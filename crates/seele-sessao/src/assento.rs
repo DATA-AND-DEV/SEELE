@@ -214,6 +214,48 @@ impl EntradasPendentes {
         }
     }
 
+    /// **Desfaz o pedido de número `numero`, que nunca saiu** (R1-M4 da
+    /// revisão do P61).
+    ///
+    /// A porta de quem pediu, e não a do servidor: uma entrada que o próprio
+    /// cliente recusou antes de escrever o quadro — a senha grande demais para
+    /// o fio — não tem resposta do servidor para esperar, e o servidor não a
+    /// conta entre as que está decidindo. Desfazê-la pela recusa do servidor
+    /// ([`Self::ouvir`]) desfazia o pedido mais antigo no ar, que é outro.
+    ///
+    /// Ela sai da fila; o assento volta ao de antes dela, se era ela que o
+    /// definia; o pedido seguinte que partia da sala dela parte do que havia
+    /// antes; e o anterior ainda no ar volta a definir o assento, se o
+    /// assento é o dele. Devolve se o assento mudou.
+    pub fn desfazer(&mut self, assento: &mut Option<VoiceRoomId>, numero: u64) -> bool {
+        let Some(indice) = self
+            .fila
+            .iter()
+            .position(|entrada| entrada.numero == numero)
+        else {
+            return false;
+        };
+        let Some(desfeita) = self.fila.remove(indice) else {
+            return false;
+        };
+        if let Some(seguinte) = self.fila.get_mut(indice) {
+            if seguinte.antes == Some(desfeita.sala) {
+                seguinte.antes = desfeita.antes;
+            }
+        }
+        if !desfeita.vale {
+            return false;
+        }
+        let mudou = *assento != desfeita.antes;
+        *assento = desfeita.antes;
+        if let Some(anterior) = self.fila.back_mut() {
+            if !anterior.recusada && *assento == Some(anterior.sala) {
+                anterior.vale = true;
+            }
+        }
+        mudou
+    }
+
     /// A recusa do pedido que o servidor está decidindo agora: o mais antigo.
     fn recusar(&mut self, assento: &mut Option<VoiceRoomId>) -> bool {
         let Some(recusada) = self.fila.front_mut() else {
@@ -378,6 +420,48 @@ mod testes {
         let a = entradas.pedir(&mut assento, A);
         entradas.ouvir(&mut assento, &pong_do_pedido(a));
         (entradas, assento)
+    }
+
+    /// **Desfazer pelo número desfaz a entrada que nunca saiu, e não a mais
+    /// antiga no ar** (R1-M4 da revisão do P61).
+    ///
+    /// O caso do revisor: sentada em A; a entrada em B no ar; a entrada em C
+    /// recusada pelo próprio cliente (a senha não cabe no fio). Pela recusa do
+    /// servidor, desfazia-se B, e depois do `Pong` de B a pessoa ficava em C
+    /// na tela, em A no áudio e em B no servidor.
+    #[test]
+    fn desfazer_pelo_numero_desfaz_a_entrada_que_nao_saiu() {
+        let (mut entradas, mut assento) = em_a();
+        let b = entradas.pedir(&mut assento, B);
+        let c = entradas.pedir(&mut assento, C);
+
+        assert!(entradas.desfazer(&mut assento, c));
+        assert_eq!(
+            (assento, entradas.confirmada(assento), entradas.len()),
+            (Some(B), Some(A), 1),
+            "desfazer C não devolveu o assento a B, ainda no ar"
+        );
+
+        // O servidor decide B: a pôs em B.
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
+        assert_eq!(
+            (assento, entradas.confirmada(assento), entradas.len()),
+            (Some(B), Some(B), 0)
+        );
+
+        // E se o servidor recusar B, a recusa é de B, e não de C, que já saiu
+        // da fila.
+        let (mut entradas, mut assento) = em_a();
+        let _b = entradas.pedir(&mut assento, B);
+        let c = entradas.pedir(&mut assento, C);
+        entradas.desfazer(&mut assento, c);
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        assert_eq!((assento, entradas.confirmada(assento)), (Some(A), Some(A)));
+
+        // Um número que não está no ar não move ninguém.
+        let (mut entradas, mut assento) = em_a();
+        assert!(!entradas.desfazer(&mut assento, 99));
+        assert_eq!(assento, Some(A));
     }
 
     #[test]

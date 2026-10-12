@@ -376,13 +376,14 @@ fn primeiros_das_entradas(corpo: &str) -> BTreeSet<String> {
     nomes
 }
 
-/// As seis listas da ponte.
+/// As cinco listas da ponte. A sexta, `ATENDIDOS_APESAR_DA_HOSPEDAGEM`, saiu
+/// com a tarefa 19 da F7: o `disconnect`, o único dela, deixou de derrubar a
+/// hospedagem.
 struct Listas {
     atendidos: BTreeSet<String>,
     so_na_larga: BTreeSet<String>,
     recusados: BTreeSet<String>,
     neutros: BTreeSet<String>,
-    apesar_da_hospedagem: BTreeSet<String>,
     a_fazer: BTreeSet<String>,
 }
 
@@ -393,7 +394,6 @@ fn listas_da_ponte() -> Listas {
         so_na_larga: lista_da_ponte(&ponte, "SO_NA_CASCA_LARGA"),
         recusados: lista_da_ponte(&ponte, "RECUSAS_NOMEADAS"),
         neutros: lista_da_ponte(&ponte, "NEUTROS_DE_QUEM_NAO_HOSPEDA"),
-        apesar_da_hospedagem: lista_da_ponte(&ponte, "ATENDIDOS_APESAR_DA_HOSPEDAGEM"),
         a_fazer: lista_da_ponte(&ponte, "AINDA_A_FAZER"),
     }
 }
@@ -406,10 +406,10 @@ fn listas_da_ponte() -> Listas {
 /// - `SO_NA_CASCA_LARGA`: atendido no PC (D-web-3) e recusado com a frase no
 ///   celular;
 /// - `RECUSAS_NOMEADAS`: recusado com a frase nas duas;
-/// - `NEUTROS_DE_QUEM_NAO_HOSPEDA` e `ATENDIDOS_APESAR_DA_HOSPEDAGEM`: os que
-///   mexem na hospedagem e não são recusados (o guarda abaixo).
+/// - `NEUTROS_DE_QUEM_NAO_HOSPEDA`: os que mexem na hospedagem e respondem o que
+///   o desktop responde a quem não hospeda (o guarda abaixo).
 ///
-/// Então no celular atende-se `COMANDOS_DA_PONTE` mais os dois da hospedagem,
+/// Então no celular atende-se `COMANDOS_DA_PONTE` mais os neutros,
 /// e recusa-se o resto; no PC, também os `SO_NA_CASCA_LARGA`. **E a lista não
 /// guarda o que a casca não chama mais**: um nome velho é uma porta que
 /// ninguém confere.
@@ -422,7 +422,6 @@ fn todo_comando_que_a_casca_chama_esta_na_ponte_nas_duas_cascas() {
         ("SO_NA_CASCA_LARGA", &l.so_na_larga),
         ("RECUSAS_NOMEADAS", &l.recusados),
         ("NEUTROS_DE_QUEM_NAO_HOSPEDA", &l.neutros),
-        ("ATENDIDOS_APESAR_DA_HOSPEDAGEM", &l.apesar_da_hospedagem),
     ];
     for (i, (nome_a, a)) in nomeadas.iter().enumerate() {
         for (nome_b, b) in nomeadas.iter().skip(i + 1) {
@@ -451,11 +450,7 @@ fn todo_comando_que_a_casca_chama_esta_na_ponte_nas_duas_cascas() {
     let a_fazer_fora: Vec<_> = l
         .a_fazer
         .iter()
-        .filter(|nome| {
-            !l.atendidos.contains(*nome)
-                && !l.so_na_larga.contains(*nome)
-                && !l.apesar_da_hospedagem.contains(*nome)
-        })
+        .filter(|nome| !l.atendidos.contains(*nome) && !l.so_na_larga.contains(*nome))
         .collect();
     assert!(
         a_fazer_fora.is_empty(),
@@ -469,6 +464,11 @@ fn corpo_do_comando(main: &str, comando: &str) -> Option<String> {
         format!("\nfn {comando}("),
         format!("\nasync fn {comando}("),
         format!("\nconst fn {comando}("),
+        // Com genéricos: desde o lote E54 da F5 o `connect` é
+        // `async fn connect<R: tauri::Runtime>(`, e sem estas duas ele sumia
+        // deste guarda.
+        format!("\nfn {comando}<"),
+        format!("\nasync fn {comando}<"),
     ]
     .iter()
     .find_map(|assinatura| main.find(assinatura.as_str()))?;
@@ -490,17 +490,34 @@ fn corpo_do_comando(main: &str, comando: &str) -> Option<String> {
     None
 }
 
+/// Se o corpo lê o campo `.nome`, em qualquer grafia: no fim da linha (o
+/// `rustfmt` quebra a cadeia em um elo por linha), antes de `.lock()` ou de um
+/// `)`. Com fronteira de palavra: `.salas` e `.sala_x` não contam.
+fn le_o_campo(corpo: &str, nome: &str) -> bool {
+    let agulha = format!(".{nome}");
+    corpo.match_indices(&agulha).any(|(onde, _)| {
+        corpo[onde + agulha.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+    })
+}
+
 /// **O critério da hospedagem, comando a comando** (`F4/ponte-no-pc.md`, o
 /// último item; pedido pela orquestradora em 09/10).
 ///
 /// O navegador não hospeda. Todo comando que a casca chama e cujo corpo, no
 /// `main.rs`, mexe na hospedagem local (`hospedagem`, `persistence_hospedada`,
-/// `portaria::`, `persistence_do_mod`) está numa de três listas, e nunca solto
+/// `portaria::`, `persistence_do_mod`, `servidor_do_mod`, `sala::`, e a leitura
+/// dos campos `.sala` e `.toques`) está numa de duas listas, e nunca solto
 /// entre os atendidos:
 /// 1. `RECUSAS_NOMEADAS`;
 /// 2. `NEUTROS_DE_QUEM_NAO_HOSPEDA`, com a resposta (a bancada `ponte-web.cjs`
-///    confere cada uma);
-/// 3. `ATENDIDOS_APESAR_DA_HOSPEDAGEM`, com o motivo (o `disconnect`).
+///    confere cada uma).
+///
+/// Havia uma terceira, `ATENDIDOS_APESAR_DA_HOSPEDAGEM`, com o motivo (o
+/// `disconnect`). Desde a tarefa 19 da F7 o `disconnect` não toca nas
+/// hospedagens, e a lista saiu inteira.
 ///
 /// Um comando novo que mexa na hospedagem reprova até alguém decidir de que
 /// lado ele fica. E o contrário também: um neutro que não mexe na hospedagem
@@ -517,15 +534,30 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
         // `hospedagens` desde a tarefa 18 da F7 (décima integração): o servidor
         // guardado e a sala pessoal moram em `Session::hospedagens`, e um comando
         // que só lia `.hospedagem` passou a ler `.hospedagens`.
-        let toca = [
-            "hospedagem",
-            "hospedagens",
-            "persistence_hospedada",
-            "portaria::",
-            "persistence_do_mod",
-        ]
-        .iter()
-        .any(|marca| corpo.contains(marca));
+        // `.sala` e `.toques` pela sala viva da F7: o `estado_da_sala` e o
+        // `toques_agora` leem `Session::sala` e `Session::toques`, e são neutros
+        // («não há sala neste lugar»). Pela leitura do campo com fronteira de
+        // palavra (`le_o_campo`), e não pela grafia de uma linha: a marca
+        // `".sala\n"` só pegava o campo no fim da linha, e um comando que o lesse
+        // numa linha só (`session.sala.lock()`) escapava calado.
+        let toca = le_o_campo(&corpo, "sala")
+            || le_o_campo(&corpo, "toques")
+            || [
+                "hospedagem",
+                "hospedagens",
+                "persistence_hospedada",
+                "portaria::",
+                "persistence_do_mod",
+                // O ajudante da F3 que acha o servidor de um MOD pelas hospedagens
+                // (`38421122`, na 0.16/api-6), e a sala pessoal da F7, que mexe nas
+                // hospedagens de dentro do `sala.rs` (`sala::subir`,
+                // `sala::desligar`, na 0.16/sala-viva). Um comando que só chame um
+                // deles mexe na hospedagem sem escrever a palavra no corpo.
+                "servidor_do_mod",
+                "sala::",
+            ]
+            .iter()
+            .any(|marca| corpo.contains(marca));
         if toca {
             mexem.insert(comando);
         }
@@ -543,10 +575,19 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
     // navegador não há registro, e essa parte não acontece. A decisão fica
     // escrita aqui, com o motivo, e o comando continua conferido: ele tem de
     // estar numa lista que o atende.
-    let leem_e_seguem_a_lista: &[(&str, &str)] = &[(
-        "renomear_server",
-        "o nome vai pela conexão; o registro local só existe para quem hospeda",
-    )];
+    let leem_e_seguem_a_lista: &[(&str, &str)] = &[
+        (
+            "renomear_server",
+            "o nome vai pela conexão; o registro local só existe para quem hospeda",
+        ),
+        // Desde a sala viva da F7 (décima segunda integração): o `connect`
+        // pergunta se o alvo é a sala desta máquina, para conferi-la pelo
+        // código. No navegador não há sala, e a conexão é a da 2.6.
+        (
+            "connect",
+            "só pergunta se o alvo é a sala desta máquina; no navegador não há sala",
+        ),
+    ];
     for (comando, _motivo) in leem_e_seguem_a_lista {
         assert!(
             mexem.contains(*comando),
@@ -565,14 +606,13 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
                 .iter()
                 .any(|(nome, _)| nome == comando)
                 || l.recusados.contains(comando)
-                || l.neutros.contains(comando)
-                || l.apesar_da_hospedagem.contains(comando),
-            "`{comando}` mexe na hospedagem local (main.rs) e não está em `RECUSAS_NOMEADAS`, \
-             `NEUTROS_DE_QUEM_NAO_HOSPEDA` nem `ATENDIDOS_APESAR_DA_HOSPEDAGEM`: decida de que \
-             lado ele fica (F4/ponte-no-pc.md)"
+                || l.neutros.contains(comando),
+            "`{comando}` mexe na hospedagem local (main.rs) e não está em `RECUSAS_NOMEADAS` \
+             nem em `NEUTROS_DE_QUEM_NAO_HOSPEDA`: decida de que lado ele fica \
+             (F4/ponte-no-pc.md)"
         );
     }
-    for comando in l.neutros.iter().chain(&l.apesar_da_hospedagem) {
+    for comando in &l.neutros {
         assert!(
             mexem.contains(comando),
             "`{comando}` está entre os da hospedagem na ponte, e o corpo dele no `main.rs` não \
@@ -625,9 +665,9 @@ fn inteiro_do_main(main: &str, nome: &str) -> u64 {
 }
 
 /// **O que a ponte responde sem perguntar a ninguém é o que o desktop
-/// responde.** As constantes da casca (o teto da mensagem, as regras da
-/// prévia e do ícone, as APIs de MOD aceitas, os domínios de GIF e os
-/// controles da voz sem ajuste guardado) moram no Rust. Na ponte elas são uma
+/// responde.** As constantes da casca (o teto da mensagem, os tetos dos
+/// campos, as regras da prévia e do ícone, as APIs de MOD aceitas, os domínios
+/// de GIF e os controles da voz sem ajuste guardado) moram no Rust. Na ponte elas são uma
 /// cópia, e este guarda é o que impede a cópia de discordar: quando o Rust
 /// muda, ele reprova e diz o valor novo.
 #[test]
@@ -657,6 +697,10 @@ fn as_constantes_da_ponte_sao_as_do_desktop() {
         .collect();
     let do_desktop = serde_json::json!({
         "limite_da_mensagem": seele_ffi::Connection::limite_da_mensagem(),
+        // Os tetos dos campos que a janela escreve (pendência 58, item 55; lote
+        // C55 da F5): a ponte os serve ao perfil do navegador, que grava o
+        // apelido desta origem com a mesma conferência do desktop.
+        "limites_dos_campos": seele_ffi::Connection::limites_dos_campos(),
         "regras_de_previa": seele_ffi::Connection::preview_rules(),
         "regras_do_icone_do_server": {
             "limite_bytes": inteiro_do_main(&main, "TETO_DO_ICONE"),

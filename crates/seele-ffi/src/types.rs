@@ -73,205 +73,13 @@ pub enum LinkTrust {
     Verified,
 }
 
-/// Which band a Sync Ratio falls into.
-///
-/// Carried as an enum beside the number so a shell never has to know the
-/// thresholds. Two shells with two copies of "85 is nominal" is two shells that
-/// disagree the day one of them is updated.
-///
-/// Three bands, from `comp v2`. The fourth — `Acceptable`
-/// — is gone, and it is gone from the JSON the webview reads too: a shell that
-/// still branches on `"Acceptable"` now falls through to whatever it does with
-/// an unknown band, and never to a colour it drew last week.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
-pub enum SignalBand {
-    /// 85 and above.
-    Nominal,
-    /// 60 to 84.
-    Degraded,
-    /// Below 60.
-    ///
-    /// The default, because an unmeasured ratio is zero and zero is critical by
-    /// the thresholds the comp sets. Defaulting to nominal would be a
-    /// reassurance nobody measured — worse than an alarm, because an alarm gets
-    /// checked.
-    #[default]
-    Critical,
-}
-
-impl From<seele_core::SignalBand> for SignalBand {
-    fn from(band: seele_core::SignalBand) -> Self {
-        match band {
-            seele_core::SignalBand::Nominal => Self::Nominal,
-            seele_core::SignalBand::Degraded => Self::Degraded,
-            seele_core::SignalBand::Critical => Self::Critical,
-        }
-    }
-}
-
-/// How loud a notice is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum Severity {
-    /// Worth knowing.
-    Info,
-    /// Something is degrading.
-    Warning,
-    /// Something is wrong.
-    Critical,
-}
-
-impl From<seele_core::AlertSeverity> for Severity {
-    fn from(severity: seele_core::AlertSeverity) -> Self {
-        match severity {
-            seele_core::AlertSeverity::Info => Self::Info,
-            seele_core::AlertSeverity::Warning => Self::Warning,
-            seele_core::AlertSeverity::Critical => Self::Critical,
-        }
-    }
-}
-
-/// What a notice is about. Enumerated so each shell writes its own sentence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
-pub enum NoticeReason {
-    /// The person was named in a message.
-    Mentioned,
-    /// A subsystem changed health.
-    SubsystemChanged,
-    /// The connection is struggling.
-    SyncDegraded,
-    /// Entry to a voice room was refused.
-    VoiceRoomEntryRefused,
-    /// The action needed a permission the person lacks.
-    PermissionDenied,
-    /// The voice room is at its limit.
-    VoiceRoomFull,
-    /// The operator is saying something.
-    OperatorNotice,
-    /// The client is sending control frames faster than its budget.
-    RateLimited,
-    /// An operator moved this person's connection into another voice room.
-    MovedByOperator,
-    /// The voice room this person's connection was in no longer exists.
-    VoiceRoomDeleted,
-    /// A Channel this person had open no longer exists.
-    ChannelDeleted,
-    /// The voice room asked about is the only one the server has, so it stays.
-    LastVoiceRoom,
-    /// Somebody else is already sharing their screen in this room.
-    ///
-    /// One share per voice room (§6.3 da spec do compartilhamento de tela), and
-    /// this is what whoever lost the race is told. Not a permission problem —
-    /// the person may share the moment the other one stops — and that is why it
-    /// is its own reason instead of `PermissionDenied`, which would say the
-    /// wrong thing and send somebody looking for a role they already have.
-    ScreenShareTaken,
-    /// O servidor parou a transmissão desta pessoa: a sala cresceu além da subida
-    /// de quem hospeda.
-    ///
-    /// §5.1 pôs o caminho de quem hospeda dentro do teto — `caminho × 60% ÷ N` —
-    /// porque é o servidor que sobe as N cópias. Passado certo N nem o piso do §2
-    /// cabe, e o §3.2 diz o que acontece então: *quem para é o vídeo*.
-    ///
-    /// Razão própria, e não [`Self::SyncDegraded`], que toda casca escreve como
-    /// «sinal em queda» — uma frase sobre a conexão de quem lê, na frente de
-    /// alguém cuja conexão está boa e cuja plateia cresceu. E não um
-    /// `ScreenShareStopped` mudo: quem apertou parar sabe que apertou, e quem
-    /// foi parado pelo servidor não ficaria sabendo de nada.
-    ScreenShareOverHostUplink,
-
-    /// A sala cresceu além do que a subida medida desta máquina comporta.
-    ///
-    /// Os dois números viajam porque «a sala está grande» não é acionável e
-    /// «precisa de 6,5 Mbps, e a medida é 4 Mbps» é. A casca escreve a frase;
-    /// aqui só chegam os valores. Ver o ADR 0038.
-    VoiceRoomOverHostUplink {
-        /// Quanto a sala pede no pior caso, todos falando ao mesmo tempo.
-        precisa_bps: u64,
-        /// A subida que esta máquina mediu para si. Nunca zero.
-        medido_bps: u32,
-    },
-
-    /// A retenção deste servidor apagou histórico. R15.
-    ///
-    /// A casca escreve a frase e, se tiver a última página na tela, volta a
-    /// buscá-la: as mensagens que ela está mostrando podem já não existir.
-    RetencaoApagouHistorico {
-        /// Quantas linhas saíram.
-        apagadas: u64,
-    },
-
-    /// O servidor não conseguiu fazer um pedido que a pessoa podia fazer.
-    ///
-    /// No fio, o pedido vem pelo ordinal em `ClientMessage`; aqui ele chega
-    /// pelo **nome** da variante (`"SetNickname"`, `"RenameVoiceRoom"`), porque
-    /// é por nome que a casca escreve a frase e acha o pedido a desfazer. Com
-    /// dois do mesmo tipo em voo, a recusa é do mais antigo (ver
-    /// `AlertReason::PedidoRecusado`).
-    PedidoRecusado {
-        /// O nome do pedido em `ClientMessage`, ou `"?"` para um ordinal que
-        /// esta build não conhece.
-        pedido: &'static str,
-        /// Por que não deu.
-        causa: CausaDaRecusa,
-    },
-}
-
-/// Por que o servidor não conseguiu fazer um pedido. O espelho de
-/// `seele_proto::control::CausaDaRecusa`, para a casca.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
-pub enum CausaDaRecusa {
-    /// O alvo do pedido não existe mais.
-    NaoExiste,
-    /// O nome pedido é de outro.
-    NomeTomado,
-    /// O servidor falhou ao fazer o que podia ser feito.
-    FalhaDoServidor,
-}
-
-impl From<seele_core::CausaDaRecusa> for CausaDaRecusa {
-    fn from(causa: seele_core::CausaDaRecusa) -> Self {
-        match causa {
-            seele_core::CausaDaRecusa::NaoExiste => Self::NaoExiste,
-            seele_core::CausaDaRecusa::NomeTomado => Self::NomeTomado,
-            seele_core::CausaDaRecusa::FalhaDoServidor => Self::FalhaDoServidor,
-        }
-    }
-}
-
-impl From<seele_core::AlertReason> for NoticeReason {
-    fn from(reason: seele_core::AlertReason) -> Self {
-        match reason {
-            seele_core::AlertReason::Mentioned => Self::Mentioned,
-            seele_core::AlertReason::SubsystemChanged => Self::SubsystemChanged,
-            seele_core::AlertReason::SyncDegraded => Self::SyncDegraded,
-            seele_core::AlertReason::VoiceRoomEntryRefused => Self::VoiceRoomEntryRefused,
-            seele_core::AlertReason::PermissionDenied => Self::PermissionDenied,
-            seele_core::AlertReason::VoiceRoomFull => Self::VoiceRoomFull,
-            seele_core::AlertReason::OperatorNotice => Self::OperatorNotice,
-            seele_core::AlertReason::VoiceRoomOverHostUplink {
-                precisa_bps,
-                medido_bps,
-            } => Self::VoiceRoomOverHostUplink {
-                precisa_bps,
-                medido_bps,
-            },
-            seele_core::AlertReason::RetencaoApagouHistorico { apagadas } => {
-                Self::RetencaoApagouHistorico { apagadas }
-            }
-            seele_core::AlertReason::PedidoRecusado { pedido, causa } => Self::PedidoRecusado {
-                pedido: seele_core::nome_do_pedido(pedido).unwrap_or("?"),
-                causa: causa.into(),
-            },
-            seele_core::AlertReason::RateLimited => Self::RateLimited,
-            seele_core::AlertReason::MovedByOperator => Self::MovedByOperator,
-            seele_core::AlertReason::VoiceRoomDeleted => Self::VoiceRoomDeleted,
-            seele_core::AlertReason::ChannelDeleted => Self::ChannelDeleted,
-            seele_core::AlertReason::LastVoiceRoom => Self::LastVoiceRoom,
-            seele_core::AlertReason::ScreenShareTaken => Self::ScreenShareTaken,
-            seele_core::AlertReason::ScreenShareOverHostUplink => Self::ScreenShareOverHostUplink,
-        }
-    }
-}
+// Os tipos de vista que saem do `Room` moram no `seele-sessao` desde a fase 2
+// da Tarefa 2.2 da F4: o navegador monta o mesmo retrato com as mesmas
+// funções. Reexportados aqui, o caminho deles na casca não mudou.
+pub use seele_core::retrato::{
+    CausaDaRecusa, Channel, EndReason, LimitesDeTela, Notice, NoticeReason, Person, Prioridade,
+    Severity, SignalBand, TelaEmCurso, TemaDaSessao, TransmissaoNaSala, VoiceRoom, VoiceRoomSync,
+};
 
 /// What the channel holds, as the confirmation in front of destroying it needs it.
 ///
@@ -334,142 +142,6 @@ impl From<seele_core::encontro::FalhaAoLocalizar> for FalhaAoLocalizar {
             Nucleo::PontoMudo => Self::PontoMudo,
             Nucleo::PontoNaoResolve => Self::PontoNaoResolve,
             Nucleo::SoAEscuta => Self::SoAEscuta,
-        }
-    }
-}
-
-/// Why a session ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
-pub enum EndReason {
-    /// Protocol version outside the compatibility window.
-    Incompatible,
-    /// Authentication failed. Says nothing about whether the account exists —
-    /// `specs/08-seguranca.md` requires login failures to be uniform.
-    CredentialRejected,
-    /// The handshake did not finish in time.
-    HandshakeTimeout,
-    /// An operator disconnected this person.
-    Kicked,
-    /// An operator barred this person.
-    Banned,
-    /// The server is full.
-    ServerFull,
-    /// Planned downtime.
-    ScheduledMaintenance,
-    /// The server is stopping.
-    ServerShuttingDown,
-    /// Keepalive lapsed.
-    Timeout,
-    /// The client sent something it should not have.
-    ProtocolViolation,
-    /// The client exceeded its frame budget.
-    RateLimited,
-    /// This connection fell behind the server's events and lost some.
-    ///
-    /// Reconnecting is the repair, not a refusal: the session's view of the
-    /// conversation has a hole in it that only a full resync fills.
-    FellBehind,
-    /// The host has not decided about this key yet. ADR 0030.
-    ///
-    /// Not a refusal: the request is written down on the hosting machine and
-    /// stays there. Trying again after the host has looked is what gets in, and
-    /// nothing was lost by the attempt.
-    AdmissionPending,
-    /// The host decided this key does not come in. ADR 0030.
-    ///
-    /// Milder than [`Self::Banned`]: the host can approve the same key later,
-    /// and this never ended a session that was already running.
-    AdmissionDenied,
-    /// O apelido pedido é de outra chave. ADR 0017.
-    ///
-    /// Separada de [`Self::CredentialRejected`] porque é a única deste conjunto
-    /// que a pessoa conserta sozinha, e porque não passa com o tempo: tentar de
-    /// novo, ser aprovado de novo e reinstalar o app dão todos o mesmo
-    /// resultado. Enquanto ela vestia a frase da credencial, o conselho que a
-    /// tela dava — «confira o convite» — mandava a pessoa mexer na única coisa
-    /// que não era o problema.
-    NicknameTaken,
-    /// Esta máquina não aceitou os MODs que o servidor exige. ADR 0045.
-    ///
-    /// Chega como fim de sessão só quando o servidor recusa a entrada; o caso
-    /// normal é a tela de aceite, que vem por
-    /// [`ConnectionError::ModsNaoAceitos`] e não por aqui.
-    ModsRecusados,
-    /// Os MODs do servidor mudaram enquanto a sessão corria. ADR 0045.
-    ///
-    /// A sessão acaba e a pessoa lê o conjunto novo ao entrar de novo — é a
-    /// forma de «um servidor que troca de MOD pergunta de novo».
-    ModsMudaram,
-    /// O servidor exige MODs que ele mesmo não consegue descrever. ADR 0045.
-    ///
-    /// Não é sobre a credencial de quem tentou entrar: é configuração do
-    /// servidor, e quem hospeda tem o motivo no log dele.
-    ModsIndisponiveis,
-    /// Quem atendeu na volta da bateria não é o servidor desta sessão.
-    ///
-    /// A volta foi recusada dentro do TLS, antes do `Hello`, por um de dois
-    /// motivos, e os dois caem aqui: a impressão esperada nomeava outra chave
-    /// (`InviteMismatch`), ou quem atendeu mostrou o certificado do servidor sem
-    /// provar ter a chave dele (`ChaveNaoProvada`). Era
-    /// [`Self::CredentialRejected`], e a frase mandava conferir convite e senha.
-    /// Eles não chegaram a quem atendeu: do aperto de mão saiu só o
-    /// `ClientHello` do TLS, que vai antes de haver o que conferir.
-    ///
-    /// Sem as impressões de propósito: este enum é `Copy` e chega ao retrato
-    /// (`ended`). Elas ficam no `seele.log`, na linha da volta recusada. Sem a
-    /// origem da impressão também (o link colado ou a lista de servidores), e
-    /// por isso a frase da casca só diz o que vale para as duas origens e os
-    /// dois motivos.
-    ServidorTrocouNaVolta,
-    /// A chave fixada do servidor mudou entre a queda e a volta. ADR 0003.
-    ///
-    /// O alarme de chave trocada, no meio de uma sessão: a volta da bateria foi
-    /// recusada dentro do TLS (`PinChanged`). Era
-    /// [`Self::CredentialRejected`]. As duas impressões ficam no `seele.log`,
-    /// pelo mesmo motivo de [`Self::ServidorTrocouNaVolta`].
-    ChaveMudouNaVolta,
-    /// Quem recebia encerrou a ligação da sala pessoal. Spec de 23/09/2026.
-    ChamadaEncerrada,
-    /// O toque da sala pessoal venceu sem ninguém atender.
-    NinguemAtendeu,
-    /// Quem recebia recusou a ligação.
-    ChamadaRecusada,
-    /// O servidor exige MODs de uma API que este app não roda (D-fio-7).
-    ///
-    /// As APIs exigidas chegam no fio como máscara, e não atravessam aqui: este
-    /// enum é unitário porque a casca o lê como texto. A frase diz «atualize o
-    /// app», que é o que a pessoa faz com qualquer API que falte; quem precisa
-    /// dos números é o launcher, na sessão do Plano 3.
-    ModsDeOutraApi,
-    /// The link died without the server saying why.
-    LinkLost,
-}
-
-impl From<seele_core::DisconnectReason> for EndReason {
-    fn from(reason: seele_core::DisconnectReason) -> Self {
-        match reason {
-            seele_core::DisconnectReason::Incompatible => Self::Incompatible,
-            seele_core::DisconnectReason::CredentialRejected => Self::CredentialRejected,
-            seele_core::DisconnectReason::HandshakeTimeout => Self::HandshakeTimeout,
-            seele_core::DisconnectReason::Kicked => Self::Kicked,
-            seele_core::DisconnectReason::Banned => Self::Banned,
-            seele_core::DisconnectReason::ServerFull => Self::ServerFull,
-            seele_core::DisconnectReason::ScheduledMaintenance => Self::ScheduledMaintenance,
-            seele_core::DisconnectReason::ServerShuttingDown => Self::ServerShuttingDown,
-            seele_core::DisconnectReason::Timeout => Self::Timeout,
-            seele_core::DisconnectReason::ProtocolViolation => Self::ProtocolViolation,
-            seele_core::DisconnectReason::RateLimited => Self::RateLimited,
-            seele_core::DisconnectReason::FellBehind => Self::FellBehind,
-            seele_core::DisconnectReason::AdmissionPending => Self::AdmissionPending,
-            seele_core::DisconnectReason::AdmissionDenied => Self::AdmissionDenied,
-            seele_core::DisconnectReason::NicknameTaken => Self::NicknameTaken,
-            seele_core::DisconnectReason::ModsRecusados => Self::ModsRecusados,
-            seele_core::DisconnectReason::ModsMudaram => Self::ModsMudaram,
-            seele_core::DisconnectReason::ModsIndisponiveis => Self::ModsIndisponiveis,
-            seele_core::DisconnectReason::ChamadaEncerrada => Self::ChamadaEncerrada,
-            seele_core::DisconnectReason::NinguemAtendeu => Self::NinguemAtendeu,
-            seele_core::DisconnectReason::ChamadaRecusada => Self::ChamadaRecusada,
-            seele_core::DisconnectReason::ModsDeOutraApi { .. } => Self::ModsDeOutraApi,
         }
     }
 }
@@ -611,102 +283,6 @@ impl From<seele_core::tofu::Verdict> for Trust {
     }
 }
 
-/// One person in a voice room.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct Person {
-    /// Stable identifier for this person on this server.
-    pub id: u64,
-    /// Display name.
-    pub nickname: String,
-    /// Transmitting right now.
-    pub speaking: bool,
-    /// Microphone muted — mudo.
-    pub muted: bool,
-    /// Speakers muted — Isolamento total.
-    pub total_isolation: bool,
-    /// Sync Ratio, 0 to 100.
-    pub signal: u8,
-    /// Which band that falls into, decided once, in the core.
-    pub sync_band: SignalBand,
-    /// Whether this is the person holding the handle.
-    pub is_self: bool,
-}
-
-/// The average Sync Ratio of a voice room, already banded — **MÉDIA DO VOICE_ROOM**.
-///
-/// The comp computes this in the shell and colours it there. It is computed in
-/// the core instead, for the reason at the top of this module: a shell that
-/// knows the thresholds is a shell that will disagree with the other one. What
-/// arrives here is the number, the band and the size of the sample, and drawing
-/// is all that is left to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-pub struct VoiceRoomSync {
-    /// The average, 0 to 100, rounded to a whole point.
-    ///
-    /// The comp prints `82.4`; the datum is a `u8` at every point it exists, so
-    /// this is `82`. A decimal here would be precision invented at the last
-    /// step, not carried from the measurement.
-    pub ratio: u8,
-    /// Which band the average falls into.
-    pub band: SignalBand,
-    /// How many people it averages — the comp's `5 PLUGS`.
-    pub people: u32,
-}
-
-impl From<seele_core::VoiceRoomSync> for VoiceRoomSync {
-    fn from(sync: seele_core::VoiceRoomSync) -> Self {
-        Self {
-            ratio: sync.ratio,
-            band: sync.band.into(),
-            // A voice room holds at most `limit` people and `limit` is a `u16`. The
-            // saturation is unreachable and is here so the conversion cannot
-            // panic on a server that says otherwise.
-            people: u32::try_from(sync.people).unwrap_or(u32::MAX),
-        }
-    }
-}
-
-/// A voice channel.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct VoiceRoom {
-    /// Identifier.
-    pub id: u32,
-    /// Display name.
-    pub name: String,
-    /// How many people fit.
-    pub limit: u16,
-    /// Whether entry needs a password.
-    pub password_required: bool,
-    /// Whether this person's connection is in it.
-    pub occupied_by_us: bool,
-    /// The Channel bound to it, if any. `specs/04-servidor-seele.md` makes the
-    /// association optional.
-    ///
-    /// Carried so a shell can say what destroying that Channel would do to this
-    /// room. The voice room survives it and comes out with no canal attached, which is
-    /// a change nobody asked for — and a product whose confirmations name their
-    /// consequences has to be able to name that one.
-    pub channel: Option<u32>,
-    /// Who is inside, in arrival order.
-    pub people: Vec<Person>,
-    /// The average Sync Ratio of everybody inside, or `None` if nobody is.
-    ///
-    /// `None` rather than zero: an empty voice room has nothing to average, and zero
-    /// would draw every idle room in the critical colour.
-    pub sync: Option<VoiceRoomSync>,
-}
-
-/// A text channel.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct Channel {
-    /// Identifier.
-    pub id: u32,
-    /// Display name.
-    pub name: String,
-    /// Whether this is the Channel being read.
-    pub open: bool,
-}
-
 /// One thing somebody said.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Message {
@@ -812,6 +388,9 @@ pub enum MotivoDaRecusa {
     },
     /// O armazenamento do servidor não aceitou a gravação.
     StorageFailed,
+    /// A moderação apagou esta mensagem enquanto quem a escreveu estava fora, e
+    /// a repetição não a traz de volta. Tentar de novo nunca passa.
+    Apagada,
 }
 
 impl From<seele_core::MessageRefusal> for MotivoDaRecusa {
@@ -821,6 +400,7 @@ impl From<seele_core::MessageRefusal> for MotivoDaRecusa {
             seele_core::MessageRefusal::NoSuchChannel => Self::NoSuchChannel,
             seele_core::MessageRefusal::TooLong { limit } => Self::TooLong { limit },
             seele_core::MessageRefusal::StorageFailed => Self::StorageFailed,
+            seele_core::MessageRefusal::Apagada => Self::Apagada,
         }
     }
 }
@@ -1092,20 +672,6 @@ pub struct Telemetry {
     pub microfone_entrega_silencio_digital: bool,
 }
 
-/// Something worth surfacing.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct Notice {
-    /// How loud.
-    pub severity: Severity,
-    /// What about.
-    pub reason: NoticeReason,
-    /// The operator's own words, when they have any.
-    ///
-    /// Not a hole in the enumerated-reasons rule: an operator writing about
-    /// their own server is data, not an error reason.
-    pub operator_text: Option<String>,
-}
-
 /// Uma tela ou uma janela que esta máquina pode transmitir.
 ///
 /// O gêmeo de [`CaptureDevice`] para o vídeo, com a mesma divisão de trabalho:
@@ -1190,157 +756,6 @@ pub enum PermissaoDeTela {
     /// mesma resposta que [`Snapshot::caminho`] dá com `None`: sem informação, a
     /// tela não escreve nada.
     NaoSeSabe,
-}
-
-/// O que a pessoa escolheu, e **todos são teto** (§5 da spec de tela).
-///
-/// Teto e nunca piso: o sistema continua livre para ficar abaixo de cada um
-/// destes números, e a §3.2 depende disso — *a voz nunca cede à tela*. Uma
-/// escolha tratada como piso devolve os 225 ms de atraso na voz que o
-/// `spikes/tela-no-transporte` mediu.
-///
-/// Nada aqui é conferido nesta travessia. Os valores da lista fechada do §5 são
-/// 1080/720/540 e 30/15/8, e quem os converte em degrau de codificador é quem
-/// abre o codificador — uma ponte que recusasse um número seria uma segunda
-/// autoridade sobre a mesma lista.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct LimitesDeTela {
-    /// Teto de banda em bits por segundo. `None` = sem limite próprio; vale só
-    /// o que o caminho permitir.
-    pub banda_bps: Option<u32>,
-    /// Altura máxima em pixels: 1080, 720 ou 540.
-    pub altura_maxima: u32,
-    /// Quadros por segundo, no máximo: 30, 15 ou 8.
-    pub quadros_maximos: u32,
-    /// O que cede primeiro quando o orçamento aperta.
-    ///
-    /// **Não é teto como os três acima**, e por isso não é um número: os outros
-    /// dizem «no máximo isto», este diz o que sacrificar quando o máximo não
-    /// couber.
-    ///
-    /// Ausente no JSON é [`Prioridade::Nitidez`], que é o padrão do §2 — uma
-    /// casca antiga que não conheça este campo continua pedindo o que sempre
-    /// pediu.
-    #[serde(default)]
-    pub prioridade: Prioridade,
-    /// Se o som da fonte vai junto com a imagem.
-    ///
-    /// R21 e ADR 0054: é o controle **de quem envia**, e é a saída que o produto
-    /// oferece a quem está num sistema onde a captura leva o áudio do SEELE junto
-    /// — em vez de afirmar que o eco foi resolvido.
-    ///
-    /// Ausente no JSON é `true`, que é o que se espera de um vídeo compartilhado.
-    /// Uma casca antiga que não conheça este campo continua pedindo o que sempre
-    /// pediu.
-    #[serde(default = "com_som_por_padrao")]
-    pub com_som: bool,
-}
-
-/// O padrão de [`LimitesDeTela::com_som`].
-///
-/// Uma função porque `serde` não aceita `default = "true"` num `bool`, e o padrão
-/// de `bool` é `false` — que aqui seria entregar vídeo mudo a quem não escolheu
-/// nada.
-const fn com_som_por_padrao() -> bool {
-    true
-}
-
-/// O que cede primeiro quando o orçamento aperta.
-///
-/// `nitidez` é a regra do §2 — a resolução segura, o quadro cede —, e é certa
-/// para texto: ele continua legível a 8 quadros e vira borrão se a resolução
-/// baixar. `movimento` é o contrário, e é o que jogo pede: a 8 quadros um jogo
-/// não é pior, é inutilizável.
-///
-/// Atravessa como texto minúsculo — `"nitidez"`, `"movimento"` — porque a casca
-/// gráfica escreve este JSON à mão, e um número seria uma tabela a manter dos
-/// dois lados.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Prioridade {
-    /// A resolução segura, o quadro cede. O padrão.
-    #[default]
-    Nitidez,
-    /// O quadro segura, a resolução cede.
-    Movimento,
-}
-
-/// A transmissão de tela desta sala de voz, quando há uma.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct TelaEmCurso {
-    // ---- o que saiu daqui, e por quê ----
-    //
-    // `altura`, `quadros`, `kbps` e `medida` eram quatro campos que **nada nesta
-    // ponte media**: os três primeiros saíam zerados e o quarto saía `false`,
-    // sempre. A tela reservava três caixas para eles e escrevia «ainda não há
-    // medida desta transmissão» em todas as três, para sempre.
-    //
-    // O review da v15 (R20) mediu o custo disso na tela e a decisão é a dele:
-    // retirar o espaço vazio enquanto não há medição. Quando houver medida de
-    // verdade — ligada ao codificador de quem transmite, e por `ScreenId` — ela
-    // volta como campos que dizem o que mediram e para qual tela. Um campo que
-    // promete um número e entrega zero é pior que um campo ausente: ele faz a
-    // interface reservar lugar para uma resposta que não existe.
-    /// **Qual** transmissão é esta, como o servidor a batizou.
-    ///
-    /// # Por que ela passou a estar aqui
-    ///
-    /// Porque nada dizia de qual tela o painel falava. `tela_de` pegava a
-    /// **primeira** transmissão encontrada no mapa da sala, sem relacioná-la com
-    /// a que o espectador escolheu nem com a própria — então numa sala com duas
-    /// pessoas transmitindo, autoria, controles e metadados podiam estar falando
-    /// de uma tela enquanto a imagem era de outra. R18 da revisão da v15 e ADR
-    /// 0054: no compartilhamento, tudo é por identidade.
-    pub tela: u32,
-    /// Quem está compartilhando.
-    pub de: u64,
-    /// Se é esta pessoa.
-    pub e_minha: bool,
-    /// Quantas pessoas estão **recebendo** esta transmissão.
-    ///
-    /// # O número passou a ser o do servidor
-    ///
-    /// Era contado no roster desta máquina — «quem está na sala menos quem
-    /// compartilha» —, e isso incluía quem escolheu não assistir. O servidor
-    /// conta assinaturas de verdade e as manda no `ScreenViewers`; é o mesmo N
-    /// pelo qual ele divide o teto no §5.1, e usar outro aqui era ter duas
-    /// contagens para a mesma pergunta, discordando.
-    ///
-    /// Zero até o primeiro `ScreenViewers` chegar. Zero é a resposta honesta: uma
-    /// transmissão que começou agora não tem ninguém assistindo ainda.
-    pub espectadores: u32,
-    /// `Some` quando a transmissão está parada, com o nome estável do motivo.
-    ///
-    /// Um nome e não uma frase, como [`Snapshot::caminho`]: a lista
-    /// [`crate::motivos_de_parada_da_tela`] é derivada deste mesmo mapeamento,
-    /// para a casca poder cobrar cobertura de frase sem repetir os nomes. Uma
-    /// frase pronta em português atravessando aqui seria a única sentença que a
-    /// casca não escreve — e a que o guarda de vocabulário da interface não vê.
-    pub parada: Option<String>,
-    /// O que foi **pedido** para esta transmissão, quando ela é desta pessoa.
-    ///
-    /// O outro lado do §5: *a tela não promete a escolha*, e mostra o que está
-    /// saindo **ao lado** do que foi pedido. Os campos acima são a primeira
-    /// metade; sem esta, a segunda não atravessa e a comparação que a regra
-    /// obriga não tem com o que ser feita.
-    ///
-    /// **Estava faltando no contrato de 22/08, e a falta tinha dono.** A casca
-    /// gráfica cobriu o buraco guardando os limites que ela mesma mandou numa
-    /// variável de JavaScript — e uma janela recarregada, ou uma segunda janela
-    /// sobre a mesma sessão, perdia a memória de uma transmissão que continuava
-    /// saindo. Aqui o pedido mora do lado que sobrevive à janela, que é o mesmo
-    /// lado que o mandou ao codificador.
-    ///
-    /// `None` em dois casos, e os dois são a mesma resposta honesta — «não sei»:
-    ///
-    /// - **quem só assiste**, sempre. O teto é escolha de quem compartilha e não
-    ///   atravessa o fio em lugar nenhum (`ScreenHeader` carrega resolução e
-    ///   codec, nunca o que a pessoa pediu). Inventá-lo a partir do que chega
-    ///   seria devolver a medida como se fosse a escolha, que é exatamente a
-    ///   promessa que o §5 proíbe;
-    /// - **uma transmissão própria que este processo não começou** — a sessão
-    ///   caiu e voltou, ou o servidor reanunciou uma tela de antes.
-    pub pedido: Option<LimitesDeTela>,
 }
 
 /// Everything the interface needs, in one value.
@@ -1599,43 +1014,6 @@ pub struct Snapshot {
     /// 17d da F3). A casca o confere e o aplica antes de desenhar a sessão;
     /// `None` é sem tema, e tira o que havia.
     pub tema_do_servidor: Option<TemaDaSessao>,
-}
-
-/// O tema do servidor, como a casca o recebe: quem o declarou e o JSON dos
-/// valores, opaco até a casca, que o confere com as mesmas tabelas do
-/// `mundo.tema` (tarefa 17j) e mede os pares (17e).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct TemaDaSessao {
-    /// O MOD que declarou o tema.
-    pub mod_id: String,
-    /// O JSON do tema.
-    pub valores: String,
-}
-
-/// Uma transmissão em curso, do ponto de vista de quem pode assisti-la.
-///
-/// O mínimo para desenhar uma linha de lista e para pedir a imagem: o nome da
-/// transmissão e de quem ela é. O que ela está entregando — resolução, quadros,
-/// kbps — está em [`TelaEmCurso`], e só para a que está no palco: medir as
-/// outras seria medir o que ninguém está recebendo.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct TransmissaoNaSala {
-    /// Como o servidor batizou a transmissão. É o que se passa a `assistir`.
-    pub tela: u32,
-    /// Quem está mandando.
-    pub de: u64,
-    /// Se é esta pessoa — quem transmite não assiste a si mesmo pelo servidor.
-    pub e_minha: bool,
-    /// Se **esta** é a transmissão que esta sessão escolheu assistir.
-    ///
-    /// ADR 0054. Vem do lado que sobrevive à janela, e não de uma variável de
-    /// JavaScript: uma recarga no meio de uma sessão perdia a escolha, e aí a
-    /// fileira de botões não sabia mais qual estava marcado.
-    pub assistida: bool,
-    /// Quantas pessoas estão recebendo esta transmissão, como o servidor conta.
-    ///
-    /// Zero até o primeiro `ScreenViewers`. Ver [`TelaEmCurso::espectadores`].
-    pub espectadores: u32,
 }
 
 /// What the shell subscribes to.
@@ -2082,6 +1460,38 @@ pub struct PreviewRules {
     pub types: Vec<String>,
 }
 
+/// Os tetos dos campos que a casca escreve e o fio carrega (pendência 58, item
+/// 55; lote C55 da F5).
+///
+/// # Por que a casca precisa destes números
+///
+/// Pela razão de [`crate::Connection::limite_da_mensagem`], cinco vezes. Os
+/// campos da janela contavam **caracteres** (`maxlength`), e o fio conta
+/// **bytes**: um apelido de 20 letras `á` cabe nos 32 caracteres do campo e
+/// ocupa 40 bytes. Desde a rodada 1 do lote P61, o núcleo recusa esse comando
+/// sem mandar o quadro e o registra no `seele.log` (`Motor::recusar_aqui`), e o
+/// enlace segue; mas a janela não fica sabendo, e o pedido some calado. Com os
+/// tetos aqui, a janela confere antes de mandar e diz o número.
+///
+/// Os números saem do `seele-proto`, pelos reexports do `seele-core`, e não de
+/// uma cópia: são os que o `encode` confere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct LimitesDosCampos {
+    /// O apelido, em bytes: o do `SetNickname` e o do `Hello`, que leva o
+    /// apelido gravado nesta máquina (`MAX_NICKNAME_LEN`).
+    pub apelido: usize,
+    /// O nome de um canal ou de uma sala de voz, em bytes, ao criar e ao
+    /// renomear (`MAX_CHANNEL_NAME_LEN`).
+    pub nome_de_canal: usize,
+    /// Quantas pessoas uma sala nova pode ter, no máximo (`MAX_VOICE_ROOM_LIMIT`).
+    /// O mínimo é um: uma sala em que ninguém entra não é sala.
+    pub lugares_da_sala: u16,
+    /// O nome do servidor, em bytes (`MAX_CLIENT_NAME_LEN`).
+    pub nome_do_servidor: usize,
+    /// O motivo de um banimento, em bytes (`MAX_ALERT_TEXT_LEN`).
+    pub motivo_do_banimento: usize,
+}
+
 /// Why a file was not drawn.
 ///
 /// Four, and they are four because they ask different things of the person
@@ -2266,6 +1676,20 @@ pub enum ConnectionError {
     /// duas máquinas. Unitária: não há impressão a comparar, porque a que quem
     /// atendeu mostrou é a do servidor verdadeiro.
     ChaveNaoProvada,
+    /// O apelido desta entrada passa do teto do fio, em **bytes**, e o `Hello`
+    /// não o levaria (pendência 58, item 55; lote C55 da F5).
+    ///
+    /// **Recusado antes de abrir a conexão**, em `Connection::connect`: o
+    /// apelido está na mão antes de qualquer endereço ser discado, e nada sai
+    /// desta máquina. Era `Unreachable`: o QUIC e o TLS abriam, o `encode` do
+    /// `Hello` recusava o apelido, e a escrita do `Hello` traduzia isso como
+    /// «nada respondeu», com o servidor de pé. A janela conferia o apelido em
+    /// caracteres, então um gravado de antes pode passar do teto. O teto vem
+    /// junto, para a frase dizer o número; o desfecho é encurtar o apelido.
+    ApelidoGrandeDemais {
+        /// O teto do apelido, em bytes (`MAX_NICKNAME_LEN`).
+        limite_bytes: u64,
+    },
     /// The server refused the session, and said why.
     Refused {
         /// The enumerated reason.

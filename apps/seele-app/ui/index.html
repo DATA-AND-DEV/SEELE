@@ -49,6 +49,9 @@
 <link rel="stylesheet" href="camada-alerta.css">
 <link rel="stylesheet" href="camada-bateria.css">
 <link rel="stylesheet" href="camada-portaria.css">
+<link rel="stylesheet" href="camada-toque.css">
+<link rel="stylesheet" href="camada-sala.css">
+<link rel="stylesheet" href="camada-hospedagem.css">
 <link rel="stylesheet" href="camada-moderar.css">
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="camada-nomear.css">
@@ -72,6 +75,7 @@
 <link rel="stylesheet" href="celular-base.css">
 <link rel="stylesheet" href="celular-sessao.css">
 <link rel="stylesheet" href="celular-folhas.css">
+<link rel="stylesheet" href="celular-entrada.css">
 <link rel="stylesheet" href="larga-base.css">
 <link rel="stylesheet" href="acessibilidade.css">
 </head>
@@ -215,6 +219,24 @@
 </div>
 
 <!--
+  A faixa do toque (tarefas 24 e 26 da F7; spec de 23/09, «O toque»): quem está
+  ligando para a sua sala, com o apelido entre aspas (é o que a pessoa diz) e o
+  código (a prova), e ATENDER e RECUSAR. O contrato é o da faixa de cima: fora
+  das telas, sem `role=alert` e sem `autofocus`, e o script nunca toma o
+  teclado. Fora das telas também é o que a deixa fora de toda região de MOD
+  (núcleo de confiança, Parte II da spec).
+
+  `data-sala-pessoal`: o navegador não tem sala, e as duas cascas dele escondem
+  toda peça com esta marca (F8).
+-->
+<div id="toque" class="toque" data-sala-pessoal hidden>
+  <p id="toque-texto" class="toque-texto"></p>
+  <button id="toque-atender" class="botao" type="button">ATENDER</button>
+  <button id="toque-recusar" class="botao-fantasma" type="button">RECUSAR</button>
+  <p id="toque-nota" class="toque-nota" hidden></p>
+</div>
+
+<!--
   A composição é a mesma do `connection` de propósito. `specs/06-clientes-gui.md`:
   "Alguém que usa a TUI deve abrir o app e saber onde tudo está sem procurar."
   Mesmo cabeçalho, mesmos três painéis na mesma ordem, mesma barra permanente
@@ -319,6 +341,21 @@
       ninguém no meio. Entre no servidor de alguém, ou ponha o seu no ar a
       partir desta máquina.</p>
 
+    <!--
+      O servidor que esta janela hospeda, no ar, com a sessão fora dele (tarefas
+      19 e 20 da F7): sair não o derruba mais, e quem saiu precisa saber que ele
+      continua lá e como voltar. VOLTAR AO MEU SERVIDOR entra nele; PARAR DE
+      HOSPEDAR o derruba, perguntando antes, porque derrubar tira todo mundo.
+      Escondido sem servidor no ar (`camada-hospedagem.js`), e no navegador, que
+      não hospeda.
+    -->
+    <div id="boot-meu-servidor" class="boot-meu-servidor" hidden>
+      <p id="boot-meu-servidor-frase" class="nota" role="status"></p>
+      <div class="boot-saidas">
+        <button id="boot-voltar-ao-meu-servidor" type="button" class="botao">VOLTAR AO MEU SERVIDOR</button>
+        <button id="boot-parar-de-hospedar" type="button" class="botao-fantasma">PARAR DE HOSPEDAR</button>
+      </div>
+    </div>
     <div class="boot-saidas">
       <button id="botao-conectar" type="button" class="botao">CONECTAR</button>
       <button id="botao-hospedar" type="button" class="botao botao-secundario">HOSPEDAR AQUI</button>
@@ -462,6 +499,13 @@
               data-glifo="engrenagem"></button>
     </div>
 
+    <!--
+      A linha da sala pessoal, na entrada (tarefa 23 da F7): só aparece quando
+      há o que dizer — a porta 8385 ocupada, o código não achável, «não
+      recebendo». Um elemento próprio, com `data-sala-pessoal`: as cascas do
+      navegador, que não têm sala, o escondem inteiro.
+    -->
+    <p id="boot-sala-estado" class="nota sala-estado" role="status" data-sala-pessoal hidden></p>
     <p id="boot-etapa" class="etapa" role="status" hidden></p>
     <p id="boot-erro" class="erro" role="alert" hidden></p>
   </div>
@@ -537,7 +581,9 @@
     <div class="server-campo">
       <label class="server-nome-campo">
         <span class="rotulo">NOME DESTE SERVIDOR</span>
-        <input id="preparar-nome" type="text" maxlength="64" spellcheck="false"
+        <!-- Sem `maxlength`, que contava caracteres: o teto do fio é em bytes, e
+             quem o confere é `confirmarPreparar` (pendência 58, item 55). -->
+        <input id="preparar-nome" type="text" spellcheck="false"
                autocomplete="off" placeholder="nome do servidor">
       </label>
     </div>
@@ -1189,6 +1235,12 @@
           que sobra aqui é dizer o que está acontecendo.
         -->
         <p id="voz-estado" class="operador-frase" role="status"></p>
+        <!--
+          A linha da sala pessoal, na sessão (tarefa 23 da F7): a mesma da
+          entrada, num elemento próprio ao lado da frase da voz, e não dentro
+          dela. Só aparece quando há o que dizer.
+        -->
+        <p id="sala-estado" class="operador-frase sala-estado" role="status" data-sala-pessoal hidden></p>
         <!--
           **O seletor de modo saiu daqui.** A comp da 0.9.0 não o desenha no
           operador: ela o põe na configuração, sob `MODO DE VOZ`, e no operador
@@ -3734,13 +3786,16 @@
                 <label class="server-nome-campo">
                   <span class="rotulo">NOME DESTE SERVIDOR</span>
                   <!--
-                    `maxlength` é a mesma aproximação que os campos de criar
-                    sala e canal já fazem: o teto do protocolo é em **bytes** e
-                    este atributo conta caracteres, então um nome de 64 letras
-                    acentuadas ainda pode ser recusado. A recusa é do servidor e
-                    chega como aviso, como a de qualquer outro verbo.
+                    **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5).
+                    Ele contava caracteres, e o teto do protocolo é em
+                    **bytes**: um nome acentuado cabia aqui e passava do teto, e
+                    o núcleo o recusava sem mandar o quadro, só com uma linha no
+                    `seele.log` (M2 da revisão do lote P61; antes, a sessão
+                    caía). Quem confere agora é `renomearServidor`, em bytes,
+                    com o teto lido do Rust (`limites_dos_campos`), e a recusa
+                    diz o número em `#server-servidor-erro`.
                   -->
-                  <input id="server-nome-valor" name="nome" maxlength="64"
+                  <input id="server-nome-valor" name="nome"
                          spellcheck="false" autocomplete="off"
                          placeholder="nome do servidor">
                 </label>
@@ -4009,11 +4064,17 @@
 
         A nota diz o que **não** muda, e ela importa: quem troca de nome pode
         esperar que o passado o acompanhe, e ele não acompanha.
+
+        **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele dizia
+        32 e contava caracteres, e o fio conta 32 **bytes**: vinte letras `á`
+        cabiam aqui e não no `Hello`. Quem confere agora é `guardarOApelido`, em
+        bytes, com o teto lido do Rust (`limites_dos_campos`), e a recusa diz o
+        número em `#perfil-erro`.
       -->
       <label class="nomear-campo">
         <span class="rotulo">APELIDO</span>
         <input id="perfil-apelido" aria-describedby="perfil-sem-nome"
-               name="apelido" maxlength="32"
+               name="apelido"
                spellcheck="false" autocomplete="off"
                placeholder="como as pessoas te veem">
         <!--
@@ -4054,6 +4115,36 @@
       </div>
       <p id="perfil-erro" class="nomear-erro" role="alert" hidden></p>
     </form>
+    <!--
+      A sala pessoal no PERFIL (tarefas 23 e 29 da F7; spec de 23/09, «"SEU
+      CÓDIGO" e a agenda»): o SEU CÓDIGO só de leitura, com COPIAR; «receber
+      ligações», que desliga a sala inteira; o firewall do Windows (D-sala-1); e
+      a agenda. Depois do formulário porque tudo aqui vale na hora, e o SALVAR
+      de cima é do apelido. Escondido até o `meu_codigo` responder
+      (`camada-sala.js`), e com `data-sala-pessoal`: o navegador não tem sala.
+    -->
+    <section id="perfil-sala" class="perfil-sala" data-sala-pessoal
+             aria-labelledby="perfil-sala-titulo" hidden>
+      <span id="perfil-sala-titulo" class="rotulo">SEU CÓDIGO</span>
+      <div class="perfil-sala-codigo">
+        <input id="perfil-codigo" readonly spellcheck="false" autocomplete="off"
+               aria-labelledby="perfil-sala-titulo">
+        <button id="perfil-copiar-codigo" class="botao-fantasma" type="button">COPIAR</button>
+      </div>
+      <label class="perfil-sala-receber">
+        <input id="perfil-receber" type="checkbox" checked>
+        <span>RECEBER LIGAÇÕES PELO SEU CÓDIGO</span>
+      </label>
+      <p id="perfil-sala-estado" class="nota sala-estado" role="status" hidden></p>
+      <div id="perfil-sala-firewall" class="perfil-sala-firewall" hidden>
+        <p id="perfil-sala-firewall-frase" class="nota"></p>
+        <button id="perfil-sala-firewall-abrir" class="botao-fantasma" type="button">ABRIR A PORTA AGORA</button>
+      </div>
+      <span class="rotulo">AGENDA</span>
+      <p id="perfil-agenda-vazia" class="nota" hidden>Ninguém ligou para o seu código ainda.</p>
+      <ul id="perfil-agenda" class="perfil-agenda"></ul>
+      <p id="perfil-agenda-erro" class="nomear-erro" role="alert" hidden></p>
+    </section>
   </div>
 </div>
 
@@ -4064,9 +4155,15 @@
       <h2 id="nomear-titulo" class="nomear-titulo">NOMEAR</h2>
     </div>
     <form id="nomear-forma" class="nomear-corpo" autocomplete="off">
+      <!--
+        **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele dizia
+        48 e contava caracteres, e o fio conta 48 **bytes**. Quem confere agora
+        é o `submit` de `camada-nomear.js`, em bytes, com o teto lido do Rust
+        (`limites_dos_campos`), e a recusa diz o número em `#nomear-erro`.
+      -->
       <label class="nomear-campo">
         <span id="nomear-rotulo" class="rotulo">NOME</span>
-        <input id="nomear-valor" name="nome" maxlength="48" required
+        <input id="nomear-valor" name="nome" required
                spellcheck="false" autocomplete="off">
       </label>
       <!--
@@ -4441,12 +4538,22 @@
                 <option value="30">30 dias</option>
               </select>
             </label>
+            <!--
+              **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele
+              dizia 200 e contava caracteres, e o fio leva 512 **bytes**: 200
+              ideogramas são 600. Quem confere agora é o BANIR
+              (`camada-moderar.js`), em bytes, com o teto lido do Rust
+              (`limites_dos_campos`), e a recusa diz o número logo abaixo, onde
+              se escreveu — o `#moderar-erro` mora na confirmação, que um
+              motivo recusado não chega a abrir.
+            -->
             <label class="moderar-campo">
               <span class="rotulo">MOTIVO</span>
-              <input id="moderar-motivo" name="motivo" maxlength="200"
+              <input id="moderar-motivo" name="motivo"
                      spellcheck="false" autocomplete="off"
                      placeholder="opcional, e só para o seu registro">
             </label>
+            <p id="moderar-motivo-erro" class="erro" role="alert" hidden></p>
             <button id="moderar-banir" class="moderar-verbo" type="button">BANIR</button>
             <span class="nota">Encerra a sessão e barra a volta. O motivo fica
               com quem hospeda e nunca chega a quem foi banido.</span>
@@ -4512,6 +4619,18 @@
   `executorDoMod` só escolhe sem o Tauri.
 -->
 <script src="mods-no-navegador.js"></script>
+<!--
+  A voz no navegador (Tarefa 3.3 da F4): o microfone, o codec e o alto-falante
+  em volta do `.wasm` do `seele-web`. Na carga ela só declara, nas duas cascas.
+  O worklet dela (`voz-worklet.js`) não entra aqui: é ela quem o carrega.
+-->
+<script src="voz-web.js"></script>
+<!--
+  A identidade do navegador, o link e o convite (Tarefa 3.4 da F4): o que a
+  tela «ENTRAR EM» lê. Na carga, no navegador, ela lê o fragmento e o apaga da
+  barra; no desktop só declara.
+-->
+<script src="identidade-web.js"></script>
 <script src="glifos.js"></script>
 <script src="frases.js"></script>
 <script src="tela-boot.js"></script>
@@ -4532,6 +4651,9 @@
   precise pensar nisso.
 -->
 <script src="camada-portaria.js"></script>
+<script src="camada-toque.js"></script>
+<script src="camada-sala.js"></script>
+<script src="camada-hospedagem.js"></script>
 <script src="camada-ajuda.js"></script>
 <script src="camada-nomear.js"></script>
 <script src="camada-mods.js"></script>
@@ -4563,6 +4685,7 @@
 <script src="celular-conversa.js"></script>
 <script src="celular-pessoas.js"></script>
 <script src="celular-ajustes.js"></script>
+<script src="celular-entrada.js"></script>
 <script src="larga-casca.js"></script>
 </body>
 </html>

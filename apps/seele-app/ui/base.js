@@ -93,6 +93,56 @@ function elemento(tag, classe, texto) {
   return nodo;
 }
 
+// ----------------------------------------------- os tetos dos campos do fio
+//
+// Pendência 58, item 55 (lote C55 da F5). Os campos que a janela escreve e o fio
+// carrega — o apelido, o nome de um canal ou de uma sala, o nome do servidor e
+// o motivo de um banimento — tinham `maxlength`, que conta caracteres, e o fio
+// conta **bytes**: um nome acentuado cabia no campo e não no quadro. Desde o
+// lote P61 o núcleo recusa um comando assim sem derrubar o enlace, e o registra
+// no `seele.log`; mas a janela não ficava sabendo, e o pedido sumia calado.
+// Agora cada campo confere aqui antes de mandar, e diz o teto.
+
+/** Quantos bytes UTF-8 este texto ocupa. */
+function bytesDe(texto) {
+  return new TextEncoder().encode(texto).length;
+}
+
+/**
+ * Os tetos dos campos (`limites_dos_campos`), pedidos uma vez, ou `null`.
+ *
+ * Do Rust, que os lê do `seele-proto` pela FFI, e não de um número escrito
+ * aqui: são os que o `encode` confere, e o guarda
+ * `nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui`, de `tests/frontend.rs`,
+ * reprova uma cópia. Uma pergunta que falhou não fica guardada: a seguinte
+ * pergunta de novo.
+ */
+let tetosPedidos = null;
+
+function tetosDosCampos() {
+  tetosPedidos ??= invoke("limites_dos_campos").catch((falha) => {
+    console.warn("limites_dos_campos:", falha);
+    tetosPedidos = null;
+    return null;
+  });
+  return tetosPedidos;
+}
+
+/**
+ * A frase de um texto que passa do teto do campo, ou `null` quando ele cabe.
+ *
+ * `campo` é o nome do teto em `limites_dos_campos`, e o texto é o que vai sair,
+ * já aparado. Sem o teto (a ponte não respondeu), nada é dito: avisar a partir
+ * de um palpite seria pior que não avisar, e o núcleo continua recusando o que
+ * não cabe, como antes.
+ */
+async function passaDoTeto(campo, texto) {
+  const teto = (await tetosDosCampos())?.[campo];
+  if (typeof teto !== "number") return null;
+  const bytes = bytesDe(texto);
+  return bytes > teto ? fraseDoTeto(teto, bytes) : null;
+}
+
 // ------------------------------------------------- a casca do navegador (P5)
 //
 // O que a casca do celular troca no desktop, e só isto (spec da F8, §9.4). Cada
@@ -108,7 +158,11 @@ function elemento(tag, classe, texto) {
 //   - `avisoDeFone`: a frase do aviso de fone (P9);
 //   - `fraseDoModo`: como o microfone abre, na faixa de contexto de
 //     CONFIGURAÇÕES. Recebe o modo e a frase do desktop, e o padrão a devolve:
-//     a frase, com o nome da tecla, continua no `tela-server.js`.
+//     a frase, com o nome da tecla, continua no `tela-server.js`;
+//   - `entradaDireta`: se a casca dispensa o aperto da tela de entrada para
+//     este veredito (P11, em `entrarNaAutenticacao`; D-celular-3). Devolve
+//     `null`, e o aperto aparece como hoje, ou as frases do registro e do
+//     anúncio da entrada direta. O passo de entrar roda igual nos dois casos.
 //
 // Selado, e não congelado: a casca troca os valores, e ninguém acrescenta
 // campo. Um campo novo é um ponto novo, e entra aqui com o nome dele.
@@ -118,6 +172,7 @@ const CASCA = Object.seal({
   enterEnvia: true,
   avisoDeFone: () => AVISO_DE_FONE,
   fraseDoModo: (_modo, doDesktop) => doDesktop,
+  entradaDireta: (_veredito, _deOnde) => null,
 });
 
 // --------------------------------------------------------------- o snapshot
@@ -495,15 +550,22 @@ const PEDACOS_DE_MIDIA = 256;
 const TETO_DE_MIDIA_BASE64 = 4 * Math.ceil(10 * 1024 * 1024 / 3) + 128;
 
 /**
- * Escreve no registro de quem hospeda.
+ * Escreve no `seele.log` desta máquina, pelo processo nativo que hospeda esta
+ * janela (`registrar_da_janela`, no `main.rs`).
  *
  * **A janela não tinha como.** Todo o caminho de um pedido de MOD é observável
  * no Rust — o executor, a bomba, a ponte, o servidor —, e o pedaço que roda
  * aqui era um vão silencioso no meio dele. Um defeito que morasse nesse vão não
  * deixava rastro nenhum, e foi exatamente onde uma medição parou.
  *
- * Não vai para a tela: quem lê isto é quem hospeda, e quem usa não tem o que
- * fazer com a frase.
+ * Não vai para a tela. Quem lê é quem investiga esta máquina pelo `seele.log`
+ * dela, e não a pessoa no meio do que está fazendo: ela não tem o que fazer
+ * com a frase. As linhas de MOD são procuradas por quem hospeda a sala que os
+ * roda, ou por quem escreve o MOD. Desde o lote W2 da F5 há também uma que não
+ * é de MOD: a recusa de uma tentativa de entrada que outra já substituiu
+ * (`conectar`, em `tela-boot.js`), que a tela cala. Essa é lida por quem
+ * investiga uma entrada nesta máquina — quem usa, ou quem a ajuda com o
+ * registro dela.
  */
 function registrarNoAnfitriao(onde, o_que, nivel = "aviso", modId = null) {
   // Nunca lança e nunca espera: um registro que derruba o caminho que ele
@@ -533,6 +595,100 @@ function registrarNoAnfitriao(onde, o_que, nivel = "aviso", modId = null) {
     /* sem ponte, sem registro — e o caminho segue */
   }
 }
+
+// --------------------------------------------------- o que ninguém pegou
+//
+// **Uma promise recusada sem `catch` some calada**, e um erro solto também. O
+// botão vermelho não fechava o app: o `destroy()` da janela era recusado pela
+// ACL do Tauri, a recusa caía numa promise que ninguém olhava, e nada chegava
+// ao `seele.log` (achado da F7). Os dois ouvintes abaixo levam o motivo e a
+// pilha ao registro, com `onde=sem-dono`. A tela não muda: é registro, e não
+// aviso à pessoa. O console do navegador segue dizendo o que já dizia, porque
+// nenhum deles chama `preventDefault`.
+//
+// **Com teto.** No Rust, a linha da janela sem MOD gasta do balde do catálogo,
+// o mesmo dos outros avisos da janela, e um laço que recusa a cada volta
+// calaria todos eles. Passam `SEM_DONO.porMinuto` linhas por minuto; as
+// seguintes são contadas, e a conta é dita numa linha só quando o minuto
+// acaba.
+//
+// Só pega o que acontece depois deste arquivo: o que estoura na carga de um
+// script anterior a ele (`ponte-web.js`, os `mods-*.js`) já foi notificado.
+// O roteiro é `tools/roteiros/recusa-sem-dono.js`.
+
+const SEM_DONO = Object.freeze({ porMinuto: 10, minuto: 60_000, quadrosDaPilha: 6 });
+
+/** O minuto corrente do teto: quando começou, quantas disse e quantas segurou. */
+const minutoSemDono = { desde: 0, ditas: 0, seguradas: 0 };
+
+/** O motivo numa linha: o nome e a mensagem, e a pilha quando houver. */
+function motivoSemDono(motivo) {
+  if (motivo && typeof motivo === "object" && typeof motivo.stack === "string") {
+    const cabeca = `${motivo.name ?? "Error"}: ${motivo.message ?? ""}`;
+    // Só os quadros: `at …` no V8, `função@lugar` no WebKit. O V8 repete a
+    // cabeça no alto da pilha, e o WebKit não.
+    const quadros = motivo.stack
+      .split("\n")
+      .map((linha) => linha.trim())
+      .filter((linha) => linha.startsWith("at ") || linha.includes("@"))
+      .slice(0, SEM_DONO.quadrosDaPilha);
+    return quadros.length > 0 ? `${cabeca} — pilha: ${quadros.join(" ← ")}` : cabeca;
+  }
+  if (typeof motivo === "string") return motivo;
+  try {
+    return JSON.stringify(motivo) ?? String(motivo);
+  } catch {
+    return String(motivo);
+  }
+}
+
+function registrarSemDono(oQue, motivo) {
+  // Nunca lança: um estouro aqui seria mais um para este mesmo ouvinte.
+  try {
+    const agora = Date.now();
+    if (agora - minutoSemDono.desde >= SEM_DONO.minuto) {
+      minutoSemDono.desde = agora;
+      minutoSemDono.ditas = 0;
+    }
+    if (minutoSemDono.ditas >= SEM_DONO.porMinuto) {
+      minutoSemDono.seguradas += 1;
+      if (minutoSemDono.seguradas === 1) {
+        setTimeout(dizerAsSeguradasSemDono, minutoSemDono.desde + SEM_DONO.minuto - agora);
+      }
+      return;
+    }
+    minutoSemDono.ditas += 1;
+    registrarNoAnfitriao("sem-dono", `${oQue}: ${motivoSemDono(motivo)}`, "erro");
+  } catch {
+    /* sem registro, e o caminho segue */
+  }
+}
+
+function dizerAsSeguradasSemDono() {
+  const { seguradas } = minutoSemDono;
+  minutoSemDono.seguradas = 0;
+  if (seguradas === 0) return;
+  registrarNoAnfitriao(
+    "sem-dono",
+    `${seguradas} outras seguradas pelo teto de ${SEM_DONO.porMinuto} por minuto`,
+    "erro",
+  );
+}
+
+window.addEventListener("unhandledrejection", (evento) =>
+  registrarSemDono("promise recusada sem catch", evento.reason),
+);
+
+window.addEventListener("error", (evento) => {
+  // Só os erros de script: o de um recurso que não carregou não sobe até a
+  // janela. O solto que não é um erro não tem pilha, e vai com o lugar.
+  const { error: erro, message, filename, lineno, colno } = evento;
+  const comPilha = erro && typeof erro === "object" && typeof erro.stack === "string";
+  registrarSemDono(
+    "erro solto",
+    comPilha ? erro : `${motivoSemDono(erro ?? message)} (${filename}:${lineno}:${colno})`,
+  );
+});
 
 // ------------------------------------------------------- a geração da sessão
 //
@@ -3931,7 +4087,9 @@ async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes) {
   for (const m of ausentes) {
     anotarEstadoDoMod(m.id, "obtendo");
     try {
-      await invoke("instalar_mod_do_catalogo", { id: m.id, versao: m.version });
+      // Obter, e não atualizar (lote X da F5, ADR 0045): o que este servidor
+      // exige não muda o que exige o servidor que esta janela hospeda.
+      await invoke("instalar_mod_do_catalogo", { id: m.id, versao: m.version, uso: "obter" });
     } catch (falha) {
       // **Visível, e não só no console.** A falha é de um MOD que o servidor
       // exige: sem frase, a sessão continuaria sem ele e a pessoa descobriria

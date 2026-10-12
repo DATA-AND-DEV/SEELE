@@ -44,6 +44,28 @@
     // MOD. O foco do teclado continua preso no diálogo. Quem pergunta é a pilha
     // de inércia do `mods-superficies.js` (F3), que não lê a marca.
     acordadosNoModal: () => [...document.querySelectorAll("#tela-sessao > .voz-celular, #tela-sessao > .cel-abas")],
+    // As regiões de MOD que esta casca tem (rascunho da API 6, §11; decidido em
+    // 09/10). O `status.barra` não: o rodapé da telemetria do desktop sai da
+    // casca, e a fileira da CHAMADA tem a altura das abas e as quatro medidas.
+    // Uma contribuição nele recebe `regiao-ausente`, em vez de desenhar num nó
+    // escondido sem o MOD saber. Quem pergunta é o `aCascaTemARegiao`, no
+    // `base.js`, e a bancada confere que cada uma tem caixa à vista. O palco
+    // dos MODs (`chamada.palco`) mora na CHAMADA, no lugar da grade, e começa
+    // atrás dela: o caso `palco-de-mods` o traz à frente e mede a casa dele.
+    regioes: new Set([
+      "redes", "servidor.navegacao", "operador.barra", "canal.cabecalho",
+      "conversa.mensagem", "compositor", "pessoas.lista", "chamada.palco",
+    ]),
+    // Onde o tema de uma região pinta, quando não é o contêiner do desktop
+    // (17i da F3, item 3; o `escreverAsRegioesDoTema` os procura no documento
+    // todo, f09e7540). A `.operador` do desktop está escondida, e o
+    // `operador.barra` mora em AJUSTES: a placa de SEU PERFIL, que tem o
+    // retrato e o apelido como a barra do desktop tem a inicial e o nome, e a
+    // própria região. Os dois pintam o painel atrás (`celular-sessao.css`): a
+    // tinta da região nunca fica sobre o fundo do produto.
+    conteineresDasRegioes: Object.freeze({
+      "operador.barra": Object.freeze(["#tela-server .cel-perfil-placa", "#tela-server #operador-mods"]),
+    }),
   });
 
   const raiz = document.documentElement;

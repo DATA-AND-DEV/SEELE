@@ -34,7 +34,21 @@
 )]
 
 pub mod mods;
+/// Uma conexão que não existe, com o `fold` e o `snapshot` de uma que existe:
+/// para os testes daqui e para a conformidade dos dois produtores de retrato.
+#[cfg(any(test, feature = "conformidade"))]
+pub mod sem_rede;
 pub mod types;
+mod volta;
+
+/// Quantas mensagens cada página da busca do buraco pede, na volta de uma queda.
+///
+/// Pública só para a conformidade a prender ao `MAX_PAGE` do servidor
+/// (`queda_recuperavel::a_pagina_da_busca_e_a_pagina_do_servidor`): a busca
+/// mede cada página por este número, e um servidor que mandasse menos a faria
+/// parar cedo. O cliente não pode ver o servidor (ADR 0002); a conformidade vê
+/// os dois.
+pub use volta::PAGINA_DO_BURACO;
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -44,6 +58,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use seele_core::enlace::Enlace;
+use seele_core::retrato::{aviso_de, foto_da_sala, minha_tela_de, transmissoes_de};
 use seele_core::{
     identity, ChannelId, ClientMessageId, FilePinStore, MediaChannel, MessageId, PersonId, Room,
     Signal, SignalBand, Ssrc, SyncInputs, Voice, VoiceRoomId,
@@ -53,11 +68,11 @@ pub use types::{
     AberturaDoAudio, Attachment, AttachmentRefusal, CaptureDevice, Channel, ChannelWeight,
     ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio,
     EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, LimitesDeTela,
-    LinkState, LinkTrust, Message, MotivoDaRecusa, NotSavedReason, Notice, NoticeReason,
-    PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview, PreviewRefusal,
-    PreviewRules, SaveDestination, SaveRefused, Severity, SignalBand as Band, Snapshot, SomDaTela,
-    TelaEmCurso, Telemetry, TemaDaSessao, Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom,
-    VoiceRoomSync, VolumeRefusal,
+    LimitesDosCampos, LinkState, LinkTrust, Message, MotivoDaRecusa, NotSavedReason, Notice,
+    NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
+    PreviewRefusal, PreviewRules, SaveDestination, SaveRefused, Severity, SignalBand as Band,
+    Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, Transfer, TransmissaoNaSala, Trust,
+    VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -218,6 +233,9 @@ impl TesteDeMicrofone {
     }
 }
 
+/// O volume padrão do toque, de 0 a 1: audível, e longe do teto da escala.
+pub const VOLUME_DO_TOQUE: f32 = seele_core::VOLUME_DO_TOQUE;
+
 /// O toque da sala pessoal tocando (tarefas 24 e 25 da F7). Largar a alça
 /// para o som.
 ///
@@ -372,6 +390,22 @@ pub fn codigo_desta_maquina(home: &str) -> Result<Codigo, ConnectionError> {
 fn codigo_com(home: &str, variavel: Option<&str>) -> Result<Codigo, ConnectionError> {
     let chave = chave_com(home, variavel)?;
     Ok(Codigo::da_chave(chave.verifying_key().as_bytes()))
+}
+
+/// O ponto de encontro desta máquina: o que `$SEELE_ENCONTRO` diz, e o do
+/// projeto sem ela; `None` quando a variável o desliga.
+///
+/// **O mesmo dos dois lados** da sala pessoal: a sala se registra nele (tarefa
+/// 23 da F7), e quem liga pelo código pergunta nele. É a leitura única do
+/// ambiente, a de `seele_core::encontro::ponto_de_quem_liga`: com
+/// `$SEELE_ENCONTRO`, uma leitura diferente aqui deixaria a sala registrada
+/// num ponto onde ninguém pergunta.
+///
+/// **Só a produção chama isto**, como o `iniciar_com_o_ponto_padrao` de quem
+/// hospeda: os testes sobem a sala com o ponto deles, ou sem ponto nenhum.
+#[must_use]
+pub fn ponto_de_encontro() -> Option<String> {
+    seele_core::encontro::ponto_de_quem_liga()
 }
 
 /// A semente da sala pessoal: a chave desta máquina, de onde saem o
@@ -1143,6 +1177,13 @@ struct Shared {
     /// por causa de um `send_to` que falhou num soluço de rede seria movimento
     /// sem informação.
     caminho: Mutex<Option<&'static str>>,
+    /// A impressão do certificado que o aperto de mão conferiu, gravada antes
+    /// de a casca poder perguntar. Ver [`Connection::impressao_do_servidor`].
+    ///
+    /// Não é reescrita quando o enlace reconecta: a reconexão de
+    /// `seele_core::enlace` volta ao mesmo destino, e uma chave diferente
+    /// nele é recusada pelo pin (`PinDecision::Changed`).
+    impressao_do_servidor: Mutex<Option<String>>,
     /// Quantas vezes o histórico mudou desde que esta sessão começou.
     ///
     /// Existe para o [`Snapshot`] poder dizer "mudou" sem carregar a conversa
@@ -1370,6 +1411,22 @@ impl Shared {
         antes.abs_diff(micros) >= 500
     }
 
+    /// Guarda a impressão que o pin conferiu nesta conexão.
+    ///
+    /// `FirstContact` e `Matches` trazem a impressão; `Changed` e
+    /// `InviteRefused` nunca chegam aqui, porque o aperto de mão já falhou.
+    fn gravar_impressao(&self, decisao: &seele_core::PinDecision) {
+        let impressao = match decisao {
+            seele_core::PinDecision::FirstContact { fingerprint }
+            | seele_core::PinDecision::Matches { fingerprint } => Some(fingerprint.clone()),
+            seele_core::PinDecision::Changed { .. }
+            | seele_core::PinDecision::InviteRefused { .. } => None,
+        };
+        if let Ok(mut slot) = self.impressao_do_servidor.lock() {
+            *slot = impressao;
+        }
+    }
+
     /// Guarda por qual caminho a chegada saiu, se ela soube dizer.
     fn gravar_caminho(&self, caminho: Option<seele_core::chegada::Caminho>) {
         if let Ok(mut slot) = self.caminho.lock() {
@@ -1558,6 +1615,23 @@ impl Connection {
         config: ConnectConfig,
         olhos: Option<Arc<dyn EventListener>>,
     ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
+        // **O apelido que o `Hello` não leva é recusado aqui, antes de tudo**
+        // (pendência 58, item 55; lote C55 da F5). O teto é do fio, em bytes,
+        // e o apelido está na mão antes de qualquer endereço: conferido aqui,
+        // nada é resolvido, discado nem lido do disco. Sem isto, o QUIC e o TLS
+        // abriam, o `encode` do `Hello` o recusava, e a falha chegava à janela
+        // como `Unreachable`, com o servidor de pé.
+        if config.nickname.len() > seele_core::MAX_NICKNAME_LEN {
+            tracing::warn!(
+                bytes = config.nickname.len(),
+                teto = seele_core::MAX_NICKNAME_LEN,
+                "o apelido passa do teto do fio, em bytes: o Hello não o leva, e a conexão não abre"
+            );
+            return Err(ConnectionError::ApelidoGrandeDemais {
+                limite_bytes: seele_core::MAX_NICKNAME_LEN as u64,
+            }
+            .into());
+        }
         let (address, server_name, pin_key) = resolve(&config.server)?;
         if config.codigo_esperado.is_some() && config.expected_fingerprint.is_some() {
             tracing::warn!(
@@ -1604,6 +1678,7 @@ impl Connection {
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             caminho: Mutex::new(None),
+            impressao_do_servidor: Mutex::new(None),
             signal: AtomicU8::new(0),
             running: AtomicBool::new(false),
             pending_weights: Mutex::new(Vec::new()),
@@ -1681,6 +1756,34 @@ impl Connection {
         voice_room: u32,
         password: Option<String>,
     ) -> Result<(), ConnectionError> {
+        // **Uma senha maior que o teto do fio é recusada aqui, antes de pedir**
+        // (R1-M4 da revisão do lote P61). O teto é em bytes, e o campo da
+        // janela conta caracteres. Sem isto, o pedido ia ao núcleo, que o
+        // recusa sem escrever o quadro; mas o `Room` já tinha sentado a pessoa
+        // na sala pedida, e não tinha como saber qual das entradas no ar
+        // desfazer. Aqui a pessoa não é sentada, e lê a mesma recusa que o
+        // servidor daria a uma senha errada — que nenhuma senha deste tamanho
+        // deixa de ser.
+        if password
+            .as_ref()
+            .is_some_and(|senha| senha.len() > seele_core::MAX_NICKNAME_LEN)
+        {
+            tracing::warn!(
+                sala = voice_room,
+                "a senha passa do teto do fio, em bytes: a entrada não sai, e é recusada aqui"
+            );
+            let recusa = seele_core::Notice {
+                severity: seele_core::AlertSeverity::Warning,
+                reason: seele_core::AlertReason::VoiceRoomEntryRefused,
+                operator_text: None,
+            };
+            let notice = aviso_de(&recusa);
+            if let Ok(mut room) = self.shared.room.lock() {
+                room.notice = Some(recusa);
+            }
+            self.shared.notify(&Event::NoticeRaised { notice });
+            return Ok(());
+        }
         self.command(Command::EnterVoiceRoom(VoiceRoomId(voice_room), password))
     }
 
@@ -1858,6 +1961,23 @@ impl Connection {
         seele_core::MAX_BODY_LEN
     }
 
+    /// Os tetos dos campos que a casca escreve: o apelido, o nome de um canal
+    /// ou de uma sala, os lugares de uma sala nova, o nome do servidor e o
+    /// motivo de um banimento. Ver [`LimitesDosCampos`].
+    ///
+    /// O molde é [`Self::limite_da_mensagem`]: a casca lê daqui, e nenhum
+    /// número do fio fica escrito à mão na janela.
+    #[must_use]
+    pub const fn limites_dos_campos() -> LimitesDosCampos {
+        LimitesDosCampos {
+            apelido: seele_core::MAX_NICKNAME_LEN,
+            nome_de_canal: seele_core::MAX_CHANNEL_NAME_LEN,
+            lugares_da_sala: seele_core::MAX_VOICE_ROOM_LIMIT,
+            nome_do_servidor: seele_core::MAX_CLIENT_NAME_LEN,
+            motivo_do_banimento: seele_core::MAX_ALERT_TEXT_LEN,
+        }
+    }
+
     /// Says something in o canal.
     ///
     /// # O que mudou, e é a metade que faltava
@@ -1886,13 +2006,12 @@ impl Connection {
         // **O teto é conferido aqui**, e não descoberto quando o quadro se
         // recusa a ser codificado. Ver [`Self::limite_da_mensagem`]: o caminho
         // antigo encerrava a sessão.
-        if corpo.len() > seele_core::MAX_BODY_LEN {
-            #[allow(
-                clippy::cast_possible_truncation,
-                reason = "o teto é 4 KiB e cabe folgado num u32"
-            )]
-            let limite = seele_core::MAX_BODY_LEN as u32;
-            self.recusar_pendente(id, seele_core::MessageRefusal::TooLong { limit: limite });
+        //
+        // Pela mesma conferência que a repetição da volta usa
+        // (`volta::grande_demais`): uma pendente grande demais que chegasse lá
+        // derrubaria o enlace a cada volta, para sempre.
+        if let Some(recusa) = volta::grande_demais(&corpo) {
+            self.recusar_pendente(id, recusa);
             return Ok(id.get().to_string());
         }
 
@@ -1933,6 +2052,16 @@ impl Connection {
         }) else {
             return Ok(false);
         };
+        // **A mesma conferência do envio** (`volta::grande_demais`), e pelo
+        // mesmo motivo: um corpo acima do teto não é recusado pelo servidor, o
+        // quadro se recusa a ser codificado e o núcleo derruba o enlace.
+        // Medido na fase A do lote P61: TENTAR DE NOVO numa `Recusada(TooLong)`
+        // derrubava a conexão, e a pendente voltava como `SemResposta`, com a
+        // tela oferecendo como seguro um reenvio que derruba de novo.
+        if let Some(recusa) = volta::grande_demais(&corpo) {
+            self.recusar_pendente(id, recusa);
+            return Ok(true);
+        }
         self.anotar_pendente(channel, id, corpo.clone());
         self.command(Command::Send {
             channel,
@@ -3152,92 +3281,25 @@ impl Connection {
     /// — `audio_state` toma o da voz — é chamado enquanto este está na mão.
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
-        struct Foto {
-            instancia_me: Option<seele_core::PersonId>,
-            nickname: Option<String>,
-            server: String,
-            voice_rooms: Vec<VoiceRoom>,
-            presentes: Vec<Person>,
-            channels: Vec<Channel>,
-            loss_fraction: f32,
-            notice: Option<Notice>,
-            permissions: Vec<seele_core::Permission>,
-            tela: Option<TelaEmCurso>,
-            minha_transmissao: Option<TelaEmCurso>,
-            transmissoes: Vec<TransmissaoNaSala>,
-            ended: Option<EndReason>,
-            tema: Option<TemaDaSessao>,
-        }
-
+        // As duas escolhas desta ponta, lidas **antes** do cadeado do `Room`:
+        // cada uma tem o seu, e nenhuma precisa dele. A foto do `Room` é a do
+        // `seele_core::retrato`, a mesma que o navegador monta (fase 2 da
+        // Tarefa 2.2 da F4).
+        let escolhida = self.shared.tela_escolhida().tela();
+        let pedido = self.shared.pedido_da_tela();
         let foto = match self.shared.room.lock() {
-            Ok(room) => Foto {
-                instancia_me: room.me,
-                nickname: room
-                    .me
-                    .and_then(|me| room.people.get(&me))
-                    .map(|person| person.nickname.clone()),
-                server: room.server.clone(),
-                voice_rooms: voice_rooms_of(&room),
-                presentes: presentes_de(&room),
-                channels: lines_of(&room),
-                loss_fraction: room.telemetry.as_ref().map_or(0.0, |t| t.loss_fraction),
-                notice: room.notice.as_ref().map(|notice| Notice {
-                    severity: notice.severity.into(),
-                    reason: notice.reason.into(),
-                    operator_text: notice.operator_text.clone(),
-                }),
-                permissions: room.permissions.clone(),
-                tela: self
-                    .shared
-                    .tela_escolhida()
-                    .tela()
-                    .and_then(|tela| tela_por_id(&room, tela, self.shared.pedido_da_tela())),
-                minha_transmissao: minha_tela_de(&room, self.shared.pedido_da_tela()),
-                transmissoes: transmissoes_de(&room, self.shared.tela_escolhida().tela()),
-                ended: room.ended.map(|end| end.reason.into()),
-                tema: room.tema.as_ref().map(|tema| TemaDaSessao {
-                    mod_id: tema.mod_id.clone(),
-                    valores: tema.valores.clone(),
-                }),
-            },
+            Ok(room) => foto_da_sala(&room, escolhida, pedido),
             // Um cadeado envenenado é uma sessão que já não tem estado. A foto
             // vazia é a resposta honesta, e é a mesma que o `Room::new()` de
             // antes dava.
-            Err(_) => {
-                let room = Room::new();
-                Foto {
-                    instancia_me: None,
-                    nickname: None,
-                    server: String::new(),
-                    voice_rooms: voice_rooms_of(&room),
-                    presentes: presentes_de(&room),
-                    channels: lines_of(&room),
-                    loss_fraction: 0.0,
-                    notice: None,
-                    permissions: Vec::new(),
-                    tela: None,
-                    minha_transmissao: None,
-                    transmissoes: Vec::new(),
-                    ended: None,
-                    tema: None,
-                }
-            }
+            Err(_) => foto_da_sala(&Room::new(), None, None),
         };
-        // **O nome vem do roster quando o roster nos conhece.**
-        //
-        // O `Mutex` local guarda o que se digitou ao conectar, e só isso: ele é
-        // escrito uma vez, na construção. Trocar de apelido manda um comando, o
-        // servidor confirma com `PersonRenamed`, o roster muda — e este número
-        // continuava lendo o nome antigo, para sempre. Quem trocasse via o
-        // próprio nome mudar na lista de gente e **não** no bloco do operador,
-        // que é onde ele está escrito ao lado do próprio retrato. Foi relatado
-        // assim: «nome do usuário não altera em tempo real».
-        //
-        // O `Mutex` continua sendo a resposta antes de o servidor apresentar
-        // esta conexão a si mesma — entre o `connect` e o `Welcome` não há
-        // roster, e um nome vazio ali seria a janela dizendo que ninguém está
-        // usando ela.
-        let nickname = foto.nickname.clone().unwrap_or_else(|| {
+        // A perda que o servidor contou vai na telemetria, e não na parte do
+        // `Room`: ela é lida antes de a foto virar o retrato da sala. O apelido
+        // e as permissões saem do retrato (`seele_core::retrato`), que é a
+        // mesma conta do navegador.
+        let loss_fraction = foto.loss_fraction;
+        let sala = foto.retrato(|| {
             self.shared
                 .nickname
                 .lock()
@@ -3258,14 +3320,14 @@ impl Connection {
             caminho: self.shared.caminho(),
             link: self.shared.enlace(),
             link_state: link_state_from_byte(self.shared.link_state.load(Ordering::Relaxed)),
-            server: foto.server.clone(),
+            server: sala.server,
             icon_revision: self.shared.icon_revision.load(Ordering::Relaxed),
             person_icons_revision: self.shared.person_icons_revision.load(Ordering::Relaxed),
-            me: foto.instancia_me.map(|person| person.0),
-            nickname,
-            voice_rooms: foto.voice_rooms,
-            presentes: foto.presentes,
-            channels: foto.channels,
+            me: sala.me,
+            nickname: sala.nickname,
+            voice_rooms: sala.voice_rooms,
+            presentes: sala.presentes,
+            channels: sala.channels,
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
             telemetry: Telemetry {
                 rtt_ms,
@@ -3274,7 +3336,7 @@ impl Connection {
                 // porque o servidor não tem como medir jitter. Ver
                 // [`Shared::jitter_de_chegada_micros`].
                 jitter_ms: self.shared.jitter_de_chegada_ms(),
-                loss_fraction: foto.loss_fraction,
+                loss_fraction,
                 bitrate_bps: audio.bitrate_bps,
                 signal,
                 sync_band: SignalBand::of(signal).into(),
@@ -3283,7 +3345,7 @@ impl Connection {
                 frames_refused: audio.frames_refused,
                 microfone_entrega_silencio_digital: audio.silencio_digital,
             },
-            notice: foto.notice,
+            notice: sala.notice,
             muted: audio.muted,
             total_isolation: audio.total_isolation,
             speaking: audio.speaking,
@@ -3294,28 +3356,18 @@ impl Connection {
             playback: audio.playback,
             aparelho: audio.aparelho,
             trocas_de_aparelho: audio.trocas_de_aparelho,
-            may_manage_voice_rooms: foto
-                .permissions
-                .contains(&seele_core::Permission::ManageVoiceRooms),
-            may_kick: foto.permissions.contains(&seele_core::Permission::Kick),
-            may_ban: foto.permissions.contains(&seele_core::Permission::Ban),
-            may_remove_message: foto
-                .permissions
-                .contains(&seele_core::Permission::RemoveMessage),
-            may_move_person: foto
-                .permissions
-                .contains(&seele_core::Permission::MovePerson),
-            may_customise_server: foto
-                .permissions
-                .contains(&seele_core::Permission::AdministerServer),
-            may_delete_rooms: foto
-                .permissions
-                .contains(&seele_core::Permission::AdministerServer),
-            tela: foto.tela,
-            minha_transmissao: foto.minha_transmissao,
-            transmissoes: foto.transmissoes,
-            ended: foto.ended,
-            tema_do_servidor: foto.tema,
+            may_manage_voice_rooms: sala.may_manage_voice_rooms,
+            may_kick: sala.may_kick,
+            may_ban: sala.may_ban,
+            may_remove_message: sala.may_remove_message,
+            may_move_person: sala.may_move_person,
+            may_customise_server: sala.may_customise_server,
+            may_delete_rooms: sala.may_delete_rooms,
+            tela: sala.tela,
+            minha_transmissao: sala.minha_transmissao,
+            transmissoes: sala.transmissoes,
+            ended: sala.ended,
+            tema_do_servidor: sala.tema_do_servidor,
         }
     }
 
@@ -3343,6 +3395,25 @@ impl Connection {
         self.shared
             .caminho_medido
             .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// A impressão do certificado do servidor que esta conexão conferiu.
+    ///
+    /// **Em toda conexão que subiu**, e não só nas que o veredito conta:
+    /// [`Trust::Known`], o de toda volta a um servidor já fixado, não leva a
+    /// impressão, e é justamente o de quem hospeda entrando no próprio
+    /// servidor pela segunda vez. A casca compara esta com a das hospedagens
+    /// dela para saber se a sessão é com uma delas: pela chave, e não pelo
+    /// endereço (lote X da F5 da 0.16).
+    ///
+    /// `None` só numa `Connection` montada à mão, sem aperto de mão.
+    #[must_use]
+    pub fn impressao_do_servidor(&self) -> Option<String> {
+        self.shared
+            .impressao_do_servidor
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
     }
 
     /// Ends the session.
@@ -3540,75 +3611,6 @@ impl Drop for Connection {
     fn drop(&mut self) {
         self.disconnect();
     }
-}
-
-/// Todo mundo que está conectado, em ordem de chegada.
-///
-/// Inclui quem está numa sala, e é de propósito: a casca precisa das duas
-/// listas para desenhar «no servidor, fora das salas» sem fazer conta de menos
-/// — subtrair uma da outra é trabalho de quem desenha, e ele é uma linha.
-///
-/// A própria pessoa entra aqui: o servidor não anuncia a chegada de volta para
-/// quem chegou, então quem monta esta lista soma o `me` que a sessão já tem.
-/// Sem isso, cada um seria o único ausente da própria lista de presentes.
-fn presentes_de(room: &Room) -> Vec<Person> {
-    room.presentes
-        .iter()
-        .chain(room.me.iter().filter(|eu| !room.presentes.contains(eu)))
-        .filter_map(|id| room.people.get(id))
-        .map(|person| Person {
-            id: person.id.0,
-            nickname: person.nickname.clone(),
-            speaking: person.speaking,
-            muted: person.muted,
-            total_isolation: person.total_isolation,
-            signal: person.signal,
-            sync_band: SignalBand::of(person.signal).into(),
-            is_self: room.me == Some(person.id),
-        })
-        .collect()
-}
-
-fn voice_rooms_of(room: &Room) -> Vec<VoiceRoom> {
-    room.voice_rooms
-        .iter()
-        .map(|voice_room| VoiceRoom {
-            id: voice_room.id.0,
-            name: voice_room.name.clone(),
-            limit: voice_room.limit,
-            password_required: voice_room.password_required,
-            occupied_by_us: room.current_voice_room == Some(voice_room.id),
-            channel: voice_room.channel.map(|channel| channel.0),
-            people: room
-                .roster(voice_room.id)
-                .map(|person| Person {
-                    id: person.id.0,
-                    nickname: person.nickname.clone(),
-                    speaking: person.speaking,
-                    muted: person.muted,
-                    total_isolation: person.total_isolation,
-                    signal: person.signal,
-                    sync_band: SignalBand::of(person.signal).into(),
-                    is_self: room.me == Some(person.id),
-                })
-                .collect(),
-            // Off the core, not folded here: the terminal draws the same number
-            // from the same method, and a mean computed in two shells is a mean
-            // two shells will one day round differently.
-            sync: room.voice_room_sync(voice_room.id).map(Into::into),
-        })
-        .collect()
-}
-
-fn lines_of(room: &Room) -> Vec<Channel> {
-    room.channels
-        .iter()
-        .map(|channel| Channel {
-            id: channel.id.0,
-            name: channel.name.clone(),
-            open: room.current_channel == Some(channel.id),
-        })
-        .collect()
 }
 
 /// A conversa do **canal aberto**, confirmadas e pendentes, na ordem de leitura.
@@ -3975,92 +3977,6 @@ pub fn motivos_de_parada_da_tela() -> Vec<&'static str> {
     .into_iter()
     .map(nome_da_parada)
     .collect()
-}
-
-/// A transmissão de tela da sala onde esta pessoa está, como a casca a vê.
-///
-/// Lê o `Room` e o que esta sessão pediu, e nada mais. Os três números do que
-/// está saindo — altura, quadros, kbps — ficam zerados com `medida: false`,
-/// porque **nada nesta ponte os mede**: quem compartilha não tem codificador
-/// daqui, e quem assiste não tem recepção aberta. Preenchê-los com o que foi
-/// pedido, ou com o degrau que o teto compraria, seria a ponte prometendo a
-/// escolha — o oposto exato da regra do §5.
-///
-/// `pedido` é a outra metade dessa mesma regra, e entra por parâmetro em vez de
-/// sair do `Room`: o `Room` é o que o servidor contou, e o que esta pessoa
-/// escolheu nunca passou por ele. Ele só sai daqui quando a transmissão é
-/// desta pessoa — ver [`TelaEmCurso::pedido`].
-/// Tudo o que está sendo transmitido na sala em que esta pessoa está.
-///
-/// **Só a sala dela.** O servidor só anuncia uma transmissão a quem está lá
-/// dentro, e listar outra aqui seria a casca contando algo que a sessão não viu.
-///
-/// Ordenada pelo nome da transmissão, que é crescente: sem ordem, um mapa
-/// devolveria as linhas em ordem diferente a cada desenho, e a lista piscaria
-/// de lugar duas vezes por segundo.
-fn transmissoes_de(room: &Room, assistida: Option<seele_core::ScreenId>) -> Vec<TransmissaoNaSala> {
-    let Some(voice_room) = room.current_voice_room else {
-        return Vec::new();
-    };
-    let mut lista: Vec<TransmissaoNaSala> = room
-        .telas
-        .values()
-        .filter(|tela| tela.voice_room == voice_room)
-        .map(|tela| TransmissaoNaSala {
-            tela: tela.screen.0,
-            de: tela.person.0,
-            e_minha: room.me == Some(tela.person),
-            assistida: assistida == Some(tela.screen),
-            espectadores: tela.espectadores,
-        })
-        .collect();
-    lista.sort_by_key(|transmissao| transmissao.tela);
-    lista
-}
-
-/// A transmissão de um `ScreenId`, se ela está acontecendo na sala desta pessoa.
-///
-/// **Por identidade, sempre.** A versão anterior pegava a primeira transmissão
-/// que encontrasse no mapa da sala — ver o doc de [`Snapshot::tela`] para o que
-/// isso custava. ADR 0054.
-fn tela_por_id(
-    room: &Room,
-    tela: seele_core::ScreenId,
-    pedido: Option<LimitesDeTela>,
-) -> Option<TelaEmCurso> {
-    let voice_room = room.current_voice_room?;
-    let encontrada = room
-        .telas
-        .values()
-        .find(|candidata| candidata.screen == tela && candidata.voice_room == voice_room)?;
-    let e_minha = room.me == Some(encontrada.person);
-    Some(TelaEmCurso {
-        tela: encontrada.screen.0,
-        de: encontrada.person.0,
-        e_minha,
-        // **O número do servidor**, que conta assinaturas de verdade. O de antes
-        // era o roster desta máquina menos quem compartilha, e incluía quem
-        // escolheu não assistir — duas contagens para a mesma pergunta.
-        espectadores: encontrada.espectadores,
-        parada: None,
-        // Só para quem compartilha, e a conferência é o campo inteiro: o teto é
-        // escolha de quem transmite e não viaja no fio, então o que esta
-        // máquina guardou só descreve a **própria** transmissão. Mostrá-lo ao
-        // lado da tela de outra pessoa seria a coluna «pedido» exibindo o que
-        // um terceiro pediu na vez passada.
-        pedido: if e_minha { pedido } else { None },
-    })
-}
-
-/// A transmissão que **esta** pessoa está mandando, se há uma.
-fn minha_tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
-    let voice_room = room.current_voice_room?;
-    let eu = room.me?;
-    let minha = room
-        .telas
-        .values()
-        .find(|tela| tela.person == eu && tela.voice_room == voice_room)?;
-    tela_por_id(room, minha.screen, pedido)
 }
 
 /// Se o painel da tela precisa ser redesenhado.
@@ -4465,6 +4381,7 @@ async fn drive(
     registrar_trilha(&chegado.trilha);
     shared.gravar_caminho(chegado.caminho());
     let mut client = chegado.enlace;
+    shared.gravar_impressao(client.pin_decision());
 
     // `Enlace::conectar` already returned `Err` above for anything that would
     // have made this a `PinDecision::Changed` or a refused invite — see
@@ -4496,6 +4413,12 @@ async fn drive(
 
     let mut sync = Signal::new();
     let mut next_tick = Instant::now() + TICK;
+
+    // **A volta do enlace** (lote P61): a busca do buraco do canal aberto, e o
+    // que ficou sem resposta saindo de novo com a mesma chave. Ver `volta`.
+    let mut buraco: Option<volta::Buraco> = None;
+    let mut carimbos_do_buraco: u64 = 1;
+    let mut repeticao = volta::Repeticao::default();
 
     while shared.running.load(Ordering::Relaxed) {
         tokio::select! {
@@ -4530,6 +4453,16 @@ async fn drive(
                         // não pode apagar o motivo da primeira.
                         for aviso in shared.drain_transfers() {
                             shared.notify(&Event::TransferChanged { transfer: aviso });
+                        }
+                        // A página do buraco que estava no ar acabou? Depois do
+                        // `fold`: a mensagem já está no `Room` quando a busca
+                        // decide. Ver `volta::Buraco`.
+                        let passo = buraco
+                            .as_mut()
+                            .and_then(|aberto| aberto.ouvir(&message, Instant::now()));
+                        if let Some(passo) = passo {
+                            volta::seguir(&client, &mut buraco, &mut carimbos_do_buraco, passo)
+                                .await;
                         }
                     }
                     seele_core::enlace::Aviso::Transferencia(estado) => {
@@ -4609,6 +4542,12 @@ async fn drive(
                             if mexeu {
                                 shared.messages_changed();
                             }
+                            // A busca e a repetição eram da conexão que caiu: a
+                            // próxima volta as refaz a partir do `Room`.
+                            if let Some(largado) = buraco.take() {
+                                carimbos_do_buraco = largado.sequencia();
+                            }
+                            repeticao.esquecer();
                         }
                     }
                     seele_core::enlace::Aviso::Reconectado { media, sessao, voice_room } => {
@@ -4668,6 +4607,38 @@ async fn drive(
                             },
                             |pedidos| abrir_a_voz(&shared, pedidos),
                         );
+                        // **O buraco e o que ficou sem resposta** (lote P61,
+                        // pendência 61). O núcleo só reassina o canal; o que
+                        // passou nele durante a queda, e o que esta máquina
+                        // mandava no instante, não voltavam sozinhos. A busca
+                        // pede o canal aberto de trás para a frente até a última
+                        // mensagem conhecida, e a repetição manda de novo, com a
+                        // **mesma chave**, cada pendente que ficou sem resposta,
+                        // na ordem em que foi escrita. Ver `volta`.
+                        if let Some(velho) = buraco.take() {
+                            carimbos_do_buraco = velho.sequencia();
+                        }
+                        let pagina = match shared.room.lock() {
+                            Ok(room) => {
+                                repeticao.na_volta(&room, Instant::now());
+                                volta::Buraco::abrir(&room, carimbos_do_buraco, Instant::now())
+                            }
+                            Err(_) => None,
+                        }
+                        .map(|(aberto, pagina)| {
+                            buraco = Some(aberto);
+                            pagina
+                        });
+                        if let Some(pagina) = pagina {
+                            let _ = client
+                                .historico_com_cerca(
+                                    pagina.canal,
+                                    pagina.cursor,
+                                    pagina.limite,
+                                    pagina.carimbo,
+                                )
+                                .await;
+                        }
                         shared.notify(&Event::TelemetryChanged);
                     }
                     seele_core::enlace::Aviso::Encerrado(motivo) => {
@@ -4676,6 +4647,45 @@ async fn drive(
                         });
                         break;
                     }
+                }
+            }
+
+            // **O relógio da busca do buraco** (I2 da revisão do P61): a página
+            // vazia que espera para ser pedida de novo, ou o prazo da cerca da
+            // página no ar. Sem ele, uma cerca descartada pelo limitador do
+            // servidor deixava a busca aberta e calada até a próxima queda.
+            () = volta::esperar_ate(buraco.as_ref().and_then(volta::Buraco::quando)),
+                if buraco.as_ref().and_then(volta::Buraco::quando).is_some() => {
+                let passo = buraco.as_mut().and_then(|aberto| aberto.vez(Instant::now()));
+                if let Some(passo) = passo {
+                    volta::seguir(&client, &mut buraco, &mut carimbos_do_buraco, passo).await;
+                }
+            }
+
+            // **A vez da repetição da volta** (lote P61): o que ficou sem
+            // resposta sai de novo, com a mesma chave, no compasso que o balde
+            // do servidor deixa — acima dele, o servidor descarta calado.
+            () = volta::esperar_ate(repeticao.quando()), if repeticao.quando().is_some() => {
+                let mut mexeu = false;
+                for chave in repeticao.vez(Instant::now()) {
+                    let repetir = shared
+                        .room
+                        .lock()
+                        .map(|mut room| volta::repetir(&mut room, chave, agora_em_segundos()))
+                        .unwrap_or(volta::Repetir::Nada);
+                    match repetir {
+                        volta::Repetir::Mandar { canal, corpo, chave } => {
+                            mexeu = true;
+                            if client.dizer(canal, corpo, chave).await.is_err() {
+                                break;
+                            }
+                        }
+                        volta::Repetir::Recusada => mexeu = true,
+                        volta::Repetir::Nada => {}
+                    }
+                }
+                if mexeu {
+                    shared.messages_changed();
                 }
             }
 
@@ -5899,12 +5909,7 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
             .room
             .lock()
             .ok()
-            .and_then(|room| room.notice.clone())
-            .map(|notice| Notice {
-                severity: notice.severity.into(),
-                reason: notice.reason.into(),
-                operator_text: notice.operator_text,
-            });
+            .and_then(|room| room.notice.as_ref().map(aviso_de));
         if let Some(notice) = notice {
             shared.notify(&Event::NoticeRaised { notice });
         }
@@ -7139,6 +7144,9 @@ mod a_identidade_e_uma_por_maquina {
 
 #[cfg(test)]
 mod tests {
+    // As funções da projeção que estes testes chamam sozinhas moram no
+    // `seele_core::retrato` desde a fase 2 da Tarefa 2.2 da F4.
+    use seele_core::retrato::{lines_of, tela_por_id, voice_rooms_of};
     #[test]
     fn a_chave_de_mensagem_nao_comeca_num_valor_fixo() {
         // Pendência 19, a metade do app. Aqui o contador é do processo, e era
@@ -7962,32 +7970,10 @@ mod tests {
         );
     }
 
-    /// A `Shared` with nothing in it, for the folds below.
+    /// A `Shared` with nothing in it, for the folds below. O mesmo da
+    /// conformidade dos dois produtores (`crate::sem_rede`).
     fn bare_shared() -> Arc<Shared> {
-        Arc::new(Shared {
-            caminho_medido: std::sync::atomic::AtomicU32::new(0),
-            link_battery: AtomicBool::new(false),
-            link_seconds: std::sync::atomic::AtomicU64::new(0),
-            link_attempts: std::sync::atomic::AtomicU32::new(0),
-            messages_revision: std::sync::atomic::AtomicU64::new(0),
-            icon_revision: std::sync::atomic::AtomicU64::new(0),
-            person_icons_revision: std::sync::atomic::AtomicU64::new(0),
-            room: Mutex::new(Room::new()),
-            listeners: Mutex::new(Vec::new()),
-            voice: VozDaSala::nova(false, seele_core::DeviceChoice::default()),
-            media: Mutex::new(None),
-            nickname: Mutex::new("marcela".into()),
-            link_state: AtomicU8::new(0),
-            rtt_micros: std::sync::atomic::AtomicU64::new(0),
-            jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
-            caminho: Mutex::new(None),
-            signal: AtomicU8::new(0),
-            running: AtomicBool::new(true),
-            pending_weights: Mutex::new(Vec::new()),
-            limites_da_tela: Mutex::new(None),
-            tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
-            fontes_de_tela: Mutex::new(Vec::new()),
-        })
+        crate::sem_rede::shared("marcela")
     }
 
     #[test]
@@ -9130,6 +9116,7 @@ mod tests {
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             caminho: Mutex::new(None),
+            impressao_do_servidor: Mutex::new(None),
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
@@ -9172,6 +9159,7 @@ mod tests {
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             caminho: Mutex::new(None),
+            impressao_do_servidor: Mutex::new(None),
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
@@ -11142,9 +11130,10 @@ mod o_audio_segue_a_sala {
     //! [`Voice`]: seele_core::Voice
 
     use super::{
-        ganhos_a_aplicar, readotar_na_volta, sala_do_audio, voice_rooms_of, Aberta,
-        AberturaDoAudio, ControlesGuardados, Futuro, Origem, PortaDaVoz, VozDaSala, VozViva,
+        ganhos_a_aplicar, readotar_na_volta, sala_do_audio, Aberta, AberturaDoAudio,
+        ControlesGuardados, Futuro, Origem, PortaDaVoz, VozDaSala, VozViva,
     };
+    use seele_core::retrato::voice_rooms_of;
     use seele_core::{
         AlertReason, AlertSeverity, DeviceChoice, PersonId, PersonProfile, Room, ServerMessage,
         SessionId, SessionInfo, Ssrc, VoiceMode, VoiceRoomId, VoiceRoomInfo,
@@ -12212,6 +12201,7 @@ mod o_audio_segue_a_sala {
             rtt_micros: AtomicU64::new(0),
             jitter_de_chegada_micros: AtomicU64::new(0),
             caminho: Mutex::new(None),
+            impressao_do_servidor: Mutex::new(None),
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),

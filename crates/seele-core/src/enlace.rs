@@ -52,6 +52,11 @@ use tokio::sync::mpsc;
 
 use crate::battery::{Action, Battery, Link};
 use crate::client::{Client, ConnectError, MediaChannel, SessionInfo};
+// **A regra das despedidas que acabam a sessão mora no `seele-sessao`**, e o
+// `Room` chama a mesma: eram duas respostas, e o `Room` tratava toda
+// `Disconnecting` como fim enquanto este motor reconectava (pendência 61). A
+// explicação de cada razão está lá, ao lado da lista.
+use crate::despedida::a_sessao_acabou_aqui;
 use crate::par;
 use crate::tofu::PinDecision;
 use crate::tofu::PinStore;
@@ -410,75 +415,15 @@ pub enum Motivo {
     Moderado(DisconnectReason),
 }
 
-/// As despedidas que **acabam** com a sessão, em vez de começarem a bateria.
+/// Um erro de um comando que é **recusa local**, e não queda: o quadro dele
+/// não coube no fio (M2 da revisão do P61).
 ///
-/// Quase toda `Disconnecting` é uma queda com nome: manutenção, desligamento,
-/// keepalive vencido, ficar para trás no barramento. Para todas elas reconectar
-/// é o conserto, e é o que a bateria interna existe para fazer — o próprio
-/// [`DisconnectReason::FellBehind`] tem isso escrito no doc dele.
-///
-/// Estas duas são o contrário: alguém do outro lado decidiu que esta pessoa não
-/// fica. Reconectar as desfaz — e não em teoria. Medido em
-/// `expulsar_acaba_com_a_sessao_e_deixa_voltar`, com sonda no servidor: a
-/// conexão expulsa fecha, a bateria sobe outra em seguida, e ela **redeclara a
-/// sala de voz guardada**. A pessoa expulsa reaparece sentada onde estava,
-/// segundos depois, sem que ninguém tenha apertado nada; e como o assento agora
-/// pertence à conexão nova, a saída da conexão expulsa não esvazia nada e
-/// ninguém na sala é informado de que ela saiu. O verbo inteiro desfeito por um
-/// recurso feito para túnel de trem.
-///
-/// `Banned` está aqui pelo mesmo motivo, e não porque a volta funcione: a
-/// portaria a recusa. O que ela produz hoje é uma reconexão inútil a cada
-/// batida da bateria por cinco minutos, e uma casca que diz «reconectando» a
-/// quem foi banido.
-///
-/// [`DisconnectReason::ModsMudaram`] entrou pela mesma porta e por um motivo
-/// próprio: **reconectar não pode dar certo sozinho.** O servidor passou a
-/// exigir um conjunto que esta máquina não aceitou, e o anúncio da reconexão
-/// vai encontrar exatamente o mesmo não. Uma bateria batendo por cinco minutos
-/// contra uma decisão que só uma pessoa pode tomar é a casca dizendo
-/// «reconectando» para quem precisa ler uma lista e responder — ADR 0045, «um
-/// servidor que troca de MOD pergunta de novo», e perguntar exige alguém.
-///
-/// As três da sala pessoal — [`DisconnectReason::ChamadaEncerrada`],
-/// [`DisconnectReason::NinguemAtendeu`] e [`DisconnectReason::ChamadaRecusada`]
-/// — são terminais pela spec de 23/09/2026 («Protocolo»): reconectar abriria a
-/// sala de quem acabou de desligar, ou tocaria de novo para quem não atendeu.
-///
-/// `ChamadaEncerrada` é a que chega aqui: quem recebe desliga, e
-/// `Recepcao::desligar` (`seele-server`, `recepcao.rs`, desde `9890e4eb`) a
-/// manda a cada convidado lá dentro, no meio da sessão, pelo mesmo
-/// `Event::ServidorEncerrando` com que quem hospeda fecha avisando. Sem ela
-/// aqui, a bateria ligaria de novo para a sala de quem acabou de desligar.
-///
-/// As outras duas o servidor manda na fase do toque, antes de a sessão
-/// existir (`tocar` e `recusar_o_aperto`, em `session.rs`): chegam como recusa
-/// do aperto de mão, [`ConnectError::Refused`], e não por aqui. Ficam na lista
-/// porque são terminais pela mesma spec, e uma despedida com elas no meio de
-/// uma sessão não pode começar uma bateria que toca de novo.
-///
-/// [`DisconnectReason::ServerShuttingDown`] é **quem hospeda fechando o
-/// servidor**, e o servidor o manda a cada sessão antes de cair
-/// (`Daemon::encerrar_avisando`, lote G-servidor da F5). Reconectar bate por
-/// cinco minutos numa porta que ninguém vai atender, com a casca dizendo
-/// «reconectando» a quem precisa ler «o servidor está encerrando». A mesma
-/// razão também é a recusa do aperto de mão de um servidor que não lê o próprio
-/// banco, e essa nunca chega aqui: a portaria a devolve como
-/// [`ConnectError::Refused`].
-///
-/// [`DisconnectReason::ScheduledMaintenance`] fica de fora de propósito: é o
-/// «volto já», e a bateria existe para esperar o servidor voltar.
-fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
-    matches!(
-        motivo,
-        DisconnectReason::Kicked
-            | DisconnectReason::Banned
-            | DisconnectReason::ModsMudaram
-            | DisconnectReason::ChamadaEncerrada
-            | DisconnectReason::NinguemAtendeu
-            | DisconnectReason::ChamadaRecusada
-            | DisconnectReason::ServerShuttingDown
-    )
+/// O `encode` do `seele-proto` confere cada campo contra o teto do contrato,
+/// em bytes, e devolve `ControlError` antes de escrever um byte. `frame::write`
+/// o passa adiante pelo `?`, e o `anyhow` o guarda inteiro. Qualquer outro
+/// erro de escrita é do transporte, e é queda.
+fn recusa_local(erro: &anyhow::Error) -> Option<&seele_proto::control::ControlError> {
+    erro.downcast_ref::<seele_proto::control::ControlError>()
 }
 
 /// O que a casca manda fazer.
@@ -517,6 +462,14 @@ enum Comando {
     Historico {
         linha: ChannelId,
         limite: u16,
+    },
+    /// Uma página atrás de `cursor`, e logo atrás o `Ping` com `carimbo`. Ver
+    /// [`Enlace::historico_com_cerca`].
+    HistoricoComCerca {
+        linha: ChannelId,
+        cursor: Option<MessageId>,
+        limite: u16,
+        carimbo: u64,
     },
     Muted(bool),
     Isolamento(bool),
@@ -657,6 +610,51 @@ enum Comando {
     /// [`Motor::consentimento`] e redito a cada reconexão.
     ConsentirNoCaminhoEntrePares(ConsentimentoDePar),
     Sair,
+}
+
+impl Comando {
+    /// O nome do comando, para o registro: **nunca** o que ele carrega.
+    const fn nome(&self) -> &'static str {
+        match self {
+            Self::ImagemDeMod { .. } => "ImagemDeMod",
+            Self::ModRequest { .. } => "ModRequest",
+            Self::LembrarCaminho(_) => "LembrarCaminho",
+            Self::EntrarNaVoiceRoom(..) => "EntrarNaVoiceRoom",
+            Self::SairDaVoiceRoom => "SairDaVoiceRoom",
+            Self::AbrirLinha(_) => "AbrirLinha",
+            Self::Dizer { .. } => "Dizer",
+            Self::Historico { .. } => "Historico",
+            Self::HistoricoComCerca { .. } => "HistoricoComCerca",
+            Self::Muted(_) => "Muted",
+            Self::Isolamento(_) => "Isolamento",
+            Self::CriarVoiceRoom { .. } => "CriarVoiceRoom",
+            Self::CriarLinha { .. } => "CriarLinha",
+            Self::RenomearVoiceRoom { .. } => "RenomearVoiceRoom",
+            Self::RenomearLinha { .. } => "RenomearLinha",
+            Self::RenomearServer { .. } => "RenomearServer",
+            Self::MeuApelido { .. } => "MeuApelido",
+            Self::MinhaImagem { .. } => "MinhaImagem",
+            Self::IconeDoServer { .. } => "IconeDoServer",
+            Self::Expulsar { .. } => "Expulsar",
+            Self::Banir { .. } => "Banir",
+            Self::RemoverMensagem { .. } => "RemoverMensagem",
+            Self::MoverPersono { .. } => "MoverPersono",
+            Self::ApagarVoiceRoom { .. } => "ApagarVoiceRoom",
+            Self::ApagarLinha { .. } => "ApagarLinha",
+            Self::PesarLinha { .. } => "PesarLinha",
+            Self::Anexar(_) => "Anexar",
+            Self::SalvarAnexo { .. } => "SalvarAnexo",
+            Self::PreverAnexo { .. } => "PreverAnexo",
+            Self::CompartilharTela { .. } => "CompartilharTela",
+            Self::AjustarLimitesDaTela { .. } => "AjustarLimitesDaTela",
+            Self::PararDeCompartilhar => "PararDeCompartilhar",
+            Self::Assistir { .. } => "Assistir",
+            Self::PedirQuadroChave { .. } => "PedirQuadroChave",
+            Self::DeclararIdentidadeDePar => "DeclararIdentidadeDePar",
+            Self::ConsentirNoCaminhoEntrePares(_) => "ConsentirNoCaminhoEntrePares",
+            Self::Sair => "Sair",
+        }
+    }
 }
 
 /// Quanto tempo se espera o servidor abrir o fluxo de um anexo pedido.
@@ -2069,6 +2067,37 @@ impl Enlace {
     /// Falha se a sessão já tiver acabado.
     pub async fn historico(&self, linha: ChannelId, limite: u16) -> Result<(), Fechado> {
         self.mandar(Comando::Historico { linha, limite }).await
+    }
+
+    /// Pede uma página de histórico **atrás de `cursor`**, e logo atrás um
+    /// `Ping` com `carimbo`, que serve de cerca: o `Pong` dele chega depois da
+    /// página inteira (ver [`Client::send_ping_marcado`]).
+    ///
+    /// É o que deixa quem chama saber quando uma página acabou, e pedir a
+    /// seguinte. O fio só pagina para trás, e as mensagens da página chegam
+    /// como `MessageReceived`, sem marca nenhuma de começo ou fim. Lote P61: a
+    /// FFI fecha assim o buraco que a queda deixou no canal aberto.
+    ///
+    /// Não é lembrado para a volta: a página é de uma conexão, e a busca
+    /// recomeça na conexão seguinte a partir do que já chegou.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn historico_com_cerca(
+        &self,
+        linha: ChannelId,
+        cursor: Option<MessageId>,
+        limite: u16,
+        carimbo: u64,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::HistoricoComCerca {
+            linha,
+            cursor,
+            limite,
+            carimbo,
+        })
+        .await
     }
 
     /// Liga ou desliga o mudo. Restaurado depois de uma reconexão.
@@ -3524,6 +3553,12 @@ impl Motor {
         let Some(cliente) = self.cliente.as_mut() else {
             return;
         };
+        // O nome, sem os valores, para a recusa local dizer qual foi; e, se é
+        // uma entrada, o número dela, que a recusa tem de desfazer. Lidos antes
+        // do `match`, que consome o comando.
+        let nome = comando.nome();
+        let entrada =
+            matches!(comando, Comando::EntrarNaVoiceRoom(..)).then_some(numero_da_entrada);
         let resultado = match comando {
             // Nada a mandar ao servidor: é estado desta máquina.
             Comando::LembrarCaminho(_) => Ok(()),
@@ -3567,6 +3602,15 @@ impl Motor {
             Comando::Historico { linha, limite } => {
                 cliente.fetch_history(linha, None, limite).await
             }
+            Comando::HistoricoComCerca {
+                linha,
+                cursor,
+                limite,
+                carimbo,
+            } => match cliente.fetch_history(linha, cursor, limite).await {
+                Ok(()) => cliente.send_ping_marcado(carimbo).await,
+                Err(erro) => Err(erro),
+            },
             Comando::Muted(ligado) => cliente.set_muted(ligado).await,
             Comando::Isolamento(ligado) => cliente.set_total_isolation(ligado).await,
             Comando::CriarVoiceRoom {
@@ -3805,8 +3849,48 @@ impl Motor {
 
             Comando::Sair => return,
         };
-        if resultado.is_err() {
-            self.cair();
+        // **Recusa, e não queda** (M2 da revisão do P61). Um campo maior que o
+        // teto do fio — um apelido, um nome de canal, a senha de uma sala —
+        // fazia o `encode` falhar, e este braço tratava como enlace caído: a
+        // sessão, a voz e o resto iam junto, por um nome comprido.
+        if let Err(erro) = resultado {
+            match recusa_local(&erro) {
+                Some(recusa) => self.recusar_aqui(nome, recusa, entrada),
+                None => self.cair(),
+            }
+        }
+    }
+
+    /// Um comando que não saiu porque um campo dele não cabe no fio.
+    ///
+    /// Vai ao `seele.log` com o comando e o campo, **sem o valor** — pode ser a
+    /// senha de uma sala. A janela ainda não a mostra: a frase é de outro lote,
+    /// e o caminho mais barato é a casca conferir o tamanho antes de mandar,
+    /// como o envio de mensagem já faz.
+    ///
+    /// A entrada numa sala com senha grande demais (`entrada`, o número dela)
+    /// é desfeita aqui **pelo número**, pela porta de quem pediu
+    /// ([`crate::assento::EntradasPendentes::desfazer`]): sem isso, a volta a
+    /// refaria a cada queda. Não pela recusa do servidor, que desfaz o pedido
+    /// mais antigo no ar — com outra entrada no ar, era essa que se desfazia
+    /// (R1-M4 da revisão do P61).
+    ///
+    /// A casca não recebe nada daqui: a do app confere a senha antes de pedir
+    /// (`seele_ffi::Connection::enter_voice_room`), e o `Room` dela nunca senta
+    /// a pessoa numa entrada que não vai sair.
+    fn recusar_aqui(
+        &mut self,
+        comando: &'static str,
+        recusa: &seele_proto::control::ControlError,
+        entrada: Option<u64>,
+    ) {
+        tracing::warn!(
+            comando,
+            %recusa,
+            "o comando não saiu: um campo dele não cabe no fio; a recusa é local, e o enlace segue"
+        );
+        if let Some(numero) = entrada {
+            self.entradas.desfazer(&mut self.voice_room, numero);
         }
     }
 
@@ -5436,7 +5520,19 @@ fn conferir(
     pin: &PinDecision,
     pins: &dyn PinStore,
 ) -> Result<Verdict, ConnectError> {
-    let veredito = verdict(pin, destino.impressao_esperada());
+    let veredito = match (
+        &destino.esperada,
+        verdict(pin, destino.impressao_esperada()),
+    ) {
+        // **O código conferiu dentro do TLS** (`ConfereCodigo`): a chave é a do
+        // código, como a impressão de um link prova um certificado. Um primeiro
+        // contato por ele é conferido, e não cego, e a casca não pergunta «confia
+        // nesta chave?» a quem acabou de prová-la.
+        (Some(Esperada::Codigo(_)), Verdict::FirstContact { fingerprint }) => {
+            Verdict::FirstContactVerified { fingerprint }
+        }
+        (_, veredito) => veredito,
+    };
 
     // O efeito vem **antes** de qualquer saída, e por isso está aqui e não
     // dentro do `if`: o verificador fixa a chave dentro do retorno de chamada
@@ -6563,39 +6659,127 @@ mod tests {
         assert_eq!(destino.marca_do_aviso(), None);
     }
 
-    /// Toda despedida do protocolo tem de escolher um lado, e escolher **aqui**.
+    /// **A recusa local desfaz a entrada que ela recusou, e não a mais antiga
+    /// no ar** (R1-M4 da revisão do P61).
     ///
-    /// # O que este teste prova, e o que ele não prova
-    ///
-    /// Ele **não** prova comportamento: o que segura a expulsão é
-    /// `expulsar_acaba_com_a_sessao_e_deixa_voltar`, em `seele-conformance`, e
-    /// esse teste foi provado por reversão.
-    ///
-    /// O que ele prova é contra deriva: o `match` abaixo é exaustivo sem braço
-    /// `_`, então uma variante nova de [`DisconnectReason`] **não compila** até
-    /// alguém dizer de que lado ela cai. Sem isto ela cairia calada no lado de
-    /// reconectar, que é onde estava o defeito que este conserto fechou.
-    ///
-    /// # Retificação de 10/09
-    ///
-    /// A versão anterior deste doc dizia que, com esta função devolvendo `true`
-    /// para tudo, «a suíte inteira do workspace continua verde». **É falso, e
-    /// este próprio teste é quem desmente**: ele não confere a tabela contra si
-    /// mesma — escreve a decisão esperada variante a variante, à parte da
-    /// função, e compara. Sob aquela mutação a primeira variante da lista já
-    /// derruba o `assert_eq!` abaixo: `Incompatible`, esperado `false`, volta
-    /// `true`. Medido às 05:51 de 10/09 e remedido na candidata de 496ba8c5.
-    ///
-    /// A lacuna real era outra, e mais estreita: **nenhum teste de
-    /// comportamento** segurava o lado de reconectar da fronteira, com um
-    /// servidor de verdade escrevendo a despedida no fio. Quem a fechou foi
-    /// `uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao`, em
-    /// `seele-conformance/tests/bateria_interna.rs`. O relatório histórico de
-    /// 10/09 não foi reescrito; a retificação está no complemento de 496ba8c5.
+    /// O caso do revisor: ela na sala 1; a entrada A (sala 2) no ar; a entrada
+    /// B (sala 3) com a senha grande demais, recusada aqui. A recusa local ia
+    /// pela porta do servidor, que recusa o pedido mais antigo no ar — A —, e
+    /// depois do `Pong` de A (o servidor a pôs na 2) o motor ficava na 3, com a
+    /// confirmada na 1 e B no ar para sempre.
     #[test]
-    fn toda_despedida_do_protocolo_escolhe_um_lado() {
-        // `DisconnectReason::` escrito por extenso e sem `_`: é o `match` que
-        // fica vermelho, e não uma lista que alguém esqueceria de atualizar.
+    fn a_recusa_local_desfaz_a_entrada_que_ela_recusou() {
+        use seele_proto::control::ControlError;
+        let grande = ControlError::FieldTooLong {
+            field: "password",
+            len: 40,
+            limit: 32,
+        };
+        let pong = |numero: u64| ServerMessage::Pong {
+            timestamp: crate::assento::carimbo_da_entrada(numero),
+        };
+        let mut motor = motor_de_teste();
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(1), None));
+        motor.ouvir_o_assento(&pong(1));
+        assert_eq!(motor.voice_room, Some(VoiceRoomId(1)));
+
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(
+            VoiceRoomId(3),
+            Some("x".repeat(40)),
+        ));
+        let numero_de_b = motor.entradas.ultimo_numero().expect("B foi pedida");
+        motor.recusar_aqui("EntrarNaVoiceRoom", &grande, Some(numero_de_b));
+        assert_eq!(
+            (
+                motor.voice_room,
+                motor.entradas.confirmada(motor.voice_room)
+            ),
+            (Some(VoiceRoomId(2)), Some(VoiceRoomId(1))),
+            "a recusa local não devolveu o assento a A, ainda no ar"
+        );
+
+        // O servidor decide A: a pôs na 2.
+        motor.ouvir_o_assento(&pong(2));
+        assert_eq!(
+            (
+                motor.voice_room,
+                motor.entradas.confirmada(motor.voice_room),
+                motor.entradas.len()
+            ),
+            (Some(VoiceRoomId(2)), Some(VoiceRoomId(2)), 0),
+            "o motor, o áudio e o servidor discordam depois da recusa local"
+        );
+    }
+
+    /// **Um campo grande demais é recusa daquele comando, e não queda** (M2 da
+    /// revisão do P61).
+    ///
+    /// A revisão mediu: o apelido, o nome de canal e a senha da sala acima do
+    /// teto do fio faziam o `encode` falhar, e `executar` chamava `cair()`. A
+    /// prova de ponta a ponta é `queda_recuperavel::um_campo_grande_demais_nao_derruba_o_enlace`;
+    /// esta prova as três peças dela: o que é recusa e o que é queda, o que vai
+    /// ao `seele.log` (o comando e o campo, **nunca o valor**), e a entrada
+    /// desfeita no motor.
+    #[test]
+    fn um_campo_grande_demais_e_recusa_local_e_nao_queda() {
+        use seele_proto::control::ControlError;
+        let grande = || ControlError::FieldTooLong {
+            field: "password",
+            len: 52,
+            limit: 32,
+        };
+        assert!(recusa_local(&anyhow::Error::from(grande())).is_some());
+        assert!(
+            recusa_local(&anyhow::Error::from(grande()).context("escrevendo o quadro")).is_some(),
+            "com um contexto em cima, a recusa virou queda"
+        );
+        assert!(
+            recusa_local(&anyhow::anyhow!("o fluxo de controle fechou")).is_none(),
+            "um erro de transporte virou recusa: o enlace caído não começaria a bateria"
+        );
+
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let mut motor = motor_de_teste();
+        let senha = "segredo-que-nao-vai-ao-log".repeat(2);
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), Some(senha)));
+        assert_eq!(motor.voice_room, Some(VoiceRoomId(2)));
+        let numero = motor.entradas.ultimo_numero();
+        motor.recusar_aqui("EntrarNaVoiceRoom", &grande(), numero);
+
+        assert_eq!(
+            motor.voice_room, None,
+            "a entrada recusada aqui ficou no motor, e a volta a refaria a cada queda"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas
+                .iter()
+                .any(|linha| linha.contains("EntrarNaVoiceRoom") && linha.contains("password")),
+            "o `seele.log` não diz qual comando nem qual campo: {linhas:?}"
+        );
+        assert!(
+            !linhas.iter().any(|linha| linha.contains("segredo")),
+            "a senha foi ao `seele.log`: {linhas:?}"
+        );
+    }
+
+    /// **O motor acaba a sessão exatamente onde o `Room` acaba** (lote P61,
+    /// pendência 61).
+    ///
+    /// O motor tratava `FellBehind` como queda e o `Room` tratava toda
+    /// `Disconnecting` como fim: a janela mostrava a tela de fim enquanto este
+    /// motor reconectava por baixo. Os dois passaram a chamar a mesma regra,
+    /// `seele_sessao::despedida::a_sessao_acabou_aqui`, e é lá que mora o teste
+    /// exaustivo dela, com a tabela escrita à parte.
+    ///
+    /// Este é o par do `toda_despedida_acaba_onde_o_motor_acaba`, no `state.rs`,
+    /// e olha pelo outro lado: o nome que **este** motor chama é conferido
+    /// contra o `Room`, razão por razão. Uma lista própria escrita aqui, que
+    /// sombreasse a importada, reprova.
+    #[test]
+    fn o_motor_acaba_a_sessao_onde_o_room_acaba() {
         for motivo in [
             DisconnectReason::Incompatible,
             DisconnectReason::CredentialRejected,
@@ -6620,56 +6804,14 @@ mod tests {
             DisconnectReason::ChamadaRecusada,
             DisconnectReason::ModsDeOutraApi { apis: 1 << 7 },
         ] {
-            let acaba = match motivo {
-                // Alguém decidiu que esta pessoa não fica. Reconectar desfaz.
-                DisconnectReason::Kicked | DisconnectReason::Banned => true,
-                // O servidor passou a exigir um conjunto de MODs que esta
-                // máquina não aceitou. Reconectar encontra o mesmo não, e quem
-                // desfaz é uma pessoa lendo a lista nova.
-                DisconnectReason::ModsMudaram => true,
-                // A sala pessoal: quem recebia encerrou, não atendeu ou
-                // recusou. Reconectar abriria ou tocaria de novo uma ligação
-                // que alguém decidiu acabar (spec de 23/09).
-                DisconnectReason::ChamadaEncerrada
-                | DisconnectReason::NinguemAtendeu
-                | DisconnectReason::ChamadaRecusada => true,
-                // Quem hospeda fechou o servidor, e avisou. Reconectar bate
-                // numa porta que ninguém atende por cinco minutos, com a casca
-                // dizendo «reconectando» a quem precisa ler «o servidor está
-                // encerrando» (lote G-servidor da F5).
-                DisconnectReason::ServerShuttingDown => true,
-                // A bateria é o conserto: o servidor volta, ou o cliente
-                // reconecta e busca o histórico que faltou. O doc de
-                // `FellBehind` diz isso com todas as letras. A manutenção
-                // programada é o «volto já»: o servidor volta, e a bateria
-                // existe para esperá-lo.
-                DisconnectReason::ScheduledMaintenance
-                | DisconnectReason::Timeout
-                | DisconnectReason::FellBehind
-                | DisconnectReason::RateLimited
-                | DisconnectReason::ProtocolViolation => false,
-                // Nunca chegam ao motor: a portaria as devolve como
-                // `ConnectError::Refused`, e não há sessão para acabar.
-                DisconnectReason::Incompatible
-                | DisconnectReason::CredentialRejected
-                | DisconnectReason::HandshakeTimeout
-                | DisconnectReason::ServerFull
-                | DisconnectReason::AdmissionPending
-                | DisconnectReason::AdmissionDenied
-                | DisconnectReason::NicknameTaken
-                // Nascem no aperto de mão, como as de cima: quem recusa os MODs
-                // ou encontra um servidor que não consegue anunciá-los nunca
-                // chegou a ter sessão.
-                | DisconnectReason::ModsRecusados
-                | DisconnectReason::ModsIndisponiveis
-                // A API de MOD que o cliente não roda: nasce no `Hello`, antes
-                // do convite, e não há sessão para acabar.
-                | DisconnectReason::ModsDeOutraApi { .. } => false,
-            };
+            let mut room = crate::state::Room::new();
+            let fim = room
+                .apply(&ServerMessage::Disconnecting { reason: motivo })
+                .ended;
             assert_eq!(
                 a_sessao_acabou_aqui(motivo),
-                acaba,
-                "{motivo:?} mudou de lado sem que este teste mudasse junto"
+                fim,
+                "{motivo:?}: o motor e o `Room` discordam sobre o fim"
             );
         }
     }
@@ -6868,6 +7010,44 @@ mod tests {
         aplicar_veredito(&veredito, &loja, "casa");
 
         assert_eq!(loja.pinned("casa"), None, "a recusa deixou o pin para trás");
+    }
+
+    /// **Um primeiro contato pelo código é conferido, e não cego.** O
+    /// `ConfereCodigo` provou dentro do TLS que a chave é a do código, como a
+    /// impressão de um link prova um certificado. Dizer `FirstContact` faria a
+    /// casca perguntar «confia nesta chave?» a quem acabou de prová-la, e na
+    /// própria sala de quem recebe (o ATENDER, tarefa 27 da F7).
+    #[test]
+    fn um_primeiro_contato_pelo_codigo_e_conferido_e_nao_cego() {
+        let mut destino = destino_de_teste(None);
+        destino.esperada = Some(Esperada::Codigo(seele_proto::codigo::Codigo::da_chave(
+            &[7; 32],
+        )));
+        let loja = crate::tofu::MemoryPinStore::new();
+
+        let primeiro = conferir(
+            &destino,
+            &PinDecision::FirstContact {
+                fingerprint: "aaaa1111".into(),
+            },
+            &loja,
+        );
+        assert!(
+            matches!(
+                &primeiro,
+                Ok(Verdict::FirstContactVerified { fingerprint }) if fingerprint == "aaaa1111"
+            ),
+            "o primeiro contato pelo código saiu {primeiro:?}, e não conferido"
+        );
+
+        let depois = conferir(
+            &destino,
+            &PinDecision::Matches {
+                fingerprint: "aaaa1111".into(),
+            },
+            &loja,
+        );
+        assert!(matches!(depois, Ok(Verdict::Known)), "{depois:?}");
     }
 
     #[test]
@@ -8632,6 +8812,25 @@ mod tests {
     /// saber dele depois de uma queda: a sessão nova chega sem assento, e o
     /// servidor confirma a entrada por silêncio. Quem estava fora de sala volta
     /// com `None`, e a casca não abre aparelho nenhum.
+    ///
+    /// # A colisão de porta, em toda rodada
+    ///
+    /// Este teste reprovava uma vez em muitas, com `None` contra
+    /// `Some(Some(VoiceRoomId(5)))` depois de 20,0 s em `tentar` (lote Y da F5).
+    /// Medido: o socket `[::]:0` de quem volta caía numa porta que um socket
+    /// IPv4 em `127.0.0.1` já segurava — numa rodada sem nada de fora, o que
+    /// `servidor_que_aperta_a_mao_e_cai` esquece de pé de propósito, no teste
+    /// anterior —, a resposta do servidor ao aperto de mão ia para ele, e o QUIC
+    /// desistia pela ociosidade (`TimedOut`). O servidor de teste ficava no
+    /// `entrada.await` daquela conexão.
+    ///
+    /// A primeira volta encena isso de propósito onde o sistema deixa (o
+    /// macOS): a proposta de socket que o sistema daria colide com um socket
+    /// IPv4 que o teste segura. Sem a conferência de
+    /// [`crate::client::socket_de_quem_conecta`], a volta reprova sempre, com a
+    /// mensagem de antes. Onde o sistema recusa a colisão, a volta corre com os
+    /// sockets IPv4 de pé, e a recusa fica medida em
+    /// `client::testes_do_socket`.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_volta_avisa_a_voice_room_em_que_o_motor_sentou_a_pessoa_de_novo() {
         let (endereco, impressao, _hellos) = servidor_que_conta_os_hellos();
@@ -8642,7 +8841,34 @@ mod tests {
             motor.avisos = avisos;
             motor.voice_room = sala;
 
+            // Os ladrões ficam de pé até a volta acabar: é um deles que recebe a
+            // resposta do servidor se o socket de quem volta dividir a porta com
+            // ele. Onde o sistema recusa a colisão, a volta corre com eles de pé,
+            // e não há proposta a encenar.
+            let (_ladroes, encenada) = if sala.is_some() {
+                use crate::client::testes_do_socket::{encenar_a_colisao, Encenacao};
+                match encenar_a_colisao() {
+                    Encenacao::Colisao { ladrao, proposta } => {
+                        crate::client::PROPOSTA_DE_TESTE
+                            .with(|vaga| *vaga.borrow_mut() = Some(Ok(proposta)));
+                        (vec![ladrao], true)
+                    }
+                    Encenacao::Recusa { ladroes, .. } => (ladroes, false),
+                }
+            } else {
+                (Vec::new(), false)
+            };
+
+            // `tentar` roda nesta thread — é o futuro do `block_on` do teste —, e
+            // é nela que a proposta guardada vale.
             motor.tentar().await;
+            if encenada {
+                assert!(
+                    crate::client::PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow().is_none()),
+                    "a volta não abriu o socket pela proposta guardada, e o teste não \
+                     encenou a colisão"
+                );
+            }
 
             let mut avisada = None;
             while let Ok(aviso) = avisos_rx.try_recv() {

@@ -55,14 +55,14 @@ let linhaAberta = null;
 let mensagensPorDesenhar = false;
 
 /**
- * Quantos lugares uma sala nova tem.
+ * Quantos lugares a primeira sala do servidor tem, para a sala nova copiar, ou
+ * `null` enquanto não há sala nenhuma de onde copiar — ver `desenharCanais`.
  *
- * Copiado da primeira sala que o servidor já tem — ver `desenharCanais`. O 250
- * é só o piso da ignorância: o teto que o protocolo aceita
- * (`MAX_VOICE_ROOM_LIMIT`), usado enquanto não há sala nenhuma de onde copiar,
- * que é o primeiro minuto de um servidor recém-montado.
+ * Era `250` até o lote C55 da F5: o teto do fio (`MAX_VOICE_ROOM_LIMIT`)
+ * escrito à mão, como piso da ignorância. O teto agora vem do Rust, e quem o
+ * aplica é `lugaresParaASalaNova`, na hora de criar.
  */
-let lugaresDeUmaSalaNova = 250;
+let lugaresDeUmaSalaNova = null;
 /**
  * O endereço que esta janela discou, para a porta do cabeçalho.
  *
@@ -107,6 +107,13 @@ function alvoDaSessao() {
  * evitar, por outra porta.
  */
 let conhecidosDaTrilha = [];
+/**
+ * O servidor que esta janela hospeda, quando a sessão está **noutro** (tarefa
+ * 20 da F7): o VOLTAR AO MEU SERVIDOR da trilha. `null` quando não há servidor
+ * no ar, ou quando a sessão já está nele. Lido com o histórico, uma vez por
+ * sessão.
+ */
+let meuServidorNaTrilha = null;
 /**
  * O que a trilha já tem desenhado, para não reconstruir os botões dela.
  *
@@ -660,6 +667,20 @@ async function recarregarTrilha() {
     console.warn("conhecidos:", falha);
     return;
   }
+  // **O VOLTAR AO MEU SERVIDOR** (tarefa 20 da F7): sair não derruba mais o
+  // servidor que esta janela hospeda, e quem foi visitar outro precisa do
+  // caminho de volta. Só com a sessão **noutro** servidor (`Outro`): dentro do
+  // próprio, oferecer voltar a ele seria oferecer entrar onde já se está. No
+  // navegador, que não hospeda, a ponte responde que não há, e nada aparece.
+  meuServidorNaTrilha = null;
+  try {
+    const [meu, onde] = await Promise.all([invoke("meu_servidor"), invoke("onde_estou")]);
+    if (meu && onde === "Outro") {
+      meuServidorNaTrilha = { alvo: meu.alvo, nome: meu.nome || "O SEU SERVIDOR" };
+    }
+  } catch {
+    meuServidorNaTrilha = null;
+  }
   trilhaDesenhada = null;
   if (desenhado) desenharTrilha(desenhado);
 }
@@ -708,12 +729,14 @@ function desenharTrilha(snapshot) {
   const nome = snapshot.server;
   const uri = iconeDesenhado.uri;
   const outros = conhecidosDaTrilha.filter((conhecido) => conhecido.alvo !== alvoDoServer);
+  const voltar = meuServidorNaTrilha;
   // A chave inclui nome e presença de imagem: sem isso, um servidor que ganhou
   // distintivo desde o último desenho não seria redesenhado — a lista teria
   // mudado e a comparação diria que não.
-  const chave = outros
-    .map((conhecido) => `${conhecido.alvo}|${conhecido.nome ?? ""}|${conhecido.icone ? 1 : 0}`)
-    .join("\n");
+  const chave = [
+    voltar ? `voltar|${voltar.alvo}|${voltar.nome}` : "",
+    ...outros.map((conhecido) => `${conhecido.alvo}|${conhecido.nome ?? ""}|${conhecido.icone ? 1 : 0}`),
+  ].join("\n");
   if (
     trilhaDesenhada !== null &&
     trilhaDesenhada.nome === nome &&
@@ -734,9 +757,25 @@ function desenharTrilha(snapshot) {
     uri,
   );
 
+  // O VOLTAR AO MEU SERVIDOR vai primeiro, e pelo mesmo clique dos outros
+  // (`pedirTrocaDeServidor`, com o nome na caixa): é um servidor como os outros,
+  // e é o único que esta janela sabe que está no ar.
+  const itemDeVoltar = voltar
+    ? (() => {
+        const linha = elemento("li");
+        const botao = elemento("button", "trilha-item trilha-outro trilha-voltar");
+        botao.type = "button";
+        botao.dataset.alvo = voltar.alvo;
+        botao.dataset.nome = voltar.nome;
+        vestirItemDaTrilha(botao, sigla(voltar.nome), `VOLTAR AO MEU SERVIDOR: ${voltar.nome}`, null);
+        botao.title = `VOLTAR AO MEU SERVIDOR: ${voltar.nome}`;
+        linha.append(botao);
+        return [linha];
+      })()
+    : [];
   repovoar(
     $("trilha-outros"),
-    outros.map((conhecido) => {
+    [...itemDeVoltar, ...outros.map((conhecido) => {
       const linha = elemento("li");
       const botao = elemento("button", "trilha-item trilha-outro");
       botao.type = "button";
@@ -770,7 +809,7 @@ function desenharTrilha(snapshot) {
       botao.title = rotulo;
       linha.append(botao);
       return linha;
-    }),
+    })],
   );
 }
 
@@ -1665,6 +1704,9 @@ const RECUSAS_DE_MENSAGEM = {
   PermissionDenied: "não pode escrever neste canal",
   NoSuchChannel: "este canal não existe mais",
   StorageFailed: "o servidor não conseguiu gravar",
+  // A moderação apagou a mensagem enquanto quem a escreveu estava fora, e a
+  // repetição não a traz de volta. Tentar de novo nunca passa: ver `seloDoEnvio`.
+  Apagada: "apagada pela moderação",
 };
 
 /**
@@ -1712,6 +1754,10 @@ function seloDoEnvio(mensagem) {
   // As duas que pedem decisão de quem escreveu: recusada e sem resposta. As
   // duas ganham os mesmos dois botões, e a frase é o que as separa — porque o
   // que se faz com elas é o mesmo, e o que se sabe sobre elas não é.
+  // **A apagada não volta**: a moderação tirou a mensagem do canal, e repetir
+  // recebe a mesma recusa. Ela fica com DESISTIR só, que devolve o texto ao
+  // campo e fecha a pendente.
+  let semVolta = false;
   if (estado === "SemResposta") {
     selo.dataset.envio = "sem-resposta";
     selo.append(
@@ -1725,6 +1771,7 @@ function seloDoEnvio(mensagem) {
     selo.dataset.envio = "falhou";
     const motivo = typeof estado === "object" ? estado.Recusada : null;
     selo.append(elemento("span", "envio-frase", `não foi gravada: ${fraseDaRecusa(motivo)}`));
+    semVolta = motivo === "Apagada";
   }
 
   if (chave) {
@@ -1739,7 +1786,8 @@ function seloDoEnvio(mensagem) {
     // «Desistir» devolve o texto ao compositor — ver `agirNaPendente`. O nome
     // diz o que a pessoa está decidindo, e não o que o programa faz com a lista.
     desistir.title = "devolve o texto ao campo de escrever";
-    selo.append(tentar, desistir);
+    if (semVolta) selo.append(desistir);
+    else selo.append(tentar, desistir);
   }
   return selo;
 }
@@ -3129,11 +3177,6 @@ invoke("limite_da_mensagem")
   })
   .catch((falha) => console.warn("limite da mensagem:", falha));
 
-/** Quantos bytes UTF-8 este texto ocupa. */
-function bytesDe(texto) {
-  return new TextEncoder().encode(texto).length;
-}
-
 /**
  * Acende o aviso de tamanho **antes** de a pessoa tentar mandar.
  *
@@ -3975,24 +4018,37 @@ function nomeDesteServidor() {
 }
 
 /**
- * Se é esta janela que está hospedando o servidor desta sessão.
+ * Se a sessão desta janela está no servidor que esta janela hospeda.
  *
- * Pergunta a `estado_da_porta`, que já responde isso à camada da portaria, em
- * vez de um comando novo com a mesma resposta: quando não se hospeda ele
- * devolve `hospedando: false` sem tocar no banco do servidor, que é o caso
- * barato e o caso comum.
+ * Pergunta ao `onde_estou`, a única resposta a «estou no meu servidor?» (Plano
+ * 2), que reconhece o servidor pela chave, e não pelo endereço (lote X da F5).
+ * Era o `estado_da_porta().hospedando`, que diz se **há** servidor no ar, e não
+ * se a sessão está nele: desde a tarefa 19 da F7 sair não derruba nada, e quem
+ * hospeda pode estar visitando outro servidor.
  *
- * Falha vira `false`, e isso não é otimismo: o `false` só **omite** uma linha da
- * consequência — a de que o servidor cai junto —, e nenhuma frase daqui afirma
- * que nada mais cai. Omitir o que não se sabe é honesto; afirmá-lo não seria.
+ * Falha vira `false`, e isso não é otimismo: o `false` só **omite** uma frase
+ * da consequência — a de que o servidor continua no ar —, e nenhuma frase daqui
+ * afirma o contrário. No navegador, que não hospeda, a ponte recusa, e é isso.
  */
-async function hospedandoAqui() {
+async function estouNoMeuServidor() {
   try {
-    return (await invoke("estado_da_porta")).hospedando === true;
+    return (await invoke("onde_estou")) === "Guardado";
   } catch (falha) {
-    console.warn("estado_da_porta:", falha);
+    console.warn("onde_estou:", falha);
     return false;
   }
+}
+
+/**
+ * A frase de quem sai do próprio servidor: ele **continua** no ar (tarefa 19 da
+ * F7). Sair derrubava o servidor junto, e a frase avisava isso; agora quem
+ * derruba é o PARAR DE HOSPEDAR, e a frase diz como voltar.
+ */
+function oMeuServidorContinua(daqui) {
+  return (
+    `${daqui} continua no ar neste computador, com quem estiver nele: você ` +
+    "volta a ele pelo VOLTAR AO MEU SERVIDOR, na entrada."
+  );
 }
 
 /**
@@ -4001,33 +4057,27 @@ async function hospedandoAqui() {
  * A forma é a das frases da moderação, e pela mesma razão: «tem certeza?» não
  * acrescenta nada a quem já apertou uma vez, e dizer o que vai acontecer sim.
  *
- * A terceira linha só aparece para quem hospeda, e é a que muda a decisão: para
- * essa pessoa trocar de servidor não é sair de uma conversa, é fechar a
- * conversa de todo mundo. Ela não pode ser um `title` nem uma nota — é a
- * consequência, e vai onde as outras vão.
+ * A terceira frase só aparece para quem está no próprio servidor, e diz que ele
+ * **continua** no ar (tarefa 19 da F7): sair não fecha mais a conversa de todo
+ * mundo, e quem sai precisa saber por onde volta. Ela não pode ser um `title`
+ * nem uma nota — é a consequência, e vai onde as outras vão.
  */
-function consequenciaDeTrocar(daqui, ate, hospedando) {
+function consequenciaDeTrocar(daqui, ate, noMeuServidor) {
   const comum =
     `Você sai de ${daqui} agora, no meio do que estiver fazendo, e entra em ${ate}.\n` +
     "Dá para estar em um servidor por vez: entrar em outro é sair deste.";
-  if (!hospedando) return comum;
-  return (
-    `${comum}\n${daqui} está no ar dentro deste computador: ele cai junto, e ` +
-    "todo mundo que estiver nele sai."
-  );
+  if (!noMeuServidor) return comum;
+  return `${comum}\n${oMeuServidorContinua(daqui)}`;
 }
 
 /** O que ir à entrada custa. Mesma forma, e um destino que não é servidor nenhum. */
-function consequenciaDeIrParaAEntrada(daqui, hospedando) {
+function consequenciaDeIrParaAEntrada(daqui, noMeuServidor) {
   const comum =
     `Você sai de ${daqui} agora, no meio do que estiver fazendo, e volta à tela ` +
     "de entrada sem estar em servidor nenhum.\n" +
     "O campo do endereço fica vazio, esperando o do servidor novo.";
-  if (!hospedando) return comum;
-  return (
-    `${comum}\n${daqui} está no ar dentro deste computador: ele cai junto, e ` +
-    "todo mundo que estiver nele sai."
-  );
+  if (!noMeuServidor) return comum;
+  return `${comum}\n${oMeuServidorContinua(daqui)}`;
 }
 
 /**
@@ -4038,7 +4088,7 @@ function consequenciaDeIrParaAEntrada(daqui, hospedando) {
  * botão é a caixa que treina a apertar duas vezes sem ler. Estes dois controles
  * dizem outra coisa — «vá para aquele servidor», «conecte a um novo» —, e a
  * parte que não está no rótulo deles é o que a caixa existe para escrever: você
- * sai deste, e o servidor que este computador hospeda cai junto.
+ * sai deste, e, se ele é o seu, ele continua no ar sem você.
  *
  * A caixa é a de `camada-moderar.js`, e não uma nova. Ela não é da moderação —
  * salvar um anexo já entra por ela —, é a superfície de confirmação deste
@@ -4047,7 +4097,7 @@ function consequenciaDeIrParaAEntrada(daqui, hospedando) {
  */
 async function pedirTrocaDeServidor(alvo, apelido, nome) {
   const daqui = nomeDesteServidor();
-  const hospedando = await hospedandoAqui();
+  const noMeuServidor = await estouNoMeuServidor();
   // **O nome, e o endereço só quando não há nome.**
   //
   // A caixa dizia `ENTRAR EM 192.168.0.39:8383` — um endereço IP no meio de uma
@@ -4066,7 +4116,7 @@ async function pedirTrocaDeServidor(alvo, apelido, nome) {
   const chamado = (nome ?? "").trim() || alvo;
   abrirConfirmacao(
     "TROCAR DE SERVIDOR",
-    consequenciaDeTrocar(daqui, chamado, hospedando),
+    consequenciaDeTrocar(daqui, chamado, noMeuServidor),
     `ENTRAR EM ${chamado}`,
     () => trocarDeServidor(alvo, apelido),
   );
@@ -4075,10 +4125,10 @@ async function pedirTrocaDeServidor(alvo, apelido, nome) {
 /** O mesmo, para o `+`: a entrada, sem destino escolhido. */
 async function pedirAEntrada() {
   const daqui = nomeDesteServidor();
-  const hospedando = await hospedandoAqui();
+  const noMeuServidor = await estouNoMeuServidor();
   abrirConfirmacao(
     "CONECTAR A OUTRO SERVIDOR",
-    consequenciaDeIrParaAEntrada(daqui, hospedando),
+    consequenciaDeIrParaAEntrada(daqui, noMeuServidor),
     `SAIR DE ${daqui}`,
     sairDoServidorParaAEntrada,
   );
@@ -4209,8 +4259,11 @@ function esquecerOEstadoDaSessao() {
   // sala daquele servidor), a trilha desenhada e o anúncio de troca de
   // aparelho, cuja conta é da voz que acabou.
   podeRemoverMensagem = false;
-  lugaresDeUmaSalaNova = 250;
+  lugaresDeUmaSalaNova = null;
   trilhaDesenhada = null;
+  // O VOLTAR AO MEU SERVIDOR da trilha diz onde **esta** sessão está (noutro
+  // servidor); a seguinte o relê com o histórico (`recarregarTrilha`).
+  meuServidorNaTrilha = null;
   trocasDeAparelhoVistas = null;
   ateQuandoAnunciarOAparelho = 0;
   // Os dois que se esquecem com o que anda junto: o retrato e a revisão dele,
@@ -4235,7 +4288,14 @@ function esquecerOEstadoDaSessao() {
   mensagensPorDesenhar = false;
 }
 
-/** Ejeta e volta para a tela de entrada, sem fechar o programa. */
+/**
+ * Ejeta e volta para a tela de entrada, sem fechar o programa.
+ *
+ * **Desmonta só a sessão desta janela** (tarefa 19 da F7): as hospedagens ficam
+ * de pé, e o servidor que esta janela hospeda continua no ar com quem estiver
+ * nele. Quem quer derrubá-lo aperta PARAR DE HOSPEDAR (`camada-hospedagem.js`).
+ * Por isso o link da porta também fica: ele continua levando a algum lugar.
+ */
 async function ejetar() {
   // **Encerrar vem primeiro, e o `disconnect` depois** — etapa E2, §5 do
   // contrato de API própria: «revogar a geração: a partir desse ponto, nenhum
@@ -4243,25 +4303,23 @@ async function ejetar() {
   // fila».
   //
   // A ordem estava invertida, e o custo era uma janela aberta. `disconnect` é
-  // um `await` sobre a ponte: ele derruba a hospedagem, espera a porta voltar,
-  // e leva o tempo que levar. Durante ele a sessão ainda era a de pé para esta
+  // um `await` sobre a ponte (ele derrubava a hospedagem e esperava a porta
+  // voltar, antes da tarefa 19 da F7), e leva o tempo que levar. Durante ele a sessão ainda era a de pé para esta
   // janela — então uma mensagem de worker que chegasse ali desenhava, pedia ao
   // servidor e escrevia tema, tudo depois de a pessoa ter apertado sair.
   //
   // Encerrando antes, a janela para de admitir efeito no instante do gesto, e o
   // `disconnect` passa a ser só a metade nativa da mesma saída.
   //
-  // **`disconnect` continua sendo esperado**, e não disparado e esquecido: ele
-  // é quem derruba o servidor hospedado, e mostrar a tela de entrada antes de
-  // ele terminar deixaria o botão de hospedar oferecendo uma porta que ainda
-  // não voltou.
+  // **`disconnect` continua sendo esperado**, e não disparado e esquecido: a
+  // entrada que aparece depois dele pergunta pelas hospedagens, e tem de ouvir
+  // a resposta de depois da saída.
   encerrarOAmbienteDosMods();
   await invoke("disconnect");
   $("tela-sessao").hidden = true;
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
   esvaziarBarraDoServidor();
-  esquecerOLinkDaPorta();
   esquecerOEstadoDaSessao();
   $("bateria").hidden = true;
   // A moderação pela mesma razão que a bateria: aberta, ela voltaria por cima
@@ -4724,16 +4782,46 @@ $("lista-linhas").addEventListener("click", alternarCanal);
 /// dispositivos do Terminal server. Duas vezes no mesmo dia: o literal fica no
 /// lugar da chamada, sempre.
 
+/**
+ * Quantos lugares a sala nova leva, conferido contra o fio antes de mandar
+ * (pendência 58, item 55; lote C55 da F5).
+ *
+ * A cópia da primeira sala vale quando cabe no fio, de 1 a `lugares_da_sala`
+ * (`limites_dos_campos`). Fora disso — um servidor configurado com uma sala de
+ * mais lugares que isso, ou de zero —, e quando não há sala de onde copiar,
+ * vale o teto. Recusar não teria saída: ninguém escreveu este número, e quem
+ * administra ficaria sem como criar sala naquele servidor. A cópia que não
+ * cabia ia ao núcleo, que recusava a sala calado. O ajuste vai ao `seele.log`.
+ */
+async function lugaresParaASalaNova() {
+  const teto = (await tetosDosCampos())?.lugares_da_sala;
+  const copiado = lugaresDeUmaSalaNova;
+  if (typeof teto !== "number") {
+    // Sem o teto (a ponte não respondeu), a cópia, como antes deste lote.
+    if (Number.isInteger(copiado)) return copiado;
+    throw new Error("os tetos dos campos não chegaram, e não há sala de onde copiar os lugares");
+  }
+  if (Number.isInteger(copiado) && copiado >= 1 && copiado <= teto) return copiado;
+  if (copiado !== null) {
+    registrarNoAnfitriao(
+      "sessao",
+      `a sala nova copiaria ${copiado} lugares da primeira sala, e o fio aceita de 1 a ${teto}: ela vai com ${teto}`,
+      "aviso",
+    );
+  }
+  return teto;
+}
+
 $("nova-voice_room").addEventListener("click", () => {
   abrirNomear({
     titulo: "NOVA SALA DE VOZ",
     rotulo: "NOME DA SALA",
     exemplo: "nome da sala",
     acao: "CRIAR",
-    aoConfirmar: (nome) =>
+    aoConfirmar: async (nome) =>
       invoke("criar_voice_room", {
         name: nome,
-        limit: lugaresDeUmaSalaNova,
+        limit: await lugaresParaASalaNova(),
         channel: null,
       }),
   });

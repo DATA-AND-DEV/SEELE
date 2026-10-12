@@ -18,7 +18,14 @@ publish.workspace = true
 [dev-dependencies]
 seele-proto = { path = "../seele-proto" }
 # The soak drives the real pipeline: codec, jitter buffer, network simulator.
-seele-audio = { path = "../seele-audio" }
+#
+# Com o aparelho de mentira (lote P61): um id com `device::mentira::PREFIXO`
+# abre um par de aparelhos que não é placa de som nenhuma, pelo mesmo
+# `device::open` de sempre. É por ele que a voz da FFI abre aqui inteira, sem o
+# microfone nem a saída da máquina. Os outros ids não mudam de comportamento, e
+# a feature não se une ao build do produto (resolvedor 2): ver o
+# `compile_error!` em `seele-audio/src/device/mentira.rs`.
+seele-audio = { path = "../seele-audio", features = ["aparelho-de-mentira"] }
 # Com o gêmeo do guarda, do lado de quem liga (`encontro::recusar_a_producao`):
 # um teste que ia perguntar à VPS de produção reprova antes do primeiro pacote.
 seele-core = { path = "../seele-core", features = ["recusar-encontro-de-producao"] }
@@ -26,7 +33,11 @@ seele-core = { path = "../seele-core", features = ["recusar-encontro-de-producao
 # encontro de produção (`alcance::encontro::recusar_a_producao`). Só aqui, numa
 # dependência de teste: o binário do produto não a leva.
 seele-server = { path = "../seele-server", features = ["recusar-encontro-de-producao"] }
-seele-ffi = { path = "../seele-ffi" }
+# Com o retrato sem rede (`sem_rede::retratos`), para a conformidade dos dois
+# produtores de retrato: o desktop e o navegador, com as mesmas mensagens.
+seele-ffi = { path = "../seele-ffi", features = ["conformidade"] }
+# O outro produtor: a sessão do navegador (`seele_web::sessao`), no nativo.
+seele-web = { path = "../seele-web" }
 # O ponto de encontro, para o teste do quarto: ele precisa das duas pontas — um
 # anfitrião registrando e um cliente perguntando — com o serviço de verdade no
 # meio, e este crate é o único lugar onde as duas cabem juntas.

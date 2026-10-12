@@ -46,7 +46,9 @@ mod executor;
 mod icone;
 mod mods;
 mod reducao;
+mod sala;
 mod servidores;
+mod toque;
 mod versoes;
 
 use std::sync::{Arc, Mutex};
@@ -157,6 +159,20 @@ struct Session {
     /// comando que as criou: cada uma fica de pé enquanto a janela estiver
     /// aberta, e independente da sessão. Ver [`Hospedagens`].
     hospedagens: Mutex<Hospedagens>,
+    /// Como está a sala pessoal: subindo, no ar (e se o código está achável),
+    /// ou por que não subiu. Guardado aqui para a tela que abre depois do
+    /// anúncio por [`sala::CANAL_DA_SALA`]; ver [`estado_da_sala`].
+    sala: Mutex<sala::EstadoDaSala>,
+    /// Quem está tocando na sala pessoal agora (tarefa 24 da F7): a faixa da
+    /// tela que abre com o toque já tocando, e o toque de quem se atende.
+    toques: Mutex<toque::Toques>,
+    /// **A despedida da saída já rodou** (tarefa 21 da F7).
+    ///
+    /// A saída comum, a da última janela fechada, despede e só então sai; e o
+    /// runtime ainda manda o `RunEvent::Exit` depois dela. Sem esta marca, a
+    /// despedida do fim ([`despedir_no_fim`]) despediria de novo uma sessão já
+    /// despedida, e o `seele.log` contaria duas saídas.
+    despedida_feita: std::sync::atomic::AtomicBool,
     /// **Qual servidor guardado está de pé**, quando há um.
     ///
     /// Plano de isolamento de 18/09: «gestão indica servidor-alvo… nunca
@@ -868,8 +884,8 @@ impl ModsNativos {
 /// que está de pé. O que não bate é **contado** antes de ser descartado: um
 /// contador que sobe depois de uma saída é a prova de que alguma coisa da
 /// sessão anterior continuava falando, e sem ele isso seria invisível.
-struct Bridge {
-    app: AppHandle,
+struct Bridge<R: tauri::Runtime = tauri::Wry> {
+    app: AppHandle<R>,
     /// A execução em que esta ponte nasceu.
     geracao: u64,
     /// O número que está de pé agora, compartilhado com a `Session`.
@@ -878,7 +894,7 @@ struct Bridge {
     descartados: Arc<std::sync::atomic::AtomicU64>,
 }
 
-impl EventListener for Bridge {
+impl<R: tauri::Runtime> EventListener for Bridge<R> {
     fn on_event(&self, event: Event) {
         if self.geracao != self.de_pe.load(std::sync::atomic::Ordering::Acquire) {
             self.descartados
@@ -925,7 +941,7 @@ impl EventListener for Bridge {
 /// configuration and the core knows how to persist an identity. `$SEELE_HOME`
 /// comes first so the desktop app and `connection` can be told to be the same person —
 /// which is what makes a session resumable between them.
-fn config_dir(app: &AppHandle) -> String {
+fn config_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> String {
     if let Ok(home) = std::env::var("SEELE_HOME") {
         return home;
     }
@@ -1029,6 +1045,15 @@ struct FalhaDaEntrada {
     /// De onde veio a impressão que esta tentativa conferia.
     #[serde(flatten)]
     de_onde: DeOndeVeio,
+    /// **Esta tentativa entrou, e outra já a tinha substituído** (pendência
+    /// 58, item 54; lote E54 da F5). A conexão dela foi fechada aqui, e a
+    /// sessão de pé é a de quem a substituiu: a janela não diz nada na tela
+    /// sobre ela. Ver [`largar_a_substituida`].
+    ///
+    /// Fora do JSON quando falso: toda outra recusa chega à janela como
+    /// chegava.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    substituida: bool,
 }
 
 impl From<ConnectionError> for FalhaDaEntrada {
@@ -1037,23 +1062,69 @@ impl From<ConnectionError> for FalhaDaEntrada {
         Self {
             falha: ConnectFailure::from(error),
             de_onde: DeOndeVeio::default(),
+            substituida: false,
         }
     }
 }
 
+/// **Fecha a conexão de uma tentativa que outra substituiu, e diz.**
+///
+/// O `connect` revoga a geração ao começar, e uma tentativa nova que começa
+/// enquanto outra anda tira a geração dela. A velha que termina depois não
+/// pode entrar: ela gravava o slot por cima da nova, e a pessoa passava a
+/// escrever num servidor que tinha deixado, com a tela mostrando o outro
+/// (medido em `a_entrada_velha_que_chega_tarde`). Aqui a conexão dela é
+/// fechada, uma linha vai ao `seele.log`, e a janela recebe a recusa marcada
+/// como substituída.
+fn largar_a_substituida(
+    connection: &Connection,
+    geracao: u64,
+    de_pe: u64,
+    alvo: &str,
+    origem_da_impressao: Option<OrigemDaImpressao>,
+) -> FalhaDaEntrada {
+    connection.disconnect();
+    tracing::warn!(
+        geracao,
+        de_pe,
+        alvo,
+        "a entrada a {alvo} foi substituída por outra antes de entrar: a conexão dela foi \
+         fechada, e a sessão de pé é a de quem a substituiu"
+    );
+    FalhaDaEntrada {
+        falha: ConnectFailure::from(ConnectionError::NotConnected),
+        de_onde: DeOndeVeio {
+            origem_da_impressao,
+            a_lista_guardou: false,
+        },
+        substituida: true,
+    }
+}
+
 #[tauri::command]
-async fn connect(
-    app: AppHandle,
+async fn connect<R: tauri::Runtime>(
+    app: AppHandle<R>,
     session: State<'_, Session>,
     server: String,
     nickname: String,
     audio: bool,
     join_secret: Option<String>,
 ) -> Result<Entrada, FalhaDaEntrada> {
-    if session.connection().is_ok() {
-        return Err(ConnectionError::AlreadyConnected.into());
-    }
-
+    // **Conferir que não há sessão e revogar, com o slot na mão** (M1 da
+    // revisão do lote E54). Eram duas linhas soltas — `connection().is_ok()`
+    // aqui e `revogar()` logo abaixo —, e uma tentativa velha podia gravar o
+    // slot entre elas. Esta passava pelo `AlreadyConnected` com o slot vazio e
+    // revogava depois de a velha já ter entrado; se falhasse, a velha ficava
+    // no slot sem tela (a janela a larga, e o pedido de soltá-la chega com uma
+    // geração que já não é a de pé), e toda entrada seguinte recebia
+    // `AlreadyConnected` até o app fechar. Com o cadeado: ou a velha grava
+    // antes e esta recusa, ou esta revoga antes e a velha é largada na
+    // conferência dela. A ordem dos cadeados é a de `soltar_a_entrada_em`: o
+    // do slot, e dentro dele os de `Session::revogar`.
+    //
+    // Sem o cadeado não há sessão a recusar, como antes
+    // (`Session::connection` devolve `NotConnected`): revoga e segue.
+    //
     // **A geração nasce com a tentativa, e não com o sucesso.** O roteiro da
     // etapa E2 é explícito: «capturar a geração desde a tentativa de conexão».
     //
@@ -1066,7 +1137,15 @@ async fn connect(
     // E uma tentativa que falha também gasta um número, de propósito: ela pode
     // ter deixado tarefas pelo caminho, e as respostas delas não podem ser
     // admitidas pela tentativa seguinte.
-    let geracao = session.revogar();
+    let geracao = {
+        let slot = session.connection.lock();
+        if slot.as_ref().is_ok_and(|slot| slot.is_some()) {
+            return Err(ConnectionError::AlreadyConnected.into());
+        }
+        let geracao = session.revogar();
+        drop(slot);
+        geracao
+    };
 
     // O convite guardado vale para o servidor dele e para nenhum outro. Quem cola
     // um link e depois troca o endereço no campo deixaria para trás uma
@@ -1233,6 +1312,11 @@ async fn connect(
     // é perguntado na ponte, e ele não volta para cá (ver o começo desta
     // função e `caminhos_a_guardar`).
     let caminhos = seele_ffi::conhecidos::caminhos_a_guardar(&alternativos, None);
+    // **A sala desta máquina se confere pelo código** (o ATENDER, tarefa 27 da
+    // F7): ela apresenta a chave da pessoa, e nenhuma lista guardou o
+    // certificado dela. Com o código, vale ele
+    // (`seele_ffi::ConnectConfig::codigo_esperado`).
+    let codigo_da_sala = sala::codigo_se_for_a_sala(&session, &server, &home);
     let config = ConnectConfig {
         server,
         alternate_servers: alternativos,
@@ -1246,7 +1330,7 @@ async fn connect(
         // embaixo, onde elas e o veredito decidem o que se guarda
         // (`impressao_a_guardar`).
         expected_fingerprint: conferida,
-        codigo_esperado: None,
+        codigo_esperado: codigo_da_sala,
         bilhete,
         // O microfone escolhido no Terminal servidor, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
@@ -1293,7 +1377,28 @@ async fn connect(
             origem_da_impressao,
             a_lista_guardou: false,
         },
+        substituida: false,
     })?;
+
+    // **A tentativa que outra substituiu não entra** (pendência 58, item 54;
+    // lote E54 da F5). Duas tentativas passam pelo `AlreadyConnected` lá em
+    // cima antes de qualquer uma terminar, e a mais nova revogou a geração
+    // desta. Conferido aqui, antes de qualquer efeito: as escolhas gravadas, o
+    // retrato e o consentimento de par não vão ao servidor que a pessoa
+    // deixou. E de novo ao gravar o slot, logo abaixo.
+    //
+    // Por `confere_geracao`, como todo comando de uma geração morta: ela conta
+    // em `comandos_de_geracao_morta` e diz em DEBUG, e a velha que chega tarde
+    // é uma coisa da sessão anterior falando depois da hora.
+    if session.confere_geracao(geracao).is_err() {
+        return Err(largar_a_substituida(
+            &connection,
+            geracao,
+            session.geracao(),
+            &alvo,
+            origem_da_impressao,
+        ));
+    }
 
     connection.subscribe(ponte);
 
@@ -1378,8 +1483,28 @@ async fn connect(
 
     let snapshot = connection.snapshot();
 
-    if let Ok(mut slot) = session.connection.lock() {
-        *slot = Some(connection);
+    // **A mesma conferência, com o slot na mão.** Entre a de cima e esta há os
+    // efeitos de entrada, e uma tentativa nova pode ter começado no meio. Com o
+    // cadeado tomado não há espera entre conferir e gravar: ou a geração ainda
+    // é desta e o slot é dela, ou a conexão dela é fechada e nada do que vem
+    // abaixo — o endereço da sessão, o alvo, a lista de visitados — vale para
+    // ela. Gravar sem conferir punha a conexão da velha no lugar da nova.
+    let substituida = match session.connection.lock() {
+        Ok(mut slot) if session.confere_geracao(geracao).is_ok() => {
+            *slot = Some(connection);
+            None
+        }
+        Ok(_) => Some(connection),
+        Err(_) => None,
+    };
+    if let Some(connection) = substituida {
+        return Err(largar_a_substituida(
+            &connection,
+            geracao,
+            session.geracao(),
+            &alvo,
+            origem_da_impressao,
+        ));
     }
 
     // A metade invisível da lista de visitados: sem isto a seção da tela de
@@ -1512,6 +1637,1106 @@ async fn connect(
     })
 }
 
+/// **Solta a entrada que a janela não adotou** (pendência 58, item 54; lote
+/// E54 da F5).
+///
+/// O par de [`largar_a_substituida`], do lado da janela. O `connect` só sabe
+/// que uma tentativa foi substituída quando a nova chega a ele e revoga a
+/// geração. Entre a nova começar na janela (`++tentativas`, em `conectar`) e o
+/// `connect` dela, a velha pode terminar e entrar com a geração ainda de pé; a
+/// janela, que já não a quer, não a mostra, e pede aqui que ela seja solta.
+/// Sem isto a conexão dela ficava no slot sem tela nenhuma: a nova recebia
+/// `AlreadyConnected`, toda entrada seguinte também, e os eventos da velha
+/// continuavam chegando à janela.
+///
+/// Devolve se soltou.
+#[tauri::command]
+fn soltar_a_entrada(session: State<'_, Session>, geracao: u64) -> bool {
+    soltar_a_entrada_em(&session, geracao)
+}
+
+/// O corpo de [`soltar_a_entrada`], sem o `State`, para o teste.
+///
+/// **Só a geração dada, e só se ela ainda é a de pé**, conferida com o slot na
+/// mão e revogada ali mesmo. Um `connect` novo que chega neste instante espera
+/// o cadeado, acha o slot vazio e revoga depois: a geração dele é a seguinte, e
+/// não esta. E uma entrada que outra já substituiu no Rust não derruba a de
+/// quem a substituiu, porque a geração dela já não é a de pé.
+///
+/// **O convite fica.** Ele pode ser da tentativa nova, que ainda vai lê-lo no
+/// `connect` dela; é a diferença deste para `desmontar_o_cliente`, que o
+/// apaga com a sessão que ele abriu.
+fn soltar_a_entrada_em(session: &Session, geracao: u64) -> bool {
+    let solta = match session.connection.lock() {
+        Ok(mut slot) if session.confere_geracao(geracao).is_ok() && slot.is_some() => {
+            session.revogar();
+            slot.take()
+        }
+        _ => None,
+    };
+    let Some(conexao) = solta else {
+        tracing::info!(
+            geracao,
+            de_pe = session.geracao(),
+            "a janela largou uma entrada que já não estava de pé: nada a soltar"
+        );
+        return false;
+    };
+    conexao.disconnect();
+    drop(conexao);
+    // Onde a sessão estava deixa de existir com ela, como na saída.
+    if let Ok(mut onde) = session.endereco_da_sessao.lock() {
+        *onde = None;
+    }
+    tracing::warn!(
+        geracao,
+        "a janela largou a entrada da geração {geracao}: outra tentativa a substituiu enquanto \
+         ela entrava, e a conexão dela foi fechada"
+    );
+    true
+}
+
+/// **A entrada velha que chega tarde** (pendência 58, item 54; lote E54 da F5).
+///
+/// Duas tentativas passam pelo `AlreadyConnected` do começo de [`connect`] antes
+/// de qualquer uma terminar: o HOSPEDAR AQUI fica aceso enquanto um `connect`
+/// anda. A velha é lenta; a nova entra; a velha entra depois. Este módulo mede,
+/// com dois servidores de verdade em porta zero e o `connect` de verdade (pelo
+/// runtime falso do Tauri), qual conexão fica no slot da [`Session`] e qual
+/// servidor recebe a mensagem que a pessoa manda em seguida.
+///
+/// A velha fica lenta pelo banco do servidor dela: o aperto de mão do
+/// servidor pega o cadeado do banco antes de responder, e o teste o segura até
+/// a nova ter entrado. A ordem é a do cenário, e não a de um relógio.
+///
+/// **Medido na base** (`b101e385`, com o `connect` genérico de `ecc3d9b5`): a
+/// velha devolvia `Ok(Entrada { geracao: 1 })` com a geração de pé em 2, o
+/// slot ficava com o servidor velho, a mensagem ia a ele, e a conexão da nova
+/// era solta e desligada calada — nenhum `Ended` chegava à janela, e a pessoa
+/// sumia da lista do servidor novo.
+#[cfg(test)]
+mod a_entrada_velha_que_chega_tarde {
+    use super::{connect, send_message, Session};
+    use seele_server::persistence::Location;
+    use seele_server::{Daemon, ServerConfig};
+    use std::net::SocketAddr;
+    use std::sync::{Arc, OnceLock};
+    use std::time::Duration;
+    use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
+    use tauri::{AppHandle, Manager};
+
+    /// A casa do app neste teste: identidade e pinos numa pasta temporária,
+    /// e não na de quem roda a bateria. Uma só para o processo inteiro, porque
+    /// `SEELE_HOME` é do processo.
+    fn casa() -> &'static std::path::Path {
+        static CASA: OnceLock<tempfile::TempDir> = OnceLock::new();
+        let pasta = CASA
+            .get_or_init(|| tempfile::tempdir().expect("a pasta temporária não abriu"))
+            .path();
+        std::env::set_var("SEELE_HOME", pasta);
+        pasta
+    }
+
+    /// Um teste deste módulo por vez: a casa é uma só, e a identidade e os
+    /// pinos dela são arquivos que dois `connect` de testes diferentes
+    /// escreveriam ao mesmo tempo. **E os do módulo vizinho que usa esta casa**
+    /// (`o_apelido_grande_demais_no_hello`, lote C55 da F5): a `SEELE_HOME` é
+    /// do processo, e uma segunda casa a trocaria por baixo destes testes.
+    pub(super) fn vez() -> std::sync::MutexGuard<'static, ()> {
+        static VEZ: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        VEZ.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// O runtime de um teste deste módulo: uma thread só, a do teste, para o
+    /// `seele.log` capturado ver o que o `connect` escreve.
+    pub(super) fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("o runtime do teste não subiu")
+    }
+
+    /// Um servidor de verdade, em porta zero e banco em memória.
+    pub(super) async fn servidor(nome: &str) -> (SocketAddr, Arc<Daemon>) {
+        let config = ServerConfig {
+            name: nome.into(),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            database: Location::Memory,
+            ..ServerConfig::default()
+        };
+        let servidor = Arc::new(Daemon::bind(config).await.expect("o servidor não subiu"));
+        let endereco = servidor
+            .local_addr()
+            .expect("o servidor não disse o endereço");
+        let aceitando = Arc::clone(&servidor);
+        tokio::spawn(async move {
+            let _ = aceitando.run().await;
+        });
+        (endereco, servidor)
+    }
+
+    /// O app, com o runtime falso. Vazado: o `connect` corre numa tarefa
+    /// própria, e o `State` que ele recebe empresta do app.
+    ///
+    /// **E sempre na casa temporária** (R1-I2 da re-revisão do E54). A casa
+    /// era montada por cada teste, e o teste do M1 esqueceu: rodado sozinho,
+    /// o `config_dir` dele caía em `$HOME/.config/seele`, e o `connect` lia a
+    /// identidade e o retrato de quem roda a bateria e gravava pinos de
+    /// `127.0.0.1` ao lado dos dela. Montada aqui, nenhum teste do módulo pode
+    /// esquecer; e a casa que o app vai usar é conferida antes de qualquer
+    /// `connect`, para um caminho novo do `config_dir` reprovar em vez de
+    /// escrever na casa de alguém.
+    pub(super) fn app() -> &'static AppHandle<MockRuntime> {
+        let casa = casa();
+        let app = mock_builder()
+            .manage(Session::default())
+            .build(mock_context(noop_assets()))
+            .expect("o app falso não montou");
+        let handle = app.handle().clone();
+        let do_app = super::config_dir(&handle);
+        assert_eq!(
+            std::path::Path::new(&do_app),
+            casa,
+            "a casa do app falso não é a temporária deste módulo: um `connect` daqui escreveria \
+             a identidade e os pinos em {do_app}"
+        );
+        Box::leak(Box::new(app));
+        Box::leak(Box::new(handle))
+    }
+
+    /// Quem recebeu `corpo`, entre os servidores dados, esperando até `prazo`.
+    async fn quem_recebeu(
+        ouvidos: &mut [(
+            &str,
+            tokio::sync::broadcast::Receiver<seele_server::server::Event>,
+        )],
+        corpo: &str,
+        prazo: Duration,
+    ) -> Vec<String> {
+        let fim = tokio::time::Instant::now() + prazo;
+        let mut receberam = Vec::new();
+        while tokio::time::Instant::now() < fim {
+            for (nome, ouvido) in ouvidos.iter_mut() {
+                while let Ok(evento) = ouvido.try_recv() {
+                    if let seele_server::server::Event::MessagePosted(mensagem) = evento {
+                        if mensagem.body == corpo && !receberam.contains(&(*nome).to_owned()) {
+                            receberam.push((*nome).to_owned());
+                        }
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        receberam
+    }
+
+    /// Quantos estão presentes no servidor, esperando até `prazo` pelo número
+    /// que se espera.
+    async fn presentes(servidor: &Daemon, espera: usize, prazo: Duration) -> usize {
+        let fim = tokio::time::Instant::now() + prazo;
+        loop {
+            let agora = servidor.server().presentes.lock().await.todos().len();
+            if agora == espera || tokio::time::Instant::now() >= fim {
+                return agora;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Um retrato desta máquina, para o `connect` ter um efeito de entrada que
+    /// o servidor vê: ele manda o retrato guardado logo depois de conectar.
+    fn guardar_um_retrato() {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(1, 1)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .expect("o retrato de teste não codificou");
+        std::fs::write(casa().join("retrato.png"), png.into_inner())
+            .expect("o retrato de teste não gravou");
+    }
+
+    /// Um `connect` numa thread só dele, com um runtime próprio.
+    ///
+    /// Para os testes que seguram um cadeado da sessão e precisam que o
+    /// `connect` pare nele: no runtime de uma thread só em que os servidores
+    /// andam, um `connect` parado num cadeado pararia os servidores junto.
+    fn connect_noutra_thread(
+        app: &'static AppHandle<MockRuntime>,
+        servidor: String,
+        apelido: &str,
+    ) -> std::thread::JoinHandle<Result<super::Entrada, super::FalhaDaEntrada>> {
+        let apelido = apelido.to_owned();
+        std::thread::spawn(move || {
+            runtime().block_on(connect(
+                app.clone(),
+                app.state::<Session>(),
+                servidor,
+                apelido,
+                false,
+                None,
+            ))
+        })
+    }
+
+    /// Espera uma thread terminar sem parar o runtime do teste, até `prazo`.
+    async fn quando_terminar<T>(thread: std::thread::JoinHandle<T>, prazo: Duration) -> T {
+        let fim = tokio::time::Instant::now() + prazo;
+        while !thread.is_finished() {
+            assert!(
+                tokio::time::Instant::now() < fim,
+                "a thread não terminou no prazo"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        thread.join().expect("a thread caiu")
+    }
+
+    /// Segura, numa thread própria, a guarda que `tomar` devolve — um cadeado
+    /// da sessão —, até o `Sender` devolvido ser usado ou cair. Numa thread, e
+    /// não no teste, para nenhuma guarda atravessar um `await`.
+    fn segurar<G>(
+        tomar: impl FnOnce() -> G + Send + 'static,
+    ) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+        let (tomado, foi_tomado) = std::sync::mpsc::channel();
+        let (soltar, quando_soltar) = std::sync::mpsc::channel::<()>();
+        let thread = std::thread::spawn(move || {
+            let guarda = tomar();
+            let _ = tomado.send(());
+            let _ = quando_soltar.recv();
+            drop(guarda);
+        });
+        foi_tomado.recv().expect("o cadeado não foi tomado");
+        (soltar, thread)
+    }
+
+    /// Espera o servidor anunciar um retrato novo, até `prazo`.
+    async fn um_retrato_chegou(
+        ouvido: &mut tokio::sync::broadcast::Receiver<seele_server::server::Event>,
+        prazo: Duration,
+    ) -> bool {
+        tokio::time::timeout(prazo, async {
+            loop {
+                match ouvido.recv().await {
+                    Ok(seele_server::server::Event::PersonIconChanged { .. }) => break true,
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(_) => break false,
+                }
+            }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// O cenário inteiro, do começo da velha à mensagem: o que ficou errado.
+    async fn a_velha_termina_depois_da_nova() -> Vec<String> {
+        guardar_um_retrato();
+        let (velho, servidor_velho) = servidor("Velho").await;
+        let (novo, servidor_novo) = servidor("Novo").await;
+        let app = app();
+        let sessao = app.state::<Session>();
+
+        // A velha sai primeiro e fica presa no aperto de mão do servidor dela.
+        let trava = servidor_velho.server().persistence.lock().await;
+        let velha = tokio::spawn(connect(
+            app.clone(),
+            app.state::<Session>(),
+            velho.to_string(),
+            "velha".to_owned(),
+            false,
+            None,
+        ));
+        let comeco = tokio::time::Instant::now();
+        while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(sessao.geracao(), 1, "a tentativa velha não começou");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !velha.is_finished(),
+            "a tentativa velha terminou antes da hora"
+        );
+
+        // A nova entra, inteira, com a velha ainda andando.
+        let nova = tokio::time::timeout(
+            Duration::from_secs(10),
+            connect(
+                app.clone(),
+                app.state::<Session>(),
+                novo.to_string(),
+                "nova".to_owned(),
+                false,
+                None,
+            ),
+        )
+        .await
+        .expect("a tentativa nova não voltou")
+        .map_err(|falha| format!("{falha:?}"))
+        .expect("a tentativa nova não entrou");
+        assert_eq!(nova.geracao, 2, "a tentativa nova não abriu a geração dois");
+        let canal = nova
+            .snapshot
+            .channels
+            .first()
+            .map(|canal| canal.id)
+            .expect("o servidor novo não tem canal nenhum");
+
+        // Solta a velha, e ela termina depois da nova. O que o servidor velho
+        // recebe dela daqui em diante é o que os efeitos de entrada fizeram.
+        let mut do_velho = servidor_velho.server().events.subscribe();
+        drop(trava);
+        let velha = tokio::time::timeout(Duration::from_secs(10), velha)
+            .await
+            .expect("a tentativa velha não voltou")
+            .expect("a tarefa da tentativa velha caiu");
+
+        let mut vermelhos = Vec::new();
+        match &velha {
+            Ok(entrada) => vermelhos.push(format!(
+                "a tentativa velha voltou como entrada (geração {}), depois de a nova ter entrado",
+                entrada.geracao
+            )),
+            Err(falha) => {
+                let dita = serde_json::to_value(falha).unwrap_or_default();
+                if dita.get("substituida") != Some(&serde_json::Value::Bool(true)) {
+                    vermelhos.push(format!(
+                        "a recusa da tentativa velha não diz que ela foi substituída, e a janela \
+                         não tem como calá-la: {dita}"
+                    ));
+                }
+            }
+        }
+        // Pelo nome que cada servidor dá a si mesmo no aperto de mão, e não
+        // pela impressão: a FFI da linha 0.15 não diz a impressão da conexão,
+        // e o teste é o mesmo nas duas linhas.
+        let qual = |nome: Option<&str>| match nome {
+            Some("Novo") => "o servidor novo",
+            Some("Velho") => "o servidor velho",
+            Some(_) => "um servidor desconhecido",
+            None => "nenhum",
+        };
+        let no_slot = sessao
+            .connection()
+            .ok()
+            .map(|conexao| conexao.snapshot().server);
+        if qual(no_slot.as_deref()) != "o servidor novo" {
+            vermelhos.push(format!(
+                "o slot da sessão ficou com {}, e não com a conexão da nova",
+                qual(no_slot.as_deref())
+            ));
+        }
+        if sessao.geracao() != nova.geracao {
+            vermelhos.push(format!(
+                "a geração de pé é {}, e não a da nova ({})",
+                sessao.geracao(),
+                nova.geracao
+            ));
+        }
+        let onde = sessao
+            .endereco_da_sessao
+            .lock()
+            .ok()
+            .and_then(|onde| onde.clone());
+        if onde.as_deref() != Some(novo.to_string().as_str()) {
+            vermelhos.push(format!(
+                "o endereço da sessão é {onde:?}, e não o do servidor novo ({novo})"
+            ));
+        }
+
+        // A mensagem que a pessoa manda em seguida: qual servidor a recebe.
+        let mut ouvidos = [
+            (
+                "o servidor velho",
+                servidor_velho.server().events.subscribe(),
+            ),
+            ("o servidor novo", servidor_novo.server().events.subscribe()),
+        ];
+        let corpo = "para onde eu vou?";
+        if let Err(erro) = send_message(app.state::<Session>(), canal, corpo.to_owned()) {
+            vermelhos.push(format!("a mensagem não saiu: {erro:?}"));
+        }
+        let receberam = quem_recebeu(&mut ouvidos, corpo, Duration::from_secs(2)).await;
+        if receberam != ["o servidor novo"] {
+            vermelhos.push(format!(
+                "a mensagem mandada em seguida chegou a {receberam:?}, e não só ao servidor novo"
+            ));
+        }
+
+        // E a conexão da velha não fica pendurada no servidor que a pessoa
+        // deixou, nem a da nova sai do servidor em que ela está.
+        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        if no_velho != 0 {
+            vermelhos.push(format!(
+                "a conexão da velha continua presente no servidor velho ({no_velho})"
+            ));
+        }
+        let no_novo = presentes(&servidor_novo, 1, Duration::from_secs(2)).await;
+        if no_novo != 1 {
+            vermelhos.push(format!(
+                "a pessoa não está presente no servidor novo ({no_novo})"
+            ));
+        }
+
+        // Nem os efeitos de entrada valem para ela: o retrato desta máquina
+        // não vai ao servidor que a pessoa deixou.
+        let mut retratos = 0;
+        while let Ok(evento) = do_velho.try_recv() {
+            if matches!(
+                evento,
+                seele_server::server::Event::PersonIconChanged { .. }
+            ) {
+                retratos += 1;
+            }
+        }
+        if retratos != 0 {
+            vermelhos.push(format!(
+                "a tentativa velha mandou o retrato ao servidor que a pessoa deixou ({retratos} \
+                 vez(es)): os efeitos de entrada valeram para ela"
+            ));
+        }
+        vermelhos
+    }
+
+    /// O cenário, com o `seele.log` capturado: a linha da velha descartada
+    /// sai na thread do teste, que é a do runtime em que o `connect` corre.
+    #[test]
+    fn a_velha_que_entra_depois_da_nova_nao_toma_a_conexao() {
+        let _vez = vez();
+        let runtime = runtime();
+        let (mut vermelhos, rastro) =
+            crate::rastro_de_teste::capturar(|| runtime.block_on(a_velha_termina_depois_da_nova()));
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("substituída") && linha.contains(" WARN "));
+        if linha.is_none() {
+            vermelhos.push(
+                "o seele.log não tem uma linha WARN dizendo que a entrada substituída foi \
+                 descartada"
+                    .to_owned(),
+            );
+        }
+        assert!(
+            vermelhos.is_empty(),
+            "a entrada velha que chegou tarde tomou a sessão nova:\n  {}",
+            vermelhos.join("\n  ")
+        );
+    }
+
+    /// **A outra ordem**: a velha entra no Rust antes de a nova chegar a ele.
+    ///
+    /// A nova já começou na janela (`++tentativas`), e ainda não chamou o
+    /// `connect` — está no `conferir_esta_versao`, por exemplo. A geração da
+    /// velha ainda é a de pé, e ela entra. A janela não a quer, e a solta pela
+    /// geração dela. O que se cobra: a velha sai do slot e do servidor dela, a
+    /// nova entra em vez de receber `AlreadyConnected`, a mensagem vai à nova,
+    /// e um pedido com uma geração que já não é a de pé não derruba ninguém.
+    async fn a_janela_larga_a_velha_antes_de_a_nova_chegar() -> Vec<String> {
+        casa();
+        let (velho, servidor_velho) = servidor("Velho").await;
+        let (novo, servidor_novo) = servidor("Novo").await;
+        let app = app();
+        let sessao = app.state::<Session>();
+        let mut vermelhos = Vec::new();
+
+        let velha = tokio::time::timeout(
+            Duration::from_secs(10),
+            connect(
+                app.clone(),
+                app.state::<Session>(),
+                velho.to_string(),
+                "velha".to_owned(),
+                false,
+                None,
+            ),
+        )
+        .await
+        .expect("a tentativa velha não voltou")
+        .map_err(|falha| format!("{falha:?}"))
+        .expect("a tentativa velha não entrou");
+        assert_eq!(
+            presentes(&servidor_velho, 1, Duration::from_secs(2)).await,
+            1
+        );
+
+        // A janela larga a velha pela geração dela.
+        if !super::soltar_a_entrada_em(&sessao, velha.geracao) {
+            vermelhos.push(format!(
+                "pedir para soltar a entrada da geração {} — a de pé — não soltou nada",
+                velha.geracao
+            ));
+        }
+        if sessao.connection().is_ok() {
+            vermelhos
+                .push("a conexão da velha continua no slot depois de a janela largá-la".into());
+        }
+        if sessao.geracao_vale(velha.geracao) {
+            vermelhos.push(format!(
+                "a geração da velha ({}) continua de pé depois de a janela largá-la: um comando \
+                 dela ainda seria atendido",
+                velha.geracao
+            ));
+        }
+        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        if no_velho != 0 {
+            vermelhos.push(format!(
+                "a conexão largada continua presente no servidor velho ({no_velho})"
+            ));
+        }
+        let onde = sessao
+            .endereco_da_sessao
+            .lock()
+            .ok()
+            .and_then(|onde| onde.clone());
+        if onde.is_some() {
+            vermelhos.push(format!(
+                "o endereço da sessão continua {onde:?} depois de a janela largar a entrada"
+            ));
+        }
+
+        // A nova chega ao `connect` e entra.
+        let nova = tokio::time::timeout(
+            Duration::from_secs(10),
+            connect(
+                app.clone(),
+                app.state::<Session>(),
+                novo.to_string(),
+                "nova".to_owned(),
+                false,
+                None,
+            ),
+        )
+        .await
+        .expect("a tentativa nova não voltou");
+        let nova = match nova {
+            Ok(entrada) => entrada,
+            Err(falha) => {
+                vermelhos.push(format!(
+                    "a tentativa nova não entrou depois de a janela largar a velha: {}",
+                    serde_json::to_string(&falha).unwrap_or_default()
+                ));
+                return vermelhos;
+            }
+        };
+        let canal = nova
+            .snapshot
+            .channels
+            .first()
+            .map(|canal| canal.id)
+            .expect("o servidor novo não tem canal nenhum");
+
+        // Um pedido com a geração da velha, que já não é a de pé, não derruba
+        // a nova.
+        if super::soltar_a_entrada_em(&sessao, velha.geracao) {
+            vermelhos.push(
+                "um pedido com a geração da velha, que já não era a de pé, soltou a entrada nova"
+                    .into(),
+            );
+        }
+        if sessao.geracao() != nova.geracao {
+            vermelhos.push("o pedido com a geração velha revogou a geração da nova".into());
+        }
+        let mut ouvidos = [
+            (
+                "o servidor velho",
+                servidor_velho.server().events.subscribe(),
+            ),
+            ("o servidor novo", servidor_novo.server().events.subscribe()),
+        ];
+        let corpo = "e agora, para onde?";
+        if let Err(erro) = send_message(app.state::<Session>(), canal, corpo.to_owned()) {
+            vermelhos.push(format!("a mensagem não saiu: {erro:?}"));
+        }
+        let receberam = quem_recebeu(&mut ouvidos, corpo, Duration::from_secs(2)).await;
+        if receberam != ["o servidor novo"] {
+            vermelhos.push(format!(
+                "a mensagem mandada depois chegou a {receberam:?}, e não só ao servidor novo"
+            ));
+        }
+        let no_novo = presentes(&servidor_novo, 1, Duration::from_secs(2)).await;
+        if no_novo != 1 {
+            vermelhos.push(format!(
+                "a pessoa não está presente no servidor novo ({no_novo})"
+            ));
+        }
+        vermelhos
+    }
+
+    /// **A nova começa entre as duas conferências da velha** (I1 da revisão
+    /// do E54).
+    ///
+    /// A velha passa a primeira conferência e aplica os efeitos de entrada; a
+    /// nova começa e revoga a geração antes de a velha gravar o slot. O teste
+    /// para a velha no cadeado do slot, que ele segura: solta o banco do
+    /// servidor velho, espera o retrato da velha chegar a ele (ela passou da
+    /// primeira conferência), revoga a geração como o `connect` da nova faz ao
+    /// começar, e só então solta o slot. A velha tem de ser largada ali.
+    async fn a_nova_comeca_entre_as_duas_conferencias() -> Vec<String> {
+        guardar_um_retrato();
+        let (velho, servidor_velho) = servidor("Velho").await;
+        let app = app();
+        let sessao = app.state::<Session>();
+        let mut vermelhos = Vec::new();
+
+        let trava = servidor_velho.server().persistence.lock().await;
+        let velha = connect_noutra_thread(app, velho.to_string(), "velha");
+        let comeco = tokio::time::Instant::now();
+        while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(sessao.geracao(), 1, "a tentativa velha não começou");
+
+        // O slot, seguro: a velha para nele, na segunda conferência.
+        let (soltar_o_slot, quem_segura) =
+            segurar(move || app.state::<Session>().inner().connection.lock());
+        let mut do_velho = servidor_velho.server().events.subscribe();
+        drop(trava);
+        assert!(
+            um_retrato_chegou(&mut do_velho, Duration::from_secs(8)).await,
+            "o retrato da velha não chegou ao servidor velho: ela não passou da primeira \
+             conferência, e este teste não mede a segunda"
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !velha.is_finished(),
+            "a velha terminou sem esperar o slot, e este teste não mede a segunda conferência"
+        );
+
+        // A nova começa, e revoga a geração da velha.
+        sessao.revogar();
+        let _ = soltar_o_slot.send(());
+        quem_segura.join().expect("quem segurava o slot caiu");
+
+        match quando_terminar(velha, Duration::from_secs(10)).await {
+            Ok(entrada) => vermelhos.push(format!(
+                "a velha voltou como entrada (geração {}) depois de a nova revogar a geração dela \
+                 no meio dos efeitos de entrada",
+                entrada.geracao
+            )),
+            Err(falha) => {
+                let dita = serde_json::to_value(&falha).unwrap_or_default();
+                if dita.get("substituida") != Some(&serde_json::Value::Bool(true)) {
+                    vermelhos.push(format!(
+                        "a recusa da velha substituída entre as duas conferências não vem marcada: \
+                         {dita}"
+                    ));
+                }
+            }
+        }
+        if let Ok(conexao) = sessao.connection() {
+            vermelhos.push(format!(
+                "o slot ficou com a conexão da velha ({})",
+                conexao.snapshot().server
+            ));
+        }
+        let onde = sessao
+            .endereco_da_sessao
+            .lock()
+            .ok()
+            .and_then(|onde| onde.clone());
+        if onde.is_some() {
+            vermelhos.push(format!(
+                "o endereço da sessão ficou {onde:?}, o do servidor que a pessoa deixou"
+            ));
+        }
+        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        if no_velho != 0 {
+            vermelhos.push(format!(
+                "a velha continua presente no servidor velho ({no_velho})"
+            ));
+        }
+        vermelhos
+    }
+
+    #[test]
+    fn a_velha_que_a_nova_substitui_entre_as_duas_conferencias_nao_grava_o_slot() {
+        let _vez = vez();
+        let vermelhos = runtime().block_on(a_nova_comeca_entre_as_duas_conferencias());
+        assert!(
+            vermelhos.is_empty(),
+            "a velha substituída entre as duas conferências do `connect` tomou a sessão:\n  {}",
+            vermelhos.join("\n  ")
+        );
+    }
+
+    /// **A nova que falha não deixa a velha órfã no slot** (M1 da revisão do
+    /// E54, a sonda P53).
+    ///
+    /// A ordem forçada: a nova passa pelo `AlreadyConnected` com o slot vazio
+    /// e para antes de revogar (o teste segura `mods_nativos`, que a revogação
+    /// toma antes de somar); a velha passa as duas conferências com a geração
+    /// dela ainda de pé; a nova revoga e falha (a porta 99999 não existe, e a
+    /// recusa sai sem rede nenhuma). A janela larga a velha, porque a nova é a
+    /// mais nova, e pede para soltá-la pela geração dela — que já não é a de
+    /// pé. Sem conferir o slot e revogar com o cadeado dele na mão, a velha
+    /// ficava no slot e presente no servidor deixado, e toda entrada seguinte
+    /// recebia `AlreadyConnected` até o app fechar.
+    async fn a_nova_falha_no_meio_da_velha() -> Vec<String> {
+        // O retrato é a prova de que a velha passou da primeira conferência
+        // (R1-I2 da re-revisão: sem ele, o teste dependia de outro do módulo
+        // tê-lo gravado antes).
+        guardar_um_retrato();
+        let (velho, servidor_velho) = servidor("Velho").await;
+        let (novo, _servidor_novo) = servidor("Novo").await;
+        let app = app();
+        let sessao = app.state::<Session>();
+        let mut vermelhos = Vec::new();
+
+        let trava = servidor_velho.server().persistence.lock().await;
+        let velha = connect_noutra_thread(app, velho.to_string(), "velha");
+        let comeco = tokio::time::Instant::now();
+        while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(sessao.geracao(), 1, "a tentativa velha não começou");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // A nova começa e para antes de revogar.
+        let (soltar_os_mods, quem_segura) =
+            segurar(move || app.state::<Session>().inner().mods_nativos.lock());
+        let nova = connect_noutra_thread(app, "127.0.0.1:99999".to_owned(), "nova");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(
+            sessao.geracao(),
+            1,
+            "a nova revogou sem esperar os MODs, e a ordem não foi a forçada"
+        );
+
+        // A velha termina o aperto de mão e passa a primeira conferência.
+        let mut do_velho = servidor_velho.server().events.subscribe();
+        drop(trava);
+        assert!(
+            um_retrato_chegou(&mut do_velho, Duration::from_secs(8)).await,
+            "o retrato da velha não chegou ao servidor velho: ela não passou da primeira \
+             conferência, e a ordem não foi a forçada"
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // A nova revoga e falha.
+        let _ = soltar_os_mods.send(());
+        quem_segura.join().expect("quem segurava os MODs caiu");
+        let da_nova = quando_terminar(nova, Duration::from_secs(10)).await;
+        let da_velha = quando_terminar(velha, Duration::from_secs(10)).await;
+
+        // **A ordem foi a forçada** (R1-M5 da re-revisão). A nova falha pela
+        // porta que não existe, e não por `AlreadyConnected`: chegando ao slot
+        // depois de a velha gravá-lo, a recusa seria essa, a janela soltaria a
+        // velha pela geração ainda de pé, e o teste passaria sem medir nada.
+        match &da_nova {
+            Ok(_) => vermelhos.push("a nova a uma porta que não existe entrou".to_owned()),
+            Err(falha) if falha.falha.error == super::ConnectionError::AlreadyConnected => {
+                vermelhos.push(
+                    "a nova recebeu `AlreadyConnected`: chegou ao slot depois de a velha gravá-lo, \
+                     e a ordem não foi a forçada"
+                        .to_owned(),
+                );
+            }
+            Err(_) => {}
+        }
+        // A velha cai na segunda conferência dela, marcada como substituída.
+        match &da_velha {
+            Ok(entrada) => vermelhos.push(format!(
+                "a velha voltou como entrada (geração {}) com a geração da nova de pé",
+                entrada.geracao
+            )),
+            Err(falha) => {
+                let dita = serde_json::to_value(falha).unwrap_or_default();
+                if dita.get("substituida") != Some(&serde_json::Value::Bool(true)) {
+                    vermelhos.push(format!(
+                        "a recusa da velha não vem marcada como substituída: {dita}"
+                    ));
+                }
+            }
+        }
+        // O slot fica vazio sem pedido nenhum da janela.
+        if let Ok(conexao) = sessao.connection() {
+            vermelhos.push(format!(
+                "a velha ficou no slot ({}) sem a janela pedir nada",
+                conexao.snapshot().server
+            ));
+        }
+        // E o que a janela faz em seguida, para o vermelho dizer a
+        // consequência: ela larga a velha que voltou entrando, pela geração
+        // dela, que já não é a de pé.
+        if let Ok(entrada) = &da_velha {
+            let _ = super::soltar_a_entrada_em(&sessao, entrada.geracao);
+            if let Ok(conexao) = sessao.connection() {
+                vermelhos.push(format!(
+                    "a velha ficou órfã no slot ({}): a janela a largou e o Rust não a soltou",
+                    conexao.snapshot().server
+                ));
+            }
+        }
+        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        if no_velho != 0 {
+            vermelhos.push(format!(
+                "a velha continua presente no servidor que a pessoa deixou ({no_velho})"
+            ));
+        }
+        let seguinte = quando_terminar(
+            connect_noutra_thread(app, novo.to_string(), "seguinte"),
+            Duration::from_secs(10),
+        )
+        .await;
+        if let Err(falha) = seguinte {
+            vermelhos.push(format!(
+                "a entrada seguinte não entrou: {}",
+                serde_json::to_string(&falha).unwrap_or_default()
+            ));
+        }
+        vermelhos
+    }
+
+    #[test]
+    fn a_nova_que_falha_no_meio_da_velha_nao_a_deixa_orfa_no_slot() {
+        let _vez = vez();
+        let vermelhos = runtime().block_on(a_nova_falha_no_meio_da_velha());
+        assert!(
+            vermelhos.is_empty(),
+            "a nova falhou no meio da velha, e a velha ficou com a sessão sem tela:\n  {}",
+            vermelhos.join("\n  ")
+        );
+    }
+
+    /// **As duas conferências do `connect`, pela forma.**
+    ///
+    /// O comportamento das duas tem teste: a primeira em
+    /// `a_velha_que_entra_depois_da_nova_nao_toma_a_conexao`, e a segunda em
+    /// `a_velha_que_a_nova_substitui_entre_as_duas_conferencias_nao_grava_o_slot`,
+    /// que para o `connect` no cadeado do slot. (Este doc dizia que nenhum teste
+    /// conseguia parar o `connect` ali, e não era verdade: a sonda P2 da
+    /// revisão o parou, e o teste dela entrou aqui.) Este guarda prende a forma
+    /// que dá aquele comportamento, sem ler comentário:
+    ///
+    /// 1. entre o `connect_watching` voltar e o primeiro efeito de entrada há a
+    ///    conferência da geração, e ela **volta** com a substituída largada;
+    /// 2. o slot só é gravado com o cadeado dele tomado e a geração conferida
+    ///    ali, sem espera no meio;
+    /// 3. quem não gravou **volta** largada, antes de o endereço da sessão ser
+    ///    escrito. Largar sem voltar (o mutante R3b da revisão) fechava a
+    ///    conexão e seguia gravando o endereço e a lista da velha, e devolvia
+    ///    `Ok`: o guarda só conferia a ordem do texto, e o deixava passar.
+    #[test]
+    fn o_connect_confere_a_geracao_antes_dos_efeitos_e_ao_gravar_o_slot() {
+        let fonte = super::fonte_sem_comentarios();
+        let corpo = super::corpo_de(&fonte, "async fn connect<");
+        let Some(volta) = corpo.find("let (connection, veredito) = resultado") else {
+            panic!("o `connect` não recebe mais a conexão do `connect_watching`: {corpo}");
+        };
+        let Some(primeiro_efeito) = [
+            "connection.subscribe(",
+            "vestir_as_escolhas_gravadas(",
+            "set_person_icon(",
+            "consentir_no_caminho_entre_pares(",
+        ]
+        .iter()
+        .filter_map(|efeito| corpo[volta..].find(efeito).map(|n| volta + n))
+        .min() else {
+            panic!("o `connect` não tem mais efeitos de entrada que este guarda conheça: {corpo}");
+        };
+        let antes_dos_efeitos = &corpo[volta..primeiro_efeito];
+        assert!(
+            antes_dos_efeitos.contains("session.confere_geracao(geracao).is_err()")
+                && antes_dos_efeitos.contains("return Err(largar_a_substituida("),
+            "o `connect` aplica os efeitos de entrada sem conferir antes se a geração dele \
+             ainda é a de pé: a tentativa que outra substituiu manda o retrato e o \
+             consentimento ao servidor que a pessoa deixou.\n{antes_dos_efeitos}"
+        );
+        let Some(gravar) = corpo.find("*slot = Some(connection)") else {
+            panic!("o `connect` não grava mais o slot: {corpo}");
+        };
+        let Some(cadeado) = corpo[..gravar].rfind("session.connection.lock()") else {
+            panic!("o `connect` grava o slot sem tomar o cadeado dele: {corpo}");
+        };
+        let ao_gravar = &corpo[cadeado..gravar];
+        assert!(
+            ao_gravar.contains("session.confere_geracao(geracao).is_ok()")
+                && !ao_gravar.contains(".await"),
+            "o `connect` grava o slot sem conferir a geração com o cadeado na mão: a tentativa \
+             que outra substituiu no meio dos efeitos de entrada grava a conexão dela por cima \
+             da nova.\n{ao_gravar}"
+        );
+        let depois = &corpo[gravar..];
+        let Some(ramo) = depois.find("if let Some(connection) = substituida {") else {
+            panic!(
+                "depois de gravar o slot, o `connect` não tem mais o ramo da tentativa que não \
+                 gravou: {depois}"
+            );
+        };
+        let Some(fim_do_ramo) = depois[ramo..].find("\n    }\n").map(|n| ramo + n) else {
+            panic!("o ramo da tentativa que não gravou não fecha: {depois}");
+        };
+        let bloco = &depois[ramo..fim_do_ramo];
+        let endereco = depois.find("endereco_da_sessao");
+        assert!(
+            bloco.contains("return Err(largar_a_substituida(")
+                && endereco.is_some_and(|endereco| fim_do_ramo < endereco),
+            "depois de gravar o slot, a tentativa que não gravou não volta largada antes de o \
+             endereço da sessão ser escrito: largada sem voltar, ela fecha a conexão e segue \
+             gravando o endereço, o alvo e a lista de visitados dela, e volta `Ok`.\n{bloco}"
+        );
+    }
+
+    #[test]
+    fn a_entrada_que_a_janela_larga_e_solta_pela_geracao_dela() {
+        let _vez = vez();
+        let runtime = runtime();
+        let (mut vermelhos, rastro) = crate::rastro_de_teste::capturar(|| {
+            runtime.block_on(a_janela_larga_a_velha_antes_de_a_nova_chegar())
+        });
+        let linhas = rastro
+            .lines()
+            .filter(|linha| linha.contains("a janela largou") && linha.contains(" WARN "))
+            .count();
+        if linhas != 1 {
+            vermelhos.push(format!(
+                "o seele.log tem {linhas} linha(s) WARN de entrada que a janela largou, e não uma: \
+                 a que soltou diz, a que não soltou não diz como se tivesse soltado"
+            ));
+        }
+        assert!(
+            vermelhos.is_empty(),
+            "a entrada que a janela largou não foi solta como devia:\n  {}",
+            vermelhos.join("\n  ")
+        );
+    }
+}
+
+/// **O apelido grande demais é recusado com nome, antes de abrir a conexão**
+/// (pendência 58, item 55; lote C55 da F5).
+///
+/// O apelido gravado nesta máquina (`escolher_apelido_local`) vai no `Hello` da
+/// conexão seguinte, e o `seele-proto` o limita a `MAX_NICKNAME_LEN` **bytes**.
+/// O campo do perfil contava caracteres até este lote, então um apelido de 20
+/// letras `á` (40 bytes) pode estar gravado de antes. O teste conecta pelo
+/// `connect` do app, contra um servidor de verdade nesta máquina, pela casa
+/// temporária do módulo do E54 (`a_entrada_velha_que_chega_tarde`), que é a
+/// única `SEELE_HOME` dos testes deste binário.
+///
+/// **Medido na base do lote** (`3b1f57c8`), com este teste ainda em
+/// `#[ignore]` como instrumento:
+/// - 16 `á` (32 B, no teto): `Ok(geracao 1)` em 16 ms, e o servidor a vê;
+/// - 20 `á` (40 B): `{"error":"Unreachable", …}` em 5 ms, com a trilha
+///   `Parada` → `Tentando` (127.0.0.1) → `Desistiu { Unreachable }` aos 3 ms,
+///   e ninguém presente no servidor. O QUIC e o TLS abriam, o `encode` do
+///   `Hello` recusava o apelido, e a escrita do `Hello`
+///   (`seele-core/src/client.rs`, `handshake`) traduzia qualquer erro em
+///   `ConnectError::Unreachable`. A janela lia «NADA RESPONDEU NESSE
+///   ENDEREÇO» com o servidor de pé.
+///
+/// **Agora** a FFI confere o apelido antes de abrir a conexão
+/// (`Connection::abrir`) e recusa com `ConnectionError::ApelidoGrandeDemais`,
+/// que leva o teto. A trilha vazia é a prova de que nada foi tentado: a
+/// chegada não começou, e nenhum candidato foi discado.
+#[cfg(test)]
+mod o_apelido_grande_demais_no_hello {
+    use super::a_entrada_velha_que_chega_tarde::{app, runtime, servidor, vez};
+    use super::{connect, Session};
+    use std::time::Duration;
+    use tauri::Manager;
+
+    #[test]
+    fn o_apelido_grande_demais_e_recusado_com_nome_antes_de_abrir_a_conexao() {
+        let _vez = vez();
+        runtime().block_on(async {
+            let teto = seele_ffi::Connection::limites_dos_campos().apelido;
+            let (endereco, servidor) = servidor("Apelido").await;
+            let mut vermelhos = Vec::new();
+
+            // Vinte letras `á` para o teto de hoje: 40 bytes, a medida da base.
+            let grande = "á".repeat(teto / 2 + 4);
+            let primeira = app();
+            let resultado = tokio::time::timeout(
+                Duration::from_secs(30),
+                connect(
+                    primeira.clone(),
+                    primeira.state::<Session>(),
+                    endereco.to_string(),
+                    grande.clone(),
+                    false,
+                    None,
+                ),
+            )
+            .await
+            .expect("o connect com o apelido grande demais não voltou");
+            match &resultado {
+                Ok(entrada) => vermelhos.push(format!(
+                    "um apelido de {} bytes entrou (geração {}), e o fio leva {teto}",
+                    grande.len(),
+                    entrada.geracao
+                )),
+                Err(falha) => {
+                    let dita = serde_json::to_value(falha).unwrap_or_default();
+                    let esperada =
+                        serde_json::json!({ "ApelidoGrandeDemais": { "limite_bytes": teto } });
+                    if dita.get("error") != Some(&esperada) {
+                        vermelhos.push(format!(
+                            "um apelido de {} bytes não voltou recusado com nome e teto \
+                             ({esperada}), e a janela não sabe o que dizer: {dita}",
+                            grande.len()
+                        ));
+                    }
+                    let tentou = !matches!(
+                        dita.get("trail").and_then(serde_json::Value::as_array),
+                        Some(trilha) if trilha.is_empty()
+                    );
+                    if tentou {
+                        vermelhos.push(format!(
+                            "a conexão foi aberta para um apelido que o `Hello` não leva: a \
+                             trilha não está vazia: {}",
+                            dita.get("trail").cloned().unwrap_or_default()
+                        ));
+                    }
+                }
+            }
+            if let Ok(sessao) = primeira.state::<Session>().connection() {
+                sessao.disconnect();
+            }
+
+            // E um apelido no teto ainda entra: sem isto, um `connect` que
+            // recusasse tudo passaria.
+            let certo = "á".repeat(teto / 2);
+            let segunda = app();
+            match tokio::time::timeout(
+                Duration::from_secs(30),
+                connect(
+                    segunda.clone(),
+                    segunda.state::<Session>(),
+                    endereco.to_string(),
+                    certo.clone(),
+                    false,
+                    None,
+                ),
+            )
+            .await
+            .expect("o connect com o apelido no teto não voltou")
+            {
+                Ok(_) => {
+                    let presentes = servidor.server().presentes.lock().await.todos().len();
+                    if presentes != 1 {
+                        vermelhos.push(format!(
+                            "depois das duas tentativas, o servidor tem {presentes} presentes, \
+                             e não só a do apelido no teto"
+                        ));
+                    }
+                }
+                Err(falha) => vermelhos.push(format!(
+                    "um apelido de {} bytes, no teto, não entrou: {}",
+                    certo.len(),
+                    serde_json::to_value(&falha).unwrap_or_default()
+                )),
+            }
+            if let Ok(sessao) = segunda.state::<Session>().connection() {
+                sessao.disconnect();
+            }
+
+            assert!(
+                vermelhos.is_empty(),
+                "o apelido grande demais no `Hello`:\n  {}",
+                vermelhos.join("\n  ")
+            );
+        });
+    }
+}
+
 /// As hospedagens deste app (Plano 2, spec de 23/09, «Hospedagens»): o
 /// servidor guardado, que a pessoa sobe com HOSPEDAR, e a sala pessoal.
 ///
@@ -1522,8 +2747,8 @@ async fn connect(
 struct Hospedagens {
     /// O servidor guardado no ar, quando está.
     guardado: Option<Hospedado>,
-    /// A sala pessoal no ar, quando está. Ela sobe sozinha a partir da tarefa
-    /// 23 do plano da F7; até lá, ninguém a sobe.
+    /// A sala pessoal no ar, quando está. Ela sobe sozinha, no `setup`
+    /// ([`sala::subir`]), e o estado dela é [`Session::sala`].
     pessoal: Option<Hospedado>,
 }
 
@@ -1533,14 +2758,15 @@ impl Hospedagens {
         self.guardado.as_ref().map(|guardado| &guardado.hospedagem)
     }
 
-    /// As portas em que as duas atendem, para [`onde_estou_em`].
-    fn portas(&self) -> (Option<u16>, Option<u16>) {
-        let porta = |hospedado: &Option<Hospedado>| {
+    /// As impressões das duas, para [`onde_estou_em`]: é pela chave que uma
+    /// sessão é de uma delas, e não pelo endereço por onde entrou.
+    fn impressoes(&self) -> (Option<String>, Option<String>) {
+        let impressao = |hospedado: &Option<Hospedado>| {
             hospedado
                 .as_ref()
-                .map(|hospedado| hospedado.hospedagem.endereco().port())
+                .map(|hospedado| hospedado.hospedagem.impressao_digital().to_owned())
         };
-        (porta(&self.guardado), porta(&self.pessoal))
+        (impressao(&self.guardado), impressao(&self.pessoal))
     }
 }
 
@@ -1572,32 +2798,248 @@ enum OndeEstou {
 /// hospedagens, nenhum dos três dizia em qual das duas a sessão está.
 #[tauri::command]
 fn onde_estou(session: State<'_, Session>) -> OndeEstou {
+    onde_estou_na(&session)
+}
+
+/// [`onde_estou`] sobre a sessão, para quem não é comando: o sim de quem
+/// hospeda ([`gravar_o_sim_de_quem_hospeda`]) e o ATENDER
+/// ([`sala::atender_em`]) perguntam a mesma coisa, e têm de ouvir a mesma
+/// resposta.
+fn onde_estou_na(session: &Session) -> OndeEstou {
     let endereco = session
         .endereco_da_sessao
         .lock()
         .ok()
         .and_then(|onde| onde.clone());
+    // A chave que o aperto de mão conferiu (`Connection::impressao_do_servidor`),
+    // em toda conexão que subiu, e não só nas que o veredito conta.
+    let impressao = session
+        .connection()
+        .ok()
+        .and_then(|connection| connection.impressao_do_servidor());
     let (guardado, pessoal) = session
         .hospedagens
         .lock()
-        .map_or((None, None), |hospedagens| hospedagens.portas());
-    onde_estou_em(endereco.as_deref(), guardado, pessoal)
+        .map_or((None, None), |hospedagens| hospedagens.impressoes());
+    onde_estou_em(
+        endereco.as_deref(),
+        impressao.as_deref(),
+        guardado.as_deref(),
+        pessoal.as_deref(),
+    )
 }
 
-/// [`onde_estou`] sem estado: o endereço da sessão, e as portas em que o
-/// guardado e a sala atendem quando estão no ar.
+/// Como está a sala pessoal desta máquina agora (tarefa 23 da F7).
+///
+/// O estado chega por [`sala::CANAL_DA_SALA`] a cada mudança; este comando é
+/// para a tela que abre depois do anúncio, e não o ouviu.
+#[tauri::command]
+fn estado_da_sala(session: State<'_, Session>) -> sala::EstadoDaSala {
+    session
+        .sala
+        .lock()
+        .map_or(sala::EstadoDaSala::Subindo, |estado| estado.clone())
+}
+
+/// ATENDER (tarefa 27 da F7): decide na campainha, e diz à casca se a sessão já
+/// está na sala ou por onde entrar nela.
+///
+/// O resto de «Atender, nesta ordem» (spec de 23/09) é da casca: encerrar os
+/// MODs, desmontar só o cliente e entrar pelo `connect` no `alvo` do
+/// [`sala::Atendido`], que o `connect` confere pelo código desta máquina. Se
+/// entrar falhar duas vezes, a casca chama [`encerrar_a_ligacao`], e ninguém
+/// fica sozinho na sala.
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender`]: a sala não está no ar, ou o toque já parou.
+#[tauri::command]
+fn atender(
+    session: State<'_, Session>,
+    quem: String,
+) -> Result<sala::Atendido, sala::FalhaAoAtender> {
+    let atendido = sala::atender_em(&session, &quem);
+    tracing::info!(?atendido, "ATENDER");
+    atendido
+}
+
+/// SEU CÓDIGO (tarefa 29 da F7): o código desta máquina, o do dono da sala que
+/// ela sobe. Ao lado de `impressao_desta_maquina`, e da mesma chave.
+///
+/// # Errors
+///
+/// Nunca com motivo: a identidade que não abre é dita no `seele.log`, e a tela
+/// mostra o campo vazio.
+#[tauri::command]
+fn meu_codigo(app: AppHandle) -> Result<String, ()> {
+    sala::meu_codigo_em(&config_dir(&app)).ok_or(())
+}
+
+/// A agenda (tarefa 29 da F7): os códigos com quem esta máquina já falou.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda::NaoGravou`] quando a agenda não abre.
+#[tauri::command]
+fn contatos_da_agenda(app: AppHandle) -> Result<Vec<sala::ContatoNaTela>, sala::FalhaNaAgenda> {
+    sala::contatos_em(&config_dir(&app))
+}
+
+/// Dá um nome a uma pessoa da agenda (tarefa 29 da F7). Vazio tira o nome.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda`]: o código não fecha, ou a agenda não gravou.
+#[tauri::command]
+fn dar_nome_na_agenda(
+    app: AppHandle,
+    codigo: String,
+    nome: String,
+) -> Result<(), sala::FalhaNaAgenda> {
+    sala::dar_nome_em(&config_dir(&app), &codigo, &nome)
+}
+
+/// Bloqueia ou desbloqueia um código (tarefa 29 da F7), **ao vivo**: quem
+/// estava tocando e passou a estar bloqueado para de tocar como recusado.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda`]: o código não fecha, ou a agenda não gravou.
+#[tauri::command]
+fn bloquear(
+    app: AppHandle,
+    session: State<'_, Session>,
+    codigo: String,
+    bloqueado: bool,
+) -> Result<(), sala::FalhaNaAgenda> {
+    // A campainha mora em `session.hospedagens`: `sala::bloquear_em` leva a ela
+    // a lista nova, quando a sala está no ar.
+    let bloqueio = sala::bloquear_em(&session, &config_dir(&app), &codigo, bloqueado);
+    tracing::info!(?bloqueio, bloqueado, "bloqueio na agenda");
+    bloqueio
+}
+
+/// RECUSAR (tarefa 27 da F7).
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender`]: a sala não está no ar, ou o toque já parou.
+#[tauri::command]
+fn recusar(session: State<'_, Session>, quem: String) -> Result<(), sala::FalhaAoAtender> {
+    let recusado = sala::recusar_em(&session, &quem);
+    tracing::info!(?recusado, "RECUSAR");
+    recusado
+}
+
+/// Encerra a ligação da sala pessoal: quem estava dentro ouve «chamada
+/// encerrada» (tarefa 27 da F7). Devolve quantos estavam.
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender::SemSala`] quando a sala não está no ar.
+#[tauri::command]
+fn encerrar_a_ligacao(session: State<'_, Session>) -> Result<usize, sala::FalhaAoAtender> {
+    let encerrada = sala::encerrar_a_ligacao_em(&session);
+    tracing::info!(?encerrada, "a ligação da sala pessoal foi encerrada");
+    encerrada
+}
+
+/// Quem está tocando na sala pessoal agora (tarefa 24 da F7), para a tela que
+/// abre com o toque já tocando. Cada toque chega por [`toque::CANAL_DO_TOQUE`]
+/// quando começa e quando para.
+#[tauri::command]
+fn toques_agora(session: State<'_, Session>) -> Vec<toque::NaFaixa> {
+    session
+        .toques
+        .lock()
+        .map(|toques| toques.na_faixa())
+        .unwrap_or_default()
+}
+
+/// «Não receber ligações», no PERFIL: desliga a sala inteira, ou a religa
+/// (tarefa 23 da F7). A escolha atravessa o processo.
+///
+/// Desligar despede a sala: quem estiver nela, ou tocando, ouve «chamada
+/// encerrada». Religar sobe a sala de novo, a menos que ela já esteja no ar ou
+/// subindo. O que aconteceu chega pelo [`sala::CANAL_DA_SALA`], como na subida
+/// do `setup`.
+///
+/// # Errors
+///
+/// Nunca: uma escolha que não foi guardada vale até o app fechar, e o
+/// `seele.log` diz.
+#[tauri::command]
+async fn receber_ligacoes(
+    app: AppHandle,
+    session: State<'_, Session>,
+    receber: bool,
+) -> Result<(), ()> {
+    match preferencias(&app).map(|mut preferencias| preferencias.set_receber_ligacoes(receber)) {
+        Some(Ok(())) => {}
+        Some(Err(erro)) => tracing::warn!(
+            %erro,
+            receber,
+            "a escolha de receber ligações não foi guardada: vale até o app fechar"
+        ),
+        None => tracing::warn!(
+            receber,
+            "as preferências não abriram: a escolha de receber ligações vale até o app fechar"
+        ),
+    }
+    if !receber {
+        sala::desligar(&app).await;
+        return Ok(());
+    }
+    let no_ar = session
+        .hospedagens
+        .lock()
+        .is_ok_and(|hospedagens| hospedagens.pessoal.is_some());
+    let subindo = session
+        .sala
+        .lock()
+        .is_ok_and(|estado| *estado == sala::EstadoDaSala::Subindo);
+    if !no_ar && !subindo {
+        tauri::async_runtime::spawn(sala::subir_agora(
+            app.clone(),
+            sala::Subida::da_producao(&app),
+        ));
+    }
+    Ok(())
+}
+
+/// [`onde_estou`] sem estado: o endereço da sessão, a impressão que ela
+/// conferiu, e as impressões do guardado e da sala quando estão no ar.
+///
+/// **Pela chave, e não pelo endereço** (lote X da F5, decisão da orquestradora).
+/// `127.0.0.1`, `localhost`, `[::1]`, o endereço da rede local, o público e o
+/// nome são a mesma hospedagem, porque a chave é a mesma; um endereço velho
+/// que hoje é de outra máquina tem outra chave, e é `Outro`. Comparar pela
+/// porta de loopback errava os dois: o próprio link não era o guardado, e o
+/// servidor de outra versão que o HOSPEDAR COM ESTA da F6 põe em `127.0.0.1`
+/// passava por ele.
+///
+/// O endereço só diz se há sessão. Com sessão e sem impressão (uma conexão
+/// sem aperto de mão), é `Outro`: falha fechado.
 fn onde_estou_em(
     endereco: Option<&str>,
-    porta_do_guardado: Option<u16>,
-    porta_da_sala: Option<u16>,
+    impressao: Option<&str>,
+    do_guardado: Option<&str>,
+    da_sala: Option<&str>,
 ) -> OndeEstou {
-    let Some(endereco) = endereco else {
+    if endereco.is_none() {
         return OndeEstou::Nenhum;
+    }
+    let e_a_chave_de = |hospedada: Option<&str>| {
+        impressao
+            .zip(hospedada)
+            .is_some_and(|(da_sessao, hospedada)| da_sessao.eq_ignore_ascii_case(hospedada))
     };
-    match porta_desta_maquina(endereco) {
-        Some(porta) if Some(porta) == porta_do_guardado => OndeEstou::Guardado,
-        Some(porta) if Some(porta) == porta_da_sala => OndeEstou::Pessoal,
-        Some(_) | None => OndeEstou::Outro,
+    if e_a_chave_de(do_guardado) {
+        OndeEstou::Guardado
+    } else if e_a_chave_de(da_sala) {
+        OndeEstou::Pessoal
+    } else {
+        OndeEstou::Outro
     }
 }
 
@@ -2489,52 +3931,110 @@ fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
     FalhaAoHospedar::NaoSubiu
 }
 
-/// Termina a sessão **desta janela** e deixa a hospedagem de pé.
+/// Termina a sessão **desta janela**, e só ela (tarefa 19 da F7, Plano 2).
 ///
-/// **A03 da auditoria de 17/09.** RECONECTAR passava por `disconnect`, que
-/// também derruba o servidor hospedado — e em seguida tentava entrar no
-/// endereço que ele acabara de tirar do ar. Quem hospedava e teve a sessão
-/// local encerrada, inclusive por uma troca de MODs, apertava um botão que
-/// promete voltar e desligava o próprio servidor, levando junto todo mundo que
-/// estava dentro.
+/// **As hospedagens ficam de pé.** O servidor guardado continua no ar com quem
+/// estiver nele, e a sala pessoal continua recebendo ligações. Quem quer
+/// derrubar o guardado diz isso com outro verbo, [`parar_de_hospedar`], e a sala
+/// desce pelo «receber ligações» ([`receber_ligacoes`]).
 ///
-/// Verbo próprio, e não `disconnect` com um argumento: são duas intenções
-/// diferentes da mesma pessoa. SAIR fecha o assunto e o anfitrião fecha junto;
-/// RECONECTAR diz «volto já», e derrubar quem ficou é o contrário disso.
+/// **A03 da auditoria de 17/09, resolvido de vez.** Este verbo derrubava o
+/// servidor hospedado junto, e o RECONECTAR, que passava por ele, tirava do ar o
+/// endereço em que ia entrar em seguida. A cura de então foi um segundo verbo
+/// (`desmontar_a_sessao`), que não derrubava. Com sair deixando de derrubar, os
+/// dois eram o mesmo, e um saiu: dois verbos iguais são dois lugares para
+/// divergirem.
 ///
 /// # Errors
 ///
 /// Nunca: o tipo existe para a ponte, e desmontar o que já está desmontado é o
 /// desfecho normal de quem apertou duas vezes.
 #[tauri::command]
-async fn desmontar_a_sessao(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
+async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
     desmontar_o_cliente(&app, &session);
     Ok(())
 }
 
+/// PARAR DE HOSPEDAR (tarefa 19 da F7): derruba o servidor guardado. Quem estava
+/// dentro lê «O SERVIDOR ESTÁ ENCERRANDO», e não uma queda de transporte
+/// (`Hospedagem::encerrar`, que avisa).
+///
+/// **Só o guardado.** A sala pessoal desce pelo «receber ligações»
+/// ([`receber_ligacoes`]), que grava a escolha: um segundo caminho para ela que
+/// não gravasse nada a faria voltar na abertura seguinte.
+///
+/// Devolve se havia servidor no ar.
+///
+/// # Errors
+///
+/// Nunca: parar o que não está no ar é o desfecho de quem apertou duas vezes.
 #[tauri::command]
-async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
-    desmontar_o_cliente(&app, &session);
+async fn parar_de_hospedar(session: State<'_, Session>) -> Result<bool, ()> {
+    let parou = parar_de_hospedar_em(&session).await;
+    tracing::info!(parou, "PARAR DE HOSPEDAR");
+    Ok(parou)
+}
 
-    // Quem hospedava para de hospedar ao sair, e quem estava dentro é
-    // derrubado. É o comportamento certo: o anfitrião fechou. `encerrar`
-    // espera a porta voltar, para hospedar de novo em seguida funcionar.
-    //
-    // Com o servidor sai também qual guardado ele era: sem isto, um
-    // `renomear_server` depois de entrar em **outro** servidor acertaria o nome
-    // do que ficou para trás.
+/// [`parar_de_hospedar`] sobre a sessão. `encerrar`, e não o `despedir` da
+/// saída do app: o app continua aberto, e hospedar de novo em seguida tem de
+/// achar a porta livre.
+async fn parar_de_hospedar_em(session: &Session) -> bool {
     let guardado = session
         .hospedagens
         .lock()
         .ok()
         .and_then(|mut hospedagens| hospedagens.guardado.take());
-    if let Some(guardado) = guardado {
-        guardado.hospedagem.encerrar().await;
-    }
-    Ok(())
+    let Some(guardado) = guardado else {
+        return false;
+    };
+    guardado.hospedagem.encerrar().await;
+    true
 }
 
-/// A metade que as duas saídas fazem igual: desmontar a sessão de cliente.
+/// O servidor guardado no ar, do jeito que o VOLTAR AO MEU SERVIDOR precisa
+/// dele (tarefa 20 da F7).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+struct MeuServidor {
+    /// Onde entrar para voltar: esta máquina, na porta em que ele atende.
+    alvo: String,
+    /// O nome que a lista de servidores mostra, quando a pessoa deu um.
+    ///
+    /// O nome de verdade mora no banco do servidor; o da lista é o que o
+    /// `renomear_server` mantém em dia, e é o que a pessoa escolheu de olho.
+    nome: Option<String>,
+}
+
+/// O servidor guardado no ar, para o VOLTAR AO MEU SERVIDOR e o PARAR DE
+/// HOSPEDAR da entrada (tarefa 20 da F7). `None` quando não há.
+#[tauri::command]
+fn meu_servidor(app: AppHandle, session: State<'_, Session>) -> Option<MeuServidor> {
+    let hospedagens = session.hospedagens.lock().ok()?;
+    meu_servidor_em(&hospedagens, &config_dir(&app))
+}
+
+/// [`meu_servidor`] sobre as hospedagens e a pasta de dados.
+fn meu_servidor_em(hospedagens: &Hospedagens, config: &str) -> Option<MeuServidor> {
+    let (porta, id) = {
+        let guardado = hospedagens.guardado.as_ref()?;
+        (
+            guardado.hospedagem.endereco().port(),
+            guardado.servidor.clone(),
+        )
+    };
+    let nome = id.and_then(|id| {
+        servidores::listar(config)
+            .into_iter()
+            .find(|servidor| servidor.id == id)
+            .map(|servidor| servidor.nome)
+            .filter(|nome| !nome.trim().is_empty())
+    });
+    Some(MeuServidor {
+        alvo: format!("127.0.0.1:{porta}"),
+        nome,
+    })
+}
+
+/// O que a saída faz: desmontar a sessão de cliente.
 ///
 /// **Revoga antes de desmontar** — §5 do contrato de API própria, passo 1: «a
 /// partir desse ponto, nenhum novo efeito daquela instância é admitido, mesmo
@@ -3309,6 +4809,19 @@ fn descartar_mensagem(
 #[tauri::command]
 const fn limite_da_mensagem() -> usize {
     seele_ffi::Connection::limite_da_mensagem()
+}
+
+/// Os tetos dos outros campos que a janela escreve: o apelido, o nome de um
+/// canal ou de uma sala, os lugares de uma sala nova, o nome do servidor e o
+/// motivo de um banimento (os textos em **bytes**).
+///
+/// O molde de [`limite_da_mensagem`], e pela mesma razão: os campos contavam
+/// caracteres, o fio conta bytes, e o que passava do teto o núcleo recusava
+/// sem a janela saber (pendência 58, item 55; lote C55 da F5). Ver
+/// `seele_ffi::LimitesDosCampos`.
+#[tauri::command]
+const fn limites_dos_campos() -> seele_ffi::LimitesDosCampos {
+    seele_ffi::Connection::limites_dos_campos()
 }
 
 #[tauri::command]
@@ -5231,17 +6744,305 @@ async fn aplicar_mod(
 
     // `endereco_da_sessao` e não `alvo`: o segundo é «onde voltar» e exclui um
     // servidor hospedado aqui, que é justamente o caso em que quem liga o MOD é
-    // quem hospeda. Ver o campo.
+    // quem hospeda. Ver o campo. E só quando a sessão é com o servidor daqui
+    // (lote X, rodada 1): ver `gravar_o_sim_de_quem_hospeda`.
+    gravar_o_sim_de_quem_hospeda(&config_dir(&app), &session, &identidade)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    Ok(identidade)
+}
+
+/// Grava o sim de quem hospeda ao conjunto que acabou de aplicar, **só** quando
+/// a sessão é com o servidor guardado que esta janela hospeda.
+///
+/// Há dois gravadores: [`aplicar_mod`] (a atualização pela gestão, QA-01) e
+/// [`aplicar_conjunto_de_mods`] (o SALVAR). Os dois gravavam
+/// `aceitar(endereco_da_sessao, identidade do servidor daqui)`, fosse a
+/// sessão com quem fosse. `Aceites::guardar` substitui o sim por alvo, então,
+/// com a sessão em outro servidor S, o sim que a pessoa deu a S era trocado
+/// por uma identidade que não descreve S:
+/// - S perguntava de novo;
+/// - quando o conjunto de S era igual ao daqui, S **não** perguntava, contra o
+///   ADR 0045;
+/// - a lista de aceites mostrava um sim a S que ninguém deu.
+///
+/// **O portão é [`onde_estou_na`]**, a única resposta a «estou no meu
+/// servidor?», e ela é pela chave: o sim vai ao endereço da sessão quando a
+/// impressão que ela conferiu é a do guardado, entre por onde ela entrar.
+/// Fora dele nada é gravado, nem na sala, que não tem MODs, nem sem guardado
+/// de pé.
+fn gravar_o_sim_de_quem_hospeda(
+    config: &str,
+    session: &Session,
+    identidade: &str,
+) -> Result<(), String> {
     let alvo = session
         .endereco_da_sessao
         .lock()
         .ok()
         .and_then(|a| a.clone());
-    if let Some(alvo) = alvo {
-        seele_ffi::mods::aceitar(&config_dir(&app), &alvo, &identidade)
-            .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    gravar_o_sim_se_for_o_guardado(config, alvo.as_deref(), onde_estou_na(session), identidade)
+}
+
+/// [`gravar_o_sim_de_quem_hospeda`] sem a sessão: o endereço dela e a
+/// resposta de [`onde_estou_na`]. Separada para os testes, que não sobem
+/// hospedagem nem conexão.
+fn gravar_o_sim_se_for_o_guardado(
+    config: &str,
+    endereco_da_sessao: Option<&str>,
+    onde: OndeEstou,
+    identidade: &str,
+) -> Result<(), String> {
+    match endereco_da_sessao {
+        Some(alvo) if onde == OndeEstou::Guardado => {
+            seele_ffi::mods::aceitar(config, alvo, identidade)
+        }
+        _ => Ok(()),
     }
-    Ok(identidade)
+}
+
+/// **O sim de quem hospeda vai só ao servidor guardado** — lote X da F5,
+/// ADR 0045. Ver [`gravar_o_sim_de_quem_hospeda`].
+///
+/// Os dois gravadores têm `AppHandle` e pedem uma hospedagem de pé, que num
+/// teste abriria UPnP e PCP no roteador, e a impressão da sessão pede uma
+/// conexão. Por isso o que roda aqui é:
+/// - a resposta de [`onde_estou_em`], a função pura sobre impressões que o
+///   portão usa;
+/// - a identidade que cada gravador calcula, sobre o banco de verdade do
+///   servidor hospedado, em memória;
+/// - a gravação, sobre o arquivo de aceites de verdade, numa pasta de passagem.
+///
+/// O guarda de texto-fonte prende os dois gravadores ao `onde_estou`.
+#[cfg(test)]
+mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
+    use seele_server::mods::anuncio::conjunto_exigido;
+    use seele_server::persistence::mods::{definir_conjunto, enable, EnabledMod};
+    use seele_server::persistence::{Location, Persistence};
+
+    use super::{
+        corpo_de, fonte_sem_comentarios, gravar_o_sim_de_quem_hospeda,
+        gravar_o_sim_se_for_o_guardado, onde_estou_em, Session,
+    };
+
+    /// A chave do guardado, a da sala e a de outro servidor S.
+    const GUARDADO: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
+    const SALA: &str = "bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22";
+    const DE_S: &str = "cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33";
+
+    fn versao(numero: &str, byte: char) -> EnabledMod {
+        EnabledMod {
+            id: "autor/rpg".to_owned(),
+            version: numero.to_owned(),
+            hash: byte.to_string().repeat(64),
+            repo: "https://example.invalid/rpg".to_owned(),
+            reach: vec!["dom".to_owned()],
+            server_half: false,
+            api: seele_ffi::mods::MOD_API_VERSION,
+        }
+    }
+
+    /// Uma pasta de configuração só deste teste.
+    fn pasta(nome: &str) -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("seele-lote-x-{nome}-"))
+            .tempdir()
+            .unwrap()
+    }
+
+    /// A identidade que cada gravador grava, calculada como ele a calcula.
+    fn identidades_dos_gravadores() -> [(&'static str, String); 2] {
+        let salvar = Persistence::open(&Location::Memory).unwrap();
+        definir_conjunto(&salvar, &[versao("1.0.0", 'a')]).unwrap();
+        let atualizar = Persistence::open(&Location::Memory).unwrap();
+        enable(&atualizar, &versao("1.0.0", 'a')).unwrap();
+        enable(&atualizar, &versao("2.0.0", 'b')).unwrap();
+        [
+            (
+                "o SALVAR da gestão (`aplicar_conjunto_de_mods`)",
+                conjunto_exigido(&salvar).unwrap().identidade,
+            ),
+            (
+                "a atualização pela gestão (`aplicar_mod`, QA-01)",
+                conjunto_exigido(&atualizar).unwrap().identidade,
+            ),
+        ]
+    }
+
+    /// Um caso do portão: por onde a sessão entrou, a chave que ela conferiu, e
+    /// as das hospedagens no ar.
+    struct Caso {
+        nome: &'static str,
+        endereco: &'static str,
+        impressao: &'static str,
+        guardado: Option<&'static str>,
+        grava: bool,
+    }
+
+    /// O que o portão grava, para cada caso e cada gravador: a lista do que
+    /// saiu diferente do esperado.
+    fn o_portao_nos(casos: &[Caso]) -> Vec<String> {
+        let mut errados = Vec::new();
+        for (quem, daqui) in identidades_dos_gravadores() {
+            for caso in casos {
+                let config = pasta("portao");
+                let config = config.path().to_str().unwrap();
+                let antes = "5".repeat(64);
+                seele_ffi::mods::aceitar(config, caso.endereco, &antes).unwrap();
+                let onde = onde_estou_em(
+                    Some(caso.endereco),
+                    Some(caso.impressao),
+                    caso.guardado,
+                    Some(SALA),
+                );
+                gravar_o_sim_se_for_o_guardado(config, Some(caso.endereco), onde, &daqui).unwrap();
+                let esperado = if caso.grava { &daqui } else { &antes };
+                if seele_ffi::mods::aceite_de(config, caso.endereco).as_deref()
+                    != Some(esperado.as_str())
+                {
+                    errados.push(format!("{quem}, {}", caso.nome));
+                }
+            }
+        }
+        errados
+    }
+
+    /// A medida: a sessão em S, a janela hospedando, e o sim de S fica como
+    /// estava. Pela chave, também com S no mesmo endereço do guardado.
+    #[test]
+    fn com_a_sessao_em_outro_servidor_o_sim_dele_fica_como_estava() {
+        let errados = o_portao_nos(&[
+            Caso {
+                nome: "a sessão em S, noutro endereço",
+                endereco: "198.51.100.7:8383",
+                impressao: DE_S,
+                guardado: Some(GUARDADO),
+                grava: false,
+            },
+            Caso {
+                nome: "a sessão em S, no mesmo endereço do guardado",
+                endereco: "127.0.0.1:8383",
+                impressao: DE_S,
+                guardado: Some(GUARDADO),
+                grava: false,
+            },
+        ]);
+        assert!(
+            errados.is_empty(),
+            "com a sessão em outro servidor, o sim dele virou a identidade do servidor daqui: \
+             {errados:?}. Ele pergunta de novo, ou, com os conjuntos iguais, não pergunta, e a \
+             lista de aceites mostra um sim que a pessoa não deu (ADR 0045)"
+        );
+    }
+
+    /// O A04 e o próprio link: com a chave do guardado, o sim de quem hospeda é
+    /// gravado, entre a sessão pelo `aqui` ou pelo endereço da rede local que o
+    /// convite anuncia.
+    #[test]
+    fn na_sessao_do_guardado_o_sim_e_gravado_entre_por_onde_entrar() {
+        let errados = o_portao_nos(&[
+            Caso {
+                nome: "o `aqui`",
+                endereco: "127.0.0.1:8383",
+                impressao: GUARDADO,
+                guardado: Some(GUARDADO),
+                grava: true,
+            },
+            Caso {
+                nome: "o próprio link, pela rede local",
+                endereco: "192.168.1.20:8383",
+                impressao: GUARDADO,
+                guardado: Some(GUARDADO),
+                grava: true,
+            },
+        ]);
+        assert!(
+            errados.is_empty(),
+            "na sessão do servidor guardado, o sim de quem hospeda não foi gravado: \
+             {errados:?}. Quem acabou de decidir o conjunto é perguntado de novo na volta (A04)"
+        );
+    }
+
+    /// A sala pessoal não tem MODs, e sem guardado de pé não há servidor daqui:
+    /// nos dois, nada é gravado.
+    #[test]
+    fn na_sala_e_sem_guardado_nada_e_gravado() {
+        let errados = o_portao_nos(&[
+            Caso {
+                nome: "a sala pessoal",
+                endereco: "127.0.0.1:8385",
+                impressao: SALA,
+                guardado: Some(GUARDADO),
+                grava: false,
+            },
+            Caso {
+                nome: "sem guardado de pé, no `aqui`",
+                endereco: "127.0.0.1:8383",
+                impressao: GUARDADO,
+                guardado: None,
+                grava: false,
+            },
+        ]);
+        assert!(
+            errados.is_empty(),
+            "o sim de quem hospeda foi gravado fora do servidor guardado: {errados:?} (ADR 0045)"
+        );
+
+        // E pela sessão de verdade: sem conexão nem hospedagem, nada.
+        let sessao = Session::default();
+        *sessao.endereco_da_sessao.lock().unwrap() = Some("127.0.0.1:8383".to_owned());
+        let config = pasta("sem-guardado");
+        let config = config.path().to_str().unwrap();
+        gravar_o_sim_de_quem_hospeda(config, &sessao, &"6".repeat(64)).unwrap();
+        assert_eq!(
+            seele_ffi::mods::aceite_de(config, "127.0.0.1:8383"),
+            None,
+            "sem conexão nem hospedagem, o sim de quem hospeda foi gravado no endereço da sessão"
+        );
+    }
+
+    /// Os dois gravadores gravam o sim só por [`gravar_o_sim_de_quem_hospeda`],
+    /// e ela só pela resposta de `onde_estou`.
+    ///
+    /// As agulhas são montadas por `concat!`, para que este guarda não case com
+    /// o próprio texto, e a fonte é lida sem as linhas de comentário.
+    #[test]
+    fn os_dois_gravadores_passam_pelo_sim_de_quem_hospeda() {
+        let fonte = fonte_sem_comentarios();
+        let fora: Vec<&str> = [
+            ("aplicar_mod", concat!("async fn aplicar_mod", "(")),
+            (
+                "aplicar_conjunto_de_mods",
+                concat!("async fn aplicar_conjunto_de_mods", "("),
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, cabecalho)| {
+            let corpo = corpo_de(&fonte, cabecalho);
+            !(corpo.contains(concat!("gravar_o_sim_de_quem_hospeda", "("))
+                && !corpo.contains(concat!("seele_ffi::mods::aceitar", "("))
+                && !corpo.contains(concat!("endereco_da", "_sessao")))
+        })
+        .map(|(quem, _)| quem)
+        .collect();
+        assert!(
+            fora.is_empty(),
+            "{fora:?} grava o sim sem passar por `gravar_o_sim_de_quem_hospeda`: com a sessão \
+             em outro servidor, o sim dele vira a identidade do servidor daqui (ADR 0045)"
+        );
+
+        let grava = corpo_de(&fonte, concat!("fn gravar_o_sim_de_quem_hospeda", "("));
+        let se_for = corpo_de(&fonte, concat!("fn gravar_o_sim_se_for_o_guardado", "("));
+        let comando = corpo_de(&fonte, concat!("fn onde_estou", "(session"));
+        assert!(
+            grava.contains(concat!("onde_estou_na", "(session)"))
+                && grava.contains(concat!("gravar_o_sim_se_for_o", "_guardado("))
+                && se_for.contains(concat!("onde == OndeEstou::", "Guardado"))
+                && comando.contains(concat!("onde_estou_na", "(&session)")),
+            "o sim de quem hospeda deixou de passar pela resposta de `onde_estou`, ou o comando \
+             deixou de dar a mesma: são duas respostas a «estou no meu servidor?», e o sim vai \
+             a um servidor que não é o guardado (ADR 0045):\n{grava}\n{se_for}\n{comando}"
+        );
+    }
 }
 
 /// O texto deste arquivo, para os guardas que afirmam sobre ele.
@@ -7651,16 +9452,10 @@ async fn aplicar_conjunto_de_mods(
     // **Um sim, para o conjunto resultante.** Salvar já é a decisão informada
     // do operador sobre o conjunto que vai valer; perguntar de novo, logo
     // depois, seria perguntar o que acabou de ser respondido. Isto não autoriza
-    // mudança futura, e não dispensa o aceite de quem entra.
-    let alvo = session
-        .endereco_da_sessao
-        .lock()
-        .ok()
-        .and_then(|a| a.clone());
-    if let Some(alvo) = alvo {
-        seele_ffi::mods::aceitar(&config_dir(&app), &alvo, &identidade)
-            .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
-    }
+    // mudança futura, e não dispensa o aceite de quem entra. E só ao servidor
+    // daqui (lote X, rodada 1): ver `gravar_o_sim_de_quem_hospeda`.
+    gravar_o_sim_de_quem_hospeda(&config_dir(&app), &session, &identidade)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
     Ok(identidade)
 }
 
@@ -7706,9 +9501,13 @@ async fn escolher_o_tema_do_servidor(
 // de gravar o sim a pergunta não teria resposta possível — a pessoa leria a
 // lista e não teria o que fazer com ela.
 //
-// **A tela que mostra a lista e tem o botão ainda não existe**, e está fora
-// desta etapa. O que existe é a superfície: os mesmos três verbos que a tela
-// vai chamar, no mesmo lugar em que `habilitar_mod` já espera a dela.
+// **A tela que mostra a lista e tem o botão é `ui/camada-mods.js`**, desde
+// 17/09/2026 (`65ad0653`). Ela abre a pergunta com o que chegou no
+// `ModsNaoAceitos`, pergunta a `aceite_de_mods` se a lista mudou desde o
+// último sim, e chama `aceitar_mods` quando a pessoa aceita. O
+// `esquecer_aceite_de_mods` é chamado por ela, para desfazer o sim de quem
+// desistiu enquanto ele era gravado, e pela seção MODS de CONFIGURAÇÕES, no
+// mesmo arquivo.
 
 /// O conjunto de MODs que esta máquina já aceitou para este servidor, se algum.
 ///
@@ -7863,12 +9662,51 @@ async fn catalogo_de_mods() -> Result<catalogo::Catalogo, catalogo::FalhaNoCatal
     catalogo::buscar_catalogo().await
 }
 
+/// Para que a janela chama [`instalar_mod_do_catalogo`]. São dois usos, e só
+/// um deles mexe no servidor que esta janela hospeda.
+///
+/// **Lote X da F5, ADR 0045.** Instalar, exigir num servidor e consentir são
+/// três decisões. O comando servia aos dois usos sem saber qual era cada um, e
+/// reaplicava no servidor hospedado aqui todo MOD que ele já exigia. Na
+/// obtenção para outro servidor, isso trocava a versão que o servidor daqui
+/// exige pela que o outro exige, e quem estava dentro dele caía. Acontecia
+/// também depois de a pessoa desistir da pergunta, porque a obtenção segue até
+/// o fim.
+///
+/// **Obrigatório, sem padrão.** Uma chamada que não diz o uso é recusada pela
+/// ponte do Tauri antes de baixar qualquer coisa, e a recusa chega à tela. Um
+/// padrão seria um defeito calado nos dois sentidos: reaplicar por omissão é o
+/// achado deste lote, e não reaplicar por omissão traz o QA-01 de volta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum UsoDoCatalogo {
+    /// A gestão de MODs atualiza um MOD pelo catálogo (`instalarDoCatalogo`,
+    /// em `camada-mods.js`). Se o servidor hospedado aqui já o exigia, a
+    /// exigência passa aos bytes novos: é o QA-01.
+    Atualizar,
+    /// A janela obtém o que um servidor exige para entrar nele
+    /// (`obterOConjunto`, em `camada-mods.js`, e
+    /// `buscarOQueFaltaSeJaFoiAceito`, em `base.js`). Só instala: o servidor
+    /// hospedado aqui continua exigindo o que exigia.
+    Obter,
+}
+
+/// Se este uso reaplica o MOD no servidor que esta janela hospeda: só a
+/// atualização pela gestão, e só de um MOD que ele já exigia. Ver
+/// [`UsoDoCatalogo`].
+fn reaplica_no_hospedado(uso: UsoDoCatalogo, ja_exigido: bool) -> bool {
+    ja_exigido && uso == UsoDoCatalogo::Atualizar
+}
+
 /// Baixa do catálogo uma versão de um MOD e a instala nesta máquina.
 ///
 /// Confere a assinatura do catálogo, a lista de revogações, e o **hash do
 /// conjunto** dos arquivos baixados — nesta ordem, e nada vai para o disco
 /// antes da última. Instala desligado, como toda instalação de MOD: ligar é
 /// outra decisão.
+///
+/// `uso` diz quem chama ([`UsoDoCatalogo`]), e a resposta diz se o MOD foi
+/// reaplicado no servidor que esta janela hospeda.
 ///
 /// # Errors
 ///
@@ -7879,8 +9717,9 @@ async fn instalar_mod_do_catalogo(
     session: State<'_, Session>,
     id: String,
     versao: String,
+    uso: UsoDoCatalogo,
 ) -> Result<bool, catalogo::FalhaNoCatalogo> {
-    let ja_exigido = mod_exigido_aqui(&session, &id).await;
+    let reaplicar = reaplica_no_hospedado(uso, mod_exigido_aqui(&session, &id).await);
     let hash = catalogo::instalar_do_catalogo(&config_dir(&app), &id, &versao).await?;
 
     // **QA-01: baixar não é aplicar.** Trocar os arquivos no disco não mexe na
@@ -7897,13 +9736,14 @@ async fn instalar_mod_do_catalogo(
     // sim, mesmo sendo a mesma decisão de segundos antes.
     //
     // Só para um MOD que **já estava exigido**: atualizar não é ligar, e um que
-    // estava desligado continua desligado.
-    if ja_exigido {
+    // estava desligado continua desligado. E só quando quem chama é a gestão:
+    // obter o que um servidor exige não decide nada sobre o servidor daqui.
+    if reaplicar {
         aplicar_mod(app, session, id, hash, true)
             .await
             .map_err(|erro| catalogo::FalhaNoCatalogo::NaoAplicou(format!("{erro:?}")))?;
     }
-    Ok(ja_exigido)
+    Ok(reaplicar)
 }
 
 /// Se este MOD está exigido pelo servidor que **esta janela** hospeda.
@@ -7917,6 +9757,160 @@ async fn mod_exigido_aqui(session: &State<'_, Session>, id: &str) -> bool {
     let persistence = persistence.lock().await;
     seele_server::persistence::mods::enabled(&persistence)
         .is_ok_and(|ligados| ligados.iter().any(|ligado| ligado.id == id))
+}
+
+/// **Só a atualização pela gestão reaplica no servidor hospedado** — lote X da
+/// F5, ADR 0045. Ver [`UsoDoCatalogo`].
+///
+/// O comando tem `AppHandle` e baixa da rede, e não roda num teste. O que roda
+/// é o banco de verdade do servidor hospedado (`Persistence`), em memória, com
+/// a decisão do comando ([`reaplica_no_hospedado`]) e o efeito de
+/// [`aplicar_mod`]: `habilitar_mod` grava a linha **por identificador**, então
+/// reaplicar troca a versão exigida e a identidade do conjunto — e, com a
+/// identidade nova, o servidor derruba quem estava dentro.
+#[cfg(test)]
+mod so_a_gestao_reaplica_no_servidor_hospedado {
+    use seele_server::mods::anuncio::conjunto_exigido;
+    use seele_server::persistence::mods::{enable, enabled, EnabledMod};
+    use seele_server::persistence::{Location, Persistence};
+
+    use super::{corpo_de, fonte_sem_comentarios, reaplica_no_hospedado, UsoDoCatalogo};
+
+    const ID: &str = "autor/rpg";
+
+    /// Uma versão do MOD, como o banco do servidor a guarda.
+    fn versao(numero: &str, byte: char) -> EnabledMod {
+        EnabledMod {
+            id: ID.to_owned(),
+            version: numero.to_owned(),
+            hash: byte.to_string().repeat(64),
+            repo: "https://example.invalid/rpg".to_owned(),
+            reach: vec!["dom".to_owned()],
+            server_half: false,
+            api: seele_ffi::mods::MOD_API_VERSION,
+        }
+    }
+
+    /// O servidor que esta janela hospeda, exigindo o MOD na 1.0.0.
+    fn hospedado() -> Persistence {
+        let banco = Persistence::open(&Location::Memory).unwrap();
+        enable(&banco, &versao("1.0.0", 'a')).unwrap();
+        banco
+    }
+
+    /// A versão que o servidor hospedado exige, e a identidade que ele anuncia.
+    fn exigido(banco: &Persistence) -> (String, String) {
+        let ligado = enabled(banco)
+            .unwrap()
+            .into_iter()
+            .find(|ligado| ligado.id == ID)
+            .unwrap();
+        (ligado.version, conjunto_exigido(banco).unwrap().identidade)
+    }
+
+    /// O que `instalar_mod_do_catalogo` faz no servidor hospedado depois de
+    /// baixar `chegou`: a decisão do comando, sobre o que `mod_exigido_aqui`
+    /// lê, e, se ela mandar, o que `aplicar_mod` grava.
+    fn depois_de_baixar(banco: &Persistence, uso: UsoDoCatalogo, chegou: &EnabledMod) -> bool {
+        let ja_exigido = enabled(banco).unwrap().iter().any(|ligado| ligado.id == ID);
+        let reaplicar = reaplica_no_hospedado(uso, ja_exigido);
+        if reaplicar {
+            enable(banco, chegou).unwrap();
+        }
+        reaplicar
+    }
+
+    /// A medida do lote: outro servidor exige o mesmo MOD na 2.0.0, e a janela
+    /// o obtém. É a mesma chamada na pergunta dos MODs, depois de a pessoa
+    /// desistir dela (a obtenção segue até o fim) e na sessão que já aceitou.
+    #[test]
+    fn obter_o_que_outro_servidor_exige_nao_troca_a_versao_do_servidor_hospedado() {
+        let banco = hospedado();
+        let antes = exigido(&banco);
+
+        let reaplicou = depois_de_baixar(&banco, UsoDoCatalogo::Obter, &versao("2.0.0", 'b'));
+
+        let depois = exigido(&banco);
+        assert_eq!(
+            depois, antes,
+            "obter o MOD que outro servidor exige trocou a versão exigida pelo servidor que \
+             esta janela hospeda, de {} para {}: quem estava dentro dele cai, e ele passa a \
+             exigir uma versão que quem hospeda não escolheu (ADR 0045)",
+            antes.0, depois.0
+        );
+        assert!(
+            !reaplicou,
+            "a obtenção para outro servidor respondeu que reaplicou no servidor hospedado aqui"
+        );
+    }
+
+    /// O QA-01 continua: atualizar pela gestão um MOD que o servidor daqui
+    /// exige passa a exigência aos bytes novos, e um que ele não exige fica
+    /// desligado.
+    #[test]
+    fn a_atualizacao_pela_gestao_continua_reaplicando() {
+        let banco = hospedado();
+        let antes = exigido(&banco);
+
+        let reaplicou = depois_de_baixar(&banco, UsoDoCatalogo::Atualizar, &versao("2.0.0", 'b'));
+
+        let depois = exigido(&banco);
+        assert!(
+            reaplicou && depois.0 == "2.0.0" && depois.1 != antes.1,
+            "atualizar pela gestão um MOD exigido aqui deixou de reaplicar: o disco tem a \
+             versão nova e o servidor continua exigindo a antiga (QA-01) — {antes:?} → {depois:?}"
+        );
+
+        let vazio = Persistence::open(&Location::Memory).unwrap();
+        assert!(
+            !depois_de_baixar(&vazio, UsoDoCatalogo::Atualizar, &versao("2.0.0", 'b'))
+                && enabled(&vazio).unwrap().is_empty(),
+            "atualizar um MOD que o servidor daqui não exige o ligou: atualizar não é ligar"
+        );
+    }
+
+    /// A janela diz o uso com estas palavras (`camada-mods.js`, `base.js`), e
+    /// nenhuma outra passa.
+    #[test]
+    fn a_janela_diz_o_uso_com_as_palavras_que_o_comando_entende() {
+        let ler = |texto: &str| serde_json::from_str::<UsoDoCatalogo>(texto).ok();
+        assert_eq!(
+            (ler("\"obter\""), ler("\"atualizar\"")),
+            (Some(UsoDoCatalogo::Obter), Some(UsoDoCatalogo::Atualizar)),
+            "o comando deixou de entender a palavra que a janela manda: toda obtenção e \
+             toda atualização pelo catálogo são recusadas antes de baixar"
+        );
+        assert_eq!(
+            (ler("null"), ler("\"Atualizar\"")),
+            (None, None),
+            "o comando aceita um uso que a janela não escreve: uma chamada sem uso passaria \
+             a ter um padrão calado"
+        );
+    }
+
+    /// O comando reaplica pela decisão que lê o uso, e por nenhum outro
+    /// caminho. Sem isto, a decisão acima podia estar certa e o comando voltar
+    /// a reaplicar por `mod_exigido_aqui` sozinho.
+    ///
+    /// A agulha do cabeçalho é montada por `concat!` (rodada 1): escrita
+    /// inteira, ela casava com este mesmo teste quando o comando mudava de
+    /// nome ou de cabeçalho, e o guarda conferia a si mesmo.
+    #[test]
+    fn o_comando_reaplica_pela_decisao_que_le_o_uso() {
+        let fonte = fonte_sem_comentarios();
+        let corpo = corpo_de(&fonte, concat!("async fn instalar_mod_do_catalogo", "("));
+        let decide = corpo.find("reaplica_no_hospedado(uso,");
+        let aplica = corpo.find("if reaplicar {");
+        assert!(
+            corpo.contains("uso: UsoDoCatalogo,")
+                && matches!((decide, aplica), (Some(decide), Some(aplica)) if decide < aplica)
+                && corpo.matches("aplicar_mod(").count() == 1
+                && corpo.contains("Ok(reaplicar)"),
+            "`instalar_mod_do_catalogo` deixou de reaplicar só pela decisão que lê o uso: a \
+             obtenção para outro servidor volta a trocar o MOD do servidor hospedado aqui \
+             (ADR 0045):\n{corpo}"
+        );
+    }
 }
 
 /// Todo sim que esta máquina já deu a um servidor.
@@ -8039,7 +10033,7 @@ async fn escolher_minha_imagem(
 /// 8 KiB de PNG, e binário num arquivo de `nome <TAB> valor` faria uma edição à
 /// mão virar conversa de suporte. É a mesma decisão que `conhecidos` já tomou
 /// para a imagem de cada servidor.
-fn caminho_do_retrato(app: &AppHandle) -> std::path::PathBuf {
+fn caminho_do_retrato<R: tauri::Runtime>(app: &AppHandle<R>) -> std::path::PathBuf {
     std::path::PathBuf::from(config_dir(app)).join("retrato.png")
 }
 
@@ -8065,7 +10059,7 @@ fn gravar_retrato(app: &AppHandle, bytes: Option<&[u8]>) -> Result<(), Connectio
 }
 
 /// Os bytes do retrato desta máquina, se há um.
-fn retrato_guardado(app: &AppHandle) -> Option<Vec<u8>> {
+fn retrato_guardado<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<Vec<u8>> {
     std::fs::read(caminho_do_retrato(app)).ok()
 }
 
@@ -8995,7 +10989,9 @@ fn consentir_no_caminho_entre_pares(
     Ok(())
 }
 
-fn preferencias(app: &AppHandle) -> Option<seele_ffi::preferences::Preferences> {
+fn preferencias<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+) -> Option<seele_ffi::preferences::Preferences> {
     seele_ffi::preferences::Preferences::open(
         std::path::PathBuf::from(config_dir(app)).join("preferences"),
     )
@@ -9171,7 +11167,7 @@ fn escolher_saida(
 }
 
 /// Onde fica a lista de servidores visitados.
-fn caminho_dos_conhecidos(app: &AppHandle) -> std::path::PathBuf {
+fn caminho_dos_conhecidos<R: tauri::Runtime>(app: &AppHandle<R>) -> std::path::PathBuf {
     std::path::PathBuf::from(config_dir(app)).join("conhecidos")
 }
 
@@ -10437,6 +12433,11 @@ fn main() {
                     }
                 }
             }
+            // **E o Cmd+Q passa pela janela** (tarefa 21 da F7): o Sair do menu
+            // padrão saía sem perguntar e sem despedir ninguém. Ver
+            // `trocar_o_sair_do_mac`.
+            #[cfg(target_os = "macos")]
+            trocar_o_sair_do_mac(app.handle());
             // O módulo de vídeo passa a morar ao lado do banco, e não dentro do
             // pacote.
             //
@@ -10476,6 +12477,13 @@ fn main() {
                     }
                 });
             }
+            // **A sala pessoal sobe sozinha, em segundo plano** (tarefa 23 da
+            // F7): a escada custa até ~4 s, e a janela não espera por ela. O
+            // estado chega à casca por `sala::CANAL_DA_SALA`.
+            tauri::async_runtime::spawn(sala::subir(
+                app.handle().clone(),
+                sala::Subida::da_producao(app.handle()),
+            ));
             tracing::info!(millis = arranque.elapsed().as_millis(), "janela pronta");
             Ok(())
         })
@@ -10506,6 +12514,7 @@ fn main() {
             apagar_pacote_do_cache,
             conjunto_exigido_agora,
             connect,
+            soltar_a_entrada,
             hospedar,
             caminho_entre_pares,
             consentir_no_caminho_entre_pares,
@@ -10520,6 +12529,16 @@ fn main() {
             estou_hospedando,
             servidor_hospedado,
             onde_estou,
+            estado_da_sala,
+            receber_ligacoes,
+            toques_agora,
+            atender,
+            recusar,
+            encerrar_a_ligacao,
+            meu_codigo,
+            contatos_da_agenda,
+            dar_nome_na_agenda,
+            bloquear,
             baixar_versao,
             conferir_esta_versao,
             estado_da_primeira_abertura,
@@ -10529,7 +12548,8 @@ fn main() {
             catalogo_de_mods,
             instalar_mod_do_catalogo,
             disconnect,
-            desmontar_a_sessao,
+            parar_de_hospedar,
+            meu_servidor,
             snapshot,
             messages,
             enter_voice_room,
@@ -10549,6 +12569,7 @@ fn main() {
             reenviar_mensagem,
             descartar_mensagem,
             limite_da_mensagem,
+            limites_dos_campos,
             criar_voice_room,
             criar_linha,
             renomear_voice_room,
@@ -10677,6 +12698,12 @@ fn main() {
             } = &evento
             {
                 api.prevent_exit();
+                // O `RunEvent::Exit` que vem depois desta saída não despede de
+                // novo (`despedir_no_fim`).
+                handle
+                    .state::<Session>()
+                    .despedida_feita
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
                 let saida = handle.clone();
                 tauri::async_runtime::spawn(async move {
                     use tauri::Manager as _;
@@ -10688,6 +12715,17 @@ fn main() {
                     saida.exit(0);
                 });
                 despedir_se(handle);
+            }
+            // **E quem sai sem fechar a janela** (tarefa 21 da F7): o Sair do
+            // Dock, o logout, um `quit` mandado de fora. O `NSApplication` manda
+            // o `terminate:`, o `tao` não implementa `applicationShouldTerminate:`,
+            // e o `applicationWillTerminate:` vem direto para cá, sem janela
+            // fechada e sem `ExitRequested` (`tao` 0.35.3, `app_state.rs`,
+            // `AppState::exit`; `tauri-runtime-wry` 2.11.4, `Event::LoopDestroyed`).
+            // Quando este fecho volta, o AppKit chama `exit()`: a despedida daqui
+            // é de melhor esforço, com teto, e diz no `seele.log` o que conseguiu.
+            if matches!(evento, tauri::RunEvent::Exit) {
+                despedir_no_fim_do_app(handle);
             }
         }),
         Err(error) => {
@@ -10746,6 +12784,304 @@ async fn despedir_das_hospedagens(sessao: &Session, teto: std::time::Duration) {
         }
     };
     tokio::join!(despedir(guardado), despedir(pessoal));
+}
+
+/// O teto da despedida de quem sai sem fechar a janela: **um segundo, e é
+/// inegociável** (decisão da orquestradora, 10/10). A saída nunca trava; o que
+/// não coube nele sai pelo prazo de ociosidade do servidor, 20 s.
+const TETO_DA_DESPEDIDA_NO_FIM: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// O que cada hospedagem tem dentro do [`TETO_DA_DESPEDIDA_NO_FIM`]. Menos que
+/// ele, para a espera de fora não vencer por um fio a hospedagem que ainda
+/// estava dentro do próprio teto. A sessão tem os ~700 ms dela
+/// ([`despedir_se`]), e as três metades correm juntas.
+const TETO_DAS_HOSPEDAGENS_NO_FIM: std::time::Duration = std::time::Duration::from_millis(800);
+
+/// O que a despedida do fim conseguiu ([`despedir_no_fim`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DespedidaNoFim {
+    /// A saída comum já tinha despedido todo mundo: nada a fazer.
+    JaFeita,
+    /// A sessão e as hospedagens acabaram dentro do teto.
+    Rodou,
+    /// O teto venceu, com alguma metade ainda andando: o processo sai assim
+    /// mesmo, e quem ficou pode notar a saída pelo prazo de ociosidade.
+    TetoVenceu,
+    /// Uma metade caiu (um pânico) antes de dizer que acabou.
+    Caiu,
+}
+
+/// **A despedida de quem sai sem fechar a janela**, de melhor esforço e com
+/// teto (tarefa 21 da F7).
+///
+/// O `RunEvent::Exit` do `terminate:` chega na thread principal, e o AppKit
+/// chama `exit()` assim que ela volta: uma espera sem teto aqui é um app que
+/// não fecha. As duas metades correm fora dela — a `sessao` numa thread, as
+/// `hospedagens` no runtime — e ela espera as duas até `teto`, contado do
+/// começo. O que passar disso é cortado pelo `exit()`.
+///
+/// Roda uma vez por processo: `feita` é a marca que a saída comum também põe
+/// ([`Session::despedida_feita`]).
+fn despedir_no_fim<S, H>(
+    feita: &std::sync::atomic::AtomicBool,
+    teto: std::time::Duration,
+    sessao: S,
+    hospedagens: H,
+) -> (DespedidaNoFim, std::time::Duration)
+where
+    S: FnOnce() + Send + 'static,
+    H: std::future::Future<Output = ()> + Send + 'static,
+{
+    if feita.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return (DespedidaNoFim::JaFeita, std::time::Duration::ZERO);
+    }
+    let comeco = std::time::Instant::now();
+    let (acabou, acabadas) = std::sync::mpsc::channel::<()>();
+    let acabou_a_sessao = acabou.clone();
+    if let Err(erro) = std::thread::Builder::new()
+        .name("despedida do fim".into())
+        .spawn(move || {
+            sessao();
+            let _ = acabou_a_sessao.send(());
+        })
+    {
+        // A metade da sessão não começou; a das hospedagens ainda vale.
+        tracing::warn!(%erro, "saída do app: a despedida da sessão não conseguiu thread");
+    }
+    tauri::async_runtime::spawn(async move {
+        hospedagens.await;
+        let _ = acabou.send(());
+    });
+    let prazo = comeco + teto;
+    for _ in 0..2 {
+        let resta = prazo.saturating_duration_since(std::time::Instant::now());
+        match acabadas.recv_timeout(resta) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                return (DespedidaNoFim::TetoVenceu, comeco.elapsed());
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return (DespedidaNoFim::Caiu, comeco.elapsed());
+            }
+        }
+    }
+    (DespedidaNoFim::Rodou, comeco.elapsed())
+}
+
+/// A linha do `seele.log` da despedida do fim: se rodou e quanto levou, ou que
+/// o teto venceu. Quem lê o log de quem «saiu e continuou aparecendo na sala»
+/// precisa achar esta linha, e não um silêncio.
+fn dizer_a_despedida_do_fim(desfecho: DespedidaNoFim, levou: std::time::Duration) {
+    let levou_ms = u64::try_from(levou.as_millis()).unwrap_or(u64::MAX);
+    let teto_ms = u64::try_from(TETO_DA_DESPEDIDA_NO_FIM.as_millis()).unwrap_or(u64::MAX);
+    match desfecho {
+        DespedidaNoFim::JaFeita => {
+            tracing::info!("saída do app: a despedida já tinha rodado ao fechar a última janela")
+        }
+        DespedidaNoFim::Rodou => tracing::info!(
+            levou_ms,
+            "saída do app sem fechar a janela (Sair do Dock, logout, um quit de fora): \
+             a sessão e as hospedagens se despediram"
+        ),
+        DespedidaNoFim::TetoVenceu => tracing::warn!(
+            levou_ms,
+            teto_ms,
+            "saída do app sem fechar a janela: o teto da despedida venceu, e quem ficou \
+             pode notar a saída pelo prazo de ociosidade, 20 s"
+        ),
+        DespedidaNoFim::Caiu => tracing::warn!(
+            levou_ms,
+            "saída do app sem fechar a janela: uma metade da despedida caiu antes de \
+             acabar, e quem ficou pode notar a saída pelo prazo de ociosidade, 20 s"
+        ),
+    }
+}
+
+/// A despedida do fim com as metades de verdade: [`despedir_se`] e
+/// [`despedir_das_hospedagens`].
+fn despedir_no_fim_do_app(handle: &tauri::AppHandle) {
+    let (da_sessao, das_hospedagens) = (handle.clone(), handle.clone());
+    let (desfecho, levou) = despedir_no_fim(
+        &handle.state::<Session>().despedida_feita,
+        TETO_DA_DESPEDIDA_NO_FIM,
+        move || despedir_se(&da_sessao),
+        async move {
+            despedir_das_hospedagens(
+                &das_hospedagens.state::<Session>(),
+                TETO_DAS_HOSPEDAGENS_NO_FIM,
+            )
+            .await;
+        },
+    );
+    dizer_a_despedida_do_fim(desfecho, levou);
+}
+
+/// O id do Sair nosso no menu do macOS ([`trocar_o_sair_do_mac`]).
+#[cfg(target_os = "macos")]
+const ID_DO_SAIR: &str = "seele-sair";
+
+/// **O Cmd+Q do macOS passa pela janela** (tarefa 21 da F7).
+///
+/// O Sair do menu padrão do Tauri (`PredefinedMenuItem::quit`) manda o
+/// `terminate:` ao `NSApplication`, e o Cmd+Q ia direto ao `RunEvent::Exit`
+/// (ver o fecho do `app.run`): sem perguntar, com o servidor guardado no ar, e
+/// sem despedir nem a sessão nem as hospedagens. O nosso fecha a janela
+/// principal ([`sair_pelo_menu`]), e o Cmd+Q passa a ser o botão vermelho: a
+/// página pergunta, se houver o que perguntar, e a saída segurada do
+/// `ExitRequested` despede todo mundo.
+///
+/// **O resto do menu é o padrão, item por item**, inclusive o Editar: sem ele,
+/// o Cmd+C, o Cmd+V e o Cmd+Z param nos campos da página. Por isso o menu é o
+/// que o Tauri já instalou (no `build`, antes do `setup`), e só o último item
+/// do submenu do app é trocado, com o mesmo texto e o mesmo atalho — e só se
+/// ele for mesmo o Sair. Se outra versão do Tauri mudar o menu, o padrão fica,
+/// e o `seele.log` diz. O menu antes e depois sai no `seele.log` em `debug`.
+#[cfg(target_os = "macos")]
+fn trocar_o_sair_do_mac(app: &AppHandle) {
+    let Some(menu) = app.menu() else {
+        tracing::warn!(
+            "o macOS ficou sem o menu padrão, e o Sair nosso não entrou: o Cmd+Q sai sem \
+             perguntar e sem se despedir"
+        );
+        return;
+    };
+    tracing::debug!(menu = %listar_o_menu(&menu), "o menu do macOS, antes do Sair nosso");
+    match trocar_o_sair(app, &menu) {
+        Ok(true) => {
+            tracing::debug!(menu = %listar_o_menu(&menu), "o menu do macOS, com o Sair nosso");
+        }
+        Ok(false) => tracing::warn!(
+            menu = %listar_o_menu(&menu),
+            "o último item do submenu do app não é o Sair padrão, e o menu ficou como \
+             estava: o Cmd+Q sai sem perguntar e sem se despedir"
+        ),
+        Err(erro) => tracing::warn!(
+            %erro,
+            "não consegui trocar o Sair do menu do macOS: o Cmd+Q sai sem perguntar e sem \
+             se despedir"
+        ),
+    }
+    app.on_menu_event(|app, evento| {
+        if evento.id().as_ref() == ID_DO_SAIR {
+            sair_pelo_menu(app);
+        }
+    });
+}
+
+/// Troca o último item do submenu do app pelo Sair nosso, com o mesmo texto e o
+/// mesmo atalho, se ele for o Sair padrão; `false` quando não é.
+#[cfg(target_os = "macos")]
+fn trocar_o_sair(app: &AppHandle, menu: &tauri::menu::Menu<tauri::Wry>) -> tauri::Result<bool> {
+    let Some(tauri::menu::MenuItemKind::Submenu(do_app)) = menu.items()?.into_iter().next() else {
+        return Ok(false);
+    };
+    let itens = do_app.items()?;
+    let Some(padrao) = itens.last().and_then(|item| item.as_predefined_menuitem()) else {
+        return Ok(false);
+    };
+    // O texto do Sair padrão é «Quit <nome do app>» (`muda` 0.19.3,
+    // `platform_impl/macos`, `new_predefined`); o nosso leva o mesmo.
+    let texto = padrao.text()?;
+    if !texto.starts_with("Quit") {
+        return Ok(false);
+    }
+    let nosso = tauri::menu::MenuItem::with_id(app, ID_DO_SAIR, &texto, true, Some("CmdOrCtrl+Q"))?;
+    do_app.remove_at(itens.len().saturating_sub(1))?;
+    do_app.append(&nosso)?;
+    Ok(true)
+}
+
+/// O menu numa linha, item por item: `Título[item | item | —]`. O id só
+/// aparece nos itens que não são do sistema, que é como o Sair nosso se
+/// distingue do padrão.
+#[cfg(target_os = "macos")]
+fn listar_o_menu(menu: &tauri::menu::Menu<tauri::Wry>) -> String {
+    fn item(kind: &tauri::menu::MenuItemKind<tauri::Wry>) -> String {
+        use tauri::menu::MenuItemKind;
+        match kind {
+            MenuItemKind::Submenu(sub) => format!(
+                "{}[{}]",
+                sub.text().unwrap_or_default(),
+                sub.items()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(item)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            ),
+            MenuItemKind::Predefined(sistema) => {
+                let texto = sistema.text().unwrap_or_default();
+                if texto.is_empty() {
+                    "—".to_owned()
+                } else {
+                    texto
+                }
+            }
+            MenuItemKind::MenuItem(nosso) => {
+                format!(
+                    "{} #{}",
+                    nosso.text().unwrap_or_default(),
+                    nosso.id().as_ref()
+                )
+            }
+            MenuItemKind::Check(marca) => marca.text().unwrap_or_default(),
+            MenuItemKind::Icon(icone) => icone.text().unwrap_or_default(),
+        }
+    }
+    menu.items()
+        .unwrap_or_default()
+        .iter()
+        .map(item)
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
+/// **O Sair nosso: o caminho do botão vermelho.** Pede o fechar da janela
+/// principal, e a página decide: com o servidor guardado no ar ela pergunta,
+/// sem nada no ar ela deixa fechar. Fechada a janela, a saída segurada do
+/// `ExitRequested` despede todo mundo.
+///
+/// Com o guardado no ar, a pergunta vai aparecer: a janela vem para a frente
+/// antes, porque um Cmd+Q com ela minimizada perguntaria a ninguém, e o app
+/// pareceria não querer fechar.
+#[cfg(target_os = "macos")]
+fn sair_pelo_menu(app: &AppHandle) {
+    let Some(janela) = app.get_webview_window("main") else {
+        // Sem a janela não há página para perguntar: a saída vai pelo
+        // `RunEvent::Exit`, com a despedida do fim.
+        tracing::info!("Sair do menu sem a janela principal: o app sai pela despedida do fim");
+        app.exit(0);
+        return;
+    };
+    let guardado_no_ar = app
+        .state::<Session>()
+        .hospedagens
+        .lock()
+        .map(|hospedagens| hospedagens.guardado.is_some())
+        .unwrap_or(false);
+    if guardado_no_ar {
+        for (passo, feito) in [
+            ("unminimize", janela.unminimize()),
+            ("show", janela.show()),
+            ("set_focus", janela.set_focus()),
+        ] {
+            if let Err(erro) = feito {
+                tracing::warn!(passo, %erro, "o Sair do menu não trouxe a janela para a frente");
+            }
+        }
+    }
+    tracing::info!(
+        guardado_no_ar,
+        "Sair do menu: pede o fechar da janela principal"
+    );
+    if let Err(erro) = janela.close() {
+        tracing::warn!(
+            %erro,
+            "o Sair do menu não conseguiu pedir o fechar da janela: o app sai pela \
+             despedida do fim, sem perguntar"
+        );
+        app.exit(0);
+    }
 }
 
 /// Quanto a saída do app espera os MODs nativos confirmarem a parada.
@@ -10814,6 +13150,144 @@ fn despedir_da_sessao(sessao: &Session, teto: std::time::Duration) {
             "a despedida não terminou em 500 ms: quem ficou vai notar a saída pelo prazo de \
              ociosidade, 20 s"
         );
+    }
+}
+
+/// A despedida de quem sai sem fechar a janela (tarefa 21 da F7): o Sair do
+/// Dock, o logout, um `quit` de fora. O que se prova aqui é a forma, com
+/// metades de mentira; se o runtime ainda a entrega no `RunEvent::Exit` é
+/// medida no app de verdade.
+#[cfg(test)]
+mod a_despedida_do_fim {
+    use super::{despedir_no_fim, dizer_a_despedida_do_fim, DespedidaNoFim};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// **A saída nunca trava.** Com as duas metades presas, a despedida volta
+    /// no teto, e diz que ele venceu.
+    #[test]
+    fn a_despedida_do_fim_nunca_passa_do_teto() {
+        let feita = AtomicBool::new(false);
+        let teto = Duration::from_millis(300);
+        let comeco = Instant::now();
+        let (desfecho, levou) = despedir_no_fim(
+            &feita,
+            teto,
+            || std::thread::sleep(Duration::from_secs(3)),
+            async { tokio::time::sleep(Duration::from_secs(3)).await },
+        );
+        let medido = comeco.elapsed();
+        assert_eq!(desfecho, DespedidaNoFim::TetoVenceu);
+        assert!(
+            medido < teto + Duration::from_millis(200),
+            "a despedida do fim segurou a saída {medido:?}, com teto de {teto:?}: o \
+             AppKit espera, e o app não fecha"
+        );
+        assert!(levou >= teto, "o teto venceu e a conta diz {levou:?}");
+    }
+
+    /// **As duas metades, qualquer que acabe primeiro.** A despedida só diz
+    /// que rodou depois de a sessão **e** as hospedagens acabarem.
+    #[test]
+    fn a_despedida_do_fim_espera_as_duas_metades() {
+        for (da_sessao, das_hospedagens) in [(100, 250), (250, 100)] {
+            let feita = AtomicBool::new(false);
+            let sessao = Arc::new(AtomicBool::new(false));
+            let hospedagens = Arc::new(AtomicBool::new(false));
+            let (marca_a_sessao, marca_as_hospedagens) =
+                (Arc::clone(&sessao), Arc::clone(&hospedagens));
+            let (desfecho, _) = despedir_no_fim(
+                &feita,
+                Duration::from_secs(2),
+                move || {
+                    std::thread::sleep(Duration::from_millis(da_sessao));
+                    marca_a_sessao.store(true, Ordering::SeqCst);
+                },
+                async move {
+                    tokio::time::sleep(Duration::from_millis(das_hospedagens)).await;
+                    marca_as_hospedagens.store(true, Ordering::SeqCst);
+                },
+            );
+            assert_eq!(desfecho, DespedidaNoFim::Rodou);
+            assert!(
+                sessao.load(Ordering::SeqCst) && hospedagens.load(Ordering::SeqCst),
+                "a despedida do fim voltou antes de uma metade acabar (sessão em \
+                 {da_sessao} ms, hospedagens em {das_hospedagens} ms)"
+            );
+            assert!(
+                feita.load(Ordering::SeqCst),
+                "a despedida rodou e não ficou marcada"
+            );
+        }
+    }
+
+    /// **Uma vez por processo.** Depois da saída comum, que já despediu e
+    /// marcou, o `RunEvent::Exit` não despede de novo.
+    #[test]
+    fn a_despedida_do_fim_nao_repete_a_da_janela() {
+        let feita = AtomicBool::new(true);
+        let chamou = Arc::new(AtomicBool::new(false));
+        let (pela_sessao, pelas_hospedagens) = (Arc::clone(&chamou), Arc::clone(&chamou));
+        let (desfecho, _) = despedir_no_fim(
+            &feita,
+            Duration::from_secs(1),
+            move || pela_sessao.store(true, Ordering::SeqCst),
+            async move { pelas_hospedagens.store(true, Ordering::SeqCst) },
+        );
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(desfecho, DespedidaNoFim::JaFeita);
+        assert!(
+            !chamou.load(Ordering::SeqCst),
+            "a despedida do fim despediu de novo uma saída que já tinha se despedido"
+        );
+    }
+
+    /// **Uma metade que cai não vira «rodou».**
+    #[test]
+    fn a_despedida_do_fim_diz_quando_uma_metade_cai() {
+        let feita = AtomicBool::new(false);
+        let (desfecho, _) = despedir_no_fim(
+            &feita,
+            Duration::from_secs(1),
+            || panic!("a metade da sessão caiu (de propósito, no teste)"),
+            async {},
+        );
+        assert_eq!(desfecho, DespedidaNoFim::Caiu);
+    }
+
+    /// **O `seele.log` diz o que aconteceu**: se rodou e quanto levou, ou que
+    /// o teto venceu. Um silêncio aqui é a pergunta de quem usa, dias depois,
+    /// sem dado nenhum.
+    #[test]
+    fn a_despedida_do_fim_diz_no_log_o_que_conseguiu() {
+        for (desfecho, agulhas) in [
+            (DespedidaNoFim::JaFeita, &["já tinha rodado"][..]),
+            (
+                DespedidaNoFim::Rodou,
+                &["se despediram", "levou_ms=420"][..],
+            ),
+            (
+                DespedidaNoFim::TetoVenceu,
+                &[
+                    "WARN",
+                    "o teto da despedida venceu",
+                    "levou_ms=420",
+                    "teto_ms=1000",
+                ][..],
+            ),
+            (DespedidaNoFim::Caiu, &["WARN", "caiu antes de acabar"][..]),
+        ] {
+            let ((), rastro) = crate::rastro_de_teste::capturar(|| {
+                dizer_a_despedida_do_fim(desfecho, Duration::from_millis(420));
+            });
+            for agulha in agulhas {
+                assert!(
+                    rastro.contains(agulha),
+                    "a linha de {desfecho:?} não diz `{agulha}`: {rastro}"
+                );
+            }
+        }
     }
 }
 
@@ -10986,6 +13460,87 @@ mod a_tela_le_os_limites_que_o_rust_manda {
             culpados.is_empty(),
             "estas telas leem um limite de imagem que o Rust não serializa, e o que \
              chega é `undefined`: {culpados:?}. As chaves que existem são {chaves:?}"
+        );
+    }
+
+    /// Os tetos que cada tela lê de `limites_dos_campos`, por arquivo: os nomes
+    /// passados a `passaDoTeto("…"` e os lidos direto de `tetosDosCampos())?.…`.
+    fn tetos_lidos_pelas_telas() -> Vec<(String, String)> {
+        let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
+        let mut lidos = Vec::new();
+        let mut arquivos: Vec<_> = std::fs::read_dir(&raiz)
+            .expect("ui/ tem de ser legível")
+            .filter_map(Result::ok)
+            .map(|entrada| entrada.file_name().to_string_lossy().into_owned())
+            .filter(|nome| nome.ends_with(".js"))
+            .collect();
+        arquivos.sort();
+        for arquivo in arquivos {
+            let script = std::fs::read_to_string(raiz.join(&arquivo))
+                .unwrap_or_else(|erro| panic!("{arquivo} tem de ser legível: {erro}"));
+            for pedaco in script.split("passaDoTeto(\"").skip(1) {
+                if let Some(campo) = pedaco.split('"').next() {
+                    lidos.push((arquivo.clone(), campo.to_owned()));
+                }
+            }
+            for pedaco in script.split("tetosDosCampos())?.").skip(1) {
+                // `?.[campo]` é o acesso por nome variável do próprio
+                // `passaDoTeto`, cujos nomes são os de quem o chama, lidos acima.
+                if pedaco.starts_with('[') {
+                    continue;
+                }
+                let campo: String = pedaco
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                lidos.push((arquivo.clone(), campo));
+            }
+        }
+        lidos
+    }
+
+    /// **E os tetos dos campos, pela mesma razão** (pendência 58, item 55; lote
+    /// C55 da F5).
+    ///
+    /// A janela pede cada teto pelo nome, e um nome que o Rust não serializa
+    /// não lança: chega `undefined`, `passaDoTeto` não confere nada, e o campo
+    /// volta a mandar calado o que o núcleo recusa. As chaves vêm de um
+    /// `LimitesDosCampos` serializado de verdade. E, na outra mão, todo teto
+    /// que o Rust serializa tem uma tela que o lê.
+    #[test]
+    fn nenhuma_tela_le_um_teto_de_campo_que_nao_existe() {
+        let Ok(serde_json::Value::Object(mapa)) =
+            serde_json::to_value(seele_ffi::Connection::limites_dos_campos())
+        else {
+            panic!("`LimitesDosCampos` tem de serializar para objeto");
+        };
+        let chaves: std::collections::BTreeSet<&str> = mapa.keys().map(String::as_str).collect();
+        let lidos = tetos_lidos_pelas_telas();
+        assert!(
+            !lidos.is_empty(),
+            "nenhuma tela lê um teto de `limites_dos_campos`, ou a leitura deste guarda \
+             quebrou: ele passaria sem olhar nada"
+        );
+        let culpados: Vec<_> = lidos
+            .iter()
+            .filter(|(_, campo)| !chaves.contains(campo.as_str()))
+            .collect();
+        assert!(
+            culpados.is_empty(),
+            "estas telas leem um teto de campo que o Rust não serializa, e o que chega é \
+             `undefined`, que não confere nada: {culpados:?}. As chaves que existem são \
+             {chaves:?}"
+        );
+        // E todo teto que o Rust manda tem quem o confira: um teto sem leitor é
+        // um campo que voltou a mandar sem conferir, ou um teto que sobrou.
+        let sem_leitor: Vec<_> = chaves
+            .iter()
+            .filter(|chave| !lidos.iter().any(|(_, campo)| campo == *chave))
+            .collect();
+        assert!(
+            sem_leitor.is_empty(),
+            "nenhuma tela confere estes tetos de `limites_dos_campos`: {sem_leitor:?}. Os \
+             lidos são {lidos:?}"
         );
     }
 }
@@ -12833,10 +15388,17 @@ mod a_janela_sabe_de_onde_veio_a_impressao {
                 origem_da_impressao: Some(OrigemDaImpressao::Lista),
                 a_lista_guardou: false,
             },
+            substituida: false,
         };
         let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(&falha) else {
             panic!("a falha da entrada tem de serializar para objeto");
         };
+        // A marca da tentativa substituída (lote E54) só aparece quando é
+        // verdade: toda outra recusa chega à janela com a forma de antes.
+        assert!(
+            !mapa.contains_key("substituida"),
+            "uma recusa que não é de tentativa substituída chegou à janela com a marca: {mapa:?}"
+        );
         for chave in ["error", "trail", "origem_da_impressao", "a_lista_guardou"] {
             assert!(
                 mapa.contains_key(chave),
@@ -16983,6 +19545,110 @@ mod o_tipo_do_arquivo_escolhido {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod parar_de_hospedar_e_so_o_guardado {
+    //! A 19 e a 20 da F7: sair não derruba nada, e o verbo que derruba é o
+    //! `parar_de_hospedar`, só para o guardado. O `meu_servidor` diz à entrada
+    //! para onde o VOLTAR AO MEU SERVIDOR leva.
+
+    use super::{meu_servidor_em, parar_de_hospedar_em, Hospedado, MeuServidor, Session};
+    use seele_server::hospedagem::Hospedagem;
+
+    /// Uma sala no lugar do guardado, com a porta dela: este arquivo só sobe
+    /// hospedagem pelo ponto padrão (o guarda
+    /// `o_ponto_de_encontro_de_quem_hospeda`), e um teste não pergunta à VPS de
+    /// produção. O que se prova aqui é o lugar do guardado na sessão.
+    async fn guardado_de_teste(sessao: &Session, servidor: Option<String>) -> u16 {
+        let hospedagem = Hospedagem::iniciar_sala(0, &[2; 32], "casa", None)
+            .await
+            .expect("o guardado de teste não subiu");
+        let porta = hospedagem.endereco().port();
+        sessao.hospedagens.lock().unwrap().guardado = Some(Hospedado {
+            hospedagem,
+            servidor,
+        });
+        porta
+    }
+
+    #[tokio::test]
+    async fn parar_de_hospedar_derruba_o_guardado_devolve_a_porta_e_deixa_a_sala() {
+        let sessao = Session::default();
+        let porta = guardado_de_teste(&sessao, None).await;
+        let sala = Hospedagem::iniciar_sala(0, &[1; 32], "dona", None)
+            .await
+            .expect("a sala não subiu");
+        sessao.hospedagens.lock().unwrap().pessoal = Some(Hospedado {
+            hospedagem: sala,
+            servidor: None,
+        });
+
+        assert!(parar_de_hospedar_em(&sessao).await, "havia guardado no ar");
+
+        {
+            let hospedagens = sessao.hospedagens.lock().unwrap();
+            assert!(hospedagens.guardado.is_none(), "o guardado ficou no ar");
+            assert!(
+                hospedagens.pessoal.is_some(),
+                "PARAR DE HOSPEDAR derrubou a sala pessoal, que desce pelo «receber ligações»"
+            );
+        }
+        assert!(
+            std::net::UdpSocket::bind(("::", porta)).is_ok(),
+            "o guardado parou e a porta {porta} ficou presa: hospedar de novo não subiria"
+        );
+        assert!(
+            !parar_de_hospedar_em(&sessao).await,
+            "parar duas vezes disse que havia o que parar"
+        );
+
+        let sala = sessao.hospedagens.lock().unwrap().pessoal.take();
+        if let Some(sala) = sala {
+            sala.hospedagem.encerrar().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn meu_servidor_diz_onde_voltar_e_o_nome_que_a_lista_mostra() {
+        let casa = tempfile::tempdir().unwrap();
+        let config = casa.path().to_str().unwrap();
+        let registrado = crate::servidores::criar(config, "Casa da Rafa", "0.16.0");
+        let sessao = Session::default();
+        let meu = |sessao: &Session| meu_servidor_em(&sessao.hospedagens.lock().unwrap(), config);
+        assert_eq!(
+            meu(&sessao),
+            None,
+            "sem guardado no ar, a entrada ofereceu VOLTAR a lugar nenhum"
+        );
+
+        let porta = guardado_de_teste(&sessao, Some(registrado.id.clone())).await;
+        assert_eq!(
+            meu(&sessao),
+            Some(MeuServidor {
+                alvo: format!("127.0.0.1:{porta}"),
+                nome: Some("Casa da Rafa".into()),
+            })
+        );
+
+        // O legado (o banco de sempre, sem registro) volta sem nome, e a frase
+        // diz «o seu servidor».
+        sessao
+            .hospedagens
+            .lock()
+            .unwrap()
+            .guardado
+            .as_mut()
+            .unwrap()
+            .servidor = None;
+        assert_eq!(meu(&sessao).and_then(|meu| meu.nome), None);
+        parar_de_hospedar_em(&sessao).await;
+    }
+}
+
+#[cfg(test)]
 mod a_saida_despede_as_hospedagens {
     use super::{despedir_das_hospedagens, Hospedado, Session};
     use seele_server::hospedagem::Hospedagem;
@@ -17025,47 +19691,90 @@ mod a_saida_despede_as_hospedagens {
 
 #[cfg(test)]
 mod a_resposta_a_estou_no_meu_servidor {
-    use super::{endereco_desta_maquina, onde_estou_em, porta_desta_maquina, OndeEstou};
+    use super::{
+        corpo_de, endereco_desta_maquina, fonte_sem_comentarios, onde_estou_em,
+        porta_desta_maquina, Hospedado, Hospedagens, OndeEstou,
+    };
+    use seele_server::hospedagem::Hospedagem;
+
+    /// A chave do guardado, a da sala e a de um servidor S qualquer.
+    const GUARDADO: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
+    const SALA: &str = "bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22";
+    const DE_S: &str = "cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33";
 
     #[test]
-    fn onde_estou_nas_quatro_situacoes() {
-        // A tela perguntava isto de três jeitos, e com duas hospedagens nenhum
-        // dizia em qual delas a sessão está.
+    fn onde_estou_pela_chave_e_nao_pelo_endereco() {
         assert_eq!(
-            onde_estou_em(None, Some(8383), Some(8385)),
-            OndeEstou::Nenhum
+            onde_estou_em(None, None, Some(GUARDADO), Some(SALA)),
+            OndeEstou::Nenhum,
+            "sem sessão, não há onde estar"
+        );
+        // Os cinco endereços por onde se entra na mesma hospedagem: a chave é
+        // a mesma, e a resposta também. A impressão chega da conexão em
+        // maiúsculas aqui de propósito: a comparação não as diferencia.
+        let fora: Vec<&str> = [
+            "127.0.0.1:8383",
+            "localhost:8383",
+            "[::1]:8383",
+            "192.168.1.20:8383",
+            "casa.exemplo:8383",
+        ]
+        .into_iter()
+        .filter(|endereco| {
+            onde_estou_em(
+                Some(endereco),
+                Some(&GUARDADO.to_ascii_uppercase()),
+                Some(GUARDADO),
+                Some(SALA),
+            ) != OndeEstou::Guardado
+        })
+        .collect();
+        assert!(
+            fora.is_empty(),
+            "a sessão com a chave do guardado, aberta por {fora:?}, não foi dita no guardado: \
+             o próprio link e os outros nomes da mesma máquina deixam de ser o servidor daqui"
         );
         assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8383"), Some(8383), Some(8385)),
-            OndeEstou::Guardado
-        );
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8385"), Some(8383), Some(8385)),
-            OndeEstou::Pessoal
-        );
-        assert_eq!(
-            onde_estou_em(Some("casa.exemplo:8383"), Some(8383), Some(8385)),
-            OndeEstou::Outro
+            onde_estou_em(
+                Some("127.0.0.1:8385"),
+                Some(SALA),
+                Some(GUARDADO),
+                Some(SALA)
+            ),
+            OndeEstou::Pessoal,
+            "a sessão com a chave da sala não foi dita na sala"
         );
     }
 
     #[test]
-    fn um_servidor_desta_maquina_que_este_app_nao_hospeda_e_outro_lugar() {
-        // Um `seeled` à parte na mesma máquina, ou a porta da sala com a sala
-        // fora do ar: o endereço é desta máquina, e a sessão não está em
-        // nenhuma das hospedagens deste app.
+    fn o_mesmo_endereco_com_outra_chave_e_outro_lugar() {
+        // Um servidor S no mesmo endereço do guardado, com outra chave: o
+        // HOSPEDAR COM ESTA da F6 pondo outra versão em 127.0.0.1, ou um
+        // endereço da rede local que hoje é de outra máquina.
+        for endereco in ["127.0.0.1:8383", "192.168.1.20:8383", "127.0.0.1:8385"] {
+            assert_eq!(
+                onde_estou_em(Some(endereco), Some(DE_S), Some(GUARDADO), Some(SALA)),
+                OndeEstou::Outro,
+                "um servidor com outra chave em {endereco} passou por uma das hospedagens desta \
+                 janela: o sim de quem hospeda iria a ele (ADR 0045)"
+            );
+        }
+        // Sem a hospedagem no ar, a chave dela não é de ninguém aqui.
         assert_eq!(
-            onde_estou_em(Some("127.0.0.1:9000"), Some(8383), Some(8385)),
-            OndeEstou::Outro
-        );
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8385"), Some(8383), None),
-            OndeEstou::Outro
-        );
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8383"), None, Some(8385)),
+            onde_estou_em(Some("127.0.0.1:8383"), Some(GUARDADO), None, Some(SALA)),
             OndeEstou::Outro,
-            "sem guardado no ar, a porta dele é de outro servidor"
+            "sem guardado no ar, a sessão foi dita no guardado"
+        );
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:8385"), Some(SALA), Some(GUARDADO), None),
+            OndeEstou::Outro,
+            "sem sala no ar, a sessão foi dita na sala"
+        );
+        // Com sessão e sem impressão, falha fechado.
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:8383"), None, Some(GUARDADO), Some(SALA)),
+            OndeEstou::Outro,
+            "uma sessão sem a chave conferida foi dita numa hospedagem desta janela"
         );
     }
 
@@ -17097,5 +19806,96 @@ mod a_resposta_a_estou_no_meu_servidor {
         for de_fora in ["192.168.0.7:8383", "casa.exemplo:8383", "203.0.113.7"] {
             assert!(!endereco_desta_maquina(de_fora), "{de_fora:?}");
         }
+    }
+
+    /// **As impressões das duas hospedagens, cada uma no seu lugar** (lote X da
+    /// F5, a impressão, commit D). `onde_estou_em` recebe a do guardado em
+    /// terceiro e a da sala em quarto; o par trocado diria `Guardado` na sala e
+    /// gravaria nela o sim de quem hospeda.
+    ///
+    /// Duas salas, e não um servidor guardado e uma sala, pela razão que
+    /// `a_saida_despede_as_hospedagens` escreve: este arquivo só sobe
+    /// hospedagem pelo ponto padrão. Sementes diferentes, chaves diferentes.
+    #[tokio::test]
+    async fn as_impressoes_saem_na_ordem_do_guardado_e_da_sala() {
+        let guardado = Hospedagem::iniciar_sala(0, &[3; 32], "casa", None)
+            .await
+            .expect("o guardado não subiu");
+        let sala = Hospedagem::iniciar_sala(0, &[4; 32], "dona", None)
+            .await
+            .expect("a sala não subiu");
+        let do_guardado = guardado.impressao_digital().to_owned();
+        let da_sala = sala.impressao_digital().to_owned();
+        assert_ne!(
+            do_guardado, da_sala,
+            "as duas hospedagens saíram com a mesma chave, e este teste não mede a ordem"
+        );
+
+        let mut hospedagens = Hospedagens {
+            guardado: Some(Hospedado {
+                hospedagem: guardado,
+                servidor: None,
+            }),
+            pessoal: Some(Hospedado {
+                hospedagem: sala,
+                servidor: None,
+            }),
+        };
+        assert_eq!(
+            hospedagens.impressoes(),
+            (Some(do_guardado), Some(da_sala)),
+            "`Hospedagens::impressoes` não devolve a chave do guardado primeiro e a da sala \
+             depois: a sessão na sala passa por guardado, e o sim de quem hospeda vai a ela \
+             (ADR 0045)"
+        );
+
+        for hospedado in [hospedagens.guardado.take(), hospedagens.pessoal.take()]
+            .into_iter()
+            .flatten()
+        {
+            hospedado.hospedagem.encerrar().await;
+        }
+    }
+
+    /// **A ligação de `onde_estou_na`** (commit D). Os testes acima são puros:
+    /// recebem as impressões prontas. Este prende o que a função da sessão
+    /// passa a eles: a chave que a **conexão** conferiu em segundo, e as das
+    /// hospedagens, na ordem de `impressoes()`, em terceiro e quarto. Trocar a
+    /// chave da sessão pela do guardado diria `Guardado` em qualquer sessão
+    /// com o guardado de pé, e o sim de quem hospeda iria a S.
+    ///
+    /// Olha a chamada e as ligações que a alimentam, sem espaço e sem as
+    /// linhas de comentário, com as agulhas montadas por `concat!`.
+    #[test]
+    fn onde_estou_na_passa_a_chave_da_conexao_e_as_das_hospedagens() {
+        let fonte = fonte_sem_comentarios();
+        let corpo: String = corpo_de(&fonte, concat!("fn onde_estou_na", "(session"))
+            .chars()
+            .filter(|letra| !letra.is_whitespace())
+            .collect::<String>()
+            // A vírgula final que o rustfmt põe numa chamada partida em linhas.
+            .replace(",)", ")");
+        let ligacao = |nome: &str| {
+            corpo
+                .split_once(nome)
+                .and_then(|(_, depois)| depois.split_once(';'))
+                .map(|(ligacao, _)| ligacao.to_owned())
+                .unwrap_or_default()
+        };
+        let da_sessao = ligacao(concat!("let", "impressao="));
+        let das_hospedagens = ligacao(concat!("let(guardado,", "pessoal)="));
+        assert!(
+            da_sessao.starts_with(concat!("session.connection", "()"))
+                && da_sessao.contains(concat!(".impressao_do_", "servidor()"))
+                && das_hospedagens.contains(concat!(".impressoes", "()"))
+                && corpo.contains(concat!(
+                    "onde_estou_em(endereco.as_deref(),",
+                    "impressao.as_deref(),guardado.as_deref(),pessoal.as_deref())"
+                )),
+            "`onde_estou_na` deixou de passar a `onde_estou_em` a chave que a conexão conferiu \
+             em segundo e as das hospedagens, na ordem de `impressoes()`, em terceiro e \
+             quarto: a sessão em S ou na sala passa por guardado, e o sim de quem hospeda vai \
+             a ela (ADR 0045):\n{corpo}"
+        );
     }
 }

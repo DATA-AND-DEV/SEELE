@@ -32,6 +32,37 @@ use crate::persistence::Persistence;
 /// still feels sent immediately.
 pub const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
 
+/// Quantos eventos o barramento guarda para a sessão mais atrasada.
+///
+/// Passado o anel, o `broadcast` descarta o mais antigo e a sessão que não o
+/// leu recebe `Lagged` — e se despede com `FellBehind` (ver o braço em
+/// `session.rs`). É o desenho certo para quem **parou de ler**, e só para ele.
+pub const ANEL_DO_BARRAMENTO: usize = 1024;
+
+/// O maior lote que o escritor grava e anuncia de uma vez.
+///
+/// **A pendência 61.** O lote não tinha teto: o escritor juntava tudo o que
+/// chegasse em [`FLUSH_INTERVAL`] e anunciava num laço sem `await`. Medido com
+/// o cliente de verdade (`seele-conformance/tests/medida_do_barramento.rs`): 17
+/// pessoas × 58 mensagens (986) não passavam ninguém para trás, e 18 × 58
+/// (1 044) passavam **todas** as sessões vivas de uma vez, inclusive quem lia
+/// depressa e quem nem estava no canal. Num servidor aberto, 18 conexões de um
+/// script derrubavam todo mundo. O guarda pela porta de fora é
+/// `rajada_de_muitos.rs`, e o deste teto sozinho é
+/// `o_lote_cheio_e_gravado_sem_esperar_o_relogio`, abaixo.
+///
+/// Um quarto do anel: um anúncio sozinho nunca o enche, e sobra lugar para o
+/// lote seguinte e para o resto do barramento (um `PersonState` por pessoa por
+/// segundo) antes de quem lê depressa voltar a ler.
+pub const TETO_DO_LOTE: usize = ANEL_DO_BARRAMENTO / 4;
+
+// O teto do lote é uma fração do anel, e a conta tem de continuar fechando se um
+// dos dois mudar.
+const _: () = assert!(
+    TETO_DO_LOTE * 4 <= ANEL_DO_BARRAMENTO,
+    "um lote do escritor pode encher mais de um quarto do anel do barramento"
+);
+
 /// Events every connection may care about.
 ///
 /// Broadcast to all, filtered per connection. `specs/04-servidor-seele.md` sizes
@@ -1606,7 +1637,16 @@ pub fn spawn_writer(
             tokio::select! {
                 request = rx.recv() => {
                     match request {
-                        Some(request) => pending.push(request.message),
+                        // **Com teto** ([`TETO_DO_LOTE`]): cheio, grava agora,
+                        // sem esperar o relógio. Sem isto um lote anunciava
+                        // mais do que o anel guarda, e o barramento passava à
+                        // frente de todo mundo de uma vez.
+                        Some(request) => {
+                            pending.push(request.message);
+                            if pending.len() >= TETO_DO_LOTE {
+                                flush(&persistence, &events, &mut pending).await;
+                            }
+                        }
                         // The server is shutting down. Flush what is left rather
                         // than dropping messages the clients believe are queued.
                         None => {
@@ -1680,6 +1720,28 @@ async fn flush(
                 client_message_id,
                 reason: motivo,
             }),
+            // **Não anunciada ao canal**: ver `Gravacao::Apagada`. Só quem
+            // repetiu recebe a recusa, pelo mesmo caminho das outras — e é ela
+            // que tira a chave da conta do que está no ar (`TETO_NO_AR`).
+            Gravacao::Apagada {
+                channel,
+                author,
+                client_message_id,
+                id,
+            } => {
+                tracing::info!(
+                    ?channel,
+                    ?author,
+                    ?id,
+                    "a chave repetida é de uma mensagem apagada pela moderação: recusada, e não anunciada"
+                );
+                events.send(Event::MessageRejected {
+                    channel,
+                    author,
+                    client_message_id,
+                    reason: seele_proto::control::MessageRefusal::Apagada,
+                })
+            }
         };
     }
 }
@@ -1706,6 +1768,68 @@ mod tests {
 
     fn instant() -> Instant {
         Instant::now()
+    }
+
+    /// `quantas` mensagens no escritor, e quanto o relógio andou até todas
+    /// serem anunciadas. Gravadas ou recusadas, tanto faz: cada uma vira um
+    /// evento só no barramento, e é o anúncio que se mede.
+    async fn anunciar(
+        writes: &mpsc::Sender<WriteRequest>,
+        ouvindo: &mut broadcast::Receiver<Event>,
+        quantas: usize,
+    ) -> Duration {
+        let comeco = tokio::time::Instant::now();
+        for numero in 0..quantas {
+            let message = PendingMessage {
+                channel: ChannelId(1),
+                author: PersonId(1),
+                author_nickname: "ana".into(),
+                body: format!("{numero}"),
+                replies_to: None,
+                client_message_id: Some(seele_proto::ids::ClientMessageId(numero as u64 + 1)),
+            };
+            writes
+                .send(WriteRequest { message })
+                .await
+                .expect("o escritor está de pé");
+        }
+        for _ in 0..quantas {
+            ouvindo.recv().await.expect("o escritor anuncia cada uma");
+        }
+        comeco.elapsed()
+    }
+
+    /// **A pendência 61: o lote cheio é gravado sem esperar o relógio.**
+    ///
+    /// Sem o teto, o escritor juntava tudo o que chegasse em [`FLUSH_INTERVAL`]
+    /// e anunciava de uma vez, e um lote acima do anel passava à frente de toda
+    /// sessão viva. Pela porta de fora (`rajada_de_muitos.rs`) este teto
+    /// sozinho não aparece: a contrapressão por conexão segura antes, e passar
+    /// dela pede mais conexões do que um endereço consegue abrir. Aqui ele
+    /// aparece, no relógio de mentira do `tokio`: um lote a menos que o teto
+    /// espera o tique, e o lote no teto sai na hora.
+    #[tokio::test(start_paused = true)]
+    async fn o_lote_cheio_e_gravado_sem_esperar_o_relogio() {
+        let persistence = Arc::new(Mutex::new(
+            Persistence::open(&crate::persistence::Location::Memory).expect("banco em memória"),
+        ));
+        let (events, mut ouvindo) = broadcast::channel(ANEL_DO_BARRAMENTO);
+        let writes = spawn_writer(persistence, events);
+
+        // O controle: um a menos que o teto espera o tique. Sem ele, o teste
+        // não distinguiria «saiu na hora» de «o relógio não andou».
+        let abaixo = anunciar(&writes, &mut ouvindo, TETO_DO_LOTE - 1).await;
+        assert!(
+            abaixo > Duration::ZERO,
+            "um lote abaixo do teto saiu sem o tique ({abaixo:?}): o teste não mede o teto"
+        );
+
+        let no_teto = anunciar(&writes, &mut ouvindo, TETO_DO_LOTE).await;
+        assert!(
+            no_teto < FLUSH_INTERVAL,
+            "o lote de {TETO_DO_LOTE} esperou {no_teto:?} pelo relógio: o escritor não grava ao \
+             chegar ao teto, e um lote acima do anel passa à frente de todo mundo"
+        );
     }
 
     #[test]

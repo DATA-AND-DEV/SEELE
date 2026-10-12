@@ -352,19 +352,47 @@ fn escolher_ponto(achados: &[SocketAddr], aviso: SocketAddr) -> Option<SocketAdd
 /// socket IPv6 só manda para IPv4 com o `IPV6_V6ONLY` desligado — cujo padrão
 /// muda de sistema para sistema (o degrau 2 do ADR 0022 mediu isso e apanhou).
 ///
-/// A diferença é que aqui a opção é escrita à mão em vez de herdada do quinn,
-/// porque é este código que abre o socket. Uma máquina sem IPv6 cai para IPv4, e
+/// A diferença é que aqui a pilha dupla é condição, e não tentativa: sem ela, o
+/// aviso a um ponto IPv4 não sai. Uma máquina sem IPv6 cai para IPv4, e
 /// continua exatamente como estava.
+///
+/// **E a porta é a mesma conferida do QUIC** ([`crate::client::socket_de_quem_conecta`]):
+/// este socket é emprestado ao aperto de mão depois do furo, e uma porta que um
+/// socket IPv4 da máquina segura entregaria a ele a resposta do servidor.
+///
+/// **Quando cai para o só IPv4, diz por quê**, como `local_endpoint` diz: o
+/// socket de pilha dupla que não abriu — sem IPv6, ou as propostas de porta
+/// todas recusadas — mudava em silêncio o socket por onde o aviso sai.
 fn abrir_socket_local() -> Option<std::net::UdpSocket> {
-    use socket2::{Domain, Protocol, Socket, Type};
-
     let seis = || -> Option<std::net::UdpSocket> {
-        let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).ok()?;
-        socket.set_only_v6(false).ok()?;
-        socket
-            .bind(&SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0)).into())
-            .ok()?;
-        Some(socket.into())
+        let socket = match crate::client::socket_de_quem_conecta() {
+            Ok(socket) => socket,
+            Err(erro) => {
+                tracing::warn!(
+                    %erro,
+                    "a batida não abriu o socket de pilha dupla conferido; o aviso sai \
+                     só por IPv4"
+                );
+                return None;
+            }
+        };
+        match socket2::SockRef::from(&socket).only_v6() {
+            Ok(false) => Some(socket),
+            Ok(true) => {
+                tracing::warn!(
+                    "o socket da batida ficou só IPv6, sem pilha dupla; o aviso sai só por IPv4"
+                );
+                None
+            }
+            Err(erro) => {
+                tracing::warn!(
+                    %erro,
+                    "não deu para ler se o socket da batida é de pilha dupla; o aviso sai \
+                     só por IPv4"
+                );
+                None
+            }
+        }
     };
     let quatro = || std::net::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).ok();
 
@@ -469,6 +497,16 @@ const ENVIOS_AO_QUARTO: u32 = 3;
 
 /// O intervalo entre uma volta e a seguinte.
 const INTERVALO_DOS_ENVIOS: Duration = Duration::from_millis(500);
+
+// As voltas cabem no prazo, como [`PRAZO_DO_QUARTO`] promete: cada uma, a última
+// inclusive, com um intervalo inteiro para ser respondida. Uma última volta que
+// saísse em cima do prazo seria uma pergunta que ninguém espera ouvir. Conferido
+// em tempo de compilação, e não pelo teste do ponto que limita: aquele mede o
+// comportamento com um prazo largo, para a carga da máquina não o reprovar.
+const _: () = assert!(
+    ENVIOS_AO_QUARTO as u128 * INTERVALO_DOS_ENVIOS.as_millis() <= PRAZO_DO_QUARTO.as_millis(),
+    "as voltas ao quarto não cabem no PRAZO_DO_QUARTO"
+);
 
 /// O piso da espera pela marca que falta, depois da primeira resposta.
 ///
@@ -1701,6 +1739,69 @@ mod testes {
             aceita_origem(outra_porta, ponto),
             "a resposta do IP do ponto por outra porta foi recusada: um ponto atrás de um \
              balanceador deixaria de ser ouvido"
+        );
+    }
+
+    /// O gêmeo de `client::testes_do_socket::o_socket_de_quem_conecta_nao_divide_a_porta_com_um_socket_ipv4`:
+    /// o socket da batida é emprestado ao aperto de mão do QUIC depois do furo,
+    /// e uma porta que um socket IPv4 da máquina segura entregaria a ele a
+    /// resposta do servidor.
+    ///
+    /// Nos três sistemas, como o gêmeo: encena a colisão onde o sistema a
+    /// deixa acontecer, e onde recusa abre o socket com as portas presas de pé.
+    #[test]
+    fn o_socket_da_batida_nao_divide_a_porta_com_um_socket_ipv4() {
+        use crate::client::testes_do_socket::{a_resposta_chega, encenar_a_colisao, Encenacao};
+
+        let (ladroes, encenada) = match encenar_a_colisao() {
+            Encenacao::Colisao { ladrao, proposta } => {
+                crate::client::PROPOSTA_DE_TESTE
+                    .with(|vaga| *vaga.borrow_mut() = Some(Ok(proposta)));
+                (vec![ladrao], true)
+            }
+            Encenacao::Recusa { ladroes, .. } => (ladroes, false),
+        };
+
+        let Some(socket) = abrir_socket_local() else {
+            panic!("não abriu o socket local da batida");
+        };
+        if encenada {
+            assert!(
+                crate::client::PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow().is_none()),
+                "o socket da batida não passou pela proposta guardada, e o teste não encenou \
+                 a colisão"
+            );
+        }
+        a_resposta_chega(&socket, &ladroes.iter().collect::<Vec<_>>());
+    }
+
+    /// O socket conferido que não abre — sem IPv6, ou as 16 propostas
+    /// recusadas — cai para o só IPv4 dizendo no registro por quê.
+    ///
+    /// O `.ok()?` de antes caía calado, e quem lesse o `seele.log` de uma
+    /// batida que não furou não teria como saber que o socket já era outro.
+    /// `#[test]` comum: `abrir_socket_local` roda inteiro nesta thread, onde
+    /// estão o rastro e a proposta guardada.
+    #[test]
+    fn a_batida_diz_no_registro_quando_o_socket_conferido_nao_abre() {
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        crate::client::PROPOSTA_DE_TESTE.with(|vaga| {
+            *vaga.borrow_mut() = Some(Err(std::io::Error::other("proposta recusada de propósito")));
+        });
+
+        let socket = abrir_socket_local();
+
+        assert!(
+            socket.is_some(),
+            "a batida não caiu para o socket só IPv4 quando o de pilha dupla não abriu"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains("proposta recusada de propósito")),
+            "o socket conferido da batida não abriu e o registro não disse nada, nem por quê. \
+             Linhas: {linhas:?}"
         );
     }
 
@@ -3125,12 +3226,22 @@ mod testes {
     /// Um ponto que limita como o de verdade: responde ao `ONDE`, e a um
     /// `QUEM2` só com a `RECUSA taxa`, uma vez por segundo, calando o resto.
     /// A última recusa acabou de ser dita a um vizinho.
+    ///
+    /// **«Acabou de» é antes de a consulta começar, e é marcado aqui**, antes
+    /// da tarefa nascer. Marcado dentro dela, o relógio do ponto começava
+    /// quando o runtime de uma linha só a punha para rodar, que é depois de a
+    /// consulta mandar a primeira volta. A terceira volta sai a 1 s do começo
+    /// da consulta, e chegava ao ponto 1,1 ms depois do segundo dele, no
+    /// pior de 60 rodadas: a folga era o atraso do timer, e um soluço de 10 ms
+    /// no começo da tarefa a calava 5 vezes em 5 (`Enc2Calado` no lugar de
+    /// `PontoRecusou`, a intermitente de 10/10). Marcado aqui, a terceira volta
+    /// sai sempre mais de 1 s depois da última recusa, com soluço ou sem.
     async fn ponto_que_limita() -> SocketAddr {
         let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let onde = socket.local_addr().unwrap();
+        let mut ultima_recusa = tokio::time::Instant::now();
         tokio::spawn(async move {
             let mut balde = [0_u8; encontro::TAMANHO2 + 1];
-            let mut ultima_recusa = tokio::time::Instant::now();
             while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
                 let dados = balde.get(..lidos).unwrap_or_default();
                 if let Some(encontro::Pedido::Onde { marca }) = encontro::analisar(dados) {
@@ -3159,9 +3270,22 @@ mod testes {
         // menos uma recusa por segundo, o `ONDE` responde, e a consulta
         // concluía que o ponto era anterior ao ENC/2. Ela pergunta de novo
         // dentro do prazo, depois da janela da recusa.
+        //
+        // As marcas antes do ponto: entre a última recusa e a primeira volta
+        // não fica nada além do socket da consulta. Com mais de 1 s ali, a
+        // primeira volta já ouviria a recusa, e o teste passaria com uma
+        // consulta que não pergunta de novo.
+        //
+        // **Com um prazo largo, e não o `PRAZO_DO_QUARTO`.** A pergunta aqui é
+        // se a consulta pergunta de novo depois da janela da recusa. Que as
+        // voltas cabem no prazo do produto é conta, e é conferida em tempo de
+        // compilação, ao lado das constantes. Com o prazo do produto, uma linha
+        // parada meio segundo perto da terceira volta reprovava este teste, e a
+        // bateria inteira carrega a máquina por uma hora e meia.
+        let marcas = marcas_da_sala();
         let ponto = ponto_que_limita().await;
         assert_eq!(
-            localizar(&ponto.to_string(), &marcas_da_sala(), PRAZO_DO_QUARTO).await,
+            localizar(&ponto.to_string(), &marcas, Duration::from_secs(30)).await,
             Localizacao::PontoRecusou
         );
     }

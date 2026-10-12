@@ -80,6 +80,8 @@ const PREVIAS_CONSENTIDAS: &str = "previas_consentidas";
 const SUPRESSAO_DE_RUIDO: &str = "supressao_de_ruido";
 /// A sensibilidade da ativação por voz, em milésimos de dBFS. F01.
 const ABERTURA_DA_VOZ: &str = "abertura_da_voz_dbfs_milesimos";
+/// Se a sala pessoal sobe: «Não receber ligações», no PERFIL. `sim` ou `nao`.
+const RECEBER_LIGACOES: &str = "receber_ligacoes";
 
 /// The local settings, on disk.
 #[derive(Debug, Clone, Default)]
@@ -148,6 +150,9 @@ pub struct Preferences {
     /// Negativa: dBFS é relativa ao máximo. Milésimos porque a interface oferece
     /// meio decibel de passo.
     abertura_da_voz_dbfs_milesimos: Option<i32>,
+    /// Se a sala pessoal sobe (tarefa 23 da F7). `None` é «não escolhido», e
+    /// quem nunca escolheu recebe: ver [`Preferences::receber_ligacoes`].
+    receber_ligacoes: Option<bool>,
 }
 
 impl Preferences {
@@ -176,6 +181,7 @@ impl Preferences {
             previas_consentidas: Vec::new(),
             supressao_de_ruido: None,
             abertura_da_voz_dbfs_milesimos: None,
+            receber_ligacoes: None,
         };
         if let Ok(text) = std::fs::read_to_string(&settings.path) {
             for line in text.lines() {
@@ -229,6 +235,13 @@ impl Preferences {
                     }
                     ASSISTE_POR_PAR => {
                         settings.assiste_por_par = match value.as_deref() {
+                            Some("sim") => Some(true),
+                            Some("nao") => Some(false),
+                            _ => None,
+                        }
+                    }
+                    RECEBER_LIGACOES => {
+                        settings.receber_ligacoes = match value.as_deref() {
                             Some("sim") => Some(true),
                             Some("nao") => Some(false),
                             _ => None,
@@ -550,6 +563,26 @@ impl Preferences {
         &self.previas_consentidas
     }
 
+    /// Se a sala pessoal sobe: «Não receber ligações», no PERFIL, desliga a
+    /// sala inteira (tarefa 23 da F7).
+    ///
+    /// **Quem nunca escolheu recebe.** O código só serve se tocar, e uma
+    /// instalação que nascesse surda daria um número que ninguém atende.
+    #[must_use]
+    pub fn receber_ligacoes(&self) -> bool {
+        self.receber_ligacoes.unwrap_or(true)
+    }
+
+    /// Escreve a escolha de receber ligações.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser escrito.
+    pub fn set_receber_ligacoes(&mut self, receber: bool) -> Result<()> {
+        self.receber_ligacoes = Some(receber);
+        self.write()
+    }
+
     fn write(&self) -> Result<()> {
         // Every setting, not only the one that just changed: this rewrites the
         // whole file, so a line left out here is a line deleted from disk. That
@@ -565,6 +598,9 @@ impl Preferences {
             (!self.previas_consentidas.is_empty()).then(|| self.previas_consentidas.join(" "));
         let supressao = self.supressao_de_ruido.map(|m| m.to_string());
         let abertura = self.abertura_da_voz_dbfs_milesimos.map(|m| m.to_string());
+        let receber = self
+            .receber_ligacoes
+            .map(|sim| if sim { "sim" } else { "nao" }.to_owned());
         for (name, value) in [
             (CAPTURE, &self.capture),
             (PLAYBACK, &self.playback),
@@ -577,6 +613,7 @@ impl Preferences {
             (PREVIAS_CONSENTIDAS, &previas),
             (SUPRESSAO_DE_RUIDO, &supressao),
             (ABERTURA_DA_VOZ, &abertura),
+            (RECEBER_LIGACOES, &receber),
         ] {
             let Some(value) = value else {
                 continue;
@@ -935,6 +972,38 @@ mod tests {
             Some(20_000_000),
             "e atravessa o fechamento da janela"
         );
+    }
+
+    /// «Não receber ligações», no PERFIL (tarefa 23 da F7): o padrão de quem
+    /// nunca escolheu é receber, a escolha atravessa o processo, e escrevê-la
+    /// não apaga as outras.
+    #[test]
+    fn nao_receber_ligacoes_atravessa_o_processo_e_o_padrao_e_receber() {
+        let caminho = scratch("receber-ligacoes");
+        assert!(
+            Preferences::open(caminho.clone())
+                .expect("abrir")
+                .receber_ligacoes(),
+            "uma instalação nova nasceu sem receber ligações"
+        );
+        {
+            let mut p = Preferences::open(caminho.clone()).expect("abrir");
+            p.set_nickname(Some("marcela")).expect("apelido");
+            p.set_receber_ligacoes(false).expect("desligar");
+        }
+        let p = Preferences::open(caminho.clone()).expect("reabrir");
+        assert!(
+            !p.receber_ligacoes(),
+            "a sala voltou ligada depois de a pessoa a desligar"
+        );
+        assert_eq!(p.nickname(), Some("marcela"), "desligar apagou o apelido");
+        {
+            let mut p = Preferences::open(caminho.clone()).expect("abrir");
+            p.set_receber_ligacoes(true).expect("religar");
+        }
+        assert!(Preferences::open(caminho)
+            .expect("reabrir")
+            .receber_ligacoes());
     }
 
     /// Zero é «ninguém compartilhou tela», e não uma medida de zero.

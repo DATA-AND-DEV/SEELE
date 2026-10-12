@@ -183,7 +183,13 @@ function entrarNaAutenticacao(snapshot, veredito, endereco, nossoServidor = fals
   // `nossoServidor` — é o servidor que esta janela subiu. Não há chave alheia a
   // conferir, e a conferência é o assunto inteiro desta tela.
   const liberado = !tela.hidden && tela.dataset.modo === "espera";
-  const direto = liberado || nossoServidor;
+  // P11 (D-celular-3): a casca pode dispensar o aperto para um veredito que já
+  // foi conferido onde a pessoa decidiu entrar. Pula-se a tela, e não o passo:
+  // a entrada abaixo roda igual, e uma falha nela fica nesta tela, com a frase.
+  // No desktop o padrão devolve `null`, e nada muda.
+  const daCasca = liberado || nossoServidor ? null : CASCA.entradaDireta(veredito, deOnde);
+  const direto = liberado || nossoServidor || daCasca !== null;
+  tela.toggleAttribute("data-entrada-direta", daCasca !== null);
   esperando = false;
   pararDeBater();
 
@@ -225,8 +231,8 @@ function entrarNaAutenticacao(snapshot, veredito, endereco, nossoServidor = fals
     // alguém lê depois para entender por onde a janela andou, e um degrau
     // que não deixa rastro é um degrau que ninguém consegue investigar.
     if (!liberado) {
-      registrar("SERVIDOR DESTA MÁQUINA — ENTRANDO", "azul");
-      anunciar("Servidor desta máquina. Entrando.");
+      registrar(daCasca?.registro ?? "SERVIDOR DESTA MÁQUINA — ENTRANDO", "azul");
+      anunciar(daCasca?.anuncio ?? "Servidor desta máquina. Entrando.");
       entrarNoServidor().catch((falha) => console.warn("entrada:", falha));
       return;
     }
@@ -540,8 +546,18 @@ function tituloDaFrase(frase) {
  * numa batida feita de dentro da espera, ela é o fim desta espera e é dita
  * aqui — mudar de tela para dar uma resposta que a pessoa está esperando seria
  * arrancá-la do lugar em que ela perguntou.
+ *
+ * **Só a falha da tentativa mais nova chega aqui** (lote W2 da F5). A de uma
+ * tentativa que outra já substituiu é calada antes, no `catch` de `conectar`,
+ * e vai ao `seele.log`: com a espera na frente, ela tomava o lugar da frase
+ * desta espera, e um `AdmissionPending` dela abria esta tela por cima da
+ * sessão em que a pessoa já estava. «Venha de onde vier», acima, é de onde
+ * vier a tentativa mais nova.
+ *
+ * `tentativa` é o número da tentativa desta falha (`esta`, em `conectar`):
+ * é ele que diz se a falha é da batida desta tela. Ver `batendoDaEspera`.
  */
-function levarParaAEspera(falha, endereco) {
+function levarParaAEspera(falha, endereco, tentativa) {
   const tela = $("tela-auth");
   // Quem saiu pela porta enquanto uma batida estava no ar levou a espera junto.
   // Reabrir esta tela por cima da entrada seria arrancar a pessoa do lugar em
@@ -551,7 +567,23 @@ function levarParaAEspera(falha, endereco) {
   // A corrida existia antes e era preciso apertar dois botões seguidos para
   // vê-la. Agora a batida parte de um relógio, então ela pode acontecer com a
   // pessoa apertando um botão só, e a culpa deixou de poder ser dela.
-  if (tela.hidden && batendoDaEspera) return true;
+  //
+  // **Só a falha da própria batida** (lote W2, rodada 2 da revisão, M1). A
+  // bandeira era um sim, e calava qualquer falha que chegasse com uma batida no
+  // ar: quem saía pela porta e apertava HOSPEDAR AQUI, que não fica apagado,
+  // tinha a recusa da entrada nova calada, sem tela e sem registro (medido
+  // pela revisão, e igual na base). Agora ela guarda o número da tentativa da
+  // batida, e a falha de outra tentativa segue para a linha vermelha. **E a da
+  // batida não some sem rastro**: vai ao `seele.log`, como aviso.
+  if (aBatidaFoiLargada(tentativa)) {
+    const dito = falha instanceof Error ? String(falha) : JSON.stringify(falha);
+    registrarNoAnfitriao(
+      "espera",
+      `a batida da espera a ${endereco || AUSENTE} voltou depois que a pessoa saiu da espera, e a tela não a mostra: ${dito}`,
+      "aviso",
+    );
+    return true;
+  }
 
   const naEspera = !tela.hidden && tela.dataset.modo === "espera";
   const razao = falha?.Refused?.reason;
@@ -650,12 +682,30 @@ let faltam = 0;
 let esperando = false;
 
 /**
- * Se a batida em curso partiu desta tela, e não do formulário da entrada.
+ * O número da tentativa que esta tela mandou bater, enquanto ela está no ar,
+ * ou `null`.
  *
  * Só serve para uma coisa: saber, quando a resposta chega, se a tela que a
- * pediu ainda está na frente.
+ * pediu ainda está na frente. **Um número, e não um sim** (lote W2, rodada 2
+ * da revisão): com um sim, a falha de qualquer outra tentativa que voltasse
+ * com a batida no ar era tomada por ela e calada. Ver `levarParaAEspera`.
  */
-let batendoDaEspera = false;
+let batendoDaEspera = null;
+
+/**
+ * **A batida desta espera, largada**: a tentativa `tentativa` é a batida que
+ * esta tela mandou, e a pessoa já saiu da espera pela porta.
+ *
+ * Nenhuma das duas voltas dela fala por cima da entrada que a pessoa escolheu:
+ * a falha é calada em `levarParaAEspera` (lote W2), e a entrada é largada em
+ * `conectar` (lote E54 da F5). A entrada largada era a que faltava: sair da
+ * espera não começa outra tentativa, então a batida continuava sendo a mais
+ * nova, e, admitida depois, reabria esta tela em aperto de mão por cima da
+ * entrada (medido na `ajustes-v013.cjs`, `aEntradaVelhaNaoTomaATela`, passo 3).
+ */
+function aBatidaFoiLargada(tentativa) {
+  return $("tela-auth").hidden && batendoDaEspera !== null && batendoDaEspera === tentativa;
+}
 
 /**
  * Para de contar e apaga a contagem da tela.
@@ -749,11 +799,18 @@ function alguemOlhando() {
  */
 async function baterDeNovo() {
   registrar("BATENDO DE NOVO", "apagado");
-  batendoDaEspera = true;
+  // **O número da batida** é o que `conectar` conta antes da primeira espera
+  // (`++tentativas`, cobrado pelo guarda da credencial): ele já está em
+  // `tentativas` quando a chamada devolve a promessa, e a resposta só chega
+  // depois. Sem alvo, `conectar` volta sem contar, e não há batida a seguir.
+  const antes = tentativas;
+  const batida = conectar();
+  const esta = tentativas !== antes ? tentativas : null;
+  batendoDaEspera = esta;
   try {
-    await conectar();
+    await batida;
   } finally {
-    batendoDaEspera = false;
+    if (batendoDaEspera === esta) batendoDaEspera = null;
   }
 }
 

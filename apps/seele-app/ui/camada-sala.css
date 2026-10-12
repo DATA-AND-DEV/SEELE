@@ -1,0 +1,67 @@
+/* SEELE — a sala pessoal na tela: a linha da sala e o bloco do PERFIL (tarefas
+   23 e 29 da F7).
+
+   A linha da sala só aparece quando há o que dizer (a porta ocupada, o código
+   não achável, «não recebendo»), e em laranja: é aviso, e não queda. O
+   vermelho de `tokens.css` fica com o que caiu. */
+
+.sala-estado {
+  color: var(--seele-laranja-nerv);
+}
+
+.perfil-sala {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+  margin-top: var(--seele-e2);
+  padding-top: var(--seele-e2);
+  border-top: var(--seele-b) solid var(--seele-linha);
+}
+
+.perfil-sala-codigo {
+  display: flex;
+  gap: var(--seele-e1);
+}
+
+.perfil-sala-codigo input {
+  flex: 1;
+  min-width: 0;
+  letter-spacing: 0.08em;
+}
+
+.perfil-sala-receber {
+  display: flex;
+  align-items: center;
+  gap: var(--seele-e1);
+}
+
+.perfil-sala-firewall {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+}
+
+.perfil-agenda {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.perfil-agenda-linha {
+  display: grid;
+  grid-template-columns: minmax(6rem, 10rem) 1fr auto;
+  align-items: center;
+  gap: var(--seele-e1);
+  padding: var(--seele-e1) 0;
+}
+
+.perfil-agenda-quem {
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+.perfil-agenda-nome {
+  min-width: 0;
+}

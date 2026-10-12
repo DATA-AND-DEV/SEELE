@@ -215,6 +215,34 @@ mod guardas {
         windows,
         ignore = "o binário de teste não carrega no Windows; ver a nota no topo"
     )]
+    fn a_pagina_que_ouve_o_fechar_consegue_terminar_de_fechar() {
+        // **A janela que não fechava** (tarefa 21 da F7, medido no app em 10/10).
+        // Com um ouvinte de `onCloseRequested` de pé, o Tauri segura o fechar no
+        // Rust e entrega a decisão à página; sem `preventDefault`, quem fecha é o
+        // embrulho do `@tauri-apps/api`, chamando `destroy()` — e não `close()`.
+        // Sem esta permissão o `destroy()` é recusado numa promise que ninguém
+        // vê: a janela fica, o `ExitRequested` nunca chega, e o processo segue
+        // vivo, dentro do servidor, sem despedida. Foi o botão vermelho, o Sair
+        // do menu e o Cmd+Q de uma build inteira.
+        let app = app();
+        let webview = main_webview(&app);
+        let erro = call(
+            &webview,
+            "plugin:window|destroy",
+            serde_json::json!({ "label": "main" }),
+        );
+        assert!(
+            erro.is_ok(),
+            "a página que ouve o pedido de fechar não consegue terminar de fechar a \
+             janela: {erro:?}"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "o binário de teste não carrega no Windows; ver a nota no topo"
+    )]
     fn the_page_may_stop_listening() {
         // The other half of the pair. `listen()` resolves to an unlisten function,
         // and a screen that can subscribe but not unsubscribe leaks a handler per

@@ -5248,6 +5248,29 @@ ninguém precise adivinhar depois.
   passou 3 de 3 sozinho, 3 de 3 com vinte processos comendo CPU e 6 de 6 em
   paralelo consigo mesmo — a reprovação só apareceu sob a suíte inteira, que é o
   retrato da pendência **29** noutro crate.
+
+  **Acréscimo de 2026-10-10 (lote Y da F5).** Este conserto não está mais no
+  arquivo: entrou em `4770dca1` (14/09) e foi desfeito no dia seguinte por
+  `becb0257` («as duas tolerâncias de `seele-server` [...] voltam ao
+  commit-base»), e o teste voltou a ler o contador uma vez só, três segundos
+  depois da rajada. Reprovou de novo em `d9124cea` com a máquina carregada
+  (1.118 de 1.160). E a leitura de 14/09 estava errada: medido agora, **não é o
+  lote que ainda não gravou**. Em cinco rodadas reprovadas a contagem parou
+  (1.074, 1.113, 1.120, 1.120, 1.137) e não subiu mais em 15 s; cada mensagem
+  faltando era a cauda de um falante que o servidor desligou com `FellBehind` —
+  o barramento passou à frente da sessão dele também, e o resto do que ele
+  mandou ficou sem ler. A soma das caudas fecha as 1.160 nas cinco. Reperguntar
+  por cinco segundos não teria consertado nada. O conserto novo é `de04ab26`:
+  sem relógio, cada falante manda um `Ping` atrás da rajada e o teste lê até o
+  `Pong` (a sessão leu tudo) ou a despedida; uma testemunha num canal próprio,
+  atrás da fila do escritor, diz que o lote gravou; e a asserção passa a ser a
+  que o servidor de fato promete — o que ele leu de cada falante está gravado,
+  em ordem, sem buraco, e quem ficou com mensagem sem gravar foi desligado
+  dizendo por quê (o `SemResposta` do cliente, que **pode** repetir com a mesma
+  chave: o cliente não repete sozinho, repete quando a casca chama
+  `reenviar_mensagem`, a pedido de quem escreveu).
+  As reversões e as rodadas estão em
+  `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-y-report.md`.
 - **`crates/seele-conformance/tests/anexos.rs`.** Esta foi a reprovação da rodada
   de validação seguinte, também com saída 101, e é a que menos parece ter a ver
   com som: `Error: SemResposta` em
@@ -5606,6 +5629,12 @@ de até cinco segundos não afrouxa a asserção, que é a mesma e continua exig
 todas as mensagens. Em `vetores_de_hash.rs` só há `fmt` e `clippy`. Desfazê-los
 devolveria a reprovação por tempo à bateria desta tarefa, que é o que a validação
 pede para não acontecer.
+
+*Acréscimo de 2026-10-10:* a tolerância de `par_lento.rs` descrita aqui saiu em
+`becb0257`, logo abaixo, e não voltou. O conserto que está no arquivo hoje é
+outro, `de04ab26` (lote Y da F5), porque a medida desmentiu a causa: o que
+faltava não era o lote atrasado, era a cauda de falantes desligados com
+`FellBehind`. Ver o acréscimo na entrada de `par_lento.rs`, acima.
 
 **A bateria, refeita inteira depois disso, em 2026-09-15.** `cargo test` no
 workspace terminou com **código de saída 0** e **1742 testes passados, nenhuma
@@ -9429,6 +9458,228 @@ pendência. A revisão dele deixou:
     `join_secret`, e pelo menos 30 campos do `Snapshot` lidos). É um guarda que
     prova menos do que parece. *Fonte:* relatório do R, «3. O guarda».
 
+52. **W2 · A tentativa substituída ainda apaga a linha de etapa da nova.** Em
+    `apps/seele-app/ui/tela-boot.js`, o `finally` de `conectar` chama
+    `mostrarEtapa(null)` sem conferir `esta === tentativas`. Depois do W2, a
+    velha não fala mais na linha vermelha nem reacende o CONECTAR (`6af0bedd`),
+    mas a etapa ela ainda apaga. O W2 leu no código, e não mediu (a bancada
+    não emite etapas), que o `connect` do `main.rs` revoga a geração ao
+    começar, e a `Bridge` descarta os eventos de uma geração revogada. Assim as
+    etapas da velha só escapam no trecho entre o `++tentativas` da nova e o
+    `invoke("connect")` dela: o apelido, a pergunta do nome e
+    `conferir_esta_versao`. **O conserto sugerido**, em três passos:
+    - condicionar o `mostrarEtapa(null)` do `finally` a `esta === tentativas`;
+    - fechar aquele trecho na janela com uma bandeira, posta no `++tentativas`
+      e reaberta logo antes do `connect`. Enquanto ela está posta, o ouvinte de
+      etapas descarta o que chega. Isso não toca no fio nem na FFI;
+    - ou, no Rust, revogar a geração mais cedo, o que pede outro lote.
+
+    O que falta, em qualquer forma, é a identidade da tentativa nos eventos de
+    etapa. *Fonte:* relatório do W2 (`lote-w2-report.md`), a rodada da
+    revisão.
+
+53. **W2 · O roteiro `tools/roteiros/aceite-de-mods.js` não prova o aceite.**
+    Na base e no W2, ele relata `gravou o sim: alvo=undefined conjunto=undefined`,
+    `tentou entrar de novo: false` e `diálogo depois: VISIVEL`, e nunca reprova,
+    porque só usa `relatar` e não tem `exigir`. O cabeçalho dele diz que prova
+    «que ACEITAR grava o sim com a identidade certa e tenta entrar de novo».
+    **Em conserto na 0.16**, a pedido da orquestradora, no lote W3: o roteiro
+    passa a exigir o sim gravado no alvo e a volta tentando entrar, e reprova
+    sem isso. A causa do `alvo=undefined` é medida no lote. *Fonte:* relatório
+    do W2; o ledger.
+
+    **Consertado em 10/10/2026, no lote W3** (integrado em `353859c2`). A causa
+    era o duble, e não o produto: ele respondia `null` a `mods_instalados`, e
+    `obterOConjunto` estourava antes de gravar o sim e de voltar. O roteiro
+    quebrou duas vezes, em `ea75ac5d` (18/09), que tirou a volta, e no lote W,
+    que tirou o sim. Agora ele exige o sim no alvo, a volta com a credencial, a
+    ordem dos dois, e a lista item por item. O `catalogo-de-mods.js` passou a
+    exigir o que diz. De passagem, o W3 achou e consertou três defeitos de
+    produto, todos com prova:
+    - a falha por dentro do ACEITAR ficava sem frase;
+    - a pergunta que não abria deixava a credencial na memória sem diálogo;
+    - uma corrida em `abrirAceiteDeMods`, em que a pessoa lia a lista de um
+      pedido e aceitava o conjunto de outro (ADR 0045).
+
+    **O que fica:** nenhum roteiro roda no CI nem no `publicar.sh`. Isso vai
+    para o lote RT. *Fonte:* `F5/lote-w3-report.md`.
+
+54. **W2 · Uma tentativa de entrada velha que entra depois da nova toma a tela
+    dela, e talvez a conexão.** Isso é anterior ao W2: a base é igual.
+    - **Na janela.** No caminho de sucesso de `conectar` (`tela-boot.js`), o
+      `entrarNaGeracao`, o `desenhar` e o `entrarNaAutenticacao` não conferem
+      `esta === tentativas`. A revisão do W2 mediu isto: uma velha lenta, que
+      entra 1,2 s depois de o `hospedar()` ter entrado, reabre `#tela-auth` em
+      `aperto` com o endereço dela por cima da sessão da nova, e a
+      `geracaoDaSessao` volta para a da velha.
+    - **No Rust, lido e não medido.** O `connect` do `main.rs` revoga a geração
+      ao começar. A `Bridge` descarta os eventos da velha, mas no fim o
+      `connect` grava `*slot = Some(connection)` sem conferir nada, o que
+      trocaria a conexão da nova pela da velha. A pessoa ficaria ligada ao
+      servidor que deixou, com a tela mostrando o outro.
+    - **Família:** a mesma da cena 5c do lote W, que mede a velha recusada.
+      HOSPEDAR AQUI fica aceso enquanto um `connect` anda, então basta a velha
+      ser lenta e entrar, em vez de ser recusada. A batida da espera que entra
+      depois de a pessoa sair da espera tem o mesmo jeito.
+    - **Falta:** medir o lado do Rust. Depois, a entrada que volta já
+      substituída não entra na tela e vai ao registro, e o `connect` velho larga
+      a conexão quando a geração dele já não está de pé.
+    *Fonte:* o relatório do W2 (`F5/lote-w2-report.md`), que o registra como
+    pendência 58, e a revisão da rodada 2 do W2 (R2-M2, no ledger).
+
+55. **P61 · A recusa local de um campo grande demais não chega à janela.
+    Consertada em 11/10/2026 pelo lote C55, com o apelido já gravado, e a sala
+    pessoal com um apelido antigo pelo S64.**
+    Desde a rodada 1 do P61, um comando com um campo acima do teto do fio
+    (em **bytes**) não derruba mais o enlace: o núcleo não manda o quadro,
+    registra o comando e o campo no `seele.log` (`Motor::recusar_aqui`, em
+    `enlace.rs`) e segue. A entrada numa sala com senha grande demais é
+    desfeita como o servidor desfaz uma senha errada, e essa a janela mostra.
+    As outras recusas a pessoa não vê: o pedido some calado.
+    - **Falta:** a janela conferir o tamanho antes de mandar, em bytes, com os
+      limites do `seele-proto`, como o envio de mensagem já faz
+      (`tela-sessao.js`, ao redor de `limite_da_mensagem`). Os campos, e onde
+      cada um é escrito:
+      - apelido, 32 B (`MAX_NICKNAME_LEN`): `#perfil-apelido`, que manda
+        `escolher_apelido` (`camada-nomear.js`);
+      - nome de canal e de sala, 48 B (`MAX_CHANNEL_NAME_LEN`): `#nomear-valor`
+        (`maxlength="48"`, que conta caracteres), que manda `criar_linha` e
+        `criar_voice_room` (`tela-sessao.js`) e `renomear_linha` e
+        `renomear_voice_room` (`tela-sessao.js` e `camada-moderar.js`);
+      - limite da sala, 1 a 250 (`MAX_VOICE_ROOM_LIMIT`): o mesmo
+        `criar_voice_room`;
+      - nome do servidor, 64 B (`MAX_CLIENT_NAME_LEN`): `#server-nome-valor`
+        (`maxlength="64"`), que manda `renomear_server` (`tela-server.js`), e
+        `#preparar-nome` (`maxlength="64"`), que manda o mesmo
+        `renomear_server` ao hospedar (`tela-boot.js`);
+      - senha da sala, 32 B (`MAX_NICKNAME_LEN`): a caixa de senha antes de
+        `enter_voice_room` (`tela-sessao.js`);
+      - motivo do banimento, 512 B (`MAX_ALERT_TEXT_LEN`): `#moderar-motivo`
+        (`maxlength="200"`; 200 letras CJK dão 600 B), que manda `banir_pessoa`
+        (`camada-moderar.js`).
+    - **Não precisam:** a carga de MOD, já conferida em bytes no `base.js`;
+      os ícones, por `check_server_icon`. A senha da sala também não: desde a
+      rodada 2 do P61, a FFI a confere antes de pedir
+      (`Connection::enter_voice_room`), e a janela mostra a entrada recusada.
+    - **Um caminho de outra classe, anterior ao lote: o apelido gravado fora da
+      sessão.** `escolher_apelido_local` (`camada-nomear.js`, o mesmo
+      `#perfil-apelido` com `maxlength="32"` em caracteres) grava o apelido na
+      máquina, e ele vai no `Hello` da conexão seguinte. Medido pela revisão
+      do P61, pela FFI: `Connection::connect` com um apelido de 40 B (20 `á`)
+      devolve `Err("Unreachable")`. Pela leitura: o `encode` do `Hello` recusa
+      o apelido, e a escrita do `Hello` (`client.rs`, depois do QUIC e antes
+      do aperto do protocolo) traduz **qualquer** erro em
+      `ConnectError::Unreachable`, com `warn` «could not send Hello». A pessoa lê
+      «NADA RESPONDEU NESSE ENDEREÇO» (`frases.js`, `Unreachable`), num
+      servidor que está de pé, e nenhuma tentativa de novo muda isso. Não é
+      recusa de comando: é a conexão que não abre, com o motivo errado.
+      **Conserto provável:** o `connect` conferir o apelido antes de abrir a
+      conexão (o teto é `MAX_NICKNAME_LEN`, em bytes), ou a falha de
+      codificação do `Hello` ter nome próprio em vez de virar `Unreachable`.
+    *Fonte:* `F5/lote-p61-report.md`, rodadas 1 e 2, M2 e R1-M5.
+    **Em 11/10/2026, o lote C55 da F5** (`F5/lote-c55-report.md`, commits
+    `20f1f331` a `13fe85da`, mais os do relatório):
+    - **Os tetos vêm de um lugar só.** O comando `limites_dos_campos`
+      (`main.rs`), no molde de `limite_da_mensagem`, devolve
+      `seele_ffi::Connection::limites_dos_campos`, que lê do `seele-proto` pelos
+      reexports do `seele-core` (`MAX_NICKNAME_LEN`, `MAX_CHANNEL_NAME_LEN`,
+      `MAX_VOICE_ROOM_LIMIT`, `MAX_CLIENT_NAME_LEN`, `MAX_ALERT_TEXT_LEN`). A
+      ponte do navegador os serve pelas `CONSTANTES_DO_DESKTOP`, que o guarda
+      do `tests/web.rs` confere contra a FFI. O fio não mudou.
+    - **Os sete caminhos conferem em bytes antes de mandar** (`passaDoTeto`, em
+      `base.js`) e dizem «PASSA DE N BYTES — ENCURTE.», com os bytes que o
+      texto tem (`fraseDoTeto`, em `frases.js`): o apelido na sessão e o
+      gravado (`guardarOApelido`), o nome de canal e de sala (o diálogo de
+      nomear), o nome do servidor em CONFIGURAÇÕES (`renomearServidor`) e ao
+      hospedar (`confirmarPreparar`, antes de subir o servidor) e o motivo do
+      banimento (o BANIR, antes de armar). Os cinco `maxlength` saíram.
+    - **Os lugares da sala nova são ajustados, e não recusados.** Ninguém
+      escreve o número: ele é copiado da primeira sala do servidor. A cópia
+      fora de 1 a `lugares_da_sala` vira o teto, e o ajuste vai ao
+      `seele.log`. O `250` escrito à mão em `tela-sessao.js` saiu.
+    - **As provas:** o roteiro `tools/roteiros/tetos-dos-campos.js`, no
+      `ci.yml` e no `publicar.sh`, com um caso por caminho, e os guardas
+      `nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui` (`frontend.rs`) e
+      `nenhuma_tela_le_um_teto_de_campo_que_nao_existe` (`main.rs`).
+    - **O apelido gravado grande demais antes do lote.** A conferência ao
+      gravar impede um novo. Um que já estava gravado dava «NADA RESPONDEU
+      NESSE ENDEREÇO»: 40 B voltavam `Unreachable` em 5 ms, e o servidor não
+      via ninguém. E encurtar o apelido no perfil não bastava: a tentativa
+      seguinte levava o de antes, guardado em `ultimoApelido` (`conectar`, em
+      `tela-boot.js`). A orquestradora escolheu a opção 1:
+      - **na FFI:** `Connection::abrir` confere o apelido antes de resolver,
+        discar ou ler o disco, e recusa com
+        `ConnectionError::ApelidoGrandeDemais { limite_bytes }`, uma variante
+        só da FFI;
+      - **na janela:** a frase «SEU APELIDO PASSA DE N BYTES.» manda abrir o
+        PERFIL e encurtar, e o `catch` de `conectar` trata a recusa como o
+        `NicknameTaken`: esquece o `ultimoApelido` e guarda a credencial.
+
+      As provas são o teste
+      `o_apelido_grande_demais_e_recusado_com_nome_antes_de_abrir_a_conexao`
+      (`main.rs`, com a trilha vazia) e o roteiro
+      `tools/roteiros/apelido-no-hello.js`.
+    - **A recusa de gravar o apelido sumia do perfil.** Era um achado do lote,
+      e o conserto entrou nele. O `catch` de `guardarOApelido` reabria o
+      perfil, e o `abrirPerfil` escondia a frase e trocava o que se escreveu
+      pelo apelido gravado. Agora o `catch` não reabre, e a cena está no mesmo
+      roteiro.
+    - **Fica para a F4, para quando o `connect` da ponte existir (tarefa
+      34):** a entrada da casca do navegador é uma oitava porta do apelido, e
+      não confere os bytes (M3 da revisão do C55, pela leitura). O campo
+      `#cel-entrada-apelido` (`celular-entrada.js`) é livre e vai direto ao
+      `connect` da ponte (`identidade-web.js`). Hoje esse `connect` é
+      `AINDA_A_FAZER`, e nada chega ao fio. Quando ele existir:
+      - ele devolve a mesma recusa, `ApelidoGrandeDemais`, com o mesmo nome;
+      - o ENTRAR do celular confere o campo com `passaDoTeto("apelido", …)`;
+      - o `desfecho` de `identidade-web.js` trata a recusa como uma que segue,
+        com o campo marcado. Sem isso, ela cai em `recusado`, a tentativa se
+        encerra, e o campo onde a pessoa escreveu some. A frase da casa manda
+        abrir o PERFIL, que não é onde ela escreveu.
+    - **Medido e consertado em 11/10/2026 pelo lote S64 da F5: a sala pessoal
+      com um apelido gravado acima de 64 B** (a observação fora da contagem da
+      revisão do C55; commit `b4d1e8f8`). A sala sobe com o apelido gravado
+      (`preferences.nickname()`, em `sala.rs`) como `ServerConfig.name` e como
+      o apelido da conta do dono (`hospedagem.rs`), e o `Session` leva o nome
+      sob `MAX_CLIENT_NAME_LEN` (64 B, `control.rs`). A v0.15.1 publicada
+      contava 32 caracteres no perfil, e 22 ideogramas são 66 B. Medido com 22
+      `語` gravados, a sala subida pelo `sala::subir_em`, como o app a sobe:
+      - **a sala sobe**, toca e é atendida. O `register_or_find` aceita os
+        66 B na conta do dono, e nada quebra ali;
+      - **quem liga é atendido e recusado.** Depois do `Tocando` e do ATENDER,
+        recebe `Disconnecting { ProtocolViolation }` no lugar do `Session`, e a
+        campainha conta a ligação como atendida. Medido com o par cru da
+        conformidade (`sala_pessoal.rs`), porque nenhum cliente lê o
+        `Tocando` ainda (tarefa 6e da F7);
+      - **o dono também não entra.** Com o apelido gravado, o C55 recusa antes
+        de discar («SEU APELIDO PASSA DE 32 BYTES»). Encurtado no PERFIL, a sala
+        continua no ar com o nome velho, e o ATENDER recebe
+        `Refused { ProtocolViolation }` («PROTOCOLO VIOLADO») a cada tentativa,
+        até a sala subir de novo;
+      - **o `seele.log` do dono diz, e a janela não.** Cerca de 1 s depois, em
+        INFO, o `seele_server` escreve ``session closed … handshake refused:
+        could not send Session: field `server` is 66 bytes, over its 64-byte
+        limit``;
+      - **com 64 B, entra.** Com 40 B (20 `á`), o dono entra com um apelido
+        curto: a conta dele, de 40 B, não sai da sala antes de ele entrar, e é
+        renomeada quando ele entra.
+
+      **O conserto:** `nome_da_sala` (`sala.rs`) corta o apelido na última
+      fronteira de caractere dentro de `nome_do_servidor`, lido de
+      `Connection::limites_dos_campos`. O `seele.log` diz quantos bytes o
+      apelido tinha e quantos ficaram. Cortado, e não trocado pelo «SEELE»,
+      porque assim quem liga continua lendo o nome de quem recebe. A prova é
+      `um_apelido_gravado_acima_do_teto_do_nome_do_servidor_nao_impede_ninguem_de_entrar`
+      (`sala.rs`): a sala sobe com os 66 B gravados, e o dono entra pelo
+      código, como o ATENDER entra, e lê 21 ideogramas no nome. As duas
+      reversões, sem o corte e sem a linha do `seele.log`, reprovam. O fio não
+      mudou.
+      - **Fica, e é da F7:** quem liga pela FFI (`codigo_esperado`) não passa
+        do `Tocando` em sala nenhuma, com qualquer apelido. O núcleo escreve
+        «expected Session» no `seele.log` de quem liga, e a FFI devolve
+        `Refused { reason: Incompatible }`. É a tarefa 6e (Task 16 do plano da
+        F7, à espera da F1). O S64 só anota.
+
 ### Fora da F5, só como referência
 
 Achados das rodadas da F5 que são de outra frente. A orquestradora já foi
@@ -9535,10 +9786,102 @@ uma 0.15.3, o conserto do Y entra nela.
 os lotes do servidor passam do anel de 1024 do barramento, uma sessão que só
 escreve e não lê é desligada com `FellBehind`, e a cauda do que ela mandou não é
 gravada. O que a sessão leu antes de desligar foi gravado, e o cliente de verdade
-repete o resto com a mesma chave. Um cliente normal lê o que chega; o caso aparece
-com um cliente que só fala (um robô, um teste). **Não consertado**: decidir na
-revisão final da 0.16 se é defeito ou contrato, e escrever a resposta aqui.
+repete o resto com a mesma chave. **A revisão do Y mostrou que também acontece com um cliente que lê**, quando ele
+escreve em rajada: o comentário do braço `Lagged` em `seele-server/src/session.rs`,
+que dizia «só com quem parou de ler», estava errado e foi corrigido pelo Y. **Medido pela F1 em 10/10** (`f5a4b51e`, `F1/pendencia-61-medida.md`): o lote do escritor
+não tem teto e é anunciado sem `await`; acima de 1024 mensagens num lote, ele passa à frente
+de **toda** sessão viva, e todas caem com `FellBehind`. Uma pessoa, uma colagem, um MOD ou
+uma sala não chegam lá; **18 conexões de um script chegam** (17 × 58 nunca derrubou; 18 × 58
+derrubou todo mundo nas 3 rodadas), e num servidor aberto não há teto de sessões. Quando
+acontece, a janela mostra a tela de fim enquanto o servidor a mantém sentada na sala; o que
+ela mandava no instante pode se perder sem aviso, e nada repete nem busca o buraco.
+
+**Decisão da orquestradora: defeito.** Desligar quem parou de ler é contrato; desligar todo
+mundo por um lote é uma porta de negação de serviço. Consertar na 0.16: no servidor, o teto
+do lote do escritor e a contrapressão por conexão; no cliente, só as razões de fim encerram,
+e na volta o histórico é buscado e o `SemResposta` repetido com a mesma chave.
 
 Junto, do mesmo achado: o `tipo_de_fluxo.rs` perdeu a tolerância dele no
 `becb0257` (o mesmo commit que desfez o conserto do `par_lento`), e os sockets que
 os testes esquecem de propósito continuam vazando (não roubam mais respostas).
+
+**O conserto do servidor, medido pela F1 em 10/10** (`1ebf85a4` na 0.16; relatório em
+`F1/pendencia-61-medida.md`, seção 5): o `TETO_DO_LOTE` (um quarto do anel) e a
+contrapressão `TETO_NO_AR` (8 mensagens no ar por conexão), com o `rajada_de_muitos.rs`
+sem `#[ignore]`. Cada metade foi medida sozinha, nas duas linhas: **só o teto do lote passa
+o 18 × 58 e reprova o 24 × 58 com 4 KiB** (3 de 3), porque segura um anúncio e não uma
+sequência deles; só a contrapressão passa os dois; as duas juntas passam, e o teto ainda
+segura o que a contrapressão não segura (mais de 128 conexões com mensagens no ar). **A
+linha 0.15 reproduz igual** (`40066a7c`, que no servidor só difere da v0.15.1 publicada no
+`assentar`): 19 de 19 e 25 de 25 sessões para trás sem conserto.
+
+**Decisão da orquestradora (10/10): entra na 0.15.2, com as duas metades.** Uma porta de
+negação de serviço que 18 conexões abrem não espera a 0.16. O porte é o
+`F1/pendencia-61-linha-0.15.patch` (5 arquivos, mais o `tokio` com `test-util` nas
+`dev-dependencies` do `seele-server`, que não entra no binário), num commit sobre
+`40066a7c`, com a bateria inteira da linha e a prova pela reversão. A 0.15.2 pronta passa a
+ser esse commit. A metade do cliente (só as razões de fim encerram; o histórico buscado na
+volta) fica na 0.16.
+
+## 62 · O pedido de MOD ignora o papel mínimo do canal, e nada grava o papel mínimo
+
+**Aberta em 2026-10-10**, medida pela F3 da 0.16 na tarefa 16. Em `mods/pedidos.rs`,
+um `ModRequest` num canal com papel mínimo de leitura que a pessoa não tem chega
+ao MOD, e o `write` que o MOD recebe é a permissão global, que ignora o papel
+mínimo de escrita do canal. **O código está assim na v0.15.1 publicada
+(`54f542f94`), na linha 0.15 (`40066a7c`) e na 0.16.**
+
+**Hoje não é alcançável:** nenhum caminho do produto grava `minimum_read_role` nem
+`minimum_write_role` (só a migração 1, que as cria vazias, e os testes do
+`autorizacao.rs`); o fio não tem campo para isso. Com as colunas vazias, o
+`pode_no_canal` se reduz ao que o `pedidos.rs` já confere. Viraria escalada de
+permissão por MOD no dia em que algo gravasse o papel mínimo.
+
+**Na 0.16:** consertado na tarefa 16 da F3, antes de qualquer recurso gravar as
+colunas. **Na linha 0.15:** fica como está, porque ali não há nem haverá caminho
+que grave o papel mínimo.
+
+## 63 · A lista de pessoas se redesenha inteira a cada `PersonState`, e com 200 pessoas e cartões de MOD a página não vence
+
+**Aberta em 2026-10-10**, achada pela M3 da API 6 (a `carga-cartoes`, 251 pessoas) e medida pela
+F3 numa bancada (`tools/lista-grande.cjs`, `df7f5efb`, `9899d0ae`). No app de verdade, com 251
+pessoas e um cartão de MOD por pessoa, o WebContent ficou acima de 100% de CPU por minutos, a memória
+subiu de 1,13 para 1,33 GB em dois, e nenhum cartão apareceu na tela.
+
+**A cadeia, pelo código:** cada sessão manda um `PersonState` por segundo a todas as conexões, sem
+filtro (`session.rs`, o `TELEMETRY_INTERVAL` de 1 s); cada um vira um `RosterChanged` sem junção na
+FFI e no app; e a janela responde a cada um com um `atualizar()` inteiro, o retrato pela ponte e a lista
+redesenhada. N eventos por segundo, cada um do tamanho de N: o custo cresce com o quadrado.
+
+**A medida da F3 (Chromium do Playwright, janelas de 5 s):** com 251 pessoas e cartões, a fila de
+redesenho chega a 4,9 s e não esvazia; a partir de 200 pessoas com cartões ela já aparece; sem MOD
+nenhum, 251 pessoas deixam a página a 99%. Juntando o redesenho em no máximo um por quadro, a fila
+some (99% com cartões, 98% sem MOD); só o tique de 500 ms deixa a página a 14%. Com 10 pessoas nada
+disso aparece, e é por isso que só a M3 o viu.
+
+**Decisão da orquestradora:** defeito, na 0.16. O `specs/04` dimensiona o servidor em 50 pessoas e
+nada leva dado a lugar errado, então **não entra na 0.15.2**. O conserto mínimo é juntar o redesenho
+(no máximo um `atualizar()` por quadro, na janela, que serve ao desktop, à casca larga e ao celular),
+com a bancada da F3 como guarda, provada pela reversão. Atualizar só a linha que mudou fica para depois.
+O lado do servidor (um `PersonState` de cada pessoa a todas as outras, por segundo: N² mensagens) é
+medido junto, antes de alguém prometer mais que 50 pessoas. **O teto de 256 alvos por ponto da API 6 não
+congela antes da medida com o conserto.**
+
+**O conserto mínimo entrou** (`6717dc2c`, da F3, na décima quarta): no máximo um `atualizar()` por quadro, com
+a bancada `um-redesenho-por-quadro.cjs` no CI. A fila acabou; o custo de refazer a lista não: com 251 pessoas a
+página fica a 99% com cartões de MOD e a 98% sem MOD (`tools/lista-grande.cjs`, modo `evento`, no Chromium).
+**O teto de 256 alvos e 128 sem alvo congelou no `v6.json`** (`78972cc0`) por essa medida: quem satura a página
+com 251 é a lista, e não o MOD.
+
+**(b), defeito de acessibilidade** (11/10, medido pela orquestradora no app, com 249 calados, sem MOD, na
+build da M3 com o `6717dc2c` e o `ax` com 60 s de prazo por consulta, a sessão desbloqueada): com a lista
+refeita inteira a cada quadro, a árvore de acessibilidade não assenta. O cabeçalho «PESSOAS · 251 NO SERVIDOR»
+aparece nela; os nomes da lista nunca entram, e o ENTRAR NA SALA sai dela (o `ax` não o acha, e quando o achou o
+aperto não pegou). **Quem usa leitor de tela não usa a lista nem a entrada na sala** com umas 250 pessoas. **Com 50, o tamanho do `specs/04`, não assenta** (medido pela F3 em 11/10, a mesma build, sem MOD, a sessão
+desbloqueada, consultas a cada ~3 s por 2 min, cada uma em até 0,2 s): a lista inteira em 18 de 38 consultas,
+oscilando entre 0 e 49 nomes; com 10 pessoas, em 39 de 39; com 100, em nenhuma. O ENTRAR NA SALA ficou na árvore
+com 50 e 100 (37 de 38), e o aperto pegou. **Decisão da orquestradora: a (b) é da 0.16**, com a F5: as linhas
+reconciliadas pelo id da pessoa, e um `PersonState` mexendo só na linha dela; o guarda é a sonda da F3
+(`arvore-ax.py`, `3436980d`), com 10, 50 e 100 pessoas em toda consulta. Ao prová-la como guarda, a F3 viu a
+perda também com 10: numa de 39 consultas a lista inteira sumiu (0 nomes). É rara com poucas pessoas, mas existe,
+porque a lista é trocada de uma vez.

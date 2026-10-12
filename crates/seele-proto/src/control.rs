@@ -262,6 +262,18 @@ pub enum MessageRefusal {
     /// Transitória por natureza — disco cheio, banco travado. Distinta das de
     /// cima porque esta é a única em que tentar de novo é a coisa certa a fazer.
     StorageFailed,
+    /// A chave repetida é a de uma mensagem que a moderação **apagou**.
+    ///
+    /// Quem escreveu caiu, a moderação apagou a mensagem, e o cliente a repetiu
+    /// com a mesma chave ao voltar. Ela não é gravada de novo e não é anunciada
+    /// a ninguém; só quem repetiu recebe esta recusa, e a pendente dele fecha.
+    /// Tentar de novo nunca passa. Até aqui a repetição devolvia a linha
+    /// apagada como gravação, e o escritor a anunciava a todo o canal, em
+    /// branco.
+    ///
+    /// Nasceu no rascunho da linha 1: um servidor só a escreve para quem a
+    /// conhece ([`crate::vocabulario::desde_a_recusa`]).
+    Apagada,
 }
 
 /// Length of an Ed25519 public key, in bytes. ADR 0004.

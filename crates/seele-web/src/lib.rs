@@ -17,6 +17,7 @@
 //! `.wasm` pelo `cargo xtask web`.
 
 pub mod fronteira;
+pub mod sessao;
 pub mod voz;
 
 use seele_proto::control::{

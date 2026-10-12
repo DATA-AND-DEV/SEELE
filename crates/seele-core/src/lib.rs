@@ -28,6 +28,9 @@ pub mod aceites;
 pub mod agenda;
 pub mod anexo_no_disco;
 pub use seele_sessao::assento;
+/// O retrato da sala: os tipos de vista do `Snapshot` e a projeção que os
+/// monta a partir do `Room`, para o desktop e o navegador (Tarefa 2.2 da F4).
+pub use seele_sessao::retrato;
 pub mod battery;
 pub mod bomba;
 pub mod caminho;
@@ -35,6 +38,7 @@ pub mod chegada;
 pub mod client;
 pub mod confere_codigo;
 pub mod conhecidos;
+pub use seele_sessao::despedida;
 pub mod encontro;
 pub mod enlace;
 pub mod entrada;
@@ -105,6 +109,8 @@ pub use seele_audio::device::{DeviceError, Tocador};
 pub use seele_audio::gate::{
     ABERTURA_COM_SUPRESSAO_DBFS, ABERTURA_SEM_SUPRESSAO_DBFS, FAIXA_DE_ABERTURA_DBFS,
 };
+/// O volume padrão do toque: audível, e longe do teto da escala.
+pub use seele_audio::toque::VOLUME as VOLUME_DO_TOQUE;
 /// O módulo do Cisco e os degraus que a pessoa escolhe.
 ///
 /// Reexportados porque [`PedidoDeTela`] pede os três e o ADR 0002 não deixa uma
@@ -194,6 +200,25 @@ pub use seele_proto::transport::key_fingerprint;
 pub use seele_proto::volume::VolumeRefusal;
 
 pub use seele_proto::control::MAX_BODY_LEN;
+/// O teto do apelido, e também da senha de uma sala de voz, em **bytes**.
+///
+/// Reexportado para a FFI conferir a senha antes de pedir a entrada (R1-M4 da
+/// revisão do lote P61): uma senha acima dele não cabe no fio, e o núcleo a
+/// recusaria sem que o `Room` da casca soubesse qual entrada desfazer.
+pub use seele_proto::control::MAX_NICKNAME_LEN;
+/// Os outros tetos dos campos que a casca escreve: o nome de um canal ou de
+/// uma sala, quantas pessoas uma sala nova pode ter, o nome do servidor e o
+/// motivo de um banimento (os textos em **bytes**).
+///
+/// Reexportados para a FFI os entregar à janela (`Connection::limites_dos_campos`,
+/// pendência 58, item 55; lote C55 da F5). A janela contava caracteres, e o fio
+/// conta bytes: um nome acentuado cabia no campo e não no quadro, e o núcleo o
+/// recusava sem a pessoa saber. Daqui, e não de uma cópia: a regra do ADR 0002
+/// não deixa a casca ver o `seele-proto`, e um número copiado é o que envelhece
+/// calado.
+pub use seele_proto::control::{
+    MAX_ALERT_TEXT_LEN, MAX_CHANNEL_NAME_LEN, MAX_CLIENT_NAME_LEN, MAX_VOICE_ROOM_LIMIT,
+};
 pub use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc, VoiceRoomId,

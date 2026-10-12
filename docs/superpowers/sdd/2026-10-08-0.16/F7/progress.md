@@ -567,3 +567,352 @@ Pedido pela orquestradora: `a_janela_fecha_dentro_do_atender_e_nao_so_no_auxilia
   que usa o `Client::connect` direto, que a 14b não tocou. Sozinho, o arquivo
   deu 3 de 3, 8 de 8 cada, em 4 s.
 
+
+## A sala viva, no `0.16/sala-viva` (10/10)
+
+O conjunto (tarefas 23, 24, 26, 27 e 29) num ramo à parte, para entrar inteiro:
+não há sala que toca sem ninguém atender. A décima primeira integração veio
+para o ramo em `97ae94a7`, com um conflito só, no `AGUARDANDO_TELA`, e os dois
+lados mantidos.
+
+**A FFI** (`6be6d49a`, `d0a97fba` no núcleo):
+- `semente_da_sala` e `codigo_desta_maquina` saem da pasta da identidade, pela
+  mesma chave da impressão. A `SementeDaSala` não é `Serialize` nem `Clone`, e o
+  `Debug` não a imprime;
+- `ConnectConfig::codigo_esperado`: o ATENDER confere `Esperada::Codigo`.
+  `esperada_de` decide num lugar só, e com o código o quarto não é perguntado;
+- a agenda, a leitura da entrada, o `Codigo`, o `Toque` (que toca na saída
+  padrão quando a escolhida sumiu) e o `ponto_de_encontro`;
+- **achado no caminho, e consertado no núcleo:** um primeiro contato pelo
+  código saía `FirstContact`, o cego. O código prova a chave dentro do TLS, e
+  agora sai `FirstContactVerified`. A `atender_pela_ponte.rs` o prova de ponta a
+  ponta.
+
+**O Rust do app:**
+
+| tarefa | o que | commits |
+|---|---|---|
+| 23 | a sala sobe sozinha no `setup` e anuncia o estado por `seele://sala`; a semente nunca atravessa a webview (guarda); o ponto é o de quem liga; «receber ligações» desliga e religa; a sala que termina de subir depois do desligar desce | `3f3c3aff`, `7546c9e8` |
+| 24 | o toque por `seele://toque`, com pedido de atenção ao sistema e nunca `set_focus`; o alarme para no último toque **e quando a sala fecha**, provado com a sala de verdade; cada toque é anotado na agenda | `fad0662a` |
+| 27 | `atender`, `recusar` e `encerrar_a_ligacao`; o `connect` confere a sala desta máquina pelo código; `onde_estou_na`, com o nome e a forma do lote X da F5 | `fcbc38cd` |
+| 29 | `meu_codigo`, a agenda e o `bloquear` ao vivo; **os bloqueados valem desde a subida da sala** | `17966fba` |
+
+**A casca:**
+
+| peça | commits |
+|---|---|
+| as frases da sala (isolado) e o guarda delas | `f2c57c54`, `0838a73c` |
+| o `ejetar(soOCliente)`, que desmonta só o cliente (isolado) | `58926889` |
+| a faixa `#toque`, ATENDER e RECUSAR, com a parte da ponte do navegador | `a53c1349` |
+| o SEU CÓDIGO, a agenda, «receber ligações» e a linha da sala, com a outra parte da ponte | `086082d0` |
+
+- Toda peça da sala leva `data-sala-pessoal`, que as cascas do navegador
+  escondem (combinado com a F8). Os lados na ponte são os do
+  `F4/ponte-no-pc.md`. Escrevi as linhas a pedido da F4, junto com a peça que
+  chama cada comando: o guarda dela reprova uma ponte que lista o que a casca
+  ainda não chama.
+- Os roteiros novos `toque.js` e `sala.js` só valem no desktop. A F4 os tira da
+  rodada da casca larga.
+
+**Medido no caminho:**
+- o desligar precisava do `encerrar`: com o `despedir`, a 8385 ficava presa, e
+  religar não subia;
+- a primeira reversão do bloqueio ao vivo **travou** a suíte em vez de
+  reprovar: sem rede, nenhuma sessão vence o toque. Toda espera de decisão dos
+  testes da sala ganhou prazo;
+- este Chromium sem cabeça não roda `requestAnimationFrame`: o `#anuncio` fica
+  vazio com a frase dita, e o roteiro mede a chamada do `anunciar`;
+- sob carga de 21 a 54 (outras sessões compilando), três coisas reprovaram uma
+  vez e passaram sozinhas: duas provas do enlace com prazo de 20 s, o
+  `discar_pelo_codigo` e o `texto-maior-390` da bancada do celular. Nenhuma
+  passa pelo que mudou; é a assinatura da pendência 29.
+
+**Como está:** app 694/694; carga limpa; 31/31 roteiros; `ponte-sem-gesto`
+limpa nas duas cascas; a bancada do celular inteira (72, e o G3 igual nos dois
+motores). A conformidade da sala (`atender_pela_ponte`, `sala_pessoal`,
+`ligar_pelo_codigo`, `discar_pelo_codigo`, `quarto_em_paralelo`) passou arquivo
+por arquivo depois da décima primeira integração; desde o aviso da
+orquestradora, não rodo conformidade.
+
+**O que ficou de fora, dito para não ficar calado:**
+- **a metade da casca da 18**: o `estado_da_porta().hospedando` da
+  `tela-sessao.js` e o `nossoServidorEm` da `tela-boot.js` ainda respondem «estou
+  no meu servidor?» pelo critério deles. O `onde_estou` saiu da
+  `AGUARDANDO_TELA` quando a faixa passou a chamá-lo, e o guarda já não cobra
+  isso;
+- as tarefas 19 e 20 (o `disconnect` que desmonta só o cliente, e VOLTAR AO MEU
+  SERVIDOR), a confirmação ao fechar (21, só o guardado) e as 28 e 30 (LIGAR pelo
+  código), que esperam a 16 da F1;
+- o lembrete de atenção do macOS (`Informational` a cada 4 s) não tem teste de
+  relógio; a lógica do alarme tem;
+- a agenda é um arquivo regravado inteiro. Um nome dado no instante em que um
+  toque termina pode perder uma das duas escritas. Raro, e da conveniência e não
+  da segurança;
+- **depois do encontro com o lote X da F5:** o teste da sala com
+  `codigo_esperado` provando `onde_estou_na == Pessoal` pela chave.
+
+## A sala viva na décima segunda (10/10)
+
+- A sala viva entrou na `versao/0.16` (`6e845e0d`), com o lote X da F5 integrado
+  antes. Trazida para o `0.16/sala-viva` em `9f170f3f`, sem conflito.
+- **O encontro com o X, provado** (`daf25ba9`):
+  `a_sessao_na_propria_sala_e_pessoal_pela_chave_e_nao_pelo_endereco`. Quem
+  recebe entra na própria sala pela ponte, com `codigo_esperado`. A impressão
+  gravada é a da sala, e o `onde_estou_na` diz `Pessoal` com o endereço
+  `127.0.0.1` e também com um nome de fora. Reprovam: o `onde_estou_na` sem a
+  impressão da conexão, e a ponte sem `gravar_impressao`.
+- **Dois ajustes da integração me tocaram:**
+  - a tabela dos neutros da bancada `ponte-web.cjs` não tinha o `estado_da_sala`
+    nem o `toques_agora` que eu pus na ponte (`8e7fcd37`). Eu rodei a
+    `ponte-sem-gesto.cjs` e não a `ponte-web.cjs`, que confere a resposta de cada
+    neutro. **Quem põe um neutro na ponte roda as duas;**
+  - o `connect` passou a ler a hospedagem para conferir a sala, e a marca
+    `sala::` da F4 o pegou. Ele entrou em `leem_e_seguem_a_lista` (`f7d53427`).
+- A VPS foi reimplantada com o ENC/2: a sala pessoal acha o ponto de produção.
+
+## As tarefas 19 e 20: sair não derruba o servidor (10/10)
+
+Desenhadas durante a pausa da M3, só lendo (`fecfa5d8`, `ceb2a490`), e
+compiladas depois dela. No `0.16/sala-viva`, cada etapa verde sozinha:
+
+| etapa | commit |
+|---|---|
+| o Rust e a ponte: o `disconnect` só da sessão, `parar_de_hospedar`, `meu_servidor`; a `ATENDIDOS_APESAR_DA_HOSPEDAGEM` sai com o ramo no guarda da F4; o guarda novo da 19 | `8b82f0eb` |
+| a `tela-chamada.js` (isolado): o SAIR sai sem caixa | `b200830a` |
+| a `tela-sessao.js`: as frases dizem que o servidor continua; o `ejetar()`; a pergunta ao `onde_estou` (a metade da `tela-sessao.js` da 18); o VOLTAR na trilha | `755e33ce` |
+| o VOLTAR AO MEU SERVIDOR e o PARAR DE HOSPEDAR na entrada (`camada-hospedagem.js`), com o roteiro `meu-servidor.js` | `620f1d8b` |
+| a `tela-fim.js`, e o `desmontar_a_sessao` que ninguém mais chama | `d46dcbb4` |
+
+**Medido no caminho:**
+- a ordem que eu tinha anotado quebrava o SAIR entre dois commits: a
+  `tela-chamada.js` chamava o `hospedandoAqui`, que a `tela-sessao.js` renomeia.
+  Ela entrou antes;
+- a `tela-fim.js` não pôde ficar isolada: sem ela, o `desmontar_a_sessao` ficou
+  sem chamador, e o guarda dos comandos sem chamador reprova. Ele saiu no mesmo
+  commit;
+- o guarda do estado de topo da sessão pegou o `meuServidorNaTrilha`, que eu não
+  tinha esquecido ao sair.
+
+**Como está:** app 711/711; 32/32 roteiros; as duas bancadas da ponte limpas; a
+bancada do celular passa (85, e o G3 igual nos dois motores). Cada guarda e cada
+passo do roteiro reprova na reversão.
+
+**O que ficou de fora:**
+- o teste de um MOD do guardado que continua respondendo enquanto o dono visita
+  outro servidor. Ele vale por construção (o servidor não cai mais), e ainda não
+  tem prova;
+- com o guardado no ar, o HOSPEDAR AQUI da entrada ainda responde «JÁ ESTOU
+  HOSPEDANDO NESTA JANELA». O bloco do VOLTAR fica logo acima dele. Fazer o
+  botão voltar é da `tela-boot.js`, na fila da F5, com a metade dela da 18;
+- **a confirmação ao fechar (21)** pede decisão da orquestradora: o guarda de
+  credencial da F5 proíbe vetar o fechamento da janela, e no macOS o botão do
+  sistema e o Cmd+Q passam sem pergunta.
+
+## Tarefa 21: a confirmação ao fechar (10/10)
+
+Decidida pela orquestradora em 10/10, no molde da exceção do `beforeunload`.
+No `0.16/sala-viva`, em três commits, cada um verde sozinho:
+
+| etapa | commit |
+|---|---|
+| a `esquecerARecusaDoApelido()` da F5, por `cherry-pick` do `ca2589f9` (`0.16/lotes`), com o mesmo `patch-id` | `b276e569` |
+| a exceção no guarda do lote R (isolado) | `a1423896` |
+| o ouvinte, o duble e o roteiro `fechar.js` | `730048aa` |
+
+- **Um ouvinte só, no `camada-hospedagem.js`**: o `onCloseRequested` cobre o
+  botão vermelho do macOS, o Alt+F4 e o botão da casca (o `close()` também pede
+  o fechar). A parte 1 aprovada, uma pergunta no `#janela-fechar` com a linha
+  do `base.js` num commit isolado, ficou desnecessária.
+- **Antes de qualquer veto, as credenciais da tentativa somem**:
+  `fecharAceiteDeMods()` e `esquecerARecusaDoApelido()`. A segunda é da F5:
+  o guarda dela proíbe outro script de nomear o `recusaDoApelido`.
+- **Só o guardado pergunta.** Sem servidor no ar (`meu_servidor` devolve
+  `null`), fecha direto. A sala pessoal não pergunta: ela se despede sozinha.
+- **A exceção no guarda do lote R** (`a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta`,
+  parte 4), revisada pela F5:
+  - o `close-requested` cru continua proibido;
+  - cada `onCloseRequested(` é cobrado, e o trecho vai até o parêntese que
+    fecha a chamada, não até o primeiro `.catch(`;
+  - antes do `preventDefault`: as duas credenciais, e `invoke("meu_servidor")`
+    antes do `if (!meu) return;`;
+  - um corte cedo (um `")"` num texto) reprova dizendo que o guarda não leu o
+    ouvinte, em vez de passar calado. Os dois últimos itens vieram da revisão
+    da F5.
+
+**Reversões, cada uma reprovando:** segurar antes de esquecer; não esquecer o
+apelido; segurar sem perguntar pelo servidor; o `close-requested` cru; um
+`.catch(` antes do veto; um `")"` num texto antes do veto; o `return` antes da
+pergunta. As duas últimas passavam caladas sem os ajustes da F5.
+
+**O roteiro `fechar.js`:** sem servidor, o pedido passa e a recusa do apelido
+é esquecida; com o guardado no ar, o pedido é segurado e a caixa cita o
+servidor, sem fechar antes do sim; depois do sim, a janela fecha e o pedido
+seguinte passa.
+
+**Como está:** cada etapa sozinha passa o `--test frontend` (292), a carga, os 33
+roteiros e as duas bancadas da ponte; sem o ouvinte, o `fechar.js` reprova («a
+casca não ouve o pedido de fechar a janela»). Com a (a) e a (b) na árvore: app
+718/718 e a bancada do celular passa.
+
+**O que ficou de fora — o Cmd+Q.** Medido no código (tauri 2.11.5,
+tauri-runtime-wry 2.11.4, tao 0.35.3, muda 0.19.3): o item Quit do macOS manda
+o `terminate:`, o `tao` não implementa `applicationShouldTerminate:`, e o
+`applicationWillTerminate:` vai direto ao `RunEvent::Exit`. O Cmd+Q, o Sair do
+Dock e o logout passam ao largo do `onCloseRequested` **e** do `ExitRequested`:
+não perguntam, não despedem as hospedagens e **não despedem nem a própria
+sessão** (o `despedir_se` da pendência 50, que na `v0.15.1` publicada também só
+roda no `ExitRequested`). Leitura de código, ainda sem medida em tempo de
+execução. A orquestradora deu o sim para os dois consertos, escritos na pausa da M3:
+(a) o Sair nosso no menu do macOS, que fecha a janela e passa pela pergunta;
+(b) a despedida de melhor esforço no `RunEvent::Exit`, com teto de 1 s. Os dois
+estão escritos, com 5 testes e 2 guardas, cada um reprovando na reversão (11),
+e **ficam sem commit até a medida no app de verdade**, que a orquestradora roda
+(a tecla e o clique são dela): se o runtime não entregar a despedida no
+`RunEvent::Exit`, a (b) sai. O desenho e a medida estão no plano, na tarefa 21.
+
+## A 21 medida no app: a janela que não fechava, a (a) e a (b) (10/10)
+
+A orquestradora rodou duas medidas no app de verdade, com builds `.app` de
+nome próprio (`SEELE-sem-ab` e `SEELE-com-ab`), o `seeled` numa porta só dele
+como medida de quem ficou, e um segundo cliente.
+
+**A primeira medida achou um defeito da 21**: o botão vermelho, o Sair do menu
+e o sim da pergunta não fechavam nada. O processo seguia vivo, sem janela à
+vista, dentro do servidor por minutos, sem uma linha de saída no `seele.log`.
+
+- **A causa, medida antes do conserto.** Com um ouvinte de `onCloseRequested`
+  de pé, o Tauri segura o fechar no Rust e entrega a decisão à página; sem
+  `preventDefault`, quem termina de fechar é o embrulho do `@tauri-apps/api`,
+  pelo `destroy()`. A capacidade `janela` dava o `close` e não o `destroy`:
+  «window.destroy not allowed», numa promise que ninguém via (a página não tem
+  ouvinte de `unhandledrejection`). Reproduzido pelo runtime falso contra a ACL
+  gerada.
+- **O conserto** (`ba9772c9`): o `core:window:allow-destroy`, com o esquema
+  gerado, e o guarda `a_pagina_que_ouve_o_fechar_consegue_terminar_de_fechar`
+  (`tests/permissoes.rs`), que reprova sem a permissão.
+- **Por que o roteiro não pegou** (`1e0a2a8a`): o duble aceitava tudo. Agora ele
+  fecha como o Tauri — o `close()` vira pedido quando há ouvinte, sem veto o
+  embrulho chama o `destroy()`, e as permissões vêm do `janela.json` — e o
+  `fechar.js` exige a janela destruída. Sem a permissão, ele reprova com a
+  frase do Tauri.
+
+**A segunda medida**, com o conserto e com diagnóstico que não foi a commit
+(a página dizendo ao `seele.log` quando recebe o Cmd+Q; todo evento do menu):
+
+| saída | sem a (a) e a (b) | com a (a) e a (b) |
+|---|---|---|
+| botão vermelho | sai em ~1 s; o servidor vê na hora | igual, e «a despedida já tinha rodado» no fim |
+| item Sair do menu | — | `seele-sair` → «Sair do menu…» → a saída; o servidor vê na hora |
+| Cmd+Q pela tecla | a página recebe o keydown, o app sai pelo `terminate:`, **o servidor só vê 20 s depois** | a página recebe, o menu dispara o `seele-sair`, a saída; o servidor vê na hora |
+| `quit app` (Dock, logout) | o servidor só vê 20 s depois | «se despediram levou_ms=96»; o servidor vê na hora |
+
+Com o guardado no ar (`--hospedar`, um segundo cliente dentro): o Cmd+Q mostra
+«FECHAR O SEELE»; CANCELAR deixa tudo de pé; o sim fecha em ~1 s, e quem estava
+dentro lê «O SERVIDOR ESTÁ ENCERRANDO».
+
+**Os commits:** a (b) em `ef364aa9` (a despedida do fim no `RunEvent::Exit`,
+teto de 1 s) e a (a) em `f835b52d` (o Sair nosso no menu do macOS). App
+719/719; 33/33 roteiros; as duas bancadas da ponte.
+
+**Decidido e registrado:**
+- **o «Quit and Keep Windows» (Option+Cmd+Q) sai do menu.** É o alternativo que
+  o AppKit só põe ao lado de um Sair com `terminate:`. O SEELE não restaura
+  janelas na reabertura (o `tao` não usa a restauração de estado do AppKit), e
+  ele só fazia o que o Cmd+Q antigo fazia: sair sem perguntar. Recuperá-lo
+  reabriria esse atalho.
+
+**O que ficou sem resposta ou de fora:**
+- **o Cmd+Q da primeira medida não se explica pela ACL**: a linha «Sair do
+  menu» sai antes do `close()`, e naquela rodada ela não saiu. A segunda medida,
+  com o mesmo envio, não reproduziu. Fica como observado uma vez, sem causa;
+- o Cmd+Q com a janela minimizada não foi medido (o `AXMinimized` não pegou);
+- **as listas do RT** (`0.16/lotes`): o `fechar.js` tem de entrar na lista do
+  job `bancadas` do `.github/workflows/ci.yml` e na `roteiros_da_casca` do
+  `empacotar/publicar.sh`, entre o `escolher-transmissao.js` e o `hospedar.js`.
+  As listas não existem no `0.16/sala-viva`: entram no encontro da 14ª;
+- a página sem ouvinte global de `unhandledrejection`, que deixou este defeito
+  mudo, é do `base.js` e ficou com a orquestradora.
+
+## A 21 quebrou a bancada do celular na 14ª (11/10)
+
+**O que aconteceu.** O `1e0a2a8a` pôs no duble da `carga-da-casca.py` o
+marcador `__PERMISSOES_DA_JANELA__`. A `tools/bancada-do-celular.py` monta o
+mesmo duble por conta própria e só preenchia os marcadores antigos: a página
+morria no primeiro script («is not defined»), e 46 casos reprovaram na bateria
+da 14ª, inclusive o G3. A orquestradora achou por bisseção (verde em
+`538ce467`, vermelho em `d9e31226`) e consertou na integração (`5c5dc9e0`): o
+marcador preenchido, e a bancada recusa pelo nome qualquer marcador que sobrar.
+Reproduzido aqui em `d9e31226`; verde depois do avanço para a `versao/0.16`
+(`a400c4eb`).
+
+**O erro foi meu**: rodei a bancada do celular antes de mexer no duble, e não
+depois. A verificação que eu rodava (a carga, os roteiros e as duas bancadas
+da ponte) não a incluía.
+
+**A regra, da orquestradora, daqui em diante:** toda mexida no duble, na `ui/`
+ou na carga roda a bancada do celular antes da entrega, junto com os roteiros
+e as bancadas da ponte. Ela usa o duble da carga, então qualquer mudança nele a
+alcança. A minha verificação passou a rodá-la.
+
+## A metade da casca da tarefa 18 (11/10)
+
+Sobre a `versao/0.16` da 15ª (`a400c4eb`), com o W2, o W3, o E54 e o
+`depoisDeConectar` da F8 já dentro. Cada etapa verde sozinha, verificada do
+zero (a carga, os 37 roteiros, as duas bancadas da ponte e a do celular; o
+`--test frontend`):
+
+| etapa | commit |
+|---|---|
+| o duble responde o `onde_estou` pela sessão, como o Rust (Guardado no endereço do servidor hospedado, Outro fora dele, Nenhum sem sessão) | `714fbeb5` |
+| a dispensa de conferir a própria chave vem do `onde_estou` depois do `connect`, e não do endereço; o `nossoServidorEm` sai; os guardas; o passo 6 do `meu-servidor.js` | `c4317f0b` |
+| HOSPEDAR AQUI, com o guardado no ar, volta a ele; o passo 7 | `aada60a5` |
+
+- **«Estou no meu servidor?» tem uma resposta só.** A última régua própria era
+  o `nossoServidorEm` da entrada: o endereço que a janela hospedou. Agora o
+  `conectar` pergunta ao `onde_estou` depois do `connect`, e só «Guardado» (a
+  chave do aperto de mão é a do servidor daqui) dispensa a `#tela-auth`. O mesmo
+  endereço com outra chave confere.
+- **O desenho da F5 e da F8 não mudou**: a conferência da tentativa logo depois
+  do `connect` (o guarda do lote E54 reprovou a minha primeira versão, que
+  perguntava antes dela), e o `depoisDeConectar` logo depois de uma
+  conferência. A pergunta é uma espera e fica entre duas conferências, como
+  depois de cada espera da entrada (lote W2).
+- **O guarda da dispensa mudou de nome**:
+  `a_dispensa_de_conferir_a_propria_chave_vem_da_chave_desta_conexao`, no
+  lugar de `the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after`.
+- **Reversões, cada uma reprovando:** o código de antes (passo 6); a pergunta
+  antes da primeira conferência; sem a segunda conferência; «!== "Nenhum"»; o
+  endereço de volta; a `tela-sessao` pelo `estado_da_porta`; sem o conserto do
+  HOSPEDAR AQUI (passo 7).
+- **Medido no caminho:** uma rodada da bancada do celular reprovou o
+  `aba-servidor-390-papel` com a máquina carregada e um roteiro meu rodando
+  junto; isolado ele passou 3 de 3, e as rodadas inteiras seguintes passaram.
+  E duas vezes mexi em arquivo com a verificação rodando: a rodada não valeu
+  como prova de etapa nenhuma, e cada etapa foi verificada de novo, sozinha.
+
+App 727/727 na ponta.
+
+## A 21 quebrou duas bancadas da janela (11/10)
+
+A F5 achou, na `versao/0.16` pura (`57fd0841`), a `conversa-com-estado` caindo
+inteira e a `ajustes-v013` reprovando por «nenhum erro na página», as duas com
+«Cannot read properties of undefined (reading 'catch')» em
+`camada-hospedagem.js:137`. Os dubles de janela das bancadas têm
+`onCloseRequested() {}`, que devolve `undefined`, e o `.catch` do ouvinte da 21
+estourava na carga, levando junto o VOLTAR e o PARAR do mesmo arquivo.
+
+**O conserto** (`07c6ae0f`): o registro vai em
+`Promise.resolve(janelaDoApp?.onCloseRequested?.(…))`. O guarda da exceção do
+fechar passou a ler a chamada direta **e** a opcional, e a reprovar qualquer
+outra menção ao método: com a forma nova, o guarda antigo não achava ouvinte
+nenhum, e um veto sem as condições passaria calado (provado por reversão).
+
+**O erro foi meu, e é o segundo do mesmo tipo** depois da bancada do celular:
+a verificação rodava a carga, os roteiros, as bancadas da ponte e a do
+celular, e não as 34 bancadas da janela. Agora roda todas. Com o conserto, 33
+de 34 passam; a do executor no navegador pede o motor com o wasi-sdk, que não
+baixei, e não carrega a camada.
+
+**A regra, daqui em diante, para toda mexida na `ui/`, no duble ou na carga:**
+a carga, os roteiros, as duas bancadas da ponte, a do celular **e todas as
+bancadas da janela** (`apps/seele-app/bancada/*.cjs`), antes da entrega.

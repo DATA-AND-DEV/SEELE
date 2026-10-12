@@ -327,6 +327,48 @@ impl GateConfig {
     pub fn abertura_dbfs(&self) -> f32 {
         dbfs_de_rms(self.open_rms)
     }
+
+    /// A régua que os controles da voz descrevem. F01.
+    ///
+    /// **Uma só, para a conversa e o teste do microfone do desktop e para a voz
+    /// do navegador.** Se duas réguas divergissem, alguém calibraria a
+    /// sensibilidade num lugar e falaria com outro corte.
+    ///
+    /// Zero em `abertura_dbfs_milesimos` quer dizer «o padrão», e o padrão
+    /// depende de a supressão estar ligada. É a decisão central de F01: −60 dBFS
+    /// só é defensável com o piso da sala removido, e sem supressão o portão
+    /// volta a ser a única defesa contra o ventilador, o argumento que
+    /// [`OPEN_RMS`] registra.
+    ///
+    /// # O padrão é um alvo, e a escolha é um número
+    ///
+    /// O padrão vai por [`GateConfig::automatico`]: −60 dBFS passa a ser o
+    /// **mais sensível que o portão chega**, e o limiar de verdade é o ruído
+    /// medido mais [`MARGEM_SOBRE_O_RUIDO_DB`]. A auditoria de 22/09/2026 (A03)
+    /// mediu por que: como número fixo, −60 dBFS abriu em 200 de 200 quadros de
+    /// ruído sem fala nenhuma, porque o residual **depois** da supressão fica em
+    /// torno de −59 dBFS, perto de zero decibel de folga.
+    ///
+    /// Um valor escolhido à mão vai por [`GateConfig::de_dbfs`], que é fixo: F01
+    /// pede o ajuste manual, e um ajuste que o produto corrige por cima não é
+    /// ajuste.
+    #[must_use]
+    pub fn dos_controles(abertura_dbfs_milesimos: i32, com_supressao: bool) -> Self {
+        if abertura_dbfs_milesimos == 0 {
+            return Self::automatico(if com_supressao {
+                ABERTURA_COM_SUPRESSAO_DBFS
+            } else {
+                ABERTURA_SEM_SUPRESSAO_DBFS
+            });
+        }
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "milésimos de decibel cabem exatos num f32 nesta faixa"
+        )]
+        let convertido = abertura_dbfs_milesimos as f32 / 1000.0;
+        // **Fixo**, porque foi escolhido. Ver o doc.
+        Self::de_dbfs(convertido)
+    }
 }
 
 /// What the gate decided, as plain data.
@@ -909,6 +951,50 @@ mod tests {
             (GateConfig::de_dbfs(12.0).abertura_dbfs() - *FAIXA_DE_ABERTURA_DBFS.end()).abs()
                 < 0.01
         );
+    }
+
+    /// **A régua dos controles: o padrão segue a supressão, e a escolha vence.**
+    ///
+    /// F01 inteira. O padrão é um alvo que acompanha o ruído, e o alvo depende de
+    /// a supressão estar ligada; um número escolhido fica onde foi posto. A
+    /// conversa e o teste do microfone do desktop e a voz do navegador chamam
+    /// esta função, e é por isso que uma prova aqui vale para os três.
+    #[test]
+    fn a_regua_dos_controles_segue_a_supressao_e_a_escolha_vence() {
+        let com = GateConfig::dos_controles(0, true);
+        assert!(
+            com.adaptativo,
+            "o padrão com supressão deixou de acompanhar o ruído"
+        );
+        assert!(
+            (com.abertura_dbfs() - ABERTURA_COM_SUPRESSAO_DBFS).abs() < 0.01,
+            "com supressão o padrão deixou de ser o alvo de F01: {} dBFS",
+            com.abertura_dbfs()
+        );
+
+        let sem = GateConfig::dos_controles(0, false);
+        assert!(
+            sem.adaptativo,
+            "o padrão sem supressão deixou de acompanhar o ruído"
+        );
+        assert!(
+            (sem.abertura_dbfs() - ABERTURA_SEM_SUPRESSAO_DBFS).abs() < 0.01,
+            "sem supressão o padrão desceu junto: {} dBFS",
+            sem.abertura_dbfs()
+        );
+
+        for com_supressao in [true, false] {
+            let escolhido = GateConfig::dos_controles(-50_000, com_supressao);
+            assert!(
+                !escolhido.adaptativo,
+                "a escolha manual passou a ser corrigida por cima"
+            );
+            assert!(
+                (escolhido.abertura_dbfs() - (-50.0)).abs() < 0.01,
+                "a escolha manual foi ignorada: {} dBFS",
+                escolhido.abertura_dbfs()
+            );
+        }
     }
 
     /// **A ida e a volta de dBFS fecham.**

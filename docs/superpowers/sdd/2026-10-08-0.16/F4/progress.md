@@ -687,3 +687,234 @@ começar.
 - **A seguir, o lote A**: a fronteira da voz no `seele-web`, com o cabeçalho, o
   relógio e a tabela (a alça opaca no lugar do SSRC) pelo `wasm`.
 
+
+## 09/10, noite: a 3.3, lote A (a voz pela fronteira do `seele-web`)
+
+- **`af0bea6d`.** Quem manda: `voz_envio`, `voz_reabrir` e o datagrama
+  montado no `.wasm` com o `RelogioDeMidia`. Quem recebe: `voz_recepcao`,
+  `voz_chegou` e `voz_esquecer` com a `TabelaDeFontes`, e a página recebe uma
+  alça u32 no lugar do SSRC (ADR 0057).
+- **Provas:** quatro testes nativos repetem as sequências gravadas do desktop,
+  e o `xtask/web/voz.mjs` roda os mesmos casos dentro do `.wasm`, como passo
+  do `cargo xtask web`. As duas reversões reprovaram nos dois lugares.
+
+## 10/10, madrugada: a 3.3, lote C (a voz no navegador)
+
+- **Passo 1, a régua do portão no `seele-voz`** (`f1f5dfd5`):
+  `GateConfig::dos_controles`. A conversa e o teste do microfone do desktop
+  montavam a régua cada um com o seu corpo, e a voz do navegador seria o
+  terceiro. Os dois do desktop passam a chamá-la, e o guarda exige que nenhum
+  monte a sua (as agulhas vêm de `concat!`, para não casar com o próprio
+  texto). Três reversões.
+- **Passo 2, o portão, o jitter e o mixer pela fronteira** (`b550f452`):
+  - **o portão mora no `Envio`, na thread da página**, e não no worklet: cada
+    quadro solto precisa do carimbo do mesmo relógio, e vai para o
+    `AudioEncoder`, que não existe no worklet. O `capturou` segue a ordem do
+    laço do desktop, e o `reabrir` monta outro portão com a mesma régua, o
+    mesmo modo e a mesma tecla;
+  - **o ganho automático do desktop não roda no navegador.** O DSP da
+    plataforma foi aceito pelo ADR, e o ganho do navegador vem **antes** do
+    portão, que é a ordem que o doc do `ganho` desaconselha. Não está medido;
+  - **o jitter e o mixer moram na `Reproducao`, no worklet**, sobre som já
+    decodificado: o `AudioDecoder` não existe lá nem oculta quadro. Um quadro
+    que falta vira silêncio com fade de 2,5 ms (a emenda do ADR 0057 ao ADR
+    0010);
+  - nove testes nativos e o `voz.mjs` dentro do `.wasm`. Sete reversões
+    reprovaram no nativo, e três delas também no `.wasm`.
+- **Passo 3, a `ui/voz-web.js` e o `ui/voz-worklet.js`** (`47a46827`), na
+  ordem da rodada 5. A bancada `voz-no-navegador.cjs` (no job
+  `bancadas-de-mod`, depois do `cargo xtask web`) prova, no Chromium com
+  microfone falso e um laço local que troca o SSRC:
+  - a voz de ponta a ponta;
+  - o mudo e o isolamento;
+  - **os controles depois de uma reconexão** (o Step 1 da 3.3): mudo,
+    isolamento, modo e régua. O mudo escondia o isolamento, e por isso eles
+    são conferidos um de cada vez;
+  - o `messageerror` dito.
+  O `.wasm` compila no worklet em 2 a 6 ms.
+- **Duas medidas que mudaram o código:**
+  - **o `usedtx: true` atrasa a voz 340 ms no Chromium.** O `AudioEncoder`
+    segura 17 quadros antes do primeiro; sem o DTX, zero. A voz do navegador
+    fica sem DTX, porque o portão fechado já não manda nada. A bancada reprova
+    acima de três quadros no codificador;
+  - **o Chromium devolve o instante do codec um microssegundo antes**
+    (259 999 por 260 000), no codificador e no decodificador. O casamento
+    passou a ser pelo número do quadro.
+- **Os guardas da janela:**
+  - a `voz-web.js` entra na `index.html` depois da `mods-no-navegador.js`.
+    **Para a F8**, a dona da fila da `index.html`: uma linha e um comentário;
+  - o worklet e a tag `<audio>` da voz são exceções conferidas;
+  - a página não nomeia mais SSRC nem datagrama: a exportação virou
+    `voz_empacotar`.
+- **O que falta na 3.3:**
+  - o ganho por pessoa, que precisa do `Room` (o `ganhos_a_aplicar` do
+    `seele-ffi` no `.wasm`, com a 2.6);
+  - os comandos da ponte (entrar e sair da voz, que esperam a sessão, 2.6);
+  - o teste do microfone do PC;
+  - a medida do eco, que é do dono;
+  - a conformidade de áudio, que espera o aviso da orquestradora.
+- **O guarda da hospedagem** (`c6fca33e`) aprende o `servidor_do_mod` da F3 e
+  o `sala::` da F7, a pedido das duas. Provado por injeção, porque nesta
+  branch nenhum corpo os usa ainda.
+- **Passo 4, o teste do microfone do PC pela ponte** (`832be563`): o portão do
+  `Envio` na ativação por voz, à parte da voz da sala. O monitor toca pela
+  mistura do worklet, e fechar fora da sala para as faixas. A bancada abre e
+  fecha duas vezes pela ponte de verdade, na casca larga. Reversões: fechar sem
+  `track.stop()`, o monitor calado e o fechar de antes da ponte reprovam a
+  bancada; o teste fora da ativação por voz e sem a régua reprovam os nativos.
+- **A sala viva da F7**: os comandos e os canais novos, com o lado proposto,
+  em `F4/ponte-no-pc.md`. Decididos quando a casca os chamar.
+
+## 10/10: a 3.4 no que não depende do domínio (a identidade do navegador)
+
+- **Pedida pela orquestradora** depois do passo 4 da 3.3, sem tocar no
+  `tela-boot.js` e seguindo o contrato do guarda da credencial do lote R.
+- **A `ui/identidade-web.js`** entrega à tela da F8 o objeto de leitura e as
+  ações: `entrar`, `aceitarOsMods`, `agoraNao`, `copiarLink` e `instalar`. O
+  fragmento é lido e apagado na carga. O token e o link vivem só em
+  `segredos`, na memória da tentativa. A chave Ed25519 nasce no primeiro
+  `entrar`, depois do `persist()`, e o servidor é guardado no IndexedDB pela
+  impressão só quando a entrada dá certo. Quem já é conhecido entra pela
+  chave, sem gastar o convite.
+- **Quem conecta é passado na criação**: o `connect` da ponte é da 2.6.
+- **O servidor responde `CredentialRejected` igual para todo convite que não
+  vale** (spec 08, `admissao.rs`). `convite-gasto` e `convite-vencido` se
+  separam pela validade do link.
+- **A bancada `identidade-no-navegador.cjs`** (no job `bancadas-de-mod`,
+  depois do `cargo xtask web`): os três casos do plano, os estados, o que segue
+  e o que encerra a tentativa, a ordem do `persist()`, o fragmento e o
+  servidor já conhecido.
+- **O guarda da credencial** passa a ler a `identidade-web.js` (cada linha que
+  nomeia `credencial`, `segredos` ou `linkDaCarga`). A chamada de `conectar`
+  dela é a quarta que leva credencial, com o porquê.
+
+## 10/10: a décima primeira integração trazida, e a conformidade da voz
+
+- **A `versao/0.16` de `330f3ab4`** (a décima primeira, verde de primeira)
+  entrou em `a6af3539`. Teve um conflito só, no guarda da credencial do
+  `frontend.rs`, e os dois lados ficam: a `recusaDoApelido` e a parte 6 do lote
+  W da F5, e a identidade do navegador. Conferido no código que a identidade
+  segue o contrato do W. Na árvore integrada passam os guardas da janela, o
+  `tests/web.rs`, os crates da F4, o `empacotamento`, o `check-deps`, o
+  `cargo xtask web` e as bancadas da ponte, da voz e da identidade. A
+  `ponte-sem-gesto` ficou limpa nas duas cascas: o `CASCA is not defined` do
+  celular era a ordem da integração da F8.
+- **A conformidade que toca o laço da voz, liberada pela orquestradora, um
+  arquivo por vez**: passam o `voz_na_reconexao`, o `soak_audio`, o
+  `troca_de_aparelho`, o `som_da_tela_segue_o_aparelho`, o `acceptance_m2`, o
+  `ejetar`, o `desassentar` e o `sala_cheia_nao_se_escuta` (38 testes). É a
+  prova de que a régua do portão no `seele-voz` (`f1f5dfd5`), que veio depois do
+  que a bateria cobriu, não mudou a voz do desktop.
+
+## 10/10: a fase 2 da 2.2, o retrato comum
+
+- **Passo 1, a mudança de lugar** (`d0f72c7c`). Os tipos de vista, as
+  conversões e as seis funções da projeção saem do `seele-ffi` para
+  `seele-sessao/src/retrato.rs`, e o `seele-ffi` os reexporta pelo
+  `seele-core`. Os guardas de texto do `frontend.rs` que liam o `types.rs`
+  leem os dois arquivos juntos (`tipos_da_ponte`). Um `#[cfg(test)]` no topo do
+  `lib.rs` cortou o «programa» que quatro guardas de texto do `seele-ffi` leem,
+  e os quatro reprovaram; o import foi para dentro dos módulos de teste.
+- **Passo 2, os dois produtores** (`f087a500`). O `RetratoDaSala` com os nomes
+  de campo do `Snapshot`; a `Sessao` do `seele-web`, que entra pelo `adopt` e
+  dobra quadros; o `seele_ffi::sem_rede`, atrás da feature `conformidade`. O
+  `dois_produtores_de_snapshot.rs` compara os 19 campos depois de cada uma de
+  onze mensagens, com o `TemaMudou` que chega e o que sai. Três reversões no
+  navegador reprovaram, cada uma no campo e no passo certos.
+- O `.wasm` do `seele-web` com a `prova` ficou em 985 KB (era 885 antes da
+  voz e da sessão).
+- **A fechar** depois da décima segunda, como a orquestradora pediu: os campos
+  novos do `Snapshot` da sala viva, cada um com o seu lado.
+
+## 10/10, tarde: a décima segunda, o jitter zero da M3 e o fecho da fase 2
+
+- **A décima segunda trazida** (`bb1944bc`). O conflito foi o `bare_shared`:
+  fica o `sem_rede::shared`, com o `impressao_do_servidor` do lote X. Ela não
+  trouxe campo novo ao `Snapshot`.
+- **A pausa da M3** (cerca de duas horas sem compilar): o código foi escrito, e
+  rodado e commitado só depois dela.
+- **O jitter zero da M3**, achado lendo, sem rodar. O falante de medição
+  gravava `PROTOCOL_VERSION` (9) no cabeçalho de mídia, e desde o `f3aaf9ce`
+  (fora da v0.15.1) o primeiro byte da voz é 1. Quem ouvia jogava fora toda a
+  voz dele, e o jitter ficava no zero inicial. A orquestradora consertou o
+  falante e mediu de 1,06 a 1,58 ms. As duas pontas que ficavam no produto
+  mudam em `67bfeee1`:
+  - o laço de voz conta, por motivo, os datagramas que o cabeçalho recusa, e
+    diz o primeiro no log (`ler_o_datagrama`, `CabecalhosRecusados`);
+  - o `encode` do `MediaHeader` grava sempre o número do layout. A F1 revisa.
+  O teste da cadeia de recepção vai dos bytes à telemetria, e com o byte do
+  falante reprova como a M3 viu.
+- **O fecho da fase 2 da 2.2** (`1c712014`): cada campo do `Snapshot` tem um
+  lado (19 da sala, 14 medidos, 3 contados), e um campo novo reprova até
+  alguém decidir.
+- **O guarda da hospedagem** (`935ea588`) lê `.sala` e `.toques` com fronteira
+  de palavra. A marca de fim de linha deixava passar calada a leitura numa
+  linha só (provado pela injeção).
+- **A fronteira da identidade com a F8**, fechada pela orquestradora e escrita
+  durante a pausa:
+  - `identidadeDaPagina()`;
+  - o `{ ok: true, resposta, persistencia }` (achado da F8);
+  - `conhecidos()`, `entrarNoConhecido` com `link-vencido`, e `lembrarONome`;
+  - o guarda da credencial com as linhas novas, e nenhum outro script tocando
+    no link da carga;
+  - a bancada com a página inteira sem casca injetada (pedido da orquestradora
+    na décima segunda), os servidores do aparelho e a identidade da página.
+
+## 10/10, noite: a revisão do E54 da F5, e uma tentativa por vez na identidade
+
+- **A revisão do E54** (`e05e1681`, pedida pela orquestradora): as duas pontas
+  da F5 não conflitam com o que eu tenho.
+  - O `soltar_a_entrada` entra em `COMANDOS_DA_PONTE` e no `AINDA_A_FAZER` com
+    a 3.4.
+  - O `corpo_do_comando` de `tests/web.rs` passa a achar as formas genéricas.
+- **A mesma corrida, do lado do navegador**, achada lendo a minha `entrar`.
+  Ela atravessava quatro esperas lendo a tentativa de agora. Medida antes do
+  conserto, no caso 12 da bancada, com o link novo aberto no meio:
+  - durante o `persist()`, a velha entrava **no servidor do link novo**, com o
+    token dele e o apelido da velha;
+  - o aceite de MODs da velha entrava no servidor novo, sem apelido;
+  - a velha aceita ou recusada encerrava a nova, e a aceita guardava o servidor
+    dela com a chave da nova (nula);
+  - com o banco respondendo fora de ordem a dois links, o token do segundo ia
+    ao servidor do primeiro.
+- **O conserto:**
+  - a `vez` conta cada tentativa encerrada e é conferida depois de cada
+    espera;
+  - o `abrir` só põe os segredos depois de o banco responder;
+  - a velha aceita fica guardada com a chave dela e é solta (`soltar`, no
+    produto o `soltar_a_entrada` da ponte);
+  - o desfecho é o `sem-tentativa`, que a tela já tem.
+  Na tela da F8 de hoje a corrida não se alcança (a de conectar não tem
+  ação), mas o contrato é da identidade.
+- **Dez reversões**, cada conferência tirada sozinha, e as dez reprovam no
+  cenário dela. Duas passavam verdes na primeira rodada:
+  - sem a conferência do `persist()`, a velha fazia nascer a chave da nova;
+  - sem a da chave, ela chamava o `connect` do servidor novo com a chave nula,
+    e o servidor de mentira estourava antes de anotar.
+  A bancada passou a anotar a entrada sem chave e a conferir a ordem do
+  `persist()` e da chave, e as duas reprovam.
+
+## 10/10, noite: o que ninguém pegou vai ao `seele.log` (pedido da orquestradora)
+
+- **O achado da F7:** o botão vermelho não fechava o app. O `destroy()` da
+  janela era recusado pela ACL do Tauri, a recusa caía numa promise sem ninguém
+  olhando, e nada ia ao `seele.log`: a página não tinha ouvinte global.
+- **O `base.js` ganha dois ouvintes**, o de `unhandledrejection` e o de
+  `error`. Eles mandam ao `registrar_da_janela` (`onde=sem-dono`, nível
+  `erro`) o motivo, com a pilha quando há e com o lugar quando o solto não é um
+  erro. A tela não muda, e o console segue dizendo o que já dizia.
+- **O teto:** dez linhas por minuto. As seguintes são contadas e ditas numa
+  linha só, no fim do minuto. É no JS também porque, no Rust, a linha da janela
+  sem MOD gasta do balde do catálogo, o dos outros avisos da janela.
+- **O roteiro** `tools/roteiros/recusa-sem-dono.js` reprova sem os ouvintes, e
+  cada peça foi provada por reversão (as seis reprovam).
+- **Os 35 roteiros que já existiam** seguem verdes, e nenhum deixa linha
+  `sem-dono`, lidos por uma cópia do aparelho que diz o que o duble recebeu.
+  Também verdes: `check-runtime`, `ponte-sem-gesto` (o `registrar_da_janela`
+  não está entre os comandos que a carga chama sozinha), a bancada da voz, a da
+  identidade e os guardas da janela (294), do celular (8) e da web (12).
+- **Achado latente no aparelho dos roteiros:** o `carga-da-casca.py` lê o
+  relato do console até a primeira aspa dupla. Um relato com aspas antes de um
+  `REPROVADO` esconde a reprovação, e o aparelho diz «carga limpa» com saída 0
+  (medido com um roteiro de duas linhas). Hoje não esconde nada: lidos até o
+  `", source:`, os 36 dão o mesmo resultado.

@@ -92,17 +92,27 @@
   // ---------------------------------------------------------- SEU PERFIL
   //
   // No alto, o apelido de quem usa o aparelho, e EDITAR PERFIL, que abre o
-  // perfil do desktop. A capa animada (D-capa-1) e a chave curta entram quando
-  // a F3 (`pessoa.capa`) e a F4 (`identidade-web.js`) as entregarem.
+  // perfil do desktop. A placa veste a capa de quem usa (`pessoa.capa`,
+  // D-capa-1) como a barra do operador do desktop: o `vestirCapa` da F3, a
+  // cada quadro. A chave curta entra com a tela ENTRAR EM (Tarefa 10).
 
   const coluna = camada.querySelector(".server-coluna");
   const apelido = h("span", { class: "cel-perfil-apelido" });
   const iniciais = h("span", { class: "cel-perfil-retrato", "aria-hidden": "true" });
-  coluna.prepend(h("div", { class: "cel-perfil" },
+  const placa = h("div", { class: "cel-perfil-placa" }, iniciais, apelido);
+  const perfil = h("div", { class: "cel-perfil" },
     h("span", { class: "rotulo", text: PALAVRAS.seuPerfil }),
-    h("div", { class: "cel-perfil-placa" }, iniciais, apelido),
+    placa,
     h("button", { class: "botao-fantasma cel-perfil-editar", type: "button", onclick: () => abrirPerfil() },
-      PALAVRAS.editarPerfil)));
+      PALAVRAS.editarPerfil));
+  coluna.prepend(perfil);
+
+  // A região `operador.barra` (F3, passo 8b): a tira do operador não existe no
+  // celular, e a região vem para logo abaixo de SEU PERFIL. O mesmo nó, e não
+  // uma cópia: o `desenharOperador` a acha pelo id a cada quadro. O teto de
+  // altura é da casca (`celular-sessao.css`): o que passar rola por dentro, e
+  // a gestão de MODs, mais abaixo, continua ao alcance.
+  perfil.after(document.getElementById("operador-mods"));
 
   // ----------------------------------------------------- as seções novas
   //
@@ -226,9 +236,10 @@
   tecla.querySelector(".server-modo-nome").textContent = PALAVRAS.segurarParaFalar;
   tecla.querySelector(".server-modo-desc").textContent = PALAVRAS.segurarNota;
 
-  CASCA.depoisDeDesenhar.push(() => {
+  CASCA.depoisDeDesenhar.push((snapshot) => {
     apelido.textContent = document.getElementById("operador-nome").textContent;
     iniciais.textContent = document.getElementById("operador-inicial").textContent;
+    vestirCapa(placa, snapshot.me);
     for (const [id, , valor] of valores) valor.textContent = document.getElementById(id)?.textContent ?? "";
   });
 })();

@@ -21,7 +21,8 @@ fuzz_target!(|data: &[u8]| {
             assert!(data.len() <= MAX_DATAGRAM_LEN);
             assert!(!payload.is_empty());
             assert_eq!(payload.len(), data.len() - HEADER_LEN);
-            assert_eq!(header.version, seele_proto::MEDIA_HEADER_VERSION);
+            // O número não é campo do cabeçalho: é o primeiro byte, e só um é aceito.
+            assert_eq!(data.first(), Some(&seele_proto::MEDIA_HEADER_VERSION));
 
             // Re-encoding an accepted datagram must reproduce it exactly.
             // A mismatch means encode and decode disagree about the layout,
