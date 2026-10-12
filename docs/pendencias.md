@@ -9882,4 +9882,6 @@ desbloqueada, consultas a cada ~3 s por 2 min, cada uma em até 0,2 s): a lista 
 oscilando entre 0 e 49 nomes; com 10 pessoas, em 39 de 39; com 100, em nenhuma. O ENTRAR NA SALA ficou na árvore
 com 50 e 100 (37 de 38), e o aperto pegou. **Decisão da orquestradora: a (b) é da 0.16**, com a F5: as linhas
 reconciliadas pelo id da pessoa, e um `PersonState` mexendo só na linha dela; o guarda é a sonda da F3
-(`arvore-ax.py`), com 50 pessoas em 38 de 38.
+(`arvore-ax.py`, `3436980d`), com 10, 50 e 100 pessoas em toda consulta. Ao prová-la como guarda, a F3 viu a
+perda também com 10: numa de 39 consultas a lista inteira sumiu (0 nomes). É rara com poucas pessoas, mas existe,
+porque a lista é trocada de uma vez.
