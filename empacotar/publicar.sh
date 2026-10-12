@@ -1165,6 +1165,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/compartilhar.js \
         --roteiro tools/roteiros/dispositivos.js \
         --roteiro tools/roteiros/escolher-transmissao.js \
+        --roteiro tools/roteiros/etapa-da-tentativa.js \
         --roteiro tools/roteiros/fechar.js \
         --roteiro tools/roteiros/hospedar.js \
         --roteiro tools/roteiros/icone-do-server.js \
