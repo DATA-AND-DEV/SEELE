@@ -9877,6 +9877,9 @@ com 251 é a lista, e não o MOD.
 build da M3 com o `6717dc2c` e o `ax` com 60 s de prazo por consulta, a sessão desbloqueada): com a lista
 refeita inteira a cada quadro, a árvore de acessibilidade não assenta. O cabeçalho «PESSOAS · 251 NO SERVIDOR»
 aparece nela; os nomes da lista nunca entram, e o ENTRAR NA SALA sai dela (o `ax` não o acha, e quando o achou o
-aperto não pegou). **Quem usa leitor de tela não usa a lista nem a entrada na sala** com umas 250 pessoas. Com 50,
-o tamanho do `specs/04`: **a medir** pela F3 (10, 50 e 100 pessoas, com o Mac desbloqueado). Se assentar com 50,
-a (b) — atualizar só a linha que mudou — fica para a 0.17; se não, é da 0.16.
+aperto não pegou). **Quem usa leitor de tela não usa a lista nem a entrada na sala** com umas 250 pessoas. **Com 50, o tamanho do `specs/04`, não assenta** (medido pela F3 em 11/10, a mesma build, sem MOD, a sessão
+desbloqueada, consultas a cada ~3 s por 2 min, cada uma em até 0,2 s): a lista inteira em 18 de 38 consultas,
+oscilando entre 0 e 49 nomes; com 10 pessoas, em 39 de 39; com 100, em nenhuma. O ENTRAR NA SALA ficou na árvore
+com 50 e 100 (37 de 38), e o aperto pegou. **Decisão da orquestradora: a (b) é da 0.16**, com a F5: as linhas
+reconciliadas pelo id da pessoa, e um `PersonState` mexendo só na linha dela; o guarda é a sonda da F3
+(`arvore-ax.py`), com 50 pessoas em 38 de 38.
