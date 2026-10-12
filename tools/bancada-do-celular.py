@@ -854,15 +854,40 @@ def sessao_entrou(pg: Page) -> list[str]:
     return falhas
 
 
+# **Por que o último `tocar` não tocou**: o alvo ausente, escondido, ou o que o
+# Playwright disse ao desistir (coberto por outro nó, instável, desabilitado).
+# O `exigir_toque` o põe na reprovação. «Não há como tocar» sozinho não separa
+# uma máquina lenta de um alvo coberto: a reprovação que a F7 viu em 11/10, com
+# a máquina carregada, ficou sem causa por isso.
+motivo_do_ultimo_toque = ""
+
+PISTAS_DO_PLAYWRIGHT = ("intercepts pointer events", "not stable", "not visible", "not enabled",
+                        "detached", "outside of the viewport")
+
+
+def motivo_do_playwright(erro: Exception) -> str:
+    """A linha do registro do Playwright que diz por que ele desistiu, ou a
+    primeira do erro."""
+    linhas = [linha.strip() for linha in str(erro).splitlines() if linha.strip()]
+    pistas = [linha for linha in linhas if any(p in linha for p in PISTAS_DO_PLAYWRIGHT)]
+    return (pistas[-1] if pistas else linhas[0] if linhas else "sem mensagem")[:200]
+
+
 def tocar(pg: Page, seletor: str) -> bool:
     """Um toque no primeiro alvo que casa, se ele estiver à vista.
 
     Devolve `False` sem tocar quando o alvo não existe ou está escondido: um
     caso que toca num controle ausente diz o que faltou, em vez de esperar o
-    tempo-limite do Playwright e estourar.
+    tempo-limite do Playwright e estourar. O porquê fica em
+    `motivo_do_ultimo_toque`.
     """
+    global motivo_do_ultimo_toque
     alvo = pg.locator(seletor).first
-    if alvo.count() == 0 or not alvo.is_visible():
+    if alvo.count() == 0:
+        motivo_do_ultimo_toque = "o alvo não existe"
+        return False
+    if not alvo.is_visible():
+        motivo_do_ultimo_toque = "o alvo está escondido"
         return False
     try:
         # Um alvo coberto, ou que não recebe toque, é um alvo que o dedo não
@@ -872,8 +897,10 @@ def tocar(pg: Page, seletor: str) -> bool:
             alvo.tap(timeout=3000)
         else:
             alvo.click(timeout=3000)
-    except ErroDoPlaywright:
+    except ErroDoPlaywright as erro:
+        motivo_do_ultimo_toque = motivo_do_playwright(erro)
         return False
+    motivo_do_ultimo_toque = ""
     return True
 
 
@@ -881,7 +908,7 @@ def exigir_toque(pg: Page, seletor: str, falhas: list[str]) -> bool:
     """O `tocar`, e a reprovação quando o alvo não está ao alcance do dedo."""
     if tocar(pg, seletor):
         return True
-    falhas.append(f"não há como tocar {seletor}")
+    falhas.append(f"não há como tocar {seletor}: {motivo_do_ultimo_toque}")
     return False
 
 
