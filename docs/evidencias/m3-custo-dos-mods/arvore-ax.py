@@ -47,6 +47,9 @@ some da árvore some, e não demora. O tempo de cada consulta fica no
 `linhas.json` de cada rodada; se ele passar de alguns segundos, é hora de
 ganhá-lo.
 
+**A carga da máquina** vai em cada consulta e no resumo (`carga_max`, a de 1 min,
+e `rustc_durante`): a orquestradora pede abaixo de 5, e sem compilação.
+
 **O que ela não mede**: o que um VoiceOver de verdade faz com uma árvore que
 muda — ela mede se a árvore tem a lista quando é consultada.
 
@@ -84,6 +87,14 @@ def principal():
     if not all(r["vale"] for r in resumos):
         return 2
     return 0 if all(r["assenta"] for r in resumos) else 1
+
+
+def carga(m3):
+    """A carga de 1 min da máquina e se há compilação: uma medida feita com a
+    máquina ocupada não vale (em 11/10, doze laços de CPU de outra frente
+    ficaram de pé por cinco minutos, e foi preciso reconstruir pelo horário se
+    uma rodada caíra neles)."""
+    return float(m3.sh("sysctl", "-n", "vm.loadavg").stdout.split()[1]), bool(m3.sh("pgrep", "-x", "rustc").stdout.strip())
 
 
 def cpu_do_webkit(m3, pids):
@@ -143,9 +154,11 @@ def medir(m3, app, saida, n):
             t1 = time.time()
             entrar = "entrar na sala" in m3.ax("textos", pid, "ENTRAR NA SALA", "200").lower()
             t2 = time.time()
+            carga_1min, compilando = carga(m3)
             linhas.append({"t": round(t0 - inicio, 1), "nomes": len(nomes), "nomes_s": round(t1 - t0, 1),
                            "entrar": entrar, "entrar_s": round(t2 - t1, 1),
-                           "cpu_webkit": cpu_do_webkit(m3, webkit), "bloqueada": m3.bloqueada()})
+                           "cpu_webkit": cpu_do_webkit(m3, webkit), "bloqueada": m3.bloqueada(),
+                           "carga": carga_1min, "rustc": compilando})
             time.sleep(3)
         apertou = m3.ax("apertar", pid, "ENTRAR NA SALA").strip()
         entrou = m3.esperar(lambda: tem(pid, "SAIR DA SALA"), 30)
@@ -159,6 +172,8 @@ def medir(m3, app, saida, n):
             "consulta_s_max": max(max(linha["nomes_s"], linha["entrar_s"]) for linha in linhas),
             "cpu_webkit_mediana": sorted(linha["cpu_webkit"] for linha in linhas)[len(linhas) // 2],
             "apertou": apertou, "entrou_na_sala": entrou,
+            "carga_max": max(linha["carga"] for linha in linhas),
+            "rustc_durante": sum(1 for linha in linhas if linha["rustc"]),
             "vale": not any(linha["bloqueada"] for linha in linhas) and not m3.bloqueada(),
         }
         resumo["assenta"] = (prontos == n - 1 and inteira == len(linhas) and com_entrar == len(linhas)
