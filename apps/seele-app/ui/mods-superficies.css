@@ -296,9 +296,11 @@
   padding: max(24px, env(safe-area-inset-top)) 16px;
   /* **O furo do véu** (rascunho da API 6, §10; tarefa 9): a área do diálogo
      começa depois da barra do operador, e o `clip-path` que
-     `mods-superficies.js` escreve deixa a barra fora do véu. Sem recorte, as
-     duas variáveis são zero. */
+     `mods-superficies.js` escreve deixa a barra fora do véu — e a faixa de
+     quem liga, em cima (tarefa 9, Step 5). Sem recorte, as três variáveis são
+     zero. */
   padding-left: calc(16px + var(--recorte-esquerda, 0px));
+  padding-top: calc(max(24px, env(safe-area-inset-top)) + var(--recorte-cima, 0px));
   padding-bottom: calc(max(24px, env(safe-area-inset-top)) + var(--recorte-baixo, 0px));
   background: color-mix(in srgb, var(--seele-negro-absoluto) 78%, transparent);
 }

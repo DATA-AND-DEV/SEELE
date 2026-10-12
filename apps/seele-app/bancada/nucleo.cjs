@@ -18,7 +18,10 @@
 //    tema da sessão.
 // 2. **O guarda 11** (Step 3), um por item: a portaria, o MUDO, o fone, o «no
 //    ar», o SAIR, o veredito, a moderação, o aceite, e a atribuição e a saída
-//    de uma superfície aberta. (a) Nenhum mora dentro do contêiner de um ponto
+//    de uma superfície aberta, e **a faixa de quem liga** (`#toque`, com o
+//    ATENDER e o RECUSAR; a 7d, tarefa 26 da F7; Step 5), acesa por um `Tocou`
+//    de `seele://toque` com quem usa dentro de um servidor, como a F7 a
+//    desenha. (a) Nenhum mora dentro do contêiner de um ponto
 //    que monta nós de MOD (`CONTEINERES_DOS_PONTOS`); os dois que só pintam
 //    ficam de fora, com o motivo: `servidor.aparencia` é o tema, medido no 1,
 //    e `pessoa.capa` é uma imagem atrás das placas (tarefa 6). (b) Com a capa
@@ -32,7 +35,9 @@
 //    acordados e no furo do véu — a 900, com a gaveta fechada, a porta dela, e
 //    aberta, o MUDO —; o resto da sessão continua inerte e coberto; o Tab fica
 //    no diálogo, e o Esc o fecha; e o diálogo nunca cruza a barra, rolando por
-//    dentro.
+//    dentro. **E a faixa de quem liga** (Step 5): o ATENDER e o RECUSAR
+//    acordados e alcançáveis, com a ligação chegando depois do modal (a 1400)
+//    e com ela já tocando quando ele abre (a 900), e o diálogo sem cruzá-la.
 //
 // Rodar:  node apps/seele-app/bancada/nucleo.cjs
 
@@ -60,7 +65,12 @@ const TEMAS = {
       window.testTable = table;
       window.__TAURI__ = {
         core: { invoke: async (cmd) => testTable[cmd] ?? null },
-        event: { listen: async () => () => {} },
+        // Os ouvintes ficam guardados: a faixa do toque só acende por um
+        // evento de `seele://toque`, e a seção 2 o entrega.
+        event: { listen: async (nome, fn) => {
+          (window.__ouvintes ??= {})[nome] = [...(window.__ouvintes[nome] ?? []), fn];
+          return () => {};
+        } },
         window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
       };
     }, respostas({ snapshot: null, microfones: [], saidas: [], pacotes_no_cache: [], aceites_de_mods: [] }));
@@ -166,12 +176,23 @@ const TEMAS = {
       await atenderOMod(mod, inst, { tipo: 'superficie-criar', n: 1, descricao: { id: 's', tipo: 'dialogo', modal: false, titulo: 'Superfície' } });
       desenhar(testTable.snapshot);
       await new Promise((ok) => setTimeout(ok, 300));
+      // **A faixa de quem liga**, acesa como o Rust a acende: um `Tocou` por
+      // `seele://toque`, com quem usa dentro de um servidor — o caso que
+      // interessa, porque é onde as regiões de MOD existem (o ATENDER vira
+      // «ATENDER (SAI DE …)»).
+      testTable.onde_estou = 'Guardado';
+      for (const ouvir of window.__ouvintes?.['seele://toque'] ?? []) {
+        ouvir({ payload: { evento: 'Tocou', quem: 'aa11bb22', codigo: 'K9P2-CSM7-NBFR-AYQ3', apelido: 'rafa',
+          nome_na_agenda: null, com_som: true } });
+      }
+      await new Promise((ok) => setTimeout(ok, 100));
       // **O desenho do MOD mira cada item** (o molde de `regioes-do-produto.cjs`):
       // `estilo.mover` vai a ±512 px, e um nó vai do canto da região até o
       // centro de cada item à vista.
       const canto = document.getElementById('operador-mods').getBoundingClientRect();
       const limite = (n) => Math.max(-512, Math.min(512, Math.round(n)));
-      const mirados = ['#botao-mudo', '#botao-surdo', '#voz-estado', '#operador-sair', '#veredito'].map((seletor, i) => {
+      const mirados = ['#botao-mudo', '#botao-surdo', '#voz-estado', '#operador-sair', '#veredito',
+        '#toque-atender', '#toque-recusar'].map((seletor, i) => {
         const centro = document.querySelector(seletor).getBoundingClientRect();
         return { forma: 'texto', chave: `mirado${i}`, dentro: '█'.repeat(6), estilo: { mover: {
           x: limite(centro.left + centro.width / 2 - canto.left - 8), y: limite(centro.top + centro.height / 2 - canto.top - 8) } } };
@@ -188,6 +209,7 @@ const TEMAS = {
         portaria: '#portaria-batendo', mudo: '#botao-mudo', fone: '#botao-surdo', noAr: '#voz-estado',
         sair: '#operador-sair', veredito: '#veredito', moderacao: '#moderar', aceite: '#mods-aceite',
         atribuicao: '[data-superficie="s"] .superficie-de-mod-origem', saidaDaSuperficie: '[data-superficie="s"] .superficie-de-mod-sair',
+        toque: '#toque', toqueAtender: '#toque-atender', toqueRecusar: '#toque-recusar',
       };
       const dentro = [];
       const cobertos = [];
@@ -199,17 +221,39 @@ const TEMAS = {
           if (el.matches(conteiner) || el.closest(conteiner)) dentro.push(`${item} dentro de ${ponto} (${conteiner})`);
         }
         if (el.closest('[hidden]') || !el.getClientRects().length) continue;
-        const r = el.getBoundingClientRect();
-        const alvo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-        if (!alvo || !(alvo === el || el.contains(alvo))) cobertos.push(`${item} coberto por <${alvo?.tagName?.toLowerCase()}${alvo?.id ? `#${alvo.id}` : ''}${alvo?.className ? `.${String(alvo.className).split(' ')[0]}` : ''}>`);
+        // **O veredito é uma faixa da largura da janela**, e o centro dela é
+        // fundo: o que precisa ficar livre é o que ele diz e o botão. Medido
+        // em 11/10: a 1400, a faixa do toque cai sobre o meio vazio dela, com
+        // o texto e o «dispensar» livres; a 1024, ela cobre o texto, e isso
+        // foi à F7 (produto sobre produto, e não MOD).
+        const partes = item === 'veredito'
+          ? [...el.querySelectorAll('span, button')].filter((p) => p.getClientRects().length && p.textContent.trim())
+          : [el];
+        for (const parte of partes) {
+          const r = parte.getBoundingClientRect();
+          const alvo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          if (!alvo || !(alvo === parte || parte.contains(alvo))) cobertos.push(`${item} coberto por <${alvo?.tagName?.toLowerCase()}${alvo?.id ? `#${alvo.id}` : ''}${alvo?.className ? `.${String(alvo.className).split(' ')[0]}` : ''}>`);
+        }
       }
       return {
         dentro, cobertos, ausentes,
         comCapa: Boolean(document.querySelector('#tela-sessao .operador[data-com-capa]')),
+        // Uma faixa escondida passaria pelo (b) sem ser medida: ela tem de
+        // estar à vista, e o ATENDER tem de dizer de onde sai.
+        toqueAVista: Boolean(document.getElementById('toque')?.getClientRects().length && !document.getElementById('toque').closest('[hidden]')),
+        atenderDiz: document.getElementById('toque-atender')?.textContent ?? null,
+        // Até onde o desenho da barra alcança: `estilo.mover` vai a ±512 px.
+        toqueAoAlcance: (() => {
+          const c = document.getElementById('operador-mods').getBoundingClientRect();
+          const f = document.getElementById('toque-atender').getBoundingClientRect();
+          return Math.abs(f.top + f.height / 2 - c.top) <= 512 && Math.abs(f.left + f.width / 2 - c.left) <= 512;
+        })(),
         barraComMod: Boolean(document.querySelector('#operador-mods')?.textContent.includes('uma linha do MOD')),
       };
     });
     assert.ok(guarda.comCapa && guarda.barraComMod, `o guarda não mede o que diz: a capa ou a barra do MOD não montou: ${JSON.stringify(guarda)}`);
+    assert.ok(guarda.toqueAVista && /^ATENDER SAI DE /.test(guarda.atenderDiz ?? ''),
+      `o guarda não mede a faixa de quem liga: ela não acendeu, ou acendeu fora de um servidor: ${JSON.stringify(guarda)}`);
     assert.deepEqual(guarda.ausentes, [], 'um item do núcleo sumiu do DOM, e o guarda não o mede');
     assert.deepEqual(guarda.dentro, [], 'um item do núcleo mora dentro do contêiner de um ponto de contribuição');
     assert.deepEqual(guarda.cobertos, [], 'uma contribuição cobre um item do núcleo');
@@ -243,6 +287,12 @@ const TEMAS = {
         mudo: alcancado(document.getElementById('botao-mudo')),
         fone: alcancado(document.getElementById('botao-surdo')),
         sair: alcancado(document.getElementById('operador-sair')),
+        // **A faixa de quem liga** (Step 5): uma ligação que chega com um modal
+        // de MOD aberto é atendida ou recusada, e o diálogo nunca a cruza.
+        atender: alcancado(document.getElementById('toque-atender')),
+        recusar: alcancado(document.getElementById('toque-recusar')),
+        cruzaToque: Boolean(caixa && document.getElementById('toque')?.getClientRects().length
+          && cruza(caixa.getBoundingClientRect(), document.getElementById('toque').getBoundingClientRect())),
         porta: alcancado(porta),
         resto: alcancado(document.querySelector('#tela-sessao textarea')),
         // **Coberto, e não só inerte**: um nó inerte não entra no teste de
@@ -261,8 +311,20 @@ const TEMAS = {
       };
     });
 
+    // A 1400, a ligação chega **depois** de o modal abrir: o furo do véu tem
+    // de se refazer quando a faixa acende. (A seção 2 já a acendeu; ela é
+    // apagada aqui e acesa de novo com o modal de pé.)
+    const tocar = (evento) => page.evaluate((evento) => {
+      for (const ouvir of window.__ouvintes?.['seele://toque'] ?? []) ouvir({ payload: evento });
+      return new Promise((ok) => setTimeout(ok, 150));
+    }, evento);
+    await tocar({ evento: 'Parou', quem: 'aa11bb22', desfecho: 'recusada' });
     await abrirModal();
+    await tocar({ evento: 'Tocou', quem: 'aa11bb22', codigo: 'K9P2-CSM7-NBFR-AYQ3', apelido: 'rafa', nome_na_agenda: null, com_som: true });
     const largo = await medirOModal();
+    assert.deepEqual({ atender: largo.atender, recusar: largo.recusar, cruzaToque: largo.cruzaToque },
+      { atender: 'sim', recusar: 'sim', cruzaToque: false },
+      `a 1400, uma ligação que chega com o modal aberto não é atendida nem recusada, ou o diálogo a cruza: ${JSON.stringify(largo)}`);
     assert.deepEqual({ mudo: largo.mudo, fone: largo.fone, sair: largo.sair }, { mudo: 'sim', fone: 'sim', sair: 'sim' },
       `a 1400, com o modal aberto, a barra do operador não está alcançável: ${JSON.stringify(largo)}`);
     assert.equal(largo.resto, 'inerte', `a 1400, o resto da sessão escapou do modal: ${JSON.stringify(largo)}`);
@@ -283,8 +345,12 @@ const TEMAS = {
     // A 900, a coluna é gaveta: fechada, a porta dela fica alcançável; aberta,
     // o MUDO.
     await page.setViewportSize({ width: 900, height: 700 });
+    // A 900, a ligação já toca quando o modal abre.
     await abrirModal();
     const estreito = await medirOModal();
+    assert.deepEqual({ atender: estreito.atender, recusar: estreito.recusar, cruzaToque: estreito.cruzaToque },
+      { atender: 'sim', recusar: 'sim', cruzaToque: false },
+      `a 900, com a ligação tocando, o modal adormece ou cobre a faixa: ${JSON.stringify(estreito)}`);
     assert.equal(estreito.porta, 'sim', `a 900, com o modal aberto, a porta da gaveta não está alcançável: ${JSON.stringify(estreito)}`);
     assert.equal(estreito.resto, 'inerte', `a 900, o resto da sessão escapou do modal: ${JSON.stringify(estreito)}`);
     assert.ok(estreito.restoCoberto.length >= 1 && estreito.restoCoberto.every(Boolean), `a 900, o resto da sessão não ficou sob o modal: ${JSON.stringify(estreito)}`);
@@ -300,7 +366,7 @@ const TEMAS = {
     await page.setViewportSize({ width: 1400, height: 900 });
 
     assert.deepEqual(errors, []);
-    console.log('núcleo: o MUDO, o fone, o SAIR, o «no ar» e o veredito têm as cores do produto sob o papel, o claro e o hostil; e o guarda 11 vale para os dez itens, com a capa e a barra do MOD montadas; e o modal de MOD não cobre a barra, a 1400 e a 900, e continua modal no resto.');
+    console.log('núcleo: o MUDO, o fone, o SAIR, o «no ar» e o veredito têm as cores do produto sob o papel, o claro e o hostil; e o guarda 11 vale para os treze itens, a faixa de quem liga entre eles, com a capa e a barra do MOD montadas; e o modal de MOD não cobre a barra nem a faixa de quem liga, a 1400 e a 900, e continua modal no resto.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

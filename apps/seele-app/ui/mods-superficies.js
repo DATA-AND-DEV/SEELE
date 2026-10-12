@@ -120,7 +120,12 @@ function inertarMenos(no, acordados, mudados) {
  * - No desktop (tarefa 9, Step 4b; decisão da orquestradora, 09/10: o
  *   recorte), o MUDO, o fone e o SAIR da barra do operador ficam acordados, e
  *   o véu ganha um furo no retângulo da barra; abaixo de 900 px a barra mora
- *   na gaveta, e a porta dela entra nos dois.
+ *   na gaveta, e a porta dela entra nos dois. **E a faixa de quem liga**
+ *   (`#toque`, a 7d; tarefa 9, Step 5): uma ligação que chega com um modal de
+ *   MOD aberto é atendida ou recusada ali, e não depois do Esc. Medido em
+ *   11/10: sem isto, o ATENDER e o RECUSAR ficavam inertes, e o diálogo largo
+ *   cruzava a faixa. Ela fica nos dois mesmo escondida: quando acende, o
+ *   `ResizeObserver` do recorte refaz o furo.
  *
  * `acordados` são os nós que a pilha de inércia deixa acordados; `recortes`,
  * os retângulos que o véu não cobre. Perguntado a cada recálculo, porque a
@@ -135,9 +140,10 @@ function foraDoModal() {
   }
   const achar = (seletor) => document.querySelector?.(seletor) ?? null;
   const porta = achar("#tela-sessao .linha-canais");
+  const toque = achar("#toque");
   return {
-    acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), porta].filter(deVerdade),
-    recortes: [achar("#tela-sessao .operador"), porta].filter(deVerdade),
+    acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), porta, toque].filter(deVerdade),
+    recortes: [achar("#tela-sessao .operador"), porta, toque].filter(deVerdade),
   };
 }
 
@@ -589,7 +595,8 @@ class SuperficieDeMod {
    * **O furo do véu** (rascunho da API 6, §10; tarefa 9, Step 4b): num modal,
    * o véu não pinta nem recebe clique no retângulo do que `foraDoModal`
    * recorta, e a caixa do diálogo nunca o cruza — a área dela começa à
-   * direita do que fica à esquerda, e acaba acima do que fica embaixo. O
+   * direita do que fica à esquerda, abaixo do que fica em cima (a faixa de
+   * quem liga, Step 5) e acaba acima do que fica embaixo. O
    * recorte segue a janela e a gaveta: um `ResizeObserver` nos recortados e o
    * `resize` da janela o refazem.
    */
@@ -621,6 +628,7 @@ class SuperficieDeMod {
     if (!furos.length) {
       camada.style.removeProperty("clip-path");
       camada.style.removeProperty("--recorte-esquerda");
+      camada.style.removeProperty("--recorte-cima");
       camada.style.removeProperty("--recorte-baixo");
       return;
     }
@@ -632,13 +640,16 @@ class SuperficieDeMod {
       caminho.push(`${x1} ${y1}`, `${x1} ${y2}`, `${x2} ${y2}`, `${x2} ${y1}`, `${x1} ${y1}`, "0 0");
     }
     camada.style.clipPath = `polygon(evenodd, ${caminho.join(", ")})`;
-    // A área do diálogo: à direita dos furos da metade esquerda, e acima dos
-    // da metade de baixo que não estão à esquerda.
+    // A área do diálogo: à direita dos furos da metade esquerda, abaixo dos da
+    // metade de cima que não estão à esquerda, e acima dos da metade de baixo
+    // que não estão à esquerda.
     const meioX = caixa.left + caixa.width / 2;
     const meioY = caixa.top + caixa.height / 2;
     const aEsquerda = furos.filter((r) => r.right <= meioX);
+    const emCima = furos.filter((r) => r.right > meioX && r.bottom <= meioY);
     const embaixo = furos.filter((r) => r.right > meioX && r.top >= meioY);
     camada.style.setProperty("--recorte-esquerda", px(Math.max(0, ...aEsquerda.map((r) => r.right - caixa.left))));
+    camada.style.setProperty("--recorte-cima", px(Math.max(0, ...emCima.map((r) => r.bottom - caixa.top))));
     camada.style.setProperty("--recorte-baixo", px(Math.max(0, ...embaixo.map((r) => caixa.bottom - r.top))));
   }
 
