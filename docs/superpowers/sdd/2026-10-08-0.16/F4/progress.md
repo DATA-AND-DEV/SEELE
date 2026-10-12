@@ -918,3 +918,24 @@ começar.
   `REPROVADO` esconde a reprovação, e o aparelho diz «carga limpa» com saída 0
   (medido com um roteiro de duas linhas). Hoje não esconde nada: lidos até o
   `", source:`, os 36 dão o mesmo resultado.
+
+## 11/10: a pausa da M3, a emenda D-web-3 e o item 52 da pendência 58
+
+- **Na pausa, só escrita:**
+  - a 17ª trazida, por avanço rápido;
+  - a «Emenda de 11/10/2026» ao ADR 0057 (D-web-3: o web app também no
+    computador), fora de commit até a orquestradora ler. Os guardas dos ADRs
+    passam com ela;
+  - o plano com a D-web-1 e a 3.2b marcadas.
+- **Em aberto, o `numa-aba` no Safari do Mac.** O desenho da F8 diz que a aba e
+  o app do Dock guardam a identidade em separado; a minha identidade supõe que
+  no computador eles dividem. Entrou como medição 7 no ADR.
+- **O item 52 da pendência 58** (`0975f08a`): a linha de etapa é da tentativa
+  mais nova.
+  - O roteiro novo mediu antes as duas metades no duble.
+  - A janela passa a tentativa ao `connect`, a `Bridge` a devolve em cada
+    etapa, e o ouvinte e o `finally` só valem para a mais nova.
+  - Quatro reversões reprovam. Os 41 roteiros passam, e o roteiro novo entrou no
+    `ci.yml` e no `publicar.sh`.
+- **O aparelho dos roteiros já não esconde reprovação atrás de aspas:** a 17ª
+  passou a mandar o relato em JSON codificado.
