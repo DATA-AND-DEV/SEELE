@@ -192,6 +192,38 @@ impl Esperas {
 mod testes {
     use super::*;
 
+    /// **A tabela dos nomes que o MOD lê** (a auditoria do `v6.json`, B1):
+    /// cada recusa de volume, com o que os bytes são, vira um nome da lista
+    /// `recusas.volume`. O teste de ponta a ponta, em `ponte_de_pedidos.rs`,
+    /// alcança três; este cobre a tabela inteira.
+    #[test]
+    fn cada_recusa_de_volume_vira_um_nome_da_lista() {
+        use seele_proto::volume::VolumeRefusal;
+        let casos = [
+            (Recusa::from(VolumeRefusal::SemEspera), "sem-espera"),
+            (Recusa::from(VolumeRefusal::NaoGravei), "nao-gravei"),
+            (Recusa::from(VolumeRefusal::Incompleto), "incompleto"),
+            (Recusa::from(VolumeRefusal::TipoRecusado), "tipo-recusado"),
+            (
+                Recusa {
+                    motivo: VolumeRefusal::TipoRecusado,
+                    detectado: Detectado::Tipo("gif"),
+                },
+                "tipo-recusado:gif",
+            ),
+            (
+                Recusa {
+                    motivo: VolumeRefusal::TipoRecusado,
+                    detectado: Detectado::FormatoNenhum,
+                },
+                "formato-desconhecido",
+            ),
+        ];
+        for (recusa, nome) in casos {
+            assert_eq!(recusa.nome_para_o_mod(), nome, "{recusa:?}");
+        }
+    }
+
     fn pessoa(n: u64) -> PersonId {
         PersonId(n)
     }
@@ -676,7 +708,7 @@ pub async fn atender_imagem(
                 let raiz = server.mods_dir.as_ref().ok_or_else(|| anyhow::anyhow!("sem diretório de MODs"))?.dados_de(&mod_id).join(PASTA);
                 let alvo = crate::mods::arquivos::dentro(&raiz, caminho).ok_or_else(|| anyhow::anyhow!("caminho de volume inválido"))?;
                 let arquivo = tokio::fs::File::open(alvo).await?;
-                anyhow::ensure!(arquivo.metadata().await?.len() <= seele_proto::midia_de_mod::TETO_DE_ARQUIVO as u64, "imagem excede 10 MiB");
+                anyhow::ensure!(arquivo.metadata().await?.len() <= seele_proto::midia_de_mod::TETO_DE_ARQUIVO as u64, "arquivo-grande-demais");
                 Ok(Some(arquivo))
             }
         }

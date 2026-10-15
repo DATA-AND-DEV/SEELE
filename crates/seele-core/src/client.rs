@@ -2592,7 +2592,9 @@ impl Transfers {
         let lidos = entrada
             .read_to_end(seele_proto::midia_de_mod::TETO_DE_ARQUIVO)
             .await?;
-        anyhow::ensure!(lidos.len() as u64 == resposta.bytes, "imagem incompleta");
+        // O nome da lista `recusas.volume`, e não uma frase: ele chega ao MOD
+        // em `e.erro` (a auditoria do `v6.json`, B2).
+        anyhow::ensure!(lidos.len() as u64 == resposta.bytes, "incompleto");
         tracing::info!(
             enviados = bytes.len(),
             recebidos = lidos.len(),

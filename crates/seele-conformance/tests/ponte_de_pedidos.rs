@@ -68,6 +68,10 @@ globalThis.aoPedir = (contextoJSON, pedidoJSON) => {
   if (pedido.op === 'grande') {
     return JSON.stringify({ ok: true, enchimento: 'á🧙'.repeat(pedido.vezes), contexto });
   }
+  if (pedido.op === 'volume') {
+    // A leitura por volume: o MOD autoriza e diz qual arquivo é.
+    return JSON.stringify({ ok: true, volume: pedido.caminho, contexto });
+  }
   return JSON.stringify({ ok: true, contexto });
 };
 "#;
@@ -1009,6 +1013,36 @@ async fn a_recusa_de_um_fluxo_de_imagem_chega_a_janela_pelo_nome() -> Result<()>
         enviar("t-nada", b"isto nao e imagem nenhuma".to_vec()).await,
         Err("formato-desconhecido".to_owned()),
         "bytes de formato nenhum não chegaram à janela como formato-desconhecido"
+    );
+
+    // E a leitura de um arquivo maior que o teto é `arquivo-grande-demais`:
+    // era «imagem excede 10 MiB».
+    let pasta = root
+        .join("mod-data")
+        .join("prova")
+        .join("ponte")
+        .join("volume");
+    std::fs::create_dir_all(&pasta)?;
+    std::fs::write(
+        pasta.join("grande.png"),
+        vec![0_u8; seele_proto::midia_de_mod::TETO_DE_ARQUIVO + 1],
+    )?;
+    let lido = transferencias
+        .imagem_de_mod(
+            PedidoDeImagem::Ler {
+                mod_id: "prova/ponte".into(),
+                channel: ChannelId(0),
+                payload: serde_json::json!({ "op": "volume", "caminho": "grande.png" }).to_string(),
+            },
+            &[],
+        )
+        .await
+        .map(|_| ())
+        .map_err(|erro| erro.to_string());
+    assert_eq!(
+        lido,
+        Err("arquivo-grande-demais".to_owned()),
+        "a leitura de um arquivo maior que o teto não chegou à janela pelo nome"
     );
 
     serving.abort();
