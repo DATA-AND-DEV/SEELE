@@ -3132,6 +3132,9 @@ struct Anfitriao {
     ///
     /// Nada nesta tela dizia isso. O relato foi «teste em LAN não funciona».
     firewall_nao_cobre: Option<String>,
+    /// O mesmo, com o motivo e se o botão que pede a regra resolve
+    /// ([`firewall::NaTela`]): a tela mostra o botão só quando ele resolve.
+    firewall: Option<firewall::NaTela>,
     /// O roteador abriu a porta, só que não a canônica (8383) — ver "O
     /// quarto" no ADR 0022.
     ///
@@ -3509,6 +3512,7 @@ async fn hospedar(
     .map_err(|erro| classificar(&erro))?;
 
     let alcance = server.alcance();
+    let firewall = firewall_deste_executavel();
     let anfitriao = Anfitriao {
         aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
         convite: server.convite_com_nome(nome_publico.as_deref()),
@@ -3516,7 +3520,8 @@ async fn hospedar(
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
         encontro_recusado: alcance
             .and_then(|alcance| alcance.encontro_recusado().map(str::to_owned)),
-        firewall_nao_cobre: firewall_nao_cobre_este_executavel(),
+        firewall_nao_cobre: firewall.as_ref().map(|tela| tela.frase.clone()),
+        firewall,
         porta_nao_canonica: alcance
             .and_then(|alcance| alcance.porta_nao_canonica().map(str::to_owned)),
     };
@@ -3692,13 +3697,40 @@ fn abrir_no_navegador(url: String) -> Result<(), String> {
 /// nome passava por coberto.
 ///
 /// A resposta vai ao `seele.log` no Windows, inclusive quando é «não sei»:
-/// `None` na tela, mas o motivo no registro.
-fn firewall_nao_cobre_este_executavel() -> Option<String> {
+/// `None` na tela, mas o motivo no registro. O botão que pede a regra só
+/// aparece quando este é o SEELE instalado, com o instalador ao lado
+/// ([`pasta_instalada`]), que é quem o botão chama.
+fn firewall_deste_executavel() -> Option<firewall::NaTela> {
     let entrada = firewall::ler_deste_programa();
     #[cfg(windows)]
     tracing::info!(?entrada, "o firewall do Windows, para este SEELE");
     let eu = std::env::current_exe().ok()?;
-    firewall::frase(&entrada, &eu)
+    #[cfg(windows)]
+    let instalado = pasta_instalada()
+        .filter(|pasta| pasta.join("desinstalar.exe").is_file())
+        .map(|pasta| pasta.join("SEELE.exe"));
+    #[cfg(not(windows))]
+    let instalado: Option<std::path::PathBuf> = None;
+    firewall::na_tela(&entrada, &eu, instalado.as_deref())
+}
+
+/// A pasta da instalação, como o instalador a registrou (`InstallLocation`).
+#[cfg(windows)]
+fn pasta_instalada() -> Option<std::path::PathBuf> {
+    use std::os::windows::process::CommandExt;
+
+    std::process::Command::new("reg")
+        .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
+        .creation_flags(SEM_CONSOLE)
+        .output()
+        .ok()
+        .filter(|saida| saida.status.success())
+        .and_then(|saida| {
+            String::from_utf8_lossy(&saida.stdout)
+                .lines()
+                .find_map(|linha| linha.split("REG_SZ").nth(1).map(|r| r.trim().to_owned()))
+        })
+        .map(std::path::PathBuf::from)
 }
 
 /// Onde o instalador grava o que se sabe sobre a instalação.
@@ -3745,20 +3777,9 @@ fn abrir_a_porta_no_firewall() -> Result<(), String> {
     {
         use std::os::windows::process::CommandExt;
 
-        let instalado = std::process::Command::new("reg")
-            .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
-            .creation_flags(SEM_CONSOLE)
-            .output()
-            .ok()
-            .filter(|saida| saida.status.success())
-            .and_then(|saida| {
-                String::from_utf8_lossy(&saida.stdout)
-                    .lines()
-                    .find_map(|linha| linha.split("REG_SZ").nth(1).map(|r| r.trim().to_owned()))
-            })
-            .ok_or_else(|| {
-                "não achei a instalação do SEELE no registro desta máquina.".to_owned()
-            })?;
+        let instalado = pasta_instalada().ok_or_else(|| {
+            "não achei a instalação do SEELE no registro desta máquina.".to_owned()
+        })?;
 
         let ferramenta = std::path::Path::new(&instalado).join("desinstalar.exe");
         if !ferramenta.is_file() {

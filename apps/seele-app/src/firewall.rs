@@ -268,38 +268,101 @@ fn perfil_por_extenso(nomes: &str) -> String {
         .join(" ou ")
 }
 
-/// A frase que a tela mostra, ou `None` quando não há o que dizer.
+/// Por que o firewall do Windows não deixa chegar, para a tela.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub(crate) enum Motivo {
+    /// Nenhuma regra libera este programa.
+    SemRegra,
+    /// Uma regra libera outra cópia do SEELE — a instalada —, e não esta.
+    OutraCopia,
+    /// Uma regra bloqueia este programa.
+    Bloqueada,
+    /// A regra libera este programa, mas não no perfil da rede ativa.
+    SoNoPerfil,
+}
+
+/// O que a tela mostra quando o firewall do Windows não deixa chegar: o
+/// motivo, a frase com o que fazer, e se o botão que pede a regra resolve.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct NaTela {
+    pub(crate) motivo: Motivo,
+    pub(crate) frase: String,
+    /// **O botão só aparece quando resolve** (a orquestradora, 15/10). Ele roda
+    /// o instalador com `--abrir-a-porta`, que cria a regra do SEELE
+    /// **instalado**, em UDP e em qualquer perfil: resolve a falta de regra e o
+    /// perfil não coberto, e só quando quem roda é o instalado. Na cópia
+    /// portátil e no bloqueio do Windows ele não muda nada, e um botão que
+    /// aparece igual quando resolve e quando não resolve diz uma coisa que não
+    /// é verdade.
+    pub(crate) abrir_resolve: bool,
+}
+
+/// O que a tela mostra para `entrada`, ou `None` quando não há o que dizer.
 ///
-/// **Diz o que a regra é**: o SEELE liberado no firewall, pelo programa, em
-/// UDP — e não uma porta, porque a regra não é de porta e cobre a 8383 do
-/// servidor guardado e a 8385 da sala ao mesmo tempo. `NaoSei` não vira frase:
-/// acusar sem saber manda a pessoa mexer em segurança à toa.
-pub(crate) fn frase(entrada: &Entrada, exe: &Path) -> Option<String> {
-    let exe = exe.display();
-    match entrada {
-        Entrada::Liberada | Entrada::NaoSei { .. } => None,
-        Entrada::SemRegra => Some(format!(
-            "o firewall do Windows não tem uma regra que libere este SEELE ({exe}) para \
-             receber conexões em UDP: quem está fora da sua rede, e até quem está nela, \
-             não chega."
-        )),
-        Entrada::Bloqueada { regra } => Some(format!(
-            "o firewall do Windows tem uma regra que bloqueia este SEELE («{regra}»), e um \
-             bloqueio vale mais que qualquer liberação: ninguém de fora chega. Ela costuma \
-             nascer de um «Cancelar» no aviso do Windows, e sai nas configurações do \
-             firewall."
-        )),
-        Entrada::SoNoPerfil { perfis, redes } => Some(format!(
-            "o firewall do Windows libera este SEELE só em rede {}, e a rede de agora é {}: \
-             quem está fora não chega por ela.",
-            perfil_por_extenso(perfis),
-            perfil_por_extenso(redes)
-        )),
-        Entrada::OutraCopia { coberta } => Some(format!(
-            "o firewall do Windows libera o SEELE de {coberta}, e este é outro ({exe}): \
-             conexões de fora não chegam a esta cópia."
-        )),
-    }
+/// `instalado` é o `SEELE.exe` da instalação registrada, quando há uma com o
+/// instalador ao lado — é ela que o botão libera.
+///
+/// **As frases dizem o que a regra é** — o SEELE liberado no firewall, pelo
+/// programa, em UDP — e não uma porta: a regra não é de porta, e cobre a 8383 do
+/// servidor guardado e a 8385 da sala ao mesmo tempo. E dizem o que fazer.
+/// `NaoSei` não vira frase: acusar sem saber manda a pessoa mexer em segurança
+/// à toa.
+pub(crate) fn na_tela(entrada: &Entrada, exe: &Path, instalado: Option<&Path>) -> Option<NaTela> {
+    let e_o_instalado = instalado.is_some_and(|instalado| {
+        normalizar(&instalado.to_string_lossy()) == normalizar(&exe.to_string_lossy())
+    });
+    let o_que_fazer = if e_o_instalado {
+        " Com o botão, o Windows pergunta uma vez, e a regra nasce."
+    } else {
+        " Quem libera o SEELE no firewall é o instalador: instale o SEELE e abra o instalado."
+    };
+    let (motivo, frase, abrir_resolve) = match entrada {
+        Entrada::Liberada | Entrada::NaoSei { .. } => return None,
+        Entrada::SemRegra => (
+            Motivo::SemRegra,
+            format!(
+                "o firewall do Windows não tem uma regra que libere este SEELE para \
+                 receber conexões em UDP: quem está fora da sua rede, e até quem está \
+                 nela, não chega.{o_que_fazer}"
+            ),
+            e_o_instalado,
+        ),
+        Entrada::SoNoPerfil { perfis, redes } => (
+            Motivo::SoNoPerfil,
+            format!(
+                "o firewall do Windows libera este SEELE só em rede {}, e a rede de agora \
+                 é {}: ela não está coberta, e quem está fora não chega por ela.{o_que_fazer}",
+                perfil_por_extenso(perfis),
+                perfil_por_extenso(redes)
+            ),
+            e_o_instalado,
+        ),
+        Entrada::OutraCopia { coberta } => (
+            Motivo::OutraCopia,
+            format!(
+                "o firewall do Windows libera o SEELE de {coberta}, e este é outra cópia \
+                 ({}): conexões de fora não chegam a ela. Para receber ligações e \
+                 hospedar, abra o SEELE instalado.",
+                exe.display()
+            ),
+            false,
+        ),
+        Entrada::Bloqueada { regra } => (
+            Motivo::Bloqueada,
+            format!(
+                "o firewall do Windows tem uma regra que bloqueia este SEELE («{regra}»), e \
+                 um bloqueio vale mais que qualquer liberação: ninguém de fora chega. Ela \
+                 sai em Segurança do Windows › Firewall e proteção de rede › Configurações \
+                 avançadas › Regras de Entrada, na regra «{regra}»."
+            ),
+            false,
+        ),
+    };
+    Some(NaTela {
+        motivo,
+        frase,
+        abrir_resolve,
+    })
 }
 
 /// Base64 do texto em UTF-16LE, que é o que o `-EncodedCommand` do PowerShell
@@ -520,14 +583,15 @@ fim
                 matches!(entrada, Entrada::NaoSei { .. }),
                 "«{saida}» virou {entrada:?}, e não «não sei»"
             );
-            assert_eq!(frase(&entrada, Path::new(INSTALADO)), None);
+            assert_eq!(
+                na_tela(&entrada, Path::new(INSTALADO), Some(Path::new(INSTALADO))),
+                None
+            );
         }
     }
 
-    #[test]
-    fn as_frases_dizem_o_que_a_regra_e_e_nao_uma_porta() {
-        let exe = Path::new(INSTALADO);
-        for entrada in [
+    fn todos_os_motivos() -> [Entrada; 4] {
+        [
             Entrada::SemRegra,
             Entrada::Bloqueada {
                 regra: "SEELE".to_owned(),
@@ -537,29 +601,153 @@ fim
                 redes: "Private".to_owned(),
             },
             Entrada::OutraCopia {
-                coberta: r"C:\Program Files\SEELE\SEELE.exe".to_owned(),
+                coberta: INSTALADO.to_owned(),
             },
+        ]
+    }
+
+    #[test]
+    fn cada_motivo_vai_a_tela_com_o_que_fazer_e_sem_falar_de_porta() {
+        let exe = Path::new(INSTALADO);
+        let instalado = Some(Path::new(INSTALADO));
+        for (entrada, motivo, o_que_fazer) in [
+            (
+                Entrada::SemRegra,
+                Motivo::SemRegra,
+                "o Windows pergunta uma vez",
+            ),
+            (
+                Entrada::Bloqueada {
+                    regra: "SEELE".to_owned(),
+                },
+                Motivo::Bloqueada,
+                "Regras de Entrada",
+            ),
+            (
+                Entrada::SoNoPerfil {
+                    perfis: "Public".to_owned(),
+                    redes: "Private".to_owned(),
+                },
+                Motivo::SoNoPerfil,
+                "não está coberta",
+            ),
+            (
+                Entrada::OutraCopia {
+                    coberta: r"C:\SEELE\entrega\portatil\SEELE.exe".to_owned(),
+                },
+                Motivo::OutraCopia,
+                "abra o SEELE instalado",
+            ),
         ] {
-            let Some(texto) = frase(&entrada, exe) else {
-                panic!("{entrada:?} não disse nada");
+            let Some(tela) = na_tela(&entrada, exe, instalado) else {
+                panic!("{entrada:?} não foi à tela");
             };
-            assert!(texto.contains("firewall do Windows"), "{texto}");
-            for porta in ["8383", "8384", "8385", "porta"] {
-                assert!(
-                    !texto.contains(porta),
-                    "a frase de {entrada:?} fala de porta: {texto}"
-                );
-            }
+            assert_eq!(tela.motivo, motivo, "{entrada:?}");
+            assert!(tela.frase.contains("firewall do Windows"), "{}", tela.frase);
+            assert!(
+                tela.frase.contains(o_que_fazer),
+                "a frase de {entrada:?} não diz o que fazer («{o_que_fazer}»): {}",
+                tela.frase
+            );
+            // A palavra inteira: «portatil», no caminho da cópia, não é porta.
+            let fala_de_porta = tela
+                .frase
+                .split(|letra: char| !letra.is_alphanumeric())
+                .any(|palavra| {
+                    ["porta", "8383", "8384", "8385"].contains(&palavra.to_lowercase().as_str())
+                });
+            assert!(
+                !fala_de_porta,
+                "a frase de {entrada:?} fala de porta: {}",
+                tela.frase
+            );
         }
-        assert_eq!(frase(&Entrada::Liberada, exe), None);
-        assert!(frase(
+        assert!(na_tela(
             &Entrada::SoNoPerfil {
                 perfis: "Public".to_owned(),
                 redes: "Private".to_owned()
             },
-            exe
+            exe,
+            instalado
         )
-        .is_some_and(|texto| texto.contains("pública") && texto.contains("particular")));
+        .is_some_and(|tela| tela.frase.contains("pública") && tela.frase.contains("particular")));
+        assert_eq!(na_tela(&Entrada::Liberada, exe, instalado), None);
+        assert_eq!(
+            na_tela(
+                &Entrada::NaoSei {
+                    motivo: "x".to_owned()
+                },
+                exe,
+                instalado
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn o_botao_so_aparece_quando_resolve() {
+        // Ele cria a regra do SEELE instalado, em UDP e em qualquer perfil.
+        let instalado = Path::new(INSTALADO);
+        let portatil = Path::new(r"C:\SEELE\entrega\portatil\SEELE.exe");
+        for (entrada, exe, registrado, resolve) in [
+            (Entrada::SemRegra, instalado, Some(instalado), true),
+            (
+                Entrada::SoNoPerfil {
+                    perfis: "Public".to_owned(),
+                    redes: "Private".to_owned(),
+                },
+                instalado,
+                Some(instalado),
+                true,
+            ),
+            // a cópia portátil: a regra que o botão cria é a do instalado
+            (Entrada::SemRegra, portatil, Some(instalado), false),
+            (
+                Entrada::OutraCopia {
+                    coberta: INSTALADO.to_owned(),
+                },
+                portatil,
+                Some(instalado),
+                false,
+            ),
+            // o bloqueio vence a regra que o botão criaria
+            (
+                Entrada::Bloqueada {
+                    regra: "SEELE".to_owned(),
+                },
+                instalado,
+                Some(instalado),
+                false,
+            ),
+            // sem instalação registrada não há instalador para chamar
+            (Entrada::SemRegra, instalado, None, false),
+        ] {
+            let Some(tela) = na_tela(&entrada, exe, registrado) else {
+                panic!("{entrada:?} não foi à tela");
+            };
+            assert_eq!(
+                tela.abrir_resolve, resolve,
+                "{entrada:?} rodando de {} (instalado: {registrado:?}): o botão aparece {} e devia {}",
+                exe.display(),
+                if tela.abrir_resolve { "sim" } else { "não" },
+                if resolve { "aparecer" } else { "sumir" }
+            );
+            if !resolve {
+                assert!(
+                    !tela.frase.contains("Com o botão"),
+                    "{entrada:?} promete o botão sem ele: {}",
+                    tela.frase
+                );
+            }
+        }
+        // E a casa não muda a resposta: o mesmo caminho noutra caixa é o instalado.
+        assert!(na_tela(
+            &Entrada::SemRegra,
+            Path::new(&INSTALADO.to_lowercase()),
+            Some(instalado)
+        )
+        .is_some_and(|tela| tela.abrir_resolve));
+        let _ = todos_os_motivos();
     }
 
     #[test]

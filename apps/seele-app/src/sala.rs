@@ -42,10 +42,11 @@ pub(crate) enum EstadoDaSala {
     NoAr {
         /// Se o código está achável pelo ponto de encontro, e por que não.
         registro: Registro,
-        /// Windows: a regra do firewall não cobre este executável, e quem liga
-        /// de fora da casa não chega (D-sala-1). `None` fora do Windows e quando
-        /// está tudo certo. A mesma conferência do HOSPEDAR.
-        firewall_nao_cobre: Option<String>,
+        /// Windows: o firewall não deixa chegar a este executável, com o motivo,
+        /// a frase com o que fazer e se o botão resolve (D-sala-1;
+        /// [`crate::firewall::NaTela`]). `None` fora do Windows, quando está tudo
+        /// certo e quando não se sabe. A mesma leitura do HOSPEDAR.
+        firewall: Option<crate::firewall::NaTela>,
     },
     /// Não subiu, e o motivo.
     Falhou {
@@ -268,10 +269,10 @@ pub(crate) async fn subir_agora<R: Runtime>(app: AppHandle<R>, subida: Subida) {
         }
         None => tracing::error!("a sala subiu sem campainha: ninguém vai ouvir quem tocar"),
     }
-    let firewall_nao_cobre = crate::firewall_nao_cobre_este_executavel();
+    let firewall = crate::firewall_deste_executavel();
     let no_ar = |registro| EstadoDaSala::NoAr {
         registro,
-        firewall_nao_cobre: firewall_nao_cobre.clone(),
+        firewall: firewall.clone(),
     };
     let Some(mut registro) = registro else {
         anunciar(&app, no_ar(Registro::SemPonto));
@@ -664,15 +665,33 @@ mod a_sala_pessoal {
     fn o_estado_chega_a_casca_com_os_nomes_que_ela_le() {
         let estado = EstadoDaSala::NoAr {
             registro: Registro::RelogioTorto { diferenca_s: 400 },
-            firewall_nao_cobre: None,
+            firewall: None,
         };
         assert_eq!(
             serde_json::to_value(&estado).unwrap(),
             serde_json::json!({
                 "estado": "NoAr",
                 "registro": { "registro": "RelogioTorto", "diferenca_s": 400 },
-                "firewall_nao_cobre": null,
+                "firewall": null,
             })
+        );
+        // E o firewall com o motivo e o botão, com os nomes que a
+        // `camada-sala.js` e a `tela-boot.js` leem.
+        let com_firewall = EstadoDaSala::NoAr {
+            registro: Registro::Registrado,
+            firewall: Some(crate::firewall::NaTela {
+                motivo: crate::firewall::Motivo::OutraCopia,
+                frase: "a frase".to_owned(),
+                abrir_resolve: false,
+            }),
+        };
+        assert_eq!(
+            serde_json::to_value(&com_firewall)
+                .unwrap()
+                .get("firewall")
+                .cloned()
+                .unwrap(),
+            serde_json::json!({ "motivo": "OutraCopia", "frase": "a frase", "abrir_resolve": false })
         );
         assert_eq!(
             serde_json::to_value(EstadoDaSala::Falhou {
@@ -742,7 +761,7 @@ mod a_sala_pessoal {
             estado(&app),
             EstadoDaSala::NoAr {
                 registro: Registro::SemPonto,
-                firewall_nao_cobre: crate::firewall_nao_cobre_este_executavel(),
+                firewall: crate::firewall_deste_executavel(),
             }
         );
         assert!(no_ar(&app), "a sala subiu e não ficou nas hospedagens");
