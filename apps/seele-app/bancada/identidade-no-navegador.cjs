@@ -5,8 +5,8 @@
 //       target/wasm32-unknown-unknown/release/seele_web.wasm
 //
 // O `.wasm` vem do `cargo xtask web`, com a `prova`: o link é lido pelo
-// `analisar_link_em`, contra a origem dos casos da F1 (`origem.invalid`),
-// porque a do produto é vazia até o D-web-2 e todo link cairia em
+// `analisar_link_em`, contra a origem dos casos da F1 (`origem.invalid`): a do
+// produto (a D-web-2) não é a desta bancada, e todo link daqui cairia em
 // `outra-origem`. Isso também se confere, pelo `analisar_link` de verdade.
 //
 // O servidor de mentira anota cada entrada (o alvo, o apelido, o token e a
@@ -312,7 +312,7 @@ async function principal() {
     confere("estados", estados.vencido === "vencido", `o link vencido leu ${estados.vencido}`);
     confere("estados", estados.numaAba === "numa-aba", `o celular numa aba leu ${estados.numaAba}`);
     confere("estados", estados.instalado === "pronto" && estados.pc === "pronto", `instalado ${estados.instalado}, no PC ${estados.pc}`);
-    confere("estados", estados.produto === "outra-origem", `o analisador do produto, sem origem até o D-web-2, leu ${estados.produto}`);
+    confere("estados", estados.produto === "outra-origem", `o analisador do produto leu ${estados.produto} num link de origem.invalid`);
     const leitura = await rodar(async (l) => (await window.criar()).abrir(l), link());
     confere("estados", leitura.endereco === "198.51.100.7:8383" && leitura.impressao === IMPRESSAO && leitura.valeAte === FUTURO && leitura.persistencia === null, `a leitura do pronto: ${JSON.stringify(leitura)}`);
     confere("estados", !JSON.stringify(leitura).includes(TOKEN), `a leitura mostra o token à tela: ${JSON.stringify(leitura)}`);
@@ -560,8 +560,8 @@ async function principal() {
     confere("12", conhecidoNoMeio.pelaChave.erro === "sem-tentativa" && conhecidoNoMeio.depois && conhecidoNoMeio.depois.impressao === NO_MEIO && conhecidoHellos.length === 0, `o servidor conhecido entrou, ou encerrou o link aberto no meio: ${JSON.stringify({ ...conhecidoNoMeio, entradas: conhecidoHellos.length })}`);
 
     // 11. A identidade da página: abre o link da carga sozinha, e a casca não
-    // vê o token. O analisador do produto não tem origem até o D-web-2, então o
-    // link cai em `outra-origem`, e é o que se espera dela hoje.
+    // vê o token. A página vem desta bancada, e não da origem do produto (a
+    // D-web-2), então o link da carga cai em `outra-origem`, e é o que se espera.
     const daPagina = await contexto.newPage();
     daPagina.on("pageerror", (erro) => doConsole.push(`daPagina: pageerror: ${erro.message}`));
     await daPagina.goto(`${endereco}#198.51.100.7:8383?fp=${IMPRESSAO}&convite=${TOKEN}`);

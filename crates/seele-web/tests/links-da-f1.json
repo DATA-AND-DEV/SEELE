@@ -73,7 +73,7 @@
    }
   },
   {
-   "de": "so_a_origem_configurada_e_do_navegador (sem origem configurada, até o D-web-2)",
+   "de": "so_a_origem_configurada_e_do_navegador (sem origem configurada)",
    "texto": "https://origem.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=abababababababababababababababababababababababababababababababab",
    "origem": "",
    "esperado": {

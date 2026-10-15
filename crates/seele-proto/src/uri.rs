@@ -73,7 +73,7 @@
 //! esquema, para haver um analisador só. A página o lê com
 //! [`analisar_no_navegador`], com as regras dela; o desktop o lê com
 //! [`analisar`], ignorando o `wh=` e o `ate=`. A origem é
-//! [`ORIGEM_DO_NAVEGADOR`], vazia até o D-web-2.
+//! [`ORIGEM_DO_NAVEGADOR`] (a D-web-2 do dono, 15/10/2026).
 
 use std::fmt;
 
@@ -100,10 +100,14 @@ pub const ESQUEMA_DA_SALA: &str = "seele://@";
 /// A origem do web app, para a forma `https://<origem>/<caminho>#<corpo>` do
 /// link (ADR 0057, emenda ao 0006).
 ///
-/// **Vazia até o D-web-2**, que é do dono: a origem não tem volta, porque as
-/// identidades do celular moram nela. Vazia, nenhum texto `https` é convite, e
-/// o desktop lê só o `seele://`, como antes.
-pub const ORIGEM_DO_NAVEGADOR: &str = "";
+/// **Decidida pelo dono em 15/10/2026 (D-web-2), e permanente**: as
+/// identidades do celular e do navegador moram nela, e trocá-la perde todas.
+/// É o único lugar do produto que a escreve. A página lê os links contra ela
+/// (`seele-web`, `analisar_link`), o desktop também (o link do navegador colado
+/// no app), e o guarda `a_origem_do_web_app_e_escrita_num_lugar_so`
+/// (`apps/seele-app/tests/web.rs`) reprova uma cópia escrita à mão. O nome do
+/// host, sem esquema e sem barra: é o que vem depois de `https://`.
+pub const ORIGEM_DO_NAVEGADOR: &str = "web.seele.app.br";
 
 /// Quantos hashes de certificado curto um link do navegador leva: as janelas
 /// vigentes e a próxima, no momento em que o convite foi feito. Os além disso
@@ -479,7 +483,7 @@ pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
 }
 
 /// [`analisar`], com a origem do navegador dada: é o que deixa os testes
-/// exercitarem a forma `https` antes de o D-web-2 escolher a origem.
+/// exercitarem a forma `https` com uma origem de mentira (`origem.invalid`).
 ///
 /// **O desktop lê o link do navegador** com o `fp`, ignorando o `wh=` e o
 /// `ate=` (pedido da F4, item 19): eles servem à página, e o nativo confere o
@@ -1889,7 +1893,7 @@ mod a_forma_do_navegador {
                 ""
             ),
             Err(ErroDoNavegador::OutraOrigem),
-            "sem origem configurada (até o D-web-2), nenhum link é do navegador"
+            "sem origem configurada, nenhum link é do navegador"
         );
         assert_eq!(
             analisar_no_navegador(&format!("https://{ORIGEM}/e"), ORIGEM),

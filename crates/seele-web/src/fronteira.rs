@@ -207,7 +207,7 @@ fn dizer_o_link(lido: &serde_json::Value) -> u32 {
 }
 
 /// Um link do navegador, lido contra a origem do produto
-/// (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`, vazia até o D-web-2). Devolve 0
+/// (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`, a D-web-2). Devolve 0
 /// com `{"link": …}` na saída, ou 1 com `{"erro": …}`.
 ///
 /// **Sem parâmetro de origem, de propósito**: a página não escolhe contra que
@@ -672,7 +672,7 @@ pub mod prova {
     }
 
     /// [`analisar_link`](super::analisar_link) com a origem dada: os casos da
-    /// F1 usam `origem.invalid`, e a do produto é vazia até o D-web-2.
+    /// F1 usam `origem.invalid`, e a do produto é a `ORIGEM_DO_NAVEGADOR`.
     ///
     /// # Safety
     ///

@@ -927,3 +927,175 @@ fn as_regras_da_voz_da_ponte_sao_as_do_desktop() {
         serde_json::to_string_pretty(&do_desktop).expect("JSON")
     );
 }
+
+// ------------------------------------------------- a origem do web app
+
+/// A raiz do repositório: `apps/seele-app/` fica duas pastas abaixo dela.
+fn raiz_do_repositorio() -> PathBuf {
+    app_dir()
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("apps/seele-app/ fica dentro do repositório")
+        .to_path_buf()
+}
+
+/// O lugar único da origem do web app.
+const LUGAR_DA_ORIGEM: &str = "crates/seele-proto/src/uri.rs";
+
+/// A origem do web app (a D-web-2), lida do lugar dela, e não copiada para
+/// cá: copiá-la seria o defeito que este guarda procura.
+fn origem_do_web_app() -> String {
+    let uri = std::fs::read_to_string(raiz_do_repositorio().join(LUGAR_DA_ORIGEM))
+        .unwrap_or_else(|erro| panic!("{LUGAR_DA_ORIGEM}: {erro}"));
+    let marca = "pub const ORIGEM_DO_NAVEGADOR: &str = \"";
+    let Some(inicio) = uri.find(marca).map(|n| n + marca.len()) else {
+        panic!("não achei a `ORIGEM_DO_NAVEGADOR` em {LUGAR_DA_ORIGEM}; este guarda ficou cego");
+    };
+    let origem = uri[inicio..]
+        .split('"')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        !origem.is_empty(),
+        "a `ORIGEM_DO_NAVEGADOR` voltou a ser vazia, e a D-web-2 decidiu uma (15/10/2026)"
+    );
+    origem
+}
+
+/// **A origem do web app é escrita num lugar só** (D-web-2, 15/10/2026).
+///
+/// Ela é permanente: as identidades do navegador moram nela. Uma cópia escrita
+/// à mão — numa bancada, num script da página, numa configuração — é uma
+/// segunda verdade que ninguém confere, e o pedido da orquestradora foi um
+/// lugar só para cada coisa que precisa do nome. O lugar é a
+/// `ORIGEM_DO_NAVEGADOR` do `seele-proto`; quem precisa dela a lê de lá (o
+/// `seele-web` pela constante, o `xtask/web/links.mjs` pelo texto do Rust).
+///
+/// Lê todo arquivo versionado (`git ls-files`), menos os documentos — o spec,
+/// o ADR e os passos do dono a nomeiam, e é para isso que existem — e os
+/// `spikes/`, que são descartáveis.
+#[test]
+fn a_origem_do_web_app_e_escrita_num_lugar_so() {
+    let origem = origem_do_web_app();
+    let raiz = raiz_do_repositorio();
+    let listados = std::process::Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(&raiz)
+        .output()
+        .expect("o git lista os arquivos versionados; sem ele este guarda não vê nada");
+    assert!(listados.status.success(), "o `git ls-files` falhou");
+    let mut copias = Vec::new();
+    let mut lidos = 0_usize;
+    for caminho in listados.stdout.split(|byte| *byte == 0) {
+        let caminho = String::from_utf8_lossy(caminho);
+        if caminho.is_empty()
+            || caminho == LUGAR_DA_ORIGEM
+            || caminho.starts_with("docs/")
+            || caminho.starts_with("spikes/")
+            || caminho.ends_with(".md")
+        {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(raiz.join(caminho.as_ref())) else {
+            continue;
+        };
+        lidos += 1;
+        if bytes
+            .windows(origem.len())
+            .any(|janela| janela == origem.as_bytes())
+        {
+            copias.push(caminho.into_owned());
+        }
+    }
+    assert!(
+        lidos > 500,
+        "o guarda leu só {lidos} arquivos: o `git ls-files` não listou o repositório, e ele ficou cego"
+    );
+    assert!(
+        copias.is_empty(),
+        "a origem do web app (`{origem}`) está escrita à mão fora de `{LUGAR_DA_ORIGEM}`:\n  {}\n\
+         Leia a `seele_proto::uri::ORIGEM_DO_NAVEGADOR` (ou o texto dela, como faz o \
+         `xtask/web/links.mjs`), em vez de copiar o nome.",
+        copias.join("\n  ")
+    );
+}
+
+/// Os endereços que a página pode escrever, e por quê. Um endereço que não está
+/// aqui é uma origem escrita à mão no código que o navegador roda.
+const ENDERECOS_DA_PAGINA: &[(&str, &str, &str)] = &[
+    (
+        "ui/frases.js",
+        "https://seele.app.br",
+        "a `PAGINA_DO_APP`, BAIXAR O APP DO SEELE",
+    ),
+    ("ui/glifos.js", "http://www.w3.org", "o namespace do SVG"),
+];
+
+/// **A página não escreve outra origem** (D-web-2): o código que o navegador
+/// roda não nomeia endereço nenhum além dos de [`ENDERECOS_DA_PAGINA`], cada um
+/// no arquivo dele. Os de exemplo de uma frase (`exemplo.br`, `.exemplo`) não
+/// são endereço de ninguém. A página fala com a origem dela pelo caminho
+/// relativo, e com os servidores pelo que o link traz.
+#[test]
+fn a_pagina_nao_escreve_outra_origem() {
+    let ui = app_dir().join("ui");
+    let mut entradas: Vec<_> = std::fs::read_dir(&ui)
+        .expect("ui/")
+        .filter_map(Result::ok)
+        .map(|entrada| entrada.file_name().to_string_lossy().into_owned())
+        .filter(|nome| {
+            [".js", ".html", ".css", ".json", ".webmanifest"]
+                .iter()
+                .any(|fim| nome.ends_with(fim))
+        })
+        .collect();
+    entradas.sort();
+    assert!(
+        entradas.len() > 20,
+        "a `ui/` tem só {} arquivos de texto: o guarda ficou cego",
+        entradas.len()
+    );
+    let mut estranhos = Vec::new();
+    let mut vistos = BTreeSet::new();
+    for nome in &entradas {
+        let relativo = format!("ui/{nome}");
+        let texto = sem_comentarios(&ler(&relativo));
+        for esquema in ["https://", "http://"] {
+            for (em, _) in texto.match_indices(esquema) {
+                let host: String = texto[em + esquema.len()..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+                    .collect();
+                let host = host.trim_end_matches('.');
+                if host.is_empty() || host.ends_with(".exemplo") || host.ends_with("exemplo.br") {
+                    continue;
+                }
+                let endereco = format!("{esquema}{host}");
+                if ENDERECOS_DA_PAGINA
+                    .iter()
+                    .any(|(dono, conhecido, _)| *dono == relativo && *conhecido == endereco)
+                {
+                    vistos.insert((relativo.clone(), endereco));
+                } else {
+                    estranhos.push(format!("{relativo}: {endereco}"));
+                }
+            }
+        }
+    }
+    assert!(
+        estranhos.is_empty(),
+        "a página escreve um endereço que não é dela:\n  {}\n\
+         O código que o navegador roda não nomeia origem nenhuma: a dele é a da página \
+         (caminho relativo), e a dos servidores vem do link. Se este é um endereço \
+         que a página precisa mesmo escrever, ele entra em `ENDERECOS_DA_PAGINA`, com o porquê.",
+        estranhos.join("\n  ")
+    );
+    for (dono, conhecido, porque) in ENDERECOS_DA_PAGINA {
+        assert!(
+            vistos.contains(&((*dono).to_owned(), (*conhecido).to_owned())),
+            "`ENDERECOS_DA_PAGINA` tem `{conhecido}` em `{dono}` ({porque}), e a página não o \
+             escreve mais: tire-o da lista"
+        );
+    }
+}

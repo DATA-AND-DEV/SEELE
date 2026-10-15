@@ -56,17 +56,23 @@ fn os_casos_da_f1_passam_pela_ponte() {
 }
 
 #[test]
-fn com_a_origem_do_produto_vazia_nenhum_link_e_do_navegador() {
-    // Até o D-web-2, `ORIGEM_DO_NAVEGADOR` é vazia, e a página não tem como
-    // aceitar link nenhum. A fronteira usa sempre esta constante.
-    assert_eq!(seele_proto::uri::ORIGEM_DO_NAVEGADOR, "");
-    let texto = format!(
-        "https://origem.invalid/e#198.51.100.7:8383/?fp={}&wh={}",
+fn com_a_origem_do_produto_so_o_link_dela_e_do_navegador() {
+    // A origem do produto é a D-web-2 (`ORIGEM_DO_NAVEGADOR`), e a fronteira
+    // usa sempre esta constante. O mesmo corpo vale nela e não vale em outra.
+    let origem = seele_proto::uri::ORIGEM_DO_NAVEGADOR;
+    assert!(!origem.is_empty(), "a origem do produto voltou a ser vazia");
+    let corpo = format!(
+        "198.51.100.7:8383/?fp={}&wh={}",
         "3cbcfb02".repeat(8),
         "ab".repeat(32)
     );
+    let da_origem = link_do_navegador(&format!("https://{origem}/#{corpo}"), origem);
     assert_eq!(
-        link_do_navegador(&texto, seele_proto::uri::ORIGEM_DO_NAVEGADOR)["erro"],
+        da_origem["link"]["alvo"], "198.51.100.7:8383",
+        "o link da origem do produto não foi lido: {da_origem}"
+    );
+    assert_eq!(
+        link_do_navegador(&format!("https://origem.invalid/e#{corpo}"), origem)["erro"],
         "OutraOrigem"
     );
 }
