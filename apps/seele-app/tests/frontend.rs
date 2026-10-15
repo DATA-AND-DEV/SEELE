@@ -15787,9 +15787,13 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
         rust.contains("fn revogar(&self) -> u64"),
         "a sessão deixou de ter como revogar a geração"
     );
-    // Revogar é a **primeira** coisa que a desmontagem faz.
+    // Revogar é a **primeira** coisa que a desmontagem faz. Com ou sem
+    // genéricos, como o `body_of`: o `desmontar_o_cliente` é genérico no
+    // runtime desde que um teste do `main.rs` sai pelo `disconnect` no runtime
+    // falso do Tauri (tarefa 20 da F7).
     let desmontar = rust
         .split_once("fn desmontar_o_cliente(")
+        .or_else(|| rust.split_once("fn desmontar_o_cliente<"))
         .expect("`desmontar_o_cliente`")
         .1;
     let desmontar = desmontar.split_once("\n}\n").map_or(desmontar, |(a, _)| a);
