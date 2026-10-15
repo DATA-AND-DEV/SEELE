@@ -139,6 +139,10 @@ const RECUSAS_NOMEADAS = new Map([
   ["receber_ligacoes", RECUSA_SALA],
   ["recusar", RECUSA_SALA],
   ["remover_versao", RECUSA_VERSOES],
+  // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
+  // tarefa 13 do plano da F3, Step 5b): mexem no banco de um servidor guardado
+  // desta máquina, e o navegador não guarda servidor.
+  ["resolver_mod_de_api_antiga", RECUSA_HOSPEDAR],
   ["revogar_admissao", RECUSA_PORTARIA],
   ["servidor_hospedado", RECUSA_HOSPEDAR],
   ["servidores_guardados", RECUSA_HOSPEDAR]

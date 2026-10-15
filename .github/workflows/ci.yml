@@ -350,6 +350,13 @@ jobs:
       - run: node apps/seele-app/bancada/camadas.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
+      # tarefa 13 da F3, Step 5b): as três na ordem do dono, ATUALIZAR só com a
+      # versão da 6 no catálogo, a saída no servidor que recusou, e a 0.15 pela
+      # tela das versões.
+      - run: node apps/seele-app/bancada/saidas-de-quem-hospeda.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # O núcleo de confiança no desktop (tarefa 9 da F3): o MUDO, o fone, o
       # SAIR, o «no ar» e o veredito nas cores do produto, sob qualquer tema.
       - run: node apps/seele-app/bancada/nucleo.cjs

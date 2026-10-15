@@ -15274,6 +15274,7 @@ fn o_conjunto_ja_aceito_volta_ao_disco_e_nenhum_outro() {
 fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
     let camada = read("ui/camada-mods.js");
     let base = read("ui/base.js");
+    let boot = read("ui/tela-boot.js");
     let chamadas = [
         (
             js_function(&camada, "async function obterOConjunto("),
@@ -15289,6 +15290,15 @@ fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
             js_function(&camada, "async function instalarDoCatalogo("),
             "atualizar",
             "a atualização pela gestão (QA-01)",
+        ),
+        // A saída 1 de quem hospeda com um MOD de API antiga (o corte da API 6;
+        // tarefa 13 do plano da F3, Step 5b): só baixa. Quem grava a
+        // exigência é `resolver_mod_de_api_antiga`, no servidor parado que
+        // recusou subir, e não o servidor hospedado aqui.
+        (
+            js_function(&boot, "async function desenharSaidasDeQuemHospeda("),
+            "obter",
+            "a saída ATUALIZAR de quem hospeda com um MOD de API antiga",
         ),
     ];
     for (corpo, uso, quem) in &chamadas {
@@ -15314,8 +15324,8 @@ fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
         })
         .collect();
     assert_eq!(
-        usos, [true; 3],
-        "a janela chama `instalar_mod_do_catalogo` fora das três chamadas deste guarda, ou \
+        usos, [true; 4],
+        "a janela chama `instalar_mod_do_catalogo` fora das quatro chamadas deste guarda, ou \
          sem dizer o uso: a chamada sem uso é recusada antes de baixar, e uma nova pode \
          reaplicar no servidor hospedado aqui sem ninguém ter decidido"
     );

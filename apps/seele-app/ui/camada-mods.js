@@ -2513,6 +2513,25 @@ function ultimaQueEsteBuildEntende(versoes) {
   return undefined;
 }
 
+/**
+ * **A versão do catálogo que este app roda**, para o ATUALIZAR de quem hospeda
+ * com um MOD de API antiga (o corte da API 6; tarefa 13 do plano da F3, Step
+ * 5b; decisão (ii) da orquestradora, 15/10): a mais nova cuja API este app
+ * aceita, **ou nenhuma**.
+ *
+ * Ao contrário de `ultimaQueEsteBuildEntende`, ela não cai na última da lista:
+ * ali, oferecer uma versão que o app recusa ainda deixa a pessoa na gestão,
+ * com a frase da recusa; aqui, ATUALIZAR para ela seria uma saída que não sai
+ * — e a tela diz que ainda não há versão para a API deste app.
+ */
+function versaoParaEsteApp(versoes) {
+  const lista = versoes ?? [];
+  for (let i = lista.length - 1; i >= 0; i--) {
+    if (APIS_QUE_ESTE_APLICATIVO_ACEITA.includes(Number(lista[i].api))) return lista[i];
+  }
+  return undefined;
+}
+
 /** Desenha uma linha do catálogo. */
 function linhaDoCatalogo(mod, instalados) {
   const linha = elemento("li");
