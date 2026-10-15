@@ -542,6 +542,27 @@ const { chromium } = require('./playwright.cjs');
     const descartado = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'fechar' && e.superficie === 'editor').at(-1));
     assert.equal(descartado?.descartou, true, `descartar o editor sujo não disse descartou: ${JSON.stringify(descartado)}`);
 
+    // 10b. **A superfície suja sempre pergunta antes de fechar** (D-api-8;
+    //      `superficies.garantias-do-produto[5]`). Só perguntava com
+    //      `fecharComAlteracoes: 'confirmar'`, que nenhum vN.json declara: por
+    //      padrão, um rascunho sumia sem pergunta. Aqui, sem a opção.
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'rascunho2', tipo: 'dialogo', modal: false, titulo: 'Rascunho' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'rascunho2', arvore: [{
+        forma: 'formulario', chave: 'f', dentro: [{ forma: 'campo', chave: 'nota', rotulo: 'Nota', valor: '' }],
+      }] });
+    });
+    await page.fill('[data-superficie="rascunho2"] [data-chave-do-mod="nota"] input', 'algo que não gravei');
+    await page.click('[data-superficie="rascunho2"] .superficie-de-mod-sair');
+    const semAOpcao = await page.evaluate(() => ({
+      perguntou: !$('moderar').hidden,
+      aberta: Boolean(document.querySelector('[data-superficie="rascunho2"]')?.isConnected),
+    }));
+    assert.deepEqual(semAOpcao, { perguntou: true, aberta: true }, `sem a opção, a superfície suja fechou sem perguntar: ${JSON.stringify(semAOpcao)}`);
+    await page.click('#moderar-confirmar');
+    const descartouSemAOpcao = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'fechar' && e.superficie === 'rascunho2').at(-1));
+    assert.equal(descartouSemAOpcao?.descartou, true, `descartar sem a opção não disse descartou: ${JSON.stringify(descartouSemAOpcao)}`);
+
     // 11. O botão que pede confirmação.
     await page.evaluate(async () => {
       await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'aparencia', tipo: 'dialogo', titulo: 'Aparência' } });

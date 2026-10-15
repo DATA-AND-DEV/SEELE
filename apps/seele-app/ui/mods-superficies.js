@@ -408,9 +408,6 @@ class SuperficieDeMod {
     this.contexto = descricao?.contexto ?? null;
     this.lado = descricao?.lado === "esquerda" ? "esquerda" : "direita";
     this.focoInicial = String(descricao?.focoInicial ?? "").slice(0, 120);
-    this.aoFecharComAlteracoes = descricao?.fecharComAlteracoes === "confirmar"
-      ? "confirmar"
-      : "fechar";
     this.suja = false;
     this.visivel = descricao?.visivel !== false;
     this.solta = false;
@@ -845,10 +842,14 @@ class SuperficieDeMod {
    * §3: «Se há alterações não salvas, o host apresenta a decisão de
    * salvar/descartar; o MOD não pode vetar indefinidamente a saída da sessão.»
    *
-   * A regra concreta: com `fecharComAlteracoes: 'confirmar'` e estado sujo, o
-   * primeiro pedido vira um evento e uma confirmação do **produto**; o segundo
-   * fecha. Sem estado sujo, fecha na hora. A saída da sessão não passa por
-   * aqui — ela chama `descartar`, que não pergunta nada.
+   * A regra concreta: com estado sujo, **sempre**, o primeiro pedido vira um
+   * evento e uma confirmação do **produto**; o sim fecha com `descartou`. Era
+   * só com `fecharComAlteracoes: 'confirmar'`, que nenhum vN.json declara, e
+   * por padrão um rascunho sumia sem pergunta (D-api-8; a auditoria do
+   * `v6.json`, `garantias-do-produto[5]`). O MOD que fecha a dele sem
+   * perguntar pede com o motivo `descartar`. Sem estado sujo, fecha na hora. A
+   * saída da sessão não passa por aqui — ela chama `descartar`, que não
+   * pergunta nada.
    */
   pedirFechamento(porque) {
     if (this.solta) return;
@@ -856,7 +857,7 @@ class SuperficieDeMod {
     // 6, §5; Step 6c): um campo que difere do inicial suja a superfície sem o
     // MOD chamar `suja`, e voltar ao gravado a limpa.
     const suja = this.suja || this.renderer.temAlteracoes?.() === true;
-    if (suja && this.aoFecharComAlteracoes === "confirmar" && porque !== "confirmado") {
+    if (suja && porque !== "confirmado") {
       this.dono.falar({
         nome: "fechar-pedido",
         superficie: this.chave,
