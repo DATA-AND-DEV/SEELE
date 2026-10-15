@@ -107,8 +107,13 @@ pub const APIS_ACEITAS: &[u32] = APIS_POR_LINHA[0].1;
 /// **depois** dos da 6 (spec-mestre, §4).
 pub const APIS_POR_LINHA: [(&str, &[u32]); 2] = [("1", &[6]), ("0.15", &[5, 4, 3])];
 
-/// A linha de servidor deste build: a primeira de [`APIS_POR_LINHA`].
-pub const LINHA_DESTE_BUILD: &str = APIS_POR_LINHA[0].0;
+/// A linha de servidor deste build, pela tabela congelada do fio (D-fio-1): o
+/// nome que [`crate::version::linha_do_protocolo`] dá ao `PROTOCOL_VERSION`.
+pub const LINHA_DESTE_BUILD: &str =
+    match crate::version::linha_do_protocolo(crate::version::PROTOCOL_VERSION) {
+        Some(linha) => linha,
+        None => panic!("o PROTOCOL_VERSION deste build não tem linha na tabela congelada"),
+    };
 
 /// **As APIs de toda linha**, da mais nova para a mais velha e sem repetir: o
 /// conjunto que o indexador aceita (o guarda
@@ -1140,7 +1145,16 @@ mod tests {
     /// Um deles escrito à mão de novo, e diferente, reprova aqui.
     #[test]
     fn o_conjunto_desta_linha_e_o_da_tabela_das_linhas() {
-        assert_eq!(LINHA_DESTE_BUILD, "1", "este build é o Servidor 1.0");
+        assert_eq!(
+            APIS_POR_LINHA[0].0, LINHA_DESTE_BUILD,
+            "a primeira entrada é a linha deste build, e APIS_ACEITAS sai dela"
+        );
+        for (linha, _) in &APIS_POR_LINHA {
+            assert!(
+                (1..=u8::MAX).any(|n| crate::version::linha_do_protocolo(n) == Some(*linha)),
+                "«{linha}» não é nome de linha na tabela congelada do fio"
+            );
+        }
         let desta: Vec<_> = APIS_POR_LINHA
             .iter()
             .filter(|(linha, _)| *linha == LINHA_DESTE_BUILD)
