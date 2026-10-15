@@ -939,3 +939,24 @@ começar.
     `ci.yml` e no `publicar.sh`.
 - **O aparelho dos roteiros já não esconde reprovação atrás de aspas:** a 17ª
   passou a mandar o relato em JSON codificado.
+
+## 15/10: a D-web-2, a origem do web app
+
+- **O dono decidiu a origem** (`403443a8`): `https://web.seele.app.br`,
+  permanente. A `versao/0.16` foi trazida (`7497efd7`).
+- **A origem num lugar só** (`7e19c02d`): a `ORIGEM_DO_NAVEGADOR` do
+  `seele-proto`, que era vazia. A página e o desktop passam a ler o link do
+  navegador dela. Dois guardas novos em `tests/web.rs`: o nome só no
+  `uri.rs`, e a página sem endereço fora de uma lista nomeada. O `links.mjs`
+  prova, dentro do `.wasm`, que a página aceita o link da origem e recusa o de
+  outra. Três reversões.
+- **Os cabeçalhos num arquivo só** (`78a7b23a`): `apps/seele-app/web/_headers`.
+  - As bancadas da identidade, da voz e dos executores os leem, no lugar da
+    CSP escrita à mão em cada uma.
+  - A `ponte-sem-gesto` mede a página inteira debaixo deles: a carga, nas duas
+    cascas e com o `.wasm`, sem violação.
+  - O guarda tem cinco reversões.
+  - Os passos do dono: `F4/origem-para-o-dono.md`.
+- **O que não se mediu:** a sessão debaixo da CSP (as imagens `data:` e o
+  `connect-src https:`), porque a sessão pelo navegador é a 2.6.
+- **Em aberto:** o caminho do link (recomendo a raiz) e o pacote (3.6).
