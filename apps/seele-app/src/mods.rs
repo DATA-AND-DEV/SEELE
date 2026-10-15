@@ -541,6 +541,154 @@ impl From<std::io::Error> for FalhaNaCopia {
     }
 }
 
+/// Um MOD ligado num servidor guardado que este app não roda (tarefa 13 do
+/// plano da F3, Step 5b).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModDeApiAntiga {
+    pub(crate) id: String,
+    /// A API que o pacote declara; `None` quando o pacote não está nesta
+    /// máquina ou o `mod.json` dele não abre. **Nunca «API 0»**: zero é «não
+    /// sei», e a tela diz que o pacote não está aqui, sem número nenhum.
+    pub(crate) api: Option<u32>,
+}
+
+/// **Os MODs ligados num banco que este app não roda** — quem hospeda sabe ao
+/// hospedar, e o servidor não sobe calado (tarefa 13 do plano da F3, Step 5b;
+/// aprovado pela orquestradora em 10/10).
+///
+/// Depois do corte da API 6, um servidor 0.16 que ainda tem ligado um MOD da
+/// 5 recusa todo app 0.16 (`ModsDeOutraApi`), e quem hospeda só ganhava uma
+/// queixa no registro. Esta função responde antes de `Hospedagem::iniciar`.
+///
+/// **Uma função pura do app, que lê o banco só para leitura.** Ela não pode ler
+/// a coluna `api`: o banco de quem vem da 0.15 está no esquema 13 e não a tem, e
+/// quem a cria (migração 14) e a preenche (`preencher_as_apis`) é a subida do
+/// servidor — depois do ponto em que esta pergunta é feita. Ela lê `id` e
+/// `hash` das linhas ligadas, que existem do esquema 11 ao 15, e a API pelo
+/// pacote, pela **mesma regra** da subida (`api_do_pacote`). Não migra nada.
+///
+/// Sem banco, ou sem a tabela, nenhum MOD: um servidor que nunca ligou MOD não
+/// tem o que conferir. O motivo exato de um `None` vai ao `seele.log`.
+pub(crate) fn mods_de_api_antiga(
+    banco: &Path,
+    raizes: &seele_server::RaizesDosMods,
+) -> Vec<ModDeApiAntiga> {
+    let Ok(conexao) =
+        rusqlite::Connection::open_with_flags(banco, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+    else {
+        return Vec::new();
+    };
+    let Ok(mut consulta) = conexao.prepare("SELECT id, hash FROM mods WHERE enabled = 1 ORDER BY id")
+    else {
+        return Vec::new();
+    };
+    let Ok(linhas) = consulta.query_map([], |linha| {
+        Ok((linha.get::<_, String>(0)?, linha.get::<_, String>(1)?))
+    }) else {
+        return Vec::new();
+    };
+    let mut antigos = Vec::new();
+    for (id, hash) in linhas.flatten() {
+        match seele_server::mods::api_do_pacote(raizes, &hash) {
+            Ok(api) if api >= seele_ffi::mods::MOD_API_MINIMA => {}
+            Ok(api) => antigos.push(ModDeApiAntiga { id, api: Some(api) }),
+            Err(motivo) => {
+                tracing::warn!(mod_id = %id, %motivo, "a API de um MOD ligado não se lê ao hospedar");
+                antigos.push(ModDeApiAntiga { id, api: None });
+            }
+        }
+    }
+    antigos
+}
+
+#[cfg(test)]
+mod mods_de_api_antiga {
+    use super::{mods_de_api_antiga, ModDeApiAntiga};
+    use std::path::Path;
+
+    const PASTA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testes/pasta-da-0.15.1/pasta");
+
+    fn copiar(de: &Path, para: &Path) {
+        std::fs::create_dir_all(para).unwrap();
+        for entrada in std::fs::read_dir(de).unwrap() {
+            let entrada = entrada.unwrap();
+            let destino = para.join(entrada.file_name());
+            if entrada.path().is_dir() {
+                copiar(&entrada.path(), &destino);
+            } else {
+                std::fs::copy(entrada.path(), destino).unwrap();
+            }
+        }
+    }
+
+    fn raizes(dir: &Path) -> seele_server::RaizesDosMods {
+        seele_server::RaizesDosMods {
+            pacotes: dir.to_path_buf(),
+            dados: dir.join("mod-data"),
+        }
+    }
+
+    fn esquema(banco: &Path) -> i64 {
+        rusqlite::Connection::open(banco)
+            .unwrap()
+            .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |l| l.get(0))
+            .unwrap()
+    }
+
+    /// **A pasta da 0.15.1, sem migrar**: o `seele/estilo` 3.1.0 sai como da
+    /// API 4, e nunca zero; e o banco continua no esquema 13 depois (conferir
+    /// não migra). Lida a coluna `api`, que o 13 não tem, isto reprova.
+    #[test]
+    fn a_pasta_da_0_15_1_sem_migrar_diz_o_estilo_da_api_4_e_continua_no_13() {
+        let dir = tempfile::tempdir().unwrap();
+        let banco = dir.path().join("seele.db");
+        rusqlite::Connection::open(&banco)
+            .unwrap()
+            .execute_batch(&std::fs::read_to_string(format!("{PASTA}/seele.sql")).unwrap())
+            .unwrap();
+        copiar(&Path::new(PASTA).join("mod-packages"), &dir.path().join("mod-packages"));
+        let antes = esquema(&banco);
+        assert_eq!(antes, 13, "a pasta da 0.15.1 não está no esquema 13");
+
+        assert_eq!(
+            mods_de_api_antiga(&banco, &raizes(dir.path())),
+            vec![ModDeApiAntiga { id: "seele/estilo".to_owned(), api: Some(4) }]
+        );
+        assert_eq!(esquema(&banco), antes, "conferir migrou o banco");
+    }
+
+    /// **O pacote que não está nesta máquina** sai como `None`, e não como
+    /// «API 0»: a tela diz que o pacote não está aqui.
+    #[test]
+    fn uma_linha_ligada_sem_o_pacote_no_disco_sai_sem_api() {
+        let dir = tempfile::tempdir().unwrap();
+        let banco = dir.path().join("seele.db");
+        rusqlite::Connection::open(&banco)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE mods (id TEXT PRIMARY KEY NOT NULL, version TEXT NOT NULL, \
+                 hash TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1); \
+                 INSERT INTO mods VALUES ('x/sumido', '1.0.0', 'ab', 1); \
+                 INSERT INTO mods VALUES ('x/desligado', '1.0.0', 'cd', 0);",
+            )
+            .unwrap();
+        assert_eq!(
+            mods_de_api_antiga(&banco, &raizes(dir.path())),
+            vec![ModDeApiAntiga { id: "x/sumido".to_owned(), api: None }],
+            "a linha ligada sem pacote não saiu como «sem API», ou a desligada foi conferida"
+        );
+    }
+
+    /// Sem banco, nenhum MOD — e o banco não é criado.
+    #[test]
+    fn sem_banco_nao_ha_o_que_conferir_e_nada_e_criado() {
+        let dir = tempfile::tempdir().unwrap();
+        let banco = dir.path().join("seele.db");
+        assert!(mods_de_api_antiga(&banco, &raizes(dir.path())).is_empty());
+        assert!(!banco.exists(), "conferir criou um banco");
+    }
+}
+
 #[cfg(test)]
 mod instalar {
     use super::{instalar_de, manifesto_de_teste, FalhaAoInstalarMod};
