@@ -727,8 +727,14 @@ impl Client {
         // only holds inside this one connection, and that limit is written down
         // in `seele_server::transfer` rather than implied here.
         let _ = send.set_priority(CONTROL_PRIORITY);
-        let (session, carimbo) = tokio::time::timeout(
-            HANDSHAKE_TIMEOUT,
+        // **O aperto de mão tem dois prazos** (tarefa 16 da F7). Até a primeira
+        // resposta depois da prova, e dela até a sessão, os 10 s de sempre,
+        // contados do começo. Numa sala pessoal essa resposta pode ser
+        // `Tocando`: quem recebe ainda vai decidir, e dali em diante o prazo é o
+        // do toque ([`prazo_do_toque`]), contado de quando ele chegou.
+        let fim_do_aperto = tokio::time::Instant::now() + HANDSHAKE_TIMEOUT;
+        let (resposta, carimbo) = tokio::time::timeout_at(
+            fim_do_aperto,
             handshake(
                 &mut send,
                 &mut recv,
@@ -736,11 +742,26 @@ impl Client {
                 signing_key,
                 &impressao,
                 join_secret,
-                aceito,
             ),
         )
         .await
         .map_err(|_| ConnectError::HandshakeTimeout)??;
+        let (session, carimbo) = if let ServerMessage::Tocando { prazo_s } = resposta {
+            tracing::info!(prazo_s, "tocando: quem recebe vai decidir");
+            tokio::time::timeout(
+                prazo_do_toque(prazo_s),
+                depois_do_toque(&mut send, &mut recv, carimbo, aceito),
+            )
+            .await
+            .map_err(|_| ConnectError::HandshakeTimeout)??
+        } else {
+            tokio::time::timeout_at(
+                fim_do_aperto,
+                concluir(&mut send, &mut recv, carimbo, aceito, resposta),
+            )
+            .await
+            .map_err(|_| ConnectError::HandshakeTimeout)??
+        };
 
         // **A chave inteira fica pinada depois da primeira ligação completa**
         // (ADR 0060, «Força»): daqui em diante, a conferência daquele código usa
@@ -2566,6 +2587,26 @@ fn certificado_do_servidor(
     Ok(certificado.clone())
 }
 
+/// **A folga do prazo do toque** (tarefa 16 da F7): o que quem liga espera além
+/// do `prazo_s` que a sala mandou no `Tocando`.
+///
+/// A sala manda «ninguém atendeu» no instante em que o prazo vence, e a razão
+/// ainda tem de atravessar a rede. Sem folga, quem liga desistiria no mesmo
+/// instante em que ela está a caminho, e a tela diria «tempo esgotado» onde a
+/// sala disse por quê.
+const FOLGA_DO_TOQUE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// O prazo de quem ouviu `Tocando { prazo_s }`: o do toque, mais a
+/// [`FOLGA_DO_TOQUE`].
+fn prazo_do_toque(prazo_s: u16) -> std::time::Duration {
+    std::time::Duration::from_secs(u64::from(prazo_s)) + FOLGA_DO_TOQUE
+}
+
+/// O aperto de mão até a prova da chave, e a primeira resposta depois dela, com
+/// o número da sessão.
+///
+/// A resposta é a sessão, o anúncio de MODs, uma recusa, ou, numa sala pessoal,
+/// `Tocando`: quem chama decide o prazo do resto, e o resto é [`concluir`].
 async fn handshake(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
@@ -2573,8 +2614,7 @@ async fn handshake(
     signing_key: &SigningKey,
     impressao: &[u8; 32],
     join_secret: Option<&str>,
-    aceito: Option<&str>,
-) -> Result<(SessionInfo, u8), ConnectError> {
+) -> Result<(ServerMessage, u8), ConnectError> {
     // **O `Hello` sai com a mínima desta build** (adendo de 08/10/2026, §4):
     // é o número que qualquer servidor da mesma linha lê. O da sessão é o que o
     // servidor carimbar na primeira resposta, logo abaixo.
@@ -2663,11 +2703,39 @@ async fn handshake(
         ConnectError::Unreachable
     })?;
 
-    let mut answer = frame::read::<ServerMessage>(recv).await.map_err(|error| {
+    let answer = frame::read::<ServerMessage>(recv).await.map_err(|error| {
         tracing::warn!(%error, "no Session came back");
         ConnectError::Unreachable
     })?;
+    Ok((answer, carimbo))
+}
 
+/// Depois de `Tocando`: a decisão de quem recebe, e o resto do aperto.
+///
+/// Atendida, a sala segue para a sessão; recusada ou vencida, ela manda a
+/// razão (`ChamadaRecusada`, `NinguemAtendeu`), que [`concluir`] devolve como
+/// [`ConnectError::Refused`].
+async fn depois_do_toque(
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+    carimbo: u8,
+    aceito: Option<&str>,
+) -> Result<(SessionInfo, u8), ConnectError> {
+    let answer = frame::read::<ServerMessage>(recv).await.map_err(|error| {
+        tracing::warn!(%error, "nada veio depois do Tocando");
+        ConnectError::Unreachable
+    })?;
+    concluir(send, recv, carimbo, aceito, answer).await
+}
+
+/// O fim do aperto de mão: o anúncio de MODs, quando há, e a sessão.
+async fn concluir(
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+    carimbo: u8,
+    aceito: Option<&str>,
+    mut answer: ServerMessage,
+) -> Result<(SessionInfo, u8), ConnectError> {
     // O anúncio de MODs, quando o servidor exige algum. ADR 0045.
     //
     // # Por que a decisão não é tomada aqui
