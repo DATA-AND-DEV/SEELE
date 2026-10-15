@@ -490,11 +490,19 @@ async function abrir(browser, url, r) {
       { tipo: "identidade", nome: "pessoa.identidade", seletor: '.contribuicao-de-mod[data-ponto="pessoa.identidade"]' },
       { tipo: "detalhes", nome: "pessoa.detalhes", seletor: '.contribuicao-de-mod[data-ponto="pessoa.detalhes"]' },
       { tipo: "sala", nome: "sala.acoes", seletor: '.contribuicao-de-mod[data-ponto="sala.acoes"]', grupos: true },
+      // M2 da revisão: numa linha apresentada por MOD, quem começa a falar muda
+      // a classe do detalhe nativo do «⋯» (`pessoa` → `pessoa falando`), e ele
+      // não pode ser refeito — com a identidade do MOD dentro, ela sairia do
+      // documento.
+      {
+        tipo: "identidade-apresentada", nome: "pessoa.identidade numa linha apresentada, com a pessoa começando a falar",
+        seletor: '.contribuicao-de-mod[data-ponto="pessoa.identidade"]', campo: "speaking", estado: "TRANSMITINDO",
+      },
     ];
     const caso5 = [];
     for (const ponto of PONTOS) {
       const aberta = await abrir(browser, url, RETRATO_MOD);
-      const r = await aberta.page.evaluate(async ({ tipo, seletor, grupos, alvo }) => {
+      const r = await aberta.page.evaluate(async ({ tipo, seletor, grupos, alvo, campo }) => {
         const conteudo = (texto) => [{ forma: "texto", chave: "c", dentro: texto }];
         const porPessoa = (ponto, modo, comConteudo = true) => testTable.snapshot.presentes.map((p) => ({
           ponto, modo, alvo: String(p.id), prioridade: 0,
@@ -508,6 +516,12 @@ async function abrir(browser, url, r) {
         if (tipo === "api3") regiaoDeCartoes("bancada/api3");
         if (tipo === "adicionar") registrarMod("bancada/adicionar", porPessoa("pessoa.cartao", "adicionar"));
         if (tipo === "identidade") registrarMod("bancada/identidade", porPessoa("pessoa.identidade", "adicionar"));
+        if (tipo === "identidade-apresentada") {
+          registrarMod("bancada/identidade-apresentada", [
+            ...porPessoa("pessoa.cartao", "substituir"),
+            ...porPessoa("pessoa.identidade", "adicionar"),
+          ]);
+        }
         if (tipo === "detalhes") {
           registrarMod("bancada/detalhes", [
             ...porPessoa("pessoa.cartao", "substituir"),
@@ -532,18 +546,22 @@ async function abrir(browser, url, r) {
           ? testTable.snapshot.voice_rooms.filter((s) => s.people.length > 0).length
           : lista.querySelectorAll("li.pessoa").length;
 
+        // O detalhe nativo do «⋯», quando a linha é apresentada por um MOD.
+        const detalheDe = () => linhasPorApelido().get(alvo)?.querySelector("details.pessoa-nativo > .pessoa") ?? null;
+        const detalhe = detalheDe();
         const parar = observarALista();
         const novo = structuredClone(testTable.snapshot);
-        novo.voice_rooms[0].people.find((p) => p.nickname === alvo).muted = true;
-        novo.presentes.find((p) => p.nickname === alvo).muted = true;
+        novo.voice_rooms[0].people.find((p) => p.nickname === alvo)[campo] = true;
+        novo.presentes.find((p) => p.nickname === alvo)[campo] = true;
         const chegou = await pelaPonte(novo, (d) =>
-          d?.voice_rooms?.[0]?.people?.find((p) => p.nickname === alvo)?.muted === true);
+          d?.voice_rooms?.[0]?.people?.find((p) => p.nickname === alvo)?.[campo] === true);
         const registros = parar();
         const removidos = registros.flatMap((reg) => [...reg.removedNodes]);
         const depois = new Set(lista.querySelectorAll(seletor));
         const linhaDoAlvo = linhasPorApelido().get(alvo);
         return {
           chegou,
+          detalheTrocado: detalhe !== null && detalheDe() !== detalhe,
           nos: nos.length,
           esperados,
           foraDaLinha: registros.map(donoDaMutacao).filter((d) => d !== alvo).length,
@@ -552,7 +570,10 @@ async function abrir(browser, url, r) {
           saiuDoDocumento: nos.filter((no) => removidos.some((m) => m === no || m.contains?.(no))).length,
           estado: linhaDoAlvo?.querySelector(".pastilha")?.textContent ?? null,
         };
-      }, { tipo: ponto.tipo, seletor: ponto.seletor, grupos: Boolean(ponto.grupos), alvo: apelido(5) });
+      }, {
+        tipo: ponto.tipo, seletor: ponto.seletor, grupos: Boolean(ponto.grupos), alvo: apelido(5),
+        campo: ponto.campo ?? "muted",
+      });
       assert.deepEqual(aberta.errors, [], `${ponto.nome}: erros na página`);
       await aberta.page.close();
       assert.ok(r.chegou, `${ponto.nome}: o PersonState não chegou à tela`);
@@ -560,11 +581,13 @@ async function abrir(browser, url, r) {
       assert.equal(
         r.saiuDoDocumento, 0,
         `${ponto.nome}: ${r.saiuDoDocumento} de ${r.nos} nós de MOD saíram do documento com um PersonState de ` +
-          `${apelido(5)} — o marcador deste ponto não está na linha montada`,
+          `${apelido(5)}: ou o marcador deste ponto não está na linha montada, ou um nó do produto com ` +
+          "o nó de MOD dentro foi refeito",
       );
       assert.equal(r.foraDaLinha, 0, `${ponto.nome}: ${r.foraDaLinha} de ${r.mutacoes} mutações fora da linha de ${apelido(5)}`);
       assert.equal(r.trocados, 0, `${ponto.nome}: ${r.trocados} nós de MOD trocaram de nó, de lugar, ou saíram da lista`);
-      assert.equal(r.estado, "MUDO", `${ponto.nome}: a linha de ${apelido(5)} não diz que ela está muda`);
+      assert.equal(r.estado, ponto.estado ?? "MUDO", `${ponto.nome}: a linha de ${apelido(5)} não diz o estado novo`);
+      assert.ok(!r.detalheTrocado, `${ponto.nome}: o detalhe nativo do «⋯» de ${apelido(5)} foi refeito`);
       caso5.push(`${ponto.nome} (${r.nos})`);
     }
 
