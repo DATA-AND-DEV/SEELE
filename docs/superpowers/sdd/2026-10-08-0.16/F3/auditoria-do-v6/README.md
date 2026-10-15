@@ -1,0 +1,175 @@
+# A auditoria do `api/v6.json` contra o produto
+
+Pedida pela orquestradora em 15/10, depois que o porte da MESA achou o
+`cancelou` do `traco`: prometido no `v6.json` e não entregue (consertado no
+`c41d04eb`). O congelamento conferiu o **texto** de cada promessa, e não a
+**entrega**. Esta auditoria confere as duas coisas, entrada por entrada:
+
+- **o código que entrega a promessa**;
+- **a prova**: uma bancada ou um teste que reprovaria se a entrega sumisse, e
+  que roda em algum lugar.
+
+Levantada em `48b6a1ba` (ramo `0.16/api-6-corte`) por nove frentes de leitura,
+uma tabela por grupo de seções. As frentes não rodaram `cargo` nem mexeram no
+repositório. As reversões que as tabelas dão como «medido» rodaram numa cópia,
+fora do repositório, e só com as bancadas de Node. Os números de linha valem
+para `48b6a1ba`.
+
+## As tabelas
+
+| Arquivo | Seções do `v6.json` |
+|---|---|
+| [1-compat-reads.md](1-compat-reads.md) | `version`, `notes`, `compatibilidade`, `handlers`, `reads`, `retrato-fica-de-fora` |
+| [2-actions-world.md](2-actions-world.md) | `actions`, `own`, `world`, `sentido` |
+| [3-eventos.md](3-eventos.md) | `moments`, `eventos`, `eventos-mudam`, `eventos-da-tela` |
+| [4-formas-figuras.md](4-formas-figuras.md) | `formas`, `figuras` |
+| [5-regioes.md](5-regioes.md) | `regioes` |
+| [6-contribuicoes-capa.md](6-contribuicoes-capa.md) | `contribuicoes`, `capa` |
+| [7-superficies-camadas.md](7-superficies-camadas.md) | `superficies`, `camadas` |
+| [8-estilos-tema.md](8-estilos-tema.md) | `estilos`, `tema` |
+| [9-nucleo-som-recusas.md](9-nucleo-som-recusas.md) | `nucleo-de-confianca`, `som`, `volume`, `limites`, `celular`, `recusas` |
+
+## Os estados
+
+- **PROVADA**: o código entrega, e um teste que roda reprovaria sem a entrega.
+- **INCERTA**: o código entrega, mas não é óbvio que o teste reprova sem ela.
+  Muitas destas já foram revertidas pelas frentes **e passaram**, o que as faz,
+  na prática, SEM PROVA.
+- **SEM PROVA**: o código entrega, e nenhum teste que roda a cobre.
+- **SEM CÓDIGO**: nada entrega a promessa, ou o código contradiz o `v6.json`.
+- **NÃO SE APLICA**: texto sem promessa verificável.
+
+## A contagem, em 48b6a1ba
+
+Uma entrada composta conta uma vez por parte com estado próprio, e por isso o
+total passa do número de chaves.
+
+| | PROVADA | INCERTA | SEM PROVA | SEM CÓDIGO | NÃO SE APLICA | linhas |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 compat e leituras | 40 | 9 | 0 | 1 | 2 | 52 |
+| 2 ações e mundo | 38 | 13 | 5 | 1 | 0 | 57 |
+| 3 eventos | 14 | 23 | 0 | 3 | 0 | 40 |
+| 4 formas e figuras | 18 | 0 | 16 | 0 | 0 | 34 |
+| 5 regiões | 32 | 11 | 13 | 3 | 0 | 59 |
+| 6 contribuições e capa | 31 | 15 | 5 | 4 | 3 | 58 |
+| 7 superfícies e camadas | 36 | 10 | 11 | 6 | 2 | 65 |
+| 8 estilos e tema | 48 | 12 | 27 | 7 | 4 | 98 |
+| 9 núcleo, som, volume, recusas | 49 | 14 | 4 | 9 | 5 | 81 |
+| **total** | **306** | **107** | **81** | **34** | **16** | **544** |
+
+Consertadas até aqui: **1**, o `cancelou` do `traco` (`c41d04eb`), antes da
+auditoria, e já contada como PROVADA. Esta contagem é o ponto de partida. Os
+consertos e os achados entram na seção de baixo, com os commits.
+
+## Os achados que valem para muitas linhas
+
+1. **As bancadas de navegador não estão no portão de release.** O `ci.yml`
+   dispara só por `workflow_dispatch`, e a bateria do `publicar.sh` roda as
+   bancadas de Node (`check-runtime`), os roteiros, o `.wasm`, o `check-api`,
+   os testes e o clippy, mas nenhuma das 22 bancadas de navegador do job
+   `bancadas`. Muitas PROVADA dependem só delas, entre elas `camadas`, `capa`,
+   `nucleo`, `regioes-do-produto` e `saidas-de-quem-hospeda`.
+2. **A `tools/bancada-do-celular.py` não roda em lugar nenhum**: nem `ci.yml`,
+   nem `release.yml`, nem `publicar.sh`, nem `xtask`. O guarda
+   `toda_bancada_da_pasta_roda_em_algum_lugar` não a vê, porque ela mora em
+   `tools/`. Toda promessa do celular que só ela mede conta como SEM PROVA.
+3. **O `check-api` confere texto, e não a entrega:**
+   - o braço de `momento_de`, e não quem emite o momento (o `MessageEdited` não
+     tem quem o emita);
+   - nenhum espelho entre `formas`/`figuras` do `v6.json` e o renderer, embora
+     o rascunho, no §13, diga que haveria;
+   - os nomes de `reads`, mas não o que o servidor entrega neles: `reads` diz
+     `contexto.pessoa` e `contexto.canal`, e o servidor entrega `person` e
+     `channel`, desde a v2.
+4. **O tipo de mensagem do prelúdio e o `case` do roteador não estão
+   amarrados.** Só 5 dos 20 tipos são conferidos rodando o prelúdio, e trocar
+   a string de um lado só não reprova nos outros 15.
+5. **Uma forma desconhecida some calada** nas regiões e nas superfícies: a
+   recusa só é contada no cartão, e o `superficie-montar` responde `ok`. É o
+   «o produto sabe e não conta».
+
+## As 34 SEM CÓDIGO, separadas para decisão
+
+A triagem é minha. Cada item será conferido no código antes do conserto, como
+foi o das recusas do volume.
+
+### A. Errata do texto: o código está certo, ou decidido, e o `v6.json` não diz isso
+
+Mexer no texto é descongelar o `v6.json`, e a decisão é da orquestradora.
+
+- `sentido.superficie-atualizar`: «as APIs 4 e 5 também o veem» é falso desde
+  o corte.
+- `regioes.servidor.navegacao.pontos[1]`: o `sala.acoes` mora na lista de
+  pessoas, e não na navegação, desde `26ad0c2b`.
+- `regioes.redes.celular.forma`: os itens têm 44 × 44, e não 56 × 44.
+- `contribuicoes.servidor.aparencia`: «o MOD de janela pinta por ele como na
+  5, e o tema do servidor se soma». Na 0.16 a janela só faz prévia, e o ponto
+  veta o tema de outro MOD.
+- `capa.movimento-reduzido`: não existe preferência própria do SEELE, só a do
+  sistema.
+- `superficies.desconhecido` (b): «até a 5 abre como dialogo». A 5 é recusada
+  antes.
+- `tema.derivados.nomes`: o `bordaForte` está na lista dos derivados, e a
+  `formula` diz que não é derivado.
+- `tema.conferencia`: «na recusa de `mundo.tema`». O servidor não confere
+  contraste, por decisão de 10/10.
+- `nucleo-de-confianca.regra`: o apelido (por desenho, rascunho §10) e a
+  atribuição são alcançados pelo tema.
+- `reads.contexto`: `pessoa` e `canal` contra `person` e `channel`.
+
+### B. Entregas que cabem na API 6, e que eu conserto com o vermelho antes
+
+Estão na ordem do caminho dos portes.
+
+1. **As recusas do volume**: `sem-espera`, `nao-gravei` e `incompleto` chegam
+   ao MOD como `"imagem recusada: SemEspera"` (`volume.rs:602`, o nome de
+   `Debug` do enum). A bancada passa porque o dublê já rejeita com o nome
+   pronto. Conferido no código em 15/10. E o `tipo-recusado` só existe no
+   seletor, e não no volume.
+2. **`recusas.o-que-e`, a lista fechada.** O tipo desconhecido recebe uma
+   frase, e `too-many-requests`, `fila-cheia` e `mensagem-grande…` saem sem
+   `e.erro`. Oito nomes que o `v6.json` não lista chegam ao MOD.
+3. **O K2**: o retrato que não decodifica não manda `midia`/`falhou`, e a
+   `regiao-do-mod.cjs` exige o contrário do `v6.json`.
+4. **`formularios.erro`**: `deslizante`, `marca` e `interruptor` não mostram
+   o `erro`, ficam fora do `sujo` e são recusados em `formulario.erros`.
+5. **`tema.chaves`, «recusados pelo nome, na casca»**: a prévia devolve
+   `{erro:'falhou'}` para chave fora da tabela, valor fora da forma e `modo`
+   que discorda.
+6. **`estilos.estados` `escolhido`**: nada escreve `data-escolhido`.
+7. **`estilos.celular`, os 44 px**: o estilo do MOD, inline, vence o piso da
+   folha. Medido: 20×20, e 9×9 com `escalar: 0.2`.
+8. **A capa «parada» na lista**, e a animação que segue com a janela oculta
+   (nada lê `document.hidden`).
+9. **`eventos-da-tela.lugar`, «a região mudou de tamanho»**: só o
+   `chamada.palco` o manda.
+10. **`compatibilidade.por-plataforma`**: nada tira o `enviar` e o `arquivo`
+    no navegador.
+11. **A forma desconhecida contada** (achado 5), nas regiões e nas superfícies.
+
+### C. O que eu não vejo como entregar na 0.16: decisão da orquestradora
+
+- `moments` `MessageEdited`: o produto não tem verbo de editar mensagem.
+- `tema.porta`, «na tela de aceite»: o `ModAnunciado` e o `ModExigido` não
+  levam `tema`. É mudança de fio, e é da F1.
+- `superficies.folha.celular`, «expansível»: não há estado nem gesto.
+- `superficies.chamada.palco.celular` (b): não existe a tira de quem fala no
+  alto.
+- `nucleo-de-confianca.celular[2]`, «DE ONDE?»: não há `#origem` no HEAD. Veio
+  de `86326686`, que não é ancestral.
+- `celular.toque-na-tela`: só o arraste existe. Não há pinça, área mínima nem
+  toque longo, e o `touch-action: none` impede rolar no vazio.
+- `superficies.limites-o-que-e` (b), «10 MiB por mídia»: o teto é a soma que a
+  `midia` divide com o `retrato` e o `fundoDeMidia`. É o Step 3 da tarefa 7,
+  que está em aberto.
+- `superficies.garantias[5]`, a decisão de descartar e o `descartou`: só existe
+  com `fecharComAlteracoes: 'confirmar'`, que nenhum `vN.json` declara. Por
+  padrão, a superfície suja fecha sem perguntar. Ou o padrão muda, ou o texto.
+- `volume.reducao`: só a `pessoa.capa` é reduzida, e ela conta bytes
+  decodificados.
+- `tema.formula`, o guia: nenhum guia publica `tonsDoTema`, e
+  `docs/como-se-faz-um-mod.md` ainda ensina o tema da API 5.
+
+## Consertos e achados
+
+(Preenchido à medida que os consertos entram, com os commits.)
