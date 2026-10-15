@@ -2339,11 +2339,28 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
   // do meio, e o foco que estivesse numa delas caía (rodada 1, M1). O que não
   // é daqui fica onde está, e sai depois.
   const daquiMesmo = new Set(desejados);
-  const posicao = new Map(Array.from(alvo.childNodes, (filho, i) => [filho, i]));
-  const ficam = new Set(maiorSequenciaCrescente(desejados.map((no) => posicao.get(no) ?? -1))
-    .map((i) => desejados[i]));
-  for (let i = desejados.length - 1; i >= 0; i -= 1) {
-    if (!ficam.has(desejados[i])) alvo.insertBefore(desejados[i], desejados[i + 1] ?? null);
+  // **O caminho rápido** (rodada 2, N1): em quase todo quadro nada mudou de
+  // lugar, e andar o cursor sobre os filhos confere isso sem alocar nada. A
+  // subsequência — um `Map` das posições, os vetores dela e um `Set` em todo
+  // elemento da lista, a todo quadro — deixava o redesenho de 251 pessoas uns
+  // 20% mais caro. Ela só roda quando há o que inserir ou mover.
+  let cursor = alvo.firstChild;
+  let emOrdem = true;
+  for (const no of desejados) {
+    while (cursor && !daquiMesmo.has(cursor)) cursor = cursor.nextSibling;
+    if (no !== cursor) {
+      emOrdem = false;
+      break;
+    }
+    cursor = cursor.nextSibling;
+  }
+  if (!emOrdem) {
+    const posicao = new Map(Array.from(alvo.childNodes, (filho, i) => [filho, i]));
+    const ficam = new Set(maiorSequenciaCrescente(desejados.map((no) => posicao.get(no) ?? -1))
+      .map((i) => desejados[i]));
+    for (let i = desejados.length - 1; i >= 0; i -= 1) {
+      if (!ficam.has(desejados[i])) alvo.insertBefore(desejados[i], desejados[i + 1] ?? null);
+    }
   }
   for (const filho of Array.from(alvo.childNodes)) {
     if (daquiMesmo.has(filho)) continue;
