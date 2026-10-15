@@ -23,9 +23,15 @@
 // 5. **Com um cartão de MOD em cada linha**, um `PersonState` continua mexendo
 //    só na linha da pessoa, e o cartão de cada uma é o mesmo nó, no documento,
 //    na linha dela.
+// 6. **A coluna de salas**, que também lista quem está em cada sala e tem o
+//    ENTRAR NA SALA: um `PersonState` mexe só na linha da pessoa nela, o
+//    ENTRAR NA SALA de outra sala é o mesmo nó, e o mesmo retrato não mexe em
+//    nada. Com 100 pessoas, a sonda viu o botão sair da árvore com a coluna
+//    refeita a cada quadro.
 //
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
-// mutações fora da linha e nós trocados em todas as outras.
+// mutações fora da linha e nós trocados em todas as outras; com a coluna de
+// salas repovoada, o caso 6.
 //
 // Rodar:  node apps/seele-app/bancada/linhas-pelo-id.cjs
 
@@ -314,13 +320,66 @@ const BASE = retratoCom({ sala1: todas.slice(0, NA_SALA), presentes: todas });
     assert.equal(caso5.cartoesTrocados, 0, `${caso5.cartoesTrocados} cartões de MOD trocaram de nó ou saíram da linha`);
     assert.equal(caso5.estado, "MUDO", `a linha de ${apelido(5)} não diz que ela está muda`);
 
+    // 6. A coluna de salas, que também lista quem está em cada sala e tem o
+    //    ENTRAR NA SALA: um PersonState mexe só na linha da pessoa nela, o
+    //    botão é o mesmo nó, e o mesmo retrato não mexe em nada.
+    const caso6 = await page.evaluate(async ({ alvo }) => {
+      const coluna = document.getElementById("lista-voice_rooms");
+      const entrar = () => [...coluna.querySelectorAll("button.voice_room-entrar")]
+        .find((b) => b.textContent === "ENTRAR NA SALA") ?? null;
+      const linhaNaSala = (nome) => [...coluna.querySelectorAll("li.voice_room-pessoa")]
+        .find((li) => li.querySelector(".voice_room-pessoa-nome")?.textContent === nome) ?? null;
+      const botao = entrar();
+      const linha = linhaNaSala(alvo);
+      const registros = [];
+      const observador = new MutationObserver((rs) => registros.push(...rs));
+      observador.observe(coluna, { subtree: true, childList: true, attributes: true, characterData: true });
+      const novo = structuredClone(testTable.snapshot);
+      novo.voice_rooms[0].people.find((p) => p.nickname === alvo).speaking = true;
+      const chegou = await pelaPonte(novo, (d) =>
+        d?.voice_rooms?.[0]?.people?.find((p) => p.nickname === alvo)?.speaking === true);
+      registros.push(...observador.takeRecords());
+      const doEvento = registros.length;
+      const fora = registros.filter((r) => {
+        const no = r.target.nodeType === Node.ELEMENT_NODE ? r.target : r.target.parentElement;
+        return no?.closest?.("li.voice_room-pessoa") !== linha;
+      }).length;
+      registros.length = 0;
+      await new Promise((ok) => setTimeout(ok, 1200));
+      registros.push(...observador.takeRecords());
+      observador.disconnect();
+      return {
+        chegou,
+        achou: Boolean(botao && linha),
+        doEvento,
+        fora,
+        doTique: registros.length,
+        mesmoBotao: botao !== null && entrar() === botao,
+        mesmaLinha: linha !== null && linhaNaSala(alvo) === linha,
+        marca: linhaNaSala(alvo)?.querySelector(".voice_room-pessoa-marca")?.textContent ?? null,
+      };
+    }, { alvo: apelido(9) });
+    assert.ok(caso6.chegou, "o PersonState não chegou à coluna de salas");
+    assert.ok(caso6.achou, "a coluna de salas não tem o ENTRAR NA SALA da sala dois, ou a linha da pessoa");
+    assert.ok(caso6.doEvento > 0, "o PersonState não mudou nada na coluna de salas");
+    assert.equal(
+      caso6.fora, 0,
+      `um PersonState de ${apelido(9)} mexeu fora da linha dela na coluna de salas: ${caso6.fora} de ` +
+        `${caso6.doEvento} mutações. O ENTRAR NA SALA sai da árvore de acessibilidade a cada quadro`,
+    );
+    assert.ok(caso6.mesmoBotao, "o ENTRAR NA SALA trocou de nó com um PersonState de outra pessoa");
+    assert.ok(caso6.mesmaLinha, `a linha de ${apelido(9)} na coluna de salas trocou de nó`);
+    assert.equal(caso6.marca, "fala", `a linha de ${apelido(9)} na coluna de salas não diz que ela fala`);
+    assert.equal(caso6.doTique, 0, `o mesmo retrato, redesenhado pelo tique, fez ${caso6.doTique} mutações na coluna de salas`);
+
     assert.deepEqual(errors, []);
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
         `(${caso1.mutacoes} mutações, nenhuma fora dela) e o foco ficou; o mesmo retrato não ` +
         "mexeu em nada; quem entrou na sala levou o nó; quem saiu perdeu o dele e quem chegou " +
         `ganhou um; com cartões de MOD, ${caso5.mutacoes} mutações, todas na linha, e nenhum ` +
-        "cartão trocado.",
+        `cartão trocado; na coluna de salas, ${caso6.doEvento} mutações, todas na linha da ` +
+        "pessoa, e o ENTRAR NA SALA o mesmo nó.",
     );
   } finally {
     await browser.close();
