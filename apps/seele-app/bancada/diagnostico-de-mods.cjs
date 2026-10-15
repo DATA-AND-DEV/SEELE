@@ -568,10 +568,12 @@ async function quemPintaCadaLugar(navegador, servidor) {
     `o retrato de mod/a, que perdeu, foi contado como mídia de quem pinta: ${avatar}`,
   );
 
-  // **O tema da API 3**, pelo caminho que o ESTILO usa: a `SeeleUI.tema` vira
-  // a mensagem «tema» que `atenderOMod` atende para um MOD da API 3. Ele pinta
-  // a sessão sem registrar ponto nenhum, e a aba diz quem pediu e que o SEELE
-  // desenha com o tema dele (I-7 e m-3 da revisão ampla do Plano 1D).
+  // **O tema da API 3 não pinta mais a sessão** (o corte da API 6; tarefa 13
+  // do plano da F3). Era o caminho do ESTILO 3.x: a `SeeleUI.tema` virava a
+  // mensagem «tema», e `atenderOMod` pintava a sessão para um MOD da API 3. O
+  // pacote dela não carrega mais, e o anfitrião recusa a mensagem pela versão;
+  // a sessão não muda de cor, e a aparência não diz «em vigor (API 3)». O
+  // tema de um servidor, na 6, é o da metade de servidor (`mundo.tema`).
   const tema = await pagina.evaluate(async () => {
     await atenderOMod({ id: "mod/estilo", hash: "mod-estilo", api: 3 }, instancia("mod/estilo"), {
       n: 1, tipo: "tema", valores: { acento: "#ff8800" },
@@ -581,27 +583,12 @@ async function quemPintaCadaLugar(navegador, servidor) {
       resposta: eventosDoMod.find((e) => e.mod === "mod/estilo" && e.tipo === "resposta"),
     };
   });
-  assert.equal(tema.cor, "#ff8800", `o tema da API 3 não pintou a sessão: ${JSON.stringify(tema)}`);
-  await esperarALinha(
-    pagina,
-    "servidor.aparencia",
-    /o SEELE desenha, com o tema de mod\/estilo em vigor \(API 3\).*tema pedido por: mod\/estilo/,
-    "o tema da API 3 pinta a sessão, e a aparência não disse que o SEELE desenha com ele, nem quem o pediu",
-  );
-  // Com o SEELE escolhido, a cor continua: a escolha não desliga o tema.
-  await pagina.evaluate(() => escolherApresentacao("servidor.aparencia", APRESENTACAO_NATIVA));
-  await esperarALinha(
-    pagina,
-    "servidor.aparencia",
-    /o SEELE desenha, com o tema de mod\/estilo em vigor \(API 3\)a escolha desta máquina não desliga o tema da API 3/,
-    "com o SEELE escolhido e a sessão ainda pintada pelo tema da API 3, a aparência não disse que a escolha não o desliga",
-  );
-  assert.equal(
-    await pagina.evaluate(() => $("tela-sessao").style.getPropertyValue("--seele-laranja-nerv")),
-    "#ff8800",
-    "com o SEELE escolhido, o tema da API 3 saiu da sessão — e a aba diria que a escolha não o desliga",
-  );
-  await pagina.evaluate(() => escolherApresentacao("servidor.aparencia", ""));
+  assert.notEqual(tema.cor, "#ff8800", `um pacote da API 3 pintou a sessão: ${JSON.stringify(tema)}`);
+  assert.equal(tema.resposta?.ok, false, `o tema da API 3 foi aceito: ${JSON.stringify(tema)}`);
+  assert.match(String(tema.resposta?.erro ?? ""), /não existe na API 3/,
+    `a recusa do tema da API 3 não disse a versão: ${JSON.stringify(tema)}`);
+  assert.doesNotMatch(await linha("servidor.aparencia"), /em vigor \(API 3\)/,
+    "a aparência disse que um tema da API 3 está em vigor, e nenhum está");
 
   assert.deepEqual(erros, [], `a página lançou erro durante «quem pinta cada lugar»: ${erros.join(" | ")}`);
   await pagina.close();
