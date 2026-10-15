@@ -1140,6 +1140,34 @@ async function oToqueSoPrendeOQueSeArrasta() {
 }
 
 // ---------------------------------------------------------------------------
+// 2a''. O estado `escolhido` de uma classe tem quem o escreva (`estilos.estados`;
+//       a auditoria do `v6.json`, B6): a marca e o interruptor ligados, e a aba
+//       ativa. O seletor `[data-escolhido="sim"]` existia, e nada o escrevia.
+//       A aba é medida no navegador (`camadas.cjs`): este DOM de mentira não
+//       monta abas.
+// ---------------------------------------------------------------------------
+
+async function oEstadoEscolhidoTemQuemOEscreva() {
+  const caso = "o estado escolhido";
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([
+    { forma: "marca", chave: "ligada", rotulo: "Ligada", valor: true },
+    { forma: "interruptor", chave: "desligado", rotulo: "Desligado", valor: false },
+  ]);
+  const [marca, interruptor] = regiao.raiz.children;
+  confere(caso, marca.dataset.escolhido === "sim", `a marca ligada não está escolhida: ${marca.dataset.escolhido}`);
+  confere(caso, interruptor.dataset.escolhido === undefined,
+    `o interruptor desligado está escolhido: ${interruptor.dataset.escolhido}`);
+  const caixa = acharTag(marca, "input");
+  caixa.checked = false;
+  caixa.disparar("change");
+  confere(caso, marca.dataset.escolhido === undefined, "desligar a marca não tirou o escolhido");
+  regiao.soltar();
+}
+
+// ---------------------------------------------------------------------------
 // 2b. Um tabuleiro: figuras declaradas, e o arraste diz qual foi pega.
 // ---------------------------------------------------------------------------
 
@@ -5850,6 +5878,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     oArrastePegaAFiguraDeCima,
     oGestoCanceladoDizCancelou,
     oToqueSoPrendeOQueSeArrasta,
+    oEstadoEscolhidoTemQuemOEscreva,
     sairDuranteOCarregamentoNaoMonta,
     aMidiaDoServidorTemOMesmoDono,
     sairDuranteAReproducaoPara,

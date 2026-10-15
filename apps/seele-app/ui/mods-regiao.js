@@ -264,6 +264,20 @@ function fraseDaRegraViolada(regras, caixa) {
  * e «recusados: 8» não diz a quem escreveu quanto a declaração tem.
  */
 /**
+ * **O estado `escolhido` de uma classe de MOD** (`estilos.estados`; a auditoria
+ * do `v6.json`, B6): a marca e o interruptor ligados, e a aba ativa. O seletor
+ * `[data-escolhido="sim"]` (`ESTADOS_DA_CLASSE`, em `mods-estilos.js`) existia,
+ * e nada o escrevia.
+ */
+function marcarEscolhido(elem, escolhido) {
+  if (escolhido) {
+    if (elem.dataset.escolhido !== "sim") elem.dataset.escolhido = "sim";
+  } else {
+    delete elem.dataset.escolhido;
+  }
+}
+
+/**
  * O valor de um campo como o sujo o compara: o `checked` numa marca e num
  * interruptor (o `value` deles é sempre «on»), e o `value` nos outros.
  */
@@ -1670,6 +1684,7 @@ class RegiaoDeMod {
     elem.append(caixa, rotulo);
     const aoTrocar = () => {
       this.aoMexerNoCampo(elem, caixa);
+      marcarEscolhido(elem, caixa.checked);
       this.dono.falar({
         nome: "marca",
         chave: plano.no.chave ?? "",
@@ -1696,9 +1711,13 @@ class RegiaoDeMod {
     else caixa.removeAttribute("role");
     // Um campo como os outros, pela mesma razão do deslizante (B4).
     this.marcarValidade(elem, caixa, plano);
-    if (document.activeElement === caixa) return;
+    if (document.activeElement === caixa) {
+      marcarEscolhido(elem, caixa.checked);
+      return;
+    }
     const ligado = plano.no.valor === true;
     if (caixa.checked !== ligado) caixa.checked = ligado;
+    marcarEscolhido(elem, caixa.checked);
   }
 
   /**
@@ -2493,6 +2512,8 @@ class RegiaoDeMod {
   }
 
   atualizarAba(elem, plano) {
+    // Só a aba ativa é montada (`montarAbas`): a que está aqui é a escolhida.
+    marcarEscolhido(elem, true);
     elem.setAttribute("role", "tabpanel");
     elem.tabIndex = 0;
     const rotulo = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";

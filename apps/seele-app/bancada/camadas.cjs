@@ -658,6 +658,33 @@ const { chromium } = require('./playwright.cjs');
     });
     assert.deepEqual(await fecharAsEntradas(), { perguntou: false, aberta: false }, 'voltar a marca e o deslizante ao inicial não limpou o sujo');
 
+    // 12c. **O estado `escolhido` de uma classe pinta** (`estilos.estados`; a
+    //      auditoria do `v6.json`, B6): a marca ligada e a aba ativa, e a marca
+    //      desligada deixa de ser pintada. O seletor existia, e nada escrevia
+    //      o estado que ele procura.
+    const escolhido = await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'escolhas', tipo: 'dialogo', modal: false, titulo: 'Escolhas' } });
+      const classes = await pedir(6, { tipo: 'superficie-classes', superficie: 'escolhas',
+        classes: { opcao: { escolhido: { fundo: '#2a6f3c' } } } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'escolhas', arvore: [
+        { forma: 'marca', chave: 'm', rotulo: 'M', valor: true, classe: 'opcao' },
+        { forma: 'abas', chave: 'abas', valor: 'dois', dentro: [
+          { forma: 'aba', chave: 'um', rotulo: 'Um', classe: 'opcao', dentro: 'o primeiro' },
+          { forma: 'aba', chave: 'dois', rotulo: 'Dois', classe: 'opcao', dentro: 'o segundo' },
+        ] },
+      ] });
+      const raiz = document.querySelector('[data-superficie="escolhas"]');
+      const fundoDe = (chave) => getComputedStyle(raiz.querySelector(`[data-chave-do-mod="${chave}"]`)).backgroundColor;
+      const ligada = fundoDe('m');
+      const aba = fundoDe('dois');
+      raiz.querySelector('[data-chave-do-mod="m"] input').click();
+      return { classes, ligada, aba, desligada: fundoDe('m') };
+    });
+    assert.equal(escolhido.classes?.ok, true, `a classe com o estado escolhido foi recusada: ${JSON.stringify(escolhido.classes)}`);
+    assert.equal(escolhido.ligada, 'rgb(42, 111, 60)', `a marca ligada não foi pintada pelo estado escolhido: ${JSON.stringify(escolhido)}`);
+    assert.equal(escolhido.aba, 'rgb(42, 111, 60)', `a aba ativa não foi pintada pelo estado escolhido: ${JSON.stringify(escolhido)}`);
+    assert.notEqual(escolhido.desligada, 'rgb(42, 111, 60)', `a marca desligada continuou pintada como escolhida: ${JSON.stringify(escolhido)}`);
+
     // 13. Os botões do produto no formulário.
     const arvoreDaFicha = (extra = {}) => [{
       forma: 'formulario', chave: 'f', primario: 'SALVAR', secundario: 'CANCELAR', ...extra, dentro: [
