@@ -2333,14 +2333,17 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
     pares.push([no, novo]);
   }
 
-  // A ordem: o que já está no lugar fica, e só o que falta ou mudou de lugar é
-  // inserido. O que não é daqui é pulado, e sai depois.
+  // A ordem: fica no lugar a maior sequência de nós que já está na ordem certa
+  // (a maior subsequência crescente das posições velhas), e só o resto se move,
+  // cada um para antes do seguinte. Mandar uma linha para trás movia todas as
+  // do meio, e o foco que estivesse numa delas caía (rodada 1, M1). O que não
+  // é daqui fica onde está, e sai depois.
   const daquiMesmo = new Set(desejados);
-  let cursor = alvo.firstChild;
-  for (const no of desejados) {
-    while (cursor && !daquiMesmo.has(cursor)) cursor = cursor.nextSibling;
-    if (no === cursor) cursor = cursor.nextSibling;
-    else alvo.insertBefore(no, cursor);
+  const posicao = new Map(Array.from(alvo.childNodes, (filho, i) => [filho, i]));
+  const ficam = new Set(maiorSequenciaCrescente(desejados.map((no) => posicao.get(no) ?? -1))
+    .map((i) => desejados[i]));
+  for (let i = desejados.length - 1; i >= 0; i -= 1) {
+    if (!ficam.has(desejados[i])) alvo.insertBefore(desejados[i], desejados[i + 1] ?? null);
   }
   for (const filho of Array.from(alvo.childNodes)) {
     if (daquiMesmo.has(filho)) continue;
@@ -2353,6 +2356,30 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
     else if (no.localName === "details") abertoPedido.set(no, no.open);
     if (novo.nodeType === Node.ELEMENT_NODE) reconciliarOsFilhos(no, Array.from(novo.childNodes), contexto);
   }
+}
+
+/**
+ * Os índices da maior subsequência estritamente crescente de `valores`, em
+ * ordem; os negativos (nós que ainda não estão ali) ficam de fora.
+ */
+function maiorSequenciaCrescente(valores) {
+  const pontas = []; // pontas[k]: o índice que termina a melhor sequência de tamanho k + 1
+  const anterior = new Array(valores.length).fill(-1);
+  valores.forEach((valor, i) => {
+    if (valor < 0) return;
+    let baixo = 0;
+    let alto = pontas.length;
+    while (baixo < alto) {
+      const meio = (baixo + alto) >> 1;
+      if (valores[pontas[meio]] < valor) baixo = meio + 1;
+      else alto = meio;
+    }
+    if (baixo > 0) anterior[i] = pontas[baixo - 1];
+    pontas[baixo] = i;
+  });
+  const indices = [];
+  for (let i = pontas.length ? pontas[pontas.length - 1] : -1; i >= 0; i = anterior[i]) indices.push(i);
+  return indices.reverse();
 }
 
 /**
