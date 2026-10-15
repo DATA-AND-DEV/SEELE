@@ -239,7 +239,7 @@
   // primeiro deles que aparece, e o `celular-folhas.css` posiciona os palcos por
   // ela. Medida, e não somada das alturas: a faixa só existe numa sala, os avisos
   // vão e vêm, e o teclado põe a faixa no alto.
-  const PE = ":scope > :is(#veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, .voz-celular, .cel-abas, .cel-telemetria)";
+  const PE = ":scope > :is(#veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, #cel-aviso-persistencia, .voz-celular, .cel-abas, .cel-telemetria)";
   function medirOPe() {
     const fim = sessao.getBoundingClientRect().bottom;
     const altos = [...sessao.querySelectorAll(PE)]
@@ -253,8 +253,15 @@
   // observador às vezes não via a área segura chegar, e o diálogo terminava
   // 34 px abaixo do alto da faixa.
   const observador = new ResizeObserver(medirOPe);
-  observador.observe(sessao, { box: "border-box" });
-  for (const parte of sessao.querySelectorAll(PE)) observador.observe(parte, { box: "border-box" });
+  function vigiarOPe() {
+    observador.observe(sessao, { box: "border-box" });
+    for (const parte of sessao.querySelectorAll(PE)) observador.observe(parte, { box: "border-box" });
+  }
+  vigiarOPe();
+  // O que entra no pé depois (o selo da prévia, abaixo; o aviso da resposta do
+  // `persist()`, do `celular-entrada.js`, que carrega depois deste) entra na
+  // medida também.
+  new MutationObserver(vigiarOPe).observe(sessao, { childList: true });
   window.addEventListener("resize", medirOPe);
   medirOPe();
 
@@ -315,7 +322,6 @@
   }, fraseDoSelo, voltarAoDialogo);
   // Do pé: o `--cel-pe` o mede, e os palcos dos MODs ficam acima dele.
   sessao.append(seloDaPrevia);
-  observador.observe(seloDaPrevia, { box: "border-box" });
 
   // O diálogo recolhido e a entrada dele no voltar. O foco de quem o abriu é do
   // `mods-superficies.js`, que o guarda no recolher e o repõe no devolver.

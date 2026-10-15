@@ -839,6 +839,162 @@ def entrada_abre_a_sessao(pg: Page) -> list[str]:
     return falhas
 
 
+LER_A_PERSISTENCIA = r"""() => {
+  const aviso = document.getElementById('cel-aviso-persistencia');
+  const texto = aviso?.querySelector('.veredito-texto');
+  const botao = aviso?.querySelector('button');
+  const faixa = document.getElementById('voz').getBoundingClientRect();
+  let dita;
+  try { dita = localStorage.getItem('seele.persistencia-dita'); } catch { dita = 'recusado'; }
+  return { sessao: !document.getElementById('tela-sessao').hidden,
+           aperto: !document.getElementById('tela-auth').hidden && document.getElementById('tela-auth').dataset.modo === 'aperto',
+           texto: texto?.checkVisibility() ? texto.textContent : null,
+           inteiro: !!texto && texto.scrollWidth <= texto.clientWidth + 1 && texto.scrollHeight <= texto.clientHeight + 1,
+           papel: aviso?.getAttribute('role') ?? null,
+           dispensar: botao?.checkVisibility() ? Math.round(botao.getBoundingClientRect().height) : 0,
+           acimaDaFaixa: !!aviso && aviso.getBoundingClientRect().bottom <= faixa.top + 1,
+           inerte: !!aviso?.closest('[inert], [aria-hidden="true"]'),
+           dita };
+}"""
+
+
+SOBRE_O_AVISO_DA_PERSISTENCIA = """(seletor) => {
+  const a = document.getElementById('cel-aviso-persistencia').getBoundingClientRect();
+  const el = document.querySelector(seletor);
+  if (!el?.checkVisibility()) return null;
+  const r = el.getBoundingClientRect();
+  return Math.max(0, Math.round(Math.min(r.bottom, a.bottom) - Math.max(r.top, a.top)));
+}"""
+
+
+def persistencia_dita(pg: Page) -> list[str]:
+    """A resposta do `persist()` na sessão (N-07; aprovado em 15/10, itens 1 e
+    2): um aviso do núcleo na pilha de baixo, acima da faixa, `role="status"`,
+    com o dispensar de 44. Dito na primeira entrada e quando a resposta muda;
+    repetido só com o armazenamento da origem recusado, porque aí é verdade.
+
+    **Dita é dita de verdade**: só quando a frase apareceu inteira. Uma entrada
+    que para no aperto (a impressão sem conferir) e volta não viu a sessão, e a
+    próxima diz de novo; sem isso, o «negada», o único dos três em que a
+    pessoa pode perder a identidade sem saber, se perdia sem ter sido lido.
+
+    Cada entrada é uma página nova (o recarregar), com o mesmo armazenamento
+    da origem e o mesmo IndexedDB, como a próxima vez que a pessoa abre."""
+    falhas = []
+    f = pg.evaluate("FRASES_DO_CELULAR.entrada.persistencia")
+
+    def entrar_com(resposta: str, veredito: str = CONFERIDA, recusado: bool = False) -> dict:
+        pg.evaluate(IDENTIDADE_DO_CASO)
+        pg.evaluate(f"""() => {{
+          const resposta = {json.dumps(resposta)};
+          navigator.storage.persist = resposta === 'sem-suporte' ? undefined : async () => resposta === 'concedida';
+          if ({json.dumps(recusado)}) {{
+            const recusar = () => {{ throw new DOMException('recusado', 'SecurityError'); }};
+            Storage.prototype.getItem = recusar;
+            Storage.prototype.setItem = recusar;
+          }}
+          SEELE_RESPOSTAS.connect = {{ snapshot: SEELE_QUADRO, veredito: {veredito} }};
+          window.__respostas.push('connect');
+        }}""")
+        usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+        if pg.evaluate("!!document.getElementById('cel-entrada-apelido')"):
+            pg.fill("#cel-entrada-apelido", "rafa")
+        tocar_acao(pg, pg.evaluate("FRASES_DO_CELULAR.entrada.entrarEm.entrar"))
+        pg.wait_for_timeout(1500)
+        return pg.evaluate(LER_A_PERSISTENCIA)
+
+    def de_novo() -> None:
+        pg.reload()
+        pg.wait_for_function("typeof criarIdentidadeDoNavegador === 'function' && !!CELULAR.ajudante('entrada')")
+        pg.wait_for_timeout(300)
+
+    pg.evaluate("localStorage.removeItem('seele.persistencia-dita')")
+
+    # Para no aperto, e volta: a sessão não apareceu, e nada foi dito.
+    r = entrar_com("negada", veredito='{ FirstContact: { fingerprint: "3cbc fb02 3cbc fb02" } }')
+    if r["sessao"] or not r["aperto"]:
+        falhas.append(f"a entrada com a impressão sem conferir não parou no aperto: a conferência abaixo não vale: {r}")
+    elif r["dita"] is not None:
+        falhas.append(f"a entrada parou no aperto, a sessão não apareceu, e a resposta já ficou dita: {r['dita']!r}")
+    tocar(pg, "#auth-voltar")
+    pg.wait_for_timeout(300)
+
+    # A primeira sessão: o aviso, e só depois de visto, dito.
+    de_novo()
+    r = entrar_com("negada")
+    esperado = {"sessao": True, "texto": f["negada"], "inteiro": True, "papel": "status", "acimaDaFaixa": True, "inerte": False, "dita": "negada"}
+    diferente = {k: r[k] for k in esperado if r[k] != esperado[k]}
+    if diferente or r["dispensar"] < 44:
+        falhas.append(f"na primeira sessão, o aviso do «negada» não está como deve: {diferente}, o dispensar com {r['dispensar']}")
+    tocar(pg, "#cel-aviso-persistencia button")
+    pg.wait_for_timeout(200)
+    if pg.evaluate("document.getElementById('cel-aviso-persistencia')?.checkVisibility() && !!document.querySelector('#cel-aviso-persistencia .veredito-texto')"):
+        falhas.append("o dispensar não tirou o aviso")
+    if pg.evaluate("document.activeElement === document.body"):
+        falhas.append("o dispensar deixou o foco no BODY")
+
+    # A mesma resposta: não repete.
+    de_novo()
+    r = entrar_com("negada")
+    if not r["sessao"] or r["texto"] is not None:
+        falhas.append(f"a mesma resposta foi dita de novo: {r}")
+
+    # A resposta muda: diz a nova. E a que o navegador não dá.
+    for resposta in ("concedida", "sem-suporte"):
+        de_novo()
+        r = entrar_com(resposta)
+        if not r["sessao"] or r["texto"] != f[resposta] or r["dita"] != resposta:
+            falhas.append(f"a resposta mudou para «{resposta}», e o aviso não a disse: {r}")
+
+    # Com o armazenamento da origem recusado, a mesma resposta é dita de novo:
+    # o navegador não guarda nada, e o aviso diz a verdade.
+    de_novo()
+    r = entrar_com("sem-suporte", recusado=True)
+    if not r["sessao"] or r["texto"] != f["sem-suporte"]:
+        falhas.append(f"com o armazenamento recusado, a resposta não foi dita de novo: {r}")
+        return falhas
+
+    # O aviso é do pé, como o de fone: o aviso de um MOD e a camada de AJUSTES
+    # ficam acima dele. Os outros avisos do pé saem antes: estando acima dele,
+    # o alto do pé seria o deles, e a conferência não veria este. Ele nasce no
+    # `celular-entrada.js`, que carrega depois de quem mede o pé, e a medida
+    # tem de vê-lo sair também: dispensado, o pé volta à faixa.
+    for dispensar in ("#veredito-fechar", "#aviso-fone-fechar"):
+        if pg.evaluate(f"document.querySelector('{dispensar}')?.checkVisibility() ?? false"):
+            tocar(pg, dispensar)
+    pg.wait_for_timeout(300)
+    pg.evaluate(MOD_DE_PE)
+    # O de erro, que dura 10 s, e não os 3,5 s do normal: a conferência do fim,
+    # depois de AJUSTES, cairia perto do prazo dele.
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'um-aviso', tipo: 'aviso', tom: 'erro', titulo: 'UM AVISO DO MOD' } })")
+    pg.wait_for_timeout(300)
+    aviso_do_mod = ".superficie-de-mod[data-superficie='um-aviso']"
+    sobre = pg.evaluate(SOBRE_O_AVISO_DA_PERSISTENCIA, aviso_do_mod)
+    if sobre is None:
+        falhas.append("o aviso do MOD não abriu: a conferência do pé não vale")
+    elif sobre:
+        falhas.append(f"o aviso do MOD e o da resposta do persist() se cobrem em {sobre} px")
+    acima_da_faixa = """(seletor) => { const no = document.querySelector(seletor);
+        return no?.checkVisibility() ? Math.round(document.getElementById('voz').getBoundingClientRect().top - no.getBoundingClientRect().bottom) : null; }"""
+    if ir_para_aba(pg, "ajustes", falhas):
+        pg.wait_for_timeout(300)
+        sobre = pg.evaluate(SOBRE_O_AVISO_DA_PERSISTENCIA, "#tela-server")
+        if sobre:
+            falhas.append(f"em AJUSTES, a camada cobre {sobre} px do aviso da resposta do persist()")
+        if not tocar(pg, "#cel-aviso-persistencia button"):
+            falhas.append(f"em AJUSTES, o dispensar do aviso não recebe o toque: {motivo_do_ultimo_toque}")
+        pg.wait_for_timeout(300)
+        if (vao := pg.evaluate(acima_da_faixa, "#tela-server")) is None or vao > 1:
+            falhas.append(f"dispensado o aviso em AJUSTES, a camada ficou {vao} px acima da faixa")
+        ir_para_aba(pg, "conversa", falhas)
+        pg.wait_for_timeout(300)
+    if (vao := pg.evaluate(acima_da_faixa, aviso_do_mod)) is None:
+        falhas.append("dispensado o aviso, o do MOD saiu de vista: a conferência do pé não vale")
+    elif vao > 9:
+        falhas.append(f"dispensado o aviso, o do MOD ficou {vao} px acima da faixa, e não 8")
+    return falhas
+
+
 def entrada_direta_na_larga(pg: Page) -> list[str]:
     """A casca larga não muda (D-celular-3): com a mesma impressão conferida, o
     aperto aparece como no desktop."""
@@ -3167,6 +3323,7 @@ CASOS: dict[str, Caso] = {
     "entrada-direta-falha": Caso(levar=entrada_direta_falha, entrar=False, raiz="#tela-auth"),
     "entrada-espera": Caso(levar=entrada_espera, entrar=False, raiz="#tela-auth"),
     "entrada-abre-a-sessao": Caso(levar=entrada_abre_a_sessao, entrar=False, medir=False),
+    "persistencia": Caso(levar=persistencia_dita, entrar=False, medir=False, http=True),
     "entrada-direta-larga": Caso(levar=entrada_direta_na_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
     # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
     # A tela cheia da larga sai junto com a do navegador (achado da F4).

@@ -1810,6 +1810,9 @@ const FRASES_DO_CELULAR = Object.freeze({
       agoraNao: "AGORA NÃO",
       servidores: "SERVIDORES DESTE APARELHO",
     }),
+    // O botão do aviso da resposta na sessão: o mesmo dos avisos do pé ao lado
+    // dele (o de fone e o do áudio, do desktop).
+    dispensar: "dispensar",
     // A resposta do `navigator.storage.persist()` (ADR 0057), dita.
     persistencia: Object.freeze({
       concedida: "Este navegador guarda a sua identidade neste aparelho.",

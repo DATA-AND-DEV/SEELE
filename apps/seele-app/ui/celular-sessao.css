@@ -76,11 +76,11 @@
 
 /* Só o painel do meio cede altura. O resto tem a altura do que diz: com a
    CHAMADA cheia, a coluna encolhia também a telemetria, e o MUDO subia. */
-:root[data-casca="celular"] #tela-sessao > :is(.cel-topo, #veredito, #aviso-fone, #aviso-audio, .voz-celular, .cel-abas, .cel-telemetria) {
+:root[data-casca="celular"] #tela-sessao > :is(.cel-topo, #veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia, .voz-celular, .cel-abas, .cel-telemetria) {
   flex-shrink: 0;
 }
 
-:root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio) {
+:root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia) {
   order: 1;
   flex-wrap: wrap;
 }
@@ -88,18 +88,26 @@
 /* O texto de um aviso divide a fileira com o botão enquanto cabe; com o texto do
    sistema grande, o botão desce para debaixo dele, e não encolhe por cima das
    letras (medido no Safari do Simulador: «dispensar» cortado no maior tamanho). */
-:root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio) > .veredito-texto {
+:root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia) > .veredito-texto {
   flex: 1 1 12em;
   min-width: 0;
 }
 
-:root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio) > button {
+:root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia) > button {
   flex-shrink: 0;
   margin-left: auto;
 }
 
 :root[data-casca="celular"] #tela-sessao > .voz-celular {
   order: 2;
+}
+
+/* O aviso da resposta do `persist()` (o `celular-entrada.js`) é uma região
+   `role="status"` que existe sempre, para o leitor de tela anunciar o que entra
+   nela: vazia, não tem altura, e o pé não muda. */
+:root[data-casca="celular"] #tela-sessao > #cel-aviso-persistencia:empty {
+  padding: 0;
+  border: 0;
 }
 
 :root[data-casca="celular"] #tela-sessao > .cel-abas {
