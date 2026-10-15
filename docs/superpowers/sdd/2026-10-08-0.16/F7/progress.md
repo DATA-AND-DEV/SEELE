@@ -916,3 +916,17 @@ baixei, e não carrega a camada.
 **A regra, daqui em diante, para toda mexida na `ui/`, no duble ou na carga:**
 a carga, os roteiros, as duas bancadas da ponte, a do celular **e todas as
 bancadas da janela** (`apps/seele-app/bancada/*.cjs`), antes da entrega.
+
+## D-sala-2 decidida, e a conferência da D-sala-1 no Windows (15/10)
+
+- **D-sala-2 (do dono):** a sala pessoal sobe sozinha quando o app abre. É o
+  que a tarefa 23 já faz (`3f3c3aff`, `7546c9e8`), e nada muda no código.
+- **D-sala-1** continua «até o dono rever». O dono liberou a orquestradora para
+  conferir no PC de testes pelo SSH. O roteiro, sem tela e sem mexer no
+  firewall à mão, está em `conferencia-firewall-windows.md`. Ele já aponta,
+  pela leitura do código:
+  - a frase da sala fala da porta 8383, e a sala escuta na 8385;
+  - o app só pergunta se existe uma regra chamada `SEELE`, sem conferir se ela
+    permite ou bloqueia;
+  - a casca tem uma linha no PERFIL, e não uma pergunta ao abrir;
+  - o `alcance::firewall` do servidor não é chamado por ninguém.
