@@ -1109,3 +1109,59 @@ Para chegar lá:
 
 App 748/748 e o clippy limpo em todos os alvos. Como a mudança não toca a `ui/`
 nem o duble, a bateria da casca não se aplica.
+
+## A P8 no ramo, e a tarefa 16: o `Tocando` no cliente (15/10)
+
+**A P8 no ramo.** A orquestradora liberou a 16 com a P8 fechada. Trouxe a
+`0410a462` (`20b6c281`) e, a pedido dela, a ponta `05e417df`, com o `OutraLinha`
+da F1 (`f9da6c11`), as duas com `--no-ff` e sem conflito. Na árvore integrada
+passaram o seele-core, o seele-ffi, o seele-sessao, o seele-app, o `outra_linha`
+da conformidade e o clippy. Na bateria inteira da casca passaram: a carga, os
+42 roteiros, as duas pontes, a bancada do celular (o `entrada-desfechos`
+inclusive) e 33 das 34 bancadas da janela.
+
+**Um achado da P8, levado à orquestradora:** o
+`dois_produtores_de_snapshot::cada_campo_do_snapshot_tem_um_lado` reprova na
+própria `05e417df`. O `fora_do_ar_revision` entrou no `Snapshot` com a
+`eae03135` (a P6 da F1), e o guarda não o classifica. O conserto é da F1.
+
+| passo | o que | commit |
+|---|---|---|
+| 1 | o aperto de mão em dois prazos: 10 s até o `Tocando`, e o prazo do toque mais 5 s depois dele | `721fbe07` |
+| 2 | quem toca vence a corrida: ninguém mais começa, quem corria cai, e o prazo do candidato se solta, sem segundo toque | `df17b0d9` |
+| — | a linha provisória do `Tocando` no `ETAPAS` (isolado, `frases.js`) | `75c7ee70` |
+| 3 | a `Etapa::Tocando` do núcleo à FFI, e o `caminho()` que lê quem tocou | `c0eda87a` |
+
+- **O que o cliente fazia:** o `Tocando` virava `ProtocolViolation` na hora,
+  porque o aperto de mão lia a resposta do `Response` esperando `Session`. A
+  recusa e o «ninguém atendeu» nem chegavam a ser lidos.
+- **A corrida e o segundo toque:** a sala anuncia a mesma pessoa por outro
+  candidato como outro `Tocou`, e fecha calado o toque de antes. O segundo
+  candidato saía aos 250 ms e chegava lá. E o prazo de cada candidato (4 s)
+  cortava a ligação que estava chamando.
+- **O `caminho()`:** ele lia a última `Tentando` antes de `Dentro` como a
+  vencedora; com o toque, ela pode ser de quem foi largado.
+- **Os testes:** `seele-conformance/tests/tocando.rs`, contra a sala de
+  verdade (seis), e os da corrida sem socket (quatro), da chegada (dois) e da
+  FFI (um). As reversões, dezessete, reprovam cada uma pela sua frase.
+
+**Uma lição de verificação, cara de aprender:** a conformidade inteira mede o
+que está no disco enquanto roda, e não só o que compilou no começo.
+- Um `cargo test --test tocando` rodado no meio dela recompila o binário do
+  `tocando` no mesmo `target/`, e a rodada roda o novo.
+- O `estados.rs` lê o `chegada.rs` do disco: com o passo seguinte editado, ele
+  comparou o fonte novo com o binário velho e reprovou.
+Durante a conformidade inteira, nenhum `cargo test` dela e nenhuma edição de
+fonte.
+
+**Como está a ponta** (`c0eda87a`):
+- seele-core e FFI, 689 de 689; app, 752 de 752; clippy limpo;
+- a conformidade inteira: 310 passaram, e só reprova o guarda da P8;
+- a bateria da casca: a carga, os 42 roteiros, as duas pontes, o celular e
+  33 das 34 da janela.
+
+**Falta da 16 o `cancelar_ligacao`.** Ele espera o sim da orquestradora: toca
+o `ConnectionError` da FFI e o `frases.js`. O desenho proposto é uma porta nova
+na FFI com um `Cancelamento`, sem mexer no `ConnectConfig`, e uma
+`Etapa::Cancelada` terminal. Um `Desistiu(Cancelada)` afrouxaria duas arestas
+que hoje são requisito escrito.
