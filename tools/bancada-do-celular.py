@@ -965,6 +965,62 @@ def confirmacao(pg: Page) -> list[str]:
     return falhas
 
 
+# --------------------------------------------- a prévia do tema (D-estilo-1)
+
+DIALOGO_COM_PREVIA = """async (tema) => {
+  await __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'estilo', tipo: 'dialogo', titulo: 'APARÊNCIA DO SERVIDOR' } });
+  await __pedirAoProduto({ tipo: 'tema', valores: tema, previa: true, superficie: 'estilo' });
+}"""
+
+ESTADO_DA_PREVIA = """(fundo) => {
+  const raiz = document.querySelector('.dialogo-de-mod[data-superficie="estilo"]');
+  const camada = raiz?.closest('.camada-de-mod');
+  return { dialogo: !!camada && !camada.hidden && raiz.checkVisibility(),
+           noTopo: !!camada && pilhaDeCamadas.at(-1) === camada,
+           sessaoInerte: !!document.getElementById('lista-mensagens').closest('[inert]'),
+           previa: previasDoTema.get('teste/bancada')?.superficie ?? null,
+           tema: document.getElementById('tela-sessao').style.getPropertyValue('--seele-negro-absoluto').trim().toLowerCase() === fundo };
+}"""
+
+
+def previa_recolhida(pg: Page) -> list[str]:
+    """O gancho da pilha de inércia para a prévia do tema (D-estilo-1), chamado
+    como a casca o chama. Com o diálogo do MOD aberto e a prévia dele, a
+    sessão está inerte; recolhido (`recolherSuperficie`), o diálogo sai da
+    vista e da pilha, a sessão deixa de ser inerte, e a prévia continua; de
+    volta (`devolverSuperficie`), o diálogo volta ao topo da pilha, a sessão
+    volta a ficar inerte, e a prévia está intacta."""
+    falhas = []
+    pg.evaluate(MOD_DE_PE)
+    tema = TEMAS["papel"]
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    aberto = pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])
+    if aberto != {"dialogo": True, "noTopo": True, "sessaoInerte": True, "previa": "estilo", "tema": True}:
+        falhas.append(f"o diálogo com a prévia não abriu como devia: {aberto}")
+        return falhas
+    raiz = "document.querySelector('.dialogo-de-mod[data-superficie=\"estilo\"]')"
+    if not pg.evaluate(f"recolherSuperficie({raiz})"):
+        falhas.append("o recolherSuperficie não recolheu o diálogo")
+    recolhido = pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])
+    if recolhido != {"dialogo": False, "noTopo": False, "sessaoInerte": False, "previa": "estilo", "tema": True}:
+        falhas.append(f"recolhido, o diálogo deixa a sessão inerte ou leva a prévia: {recolhido}")
+    if not pg.evaluate(f"devolverSuperficie({raiz})"):
+        falhas.append("o devolverSuperficie não devolveu o diálogo")
+    de_volta = pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])
+    if de_volta != {"dialogo": True, "noTopo": True, "sessaoInerte": True, "previa": "estilo", "tema": True}:
+        falhas.append(f"de volta, o diálogo não está no topo da pilha com a prévia: {de_volta}")
+    # Só a casca devolve o que ela recolheu: um diálogo que o MOD ocultou não
+    # volta por aqui.
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-ocultar', superficie: 'estilo' })")
+    pg.wait_for_timeout(200)
+    if pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])["dialogo"]:
+        falhas.append("o MOD pediu para ocultar o diálogo, e ele continua à vista: a conferência abaixo não vale")
+    elif pg.evaluate(f"devolverSuperficie({raiz})") or pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])["dialogo"]:
+        falhas.append("o devolverSuperficie mostrou um diálogo que o MOD tinha ocultado")
+    return falhas
+
+
 def sessao_entrou(pg: Page) -> list[str]:
     """A sessão abriu com a marca, e a raiz do celular rodou."""
     falhas = []
@@ -2876,6 +2932,8 @@ CASOS: dict[str, Caso] = {
     "deitado": Caso(levar=deitado, aparelhos=("deitado",), raiz="#palco, #voz"),
     # A casca larga (Tarefa 17): o computador, com a marca larga.
     "casca-larga": Caso(levar=casca_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
+    # O gancho da pilha de inércia para a prévia do tema (D-estilo-1).
+    "previa-recolhida": Caso(levar=previa_recolhida, aparelhos=("390",), medir=False),
     # As camadas sobre a sessão e a confirmação (Tarefa 11).
     "queda": Caso(levar=queda, medir=False),
     "alerta": Caso(levar=alerta, medir=False),
