@@ -489,19 +489,32 @@ mod testes {
             "o MOD da API 6 lê outras capacidades que as do núcleo"
         );
 
+        // **A 5 não recebe nada pela capacidade** (o corte da API 6; tarefa 13
+        // do plano da F3): `capacidades_da_api(5)` é vazio, e o manifesto dela é
+        // recusado antes de chegar a um executor. O `snapshot` não entra nesta
+        // lista: o prelúdio o monta pela **falta** de `retrato`, e a tabela
+        // vazia não o tira; quem o recusa é o anfitrião (`podePedir`), que não
+        // dá nada a uma API que este app não roda.
         let cinco = o_que_a_api_entrega(5);
-        for continua in ["regiao", "cartoes", "snapshot"] {
+        assert_eq!(
+            campo(&cinco, "capacidades"),
+            &serde_json::json!([]),
+            "a API 5 ainda recebe capacidades depois do corte: {cinco}"
+        );
+        for saiu in [
+            "regiao",
+            "cartoes",
+            "superficies",
+            "contribuicoes",
+            "enviar",
+            "retrato",
+        ] {
             assert_eq!(
-                campo(&cinco, continua),
-                "function",
-                "a API 5 perdeu «{continua}», que ela tem: {cinco}"
+                campo(&cinco, saiu),
+                "undefined",
+                "a API 5 ainda recebe «{saiu}» depois do corte: {cinco}"
             );
         }
-        assert_eq!(
-            campo(&cinco, "retrato"),
-            "undefined",
-            "a API 5 ganhou o retrato da 6: {cinco}"
-        );
     }
 
     /// **A recusa chega ao MOD com os campos dela** (o I do PERFIS; rascunho da
@@ -2094,16 +2107,18 @@ mod testes {
     /// bytes, que os recusava como `fila-cheia`. A contenção funcionava; o
     /// diagnóstico mentia, e mandava procurar saturação onde havia tamanho.
     ///
-    /// Aqui o MOD pede uma região com texto acentuado e conta o que a recusa
-    /// diz. `mensagem-grande` com o tamanho certo é o aceite; `fila-cheia` é o
-    /// defeito de volta.
+    /// Aqui o MOD pede uma contribuição com texto acentuado e conta o que a
+    /// recusa diz. `mensagem-grande` com o tamanho certo é o aceite; `fila-cheia`
+    /// é o defeito de volta. (Era uma região; a `regiao` saiu no corte da API 6,
+    /// e a conta é a do `pedir`, a mesma para toda mensagem.)
     #[test]
     fn o_preludio_conta_utf8_sem_textencoder() {
         let executor = executor();
         executor
             .iniciar(
                 "seele.postar(JSON.stringify({ tem: typeof TextEncoder }));\
-                 SeeleUI.regiao([{ forma: 'texto', dentro: 'é'.repeat(7000) }])\
+                 SeeleUI.contribuicoes.registrar({ ponto: 'servidor.navegacao',\
+                   conteudo: [{ forma: 'texto', dentro: 'é'.repeat(7000) }] })\
                    .then(() => seele.postar('aceitou'),\
                          (erro) => seele.postar(String(erro.message)));",
             )
