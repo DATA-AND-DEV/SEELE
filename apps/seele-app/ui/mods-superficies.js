@@ -300,13 +300,12 @@ function recusaDaSuperficie(nome, frase, campos) {
  * `janela` via um diálogo e não tinha como saber por quê. Na 6, ele é recusado
  * pelo nome — `tipo-desconhecido`, com o tipo pedido (`tipoPedido`) e os que
  * existem (`tipos`) —, e o
- * roteador põe a linha no `seele.log`. Até a 5, que é o que os MODs publicados
- * recebem, a superfície abre como `dialogo`, como abria, e a linha vai ao
- * `seele.log` pelo dono. Sem tipo, `dialogo`, nas duas.
+ * roteador põe a linha no `seele.log`. Sem tipo, `dialogo`. (Até a 5 a
+ * superfície abria como `dialogo`; depois do corte da API 6, tarefa 13 do
+ * plano da F3, só a 6 chega aqui.)
  *
  * Os tipos são os da API do pacote (`tiposDaApi`), que vem do dono: o
- * `painel` na 6 é um tipo que ela não tem, e a frase diz «use folha»; a
- * `folha` até a 5 também, e abre como `dialogo`.
+ * `painel` é um tipo que a 6 não tem, e a frase diz «use folha».
  */
 function tipoDaSuperficie(descricao, dono) {
   const api = Number(dono?.api) || 0;
@@ -315,16 +314,14 @@ function tipoDaSuperficie(descricao, dono) {
   if (pedido === undefined || pedido === null) return "dialogo";
   if (tipos.includes(pedido)) return pedido;
   const tipo = String(pedido).slice(0, 64);
-  const troca = api >= 6 && tipo === "painel" ? "; o painel saiu na API 6: use folha" : "";
+  const troca = tipo === "painel" ? "; o painel saiu na API 6: use folha" : "";
   // `tipoPedido`, e não `tipo`: `tipo` é o da mensagem da ponte («resposta»).
   const recusa = recusaDaSuperficie(
     "tipo-desconhecido",
     `o tipo de superfície «${tipo}» não existe; os tipos são ${tipos.join(", ")}${troca}`,
     { tipoPedido: tipo, tipos },
   );
-  if (api >= 6) throw recusa;
-  dono?.anotarRecusa?.(`${recusa.message}; até a API 5, ela abre como dialogo`);
-  return "dialogo";
+  throw recusa;
 }
 
 /**

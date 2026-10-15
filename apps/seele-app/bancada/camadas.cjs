@@ -8,10 +8,10 @@
 //    número, também ao reabrir —, só a de cima aparece, e a saída é do
 //    produto, com o `descartou` quando a pessoa aceita perder o rascunho.
 // 2. **O `painel` na 6 é recusado pelo nome**, com «use folha» no `seele.log`;
-//    até a 5 ele continua, e a `folha`, que a 5 não tem, abre como `dialogo`.
+//    e a 5 não cria superfície nenhuma: o corte da API 6 (tarefa 13).
 // 3. **O teto de superfícies de pé chega à 6 pelo nome**, com o número: ele
 //    chegava como `falhou`.
-// 4. **A 300 px, nenhum título de folha, painel ou diálogo quebra dentro de
+// 4. **A 300 px, nenhum título de folha ou diálogo quebra dentro de
 //    uma palavra**; uma palavra maior que a coluna é a única exceção. O título
 //    quebrava «EDITA / R / PERFIL» (achado da tarefa 7, Step 4).
 // 5. **A mídia do servidor por `volume`, em todo lugar** (Step 5b; rascunho
@@ -203,18 +203,16 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(teto?.erro, 'teto-de-superficies', `o teto de superfícies não chegou à 6 pelo nome: ${JSON.stringify(teto)}`);
     assert.equal(teto?.teto, 12, `o teto de superfícies não disse o número: ${JSON.stringify(teto)}`);
 
-    // Até a 5, o painel continua, e a folha — que a 5 não tem — abre como
-    // dialogo, com a linha no seele.log.
-    const painel5 = await page.evaluate(() => pedir(5, { tipo: 'superficie-criar', descricao: { id: 'p5', tipo: 'painel' } }));
-    assert.equal(painel5?.ok, true, `o painel deixou de abrir na API 5: ${JSON.stringify(painel5)}`);
-    assert.ok(await page.evaluate(() => Boolean(document.querySelector('#palco-de-paineis > .painel-de-mod[data-superficie="p5"]'))),
-      'o painel da API 5 não foi ao palco dos painéis');
-    const folha5 = await page.evaluate(() => pedir(5, { tipo: 'superficie-criar', descricao: { id: 'f5', tipo: 'folha' } }));
-    assert.equal(folha5?.ok, true, `a folha na API 5 foi recusada, e não aberta como antes: ${JSON.stringify(folha5)}`);
-    assert.ok(await page.evaluate(() => Boolean(document.querySelector('#palco-de-camadas .dialogo-de-mod[data-superficie="f5"]'))),
-      'a folha na API 5 não abriu como dialogo');
-    assert.ok(await page.evaluate(() => linhasDoLog().some(l => l.modId === 'teste/api5' && /folha/.test(l.oQue) && /dialogo/.test(l.oQue))),
-      'a folha da API 5, aberta como dialogo, não foi ao seele.log');
+    // **A 5 não cria superfície nenhuma** (o corte da API 6; tarefa 13 do
+    // plano da F3): nem o painel que ela tinha, nem a folha como dialogo, que
+    // era o recuo dela. A recusa é pela versão, antes do palco.
+    for (const tipo of ['painel', 'folha']) {
+      const da5 = await page.evaluate((tipo) => pedir(5, { tipo: 'superficie-criar', descricao: { id: `${tipo}5`, tipo } }), tipo);
+      assert.equal(da5?.ok, false, `a API 5 abriu um ${tipo}: ${JSON.stringify(da5)}`);
+      assert.match(String(da5?.erro ?? ''), /não existe na API 5/, `a recusa do ${tipo} da 5 não disse a versão: ${JSON.stringify(da5)}`);
+      assert.ok(await page.evaluate((tipo) => !document.querySelector(`[data-superficie="${tipo}5"]`), tipo),
+        `o ${tipo} da API 5 foi ao palco`);
+    }
 
     // 4. Os títulos a 300 px. Cada palavra é medida pelo `Range` dela: mais de
     // uma linha é quebra dentro da palavra, e só vale para a palavra que, sem
@@ -255,7 +253,7 @@ const { chromium } = require('./playwright.cjs');
       let i = 0;
       for (const titulo of titulos) {
         i += 1;
-        for (const [api, tipo, extra] of [[6, 'folha', {}], [5, 'painel', {}], [6, 'dialogo', { modal: false, tamanho: { largura: 300 } }]]) {
+        for (const [api, tipo, extra] of [[6, 'folha', {}], [6, 'dialogo', { modal: false, tamanho: { largura: 300 } }]]) {
           const id = `titulo-${tipo}-${i}`;
           const r = await pedir(api, { tipo: 'superficie-criar', descricao: { id, tipo, titulo, ...extra } });
           if (!r?.ok) { achadas.push(`${tipo} «${titulo}» não abriu: ${JSON.stringify(r)}`); continue; }
@@ -430,8 +428,8 @@ const { chromium } = require('./playwright.cjs');
 
     // 8. A inércia com o que a casca pede acordado.
     const inercia = await page.evaluate(async () => {
-      // Sem nenhuma superfície de pé: a folha da API 5, na seção 2, abriu como
-      // diálogo modal, e um modal que sobra deixa a sessão inerte por ele.
+      // Sem nenhuma superfície de pé: um modal que sobra de uma seção anterior
+      // deixa a sessão inerte por ele.
       for (const api of [5, 6]) superficiesDoMod(modDe[api].mod, modDe[api].inst).soltarTudo();
       const mudo = document.getElementById('botao-mudo');
       const sair = document.getElementById('operador-sair');
@@ -649,7 +647,7 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(await submetidos(), antesDoEnter + 1, 'o Enter enviou um formulário em progresso, sem primário');
 
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial; e a ação destrutiva só chega ao MOD depois do sim; e o erro vale na escolha e na cor; e os botões do formulário são do produto.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e a 5 não cria superfície nenhuma; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial; e a ação destrutiva só chega ao MOD depois do sim; e o erro vale na escolha e na cor; e os botões do formulário são do produto.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

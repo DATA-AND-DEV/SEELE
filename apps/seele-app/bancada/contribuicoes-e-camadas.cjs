@@ -2416,23 +2416,14 @@ function anotando(...anotadas) {
           return { recusa: falha?.recusa ?? String(falha) };
         }
       };
-      for (const api of [4, 6]) {
-        confere(`Step 1 · sem tipo, dialogo (API ${api})`, decide(api, { id: "s" }) === "dialogo"
-          && decide(api, { id: "s", tipo: null }) === "dialogo", "uma descrição sem tipo deixou de abrir um dialogo");
-        confere(`Step 1 · um tipo que existe (API ${api})`, decide(api, { id: "p", tipo: "pagina" }) === "pagina",
-          "um tipo que existe deixou de ser o pedido");
-      }
-      confere("Step 1 · o tipo desconhecido, na 6", decide(6, { id: "x", tipo: "janela" })?.recusa === "tipo-desconhecido",
-        "`tipoDaSuperficie` não recusou o tipo desconhecido na 6");
-      anotadasDoDono.length = 0;
-      confere("Step 1 · até a 5, o de antes", decide(4, { id: "antiga", tipo: "janela" }) === "dialogo",
-        "um pacote de API 4 com um tipo desconhecido deixou de abrir o dialogo");
-      confere(
-        "Step 1 · até a 5, dito",
-        anotadasDoDono.length === 1 && anotadasDoDono[0].startsWith("mod/b: ")
-          && anotadasDoDono[0].includes("janela") && anotadasDoDono[0].includes("dialogo"),
-        `o dialogo de um tipo desconhecido, até a 5, não foi ao seele.log: ${JSON.stringify(anotadasDoDono)}`,
-      );
+      confere("Step 1 · sem tipo, dialogo", decide(6, { id: "s" }) === "dialogo"
+        && decide(6, { id: "s", tipo: null }) === "dialogo", "uma descrição sem tipo deixou de abrir um dialogo");
+      confere("Step 1 · um tipo que existe", decide(6, { id: "p", tipo: "pagina" }) === "pagina",
+        "um tipo que existe deixou de ser o pedido");
+      confere("Step 1 · o tipo desconhecido", decide(6, { id: "x", tipo: "janela" })?.recusa === "tipo-desconhecido",
+        "`tipoDaSuperficie` não recusou o tipo desconhecido");
+      // O recuo da 5 — abrir um tipo desconhecido como `dialogo` e dizê-lo ao
+      // seele.log — saiu com o corte da API 6 (tarefa 13): só a 6 chega aqui.
     }
 
     // **E A revoga o que é de A.** Sem esta metade, a correção seria uma porta
