@@ -987,6 +987,10 @@ function desenharCanais(snapshot) {
       "li",
       voice_room.occupied_by_us ? "voice_room aberto" : "voice_room",
     );
+    // A coluna também é reconciliada, e a sala é a chave: o ENTRAR NA SALA
+    // trocado a cada quadro saía da árvore de acessibilidade (pendência 63,
+    // (b)). Ver `reconciliarALista`.
+    chaveNaLista.set(item, `sala:${voice_room.id}`);
 
     const cabeca = elemento("span", "canal-cabeca");
 
@@ -1004,11 +1008,15 @@ function desenharCanais(snapshot) {
       nome.title = `renomear ${voice_room.name}`;
       nome.setAttribute("aria-label", `Renomear ${voice_room.name}`);
       nome.addEventListener("click", () => {
+        // O nome de agora, e não o do quadro em que este botão nasceu: a coluna
+        // é reconciliada, e o botão atravessa os retratos com o ouvinte dele.
+        const agora = desenhado?.voice_rooms?.find((sala) => sala.id === voice_room.id)?.name
+          ?? voice_room.name;
         abrirNomear({
           titulo: "RENOMEAR A SALA",
           rotulo: "NOME DA SALA",
-          exemplo: voice_room.name,
-          valor: voice_room.name,
+          exemplo: agora,
+          valor: agora,
           acao: "RENOMEAR",
           aoConfirmar: (escolhido) =>
             invoke("renomear_voice_room", {
@@ -1086,7 +1094,7 @@ function desenharCanais(snapshot) {
     quantosIgnorados(arranjo?.salas, snapshot.voice_rooms.map((sala) => sala.id))
       + quantosIgnorados(arranjo?.canais, snapshot.channels.map((canal) => canal.id)),
   );
-  repovoar(
+  reconciliarALista(
     $("lista-voice_rooms"),
     emGrupos(voice_rooms, snapshot.voice_rooms, arranjo?.salas, "OUTRAS SALAS"),
   );
@@ -1180,6 +1188,7 @@ function desenharCanais(snapshot) {
  */
 function linhaDeQuemEstaDentro(pessoa, snapshot) {
   const item = elemento("li", "voice_room-pessoa");
+  chaveNaLista.set(item, `pessoa:${pessoa.id}`);
   item.append(glifo(pessoa.speaking ? "falando" : "silencio"));
   item.append(elemento("span", "voice_room-pessoa-nome", pessoa.nickname));
   if (pessoa.is_self) item.append(elemento("span", "voice_room-pessoa-eu", "(você)"));
@@ -2249,8 +2258,15 @@ function nosDeMod(nos) {
  *
  * Um nó só se move quando a ordem muda, e um retrato igual ao anterior não mexe
  * em nada. A bancada `linhas-pelo-id.cjs` prende as duas coisas.
+ *
+ * **A coluna de salas passa por aqui também** (`desenharCanais`): ela lista
+ * quem está em cada sala e tem o ENTRAR NA SALA, que, trocado a cada quadro,
+ * saía da árvore com 100 pessoas. Lá a sala é a chave, e a pessoa dentro dela
+ * também. A casca do celular adapta essa coluna depois de cada quadro
+ * (`celular-servidor.js`) e o que ela acrescenta não está na lista montada:
+ * sai aqui, e ela o põe de novo, como fazia com a coluna refeita.
  */
-function reconciliarALista(lista, grupos) {
+function reconciliarALista(lista, filhos) {
   const velhos = new Map();
   for (const no of lista.querySelectorAll("li")) {
     const chave = chaveNaLista.get(no);
@@ -2264,7 +2280,7 @@ function reconciliarALista(lista, grupos) {
     usados: new Set(),
     pendentes: [],
   };
-  reconciliarOsFilhos(lista, grupos, contexto);
+  reconciliarOsFilhos(lista, filhos, contexto);
   for (const no of contexto.pendentes) {
     if (!contexto.usados.has(no)) no.remove();
   }
