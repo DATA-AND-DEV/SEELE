@@ -19633,12 +19633,13 @@ fn o_connect_confere_a_sala_desta_maquina_pelo_codigo() {
     );
 }
 
-/// As variantes de um `enum` de `src/sala.rs`, pelo texto: cada linha de quatro
-/// espaços que começa com maiúscula, entre `enum {nome}` e o `}` que o fecha.
-fn variantes_da_sala(nome: &str) -> Vec<String> {
-    let sala = without_comments(&read("src/sala.rs"));
-    let Some(depois) = sala.split(&format!("enum {nome} {{")).nth(1) else {
-        panic!("`src/sala.rs` não tem mais o `enum {nome}`");
+/// As variantes de um `enum` de um arquivo do app, pelo texto: cada linha de
+/// quatro espaços que começa com maiúscula, entre `enum {nome}` e o `}` que o
+/// fecha.
+fn variantes_do_enum(arquivo: &str, nome: &str) -> Vec<String> {
+    let fonte = without_comments(&read(arquivo));
+    let Some(depois) = fonte.split(&format!("enum {nome} {{")).nth(1) else {
+        panic!("`{arquivo}` não tem mais o `enum {nome}`");
     };
     let corpo = depois.split("\n}").next().unwrap_or_default();
     let variantes: Vec<String> = corpo
@@ -19683,7 +19684,7 @@ fn toda_variante_da_sala_pessoal_tem_frase() {
         "FalhaAoAtender",
         "FalhaNaAgenda",
     ] {
-        for variante in variantes_da_sala(tipo) {
+        for variante in variantes_do_enum("src/sala.rs", tipo) {
             if !bloco.contains(&format!("{variante}:")) {
                 faltam.push(format!("{tipo}::{variante}"));
             }
@@ -19781,6 +19782,159 @@ fn a_faixa_do_toque_chama_nao_toma_a_tela_e_nenhum_mod_sabe_dela() {
     assert!(
         entrar.contains("ejetar()") && !entrar.contains("parar_de_hospedar"),
         "o ATENDER não desmonta só o cliente:\n{entrar}"
+    );
+}
+
+/// **O toque chega por evento, e não por relógio** (tarefa 31 da F7; spec de
+/// 23/09, «Testes» 8).
+///
+/// O toque de antes vinha de um `setInterval` de 5 s, que a webview minimizada
+/// estrangula e até suspende: quem estava noutro programa só via o toque quando
+/// já tinham desistido. O vigia do Rust emite por `CANAL_DO_TOQUE`, e os testes
+/// de `src/toque.rs` provam isso sozinhos; o que só se vê aqui é a casca do
+/// outro lado. Ela ouve o mesmo canal, reage a cada aviso que o Rust manda, e
+/// pergunta `toques_agora` uma vez só, na carga, para a tela que abre com o
+/// toque já tocando. Um canal renomeado de um lado só, ou um evento que a faixa
+/// não conhece, é um toque que não chega a ninguém, sem erro nenhum.
+#[test]
+fn o_toque_chega_por_evento_e_nunca_por_relogio() {
+    let rust = without_comments(&read("src/toque.rs"));
+    let Some(canal) = rust
+        .split("const CANAL_DO_TOQUE: &str = \"")
+        .nth(1)
+        .and_then(|depois| depois.split('"').next())
+    else {
+        panic!("`src/toque.rs` não tem mais o `CANAL_DO_TOQUE`");
+    };
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    assert!(
+        toque.contains(&format!("listen(\"{canal}\",")),
+        "a faixa do toque não ouve `{canal}`, o canal em que o Rust avisa: o toque não chega \
+         à casca"
+    );
+    for evento in variantes_do_enum("src/toque.rs", "AvisoDoToque") {
+        assert!(
+            toque.contains(&format!("payload?.evento === \"{evento}\"")),
+            "o Rust avisa `{evento}` pelo canal do toque, e a faixa não reage a ele"
+        );
+    }
+    assert!(
+        !toque.contains("setInterval("),
+        "a faixa do toque voltou a um relógio: a webview minimizada o estrangula, e o toque \
+         chega quando já desistiram"
+    );
+    let pedidos: Vec<&str> = toque
+        .lines()
+        .filter(|linha| linha.contains("\"toques_agora\""))
+        .collect();
+    assert!(
+        pedidos == ["invoke(\"toques_agora\")"],
+        "o `toques_agora` deixou de ser uma pergunta só, na carga: {pedidos:?}"
+    );
+    for arquivo in ui_files(".js") {
+        if arquivo == "camada-toque.js" || arquivo == "ponte-web.js" {
+            continue;
+        }
+        assert!(
+            !read(&format!("ui/{arquivo}")).contains("\"toques_agora\""),
+            "`ui/{arquivo}` pergunta pelos toques, e o toque chega por evento à faixa"
+        );
+    }
+}
+
+/// **O apelido de quem liga é citado como alegação** (tarefa 31 da F7; spec de
+/// 23/09, «O toque» e «Testes» 8).
+///
+/// O apelido é o que a pessoa diz que é, e qualquer um diz ser qualquer um; só o
+/// código é prova. Por isso a faixa o mostra entre aspas, ao lado do código, e o
+/// nome que a pessoa deu na agenda (que é dela, e não de quem liga) vem de fora
+/// das aspas. A faixa escreve só a frase do `frases.js`: um `.apelido` solto no
+/// script da faixa seria o apelido sem aspas na tela de alguém.
+/// O comportamento é provado num navegador, em `tools/roteiros/toque.js`.
+#[test]
+fn o_apelido_de_quem_liga_e_citado_como_alegacao() {
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(depois) = frases
+        .split("const SALA_PESSOAL = Object.freeze({")
+        .nth(1)
+        .and_then(|sala| sala.split("\n  ligando:").nth(1))
+    else {
+        panic!("o `SALA_PESSOAL` do `frases.js` não tem mais o `ligando`");
+    };
+    let ligando = js_function(depois, "=>");
+    let citado = ligando.matches("«${apelido}»").count();
+    assert!(
+        citado > 0 && citado == ligando.matches("${apelido}").count(),
+        "a faixa do toque mostra o apelido de quem liga fora das aspas, como se fosse prova:\n\
+         {ligando}"
+    );
+    assert!(
+        ligando.contains("${codigo}"),
+        "a faixa do toque não mostra o código de quem liga, que é a única prova:\n{ligando}"
+    );
+
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    assert!(
+        js_function(&toque, "async function desenharToque(")
+            .contains("frase = SALA_PESSOAL.ligando(tocando);"),
+        "a faixa do toque não escreve mais a frase do `frases.js`"
+    );
+    assert!(
+        !toque.contains(".apelido"),
+        "o script da faixa do toque lê o apelido por conta própria, fora da frase que o cita"
+    );
+}
+
+/// **«Atender sai de Y» aparece quando há conexão em outro lugar** (tarefa 31
+/// da F7; spec de 23/09, «O toque» e «Testes» 8).
+///
+/// Atender desmonta a sessão desta janela, e quem está num servidor sai dele: o
+/// botão diz isso antes, com o nome. Quem responde é o `onde_estou`, a resposta
+/// única. Sai dizendo de onde quem está no servidor guardado (que continua no
+/// ar) e quem está em outro lugar; não diz nada quem não tem sessão (`Nenhum`) e
+/// quem já está na própria sala (`Pessoal`, o grupo crescendo). Uma variante
+/// nova do `OndeEstou` reprova aqui até alguém decidir de que lado ela fica.
+/// O caminho do `Guardado` é provado num navegador, em `tools/roteiros/toque.js`.
+#[test]
+fn atender_sai_de_y_quando_ha_conexao_em_outro_lugar() {
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    let desenhar = js_function(&toque, "async function desenharToque(");
+    assert!(
+        desenhar.contains("const onde = await invoke(\"onde_estou\")"),
+        "a faixa do toque não pergunta ao `onde_estou` onde a janela está:\n{desenhar}"
+    );
+    let Some(sai) = desenhar.find("SALA_PESSOAL.atenderSaiDe(") else {
+        panic!("o ATENDER não diz mais de onde sai:\n{desenhar}");
+    };
+    let Some(se) = desenhar[..sai].rfind("if (") else {
+        panic!("o «atender sai de» não depende de onde a janela está:\n{desenhar}");
+    };
+    let condicao = &desenhar[se..sai];
+    for onde in variantes_do_enum("src/main.rs", "OndeEstou") {
+        let sem_sessao_ou_na_sala = onde == "Nenhum" || onde == "Pessoal";
+        assert_eq!(
+            condicao.contains(&format!("onde === \"{onde}\"")),
+            !sem_sessao_ou_na_sala,
+            "com o `onde_estou` em `{onde}`, o ATENDER {} — a regra é sair dizendo de onde \
+             sempre que há conexão em outro lugar: {condicao}",
+            if sem_sessao_ou_na_sala {
+                "anuncia uma saída que não acontece"
+            } else {
+                "tira a pessoa de onde ela está sem avisar"
+            }
+        );
+    }
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(frase) = frases
+        .split("\n  atenderSaiDe:")
+        .nth(1)
+        .and_then(|depois| depois.lines().next())
+    else {
+        panic!("o `frases.js` não tem mais o `atenderSaiDe`");
+    };
+    assert!(
+        frase.contains("SAI DE ${"),
+        "o `atenderSaiDe` não diz de onde a pessoa sai: {frase}"
     );
 }
 
