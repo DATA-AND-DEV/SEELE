@@ -3552,16 +3552,39 @@ async fn hospedar(
 /// O arquivo inteiro, e não só o `hospedar`: a sala pessoal (tarefa 4f da F7)
 /// e o G-casca do Plano 2 vão abrir pontos de entrada novos aqui, e o que
 /// esquecer o padrão reprova sem que alguém precise lembrar de pôr um guarda
-/// nele.
+/// nele. **Menos os módulos de teste**, que sobem pelo `iniciar` curto de
+/// propósito (o padrão seguro, acima): o MOD do guardado
+/// (`o_mod_do_guardado_continua_respondendo`, tarefa 20 da F7) precisa de uma
+/// hospedagem com MODs, e com o ponto padrão ela convocaria o ponto do projeto.
 #[cfg(test)]
 mod o_ponto_de_encontro_de_quem_hospeda {
     /// As duas formas, partidas para não casarem com este texto.
     const COM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar_com_o_ponto_padrao(");
     const SEM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar(");
 
+    /// Este arquivo sem comentários e sem os módulos `#[cfg(test)]`. Cada um é
+    /// de primeiro nível e fecha numa linha `}` sozinha, onde a produção
+    /// recomeça. Só os módulos: um `use` sob `#[cfg(test)]` não tem `}`, e
+    /// cortar até a próxima levaria junto a produção que vem depois dele.
+    fn producao() -> String {
+        let fonte = super::fonte_sem_comentarios();
+        let mut pedacos = fonte.split(concat!("\n#[cfg(test)]\n", "mod "));
+        let mut producao = pedacos.next().unwrap_or_default().to_owned();
+        for pedaco in pedacos {
+            if let Some(fim) = pedaco.find("\n}\n") {
+                producao.push_str(&pedaco[fim + 2..]);
+            }
+        }
+        producao
+    }
+
     #[test]
     fn nenhuma_hospedagem_deste_arquivo_sobe_sem_o_ponto_padrao() {
-        let fonte = super::fonte_sem_comentarios();
+        let fonte = producao();
+        assert!(
+            fonte.contains("async fn hospedar(") && !fonte.contains("mod o_ponto_de_encontro"),
+            "o recorte da produção deste arquivo quebrou"
+        );
         let sem: Vec<&str> = fonte
             .lines()
             .filter(|linha| linha.contains(SEM_O_PADRAO))
