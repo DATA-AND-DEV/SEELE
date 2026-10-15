@@ -628,6 +628,28 @@ function fraseDeErro(erro, apelido, deOnde) {
         "sem-porta-de-tema": "Este MOD não declara a porta do tema, e não pode pintar a aparência do servidor.",
       }[motivo] ?? motivo;
     }
+    // **Um MOD ligado que este app não roda** (o corte da API 6; tarefa 13 do
+    // plano da F3, Step 5b): o servidor não sobe calado. Cada MOD com o nome e
+    // a API que o pacote declara; o que não tem o pacote nesta máquina sai sem
+    // número — «API 0» seria «não sei» escrito como um fato. As três saídas são
+    // as do dono (08/10), nesta ordem.
+    if (erro.ModsDeApiAntiga) {
+      const mods = erro.ModsDeApiAntiga.mods ?? [];
+      // Zero também é «não sei»: o Rust manda `None`, e um zero que chegasse
+      // por outro caminho não vira número escrito.
+      const ditos = mods.map(([id, api]) => (!api
+        ? `${id}: o pacote deste MOD não está nesta máquina — baixe-o de novo, ou desligue o MOD.`
+        : `${id}: feito para a API ${api}, que roda no Servidor 0.15.`));
+      const algumComApi = mods.some(([, api]) => Boolean(api));
+      return (
+        "ESTE SERVIDOR TEM MOD QUE ESTE APP NÃO RODA.\n" +
+        ditos.join("\n") +
+        (algumComApi
+          ? "\nAtualize o MOD para a versão da API 6; ou hospede pelo Servidor 0.15, no launcher; " +
+            "ou desligue o MOD e hospede sem ele — os dados dele ficam."
+          : "")
+      );
+    }
     // ADR 0046: esta versão foi revogada. A frase diz o defeito e o conserto,
     // como a lista assinada os escreve — nunca uma recusa genérica. Serve a
     // `FalhaAoHospedar` e a `conferir_esta_versao`, que usam o mesmo nome.
