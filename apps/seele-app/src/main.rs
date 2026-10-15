@@ -3717,14 +3717,18 @@ const CHAVE_DA_INSTALACAO: &str = r"HKLM\Software\Microsoft\Windows\CurrentVersi
 /// cópia que a instalação deixa na pasta é ele mesmo. Então o app o chama, o
 /// Windows pergunta uma vez, e a regra nasce.
 ///
-/// # Por que a pergunta mudou de lugar
+/// # Por que também aqui, e não só no instalador
 ///
-/// Ela era uma caixa no passo 02 do instalador, desmarcada, perguntando «quer
-/// abrir a porta?» a quem ainda não sabia se ia hospedar. Perguntado assim:
-/// «mas uai, o instalador já não faz isso?». Faz quando pedem, e quem instala um
-/// app de conversa não está decidindo sobre firewall naquele instante.
+/// O instalador cria a regra por padrão: a caixa «Liberar o SEELE no firewall
+/// do Windows» nasce marcada, e a atualização silenciosa guarda a escolha. Este
+/// caminho é para o que sobra dele — quem a desmarcou, a regra que alguém
+/// apagou, a que uma política não deixou nascer. A linha da sala e a tela de
+/// hospedar mostram o botão quando o leitor ([`firewall`]) diz que de fora não
+/// se chega.
 ///
-/// Quem aperta HOSPEDAR AQUI **está**. É aqui que a pergunta cabe.
+/// Ele libera o SEELE **instalado**, que é o caminho que o instalador conhece:
+/// uma cópia portátil não ganha nada com ele, e um bloqueio criado pelo aviso
+/// do Windows também não sai por aqui.
 ///
 /// # Errors
 ///

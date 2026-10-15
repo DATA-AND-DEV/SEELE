@@ -663,7 +663,7 @@ fn o_modelo_bifurcado_guarda_o_que_faz_a_atualizacao_funcionar() {
     assert!(
         modelo.contains("{{#if installer_hooks}}") && modelo.contains("{{installer_hooks}}"),
         "o modelo bifurcado deixou de incluir os ganchos.\n\
-         São eles que criam a regra de firewall da 8383 e removem a instalação \
+         São eles que criam a regra de firewall do SEELE e removem a instalação \
          por usuário — ver `instalador.nsh`."
     );
     assert!(

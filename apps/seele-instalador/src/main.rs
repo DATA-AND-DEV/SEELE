@@ -77,8 +77,8 @@ pub const OBRIGACOES: &[(&str, &str)] = &[
         "o SEELE não abre numa máquina limpa",
     ),
     (
-        "a regra de firewall da 8383, do programa, em rede confiável",
-        "quem hospeda fica invisível e não descobre por quê",
+        "a regra de firewall do programa, em UDP e em qualquer perfil de rede",
+        "quem hospeda ou espera ligação fica invisível e não descobre por quê",
     ),
     (
         "apagar a instalação por usuário da 0.7.1",
@@ -142,7 +142,7 @@ fn main() -> std::process::ExitCode {
                         // o atalho.
                         let _ = registro::guardar_uma_escolha(None, Some(true));
                         println!(
-                            "porta 8383 UDP aberta no firewall para {}",
+                            "SEELE liberado no firewall do Windows (entrada UDP) para {}",
                             produto.display()
                         );
                         Ok(())

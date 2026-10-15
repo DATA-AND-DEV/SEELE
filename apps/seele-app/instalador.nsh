@@ -333,7 +333,7 @@ Function SeelePaginaOpcoes
   Pop $0
   SetCtlColors $0 ${SEELE_ROTULO} transparent
 
-  ${NSD_CreateCheckbox} 74u 50u 226u 10u "Abrir a porta 8383 UDP no firewall do Windows"
+  ${NSD_CreateCheckbox} 74u 50u 226u 10u "Liberar o SEELE no firewall do Windows"
   Pop $SeeleCaixaFirewall
   SetCtlColors $SeeleCaixaFirewall ${SEELE_OSSO} transparent
   ${If} $SeeleQuerFirewall == 1
