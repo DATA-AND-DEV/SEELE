@@ -9885,3 +9885,38 @@ reconciliadas pelo id da pessoa, e um `PersonState` mexendo só na linha dela; o
 (`arvore-ax.py`, `3436980d`), com 10, 50 e 100 pessoas em toda consulta. Ao prová-la como guarda, a F3 viu a
 perda também com 10: numa de 39 consultas a lista inteira sumiu (0 nomes). É rara com poucas pessoas, mas existe,
 porque a lista é trocada de uma vez.
+
+## 65 · No Windows, a sala e o servidor guardado sobem na porta de outro SEELE, só em IPv4, calados
+
+**Aberta em 2026-10-15**, medida pela orquestradora no PC de testes quando o
+`sala::` rodou pela primeira vez no Windows: o `a_porta_ocupada_e_dita`
+reprovou («left: None, right: Some(PortaOcupada)»). **Existe na v0.15.1
+publicada**: o recuo do `alcance::abrir_escuta` é de antes dela. A dona é a F7.
+
+**O mecanismo (medido no PC, com o .NET e com uma sonda no próprio
+`abrir_escuta`):** no Windows, a mesma família na mesma porta é recusada, e uma
+família diferente liga — inclusive a pilha dupla ao lado de um só IPv4. O recuo
+tratava o `AddrInUse` do socket duplo como «sem pilha dupla nesta máquina», e o
+`0.0.0.0` ligava, porque um socket duplo de lá não reserva o IPv4 da porta. Com
+outra escuta do SEELE na porta, a segunda ligou `SoIpv4`; com um programa só
+IPv4, ligou `Dupla`; com o `[::]` do `std`, que no Windows é só IPv6, ligou
+`Dupla`. No macOS e no Linux o socket duplo segura as duas famílias, e o recuo é
+recusado. A irmã do lado do cliente é a 60.
+
+**O custo:** duas cópias abertas — a instalada e a portátil, o caso
+«outra cópia» da D-sala-1 — sobem as duas a sala na 8385, a segunda calada e só
+em IPv4, dividindo a porta. O registro diz uma coisa falsa, e a tela diz «no
+ar»: é ligação perdida sem aviso. Com a D-sala-2 a sala sobe sozinha ao abrir o
+app, e isso fica bem mais provável. O mesmo vale para hospedar na 8383. Não é de
+segurança: quem liga confere a impressão.
+
+**Na 0.16:** consertado pela F7 (`c8bb813c`). O recuo para IPv4 só acontece
+quando a pilha dupla não existe; um `AddrInUse` volta como está, e o app o lê
+como porta ocupada. Antes do socket duplo, uma sonda em `0.0.0.0` e outra em
+`[::]` (só IPv6 no Windows) ligam e soltam a porta: o ocupante que o socket
+duplo não vê, a sonda vê. O `SO_EXCLUSIVEADDRUSE` faria isso no socket, mas o
+`socket2` 0.6.5 não o expõe, e a folha de lints proíbe o `unsafe`. Os testes
+põem três ocupantes — outra escuta, um só IPv4, um só IPv6 — no `seele-server` e
+na sala, e no macOS o do só IPv6 reprovava antes. A prova do Windows, vermelho
+antes e verde depois, é a do PC de testes.
+**Na linha 0.15:** fica como está. A 0.15.2 já está pronta para a tag.
