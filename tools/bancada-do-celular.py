@@ -390,13 +390,33 @@ class Caso:
     http: bool = False
 
 
+# O que a página pede e a cópia da `ui/` não tem, de propósito. O `.wasm` sai do
+# `cargo xtask web`, e não mora na `ui/`: a `identidadeDaPagina()` da F4 o pede
+# na carga, falha, e a tela do celular segue sem ela (o `catch` do
+# `celular-entrada.js`); os casos da entrada passam a identidade deles.
+AUSENTES_NA_COPIA = frozenset({"seele_web.wasm"})
+
+
 @contextlib.contextmanager
 def servida(pasta: pathlib.Path):
     """A cópia servida em 127.0.0.1, numa porta efêmera: nada disputa a 8384."""
     class Calado(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *_):
             pass
-    servidor = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Calado, directory=str(pasta)))
+
+    class ComFila(http.server.ThreadingHTTPServer):
+        # **A fila do `listen`**, que o `socketserver` deixa em 5. A página pede
+        # uns setenta arquivos de uma vez, e o Chromium abre seis conexões em
+        # paralelo: com a máquina ocupada, a linha que aceita as conexões
+        # atrasa, a fila enche, e o sistema recusa a conexão seguinte
+        # (`net::ERR_CONNECTION_RESET`). O script que não chegou não roda, e o
+        # seguinte reprova lendo o que ele declarava: a reprovação que a F7
+        # guardou em 15/10 («PONTE_NO_LUGAR_DO_TAURI is not defined»).
+        # Medido: com a fila em 1 e carga, quatro rodadas em quatro reprovam
+        # assim; com esta, nenhuma.
+        request_queue_size = 128
+
+    servidor = ComFila(("127.0.0.1", 0), functools.partial(Calado, directory=str(pasta)))
     fio = threading.Thread(target=servidor.serve_forever, daemon=True)
     fio.start()
     try:
@@ -2908,6 +2928,14 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             pg.set_default_timeout(5000)
             erros = []
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
+            # **Um arquivo da página que não chegou** diz qual, e por quê. Sem
+            # isto, um script que a cópia servida por HTTP não entregou aparecia
+            # só como o erro do seguinte, que o lia («PONTE_NO_LUGAR_DO_TAURI is
+            # not defined», a reprovação que a F7 guardou em 15/10).
+            nao_chegaram = []
+            pg.on("requestfailed", lambda r: nao_chegaram.append(f"{r.url.rsplit('/', 1)[-1]} ({r.failure})"))
+            pg.on("response", lambda r: r.status >= 400 and r.url.rsplit("/", 1)[-1] not in AUSENTES_NA_COPIA
+                  and nao_chegaram.append(f"{r.url.rsplit('/', 1)[-1]} (HTTP {r.status})"))
             servindo = contextlib.ExitStack()
             if caso.http:
                 origem = servindo.enter_context(servida(pagina.parent))
@@ -2954,6 +2982,8 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
                         chaves = ("cor", "fundo", "borda", "emVolta") if id_.startswith("voz-") else ("cor", "fundo", "borda")
                         if nativo and {k: n[k] for k in chaves} != {k: nativo[k] for k in chaves}:
                             motivos.append(f"{id_} mudou com o tema: {n} contra {nativo}")
+            if nao_chegaram:
+                motivos.append(f"arquivos da página que não chegaram: {nao_chegaram}")
             if erros:
                 motivos.append(f"erros de script: {erros}")
             ctx.close()
