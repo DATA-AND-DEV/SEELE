@@ -2679,4 +2679,102 @@ mod o_quintal_sobe_da_0_15 {
 
         servidor.shutdown();
     }
+
+    /// **A saída 1 de quem hospeda, de ponta a ponta** (tarefa 13 do plano da
+    /// F3, Step 5b; o pedido da orquestradora de 10/10). A pasta da 0.15.1, com
+    /// o `seele/estilo` 3.1.0 da API 4 ligado:
+    ///
+    /// 1. hospedar recusaria, com `("seele/estilo", 4)` — a mesma conferência
+    ///    do `hospedar`, antes de subir;
+    /// 2. a saída 1, **pelo caminho de código dela**
+    ///    (`resolver_mod_de_api_antiga`), liga o 4.0.0 com o servidor parado;
+    ///    o pacote entra pelo cache por hash, no lugar do catálogo;
+    /// 3. hospedar não recusa mais, sobe, e a metade de servidor do 4.0.0 lê o
+    ///    `theme` igual, byte a byte, ao que a 3.1.0 gravou.
+    #[tokio::test]
+    async fn a_saida_1_liga_o_4_0_0_com_o_servidor_parado_e_ele_le_o_quintal_da_0_15() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        rusqlite::Connection::open(dir.path().join("seele.db"))
+            .unwrap()
+            .execute_batch(&std::fs::read_to_string(format!("{PASTA}/seele.sql")).unwrap())
+            .unwrap();
+        let gravado_na_0_15 =
+            quintal_do_estilo(&dir.path().join("seele.db")).expect("o quintal da pasta da 0.15.1");
+        copiar(
+            &Path::new(PASTA).join("mod-packages"),
+            &dir.path().join("mod-packages"),
+        );
+        super::primeira_abertura(&config);
+        crate::mods::levar_pacotes_antigos_para_o_cache(dir.path());
+
+        // 1. Hospedar recusaria.
+        let banco = crate::servidores::banco_de_hospedar(&config, None);
+        let raizes = crate::servidores::raizes_dos_mods(&config, None);
+        assert_eq!(
+            crate::mods::mods_de_api_antiga(&banco, &raizes),
+            vec![crate::mods::ModDeApiAntiga {
+                id: "seele/estilo".to_owned(),
+                api: Some(4)
+            }],
+            "hospedar não recusaria o 3.1.0 da API 4"
+        );
+
+        // 2. A saída 1.
+        let origem = tempfile::tempdir().unwrap();
+        estilo_4(origem.path());
+        let publicado = crate::mods::instalar_de(dir.path(), origem.path()).unwrap();
+        crate::mods::resolver_mod_de_api_antiga(
+            &config,
+            None,
+            "seele/estilo",
+            &crate::mods::SaidaDoModAntigo::Atualizar {
+                hash: publicado.hash,
+            },
+            false,
+        )
+        .expect("a saída 1 não ligou o 4.0.0");
+
+        // 3. Hospedar não recusa mais, e sobe.
+        assert!(
+            crate::mods::mods_de_api_antiga(&banco, &raizes).is_empty(),
+            "depois da saída 1, hospedar ainda recusaria"
+        );
+        let servidor = seele_server::Daemon::bind(seele_server::ServerConfig {
+            name: "Casa".to_owned(),
+            mods_dir: Some(raizes),
+            listen: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0)),
+            database: seele_server::persistence::Location::File(banco),
+            ..seele_server::ServerConfig::default()
+        })
+        .await
+        .expect("o servidor não subiu depois da saída 1");
+        let server = std::sync::Arc::clone(servidor.server());
+        let dono = {
+            let banco = server.persistence.lock().await;
+            seele_server::permissions::Permissions::new(&banco)
+                .register_or_find(&[0x5e; 32], "dono")
+                .unwrap()
+        };
+        let resposta = seele_server::mods::pedidos::executar(
+            &server,
+            dono.id,
+            0_u32.into(),
+            "seele/estilo",
+            r#"{"op":"view"}"#,
+        )
+        .await;
+        let lido: serde_json::Value = serde_json::from_str(&resposta).unwrap();
+        assert_eq!(
+            lido["versao"], "4.0.0",
+            "o pedido não chegou ao 4.0.0: {resposta}"
+        );
+        assert_eq!(
+            lido["theme"].as_str(),
+            Some(gravado_na_0_15.as_str()),
+            "o 4.0.0 não leu o quintal que a 3.1.0 gravou na 0.15.1: {resposta}"
+        );
+
+        servidor.shutdown();
+    }
 }

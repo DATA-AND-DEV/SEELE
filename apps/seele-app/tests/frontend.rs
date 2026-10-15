@@ -20013,7 +20013,8 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
 #[test]
 fn todo_pacote_recusado_e_dito_com_uma_frase() {
     let nucleo = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/seele-core/src/mods.rs"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/seele-core/src/mods.rs"),
     )
     .expect("crates/seele-core/src/mods.rs");
     let corpo = nucleo
@@ -20049,7 +20050,10 @@ fn todo_pacote_recusado_e_dito_com_uma_frase() {
         .filter_map(|linha| {
             let resto = linha.trim().strip_prefix('"')?;
             let (nome, depois) = resto.split_once('"')?;
-            depois.trim_start().starts_with(':').then(|| nome.to_owned())
+            depois
+                .trim_start()
+                .starts_with(':')
+                .then(|| nome.to_owned())
         })
         .collect();
     for nome in &nomes {

@@ -578,7 +578,8 @@ pub(crate) fn mods_de_api_antiga(
     else {
         return Vec::new();
     };
-    let Ok(mut consulta) = conexao.prepare("SELECT id, hash FROM mods WHERE enabled = 1 ORDER BY id")
+    let Ok(mut consulta) =
+        conexao.prepare("SELECT id, hash FROM mods WHERE enabled = 1 ORDER BY id")
     else {
         return Vec::new();
     };
@@ -599,6 +600,149 @@ pub(crate) fn mods_de_api_antiga(
         }
     }
     antigos
+}
+
+/// **A linha que liga estes bytes**: os sete campos lidos do pacote por hash,
+/// no mesmo ato (migrações 12 e 14), ou o nome da recusa.
+///
+/// Uma regra só para a gestão (`habilitar_mod`) e para a saída 1 de quem
+/// hospeda: por hash, porque dois pacotes do mesmo MOD podem estar no disco, e
+/// quem liga sabe quais bytes quer; e recusado quando os bytes são de outro
+/// MOD. Um pacote de API que este build não roda não chega aqui: o
+/// `read_manifest` o recusa ao ler.
+pub(crate) fn linha_do_pacote(
+    config: &str,
+    id: &str,
+    hash: &str,
+) -> Result<seele_server::persistence::mods::EnabledMod, String> {
+    let instalado = seele_ffi::mods::ler_por_hash(config, hash)?;
+    if instalado.id != id {
+        return Err("conteudo-de-outro-mod".to_owned());
+    }
+    Ok(seele_server::persistence::mods::EnabledMod {
+        id: instalado.id,
+        version: instalado.version,
+        hash: instalado.hash,
+        repo: instalado.repo,
+        reach: instalado.reach,
+        server_half: instalado.server,
+        api: instalado.api,
+    })
+}
+
+/// A saída que quem hospeda escolheu para um MOD de API antiga (decisão do
+/// dono de 08/10). A saída 2, hospedar pelo Servidor 0.15, não mexe neste
+/// banco: é o painel de versões.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum SaidaDoModAntigo {
+    /// A saída 1: liga os bytes deste hash, a versão do MOD feita para a API
+    /// deste build, já no cache (a janela a baixa do catálogo antes).
+    Atualizar { hash: String },
+    /// A saída 3: desliga o MOD. A linha e os dados ficam (ADR 0045).
+    Desligar,
+}
+
+/// Por que uma saída de quem hospeda não mexeu no banco. A frase mora em
+/// `frases.js`, pela mesma razão de [`FalhaAoInstalarMod`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) enum FalhaAoResolverModAntigo {
+    /// Esta janela está hospedando. O banco é do servidor que está de pé, e
+    /// mudar a linha por baixo dele seria o servidor exigir um conjunto e o
+    /// banco dizer outro (o mesmo limite do `apagar_servidor`).
+    ServidorNoAr,
+    /// O servidor pedido não está entre os guardados desta máquina.
+    ServidorDesconhecido,
+    /// Este MOD não está ligado com uma API antiga neste servidor: já foi
+    /// resolvido, ou nunca foi. As saídas não são a gestão de MODs.
+    NaoEDeApiAntiga,
+    /// Os bytes da versão nova não servem, com o nome da recusa
+    /// ([`linha_do_pacote`]).
+    PacoteNaoServe(String),
+    /// O banco não abriu, não migrou ou não gravou, com o que ele disse.
+    BancoNaoRespondeu(String),
+}
+
+/// **As saídas 1 e 3 de quem hospeda com um MOD de API antiga, com o servidor
+/// parado** (tarefa 13 do plano da F3, Step 5b; aprovado pela orquestradora em
+/// 15/10, com os limites que esta função confere, nesta ordem):
+///
+/// 1. **só com o servidor parado** — `no_ar` vem da janela, e com ele de pé
+///    nada é aberto;
+/// 2. **só os servidores guardados desta máquina** — um id fora da lista é
+///    recusado, e não cai no banco de sempre como `servidores::banco` cai;
+/// 3. **só um MOD que hospedar recusaria** — pela mesma conferência do
+///    `hospedar` ([`mods_de_api_antiga`]);
+/// 4. **o mesmo banco e a mesma migração da subida** —
+///    [`crate::servidores::banco_de_hospedar`] e `Persistence::open`;
+/// 5. **os dados do MOD ficam** — `enable` e `disable` não tocam `mod_data`
+///    (ADR 0045), e a versão nova lê o quintal que a antiga gravou;
+/// 6. **o `seele.log` diz o que mudou e em qual servidor.**
+pub(crate) fn resolver_mod_de_api_antiga(
+    config: &str,
+    servidor: Option<&str>,
+    id: &str,
+    saida: &SaidaDoModAntigo,
+    no_ar: bool,
+) -> Result<(), FalhaAoResolverModAntigo> {
+    if no_ar {
+        return Err(FalhaAoResolverModAntigo::ServidorNoAr);
+    }
+    if let Some(guardado) = servidor {
+        if !crate::servidores::listar(config)
+            .iter()
+            .any(|s| s.id == guardado)
+        {
+            return Err(FalhaAoResolverModAntigo::ServidorDesconhecido);
+        }
+    }
+    let banco = crate::servidores::banco_de_hospedar(config, servidor);
+    let raizes = crate::servidores::raizes_dos_mods(config, servidor);
+    let Some(antigo) = mods_de_api_antiga(&banco, &raizes)
+        .into_iter()
+        .find(|antigo| antigo.id == id)
+    else {
+        return Err(FalhaAoResolverModAntigo::NaoEDeApiAntiga);
+    };
+    // Os bytes novos conferidos **antes** de abrir o banco: abrir migra, e uma
+    // recusa não deixa um banco migrado para trás.
+    let nova = match saida {
+        SaidaDoModAntigo::Atualizar { hash } => Some(
+            linha_do_pacote(config, id, hash).map_err(FalhaAoResolverModAntigo::PacoteNaoServe)?,
+        ),
+        SaidaDoModAntigo::Desligar => None,
+    };
+    let banco_aberto = seele_server::persistence::Persistence::open(
+        &seele_server::persistence::Location::File(banco),
+    )
+    .map_err(|erro| FalhaAoResolverModAntigo::BancoNaoRespondeu(format!("{erro:#}")))?;
+    let gravado = match &nova {
+        Some(linha) => seele_server::persistence::mods::enable(&banco_aberto, linha),
+        None => seele_server::persistence::mods::disable(&banco_aberto, id),
+    };
+    gravado.map_err(|erro| FalhaAoResolverModAntigo::BancoNaoRespondeu(format!("{erro:#}")))?;
+
+    let qual = servidor.unwrap_or("o de sempre");
+    let api = antigo
+        .api
+        .map_or_else(|| "não lida".to_owned(), |api| api.to_string());
+    match &nova {
+        Some(linha) => tracing::info!(
+            servidor = qual,
+            mod_id = id,
+            api_antiga = %api,
+            versao = %linha.version,
+            api = linha.api,
+            "MOD de API antiga atualizado com o servidor parado"
+        ),
+        None => tracing::info!(
+            servidor = qual,
+            mod_id = id,
+            api_antiga = %api,
+            "MOD de API antiga desligado com o servidor parado; os dados dele ficam"
+        ),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -631,7 +775,11 @@ mod mods_de_api_antiga {
     fn esquema(banco: &Path) -> i64 {
         rusqlite::Connection::open(banco)
             .unwrap()
-            .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |l| l.get(0))
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |l| l.get(0),
+            )
             .unwrap()
     }
 
@@ -646,13 +794,19 @@ mod mods_de_api_antiga {
             .unwrap()
             .execute_batch(&std::fs::read_to_string(format!("{PASTA}/seele.sql")).unwrap())
             .unwrap();
-        copiar(&Path::new(PASTA).join("mod-packages"), &dir.path().join("mod-packages"));
+        copiar(
+            &Path::new(PASTA).join("mod-packages"),
+            &dir.path().join("mod-packages"),
+        );
         let antes = esquema(&banco);
         assert_eq!(antes, 13, "a pasta da 0.15.1 não está no esquema 13");
 
         assert_eq!(
             mods_de_api_antiga(&banco, &raizes(dir.path())),
-            vec![ModDeApiAntiga { id: "seele/estilo".to_owned(), api: Some(4) }]
+            vec![ModDeApiAntiga {
+                id: "seele/estilo".to_owned(),
+                api: Some(4)
+            }]
         );
         assert_eq!(esquema(&banco), antes, "conferir migrou o banco");
     }
@@ -674,7 +828,10 @@ mod mods_de_api_antiga {
             .unwrap();
         assert_eq!(
             mods_de_api_antiga(&banco, &raizes(dir.path())),
-            vec![ModDeApiAntiga { id: "x/sumido".to_owned(), api: None }],
+            vec![ModDeApiAntiga {
+                id: "x/sumido".to_owned(),
+                api: None
+            }],
             "a linha ligada sem pacote não saiu como «sem API», ou a desligada foi conferida"
         );
     }
@@ -686,6 +843,326 @@ mod mods_de_api_antiga {
         let banco = dir.path().join("seele.db");
         assert!(mods_de_api_antiga(&banco, &raizes(dir.path())).is_empty());
         assert!(!banco.exists(), "conferir criou um banco");
+    }
+}
+
+/// **As saídas 1 e 3 de quem hospeda, com o servidor parado** (tarefa 13 do
+/// plano da F3, Step 5b; os limites da orquestradora de 15/10). Sobre a pasta
+/// da 0.15.1: o `seele/estilo` 3.1.0, da API 4, e o quintal que ele gravou.
+#[cfg(test)]
+mod saidas_do_mod_antigo {
+    use super::{
+        instalar_de, mods_de_api_antiga, resolver_mod_de_api_antiga, FalhaAoResolverModAntigo,
+        SaidaDoModAntigo,
+    };
+    use std::path::Path;
+
+    const PASTA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testes/pasta-da-0.15.1/pasta");
+
+    fn copiar(de: &Path, para: &Path) {
+        std::fs::create_dir_all(para).unwrap();
+        for entrada in std::fs::read_dir(de).unwrap() {
+            let entrada = entrada.unwrap();
+            let destino = para.join(entrada.file_name());
+            if entrada.path().is_dir() {
+                copiar(&entrada.path(), &destino);
+            } else {
+                std::fs::copy(entrada.path(), destino).unwrap();
+            }
+        }
+    }
+
+    /// A pasta da 0.15.1 como pasta de configuração, sem migrar: o banco de
+    /// sempre (`banco_do_cliente`) e os pacotes no cache por hash.
+    fn pasta_da_0_15_1() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        rusqlite::Connection::open(dir.path().join("seele.db"))
+            .unwrap()
+            .execute_batch(&std::fs::read_to_string(format!("{PASTA}/seele.sql")).unwrap())
+            .unwrap();
+        copiar(
+            &Path::new(PASTA).join("mod-packages"),
+            &dir.path().join("mod-packages"),
+        );
+        let config = dir.path().to_string_lossy().into_owned();
+        (dir, config)
+    }
+
+    fn banco(dir: &tempfile::TempDir) -> std::path::PathBuf {
+        dir.path().join("seele.db")
+    }
+
+    fn esquema(banco: &Path) -> i64 {
+        rusqlite::Connection::open_with_flags(banco, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap()
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |l| l.get(0),
+            )
+            .unwrap()
+    }
+
+    /// A linha do `seele/estilo` em `mods`: versão, hash e ligado.
+    fn linha_do_estilo(banco: &Path) -> (String, String, i64) {
+        rusqlite::Connection::open_with_flags(banco, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap()
+            .query_row(
+                "SELECT version, hash, enabled FROM mods WHERE id = 'seele/estilo'",
+                [],
+                |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
+            )
+            .unwrap()
+    }
+
+    /// O quintal do `seele/estilo`, linha por linha, como o disco o tem.
+    fn quintal_do_estilo(banco: &Path) -> Vec<(String, Vec<u8>)> {
+        let conexao = rusqlite::Connection::open_with_flags(
+            banco,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        let mut consulta = conexao
+            .prepare("SELECT key, CAST(value AS BLOB) FROM mod_data WHERE mod_id = 'seele/estilo' ORDER BY key")
+            .unwrap();
+        consulta
+            .query_map([], |l| Ok((l.get(0)?, l.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    /// O esquema que a subida deste build deixa: o que `Persistence::open` migra.
+    fn esquema_deste_build() -> i64 {
+        seele_server::persistence::Persistence::open(&seele_server::persistence::Location::Memory)
+            .unwrap()
+            .schema_version()
+            .unwrap()
+    }
+
+    /// O `seele/estilo` 4.0.0, na API deste build, instalado no cache por hash.
+    fn estilo_4_no_cache(config: &str) -> String {
+        let origem = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(origem.path().join("servidor")).unwrap();
+        std::fs::write(
+            origem.path().join("mod.json"),
+            serde_json::json!({
+                "schema": 1,
+                "id": "seele/estilo",
+                "version": "4.0.0",
+                "api": seele_ffi::mods::MOD_API_VERSION,
+                "repo": "https://github.com/DATA-AND-DEV/ESTILO",
+                "reach": ["tema do servidor"],
+                "server": "servidor/main.js",
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(origem.path().join("servidor/main.js"), "/* nada */").unwrap();
+        instalar_de(Path::new(config), origem.path()).unwrap().hash
+    }
+
+    /// **A saída 3: desligar, com o servidor parado.** A linha fica e passa a
+    /// desligada, o quintal fica byte a byte (ADR 0045), o banco migra pelo
+    /// mesmo `Persistence::open` da subida, e o `seele.log` diz o que mudou e
+    /// em qual servidor.
+    #[test]
+    fn desligar_com_o_servidor_parado_desliga_e_o_quintal_fica() {
+        let (dir, config) = pasta_da_0_15_1();
+        let quintal = quintal_do_estilo(&banco(&dir));
+        assert!(
+            !quintal.is_empty(),
+            "a pasta da 0.15.1 não tem quintal do estilo"
+        );
+
+        let (feito, rastro) = crate::rastro_de_teste::capturar(|| {
+            resolver_mod_de_api_antiga(
+                &config,
+                None,
+                "seele/estilo",
+                &SaidaDoModAntigo::Desligar,
+                false,
+            )
+        });
+        assert_eq!(feito, Ok(()));
+
+        let (versao, _, ligado) = linha_do_estilo(&banco(&dir));
+        assert_eq!(
+            (versao.as_str(), ligado),
+            ("3.1.0", 0),
+            "a linha não ficou, desligada"
+        );
+        assert_eq!(
+            quintal_do_estilo(&banco(&dir)),
+            quintal,
+            "desligar mexeu no quintal"
+        );
+        assert_eq!(
+            esquema(&banco(&dir)),
+            esquema_deste_build(),
+            "o banco não migrou como na subida"
+        );
+        assert!(
+            mods_de_api_antiga(
+                &banco(&dir),
+                &crate::servidores::raizes_dos_mods(&config, None)
+            )
+            .is_empty(),
+            "depois de desligar, hospedar ainda recusaria"
+        );
+        assert!(
+            rastro.contains("seele/estilo")
+                && rastro.contains("desligado")
+                && rastro.contains("o de sempre"),
+            "o seele.log não diz o que mudou e em qual servidor: {rastro}"
+        );
+    }
+
+    /// **A saída 1: atualizar, com o servidor parado.** A linha passa aos bytes
+    /// do 4.0.0, ligada, e o quintal fica: é o que a metade nova vai ler.
+    #[test]
+    fn atualizar_com_o_servidor_parado_liga_a_versao_nova_e_o_quintal_fica() {
+        let (dir, config) = pasta_da_0_15_1();
+        let quintal = quintal_do_estilo(&banco(&dir));
+        let hash = estilo_4_no_cache(&config);
+
+        let (feito, rastro) = crate::rastro_de_teste::capturar(|| {
+            resolver_mod_de_api_antiga(
+                &config,
+                None,
+                "seele/estilo",
+                &SaidaDoModAntigo::Atualizar { hash: hash.clone() },
+                false,
+            )
+        });
+        assert_eq!(feito, Ok(()));
+
+        assert_eq!(
+            linha_do_estilo(&banco(&dir)),
+            ("4.0.0".to_owned(), hash, 1),
+            "a linha não passou ao 4.0.0, ligada"
+        );
+        assert_eq!(
+            quintal_do_estilo(&banco(&dir)),
+            quintal,
+            "atualizar mexeu no quintal"
+        );
+        assert!(
+            mods_de_api_antiga(
+                &banco(&dir),
+                &crate::servidores::raizes_dos_mods(&config, None)
+            )
+            .is_empty(),
+            "depois de atualizar, hospedar ainda recusaria"
+        );
+        assert!(
+            rastro.contains("seele/estilo")
+                && rastro.contains("4.0.0")
+                && rastro.contains("o de sempre"),
+            "o seele.log não diz o que mudou e em qual servidor: {rastro}"
+        );
+    }
+
+    /// **Com o servidor no ar, recusa, e o banco não é tocado**: nem migrado,
+    /// nem a linha mudada. O banco é do servidor que está de pé.
+    #[test]
+    fn com_o_servidor_no_ar_recusa_e_o_banco_nao_e_tocado() {
+        let (dir, config) = pasta_da_0_15_1();
+        let antes = linha_do_estilo(&banco(&dir));
+        for saida in [
+            SaidaDoModAntigo::Desligar,
+            SaidaDoModAntigo::Atualizar {
+                hash: estilo_4_no_cache(&config),
+            },
+        ] {
+            assert_eq!(
+                resolver_mod_de_api_antiga(&config, None, "seele/estilo", &saida, true),
+                Err(FalhaAoResolverModAntigo::ServidorNoAr),
+                "com o servidor no ar, {saida:?} não foi recusada"
+            );
+        }
+        assert_eq!(
+            esquema(&banco(&dir)),
+            13,
+            "com o servidor no ar, o banco migrou"
+        );
+        assert_eq!(
+            linha_do_estilo(&banco(&dir)),
+            antes,
+            "com o servidor no ar, a linha mudou"
+        );
+    }
+
+    /// **Só os servidores guardados desta máquina.** Um id que a lista não tem
+    /// é recusado — e o banco de sempre, que é para onde `servidores::banco`
+    /// cai com um id desconhecido, não é tocado.
+    #[test]
+    fn um_servidor_que_esta_maquina_nao_guarda_e_recusado_sem_tocar_o_banco_de_sempre() {
+        let (dir, config) = pasta_da_0_15_1();
+        let antes = linha_do_estilo(&banco(&dir));
+        assert_eq!(
+            resolver_mod_de_api_antiga(
+                &config,
+                Some("nao-existe"),
+                "seele/estilo",
+                &SaidaDoModAntigo::Desligar,
+                false
+            ),
+            Err(FalhaAoResolverModAntigo::ServidorDesconhecido)
+        );
+        assert_eq!(esquema(&banco(&dir)), 13, "o banco de sempre migrou");
+        assert_eq!(
+            linha_do_estilo(&banco(&dir)),
+            antes,
+            "o banco de sempre mudou"
+        );
+    }
+
+    /// **Só um MOD de API antiga**: as saídas não são a gestão de MODs. Um que
+    /// não está ligado com API antiga é recusado, sem tocar o banco.
+    #[test]
+    fn um_mod_que_nao_e_de_api_antiga_e_recusado_sem_tocar_o_banco() {
+        let (dir, config) = pasta_da_0_15_1();
+        assert_eq!(
+            resolver_mod_de_api_antiga(
+                &config,
+                None,
+                "x/outro",
+                &SaidaDoModAntigo::Desligar,
+                false
+            ),
+            Err(FalhaAoResolverModAntigo::NaoEDeApiAntiga)
+        );
+        assert_eq!(esquema(&banco(&dir)), 13, "recusado, e o banco migrou");
+    }
+
+    /// **Atualizar para os bytes de outro MOD é recusado** pela mesma regra da
+    /// gestão (`linha_do_pacote`), antes de abrir o banco.
+    #[test]
+    fn atualizar_com_o_pacote_de_outro_mod_e_recusado_sem_tocar_o_banco() {
+        let (dir, config) = pasta_da_0_15_1();
+        let origem = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(origem.path().join("cliente")).unwrap();
+        std::fs::write(
+            origem.path().join("mod.json"),
+            super::manifesto_de_teste("x/outro"),
+        )
+        .unwrap();
+        std::fs::write(origem.path().join("cliente/main.js"), "/* nada */").unwrap();
+        let hash = instalar_de(dir.path(), origem.path()).unwrap().hash;
+        assert_eq!(
+            resolver_mod_de_api_antiga(
+                &config,
+                None,
+                "seele/estilo",
+                &SaidaDoModAntigo::Atualizar { hash },
+                false
+            ),
+            Err(FalhaAoResolverModAntigo::PacoteNaoServe(
+                "conteudo-de-outro-mod".to_owned()
+            ))
+        );
+        assert_eq!(esquema(&banco(&dir)), 13, "recusado, e o banco migrou");
     }
 }
 
