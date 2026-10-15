@@ -739,9 +739,14 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   Step 5 (`69dcb3b7`): o `#toque` no guarda 11, e um modal de MOD deixando de
   adormecê-lo. **O corte (tarefa 13)**, no ramo local `0.16/api-6-corte`:
   Steps 0 a 4 e 6b feitos, 5b em parte (a conferência e a frase; faltam as
-  saídas como botões), 5 esperando a fonte da união das linhas.
-- **Esperam:** do corte, o Step 5 (a fonte da união das linhas) e as
-  saídas do 5b como botões (três decisões pedidas); o avanço do `0.16/api-6`
-  quando o corte estiver verde; a limpeza da máquina da API 3 na casca e do
-  `snapshot` do prelúdio, depois da (b) da 63; e o Step 3 da tarefa 7 (o teto
-  da `midia`, que a M3 não mediu).
+  saídas como botões). Do Step 5, a `APIS_POR_LINHA` (`c4eb6d03`) e o texto
+  do dono para o indexador (`o-indexador-na-api-6.md`). Medindo o indexador
+  só na memória, saiu que `"tema"` em `CHAVES` e `TIPOS` não basta: a
+  conferência de tipo recusa todo booleano. O guarda da união está escrito e
+  medido, vermelho até o Step 6.
+- **Esperam:** do corte, o guarda da união (o Step 6 do dono, ou a decisão
+  de como pô-lo no ramo antes) e as saídas do 5b como botões (as três
+  decididas em 15/10); o avanço do `0.16/api-6` quando o corte estiver verde;
+  as duas limpezas, na 0.16 e depois do lote AX da F5 (a máquina da API 3 na
+  casca; `regiao`, `cartoes` e `snapshot` no prelúdio do motor); e o Step 3
+  da tarefa 7 (o teto da `midia`, que a M3 não mediu).
