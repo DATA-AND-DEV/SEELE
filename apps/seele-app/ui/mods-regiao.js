@@ -2059,7 +2059,7 @@ class RegiaoDeMod {
   imagemCitada(qual) {
     const pessoa = this.pessoaDoDestino ?? "";
     if (!pessoa || typeof this.dono.imagemDaPessoa !== "function") return Promise.resolve(null);
-    return this.dono.imagemDaPessoa(String(qual), pessoa);
+    return this.dono.imagemDaPessoa(String(qual), pessoa, { parada: this.citacaoParada === true });
   }
 
   /** Lembra um nó que cita, para a troca da imagem citada o alcançar. */

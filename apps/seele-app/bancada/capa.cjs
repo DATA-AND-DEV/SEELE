@@ -272,6 +272,30 @@ const { chromium } = require('./playwright.cjs');
       `com movimento reduzido, o cartão não usou o quadro estático: ${JSON.stringify(comMovimentoReduzido)}`);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
 
+    // 3b. **Com a janela oculta, o quadro estático** (`capa.movimento-reduzido`;
+    //     a auditoria do `v6.json`, B8), e a original de volta quando ela
+    //     volta. Nada lia `document.hidden`.
+    const comAJanelaOculta = await page.evaluate(seletor => {
+      const fundo = () => {
+        const camada = document.querySelector(seletor)?.querySelector(':scope > .capa-camada');
+        return camada ? getComputedStyle(camada).backgroundImage : '';
+      };
+      redesenharCapas();
+      const antes = fundo().includes(window.daCapa);
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      const oculta = { temImagem: fundo().startsWith('url('), eAOriginal: fundo().includes(window.daCapa) };
+      delete document.hidden;
+      delete document.visibilityState;
+      document.dispatchEvent(new Event('visibilitychange'));
+      return { antes, oculta, deVolta: fundo().includes(window.daCapa) };
+    }, cartao);
+    assert.ok(comAJanelaOculta.antes, `o cartão não animava antes de a janela ficar oculta: ${JSON.stringify(comAJanelaOculta)}`);
+    assert.ok(comAJanelaOculta.oculta.temImagem && !comAJanelaOculta.oculta.eAOriginal,
+      `com a janela oculta, o cartão não usou o quadro estático: ${JSON.stringify(comAJanelaOculta)}`);
+    assert.ok(comAJanelaOculta.deVolta, `com a janela de volta, o cartão não voltou à original: ${JSON.stringify(comAJanelaOculta)}`);
+
     // 4. A capa recusada: fundo liso, e o MOD sabe, com o ponto e o alvo.
     await page.evaluate(alvo => {
       contribuicoesDosMods.revogar(handleCapa);
@@ -417,7 +441,11 @@ const { chromium } = require('./playwright.cjs');
       await new Promise(ok => setTimeout(ok, 400));
       registrarNoAnfitriao = registrarDeAntes;
       const linha = document.querySelector('li.pessoa-apresentada[data-apresentada-por="teste/perfis"]');
-      const comFundo = [...(linha?.querySelectorAll('.pessoa-miolo *') ?? [])].some(e => e.style.backgroundImage.includes(window.daCapa));
+      // **Na lista, parada** (`capa.onde.lista`): o quadro estático, que sai em
+      // PNG, e não a original, que é JPEG.
+      const fundosDoCartao = [...(linha?.querySelectorAll('.pessoa-miolo *') ?? [])].map(e => e.style.backgroundImage);
+      const comFundo = fundosDoCartao.some(b => b.includes('data:image/png'));
+      const parada = !fundosDoCartao.some(b => b.includes(window.daCapa));
       const retrato = linha?.querySelector('.pessoa-miolo [data-estado-do-retrato]');
       const montagem = contribuicoesDosMods.porHandle.get(cartao)?.montadas?.get(alvo);
       const bytesNoCartao = montagem
@@ -426,13 +454,15 @@ const { chromium } = require('./playwright.cjs');
       contribuicoesDosMods.revogar(cartao);
       return {
         comFundo,
+        parada,
         pedidosNovos: testCalls.filter(c => c.cmd === 'ler_imagem_mod').length - pedidosAntes,
         bytesNoCartao,
         retrato: retrato?.dataset.estadoDoRetrato ?? null,
         recusas: ditos.filter(d => /retrato|fundo/.test(d)),
       };
     }, alvo);
-    assert.ok(citacao.comFundo, `o cartão que cita a capa não a mostrou: ${JSON.stringify(citacao)}`);
+    assert.ok(citacao.comFundo, `o cartão que cita a capa não a mostrou parada: ${JSON.stringify(citacao)}`);
+    assert.ok(citacao.parada, `na lista, a capa citada no cartão anima: ${JSON.stringify(citacao)}`);
     assert.equal(citacao.pedidosNovos, 0, `citar a capa abriu ${citacao.pedidosNovos} pedido(s) de mídia novo(s)`);
     assert.equal(citacao.bytesNoCartao, 0, `a capa citada contou ${citacao.bytesNoCartao} bytes de novo no cartão`);
     assert.equal(citacao.retrato, 'inicial', `o retrato que cita um avatar que não existe saiu ${citacao.retrato}`);
@@ -471,7 +501,8 @@ const { chromium } = require('./playwright.cjs');
       const fundo = () => [...(linha()?.querySelectorAll('.pessoa-miolo *') ?? [])]
         .map(e => e.style.backgroundImage).find(b => b.includes('url(')) ?? '';
       const retrato = () => linha()?.querySelector('.pessoa-miolo .regiao-de-mod-retrato-imagem')?.getAttribute('src') ?? '';
-      const antes = { fundo: fundo().includes(daCapa), retrato: retrato() === daCapa };
+      const parado = (uri) => uri.includes('data:image/png');
+      const antes = { fundo: fundo(), retrato: retrato() };
 
       const nova = fotoDe('#e63232');
       testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: nova };
@@ -479,11 +510,17 @@ const { chromium } = require('./playwright.cjs');
         doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:depois' } },
       });
       await new Promise(ok => setTimeout(ok, 600));
-      const depois = { fundo: fundo().includes(nova) && !fundo().includes(daCapa), retrato: retrato() === nova };
+      const depois = { fundo: fundo(), retrato: retrato() };
       contribuicoesDosMods.revogar(cartao);
-      return { antes, depois };
+      return {
+        antes: { fundo: parado(antes.fundo), retrato: parado(antes.retrato) },
+        depois: {
+          fundo: parado(depois.fundo) && depois.fundo !== antes.fundo,
+          retrato: parado(depois.retrato) && depois.retrato !== antes.retrato,
+        },
+      };
     }, alvo);
-    assert.deepEqual(troca.antes, { fundo: true, retrato: true }, `o cartão não citava a capa antes da troca: ${JSON.stringify(troca)}`);
+    assert.deepEqual(troca.antes, { fundo: true, retrato: true }, `o cartão não citava a capa, parada, antes da troca: ${JSON.stringify(troca)}`);
     assert.deepEqual(troca.depois, { fundo: true, retrato: true },
       `a citação não acompanhou a troca da capa: o cartão ficou com a velha (${JSON.stringify(troca)})`);
 

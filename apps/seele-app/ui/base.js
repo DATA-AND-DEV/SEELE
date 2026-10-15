@@ -1035,7 +1035,7 @@ function donoDaRegiao(mod, instancia) {
     // 6, o `painel` até a 5 (rascunho da API 6, §5; tarefa 7, Step 4).
     api: Number(mod.api) || 0,
     // A imagem que uma pessoa já tem, para a citação `daPessoa` (Step 4b).
-    imagemDaPessoa: (qual, pessoaId) => imagemCitada(qual, pessoaId),
+    imagemDaPessoa: (qual, pessoaId, opcoes) => imagemCitada(qual, pessoaId, opcoes),
     /**
      * Um evento da janela para o MOD.
      *
@@ -1533,7 +1533,7 @@ function quadroEstatico(imagem) {
  *
  * @returns {Promise<{ papel: string, bytes: number, uri: string } | null>}
  */
-function imagemCitada(qual, pessoaId) {
+function imagemCitada(qual, pessoaId, opcoes = {}) {
   const ponto = qual === "capa" ? "pessoa.capa" : qual === "avatar" ? "pessoa.avatar" : "";
   if (!ponto || pessoaId === "" || pessoaId == null) return Promise.resolve(null);
   // A primeira consulta começa a carga, quando há contribuição; a segunda
@@ -1541,8 +1541,10 @@ function imagemCitada(qual, pessoaId) {
   const estado = imagemContribuida(ponto, pessoaId) ?? imagemContribuida(ponto, pessoaId);
   if (!estado) return Promise.resolve(null);
   const comoMidia = () => {
-    const parada = ponto === "pessoa.capa" && typeof matchMedia === "function"
-      && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // A capa parada: com o movimento reduzido, e onde quem cita pede (a lista;
+    // `capa.onde.lista`). O avatar não tem quadro parado.
+    const parada = ponto === "pessoa.capa" && (opcoes.parada === true || (typeof matchMedia === "function"
+      && matchMedia("(prefers-reduced-motion: reduce)").matches));
     const uri = parada ? estado.estatico : estado.uri;
     return uri ? { papel: "imagem", bytes: 0, uri } : null;
   };
@@ -1847,6 +1849,9 @@ function montarContribuicao(contribuicao, destino = "") {
   // De quem é este destino, quando ele é uma pessoa: é o que a citação
   // `daPessoa` cita (Step 4b). Num canal, nada.
   renderer.pessoaDoDestino = contribuicao.ponto.startsWith("pessoa.") ? chave : "";
+  // **Na lista, a capa citada fica parada** (`capa.onde.lista`; a auditoria do
+  // `v6.json`, B8): o cartão é onde ela aparece vinte vezes de uma vez.
+  renderer.citacaoParada = contribuicao.ponto === "pessoa.cartao";
   // **Os sons da contribuição moram num destino só.** Cada destino tem o seu
   // renderer, e cada renderer pedia os bytes, decodificava e segurava a sua
   // cópia de cada som — e tocava, todos juntos. A marca de quem tomou os sons
