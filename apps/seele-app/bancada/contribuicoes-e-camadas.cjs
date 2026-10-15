@@ -2115,7 +2115,7 @@ function anotando(...anotadas) {
     confere(
       "o elo · a api",
       elo.donoDaRegiao({ id: "mod/x", hash: "h", api: 6 }, instancia).api === 6
-        && elo.donoDaRegiao({ id: "mod/x", hash: "h", api: "5" }, instancia).api === 5,
+        && elo.donoDaRegiao({ id: "mod/x", hash: "h", api: "6" }, instancia).api === 6,
       "o dono de `base.js` não diz a API do pacote, e `tipoDaSuperficie` a lê para saber se há folha ou painel",
     );
 
@@ -2245,7 +2245,7 @@ function anotando(...anotadas) {
   (async () => {
     // **B não revoga o que A registrou.** Os punhos são sequenciais: adivinhar
     // o do vizinho não exige nada.
-    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
       tipo: "revogar-contribuicao", n: 1, handle,
     });
     confere("R2 · o dono", registro.porHandle.has(handle), "mod/b removeu a contribuição de mod/a");
@@ -2269,42 +2269,43 @@ function anotando(...anotadas) {
       onde === "atender-mod" && nivel === "aviso" && modId === "mod/b"
       && pedacos.every((pedaco) => String(texto).includes(pedaco)));
 
-    // **E um pacote de API 3 não alcança uma mensagem da API 4.** O prelúdio
-    // omite o método; `seele.postar` emite a mensagem do mesmo jeito, e é por
-    // isso que a conferência é do anfitrião.
-    await contexto.atenderOMod({ id: "mod/b", api: 3 }, b, {
+    // **E um pacote de API 5 não alcança nada: o corte da API 6** (tarefa 13
+    // do plano da F3). O manifesto dele já é recusado ao carregar; esta é a
+    // segunda porta, a do anfitrião, porque `seele.postar` emite a mensagem do
+    // mesmo jeito.
+    await contexto.atenderOMod({ id: "mod/b", api: 5 }, b, {
       tipo: "contribuir", n: 2,
-      pedido: { ponto: "servidor.navegacao", rotulo: "API 3" },
+      pedido: { ponto: "servidor.navegacao", rotulo: "API 5" },
     });
-    confere("R2 · a versão", respostas.at(-1)?.ok === false, "um pacote de API 3 contribuiu pela mensagem direta");
+    confere("R2 · a versão", respostas.at(-1)?.ok === false, "um pacote de API 5 contribuiu pela mensagem direta");
     confere(
       "R2 · a versão",
-      String(respostas.at(-1)?.erro ?? "").includes("API 3"),
+      String(respostas.at(-1)?.erro ?? "").includes("API 5"),
       `a recusa não disse que a API do pacote é a razão: ${respostas.at(-1)?.erro}`,
     );
     confere(
       "R2 · a versão no registro",
-      dita("«contribuir»", "não existe na API 3"),
+      dita("«contribuir»", "não existe na API 5"),
       "a recusa por versão foi dita só ao MOD, e quem hospeda não acha no seele.log por que o "
         + `pedido dele voltou recusado: ${JSON.stringify(anotadasDoRoteador)}`,
     );
 
-    // E o mesmo pacote declarando API 4 é aceito: a conferência é por versão,
+    // E o mesmo pacote declarando API 6 é aceito: a conferência é por versão,
     // e não uma porta fechada.
-    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
       tipo: "contribuir", n: 3,
-      pedido: { ponto: "servidor.navegacao", rotulo: "API 4" },
+      pedido: { ponto: "servidor.navegacao", rotulo: "API 6" },
     });
-    confere("R2 · a versão", respostas.at(-1)?.ok === true, `a API 4 foi recusada: ${respostas.at(-1)?.erro}`);
+    confere("R2 · a versão", respostas.at(-1)?.ok === true, `a API 6 foi recusada: ${respostas.at(-1)?.erro}`);
 
     // **`atualizar`, pelo roteador** (R7 do PERFIS; tarefa 5, Step 6): B não
     // troca o conteúdo do que é de A, e A troca o dele — com o dono vindo do
     // roteador, e não do corpo da mensagem, como no `revogar`.
-    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
       tipo: "atualizar-contribuicao", n: 31, handle, conteudo: [{ forma: "texto", dentro: "de B" }],
     });
     confere("R2 · atualizar, o dono", respostas.at(-1)?.ok === false, "mod/b atualizou a contribuição de mod/a");
-    await contexto.atenderOMod({ id: "mod/a", api: 4 }, a, {
+    await contexto.atenderOMod({ id: "mod/a", api: 6 }, a, {
       tipo: "atualizar-contribuicao", n: 32, handle, conteudo: [{ forma: "texto", dentro: "de A, de novo" }],
     });
     confere(
@@ -2318,9 +2319,9 @@ function anotando(...anotadas) {
       "o roteador respondeu, e o conteúdo da contribuição não mudou",
     );
 
-    // **A recusa chega ao MOD da 6 com o nome** (Step 7b; rascunho §7.1), e ao
-    // da API 4 com a frase, como os publicados recebem. O teto agregado, pelo
-    // roteador de verdade: 128 entradas, e a 129ª.
+    // **A recusa chega ao MOD da 6 com o nome** (Step 7b; rascunho §7.1). O
+    // teto agregado, pelo roteador de verdade: 128 entradas, e a 129ª. A API 4,
+    // que recebia a frase, não roda mais (o corte): ela nem chega ao teto.
     {
       const c = { geracao: 7, admite: () => true, registrar() { return () => {}; }, executor: escuta };
       contexto.modsCarregados.set("mod/c", c);
@@ -2333,8 +2334,9 @@ function anotando(...anotadas) {
       await contexto.atenderOMod({ id: "mod/c", api: 4 }, c, {
         tipo: "contribuir", n: 42, pedido: { ponto: "servidor.navegacao", rotulo: "a 129ª" },
       });
-      confere("Step 7b · a frase segue na 4", String(respostas.at(-1)?.erro ?? "").includes("128"),
-        `o MOD da API 4 deixou de receber a frase: ${JSON.stringify(respostas.at(-1))}`);
+      confere("Step 7b · a 4 não chega ao teto: é recusada pela versão",
+        respostas.at(-1)?.ok === false && String(respostas.at(-1)?.erro ?? "").includes("não existe na API 4"),
+        `o MOD da API 4 passou da conferência de versão: ${JSON.stringify(respostas.at(-1))}`);
       contexto.modsCarregados.delete("mod/c");
     }
 
@@ -2436,7 +2438,7 @@ function anotando(...anotadas) {
     // **E A revoga o que é de A.** Sem esta metade, a correção seria uma porta
     // fechada para todo mundo — e uma porta fechada passa no teste de
     // isolamento sem oferecer a capacidade.
-    await contexto.atenderOMod({ id: "mod/a", api: 4 }, a, {
+    await contexto.atenderOMod({ id: "mod/a", api: 6 }, a, {
       tipo: "revogar-contribuicao", n: 4, handle,
     });
     confere("R2 · o dono", respostas.at(-1)?.ok === true, `mod/a não conseguiu revogar a própria contribuição: ${respostas.at(-1)?.erro}`);
@@ -2459,12 +2461,12 @@ function anotando(...anotadas) {
       let contribuicaoRespondida;
       let regiaoRespondida;
       try {
-        await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+        await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
           tipo: "contribuir", n: 5,
           pedido: { ponto: "nao.existe", rotulo: "x" },
         });
         contribuicaoRespondida = respostas.at(-1);
-        await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+        await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
           tipo: "regiao", n: 6,
           conteudo: [{ forma: "texto", chave: "t", dentro: "x" }],
         });
@@ -2490,12 +2492,16 @@ function anotando(...anotadas) {
         "a linha da contribuição recusada levou ao seele.log a frase de tela de `fraseDeErro`, "
           + `e não só o motivo: ${JSON.stringify(linhaDaRecusada)}`,
       );
-      confere("R2 · a região no registro", regiaoRespondida?.ok === false,
-        "uma região com nós demais foi respondida como aceita");
+      // **A 6 não tem `regiao`** (o corte; rascunho §2): a mensagem é recusada
+      // pela versão antes do renderer, e a recusa chega ao registro. A região
+      // com nós demais, na 6, é a contribuição num ponto de região, coberta
+      // pela recusa acima.
+      confere("R2 · a região saiu da 6", regiaoRespondida?.ok === false,
+        "um pacote da API 6 desenhou pela mensagem `regiao`");
       confere(
-        "R2 · a região no registro",
-        dita("«regiao»", "3 nó(s)"),
-        `a região com nós demais não chegou ao registro com o nível e o id: ${JSON.stringify(anotadasDoRoteador)}`,
+        "R2 · a região saiu da 6, no registro",
+        dita("«regiao»", "não existe na API 6"),
+        `a recusa da região da 6 não chegou ao registro com o nível e o id: ${JSON.stringify(anotadasDoRoteador)}`,
       );
     }
 
@@ -2504,7 +2510,7 @@ function anotando(...anotadas) {
     // `CAPACIDADE_DA_MENSAGEM`, e é aqui que ele é recusado. Pelo tipo, e não
     // só por «não conhece»: a recusa do ponto «nao.existe», acima, também diz
     // isso.
-    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, { tipo: "inexistente", n: 7 });
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "inexistente", n: 7 });
     confere("R2 · o tipo desconhecido", respostas.at(-1)?.ok === false,
       "uma mensagem que a API não conhece foi respondida como aceita");
     confere(
@@ -2516,11 +2522,11 @@ function anotando(...anotadas) {
 
     // **Uma variante de struct da FFI**, que `motivoDaFalha` não sabe ler: ela
     // a escreveria «[object Object]», e o registro a leva inteira em JSON. O
-    // `snapshot` é o caso por onde ela entraria — o `invoke` que rejeita —, e
-    // `Refused` é uma variante assim do `ConnectionError`.
+    // `retrato` é o caso por onde ela entraria na 6 — o `invoke` do snapshot
+    // que rejeita —, e `Refused` é uma variante assim do `ConnectionError`.
     contexto.invoke = () => Promise.reject({ Refused: { reason: "Teste" } });
     try {
-      await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, { tipo: "snapshot", n: 8 });
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "retrato", n: 8 });
     } finally {
       delete contexto.invoke;
     }
@@ -2528,7 +2534,7 @@ function anotando(...anotadas) {
       "um retrato cujo `invoke` rejeitou foi respondido como aceito");
     confere(
       "R2 · a variante da FFI",
-      dita("«snapshot»", '{"Refused":{"reason":"Teste"}}')
+      dita("«retrato»", '{"Refused":{"reason":"Teste"}}')
         && !anotadasDoRoteador.some(([, texto]) => String(texto).includes("[object Object]")),
       "a falha que chega como variante de struct da FFI não foi ao registro inteira: "
         + `${JSON.stringify(anotadasDoRoteador)}`,
@@ -2565,9 +2571,9 @@ function anotando(...anotadas) {
       recusarComo({ Recusado: { motivo: "tipo-recusado:heic" } });
       await contexto.atenderOMod({ id: "mod/b", api: 5 }, b, { tipo: "enviar-imagem", n: 33, arquivo: 1, token: "t" });
       const cinco = respostas.at(-1);
-      confere("recusa · a 5 continua com a frase", cinco?.ok === false
-        && cinco?.erro !== "tipo-recusado" && !("detectado" in cinco),
-      `o MOD da API 5 passou a receber o nome, e não a frase: ${JSON.stringify(cinco)}`);
+      confere("recusa · a 5 é recusada pela versão", cinco?.ok === false
+        && String(cinco?.erro ?? "").includes("não existe na API 5"),
+      `o MOD da API 5 passou da conferência de versão: ${JSON.stringify(cinco)}`);
     } finally {
       delete contexto.invoke;
     }
@@ -2605,10 +2611,14 @@ function anotando(...anotadas) {
       confere("retrato · o snapshot saiu da 6, no registro", dita("«snapshot»", "não existe na API 6"),
         `a recusa do snapshot da 6 foi dita só ao MOD: ${JSON.stringify(anotadasDoRoteador)}`);
 
+      // **E a 5 não alcança nem o `snapshot`** (o corte): uma API que este app
+      // não roda não tem capacidade nenhuma, e a mensagem que não exige
+      // capacidade também é recusada. Antes do corte, o `snapshot` inteiro
+      // passava para qualquer API fora da tabela.
       await contexto.atenderOMod({ id: "mod/b", api: 5 }, b, { tipo: "snapshot", n: 23 });
-      confere("retrato · a 5 continua com o snapshot", respostas.at(-1)?.ok === true
-        && respostas.at(-1)?.valor?.link_state === "ConexaoSegura",
-      `a API 5 perdeu o snapshot inteiro que ela tem: ${JSON.stringify(respostas.at(-1))}`);
+      confere("retrato · a 5 não alcança nem o snapshot", respostas.at(-1)?.ok === false
+        && !JSON.stringify(respostas.at(-1)).includes("ConexaoSegura"),
+      `um pacote da API 5 leu o Snapshot inteiro: ${JSON.stringify(respostas.at(-1))}`);
     } finally {
       delete contexto.invoke;
     }

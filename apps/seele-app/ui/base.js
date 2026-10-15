@@ -3324,11 +3324,16 @@ const SUBSTITUIDA_PELA_CAPACIDADE = Object.freeze({
  * Este pacote pode pedir isto?
  *
  * `api` vem de `mods_instalados`, que o lê do manifesto do pacote cujo hash
- * esta janela conferiu. Um número que não está na tabela não tem capacidade
- * nenhuma — é o caso de um manifesto que não pôde ser lido.
+ * esta janela conferiu. **Um número que não está na tabela não pede nada** —
+ * nem o que não exige capacidade. É o caso de um manifesto que não pôde ser
+ * lido, e, desde o corte da API 6 (tarefa 13 do plano da F3), o das APIs 3, 4
+ * e 5: medido, um pacote da 5 que emitisse `snapshot` direto lia o `Snapshot`
+ * inteiro, porque o `snapshot` não exige capacidade e a tabela vazia não o
+ * barrava. O manifesto dele já é recusado ao carregar; esta é a segunda porta.
  */
 function podePedir(mod, tipo) {
-  const tem = CAPACIDADES_POR_API[Number(mod?.api)] ?? [];
+  const tem = CAPACIDADES_POR_API[Number(mod?.api)];
+  if (!tem) return false;
   // Antes da exigida: o `snapshot` não exige capacidade nenhuma, e é por isso
   // mesmo que a substituição tem de ser perguntada primeiro.
   const substituta = SUBSTITUIDA_PELA_CAPACIDADE[tipo];
