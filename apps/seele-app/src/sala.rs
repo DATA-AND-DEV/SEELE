@@ -622,16 +622,51 @@ mod a_sala_pessoal {
 
     #[tokio::test]
     async fn a_porta_ocupada_e_dita() {
+        // **Três ocupantes, e não só o `[::]` do `std`** (pendência 65): este
+        // teste rodou pela primeira vez no Windows em 15/10 e reprovou — o
+        // `[::]` do `std` lá é só IPv6, e a sala subia ao lado dele, só em IPv4.
+        // Outra sala na porta, um programa só IPv4 e um só IPv6: os três são
+        // «a porta 8385 está em uso».
         let casa = casa_com_a_chave(3);
-        let ocupante = std::net::UdpSocket::bind("[::]:0").unwrap();
-        let porta = ocupante.local_addr().unwrap().port();
-        let subida = subir_em(casa.path().to_str().unwrap(), porta, None).await;
-        assert_eq!(
-            subida.err(),
-            Some(FalhaDaSala::PortaOcupada),
-            "a porta ocupada virou outra falha, e a casca não diria «a porta 8385 está em uso»"
-        );
-        drop(ocupante);
+        let outra_casa = casa_com_a_chave(4);
+        let Ok(outra) = subir_em(outra_casa.path().to_str().unwrap(), 0, None).await else {
+            panic!("a primeira sala não subiu");
+        };
+        let porta = outra.endereco().port();
+        let so_quatro = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+        let so_seis = {
+            use socket2::{Domain, Protocol, Socket, Type};
+            let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).unwrap();
+            socket.set_only_v6(true).unwrap();
+            socket
+                .bind(&std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0)).into())
+                .unwrap();
+            socket
+        };
+        for (quem, porta) in [
+            ("outra sala", porta),
+            (
+                "um programa só IPv4",
+                so_quatro.local_addr().unwrap().port(),
+            ),
+            (
+                "um programa só IPv6",
+                so_seis.local_addr().unwrap().as_socket().unwrap().port(),
+            ),
+        ] {
+            let subida = subir_em(casa.path().to_str().unwrap(), porta, None).await;
+            assert_eq!(
+                subida.as_ref().err(),
+                Some(&FalhaDaSala::PortaOcupada),
+                "com {quem} na porta {porta}, a sala subiu ou falhou por outro motivo, e a \
+                 casca não diria «a porta 8385 está em uso»"
+            );
+            if let Ok(sala) = subida {
+                sala.encerrar().await;
+            }
+        }
+        outra.encerrar().await;
+        drop((so_quatro, so_seis));
     }
 
     #[tokio::test]
