@@ -28,6 +28,10 @@
 //    ENTRAR NA SALA de outra sala é o mesmo nó, e o mesmo retrato não mexe em
 //    nada. Com 100 pessoas, a sonda viu o botão sair da árvore com a coluna
 //    refeita a cada quadro.
+// 7. **Ainda nela**: quem sai de uma sala tira só a linha dela, e o nome de
+//    uma sala renomeada — botão com ouvinte próprio, que agora atravessa os
+//    retratos — abre o RENOMEAR com o nome de agora, e não o do quadro em que
+//    o botão nasceu.
 //
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
@@ -372,6 +376,42 @@ const BASE = retratoCom({ sala1: todas.slice(0, NA_SALA), presentes: todas });
     assert.equal(caso6.marca, "fala", `a linha de ${apelido(9)} na coluna de salas não diz que ela fala`);
     assert.equal(caso6.doTique, 0, `o mesmo retrato, redesenhado pelo tique, fez ${caso6.doTique} mutações na coluna de salas`);
 
+    // 7. Ainda na coluna de salas: quem sai de uma sala tira só a linha dela, e
+    //    o nome de uma sala renomeada, que é botão com ouvinte próprio e
+    //    atravessa os retratos, abre o RENOMEAR com o nome de agora.
+    const caso7 = await page.evaluate(async ({ sai, nomeNovo }) => {
+      const coluna = document.getElementById("lista-voice_rooms");
+      const linhasNaColuna = () => new Map([...coluna.querySelectorAll("li.voice_room-pessoa")]
+        .map((li) => [li.querySelector(".voice_room-pessoa-nome")?.textContent, li]));
+      const antes = linhasNaColuna();
+      const novo = structuredClone(testTable.snapshot);
+      novo.voice_rooms[0].people = novo.voice_rooms[0].people.filter((p) => p.nickname !== sai);
+      novo.voice_rooms[1].name = nomeNovo;
+      const chegou = await pelaPonte(novo, (d) => d?.voice_rooms?.[1]?.name === nomeNovo);
+      const depois = linhasNaColuna();
+      const botao = [...coluna.querySelectorAll("button.voice_room-nome")].find((b) => b.textContent === nomeNovo);
+      botao?.click();
+      await quadros(2);
+      const valor = document.getElementById("nomear-valor")?.value ?? null;
+      document.getElementById("nomear-cancelar")?.click();
+      return {
+        chegou,
+        saiu: antes.has(sai) && !depois.has(sai),
+        trocadas: [...antes].filter(([nome, li]) => nome !== sai && depois.get(nome) !== li).length,
+        achouBotao: Boolean(botao),
+        valor,
+      };
+    }, { sai: apelido(15), nomeNovo: "Sala dois, renomeada" });
+    assert.ok(caso7.chegou, "a saída da sala e o nome novo não chegaram à coluna de salas");
+    assert.ok(caso7.saiu, `${apelido(15)} saiu da sala e a linha dela ficou na coluna de salas`);
+    assert.equal(caso7.trocadas, 0, `${caso7.trocadas} outras linhas da coluna de salas trocaram de nó com uma saída`);
+    assert.ok(caso7.achouBotao, "o nome da sala renomeada não está na coluna de salas como botão");
+    assert.equal(
+      caso7.valor, "Sala dois, renomeada",
+      `o RENOMEAR abriu com ${JSON.stringify(caso7.valor)}: o botão atravessou os retratos e ` +
+        "ficou com o nome do quadro em que nasceu",
+    );
+
     assert.deepEqual(errors, []);
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
@@ -379,7 +419,8 @@ const BASE = retratoCom({ sala1: todas.slice(0, NA_SALA), presentes: todas });
         "mexeu em nada; quem entrou na sala levou o nó; quem saiu perdeu o dele e quem chegou " +
         `ganhou um; com cartões de MOD, ${caso5.mutacoes} mutações, todas na linha, e nenhum ` +
         `cartão trocado; na coluna de salas, ${caso6.doEvento} mutações, todas na linha da ` +
-        "pessoa, e o ENTRAR NA SALA o mesmo nó.",
+        "pessoa, o ENTRAR NA SALA o mesmo nó, quem saiu da sala levou só a linha dela, e o " +
+        "RENOMEAR abriu com o nome de agora.",
     );
   } finally {
     await browser.close();
