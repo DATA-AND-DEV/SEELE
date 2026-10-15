@@ -81,12 +81,15 @@ fn o_indexador_e_este_build_oferecem_a_mesma_api_de_mods() {
 
     // **E o conjunto que cada lado executa também.**
     //
-    // Desde a API 4 a conferência dos dois lados deixou de ser igualdade: a 4
-    // não tirou nada da 3, então o indexador publica pacotes de ambas e o
-    // cliente executa ambos. Dois conjuntos diferentes é o indexador
-    // publicando um pacote que o cliente não roda — ou recusando um que ele
-    // rodaria —, e nenhum dos dois aparece numa suíte que só compara tetos.
-    let aceitas: Vec<u32> = indexador
+    // **O indexador aceita as APIs de toda linha, e só elas** (o corte da API
+    // 6; tarefa 13 do plano da F3, Step 5). Até a 0.15 o conjunto do indexador
+    // era o deste build. Depois do corte, este build roda a 6, e o indexador
+    // continua publicando os legados das 3, 4 e 5 para quem hospeda pelo
+    // Servidor 0.15: o conjunto dele é a **união** das linhas
+    // (`seele_proto::mods::apis_de_toda_linha`, de `APIS_POR_LINHA`). Faltar
+    // uma é recusar um pacote de uma linha que o launcher oferece; sobrar uma
+    // é aceitar um pacote que nenhuma linha roda.
+    let aceitas: std::collections::BTreeSet<u32> = indexador
         .get("apis_aceitas")
         .and_then(serde_json::Value::as_array)
         .expect(
@@ -97,11 +100,21 @@ fn o_indexador_e_este_build_oferecem_a_mesma_api_de_mods() {
         .filter_map(serde_json::Value::as_u64)
         .filter_map(|n| u32::try_from(n).ok())
         .collect();
-    assert_eq!(
-        aceitas,
-        seele_proto::mods::APIS_ACEITAS,
-        "o indexador e este build executam conjuntos diferentes de APIs: um \
-         publicaria pacotes que o outro não roda"
+    let das_linhas: std::collections::BTreeSet<u32> =
+        seele_proto::mods::apis_de_toda_linha().into_iter().collect();
+    assert!(
+        das_linhas.is_subset(&aceitas),
+        "o indexador recusaria um pacote de uma linha que o launcher oferece: faltam {:?}",
+        das_linhas.difference(&aceitas).collect::<Vec<_>>()
+    );
+    assert!(
+        aceitas.is_subset(&das_linhas),
+        "o indexador aceita uma API que nenhuma linha roda: {:?}",
+        aceitas.difference(&das_linhas).collect::<Vec<_>>()
+    );
+    assert!(
+        das_linhas.contains(&MOD_API_VERSION),
+        "a API deste build não está em linha nenhuma"
     );
 
     // **E o catálogo publicado nunca vai à frente.** Ele pode ficar atrás — é o
