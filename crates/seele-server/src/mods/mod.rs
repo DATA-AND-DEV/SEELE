@@ -1158,11 +1158,39 @@ pub fn carregar_do_disco(
     (prontos, queixas)
 }
 
+/// **A API de um pacote instalado, pela regra só** (tarefa 13 do plano da F3,
+/// Step 5b; condição da orquestradora, 10/10).
+///
+/// O `mod.json` da pasta do hash, pelo `como_ele_se_chama`, e zero como «não
+/// declara». **O que o manifesto declara, e não se esta build o aceita**: um
+/// MOD da API 5 numa build da 6 tem de ser dito como da 5 — é isso que deixa o
+/// servidor dizer a quem entra que versão do app o roda, e quem hospeda saber
+/// que MOD o impede —, e `read_manifest` o recusaria antes de dizer o número.
+///
+/// Os dois a chamam: `preencher_as_apis`, na subida, e a conferência de quem
+/// hospeda, no app (`mods_de_api_antiga`, em `apps/seele-app/src/mods.rs`).
+/// Uma segunda leitura do `mod.json` seria um segundo jeito de errar, e os dois
+/// discordariam sobre o mesmo pacote.
+///
+/// # Errors
+///
+/// O motivo, em texto, para o `seele.log`: sem `mod.json` na pasta do hash, ou
+/// um que não declara a API.
+pub fn api_do_pacote(raizes: &crate::RaizesDosMods, hash: &str) -> Result<u32, String> {
+    let dir = raizes.pacote_de(hash);
+    let texto = std::fs::read_to_string(dir.join("mod.json"))
+        .map_err(|erro| format!("sem mod.json em {}: {erro}", dir.display()))?;
+    match seele_proto::mods::como_ele_se_chama(&texto).api {
+        0 => Err("o mod.json não declara a API".to_owned()),
+        api => Ok(api),
+    }
+}
+
 /// Preenche a API das linhas habilitadas que ainda não a têm (migração 14).
 ///
 /// Lê o `mod.json` da pasta do **hash** que a linha exige — os bytes que a
 /// exigência cobre, e não «o que estiver na pasta do MOD» —, como
-/// [`carregar_do_disco`] faz. Uma linha que não se preenche (pacote fora do
+/// [`carregar_do_disco`] faz, pela regra de [`api_do_pacote`]. Uma linha que não se preenche (pacote fora do
 /// disco, manifesto que não abre) fica zero, que é «não preenchida», e é
 /// **nomeada** na lista devolvida: zero em silêncio seria o anúncio dizendo «não
 /// sei» sem ninguém saber por quê.
@@ -1177,20 +1205,7 @@ pub fn preencher_as_apis(
     };
     let mut queixas = Vec::new();
     for ligado in ligados.into_iter().filter(|ligado| ligado.api == 0) {
-        let dir = raizes.pacote_de(&ligado.hash);
-        // **O que o manifesto declara, e não se esta build o aceita.** Um MOD
-        // da API 5 numa build da 6 tem de ser anunciado como da 5 — é isso
-        // que deixa o servidor dizer a quem entra que versão do app o roda —,
-        // e `read_manifest` o recusaria antes de dizer o número.
-        let api = std::fs::read_to_string(dir.join("mod.json"))
-            .map_err(|erro| format!("sem mod.json em {}: {erro}", dir.display()))
-            .and_then(
-                |texto| match seele_proto::mods::como_ele_se_chama(&texto).api {
-                    0 => Err("o mod.json não declara a API".to_owned()),
-                    api => Ok(api),
-                },
-            );
-        match api {
+        match api_do_pacote(raizes, &ligado.hash) {
             Ok(api) => {
                 if let Err(erro) = crate::persistence::mods::preencher_api(
                     persistence,
@@ -1289,6 +1304,72 @@ mod tests {
         assert_eq!(api_de("seele/sumido"), Some(0));
         assert_eq!(queixas.len(), 1, "{queixas:?}");
         assert!(queixas[0].contains("seele/sumido"), "{queixas:?}");
+    }
+
+    /// **Uma regra só para a API de um pacote** (tarefa 13 do plano da F3, Step
+    /// 5b): na pasta da 0.15.1 — o banco no esquema 13 e o `seele/estilo`
+    /// 3.1.0, da API 4 —, a subida preenche a API que `api_do_pacote` devolve.
+    /// Uma leitura diferente na subida (o `read_manifest`, que depois do corte
+    /// recusa a 4) faria o servidor e a conferência de quem hospeda discordarem
+    /// sobre o mesmo pacote.
+    #[test]
+    fn a_subida_e_a_conferencia_leem_a_api_pela_mesma_regra_na_pasta_da_0_15_1() {
+        use crate::persistence::mods::enabled;
+        use crate::persistence::{Location, Persistence};
+
+        const PASTA: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../apps/seele-app/testes/pasta-da-0.15.1/pasta"
+        );
+        const HASH_DA_0_15: &str =
+            "ca0b79565bbb41a79403ce69b500c62f908a080efbb9bcbd4e3486a302d21682";
+        let raiz = pasta_de_teste("api-da-0-15");
+        let copiar = |de: &std::path::Path, para: &std::path::Path| {
+            fn copiar(de: &std::path::Path, para: &std::path::Path) {
+                std::fs::create_dir_all(para).expect("pasta");
+                for entrada in std::fs::read_dir(de).expect("ler") {
+                    let entrada = entrada.expect("entrada");
+                    let destino = para.join(entrada.file_name());
+                    if entrada.path().is_dir() {
+                        copiar(&entrada.path(), &destino);
+                    } else {
+                        std::fs::copy(entrada.path(), destino).expect("copiar");
+                    }
+                }
+            }
+            copiar(de, para);
+        };
+        copiar(
+            &std::path::Path::new(PASTA).join("mod-packages"),
+            &raiz.join("mod-packages"),
+        );
+        let caminho = raiz.join("seele.db");
+        rusqlite::Connection::open(&caminho)
+            .expect("banco da 0.15.1")
+            .execute_batch(
+                &std::fs::read_to_string(format!("{PASTA}/seele.sql")).expect("seele.sql"),
+            )
+            .expect("o esquema 13");
+        let raizes = crate::RaizesDosMods {
+            pacotes: raiz.clone(),
+            dados: raiz.join("mod-data"),
+        };
+
+        let banco = Persistence::open(&Location::File(caminho)).expect("abrir e migrar");
+        let queixas = preencher_as_apis(&banco, &raizes);
+        assert!(queixas.is_empty(), "{queixas:?}");
+
+        let preenchida = enabled(&banco)
+            .expect("listar")
+            .into_iter()
+            .find(|m| m.id == "seele/estilo")
+            .map(|m| m.api);
+        assert_eq!(api_do_pacote(&raizes, HASH_DA_0_15), Ok(4));
+        assert_eq!(
+            preenchida,
+            Some(4),
+            "a subida preencheu outra API que a da regra só para o 3.1.0 da pasta da 0.15.1"
+        );
     }
 
     /// **A pessoa de uma espera vem do servidor, e não do MOD** — ADR 0048.
