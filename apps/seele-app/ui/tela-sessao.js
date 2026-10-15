@@ -5227,7 +5227,9 @@ function anotarQuemFala(pessoaId) {
  */
 function escolherAsCapasAnimadas() {
   const quadros = [...document.querySelectorAll("[data-pessoa-da-capa]")];
-  const naVista = quadros.filter((quadro) => {
+  // **Com a janela oculta, nenhuma anima** (`capa.movimento-reduzido`; a
+  // auditoria do `v6.json`, B8): o quadro parado, até ela voltar.
+  const naVista = document.hidden ? [] : quadros.filter((quadro) => {
     const caixa = quadro.getBoundingClientRect();
     return caixa.width > 0 && caixa.height > 0 && caixa.bottom > 0 && caixa.top < innerHeight
       && caixa.right > 0 && caixa.left < innerWidth
@@ -5255,6 +5257,10 @@ function redesenharCapas() {
   escolherAsCapasAnimadas();
   document.querySelectorAll("[data-pessoa-da-capa]").forEach(aplicarCapa);
 }
+
+// A janela que some e volta troca as capas na hora, e não pelo
+// `agendarAsCapas`: o `requestAnimationFrame` para com a janela oculta.
+document.addEventListener("visibilitychange", () => redesenharCapas());
 
 /**
  * Põe ou tira a camada da capa. **Com o movimento reduzido, o quadro parado**:
