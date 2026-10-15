@@ -16,6 +16,8 @@
 //    instalado, sim; na cópia portátil, no bloqueio do Windows e sem o
 //    instalado, não. Depois da regra criada, um reanúncio do estado velho não
 //    devolve o botão.
+// 5. **A tela de hospedar lê o mesmo motivo** (a parede do convite, em
+//    `tela-boot.js`): a frase do Rust, e o botão só quando resolve.
 //
 // O duble não tem sala: o roteiro emite `seele://sala` e responde os comandos à
 // mão.
@@ -135,3 +137,28 @@ exigir(
   botao() === "escondida" && texto("perfil-sala-firewall").includes("Regra criada"),
   "a regra foi criada, e o reanúncio do estado da sala devolveu o botão e a frase de antes",
 );
+
+// 5. A tela de hospedar.
+const parede = () => document.querySelector("#convite-alcance .convite-alcance-parede");
+const conserto = () => document.querySelector("#convite-alcance .convite-alcance-conserto");
+mostrarAlcance(
+  "SoRedeLocal",
+  null,
+  null,
+  { motivo: "OutraCopia", frase: "o firewall do Windows libera o SEELE de C:\\Program Files\\SEELE\\SEELE.exe, e este é outra cópia.", abrir_resolve: false },
+  null,
+);
+relatar("parede, cópia portátil: " + parede()?.textContent);
+exigir(
+  parede()?.textContent.includes("outra cópia"),
+  "a tela de hospedar não mostra a frase do motivo: «" + parede()?.textContent + "»",
+);
+exigir(conserto() === null, "a tela de hospedar oferece, na cópia portátil, um botão que não resolve nada");
+// O caminho de verdade: o HOSPEDAR AQUI, com a resposta do Rust.
+SEELE_RESPOSTAS.hospedar = { ...SEELE_RESPOSTAS.hospedar, firewall: semRegra, firewall_nao_cobre: semRegra.frase };
+await entrarNaSessao();
+exigir(
+  parede()?.textContent === semRegra.frase,
+  "o HOSPEDAR AQUI não mostrou a frase do firewall que o Rust mandou: «" + parede()?.textContent + "»",
+);
+exigir(conserto() !== null, "sem regra no SEELE instalado, a tela de hospedar não oferece o botão que resolve");
