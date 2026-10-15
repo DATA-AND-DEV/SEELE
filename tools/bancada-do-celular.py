@@ -827,6 +827,124 @@ def entrada_direta_na_larga(pg: Page) -> list[str]:
     return [] if (not e["sessao"] and e["auth"] and not e["direta"] and e["apertos"]) else [f"na larga, a impressão conferida pulou o aperto: {e}"]
 
 
+# ------------------------------------------- as camadas sobre a sessão (Tarefa 11)
+
+MUDO_ALCANCAVEL = """() => { const b = document.getElementById('voz-mudo').getBoundingClientRect();
+    return !!document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('#voz-mudo'); }"""
+
+
+def queda(pg: Page) -> list[str]:
+    """A queda (spec §2.5; specs/07): uma faixa no alto, em largura cheia, e não
+    uma caixa sobre a conversa. A sessão esmaece e continua legível: uma
+    mensagem à vista embaixo da faixa recebe o toque. A faixa de voz diz «SEM
+    SOM · RECONECTANDO», e o MUDO continua ao alcance. Quando o enlace volta,
+    tudo volta. Termina na queda, para a foto."""
+    falhas = []
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate("SEELE_QUADRO.link = { InternalBattery: { remaining_seconds: 287, attempts: 2 } }")
+    esperar_quadro(pg)
+    v = pg.evaluate("""() => {
+        const caixa = document.querySelector('#bateria .bateria-caixa'); const b = caixa?.getBoundingClientRect();
+        const legivel = [...document.querySelectorAll('#lista-mensagens li.mensagem')].some((li) => {
+            const r = li.getBoundingClientRect(); if (!b || r.top < b.bottom || r.height === 0) return false;
+            const c = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 12)); return !!c && li.contains(c); });
+        return { visivel: !!caixa && caixa.checkVisibility(), caixa: b ? [Math.round(b.top), Math.round(b.width), Math.round(b.height)] : null,
+                 legivel, faixa: document.querySelector('.voz-celular .voz-sala-quem')?.textContent ?? '',
+                 inteira: ((q, f) => q.scrollWidth <= q.clientWidth + 1 && q.getBoundingClientRect().bottom <= f.getBoundingClientRect().bottom + 1)(
+                     document.querySelector('.voz-celular .voz-sala-quem'), document.querySelector('.voz-celular')),
+                 vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    largura, altura = pg.evaluate("[innerWidth, innerHeight]")
+    # A altura conta sem a área segura do alto: aquela faixa é do sistema (a
+    # ilha), e não da conversa.
+    seguro = pg.evaluate("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cel-seguro-topo')) || 0")
+    if not v["visivel"] or v["caixa"][0] > 1 or v["caixa"][1] < largura - 1 or v["caixa"][2] - seguro > altura / 3:
+        falhas.append(f"a queda não é uma faixa no alto, em largura cheia: {v['caixa']} numa tela de {largura}×{altura}, com {seguro} de área segura")
+    if not v["legivel"]:
+        falhas.append("com a queda, nenhuma mensagem fica à vista e ao toque embaixo da faixa")
+    reconectando = pg.evaluate("FRASES_DO_CELULAR.voz.reconectando")
+    if v["faixa"] != reconectando:
+        falhas.append(f"com a queda, a faixa de voz diz «{v['faixa']}», e não «{reconectando}»")
+    elif not v["inteira"]:
+        falhas.append(f"com a queda, «{reconectando}» sai cortado na faixa de voz")
+    if not pg.evaluate(MUDO_ALCANCAVEL):
+        falhas.append("com a queda, o MUDO não recebe o toque")
+    if v["vaza"]:
+        falhas.append("com a queda, a página rola de lado")
+    pg.evaluate("SEELE_QUADRO.link = 'Online'")
+    esperar_quadro(pg)
+    volta = pg.evaluate("[document.getElementById('bateria').hidden, document.querySelector('.voz-celular .voz-sala-quem')?.textContent ?? '']")
+    if not volta[0] or volta[1] == reconectando:
+        falhas.append(f"o enlace voltou, e a queda ficou: {volta}")
+    pg.evaluate("SEELE_QUADRO.link = { InternalBattery: { remaining_seconds: 287, attempts: 2 } }")
+    esperar_quadro(pg)
+    return falhas
+
+
+def alerta(pg: Page) -> list[str]:
+    """O alerta (`#banner`; spec §2.5) em largura cheia, com o fechar de 44. A
+    porta de moderar do alerta não aparece no celular: moderar é pelo SEELE no
+    computador. Termina com o alerta aberto, para a foto."""
+    falhas = []
+    pg.evaluate("SEELE_QUADRO.notice = { severity: 'Alta', reason: 'ServerShuttingDown', operator_text: null }")
+    esperar_quadro(pg)
+    v = pg.evaluate("""() => {
+        const caixa = document.querySelector('#banner .alerta-caixa'); const b = caixa?.getBoundingClientRect();
+        const fechar = document.getElementById('banner-fechar').getBoundingClientRect();
+        return { visivel: !!caixa && caixa.checkVisibility(), largura: b ? Math.round(b.width) : 0,
+                 fechar: [Math.round(fechar.width), Math.round(fechar.height)],
+                 porta: document.getElementById('alerta-ejetar').checkVisibility(),
+                 vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    if not v["visivel"] or v["largura"] < pg.evaluate("innerWidth") - 1:
+        falhas.append(f"o alerta não está em largura cheia: {v['largura']} px")
+    if min(v["fechar"]) < 44:
+        falhas.append(f"o fechar do alerta tem {v['fechar']}")
+    if v["porta"]:
+        falhas.append("o alerta oferece moderar no celular")
+    if v["vaza"]:
+        falhas.append("com o alerta, a página rola de lado")
+    return falhas
+
+
+def confirmacao(pg: Page) -> list[str]:
+    """A confirmação (spec §2.4) é uma folha de baixo, como as do celular: em
+    largura cheia, presa ao pé, com a borda vermelha, o verbo inteiro no botão,
+    o CANCELAR com 44 como saída, e o voltar do aparelho a fecha. Termina com
+    ela aberta, para a foto."""
+    falhas = []
+    abrir = "abrirConfirmacao('APAGAR A MENSAGEM', 'A mensagem sai da conversa para todo mundo, e não volta.', 'APAGAR A MENSAGEM', () => {})"
+    pg.evaluate(abrir)
+    pg.wait_for_timeout(300)
+    v = pg.evaluate("""() => {
+        const caixa = document.querySelector('#moderar .moderar-caixa'); const b = caixa.getBoundingClientRect();
+        const verbo = document.getElementById('moderar-confirmar'), cancelar = document.getElementById('moderar-cancelar');
+        return { caixa: [Math.round(b.left), Math.round(b.bottom), Math.round(b.width)], borda: getComputedStyle(caixa).borderTopColor,
+                 vermelho: getComputedStyle(document.documentElement).getPropertyValue('--seele-vermelho-alerta').trim(),
+                 verbo: [verbo.textContent.trim(), Math.round(verbo.getBoundingClientRect().height)],
+                 cancelar: cancelar.checkVisibility() ? Math.round(cancelar.getBoundingClientRect().height) : 0,
+                 vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    largura, altura = pg.evaluate("[innerWidth, innerHeight]")
+    if v["caixa"][0] > 0 or v["caixa"][2] < largura - 1 or abs(v["caixa"][1] - altura) > 1:
+        falhas.append(f"a confirmação não é uma folha presa ao pé, em largura cheia: {v['caixa']}")
+    vermelho = pg.evaluate("(cor) => { const e = document.createElement('i'); e.style.color = cor; document.body.append(e); const c = getComputedStyle(e).color; e.remove(); return c; }", v["vermelho"])
+    if v["borda"] != vermelho:
+        falhas.append(f"a borda da confirmação é {v['borda']}, e não o vermelho do alerta ({vermelho})")
+    if v["verbo"][0] != "APAGAR A MENSAGEM" or v["verbo"][1] < 44:
+        falhas.append(f"o botão da confirmação diz «{v['verbo'][0]}», com {v['verbo'][1]} de altura")
+    if v["cancelar"] < 44:
+        falhas.append(f"a saída da confirmação (CANCELAR) tem {v['cancelar']} de altura")
+    if v["vaza"]:
+        falhas.append("com a confirmação, a página rola de lado")
+    pg.go_back()
+    pg.wait_for_timeout(400)
+    if not pg.evaluate("document.getElementById('moderar').hidden"):
+        falhas.append("o voltar do aparelho não fechou a confirmação")
+    if pg.evaluate("document.getElementById('tela-sessao').hidden"):
+        falhas.append("o voltar saiu da sessão em vez de fechar a confirmação")
+    pg.evaluate(abrir)
+    pg.wait_for_timeout(300)
+    return falhas
+
+
 def sessao_entrou(pg: Page) -> list[str]:
     """A sessão abriu com a marca, e a raiz do celular rodou."""
     falhas = []
@@ -2738,6 +2856,10 @@ CASOS: dict[str, Caso] = {
     "deitado": Caso(levar=deitado, aparelhos=("deitado",), raiz="#palco, #voz"),
     # A casca larga (Tarefa 17): o computador, com a marca larga.
     "casca-larga": Caso(levar=casca_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
+    # As camadas sobre a sessão e a confirmação (Tarefa 11).
+    "queda": Caso(levar=queda, medir=False),
+    "alerta": Caso(levar=alerta, medir=False),
+    "confirmacao": Caso(levar=confirmacao, raiz="#moderar"),
     # A entrada do celular (Tarefa 10), sobre a identidade da F4.
     "entrada": Caso(levar=entrada, entrar=False, raiz="#tela-boot"),
     "entrada-desfechos": Caso(levar=entrada_desfechos, entrar=False, medir=False, http=True),
