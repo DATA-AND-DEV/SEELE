@@ -1683,6 +1683,8 @@ const FRASES_DO_CELULAR = Object.freeze({
     fala: (quem) => `${quem} fala`,
     naSala: (n) => `${n} na sala`,
     sinal: (n) => `sinal ${n}`,
+    // Com o enlace caído (spec §2.5), no lugar de quem fala.
+    reconectando: "SEM SOM · RECONECTANDO",
     recolher: "RECOLHER",
     recolherChamada: "Recolher a chamada e voltar à sessão",
     telemetria: "telemetria da chamada",

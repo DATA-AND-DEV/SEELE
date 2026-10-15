@@ -211,3 +211,118 @@
   bottom: calc(var(--cel-pe, 0px) + 8px);
   max-width: none;
 }
+
+/* ------------------------------------------- as camadas sobre a sessão
+ *
+ * Spec §2.4 e §2.5. A queda, o alerta e a confirmação são as caixas do
+ * desktop, redesenhadas pela casca: a queda vira uma faixa no alto, o alerta
+ * fica em largura cheia, e a confirmação é uma folha de baixo. */
+
+/* A queda: uma faixa no alto, em largura cheia, e não uma caixa sobre a
+   conversa (specs/07: a sessão esmaece e continua legível). A camada do
+   desktop já não intercepta o toque fora da caixa, e o `.na-bateria` dele
+   esmaece a sessão embaixo. */
+:root[data-casca="celular"] #bateria.camada-bateria {
+  align-items: flex-start;
+  justify-content: stretch;
+}
+
+:root[data-casca="celular"] #bateria .bateria-caixa {
+  width: 100%;
+  max-width: none;
+  border-width: 0 0 var(--seele-b-forte);
+}
+
+:root[data-casca="celular"] #bateria .bateria-cabeca {
+  padding: calc(var(--cel-seguro-topo) + 8px) calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] #bateria .bateria-nome {
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] #bateria .bateria-corpo {
+  gap: 12px;
+  padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] #bateria #bateria-conta {
+  font-size: calc(40px * var(--cel-escala));
+}
+
+:root[data-casca="celular"] #bateria .bateria-dizeres {
+  gap: 2px;
+}
+
+/* «2 tentativas» não precisa de rótulo embaixo de RECONECTANDO; a frase de que
+   o SEELE já está tentando fica, porque ela é a resposta a «posso apressar?». */
+:root[data-casca="celular"] #bateria .bateria-pe .rotulo {
+  display: none;
+}
+
+:root[data-casca="celular"] #bateria .bateria-pe {
+  gap: 2px;
+  padding: 0 calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] #bateria .bateria-forcar {
+  margin: 4px 0 0;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  line-height: 1.4;
+}
+
+/* O alerta em largura cheia. A porta de moderar dele não aparece: moderar é
+   pelo SEELE no computador (O QUE O CELULAR NÃO FAZ). */
+:root[data-casca="celular"] #banner .alerta-caixa {
+  width: 100%;
+  max-width: none;
+  border-left: 0;
+  border-right: 0;
+}
+
+:root[data-casca="celular"] #banner #alerta-ejetar {
+  display: none;
+}
+
+:root[data-casca="celular"] #banner #banner-fechar {
+  min-width: var(--cel-alvo);
+  min-height: var(--cel-alvo);
+}
+
+/* A confirmação é uma folha de baixo, como as do celular: presa ao pé, em
+   largura cheia, com a borda vermelha de quem pergunta antes de um ato sem
+   volta, e as ações em largura cheia, com o verbo inteiro. */
+:root[data-casca="celular"] #moderar.camada-moderar {
+  align-items: flex-end;
+}
+
+:root[data-casca="celular"] #moderar .moderar-caixa {
+  width: 100%;
+  max-width: none;
+  max-height: 85%;
+  border: 0;
+  border-top: var(--seele-b-forte) solid var(--seele-vermelho-alerta);
+  padding-bottom: var(--cel-seguro-pe);
+}
+
+:root[data-casca="celular"] #moderar .moderar-confirmacao {
+  padding: 16px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] #moderar .moderar-botoes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+:root[data-casca="celular"] #moderar .moderar-botoes button {
+  width: 100%;
+  min-height: var(--cel-alvo);
+}
+
+/* O verbo primeiro, embaixo do polegar; o CANCELAR depois. */
+:root[data-casca="celular"] #moderar #moderar-confirmar {
+  order: -1;
+}

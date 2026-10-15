@@ -246,6 +246,14 @@
   text-overflow: ellipsis;
 }
 
+/* Com o enlace caído, a frase é a única coisa que importa nesta linha, e ela
+   quebra em vez de sair cortada («SEM SOM · RECONEC…», medido a 390). */
+:root[data-casca="celular"] .voz-celular[data-caido] .voz-sala-quem {
+  white-space: normal;
+  overflow: visible;
+  line-height: 1.2;
+}
+
 /* **A placa do núcleo.** Os três controles moram numa placa opaca do núcleo, e
    não sobre o fundo temado da faixa. É o que torna a borda deles mensurável: a
    WCAG pede 3:1 entre o contorno de um controle e o que está em volta, e

@@ -259,6 +259,32 @@
   medirOPe();
 
   CELULAR.registrar("folhaDaMensagem", folhaDaMensagem);
+
+  // ------------------------------------------------------ a confirmação
+  //
+  // A caixa `#moderar` do desktop, que pergunta antes de todo ato sem volta
+  // (apagar uma mensagem, o `confirmar` de um MOD), é no celular uma folha de
+  // baixo (spec §2.4; o desenho é do `celular-folhas.css`). Como toda folha, o
+  // voltar do aparelho a fecha, pelo mesmo caminho do Escape do desktop
+  // (`fecharModeracao`). Sem isto, o voltar com a
+  // confirmação aberta saía da página, e a sessão caía junto (medido na
+  // bancada, caso `confirmacao`). A saída da folha é o CANCELAR dela, que o
+  // desktop já põe embaixo do verbo; um FECHAR a mais seria o mesmo botão duas
+  // vezes.
+  const caixaDeConfirmar = document.getElementById("moderar");
+  let tirarDaPilha = null;
+  new MutationObserver(() => {
+    if (!caixaDeConfirmar.hidden && !tirarDaPilha) {
+      tirarDaPilha = CELULAR.ajudante("empilhar")(() => {
+        tirarDaPilha = null;
+        fecharModeracao();
+      });
+    } else if (caixaDeConfirmar.hidden && tirarDaPilha) {
+      const tirar = tirarDaPilha;
+      tirarDaPilha = null;
+      tirar();
+    }
+  }).observe(caixaDeConfirmar, { attributes: true, attributeFilter: ["hidden"] });
   CELULAR.registrar("folhaDeAnexar", folhaDeAnexar);
   CELULAR.registrar("folhaDaPessoa", folhaDaPessoa);
   CELULAR.registrar("folhaDeFrase", folhaDeFrase);
