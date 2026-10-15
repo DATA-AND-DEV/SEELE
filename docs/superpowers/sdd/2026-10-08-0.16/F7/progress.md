@@ -1082,3 +1082,30 @@ medida diz:
 
 - as três rodadas inteiras depois dela passaram;
 - na ponta `4ed24ee0`, três rodadas só do `entrada-desfechos` deram 6 de 6.
+
+**O teste que faltava da 20** (`511aa0bc`): um MOD do guardado continua
+respondendo enquanto a dona visita outro servidor. O teste passa pelo `connect`
+e pelo `disconnect` de verdade, no runtime falso do Tauri, com o MOD de
+referência:
+
+- com a dona dentro, ele responde 1;
+- com ela noutro servidor (`Outro`), ele responde 2, pelo servidor que os
+  comandos de MOD do app acham.
+
+Três reversões reprovam, cada uma no ponto dela: o `disconnect` voltando a
+derrubar o guardado; os comandos de MOD seguindo a sessão; e a saída desligando
+o MOD.
+
+Para chegar lá:
+
+- o `disconnect` e o `desmontar_o_cliente` ficaram genéricos no runtime, como o
+  `connect`;
+- o guarda da revogação no `frontend.rs` passou a aceitar a assinatura genérica
+  (`da9580eb`, isolado);
+- o guarda do ponto de encontro do `main.rs` (lote G-servidor da F5) passou a
+  ler só a produção (`845e20e3`). Ele reprovava o `Hospedagem::iniciar` curto do
+  teste, que o próprio doc dele chama de padrão seguro dos testes. Três
+  reversões de produção ainda reprovam.
+
+App 748/748 e o clippy limpo em todos os alvos. Como a mudança não toca a `ui/`
+nem o duble, a bateria da casca não se aplica.
