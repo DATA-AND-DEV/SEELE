@@ -980,3 +980,45 @@ bancadas da janela (a do executor pede o motor com o wasi-sdk). A
 `voz-no-navegador` reprovou uma vez com «Could not start audio source» e passou
 na seguinte, com o `.wasm` recompilado: a minha verificação usava um `.wasm` de
 antes da integração, e passou a recompilá-lo sempre.
+
+## O motivo do firewall na tela, e o botão só quando resolve (15/10)
+
+**Provado no PC antes** (a orquestradora, na ponta `3ffdd92b`): o
+`cargo test -p seele-app --bin seele-app -- firewall::` deu 12 de 12, com a
+leitura de verdade pelo PowerShell (`no_windows_a_leitura_de_verdade_chega_ao_fim`,
+1,27 s), e o `cargo clippy -p seele-app -- -D warnings` saiu 0.
+
+**Pedido pela orquestradora:** um botão que aparece igual quando resolve e
+quando não resolve é o produto dizendo uma coisa que não é verdade. O ABRIR A
+PORTA AGORA cria a regra do SEELE **instalado**, em UDP e em qualquer perfil:
+resolve a falta de regra e o perfil não coberto, e só quando quem roda é o
+instalado, com o instalador ao lado.
+
+| etapa | commit |
+|---|---|
+| o `NaTela { motivo, frase, abrir_resolve }` no Rust; o estado da sala com ele; a linha da sala com o botão só quando resolve | `e0e48744` |
+| a parede da tela de hospedar lê o mesmo motivo (isolado, `tela-boot.js` da F5) | `3cdcafc7` |
+| o guarda da parede cobra o botão só quando resolve (isolado, `frontend.rs`) | `bf2624ab` |
+| sai o `firewall_nao_cobre` da resposta do `hospedar` | `cb3b4520` |
+
+- **A frase diz o que fazer:** com o botão, o Windows pergunta uma vez; na
+  cópia portátil, abrir o SEELE instalado; no bloqueio, onde ele sai (Regras de
+  Entrada); no perfil, que a rede ativa não está coberta; sem o instalado,
+  instalar.
+- **No perfil não coberto o botão também aparece**, quando quem roda é o
+  instalado: a regra que ele cria vale em qualquer perfil e soma às outras.
+  Fora da lista que a orquestradora escreveu, mas dentro da regra dela.
+- **Depois da regra criada**, um reanúncio do estado da sala (feito a cada
+  mudança do registro, com a leitura de quando ela subiu) não devolve o botão
+  nem a frase de antes, até a sala descer e subir com uma leitura nova.
+- **Reversões, cada uma reprovando:** o `abrir_resolve` sempre verdadeiro; o
+  botão em todos os motivos na linha da sala e na parede de hospedar; sem a
+  marca da regra criada; a parede sem a frase do motivo.
+- **Fica para o PC:** o `pasta_instalada` e o ramo do Windows do
+  `firewall_deste_executavel` não compilam no Mac.
+
+**Como está a ponta** (`cb3b4520`): app 744/744; os 40 roteiros; as duas
+bancadas da ponte; a do celular; e 33 das 34 da janela (a do executor pede o
+motor com o wasi-sdk). Com a máquina a 17–26 de carga, o `texto-maior-390` do
+celular e a `diagnostico-de-mods` reprovaram por tempo; com e sem esta mudança,
+sob carga de 10 a 14, passaram. A F5 revisou e aprovou a parede da tela dela.
