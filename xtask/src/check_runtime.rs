@@ -41,8 +41,10 @@
 //!
 //! As de navegador (Playwright) não estão aqui: elas precisam de um Chromium,
 //! e quem as roda, por nome, é o job `bancadas` do `ci.yml`, que só roda
-//! quando alguém o dispara — nem o `validar` do `release.yml` nem a bateria do
-//! `publicar.sh` as rodam. A exceção é a do executor de MODs no navegador
+//! quando alguém o dispara, e a bateria do `publicar.sh`, desde a D-api-8 (a
+//! etapa `bancadas_de_navegador`, com a mesma lista: ver o teste
+//! `toda_bancada_de_navegador_e_a_do_celular_rodam_no_ci_e_no_publicar`). O
+//! `validar` do `release.yml` não as roda. A exceção é a do executor de MODs no navegador
 //! (`executor-no-navegador.cjs`), que precisa do `.wasm` do motor: ela roda no
 //! job `bancadas-de-mod`, depois do `cargo xtask web` que o compila. Quantas
 //! são e onde cada uma roda não está escrito em comentário nenhum: o teste
