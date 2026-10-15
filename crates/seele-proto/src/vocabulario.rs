@@ -21,7 +21,8 @@
 //! teste de integração dos bytes-ouro precisa dos nomes.
 //!
 //! Mora aqui também a tabela de **em que número cada variante nasceu**
-//! ([`desde`], [`desde_a_razao`], [`desde_o_alerta`], [`desde_a_causa`]): o
+//! ([`desde`], [`desde_a_razao`], [`desde_o_alerta`], [`desde_a_causa`],
+//! [`desde_a_recusa`]): o
 //! portão que decide o
 //! que o servidor pode escrever para um par, e que até a 0.15 era um `match`
 //! com `_` dentro do `seele-server`.
@@ -29,7 +30,7 @@
 use std::cell::Cell;
 use std::fmt;
 
-use crate::control::{AlertReason, CausaDaRecusa, DisconnectReason, ServerMessage};
+use crate::control::{AlertReason, CausaDaRecusa, DisconnectReason, MessageRefusal, ServerMessage};
 use crate::version::PRIMEIRO_DA_LINHA_UM;
 
 /// Os nomes das variantes do enum `T`, na ordem dos ordinais.
@@ -81,6 +82,11 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
     match mensagem {
         // O `Alert` existe desde sempre, e o que pode ser novo é o motivo.
         ServerMessage::Alert { reason, .. } => maior(PRIMEIRO_DA_LINHA_UM, desde_o_alerta(reason)),
+        // Puxa o número da razão que leva, como o `Alert` puxa o do motivo: uma
+        // razão nova não pode chegar a quem fala um número de antes dela.
+        ServerMessage::MessageRejected { reason, .. } => {
+            maior(PRIMEIRO_DA_LINHA_UM, desde_a_recusa(reason))
+        }
         // O mesmo para o `Disconnecting`: o ordinal 11 é congelado, e a razão
         // não.
         ServerMessage::Disconnecting { reason } => {
@@ -124,7 +130,6 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
         | ServerMessage::ModReply { .. }
         | ServerMessage::Instancia { .. }
         | ServerMessage::VolumeRecusado { .. }
-        | ServerMessage::MessageRejected { .. }
         | ServerMessage::Tocando { .. }
         | ServerMessage::Membros { .. }
         | ServerMessage::MembroNovo { .. }
@@ -204,6 +209,20 @@ pub const fn desde_a_causa(causa: &CausaDaRecusa) -> u8 {
         CausaDaRecusa::NaoExiste | CausaDaRecusa::NomeTomado | CausaDaRecusa::FalhaDoServidor => {
             PRIMEIRO_DA_LINHA_UM
         }
+    }
+}
+
+/// Em que número uma razão de [`MessageRefusal`] passou a existir.
+#[must_use]
+pub const fn desde_a_recusa(recusa: &MessageRefusal) -> u8 {
+    match recusa {
+        MessageRefusal::PermissionDenied
+        | MessageRefusal::NoSuchChannel
+        | MessageRefusal::TooLong { .. }
+        | MessageRefusal::StorageFailed => PRIMEIRO_DA_LINHA_UM,
+        // No rascunho da linha 1, que nenhuma build publicada fala: o 9 ainda
+        // aceita variante nova no fim.
+        MessageRefusal::Apagada => PRIMEIRO_DA_LINHA_UM,
     }
 }
 
@@ -326,6 +345,11 @@ mod tests {
                 "desde_a_causa",
                 "CausaDaRecusa",
                 variantes::<CausaDaRecusa>(),
+            ),
+            (
+                "desde_a_recusa",
+                "MessageRefusal",
+                variantes::<MessageRefusal>(),
             ),
         ] {
             let corpo = corpo_da_tabela(tabela);

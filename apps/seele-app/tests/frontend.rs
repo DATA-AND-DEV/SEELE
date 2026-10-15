@@ -606,10 +606,9 @@ fn every_command_the_frontend_calls_is_registered() {
 //
 // `onde_estou` esteve aqui de 2026-10-09 a 2026-10-10: entrou com a metade do
 // `main.rs` da tarefa 18 da F7 (Plano 2), e saiu quando a faixa `#toque` passou
-// a perguntá-lo (tarefa 26). **A metade da casca da 18 continua por fazer**: o
-// `estado_da_porta().hospedando` da `tela-sessao.js` e o `nossoServidorEm` da
-// `tela-boot.js` ainda respondem «estou no meu servidor?» pelo critério deles.
-// Está no andamento da F7, porque este guarda já não a cobra.
+// a perguntá-lo (tarefa 26). A metade da casca da 18 veio depois: a
+// `tela-sessao.js` com as tarefas 19 e 20, e a `tela-boot.js` na 18 (o guarda
+// `estou_no_meu_servidor_tem_uma_resposta_so`).
 //
 // `escolher_o_tema_do_servidor` esteve aqui entre as duas metades da tarefa
 // 17f.0 da F3 (a escolha de quem administra, D-api-5): o comando entrou num
@@ -11151,7 +11150,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // **E a exceção do `onCloseRequested`** (tarefa 21 da F7, decidida pela
     // orquestradora em 10/10, no molde da do `beforeunload`): fechar o SEELE com
     // o servidor guardado no ar tira todo mundo dele, e a página pergunta antes.
-    // O `close-requested` cru continua proibido. Cada `onCloseRequested(` tem de
+    // O `close-requested` cru continua proibido. Cada chamada do `onCloseRequested`
+    // (direta ou `?.(`) tem de
     // mostrar, **antes** do `preventDefault`: as duas credenciais esquecidas
     // (`fecharAceiteDeMods()` e `esquecerARecusaDoApelido()`), e o veto só com o
     // servidor guardado no ar: `invoke("meu_servidor")`, **depois** o `return`
@@ -11164,11 +11164,24 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
              próprio fechamento sem as condições do `onCloseRequested`, e a credencial \
              da tentativa, que só existe na memória dela, sobreviveria ao fechar."
         );
-        for (em, _) in texto.match_indices("onCloseRequested(") {
+        for (em, _) in texto.match_indices("onCloseRequested") {
+            // **A chamada, direta ou opcional.** O `?.(` é a forma que não
+            // derruba o script num runtime (ou num duble de bancada) sem o
+            // método. Qualquer outra menção — o método passado adiante, lido
+            // num `typeof` — reprova: este guarda só lê a chamada, e um ouvinte
+            // registrado por outro caminho escaparia das condições do veto.
+            let depois = &texto[em + "onCloseRequested".len()..];
+            let resto = depois.strip_prefix("?.").unwrap_or(depois);
+            assert!(
+                resto.starts_with('('),
+                "`{nome}` menciona o `onCloseRequested` sem chamá-lo (`onCloseRequested(` \
+                 ou `onCloseRequested?.(`), e este guarda só lê a chamada: um ouvinte \
+                 registrado por outro caminho escaparia das condições do veto (tarefa 21 \
+                 da F7)."
+            );
             // A chamada inteira, pelos parênteses balanceados, e não até o
             // primeiro `.catch(`: um `.catch(` dentro do ouvinte, antes do
             // `preventDefault`, cortaria o trecho cedo, e o veto passaria calado.
-            let resto = &texto[em + "onCloseRequested".len()..];
             let mut fundura = 0usize;
             let fim = resto
                 .char_indices()
@@ -11191,8 +11204,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 // A contagem não sabe de string: um `")"` num literal do ouvinte
                 // fecha o trecho cedo, e um `preventDefault` depois do corte
                 // passaria calado. Sem ele no trecho, ele também não pode estar
-                // entre o corte e o próximo `onCloseRequested(`.
-                let ate_o_proximo = resto.find("onCloseRequested(").unwrap_or(resto.len());
+                // entre o corte e a próxima menção ao `onCloseRequested`.
+                let ate_o_proximo = resto.find("onCloseRequested").unwrap_or(resto.len());
                 assert!(
                     !resto[..ate_o_proximo].contains("preventDefault"),
                     "`{nome}`: o guarda não conseguiu ler o ouvinte do `onCloseRequested` \
@@ -12007,73 +12020,62 @@ fn no_class_is_drawn_by_two_stylesheets_without_being_a_declared_refinement() {
 /// hospedar que falha não pode dispensar a conferência da conexão seguinte, que
 /// essa vai a um servidor alheio de verdade.
 ///
-/// **A dispensa deixou de ser um sim e passou a ser um endereço** — A05 da
-/// auditoria de 17/09. A bandeira booleana era lida e apagada na primeira linha
-/// de `conectar`, e isso confundia «a tentativa falhou» com «a mesma tentativa
-/// está continuando»: uma entrada que para no aceite de MODs é retomada por
-/// `aceitarOsMods`, e a intenção já tinha sido consumida — quem hospedava caía
-/// na tela de conferir a própria chave.
+/// **A dispensa foi um sim, depois um endereço, e é a chave** (tarefa 18 da F7).
 ///
-/// Guardar o endereço resolve as duas de uma vez, e por construção: continuar
-/// para o mesmo alvo reconhece a intenção, e **qualquer outro alvo não casa**,
-/// então não há o que vazar para a conexão seguinte. É uma propriedade mais
-/// forte que a de antes, e não um afrouxamento dela.
+/// A bandeira booleana era lida e apagada na primeira linha de `conectar`, e
+/// confundia «a tentativa falhou» com «a mesma tentativa está continuando» (A05
+/// da auditoria de 17/09). O endereço resolveu isso, mas ficou com o defeito de
+/// todo endereço: o de uma rede local volta a ser de outra máquina no dia
+/// seguinte, e a dispensa dependia de alguém zerá-lo a tempo.
+///
+/// Agora quem responde é o `onde_estou`, **depois** do `connect` desta
+/// tentativa: «Guardado» só quando a chave conferida no aperto de mão é a do
+/// servidor que esta janela hospeda. Uma tentativa de hospedar que falha não
+/// dispensa nada na seguinte, porque a seguinte pergunta de novo, pela chave
+/// dela; o mesmo endereço com outra chave pede a conferência
+/// (`tools/roteiros/meu-servidor.js`, passo 6). E a pergunta vem **antes** da
+/// conferência da tentativa (F5 e F8): entre ela e o `depoisDeConectar` não há
+/// espera nenhuma.
 #[test]
-fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after() {
+fn a_dispensa_de_conferir_a_propria_chave_vem_da_chave_desta_conexao() {
     let boot = read("ui/tela-boot.js");
-    let conectar = js_function(&boot, "async function conectar(");
-
-    // A dispensa é uma comparação com o alvo desta conexão, e não a leitura de
-    // um sim. Sem o `=== ultimoAlvo`, ela voltaria a valer em qualquer endereço.
+    let conectar = without_comments(&js_function(&boot, "async function conectar("));
+    let posicao = |agulha: &str| {
+        conectar
+            .find(agulha)
+            .unwrap_or_else(|| panic!("`conectar` perdeu `{agulha}`:\n{conectar}"))
+    };
+    let entra = posicao("invoke(\"connect\"");
+    let pergunta = posicao("invoke(\"onde_estou\")");
+    // A conferência **depois** da pergunta: a primeira, logo depois do `connect`,
+    // é do guarda do lote E54 (`a_entrada_que_outra_substituiu_nao_toca_na_tela_e_e_solta`).
+    let confere = conectar[pergunta..]
+        .find("if (esta !== tentativas || aBatidaFoiLargada(esta))")
+        .map(|onde| pergunta + onde)
+        .unwrap_or_else(|| {
+            panic!("`conectar` não confere a tentativa depois de perguntar ao `onde_estou`:\n{conectar}")
+        });
+    let depois = posicao("depoisDeConectar(resposta, alvo, nossoServidor)");
     assert!(
-        conectar.contains("nossoServidorEm === ultimoAlvo"),
-        "`conectar` não compara a dispensa com o alvo desta conexão, então ela \
-         valeria para qualquer endereço:\n{conectar}"
-    );
-    assert!(
-        !boot.contains("nossoServidorEm = true"),
-        "a dispensa voltou a ser um sim solto; ela tem de ser o endereço que \
-         esta janela hospeda, ou volta a vazar para a conexão seguinte"
-    );
-
-    // E quem a liga é só o hospedar, com o endereço que acabou de subir.
-    let ligam =
-        boot.matches("nossoServidorEm = ").count() - boot.matches("nossoServidorEm = null").count();
-    assert_eq!(
-        ligam, 1,
-        "a dispensa da conferência de chave é escrita em {ligam} lugares; só \
-         `hospedar` pode escrevê-la"
-    );
-    let hospedar = js_function(&boot, "async function hospedar(");
-    assert!(
-        hospedar.contains("nossoServidorEm = anfitriao.aqui"),
-        "`hospedar` não prende a dispensa ao endereço que acabou de subir: {hospedar}"
-    );
-    // **E a entrada vai ao mesmo `aqui`** (lote X da F5, rodada 2). A dispensa
-    // é `nossoServidorEm === ultimoAlvo`: entrando por outro endereço, quem
-    // hospeda volta a ser mandado conferir a própria chave. O sim de quem
-    // hospeda não depende mais disto: desde a impressão, o Rust reconhece o
-    // servidor daqui pela chave (`onde_estou_em`), entre por onde entrar.
-    assert!(
-        hospedar.contains("ultimoAlvo = anfitriao.aqui"),
-        "`hospedar` entra no próprio servidor por outro endereço que não o `aqui`: a \
-         dispensa de conferir a própria chave não casa com o alvo: {hospedar}"
-    );
-
-    // **E ela morre com a hospedagem.** Um endereço de rede local volta a ser de
-    // outra máquina no dia seguinte: mantê-la depois de o servidor cair seria
-    // dispensar a conferência justamente onde ela passa a valer. Desde a tarefa
-    // 19 da F7 quem derruba o servidor é o PARAR DE HOSPEDAR, e é ele que a zera
-    // (a tela de fim zerava quando o SAIR derrubava).
-    let parar = js_function(
-        &read("ui/camada-hospedagem.js"),
-        "async function pararDeHospedarOMeuServidor(",
+        entra < pergunta && pergunta < confere && confere < depois,
+        "a dispensa de `conectar` não é perguntada ao `onde_estou` depois do `connect` \
+         desta tentativa e antes da conferência dela:\n{conectar}"
     );
     assert!(
-        parar.contains("invoke(\"parar_de_hospedar\")") && parar.contains("nossoServidorEm = null"),
-        "nada zera a dispensa quando a hospedagem cai, e o mesmo endereço na mão \
-         de outra máquina herdaria a dispensa:\n{parar}"
+        conectar.contains("=== \"Guardado\""),
+        "a dispensa de `conectar` não exige o servidor guardado: a sala pessoal, ou \
+         qualquer resposta que não seja «Guardado», dispensaria a conferência:\n{conectar}"
     );
+    // **Nenhum endereço volta a dispensar a conferência.**
+    for nome in ui_files(".js") {
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        assert!(
+            !texto.contains("nossoServidorEm"),
+            "`{nome}` voltou a guardar o endereço do servidor daqui (`nossoServidorEm`): \
+             a dispensa de conferir a chave volta a valer para um endereço, e não para \
+             a chave"
+        );
+    }
 
     // **E a bandeira tem de decidir alguma coisa do outro lado.**
     //
@@ -12981,8 +12983,13 @@ fn the_shell_never_remembers_a_nickname_nobody_chose() {
     // outra chave a pessoa o trocava no perfil e a tentativa seguinte mandava o
     // recusado de novo — o mesmo relato de cima, com um nome que alguém
     // escolheu. A `ajustes-v013.cjs` troca o apelido e confere o que sai.
+    //
+    // **E o apelido grande demais** (lote C55 da F5), pela mesma porta: a FFI o
+    // recusa antes de discar (`ApelidoGrandeDemais`), a frase manda encurtá-lo
+    // no perfil, e o recusado guardado aqui voltava na tentativa seguinte. O
+    // roteiro `apelido-no-hello.js` encurta e confere o que sai.
     let recusa = corpo
-        .split_once("if (motivo?.Refused?.reason === \"NicknameTaken\") {")
+        .split_once("if (motivo?.Refused?.reason === \"NicknameTaken\"")
         .and_then(|(_, depois)| depois.split_once('}'))
         .map(|(bloco, _)| bloco);
     assert!(
@@ -12990,6 +12997,16 @@ fn the_shell_never_remembers_a_nickname_nobody_chose() {
         "a casca deixou de esquecer o apelido que o servidor recusou por ser de \
          outra chave: a pessoa troca o nome no perfil, como a frase manda, e a \
          tentativa seguinte manda o recusado de novo.\n{corpo}"
+    );
+    assert!(
+        recusa.is_some_and(|bloco| {
+            bloco
+                .split_once('{')
+                .is_some_and(|(condicao, _)| condicao.contains("motivo?.ApelidoGrandeDemais"))
+        }),
+        "a casca deixou de esquecer o apelido grande demais que a FFI recusa antes de \
+         discar: a pessoa o encurta no perfil, como a frase manda, e a tentativa \
+         seguinte manda o recusado de novo.\n{corpo}"
     );
 }
 
@@ -16456,9 +16473,10 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
 /// dos três dizia em qual das duas a sessão está, e cada tela respondia do seu
 /// jeito.
 ///
-/// Esta é a metade do `main.rs`. A da casca (`tela-sessao.js` e
-/// `tela-boot.js`) entra quando esses arquivos passarem a perguntar ao
-/// `onde_estou`, na vez da F7 neles.
+/// As duas metades: a do `main.rs`, e a da casca, em que a `tela-sessao.js` (o
+/// SAIR, o `+`, a trilha) e a `tela-boot.js` (a dispensa de conferir a própria
+/// chave) perguntam ao `onde_estou`. «Há servidor no ar?» é outra pergunta (a
+/// portaria, a linha de ESTE SERVIDOR) e continua no `estado_do_servidor`.
 #[test]
 fn estou_no_meu_servidor_tem_uma_resposta_so() {
     let app = without_comments(&read("src/main.rs"));
@@ -16478,6 +16496,30 @@ fn estou_no_meu_servidor_tem_uma_resposta_so() {
         regra_da_lista.contains("porta_desta_maquina("),
         "a lista de visitados voltou a ler o endereço do jeito dela:\n{regra_da_lista}"
     );
+
+    // **A metade da casca.** Quem pergunta «estou no meu servidor?» pergunta ao
+    // `onde_estou`, e nenhum script guarda a resposta pelo critério dele.
+    for (arquivo, funcao) in [
+        ("ui/tela-sessao.js", "async function estouNoMeuServidor("),
+        ("ui/tela-boot.js", "async function conectar("),
+    ] {
+        let corpo = without_comments(&js_function(&read(arquivo), funcao));
+        assert!(
+            corpo.contains("invoke(\"onde_estou\")"),
+            "`{funcao}` (`{arquivo}`) deixou de perguntar ao `onde_estou` se esta \
+             sessão está no servidor daqui:\n{corpo}"
+        );
+    }
+    for nome in ui_files(".js") {
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        for criterio in ["nossoServidorEm", "hospedandoAqui"] {
+            assert!(
+                !texto.contains(criterio),
+                "`{nome}` voltou a responder «estou no meu servidor?» pelo critério dele \
+                 (`{criterio}`), e não pelo `onde_estou`"
+            );
+        }
+    }
 }
 
 /// O caminho entre pares tem onde ser consentido, da tela até o núcleo.
@@ -19748,4 +19790,211 @@ fn sair_nao_derruba_o_servidor_de_ninguem() {
         "o `parar_de_hospedar` não derruba o guardado, ou mexe na sala, que desce pelo \
          «receber ligações»:\n{parar}"
     );
+}
+
+/// Os números escritos numa linha de script: cada sequência de algarismos que
+/// não está colada a uma letra, a um `_` ou a um ponto (`v2`, `0.5` e `x_32`
+/// não contam).
+fn numeros_da_linha(linha: &str) -> Vec<usize> {
+    let bytes = linha.as_bytes();
+    let colado = |byte: Option<&u8>| {
+        byte.is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'.')
+    };
+    let mut achados = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let comeco = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        let antes = comeco.checked_sub(1).and_then(|j| bytes.get(j));
+        if !colado(antes) && !colado(bytes.get(i)) {
+            if let Ok(numero) = linha[comeco..i].parse() {
+                achados.push(numero);
+            }
+        }
+    }
+    achados
+}
+
+/// O número de uma linha que só declara uma constante com um número —
+/// `const X = 512;`, `let x = 512;`, `var x = 512;` —, ou `None`.
+fn numero_declarado(linha: &str) -> Option<usize> {
+    let linha = linha.trim();
+    let resto = ["const ", "let ", "var "]
+        .iter()
+        .find_map(|palavra| linha.strip_prefix(palavra))?;
+    let (nome, valor) = resto.split_once('=')?;
+    let nome = nome.trim();
+    if nome.is_empty()
+        || !nome
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+    {
+        return None;
+    }
+    let valor = valor.trim();
+    valor.strip_suffix(';').unwrap_or(valor).trim().parse().ok()
+}
+
+/// **Nenhum teto do fio dos campos é escrito à mão na `ui/`** (pendência 58,
+/// item 55; lote C55 da F5).
+///
+/// Os campos que o fio carrega — o apelido, o nome de um canal ou de uma sala,
+/// o nome do servidor e o motivo de um banimento — tinham `maxlength`, e os
+/// lugares de uma sala nova tinham um `250` escrito à mão. O `maxlength` conta
+/// caracteres, e o fio conta **bytes**: vinte letras `á` cabiam no apelido e
+/// não no `Hello`. Os tetos agora vêm do Rust (`limites_dos_campos`), e cada
+/// campo os confere em bytes por `passaDoTeto`, em `base.js`. Este guarda
+/// reprova a volta de um teto escrito à mão, em três formas:
+///
+/// - um `maxlength` num dos cinco campos do `index.html`, com qualquer número:
+///   um teto em caracteres num campo que o fio conta em bytes é o defeito;
+/// - um número igual a um dos tetos numa linha de script que trata do tamanho
+///   de um campo: que põe `maxLength`, que conta `bytesDe(`, que pede um teto
+///   (`passaDoTeto`, `tetosDosCampos`) ou diz a frase dele (`fraseDoTeto`),
+///   que fala dos lugares de uma sala, ou que nomeia um dos cinco campos;
+/// - uma constante declarada com um número igual a um dos tetos
+///   (`const TETO_DO_MOTIVO = 512;`), em qualquer script, porque é a forma
+///   de copiar um teto para usá-lo noutra linha.
+///
+/// As duas últimas vieram da revisão do lote (M2): `fraseDoTeto(512, …)` e
+/// uma constante com o teto passavam por este guarda.
+///
+/// **O que ele não vê, por ser textual:** um teto montado por conta
+/// (`256 * 2`), escrito como propriedade de um objeto (`{ motivo: 512 }`)
+/// numa linha sem marca, ou declarado com outro valor e corrigido depois.
+///
+/// Os tetos são lidos da FFI, e não escritos aqui. A única cópia deles na
+/// `ui/` é a das `CONSTANTES_DO_DESKTOP` da ponte do navegador, que não tem
+/// Rust a quem perguntar: o guarda `as_constantes_da_ponte_sao_as_do_desktop`,
+/// de `tests/web.rs`, a confere contra a FFI, e por isso ela fica fora daqui.
+#[test]
+fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
+    const CAMPOS: [&str; 5] = [
+        "perfil-apelido",
+        "nomear-valor",
+        "server-nome-valor",
+        "preparar-nome",
+        "moderar-motivo",
+    ];
+    const MARCAS: [&str; 8] = [
+        "maxLength",
+        "maxlength",
+        "bytesDe(",
+        "passaDoTeto",
+        "tetosDosCampos",
+        "fraseDoTeto",
+        "lugaresDeUmaSalaNova",
+        "lugares",
+    ];
+    // Os números iguais a um teto que não são teto de campo nenhum do fio,
+    // cada um com o motivo, conferido na hora de entrar aqui.
+    const EXCECOES: &[(&str, &str, &str)] = &[
+        (
+            "camada-sala.js",
+            "nome.maxLength = 48;",
+            "o nome que esta máquina dá a um contato da agenda da sala pessoal: ele fica no \
+             disco desta máquina (`seele_core::agenda`), e não vai ao fio",
+        ),
+        (
+            "base.js",
+            "const INTERVALO = 250;",
+            "o ritmo da fala de um MOD, em milissegundos (rascunho da API 6, §7.2): é \
+             tempo, e não tamanho de campo",
+        ),
+        (
+            "tela-sessao.js",
+            "const TETO_DE_GRUPOS = 32;",
+            "quantos grupos uma lista que um MOD arranja mostra: é desenho desta janela, \
+             e não vai ao fio",
+        ),
+        (
+            "tela-sessao.js",
+            "const TETO_DO_TITULO_DE_GRUPO = 64;",
+            "quanto do título de cada grupo dessa lista se mostra: é desenho desta \
+             janela, e não vai ao fio",
+        ),
+    ];
+
+    let limites = seele_ffi::Connection::limites_dos_campos();
+    let tetos = [
+        limites.apelido,
+        limites.nome_de_canal,
+        usize::from(limites.lugares_da_sala),
+        limites.nome_do_servidor,
+        limites.motivo_do_banimento,
+    ];
+    let mut a_mao = Vec::new();
+
+    let pagina = without_comments(&read("ui/index.html"));
+    for id in CAMPOS {
+        let marca = format!("id=\"{id}\"");
+        let Some(onde) = pagina.find(&marca) else {
+            panic!("o `index.html` não tem mais `#{id}`, e este guarda olharia o nada");
+        };
+        let abre = pagina[..onde]
+            .rfind('<')
+            .expect("o id está dentro de uma etiqueta");
+        let fecha = onde + pagina[onde..].find('>').expect("a etiqueta fecha");
+        let etiqueta = &pagina[abre..=fecha];
+        if etiqueta.contains("maxlength") {
+            a_mao.push(format!("index.html, #{id}: {etiqueta}"));
+        }
+    }
+
+    let mut excecoes_vistas = BTreeSet::new();
+    for nome in ui_files(".js") {
+        let mut fonte = without_comments(&read(&format!("ui/{nome}")));
+        if nome == "ponte-web.js" {
+            let (antes, depois) = fonte
+                .split_once("const CONSTANTES_DO_DESKTOP = Object.freeze(")
+                .expect("a ponte declara `CONSTANTES_DO_DESKTOP`");
+            let (_, resto) = depois
+                .split_once(");")
+                .expect("`CONSTANTES_DO_DESKTOP` fecha");
+            fonte = format!("{antes}{resto}");
+        }
+        for linha in fonte.lines() {
+            let do_tamanho = MARCAS.iter().any(|marca| linha.contains(marca))
+                || CAMPOS.iter().any(|campo| linha.contains(campo));
+            let teto_na_linha = do_tamanho
+                && numeros_da_linha(linha)
+                    .iter()
+                    .any(|numero| tetos.contains(numero));
+            let teto_declarado =
+                numero_declarado(linha).is_some_and(|numero| tetos.contains(&numero));
+            if !teto_na_linha && !teto_declarado {
+                continue;
+            }
+            if let Some((_, excecao, _)) = EXCECOES
+                .iter()
+                .find(|(arquivo, excecao, _)| *arquivo == nome && linha.trim() == *excecao)
+            {
+                excecoes_vistas.insert(*excecao);
+                continue;
+            }
+            a_mao.push(format!("{nome}: {}", linha.trim()));
+        }
+    }
+
+    assert!(
+        a_mao.is_empty(),
+        "um teto do fio voltou a ser escrito à mão na `ui/` (os tetos de hoje são {tetos:?}). \
+         Um `maxlength` conta caracteres e o fio conta bytes, e um número copiado envelhece \
+         calado quando o fio muda: o teto vem de `limites_dos_campos`, e quem confere é \
+         `passaDoTeto`, em bytes.\n  {}",
+        a_mao.join("\n  ")
+    );
+    for (arquivo, excecao, _) in EXCECOES {
+        assert!(
+            excecoes_vistas.contains(excecao),
+            "a exceção `{excecao}`, de `{arquivo}`, não está mais lá: tire-a da lista, que \
+             uma exceção sem dono é uma porta que ninguém confere"
+        );
+    }
 }

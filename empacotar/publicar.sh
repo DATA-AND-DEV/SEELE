@@ -1153,6 +1153,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/aceite-de-mods-que-falha.js \
         --roteiro tools/roteiros/aceite-de-mods-que-nao-abre.js \
         --roteiro tools/roteiros/aceite-de-mods.js \
+        --roteiro tools/roteiros/apelido-no-hello.js \
         --roteiro tools/roteiros/apelido-recusado.js \
         --roteiro tools/roteiros/apps-mais-novos.js \
         --roteiro tools/roteiros/atualizacao.js \
@@ -1176,6 +1177,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/perfil-salva-sessao.js \
         --roteiro tools/roteiros/perfil-salva.js \
         --roteiro tools/roteiros/perfil-sessao.js \
+        --roteiro tools/roteiros/recusa-apagada.js \
         --roteiro tools/roteiros/recusa-sem-dono.js \
         --roteiro tools/roteiros/renomear-canal.js \
         --roteiro tools/roteiros/rodape-do-operador.js \
@@ -1183,6 +1185,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/sala.js \
         --roteiro tools/roteiros/sessao.js \
         --roteiro tools/roteiros/tela-de-outra-versao.js \
+        --roteiro tools/roteiros/tetos-dos-campos.js \
         --roteiro tools/roteiros/toque.js \
         --roteiro tools/roteiros/trocar-de-janela.js \
         --roteiro tools/roteiros/versao-do-servidor.js

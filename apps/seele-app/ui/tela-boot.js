@@ -128,50 +128,6 @@ let tentativas = 0;
 let jaPergunteiONome = false;
 
 /**
- * **Este `connect` é para o servidor que esta janela acabou de subir.**
- *
- * A `#tela-auth` existe para o momento TOFU do ADR 0003: quem chega a um
- * servidor de outra pessoa **olha** a impressão digital antes de entrar, e é
- * esse olhar que detecta alguém no meio do caminho. Hospedando não há meio do
- * caminho — o certificado foi gerado por este mesmo processo, nesta mesma
- * máquina, segundos antes, e a chave a conferir é a nossa contra a nossa.
- *
- * O relato de campo foi a pergunta certa: «se eu vou hospedar o server, por que
- * preciso ir pra tela onde mostra entrar no servidor?». Um pedágio que não
- * decide nada ensina a atravessar sem ler — e o dia em que ele decidir alguma
- * coisa, num servidor alheio de verdade, o dedo já vai estar treinado a passar
- * batido. A tela vale mais quando aparece menos.
- *
- * Uma bandeira e não um argumento de `conectar`: quem chama `conectar` de fora
- * — reconectar, trocar de servidor, um link de convite — está sempre indo a um
- * servidor que não é este, e não deveria precisar dizer isso.
- *
- * O nome é longo de propósito. Ele se chamava `hospedandoAqui`, que é o nome de
- * uma **função** que `tela-sessao.js` já tinha — e os catorze scripts desta
- * janela dividem um escopo global só. Um `let` colidindo com uma `function` de
- * outro arquivo não é um aviso: é `SyntaxError` no arquivo inteiro, que deixa
- * de carregar e leva junto tudo o que declarava.
- */
-// **O endereço que esta janela hospeda e está entrando, ou `null`.**
-//
-// Era uma bandeira `true`/`false`, lida e apagada na primeira linha de
-// `conectar` — para que uma tentativa de hospedar que desse errado não virasse
-// permissão para a conexão seguinte, essa a um servidor alheio de verdade.
-//
-// A05 da auditoria de 17/09: isso confunde «a tentativa falhou» com «a mesma
-// tentativa está continuando». Uma entrada que para no aceite de MODs é
-// retomada por `aceitarOsMods`, que chama `conectar` de novo — e a intenção já
-// tinha sido consumida, então quem hospeda caía na tela ENTRAR NO SERVIDOR
-// para conferir a própria chave.
-//
-// Guardar o **endereço** em vez de um sim resolve as duas coisas de uma vez:
-// continuar para o mesmo alvo reconhece a intenção, e qualquer outro alvo não
-// casa — não há o que vazar. Vive enquanto a hospedagem vive: `tela-fim.js` o
-// zera quando ela cai, senão o mesmo endereço na mão de outra máquina herdaria
-// a dispensa.
-let nossoServidorEm = null;
-
-/**
  * **Os passos do sucesso de uma entrada**: a geração, o desenho e a tela de
  * entrada, nesta ordem, com a resposta do `connect`.
  *
@@ -389,16 +345,6 @@ async function conectar(alvo, apelido, credencial) {
   // segunda pessoa sem nome, e passou a ser `pessoa-` mais quatro caracteres da
   // impressão da chave daqui. A casca não tem essa impressão, e pedi-la por IPC
   // só para montar uma palavra seria uma volta a mais para chegar no mesmo.
-  // **A bandeira é lida e apagada aqui, e não depois do `connect`.**
-  //
-  // Apagá-la só no caminho feliz a deixaria ligada quando o `connect` falha —
-  // e a próxima conexão, essa a um servidor alheio de verdade, entraria sem a
-  // conferência de identidade que é a razão de a `#tela-auth` existir. Uma
-  // tentativa de hospedar que dá errado não pode virar permissão para a
-  // seguinte.
-  // Casa por alvo, e não por «alguém apertou hospedar»: continuar para o mesmo
-  // endereço é a mesma entrada; qualquer outro é outra conversa.
-  const nossoServidor = nossoServidorEm !== null && nossoServidorEm === ultimoAlvo;
   // **Os valores chegam por argumento desde a 0.9.0.**
   //
   // Eles vinham de dois campos desta tela, e a comp tirou os dois: o endereço
@@ -448,6 +394,30 @@ async function conectar(alvo, apelido, credencial) {
       largarAEntrada(alvo, resposta?.geracao, esta !== tentativas ? "outra a substituiu" : "a pessoa saiu da espera");
       return;
     }
+    // **Este `connect` é para o servidor que esta janela hospeda?** (tarefa 18
+    // da F7). Se for, a `#tela-auth` não para ninguém: ela existe para o
+    // momento TOFU do ADR 0003 — quem chega ao servidor de outra pessoa olha a
+    // impressão antes de entrar —, e aqui a chave a conferir é a nossa contra a
+    // nossa. «Se eu vou hospedar o server, por que preciso ir pra tela onde
+    // mostra entrar no servidor?» Um pedágio que não decide nada ensina a
+    // atravessar sem ler.
+    //
+    // **Quem responde é a chave, e não o endereço.** Foi um sim solto, que
+    // vazava para a conexão seguinte; depois, o endereço que esta janela subiu,
+    // que um dia volta a ser de outra máquina na mesma rede. O `onde_estou`
+    // compara a impressão que este aperto de mão conferiu com a do servidor
+    // guardado: o mesmo endereço com outra chave confere, e uma tentativa de
+    // hospedar que falhou não dispensa nada na seguinte, que pergunta de novo.
+    // No navegador, que não hospeda, a ponte recusa, e a resposta é «não».
+    const nossoServidor = (await invoke("onde_estou").catch(() => null)) === "Guardado";
+    // **A mesma conferência depois da pergunta**, como depois de cada espera
+    // desta entrada (lote W2): uma tentativa nova pode ter começado enquanto
+    // ela voltava, e entre esta conferência e o `depoisDeConectar` não há
+    // espera nenhuma (F5 e F8).
+    if (esta !== tentativas || aBatidaFoiLargada(esta)) {
+      largarAEntrada(alvo, resposta?.geracao, esta !== tentativas ? "outra a substituiu" : "a pessoa saiu da espera");
+      return;
+    }
     depoisDeConectar(resposta, alvo, nossoServidor);
   } catch (falha) {
     // `connect` responde por `FalhaDaEntrada` (em `main.rs`): o erro de sempre
@@ -467,8 +437,9 @@ async function conectar(alvo, apelido, credencial) {
     // A frase manda escolher outro e entrar de novo, e o lugar de escolher é o
     // perfil. Com o recusado em `ultimoApelido`, a tentativa seguinte não lia
     // mais o perfil, e o nome novo ficava gravado sem sair da máquina — o
-    // relato do `d084cfb4`, agora com um nome que alguém escolheu.
-    if (motivo?.Refused?.reason === "NicknameTaken") {
+    // relato do `d084cfb4`, agora com um nome que alguém escolheu. E o
+    // apelido grande demais, que a FFI recusa antes de discar (lote C55).
+    if (motivo?.Refused?.reason === "NicknameTaken" || motivo?.ApelidoGrandeDemais) {
       ultimoApelido = null;
       // E a credencial desta tentativa fica para a seguinte a este alvo — o
       // `alvo` desta chamada, e não o `ultimoAlvo`, pela razão do lote R logo
@@ -748,11 +719,9 @@ async function hospedar() {
     // alvo da conexão que vem em seguida, e é o que `conectar()` sem argumento
     // vai usar.
     ultimoAlvo = anfitriao.aqui;
-    // E entrar aqui não pede para conferir a própria chave — ver
-    // `nossoServidorEm`. Preso ao endereço que acabou de subir, e não a um sim
-    // solto: é isso que faz a retomada depois do aceite de MODs continuar sendo
-    // a mesma entrada, sem dispensar nada em nenhum outro endereço.
-    nossoServidorEm = anfitriao.aqui;
+    // E entrar aqui não pede para conferir a própria chave: quem decide é o
+    // `onde_estou`, pela chave deste servidor, em `conectar` — também na
+    // retomada depois do aceite de MODs, que pergunta de novo.
     mostrarAlcance(
       anfitriao.alcance,
       anfitriao.porta_recusada,
@@ -927,6 +896,22 @@ $("botao-hospedar").addEventListener("click", () => {
  * que nasceu.
  */
 async function abrirHospedagem() {
+  // **Com o servidor guardado no ar, HOSPEDAR AQUI volta a ele** (tarefa 18 da
+  // F7). Desde a tarefa 19 sair não o derruba, e quem aperta HOSPEDAR AQUI com
+  // ele no ar quer o servidor que já hospeda: hospedar de novo daria «JÁ ESTOU
+  // HOSPEDANDO», e a tela de preparar ofereceria criar um segundo que não
+  // cabe. É o caminho do VOLTAR AO MEU SERVIDOR (`camada-hospedagem.js`): o
+  // `conectar` de sempre, no endereço desta máquina, sem credencial.
+  let meu = null;
+  try {
+    meu = await invoke("meu_servidor");
+  } catch {
+    meu = null;
+  }
+  if (meu?.alvo) {
+    await conectar(meu.alvo);
+    return;
+  }
   let guardados = [];
   try {
     guardados = await invoke("servidores_guardados");
@@ -1352,6 +1337,16 @@ async function confirmarPreparar() {
     // **Registrar antes de levantar.** Um registro com um servidor que nunca
     // subiu se explica; um servidor no ar que ninguém pediu, não.
     const nome = $("preparar-nome").value.trim();
+    // O teto do fio, em bytes, antes de subir (pendência 58, item 55): o nome
+    // só chega ao `renomear_server` depois da entrada, e o núcleo o recusaria
+    // calado com o servidor já no ar.
+    const grandeDemais = await passaDoTeto("nome_do_servidor", nome);
+    if (grandeDemais) {
+      erro.hidden = false;
+      erro.textContent = grandeDemais;
+      $("preparar-nome").focus();
+      return;
+    }
     const guardado = await invoke("criar_servidor", { nome });
     servidorEscolhido = guardado.id;
 
