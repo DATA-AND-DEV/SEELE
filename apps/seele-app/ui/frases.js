@@ -650,6 +650,26 @@ function fraseDeErro(erro, apelido, deOnde) {
           : "")
       );
     }
+    // **As saídas de quem hospeda com um MOD de API antiga**, as recusas com
+    // campo (`FalhaAoResolverModAntigo`, em `mods.rs`; as sem campo estão no
+    // `FRASES`). O motivo de um pacote que não serve é um nome: os do núcleo
+    // têm frase em `RECUSAS_DE_PACOTE`, e dois vêm da leitura por hash.
+    if (erro.PacoteNaoServe) {
+      const motivo = erro.PacoteNaoServe;
+      const porque = {
+        "conteudo-de-outro-mod": "o pacote baixado é de outro MOD",
+        "conteudo-nao-bate": "o conteúdo do pacote não é o que o catálogo publicou",
+      }[motivo] ?? RECUSAS_DE_PACOTE[motivo] ?? motivo;
+      return `A VERSÃO NOVA DESTE MOD NÃO SERVE: ${porque}.\nO MOD continua como estava.`;
+    }
+    // A de unidade com o mesmo nome é da `FalhaNoMod`, e chega como texto: esta
+    // chega como objeto, com o que o banco disse.
+    if (typeof erro.BancoNaoRespondeu === "string") {
+      return (
+        `O BANCO DESTE SERVIDOR NÃO RESPONDEU: ${erro.BancoNaoRespondeu}.\n` +
+        "O MOD continua como estava."
+      );
+    }
     // ADR 0046: esta versão foi revogada. A frase diz o defeito e o conserto,
     // como a lista assinada os escreve — nunca uma recusa genérica. Serve a
     // `FalhaAoHospedar` e a `conferir_esta_versao`, que usam o mesmo nome.
@@ -1083,6 +1103,17 @@ const FRASES = {
       "O CATÁLOGO NÃO É O NOSSO.\n" +
       "A assinatura não confere com a chave deste SEELE. Não tente de novo: " +
       "avise quem publica.",
+
+    // As saídas de quem hospeda com um MOD de API antiga, com o servidor parado
+    // (`FalhaAoResolverModAntigo`, em `mods.rs`; tarefa 13 do plano da F3,
+    // Step 5b). As que trazem o motivo são montadas em `fraseDeErro`.
+    ServidorNoAr:
+      "PARE A HOSPEDAGEM PRIMEIRO.\n" +
+      "Com um servidor no ar nesta janela, o SEELE não atualiza nem desliga MOD de servidor guardado.",
+    ServidorDesconhecido:
+      "ESTE SERVIDOR NÃO ESTÁ ENTRE OS GUARDADOS DESTA MÁQUINA.\nNada foi mudado.",
+    NaoEDeApiAntiga:
+      "ESTE MOD JÁ NÃO IMPEDE DE HOSPEDAR.\nNada foi mudado: tente hospedar de novo.",
 
     // Instalar um MOD de uma pasta (`FalhaAoInstalarMod`, em `mods.rs`). A
     // única recusa sem campo; as outras três, que trazem o motivo ou o caminho,

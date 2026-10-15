@@ -2422,6 +2422,12 @@ fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
         ("src/main.rs", "FalhaAoEscolher"),
         ("src/main.rs", "FalhaNaPortaria"),
         ("src/mods.rs", "FalhaAoInstalarMod"),
+        // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
+        // tarefa 13 do plano da F3, Step 5b). O nome sozinho não basta para a
+        // `BancoNaoRespondeu(String)`, que divide o nome com a de unidade da
+        // `FalhaNoMod`: a bancada `hospedar-com-mod-antigo.cjs` monta cada
+        // variante pelo `fraseDeErro` e confere a frase.
+        ("src/mods.rs", "FalhaAoResolverModAntigo"),
     ] {
         for variant in variants_of(&read(file), enumeration) {
             if !names(&script, &variant) {

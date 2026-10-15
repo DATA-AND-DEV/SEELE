@@ -58,4 +58,30 @@ const juntos = frase([["seele/estilo", 4], ["x/sumido", null]]);
 assert.ok(juntos.includes("seele/estilo: feito para a API 4") && juntos.includes("x/sumido: o pacote"),
   `com dois MODs, um deles sumiu da frase: ${juntos}`);
 
-console.log("hospedar com MOD antigo: a frase diz o MOD, a API e as três saídas na ordem do dono; sem o pacote, diz que ele falta, sem número.");
+// 3. **As recusas das saídas** (`FalhaAoResolverModAntigo`, em `src/mods.rs`):
+// cada variante, montada como o Tauri a manda — a de unidade como texto, a com
+// campo como objeto —, sai com frase, e não com o recuo «ALGO FALHOU» nem com o
+// nome da variante. A `BancoNaoRespondeu(String)` divide o nome com a de
+// unidade da `FalhaNoMod`, e o guarda de nomes em `frontend.rs` não a separa:
+// é aqui que ela é conferida.
+const recusas = {
+  ServidorNoAr: [/PARE A HOSPEDAGEM/, /servidor no ar nesta janela/],
+  ServidorDesconhecido: [/NÃO ESTÁ ENTRE OS GUARDADOS/, /Nada foi mudado/],
+  NaoEDeApiAntiga: [/JÁ NÃO IMPEDE/, /hospedar de novo/],
+};
+for (const [nome, esperadas] of Object.entries(recusas)) {
+  const dita = contexto.fraseDeErro(nome);
+  assert.doesNotMatch(dita, /ALGO FALHOU/, `«${nome}» caiu no recuo: ${dita}`);
+  for (const esperada of esperadas) assert.match(dita, esperada, `a frase de «${nome}» não diz ${esperada}: ${dita}`);
+}
+const outroMod = contexto.fraseDeErro({ PacoteNaoServe: "conteudo-de-outro-mod" });
+assert.match(outroMod, /NÃO SERVE: o pacote baixado é de outro MOD/, `a recusa do pacote não diz por quê: ${outroMod}`);
+assert.match(outroMod, /continua como estava/, `a recusa do pacote não diz que nada mudou: ${outroMod}`);
+const apiVelha = contexto.fraseDeErro({ PacoteNaoServe: "api-too-old" });
+assert.match(apiVelha, /roda no Servidor 0\.15/, `um motivo do núcleo não sai pela frase dele: ${apiVelha}`);
+const banco = contexto.fraseDeErro({ BancoNaoRespondeu: "database is locked" });
+assert.doesNotMatch(banco, /ALGO FALHOU|BancoNaoRespondeu/, `a falha do banco caiu no recuo: ${banco}`);
+assert.match(banco, /database is locked/, `a falha do banco não diz o que o banco disse: ${banco}`);
+assert.match(banco, /continua como estava/, `a falha do banco não diz que nada mudou: ${banco}`);
+
+console.log("hospedar com MOD antigo: a frase diz o MOD, a API e as três saídas na ordem do dono; sem o pacote, diz que ele falta, sem número; e toda recusa das saídas tem frase.");
