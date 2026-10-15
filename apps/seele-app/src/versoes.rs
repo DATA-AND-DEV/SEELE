@@ -2777,4 +2777,69 @@ mod o_quintal_sobe_da_0_15 {
 
         servidor.shutdown();
     }
+
+    /// **A saída 3 de quem hospeda, de ponta a ponta** (tarefa 13 do plano da
+    /// F3, Step 5b: «a saída 3 tem prova própria»). Desligado o 3.1.0 com o
+    /// servidor parado, hospedar não recusa mais e sobe, o MOD não está entre
+    /// os ligados, e o quintal dele continua no banco do servidor no ar.
+    #[tokio::test]
+    async fn a_saida_3_desliga_com_o_servidor_parado_e_hospedar_sobe_com_o_quintal() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        rusqlite::Connection::open(dir.path().join("seele.db"))
+            .unwrap()
+            .execute_batch(&std::fs::read_to_string(format!("{PASTA}/seele.sql")).unwrap())
+            .unwrap();
+        let gravado_na_0_15 =
+            quintal_do_estilo(&dir.path().join("seele.db")).expect("o quintal da pasta da 0.15.1");
+        copiar(
+            &Path::new(PASTA).join("mod-packages"),
+            &dir.path().join("mod-packages"),
+        );
+        super::primeira_abertura(&config);
+        crate::mods::levar_pacotes_antigos_para_o_cache(dir.path());
+
+        crate::mods::resolver_mod_de_api_antiga(
+            &config,
+            None,
+            "seele/estilo",
+            &crate::mods::SaidaDoModAntigo::Desligar,
+            false,
+        )
+        .expect("a saída 3 não desligou o 3.1.0");
+
+        let banco = crate::servidores::banco_de_hospedar(&config, None);
+        let raizes = crate::servidores::raizes_dos_mods(&config, None);
+        assert!(
+            crate::mods::mods_de_api_antiga(&banco, &raizes).is_empty(),
+            "depois da saída 3, hospedar ainda recusaria"
+        );
+        let servidor = seele_server::Daemon::bind(seele_server::ServerConfig {
+            name: "Casa".to_owned(),
+            mods_dir: Some(raizes),
+            listen: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0)),
+            database: seele_server::persistence::Location::File(banco),
+            ..seele_server::ServerConfig::default()
+        })
+        .await
+        .expect("o servidor não subiu depois da saída 3");
+        {
+            let banco = servidor.server().persistence.lock().await;
+            assert!(
+                !seele_server::persistence::mods::enabled(&banco)
+                    .unwrap()
+                    .iter()
+                    .any(|ligado| ligado.id == "seele/estilo"),
+                "depois da saída 3, o servidor no ar ainda exige o estilo"
+            );
+            assert_eq!(
+                seele_server::persistence::mods::ler_quintal(&banco, "seele/estilo")
+                    .unwrap()
+                    .get("theme"),
+                Some(&gravado_na_0_15),
+                "a saída 3 levou o quintal do estilo"
+            );
+        }
+        servidor.shutdown();
+    }
 }
