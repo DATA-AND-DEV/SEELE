@@ -4218,19 +4218,24 @@ fn a_api_da_casca_bate_com_a_do_nucleo() {
          mandaria alguém atualizar o que já está atualizado"
     );
 
-    // E o conjunto aceito, na mesma ordem em que o Rust o escreve.
-    let aceitas = rust
-        .split_once("pub const APIS_ACEITAS: &[u32] = &[")
+    // E o conjunto aceito, na mesma ordem: **o valor compilado**, e não o
+    // texto. Desde o corte da API 6 o `APIS_ACEITAS` sai de `APIS_POR_LINHA`
+    // (`c4eb6d03`), e a leitura do texto, que procurava a lista escrita,
+    // reprovava com «sumiu» — o guarda dependia da forma, e não do número.
+    let da_casca: Vec<u32> = casca
+        .split_once("const APIS_QUE_ESTE_APLICATIVO_ACEITA = [")
         .and_then(|(_, resto)| resto.split_once(']'))
-        .map(|(lista, _)| lista.replace(char::is_whitespace, ""))
-        .expect("`APIS_ACEITAS` sumiu de seele-proto");
-    let esperado = format!(
-        "const APIS_QUE_ESTE_APLICATIVO_ACEITA = [{}];",
-        aceitas.trim_end_matches(',')
-    );
-    assert!(
-        casca.contains(&esperado),
-        "a casca lista outras APIs aceitas que o núcleo: esperava `{esperado}`"
+        .map(|(lista, _)| {
+            lista
+                .split(',')
+                .filter_map(|n| n.trim().parse().ok())
+                .collect()
+        })
+        .expect("`APIS_QUE_ESTE_APLICATIVO_ACEITA` sumiu de camada-mods.js");
+    assert_eq!(
+        da_casca,
+        seele_ffi::mods::APIS_ACEITAS,
+        "a casca lista outras APIs aceitas que o núcleo"
     );
 }
 

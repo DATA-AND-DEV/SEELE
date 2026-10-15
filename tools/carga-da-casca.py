@@ -72,11 +72,19 @@ def apis_aceitas() -> str:
     Um número escrito à mão no duble envelhece na primeira subida de API, e o
     catálogo do roteiro passa a oferecer o que o build de verdade filtraria.
     Falha alto se a constante mudar de forma: um duble que adivinha não prova.
+
+    Desde o corte da API 6 (`c4eb6d03`), o conjunto desta linha sai da tabela
+    das linhas (`APIS_ACEITAS = APIS_POR_LINHA[0].1`), e é ela que se lê.
     """
-    achado = re.search(r"pub const APIS_ACEITAS: &\[u32\] = &\[([0-9, ]+)\];", PROTO_MODS.read_text())
-    if not achado:
-        raise SystemExit(f"não achei `APIS_ACEITAS` em {PROTO_MODS}; o duble precisa dela.")
-    return "[" + achado.group(1) + "]"
+    texto = PROTO_MODS.read_text()
+    derivada = re.search(r"pub const APIS_ACEITAS: &\[u32\] = APIS_POR_LINHA\[(\d+)\]\.1;", texto)
+    tabela = re.search(r"pub const APIS_POR_LINHA: \[\(&str, &\[u32\]\); \d+\] =\s*\[(.*?)\];", texto, re.S)
+    if derivada and tabela:
+        linhas = re.findall(r'\(\s*"[^"]*"\s*,\s*&\[([0-9, ]+)\]\s*\)', tabela.group(1))
+        indice = int(derivada.group(1))
+        if indice < len(linhas):
+            return "[" + linhas[indice] + "]"
+    raise SystemExit(f"não achei `APIS_ACEITAS` em {PROTO_MODS}; o duble precisa dela.")
 
 
 def permissoes_da_janela() -> str:
