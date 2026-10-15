@@ -3131,9 +3131,10 @@ struct Anfitriao {
     /// quase nunca funciona.
     ///
     /// Nada nesta tela dizia isso. O relato foi «teste em LAN não funciona».
-    firewall_nao_cobre: Option<String>,
-    /// O mesmo, com o motivo e se o botão que pede a regra resolve
-    /// ([`firewall::NaTela`]): a tela mostra o botão só quando ele resolve.
+    ///
+    /// Com o motivo, a frase com o que fazer e se o botão que pede a regra
+    /// resolve ([`firewall::NaTela`]): a tela mostra o botão só quando ele
+    /// resolve (D-sala-1).
     firewall: Option<firewall::NaTela>,
     /// O roteador abriu a porta, só que não a canônica (8383) — ver "O
     /// quarto" no ADR 0022.
@@ -3520,7 +3521,6 @@ async fn hospedar(
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
         encontro_recusado: alcance
             .and_then(|alcance| alcance.encontro_recusado().map(str::to_owned)),
-        firewall_nao_cobre: firewall.as_ref().map(|tela| tela.frase.clone()),
         firewall,
         porta_nao_canonica: alcance
             .and_then(|alcance| alcance.porta_nao_canonica().map(str::to_owned)),

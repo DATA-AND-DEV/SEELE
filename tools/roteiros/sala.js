@@ -155,7 +155,7 @@ exigir(
 );
 exigir(conserto() === null, "a tela de hospedar oferece, na cópia portátil, um botão que não resolve nada");
 // O caminho de verdade: o HOSPEDAR AQUI, com a resposta do Rust.
-SEELE_RESPOSTAS.hospedar = { ...SEELE_RESPOSTAS.hospedar, firewall: semRegra, firewall_nao_cobre: semRegra.frase };
+SEELE_RESPOSTAS.hospedar = { ...SEELE_RESPOSTAS.hospedar, firewall: semRegra };
 await entrarNaSessao();
 exigir(
   parede()?.textContent === semRegra.frase,
