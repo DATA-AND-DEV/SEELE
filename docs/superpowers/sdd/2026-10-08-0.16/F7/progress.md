@@ -930,3 +930,53 @@ bancadas da janela** (`apps/seele-app/bancada/*.cjs`), antes da entrega.
     permite ou bloqueia;
   - a casca tem uma linha no PERFIL, e não uma pergunta ao abrir;
   - o `alcance::firewall` do servidor não é chamado por ninguém.
+
+## A faixa do toque e os consertos da D-sala-1 (15/10)
+
+**A faixa do toque cobria o veredito** (achado da F3, pelo guarda 11): a 1024,
+o centro do texto de um primeiro contato caía embaixo dela; reproduzido aqui, e
+a 1440 ela também cruzava parte do texto. Agora ela **empurra a tela em vez de
+cobri-la** (`58b597b4`): acesa, a `.tela` à vista abre no topo o espaço até o pé
+dela. O passo 5 do `toque.js` mede retângulo contra retângulo.
+
+**A conferência no PC de testes** (a orquestradora, pelo SSH, só lendo; os
+passos que instalam ficaram com o dono): a v0.15.1 instalada, a regra `SEELE`
+certa (entrada, permite, qualquer perfil, UDP, pelo programa), e um par TCP/UDP
+`seele-app.exe` do aviso do Windows, só no perfil público, em minúsculas. O
+passo 6 confirmou no app de verdade o ramo «outra cópia». O instalador e o
+portátil da 0.16 saíram de `95ff2689`.
+
+**Os consertos pedidos pela orquestradora** (os achados 1, 2 e 4):
+
+| conserto | commit |
+|---|---|
+| 2: o app lê a regra num lugar só (`src/firewall.rs`), pelo PowerShell — ligada, de entrada, UDP, do caminho inteiro do programa que roda, no perfil da rede ativa, com o bloqueio vencendo | `1daa487a` |
+| 4: o `alcance::firewall` do `seele-server` sai (sem chamador, só o nome do arquivo) | `d7c51e41` |
+| 1: os textos do instalador e do ADR 0043 dizem o que a regra é; o comentário da caixa «desmarcada» sai | `4f6ca33e` |
+
+- **Os testes usam a saída de verdade do PC**, e não amostras inventadas. O
+  leitor que roda no Windows tem um teste `cfg(windows)` (o CI e o PC), e um
+  gêmeo diz «PARCIAL» fora dele.
+- **Reversões, cada uma reprovando:** o bloqueio ignorado; só o nome do arquivo;
+  o perfil ignorado; e a leitura de antes («existe uma regra chamada SEELE»),
+  que deixa passar um bloqueio com esse nome.
+- **Fica com o dono** (o achado 3): a D-sala-1 diz «pergunta», e a casca tem uma
+  linha no PERFIL com um botão.
+- **Fica anotado:** o botão «ABRIR A PORTA AGORA» (o da sala, meu, e o da tela
+  de hospedar, da F5) cria a regra do SEELE **instalado**; para a cópia
+  portátil e para um bloqueio do aviso do Windows ele não resolve nada, e hoje
+  aparece igual. Pedir a mudança passa pela orquestradora.
+
+**Medido no caminho:**
+- o scratchpad em `/private/tmp` foi limpo entre 11 e 15/10, com os scripts de
+  verificação e as pastas de comparação que eu tinha passado à F8; recriados;
+- a bancada do celular reprovou de forma intermitente o `entrada-desfechos-390`
+  («PONTE_NO_LUGAR_DO_TAURI is not defined»), sem relação com a faixa; foi à F8
+  com a pasta guardada.
+
+**Como está a ponta** (`4f6ca33e`, sobre a `versao/0.16` `95ff2689`): app
+743/743; os 40 roteiros; as duas bancadas da ponte; a do celular; e 33 das 34
+bancadas da janela (a do executor pede o motor com o wasi-sdk). A
+`voz-no-navegador` reprovou uma vez com «Could not start audio source» e passou
+na seguinte, com o `.wasm` recompilado: a minha verificação usava um `.wasm` de
+antes da integração, e passou a recompilá-lo sempre.

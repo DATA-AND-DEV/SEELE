@@ -195,3 +195,20 @@ Passo 0.
    Não há pergunta ao abrir o app. Isso o dono vê na tela, e é dele rever.
 4. O `alcance::firewall` do `seele-server`, cuja documentação diz ser quem lê a
    regra, não é chamado por ninguém fora dos testes. Quem lê é o `main.rs`.
+
+## O que aconteceu (15/10)
+
+- **Rodados pela orquestradora, só lendo:** o Passo 0, o 1 (o instalador e o
+  portátil da 0.16 saíram de `95ff2689`) e o 6 (o portátil com a v0.15.1
+  instalada: a janela abriu pelo SSH, a sala subiu na 8385, e o log disse
+  «este SEELE está rodando de C:\SEELE\entrega\portatil\SEELE.exe…»). Os passos
+  3 a 5 ficam com o dono, porque instalar recria a regra do firewall.
+- **O PC:** a regra `SEELE` certa, e um par TCP/UDP `seele-app.exe` do aviso do
+  Windows, só no perfil público e em minúsculas. Nenhum bloqueio.
+- **Os achados 1, 2 e 4 foram consertados** (`1daa487a`, `d7c51e41`,
+  `4f6ca33e`): o app lê a regra num lugar só, pelo PowerShell, com o bloqueio,
+  o perfil e o caminho inteiro; o `alcance::firewall` saiu; os textos dizem o
+  que a regra é. As linhas esperadas no `seele.log` dos passos 2, 5 e 6 acima
+  são as de **antes** desse conserto: com ele, a linha da sala traz a frase
+  nova, e o log ganha a linha «o firewall do Windows, para este SEELE».
+- **O achado 3** (a pergunta da D-sala-1 é uma linha no PERFIL) foi ao dono.
