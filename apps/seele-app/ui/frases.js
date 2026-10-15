@@ -411,6 +411,9 @@ const ETAPAS = {
   Tentando: "TENTANDO UM ENDEREÇO DO CONVITE",
   // Diz o que abriu e não o que vem: quem lê isto ainda pode não entrar.
   CaminhoAberto: "O CAMINHO ATÉ AQUI ABRIU",
+  // Provisória: a frase de quem liga é da tarefa 7f (CHAMANDO ALICE… e
+  // CANCELAR), que troca esta. Diz que chama, e não que alguém atendeu.
+  Tocando: "CHAMANDO",
   Dentro: "DENTRO",
   // Neutra de propósito. `Desistiu` carrega o `ConnectError` inteiro — o núcleo
   // o guardou assim para não achatar `PinChanged` e `InviteMismatch`, os dois
