@@ -2407,6 +2407,13 @@ function mesmoFeitio(velho, novo) {
  * tique seguinte, o «⋯» e o SINAL E ESTADO que a pessoa abriu, com o volume
  * de dentro. O pedido vale quando muda (`abertoPedido`); fora disso, fica o
  * que a pessoa escolheu.
+ *
+ * **Fora o `open`, todo atributo que a linha montada não tem sai, e há quem
+ * conte com isso** (M4 da revisão): a casca do celular marca com `data-celular`
+ * o `li.voice_room` que adaptou (`celular-servidor.js`) e só o adapta de novo
+ * porque a marca sai aqui no quadro seguinte. Preservar outro atributo faria o
+ * celular parar de adaptar calado — o ENTRAR MUDO e as marcas da sala sumiriam.
+ * A `tools/bancada-do-celular.py` (`aba_servidor`) prende isso.
  */
 function vestirComo(velho, novo) {
   if (velho.nodeType === Node.TEXT_NODE) {
