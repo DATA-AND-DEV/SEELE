@@ -291,6 +291,12 @@ pub async fn receive(
                 vault.store.abandon(&mut ledger, reservation);
                 anyhow::bail!("a mensagem do anexo não foi gravada: {motivo:?}");
             }
+            // Um anexo repetido para uma mensagem que a moderação apagou: nem o
+            // arquivo se pendura nela, nem ela volta a ser anunciada.
+            crate::persistence::messages::Gravacao::Apagada { id, .. } => {
+                vault.store.abandon(&mut ledger, reservation);
+                anyhow::bail!("a mensagem do anexo foi apagada pela moderação ({id:?})");
+            }
         };
 
         // A retry that had in fact succeeded. `append_batch` deduplicates by
