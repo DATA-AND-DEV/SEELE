@@ -947,6 +947,75 @@ async fn um_token_que_ninguem_autorizou_nao_escreve_nada() -> Result<()> {
     Ok(())
 }
 
+/// **O que a janela recebe de um fluxo de imagem recusado é o nome da recusa**
+/// (o corte da API 6; a auditoria do `v6.json`, `recusas.volume`).
+///
+/// O fluxo de imagem achatava a recusa em «imagem recusada: SemEspera», o
+/// `Debug` do enum, e o MOD a recebia assim em `e.erro`, fora da lista fechada
+/// que o `v6.json` promete. A bancada não via, porque o dublê dela já rejeita
+/// com o nome. Aqui a pergunta é feita pelo cliente de verdade
+/// (`Transfers::imagem_de_mod`), que é o que a janela usa, e o que se confere é
+/// o texto que ele devolve — o que vira `e.erro`:
+///
+/// - um token que ninguém autorizou → `sem-espera`;
+/// - um GIF para um MOD que só autorizou PNG → `tipo-recusado:gif` (o
+///   `recusaParaOMod` da casca faz disso `erro: 'tipo-recusado'` e
+///   `detectado: 'gif'`);
+/// - bytes de formato nenhum → `formato-desconhecido`, e não `tipo-recusado`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recusa_de_um_fluxo_de_imagem_chega_a_janela_pelo_nome() -> Result<()> {
+    use seele_proto::volume::{PedidoDeImagem, VolumeHeader};
+    let _vaga = vaga::minha();
+    let (_daemon, root, mut cliente, serving) = servidor_com_o_mod(208).await?;
+    let transferencias = cliente.transfers();
+    let enviar = |token: &str, bytes: Vec<u8>| {
+        let transferencias = transferencias.clone();
+        let token = token.to_owned();
+        async move {
+            transferencias
+                .imagem_de_mod(
+                    PedidoDeImagem::Enviar {
+                        cabecalho: VolumeHeader {
+                            mod_id: "prova/ponte".into(),
+                            token,
+                        },
+                        bytes: bytes.len() as u64,
+                    },
+                    &bytes,
+                )
+                .await
+                .map(|_| ())
+                .map_err(|erro| erro.to_string())
+        }
+    };
+
+    assert_eq!(
+        enviar("inventado", png_minimo()).await,
+        Err("sem-espera".to_owned()),
+        "o token que ninguém autorizou não chegou à janela pelo nome"
+    );
+
+    autorizar(&mut cliente, 1, "t-gif", &["png"]).await?;
+    let mut gif = b"GIF89a".to_vec();
+    gif.extend_from_slice(&[1, 0, 1, 0, 0, 0, 0, 0x3B]);
+    assert_eq!(
+        enviar("t-gif", gif).await,
+        Err("tipo-recusado:gif".to_owned()),
+        "o tipo recusado não chegou à janela pelo nome, com o que foi detectado"
+    );
+
+    autorizar(&mut cliente, 2, "t-nada", &["png"]).await?;
+    assert_eq!(
+        enviar("t-nada", b"isto nao e imagem nenhuma".to_vec()).await,
+        Err("formato-desconhecido".to_owned()),
+        "bytes de formato nenhum não chegaram à janela como formato-desconhecido"
+    );
+
+    serving.abort();
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
 /// **O tipo é lido dos bytes, e não do que alguém declara.**
 ///
 /// Decisão 2 do ADR 0048: quem confere é o servidor, porque o MOD deixou de ver

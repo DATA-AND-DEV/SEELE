@@ -410,7 +410,66 @@ pub async fn receber(
     let cabecalho: seele_proto::volume::VolumeHeader = crate::frame::read(fluxo)
         .await
         .map_err(|_| (String::new(), VolumeRefusal::Incompleto))?;
-    receber_imagem(esperas, raizes, pessoa, fluxo, cabecalho, None).await
+    receber_imagem(esperas, raizes, pessoa, fluxo, cabecalho, None)
+        .await
+        .map_err(|(token, recusa)| (token, recusa.motivo))
+}
+
+/// **Uma recusa de volume, com o que o MOD lê dela** (o corte da API 6; a
+/// auditoria do `v6.json`, `recusas.volume`).
+///
+/// O fio do controle leva só o [`seele_proto::volume::VolumeRefusal`]
+/// (`VolumeRecusado`), e ele não muda. O fluxo de imagem leva um texto, que a
+/// casca entrega ao MOD em `e.erro` (`recusaParaOMod`), e esse texto tem de ser
+/// um nome da lista fechada: era «imagem recusada: SemEspera», o `Debug` do
+/// enum. E o que só os bytes dizem — o tipo que eles têm, ou que não têm tipo
+/// nenhum — viaja até aqui, para o MOD saber se mandou um GIF onde pediu PNG
+/// ou um arquivo que não é imagem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Recusa {
+    /// O que o controle diz.
+    pub motivo: seele_proto::volume::VolumeRefusal,
+    /// O que os bytes são, quando foi por eles que a recusa veio.
+    pub detectado: Detectado,
+}
+
+/// O que os bytes de um volume recusado são.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Detectado {
+    /// A recusa não olhou os bytes.
+    Nada,
+    /// Um formato que o produto conhece e o MOD não autorizou: o sufixo dele.
+    Tipo(&'static str),
+    /// Bytes de formato nenhum.
+    FormatoNenhum,
+}
+
+impl From<seele_proto::volume::VolumeRefusal> for Recusa {
+    fn from(motivo: seele_proto::volume::VolumeRefusal) -> Self {
+        Self {
+            motivo,
+            detectado: Detectado::Nada,
+        }
+    }
+}
+
+impl Recusa {
+    /// O nome que o MOD lê em `e.erro`, da lista `recusas.volume` do
+    /// `api/v6.json`; o sufixo depois de `:` a casca faz campo (`detectado`).
+    #[must_use]
+    pub fn nome_para_o_mod(self) -> String {
+        use seele_proto::volume::VolumeRefusal;
+        match (self.motivo, self.detectado) {
+            (VolumeRefusal::SemEspera, _) => "sem-espera".to_owned(),
+            (VolumeRefusal::TipoRecusado, Detectado::Tipo(tipo)) => format!("tipo-recusado:{tipo}"),
+            (VolumeRefusal::TipoRecusado, Detectado::FormatoNenhum) => {
+                "formato-desconhecido".to_owned()
+            }
+            (VolumeRefusal::TipoRecusado, Detectado::Nada) => "tipo-recusado".to_owned(),
+            (VolumeRefusal::NaoGravei, _) => "nao-gravei".to_owned(),
+            (VolumeRefusal::Incompleto, _) => "incompleto".to_owned(),
+        }
+    }
 }
 
 /// Recebe o corpo com autorização consumível e tamanho opcional conferido.
@@ -421,16 +480,16 @@ pub async fn receber_imagem(
     fluxo: &mut quinn::RecvStream,
     cabecalho: seele_proto::volume::VolumeHeader,
     tamanho: Option<u64>,
-) -> Result<Chegou, (String, seele_proto::volume::VolumeRefusal)> {
+) -> Result<Chegou, (String, Recusa)> {
     use seele_proto::volume::VolumeRefusal;
     {
         use seele_proto::control::Validate as _;
         if cabecalho.validate().is_err() {
-            return Err((String::new(), VolumeRefusal::SemEspera));
+            return Err((String::new(), VolumeRefusal::SemEspera.into()));
         }
     }
     let token = cabecalho.token.clone();
-    let errar = |motivo| (token.clone(), motivo);
+    let errar = |motivo: VolumeRefusal| (token.clone(), Recusa::from(motivo));
 
     let espera = {
         let Ok(mut guarda) = esperas.lock() else {
@@ -486,7 +545,7 @@ pub async fn receber_imagem(
             // O de obras sai em toda saída que não é a de cima. Deixá-lo seria
             // lixo com nome de token na pasta de quem hospeda.
             let _ = tokio::fs::remove_file(&obras).await;
-            Err(errar(motivo))
+            Err((token.clone(), motivo))
         }
     }
 }
@@ -508,7 +567,7 @@ async fn escorrer(
     obras: &std::path::Path,
     espera: &Espera,
     tamanho: Option<u64>,
-) -> Result<Chegou, seele_proto::volume::VolumeRefusal> {
+) -> Result<Chegou, Recusa> {
     use seele_proto::attachment::ContentDigest;
     use seele_proto::volume::VolumeRefusal;
     use tokio::io::AsyncWriteExt;
@@ -539,7 +598,7 @@ async fn escorrer(
         soma.feed(pedaco);
         bytes = bytes.saturating_add(quantos as u64);
         if tamanho.is_some_and(|total| bytes > total) {
-            return Err(VolumeRefusal::Incompleto);
+            return Err(VolumeRefusal::Incompleto.into());
         }
         arquivo
             .write_all(pedaco)
@@ -553,16 +612,22 @@ async fn escorrer(
     drop(arquivo);
 
     if tamanho.is_some_and(|total| bytes != total) {
-        return Err(VolumeRefusal::Incompleto);
+        return Err(VolumeRefusal::Incompleto.into());
     }
     // **O tipo vem dos bytes**, com a mesma tabela de quatro formatos que a
     // prévia de anexo usa — reúso, e não uma segunda cópia da regra. Decisão 2
     // do ADR 0048: o MOD não tem como conferir o que ele não vê.
-    let formato = seele_proto::imagem::sniff(&comeco).ok_or(VolumeRefusal::TipoRecusado)?;
+    let formato = seele_proto::imagem::sniff(&comeco).ok_or(Recusa {
+        motivo: VolumeRefusal::TipoRecusado,
+        detectado: Detectado::FormatoNenhum,
+    })?;
     // O MOD declara os tipos como `png`, `jpeg`, `webp`, `gif` — o sufixo do
     // tipo de mídia, que é como o `data:` da janela já os escrevia.
     if !espera.tipos.iter().any(|t| t == formato.sufixo()) {
-        return Err(VolumeRefusal::TipoRecusado);
+        return Err(Recusa {
+            motivo: VolumeRefusal::TipoRecusado,
+            detectado: Detectado::Tipo(formato.sufixo()),
+        });
     }
 
     Ok(Chegou {
@@ -599,7 +664,7 @@ pub async fn atender_imagem(
         match pedido {
             PedidoDeImagem::Enviar { cabecalho, bytes } => {
                 let chegou = receber_imagem(&server.esperas, server.mods_dir.as_ref(), pessoa, entrada, cabecalho, Some(bytes)).await
-                    .map_err(|(_, motivo)| anyhow::anyhow!("imagem recusada: {motivo:?}"))?;
+                    .map_err(|(_, recusa)| anyhow::anyhow!("{}", recusa.nome_para_o_mod()))?;
                 tracing::info!(mod_id = %chegou.mod_id, bytes = chegou.bytes, em_ms = inicio.elapsed().as_millis(), "imagem de MOD gravada por fluxo");
                 Ok(None)
             }
