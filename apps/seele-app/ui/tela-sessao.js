@@ -2355,13 +2355,20 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
   }
 }
 
-/** Se um filho velho sem chave pode virar o novo: a mesma etiqueta e classe. */
+/**
+ * Se um filho velho sem chave pode virar o novo: a mesma etiqueta e o mesmo
+ * feitio, que é a **primeira** classe. A classe inteira muda com o estado — o
+ * detalhe nativo de quem começa a falar vira `pessoa falando`, o ENTRAR vira
+ * `voice_room-entrar aqui` —, e comparada inteira refazia o nó com o que ele
+ * tivesse dentro, um nó de MOD inclusive (rodada 1 do lote AX, M2). O resto da
+ * classe chega pelo `vestirComo`.
+ */
 function mesmoFeitio(velho, novo) {
   if (velho.nodeType !== novo.nodeType) return false;
   if (chaveNaLista.has(velho) || nosDeModNaLista.has(velho) || modDoMarcador.has(velho)) return false;
   if (velho.nodeType === Node.TEXT_NODE) return true;
   if (velho.nodeType !== Node.ELEMENT_NODE) return false;
-  return velho.localName === novo.localName && velho.getAttribute("class") === novo.getAttribute("class");
+  return velho.localName === novo.localName && velho.classList[0] === novo.classList[0];
 }
 
 /**
