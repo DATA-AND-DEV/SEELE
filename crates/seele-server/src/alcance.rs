@@ -29,7 +29,6 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 use anyhow::{Context, Result};
 
 pub mod encontro;
-pub mod firewall;
 pub mod interfaces;
 pub mod pcp;
 pub mod porta;

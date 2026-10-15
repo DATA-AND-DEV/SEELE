@@ -69,8 +69,8 @@
 ; que o Windows faz sozinho com metade das redes domésticas. Sem a regra o
 ; anfitrião sobe o servidor, vê tudo verde do lado dele, e ninguém entra.
 ;
-; Até aqui o SEELE só sabia **olhar** para essa regra: `alcance::firewall` lê a
-; saída do `netsh` e responde se há uma. Ele se recusava a criar, e a razão
+; Até aqui o SEELE só sabia **olhar** para essa regra — hoje quem olha é o
+; `apps/seele-app/src/firewall.rs`, pelo PowerShell. Ele se recusava a criar, e a razão
 ; escrita no cabeçalho dele era que o instalador rodava por usuário e não tinha
 ; elevação. Essa razão caducou na 0.7.2, quando a instalação passou a ser da
 ; máquina — e o comentário no topo deste arquivo diz que ela passou a ser da
@@ -81,9 +81,10 @@
 ;
 ; **Por programa e não por porta.** `program=` e não `localport=8383`: a porta
 ; do encontro é a 8384, ao lado da do servidor, e uma regra por porta deixaria
-; metade do problema de pé. É também a forma que `alcance::firewall::ha_regra_para`
-; sabe reconhecer — ele compara a linha `Program`, então uma regra por porta
-; seria invisível para o próprio código que confere.
+; metade do problema de pé. É também a forma que o leitor do app
+; (`apps/seele-app/src/firewall.rs`) reconhece — ele compara o programa da regra
+; com o caminho do que roda, então uma regra por porta seria invisível para o
+; próprio código que confere.
 ;
 ; **`profile=any`.** É o que todos os nossos documentos mandam a pessoa colar à
 ; mão, e é o que resolve a rede doméstica que o Windows classificou como
