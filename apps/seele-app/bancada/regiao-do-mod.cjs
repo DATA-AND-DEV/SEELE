@@ -1039,6 +1039,58 @@ async function oArrasteViraTracoAgregado() {
 }
 
 // ---------------------------------------------------------------------------
+// 2a. O gesto que o sistema toma é «cancelou», e não «terminou» (MESA M14;
+//     rascunho da API 6, §7.1; prometido no `api/v6.json`).
+// ---------------------------------------------------------------------------
+
+async function oGestoCanceladoDizCancelou() {
+  const caso = "o gesto cancelado diz cancelou";
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const tabuleiro = [{
+    forma: "tela",
+    chave: "mapa",
+    largura: 200,
+    altura: 200,
+    figuras: [{ tipo: "circulo", chave: "peca", x: 60, y: 60, raio: 15, cor: "#6bffb6" }],
+  }];
+  regiao.aplicar(tabuleiro);
+  const tela = regiao.raiz.children[0];
+  tela.darPincel();
+  regiao.aplicar(tabuleiro);
+
+  // A peça pega, levada até outro lugar, e o sistema toma o gesto — uma
+  // ligação, a notificação, o gesto de voltar do celular — com um movimento
+  // ainda esperando o quadro.
+  tela.disparar("pointerdown", { clientX: 60, clientY: 60, pointerId: 1 });
+  tela.disparar("pointermove", { clientX: 150, clientY: 150, pointerId: 1 });
+  tela.disparar("pointercancel", { clientX: 150, clientY: 150, pointerId: 1 });
+  const fim = d.ditos.at(-1);
+  confere(
+    caso,
+    fim?.fase === "cancelou" && fim?.alvo === "peca",
+    `o gesto cancelado não chegou como «cancelou» da peça: ${JSON.stringify(fim)}`,
+  );
+  confere(
+    caso,
+    !d.ditos.some((e) => e.fase === "terminou"),
+    "o gesto cancelado também disse «terminou», e a peça se moveria para onde o dedo não soltou",
+  );
+  // O movimento que esperava o quadro não sai depois do fim.
+  b.quadros.shift()?.();
+  confere(
+    caso,
+    d.ditos.at(-1)?.fase === "cancelou",
+    `um movimento saiu depois do «cancelou»: ${JSON.stringify(d.ditos.at(-1))}`,
+  );
+  // E o gesto seguinte começa limpo: soltar sem ter descido não diz nada.
+  const ditos = d.ditos.length;
+  tela.disparar("pointerup", { clientX: 10, clientY: 10, pointerId: 2 });
+  confere(caso, d.ditos.length === ditos, "soltar depois do «cancelou» disse alguma coisa");
+}
+
+// ---------------------------------------------------------------------------
 // 2b. Um tabuleiro: figuras declaradas, e o arraste diz qual foi pega.
 // ---------------------------------------------------------------------------
 
@@ -5744,6 +5796,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     aRecusaDoSeletorChegaPeloNome,
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
+    oGestoCanceladoDizCancelou,
     sairDuranteOCarregamentoNaoMonta,
     aMidiaDoServidorTemOMesmoDono,
     sairDuranteAReproducaoPara,

@@ -2520,22 +2520,30 @@ class RegiaoDeMod {
       pendente = evento;
       if (!quadro) quadro = requestAnimationFrame(escoar);
     };
-    const aoSubir = (evento) => {
+    // **O fim do gesto tem dois desfechos** (MESA M14; rascunho da API 6,
+    // §7.1). Soltar é `terminou`, com o ponto onde o dedo saiu. O gesto que o
+    // sistema toma — uma ligação, a notificação, o gesto de voltar, o que no
+    // celular é comum — é `cancelou`: chegava como `terminou`, e um jogo
+    // movia a peça para onde ninguém a soltou. O movimento que esperava o
+    // quadro não sai depois de nenhum dos dois.
+    const aoAcabar = (fase) => (evento) => {
       if (!arrastando) return;
       arrastando = false;
       pendente = null;
-      mandar("terminou", evento);
+      mandar(fase, evento);
       pego = null;
     };
+    const aoSubir = aoAcabar("terminou");
+    const aoCancelar = aoAcabar("cancelou");
     elem.addEventListener("pointerdown", aoDescer);
     elem.addEventListener("pointermove", aoMover);
     elem.addEventListener("pointerup", aoSubir);
-    elem.addEventListener("pointercancel", aoSubir);
+    elem.addEventListener("pointercancel", aoCancelar);
     this.guardar(elem, `tela ${plano.chave}`, () => {
       elem.removeEventListener("pointerdown", aoDescer);
       elem.removeEventListener("pointermove", aoMover);
       elem.removeEventListener("pointerup", aoSubir);
-      elem.removeEventListener("pointercancel", aoSubir);
+      elem.removeEventListener("pointercancel", aoCancelar);
       // **O quadro pendente também é recurso.** Um `requestAnimationFrame` que
       // sobrevive à saída roda uma vez depois de a sessão ter acabado, e o que
       // ele faz é falar com um executor que não existe mais.
