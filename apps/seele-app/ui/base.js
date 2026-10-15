@@ -2449,6 +2449,19 @@ function porPontoDeCodigo(a, b) {
  * nome e os campos para o MOD da 6 (`recusa`, `camposDaRecusa`), e a frase diz
  * a chave e a região.
  */
+/**
+ * Uma recusa do tema com o nome e a chave, os do vetor
+ * (`crates/seele-proto/tests/vetores/chaves-do-tema.json`) e os que o
+ * servidor dá: `chave-desconhecida` ou `valor-invalido`. A frase fica para o
+ * registro; o MOD da 6 recebe o nome (a auditoria do `v6.json`, B5).
+ */
+function recusaDoTema(nome, frase, chave) {
+  const erro = new Error(frase);
+  erro.recusa = nome;
+  erro.camposDaRecusa = { chave };
+  return erro;
+}
+
 function recusaDasRegioes(valor) {
   const recusa = (nome, frase, chave, regiao) => {
     const erro = new Error(frase);
@@ -2606,7 +2619,7 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
     if (daTabela(MEDIDAS_DA_API, nome)) {
       if (typeof valor !== "string" || !daTabela(MEDIDAS_DA_API[nome], valor)) {
         const conhecidas = Object.keys(MEDIDAS_DA_API[nome]).join(", ");
-        throw new Error(`«${nome}» só aceita ${conhecidas}, e veio «${valor}»`);
+        throw recusaDoTema("valor-invalido", `«${nome}» só aceita ${conhecidas}, e veio «${valor}»`, nome);
       }
       // O modo concorda com o fundo, na vez dele: um fundo errado já foi
       // recusado, porque vem antes na ordem alfabética.
@@ -2614,9 +2627,11 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
         const fundo = Object.hasOwn(valores, "fundo") ? valores.fundo : undefined;
         const pede = modoDoFundo(fundo);
         if (valor !== pede) {
-          throw new Error(
+          throw recusaDoTema(
+            "valor-invalido",
             `«modo» tem de ser «${pede}» para ${fundo === undefined ? "o fundo do produto" : `o fundo ${fundo}`}, `
-            + `e veio «${valor}»`,
+              + `e veio «${valor}»`,
+            "modo",
           );
         }
       }
@@ -2629,8 +2644,10 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
     if (daTabela(NUMEROS_DA_API, nome)) {
       const regra = NUMEROS_DA_API[nome];
       if (!Number.isInteger(valor) || valor < regra.minimo || valor > regra.maximo) {
-        throw new Error(
+        throw recusaDoTema(
+          "valor-invalido",
           `«${nome}» é um inteiro de ${regra.minimo} a ${regra.maximo}, e veio «${valor}»`,
+          nome,
         );
       }
       pedido.set(nome, valor);
@@ -2641,16 +2658,16 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
     // que `"false"` quer dizer.
     if (daTabela(BANDEIRAS_DA_API, nome)) {
       if (typeof valor !== "boolean") {
-        throw new Error(`«${nome}» é sim ou não, e veio «${valor}»`);
+        throw recusaDoTema("valor-invalido", `«${nome}» é sim ou não, e veio «${valor}»`, nome);
       }
       pedido.set(nome, valor);
       continue;
     }
     if (!daTabela(TEMA_DA_API, nome)) {
-      throw new Error(`a API de tema não conhece «${nome}»`);
+      throw recusaDoTema("chave-desconhecida", `a API de tema não conhece «${nome}»`, nome);
     }
     if (typeof valor !== "string" || !COR_DO_TEMA.test(valor)) {
-      throw new Error(`«${nome}» precisa ser uma cor #rrggbb, e veio «${valor}»`);
+      throw recusaDoTema("valor-invalido", `«${nome}» precisa ser uma cor #rrggbb, e veio «${valor}»`, nome);
     }
     for (const [outro, seus] of previa ? [] : temaDosMods) {
       if (outro !== id && nome in seus) {
