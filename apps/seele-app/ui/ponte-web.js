@@ -373,6 +373,24 @@ const AINDA_A_FAZER = new Map([
 ]);
 
 /**
+ * **As capacidades que esta plataforma tem** (`compatibilidade.por-plataforma`;
+ * a auditoria do `v6.json`, B10): o executor do navegador omite, como já omite
+ * por versão, a capacidade cujos comandos a ponte não faz — recusados ou ainda
+ * por fazer. Um MOD que subisse aqui via o `SeeleUI.enviar` (a capacidade
+ * `volume`) e o seletor (`arquivo`), e só recebia recusa.
+ */
+const COMANDOS_DE_CADA_CAPACIDADE = Object.freeze({
+  volume: Object.freeze(["enviar_imagem_mod", "ler_imagem_mod"]),
+  arquivo: Object.freeze(["escolher_arquivo", "pedaco_do_escolhido"]),
+});
+
+function capacidadesDaPlataforma(capacidades) {
+  const faz = (comando) => !AINDA_A_FAZER.has(comando) && !RECUSAS_NOMEADAS.has(comando);
+  return (capacidades ?? []).filter((capacidade) =>
+    (COMANDOS_DE_CADA_CAPACIDADE[capacidade] ?? []).every(faz));
+}
+
+/**
  * O que o desktop responde sem perguntar a ninguém. **JSON estrito**:
  * `tests/web.rs` o lê e confere cada valor contra o Rust (`main.rs`,
  * `seele_ffi`). O `controles_da_voz` é o do desktop sem sessão e sem ajuste
