@@ -1720,15 +1720,24 @@ pub enum ConnectionError {
     /// disse qual no byte 0 da resposta (ADR 0058).
     ///
     /// Até a 0.15, isto chegava como `Unreachable`, e a tela dizia «não foi
-    /// possível alcançar» de um servidor que tinha respondido. A casca diz a
-    /// versão do servidor, e o launcher (a tarefa 13 da F6) abre o app dela.
+    /// possível alcançar» de um servidor que tinha respondido. A casca escolhe
+    /// a frase pelos dois campos de baixo, e o launcher (a tarefa 13 da F6) só
+    /// age com o `servidor` presente.
     OutraLinha {
         /// O número do byte 0 da resposta.
         numero: u8,
-        /// A versão do servidor que esse número fala, como o launcher a
-        /// chama: `"0.15"` para o 8, `"1"` do 9 em diante, ou `None` para um
-        /// número que nenhuma versão publicada fala.
+        /// A versão do servidor **só quando é uma que o launcher abre**, como
+        /// ele a chama: `"0.15"` para o 8. `None` para um número de antes da
+        /// 0.15, que nenhum app oferecido fala, e para um acima desta build.
+        ///
+        /// A tabela congelada (`linha_do_protocolo`) chama de «1» todo número
+        /// do 9 em diante, mas quem recusa o número desta build não é uma 1.x:
+        /// toda 1.x fala o 9 (ADR 0058). Dizer «1» ali seria a FFI dizer uma
+        /// versão que o servidor não é (decisão da orquestradora, 15/10).
         servidor: Option<String>,
+        /// Se o número está acima do desta build (`Linha::Posterior`): o
+        /// servidor é mais novo, e o remédio é atualizar este app.
+        mais_nova: bool,
     },
     /// The identity on disk could not be read or written.
     IdentityUnavailable,

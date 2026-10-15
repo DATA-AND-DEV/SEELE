@@ -6736,10 +6736,22 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
                 reason: EndReason::Incompatible,
             }
         }
-        seele_core::ConnectError::OutraLinha { numero } => ConnectionError::OutraLinha {
-            numero: *numero,
-            servidor: seele_core::linha_do_protocolo(*numero).map(str::to_owned),
-        },
+        seele_core::ConnectError::OutraLinha { numero } => {
+            // **A relação, e não só o nome.** A versão só vai quando é uma que
+            // o launcher abre, uma de antes desta build; acima dela, a tabela
+            // diria «1» de um servidor que não é uma 1.x (ver o campo).
+            let linha = seele_core::linha_de(*numero);
+            ConnectionError::OutraLinha {
+                numero: *numero,
+                servidor: match linha {
+                    Some(seele_core::Linha::AntesDaUm { .. }) => {
+                        seele_core::linha_do_protocolo(*numero).map(str::to_owned)
+                    }
+                    _ => None,
+                },
+                mais_nova: matches!(linha, Some(seele_core::Linha::Posterior { .. })),
+            }
+        }
         seele_core::ConnectError::PinChanged { pinned, offered } => ConnectionError::PinChanged {
             pinned: pinned.clone(),
             offered: offered.clone(),
@@ -6801,6 +6813,41 @@ mod a_volta_recusada_diz_o_motivo {
     use super::{classify_connect_failure, fim_da_sessao, ConnectionError, EndReason};
     use seele_core::enlace::Motivo;
     use seele_core::{ConnectError, DisconnectReason};
+
+    /// **O `OutraLinha` diz a relação**: a versão só quando o launcher a abre,
+    /// e se o servidor é mais novo que este app (decisão da orquestradora de
+    /// 15/10). Antes, o 30 vinha com «1», uma versão que ele não é.
+    #[test]
+    fn outra_linha_diz_a_versao_so_quando_o_launcher_a_abre_e_se_e_mais_nova() {
+        let caso = |numero| classify_connect_failure(&ConnectError::OutraLinha { numero });
+        assert_eq!(
+            caso(8),
+            ConnectionError::OutraLinha {
+                numero: 8,
+                servidor: Some("0.15".into()),
+                mais_nova: false,
+            },
+            "o Servidor 0.15 publicado"
+        );
+        assert_eq!(
+            caso(30),
+            ConnectionError::OutraLinha {
+                numero: 30,
+                servidor: None,
+                mais_nova: true,
+            },
+            "acima desta build: mais novo, e sem uma versão que ele não é"
+        );
+        assert_eq!(
+            caso(7),
+            ConnectionError::OutraLinha {
+                numero: 7,
+                servidor: None,
+                mais_nova: false,
+            },
+            "abaixo da 0.15: antigo, e sem versão oferecida"
+        );
+    }
 
     #[test]
     fn quem_nao_prova_a_chave_nao_chega_como_versao_incompativel() {

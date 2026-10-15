@@ -702,30 +702,31 @@ function fraseDeErro(erro, apelido, deOnde) {
     // primeiro byte da resposta. A frase diz a versão do servidor, e não o
     // número do fio.
     //
-    // `servidor` é a versão como o launcher a chama (`linha_do_protocolo`):
-    // - «0.15», a legada, que este app não abre e o SEELE 0.15 abre;
-    // - `null`, um número das versões de antes da 0.15, que nenhum app
-    //   oferecido fala;
-    // - «1», que vem de um servidor que **recusou** o número deste app. Toda
-    //   1.x fala o primeiro número da 1.0 (ADR 0058), então quem recusa é mais
-    //   novo que este app, e o remédio é atualizar.
+    // **Pelos dois campos que a FFI manda, e não pela forma do texto da
+    // versão** (decisão da orquestradora de 15/10):
+    // - `servidor`, só quando é uma versão que o launcher abre («0.15»);
+    // - `mais_nova`, quando o número está acima do deste app: toda 1.x fala o
+    //   primeiro número da 1.0 (ADR 0058), então quem o recusa é mais novo, e o
+    //   remédio é atualizar;
+    // - nenhum dos dois: um número de antes da 0.15, que nenhum app oferecido
+    //   fala.
     if (erro.OutraLinha) {
-      const { servidor } = erro.OutraLinha;
-      if (servidor?.startsWith("0.")) {
+      const { servidor, mais_nova: maisNova } = erro.OutraLinha;
+      if (servidor) {
         return (
           `ESTE SERVIDOR É O SERVIDOR ${servidor}.\n` +
           `Esta versão do app não conversa com ele. Para entrar, use o SEELE ${servidor}.`
         );
       }
-      if (servidor == null) {
+      if (maisNova) {
         return (
-          "ESTE SERVIDOR É DE UMA VERSÃO ANTIGA DO SEELE.\n" +
-          "Esta versão do app não conversa com ele, e nenhuma versão oferecida hoje conversa."
+          "ESTE SERVIDOR É DE UMA VERSÃO MAIS NOVA DO SEELE.\n" +
+          "Atualize o app para entrar nele."
         );
       }
       return (
-        "ESTE SERVIDOR É DE UMA VERSÃO MAIS NOVA DO SEELE.\n" +
-        "Atualize o app para entrar nele."
+        "ESTE SERVIDOR É DE UMA VERSÃO ANTIGA DO SEELE.\n" +
+        "Esta versão do app não conversa com ele, e nenhuma versão oferecida hoje conversa."
       );
     }
     // **O servidor exige MODs que esta máquina não aceitou.** ADR 0045.

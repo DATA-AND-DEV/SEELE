@@ -7,21 +7,23 @@
 // novo, ou antigo), se cair no ALGO FALHOU com o JSON cru, ou se usar a palavra
 // «linha», que neste produto é o canal de texto.
 const ALVO = "203.0.113.9:8383";
-const falha = (numero, servidor) => ({
-  error: { OutraLinha: { numero, servidor } },
+const falha = (numero, servidor, maisNova) => ({
+  error: { OutraLinha: { numero, servidor, mais_nova: maisNova } },
   trail: [],
   origem_da_impressao: null,
   a_lista_guardou: false,
 });
-for (const [numero, servidor, esperada] of [
+// Como a FFI os manda (`classify_connect_failure`): a versão só quando o
+// launcher a abre, e se o número está acima do deste app.
+for (const [numero, servidor, maisNova, esperada] of [
   // O que a v0.15.1 publicada responde: o 8.
-  [8, "0.15", "ESTE SERVIDOR É O SERVIDOR 0.15."],
-  // Um número à frente, que recusou o deste app.
-  [30, "1", "ESTE SERVIDOR É DE UMA VERSÃO MAIS NOVA DO SEELE."],
+  [8, "0.15", false, "ESTE SERVIDOR É O SERVIDOR 0.15."],
+  // Um número à frente, que recusou o deste app: sem versão, e mais novo.
+  [30, null, true, "ESTE SERVIDOR É DE UMA VERSÃO MAIS NOVA DO SEELE."],
   // Uma versão de antes da 0.15, que o launcher não oferece.
-  [7, null, "ESTE SERVIDOR É DE UMA VERSÃO ANTIGA DO SEELE."],
+  [7, null, false, "ESTE SERVIDOR É DE UMA VERSÃO ANTIGA DO SEELE."],
 ]) {
-  SEELE_RESPOSTAS.connect = { __recusa: falha(numero, servidor) };
+  SEELE_RESPOSTAS.connect = { __recusa: falha(numero, servidor, maisNova) };
   await conectar(ALVO);
   await espera(200);
   const dita = document.getElementById("boot-erro").textContent;
