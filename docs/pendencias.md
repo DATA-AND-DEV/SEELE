@@ -9883,3 +9883,20 @@ oscilando entre 0 e 49 nomes; com 10 pessoas, em 39 de 39; com 100, em nenhuma. 
 com 50 e 100 (37 de 38), e o aperto pegou. **Decisão da orquestradora: a (b) é da 0.16**, com a F5: as linhas
 reconciliadas pelo id da pessoa, e um `PersonState` mexendo só na linha dela; o guarda é a sonda da F3
 (`arvore-ax.py`), com 50 pessoas em 38 de 38.
+
+**A (b) entrou** (15/10, lote AX da F5: `c5691d78` e `d44f7c1f`, só no `tela-sessao.js`, com a bancada
+`linhas-pelo-id.cjs` no CI em `22a66313`, `bede50d9` e `c0d26666`). A lista de pessoas é reconciliada pelo id da
+pessoa (`reconciliarALista`): a linha que já existe fica com o mesmo nó, quem entra numa sala leva o nó para o grupo
+dela, um `PersonState` só muda a linha daquela pessoa, e os cartões e as contribuições de MOD entram por um marcador
+e não saem do documento. Com só a lista reconciliada, a sonda achou a lista inteira em toda consulta com 100
+pessoas e o ENTRAR NA SALA fora da árvore em 3 de 37: ele mora na coluna de salas, que também era repovoada a cada
+quadro, e ela passou pela mesma reconciliação. **Pela sonda da F3** (`arvore-ax.py` do `3436980d`), numa pasta só
+da F5, o app vermelho e o verde do mesmo commit-base (`1bb6450a`, e ele com o `tela-sessao.js` do `d44f7c1f`),
+intercalados, em 15/10: o verde assentou nas cinco rodadas — com 10, 35 de 35; com 50, 37 de 37 duas vezes; com
+100, 36 de 36 duas vezes, sempre com o ENTRAR NA SALA e o aperto entrando —, e o vermelho reprovou com 50 (35 de 37,
+uma consulta com 0 nomes) e com 100 (29 e 35 de 36), e assentou com 10 nas duas vezes. Na campanha de 11/10 o
+vermelho foi bem mais severo com o mesmo app (36 de 39, 19 de 38 e 0 de 38), e o verde da lista sozinha deu 38 de
+38, 38 de 38 e 37 de 37. Ficam de fora, no relatório do lote (`docs/superpowers/sdd/2026-10-08-0.16/F5/lote-ax-report.md`):
+a coluna de canais e as outras regiões ainda repovoadas a cada quadro, a coluna de salas do celular (que
+`celular-servidor.js` adapta depois de cada quadro e que continua trocada), e o `<details>` que a pessoa abre e que
+fecha no quadro seguinte, como antes.
