@@ -1955,13 +1955,15 @@ class RegiaoDeMod {
     });
     // Falhar num retrato **não** é um erro que a pessoa precise ler: a inicial
     // continua lá e responde a mesma pergunta. Quem escreveu o MOD precisa — e
-    // é para ele que a linha vai ao registro e o diagnóstico anota. **Sem
-    // evento ao MOD**: o retrato nunca falou com ele, e passar a falar seria
-    // promessa nova da API.
+    // é para ele que a linha vai ao registro, o diagnóstico anota, **e o
+    // evento vai**: `midia`/`falhou` com a chave e o motivo, como o fundo. O
+    // `v6.json` o promete (`eventos-mudam.midia`, o K2 da F5), e o retrato
+    // calava (a auditoria do `v6.json`, B3).
     const recusar = (porque, oQue) => {
       tirarAImagem();
       elem.dataset.estadoDoRetrato = "inicial";
       this.anotarMidia(elem, "recusada", porque);
+      this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
       this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no retrato: ${oQue}`);
     };
     // **Aplicar fica fora da recusa** (`.then(aplicar, …)`): só a busca e o

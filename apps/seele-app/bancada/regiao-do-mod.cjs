@@ -2570,8 +2570,9 @@ async function oFundoEORetratoTambemDizemOEstado() {
  * o fundo por `midia`/`falhou`, o fundo de tela por `tela`/`fundo-falhou` — e
  * os bytes que ela reservou voltam à conta. O tropeço de aplicar cai no
  * `.catch` do fim, e não aqui (ver `aplicarQueLancaNaoViraRecusa`).
- * **O retrato não fala com o MOD**, e continua sem falar: um evento novo seria
- * promessa nova da API.
+ * **E o retrato fala com o MOD**, por `midia`/`falhou` com a chave e o motivo,
+ * como o fundo: o `v6.json` o promete (`eventos-mudam.midia`, o K2 da F5), e
+ * esta bancada exigia o contrário (a auditoria do `v6.json`, B3).
  *
  * E o `<img>` do retrato ganha o ouvinte de `error` que o da mídia já tinha
  * (`naoAbriu`, em `montarMidia`): a imagem que decodificou e depois não abriu
@@ -2582,7 +2583,7 @@ async function umaImagemQueNaoDecodificaERecusadaEDita() {
     {
       nome: "o retrato",
       no: { forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" },
-      evento: null,
+      evento: { nome: "midia", estado: "falhou" },
       nadaPintado: (elem) => !acharTag(elem, "img") && elem.dataset.estadoDoRetrato === "inicial",
     },
     {
@@ -2659,7 +2660,7 @@ async function umaImagemQueNaoDecodificaERecusadaEDita() {
 
   // **O `<img>` do retrato que decodificou e depois não abriu.** O mesmo
   // caminho de recusa: a inicial volta, os bytes voltam, a aba e o registro
-  // dizem — e o MOD continua sem evento.
+  // dizem — e o MOD recebe `midia`/`falhou`, como no `decode()` recusado.
   {
     const nome = "o retrato cujo <img> não abriu";
     const b = bancada();
@@ -2692,10 +2693,12 @@ async function umaImagemQueNaoDecodificaERecusadaEDita() {
       d.anotadas.some((texto) => texto.includes("«rosto»")),
       `o <img> do retrato que não abriu não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
     );
+    const aoMod = d.ditos.filter((dito) => dito.nome === "midia");
     confere(
       nome,
-      !d.ditos.some((dito) => dito.nome === "midia"),
-      `o retrato passou a falar com o MOD: ${JSON.stringify(d.ditos)}`,
+      aoMod.length === 1 && aoMod[0].chave === "rosto" && aoMod[0].estado === "falhou"
+        && /não decodificou/.test(String(aoMod[0].porque ?? "")),
+      `o MOD não recebeu «midia»/«falhou» do <img> do retrato que não abriu: ${JSON.stringify(aoMod)}`,
     );
     confere(nome, img?.ouvintesDePe() === 0, "o ouvinte de `error` ficou preso ao <img> que saiu");
     regiao.soltar();
