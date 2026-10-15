@@ -10,10 +10,11 @@ cada retrato.
   orquestradora mandou (o `arvore-ax.py` do `3436980d`, a pasta só minha, a
   8393, a casa descartável, as conferências antes de cada rodada).
 - Arquivos mudados: `apps/seele-app/ui/tela-sessao.js` (o conserto, em dois
-  commits só dele), `apps/seele-app/bancada/linhas-pelo-id.cjs` (nova),
-  `.github/workflows/ci.yml` (a bancada nova no job de navegador), e os
-  documentos: este relatório e a pendência 63.
-- Status: **DONE_WITH_CONCERNS**. O verde passa com 10, 50 e 100 pessoas em
+  commits só dele, e mais quatro na rodada 1), `apps/seele-app/bancada/linhas-pelo-id.cjs`
+  (nova), `.github/workflows/ci.yml` (a bancada nova no job de navegador),
+  `apps/seele-app/ui/camada-moderar.js` (só comentário, na rodada 1), e os
+  documentos: este relatório e as pendências 63 e 64.
+- Status (rodada 1): **DONE_WITH_CONCERNS**. O verde passa com 10, 50 e 100 pessoas em
   toda consulta; as preocupações estão no fim, e nenhuma bloqueia.
 
 ## Os commits
@@ -25,7 +26,9 @@ cada retrato.
 | `d44f7c1f` | o conserto da coluna de salas: a mesma reconciliação, a sala e a pessoa como chaves, o RENOMEAR com o nome de agora (só `tela-sessao.js`) |
 | `bede50d9` | a bancada, caso 6: a coluna de salas e o ENTRAR NA SALA |
 | `c0d26666` | a bancada, caso 7: a saída da sala na coluna e o nome de agora no RENOMEAR |
-| este | o relatório e a pendência 63, (b) |
+| `30c38dbe` | o relatório e a pendência 63, (b) |
+
+Os da rodada 1 estão na seção «Rodada 1», no fim.
 
 Cada mensagem é em português e termina em `Co-Authored-By: Claude Opus 5.5
 <noreply@anthropic.com>`. Nada foi empurrado; o fio não mudou.
@@ -47,8 +50,10 @@ vermelho e o verde diferem só no conserto.
 - **app verde**: o mesmo fonte com o `tela-sessao.js` do `d44f7c1f` (sha256
   `4a1fc947…f774`), que é o da ponta do ramo — `seele-app` sha256 `6158440a…0c24`.
 
-As builds são reprodutíveis: o vermelho e o verde montados de novo hoje saíram
-com os mesmos sha256 dos de 11/10.
+Segundo as minhas notas da primeira campanha, o vermelho e o verde de 11/10
+tinham estes mesmos sha256. Os hashes de 11/10 não ficaram em artefato nenhum
+(o scratchpad se perdeu, e a mensagem do `c5691d78` não os traz), então isso
+não se confere; e o verde medido em 11/10 era o verde-1, outra build (abaixo).
 
 Cada rodada é um N só, pelo condutor `sondar.sh`, que antes dela confere o Mac
 desbloqueado pelo `sessao` e nenhuma SEELE aberta pelo `pgrep -fl SEELE.app`,
@@ -90,12 +95,14 @@ nas minhas notas:
 | vermelho | 36 de 39 (nomes 1, 3, 4, 9) | 19 de 38 (de 3 a 49) | 0 de 38 (de 0 a 88) |
 | verde-1 (só a lista) | 38 de 38 | 38 de 38 | 37 de 37, **e o ENTRAR NA SALA em 34 de 37** |
 
-A CPU do WebKit, nela, foi de 32,4% (vermelho) para 27,5% (verde) com 50 e de
-52,0% para 44,2% com 100. **Hoje o vermelho reprova bem menos que em 11/10**
-(com 100, 29 e 35 de 36 contra 0 de 38), e a CPU do WebKit no vermelho também é
-menor (31% contra 52%): o mesmo app, o mesmo servidor e o mesmo falante, então é
-a máquina que mudou — não medi o quê. A conclusão não depende disso: nas duas
-campanhas o vermelho reprova com 50 e com 100, e o verde nunca perdeu a lista.
+Segundo as notas, a CPU do WebKit, nela, foi de 32,4% (vermelho) para 27,5%
+(verde) com 50 e de 52,0% para 44,2% com 100. **Hoje o vermelho reprova bem
+menos que em 11/10** (com 100, 29 e 35 de 36 contra 0 de 38), e a CPU do WebKit
+no vermelho medida hoje é 31%. **A hipótese** é que algo na máquina mudou entre
+as duas noites, já que o fonte do app, o servidor e o falante são os mesmos —
+mas não medi, e nem a CPU de 11/10 tem bruto. A conclusão não depende disso:
+nas duas campanhas o vermelho reprova com 50 e com 100, e o verde nunca perdeu a
+lista.
 
 **O ENTRAR NA SALA do verde-1.** Com só a lista reconciliada, o botão saiu da
 árvore em 3 de 37 consultas com 100 pessoas (em t = 13, 49 e 101 s, com a lista
@@ -118,18 +125,22 @@ no que mudou.
   reconciliar, as linhas velhas com chave são achadas em toda a lista: quem
   entra numa sala leva o próprio nó para o grupo dela, e não ganha outro.
 - **Dentro de uma linha, pela posição.** Um filho sem chave casa com o próximo
-  filho velho da mesma etiqueta e da mesma classe, e recebe os atributos, o texto
-  e o valor do novo. O valor de quem está sob o dedo (`document.activeElement`)
-  não é trocado, como em `pintarVolumesDoRoster`.
-- **A ordem.** O que já está no lugar fica; só o que falta ou mudou de lugar é
-  inserido. Um nó velho com chave que não serve ao grupo de agora espera o fim,
-  porque um grupo seguinte pode querê-lo; o que ninguém quis sai no fim.
+  filho velho da mesma etiqueta e da mesma **primeira** classe (desde a rodada 1,
+  M2; antes era a classe inteira), e recebe os atributos, o texto e o valor do
+  novo. O valor de quem está sob o dedo (`document.activeElement`) não é
+  trocado, como em `pintarVolumesDoRoster`; o `open` de um `<details>` só segue
+  a linha montada quando o que ela pede muda (rodada 1, I1).
+- **A ordem.** Fica no lugar a maior subsequência crescente das posições velhas,
+  e só o resto se move (rodada 1, M1; antes, o cursor movia todos os irmãos do
+  meio quando uma linha ia para trás). Um nó velho com chave que não serve ao
+  grupo de agora espera o fim, porque um grupo seguinte pode querê-lo; o que
+  ninguém quis sai no fim.
 - **Os nós de MOD não saem do documento.** Os cartões e as contribuições chegam
   montados e são o mesmo nó entre um retrato e o seguinte. Anexá-los à linha
   montada os tiraria da lista para voltar — para a árvore de acessibilidade,
   outro nó, e o som e a imagem recomeçando. Por isso a linha montada leva um
   **marcador** (`noDeMod`, um comentário vazio) no lugar de cada um, e a
-  reconciliação põe o nó onde o marcador está, sem entrar nele. São nove pontos
+  reconciliação põe o nó onde o marcador está, sem entrar nele. São oito pontos
   de montagem: os três `cartoes` de `desenharPessoas`, o cartão de quem apresenta
   em `linhaDoRoster`, `pessoa.cartao`, `pessoa.detalhes`, `pessoa.identidade` e
   `sala.acoes`. A linha `for (const cartao of pessoa.cartoes ?? []) item.append(cartao);`,
@@ -232,24 +243,18 @@ cache da máquina.
 
 ## O que ficou de fora
 
-- **A coluna de canais (`lista-linhas`) e as outras regiões repovoadas a cada
-  quadro** — `roster-mods`, o `pessoas-conta` do cabeçalho, a conversa, a
-  telemetria. A sonda não as mede, e esta parte da pendência é a lista e o
-  ENTRAR NA SALA. Pelo mesmo mecanismo, o que elas têm sai e volta da árvore a
-  cada quadro com muita gente na sessão.
-- **No celular, a coluna de salas ainda gira.** `celular-servidor.js` adapta a
-  coluna depois de cada quadro contando com ela refeita, e a reconciliação tira o
-  que ele pôs para ele pôr de novo: o ENTRAR e o ENTRAR MUDO de lá continuam
-  trocados a cada quadro, como antes. A aba PESSOAS do celular usa a
-  `#lista-roster` do desktop e só ouve cliques, e ganha o conserto inteiro.
-  Tornar a adaptação do celular idempotente é trabalho da F8.
-- **O `<details>` que a pessoa abre ainda fecha no quadro seguinte.** O SINAL E
-  ESTADO de uma linha que não está «interessante» nasce fechado, e a
-  reconciliação copia o `open` da linha montada, como a lista refeita fazia. Com
-  o foco agora preservado, quem navega pelo teclado chega ao resumo, abre, e o
-  vê fechar em menos de meio segundo. Não mudei, porque muda comportamento, e
-  não só identidade; o caminho é a reconciliação só mexer no `open` quando o que
-  a linha montada deriva (mudo, isolado, faixa) mudar.
+- **A coluna de canais (`lista-linhas`)** segue repovoada a cada retrato, e o
+  foco do teclado num canal cai a cada tique: é a **pendência 64**, da F5, um
+  lote à parte depois deste.
+- **O `roster-mods`, o `pessoas-conta` do cabeçalho, a conversa e a telemetria**
+  seguem repovoados a cada retrato, sem dona por ora. A sonda não os mede, e esta
+  parte da pendência é a lista e o ENTRAR NA SALA.
+- **No celular, a coluna de salas ainda gira: a (b) não está resolvida lá.**
+  `celular-servidor.js` adapta a coluna depois de cada quadro contando com ela
+  refeita, e a reconciliação tira o que ele pôs para ele pôr de novo: o ENTRAR e
+  o ENTRAR MUDO de lá continuam trocados a cada quadro, como antes. A aba PESSOAS
+  do celular usa a `#lista-roster` do desktop e só ouve cliques, e ganha o
+  conserto inteiro. A dona é a F8.
 - **O que um VoiceOver de verdade faz com a árvore** — a sonda mede se a árvore
   tem a lista quando é consultada, como ela mesma diz.
 - **A parte do servidor da pendência 63** (um PersonState de cada pessoa a todas
@@ -260,19 +265,217 @@ cache da máquina.
 
 ## Preocupações
 
-1. **O vermelho de hoje é mais brando que o de 11/10**, com o mesmo app (sha256
-   igual): com 100, 29 e 35 de 36 contra 0 de 38, e a CPU do WebKit em 31%
-   contra 52%. Não medi a causa. O verde passou nas duas campanhas; a de hoje é a
+1. **O vermelho de hoje é mais brando que o de 11/10**, do mesmo fonte: com 100,
+   29 e 35 de 36 contra 0 de 38, e a CPU do WebKit em 31% contra 52% segundo as
+   notas. Não medi a causa. O verde passou nas duas campanhas; a de hoje é a
    que tem o conserto inteiro.
 2. **Duas interrupções que não vieram do produto.** (a) Na primeira campanha, a
    segunda rodada verde não começou: a F3 abriu a SEELE dela (`/tmp/m3-6`) na
-   8393, e o condutor parou, como a regra pede. (b) Hoje, às 11:44, algo de fora
-   terminou com SIGTERM os meus processos de fundo, o servidor e o falante de uma
-   rodada vermelha de 100; a sonda ficou esperando os calados, o app não chegou a
-   abrir, e eu a encerrei. A rodada foi refeita (11:44, na tabela).
+   8393, e o condutor parou, como a regra pede. (b) Hoje, na rodada vermelha de
+   100 que começou às 11:43:28 (`interrompida-100-114328`), algo de fora terminou
+   com SIGTERM os meus processos de fundo, o servidor e o falante (o último
+   registro do servidor é das 11:44:11); a sonda ficou esperando os calados, o
+   app não chegou a abrir, e eu a encerrei. A refeita é a `100-114455`, que
+   começou às 11:44:55 (a linha 11:44 da tabela).
 3. **Um falso positivo na conferência de outra SEELE.** O `pgrep -fl SEELE.app`
    casou com a linha de comando de um laço meu de espera, que tinha esse nome no
    texto; o condutor parou, como devia, e passou a contar só o executável
    (`/Contents/MacOS/seele-app`).
 4. **A consulta mais lenta do verde com 10 levou 4,3 s**, uma vez, com a carga da
    máquina em 7,6. As outras ficaram em 0,7 s ou menos.
+
+## Rodada 1
+
+A revisão (`.superpowers/sdd/lotes/review-ax-report.md`) aprovou com ressalvas:
+0 Críticos, 2 Importantes, 4 Menores. O pedido da rodada
+(`.superpowers/sdd/lotes/lote-ax-rodada1.md`) mandou, na ordem, I2, I1, M2, M1,
+M4, M3, e a sonda de novo; o acréscimo da orquestradora mandou escrever a
+pendência 64 e corrigir os comentários do `camada-moderar.js`. Ponta de partida
+`30c38dbe`.
+
+### Os commits
+
+| commit | achado | o que entra |
+|---|---|---|
+| `68c4544d` | I2 | a bancada guarda cada ponto de montagem de MOD, prova que o tique redesenhou e confere a ordem |
+| `64858020` | I1 | o `open` de um `<details>` reaproveitado só segue a linha montada quando o pedido muda (só `tela-sessao.js`) |
+| `bcff658a` | I1 | a bancada, caso 9 |
+| `607b85f5` | M2 | `mesmoFeitio` pela etiqueta e pela primeira classe (só `tela-sessao.js`) |
+| `c75b6008` | M2 | a bancada, caso 5: `pessoa.identidade` numa linha apresentada, com a pessoa começando a falar |
+| `ee24b4f3` | M1 | a ordem pela maior subsequência crescente (só `tela-sessao.js`) |
+| `b0f828ad` | M1 | a bancada, caso 8: um nó inserido e o foco no meio fica |
+| `fea04116` | M4 | o acoplamento com o celular escrito no `vestirComo` (só comentário, só `tela-sessao.js`) |
+| `ec8ec2ce` | B | os comentários das duas delegações do `camada-moderar.js` (só comentário) |
+| este | M3, A | o relatório e as pendências 63 e 64 |
+
+`celular-servidor.js` e `celular-pessoas.js` não foram tocados: são da F8.
+
+### I2 — a bancada mais forte, antes dos consertos
+
+O caso 5 passou a rodar um ponto de montagem por vez, cada um numa página nova,
+com quem usa fora das salas (para os três ramos de `cartoes` montarem linhas) e
+as duas salas com gente: `pessoa.cartao` substituir com conteúdo; o mesmo sem
+conteúdo, com o cartão de uma região da API 3 simulada (`cartoesDosMods`, o
+caminho do PERFIS: `cartaoDeContribuicao` → `regiao.cartaoDe(id)`); os cartões
+da API 3 na linha nativa; `pessoa.cartao` adicionar; `pessoa.identidade`;
+`pessoa.detalhes`; `sala.acoes`. Em cada um: com um PersonState, nenhum nó de
+MOD aparece nos `removedNodes` do observador (nem dentro de um nó removido),
+cada um é o mesmo nó na mesma linha, e nenhuma mutação cai fora da linha. O caso
+2 exige que `desenhado` seja outro objeto depois de 1,2 s; o caso 8, a ordem da
+lista e da coluna igual à do retrato, também depois de uma reordenação.
+
+**Os mutantes da revisão, agora vermelhos** (na ponta `c0d26666`, cada um
+voltando idêntico pelo `cmp`; o sha256 do `tela-sessao.js` antes e depois da
+série é `4a1fc947…`):
+
+| mutante | o marcador tirado | o que reprovou |
+|---|---|---|
+| M1 | `pessoa.identidade` | «50 de 50 nós de MOD saíram do documento» |
+| M2 (sala) | os `cartoes` da API 3, ramo das salas | «24 de 50» |
+| M2 (fora) | os `cartoes`, ramo FORA DE SALA | «1 de 50» |
+| M2 (saguão) | os `cartoes`, ramo do saguão | «25 de 50» |
+| M3 | `sala.acoes` | «2 de 2» |
+| M4 | `pessoa.cartao` adicionar | «50 de 50» |
+| — | `pessoa.detalhes` | «50 de 50» |
+| — | o cartão de quem apresenta (`noDeMod(cartao)`) | «50 de 50» |
+| — | o tique parado (`if (false) atualizar()`) | caso 2: «o tique não redesenhou em 1,2 s» |
+| — | a ordem que não move nó já presente | caso 8: «a ordem da lista não é a do retrato» |
+
+Os oito marcadores são as oito chamadas de `noDeMod`/`nosDeMod` do
+`tela-sessao.js`.
+
+### I1 — o `<details>` que a pessoa abre continua aberto
+
+- **Vermelho** (caso 9, antes do `64858020`): «o «⋯» de p-003, aberto pela
+  pessoa, fechou no tique com o mesmo retrato (1 mutações na linha)».
+- **Conserto:** `abertoPedido` (um `WeakMap`) guarda o `open` que a linha montada
+  pediu a cada `<details>` no quadro anterior; o `vestirComo` só aplica o `open`
+  da linha montada quando esse pedido muda, e fora disso fica o que a pessoa
+  escolheu. A exceção é só o `open` de `details`. O pedido é esquecido com a
+  sessão (o guarda `todo_estado_de_topo_da_sessao_e_esquecido_ao_sair` o exige).
+- **Verde:** o «⋯» de uma linha apresentada por MOD, aberto pelo resumo e com o
+  foco nele, atravessa o tique sem mutação e com o foco; o volume de dentro fica
+  ao alcance do teclado (`checkVisibility()` e o foco) através de outro tique; o
+  SINAL E ESTADO aberto à mão numa linha nativa também fica; quem fica muda tem o
+  SINAL E ESTADO aberto pelo produto, e fechado quando deixa de ficar.
+- **O celular**, que depende de os outros atributos saírem (M4): a
+  `tools/bancada-do-celular.py` inteira passou depois do conserto — 110 casos,
+  o G3 IGUAL pixel a pixel no Chromium e no WebKit.
+
+### M2 — o detalhe nativo de quem começa a falar não é refeito
+
+- **Vermelho** (o ponto «pessoa.identidade numa linha apresentada, com a pessoa
+  começando a falar» do caso 5, antes do `607b85f5`): «1 de 50 nós de MOD saíram
+  do documento».
+- **Conserto:** `mesmoFeitio` compara a etiqueta e a **primeira** classe, e o
+  resto da classe chega pelo `vestirComo`. Escolhi a primeira classe, e não um
+  `data-feitio`, porque não muda nenhuma linha montada: toda classe que varia com
+  o estado nas duas listas reconciliadas põe a variante depois da base («pessoa
+  falando», «voice_room-entrar aqui»). O ENTRAR que vira VER A CHAMADA passa a
+  ser o mesmo nó também.
+- **Verde:** o `div` do detalhe é o mesmo nó, e nenhum nó de MOD sai do
+  documento.
+
+### M1 — mover só o que precisa
+
+- **Vermelho** (caso 8, antes do `ee24b4f3`): «a primeira de 19 pessoas foi para
+  o fim e 18 linhas foram tiradas e postas de novo no grupo da sala».
+- **Conserto:** fica no lugar a maior subsequência crescente das posições velhas
+  (`maiorSequenciaCrescente`, O(n log n)), e só o resto se move, de trás para a
+  frente, cada um para antes do seguinte. Cerca de 24 linhas de código, abaixo do
+  teto de ~30 do pedido; nenhum caso que a bancada já prendia mudou.
+- **Verde:** um nó inserido no grupo da sala e um na coluna, o foco no nome de
+  quem está no meio fica, a ordem e a identidade se mantêm. A
+  `um-redesenho-por-quadro.cjs` seguiu verde (34 ms de atraso máximo com 251
+  cartões).
+
+### M4, B e M3
+
+- **M4:** o `vestirComo` diz, num comentário, que o celular só adapta de novo a
+  coluna de salas porque o `data-celular` sai ali, e que o `open` é a única
+  exceção (`fea04116`).
+- **B:** os comentários de `camada-moderar.js` sobre as duas delegações diziam
+  «as linhas são refeitas a cada snapshot»; agora dizem o porquê de agora — a
+  linha é reaproveitada pelo id, e o ouvinte delegado lê os `data-*` que o
+  `vestirComo` atualiza (`ec8ec2ce`, só comentário).
+- **M3:** neste relatório e na pendência 63, a causa do vermelho mais brando
+  virou hipótese; a reprodutibilidade frente a 11/10 e a CPU de 11/10 viraram
+  «segundo as notas»; «nove pontos» virou «oito»; a interrupção ficou com as horas
+  dos brutos (`interrompida-100-114328`, e a refeita `100-114455`). O I1 saiu do
+  «ficou de fora».
+- **A:** a pendência 64 (a lista de canais perde o foco do teclado a cada tique,
+  dona a F5, num lote à parte), com o mecanismo e a medida; a 63 aponta para ela,
+  e lista o celular (F8) e o `roster-mods`, o contador, a conversa e a telemetria
+  (sem dona) como abertos.
+
+### As reversões dos consertos da rodada
+
+Na ponta `ec8ec2ce`, pelo mesmo `reverter.sh`; todas voltaram idênticas, e o
+sha256 do `tela-sessao.js` antes e depois da série é `4e487980…1b6b`.
+
+| | o mutante | o que reprovou |
+|---|---|---|
+| RI1 | o `open` volta a ser copiado como os outros atributos | caso 9: «o «⋯» de p-003 … fechou no tique» |
+| RM2 | o feitio volta a ser a classe inteira | caso 5: «1 de 50 nós de MOD saíram do documento» |
+| RM1 | a ordem volta ao cursor | caso 8: «18 linhas foram tiradas e postas de novo» |
+| R1 | o arquivo inteiro do `1bb6450a` | caso 1: «1 de 1 mutações, e 50 linhas trocaram de nó» |
+
+### A sonda de novo, na ponta
+
+O app `verde-r1`: o fonte do `1bb6450a` com o `tela-sessao.js` e o
+`camada-moderar.js` do `ec8ec2ce` (`tela-sessao.js` sha256 `4e487980…1b6b`;
+`seele-app` sha256 `2c504453…836b`). O mesmo arranjo e os mesmos cuidados. Antes
+de cada rodada o condutor grava o `pgrep -fl -i seele` inteiro e para se houver
+o executável de um app, um `m3-servidor` ou um `m3-falante` (a lista casa também
+com todo caminho que tenha SEELE: os shells, os testes e o próprio Claude de
+outras sessões); e confere o `sessao`.
+
+| hora | pessoas | a lista inteira | nomes achados | ENTRAR NA SALA | entrou | CPU do WebKit | consulta mais lenta (s) | assenta |
+|---|---|---|---|---|---|---|---|---|
+| 12:59 | 10 | 38 de 38 | 9 | 38 de 38 | sim | 6,4% | 0,1 | sim |
+| 13:02 | 50 | 37 de 37 | 49 | 37 de 37 | sim | 18,3% | 0,2 | sim |
+| 13:05 | 100 | 37 de 37 | 99 | 37 de 37 | sim | 51,1% | 0,4 | sim |
+| 13:35 | 10 | 38 de 38 | 9 | 38 de 38 | sim | 5,4% | 0,3 | sim |
+| 13:37 | 50 | 37 de 37 | 49 | 37 de 37 | sim | 16,6% | 0,2 | sim |
+
+**Assenta em todas, em toda consulta.** As três primeiras estão em
+`sonda-verde-r1/` (`10-125947`, `50-130228`, `100-130549`). As duas últimas são
+repetições que a coordenadora pediu depois de a janela do app voltar (ela tinha
+procurado as rodadas em `sonda-verde/`, que é a pasta do app de antes); a carga
+pelo `uptime` antes delas foi 7,70 e 8,86, com um `node ajustes-v013.cjs` de
+outra frente rodando.
+
+**A CPU de 51% com 100.** De manhã, o verde (`d44f7c1f`) deu 28 a 33% com 100.
+Para não atribuir a diferença ao código da rodada sem medida, rodei em seguida um
+par com 100, o app de antes e o da ponta, um depois do outro:
+
+| hora | app | a lista inteira | ENTRAR NA SALA | CPU do WebKit | assenta |
+|---|---|---|---|---|---|
+| 13:11 | verde (`d44f7c1f`) | 37 de 37 | 37 de 37 | 46,1% | sim |
+| 13:16 | verde-r1 (`ec8ec2ce`) | 37 de 37 | 37 de 37 | 50,1% | sim |
+
+O app de antes também subiu (de 28–33% de manhã para 46% à tarde), então a
+maior parte da diferença não é da rodada; entre os dois, 4 pontos numa amostra de
+cada não separam o código do ruído. Não medi a causa da subida. Depois do par, a
+orquestradora pediu a janela do app, e não abri mais nada até ela voltar
+(13:22:55); as repetições de 10 e 50, acima, vieram depois disso.
+
+### O que rodou na rodada
+
+Na ponta do código `ec8ec2ce` (os documentos vêm depois), com a HOME falsa por
+script nos testes de Rust, todas terminando vazias:
+
+- **`cargo test -p seele-app --test frontend`**: 296 de 296 (também depois do I1,
+  com o `abertoPedido` esquecido na saída);
+- **`cargo test -p xtask`**: 230 (88 + 4 + 121 + 1 + 3 + 10 + 1 + 2);
+- **`cargo xtask check-runtime`**: passa;
+- **as 22 bancadas de navegador do CI**: as 19 do job `bancadas` e as 3 do
+  `bancadas-de-mod`, com o `.wasm` do `cargo xtask web`, todas verdes. A
+  `linhas-pelo-id.cjs` com os nove casos e os oito pontos de MOD; a
+  `um-redesenho-por-quadro.cjs` com 38 ms de atraso máximo;
+- **os 40 roteiros**: «os 40 passaram», carga limpa;
+- **a bancada do celular inteira**: 110 casos, o G3 IGUAL pixel a pixel no
+  Chromium e no WebKit — depois do I1 (por causa do `data-celular`) e de novo na
+  ponta;
+- **a medida da 64**, no Chromium da bancada: o foco num canal cai no `BODY`
+  depois de um tique, com o retrato igual e com outro canal mudando.
