@@ -738,15 +738,22 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   Mac que não abriu para o app, e não o conserto (`d9e7f475`). A tarefa 9,
   Step 5 (`69dcb3b7`): o `#toque` no guarda 11, e um modal de MOD deixando de
   adormecê-lo. **O corte (tarefa 13)**, no ramo local `0.16/api-6-corte`:
-  Steps 0 a 4 e 6b feitos, 5b em parte (a conferência e a frase; faltam as
-  saídas como botões). Do Step 5, a `APIS_POR_LINHA` (`c4eb6d03`) e o texto
+  Steps 0 a 4, 5b e 6b feitos. O 5b ganhou as três saídas como botões, nas
+  decisões (i) a (iii): a regra das saídas com o servidor parado
+  (`4ed543e4`), o comando (`4bf9f6b3`), as frases (`6aff1990`), os botões
+  com a bancada `saidas-de-quem-hospeda.cjs` (`af743f51`) e a saída 3 de
+  ponta a ponta (`6e6e0748`). E um conserto meu (`6eb73c23`): o `c4eb6d03`
+  mudou a forma de `APIS_ACEITAS`, e três leitores pelo texto quebraram — um
+  guarda do frontend, o gerador do manifesto e o dublê dos roteiros. Do
+  Step 5, a `APIS_POR_LINHA` (`c4eb6d03`, com a revisão da F1 em
+  `8d204e4a`), e o texto
   do dono para o indexador (`o-indexador-na-api-6.md`). Medindo o indexador
   só na memória, saiu que `"tema"` em `CHAVES` e `TIPOS` não basta: a
   conferência de tipo recusa todo booleano. O guarda da união está escrito e
   medido, vermelho até o Step 6.
-- **Esperam:** do corte, o guarda da união (o Step 6 do dono, ou a decisão
-  de como pô-lo no ramo antes) e as saídas do 5b como botões (as três
-  decididas em 15/10); o avanço do `0.16/api-6` quando o corte estiver verde;
+- **Esperam:** do corte, o guarda da união, pronto em
+  `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
+  depois do Step 6 do dono (D-api-7); o avanço do `0.16/api-6`;
   as duas limpezas, na 0.16 e depois do lote AX da F5 (a máquina da API 3 na
   casca; `regiao`, `cartoes` e `snapshot` no prelúdio do motor); e o Step 3
   da tarefa 7 (o teto da `midia`, que a M3 não mediu).
