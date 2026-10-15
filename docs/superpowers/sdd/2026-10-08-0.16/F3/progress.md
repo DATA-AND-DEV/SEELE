@@ -753,7 +753,9 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   medido, vermelho até o Step 6.
 - **Esperam:** do corte, o guarda da união, pronto em
   `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
-  depois do Step 6 do dono (D-api-7); o avanço do `0.16/api-6`;
+  depois do Step 6 do dono (D-api-7). O `0.16/api-6` avançou para
+  `ed7abdb9` em 15/10, com o aval da orquestradora (a D-api-7 segura só a
+  entrada na `versao/0.16`), e a F1 foi avisada para pôr o P7c por cima;
   as duas limpezas, na 0.16 e depois do lote AX da F5 (a máquina da API 3 na
   casca; `regiao`, `cartoes` e `snapshot` no prelúdio do motor); e o Step 3
   da tarefa 7 (o teto da `midia`, que a M3 não mediu).
