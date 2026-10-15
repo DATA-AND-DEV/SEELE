@@ -1709,6 +1709,10 @@ const FRASES_DO_CELULAR = Object.freeze({
     foraSalas: NO_COMPUTADOR.salasECanais[1],
   }),
   folhas: Object.freeze({
+    // A prévia do tema (D-estilo-1): o diálogo recolhido num selo do núcleo.
+    verNaSessao: "VER NA SESSÃO",
+    seloDaPrevia: "PRÉVIA NÃO PUBLICADA · SÓ NESTE APARELHO",
+    voltarAoDialogo: "VOLTAR",
     senhaDaSala: "SENHA DA SALA",
     pedeSenha: (sala) => `${sala} pede senha para entrar.`,
     senha: "SENHA",

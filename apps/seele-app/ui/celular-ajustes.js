@@ -25,14 +25,15 @@
   // abas): as medidas vêm da moldura, e acompanham quando ela muda.
   function encaixar() {
     const topo = sessao.querySelector(".cel-topo").getBoundingClientRect().bottom;
-    const pe = [...sessao.querySelectorAll(":scope > #veredito, :scope > #aviso-fone, :scope > #aviso-audio, :scope > .voz-celular, :scope > .cel-abas")]
+    const pe = [...sessao.querySelectorAll(":scope > #veredito, :scope > #aviso-fone, :scope > #aviso-audio, :scope > .cel-selo-da-previa, :scope > .voz-celular, :scope > .cel-abas")]
       .filter((e) => !e.hidden && getComputedStyle(e).display !== "none")
       .reduce((menor, e) => Math.min(menor, e.getBoundingClientRect().top), innerHeight);
     camada.style.setProperty("--cel-ajustes-topo", `${topo}px`);
     camada.style.setProperty("--cel-ajustes-pe", `${innerHeight - pe}px`);
   }
   const observador = new ResizeObserver(encaixar);
-  for (const parte of sessao.querySelectorAll(":scope > .cel-topo, :scope > .voz-celular, :scope > .cel-abas")) {
+  // O selo da prévia é do `celular-folhas.js`, que carrega antes deste.
+  for (const parte of sessao.querySelectorAll(":scope > .cel-topo, :scope > .cel-selo-da-previa, :scope > .voz-celular, :scope > .cel-abas")) {
     observador.observe(parte);
   }
   window.addEventListener("resize", encaixar);

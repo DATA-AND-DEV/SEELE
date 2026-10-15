@@ -326,3 +326,80 @@
 :root[data-casca="celular"] #moderar #moderar-confirmar {
   order: -1;
 }
+
+/* ---------------------------------------------------- a prévia do tema
+ *
+ * D-estilo-1. O VER NA SESSÃO mora no cabeçalho do diálogo, ao lado do
+ * FECHAR, e tem o desenho dele. O selo é do núcleo, como o MUDO: diz que o que
+ * se vê não é o tema do servidor, e um tema em prévia não o repinta. Ele é do
+ * pé da sessão, no fluxo, logo acima da faixa, como os avisos do produto: o
+ * `--cel-pe` o conta, e os palcos dos MODs ficam acima dele. Medido antes,
+ * solto por cima do pé: o aviso de um MOD o cobria inteiro, VOLTAR junto, e
+ * ele cobria os 56 px de baixo de uma folha de MOD. O do desktop, no alto e
+ * sem clique, sai: este diz o mesmo, e é por onde se volta. */
+:root[data-casca="celular"] #selo-da-previa {
+  display: none;
+}
+
+:root[data-casca="celular"] .dialogo-de-mod-cabecalho > .cel-ver-na-sessao {
+  flex: 0 0 auto;
+  margin-left: auto;
+  min-height: 44px;
+  padding: 2px 12px;
+  border: 1px solid var(--seele-laranja-nerv);
+  background: transparent;
+  color: var(--seele-osso);
+  font: inherit;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  letter-spacing: 0.08em;
+}
+
+/* Os dois à direita, juntos: as duas margens automáticas dividiriam o vão. */
+:root[data-casca="celular"] .dialogo-de-mod-cabecalho > .cel-ver-na-sessao:not([hidden]) + .superficie-de-mod-sair {
+  margin-left: 0;
+}
+
+:root[data-casca="celular"] .cel-ver-na-sessao[hidden] {
+  display: none;
+}
+
+:root[data-casca="celular"] #tela-sessao > .cel-selo-da-previa[data-nucleo] {
+  order: 1;
+  flex-shrink: 0;
+  margin: 0 calc(8px + var(--cel-seguro-dir)) 8px calc(8px + var(--cel-seguro-esq));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-left: 12px;
+  font-family: var(--nucleo-pilha);
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  letter-spacing: 0.12em;
+  color: var(--nucleo-texto);
+  background: var(--nucleo-painel);
+  border: 1px solid var(--nucleo-acento);
+}
+
+:root[data-casca="celular"] .cel-selo-da-previa[data-nucleo][hidden] {
+  display: none;
+}
+
+:root[data-casca="celular"] .cel-selo-da-previa[data-nucleo] > span {
+  flex: 1 1 auto;
+  padding-block: 8px;
+}
+
+:root[data-casca="celular"] .cel-selo-da-previa[data-nucleo] > button {
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--nucleo-fundo);
+  background: var(--nucleo-acento);
+}
+
+:root[data-casca="celular"] .cel-selo-da-previa[data-nucleo] > button[hidden] {
+  display: none;
+}

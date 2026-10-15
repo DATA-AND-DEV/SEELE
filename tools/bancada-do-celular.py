@@ -1079,6 +1079,167 @@ def previa_recolhida(pg: Page) -> list[str]:
     return falhas
 
 
+LER_A_PREVIA = """(fundo) => {
+  const visivel = (e) => !!e && e.checkVisibility();
+  const raiz = document.querySelector('.dialogo-de-mod[data-superficie="estilo"]');
+  const ver = raiz?.querySelector('.cel-ver-na-sessao');
+  const selo = document.querySelector('.cel-selo-da-previa');
+  const voltar = selo?.querySelector('button');
+  const faixa = document.getElementById('voz').getBoundingClientRect();
+  const mudo = document.getElementById('voz-mudo').getBoundingClientRect();
+  const noMudo = document.elementFromPoint(mudo.left + mudo.width / 2, mudo.top + mudo.height / 2);
+  const nucleo = (() => { const e = document.createElement('i'); e.style.color = 'var(--nucleo-texto)'; document.documentElement.append(e); const c = getComputedStyle(e).color; e.remove(); return c; })();
+  return { dialogo: visivel(raiz), ver: visivel(ver) ? Math.round(ver.getBoundingClientRect().height) : 0,
+           selo: visivel(selo) ? selo.firstChild?.textContent ?? selo.textContent : null,
+           acimaDaFaixa: !!selo && selo.getBoundingClientRect().bottom <= faixa.top + 1,
+           doNucleo: !!selo && getComputedStyle(selo).color === nucleo,
+           voltar: visivel(voltar) ? Math.round(voltar.getBoundingClientRect().height) : 0,
+           sessaoInerte: !!document.getElementById('lista-mensagens').closest('[inert]'),
+           previa: previasDoTema.has('teste/bancada'),
+           tema: document.getElementById('tela-sessao').style.getPropertyValue('--seele-negro-absoluto').trim().toLowerCase() === fundo,
+           mudo: !!noMudo?.closest('#voz-mudo'),
+           seloDoDesktop: visivel(document.getElementById('selo-da-previa')) };
+}"""
+
+
+SELO_E_O_MOD = """(seletor) => {
+  const selo = document.querySelector('.cel-selo-da-previa');
+  const s = selo.getBoundingClientRect();
+  const el = document.querySelector(seletor);
+  if (!el?.checkVisibility()) return { aVista: false };
+  const r = el.getBoundingClientRect();
+  const voltar = selo.querySelector('button').getBoundingClientRect();
+  const noVoltar = document.elementFromPoint(voltar.left + voltar.width / 2, voltar.top + voltar.height / 2);
+  return { aVista: true, sobreposto: Math.max(0, Math.round(Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top))),
+           voltarNoToque: !!noVoltar?.closest('.cel-selo-da-previa button') };
+}"""
+
+
+def previa_do_tema(pg: Page) -> list[str]:
+    """A prévia do tema no celular (D-estilo-1): o diálogo do MOD cobre a
+    sessão, e o VER NA SESSÃO, na barra do produto e só com uma prévia daquela
+    superfície, o recolhe num selo do núcleo, «PRÉVIA NÃO PUBLICADA · SÓ NESTE
+    APARELHO», acima da faixa, com VOLTAR. A sessão aparece com a prévia e
+    deixa de ser inerte; o MUDO responde. O VOLTAR, e o voltar do aparelho,
+    devolvem o diálogo com a prévia intacta. Um diálogo sem prévia não tem o
+    VER NA SESSÃO. O foco vai ao VOLTAR, volta ao diálogo, e, fechado o
+    diálogo, a quem o abriu, e não ao VOLTAR que saiu de vista. Termina
+    recolhido, para a foto."""
+    falhas = []
+    pg.evaluate(MOD_DE_PE)
+    tema = TEMAS["papel"]
+    frase = pg.evaluate("FRASES_DO_CELULAR.folhas.seloDaPrevia")
+    foco = ("document.activeElement?.closest('.cel-selo-da-previa button, .dialogo-de-mod, #campo-mensagem')"
+            "?.textContent.trim().slice(0, 40) ?? document.activeElement?.tagName")
+    pg.evaluate("document.getElementById('campo-mensagem').focus()")
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    aberto = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+    if not aberto["dialogo"] or aberto["ver"] < 44 or aberto["selo"] is not None or aberto["seloDoDesktop"]:
+        falhas.append(f"com o diálogo e a prévia, o VER NA SESSÃO não está com 44, ou o selo aparece por cima: {aberto}")
+        return falhas
+    for como in ("VOLTAR", "o voltar do aparelho"):
+        tocar(pg, ".dialogo-de-mod[data-superficie='estilo'] .cel-ver-na-sessao")
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+        esperado = {"dialogo": False, "selo": frase, "acimaDaFaixa": True, "doNucleo": True, "sessaoInerte": False,
+                    "previa": True, "tema": True, "mudo": True, "seloDoDesktop": False}
+        diferente = {k: r[k] for k in esperado if r[k] != esperado[k]}
+        if diferente or r["voltar"] < 44:
+            falhas.append(f"recolhido, o selo, a sessão ou a prévia não estão como devem ({como}): {diferente}, VOLTAR com {r['voltar']}")
+        if (onde := pg.evaluate(foco)) != pg.evaluate("FRASES_DO_CELULAR.folhas.voltarAoDialogo"):
+            falhas.append(f"recolhido, o foco não está no VOLTAR, e sim em {onde!r}")
+        if como == "VOLTAR":
+            tocar(pg, ".cel-selo-da-previa button")
+        else:
+            pg.go_back()
+        pg.wait_for_timeout(300)
+        de_volta = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+        if not de_volta["dialogo"] or not de_volta["sessaoInerte"] or not de_volta["previa"] or de_volta["selo"] is not None:
+            falhas.append(f"{como} não devolveu o diálogo com a prévia: {de_volta}")
+        if pg.evaluate("document.getElementById('tela-sessao').hidden"):
+            falhas.append(f"{como} saiu da sessão")
+            return falhas
+    # Um diálogo sem prévia não tem o VER NA SESSÃO.
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'outro', tipo: 'dialogo', titulo: 'OUTRO' } })")
+    pg.wait_for_timeout(300)
+    if pg.evaluate("document.querySelector('.dialogo-de-mod[data-superficie=\"outro\"] .cel-ver-na-sessao')?.checkVisibility() ?? false"):
+        falhas.append("um diálogo sem prévia oferece o VER NA SESSÃO")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-fechar', superficie: 'outro' })")
+    pg.wait_for_timeout(300)
+    if not pg.evaluate("!!document.activeElement?.closest('.dialogo-de-mod[data-superficie=\"estilo\"]')"):
+        falhas.append(f"de volta, o foco não está no diálogo, e sim em {pg.evaluate(foco)!r}")
+    # Fechado o diálogo, o foco volta a quem o abriu, e o selo sai com a prévia.
+    tocar(pg, ".dialogo-de-mod[data-superficie='estilo'] .superficie-de-mod-sair")
+    pg.wait_for_timeout(300)
+    if not pg.evaluate("document.activeElement?.id === 'campo-mensagem'"):
+        falhas.append(f"fechado o diálogo, o foco não voltou ao campo de onde ele abriu, e sim a {pg.evaluate(foco)!r}")
+    if pg.evaluate(LER_A_PREVIA, tema["fundo"])["selo"] is not None:
+        falhas.append("fechado o diálogo, e com ele a prévia, o selo continua")
+    # Recolhido, o MOD o mostra de novo, ou o fecha: a casca larga o que
+    # guardava, e o VER NA SESSÃO seguinte ainda recolhe.
+    ver = ".dialogo-de-mod[data-superficie='estilo'] .cel-ver-na-sessao"
+    for pedido in ("superficie-mostrar", "superficie-fechar"):
+        pg.evaluate(DIALOGO_COM_PREVIA, tema)
+        pg.wait_for_timeout(300)
+        tocar(pg, ver)
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+        if r["dialogo"] or not r["voltar"]:
+            falhas.append(f"antes do {pedido}, o VER NA SESSÃO não recolheu o diálogo: {r}")
+        pg.evaluate(f"__pedirAoProduto({{ tipo: '{pedido}', superficie: 'estilo' }})")
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+        if r["voltar"] or (pedido == "superficie-fechar" and r["selo"] is not None):
+            falhas.append(f"recolhido, o MOD pediu {pedido}, e o selo ficou com o VOLTAR para um diálogo que não está recolhido: {r}")
+    # O MOD oculta o diálogo recolhido: nada no palco muda, e o VOLTAR não o
+    # mostra. Ele sai, o selo fica com a prévia, e o foco vai à sessão.
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    tocar(pg, ver)
+    pg.wait_for_timeout(300)
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-ocultar', superficie: 'estilo' })")
+    pg.wait_for_timeout(300)
+    tocar(pg, ".cel-selo-da-previa button")
+    pg.wait_for_timeout(300)
+    r = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+    if r["dialogo"] or r["voltar"] or r["selo"] != frase:
+        falhas.append(f"recolhido e ocultado pelo MOD, o VOLTAR o mostrou ou ficou de pé: {r}")
+    if (onde := pg.evaluate("document.activeElement?.id || document.activeElement?.tagName")) != "tela-sessao":
+        falhas.append(f"o VOLTAR que não tinha o que devolver deixou o foco em {onde!r}, e não na sessão")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-fechar', superficie: 'estilo' })")
+    pg.wait_for_timeout(300)
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    tocar(pg, ver)
+    pg.wait_for_timeout(300)
+    r = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+    if r["dialogo"] or r["selo"] != frase or r["voltar"] < 44:
+        falhas.append(f"depois de o MOD fechar o diálogo recolhido, o VER NA SESSÃO não recolhe mais: {r}")
+    # Recolhido, em AJUSTES (onde se desliga o MOD): a camada acaba no alto do
+    # selo, que continua à vista e no toque.
+    if ir_para_aba(pg, "ajustes", falhas):
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(SELO_E_O_MOD, "#tela-server")
+        if not r["aVista"] or r["sobreposto"] or not r["voltarNoToque"]:
+            falhas.append(f"recolhido, em AJUSTES, a camada e o selo se cobrem: {r}")
+        ir_para_aba(pg, "conversa", falhas)
+        pg.wait_for_timeout(300)
+    # O selo é do pé: uma folha e um aviso do MOD, com o diálogo recolhido,
+    # ficam acima dele, sem cobri-lo e sem ser cobertos. Medido antes, com o
+    # selo solto por cima do pé: o aviso o cobria inteiro, VOLTAR junto. O
+    # aviso fica, para a foto.
+    for tipo in ("folha", "aviso"):
+        pg.evaluate(f"__pedirAoProduto({{ tipo: 'superficie-criar', descricao: {{ id: 'um-{tipo}', tipo: '{tipo}', titulo: 'UM {tipo.upper()} DO MOD' }} }})")
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(SELO_E_O_MOD, f".superficie-de-mod[data-superficie='um-{tipo}']")
+        if not r["aVista"] or r["sobreposto"] or not r["voltarNoToque"]:
+            falhas.append(f"com o diálogo recolhido, {'a folha' if tipo == 'folha' else 'o aviso'} do MOD e o selo se cobrem: {r}")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-fechar', superficie: 'um-folha' })")
+    pg.wait_for_timeout(300)
+    return falhas
+
+
 def sessao_entrou(pg: Page) -> list[str]:
     """A sessão abriu com a marca, e a raiz do celular rodou."""
     falhas = []
@@ -2992,6 +3153,7 @@ CASOS: dict[str, Caso] = {
     "casca-larga": Caso(levar=casca_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
     # O gancho da pilha de inércia para a prévia do tema (D-estilo-1).
     "previa-recolhida": Caso(levar=previa_recolhida, aparelhos=("390",), medir=False),
+    "previa-do-tema": Caso(levar=previa_do_tema, medir=False),
     # As camadas sobre a sessão e a confirmação (Tarefa 11).
     "queda": Caso(levar=queda, medir=False),
     "alerta": Caso(levar=alerta, medir=False),
