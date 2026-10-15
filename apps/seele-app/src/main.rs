@@ -6648,26 +6648,33 @@ async fn habilitar_mod(
 
     let persistence = persistence_do_mod(&session)?;
     let persistence = persistence.lock().await;
-    // Os seis campos de uma vez, e não só os três de identidade: o que a tela
-    // de aceite de quem entra vai ler — repositório, alcance declarado, e se o
-    // MOD roda na máquina de quem hospeda — é gravado **no mesmo ato** que
-    // grava o hash, e por isso descreve exatamente os bytes que o hash cobre.
-    // Ver a migração 12.
-    seele_server::persistence::mods::enable(
-        &persistence,
-        &seele_server::persistence::mods::EnabledMod {
-            id: instalado.id,
-            version: instalado.version,
-            hash: instalado.hash,
-            repo: instalado.repo,
-            reach: instalado.reach,
-            server_half: instalado.server,
-            // A API que o manifesto pede, gravada no mesmo ato que o hash
-            // (migração 14; D-fio-7). É ela que o anúncio diz.
-            api: instalado.api,
-        },
-    )
-    .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
+    seele_server::persistence::mods::enable(&persistence, &habilitado_de(instalado))
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
+}
+
+/// A linha do banco em que um pacote instalado vira ao ser exigido aqui.
+///
+/// **Uma construção só, para os dois caminhos que gravam**: `habilitar_mod` e
+/// `aplicar_conjunto_de_mods`. Os campos de uma vez, e não só os três de
+/// identidade: o que a tela de aceite de quem entra vai ler — repositório,
+/// alcance declarado, e se o MOD roda na máquina de quem hospeda — é gravado
+/// **no mesmo ato** que grava o hash, e por isso descreve exatamente os bytes que
+/// o hash cobre (migração 12).
+///
+/// **A API é a que o manifesto do pacote declara** (migração 14; D-fio-7), e não
+/// a deste build: é ela que o anúncio diz. Ver `a_api_do_mod_habilitado`.
+fn habilitado_de(
+    instalado: seele_ffi::mods::ModInstalado,
+) -> seele_server::persistence::mods::EnabledMod {
+    seele_server::persistence::mods::EnabledMod {
+        id: instalado.id,
+        version: instalado.version,
+        hash: instalado.hash,
+        repo: instalado.repo,
+        reach: instalado.reach,
+        server_half: instalado.server,
+        api: instalado.api,
+    }
 }
 
 /// Desliga um MOD. Os dados dele ficam — ADR 0045.
@@ -9417,15 +9424,7 @@ async fn aplicar_conjunto_de_mods(
                 motivo: "conteudo-de-outro-mod".to_owned(),
             });
         }
-        linhas.push(seele_server::persistence::mods::EnabledMod {
-            id: instalado.id,
-            version: instalado.version,
-            hash: instalado.hash,
-            repo: instalado.repo,
-            reach: instalado.reach,
-            server_half: instalado.server,
-            api: instalado.api,
-        });
+        linhas.push(habilitado_de(instalado));
     }
 
     let identidade = {
@@ -19897,5 +19896,97 @@ mod a_resposta_a_estou_no_meu_servidor {
              quarto: a sessão em S ou na sala passa por guardado, e o sim de quem hospeda vai \
              a ela (ADR 0045):\n{corpo}"
         );
+    }
+}
+
+/// **A P7b: a API que o manifesto declara chega à coluna do banco** por quem a
+/// grava a partir da tela.
+///
+/// O código entrou com a P7a (`4112f96b`), e o teste da tela ficou esperando a
+/// fila do `main.rs`. Ele vai do pacote em disco, pelo mesmo `ler_por_hash` que
+/// os dois comandos usam, até a linha que o banco devolve; o guarda de fonte
+/// prende os dois comandos na mesma construção, que é o que sobra entre a tela e
+/// este teste.
+#[cfg(test)]
+mod a_api_do_mod_habilitado {
+    use super::*;
+
+    /// Um pacote no cache de uma casa temporária, com a API que o manifesto
+    /// declara. Devolve a casa e o hash do pacote.
+    fn pacote_no_cache(api: u32) -> (std::path::PathBuf, String) {
+        let raiz = std::env::temp_dir().join(format!("seele-app-p7b-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&raiz);
+        let fonte = raiz.join("fonte");
+        std::fs::create_dir_all(fonte.join("servidor")).expect("temporário");
+        std::fs::write(
+            fonte.join("mod.json"),
+            format!(
+                r#"{{"schema":1,"id":"seele/p7b","version":"1.0.0","api":{api},"repo":"https://github.com/seele/p7b","reach":[],"server":"servidor/main.js"}}"#
+            ),
+        )
+        .expect("manifesto");
+        std::fs::write(
+            fonte.join("servidor/main.js"),
+            "globalThis.aoPedir = () => '';",
+        )
+        .expect("metade de servidor");
+        let lido =
+            seele_ffi::mods::ler_pasta(&fonte.to_string_lossy()).expect("pacote válido recusado");
+        let casa = raiz.join("casa");
+        let guardado = casa.join(seele_ffi::mods::PACOTES).join(&lido.hash);
+        std::fs::create_dir_all(guardado.join("servidor")).expect("cache");
+        for arquivo in ["mod.json", "servidor/main.js"] {
+            std::fs::copy(fonte.join(arquivo), guardado.join(arquivo)).expect("copiar");
+        }
+        (casa, lido.hash)
+    }
+
+    #[test]
+    fn exigir_um_mod_grava_no_banco_a_api_que_o_manifesto_declara() {
+        // A 4: aceita por este build, e diferente do zero de «não preenchida» e
+        // da API deste build. Gravar uma das duas no lugar da do pacote reprova.
+        let declarada = 4;
+        assert!(
+            declarada != 0 && declarada != seele_ffi::mods::MOD_API_VERSION,
+            "o teste precisa de uma API que não é nem o zero nem a deste build"
+        );
+        let (casa, hash) = pacote_no_cache(declarada);
+        let instalado = seele_ffi::mods::ler_por_hash(&casa.to_string_lossy(), &hash)
+            .expect("o pacote não foi achado por hash");
+        let banco = seele_server::persistence::Persistence::open(
+            &seele_server::persistence::Location::Memory,
+        )
+        .expect("banco em memória");
+        seele_server::persistence::mods::enable(&banco, &habilitado_de(instalado))
+            .expect("exigir o MOD");
+        let gravada = seele_server::persistence::mods::enabled(&banco)
+            .expect("ler os exigidos")
+            .into_iter()
+            .find(|exigido| exigido.id == "seele/p7b")
+            .map(|exigido| exigido.api);
+        let _ = std::fs::remove_dir_all(casa.parent().unwrap_or(&casa));
+        assert_eq!(
+            gravada,
+            Some(declarada),
+            "a coluna `api` não recebeu a API que o manifesto declara: o anúncio diria outra"
+        );
+    }
+
+    #[test]
+    fn os_dois_comandos_que_gravam_passam_pela_mesma_construcao() {
+        let fonte = fonte_sem_comentarios();
+        // Montada, e não escrita: escrita aqui, a própria agulha seria achada
+        // no texto deste teste.
+        let a_mao = concat!("EnabledMod", " {");
+        for comando in [
+            "async fn habilitar_mod(",
+            "async fn aplicar_conjunto_de_mods(",
+        ] {
+            let corpo = corpo_de(&fonte, comando);
+            assert!(
+                corpo.contains("habilitado_de(") && !corpo.contains(a_mao),
+                "`{comando}` deixou de gravar pela construção que leva a API do manifesto"
+            );
+        }
     }
 }
