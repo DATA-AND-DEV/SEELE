@@ -16,13 +16,20 @@
 //    cai dentro da linha dela, cada linha é o mesmo nó (`===`), a linha dela diz
 //    o estado novo, e o foco de quem navega pela lista fica onde estava.
 // 2. **O mesmo retrato não mexe em nada**: com o tique de 500 ms redesenhando
-//    duas vezes, nenhuma mutação na lista.
+//    duas vezes, nenhuma mutação na lista — e o retrato desenhado é outro
+//    objeto no fim, senão um tique parado passaria sem medir nada.
 // 3. **Quem entra numa sala leva o próprio nó**: a linha é movida para o grupo
 //    da sala, e não recriada; as outras ficam.
 // 4. **Quem sai perde o nó, e quem chega ganha um**; as outras ficam.
-// 5. **Com um cartão de MOD em cada linha**, um `PersonState` continua mexendo
-//    só na linha da pessoa, e o cartão de cada uma é o mesmo nó, no documento,
-//    na linha dela.
+// 5. **Os nós de MOD, ponto de montagem por ponto**, cada um numa página nova:
+//    `pessoa.cartao` substituir com conteúdo, o mesmo sem conteúdo com o
+//    cartão de uma região da API 3 (o caminho do PERFIS), os cartões da API 3
+//    na linha nativa (nos três ramos: FORA DE SALA, as salas, o saguão),
+//    `pessoa.cartao` adicionar, `pessoa.identidade`, `pessoa.detalhes` e
+//    `sala.acoes`. Um `PersonState` não tira nenhum nó de MOD do documento —
+//    o observador vê os removidos —, cada um é o mesmo nó na mesma linha, e
+//    nenhuma mutação cai fora da linha da pessoa. Um marcador tirado de um
+//    ponto só reprova aqui.
 // 6. **A coluna de salas**, que também lista quem está em cada sala e tem o
 //    ENTRAR NA SALA: um `PersonState` mexe só na linha da pessoa nela, o
 //    ENTRAR NA SALA de outra sala é o mesmo nó, e o mesmo retrato não mexe em
@@ -32,6 +39,10 @@
 //    uma sala renomeada — botão com ouvinte próprio, que agora atravessa os
 //    retratos — abre o RENOMEAR com o nome de agora, e não o do quadro em que
 //    o botão nasceu.
+// 8. **A ordem é a do retrato** — depois de um PersonState, de uma entrada,
+//    de uma saída e de uma chegada, e depois de uma reordenação (a primeira da
+//    sala vai para o fim), na lista e na coluna de salas —, e cada linha é o
+//    mesmo nó.
 //
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
@@ -76,11 +87,12 @@ function retratoCom({ sala1, sala2 = [], presentes }) {
 const todas = Array.from({ length: PESSOAS }, (_, i) => pessoa(i + 1));
 const BASE = retratoCom({ sala1: todas.slice(0, NA_SALA), presentes: todas });
 
-(async () => {
-  const server = servir();
-  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
-  const browser = await chromium().launch({ headless: true });
-  try {
+/**
+ * Uma página nova, com a ponte simulada, os ajudantes dos casos e a sessão
+ * desenhada a partir de `r`. Os casos de MOD abrem uma cada: um ponto de
+ * montagem por vez, sem o registro de um caso anterior.
+ */
+async function abrir(browser, url, r) {
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -138,6 +150,55 @@ const BASE = retratoCom({ sala1: todas.slice(0, NA_SALA), presentes: todas });
         if (!linha) return null;
         return (linha.querySelector(".pessoa-nome")?.textContent ?? "?").replace(" (você)", "");
       };
+      // Um MOD de pé com estas contribuições, pelo registro de verdade.
+      window.registrarMod = (id, contribuicoes) => {
+        if (typeof geracaoDaSessao !== "number" || geracaoDaSessao < 1) entrarNaGeracao(1);
+        const instancia = new InstanciaDeMod(id, "hash", geracaoDaSessao, {
+          entregar: async () => {},
+          encerrar: async () => {},
+        });
+        instancia.estado = ESTADOS_DE_MOD.ativa;
+        modsCarregados.set(id, instancia);
+        for (const c of contribuicoes) contribuicoesDosMods.registrar({ id }, instancia, c);
+        return instancia;
+      };
+      // Os cartões de uma região da API 3 (`SeeleUI.cartoes`, o caminho do
+      // PERFIS), simulada: um nó por pessoa, montado uma vez e devolvido igual,
+      // como `RegiaoDeMod#cartaoDe`.
+      window.regiaoDeCartoes = (id) => {
+        const raizes = new Map();
+        cartoesDosMods.set(id, {
+          id,
+          cartaoDe(pessoa) {
+            const chave = String(pessoa);
+            if (!raizes.has(chave)) {
+              const raiz = document.createElement("div");
+              raiz.className = "pessoa-cartao";
+              raiz.dataset.mod = id;
+              raiz.textContent = `cartão da região para ${chave}`;
+              raizes.set(chave, raiz);
+            }
+            return raizes.get(chave);
+          },
+          midiasAnotadas: () => [],
+        });
+        redesenharAsPessoas();
+      };
+      // A ordem das linhas que o retrato pede: FORA DE SALA, as salas com
+      // gente, e quem está no servidor fora delas.
+      window.ordemDoRetrato = (r) => {
+        const sentados = new Set(r.voice_rooms.flatMap((s) => s.people.map((p) => p.id)));
+        const eu = r.presentes.find((p) => p.is_self);
+        return [
+          ...(r.voice_rooms.some((s) => s.occupied_by_us) || !eu ? [] : [eu.nickname]),
+          ...r.voice_rooms.flatMap((s) => s.people.map((p) => p.nickname)),
+          ...r.presentes.filter((p) => !sentados.has(p.id) && !p.is_self).map((p) => p.nickname),
+        ];
+      };
+      window.ordemNaTela = () => [...document.querySelectorAll("#lista-roster li.pessoa")]
+        .map((li) => (li.querySelector(".pessoa-nome")?.textContent ?? "").replace(" (você)", ""));
+      window.ordemNaColuna = () => [...document.querySelectorAll("#lista-voice_rooms .voice_room-pessoa-nome")]
+        .map((n) => n.textContent);
       window.quadros = async (n) => {
         for (let i = 0; i < n; i += 1) await new Promise((ok) => requestAnimationFrame(() => ok()));
       };
@@ -150,14 +211,23 @@ const BASE = retratoCom({ sala1: todas.slice(0, NA_SALA), presentes: todas });
         return chegou(desenhado);
       };
     }, respostas({ snapshot: null, microfones: [], saidas: [], pacotes_no_cache: [], aceites_de_mods: [] }));
-    await page.goto(`http://127.0.0.1:${server.address().port}`);
-
+    await page.goto(url);
     await page.evaluate((r) => {
       testTable.snapshot = r;
       $("tela-boot").hidden = true;
       $("tela-sessao").hidden = false;
       desenhar(r);
-    }, BASE);
+    }, r);
+    return { page, errors };
+}
+
+(async () => {
+  const server = servir();
+  await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium().launch({ headless: true });
+  try {
+    const { page, errors } = await abrir(browser, url, BASE);
     const contadas = await page.evaluate(() => linhasPorApelido().size);
     assert.equal(contadas, PESSOAS, `a lista desenhou ${contadas} linhas, e o retrato tem ${PESSOAS} pessoas`);
 
@@ -210,13 +280,21 @@ const BASE = retratoCom({ sala1: todas.slice(0, NA_SALA), presentes: todas });
     assert.equal(caso1.sinal, "61", `a linha de ${apelido(7)} não diz o sinal novo`);
     assert.ok(caso1.focoFicou, "o foco que estava no nome de outra pessoa saiu dele com o PersonState");
 
+    // A ordem na tela é a do retrato.
+    const ordem1 = await page.evaluate(() => ({ tela: ordemNaTela(), retrato: ordemDoRetrato(desenhado) }));
+    assert.deepEqual(ordem1.tela, ordem1.retrato, "depois de um PersonState, a ordem da lista não é a do retrato");
+
     // 2. O mesmo retrato, de novo: o tique de 500 ms o redesenha, e nada muda.
+    //    O retrato desenhado tem de ser outro objeto no fim: sem isso, um tique
+    //    parado passaria aqui sem medir nada.
     const caso2 = await page.evaluate(async () => {
+      const antes = desenhado;
       const parar = observarALista();
       await new Promise((ok) => setTimeout(ok, 1200));
-      return parar().length;
+      return { mutacoes: parar().length, redesenhou: desenhado !== antes && desenhado !== null };
     });
-    assert.equal(caso2, 0, `o mesmo retrato, redesenhado pelo tique, fez ${caso2} mutações na lista`);
+    assert.ok(caso2.redesenhou, "o tique não redesenhou em 1,2 s: o caso 2 não mediu nada");
+    assert.equal(caso2.mutacoes, 0, `o mesmo retrato, redesenhado pelo tique, fez ${caso2.mutacoes} mutações na lista`);
 
     // 3. Alguém de fora das salas entra na sala dois: o nó vai junto.
     const caso3 = await page.evaluate(async ({ alvo }) => {
@@ -244,6 +322,8 @@ const BASE = retratoCom({ sala1: todas.slice(0, NA_SALA), presentes: todas });
     assert.equal(caso3.grupo, "Sala dois", `a linha de ${apelido(40)} não foi para o grupo da sala`);
     assert.ok(caso3.mesmoNo, `${apelido(40)} entrou numa sala e a linha dela foi recriada, e não movida`);
     assert.equal(caso3.trocadas, 0, `${caso3.trocadas} outras linhas trocaram de nó com uma entrada na sala`);
+    const ordem3 = await page.evaluate(() => ({ tela: ordemNaTela(), retrato: ordemDoRetrato(desenhado) }));
+    assert.deepEqual(ordem3.tela, ordem3.retrato, "depois de uma entrada na sala, a ordem da lista não é a do retrato");
     assert.equal(caso3.grupos, 3, `a lista ficou com ${caso3.grupos} grupos, e são três: as duas salas e fora delas`);
     assert.deepEqual(caso3.gruposTrocados, [], "um grupo que já existia trocou de nó quando uma sala ganhou alguém");
 
@@ -271,58 +351,33 @@ const BASE = retratoCom({ sala1: todas.slice(0, NA_SALA), presentes: todas });
     assert.ok(caso4.foiEmbora, `${apelido(12)} saiu do servidor e a linha dela ficou`);
     assert.ok(caso4.nasceu, "quem chegou ao servidor não ganhou linha");
     assert.equal(caso4.trocadas, 0, `${caso4.trocadas} outras linhas trocaram de nó com uma saída e uma chegada`);
+    const ordem4 = await page.evaluate(() => ({ tela: ordemNaTela(), retrato: ordemDoRetrato(desenhado) }));
+    assert.deepEqual(ordem4.tela, ordem4.retrato, "depois de uma entrada na sala, uma saída e uma chegada, a ordem da lista não é a do retrato");
 
-    // 5. Com um cartão de MOD em cada linha.
-    const caso5 = await page.evaluate(async ({ alvo }) => {
-      entrarNaGeracao(1);
-      const instancia = new InstanciaDeMod("bancada/cartao", "hash", geracaoDaSessao, {
-        entregar: async () => {},
-        encerrar: async () => {},
-      });
-      instancia.estado = ESTADOS_DE_MOD.ativa;
-      modsCarregados.set("bancada/cartao", instancia);
-      for (const p of testTable.snapshot.presentes) {
-        contribuicoesDosMods.registrar({ id: "bancada/cartao" }, instancia, {
-          ponto: "pessoa.cartao", modo: "substituir", alvo: String(p.id), prioridade: 0,
-          conteudo: [{ forma: "texto", chave: "c", dentro: `cartão de ${p.nickname}` }],
-        });
-      }
-      await quadros(3);
-      desenhar(testTable.snapshot);
-      const cartaoDa = (li) => li?.querySelector(".contribuicao-de-mod") ?? null;
+    // 8. A ordem muda: a primeira da sala principal vai para o fim. A lista e a
+    //    coluna de salas ficam na ordem do retrato, e cada linha é o mesmo nó.
+    const caso8 = await page.evaluate(async () => {
       const antes = linhasPorApelido();
-      const cartoes = new Map([...antes].map(([nome, li]) => [nome, cartaoDa(li)]));
-      const comCartao = [...cartoes.values()].filter(Boolean).length;
-      const parar = observarALista();
       const novo = structuredClone(testTable.snapshot);
-      const quem = novo.voice_rooms[0].people.find((p) => p.nickname === alvo);
-      quem.muted = true;
-      const chegou = await pelaPonte(novo, (d) =>
-        d?.voice_rooms?.[0]?.people?.find((p) => p.nickname === alvo)?.muted === true);
-      const registros = parar();
+      const sala = novo.voice_rooms[0].people;
+      sala.push(sala.shift());
+      const ultimo = sala[sala.length - 1].nickname;
+      const chegou = await pelaPonte(novo, (d) => d?.voice_rooms?.[0]?.people?.at(-1)?.nickname === ultimo);
       const depois = linhasPorApelido();
-      const donos = registros.map(donoDaMutacao);
       return {
         chegou,
-        comCartao,
-        foraDaLinha: donos.filter((d) => d !== alvo).length,
-        mutacoes: registros.length,
+        naSala: sala.length,
+        tela: ordemNaTela(),
+        retrato: ordemDoRetrato(desenhado),
+        coluna: ordemNaColuna(),
+        colunaDoRetrato: desenhado.voice_rooms.flatMap((s) => s.people.map((p) => p.nickname)),
         trocadas: [...antes].filter(([nome, li]) => depois.get(nome) !== li).length,
-        cartoesTrocados: [...cartoes].filter(([nome, c]) =>
-          !c || cartaoDa(depois.get(nome)) !== c || !c.isConnected).length,
-        estado: depois.get(alvo)?.querySelector(".pastilha")?.textContent ?? null,
       };
-    }, { alvo: apelido(5) });
-    assert.ok(caso5.chegou, "o PersonState com cartões não chegou à tela");
-    assert.equal(caso5.comCartao, PESSOAS - 1 + 1, `só ${caso5.comCartao} linhas desenharam o cartão do MOD`);
-    assert.equal(
-      caso5.foraDaLinha, 0,
-      `com cartões, um PersonState de ${apelido(5)} mexeu fora da linha dela: ` +
-        `${caso5.foraDaLinha} de ${caso5.mutacoes} mutações`,
-    );
-    assert.equal(caso5.trocadas, 0, `com cartões, ${caso5.trocadas} linhas trocaram de nó`);
-    assert.equal(caso5.cartoesTrocados, 0, `${caso5.cartoesTrocados} cartões de MOD trocaram de nó ou saíram da linha`);
-    assert.equal(caso5.estado, "MUDO", `a linha de ${apelido(5)} não diz que ela está muda`);
+    });
+    assert.ok(caso8.chegou, "a ordem nova não chegou à tela");
+    assert.deepEqual(caso8.tela, caso8.retrato, "depois de uma reordenação, a ordem da lista não é a do retrato");
+    assert.deepEqual(caso8.coluna, caso8.colunaDoRetrato, "depois de uma reordenação, a ordem da coluna de salas não é a do retrato");
+    assert.equal(caso8.trocadas, 0, `${caso8.trocadas} linhas trocaram de nó com uma reordenação`);
 
     // 6. A coluna de salas, que também lista quem está em cada sala e tem o
     //    ENTRAR NA SALA: um PersonState mexe só na linha da pessoa nela, o
@@ -413,14 +468,115 @@ const BASE = retratoCom({ sala1: todas.slice(0, NA_SALA), presentes: todas });
     );
 
     assert.deepEqual(errors, []);
+    await page.close();
+
+    // 5. Os nós de MOD, um ponto de montagem por vez, cada um numa página
+    //    nova. Um PersonState de uma pessoa não tira nenhum nó de MOD do
+    //    documento — nem por um instante: o observador vê os nós removidos —,
+    //    cada nó é o mesmo, na mesma linha (ou no mesmo grupo), e nenhuma
+    //    mutação cai fora da linha da pessoa. Quem usa está fora das salas, para
+    //    os três ramos de `desenharPessoas` (FORA DE SALA, as salas, o saguão)
+    //    montarem linhas, e as duas salas têm gente, para o `sala.acoes`.
+    const RETRATO_MOD = (() => {
+      const r = retratoCom({ sala1: todas.slice(1, NA_SALA), sala2: todas.slice(NA_SALA, NA_SALA + 5), presentes: todas });
+      r.voice_rooms[0].occupied_by_us = false;
+      return r;
+    })();
+    const PONTOS = [
+      { tipo: "substituir", nome: "pessoa.cartao substituir, com conteúdo", seletor: '.contribuicao-de-mod[data-ponto="pessoa.cartao"]' },
+      { tipo: "perfis", nome: "pessoa.cartao substituir sem conteúdo, o cartão da região (o PERFIS)", seletor: '.pessoa-cartao[data-mod="bancada/perfis"]' },
+      { tipo: "api3", nome: "os cartões da API 3 na linha nativa", seletor: '.pessoa-cartao[data-mod="bancada/api3"]' },
+      { tipo: "adicionar", nome: "pessoa.cartao adicionar", seletor: '.contribuicao-de-mod[data-ponto="pessoa.cartao"]' },
+      { tipo: "identidade", nome: "pessoa.identidade", seletor: '.contribuicao-de-mod[data-ponto="pessoa.identidade"]' },
+      { tipo: "detalhes", nome: "pessoa.detalhes", seletor: '.contribuicao-de-mod[data-ponto="pessoa.detalhes"]' },
+      { tipo: "sala", nome: "sala.acoes", seletor: '.contribuicao-de-mod[data-ponto="sala.acoes"]', grupos: true },
+    ];
+    const caso5 = [];
+    for (const ponto of PONTOS) {
+      const aberta = await abrir(browser, url, RETRATO_MOD);
+      const r = await aberta.page.evaluate(async ({ tipo, seletor, grupos, alvo }) => {
+        const conteudo = (texto) => [{ forma: "texto", chave: "c", dentro: texto }];
+        const porPessoa = (ponto, modo, comConteudo = true) => testTable.snapshot.presentes.map((p) => ({
+          ponto, modo, alvo: String(p.id), prioridade: 0,
+          ...(comConteudo ? { conteudo: conteudo(`${ponto} de ${p.nickname}`) } : {}),
+        }));
+        if (tipo === "substituir") registrarMod("bancada/substituir", porPessoa("pessoa.cartao", "substituir"));
+        if (tipo === "perfis") {
+          registrarMod("bancada/perfis", porPessoa("pessoa.cartao", "substituir", false));
+          regiaoDeCartoes("bancada/perfis");
+        }
+        if (tipo === "api3") regiaoDeCartoes("bancada/api3");
+        if (tipo === "adicionar") registrarMod("bancada/adicionar", porPessoa("pessoa.cartao", "adicionar"));
+        if (tipo === "identidade") registrarMod("bancada/identidade", porPessoa("pessoa.identidade", "adicionar"));
+        if (tipo === "detalhes") {
+          registrarMod("bancada/detalhes", [
+            ...porPessoa("pessoa.cartao", "substituir"),
+            ...porPessoa("pessoa.detalhes", "adicionar"),
+          ]);
+        }
+        if (tipo === "sala") {
+          registrarMod("bancada/sala", testTable.snapshot.voice_rooms.map((s) => ({
+            ponto: "sala.acoes", modo: "adicionar", alvo: String(s.id), prioridade: 0, conteudo: conteudo(`ações de ${s.name}`),
+          })));
+        }
+        await quadros(3);
+        desenhar(testTable.snapshot);
+
+        const lista = document.getElementById("lista-roster");
+        const dono = (no) => grupos
+          ? no.closest("li.roster-grupo")?.querySelector(".roster-sala-nome")?.textContent ?? null
+          : (no.closest("li.pessoa")?.querySelector(".pessoa-nome")?.textContent ?? "").replace(" (você)", "") || null;
+        const nos = [...lista.querySelectorAll(seletor)];
+        const donos = new Map(nos.map((no) => [no, dono(no)]));
+        const esperados = grupos
+          ? testTable.snapshot.voice_rooms.filter((s) => s.people.length > 0).length
+          : lista.querySelectorAll("li.pessoa").length;
+
+        const parar = observarALista();
+        const novo = structuredClone(testTable.snapshot);
+        novo.voice_rooms[0].people.find((p) => p.nickname === alvo).muted = true;
+        novo.presentes.find((p) => p.nickname === alvo).muted = true;
+        const chegou = await pelaPonte(novo, (d) =>
+          d?.voice_rooms?.[0]?.people?.find((p) => p.nickname === alvo)?.muted === true);
+        const registros = parar();
+        const removidos = registros.flatMap((reg) => [...reg.removedNodes]);
+        const depois = new Set(lista.querySelectorAll(seletor));
+        const linhaDoAlvo = linhasPorApelido().get(alvo);
+        return {
+          chegou,
+          nos: nos.length,
+          esperados,
+          foraDaLinha: registros.map(donoDaMutacao).filter((d) => d !== alvo).length,
+          mutacoes: registros.length,
+          trocados: nos.filter((no) => !depois.has(no) || !no.isConnected || dono(no) !== donos.get(no)).length,
+          saiuDoDocumento: nos.filter((no) => removidos.some((m) => m === no || m.contains?.(no))).length,
+          estado: linhaDoAlvo?.querySelector(".pastilha")?.textContent ?? null,
+        };
+      }, { tipo: ponto.tipo, seletor: ponto.seletor, grupos: Boolean(ponto.grupos), alvo: apelido(5) });
+      assert.deepEqual(aberta.errors, [], `${ponto.nome}: erros na página`);
+      await aberta.page.close();
+      assert.ok(r.chegou, `${ponto.nome}: o PersonState não chegou à tela`);
+      assert.ok(r.nos > 0 && r.nos === r.esperados, `${ponto.nome}: ${r.nos} nós de MOD na lista, e eram ${r.esperados}`);
+      assert.equal(
+        r.saiuDoDocumento, 0,
+        `${ponto.nome}: ${r.saiuDoDocumento} de ${r.nos} nós de MOD saíram do documento com um PersonState de ` +
+          `${apelido(5)} — o marcador deste ponto não está na linha montada`,
+      );
+      assert.equal(r.foraDaLinha, 0, `${ponto.nome}: ${r.foraDaLinha} de ${r.mutacoes} mutações fora da linha de ${apelido(5)}`);
+      assert.equal(r.trocados, 0, `${ponto.nome}: ${r.trocados} nós de MOD trocaram de nó, de lugar, ou saíram da lista`);
+      assert.equal(r.estado, "MUDO", `${ponto.nome}: a linha de ${apelido(5)} não diz que ela está muda`);
+      caso5.push(`${ponto.nome} (${r.nos})`);
+    }
+
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
         `(${caso1.mutacoes} mutações, nenhuma fora dela) e o foco ficou; o mesmo retrato não ` +
-        "mexeu em nada; quem entrou na sala levou o nó; quem saiu perdeu o dele e quem chegou " +
-        `ganhou um; com cartões de MOD, ${caso5.mutacoes} mutações, todas na linha, e nenhum ` +
-        `cartão trocado; na coluna de salas, ${caso6.doEvento} mutações, todas na linha da ` +
+        "mexeu em nada (e foi redesenhado); quem entrou na sala levou o nó; quem saiu perdeu o " +
+        "dele e quem chegou ganhou um; a ordem é a do retrato, também depois de uma " +
+        `reordenação; na coluna de salas, ${caso6.doEvento} mutações, todas na linha da ` +
         "pessoa, o ENTRAR NA SALA o mesmo nó, quem saiu da sala levou só a linha dela, e o " +
-        "RENOMEAR abriu com o nome de agora.",
+        "RENOMEAR abriu com o nome de agora; e nenhum nó de MOD saiu do documento nem trocou " +
+        `de linha, ponto por ponto: ${caso5.join("; ")}.`,
     );
   } finally {
     await browser.close();
