@@ -3179,6 +3179,18 @@ enum FalhaAoHospedar {
     /// A lista de revogação que chegou não abriu, ou é mais velha que a
     /// guardada: o ato é recusado junto, em vez de seguir calado.
     ListaDeRevogacaoRecusada,
+    /// **Um MOD ligado neste servidor que este app não roda** (o corte da API
+    /// 6; tarefa 13 do plano da F3, Step 5b).
+    ///
+    /// Conferido antes de subir, como o nome e a revogação: subido, o servidor
+    /// recusaria todo app 0.16 com `ModsDeOutraApi`, e quem hospeda só ganhava
+    /// uma queixa no registro — «o produto sabe e não conta». Cada um com o
+    /// identificador e a API que o pacote declara, ou `None` quando o pacote
+    /// não está nesta máquina; a frase e as três saídas são da tela.
+    ModsDeApiAntiga {
+        /// `(id, api)`, na ordem do banco.
+        mods: Vec<(String, Option<u32>)>,
+    },
 }
 
 impl From<versoes::RecusaDestaVersao> for FalhaAoHospedar {
@@ -3452,6 +3464,19 @@ async fn hospedar(
         // hospedou antes desta versão existir.
         None => seele_server::persistence::banco_do_cliente(std::path::Path::new(&config)),
     };
+    // **Um MOD ligado que este app não roda: dito antes de subir** (o corte da
+    // API 6; tarefa 13 do plano da F3, Step 5b). Com o mesmo banco e as mesmas
+    // raízes que vão ao servidor, e antes de marcar o servidor como hospedado:
+    // recusado aqui, nada sobe e nada fica dizendo que esta janela hospeda.
+    let antigos = mods::mods_de_api_antiga(
+        &banco,
+        &servidores::raizes_dos_mods(&config, id_do_servidor),
+    );
+    if !antigos.is_empty() {
+        return Err(FalhaAoHospedar::ModsDeApiAntiga {
+            mods: antigos.into_iter().map(|antigo| (antigo.id, antigo.api)).collect(),
+        });
+    }
     // Guardado **antes** de subir: quem perguntar «qual servidor esta janela
     // hospeda?» entre o início e o fim recebe a resposta certa, e não «nenhum».
     if let Ok(mut qual) = session.servidor_hospedado.lock() {
@@ -3571,6 +3596,38 @@ mod o_ponto_de_encontro_de_quem_hospeda {
             fonte.contains(COM_O_PADRAO),
             "nenhuma hospedagem deste arquivo usa `{COM_O_PADRAO}`: o app hospeda sem o ponto de \
              encontro do projeto"
+        );
+    }
+
+    /// **Quem hospeda com um MOD de API antiga sabe antes de o servidor subir**
+    /// (tarefa 13 do plano da F3, Step 5b). A conferência é a de
+    /// `mods::mods_de_api_antiga` (provada lá, com a pasta da 0.15.1); aqui, que
+    /// ela é chamada com o banco e as raízes que vão ao servidor, e **antes**
+    /// de marcar o servidor hospedado e de `iniciar`: depois, a recusa chegaria
+    /// com o servidor já no ar. Tirada a chamada, ou posta depois do `iniciar`,
+    /// reprova.
+    #[test]
+    fn hospedar_confere_os_mods_de_api_antiga_antes_de_subir() {
+        let fonte = super::fonte_sem_comentarios();
+        let corpo = super::corpo_de(&fonte, "async fn hospedar(");
+        let conferir = corpo
+            .find("mods::mods_de_api_antiga(")
+            .expect("`hospedar` não confere os MODs de API antiga: o servidor subiria calado");
+        let marcar = corpo
+            .find("session.servidor_hospedado.lock()")
+            .expect("`hospedar` deixou de marcar o servidor hospedado");
+        let subir = corpo
+            .find(COM_O_PADRAO)
+            .expect("`hospedar` deixou de subir o servidor");
+        assert!(
+            conferir < marcar && conferir < subir,
+            "a conferência dos MODs de API antiga vem depois de marcar o servidor ou de subi-lo: \
+             a recusa chegaria com o servidor no ar"
+        );
+        let chamada = &corpo[conferir..];
+        assert!(
+            chamada.contains("&banco") && chamada.contains("servidores::raizes_dos_mods(&config, id_do_servidor)"),
+            "a conferência não usa o banco e as raízes que vão ao servidor"
         );
     }
 
