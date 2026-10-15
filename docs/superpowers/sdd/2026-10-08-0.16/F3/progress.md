@@ -731,7 +731,17 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   `carga-cartoes` com 251, contra a `lista-251` — os mesmos calados sem MOD,
   a referência que o §12 usa (`36fbc79f`). O «diz e segue» aplicado
   (`94fee0c0`).
-- **Esperam:** a `carga-cartoes` consertada (com ela, o teto de
-  contribuições no §12 e no `v6.json`), a tarefa 13 (o corte), o Step 5 da
-  tarefa 9 (a 7d) e o Step 3 da tarefa 7 (o teto da `midia`, que a M3 não
-  mediu).
+- **11/10–15/10.** O teto de contribuições congelou no `v6.json` pela
+  bancada (`78972cc0`): no app a lista de 251 não se mede pela
+  acessibilidade, e a (b) da 63 entrou na 0.16 com a F5, guardada pela sonda
+  `arvore-ax.py` (`3436980d`). O jitter zero da rodada de 11/10 era o áudio do
+  Mac que não abriu para o app, e não o conserto (`d9e7f475`). A tarefa 9,
+  Step 5 (`69dcb3b7`): o `#toque` no guarda 11, e um modal de MOD deixando de
+  adormecê-lo. **O corte (tarefa 13)**, no ramo local `0.16/api-6-corte`:
+  Steps 0 a 4 e 6b feitos, 5b em parte (a conferência e a frase; faltam as
+  saídas como botões), 5 esperando a fonte da união das linhas.
+- **Esperam:** do corte, o Step 5 (a fonte da união das linhas) e as
+  saídas do 5b como botões (três decisões pedidas); o avanço do `0.16/api-6`
+  quando o corte estiver verde; a limpeza da máquina da API 3 na casca e do
+  `snapshot` do prelúdio, depois da (b) da 63; e o Step 3 da tarefa 7 (o teto
+  da `midia`, que a M3 não mediu).
