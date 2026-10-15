@@ -180,21 +180,9 @@ def montar(destino: pathlib.Path, *, celular: bool, marca: str | None) -> pathli
     if marca:
         texto = texto.replace("<head>", "<head>\n" + MARCA.format(marca), 1)
     corte = texto.index("<script src=")
-    duble = (
-        carga.DUBLE.replace("__APIS_ACEITAS__", carga.apis_aceitas())
-        .replace("__PERMISSOES_DA_JANELA__", carga.permissoes_da_janela())
-        .replace("__VERSAO_DO_SERVIDOR__", carga.versao_do_servidor())
-        .replace("__LINHA__", carga.linha_desta_janela())
-    )
-    # **Nenhum marcador do duble fica sem valor.** A 21 da F7 pôs no duble da
-    # carga o `__PERMISSOES_DA_JANELA__`, que a carga preenche e esta bancada
-    # não preenchia: a página morria no primeiro script com «is not defined», e
-    # a bancada inteira reprovava sem dizer por quê (décima quarta integração,
-    # 11/10). Um marcador novo na carga reprova aqui, com o nome dele.
-    sobrando = sorted(set(re.findall(r"__[A-Z][A-Z_]*__", duble)) - {"__TAURI__"})
-    if sobrando:
-        raise SystemExit(f"o duble da carga tem marcadores que esta bancada não preenche: {sobrando}")
-    pagina.write_text(texto[:corte] + duble + texto[corte:])
+    # O duble montado pela carga, com todo marcador preenchido e nenhum
+    # sobrando: a bancada não repete as trocas (ver `carga.duble_montado`).
+    pagina.write_text(texto[:corte] + carga.duble_montado() + texto[corte:])
     return pagina
 
 

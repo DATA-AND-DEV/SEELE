@@ -55,14 +55,14 @@ let linhaAberta = null;
 let mensagensPorDesenhar = false;
 
 /**
- * Quantos lugares uma sala nova tem.
+ * Quantos lugares a primeira sala do servidor tem, para a sala nova copiar, ou
+ * `null` enquanto não há sala nenhuma de onde copiar — ver `desenharCanais`.
  *
- * Copiado da primeira sala que o servidor já tem — ver `desenharCanais`. O 250
- * é só o piso da ignorância: o teto que o protocolo aceita
- * (`MAX_VOICE_ROOM_LIMIT`), usado enquanto não há sala nenhuma de onde copiar,
- * que é o primeiro minuto de um servidor recém-montado.
+ * Era `250` até o lote C55 da F5: o teto do fio (`MAX_VOICE_ROOM_LIMIT`)
+ * escrito à mão, como piso da ignorância. O teto agora vem do Rust, e quem o
+ * aplica é `lugaresParaASalaNova`, na hora de criar.
  */
-let lugaresDeUmaSalaNova = 250;
+let lugaresDeUmaSalaNova = null;
 /**
  * O endereço que esta janela discou, para a porta do cabeçalho.
  *
@@ -3177,11 +3177,6 @@ invoke("limite_da_mensagem")
   })
   .catch((falha) => console.warn("limite da mensagem:", falha));
 
-/** Quantos bytes UTF-8 este texto ocupa. */
-function bytesDe(texto) {
-  return new TextEncoder().encode(texto).length;
-}
-
 /**
  * Acende o aviso de tamanho **antes** de a pessoa tentar mandar.
  *
@@ -4264,7 +4259,7 @@ function esquecerOEstadoDaSessao() {
   // sala daquele servidor), a trilha desenhada e o anúncio de troca de
   // aparelho, cuja conta é da voz que acabou.
   podeRemoverMensagem = false;
-  lugaresDeUmaSalaNova = 250;
+  lugaresDeUmaSalaNova = null;
   trilhaDesenhada = null;
   // O VOLTAR AO MEU SERVIDOR da trilha diz onde **esta** sessão está (noutro
   // servidor); a seguinte o relê com o histórico (`recarregarTrilha`).
@@ -4787,16 +4782,46 @@ $("lista-linhas").addEventListener("click", alternarCanal);
 /// dispositivos do Terminal server. Duas vezes no mesmo dia: o literal fica no
 /// lugar da chamada, sempre.
 
+/**
+ * Quantos lugares a sala nova leva, conferido contra o fio antes de mandar
+ * (pendência 58, item 55; lote C55 da F5).
+ *
+ * A cópia da primeira sala vale quando cabe no fio, de 1 a `lugares_da_sala`
+ * (`limites_dos_campos`). Fora disso — um servidor configurado com uma sala de
+ * mais lugares que isso, ou de zero —, e quando não há sala de onde copiar,
+ * vale o teto. Recusar não teria saída: ninguém escreveu este número, e quem
+ * administra ficaria sem como criar sala naquele servidor. A cópia que não
+ * cabia ia ao núcleo, que recusava a sala calado. O ajuste vai ao `seele.log`.
+ */
+async function lugaresParaASalaNova() {
+  const teto = (await tetosDosCampos())?.lugares_da_sala;
+  const copiado = lugaresDeUmaSalaNova;
+  if (typeof teto !== "number") {
+    // Sem o teto (a ponte não respondeu), a cópia, como antes deste lote.
+    if (Number.isInteger(copiado)) return copiado;
+    throw new Error("os tetos dos campos não chegaram, e não há sala de onde copiar os lugares");
+  }
+  if (Number.isInteger(copiado) && copiado >= 1 && copiado <= teto) return copiado;
+  if (copiado !== null) {
+    registrarNoAnfitriao(
+      "sessao",
+      `a sala nova copiaria ${copiado} lugares da primeira sala, e o fio aceita de 1 a ${teto}: ela vai com ${teto}`,
+      "aviso",
+    );
+  }
+  return teto;
+}
+
 $("nova-voice_room").addEventListener("click", () => {
   abrirNomear({
     titulo: "NOVA SALA DE VOZ",
     rotulo: "NOME DA SALA",
     exemplo: "nome da sala",
     acao: "CRIAR",
-    aoConfirmar: (nome) =>
+    aoConfirmar: async (nome) =>
       invoke("criar_voice_room", {
         name: nome,
-        limit: lugaresDeUmaSalaNova,
+        limit: await lugaresParaASalaNova(),
         channel: null,
       }),
   });

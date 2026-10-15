@@ -206,6 +206,19 @@ pub use seele_proto::control::MAX_BODY_LEN;
 /// revisão do lote P61): uma senha acima dele não cabe no fio, e o núcleo a
 /// recusaria sem que o `Room` da casca soubesse qual entrada desfazer.
 pub use seele_proto::control::MAX_NICKNAME_LEN;
+/// Os outros tetos dos campos que a casca escreve: o nome de um canal ou de
+/// uma sala, quantas pessoas uma sala nova pode ter, o nome do servidor e o
+/// motivo de um banimento (os textos em **bytes**).
+///
+/// Reexportados para a FFI os entregar à janela (`Connection::limites_dos_campos`,
+/// pendência 58, item 55; lote C55 da F5). A janela contava caracteres, e o fio
+/// conta bytes: um nome acentuado cabia no campo e não no quadro, e o núcleo o
+/// recusava sem a pessoa saber. Daqui, e não de uma cópia: a regra do ADR 0002
+/// não deixa a casca ver o `seele-proto`, e um número copiado é o que envelhece
+/// calado.
+pub use seele_proto::control::{
+    MAX_ALERT_TEXT_LEN, MAX_CHANNEL_NAME_LEN, MAX_CLIENT_NAME_LEN, MAX_VOICE_ROOM_LIMIT,
+};
 pub use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc, VoiceRoomId,
