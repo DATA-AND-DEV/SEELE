@@ -989,10 +989,14 @@ def previa_recolhida(pg: Page) -> list[str]:
     sessão está inerte; recolhido (`recolherSuperficie`), o diálogo sai da
     vista e da pilha, a sessão deixa de ser inerte, e a prévia continua; de
     volta (`devolverSuperficie`), o diálogo volta ao topo da pilha, a sessão
-    volta a ficar inerte, e a prévia está intacta."""
+    volta a ficar inerte, e a prévia está intacta. Fechado depois, o foco
+    volta a quem o abriu, e não ao VOLTAR da casca, que já saiu (A da revisão
+    da F3, 15/10). Um `ocultar` do MOD com o diálogo recolhido não é desfeito
+    pelo devolver (B), e uma página não se recolhe."""
     falhas = []
     pg.evaluate(MOD_DE_PE)
     tema = TEMAS["papel"]
+    pg.evaluate("document.getElementById('campo-mensagem').focus()")
     pg.evaluate(DIALOGO_COM_PREVIA, tema)
     pg.wait_for_timeout(300)
     aberto = pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])
@@ -1005,11 +1009,35 @@ def previa_recolhida(pg: Page) -> list[str]:
     recolhido = pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])
     if recolhido != {"dialogo": False, "noTopo": False, "sessaoInerte": False, "previa": "estilo", "tema": True}:
         falhas.append(f"recolhido, o diálogo deixa a sessão inerte ou leva a prévia: {recolhido}")
-    if not pg.evaluate(f"devolverSuperficie({raiz})"):
+    # O VOLTAR da casca: pega o foco, devolve, e sai de vista.
+    devolvido = pg.evaluate(f"""() => {{
+      const voltar = document.createElement('button');
+      document.getElementById('tela-sessao').append(voltar);
+      voltar.focus();
+      const devolveu = devolverSuperficie({raiz});
+      voltar.remove();
+      return devolveu;
+    }}""")
+    if not devolvido:
         falhas.append("o devolverSuperficie não devolveu o diálogo")
     de_volta = pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])
     if de_volta != {"dialogo": True, "noTopo": True, "sessaoInerte": True, "previa": "estilo", "tema": True}:
         falhas.append(f"de volta, o diálogo não está no topo da pilha com a prévia: {de_volta}")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-fechar', superficie: 'estilo' })")
+    pg.wait_for_timeout(200)
+    if (onde := pg.evaluate("document.activeElement?.id || document.activeElement?.tagName")) != "campo-mensagem":
+        falhas.append(f"recolhido, devolvido e fechado, o diálogo devolveu o foco a {onde!r}, e não ao campo que o abriu")
+    # B: o MOD oculta o diálogo enquanto a casca o tem recolhido. O devolver
+    # não o mostra: o ocultar é do MOD, e vale o último.
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    pg.evaluate(f"recolherSuperficie({raiz})")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-ocultar', superficie: 'estilo' })")
+    pg.wait_for_timeout(200)
+    if pg.evaluate(f"devolverSuperficie({raiz})") or pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])["dialogo"]:
+        falhas.append("recolhido, o MOD ocultou o diálogo, e o devolverSuperficie o mostrou")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-mostrar', superficie: 'estilo' })")
+    pg.wait_for_timeout(200)
     # Só a casca devolve o que ela recolheu: um diálogo que o MOD ocultou não
     # volta por aqui.
     pg.evaluate("__pedirAoProduto({ tipo: 'superficie-ocultar', superficie: 'estilo' })")
@@ -1018,6 +1046,15 @@ def previa_recolhida(pg: Page) -> list[str]:
         falhas.append("o MOD pediu para ocultar o diálogo, e ele continua à vista: a conferência abaixo não vale")
     elif pg.evaluate(f"devolverSuperficie({raiz})") or pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])["dialogo"]:
         falhas.append("o devolverSuperficie mostrou um diálogo que o MOD tinha ocultado")
+    # Só o diálogo se recolhe: uma página que a casca pedisse por engano sairia
+    # do palco dela.
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'pagina', tipo: 'pagina', titulo: 'PÁGINA' } })")
+    pg.wait_for_timeout(300)
+    pagina = "document.querySelector('.pagina-de-mod[data-superficie=\"pagina\"]')"
+    if not pg.evaluate(f"{pagina}?.checkVisibility() ?? false"):
+        falhas.append("a página do MOD não abriu: a conferência de que ela não se recolhe não vale")
+    elif pg.evaluate(f"recolherSuperficie({pagina})") or not pg.evaluate(f"{pagina}.checkVisibility()"):
+        falhas.append("o recolherSuperficie recolheu uma página, e só o diálogo se recolhe")
     return falhas
 
 

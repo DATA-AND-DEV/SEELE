@@ -264,15 +264,26 @@ function acordarDaPilha(no) {
  * desfeito por aqui.
  *
  * Achada pelo nó dela (`.superficie-de-mod`), que é o que a casca tem na mão.
+ * Só o diálogo se recolhe: é o único que cobre a sessão, e uma página recolhida
+ * por engano tiraria a página ativa do palco dela (`liberarDestino`).
+ *
+ * Qualquer `mostrar` ou `ocultar` que não seja daqui (o do MOD, o de outra
+ * página) tira a marca: a casca só devolve o que continua como ela deixou.
  */
 const superficiePorRaiz = new WeakMap();
 
 /** @returns {boolean} se recolheu. */
 function recolherSuperficie(raiz) {
   const superficie = superficiePorRaiz.get(raiz);
-  if (!superficie || superficie.solta || !superficie.montada || !superficie.visivel) return false;
-  superficie.recolhidaPelaCasca = true;
+  if (!superficie || superficie.tipo !== "dialogo" || superficie.solta || !superficie.montada || !superficie.visivel) {
+    return false;
+  }
+  // O foco de quem a abriu: o `ocultar` o devolve e o esquece, e o `mostrar`
+  // da volta guardaria o VOLTAR da casca no lugar dele.
+  const focoAnterior = superficie.focoAnterior;
   superficie.ocultar();
+  superficie.recolhidaPelaCasca = true;
+  superficie.focoAntesDeRecolher = focoAnterior;
   return true;
 }
 
@@ -280,8 +291,9 @@ function recolherSuperficie(raiz) {
 function devolverSuperficie(raiz) {
   const superficie = superficiePorRaiz.get(raiz);
   if (!superficie || superficie.solta || !superficie.recolhidaPelaCasca) return false;
-  superficie.recolhidaPelaCasca = false;
+  const focoAnterior = superficie.focoAntesDeRecolher;
   superficie.mostrar();
+  if (focoAnterior) superficie.focoAnterior = focoAnterior;
   return true;
 }
 
@@ -813,6 +825,8 @@ class SuperficieDeMod {
     if (this.solta) throw new Error(`a superfície «${this.chave}» foi descartada`);
     // O teto da pilha de folhas, que o conjunto confere: reabrir também conta.
     this.antesDeMostrar?.();
+    this.recolhidaPelaCasca = false;
+    this.focoAntesDeRecolher = null;
     this.visivel = true;
     this.abrir();
   }
@@ -829,6 +843,8 @@ class SuperficieDeMod {
    */
   ocultar() {
     if (this.solta) return;
+    this.recolhidaPelaCasca = false;
+    this.focoAntesDeRecolher = null;
     this.visivel = false;
     this.liberarDestino();
     this.soltarFoco();
