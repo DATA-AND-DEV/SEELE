@@ -196,6 +196,8 @@ const SEELE_QUADRO = {
     { id: 3, name: "links", open: false }, { id: 4, name: "ruido", open: false },
   ],
   messages_revision: 1,
+  // O FORA DO AR é pedido pelo número, e a lista não vem no retrato (P6).
+  fora_do_ar_revision: 0,
   telemetry: { rtt_ms: 23, jitter_ms: 4, loss_fraction: 0.002, bitrate_bps: 48000,
                signal: 92, sync_band: "Verde", input_level: 0.4, local_fault: false,
                frames_refused: 0 },
@@ -220,6 +222,9 @@ SEELE_RESPOSTAS.messages = [
   M(4, 2, "juli", 1756000563, "o furo de NAT funcionou daqui pro celular do vitor, o encontro só apresentou os dois e esqueceu"),
   M(5, 4, "dani", 1756000649, "entrei na oficina, alguém vem?"),
 ];
+// Ninguém fora do ar, como num servidor sem contas além das conectadas: um
+// roteiro que quer o grupo põe a lista aqui e anda a revisão.
+SEELE_RESPOSTAS.membros_fora_do_ar = [];
 SEELE_RESPOSTAS.snapshot = SEELE_QUADRO;
 SEELE_RESPOSTAS.connect = { snapshot: SEELE_QUADRO, veredito: null };
 window.__SEELE_CHAMADAS = [];

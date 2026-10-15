@@ -283,6 +283,20 @@ impl From<seele_core::tofu::Verdict> for Trust {
     }
 }
 
+/// Um membro deste servidor que não está conectado agora: o FORA DO AR (P6).
+///
+/// **Só id e apelido**, sem papel e sem horário. E **fora do [`Snapshot`]**, de
+/// propósito: o `Snapshot` inteiro vai a todo MOD da API 5 para baixo, e a lista
+/// de membros do servidor não é dele. A janela a lê por
+/// [`crate::Connection::membros_fora_do_ar`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct MembroForaDoAr {
+    /// A conta.
+    pub id: u64,
+    /// O apelido de agora.
+    pub nickname: String,
+}
+
 /// One thing somebody said.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Message {
@@ -846,6 +860,13 @@ pub struct Snapshot {
     /// `seele_core::Changed` already said when that was, and this is the shell
     /// finally being able to act on it.
     pub messages_revision: u64,
+    /// Quantas vezes o FORA DO AR pode ter mudado: **o número, e nunca a lista**.
+    ///
+    /// A lista de membros do servidor fica fora do `Snapshot`, porque todo MOD
+    /// da API 5 para baixo lê o `Snapshot` inteiro e ela não é dele (P6). A
+    /// casca guarda o último número que desenhou e chama
+    /// [`crate::Connection::membros_fora_do_ar`] quando ele muda.
+    pub fora_do_ar_revision: u64,
     /// Measurements.
     pub telemetry: Telemetry,
     /// The last thing worth surfacing.

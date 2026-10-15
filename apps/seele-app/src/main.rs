@@ -4744,6 +4744,19 @@ fn messages(session: State<'_, Session>) -> Result<Vec<seele_ffi::Message>, Conn
     Ok(session.connection()?.messages())
 }
 
+/// O FORA DO AR: os membros deste servidor que não estão conectados agora (P6,
+/// D-fio-4).
+///
+/// Fora do `snapshot` como a conversa, e por mais um motivo: um MOD da API 5
+/// recebe o retrato inteiro, e nenhum MOD ganhou a lista de membros. A tela
+/// pede este quando o `fora_do_ar_revision` do snapshot muda.
+#[tauri::command]
+fn membros_fora_do_ar(
+    session: State<'_, Session>,
+) -> Result<Vec<seele_ffi::MembroForaDoAr>, ConnectionError> {
+    Ok(session.connection()?.membros_fora_do_ar())
+}
+
 #[tauri::command]
 fn enter_voice_room(
     session: State<'_, Session>,
@@ -12564,6 +12577,7 @@ fn main() {
             meu_servidor,
             snapshot,
             messages,
+            membros_fora_do_ar,
             enter_voice_room,
             leave_voice_room,
             open_channel,

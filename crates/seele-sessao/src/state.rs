@@ -347,6 +347,18 @@ pub struct Room {
     /// anunciada duas vezes é uma linha, porque a varredura de abertura e a
     /// difusão podem se sobrepor por um instante.
     pub presentes: Vec<PersonId>,
+    /// Os membros deste servidor, inteiros: a última lista de `Membros` que
+    /// chegou até o `fim`, com os `MembroNovo` e sem os `MembroBanido` de
+    /// depois. O FORA DO AR é ela menos quem está em [`Self::presentes`] (ver
+    /// [`Self::fora_do_ar`]).
+    ///
+    /// **Fora do `Snapshot`, de propósito** (P6, decisão da orquestradora): o
+    /// `Snapshot` inteiro ainda vai a todo MOD da API 5 para baixo, e a lista de
+    /// membros do servidor não é dele. A ponte a entrega por um acessor
+    /// próprio, como entrega as mensagens.
+    pub membros: BTreeMap<PersonId, String>,
+    /// As partes de um `Membros` que ainda não chegou ao `fim`.
+    membros_chegando: Option<BTreeMap<PersonId, String>>,
     /// What has been said, **por canal**, oldest first within each.
     ///
     /// # Por que um mapa, e não uma lista
@@ -496,6 +508,11 @@ pub struct ChavePedida {
 pub struct Changed {
     /// Somebody joined, left, or changed state.
     pub roster: bool,
+    /// O FORA DO AR pode ter mudado: a lista de membros, um apelido de membro,
+    /// ou quem está conectado. **Separado do `roster`**, que sobe a cada
+    /// `PersonState` (um por pessoa por segundo, pendência 63): é por este que a
+    /// janela sabe quando reler [`Room::fora_do_ar`], e não a cada tique.
+    pub membros: bool,
     /// A message arrived, changed, or went away.
     pub messages: bool,
     /// voice_rooms or Channels changed.
@@ -545,6 +562,25 @@ impl Room {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// O FORA DO AR: os membros deste servidor que não estão conectados agora,
+    /// por apelido. Nem quem abriu esta sessão, nem quem está em
+    /// [`Self::presentes`]. Só id e apelido: sem papel e sem horário (P6).
+    #[must_use]
+    pub fn fora_do_ar(&self) -> Vec<(PersonId, String)> {
+        let mut fora: Vec<(PersonId, String)> = self
+            .membros
+            .iter()
+            .filter(|(id, _)| Some(**id) != self.me && !self.presentes.contains(id))
+            .map(|(id, apelido)| (*id, apelido.clone()))
+            .collect();
+        fora.sort_by(|(um_id, um), (outro_id, outro)| {
+            um.to_lowercase()
+                .cmp(&outro.to_lowercase())
+                .then(um_id.cmp(outro_id))
+        });
+        fora
     }
 
     /// Seeds from what the handshake already established.
@@ -1147,12 +1183,14 @@ impl Room {
                 person.ssrc = Some(*ssrc);
                 if !self.presentes.contains(&profile.id) {
                     self.presentes.push(profile.id);
+                    changed.membros = true;
                 }
                 changed.roster = true;
             }
 
             ServerMessage::PersonGone { person } => {
                 self.presentes.retain(|presente| presente != person);
+                changed.membros = true;
                 // Os assentos **não** são limpos aqui: o servidor manda um
                 // `PersonLeft` por sala que a pessoa ocupava, e limpar nos dois
                 // lugares poria duas autoridades sobre a mesma linha. O que se
@@ -1464,6 +1502,18 @@ impl Room {
                 if let Some(pessoa) = self.people.get_mut(person) {
                     pessoa.nickname.clone_from(nickname);
                 }
+                // E no FORA DO AR, que é onde quem renomeou fora do ar aparece.
+                if let Some(apelido) = self.membros.get_mut(person) {
+                    apelido.clone_from(nickname);
+                    changed.membros = true;
+                }
+                if let Some(apelido) = self
+                    .membros_chegando
+                    .as_mut()
+                    .and_then(|chegando| chegando.get_mut(person))
+                {
+                    apelido.clone_from(nickname);
+                }
                 changed.roster = true;
             }
 
@@ -1662,13 +1712,34 @@ impl Room {
             | ServerMessage::Pong { .. }
             | ServerMessage::Tocando { .. } => {}
 
-            // O FORA DO AR (D-fio-4): o tipo e o fio existem desde o Servidor
-            // 1.0, e nenhum servidor os manda ainda. Guardar a lista de
-            // membros e mostrá-la é da sessão do Plano 3 e da casca; até lá,
-            // não há o que perder aqui.
-            ServerMessage::Membros { .. }
-            | ServerMessage::MembroNovo { .. }
-            | ServerMessage::MembroBanido { .. } => {}
+            // O FORA DO AR (D-fio-4, P6). A lista chega em partes de até 256,
+            // e só vale inteira no `fim`: uma parte sem ele não troca a lista
+            // anterior, que é o que a volta de uma queda reenvia sem o grupo
+            // piscar vazio.
+            ServerMessage::Membros { membros, fim } => {
+                let chegando = self.membros_chegando.get_or_insert_with(BTreeMap::new);
+                for membro in membros {
+                    chegando.insert(membro.id, membro.nickname.clone());
+                }
+                if *fim {
+                    self.membros = self.membros_chegando.take().unwrap_or_default();
+                    changed.roster = true;
+                    changed.membros = true;
+                }
+            }
+            ServerMessage::MembroNovo { membro } => {
+                self.membros.insert(membro.id, membro.nickname.clone());
+                changed.roster = true;
+                changed.membros = true;
+            }
+            ServerMessage::MembroBanido { person } => {
+                self.membros.remove(person);
+                if let Some(chegando) = self.membros_chegando.as_mut() {
+                    chegando.remove(person);
+                }
+                changed.roster = true;
+                changed.membros = true;
+            }
 
             // Os certificados curtos do celular (ADR 0057). O desktop não abre
             // `h3`; quem guarda estes hashes é quem monta link para o celular,
@@ -1818,6 +1889,114 @@ mod tests {
         room.enter_voice_room(VOICE_ROOM);
         room.open_channel(CHANNEL);
         room
+    }
+
+    /// Alguém conectado a este servidor agora.
+    fn presente(id: u64, nickname: &str) -> ServerMessage {
+        ServerMessage::PersonPresent {
+            profile: PersonProfile {
+                id: PersonId(id),
+                nickname: nickname.into(),
+                roles: Vec::new(),
+                material_e2ee: None,
+            },
+            ssrc: Ssrc(u32::try_from(id * 10).expect("ssrc")),
+        }
+    }
+
+    fn membro(id: u64, nickname: &str) -> seele_proto::control::Membro {
+        seele_proto::control::Membro {
+            id: PersonId(id),
+            nickname: nickname.into(),
+        }
+    }
+
+    fn fora(lista: &[(u64, &str)]) -> Vec<(PersonId, String)> {
+        lista
+            .iter()
+            .map(|(id, apelido)| (PersonId(*id), (*apelido).to_owned()))
+            .collect()
+    }
+
+    /// **O FORA DO AR** (P6 do plano F1b; D-fio-4): quem é membro do servidor e
+    /// não está conectado agora. Quem está conectado não aparece nele, nem quem
+    /// abriu esta sessão.
+    #[test]
+    fn fora_do_ar_e_quem_e_membro_e_nao_esta_conectado() {
+        let mut room = room();
+        room.apply(&presente(3, "ana"));
+        let mudou = room.apply(&ServerMessage::Membros {
+            membros: vec![membro(3, "ana"), membro(4, "bruno"), membro(7, "eu")],
+            fim: true,
+        });
+        assert!(
+            mudou.roster,
+            "a lista de membros chegou e ninguém foi avisado"
+        );
+        assert_eq!(
+            room.fora_do_ar(),
+            fora(&[(4, "bruno")]),
+            "o FORA DO AR mostra quem está conectado, ou quem abriu esta sessão"
+        );
+    }
+
+    /// A lista chega em partes, e só vale inteira no `fim`. Uma parte sem `fim`
+    /// não esvazia a anterior: a volta de uma queda reenvia a lista, e o grupo
+    /// não pode piscar vazio enquanto ela chega.
+    #[test]
+    fn uma_parte_sem_fim_nao_troca_a_lista_e_as_partes_somam() {
+        let mut room = room();
+        room.apply(&ServerMessage::Membros {
+            membros: vec![membro(4, "bruno")],
+            fim: true,
+        });
+        room.apply(&ServerMessage::Membros {
+            membros: vec![membro(5, "carla")],
+            fim: false,
+        });
+        assert_eq!(
+            room.fora_do_ar(),
+            fora(&[(4, "bruno")]),
+            "uma parte sem `fim` trocou a lista que estava inteira"
+        );
+        room.apply(&ServerMessage::Membros {
+            membros: vec![membro(6, "davi")],
+            fim: true,
+        });
+        assert_eq!(
+            room.fora_do_ar(),
+            fora(&[(5, "carla"), (6, "davi")]),
+            "as partes não somaram, ou a lista velha sobreviveu ao `fim` da nova"
+        );
+    }
+
+    #[test]
+    fn membro_novo_entra_banido_sai_e_o_nome_novo_vale_fora_do_ar() {
+        let mut room = room();
+        room.apply(&ServerMessage::Membros {
+            membros: vec![membro(4, "bruno")],
+            fim: true,
+        });
+        room.apply(&ServerMessage::MembroNovo {
+            membro: membro(5, "carla"),
+        });
+        room.apply(&ServerMessage::PersonRenamed {
+            person: PersonId(4),
+            nickname: "bruno lima".into(),
+        });
+        assert_eq!(
+            room.fora_do_ar(),
+            fora(&[(4, "bruno lima"), (5, "carla")]),
+            "o membro novo não entrou, ou o nome novo não chegou ao FORA DO AR"
+        );
+        room.apply(&ServerMessage::MembroBanido {
+            person: PersonId(4),
+        });
+        assert_eq!(
+            room.fora_do_ar(),
+            fora(&[(5, "carla")]),
+            "quem foi banido continua no FORA DO AR"
+        );
     }
 
     #[test]

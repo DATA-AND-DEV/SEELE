@@ -68,11 +68,11 @@ pub use types::{
     AberturaDoAudio, Attachment, AttachmentRefusal, CaptureDevice, Channel, ChannelWeight,
     ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio,
     EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, LimitesDeTela,
-    LimitesDosCampos, LinkState, LinkTrust, Message, MotivoDaRecusa, NotSavedReason, Notice,
-    NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
-    PreviewRefusal, PreviewRules, SaveDestination, SaveRefused, Severity, SignalBand as Band,
-    Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, Transfer, TransmissaoNaSala, Trust,
-    VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
+    LimitesDosCampos, LinkState, LinkTrust, MembroForaDoAr, Message, MotivoDaRecusa,
+    NotSavedReason, Notice, NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person,
+    PlaybackDevice, Preview, PreviewRefusal, PreviewRules, SaveDestination, SaveRefused, Severity,
+    SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, Transfer,
+    TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -1196,6 +1196,12 @@ struct Shared {
     /// O número em si não significa nada; só a diferença significa. A casca
     /// guarda o último que desenhou e busca o histórico quando ele muda.
     messages_revision: std::sync::atomic::AtomicU64,
+    /// Quantas vezes o FORA DO AR pode ter mudado. Pelo mesmo motivo do
+    /// `messages_revision`, e por um a mais: a lista de membros fica **fora do
+    /// `Snapshot`** (P6), que todo MOD da API 5 para baixo lê, e este número é a
+    /// única coisa dela que viaja nele. A casca relê
+    /// [`Connection::membros_fora_do_ar`] quando ele muda.
+    fora_do_ar_revision: std::sync::atomic::AtomicU64,
     /// Quantas vezes a imagem do servidor mudou desde que esta sessão começou.
     ///
     /// Existe pelo mesmo motivo do `messages_revision`, num tamanho menor: o
@@ -1667,6 +1673,7 @@ impl Connection {
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
+            fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
@@ -3256,6 +3263,28 @@ impl Connection {
             .unwrap_or_default()
     }
 
+    /// O FORA DO AR: os membros deste servidor que não estão conectados agora.
+    ///
+    /// **Separado do [`Connection::snapshot`], e é isso que protege a lista**:
+    /// o `Snapshot` inteiro vai a todo MOD da API 5 para baixo, e a lista de
+    /// membros do servidor não é dele (P6, decisão da orquestradora). Muda junto
+    /// com o roster: a janela relê no `Event::RosterChanged`.
+    pub fn membros_fora_do_ar(&self) -> Vec<MembroForaDoAr> {
+        self.shared
+            .room
+            .lock()
+            .map(|room| {
+                room.fora_do_ar()
+                    .into_iter()
+                    .map(|(id, nickname)| MembroForaDoAr {
+                        id: id.get(),
+                        nickname,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Everything the interface needs, in one value.
     ///
     /// Cheap enough to call on every frame of a redraw, and deliberately a copy:
@@ -3329,6 +3358,7 @@ impl Connection {
             presentes: sala.presentes,
             channels: sala.channels,
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
+            fora_do_ar_revision: self.shared.fora_do_ar_revision.load(Ordering::Relaxed),
             telemetry: Telemetry {
                 rtt_ms,
                 // O jitter que a pessoa quer saber é o de chegada, medido
@@ -5851,6 +5881,15 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
                 }
             }
         }
+    }
+
+    // **Antes do `RosterChanged`**, pelo motivo da revisão dos retratos logo
+    // abaixo: a casca relê o FORA DO AR pelo número quando o evento chega, e um
+    // número que sobe depois do aviso é um número que ela pode ler velho.
+    if changed.membros {
+        shared
+            .fora_do_ar_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     if changed.roster {
@@ -9105,6 +9144,7 @@ mod tests {
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
+            fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
@@ -9141,6 +9181,118 @@ mod tests {
     /// Devolve o `Room` para o teste acrescentar gente: é a contagem de
     /// espectadores que os testes abaixo mexem, e ela é o N do §5.1.
     /// Um `Shared` vazio, para exercer o `fold` sem uma conexão.
+    /// **A lista de membros não vai no `Snapshot`** (P6, decisão da
+    /// orquestradora).
+    ///
+    /// O `Snapshot` inteiro ainda vai a todo MOD da API 5 para baixo
+    /// (`base.js`, a mensagem `snapshot`), e a lista de membros do servidor não é
+    /// dele. O FORA DO AR sai por [`Connection::membros_fora_do_ar`]. Se alguém
+    /// puser os membros fora do ar no `Snapshot`, o apelido aparece no JSON que
+    /// a janela e os MODs leem, e este teste reprova.
+    #[test]
+    fn o_snapshot_serializado_nao_leva_nenhum_membro_fora_do_ar() {
+        use seele_core::{ServerMessage, SessionId, Ssrc};
+        let shared = compartilhado_de_teste();
+        fold(
+            &shared,
+            &ServerMessage::Session {
+                id: SessionId(1),
+                person: seele_core::PersonId(7),
+                ssrc: Ssrc(700),
+                server: "Casa".into(),
+                voice_rooms: Vec::new(),
+                channels: Vec::new(),
+                roles: Vec::new(),
+                permissions: Vec::new(),
+            },
+        );
+        let apelido = "membro-que-nenhum-mod-pode-ler";
+        fold(
+            &shared,
+            &ServerMessage::Membros {
+                membros: vec![seele_core::Membro {
+                    id: seele_core::PersonId(42),
+                    nickname: apelido.into(),
+                }],
+                fim: true,
+            },
+        );
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let connection = Connection {
+            commands,
+            shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
+        };
+        // O controle: o membro chegou, e a janela o lê pelo acessor. Sem isto,
+        // um `Snapshot` sem ele não provaria nada.
+        assert_eq!(
+            connection.membros_fora_do_ar(),
+            vec![MembroForaDoAr {
+                id: 42,
+                nickname: apelido.into(),
+            }],
+            "o FORA DO AR não chegou ao acessor, e o teste mediu outra coisa"
+        );
+        let snapshot = serde_json::to_string(&connection.snapshot()).expect("o snapshot vira JSON");
+        assert!(
+            !snapshot.contains(apelido),
+            "o `Snapshot` leva um membro fora do ar, e todo MOD da API 5 para baixo o lê"
+        );
+    }
+
+    /// **O número do FORA DO AR já subiu quando o `RosterChanged` chega.**
+    ///
+    /// A casca relê a lista quando o evento chega, e só se o número andou. Um
+    /// número que sobe depois do aviso é um que ela pode ler velho, e aí o
+    /// grupo fica errado até a próxima mudança de membros — que pode não vir.
+    /// O ouvinte lê o número no instante do aviso, que é o instante em que a
+    /// casca o leria.
+    #[test]
+    fn o_numero_do_fora_do_ar_ja_subiu_quando_o_aviso_chega() {
+        use seele_core::ServerMessage;
+
+        struct Leitor(std::sync::Weak<Shared>, Mutex<Vec<u64>>);
+        impl EventListener for Leitor {
+            fn on_event(&self, event: Event) {
+                if !matches!(event, Event::RosterChanged) {
+                    return;
+                }
+                if let (Some(shared), Ok(mut lidos)) = (self.0.upgrade(), self.1.lock()) {
+                    lidos.push(
+                        shared
+                            .fora_do_ar_revision
+                            .load(std::sync::atomic::Ordering::Relaxed),
+                    );
+                }
+            }
+        }
+
+        let shared = compartilhado_de_teste();
+        let leitor = Arc::new(Leitor(Arc::downgrade(&shared), Mutex::new(Vec::new())));
+        shared
+            .listeners
+            .lock()
+            .unwrap()
+            .push(Arc::clone(&leitor) as Arc<dyn EventListener>);
+
+        fold(
+            &shared,
+            &ServerMessage::Membros {
+                membros: vec![seele_core::Membro {
+                    id: seele_core::PersonId(42),
+                    nickname: "ritsuko".into(),
+                }],
+                fim: true,
+            },
+        );
+
+        assert_eq!(
+            leitor.1.lock().unwrap().as_slice(),
+            &[1],
+            "o `RosterChanged` saiu com o número do FORA DO AR ainda velho"
+        );
+    }
+
     pub(super) fn compartilhado_de_teste() -> Arc<Shared> {
         Arc::new(Shared {
             caminho_medido: std::sync::atomic::AtomicU32::new(0),
@@ -9148,6 +9300,7 @@ mod tests {
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
+            fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
@@ -12190,6 +12343,7 @@ mod o_audio_segue_a_sala {
             link_seconds: AtomicU64::new(0),
             link_attempts: AtomicU32::new(0),
             messages_revision: AtomicU64::new(0),
+            fora_do_ar_revision: AtomicU64::new(0),
             icon_revision: AtomicU64::new(0),
             person_icons_revision: AtomicU64::new(0),
             room: Mutex::new(Room::new()),
