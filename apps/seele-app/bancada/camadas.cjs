@@ -366,6 +366,35 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(partes.notasFicaram, true, 'a parte recusada trocou as notas assim mesmo');
     assert.equal(partes.notasDepoisDaProxima, true, 'a parte recusada ficou na declaração, e a parte seguinte a desenhou');
 
+    // 6b. **A forma que a API não tem é recusada pelo nome** (D-api-8; o
+    // achado 5 da auditoria do `v6.json`), no montar e no atualizar, antes
+    // de mexer na tela, e com a forma. Ela sumia calada: o renderer não a
+    // contava fora do cartão, e o `superficie-montar` respondia `ok`.
+    const formas = await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'formas', tipo: 'dialogo', modal: false, titulo: 'Formas' } });
+      const boa = await pedir(6, { tipo: 'superficie-montar', superficie: 'formas',
+        arvore: [{ forma: 'texto', chave: 'a', dentro: 'antes' }, { forma: 'texto', chave: 'b', dentro: 'outra' }] });
+      const montar = await pedir(6, { tipo: 'superficie-montar', superficie: 'formas',
+        arvore: [{ forma: 'linha', dentro: [{ forma: 'texto', dentro: 'novo' }, { forma: 'textolongo', dentro: 'x' }] }] });
+      const atualizar = await pedir(6, { tipo: 'superficie-atualizar', superficie: 'formas', chave: 'a',
+        arvore: { forma: 'carrossel', chave: 'a' } });
+      const raiz = document.querySelector('.dialogo-de-mod[data-superficie="formas"]');
+      const texto = raiz?.textContent ?? '';
+      // E a recusa não estraga a declaração: a parte seguinte, válida e de
+      // **outra** chave, entra. Pela mesma chave, ela apagaria o estrago.
+      const depois = await pedir(6, { tipo: 'superficie-atualizar', superficie: 'formas', chave: 'b',
+        arvore: { forma: 'texto', chave: 'b', dentro: 'depois' } });
+      return { boa, montar, atualizar, texto, depois, textoDepois: raiz?.textContent ?? '' };
+    });
+    assert.equal(formas.boa?.ok, true, `a árvore com formas da API foi recusada: ${JSON.stringify(formas.boa)}`);
+    assert.equal(formas.montar?.erro, 'forma-desconhecida', `o montar com uma forma que a API não tem não foi recusado pelo nome: ${JSON.stringify(formas.montar)}`);
+    assert.equal(formas.montar?.forma, 'textolongo', `a recusa do montar não disse a forma: ${JSON.stringify(formas.montar)}`);
+    assert.equal(formas.atualizar?.erro, 'forma-desconhecida', `o atualizar com uma forma que a API não tem não foi recusado pelo nome: ${JSON.stringify(formas.atualizar)}`);
+    assert.equal(formas.atualizar?.forma, 'carrossel', `a recusa do atualizar não disse a forma: ${JSON.stringify(formas.atualizar)}`);
+    assert.ok(formas.texto.includes('antes') && !formas.texto.includes('novo'), `a recusa mexeu na tela: «${formas.texto}»`);
+    assert.equal(formas.depois?.ok, true, `a recusa ficou na declaração, e a parte válida seguinte foi recusada: ${JSON.stringify(formas.depois)}`);
+    assert.ok(formas.textoDepois.includes('depois'), `a parte válida depois da recusa não apareceu: «${formas.textoDepois}»`);
+
     // 7. As regras declaradas dos formulários.
     await page.evaluate(async () => {
       await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'perfil', tipo: 'dialogo', modal: false, titulo: 'Perfil' } });

@@ -281,6 +281,27 @@ function tiposDaApi(api) {
 }
 
 /**
+ * **A primeira forma que a API não tem, numa árvore declarada**, ou `null`
+ * (D-api-8; o achado 5 da auditoria do `v6.json`). Ela sumia calada: o
+ * renderer não a contava fora do cartão, e o `superficie-montar` respondia
+ * `ok`. Com ela, a superfície recusa pelo nome antes de mexer na tela. O
+ * percurso é o de `nosDaDeclaracao`: os filhos moram em `dentro`, e um texto
+ * solto é uma string.
+ */
+function formaDesconhecida(no) {
+  if (Array.isArray(no)) {
+    for (const um of no) {
+      const achada = formaDesconhecida(um);
+      if (achada !== null) return achada;
+    }
+    return null;
+  }
+  if (no === null || typeof no !== "object") return null;
+  if (typeof no.forma === "string" && !Object.hasOwn(FORMAS_DA_REGIAO, no.forma)) return no.forma;
+  return formaDesconhecida(no.dentro);
+}
+
+/**
  * Uma recusa das superfícies, com o nome de lista fechada (rascunho §7.1) e
  * os campos que a 6 recebe. Até a 5, `recusaParaOMod` devolve `null`, e o MOD
  * recebe a frase.
@@ -683,6 +704,7 @@ class SuperficieDeMod {
   /** O que o MOD declarou, montado aqui dentro. */
   montar(conteudo) {
     if (this.solta) return 0;
+    this.recusarFormaDesconhecida(conteudo);
     // A declaração inteira, para a montagem por partes trocar um nó dela.
     this.declaracao = conteudo;
     const tinhaFoco = this.raiz.contains?.(document.activeElement);
@@ -714,6 +736,7 @@ class SuperficieDeMod {
       throw recusaDaSuperficie("chave-desconhecida",
         `a superfície «${this.chave}» não tem um nó com a chave «${alvo}»`, { chave: alvo });
     }
+    this.recusarFormaDesconhecida(subarvore);
     const perfil = this.renderer.perfil;
     const tamanho = nosDaDeclaracao(this.declaracao)
       - nosDaDeclaracao(lugar.pai[lugar.campo]) + nosDaDeclaracao(subarvore);
@@ -724,6 +747,15 @@ class SuperficieDeMod {
     }
     lugar.pai[lugar.campo] = subarvore;
     return this.montar(raiz.declaracao);
+  }
+
+  /** Recusa, pelo nome e com a forma, a árvore com uma forma que a API não tem. */
+  recusarFormaDesconhecida(arvore) {
+    const forma = formaDesconhecida(arvore);
+    if (forma !== null) {
+      throw recusaDaSuperficie("forma-desconhecida",
+        `a superfície «${this.chave}» declara a forma «${forma}», que a API não tem`, { forma });
+    }
   }
 
   /**

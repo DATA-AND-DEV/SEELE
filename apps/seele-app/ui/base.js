@@ -3686,6 +3686,7 @@ const RECUSAS_AO_MOD = Object.freeze([
   "chave-desconhecida",
   "valor-invalido",
   "regiao-desconhecida",
+  "forma-desconhecida",
   "orcamento",
   "superficie-desconhecida",
   "sem-previa",
