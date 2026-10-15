@@ -3231,6 +3231,41 @@ fn apagar_servidor(app: AppHandle, session: State<'_, Session>, id: String) -> R
     servidores::apagar(&config_dir(&app), &id)
 }
 
+/// **As saídas 1 e 3 de quem hospeda com um MOD de API antiga**: atualizar o
+/// MOD ou desligá-lo, com o servidor parado (tarefa 13 do plano da F3, Step
+/// 5b; os limites da orquestradora de 15/10).
+///
+/// A regra e os limites são de [`mods::resolver_mod_de_api_antiga`], provados
+/// lá com a pasta da 0.15.1. Aqui, o «no ar» lido da janela, pelo mesmo campo
+/// do [`apagar_servidor`]: com um servidor guardado de pé nesta janela, nada
+/// é aberto.
+///
+/// # Errors
+///
+/// [`mods::FalhaAoResolverModAntigo`], uma variante por motivo.
+#[tauri::command]
+async fn resolver_mod_de_api_antiga(
+    app: AppHandle,
+    session: State<'_, Session>,
+    servidor: Option<String>,
+    id: String,
+    saida: mods::SaidaDoModAntigo,
+) -> Result<(), mods::FalhaAoResolverModAntigo> {
+    let no_ar = match session.hospedagens.lock() {
+        Ok(hospedagens) => hospedagens.guardado.is_some(),
+        // Sem saber, recusar: mexer no banco de um servidor de pé é o que a
+        // recusa existe para impedir.
+        Err(_) => true,
+    };
+    let config = config_dir(&app);
+    // Abrir o banco migra, e uma migração não roda na thread da janela.
+    tauri::async_runtime::spawn_blocking(move || {
+        mods::resolver_mod_de_api_antiga(&config, servidor.as_deref(), &id, &saida, no_ar)
+    })
+    .await
+    .map_err(|erro| mods::FalhaAoResolverModAntigo::BancoNaoRespondeu(erro.to_string()))?
+}
+
 /// Guarda um servidor novo e devolve o que foi guardado.
 ///
 /// **Não o levanta.** Criar e hospedar são dois passos porque a tela de
@@ -3455,15 +3490,12 @@ async fn hospedar(
     // continuar funcionando numa máquina sem registro nenhum.
     let config = config_dir(&app);
     let id_do_servidor = servidor.as_deref();
-    let banco = match id_do_servidor {
-        Some(id) => {
-            servidores::marcar_uso(&config, id);
-            servidores::banco(&config, Some(id))
-        }
-        // O legado, e ele não é um caso de canto: é toda máquina que já
-        // hospedou antes desta versão existir.
-        None => seele_server::persistence::banco_do_cliente(std::path::Path::new(&config)),
-    };
+    if let Some(id) = id_do_servidor {
+        servidores::marcar_uso(&config, id);
+    }
+    // O mesmo banco que as saídas de quem hospeda com um MOD de API antiga
+    // abrem (`resolver_mod_de_api_antiga`): um lugar só, em `servidores`.
+    let banco = servidores::banco_de_hospedar(&config, id_do_servidor);
     // **Um MOD ligado que este app não roda: dito antes de subir** (o corte da
     // API 6; tarefa 13 do plano da F3, Step 5b). Com o mesmo banco e as mesmas
     // raízes que vão ao servidor, e antes de marcar o servidor como hospedado:
@@ -3474,7 +3506,10 @@ async fn hospedar(
     );
     if !antigos.is_empty() {
         return Err(FalhaAoHospedar::ModsDeApiAntiga {
-            mods: antigos.into_iter().map(|antigo| (antigo.id, antigo.api)).collect(),
+            mods: antigos
+                .into_iter()
+                .map(|antigo| (antigo.id, antigo.api))
+                .collect(),
         });
     }
     // Guardado **antes** de subir: quem perguntar «qual servidor esta janela
@@ -3626,8 +3661,30 @@ mod o_ponto_de_encontro_de_quem_hospeda {
         );
         let chamada = &corpo[conferir..];
         assert!(
-            chamada.contains("&banco") && chamada.contains("servidores::raizes_dos_mods(&config, id_do_servidor)"),
+            chamada.contains("&banco")
+                && chamada.contains("servidores::raizes_dos_mods(&config, id_do_servidor)"),
             "a conferência não usa o banco e as raízes que vão ao servidor"
+        );
+    }
+
+    /// **As saídas de quem hospeda leem da janela se há servidor no ar**
+    /// (tarefa 13 do plano da F3, Step 5b). A recusa é de
+    /// `mods::resolver_mod_de_api_antiga` (provada lá); aqui, que o comando
+    /// lhe passa o `guardado` desta janela, o campo do `apagar_servidor`, e
+    /// não uma constante. Com `false` no lugar, reprova.
+    #[test]
+    fn as_saidas_de_quem_hospeda_leem_da_janela_se_ha_servidor_no_ar() {
+        let fonte = super::fonte_sem_comentarios();
+        let corpo = super::corpo_de(&fonte, "async fn resolver_mod_de_api_antiga(");
+        let no_ar = corpo.find("guardado.is_some()").expect(
+            "as saídas não leem o servidor guardado desta janela: mexeriam num banco de pé",
+        );
+        let chamada = corpo
+            .find("mods::resolver_mod_de_api_antiga(")
+            .expect("o comando não chama a regra das saídas");
+        assert!(
+            no_ar < chamada && corpo[chamada..].contains("no_ar)"),
+            "o comando não passa à regra o «no ar» que leu da janela"
         );
     }
 
@@ -6685,46 +6742,26 @@ fn mod_nativo_encerrar(
     Ok(())
 }
 
-/// Liga um MOD no servidor que este processo hospeda./// Liga um MOD no servidor que este processo hospeda.
+/// Liga um MOD no servidor que este processo hospeda.
 async fn habilitar_mod(
     app: AppHandle,
     session: State<'_, Session>,
     id: String,
     hash: String,
 ) -> Result<(), FalhaNoMod> {
-    // Por hash: dois pacotes do mesmo MOD podem estar no disco, e quem liga
-    // sabe quais bytes quer — ler por identificador pegaria «o que estiver
-    // lá», que pode ser o que outro servidor desta máquina baixou depois.
-    let instalado = seele_ffi::mods::ler_por_hash(&config_dir(&app), &hash)
+    // Por hash, e os campos todos de uma vez, no mesmo ato que grava o hash:
+    // o que a tela de aceite de quem entra vai ler — repositório, alcance
+    // declarado, se o MOD roda na máquina de quem hospeda, a API que o anúncio
+    // diz — descreve exatamente os bytes que o hash cobre (migrações 12 e 14).
+    // A regra é uma só, a de `mods::linha_do_pacote`, também para a saída 1 de
+    // quem hospeda com um MOD de API antiga.
+    let linha = mods::linha_do_pacote(&config_dir(&app), &id, &hash)
         .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
-    if instalado.id != id {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "conteudo-de-outro-mod".to_owned(),
-        });
-    }
 
     let persistence = persistence_do_mod(&session)?;
     let persistence = persistence.lock().await;
-    // Os seis campos de uma vez, e não só os três de identidade: o que a tela
-    // de aceite de quem entra vai ler — repositório, alcance declarado, e se o
-    // MOD roda na máquina de quem hospeda — é gravado **no mesmo ato** que
-    // grava o hash, e por isso descreve exatamente os bytes que o hash cobre.
-    // Ver a migração 12.
-    seele_server::persistence::mods::enable(
-        &persistence,
-        &seele_server::persistence::mods::EnabledMod {
-            id: instalado.id,
-            version: instalado.version,
-            hash: instalado.hash,
-            repo: instalado.repo,
-            reach: instalado.reach,
-            server_half: instalado.server,
-            // A API que o manifesto pede, gravada no mesmo ato que o hash
-            // (migração 14; D-fio-7). É ela que o anúncio diz.
-            api: instalado.api,
-        },
-    )
-    .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
+    seele_server::persistence::mods::enable(&persistence, &linha)
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
 }
 
 /// Desliga um MOD. Os dados dele ficam — ADR 0045.
@@ -12579,6 +12616,7 @@ fn main() {
             servidores_guardados,
             criar_servidor,
             apagar_servidor,
+            resolver_mod_de_api_antiga,
             abrir_versao,
             abertura,
             instalar_mod,
