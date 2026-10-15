@@ -1841,8 +1841,9 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
 - o teto de 12 KiB por mensagem, conferido antes de postar, igual
   (`executor.rs:1504-1516` [c]), enquanto o §12 não mudar;
 - nenhum armazenamento que sobreviva à sessão, nenhuma rede, nenhum acesso à
-  origem da página (os critérios do spike, que o AB passou no Chromium 151 e
-  no Safari do Simulador).
+  origem da página — `https://web.seele.app.br`, onde moram as identidades do
+  celular e do navegador (D-web-2, do dono, 15/10) — (os critérios do spike,
+  que o AB passou no Chromium 151 e no Safari do Simulador).
 
 **A MESA não usa armazenamento nem rede** e roda igual nas duas candidatas
 (MESA, item 18). O PERFIS e o ESTILO também não, pela leitura das revisões
