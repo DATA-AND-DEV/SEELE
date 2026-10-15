@@ -22,6 +22,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use seele_core::chegada::{Chegada, Etapa};
 use seele_core::confere_codigo::chave_do_pino;
 use seele_core::enlace::{Destino, Enlace, Esperada};
 use seele_core::{ConnectError, MemoryPinStore, PinStore};
@@ -256,14 +257,14 @@ async fn quem_toca_numa_corrida_nao_cai_no_prazo_do_candidato() {
     let mut avisos = recepcao.assinar();
     // Um endereço que recebe e nunca responde.
     let mudo = std::net::UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-    let ligando = tokio::spawn(Enlace::conectar_entre(
+    let chegada = Chegada::nova(
         vec![
             destino(mudo.local_addr().unwrap()),
             destino(sala.local_addr().unwrap()),
         ],
-        chave(QUEM_LIGA),
-        pins(),
-    ));
+        None,
+    );
+    let ligando = tokio::spawn(chegada.chegar(chave(QUEM_LIGA), pins()));
     let toque = tocou(&mut avisos, QUEM_LIGA).await;
 
     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -271,19 +272,76 @@ async fn quem_toca_numa_corrida_nao_cai_no_prazo_do_candidato() {
         let resultado = ligando.await.unwrap();
         panic!(
             "quem tocava desistiu no prazo do candidato, com o toque ainda no prazo: {:?}",
-            desfecho(&resultado)
+            resultado.err().map(|frustrada| frustrada.motivo().clone())
         );
     }
 
     assert!(recepcao.atender(toque), "o toque não estava mais tocando");
-    let resultado = tokio::time::timeout(Duration::from_secs(5), ligando)
+    let chegado = tokio::time::timeout(Duration::from_secs(5), ligando)
         .await
         .expect("quem foi atendido não entrou em 5 s")
-        .unwrap();
+        .unwrap()
+        .unwrap_or_else(|frustrada| {
+            panic!("quem foi atendido não entrou: {:?}", frustrada.motivo())
+        });
+    // E a trilha diz quem tocou: o segundo, e não o mudo.
+    let etapas: Vec<&Etapa> = chegado.trilha.iter().map(|passo| &passo.etapa).collect();
     assert!(
-        resultado.is_ok(),
-        "quem foi atendido não entrou: {:?}",
-        desfecho(&resultado)
+        matches!(
+            etapas.as_slice(),
+            [
+                Etapa::Parada { .. },
+                Etapa::Tentando { candidato: 0, .. },
+                Etapa::Tentando { candidato: 1, .. },
+                Etapa::Tocando { candidato: 1, .. },
+                Etapa::Dentro,
+            ]
+        ),
+        "a trilha da corrida não diz quem tocou: {etapas:?}"
     );
     drop(mudo);
+}
+
+/// **Quem acompanha a chegada vê `Tocando`** (tarefa 16 da F7): a etapa sai
+/// quando a sala manda o toque, antes de alguém atender, e a trilha de uma
+/// ligação atendida é `Parada → Tentando → Tocando → Dentro`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn quem_acompanha_a_chegada_ve_tocando_antes_de_atenderem() {
+    let _vaga = vaga::minha();
+    let sala = sala(Duration::from_secs(30)).await;
+    let recepcao = recepcao(&sala);
+    let mut avisos = recepcao.assinar();
+    let chegada = Chegada::nova(vec![destino(sala.local_addr().unwrap())], None);
+    let mut etapas = chegada.acompanhar();
+    let chegando = tokio::spawn(chegada.chegar(chave(QUEM_LIGA), pins()));
+
+    let toque = tocou(&mut avisos, QUEM_LIGA).await;
+    let vista = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Etapa::Tocando { prazo_s, .. } = &*etapas.borrow_and_update() {
+                return *prazo_s;
+            }
+            if etapas.changed().await.is_err() {
+                return 0;
+            }
+        }
+    })
+    .await
+    .expect("a sala tocou, e quem acompanha a chegada não viu");
+    assert_eq!(vista, 30, "o toque chegou à chegada com outro prazo");
+
+    assert!(recepcao.atender(toque), "o toque não estava mais tocando");
+    let chegado = tokio::time::timeout(Duration::from_secs(5), chegando)
+        .await
+        .expect("quem foi atendido não entrou em 5 s")
+        .unwrap()
+        .unwrap_or_else(|frustrada| {
+            panic!("quem foi atendido não entrou: {:?}", frustrada.motivo())
+        });
+    let nomes: Vec<&str> = chegado
+        .trilha
+        .iter()
+        .map(|passo| passo.etapa.nome())
+        .collect();
+    assert_eq!(nomes, ["Parada", "Tentando", "Tocando", "Dentro"]);
 }

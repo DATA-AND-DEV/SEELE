@@ -653,6 +653,16 @@ pub enum ConnectStage {
         /// De onde o furo veio.
         onde: String,
     },
+    /// Quem recebe está sendo chamado: uma sala pessoal mandou `Tocando`.
+    ///
+    /// Ver a variante do núcleo: quem tocou venceu a corrida, e daqui só se sai
+    /// para `Dentro` ou `Desistiu`.
+    Tocando {
+        /// Qual da lista tocou, contando do zero.
+        candidato: u8,
+        /// O prazo do toque, em segundos.
+        prazo_s: u16,
+    },
     /// Dentro: o aperto de mão terminou e há sessão.
     Dentro,
     /// Nenhum candidato entrou, e este é o motivo.
@@ -728,6 +738,7 @@ impl ConnectStage {
             Self::Avisando { .. } => "Avisando",
             Self::Tentando { .. } => "Tentando",
             Self::CaminhoAberto { .. } => "CaminhoAberto",
+            Self::Tocando { .. } => "Tocando",
             Self::Dentro => "Dentro",
             Self::Desistiu { .. } => "Desistiu",
         }
@@ -789,6 +800,10 @@ impl From<&seele_core::chegada::Etapa> for ConnectStage {
             Etapa::CaminhoAberto { onde } => Self::CaminhoAberto {
                 onde: onde.to_string(),
             },
+            Etapa::Tocando { candidato, prazo_s } => Self::Tocando {
+                candidato: *candidato,
+                prazo_s: *prazo_s,
+            },
             Etapa::Dentro => Self::Dentro,
             Etapa::Desistiu(erro) => Self::Desistiu {
                 motivo: classify_connect_failure(erro),
@@ -818,6 +833,8 @@ fn campos_do_passo(etapa: &seele_core::chegada::Etapa) -> (Option<String>, Optio
             ..
         } => (Some(onde.to_string()), Some(*candidato), Some(*de)),
         Etapa::CaminhoAberto { onde } => (Some(onde.to_string()), None, None),
+        // O endereço é o da `Tentando` do mesmo candidato, logo acima na trilha.
+        Etapa::Tocando { candidato, .. } => (None, Some(*candidato), None),
         Etapa::Parada { candidatos, .. } => (None, None, Some(*candidatos)),
         Etapa::Dentro | Etapa::Desistiu(_) => (None, None, None),
     }
@@ -860,6 +877,7 @@ fn avisou_do_passo(etapa: &seele_core::chegada::Etapa) -> Option<bool> {
         | Etapa::Localizando { .. }
         | Etapa::Avisando { .. }
         | Etapa::CaminhoAberto { .. }
+        | Etapa::Tocando { .. }
         | Etapa::Dentro
         | Etapa::Desistiu(_) => None,
     }
@@ -10401,6 +10419,31 @@ mod trilha_no_log {
             campos_do_passo(&localizando),
             (Some("encontro.exemplo:8384".into()), None, None)
         );
+    }
+
+    #[test]
+    fn o_toque_atravessa_com_o_candidato_e_o_prazo() {
+        // Tarefa 16 da F7. A casca desenha o CHAMANDO a partir desta etapa, e
+        // lê o prazo pelo nome do campo.
+        use seele_core::chegada::Etapa;
+        let tocando = Etapa::Tocando {
+            candidato: 1,
+            prazo_s: 45,
+        };
+        let atravessou = ConnectStage::from(&tocando);
+        assert_eq!(
+            atravessou,
+            ConnectStage::Tocando {
+                candidato: 1,
+                prazo_s: 45
+            }
+        );
+        assert_eq!(atravessou.nome(), "Tocando");
+        assert_eq!(
+            serde_json::to_value(&atravessou).ok(),
+            Some(serde_json::json!({ "Tocando": { "candidato": 1, "prazo_s": 45 } }))
+        );
+        assert_eq!(campos_do_passo(&tocando), (None, Some(1), None));
     }
 
     #[test]

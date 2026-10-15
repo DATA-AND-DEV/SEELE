@@ -166,6 +166,20 @@ pub enum Etapa {
         /// De onde o furo veio.
         onde: SocketAddr,
     },
+    /// Quem recebe está sendo chamado: uma sala pessoal mandou `Tocando`
+    /// (tarefa 16 da F7, o 6e do Plano 5).
+    ///
+    /// O candidato que tocou venceu a corrida: ninguém mais começa, e quem
+    /// corria é largado, porque a mesma pessoa chegando por outro caminho seria
+    /// um segundo toque. Daqui só se sai para [`Etapa::Dentro`], quando atendem,
+    /// ou para [`Etapa::Desistiu`], com a razão da sala.
+    Tocando {
+        /// Qual da lista tocou, contando do zero: o índice da [`Etapa::Tentando`]
+        /// dele.
+        candidato: u8,
+        /// O prazo do toque que a sala mandou, em segundos.
+        prazo_s: u16,
+    },
     /// Dentro: o aperto de mão terminou e há sessão.
     Dentro,
     /// Nenhum candidato entrou, e este é o motivo.
@@ -201,7 +215,7 @@ impl Etapa {
     ///
     /// Os valores são de exemplo e não significam nada — o que se lê deles é a
     /// variante.
-    pub const TODAS: [Self; 7] = [
+    pub const TODAS: [Self; 8] = [
         Self::Parada {
             candidatos: 0,
             com_bilhete_e_impressao: false,
@@ -219,6 +233,10 @@ impl Etapa {
             avisou: false,
         },
         Self::CaminhoAberto { onde: EXEMPLO },
+        Self::Tocando {
+            candidato: 0,
+            prazo_s: 0,
+        },
         Self::Dentro,
         Self::Desistiu(ConnectError::Unreachable),
     ];
@@ -232,6 +250,7 @@ impl Etapa {
             Self::Avisando { .. } => "Avisando",
             Self::Tentando { .. } => "Tentando",
             Self::CaminhoAberto { .. } => "CaminhoAberto",
+            Self::Tocando { .. } => "Tocando",
             Self::Dentro => "Dentro",
             Self::Desistiu(_) => "Desistiu",
         }
@@ -291,6 +310,10 @@ impl Etapa {
     /// `Avisando`, para `Tentando` ou para `Desistiu`, e esta última é honesta
     /// pela razão oposta à do aviso: numa ligação, os candidatos **dependem**
     /// do quarto.
+    ///
+    /// `Tocando` vem de uma tentativa, e dele só se sai para `Dentro` ou para
+    /// `Desistiu`, de qualquer candidato: quem tocou levou a corrida, e não há
+    /// próximo a tentar. Uma `Tentando` depois dele seria um segundo toque.
     #[must_use]
     pub fn transicao_legal(atual: &Self, para: &str) -> bool {
         match (atual, para) {
@@ -321,8 +344,9 @@ impl Etapa {
             (Self::Tentando { candidato, de, .. }, "Desistiu") => {
                 u16::from(*candidato) + 1 == u16::from(*de)
             }
-            (Self::Tentando { .. }, "CaminhoAberto" | "Tentando" | "Dentro") => true,
-            (Self::CaminhoAberto { .. }, "Tentando" | "Dentro" | "Desistiu") => true,
+            (Self::Tentando { .. }, "CaminhoAberto" | "Tentando" | "Tocando" | "Dentro") => true,
+            (Self::CaminhoAberto { .. }, "Tentando" | "Tocando" | "Dentro" | "Desistiu") => true,
+            (Self::Tocando { .. }, "Dentro" | "Desistiu") => true,
             _ => false,
         }
     }
@@ -494,24 +518,38 @@ impl Caminho {
 ///
 /// Lê a **última** [`Etapa::Tentando`] antes de [`Etapa::Dentro`], que é a que
 /// venceu: as anteriores falharam, e o laço só publica um passo por candidato.
+///
+/// **Menos quando alguém tocou** (tarefa 16 da F7): quem venceu é o candidato
+/// da [`Etapa::Tocando`], e a última tentativa pode ser de outro, que começou
+/// antes do toque e foi largado nele.
 #[must_use]
 pub fn caminho(trilha: &[Passo]) -> Option<Caminho> {
     let dentro = trilha
         .iter()
         .rposition(|passo| passo.etapa == Etapa::Dentro)?;
-    trilha
-        .iter()
-        .take(dentro)
-        .rev()
-        .find_map(|passo| match &passo.etapa {
-            Etapa::Tentando { onde, avisou, .. } => Some(Caminho::de(*onde, *avisou)),
-            Etapa::Parada { .. }
-            | Etapa::Localizando { .. }
-            | Etapa::Avisando { .. }
-            | Etapa::CaminhoAberto { .. }
-            | Etapa::Dentro
-            | Etapa::Desistiu(_) => None,
-        })
+    let antes = trilha.get(..dentro)?;
+    let quem_tocou = antes.iter().rev().find_map(|passo| match passo.etapa {
+        Etapa::Tocando { candidato, .. } => Some(candidato),
+        _ => None,
+    });
+    antes.iter().rev().find_map(|passo| match &passo.etapa {
+        Etapa::Tentando {
+            candidato,
+            onde,
+            avisou,
+            ..
+        } if quem_tocou.is_none_or(|tocou| tocou == *candidato) => {
+            Some(Caminho::de(*onde, *avisou))
+        }
+        Etapa::Tentando { .. }
+        | Etapa::Parada { .. }
+        | Etapa::Localizando { .. }
+        | Etapa::Avisando { .. }
+        | Etapa::CaminhoAberto { .. }
+        | Etapa::Tocando { .. }
+        | Etapa::Dentro
+        | Etapa::Desistiu(_) => None,
+    })
 }
 
 /// Uma etapa e quando ela aconteceu.
@@ -797,7 +835,7 @@ impl Chegada {
                 // fim — e a etapa ao vivo existe para acompanhar a travessia,
                 // não para resumi-la depois.
                 biased;
-                Some(tentativa) = tentativas.recv() => self.tentando(tentativa, de),
+                Some(andamento) = tentativas.recv() => self.andou(andamento, de),
                 no_quarto = &mut perguntando, if !perguntado => {
                     perguntado = true;
                     if let Some(entrega) = entrega.take() {
@@ -818,8 +856,8 @@ impl Chegada {
         // O que o laço mandou no mesmo instante em que terminou. Sem isto, o
         // candidato que venceu ficaria de fora da trilha justamente por ter
         // vencido — e é dele que sai o [`Caminho`].
-        while let Ok(tentativa) = tentativas.try_recv() {
-            self.tentando(tentativa, de);
+        while let Ok(andamento) = tentativas.try_recv() {
+            self.andou(andamento, de);
         }
 
         match resultado {
@@ -834,14 +872,21 @@ impl Chegada {
         }
     }
 
-    /// Publica um candidato que o laço acabou de começar a tentar.
-    fn tentando(&mut self, tentativa: crate::enlace::Tentativa, de: u8) {
-        self.marcar(Etapa::Tentando {
-            candidato: tentativa.candidato,
-            de,
-            onde: tentativa.onde,
-            avisou: tentativa.avisou,
-        });
+    /// Publica o que o laço contou: um candidato que ele acabou de começar a
+    /// tentar, ou o que tocou.
+    fn andou(&mut self, andamento: crate::enlace::Andamento, de: u8) {
+        use crate::enlace::Andamento;
+        match andamento {
+            Andamento::Tentando(tentativa) => self.marcar(Etapa::Tentando {
+                candidato: tentativa.candidato,
+                de,
+                onde: tentativa.onde,
+                avisou: tentativa.avisou,
+            }),
+            Andamento::Tocando { candidato, prazo_s } => {
+                self.marcar(Etapa::Tocando { candidato, prazo_s });
+            }
+        }
     }
 
     /// Pergunta ao quarto onde a sala do código mora, e faz da resposta os
@@ -1342,6 +1387,80 @@ mod tests {
                 "`Tentando → {saida}` deixou de valer no primeiro candidato"
             );
         }
+    }
+
+    /// Uma tentativa do candidato `candidato` de `de`, contra `onde`.
+    fn tentando_o(candidato: u8, de: u8, onde: &str, avisou: bool) -> Passo {
+        let Ok(onde) = onde.parse::<SocketAddr>() else {
+            panic!("o endereço de teste `{onde}` não é um endereço");
+        };
+        passo(Etapa::Tentando {
+            candidato,
+            de,
+            onde,
+            avisou,
+        })
+    }
+
+    #[test]
+    fn com_toque_o_caminho_e_o_de_quem_tocou_e_nao_o_da_ultima_tentativa() {
+        // Tarefa 16 da F7. O 0 toca depois que o 1 começou: a última tentativa
+        // da trilha é a do 1, que foi largado no toque, e quem entrou foi o 0.
+        let trilha = vec![
+            passo(Etapa::Parada {
+                candidatos: 2,
+                com_bilhete_e_impressao: true,
+            }),
+            tentando_o(0, 2, "203.0.113.7:8385", true),
+            tentando_o(1, 2, "192.168.1.5:8385", false),
+            passo(Etapa::Tocando {
+                candidato: 0,
+                prazo_s: 45,
+            }),
+            passo(Etapa::Dentro),
+        ];
+
+        assert_eq!(caminho(&trilha).map(|c| c.nome()), Some("FuroDeNat"));
+    }
+
+    #[test]
+    fn do_toque_so_se_sai_para_dentro_ou_para_a_razao_da_sala() {
+        // Tarefa 16 da F7: quem tocou levou a corrida.
+        let tocando = Etapa::Tocando {
+            candidato: 0,
+            prazo_s: 45,
+        };
+        for saida in ["Dentro", "Desistiu"] {
+            assert!(
+                Etapa::transicao_legal(&tocando, saida),
+                "`Tocando → {saida}` não vale"
+            );
+        }
+        for proibida in [
+            "Tentando",
+            "CaminhoAberto",
+            "Tocando",
+            "Avisando",
+            "Localizando",
+            "Parada",
+        ] {
+            assert!(
+                !Etapa::transicao_legal(&tocando, proibida),
+                "`Tocando → {proibida}` vale, e depois de um toque nada mais corre"
+            );
+        }
+        // Toca qualquer candidato, e não só o último.
+        let primeiro_de_tres = Etapa::Tentando {
+            candidato: 0,
+            de: 3,
+            onde: EXEMPLO,
+            avisou: false,
+        };
+        assert!(Etapa::transicao_legal(&primeiro_de_tres, "Tocando"));
+        assert!(Etapa::transicao_legal(
+            &Etapa::CaminhoAberto { onde: EXEMPLO },
+            "Tocando"
+        ));
     }
 
     #[test]

@@ -836,6 +836,21 @@ pub struct Tentativa {
     pub avisou: bool,
 }
 
+/// O que a corrida conta a quem acompanha a chegada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Andamento {
+    /// Um candidato começou.
+    Tentando(Tentativa),
+    /// Um candidato ouviu `Tocando` de uma sala pessoal (tarefa 16 da F7): ele
+    /// venceu a corrida, e quem recebe está sendo chamado.
+    Tocando {
+        /// Qual da lista, contando do zero: o mesmo índice da [`Tentativa`].
+        candidato: u8,
+        /// O prazo do toque que a sala mandou, em segundos.
+        prazo_s: u16,
+    },
+}
+
 /// A sessão com um servidor, viva através de quedas.
 pub struct Enlace {
     comandos: mpsc::Sender<Comando>,
@@ -1185,7 +1200,8 @@ async fn ouvir_um_toque(tocados: &mut Option<mpsc::UnboundedReceiver<usize>>) ->
 /// O prazo de um candidato da corrida, que deixa de valer quando ele toca
 /// (tarefa 16 da F7).
 ///
-/// `None` é o prazo vencido sem toque. Com o toque, o aperto de mão inteiro
+/// Sem `prazo`, a tentativa vai até o fim, e só o toque é escutado (o caminho
+/// de candidato único). `None` é o prazo vencido sem toque. Com o toque, o aperto de mão inteiro
 /// passa a ser medido pelo prazo do toque, dentro de `Client::connect_por`, e
 /// o do candidato, que existe para soltar quem nunca respondeu, cortaria uma
 /// ligação que está chamando. `ao_tocar` roda uma vez, com o `prazo_s`.
@@ -1193,13 +1209,18 @@ async fn ouvir_um_toque(tocados: &mut Option<mpsc::UnboundedReceiver<usize>>) ->
 /// Um `select!` sobre a tentativa **inteira**, e não sobre uma leitura: quem
 /// perde é largado de uma vez, com a conexão dele.
 async fn ate_o_prazo_ou_o_toque<T>(
-    prazo: Duration,
+    prazo: Option<Duration>,
     tentativa: impl std::future::Future<Output = T>,
     ouviu: &mut mpsc::UnboundedReceiver<u16>,
     ao_tocar: impl FnOnce(u16),
 ) -> Option<T> {
     tokio::pin!(tentativa);
-    let limite = tokio::time::sleep(prazo);
+    let limite = async {
+        match prazo {
+            Some(prazo) => tokio::time::sleep(prazo).await,
+            None => std::future::pending().await,
+        }
+    };
     tokio::pin!(limite);
     let mut ao_tocar = Some(ao_tocar);
     loop {
@@ -1419,7 +1440,7 @@ impl Enlace {
         bilhete: Option<seele_proto::uri::Bilhete>,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
-        olhos: mpsc::UnboundedSender<Tentativa>,
+        olhos: mpsc::UnboundedSender<Andamento>,
     ) -> Result<Self, ConnectError> {
         Self::entre(destinos, bilhete, chave, pins, Some(olhos), None).await
     }
@@ -1454,7 +1475,7 @@ impl Enlace {
         bilhete: Option<seele_proto::uri::Bilhete>,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
-        olhos: mpsc::UnboundedSender<Tentativa>,
+        olhos: mpsc::UnboundedSender<Andamento>,
         quarto: Option<tokio::sync::oneshot::Receiver<DoQuarto>>,
     ) -> Result<Self, ConnectError> {
         Self::entre(destinos, bilhete, chave, pins, Some(olhos), quarto).await
@@ -1466,7 +1487,7 @@ impl Enlace {
         bilhete: Option<seele_proto::uri::Bilhete>,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
-        olhos: Option<mpsc::UnboundedSender<Tentativa>>,
+        olhos: Option<mpsc::UnboundedSender<Andamento>>,
         quarto: Option<tokio::sync::oneshot::Receiver<DoQuarto>>,
     ) -> Result<Self, ConnectError> {
         // Preparado antes do laço porque o socket tem de ser um só — o NAT
@@ -1498,7 +1519,7 @@ impl Enlace {
         bilhete: Option<seele_proto::uri::Bilhete>,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
-        olhos: Option<&mpsc::UnboundedSender<Tentativa>>,
+        olhos: Option<&mpsc::UnboundedSender<Andamento>>,
         quarto: Option<tokio::sync::oneshot::Receiver<DoQuarto>>,
     ) -> Result<Self, ConnectError> {
         // Uma cópia por tentativa, e o original vivo até o fim: um `Endpoint`
@@ -1533,14 +1554,28 @@ impl Enlace {
             let repeticao = avisar_pelo_candidato(batida, primeiro.servidor).await;
             contar(
                 olhos,
-                Tentativa {
+                Andamento::Tentando(Tentativa {
                     candidato: 0,
                     onde: primeiro.servidor,
                     avisou: repeticao.is_some(),
-                },
+                }),
             );
-            let resultado =
-                Self::conectar_por(&endpoint, bilhete, primeiro, chave, pins, None).await;
+            // Sem corrida não há a quem dar a vitória, e o prazo é só o do aperto
+            // de mão: o toque vai a quem acompanha, e mais nada.
+            let (tocou, mut ouviu) = mpsc::unbounded_channel();
+            let tentativa =
+                Self::conectar_por(&endpoint, bilhete, primeiro, chave, pins, Some(tocou));
+            let resultado = ate_o_prazo_ou_o_toque(None, tentativa, &mut ouviu, |prazo_s| {
+                contar(
+                    olhos,
+                    Andamento::Tocando {
+                        candidato: 0,
+                        prazo_s,
+                    },
+                );
+            })
+            .await
+            .unwrap_or(Err(ConnectError::SemResposta));
             if let Some(repeticao) = repeticao {
                 repeticao.abort();
             }
@@ -1638,11 +1673,11 @@ impl Enlace {
                     let repeticao = avisar_pelo_candidato(batida.as_ref(), onde).await;
                     contar(
                         olhos.as_ref(),
-                        Tentativa {
+                        Andamento::Tentando(Tentativa {
                             candidato: u8::try_from(posicao).unwrap_or(u8::MAX),
                             onde,
                             avisou: repeticao.is_some(),
-                        },
+                        }),
                     );
 
                     // Um candidato privado de outra casa não devolve ICMP nenhum:
@@ -1659,27 +1694,38 @@ impl Enlace {
                     let (tocou, mut ouviu) = mpsc::unbounded_channel();
                     let tentativa =
                         Self::conectar_por(&endpoint, bilhete, destino, chave, pins, Some(tocou));
-                    let resultado =
-                        match ate_o_prazo_ou_o_toque(prazo, tentativa, &mut ouviu, |_| {
+                    let resultado = match ate_o_prazo_ou_o_toque(
+                        Some(prazo),
+                        tentativa,
+                        &mut ouviu,
+                        |prazo_s| {
                             let _ = para_a_corrida.send(posicao);
-                        })
-                        .await
-                        {
-                            Some(resultado) => resultado,
-                            // `SemResposta` e não `HandshakeTimeout`: este prazo é o do
-                            // **candidato inteiro**, e queimá-lo é não ter recebido nada
-                            // de volta. O aperto de mão tem um prazo próprio, dentro de
-                            // `Client::connect`, e é ele quem sabe dizer «o servidor
-                            // recebeu e demorou» — porque só ele roda depois de haver
-                            // conexão.
-                            //
-                            // Enquanto os dois casos saíam por aqui, a separação escrita
-                            // em `ConnectError::SemResposta` não chegava à tela uma vez
-                            // sequer: quatro segundos de silêncio na LAN eram anunciados
-                            // como problema de sincronização, e a frase mandava conferir
-                            // versão e protocolo — as duas coisas que estavam certas.
-                            None => Err(ConnectError::SemResposta),
-                        };
+                            contar(
+                                olhos.as_ref(),
+                                Andamento::Tocando {
+                                    candidato: u8::try_from(posicao).unwrap_or(u8::MAX),
+                                    prazo_s,
+                                },
+                            );
+                        },
+                    )
+                    .await
+                    {
+                        Some(resultado) => resultado,
+                        // `SemResposta` e não `HandshakeTimeout`: este prazo é o do
+                        // **candidato inteiro**, e queimá-lo é não ter recebido nada
+                        // de volta. O aperto de mão tem um prazo próprio, dentro de
+                        // `Client::connect`, e é ele quem sabe dizer «o servidor
+                        // recebeu e demorou» — porque só ele roda depois de haver
+                        // conexão.
+                        //
+                        // Enquanto os dois casos saíam por aqui, a separação escrita
+                        // em `ConnectError::SemResposta` não chegava à tela uma vez
+                        // sequer: quatro segundos de silêncio na LAN eram anunciados
+                        // como problema de sincronização, e a frase mandava conferir
+                        // versão e protocolo — as duas coisas que estavam certas.
+                        None => Err(ConnectError::SemResposta),
+                    };
                     // A repetição para quando o candidato termina, dando certo ou
                     // não: avisar sobre um candidato que já falhou gastaria furo da
                     // janela do anfitrião por um caminho que ninguém vai tentar de
@@ -5945,9 +5991,9 @@ fn registrar_a_falha_do_candidato(
 /// Um `send` recusado é silêncio de propósito: o canal só fecha quando quem
 /// observava desistiu, e a conexão não pode depender de uma tela estar viva —
 /// é a mesma regra que faz o `watch` da chegada ignorar o `send` sem ouvinte.
-fn contar(olhos: Option<&mpsc::UnboundedSender<Tentativa>>, tentativa: Tentativa) {
+fn contar(olhos: Option<&mpsc::UnboundedSender<Andamento>>, andamento: Andamento) {
     if let Some(olhos) = olhos {
-        let _ = olhos.send(tentativa);
+        let _ = olhos.send(andamento);
     }
 }
 
@@ -6871,7 +6917,7 @@ mod a_corrida {
 
         let (_sem_toque, mut ninguem_toca) = tokio::sync::mpsc::unbounded_channel::<u16>();
         let sem_toque = super::ate_o_prazo_ou_o_toque(
-            prazo,
+            Some(prazo),
             tokio::time::sleep(Duration::from_secs(10)),
             &mut ninguem_toca,
             |_| panic!("ninguém tocou"),
@@ -6882,7 +6928,7 @@ mod a_corrida {
         let (toca, mut ouviu) = tokio::sync::mpsc::unbounded_channel::<u16>();
         let ouvidos = std::sync::Mutex::new(Vec::new());
         let com_toque = super::ate_o_prazo_ou_o_toque(
-            prazo,
+            Some(prazo),
             async move {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 let _ = toca.send(45);
@@ -8349,7 +8395,7 @@ mod tests {
         let segunda = tokio::time::timeout(Duration::from_millis(500), tentativas.recv()).await;
         tentativa.abort();
 
-        let Ok(Some(primeira)) = primeira else {
+        let Ok(Some(super::Andamento::Tentando(primeira))) = primeira else {
             panic!("a tentativa de casa não começou em meio segundo: esperou o quarto");
         };
         assert_eq!(primeira.onde.to_string(), "127.0.0.1:9");
