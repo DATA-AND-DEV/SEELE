@@ -568,6 +568,91 @@ async function abrir(browser, url, r) {
       caso5.push(`${ponto.nome} (${r.nos})`);
     }
 
+    // 9. O `<details>` que a pessoa abre continua aberto. O «⋯» de uma linha
+    //    apresentada por MOD — onde moram o diagnóstico nativo e o volume — e o
+    //    SINAL E ESTADO de uma linha nativa: abertos à mão, atravessam o tique
+    //    sem mutação e com o foco no lugar, e o volume continua alcançável.
+    //    O que a linha montada pede continua valendo quando o pedido muda: quem
+    //    fica muda tem o SINAL E ESTADO aberto, e fechado quando deixa de ficar.
+    const pagina9 = await abrir(browser, url, BASE);
+    const caso9 = await pagina9.page.evaluate(async ({ apresentada, nativa, muda }) => {
+      registrarMod("bancada/apresenta", [{
+        ponto: "pessoa.cartao", modo: "substituir", alvo: String(testTable.snapshot.presentes
+          .find((p) => p.nickname === apresentada).id), prioridade: 0,
+        conteudo: [{ forma: "texto", chave: "c", dentro: `cartão de ${apresentada}` }],
+      }]);
+      await quadros(3);
+      desenhar(testTable.snapshot);
+      const tique = () => new Promise((ok) => setTimeout(ok, 1200));
+      const linhaDe = (nome) => linhasPorApelido().get(nome);
+
+      // O «⋯» da linha apresentada, aberto pelo resumo, com o foco nele.
+      const linha = linhaDe(apresentada);
+      const mais = linha.querySelector("details.pessoa-nativo");
+      const resumo = mais.querySelector("summary");
+      resumo.click();
+      resumo.focus();
+      const abriu = mais.open;
+      let parar = observarALista();
+      const antes = desenhado;
+      await tique();
+      const noTique = parar().filter((r) => donoDaMutacao(r) === apresentada).length;
+      const redesenhou = desenhado !== antes;
+      const maisFicou = linhaDe(apresentada)?.querySelector("details.pessoa-nativo") === mais && mais.open;
+      const focoNoResumo = document.activeElement === resumo;
+      // O volume, dentro do «⋯», ao alcance do teclado através de outro tique.
+      const volume = mais.querySelector("input.volume");
+      volume?.focus();
+      await tique();
+      const volumeAlcancavel = Boolean(volume) && volume.isConnected && document.activeElement === volume
+        && volume.checkVisibility() && mais.open;
+
+      // O SINAL E ESTADO de uma linha nativa, aberto à mão.
+      const diagnostico = linhaDe(nativa).querySelector("details.pessoa-diagnostico");
+      diagnostico.querySelector("summary").click();
+      parar = observarALista();
+      await tique();
+      const noTiqueNativa = parar().filter((r) => donoDaMutacao(r) === nativa).length;
+      const nativaFicou = diagnostico.isConnected && diagnostico.open;
+
+      // Quem fica muda: o produto abre o SINAL E ESTADO dela, e fecha quando ela
+      // volta — e a linha aberta à mão segue aberta através dos dois retratos.
+      const daMuda = () => linhaDe(muda).querySelector("details.pessoa-diagnostico");
+      const fechadaAntes = !daMuda().open;
+      const comMudo = structuredClone(testTable.snapshot);
+      comMudo.voice_rooms[0].people.find((p) => p.nickname === muda).muted = true;
+      await pelaPonte(comMudo, (d) => d?.voice_rooms?.[0]?.people?.find((p) => p.nickname === muda)?.muted === true);
+      const abriuComMudo = daMuda().open;
+      const semMudo = structuredClone(comMudo);
+      semMudo.voice_rooms[0].people.find((p) => p.nickname === muda).muted = false;
+      await pelaPonte(semMudo, (d) => d?.voice_rooms?.[0]?.people?.find((p) => p.nickname === muda)?.muted === false);
+      const fechouSemMudo = !daMuda().open;
+      return {
+        abriu, redesenhou, noTique, maisFicou, focoNoResumo, volumeAlcancavel,
+        noTiqueNativa, nativaFicou, fechadaAntes, abriuComMudo, fechouSemMudo,
+        nativaSeguiuAberta: diagnostico.isConnected && diagnostico.open,
+        maisSeguiuAberto: mais.isConnected && mais.open,
+      };
+    }, { apresentada: apelido(3), nativa: apelido(4), muda: apelido(6) });
+    assert.deepEqual(pagina9.errors, [], "caso 9: erros na página");
+    await pagina9.page.close();
+    assert.ok(caso9.abriu, "o «⋯» não abriu com o clique no resumo");
+    assert.ok(caso9.redesenhou, "caso 9: o tique não redesenhou, e o caso não mediu nada");
+    assert.ok(
+      caso9.maisFicou,
+      `o «⋯» de ${apelido(3)}, aberto pela pessoa, fechou no tique com o mesmo retrato ` +
+        `(${caso9.noTique} mutações na linha): quem usa teclado não alcança o volume nem o diagnóstico`,
+    );
+    assert.equal(caso9.noTique, 0, `o tique com o mesmo retrato fez ${caso9.noTique} mutações na linha de ${apelido(3)}`);
+    assert.ok(caso9.focoNoResumo, "o foco saiu do resumo do «⋯» no tique");
+    assert.ok(caso9.volumeAlcancavel, "o volume dentro do «⋯» não ficou ao alcance do teclado através de um tique");
+    assert.ok(caso9.nativaFicou, `o SINAL E ESTADO de ${apelido(4)}, aberto pela pessoa, fechou no tique`);
+    assert.equal(caso9.noTiqueNativa, 0, `o tique fez ${caso9.noTiqueNativa} mutações na linha de ${apelido(4)}`);
+    assert.ok(caso9.fechadaAntes, `o SINAL E ESTADO de ${apelido(6)} já estava aberto antes de ela ficar muda`);
+    assert.ok(caso9.abriuComMudo, `${apelido(6)} ficou muda e o SINAL E ESTADO dela não abriu`);
+    assert.ok(caso9.fechouSemMudo, `${apelido(6)} deixou de estar muda e o SINAL E ESTADO dela não fechou`);
+    assert.ok(caso9.nativaSeguiuAberta && caso9.maisSeguiuAberto, "o que a pessoa abriu fechou com um PersonState de outra pessoa");
+
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
         `(${caso1.mutacoes} mutações, nenhuma fora dela) e o foco ficou; o mesmo retrato não ` +
