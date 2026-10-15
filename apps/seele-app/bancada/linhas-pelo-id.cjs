@@ -356,16 +356,35 @@ async function abrir(browser, url, r) {
 
     // 8. A ordem muda: a primeira da sala principal vai para o fim. A lista e a
     //    coluna de salas ficam na ordem do retrato, e cada linha é o mesmo nó.
-    const caso8 = await page.evaluate(async () => {
+    //    Só a que mudou de lugar se move: um nó inserido no grupo da sala e um
+    //    na coluna, e o foco no nome de quem está no meio fica (M1 da revisão:
+    //    mandar uma linha para trás movia todas as do meio, e o foco caía).
+    const caso8 = await page.evaluate(async ({ meio }) => {
       const antes = linhasPorApelido();
+      const botao = antes.get(meio)?.querySelector("button.pessoa-nome-porta");
+      botao?.focus();
+      const focado = Boolean(botao) && document.activeElement === botao;
+      const ulDaSala = antes.get(meio)?.closest("ul.roster-pessoas");
+      const ulDaColuna = [...document.querySelectorAll("#lista-voice_rooms li.voice_room-pessoa")]
+        .find((li) => li.querySelector(".voice_room-pessoa-nome")?.textContent === meio)?.closest("ul");
+      const registros = [];
+      const observador = new MutationObserver((rs) => registros.push(...rs));
+      for (const ul of [ulDaSala, ulDaColuna]) if (ul) observador.observe(ul, { childList: true });
       const novo = structuredClone(testTable.snapshot);
       const sala = novo.voice_rooms[0].people;
       sala.push(sala.shift());
       const ultimo = sala[sala.length - 1].nickname;
       const chegou = await pelaPonte(novo, (d) => d?.voice_rooms?.[0]?.people?.at(-1)?.nickname === ultimo);
+      registros.push(...observador.takeRecords());
+      observador.disconnect();
+      const inseridos = (ul) => registros.filter((r) => r.target === ul).reduce((n, r) => n + r.addedNodes.length, 0);
       const depois = linhasPorApelido();
       return {
         chegou,
+        focado,
+        focoFicou: focado && document.activeElement === botao,
+        inseridosNaSala: inseridos(ulDaSala),
+        inseridosNaColuna: inseridos(ulDaColuna),
         naSala: sala.length,
         tela: ordemNaTela(),
         retrato: ordemDoRetrato(desenhado),
@@ -373,8 +392,16 @@ async function abrir(browser, url, r) {
         colunaDoRetrato: desenhado.voice_rooms.flatMap((s) => s.people.map((p) => p.nickname)),
         trocadas: [...antes].filter(([nome, li]) => depois.get(nome) !== li).length,
       };
-    });
+    }, { meio: apelido(10) });
     assert.ok(caso8.chegou, "a ordem nova não chegou à tela");
+    assert.ok(caso8.focado, `a bancada não conseguiu pôr o foco no nome de ${apelido(10)}`);
+    assert.equal(
+      caso8.inseridosNaSala, 1,
+      `a primeira de ${caso8.naSala} pessoas foi para o fim e ${caso8.inseridosNaSala} linhas foram tiradas e ` +
+        "postas de novo no grupo da sala: só a que mudou de lugar se move",
+    );
+    assert.equal(caso8.inseridosNaColuna, 1, `na coluna de salas, ${caso8.inseridosNaColuna} linhas foram tiradas e postas de novo`);
+    assert.ok(caso8.focoFicou, `o foco no nome de ${apelido(10)} caiu com a reordenação`);
     assert.deepEqual(caso8.tela, caso8.retrato, "depois de uma reordenação, a ordem da lista não é a do retrato");
     assert.deepEqual(caso8.coluna, caso8.colunaDoRetrato, "depois de uma reordenação, a ordem da coluna de salas não é a do retrato");
     assert.equal(caso8.trocadas, 0, `${caso8.trocadas} linhas trocaram de nó com uma reordenação`);
