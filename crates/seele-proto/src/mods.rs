@@ -483,6 +483,13 @@ pub enum Refused {
     #[error("mod declares neither a client nor a server half")]
     Empty,
 
+    /// **A porta do tema sem quem a abra** (achado da 17a; tarefa 13 do plano
+    /// da F3, Step 6b): `"tema": true` sem `server`. Quem pinta a aparência é a
+    /// metade de servidor, por `mundo.tema`, e sem ela o tema nunca aparecia —
+    /// calado, para quem escreveu o MOD e para quem o instalou.
+    #[error("mod declares the theme door (`\"tema\": true`) without a server half to open it")]
+    TemaSemMetadeDeServidor,
+
     /// Um arquivo declarado não é um caminho dentro do pacote.
     ///
     /// **Recusado no manifesto, e não na leitura.** Um `..` que só fosse
@@ -592,6 +599,9 @@ pub fn read_manifest(text: &str) -> Result<Manifest, Refused> {
     }
     if manifest.client.is_none() && manifest.server.is_none() {
         return Err(Refused::Empty);
+    }
+    if manifest.tema && manifest.server.is_none() {
+        return Err(Refused::TemaSemMetadeDeServidor);
     }
     if manifest.arquivos.len() > TETO_DE_ARQUIVOS {
         return Err(Refused::ArquivosDemais {
@@ -1190,6 +1200,23 @@ mod tests {
         assert!(
             !sem.tema,
             "sem a chave, a porta do tema tem de ficar fechada"
+        );
+    }
+
+    /// **A porta do tema sem metade de servidor é recusada pelo nome** (achado
+    /// da 17a; tarefa 13 do plano da F3, Step 6b). Quem abre a porta é a
+    /// metade de servidor, por `mundo.tema`: um manifesto com `"tema": true` e
+    /// sem `server` tinha uma porta que ninguém abre — o tema nunca aparecia,
+    /// e quem escreveu o MOD não ficava sabendo.
+    #[test]
+    fn um_tema_sem_metade_de_servidor_e_recusado() {
+        let sem_servidor = manifesto_minimo().replace(
+            "\"client\": \"cliente/main.js\"",
+            "\"client\": \"cliente/main.js\", \"tema\": true",
+        );
+        assert_eq!(
+            read_manifest(&sem_servidor),
+            Err(Refused::TemaSemMetadeDeServidor)
         );
     }
 

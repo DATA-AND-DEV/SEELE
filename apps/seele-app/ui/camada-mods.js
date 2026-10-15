@@ -607,7 +607,7 @@ function linhaDeModInstalado(mod, hospedando) {
   // silêncio — «o produto sabe e não conta».
   if (mod.refused) {
     texto.append(
-      elemento("span", "mods-recusado", `não serve: ${mod.refused}`),
+      elemento("span", "mods-recusado", `não serve: ${RECUSAS_DE_PACOTE[mod.refused] ?? mod.refused}`),
     );
     caixa.append(texto);
     linha.append(caixa);

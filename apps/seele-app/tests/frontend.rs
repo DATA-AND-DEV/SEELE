@@ -20000,3 +20000,71 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
         );
     }
 }
+
+/// **Todo pacote recusado é dito com uma frase, e não com um código** (tarefa
+/// 13 do plano da F3, Step 6b).
+///
+/// A gestão escrevia `não serve: ${mod.refused}`, e o que aparecia era o nome
+/// de `refusal_name` cru — «não serve: empty», «não serve: api-too-old».
+/// Quem lê não sabe o que fazer com um código. A lista de nomes sai do próprio
+/// `refusal_name`, em `crates/seele-core/src/mods.rs`, e não é escrita aqui:
+/// uma variante nova de `Refused` sem frase reprova nesta rodada, em vez de
+/// aparecer como código na tela de alguém.
+#[test]
+fn todo_pacote_recusado_e_dito_com_uma_frase() {
+    let nucleo = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/seele-core/src/mods.rs"),
+    )
+    .expect("crates/seele-core/src/mods.rs");
+    let corpo = nucleo
+        .split_once("pub fn refusal_name(")
+        .expect("`refusal_name` sumiu do núcleo")
+        .1
+        .split_once("\n}\n")
+        .expect("o fim de `refusal_name`")
+        .0;
+    let nomes: Vec<String> = corpo
+        .split("=> \"")
+        .skip(1)
+        .filter_map(|resto| resto.split_once('"').map(|(nome, _)| nome.to_owned()))
+        .collect();
+    assert!(
+        nomes.len() >= 8 && nomes.contains(&"tema-sem-metade-de-servidor".to_owned()),
+        "a leitura de `refusal_name` achou {nomes:?}: ela ficou cega, e o laço abaixo \
+         confere quase nada"
+    );
+
+    // As chaves têm hífen («api-too-old»), e por isso vão entre aspas: o
+    // `sentences_of` lê só as chaves sem aspas, e esta tabela é lida aqui.
+    let frases = without_comments(&read("ui/frases.js"));
+    let bloco = frases
+        .split_once("const RECUSAS_DE_PACOTE = {")
+        .expect("`RECUSAS_DE_PACOTE` sumiu de ui/frases.js")
+        .1
+        .split_once("\n};")
+        .expect("`RECUSAS_DE_PACOTE` nunca fecha")
+        .0;
+    let escritas: BTreeSet<String> = bloco
+        .lines()
+        .filter_map(|linha| {
+            let resto = linha.trim().strip_prefix('"')?;
+            let (nome, depois) = resto.split_once('"')?;
+            depois.trim_start().starts_with(':').then(|| nome.to_owned())
+        })
+        .collect();
+    for nome in &nomes {
+        assert!(
+            escritas.contains(nome),
+            "o pacote recusado por «{nome}» não tem frase em `RECUSAS_DE_PACOTE` \
+             (ui/frases.js): a gestão o diria como código"
+        );
+    }
+
+    // E a gestão a usa: sem isto, a tabela existiria e a tela continuaria
+    // dizendo o código.
+    let gestao = without_comments(&read("ui/camada-mods.js"));
+    assert!(
+        gestao.contains("RECUSAS_DE_PACOTE[mod.refused]"),
+        "a gestão de MODs não diz o pacote recusado pela frase de `RECUSAS_DE_PACOTE`"
+    );
+}

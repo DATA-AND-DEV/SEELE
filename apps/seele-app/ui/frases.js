@@ -572,6 +572,28 @@ const MOTIVOS_DE_REVOGACAO = {
   "migracao-que-corrompe": "uma migração dele corrompia os dados guardados",
 };
 
+/**
+ * Por que um pacote instalado não serve, depois do «não serve:» da gestão de
+ * MODs (tarefa 13 do plano da F3, Step 6b).
+ *
+ * As chaves são os nomes de `refusal_name` (`crates/seele-core/src/mods.rs`),
+ * e o guarda `todo_pacote_recusado_e_dito_com_uma_frase` cobra uma frase para
+ * cada um. Antes, a gestão dizia o nome cru — «não serve: empty» —, e um
+ * código não diz a ninguém o que fazer. Um nome que chegue sem frase continua
+ * aparecendo cru, como em `MOTIVOS_DE_REVOGACAO`: feio, e honesto.
+ */
+const RECUSAS_DE_PACOTE = {
+  "malformed": "o mod.json dele não é um JSON que este app lê, ou tem uma chave que ele não conhece",
+  "schema-too-new": "o mod.json dele é de um formato mais novo que este app; atualize o aplicativo",
+  "api-too-new": "ele é de uma API mais nova que a deste app; atualize o aplicativo",
+  "api-too-old": "ele é de uma API que roda no Servidor 0.15, e não neste app; procure a versão dele para a API 6, ou use o Servidor 0.15 pelo launcher",
+  "malformed-id": "o identificador dele não é «autor/nome»",
+  "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",
+  "tema-sem-metade-de-servidor": "ele declara a porta do tema sem a metade de servidor, que é quem pinta a aparência: o tema nunca apareceria",
+  "arquivo-invalido": "ele declara um arquivo fora da pasta do pacote",
+  "arquivos-demais": "ele declara mais arquivos do que o app carrega",
+};
+
 const NOMES_RECUSADOS = {
   Vazio: "ESTE NOME É SÓ ESPAÇO.\nDeixe o campo em branco para usar o endereço numérico de sempre.",
   ComEspaco:
