@@ -20093,3 +20093,115 @@ fn todo_pacote_recusado_e_dito_com_uma_frase() {
         "a gestão de MODs não diz o pacote recusado pela frase de `RECUSAS_DE_PACOTE`"
     );
 }
+
+/// **A lista fechada das recusas é a do `api/v6.json`, nos dois sentidos** (a
+/// auditoria do `v6.json`, B2; a emenda da D-api-8).
+///
+/// `RECUSAS_AO_MOD`, em `ui/base.js`, é o que a janela deixa chegar ao MOD da
+/// 6; o resto vira `falhou`. O `recusas` do `api/v6.json` é o que o contrato
+/// promete. Antes desta amarra, os dois discordavam calados: a janela entregava
+/// onze nomes que o contrato não listava, e o contrato não dizia que o
+/// genérico é `falhou`.
+///
+/// - todo nome que a janela entrega está no contrato;
+/// - todo nome do contrato está na janela, menos os da lista `tema`, que são
+///   do `mundo.tema` da metade de servidor e não passam pela janela;
+/// - as recusas das contribuições e as das superfícies, que têm lista ou
+///   chamada própria, estão na lista da janela.
+#[test]
+fn a_lista_fechada_das_recusas_e_a_do_v6() {
+    use std::collections::BTreeSet;
+
+    let base = without_comments(&read("ui/base.js"));
+    let janela: BTreeSet<String> = base
+        .split_once("const RECUSAS_AO_MOD = Object.freeze([")
+        .and_then(|(_, resto)| resto.split_once("]);"))
+        .map(|(lista, _)| {
+            lista
+                .split('"')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_owned)
+                .collect()
+        })
+        .expect("`RECUSAS_AO_MOD` sumiu de base.js");
+    assert!(janela.len() > 30, "a leitura de `RECUSAS_AO_MOD` quebrou: {janela:?}");
+
+    let v6: serde_json::Value =
+        serde_json::from_str(&read("../../api/v6.json")).expect("api/v6.json é JSON");
+    let recusas = v6
+        .get("recusas")
+        .and_then(serde_json::Value::as_object)
+        .expect("api/v6.json sem `recusas`");
+    let nome = |entrada: &str| {
+        entrada
+            .split(|c: char| c == ' ' || c == '(')
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let mut contrato = BTreeSet::new();
+    let mut do_servidor = BTreeSet::new();
+    for (lista, entradas) in recusas {
+        let Some(entradas) = entradas.as_array() else {
+            continue;
+        };
+        for entrada in entradas.iter().filter_map(serde_json::Value::as_str) {
+            if lista == "tema" {
+                do_servidor.insert(nome(entrada));
+            } else {
+                contrato.insert(nome(entrada));
+            }
+        }
+    }
+
+    let fora_do_contrato: Vec<_> = janela
+        .iter()
+        .filter(|n| !contrato.contains(*n) && !do_servidor.contains(*n))
+        .collect();
+    assert!(
+        fora_do_contrato.is_empty(),
+        "a janela entrega ao MOD nomes que o `recusas` do api/v6.json não lista: \
+         {fora_do_contrato:?}"
+    );
+    let fora_da_janela: Vec<_> = contrato.difference(&janela).collect();
+    assert!(
+        fora_da_janela.is_empty(),
+        "o api/v6.json promete recusas que a janela não deixa chegar ao MOD (viram \
+         `falhou`): {fora_da_janela:?}"
+    );
+
+    let contribuicoes = without_comments(&read("ui/mods-contribuicoes.js"));
+    let das_contribuicoes: Vec<String> = contribuicoes
+        .split_once("const RECUSAS_DAS_CONTRIBUICOES = Object.freeze([")
+        .and_then(|(_, resto)| resto.split_once("]);"))
+        .map(|(lista, _)| {
+            lista
+                .split('"')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_owned)
+                .collect()
+        })
+        .expect("`RECUSAS_DAS_CONTRIBUICOES` sumiu de mods-contribuicoes.js");
+    let superficies = without_comments(&read("ui/mods-superficies.js"));
+    let das_superficies: Vec<String> = superficies
+        .split("recusaDaSuperficie(\"")
+        .skip(1)
+        .filter_map(|resto| resto.split_once('"').map(|(n, _)| n.to_owned()))
+        .collect();
+    assert!(
+        !das_superficies.is_empty(),
+        "a leitura das recusas das superfícies quebrou"
+    );
+    let sem_lugar: Vec<_> = das_contribuicoes
+        .iter()
+        .chain(&das_superficies)
+        .filter(|n| !janela.contains(*n))
+        .collect();
+    assert!(
+        sem_lugar.is_empty(),
+        "recusas das contribuições ou das superfícies fora de `RECUSAS_AO_MOD`: chegam \
+         ao MOD como `falhou`: {sem_lugar:?}"
+    );
+}

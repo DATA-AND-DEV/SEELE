@@ -133,8 +133,23 @@ publicar em vez de antes de existir.
 `api/v6.json` **congelou no corte** (15/10/2026; tarefa 13 do plano da F3):
 `MOD_API_VERSION = 6` e `APIS_ACEITAS = [6]`, e a linha dela em
 `congeladas.sha256` não muda mais — o que vier depois vai para a v7. Até o
-corte ela esteve em construção, com a linha acompanhando cada edição. O que
-muda na forma do arquivo:
+corte ela esteve em construção, com a linha acompanhando cada edição.
+
+> **Emendado em 15/10/2026 — a única emenda depois do congelamento (D-api-8),
+> antes da publicação.** A auditoria do `v6.json` contra o produto
+> (`docs/superpowers/sdd/2026-10-08-0.16/F3/auditoria-do-v6/`) achou promessas
+> que o produto não entregava, e a regra da D-api-8 é uma só: o `v6.json` diz
+> o que o produto entrega, e nada além. A emenda corrigiu dez textos que
+> descreviam outra coisa que o código faz, tirou o que não se entrega na 0.16
+> (o `MessageEdited`, a folha expansível, a tira do palco e o «DE ONDE?» no
+> celular, a pinça, a área mínima e o toque longo na tela), disse o teto real
+> das mídias de uma superfície e o alcance da redução de mídia, e escreveu a
+> lista fechada das recusas inteira, com a fronteira que a faz valer (o
+> genérico `falhou`, as da ponte, as do `arquivo`, e a `forma-desconhecida`).
+> A linha do v6 em `congeladas.sha256` foi refeita no mesmo commit; a próxima
+> mudança vai para a v7.
+
+O que muda na forma do arquivo:
 
 - **a v6 é escrita por inteiro**, sem `extends`: só a API 6 roda no app 0.16,
   e herdar traria de volta o que as versões 1 a 5 prometeram e não entregaram;
@@ -161,8 +176,10 @@ pelo evento `tema`: `aplicado`, ou `recusado` com os pares e a região.
   acha o mesmo nome no protocolo, sem intermediário. **Da v1 à v5, só 5 dos 21
   momentos são entregues.** A v1 lista 21, a v2 à v5 os herdam pelo `extends`,
   e `momento_de` (`crates/seele-server/src/mods/despacho.rs`), o único
-  despachante de momentos do servidor, entrega só `PersonJoined`, `PersonLeft`,
-  `MessageReceived`, `MessageEdited` e `MessageRemoved`. Os outros 16 nunca
+  despachante de momentos do servidor, tem braço só para `PersonJoined`,
+  `PersonLeft`, `MessageReceived`, `MessageEdited` e `MessageRemoved` — e o
+  `MessageEdited` nem esse entrega, porque nada o emite: o produto não edita
+  mensagem, e a v6 não o lista (a emenda de 15/10). Os outros 16 nunca
   foram entregues: um MOD que espera por `ChannelCreated` espera para sempre,
   sem erro. A v1 não se edita, e por isso a v6 lista só o que é entregue: da
   API 6 em diante, `moments` e `eventos` são escritos por inteiro em cada versão
