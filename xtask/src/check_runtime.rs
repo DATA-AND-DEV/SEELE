@@ -277,10 +277,12 @@ mod tests {
         (chamada, passo.copied().collect::<Vec<_>>().join("\n"))
     }
 
-    /// Os arquivos de `bancada/` que não são bancada: o carregador do
-    /// Playwright e o `telas.cjs`, que é o servidor que as de navegador usam e,
-    /// rodado sozinho, uma ferramenta de retrato que não julga o que vê.
-    const NAO_SAO_BANCADA: [&str; 2] = ["playwright.cjs", "telas.cjs"];
+    /// Os arquivos de `bancada/` que não são bancada: o leitor dos cabeçalhos
+    /// da origem (`web/_headers`), que as de navegador usam para servir a
+    /// página como a origem a serve; o carregador do Playwright; e o
+    /// `telas.cjs`, que é o servidor que as de navegador usam e, rodado
+    /// sozinho, uma ferramenta de retrato que não julga o que vê.
+    const NAO_SAO_BANCADA: [&str; 3] = ["cabecalhos-da-origem.cjs", "playwright.cjs", "telas.cjs"];
 
     /// As bancadas que não rodam em lugar nenhum, **de propósito e por nome**.
     ///

@@ -42,6 +42,7 @@ const path = require("node:path");
 
 const raiz = path.resolve(__dirname, "..");
 const { chromium } = require("./playwright.cjs");
+const { cabecalhosDaOrigem } = require("./cabecalhos-da-origem.cjs");
 const [caminhoDoWasm] = process.argv.slice(2);
 if (!caminhoDoWasm || !fs.existsSync(caminhoDoWasm)) {
   console.error("uso: node apps/seele-app/bancada/voz-no-navegador.cjs <seele_web.wasm>  (o `cargo xtask web` o compila)");
@@ -171,7 +172,6 @@ document.getElementById("testar").addEventListener("click", () => {
 `,
 );
 
-const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; frame-ancestors 'none'";
 const TIPOS = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".wasm": "application/wasm" };
 
 function servir() {
@@ -182,9 +182,10 @@ function servir() {
       resposta.writeHead(404).end();
       return;
     }
+    // Os cabeçalhos da origem (`web/_headers`), como ela serve a página.
     resposta.writeHead(200, {
+      ...cabecalhosDaOrigem(`/${nome}`),
       "content-type": TIPOS[path.extname(nome)] ?? "application/octet-stream",
-      "content-security-policy": CSP,
     });
     resposta.end(fs.readFileSync(arquivo));
   });

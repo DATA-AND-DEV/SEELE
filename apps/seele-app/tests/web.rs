@@ -1099,3 +1099,171 @@ fn a_pagina_nao_escreve_outra_origem() {
         );
     }
 }
+
+/// As regras de `web/_headers`, na ordem: o caminho e os cabeçalhos dele, com
+/// o nome em minúsculas.
+fn regras_dos_cabecalhos(texto: &str) -> Vec<(String, Vec<(String, String)>)> {
+    let mut regras: Vec<(String, Vec<(String, String)>)> = Vec::new();
+    for linha in texto.lines() {
+        if linha.trim().is_empty() || linha.trim_start().starts_with('#') {
+            continue;
+        }
+        if !linha.starts_with([' ', '\t']) {
+            regras.push((linha.trim().to_owned(), Vec::new()));
+            continue;
+        }
+        let (nome, valor) = linha
+            .split_once(':')
+            .unwrap_or_else(|| panic!("web/_headers: linha sem «:»: {linha}"));
+        regras
+            .last_mut()
+            .unwrap_or_else(|| panic!("web/_headers: cabeçalho antes de caminho: {linha}"))
+            .1
+            .push((nome.trim().to_ascii_lowercase(), valor.trim().to_owned()));
+    }
+    regras
+}
+
+/// O valor de um cabeçalho numa regra, se ela o tem.
+fn cabecalho<'a>(
+    regras: &'a [(String, Vec<(String, String)>)],
+    caminho: &str,
+    nome: &str,
+) -> Option<&'a str> {
+    regras
+        .iter()
+        .filter(|(dela, _)| dela == caminho)
+        .flat_map(|(_, cabecalhos)| cabecalhos)
+        .find(|(dele, _)| dele == nome)
+        .map(|(_, valor)| valor.as_str())
+}
+
+/// Uma CSP, diretiva a diretiva.
+fn diretivas(csp: &str) -> BTreeMap<String, BTreeSet<String>> {
+    csp.split(';')
+        .filter_map(|diretiva| {
+            let mut partes = diretiva.split_whitespace();
+            let nome = partes.next()?.to_owned();
+            Some((nome, partes.map(str::to_owned).collect()))
+        })
+        .collect()
+}
+
+/// **Os cabeçalhos da origem do web app são um só** (D-web-2): o
+/// `web/_headers`, que o host lê, as bancadas servem
+/// (`bancada/cabecalhos-da-origem.cjs`) e os passos do dono copiam
+/// (`F4/origem-para-o-dono.md`).
+///
+/// 1. **A CSP da página** é a mesma em `/` e em `/index.html`, só com fontes da
+///    origem, `data:` e `https:` — nenhum host de terceiro, nenhum
+///    `unsafe-inline` nem `unsafe-eval` —, e fecha o `frame-ancestors`, o
+///    `object-src` e o `base-uri`. O `script-src` é `'self'` e a compilação do
+///    `.wasm`, e nada mais.
+/// 2. **A regra de `/*` não leva CSP**: as regras se somam, e a da página
+///    impediria a página de emoldurar o `iframe` dos executores, que traz a dele
+///    no `<meta>` e aqui só pede `frame-ancestors 'self'`.
+/// 3. **O HSTS** vale por um ano, pelo menos.
+/// 4. **Os passos do dono** trazem o arquivo inteiro.
+/// 5. **Nenhuma bancada escreve uma CSP à mão**: elas leem esta. O `telas.cjs`
+///    serve a política do desktop (`tauri.conf.json`), que é outra.
+#[test]
+fn os_cabecalhos_da_origem_sao_um_so() {
+    let texto = ler("web/_headers");
+    let regras = regras_dos_cabecalhos(&texto);
+
+    // 1.
+    let csp =
+        cabecalho(&regras, "/", "content-security-policy").expect("o `/` não leva a CSP da página");
+    assert_eq!(
+        cabecalho(&regras, "/index.html", "content-security-policy"),
+        Some(csp),
+        "a CSP de `/index.html` não é a de `/`: a página teria duas políticas, pelo caminho"
+    );
+    let csp = diretivas(csp);
+    for (nome, fontes) in &csp {
+        for fonte in fontes {
+            assert!(
+                matches!(
+                    fonte.as_str(),
+                    "'self'" | "'none'" | "'wasm-unsafe-eval'" | "data:" | "https:"
+                ),
+                "a CSP da página tem `{fonte}` em `{nome}`: só a origem, `data:` e `https:`, \
+                 sem host de terceiro nem `unsafe-*`"
+            );
+        }
+    }
+    let so = |nome: &str, fontes: &[&str]| {
+        assert_eq!(
+            csp.get(nome),
+            Some(
+                &fontes
+                    .iter()
+                    .map(|&f| f.to_owned())
+                    .collect::<BTreeSet<_>>()
+            ),
+            "a CSP da página: `{nome}` devia ser {fontes:?}"
+        );
+    };
+    so("script-src", &["'self'", "'wasm-unsafe-eval'"]);
+    so("default-src", &["'self'"]);
+    so("frame-ancestors", &["'none'"]);
+    so("object-src", &["'none'"]);
+    so("base-uri", &["'none'"]);
+
+    // 2.
+    assert_eq!(
+        cabecalho(&regras, "/*", "content-security-policy"),
+        None,
+        "a regra de `/*` leva CSP, e ela se soma à do `iframe` dos executores"
+    );
+    assert_eq!(
+        cabecalho(&regras, "/executor-de-mod.html", "content-security-policy"),
+        Some("frame-ancestors 'self'"),
+        "o `iframe` dos executores pede só para ser emoldurado pela página: a política dele \
+         está no `<meta>`"
+    );
+
+    // 3.
+    let hsts = cabecalho(&regras, "/*", "strict-transport-security").expect("sem HSTS");
+    let ano = hsts
+        .split(';')
+        .find_map(|parte| parte.trim().strip_prefix("max-age="))
+        .and_then(|segundos| segundos.parse::<u64>().ok())
+        .unwrap_or(0);
+    assert!(ano >= 31_536_000, "o HSTS vale menos de um ano: {hsts}");
+
+    // 4.
+    let passos = std::fs::read_to_string(
+        raiz_do_repositorio().join("docs/superpowers/sdd/2026-10-08-0.16/F4/origem-para-o-dono.md"),
+    )
+    .expect("os passos do dono");
+    assert!(
+        passos.contains(&texto),
+        "os passos do dono (`F4/origem-para-o-dono.md`) não trazem o `web/_headers` de hoje, \
+         inteiro: o dono configuraria outros cabeçalhos"
+    );
+
+    // 5.
+    let bancada = app_dir().join("bancada");
+    let mut a_mao = Vec::new();
+    for entrada in std::fs::read_dir(&bancada)
+        .expect("bancada/")
+        .filter_map(Result::ok)
+    {
+        let nome = entrada.file_name().to_string_lossy().into_owned();
+        if !nome.ends_with(".cjs") || nome == "telas.cjs" {
+            continue;
+        }
+        // Sem os comentários: a prosa de uma bancada cita a política do
+        // desktop, e citar não é servir.
+        let corpo = sem_comentarios(&std::fs::read_to_string(entrada.path()).expect("bancada"));
+        if corpo.contains("default-src") || corpo.contains("frame-ancestors") {
+            a_mao.push(nome);
+        }
+    }
+    assert!(
+        a_mao.is_empty(),
+        "estas bancadas escrevem uma CSP à mão, em vez de ler `web/_headers` por \
+         `cabecalhos-da-origem.cjs`: {a_mao:?}"
+    );
+}

@@ -13,6 +13,11 @@
 // As duas cascas: o celular (390 px, toque) e o PC (1280 px, ponteiro). A
 // marca de cada uma é conferida também.
 //
+// **Com os cabeçalhos da origem** (`web/_headers`, D-web-2), como a origem a
+// serve: a CSP da página inteira, e nenhuma violação dela na carga, nas duas
+// cascas. Com o `.wasm` da página compilado (`cargo xtask web`), ele vai junto,
+// e a carga o compila debaixo da CSP.
+//
 // **O que ela ainda não alcança:** a sessão. Sem a sessão pelo navegador (2.6),
 // os que a casca chama sozinha dentro dela (`estado_da_porta`,
 // `mods_instalados`, o `snapshot` a cada poucos segundos) não acontecem aqui.
@@ -26,6 +31,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { chromium } = require("./playwright.cjs");
+const { cabecalhosDaOrigem } = require("./cabecalhos-da-origem.cjs");
 
 const raiz = path.resolve(__dirname, "..");
 
@@ -44,6 +50,9 @@ const SOZINHA_MS = 5000;
 // instalador (`tools/carga-da-casca.py` diz o mesmo).
 const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "ponte-sem-gesto-"));
 fs.cpSync(path.join(raiz, "ui"), pasta, { recursive: true });
+const WASM_DA_PAGINA = path.resolve(raiz, "..", "..", "target", "wasm32-unknown-unknown", "release", "seele_web.wasm");
+const comOWasm = fs.existsSync(WASM_DA_PAGINA);
+if (comOWasm) fs.copyFileSync(WASM_DA_PAGINA, path.join(pasta, "seele_web.wasm"));
 
 const TIPOS = {
   ".html": "text/html; charset=utf-8",
@@ -52,6 +61,7 @@ const TIPOS = {
   ".svg": "image/svg+xml",
   ".woff2": "font/woff2",
   ".png": "image/png",
+  ".wasm": "application/wasm",
 };
 
 function servir() {
@@ -63,7 +73,10 @@ function servir() {
       resposta.end();
       return;
     }
-    resposta.writeHead(200, { "content-type": TIPOS[path.extname(arquivo)] ?? "application/octet-stream" });
+    resposta.writeHead(200, {
+      ...cabecalhosDaOrigem(`/${nome}`),
+      "content-type": TIPOS[path.extname(arquivo)] ?? "application/octet-stream",
+    });
     fs.createReadStream(arquivo).pipe(resposta);
   });
 }
@@ -73,6 +86,16 @@ async function medir(navegador, url, casca, opcoes) {
   const aba = await contexto.newPage();
   const estouros = [];
   aba.on("pageerror", (erro) => estouros.push(String(erro.message).slice(0, 240)));
+  // Toda violação da CSP da origem: pelo evento, e pelo console, que a diz
+  // também quando ela é de um recurso que a página nem chegou a pedir por
+  // script.
+  const violacoes = [];
+  aba.on("console", (m) => /Content Security Policy/i.test(m.text()) && violacoes.push(m.text().slice(0, 240)));
+  await aba.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", (e) => {
+      console.error(`Content Security Policy: ${e.effectiveDirective} recusou ${e.blockedURI || "(embutido)"}`);
+    });
+  });
   await aba.goto(url);
   await aba.waitForTimeout(SOZINHA_MS);
   const visto = await aba.evaluate(() => ({
@@ -81,6 +104,7 @@ async function medir(navegador, url, casca, opcoes) {
     chamadas: [...CHAMADAS_DA_PONTE.entries()],
     contas: [...CONTAS_DA_PONTE.entries()],
   }));
+  const cabecalhosDaPagina = (await (await fetch(url)).headers.get("content-security-policy")) ?? "";
   await contexto.close();
   const falhas = [];
   if (!visto.lugar) falhas.push(`${casca}: a ponte não se pôs no lugar do Tauri`);
@@ -89,6 +113,9 @@ async function medir(navegador, url, casca, opcoes) {
     falhas.push(`${casca}: a casca chamou \`${comando}\` sozinha, e a ponte respondeu ${JSON.stringify(contas)}`);
   }
   for (const estouro of estouros) falhas.push(`${casca}: a página estourou: ${estouro}`);
+  for (const violacao of violacoes) falhas.push(`${casca}: a CSP da origem recusou: ${violacao}`);
+  const daOrigem = cabecalhosDaOrigem("/index.html")["content-security-policy"];
+  if (!daOrigem || cabecalhosDaPagina !== daOrigem) falhas.push(`${casca}: a página veio sem a CSP da origem, e a bancada não a mediu`);
   if (visto.chamadas.length === 0) falhas.push(`${casca}: a casca não chamou nada, e a bancada não mediu nada`);
   const chamados = visto.chamadas.map(([comando]) => comando).sort();
   console.log(`  ${casca}: ${chamados.length} comandos sem gesto: ${chamados.join(", ")}`);
@@ -117,7 +144,7 @@ async function medir(navegador, url, casca, opcoes) {
   }
   terminou = true;
   if (falhas.length === 0) {
-    console.log("ponte-sem-gesto: nada do que a casca chama sozinha volta recusado, nas duas cascas.");
+    console.log(`ponte-sem-gesto: nada do que a casca chama sozinha volta recusado, e a CSP da origem não recusa nada, nas duas cascas (${comOWasm ? "com" : "sem"} o .wasm da página).`);
     process.exit(0);
   }
   for (const falha of falhas) console.error(`FALHOU — ${falha}`);

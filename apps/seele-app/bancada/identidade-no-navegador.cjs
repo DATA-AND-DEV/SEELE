@@ -55,6 +55,7 @@ const path = require("node:path");
 
 const raiz = path.resolve(__dirname, "..");
 const { chromium } = require("./playwright.cjs");
+const { cabecalhosDaOrigem } = require("./cabecalhos-da-origem.cjs");
 const [caminhoDoWasm] = process.argv.slice(2);
 if (!caminhoDoWasm || !fs.existsSync(caminhoDoWasm)) {
   console.error("uso: node apps/seele-app/bancada/identidade-no-navegador.cjs <seele_web.wasm>  (o `cargo xtask web` o compila, com a `prova`)");
@@ -217,7 +218,6 @@ window.tudoQueAOrigemGuarda = async () => {
 `,
 );
 
-const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; frame-ancestors 'none'";
 const TIPOS = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -236,10 +236,10 @@ function servir() {
       resposta.writeHead(404).end();
       return;
     }
-    // A página inteira vai sem o cabeçalho da página mínima, como na
-    // `ponte-sem-gesto.cjs`: ela tem a política dela.
-    const cabecalhos = { "content-type": TIPOS[path.extname(nome)] ?? "application/octet-stream" };
-    if (!nome.startsWith("ui/")) cabecalhos["content-security-policy"] = CSP;
+    // Os cabeçalhos da origem (`web/_headers`), os da página e os da página
+    // inteira, que mora em `ui/` aqui e na raiz da origem.
+    const naOrigem = `/${nome.startsWith("ui/") ? nome.slice(3) : nome}`;
+    const cabecalhos = { ...cabecalhosDaOrigem(naOrigem), "content-type": TIPOS[path.extname(nome)] ?? "application/octet-stream" };
     resposta.writeHead(200, cabecalhos);
     resposta.end(fs.readFileSync(arquivo));
   });
