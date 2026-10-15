@@ -11027,7 +11027,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // 3. Só quatro chamadas de `conectar` passam credencial por argumento (a do
     //    apelido tomado, `conectar` anexa sozinho: ver a parte 6).
     const LEVAM: &[(&str, &str)] = &[
-        ("camada-servidores.js", "alvo, apelido || undefined, token, linkColado ?? null"),
+        (
+            "camada-servidores.js",
+            "alvo, apelido || undefined, token, linkColado ?? null",
+        ),
         ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
         ("camada-mods.js", "alvo, null, credencial"),
         // A entrada pelo navegador (3.4): o link da página, com o token da
