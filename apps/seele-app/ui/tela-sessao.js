@@ -2211,6 +2211,13 @@ let modDoMarcador = new WeakMap();
 let nosDeModNaLista = new WeakSet();
 
 /**
+ * O `open` que a linha montada pediu, da última vez, a cada `<details>` da
+ * lista: é por ele que `vestirComo` sabe se o pedido mudou ou se o que está
+ * aberto foi a pessoa quem abriu.
+ */
+let abertoPedido = new WeakMap();
+
+/**
  * **O lugar de um nó de MOD na linha que se monta**, e não o nó.
  *
  * Os cartões e as contribuições chegam montados, e são o mesmo nó entre um
@@ -2343,6 +2350,7 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
 
   for (const [no, novo] of pares) {
     if (no !== novo) vestirComo(no, novo);
+    else if (no.localName === "details") abertoPedido.set(no, no.open);
     if (novo.nodeType === Node.ELEMENT_NODE) reconciliarOsFilhos(no, Array.from(novo.childNodes), contexto);
   }
 }
@@ -2356,18 +2364,35 @@ function mesmoFeitio(velho, novo) {
   return velho.localName === novo.localName && velho.getAttribute("class") === novo.getAttribute("class");
 }
 
-/** O nó velho com os atributos, o texto e o valor do novo. */
+/**
+ * O nó velho com os atributos, o texto e o valor do novo.
+ *
+ * **O `open` de um `<details>` é de quem o abriu** (rodada 1 do lote AX, I1).
+ * A linha montada só pede aberto o que é «interessante» — o SINAL E ESTADO de
+ * quem está muda, por exemplo —, e copiar o pedido a cada quadro fechava, no
+ * tique seguinte, o «⋯» e o SINAL E ESTADO que a pessoa abriu, com o volume
+ * de dentro. O pedido vale quando muda (`abertoPedido`); fora disso, fica o
+ * que a pessoa escolheu.
+ */
 function vestirComo(velho, novo) {
   if (velho.nodeType === Node.TEXT_NODE) {
     if (velho.nodeValue !== novo.nodeValue) velho.nodeValue = novo.nodeValue;
     return;
   }
+  const detalhe = velho.localName === "details";
   for (const nome of velho.getAttributeNames()) {
+    if (detalhe && nome === "open") continue;
     if (!novo.hasAttribute(nome)) velho.removeAttribute(nome);
   }
   for (const nome of novo.getAttributeNames()) {
+    if (detalhe && nome === "open") continue;
     const valor = novo.getAttribute(nome);
     if (velho.getAttribute(nome) !== valor) velho.setAttribute(nome, valor);
+  }
+  if (detalhe) {
+    const pedido = novo.hasAttribute("open");
+    if (abertoPedido.get(velho) !== pedido) velho.open = pedido;
+    abertoPedido.set(velho, pedido);
   }
   // O valor de um deslizante é propriedade, e não atributo.
   if (velho.localName === "input" && velho.value !== novo.value && velho !== document.activeElement) {
@@ -4434,6 +4459,7 @@ function esquecerOEstadoDaSessao() {
   chaveNaLista = new WeakMap();
   modDoMarcador = new WeakMap();
   nosDeModNaLista = new WeakSet();
+  abertoPedido = new WeakMap();
   rascunhos.clear();
   previas.clear();
   previasFechadas.clear();
