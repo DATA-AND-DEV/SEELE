@@ -99,8 +99,9 @@ Segundo as notas, a CPU do WebKit, nela, foi de 32,4% (vermelho) para 27,5%
 (verde) com 50 e de 52,0% para 44,2% com 100. **Hoje o vermelho reprova bem
 menos que em 11/10** (com 100, 29 e 35 de 36 contra 0 de 38), e a CPU do WebKit
 no vermelho medida hoje é 31%. **A hipótese** é que algo na máquina mudou entre
-as duas noites, já que o fonte do app, o servidor e o falante são os mesmos —
-mas não medi, e nem a CPU de 11/10 tem bruto. A conclusão não depende disso:
+as duas noites. O fonte do app é o mesmo (os dois são o `1bb6450a` por `git
+archive`); o servidor e o falante, segundo as notas, também, mas os binários de
+11/10 se perderam. Não medi, e nem a CPU de 11/10 tem bruto. A conclusão não depende disso:
 nas duas campanhas o vermelho reprova com 50 e com 100, e o verde nunca perdeu a
 lista.
 
@@ -130,9 +131,12 @@ no que mudou.
   novo. O valor de quem está sob o dedo (`document.activeElement`) não é
   trocado, como em `pintarVolumesDoRoster`; o `open` de um `<details>` só segue
   a linha montada quando o que ela pede muda (rodada 1, I1).
-- **A ordem.** Fica no lugar a maior subsequência crescente das posições velhas,
-  e só o resto se move (rodada 1, M1; antes, o cursor movia todos os irmãos do
-  meio quando uma linha ia para trás). Um nó velho com chave que não serve ao
+- **A ordem.** Primeiro o cursor anda sobre os filhos, sem alocar, e confere se
+  os desejados já estão na ordem do DOM — o caso de quase todo quadro, e então
+  nada se move (rodada 2, N1). Só quando não estão, fica no lugar a maior
+  subsequência crescente das posições velhas, e só o resto se move (rodada 1,
+  M1; antes, o cursor movia todos os irmãos do meio quando uma linha ia para
+  trás). Um nó velho com chave que não serve ao
   grupo de agora espera o fim, porque um grupo seguinte pode querê-lo; o que
   ninguém quis sai no fim.
 - **Os nós de MOD não saem do documento.** Os cartões e as contribuições chegam
@@ -148,9 +152,10 @@ no que mudou.
   entra antes, em `desenharPessoas`.
 - **As chaves são esquecidas com a sessão.** O guarda
   `todo_estado_de_topo_da_sessao_e_esquecido_ao_sair` pegou o primeiro rascunho, e
-  com razão: a pessoa 3 de um servidor não é a do seguinte. As três estruturas
-  são refeitas em `esquecerOEstadoDaSessao`, e a primeira lista da sessão nasce
-  com nós novos.
+  com razão: a pessoa 3 de um servidor não é a do seguinte. As quatro estruturas
+  (`chaveNaLista`, `modDoMarcador`, `nosDeModNaLista` e, desde a rodada 1,
+  `abertoPedido`) são refeitas em `esquecerOEstadoDaSessao`, e a primeira lista
+  da sessão nasce com nós novos.
 - **A coluna de salas.** Mesma função. O nome da sala é um botão de renomear com
   ouvinte próprio, e agora ele atravessa os retratos: o ouvinte lê o nome de
   agora do último retrato desenhado (`desenhado`), e não do quadro em que nasceu.
@@ -168,27 +173,48 @@ continua marcando o quadro, e o quadro pede o retrato.
 depois da `um-redesenho-por-quadro.cjs`, com `if: ${{ !cancelled() }}` e
 `timeout-minutes: 5`. O HTML, o CSS e o registro reais, só a ponte simulada,
 50 pessoas (20 na sala principal, 30 fora das salas). Cada caso guarda as
-referências dos nós e confere com `===`, e um `MutationObserver` na lista diz
-onde cada mutação caiu.
+referências dos nós e confere com `===`, e um `MutationObserver` diz onde cada
+mutação caiu. Assim ela está desde a rodada 1 (`68c4544d`, `bcff658a`,
+`c75b6008`, `b0f828ad`):
 
 1. Um PersonState (falar, sinal 61) pelo caminho do evento: toda mutação cai
    dentro da linha da pessoa; as 50 linhas são os mesmos nós; a linha diz
-   TRANSMITINDO e 61; o foco no nome de outra pessoa fica onde estava.
-2. O mesmo retrato, redesenhado pelo tique de 500 ms por 1,2 s: nenhuma mutação.
+   TRANSMITINDO e 61; o foco no nome de outra pessoa fica onde estava. A ordem
+   na tela é a do retrato.
+2. O mesmo retrato, redesenhado pelo tique de 500 ms por 1,2 s: nenhuma mutação
+   — e o retrato desenhado é outro objeto no fim (`desenhado`), senão um tique
+   parado passaria sem medir nada.
 3. Alguém de fora das salas entra na sala dois: a linha dela é o mesmo nó, agora
-   no grupo da sala; as outras e os grupos que existiam ficam.
+   no grupo da sala; as outras e os grupos que existiam ficam; a ordem é a do
+   retrato.
 4. Alguém sai do servidor (a linha sai) e alguém chega (ganha uma); as outras
-   ficam.
-5. Com um cartão de MOD (`pessoa.cartao`, substituir) em cada linha: um
-   PersonState continua só na linha; nenhum cartão troca de nó ou sai do
-   documento.
+   ficam; a ordem é a do retrato.
+5. **Os nós de MOD, ponto de montagem por ponto**, cada um numa página nova, com
+   quem usa fora das salas (para os três ramos de `cartoes` montarem linhas) e as
+   duas salas com gente: `pessoa.cartao` substituir com conteúdo; o mesmo sem
+   conteúdo, com o cartão de uma região da API 3 simulada (`cartoesDosMods`, o
+   caminho do PERFIS); os cartões da API 3 na linha nativa; `pessoa.cartao`
+   adicionar; `pessoa.identidade`; `pessoa.detalhes`; `sala.acoes`; e
+   `pessoa.identidade` numa linha apresentada, com a pessoa começando a falar.
+   Com um PersonState, nenhum nó de MOD aparece nos `removedNodes` (nem dentro de
+   um nó removido), cada um é o mesmo nó na mesma linha, nenhuma mutação cai fora
+   da linha da pessoa, e o `div` do detalhe nativo do «⋯» é o mesmo nó.
 6. Na coluna de salas: um PersonState só muta dentro da linha da pessoa nela; o
    ENTRAR NA SALA da sala dois é o mesmo nó; o mesmo retrato não muta nada.
 7. Ainda nela: quem sai da sala tira só a linha dela; o RENOMEAR de uma sala
    renomeada abre com o nome de agora.
+8. Uma reordenação (a primeira da sala vai para o fim): a ordem da lista e da
+   coluna é a do retrato, cada linha é o mesmo nó, só um nó é inserido no grupo
+   da sala e um na coluna, e o foco no nome de quem está no meio fica.
+9. O `<details>` que a pessoa abre: o «⋯» de uma linha apresentada por MOD,
+   aberto pelo resumo e com o foco nele, atravessa o tique sem mutação; o volume
+   de dentro fica ao alcance do teclado; o SINAL E ESTADO aberto à mão numa linha
+   nativa também fica; quem fica muda tem o SINAL E ESTADO aberto pelo produto, e
+   fechado quando deixa de ficar.
 
 Antes do conserto, reprovou no caso 1 («1 de 1 mutações»: a lista inteira num
-registro só), e o caso 6, antes do `d44f7c1f`, do mesmo jeito.
+registro só), e o caso 6, antes do `d44f7c1f`, do mesmo jeito. Os vermelhos dos
+casos da rodada 1 estão na seção dela.
 
 ## As reversões
 
@@ -425,10 +451,19 @@ sha256 do `tela-sessao.js` antes e depois da série é `4e487980…1b6b`.
 O app `verde-r1`: o fonte do `1bb6450a` com o `tela-sessao.js` e o
 `camada-moderar.js` do `ec8ec2ce` (`tela-sessao.js` sha256 `4e487980…1b6b`;
 `seele-app` sha256 `2c504453…836b`). O mesmo arranjo e os mesmos cuidados. Antes
-de cada rodada o condutor grava o `pgrep -fl -i seele` inteiro e para se houver
-o executável de um app, um `m3-servidor` ou um `m3-falante` (a lista casa também
-com todo caminho que tenha SEELE: os shells, os testes e o próprio Claude de
-outras sessões); e confere o `sessao`.
+de cada rodada o condutor conferiu o `pgrep -fl -i seele` inteiro e pararia se
+houvesse o executável de um app, um `m3-servidor` ou um `m3-falante` (a lista
+casa também com todo caminho que tenha SEELE: os shells, os testes e o próprio
+Claude de outras sessões); e conferiu o `sessao`.
+
+**Mas a prova da conferência das três primeiras rodadas não ficou** (N2 da
+re-revisão). O condutor gravava um arquivo por N (`sonda-<app>/pgrep-antes-de-<N>.txt`),
+e o par (13:16) e as repetições (13:35 e 13:37) sobrescreveram os das rodadas de
+12:59, 13:02 e 13:05. As quatro que sobraram estão limpas: nenhum `seele-app`,
+`m3-servidor` ou `m3-falante`. E o condutor mudou às 13:34:52: o log passou de
+«carga» para «uptime». Desde a rodada 2, a conferência de cada rodada — a sessão,
+o `uptime` e o `pgrep` inteiro — fica dentro da pasta dela
+(`<N>-<hora>/conferencia-antes.txt`), com o log da sonda ao lado.
 
 | hora | pessoas | a lista inteira | nomes achados | ENTRAR NA SALA | entrou | CPU do WebKit | consulta mais lenta (s) | assenta |
 |---|---|---|---|---|---|---|---|---|
@@ -455,8 +490,11 @@ par com 100, o app de antes e o da ponta, um depois do outro:
 | 13:16 | verde-r1 (`ec8ec2ce`) | 37 de 37 | 37 de 37 | 50,1% | sim |
 
 O app de antes também subiu (de 28–33% de manhã para 46% à tarde), então a
-maior parte da diferença não é da rodada; entre os dois, 4 pontos numa amostra de
-cada não separam o código do ruído. Não medi a causa da subida. Depois do par, a
+maior parte da diferença não é da rodada, e a causa da subida não medi. **Entre os
+dois, uma parte é código:** o instrumento da re-revisão mediu o `desenharPessoas`
+da rodada 1 uns 20% mais caro com 251 pessoas, pela maior subsequência calculada
+em todo quadro — ver «Rodada 2», N1, com a medida antes e depois do caminho
+rápido. Depois do par, a
 orquestradora pediu a janela do app, e não abri mais nada até ela voltar
 (13:22:55); as repetições de 10 e 50, acima, vieram depois disso.
 
@@ -479,3 +517,134 @@ script nos testes de Rust, todas terminando vazias:
   ponta;
 - **a medida da 64**, no Chromium da bancada: o foco num canal cai no `BODY`
   depois de um tique, com o retrato igual e com outro canal mudando.
+
+## Rodada 2
+
+A re-revisão (`.superpowers/sdd/lotes/review-ax-r1-report.md`) aprovou a rodada
+1 e fechou os seis achados e os acréscimos A e B, com 2 Menores novos, N1 e N2.
+O pedido da rodada é o `.superpowers/sdd/lotes/lote-ax-rodada2.md`. Ponta de
+partida `a0ec7bbf`.
+
+### Os commits
+
+| commit | achado | o que entra |
+|---|---|---|
+| `e5e16735` | N1 | o caminho rápido da ordem (só `tela-sessao.js`) |
+| este | N2 | o relatório |
+
+### N1 — o caminho rápido antes da maior subsequência
+
+**O instrumento**, como script do meu scratchpad, fora do CI
+(`ax/n1/medir-n1.cjs`): serve a `ui/` do worktree com um `tela-sessao.js`
+diferente por prefixo de caminho, abre uma página por versão no mesmo Chromium e
+mede a mediana de 120 chamadas de `desenharPessoas` com 251 pessoas (120 na sala,
+131 no saguão), alternando o `speaking` de uma; 5 pares intercalados; com o
+cartão `pessoa.cartao` substituir em toda linha e sem MOD. O `#tela-sessao` fica
+escondido, para o tique não desenhar no meio.
+
+**O vermelho** (13:56, carga 6,7–7,9), em mediana por par:
+
+| `tela-sessao.js` | com cartão | sem MOD |
+|---|---|---|
+| `30c38dbe` | 9,9–10,6 ms | 6,8–7,4 ms |
+| `a0ec7bbf` | 12,7–14,2 ms | 8,6–9,1 ms |
+
+A direção do revisor (10,9–11,4 → 13,4–14,4 e 7,1–7,9 → 9,1–10,3) se reproduz.
+
+**O conserto** (`e5e16735`): antes de montar o `Map`, o cursor anda sobre os
+filhos como no `30c38dbe`, sem alocar, e confere se os desejados já estão na
+ordem do DOM. Se estão — o caso de quase todo quadro —, nada se move e a
+subsequência não é calculada; se não, ela roda como antes. O DOM sai idêntico:
+em ordem, a subsequência já incluía todos e nada se movia. A bancada (casos 1, 2
+e 8, e o resto) seguiu verde.
+
+**Depois** (13:57, carga 5,3–6,7), as três pontas:
+
+| `tela-sessao.js` | com cartão | sem MOD |
+|---|---|---|
+| `30c38dbe` | 10,0–11,3 ms | 7,7–8,2 ms |
+| `a0ec7bbf` | 13,0–14,5 ms | 9,6–10,3 ms |
+| `e5e16735` | 11,5–12,4 ms | 8,1–9,1 ms |
+
+Uma rodada seguinte, às 13:59, saiu com a carga subindo a 14,5 (outra sessão
+compilando) e valores pulando nas três versões, inclusive no `30c38dbe`: não a
+uso. Com a carga de volta abaixo de 8 (14:02, 5,6–7,0), a medida que separa as
+partes:
+
+| `tela-sessao.js` | com cartão | sem MOD |
+|---|---|---|
+| `e5e16735` | 10,8–11,5 ms | 7,2–7,6 ms |
+| `e5e16735` sem o caminho rápido | 12,6–13,4 ms | 8,7–9,0 ms |
+| `e5e16735` com a classe inteira no feitio | 10,1–10,6 ms | 6,9–7,3 ms |
+| `30c38dbe` | 10,2–10,9 ms | 6,8–7,2 ms |
+
+A ponta ficou perto do `30c38dbe`: uns 0,5 ms a mais com cartão e 0,3 ms sem MOD.
+O que sobra é o `classList[0]` do feitio (M2 da rodada 1), que a terceira linha
+isola. Não mexi nele: o pedido era o caminho rápido, e comparar a classe inteira
+de novo desfaria o M2.
+
+**A reversão do caminho rápido é de desempenho, e não de comportamento.** Com o
+mutante (`let emOrdem = false`, o caminho rápido desligado), pelo `reverter.sh`:
+a `linhas-pelo-id.cjs` **seguiu verde** (saída 0), e o arquivo voltou idêntico
+(`805977b9…`); o custo volta, pelo instrumento, para 12,6–13,4 ms com cartão e
+8,7–9,0 ms sem MOD (a segunda linha da tabela). Não há vermelho de comportamento
+a mostrar, porque o caminho rápido não muda o DOM.
+
+**A `um-redesenho-por-quadro.cjs`**, intercalada, três vezes cada (o `a0ec7bbf`
+pelo `reverter.sh`, voltando idêntico): o maior atraso foi 31, 29 e 28 ms na
+ponta, e 38, 30 e 34 ms no `a0ec7bbf`.
+
+### N2 — o relatório e o condutor da sonda
+
+- **«O teste de identidade»** descreve a bancada de agora: o caso 2 com a prova
+  do redesenho, o caso 5 por ponto de montagem e com o cartão da região da API 3,
+  e os casos 8 e 9.
+- **As estruturas esquecidas com a sessão** são quatro, com o `abertoPedido`.
+- **O servidor e o falante de 11/10** viraram «segundo as notas»: do fonte do app
+  há prova, dos binários não.
+- **A conferência antes de cada rodada:** o texto da rodada 1 diz agora que a
+  prova das rodadas de 12:59, 13:02 e 13:05 foi sobrescrita, e que as quatro que
+  sobraram estão limpas. O `sondar.sh` grava, desde esta rodada, a sessão, o
+  `uptime` e o `pgrep -fl -i seele` inteiro em
+  `sonda-<app>/<N>-<hora>/conferencia-antes.txt`, com o log da sonda ao lado
+  (`rodada.log`).
+- **A ressalva da CPU** da rodada 1 aponta para a medida do instrumento.
+
+### A sonda na ponta final
+
+O app `verde-r2`: o fonte do `1bb6450a` com o `tela-sessao.js` do `e5e16735`
+(sha256 `805977b9…2ffe`) e o `camada-moderar.js` do `ec8ec2ce`; `seele-app`
+sha256 `f3c2fb75…beb1`. O mesmo arranjo, `caffeinate -di`, e antes de cada
+rodada a sessão, o `uptime` e o `pgrep` gravados na pasta dela.
+
+| pasta | pessoas | a lista inteira | ENTRAR NA SALA | entrou | CPU do WebKit | consulta mais lenta (s) | carga antes | assenta |
+|---|---|---|---|---|---|---|---|---|
+| `10-140656` | 10 | 38 de 38 | 38 de 38 | sim | 7,5% | 0,1 | 9,14 | sim |
+| `50-140935` | 50 | 37 de 37 | 37 de 37 | sim | 26,4% | 0,5 | 5,65 | sim |
+| `100-141257` | 100 | 36 de 36 | 36 de 36 | sim | **31,3%** | 0,3 | 8,95 | sim |
+
+**Assenta nas três, em toda consulta.** A CPU do WebKit com 100 foi 31,3%,
+contra os 51,1% da ponta da rodada 1 (`100-130549`) e os 50,1% do par
+(`100-131614`). Uma parte disso é o N1, que o instrumento mede; quanto é a
+máquina, que também variou ao longo do dia (o app de antes foi de 28–33% de
+manhã a 46% à tarde), não separei. Nas três conferências, nenhum executável de
+app (`/Contents/MacOS/seele-app`), `m3-servidor` ou `m3-falante`; a única linha
+com «seele-app» em cada uma é o texto de um comando de outra sessão
+(`node apps/seele-app/bancada/…`), que não é processo do app.
+
+### O que rodou na rodada
+
+Na ponta do código `e5e16735`, com a HOME falsa por script nos testes de Rust,
+todas terminando vazias:
+
+- **`cargo test -p seele-app --test frontend`**: 296 de 296;
+- **`cargo test -p xtask`**: 230 (88 + 4 + 121 + 1 + 3 + 10 + 1 + 2);
+- **`cargo xtask check-runtime`**: passa;
+- **as 22 bancadas de navegador do CI**: as 19 do job `bancadas` e as 3 do
+  `bancadas-de-mod`, com o `.wasm` do `cargo xtask web` e o `target/wasi-sdk`
+  que já estava no worktree («o wasi-sdk conferido»; nada baixado). A
+  `um-redesenho-por-quadro.cjs` deu 30 ms de atraso máximo nessa passada;
+- **os 40 roteiros**: «os 40 passaram», carga limpa;
+- **a bancada do celular inteira**: 110 casos, o G3 IGUAL pixel a pixel no
+  Chromium e no WebKit;
+- **a sonda**, acima, e **o instrumento do N1**, fora do CI.
