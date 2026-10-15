@@ -2559,6 +2559,67 @@ function anotando(...anotadas) {
       confere("recusa · a falha sem nome no registro", dita("«enviar-imagem»", "o disco sumiu"),
         `o motivo da falha sem nome não foi ao registro: ${JSON.stringify(anotadasDoRoteador)}`);
 
+      // **A lista fechada vale na fronteira** (a auditoria do `v6.json`, B2;
+      // `recusas.o-que-e`). Um nome que o Rust manda e que a lista não tem —
+      // o prazo do enlace era uma frase, que chegava inteira em `e.erro` —
+      // chega como `falhou`, sem os campos que vieram com ele, e o que veio
+      // vai ao registro.
+      const prazo = "Prazo da transferência esgotado. Confira a conexão e a versão do servidor.";
+      recusarComo({ Recusado: { motivo: prazo } });
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "enviar-imagem", n: 34, arquivo: 1, token: "t" });
+      const fora = respostas.at(-1);
+      confere("lista fechada · um nome fora dela", fora?.ok === false && fora?.erro === "falhou"
+        && Object.keys(fora).every((campo) => ["tipo", "n", "ok", "erro"].includes(campo)),
+      `uma recusa fora da lista fechada chegou ao MOD como veio: ${JSON.stringify(fora)}`);
+      confere("lista fechada · um nome fora dela, no registro", dita("Prazo da transferência esgotado"),
+        `a recusa fora da lista não foi ao registro: ${JSON.stringify(anotadasDoRoteador)}`);
+    } finally {
+      delete contexto.invoke;
+    }
+
+    // **O tipo que o pacote não pode pedir chega pelo nome**: o que a API não
+    // conhece e o que saiu dela na 6 são `tipo-desconhecido`, com o
+    // `tipoPedido`, como o tipo de superfície que não é da API. Eram frases.
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "inexistente", n: 35 });
+    const desconhecido = respostas.at(-1);
+    confere("lista fechada · o tipo que a API não conhece", desconhecido?.erro === "tipo-desconhecido"
+      && desconhecido?.tipoPedido === "inexistente",
+    `o tipo que a API não conhece não chegou pelo nome: ${JSON.stringify(desconhecido)}`);
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "snapshot", n: 36 });
+    const saiu = respostas.at(-1);
+    confere("lista fechada · o tipo que saiu da 6", saiu?.erro === "tipo-desconhecido"
+      && saiu?.tipoPedido === "snapshot",
+    `o tipo que saiu da 6 não chegou pelo nome: ${JSON.stringify(saiu)}`);
+
+    // **E o pedido que não cabe na mensagem é `mensagem-grande`**, como o
+    // prelúdio o chama: a janela recusava de novo com `request-too-large`,
+    // que não tinha nome para o MOD e chegava como `falhou`.
+    // O `pedirAoServidor` fica antes do recorte do roteador: recortado aqui,
+    // da fila de pedidos ao fim dele, com o que ele lê de fora em dublê — o
+    // mapa dos pedidos, o contador, a escuta e a geração de pé.
+    const deFila = base.indexOf("let filaDePedidosDeMod = Promise.resolve();");
+    const dePedir = base.indexOf("async function pedirAoServidor(", deFila);
+    const fimDePedir = base.indexOf("\n}\n", dePedir) + 3;
+    confere("lista fechada · o recorte do pedido", deFila >= 0 && dePedir > deFila,
+      "a fila de pedidos e `pedirAoServidor` deixaram de ser vizinhas, e o recorte não as achou");
+    vm.runInContext("const pedidosDeMod = new Map(); let proximoPedidoDeMod = 0;", contexto);
+    contexto.ouvirMod = Promise.resolve();
+    contexto.daGeracaoDePe = () => true;
+    vm.runInContext(base.slice(deFila, fimDePedir), contexto);
+    // A vez na fila espera 125 ms por um `setTimeout`, que nesta bancada não
+    // dispara: o caso mede o nome da recusa de tamanho, e não a fila.
+    contexto.aguardarVezDePedidoDeMod = async () => {};
+    contexto.TextEncoder = TextEncoder;
+    try {
+      contexto.invoke = () => Promise.reject(new Error("o pedido grande não podia chegar ao Rust"));
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
+        tipo: "pedido", n: 37, canal: 0, valor: { texto: "x".repeat(13 * 1024) },
+      });
+      const grande = respostas.at(-1);
+      confere("lista fechada · o pedido grande", grande?.erro === "mensagem-grande",
+        `o pedido grande demais não chegou como mensagem-grande: ${JSON.stringify(grande)}; `
+          + `o registro: ${JSON.stringify(anotadasDoRoteador.at(-1))}`);
+
       recusarComo({ Recusado: { motivo: "tipo-recusado:heic" } });
       await contexto.atenderOMod({ id: "mod/b", api: 5 }, b, { tipo: "enviar-imagem", n: 33, arquivo: 1, token: "t" });
       const cinco = respostas.at(-1);

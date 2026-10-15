@@ -761,7 +761,7 @@ let filaDePedidosDeMod = Promise.resolve();
 let pedidosDeModNaFila = 0;
 
 async function aguardarVezDePedidoDeMod(geracao) {
-  if (pedidosDeModNaFila >= 128) throw new Error("too-many-requests");
+  if (pedidosDeModNaFila >= 128) throw recusaAoMod("too-many-requests");
   pedidosDeModNaFila += 1;
   const vez = filaDePedidosDeMod.then(async () => {
     if (!daGeracaoDePe(geracao)) throw new Error("disconnected");
@@ -803,13 +803,15 @@ async function pedirAoServidor(id, canal, valor) {
   }
   if (pedidosDeMod.size >= 8) {
     dizerRecusaDoPedido(id, "oito pedidos em voo, este não cabe");
-    throw new Error("too-many-requests");
+    throw recusaAoMod("too-many-requests");
   }
   const request = ++proximoPedidoDeMod;
   const payload = JSON.stringify(valor);
-  if (new TextEncoder().encode(payload).length > 12 * 1024) {
+  const tamanho = new TextEncoder().encode(payload).length;
+  if (tamanho > 12 * 1024) {
     dizerRecusaDoPedido(id, `carga de ${payload.length} caracteres não cabe`);
-    throw new Error("request-too-large");
+    // O mesmo nome e os mesmos campos da recusa do prelúdio.
+    throw recusaAoMod("mensagem-grande", "request-too-large", { tamanho, teto: 12 * 1024 });
   }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -3644,6 +3646,94 @@ function avisarOsModsDaTela(snapshot) {
  *   superfícies leva `tipoPedido` e `tipos`);
  * - o resto é `falhou`, e o motivo vai ao registro, que quem chama já escreve.
  */
+/**
+ * **A lista fechada das recusas que um MOD da 6 recebe da janela** (o
+ * `recusas` do `api/v6.json`, K1-m3; a auditoria do `v6.json`, B2).
+ *
+ * Conferida na fronteira, o `responder` de `atenderOMod`, por onde passa toda
+ * resposta ao MOD. Um nome fora dela chega como `falhou`, sem os campos que
+ * vieram junto, e o que veio vai ao `seele.log`. Antes, chegava como veio: o
+ * prazo do enlace e o tipo que a API não conhece eram frases inteiras em
+ * `e.erro`, e o MOD não tinha como reagir a uma frase. Um nome novo que alguém
+ * esqueça de pôr aqui degrada para `falhou`, e é dito, em vez de virar uma
+ * promessa que o `v6.json` não faz.
+ */
+const RECUSAS_AO_MOD = Object.freeze([
+  // O genérico, e o que é da ponte: o prelúdio recusa os três primeiros cedo,
+  // e a janela de novo.
+  "falhou",
+  "too-many-requests",
+  "fila-cheia",
+  "mensagem-grande",
+  "tipo-desconhecido",
+  "sessao-encerrada",
+  // O volume e os arquivos (`recusas.volume`).
+  "sem-espera",
+  "tipo-recusado",
+  "formato-desconhecido",
+  "arquivo-grande-demais",
+  "nao-gravei",
+  "incompleto",
+  "banco-indisponivel",
+  "arquivo-nao-esta-de-pe",
+  "arquivo-de-outro-mod",
+  "arquivo-ilegivel",
+  "caminho-invalido",
+  "papel-nao-serve",
+  "arquivos-demais-de-pe",
+  // As superfícies e a prévia do tema (`recusas.superficies`,
+  // `recusas.tema-pela-janela`).
+  "chave-desconhecida",
+  "valor-invalido",
+  "regiao-desconhecida",
+  "orcamento",
+  "superficie-desconhecida",
+  "sem-previa",
+  "contraste",
+  "teto-de-folhas",
+  "teto-de-superficies",
+  // As contribuições (`recusas.contribuicoes`, `RECUSAS_DAS_CONTRIBUICOES`).
+  "ponto-desconhecido",
+  "modo-recusado",
+  "sem-alvo",
+  "conteudo-invalido",
+  "teto-de-contribuicoes",
+  "teto-de-alvos",
+  "contribuicao-ja-existe",
+  "contribuicao-de-outro-mod",
+]);
+
+/**
+ * Um `Error` da janela que chega ao MOD da 6 pelo nome: o `recusaParaOMod` lê o
+ * `recusa` e os `camposDaRecusa`. A frase fica para o registro. Um nome fora da
+ * lista fechada é defeito de quem escreveu, e lança na hora.
+ */
+function recusaAoMod(nome, frase = nome, campos = undefined) {
+  if (!RECUSAS_AO_MOD.includes(nome)) {
+    throw new TypeError(`«${nome}» não está na lista fechada das recusas ao MOD`);
+  }
+  const erro = new Error(frase);
+  erro.recusa = nome;
+  if (campos) erro.camposDaRecusa = campos;
+  return erro;
+}
+
+/**
+ * A recusa que vai ao MOD da 6, conferida contra a lista fechada: fora dela, é
+ * `falhou`, e o que veio vai ao registro.
+ */
+function recusaDaListaFechada(mod, tipo, carga) {
+  const nome = String(carga?.erro ?? "");
+  if (RECUSAS_AO_MOD.includes(nome)) return carga;
+  registrarNoAnfitriao(
+    "atender-mod",
+    `${mod.id}: a recusa de «${tipo}» não está na lista fechada, e o MOD a recebe como falhou — ${nome}`,
+    "aviso",
+    mod.id,
+  );
+  return { erro: "falhou" };
+}
+
 function recusaParaOMod(mod, falha) {
   if (Number(mod?.api) < 6) return null;
   const SUFIXOS = { "tipo-recusado": "detectado", "papel-nao-serve": "papel" };
@@ -3738,6 +3828,9 @@ async function atenderOMod(mod, instancia, m) {
   const meu = () => minhaInstancia() && instancia.admite(geracaoDaSessao);
 
   const responder = (ok, carga) => {
+    // **Só um nome da lista fechada chega ao MOD da 6** (a auditoria do
+    // `v6.json`, B2): ver `RECUSAS_AO_MOD`.
+    if (!ok && Number(mod?.api) >= 6) carga = recusaDaListaFechada(mod, m.tipo, carga);
     // Perguntada **de novo** aqui, e não herdada de cima: entre a conferência
     // de entrada e esta linha há `await`s, e a sessão pode ter acabado no meio
     // deles. Mandar o **valor** para uma instância encerrada é falar com quem
@@ -3805,7 +3898,8 @@ async function atenderOMod(mod, instancia, m) {
       "aviso",
       mod.id,
     );
-    responder(false, {
+    // Na 6, pelo nome, como o tipo de superfície que não é da API do pacote.
+    responder(false, Number(mod?.api) >= 6 ? { erro: "tipo-desconhecido", tipoPedido: m.tipo } : {
       erro: `«${m.tipo}» não existe na API ${mod?.api ?? "?"}, que é a que este `
         + "pacote declara",
     });
@@ -3980,7 +4074,9 @@ async function atenderOMod(mod, instancia, m) {
           "aviso",
           mod.id,
         );
-        responder(false, { erro: `a API de MODs não conhece «${m.tipo}»` });
+        responder(false, Number(mod?.api) >= 6
+          ? { erro: "tipo-desconhecido", tipoPedido: m.tipo }
+          : { erro: `a API de MODs não conhece «${m.tipo}»` });
     }
   } catch (falha) {
     // **O registro leva o motivo; a frase de tela fica com o MOD.**
