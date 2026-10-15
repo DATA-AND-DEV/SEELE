@@ -550,6 +550,8 @@ impl Client {
             pins,
             join_secret,
             aceito,
+            // Quem entra por aqui não corre candidatos: ninguém espera o toque.
+            None,
         )
         .await
     }
@@ -587,11 +589,14 @@ impl Client {
     /// # Errors
     ///
     /// O mesmo de [`Client::connect`].
+    /// `tocou` recebe o `prazo_s` quando a sala manda `Tocando` (tarefa 16 da
+    /// F7): é por ele que a corrida de [`crate::enlace`] sabe que este candidato
+    /// venceu, muito antes de o aperto de mão terminar.
     #[expect(
         clippy::too_many_arguments,
-        reason = "três argumentos a mais que o `connect` público — o socket, a \
-                  impressão esperada e se o pino prova o servidor —, que já passava \
-                  do limite"
+        reason = "quatro argumentos a mais que o `connect` público — o socket, a \
+                  impressão esperada, se o pino prova o servidor e o aviso do toque —, \
+                  que já passava do limite"
     )]
     pub(crate) async fn connect_por(
         endpoint: &quinn::Endpoint,
@@ -605,6 +610,7 @@ impl Client {
         pins: Arc<dyn PinStore>,
         join_secret: Option<&str>,
         aceito: Option<&str>,
+        tocou: Option<tokio::sync::mpsc::UnboundedSender<u16>>,
     ) -> Result<Self, ConnectError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -748,6 +754,10 @@ impl Client {
         .map_err(|_| ConnectError::HandshakeTimeout)??;
         let (session, carimbo) = if let ServerMessage::Tocando { prazo_s } = resposta {
             tracing::info!(prazo_s, "tocando: quem recebe vai decidir");
+            // Um `send` recusado é quem ouvia ter desistido, e o aperto segue.
+            if let Some(tocou) = &tocou {
+                let _ = tocou.send(prazo_s);
+            }
             tokio::time::timeout(
                 prazo_do_toque(prazo_s),
                 depois_do_toque(&mut send, &mut recv, carimbo, aceito),

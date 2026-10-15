@@ -1022,6 +1022,24 @@ struct Corrida<P, T> {
 /// ["full"]`, e este repositório documenta em `Cargo.toml` o que cada
 /// dependência arrasta — uma a mais para isto seria custo sem necessidade.
 ///
+/// # Quem toca vence
+///
+/// `tocados` traz a posição de quem ouviu `Tocando` de uma sala pessoal
+/// (tarefa 16 da F7). Esse candidato venceu, mesmo sem ter terminado: quem
+/// recebe já está sendo chamado, e qualquer outro que chegasse à sala seria
+/// **um segundo toque** — a mesma pessoa por outro caminho, que a sala anuncia
+/// como outro `Tocou` e que fecha calado o toque de antes. Por isso, no primeiro
+/// aviso:
+///
+/// - ninguém mais começa: a fila e os tardios acabam ali;
+/// - quem já corria é derrubado, e o que ele entregar depois não conta;
+/// - a corrida espera quem toca terminar, e o desfecho é o dele: a sessão, se
+///   atenderam, ou a razão da sala, se não.
+///
+/// Os derrubados não entram em `falhas`, como os que o `JoinSet` derruba no fim:
+/// numa ligação pelo código o pino só é escrito depois da sessão, e eles não
+/// chegaram lá.
+///
 /// # Cancelamento
 ///
 /// As tentativas perdedoras são derrubadas com o `JoinSet` ao fim desta função.
@@ -1032,6 +1050,7 @@ async fn correr<P, T, F, Fut, L>(
     fila: Vec<P>,
     defasagem: Duration,
     tardios: Option<L>,
+    tocados: Option<mpsc::UnboundedReceiver<usize>>,
     tentar: F,
 ) -> Corrida<P, T>
 where
@@ -1043,6 +1062,11 @@ where
 {
     let mut fila: std::collections::VecDeque<P> = fila.into();
     let mut corredores = tokio::task::JoinSet::new();
+    // Quem corre, pela posição: é por ela que os outros caem quando um toca.
+    let mut no_ar: Vec<(usize, tokio::task::AbortHandle)> = Vec::new();
+    // Quem ouviu `Tocando`: daí em diante a corrida é dele.
+    let mut tocando: Option<usize> = None;
+    let mut tocados = tocados;
     let mut falhas: Vec<(usize, ConnectError)> = Vec::new();
     let mut iniciados: Vec<P> = Vec::new();
     // Sem tardios, eles já chegaram: um lote vazio, que nunca é esperado.
@@ -1068,7 +1092,8 @@ where
                 let posicao = iniciados.len();
                 iniciados.push(proximo.clone());
                 let futuro = tentar(posicao, proximo);
-                corredores.spawn(async move { (posicao, futuro.await) });
+                let alca = corredores.spawn(async move { (posicao, futuro.await) });
+                no_ar.push((posicao, alca));
                 vez = tokio::time::Instant::now() + defasagem;
             }
         }
@@ -1088,7 +1113,22 @@ where
         // Enquanto os que já estão no ar correm, o relógio da defasagem anda. Se
         // alguém fechar antes dela, a corrida acaba ali — que é o caso comum, e
         // é o motivo de isto existir.
+        // `biased`, com o toque primeiro: um toque e uma sessão de outro
+        // candidato prontos no mesmo instante são o toque, e a sessão cai no
+        // braço de baixo que larga quem não tocou.
         let terminou = tokio::select! {
+            biased;
+            Some(quem) = ouvir_um_toque(&mut tocados), if tocando.is_none() => {
+                tocando = Some(quem);
+                fila.clear();
+                tardios_chegaram = true;
+                for (posicao, alca) in &no_ar {
+                    if *posicao != quem {
+                        alca.abort();
+                    }
+                }
+                continue;
+            }
             terminou = corredores.join_next(), if !corredores.is_empty() => terminou,
             () = tokio::time::sleep_until(vez), if !fila.is_empty() => {
                 disparar = true;
@@ -1105,6 +1145,9 @@ where
         disparar = true;
 
         match terminou {
+            // Depois de um toque, só o desfecho de quem toca conta: uma sessão
+            // que outro candidato tenha aberto no mesmo instante cai aqui.
+            Some(Ok((posicao, _))) if tocando.is_some_and(|quem| quem != posicao) => {}
             Some(Ok((posicao, Ok(pronto)))) => {
                 // O `JoinSet` derruba o resto ao ser recolhido no fim desta
                 // função.
@@ -1125,6 +1168,51 @@ where
         vencedor: None,
         falhas,
         iniciados,
+    }
+}
+
+/// O próximo aviso de toque da corrida, ou nunca, quando ela não os escuta.
+///
+/// `None` quando o canal fechou: o ramo do `select!` desarma naquela volta, e
+/// os outros seguem.
+async fn ouvir_um_toque(tocados: &mut Option<mpsc::UnboundedReceiver<usize>>) -> Option<usize> {
+    match tocados {
+        Some(tocados) => tocados.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// O prazo de um candidato da corrida, que deixa de valer quando ele toca
+/// (tarefa 16 da F7).
+///
+/// `None` é o prazo vencido sem toque. Com o toque, o aperto de mão inteiro
+/// passa a ser medido pelo prazo do toque, dentro de `Client::connect_por`, e
+/// o do candidato, que existe para soltar quem nunca respondeu, cortaria uma
+/// ligação que está chamando. `ao_tocar` roda uma vez, com o `prazo_s`.
+///
+/// Um `select!` sobre a tentativa **inteira**, e não sobre uma leitura: quem
+/// perde é largado de uma vez, com a conexão dele.
+async fn ate_o_prazo_ou_o_toque<T>(
+    prazo: Duration,
+    tentativa: impl std::future::Future<Output = T>,
+    ouviu: &mut mpsc::UnboundedReceiver<u16>,
+    ao_tocar: impl FnOnce(u16),
+) -> Option<T> {
+    tokio::pin!(tentativa);
+    let limite = tokio::time::sleep(prazo);
+    tokio::pin!(limite);
+    let mut ao_tocar = Some(ao_tocar);
+    loop {
+        tokio::select! {
+            biased;
+            resultado = &mut tentativa => return Some(resultado),
+            Some(prazo_s) = ouviu.recv(), if ao_tocar.is_some() => {
+                if let Some(ao_tocar) = ao_tocar.take() {
+                    ao_tocar(prazo_s);
+                }
+            }
+            () = &mut limite, if ao_tocar.is_some() => return None,
+        }
     }
 }
 
@@ -1451,7 +1539,8 @@ impl Enlace {
                     avisou: repeticao.is_some(),
                 },
             );
-            let resultado = Self::conectar_por(&endpoint, bilhete, primeiro, chave, pins).await;
+            let resultado =
+                Self::conectar_por(&endpoint, bilhete, primeiro, chave, pins, None).await;
             if let Some(repeticao) = repeticao {
                 repeticao.abort();
             }
@@ -1519,15 +1608,19 @@ impl Enlace {
             }
         });
 
+        // Quem ouvir `Tocando` avisa a corrida por aqui (tarefa 16 da F7).
+        let (para_a_corrida, tocados) = mpsc::unbounded_channel();
         let corrida = correr(
             ja,
             DEFASAGEM_ENTRE_CANDIDATOS,
             tardios,
+            Some(tocados),
             |posicao, corredor: Corredor| {
                 let chave = chave.clone();
                 let pins = Arc::clone(&pins);
                 let endpoint = endpoint.clone();
                 let olhos = olhos.cloned();
+                let para_a_corrida = para_a_corrida.clone();
                 async move {
                     let Corredor {
                         destino,
@@ -1563,23 +1656,30 @@ impl Enlace {
                         PRAZO_POR_CANDIDATO
                     };
 
-                    let tentativa = Self::conectar_por(&endpoint, bilhete, destino, chave, pins);
-                    let resultado = match tokio::time::timeout(prazo, tentativa).await {
-                        Ok(resultado) => resultado,
-                        // `SemResposta` e não `HandshakeTimeout`: este prazo é o do
-                        // **candidato inteiro**, e queimá-lo é não ter recebido nada
-                        // de volta. O aperto de mão tem um prazo próprio, dentro de
-                        // `Client::connect`, e é ele quem sabe dizer «o servidor
-                        // recebeu e demorou» — porque só ele roda depois de haver
-                        // conexão.
-                        //
-                        // Enquanto os dois casos saíam por aqui, a separação escrita
-                        // em `ConnectError::SemResposta` não chegava à tela uma vez
-                        // sequer: quatro segundos de silêncio na LAN eram anunciados
-                        // como problema de sincronização, e a frase mandava conferir
-                        // versão e protocolo — as duas coisas que estavam certas.
-                        Err(_) => Err(ConnectError::SemResposta),
-                    };
+                    let (tocou, mut ouviu) = mpsc::unbounded_channel();
+                    let tentativa =
+                        Self::conectar_por(&endpoint, bilhete, destino, chave, pins, Some(tocou));
+                    let resultado =
+                        match ate_o_prazo_ou_o_toque(prazo, tentativa, &mut ouviu, |_| {
+                            let _ = para_a_corrida.send(posicao);
+                        })
+                        .await
+                        {
+                            Some(resultado) => resultado,
+                            // `SemResposta` e não `HandshakeTimeout`: este prazo é o do
+                            // **candidato inteiro**, e queimá-lo é não ter recebido nada
+                            // de volta. O aperto de mão tem um prazo próprio, dentro de
+                            // `Client::connect`, e é ele quem sabe dizer «o servidor
+                            // recebeu e demorou» — porque só ele roda depois de haver
+                            // conexão.
+                            //
+                            // Enquanto os dois casos saíam por aqui, a separação escrita
+                            // em `ConnectError::SemResposta` não chegava à tela uma vez
+                            // sequer: quatro segundos de silêncio na LAN eram anunciados
+                            // como problema de sincronização, e a frase mandava conferir
+                            // versão e protocolo — as duas coisas que estavam certas.
+                            None => Err(ConnectError::SemResposta),
+                        };
                     // A repetição para quando o candidato termina, dando certo ou
                     // não: avisar sobre um candidato que já falhou gastaria furo da
                     // janela do anfitrião por um caminho que ninguém vai tentar de
@@ -1699,7 +1799,7 @@ impl Enlace {
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
         let endpoint = crate::client::local_endpoint(None)?;
-        let enlace = Self::conectar_por(&endpoint, None, destino, chave, pins).await?;
+        let enlace = Self::conectar_por(&endpoint, None, destino, chave, pins, None).await?;
         let _ = enlace.declarar_identidade_de_par().await;
         Ok(enlace)
     }
@@ -1715,6 +1815,7 @@ impl Enlace {
         destino: Destino,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
+        tocou: Option<mpsc::UnboundedSender<u16>>,
     ) -> Result<Self, ConnectError> {
         // O TLS escreve o pin de dentro do aperto de mão, e os vizinhos desta
         // tentativa escrevem na mesma chave quando são alternativos do mesmo
@@ -1742,6 +1843,7 @@ impl Enlace {
             Arc::clone(&deste_aperto) as Arc<dyn PinStore>,
             destino.segredo.as_deref(),
             destino.aceito.as_deref(),
+            tocou,
         )
         .await;
 
@@ -3404,6 +3506,8 @@ impl Motor {
                     Arc::clone(&self.pins),
                     self.destino.segredo.as_deref(),
                     self.destino.aceito.as_deref(),
+                    // A volta não corre candidatos: ela é ao endereço que venceu.
+                    None,
                 )
                 .await
             }
@@ -6395,6 +6499,7 @@ mod a_corrida {
             vec![0, 1, 2],
             DEFASAGEM,
             sem_tardios(),
+            None,
             |posicao, _| async move {
                 // Os dois primeiros demoram uma eternidade; o terceiro fecha logo.
                 let espera = if posicao == 2 { 50 } else { 100_000 };
@@ -6416,16 +6521,22 @@ mod a_corrida {
         let comecaram = Arc::new(AtomicUsize::new(0));
         let contador = Arc::clone(&comecaram);
 
-        let corrida = correr(vec![0, 1], DEFASAGEM, sem_tardios(), move |posicao, _| {
-            let contador = Arc::clone(&contador);
-            async move {
-                contador.fetch_add(1, Ordering::SeqCst);
-                // O primeiro nunca termina dentro do horizonte deste teste.
-                let espera = if posicao == 0 { 100_000 } else { 10 };
-                tokio::time::sleep(Duration::from_millis(espera)).await;
-                Ok::<usize, ConnectError>(posicao)
-            }
-        })
+        let corrida = correr(
+            vec![0, 1],
+            DEFASAGEM,
+            sem_tardios(),
+            None,
+            move |posicao, _| {
+                let contador = Arc::clone(&contador);
+                async move {
+                    contador.fetch_add(1, Ordering::SeqCst);
+                    // O primeiro nunca termina dentro do horizonte deste teste.
+                    let espera = if posicao == 0 { 100_000 } else { 10 };
+                    tokio::time::sleep(Duration::from_millis(espera)).await;
+                    Ok::<usize, ConnectError>(posicao)
+                }
+            },
+        )
         .await;
 
         assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
@@ -6440,9 +6551,13 @@ mod a_corrida {
     /// para escolher a que melhor descreve o que houve, e para limpar os pins.
     #[tokio::test(start_paused = true)]
     async fn todas_as_falhas_voltam_quando_ninguem_fecha() {
-        let corrida = correr(vec![0, 1, 2], DEFASAGEM, sem_tardios(), |_, _| async {
-            Err::<usize, ConnectError>(ConnectError::Unreachable)
-        })
+        let corrida = correr(
+            vec![0, 1, 2],
+            DEFASAGEM,
+            sem_tardios(),
+            None,
+            |_, _| async { Err::<usize, ConnectError>(ConnectError::Unreachable) },
+        )
         .await;
 
         assert!(corrida.vencedor.is_none());
@@ -6452,7 +6567,7 @@ mod a_corrida {
     /// Uma lista vazia não trava: devolve sem vencedor e sem falha.
     #[tokio::test(start_paused = true)]
     async fn uma_corrida_sem_candidatos_termina() {
-        let corrida = correr(Vec::new(), DEFASAGEM, sem_tardios(), |_, _| async {
+        let corrida = correr(Vec::new(), DEFASAGEM, sem_tardios(), None, |_, _| async {
             Ok::<usize, ConnectError>(0)
         })
         .await;
@@ -6468,6 +6583,7 @@ mod a_corrida {
             vec![0, 1],
             DEFASAGEM,
             sem_tardios(),
+            None,
             |posicao, _| async move {
                 if posicao == 0 {
                     return Err(ConnectError::Unreachable);
@@ -6490,7 +6606,7 @@ mod a_corrida {
     #[tokio::test(start_paused = true)]
     async fn os_candidatos_comecam_um_a_cada_defasagem_na_ordem_da_lista() {
         let (quando, tentar) = anotando(&[], &[]);
-        let corrida = correr(vec![10, 11, 12], DEFASAGEM, sem_tardios(), tentar).await;
+        let corrida = correr(vec![10, 11, 12], DEFASAGEM, sem_tardios(), None, tentar).await;
 
         assert!(corrida.vencedor.is_none());
         assert_eq!(
@@ -6510,6 +6626,7 @@ mod a_corrida {
             vec![10, 11],
             DEFASAGEM,
             tardios(Duration::from_millis(100), vec![20]),
+            None,
             tentar,
         )
         .await;
@@ -6531,6 +6648,7 @@ mod a_corrida {
             vec![10, 11, 12],
             DEFASAGEM,
             tardios(Duration::from_millis(100), vec![20]),
+            None,
             tentar,
         )
         .await;
@@ -6551,6 +6669,7 @@ mod a_corrida {
             vec![10, 11, 12],
             DEFASAGEM,
             tardios(Duration::from_millis(100), Vec::new()),
+            None,
             tentar,
         )
         .await;
@@ -6570,6 +6689,7 @@ mod a_corrida {
             vec![10, 11],
             DEFASAGEM,
             tardios(Duration::from_secs(60), vec![20]),
+            None,
             tentar,
         )
         .await;
@@ -6580,6 +6700,205 @@ mod a_corrida {
             "quem ganhava esperou {:?} por um tardio",
             comeco.elapsed()
         );
+    }
+
+    /// Conta quando uma tentativa foi largada sem terminar.
+    struct Largada {
+        quando: Arc<std::sync::Mutex<Vec<(usize, Duration)>>>,
+        posicao: usize,
+        comeco: tokio::time::Instant,
+        terminou: bool,
+    }
+
+    impl Drop for Largada {
+        fn drop(&mut self) {
+            if !self.terminou {
+                self.quando
+                    .lock()
+                    .unwrap()
+                    .push((self.posicao, self.comeco.elapsed()));
+            }
+        }
+    }
+
+    /// **Quem toca vence, e ninguém mais começa** (tarefa 16 da F7).
+    ///
+    /// O 0 nunca responde; o 1 toca 10 ms depois de começar e só termina 20 s
+    /// depois, quando atendem; o 2 começaria aos 500 ms. O 2 não começa, o 0 é
+    /// largado no instante do toque (e não no fim da corrida), e o 1 vence.
+    #[tokio::test(start_paused = true)]
+    async fn quem_toca_vence_e_ninguem_mais_comeca() {
+        let (avisa, tocados) = tokio::sync::mpsc::unbounded_channel();
+        let comecaram = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let largadas = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let comeco = tokio::time::Instant::now();
+        let tentar = {
+            let comecaram = Arc::clone(&comecaram);
+            let largadas = Arc::clone(&largadas);
+            move |posicao: usize, _| {
+                comecaram.lock().unwrap().push(posicao);
+                let avisa = avisa.clone();
+                let largada = Largada {
+                    quando: Arc::clone(&largadas),
+                    posicao,
+                    comeco,
+                    terminou: false,
+                };
+                async move {
+                    // O marcador inteiro, e não só o campo: é o `Drop` dele
+                    // que conta a tentativa largada.
+                    let mut largada = largada;
+                    if posicao == 1 {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                        let _ = avisa.send(1);
+                        tokio::time::sleep(Duration::from_secs(20)).await;
+                    } else {
+                        tokio::time::sleep(Duration::from_secs(100)).await;
+                    }
+                    largada.terminou = true;
+                    Ok::<usize, ConnectError>(posicao)
+                }
+            }
+        };
+        let corrida = correr(
+            vec![0, 1, 2],
+            DEFASAGEM,
+            sem_tardios(),
+            Some(tocados),
+            tentar,
+        )
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
+        assert_eq!(
+            *comecaram.lock().unwrap(),
+            vec![0, 1],
+            "alguém começou depois do toque, e chegaria à sala como um segundo toque"
+        );
+        let largadas = largadas.lock().unwrap().clone();
+        assert!(
+            largadas.len() == 1
+                && largadas.first().is_some_and(
+                    |(posicao, quando)| *posicao == 0 && *quando < Duration::from_secs(1)
+                ),
+            "quem corria não foi largado no instante do toque: {largadas:?}"
+        );
+    }
+
+    /// **Depois do toque, a sessão de outro candidato não vence** (tarefa 16 da
+    /// F7). O 0 abre uma sessão no mesmo instante em que o 1 toca: quem tocou
+    /// já levou a corrida, e a sessão do 0 é largada.
+    #[tokio::test(start_paused = true)]
+    async fn depois_do_toque_a_sessao_de_outro_nao_vence() {
+        let (avisa, tocados) = tokio::sync::mpsc::unbounded_channel();
+        let corrida = correr(
+            vec![0, 1],
+            DEFASAGEM,
+            sem_tardios(),
+            Some(tocados),
+            move |posicao: usize, _| {
+                let avisa = avisa.clone();
+                async move {
+                    if posicao == 0 {
+                        // Pronta no mesmo instante do toque do 1, que começa
+                        // na vez dele e toca 10 ms depois.
+                        tokio::time::sleep(DEFASAGEM + Duration::from_millis(10)).await;
+                        return Ok::<usize, ConnectError>(0);
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    let _ = avisa.send(1);
+                    tokio::time::sleep(Duration::from_secs(20)).await;
+                    Ok(1)
+                }
+            },
+        )
+        .await;
+
+        assert_eq!(
+            corrida.vencedor.map(|(posicao, _)| posicao),
+            Some(1),
+            "a sessão de quem não tocou venceu a de quem estava tocando"
+        );
+    }
+
+    /// **Quem toca e não é atendido leva a corrida junto** (tarefa 16 da F7).
+    ///
+    /// O 0 toca e, 5 s depois, a sala diz que ninguém atendeu; o 1 entraria aos
+    /// 300 ms. Ligar de novo pelo outro caminho seria tocar outra vez para quem
+    /// não atendeu: a corrida acaba com o desfecho de quem tocou.
+    #[tokio::test(start_paused = true)]
+    async fn quem_toca_e_nao_e_atendido_leva_a_corrida_junto() {
+        let (avisa, tocados) = tokio::sync::mpsc::unbounded_channel();
+        let ninguem = ConnectError::Refused {
+            reason: seele_proto::control::DisconnectReason::NinguemAtendeu,
+        };
+        let recusa = ninguem.clone();
+        let corrida = correr(
+            vec![0, 1],
+            DEFASAGEM,
+            sem_tardios(),
+            Some(tocados),
+            move |posicao: usize, _| {
+                let avisa = avisa.clone();
+                let recusa = recusa.clone();
+                async move {
+                    if posicao == 0 {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                        let _ = avisa.send(0);
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        return Err(recusa);
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    Ok::<usize, ConnectError>(posicao)
+                }
+            },
+        )
+        .await;
+
+        assert!(
+            corrida.vencedor.is_none(),
+            "outro candidato entrou depois de o toque não ser atendido"
+        );
+        assert_eq!(corrida.falhas, vec![(0, ninguem)]);
+    }
+
+    /// **O prazo do candidato se solta quando ele toca** (tarefa 16 da F7): sem
+    /// toque, a tentativa que passa do prazo é largada nele; com toque, ela vai
+    /// até o fim, e quem ouve sabe uma vez, com o prazo do toque.
+    #[tokio::test(start_paused = true)]
+    async fn o_prazo_do_candidato_se_solta_quando_ele_toca() {
+        let prazo = Duration::from_secs(4);
+
+        let (_sem_toque, mut ninguem_toca) = tokio::sync::mpsc::unbounded_channel::<u16>();
+        let sem_toque = super::ate_o_prazo_ou_o_toque(
+            prazo,
+            tokio::time::sleep(Duration::from_secs(10)),
+            &mut ninguem_toca,
+            |_| panic!("ninguém tocou"),
+        )
+        .await;
+        assert!(sem_toque.is_none(), "a tentativa sem toque passou do prazo");
+
+        let (toca, mut ouviu) = tokio::sync::mpsc::unbounded_channel::<u16>();
+        let ouvidos = std::sync::Mutex::new(Vec::new());
+        let com_toque = super::ate_o_prazo_ou_o_toque(
+            prazo,
+            async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                let _ = toca.send(45);
+                tokio::time::sleep(Duration::from_secs(9)).await;
+                "atendida"
+            },
+            &mut ouviu,
+            |prazo_s| ouvidos.lock().unwrap().push(prazo_s),
+        )
+        .await;
+        assert_eq!(
+            com_toque,
+            Some("atendida"),
+            "quem tocava caiu no prazo do candidato"
+        );
+        assert_eq!(*ouvidos.lock().unwrap(), vec![45]);
     }
 }
 
@@ -7384,6 +7703,7 @@ mod tests {
                 destino_na_chave(onde_do_impostor, chave, Some(&impressao_do_verdadeiro)),
                 SigningKey::from_bytes(&[7; 32]),
                 Arc::clone(&loja) as Arc<dyn PinStore>,
+                None,
             ),
         )
         .await
@@ -8304,6 +8624,7 @@ mod tests {
             destino_na_chave(onde_b, chave, Some(&impressao_de_a)),
             SigningKey::from_bytes(&[8; 32]),
             Arc::clone(&loja) as Arc<dyn PinStore>,
+            None,
         );
         let armar_e_abrir = async {
             let _ = chegou.await;
@@ -8385,6 +8706,7 @@ mod tests {
             destino_na_chave(onde_a, chave, Some(&impressao_a)),
             SigningKey::from_bytes(&[7; 32]),
             Arc::clone(&loja) as Arc<dyn PinStore>,
+            None,
         );
         let b = Enlace::conectar_por(
             &endpoint,
@@ -8392,6 +8714,7 @@ mod tests {
             destino_na_chave(onde_b, chave, None),
             SigningKey::from_bytes(&[8; 32]),
             Arc::clone(&loja) as Arc<dyn PinStore>,
+            None,
         );
         let quando_a_fixar = async {
             while loja.pinned(chave).as_deref() != Some(impressao_a.as_str()) {

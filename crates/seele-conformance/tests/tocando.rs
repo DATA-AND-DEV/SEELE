@@ -198,3 +198,92 @@ async fn a_recusa_chega_como_chamada_recusada() {
         desfecho(&resultado)
     );
 }
+
+/// **Dois candidatos para a mesma sala tocam uma vez só** (tarefa 16 da F7).
+///
+/// A mesma pessoa por outro candidato chega à sala como outro `Tocou`, e o
+/// toque de antes fecha calado (`recepcao::Aviso`). O segundo candidato sai 250
+/// ms depois do primeiro; quem tocou primeiro tem de parar a corrida antes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dois_candidatos_para_a_mesma_sala_tocam_uma_vez_so() {
+    let _vaga = vaga::minha();
+    let sala = sala(Duration::from_secs(30)).await;
+    let recepcao = recepcao(&sala);
+    let mut avisos = recepcao.assinar();
+    let onde = sala.local_addr().unwrap();
+    let ligando = tokio::spawn(Enlace::conectar_entre(
+        vec![destino(onde), destino(onde)],
+        chave(QUEM_LIGA),
+        pins(),
+    ));
+    let toque = tocou(&mut avisos, QUEM_LIGA).await;
+
+    // Um segundo inteiro cobre a vez do segundo candidato, com folga.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let depois: Vec<Aviso> = std::iter::from_fn(|| avisos.try_recv().ok()).collect();
+    assert!(
+        !depois
+            .iter()
+            .any(|aviso| matches!(aviso, Aviso::Tocou { .. })),
+        "a mesma pessoa tocou de novo por outro candidato: {depois:?}"
+    );
+
+    assert!(
+        recepcao.atender(toque),
+        "o primeiro toque não estava mais tocando: {depois:?}"
+    );
+    let resultado = tokio::time::timeout(Duration::from_secs(5), ligando)
+        .await
+        .expect("quem foi atendido não entrou em 5 s")
+        .unwrap();
+    assert!(
+        resultado.is_ok(),
+        "quem foi atendido não entrou: {:?}",
+        desfecho(&resultado)
+    );
+}
+
+/// **Quem toca numa corrida não cai no prazo do candidato** (tarefa 16 da F7).
+///
+/// O prazo de cada candidato (4 s numa rede local) existe para soltar quem
+/// nunca respondeu. O primeiro aqui é um socket que não responde, e o segundo é
+/// a sala: ela toca, e quem recebe demora mais que os 4 s para atender.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn quem_toca_numa_corrida_nao_cai_no_prazo_do_candidato() {
+    let _vaga = vaga::minha();
+    let sala = sala(Duration::from_secs(30)).await;
+    let recepcao = recepcao(&sala);
+    let mut avisos = recepcao.assinar();
+    // Um endereço que recebe e nunca responde.
+    let mudo = std::net::UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+    let ligando = tokio::spawn(Enlace::conectar_entre(
+        vec![
+            destino(mudo.local_addr().unwrap()),
+            destino(sala.local_addr().unwrap()),
+        ],
+        chave(QUEM_LIGA),
+        pins(),
+    ));
+    let toque = tocou(&mut avisos, QUEM_LIGA).await;
+
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    if ligando.is_finished() {
+        let resultado = ligando.await.unwrap();
+        panic!(
+            "quem tocava desistiu no prazo do candidato, com o toque ainda no prazo: {:?}",
+            desfecho(&resultado)
+        );
+    }
+
+    assert!(recepcao.atender(toque), "o toque não estava mais tocando");
+    let resultado = tokio::time::timeout(Duration::from_secs(5), ligando)
+        .await
+        .expect("quem foi atendido não entrou em 5 s")
+        .unwrap();
+    assert!(
+        resultado.is_ok(),
+        "quem foi atendido não entrou: {:?}",
+        desfecho(&resultado)
+    );
+    drop(mudo);
+}
