@@ -248,6 +248,43 @@ function acordarDaPilha(no) {
   };
 }
 
+/**
+ * **Recolher e devolver uma superfície, pela casca** (D-estilo-1; desenho da
+ * F8 aprovado pela orquestradora em 15/10, para a F3 revisar).
+ *
+ * No celular, o diálogo de um MOD cobre a sessão inteira, e a prévia do tema
+ * que ele pede não se vê atrás dele. O VER NA SESSÃO recolhe o diálogo num
+ * selo, e o VOLTAR o devolve. Fechar não serve: a prévia é da superfície, e
+ * sairia com ela (`fechar` chama o `aoFecharASuperficie`).
+ *
+ * Recolher é o `ocultar` que já existe: a superfície sai da vista e da pilha de
+ * inércia (o `soltarFoco` a desempilha), e continua montada, com a prévia.
+ * Devolver é o `mostrar`: ela volta ao topo da pilha. **Só a casca chama, e só
+ * devolve o que ela mesma recolheu**: um `ocultar` que o MOD pediu não é
+ * desfeito por aqui.
+ *
+ * Achada pelo nó dela (`.superficie-de-mod`), que é o que a casca tem na mão.
+ */
+const superficiePorRaiz = new WeakMap();
+
+/** @returns {boolean} se recolheu. */
+function recolherSuperficie(raiz) {
+  const superficie = superficiePorRaiz.get(raiz);
+  if (!superficie || superficie.solta || !superficie.montada || !superficie.visivel) return false;
+  superficie.recolhidaPelaCasca = true;
+  superficie.ocultar();
+  return true;
+}
+
+/** @returns {boolean} se devolveu. */
+function devolverSuperficie(raiz) {
+  const superficie = superficiePorRaiz.get(raiz);
+  if (!superficie || superficie.solta || !superficie.recolhidaPelaCasca) return false;
+  superficie.recolhidaPelaCasca = false;
+  superficie.mostrar();
+  return true;
+}
+
 /** Os tipos de superfície, e o que cada um exige do host. */
 const TIPOS_DE_SUPERFICIE = Object.freeze({
   pagina: { host: "palco-de-paginas", foco: false, camada: false },
@@ -394,6 +431,7 @@ class SuperficieDeMod {
     this.focoAnterior = null;
 
     this.montarCasca(descricao);
+    superficiePorRaiz.set(this.raiz, this);
     this.renderer = new RegiaoDeMod(id, dono, this.corpo, PERFIS_DE_RENDER.superficie);
     // O secundário de um formulário sai pela saída do produto (Step 6f).
     this.renderer.aoCancelar = () => this.pedirFechamento("saida-do-produto");
