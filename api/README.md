@@ -18,6 +18,10 @@ das APIs 3, 4 e 5 carrega como carregava (`APIS_ACEITAS = [5, 4, 3]`, em
 depois da 0.15.0, é o executor da metade de janela e o som, e quem escreve MOD
 precisa saber disso para o MOD rodar igual nas duas.
 
+> **Emendado em 15/10/2026 — o corte da API 6 (0.16).** Isto vale para a linha
+> 0.15. No app 0.16, `APIS_ACEITAS = [6]`: um MOD das APIs 3, 4 e 5 é recusado
+> pelo nome, e roda no Servidor 0.15, pelo launcher.
+
 - **Na metade de janela, `console` existe, em qualquer API.** `console.log`,
   `info`, `warn`, `error` e `debug` — e `dir`, `table`, `trace` e o `assert`
   que falha — viram uma linha no `seele.log` da máquina que roda o MOD, com o
@@ -124,12 +128,13 @@ fecha.
 adivinhação: a superfície cresce enquanto ninguém depende dela, e fecha antes de
 publicar em vez de antes de existir.
 
-## A API 6, em construção
+## A API 6
 
-`api/v6.json` existe e está em construção: `MOD_API_VERSION` ainda é 5, e a
-linha dela em `congeladas.sha256` acompanha cada edição até o corte, quando
-`MOD_API_VERSION` e `APIS_ACEITAS` sobem para 6 e ela congela. O que muda na
-forma do arquivo:
+`api/v6.json` **congelou no corte** (15/10/2026; tarefa 13 do plano da F3):
+`MOD_API_VERSION = 6` e `APIS_ACEITAS = [6]`, e a linha dela em
+`congeladas.sha256` não muda mais — o que vier depois vai para a v7. Até o
+corte ela esteve em construção, com a linha acompanhando cada edição. O que
+muda na forma do arquivo:
 
 - **a v6 é escrita por inteiro**, sem `extends`: só a API 6 roda no app 0.16,
   e herdar traria de volta o que as versões 1 a 5 prometeram e não entregaram;
