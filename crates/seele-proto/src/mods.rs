@@ -90,7 +90,40 @@ pub const MOD_API_VERSION: u32 = 6;
 /// publicação que o conjunto protegia continua valendo, e agora pelo outro
 /// lado: o app da 0.16 só sai depois dos três MODs oficiais na 4.0.0 (API 6),
 /// e a linha 3.x deles continua no Servidor 0.15 (spec-mestre, §4).
-pub const APIS_ACEITAS: &[u32] = &[6];
+///
+/// **Sai de [`APIS_POR_LINHA`]**, a linha deste build, e não é escrita aqui
+/// também: duas cópias do mesmo conjunto discordam no dia em que só uma muda.
+pub const APIS_ACEITAS: &[u32] = APIS_POR_LINHA[0].1;
+
+/// **As APIs de MOD de cada linha de servidor** (o corte da API 6; tarefa 13
+/// do plano da F3, Step 5; decisão da orquestradora, 15/10).
+///
+/// A linha é o texto canônico do launcher (`seele_lancador::Linha`): `1` para o
+/// Servidor 1.0, que este build é, e `0.15` para a linha legada, que o launcher
+/// roda ao lado. **A primeira é a deste build** ([`LINHA_DESTE_BUILD`]), e
+/// [`APIS_ACEITAS`] sai dela. A união de todas ([`apis_de_toda_linha`]) é o
+/// que o indexador aceita: os MODs da 6 são da linha 1, e os legados das 3, 4 e
+/// 5 continuam publicáveis para quem hospeda pelo Servidor 0.15 — e saem
+/// **depois** dos da 6 (spec-mestre, §4).
+pub const APIS_POR_LINHA: [(&str, &[u32]); 2] = [("1", &[6]), ("0.15", &[5, 4, 3])];
+
+/// A linha de servidor deste build: a primeira de [`APIS_POR_LINHA`].
+pub const LINHA_DESTE_BUILD: &str = APIS_POR_LINHA[0].0;
+
+/// **As APIs de toda linha**, da mais nova para a mais velha e sem repetir: o
+/// conjunto que o indexador aceita (o guarda
+/// `o_indexador_aceita_as_apis_de_toda_linha_e_so_elas`, em
+/// `crates/seele-conformance`).
+#[must_use]
+pub fn apis_de_toda_linha() -> Vec<u32> {
+    let mut todas: Vec<u32> = APIS_POR_LINHA
+        .iter()
+        .flat_map(|(_, apis)| apis.iter().copied())
+        .collect();
+    todas.sort_unstable_by(|a, b| b.cmp(a));
+    todas.dedup();
+    todas
+}
 
 /// A API mais velha que este build ainda executa.
 pub const MOD_API_MINIMA: u32 = 6;
@@ -1099,6 +1132,33 @@ mod tests {
             );
         }
         assert!(!capacidades_da_api(6).is_empty());
+    }
+
+    /// **O conjunto desta linha é um só** (Step 5 do corte): `APIS_ACEITAS`,
+    /// `MOD_API_VERSION` e `MOD_API_MINIMA` batem com a entrada da linha deste
+    /// build em `APIS_POR_LINHA`, procurada pelo **nome**, e não pela posição.
+    /// Um deles escrito à mão de novo, e diferente, reprova aqui.
+    #[test]
+    fn o_conjunto_desta_linha_e_o_da_tabela_das_linhas() {
+        assert_eq!(LINHA_DESTE_BUILD, "1", "este build é o Servidor 1.0");
+        let desta: Vec<_> = APIS_POR_LINHA
+            .iter()
+            .filter(|(linha, _)| *linha == LINHA_DESTE_BUILD)
+            .collect();
+        assert_eq!(desta.len(), 1, "a linha deste build aparece {} vezes na tabela", desta.len());
+        let apis = desta[0].1;
+        assert_eq!(APIS_ACEITAS, apis, "APIS_ACEITAS divergiu da tabela das linhas");
+        assert_eq!(Some(&MOD_API_VERSION), apis.iter().max(), "MOD_API_VERSION não é a mais nova da linha");
+        assert_eq!(Some(&MOD_API_MINIMA), apis.iter().min(), "MOD_API_MINIMA não é a mais velha da linha");
+        // E a tabela tem forma: cada linha uma vez, cada uma com alguma API.
+        for (i, (linha, apis)) in APIS_POR_LINHA.iter().enumerate() {
+            assert!(!apis.is_empty(), "a linha {linha} não tem API nenhuma");
+            assert!(
+                APIS_POR_LINHA.iter().skip(i + 1).all(|(outra, _)| outra != linha),
+                "a linha {linha} aparece duas vezes"
+            );
+        }
+        assert_eq!(apis_de_toda_linha(), vec![6, 5, 4, 3]);
     }
 
     /// **A API 6 é a deste build** (o corte; tarefa 13 do plano da F3). E é uma
