@@ -991,8 +991,9 @@ def previa_recolhida(pg: Page) -> list[str]:
     volta (`devolverSuperficie`), o diálogo volta ao topo da pilha, a sessão
     volta a ficar inerte, e a prévia está intacta. Fechado depois, o foco
     volta a quem o abriu, e não ao VOLTAR da casca, que já saiu (A da revisão
-    da F3, 15/10). Um `ocultar` do MOD com o diálogo recolhido não é desfeito
-    pelo devolver (B), e uma página não se recolhe."""
+    da F3, 15/10). Um `ocultar`, um `fechar` ou um `mostrar` do MOD com o
+    diálogo recolhido não são desfeitos pelo devolver (B), e uma página não se
+    recolhe."""
     falhas = []
     pg.evaluate(MOD_DE_PE)
     tema = TEMAS["papel"]
@@ -1046,6 +1047,26 @@ def previa_recolhida(pg: Page) -> list[str]:
         falhas.append("o MOD pediu para ocultar o diálogo, e ele continua à vista: a conferência abaixo não vale")
     elif pg.evaluate(f"devolverSuperficie({raiz})") or pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])["dialogo"]:
         falhas.append("o devolverSuperficie mostrou um diálogo que o MOD tinha ocultado")
+    # Recolhido, o MOD o fecha, ou o mostra: o devolver não tem o que devolver.
+    # Com o fechar, ele remontaria um diálogo que o MOD fechou; com o mostrar,
+    # diria ter devolvido o que já estava à vista (o caminho do meio é o da F3).
+    for caminho in (["superficie-fechar"], ["superficie-mostrar"], ["superficie-mostrar", "superficie-fechar"]):
+        pg.evaluate("__pedirAoProduto({ tipo: 'superficie-mostrar', superficie: 'estilo' })")
+        pg.evaluate(DIALOGO_COM_PREVIA, tema)
+        pg.wait_for_timeout(300)
+        pg.evaluate(f"window.__recolhido = {raiz}")
+        if not pg.evaluate("recolherSuperficie(window.__recolhido)"):
+            falhas.append(f"o diálogo não recolheu antes de {caminho}: a conferência abaixo não vale")
+            continue
+        for pedido in caminho:
+            pg.evaluate(f"__pedirAoProduto({{ tipo: '{pedido}', superficie: 'estilo' }})")
+            pg.wait_for_timeout(200)
+        a_vista = pg.evaluate("window.__recolhido.isConnected && window.__recolhido.checkVisibility()")
+        devolveu = pg.evaluate("devolverSuperficie(window.__recolhido)")
+        depois = pg.evaluate("window.__recolhido.isConnected && window.__recolhido.checkVisibility()")
+        if devolveu or depois != a_vista:
+            falhas.append(f"recolhido, {' e '.join(caminho)} do MOD, e o devolverSuperficie deu {devolveu}, "
+                          f"com o diálogo {'à vista' if depois else 'fora'} (antes, {'à vista' if a_vista else 'fora'})")
     # Só o diálogo se recolhe: uma página que a casca pedisse por engano sairia
     # do palco dela.
     pg.evaluate("__pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'pagina', tipo: 'pagina', titulo: 'PÁGINA' } })")

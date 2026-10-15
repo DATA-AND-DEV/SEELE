@@ -267,8 +267,10 @@ function acordarDaPilha(no) {
  * Só o diálogo se recolhe: é o único que cobre a sessão, e uma página recolhida
  * por engano tiraria a página ativa do palco dela (`liberarDestino`).
  *
- * Qualquer `mostrar` ou `ocultar` que não seja daqui (o do MOD, o de outra
- * página) tira a marca: a casca só devolve o que continua como ela deixou.
+ * Qualquer `mostrar`, `ocultar` ou `fechar` que não seja daqui (o do MOD, o
+ * da saída do produto) tira a marca: a casca só devolve o que continua como
+ * ela deixou. Sem a do `fechar`, um diálogo que o MOD fechou com ele recolhido
+ * voltava montado pelo devolver.
  */
 const superficiePorRaiz = new WeakMap();
 
@@ -943,6 +945,9 @@ class SuperficieDeMod {
    */
   fechar() {
     if (this.solta) return;
+    // Fechada, deixa de estar como a casca a recolheu (`devolverSuperficie`).
+    this.recolhidaPelaCasca = false;
+    this.focoAntesDeRecolher = null;
     // A prévia do tema que era desta superfície sai com ela (tarefa 17g).
     this.dono.aoFecharASuperficie?.(this.chave);
     this.visivel = false;
