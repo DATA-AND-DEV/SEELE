@@ -1091,6 +1091,55 @@ async function oGestoCanceladoDizCancelou() {
 }
 
 // ---------------------------------------------------------------------------
+// 2a'. No toque, só o que se arrasta prende o dedo; o vazio rola a página
+//      (D-api-8, item 6; `celular.toque-na-tela`).
+// ---------------------------------------------------------------------------
+
+async function oToqueSoPrendeOQueSeArrasta() {
+  const caso = "o toque só prende o que se arrasta";
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const tabuleiro = [{
+    forma: "tela",
+    chave: "mapa",
+    largura: 200,
+    altura: 200,
+    figuras: [
+      { tipo: "linha", chave: "parede", x: 0, y: 0, ate_x: 200, ate_y: 200 },
+      { tipo: "circulo", chave: "peca", x: 60, y: 60, raio: 15, cor: "#6bffb6" },
+    ],
+  }];
+  regiao.aplicar(tabuleiro);
+  const tela = regiao.raiz.children[0];
+  tela.darPincel();
+  regiao.aplicar(tabuleiro);
+
+  // O dedo que desce: prender é impedir que o navegador role a página.
+  const prende = (x, y) => {
+    let impedido = false;
+    tela.disparar("touchstart", {
+      touches: [{ clientX: x, clientY: y }],
+      preventDefault() { impedido = true; },
+    });
+    return impedido;
+  };
+  confere(caso, prende(60, 60) === true,
+    "o dedo sobre a peça não prendeu o gesto: no celular, a página rolaria em vez de a peça andar");
+  confere(caso, prende(5, 150) === false,
+    "o dedo no vazio da tela prendeu o gesto: no celular, a página não rola por cima de um tabuleiro");
+  confere(caso, prende(100, 100) === false,
+    "o dedo sobre uma parede, que não se arrasta, prendeu o gesto");
+
+  // E a folha deixa a página rolar: o `touch-action: none` em todo o canvas
+  // prendia o dedo no vazio também, e o script não tem como soltá-lo depois.
+  const folha = fs.readFileSync(path.join(__dirname, "../ui/mods-controles.css"), "utf8");
+  const regra = folha.split("canvas.regiao-de-mod-parte {")[1]?.split("}")[0] ?? "";
+  confere(caso, /touch-action:\s*pan-x pan-y;/.test(regra) && !/touch-action:\s*none/.test(regra),
+    `o canvas da tela não deixa a página rolar: ${regra.trim()}`);
+}
+
+// ---------------------------------------------------------------------------
 // 2b. Um tabuleiro: figuras declaradas, e o arraste diz qual foi pega.
 // ---------------------------------------------------------------------------
 
@@ -5797,6 +5846,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
     oGestoCanceladoDizCancelou,
+    oToqueSoPrendeOQueSeArrasta,
     sairDuranteOCarregamentoNaoMonta,
     aMidiaDoServidorTemOMesmoDono,
     sairDuranteAReproducaoPara,

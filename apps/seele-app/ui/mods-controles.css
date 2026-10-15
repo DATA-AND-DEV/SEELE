@@ -162,9 +162,10 @@ canvas.regiao-de-mod-parte {
   max-width: 100%;
   border: 1px solid var(--seele-linha);
   background: var(--seele-negro-absoluto);
-  /* Sem isto, arrastar no canvas rola a página no toque, e o traço sai
-     picado — o gesto é do desenho, e o navegador precisa saber disso. */
-  touch-action: none;
+  /* A página rola no toque: o dedo no vazio de um tabuleiro é a pessoa
+     descendo a tela. O dedo sobre uma figura com chave é do desenho, e o
+     `touchstart` do renderer impede a rolagem só nele (D-api-8, item 6). */
+  touch-action: pan-x pan-y;
 }
 
 figure.regiao-de-mod-parte { margin: 0 0 var(--seele-celula-x); }

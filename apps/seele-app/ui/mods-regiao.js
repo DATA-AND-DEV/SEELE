@@ -2589,6 +2589,18 @@ class RegiaoDeMod {
     };
     const aoSubir = aoAcabar("terminou");
     const aoCancelar = aoAcabar("cancelou");
+    // **No toque, só o que se arrasta prende o dedo** (D-api-8, item 6;
+    // `celular.toque-na-tela`). A folha deixa a página rolar (`touch-action:
+    // pan-x pan-y`), e é aqui, no dedo que desce, que o produto decide: sobre
+    // uma figura com chave, o gesto é do desenho, e a rolagem é impedida; no
+    // vazio, a página rola, e o arraste que tinha começado chega ao MOD como
+    // `cancelou`. Era `touch-action: none` no canvas inteiro, e um tabuleiro
+    // no celular prendia a página.
+    const aoTocar = (evento) => {
+      const toque = evento.touches?.[0];
+      if (toque && sob(ponto(toque)) !== null) evento.preventDefault();
+    };
+    elem.addEventListener("touchstart", aoTocar, { passive: false });
     elem.addEventListener("pointerdown", aoDescer);
     elem.addEventListener("pointermove", aoMover);
     elem.addEventListener("pointerup", aoSubir);
@@ -2598,6 +2610,7 @@ class RegiaoDeMod {
       elem.removeEventListener("pointermove", aoMover);
       elem.removeEventListener("pointerup", aoSubir);
       elem.removeEventListener("pointercancel", aoCancelar);
+      elem.removeEventListener("touchstart", aoTocar);
       // **O quadro pendente também é recurso.** Um `requestAnimationFrame` que
       // sobrevive à saída roda uma vez depois de a sessão ter acabado, e o que
       // ele faz é falar com um executor que não existe mais.
