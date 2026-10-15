@@ -3621,6 +3621,9 @@ function modsQueOuvemATela() {
  * retrato quando sobe.
  */
 function avisarOsModsDaTela(snapshot) {
+  // O tamanho das regiões, num quadro, depois do desenho: um MOD que acabou de
+  // contribuir numa região sabe quanto cabe nela (`dizerOTamanhoDasRegioes`).
+  agendarOTamanhoDasRegioes();
   const agora = projetarORetrato(snapshot, cascaDoRetrato());
   const antes = geracaoDosEventos === geracaoDaSessao ? retratoDosEventos : null;
   retratoDosEventos = agora;
@@ -3654,6 +3657,80 @@ function avisarOsModsDaTela(snapshot) {
     }
   }
   if (m.falando !== undefined && donos.length) ritmoDaFala?.mudou(m.falando);
+}
+
+/**
+ * **O tamanho de cada região, dito a quem contribui nela**
+ * (`eventos-da-tela.lugar`: «a região ou camada do MOD mudou de tamanho»; a
+ * auditoria do `v6.json`, B9). Só o `chamada.palco` mandava `lugar` com
+ * `regiao` (`dizerOTamanhoDoPalco`, em `tela-chamada.js`), e um MOD na barra
+ * de baixo não sabia quanto cabia nela.
+ *
+ * As regiões de um lugar só: o contêiner onde a casca monta o ponto da região
+ * (`CONTEINERES_DOS_PONTOS`, em `camada-mods.js`, aponta para os mesmos). A
+ * `conversa.mensagem` fica de fora: ela se repete por mensagem, e não tem um
+ * tamanho.
+ *
+ * Ao chegar e a cada mudança, como o palco: o que já foi dito, por MOD e
+ * região, não se repete.
+ */
+const CONTEINERES_DAS_REGIOES = Object.freeze({
+  "servidor.navegacao": "lista-mods-navegacao",
+  "canal.cabecalho": "canal-cabecalho-mods",
+  "compositor": "compositor-mods",
+  "pessoas.lista": "roster-mods",
+  "status.barra": "telemetria-mods",
+  "operador.barra": "operador-mods",
+  "redes": "trilha-mods",
+});
+const tamanhoDaRegiaoDito = new Map();
+
+function dizerOTamanhoDasRegioes() {
+  if (typeof contribuicoesDosMods !== "object") return;
+  const casca = cascaDoRetrato();
+  const vistos = new Set();
+  for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
+    const regiao = contribuicao.ponto;
+    const id = CONTEINERES_DAS_REGIOES[regiao];
+    const instancia = contribuicao.instancia;
+    if (!id || !instancia?.admite?.(geracaoDaSessao)) continue;
+    if (!(CAPACIDADES_POR_API[Number(instancia.api)] ?? []).includes("eventos-da-tela")) continue;
+    const chave = `${contribuicao.mod}|${regiao}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    const caixa = $(id);
+    const largura = Math.round(caixa?.clientWidth ?? 0);
+    const altura = Math.round(caixa?.clientHeight ?? 0);
+    const medida = `${largura}×${altura}`;
+    if (tamanhoDaRegiaoDito.get(chave) === medida) continue;
+    tamanhoDaRegiaoDito.set(chave, medida);
+    donoDaRegiao({ id: contribuicao.mod, hash: instancia.hash }, instancia).falar({
+      nome: "lugar", onde: casca.onde, regioes: casca.regioes, largura, altura, regiao,
+    });
+  }
+  // Quem saiu da região esquece o que foi dito: voltando, sabe de novo.
+  for (const chave of [...tamanhoDaRegiaoDito.keys()]) {
+    if (!vistos.has(chave)) tamanhoDaRegiaoDito.delete(chave);
+  }
+}
+
+let tamanhoDasRegioesAgendado = false;
+function agendarOTamanhoDasRegioes() {
+  if (tamanhoDasRegioesAgendado || typeof requestAnimationFrame !== "function") return;
+  tamanhoDasRegioesAgendado = true;
+  requestAnimationFrame(() => {
+    tamanhoDasRegioesAgendado = false;
+    dizerOTamanhoDasRegioes();
+  });
+}
+
+// O tamanho muda sem retrato novo: a janela, a coluna, o conteúdo da região.
+if (typeof ResizeObserver === "function" && typeof document === "object") {
+  const observador = new ResizeObserver(() => dizerOTamanhoDasRegioes());
+  for (const id of Object.values(CONTEINERES_DAS_REGIOES)) {
+    const caixa = document.getElementById(id);
+    if (caixa) observador.observe(caixa);
+  }
 }
 
 /**

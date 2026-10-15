@@ -707,6 +707,79 @@ const REGIOES = [
       }
     }
 
+    // ------------------------------------- o lugar de cada região
+    //
+    // **Quem contribui numa região sabe o tamanho dela** (`eventos-da-tela.
+    // lugar`: «a região ou camada do MOD mudou de tamanho»; a auditoria do
+    // `v6.json`, B9). Só o `chamada.palco` mandava `lugar` com `regiao`: um MOD
+    // na barra de baixo não sabia quanto cabia nela. Ao chegar, e quando ela
+    // muda de tamanho. **O MOD medido chega numa barra que já está à vista e
+    // com o tamanho dela** — outro MOD a abriu, e ela está fixa em 320 × 140:
+    // a chegada não a redimensiona, e quem diz o tamanho é o desenho, e não o
+    // observador. Medido: com a barra escondida até a primeira contribuição,
+    // o observador dizia a chegada sozinho, e o caso passava sem o desenho.
+    const lugar = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const entregues = [];
+      const instancia = new InstanciaDeMod("mod/lugar", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; },
+        entregar(mensagem) { entregues.push(mensagem); },
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      instancia.api = 6;
+      modsCarregados.set("mod/lugar", instancia);
+      const dono = { id: "mod/lugar", instancia };
+      const primeira = new InstanciaDeMod("mod/primeiro", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      primeira.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/primeiro", primeira);
+      const donoPrimeiro = { id: "mod/primeiro", instancia: primeira };
+      const abriu = contribuicoesDosMods.registrar(donoPrimeiro, primeira, {
+        ponto: "status.barra", modo: "adicionar", conteudo: [{ forma: "texto", chave: "p", dentro: "o primeiro" }],
+      }).handle;
+      $("telemetria-mods").style.minHeight = "140px";
+      $("telemetria-mods").style.width = "320px";
+      desenhar(r);
+      await quadro();
+      await quadro();
+      const { handle } = contribuicoesDosMods.registrar(dono, instancia, {
+        ponto: "status.barra", modo: "adicionar", conteudo: [{ forma: "texto", chave: "t", dentro: "na barra" }],
+      });
+      desenhar(r);
+      await quadro();
+      desenhar(r);
+      await quadro();
+      const daBarra = () => entregues.filter((m) => m.nome === "lugar" && m.regiao === "status.barra");
+      const aoChegar = daBarra().at(-1) ?? null;
+      $("telemetria-mods").style.minHeight = "200px";
+      await quadro();
+      await quadro();
+      const depois = daBarra().at(-1) ?? null;
+      $("telemetria-mods").style.minHeight = "";
+      $("telemetria-mods").style.width = "";
+      contribuicoesDosMods.revogar(handle, dono);
+      contribuicoesDosMods.revogar(abriu, donoPrimeiro);
+      modsCarregados.delete("mod/lugar");
+      modsCarregados.delete("mod/primeiro");
+      desenhar(r);
+      await quadro();
+      return { aoChegar, depois, vezes: daBarra().length };
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (lugar.erro) falhas.push(`lugar: ${lugar.erro}`);
+    else {
+      if (!lugar.aoChegar || lugar.aoChegar.altura < 140) {
+        falhas.push(`lugar: o MOD que contribui na barra de baixo não soube o tamanho dela ao chegar: ${JSON.stringify(lugar.aoChegar)}`);
+      }
+      else if (!Array.isArray(lugar.aoChegar.regioes) || typeof lugar.aoChegar.onde !== "string") {
+        falhas.push(`lugar: o lugar da região não diz onde e quais regiões: ${JSON.stringify(lugar.aoChegar)}`);
+      }
+      if (!lugar.depois || lugar.depois.altura < 200) {
+        falhas.push(`lugar: a barra cresceu, e o MOD não soube do tamanho novo: ${JSON.stringify(lugar)}`);
+      }
+    }
+
     // ------------------------------------- a navegação, substituída
     //
     // `servidor.navegacao` substituído (rascunho §3, a regra aprovada em 09/10):
