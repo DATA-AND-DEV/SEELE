@@ -96,10 +96,21 @@
   letter-spacing: 0.2em;
 }
 
-/* Todo controle tem 44 de alvo. */
+/* Todo controle tem 44 de alvo, e nenhum estilo de MOD o desce
+   (`estilos.celular`; a auditoria do `v6.json`, B7). O estilo do MOD é inline,
+   e esta regra, sem `!important`, perdia para ele: um botão com altura e
+   largura de 20 media 20. */
 :root[data-casca="celular"] :is(button, .botao, .botao-fantasma, select, summary) {
-  min-height: var(--cel-alvo);
-  min-width: var(--cel-alvo);
+  min-height: var(--cel-alvo) !important;
+  min-width: var(--cel-alvo) !important;
+}
+
+/* E o `escalar` do MOD não encolhe o alvo nem a letra de um campo depois do
+   layout: nem no controle, nem no nó com estilo de MOD que contém um controle
+   ou um campo. Com `escalar: 0.2`, o botão media 9 × 9. */
+:root[data-casca="celular"] :is(button, .botao, .botao-fantasma, select, summary),
+:root[data-casca="celular"] [data-estilo-de-mod]:has(:is(button, select, summary, input, textarea)) {
+  scale: none !important;
 }
 
 /* A letra de campo de 16: abaixo disso o Safari do iOS amplia a página inteira ao

@@ -685,6 +685,34 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(escolhido.aba, 'rgb(42, 111, 60)', `a aba ativa não foi pintada pelo estado escolhido: ${JSON.stringify(escolhido)}`);
     assert.notEqual(escolhido.desligada, 'rgb(42, 111, 60)', `a marca desligada continuou pintada como escolhida: ${JSON.stringify(escolhido)}`);
 
+    // 12d. **No celular, nenhum estilo desce um controle abaixo de 44 px**
+    //      (`estilos.celular`; a auditoria do `v6.json`, B7). O piso era uma
+    //      regra de folha, e o estilo do MOD, inline, vencia: medido 20 × 20
+    //      com altura e largura, e 9 × 9 com `escalar: 0.2`. A casca do
+    //      celular é a folha de sempre com `data-casca="celular"` na raiz.
+    const piso = await page.evaluate(async () => {
+      document.documentElement.dataset.casca = 'celular';
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'pequenos', tipo: 'dialogo', modal: false, titulo: 'Pequenos' } });
+      const montou = await pedir(6, { tipo: 'superficie-montar', superficie: 'pequenos', arvore: [
+        { forma: 'botao', chave: 'apertado', dentro: 'X', estilo: { altura: 20, largura: 20, alturaMinima: 10, larguraMinima: 10 } },
+        { forma: 'botao', chave: 'encolhido', dentro: 'Y', estilo: { escalar: 0.2 } },
+        { forma: 'caixa', chave: 'grupo', estilo: { escalar: 0.2 }, dentro: [{ forma: 'botao', chave: 'dentro', dentro: 'Z' }] },
+      ] });
+      const raiz = document.querySelector('[data-superficie="pequenos"]');
+      const medida = (chave) => {
+        const r = raiz.querySelector(`[data-chave-do-mod="${chave}"]`).getBoundingClientRect();
+        return [Math.round(r.width), Math.round(r.height)];
+      };
+      const medidas = { apertado: medida('apertado'), encolhido: medida('encolhido'), dentro: medida('dentro') };
+      delete document.documentElement.dataset.casca;
+      await pedir(6, { tipo: 'superficie-descartar', superficie: 'pequenos' });
+      return { montou, medidas };
+    });
+    assert.equal(piso.montou?.ok, true, `a árvore com estilos foi recusada: ${JSON.stringify(piso.montou)}`);
+    for (const [chave, [largura, altura]] of Object.entries(piso.medidas)) {
+      assert.ok(largura >= 44 && altura >= 44, `no celular, o estilo do MOD desceu «${chave}» a ${largura} × ${altura}: ${JSON.stringify(piso.medidas)}`);
+    }
+
     // 13. Os botões do produto no formulário.
     const arvoreDaFicha = (extra = {}) => [{
       forma: 'formulario', chave: 'f', primario: 'SALVAR', secundario: 'CANCELAR', ...extra, dentro: [
