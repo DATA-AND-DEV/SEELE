@@ -695,6 +695,22 @@ class RegiaoDeMod {
      */
     this.escopo = `mod-${(RegiaoDeMod.serieDeEscopo += 1)}`;
     if (raiz) raiz.dataset.escopoDeMod = this.escopo;
+    /**
+     * **Os nós que citam uma imagem da pessoa do destino** (`daPessoa`), por
+     * elemento: o ponto citado e como reaplicar. A troca da foto ou da capa
+     * (o `atualizar` da contribuição, R7 do PERFIS) os alcança pelo evento
+     * `seele-mods-citacao`; sem isto o cartão ficava com a imagem velha até a
+     * sessão remontar (o achado do PERFIS, 15/10). O ouvinte só existe
+     * enquanto há citação: a região que não cita não paga nada.
+     */
+    this.citados = new Map();
+    this.aoTrocarACitacao = (evento) => {
+      const { ponto, pessoa } = evento?.detail ?? {};
+      if (this.solta || String(this.pessoaDoDestino ?? "") !== String(pessoa ?? "")) return;
+      for (const citado of Array.from(this.citados.values())) {
+        if (citado.ponto === ponto) citado.reaplicar();
+      }
+    };
     /** A folha de classes desta raiz, montada sob demanda. */
     this.folha = null;
     this.textoDaFolha = "";
@@ -1834,6 +1850,7 @@ class RegiaoDeMod {
     this.guardar(elem, `fundo ${plano.chave}`, () => {
       cancelado = true; this[bolso.conta] -= bytes; this.contagem[bolso.quantas] -= 1;
       elem.style.backgroundImage = "";
+      this.esquecerCitacao(elem);
       this.esquecerMidia(elem);
     });
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
@@ -1867,6 +1884,15 @@ class RegiaoDeMod {
       this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
       this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo: ${porque}`);
     };
+    // A imagem citada que troca (o `atualizar` da contribuição) chega aqui de
+    // novo: já decodificada pela contribuição, e sem bytes neste bolso.
+    if (fonte.daPessoa) {
+      this.lembrarCitacao(elem, fonte.daPessoa, () => {
+        soImagem(this.imagemCitada(fonte.daPessoa))
+          .then(aplicar)
+          .catch((falha) => this.dizerTropecoDaMidia("o fundo citado", plano.no.chave, falha));
+      });
+    }
     vindo.then(midia => {
       if (cancelado || this.solta || !this.dono.podeFalar()) return;
       // A citação de uma imagem que a pessoa não tem: o fundo fica liso, e
@@ -1922,6 +1948,7 @@ class RegiaoDeMod {
     };
     this.guardar(elem, `retrato ${plano.chave}`, () => {
       estado.cancelado = true;
+      this.esquecerCitacao(elem);
       tirarAImagem();
       this.contagem[plano.cartao ? "midiasDeCartao" : "midias"] -= 1;
       this.esquecerMidia(elem);
@@ -1977,6 +2004,19 @@ class RegiaoDeMod {
           : null);
     // Sem origem não há mídia: a inicial é o estado natural, e não uma recusa.
     if (!vindo) return;
+    // A imagem citada que troca chega aqui de novo, e troca o `<img>`: já
+    // decodificada pela contribuição, e sem bytes neste bolso.
+    if (plano.no.daPessoa) {
+      this.lembrarCitacao(elem, plano.no.daPessoa, () => {
+        soImagem(this.imagemCitada(plano.no.daPessoa))
+          .then((midia) => {
+            if (!midia || estado.cancelado || this.solta) return;
+            tirarAImagem();
+            aplicar(midia);
+          })
+          .catch((falha) => this.dizerTropecoDaMidia("o retrato citado", plano.no.chave, falha));
+      });
+    }
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     vindo.then((midia) => {
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
@@ -2020,6 +2060,20 @@ class RegiaoDeMod {
     const pessoa = this.pessoaDoDestino ?? "";
     if (!pessoa || typeof this.dono.imagemDaPessoa !== "function") return Promise.resolve(null);
     return this.dono.imagemDaPessoa(String(qual), pessoa);
+  }
+
+  /** Lembra um nó que cita, para a troca da imagem citada o alcançar. */
+  lembrarCitacao(elem, qual, reaplicar) {
+    const ponto = qual === "capa" ? "pessoa.capa" : qual === "avatar" ? "pessoa.avatar" : "";
+    if (!ponto) return;
+    if (this.citados.size === 0) globalThis.addEventListener?.("seele-mods-citacao", this.aoTrocarACitacao);
+    this.citados.set(elem, { ponto, reaplicar });
+  }
+
+  /** Esquece o nó que citava, e o ouvinte com o último. */
+  esquecerCitacao(elem) {
+    if (!this.citados.delete(elem) || this.citados.size > 0) return;
+    globalThis.removeEventListener?.("seele-mods-citacao", this.aoTrocarACitacao);
   }
 
   atualizarRetrato(elem, plano) {
@@ -4020,6 +4074,8 @@ class RegiaoDeMod {
     this.soltarAFolha();
     this.estadosDeMidia.clear();
     this.somDaMidia.clear();
+    if (this.citados.size > 0) globalThis.removeEventListener?.("seele-mods-citacao", this.aoTrocarACitacao);
+    this.citados.clear();
     this.raiz.remove();
   }
 }

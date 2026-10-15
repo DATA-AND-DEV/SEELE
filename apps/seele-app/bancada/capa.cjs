@@ -438,8 +438,57 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(citacao.retrato, 'inicial', `o retrato que cita um avatar que não existe saiu ${citacao.retrato}`);
     assert.deepEqual(citacao.recusas, [], 'citar uma imagem que a pessoa não tem virou recusa');
 
+    // 5b. **A citação acompanha a troca** (o achado do PERFIS, 15/10; rascunho
+    //     §4). A pessoa troca a capa pelo servidor: o MOD faz `atualizar` na
+    //     contribuição da capa, e o cartão que a cita — no fundo e num retrato
+    //     — passa a mostrar a nova, sem o conteúdo do cartão mudar. Ficava com
+    //     a velha até a sessão remontar: o redesenho da troca só alcançava a
+    //     capa nativa, e o renderer não tinha o que reconciliar.
+    const troca = await page.evaluate(async (alvo) => {
+      const fotoDe = (cor) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 96; canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = cor; ctx.fillRect(0, 0, 96, 32);
+        return canvas.toDataURL('image/jpeg');
+      };
+      window.recusarCapa = false;
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      contribuicoesDosMods.revogar(handleCapa);
+      window.handleCapa = registrarCapa(alvo, 'volume:antes');
+      desenharChamada(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      const cartao = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.cartao', modo: 'substituir', alvo,
+        conteudo: [{
+          forma: 'caixa', chave: 'faixa', fundoDeMidia: { daPessoa: 'capa' },
+          dentro: [{ forma: 'texto', chave: 't', dentro: 'cartão' }, { forma: 'retrato', chave: 'r', daPessoa: 'capa' }],
+        }],
+      }).handle;
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      const linha = () => document.querySelector('li.pessoa-apresentada[data-apresentada-por="teste/perfis"]');
+      const fundo = () => [...(linha()?.querySelectorAll('.pessoa-miolo *') ?? [])]
+        .map(e => e.style.backgroundImage).find(b => b.includes('url(')) ?? '';
+      const retrato = () => linha()?.querySelector('.pessoa-miolo .regiao-de-mod-retrato-imagem')?.getAttribute('src') ?? '';
+      const antes = { fundo: fundo().includes(daCapa), retrato: retrato() === daCapa };
+
+      const nova = fotoDe('#e63232');
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: nova };
+      contribuicoesDosMods.atualizar(handleCapa, { id: 'teste/perfis', instancia: instanciaTeste }, {
+        doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:depois' } },
+      });
+      await new Promise(ok => setTimeout(ok, 600));
+      const depois = { fundo: fundo().includes(nova) && !fundo().includes(daCapa), retrato: retrato() === nova };
+      contribuicoesDosMods.revogar(cartao);
+      return { antes, depois };
+    }, alvo);
+    assert.deepEqual(troca.antes, { fundo: true, retrato: true }, `o cartão não citava a capa antes da troca: ${JSON.stringify(troca)}`);
+    assert.deepEqual(troca.depois, { fundo: true, retrato: true },
+      `a citação não acompanhou a troca da capa: o cartão ficou com a velha (${JSON.stringify(troca)})`);
+
     assert.deepEqual(errors, []);
-    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo.');
+    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo, e que acompanha a troca da capa.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

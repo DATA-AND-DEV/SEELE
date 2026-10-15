@@ -1695,6 +1695,12 @@ function imagemContribuida(ponto, pessoaId) {
         }
         contribuicao.retrato = nova;
         contribuicao.retratoPendente = null;
+        // **E a quem cita** (`daPessoa`): o cartão que cita esta foto ou esta
+        // capa a troca também, sem remontar (o achado do PERFIS, 15/10). O
+        // redesenho de baixo só alcança o nativo.
+        globalThis.dispatchEvent?.(new CustomEvent("seele-mods-citacao", {
+          detail: { ponto, pessoa: String(pessoaId) },
+        }));
       },
       aoFalhar: () => {
         if (contribuicao.retratoPendente === nova) contribuicao.retratoPendente = null;
