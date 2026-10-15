@@ -378,6 +378,13 @@ jobs:
       - run: node apps/seele-app/bancada/um-redesenho-por-quadro.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # A lista de pessoas reconciliada pelo id (pendência 63, (b)): um
+      # PersonState mexe só na linha da pessoa, e o foco fica; o mesmo retrato
+      # não mexe em nada; quem entra numa sala leva o nó. A lista repovoada a
+      # cada quadro sumia e voltava na árvore de acessibilidade.
+      - run: node apps/seele-app/bancada/linhas-pelo-id.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # **Os roteiros da casca** (lote RT da F5), que até 10/10/2026 só rodavam
       # na bateria da orquestradora. Nem este workflow nem a bateria do
       # `empacotar/publicar.sh` os rodavam, e assim eles apodreciam calados: o
