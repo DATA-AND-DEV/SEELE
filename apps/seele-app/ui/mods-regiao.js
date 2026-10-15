@@ -263,6 +263,14 @@ function fraseDaRegraViolada(regras, caixa) {
  * o orçamento acaba — uma forma recusada leva os filhos junto sem contá-los —,
  * e «recusados: 8» não diz a quem escreveu quanto a declaração tem.
  */
+/**
+ * O valor de um campo como o sujo o compara: o `checked` numa marca e num
+ * interruptor (o `value` deles é sempre «on»), e o `value` nos outros.
+ */
+function valorDoCampo(caixa) {
+  return caixa.type === "checkbox" ? String(caixa.checked) : caixa.value;
+}
+
 function nosDaDeclaracao(no) {
   if (Array.isArray(no)) return no.reduce((soma, um) => soma + nosDaDeclaracao(um), 0);
   if (typeof no === "string") return 1;
@@ -1619,6 +1627,7 @@ class RegiaoDeMod {
     elem.append(rotulo, caixa, lido);
     const aoMexer = () => {
       lido.textContent = caixa.value;
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "numero",
         chave: plano.no.chave ?? "",
@@ -1647,6 +1656,10 @@ class RegiaoDeMod {
       if (caixa.value !== valor) caixa.value = valor;
     }
     if (lido && lido.textContent !== caixa.value) lido.textContent = caixa.value;
+    // **Um campo como os outros** (`formularios.erro`: «em toda forma de
+    // entrada»; a auditoria do `v6.json`, B4): o erro declarado, o sujo e o
+    // `formulario.erros` pela chave.
+    this.marcarValidade(elem, caixa, plano);
   }
 
   /** Uma marca — caixa de seleção ou interruptor, na mesma mecânica. */
@@ -1656,6 +1669,7 @@ class RegiaoDeMod {
     const rotulo = elemento("span", "regiao-de-mod-rotulo");
     elem.append(caixa, rotulo);
     const aoTrocar = () => {
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "marca",
         chave: plano.no.chave ?? "",
@@ -1680,6 +1694,8 @@ class RegiaoDeMod {
     // são o mesmo controle com leituras diferentes para quem usa leitor de tela.
     if (plano.forma === "interruptor") caixa.setAttribute("role", "switch");
     else caixa.removeAttribute("role");
+    // Um campo como os outros, pela mesma razão do deslizante (B4).
+    this.marcarValidade(elem, caixa, plano);
     if (document.activeElement === caixa) return;
     const ligado = plano.no.valor === true;
     if (caixa.checked !== ligado) caixa.checked = ligado;
@@ -2281,7 +2297,7 @@ class RegiaoDeMod {
     for (const parte of this.raiz?.querySelectorAll("[data-chave-do-mod]") ?? []) {
       if (!this.iniciais.has(parte)) continue;
       const caixa = this.caixasDoCampo.get(parte);
-      if (caixa && caixa.value !== this.iniciais.get(parte)) return true;
+      if (caixa && valorDoCampo(caixa) !== this.iniciais.get(parte)) return true;
     }
     return false;
   }
@@ -2351,7 +2367,11 @@ class RegiaoDeMod {
     // **O inicial, para o sujo derivado** (rascunho da API 6, §5; Step 6c): o
     // MOD que declara `inicial` (o gravado) ao lado de `valor` (o rascunho)
     // tem um campo que nasce sujo; sem `inicial`, vale o valor da montagem.
-    const comoTexto = (valor) => (valor === null || valor === undefined ? "" : String(valor));
+    // Numa marca, o inicial é o ligado («true»/«false»): o `value` dela é
+    // sempre «on», e o sujo nunca a veria (`valorDoCampo`).
+    const comoTexto = caixa?.type === "checkbox"
+      ? (valor) => String(valor === true)
+      : (valor) => (valor === null || valor === undefined ? "" : String(valor));
     if (Object.hasOwn(plano.no, "inicial")) this.iniciais.set(elem, comoTexto(plano.no.inicial));
     else if (!this.iniciais.has(elem)) this.iniciais.set(elem, comoTexto(plano.no.valor));
     this.errosDoMod.set(elem, typeof plano.no.erro === "string" ? plano.no.erro.slice(0, 200) : "");

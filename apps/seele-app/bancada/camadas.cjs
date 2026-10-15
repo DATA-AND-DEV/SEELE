@@ -603,6 +603,61 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(await page.evaluate(() => !$('moderar').hidden), true, 'trocar a escolha não sujou a superfície');
     await page.click('#moderar-confirmar');
 
+    // 12b. **O erro, o sujo e o formulario.erros também no deslizante, na marca
+    //      e no interruptor** (`superficies.dialogo.formularios`: «em toda forma
+    //      de entrada»; a auditoria do `v6.json`, B4). Os três ignoravam o `erro`
+    //      declarado, ficavam fora do sujo, e `formulario.erros` com a chave
+    //      deles era recusado como `chave-desconhecida`.
+    const marcaDaEntrada = (chave) => page.evaluate((chave) => {
+      const parte = document.querySelector(`[data-superficie="entradas"] [data-chave-do-mod="${chave}"]`);
+      const caixa = parte?.querySelector('input');
+      return { invalido: parte?.dataset.invalido ?? null, frase: parte?.dataset.mensagemDeErro ?? null, aria: caixa?.getAttribute('aria-invalid') ?? null };
+    }, chave);
+    const arvoreDasEntradas = (comErro) => [{
+      forma: 'formulario', chave: 'f', dentro: [
+        { forma: 'deslizante', chave: 'volume', rotulo: 'Volume', valor: 30, minimo: 0, maximo: 100, ...(comErro ? { erro: 'alto demais para esta sala' } : {}) },
+        { forma: 'marca', chave: 'aviso', rotulo: 'Avisar', valor: false, ...(comErro ? { erro: 'marque para continuar' } : {}) },
+        { forma: 'interruptor', chave: 'ligado', rotulo: 'Ligado', valor: true },
+        // Sem `valor`: desligada, e o inicial dela é «desligada», e não vazio.
+        { forma: 'marca', chave: 'extra', rotulo: 'Extra' },
+      ],
+    }];
+    await page.evaluate(async (arvore) => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'entradas', tipo: 'dialogo', modal: false, titulo: 'Entradas', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'entradas', arvore });
+    }, arvoreDasEntradas(true));
+    assert.deepEqual(await marcaDaEntrada('volume'), { invalido: 'sim', frase: 'alto demais para esta sala', aria: 'true' }, 'o deslizante não mostrou o erro do MOD');
+    assert.deepEqual(await marcaDaEntrada('aviso'), { invalido: 'sim', frase: 'marque para continuar', aria: 'true' }, 'a marca não mostrou o erro do MOD');
+    assert.deepEqual(await marcaDaEntrada('ligado'), { invalido: null, frase: null, aria: null }, 'o interruptor sem erro ficou marcado');
+    await page.evaluate((arvore) => pedir(6, { tipo: 'superficie-montar', superficie: 'entradas', arvore }), arvoreDasEntradas(false));
+    const doServidor = await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'entradas', erros: { ligado: 'recusado pelo servidor', volume: 'recusado pelo servidor' } }));
+    assert.equal(doServidor?.ok, true, `formulario.erros não alcança o interruptor e o deslizante: ${JSON.stringify(doServidor)}`);
+    assert.deepEqual([(await marcaDaEntrada('ligado')).frase, (await marcaDaEntrada('volume')).frase], ['recusado pelo servidor', 'recusado pelo servidor'],
+      'formulario.erros não marcou o interruptor e o deslizante');
+    await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'entradas', erros: {} }));
+    // O sujo: nasce limpo, a marca mexida suja, e voltar a desfaz; o deslizante mexido suja.
+    const fecharAsEntradas = async () => {
+      await page.click('[data-superficie="entradas"] .superficie-de-mod-sair');
+      return page.evaluate(() => ({ perguntou: !$('moderar').hidden, aberta: Boolean(document.querySelector('[data-superficie="entradas"]')?.isConnected) }));
+    };
+    await page.click('[data-superficie="entradas"] [data-chave-do-mod="aviso"] input');
+    assert.deepEqual(await fecharAsEntradas(), { perguntou: true, aberta: true }, 'marcar a marca não sujou a superfície');
+    await page.click('#moderar-cancelar');
+    await page.click('[data-superficie="entradas"] [data-chave-do-mod="aviso"] input');
+    await page.evaluate(() => {
+      const deslizante = document.querySelector('[data-superficie="entradas"] [data-chave-do-mod="volume"] input');
+      deslizante.value = '70';
+      deslizante.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    assert.deepEqual(await fecharAsEntradas(), { perguntou: true, aberta: true }, 'mexer no deslizante não sujou a superfície');
+    await page.click('#moderar-cancelar');
+    await page.evaluate(() => {
+      const deslizante = document.querySelector('[data-superficie="entradas"] [data-chave-do-mod="volume"] input');
+      deslizante.value = '30';
+      deslizante.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    assert.deepEqual(await fecharAsEntradas(), { perguntou: false, aberta: false }, 'voltar a marca e o deslizante ao inicial não limpou o sujo');
+
     // 13. Os botões do produto no formulário.
     const arvoreDaFicha = (extra = {}) => [{
       forma: 'formulario', chave: 'f', primario: 'SALVAR', secundario: 'CANCELAR', ...extra, dentro: [
