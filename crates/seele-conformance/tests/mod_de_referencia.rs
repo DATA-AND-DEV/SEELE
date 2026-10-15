@@ -1,4 +1,5 @@
-//! O MOD de referência: a API 3 provada por um vetor, e não por um guia.
+//! O MOD de referência: a API deste build provada por um vetor, e não por um
+//! guia. Na 0.16, a API 6 (o corte; tarefa 13 do plano da F3).
 //!
 //! # Por que ele existe
 //!
@@ -216,7 +217,41 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     // oferece. Quem prova o console são os testes do executor, e não este
     // vetor.
     let api_do_preludio = sem_o_console(preludio);
+    // **O prelúdio da API deste build, e não o texto inteiro** (P51-28, no
+    // corte da API 6). O prelúdio é um só para toda API, e monta cada membro
+    // pela capacidade: `...(capacidades.has('X') ? { m: … } : {})` só existe
+    // com X, e `...(capacidades.has('X') ? {} : { m: … })` só sem X. Lido como
+    // texto, ele oferecia `regiao`, `cartoes` e `snapshot` a um vetor da 6 —
+    // que chamá-los passaria aqui e seria `TypeError` no produto — e escondia
+    // `retrato` e `enviar`, que a 6 tem, da lista do que tem de ser exercitado.
+    let da_api = seele_proto::mods::capacidades_da_api(seele_proto::mods::MOD_API_VERSION);
+    let (na_api, fora_da_api) = membros_pela_capacidade(&api_do_preludio, da_api);
+    for (nome, motivo) in [
+        ("regiao", "a capacidade `regiao` saiu na 6"),
+        ("cartoes", "a capacidade `cartoes` saiu na 6"),
+        ("snapshot", "o `snapshot` só existe sem `retrato`"),
+    ] {
+        assert!(
+            fora_da_api.contains(&nome.to_owned()),
+            "a leitura das capacidades do prelúdio não achou `{nome}` fora da API deste build \
+             ({motivo}): ela ficou cega, e o vetor poderia chamar o que a API não tem. \
+             Fora: {fora_da_api:?}; dentro: {na_api:?}"
+        );
+    }
+    for nome in ["retrato", "enviar"] {
+        assert!(
+            na_api.contains(&nome.to_owned()),
+            "a leitura das capacidades do prelúdio não achou `{nome}` dentro da API deste \
+             build: ela ficou cega, e o vetor deixaria de exercitá-lo. Dentro: {na_api:?}"
+        );
+    }
     for (objeto, metodo) in chamadas_de(&executado) {
+        assert!(
+            !fora_da_api.contains(&metodo),
+            "o vetor chama `{objeto}.{metodo}`, que o prelúdio só monta para outra API: \
+             na API {} ele não existe",
+            seele_proto::mods::MOD_API_VERSION
+        );
         // **Um membro, ou um espaço de nomes.** A API 4 agrupou o que ela
         // acrescentou — `SeeleUI.superficies.criar`, `SeeleUI.contribuicoes.
         // registrar` —, e os grupos entram no objeto por abreviação
@@ -237,7 +272,7 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     // para trás no dia em que a API crescesse — e o guarda passaria a dizer
     // «tudo exercitado» sobre uma lista velha. Foi o que ia acontecer quando
     // `aoEvento` entrou. Ela também sai de `api_do_preludio`, sem o console.
-    let oferecidos: Vec<String> = api_do_preludio
+    let mut oferecidos: Vec<String> = api_do_preludio
         .lines()
         .filter_map(|linha| {
             let corte = linha.trim().split_once(": (")?;
@@ -247,6 +282,8 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
                 .then(|| nome.to_owned())
         })
         .collect();
+    // E os que o prelúdio monta pela capacidade, quando a API deste build a tem.
+    oferecidos.extend(na_api.iter().cloned());
     assert!(
         oferecidos.len() >= 5,
         "o prelúdio passou a oferecer {} coisas, e a leitura desta lista \
@@ -300,11 +337,14 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
         .split_once("});")
         .expect("o fim de `TEMA_DA_API`")
         .0;
+    // **O objeto do tema acaba na primeira `}`**, e não em `})`: na API 6 a
+    // chamada leva um segundo argumento (`{ previa, superficie }`), e ler até
+    // `})` cobrava `previa` e `superficie` como se fossem chaves de tema.
     let pedido = cliente
         .split_once("SeeleUI.tema({")
         .expect("o vetor pede tema")
         .1
-        .split_once("})")
+        .split_once('}')
         .expect("o fim do pedido de tema")
         .0;
     for chave in pedido.split(':').rev().skip(1) {
@@ -321,6 +361,52 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
             "o vetor pede o token de tema «{nome}», que a API não conhece"
         );
     }
+}
+
+/// Os membros que o prelúdio monta pela capacidade, separados pela API deste
+/// build: `(os que ela tem, os que ela não tem)`.
+///
+/// Lê as duas formas do prelúdio, numa linha: `capacidades.has('X') ? { m:` (m
+/// existe com X) e `capacidades.has('X') ? {} : { m:` (m existe sem X).
+fn membros_pela_capacidade(preludio: &str, da_api: &[&str]) -> (Vec<String>, Vec<String>) {
+    let mut dentro = Vec::new();
+    let mut fora = Vec::new();
+    for linha in preludio.lines() {
+        let Some((_, depois)) = linha.split_once("capacidades.has('") else {
+            continue;
+        };
+        let Some((capacidade, resto)) = depois.split_once("')") else {
+            continue;
+        };
+        let resto = resto.trim_start();
+        let Some(resto) = resto.strip_prefix('?') else {
+            continue;
+        };
+        let resto = resto.trim_start();
+        // `? {} : { m:` — o membro existe **sem** a capacidade.
+        let (sem, objeto) = match resto.strip_prefix("{} :") {
+            Some(alternativa) => (true, alternativa.trim_start()),
+            None => (false, resto),
+        };
+        let Some(objeto) = objeto.strip_prefix('{') else {
+            continue;
+        };
+        let nome: String = objeto
+            .trim_start()
+            .chars()
+            .take_while(char::is_ascii_alphanumeric)
+            .collect();
+        if nome.is_empty() {
+            continue;
+        }
+        let tem = da_api.contains(&capacidade);
+        if tem != sem {
+            dentro.push(nome);
+        } else {
+            fora.push(nome);
+        }
+    }
+    (dentro, fora)
 }
 
 /// O prelúdio sem o bloco `globalThis.console = { … };`.

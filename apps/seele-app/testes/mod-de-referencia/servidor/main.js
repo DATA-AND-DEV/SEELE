@@ -37,6 +37,22 @@ globalThis.aoPedir = (contexto, pedido) => {
     return JSON.stringify({ ok: true });
   }
 
+  // **A porta do volume é aberta aqui, e não pela janela** (ADR 0048): o
+  // token é deste MOD, vale para quem está sendo atendido agora, pelos tipos
+  // e pelo prazo que esta linha escreve. A janela só manda o arquivo com ele.
+  if (o_que.op === "esperar-envio") {
+    const token = `ref-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+    const aberta = volume.esperar(token, "referencia/anexo", ["png", "jpeg", "webp", "gif"], 30);
+    return JSON.stringify(aberta ? { token } : { erro: "o volume não abriu a porta" });
+  }
+
+  // **O aviso às janelas deste MOD** (rascunho da API 6, §7.3): volta a cada
+  // uma como o evento `servidor`. Só vale se esta chamada terminar.
+  if (o_que.op === "avisar") {
+    const dito = mundo.avisar({ carga: { vezes: Number(dados.vezes ?? "0") } });
+    return JSON.stringify(dito?.ok ? { ok: true } : { erro: String(dito?.erro ?? "aviso recusado") });
+  }
+
   if (o_que.op !== "contar" && o_que.op !== "gravar") {
     // Uma operação que este MOD não conhece é recusada pelo nome, e não
     // devolvida vazia: quem escreveu a chamada precisa saber por que ela não
