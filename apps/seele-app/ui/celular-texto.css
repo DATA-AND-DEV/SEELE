@@ -104,6 +104,7 @@
 :where(:root[data-casca="celular"]) .pessoas-cartela { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoas-conta { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .roster-sala { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .membro-fora-do-ar { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .roster-subgrupo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-nome { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-diagnostico-resumo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }

@@ -170,6 +170,9 @@ pub use seele_proto::control::{
     // `key_fingerprint` logo abaixo.
     ConsentimentoDePar,
     DisconnectReason,
+    // Reexportado com a lista do FORA DO AR (`ServerMessage::Membros`), que a
+    // ponte dobra e entrega fora do `Snapshot`.
+    Membro,
     // Reexportado porque a casca desenha por que uma mensagem não foi gravada,
     // e é o vocabulário fechado do fio que diz o motivo. Mesmo caso do
     // `AttachmentRefusal` acima.

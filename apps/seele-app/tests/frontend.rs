@@ -18790,6 +18790,11 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
              descartada (`sincronizarMensagens` confere a geração)",
         ),
         (
+            "buscandoForaDoAr",
+            "pedido em voo: o `finally` o apaga, e a resposta de outra sessão é \
+             descartada (`sincronizarForaDoAr` confere a geração)",
+        ),
+        (
             "abrindoLinha",
             "pedido em voo: o `finally` o apaga, e a resposta não escreve estado \
              nenhum desta tela",
@@ -20177,4 +20182,82 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
              uma exceção sem dono é uma porta que ninguém confere"
         );
     }
+}
+
+#[test]
+fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
+    // **D-fio-4: «todos veem, sem papéis e sem horário».** O grupo FORA DO AR
+    // (P6) lista os membros deste servidor que não estão conectados, e um
+    // «visto por último» ali diria a todo membro quando cada outro sai — é o
+    // que a decisão recusou. As duas metades: o tipo que atravessa a ponte só
+    // tem id e apelido, e a linha da casca só lê o apelido.
+    //
+    // E a linha não passa pelo caminho das linhas de quem está aqui: aquelas
+    // um MOD apresenta (`pessoa.cartao`, `pessoa.identidade`), e nenhum MOD
+    // ganhou a lista de membros.
+    let tipos = without_comments(&read("../../crates/seele-ffi/src/types.rs"));
+    let Some(depois) = tipos.split("pub struct MembroForaDoAr {").nth(1) else {
+        panic!("`seele-ffi/src/types.rs` não declara mais `MembroForaDoAr`");
+    };
+    let Some(corpo_do_tipo) = depois.split('}').next() else {
+        panic!("`MembroForaDoAr` não fecha");
+    };
+    let campos: Vec<&str> = corpo_do_tipo
+        .lines()
+        .filter_map(|linha| linha.trim().strip_prefix("pub ")?.split(':').next())
+        .map(str::trim)
+        .collect();
+    assert_eq!(
+        campos,
+        ["id", "nickname"],
+        "`MembroForaDoAr` passou a levar mais que id e apelido até a casca; D-fio-4 \
+         recusa papéis e horário no FORA DO AR"
+    );
+
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let linha = body_of(&sessao, "function grupoForaDoAr(");
+    let lidos: std::collections::BTreeSet<&str> = linha
+        .match_indices("membro.")
+        .filter(|(onde, _)| {
+            linha[..*onde]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+        })
+        .filter_map(|(onde, achado)| {
+            let resto = &linha[onde + achado.len()..];
+            resto
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .next()
+        })
+        .collect();
+    assert_eq!(
+        lidos.into_iter().collect::<Vec<_>>(),
+        ["nickname"],
+        "a linha do FORA DO AR lê do membro mais que o apelido:\n{linha}"
+    );
+    for proibido in [
+        "Date",
+        "at_seconds",
+        "segundos",
+        "linhaDoRoster",
+        "linhaNativaDoRoster",
+        "cartoesDaPessoa",
+        "conteudoDasContribuicoes",
+        "\"pessoa",
+    ] {
+        assert!(
+            !linha.contains(proibido),
+            "a linha do FORA DO AR usa `{proibido}`: ela é só o nome, sem horário, e não passa \
+             pelo caminho que os MODs apresentam:\n{linha}"
+        );
+    }
+    // E o grupo é desenhado: uma função que ninguém chama guardaria nada.
+    assert!(
+        names(
+            &body_of(&sessao, "function desenharPessoas("),
+            "grupoForaDoAr"
+        ),
+        "`desenharPessoas` não desenha mais o grupo FORA DO AR"
+    );
 }

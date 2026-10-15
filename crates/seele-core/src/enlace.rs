@@ -6245,6 +6245,9 @@ fn alguem_respondeu(erro: &ConnectError) -> bool {
         | ConnectError::Refused { .. }
         | ConnectError::TlsRefused
         | ConnectError::ProtocolViolation => true,
+        // Respondeu, e disse o número do protocolo dele: é o que a pessoa
+        // precisa ler para abrir a versão certa.
+        ConnectError::OutraLinha { .. } => true,
         // **Respondeu, e respondeu a coisa mais informativa do conjunto:** a
         // lista inteira do que exige. Sem isto ela perde a corrida de
         // `conectar_entre` para o `Unreachable` de um endereço morto — que
@@ -6280,6 +6283,9 @@ fn vale_insistir(erro: &ConnectError) -> bool {
         // é perguntar de novo a quem já não provou, e é o comportamento que um
         // impostor espera.
         ConnectError::ChaveNaoProvada => false,
+        // O servidor fala outro número, e continua falando na próxima batida:
+        // quem resolve é abrir o app da versão dele, ou atualizar este.
+        ConnectError::OutraLinha { .. } => false,
         // **Só uma pessoa desfaz isto**, e é a metade simétrica do que
         // `a_sessao_acabou_aqui` já dizia para `DisconnectReason::ModsMudaram`:
         // a reconexão encontra o mesmo anúncio e o mesmo não. Insistir manda
