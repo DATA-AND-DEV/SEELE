@@ -1154,6 +1154,61 @@ async fn a_api_nao_preenchida_nao_recusa_ninguem() -> Result<()> {
     Ok(())
 }
 
+/// **E antes da portaria:** quem não roda a API de um MOD exigido não deixa
+/// pedido na fila de quem hospeda.
+///
+/// Com a portaria ligada, toda chave nova vira um pedido pendente, com ou sem
+/// convite. O pedido de quem não vai poder entrar de qualquer jeito é um cartão
+/// que quem hospeda aprova à toa: a pessoa volta admitida e esbarra na API do
+/// mesmo jeito. O controle é o mesmo convite num app que roda a 7: ele chega à
+/// portaria e fica na fila, e é isso que prova que ela estava ligada.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_app_sem_a_api_do_mod_nao_deixa_pedido_na_portaria() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, daemon) = servidor().await?;
+    let mut da_api_7 = um_mod("fulano/da-api-7", 0x77);
+    da_api_7.api = 7;
+    habilitar(&daemon, &da_api_7).await;
+    let convite = {
+        let mut banco = daemon.server().persistence.lock().await;
+        seele_server::portaria::ligar(&mut banco, true)?;
+        seele_server::admissao::criar_convite(&mut banco, "para quem roda a 6")?
+    };
+
+    let recusa = bater_com_apis(endereco, 73, vec![6], &convite).await?;
+    assert_eq!(
+        recusa,
+        ServerMessage::Disconnecting {
+            reason: DisconnectReason::ModsDeOutraApi {
+                apis: seele_proto::control::mascara_de_apis(&[7]),
+            }
+        }
+    );
+    assert_eq!(
+        pedidos_pendentes(&daemon).await?,
+        0,
+        "quem não roda a API do MOD deixou pedido na fila da portaria"
+    );
+
+    let espera = bater_com_apis(endereco, 74, vec![6, 7], &convite).await?;
+    assert_eq!(
+        espera,
+        ServerMessage::Disconnecting {
+            reason: DisconnectReason::AdmissionPending,
+        },
+        "o controle não chegou à portaria, e o teste mediu outra coisa"
+    );
+    assert_eq!(pedidos_pendentes(&daemon).await?, 1);
+
+    daemon.shutdown();
+    Ok(())
+}
+
+async fn pedidos_pendentes(daemon: &Daemon) -> Result<i64> {
+    let banco = daemon.server().persistence.lock().await;
+    seele_server::portaria::pendentes(&banco)
+}
+
 /// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
 /// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
 /// Desde o Servidor 1.0, o nonce cru não entra mais.
