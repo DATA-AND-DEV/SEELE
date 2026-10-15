@@ -1022,3 +1022,63 @@ bancadas da ponte; a do celular; e 33 das 34 da janela (a do executor pede o
 motor com o wasi-sdk). Com a máquina a 17–26 de carga, o `texto-maior-390` do
 celular e a `diagnostico-de-mods` reprovaram por tempo; com e sem esta mudança,
 sob carga de 10 a 14, passaram. A F5 revisou e aprovou a parede da tela dela.
+
+## A 65 provada no Windows, os guardas da spec «Testes» 8 e as caixas do plano (15/10)
+
+**A pendência 65, provada no PC de testes** (a orquestradora; o conserto é a
+`c8bb813c`, e a pendência está em `4ed24ee0`):
+
+- **vermelho antes** (`95271bc4`): o `sala::a_sala_pessoal::a_porta_ocupada_e_dita`
+  deu «left: None, right: Some(PortaOcupada)»;
+- **verde depois** (`4ed24ee0`): `alcance::testes` 44 de 44, com os dois novos;
+  `sala::` 22 de 22; o clippy `-p seele-server -p seele-app -D warnings` limpo;
+- **as reversões lá, uma por família:** sem o `ninguem_na_porta(…)`, o
+  `a_porta_ocupada_por_qualquer_ocupante_e_porta_ocupada` reprova no ocupante só
+  IPv4 e para ali; tirando só a sonda `[::]`, ele reprova no ocupante só IPv6, e
+  o `as_sondas_acham_o_ocupante_que_o_socket_duplo_nao_ve` reprova junto.
+
+A `4ed24ee0` entra na integração 18.
+
+**A tarefa 31, a metade dos guardas** (`fe01d33d`, isolado no `frontend.rs`,
+depois de trazer a `versao/0.16` em `52b8278b`, no merge `6b9107df`). Dos cinco
+itens da casca na spec, dois já tinham guarda: o `focus()` da faixa (`a53c1349`)
+e a `media-src` sem `data:` (`f97dcd4f`). Os três que faltavam leem o Rust do
+outro lado, para não casarem com o próprio texto:
+
+- **o toque por evento:** o canal que a faixa ouve é o `CANAL_DO_TOQUE`; cada
+  variante do `AvisoDoToque` tem o seu ramo; a faixa não tem `setInterval`; e o
+  `toques_agora` é uma pergunta só, na carga, que nenhum outro script faz;
+- **o apelido como alegação:** o `ligando` do `frases.js` põe todo apelido entre
+  aspas e mostra o código, e o script da faixa não lê `.apelido` por conta própria;
+- **«atender sai de Y»:** vale para toda variante do `OndeEstou` menos `Nenhum` e
+  `Pessoal`, e uma variante nova reprova até alguém decidir de que lado ela fica.
+  O roteiro `toque.js` prova só o caminho do `Guardado`, e a spec fala do `Outro`.
+
+As reversões, dez, uma por vez, reprovam cada uma pela sua frase:
+
+- o canal renomeado, um relógio de 5 s e o `Parou` sem ramo;
+- o apelido sem aspas, o apelido solto no anúncio e a frase sem o código;
+- o «sai de» só no `Outro`, ou também no `Pessoal`, ou sem perguntar ao
+  `onde_estou`, ou com uma variante nova no Rust.
+
+No `frontend.rs`, 299 de 299, e o clippy limpo. Como a mudança não toca a `ui/`
+nem o duble, a bateria da casca não se aplica.
+
+**As caixas do plano.** Marquei as da 23, 24, 25, 26 e 31, cada uma com o guarda
+e o commit. A 25 está feita desde a `fad0662a`: o `AlarmeDaJanela` toca na saída
+escolhida e para com o toque.
+
+**A D-sala-3** (15/10, pela recomendação da F7) já está no código desde a
+`e0e48744`. No `SoNoPerfil`, o botão aparece quando quem roda é o instalado, e o
+`firewall::o_botao_so_aparece_quando_resolve` prova isso.
+
+**Uma reprovação velha do celular, que não se repete.** A notificação de uma
+rodada das 11:27 chegou depois. O caso era o `entrada-desfechos-390`, com
+«Cannot access 'pedidoDeInstalar' before initialization» e
+«PONTE_NO_LUGAR_DO_TAURI is not defined». A pasta guardada mostra a ponta
+`a416f17f` com a árvore no meio da faixa do toque (`camada-toque.css`,
+`camada-toque.js` e `roteiros/toque.js` modificados). Não achei a causa. O que a
+medida diz:
+
+- as três rodadas inteiras depois dela passaram;
+- na ponta `4ed24ee0`, três rodadas só do `entrada-desfechos` deram 6 de 6.
