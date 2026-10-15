@@ -2098,6 +2098,25 @@ mod testes {
         assert_eq!(uma_mensagem(&executor), "coube");
     }
 
+    /// A próxima mensagem do MOD que é um objeto com `erro`, passando pelas que
+    /// o prelúdio posta para a janela (os pedidos) e pelo relato de promessa
+    /// rejeitada, que o motor pode mandar antes de o `catch` do MOD rodar.
+    fn a_recusa_que_o_mod_leu(executor: &ExecutorQuickJs) -> serde_json::Value {
+        loop {
+            match executor.receber(Duration::from_secs(5)) {
+                Some(ParaOFora::Mensagem(json)) => {
+                    let valor: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+                    if valor.get("lida").is_some() {
+                        return valor;
+                    }
+                }
+                Some(ParaOFora::Falhou(_) | ParaOFora::Console { .. }) => {}
+                Some(outro) => panic!("veio {outro:?}"),
+                None => panic!("o executor não respondeu"),
+            }
+        }
+    }
+
     /// **O prelúdio conta bytes UTF-8, e ele não tem `TextEncoder`.**
     ///
     /// O reteste nativo de `c4fe3ea` mediu o defeito no motor real: a contagem
@@ -2107,10 +2126,15 @@ mod testes {
     /// bytes, que os recusava como `fila-cheia`. A contenção funcionava; o
     /// diagnóstico mentia, e mandava procurar saturação onde havia tamanho.
     ///
-    /// Aqui o MOD pede uma contribuição com texto acentuado e conta o que a
-    /// recusa diz. `mensagem-grande` com o tamanho certo é o aceite; `fila-cheia`
-    /// é o defeito de volta. (Era uma região; a `regiao` saiu no corte da API 6,
+    /// Aqui o MOD pede uma contribuição com texto acentuado e lê a recusa.
+    /// `mensagem-grande` com o tamanho certo é o aceite; `fila-cheia` é o
+    /// defeito de volta. (Era uma região; a `regiao` saiu no corte da API 6,
     /// e a conta é a do `pedir`, a mesma para toda mensagem.)
+    ///
+    /// **E a recusa tem a forma de toda recusa** (rascunho §7.1; a auditoria
+    /// do `v6.json`, B2): o nome em `message` e em `erro`, e o tamanho, o teto
+    /// e o tipo em campos. Era uma frase em `message`, sem `erro`, e o MOD que
+    /// lesse `e.erro`, como lê toda outra recusa, recebia `undefined`.
     #[test]
     fn o_preludio_conta_utf8_sem_textencoder() {
         let executor = executor();
@@ -2120,7 +2144,8 @@ mod testes {
                  SeeleUI.contribuicoes.registrar({ ponto: 'servidor.navegacao',\
                    conteudo: [{ forma: 'texto', dentro: 'é'.repeat(7000) }] })\
                    .then(() => seele.postar('aceitou'),\
-                         (erro) => seele.postar(String(erro.message)));",
+                         (e) => seele.postar(JSON.stringify({ lida: true, message: e.message,\
+                           erro: e.erro, tamanho: e.tamanho, teto: e.teto, tipoPedido: e.tipoPedido })));",
             )
             .expect("código");
 
@@ -2134,30 +2159,66 @@ mod testes {
              deliberado, a contagem do prelúdio pode voltar a usá-lo"
         );
 
-        // A recusa pode chegar pela mensagem que o MOD posta no `catch` ou pelo
-        // relato de promessa rejeitada — o motor avisa antes de a microtarefa
-        // do `then` rodar. O que se mede é o **texto**, e ele é o mesmo.
-        let recusa = match executor.receber(Duration::from_secs(5)) {
-            Some(ParaOFora::Mensagem(json)) => json,
-            Some(ParaOFora::Falhou(texto)) => texto,
-            Some(outro) => panic!("veio {outro:?}"),
-            None => panic!("o executor não respondeu"),
-        };
-        assert!(
-            recusa.contains("mensagem-grande"),
-            "a recusa não diz que a mensagem não coube: {recusa}"
+        let recusa = a_recusa_que_o_mod_leu(&executor);
+        assert_eq!(
+            (
+                recusa.get("erro").and_then(serde_json::Value::as_str),
+                recusa.get("message").and_then(serde_json::Value::as_str)
+            ),
+            (Some("mensagem-grande"), Some("mensagem-grande")),
+            "a recusa não diz pelo nome que a mensagem não coube: {recusa}"
         );
-        // Dois bytes por «é», mais a casca do JSON. O número exato não importa;
-        // o que importa é que ele **não** é 7.000 — que é o que `length` diria.
-        assert!(
-            recusa.contains("14"),
-            "o tamanho relatado não é o de UTF-8: sete mil «é» ocupam mais de \
-             catorze mil bytes, e `length` diria sete mil: {recusa}"
+        assert_eq!(
+            recusa.get("tipoPedido").and_then(serde_json::Value::as_str),
+            Some("contribuir"),
+            "a recusa não diz qual mensagem não coube: {recusa}"
         );
+        // Dois bytes por «é», mais a casca do JSON: o tamanho **não** é 7.000,
+        // que é o que `length` diria, e passa do teto.
+        let tamanho = recusa
+            .get("tamanho")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default();
+        let teto = recusa
+            .get("teto")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(u64::MAX);
         assert!(
-            !recusa.contains("fila-cheia"),
-            "uma mensagem grande demais voltou a ser relatada como fila \
-             saturada: {recusa}"
+            tamanho > 14_000 && tamanho > teto,
+            "o tamanho relatado não é o de UTF-8, ou não passa do teto: {recusa}"
+        );
+    }
+
+    /// **As recusas do próprio prelúdio levam o nome em `erro`** (a auditoria
+    /// do `v6.json`, B2): o nono pedido em voo é `too-many-requests`, com o
+    /// teto, e não um `Error` com o nome só em `message`.
+    #[test]
+    fn o_nono_pedido_em_voo_e_recusado_pelo_nome() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "const pedidos = [];\
+                 for (let i = 0; i < 9; i += 1) {\
+                   pedidos.push(SeeleUI.contribuicoes.registrar({ ponto: 'servidor.navegacao',\
+                     conteudo: [] }).catch((e) => e));\
+                 }\
+                 pedidos[8].then((e) => seele.postar(JSON.stringify({ lida: true,\
+                   message: e.message, erro: e.erro, teto: e.teto })));",
+            )
+            .expect("código");
+        let recusa = a_recusa_que_o_mod_leu(&executor);
+        assert_eq!(
+            (
+                recusa.get("erro").and_then(serde_json::Value::as_str),
+                recusa.get("message").and_then(serde_json::Value::as_str),
+                recusa.get("teto").and_then(serde_json::Value::as_u64)
+            ),
+            (
+                Some("too-many-requests"),
+                Some("too-many-requests"),
+                Some(8)
+            ),
+            "o nono pedido em voo não foi recusado pelo nome, com o teto: {recusa}"
         );
     }
 

@@ -118,8 +118,20 @@ pub const PRELUDIO: &str = r#"
     return bytes;
   };
 
+  // **Uma recusa do próprio prelúdio tem a forma de toda recusa** (rascunho
+  // da API 6, §7.1; a auditoria do `v6.json`, B2): o nome em `message` e em
+  // `erro`, e o resto em campos. Estas três saíam com o nome só em `message`,
+  // e a de tamanho com uma frase no lugar do nome: o MOD que lesse `e.erro`,
+  // como lê toda outra recusa, recebia `undefined`.
+  const recusaDoPreludio = (nome, campos) => {
+    const recusa = new Error(nome);
+    if (campos) Object.assign(recusa, campos);
+    recusa.erro = nome;
+    return recusa;
+  };
+
   const pedir = (tipo, carga) => new Promise((resolve, reject) => {
-    if (pendentes.size >= 8) { reject(new Error('too-many-requests')); return; }
+    if (pendentes.size >= 8) { reject(recusaDoPreludio('too-many-requests', { teto: 8 })); return; }
     const texto = JSON.stringify({ tipo, n: proximo + 1, ...carga });
     // **«Não coube» é diferente de «a fila encheu».** As duas faziam `postar`
     // devolver `false`, e a única frase que existia era `fila-cheia`: um MOD
@@ -128,16 +140,18 @@ pub const PRELUDIO: &str = r#"
     // leva a quem escreveu direto ao que ele precisa dividir.
     const bytes = tamanhoEmBytes(texto);
     if (bytes > tetoDaMensagem) {
-      reject(new Error('mensagem-grande: ' + tipo + ' tem ' + bytes
+      // A frase vai ao registro de quem hospeda; ao MOD, o nome e os números.
+      dizerOAviso('mensagem-grande: ' + tipo + ' tem ' + bytes
         + ' bytes e o teto por mensagem é ' + tetoDaMensagem
-        + '; mande menos de uma vez, ou monte só a parte que aparece'));
+        + '; mande menos de uma vez, ou monte só a parte que aparece');
+      reject(recusaDoPreludio('mensagem-grande', { tipoPedido: tipo, tamanho: bytes, teto: tetoDaMensagem }));
       return;
     }
     const n = ++proximo;
     pendentes.set(n, { resolve, reject });
     if (!seele.postar(texto)) {
       pendentes.delete(n);
-      reject(new Error('fila-cheia'));
+      reject(recusaDoPreludio('fila-cheia'));
     }
   });
 
@@ -268,6 +282,7 @@ pub const PRELUDIO: &str = r#"
   // linha de console — com o id do MOD, o escape, o corte e o balde, que é o
   // que segura um `setInterval` de 4 ms que lança a cada batida.
   const dizerOErro = escrever('error');
+  const dizerOAviso = escrever('warn');
   globalThis.console = {
     log: escrever('log'),
     info: escrever('info'),
