@@ -218,7 +218,10 @@ function largarAEntrada(alvo, geracao, porque) {
   );
 }
 
-async function conectar(alvo, apelido, credencial) {
+async function conectar(alvo, apelido, credencial, linkColado) {
+  // O `seele://` colado, quando esta tentativa veio de um. Como a credencial,
+  // **não** é lembrado: ele pode levar o convite de uso único, e só serve à
+  // recusa por versão desta tentativa (`entrarPelaRecusa`).
   ultimoAlvo = alvo ?? ultimoAlvo;
   ultimoApelido = apelido ?? ultimoApelido;
   // A credencial — o token do convite, ou a senha do servidor: as duas viajam
@@ -507,6 +510,11 @@ async function conectar(alvo, apelido, credencial) {
       // poder dizer **qual** nome foi recusado, e de onde veio a impressão,
       // para a recusa por ela acusar o link ou a lista. Ver `fraseDeErro`.
       erro.textContent = fraseDeErro(motivo, apelido, deOndeVeio(falha));
+      // **O servidor fala outra versão, e o launcher a abre** (tarefa 13 da
+      // F6, passo 5). A frase fica, porque diz o que houve; a pergunta vem
+      // junto, porque diz o que dá para fazer. Sem esperar: a pergunta é da
+      // pessoa, e esta tentativa termina agora, devolvendo o CONECTAR.
+      entrarPelaRecusa(motivo, linkColado).catch((f) => console.warn("entrar pela recusa:", f));
     }
   } finally {
     // **Só a tentativa mais nova devolve o CONECTAR** (lote W2 da F5). A que
