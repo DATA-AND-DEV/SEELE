@@ -152,7 +152,7 @@ async fn ligar(endereco: SocketAddr, semente: u8) -> Result<Ligacao> {
             public_key: pessoa.verifying_key().to_bytes().to_vec(),
             join_secret: None,
             material_e2ee: None,
-            apis_de_mod: Vec::new(),
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
         },
     )
     .await?;
