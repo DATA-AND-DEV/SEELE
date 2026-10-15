@@ -49,11 +49,49 @@ INFO seele_server: session closed peer=[::ffff:127.0.0.1]:55118 error=handshake 
 antes de decodificar e respondeu num formato que a 0.15.1 lê. Do lado do app, a
 recusa chegou como «VERSÃO INCOMPATÍVEL».
 
+## A outra direção: o app da 0.16 contra o `seeled` 0.15.1 (P8)
+
+Feita em seguida, às 13:56 do mesmo dia, depois que a P8 fechou (o dono a
+liberou na sessão da F1).
+
+- **O servidor** é o `seeled` compilado da tag `v0.15.1` (`54f542f94`). É o mesmo
+  commit que o corpo do release publicado da v0.15.1 grava (conferido pela API de
+  releases do SEELE-RELEASES). Foi compilado do código, sem baixar binário. Ele
+  subiu em `[::]:8392` com um banco novo.
+- **O app** é o `seele-app` compilado em debug do `0.16/protocolo-p8` em
+  `05e417df` (a P8 com o `mais_nova` da F1), aberto com um `SEELE_HOME` vazio e
+  `--entrar seele://127.0.0.1:8392/?fp=…`. A casa nova perguntou o apelido antes
+  de seguir o link e foi dispensada com CANCELAR, como na M3.
+
+**Na tela do app da 0.16**, debaixo de CONECTAR e HOSPEDAR AQUI:
+
+> ESTE SERVIDOR É O SERVIDOR 0.15. Esta versão do app não conversa com ele. Para entrar, use o SEELE 0.15.
+
+**No `seele.log` do app**:
+
+```
+WARN seele_core::client: o servidor respondeu num número de protocolo que esta build não fala numero=8 recusa=peer speaks protocol 8, oldest supported is 9
+INFO seele_core::enlace: desfiz o pin que este aperto de mão fixou: …
+WARN seele_ffi: could not reach the server motivo=OutraLinha { numero: 8 } depois de 3 passos
+```
+
+**No registro do servidor 0.15.1**:
+
+```
+INFO seele_server: session closed peer=[::ffff:127.0.0.1]:61013 error=handshake refused: could not read Hello: frame announces protocol 9, this build implements 8
+```
+
+**Passou.** O servidor 0.15.1 recusou o `Hello` carimbado 9. O cliente da 0.16
+leu o byte 0 da resposta (8), viu nele uma linha anterior à 1.0 e disse o nome
+dela, e não «não alcançou». O caminho que oferece abrir o SEELE 0.15 pelo
+launcher (`0.16/launcher-recusa`, da F6) não estava neste build. A medida dele
+fica para a árvore integrada.
+
 ## O que esta medida não cobre
 
-- **A outra direção:** o app 0.16 contra o `seeled` 0.15.1. Ela depende da P8,
-  que está parada esperando o dono na sessão da F1. Sem a P8, o app 0.16 diz que
-  não alcançou o servidor, e o launcher não sabe que versão abrir.
+- **O caminho pelo launcher**, depois da frase: abrir o SEELE 0.15 com o link
+  colado. Ele tem roteiro (`outra-linha-pelo-launcher.js`) e ainda não foi medido
+  em campo.
 - **O Windows e o celular:** a medida foi só no Mac.
 - **A frase:** ela manda atualizar «nas duas máquinas». Com o launcher da 0.16,
   quem tem o app 0.15.1 e encontra um servidor 1.0 precisa atualizar; o servidor
