@@ -3278,12 +3278,9 @@ const CAPACIDADES_POR_API = Object.freeze({
     "superficies", "contribuicoes", "estilos", "classes", "volume",
     "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor",
   ]),
-  5: Object.freeze(["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes", "volume"]),
-  4: Object.freeze([
-    "regiao", "tema", "cartoes", "arquivo",
-    "superficies", "contribuicoes", "estilos", "classes",
-  ]),
-  3: Object.freeze(["regiao", "tema", "cartoes", "arquivo"]),
+  // As 3, 4 e 5 saíram no corte (tarefa 13 do plano da F3), como os braços
+  // delas em `capacidades_da_api`: este app não as executa, e quem as roda é a
+  // linha do Servidor 0.15. Um pacote delas é recusado ao carregar.
 });
 
 /** Que capacidade cada mensagem exige. Ausente quer dizer «toda versão». */

@@ -2179,8 +2179,8 @@ async function desenharMods() {
  * discordam no dia em que só uma sobe, e esta é usada para dizer a alguém se o
  * problema está no aplicativo ou no pacote.
  */
-const API_DESTE_APLICATIVO = 5;
-const APIS_QUE_ESTE_APLICATIVO_ACEITA = [5,4,3];
+const API_DESTE_APLICATIVO = 6;
+const APIS_QUE_ESTE_APLICATIVO_ACEITA = [6];
 
 /** Os pacotes guardados nesta máquina, com tamanho e com quem os exige. */
 async function desenharOCache() {
@@ -2300,9 +2300,15 @@ function linhaDePacoteNoCache(pacote) {
       : dele > nossa
         ? `este pacote foi feito para a API ${dele}, e este SEELE oferece a `
           + `${nossa}. Atualize o aplicativo em CONFIGURAÇÕES › ATUALIZAÇÃO.`
-        : `este pacote foi feito para a API ${dele}, que este SEELE já não `
-          + `executa (ele aceita ${APIS_QUE_ESTE_APLICATIVO_ACEITA.join(" e ")}). `
-          + "Procure uma versão nova dele no catálogo do servidor.";
+        // **As APIs 3, 4 e 5 não sumiram: rodam no Servidor 0.15**
+        // (o corte da API 6; tarefa 13 do plano da F3). Quem tem um MOD
+        // delas tem dois caminhos, e a frase diz os dois: a versão dele para
+        // a API 6, quando existir, ou o Servidor 0.15 pelo launcher, que as
+        // roda como sempre rodou.
+        : `este pacote foi feito para a API ${dele}, que roda no Servidor `
+          + `0.15, e este SEELE roda a ${APIS_QUE_ESTE_APLICATIVO_ACEITA.join(" e ")}. `
+          + "Procure a versão dele para a API 6 no catálogo do servidor, ou "
+          + "use o Servidor 0.15 pelo launcher, que roda o pacote como está.";
     texto.append(elemento("span", "mods-recusado", explicacao));
   }
   caixa.append(texto);

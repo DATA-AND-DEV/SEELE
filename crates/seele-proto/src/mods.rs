@@ -43,7 +43,14 @@ pub const MANIFEST_SCHEMA: u32 = 1;
 /// houvesse um MOD antigo carregado, a promessa «o que um MOD faz some quando
 /// você sai do servidor» continuaria falsa, e o produto prometeria duas coisas
 /// diferentes ao mesmo tempo.
-pub const MOD_API_VERSION: u32 = 5;
+///
+/// **6 desde o corte da 0.16, e é outra ruptura** (rascunho da API 6, §2;
+/// tarefa 13 do plano da F3). `regiao` e `cartoes` saem (decisão do dono de
+/// 08/10): o MOD desenha nos pontos de contribuição e nas superfícies, lê o
+/// retrato projetado no lugar do `snapshot` inteiro, e ouve a tela e a metade
+/// de servidor por eventos. As APIs 3, 4 e 5 continuam rodando na linha do
+/// Servidor 0.15, pelo launcher — não aqui.
+pub const MOD_API_VERSION: u32 = 6;
 
 /// **As versões que este build executa**, da mais nova para a mais velha.
 ///
@@ -74,10 +81,19 @@ pub const MOD_API_VERSION: u32 = 5;
 ///
 /// A API 2 não volta. Ela executava na janela, e o ADR 0049 explica por que
 /// não há caminho de volta disso.
-pub const APIS_ACEITAS: &[u32] = &[5, 4, 3];
+///
+/// # A 6 tira, e o conjunto encolhe
+///
+/// Até a 0.16 o conjunto era `[5, 4, 3]`, porque a 4 e a 5 só acrescentavam.
+/// A 6 tira `regiao` e `cartoes`, e «serve uma API mais velha» deixa de ser
+/// verdade outra vez, como na 3: o conjunto passa a `[6]`. A ordem de
+/// publicação que o conjunto protegia continua valendo, e agora pelo outro
+/// lado: o app da 0.16 só sai depois dos três MODs oficiais na 4.0.0 (API 6),
+/// e a linha 3.x deles continua no Servidor 0.15 (spec-mestre, §4).
+pub const APIS_ACEITAS: &[u32] = &[6];
 
 /// A API mais velha que este build ainda executa.
-pub const MOD_API_MINIMA: u32 = 3;
+pub const MOD_API_MINIMA: u32 = 6;
 
 /// O que um pacote de cada versão pode chamar.
 ///
@@ -90,9 +106,8 @@ pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
         // **Uma ruptura, e não um alargamento** (rascunho da API 6, §2):
         // `regiao` e `cartoes` saem (decisão do dono de 08/10), e entram o
         // retrato projetado (no lugar do `snapshot` inteiro), os eventos da tela
-        // e o aviso da metade de servidor. Construída com
-        // `MOD_API_VERSION` ainda em 5: só um teste carrega um pacote da 6, até
-        // o corte (tarefa 13 do plano da F3).
+        // e o aviso da metade de servidor. Os braços da 3, da 4 e da 5 saíram
+        // no corte (tarefa 13 do plano da F3): este build não as executa.
         6 => &[
             "superficies",
             "contribuicoes",
@@ -105,28 +120,6 @@ pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
             "eventos-da-tela",
             "aviso-do-servidor",
         ],
-        5 => &[
-            "regiao",
-            "tema",
-            "cartoes",
-            "arquivo",
-            "superficies",
-            "contribuicoes",
-            "estilos",
-            "classes",
-            "volume",
-        ],
-        4 => &[
-            "regiao",
-            "tema",
-            "cartoes",
-            "arquivo",
-            "superficies",
-            "contribuicoes",
-            "estilos",
-            "classes",
-        ],
-        3 => &["regiao", "tema", "cartoes", "arquivo"],
         _ => &[],
     }
 }
@@ -580,9 +573,8 @@ pub fn read_manifest(text: &str) -> Result<Manifest, Refused> {
             ours: MANIFEST_SCHEMA,
         });
     }
-    // **Um conjunto, e não uma igualdade** — ver [`APIS_ACEITAS`]. A API 3
-    // continua executando porque a 4 não tirou nada dela; a 2 não, porque ela
-    // rodava na janela.
+    // **Um conjunto, e não uma igualdade** — ver [`APIS_ACEITAS`]. Depois do
+    // corte o conjunto é só a 6: as 3, 4 e 5 são da linha do Servidor 0.15.
     if manifest.api > MOD_API_VERSION {
         return Err(Refused::ApiTooNew {
             wanted: manifest.api,
@@ -1041,23 +1033,32 @@ mod tests {
         );
     }
 
-    /// **O pacote da API 3 continua executando na 4**, e este caso é o guarda.
+    /// **As APIs 3, 4 e 5 são recusadas com `ApiTooOld`** — o corte da API 6
+    /// (tarefa 13 do plano da F3; rascunho, §2).
     ///
-    /// A conferência era igualdade, e subir a constante para 4 teria recusado
-    /// todo pacote publicado no mesmo instante — os três MODs oficiais, na
-    /// máquina de quem já os tinha instalado. O §13 do plano aponta essa
-    /// armadilha pelo nome; este teste é o que impede alguém de reintroduzi-la
-    /// voltando a comparar por igual.
+    /// A 6 é uma ruptura: `regiao` e `cartoes` saíram (decisão do dono de
+    /// 08/10), e um pacote da 5 não tem o que chamar aqui. Quem roda as APIs
+    /// 3, 4 e 5 é a linha do Servidor 0.15, pelo launcher. A recusa é pelo
+    /// nome, com a API que o pacote pede e a mais velha que este build roda,
+    /// para a gestão dizer «este MOD é de uma API que este app não roda mais».
+    ///
+    /// A conferência continua sendo por conjunto (`APIS_ACEITAS`), e não por
+    /// igualdade: uma API 7 que só acrescente entra no conjunto sem tirar a 6.
     #[test]
-    fn um_pacote_da_api_anterior_continua_carregando() {
-        for aceita in APIS_ACEITAS {
+    fn as_apis_3_4_e_5_sao_recusadas_com_api_too_old() {
+        for velha in [3, 4, 5] {
             let texto = manifesto_minimo().replace(
                 &format!("\"api\": {MOD_API_VERSION}"),
-                &format!("\"api\": {aceita}"),
+                &format!("\"api\": {velha}"),
             );
-            let lido = read_manifest(&texto)
-                .unwrap_or_else(|erro| panic!("a API {aceita} devia carregar, e deu {erro:?}"));
-            assert_eq!(lido.api, *aceita);
+            assert_eq!(
+                read_manifest(&texto),
+                Err(Refused::ApiTooOld {
+                    wanted: velha,
+                    ours: 6
+                }),
+                "a API {velha} devia ser recusada pelo nome depois do corte"
+            );
         }
     }
 
@@ -1076,43 +1077,29 @@ mod tests {
         );
     }
 
-    /// Aceitar uma versão não é dar a ela o que a versão nova tem.
+    /// **Só a API 6 tem capacidades neste build** (o corte; tarefa 13 do plano
+    /// da F3). Um braço da 3, da 4 ou da 5 que voltasse daria a um pacote velho
+    /// o que este build não executa mais.
     #[test]
     fn cada_versao_tem_as_capacidades_dela() {
-        let cinco = capacidades_da_api(5);
-        let quatro = capacidades_da_api(4);
-        assert!(cinco.contains(&"volume"));
-        assert!(!quatro.contains(&"volume"));
-        for capacidade in quatro {
-            assert!(cinco.contains(capacidade));
-        }
-        let tres = capacidades_da_api(3);
-        assert!(quatro.contains(&"superficies"));
-        assert!(quatro.contains(&"contribuicoes"));
-        assert!(
-            !tres.contains(&"superficies"),
-            "a API 3 recebeu por acidente uma capacidade da 4",
-        );
-        // O que a 3 tinha, a 4 continua tendo: a 4 não tirou nada.
-        for capacidade in tres {
+        for velha in [2, 3, 4, 5] {
             assert!(
-                quatro.contains(capacidade),
-                "a API 4 perdeu «{capacidade}», que a 3 tinha",
+                capacidades_da_api(velha).is_empty(),
+                "a API {velha} voltou a ter capacidades depois do corte"
             );
         }
-        assert!(capacidades_da_api(2).is_empty());
+        assert!(!capacidades_da_api(6).is_empty());
     }
 
-    /// **A API 6 existe antes de ser oferecida** (tarefa 3 do plano da F3).
-    ///
-    /// Ela é construída com `MOD_API_VERSION` ainda em 5: um pacote da 6 só
-    /// carrega em teste, e a constante sobe no corte (tarefa 13). E é uma
+    /// **A API 6 é a deste build** (o corte; tarefa 13 do plano da F3). E é uma
     /// ruptura, e não um alargamento: `regiao` e `cartoes` saem (decisão do
     /// dono de 08/10), e o MOD que os usava reescreve para as regiões e os
     /// pontos de contribuição.
     #[test]
-    fn a_api_6_existe_antes_de_ser_oferecida() {
-        assert_eq!(MOD_API_VERSION, 5, "a constante subiu antes do corte");
+    fn a_api_6_e_a_deste_build() {
+        assert_eq!(MOD_API_VERSION, 6);
+        assert_eq!(APIS_ACEITAS, &[6]);
+        assert_eq!(MOD_API_MINIMA, 6);
         let seis = capacidades_da_api(6);
         for nome in [
             "superficies",

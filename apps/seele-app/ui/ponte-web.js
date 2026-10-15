@@ -385,7 +385,7 @@ const CONSTANTES_DO_DESKTOP = Object.freeze({
   },
   "regras_de_previa": { "limit": 4194304, "types": ["image/png", "image/jpeg", "image/gif", "image/webp"] },
   "regras_do_icone_do_server": { "limite_bytes": 8192, "lado": 256 },
-  "apis_de_mod_aceitas": [5, 4, 3],
+  "apis_de_mod_aceitas": [6],
   "dominios_de_gif": ["tenor.com", "giphy.com", "imgur.com"],
   "controles_da_voz": {
     "supressao": 1,

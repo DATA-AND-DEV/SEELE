@@ -19351,7 +19351,9 @@ fn nenhuma_tabela_constante_da_ui_repete_uma_chave() {
     // lidas, e as duas maiores com um número de chaves que só a leitura inteira
     // alcança. E uma congelada, para a forma `Object.freeze({` não sumir calada.
     for (dono, nome, minimo) in [
-        ("base.js", "CAPACIDADES_POR_API", 4),
+        // Uma chave só desde o corte da API 6 (tarefa 13 do plano da F3): as 3,
+        // 4 e 5 saíram com os braços delas em `capacidades_da_api`.
+        ("base.js", "CAPACIDADES_POR_API", 1),
         ("glifos.js", "GLIFOS", 20),
         ("frases.js", "MOTIVOS", 5),
         ("frases.js", "AVISOS", 3),
