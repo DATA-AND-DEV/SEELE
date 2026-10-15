@@ -172,4 +172,45 @@ Estão na ordem do caminho dos portes.
 
 ## Consertos e achados
 
-(Preenchido à medida que os consertos entram, com os commits.)
+As decisões da orquestradora estão na D-api-8 (`b07c6d64`, na `versao/0.16`).
+Cada conserto entrou com o vermelho antes e com as reversões, que estão na
+mensagem do commit.
+
+**A emenda única do `v6.json`:** `44025ab5`. Ela trouxe as dez erratas (A), o
+que sai (C1, C3, C4, a pinça e o «DE ONDE?»), o teto real das mídias, a
+redução e a lista fechada das recusas inteira. Com ela entrou o guarda
+`a_lista_fechada_das_recusas_e_a_do_v6`.
+
+**Os consertos da API 6 (B):**
+
+| | entrega | commits |
+|---|---|---|
+| B1 | as recusas do volume pelo nome | `472ed664`, `f52a84ec` |
+| B2 | a lista fechada na fronteira da janela, o prelúdio, o tipo desconhecido | `0c2b3dc7`, `0908eaa5` |
+| — | a `forma-desconhecida`, recusada no montar e no atualizar | `1c9006e3` |
+| B3 | o retrato que não carrega manda `midia`/`falhou` (K2) | `ba8afdf7` |
+| B4 | o `erro`, o `sujo` e o `formulario.erros` no deslizante, na marca e no interruptor | `fb98b98d` |
+| B5 | a prévia do tema recusa pelo nome | `854a7afc` |
+| B6 | o estado `escolhido` | `2f76bc4c` |
+| B7 | o piso de 44 px no celular | `c64f29c6` |
+| B8 | a capa parada com a janela oculta e na lista | `ad4c5e71`, `821ac8df` |
+| B9 | o `lugar` das regiões | `43d0b92e` |
+| B10 | as capacidades por plataforma no navegador | `3f9e62d0` |
+| C6 | no toque, só a figura que se arrasta prende o dedo; o vazio rola | `821877a9` |
+
+**Os achados dos portes durante a auditoria**, também consertados:
+
+| achado | quem achou | commit |
+|---|---|---|
+| o `cancelou` do `traco` | MESA | `c41d04eb` |
+| a citação `daPessoa` que não acompanhava a troca | PERFIS | `fc7f32d2` |
+
+**Ainda abertos:**
+- `capa.onde.perfil`: a citação numa superfície, à espera da decisão sobre o `pessoa` na citação;
+- o `garantias[5]`: a superfície suja sempre pergunta;
+- a linha do tema na tela de aceite, quando a ponta da F1 chegar;
+- as provas das INCERTA e das SEM PROVA, e os dois guardas-espelho;
+- o guia (`docs/como-se-faz-um-mod.md` na API 6).
+
+Os achados 1 e 2, as bancadas de navegador e a do celular no portão de
+publicação, são da F6.
