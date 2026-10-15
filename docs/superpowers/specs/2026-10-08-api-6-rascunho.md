@@ -753,9 +753,11 @@ Mudam, na 6:
   `estado` é o `'falhou'` que o avatar já mandava, e o `alvo` vai como texto,
   como os alvos das contribuições] E o retrato que não decodifica manda
   `midia`/`falhou` (nota do K2 da F5).
-- **`traco`** ganha a fase `cancelou`. Hoje `pointercancel` chega como
-  `terminou` (`mods-regiao.js:1898` [c]) e um gesto cancelado move a peça
-  (MESA M14). No celular é comum.
+- **`traco`** ganha a fase `cancelou`. Até a 0.16, `pointercancel` chegava como
+  `terminou` e um gesto cancelado movia a peça (MESA M14). No celular é comum.
+  [c, `c41d04eb`, em 15/10: prometido no `v6.json` e não entregue até a sessão de
+  porte da MESA o achar; `cancelou` leva a peça pega, como as outras fases, e
+  nenhum movimento sai depois]
 - **`contribuicao`** ganha o motivo `regiao-ausente` (§11), e o motivo
   **`orcamento`**: uma declaração que passa do teto do ponto é montada até o
   teto, e o MOD recebe `{ nome: 'contribuicao', ponto, destino, recusados,
