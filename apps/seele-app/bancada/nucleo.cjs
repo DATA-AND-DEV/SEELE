@@ -298,7 +298,15 @@ const TEMAS = {
         // **Coberto, e não só inerte**: um nó inerte não entra no teste de
         // clique, então quem recebe o clique no centro dele precisa ser o
         // modal — o véu ou a caixa —, e não o que estiver por baixo.
-        restoCoberto: ['#tela-sessao textarea', '#lista-linhas'].map((seletor) => {
+        //
+        // **Da gaveta, a área que rola**, e não a lista de canais: com a
+        // faixa de quem liga acesa, a tela desce até o pé dela (`--toque-ocupa`,
+        // da versao/0.16), e a 900 × 700 a lista fica abaixo do que a área
+        // mostra — cortada por ela, alcançável rolando. O centro da lista caía
+        // então atrás da barra do operador, no furo do véu, e a prova media um
+        // ponto que ninguém vê. A área que rola é a gaveta fora da barra, à
+        // vista em toda largura.
+        restoCoberto: ['#tela-sessao textarea', '#tela-sessao .canais-rolagem'].map((seletor) => {
           const el = document.querySelector(seletor);
           if (!el || !el.getClientRects().length) return null;
           const r = el.getBoundingClientRect();
