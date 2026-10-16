@@ -1800,9 +1800,12 @@ async function abrir(browser, url, r) {
 
       // h) Duas pendentes sem resposta, a 77 e a 78, e o foco no TENTAR DE NOVO
       //    da 78; a 77 é gravada (rodada 1, I1). É o enlace que caiu e as
-      //    mensagens gravadas uma a uma na volta. A pendente tem a chave da
-      //    máquina (`pendente:<client_message_id>`): sem ela, as duas casariam
-      //    pela posição, o nó velho da 77 passaria a dizer a 78, e o foco cairia.
+      //    mensagens gravadas uma a uma na volta. A pendente tem a chave do
+      //    envio (`envio:<client_message_id>`; até o lote ECO, `pendente:`):
+      //    sem ela, as duas casariam pela posição, o nó velho da 77 passaria a
+      //    dizer a 78, e o foco cairia. A 77 chega gravada sem o eco, como a
+      //    ponte a mandava antes da F1, e a linha dela sai; com o eco, ela fica
+      //    (o passo j).
       const agoraH = Math.floor(Date.now() / 1000);
       const pendente = (cmid, body) => ({
         ...testTable.messages[testTable.messages.length - 1], id: 0, own: true, author: 1,
