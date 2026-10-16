@@ -2381,6 +2381,16 @@ function anotando(...anotadas) {
       confere("R2 · a recusa no registro", contribuicaoRespondida?.ok === false
         && contribuicaoRespondida.erro === "ponto-desconhecido",
         `um ponto que não existe foi aceito, ou recusado sem o nome: ${JSON.stringify(contribuicaoRespondida)}`);
+      // **E a lista do que existe vai ao MOD**, no molde do `tipo-desconhecido`
+      // (`contribuicoes.fora[1]`; a orquestradora, 16/10): o ponto pedido em
+      // `pontoPedido`, e os que a API tem em `pontos`. Antes ela ia só ao
+      // registro.
+      confere("R2 · a lista ao MOD", contribuicaoRespondida?.pontoPedido === "nao.existe"
+        && Array.isArray(contribuicaoRespondida.pontos)
+        && contribuicaoRespondida.pontos.includes("pessoa.cartao")
+        && contribuicaoRespondida.pontos.includes("canal.item")
+        && !contribuicaoRespondida.pontos.includes("nao.existe"),
+        `o MOD não recebeu o ponto pedido e os que existem: ${JSON.stringify(contribuicaoRespondida)}`);
       confere(
         "R2 · a recusa no registro",
         dita("nao.existe"),

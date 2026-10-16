@@ -262,10 +262,14 @@ class RegistroDeContribuicoes {
     // **Recusado e nomeado.** Um ponto que não existe não pode virar silêncio:
     // o MOD ficaria esperando para sempre uma contribuição que nunca aparece.
     if (!regra) {
+      // **Com a lista do que existe, também ao MOD** (`contribuicoes.fora[1]`;
+      // a orquestradora, 16/10), no molde do `tipo-desconhecido`: o ponto
+      // pedido e os que a API tem. Ela ia só ao registro.
+      const pontos = Object.keys(PONTOS_DE_CONTRIBUICAO);
       throw recusaNomeada(
         "ponto-desconhecido",
-        `a API de MODs não conhece o ponto «${ponto}»; os que existem são `
-        + Object.keys(PONTOS_DE_CONTRIBUICAO).join(", "),
+        `a API de MODs não conhece o ponto «${ponto}»; os que existem são ${pontos.join(", ")}`,
+        { pontoPedido: ponto.slice(0, 64), pontos },
       );
     }
     const modo = String(pedido?.modo ?? "adicionar");

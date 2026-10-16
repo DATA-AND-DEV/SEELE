@@ -829,7 +829,7 @@ try {
 | volume | `sem-espera`, `tipo-recusado` (leva `detectado`), `formato-desconhecido`, `arquivo-grande-demais`, `nao-gravei`, `incompleto`, `sessao-encerrada` |
 | arquivo | `banco-indisponivel`, `arquivo-nao-esta-de-pe`, `arquivo-de-outro-mod`, `arquivo-ilegivel`, `caminho-invalido`, `papel-nao-serve` (leva `papel`), `arquivos-demais-de-pe` |
 | superfícies | `tipo-desconhecido` (leva `tipoPedido` e `tipos`), `chave-desconhecida` (leva `chave`), `orcamento` (leva `perfil`, `teto`, `tamanho`), `forma-desconhecida` (leva `forma`), `nos-recusados` (leva `recusados` e `amostra`), `superficie-desconhecida` (leva `superficie`), `sem-previa`, `contraste` (leva `pares`), `teto-de-folhas` e `teto-de-superficies` (levam `teto`) |
-| contribuições | `ponto-desconhecido`, `modo-recusado`, `sem-alvo`, `conteudo-invalido`, `teto-de-contribuicoes`, `teto-de-alvos` (leva `teto`), `contribuicao-ja-existe`, `contribuicao-de-outro-mod` |
+| contribuições | `ponto-desconhecido` (leva `pontoPedido` e `pontos`, os que a API tem), `modo-recusado`, `sem-alvo`, `conteudo-invalido`, `teto-de-contribuicoes`, `teto-de-alvos` (leva `teto`), `contribuicao-ja-existe`, `contribuicao-de-outro-mod` |
 | tema, no servidor | `sem-porta-de-tema`, `tema-de-outro-mod`, `tema-invalido`, `tema-grande-demais`, `chave-desconhecida`, `valor-invalido`, `regiao-desconhecida` (em `mundo.tema`, como valor, e não como exceção) |
 
 **Um nome fora da lista chega como `falhou`, sem campos.** Não há outro
