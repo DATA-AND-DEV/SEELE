@@ -330,6 +330,10 @@ tabelas, com a prova e o commit.
 | 22a | o papel que o MOD não pediu é `papel-nao-serve`, com o papel: a conferência sai do comando, que não sobe em teste | `main.rs` | `40c3d8c3` |
 | 22 | as linhas do celular pela bancada que roda no CI desde `937d4251`, caso a caso; **um guarda de enfeite** (a rolagem do `operador.barra` passava com `overflow: visible`), e medidos a letra de 16 dos campos, o zoom e os gestos e o `status.barra` na casca larga; o descarte com a instância, sem pergunta; a duração de cada aviso; a revogação que recalcula do estado de agora; as capas animadas com mais de seis à vista | `tools/bancada-do-celular.py`, `contribuicoes-e-camadas.cjs`, `ajustes-v013.cjs`, `regioes-do-produto.cjs`, `capa.cjs` | `fa31a7d1` |
 | 23 | cada ponto de contribuição põe o nó do MOD no lugar que promete; com a navegação e a lista substituídas, o ENTRAR, o renomear, o apagar e a moderação continuam do produto; o avatar que existe, citado. **Achado**: o `pessoa.detalhes` não tem lugar na linha nativa | `regioes-do-produto.cjs`, `capa.cjs` | `85a3292c` |
+| 24 | o cabeçalho diz de qual MOD é; o foco entra no diálogo e volta ao acionador; o núcleo aguenta os três acentos que o texto nomeia, na janela e na faixa de voz | `nucleo.cjs`, `tools/bancada-do-celular.py` | `c6198b64` |
+| — | **o achado do 23, consertado** (decisão da orquestradora): o `pessoa.detalhes` na linha nativa, num «⋯» próprio, com o nome do MOD por cima numa caixa que recorta, por um lugar só (`detalhesDaPessoaNaLinha`), e `CASCA.detalhesNaLinha` para o celular pô-lo na folha da pessoa (a F8) | `base.js`, `mods-controles.css`, `tela-sessao.js`, `regioes-do-produto.cjs` | `2ff19efb`, `701302c6`, `4aeab701` |
+| 25 | a portaria, a moderação e o aceite à vista no guarda 11; a linha de dono do «⋯» descoberta, fora do tema e acima de 4,5:1; o «⋯» nativo pelo teclado; o palco pelo ponteiro de verdade | `nucleo.cjs`, `palco-da-chamada.cjs`, `regioes-do-produto.cjs` | `8f537bd8` |
+| — | **dois consertos do lote 25** (decisão da orquestradora): a linha de dono no `--nucleo-rotulo`, 6,82:1, e não nos 4,11 do apagado (achado da F8); e **a portaria fora do alcance dos diálogos de MOD** — um diálogo (z 60) cobria o VER QUEM É e o DEPOIS (z 19), e com um modal eles ficavam inertes —, pelo recorte do modal, pela área do não modal e pela pilha de inércia, e não subindo o z dela, que cobriria as camadas do produto entre 20 e 40 | `tela-sessao.css`, `mods-controles.css`, `mods-superficies.js`, `mods-superficies.css` | `4e2e1497`, `87908e41` |
 
 E o que o `.wasm` cobrava, rodado pela primeira vez nesta máquina com o
 wasi-sdk conferido: dois consertos meus (a B2 e a B10) tinham deixado o
@@ -344,24 +348,20 @@ postas na forma que o produto já tinha (`8e8dfea5`).
   `tipo-desconhecido` (`021876f8`). Os dois nomes só entram no `v6.json` se
   houver uma quarta emenda por outro motivo.
 
-**A contagem das tabelas, até o lote 23:** 473 PROVADA, 17 INCERTA, 10 SEM
+**A contagem das tabelas, até o lote 25:** 482 PROVADA, 9 INCERTA, 9 SEM
 PROVA, 35 SEM CÓDIGO e 16 NÃO SE APLICA (551 linhas). As SEM CÓDIGO e parte
 das INCERTA e SEM PROVA foram fechadas pelos consertos da B e pelas provas do
 passo 5, e ainda não foram remarcadas linha a linha (a tabela 4 foi).
 
-**À espera da orquestradora (16/10):** o `pessoa.detalhes` (6:21, 5:102) só
-é desenhado na linha apresentada por um MOD; na linha nativa uma
-contribuição nele é aceita e não aparece, e a folha da pessoa do celular
-também não o desenha. Nenhum MOD oficial o registra hoje.
-
-**Ainda abertos (27):**
-- a capa (6:59, 6:64, 6:65, 6:69), o núcleo na janela (9:20, 9:23, 9:24,
-  8:78, 8:82) e as superfícies (7:39, 7:42, 7:44, 7:49, 7:50, 7:88);
+**Ainda abertos (18):**
+- a capa (6:59, 6:64, 6:65, 6:69), a ligação no núcleo (9:24: CHAMANDO, SEU
+  CÓDIGO e «receber ligações»; a portaria e a faixa de quem liga estão
+  provadas), a conferência de todos os pares do tema (8:78) e a folha que
+  convive com o palco e a página (7:49, 7:50);
 - no celular: a «célula inteira» da aba SERVIDOR (5:70), o `listarNaBarra`
   (6:47), as abas do diálogo a 390 px (7:65), e as áreas seguras (7:47, 9:29);
 - o braço `pedido` do roteador (2:19), o `superficie-classes` (2:29) e o
   movimento reduzido dos estilos (8:36);
-- o `pessoa.detalhes` (6:21, 5:102), acima;
 - sem teste automatizado possível, ou por decidir: os rótulos que nada lê
   (1:26, 1:27).
 - **Texto, para a quarta emenda, se houver uma:** o `listarNaBarra` diz
