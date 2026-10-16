@@ -45,6 +45,7 @@ mod catalogo;
 mod executor;
 mod firewall;
 mod icone;
+mod ligar;
 mod mods;
 mod reducao;
 mod sala;
@@ -2878,11 +2879,11 @@ fn meu_codigo(app: AppHandle) -> Result<String, ()> {
 
 /// O que um texto colado em CONECTAR é (tarefa 30 da F7, a 6g): a leitura do
 /// núcleo, com «é o seu código?» respondido pela chave desta máquina. Ver
-/// [`sala::EntradaColada`].
+/// [`ligar::EntradaColada`].
 #[tauri::command]
-fn ler_entrada(app: AppHandle, texto: String) -> sala::EntradaColada {
+fn ler_entrada(app: AppHandle, texto: String) -> ligar::EntradaColada {
     let meu = seele_ffi::codigo_desta_maquina(&config_dir(&app)).ok();
-    sala::ler_entrada_em(&texto, meu.as_ref())
+    ligar::ler_entrada_em(&texto, meu.as_ref())
 }
 
 /// A agenda (tarefa 29 da F7): os códigos com quem esta máquina já falou.
