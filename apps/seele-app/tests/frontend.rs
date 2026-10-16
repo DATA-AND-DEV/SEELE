@@ -555,10 +555,15 @@ fn every_command_the_frontend_calls_is_registered() {
 //
 // A primeira dizia que renomear pertence **à fileira**, e que toda fileira de
 // `#lista-linhas` é jogada fora e reconstruída duas vezes por segundo — um campo
-// ali não segura cursor. Continua verdade, e por isso o controle não foi para a
+// ali não segura cursor. Era verdade então, e por isso o controle não foi para a
 // fileira: foi para a **barra do canal aberto**, onde o nome é título e não
 // navegação. Na lista o nome já é o botão que abre o canal; na barra o alvo está
-// livre. O preço é renomear só o canal em que se está.
+// livre. O preço era renomear só o canal em que se está.
+//
+// Depois disso, o lápis também foi para a fileira (`botaoDeRenomearLinha`), ao
+// lado do `×`, e abre o mesmo diálogo. E a premissa **deixou de ser verdade** na
+// 0.16 (pendência 64, lote C64): a coluna de canais é reconciliada pelo id do
+// canal (`reconciliarALista`), e a fileira atravessa os retratos com o mesmo nó.
 //
 // A segunda rejeitava o diálogo, por ser «pura distância entre a pessoa e a sala
 // que ela renomeia». Essa objeção já tinha sido vencida pelos fatos: a 0.9.0
