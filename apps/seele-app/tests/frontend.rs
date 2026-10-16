@@ -20256,3 +20256,89 @@ fn o_aviso_do_mod_chega_a_janela_pelos_nomes_que_o_rust_serializa() {
         );
     }
 }
+
+/// **O prelúdio e o roteador falam os mesmos tipos de mensagem, e cada um pela
+/// mesma capacidade** (a auditoria do `v6.json`, o achado 4). O prelúdio
+/// (`crates/seele-motor/src/preludio.rs`) monta o `SeeleUI` e o `SeeleMods` de
+/// um MOD e pede ao anfitrião por `pedir('<tipo>', …)`; o roteador da janela
+/// (`atenderOMod`, em `base.js`) atende pelo `case "<tipo>"`, e a
+/// `CAPACIDADE_DA_MENSAGEM` diz qual capacidade cada tipo exige. Só cinco dos
+/// tipos eram conferidos rodando o prelúdio, e trocar a string de um lado só
+/// não reprovava os outros. E a capacidade: o prelúdio montava `pedaco` e
+/// `soltar` sem a `arquivo`, que o roteador exige, e no navegador as duas
+/// existiam e sempre falhavam.
+#[test]
+fn o_preludio_e_o_roteador_falam_os_mesmos_tipos_pela_mesma_capacidade() {
+    let preludio = read("../../crates/seele-motor/src/preludio.rs");
+    let base = without_comments(&read("ui/base.js"));
+
+    let do_preludio: BTreeSet<String> = preludio
+        .split("pedir('")
+        .skip(1)
+        .filter_map(|resto| resto.split_once('\'').map(|(tipo, _)| tipo.to_owned()))
+        .collect();
+    let roteador = base
+        .split_once("async function atenderOMod(")
+        .and_then(|(_, resto)| resto.split_once("\n}\n"))
+        .map(|(corpo, _)| corpo)
+        .expect("`atenderOMod` sumiu de base.js");
+    let do_roteador: BTreeSet<String> = roteador
+        .split("case \"")
+        .skip(1)
+        .filter_map(|resto| resto.split_once("\":").map(|(tipo, _)| tipo.to_owned()))
+        .collect();
+    assert!(
+        do_preludio.len() > 20,
+        "a leitura dos tipos do prelúdio quebrou: {do_preludio:?}"
+    );
+    assert_eq!(
+        do_preludio,
+        do_roteador,
+        "o prelúdio pede tipos que o roteador não atende, ou o contrário: só no prelúdio {:?}, só no roteador {:?}",
+        do_preludio.difference(&do_roteador).collect::<Vec<_>>(),
+        do_roteador.difference(&do_preludio).collect::<Vec<_>>()
+    );
+
+    let tabela = base
+        .split_once("const CAPACIDADE_DA_MENSAGEM = Object.freeze({")
+        .and_then(|(_, resto)| resto.split_once("});"))
+        .map(|(tabela, _)| tabela)
+        .expect("`CAPACIDADE_DA_MENSAGEM` sumiu de base.js");
+    let exigidas: Vec<(String, String)> = tabela
+        .lines()
+        .filter_map(|linha| {
+            let (tipo, capacidade) = linha.trim().trim_end_matches(',').split_once(':')?;
+            Some((
+                tipo.trim().trim_matches('"').to_owned(),
+                capacidade.trim().trim_matches('"').to_owned(),
+            ))
+        })
+        .collect();
+    assert!(
+        exigidas.len() > 15,
+        "a leitura da `CAPACIDADE_DA_MENSAGEM` quebrou: {exigidas:?}"
+    );
+    for (tipo, capacidade) in &exigidas {
+        assert!(
+            do_preludio.contains(tipo),
+            "a `CAPACIDADE_DA_MENSAGEM` confere «{tipo}», que o prelúdio não pede"
+        );
+        // A capacidade que monta o membro: a da guarda mais próxima antes do
+        // primeiro `pedir` do tipo, por `capacidades.has` ou `comCapacidade`.
+        let onde = preludio
+            .find(&format!("pedir('{tipo}'"))
+            .expect("o tipo está no prelúdio");
+        let antes = &preludio[..onde];
+        let guarda = ["capacidades.has('", "comCapacidade('"]
+            .iter()
+            .filter_map(|abre| antes.rfind(abre).map(|i| i + abre.len()))
+            .max()
+            .and_then(|i| antes[i..].split_once('\'').map(|(nome, _)| nome.to_owned()));
+        assert_eq!(
+            guarda.as_deref(),
+            Some(capacidade.as_str()),
+            "o roteador exige «{capacidade}» para «{tipo}», e o prelúdio monta quem o pede sob outra guarda: \
+             sem a capacidade, o membro existiria e sempre falharia"
+        );
+    }
+}

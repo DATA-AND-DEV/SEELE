@@ -120,6 +120,23 @@
         { "tipo": "mensagem", "corpo": "\"parou no teto\"" },
         { "tipo": "parou" }
       ]
+    },
+    {
+      "de": "sem a capacidade arquivo (o navegador), pedaco e soltar faltam, como enviar falta sem volume: ausentes, e não recusados em tempo de execução (compatibilidade.por-plataforma)",
+      "capacidades": ["tema", "superficies", "contribuicoes", "estilos", "classes", "retrato", "eventos-da-tela", "aviso-do-servidor"],
+      "fonte": "seele.postar(JSON.stringify([typeof SeeleUI.pedaco, typeof SeeleUI.soltar, typeof SeeleUI.enviar]));",
+      "esperado": [
+        { "tipo": "mensagem", "corpo": "[\"undefined\",\"undefined\",\"undefined\"]" },
+        { "tipo": "parou" }
+      ]
+    },
+    {
+      "de": "com a capacidade arquivo, pedaco e soltar existem",
+      "fonte": "seele.postar(JSON.stringify([typeof SeeleUI.pedaco, typeof SeeleUI.soltar]));",
+      "esperado": [
+        { "tipo": "mensagem", "corpo": "[\"function\",\"function\"]" },
+        { "tipo": "parou" }
+      ]
     }
   ]
 }

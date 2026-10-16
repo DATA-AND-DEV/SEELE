@@ -395,11 +395,13 @@ pub const PRELUDIO: &str = r#"
     ...(capacidades.has('regiao') ? { regiao: (conteudo) => pedir('regiao', { conteudo }) } : {}),
     // Na 6, a janela só faz prévia (rascunho §9, B4): `{ previa: true,
     // superficie }`. Até a 5, o tema vai como sempre, e a janela ignora os dois.
-    tema: (valores, opcoes) => pedir('tema', {
-      valores,
-      previa: Boolean(opcoes && opcoes.previa === true),
-      superficie: opcoes && opcoes.superficie,
-    }),
+    ...(capacidades.has('tema') ? {
+      tema: (valores, opcoes) => pedir('tema', {
+        valores,
+        previa: Boolean(opcoes && opcoes.previa === true),
+        superficie: opcoes && opcoes.superficie,
+      }),
+    } : {}),
     ...(capacidades.has('retrato') ? { retrato: () => pedir('retrato', {}) } : {}),
     ...(superficies ? { superficies } : {}),
     ...(contribuicoes ? { contribuicoes } : {}),
@@ -434,8 +436,14 @@ pub const PRELUDIO: &str = r#"
     // Com acesso ao disco, ele teria o caminho errado — e nenhum cliente do
     // SEELE abre arquivo por conta de terceiro.
     ...(capacidades.has('volume') ? { enviar: (arquivo, token) => pedir('enviar-imagem', { arquivo, token }) } : {}),
-    pedaco: (arquivo, inicio) => pedir('pedaco', { arquivo, inicio: Number(inicio) || 0 }),
-    soltar: (arquivo) => pedir('soltar-arquivo', { arquivo }),
+    //
+    // **Pela capacidade `arquivo`, como o anfitrião confere** (a auditoria do
+    // `v6.json`, o espelho do prelúdio com o roteador): no navegador a
+    // plataforma não tem o seletor, e as duas existiam e sempre falhavam.
+    ...(capacidades.has('arquivo') ? {
+      pedaco: (arquivo, inicio) => pedir('pedaco', { arquivo, inicio: Number(inicio) || 0 }),
+      soltar: (arquivo) => pedir('soltar-arquivo', { arquivo }),
+    } : {}),
   });
 
   // ---- tempo ----
