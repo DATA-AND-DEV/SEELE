@@ -218,6 +218,16 @@ pub enum ConnectError {
     /// O motivo diz qual das frases da spec de 23/09 cabe: o ponto calado, a
     /// pessoa que não está disponível, o ponto que recusou.
     NaoLocalizou(crate::encontro::FalhaAoLocalizar),
+
+    /// **Quem liga desistiu antes de entrar** (tarefa 16 da F7, o
+    /// `cancelar_ligacao`). Não é falha de ninguém, e não há o que explicar: foi
+    /// a pessoa quem cancelou.
+    ///
+    /// Sai de [`crate::chegada::Chegada::chegar_ate`], que larga a chegada em
+    /// voo inteira: o QUIC de cada candidato fecha, e a sala que tocava vê
+    /// `ParouDeTocar(Cancelada)`. A trilha acaba em
+    /// [`crate::chegada::Etapa::Cancelada`].
+    Cancelada,
 }
 
 impl std::fmt::Display for ConnectError {

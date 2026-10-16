@@ -670,6 +670,9 @@ pub enum ConnectStage {
         /// O mesmo erro que a casca já sabe escrever.
         motivo: ConnectionError,
     },
+    /// Quem liga desistiu antes de entrar. Ver a variante do núcleo: não é
+    /// `Desistiu`, e daqui não se sai.
+    Cancelada,
 }
 
 /// Uma etapa e quando ela aconteceu.
@@ -741,6 +744,7 @@ impl ConnectStage {
             Self::Tocando { .. } => "Tocando",
             Self::Dentro => "Dentro",
             Self::Desistiu { .. } => "Desistiu",
+            Self::Cancelada => "Cancelada",
         }
     }
 
@@ -808,6 +812,7 @@ impl From<&seele_core::chegada::Etapa> for ConnectStage {
             Etapa::Desistiu(erro) => Self::Desistiu {
                 motivo: classify_connect_failure(erro),
             },
+            Etapa::Cancelada => Self::Cancelada,
         }
     }
 }
@@ -836,7 +841,7 @@ fn campos_do_passo(etapa: &seele_core::chegada::Etapa) -> (Option<String>, Optio
         // O endereço é o da `Tentando` do mesmo candidato, logo acima na trilha.
         Etapa::Tocando { candidato, .. } => (None, Some(*candidato), None),
         Etapa::Parada { candidatos, .. } => (None, None, Some(*candidatos)),
-        Etapa::Dentro | Etapa::Desistiu(_) => (None, None, None),
+        Etapa::Dentro | Etapa::Desistiu(_) | Etapa::Cancelada => (None, None, None),
     }
 }
 
@@ -879,7 +884,8 @@ fn avisou_do_passo(etapa: &seele_core::chegada::Etapa) -> Option<bool> {
         | Etapa::CaminhoAberto { .. }
         | Etapa::Tocando { .. }
         | Etapa::Dentro
-        | Etapa::Desistiu(_) => None,
+        | Etapa::Desistiu(_)
+        | Etapa::Cancelada => None,
     }
 }
 
@@ -1575,6 +1581,40 @@ enum Lado {
     Saida,
 }
 
+/// **O CANCELAR de quem está ligando** (tarefa 16 da F7): o pedido de largar a
+/// chegada em voo de [`Connection::connect_cancelavel`].
+///
+/// Entregue antes do bloqueio e usado de outra linha. Pedido uma vez, fica
+/// pedido: cancelar antes de a chegada começar a esperar também vale.
+pub struct Cancelamento {
+    pedido: tokio::sync::watch::Sender<bool>,
+}
+
+impl Cancelamento {
+    /// Um cancelamento ainda não pedido.
+    #[must_use]
+    pub fn novo() -> Arc<Self> {
+        Arc::new(Self {
+            pedido: tokio::sync::watch::Sender::new(false),
+        })
+    }
+
+    /// Larga a ligação em voo: o QUIC de cada candidato fecha, a sala que tocava
+    /// vê `ParouDeTocar(Cancelada)`, e o `connect` volta com
+    /// [`ConnectionError::Cancelada`]. Depois de a sessão abrir, não faz nada:
+    /// sair é o `disconnect`.
+    pub fn cancelar_ligacao(&self) {
+        self.pedido.send_replace(true);
+    }
+
+    /// Fica pronto quando o cancelamento é pedido.
+    async fn pedido(&self) {
+        let mut pedido = self.pedido.subscribe();
+        // O `Sender` mora em `self`, e não fecha enquanto isto espera.
+        let _ = pedido.wait_for(|pedido| *pedido).await;
+    }
+}
+
 impl Connection {
     /// Connects, authenticates, and starts the driver thread.
     ///
@@ -1606,7 +1646,7 @@ impl Connection {
     /// vem vazia quando a falha é de antes de haver chegada: um endereço que
     /// não resolve, uma identidade que não abre, uma thread que não sobe.
     pub fn connect_with_trail(config: ConnectConfig) -> Result<(Arc<Self>, Trust), ConnectFailure> {
-        Self::abrir(config, None)
+        Self::abrir(config, None, None)
     }
 
     /// O mesmo, com alguém ouvindo a chegada **enquanto** ela acontece.
@@ -1631,13 +1671,34 @@ impl Connection {
         config: ConnectConfig,
         olhos: Arc<dyn EventListener>,
     ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
-        Self::abrir(config, Some(olhos))
+        Self::abrir(config, Some(olhos), None)
     }
 
-    /// O corpo que as três portas compartilham.
+    /// O mesmo, com um [`Cancelamento`]: quem liga pode desistir enquanto a
+    /// chegada anda (tarefa 16 da F7). É a porta do CANCELAR de quem está
+    /// chamando alguém.
+    ///
+    /// O `Cancelamento` é entregue **antes** do bloqueio, como o ouvinte: é de
+    /// outra linha que alguém o usa, enquanto esta espera.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Connection::connect_with_trail`], e
+    /// [`ConnectionError::Cancelada`] quando o cancelamento chega antes da
+    /// sessão, com a trilha acabando em [`ConnectStage::Cancelada`].
+    pub fn connect_cancelavel(
+        config: ConnectConfig,
+        olhos: Option<Arc<dyn EventListener>>,
+        cancelamento: Arc<Cancelamento>,
+    ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
+        Self::abrir(config, olhos, Some(cancelamento))
+    }
+
+    /// O corpo que as quatro portas compartilham.
     fn abrir(
         config: ConnectConfig,
         olhos: Option<Arc<dyn EventListener>>,
+        cancelamento: Option<Arc<Cancelamento>>,
     ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
         // **O apelido que o `Hello` não leva é recusado aqui, antes de tudo**
         // (pendência 58, item 55; lote C55 da F5). O teto é do fio, em bytes,
@@ -1744,6 +1805,7 @@ impl Connection {
                     command_rx,
                     &ready_tx,
                     olhos,
+                    cancelamento,
                 ));
                 // **Antes de o runtime cair, e não depois.** `drive` voltou com
                 // a despedida do enlace feita (`Enlace::sair`), e é isso que
@@ -4342,6 +4404,7 @@ async fn drive(
     mut commands: tokio::sync::mpsc::UnboundedReceiver<Command>,
     ready: &std::sync::mpsc::Sender<Result<Trust, ConnectFailure>>,
     olhos: Option<Arc<dyn EventListener>>,
+    cancelamento: Option<Arc<Cancelamento>>,
 ) {
     shared
         .link_state
@@ -4396,7 +4459,14 @@ async fn drive(
         })
     });
 
-    let chegou = chegada.chegar(key, pins).await;
+    let chegou = chegada
+        .chegar_ate(key, pins, async move {
+            match cancelamento {
+                Some(cancelamento) => cancelamento.pedido().await,
+                None => std::future::pending().await,
+            }
+        })
+        .await;
     // Esperada, e não abortada. A `Chegada` já morreu quando esta linha roda —
     // `chegar` a consome —, então o emissor do `watch` já caiu e a tarefa acima
     // termina sozinha depois de entregar a última etapa. Abortar aqui perderia
@@ -6728,8 +6798,10 @@ fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
         // trocado por outra versão, no meio da sessão.
         seele_core::ConnectError::OutraLinha { .. } => EndReason::Incompatible,
         // Não chega à volta hoje: ela é ao `IP:porta` que atendeu, e não ao
-        // código. Se chegar, é a conversa que caiu, como as de rede.
+        // código. Se chegar, é a conversa que caiu, como as de rede. E ninguém
+        // cancela uma volta: o `Cancelamento` é da chegada.
         seele_core::ConnectError::NaoLocalizou(_)
+        | seele_core::ConnectError::Cancelada
         | seele_core::ConnectError::LocalEndpoint
         | seele_core::ConnectError::Unreachable
         | seele_core::ConnectError::TlsRefused
@@ -6802,6 +6874,7 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
         seele_core::ConnectError::NaoLocalizou(falha) => ConnectionError::NaoLocalizou {
             motivo: (*falha).into(),
         },
+        seele_core::ConnectError::Cancelada => ConnectionError::Cancelada,
         // Era `TlsRefused`, e caía no braço de cima: o impostor que repete o
         // certificado sem ter a chave aparecia como versão incompatível, e a
         // tela mandava atualizar o SEELE nas duas máquinas.
@@ -10444,6 +10517,24 @@ mod trilha_no_log {
             Some(serde_json::json!({ "Tocando": { "candidato": 1, "prazo_s": 45 } }))
         );
         assert_eq!(campos_do_passo(&tocando), (None, Some(1), None));
+    }
+
+    #[test]
+    fn o_cancelamento_atravessa_como_etapa_e_como_erro_proprios() {
+        // Tarefa 16 da F7. A casca lê os dois pelo nome: a etapa no `ETAPAS`, e
+        // o erro no `FRASES`, que o `fraseDeErro` procura pela palavra que o
+        // serde escreve para uma variante unitária.
+        use seele_core::chegada::Etapa;
+        let cancelada = ConnectStage::from(&Etapa::Cancelada);
+        assert_eq!(cancelada, ConnectStage::Cancelada);
+        assert_eq!(cancelada.nome(), "Cancelada");
+        assert_eq!(campos_do_passo(&Etapa::Cancelada), (None, None, None));
+        let erro = classify_connect_failure(&seele_core::ConnectError::Cancelada);
+        assert_eq!(erro, ConnectionError::Cancelada);
+        assert_eq!(
+            serde_json::to_value(&erro).ok(),
+            Some(serde_json::json!("Cancelada"))
+        );
     }
 
     #[test]

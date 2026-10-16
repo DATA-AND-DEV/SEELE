@@ -6411,6 +6411,9 @@ fn alguem_respondeu(erro: &ConnectError) -> bool {
         // Não é de candidato nenhum: sai antes da corrida, quando o quarto não
         // deu onde conectar, e nenhuma tentativa o produz.
         ConnectError::NaoLocalizou(_) => false,
+        // Não é de candidato nenhum: é quem liga, pela `Chegada`, que larga a
+        // corrida inteira (tarefa 16 da F7).
+        ConnectError::Cancelada => false,
         ConnectError::LocalEndpoint
         | ConnectError::Unreachable
         | ConnectError::HandshakeTimeout
@@ -6458,6 +6461,9 @@ fn vale_insistir(erro: &ConnectError) -> bool {
                 | crate::encontro::FalhaAoLocalizar::PontoRecusou
                 | crate::encontro::FalhaAoLocalizar::SoAEscuta
         ),
+        // Quem liga desistiu: insistir seria ligar de novo contra a vontade de
+        // quem cancelou. Não chega à volta hoje, que ninguém cancela.
+        ConnectError::Cancelada => false,
         ConnectError::LocalEndpoint
         | ConnectError::Unreachable
         | ConnectError::TlsRefused

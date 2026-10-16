@@ -345,3 +345,91 @@ async fn quem_acompanha_a_chegada_ve_tocando_antes_de_atenderem() {
         .collect();
     assert_eq!(nomes, ["Parada", "Tentando", "Tocando", "Dentro"]);
 }
+
+/// Cancela a ligação no instante em que vê `Tocando`, como o CANCELAR da tela
+/// faria de outra linha.
+struct CancelaAoTocar {
+    cancelamento: Arc<seele_ffi::Cancelamento>,
+}
+
+impl seele_ffi::EventListener for CancelaAoTocar {
+    fn on_event(&self, event: seele_ffi::Event) {
+        if let seele_ffi::Event::ConnectStageChanged {
+            stage: seele_ffi::ConnectStage::Tocando { .. },
+        } = event
+        {
+            self.cancelamento.cancelar_ligacao();
+        }
+    }
+}
+
+/// **`cancelar_ligacao` fecha o QUIC, e a sala vê a ligação cancelada**
+/// (tarefa 16 da F7). Pela FFI, como o app vai chamar: o `connect` espera numa
+/// linha, e o cancelamento é usado de outra.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelar_a_ligacao_fecha_o_quic_e_a_sala_ve_cancelada() {
+    let _vaga = vaga::minha();
+    let sala = sala(Duration::from_secs(30)).await;
+    let recepcao = recepcao(&sala);
+    let mut avisos = recepcao.assinar();
+    let casa = tempfile::tempdir().unwrap();
+    std::fs::write(casa.path().join("identity.key"), [QUEM_LIGA; 32]).unwrap();
+    let config = seele_ffi::ConnectConfig {
+        server: sala.local_addr().unwrap().to_string(),
+        alternate_servers: Vec::new(),
+        nickname: "quem-liga".into(),
+        codigo_esperado: Some(Codigo::da_chave(&publica(DONO))),
+        home: casa.path().display().to_string(),
+        join_secret: None,
+        expected_fingerprint: None,
+        bilhete: None,
+        // Não há placa de som numa máquina de integração contínua.
+        audio: false,
+        capture_device: None,
+        playback_device: None,
+    };
+    let cancelamento = seele_ffi::Cancelamento::novo();
+    let olhos: Arc<dyn seele_ffi::EventListener> = Arc::new(CancelaAoTocar {
+        cancelamento: Arc::clone(&cancelamento),
+    });
+    let ligando = tokio::task::spawn_blocking(move || {
+        seele_ffi::Connection::connect_cancelavel(config, Some(olhos), cancelamento)
+    });
+
+    let toque = tocou(&mut avisos, QUEM_LIGA).await;
+    let desfecho = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            match avisos.recv().await {
+                Ok(Aviso::ParouDeTocar {
+                    toque: qual,
+                    desfecho,
+                    ..
+                }) if qual == toque => return desfecho,
+                Ok(_) => {}
+                Err(erro) => panic!("a recepção calou: {erro}"),
+            }
+        }
+    })
+    .await
+    .expect("a sala não viu a ligação parar em 3 s depois do CANCELAR: o QUIC não fechou");
+    assert_eq!(
+        desfecho,
+        seele_server::campainha::Desfecho::Cancelada,
+        "a sala viu a ligação parar por outro motivo"
+    );
+
+    let resultado = tokio::time::timeout(Duration::from_secs(5), ligando)
+        .await
+        .expect("o connect cancelado não voltou em 5 s")
+        .unwrap();
+    let Err(falha) = resultado else {
+        panic!("a ligação cancelada entrou");
+    };
+    assert_eq!(falha.error, seele_ffi::ConnectionError::Cancelada);
+    assert_eq!(
+        falha.trail.last().map(|passo| &passo.etapa),
+        Some(&seele_ffi::ConnectStage::Cancelada),
+        "a trilha de quem cancelou não acaba em Cancelada: {:?}",
+        falha.trail
+    );
+}
