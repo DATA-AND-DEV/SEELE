@@ -546,6 +546,41 @@ const REGIOES = [
       }
     }
 
+    // E **pelo teclado** (decisão da orquestradora, 16/10): o «⋯» da linha
+    // nativa recebe o foco, abre com o Enter, e diz de quem são os detalhes.
+    const deLia = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const instancia = new InstanciaDeMod("mod/teclado", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/teclado", instancia);
+      window.__teclado = contribuicoesDosMods.registrar({ id: "mod/teclado" }, instancia, {
+        ponto: "pessoa.detalhes", modo: "adicionar", alvo: String(lia.id),
+        conteudo: [{ forma: "texto", chave: "t", dentro: "pelo teclado" }],
+      }).handle;
+      desenhar(r);
+      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      return { id: String(lia.id), apelido: lia.nickname };
+    });
+    const resumo = `#lista-roster li.pessoa[data-pessoa-id="${deLia.id}"] > details.pessoa-nativo > summary`;
+    await page.focus(resumo);
+    await page.keyboard.press("Enter");
+    const pelaTecla = await page.evaluate((resumo) => {
+      const el = document.querySelector(resumo);
+      return { focado: document.activeElement === el, aberto: Boolean(el?.parentElement.open), nome: el?.getAttribute("aria-label") ?? "" };
+    }, resumo);
+    await page.evaluate(async () => {
+      contribuicoesDosMods.revogar(window.__teclado, { id: "mod/teclado", instancia: modsCarregados.get("mod/teclado") });
+      modsCarregados.delete("mod/teclado");
+      desenhar(window.testTable.snapshot);
+      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+    });
+    if (!pelaTecla.focado || !pelaTecla.aberto || !pelaTecla.nome.includes(deLia.apelido)) {
+      falhas.push(`pessoa.detalhes pelo teclado: ${JSON.stringify(pelaTecla)} (o nome deve dizer ${deLia.apelido})`);
+    }
+
     // ------------------------------------- revogar recalcula do estado de agora
     //
     // `contribuicoes.garantias-do-produto[4]` («ao revogar, o nativo é

@@ -75,6 +75,8 @@ class No {
     this.hidden = false;
     this.dataset = {};
     this.ouvintes = 0;
+    // As variáveis do recorte (`--recorte-*`) que o diálogo escreve na camada.
+    this.style = { setProperty() {}, removeProperty() {}, getPropertyValue() { return ""; } };
   }
   get children() {
     return this.filhos;
@@ -102,6 +104,10 @@ class No {
   addEventListener() { this.ouvintes += 1; }
   removeEventListener() { this.ouvintes -= 1; }
   focus() { documento.activeElement = this; }
+  // Sem layout: uma caixa vazia. O diálogo não modal pede o recorte ao abrir
+  // (a portaria, passo 7 da auditoria do v6), e o recorte mede caixas.
+  getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }; }
+  getClientRects() { return []; }
 }
 
 /**
@@ -201,6 +207,8 @@ const contexto = vm.createContext({
   setTimeout: () => 1,
   clearTimeout: () => {},
   requestAnimationFrame: (f) => f(),
+  // A janela só para o ouvinte de redimensionar do recorte.
+  window: { addEventListener() {}, removeEventListener() {} },
   document: documento,
   geracaoDaSessao: 7,
   modsCarregados: new Map(),

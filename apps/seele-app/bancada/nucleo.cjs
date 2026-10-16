@@ -166,6 +166,16 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
     }
     assert.deepEqual(diferencas, [], 'o tema alcançou um controle do núcleo');
 
+    // As aberturas da seção 2b moram na página, e os temas também.
+    await page.evaluate(({ temas }) => {
+      window.__temasDoNucleo = temas;
+      window.__escondidos = [
+        ['portaria', () => avisarQueBatem(1), null, () => avisarQueBatem(0)],
+        ['moderação', () => abrirModeracao(), null, () => fecharModeracao()],
+        ['aceite', () => abrirAceiteDeMods('127.0.0.1:8384', [{ id: 'teste/mesa', nome: 'MESA', hash: 'h', versao: '1.0.0', api: 6 }], 'c1', null), null, () => fecharAceiteDeMods()],
+      ];
+    }, { temas: { claro: TEMAS.claro, hostil: TEMAS.hostil } });
+
     // 2. O guarda 11.
     const guarda = await page.evaluate(async () => {
       // A capa de quem usa e uma contribuição alta na barra do operador, e uma
@@ -273,6 +283,136 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
     assert.deepEqual(guarda.cobertos, [], 'uma contribuição cobre um item do núcleo');
     assert.equal(guarda.atribuicaoDiz, 'teste/nucleo', 'o cabeçalho da superfície não diz de qual MOD ela é');
 
+    // 2b. **Os itens que a seção 2 só via escondidos** (`nucleo-de-confianca.
+    //     itens[2]`, `[5]` e `[6]`; a auditoria do v6, tabela 9): a moderação, o
+    //     aceite e a portaria estavam escondidos lá, e o (b) e o tema os pulavam.
+    //     Aqui cada um à vista, com um MOD mirando o centro de quem fala por
+    //     ele, como a seção 2 mira os outros: quem recebe o clique é o item, e as
+    //     cores dele são as mesmas com e sem o tema — o claro e o hostil.
+    // O que se mede de cada um; a abertura e o fechamento moram na página
+    // (`__escondidos`, na mesma ordem).
+    const ESCONDIDOS = [
+      ['portaria', ['#portaria-batendo-texto', '#portaria-batendo-ver']],
+      ['moderação', ['#moderar-titulo', '#moderar-fechar']],
+      ['aceite', ['#mods-titulo', '#mods-aceitar']],
+    ];
+    for (const [item, seletores] of ESCONDIDOS) {
+      const visto = await page.evaluate(async ({ indice, seletores }) => {
+        const [, abrir, , fechar] = window.__escondidos[indice];
+        await abrir();
+        await new Promise((ok) => setTimeout(ok, 200));
+        const mod = { id: 'teste/mira', hash: 'h', api: 6 };
+        const inst = new InstanciaDeMod(mod.id, mod.hash, geracaoDaSessao, { pedirEncerramento() {}, async encerrou() { return true; }, entregar() {} });
+        inst.estado = ESTADOS_DE_MOD.ativa;
+        modsCarregados.set(mod.id, inst);
+        const canto = document.getElementById('operador-mods').getBoundingClientRect();
+        const limite = (n) => Math.max(-512, Math.min(512, Math.round(n)));
+        const mirados = seletores.map((seletor, i) => {
+          const r = document.querySelector(seletor).getBoundingClientRect();
+          return { forma: 'texto', chave: `m${i}`, dentro: '█'.repeat(6), estilo: { mover: {
+            x: limite(r.left + r.width / 2 - canto.left - 8), y: limite(r.top + r.height / 2 - canto.top - 8) } } };
+        });
+        const { handle } = contribuicoesDosMods.registrar(mod, inst, { ponto: 'operador.barra', modo: 'adicionar', conteudo: mirados });
+        desenhar(testTable.snapshot);
+        await new Promise((ok) => setTimeout(ok, 200));
+        const medir = () => seletores.map((seletor) => {
+          const el = document.querySelector(seletor);
+          if (!el || el.closest('[hidden]') || !el.getClientRects().length) return { seletor, aVista: false };
+          const r = el.getBoundingClientRect();
+          const alvo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          let fundo = 'rgba(0, 0, 0, 0)';
+          for (let n = el; n && /rgba\(0, 0, 0, 0\)|transparent/.test(fundo); n = n.parentElement) fundo = getComputedStyle(n).backgroundColor;
+          return { seletor, aVista: true, livre: Boolean(alvo && (alvo === el || el.contains(alvo))), cor: getComputedStyle(el).color, fundo, por: alvo && !(alvo === el || el.contains(alvo)) ? `${alvo.tagName.toLowerCase()}.${String(alvo.className).split(' ')[0]} em ${alvo.closest('[id]')?.id} (${[r.left, r.top].map(Math.round)})` : null };
+        });
+        const semTema = medir();
+        const comTema = {};
+        for (const [nome, valores] of Object.entries(window.__temasDoNucleo)) {
+          temaDosMods.set('bancada', valores);
+          escreverOTemaDaSessao();
+          comTema[nome] = medir();
+          temaDosMods.delete('bancada');
+          escreverOTemaDaSessao();
+        }
+        contribuicoesDosMods.revogar(handle, { id: mod.id, instancia: inst });
+        modsCarregados.delete(mod.id);
+        await fechar();
+        desenhar(testTable.snapshot);
+        await new Promise((ok) => setTimeout(ok, 100));
+        return { semTema, comTema };
+      }, { indice: ESCONDIDOS.findIndex(([nome]) => nome === item), seletores }).catch((erro) => ({ erro: erro.message.split('\n')[0] }));
+      assert.ok(!visto.erro, `${item}: ${visto.erro}`);
+      for (const medida of visto.semTema) {
+        assert.ok(medida.aVista, `${item}: ${medida.seletor} não ficou à vista, e o caso não o mede`);
+        assert.ok(medida.livre, `${item}: um MOD cobre ${medida.seletor}: ${medida.por}`);
+      }
+      for (const [nome, medidas] of Object.entries(visto.comTema)) {
+        for (const [i, medida] of medidas.entries()) {
+          const sem = visto.semTema[i];
+          assert.deepEqual({ cor: medida.cor, fundo: medida.fundo }, { cor: sem.cor, fundo: sem.fundo },
+            `${item}: o tema ${nome} alcançou ${sem.seletor}`);
+        }
+      }
+    }
+
+    // 2c. **O dono de cada seção do «⋯»** (decisão da orquestradora, 16/10):
+    //     a linha com o nome do MOD por cima de um `pessoa.detalhes`, do
+    //     produto, é núcleo — sem ela, um MOD desenharia um «MODERAR» falso
+    //     ao lado do verdadeiro. Na linha nativa, com um nó do MOD movido e
+    //     escalado contra ela: descoberta, com as cores do produto sob todo
+    //     tema da bancada, e acima de 4,5:1 (é letra de 10 px).
+    const dono = await page.evaluate(async (temas) => {
+      const r = testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const outra = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const mod = { id: 'teste/dono', hash: 'h', api: 6 };
+      const inst = new InstanciaDeMod(mod.id, mod.hash, geracaoDaSessao, { pedirEncerramento() {}, async encerrou() { return true; }, entregar() {} });
+      inst.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set(mod.id, inst);
+      const { handle } = contribuicoesDosMods.registrar(mod, inst, { ponto: 'pessoa.detalhes', modo: 'adicionar', alvo: String(outra.id),
+        conteudo: [{ forma: 'texto', chave: 'falso', dentro: 'MODERAR', estilo: { mover: { x: 0, y: -60 }, escalar: 4 } }] });
+      desenhar(r);
+      await quadro();
+      const detalhes = document.querySelector(`#lista-roster li.pessoa[data-pessoa-id="${outra.id}"] > details.pessoa-nativo`);
+      if (detalhes) detalhes.open = true;
+      await quadro();
+      const origem = detalhes?.querySelector('.contribuicao-de-mod-origem');
+      origem?.scrollIntoView({ block: 'center' });
+      const rgb = (c) => (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+      const luz = ([a, b, c]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+        return 0.2126 * f(a) + 0.7152 * f(b) + 0.0722 * f(c); };
+      const medir = () => {
+        if (!origem || !origem.getClientRects().length) return null;
+        const caixa = origem.getBoundingClientRect();
+        const alvo = document.elementFromPoint(caixa.left + Math.min(caixa.width, 40) / 2, caixa.top + caixa.height / 2);
+        const s = getComputedStyle(origem);
+        const [x, y] = [luz(rgb(s.color)), luz(rgb(s.backgroundColor))].sort((m, n) => n - m);
+        return { texto: origem.textContent, livre: Boolean(alvo && origem.contains(alvo)), cor: s.color, fundo: s.backgroundColor,
+          contraste: Number(((x + 0.05) / (y + 0.05)).toFixed(2)) };
+      };
+      const sem = medir();
+      const comTemas = {};
+      for (const [nome, valores] of Object.entries(temas)) {
+        temaDosMods.set('bancada', valores);
+        escreverOTemaDaSessao();
+        comTemas[nome] = medir();
+        temaDosMods.delete('bancada');
+        escreverOTemaDaSessao();
+      }
+      contribuicoesDosMods.revogar(handle, { id: mod.id, instancia: inst });
+      modsCarregados.delete(mod.id);
+      desenhar(r);
+      await quadro();
+      return { sem, comTemas };
+    }, TEMAS);
+    assert.ok(dono.sem, 'o «⋯» da linha nativa não mostrou a linha de dono, e o caso não a mede');
+    assert.equal(dono.sem.texto, 'teste/dono', 'a linha de dono não diz o MOD');
+    assert.ok(dono.sem.livre, 'um nó do MOD, movido e escalado, cobre a linha de dono');
+    assert.ok(dono.sem.contraste >= 4.5, `a linha de dono está a ${dono.sem.contraste}:1`);
+    for (const [nome, medida] of Object.entries(dono.comTemas)) {
+      assert.deepEqual({ cor: medida?.cor, fundo: medida?.fundo, livre: medida?.livre }, { cor: dono.sem.cor, fundo: dono.sem.fundo, livre: true },
+        `sob o tema ${nome}, a linha de dono mudou ou foi coberta`);
+    }
+
     // 3. O modal não cobre a barra.
     const abrirModal = () => page.evaluate(async () => {
       const mod = { id: 'teste/nucleo', hash: 'h', api: 6 };
@@ -309,6 +449,13 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
         cruzaToque: Boolean(caixa && document.getElementById('toque')?.getClientRects().length
           && cruza(caixa.getBoundingClientRect(), document.getElementById('toque').getBoundingClientRect())),
         porta: alcancado(porta),
+        // **A portaria** (achado do passo 7; decisão da orquestradora, 16/10):
+        // o VER QUEM É e o DEPOIS alcançáveis com o modal aberto, e o diálogo
+        // nunca a cruza — como a faixa de quem liga.
+        portariaVer: alcancado(document.getElementById('portaria-batendo-ver')),
+        portariaDepois: alcancado(document.getElementById('portaria-batendo-depois')),
+        cruzaPortaria: Boolean(caixa && document.getElementById('portaria-batendo')?.getClientRects().length
+          && cruza(caixa.getBoundingClientRect(), document.getElementById('portaria-batendo').getBoundingClientRect())),
         resto: alcancado(document.querySelector('#tela-sessao textarea')),
         // **Coberto, e não só inerte**: um nó inerte não entra no teste de
         // clique, então quem recebe o clique no centro dele precisa ser o
@@ -321,11 +468,22 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
         // então atrás da barra do operador, no furo do véu, e a prova media um
         // ponto que ninguém vê. A área que rola é a gaveta fora da barra, à
         // vista em toda largura.
-        restoCoberto: ['#tela-sessao textarea', '#tela-sessao .canais-rolagem'].map((seletor) => {
+        //
+        // **E fora dos furos**: com a portaria acesa, o furo dela fica sobre o
+        // compositor, e o centro dele caía no furo, onde quem está em cima é a
+        // própria faixa. O ponto medido é o primeiro que nenhum recorte guarda,
+        // e a lista de mensagens entra junto: a 1400, a faixa acesa fica sobre
+        // o compositor inteiro.
+        restoCoberto: ['#tela-sessao textarea', '#tela-sessao .canais-rolagem', '#lista-mensagens'].map((seletor) => {
           const el = document.querySelector(seletor);
           if (!el || !el.getClientRects().length) return null;
           const r = el.getBoundingClientRect();
-          return Boolean(document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 20))?.closest('.camada-de-mod'));
+          const furos = foraDoModal().recortes.filter((n) => n.getClientRects().length).map((n) => n.getBoundingClientRect());
+          const y = r.top + Math.min(r.height / 2, 20);
+          const x = [0.5, 0.1, 0.9, 0.3, 0.7].map((f) => r.left + r.width * f)
+            .find((px) => !furos.some((f) => px >= f.left && px <= f.right && y >= f.top && y <= f.bottom));
+          if (x === undefined) return null;
+          return Boolean(document.elementFromPoint(x, y)?.closest('.camada-de-mod'));
         }).filter((v) => v !== null),
         cruzaBarra: Boolean(caixa && barra?.getClientRects().length && cruza(caixa.getBoundingClientRect(), barra.getBoundingClientRect())),
         cruzaPorta: Boolean(caixa && porta?.getClientRects().length && cruza(caixa.getBoundingClientRect(), porta.getBoundingClientRect())),
@@ -348,11 +506,16 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
     // dentro, e nada conferia a volta. O acionador é a lupa do cabeçalho do
     // canal, do produto, que o modal adormece.
     await page.focus('#botao-buscar');
+    // A portaria acesa **antes** do modal, a 1400; a 900, depois dele.
+    await page.evaluate(() => avisarQueBatem(1));
     await abrirModal();
     const focoNaAbertura = await page.evaluate(() => Boolean(document.activeElement?.closest('[data-superficie="alto"]')));
     assert.ok(focoNaAbertura, 'o diálogo modal abriu, e o foco ficou fora dele até a primeira tecla');
     await tocar({ evento: 'Tocou', quem: 'aa11bb22', codigo: 'K9P2-CSM7-NBFR-AYQ3', apelido: 'rafa', nome_na_agenda: null, com_som: true });
     const largo = await medirOModal();
+    assert.deepEqual({ ver: largo.portariaVer, depois: largo.portariaDepois, cruza: largo.cruzaPortaria },
+      { ver: 'sim', depois: 'sim', cruza: false },
+      `a 1400, com o modal aberto, a portaria não está alcançável, ou o diálogo a cruza: ${JSON.stringify(largo)}`);
     assert.deepEqual({ atender: largo.atender, recusar: largo.recusar, cruzaToque: largo.cruzaToque },
       { atender: 'sim', recusar: 'sim', cruzaToque: false },
       `a 1400, uma ligação que chega com o modal aberto não é atendida nem recusada, ou o diálogo a cruza: ${JSON.stringify(largo)}`);
@@ -378,9 +541,15 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
     // A 900, a coluna é gaveta: fechada, a porta dela fica alcançável; aberta,
     // o MUDO.
     await page.setViewportSize({ width: 900, height: 700 });
-    // A 900, a ligação já toca quando o modal abre.
+    // A 900, a ligação já toca quando o modal abre; a portaria acende depois.
+    await page.evaluate(() => avisarQueBatem(0));
     await abrirModal();
+    await page.evaluate(() => avisarQueBatem(2));
+    await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
     const estreito = await medirOModal();
+    assert.deepEqual({ ver: estreito.portariaVer, depois: estreito.portariaDepois, cruza: estreito.cruzaPortaria },
+      { ver: 'sim', depois: 'sim', cruza: false },
+      `a 900, a portaria que acende com o modal aberto não está alcançável, ou o diálogo a cruza: ${JSON.stringify(estreito)}`);
     assert.deepEqual({ atender: estreito.atender, recusar: estreito.recusar, cruzaToque: estreito.cruzaToque },
       { atender: 'sim', recusar: 'sim', cruzaToque: false },
       `a 900, com a ligação tocando, o modal adormece ou cobre a faixa: ${JSON.stringify(estreito)}`);
@@ -398,8 +567,53 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
     assert.ok(gavetaAberta.restoCoberto.length >= 2 && gavetaAberta.restoCoberto.every(Boolean), `a 900, a gaveta aberta escapou do modal fora da barra: ${JSON.stringify(gavetaAberta)}`);
     await page.setViewportSize({ width: 1400, height: 900 });
 
+    // **O não modal e os avisos não cobrem a portaria** (a mesma decisão): o
+    // diálogo não modal mora embaixo, à direita, e os avisos também — os dois
+    // onde a portaria acende. Um não modal largo, e quatro avisos, a 1400 e a
+    // 900, com a portaria acesa.
+    for (const [largura, altura] of [[1400, 900], [900, 700]]) {
+      await page.setViewportSize({ width: largura, height: altura });
+      const visto = await page.evaluate(async () => {
+        const mod = { id: 'teste/nucleo', hash: 'h', api: 6 };
+        const inst = modsCarregados.get(mod.id);
+        superficiesDoMod(mod, inst).soltarTudo();
+        avisarQueBatem(1);
+        await atenderOMod(mod, inst, { tipo: 'superficie-criar', n: 20, descricao: { id: 'baixo', tipo: 'dialogo', modal: false, titulo: 'Não modal', tamanho: { largura: 1600 } } });
+        await atenderOMod(mod, inst, { tipo: 'superficie-montar', n: 21, superficie: 'baixo', arvore: Array.from({ length: 40 }, (_, i) => ({ forma: 'texto', chave: `l${i}`, dentro: `linha ${i} do não modal` })) });
+        for (let i = 0; i < 4; i += 1) {
+          await atenderOMod(mod, inst, { tipo: 'superficie-criar', n: 30 + i, descricao: { id: `aviso${i}`, tipo: 'aviso', titulo: `um aviso do MOD, longo o bastante para alargar a fila ${i}` } });
+        }
+        await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+        const alcancado = (el) => {
+          if (!el || !el.getClientRects().length) return 'invisivel';
+          if (el.closest('[inert]')) return 'inerte';
+          const r = el.getBoundingClientRect();
+          const alvo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return alvo && (alvo === el || el.contains(alvo)) ? 'sim' : `coberto por ${alvo?.className ?? alvo?.tagName}`;
+        };
+        const cruza = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+        const faixa = document.getElementById('portaria-batendo').getBoundingClientRect();
+        const caixa = document.querySelector('.dialogo-de-mod[data-superficie="baixo"], [data-superficie="baixo"] .dialogo-de-mod, [data-superficie="baixo"].dialogo-de-mod');
+        const avisos = [...document.querySelectorAll('.aviso-de-mod')].filter((a) => a.getClientRects().length);
+        const medido = {
+          ver: alcancado(document.getElementById('portaria-batendo-ver')),
+          depois: alcancado(document.getElementById('portaria-batendo-depois')),
+          cruzaODialogo: Boolean(caixa && cruza(caixa.getBoundingClientRect(), faixa)),
+          cruzaUmAviso: avisos.some((a) => cruza(a.getBoundingClientRect(), faixa)),
+          avisos: avisos.length,
+          dialogo: Boolean(caixa),
+        };
+        superficiesDoMod(mod, inst).soltarTudo();
+        avisarQueBatem(0);
+        return medido;
+      });
+      assert.deepEqual(visto, { ver: 'sim', depois: 'sim', cruzaODialogo: false, cruzaUmAviso: false, avisos: 4, dialogo: true },
+        `a ${largura}, o diálogo não modal ou os avisos de um MOD cobrem a portaria: ${JSON.stringify(visto)}`);
+    }
+    await page.setViewportSize({ width: 1400, height: 900 });
+
     assert.deepEqual(errors, []);
-    console.log('núcleo: o MUDO, o fone, o SAIR, o «no ar» e o veredito têm as cores do produto sob o papel, o claro e o hostil; e o guarda 11 vale para os treze itens, a faixa de quem liga entre eles, com a capa e a barra do MOD montadas; e o modal de MOD não cobre a barra nem a faixa de quem liga, a 1400 e a 900, e continua modal no resto.');
+    console.log('núcleo: o MUDO, o fone, o SAIR, o «no ar» e o veredito têm as cores do produto sob o papel, o claro e o hostil; e o guarda 11 vale para os treze itens, a faixa de quem liga entre eles, com a capa e a barra do MOD montadas; e o modal de MOD não cobre a barra, a faixa de quem liga nem a portaria, a 1400 e a 900, e continua modal no resto; e o não modal e os avisos não cobrem a portaria; e a linha de dono do «⋯» fica descoberta, acima de 4,5:1 e fora do tema.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

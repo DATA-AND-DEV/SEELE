@@ -160,11 +160,32 @@ function wavDeTeste(segundos) {
     assert.ok(await page.evaluate(() => Boolean($('palco-de-mods-miolo').querySelector('canvas'))),
       'a `tela` não montou: o palco é superfície, e aceita a gramática inteira');
 
-    // 2. O clique chega ao MOD.
-    await page.evaluate(() => [...$('palco-de-mods-miolo').querySelectorAll('button')]
-      .find((b) => b.textContent === 'ROLAR').click());
+    // 2. O clique e o toque chegam ao MOD (`camadas.chamada.palco.toque`,
+    //    «recebe toque e clique»; a auditoria do v6, tabela 7), **pelo ponteiro
+    //    de verdade**: o `HTMLElement.click()` de antes ignorava o
+    //    `pointer-events` e o que estivesse por cima, e um palco que não
+    //    recebesse nada passava. O clique no centro do ROLAR, e um traço na
+    //    `tela`, do centro dela para baixo e à direita.
+    const centroDe = (seletor) => page.evaluate((seletor) => {
+      const el = [...$('palco-de-mods-miolo').querySelectorAll(seletor)].at(0);
+      el?.scrollIntoView({ block: 'center' });
+      const r = el?.getBoundingClientRect();
+      return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    }, seletor);
+    const rolar = await centroDe('button');
+    assert.ok(rolar, 'o palco não tem o ROLAR para o clique');
+    await page.mouse.click(rolar.x, rolar.y);
     assert.ok(await page.evaluate(() => eventos.some((e) => e.mod === 'mod/mesa' && e.nome === 'botao' && e.chave === 'rolar')),
       'o clique no palco não chegou ao MOD');
+    const tabuleiro = await centroDe('canvas');
+    assert.ok(tabuleiro, 'o palco não tem a tela para o traço');
+    await page.mouse.move(tabuleiro.x, tabuleiro.y);
+    await page.mouse.down();
+    await page.mouse.move(tabuleiro.x + 12, tabuleiro.y + 12, { steps: 4 });
+    await page.mouse.up();
+    await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+    const fases = await page.evaluate(() => eventos.filter((e) => e.mod === 'mod/mesa' && e.nome === 'traco' && e.chave === 'tabuleiro').map((e) => e.fase));
+    assert.ok(fases[0] === 'comecou' && fases.length >= 2, `o traço na tela do palco não chegou ao MOD: ${JSON.stringify(fases)}`);
 
     // 3. A saída é do produto, e esconder não desmonta.
     const no = await page.evaluateHandle(() => $('palco-de-mods-miolo').firstElementChild);
