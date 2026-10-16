@@ -1028,7 +1028,19 @@ class RegiaoDeMod {
    */
   planejar(no, fundura, orcamento, permitidas = null, posicao = "0") {
     const teto = this.perfil.fundura;
-    if (fundura > teto || no === null || no === undefined) return [];
+    if (no === null || no === undefined) return [];
+    // **O que passa da fundura é recusado, e dito** (`nos-recusados`: «um
+    // teto»). Devolver `[]` calado cortava os galhos de baixo de uma árvore
+    // funda demais sem que o MOD ouvisse nada — a auditoria do `v6.json`,
+    // passo 7. Uma recusa por galho cortado, com a chave dele na amostra; e
+    // fora do `foraDoTeto`, que é a conta do orçamento de nós.
+    if (fundura > teto) {
+      for (const galho of Array.isArray(no) ? no : [no]) {
+        if (galho === null || galho === undefined) continue;
+        this.anotarRecusado("teto-de-fundura", typeof galho === "object" ? chaveDoNo(galho) : {});
+      }
+      return [];
+    }
     if (Array.isArray(no)) {
       return no.flatMap((um, indice) => this.planejar(
         um, fundura, orcamento, permitidas, `${posicao}.${indice}`,

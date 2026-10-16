@@ -288,6 +288,10 @@ fora do lugar, um estilo com uma parte errada, uma figura que a API não tem)
 **monta o que coube** e rejeita com `nos-recusados`, que leva `recusados`, a
 conta, e `amostra`: até oito `{ motivo, chave, forma, propriedade, tipo, classe }`,
 com o que identifica cada uma. O `classes` rejeita do mesmo jeito.
+**A fundura também é teto** (16 níveis numa superfície, 6 num cartão): o galho
+que passa dela é recusado com o motivo `teto-de-fundura` e a chave dele. A
+palavra dentro de um `texto` é um nível, como é um nó no orçamento: um `texto`
+no último nível não tem onde pôr o que diz.
 Uma forma que a API não tem rejeita com `forma-desconhecida`, com a `forma`, e
 a tela fica como estava.
 

@@ -2092,6 +2092,108 @@ async function osTetosContemEARecusaEDita() {
   }
 }
 
+/**
+ * **Os tetos da superfície são os do `v6.json`, e cada um recusa e diz**
+ * (`superficies.limites`; a auditoria do `v6.json`, tabela 7, linhas 70 a 74).
+ *
+ * Os números do perfil contra os do contrato, e cada teto medido na borda: o
+ * que cabe monta sem recusa, e o que passa é recusado com o motivo na amostra
+ * (`nos-recusados`). O bolso de bytes é o que o `limites-o-que-e` diz: o
+ * retrato e o fundo param na soma de 24 MiB, e a `midia` nos 10 MiB dela.
+ *
+ * **A fundura recusava calada.** `planejar` devolvia `[]` para o que passava
+ * dela, sem `anotarRecusado`: uma árvore funda demais perdia os galhos de
+ * baixo, e o MOD não ouvia nada — o texto diz que «um teto» é recusa.
+ */
+async function osTetosDaSuperficieSaoOsDoV6() {
+  const caso = "os tetos da superfície são os do v6";
+  const v6 = JSON.parse(fs.readFileSync(path.join(raiz, "../../api/v6.json"), "utf8")).superficies.limites;
+  const b = bancada();
+  const perfil = b.PERFIS.superficie;
+  for (const teto of ["nos", "fundura", "campos", "telas", "midias", "bytesDeMidia"]) {
+    confere(caso, perfil[teto] === v6[teto],
+      `o perfil da superfície tem \`${teto}\` = ${perfil[teto]}, e o v6.json promete ${v6[teto]}`);
+  }
+  const nova = (bb = b, dd = dono(bb)) => new bb.RegiaoDeMod("a/b", dd.api, bb.raiz(), bb.PERFIS.superficie);
+  const motivos = (r) => r.amostraDeRecusados.map((a) => a.motivo);
+
+  // **A fundura**: `n` caixas encaixadas em volta de uma folha ocupam os
+  // níveis 0 a `n`. Até a fundura, tudo monta; um nível a mais é recusado.
+  const encaixar = (n, folha = { forma: "separador", chave: "folha" }) => {
+    let no = folha;
+    for (let i = 0; i < n; i += 1) no = { forma: "caixa", chave: `n${i}`, dentro: [no] };
+    return [no];
+  };
+  const profundidade = (no) => (no.filhos?.length ? 1 + Math.max(...no.filhos.map(profundidade)) : 0);
+  {
+    const cabe = nova();
+    const recusados = cabe.aplicar(encaixar(v6.fundura));
+    confere(caso, recusados === 0 && profundidade(cabe.raiz) === v6.fundura + 1,
+      `${v6.fundura} níveis de caixa cabem na fundura de ${v6.fundura}, e montaram ${profundidade(cabe.raiz)} níveis com `
+        + `${recusados} recusa(s)`);
+    // **O texto é um nível**: a palavra dentro de um `texto` é um nó, como no
+    // orçamento de nós. Um `texto` no penúltimo nível mostra o que diz; no
+    // último, a palavra passa da fundura — e sumia calada, com a caixa vazia
+    // na tela. Agora ela é recusada e dita.
+    const comTexto = nova();
+    const folhaDeTexto = { forma: "texto", chave: "folha", dentro: "no fundo" };
+    const recusadosDoTexto = comTexto.aplicar(encaixar(v6.fundura - 1, folhaDeTexto));
+    confere(caso, recusadosDoTexto === 0 && textoDe(comTexto.raiz).includes("no fundo"),
+      `o texto de um \`texto\` no penúltimo nível da fundura sumiu ou foi recusado: `
+        + `${recusadosDoTexto} recusa(s), ${JSON.stringify(textoDe(comTexto.raiz))}`);
+    const textoNoFundo = nova();
+    const recusadosNoFundo = textoNoFundo.aplicar(encaixar(v6.fundura, folhaDeTexto));
+    confere(caso, recusadosNoFundo === 1 && motivos(textoNoFundo).includes("teto-de-fundura"),
+      "a palavra de um `texto` no último nível passou da fundura e sumiu calada: "
+        + `${recusadosNoFundo} recusa(s), amostra ${JSON.stringify(textoNoFundo.amostraDeRecusados)}`);
+    const passa = nova();
+    const recusadosDaFunda = passa.aplicar(encaixar(v6.fundura + 1));
+    confere(caso, recusadosDaFunda === 1 && motivos(passa).includes("teto-de-fundura")
+      && passa.amostraDeRecusados.some((a) => a.chave === "folha"),
+      "um nível além da fundura foi cortado calado: a folha de baixo sumiu, e a recusa não foi contada nem a "
+        + `amostra a nomeou (${recusadosDaFunda} recusa(s), amostra ${JSON.stringify(passa.amostraDeRecusados)})`);
+  }
+
+  // **Os tetos por forma**, na borda.
+  for (const [teto, forma, extra] of [
+    ["campos", { forma: "campo", rotulo: "X" }, 3],
+    ["telas", { forma: "tela", largura: 10, altura: 10 }, 2],
+    ["midias", { forma: "midia", fonte: "img/a.png" }, 2],
+  ]) {
+    const r = nova(b, dono(b, () => new Promise(() => {})));
+    const pedidas = Array.from({ length: v6[teto] + extra }, (_, i) => ({ ...forma, chave: `${teto}${i}` }));
+    const recusados = r.aplicar(pedidas);
+    confere(caso, recusados === extra && r.contagem[teto] === v6[teto],
+      `${v6[teto] + extra} de \`${forma.forma}\` numa superfície de teto ${v6[teto]}: montou ${r.contagem[teto]}, `
+        + `recusou ${recusados}`);
+    r.soltar();
+  }
+
+  // **O bolso de bytes**: o retrato entre 10 e 24 MiB monta, o que passa dos
+  // 24 é recusado com os números; a `midia` acima de 10 MiB é recusada nos 10.
+  const MIB = 1024 * 1024;
+  for (const [declarado, bytes, monta, teto] of [
+    [{ forma: "retrato", chave: "r", fonte: "img/r.png", inicial: "R" }, 20 * MIB, true, null],
+    [{ forma: "retrato", chave: "r", fonte: "img/r.png", inicial: "R" }, v6.bytesDeMidia + 1, false, v6.bytesDeMidia],
+    [{ forma: "midia", chave: "m", fonte: "img/m.png" }, 11 * MIB, false, 10 * MIB],
+  ]) {
+    const bb = bancada();
+    const dd = dono(bb, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes }));
+    const r = nova(bb, dd);
+    r.aplicar([declarado]);
+    await assentar();
+    const anotada = r.midiasAnotadas()[0];
+    if (monta) {
+      confere(caso, anotada?.situacao === "pronta",
+        `um ${declarado.forma} de ${bytes} bytes cabe no bolso de ${v6.bytesDeMidia}, e ficou ${JSON.stringify(anotada)}`);
+    } else {
+      confere(caso, anotada?.situacao === "recusada" && String(anotada.motivo).includes(`passam do teto de ${teto} bytes`),
+        `um ${declarado.forma} de ${bytes} bytes passa do teto de ${teto}, e ficou ${JSON.stringify(anotada)}`);
+    }
+    r.soltar();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 7. O quadro pendente do arraste não sobrevive à saída.
 // ---------------------------------------------------------------------------
@@ -6497,6 +6599,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     sairDuranteAReproducaoPara,
     tirarUmNoSoltaOQueEleSegurava,
     osTetosContemEARecusaEDita,
+    osTetosDaSuperficieSaoOsDoV6,
     oQuadroPendenteNaoSobreviveASaida,
     tudoChegaAInstanciaESoltarDuasVezesNaoDoi,
     oCartaoUsaOMesmoRendererComGramaticaMenor,
