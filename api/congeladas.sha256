@@ -41,18 +41,28 @@
 # este guarda muda é que a próxima edição assim não passa em silêncio: ela vira
 # a versão seguinte.
 #
-# ## v6 foi emendada uma vez, depois do corte e antes da publicação
+# ## v6 foi emendada duas vezes, depois do corte e antes da publicação
 #
 # Congelada no corte da API 6 (15/10/2026) com SHA-256
 # 3e24f61b0d6e312d93c003a45dc9dc8f88d31a329018ce541f99de3305644fb4. A
 # auditoria do `v6.json` contra o produto achou promessas sem entrega, e a
-# D-api-8 autorizou um descongelamento explícito, um só, antes de a v6 sair:
-# a emenda corrigiu textos, tirou o que a 0.16 não entrega e escreveu a lista
-# fechada das recusas (ver `api/README.md`, «A API 6»). Nenhum build publicado
-# leu a v6 de antes. A próxima mudança vai para a v7.
+# D-api-8 autoriza emendas antes de a v6 sair, cada uma num commit só, com
+# esta linha refeita nele e a razão escrita, e só do que já foi entregue.
+#
+# - A primeira (44025ab5, SHA-256
+#   9789081befca36e53e99832941ff7e8e2858c65031f2dd7ad18abef71c5e1ca1) corrigiu
+#   textos, tirou o que a 0.16 não entrega e escreveu a lista fechada das
+#   recusas.
+# - A segunda (16/10/2026) escreveu a `pessoa` da citação (D-api-9), a errata
+#   do `sujo` (o inicial é o da primeira montagem do campo), o diálogo não
+#   modal no celular, os nomes que vão no par de uma recusa do tema e o `teto`
+#   do `teto-de-alvos`.
+#
+# Ver `api/README.md`, «A API 6». Nenhum build publicado leu a v6 de antes.
+# Depois que a 0.16 for publicada, a v6 não muda mais: a mudança vai para a v7.
 298fcbc3f386bf62c5aa4484bbc32f4ebb7a9d5523891eceec4bc1cc7738d3d6  v1.json
 f28d33eef08841daee7da58075d3513c0a7f3719bcf51fec784bc16b70e3505b  v2.json
 519b5e0d1c47138e009d63fffe1c7cfa0a528808293d0b34c71a08c7140a71e2  v3.json
 e31dda28805d2c4213889ea9437bfb7d7f49b14b041b127f47bb97676c50b973  v4.json
 7ff2570751fa4acbe52cf2d3cf7cec015453c12fae62ab5a469b74959aec046b  v5.json
-9789081befca36e53e99832941ff7e8e2858c65031f2dd7ad18abef71c5e1ca1  v6.json
+58576e950a7fbbc928610474aa13018e7ab949688b54ea8b78f8328cb16868b8  v6.json

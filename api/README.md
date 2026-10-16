@@ -132,10 +132,11 @@ publicar em vez de antes de existir.
 
 `api/v6.json` **congelou no corte** (15/10/2026; tarefa 13 do plano da F3):
 `MOD_API_VERSION = 6` e `APIS_ACEITAS = [6]`, e a linha dela em
-`congeladas.sha256` não muda mais — o que vier depois vai para a v7. Até o
-corte ela esteve em construção, com a linha acompanhando cada edição.
+`congeladas.sha256` só muda por uma emenda da D-api-8, antes da publicação.
+Depois que a 0.16 sair, o que vier vai para a v7. Até o corte ela esteve em
+construção, com a linha acompanhando cada edição.
 
-> **Emendado em 15/10/2026 — a única emenda depois do congelamento (D-api-8),
+> **Emendado em 15/10/2026 — a primeira emenda depois do congelamento (D-api-8),
 > antes da publicação.** A auditoria do `v6.json` contra o produto
 > (`docs/superpowers/sdd/2026-10-08-0.16/F3/auditoria-do-v6/`) achou promessas
 > que o produto não entregava, e a regra da D-api-8 é uma só: o `v6.json` diz
@@ -146,8 +147,26 @@ corte ela esteve em construção, com a linha acompanhando cada edição.
 > das mídias de uma superfície e o alcance da redução de mídia, e escreveu a
 > lista fechada das recusas inteira, com a fronteira que a faz valer (o
 > genérico `falhou`, as da ponte, as do `arquivo`, e a `forma-desconhecida`).
-> A linha do v6 em `congeladas.sha256` foi refeita no mesmo commit; a próxima
-> mudança vai para a v7.
+> A linha do v6 em `congeladas.sha256` foi refeita no mesmo commit.
+
+> **Emendado em 16/10/2026 — a segunda emenda (D-api-8), antes da publicação.**
+> Cada emenda é um commit só, e só escreve o que já foi entregue. Esta escreveu:
+> - a `pessoa` da citação (D-api-9): `fundoDeMidia: { daPessoa, pessoa }` e
+>   `retrato({ daPessoa, pessoa })` citam quem o MOD nomeia, numa superfície
+>   também, se a pessoa estiver na sessão;
+> - a errata do `sujo`: sem `inicial`, o inicial é o valor da **primeira**
+>   montagem do campo, e um controle que o MOD regrava declara `inicial`. O
+>   texto de antes induzia o defeito que a MESA teve;
+> - o diálogo no celular: o modal na sessão acima do pé, com a faixa de voz e
+>   as abas à vista, e o não modal embaixo, até 85% dela. O texto de antes
+>   prometia as abas do MOD cabendo em 390 px, que é conteúdo do ESTILO, e não
+>   entrega do produto (medido pela F8);
+> - os nomes que vão na frente do par de uma recusa do tema: as cores de estado
+>   (`fosforo`, `azul`, `vermelho`) e o segundo apagado (`apagadoSecundario`,
+>   que saía como `apagado-secundario`; o achado do ESTILO);
+> - o `teto` que a recusa `teto-de-alvos` passou a levar.
+>
+> A linha do v6 em `congeladas.sha256` foi refeita no mesmo commit.
 
 O que muda na forma do arquivo:
 

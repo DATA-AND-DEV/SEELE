@@ -431,7 +431,7 @@
       "perfil": "os dois cabeçalhos: a página do PERFIS (por citação) e o «SEU PERFIL» nativo (por aplicador do produto)",
       "lista": "parada, se o MOD a citar no cartão"
     },
-    "citacao": "fundoDeMidia: { daPessoa: 'capa' } e retrato({ daPessoa: 'avatar' }): carregada e contada uma vez (PERFIS R2)",
+    "citacao": "fundoDeMidia: { daPessoa: 'capa' } e retrato({ daPessoa: 'avatar' }): carregada e contada uma vez (PERFIS R2); da pessoa do destino, e, com pessoa: id (fundoDeMidia: { daPessoa: 'capa', pessoa: id } e retrato({ daPessoa: 'avatar', pessoa: id })), da que o MOD nomeia, em qualquer destino, numa superfície também, se ela estiver na sessão pelo retrato; fora da sessão, ou com um id que não é id, o fundo fica liso e o retrato na inicial, sem recusa (D-api-9)",
     "preferencia": "herda a de pessoa.cartao: «o SEELE desenha» não recebe capa",
     "legibilidade": "o texto e os controles do produto ficam em placas opacas da cor do fundo nativo; todo texto e controle sobre a capa mantém o contraste que tem sem capa, a cor e a borda, contra um quadro branco, um preto e um da cor da própria tinta; MUDO, fone e SAIR ficam sobre placas do núcleo, nunca sobre a capa sem placa",
     "quem-fala": "o halo e a pastilha FALANDO ficam acima da capa; o véu passa a --seele-laranja-carga",
@@ -481,12 +481,12 @@
         "erro": "em toda forma de entrada, inclusive cor e escolha",
         "botoes": "primário (envia todos os valores juntos) e secundário (sai), montados pelo produto",
         "recusa-do-servidor": "formulario.erros({ chave: motivo })",
-        "sujo": "derivado pelo produto, valor atual contra inicial; o MOD pode declarar os dois: { forma: 'campo', chave, valor: <rascunho>, inicial: <gravado> }; sem inicial, o inicial é o valor da montagem",
+        "sujo": "derivado pelo produto, valor atual contra inicial; o MOD pode declarar os dois: { forma: 'campo', chave, valor: <rascunho>, inicial: <gravado> }; sem inicial, o inicial é o valor da primeira montagem do campo, pela chave, e não muda quando o MOD regrava o valor: um controle que o MOD regrava declara inicial",
         "confirmacao": "declarada em qualquer botao (não só no primário), com as palavras do produto; o evento botao só chega depois do sim",
         "emProgresso": "o primário ignora o segundo clique",
         "erros-de-dois-campos": "formulario.erros({ a: motivo, b: motivo }); a resposta da metade de servidor é protocolo do próprio MOD"
       },
-      "celular": "tela cheia, com as ações fixas embaixo e as abas cabendo em 390 px (D-estilo-1)"
+      "celular": "o modal, em tela cheia (a sessão acima do pé, como em superficies.celular: a faixa de voz e as abas ficam à vista e ao toque), com as acoes fixas no rodapé do produto; o não modal (modal: false), embaixo, até 85% da altura da sessão acima do pé, com a sessão à vista acima"
     },
     "limites": {
       "superficies": 12,
@@ -626,7 +626,7 @@
       "fundo da sessão por mídia (não medido no iPhone antes do congelamento)"
     ],
     "chaves": "lista fechada de nomes do contrato, nunca nomes de CSS: o produto traduz cada nome por uma tabela fechada para o token --seele-* que ele redefine (TEMA_DA_API na casca); nenhum nome leva a --nucleo-*, que o MUDO, o SURDO e o SAIR leem no celular; chave fora da tabela ou valor fora da forma são recusados pelo nome, na casca e (tarefa 17j) no mundo.tema, com um teste espelho entre as duas listas",
-    "cores-de-estado": "o fósforo, o azul e o vermelho do produto (e os -fraco) não são chaves do tema: sob um tema, o produto os deriva das superfícies, com o matiz do produto e 4,5:1 sobre fundo e sobre painel (e sobre o próprio -fraco); as cores do padrão devolvem as do produto (ΔE 0); sem luminosidade que sirva às duas superfícies, o tema é recusado com o par; o MOD não escreve nenhuma delas, e os itens do núcleo leem --nucleo-* (decidido em 09/10, achado da F8)"
+    "cores-de-estado": "o fósforo, o azul e o vermelho do produto (e os -fraco) não são chaves do tema: sob um tema, o produto os deriva das superfícies, com o matiz do produto e 4,5:1 sobre fundo e sobre painel (e sobre o próprio -fraco); as cores do padrão devolvem as do produto (ΔE 0); sem luminosidade que sirva às duas superfícies, o tema é recusado com o par { frente: 'fosforo' | 'azul' | 'vermelho', fundo: 'painel', razao, piso: 4,5 }, e o segundo apagado do produto, a 3:1, com { frente: 'apagadoSecundario', fundo: 'painel', razao, piso: 3 }; o MOD não escreve nenhuma delas, e os itens do núcleo leem --nucleo-* (decidido em 09/10, achado da F8)"
   },
   "nucleo-de-confianca": {
     "regra": "nenhum item mora dentro de uma região ou aceita contribuição; o tema não alcança os controles (o MUDO, o fone, o «no ar», o SAIR e o veredito da conexão leem --nucleo-*); o apelido verificado e a atribuição usam as cores do tema por desenho, e o que os protege é a estrutura: um lugar que o MOD não cobre (rascunho §10)",
@@ -674,7 +674,7 @@
     ],
     "leitura": "doServidor.pedido.transporte = volume",
     "reducao": "a pessoa.capa de servidor é reduzida ao tamanho de uso antes de chegar à janela, e o bolso dela conta bytes decodificados (PERFIS R3); as outras mídias de servidor chegam como estão, e os bolsos delas contam os bytes do arquivo",
-    "fundoDeMidia": "propriedade de caixa: {doServidor:{canal,pedido,campo}}, {fonte} ou {daPessoa:'capa'}",
+    "fundoDeMidia": "propriedade de caixa: {doServidor:{canal,pedido,campo}}, {fonte} ou {daPessoa:'capa', pessoa?}",
     "onde": "toda mídia do servidor aceita transporte: 'volume': midia, fundoDeMidia, retrato, pessoa.capa e o fundo da tela"
   },
   "limites": {
@@ -749,7 +749,7 @@
       "sem-alvo (o ponto exige alvo, o pessoa.avatar)",
       "conteudo-invalido (o conteúdo não tem a forma que o ponto exige)",
       "teto-de-contribuicoes (128 contribuições sem alvo de pé)",
-      "teto-de-alvos (256 alvos num ponto)",
+      "teto-de-alvos (256 alvos num ponto; leva teto)",
       "contribuicao-ja-existe (já há uma deste MOD para o alvo, o ponto e o modo: use atualizar)",
       "contribuicao-de-outro-mod (o handle de atualizar ou revogar é de outro MOD)"
     ],

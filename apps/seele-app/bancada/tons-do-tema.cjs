@@ -262,6 +262,19 @@ for (const [nome, tema] of Object.entries({
     `as superfícies a 3:1 de nada não recusaram pelo segundo apagado: ${JSON.stringify(largo.pares)}`);
   confere("par · o segundo apagado pelo nome do contrato", Boolean(segundo) && derivados.has(segundo.frente),
     `o par do segundo apagado saiu como «${segundo?.frente}», e o v6.json o chama de ${[...derivados].join(" ou ")}`);
+
+  // **E as cores de estado**, que não são chaves do tema: o nome que vai na
+  // frente do par está escrito em `tema.cores-de-estado` (a segunda emenda).
+  const cinza = tonsDoTema({ fundo: "#777777", painel: "#777777", texto: "#000000", apagado: "#000000", acento: "#000000" }, daRaiz);
+  const chaves = new Set(["texto", "apagado", "acento", "fundo", "painel", "borda"]);
+  const deEstado = [...new Set([...cinza.pares, ...largo.pares].map((p) => p.frente))]
+    .filter((frente) => !chaves.has(frente) && !derivados.has(frente));
+  confere("par · as cores de estado têm nome no contrato", deEstado.length > 0,
+    `nenhum par de cor de estado saiu para conferir: ${JSON.stringify(cinza.pares)}`);
+  for (const frente of deEstado) {
+    confere("par · as cores de estado têm nome no contrato", v6.tema["cores-de-estado"].includes(`'${frente}'`),
+      `o par sai com frente «${frente}», que tema.cores-de-estado não escreve`);
+  }
 }
 
 if (falhas.length) {
