@@ -626,9 +626,11 @@ fn every_command_the_frontend_calls_is_registered() {
 // vazia.
 //
 // `ler_entrada` (tarefa 30 da F7) esteve aqui entre o Rust e a tela, e saiu
-// quando o diálogo de servidores passou a mandar todo texto a ele. A lista
-// voltou a ser vazia.
-const AGUARDANDO_TELA: &[&str] = &[];
+// quando o diálogo de servidores passou a mandar todo texto a ele.
+//
+// `cancelar_ligacao` (tarefa 28 da F7) está aqui entre o Rust e a tela: o
+// CANCELAR do CHAMANDO passa a chamá-lo no commit da casca, e sai daqui junto.
+const AGUARDANDO_TELA: &[&str] = &["cancelar_ligacao"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {

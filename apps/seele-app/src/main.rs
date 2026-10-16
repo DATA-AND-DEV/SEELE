@@ -260,6 +260,10 @@ struct Session {
     /// é por isso que ele recusa com [`FalhaAoAtualizar::NadaEscolhido`] em vez
     /// de silenciosamente ir procurar.
     atualizacao: Mutex<Option<tauri_plugin_updater::Update>>,
+    /// **A ligação em voo, para o CANCELAR** (tarefa 28 da F7): o
+    /// [`seele_ffi::Cancelamento`] do `connect` que está andando, ou nada. Quem
+    /// abre e fecha a vaga é o [`ligar::LigacaoEmVoo`].
+    ligacao_em_voo: Mutex<Option<Arc<seele_ffi::Cancelamento>>>,
 }
 
 /// Com que intenção este processo foi aberto.
@@ -1369,10 +1373,16 @@ async fn connect<R: tauri::Runtime>(
         descartados: Arc::clone(&session.eventos_de_geracao_morta),
     }) as Arc<dyn EventListener>;
     let atento = Arc::clone(&ponte);
-    let resultado =
-        tauri::async_runtime::spawn_blocking(move || Connection::connect_watching(config, atento))
-            .await
-            .unwrap_or_else(|_| Err(ConnectFailure::from(ConnectionError::Unreachable)));
+    // **O CANCELAR desta tentativa** (tarefa 28 da F7): a vaga fica na sessão
+    // enquanto a chegada anda, e o `cancelar_ligacao` a acha lá.
+    let em_voo = ligar::LigacaoEmVoo::abrir(&session);
+    let cancelamento = em_voo.cancelamento();
+    let resultado = tauri::async_runtime::spawn_blocking(move || {
+        Connection::connect_cancelavel(config, Some(atento), cancelamento)
+    })
+    .await
+    .unwrap_or_else(|_| Err(ConnectFailure::from(ConnectionError::Unreachable)));
+    drop(em_voo);
     let (connection, veredito) = resultado.map_err(|falha| FalhaDaEntrada {
         falha,
         de_onde: DeOndeVeio {
@@ -2884,6 +2894,13 @@ fn meu_codigo(app: AppHandle) -> Result<String, ()> {
 fn ler_entrada(app: AppHandle, texto: String) -> ligar::EntradaColada {
     let meu = seele_ffi::codigo_desta_maquina(&config_dir(&app)).ok();
     ligar::ler_entrada_em(&texto, meu.as_ref())
+}
+
+/// CANCELAR (tarefa 28 da F7): larga a ligação em voo, se houver uma. Devolve
+/// se havia o que cancelar. Ver [`ligar::cancelar_em`].
+#[tauri::command]
+fn cancelar_ligacao(session: State<'_, Session>) -> bool {
+    ligar::cancelar_em(&session)
 }
 
 /// A agenda (tarefa 29 da F7): os códigos com quem esta máquina já falou.
@@ -12758,6 +12775,7 @@ fn main() {
             encerrar_a_ligacao,
             meu_codigo,
             ler_entrada,
+            cancelar_ligacao,
             contatos_da_agenda,
             dar_nome_na_agenda,
             bloquear,

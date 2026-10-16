@@ -53,6 +53,68 @@ pub(crate) fn ler_entrada_em(texto: &str, meu: Option<&seele_ffi::Codigo>) -> En
     }
 }
 
+/// **A ligação em voo**, do `connect` que a abriu até ele voltar (tarefa 28 da
+/// F7, o CANCELAR de quem está chamando alguém).
+///
+/// O [`seele_ffi::Cancelamento`] fica na sessão enquanto a chegada anda, e o
+/// [`cancelar_em`] o acha lá. Ao cair, o guarda devolve a vaga, **mas só se ela
+/// ainda é dele**: uma tentativa mais nova pode ter tomado o lugar (o E54), e o
+/// CANCELAR passa a ser dela.
+pub(crate) struct LigacaoEmVoo<'a> {
+    sessao: &'a crate::Session,
+    cancelamento: std::sync::Arc<seele_ffi::Cancelamento>,
+}
+
+impl<'a> LigacaoEmVoo<'a> {
+    /// Abre a vaga desta tentativa, por cima da de qualquer outra.
+    pub(crate) fn abrir(sessao: &'a crate::Session) -> Self {
+        let cancelamento = seele_ffi::Cancelamento::novo();
+        if let Ok(mut vaga) = sessao.ligacao_em_voo.lock() {
+            *vaga = Some(std::sync::Arc::clone(&cancelamento));
+        }
+        Self {
+            sessao,
+            cancelamento,
+        }
+    }
+
+    /// O cancelamento que vai à ponte (`Connection::connect_cancelavel`).
+    pub(crate) fn cancelamento(&self) -> std::sync::Arc<seele_ffi::Cancelamento> {
+        std::sync::Arc::clone(&self.cancelamento)
+    }
+}
+
+impl Drop for LigacaoEmVoo<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut vaga) = self.sessao.ligacao_em_voo.lock() {
+            if vaga
+                .as_ref()
+                .is_some_and(|em_voo| std::sync::Arc::ptr_eq(em_voo, &self.cancelamento))
+            {
+                *vaga = None;
+            }
+        }
+    }
+}
+
+/// CANCELAR: larga a ligação em voo, se houver uma (tarefa 28 da F7). O QUIC de
+/// cada candidato fecha, a sala que tocava vê `ParouDeTocar(Cancelada)`, e o
+/// `connect` volta com `ConnectionError::Cancelada`. Devolve se havia o que
+/// cancelar: apertado duas vezes, a segunda não acha nada.
+pub(crate) fn cancelar_em(sessao: &crate::Session) -> bool {
+    let em_voo = sessao
+        .ligacao_em_voo
+        .lock()
+        .ok()
+        .and_then(|mut vaga| vaga.take());
+    let Some(em_voo) = em_voo else {
+        return false;
+    };
+    em_voo.cancelar_ligacao();
+    tracing::info!("CANCELAR: a ligação em voo foi largada");
+    true
+}
+
 /// A entrada colada em CONECTAR (tarefa 30 da F7): a leitura do núcleo, com «é o
 /// seu código?» respondido pela chave desta máquina.
 #[cfg(test)]
@@ -143,5 +205,177 @@ mod a_entrada_colada {
             serde_json::to_value(EntradaColada::CodigoComErro).ok(),
             Some(serde_json::json!("CodigoComErro"))
         );
+    }
+}
+
+/// **CANCELAR larga a ligação que toca** (tarefa 28 da F7). Pelo `connect` de
+/// verdade, no runtime falso do Tauri, contra uma sala de verdade: ela toca, o
+/// CANCELAR larga a chegada, a sala vê `ParouDeTocar(Cancelada)`, o `connect`
+/// volta `Cancelada`, e a vaga fica vazia para a próxima.
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod o_cancelar_da_ligacao {
+    use super::{cancelar_em, LigacaoEmVoo};
+    use crate::a_entrada_velha_que_chega_tarde::{app, runtime, servidor, vez};
+    use crate::Session;
+    use seele_server::campainha::Desfecho;
+    use seele_server::recepcao::{Aviso, Sala};
+    use seele_server::{Daemon, ServerConfig};
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tauri::Manager;
+
+    /// A semente de quem recebe.
+    const DONO: u8 = 1;
+
+    async fn sala() -> Arc<Daemon> {
+        // A chave do dono só precisa não ser a de quem liga (a do app, gerada na
+        // casa do teste): quem não é o dono toca.
+        let dono = [DONO; 32];
+        let config = ServerConfig {
+            identidade: Some(seele_server::tls::Identity::da_semente(&[DONO; 32]).unwrap()),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            voice_room_limit: 6,
+            sala: Some(Sala {
+                dono,
+                prazo_do_toque: Duration::from_secs(30),
+            }),
+            ..ServerConfig::default()
+        };
+        let servidor = Arc::new(Daemon::bind(config).await.expect("a sala não subiu"));
+        let rodando = Arc::clone(&servidor);
+        tokio::spawn(async move { rodando.run().await });
+        servidor
+    }
+
+    #[test]
+    fn cancelar_larga_a_ligacao_que_toca_e_a_sala_ve_cancelada() {
+        let _vez = vez();
+        runtime().block_on(async {
+            let sala = sala().await;
+            let recepcao = sala.server().recepcao.clone().expect("a sala tem recepção");
+            let mut avisos = recepcao.assinar();
+            let app = app();
+            let alvo = sala.local_addr().unwrap().to_string();
+            let ligando = std::thread::spawn(move || {
+                runtime().block_on(crate::connect(
+                    app.clone(),
+                    app.state::<Session>(),
+                    alvo,
+                    "quem-liga".to_owned(),
+                    false,
+                    None,
+                ))
+            });
+
+            let toque = tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    if let Ok(Aviso::Tocou { toque, .. }) = avisos.recv().await {
+                        return toque;
+                    }
+                }
+            })
+            .await
+            .expect("a sala não tocou");
+
+            assert!(
+                cancelar_em(&app.state::<Session>()),
+                "o CANCELAR não achou a ligação em voo"
+            );
+            let desfecho = tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    if let Ok(Aviso::ParouDeTocar {
+                        toque: qual,
+                        desfecho,
+                        ..
+                    }) = avisos.recv().await
+                    {
+                        if qual == toque {
+                            return desfecho;
+                        }
+                    }
+                }
+            })
+            .await
+            .expect("a sala não viu a ligação parar em 3 s depois do CANCELAR");
+            assert_eq!(desfecho, Desfecho::Cancelada);
+
+            let fim = tokio::time::Instant::now() + Duration::from_secs(5);
+            while !ligando.is_finished() {
+                assert!(
+                    tokio::time::Instant::now() < fim,
+                    "o connect cancelado não voltou"
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let resultado = ligando.join().expect("a linha do connect caiu");
+            let Err(falha) = resultado else {
+                panic!("a ligação cancelada entrou");
+            };
+            let dita = serde_json::to_value(&falha).unwrap_or_default();
+            assert_eq!(
+                dita.get("error"),
+                Some(&serde_json::json!("Cancelada")),
+                "o connect cancelado não voltou como «cancelada»: {dita}"
+            );
+            assert!(
+                !cancelar_em(&app.state::<Session>()),
+                "a vaga da ligação ficou ocupada depois de o connect voltar"
+            );
+        });
+    }
+
+    /// A vaga é da tentativa mais nova: a velha que cai depois não a esvazia (o
+    /// E54), e a nova, ao cair, sim.
+    #[test]
+    fn a_vaga_e_da_tentativa_mais_nova() {
+        let sessao = Session::default();
+        let velha = LigacaoEmVoo::abrir(&sessao);
+        let nova = LigacaoEmVoo::abrir(&sessao);
+        let dela = nova.cancelamento();
+        drop(velha);
+        let na_vaga = sessao.ligacao_em_voo.lock().unwrap().clone();
+        assert!(
+            na_vaga.is_some_and(|em_voo| Arc::ptr_eq(&em_voo, &dela)),
+            "a tentativa velha, ao cair, esvaziou a vaga da nova"
+        );
+        drop(nova);
+        assert!(
+            sessao.ligacao_em_voo.lock().unwrap().is_none(),
+            "a tentativa que caiu deixou a vaga ocupada"
+        );
+    }
+
+    /// Depois de uma entrada sem CANCELAR, não sobra ligação a cancelar.
+    #[test]
+    fn depois_de_entrar_nao_sobra_ligacao_a_cancelar() {
+        let _vez = vez();
+        runtime().block_on(async {
+            let (endereco, servidor) = servidor("Sem sala").await;
+            let app = app();
+            let entrou = crate::connect(
+                app.clone(),
+                app.state::<Session>(),
+                endereco.to_string(),
+                "quem-entra".to_owned(),
+                false,
+                None,
+            )
+            .await;
+            assert!(entrou.is_ok(), "a entrada num servidor sem sala não entrou");
+            assert!(
+                !cancelar_em(&app.state::<Session>()),
+                "a vaga da ligação ficou ocupada depois de o connect voltar"
+            );
+            if let Ok(sessao) = app.state::<Session>().connection() {
+                sessao.disconnect();
+            }
+            servidor.shutdown();
+        });
     }
 }
