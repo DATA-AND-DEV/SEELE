@@ -9973,3 +9973,20 @@ põem três ocupantes — outra escuta, um só IPv4, um só IPv6 — no `seele-s
 na sala, e no macOS o do só IPv6 reprovava antes. A prova do Windows, vermelho
 antes e verde depois, é a do PC de testes.
 **Na linha 0.15:** fica como está. A 0.15.2 já está pronta para a tag.
+
+## 66 · O teste da bomba da tela leva ~38 s e reprova quando a máquina está dividida
+
+**Aberta em 2026-10-16**, medida pela orquestradora na bateria da 18ª integração, parte A. O
+`seele-core` `bomba::tests::a_bomba_atravessa_a_conexao_e_o_outro_lado_le_o_que_saiu` espera o
+primeiro fluxo de tela com uma paciência de 60 s (`PACIENCIA`, `bomba.rs`), e com a máquina livre
+ele já leva ~38 s (medido: 38,1 a 45,3 s em oito rodadas). Com outro `cargo test` rodando ao lado,
+passa dos 60 s e reprova com «nenhum fluxo de tela chegou em 60s: a tarefa que escoa ainda espera
+a bomba armar» (4 de 5). Intercalado com o mesmo teste antes da 18ª (`95ff2689`), com o código do
+`seele-core` idêntico, o de antes também reprovou (1 de 4). O `cefa6a93` (10/10) já tinha tirado o
+prazo escondido do QUIC desse teste; o que sobra é o tempo da primeira sessão de codificação.
+
+**A direção:** medir onde vão os ~38 s (a primeira sessão do OpenH264 no build de teste, a
+captura de mentira, a espera da bomba armar) antes de mexer na paciência: um teste que só passa com
+a máquina parada não prova nada numa bateria, e um prazo maior sem a medida esconde uma lentidão
+do produto. **Sem dona ainda.**
+
