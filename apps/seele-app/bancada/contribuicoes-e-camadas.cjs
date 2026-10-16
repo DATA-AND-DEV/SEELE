@@ -2330,6 +2330,21 @@ function anotando(...anotadas) {
       registro.porHandle.get(handle)?.conteudo?.[0]?.dentro === "de A, de novo",
       "o roteador respondeu, e o conteúdo da contribuição não mudou",
     );
+    // **Atualizar o que já saiu diz que não havia o que trocar** (o PERFIS
+    // registra de novo quando o `atualizar` devolve `false`; o cruzamento dos
+    // portes): sem recusa, com `false`, e sem a contribuição voltar.
+    {
+      const { handle: saiu } = registro.registrar({ id: "mod/a" }, a, { ponto: "servidor.navegacao", rotulo: "vai sair" });
+      await contexto.atenderOMod({ id: "mod/a", api: 6 }, a, { tipo: "revogar-contribuicao", n: 33, handle: saiu });
+      await contexto.atenderOMod({ id: "mod/a", api: 6 }, a, {
+        tipo: "atualizar-contribuicao", n: 34, handle: saiu, conteudo: { rotulo: "voltou?" },
+      });
+      confere(
+        "R2 · atualizar o que saiu",
+        respostas.at(-1)?.ok === true && respostas.at(-1)?.valor === false && !registro.porHandle.has(saiu),
+        `atualizar uma contribuição revogada respondeu ${JSON.stringify(respostas.at(-1))}`,
+      );
+    }
 
     // **A recusa chega ao MOD da 6 com o nome** (Step 7b; rascunho §7.1). O
     // teto agregado, pelo roteador de verdade: 128 entradas, e a 129ª. A API 4,
