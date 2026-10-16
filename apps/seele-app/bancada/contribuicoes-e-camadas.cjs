@@ -2010,6 +2010,18 @@ function anotando(...anotadas) {
   confere("Step 7b · teto-de-alvos",
     nomeDa(() => registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "257" })) === "teto-de-alvos",
     "o teto de alvos não veio com o nome");
+  // **E com o número** (o PERFIS lê `erro.teto` para contar os de fora): o
+  // produto sabe o teto, e o `teto-de-superficies` já o leva.
+  const camposDoTetoDeAlvos = (() => {
+    try {
+      registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "257" });
+      return "(aceita)";
+    } catch (falha) {
+      return falha.camposDaRecusa ?? null;
+    }
+  })();
+  confere("Step 7b · teto-de-alvos leva o teto", camposDoTetoDeAlvos?.teto === 256,
+    `a recusa do teto de alvos não diz o teto: ${JSON.stringify(camposDoTetoDeAlvos)}`);
   for (let i = 0; i < 128; i += 1) registrar({ ponto: "servidor.navegacao", rotulo: `e${i}` });
   confere("Step 7b · teto-de-contribuicoes",
     nomeDa(() => registrar({ ponto: "servidor.navegacao", rotulo: "e128" })) === "teto-de-contribuicoes",

@@ -150,13 +150,17 @@ const RECUSAS_DAS_CONTRIBUICOES = Object.freeze([
   "contribuicao-de-outro-mod",
 ]);
 
-/** Uma recusa do registro: a frase, e o nome em `recusa`, da lista fechada. */
-function recusaNomeada(nome, frase) {
+/**
+ * Uma recusa do registro: a frase, e o nome em `recusa`, da lista fechada. Os
+ * `campos` vão ao MOD junto com o nome (`recusaParaOMod`), como o `teto`.
+ */
+function recusaNomeada(nome, frase, campos) {
   if (!RECUSAS_DAS_CONTRIBUICOES.includes(nome)) {
     throw new TypeError(`«${nome}» não está na lista das recusas das contribuições`);
   }
   const recusa = new Error(frase);
   recusa.recusa = nome;
+  if (campos) recusa.camposDaRecusa = campos;
   return recusa;
 }
 
@@ -323,6 +327,7 @@ class RegistroDeContribuicoes {
           throw recusaNomeada(
             "teto-de-alvos",
             `um MOD contribui para até ${TETO_DE_ALVOS_POR_PONTO} alvos em «${ponto}»`,
+            { teto: TETO_DE_ALVOS_POR_PONTO },
           );
         }
       }
