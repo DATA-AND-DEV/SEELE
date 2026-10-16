@@ -52,9 +52,36 @@
 // 11. **Um id repetido num grupo do MOD** de `servidor.navegacao` não duplica
 //    a fileira da sala, com o ENTRAR NA SALA, nem a do canal.
 //
+// E o resto da pendência 63 (lote R63), numa seção própria no fim:
+//
+// 12. **O texto que não mudou não é reescrito**: o contador `#pessoas-conta`,
+//    a telemetria do rodapé e o `#voz-estado` (região viva) atravessam o tique
+//    com o retrato igual sem mutação nenhuma, com o mesmo nó de texto e com a
+//    seleção; o que muda (o ATRASO, o UPTIME, a média, o contador, o «no ar»)
+//    muda no mesmo nó, e a seleção num número vizinho fica.
+// 13. **As regiões de MOD** (`#roster-mods`, `#telemetria-mods`, e o
+//    `#compositor-mods`, pelo mesmo `aplicarARegiao`): sem MOD, o tique não
+//    mexe nelas; com um MOD, o retrato igual não tira nem põe nó, o conteúdo e
+//    o botão da ação são os mesmos nós, o foco fica no botão e a seleção no
+//    texto do MOD; a ação que sai tira só o botão dela; o clique depois de
+//    um retrato que muda o dado da ação (o canal aberto) age com o de agora;
+//    e a mesma ação contribuída duas vezes guarda o foco no segundo botão.
+// 14. **A conversa reconciliada pelo id da mensagem**: alguém que chega ao
+//    servidor não muda nada nela; um retrato novo muda o avatar no lugar, e a
+//    imagem aparece (o `style` pelo CSSOM, que a CSP aceita); uma mensagem
+//    nova entra sem tirar nem mudar as outras, com a rolagem onde estava, ou
+//    seguindo o fim; a que sai leva só o nó dela; o REMOVER e o link de
+//    mensagens editadas são os mesmos nós e agem com o dado de agora; e os nós
+//    de MOD da conversa não saem do documento. O foco no link de uma mensagem
+//    e a seleção no corpo de outra atravessam tudo isso. E, com duas pendentes
+//    sem resposta, a gravação da primeira não tira o foco do TENTAR DE NOVO da
+//    segunda; com a hora voltando atrás, os dois divisores do mesmo dia ficam.
+//
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
-// salas repovoada, o caso 6; com a de canais, o caso 10.
+// salas repovoada, o caso 6; com a de canais, o caso 10; com o `textContent`
+// de volta, o caso 12; com a região de MOD repovoada, o caso 13; com a
+// conversa repovoada, o caso 14.
 //
 // Rodar:  node apps/seele-app/bancada/linhas-pelo-id.cjs
 
@@ -112,8 +139,14 @@ async function abrir(browser, url, r) {
       };
       window.__TAURI__ = {
         core: {
-          invoke: async (cmd) => {
+          invoke: async (cmd, args) => {
+            // O que a página pediu, para o caso 14 conferir o link da conversa.
+            window.chamadas?.push({ cmd, args });
             if (cmd === "snapshot") return JSON.parse(JSON.stringify(testTable.snapshot));
+            // A conversa também é um objeto novo a cada pedido, como a ponte a manda.
+            if (cmd === "messages" && Array.isArray(testTable.messages)) {
+              return JSON.parse(JSON.stringify(testTable.messages));
+            }
             return testTable[cmd] ?? null;
           },
         },
@@ -1049,6 +1082,883 @@ async function abrir(browser, url, r) {
     }
     assert.ok(caso11.mesmoEntrar, "caso 11: o ENTRAR da sala 1 trocou de nó com o tique");
 
+    // ------------------------------------------------------------------------
+    // O resto da pendência 63 (lote R63 da F5): o que o tique de 500 ms ainda
+    // refazia sem mudança nenhuma. Medido em 16/10, no Chromium e no WebKit
+    // da bancada: o contador, a telemetria e o `#voz-estado` trocavam o nó de
+    // texto em todo tique, mesmo com o texto igual; as regiões de MOD tiravam
+    // e punham o conteúdo e trocavam o botão da ação; e a conversa era refeita
+    // inteira a cada mensagem nova, a cada pessoa que chegava e a cada retrato
+    // que mudava. Com isso iam o foco, a seleção e o nó do leitor de tela.
+    // Todos pelo tique, como no caso 10: é ele que redesenha a sessão parada.
+    // ------------------------------------------------------------------------
+
+    // 12. O texto que não mudou não é reescrito: o contador `#pessoas-conta`,
+    //     a telemetria do rodapé e o `#voz-estado`, que é região viva. Com o
+    //     retrato igual, nenhuma mutação neles (fora o relógio do UPTIME, que
+    //     anda a cada segundo, e o `#telemetria-mods`, que é do caso 13), o nó
+    //     de texto é o mesmo e a seleção fica. Quando o texto muda, ele muda
+    //     no mesmo nó, e um número que não mudou não perde a seleção.
+    const pagina12 = await abrir(browser, url, BASE);
+    const caso12 = await pagina12.page.evaluate(async () => {
+      const tique = () => new Promise((ok) => setTimeout(ok, 1200));
+      const $id = (id) => document.getElementById(id);
+      const conta = $id("pessoas-conta");
+      const voz = $id("voz-estado");
+      const rodape = document.querySelector("footer.telemetria");
+      const uptime = $id("tel-uptime");
+      const modsDoRodape = $id("telemetria-mods");
+      const observar = (el) => {
+        const registros = [];
+        const observador = new MutationObserver((rs) => registros.push(...rs));
+        observador.observe(el, { subtree: true, childList: true, attributes: true, characterData: true });
+        return () => {
+          registros.push(...observador.takeRecords());
+          observador.disconnect();
+          return registros;
+        };
+      };
+      // O rodapé sem o relógio, que anda sozinho, e sem a região de MOD.
+      const doRodape = (registros) => registros.filter((r) =>
+        r.target !== uptime && r.target.parentNode !== uptime && !modsDoRodape.contains(r.target));
+      const descrever = (registros) => registros.map((r) => {
+        const alvo = r.target.nodeType === Node.TEXT_NODE ? r.target.parentElement : r.target;
+        return `${r.type}${r.attributeName ? `:${r.attributeName}` : ""}@${alvo?.id || alvo?.className || alvo?.tagName}`;
+      });
+      const selecionar = (no) => {
+        const faixa = document.createRange();
+        faixa.selectNodeContents(no);
+        getSelection().removeAllRanges();
+        getSelection().addRange(faixa);
+        return getSelection().toString();
+      };
+      const texto = (id) => $id(id).firstChild;
+      const nosDeTexto = () => ({
+        conta: conta.firstChild, voz: voz.firstChild, jitter: texto("tel-jit"), sinal: texto("tel-sinal-valor"),
+      });
+
+      // a) O mesmo retrato: o contador selecionado, e as três regiões observadas.
+      const nosA = nosDeTexto();
+      const selA = selecionar(conta);
+      const pararConta = observar(conta);
+      const pararVoz = observar(voz);
+      const pararRodape = observar(rodape);
+      let antes = desenhado;
+      const uptimeAntes = texto("tel-uptime");
+      const relogioAntes = uptime.textContent;
+      // O relógio adiantado cinco segundos: em 1,2 s ele pode não virar de
+      // segundo entre o desenho de antes e o de depois, e o caso não pode
+      // depender da fase do tique.
+      comecoDaSessao -= 5000;
+      await tique();
+      const nosDepoisA = nosDeTexto();
+      const igual = {
+        redesenhou: desenhado !== antes && desenhado !== null,
+        selecao: [selA, getSelection().toString()],
+        trocados: Object.keys(nosA).filter((nome) => nosA[nome] === null || !nosA[nome].isConnected
+          || nosDepoisA[nome] !== nosA[nome]),
+        conta: descrever(pararConta()),
+        voz: descrever(pararVoz()),
+        rodape: descrever(doRodape(pararRodape())),
+        // O relógio muda, e muda no mesmo nó.
+        relogio: [relogioAntes, uptime.textContent],
+        relogioMesmoNo: texto("tel-uptime") === uptimeAntes && uptimeAntes.isConnected,
+      };
+
+      // b) A telemetria muda: o ATRASO anda, o JITTER não. A seleção no JITTER
+      //    fica, e o ATRASO muda no mesmo nó.
+      const jitter = texto("tel-jit");
+      const atraso = texto("tel-rtt");
+      const selB = selecionar($id("tel-jit"));
+      antes = desenhado;
+      const comAtraso = structuredClone(testTable.snapshot);
+      comAtraso.telemetry.rtt_ms = 77;
+      testTable.snapshot = comAtraso;
+      await tique();
+      const telemetria = {
+        redesenhou: desenhado !== antes && desenhado?.telemetry?.rtt_ms === 77,
+        selecao: [selB, getSelection().toString()],
+        jitterMesmoNo: texto("tel-jit") === jitter && jitter.isConnected,
+        atrasoMesmoNo: texto("tel-rtt") === atraso && atraso.isConnected,
+        atraso: $id("tel-rtt").textContent,
+      };
+
+      // c) O `#voz-estado`, selecionado, com o retrato igual; e depois quem usa
+      //    começa a falar: o texto muda, no mesmo nó, e só ele muda.
+      const vozTexto = voz.firstChild;
+      const selC = selecionar(voz);
+      let pararVozC = observar(voz);
+      antes = desenhado;
+      await tique();
+      const vozIgual = {
+        redesenhou: desenhado !== antes && desenhado !== null,
+        selecao: [selC, getSelection().toString()],
+        mutacoes: descrever(pararVozC()),
+        mesmoNo: voz.firstChild === vozTexto && vozTexto.isConnected,
+      };
+      pararVozC = observar(voz);
+      antes = desenhado;
+      const falando = structuredClone(testTable.snapshot);
+      falando.speaking = true;
+      testTable.snapshot = falando;
+      await tique();
+      const registrosVoz = pararVozC();
+      const vozMuda = {
+        redesenhou: desenhado !== antes && desenhado?.speaking === true,
+        texto: voz.textContent,
+        mesmoNo: voz.firstChild === vozTexto && vozTexto.isConnected,
+        deNo: registrosVoz.filter((r) => r.type === "childList").length,
+        deTexto: registrosVoz.filter((r) => r.type === "characterData").length,
+      };
+
+      // d) A média da sala chega, e fica: do travessão (não medido) ao número,
+      //    no mesmo nó; e o retrato seguinte, igual, não muda nada na célula.
+      const sinalTexto = texto("tel-sinal-valor");
+      antes = desenhado;
+      const comMedia = structuredClone(testTable.snapshot);
+      comMedia.voice_rooms[0].sync = { ratio: 88, band: "Nominal" };
+      testTable.snapshot = comMedia;
+      await tique();
+      const pararCelula = observar($id("tel-sinal"));
+      const antesD = desenhado;
+      await tique();
+      const media = {
+        redesenhou: antesD !== antes && desenhado !== antesD && desenhado?.voice_rooms?.[0]?.sync?.ratio === 88,
+        valor: $id("tel-sinal-valor").textContent,
+        ausente: $id("tel-sinal-valor").classList.contains("ausente"),
+        title: $id("tel-sinal-valor").getAttribute("title"),
+        mesmoNo: texto("tel-sinal-valor") === sinalTexto && sinalTexto.isConnected,
+        mutacoes: descrever(pararCelula()),
+      };
+
+      // e) Alguém chega ao servidor: o contador muda, no mesmo nó.
+      const contaTexto = conta.firstChild;
+      antes = desenhado;
+      const comMais = structuredClone(testTable.snapshot);
+      comMais.presentes.push({ ...comMais.presentes[1], id: 900, nickname: "recem-chegada-12", is_self: false });
+      testTable.snapshot = comMais;
+      await tique();
+      const contador = {
+        redesenhou: desenhado !== antes && desenhado?.presentes?.length === comMais.presentes.length,
+        texto: conta.textContent,
+        mesmoNo: conta.firstChild === contaTexto && contaTexto.isConnected,
+      };
+      getSelection().removeAllRanges();
+      return { igual, telemetria, vozIgual, vozMuda, media, contador };
+    });
+    assert.deepEqual(pagina12.errors, [], "caso 12: erros na página");
+    await pagina12.page.close();
+    {
+      const { igual, telemetria, vozIgual, vozMuda, media, contador } = caso12;
+      assert.ok(igual.redesenhou, "caso 12 (a): o tique não redesenhou em 1,2 s, e o caso não mediu nada");
+      assert.equal(
+        igual.selecao[1], igual.selecao[0],
+        `o mesmo retrato, redesenhado pelo tique, desfez a seleção no contador: ${JSON.stringify(igual.selecao[0])} ` +
+          `→ ${JSON.stringify(igual.selecao[1])}. O nó de texto é trocado mesmo com o texto igual`,
+      );
+      assert.deepEqual(igual.trocados, [], `o mesmo retrato trocou o nó de texto de: ${igual.trocados.join(", ")}`);
+      assert.deepEqual(igual.conta, [], `o mesmo retrato fez mutações no contador: ${igual.conta.join(", ")}`);
+      assert.deepEqual(
+        igual.voz, [],
+        `o mesmo retrato fez mutações no #voz-estado, que é região viva (role="status"): ${igual.voz.join(", ")}`,
+      );
+      assert.deepEqual(
+        igual.rodape, [],
+        `o mesmo retrato fez mutações na telemetria, fora o relógio: ${igual.rodape.join(", ")}`,
+      );
+      assert.notEqual(igual.relogio[1], igual.relogio[0], "caso 12 (a): o UPTIME não andou em 1,2 s");
+      assert.ok(igual.relogioMesmoNo, "o UPTIME andou e trocou de nó de texto: o número muda, o nó fica");
+      assert.ok(telemetria.redesenhou, "caso 12 (b): o ATRASO novo não chegou à tela pelo tique");
+      assert.equal(telemetria.atraso, "77ms", `o ATRASO diz ${JSON.stringify(telemetria.atraso)}`);
+      assert.equal(
+        telemetria.selecao[1], telemetria.selecao[0],
+        `o ATRASO mudou e a seleção no JITTER, que não mudou, foi de ${JSON.stringify(telemetria.selecao[0])} ` +
+          `a ${JSON.stringify(telemetria.selecao[1])}`,
+      );
+      assert.ok(telemetria.jitterMesmoNo, "o ATRASO mudou e o JITTER, que não mudou, trocou de nó de texto");
+      assert.ok(telemetria.atrasoMesmoNo, "o ATRASO mudou trocando o nó de texto: o número muda, o nó fica");
+      assert.ok(vozIgual.redesenhou, "caso 12 (c): o tique não redesenhou em 1,2 s");
+      assert.equal(
+        vozIgual.selecao[1], vozIgual.selecao[0],
+        `o mesmo retrato desfez a seleção no #voz-estado: ${JSON.stringify(vozIgual.selecao[0])} → ` +
+          `${JSON.stringify(vozIgual.selecao[1])}`,
+      );
+      assert.deepEqual(vozIgual.mutacoes, [], `o mesmo retrato mexeu no #voz-estado: ${vozIgual.mutacoes.join(", ")}`);
+      assert.ok(vozIgual.mesmoNo, "o mesmo retrato trocou o nó de texto do #voz-estado");
+      assert.ok(vozMuda.redesenhou, "caso 12 (c): o retrato com quem usa falando não chegou à tela pelo tique");
+      assert.ok(vozMuda.texto.endsWith(" · no ar"), `o #voz-estado diz ${JSON.stringify(vozMuda.texto)}, e quem usa está falando`);
+      assert.ok(
+        vozMuda.mesmoNo && vozMuda.deNo === 0,
+        `o #voz-estado mudou trocando o nó de texto (${vozMuda.deNo} mutações de nó)`,
+      );
+      assert.ok(vozMuda.deTexto > 0, "o #voz-estado mudou sem mutação de texto: a bancada não mediu o que pensa");
+      assert.ok(media.redesenhou, "caso 12 (d): a média da sala não chegou à tela, ou o tique não a redesenhou");
+      assert.equal(media.valor, "88", `a média da sala diz ${JSON.stringify(media.valor)}`);
+      assert.ok(!media.ausente && media.title === null, "a média medida ainda está marcada como não medida");
+      assert.ok(media.mesmoNo, "a média passou do travessão ao número trocando o nó de texto");
+      assert.deepEqual(media.mutacoes, [], `a mesma média, redesenhada pelo tique, mexeu na célula: ${media.mutacoes.join(", ")}`);
+      assert.ok(contador.redesenhou, "caso 12 (e): quem chegou não chegou à tela pelo tique");
+      assert.equal(contador.texto, `${NA_SALA} EM SALAS · ${PESSOAS + 1} NO SERVIDOR`, `o contador diz ${JSON.stringify(contador.texto)}`);
+      assert.ok(contador.mesmoNo, "o contador mudou trocando o nó de texto");
+    }
+
+    // 13. As regiões de MOD (`#roster-mods`, `pessoas.lista`, e
+    //     `#telemetria-mods`, `status.barra`; o caminho é o `aplicarARegiao`).
+    //     Sem MOD, o tique não mexe nelas (nem no `hidden`). Com um MOD que
+    //     contribui um texto e uma ação em cada uma: com o retrato igual,
+    //     nenhum nó sai nem entra, o conteúdo do MOD é o mesmo nó, o botão da
+    //     ação é o mesmo nó com o foco nele, e a seleção no texto do MOD fica.
+    //     O clique na ação depois do tique chega ao MOD certo. Uma ação que sai
+    //     tira só o botão dela: a do outro MOD, com o foco, fica (a ação tem
+    //     chave; casada pela posição, o botão de quem saiu viraria o do outro).
+    //     E o clique depois de um retrato que muda o dado da ação age com o
+    //     dado de agora: na região `compositor`, o mesmo caminho, o canal
+    //     aberto muda e o mesmo botão, com o foco, manda o canal novo.
+    const pagina13 = await abrir(browser, url, BASE);
+    const caso13 = await pagina13.page.evaluate(async () => {
+      const tique = () => new Promise((ok) => setTimeout(ok, 1200));
+      const $id = (id) => document.getElementById(id);
+      const observar = (...els) => {
+        const registros = [];
+        const observador = new MutationObserver((rs) => registros.push(...rs));
+        for (const el of els) {
+          observador.observe(el, { subtree: true, childList: true, attributes: true, characterData: true });
+        }
+        return () => {
+          registros.push(...observador.takeRecords());
+          observador.disconnect();
+          return registros.map((r) => {
+            const alvo = r.target.nodeType === Node.TEXT_NODE ? r.target.parentElement : r.target;
+            return `${r.type}${r.attributeName ? `:${r.attributeName}` : ""}@${alvo?.id || alvo?.className || alvo?.tagName}`;
+          });
+        };
+      };
+      const selecionar = (no) => {
+        const faixa = document.createRange();
+        faixa.selectNodeContents(no);
+        getSelection().removeAllRanges();
+        getSelection().addRange(faixa);
+        return getSelection().toString();
+      };
+      const lista = $id("roster-mods");
+      const barra = $id("telemetria-mods");
+      const compositor = $id("compositor-mods");
+
+      // a) Sem MOD: as regiões vazias e escondidas, e o tique não mexe nelas.
+      let parar = observar(lista, barra, compositor);
+      let antes = desenhado;
+      await tique();
+      const semMod = {
+        redesenhou: desenhado !== antes && desenhado !== null,
+        escondidas: lista.hidden && barra.hidden,
+        mutacoes: parar(),
+      };
+
+      // O MOD, pelo registro de verdade; o que ele recebe fica anotado.
+      const entregues = [];
+      const texto = (dentro) => [{ forma: "texto", chave: "t", dentro }];
+      const instanciaA = registrarMod("bancada/regioes-a", [
+        { ponto: "pessoas.lista", modo: "adicionar", prioridade: 0, conteudo: texto("faixa do MOD acima da lista") },
+        { ponto: "pessoas.lista", modo: "adicionar", prioridade: 0, acaoPrincipal: "a-lista", rotulo: "AÇÃO A", nomeAcessivel: "ação a" },
+        { ponto: "status.barra", modo: "adicionar", prioridade: 0, conteudo: texto("MOD 42 ms") },
+        { ponto: "status.barra", modo: "adicionar", prioridade: 0, acaoPrincipal: "a-barra", rotulo: "AÇÃO NA BARRA", nomeAcessivel: "ação na barra" },
+        { ponto: "compositor", modo: "adicionar", prioridade: 0, acaoPrincipal: "a-escrever", rotulo: "INSERIR", nomeAcessivel: "inserir" },
+      ]);
+      const instanciaB = registrarMod("bancada/regioes-b", [
+        { ponto: "pessoas.lista", modo: "adicionar", prioridade: 0, acaoPrincipal: "b-lista", rotulo: "AÇÃO B", nomeAcessivel: "ação b" },
+      ]);
+      for (const instancia of [instanciaA, instanciaB]) {
+        instancia.executor.entregar = (mensagem) => { entregues.push({ mod: instancia.id, ...mensagem }); };
+      }
+      await quadros(3);
+      desenhar(testTable.snapshot);
+      const acao = (regiao, nome) => regiao.querySelector(`button[data-acao-de-mod="${nome}"]`);
+      const conteudo = (regiao) => regiao.querySelector(".contribuicao-de-mod");
+      const textoDoMod = (regiao) => regiao.querySelector(".contribuicao-de-mod .regiao-de-mod-parte") ?? conteudo(regiao);
+      const nos = () => ({
+        listaConteudo: conteudo(lista), listaA: acao(lista, "a-lista"), listaB: acao(lista, "b-lista"),
+        barraConteudo: conteudo(barra), barraAcao: acao(barra, "a-barra"), escrever: acao(compositor, "a-escrever"),
+      });
+      const trocados = (antesDele) => {
+        const agora = nos();
+        return Object.keys(antesDele).filter((nome) => antesDele[nome] === null || !antesDele[nome].isConnected
+          || agora[nome] !== antesDele[nome]);
+      };
+      const ondeEstaOFoco = () => {
+        const ativo = document.activeElement;
+        return ativo?.dataset?.acaoDeMod ? `a ação ${ativo.dataset.acaoDeMod}` : (ativo?.tagName ?? "nada");
+      };
+
+      // b) O retrato igual, duas vezes: o foco na ação de uma região e a
+      //    seleção no texto do MOD da outra, e depois o contrário.
+      const passada = async (focar, selecionarEm) => {
+        const antesDela = nos();
+        focar.focus();
+        const focado = document.activeElement === focar;
+        const selecao = selecionar(textoDoMod(selecionarEm));
+        const pararDela = observar(lista, barra);
+        const retrato = desenhado;
+        await tique();
+        return {
+          redesenhou: desenhado !== retrato && desenhado !== null,
+          focado,
+          focoFicou: focado && document.activeElement === focar && focar.isConnected,
+          foco: ondeEstaOFoco(),
+          selecao: [selecao, getSelection().toString()],
+          trocados: trocados(antesDela),
+          mutacoes: pararDela(),
+        };
+      };
+      const naLista = await passada(acao(lista, "a-lista"), barra);
+      const naBarra = await passada(acao(barra, "a-barra"), lista);
+      getSelection().removeAllRanges();
+
+      // c) O clique na ação da lista, que atravessou os tiques, chega ao MOD A.
+      entregues.length = 0;
+      acao(lista, "a-lista").click();
+      const clique = entregues.map((e) => `${e.mod}:${e.nome}:${e.acao}`);
+
+      // d) A ação do MOD A sai da lista; o foco está na do MOD B, que fica.
+      const botaoB = acao(lista, "b-lista");
+      botaoB.focus();
+      const focadoB = document.activeElement === botaoB;
+      const botaoA = acao(lista, "a-lista");
+      const handleA = [...contribuicoesDosMods.porHandle.values()]
+        .find((c) => c.mod === "bancada/regioes-a" && c.acaoPrincipal === "a-lista").handle;
+      contribuicoesDosMods.revogar(handleA);
+      antes = desenhado;
+      await tique();
+      entregues.length = 0;
+      acao(lista, "b-lista")?.click();
+      const saiUma = {
+        redesenhou: desenhado !== antes && desenhado !== null,
+        focado: focadoB,
+        aSaiu: !botaoA.isConnected && acao(lista, "a-lista") === null,
+        bFicou: acao(lista, "b-lista") === botaoB && botaoB.isConnected && document.activeElement === botaoB,
+        foco: ondeEstaOFoco(),
+        rotuloB: botaoB.textContent,
+        clique: entregues.map((e) => `${e.mod}:${e.nome}:${e.acao}`),
+      };
+
+      // e) O dado da ação muda: o canal aberto passa do 1 ao 2. A ação do
+      //    compositor é o mesmo botão, com o foco, e o clique manda o canal 2.
+      const escrever = acao(compositor, "a-escrever");
+      escrever.focus();
+      const focadoE = document.activeElement === escrever;
+      const canalAntes = escrever.dataset.canalDaAcao;
+      antes = desenhado;
+      const outroCanal = structuredClone(testTable.snapshot);
+      for (const canal of outroCanal.channels) canal.open = canal.id === 2;
+      testTable.snapshot = outroCanal;
+      await tique();
+      entregues.length = 0;
+      document.activeElement?.click();
+      const dadoNovo = {
+        redesenhou: desenhado !== antes && desenhado?.channels?.find((c) => c.id === 2)?.open === true,
+        focado: focadoE,
+        mesmoNo: acao(compositor, "a-escrever") === escrever && escrever.isConnected,
+        focoFicou: document.activeElement === escrever,
+        foco: ondeEstaOFoco(),
+        canalAntes,
+        clique: entregues.map((e) => `${e.mod}:${e.acao}:canal ${e.canal}`),
+      };
+
+      // f) A mesma ação contribuída duas vezes pelo mesmo MOD («X1» e «X2»),
+      //    com o foco no segundo botão (rodada 1, I1). A chave do botão é o MOD
+      //    e a ação, contados: sem a contagem, as duas teriam a mesma chave, e
+      //    o segundo seria refeito a cada tique, com o foco no `<body>`.
+      registrarMod("bancada/regioes-c", [
+        { ponto: "pessoas.lista", modo: "adicionar", prioridade: 0, acaoPrincipal: "x", rotulo: "X1", nomeAcessivel: "x1" },
+        { ponto: "pessoas.lista", modo: "adicionar", prioridade: 0, acaoPrincipal: "x", rotulo: "X2", nomeAcessivel: "x2" },
+      ]);
+      await quadros(3);
+      desenhar(testTable.snapshot);
+      const repetidas = [...lista.querySelectorAll('button[data-acao-de-mod="x"]')];
+      const segundo = repetidas.find((b) => b.textContent === "X2") ?? null;
+      segundo?.focus();
+      const focadoF = Boolean(segundo) && document.activeElement === segundo;
+      parar = observar(lista);
+      antes = desenhado;
+      await tique();
+      const repetida = {
+        redesenhou: desenhado !== antes && desenhado !== null,
+        botoes: repetidas.map((b) => b.textContent),
+        focado: focadoF,
+        mesmoNo: Boolean(segundo) && [...lista.querySelectorAll('button[data-acao-de-mod="x"]')]
+          .find((b) => b.textContent === "X2") === segundo,
+        noDocumento: Boolean(segundo?.isConnected),
+        focoFicou: Boolean(segundo) && document.activeElement === segundo,
+        foco: ondeEstaOFoco(),
+        mutacoes: parar(),
+      };
+      return { semMod, naLista, naBarra, clique, saiUma, dadoNovo, repetida };
+    });
+    assert.deepEqual(pagina13.errors, [], "caso 13: erros na página");
+    await pagina13.page.close();
+    {
+      const { semMod, naLista, naBarra, clique, saiUma, dadoNovo, repetida } = caso13;
+      assert.ok(semMod.redesenhou, "caso 13 (a): o tique não redesenhou em 1,2 s");
+      assert.ok(semMod.escondidas, "caso 13 (a): sem MOD, as regiões de MOD não estão escondidas");
+      assert.deepEqual(semMod.mutacoes, [], `sem MOD, o tique mexeu nas regiões de MOD: ${semMod.mutacoes.join(", ")}`);
+      for (const [nome, p] of [["#roster-mods", naLista], ["#telemetria-mods", naBarra]]) {
+        assert.ok(p.redesenhou, `caso 13, ${nome}: o tique não redesenhou em 1,2 s`);
+        assert.ok(p.focado, `caso 13, ${nome}: a bancada não conseguiu pôr o foco na ação do MOD`);
+        assert.ok(p.selecao[0].length > 0, `caso 13, ${nome}: a bancada não conseguiu selecionar o texto do MOD`);
+        assert.ok(
+          p.focoFicou,
+          `o mesmo retrato, redesenhado pelo tique, tirou o foco da ação do MOD em ${nome}: o foco está em ${p.foco}`,
+        );
+        assert.equal(
+          p.selecao[1], p.selecao[0],
+          `o mesmo retrato desfez a seleção no texto do MOD (foco em ${nome}): ${JSON.stringify(p.selecao[0])} → ` +
+            `${JSON.stringify(p.selecao[1])}`,
+        );
+        assert.deepEqual(p.trocados, [], `o mesmo retrato trocou ou tirou do documento: ${p.trocados.join(", ")}`);
+        assert.deepEqual(p.mutacoes, [], `o mesmo retrato mexeu nas regiões de MOD (foco em ${nome}): ${p.mutacoes.join(", ")}`);
+      }
+      assert.deepEqual(clique, ["bancada/regioes-a:acao:a-lista"], `o clique na ação da lista entregou ${JSON.stringify(clique)}`);
+      assert.ok(saiUma.redesenhou, "caso 13 (d): o tique não redesenhou em 1,2 s");
+      assert.ok(saiUma.focado, "caso 13 (d): a bancada não conseguiu pôr o foco na ação do MOD B");
+      assert.ok(saiUma.aSaiu, "a ação do MOD A saiu do registro e o botão dela ficou na lista");
+      assert.ok(
+        saiUma.bFicou,
+        `a ação do MOD A saiu e a do MOD B, com o foco, não é mais o mesmo botão (o foco está em ${saiUma.foco}, ` +
+          `e o botão de B diz ${JSON.stringify(saiUma.rotuloB)})`,
+      );
+      assert.deepEqual(saiUma.clique, ["bancada/regioes-b:acao:b-lista"], `o clique na ação de B entregou ${JSON.stringify(saiUma.clique)}`);
+      assert.ok(dadoNovo.redesenhou, "caso 13 (e): o canal aberto novo não chegou à tela pelo tique");
+      assert.ok(dadoNovo.focado && dadoNovo.canalAntes === "1", `caso 13 (e): a ação do compositor não estava focada no canal 1 (${dadoNovo.canalAntes})`);
+      assert.ok(
+        dadoNovo.mesmoNo && dadoNovo.focoFicou,
+        `o canal aberto mudou e a ação do compositor, com o foco, não é o mesmo botão: o foco está em ${dadoNovo.foco}`,
+      );
+      assert.deepEqual(
+        dadoNovo.clique, ["bancada/regioes-a:a-escrever:canal 2"],
+        `o clique na ação focada, depois de o canal aberto passar ao 2, entregou ${JSON.stringify(dadoNovo.clique)}. ` +
+          "Com o canal 1, o botão reaproveitado age com o dado do retrato em que nasceu",
+      );
+      assert.ok(repetida.redesenhou, "caso 13 (f): o tique não redesenhou em 1,2 s");
+      assert.deepEqual(repetida.botoes, ["X1", "X2"], `caso 13 (f): a ação repetida desenhou ${JSON.stringify(repetida.botoes)}`);
+      assert.ok(repetida.focado, "caso 13 (f): a bancada não conseguiu pôr o foco no segundo botão da ação repetida");
+      assert.ok(
+        repetida.mesmoNo && repetida.noDocumento && repetida.focoFicou,
+        `a mesma ação, contribuída duas vezes, perdeu o foco do segundo botão no tique: o botão ` +
+          `${repetida.mesmoNo ? "é" : "não é"} o mesmo nó, ${repetida.noDocumento ? "está" : "saiu"} do documento, ` +
+          `e o foco está em ${repetida.foco}. A chave do botão perdeu a contagem`,
+      );
+      assert.deepEqual(repetida.mutacoes, [], `com a ação repetida, o tique mexeu no #roster-mods: ${repetida.mutacoes.join(", ")}`);
+    }
+
+    // 14. A conversa reconciliada pelo id da mensagem. Ela não é refeita a cada
+    //     tique — só quando a revisão das mensagens anda, ou quando os retratos
+    //     mudam (`sincronizarRetratos`) —, mas era refeita **inteira** nessas
+    //     vezes: o foco no link de uma mensagem caía no `<body>`, a seleção se
+    //     desfazia, e o leitor de tela perdia o nó (433 de 434 ids AX trocados
+    //     com uma mensagem nova, 512 de 513 com alguém chegando ao servidor,
+    //     sem nada mudar na conversa). Com 60 mensagens, pelo tique:
+    //     a) alguém chega ao servidor: nada muda na lista;
+    //     b) o retrato de quem escreve muda: o avatar muda no lugar, e a imagem
+    //        aparece de fato (o `style` passa pelo CSSOM: a CSP recusa o
+    //        atributo escrito), sem nó tirado nem posto na lista;
+    //     c) uma mensagem nova, com a conversa rolada para cima: ela entra, e
+    //        nenhuma outra sai nem muda; a rolagem fica onde estava;
+    //     d) outra, com a conversa no fim: a rolagem segue o fim;
+    //     e) uma mensagem sai: só o nó dela sai;
+    //     f) duas mensagens são editadas: o REMOVER de uma e o link da outra são
+    //        os mesmos nós, e agem com o dado de agora.
+    //     Em todos, o foco no link de uma mensagem e a seleção no corpo de outra
+    //     ficam, e cada `li` é o mesmo nó.
+    const agora = Math.floor(Date.now() / 1000);
+    const CONVERSA = Array.from({ length: 60 }, (_, i) => ({
+      id: i + 1,
+      channel: 1,
+      author: (i % 3) + 2,
+      author_nickname: apelido((i % 3) + 2),
+      at_seconds: agora - (60 - i) * 1200,
+      body: i === 10
+        ? `mensagem ${i}: veja https://exemplo.br/pagina-${i} antes de sair`
+        : i === 20
+          ? `mensagem ${i}: o túnel do norte está fechado até amanhã, e o desvio antigo continua aberto`
+          : `mensagem ${i}: texto comum da conversa, para ela ter altura e rolar`,
+      own: false,
+      edited: false,
+      attachment: null,
+      estado: "Confirmada",
+      client_message_id: null,
+    }));
+    const RETRATO_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const pagina14 = await abrir(browser, url, BASE);
+    const caso14 = await pagina14.page.evaluate(async ({ conversa, png }) => {
+      const tique = () => new Promise((ok) => setTimeout(ok, 1200));
+      const lista = document.getElementById("lista-mensagens");
+      // Quantas vezes a conversa foi desenhada: a prova de que cada passo
+      // redesenhou a lista, e não só o retrato.
+      let desenhosDaConversa = 0;
+      const desenharDeVerdade = window.desenharMensagens;
+      window.desenharMensagens = function contado(...args) {
+        desenhosDaConversa += 1;
+        return desenharDeVerdade.apply(this, args);
+      };
+      window.chamadas = [];
+      const liDe = (id) => lista.querySelector(`button[data-moderar-mensagem="${id}"]`)?.closest("li") ?? null;
+      const linhas = () => new Map([...lista.querySelectorAll(":scope > li.mensagem")]
+        .map((li) => [li.querySelector("button[data-moderar-mensagem]")?.dataset.moderarMensagem, li]));
+      const observar = () => {
+        const registros = [];
+        const observador = new MutationObserver((rs) => registros.push(...rs));
+        observador.observe(lista, { subtree: true, childList: true, attributes: true, characterData: true });
+        return () => {
+          registros.push(...observador.takeRecords());
+          observador.disconnect();
+          return registros;
+        };
+      };
+      const naLista = (registros) => registros.filter((r) => r.target === lista && r.type === "childList");
+      const tirados = (registros) => naLista(registros).flatMap((r) => [...r.removedNodes]);
+      const postos = (registros) => naLista(registros).flatMap((r) => [...r.addedNodes]);
+      const trocadas = (antes, fora = null) => {
+        const depois = linhas();
+        return [...antes].filter(([id, li]) => id !== fora && (depois.get(id) !== li || !li.isConnected)).map(([id]) => id);
+      };
+      const link = () => liDe(11)?.querySelector(".link-externo") ?? null;
+      const corpo20 = () => liDe(21)?.querySelector(".corpo")?.firstChild ?? null;
+      const comRevisao = (mensagens) => {
+        testTable.messages = mensagens;
+        const s = structuredClone(testTable.snapshot);
+        s.messages_revision += 1;
+        testTable.snapshot = s;
+      };
+
+      // A conversa chega, e a página a desenha.
+      comRevisao(conversa);
+      for (let i = 0; i < 60 && lista.querySelectorAll("li.mensagem").length < conversa.length; i += 1) await quadros(2);
+      await tique();
+
+      // O foco no link da mensagem 11 e a seleção no corpo da 21, que valem
+      // através de todos os passos; e a conversa rolada para cima.
+      const oLink = link();
+      oLink?.focus();
+      const oCorpo = corpo20();
+      const faixa = document.createRange();
+      faixa.setStart(oCorpo, 14);
+      faixa.setEnd(oCorpo, 60);
+      getSelection().removeAllRanges();
+      getSelection().addRange(faixa);
+      const selecionado = getSelection().toString();
+      lista.scrollTop = 800;
+      const preparo = {
+        mensagens: lista.querySelectorAll("li.mensagem").length,
+        focado: Boolean(oLink) && document.activeElement === oLink,
+        selecionado,
+        rolagem: lista.scrollTop,
+        cabe: lista.scrollHeight - lista.clientHeight,
+      };
+      const ficou = () => ({
+        foco: Boolean(oLink) && oLink.isConnected && document.activeElement === oLink,
+        focoEm: document.activeElement?.className || document.activeElement?.tagName,
+        selecao: getSelection().toString(),
+      });
+      const passo = async (mudar) => {
+        const antes = linhas();
+        const desenhos = desenhosDaConversa;
+        const parar = observar();
+        mudar();
+        await tique();
+        const registros = parar();
+        return { antes, registros, redesenhou: desenhosDaConversa > desenhos, ...ficou() };
+      };
+
+      // a) Alguém chega ao servidor, e não escreveu nada.
+      let r = await passo(() => {
+        const s = structuredClone(testTable.snapshot);
+        s.presentes.push({ ...s.presentes[1], id: 901, nickname: "recem-chegada-14", is_self: false });
+        testTable.snapshot = s;
+      });
+      const chega = {
+        redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
+        trocadas: trocadas(r.antes), mutacoes: r.registros.length, rolagem: lista.scrollTop,
+      };
+
+      // b) O retrato de quem escreve muda: a revisão dos retratos anda, e a
+      //    ponte passa a devolver uma imagem.
+      const avatar = liDe(1)?.querySelector(".mensagem-avatar");
+      testTable.imagem_da_pessoa = png;
+      r = await passo(() => {
+        const s = structuredClone(testTable.snapshot);
+        s.person_icons_revision = (s.person_icons_revision ?? 0) + 1;
+        testTable.snapshot = s;
+      });
+      const foraDoAvatar = r.registros.filter((reg) => {
+        const no = reg.target.nodeType === Node.ELEMENT_NODE ? reg.target : reg.target.parentElement;
+        return !no?.closest?.(".mensagem-avatar");
+      });
+      const retrato = {
+        redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
+        trocadas: trocadas(r.antes),
+        naLista: naLista(r.registros).length,
+        foraDoAvatar: foraDoAvatar.length,
+        mutacoes: r.registros.length,
+        mesmoAvatar: Boolean(avatar) && liDe(1)?.querySelector(".mensagem-avatar") === avatar,
+        imagem: avatar ? getComputedStyle(avatar).backgroundImage.slice(0, 22) : null,
+        rolagem: lista.scrollTop,
+      };
+
+      // c) Uma mensagem nova, com a conversa rolada para cima.
+      const comNova = (mensagens, id) => [...mensagens, {
+        ...mensagens[mensagens.length - 1], id, author: 4, author_nickname: "p-004",
+        at_seconds: Math.floor(Date.now() / 1000), body: `mensagem nova ${id}`,
+      }];
+      lista.scrollTop = 800;
+      const rolagemAntes = lista.scrollTop;
+      r = await passo(() => comRevisao(comNova(testTable.messages, 61)));
+      const nova = {
+        redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
+        trocadas: trocadas(r.antes),
+        tirados: tirados(r.registros).length,
+        postos: postos(r.registros).map((no) => no.className),
+        dentroDeOutras: r.registros.filter((reg) => reg.target !== lista).length,
+        entrou: Boolean(liDe(61)),
+        rolagem: [rolagemAntes, lista.scrollTop],
+      };
+
+      // d) Outra, com a conversa no fim: ela segue o fim.
+      lista.scrollTop = lista.scrollHeight;
+      r = await passo(() => comRevisao(comNova(testTable.messages, 62)));
+      const noFim = {
+        redesenhou: r.redesenhou,
+        trocadas: trocadas(r.antes),
+        entrou: Boolean(liDe(62)),
+        distanciaDoFim: lista.scrollHeight - lista.scrollTop - lista.clientHeight,
+      };
+      lista.scrollTop = 800;
+
+      // e) A mensagem 31 sai.
+      const li31 = liDe(31);
+      r = await passo(() => comRevisao(testTable.messages.filter((m) => m.id !== 31)));
+      const saiu = {
+        redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
+        trocadas: trocadas(r.antes, "31"),
+        foiEmbora: Boolean(li31) && !li31.isConnected && liDe(31) === null,
+        tirados: tirados(r.registros).map((no) => (no === li31 ? "a 31" : no.className)),
+        postos: postos(r.registros).length,
+      };
+
+      // f) A 12 e a 11 são editadas: o REMOVER da 12 e o link da 11 são os
+      //    mesmos nós, e o clique age com o texto e o endereço de agora.
+      const remover = liDe(12)?.querySelector("button.moderar-remover");
+      r = await passo(() => comRevisao(testTable.messages.map((m) => (
+        m.id === 12 ? { ...m, edited: true, body: "mensagem 11: corrigida depois" }
+          : m.id === 11 ? { ...m, edited: true, body: "mensagem 10: veja https://exemplo.br/outra-pagina antes de sair" }
+            : m))));
+      const editada = {
+        redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
+        trocadas: trocadas(r.antes),
+        mesmoRemover: Boolean(remover) && liDe(12)?.querySelector("button.moderar-remover") === remover && remover.isConnected,
+        mesmoLink: Boolean(oLink) && link() === oLink,
+      };
+      window.chamadas = [];
+      oLink?.click();
+      await quadros(2);
+      editada.abriu = window.chamadas.filter((c) => c.cmd === "abrir_no_navegador").map((c) => c.args?.url);
+      remover?.click();
+      await quadros(2);
+      editada.confirmacao = document.getElementById("moderar-consequencia")?.textContent ?? "";
+      document.getElementById("moderar-cancelar")?.click();
+
+      // g) Os nós de MOD da conversa (`conversa.mensagem`): o que um MOD
+      //    acrescenta à mensagem 5 e o corpo que ele desenha na 6 são os mesmos
+      //    nós entre um desenho e o seguinte, e uma mensagem nova não os tira
+      //    do documento — nem por um instante: o observador vê os removidos.
+      registrarMod("bancada/conversa", [
+        { ponto: "conversa.mensagem", modo: "adicionar", alvo: "5", prioridade: 0,
+          conteudo: [{ forma: "texto", chave: "t", dentro: "nota do MOD na mensagem 5" }] },
+        { ponto: "conversa.mensagem", modo: "substituir", alvo: "6", prioridade: 0,
+          conteudo: [{ forma: "texto", chave: "t", dentro: "a mensagem 6, desenhada pelo MOD" }] },
+      ]);
+      await quadros(3);
+      desenharMensagens();
+      const deMod = () => [...lista.querySelectorAll('.contribuicao-de-mod[data-ponto="conversa.mensagem"]')];
+      const nosDeModAntes = deMod();
+      const donoDe = (no) => no.closest("li")?.querySelector("button[data-moderar-mensagem]")?.dataset.moderarMensagem;
+      const donos = nosDeModAntes.map(donoDe);
+      r = await passo(() => comRevisao(comNova(testTable.messages, 63)));
+      const removidos = r.registros.flatMap((reg) => [...reg.removedNodes]);
+      const comMod = {
+        redesenhou: r.redesenhou,
+        nos: nosDeModAntes.length,
+        donos,
+        saiuDoDocumento: nosDeModAntes.filter((no) => removidos.some((m) => m === no || m.contains?.(no))).length,
+        trocados: nosDeModAntes.filter((no, i) => !no.isConnected || donoDe(no) !== donos[i]).length,
+        mesmos: deMod().length === nosDeModAntes.length && deMod().every((no, i) => no === nosDeModAntes[i]),
+        trocadas: trocadas(r.antes),
+      };
+      getSelection().removeAllRanges();
+
+      // h) Duas pendentes sem resposta, a 77 e a 78, e o foco no TENTAR DE NOVO
+      //    da 78; a 77 é gravada (rodada 1, I1). É o enlace que caiu e as
+      //    mensagens gravadas uma a uma na volta. A pendente tem a chave da
+      //    máquina (`pendente:<client_message_id>`): sem ela, as duas casariam
+      //    pela posição, o nó velho da 77 passaria a dizer a 78, e o foco cairia.
+      const agoraH = Math.floor(Date.now() / 1000);
+      const pendente = (cmid, body) => ({
+        ...testTable.messages[testTable.messages.length - 1], id: 0, own: true, author: 1,
+        author_nickname: "p-001", at_seconds: agoraH, body, edited: false, estado: "SemResposta",
+        client_message_id: cmid,
+      });
+      comRevisao([...testTable.messages, pendente("77", "primeira pendente"), pendente("78", "segunda pendente")]);
+      await tique();
+      const corpoDe = (li) => li?.querySelector(".corpo")?.textContent ?? null;
+      const liQueDiz = (texto) => [...lista.querySelectorAll(":scope > li.mensagem")].find((li) => corpoDe(li) === texto) ?? null;
+      const li77 = liQueDiz("primeira pendente");
+      const li78 = liQueDiz("segunda pendente");
+      const tentar78 = li78?.querySelector('button[data-pendente="78"][data-acao="reenviar"]') ?? null;
+      tentar78?.focus();
+      const focadoH = Boolean(tentar78) && document.activeElement === tentar78;
+      r = await passo(() => comRevisao(testTable.messages.map((m) => (m.client_message_id === "77"
+        ? { ...m, id: 500, estado: "Confirmada", client_message_id: null }
+        : m))));
+      const gravada = {
+        redesenhou: r.redesenhou,
+        achou: Boolean(li77 && li78 && tentar78),
+        focado: focadoH,
+        mesmoBotao: Boolean(tentar78) && lista.querySelector('button[data-pendente="78"][data-acao="reenviar"]') === tentar78,
+        focoFicou: Boolean(tentar78) && tentar78.isConnected && document.activeElement === tentar78,
+        focoEm: document.activeElement?.className || document.activeElement?.tagName,
+        li78Ficou: Boolean(li78) && li78.isConnected && liQueDiz("segunda pendente") === li78,
+        li77Saiu: Boolean(li77) && !li77.isConnected,
+        // Nenhuma `li` que dizia uma pendente passou a dizer a outra.
+        trocouDeTexto: [[li77, "primeira pendente"], [li78, "segunda pendente"]]
+          .filter(([li, texto]) => li?.isConnected && corpoDe(li) !== texto).map(([, texto]) => texto),
+        gravadaNaTela: Boolean(lista.querySelector('button[data-moderar-mensagem="500"]')),
+        trocadas: trocadas(r.antes, "0"),
+      };
+
+      // i) A hora do servidor volta atrás: os dias D1, D2, D1, D2 abrem quatro
+      //    divisores, dois de cada dia (rodada 1, M1). A chave do divisor é o
+      //    dia, contado: sem a contagem, o segundo divisor de cada dia seria
+      //    refeito a cada desenho. A conversa toda é trocada por estas quatro, e
+      //    depois redesenhada igual.
+      const meioDia = new Date();
+      meioDia.setHours(12, 0, 0, 0);
+      const d2 = Math.floor(meioDia.getTime() / 1000) - 86400;
+      const d1 = d2 - 86400;
+      const base = testTable.messages[0];
+      const voltaAtras = [d1, d2, d1 + 60, d2 + 60].map((at_seconds, i) => ({
+        ...base, id: 601 + i, own: false, author: 2 + (i % 2), author_nickname: `p-00${2 + (i % 2)}`,
+        at_seconds, body: `mensagem que volta no tempo ${i}`, edited: false, estado: "Confirmada", client_message_id: null,
+      }));
+      comRevisao(voltaAtras);
+      await tique();
+      const divisores = () => [...lista.querySelectorAll(":scope > li.mensagens-dia")];
+      const divisoresAntes = divisores();
+      r = await passo(() => comRevisao(structuredClone(voltaAtras)));
+      const divisoresDepois = divisores();
+      const voltaNoTempo = {
+        redesenhou: r.redesenhou,
+        divisores: divisoresAntes.length,
+        mensagens: lista.querySelectorAll(":scope > li.mensagem").length,
+        mutacoes: r.registros.length,
+        trocados: divisoresAntes.filter((no, i) => !no.isConnected || divisoresDepois[i] !== no).length,
+      };
+      window.desenharMensagens = desenharDeVerdade;
+      return { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod, gravada, voltaNoTempo };
+    }, { conversa: CONVERSA, png: RETRATO_PNG });
+    assert.deepEqual(pagina14.errors, [], "caso 14: erros na página");
+    await pagina14.page.close();
+    {
+      const { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod, gravada, voltaNoTempo } = caso14;
+      assert.equal(preparo.mensagens, CONVERSA.length, `caso 14: a conversa desenhou ${preparo.mensagens} mensagens`);
+      assert.ok(preparo.focado, "caso 14: a bancada não conseguiu pôr o foco no link da mensagem 11");
+      assert.ok(selecionado.length > 20, `caso 14: a bancada não conseguiu selecionar o corpo da 21 (${JSON.stringify(selecionado)})`);
+      assert.ok(preparo.rolagem === 800 && preparo.cabe > 1600, `caso 14: a conversa não rola o bastante (${preparo.rolagem}, ${preparo.cabe})`);
+      const ficaram = (nome, p) => {
+        assert.ok(p.redesenhou, `caso 14 (${nome}): a conversa não foi redesenhada, e o passo não mediu nada`);
+        assert.ok(p.foco, `${nome}: o foco no link da mensagem 11 caiu (está em ${p.focoEm})`);
+        assert.equal(p.selecao, selecionado, `${nome}: a seleção no corpo da mensagem 21 foi de ${JSON.stringify(selecionado)} a ${JSON.stringify(p.selecao)}`);
+        assert.deepEqual(p.trocadas, [], `${nome}: ${p.trocadas.length} mensagens trocaram de nó (${p.trocadas.slice(0, 5).join(", ")}…)`);
+      };
+      ficaram("alguém chegou ao servidor", chega);
+      assert.equal(chega.mutacoes, 0, `alguém chegou ao servidor e a conversa, que não mudou, teve ${chega.mutacoes} mutações`);
+      assert.equal(chega.rolagem, 800, `alguém chegou ao servidor e a rolagem da conversa foi a ${chega.rolagem}`);
+      ficaram("o retrato de quem escreve mudou", retrato);
+      assert.equal(retrato.naLista, 0, `o retrato de quem escreve mudou e ${retrato.naLista} mutações tiraram ou puseram nós na lista`);
+      assert.equal(retrato.foraDoAvatar, 0, `o retrato mudou e ${retrato.foraDoAvatar} de ${retrato.mutacoes} mutações caíram fora dos avatares`);
+      assert.ok(retrato.mesmoAvatar, "o retrato mudou e o avatar da mensagem 1 trocou de nó");
+      assert.ok(
+        retrato.imagem?.startsWith('url("data:image/png'),
+        `o retrato mudou e o avatar da mensagem 1 não mostra a imagem (background-image ${JSON.stringify(retrato.imagem)}): ` +
+          "a CSP do produto recusa o `style` escrito como atributo",
+      );
+      assert.equal(retrato.rolagem, 800, `o retrato mudou e a rolagem da conversa foi a ${retrato.rolagem}`);
+      ficaram("uma mensagem nova", nova);
+      assert.ok(nova.entrou, "a mensagem nova não entrou na conversa");
+      assert.equal(nova.tirados, 0, `a mensagem nova tirou ${nova.tirados} nós da lista`);
+      // A mensagem, e o divisor de um dia novo se ela virou a meia-noite.
+      const feitio = (classe) => classe.split(" ")[0];
+      assert.ok(
+        nova.postos.filter((classe) => feitio(classe) === "mensagem").length === 1
+          && nova.postos.every((classe) => ["mensagem", "mensagens-dia"].includes(feitio(classe))),
+        `a mensagem nova pôs na lista: ${JSON.stringify(nova.postos)}`,
+      );
+      assert.equal(nova.dentroDeOutras, 0, `a mensagem nova mexeu em ${nova.dentroDeOutras} lugares dentro das outras`);
+      assert.equal(nova.rolagem[1], nova.rolagem[0], `a mensagem nova levou a conversa, rolada para cima, de ${nova.rolagem[0]} a ${nova.rolagem[1]}`);
+      assert.ok(noFim.redesenhou && noFim.entrou, "caso 14 (d): a mensagem nova não chegou à conversa");
+      assert.deepEqual(noFim.trocadas, [], `com a conversa no fim, ${noFim.trocadas.length} mensagens trocaram de nó`);
+      assert.ok(noFim.distanciaDoFim < 2, `com a conversa no fim, a mensagem nova a deixou a ${noFim.distanciaDoFim}px do fim`);
+      ficaram("a mensagem 31 saiu", saiu);
+      assert.ok(saiu.foiEmbora, "a mensagem 31 saiu da conversa e o nó dela ficou");
+      assert.deepEqual(saiu.tirados, ["a 31"], `a mensagem 31 saiu e a lista perdeu: ${JSON.stringify(saiu.tirados)}`);
+      assert.equal(saiu.postos, 0, `a mensagem 31 saiu e ${saiu.postos} nós foram postos na lista`);
+      ficaram("duas mensagens editadas", editada);
+      assert.ok(editada.mesmoRemover, "a mensagem 12 foi editada e o REMOVER dela trocou de nó");
+      assert.ok(editada.mesmoLink, "a mensagem 11 foi editada e o link dela trocou de nó");
+      assert.deepEqual(
+        editada.abriu, ["https://exemplo.br/outra-pagina"],
+        `o link editado abriu ${JSON.stringify(editada.abriu)}, e não o endereço de agora`,
+      );
+      assert.ok(
+        editada.confirmacao.includes("«mensagem 11: corrigida depois»"),
+        `o REMOVER da mensagem editada confirma ${JSON.stringify(editada.confirmacao)}, e não o texto de agora`,
+      );
+      assert.ok(comMod.redesenhou, "caso 14 (g): a mensagem nova não redesenhou a conversa");
+      assert.deepEqual(comMod.donos, ["5", "6"], `caso 14 (g): os nós de MOD da conversa estão nas mensagens ${JSON.stringify(comMod.donos)}`);
+      assert.equal(
+        comMod.saiuDoDocumento, 0,
+        `conversa.mensagem: ${comMod.saiuDoDocumento} de ${comMod.nos} nós de MOD saíram do documento com uma ` +
+          "mensagem nova: ou o marcador não está na mensagem montada, ou um nó do produto com o nó de MOD dentro foi refeito",
+      );
+      assert.equal(comMod.trocados, 0, `conversa.mensagem: ${comMod.trocados} nós de MOD trocaram de mensagem ou saíram`);
+      assert.ok(comMod.mesmos, "conversa.mensagem: os nós de MOD da conversa não são os mesmos depois de uma mensagem nova");
+      assert.deepEqual(comMod.trocadas, [], `com nós de MOD na conversa, ${comMod.trocadas.length} mensagens trocaram de nó`);
+      assert.ok(gravada.achou, "caso 14 (h): a conversa não desenhou as duas pendentes com o TENTAR DE NOVO");
+      assert.ok(gravada.focado, "caso 14 (h): a bancada não conseguiu pôr o foco no TENTAR DE NOVO da segunda pendente");
+      assert.ok(gravada.redesenhou && gravada.gravadaNaTela, "caso 14 (h): a primeira pendente gravada não chegou à conversa");
+      assert.ok(
+        gravada.mesmoBotao && gravada.focoFicou,
+        `a primeira pendente foi gravada e o TENTAR DE NOVO da segunda, com o foco, não é o mesmo botão: o foco está ` +
+          `em ${gravada.focoEm}`,
+      );
+      assert.ok(gravada.li78Ficou, "a primeira pendente foi gravada e a linha da segunda trocou de nó");
+      assert.ok(gravada.li77Saiu, "a primeira pendente foi gravada e a linha velha dela ficou no documento");
+      assert.deepEqual(
+        gravada.trocouDeTexto, [],
+        `a primeira pendente foi gravada e a linha que dizia ${JSON.stringify(gravada.trocouDeTexto)} passou a dizer ` +
+          "outra mensagem: as pendentes casaram pela posição",
+      );
+      assert.deepEqual(gravada.trocadas, [], `a primeira pendente foi gravada e ${gravada.trocadas.length} mensagens trocaram de nó`);
+      assert.ok(voltaNoTempo.redesenhou, "caso 14 (i): a conversa igual não foi redesenhada, e o passo não mediu nada");
+      assert.ok(
+        voltaNoTempo.divisores === 4 && voltaNoTempo.mensagens === 4,
+        `caso 14 (i): a hora que volta atrás desenhou ${voltaNoTempo.divisores} divisores para ${voltaNoTempo.mensagens} ` +
+          "mensagens, e são quatro de cada",
+      );
+      assert.equal(
+        voltaNoTempo.mutacoes, 0,
+        `com dois divisores do mesmo dia, a conversa igual, redesenhada, teve ${voltaNoTempo.mutacoes} mutações`,
+      );
+      assert.equal(voltaNoTempo.trocados, 0, `com dois divisores do mesmo dia, ${voltaNoTempo.trocados} divisores trocaram de nó`);
+    }
+
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
         `(${caso1.mutacoes} mutações, nenhuma fora dela) e o foco ficou; o mesmo retrato não ` +
@@ -1061,7 +1971,17 @@ async function abrir(browser, url, r) {
         "segundo canal atravessou o tique com o mesmo retrato e com outro canal mudando de nome " +
         `(${outro.mutacoes} mutações, todas na fileira dele), quem saiu perdeu o nó, quem entrou ` +
         `ganhou um, o foco ficou no canal que virou o aberto, e os ${caso10m.nos} nós do canal.item ficaram ` +
-        "no documento; um id repetido no arranjo do MOD não duplicou nenhuma sala nem canal.",
+        "no documento; um id repetido no arranjo do MOD não duplicou nenhuma sala nem canal. " +
+        "Com o retrato igual, o contador, a telemetria e o #voz-estado não mudaram nada e a seleção " +
+        "ficou; o que mudou (o ATRASO, o UPTIME, a média, o contador, o «no ar») mudou no mesmo nó. " +
+        "Nas regiões de MOD, o retrato igual não mexeu em nada, o foco ficou no botão da ação e a seleção " +
+        "no texto do MOD; a ação que saiu levou só o botão dela; e o clique depois de o canal aberto " +
+        `mudar mandou o canal novo. Na conversa, com ${CONVERSA.length} mensagens, o foco no link e a ` +
+        "seleção ficaram com alguém chegando, com um retrato novo (o avatar mudou no lugar, com a " +
+        "imagem), com uma mensagem nova (só ela entrou, e a rolagem ficou, ou seguiu o fim), com uma " +
+        "que saiu (só ela saiu) e com duas editadas (o REMOVER e o link agiram com o dado de agora); " +
+        "e os nós de MOD da conversa não saíram do documento. A ação repetida guardou o foco no segundo " +
+        "botão, a pendente gravada não tirou o foco da outra, e dois divisores do mesmo dia ficaram.",
     );
   } finally {
     await browser.close();

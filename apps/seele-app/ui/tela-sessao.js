@@ -244,6 +244,31 @@ let ocorrenciaAtual = null;
 const SEM_MEDIDA = "—";
 
 /**
+ * **Escreve o texto de um campo só quando ele muda, e no nó que já existe**
+ * (pendência 63; lote R63 da F5).
+ *
+ * `textContent =` troca o nó de texto por um novo **mesmo com o texto igual** —
+ * medido no Chromium e no WebKit, que não pulam a troca. O tique de 500 ms
+ * escreve o contador, a telemetria e o `#voz-estado` duas vezes por segundo, e
+ * cada troca desfazia a seleção de quem copiava um número, dava ao leitor de
+ * tela outro nó, e mexia numa região viva sem nada para dizer.
+ *
+ * Com o texto igual, nada é escrito. Com o texto novo, muda o `nodeValue` do
+ * nó que está ali, e não o nó: para o leitor de tela é o mesmo texto com outro
+ * conteúdo, e uma seleção num número vizinho, que não mudou, não é tocada.
+ * Fora desse caso — o campo vazio, ou com mais de um filho — vale o
+ * `textContent` de sempre, e o resultado na tela é o mesmo.
+ */
+function escreverOTexto(nodo, texto) {
+  const so = nodo.firstChild;
+  if (so !== null && so === nodo.lastChild && so.nodeType === Node.TEXT_NODE && texto !== "") {
+    if (so.nodeValue !== texto) so.nodeValue = texto;
+  } else if (so !== null || texto !== "") {
+    nodo.textContent = texto;
+  }
+}
+
+/**
  * Marca um campo como não medido, e diz o que faltaria para medi-lo.
  *
  * O travessão é o mesmo que `quando()` já usava em `base.js`, e é deliberado
@@ -256,15 +281,19 @@ const SEM_MEDIDA = "—";
  * quem reparou no travessão está fazendo.
  */
 function naoMedido(nodo, motivo) {
-  nodo.textContent = SEM_MEDIDA;
-  nodo.classList.add("ausente");
-  nodo.title = motivo;
+  escreverOTexto(nodo, SEM_MEDIDA);
+  // A classe e o `title` também só quando mudam: `classList.add` de uma classe
+  // que já está, e o `title` igual, reescrevem o atributo do mesmo jeito — é
+  // uma mutação por campo, duas vezes por segundo (lote R63).
+  if (!nodo.classList.contains("ausente")) nodo.classList.add("ausente");
+  if (nodo.title !== motivo) nodo.title = motivo;
 }
 
 /** O contrário: um valor que existe, no mesmo campo. */
 function medido(nodo, texto) {
-  nodo.textContent = texto;
-  nodo.classList.remove("ausente");
+  escreverOTexto(nodo, texto);
+  if (nodo.classList.contains("ausente")) nodo.classList.remove("ausente");
+  // Sem `title`, tirá-lo não muta nada: não há guarda a pôr.
   nodo.removeAttribute("title");
 }
 
@@ -691,8 +720,25 @@ async function recarregarTrilha() {
  * região. Escondida quando ninguém acrescenta nada: uma faixa vazia é uma
  * régua sobre nada.
  *
- * Repovoada e não reconstruída: os nós vêm montados do registro, e movê-los
- * preserva o que eles seguram — como em `canal.cabecalho`.
+ * **Reconciliada, e não repovoada** (pendência 63; lote R63 da F5). O tique
+ * de 500 ms passa por aqui em cada região, e o `replaceChildren` de antes
+ * tirava o conteúdo do MOD do documento e o punha de volta, e trocava o botão
+ * da ação por um novo, que `acoesDasContribuicoes` monta a cada retrato: o
+ * foco nele caía no `<body>` e a seleção no texto do MOD se desfazia, duas
+ * vezes por segundo. Agora é o caminho da lista de pessoas
+ * (`reconciliarALista`):
+ *
+ * - o conteúdo vem montado do registro, e é o mesmo nó entre um retrato e o
+ *   seguinte (`montarContribuicao`): entra pelo marcador (`nosDeMod`), e não
+ *   sai do documento;
+ * - o botão da ação tem chave — o MOD e a ação, contados —, e o que já estava
+ *   na tela fica, vestido com o botão montado agora. Pela posição, a saída da
+ *   ação de um MOD daria o botão dela à ação do vizinho;
+ * - **o clique age com o dado de agora**: o ouvinte é um só, no contêiner
+ *   (`ligarAcoesDeApresentacao`), e lê os `data-*` do botão na hora do
+ *   clique; o `vestirComo` os reescreve no botão reaproveitado — o canal do
+ *   `compositor`, quando o canal aberto muda. Nada no botão guarda o retrato
+ *   em que ele nasceu.
  *
  * `contexto` `null` é a região sem onde valer agora — o compositor sem canal
  * aberto —, e ela fica vazia.
@@ -701,13 +747,24 @@ function aplicarARegiao(ponto, conteiner, alvo = "", contexto = {}) {
   if (!conteiner) return;
   // A região que a casca não tem fica vazia, e quem contribui para ela sabe
   // (`regiaoAusente`, em `base.js`; tarefa 5, Step 8).
-  const nos = contexto === null || regiaoAusente(ponto) ? [] : [
-    ...conteudoDasContribuicoes(ponto, alvo),
-    ...acoesDasContribuicoes(ponto, alvo, contexto),
-  ];
-  repovoar(conteiner, nos);
+  const vale = contexto !== null && !regiaoAusente(ponto);
+  const conteudo = vale ? conteudoDasContribuicoes(ponto, alvo) : [];
+  const acoes = vale ? acoesDasContribuicoes(ponto, alvo, contexto) : [];
+  const vazia = conteudo.length + acoes.length === 0;
+  // Vazia e sem nada na tela, o caso de quase todo quadro: nada a reconciliar.
+  if (!vazia || conteiner.firstChild !== null) {
+    const vezes = new Map();
+    for (const botao of acoes) {
+      const chave = `acao:${botao.dataset.modDaAcao}\u0000${botao.dataset.acaoDeMod}`;
+      const vez = vezes.get(chave) ?? 0;
+      vezes.set(chave, vez + 1);
+      chaveNaLista.set(botao, `${chave}#${vez}`);
+    }
+    reconciliarALista(conteiner, [...nosDeMod(conteudo), ...acoes], ":scope > [data-acao-de-mod]");
+  }
   ligarAcoesDeApresentacao(conteiner);
-  conteiner.hidden = nos.length === 0;
+  // E o `hidden` só quando muda, como o texto do rodapé (`escreverOTexto`).
+  if (conteiner.hidden !== vazia) conteiner.hidden = vazia;
 }
 
 /**
@@ -1306,7 +1363,11 @@ function desenharOperador(snapshot) {
   //    passou a querer dizer só o terceiro caso, que é o único em que ele
   //    está aberto o tempo todo;
   // 3. **se está indo ao ar agora**, que é o que `speaking` mede.
-  $("voz-estado").textContent = [
+  //
+  // **E só quando muda** (pendência 63; lote R63): a linha é `role="status"` e
+  // está à vista, e o tique a reescrevia com o mesmo texto duas vezes por
+  // segundo — uma região viva mexida sem nada para dizer. Ver `escreverOTexto`.
+  escreverOTexto($("voz-estado"), [
     estadoDoMicrofone,
     // E a linha de estado diz o mesmo: quem lê «não está ouvindo» entende
     // «ninguém está falando comigo», e não «o som da tela também está calado».
@@ -1314,7 +1375,7 @@ function desenharOperador(snapshot) {
     !snapshot.muted && snapshot.speaking ? "no ar" : null,
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(" · "));
 
 }
 
@@ -1694,9 +1755,12 @@ function itemDeMensagem(mensagem, indice, segue) {
     ).escolhida
     : null;
   const desenhoDoMod = substituta ? montarContribuicao(substituta, alvoDaMensagem) : null;
+  // Os nós do MOD entram pelo marcador (`noDeMod`): são os mesmos de um desenho
+  // para o outro, e a conversa reconciliada (`desenharMensagens`) os põe onde o
+  // marcador está, sem tirá-los do documento (lote R63).
   if (desenhoDoMod) {
     const miolo = elemento("span", "mensagem-miolo");
-    miolo.append(desenhoDoMod);
+    miolo.append(noDeMod(desenhoDoMod));
     conteudo.append(miolo);
   } else {
     const corpo = elemento("span", "corpo");
@@ -1704,7 +1768,7 @@ function itemDeMensagem(mensagem, indice, segue) {
     corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
     conteudo.append(corpo);
   }
-  if (alvoDaMensagem) conteudo.append(...conteudoDasContribuicoes("conversa.mensagem", alvoDaMensagem));
+  if (alvoDaMensagem) conteudo.append(...nosDeMod(conteudoDasContribuicoes("conversa.mensagem", alvoDaMensagem)));
   // O arquivo, embaixo do texto. ADR 0027: o texto sobrevive ao arquivo, e é
   // por isso que este bloco continua aparecendo depois de os bytes irem
   // embora — com o nome, o tamanho, e a frase que diz o que houve.
@@ -1820,6 +1884,19 @@ function seloDoEnvio(mensagem) {
  * `data-mensagem`. `desenharBusca` alcançava a mensagem pelo lugar dela entre
  * os filhos, e o primeiro divisor desalinharia essa conta em um, calado, para
  * todas as mensagens do dia seguinte.
+ *
+ * **Reconciliada pelo id da mensagem, e não repovoada** (pendência 63; lote
+ * R63 da F5). A lista era refeita inteira quando chegava mensagem, e também
+ * quando alguém chegava ao servidor ou um retrato mudava
+ * (`sincronizarRetratos`), sem nada mudar na conversa: o foco no link ou no
+ * REMOVER caía no `<body>`, a seleção se desfazia, e o leitor de tela perdia o
+ * nó (433 de 434 ids AX trocados, medido em 16/10). Agora é o caminho da lista
+ * de pessoas (`reconciliarALista`): cada mensagem tem a chave do id que o
+ * servidor deu — ou, numa pendente, a da máquina —, e cada divisor a do dia; a
+ * mensagem que chega entra, a que sai sai, e as outras ficam com o mesmo nó,
+ * só com o que mudou nelas. O REMOVER e o link continuam agindo com o dado de
+ * agora: os ouvintes são delegados na lista e leem o `data-*` que o
+ * `vestirComo` reescreve, e `mensagens`.
  */
 function desenharMensagens() {
   const lista = $("lista-mensagens");
@@ -1829,8 +1906,8 @@ function desenharMensagens() {
   // que chegue com uma delas aberta cai aqui com a lista em `display: none` —
   // onde `scrollHeight`, `scrollTop` e `clientHeight` valem todos 0. A conta
   // abaixo vira `0 - 0 - 0 < 32`, isto é, "estava no fim", para justamente
-  // quem tinha subido para ler. O `repovoar` seguinte ainda troca todos os
-  // filhos, o que zera a rolagem de qualquer forma.
+  // quem tinha subido para ler. (E o `repovoar` de antes da reconciliação
+  // trocava todos os filhos, o que zerava a rolagem de qualquer forma.)
   //
   // A lista é redesenhada ao voltar — `fecharChamada` e `fecharServer` pedem
   // isso —, então sair daqui não deixa nada velho na tela.
@@ -1853,11 +1930,20 @@ function desenharMensagens() {
   const noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 32;
 
   const itens = [];
+  // O mesmo dia pode abrir dois divisores — a hora é do servidor, e a ordem é
+  // a do id —, e cada um tem a chave contada, para os dois não disputarem um nó.
+  const dias = new Map();
   let anterior = null;
   mensagens.forEach((mensagem, indice) => {
     const dia = diaDaMensagem(mensagem.at_seconds);
     const trocouDeDia = dia !== null && dia !== diaDaMensagem(anterior?.at_seconds);
-    if (trocouDeDia) itens.push(divisorDeDia(mensagem.at_seconds));
+    if (trocouDeDia) {
+      const divisor = divisorDeDia(mensagem.at_seconds);
+      const vez = dias.get(dia) ?? 0;
+      dias.set(dia, vez + 1);
+      chaveNaLista.set(divisor, `dia:${dia}#${vez}`);
+      itens.push(divisor);
+    }
     // Sem hora dos dois lados não há como saber se a rajada é a mesma, e o
     // desconhecido abre cabeçalho: repetir o nome custa uma linha, e engolir
     // o nome de quem falou custa a autoria.
@@ -1872,11 +1958,18 @@ function desenharMensagens() {
       Boolean(anterior.at_seconds) &&
       Boolean(mensagem.at_seconds) &&
       mensagem.at_seconds - anterior.at_seconds <= JUNTA_ATE_SEGUNDOS;
-    itens.push(itemDeMensagem(mensagem, indice, segue));
+    const item = itemDeMensagem(mensagem, indice, segue);
+    // O id do servidor, ou — numa pendente, que tem id zero — a chave desta
+    // máquina. A pendente que é gravada troca de chave, e só ela ganha nó novo.
+    const chave = mensagem.id
+      ? `mensagem:${mensagem.id}`
+      : mensagem.client_message_id ? `pendente:${mensagem.client_message_id}` : null;
+    if (chave !== null) chaveNaLista.set(item, chave);
+    itens.push(item);
     anterior = mensagem;
   });
 
-  repovoar(lista, itens);
+  reconciliarALista(lista, itens, ":scope > li");
   if (noFim) lista.scrollTop = lista.scrollHeight;
 }
 
@@ -2134,8 +2227,10 @@ async function mostrarAPrevia(evento) {
  * Abre o endereço de um link de mensagem, fora desta janela.
  *
  * Ouvinte único na lista, e não um por link: uma conversa longa tem centenas
- * de mensagens, e redesenhá-la é trocar todos os filhos — ouvintes por
- * elemento seriam criados e jogados fora a cada desenho.
+ * de mensagens, e ouvintes por elemento seriam criados a cada desenho. E, com
+ * a conversa reconciliada pelo id (lote R63), o link é reaproveitado entre os
+ * desenhos: um ouvinte nele guardaria o endereço do desenho em que nasceu. Este
+ * lê o `data-url` na hora do clique, e o `vestirComo` o reescreve.
  */
 function abrirLinkDaMensagem(evento) {
   const link = evento.target.closest?.("[data-url]");
@@ -2286,10 +2381,14 @@ function nosDeMod(nos) {
  *
  * **E a coluna de canais**, com o canal como chave: repovoada, ela tirava do
  * documento o botão com o foco do teclado a cada tique (pendência 64).
+ *
+ * **E as regiões de MOD** (`aplicarARegiao`; lote R63), onde a chave mora nos
+ * botões de ação, filhos diretos do contêiner, e não em `li`: é o que
+ * `comChave` diz — onde procurar os nós velhos com chave.
  */
-function reconciliarALista(lista, filhos) {
+function reconciliarALista(lista, filhos, comChave = "li") {
   const velhos = new Map();
-  for (const no of lista.querySelectorAll("li")) {
+  for (const no of lista.querySelectorAll(comChave)) {
     const chave = chaveNaLista.get(no);
     if (chave !== undefined && !velhos.has(chave)) velhos.set(chave, no);
   }
@@ -2445,6 +2544,12 @@ function mesmoFeitio(velho, novo) {
  * porque a marca sai aqui no quadro seguinte. Preservar outro atributo faria o
  * celular parar de adaptar calado — o ENTRAR MUDO e as marcas da sala sumiriam.
  * A `tools/bancada-do-celular.py` (`aba_servidor`) prende isso.
+ *
+ * **O `style` passa pelo CSSOM, e não pelo atributo** (lote R63). A CSP do
+ * produto é `style-src 'self'`, e ela recusa o `style` escrito por
+ * `setAttribute`: medido no Chromium e no WebKit da bancada, o texto fica no
+ * atributo e nada é aplicado. `style.cssText` é aceito. É o avatar da conversa,
+ * que ganha o retrato (`aplicarAvatar`) num nó reaproveitado.
  */
 function vestirComo(velho, novo) {
   if (velho.nodeType === Node.TEXT_NODE) {
@@ -2459,7 +2564,9 @@ function vestirComo(velho, novo) {
   for (const nome of novo.getAttributeNames()) {
     if (detalhe && nome === "open") continue;
     const valor = novo.getAttribute(nome);
-    if (velho.getAttribute(nome) !== valor) velho.setAttribute(nome, valor);
+    if (velho.getAttribute(nome) === valor) continue;
+    if (nome === "style") velho.style.cssText = novo.style.cssText;
+    else velho.setAttribute(nome, valor);
   }
   if (detalhe) {
     const pedido = novo.hasAttribute("open");
@@ -2711,17 +2818,18 @@ function desenharMedia(voice_room) {
     // Sem sala, ou numa sala vazia. Não é uma média baixa: é a ausência de
     // qualquer coisa para tirar média de.
     delete celula.dataset.faixa;
-    marca.textContent = "";
+    escreverOTexto(marca, "");
     naoMedido(valor, voice_room ? "esta sala está vazia" : "você não entrou em nenhuma sala");
     return;
   }
 
   const sync = voice_room.sync;
-  celula.dataset.faixa = sync.band;
+  // Só quando muda, como o texto (lote R63): ver `escreverOTexto`.
+  if (celula.dataset.faixa !== sync.band) celula.dataset.faixa = sync.band;
   // A marca de bloco é a metade que sobrevive sem cor. Ela fica em face
   // monoespaçada ao lado do número porque a Saira Condensed, que desenha o
   // número, não tem `U+2588`.
-  marca.textContent = marcaSync(sync.band);
+  escreverOTexto(marca, marcaSync(sync.band));
   medido(valor, String(sync.ratio));
 }
 
@@ -3234,7 +3342,10 @@ function desenharTelemetria(snapshot) {
     medido($("tel-caminho"), caminho);
   }
 
-  $("tel-local").hidden = !tel.local_fault;
+  // O `hidden` também só quando muda: escrito igual, ele é uma mutação no
+  // rodapé a cada tique (lote R63).
+  const falhaLocal = $("tel-local");
+  if (falhaLocal.hidden !== !tel.local_fault) falhaLocal.hidden = !tel.local_fault;
   desenharAparelho(snapshot);
 
   desenharEnlace(snapshot.link);
@@ -3280,21 +3391,21 @@ function desenharAparelho(snapshot) {
 
   if (snapshot.aparelho === "trocando") {
     alvo.hidden = false;
-    alvo.textContent = "TROCANDO DE APARELHO";
+    escreverOTexto(alvo, "TROCANDO DE APARELHO");
     return;
   }
   if (snapshot.aparelho === "perdido") {
     alvo.hidden = false;
-    alvo.textContent = "SEM APARELHO DE ÁUDIO";
+    escreverOTexto(alvo, "SEM APARELHO DE ÁUDIO");
     return;
   }
   if (Date.now() < ateQuandoAnunciarOAparelho) {
     const nome = snapshot.playback?.name ?? snapshot.capture?.name;
     alvo.hidden = false;
-    alvo.textContent = nome ? `ÁUDIO AGORA EM ${nome.toUpperCase()}` : "O APARELHO DE ÁUDIO MUDOU";
+    escreverOTexto(alvo, nome ? `ÁUDIO AGORA EM ${nome.toUpperCase()}` : "O APARELHO DE ÁUDIO MUDOU");
     return;
   }
-  alvo.hidden = true;
+  if (!alvo.hidden) alvo.hidden = true;
 }
 
 /** `HH:MM:SS` desde um instante local, ou o travessão antes de haver um. */

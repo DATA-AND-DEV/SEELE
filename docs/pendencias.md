@@ -9906,16 +9906,76 @@ bancada guarda cada um dos oito pontos de montagem de MOD (`68c4544d`). Pela mes
 (`ec8ec2ce`): com 10, 38 de 38 duas vezes; com 50, 37 de 37 duas vezes; com 100, 37 de 37 duas vezes — sempre com o
 ENTRAR NA SALA e o aperto entrando. O relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-ax-report.md`.
 
+**O resto da (b) entrou** (16/10, lote R63 da F5, no ramo `0.16/lotes-r63`, aberto no `1d0c7ebf`). **A medida
+antes** (16/10, no Chromium 151 e no WebKit 26.5 da bancada, com os mesmos números nos dois; a árvore AX só no
+Chromium): o tique de 500 ms refazia, sem mudança nenhuma, cinco regiões da sessão —
+- o contador `#pessoas-conta` e os sete números da telemetria (`medido`/`naoMedido`): `textContent =` troca o nó
+  de texto mesmo com o texto igual, e a seleção num número que não mudou ia a «» em todo tique (2 de 3 ids AX
+  trocados no contador, 14 de 51 na telemetria);
+- o `#voz-estado`, `role="status"` e à vista: uma região viva reescrita duas vezes por segundo com o mesmo texto;
+- `#roster-mods` e `#telemetria-mods`, com MOD (`aplicarARegiao` → `repovoar`): o foco na ação do MOD caía no
+  `BODY` e a seleção no texto do MOD se desfazia em todo tique;
+- a conversa: não a cada tique, mas **inteira** a cada mensagem nova e também a cada pessoa que chegava ou retrato
+  que mudava (`sincronizarRetratos`), sem nada mudar nela — o foco no link e no REMOVER no `BODY`, a seleção a «», e
+  433 de 434 ids AX trocados (512 de 513 com alguém chegando).
+
+**O conserto**, só no `tela-sessao.js`, em commits isolados:
+- `f642679c`: `escreverOTexto` escreve só quando o texto muda, e pelo `nodeValue` do nó que está ali — no contador,
+  na telemetria, no `#voz-estado`, na marca da média e no `#tel-aparelho`;
+- `59d08b0f`: a classe e o `title` de `medido`/`naoMedido`, o `data-faixa` da média e o `hidden` do `#tel-local` e
+  do `#tel-aparelho` também só quando mudam. A medida diz que, no Chromium, eles não trocam id AX nem tocam a
+  seleção; eles aparecem a todo observador de mutações, e por uma comparação a guarda fica «nenhuma mutação»;
+- `4824d313`: as regiões de MOD passam pelo `reconciliarALista` do AX (que ganha `comChave`, onde procurar os nós
+  velhos com chave): o conteúdo pelo marcador, o botão da ação com a chave do MOD e da ação. O clique continua
+  delegado no contêiner e lê os `data-*` na hora, que o `vestirComo` reescreve no botão reaproveitado: nada guarda
+  o retrato em que o botão nasceu. Vale para as cinco regiões do `aplicarARegiao`, o `#operador-mods`, o
+  `#compositor-mods` e o `#trilha-mods` inclusive;
+- `3dd4d100`: o `vestirComo` escreve o `style` pelo CSSOM — a CSP do produto (`style-src 'self'`) recusa o
+  `style` escrito por `setAttribute`, medido nos dois motores —, para o avatar da conversa ganhar o retrato num nó
+  reaproveitado;
+- `98f4e6cd`: a conversa reconciliada pelo id da mensagem (`mensagem:<id>`, ou `pendente:<client_message_id>`
+  numa pendente), com o divisor pela chave do dia, contada, e os nós de `conversa.mensagem` pelo marcador. A
+  rolagem segue como antes.
+
+**Os guardas:** os casos 12, 13 e 14 da `linhas-pelo-id.cjs` (`644efc18`, `557ebae0`, `1c0760bd`, e na rodada 1 da
+revisão `a3382f33`: a mesma ação contribuída duas vezes, duas pendentes com a primeira gravada, e dois divisores do
+mesmo dia, cada um provado pelo mutante da revisão), numa seção
+própria — o nó `===` e no documento, o `document.activeElement`, a seleção, 0 mutações com o retrato igual, e a
+prova de que o tique (ou a conversa) redesenhou; o clique na ação do MOD depois de um retrato que muda o canal
+aberto manda o canal novo, e o REMOVER e o link de mensagens editadas agem com o dado de agora. Cada conserto tem a
+reversão que reprova o seu caso, e o arquivo voltou idêntico pelo `cmp` em todas. **Depois**, pela mesma medida,
+nos dois motores: 0 de 48 focos perdidos; a seleção só se perde no número que **mudou** (o ATRASO, o contador com
+alguém chegando), que é o dado mudando; no Chromium, o contador mantém 3 de 3 ids AX, a telemetria 57 de 58 com
+MOD (o que troca é a `InlineTextBox` do UPTIME, o relógio andando), as regiões de MOD 7 de 7 e a conversa 434 de
+434, e com a mensagem nova os 434 ficam e 7 entram. A `um-redesenho-por-quadro.cjs`, intercalada com o `1d0c7ebf`,
+deu 30, 28 e 29 ms antes e 29, 31 e 30 ms depois; a conversa com 300 mensagens custa ~1 ms a menos por desenho. O
+relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-r63-report.md`.
+
 **Seguem abertos da (b):**
 - **o celular**: o ENTRAR e o ENTRAR MUDO da coluna de salas seguem recriados a cada quadro pelo
   `celular-servidor.js`, que adapta a coluna depois de cada desenho contando com ela refeita, e a reconciliação tira o
-  que ele pôs para ele pôr de novo. A (b) **não** está resolvida no celular. Dona: a F8;
+  que ele pôs para ele pôr de novo. A (b) **não** está resolvida no celular. Dona: a F8. E, para a F8, desde o
+  lote R63: o comentário de `celular-conversa.js:62-63` («a lista é refeita quando chega mensagem») ficou falso; o
+  código está certo com a conversa reconciliada, porque o ouvinte é delegado e lê o `data-mensagem` na hora do
+  toque. A troca do comentário é dela;
+- **a própria mensagem gravada perde o nó — limite conhecido do lote R63.** Na conversa, a pendente tem a chave da
+  máquina (`pendente:<client_message_id>`) e a confirmada a do servidor (`mensagem:<id>`), e as duas não casam:
+  quando a mensagem que a própria pessoa mandou é gravada, a `li` é outra, e vão com ela o link, o REMOVER, a seleção
+  e o nó do leitor de tela — em toda mensagem que a pessoa manda. O fio já leva o eco (`client_message_id` no
+  `MessageReceived`, `crates/seele-proto/src/control.rs:1934-1936`: «so a client can match its own pending send»);
+  quem o perde é o cliente — a `Message` da sala (`crates/seele-sessao/src/state.rs`) não o guarda, e a FFI monta
+  `client_message_id: None` nas confirmadas (`crates/seele-ffi/src/lib.rs:3646`). **O caminho:** a F1 guarda o eco
+  e o leva pela FFI nas confirmadas próprias (a orquestradora já o pediu a ela); depois que a ponta dela chegar, a
+  F5 faz a pendente e a confirmada própria casarem pela mesma chave na conversa, com um caso na
+  `linhas-pelo-id.cjs` que começa vermelho: a própria mensagem gravada mantém o nó, a seleção e o REMOVER;
+- **o grupo FORA DO AR** (`grupoForaDoAr`), que só existe no `0.16/sala-viva`: as linhas dele não têm chave e casam
+  pela posição, e um leitor de tela parado em «Bruno» passa a ler «Carla» no mesmo nó quando alguém do meio se
+  conecta. Medido em 16/10 no `531b9cba`: com a chave `membro:<id>` na linha, as que ficam são os mesmos nós e
+  nenhum texto é reescrito. Fica para quando o `0.16/sala-viva` entrar;
 - **a lista de canais** perde o foco do teclado a cada tique: é a pendência 64 — fechada em 16/10, no lote C64,
   que achou também uma regressão do AX na coluna de salas (um id de sala repetido no arranjo de
   `servidor.navegacao` duplicava a fileira) e a consertou (`627666f8`, guardado pelo caso 11 da
-  `linhas-pelo-id.cjs`, `b11d1464`); ver a 64;
-- **o `roster-mods`, o contador do cabeçalho (`pessoas-conta`), a conversa e a telemetria** seguem repovoados a
-  cada retrato, pelo mesmo mecanismo, sem dona por ora.
+  `linhas-pelo-id.cjs`, `b11d1464`); ver a 64.
 
 ## 64 · Fechada em 2026-10-16 · A lista de canais perde o foco do teclado a cada tique
 
