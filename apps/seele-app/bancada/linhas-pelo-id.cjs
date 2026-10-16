@@ -76,6 +76,10 @@
 //    e a seleção no corpo de outra atravessam tudo isso. E, com duas pendentes
 //    sem resposta, a gravação da primeira não tira o foco do TENTAR DE NOVO da
 //    segunda; com a hora voltando atrás, os dois divisores do mesmo dia ficam.
+//    E a própria mensagem, gravada, fica no nó da pendente (lote ECO): o foco
+//    no link, a seleção no corpo e o REMOVER atravessam a gravação, e o
+//    REMOVER remove o id de agora; a de outra pessoa, sem chave, e a própria
+//    relida do histórico ganham um nó cada, sem tomar o de ninguém.
 //
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
@@ -1860,13 +1864,127 @@ async function abrir(browser, url, r) {
         mutacoes: r.registros.length,
         trocados: divisoresAntes.filter((no, i) => !no.isConnected || divisoresDepois[i] !== no).length,
       };
+      // j) A própria mensagem, gravada, fica no nó da pendente (lote ECO). A
+      //    ponte manda a confirmada própria com a `client_message_id` da
+      //    pendente, e tira a pendente na mesma revisão; a de outra pessoa vem
+      //    com `null`, e a própria relida do histórico com a chave que o
+      //    servidor gravou (a F1, `0.16/protocolo-eco`). Os valores são os do
+      //    teste dela, `a_confirmada_propria_chega_com_a_chave_da_pendente`: a
+      //    pendente "77" gravada como a 5, e a relida, a 2 com "31". A de outra
+      //    pessoa é a 7, e não a 6: o MOD do passo (g) desenha o corpo da 6.
+      //    O foco no link da pendente e a seleção no corpo dela; e depois, com
+      //    tudo gravado, a de outra pessoa que sai (a 3): as que ficam guardam
+      //    o nó, pelo id ou pela chave.
+      const meioDiaJ = new Date();
+      meioDiaJ.setHours(12, 0, 0, 0);
+      const t = Math.floor(meioDiaJ.getTime() / 1000);
+      const umaJ = (campos) => ({
+        id: 0, channel: 1, author: 2, author_nickname: "p-002", at_seconds: t, body: "", own: false,
+        edited: false, attachment: null, estado: "Confirmada", client_message_id: null, ...campos,
+      });
+      const deOutra = (id, autor, minuto) => umaJ({
+        id, author: autor, author_nickname: `p-00${autor}`, at_seconds: t + minuto * 60,
+        body: `mensagem ${id}, de outra pessoa`,
+      });
+      const minha = (campos) => umaJ({ author: 1, author_nickname: "p-001", own: true, ...campos });
+      const corpoMeu = "a minha mensagem, recém-escrita: veja https://exemplo.br/eco antes de sair";
+      const pendenteJ = minha({ id: 0, at_seconds: t + 240, body: corpoMeu, estado: "Enviando", client_message_id: "77" });
+      const gravadaJ = minha({ id: 5, at_seconds: t + 241, body: corpoMeu, client_message_id: "77" });
+      const relidaJ = minha({ id: 2, at_seconds: t + 60, body: "a minha, relida do histórico", client_message_id: "31" });
+      comRevisao([deOutra(1, 2, 0), deOutra(3, 3, 2), deOutra(4, 4, 3), pendenteJ]);
+      await tique();
+      const liPorId = (id) => lista.querySelector(`button[data-moderar-mensagem="${id}"]`)?.closest("li") ?? null;
+      const filhos = () => [...lista.querySelectorAll(":scope > li")];
+      const dizJ = (li) => li.querySelector(".corpo")?.textContent ?? li.textContent;
+      const liP = liPorId(0);
+      const linkP = liP?.querySelector(".link-externo") ?? null;
+      const removerP = liP?.querySelector("button.moderar-remover") ?? null;
+      linkP?.focus();
+      const textoP = liP?.querySelector(".corpo")?.firstChild ?? null;
+      if (textoP?.nodeType === Node.TEXT_NODE) {
+        const faixaP = document.createRange();
+        faixaP.setStart(textoP, 2);
+        faixaP.setEnd(textoP, 31);
+        getSelection().removeAllRanges();
+        getSelection().addRange(faixaP);
+      }
+      const eco = {
+        achou: Boolean(liP && linkP && removerP),
+        enviando: Boolean(liP?.querySelector('.envio[data-envio="enviando"]')),
+        focado: Boolean(linkP) && document.activeElement === linkP,
+        selecionado: getSelection().toString(),
+      };
+      const antesJ = filhos();
+      const disseJ = new Map(antesJ.map((li) => [li, dizJ(li)]));
+      const ficouJ = () => ({
+        foco: Boolean(linkP) && linkP.isConnected && document.activeElement === linkP,
+        focoEm: document.activeElement?.className || document.activeElement?.tagName,
+        selecao: getSelection().toString(),
+      });
+
+      // A gravação, e na mesma revisão a relida (a 2) e a de outra pessoa (a 7).
+      r = await passo(() => comRevisao([
+        deOutra(1, 2, 0), relidaJ, deOutra(3, 3, 2), deOutra(4, 4, 3), gravadaJ, deOutra(7, 2, 5),
+      ]));
+      const li2 = liPorId(2);
+      const li7 = liPorId(7);
+      const depoisJ = filhos();
+      Object.assign(eco, {
+        redesenhou: r.redesenhou,
+        gravadaNaTela: Boolean(liPorId(5)) && !liPorId(0),
+        mesmaLi: Boolean(liP) && liP.isConnected && liPorId(5) === liP,
+        ...ficouJ(),
+        mesmoRemover: Boolean(removerP) && removerP.isConnected && liP.querySelector("button.moderar-remover") === removerP,
+        // O dado de agora no nó de antes: o REMOVER, o índice que o celular lê,
+        // e o selo do envio, que sai.
+        idDoRemover: removerP?.dataset.moderarMensagem ?? null,
+        idDoIndice: mensagens[Number(liP?.getAttribute("data-mensagem"))]?.id ?? null,
+        selo: liP?.querySelector(".envio")?.dataset.envio ?? null,
+        // As outras `li` de antes — as de outras pessoas e o divisor: no
+        // documento, na mesma ordem, e dizendo o que diziam.
+        outrasTrocadas: antesJ.filter((li) => li !== liP && (!li.isConnected || dizJ(li) !== disseJ.get(li)))
+          .map((li) => disseJ.get(li)),
+        mesmaOrdem: ((era, ficaram) => ficaram.length === era.length && ficaram.every((li, i) => li === era[i]))(
+          antesJ.filter((li) => li !== liP),
+          depoisJ.filter((li) => li !== liP && disseJ.has(li)),
+        ),
+        // Os dois controles: um nó novo cada, que diz a própria mensagem.
+        outra: { nova: Boolean(li7) && !disseJ.has(li7), diz: li7 ? dizJ(li7) : null },
+        relida: { nova: Boolean(li2) && !disseJ.has(li2), diz: li2 ? dizJ(li2) : null },
+      });
+
+      // A 3, de outra pessoa, sai: cada uma das que ficam guarda o nó — as de
+      // outras pessoas pelo id, a relida e a gravada pela chave.
+      const fixas = new Map([1, 2, 4, 5, 7].map((id) => [id, liPorId(id)]));
+      const li3 = liPorId(3);
+      r = await passo(() => comRevisao(testTable.messages.filter((m) => m.id !== 3)));
+      eco.saiA3 = {
+        redesenhou: r.redesenhou,
+        ...ficouJ(),
+        foiEmbora: Boolean(li3) && !li3.isConnected,
+        trocadas: [...fixas].filter(([id, li]) => !li || !li.isConnected || liPorId(id) !== li).map(([id]) => id),
+      };
+
+      // E o REMOVER, o mesmo nó desde a pendente, remove a 5.
+      window.chamadas = [];
+      removerP?.click();
+      await quadros(2);
+      // A frase de uma caixa que não abriu é a da última que abriu (f).
+      eco.confirmacao = document.getElementById("moderar")?.hidden === false
+        ? document.getElementById("moderar-consequencia")?.textContent ?? ""
+        : "(a caixa não abriu)";
+      document.getElementById("moderar-confirmar")?.click();
+      await quadros(4);
+      eco.removeu = window.chamadas.filter((c) => c.cmd === "remover_mensagem").map((c) => c.args?.message);
+      getSelection().removeAllRanges();
+
       window.desenharMensagens = desenharDeVerdade;
-      return { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod, gravada, voltaNoTempo };
+      return { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod, gravada, voltaNoTempo, eco };
     }, { conversa: CONVERSA, png: RETRATO_PNG });
     assert.deepEqual(pagina14.errors, [], "caso 14: erros na página");
     await pagina14.page.close();
     {
-      const { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod, gravada, voltaNoTempo } = caso14;
+      const { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod, gravada, voltaNoTempo, eco } = caso14;
       assert.equal(preparo.mensagens, CONVERSA.length, `caso 14: a conversa desenhou ${preparo.mensagens} mensagens`);
       assert.ok(preparo.focado, "caso 14: a bancada não conseguiu pôr o foco no link da mensagem 11");
       assert.ok(selecionado.length > 20, `caso 14: a bancada não conseguiu selecionar o corpo da 21 (${JSON.stringify(selecionado)})`);
@@ -1957,6 +2075,41 @@ async function abrir(browser, url, r) {
         `com dois divisores do mesmo dia, a conversa igual, redesenhada, teve ${voltaNoTempo.mutacoes} mutações`,
       );
       assert.equal(voltaNoTempo.trocados, 0, `com dois divisores do mesmo dia, ${voltaNoTempo.trocados} divisores trocaram de nó`);
+      assert.ok(eco.achou && eco.enviando, "caso 14 (j): a pendente própria não foi desenhada enviando, com o link e o REMOVER");
+      assert.ok(eco.focado, "caso 14 (j): a bancada não conseguiu pôr o foco no link da pendente");
+      assert.ok(eco.selecionado.length > 20, `caso 14 (j): a bancada não conseguiu selecionar o corpo da pendente (${JSON.stringify(eco.selecionado)})`);
+      assert.ok(eco.redesenhou && eco.gravadaNaTela, "caso 14 (j): a confirmada própria não chegou à conversa, ou a pendente ficou");
+      assert.ok(
+        eco.mesmaLi,
+        "a própria mensagem foi gravada e a linha dela trocou de nó: o foco está em " +
+          `${eco.focoEm}, o REMOVER ${eco.mesmoRemover ? "é" : "não é"} o mesmo, e a seleção foi de ` +
+          `${JSON.stringify(eco.selecionado)} a ${JSON.stringify(eco.selecao)}`,
+      );
+      assert.ok(eco.foco, `a própria mensagem foi gravada e o foco no link dela caiu (está em ${eco.focoEm})`);
+      assert.equal(eco.selecao, eco.selecionado, `a própria mensagem foi gravada e a seleção no corpo dela foi a ${JSON.stringify(eco.selecao)}`);
+      assert.ok(eco.mesmoRemover, "a própria mensagem foi gravada e o REMOVER dela trocou de nó");
+      assert.deepEqual(eco.outrasTrocadas, [], `a própria mensagem foi gravada e outras linhas trocaram de nó: ${JSON.stringify(eco.outrasTrocadas)}`);
+      assert.ok(eco.mesmaOrdem, "a própria mensagem foi gravada e as outras linhas mudaram de ordem");
+      assert.equal(eco.idDoRemover, "5", `o REMOVER da própria mensagem gravada leva o id ${JSON.stringify(eco.idDoRemover)}, e não o 5 de agora`);
+      assert.equal(eco.idDoIndice, 5, `o \`data-mensagem\` da própria mensagem gravada aponta a mensagem ${eco.idDoIndice}, e não a 5`);
+      assert.equal(eco.selo, null, `a própria mensagem foi gravada e o selo dela ainda diz ${JSON.stringify(eco.selo)}`);
+      assert.ok(
+        eco.outra.nova && eco.outra.diz === "mensagem 7, de outra pessoa",
+        `caso 14 (j), controle: a de outra pessoa, sem chave, não ganhou um nó dela (${JSON.stringify(eco.outra)})`,
+      );
+      assert.ok(
+        eco.relida.nova && eco.relida.diz === "a minha, relida do histórico",
+        `caso 14 (j), controle: a própria relida do histórico não ganhou um nó dela (${JSON.stringify(eco.relida)})`,
+      );
+      assert.ok(eco.saiA3.redesenhou && eco.saiA3.foiEmbora, "caso 14 (j): a 3 saiu da conversa e o nó dela ficou");
+      assert.deepEqual(eco.saiA3.trocadas, [], `a 3 saiu e as mensagens ${JSON.stringify(eco.saiA3.trocadas)} trocaram de nó`);
+      assert.ok(eco.saiA3.foco, `a 3 saiu e o foco no link da própria mensagem caiu (está em ${eco.saiA3.focoEm})`);
+      assert.equal(eco.saiA3.selecao, eco.selecionado, `a 3 saiu e a seleção no corpo da própria mensagem foi a ${JSON.stringify(eco.saiA3.selecao)}`);
+      assert.ok(
+        eco.confirmacao.includes("«a minha mensagem, recém-escrita: veja https://exemplo.br/eco antes de sair»"),
+        `o REMOVER da própria mensagem gravada confirma ${JSON.stringify(eco.confirmacao)}`,
+      );
+      assert.deepEqual(eco.removeu, [5], `o REMOVER da própria mensagem gravada pediu para remover ${JSON.stringify(eco.removeu)}, e não a 5`);
     }
 
     console.log(
@@ -1981,7 +2134,9 @@ async function abrir(browser, url, r) {
         "imagem), com uma mensagem nova (só ela entrou, e a rolagem ficou, ou seguiu o fim), com uma " +
         "que saiu (só ela saiu) e com duas editadas (o REMOVER e o link agiram com o dado de agora); " +
         "e os nós de MOD da conversa não saíram do documento. A ação repetida guardou o foco no segundo " +
-        "botão, a pendente gravada não tirou o foco da outra, e dois divisores do mesmo dia ficaram.",
+        "botão, a pendente gravada não tirou o foco da outra, e dois divisores do mesmo dia ficaram. " +
+        "A própria mensagem, gravada, ficou no nó da pendente, com o foco no link, a seleção e o " +
+        "REMOVER, que removeu a 5.",
     );
   } finally {
     await browser.close();
