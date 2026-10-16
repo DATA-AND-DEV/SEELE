@@ -563,6 +563,38 @@ const { chromium } = require('./playwright.cjs');
     const descartouSemAOpcao = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'fechar' && e.superficie === 'rascunho2').at(-1));
     assert.equal(descartouSemAOpcao?.descartou, true, `descartar sem a opção não disse descartou: ${JSON.stringify(descartouSemAOpcao)}`);
 
+    // 10c. **Fechada, a superfície continua do MOD** (o cruzamento dos portes:
+    //      a MESA e o PERFIS guardam o punho e reabrem). Fechar tira a página
+    //      da tela e guarda o que ela tem. `superficie-montar` na fechada vale,
+    //      e `criar` com o mesmo id a reabre sem recriar: o que foi montado
+    //      enquanto ela estava fechada aparece, e a descrição nova não troca o
+    //      título (quem troca é `superficie-titulo`). Se `criar` recriasse, a
+    //      página voltaria vazia, porque o MOD não monta de novo.
+    const reuso = await page.evaluate(async () => {
+      const campo = () => document.querySelector('[data-superficie="reuso"] [data-chave-do-mod="nota"] input');
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'reuso', tipo: 'pagina', titulo: 'Antes' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'reuso', arvore: [{ forma: 'campo', chave: 'nota', rotulo: 'Nota', valor: 'um', inicial: 'um' }] });
+      const fechou = await pedir(6, { tipo: 'superficie-fechar', superficie: 'reuso' });
+      const fechada = !document.querySelector('[data-superficie="reuso"]')?.isConnected;
+      const montouFechada = await pedir(6, { tipo: 'superficie-montar', superficie: 'reuso', arvore: [{ forma: 'campo', chave: 'nota', rotulo: 'Nota', valor: 'dois', inicial: 'dois' }] });
+      const reaberta = await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'reuso', tipo: 'pagina', titulo: 'Depois' } });
+      const titulo = document.querySelector('[data-superficie="reuso"] .superficie-de-mod-titulo')?.textContent ?? null;
+      const resultado = {
+        fechou: fechou?.ok === true,
+        fechada,
+        montouFechada: montouFechada?.ok === true,
+        reaproveitada: reaberta?.ok === true && reaberta.valor?.reaproveitada === true,
+        aberta: Boolean(document.querySelector('[data-superficie="reuso"]')?.isConnected),
+        valor: campo()?.value ?? null,
+        titulo,
+      };
+      await pedir(6, { tipo: 'superficie-descartar', superficie: 'reuso' });
+      return resultado;
+    });
+    assert.deepEqual(reuso, {
+      fechou: true, fechada: true, montouFechada: true, reaproveitada: true, aberta: true, valor: 'dois', titulo: 'Antes',
+    }, `a superfície fechada não ficou do MOD para reabrir: ${JSON.stringify(reuso)}`);
+
     // 11. O botão que pede confirmação.
     await page.evaluate(async () => {
       await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'aparencia', tipo: 'dialogo', titulo: 'Aparência' } });
