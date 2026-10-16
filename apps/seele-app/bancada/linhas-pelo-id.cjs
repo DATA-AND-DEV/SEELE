@@ -49,6 +49,8 @@
 //    mudando de nome, e quando ele vira o aberto —, o botão é o mesmo nó e
 //    continua no documento; um canal que entra ganha um nó, um que sai perde o
 //    dele, os outros ficam; e o nó de MOD do `canal.item` não sai do documento.
+// 11. **Um id repetido num grupo do MOD** de `servidor.navegacao` não duplica
+//    a fileira da sala, com o ENTRAR NA SALA, nem a do canal.
 //
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
@@ -983,6 +985,70 @@ async function abrir(browser, url, r) {
     );
     assert.equal(caso10m.trocados, 0, `canal.item: ${caso10m.trocados} nós de MOD trocaram de canal ou saíram da coluna`);
 
+    // 11. Um id repetido num grupo do MOD de `servidor.navegacao` não duplica a
+    //     fileira, nem na coluna de salas nem na de canais. O `emGrupos` punha a
+    //     mesma fileira duas vezes no vetor; o `repovoar` a punha uma vez só, e
+    //     a reconciliação faz da segunda um nó a mais — a sala, com o ENTRAR
+    //     NA SALA, duas vezes (regressão do lote AX, consertada no lote C64).
+    //     Dois retratos e um tique: a duplicata só nasce quando já há nó velho.
+    const pagina11 = await abrir(browser, url, BASE);
+    const caso11 = await pagina11.page.evaluate(async () => {
+      registrarMod("bancada/navegacao", [{
+        ponto: "servidor.navegacao", modo: "substituir", prioridade: 0,
+        conteudo: {
+          salas: { grupos: [{ titulo: "MESA", ids: [1, 1] }] },
+          canais: { grupos: [{ titulo: "MESA", ids: [2, 2] }] },
+        },
+      }]);
+      await quadros(3);
+      desenhar(testTable.snapshot);
+      desenhar(testTable.snapshot);
+      const salas = document.getElementById("lista-voice_rooms");
+      const canais = document.getElementById("lista-linhas");
+      const entrar = () => salas.querySelector('button[data-voice_room="1"]');
+      const contar = () => ({
+        salas: salas.querySelectorAll("li.voice_room").length,
+        entrar: salas.querySelectorAll("button[data-voice_room]").length,
+        canais: canais.querySelectorAll("button[data-linha]").length,
+      });
+      const titulos = (lista) => [...lista.querySelectorAll("li.canais-grupo")].map((g) => g.textContent);
+      const antes = entrar();
+      const nosRetratos = contar();
+      const retrato = desenhado;
+      await new Promise((ok) => setTimeout(ok, 1200));
+      return {
+        redesenhou: desenhado !== retrato && desenhado !== null,
+        nosRetratos,
+        noTique: contar(),
+        salasNoRetrato: testTable.snapshot.voice_rooms.length,
+        canaisNoRetrato: testTable.snapshot.channels.length,
+        mesmoEntrar: antes !== null && entrar() === antes,
+        gruposDasSalas: titulos(salas),
+        gruposDosCanais: titulos(canais),
+      };
+    });
+    assert.deepEqual(pagina11.errors, [], "caso 11: erros na página");
+    await pagina11.page.close();
+    assert.ok(caso11.redesenhou, "caso 11: o tique não redesenhou em 1,2 s, e o caso não mediu nada");
+    assert.ok(
+      caso11.gruposDasSalas.includes("MESA") && caso11.gruposDosCanais.includes("MESA"),
+      `caso 11: o arranjo do MOD não chegou às colunas (salas ${JSON.stringify(caso11.gruposDasSalas)}, ` +
+        `canais ${JSON.stringify(caso11.gruposDosCanais)}), e o caso não mediu nada`,
+    );
+    for (const [quando, conta] of [["depois de dois retratos", caso11.nosRetratos], ["depois do tique", caso11.noTique]]) {
+      assert.ok(
+        conta.salas === caso11.salasNoRetrato && conta.entrar === caso11.salasNoRetrato,
+        `um id de sala repetido no arranjo do MOD duplicou a fileira da sala: ${quando}, ${conta.salas} li.voice_room ` +
+          `e ${conta.entrar} ENTRAR para ${caso11.salasNoRetrato} salas`,
+      );
+      assert.equal(
+        conta.canais, caso11.canaisNoRetrato,
+        `um id de canal repetido no arranjo do MOD duplicou a fileira do canal: ${quando}, ${conta.canais} botões ` +
+          `para ${caso11.canaisNoRetrato} canais`,
+      );
+    }
+    assert.ok(caso11.mesmoEntrar, "caso 11: o ENTRAR da sala 1 trocou de nó com o tique");
+
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
         `(${caso1.mutacoes} mutações, nenhuma fora dela) e o foco ficou; o mesmo retrato não ` +
@@ -994,7 +1060,8 @@ async function abrir(browser, url, r) {
         `de linha, ponto por ponto: ${caso5.join("; ")}. Na coluna de canais, o foco no ` +
         "segundo canal atravessou o tique com o mesmo retrato e com outro canal mudando de nome " +
         `(${outro.mutacoes} mutações, todas na fileira dele), quem saiu perdeu o nó, quem entrou ` +
-        `ganhou um, e os ${caso10m.nos} nós do canal.item ficaram no documento.`,
+        `ganhou um, o foco ficou no canal que virou o aberto, e os ${caso10m.nos} nós do canal.item ficaram ` +
+        "no documento; um id repetido no arranjo do MOD não duplicou nenhuma sala nem canal.",
     );
   } finally {
     await browser.close();
