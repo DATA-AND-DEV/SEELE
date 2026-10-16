@@ -4595,6 +4595,18 @@ fn teto_do_escolhido(limite_de_bytes: Option<usize>) -> usize {
         .map_or(TETO_DO_ESCOLHIDO, |n| n.min(TETO_DO_ESCOLHIDO))
 }
 
+/// O papel provado dos bytes contra os que o MOD pediu. Nenhum pedido (ou a
+/// lista vazia) aceita os dois; um papel fora da lista é
+/// `papel-nao-serve:<papel>`, com o nome, para a região dizê-lo.
+fn o_papel_serve(papeis: Option<&[String]>, papel: &str) -> Result<(), FalhaNoMod> {
+    match papeis.filter(|p| !p.is_empty()) {
+        Some(pedidos) if !pedidos.iter().any(|p| p == papel) => Err(FalhaNoMod::Recusado {
+            motivo: format!("papel-nao-serve:{papel}"),
+        }),
+        _ => Ok(()),
+    }
+}
+
 /// Quanto de um arquivo escolhido sai por pedido.
 ///
 /// **Múltiplo de três**, e é o que importa aqui. O base64 codifica três bytes
@@ -9294,13 +9306,7 @@ async fn escolher_para_o_mod(
     // **E o papel provado é conferido contra o que o MOD pediu.** Sem isto, um
     // MOD que precisa de retrato recebia um som e só descobria ao tentar usá-lo
     // — quando descobria. O erro tem nome próprio para a região poder dizê-lo.
-    if let Some(pedidos) = papeis.as_ref().filter(|p| !p.is_empty()) {
-        if !pedidos.iter().any(|p| p == lida.papel) {
-            return Err(FalhaNoMod::Recusado {
-                motivo: format!("papel-nao-serve:{}", lida.papel),
-            });
-        }
-    }
+    o_papel_serve(papeis.as_deref(), lida.papel)?;
 
     // Conferida **de novo** depois do `await` do seletor: a pessoa pode ter
     // demorado a escolher, e a sessão pode ter acabado no meio.
@@ -15299,6 +15305,50 @@ mod a_supervisao_dos_mods_nativos {
             super::teto_do_escolhido(Some(20 * MIB)),
             10 * MIB,
             "o MOD ampliou o que esta máquina aceita ler"
+        );
+    }
+
+    /// **O papel que o MOD não pediu é `papel-nao-serve`, com o papel**
+    /// (`recusas` do `v6.json`, «leva papel»; `actions.escolher-arquivo`, a
+    /// auditoria, tabela 2). A conferência morava dentro do comando, que abre o
+    /// seletor do sistema e não sobe em teste: tirá-la passava.
+    #[test]
+    fn o_papel_que_o_mod_nao_pediu_e_papel_nao_serve_com_o_papel() {
+        let v6 = include_str!("../../../api/v6.json");
+        assert!(
+            v6.contains("papel-nao-serve (o arquivo não é do papel pedido; leva papel)"),
+            "o v6.json não diz mais o papel-nao-serve como este teste o confere"
+        );
+        let pedidos = |p: &[&str]| p.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let motivo =
+            |r: Result<(), super::FalhaNoMod>| r.err().map(|f| super::motivo_de(&f).to_owned());
+        assert_eq!(
+            motivo(super::o_papel_serve(None, "som")),
+            None,
+            "sem pedido, o papel não foi aceito"
+        );
+        assert_eq!(
+            motivo(super::o_papel_serve(Some(&[]), "imagem")),
+            None,
+            "a lista vazia é «não pediu», e recusou"
+        );
+        assert_eq!(
+            motivo(super::o_papel_serve(Some(&pedidos(&["imagem"])), "imagem")),
+            None,
+            "o papel pedido foi recusado"
+        );
+        assert_eq!(
+            motivo(super::o_papel_serve(Some(&pedidos(&["imagem"])), "som")).as_deref(),
+            Some("papel-nao-serve:som"),
+            "o som, para um MOD que pediu imagem, passou ou saiu sem o papel"
+        );
+        assert_eq!(
+            motivo(super::o_papel_serve(
+                Some(&pedidos(&["som", "imagem"])),
+                "som"
+            )),
+            None,
+            "um dos dois papéis pedidos foi recusado"
         );
     }
 
