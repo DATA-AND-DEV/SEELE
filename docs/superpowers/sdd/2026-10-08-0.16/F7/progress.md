@@ -1165,3 +1165,48 @@ o `ConnectionError` da FFI e o `frases.js`. O desenho proposto é uma porta nova
 na FFI com um `Cancelamento`, sem mexer no `ConnectConfig`, e uma
 `Etapa::Cancelada` terminal. Um `Desistiu(Cancelada)` afrouxaria duas arestas
 que hoje são requisito escrito.
+
+## A tarefa 16 inteira: o `cancelar_ligacao` (16/10)
+
+A orquestradora aprovou o desenho em 16/10, e a F1 já tinha saído do
+`ConnectionError`.
+
+| passo | o que | commit |
+|---|---|---|
+| — | as frases de quem cancela, no `ETAPAS` e no `FRASES` (isolado) | `c2180905` |
+| 5 | `cancelar_ligacao`: `Chegada::chegar_ate`, a `Etapa::Cancelada`, o `ConnectError::Cancelada`, e na FFI o `Cancelamento` com a porta `connect_cancelavel` | `b6d02712` |
+| — | merge da `versao/0.16` (`e2c2474f`), com o conflito do FORA DO AR resolvido | `531b9cba` |
+| — | o guarda da frase do `Cancelada` (isolado, `frontend.rs`) | `821510bc` |
+
+- **Uma etapa própria, e não `Desistiu`:** a máquina proíbe
+  `Avisando → Desistiu` e só deixa o último candidato desistir, e quem cancela
+  no meio da corrida quebraria as duas regras. `Cancelada` sai de qualquer
+  etapa que não é fim, e de nenhuma que é.
+- **O cancelamento larga a chegada inteira:** a pergunta ao ponto de encontro,
+  ou a corrida com o QUIC de cada candidato. No laço da corrida, ele vem depois
+  dos passos já contados e antes da conexão.
+- **Medido pela FFI contra a sala:** um ouvinte cancela no instante do
+  `Tocando`, e a sala vê `ParouDeTocar(Cancelada)` na hora (o teste inteiro
+  levou 0,02 s): o QUIC fecha de verdade, e não no prazo ocioso. O `connect`
+  volta `Cancelada`, com a trilha acabando nela.
+- **O `ConnectConfig` não mudou:** são 38 montagens explícitas, quase todas em
+  testes de outras frentes. O `Cancelamento` vai numa porta nova, ao lado do
+  ouvinte.
+- **Reversões, sete:** a FFI que não entrega o cancelamento, a corrida e a
+  localização surdas, a aresta que falta, o cancelamento que vira `Desistiu`, e
+  no guarda da frase, a frase que falta e uma que se lê como falha.
+- **O conflito do merge** não era da F7. O grupo FORA DO AR da F1 (P6, com a
+  P8) repovoava a lista, e a pendência 63 (b) a passou a reconciliar pelo id.
+  A junção é empilhar o grupo e reconciliar: o grupo tem a chave do nome, e as
+  linhas dele, sem chave, casam pela posição. O roteiro `fora-do-ar.js` e a
+  bancada `linhas-pelo-id.cjs` passam.
+
+**Como está a ponta** (`821510bc`):
+- núcleo, FFI e app, 1445 de 1445, e o `frontend.rs`, 301 de 301;
+- clippy limpo;
+- a bateria inteira da casca na árvore do merge: os 42 roteiros, as duas
+  pontes, o celular e 34 das 35 da janela (a do executor pede o wasi-sdk);
+- a conformidade inteira: 311 passaram, e só reprova o guarda da P8
+  (`fora_do_ar_revision`), que a F1 vai classificar.
+
+O comando Tauri `cancelar_ligacao` e o CANCELAR da tela são da tarefa 28.
