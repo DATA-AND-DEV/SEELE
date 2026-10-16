@@ -3567,15 +3567,51 @@ mod o_ponto_de_encontro_de_quem_hospeda {
     /// recomeça. Só os módulos: um `use` sob `#[cfg(test)]` não tem `}`, e
     /// cortar até a próxima levaria junto a produção que vem depois dele.
     fn producao() -> String {
-        let fonte = super::fonte_sem_comentarios();
+        producao_de(&super::fonte_sem_comentarios())
+    }
+
+    /// [`producao`] sobre um texto qualquer, para o recorte ter prova própria.
+    ///
+    /// **E ele se confere sozinho** (sugestão da F5, ao aceitar o recorte): o
+    /// que se corta é um módulo, e dentro de um módulo toda linha é recuada,
+    /// menos a do nome e a do `}` final. Um `#[cfg(test)] mod x;`, sem corpo,
+    /// levaria o corte até a `}` da próxima função de produção, e é essa linha
+    /// na coluna zero que acusa.
+    fn producao_de(fonte: &str) -> String {
         let mut pedacos = fonte.split(concat!("\n#[cfg(test)]\n", "mod "));
         let mut producao = pedacos.next().unwrap_or_default().to_owned();
         for pedaco in pedacos {
             if let Some(fim) = pedaco.find("\n}\n") {
+                let soltas: Vec<&str> = pedaco[..fim]
+                    .lines()
+                    .skip(1)
+                    .filter(|linha| linha.starts_with(|c: char| !c.is_whitespace()))
+                    .collect();
+                assert!(
+                    soltas.is_empty(),
+                    "o recorte de um módulo de teste levou linhas da coluna zero, que são de \
+                     produção: {soltas:?}"
+                );
                 producao.push_str(&pedaco[fim + 2..]);
             }
         }
         producao
+    }
+
+    #[test]
+    #[should_panic(expected = "linhas da coluna zero")]
+    fn o_recorte_acusa_um_modulo_de_teste_sem_corpo() {
+        let fonte = concat!(
+            "fn antes() {}\n",
+            "#[cfg(test)]\n",
+            "mod fora;\n",
+            "\n",
+            "async fn hospedar_de_producao() {\n",
+            "    let _ = 1;\n",
+            "}\n",
+            "fn depois() {}\n",
+        );
+        let _ = producao_de(fonte);
     }
 
     #[test]
