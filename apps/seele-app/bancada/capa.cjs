@@ -284,6 +284,38 @@ const { chromium } = require('./playwright.cjs');
     }, cartao);
     assert.deepEqual(porCima, [], 'a capa ficou por cima do que o produto escreve no cartão');
 
+    // 2b. **Quem fala ganha o véu de carga e o halo por cima da capa**
+    //     (`capa.quem-fala`; a auditoria do v6, tabela 6): os dois moram no
+    //     `::after` da camada da capa, que nenhuma medida lia. O mesmo cartão,
+    //     calado e falando.
+    const veu = await page.evaluate(async (seletor) => {
+      const quadro = () => new Promise(ok => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const ler = () => {
+        const camada = document.querySelector(seletor)?.querySelector(':scope > .capa-camada');
+        if (!camada) return null;
+        const s = getComputedStyle(camada, '::after');
+        return { fundo: s.backgroundColor, halo: s.boxShadow, fala: document.querySelector(seletor).dataset.fala ?? null };
+      };
+      const id = document.querySelector(seletor).dataset.pessoaDaCapa;
+      const pessoa = testTable.snapshot.voice_rooms.flatMap(sala => sala.people).find(p => String(p.id) === id);
+      const antes = pessoa.speaking;
+      pessoa.speaking = false;
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      const calado = ler();
+      pessoa.speaking = true;
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      const falando = ler();
+      pessoa.speaking = antes;
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      return { calado, falando };
+    }, cartao);
+    assert.ok(veu.calado && veu.falando && veu.falando.fala === 'sim', `o caso não mediu o véu de quem fala: ${JSON.stringify(veu)}`);
+    assert.ok(veu.falando.halo !== 'none' && veu.calado.halo === 'none', `quem fala não ganhou o halo por cima da capa: ${JSON.stringify(veu)}`);
+    assert.notEqual(veu.falando.fundo, veu.calado.fundo, `quem fala não ganhou o véu de carga: ${JSON.stringify(veu)}`);
+
     // 3. Com movimento reduzido, o quadro estático.
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.evaluate(() => redesenharCapas());
@@ -295,6 +327,32 @@ const { chromium } = require('./playwright.cjs');
     assert.ok(comMovimentoReduzido.temImagem && !comMovimentoReduzido.eAOriginal,
       `com movimento reduzido, o cartão não usou o quadro estático: ${JSON.stringify(comMovimentoReduzido)}`);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+    // 3a. **Carregando, liso** (`capa.estados`; a auditoria do v6, tabela 6):
+    //     enquanto a imagem não chegou, o cartão não tem capa nem marca dela.
+    const carregando = await page.evaluate(async (alvo) => {
+      const quadro = () => new Promise(ok => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      contribuicoesDosMods.revogar(handleCapa);
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      let soltar;
+      testTable.ler_imagem_mod = new Promise((ok) => { soltar = () => ok({ papel: 'imagem', bytes: 256, uri: daCapa }); });
+      window.handleCapa = registrarCapa(alvo, 'volume:demora');
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      const cartao = document.querySelector(`.chamada-cartao[data-pessoa-da-capa="${alvo}"]`);
+      const camada = cartao?.querySelector(':scope > .capa-camada');
+      const enquanto = { comCapa: cartao?.dataset.comCapa ?? null, fundo: camada ? getComputedStyle(camada).backgroundImage : 'none' };
+      soltar();
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      await new Promise(ok => setTimeout(ok, 300));
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      const depois = document.querySelector(`.chamada-cartao[data-pessoa-da-capa="${alvo}"]`)?.dataset.comCapa ?? null;
+      return { enquanto, depois };
+    }, alvo);
+    assert.deepEqual(carregando.enquanto, { comCapa: null, fundo: 'none' }, `carregando, o cartão não ficou liso: ${JSON.stringify(carregando)}`);
+    assert.ok(carregando.depois, `a capa que chegou depois não vestiu o cartão: ${JSON.stringify(carregando)}`);
 
     // 3b. **Com a janela oculta, o quadro estático** (`capa.movimento-reduzido`;
     //     a auditoria do `v6.json`, B8), e a original de volta quando ela
@@ -390,8 +448,8 @@ const { chromium } = require('./playwright.cjs');
 
     // 7. **No máximo seis capas animadas ao mesmo tempo** (rascunho §4; tarefa
     //    6, Step 5c): escolhidas pela vista — as visíveis, e entre elas quem
-    //    falou por último. As outras mostram o quadro parado. Oito pessoas na
-    //    sala e a capa de quem usa: nove capas; a última da grade é quem falou.
+    //    falou por último. As outras mostram o quadro parado. Dezoito pessoas
+    //    na sala e a capa de quem usa; a última da grade é quem falou.
     const animadas = await page.evaluate(async () => {
       window.recusarCapa = false;
       testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
@@ -399,7 +457,9 @@ const { chromium } = require('./playwright.cjs');
       const sala = r.voice_rooms[0];
       const modelo = sala.people.find(p => !p.is_self);
       const deAntes = sala.people.slice();
-      for (let id = 10; id < 17; id += 1) sala.people.push({ ...modelo, id, nickname: `p${id}`, speaking: false });
+      // Dezessete a mais: a grade passa da janela por mais de uma fileira, e
+      // rolada até o fim, a primeira sai da vista inteira.
+      for (let id = 10; id < 27; id += 1) sala.people.push({ ...modelo, id, nickname: `p${id}`, speaking: false });
       const ids = sala.people.map(p => String(p.id));
       // A de quem usa já está de pé (a seção do núcleo a registrou), e uma
       // segunda seria `contribuicao-ja-existe`.
@@ -407,11 +467,17 @@ const { chromium } = require('./playwright.cjs');
       desenhar(r);
       desenharChamada(r);
       await new Promise(ok => setTimeout(ok, 600));
-      // Quem fala agora é a última da grade.
-      sala.people.at(-1).speaking = true;
+      // Quem fala agora é a última da grade **à vista**: depois das seis
+      // primeiras na ordem, e só a fala a põe entre as que animam.
+      const aVista = [...document.querySelectorAll('.chamada-cartao[data-com-capa]')].filter(e => {
+        const c = e.getBoundingClientRect();
+        return c.width > 0 && c.height > 0 && c.bottom > 0 && c.top < innerHeight;
+      });
+      const quemFala = sala.people.find(p => String(p.id) === aVista.at(-1)?.dataset.pessoaDaCapa);
+      quemFala.speaking = true;
       desenharChamada(r);
       await new Promise(ok => setTimeout(ok, 300));
-      sala.people.at(-1).speaking = false;
+      quemFala.speaking = false;
       desenharChamada(r);
       await new Promise(ok => setTimeout(ok, 300));
       const capas = [...document.querySelectorAll('[data-com-capa]')];
@@ -420,7 +486,7 @@ const { chromium } = require('./playwright.cjs');
         return c.width > 0 && c.height > 0 && c.bottom > 0 && c.top < innerHeight;
       });
       const usaOriginal = e => e.querySelector(':scope > .capa-camada')?.style.backgroundImage.includes(daCapa);
-      const ultima = document.querySelector(`.chamada-cartao[data-pessoa-da-capa="${ids.at(-1)}"]`);
+      const ultima = document.querySelector(`.chamada-cartao[data-pessoa-da-capa="${quemFala.id}"]`);
       const resultado = {
         capas: capas.length,
         visiveis: visiveis.length,
@@ -428,6 +494,27 @@ const { chromium } = require('./playwright.cjs');
         animadasFora: capas.filter(e => !visiveis.includes(e) && usaOriginal(e)).length,
         quemFalouAnima: Boolean(ultima && usaOriginal(ultima)),
       };
+      // **E com a grade rolada até o fim** (`capa.movimento-reduzido`, fora da
+      // vista; a auditoria do v6, tabela 6): sem rolar, as de fora ficavam no
+      // fim da ordem, e o caso passava sem o filtro da caixa. Rolada, as
+      // primeiras saem da vista — e continuam paradas.
+      const rolante = (() => {
+        for (let n = document.querySelector('.chamada-cartao')?.parentElement; n; n = n.parentElement) {
+          if (/(auto|scroll)/.test(getComputedStyle(n).overflowY) && n.scrollHeight > n.clientHeight) return n;
+        }
+        return null;
+      })();
+      if (rolante) {
+        rolante.scrollTop = rolante.scrollHeight;
+        redesenharCapas();
+        await new Promise(ok => setTimeout(ok, 300));
+        const vista = capas.filter(e => { const c = e.getBoundingClientRect(); return c.width > 0 && c.height > 0 && c.bottom > 0 && c.top < innerHeight; });
+        resultado.rolada = {
+          primeiraFora: !vista.includes(capas.find(e => e.classList.contains('chamada-cartao'))),
+          animadasFora: capas.filter(e => !vista.includes(e) && usaOriginal(e)).length,
+        };
+        rolante.scrollTop = 0;
+      }
       for (const h of handles) contribuicoesDosMods.revogar(h);
       sala.people.splice(0, sala.people.length, ...deAntes);
       desenhar(r);
@@ -440,6 +527,8 @@ const { chromium } = require('./playwright.cjs');
     assert.ok(animadas.visiveis > 6, `só ${animadas.visiveis} capas à vista, e o teto de seis não se mede: ${JSON.stringify(animadas)}`);
     assert.equal(animadas.animadas, Math.min(6, animadas.visiveis), `animam ${JSON.stringify(animadas)}`);
     assert.equal(animadas.animadasFora, 0, `uma capa fora da vista anima: ${JSON.stringify(animadas)}`);
+    assert.ok(animadas.rolada?.primeiraFora, `a grade não rolou a ponto de tirar a primeira capa da vista, e o caso não mede o filtro: ${JSON.stringify(animadas)}`);
+    assert.equal(animadas.rolada.animadasFora, 0, `com a grade rolada, uma capa fora da vista anima: ${JSON.stringify(animadas)}`);
     assert.ok(animadas.quemFalouAnima, `quem falou por último não anima: ${JSON.stringify(animadas)}`);
 
     // 5. **A citação `daPessoa`** (rascunho §4; tarefa 6, Step 4b; o bloqueio A
