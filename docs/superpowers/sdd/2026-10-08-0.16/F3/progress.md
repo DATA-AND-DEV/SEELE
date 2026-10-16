@@ -782,11 +782,35 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   Um erro meu, achado e consertado (`c9749e03`): uma conferência do caso da
   `pessoa` contava eventos por um campo que não existe e passava sem medir
   nada.
+- **16/10. A terceira emenda, as integrações e as limpezas das APIs 3 a 5.**
+  - O P7c e o tema da F1 entraram no `0.16/api-6` por merge, e ele avançou
+    até `abea7352` (a linha do tema na tela de aceite, com a
+    `aceite-dos-mods.cjs` no portão) e depois até `5b7ff153`: o
+    `nos-recusados`, o `classes` contado no evento `contribuicao`, e a
+    terceira emenda do `v6.json` (`ddbd76f4…`) no mesmo commit. Os três
+    portes a conferiram; a MESA achou nela um defeito dela, e o consertou.
+  - A versao/0.16 entrou no corte (`29f6454f`), e as limpezas por cima: o
+    prelúdio e o roteador (`282c8e7c`), a lista de pessoas (`a84f7da4`, o
+    `tela-sessao.js` isolado), as provas do cartão (`9ab16437`), a região e
+    os cartões da 3 fora da casca, com `APOSENTADOS_PELO_CORTE` no
+    `check-api` (`960290af`), e as regras de folha sem nó (`8f589060`).
+  - **Dois defeitos da minha integração**, achados na casca inteira e não na
+    que rodei ao integrar: a bancada das saídas de quem hospeda, no `ci.yml`
+    e fora do `publicar.sh`, que deixava o `cargo test -p xtask` vermelho
+    (`aa306a5d`); e a prova do núcleo que, com a faixa de quem liga
+    empurrando a tela (da versao/0.16), media o centro de uma lista cortada
+    atrás da barra (`bc8bd1a5`). A lição: integrar é rodar a casca inteira,
+    o xtask e a bancada do celular junto.
+  - Medido e não consertado, porque o texto já diz: numa superfície, a
+    `midia` para nos 10 MiB dela, e o retrato e o fundo no bolso de 24 MiB
+    (`superficies.limites-o-que-e`). O teto de altura que o guarda do cartão
+    conferia era o do `.pessoa-cartao` da 3: o cartão da 6 é contido pelo
+    teto de nós e pelo `linhasMaximas`, e fica dito no guarda.
 - **Esperam:** do corte, o guarda da união, pronto em
   `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
-  depois do Step 6 do dono (D-api-7). O `0.16/api-6` avançou para
-  `ed7abdb9` em 15/10, com o aval da orquestradora (a D-api-7 segura só a
-  entrada na `versao/0.16`), e a F1 foi avisada para pôr o P7c por cima;
-  as duas limpezas, na 0.16 e depois do lote AX da F5 (a máquina da API 3 na
-  casca; `regiao`, `cartoes` e `snapshot` no prelúdio do motor); e o Step 3
-  da tarefa 7 (o teto da `midia`, que a M3 não mediu).
+  depois do Step 6 do dono (D-api-7); o avanço do `0.16/api-6` para as
+  limpezas, que levam a integração da versao/0.16 junto, com o aval da
+  orquestradora; o passo 7 (as INCERTA e SEM PROVA restantes; o que pedir
+  texto vai numa quarta e última emenda); e o Step 3 da tarefa 7 (o teto da
+  `midia`, que a M3 não mediu). Nada que roda o `.wasm` rodou nesta máquina:
+  falta o `WASI_SDK`.

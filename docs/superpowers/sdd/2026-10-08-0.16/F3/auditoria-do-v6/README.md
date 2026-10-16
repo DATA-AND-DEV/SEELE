@@ -216,6 +216,21 @@ redução e a lista fechada das recusas inteira. Com ela entrou o guarda
 `pessoa` da citação, a errata do `sujo`, o diálogo no celular, os nomes do par
 de uma recusa do tema e o `teto` do `teto-de-alvos`.
 
+**A terceira emenda:** `5b7ff153` (SHA-256 da v6 `ddbd76f4…`), com a entrega
+no mesmo commit, porque o guarda da lista fechada não deixa um nome novo de
+recusa entrar sem o texto. As duas decisões da orquestradora:
+- a montagem que não coube inteira recusa com `nos-recusados`, a conta e a
+  amostra (até oito), no montar, no atualizar e nas classes; antes respondia
+  `falhou`;
+- o `classes` numa contribuição é contado nos `recusados` do evento
+  `contribuicao`, com a amostra (`classes-fora-da-superficie`).
+
+Os três portes a conferiram: o PERFIS sem remontar (83/83), o ESTILO no
+pacote `6552cf6`, e a MESA com a frase da recusa e um defeito dela achado e
+consertado (as classes da página declaradas antes de a dar por aberta).
+Daqui em diante, o que pedir texto vai numa quarta e última emenda, no fim do
+passo 7 (a orquestradora, 16/10).
+
 ## O passo 5: o que os portes usam
 
 Três frentes de leitura levantaram, nos ramos dos portes (a MESA em
@@ -266,11 +281,25 @@ têm o espelho em `09c9a375`, em runtime e no portão.
 
 **O guia:** `c47b6874`, na API 6, com o `tonsDoTema` executado pela bateria.
 
+**A linha do tema na tela de aceite:** `abea7352`, com a `aceite-dos-mods.cjs`
+no portão.
+
+**As limpezas das APIs 3 a 5**, sobre a integração da versao/0.16
+(`29f6454f`): o prelúdio sem `snapshot`, `regiao` e `cartoes` e o roteador
+sem os casos deles (`282c8e7c`); a lista de pessoas sem os cartões da 3
+(`a84f7da4`, o `tela-sessao.js` isolado); as provas do cartão no perfil da 6
+(`9ab16437`); a região e os cartões fora da casca, com os apontadores das
+congeladas que o corte aposentou ditos pelo `check-api` (`960290af`); e as
+regras de folha que ninguém casa mais (`8f589060`). Dois defeitos da
+integração apareceram na casca inteira e foram consertados à parte: a
+bancada das saídas de quem hospeda, que o `ci.yml` rodava e o `publicar.sh`
+não (`aa306a5d`), e a prova do núcleo que media um ponto escondido atrás da
+barra quando a faixa de quem liga empurra a tela (`bc8bd1a5`).
+
 **Ainda abertos:**
-- a linha do tema na tela de aceite, quando a ponta da F1 chegar;
-- as INCERTA e as SEM PROVA que nenhum porte usa;
-- duas decisões da orquestradora: a montagem com nós recusados, que responde
-  `falhou`, e o `classes` numa contribuição, que não pinta nada.
+- as INCERTA e as SEM PROVA que nenhum porte usa (o passo 7);
+- nada que roda o `.wasm` rodou nesta máquina (`cargo xtask web`,
+  `executor-no-navegador.cjs`): falta o `WASI_SDK`. O CI os roda.
 
 Os achados 1 e 2, as bancadas de navegador e a do celular no portão de
 publicação, são da F6.
