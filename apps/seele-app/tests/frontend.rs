@@ -14397,12 +14397,13 @@ fn a_excecao_do_tema_de_servidor_esta_escrita_na_estetica() {
     );
 }
 
-/// **O cartão de um MOD é desenhado pelo renderer do produto, e sai com ele.**
+/// **O cartão de um MOD é desenhado pelo renderer do produto.**
 ///
-/// Esta é a única superfície de um MOD fora da região dele. O que a mantém
-/// sendo do produto não é uma promessa: é o renderer ser o mesmo —
+/// Na 6, o cartão é o destino de uma contribuição em `pessoa.cartao`. O que o
+/// mantém sendo do produto não é uma promessa: é o renderer ser o mesmo —
 /// `planejar`, `reconciliar`, `elemento`, `createElement`, `textContent` — com
-/// uma gramática menor e tetos próprios.
+/// o perfil do cartão, de gramática menor e tetos próprios. (Os cartões da API
+/// 3, `SeeleUI.cartoes` e `declararCartoes`, saíram com ela.)
 ///
 /// Os limites, a recusa e o descarte rodam em `bancada/regiao-do-mod.cjs`, no
 /// DOM de mentira, contra este mesmo arquivo. O que este guarda prova é o que
@@ -14413,22 +14414,45 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
     let regiao = without_comments(&read("ui/mods-regiao.js"));
     let base = without_comments(&read("ui/base.js"));
     let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let contribuicoes = without_comments(&read("ui/mods-contribuicoes.js"));
 
-    // **O mesmo renderer.** Se `declararCartoes` parar de chamar `planejar` e
-    // `reconciliar`, o cartão passou a ser montado por outra coisa — e essa
-    // outra coisa é a que ninguém revisou.
-    let declarar = js_function(&regiao, "\n  declararCartoes(cartoes)");
+    // **O mesmo renderer, com o orçamento do ponto.** `montarContribuicao`
+    // monta cada destino por `RegiaoDeMod`, com o perfil que a tabela de pontos
+    // dá — o do cartão, em `pessoa.cartao`. Se ela passar a montar por outra
+    // coisa, essa outra coisa é a que ninguém revisou.
+    let montar = js_function(&base, "function montarContribuicao(");
     assert!(
-        declarar
-            .contains("this.planejar(declaracao, 0, orcamento, PERFIS_DE_RENDER.cartao.formas)")
-            && declarar.contains("this.reconciliar(raiz, planos, 0, orcamento)"),
-        "o cartão deixou de passar pelo renderer da região: {declarar}"
+        montar.contains("new RegiaoDeMod(")
+            && montar.contains("PERFIS_DE_RENDER[perfil]")
+            && montar.contains("elemento(\"div\", \"contribuicao-de-mod\")"),
+        "o cartão deixou de ser montado pelo renderer do produto, com o orçamento do ponto e a \
+         raiz por `elemento`: {montar}"
     );
     assert!(
-        declarar.contains("elemento(\"div\", \"pessoa-cartao\")"),
-        "a raiz do cartão deixou de nascer por `elemento`, que é o construtor \
-         desta casa e o que o guarda de CSS enxerga: {declarar}"
+        contribuicoes.contains(
+            "\"pessoa.cartao\": { modos: [\"substituir\", \"adicionar\"], perfil: \"cartao\""
+        ),
+        "`pessoa.cartao` deixou de ter o perfil do cartão na tabela de pontos"
     );
+    // **E os cartões da API 3 não voltam por baixo.** Eles eram um segundo
+    // caminho para o mesmo ponto, com regra própria de disputa; o corte da 6
+    // os tirou, e um caminho paralelo que volta é a regra que discorda.
+    for saiu in ["declararCartoes", "raizesDeCartao"] {
+        assert!(!regiao.contains(saiu), "`{saiu}` voltou ao renderer");
+    }
+    //
+    // O primeiro vai partido, e não por capricho: `api/v3.json` a `v5.json`
+    // apontam para a função que dava os cartões, e o `check-api` procura o
+    // nome dela no texto de todo `.rs` — escrito inteiro aqui, nem que fosse
+    // num comentário, ele resolveria o apontador por acidente (ver
+    // `APOSENTADOS_PELO_CORTE`, em `xtask/src/check_api.rs`).
+    for saiu in [
+        concat!("darCartoes", "DoMod"),
+        "cartoesDosMods",
+        "modsDeCartaoQueValem",
+    ] {
+        assert!(!base.contains(saiu), "`{saiu}` voltou a `base.js`");
+    }
 
     // **A gramática é menor, e o que fica de fora é tudo que recebe foco.**
     //
@@ -14491,63 +14515,12 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
 
     // Tetos próprios, e menores que os da região: um cartão é por pessoa.
     let limites = bloco_congelado(&regiao, "const LIMITES_DO_CARTAO = Object.freeze({");
-    for teto in ["cartoes:", "nos:", "fundura:", "midias:", "bytesDeMidia:"] {
+    for teto in ["nos:", "fundura:", "midias:", "bytesDeMidia:"] {
         assert!(
             limites.contains(teto),
             "o teto `{teto}` sumiu dos limites do cartão: {limites}"
         );
     }
-
-    // **A montagem acontece ao declarar, e não ao desenhar a linha.** É aqui
-    // que o teto vira erro na mão de quem pediu; montar tarde recusaria
-    // calado, no meio de um retrato, e o MOD nunca saberia.
-    let dar = js_function(&base, "function darCartoesDoMod(");
-    assert!(
-        dar.contains("regiao.declararCartoes(cartoes)"),
-        "`darCartoesDoMod` deixou de montar no momento da declaração: {dar}"
-    );
-    assert!(
-        dar.contains("redesenharAsPessoas()"),
-        "declarar um cartão deixou de repintar a lista, e ele só apareceria no \
-         próximo retrato: {dar}"
-    );
-    // **A região é criada aqui se ainda não existe, e não exigida.**
-    //
-    // Exigir que o MOD desenhasse antes era uma armadilha de ordem que a API
-    // não conta a ninguém: um MOD que monta os cartões no mesmo ciclo em que
-    // pinta o painel — que é o caso do PERFIS — recebia «não tem região de pé»
-    // e não tinha como saber que bastava inverter duas linhas. Foi a corrida
-    // nativa que pegou, e não um teste.
-    assert!(
-        dar.contains("regiaoDoMod(mod, instancia)"),
-        "dar cartão voltou a exigir uma região que já exista: {dar}"
-    );
-    let desenhar = js_function(&base, "function desenharARegiaoDoMod(");
-    assert!(
-        desenhar.contains("regiaoDoMod(mod, instancia)"),
-        "os dois caminhos deixaram de criar a região pelo mesmo lugar, e um \
-         deles vai esquecer de registrá-la para a saída: {desenhar}"
-    );
-    // E criar a região para um cartão **não abre uma faixa vazia**: quem tira
-    // o palco de escondido é quem desenha.
-    let criar_regiao = js_function(&base, "function regiaoDoMod(mod, instancia)");
-    assert!(
-        !criar_regiao.contains("hidden = false"),
-        "criar a região passou a mostrar o palco, e um MOD que só dá cartão \
-         abre uma faixa vazia na tela: {criar_regiao}"
-    );
-
-    // **O descarte é o da região**, e alcança o que não está sob a raiz dela.
-    let soltar = js_function(&regiao, "\n  soltar()");
-    assert!(
-        soltar.contains("this.soltarCartao(pessoa, raiz)"),
-        "soltar a região deixou de tirar os cartões da lista do produto: {soltar}"
-    );
-    let limpar = js_function(&base, "function limparARegiaoDoMod(");
-    assert!(
-        limpar.contains("cartoesDosMods.delete(id)"),
-        "o MOD saiu e a lista continuou achando que ele tem cartões: {limpar}"
-    );
 
     // **Quem desenha a linha é o produto.** O nó chega montado e é anexado; o
     // MOD não escolhe posição, e nada de fora escreve estilo nele. Na 6, o
@@ -14614,13 +14587,12 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
         );
     }
 
-    // E o tamanho do cartão é da folha do produto, e não do MOD.
-    let css = read("ui/tela-sessao.css");
-    assert!(
-        css.contains(".pessoa-cartao") && css.contains("max-height"),
-        "o cartão perdeu o teto de altura, e uma lista de vinte pessoas deixa \
-         de ser uma lista de pessoas"
-    );
+    // **O tamanho.** O cartão da API 3 tinha teto de altura na folha
+    // (`.pessoa-cartao`, 96 px), e era isso que este guarda conferia. O da 6
+    // é uma contribuição (`.contribuicao-de-mod`, `display: contents`): o que
+    // o contém é o teto de nós e de fundura do perfil, acima, e o
+    // `linhasMaximas` que o MOD declara — a folha não o corta no meio
+    // (`.pessoa-apresentada-porta`, em `mods-controles.css`).
 }
 
 /// **O que a região cria nasce com dono, teto e descarte.**/// **O que a região cria nasce com dono, teto e descarte.**
@@ -15122,28 +15094,6 @@ fn as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor() {
         "as chaves do tema divergem entre `CHAVES_DO_TEMA` (seele-proto, à esquerda) e as \
          tabelas da casca (base.js, à direita): uma chave somada a um lado só é um tema \
          que um lado recusa e o outro aplica"
-    );
-}
-
-/// E a faixa não fica de pé vazia, nem some com região de outro MOD dentro.
-#[test]
-fn a_faixa_das_regioes_aparece_com_a_primeira_e_sai_com_a_ultima() {
-    let base = without_comments(&read("ui/base.js"));
-    let desenhar = js_function(&base, "function desenharARegiaoDoMod(");
-    let limpar = js_function(&base, "function limparARegiaoDoMod(");
-
-    assert!(
-        desenhar.contains("palco.hidden = false"),
-        "a faixa não é revelada quando a primeira região entra: {desenhar}"
-    );
-    assert!(
-        limpar.contains("palco.childElementCount === 0"),
-        "a faixa some sem olhar se ainda há região de outro MOD dentro, ou \
-         fica de pé vazia — uma régua de 1px em cima de nada: {limpar}"
-    );
-    assert!(
-        limpar.contains("temaDosMods.delete(id)"),
-        "descarregar um MOD deixa o tema dele de pé: {limpar}"
     );
 }
 
@@ -17077,13 +17027,11 @@ fn sair_do_servidor_encerra_o_ambiente_dos_mods_antes_de_trocar_de_tela() {
     // executor nem a limpar recurso por conta própria: quem sabe o que uma
     // instância criou é ela, e uma limpeza escrita aqui é uma lista que
     // envelhece sozinha a cada recurso novo. Ver `InstanciaDeMod.encerrar`.
-    for proibido in ["terminate()", "limparARegiaoDoMod("] {
-        assert!(
-            !encerrar.contains(proibido),
-            "o encerramento voltou a fazer `{proibido}` na mão, por fora do \
-             ciclo da instância: {encerrar}"
-        );
-    }
+    assert!(
+        !encerrar.contains("terminate()"),
+        "o encerramento voltou a fazer `terminate()` na mão, por fora do ciclo da \
+         instância: {encerrar}"
+    );
     assert!(
         !encerrar.contains("seele-mod-unload"),
         "o encerramento voltou a **pedir** que o MOD se desmonte; um MOD que \

@@ -6,12 +6,12 @@
 // registro com um DOM de mentira, e é lá que moram as provas de descarte e de
 // disputa. O que só um navegador mede é o que esta bancada mede:
 //
-// - **a mídia de cada ponto**: o que os renderers, o retrato de avatar e os
-//   cartões da API 3 anotam, somado por ponto de contribuição;
+// - **a mídia de cada ponto**: o que os renderers e o retrato de avatar
+//   anotam, somado por ponto de contribuição;
 // - **a gestão**: «quem pinta cada lugar» desenhada a partir do registro e da
-//   mídia de verdade, e redesenhada quando os bytes chegam; o bloco da região
-//   e das páginas de cada MOD, logo abaixo; e «quem desenha o que», com a
-//   escolha desta máquina;
+//   mídia de verdade, e redesenhada quando os bytes chegam; o bloco das
+//   páginas de cada MOD, logo abaixo; e «quem desenha o que», com a escolha
+//   desta máquina;
 // - **o modo de desenvolvedor**: que os contornos deixam o clique chegar ao
 //   canal de baixo, não tiram o foco de quem escreve, contornam só o que a
 //   rolagem e uma página aberta deixam à vista — sem o traço de um nó que o
@@ -291,49 +291,6 @@ async function aMidiaDeCadaPontoEContadaEDita(navegador, servidor) {
     `três mudanças na mesma volta deram ${avisosNumaVolta} aviso(s), e não um: a gestão redesenharia uma vez por mídia`,
   );
 
-  // **A regra dos cartões da API 3 é a de `cartoesDaPessoa`**, lida por fora.
-  const cartoes = await pagina.evaluate(() => {
-    darCartoesDoMod({ id: "mod/b", hash: "mod-b" }, instancia("mod/b"), { 2: [{ forma: "texto", dentro: "B" }] });
-    const auto = modsDeCartaoQueValem();
-    escolherApresentacao("pessoa.cartao", APRESENTACAO_NATIVA);
-    const nativo = modsDeCartaoQueValem();
-    escolherApresentacao("pessoa.cartao", "mod/b");
-    const escolhido = modsDeCartaoQueValem();
-    escolherApresentacao("pessoa.cartao", "mod/z");
-    const outro = modsDeCartaoQueValem();
-    escolherApresentacao("pessoa.cartao", "");
-    return { auto, nativo, escolhido, outro };
-  });
-  assert.deepEqual(
-    cartoes,
-    { auto: ["mod/b"], nativo: [], escolhido: ["mod/b"], outro: [] },
-    "a regra que diz quais cartões da API 3 entram na lista mudou",
-  );
-
-  // **A mídia de um cartão da API 3 conta em `pessoa.cartao`**, e a da região
-  // do mesmo MOD não: as duas moram na mesma `RegiaoDeMod`, e só a anotação
-  // `cartao` as separa. Sem esta conferência, o ramo dos cartões de
-  // `midiasDoPonto` existiria sem que nada o medisse.
-  await pagina.evaluate(() => {
-    const b = { id: "mod/b", hash: "mod-b" };
-    darCartoesDoMod(b, modsCarregados.get("mod/b"), {
-      2: [{ forma: "texto", dentro: "B" }, { forma: "midia", chave: "foto", fonte: "img/b.png" }],
-    });
-    desenharARegiaoDoMod(b, modsCarregados.get("mod/b"), [{ forma: "midia", chave: "na-regiao", fonte: "img/r.png" }]);
-  });
-  await esperarQue(
-    pagina,
-    () => testCalls.filter((chamada) => chamada.cmd === "midia_do_mod"
-      && ["img/b.png", "img/r.png"].includes(chamada.args?.caminho)).length === 2,
-    "o cartão e a região de mod/b não pediram as mídias deles",
-  );
-  const doCartao = await pagina.evaluate(() => midiasDoPonto("pessoa.cartao"));
-  assert.deepEqual(
-    doCartao,
-    { carregando: 1, pronta: 0, recusada: 0, motivos: [] },
-    "a mídia de um cartão da API 3 não foi contada em «pessoa.cartao», ou a da região do MOD foi contada junto",
-  );
-
   // **A preferência que o avatar consulta**: a dele, e na falta dela a do cartão.
   const preferencias = await pagina.evaluate(() => {
     escolherApresentacao("pessoa.cartao", "mod/a");
@@ -493,35 +450,6 @@ async function quemPintaCadaLugar(navegador, servidor) {
     "um MOD passou a usar um lugar, sem mídia, e a aba não se redesenhou",
   );
 
-  // **O caminho da API 3 também pinta.**
-  await pagina.evaluate(() => {
-    darCartoesDoMod({ id: "mod/b", hash: "mod-b" }, modsCarregados.get("mod/b"), { 2: [{ forma: "texto", dentro: "B" }] });
-    escolherApresentacao("pessoa.cartao", "");
-  });
-  assert.match(await linha("pessoa.cartao"), /cartões pela API 3: mod\/b/, "um MOD que desenha cartões pela API 3 não apareceu em «quem pinta»");
-
-  // E a mídia dele é de quem pinta enquanto ele vale: no automático, a foto do
-  // cartão da API 3 conta (o cartão genérico de mod/b, que perdeu para mod/a,
-  // não); com o SEELE escolhido, nenhuma das duas.
-  await pagina.evaluate(() => {
-    darCartoesDoMod({ id: "mod/b", hash: "mod-b" }, modsCarregados.get("mod/b"), {
-      2: [{ forma: "texto", dentro: "B" }, { forma: "midia", chave: "foto", fonte: "img/b.png" }],
-    });
-  });
-  await esperarALinha(
-    pagina,
-    "pessoa.cartao",
-    /mídia: 1 carregando$/,
-    "no automático, a foto do cartão da API 3 não foi contada, ou a mídia do cartão de mod/b, que perdeu, foi contada junto",
-  );
-  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", APRESENTACAO_NATIVA));
-  cartao = await linha("pessoa.cartao");
-  assert.match(
-    cartao,
-    /mídia: nenhuma em uso agora$/,
-    `com o SEELE escolhido, a foto do cartão da API 3 de mod/b foi dita como mídia de quem pinta: ${cartao}`,
-  );
-
   // **O caso parcial.** O avatar é por pessoa: mod/b desenha a Lia (2) e mod/a
   // o Alex (1) — os dois que o retrato da bancada mostra com quadrado de
   // avatar. No automático cada um desenha quem declarou, e os dois retratos
@@ -595,20 +523,22 @@ async function quemPintaCadaLugar(navegador, servidor) {
 }
 
 /**
- * **A região e as páginas de cada MOD aparecem na aba** (pendência 49, item 5).
+ * **As páginas de cada MOD aparecem na aba** (pendência 49, item 5).
  * `desenharQuemPinta` desenha, logo abaixo dos lugares, o bloco que soma a
- * mídia da faixa e das páginas de cada MOD (`desenharAMidiaDosMods`). A bancada
- * de node mede a soma e as frases; esta mede que a aba as desenha, com uma
- * recusa da região e uma da página do mesmo MOD.
+ * mídia das páginas de cada MOD (`desenharAMidiaDosMods`). A bancada de node
+ * mede a soma e as frases; esta mede que a aba as desenha, com uma recusa em
+ * cada uma de duas páginas do mesmo MOD. (A faixa da API 3, a região, somava
+ * aqui também, e saiu com ela.)
  */
-async function aRegiaoEAsPaginasDeCadaModAparecemNaAba(navegador, servidor) {
+async function asPaginasDeCadaModAparecemNaAba(navegador, servidor) {
   const { pagina, erros } = await abrirASessao(navegador, servidor);
   await pagina.evaluate(() => {
     testTable.midia_do_mod = (args) => Promise.reject({ Recusado: { motivo: `${args.caminho} não está no pacote` } });
     const x = instancia("mod/x");
     const mod = { id: "mod/x", hash: "mod-x" };
-    desenharARegiaoDoMod(mod, x, [{ forma: "midia", chave: "na-regiao", fonte: "img/regiao.png" }]);
     const conjunto = superficiesDoMod(mod, x);
+    conjunto.criar({ id: "ficha", tipo: "pagina", titulo: "Ficha de X" });
+    conjunto.de("ficha").montar([{ forma: "midia", chave: "na-ficha", fonte: "img/ficha.png" }]);
     conjunto.criar({ id: "mesa", tipo: "pagina", titulo: "Mesa de X" });
     conjunto.de("mesa").montar([{ forma: "midia", chave: "na-pagina", fonte: "img/pagina.png" }]);
     $("tela-server").hidden = false;
@@ -618,13 +548,13 @@ async function aRegiaoEAsPaginasDeCadaModAparecemNaAba(navegador, servidor) {
   const bloco = () => document.querySelector('#lista-quem-pinta + ul[data-midia-dos-mods="sim"]')?.textContent ?? "(sem bloco)";
   await esperarQue(
     pagina,
-    () => /a região e as páginas de mod\/x: 2 recusadas — img\/regiao\.png não está no pacote; img\/pagina\.png não está no pacote/
+    () => /as páginas de mod\/x: 2 recusadas — img\/ficha\.png não está no pacote; img\/pagina\.png não está no pacote/
       .test(document.querySelector('#lista-quem-pinta + ul[data-midia-dos-mods="sim"]')?.textContent ?? ""),
-    "a aba DIAGNÓSTICO não desenhou, abaixo dos lugares, o bloco da região e das páginas de mod/x com as duas "
-      + "recusas e os motivos: a mídia recusada da faixa e da página de um MOD chega ao seele.log e ao MOD, e não à aba",
+    "a aba DIAGNÓSTICO não desenhou, abaixo dos lugares, o bloco das páginas de mod/x com as duas recusas e os "
+      + "motivos: a mídia recusada das páginas de um MOD chega ao seele.log e ao MOD, e não à aba",
     bloco,
   );
-  assert.deepEqual(erros, [], `a página lançou erro durante o bloco da região e das páginas: ${erros.join(" | ")}`);
+  assert.deepEqual(erros, [], `a página lançou erro durante o bloco das páginas: ${erros.join(" | ")}`);
   await pagina.close();
 }
 
@@ -633,10 +563,12 @@ async function aRegiaoEAsPaginasDeCadaModAparecemNaAba(navegador, servidor) {
  * do Plano 1D). O MOD e o registro recebiam «N bytes somados aos M já
  * montados passam do teto de T»; a anotação que a aba lê dizia só o teto, e
  * quem abria a aba não sabia se a mídia era grande demais ou se as outras já
- * tinham ocupado o lugar. Três formas, cada uma com o seu tamanho: a mídia
- * (`montarMidia`), o fundo de uma caixa (`montarFundoDeMidia`) e o retrato
- * (`montarRetrato`), na região de um MOD, cujo teto é de 10 MiB. A anotação
- * de cada uma é lida no renderer.
+ * tinham ocupado o lugar. Numa página — era a região da API 3, até ela sair —,
+ * as três formas que montam bytes, com o teto que o `v6.json` dá a cada uma
+ * (`superficies.limites-o-que-e`): o fundo de uma caixa
+ * (`montarFundoDeMidia`) e o retrato (`montarRetrato`) pelo bolso da
+ * superfície, de 24 MiB; a mídia (`montarMidia`) pelos 10 MiB dela. A
+ * anotação de cada uma é lida no renderer.
  *
  * **E as recusas pelo mesmo teto ocupam uma vaga só na aba** (M6 da revisão
  * do K3). A aba guarda até três motivos, iguais pelo texto: com os números,
@@ -654,39 +586,61 @@ async function aRecusaPeloTetoDeBytesDizOsNumeros(navegador, servidor) {
       tela.width = tela.height = 8;
       return tela.toDataURL();
     };
-    const tamanhos = { "img/midia.png": 11 * mib, "img/fundo.png": 12 * mib, "img/retrato.png": 13 * mib };
+    const teto = PERFIS_DE_RENDER.superficie.bytesDeMidia;
+    const daMidia = LIMITES_DA_REGIAO.bytesDeMidia;
+    const tamanhos = {
+      "img/retrato.png": teto + mib, "img/fundo.png": teto + 2 * mib, "img/retrato-2.png": teto + 3 * mib,
+      "img/grande.png": daMidia + mib,
+    };
     testTable.midia_do_mod = (args) => (tamanhos[args.caminho]
       ? Promise.resolve({ papel: "imagem", uri: foto(), bytes: tamanhos[args.caminho] })
       : Promise.reject({ Recusado: { motivo: `${args.caminho} não está no pacote` } }));
-    desenharARegiaoDoMod({ id: "mod/t", hash: "mod-t" }, instancia("mod/t"), [
-      { forma: "midia", chave: "midia", fonte: "img/midia.png" },
-      { forma: "caixa", chave: "fundo", fundoDeMidia: { fonte: "img/fundo.png" }, dentro: [{ forma: "texto", dentro: "F" }] },
+    const pagina = (id, declaracao) => {
+      const conjunto = superficiesDoMod({ id, hash: id.replace("/", "-") }, instancia(id));
+      conjunto.criar({ id: "mesa", tipo: "pagina", titulo: `Mesa de ${id}` });
+      conjunto.de("mesa").montar(declaracao);
+      return () => conjunto.de("mesa")?.renderer;
+    };
+    const daT = pagina("mod/t", [
       { forma: "retrato", chave: "retrato", fonte: "img/retrato.png", inicial: "T" },
+      { forma: "caixa", chave: "fundo", fundoDeMidia: { fonte: "img/fundo.png" }, dentro: [{ forma: "texto", dentro: "F" }] },
+      { forma: "retrato", chave: "retrato-2", fonte: "img/retrato-2.png", inicial: "U" },
       { forma: "midia", chave: "falta", fonte: "img/falta.png" },
     ]);
-    const daRegiao = () => [...regioesDosMods.values()].find((regiao) => regiao.id === "mod/t");
+    const daU = pagina("mod/u", [{ forma: "midia", chave: "grande", fonte: "img/grande.png" }]);
+    const recusados = (renderer) => (renderer?.midiasAnotadas() ?? []).filter((a) => a.situacao === "recusada");
     for (let volta = 0; volta < 20; volta += 1) {
-      if (daRegiao()?.midiasAnotadas().filter((a) => a.situacao === "recusada").length === 4) break;
+      if (recusados(daT()).length === 4 && recusados(daU()).length === 1) break;
       await new Promise((pronto) => setTimeout(pronto, 25));
     }
     return {
-      anotados: (daRegiao()?.midiasAnotadas() ?? []).filter((a) => a.situacao === "recusada").map((a) => a.motivo),
-      soma: midiasDaRegiaoEDasPaginas(regioesDosMods, superficiesDosMods).get("mod/t") ?? null,
+      teto,
+      daMidia,
+      anotados: recusados(daT()).map((a) => a.motivo),
+      daGrande: recusados(daU()).map((a) => a.motivo),
+      soma: midiasDasPaginas(superficiesDosMods).get("mod/t") ?? null,
     };
   }, MIB);
-  const teto = 10 * MIB;
-  const esperados = [11, 12, 13].map((n) => `${n * MIB} bytes somados aos 0 já montados passam do teto de ${teto} bytes de mídia deste lugar`);
+  const { teto, daMidia } = medido;
+  const passa = (bytes, de) => `${bytes} bytes somados aos 0 já montados passam do teto de ${de} bytes de mídia deste lugar`;
+  const esperados = [1, 2, 3].map((n) => passa(teto + n * MIB, teto));
   assert.equal(
     medido.anotados.length,
     4,
-    "a mídia, o fundo e o retrato de 11, 12 e 13 MiB, numa região de 10, e o arquivo que não está no pacote não "
-      + `foram os quatro recusados: ${JSON.stringify(medido.anotados)}`,
+    "o retrato, o fundo e o outro retrato de 1, 2 e 3 MiB acima do bolso da página, e o arquivo que não está no "
+      + `pacote, não foram os quatro recusados: ${JSON.stringify(medido.anotados)}`,
   );
   assert.deepEqual(
     medido.anotados.filter((motivo) => motivo.includes("teto")).sort(),
     esperados,
     "a recusa pelo teto de bytes foi anotada sem os números — quanto a mídia tinha e quanto já estava montado —, "
       + "e quem abre a aba não sabe se a mídia era grande demais ou se o lugar já estava cheio",
+  );
+  assert.deepEqual(
+    medido.daGrande,
+    [passa(daMidia + MIB, daMidia)],
+    "a mídia acima dos 10 MiB dela, numa página, não foi recusada com os números e com o teto que o v6.json dá a "
+      + `ela: ${JSON.stringify(medido.daGrande)}`,
   );
   assert.deepEqual(
     medido.soma?.motivos,
@@ -857,24 +811,22 @@ async function quemDesenhaOQueDizAEscolhaDestaMaquina(navegador, servidor) {
   await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", ""));
 
   // **«Usar» só quem pode desenhar o lugar** (I-3 da revisão ampla do Plano
-  // 1D). mod/c só acrescenta ao cartão: escolhê-lo não o faz desenhar nada, e
-  // o SEELE passa a desenhar. mod/d também só acrescenta, mas dá cartões pela
-  // API 3 — e escolhê-lo é o que faz os cartões dele valerem sozinhos.
+  // 1D). mod/c e mod/d só acrescentam ao cartão: escolhê-los não os faz
+  // desenhar nada, e o SEELE passa a desenhar. (Na API 3, o mod/d que dava
+  // cartões por `SeeleUI.cartoes` ganhava «usar»; o caminho saiu com ela.)
   await pagina.evaluate(() => {
     contribuicoesDosMods.registrar({ id: "mod/c" }, instancia("mod/c"), {
       ponto: "pessoa.cartao", modo: "adicionar", alvo: "2", conteudo: [{ forma: "texto", dentro: "selo de C" }],
     });
-    const d = instancia("mod/d");
-    contribuicoesDosMods.registrar({ id: "mod/d" }, d, {
+    contribuicoesDosMods.registrar({ id: "mod/d" }, instancia("mod/d"), {
       ponto: "pessoa.cartao", modo: "adicionar", alvo: "2", conteudo: [{ forma: "texto", dentro: "selo de D" }],
     });
-    darCartoesDoMod({ id: "mod/d", hash: "mod-d" }, d, { 2: [{ forma: "texto", dentro: "cartão de D" }] });
   });
   linha = await linhaDaGestao(pagina, cartao);
   assert.ok(
-    !linha.botoes.includes("USAR mod/c") && linha.botoes.includes("USAR mod/d") && linha.botoes.includes("USAR mod/b"),
-    "a gestão ofereceu «usar» a um MOD que só acrescenta ao cartão, ou deixou de oferecer a quem o substitui ou "
-      + `dá cartões pela API 3: ${linha.botoes.join(", ")}`,
+    !linha.botoes.includes("USAR mod/c") && !linha.botoes.includes("USAR mod/d") && linha.botoes.includes("USAR mod/b"),
+    "a gestão ofereceu «usar» a um MOD que só acrescenta ao cartão, ou deixou de oferecer a quem o substitui: "
+      + `${linha.botoes.join(", ")}`,
   );
 
   // E quem foi escolhido, está de pé e não substitui o lugar não é dito como
@@ -1413,8 +1365,12 @@ async function esperarOSino(pagina, estado, vezes = 1) {
 
 async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
   const { pagina, erros, recusasDaCsp } = await abrirASessao(navegador, servidor);
+  // O som numa página — a única forma da 6 com o botão do produto (o cartão e
+  // a contribuição não têm). Era a faixa da API 3, até ela sair.
   const declarar = (tocando) => pagina.evaluate((quer) => {
-    desenharARegiaoDoMod({ id: "mod/a", hash: "mod-a" }, somA, [
+    const conjunto = superficiesDoMod({ id: "mod/a", hash: "mod-a" }, somA);
+    if (!conjunto.de("mesa")) conjunto.criar({ id: "mesa", tipo: "pagina", titulo: "Mesa" });
+    conjunto.de("mesa").montar([
       { forma: "midia", chave: "sino", fonte: "som/sino.wav", descricao: "Sino de teste", tocando: quer },
     ]);
   }, tocando);
@@ -1439,14 +1395,14 @@ async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
   // Os bytes e a decodificação são duas voltas: espera-se a figura sair de
   // «carregando», e o que ela disse é o que se confere.
   await pagina.waitForFunction(() => {
-    const estado = document.querySelector('#regioes-dos-mods figure[data-chave-do-mod="sino"]')?.dataset.estado;
+    const estado = document.querySelector('.superficie-de-mod figure[data-chave-do-mod="sino"]')?.dataset.estado;
     return Boolean(estado) && estado !== "carregando";
   }, null, { timeout: 8000 });
   const montado = await pagina.evaluate(() => ({
     porque: eventosDoMod.find((e) => e.nome === "midia" && e.estado === "falhou")?.porque ?? "",
     audios: document.querySelectorAll("audio").length,
-    botao: document.querySelector("#regioes-dos-mods .regiao-de-mod-som")?.textContent ?? null,
-    figura: document.querySelector('#regioes-dos-mods figure[data-chave-do-mod="sino"]')?.dataset.estado ?? null,
+    botao: document.querySelector(".superficie-de-mod .regiao-de-mod-som")?.textContent ?? null,
+    figura: document.querySelector('.superficie-de-mod figure[data-chave-do-mod="sino"]')?.dataset.estado ?? null,
     pedido: testCalls.find((c) => c.cmd === "som_do_mod")?.args ?? null,
     eventos: eventosDoMod.filter((e) => e.nome === "midia").length,
   }));
@@ -1462,16 +1418,16 @@ async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
   );
 
   // Quem aperta o botão do produto ouve, e o fim é dito ao MOD.
-  await pagina.click("#regioes-dos-mods .regiao-de-mod-som");
+  await pagina.click(".superficie-de-mod .regiao-de-mod-som");
   await esperarOSino(pagina, "tocando");
   assert.equal(
-    await pagina.textContent("#regioes-dos-mods .regiao-de-mod-som"),
+    await pagina.textContent(".superficie-de-mod .regiao-de-mod-som"),
     "PAUSAR",
     "o som começou e o botão do produto não passou a PAUSAR",
   );
   await esperarOSino(pagina, "terminou");
   assert.equal(
-    await pagina.textContent("#regioes-dos-mods .regiao-de-mod-som"),
+    await pagina.textContent(".superficie-de-mod .regiao-de-mod-som"),
     "TOCAR",
     "o som terminou e o botão do produto ficou em PAUSAR",
   );
@@ -1480,20 +1436,27 @@ async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
   await declarar(true);
   await esperarOSino(pagina, "tocando", 2);
   const antes = await pagina.evaluate(() => window.paradas);
-  await pagina.evaluate(() => limparARegiaoDoMod("mod/a", somA));
+  // A saída da página pelo descarte que a instância registrou — o mesmo que
+  // roda quando o MOD sai.
+  const registrado = await pagina.evaluate(() => {
+    const saida = somA.recursos.find((recurso) => recurso.porque === "mod/a: as superfícies");
+    saida?.descartar();
+    return Boolean(saida);
+  });
+  assert.ok(registrado, "as superfícies de mod/a não estão registradas na instância, e a saída do MOD não as alcança");
   assert.equal(
     await pagina.evaluate(() => window.paradas),
     antes + 1,
     "sair no meio do som não parou a fonte, e o som continua tocando sem dono",
   );
-  assert.equal(await pagina.locator(".regiao-de-mod-som").count(), 0, "o botão do som ficou na tela depois de a região sair");
+  assert.equal(await pagina.locator(".regiao-de-mod-som").count(), 0, "o botão do som ficou na tela depois de a página sair");
 
   // **E numa contribuição.** Ela é montada uma vez por destino — um
   // `canal.item` sem alvo, num retrato de dois canais, monta duas vezes —, e
   // cada montagem pede os bytes com o mesmo contrato: sem o `hash`, o Tauri
   // recusa o pedido («missing required key hash») e o som nunca chega ao
   // WebAudio. Conferido em **todo** pedido de mídia da página, e não no
-  // primeiro: o primeiro é o da região, que já tinha o hash.
+  // primeiro: o primeiro é o da página, que já tinha o hash.
   //
   // E o som mora **num destino só**: um pede os bytes, decodifica e toca, e
   // o outro mostra a figura sem tocador (`montarSom`). Por destino, dois
@@ -1571,8 +1534,8 @@ async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
  * no Chromium, com o WebAudio de verdade (I-1 da revisão ampla do Plano 1D,
  * medido na sonda «som solto»): a página fechada pela saída do produto, o som
  * novo que uma página fechada declara `tocando`, a contribuição que perde a
- * disputa para «o SEELE desenha», o cartão da API 3 que deixa a lista, e o
- * destino de quem saiu do servidor.
+ * disputa para «o SEELE desenha», e o destino de quem saiu do servidor. (O
+ * quarto, o cartão da API 3 que deixa a lista, saiu com ela.)
  *
  * Antes, nos cinco, a fonte seguia até o fim fora da tela, e o MOD não ouvia
  * `pausada`. Um `<audio>` tirado do documento pausava sozinho.
@@ -1836,7 +1799,7 @@ async function oAvatarOuveDoSomRecusadoOQueOuvia(navegador, servidor) {
 const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
   quemPintaCadaLugar,
-  aRegiaoEAsPaginasDeCadaModAparecemNaAba,
+  asPaginasDeCadaModAparecemNaAba,
   aRecusaPeloTetoDeBytesDizOsNumeros,
   oEscolhidoDePeNaoEDitoComoQuemNaoEstaDePe,
   quemDesenhaOQueDizAEscolhaDestaMaquina,

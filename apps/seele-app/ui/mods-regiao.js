@@ -133,8 +133,6 @@ const LIMITES_DA_REGIAO = Object.freeze({
  * já existe.
  */
 const LIMITES_DO_CARTAO = Object.freeze({
-  /** Pessoas com cartão, por MOD. */
-  cartoes: 64,
   /**
    * Nós num cartão, somando todos os níveis.
    *
@@ -158,17 +156,15 @@ const LIMITES_DO_CARTAO = Object.freeze({
   fundura: 6,
   /**
    * Mídias no bolso de cartão de um renderer. O bolso é o mesmo de
-   * `bytesDeMidia`, abaixo: de todos os cartões deste MOD nos de
-   * `SeeleUI.cartoes`, e de cada destino numa contribuição.
+   * `bytesDeMidia`, abaixo: o de cada destino numa contribuição.
    */
   midias: 64,
   /**
    * Bytes de mídia no bolso de cartão de um renderer — os do arquivo, como
    * chegaram, como em `LIMITES_DA_REGIAO.bytesDeMidia`.
    *
-   * **De quem é o bolso.** Nos cartões de `SeeleUI.cartoes`, de todos os
-   * cartões deste MOD: eles moram no renderer da região, e o bolso é um só.
-   * Numa contribuição, **de cada destino**: ela monta um renderer por destino
+   * **De quem é o bolso.** Numa contribuição, **de cada destino**: ela monta
+   * um renderer por destino
    * (`montarContribuicao`, em `base.js`), e cada um conta a mídia que monta —
    * um `pessoa.cartao` sem alvo numa sala de 64 pessoas tem 64 bolsos destes.
    * O som decodificado não segue esta conta: o bolso dele numa contribuição é
@@ -182,9 +178,8 @@ const LIMITES_DO_CARTAO = Object.freeze({
    * O mesmo da região, e não o dobro como nos bytes: o bolso dos cartões é
    * maior pelos retratos de muitas pessoas, e retrato não é som.
    *
-   * **De quem é o bolso.** Nos cartões da API 3, de todos os cartões deste
-   * MOD: eles moram no renderer da região. Numa contribuição, **de cada
-   * contribuição**: ela monta um renderer por destino, e os sons dela moram
+   * **De quem é o bolso.** Numa contribuição, **de cada contribuição**: ela
+   * monta um renderer por destino, e os sons dela moram
    * num destino só (ver `montarSom`) — sem isso, o teto valia por destino, e
    * um `pessoa.cartao` sem alvo numa sala de 64 pessoas segurava até 64 vezes
    * este número. O teto **não** soma as contribuições de um MOD entre si: cada
@@ -208,9 +203,10 @@ const LIMITES_DO_CARTAO = Object.freeze({
  *
  * Três lugares, três orçamentos, e a diferença entre eles não é organização:
  *
- * - a **região** é a faixa da API 3, e continua existindo para os pacotes que
- *   já estão publicados. Ela não cresceu: crescer a faixa era exatamente o que
- *   o §15 do plano diz não confundir com uma API de aplicações;
+ * - a **região** era a faixa da API 3, e saiu com ela: nenhum lugar do produto
+ *   a monta mais. O perfil fica como o padrão do renderer, que é o das provas
+ *   da bancada. Ela não cresceu: crescer a faixa era exatamente o que o §15 do
+ *   plano diz não confundir com uma API de aplicações;
  * - o **cartão** é desenhado ao lado do nome de uma pessoa, e há um por pessoa.
  *   Ele cresceu de 24 para 64 nós porque U27 pediu que ele pudesse
  *   **substituir** a identidade — faixa, retrato sobreposto, nome, pronomes,
@@ -811,8 +807,6 @@ class RegiaoDeMod {
      */
     this.bytesDeSomDecodificado = 0;
     this.bytesDeSomDeCartao = 0;
-    /** A raiz do cartão de cada pessoa, por `id` em texto. */
-    this.raizesDeCartao = new Map();
     /** Quantos nós a última montagem recusou, por teto. */
     this.recusados = 0;
     /**
@@ -3725,13 +3719,13 @@ class RegiaoDeMod {
    * não ao documento. O descarte já cala o som (`montarMidia`), mas o produto
    * também tira nós da tela **sem** descartá-los: a página fechada pelo VOLTAR
    * ou, quando é imersiva, pelo Escape, a contribuição que perde a disputa, o
-   * cartão da API 3 sob «o SEELE desenha», o destino de quem saiu da sala. Nos
-   * cinco caminhos que a revisão ampla do Plano 1D mediu (I-1), o som seguia
-   * até o fim, sem controle à vista e sem `pausada` ao MOD.
+   * destino de quem saiu da sala (e o cartão da API 3 sob «o SEELE desenha»,
+   * até sair com ela). Nos cinco caminhos que a revisão ampla do Plano 1D mediu
+   * (I-1), o som seguia até o fim, sem controle à vista e sem `pausada` ao MOD.
    *
    * Um som está fora da tela quando o nó dele saiu do documento, ou quando ele
-   * mora num cartão — um da API 3, ou um destino de contribuição — e
-   * `cartoesPintam` diz que aquela montagem não desenha agora.
+   * mora num cartão — um destino de contribuição — e `cartoesPintam` diz que
+   * aquela montagem não desenha agora.
    *
    * O som fora da tela é pausado: o MOD recebe `pausada`, e a anotação
    * acompanha. Um `tocar` que ainda esperava o áudio da janela é cancelado, e
@@ -3751,8 +3745,7 @@ class RegiaoDeMod {
    *
    * @param {boolean} [cartoesPintam] Se as mídias de cartão deste renderer
    *   desenham agora — falso para o destino de uma contribuição que não
-   *   desenha (`aContribuicaoPinta`, em `base.js`) e para os cartões da API 3
-   *   de um MOD fora de `modsDeCartaoQueValem`.
+   *   desenha (`aContribuicaoPinta`, em `base.js`).
    */
   calarSonsForaDaTela(cartoesPintam = true) {
     if (this.solta) return;
@@ -4008,13 +4001,9 @@ class RegiaoDeMod {
    * **Quem lê as anotações.** As duas somas da aba, em `base.js`:
    * - `midiasDoPonto`, por ponto de contribuição: as dos renderers de
    *   contribuição (`montarContribuicao`), no destino em que a contribuição
-   *   desenha (`aContribuicaoPinta`), e as de cartão (`cartao: true`) da região
-   *   de um MOD cujos cartões valem (`modsDeCartaoQueValem`), em
-   *   `pessoa.cartao`;
-   * - `midiasDaRegiaoEDasPaginas`, por MOD: todas as da região dele e as das
-   *   superfícies (páginas, painéis e diálogos), sem filtro — é onde o som
-   *   costuma morar. A mídia de um cartão entra nas duas: são duas vistas da
-   *   mesma mídia, e a aba não soma os dois blocos.
+   *   desenha (`aContribuicaoPinta`);
+   * - `midiasDasPaginas`, por MOD: as das superfícies dele (páginas, painéis
+   *   e diálogos), sem filtro — é onde o som costuma morar.
    *
    * @param {Element} elem O nó da mídia.
    * @param {"carregando"|"pronta"|"recusada"} situacao
@@ -4050,88 +4039,6 @@ class RegiaoDeMod {
   /** O estado de cada mídia de pé, em cópia: quem lê não escreve aqui. */
   midiasAnotadas() {
     return [...this.estadosDeMidia.values()].map((anotada) => ({ ...anotada }));
-  }
-
-  // -------------------------------------------------------- os cartões
-
-  /**
-   * Os cartões que este MOD declara para a lista de pessoas do produto.
-   *
-   * # Por que isto não é o MOD desenhando na janela
-   *
-   * O ADR 0049 tirou o MOD da janela, e nada aqui o traz de volta. O que chega
-   * é **a mesma declaração da região** — as mesmas formas, o mesmo
-   * `planejar`, o mesmo `reconciliar`, o mesmo `elemento` — montada pelo mesmo
-   * renderer, com `createElement` e `textContent` e nunca com HTML de texto.
-   * O MOD não alcança nó nenhum, não escolhe onde o cartão entra na linha, e
-   * não recebe evento de dentro dele.
-   *
-   * O que muda em relação à região é o que ele **pode** declarar (ver
-   * `FORMAS_DO_CARTAO`) e quanto (ver `LIMITES_DO_CARTAO`). Um cartão é
-   * desenhado ao lado do nome de uma pessoa, numa lista que o produto usa para
-   * dizer quem está falando: um teto de região ali seria a lateral inteira.
-   *
-   * # O descarte
-   *
-   * A raiz de cada cartão é guardada aqui, e não só no documento. Quando um
-   * MOD para de declarar uma pessoa, a raiz dela sai e solta o que segurava —
-   * e quando a região inteira sai, `soltar` percorre estas raízes também.
-   * Sem isso, o retrato de um MOD que não está mais de pé continuaria na lista
-   * até alguém trocar de servidor.
-   *
-   * @param {object} cartoes `{ [id da pessoa]: declaração }`.
-   * @returns {number} quantos nós foram recusados por teto ou por forma.
-   */
-  declararCartoes(cartoes) {
-    if (this.solta) return 0;
-    this.recusados = 0;
-    this.amostraDeRecusados = [];
-    const pedidos = Object.entries(cartoes ?? {});
-    if (pedidos.length > LIMITES_DO_CARTAO.cartoes) {
-      throw new Error(
-        `um MOD dá cartão a até ${LIMITES_DO_CARTAO.cartoes} pessoas, e vieram ${pedidos.length}`,
-      );
-    }
-
-    const vivos = new Set();
-    for (const [quem, declaracao] of pedidos) {
-      const pessoa = String(quem);
-      // Um cartão sem nada dentro não é um cartão: seria uma moldura vazia ao
-      // lado de um nome, que é o produto anunciando uma ausência que ninguém
-      // pediu para anunciar.
-      const orcamento = { nos: LIMITES_DO_CARTAO.nos };
-      const planos = this.planejar(declaracao, 0, orcamento, PERFIS_DE_RENDER.cartao.formas);
-      if (planos.length === 0) continue;
-      vivos.add(pessoa);
-
-      let raiz = this.raizesDeCartao.get(pessoa);
-      if (!raiz) {
-        raiz = elemento("div", "pessoa-cartao");
-        raiz.dataset.mod = this.id;
-        this.raizesDeCartao.set(pessoa, raiz);
-      }
-      this.reconciliar(raiz, planos, 0, orcamento);
-    }
-
-    for (const [pessoa, raiz] of Array.from(this.raizesDeCartao)) {
-      if (vivos.has(pessoa)) continue;
-      this.soltarCartao(pessoa, raiz);
-    }
-    return this.recusados;
-  }
-
-  /** Tira o cartão de uma pessoa e solta o que ele segurava. */
-  soltarCartao(pessoa, raiz) {
-    this.raizesDeCartao.delete(pessoa);
-    this.soltarSubarvore(raiz);
-    for (const filho of Array.from(raiz.children)) this.soltarSubarvore(filho);
-    raiz.remove();
-  }
-
-  /** A raiz do cartão desta pessoa, ou nada quando este MOD não deu um. */
-  cartaoDe(pessoa) {
-    if (this.solta) return null;
-    return this.raizesDeCartao.get(String(pessoa)) ?? null;
   }
 
   // ------------------------------------------------------- os recursos
@@ -4184,12 +4091,6 @@ class RegiaoDeMod {
         filho.remove();
       }
       this.rodape.hidden = true;
-    }
-    // **E os cartões**, que moram na lista do produto e não sob esta raiz. Um
-    // retrato de um MOD que saiu continuaria ao lado do nome de alguém até a
-    // próxima troca de servidor — e ninguém teria como tirá-lo.
-    for (const [pessoa, raiz] of Array.from(this.raizesDeCartao)) {
-      this.soltarCartao(pessoa, raiz);
     }
     // O que não estava mais na árvore — porque o nó saiu antes — já foi solto
     // pelo mesmo caminho; o que restar aqui é o que a árvore não alcançava.

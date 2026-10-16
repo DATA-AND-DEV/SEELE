@@ -656,9 +656,8 @@ function bancada(opcoes = {}) {
  * quem saiu, e outra que a oferece a quem desenha. Uma cópia aqui ficaria
  * verde com a segunda volta tirada de `base.js`.
  *
- * As tabelas que ela lê são desta prova: nenhuma região de MOD, nenhum MOD com
- * cartão que valha, e as contribuições que a prova passa, cada uma com o seu
- * `montadas` e o seu `sons`, como `montarContribuicao` os deixa.
+ * A tabela que ela lê é desta prova: as contribuições que a prova passa, cada
+ * uma com o seu `montadas` e o seu `sons`, como `montarContribuicao` os deixa.
  *
  * @param {object} b A bancada.
  * @param {object[]} contribuicoes `{ modo, ponto, sons, montadas }`.
@@ -680,8 +679,6 @@ function varreduraDeBase(b, contribuicoes) {
       + "as provas do som que muda de destino mediriam outra varredura",
   );
   if (!pinta || !varre) return () => {};
-  b.janela.modsDeCartaoQueValem = () => [];
-  b.janela.regioesDosMods = new Map();
   b.janela.contribuicoesDosMods = {
     porHandle: new Map(contribuicoes.map((contribuicao, i) => [`c${i + 1}`, contribuicao])),
   };

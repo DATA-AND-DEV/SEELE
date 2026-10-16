@@ -2550,25 +2550,11 @@ button.linha-nome:hover { text-decoration: underline; }
    `aplicarOTemaDoMod` recusa um tema cujo texto não alcance 4,5:1 sobre o
    fundo que ficaria em vigor, e recusa pelo nome.
 
-/* ---- a faixa ----
+   (A faixa das regiões, que morava aqui, saiu com a API 3.) */
 
-   Vazia ela não existe: `hidden` é tirado por `desenharARegiaoDoMod` e reposto
-   por `limparARegiaoDoMod` quando sai a última região. Uma faixa de altura zero
-   com borda em cima seria uma régua que aparece sem nada do outro lado. */
-.regioes-dos-mods {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 1px;
-  max-height: 240px;
-  overflow-y: auto;
-  border-top: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-painel);
-}
-
-
-/* O que um MOD declara dentro da faixa, da lista de pessoas ou de uma
-   superfície é desenhado por `mods-controles.css`. Ele mora lá e não aqui
-   porque a mesma gramática é montada nos três lugares, e uma régua repetida em
+/* O que um MOD declara numa contribuição — na lista de pessoas, num canal —
+   ou numa superfície é desenhado por `mods-controles.css`. Ele mora lá e não
+   aqui porque a mesma gramática é montada nos dois lugares, e uma régua repetida em
    duas folhas é a régua que discorda no dia em que só uma delas muda — que foi
    exatamente o que o guarda de classes duplicadas pegou. */
 

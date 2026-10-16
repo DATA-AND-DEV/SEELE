@@ -742,10 +742,8 @@ class RegistroDeContribuicoes {
         ponto,
         mods,
         // Quem pede para substituir este lugar. A gestão oferece «usar» a
-        // estes e, em `pessoa.cartao`, também a quem contribui aqui e dá
-        // cartões pela API 3 — escolhê-lo é o que faz os cartões dele valerem
-        // sozinhos (`oQueAGestaoDiz`, em `camada-mods.js`). Escolher quem só
-        // acrescenta, sem cartões da API 3, faz o SEELE desenhar.
+        // estes (`oQueAGestaoDiz`, em `camada-mods.js`): escolher quem só
+        // acrescenta faz o SEELE desenhar.
         substituem,
         quantas: todas.length,
         escolhido: disputa.escolhida?.mod ?? (desenhaQuemDeclarou ? semCandidata : ""),

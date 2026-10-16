@@ -772,7 +772,6 @@ contexto.PERFIS_DE_RENDER = { cartao: {}, superficie: {} };
 contexto.elemento = (tag) => new No(tag, "");
 // O `mod` vai junto: é com o hash dele que o dono de verdade pede a mídia.
 contexto.donoDaRegiao = (mod, instancia) => ({ instancia, mod, falar() {} });
-contexto.cartoesDosMods = new Map();
 
 {
   const base = ler("base.js");
@@ -877,8 +876,8 @@ contexto.cartoesDosMods = new Map();
   // cada um é medido em `regiao-do-mod.cjs`.
   //
   // A regra é a de `midiasDoPonto`: uma substituição desenha onde
-  // `escolherSubstituicao` a escolhe, um acréscimo desenha sempre, e um
-  // cartão da API 3 desenha quando o MOD está em `modsDeCartaoQueValem`.
+  // `escolherSubstituicao` a escolhe, e um acréscimo desenha sempre. (A
+  // região da API 3 e os cartões dela saíram com ela.)
   const ouvidos = new Map();
   const renderer = (nome) => ({
     calarSonsForaDaTela(cartoesPintam = true) { ouvidos.set(nome, cartoesPintam); },
@@ -891,11 +890,6 @@ contexto.cartoesDosMods = new Map();
   };
   const [a, b, c] = ["mod/a", "mod/b", "mod/c"].map(instancia);
   contexto.contribuicoesDosMods = registro;
-  contexto.regioesDosMods = new Map([
-    [a, { id: "mod/a", ...renderer("a região de mod/a, cujos cartões valem") }],
-    [b, { id: "mod/b", ...renderer("a região de mod/b, cujos cartões não valem") }],
-  ]);
-  contexto.modsDeCartaoQueValem = () => ["mod/a"];
   contexto.preferenciaConsultadaPara = () => "";
   const montada = (mod, dono, pedido, nome) => {
     const { handle } = registro.registrar({ id: mod }, dono, pedido);
@@ -915,8 +909,6 @@ contexto.cartoesDosMods = new Map();
   );
   varrer();
   const esperado = {
-    "a região de mod/a, cujos cartões valem": true,
-    "a região de mod/b, cujos cartões não valem": false,
     "a substituição que perdeu": false,
     "a substituição que venceu": true,
     "o acréscimo": true,
@@ -988,7 +980,6 @@ contexto.cartoesDosMods = new Map();
   const anotadas = [];
   const registrarDeAntes = contexto.registrarNoAnfitriao;
   const rendererDeAntes = contexto.RegiaoDeMod;
-  const regiaoDeAntes = contexto.regiaoDoMod;
   contexto.registrarNoAnfitriao = (...argumentos) => anotadas.push(argumentos);
   const dita = (idDoMod, ...pedacos) => anotadas.some(([onde, texto, nivel, modId]) =>
     onde === "recusa-de-mod" && nivel === "aviso" && modId === idDoMod
@@ -1032,22 +1023,8 @@ contexto.cartoesDosMods = new Map();
     "a recusa do descarte escreveu o ponto sem «», ao contrário das outras recusas de contribuição: "
       + `${JSON.stringify(anotadas.filter(([, texto]) => String(texto).includes("não saiu")))}`);
 
-  // Cartões recusados, pelo `darCartoesDoMod` de verdade.
-  const base = ler("base.js");
-  const inicio = base.indexOf("function darCartoesDoMod(");
-  const fim = base.indexOf("\n}\n", inicio) + 3;
-  confere("R4d · o recorte", inicio >= 0, "`darCartoesDoMod` mudou de forma e o recorte não a achou");
-  vm.runInContext(base.slice(inicio, fim), contexto);
-  contexto.regiaoDoMod = () => ({ declararCartoes: () => 2 });
-  const devolvidos = contexto.darCartoesDoMod({ id: "mod/c" }, {}, { 7: [] });
-  confere("R4d · cartões", devolvidos === 2, `o MOD deixou de receber o número de recusas: ${devolvidos}`);
-  confere("R4d · cartões", dita("mod/c", "2 nó(s)", "cartões"),
-    `os cartões que não couberam não chegaram ao registro: ${JSON.stringify(anotadas)}`);
-
-  contexto.regiaoDoMod = regiaoDeAntes;
   contexto.RegiaoDeMod = rendererDeAntes;
   contexto.registrarNoAnfitriao = registrarDeAntes;
-  contexto.cartoesDosMods.clear();
 }
 
 // ------------- R3b · a substituição desenha o conteúdo da própria contribuição
@@ -1059,9 +1036,6 @@ contexto.cartoesDosMods = new Map();
 
   // **Sem `SeeleUI.cartoes`.** É o ponto: um autor que siga o contrato
   // genérico registra `pessoa.cartao/substituir` com `conteudo` e mais nada.
-  // `cartoesDosMods` fica vazio de propósito — era ele, e só ele, que o
-  // caminho antigo consultava.
-  contexto.cartoesDosMods.clear();
   const { handle } = registro.registrar({ id: "mod/a" }, dono, {
     ponto: "pessoa.cartao", modo: "substituir",
     conteudo: [{ forma: "texto", chave: "c", dentro: "cartão do MOD" }],
@@ -1105,69 +1079,13 @@ contexto.cartoesDosMods = new Map();
 
   // **O legado saiu** (a limpeza das APIs 3 a 5): este build só executa a 6,
   // e uma contribuição sem conteúdo não cai mais num cartão de
-  // `SeeleUI.cartoes`. Um cartão legado posto à mão, enquanto a tabela dele
-  // existir, não é usado: a linha fica com o que o produto desenha.
-  const legado = new No("div", "");
-  contexto.cartoesDosMods?.set?.("mod/a", { cartaoDe: (id) => (String(id) === "12" ? legado : null) });
+  // `SeeleUI.cartoes`: a linha fica com o que o produto desenha.
   const semConteudo = { mod: "mod/a", instancia: dono, ponto: "pessoa.cartao", conteudo: null };
   confere(
     "R3b · sem o legado",
     !contexto.cartaoDeContribuicao(semConteudo, 12),
     "uma contribuição sem conteúdo caiu num cartão de `SeeleUI.cartoes`, que saiu com as APIs 3 a 5",
   );
-  contexto.cartoesDosMods?.clear?.();
-}
-
-// ------------- N4 · a escolha de apresentação alcança o caminho legado
-
-{
-  // `SeeleUI.cartoes` é o caminho da API 3 para o mesmo ponto que
-  // `pessoa.cartao/substituir`. A preferência alcançava só a substituição:
-  // escolher «usar apresentação do SEELE» devolvia o nome nativo **e deixava o
-  // cartão do MOD logo abaixo**. A validação nativa de 20/09/2026 observou.
-  const base = ler("base.js");
-  // **As duas funções, e não uma.** Desde a fase M1 a regra mora em
-  // `modsDeCartaoQueValem`, que «quem pinta cada lugar» também lê, e
-  // `cartoesDaPessoa` só desenha por ela. Recortar só a segunda mediria uma
-  // função que chama o que não está no recorte.
-  const inicio = base.indexOf("function modsDeCartaoQueValem(");
-  const desenha = base.indexOf("function cartoesDaPessoa(", inicio);
-  const fim = base.indexOf("\n}", desenha) + 2;
-  confere(
-    "N4 · o recorte",
-    inicio >= 0 && desenha > inicio,
-    "`modsDeCartaoQueValem` e `cartoesDaPessoa` deixaram de ser vizinhas, e o recorte não as achou",
-  );
-  vm.runInContext(base.slice(inicio, fim), contexto);
-
-  const doA = new No("div", "");
-  const doB = new No("div", "");
-  contexto.cartoesDosMods.clear();
-  contexto.cartoesDosMods.set("mod/a", { cartaoDe: () => doA });
-  contexto.cartoesDosMods.set("mod/b", { cartaoDe: () => doB });
-
-  let escolhido = "";
-  contexto.modPreferidoPara = () => escolhido;
-
-  confere(
-    "N4 · automático",
-    contexto.cartoesDaPessoa(12).length === 2,
-    "sem escolha, os cartões dos dois MODs deixaram de aparecer",
-  );
-
-  escolhido = contexto.NATIVO;
-  confere(
-    "N4 · nativo",
-    contexto.cartoesDaPessoa(12).length === 0,
-    "«usar apresentação do SEELE» deixou o cartão do MOD pendurado abaixo do nativo",
-  );
-
-  escolhido = "mod/b";
-  const so = contexto.cartoesDaPessoa(12);
-  confere("N4 · provedor", so.length === 1 && so[0] === doB, "escolher um provedor não tirou o cartão do outro");
-
-  escolhido = "";
-  contexto.cartoesDosMods.clear();
 }
 
 // ----------------------------- M1 · a aba DIAGNÓSTICO, no portão (m-6)
@@ -1208,7 +1126,6 @@ function abaDoDiagnostico() {
   const camada = ler("camada-mods.js");
   const recortes = [
     [base, "function midiasDoPonto(", "/**\n * Cala o som de MOD que um desenho tirou da tela."],
-    [base, "function modsDeCartaoQueValem(", "/**\n * Os cartões desta pessoa"],
     [camada, "function preferenciaConsultadaPara(", "/**\n * Escolhe quem apresenta um ponto"],
     [camada, "function oQueAGestaoDiz(", "/**\n * O valor que quer dizer «o SEELE desenha, e nenhum MOD»."],
     [camada, "const APRESENTACAO_NATIVA = ", "/** Uma linha: o nome em palavra"],
@@ -1224,13 +1141,11 @@ function abaDoDiagnostico() {
     if (inicio >= 0 && fim > inicio) vm.runInContext(fonte.slice(inicio, fim), aba);
   }
   // O que a aba lê da página e dos MODs de pé: a preferência desta máquina,
-  // os cartões e o tema do caminho antigo (`modsDoCaminhoAntigo`), e a região
-  // e as superfícies de cada instância. O registro é de verdade.
+  // o tema do caminho antigo (`modsDoCaminhoAntigo`), e as superfícies de
+  // cada instância. O registro é de verdade.
   aba.preferencias = new Map();
   aba.modPreferidoPara = (ponto) => aba.preferencias.get(ponto) ?? "";
-  aba.cartoesDosMods = new Map();
   aba.temaDosMods = new Map();
-  aba.regioesDosMods = new Map();
   aba.superficiesDosMods = new Map();
   aba.contribuicoesDosMods = vm.runInContext("new RegistroDeContribuicoes()", aba);
   return aba;
@@ -1291,21 +1206,6 @@ function anotando(...anotadas) {
     `o motivo do retrato não saiu cortado em 200 pontos de código inteiros: ${JSON.stringify(doAvatar.motivos[0]?.slice(-4))}`,
   );
 
-  // **Os cartões da API 3**: só os de quem vale, e só as anotações de cartão —
-  // a região do mesmo MOD mora no mesmo renderer, e não é de `pessoa.cartao`.
-  aba.cartoesDosMods.set("mod/c", anotando({ situacao: "pronta", cartao: true }, { situacao: "carregando", cartao: false }));
-  aba.cartoesDosMods.set("mod/d", anotando({ situacao: "carregando", cartao: true }));
-  aba.preferencias.set("pessoa.cartao", "mod/c");
-  const dosCartoes = aba.midiasDoPonto("pessoa.cartao");
-  confere(
-    "M1 · a aba · os cartões da API 3",
-    dosCartoes.pronta === 1 && dosCartoes.carregando === 0,
-    "com mod/c escolhido, a mídia do cartão da API 3 dele não foi contada, ou a da região dele e a dos cartões de "
-      + `mod/d, que não valem, foram contadas junto: ${JSON.stringify(dosCartoes)}`,
-  );
-  aba.preferencias.clear();
-  aba.cartoesDosMods.clear();
-
   // **A preferência que o avatar consulta**: a dele, e na falta dela a do cartão.
   aba.preferencias.set("pessoa.cartao", "mod/a");
   confere(
@@ -1352,53 +1252,52 @@ function anotando(...anotadas) {
   aba.preferencias.clear();
 }
 
-// **A região e as páginas de cada MOD** (pendência 49, item 5; m-2 da revisão
-// ampla do Plano 1D). A aba contava só a mídia dos onze lugares, e a faixa de
-// cada MOD e as superfícies dele anotavam e ninguém lia: uma trilha recusada
-// numa página chegava ao `seele.log` e ao MOD, e não à aba. A soma não filtra
-// cartão: a mídia de um cartão aparece aqui e em `pessoa.cartao`, duas vistas
-// da mesma mídia.
+// **As páginas de cada MOD** (pendência 49, item 5; m-2 da revisão ampla do
+// Plano 1D). A aba contava só a mídia dos onze lugares, e as superfícies de
+// cada MOD anotavam e ninguém lia: uma trilha recusada numa página chegava ao
+// `seele.log` e ao MOD, e não à aba. (A faixa da API 3, a região, somava aqui
+// também, e saiu com ela.)
 {
-  const caso = "M1 · a aba · a região e as páginas";
+  const caso = "M1 · a aba · as páginas";
   const aba = abaDoDiagnostico();
-  const somar = typeof aba.midiasDaRegiaoEDasPaginas === "function" ? aba.midiasDaRegiaoEDasPaginas : null;
+  const somar = typeof aba.midiasDasPaginas === "function" ? aba.midiasDasPaginas : null;
   confere(
     caso,
     somar !== null && typeof aba.frasesDaMidiaDosMods === "function",
-    "`midiasDaRegiaoEDasPaginas` (`base.js`) ou `frasesDaMidiaDosMods` (`camada-mods.js`) não estão nos recortes "
-      + "da aba: ela continua sem ler a mídia da região e das páginas",
+    "`midiasDasPaginas` (`base.js`) ou `frasesDaMidiaDosMods` (`camada-mods.js`) não estão nos recortes "
+      + "da aba: ela continua sem ler a mídia das páginas",
   );
   if (somar) {
     confere(
       caso,
-      JSON.stringify(aba.frasesDaMidiaDosMods()) === JSON.stringify(["nenhum MOD tem região nem página de pé agora"]),
+      JSON.stringify(aba.frasesDaMidiaDosMods()) === JSON.stringify(["nenhum MOD tem página de pé agora"]),
       `sem MOD de pé, o bloco não disse que não há nada: ${JSON.stringify(aba.frasesDaMidiaDosMods())}`,
     );
-    // Uma região com um som recusado e um retrato de cartão recusado, e uma
-    // página com um fundo recusado — de duas instâncias, como no produto: a
-    // região e as superfícies são guardadas por instância, e a soma é por id.
-    aba.regioesDosMods.set({}, {
+    // Duas instâncias de mod/x, como no produto — as superfícies são
+    // guardadas por instância, e a soma é por id —, uma com um som e um
+    // retrato recusados, a outra com um fundo recusado; e mod/y sem mídia.
+    aba.superficiesDosMods.set({}, {
       id: "mod/x",
-      ...anotando(
+      porChave: new Map([["painel", { renderer: anotando(
         { situacao: "recusada", motivo: "o som não decodificou" },
-        { situacao: "recusada", motivo: "o retrato passou do teto do cartão", cartao: true },
-      ),
+        { situacao: "recusada", motivo: "o retrato passou do teto" },
+      ) }]]),
     });
     aba.superficiesDosMods.set({}, {
       id: "mod/x",
       porChave: new Map([["mesa", { renderer: anotando({ situacao: "recusada", motivo: "o fundo não é imagem" }) }]]),
     });
-    aba.regioesDosMods.set({}, { id: "mod/y", ...anotando() });
-    const porMod = somar(aba.regioesDosMods, aba.superficiesDosMods);
+    aba.superficiesDosMods.set({}, { id: "mod/y", porChave: new Map([["capa", { renderer: anotando() }]]) });
+    const porMod = somar(aba.superficiesDosMods);
     const deX = porMod.get("mod/x");
     confere(
       caso,
       deX?.recusada === 3 && deX.carregando === 0 && deX.pronta === 0
         && JSON.stringify(deX.motivos) === JSON.stringify([
-          "o som não decodificou", "o retrato passou do teto do cartão", "o fundo não é imagem",
+          "o som não decodificou", "o retrato passou do teto", "o fundo não é imagem",
         ]),
-      "a região e a página de mod/x não somaram as três recusas com os três motivos — a da página, a do cartão "
-        + `ou a da região ficou de fora: ${JSON.stringify(deX)}`,
+      "as duas instâncias de mod/x não somaram as três recusas com os três motivos — uma das páginas ficou de "
+        + `fora: ${JSON.stringify(deX)}`,
     );
     confere(
       caso,
@@ -1409,9 +1308,8 @@ function anotando(...anotadas) {
     confere(
       caso,
       JSON.stringify(frases) === JSON.stringify([
-        "a região e as páginas de mod/x: 3 recusadas — o som não decodificou; o retrato passou do teto do cartão; "
-          + "o fundo não é imagem",
-        "a região e as páginas de mod/y: nenhuma mídia montada",
+        "as páginas de mod/x: 3 recusadas — o som não decodificou; o retrato passou do teto; o fundo não é imagem",
+        "as páginas de mod/y: nenhuma mídia montada",
       ]),
       `o bloco não disse a mídia de cada MOD com os motivos: ${JSON.stringify(frases)}`,
     );
@@ -1566,16 +1464,16 @@ function anotando(...anotadas) {
 // de todos, e a disputa do alvo vazio sai antes de olhar a escolha. A linha da
 // gestão era só a dessa disputa: dizia «4 contribuição(ões)» com qualquer
 // escolha, e oferecia de novo o que já vale — «USAR mod/b» com mod/b escolhido,
-// «USAR APRESENTAÇÃO DO SEELE» com o SEELE escolhido, «USAR mod/d» com o mod/d
-// da API 3 escolhido. A escolha dita e os botões que somem vêm da escolha
-// gravada do ponto; a disputa e quem pinta não mudam.
+// «USAR APRESENTAÇÃO DO SEELE» com o SEELE escolhido. A escolha dita e os
+// botões que somem vêm da escolha gravada do ponto; a disputa e quem pinta não
+// mudam.
 {
   const caso = "M1 · a gestão · a escolha desta máquina";
   /** Um registro novo; devolve, para cada escolha, a linha de `resumo`, o que a gestão diz e a linha da aba. */
   const montar = (registrar) => {
     const aba = abaDoDiagnostico();
     for (const id of ["mod/b", "mod/c", "mod/d", "mod/e"]) aba.modsCarregados.set(id, {});
-    registrar(aba.contribuicoesDosMods, aba.cartoesDosMods);
+    registrar(aba.contribuicoesDosMods);
     return (escolha) => {
       const linha = aba.contribuicoesDosMods
         .resumo(new Map([["pessoa.cartao", escolha]]), (id) => aba.modsCarregados.has(id))
@@ -1589,22 +1487,24 @@ function anotando(...anotadas) {
   };
   const cartao = (alvo, modo) => ({ ponto: "pessoa.cartao", modo, alvo });
   // mod/b substitui o cartão da pessoa 2 e mod/e o da 3; mod/c acrescenta ao
-  // da 2; mod/d acrescenta ao da 3 e dá cartões pela API 3.
-  const naGestao = montar((registro, cartoesDosMods) => {
+  // da 2, e mod/d ao da 3.
+  const naGestao = montar((registro) => {
     registro.registrar({ id: "mod/b" }, null, cartao("2", "substituir"));
     registro.registrar({ id: "mod/c" }, null, cartao("2", "adicionar"));
     registro.registrar({ id: "mod/e" }, null, cartao("3", "substituir"));
     registro.registrar({ id: "mod/d" }, null, cartao("3", "adicionar"));
-    cartoesDosMods.set("mod/d", anotando());
   });
 
   // Sem escolha gravada, nada muda: a contagem, «usar» para quem desenha o
   // cartão, e o SEELE; voltar ao automático não, porque já se está nele.
+  // **Quem só acrescenta não ganha «usar»**: mod/c e mod/d não desenham o
+  // cartão, e escolhê-los faria o SEELE desenhar. (Na API 3, o mod/d que dava
+  // cartões por `SeeleUI.cartoes` ganhava; o caminho saiu com ela.)
   const automatico = naGestao("");
   confere(
     caso,
     automatico.estado === "4 contribuição(ões) de mod/b, mod/c, mod/e, mod/d"
-      && automatico.botoes.join() === "USAR mod/b,USAR mod/e,USAR mod/d,USAR APRESENTAÇÃO DO SEELE",
+      && automatico.botoes.join() === "USAR mod/b,USAR mod/e,USAR APRESENTAÇÃO DO SEELE",
     `sem escolha nesta máquina, a linha da gestão mudou: «${automatico.estado}», ${automatico.botoes.join(", ")}`,
   );
 
@@ -1648,8 +1548,8 @@ function anotando(...anotadas) {
       + `oferecer as outras escolhas: ${doSeele.botoes.join(", ")}`,
   );
 
-  // O mod/d da API 3 escolhido: os cartões dele valem sozinhos, e o «usar»
-  // dele some.
+  // mod/d escolhido, que só acrescenta: o SEELE desenha, e a gestão oferece o
+  // SEELE e o automático — e nenhum «usar» para ele.
   const doD = naGestao("mod/d");
   confere(
     caso,
@@ -1661,7 +1561,7 @@ function anotando(...anotadas) {
     !doD.botoes.includes("USAR mod/d")
       && doD.botoes.includes("USAR APRESENTAÇÃO DO SEELE")
       && doD.botoes.includes("DECIDIR AUTOMATICAMENTE"),
-    "com o mod/d da API 3 escolhido, a gestão ofereceu de novo «USAR mod/d», que já vale, ou deixou de oferecer "
+    "com mod/d escolhido, a gestão ofereceu «USAR mod/d», que só acrescenta, ou deixou de oferecer "
       + `as outras escolhas: ${doD.botoes.join(", ")}`,
   );
 
@@ -2467,21 +2367,13 @@ function anotando(...anotadas) {
     confere("R2 · o dono", registro.porHandle.has(handle) === false, "a revogação do dono não tirou a contribuição");
     confere("R2 · o dono", a.recursos.length === 0, "a revogação do dono deixou o descartador retido na instância");
 
-    // **O `catch` de `atenderOMod`**, por duas portas: a contribuição recusada
-    // e a região com nós demais, esta pelo `desenharARegiaoDoMod` de verdade.
+    // **O `catch` de `atenderOMod`**: a contribuição recusada, e a mensagem
+    // `regiao`, que a 6 não tem. (A região com nós demais, pelo
+    // `desenharARegiaoDoMod` de verdade, saiu com a API 3.)
     {
-      const regiaoDeAntes = contexto.regiaoDoMod;
-      const inicioDaRegiao = base.indexOf("function desenharARegiaoDoMod(");
-      const fimDaRegiao = base.indexOf("\n}\n", inicioDaRegiao) + 3;
-      confere("R2 · o recorte da região", inicioDaRegiao >= 0,
-        "`desenharARegiaoDoMod` mudou de forma e o recorte não a achou");
-      vm.runInContext(base.slice(inicioDaRegiao, fimDaRegiao), contexto);
-      // Uma região que recusa três nós: é o que o renderer devolve quando a
-      // árvore passa do teto, e é o número que `desenharARegiaoDoMod` lança.
-      contexto.regiaoDoMod = () => ({ aplicar: () => 3 });
       let contribuicaoRespondida;
       let regiaoRespondida;
-      try {
+      {
         await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
           tipo: "contribuir", n: 5,
           pedido: { ponto: "nao.existe", rotulo: "x" },
@@ -2492,8 +2384,6 @@ function anotando(...anotadas) {
           conteudo: [{ forma: "texto", chave: "t", dentro: "x" }],
         });
         regiaoRespondida = respostas.at(-1);
-      } finally {
-        contexto.regiaoDoMod = regiaoDeAntes;
       }
       confere("R2 · a recusa no registro", contribuicaoRespondida?.ok === false,
         "um ponto que não existe foi aceito");

@@ -926,76 +926,6 @@ async function montarOMod(mod) {
 }
 
 /**
- * A região de um MOD: onde ele desenha, e o único lugar onde ele desenha.
- *
- * ADR 0049. O MOD **declara** o que quer ver e o produto monta — com
- * `textContent` e `createElement`, nunca com HTML de texto: o conteúdo vem de
- * código de terceiro, e montá-lo como marcação seria dar a ele a página
- * inteira por outro caminho.
- *
- * A gramática é pequena de propósito. Cada forma nova é uma decisão de API, em
- * vez de um MOD descobrir que consegue.
- */
-/**
- * As regiões de pé, por instância.
- *
- * **Por instância, e não por `id`.** Um MOD recarregado dentro da mesma sessão
- * é outra instância, e o que a região anterior segurava — mídia carregando,
- * ouvintes, quadros pendentes — não é dela. Guardar por `id` faria o
- * recarregamento herdar recursos de quem já saiu.
- */
-const regioesDosMods = new Map();
-
-/**
- * Desenha o que um MOD declarou, reaproveitando o que já está na tela.
- *
- * O trabalho mora em `RegiaoDeMod`, em `mods-regiao.js`. Esta função é a
- * amarração: onde a região vive, quem é o dono dela, e como ela fala de volta.
- */
-/**
- * A região desta instância, criada na primeira vez que alguém precisa dela.
- *
- * **Os dois caminhos passam por aqui**, e não só o desenho. Um MOD que dá
- * cartão antes de desenhar a própria região é um MOD comum — o PERFIS consulta
- * os perfis e monta os cartões no mesmo ciclo em que pinta o painel, e a ordem
- * entre as duas coisas é dele. Exigir que a região exista primeiro era uma
- * armadilha de ordem que não aparece em lugar nenhum da API: o MOD recebia «não
- * tem região de pé» e não tinha como saber que bastava inverter duas linhas.
- *
- * Encontrado na corrida nativa, e não em teste: o vetor de referência pede
- * cartão antes de desenhar, e o quintal dele registrou a recusa.
- */
-function regiaoDoMod(mod, instancia) {
-  const palco = $("regioes-dos-mods");
-  if (!palco) return null;
-  let regiao = regioesDosMods.get(instancia);
-  if (!regiao) {
-    const raiz = elemento("section", "regiao-de-mod");
-    raiz.dataset.mod = mod.id;
-    palco.append(raiz);
-    regiao = new RegiaoDeMod(mod.id, donoDaRegiao(mod, instancia), raiz);
-    regioesDosMods.set(instancia, regiao);
-    // Registrada **na criação**, e não depois de o MOD desenhar: uma região
-    // criada e não registrada é uma região que a saída não encontra.
-    instancia.registrar(`${mod.id}: a região`, () => limparARegiaoDoMod(mod.id, instancia));
-  }
-  return regiao;
-}
-
-function desenharARegiaoDoMod(mod, instancia, conteudo) {
-  const regiao = regiaoDoMod(mod, instancia);
-  if (!regiao) return;
-  const palco = $("regioes-dos-mods");
-  palco.hidden = false;
-  const recusados = regiao.aplicar(conteudo);
-  // **Recusar em silêncio é o defeito que este repositório mais paga.** Um MOD
-  // cuja árvore não coube precisa saber disso onde ele a escreveu.
-  if (recusados > 0) {
-    throw new Error(`${recusados} nó(s) não couberam nos limites da região`);
-  }
-}
-
-/**
  * A mídia de alguma montagem de MOD mudou de estado.
  *
  * Um evento na janela, e não uma chamada: quem escuta é a gestão de MODs
@@ -1261,118 +1191,12 @@ function donoDaRegiao(mod, instancia) {
   };
 }
 
-/**
- * O cartão que cada MOD dá a cada pessoa, desenhado na lista do produto.
- *
- * # Por que existe uma superfície além da região
- *
- * A região é o lugar onde um MOD desenha, e continua sendo. Mas a lista de
- * pessoas é uma superfície onde uma informação de MOD tem lugar **natural**: o
- * retrato e o nome que alguém escolheu num MOD de perfis são sobre aquela
- * pessoa, e mostrá-los só dentro de um painel ao lado é mostrá-los longe de
- * onde significam alguma coisa.
- *
- * # O que impede isto de devolver a janela ao MOD
- *
- * **O renderer é o mesmo.** O que chega é a declaração da região — as mesmas
- * formas, `planejar`, `reconciliar`, `elemento`, `createElement` e
- * `textContent`. Nada de HTML de texto, nada de nó alcançável de fora, nada de
- * estilo escrito por terceiro. O MOD não escolhe onde o cartão entra na linha,
- * e nenhum evento de dentro dele volta para ele.
- *
- * **A gramática é menor.** Um cartão não aceita `botao`, `campo`, `escolha`,
- * `arquivo` nem `tela`: ver `FORMAS_DO_CARTAO` em `mods-regiao.js`. A linha do
- * roster já tem um botão do produto, e dividir foco e área de toque com um
- * terceiro é o tipo de coisa que ninguém consegue depurar depois.
- *
- * **O dono é a região.** O cartão nasce dentro da `RegiaoDeMod` daquela
- * instância, e sai com ela: é a mesma `soltar` que tira o som e os bytes.
- */
-
-/** Os cartões declarados por MOD, por `id`. */
-const cartoesDosMods = new Map();
-
-/**
- * Guarda o que um MOD declarou para a lista, e manda repintá-la.
- *
- * A montagem acontece **agora**, e não na hora de desenhar a linha: é aqui que
- * o teto é conferido e a recusa vira erro na mão de quem pediu. Um cartão
- * montado tarde recusaria calado, no meio de um retrato.
- */
-function darCartoesDoMod(mod, instancia, cartoes) {
-  // A região é criada aqui se ainda não existe: ela é a dona do cartão — dela
-  // vêm o descarte, a geração e o caminho até a mídia — e exigir que o MOD
-  // desenhe antes seria uma ordem que a API não conta a ninguém.
-  //
-  // Criá-la **não a mostra**: o palco só deixa de estar escondido quando algo
-  // é desenhado nela. Um MOD que só dá cartão não abre uma faixa vazia.
-  const regiao = regiaoDoMod(mod, instancia);
-  if (!regiao) throw new Error("a tela da sessão não está montada");
-  const recusados = regiao.declararCartoes(cartoes);
-  // **Dito a quem hospeda, além de devolvido ao MOD.** O número volta como o
-  // valor do pedido, e um MOD que não o confere não fica sabendo; o
-  // `seele.log` fica, com o id em campo próprio.
-  if (recusados > 0) {
-    registrarNoAnfitriao(
-      "recusa-de-mod",
-      `${mod.id}: ${recusados} nó(s) dos cartões não couberam nos limites do cartão`,
-      "aviso",
-      mod.id,
-    );
-  }
-  cartoesDosMods.set(mod.id, regiao);
-  if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
-  return recusados;
-}
-
-/**
- * Os MODs cujos cartões da API 3 (`SeeleUI.cartoes`) entram na lista, pela
- * escolha de apresentação de `pessoa.cartao`.
- *
- * **A regra, num lugar só.** A validação nativa de 20/09/2026: «usar
- * apresentação do SEELE» devolvia o nome e o diagnóstico nativos **e mantinha
- * o cartão do MOD logo abaixo**. A preferência alcançava a substituição —
- * `escolherSubstituicao` — e não alcançava `SeeleUI.cartoes`, que é o outro
- * caminho do mesmo provedor para o mesmo ponto. Preservar a compatibilidade da
- * API 3 é executar o caminho antigo, não ignorar o que a pessoa escolheu:
- *
- * - nativo explícito: nenhum cartão de MOD entra;
- * - um provedor escolhido: só os dele;
- * - automático: todos, na ordem em que declararam.
- *
- * `cartoesDaPessoa` desenha por ela, e «quem pinta cada lugar» a lê: duas
- * cópias de uma regra de disputa são duas respostas no dia em que uma mudar.
- */
-function modsDeCartaoQueValem() {
-  const escolha = typeof modPreferidoPara === "function"
-    ? modPreferidoPara("pessoa.cartao")
-    : "";
-  if (escolha === NATIVO) return [];
-  return [...cartoesDosMods.keys()].filter((quem) => !escolha || quem === escolha);
-}
-
-/**
- * Os cartões desta pessoa, na ordem em que os MODs os declararam.
- *
- * Devolve os **nós de verdade**, e não cópias: mover um nó já montado preserva
- * o que ele segura — um som recriado a cada retrato recomeçaria, e um `<img>`
- * recriado piscaria a cada quatro segundos.
- */
-function cartoesDaPessoa(id) {
-  const achados = [];
-  for (const quem of modsDeCartaoQueValem()) {
-    const cartao = cartoesDosMods.get(quem)?.cartaoDe(id);
-    if (cartao) achados.push(cartao);
-  }
-  return achados;
-}
-
 // ------------------------------------------ as superfícies e as contribuições
 
 /**
  * As superfícies de cada instância de MOD — ADR 0052.
  *
- * Por instância e não por `id`, pela mesma razão que a região: um MOD
+ * Por instância e não por `id`: um MOD
  * recarregado dentro da mesma sessão não herda as janelas da instância
  * anterior. Uma página aberta pela instância de antes, montada de novo pela de
  * agora, seria a instância nova recebendo eventos de uma janela que ela não
@@ -1399,8 +1223,8 @@ function superficiesDoMod(mod, instancia) {
   if (!conjunto) {
     conjunto = new SuperficiesDoMod(mod.id, donoDaRegiao(mod, instancia), palcosDeSuperficie());
     superficiesDosMods.set(instancia, conjunto);
-    // Registrado **na criação**, como a região: um conjunto criado e não
-    // registrado é um modal que a saída não fecha.
+    // Registrado **na criação**: um conjunto criado e não registrado é um
+    // modal que a saída não fecha.
     instancia.registrar(`${mod.id}: as superfícies`, () => {
       superficiesDosMods.delete(instancia);
       conjunto.soltarTudo();
@@ -1938,21 +1762,17 @@ function conteudoDasContribuicoes(ponto, alvo = "") {
  * Em que pé está a mídia de quem pinta um ponto agora — só leitura.
  *
  * Para «quem pinta cada lugar», na gestão de MODs: soma o que cada renderer de
- * contribuição anotou (`midiasAnotadas`, em `mods-regiao.js`), o retrato de
- * avatar, que carrega por conta própria (`avatarContribuido`), e — em
- * `pessoa.cartao` — os cartões da API 3, que moram na região do MOD.
+ * contribuição anotou (`midiasAnotadas`, em `mods-regiao.js`) e o retrato de
+ * avatar, que carrega por conta própria (`avatarContribuido`).
  *
  * **Só de quem pinta.** Perder a disputa não desmonta nada: o retrato que
- * chegou antes de a preferência mudar fica no cache da contribuição, o cartão
- * de um MOD que já valeu fica montado para voltar sem piscar, e os cartões da
- * API 3 montam na declaração. Contada, essa mídia sairia na gestão ao lado de
- * «o SEELE desenha». (O som de quem perdeu não segue tocando: ele é pausado
- * por `calarOsSonsQueSairamDaTela`, pela mesma regra.) Por isso cada uma conta
- * pela regra que a tela usa para desenhá-la:
- *
- * - uma contribuição conta onde `aContribuicaoPinta` diz que ela desenha: uma
- *   substituição, no destino em que é escolhida; um acréscimo, sempre;
- * - um cartão da API 3 conta quando o MOD está em `modsDeCartaoQueValem`.
+ * chegou antes de a preferência mudar fica no cache da contribuição, e o
+ * cartão de um MOD que já valeu fica montado para voltar sem piscar. Contada,
+ * essa mídia sairia na gestão ao lado de «o SEELE desenha». (O som de quem
+ * perdeu não segue tocando: ele é pausado por `calarOsSonsQueSairamDaTela`,
+ * pela mesma regra.) Por isso uma contribuição conta pela regra que a tela usa
+ * para desenhá-la — onde `aContribuicaoPinta` diz que ela desenha: uma
+ * substituição, no destino em que é escolhida; um acréscimo, sempre.
  *
  * @param {string} ponto Um dos `PONTOS_DE_CONTRIBUICAO`.
  * @returns {{ carregando: number, pronta: number, recusada: number, motivos: string[] }}
@@ -1969,13 +1789,6 @@ function midiasDoPonto(ponto) {
     for (const [destino, montagem] of contribuicao.montadas ?? []) {
       if (!aContribuicaoPinta(contribuicao, destino)) continue;
       for (const anotada of montagem.renderer.midiasAnotadas()) contar(contribuicao.mod, anotada);
-    }
-  }
-  if (ponto === "pessoa.cartao") {
-    for (const mod of modsDeCartaoQueValem()) {
-      for (const anotada of cartoesDosMods.get(mod)?.midiasAnotadas() ?? []) {
-        if (anotada.cartao) contar(mod, anotada);
-      }
     }
   }
   return soma;
@@ -2012,7 +1825,7 @@ const vagasDosTetos = new WeakMap();
 /**
  * Soma uma anotação de mídia — a regra das duas contas da aba DIAGNÓSTICO.
  *
- * `midiasDoPonto` e `midiasDaRegiaoEDasPaginas` contam pela mesma: as três
+ * `midiasDoPonto` e `midiasDasPaginas` contam pela mesma: as três
  * situações, e até três motivos, sem repetir. **O motivo é cortado aqui, num
  * lugar só**, e por ponto de código, como `anotarMidia` corta os da região: o
  * do retrato de avatar vem do Rust ou de uma exceção, sem teto, e um corte por
@@ -2066,39 +1879,28 @@ function contarAMidia(soma, anotada, mod = "") {
 }
 
 /**
- * Em que pé está a mídia da região e das páginas de cada MOD — só leitura.
+ * Em que pé está a mídia das páginas de cada MOD — só leitura.
  *
  * A pendência 49, item 5 (m-2 da revisão ampla do Plano 1D). A aba DIAGNÓSTICO
- * contava só a mídia dos onze pontos de contribuição (`midiasDoPonto`), e a
- * faixa de cada MOD e as superfícies dele — páginas, painéis e diálogos —
- * anotavam e ninguém lia. É ali que o som costuma morar: o do MOD de
- * referência está na faixa, e a trilha da MESA numa página. Uma trilha
- * recusada chegava ao `seele.log` e ao evento do MOD, e não à aba.
+ * contava só a mídia dos onze pontos de contribuição (`midiasDoPonto`), e as
+ * superfícies de cada MOD — páginas, painéis e diálogos — anotavam e ninguém
+ * lia. É ali que o som costuma morar: a trilha da MESA está numa página. Uma
+ * trilha recusada chegava ao `seele.log` e ao evento do MOD, e não à aba. (A
+ * faixa da API 3, a região, somava aqui também, e saiu com ela.)
  *
- * **Sem filtro de cartão.** A região de um MOD também monta os cartões que ele
- * dá à lista de pessoas, e a mídia deles já aparece em `pessoa.cartao`: são
- * duas vistas da mesma mídia, e a aba não soma os dois blocos. Um filtro aqui
- * só valeria enquanto os cartões morassem na região.
+ * Pura: recebe o mapa em vez de lê-lo, e a bancada a mede sem página.
  *
- * Pura: recebe os dois mapas em vez de lê-los, e a bancada a mede sem página.
- *
- * @param {Map<object, RegiaoDeMod>} regioes `regioesDosMods`: por instância, com
- *   o id do MOD em `regiao.id`.
  * @param {Map<object, SuperficiesDoMod>} superficies `superficiesDosMods`: por
  *   instância, cada superfície em `porChave` com o seu `renderer`.
  * @returns {Map<string, { carregando: number, pronta: number, recusada: number, motivos: string[] }>}
  *   Por id de MOD, na ordem em que aparecem; `motivos` traz até três, sem repetir.
  */
-function midiasDaRegiaoEDasPaginas(regioes, superficies) {
+function midiasDasPaginas(superficies) {
   const porMod = new Map();
   const somaDe = (id) => {
     if (!porMod.has(id)) porMod.set(id, { carregando: 0, pronta: 0, recusada: 0, motivos: [] });
     return porMod.get(id);
   };
-  for (const regiao of regioes.values()) {
-    const soma = somaDe(regiao.id);
-    for (const anotada of regiao.midiasAnotadas()) contarAMidia(soma, anotada);
-  }
   for (const conjunto of superficies.values()) {
     const soma = somaDe(conjunto.id);
     for (const superficie of conjunto.porChave.values()) {
@@ -2126,15 +1928,12 @@ function midiasDaRegiaoEDasPaginas(regioes, superficies) {
  * página fechada cala o som dela em `SuperficieDeMod#fechar`.
  *
  * Ela alcança o que a revisão ampla do Plano 1D mediu tocando fora da tela
- * (I-1):
- * - a região de cada MOD, com os cartões da API 3 de quem está fora de
- *   `modsDeCartaoQueValem`: com «o SEELE desenha» o cartão, o som do cartão
- *   para, e o da região não;
- * - cada destino de cada contribuição, pela regra de `aContribuicaoPinta`: o
- *   de quem perdeu a disputa para, e o de quem saiu da sala — que continua em
- *   `montadas`, fora do documento — também. Assim o som de uma contribuição
- *   sem alvo, que mora só no destino que o tomou (`montarSom`), não fica
- *   soando quando esse destino deixa de desenhar (o N1 da Task 8).
+ * (I-1) — a região e os cartões da API 3 também, até saírem com ela: cada
+ * destino de cada contribuição, pela regra de `aContribuicaoPinta`. O de quem
+ * perdeu a disputa para, e o de quem saiu da sala — que continua em
+ * `montadas`, fora do documento — também. Assim o som de uma contribuição sem
+ * alvo, que mora só no destino que o tomou (`montarSom`), não fica soando
+ * quando esse destino deixa de desenhar (o N1 da Task 8).
  *
  * **E o som de uma contribuição muda de destino, na mesma varredura** (P49-8).
  * O destino que segurava os sons dela e saiu do documento os devolve, na
@@ -2151,10 +1950,6 @@ function midiasDaRegiaoEDasPaginas(regioes, superficies) {
  * estava.
  */
 function calarOsSonsQueSairamDaTela() {
-  const valem = new Set(modsDeCartaoQueValem());
-  for (const regiao of regioesDosMods.values()) {
-    regiao.calarSonsForaDaTela(valem.has(regiao.id));
-  }
   for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
     for (const [destino, montagem] of contribuicao.montadas ?? []) {
       montagem.renderer.calarSonsForaDaTela(aContribuicaoPinta(contribuicao, destino));
@@ -2224,39 +2019,6 @@ function ligarAcoesDeApresentacao(lista) {
       canal: alvo.dataset.canalDaAcao ?? "",
     });
   });
-}
-
-/** Tira a região de uma instância da tela, inteira — e o tema junto. */
-function limparARegiaoDoMod(id, instancia) {
-  const regiao = regioesDosMods.get(instancia);
-  if (regiao) {
-    regioesDosMods.delete(instancia);
-    regiao.soltar();
-  }
-  const palco = $("regioes-dos-mods");
-  // A faixa não existe vazia: uma régua de 1px em cima de nada é uma borda que
-  // aparece sem ter o que separar.
-  if (palco) palco.hidden = palco.childElementCount === 0;
-  // O tema é por `id` de propósito: ele é sobre o nome que reservou o token, e
-  // um MOD recarregado continua sendo o mesmo nome. As marcas também.
-  if (temaDosMods.delete(id)) escreverOTemaDaSessao();
-  // Os cartões saem com a região, porque nascem dentro dela: `soltar` já
-  // tirou as raízes da lista e soltou o que elas seguravam. O que resta aqui é
-  // esquecer o MOD e mandar a lista se redesenhar sem ele.
-  if (cartoesDosMods.delete(id) && typeof redesenharAsPessoas === "function") {
-    redesenharAsPessoas();
-  }
-  // **E as superfícies e as contribuições.** Elas não moram sob a raiz da
-  // região — uma página ocupa a área da sessão, um cartão substituído mora na
-  // linha do roster —, então `soltar` não as alcança. Sem estas duas linhas,
-  // um modal de um MOD descarregado continuaria aberto sobre a conversa, e a
-  // apresentação que ele substituiu não voltaria ao padrão.
-  const superficies = superficiesDosMods.get(instancia);
-  if (superficies) {
-    superficiesDosMods.delete(instancia);
-    superficies.soltarTudo();
-  }
-  contribuicoesDosMods.revogarDoMod(id);
 }
 
 // ------------------------------------------------------------ o tema de um MOD

@@ -1115,17 +1115,11 @@ function oQueAGestaoDiz(linha, escolha) {
   const botoes = [];
   // **«Usar» só quem pode desenhar este lugar.** Escolher um MOD que só
   // acrescenta não o faz desenhar nada: o SEELE desenha, e o botão mentiria.
-  // A exceção é o cartão, em que um MOD da API 3 desenha pelos cartões dele
-  // (`SeeleUI.cartoes`) — e escolhê-lo é o que os faz valer sozinhos
-  // (`modsDeCartaoQueValem`).
   const podemDesenhar = new Set(linha.substituem);
-  if (linha.ponto === "pessoa.cartao") {
-    for (const id of cartoesDosMods.keys()) podemDesenhar.add(id);
-  }
   // **E nenhum «usar» para o que já vale.** O escolhido desta máquina não
   // ganha botão — um botão que não muda nada é uma pergunta sem resposta —, e
-  // a escolha é a gravada, e não a disputa do alvo vazio: o MOD da API 3
-  // escolhido não tem candidata ali, e só acrescenta pelo registro (D-m1 da
+  // a escolha é a gravada, e não a disputa do alvo vazio: um MOD escolhido
+  // pode não ter candidata ali, e só acrescentar pelo registro (D-m1 da
   // revisão do Lote Diagnóstico da correção ampla do Plano 1D). Sem escolha,
   // quem não ganha botão é quem vence no automático o lugar de todos, quando
   // alguém o pede.
@@ -1232,27 +1226,14 @@ const NOMES_DOS_PONTOS = Object.freeze({
 // e o estado da mídia. Tudo aqui é leitura: nada escolhe, revoga ou grava.
 
 /**
- * Quem desenha um ponto pelo caminho da API 3, fora do registro de
- * contribuições.
+ * Quem desenha um ponto fora do registro de contribuições.
  *
- * Dois pontos têm esse segundo caminho, e os dois são usados pelos MODs
- * oficiais: `SeeleUI.cartoes` desenha em `pessoa.cartao` (o PERFIS), e
- * `SeeleUI.tema` pinta `servidor.aparencia` (o ESTILO) sem registrar ponto
- * nenhum. Sem esta leitura a aba diria «nenhum MOD usa este lugar» sobre a
- * sessão inteira pintada por um.
- *
- * A regra dos cartões é `modsDeCartaoQueValem`, em `base.js` — a mesma que
- * `cartoesDaPessoa` usa para desenhar.
+ * Um ponto tem esse segundo caminho: `SeeleUI.tema` pinta `servidor.aparencia`
+ * (o ESTILO) sem registrar ponto nenhum. Sem esta leitura a aba diria «nenhum
+ * MOD usa este lugar» sobre a sessão inteira pintada por um. (O outro,
+ * `SeeleUI.cartoes` em `pessoa.cartao`, saiu com a API 3.)
  */
 function modsDoCaminhoAntigo(ponto) {
-  if (ponto === "pessoa.cartao") {
-    const valem = modsDeCartaoQueValem();
-    return {
-      rotulo: "cartões pela API 3",
-      valem,
-      perdem: [...cartoesDosMods.keys()].filter((id) => !valem.includes(id)),
-    };
-  }
   if (ponto === "servidor.aparencia") {
     // **O tema do servidor não é o caminho antigo** (tarefa 17f): ele mora em
     // `temaDosMods` porque entra por `aplicarOTemaDoMod`, e sem este filtro a
@@ -1337,21 +1318,17 @@ function porqueDaMidia(midias) {
  * A mídia da região e das páginas de cada MOD, uma frase por MOD.
  *
  * O bloco que a aba ganhou com a pendência 49, item 5: os onze lugares contam
- * a mídia de quem pinta cada um, e a faixa e as superfícies de um MOD não são
- * lugar nenhum deles. A soma é `midiasDaRegiaoEDasPaginas`, em `base.js`.
- *
- * **A mídia de um cartão aparece aqui e em «O cartão de cada pessoa».** Os
- * cartões que um MOD dá à lista moram na região dele: são duas vistas da mesma
- * mídia, e não duas mídias.
+ * a mídia de quem pinta cada um, e as superfícies de um MOD não são lugar
+ * nenhum deles. A soma é `midiasDasPaginas`, em `base.js`.
  */
 function frasesDaMidiaDosMods() {
-  const porMod = midiasDaRegiaoEDasPaginas(regioesDosMods, superficiesDosMods);
-  if (porMod.size === 0) return ["nenhum MOD tem região nem página de pé agora"];
+  const porMod = midiasDasPaginas(superficiesDosMods);
+  if (porMod.size === 0) return ["nenhum MOD tem página de pé agora"];
   return [...porMod].map(([id, midias]) => {
     const partes = partesDaMidia(midias);
     return partes.length === 0
-      ? `a região e as páginas de ${id}: nenhuma mídia montada`
-      : `a região e as páginas de ${id}: ${partes.join(" · ")}${porqueDaMidia(midias)}`;
+      ? `as páginas de ${id}: nenhuma mídia montada`
+      : `as páginas de ${id}: ${partes.join(" · ")}${porqueDaMidia(midias)}`;
   });
 }
 
@@ -1471,7 +1448,7 @@ function desenharQuemPinta() {
 }
 
 /**
- * O bloco «a região e as páginas de cada MOD», numa lista irmã da dos onze.
+ * O bloco «as páginas de cada MOD», numa lista irmã da dos onze.
  *
  * **Irmã, e não mais uma linha dela.** A lista dos lugares é a lista inteira
  * deles — «os onze, sempre» —, e um MOD não é um lugar. Criada aqui na
