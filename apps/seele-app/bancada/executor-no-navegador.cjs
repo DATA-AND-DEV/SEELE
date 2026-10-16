@@ -49,13 +49,16 @@ const confere = (caso, condicao, detalhe) => {
 // **Uma cópia**, e não a `ui/`: um arquivo de bancada esquecido lá iria para o
 // instalador (`tools/carga-da-casca.py` diz o mesmo).
 const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "executor-no-navegador-"));
-for (const nome of ["mods-runtime.js", "mods-no-navegador.js", "executor-de-mod.html"]) {
+// **E a ponte, primeiro, como no `index.html`**: o executor pergunta a ela o
+// que esta plataforma tem (`capacidadesDaPlataforma`; a auditoria do v6, B10).
+for (const nome of ["ponte-web.js", "mods-runtime.js", "mods-no-navegador.js", "executor-de-mod.html"]) {
   fs.copyFileSync(daUi(nome), path.join(pasta, nome));
 }
 fs.copyFileSync(caminhoDoMotor, path.join(pasta, "seele_motor_web.wasm"));
 fs.writeFileSync(
   path.join(pasta, "index.html"),
   '<!doctype html><meta charset="utf-8"><title>bancada</title>\n' +
+    '<script src="ponte-web.js"></script>\n' +
     '<script src="mods-runtime.js"></script>\n<script src="mods-no-navegador.js"></script>\n',
 );
 
@@ -220,7 +223,10 @@ async function caso(pagina, nome, corpo) {
         confere("MOD comum", r.pronto.retrato?.servidor?.nome === "bancada", `retrato ${JSON.stringify(r.pronto.retrato)}`);
         confere("MOD comum", r.pronto.intervalos === 3, `intervalos ${r.pronto.intervalos}`);
         confere("MOD comum", r.pronto.erro === "rejeitou: desconhecido", `erro ${r.pronto.erro}`);
-        confere("MOD comum", String(r.pronto.grande).startsWith("mensagem-grande"), `grande ${r.pronto.grande}`);
+        confere("MOD comum", r.pronto.grande === "mensagem-grande"
+          && JSON.stringify(r.pronto.grandeCampos)
+            === JSON.stringify({ erro: "mensagem-grande", tipoPedido: "pedido", tamanho: 14062, teto: 12288 }),
+        `grande ${r.pronto.grande} ${JSON.stringify(r.pronto.grandeCampos)}`);
         confere("MOD comum", r.pronto.superficies === "object", `superficies ${r.pronto.superficies}`);
       }
       console.log(`  MOD comum: ${r.pronto ? "pronto" : "NÃO"} em ${Math.round(r.subida_ms)} ms de subida`);

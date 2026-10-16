@@ -233,7 +233,8 @@ const comum = await oModComum(tabela);
 const v = comum.valor ?? {};
 if (!comum.valor) falhas.push(`MOD comum: não chegou ao pronto (${JSON.stringify(comum.falas).slice(0, 400)})`);
 else if (v.retrato?.servidor?.nome !== "bancada" || JSON.stringify(v.capacidades) !== JSON.stringify(tabela.capacidades_padrao)
-  || v.intervalos !== 3 || v.erro !== "rejeitou: desconhecido" || !String(v.grande).startsWith("mensagem-grande: pedido tem 14062 bytes")
+  || v.intervalos !== 3 || v.erro !== "rejeitou: desconhecido" || v.grande !== "mensagem-grande"
+  || JSON.stringify(v.grandeCampos) !== JSON.stringify({ erro: "mensagem-grande", tipoPedido: "pedido", tamanho: 14062, teto: 12288 })
   || v.superficies !== "object" || v.console !== "function"
   || !comum.falas.some((f) => f.tipo === "console" && f.texto === "mod comum de pé")) {
   falhas.push(`MOD comum: a API diverge do desktop: ${JSON.stringify(v)}`);
