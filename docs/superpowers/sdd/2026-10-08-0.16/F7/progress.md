@@ -1210,3 +1210,51 @@ A orquestradora aprovou o desenho em 16/10, e a F1 já tinha saído do
   (`fora_do_ar_revision`), que a F1 vai classificar.
 
 O comando Tauri `cancelar_ligacao` e o CANCELAR da tela são da tarefa 28.
+
+## A tarefa 30: ligar pelo código, da ponte à casca (16/10)
+
+A orquestradora liberou a 28 e a 30 sem esperar a parte B da integração.
+Antes delas:
+- o `cargo clean` liberou a pasta de compilação inteira, uns 70 GB em disco;
+- a P8 com o conserto da F1 (`53bbc919`) entrou no ramo, e o guarda dos dois
+  produtores passa;
+- a sugestão da F5 ao `845e20e3` foi feita: o recorte da produção se confere
+  sozinho contra um módulo de teste sem corpo (`dafa0da5`).
+
+| passo | o que | commit |
+|---|---|---|
+| b | a FFI disca `@CÓDIGO`: o `abrir` reconhece o alvo, e o `drive` nasce pela `Chegada::para_o_codigo`, com o ponto de quem liga | `2278dd4c` |
+| a | o `ler_entrada`, com «é o seu código?» decidido pela chave desta máquina | `2e2947e9` |
+| — | a leitura muda para `ligar.rs`, o lado de quem liga | `a34674ed` |
+| — | merge da `versao/0.16` (`66540b05`, só docs) | — |
+| c | a casca: o diálogo manda todo texto ao `ler_entrada`, a caixa LIGAR na sessão, a ponte web, o duble e a bancada | `64b98205` |
+
+- **«Nada disca um código ainda»**, dizia a leitura da 14. O núcleo discava
+  desde a 14a, e a ponte e o app não. O teste da FFI sobe um ponto de encontro
+  de verdade, a sala de outra pessoa registrada nele, e aponta
+  `$SEELE_ENCONTRO` para ele enquanto roda.
+- **Uma linha que não fazia nada saiu.** Ligar o `codigo_esperado` no modo
+  código foi revertido e o teste continuou verde: ele só alimenta o caminho por
+  endereço.
+- **Um achado para a casca da 28:** a ponte entrega as etapas por um `watch`,
+  que guarda a última. Numa ligação atendida no mesmo instante, quem liga pode
+  não ver o `Tocando`, e a tela não deve depender dele para sair do CHAMANDO.
+- **Por que `ligar.rs`:** a ponte do navegador separa os comandos que citam
+  `sala::`, porque mexem na hospedagem local, e o `ler_entrada` só entrava na
+  conta por morar lá. Recusá-lo de vez no navegador trancaria a entrada dele
+  quando a F4 fizer a 3.4. Ele fica na `AINDA_A_FAZER` dela, com o
+  `analisar_convite`.
+- **A bancada `ajustes-v013.cjs` (lote R e W da F5) reprovou, e por causa da
+  mudança, não da carga.** Os dubles dela não conheciam o `ler_entrada`, e o
+  convite seguia como endereço, sem o token. Os oito aprenderam a forma de
+  antes, logo depois de registrar a chamada. Os dois guardas da credencial
+  contam o `ler_entrada` entre as leituras, ao lado do `analisar_convite`: ele
+  recebe o texto inteiro para dizer o que ele é, e não guarda nem escreve nada.
+- **Reversões:** na FFI, o alvo ignorado e o ponto que falta; no app, o «seu
+  código» e o alvo sem o `@`; na casca, o diálogo sem o `ler_entrada`, a caixa
+  que ignora a ligação, a frase que falta e o duble sem a regra.
+- **A bateria da casca** na ponte `64b98205` passou inteira: os 44 roteiros, as
+  duas pontes, o celular e 34 das 35 bancadas da janela.
+- **Em aberto:** o `connect` grava a visita com o alvo como veio, e um
+  `@CÓDIGO` entraria na lista de visitados. Isso é da agenda, e fica para a
+  orquestradora decidir.
