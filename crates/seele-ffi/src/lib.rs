@@ -386,6 +386,24 @@ pub fn codigo_desta_maquina(home: &str) -> Result<Codigo, ConnectionError> {
     codigo_com(home, std::env::var(VARIAVEL_DA_IDENTIDADE).ok().as_deref())
 }
 
+/// **O alvo canônico de quem liga para um código**: `@CÓDIGO` (tarefa 30 da F7,
+/// a 6g; spec de 23/09, «Do lado de quem liga», 2).
+///
+/// Ele se basta sozinho: é o que a casca põe no `server` do [`ConnectConfig`],
+/// e a ponte pergunta ao ponto de encontro onde a sala mora. Sobrevive ao
+/// `ejetar`, que zera o convite da sessão, porque não depende dele. É o mesmo
+/// texto da chave do pino do código (`seele_core::confere_codigo::chave_do_pino`).
+#[must_use]
+pub fn alvo_do_codigo(codigo: &Codigo) -> String {
+    seele_core::confere_codigo::chave_do_pino(codigo)
+}
+
+/// O código de um alvo `@CÓDIGO`, ou nada quando o alvo é um endereço. A volta
+/// de [`alvo_do_codigo`], e a única leitura dela.
+fn codigo_do_alvo(alvo: &str) -> Option<Codigo> {
+    Codigo::ler(alvo.trim().strip_prefix('@')?).ok()
+}
+
 /// O mesmo, com o valor de `SEELE_IDENTIDADE` dito por quem chama.
 fn codigo_com(home: &str, variavel: Option<&str>) -> Result<Codigo, ConnectionError> {
     let chave = chave_com(home, variavel)?;
@@ -1717,23 +1735,38 @@ impl Connection {
             }
             .into());
         }
-        let (address, server_name, pin_key) = resolve(&config.server)?;
+        // **Um código, e não um endereço** (tarefa 30 da F7): não há o que
+        // resolver, e quem diz onde a sala mora é o ponto de encontro. Cada
+        // candidato que ele der confere o código dentro do TLS: é a
+        // `Chegada::para_o_codigo` quem monta os destinos, e não o
+        // `build_destino`, então o `codigo_esperado` não entra aqui.
+        let alvo = match codigo_do_alvo(&config.server) {
+            Some(codigo) => Alvo::Codigo(codigo),
+            None => {
+                let (address, server_name, pin_key) = resolve(&config.server)?;
+                // The invite's other addresses, resolved here so the driver
+                // thread gets values. An alternative that does not resolve is
+                // dropped: the first address is the one the person is most
+                // likely on the same network as, and refusing the whole link
+                // over a spare would trade one path fewer for no path at all.
+                let alternates: Vec<(SocketAddr, String, String)> = config
+                    .alternate_servers
+                    .iter()
+                    .filter_map(|alternate| resolve(alternate).ok())
+                    .collect();
+                Alvo::Enderecos {
+                    address,
+                    server_name,
+                    pin_key,
+                    alternates,
+                }
+            }
+        };
         if config.codigo_esperado.is_some() && config.expected_fingerprint.is_some() {
             tracing::warn!(
                 "a conexão trouxe código e impressão: vale o código, e a impressão não é conferida"
             );
         }
-        // The invite's other addresses, resolved here so the driver thread gets
-        // values. An alternative that does not resolve is dropped: the first
-        // address is the one the person is most likely on the same network as,
-        // and refusing the whole link over a spare would trade one path fewer
-        // for no path at all.
-        let alternates: Vec<(SocketAddr, String, String)> = config
-            .alternate_servers
-            .iter()
-            .filter_map(|alternate| resolve(alternate).ok())
-            .collect();
-
         let home = PathBuf::from(&config.home);
         // ADR 0061: a chave mora na pasta da identidade da máquina, quando o
         // launcher a diz; os pins e o resto continuam em `home`.
@@ -1795,10 +1828,7 @@ impl Connection {
                 };
                 runtime.block_on(drive(
                     thread_config,
-                    address,
-                    server_name,
-                    pin_key,
-                    alternates,
+                    alvo,
                     key,
                     pins,
                     thread_shared,
@@ -4387,6 +4417,24 @@ fn build_destino(
     }
 }
 
+/// Para onde uma conexão vai.
+enum Alvo {
+    /// Os endereços de um servidor, o primeiro e os alternativos, já resolvidos.
+    Enderecos {
+        /// O primeiro endereço.
+        address: SocketAddr,
+        /// O nome que o TLS confere.
+        server_name: String,
+        /// A chave do pin e do aceite, na forma canônica.
+        pin_key: String,
+        /// Os outros endereços do convite.
+        alternates: Vec<(SocketAddr, String, String)>,
+    },
+    /// O código de uma pessoa (tarefa 30 da F7): quem diz onde a sala mora é o
+    /// ponto de encontro.
+    Codigo(Codigo),
+}
+
 /// The driver: connects, then pumps until told to stop.
 #[allow(
     clippy::too_many_arguments,
@@ -4394,10 +4442,7 @@ fn build_destino(
 )]
 async fn drive(
     config: ConnectConfig,
-    address: SocketAddr,
-    server_name: String,
-    pin_key: String,
-    alternates: Vec<(SocketAddr, String, String)>,
+    alvo: Alvo,
     key: seele_core::SigningKey,
     pins: Arc<FilePinStore>,
     shared: Arc<Shared>,
@@ -4413,34 +4458,54 @@ async fn drive(
     // `Enlace` e não `Client`: é a sessão que atravessa quedas, com a bateria
     // interna dentro. Antes disto, o app pulava de "conectado" para "encerrado"
     // no primeiro soluço de rede.
-    // O alvo como a pessoa o digitou. É sob ele que a casca grava o sim, e é
-    // ele que vale para todos os candidatos desta chegada.
-    let chave_do_aceite = pin_key.clone();
-    let destinos = std::iter::once((address, server_name.clone(), pin_key.clone()))
-        .chain(alternates)
-        .map(|(address, server_name, pin_key)| {
-            build_destino(&config, address, &server_name, &pin_key, &chave_do_aceite)
-        })
-        .collect();
-    // Uma `Chegada` e não a chamada direta ao laço: ela é quem dá nome a cada
-    // etapa desta travessia e guarda a trilha. O laço continua exatamente onde
-    // estava — com o aviso por candidato e os prazos —, e o que muda aqui é que
-    // a falha deixa de ser uma frase só. O bilhete vai junto: com ele, quem
-    // entra avisa o ponto de encontro por candidato que precisa de furo, que é
-    // o degrau 4 do ADR 0022. Sem bilhete os dois caminhos são o mesmo.
-    let chegada = seele_core::chegada::Chegada::nova(destinos, config.bilhete.clone());
-    // **O quarto corre junto com a corrida** (a pendência 55, tarefa 14b da F7).
-    // Era o `connect` do app que perguntava, antes de chamar esta ponte, e quem
-    // estava na mesma casa pagava até 1,5 s de prazo do quarto com o ponto ou o
-    // DNS mudos. Agora a `Chegada` pergunta enquanto corre: quem não precisa de
-    // furo começa na hora, e o endereço de hoje entra quando chega.
-    //
-    // Com a impressão conferida, e o bilhete guardado (a `Chegada` só pergunta
-    // com bilhete): é a mesma condição em que o `connect` perguntava. Ver
-    // `quarto_de`.
-    let chegada = match quarto_de(&config, &chave_do_aceite) {
-        Some(quarto) => chegada.com_o_quarto(quarto),
-        None => chegada,
+    let chegada = match alvo {
+        // **Uma ligação** (tarefa 30 da F7): a `Chegada` pergunta ao ponto de
+        // encontro desta máquina onde a sala do código mora, e os candidatos
+        // saem da resposta, todos conferindo o código dentro do TLS. O ponto é o
+        // de quem liga, a mesma leitura do ambiente com que a sala se registra.
+        Alvo::Codigo(codigo) => seele_core::chegada::Chegada::para_o_codigo(
+            codigo,
+            seele_core::encontro::ponto_de_quem_liga(),
+            config.nickname.clone(),
+        ),
+        Alvo::Enderecos {
+            address,
+            server_name,
+            pin_key,
+            alternates,
+        } => {
+            // O alvo como a pessoa o digitou. É sob ele que a casca grava o
+            // sim, e é ele que vale para todos os candidatos desta chegada.
+            let chave_do_aceite = pin_key.clone();
+            let destinos = std::iter::once((address, server_name.clone(), pin_key.clone()))
+                .chain(alternates)
+                .map(|(address, server_name, pin_key)| {
+                    build_destino(&config, address, &server_name, &pin_key, &chave_do_aceite)
+                })
+                .collect();
+            // Uma `Chegada` e não a chamada direta ao laço: ela é quem dá nome
+            // a cada etapa desta travessia e guarda a trilha. O laço continua
+            // exatamente onde estava — com o aviso por candidato e os prazos —,
+            // e o que muda aqui é que a falha deixa de ser uma frase só. O
+            // bilhete vai junto: com ele, quem entra avisa o ponto de encontro
+            // por candidato que precisa de furo, que é o degrau 4 do ADR 0022.
+            // Sem bilhete os dois caminhos são o mesmo.
+            let chegada = seele_core::chegada::Chegada::nova(destinos, config.bilhete.clone());
+            // **O quarto corre junto com a corrida** (a pendência 55, tarefa
+            // 14b da F7). Era o `connect` do app que perguntava, antes de
+            // chamar esta ponte, e quem estava na mesma casa pagava até 1,5 s
+            // de prazo do quarto com o ponto ou o DNS mudos. Agora a `Chegada`
+            // pergunta enquanto corre: quem não precisa de furo começa na hora,
+            // e o endereço de hoje entra quando chega.
+            //
+            // Com a impressão conferida, e o bilhete guardado (a `Chegada` só
+            // pergunta com bilhete): é a mesma condição em que o `connect`
+            // perguntava. Ver `quarto_de`.
+            match quarto_de(&config, &chave_do_aceite) {
+                Some(quarto) => chegada.com_o_quarto(quarto),
+                None => chegada,
+            }
+        }
     };
 
     // O ouvinte entra **antes** do bloqueio, que é a coisa inteira: o `watch` da
@@ -14073,6 +14138,40 @@ mod o_debug_da_configuracao {
             impresso.contains("join_secret: None"),
             "sem segredo, o `Debug` de `ConnectConfig` não diz `None`:\n{impresso}"
         );
+    }
+}
+
+/// O alvo canônico de quem liga (tarefa 30 da F7): a ida e a volta são a mesma
+/// regra, e só um código que fecha vira alvo.
+#[cfg(test)]
+mod o_alvo_do_codigo {
+    use super::{alvo_do_codigo, codigo_do_alvo, Codigo};
+
+    #[test]
+    fn o_alvo_e_arroba_codigo_e_volta_ao_mesmo_codigo() {
+        let codigo = Codigo::da_chave(&[0; 32]);
+        let alvo = alvo_do_codigo(&codigo);
+        assert_eq!(alvo, format!("@{codigo}"));
+        assert_eq!(codigo_do_alvo(&alvo), Some(codigo));
+        assert_eq!(codigo_do_alvo(&format!("  {alvo}  ")), Some(codigo));
+    }
+
+    #[test]
+    fn um_endereco_ou_um_codigo_que_nao_fecha_nao_e_alvo_de_codigo() {
+        for texto in [
+            "casa.exemplo:8383",
+            "10.0.0.1:8383",
+            "[::1]:8383",
+            "CSM7-NBFR-CAYQ-EV4Y",
+            "@CSM7-NBFR-CAYQ-EV4Z",
+            "@",
+        ] {
+            assert_eq!(
+                codigo_do_alvo(texto),
+                None,
+                "`{texto}` virou alvo de código"
+            );
+        }
     }
 }
 
