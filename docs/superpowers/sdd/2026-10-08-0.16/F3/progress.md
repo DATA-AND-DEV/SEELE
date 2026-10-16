@@ -806,11 +806,25 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
     (`superficies.limites-o-que-e`). O teto de altura que o guarda do cartão
     conferia era o do `.pessoa-cartao` da 3: o cartão da 6 é contido pelo
     teto de nós e pelo `linhasMaximas`, e fica dito no guarda.
+- **16/10. O passo 7 da auditoria: as INCERTA e as SEM PROVA restantes.**
+  - O `0.16/api-6` avançou até `8e8dfea5` com o aval da orquestradora, e o
+    `.wasm` rodou nesta máquina com o wasi-sdk conferido: dois consertos meus
+    (a B2 e a B10) tinham deixado o `motor.mjs` e a `executor-no-navegador.cjs`
+    vermelhos (`8e8dfea5`).
+  - Os lotes 1 a 22 no `0.16/api-6-corte`, cada prova revertida contra o
+    produto: a tabela está no README da auditoria. Dois consertos decididos
+    pela orquestradora, e não emenda: o retrato e o `fundoDeMidia` recusados
+    dizem `midia/recusada` ao MOD (`b1a4c3cf`), e o `ponto-desconhecido` leva
+    `pontoPedido` e `pontos` (`021876f8`). E o que o produto calava, achado
+    medindo: a fundura acima do teto cortava calada (`teto-de-fundura`, lote 2).
+  - **A bancada do celular roda no CI desde `937d4251`**, e as linhas do
+    celular que a auditoria deu como «não roda» se provam por ela, caso a caso
+    (`--so`), revertidas (lote 22). Um guarda dela era de enfeite: a rolagem
+    do `operador.barra` passava com `overflow: visible`. E a letra de 16 dos
+    campos não era medida. Os dois consertados, e medidos também o zoom e os
+    gestos e o `status.barra` na casca larga.
 - **Esperam:** do corte, o guarda da união, pronto em
   `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
-  depois do Step 6 do dono (D-api-7); o avanço do `0.16/api-6` para as
-  limpezas, que levam a integração da versao/0.16 junto, com o aval da
-  orquestradora; o passo 7 (as INCERTA e SEM PROVA restantes; o que pedir
-  texto vai numa quarta e última emenda); e o Step 3 da tarefa 7 (o teto da
-  `midia`, que a M3 não mediu). Nada que roda o `.wasm` rodou nesta máquina:
-  falta o `WASI_SDK`.
+  depois do Step 6 do dono (D-api-7); o resto do passo 7 (o que pedir texto
+  vai numa quarta e última emenda, e até aqui nada pediu); e o Step 3 da
+  tarefa 7 (o teto da `midia`, que a M3 não mediu).
