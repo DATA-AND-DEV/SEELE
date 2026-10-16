@@ -246,6 +246,31 @@ for (const [nome, tema] of Object.entries({
     `superfícies cinza-médio, onde nenhum fósforo alcança o piso, não recusaram pelo fósforo: ${JSON.stringify(cinza.pares)}`);
 }
 
+// ---------------------------------------- cada par do v6.json recusa por ele
+
+{
+  // **Cada par do contrato, com o piso dele** (`tema.pares`; a auditoria do
+  // `v6.json`, tabela 8): `apagado/fundo`, `apagado/painel` e `acento/painel`
+  // não tinham caso nenhum, e tirar a linha deles de `PARES_DO_TEMA` passava.
+  // O espelho nos dois sentidos — o `acento/acentoFraco` é derivado pelo
+  // produto, e não recusado: o texto diz, e ele fica de fora —, e para cada
+  // par um tema em que só a frente dele quase some sobre o fundo dele.
+  const v6 = JSON.parse(fs.readFileSync(`${repo}/api/v6.json`, "utf8"));
+  const doContrato = Object.entries(v6.tema.pares)
+    .filter(([, piso]) => !/não recusado/.test(piso))
+    .map(([par, piso]) => [...par.split("/"), Number.parseFloat(piso.replace(",", "."))]);
+  const daCasca = vm.runInContext("PARES_DO_TEMA", contexto).map((p) => [...p]);
+  const comoTexto = (lista) => lista.map((p) => p.join(" ")).sort().join(" | ");
+  confere("os pares · o espelho", comoTexto(doContrato) === comoTexto(daCasca),
+    `o v6.json diz «${comoTexto(doContrato)}», e a casca recusa por «${comoTexto(daCasca)}»`);
+  for (const [frente, fundo, piso] of doContrato) {
+    const r = tonsDoTema({ ...CLARO, [fundo]: "#000000", [frente]: "#111111" }, daRaiz);
+    const par = r.pares.find((p) => p.frente === frente && p.fundo === fundo);
+    confere(`os pares · ${frente}/${fundo}`, Boolean(par) && par.piso === piso && par.razao < piso,
+      `«${frente}» quase preto sobre «${fundo}» preto não foi recusado pelo par, com o piso ${piso}: ${JSON.stringify(r.pares)}`);
+  }
+}
+
 // ---------------------------------------- os pares, pelos nomes do contrato
 
 {
