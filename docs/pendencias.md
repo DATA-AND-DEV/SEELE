@@ -9937,7 +9937,9 @@ Chromium): o tique de 500 ms refazia, sem mudança nenhuma, cinco regiões da se
   numa pendente), com o divisor pela chave do dia, contada, e os nós de `conversa.mensagem` pelo marcador. A
   rolagem segue como antes.
 
-**Os guardas:** os casos 12, 13 e 14 da `linhas-pelo-id.cjs` (`644efc18`, `557ebae0`, `1c0760bd`), numa seção
+**Os guardas:** os casos 12, 13 e 14 da `linhas-pelo-id.cjs` (`644efc18`, `557ebae0`, `1c0760bd`, e na rodada 1 da
+revisão `a3382f33`: a mesma ação contribuída duas vezes, duas pendentes com a primeira gravada, e dois divisores do
+mesmo dia, cada um provado pelo mutante da revisão), numa seção
 própria — o nó `===` e no documento, o `document.activeElement`, a seleção, 0 mutações com o retrato igual, e a
 prova de que o tique (ou a conversa) redesenhou; o clique na ação do MOD depois de um retrato que muda o canal
 aberto manda o canal novo, e o REMOVER e o link de mensagens editadas agem com o dado de agora. Cada conserto tem a
@@ -9952,7 +9954,20 @@ relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-r63-report.md`.
 **Seguem abertos da (b):**
 - **o celular**: o ENTRAR e o ENTRAR MUDO da coluna de salas seguem recriados a cada quadro pelo
   `celular-servidor.js`, que adapta a coluna depois de cada desenho contando com ela refeita, e a reconciliação tira o
-  que ele pôs para ele pôr de novo. A (b) **não** está resolvida no celular. Dona: a F8;
+  que ele pôs para ele pôr de novo. A (b) **não** está resolvida no celular. Dona: a F8. E, para a F8, desde o
+  lote R63: o comentário de `celular-conversa.js:62-63` («a lista é refeita quando chega mensagem») ficou falso; o
+  código está certo com a conversa reconciliada, porque o ouvinte é delegado e lê o `data-mensagem` na hora do
+  toque. A troca do comentário é dela;
+- **a própria mensagem gravada perde o nó — limite conhecido do lote R63.** Na conversa, a pendente tem a chave da
+  máquina (`pendente:<client_message_id>`) e a confirmada a do servidor (`mensagem:<id>`), e as duas não casam:
+  quando a mensagem que a própria pessoa mandou é gravada, a `li` é outra, e vão com ela o link, o REMOVER, a seleção
+  e o nó do leitor de tela — em toda mensagem que a pessoa manda. O fio já leva o eco (`client_message_id` no
+  `MessageReceived`, `crates/seele-proto/src/control.rs:1934-1936`: «so a client can match its own pending send»);
+  quem o perde é o cliente — a `Message` da sala (`crates/seele-sessao/src/state.rs`) não o guarda, e a FFI monta
+  `client_message_id: None` nas confirmadas (`crates/seele-ffi/src/lib.rs:3646`). **O caminho:** a F1 guarda o eco
+  e o leva pela FFI nas confirmadas próprias (a orquestradora já o pediu a ela); depois que a ponta dela chegar, a
+  F5 faz a pendente e a confirmada própria casarem pela mesma chave na conversa, com um caso na
+  `linhas-pelo-id.cjs` que começa vermelho: a própria mensagem gravada mantém o nó, a seleção e o REMOVER;
 - **o grupo FORA DO AR** (`grupoForaDoAr`), que só existe no `0.16/sala-viva`: as linhas dele não têm chave e casam
   pela posição, e um leitor de tela parado em «Bruno» passa a ler «Carla» no mesmo nó quando alguém do meio se
   conecta. Medido em 16/10 no `531b9cba`: com a chave `membro:<id>` na linha, as que ficam são os mesmos nós e

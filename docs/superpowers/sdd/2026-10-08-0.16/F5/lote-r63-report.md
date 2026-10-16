@@ -110,8 +110,9 @@ R5 (o botão reaproveitado não vestido) reprova ali: «… entregou ["bancada/r
 ### Passo 3 — a conversa, pelo id da mensagem
 
 - **A chave** da mensagem é o id que o servidor deu (`mensagem:<id>`), ou, numa pendente — id zero —, a chave
-  desta máquina (`pendente:<client_message_id>`). A pendente que é gravada troca de chave (o Rust manda o
-  `client_message_id` só nas não gravadas), e só ela ganha nó novo.
+  desta máquina (`pendente:<client_message_id>`). A pendente que é gravada troca de chave — a FFI manda o
+  `client_message_id` só nas não gravadas —, e só ela ganha nó novo. O que isso custa a quem escreveu está em «O que
+  ficou de fora» (desde a rodada 1).
 - **O divisor de dia** tem a chave do dia, contada: a hora é do servidor e a ordem é a do id, e o mesmo dia pode
   abrir dois divisores — sem a contagem, os dois disputariam um nó.
 - `comChave` é `":scope > li"`: só os filhos da lista, e não um `li` que um MOD desenhe dentro de uma mensagem.
@@ -256,17 +257,34 @@ Os brutos estão no scratchpad desta sessão (`r63/saidas/medida-ponta-{chromium
 - **O grupo FORA DO AR** (`grupoForaDoAr`), que só existe no `0.16/sala-viva`. A medida de 16/10 confirmou que as
   linhas casam pela posição e que a chave `membro:<id>` resolve. Não foi tocado aqui; a 63 segue aberta por ele.
 - **O celular** (dona: a F8): a coluna de salas segue adaptada a cada quadro pelo `celular-servidor.js`. E o
-  comentário do ouvinte da folha da mensagem em `celular-conversa.js` diz «a lista é refeita quando chega mensagem»:
-  deixou de ser verdade, e o ouvinte continua certo (ele procura o REMOVER na lista de agora). É arquivo da F8, e
-  não mexi.
+  comentário do ouvinte da folha da mensagem em `celular-conversa.js:62-63` diz «a lista é refeita quando chega
+  mensagem»: deixou de ser verdade. O código continua certo com a reconciliação — o ouvinte é delegado e, na hora do
+  toque, lê o `data-mensagem` (que o `vestirComo` reescreve), lê `mensagens[indice]` e procura o REMOVER pelo id.
+  Trocar o comentário é da F8; desde a rodada 1 a 63 o registra para ela. Não mexi no arquivo.
 - **O que um VoiceOver de verdade anuncia** — de um `nodeValue` que muda no `#voz-estado`, por exemplo. Não se mede
   aqui, e o app não foi aberto.
 - **Outras escritas iguais por tique, fora das cinco regiões do brief**: o `#banner`, o `#aviso-audio` e o
   `#bateria` (regiões vivas, escondidas: só atributos, `hidden`), o `#operador-nome`, a `#operador-inicial`, os
   botões MUDO e SURDO (`replaceChildren` do glifo a cada quadro) e o `#canal-cabecalho-mods` e as
   `#compositor-ferramentas`, que ainda passam por `repovoar` direto. A medida não os pediu; ficam registrados.
-- **A pendente que é gravada** troca de chave (de `pendente:` para `mensagem:`) e ganha nó novo: o foco num TENTAR
-  DE NOVO dela cai quando ela é gravada — que é quando o botão deixa de existir.
+- **A própria mensagem gravada perde o nó: é um limite conhecido** (corrigido na rodada 1, M2; antes este item
+  dizia só que caía o foco num TENTAR DE NOVO). A pendente tem a chave da máquina (`pendente:<client_message_id>`) e
+  a confirmada a do servidor (`mensagem:<id>`), e as duas não casam: quando a mensagem que a própria pessoa mandou é
+  gravada, a `li` é outra. Vão com ela o link, o REMOVER (a própria mensagem sempre o tem), a seleção no corpo e o
+  nó do leitor de tela — **em toda mensagem que a própria pessoa manda**, e não só nas que falharam. A revisão mediu
+  (uma pendente `Enviando`, própria, com um endereço: o foco no link vai ao `BODY` e a seleção a «»), e o caso 14 (h)
+  vê a `li` velha sair do documento.
+
+  **Onde o dado se perde.** O fio já leva o eco: o `MessageReceived` do `seele-proto` tem `client_message_id`
+  («Echo of the sender's identifier, so a client can match its own pending send», `control.rs:1934-1936`). Quem o
+  perde é o cliente: a `Message` da sala (`crates/seele-sessao/src/state.rs`) não guarda o campo, e a FFI monta
+  `client_message_id: None` nas confirmadas (`crates/seele-ffi/src/lib.rs:3646`). Sem ele, a tela não tem como
+  ligar a gravada à pendente que ela foi, a não ser por heurística.
+
+  **O caminho:** a F1 guarda o eco e o leva pela FFI nas confirmadas próprias — a orquestradora já pediu isso a
+  ela. Depois que a ponta dela chegar, a F5 faz a pendente e a confirmada própria casarem pela mesma chave na
+  conversa, com um caso na `linhas-pelo-id.cjs` que começa vermelho: a própria mensagem gravada mantém o nó, a
+  seleção e o REMOVER.
 - **Mensagens mais velhas entrando no começo da lista**: a rolagem segue o comportamento do navegador com nós que
   ficam (a âncora de rolagem do Chromium); não medi. O caso do brief é a mensagem nova no fim.
 
@@ -290,3 +308,67 @@ Os brutos estão no scratchpad desta sessão (`r63/saidas/medida-ponta-{chromium
 5. **A sessão mudou de worktree pelo `EnterWorktree`.** O gancho da sessão recusou o `Edit` no `lote-r63` enquanto
    ela estava no `eloquent-blackburn`; o `EnterWorktree` com o caminho do `lote-r63` pôs a sessão nele, e nada foi
    escrito no `eloquent-blackburn`.
+
+## Rodada 1
+
+A revisão (`.superpowers/sdd/lotes/review-r63-report.md`) deu o lote conforme e aprovado com ressalvas: 0
+Críticos, 1 Importante e 3 Menores. O código estava certo; faltavam guardas e docs. O pedido da rodada é o
+`.superpowers/sdd/lotes/lote-r63-rodada1.md`, com uma correção da orquestradora sobre o M2 (não é o fio: o fio já
+leva o eco, e quem o perde é o cliente). Ponta de partida `31102f9f`. **A rodada não muda código de produção**: o
+`tela-sessao.js` segue com o sha256 `a838c5ca3b416e2173e58ff6a3900a86875127e0d84616d8772e2b21fe76e754`, e o `git
+diff` de `apps/seele-app/ui/` desde o `31102f9f` é vazio.
+
+### Os commits
+
+| commit | achado | o que entra |
+|---|---|---|
+| `a3382f33` | I1, M1 | a bancada: 13 (f), 14 (h) e 14 (i) |
+| este | M2, M3 | o relatório e a 63 |
+
+### I1 e M1 — os três passos, cada um provado pelo seu mutante
+
+A revisão achou três propriedades que o código cumpre, que este relatório afirma e que nenhum caso prendia; os
+mutantes de uma linha dela passavam verdes. Os cenários são os da sonda dela (`sonda-r63.cjs`).
+
+- **13 (f), a mesma ação contribuída duas vezes.** Um MOD contribui a ação `x` duas vezes em `pessoas.lista`
+  («X1» e «X2»), com o foco no segundo botão. Depois de um tique: o mesmo nó, no documento, o `activeElement`, e 0
+  mutações no `#roster-mods`.
+- **14 (h), duas pendentes, e a primeira é gravada.** Duas pendentes `SemResposta`, a 77 e a 78, com o foco no
+  TENTAR DE NOVO da 78; a 77 é gravada (id 500). O mesmo botão, com o foco; a `li` da 78 `===`; a `li` velha da 77
+  fora do documento; nenhuma `li` que dizia uma pendente dizendo a outra.
+- **14 (i), a hora que volta atrás.** Quatro mensagens nos dias D1, D2, D1, D2 (ao meio-dia local, para a virada da
+  meia-noite não mudar o dia), que abrem quatro divisores; a conversa igual, redesenhada: 0 mutações e os divisores
+  `===`.
+
+| | o mutante | o que reprovou |
+|---|---|---|
+| Ma | a chave do botão sem o `#${vez}` (`tela-sessao.js:761`) | 13 (f): «a mesma ação, contribuída duas vezes, perdeu o foco do segundo botão no tique: o botão não é o mesmo nó, saiu do documento, e o foco está em BODY» |
+| Mb | o divisor sem a contagem (`:1944`) | 14 (i): «com dois divisores do mesmo dia, a conversa igual, redesenhada, teve 4 mutações»; com as asserções suaves, também «2 divisores trocaram de nó» |
+| Mc | a pendente sem chave (`:1966`) | 14 (h): «o TENTAR DE NOVO da segunda, com o foco, não é o mesmo botão: o foco está em BODY»; com as asserções suaves, também a `li` da 78 trocada, a velha da 77 no documento, e a linha que dizia «primeira pendente» dizendo outra mensagem |
+
+Pelo mesmo `reverter.sh`: as três reprovaram, e o `tela-sessao.js` voltou idêntico pelo `cmp` em cada uma (sha256
+`a838c5ca…e754` antes e depois).
+
+### M2 — a própria mensagem gravada
+
+O item de «O que ficou de fora» dizia só que caía o foco num TENTAR DE NOVO. Agora diz o que se perde — o link, o
+REMOVER, a seleção e o nó do leitor de tela, em toda mensagem que a própria pessoa manda —, onde o dado se perde (o
+fio leva o eco, `control.rs:1934-1936`; o cliente o perde, `state.rs` sem o campo e a FFI com `None`,
+`lib.rs:3646`) e o caminho (a F1, e depois a F5, com o caso começando vermelho). A 63 registra o mesmo, como item
+dela, sem número novo. O passo 3 do desenho deixou de atribuir a falta «ao Rust» em geral.
+
+### M3 — o comentário do celular
+
+Uma linha no item «o celular» da 63: o comentário de `celular-conversa.js:62-63` ficou falso, o código está certo
+com a reconciliação, e a troca é da F8. O arquivo não foi tocado.
+
+### O que rodou na rodada
+
+Na ponta `a3382f33` (o código de produção é o mesmo do `31102f9f`):
+- **a `linhas-pelo-id.cjs`**, todos os casos: saída 0, em uns 49 s;
+- **a `um-redesenho-por-quadro.cjs`**: o maior atraso 28 ms, na passada da bateria;
+- **as 19 bancadas do job `bancadas`**: 19 de 19, com a carga de 1 min entre 8 e 22 (outras sessões rodando);
+- **os 40 roteiros**: «os 40 passaram», «carga limpa: nenhum script estourou»;
+- **o cargo e a bancada do celular não rodaram**, como o pedido dispensa: a rodada não muda código de produção nem
+  o `frontend.rs`. As últimas passadas são as da rodada 0, acima (296 de 296 no `frontend`, 230 no `xtask`, o
+  `check-runtime` passando, e o celular com 110 casos e o G3 IGUAL).
