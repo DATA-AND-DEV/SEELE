@@ -28,6 +28,10 @@ pub(crate) enum EntradaColada {
         /// (`seele_ffi::alvo_do_codigo`): ele se basta sozinho, e sobrevive ao
         /// `ejetar`.
         alvo: String,
+        /// O nome que esta máquina deu a essa pessoa na agenda, quando deu: é o
+        /// «ALICE» de «CHAMANDO ALICE…» (tarefa 28 da F7). Sem ele, a tela diz o
+        /// código.
+        nome: Option<String>,
     },
     /// Tem a forma de um código, e não fecha: «ESSE CÓDIGO TEM UM ERRO DE
     /// DIGITAÇÃO», dito sem consultar a rede.
@@ -37,8 +41,13 @@ pub(crate) enum EntradaColada {
 }
 
 /// [`EntradaColada`] de um texto, com o código desta máquina, quando ele se
-/// lê. Sem ele (a identidade não abriu), nenhum código é «o seu».
-pub(crate) fn ler_entrada_em(texto: &str, meu: Option<&seele_ffi::Codigo>) -> EntradaColada {
+/// lê, e o nome que a agenda dá a um código. Sem o código desta máquina (a
+/// identidade não abriu), nenhum código é «o seu».
+pub(crate) fn ler_entrada_em(
+    texto: &str,
+    meu: Option<&seele_ffi::Codigo>,
+    nome_de: impl Fn(&seele_ffi::Codigo) -> Option<String>,
+) -> EntradaColada {
     match seele_ffi::entrada::ler_entrada(texto) {
         seele_ffi::entrada::Entrada::Endereco(endereco) => EntradaColada::Endereco(endereco),
         seele_ffi::entrada::Entrada::Convite(convite) => EntradaColada::Convite(convite),
@@ -49,8 +58,21 @@ pub(crate) fn ler_entrada_em(texto: &str, meu: Option<&seele_ffi::Codigo>) -> En
         seele_ffi::entrada::Entrada::Codigo(codigo) => EntradaColada::Codigo {
             codigo: codigo.to_string(),
             alvo: seele_ffi::alvo_do_codigo(&codigo),
+            nome: nome_de(&codigo),
         },
     }
+}
+
+/// O nome que esta máquina deu a um código na agenda, quando deu. Uma agenda
+/// que não abre não tem nome nenhum, e o `seele.log` diz por quê.
+pub(crate) fn nome_na_agenda(config: &str, codigo: &seele_ffi::Codigo) -> Option<String> {
+    let agenda = seele_ffi::agenda::Agenda::abrir(crate::toque::caminho_da_agenda(config))
+        .map_err(|erro| tracing::warn!(erro = %format!("{erro:#}"), "a agenda não abriu"))
+        .ok()?;
+    agenda
+        .buscar(codigo)
+        .and_then(|contato| contato.nome.clone())
+        .filter(|nome| !nome.trim().is_empty())
 }
 
 /// **A ligação em voo**, do `connect` que a abriu até ele voltar (tarefa 28 da
@@ -118,8 +140,13 @@ pub(crate) fn cancelar_em(sessao: &crate::Session) -> bool {
 /// A entrada colada em CONECTAR (tarefa 30 da F7): a leitura do núcleo, com «é o
 /// seu código?» respondido pela chave desta máquina.
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
 mod a_entrada_colada {
-    use super::{ler_entrada_em, EntradaColada};
+    use super::{ler_entrada_em, nome_na_agenda, EntradaColada};
     use seele_ffi::Codigo;
 
     /// O código da chave de zeros, o mesmo dos vetores do `seele-proto`.
@@ -129,16 +156,21 @@ mod a_entrada_colada {
         Codigo::da_chave(&[0; 32])
     }
 
+    /// Uma agenda sem nome nenhum.
+    fn sem_nome(_: &Codigo) -> Option<String> {
+        None
+    }
+
     #[test]
     fn enderecos_e_convites_passam_como_foram_escritos() {
         for endereco in ["casa.exemplo:8383", "10.0.0.1:8383", "[::1]:8383"] {
             assert_eq!(
-                ler_entrada_em(endereco, None),
+                ler_entrada_em(endereco, None, sem_nome),
                 EntradaColada::Endereco(endereco.to_owned())
             );
         }
         assert_eq!(
-            ler_entrada_em("seele://casa.exemplo:8383", None),
+            ler_entrada_em("seele://casa.exemplo:8383", None, sem_nome),
             EntradaColada::Convite("seele://casa.exemplo:8383".to_owned())
         );
     }
@@ -147,17 +179,24 @@ mod a_entrada_colada {
     fn o_codigo_de_outra_pessoa_vem_com_o_alvo_de_quem_liga() {
         let outro = Codigo::da_chave(&[1; 32]);
         assert_eq!(
-            ler_entrada_em(DE_ZEROS, Some(&outro)),
+            ler_entrada_em(DE_ZEROS, Some(&outro), sem_nome),
             EntradaColada::Codigo {
                 codigo: DE_ZEROS.to_owned(),
                 alvo: seele_ffi::alvo_do_codigo(&zeros()),
+                nome: None,
             }
         );
         // O link da sala também é código, e o alvo é o mesmo.
         assert_eq!(
-            ler_entrada_em(&format!("seele://@{DE_ZEROS}"), None),
-            ler_entrada_em(DE_ZEROS, None)
+            ler_entrada_em(&format!("seele://@{DE_ZEROS}"), None, sem_nome),
+            ler_entrada_em(DE_ZEROS, None, sem_nome)
         );
+        // E o nome é o que a agenda dá àquele código, e só a ele.
+        let alice = |codigo: &Codigo| (*codigo == zeros()).then(|| "Alice".to_owned());
+        assert!(matches!(
+            ler_entrada_em(DE_ZEROS, Some(&outro), alice),
+            EntradaColada::Codigo { nome: Some(nome), .. } if nome == "Alice"
+        ));
     }
 
     #[test]
@@ -168,22 +207,37 @@ mod a_entrada_colada {
             &format!("seele://@{DE_ZEROS}"),
         ] {
             assert_eq!(
-                ler_entrada_em(escrito, Some(&zeros())),
+                ler_entrada_em(escrito, Some(&zeros()), sem_nome),
                 EntradaColada::SeuCodigo,
                 "`{escrito}`"
             );
         }
         // Sem a chave desta máquina, nenhum código é o seu.
         assert!(matches!(
-            ler_entrada_em(DE_ZEROS, None),
+            ler_entrada_em(DE_ZEROS, None, sem_nome),
             EntradaColada::Codigo { .. }
         ));
     }
 
     #[test]
+    fn o_nome_vem_da_agenda_desta_maquina() {
+        let casa = tempfile::tempdir().expect("a pasta de teste não abriu");
+        let config = casa.path().display().to_string();
+        let alice = Codigo::da_chave(&[1; 32]);
+        assert_eq!(nome_na_agenda(&config, &alice), None, "sem agenda, um nome");
+        crate::sala::dar_nome_em(&config, &alice.to_string(), "Alice").unwrap();
+        assert_eq!(nome_na_agenda(&config, &alice).as_deref(), Some("Alice"));
+        assert_eq!(
+            nome_na_agenda(&config, &zeros()),
+            None,
+            "o nome de uma pessoa foi dado a outro código"
+        );
+    }
+
+    #[test]
     fn um_codigo_que_nao_fecha_e_erro_de_digitacao() {
         assert_eq!(
-            ler_entrada_em("CSM7-NBFR-CAYQ-EV4Z", Some(&zeros())),
+            ler_entrada_em("CSM7-NBFR-CAYQ-EV4Z", Some(&zeros()), sem_nome),
             EntradaColada::CodigoComErro
         );
     }
@@ -192,9 +246,9 @@ mod a_entrada_colada {
     fn a_casca_le_a_entrada_pelo_nome_da_variante() {
         // A tela escolhe a frase e o caminho por estes nomes.
         assert_eq!(
-            serde_json::to_value(ler_entrada_em(DE_ZEROS, None)).ok(),
+            serde_json::to_value(ler_entrada_em(DE_ZEROS, None, sem_nome)).ok(),
             Some(serde_json::json!({
-                "Codigo": { "codigo": DE_ZEROS, "alvo": format!("@{DE_ZEROS}") }
+                "Codigo": { "codigo": DE_ZEROS, "alvo": format!("@{DE_ZEROS}"), "nome": null }
             }))
         );
         assert_eq!(

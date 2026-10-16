@@ -2892,8 +2892,11 @@ fn meu_codigo(app: AppHandle) -> Result<String, ()> {
 /// [`ligar::EntradaColada`].
 #[tauri::command]
 fn ler_entrada(app: AppHandle, texto: String) -> ligar::EntradaColada {
-    let meu = seele_ffi::codigo_desta_maquina(&config_dir(&app)).ok();
-    ligar::ler_entrada_em(&texto, meu.as_ref())
+    let config = config_dir(&app);
+    let meu = seele_ffi::codigo_desta_maquina(&config).ok();
+    ligar::ler_entrada_em(&texto, meu.as_ref(), |codigo| {
+        ligar::nome_na_agenda(&config, codigo)
+    })
 }
 
 /// CANCELAR (tarefa 28 da F7): larga a ligação em voo, se houver uma. Devolve
