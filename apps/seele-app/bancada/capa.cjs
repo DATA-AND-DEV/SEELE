@@ -169,6 +169,30 @@ const { chromium } = require('./playwright.cjs');
       return camada && getComputedStyle(camada).backgroundImage.includes(window.daCapa);
     }, cartao, { timeout: 5000 });
 
+    // 1b. **«O SEELE desenha» não recebe capa** (`capa.preferencia`; a
+    //     auditoria do `v6.json`, tabela 6): pela escolha da própria capa, e
+    //     pela do cartão, que ela herda. De volta ao automático, ela volta.
+    const porEscolha = await page.evaluate(async (seletor) => {
+      const pintada = () => {
+        const camada = document.querySelector(seletor)?.querySelector(':scope > .capa-camada');
+        return Boolean(camada && getComputedStyle(camada).backgroundImage.includes(window.daCapa));
+      };
+      const assentar = () => new Promise(ok => setTimeout(ok, 200));
+      const com = async (ponto) => {
+        escolherApresentacao(ponto, APRESENTACAO_NATIVA);
+        desenharChamada(testTable.snapshot);
+        await assentar();
+        const r = pintada();
+        escolherApresentacao(ponto, '');
+        desenharChamada(testTable.snapshot);
+        await assentar();
+        return r;
+      };
+      return { propria: await com('pessoa.capa'), herdada: await com('pessoa.cartao'), deVolta: pintada() };
+    }, cartao);
+    assert.deepEqual(porEscolha, { propria: false, herdada: false, deVolta: true },
+      `com «o SEELE desenha», a capa do MOD foi pintada, ou não voltou no automático: ${JSON.stringify(porEscolha)}`);
+
     // A legibilidade, com as três capas de prova, calado e falando.
     const pioras = [];
     for (const [nomeDaCapa, cor] of CAPAS_DE_PROVA) {
@@ -649,6 +673,33 @@ const { chromium } = require('./playwright.cjs');
       { acao: 'abrir-perfil', pessoa: alvo, canal: '' },
       { acao: 'mesa-da-sala', pessoa: '', canal: acoes.sala },
     ], `o clique nas ações não chegou ao MOD com o alvo: ${JSON.stringify(acoes)}`);
+
+    // 8. **O endereço abre fora da janela, e só http e https**
+    //    (`actions.abrir-endereco`, `eventos[12]`; a auditoria do `v6.json`,
+    //    tabelas 2 e 3). O dono de verdade: o `https` vai ao navegador do
+    //    sistema por `abrir_no_navegador`, e o MOD ouve `link` aberto; um
+    //    `javascript:` e um `file:` não vão a lugar nenhum, e o MOD ouve o porquê.
+    const links = await page.evaluate(async () => {
+      const dono = donoDaRegiao({ id: 'teste/perfis', hash: 'hash' }, instanciaTeste);
+      const antes = entregues.length;
+      const chamadasAntes = testCalls.length;
+      dono.abrirEndereco('https://exemplo.org/regras', 'site');
+      dono.abrirEndereco('javascript:alert(1)', 'mau');
+      dono.abrirEndereco('file:///etc/hosts', 'arquivo');
+      await new Promise(ok => setTimeout(ok, 50));
+      const ditos = entregues.slice(antes).filter(m => m.tipo === 'evento' && m.nome === 'link')
+        .map(({ chave, aberto, porque }) => ({ chave, aberto, porque: porque ?? null }))
+        .sort((a, b) => a.chave.localeCompare(b.chave));
+      const abertos = testCalls.slice(chamadasAntes).filter(c => c.cmd === 'abrir_no_navegador').map(c => c.args?.url);
+      return { ditos, abertos };
+    });
+    assert.deepEqual(links.abertos, ['https://exemplo.org/regras'],
+      `o que o MOD nomeou não foi ao navegador do sistema, ou um esquema que não serve foi: ${JSON.stringify(links)}`);
+    assert.deepEqual(links.ditos, [
+      { chave: 'arquivo', aberto: false, porque: 'endereco-nao-serve' },
+      { chave: 'mau', aberto: false, porque: 'endereco-nao-serve' },
+      { chave: 'site', aberto: true, porque: null },
+    ], `o MOD não ouviu o \`link\` de cada endereço como foi: ${JSON.stringify(links)}`);
 
     assert.deepEqual(errors, []);
     console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo, que acompanha a troca da capa, e que pelo id resolve numa folha.');

@@ -1217,6 +1217,18 @@ function anotando(...anotadas) {
     aba.preferenciaConsultadaPara("pessoa.avatar") === ":nativo",
     `com escolha própria, o avatar seguiu a do cartão: «${aba.preferenciaConsultadaPara("pessoa.avatar")}»`,
   );
+  // **E a capa, a mesma herança** (`capa.preferencia`).
+  confere(
+    "M1 · a aba · a herança",
+    aba.preferenciaConsultadaPara("pessoa.capa") === "mod/a",
+    `sem escolha própria, a capa não herdou a escolha do cartão: «${aba.preferenciaConsultadaPara("pessoa.capa")}»`,
+  );
+  aba.preferencias.set("pessoa.capa", vm.runInContext("NATIVO", aba));
+  confere(
+    "M1 · a aba · a herança",
+    aba.preferenciaConsultadaPara("pessoa.capa") === ":nativo",
+    `com escolha própria, a capa seguiu a do cartão: «${aba.preferenciaConsultadaPara("pessoa.capa")}»`,
+  );
   aba.preferencias.clear();
 
   // **As frases.** Um lugar vazio, e a mídia de um lugar que tem quem pinte e
@@ -1865,6 +1877,23 @@ function anotando(...anotadas) {
     const visto = nomeDa(fazer);
     confere("Step 7b · o nome", visto === nome, `esperava «${nome}», e veio ${visto}`);
   }
+  // **A capa tem a forma do avatar** (`capa.forma`): substituir, por alvo,
+  // com `conteudo.doServidor`. Num registro à parte, para uma capa aceita
+  // por engano não ocupar o que as conferências de baixo contam.
+  {
+    const daCapa = new R();
+    const capa = (pedido) => () => daCapa.registrar({ id: "mod/capa" }, new I("mod/capa", "c", 7, {}), { ponto: "pessoa.capa", ...pedido });
+    for (const [nome, fazer] of [
+      ["sem-alvo", capa({ modo: "substituir", conteudo: { doServidor: { canal: 1 } } })],
+      ["conteudo-invalido", capa({ modo: "substituir", alvo: "1", conteudo: {} })],
+      ["conteudo-invalido", capa({ modo: "substituir", alvo: "1", conteudo: [{ forma: "texto" }] })],
+      ["modo-recusado", capa({ modo: "adicionar", alvo: "1", conteudo: { doServidor: { canal: 1 } } })],
+      ["(aceita)", capa({ modo: "substituir", alvo: "1", conteudo: { doServidor: { canal: 1 } } })],
+    ]) {
+      const visto = nomeDa(fazer);
+      confere("Step 7b · a capa", visto === nome, `esperava «${nome}», e veio ${visto}`);
+    }
+  }
   const { handle } = registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "1" });
   confere("Step 7b · contribuicao-ja-existe",
     nomeDa(() => registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "1" })) === "contribuicao-ja-existe",
@@ -2349,8 +2378,9 @@ function anotando(...anotadas) {
         });
         regiaoRespondida = respostas.at(-1);
       }
-      confere("R2 · a recusa no registro", contribuicaoRespondida?.ok === false,
-        "um ponto que não existe foi aceito");
+      confere("R2 · a recusa no registro", contribuicaoRespondida?.ok === false
+        && contribuicaoRespondida.erro === "ponto-desconhecido",
+        `um ponto que não existe foi aceito, ou recusado sem o nome: ${JSON.stringify(contribuicaoRespondida)}`);
       confere(
         "R2 · a recusa no registro",
         dita("nao.existe"),
@@ -2366,6 +2396,13 @@ function anotando(...anotadas) {
         linhaDaRecusada !== undefined && !String(linhaDaRecusada[1]).includes("ALGO FALHOU"),
         "a linha da contribuição recusada levou ao seele.log a frase de tela de `fraseDeErro`, "
           + `e não só o motivo: ${JSON.stringify(linhaDaRecusada)}`,
+      );
+      // **Com a lista do que existe** (`contribuicoes.fora[1]`): a linha diz
+      // os pontos que a API tem, e não só o que veio.
+      confere(
+        "R2 · a recusa no registro",
+        /os que existem são .*pessoa\.cartao.*canal\.item/.test(String(linhaDaRecusada?.[1] ?? "")),
+        `a linha da contribuição recusada não disse os pontos que existem: ${JSON.stringify(linhaDaRecusada)}`,
       );
       // **A 6 não tem `regiao`** (o corte; rascunho §2): a mensagem é recusada
       // pela versão antes do renderer, e a recusa chega ao registro. A região
