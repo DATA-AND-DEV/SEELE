@@ -11229,6 +11229,25 @@ fn analisar_convite(
     Ok(lido)
 }
 
+/// O caminho pela recusa (tarefa 13 da F6, passo 5; P8 da F1): o servidor
+/// recusou o número deste app dizendo, no byte 0 da resposta, que fala o
+/// Servidor `linha`. Responde o mesmo `versoes::ParaEntrar` do
+/// `analisar_convite`, pelo mesmo núcleo, para a casca seguir pelo mesmo
+/// `entrarPelaLinha`.
+///
+/// `linha` é o `ConnectionError::OutraLinha::servidor`, que a FFI só manda
+/// para uma versão que o launcher abre («0.15»).
+#[tauri::command]
+fn para_entrar_pela_recusa(app: AppHandle, linha: String) -> versoes::ParaEntrar {
+    versoes::para_entrar_pela_recusa(
+        &config_dir(&app),
+        versoes::atualizador_do_app(&app)
+            .as_ref()
+            .map(|atualizador| &atualizador.chave),
+        &linha,
+    )
+}
+
 /// O nome estável de uma falha ao ler um convite.
 ///
 /// Um `match` e não o `Display` do core. O `Display` de `ErroDeUri` hoje escreve
@@ -12599,6 +12618,7 @@ fn main() {
             conhecidos,
             esquecer,
             analisar_convite,
+            para_entrar_pela_recusa,
             buscar,
             busca_andar,
             busca_limpar,

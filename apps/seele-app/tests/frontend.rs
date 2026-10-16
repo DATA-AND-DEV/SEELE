@@ -10760,6 +10760,14 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 ///    mesma conferência vale para a pergunta dos MODs: só a tentativa mais
 ///    nova a abre com a credencial dela.
 ///
+/// 7. **O link colado vai à outra versão, e só a ela** (tarefa 13 da F6, passo
+///    5). Ele carrega o mesmo convite, e desce do painel de servidores ao
+///    `conectar` como `linkColado`, sem ser lembrado entre tentativas. Quando o
+///    servidor recusa por falar outra versão, a recusa vem antes do Hello e o
+///    convite não foi gasto: o `entrarPelaRecusa` o entrega ao `abrir_versao`,
+///    para a versão aberta entrar com ele. Ele não vai a registro nem a frase,
+///    e o roteiro `outra-linha-pelo-launcher.js` reprova se for.
+///
 /// **A entrada pelo navegador segue o mesmo contrato** (Tarefa 3.4 da F4): a
 /// `identidade-web.js` guarda o token do link, e o link inteiro que o carrega,
 /// em `segredos`, na memória da tentativa. Cada linha dela que nomeia
@@ -10770,7 +10778,13 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
-        ("tela-boot.js", "async function conectar(alvo, apelido, credencial) {"),
+        ("tela-boot.js", "async function conectar(alvo, apelido, credencial, linkColado) {"),
+        // O link colado (parte 7): o caminho pela recusa por versão o leva
+        // ao `abrir_versao` da outra versão, e a nenhum outro lugar.
+        (
+            "tela-boot.js",
+            "entrarPelaRecusa(motivo, linkColado).catch((f) => console.warn(\"entrar pela recusa:\", f));",
+        ),
         ("tela-boot.js", "joinSecret: credencial ?? null,"),
         // O apelido tomado (lote W): o lugar, a leitura presa ao alvo e o
         // esquecimento no começo de toda tentativa, e a guarda na recusa.
@@ -10927,6 +10941,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         for linha in texto.lines().map(str::trim) {
             if [
                 "credencial",
+                "linkColado",
                 "aceitePendente",
                 "recusaDoApelido",
                 "segredos",
@@ -11012,7 +11027,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // 3. Só quatro chamadas de `conectar` passam credencial por argumento (a do
     //    apelido tomado, `conectar` anexa sozinho: ver a parte 6).
     const LEVAM: &[(&str, &str)] = &[
-        ("camada-servidores.js", "alvo, apelido || undefined, token"),
+        (
+            "camada-servidores.js",
+            "alvo, apelido || undefined, token, linkColado ?? null",
+        ),
         ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
         ("camada-mods.js", "alvo, null, credencial"),
         // A entrada pelo navegador (3.4): o link da página, com o token da

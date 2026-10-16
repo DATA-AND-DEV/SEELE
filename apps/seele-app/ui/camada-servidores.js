@@ -107,9 +107,15 @@ async function desenharServidores() {
   );
 }
 
-/** Abre a camada. */
-async function abrirServidores() {
-  focoAntesDosServidores = document.activeElement;
+/**
+ * Abre a camada.
+ *
+ * `voltarPara` é para onde o teclado volta ao fechar. Por padrão, o que tinha o
+ * foco; o caminho pela recusa diz o CONECTAR, que naquela hora ainda está
+ * apagado e não tem o foco (`entrarPelaRecusa`, em `camada-versoes.js`).
+ */
+async function abrirServidores(voltarPara = document.activeElement) {
+  focoAntesDosServidores = voltarPara;
   $("servidores-erro").hidden = true;
   $("servidores-endereco").value = "";
   await desenharServidores();
@@ -210,7 +216,10 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
   }
   consumirOCampo();
   fecharServidores();
-  irParaOServidor(alvo, null, token);
+  // O link desce com a tentativa: se o servidor recusar por falar outra
+  // versão, é ele que leva o SEELE daquela versão já ao servidor
+  // (`entrarPelaRecusa`). Um endereço cru não tem link.
+  irParaOServidor(alvo, null, token, undefined, escrito.startsWith("seele://") ? escrito : null);
 });
 
 $("servidores-fechar").addEventListener("click", fecharServidores);
@@ -240,8 +249,12 @@ window.addEventListener(
  *
  * O apelido vem junto quando se sabe — é o daquela visita, gravado com o
  * servidor. Sem ele, o campo da entrada decide.
+ *
+ * `linkColado` é o `seele://` colado, quando houve um, para a recusa por versão o
+ * levar à outra (`entrarPelaRecusa`). De dentro de uma sessão ele não segue: a
+ * troca pergunta antes, e volta pelo alvo.
  */
-function irParaOServidor(alvo, apelido, token, nome) {
+function irParaOServidor(alvo, apelido, token, nome, linkColado) {
   const naSessao = !$("tela-sessao").hidden;
   if (naSessao) {
     // O nome junto: a caixa de confirmação fala por nome, e quem clicou numa
@@ -255,7 +268,7 @@ function irParaOServidor(alvo, apelido, token, nome) {
   // Esta leitura morava aqui, e era a **única** porta que a fazia: quem
   // hospedava não passava por ela e conectava sem nome. Ela desceu para o
   // `conectar`, que é por onde toda conexão passa.
-  conectar(alvo, apelido || undefined, token).catch((falha) =>
+  conectar(alvo, apelido || undefined, token, linkColado ?? null).catch((falha) =>
     console.warn("conectar:", falha),
   );
 }
