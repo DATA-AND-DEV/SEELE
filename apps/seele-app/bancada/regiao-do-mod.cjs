@@ -785,26 +785,32 @@ function contarNos(no) {
   return no.filhos.reduce((soma, filho) => soma + 1 + contarNos(filho), 0);
 }
 
+/**
+ * **Um cartão da 6**: o renderer de um destino de `pessoa.cartao`, com o
+ * perfil do cartão, como `montarContribuicao` (`base.js`) o monta. Os cartões
+ * da API 3 (`declararCartoes`) saíram com ela; a gramática, os tetos e o som
+ * sem botão do cartão são os deste perfil.
+ */
+function umCartao(b, d) {
+  return new b.RegiaoDeMod("seele/perfis", d.api, b.raiz(), b.PERFIS.cartao);
+}
+
 async function oCartaoUsaOMesmoRendererComGramaticaMenor() {
   const b = bancada();
   const d = dono(b);
-  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+  const regiao = umCartao(b, d);
 
-  const recusados = regiao.declararCartoes({
-    7: [
-      { forma: "titulo", dentro: "Lia" },
-      { forma: "texto", dentro: "ela/dela" },
-      // As três que um cartão não aceita. Elas não somem caladas: contam como
-      // recusa, porque o MOD precisa saber que pôs botão onde botão não entra.
-      { forma: "botao", chave: "b", dentro: "APERTE" },
-      { forma: "campo", chave: "c", rotulo: "R", valor: "v" },
-      { forma: "tela", chave: "t", largura: 10, altura: 10 },
-    ],
-  });
+  const recusados = regiao.aplicar([
+    { forma: "titulo", dentro: "Lia" },
+    { forma: "texto", dentro: "ela/dela" },
+    // As três que um cartão não aceita. Elas não somem caladas: contam como
+    // recusa, porque o MOD precisa saber que pôs botão onde botão não entra.
+    { forma: "botao", chave: "b", dentro: "APERTE" },
+    { forma: "campo", chave: "c", rotulo: "R", valor: "v" },
+    { forma: "tela", chave: "t", largura: 10, altura: 10 },
+  ]);
 
-  const cartao = regiao.cartaoDe(7);
-  confere("o cartão existe", Boolean(cartao), "não foi montado");
-  confere("o cartão é do produto", cartao?.className === "pessoa-cartao", String(cartao?.className));
+  const cartao = regiao.raiz;
 
   // **Montado pelo renderer, e não por HTML.** As etiquetas são as que
   // `FORMAS_DA_REGIAO` dita, e o texto entrou por `textContent`.
@@ -835,80 +841,30 @@ async function oCartaoUsaOMesmoRendererComGramaticaMenor() {
   }
 }
 
-async function oCartaoSaiQuandoOModParaDeDeclararOuQuandoAReGiaoSai() {
-  const b = bancada();
-  const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: 1000 }));
-  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
-
-  regiao.declararCartoes({
-    7: [{ forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } }],
-    9: [{ forma: "texto", dentro: "outro" }],
-  });
-  await volta();
-  await volta();
-
-  const soltos = () => d.registrados.filter((r) => r.porque.includes("midia")).length;
-  confere("o retrato foi registrado", soltos() === 1, `${soltos()} registros`);
-  confere("os bytes entraram na conta do cartão", regiao.bytesDeCartao === 1000, String(regiao.bytesDeCartao));
-  confere("e não na conta da região", regiao.bytesDeMidia === 0, String(regiao.bytesDeMidia));
-
-  // Parar de declarar uma pessoa tira o cartão dela e solta o que ele segurava.
-  regiao.declararCartoes({ 9: [{ forma: "texto", dentro: "outro" }] });
-  confere("o cartão de 7 saiu", regiao.cartaoDe(7) === null, "continuou lá");
-  confere("o de 9 ficou", regiao.cartaoDe(9) !== null, "sumiu junto");
-  confere("os bytes voltaram", regiao.bytesDeCartao === 0, String(regiao.bytesDeCartao));
-  confere("a contagem voltou", regiao.contagem.midiasDeCartao === 0, String(regiao.contagem.midiasDeCartao));
-
-  // E soltar a região tira o resto, **mesmo o que nunca esteve sob a raiz
-  // dela**. Um cartão mora na lista do produto, e não na região: pendurá-lo
-  // aqui é o que faz esta prova medir alguma coisa.
-  //
-  // A primeira versão disto media nada: `cartaoDe` devolve `null` assim que a
-  // região está solta, e a raiz nunca fora pendurada em lugar nenhum — as duas
-  // asserções passavam com o descarte **removido**. A reversão pegou.
-  regiao.declararCartoes({
-    9: [{ forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } }],
-  });
-  await volta();
-  await volta();
-  const lista = b.doc.createElement("li");
-  const noDoNove = regiao.cartaoDe(9);
-  lista.append(noDoNove);
-  confere("o cartão está na lista", noDoNove.pai === lista, "não foi pendurado");
-  confere("e segura o retrato", regiao.bytesDeCartao === 1000, String(regiao.bytesDeCartao));
-
-  regiao.soltar();
-  confere("o cartão saiu da lista do produto", noDoNove.pai === null, "continuou pendurado ao lado do nome");
-  confere("e a região esqueceu a raiz", regiao.raizesDeCartao.size === 0, `${regiao.raizesDeCartao.size} raiz(es)`);
-  confere("e o retrato foi solto", regiao.bytesDeCartao === 0, String(regiao.bytesDeCartao));
-}
-
 async function oRetratoDoCartaoEOMesmoNoEntreDoisRetratos() {
   const b = bancada();
   const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: 10 }));
-  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+  const regiao = umCartao(b, d);
 
   const declarar = (nome) =>
-    regiao.declararCartoes({
-      7: [
-        { forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } },
-        { forma: "texto", chave: "nome", dentro: nome },
-      ],
-    });
+    regiao.aplicar([
+      { forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } },
+      { forma: "texto", chave: "nome", dentro: nome },
+    ]);
 
   declarar("Lia");
   await volta();
   await volta();
-  const antes = acharTag(regiao.cartaoDe(7), "img");
+  const antes = acharTag(regiao.raiz, "img");
   confere("o retrato montou", Boolean(antes), "sem img");
 
   // **O mesmo nó.** Um `<img>` recriado a cada quatro segundos pisca, e um
   // `<audio>` recriado recomeça — é o motivo de a lista receber o nó montado
   // em vez de uma cópia, e de a reconciliação valer aqui como vale na região.
   declarar("Lia Nova");
-  const depois = acharTag(regiao.cartaoDe(7), "img");
+  const depois = acharTag(regiao.raiz, "img");
   confere("o retrato não foi recriado", antes === depois, "o nó da imagem trocou");
-  confere("e o texto mudou", textoDe(regiao.cartaoDe(7)).includes("Lia Nova"), textoDe(regiao.cartaoDe(7)));
+  confere("e o texto mudou", textoDe(regiao.raiz).includes("Lia Nova"), textoDe(regiao.raiz));
   confere("os bytes não dobraram", regiao.bytesDeCartao === 10, String(regiao.bytesDeCartao));
 }
 
@@ -945,26 +901,13 @@ async function aImagemAcompanhaAMudancaDaFonte() {
 async function osTetosDoCartaoSaoDoCartaoENaoDaRegiao() {
   const b = bancada();
   const d = dono(b);
-  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+  const regiao = umCartao(b, d);
 
-  // Pessoas demais é recusa **inteira**, e com o teto escrito: o MOD pediu um
-  // conjunto, e um conjunto pela metade é pior que nenhum.
-  const demais = {};
-  for (let i = 0; i <= b.CARTAO.cartoes; i += 1) demais[i] = [{ forma: "texto", dentro: "a" }];
-  let recusou = "";
-  try {
-    regiao.declararCartoes(demais);
-  } catch (erro) {
-    recusou = String(erro.message);
-  }
-  confere("pessoas demais é recusa", recusou.includes(String(b.CARTAO.cartoes)), recusou || "aceitou");
-  confere("e nada ficou pela metade", regiao.cartaoDe(0) === null, "gravou parte do conjunto");
-
-  // O teto de nós é o do cartão, e não o da região: vinte e quatro, e não 512.
+  // O teto de nós é o do cartão, e não o da região.
   const muitos = [];
   for (let i = 0; i < b.CARTAO.nos + 30; i += 1) muitos.push({ forma: "texto", dentro: `n${i}` });
-  const recusados = regiao.declararCartoes({ 3: muitos });
-  const quantos = contarNos(regiao.cartaoDe(3));
+  const recusados = regiao.aplicar(muitos);
+  const quantos = contarNos(regiao.raiz);
   confere("o cartão parou no teto dele", quantos <= b.CARTAO.nos, `montou ${quantos}`);
   confere("e a recusa foi contada", recusados > 0, "recusou calado");
   confere(
@@ -972,10 +915,6 @@ async function osTetosDoCartaoSaoDoCartaoENaoDaRegiao() {
     b.CARTAO.nos < b.LIMITES.nos,
     `cartão ${b.CARTAO.nos} · região ${b.LIMITES.nos}`,
   );
-
-  // Um cartão vazio não vira moldura vazia ao lado de um nome.
-  regiao.declararCartoes({ 5: [] });
-  confere("cartão vazio não entra", regiao.cartaoDe(5) === null, "montou uma moldura vazia");
 }
 
 // ---------------------------------------------------------------------------
@@ -1952,8 +1891,8 @@ async function osTetosContemEARecusaEDita() {
     const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
     const bs = bancada({ audio: Audio });
     const ds = dono(bs, () => Promise.resolve({ papel: "som", bytes: 12 }));
-    const r = new bs.RegiaoDeMod("a/b", ds.api, bs.raiz());
-    r.declararCartoes({ 7: [{ forma: "midia", chave: "c", fonte: "som/c.ogg", tocando: true }] });
+    const r = umCartao(bs, ds);
+    r.aplicar([{ forma: "midia", chave: "c", fonte: "som/c.ogg", tocando: true }]);
     await assentar();
     confere(
       caso,
@@ -3757,13 +3696,12 @@ async function oSomNumCartaoNaoTemBotao() {
   const d = dono(b, () =>
     Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }),
   );
-  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
-  regiao.declararCartoes({ 7: [{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }] });
-  // A lista de pessoas pendura o cartão na linha da pessoa no mesmo desenho
-  // (`darCartoesDoMod` → `redesenharAsPessoas`), antes de os bytes chegarem.
-  b.doc.body.append(regiao.cartaoDe(7));
+  // O cartão já nasce no documento (`b.raiz()`), como o destino que a linha
+  // da pessoa pendura antes de os bytes chegarem.
+  const regiao = umCartao(b, d);
+  regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }]);
   await assentar();
-  const cartao = regiao.cartaoDe(7);
+  const cartao = regiao.raiz;
   confere(caso, acharTag(cartao, "button") === null, "um cartão ganhou um botão, e cartão não recebe foco (ver FORMAS_DO_CARTAO)");
   confere(caso, Audio.ultimo?.fontes[0]?.tocando === true, "o som que o MOD declarou no cartão não tocou");
   confere(caso, regiao.midiasAnotadas()[0]?.cartao === true, "a mídia do cartão não foi anotada como de cartão");
@@ -4440,11 +4378,11 @@ async function asProtecoesDoTocadorEDaMontagemDoSom() {
   {
     const b = bancada();
     const d = dono(b, () => Promise.resolve({ uri: "data:image/png;base64,AA", papel: "imagem", bytes: 12 }));
-    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
-    regiao.declararCartoes({ 7: [{ forma: "midia", chave: "m", fonte: "img/a.png" }] });
+    const regiao = umCartao(b, d);
+    regiao.aplicar([{ forma: "midia", chave: "m", fonte: "img/a.png" }]);
     await assentar();
     const antes = d.mudancas();
-    regiao.declararCartoes({});
+    regiao.aplicar([]);
     confere(
       caso,
       d.mudancas() > antes && regiao.midiasAnotadas().length === 0,
@@ -4668,7 +4606,9 @@ async function oSomComRepetirTocaEmLaco() {
  * Plano 1D mediu (I-1) o som seguia até o fim, sem controle à vista e sem
  * `pausada` ao MOD: a página fechada, a contribuição que perde a disputa, o
  * cartão da API 3 sob «o SEELE desenha», o destino de quem saiu da sala, e a
- * página fechada que recebe um som novo `tocando`.
+ * página fechada que recebe um som novo `tocando`. O cartão da API 3 saiu com
+ * ela; o que ele media — o cartão que não desenha cala, e não volta com o
+ * próximo `tocando: true` — vale para o destino de uma contribuição.
  *
  * Esta prova mede `RegiaoDeMod#calarSonsForaDaTela` — quem a chama nos
  * desenhos do produto é medido em `contribuicoes-e-camadas.cjs` (a página
@@ -4838,46 +4778,32 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     regiao.soltar();
   }
 
-  // O cartão da API 3: quando o SEELE desenha o cartão, o som do cartão para
-  // — e o da região, não. E o cartão que sai da lista, também.
+  // O destino de uma contribuição que não desenha (`aContribuicaoPinta`): o
+  // som de cartão dele para, mesmo com o nó no documento, e o MOD que o
+  // redeclara `tocando: true` não o religa.
   {
     const Audio = audioDeMentira();
     const b = bancada({ audio: Audio });
     const d = dono(b, midiaDeSom);
-    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
-    const cartoes = {
-      7: [{ forma: "midia", chave: "cartao-7", fonte: "som/c7.wav", tocando: true }],
-      8: [{ forma: "midia", chave: "cartao-8", fonte: "som/c8.wav", tocando: true }],
-    };
-    regiao.aplicar([{ forma: "midia", chave: "faixa", fonte: "som/f.wav", tocando: true }]);
-    regiao.declararCartoes(cartoes);
-    b.doc.body.append(regiao.cartaoDe(7), regiao.cartaoDe(8));
+    const cartao = umCartao(b, d);
+    const vinheta = [{ forma: "midia", chave: "vinheta", fonte: "som/v.wav", tocando: true }];
+    cartao.aplicar(vinheta);
     await assentar();
     const tocando = () => (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
-    confere(caso, tocando() === 3, `a faixa e os dois cartões não tocaram: ${tocando()} fonte(s)`);
-
-    // A pessoa 8 sai da sala: o cartão dela sai da lista, e o MOD vale.
-    regiao.cartaoDe(8).remove();
-    regiao.calarSonsForaDaTela(true);
+    confere(caso, tocando() === 1, `o som do cartão não tocou: ${tocando()} fonte(s)`);
+    cartao.calarSonsForaDaTela(true);
+    confere(caso, tocando() === 1, "o cartão que desenha, na tela, foi calado");
+    cartao.calarSonsForaDaTela(false);
     confere(
       caso,
-      ditos(d, "cartao-8", "pausada").length === 1 && tocando() === 2,
-      `o cartão de quem saiu da lista seguiu tocando: ${tocando()} fonte(s), «pausada» dita `
-        + `${ditos(d, "cartao-8", "pausada").length} vez(es)`,
+      tocando() === 0 && ditos(d, "vinheta", "pausada").length === 1,
+      "o cartão que não desenha seguiu tocando: "
+        + `${tocando()} fonte(s), «pausada» dita ${ditos(d, "vinheta", "pausada").length} vez(es)`,
     );
-    // «O SEELE desenha» o cartão: os cartões deste MOD deixam de valer.
-    regiao.calarSonsForaDaTela(false);
-    confere(
-      caso,
-      ditos(d, "cartao-7", "pausada").length === 1 && ditos(d, "faixa", "pausada").length === 0 && tocando() === 1,
-      "com «o SEELE desenha» o cartão, o som do cartão do MOD seguiu, ou o da faixa parou junto: "
-        + `${tocando()} fonte(s), cartão ${ditos(d, "cartao-7", "pausada").length}, faixa ${ditos(d, "faixa", "pausada").length}`,
-    );
-    // O MOD redeclara os cartões com `tocando: true`, e eles não voltam.
-    regiao.declararCartoes(cartoes);
+    cartao.aplicar(vinheta);
     await assentar();
-    confere(caso, tocando() === 1, `o MOD redeclarou os cartões e um som calado voltou a tocar: ${tocando()} fonte(s)`);
-    regiao.soltar();
+    confere(caso, tocando() === 0, `o MOD redeclarou o cartão e o som calado voltou a tocar: ${tocando()} fonte(s)`);
+    cartao.soltar();
   }
 
   // O destino que tomou os sons de uma contribuição e perde a disputa: o som
@@ -6396,7 +6322,6 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     oQuadroPendenteNaoSobreviveASaida,
     tudoChegaAInstanciaESoltarDuasVezesNaoDoi,
     oCartaoUsaOMesmoRendererComGramaticaMenor,
-    oCartaoSaiQuandoOModParaDeDeclararOuQuandoAReGiaoSai,
     oRetratoDoCartaoEOMesmoNoEntreDoisRetratos,
     osTetosDoCartaoSaoDoCartaoENaoDaRegiao,
     aImagemAcompanhaAMudancaDaFonte,
