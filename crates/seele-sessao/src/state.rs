@@ -104,6 +104,20 @@ pub struct Message {
     pub replies_to: Option<MessageId>,
     /// Whether this client sent it.
     pub own: bool,
+    /// **O eco da chave com que esta máquina a mandou**, quando é própria: o
+    /// `client_message_id` que o servidor devolve no `MessageReceived`, «so a
+    /// client can match its own pending send».
+    ///
+    /// É o que deixa a tela trocar a pendente pela confirmada **no mesmo nó**.
+    /// Sem ele, a gravada chegava como uma mensagem nova, e quem usa leitor de
+    /// tela e lia a mensagem que acabou de mandar perdia a posição, a seleção e
+    /// o REMOVER, em toda mensagem (o achado da revisão do R63 da F5).
+    ///
+    /// `None` na de outra pessoa, mesmo que o fio a traga: a chave de outra
+    /// máquina não identifica nada aqui. O histórico relido do servidor traz a
+    /// chave gravada (`FetchHistory` responde com o `client_message_id` de
+    /// cada linha), então a própria antiga chega com ela também.
+    pub client_message_id: Option<ClientMessageId>,
     /// Whether it has been edited since.
     pub edited: bool,
     /// The file hanging off it, if any. ADR 0027.
@@ -1271,6 +1285,7 @@ impl Room {
                     body: body.clone(),
                     replies_to: *replies_to,
                     own: propria,
+                    client_message_id: if propria { *client_message_id } else { None },
                     edited: false,
                     attachment: attachment.clone(),
                 });

@@ -3673,7 +3673,11 @@ fn messages_of(room: &Room) -> Vec<Message> {
             own: message.own,
             edited: message.edited,
             estado: EstadoDoEnvio::Confirmada,
-            client_message_id: None,
+            // O eco da própria, para a casca trocar a pendente pela gravada no
+            // mesmo nó (ver `seele_sessao::Message::client_message_id`).
+            client_message_id: message
+                .client_message_id
+                .map(|chave| chave.get().to_string()),
             attachment: message.attachment.as_ref().map(|anexo| Attachment {
                 id: anexo.id.get(),
                 file_name: anexo.file_name.clone(),
@@ -7764,6 +7768,86 @@ mod tests {
         assert!(voice_rooms_of(&room).is_empty());
         assert!(lines_of(&room).is_empty());
         assert!(messages_of(&room).is_empty());
+    }
+
+    /// **A confirmada própria chega com o eco da pendente**, e é o que deixa a
+    /// casca trocar uma pela outra no mesmo nó (achado da revisão do R63 da
+    /// F5). Sem ele, quem usa leitor de tela e lia a mensagem que acabou de
+    /// mandar perdia a posição, a seleção e o REMOVER a cada envio.
+    ///
+    /// A de outra pessoa chega sem a chave, mesmo que o fio a traga. E a
+    /// própria relida do histórico chega com a chave gravada: o `FetchHistory`
+    /// do servidor responde com o `client_message_id` de cada linha.
+    #[test]
+    fn a_confirmada_propria_chega_com_a_chave_da_pendente() {
+        use seele_core::{ChannelInfo, ClientMessageId, PersonId, ServerMessage, SessionId, Ssrc};
+
+        let canal = ChannelId(1);
+        let mut room = Room::new();
+        room.apply(&ServerMessage::Session {
+            id: SessionId(1),
+            person: PersonId(7),
+            ssrc: Ssrc(700),
+            server: "Casa".into(),
+            voice_rooms: Vec::new(),
+            channels: vec![ChannelInfo {
+                id: canal,
+                name: "geral".into(),
+            }],
+            roles: Vec::new(),
+            permissions: Vec::new(),
+        });
+        room.open_channel(canal);
+        let recebida = |id: u64, autor: u64, chave: Option<u64>| ServerMessage::MessageReceived {
+            channel: canal,
+            id: MessageId(id),
+            author: PersonId(autor),
+            at_seconds: 0,
+            author_nickname: format!("pessoa{autor}"),
+            body: format!("mensagem {id}"),
+            replies_to: None,
+            client_message_id: chave.map(ClientMessageId),
+            attachment: None,
+        };
+
+        // A pendente, e a chave com que a casca a desenha.
+        room.anotar_envio(canal, ClientMessageId(77), "mensagem 5".into(), 0);
+        let pendente = messages_of(&room);
+        assert_eq!(pendente.len(), 1);
+        assert_eq!(pendente[0].client_message_id.as_deref(), Some("77"));
+
+        // Gravada: a pendente sai, e a confirmada leva a mesma chave.
+        room.apply(&recebida(5, 7, Some(77)));
+        // De outra pessoa, com uma chave no fio que não é desta máquina.
+        room.apply(&recebida(6, 8, Some(78)));
+        // A própria relida do histórico, com a chave que o servidor gravou.
+        room.apply(&recebida(2, 7, Some(31)));
+
+        let lista = messages_of(&room);
+        let de = |id: u64| lista.iter().find(|mensagem| mensagem.id == id);
+        assert_eq!(
+            lista.len(),
+            3,
+            "a pendente não saiu, ou alguma não chegou: {lista:?}"
+        );
+        let gravada = de(5).expect("a gravada");
+        assert_eq!(gravada.estado, EstadoDoEnvio::Confirmada);
+        assert_eq!(
+            gravada.client_message_id.as_deref(),
+            Some("77"),
+            "a confirmada própria chegou sem a chave da pendente, e a casca a desenha \
+             como uma mensagem nova"
+        );
+        assert_eq!(
+            de(6).expect("a de outra pessoa").client_message_id,
+            None,
+            "a chave de outra máquina chegou à casca"
+        );
+        assert_eq!(
+            de(2).expect("a relida").client_message_id.as_deref(),
+            Some("31"),
+            "o histórico traz a chave gravada, e a própria antiga a perdeu no caminho"
+        );
     }
 
     #[test]
@@ -13782,6 +13866,7 @@ mod onde_um_anexo_grava {
             body: String::new(),
             replies_to: None,
             own: false,
+            client_message_id: None,
             edited: false,
             attachment: Some(seele_core::AttachmentInfo {
                 id: seele_core::AttachmentId(7),
