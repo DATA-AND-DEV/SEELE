@@ -8073,6 +8073,35 @@ fn quem_nao_prova_a_chave_tem_frase_propria_e_nao_a_de_versao_incompativel() {
     );
 }
 
+#[test]
+fn quem_cancela_a_ligacao_le_que_cancelou_e_nao_uma_falha() {
+    // Tarefa 16 da F7. `ConnectionError::Cancelada` é unitária, como a
+    // `ChaveNaoProvada` logo acima, e o `fraseDeErro` a lê em `FRASES` por esse
+    // nome: sem a entrada, a tela escreveria o nome de uma variante do Rust a
+    // quem acabou de apertar CANCELAR. E a frase diz que foi a pessoa, e não
+    // uma falha de rede ou de alguém.
+    //
+    // O nome vem do serde, e não de um texto aqui: renomear a variante reprova
+    // este guarda, em vez de deixar uma frase que ninguém lê.
+    let Ok(json) = serde_json::to_string(&seele_ffi::ConnectionError::Cancelada) else {
+        panic!("ConnectionError does not serialise, so no shell can read it at all");
+    };
+    let nome = json.trim_matches('"');
+    let arquivo = without_comments(&read("ui/frases.js"));
+    let frases = sentences_of(&arquivo, "FRASES");
+    let Some((_, frase)) = frases.iter().find(|(variante, _)| variante == nome) else {
+        panic!(
+            "`ConnectionError::{nome}` chega à tela sem frase em `FRASES`, e a tela escreve \
+             o nome de uma variante do Rust a quem cancelou a ligação"
+        );
+    };
+    assert!(
+        frase.contains("CANCELOU"),
+        "a frase de `{nome}` não diz que foi a pessoa quem cancelou, e se lê como uma \
+         falha: {frase}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // What the owner asked for after installing the app and using it. Four guards,
 // and three of them guard an **absence** — the hardest kind to keep, because
