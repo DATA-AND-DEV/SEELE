@@ -20,6 +20,10 @@
 //
 // 1. Sair do servidor apaga o tema na hora — o caso do relato.
 // 2. E a prévia, que é desta sessão como o tema.
+// 3. **O que o tema nomeia é o que ele escreve** (`tema.nomes`; a auditoria do
+//    `v6.json`, tabela 8): o arredondamento, o brilho, a densidade e a fonte
+//    chegam à sessão como os tokens que prometem — o nome era provado, e o
+//    efeito não —, e saem com ela.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual. Rodada por
 // `cargo xtask check-runtime`.
@@ -162,6 +166,29 @@ function cobrar(ok, caso, visto) {
     api.entrarNaGeracao(10);
     cobrar(comAPrevia === "#2f8fe0" && Object.keys(logoDepois).length === 0 && selo?.hidden === true,
       "sair do servidor apaga a prévia do tema na hora, e o selo dela", { comAPrevia, logoDepois, selo: selo?.hidden });
+  }
+
+  // 3. O arredondamento, o brilho, a densidade e a fonte.
+  {
+    estilo.clear();
+    api.entrarNaGeracao(11);
+    const inst = instanciaAtiva(11);
+    pedirTema({ ...TEMA, arredondamento: 8, brilho: true, densidade: "compacta", fonte: "sans" });
+    const escrito = Object.fromEntries(estilo);
+    const esperado = {
+      "--seele-raio": "8px",
+      "--seele-sombra": "0 0 12px var(--seele-laranja-nerv)",
+      "--seele-celula-x": "6px",
+      "--seele-celula-y": "10px",
+      "--seele-mono": "var(--seele-pilha-sans)",
+    };
+    cobrar(Object.entries(esperado).every(([token, valor]) => escrito[token] === valor),
+      "o arredondamento, o brilho, a densidade e a fonte chegam à sessão como os tokens deles", escrito);
+    api.encerrarOAmbienteDosMods();
+    await inst.encerramento;
+    api.entrarNaGeracao(12);
+    cobrar(Object.keys(esperado).every((token) => !estilo.has(token)),
+      "e saem com ela", Object.fromEntries(estilo));
   }
 
   if (falhas.length) process.exit(1);
