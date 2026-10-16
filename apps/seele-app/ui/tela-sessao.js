@@ -2240,6 +2240,25 @@ function nosDeMod(nos) {
 }
 
 /**
+ * **O `pessoa.detalhes` de uma pessoa, para a linha dela** — o único lugar que
+ * o acrescenta, para as duas linhas, a nativa e a apresentada (decisão da
+ * orquestradora, 16/10). Com `CASCA.detalhesNaLinha` falso, nada: o celular o
+ * monta só na folha da pessoa, e um nó por pessoa fica num lugar só.
+ *
+ * Cada seção leva **o nome do MOD por cima**, escrito pelo produto e fora do
+ * nó dele, e o nó numa caixa que recorta o que ele desenha: sem dono, uma
+ * seção ao lado do MODERAR podia ser um MODERAR falso.
+ */
+function detalhesDaPessoaNaLinha(pessoa) {
+  if (!CASCA.detalhesNaLinha || pessoa.id === undefined || pessoa.id === null) return [];
+  return conteudoDasContribuicoes("pessoa.detalhes", String(pessoa.id)).flatMap((no) => {
+    const caixa = elemento("div", "contribuicao-de-mod-caixa");
+    caixa.append(noDeMod(no));
+    return [elemento("p", "contribuicao-de-mod-origem", no.dataset.mod ?? ""), caixa];
+  });
+}
+
+/**
  * **A lista de pessoas reconciliada pelo id, e não repovoada** (pendência 63,
  * a parte (b); lote AX da F5).
  *
@@ -2763,8 +2782,30 @@ function linhaDoRoster(pessoa, temAudio) {
     ? linhaSubstituida(pessoa, temAudio, substituicao, noDeMod(cartao))
     : linhaNativaDoRoster(pessoa, temAudio);
   // A chave da linha é a pessoa, e não o lugar dela na lista: ver
-  // `reconciliarALista`.
-  if (pessoa.id !== undefined && pessoa.id !== null) chaveNaLista.set(item, `pessoa:${pessoa.id}`);
+  // `reconciliarALista`. E o id escrito na linha, da mesma fonte da chave: a
+  // folha da pessoa do celular o lê para pedir o `pessoa.detalhes` dela.
+  if (pessoa.id !== undefined && pessoa.id !== null) {
+    chaveNaLista.set(item, `pessoa:${pessoa.id}`);
+    item.dataset.pessoaId = String(pessoa.id);
+  }
+
+  // **`pessoa.detalhes` na linha nativa** (achado do passo 7 da auditoria do
+  // v6; decisão da orquestradora, 16/10): ele só tinha lugar na linha
+  // apresentada por um MOD, e numa nativa a contribuição era aceita e não
+  // aparecia. Aqui, um «⋯» como o da apresentada — só quando há o que pôr nele:
+  // sem contribuição, a linha é a de sempre.
+  if (!cartao) {
+    const deMods = detalhesDaPessoaNaLinha(pessoa);
+    if (deMods.length) {
+      const detalhes = elemento("details", "pessoa-nativo");
+      const resumo = elemento("summary", "pessoa-nativo-resumo", "⋯");
+      resumo.setAttribute("aria-label", `Detalhes de ${pessoa.nome}`);
+      resumo.title = `Detalhes de ${pessoa.nome}`;
+      detalhes.append(resumo, ...deMods);
+      item.classList.add("pessoa-com-detalhes");
+      item.append(detalhes);
+    }
+  }
 
   // **Mas o acesso ao MOD não some junto.** Quem não tem perfil é exatamente
   // quem precisa alcançar o editor. A ação principal do provedor vira um botão
@@ -2877,7 +2918,7 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   // **`pessoa.detalhes`** — seções que o MOD acrescenta ao perfil detalhado.
   // Dentro do mesmo `<details>` da identidade verificável: quem abre para ver
   // quem a pessoa é encontra as duas coisas no mesmo gesto.
-  detalhes.append(...nosDeMod(conteudoDasContribuicoes("pessoa.detalhes", String(pessoa.id))));
+  detalhes.append(...detalhesDaPessoaNaLinha(pessoa));
   item.append(detalhes);
   return item;
 }
