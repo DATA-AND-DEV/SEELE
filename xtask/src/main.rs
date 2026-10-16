@@ -10,6 +10,7 @@ mod check_deps;
 mod check_runtime;
 mod check_versao;
 mod check_vetores;
+mod pacote_web;
 mod wasi_sdk;
 mod web;
 
@@ -21,6 +22,7 @@ fn main() -> ExitCode {
         Some("check-runtime") => check_runtime::run(),
         Some("check-versao") => check_versao::run(),
         Some("check-vetores") => check_vetores::run(),
+        Some("pacote-web") => pacote_web::run(),
         Some("wasi-sdk") => wasi_sdk::run(),
         Some("web") => web::run(),
         Some(other) => {
@@ -44,6 +46,7 @@ fn usage() {
     eprintln!("  check-runtime roda as bancadas de MOD de Node puro (precisa de Node)");
     eprintln!("  wasi-sdk     baixa, confere o SHA-256 e descompacta o wasi-sdk do motor de MODs do celular; imprime o caminho para WASI_SDK");
     eprintln!("  web          os crates do celular dentro do .wasm: bytes-ouro, motor, teto de memória (precisa de Node e dos alvos wasm)");
+    eprintln!("  pacote-web   monta e confere o pacote do web app em target/pacote-web (não baixa nada e não publica)");
     eprintln!("  check-vetores confere que todo vetor está versionado (precisa de Git)");
     eprintln!("  check-versao prova que a versão do produto alcança tudo o que a carrega");
 }

@@ -49,6 +49,10 @@ fn stylesheets() -> String {
         .join("\n")
 }
 
+/// The window's copy. The web app's copy — the one that goes to the origin
+/// (`https://web.seele.app.br`) inside the package — is held by the same rule
+/// in `cargo xtask pacote-web` (`xtask/src/pacote_web.rs`, rule 1 of
+/// `conferir`), because this guard reads `ui/` and not the package.
 #[test]
 fn the_served_tokens_are_the_frozen_tokens() {
     let root = repo_root();
