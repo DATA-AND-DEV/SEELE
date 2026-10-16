@@ -29,7 +29,6 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 use anyhow::{Context, Result};
 
 pub mod encontro;
-pub mod firewall;
 pub mod interfaces;
 pub mod pcp;
 pub mod porta;
@@ -186,6 +185,20 @@ impl Escuta {
 /// então ficar sem IPv4 tira mais gente da sala do que ficar sem IPv6. A perda
 /// vai para o log e para [`Pilha`], em vez de ficar só no log.
 ///
+/// **Só quando a pilha dupla não existe nesta máquina, e nunca com a porta
+/// ocupada** (pendência 65, medida no PC de testes em 15/10). O recuo tratava o
+/// `AddrInUse` do socket duplo como «sem pilha dupla», e no Windows o `0.0.0.0`
+/// ligava: um socket duplo de lá não reserva o IPv4 da porta. Duas cópias do
+/// SEELE abertas subiam as duas a sala na 8385, a segunda calada e só em IPv4,
+/// dividindo a porta — e a tela dizia «no ar». O mesmo valia para hospedar.
+///
+/// E, pela mesma medida, um socket duplo no Windows convive com um só IPv4 e com
+/// um só IPv6 na mesma porta. Por isso, antes de declarar a pilha, uma sonda de
+/// cada família liga e solta a porta ([`ninguem_na_porta`]): o ocupante que o
+/// socket duplo não vê, a sonda vê. O `SO_EXCLUSIVEADDRUSE` faria isso no
+/// socket, mas o `socket2` não o expõe, e a folha de lints proíbe o `unsafe`
+/// que a chamada direta pediria.
+///
 /// # Errors
 ///
 /// Falha se nem IPv6 nem IPv4 aceitarem a porta — normalmente porque ela já
@@ -209,6 +222,9 @@ pub fn abrir_escuta(escuta: SocketAddr) -> Result<(UdpSocket, Pilha)> {
 
     match pilha_dupla(escuta) {
         Ok(socket) => Ok((socket, Pilha::Dupla)),
+        // Porta ocupada não é falta de pilha dupla: recuar para IPv4 aqui é
+        // ligar ao lado de quem já está na porta.
+        Err(erro) if porta_em_uso(&erro) => Err(erro),
         Err(erro) => {
             tracing::warn!(
                 %erro,
@@ -221,9 +237,45 @@ pub fn abrir_escuta(escuta: SocketAddr) -> Result<(UdpSocket, Pilha)> {
     }
 }
 
+/// Se o erro é de porta em uso — o `AddrInUse` em qualquer ponto da cadeia,
+/// que é como o app também o separa do resto.
+fn porta_em_uso(erro: &anyhow::Error) -> bool {
+    erro.chain().any(|causa| {
+        causa
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::AddrInUse)
+    })
+}
+
+/// **Ninguém na porta, em família nenhuma**: liga e solta uma sonda em
+/// `0.0.0.0` e outra em `[::]` com o padrão do `std` (só IPv6 no Windows,
+/// dupla nos outros). A porta zero é a que o sistema escolhe, e não há o que
+/// sondar.
+///
+/// Existe pelo Windows (pendência 65): lá um socket duplo não reserva o IPv4 da
+/// porta e convive com um só IPv6, então o `bind` do socket duplo passaria por
+/// cima dos dois. Um erro de sonda que não seja porta em uso — uma máquina sem
+/// IPv6 — volta como está, e quem chama decide o recuo.
+fn ninguem_na_porta(porta: u16) -> Result<()> {
+    if porta == 0 {
+        return Ok(());
+    }
+    for sonda in [
+        SocketAddr::from(([0, 0, 0, 0], porta)),
+        SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, porta)),
+    ] {
+        // Solta no fim da linha: a sonda só pergunta.
+        UdpSocket::bind(sonda)
+            .with_context(|| format!("a porta {porta} já está em uso ({sonda})"))?;
+    }
+    Ok(())
+}
+
 /// Um socket IPv6 que atende IPv4 junto, ou um erro dizendo por que não.
 fn pilha_dupla(escuta: SocketAddr) -> Result<UdpSocket> {
     use socket2::{Domain, Protocol, Socket, Type};
+
+    ninguem_na_porta(escuta.port())?;
 
     let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))
         .context("esta máquina não abre socket IPv6")?;
@@ -1370,6 +1422,111 @@ mod testes {
         let local = socket.local_addr().expect("o socket não diz onde ligou");
         assert!(local.is_ipv6(), "a pilha dupla mora num socket IPv6");
         assert_ne!(local.port(), 0, "o sistema não escolheu porta");
+    }
+
+    /// A porta de quem chama já está ocupada, e o erro diz isso pelo
+    /// `AddrInUse` na cadeia: é por ele que o app separa «já tem um SEELE
+    /// aberto» de todo o resto.
+    fn recusada_por_ocupada(resultado: Result<(UdpSocket, Pilha)>) -> bool {
+        match resultado {
+            Ok((_, pilha)) => {
+                eprintln!("a escuta ligou ({pilha:?}) numa porta ocupada");
+                false
+            }
+            Err(erro) => erro.chain().any(|causa| {
+                causa
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::AddrInUse)
+            }),
+        }
+    }
+
+    /// Um socket IPv6 **só IPv6** numa porta qualquer — o que o `std` faz por
+    /// padrão no Windows, e o que um programa pode pedir em qualquer sistema.
+    fn ocupante_so_ipv6() -> Option<socket2::Socket> {
+        use socket2::{Domain, Protocol, Socket, Type};
+        let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).ok()?;
+        socket.set_only_v6(true).ok()?;
+        socket.bind(&qualquer_porta_v6().into()).ok()?;
+        Some(socket)
+    }
+
+    #[test]
+    fn a_porta_ocupada_por_qualquer_ocupante_e_porta_ocupada() {
+        // **A pendência 65** (medida pela orquestradora no PC de testes, 15/10):
+        // o recuo para IPv4 tratava o `AddrInUse` da pilha dupla como «sem pilha
+        // dupla nesta máquina», e o Windows deixava a segunda sala ligar só em
+        // IPv4 na mesma porta, calada. Três ocupantes, e os três são porta
+        // ocupada: outra escuta do SEELE, um programa só IPv4, um só IPv6.
+        let Ok((outra, _)) = abrir_escuta(qualquer_porta_v6()) else {
+            eprintln!("pulado: esta máquina não liga em nenhuma porta UDP");
+            return;
+        };
+        let porta = outra.local_addr().expect("a escuta diz onde ligou").port();
+        assert!(
+            recusada_por_ocupada(abrir_escuta(SocketAddr::from((
+                Ipv6Addr::UNSPECIFIED,
+                porta
+            )))),
+            "outra escuta do SEELE na porta {porta}, e a segunda ligou ou falhou por outro motivo"
+        );
+
+        let quatro = UdpSocket::bind("0.0.0.0:0").expect("esta máquina liga em IPv4");
+        let porta = quatro.local_addr().expect("o socket diz onde ligou").port();
+        assert!(
+            recusada_por_ocupada(abrir_escuta(SocketAddr::from((
+                Ipv6Addr::UNSPECIFIED,
+                porta
+            )))),
+            "um programa só IPv4 na porta {porta}, e a escuta ligou ou falhou por outro motivo"
+        );
+
+        let Some(seis) = ocupante_so_ipv6() else {
+            eprintln!("pulado em parte: esta máquina não abre socket só IPv6");
+            return;
+        };
+        let porta = seis
+            .local_addr()
+            .ok()
+            .and_then(|endereco| endereco.as_socket())
+            .expect("o socket diz onde ligou")
+            .port();
+        assert!(
+            recusada_por_ocupada(abrir_escuta(SocketAddr::from((
+                Ipv6Addr::UNSPECIFIED,
+                porta
+            )))),
+            "um programa só IPv6 na porta {porta}, e a escuta ligou (só em IPv4, ao lado dele) \
+             ou falhou por outro motivo"
+        );
+    }
+
+    #[test]
+    fn as_sondas_acham_o_ocupante_que_o_socket_duplo_nao_ve() {
+        // No Windows um socket duplo não reserva o IPv4 da porta e convive com
+        // um só IPv6 (medido no PC de testes): só uma sonda de cada família acha
+        // esses ocupantes antes de a pilha ser declarada.
+        let quatro = UdpSocket::bind("0.0.0.0:0").expect("esta máquina liga em IPv4");
+        let porta = quatro.local_addr().expect("o socket diz onde ligou").port();
+        assert!(
+            ninguem_na_porta(porta).is_err(),
+            "a sonda não achou o programa só IPv4 na porta {porta}"
+        );
+        drop(quatro);
+        if let Some(seis) = ocupante_so_ipv6() {
+            let porta = seis
+                .local_addr()
+                .ok()
+                .and_then(|endereco| endereco.as_socket())
+                .expect("o socket diz onde ligou")
+                .port();
+            assert!(
+                ninguem_na_porta(porta).is_err(),
+                "a sonda não achou o programa só IPv6 na porta {porta}"
+            );
+        }
+        // A porta zero é a que o sistema escolhe: não há o que sondar.
+        assert!(ninguem_na_porta(0).is_ok());
     }
 
     #[test]

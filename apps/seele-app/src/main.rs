@@ -43,6 +43,7 @@ mod catalogo;
 // disso. Ela sai no dia em que a decisão de E1 for tomada, junto com o
 // executor que perder.
 mod executor;
+mod firewall;
 mod icone;
 mod mods;
 mod reducao;
@@ -3213,7 +3214,11 @@ struct Anfitriao {
     /// quase nunca funciona.
     ///
     /// Nada nesta tela dizia isso. O relato foi «teste em LAN não funciona».
-    firewall_nao_cobre: Option<String>,
+    ///
+    /// Com o motivo, a frase com o que fazer e se o botão que pede a regra
+    /// resolve ([`firewall::NaTela`]): a tela mostra o botão só quando ele
+    /// resolve (D-sala-1).
+    firewall: Option<firewall::NaTela>,
     /// O roteador abriu a porta, só que não a canônica (8383) — ver "O
     /// quarto" no ADR 0022.
     ///
@@ -3591,6 +3596,7 @@ async fn hospedar(
     .map_err(|erro| classificar(&erro))?;
 
     let alcance = server.alcance();
+    let firewall = firewall_deste_executavel();
     let anfitriao = Anfitriao {
         aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
         convite: server.convite_com_nome(nome_publico.as_deref()),
@@ -3598,7 +3604,7 @@ async fn hospedar(
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
         encontro_recusado: alcance
             .and_then(|alcance| alcance.encontro_recusado().map(str::to_owned)),
-        firewall_nao_cobre: firewall_nao_cobre_este_executavel(),
+        firewall,
         porta_nao_canonica: alcance
             .and_then(|alcance| alcance.porta_nao_canonica().map(str::to_owned)),
     };
@@ -3764,116 +3770,50 @@ fn abrir_no_navegador(url: String) -> Result<(), String> {
         .map_err(|erro| format!("não consegui abrir o navegador: {erro}"))
 }
 
-/// Se a regra de firewall desta máquina **não** cobre o executável que está
-/// rodando, e por quê.
+/// Se o firewall do Windows **não** deixa chegar conexão a este SEELE, e por
+/// quê: a frase que a linha da sala e a tela de hospedar mostram.
 ///
-/// # Por que comparar com o registro em vez de ler a regra
+/// Quem lê a regra é [`firewall`], num lugar só (D-sala-1, a conferência de
+/// 15/10): a regra ligada, de entrada, UDP, do caminho inteiro deste programa,
+/// no perfil da rede ativa, com o bloqueio vencendo a liberação. Era aqui, e
+/// perguntava só se existia uma regra chamada `SEELE` — um bloqueio com esse
+/// nome passava por coberto.
 ///
-/// Ler a regra seria perguntar ao `netsh`, e a saída dele é traduzida: o campo é
-/// `Programa:` num Windows em português e `Program:` num em inglês. Um
-/// diagnóstico que depende do idioma do sistema é um diagnóstico que erra
-/// justamente na máquina de outra pessoa.
-///
-/// O registro responde a mesma pergunta sem ambiguidade. `InstallLocation` é
-/// escrito pelo nosso instalador, e é dele que sai o caminho que a regra nomeia.
-/// Se este executável não está lá dentro, a regra não é sobre ele.
-///
-/// Duas formas de estar errado, e as duas dão a mesma tela vazia do outro lado:
-///
-///   1. **A pasta não existe.** Alguém apagou a instalação sem passar pelo
-///      desinstalador; a regra continua apontando para o nada.
-///   2. **Este não é o executável instalado.** Uma cópia compilada à mão, um
-///      atalho para outra pasta. A regra cobre a instalada, não esta.
-///
-/// Medido numa máquina de verdade em 04/09/2026: o registro dizia uma pasta que
-/// não existia, a regra apontava para o executável que estaria lá, o anfitrião
-/// subia anunciando furo de NAT, e quem estava na mesma LAN batia três vezes sem
-/// entrar. Nada na tela dizia isso, e o relato foi «teste em LAN não funciona».
-///
-/// `None` fora do Windows e quando está tudo certo. Um `None` por não conseguir
-/// ler o registro também é `None`: não saber não é motivo para acusar.
-fn firewall_nao_cobre_este_executavel() -> Option<String> {
-    #[cfg(not(windows))]
-    {
-        None
-    }
+/// A resposta vai ao `seele.log` no Windows, inclusive quando é «não sei»:
+/// `None` na tela, mas o motivo no registro. O botão que pede a regra só
+/// aparece quando este é o SEELE instalado, com o instalador ao lado
+/// ([`pasta_instalada`]), que é quem o botão chama.
+fn firewall_deste_executavel() -> Option<firewall::NaTela> {
+    let entrada = firewall::ler_deste_programa();
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
+    tracing::info!(?entrada, "o firewall do Windows, para este SEELE");
+    let eu = std::env::current_exe().ok()?;
+    #[cfg(windows)]
+    let instalado = pasta_instalada()
+        .filter(|pasta| pasta.join("desinstalar.exe").is_file())
+        .map(|pasta| pasta.join("SEELE.exe"));
+    #[cfg(not(windows))]
+    let instalado: Option<std::path::PathBuf> = None;
+    firewall::na_tela(&entrada, &eu, instalado.as_deref())
+}
 
-        let eu = std::env::current_exe().ok()?;
+/// A pasta da instalação, como o instalador a registrou (`InstallLocation`).
+#[cfg(windows)]
+fn pasta_instalada() -> Option<std::path::PathBuf> {
+    use std::os::windows::process::CommandExt;
 
-        // **Antes de comparar caminhos: existe regra?**
-        //
-        // A primeira versão disto comparava o executável com o `InstallLocation`
-        // e nada mais — então ela pegava «a regra aponta para outro lugar» e
-        // deixava passar o caso mais comum de todos: **regra nenhuma**. A caixa
-        // que a cria nasce desmarcada no passo 02 do instalador, com o argumento
-        // de que uma porta aberta é decisão; quem não a marcou não tem regra, e
-        // nada nesta tela dizia isso.
-        //
-        // Foi assim que a pergunta chegou: «mas uai, o instalador já não faz
-        // isso? E eu nunca travei meu firewall, ele já era liberado». As duas
-        // metades são verdade e nenhuma delas produz uma regra: o instalador só
-        // faz quando pedem, e o que estava liberado era o `seele-app.exe` do
-        // instalador antigo — o aviso do Windows cria regra para **um arquivo**,
-        // e este programa passou a se chamar `SEELE.exe`.
-        //
-        // Só a existência é lida, e não os campos: a saída do `netsh` é
-        // traduzida — `Programa:` num Windows em português, `Program:` num em
-        // inglês — e um diagnóstico que depende do idioma erra na máquina de
-        // outra pessoa. Existir ou não existir, isso o código de saída responde.
-        let ha_regra = std::process::Command::new("netsh")
-            .args([
-                "advfirewall",
-                "firewall",
-                "show",
-                "rule",
-                "name=SEELE",
-                "dir=in",
-            ])
-            .creation_flags(SEM_CONSOLE)
-            .output()
-            .ok()
-            .is_some_and(|saida| saida.status.success());
-        if !ha_regra {
-            return Some(
-                "não há regra de firewall para o SEELE nesta máquina, então \
-                 conexão de fora não chega — nem de quem está na mesma rede. \
-                 Reinstale marcando a caixa «abrir a porta 8383 UDP» no passo 02."
-                    .to_owned(),
-            );
-        }
-
-        let instalado = std::process::Command::new("reg")
-            .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
-            .creation_flags(SEM_CONSOLE)
-            .output()
-            .ok()
-            .filter(|saida| saida.status.success())
-            .and_then(|saida| {
-                String::from_utf8_lossy(&saida.stdout)
-                    .lines()
-                    .find_map(|linha| linha.split("REG_SZ").nth(1).map(|r| r.trim().to_owned()))
-            })?;
-
-        let pasta = std::path::Path::new(&instalado);
-        if !pasta.is_dir() {
-            return Some(format!(
-                "a regra de firewall aponta para {instalado}, e essa pasta não existe \
-                 mais — então ela não deixa entrar nada. Reinstale o SEELE marcando a \
-                 caixa da porta."
-            ));
-        }
-        if !eu.starts_with(pasta) {
-            return Some(format!(
-                "este SEELE está rodando de {}, e a regra de firewall cobre o que está \
-                 instalado em {instalado}. Conexões de fora não chegam a esta cópia.",
-                eu.display()
-            ));
-        }
-        None
-    }
+    std::process::Command::new("reg")
+        .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
+        .creation_flags(SEM_CONSOLE)
+        .output()
+        .ok()
+        .filter(|saida| saida.status.success())
+        .and_then(|saida| {
+            String::from_utf8_lossy(&saida.stdout)
+                .lines()
+                .find_map(|linha| linha.split("REG_SZ").nth(1).map(|r| r.trim().to_owned()))
+        })
+        .map(std::path::PathBuf::from)
 }
 
 /// Onde o instalador grava o que se sabe sobre a instalação.
@@ -3892,14 +3832,18 @@ const CHAVE_DA_INSTALACAO: &str = r"HKLM\Software\Microsoft\Windows\CurrentVersi
 /// cópia que a instalação deixa na pasta é ele mesmo. Então o app o chama, o
 /// Windows pergunta uma vez, e a regra nasce.
 ///
-/// # Por que a pergunta mudou de lugar
+/// # Por que também aqui, e não só no instalador
 ///
-/// Ela era uma caixa no passo 02 do instalador, desmarcada, perguntando «quer
-/// abrir a porta?» a quem ainda não sabia se ia hospedar. Perguntado assim:
-/// «mas uai, o instalador já não faz isso?». Faz quando pedem, e quem instala um
-/// app de conversa não está decidindo sobre firewall naquele instante.
+/// O instalador cria a regra por padrão: a caixa «Liberar o SEELE no firewall
+/// do Windows» nasce marcada, e a atualização silenciosa guarda a escolha. Este
+/// caminho é para o que sobra dele — quem a desmarcou, a regra que alguém
+/// apagou, a que uma política não deixou nascer. A linha da sala e a tela de
+/// hospedar mostram o botão quando o leitor ([`firewall`]) diz que de fora não
+/// se chega.
 ///
-/// Quem aperta HOSPEDAR AQUI **está**. É aqui que a pergunta cabe.
+/// Ele libera o SEELE **instalado**, que é o caminho que o instalador conhece:
+/// uma cópia portátil não ganha nada com ele, e um bloqueio criado pelo aviso
+/// do Windows também não sai por aqui.
 ///
 /// # Errors
 ///
@@ -3916,20 +3860,9 @@ fn abrir_a_porta_no_firewall() -> Result<(), String> {
     {
         use std::os::windows::process::CommandExt;
 
-        let instalado = std::process::Command::new("reg")
-            .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
-            .creation_flags(SEM_CONSOLE)
-            .output()
-            .ok()
-            .filter(|saida| saida.status.success())
-            .and_then(|saida| {
-                String::from_utf8_lossy(&saida.stdout)
-                    .lines()
-                    .find_map(|linha| linha.split("REG_SZ").nth(1).map(|r| r.trim().to_owned()))
-            })
-            .ok_or_else(|| {
-                "não achei a instalação do SEELE no registro desta máquina.".to_owned()
-            })?;
+        let instalado = pasta_instalada().ok_or_else(|| {
+            "não achei a instalação do SEELE no registro desta máquina.".to_owned()
+        })?;
 
         let ferramenta = std::path::Path::new(&instalado).join("desinstalar.exe");
         if !ferramenta.is_file() {

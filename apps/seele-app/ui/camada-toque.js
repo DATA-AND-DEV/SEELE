@@ -41,6 +41,31 @@ let atendendo = false;
 /** Uma frase de recusa sob o texto da faixa, ou `null`. */
 let notaDoToque = null;
 
+/**
+ * **A faixa empurra a tela, e não a cobre** (medido pela F3, 15/10; a regra
+ * mora em `camada-toque.css`). Acesa, ela diz à raiz até onde vai
+ * (`--toque-ocupa`), e a tela à vista abre esse espaço no topo; apagada, a tela
+ * volta ao lugar.
+ *
+ * Medida aqui, com `getBoundingClientRect`, a cada vez que a faixa acende ou
+ * apaga: o `ResizeObserver` de baixo só avisa no passo de desenho, que o
+ * navegador sem cabeça dos roteiros não roda. Ele fica para quando a faixa muda
+ * de altura sozinha, com a janela que estreita e quebra o texto em duas linhas.
+ */
+function abrirEspacoParaAFaixa() {
+  const raiz = document.documentElement;
+  const faixa = $("toque");
+  if (faixa.hidden) {
+    raiz.removeAttribute("data-toque-aceso");
+    raiz.style.removeProperty("--toque-ocupa");
+    return;
+  }
+  raiz.style.setProperty("--toque-ocupa", `${Math.ceil(faixa.getBoundingClientRect().bottom)}px`);
+  raiz.setAttribute("data-toque-aceso", "");
+}
+
+new ResizeObserver(() => abrirEspacoParaAFaixa()).observe($("toque"));
+
 /** Quem a faixa mostra: o primeiro que ainda toca. */
 function quemNaFaixa() {
   return tocandoNaFaixa.values().next().value ?? null;
@@ -83,6 +108,7 @@ async function desenharToque() {
   } else {
     notaDoToque = null;
     faixa.hidden = true;
+    abrirEspacoParaAFaixa();
     return;
   }
 
@@ -99,6 +125,7 @@ async function desenharToque() {
   // escondida.
   if (faixa.hidden) anunciar(`${frase}.`);
   faixa.hidden = false;
+  abrirEspacoParaAFaixa();
 }
 
 /** Espera um `conectar` em voo terminar, até dez segundos. */

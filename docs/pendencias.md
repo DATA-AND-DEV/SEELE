@@ -9897,3 +9897,91 @@ reconciliadas pelo id da pessoa, e um `PersonState` mexendo só na linha dela; o
 (`arvore-ax.py`, `3436980d`), com 10, 50 e 100 pessoas em toda consulta. Ao prová-la como guarda, a F3 viu a
 perda também com 10: numa de 39 consultas a lista inteira sumiu (0 nomes). É rara com poucas pessoas, mas existe,
 porque a lista é trocada de uma vez.
+
+**A (b) entrou** (15/10, lote AX da F5: `c5691d78` e `d44f7c1f`, só no `tela-sessao.js`, com a bancada
+`linhas-pelo-id.cjs` no CI em `22a66313`, `bede50d9` e `c0d26666`). A lista de pessoas é reconciliada pelo id da
+pessoa (`reconciliarALista`): a linha que já existe fica com o mesmo nó, quem entra numa sala leva o nó para o grupo
+dela, um `PersonState` só muda a linha daquela pessoa, e os cartões e as contribuições de MOD entram por um marcador
+e não saem do documento. Com só a lista reconciliada, a sonda achou a lista inteira em toda consulta com 100
+pessoas e o ENTRAR NA SALA fora da árvore em 3 de 37: ele mora na coluna de salas, que também era repovoada a cada
+quadro, e ela passou pela mesma reconciliação. **Pela sonda da F3** (`arvore-ax.py` do `3436980d`), numa pasta só
+da F5, o app vermelho e o verde do mesmo commit-base (`1bb6450a`, e ele com o `tela-sessao.js` do `d44f7c1f`),
+intercalados, em 15/10: o verde assentou nas cinco rodadas — com 10, 35 de 35; com 50, 37 de 37 duas vezes; com
+100, 36 de 36 duas vezes, sempre com o ENTRAR NA SALA e o aperto entrando —, e o vermelho reprovou com 50 (35 de 37,
+uma consulta com 0 nomes) e com 100 (29 e 35 de 36), e assentou com 10 nas duas vezes. Segundo as notas da
+campanha de 11/10, cujos brutos se perderam, o vermelho foi bem mais severo (36 de 39, 19 de 38 e 0 de 38), e o
+verde só com a lista deu 38 de 38, 38 de 38 e 37 de 37; por que o vermelho de 15/10 foi mais brando, não se mediu.
+
+**A rodada 1 do lote** (15/10, depois da revisão): o `<details>` que a pessoa abre na lista — o «⋯» de uma linha
+apresentada por MOD, onde mora o volume, e o SINAL E ESTADO — continua aberto no tique, e o que a linha pede vale
+quando muda (`64858020`); o detalhe nativo de quem começa a falar não é refeito, e nenhum nó de MOD sai do documento
+(`607b85f5`); uma reordenação move só a linha que mudou de lugar, e o foco no meio da lista fica (`ee24b4f3`); e a
+bancada guarda cada um dos oito pontos de montagem de MOD (`68c4544d`). Pela mesma sonda, na ponta da rodada
+(`ec8ec2ce`): com 10, 38 de 38 duas vezes; com 50, 37 de 37 duas vezes; com 100, 37 de 37 duas vezes — sempre com o
+ENTRAR NA SALA e o aperto entrando. O relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-ax-report.md`.
+
+**Seguem abertos da (b):**
+- **o celular**: o ENTRAR e o ENTRAR MUDO da coluna de salas seguem recriados a cada quadro pelo
+  `celular-servidor.js`, que adapta a coluna depois de cada desenho contando com ela refeita, e a reconciliação tira o
+  que ele pôs para ele pôr de novo. A (b) **não** está resolvida no celular. Dona: a F8;
+- **a lista de canais** perde o foco do teclado a cada tique: é a pendência 64;
+- **o `roster-mods`, o contador do cabeçalho (`pessoas-conta`), a conversa e a telemetria** seguem repovoados a
+  cada retrato, pelo mesmo mecanismo, sem dona por ora.
+
+## 64 · A lista de canais perde o foco do teclado a cada tique
+
+**Aberta em 2026-10-15**, achada pela revisão do lote AX (pendência 63, (b)) e medida pela F5. **Dona: a F5, na
+0.16, num lote à parte depois do merge do AX.**
+
+**O mecanismo, pelo código:** `desenharCanais` (`tela-sessao.js`) monta as linhas da coluna de canais a cada
+retrato e as põe com `repovoar($("lista-linhas"), …)`, que troca todos os filhos. O retrato vem a cada tique de
+500 ms da sessão (`setInterval(… atualizar(), 500)`) e a cada quadro com evento (`atualizarNoProximoQuadro`). O
+botão de um canal que tem o foco do teclado sai do documento, e o foco vai para o `<body>`: quem navega pela
+coluna pelo teclado, ou pelo leitor de tela, é tirado dela em até meio segundo, com a sessão parada. A lista de
+pessoas e a coluna de salas, na mesma gaveta, já são reconciliadas (`reconciliarALista`, pendência 63); a de canais
+não, e a revisão a deixou de fora do lote por ser outra lista. **Medido em 15/10** no Chromium da bancada, na ponta
+do lote AX (`ec8ec2ce`), com o HTML, o CSS e o registro reais e só a ponte simulada: com o foco no botão do
+segundo canal, depois de um tique com o **mesmo** retrato, o botão saiu do documento e o foco estava no `BODY`; com
+o foco de novo no segundo canal e um retrato em que **outro** canal muda de nome, o mesmo — o botão fora do
+documento, o foco no `BODY`. Nos dois, o retrato desenhado mudou (o tique redesenhou).
+
+**A direção:**
+- a mesma reconciliação pelo id: a chave da linha é o id do canal, como a da sala na coluna de salas;
+- um caso na `linhas-pelo-id.cjs` em que o foco do teclado num canal sobrevive a um retrato igual e a um retrato
+  em que outro canal muda;
+- uma reversão que reprova o caso.
+
+## 65 · No Windows, a sala e o servidor guardado sobem na porta de outro SEELE, só em IPv4, calados
+
+**Aberta em 2026-10-15**, medida pela orquestradora no PC de testes quando o
+`sala::` rodou pela primeira vez no Windows: o `a_porta_ocupada_e_dita`
+reprovou («left: None, right: Some(PortaOcupada)»). **Existe na v0.15.1
+publicada**: o recuo do `alcance::abrir_escuta` é de antes dela. A dona é a F7.
+
+**O mecanismo (medido no PC, com o .NET e com uma sonda no próprio
+`abrir_escuta`):** no Windows, a mesma família na mesma porta é recusada, e uma
+família diferente liga — inclusive a pilha dupla ao lado de um só IPv4. O recuo
+tratava o `AddrInUse` do socket duplo como «sem pilha dupla nesta máquina», e o
+`0.0.0.0` ligava, porque um socket duplo de lá não reserva o IPv4 da porta. Com
+outra escuta do SEELE na porta, a segunda ligou `SoIpv4`; com um programa só
+IPv4, ligou `Dupla`; com o `[::]` do `std`, que no Windows é só IPv6, ligou
+`Dupla`. No macOS e no Linux o socket duplo segura as duas famílias, e o recuo é
+recusado. A irmã do lado do cliente é a 60.
+
+**O custo:** duas cópias abertas — a instalada e a portátil, o caso
+«outra cópia» da D-sala-1 — sobem as duas a sala na 8385, a segunda calada e só
+em IPv4, dividindo a porta. O registro diz uma coisa falsa, e a tela diz «no
+ar»: é ligação perdida sem aviso. Com a D-sala-2 a sala sobe sozinha ao abrir o
+app, e isso fica bem mais provável. O mesmo vale para hospedar na 8383. Não é de
+segurança: quem liga confere a impressão.
+
+**Na 0.16:** consertado pela F7 (`c8bb813c`). O recuo para IPv4 só acontece
+quando a pilha dupla não existe; um `AddrInUse` volta como está, e o app o lê
+como porta ocupada. Antes do socket duplo, uma sonda em `0.0.0.0` e outra em
+`[::]` (só IPv6 no Windows) ligam e soltam a porta: o ocupante que o socket
+duplo não vê, a sonda vê. O `SO_EXCLUSIVEADDRUSE` faria isso no socket, mas o
+`socket2` 0.6.5 não o expõe, e a folha de lints proíbe o `unsafe`. Os testes
+põem três ocupantes — outra escuta, um só IPv4, um só IPv6 — no `seele-server` e
+na sala, e no macOS o do só IPv6 reprovava antes. A prova do Windows, vermelho
+antes e verde depois, é a do PC de testes.
+**Na linha 0.15:** fica como está. A 0.15.2 já está pronta para a tag.

@@ -597,7 +597,7 @@ function mostrarAlcance(
   alcance,
   portaRecusada,
   encontroRecusado,
-  firewallNaoCobre,
+  firewall,
   portaNaoCanonica,
 ) {
   const onde = $("convite-alcance");
@@ -647,45 +647,47 @@ function mostrarAlcance(
   // quem estava na mesma LAN batia três vezes sem entrar. A escada dizia até
   // onde o link ia; nada dizia que a porta estava fechada atrás dela. O relato
   // foi «teste em LAN não funciona».
-  if (firewallNaoCobre) {
+  //
+  // Desde a D-sala-1 (15/10) ela vem do leitor do Rust com o motivo: a frase diz
+  // o que fazer, e o botão só aparece quando resolve (`abrir_resolve`).
+  if (firewall) {
     const parede = document.createElement("span");
     parede.className = "convite-alcance-parede";
-    parede.textContent = firewallNaoCobre;
+    parede.textContent = firewall.frase;
     onde.append(parede);
 
-    // **E o botão que resolve, em vez da frase que manda reinstalar.**
+    // **E o botão que resolve — só quando resolve.**
     //
-    // A pergunta estava no lugar errado: uma caixa no passo 02 do instalador,
-    // desmarcada, perguntando «quer abrir a porta?» a quem ainda não sabia se ia
-    // hospedar. Perguntado assim: «mas uai, o instalador já não faz isso?». Faz
-    // quando pedem — e quem instala um app de conversa não está decidindo sobre
-    // firewall naquele instante.
-    //
-    // Quem acabou de apertar HOSPEDAR AQUI **está**, e é aqui que a decisão
-    // cabe. O Windows pergunta uma vez, e a regra nasce.
-    const abrir = document.createElement("button");
-    abrir.type = "button";
-    abrir.className = "convite-alcance-conserto";
-    abrir.textContent = "ABRIR A PORTA AGORA";
-    abrir.title = "o Windows vai pedir permissão de administrador uma vez";
-    abrir.addEventListener("click", async () => {
-      abrir.disabled = true;
-      abrir.textContent = "PEDINDO AO WINDOWS…";
-      try {
-        await invoke("abrir_a_porta_no_firewall");
-        // Relido e não presumido: quem responde se a regra existe é o Windows,
-        // e o botão que se declara vitorioso é o mesmo defeito do atualizador
-        // que fechava o app sem saber se instalou.
-        parede.textContent =
-          "Regra criada. Mande o link de novo — agora as conexões chegam.";
-        abrir.remove();
-      } catch (falha) {
-        abrir.disabled = false;
-        abrir.textContent = "ABRIR A PORTA AGORA";
-        parede.textContent = fraseDeErro(falha);
-      }
-    });
-    onde.append(abrir);
+    // O instalador cria a regra por padrão (a caixa nasce marcada); este botão
+    // é para o que sobra dele: quem a desmarcou, a regra que alguém apagou. Ele
+    // libera o SEELE **instalado**, e por isso não aparece na cópia portátil
+    // nem no bloqueio do Windows, onde não muda nada — a frase diz o que fazer
+    // no lugar dele. O Windows pergunta uma vez, e a regra nasce.
+    if (firewall.abrir_resolve) {
+      const abrir = document.createElement("button");
+      abrir.type = "button";
+      abrir.className = "convite-alcance-conserto";
+      abrir.textContent = "ABRIR A PORTA AGORA";
+      abrir.title = "o Windows vai pedir permissão de administrador uma vez";
+      abrir.addEventListener("click", async () => {
+        abrir.disabled = true;
+        abrir.textContent = "PEDINDO AO WINDOWS…";
+        try {
+          await invoke("abrir_a_porta_no_firewall");
+          // Relido e não presumido: quem responde se a regra existe é o Windows,
+          // e o botão que se declara vitorioso é o mesmo defeito do atualizador
+          // que fechava o app sem saber se instalou.
+          parede.textContent =
+            "Regra criada. Mande o link de novo — agora as conexões chegam.";
+          abrir.remove();
+        } catch (falha) {
+          abrir.disabled = false;
+          abrir.textContent = "ABRIR A PORTA AGORA";
+          parede.textContent = fraseDeErro(falha);
+        }
+      });
+      onde.append(abrir);
+    }
   }
 
   for (const motivo of [portaRecusada, encontroRecusado, portaNaoCanonica]) {
@@ -734,7 +736,7 @@ async function hospedar() {
       anfitriao.alcance,
       anfitriao.porta_recusada,
       anfitriao.encontro_recusado,
-      anfitriao.firewall_nao_cobre,
+      anfitriao.firewall,
       anfitriao.porta_nao_canonica,
     );
 

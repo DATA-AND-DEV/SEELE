@@ -1210,6 +1210,90 @@ prazo_dos_roteiros() {
         "$(tail -n 20 "$TEMPORARIO/bateria.log")"
 }
 
+# As bancadas de navegador e a do celular, uma etapa da bateria (D-api-8).
+#
+# As de `apps/seele-app/bancada/` exercitam o HTML e os scripts de verdade num
+# Chromium do Playwright, e muitas promessas da API 6 (as camadas, a capa, o
+# núcleo, as regiões do produto) só têm prova nelas. Até a D-api-8 nenhuma
+# rodava aqui: o `ci.yml` só roda quando alguém o dispara, e este é o portão
+# das versões. A do celular (`tools/bancada-do-celular.py`, da F8) desenha a
+# casca no Chromium e no WebKit, e não rodava em lugar nenhum.
+#
+# **A lista é a dos jobs `bancadas` e `bancadas-de-mod` do `ci.yml`, com o mesmo
+# comando de cada `run:`**, e o teste
+# `toda_bancada_de_navegador_e_a_do_celular_rodam_no_ci_e_no_publicar`
+# (`xtask/src/check_runtime.rs`) exige que as duas sejam a mesma. Depois do
+# `cargo xtask web`: três delas leem o `.wasm` do motor que ele compila.
+#
+# **Todas rodam, mesmo depois de uma vermelha**, como os passos do job, e o fim
+# diz quais reprovaram. Cada uma é dita antes de rodar (`bancada: rodando …`),
+# para o prazo dizer qual travou (`prazo_das_bancadas`).
+#
+# Precisa do Playwright de Node (o `npm install --no-save playwright` do job, ou
+# `PLAYWRIGHT` apontando um), com o Chromium, e do Playwright de Python com o
+# Chromium, o WebKit e o Pillow para a do celular.
+bancadas_de_navegador() {
+    etapa_da_bateria --prazo prazo_das_bancadas \
+        "uma bancada de navegador reprovou, ou falta nesta máquina o Playwright, o Chromium, o WebKit ou o Pillow." \
+        "Leia o fim da saída: ele diz quais reprovaram. Sem o Playwright de Node: «npm install --no-save playwright && npx playwright install chromium», ou PLAYWRIGHT=<pasta do pacote>. Para a do celular: «python3 -m pip install playwright pillow && python3 -m playwright install chromium webkit»." \
+        todas_as_bancadas_de_navegador
+}
+
+# Roda uma bancada e anota se ela reprovou, sem parar as seguintes.
+uma_bancada() {
+    printf 'bancada: rodando %s\n' "$*"
+    BANCADAS_RODADAS=$((BANCADAS_RODADAS + 1))
+    if ! "$@"; then
+        BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS $2"
+    fi
+}
+
+# A lista, e o veredito no fim. Roda a partir de `RAIZ` (`etapa_da_bateria`).
+todas_as_bancadas_de_navegador() {
+    BANCADAS_RODADAS=0
+    BANCADAS_VERMELHAS=""
+    uma_bancada node apps/seele-app/bancada/ponte-sem-gesto.cjs
+    uma_bancada node apps/seele-app/bancada/compartilhar-por-identidade.cjs
+    uma_bancada node apps/seele-app/bancada/conversa-com-estado.cjs
+    uma_bancada node apps/seele-app/bancada/qualidade-da-voz.cjs
+    uma_bancada node apps/seele-app/bancada/avatares-do-mod.cjs
+    uma_bancada node apps/seele-app/bancada/diagnostico-de-mods.cjs
+    uma_bancada node apps/seele-app/bancada/ajustes-v013.cjs
+    uma_bancada node apps/seele-app/bancada/escolha-de-versao-de-mod.cjs
+    uma_bancada node apps/seele-app/bancada/gif-na-conversa.cjs
+    uma_bancada node apps/seele-app/bancada/tema-claro-legivel.cjs
+    uma_bancada node apps/seele-app/bancada/regioes-do-produto.cjs
+    uma_bancada node apps/seele-app/bancada/capa.cjs
+    uma_bancada node apps/seele-app/bancada/camadas.cjs
+    uma_bancada node apps/seele-app/bancada/nucleo.cjs
+    uma_bancada node apps/seele-app/bancada/tema-do-servidor.cjs
+    uma_bancada node apps/seele-app/bancada/gestao-do-tema.cjs
+    uma_bancada node apps/seele-app/bancada/palco-da-chamada.cjs
+    uma_bancada node apps/seele-app/bancada/um-redesenho-por-quadro.cjs
+    uma_bancada node apps/seele-app/bancada/linhas-pelo-id.cjs
+    uma_bancada node apps/seele-app/bancada/executor-no-navegador.cjs target/wasm32-wasip1/release/seele_motor_web.wasm
+    uma_bancada node apps/seele-app/bancada/voz-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
+    uma_bancada node apps/seele-app/bancada/identidade-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
+    uma_bancada python3 tools/bancada-do-celular.py "$TEMPORARIO/bancada-do-celular"
+    if [ -n "$BANCADAS_VERMELHAS" ]; then
+        printf 'bancadas que reprovaram:%s\n' "$BANCADAS_VERMELHAS"
+        return 1
+    fi
+    printf 'bancadas de navegador: as %s passaram\n' "$BANCADAS_RODADAS"
+}
+
+# O prazo vencido da etapa das bancadas: diz qual travou, pela última dita.
+prazo_das_bancadas() {
+    pb_travada=$(LC_ALL=C sed -n 's/^bancada: rodando //p' "$TEMPORARIO/bateria.log" | tail -n 1)
+    morrer "as bancadas de navegador passaram de $PRAZO_DA_ETAPA_S segundos e foram interrompidas." \
+        "A que travou: ${pb_travada:-nenhuma; a etapa travou antes de dizer a primeira}." \
+        "Rode-a sozinha, a partir da raiz do repositório:" \
+        "  ${pb_travada:-<bancada>}" \
+        "" \
+        "As últimas linhas antes de ela parar:" \
+        "$(tail -n 20 "$TEMPORARIO/bateria.log")"
+}
+
 bateria() {
     if [ "${SEM_BATERIA:-nao}" = "sim" ]; then
         aviso "bateria pulada por --sem-bateria: este pacote não foi testado."
@@ -1299,6 +1383,7 @@ bateria() {
     etapa_da_bateria "os crates do celular reprovaram dentro do .wasm, ou falta nesta máquina um alvo wasm, o Node ou o hash fixado do wasi-sdk." \
         "Rode «cargo xtask web» e leia: ele diz o passo que caiu, ou o que falta e como resolver." \
         cargo xtask web
+    bancadas_de_navegador
     # **As conferências de regra que o `validar` do `release.yml` roda, e esta
     # bateria não rodava** (m3 da revisão final do Plano 1). O `check-api` é o
     # único guarda de que todo nome, momento e evento que uma `api/vN.json`
