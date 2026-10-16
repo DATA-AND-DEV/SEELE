@@ -1755,9 +1755,12 @@ function itemDeMensagem(mensagem, indice, segue) {
     ).escolhida
     : null;
   const desenhoDoMod = substituta ? montarContribuicao(substituta, alvoDaMensagem) : null;
+  // Os nós do MOD entram pelo marcador (`noDeMod`): são os mesmos de um desenho
+  // para o outro, e a conversa reconciliada (`desenharMensagens`) os põe onde o
+  // marcador está, sem tirá-los do documento (lote R63).
   if (desenhoDoMod) {
     const miolo = elemento("span", "mensagem-miolo");
-    miolo.append(desenhoDoMod);
+    miolo.append(noDeMod(desenhoDoMod));
     conteudo.append(miolo);
   } else {
     const corpo = elemento("span", "corpo");
@@ -1765,7 +1768,7 @@ function itemDeMensagem(mensagem, indice, segue) {
     corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
     conteudo.append(corpo);
   }
-  if (alvoDaMensagem) conteudo.append(...conteudoDasContribuicoes("conversa.mensagem", alvoDaMensagem));
+  if (alvoDaMensagem) conteudo.append(...nosDeMod(conteudoDasContribuicoes("conversa.mensagem", alvoDaMensagem)));
   // O arquivo, embaixo do texto. ADR 0027: o texto sobrevive ao arquivo, e é
   // por isso que este bloco continua aparecendo depois de os bytes irem
   // embora — com o nome, o tamanho, e a frase que diz o que houve.
@@ -1881,6 +1884,19 @@ function seloDoEnvio(mensagem) {
  * `data-mensagem`. `desenharBusca` alcançava a mensagem pelo lugar dela entre
  * os filhos, e o primeiro divisor desalinharia essa conta em um, calado, para
  * todas as mensagens do dia seguinte.
+ *
+ * **Reconciliada pelo id da mensagem, e não repovoada** (pendência 63; lote
+ * R63 da F5). A lista era refeita inteira quando chegava mensagem, e também
+ * quando alguém chegava ao servidor ou um retrato mudava
+ * (`sincronizarRetratos`), sem nada mudar na conversa: o foco no link ou no
+ * REMOVER caía no `<body>`, a seleção se desfazia, e o leitor de tela perdia o
+ * nó (433 de 434 ids AX trocados, medido em 16/10). Agora é o caminho da lista
+ * de pessoas (`reconciliarALista`): cada mensagem tem a chave do id que o
+ * servidor deu — ou, numa pendente, a da máquina —, e cada divisor a do dia; a
+ * mensagem que chega entra, a que sai sai, e as outras ficam com o mesmo nó,
+ * só com o que mudou nelas. O REMOVER e o link continuam agindo com o dado de
+ * agora: os ouvintes são delegados na lista e leem o `data-*` que o
+ * `vestirComo` reescreve, e `mensagens`.
  */
 function desenharMensagens() {
   const lista = $("lista-mensagens");
@@ -1890,8 +1906,8 @@ function desenharMensagens() {
   // que chegue com uma delas aberta cai aqui com a lista em `display: none` —
   // onde `scrollHeight`, `scrollTop` e `clientHeight` valem todos 0. A conta
   // abaixo vira `0 - 0 - 0 < 32`, isto é, "estava no fim", para justamente
-  // quem tinha subido para ler. O `repovoar` seguinte ainda troca todos os
-  // filhos, o que zera a rolagem de qualquer forma.
+  // quem tinha subido para ler. (E o `repovoar` de antes da reconciliação
+  // trocava todos os filhos, o que zerava a rolagem de qualquer forma.)
   //
   // A lista é redesenhada ao voltar — `fecharChamada` e `fecharServer` pedem
   // isso —, então sair daqui não deixa nada velho na tela.
@@ -1914,11 +1930,20 @@ function desenharMensagens() {
   const noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 32;
 
   const itens = [];
+  // O mesmo dia pode abrir dois divisores — a hora é do servidor, e a ordem é
+  // a do id —, e cada um tem a chave contada, para os dois não disputarem um nó.
+  const dias = new Map();
   let anterior = null;
   mensagens.forEach((mensagem, indice) => {
     const dia = diaDaMensagem(mensagem.at_seconds);
     const trocouDeDia = dia !== null && dia !== diaDaMensagem(anterior?.at_seconds);
-    if (trocouDeDia) itens.push(divisorDeDia(mensagem.at_seconds));
+    if (trocouDeDia) {
+      const divisor = divisorDeDia(mensagem.at_seconds);
+      const vez = dias.get(dia) ?? 0;
+      dias.set(dia, vez + 1);
+      chaveNaLista.set(divisor, `dia:${dia}#${vez}`);
+      itens.push(divisor);
+    }
     // Sem hora dos dois lados não há como saber se a rajada é a mesma, e o
     // desconhecido abre cabeçalho: repetir o nome custa uma linha, e engolir
     // o nome de quem falou custa a autoria.
@@ -1933,11 +1958,18 @@ function desenharMensagens() {
       Boolean(anterior.at_seconds) &&
       Boolean(mensagem.at_seconds) &&
       mensagem.at_seconds - anterior.at_seconds <= JUNTA_ATE_SEGUNDOS;
-    itens.push(itemDeMensagem(mensagem, indice, segue));
+    const item = itemDeMensagem(mensagem, indice, segue);
+    // O id do servidor, ou — numa pendente, que tem id zero — a chave desta
+    // máquina. A pendente que é gravada troca de chave, e só ela ganha nó novo.
+    const chave = mensagem.id
+      ? `mensagem:${mensagem.id}`
+      : mensagem.client_message_id ? `pendente:${mensagem.client_message_id}` : null;
+    if (chave !== null) chaveNaLista.set(item, chave);
+    itens.push(item);
     anterior = mensagem;
   });
 
-  repovoar(lista, itens);
+  reconciliarALista(lista, itens, ":scope > li");
   if (noFim) lista.scrollTop = lista.scrollHeight;
 }
 
@@ -2195,8 +2227,10 @@ async function mostrarAPrevia(evento) {
  * Abre o endereço de um link de mensagem, fora desta janela.
  *
  * Ouvinte único na lista, e não um por link: uma conversa longa tem centenas
- * de mensagens, e redesenhá-la é trocar todos os filhos — ouvintes por
- * elemento seriam criados e jogados fora a cada desenho.
+ * de mensagens, e ouvintes por elemento seriam criados a cada desenho. E, com
+ * a conversa reconciliada pelo id (lote R63), o link é reaproveitado entre os
+ * desenhos: um ouvinte nele guardaria o endereço do desenho em que nasceu. Este
+ * lê o `data-url` na hora do clique, e o `vestirComo` o reescreve.
  */
 function abrirLinkDaMensagem(evento) {
   const link = evento.target.closest?.("[data-url]");
