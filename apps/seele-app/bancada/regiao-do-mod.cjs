@@ -150,6 +150,10 @@ class Elemento {
     this.inserir(no, antes);
     return no;
   }
+  replaceChildren(...nos) {
+    for (const filho of [...this.filhos]) this.tirar(filho);
+    this.append(...nos);
+  }
   inserir(no, antes) {
     if (no.pai) no.pai.tirar(no);
     const i = antes ? this.filhos.indexOf(antes) : -1;
@@ -524,7 +528,7 @@ function bancada(opcoes = {}) {
   // propriedades do contexto, e por isso saem por esta linha em vez de por uma
   // leitura de `contexto.RegiaoDeMod`, que devolveria `undefined`.
   vm.runInContext(
-    `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO, PERFIS_DE_RENDER,
+    `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO, FORMAS_DA_REGIAO, PERFIS_DE_RENDER,
       SILENCIO: typeof SILENCIO_ANTES_DE_SUSPENDER_MS === "number" ? SILENCIO_ANTES_DE_SUSPENDER_MS : undefined,
       encerrarOSomDosMods: typeof encerrarOSomDosMods === "function" ? encerrarOSomDosMods : undefined,
       tocadoresDePe: typeof tocadoresDeSomDeMod === "object" ? () => tocadoresDeSomDeMod.size : undefined };`,
@@ -540,6 +544,8 @@ function bancada(opcoes = {}) {
     LIMITES: contexto.api.LIMITES_DA_REGIAO,
     CARTAO: contexto.api.LIMITES_DO_CARTAO,
     FORMAS_DO_CARTAO: contexto.api.FORMAS_DO_CARTAO,
+    /** A tabela do renderer: o espelho dela contra o `v6.json` é `cadaFormaDoV6MontaOQuePromete`. */
+    FORMAS_DA_REGIAO: contexto.api.FORMAS_DA_REGIAO,
     PERFIS: contexto.api.PERFIS_DE_RENDER,
     /** Quanto o áudio calado espera antes de ser suspenso — ver `SILENCIO_ANTES_DE_SUSPENDER_MS`. */
     SILENCIO: contexto.api.SILENCIO,
@@ -1165,6 +1171,288 @@ async function oEstadoEscolhidoTemQuemOEscreva() {
   caixa.disparar("change");
   confere(caso, marca.dataset.escolhido === undefined, "desligar a marca não tirou o escolhido");
   regiao.soltar();
+}
+
+// ---------------------------------------------------------------------------
+// 2a. As formas e as figuras do `v6.json`: cada uma monta o que promete.
+// ---------------------------------------------------------------------------
+
+/**
+ * O contrato publicado. As listas `formas` e `figuras` saem dele, e não desta
+ * bancada: uma forma que entrar no `v6.json` sem prova aqui reprova.
+ */
+const V6 = JSON.parse(fs.readFileSync(path.join(raiz, "../../api/v6.json"), "utf8"));
+
+/**
+ * O que cada forma do `v6.json` monta, escrito aqui, à parte da tabela do
+ * renderer (a auditoria do `v6.json`, tabela 4: 16 formas e a figura `linha`
+ * estavam SEM PROVA, e tirar uma delas de `FORMAS_DA_REGIAO` passava).
+ *
+ * **Escrito, e não lido de `FORMAS_DA_REGIAO`:** uma prova que copiasse a
+ * tabela concordaria com qualquer mudança dela, inclusive a de tirar uma forma.
+ *
+ * Cada entrada declara um nó e diz a etiqueta que ele vira. `achar` acha o
+ * elemento da forma: o da raiz, salvo em `item` e `aba`, que moram dentro de
+ * outra. `faz`, nas formas que nenhuma outra prova exercita, confere o que ela
+ * promete além de existir, e devolve o que faltou.
+ */
+const O_QUE_CADA_FORMA_MONTA = {
+  titulo: { no: { forma: "titulo", dentro: "Mapa" }, tag: "H3", texto: "Mapa" },
+  texto: { no: { forma: "texto", dentro: "um texto" }, tag: "P", texto: "um texto" },
+  linha: {
+    no: { forma: "linha", dentro: [{ forma: "texto", dentro: "a" }, { forma: "texto", dentro: "b" }] },
+    tag: "DIV",
+    faz: (elem) => (elem.children.map((f) => f.tagName).join() === "P,P" ? "" : "a linha não guardou os dois textos"),
+  },
+  lista: {
+    no: { forma: "lista", dentro: [{ forma: "item", dentro: "um" }, { forma: "item", dentro: "dois" }] },
+    tag: "UL",
+    faz: (elem) => (elem.children.map((f) => f.tagName).join() === "LI,LI" ? "" : "a lista não tem os dois itens"),
+  },
+  item: {
+    no: { forma: "lista", dentro: [{ forma: "item", dentro: "um" }] },
+    achar: (raiz) => raiz.children[0]?.children[0],
+    tag: "LI",
+    texto: "um",
+  },
+  campo: { no: { forma: "campo", chave: "nome", rotulo: "Nome", valor: "Lia" }, tag: "LABEL" },
+  escolha: {
+    no: { forma: "escolha", chave: "cor", rotulo: "Cor", opcoes: [{ valor: "a", dentro: "A" }] },
+    tag: "LABEL",
+    faz: (elem) => (acharTag(elem, "select") ? "" : "a escolha não tem select"),
+  },
+  botao: { no: { forma: "botao", chave: "ok", dentro: "OK" }, tag: "BUTTON" },
+  arquivo: { no: { forma: "arquivo", chave: "foto", rotulo: "Foto" }, tag: "BUTTON" },
+  tela: { no: { forma: "tela", chave: "mapa", largura: 10, altura: 10 }, tag: "CANVAS" },
+  midia: { no: { forma: "midia", chave: "faixa" }, tag: "FIGURE" },
+  caixa: { no: { forma: "caixa", dentro: [{ forma: "texto", dentro: "a" }] }, tag: "DIV" },
+  pilha: { no: { forma: "pilha", dentro: [{ forma: "texto", dentro: "a" }] }, tag: "DIV" },
+  grade: { no: { forma: "grade", dentro: [{ forma: "texto", dentro: "a" }] }, tag: "DIV" },
+  rolagem: { no: { forma: "rolagem", dentro: [{ forma: "texto", dentro: "a" }] }, tag: "DIV" },
+  separador: { no: { forma: "separador" }, tag: "HR" },
+  espaco: { no: { forma: "espaco" }, tag: "DIV" },
+  formulario: {
+    no: { forma: "formulario", chave: "perfil", dentro: [{ forma: "campo", chave: "nome", rotulo: "Nome" }] },
+    tag: "FORM",
+  },
+  acoes: { no: { forma: "acoes", dentro: [{ forma: "botao", chave: "ok", dentro: "OK" }] }, tag: "DIV" },
+  abas: {
+    no: {
+      forma: "abas",
+      chave: "abas",
+      valor: "b",
+      dentro: [
+        { forma: "aba", chave: "a", rotulo: "A", dentro: "painel a" },
+        { forma: "aba", chave: "b", rotulo: "B", dentro: "painel b" },
+      ],
+    },
+    tag: "DIV",
+    // **Só o painel ativo**, as tiras com papel de aba, e o clique que fala `aba`.
+    faz: (elem, d) => {
+      const [tiras, palco] = elem.children;
+      if (tiras?.getAttribute("role") !== "tablist") return "as tiras não são um tablist";
+      const tiras2 = tiras.children;
+      if (tiras2.length !== 2 || tiras2.some((t) => t.getAttribute("role") !== "tab")) return "as tiras não são duas abas";
+      if (tiras2[1].getAttribute("aria-selected") !== "true") return "a aba escolhida não está selecionada";
+      if (palco?.children.length !== 1 || textoDe(palco) !== "painel b") return `o palco mostra «${textoDe(palco)}», e não só o painel ativo`;
+      tiras.disparar("click", { target: { closest: () => tiras2[0] } });
+      const dito = d.ditos.at(-1);
+      return dito?.nome === "aba" && dito.chave === "abas" && dito.valor === "a" ? "" : `o clique disse ${JSON.stringify(dito)}`;
+    },
+  },
+  aba: {
+    no: { forma: "abas", chave: "abas", dentro: [{ forma: "aba", chave: "a", rotulo: "A", dentro: "painel a" }] },
+    achar: (raiz) => raiz.children[0]?.children[1]?.children[0],
+    tag: "SECTION",
+    faz: (elem) => (elem.getAttribute("role") === "tabpanel" ? "" : "a aba não é um tabpanel"),
+  },
+  textoLongo: {
+    no: { forma: "textoLongo", chave: "bio", rotulo: "Bio" },
+    tag: "LABEL",
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "textarea");
+      if (!caixa) return "sem textarea";
+      caixa.value = "duas\nlinhas";
+      caixa.disparar("input");
+      const dito = d.ditos.at(-1);
+      return dito?.nome === "campo" && dito.chave === "bio" && dito.valor === "duas\nlinhas" ? "" : `digitar disse ${JSON.stringify(dito)}`;
+    },
+  },
+  numero: {
+    no: { forma: "numero", chave: "pv", rotulo: "PV", valor: 3 },
+    tag: "LABEL",
+    faz: (elem) => (acharTag(elem, "input")?.type === "number" ? "" : "o número não é um input number"),
+  },
+  deslizante: {
+    no: { forma: "deslizante", chave: "volume", rotulo: "Volume", valor: 3, minimo: 0, maximo: 10 },
+    tag: "LABEL",
+    // **O valor legível**: o `output` diz o número, ao montar e ao mexer.
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "input");
+      const lido = acharTag(elem, "output");
+      if (caixa?.type !== "range") return "o deslizante não é um input range";
+      if (lido?.textContent !== "3") return `o valor legível ao montar é «${lido?.textContent}»`;
+      caixa.value = "7";
+      caixa.disparar("input");
+      const dito = d.ditos.at(-1);
+      if (lido.textContent !== "7") return `o valor legível depois de mexer é «${lido.textContent}»`;
+      return dito?.nome === "numero" && dito.chave === "volume" && dito.valor === 7 ? "" : `mexer disse ${JSON.stringify(dito)}`;
+    },
+  },
+  marca: {
+    no: { forma: "marca", chave: "previa", rotulo: "Prévia", valor: false },
+    tag: "LABEL",
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "input");
+      if (caixa?.type !== "checkbox") return "a marca não é um checkbox";
+      if (caixa.getAttribute("role") !== null) return "a marca tem papel de interruptor";
+      caixa.checked = true;
+      caixa.disparar("change");
+      const dito = d.ditos.at(-1);
+      return dito?.nome === "marca" && dito.chave === "previa" && dito.valor === true ? "" : `ligar disse ${JSON.stringify(dito)}`;
+    },
+  },
+  interruptor: {
+    no: { forma: "interruptor", chave: "tema", rotulo: "Tema", valor: true },
+    tag: "LABEL",
+    // O mesmo controle da marca, com o papel de interruptor para quem usa leitor de tela, e o mesmo evento.
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "input");
+      if (caixa?.getAttribute("role") !== "switch") return "o interruptor não tem role=switch";
+      caixa.checked = false;
+      caixa.disparar("change");
+      const dito = d.ditos.at(-1);
+      return dito?.nome === "marca" && dito.chave === "tema" && dito.valor === false ? "" : `desligar disse ${JSON.stringify(dito)}`;
+    },
+  },
+  cor: {
+    no: { forma: "cor", chave: "acento", rotulo: "Acento", valor: "#ff8800" },
+    tag: "LABEL",
+    faz: (elem) => (acharTag(elem, "input")?.type === "color" ? "" : "a cor não tem input color"),
+  },
+  retrato: {
+    no: { forma: "retrato", chave: "foto", inicial: "L" },
+    tag: "SPAN",
+    faz: (elem) => (elem.querySelector(".regiao-de-mod-retrato-inicial") ? "" : "o retrato não tem a inicial"),
+  },
+  distintivo: { no: { forma: "distintivo", dentro: "MESTRE" }, tag: "SPAN", texto: "MESTRE" },
+  link: {
+    no: { forma: "link", chave: "site", endereco: "https://exemplo.org/regras", dentro: "REGRAS" },
+    tag: "BUTTON",
+    // **O endereço fica à vista**, e o clique o abre pelo produto, com a chave.
+    faz: (elem, d) => {
+      if (elem.title !== "https://exemplo.org/regras") return `o endereço à vista é «${elem.title}»`;
+      if (elem.disabled) return "o link com endereço nasceu desligado";
+      elem.disparar("click");
+      const aberto = d.abertos.at(-1);
+      return aberto?.url === "https://exemplo.org/regras" && aberto.chave === "site" ? "" : `o clique abriu ${JSON.stringify(aberto)}`;
+    },
+  },
+};
+
+/** Compara duas listas de nomes como conjuntos, e diz o que sobra de cada lado. */
+function diferencaDeNomes(rotuloA, a, rotuloB, b) {
+  const faltam = [...a].filter((n) => !b.has(n));
+  const sobram = [...b].filter((n) => !a.has(n));
+  return [
+    faltam.length ? `${rotuloA} tem e ${rotuloB} não: ${faltam.join(", ")}` : "",
+    sobram.length ? `${rotuloB} tem e ${rotuloA} não: ${sobram.join(", ")}` : "",
+  ].filter(Boolean).join("; ");
+}
+
+async function cadaFormaDoV6MontaOQuePromete() {
+  const caso = "cada forma do v6 monta o que promete";
+  const doV6 = new Set(V6.formas);
+  // **O espelho, nos dois sentidos**: o contrato contra esta prova, e o
+  // contrato contra o renderer. Uma forma nova no `v6.json` sem prova reprova
+  // aqui; uma forma no renderer que o `v6.json` não promete também.
+  const espelhoDaProva = diferencaDeNomes("o v6.json", doV6, "esta prova", new Set(Object.keys(O_QUE_CADA_FORMA_MONTA)));
+  confere(caso, espelhoDaProva === "", espelhoDaProva);
+  const b0 = bancada();
+  const espelhoDoRenderer = diferencaDeNomes("o v6.json", doV6, "FORMAS_DA_REGIAO", new Set(Object.keys(b0.FORMAS_DA_REGIAO ?? {})));
+  confere(caso, espelhoDoRenderer === "", espelhoDoRenderer);
+
+  for (const forma of V6.formas) {
+    const esperado = O_QUE_CADA_FORMA_MONTA[forma];
+    if (!esperado) continue;
+    const b = bancada();
+    const d = dono(b);
+    d.abertos = [];
+    d.api.abrirEndereco = (url, chave) => d.abertos.push({ url, chave });
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([esperado.no]);
+    const elem = (esperado.achar ?? ((raiz) => raiz.children[0]))(regiao.raiz);
+    const montou = elem?.tagName === esperado.tag;
+    confere(caso, montou, `«${forma}» virou ${elem?.tagName ?? "nada"}, e não ${esperado.tag}`);
+    if (!montou) {
+      regiao.soltar();
+      continue;
+    }
+    confere(caso, elem.dataset.forma === forma, `«${forma}» saiu com data-forma «${elem.dataset.forma}»: a folha não o pinta`);
+    if (esperado.texto !== undefined) {
+      confere(caso, textoDe(elem) === esperado.texto, `«${forma}» diz «${textoDe(elem)}», e não «${esperado.texto}»`);
+    }
+    if (esperado.faz) {
+      const faltou = esperado.faz(elem, d);
+      confere(caso, faltou === "", `«${forma}»: ${faltou}`);
+    }
+    regiao.soltar();
+  }
+
+  // E o link sem endereço não abre nada: nasce desligado.
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([{ forma: "link", chave: "vazio", dentro: "NADA" }]);
+  confere(caso, regiao.raiz.children[0]?.disabled === true, "o link sem endereço nasceu ligado");
+  regiao.soltar();
+}
+
+/**
+ * O que cada figura do `v6.json` pinta, no pincel de mentira: `linha` é a
+ * única que traça sem preencher, e por isso o `traco` é o dela.
+ */
+const O_QUE_CADA_FIGURA_PINTA = {
+  retangulo: {
+    figura: { tipo: "retangulo", x: 1, y: 1, largura: 5, altura: 5, cor: "#112233" },
+    pintou: (p) => p.some((x) => x[0] === "retangulo"),
+  },
+  circulo: { figura: { tipo: "circulo", x: 5, y: 5, raio: 3, cor: "#112233" }, pintou: (p) => p.includes("circulo") },
+  texto: {
+    figura: { tipo: "texto", x: 1, y: 9, dentro: "GOBLIN", corpo: 12 },
+    pintou: (p) => p.some((x) => x[0] === "texto" && x[1] === "GOBLIN"),
+  },
+  linha: { figura: { tipo: "linha", x: 0, y: 0, ate_x: 9, ate_y: 9, cor: "#112233" }, pintou: (p) => p.includes("traco") },
+};
+
+async function cadaFiguraDoV6Pinta() {
+  const caso = "cada figura do v6 pinta";
+  const espelho = diferencaDeNomes("o v6.json", new Set(V6.figuras), "esta prova", new Set(Object.keys(O_QUE_CADA_FIGURA_PINTA)));
+  confere(caso, espelho === "", espelho);
+
+  // Cada figura sozinha numa tela: o que o pincel anotou é dela, e uma figura
+  // que o renderer não pinta mais vira recusa contada, e não traço nenhum.
+  const pintar = (figura) => {
+    const b = bancada();
+    const d = dono(b);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    const tela = [{ forma: "tela", chave: "mapa", largura: 20, altura: 20, figuras: [figura] }];
+    regiao.aplicar(tela);
+    regiao.raiz.children[0].darPincel();
+    const recusados = regiao.aplicar(tela);
+    const pintado = regiao.raiz.children[0].pincel.pintado;
+    regiao.soltar();
+    return { recusados, pintado };
+  };
+  for (const tipo of V6.figuras) {
+    const esperado = O_QUE_CADA_FIGURA_PINTA[tipo];
+    if (!esperado) continue;
+    const { recusados, pintado } = pintar(esperado.figura);
+    confere(caso, recusados === 0, `a figura «${tipo}» foi recusada (${recusados})`);
+    confere(caso, esperado.pintou(pintado), `a figura «${tipo}» não foi pintada: ${JSON.stringify(pintado)}`);
+  }
+  const estranha = pintar({ tipo: "estrela", x: 1, y: 1 });
+  confere(caso, estranha.recusados === 1, `um tipo que o v6 não tem não foi contado como recusa (${estranha.recusados})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -5879,6 +6167,8 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     oGestoCanceladoDizCancelou,
     oToqueSoPrendeOQueSeArrasta,
     oEstadoEscolhidoTemQuemOEscreva,
+    cadaFormaDoV6MontaOQuePromete,
+    cadaFiguraDoV6Pinta,
     sairDuranteOCarregamentoNaoMonta,
     aMidiaDoServidorTemOMesmoDono,
     sairDuranteAReproducaoPara,
