@@ -755,7 +755,8 @@ $("lista-linhas").addEventListener("click", (evento) => {
   if (!alvo) return;
   const id = Number(alvo.dataset.renomearLinha);
   // O nome de agora vem do último snapshot desenhado, e não de uma captura de
-  // quando este botão nasceu: as listas são refeitas duas vezes por segundo, e
+  // quando este botão nasceu: a coluna de canais é reaproveitada pelo id do canal
+  // (`reconciliarALista`, pendência 64), o mesmo botão atravessa os retratos, e
   // entre o desenho e o clique outra pessoa pode ter renomeado o mesmo canal.
   const linha = desenhado?.channels?.find((l) => l.id === id);
   if (!linha) return;
