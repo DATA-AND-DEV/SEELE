@@ -20125,7 +20125,10 @@ fn a_lista_fechada_das_recusas_e_a_do_v6() {
                 .collect()
         })
         .expect("`RECUSAS_AO_MOD` sumiu de base.js");
-    assert!(janela.len() > 30, "a leitura de `RECUSAS_AO_MOD` quebrou: {janela:?}");
+    assert!(
+        janela.len() > 30,
+        "a leitura de `RECUSAS_AO_MOD` quebrou: {janela:?}"
+    );
 
     let v6: serde_json::Value =
         serde_json::from_str(&read("../../api/v6.json")).expect("api/v6.json é JSON");
@@ -20204,4 +20207,52 @@ fn a_lista_fechada_das_recusas_e_a_do_v6() {
         "recusas das contribuições ou das superfícies fora de `RECUSAS_AO_MOD`: chegam \
          ao MOD como `falhou`: {sem_lugar:?}"
     );
+}
+
+/// **O aviso do servidor do MOD chega à janela pelos nomes que o Rust
+/// serializa** (o cruzamento dos portes; D-api-8 passo 5). A janela escuta
+/// `seele://event` e lê `payload?.ModAviso` com `mod_id`, `canal` e `carga`
+/// (`base.js`, `ouvirAvisoDeMod` e `entregarOAvisoDoMod`). O lado do Rust é
+/// `seele_ffi::types::Event::ModAviso`, serializado pelo serde. Trocar um nome
+/// de um lado só calava o aviso: o `if (payload?.ModAviso)` não acharia nada,
+/// e nada reclamaria. O PERFIS e a MESA desligam o laço de consulta pelo aviso.
+#[test]
+fn o_aviso_do_mod_chega_a_janela_pelos_nomes_que_o_rust_serializa() {
+    let evento = seele_ffi::types::Event::ModAviso {
+        mod_id: "autor/mod".to_owned(),
+        canal: Some(3),
+        carga: "{}".to_owned(),
+    };
+    let valor = serde_json::to_value(&evento).expect("o Event serializa");
+    let (variante, campos) = valor
+        .as_object()
+        .and_then(|objeto| objeto.iter().next())
+        .expect("o Event sai como { Variante: { campos } }");
+    let base = without_comments(&read("ui/base.js"));
+    assert!(
+        base.contains(&format!("payload?.{variante})"))
+            && base.contains(&format!("payload.{variante}")),
+        "a janela não escuta o aviso pela variante que o Rust serializa («{variante}»)"
+    );
+    let entrega = base
+        .split_once("function entregarOAvisoDoMod(aviso) {")
+        .and_then(|(_, resto)| resto.split_once("\n}\n"))
+        .map(|(corpo, _)| corpo.to_owned())
+        .expect("`entregarOAvisoDoMod` sumiu de base.js");
+    let campos = campos
+        .as_object()
+        .expect("os campos do ModAviso são um objeto");
+    for campo in campos.keys() {
+        assert!(
+            entrega.contains(&format!("aviso.{campo}"))
+                || entrega.contains(&format!("aviso?.{campo}")),
+            "o Rust manda `{campo}` no ModAviso, e `entregarOAvisoDoMod` não o lê"
+        );
+    }
+    for lido in ["mod_id", "canal", "carga"] {
+        assert!(
+            campos.contains_key(lido),
+            "`entregarOAvisoDoMod` lê `aviso.{lido}`, e o Rust não o manda: {campos:?}"
+        );
+    }
 }
