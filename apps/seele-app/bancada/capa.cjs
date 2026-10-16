@@ -614,6 +614,42 @@ const { chromium } = require('./playwright.cjs');
       `a citação pelo id não acompanhou a troca da capa na folha: ${JSON.stringify({ antesDaTroca, depoisDaTroca })}`);
     await page.evaluate(() => pedirComoOPerfis({ tipo: 'superficie-descartar', superficie: 'perfil' }));
 
+    // 6. **O clique numa ação de contribuição chega ao MOD com o alvo** (o
+    //    cruzamento dos portes). O cartão da pessoa (`pessoa.cartao` em
+    //    substituir, com `acaoPrincipal`) diz `pessoa`, que o PERFIS usa para
+    //    abrir o perfil. A ação de uma sala (`sala.acoes`) diz `canal`, que a
+    //    MESA usa para abrir a mesa da sala. Os dois levam o id que o produto
+    //    escreveu, em texto, e não algo que o MOD desenhou.
+    const acoes = await page.evaluate(async (alvo) => {
+      const sala = String(testTable.snapshot.voice_rooms[0].id);
+      const cartao = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.cartao', modo: 'substituir', alvo, acaoPrincipal: 'abrir-perfil', nomeAcessivel: 'perfil',
+        conteudo: [{ forma: 'texto', chave: 't', dentro: 'cartão' }],
+      }).handle;
+      const daSala = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'sala.acoes', modo: 'adicionar', alvo: sala, acaoPrincipal: 'mesa-da-sala', rotulo: 'MESA',
+      }).handle;
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 300));
+      const antes = entregues.length;
+      const linha = document.querySelector('li.pessoa-apresentada[data-apresentada-por="teste/perfis"]');
+      const doCartao = linha?.matches('[data-acao-de-mod]') ? linha : linha?.querySelector('[data-acao-de-mod]');
+      doCartao?.click();
+      document.querySelector('[data-acao-de-mod="mesa-da-sala"]')?.click();
+      await new Promise(ok => setTimeout(ok, 50));
+      const ditas = entregues.slice(antes).filter(m => m.tipo === 'evento' && m.nome === 'acao')
+        .map(({ acao, pessoa, canal }) => ({ acao, pessoa, canal }));
+      contribuicoesDosMods.revogar(cartao);
+      contribuicoesDosMods.revogar(daSala);
+      desenhar(testTable.snapshot);
+      return { achouOCartao: Boolean(doCartao), ditas, sala };
+    }, alvo);
+    assert.ok(acoes.achouOCartao, 'o cartão com acaoPrincipal não ganhou o alvo do clique');
+    assert.deepEqual(acoes.ditas, [
+      { acao: 'abrir-perfil', pessoa: alvo, canal: '' },
+      { acao: 'mesa-da-sala', pessoa: '', canal: acoes.sala },
+    ], `o clique nas ações não chegou ao MOD com o alvo: ${JSON.stringify(acoes)}`);
+
     assert.deepEqual(errors, []);
     console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo, que acompanha a troca da capa, e que pelo id resolve numa folha.');
   } finally {
