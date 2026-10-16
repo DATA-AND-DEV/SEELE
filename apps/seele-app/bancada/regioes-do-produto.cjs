@@ -581,6 +581,58 @@ const REGIOES = [
       falhas.push(`pessoa.detalhes pelo teclado: ${JSON.stringify(pelaTecla)} (o nome deve dizer ${deLia.apelido})`);
     }
 
+    // ------------------------------------- o movimento reduzido, em todo lugar
+    //
+    // `estilos.movimento-reduzido` (a auditoria do v6, tabela 8): «vale em
+    // toda região e camada onde contribuição de MOD aparece, e não só em
+    // .superficie-de-mod e .pessoa-cartao». Um nó que pulsa em cada região que
+    // monta nós, num cartão e num diálogo: com o movimento reduzido, nenhum
+    // anima; sem ele, todos — o caso mede a animação que existe. **Duas regras
+    // o entregam**: a global de `acessibilidade.css` e a de
+    // `.contribuicao-de-mod *` em `mods-superficies.css`. Tirar uma só passa;
+    // tirar as duas reprova (medido em 16/10).
+    const animados = async () => page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const mod = { id: "mod/pulso", hash: "h", api: 6 };
+      const instancia = new InstanciaDeMod(mod.id, mod.hash, geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set(mod.id, instancia);
+      const no = (chave) => [{ forma: "texto", chave, dentro: `pulso ${chave}`, estilo: { animacao: "pulso" } }];
+      const handles = [
+        ["operador.barra", undefined], ["status.barra", undefined], ["redes", undefined],
+        ["compositor", undefined], ["pessoas.lista", undefined], ["pessoa.cartao", String(lia.id)],
+      ].map(([ponto, alvo]) => contribuicoesDosMods.registrar(mod, instancia, { ponto, modo: "adicionar", ...(alvo ? { alvo } : {}), conteudo: no(ponto) }).handle);
+      await atenderOMod(mod, instancia, { tipo: "superficie-criar", n: 1, descricao: { id: "pulso", tipo: "dialogo", modal: false, titulo: "Pulso" } });
+      await atenderOMod(mod, instancia, { tipo: "superficie-montar", n: 2, superficie: "pulso", arvore: no("dialogo") });
+      desenhar(r);
+      await quadro();
+      const nomes = {};
+      for (const el of document.querySelectorAll("*")) {
+        if (el.children.length === 0 && /^pulso /.test(el.textContent.trim())) {
+          nomes[el.textContent.trim()] = getComputedStyle(el.closest("[style*='animation']") ?? el).animationName;
+        }
+      }
+      for (const handle of handles) contribuicoesDosMods.revogar(handle, { id: mod.id, instancia });
+      superficiesDoMod(mod, instancia).soltarTudo();
+      modsCarregados.delete(mod.id);
+      desenhar(r);
+      await quadro();
+      return nomes;
+    });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const reduzido = await animados();
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    const livre = await animados();
+    if (Object.keys(reduzido).length < 7 || Object.values(livre).some((n) => n !== "seele-mod-pulso")) {
+      falhas.push(`movimento reduzido: o caso não montou os sete nós que pulsam: ${JSON.stringify({ reduzido, livre })}`);
+    } else if (Object.values(reduzido).some((n) => n !== "none")) {
+      falhas.push(`movimento reduzido: um nó de MOD anima assim mesmo: ${JSON.stringify(reduzido)}`);
+    }
+
     // ------------------------------------- revogar recalcula do estado de agora
     //
     // `contribuicoes.garantias-do-produto[4]` («ao revogar, o nativo é
