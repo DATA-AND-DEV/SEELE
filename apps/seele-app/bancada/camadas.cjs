@@ -964,6 +964,32 @@ const { chromium } = require('./playwright.cjs');
     await page.press(campoUnico, 'Enter');
     assert.equal(await submetidos(), antesDoEnter + 1, 'o Enter enviou um formulário em progresso, sem primário');
 
+    // 13b. **A folha convive com a página não imersiva** (`superficies.folha.
+    //      convive[1]`; a auditoria do v6, tabela 7): a página na área da linha,
+    //      a folha na coluna — estrutural, e sem caso. As duas à vista, sem se
+    //      cruzar, cada uma recebendo o clique no que é dela.
+    const comAPagina = await page.evaluate(async () => {
+      for (const api of [5, 6]) superficiesDoMod(modDe[api].mod, modDe[api].inst).soltarTudo();
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'pagina-aberta', tipo: 'pagina', titulo: 'Página' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'pagina-aberta', arvore: [{ forma: 'botao', chave: 'p', dentro: 'NA PÁGINA' }] });
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'ao-lado', tipo: 'folha', titulo: 'Folha' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'ao-lado', arvore: [{ forma: 'botao', chave: 'f', dentro: 'NA FOLHA' }] });
+      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const caixa = (el) => el?.getBoundingClientRect();
+      const livre = (el) => { const r = caixa(el); if (!r || !r.width) return false; const a = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return Boolean(a && el.contains(a)); };
+      const botao = (sup, texto) => [...(document.querySelector(`[data-superficie="${sup}"]`)?.querySelectorAll('button') ?? [])].find((b) => b.textContent === texto);
+      const [p, f] = ['pagina-aberta', 'ao-lado'].map((sup) => caixa(document.querySelector(`[data-superficie="${sup}"]`)));
+      const medido = {
+        pagina: Boolean(p && p.width > 0), folha: Boolean(f && f.width > 0),
+        cruzam: Boolean(p && f && p.left < f.right && f.left < p.right && p.top < f.bottom && f.top < p.bottom),
+        naPagina: livre(botao('pagina-aberta', 'NA PÁGINA')), naFolha: livre(botao('ao-lado', 'NA FOLHA')),
+      };
+      superficiesDoMod(modDe[6].mod, modDe[6].inst).soltarTudo();
+      return medido;
+    });
+    assert.deepEqual(comAPagina, { pagina: true, folha: true, cruzam: false, naPagina: true, naFolha: true },
+      `a folha não convive com a página não imersiva: ${JSON.stringify(comAPagina)}`);
+
     // 14. **A saída da sessão solta as superfícies, a suja também, sem
     //     perguntar** (o cruzamento dos portes; a exceção do garantias[5]).
     //     Quem sai não fica preso numa pergunta sobre o rascunho de um MOD, o

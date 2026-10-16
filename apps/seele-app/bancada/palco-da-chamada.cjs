@@ -187,6 +187,37 @@ function wavDeTeste(segundos) {
     const fases = await page.evaluate(() => eventos.filter((e) => e.mod === 'mod/mesa' && e.nome === 'traco' && e.chave === 'tabuleiro').map((e) => e.fase));
     assert.ok(fases[0] === 'comecou' && fases.length >= 2, `o traço na tela do palco não chegou ao MOD: ${JSON.stringify(fases)}`);
 
+    // 2b. **A folha convive com o palco** (`superficies.folha.convive[0]`; a
+    //     auditoria do v6, tabela 7): era estrutural — a folha no palco dos
+    //     painéis, o palco na vista da chamada —, e nenhum caso abria uma folha
+    //     com o palco à frente. Os dois à vista, sem se cruzar, e cada um
+    //     recebendo o clique no que é dele.
+    const convive = await page.evaluate(async () => {
+      const mod = { id: 'mod/mesa', api: 6 };
+      const inst = modsCarregados.get(mod.id);
+      await atenderOMod(mod, inst, { tipo: 'superficie-criar', n: 901, descricao: { id: 'ficha', tipo: 'folha', titulo: 'Ficha' } });
+      await atenderOMod(mod, inst, { tipo: 'superficie-montar', n: 902, superficie: 'ficha', arvore: [{ forma: 'botao', chave: 'f', dentro: 'NA FICHA' }] });
+      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const caixa = (el) => el?.getBoundingClientRect();
+      const livre = (el) => { const r = caixa(el); if (!r || !r.width) return false; const a = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return Boolean(a && el.contains(a)); };
+      const folha = document.querySelector('[data-superficie="ficha"]');
+      const miolo = $('palco-de-mods-miolo');
+      const rolar = [...miolo.querySelectorAll('button')].find((b) => b.textContent === 'ROLAR');
+      const naFicha = [...(folha?.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'NA FICHA');
+      const [f, m] = [caixa(folha), caixa(miolo)];
+      const medido = {
+        folha: Boolean(folha && f.width > 0 && f.height > 0 && !folha.closest('[hidden]')),
+        palco: !$('palco-de-mods').hidden && m.width > 0,
+        cruzam: Boolean(f && m && f.left < m.right && m.left < f.right && f.top < m.bottom && m.top < f.bottom),
+        rolarLivre: livre(rolar),
+        fichaLivre: livre(naFicha),
+      };
+      superficiesDoMod(mod, inst).soltarTudo();
+      return medido;
+    });
+    assert.deepEqual(convive, { folha: true, palco: true, cruzam: false, rolarLivre: true, fichaLivre: true },
+      `com o palco à frente, a folha não convive com ele: ${JSON.stringify(convive)}`);
+
     // 3. A saída é do produto, e esconder não desmonta.
     const no = await page.evaluateHandle(() => $('palco-de-mods-miolo').firstElementChild);
     await page.click('#palco-de-mods-ver-a-grade');
