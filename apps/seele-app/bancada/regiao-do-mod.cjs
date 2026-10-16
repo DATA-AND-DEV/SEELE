@@ -1405,7 +1405,15 @@ const O_QUE_CADA_FORMA_MONTA = {
   escolha: {
     no: { forma: "escolha", chave: "cor", rotulo: "Cor", opcoes: [{ valor: "a", dentro: "A" }] },
     tag: "LABEL",
-    faz: (elem) => (acharTag(elem, "select") ? "" : "a escolha não tem select"),
+    // **O evento `escolha`** (`eventos[1]`): trocar a opção diz a chave e o valor.
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "select");
+      if (!caixa) return "a escolha não tem select";
+      caixa.value = "a";
+      caixa.disparar("change");
+      const dito = d.ditos.at(-1);
+      return dito?.nome === "escolha" && dito.chave === "cor" && dito.valor === "a" ? "" : `trocar disse ${JSON.stringify(dito)}`;
+    },
   },
   botao: { no: { forma: "botao", chave: "ok", dentro: "OK" }, tag: "BUTTON" },
   arquivo: { no: { forma: "arquivo", chave: "foto", rotulo: "Foto" }, tag: "BUTTON" },
@@ -1467,7 +1475,20 @@ const O_QUE_CADA_FORMA_MONTA = {
   numero: {
     no: { forma: "numero", chave: "pv", rotulo: "PV", valor: 3 },
     tag: "LABEL",
-    faz: (elem) => (acharTag(elem, "input")?.type === "number" ? "" : "o número não é um input number"),
+    // **O evento `numero`** (`eventos[6]`): o número, e o texto; vazio é `null`, e não zero.
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "input");
+      if (caixa?.type !== "number") return "o número não é um input number";
+      caixa.value = "5";
+      caixa.disparar("input");
+      const cinco = d.ditos.at(-1);
+      caixa.value = "";
+      caixa.disparar("input");
+      const vazio = d.ditos.at(-1);
+      return cinco?.nome === "numero" && cinco.chave === "pv" && cinco.valor === 5 && cinco.texto === "5"
+        && vazio?.nome === "numero" && vazio.valor === null && vazio.texto === ""
+        ? "" : `digitar disse ${JSON.stringify([cinco, vazio])}`;
+    },
   },
   deslizante: {
     no: { forma: "deslizante", chave: "volume", rotulo: "Volume", valor: 3, minimo: 0, maximo: 10 },
@@ -1514,7 +1535,27 @@ const O_QUE_CADA_FORMA_MONTA = {
   cor: {
     no: { forma: "cor", chave: "acento", rotulo: "Acento", valor: "#ff8800" },
     tag: "LABEL",
-    faz: (elem) => (acharTag(elem, "input")?.type === "color" ? "" : "a cor não tem input color"),
+    // **O evento `cor`** (`eventos[8]`): pelo seletor, e pelo hexadecimal só
+    // quando ele está completo — `#12` no meio da digitação não vira pedido.
+    faz: (elem, d) => {
+      const seletor = acharTag(elem, "input");
+      const hexa = elem.querySelector(".regiao-de-mod-hexa");
+      if (seletor?.type !== "color") return "a cor não tem input color";
+      if (!hexa) return "a cor não tem o hexadecimal";
+      seletor.value = "#00ff00";
+      seletor.disparar("input");
+      const doSeletor = d.ditos.at(-1);
+      const antes = d.ditos.length;
+      hexa.value = "#12";
+      hexa.disparar("input");
+      const incompleto = d.ditos.length === antes;
+      hexa.value = "#123456";
+      hexa.disparar("input");
+      const doHexa = d.ditos.at(-1);
+      return doSeletor?.nome === "cor" && doSeletor.chave === "acento" && doSeletor.valor === "#00ff00"
+        && incompleto && doHexa?.nome === "cor" && doHexa.valor === "#123456"
+        ? "" : `o seletor e o hexadecimal disseram ${JSON.stringify([doSeletor, incompleto, doHexa])}`;
+    },
   },
   retrato: {
     no: { forma: "retrato", chave: "foto", inicial: "L" },
@@ -2379,6 +2420,40 @@ async function aRecusaDoSeletorChegaPeloNome() {
       confere(caso, dito?.resultado === "falhou" && typeof dito?.porque === "string" && !("erro" in dito),
         `o MOD da API 5 deixou de receber o \`porque\` de antes: ${JSON.stringify(dito)}`);
     }
+    r.soltar();
+  }
+}
+
+/**
+ * **O evento `arquivo`, pelos três caminhos** (`eventos[3]`; a auditoria do
+ * `v6.json`, tabela 3): a pessoa escolhe e o MOD recebe o identificador com
+ * `resultado: "escolhido"`; fecha o seletor e ele recebe `arquivo: null` com
+ * `cancelado` — «não escolhi» e «não deu» chegam diferentes. O `falhou` é a
+ * prova de cima. E o botão fica desligado enquanto o seletor está aberto.
+ */
+async function oArquivoEscolhidoOuCanceladoChegaAoMod() {
+  const caso = "o arquivo escolhido ou cancelado chega ao MOD";
+  for (const [resposta, esperado] of [
+    [{ id: "arq-1", nome: "mapa.png", tipo: "imagem", bytes: 12 }, "escolhido"],
+    [null, "cancelado"],
+  ]) {
+    const b = bancada();
+    const d = dono(b);
+    let soltar;
+    d.api.escolherArquivo = () => new Promise((ok) => { soltar = () => ok(resposta); });
+    const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.superficie);
+    r.aplicar([{ forma: "arquivo", chave: "mapa", rotulo: "Mapa", dentro: "ENVIAR" }]);
+    const botao = acharTag(r.raiz, "button");
+    botao?.disparar("click");
+    confere(caso, botao?.disabled === true, "o botão do arquivo continuou ligado com o seletor aberto");
+    soltar?.();
+    await volta();
+    await volta();
+    const dito = d.ditos.find((e) => e.nome === "arquivo");
+    confere(caso, dito?.chave === "mapa" && dito.resultado === esperado
+      && JSON.stringify(dito.arquivo) === JSON.stringify(resposta),
+      `com o seletor respondendo ${JSON.stringify(resposta)}, o MOD ouviu ${JSON.stringify(dito)}`);
+    confere(caso, botao?.disabled === false, "o botão do arquivo ficou desligado depois do seletor");
     r.soltar();
   }
 }
@@ -6587,6 +6662,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     aChaveDoCampoNaoPartePar,
     aFinalidadeDoArquivoNaoPartePar,
     aRecusaDoSeletorChegaPeloNome,
+    oArquivoEscolhidoOuCanceladoChegaAoMod,
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
     oGestoCanceladoDizCancelou,
