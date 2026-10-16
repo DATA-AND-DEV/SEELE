@@ -170,6 +170,9 @@ pub use seele_proto::control::{
     // `key_fingerprint` logo abaixo.
     ConsentimentoDePar,
     DisconnectReason,
+    // Reexportado com a lista do FORA DO AR (`ServerMessage::Membros`), que a
+    // ponte dobra e entrega fora do `Snapshot`.
+    Membro,
     // Reexportado porque a casca desenha por que uma mensagem não foi gravada,
     // e é o vocabulário fechado do fio que diz o motivo. Mesmo caso do
     // `AttachmentRefusal` acima.
@@ -235,7 +238,9 @@ pub use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource};
 pub use seele_proto::signal::{Signal, SignalBand, SyncInputs};
 pub use seele_proto::transport::DEFAULT_PORT;
 pub use seele_proto::uri;
-pub use seele_proto::version::{linha_do_protocolo, VERSAO_DO_SERVIDOR};
+// `linha_de` e `Linha` com o `ConnectError::OutraLinha`: a FFI diz à casca se
+// quem respondeu é de uma versão que o launcher abre ou mais nova que esta.
+pub use seele_proto::version::{linha_de, linha_do_protocolo, Linha, VERSAO_DO_SERVIDOR};
 pub use seele_proto::PROTOCOL_VERSION;
 
 pub use seele_proto::volume::{PedidoDeImagem, VolumeHeader};

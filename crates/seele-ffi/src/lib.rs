@@ -68,11 +68,11 @@ pub use types::{
     AberturaDoAudio, Attachment, AttachmentRefusal, CaptureDevice, Channel, ChannelWeight,
     ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio,
     EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, LimitesDeTela,
-    LimitesDosCampos, LinkState, LinkTrust, Message, MotivoDaRecusa, NotSavedReason, Notice,
-    NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
-    PreviewRefusal, PreviewRules, SaveDestination, SaveRefused, Severity, SignalBand as Band,
-    Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, Transfer, TransmissaoNaSala, Trust,
-    VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
+    LimitesDosCampos, LinkState, LinkTrust, MembroForaDoAr, Message, MotivoDaRecusa,
+    NotSavedReason, Notice, NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person,
+    PlaybackDevice, Preview, PreviewRefusal, PreviewRules, SaveDestination, SaveRefused, Severity,
+    SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, Transfer,
+    TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -1196,6 +1196,12 @@ struct Shared {
     /// O número em si não significa nada; só a diferença significa. A casca
     /// guarda o último que desenhou e busca o histórico quando ele muda.
     messages_revision: std::sync::atomic::AtomicU64,
+    /// Quantas vezes o FORA DO AR pode ter mudado. Pelo mesmo motivo do
+    /// `messages_revision`, e por um a mais: a lista de membros fica **fora do
+    /// `Snapshot`** (P6), que todo MOD da API 5 para baixo lê, e este número é a
+    /// única coisa dela que viaja nele. A casca relê
+    /// [`Connection::membros_fora_do_ar`] quando ele muda.
+    fora_do_ar_revision: std::sync::atomic::AtomicU64,
     /// Quantas vezes a imagem do servidor mudou desde que esta sessão começou.
     ///
     /// Existe pelo mesmo motivo do `messages_revision`, num tamanho menor: o
@@ -1667,6 +1673,7 @@ impl Connection {
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
+            fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
@@ -3256,6 +3263,28 @@ impl Connection {
             .unwrap_or_default()
     }
 
+    /// O FORA DO AR: os membros deste servidor que não estão conectados agora.
+    ///
+    /// **Separado do [`Connection::snapshot`], e é isso que protege a lista**:
+    /// o `Snapshot` inteiro vai a todo MOD da API 5 para baixo, e a lista de
+    /// membros do servidor não é dele (P6, decisão da orquestradora). Muda junto
+    /// com o roster: a janela relê no `Event::RosterChanged`.
+    pub fn membros_fora_do_ar(&self) -> Vec<MembroForaDoAr> {
+        self.shared
+            .room
+            .lock()
+            .map(|room| {
+                room.fora_do_ar()
+                    .into_iter()
+                    .map(|(id, nickname)| MembroForaDoAr {
+                        id: id.get(),
+                        nickname,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Everything the interface needs, in one value.
     ///
     /// Cheap enough to call on every frame of a redraw, and deliberately a copy:
@@ -3329,6 +3358,7 @@ impl Connection {
             presentes: sala.presentes,
             channels: sala.channels,
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
+            fora_do_ar_revision: self.shared.fora_do_ar_revision.load(Ordering::Relaxed),
             telemetry: Telemetry {
                 rtt_ms,
                 // O jitter que a pessoa quer saber é o de chegada, medido
@@ -3643,7 +3673,11 @@ fn messages_of(room: &Room) -> Vec<Message> {
             own: message.own,
             edited: message.edited,
             estado: EstadoDoEnvio::Confirmada,
-            client_message_id: None,
+            // O eco da própria, para a casca trocar a pendente pela gravada no
+            // mesmo nó (ver `seele_sessao::Message::client_message_id`).
+            client_message_id: message
+                .client_message_id
+                .map(|chave| chave.get().to_string()),
             attachment: message.attachment.as_ref().map(|anexo| Attachment {
                 id: anexo.id.get(),
                 file_name: anexo.file_name.clone(),
@@ -5853,6 +5887,15 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         }
     }
 
+    // **Antes do `RosterChanged`**, pelo motivo da revisão dos retratos logo
+    // abaixo: a casca relê o FORA DO AR pelo número quando o evento chega, e um
+    // número que sobe depois do aviso é um número que ela pode ler velho.
+    if changed.membros {
+        shared
+            .fora_do_ar_revision
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
     if changed.roster {
         // **A revisão dos retratos sobe aqui, e não no ramo do servidor.**
         //
@@ -6667,6 +6710,9 @@ fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
         // Na volta, o anúncio que esta máquina não aceitou é o servidor que
         // passou a exigir outro conjunto no meio da sessão.
         seele_core::ConnectError::ModsNaoAceitos { .. } => EndReason::ModsMudaram,
+        // Na volta, o servidor passou a falar outro número: foi atualizado, ou
+        // trocado por outra versão, no meio da sessão.
+        seele_core::ConnectError::OutraLinha { .. } => EndReason::Incompatible,
         // Não chega à volta hoje: ela é ao `IP:porta` que atendeu, e não ao
         // código. Se chegar, é a conversa que caiu, como as de rede.
         seele_core::ConnectError::NaoLocalizou(_)
@@ -6692,6 +6738,22 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
         seele_core::ConnectError::TlsRefused | seele_core::ConnectError::ProtocolViolation => {
             ConnectionError::Refused {
                 reason: EndReason::Incompatible,
+            }
+        }
+        seele_core::ConnectError::OutraLinha { numero } => {
+            // **A relação, e não só o nome.** A versão só vai quando é uma que
+            // o launcher abre, uma de antes desta build; acima dela, a tabela
+            // diria «1» de um servidor que não é uma 1.x (ver o campo).
+            let linha = seele_core::linha_de(*numero);
+            ConnectionError::OutraLinha {
+                numero: *numero,
+                servidor: match linha {
+                    Some(seele_core::Linha::AntesDaUm { .. }) => {
+                        seele_core::linha_do_protocolo(*numero).map(str::to_owned)
+                    }
+                    _ => None,
+                },
+                mais_nova: matches!(linha, Some(seele_core::Linha::Posterior { .. })),
             }
         }
         seele_core::ConnectError::PinChanged { pinned, offered } => ConnectionError::PinChanged {
@@ -6755,6 +6817,41 @@ mod a_volta_recusada_diz_o_motivo {
     use super::{classify_connect_failure, fim_da_sessao, ConnectionError, EndReason};
     use seele_core::enlace::Motivo;
     use seele_core::{ConnectError, DisconnectReason};
+
+    /// **O `OutraLinha` diz a relação**: a versão só quando o launcher a abre,
+    /// e se o servidor é mais novo que este app (decisão da orquestradora de
+    /// 15/10). Antes, o 30 vinha com «1», uma versão que ele não é.
+    #[test]
+    fn outra_linha_diz_a_versao_so_quando_o_launcher_a_abre_e_se_e_mais_nova() {
+        let caso = |numero| classify_connect_failure(&ConnectError::OutraLinha { numero });
+        assert_eq!(
+            caso(8),
+            ConnectionError::OutraLinha {
+                numero: 8,
+                servidor: Some("0.15".into()),
+                mais_nova: false,
+            },
+            "o Servidor 0.15 publicado"
+        );
+        assert_eq!(
+            caso(30),
+            ConnectionError::OutraLinha {
+                numero: 30,
+                servidor: None,
+                mais_nova: true,
+            },
+            "acima desta build: mais novo, e sem uma versão que ele não é"
+        );
+        assert_eq!(
+            caso(7),
+            ConnectionError::OutraLinha {
+                numero: 7,
+                servidor: None,
+                mais_nova: false,
+            },
+            "abaixo da 0.15: antigo, e sem versão oferecida"
+        );
+    }
 
     #[test]
     fn quem_nao_prova_a_chave_nao_chega_como_versao_incompativel() {
@@ -7671,6 +7768,86 @@ mod tests {
         assert!(voice_rooms_of(&room).is_empty());
         assert!(lines_of(&room).is_empty());
         assert!(messages_of(&room).is_empty());
+    }
+
+    /// **A confirmada própria chega com o eco da pendente**, e é o que deixa a
+    /// casca trocar uma pela outra no mesmo nó (achado da revisão do R63 da
+    /// F5). Sem ele, quem usa leitor de tela e lia a mensagem que acabou de
+    /// mandar perdia a posição, a seleção e o REMOVER a cada envio.
+    ///
+    /// A de outra pessoa chega sem a chave, mesmo que o fio a traga. E a
+    /// própria relida do histórico chega com a chave gravada: o `FetchHistory`
+    /// do servidor responde com o `client_message_id` de cada linha.
+    #[test]
+    fn a_confirmada_propria_chega_com_a_chave_da_pendente() {
+        use seele_core::{ChannelInfo, ClientMessageId, PersonId, ServerMessage, SessionId, Ssrc};
+
+        let canal = ChannelId(1);
+        let mut room = Room::new();
+        room.apply(&ServerMessage::Session {
+            id: SessionId(1),
+            person: PersonId(7),
+            ssrc: Ssrc(700),
+            server: "Casa".into(),
+            voice_rooms: Vec::new(),
+            channels: vec![ChannelInfo {
+                id: canal,
+                name: "geral".into(),
+            }],
+            roles: Vec::new(),
+            permissions: Vec::new(),
+        });
+        room.open_channel(canal);
+        let recebida = |id: u64, autor: u64, chave: Option<u64>| ServerMessage::MessageReceived {
+            channel: canal,
+            id: MessageId(id),
+            author: PersonId(autor),
+            at_seconds: 0,
+            author_nickname: format!("pessoa{autor}"),
+            body: format!("mensagem {id}"),
+            replies_to: None,
+            client_message_id: chave.map(ClientMessageId),
+            attachment: None,
+        };
+
+        // A pendente, e a chave com que a casca a desenha.
+        room.anotar_envio(canal, ClientMessageId(77), "mensagem 5".into(), 0);
+        let pendente = messages_of(&room);
+        assert_eq!(pendente.len(), 1);
+        assert_eq!(pendente[0].client_message_id.as_deref(), Some("77"));
+
+        // Gravada: a pendente sai, e a confirmada leva a mesma chave.
+        room.apply(&recebida(5, 7, Some(77)));
+        // De outra pessoa, com uma chave no fio que não é desta máquina.
+        room.apply(&recebida(6, 8, Some(78)));
+        // A própria relida do histórico, com a chave que o servidor gravou.
+        room.apply(&recebida(2, 7, Some(31)));
+
+        let lista = messages_of(&room);
+        let de = |id: u64| lista.iter().find(|mensagem| mensagem.id == id);
+        assert_eq!(
+            lista.len(),
+            3,
+            "a pendente não saiu, ou alguma não chegou: {lista:?}"
+        );
+        let gravada = de(5).expect("a gravada");
+        assert_eq!(gravada.estado, EstadoDoEnvio::Confirmada);
+        assert_eq!(
+            gravada.client_message_id.as_deref(),
+            Some("77"),
+            "a confirmada própria chegou sem a chave da pendente, e a casca a desenha \
+             como uma mensagem nova"
+        );
+        assert_eq!(
+            de(6).expect("a de outra pessoa").client_message_id,
+            None,
+            "a chave de outra máquina chegou à casca"
+        );
+        assert_eq!(
+            de(2).expect("a relida").client_message_id.as_deref(),
+            Some("31"),
+            "o histórico traz a chave gravada, e a própria antiga a perdeu no caminho"
+        );
     }
 
     #[test]
@@ -9105,6 +9282,7 @@ mod tests {
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
+            fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
@@ -9141,6 +9319,118 @@ mod tests {
     /// Devolve o `Room` para o teste acrescentar gente: é a contagem de
     /// espectadores que os testes abaixo mexem, e ela é o N do §5.1.
     /// Um `Shared` vazio, para exercer o `fold` sem uma conexão.
+    /// **A lista de membros não vai no `Snapshot`** (P6, decisão da
+    /// orquestradora).
+    ///
+    /// O `Snapshot` inteiro ainda vai a todo MOD da API 5 para baixo
+    /// (`base.js`, a mensagem `snapshot`), e a lista de membros do servidor não é
+    /// dele. O FORA DO AR sai por [`Connection::membros_fora_do_ar`]. Se alguém
+    /// puser os membros fora do ar no `Snapshot`, o apelido aparece no JSON que
+    /// a janela e os MODs leem, e este teste reprova.
+    #[test]
+    fn o_snapshot_serializado_nao_leva_nenhum_membro_fora_do_ar() {
+        use seele_core::{ServerMessage, SessionId, Ssrc};
+        let shared = compartilhado_de_teste();
+        fold(
+            &shared,
+            &ServerMessage::Session {
+                id: SessionId(1),
+                person: seele_core::PersonId(7),
+                ssrc: Ssrc(700),
+                server: "Casa".into(),
+                voice_rooms: Vec::new(),
+                channels: Vec::new(),
+                roles: Vec::new(),
+                permissions: Vec::new(),
+            },
+        );
+        let apelido = "membro-que-nenhum-mod-pode-ler";
+        fold(
+            &shared,
+            &ServerMessage::Membros {
+                membros: vec![seele_core::Membro {
+                    id: seele_core::PersonId(42),
+                    nickname: apelido.into(),
+                }],
+                fim: true,
+            },
+        );
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let connection = Connection {
+            commands,
+            shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
+        };
+        // O controle: o membro chegou, e a janela o lê pelo acessor. Sem isto,
+        // um `Snapshot` sem ele não provaria nada.
+        assert_eq!(
+            connection.membros_fora_do_ar(),
+            vec![MembroForaDoAr {
+                id: 42,
+                nickname: apelido.into(),
+            }],
+            "o FORA DO AR não chegou ao acessor, e o teste mediu outra coisa"
+        );
+        let snapshot = serde_json::to_string(&connection.snapshot()).expect("o snapshot vira JSON");
+        assert!(
+            !snapshot.contains(apelido),
+            "o `Snapshot` leva um membro fora do ar, e todo MOD da API 5 para baixo o lê"
+        );
+    }
+
+    /// **O número do FORA DO AR já subiu quando o `RosterChanged` chega.**
+    ///
+    /// A casca relê a lista quando o evento chega, e só se o número andou. Um
+    /// número que sobe depois do aviso é um que ela pode ler velho, e aí o
+    /// grupo fica errado até a próxima mudança de membros — que pode não vir.
+    /// O ouvinte lê o número no instante do aviso, que é o instante em que a
+    /// casca o leria.
+    #[test]
+    fn o_numero_do_fora_do_ar_ja_subiu_quando_o_aviso_chega() {
+        use seele_core::ServerMessage;
+
+        struct Leitor(std::sync::Weak<Shared>, Mutex<Vec<u64>>);
+        impl EventListener for Leitor {
+            fn on_event(&self, event: Event) {
+                if !matches!(event, Event::RosterChanged) {
+                    return;
+                }
+                if let (Some(shared), Ok(mut lidos)) = (self.0.upgrade(), self.1.lock()) {
+                    lidos.push(
+                        shared
+                            .fora_do_ar_revision
+                            .load(std::sync::atomic::Ordering::Relaxed),
+                    );
+                }
+            }
+        }
+
+        let shared = compartilhado_de_teste();
+        let leitor = Arc::new(Leitor(Arc::downgrade(&shared), Mutex::new(Vec::new())));
+        shared
+            .listeners
+            .lock()
+            .unwrap()
+            .push(Arc::clone(&leitor) as Arc<dyn EventListener>);
+
+        fold(
+            &shared,
+            &ServerMessage::Membros {
+                membros: vec![seele_core::Membro {
+                    id: seele_core::PersonId(42),
+                    nickname: "ritsuko".into(),
+                }],
+                fim: true,
+            },
+        );
+
+        assert_eq!(
+            leitor.1.lock().unwrap().as_slice(),
+            &[1],
+            "o `RosterChanged` saiu com o número do FORA DO AR ainda velho"
+        );
+    }
+
     pub(super) fn compartilhado_de_teste() -> Arc<Shared> {
         Arc::new(Shared {
             caminho_medido: std::sync::atomic::AtomicU32::new(0),
@@ -9148,6 +9438,7 @@ mod tests {
             link_seconds: std::sync::atomic::AtomicU64::new(0),
             link_attempts: std::sync::atomic::AtomicU32::new(0),
             messages_revision: std::sync::atomic::AtomicU64::new(0),
+            fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
             icon_revision: std::sync::atomic::AtomicU64::new(0),
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
@@ -12190,6 +12481,7 @@ mod o_audio_segue_a_sala {
             link_seconds: AtomicU64::new(0),
             link_attempts: AtomicU32::new(0),
             messages_revision: AtomicU64::new(0),
+            fora_do_ar_revision: AtomicU64::new(0),
             icon_revision: AtomicU64::new(0),
             person_icons_revision: AtomicU64::new(0),
             room: Mutex::new(Room::new()),
@@ -13574,6 +13866,7 @@ mod onde_um_anexo_grava {
             body: String::new(),
             replies_to: None,
             own: false,
+            client_message_id: None,
             edited: false,
             attachment: Some(seele_core::AttachmentInfo {
                 id: seele_core::AttachmentId(7),

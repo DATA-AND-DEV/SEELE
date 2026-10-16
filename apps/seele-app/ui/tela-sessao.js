@@ -506,6 +506,7 @@ function desenhar(snapshot) {
   desenharTransmissoes(snapshot);
   abrirLinhaSozinho(snapshot);
   sincronizarMensagens(snapshot.messages_revision);
+  sincronizarForaDoAr(snapshot.fora_do_ar_revision);
   // Os eventos da tela aos MODs da API 6, pela comparação com o retrato de
   // antes (rascunho da API 6, §7.2).
   avisarOsModsDaTela(snapshot);
@@ -1464,6 +1465,20 @@ let mensagens = [];
 let revisaoDesenhada = null;
 let buscandoMensagens = false;
 
+/**
+ * O FORA DO AR que esta tela tem em mãos, e qual revisão dele (P6, D-fio-4):
+ * os membros deste servidor que não estão conectados agora, só id e apelido.
+ *
+ * Fora do `snapshot` pelo motivo da conversa, e por mais um: um MOD da API 5
+ * recebe o retrato inteiro, e a lista de membros de um servidor não é coisa que
+ * um MOD que roda hoje tenha ganhado. O retrato diz só o número
+ * (`fora_do_ar_revision`), e esta tela busca a lista quando ele anda — pelo
+ * `membros_fora_do_ar`, como a conversa pelo `messages`.
+ */
+let foraDoAr = [];
+let revisaoDoForaDoAr = null;
+let buscandoForaDoAr = false;
+
 /** Se um pedido de abrir Linha está em voo, para não mandar outro por cima. */
 let abrindoLinha = false;
 
@@ -1531,6 +1546,32 @@ async function sincronizarMensagens(revisao) {
     if (erro !== "NotConnected") console.warn("messages:", erro);
   } finally {
     buscandoMensagens = false;
+  }
+}
+
+/**
+ * Busca o FORA DO AR e repinta a lista de pessoas, se ele mudou desde a última
+ * vez. As mesmas duas guardas de `sincronizarMensagens`: uma busca em voo por
+ * vez, e a resposta só vale na sessão que a pediu.
+ *
+ * O número não anda a cada `PersonState` (pendência 63): só a lista de
+ * membros, um apelido de membro, ou alguém entrando ou saindo do servidor o
+ * movem (`Changed.membros`, em `seele-sessao`).
+ */
+async function sincronizarForaDoAr(revisao) {
+  if (revisao === revisaoDoForaDoAr || buscandoForaDoAr) return;
+  buscandoForaDoAr = true;
+  const geracao = geracaoDaSessao;
+  try {
+    const lidos = await invoke("membros_fora_do_ar");
+    if (geracao !== geracaoDaSessao) return;
+    foraDoAr = lidos ?? [];
+    revisaoDoForaDoAr = revisao;
+    redesenharAsPessoas();
+  } catch (erro) {
+    if (erro !== "NotConnected") console.warn("membros_fora_do_ar:", erro);
+  } finally {
+    buscandoForaDoAr = false;
   }
 }
 
@@ -2607,9 +2648,15 @@ function desenharPessoas(snapshot) {
     );
   }
 
+  // **FORA DO AR** (D-fio-4, P6), por último: quem é membro deste servidor e
+  // não está conectado agora. A lista vem do acessor, e não do retrato — ver
+  // `foraDoAr`.
+  if (foraDoAr.length > 0) grupos.push(grupoForaDoAr(foraDoAr));
+
   // **Reconciliada pelo id, e não repovoada** (pendência 63, (b)): ver
   // `reconciliarALista`. A lista refeita a cada retrato sumia e voltava na
-  // árvore de acessibilidade.
+  // árvore de acessibilidade. O grupo FORA DO AR tem a chave do nome
+  // (`grupoDeSala`), e as linhas dele, sem chave, casam pela posição.
   reconciliarALista($("lista-roster"), grupos);
   // Uma vez, e na lista: ver `ligarAcoesDeApresentacao` em `base.js`.
   ligarAcoesDeApresentacao($("lista-roster"));
@@ -2637,6 +2684,27 @@ function pintarVolumesDoRoster() {
     if (deslizante === document.activeElement) continue;
     deslizante.value = String(volumesLidos.get(deslizante.dataset.pessoa) ?? 100);
   }
+}
+
+/**
+ * O grupo FORA DO AR: os membros que não estão conectados, apagados e só com o
+ * nome.
+ *
+ * **Só o nome**, e é a decisão D-fio-4: sem papéis e sem horário. O fio nem os
+ * traz (`MembroForaDoAr` é id e apelido), e esta linha não os inventa — «visto
+ * por último» seria dizer a todo membro quando cada outro sai.
+ *
+ * **Não é um `li.pessoa`.** Aquela é a linha de quem está aqui: um MOD a
+ * apresenta (`pessoa.cartao`, `pessoa.identidade`), o celular abre a folha dela
+ * ao toque (`celular-pessoas.js`), e ela carrega sinal e volume. Nada disso
+ * cabe a quem está fora: nenhuma medida existe, nenhuma ação o alcança, e
+ * nenhum MOD ganhou a lista de membros.
+ */
+function grupoForaDoAr(membros) {
+  const linhas = membros.map((membro) => elemento("li", "membro-fora-do-ar", membro.nickname));
+  const grupo = grupoDeSala("FORA DO AR", `${membros.length}`, false, linhas);
+  grupo.dataset.foraDoAr = "sim";
+  return grupo;
 }
 
 /** Um grupo da faixa: o nome de uma sala e os cartões de quem está nela. */
@@ -4542,6 +4610,10 @@ function esquecerOEstadoDaSessao() {
   // abria com a conversa de outro servidor. Antes de `limparBusca`, que redesenha.
   mensagens = [];
   revisaoDesenhada = null;
+  // O FORA DO AR, pelo mesmo motivo: os membros são de um servidor, e a revisão
+  // do seguinte começa do zero.
+  foraDoAr = [];
+  revisaoDoForaDoAr = null;
   // O que cada retrato recalcula, e que até o primeiro dele seria do anterior:
   // a permissão de tirar mensagem, os lugares de uma sala nova (copiados de uma
   // sala daquele servidor), a trilha desenhada e o anúncio de troca de
