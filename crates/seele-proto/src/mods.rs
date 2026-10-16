@@ -1172,16 +1172,35 @@ mod tests {
             .iter()
             .filter(|(linha, _)| *linha == LINHA_DESTE_BUILD)
             .collect();
-        assert_eq!(desta.len(), 1, "a linha deste build aparece {} vezes na tabela", desta.len());
+        assert_eq!(
+            desta.len(),
+            1,
+            "a linha deste build aparece {} vezes na tabela",
+            desta.len()
+        );
         let apis = desta[0].1;
-        assert_eq!(APIS_ACEITAS, apis, "APIS_ACEITAS divergiu da tabela das linhas");
-        assert_eq!(Some(&MOD_API_VERSION), apis.iter().max(), "MOD_API_VERSION não é a mais nova da linha");
-        assert_eq!(Some(&MOD_API_MINIMA), apis.iter().min(), "MOD_API_MINIMA não é a mais velha da linha");
+        assert_eq!(
+            APIS_ACEITAS, apis,
+            "APIS_ACEITAS divergiu da tabela das linhas"
+        );
+        assert_eq!(
+            Some(&MOD_API_VERSION),
+            apis.iter().max(),
+            "MOD_API_VERSION não é a mais nova da linha"
+        );
+        assert_eq!(
+            Some(&MOD_API_MINIMA),
+            apis.iter().min(),
+            "MOD_API_MINIMA não é a mais velha da linha"
+        );
         // E a tabela tem forma: cada linha uma vez, cada uma com alguma API.
         for (i, (linha, apis)) in APIS_POR_LINHA.iter().enumerate() {
             assert!(!apis.is_empty(), "a linha {linha} não tem API nenhuma");
             assert!(
-                APIS_POR_LINHA.iter().skip(i + 1).all(|(outra, _)| outra != linha),
+                APIS_POR_LINHA
+                    .iter()
+                    .skip(i + 1)
+                    .all(|(outra, _)| outra != linha),
                 "a linha {linha} aparece duas vezes"
             );
         }

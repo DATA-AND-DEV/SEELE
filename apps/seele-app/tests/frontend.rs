@@ -20138,7 +20138,7 @@ fn a_lista_fechada_das_recusas_e_a_do_v6() {
         .expect("api/v6.json sem `recusas`");
     let nome = |entrada: &str| {
         entrada
-            .split(|c: char| c == ' ' || c == '(')
+            .split([' ', '('])
             .next()
             .unwrap_or_default()
             .to_owned()
