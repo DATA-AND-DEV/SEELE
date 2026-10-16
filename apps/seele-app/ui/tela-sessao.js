@@ -1105,6 +1105,12 @@ function desenharCanais(snapshot) {
 
   const linhas = snapshot.channels.map((linha) => {
     const item = elemento("li", null);
+    // A coluna de canais também é reconciliada, e o canal é a chave: repovoada
+    // a cada retrato, ela tirava do documento o botão que tinha o foco do
+    // teclado, e o foco caía no `<body>` a cada tique (pendência 64). Os
+    // ouvintes do canal são delegados no `#lista-linhas` e leem o id do botão
+    // e o retrato de agora, e não um canal preso no quadro em que ele nasceu.
+    chaveNaLista.set(item, `canal:${linha.id}`);
 
     // Botão de verdade, e não um `<li>` com `cursor: pointer`: o ouvinte estava
     // no `<ul>`, então a lista inteira era inalcançável pelo teclado e nenhum
@@ -1121,8 +1127,9 @@ function desenharCanais(snapshot) {
     botao.append(cerquilha, elemento("span", "linha-rotulo", linha.name));
     // **`canal.item`** — ícone, distintivo, contagem ou decoração que um MOD
     // põe ao lado do nome do canal. Dentro do botão, porque é dele que a linha
-    // fala; o clique continua sendo o do produto — abrir o canal.
-    botao.append(...conteudoDasContribuicoes("canal.item", String(linha.id)));
+    // fala; o clique continua sendo o do produto — abrir o canal. Pelo
+    // marcador, como os pontos da lista de pessoas (`noDeMod`).
+    botao.append(...nosDeMod(conteudoDasContribuicoes("canal.item", String(linha.id))));
 
     // A contagem de pendências do comp não entra. `Channel` é `{id, name, open}` —
     // não há contagem de não-lidas nem marca d'água de leitura em lugar nenhum
@@ -1150,7 +1157,7 @@ function desenharCanais(snapshot) {
     if (linha.open) linhaAberta = linha.id;
     return item;
   });
-  repovoar($("lista-linhas"), emGrupos(linhas, snapshot.channels, arranjo?.canais, "OUTROS CANAIS"));
+  reconciliarALista($("lista-linhas"), emGrupos(linhas, snapshot.channels, arranjo?.canais, "OUTROS CANAIS"));
 
   // Os dois formulários de criar sala só aparecem para quem pode criar. Quem
   // responde é o servidor, em `may_manage_voice_rooms`, resolvido pelo PERMISSIONS a
@@ -2203,8 +2210,8 @@ function redesenharAsPessoas() {
 
 /**
  * A chave de um nó da lista de pessoas: `pessoa:<id>` numa linha, `sala:<id>`
- * ou `grupo:<nome>` num grupo. Num mapa, e não num atributo: ela é de quem
- * reconcilia, e não da página.
+ * ou `grupo:<nome>` num grupo; na coluna de canais, `canal:<id>`. Num mapa, e
+ * não num atributo: ela é de quem reconcilia, e não da página.
  */
 let chaveNaLista = new WeakMap();
 
@@ -2276,6 +2283,9 @@ function nosDeMod(nos) {
  * também. A casca do celular adapta essa coluna depois de cada quadro
  * (`celular-servidor.js`) e o que ela acrescenta não está na lista montada:
  * sai aqui, e ela o põe de novo, como fazia com a coluna refeita.
+ *
+ * **E a coluna de canais**, com o canal como chave: repovoada, ela tirava do
+ * documento o botão com o foco do teclado a cada tique (pendência 64).
  */
 function reconciliarALista(lista, filhos) {
   const velhos = new Map();
