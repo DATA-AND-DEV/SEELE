@@ -405,6 +405,71 @@ const REGIOES = [
       if (!linha.foraDoMiolo) falhas.push("pessoa.cartao: o apelido verificado está dentro da raiz do MOD");
     }
 
+    // ------------------------------------- cada ponto, o nó do MOD no lugar dele
+    //
+    // `contribuicoes.pontos.*` e `regioes.*.pontos` (a auditoria do v6, tabelas
+    // 5 e 6): o diagnóstico contava o contêiner, e a montagem acontecia anexada
+    // ou não — tirar o `append` de cada ponto passava. Aqui cada um recebe uma
+    // contribuição marcada, como um MOD a faria, e a marca é procurada **no
+    // lugar que o ponto promete**, uma vez, e em nenhum outro.
+    const pontos = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const salaDeLia = r.voice_rooms.find((sala) => sala.people.includes(lia));
+      const aberto = r.channels.find((c) => c.open);
+      const outroCanal = r.channels.find((c) => !c.open) ?? aberto;
+      const linhaDe = (no) => no.closest("li.pessoa")?.querySelector(".pessoa-nome")?.textContent.trim();
+      const casos = [
+        { ponto: "pessoa.identidade", alvo: lia.id, lugar: (no) => !!no.closest(".pessoa-identidade") && linhaDe(no) === lia.nickname },
+        // Só na linha apresentada por um MOD: a nativa não tem onde pô-lo (achado
+        // do passo 7, levado à orquestradora em 16/10).
+        { ponto: "pessoa.detalhes", alvo: lia.id, comCartao: true,
+          lugar: (no) => !!no.closest("li.pessoa-apresentada details.pessoa-nativo") && linhaDe(no) === lia.nickname },
+        { ponto: "pessoa.acoes", alvo: lia.id, acao: true, lugar: (no) => !!no.closest(".pessoa-rodape") && linhaDe(no) === lia.nickname },
+        { ponto: "canal.item", alvo: outroCanal.id, lugar: (no) => !!no.closest(`#lista-linhas button[data-linha="${outroCanal.id}"]`) },
+        { ponto: "canal.cabecalho", alvo: aberto.id, lugar: (no) => !!no.closest("#canal-cabecalho-mods") },
+        { ponto: "canal.cabecalho", alvo: aberto.id, acao: true, lugar: (no) => !!no.closest("#canal-cabecalho-mods") },
+        { ponto: "compositor.ferramentas", acao: true, lugar: (no) => !!no.closest("#form-mensagem #compositor-ferramentas") },
+        { ponto: "sala.acoes", alvo: salaDeLia.id, lugar: (no) => no.closest("li.roster-grupo")?.querySelector(":scope > .roster-sala .roster-sala-nome")?.textContent === salaDeLia.name && !!no.closest(".roster-sala") },
+        { ponto: "sala.acoes", alvo: salaDeLia.id, acao: true, lugar: (no) => no.closest("li.roster-grupo")?.querySelector(":scope > .roster-sala .roster-sala-nome")?.textContent === salaDeLia.name && !!no.closest(".roster-sala") },
+      ];
+      const instancia = new InstanciaDeMod("mod/pontos", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/pontos", instancia);
+      const medidos = [];
+      for (const caso of casos) {
+        const marca = `marca de ${caso.ponto}${caso.acao ? " (ação)" : ""}`;
+        const pedido = { ponto: caso.ponto, modo: "adicionar", ...(caso.alvo !== undefined ? { alvo: String(caso.alvo) } : {}) };
+        const cartao = caso.comCartao ? contribuicoesDosMods.registrar({ id: "mod/pontos" }, instancia, {
+          ponto: "pessoa.cartao", modo: "substituir", alvo: String(caso.alvo),
+          conteudo: [{ forma: "texto", chave: "c", dentro: "cartão" }],
+        }).handle : null;
+        const { handle } = contribuicoesDosMods.registrar({ id: "mod/pontos" }, instancia, caso.acao
+          ? { ...pedido, rotulo: marca, acaoPrincipal: "tocar" }
+          : { ...pedido, conteudo: [{ forma: "texto", chave: "marca", dentro: marca }] });
+        desenhar(r);
+        await quadro();
+        const achados = [...document.querySelectorAll("body *")]
+          .filter((no) => no.children.length === 0 && no.textContent.trim() === marca);
+        medidos.push({ marca, achados: achados.length, noLugar: achados.filter(caso.lugar).length });
+        contribuicoesDosMods.revogar(handle, { id: "mod/pontos", instancia });
+        if (cartao) contribuicoesDosMods.revogar(cartao, { id: "mod/pontos", instancia });
+      }
+      modsCarregados.delete("mod/pontos");
+      desenhar(r);
+      await quadro();
+      return medidos;
+    }).catch((erro) => [{ erro: erro.message.split("\n")[0] }]);
+    for (const medido of pontos) {
+      if (medido.erro) falhas.push(`cada ponto no lugar: ${medido.erro}`);
+      else if (medido.achados !== 1 || medido.noLugar !== 1) {
+        falhas.push(`cada ponto no lugar: «${medido.marca}» aparece ${medido.achados} vez(es), ${medido.noLugar} no lugar que o ponto promete`);
+      }
+    }
+
     // ------------------------------------- revogar recalcula do estado de agora
     //
     // `contribuicoes.garantias-do-produto[4]` («ao revogar, o nativo é
@@ -469,6 +534,11 @@ const REGIOES = [
           li.classList.contains("roster-subgrupo") ? `[${li.textContent}]` : (li.querySelector(".pessoa-nome")?.textContent ?? "?")),
       }));
       const antes = $("lista-roster").innerHTML;
+      // **O menu de moderação continua do produto** (`regioes.pessoas.lista.
+      // produto[0]`; a auditoria do v6, tabela 5): a porta de cada nome,
+      // contada sem e com a substituição.
+      const portas = () => $("lista-roster").querySelectorAll("button[data-moderar-pessoa]").length;
+      const portasAntes = portas();
       const instancia = new InstanciaDeMod("mod/lista", "h", geracaoDaSessao, {
         pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
       });
@@ -489,6 +559,7 @@ const REGIOES = [
       desenhar(r);
       await quadro();
       const com = secoes();
+      const portasCom = portas();
       // A aba DIAGNÓSTICO conta o identificador que ninguém usa (o 99).
       const diagnostico = () => frasesDeQuemPinta(quemPintaCadaPonto().find((l) => l.ponto === "pessoas.lista"));
       const diag = diagnostico();
@@ -497,7 +568,7 @@ const REGIOES = [
       desenhar(r);
       await quadro();
       const ignoradosDepois = quemPintaCadaPonto().find((l) => l.ponto === "pessoas.lista").ignorados;
-      return { recusa, com, voltou: $("lista-roster").innerHTML === antes, diag, ignoradosDepois };
+      return { recusa, com, voltou: $("lista-roster").innerHTML === antes, diag, ignoradosDepois, portasAntes, portasCom };
     }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
     if (lista.erro) falhas.push(`pessoas.lista: ${lista.erro}`);
     else {
@@ -512,6 +583,10 @@ const REGIOES = [
         falhas.push(`pessoas.lista: as seções saíram ${JSON.stringify(lista.com)}, e o esperado é ${JSON.stringify(esperado)}`);
       }
       if (!lista.voltou) falhas.push("pessoas.lista: revogada, e a lista não voltou ao que era");
+      if (lista.portasAntes < 1) falhas.push("pessoas.lista: o retrato não tem quem moderar, e o caso não mede a porta");
+      else if (lista.portasCom !== lista.portasAntes) {
+        falhas.push(`pessoas.lista: com a lista substituída, as portas de moderação foram de ${lista.portasAntes} a ${lista.portasCom}`);
+      }
       if (!lista.diag.some((f) => /cita 1 identificador de quem não está aqui, ou repetido: ignorado$/.test(f))) {
         falhas.push(`pessoas.lista: o DIAGNÓSTICO não conta o identificador ignorado — diz ${JSON.stringify(lista.diag)}`);
       }
@@ -842,6 +917,15 @@ const REGIOES = [
       const textos = (id) => [...$(id).children].map((li) =>
         (li.querySelector(".linha-rotulo, .voice_room-nome") ?? li).textContent.trim());
       const antes = { salas: $("lista-voice_rooms").innerHTML, canais: $("lista-linhas").innerHTML };
+      // **O que é do produto em cada linha** (`regioes.servidor.navegacao.produto`;
+      // a auditoria do v6, tabela 5): o ENTRAR NA SALA e a moderação de salas e
+      // canais — renomear, apagar —, contados antes e com a substituição.
+      const doProduto = () => ({
+        entrar: $("lista-voice_rooms").querySelectorAll(".voice_room-entrar").length,
+        botoesDasSalas: $("lista-voice_rooms").querySelectorAll("li.voice_room button").length,
+        controlesDosCanais: $("lista-linhas").querySelectorAll(".linha-controles button").length,
+      });
+      const nativo = doProduto();
       const instancia = new InstanciaDeMod("mod/navegacao", "h", geracaoDaSessao, {
         pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
       });
@@ -863,9 +947,19 @@ const REGIOES = [
           canais: { grupos: [{ titulo: "MESA 1", ids: [2, 2, 99] }, { titulo: "VAZIO", ids: [98] }] },
         },
       });
+      // E um `canal.item` no canal agrupado: com a navegação substituída, ele
+      // continua na linha do canal (`regioes.servidor.navegacao.pontos[0]`).
+      const item = contribuicoesDosMods.registrar({ id: "mod/navegacao" }, instancia, {
+        ponto: "canal.item", modo: "adicionar", alvo: "2",
+        conteudo: [{ forma: "texto", chave: "i", dentro: "marca do canal agrupado" }],
+      }).handle;
       desenhar(r);
       await quadro();
+      const marcas = [...document.querySelectorAll("body *")]
+        .filter((no) => no.children.length === 0 && no.textContent.trim() === "marca do canal agrupado");
       const com = {
+        produto: doProduto(),
+        itemNaLinha: marcas.length === 1 && Boolean(marcas[0].closest('#lista-linhas button[data-linha="2"]')),
         diag: frasesDeQuemPinta(quemPintaCadaPonto().find((l) => l.ponto === "servidor.navegacao")),
         salas: textos("lista-voice_rooms"),
         canais: textos("lista-linhas"),
@@ -873,12 +967,13 @@ const REGIOES = [
         entrar: $("lista-voice_rooms").querySelectorAll("li.voice_room").length,
         entradasDeMod: !$("lista-mods-navegacao").hidden,
       };
+      contribuicoesDosMods.revogar(item, { id: "mod/navegacao", instancia });
       contribuicoesDosMods.revogar(handle, { id: "mod/navegacao", instancia });
       modsCarregados.delete("mod/navegacao");
       desenhar(r);
       await quadro();
       const depois = { salas: $("lista-voice_rooms").innerHTML, canais: $("lista-linhas").innerHTML };
-      return { recusa, com, voltou: depois.salas === antes.salas && depois.canais === antes.canais, canais: r.channels.length };
+      return { recusa, com, nativo, voltou: depois.salas === antes.salas && depois.canais === antes.canais, canais: r.channels.length };
     }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
     if (navegacao.erro) {
       falhas.push(`servidor.navegacao: ${navegacao.erro}`);
@@ -897,6 +992,12 @@ const REGIOES = [
         falhas.push(`servidor.navegacao: ${navegacao.com.canaisNaTela} de ${navegacao.canais} canais na tela — alguém sumiu`);
       }
       if (navegacao.com.entrar !== 1) falhas.push("servidor.navegacao: a sala perdeu a linha do produto");
+      if (navegacao.nativo.entrar < 1 || navegacao.nativo.botoesDasSalas <= navegacao.nativo.entrar || navegacao.nativo.controlesDosCanais < 1) {
+        falhas.push(`servidor.navegacao: o retrato não tem ENTRAR e moderação para o caso medir: ${JSON.stringify(navegacao.nativo)}`);
+      } else if (JSON.stringify(navegacao.com.produto) !== JSON.stringify(navegacao.nativo)) {
+        falhas.push(`servidor.navegacao: com a substituição, o que é do produto nas linhas mudou: ${JSON.stringify(navegacao.nativo)} → ${JSON.stringify(navegacao.com.produto)}`);
+      }
+      if (!navegacao.com.itemNaLinha) falhas.push("servidor.navegacao: com a substituição, o canal.item não ficou na linha do canal");
       if (navegacao.com.entradasDeMod) falhas.push("servidor.navegacao: a substituição apareceu como entrada «DOS MODS»");
       if (!navegacao.voltou) falhas.push("servidor.navegacao: revogada, e as listas não voltaram ao que eram");
       // O 2 repetido, o 99 e o 98: três, somadas as duas listas.

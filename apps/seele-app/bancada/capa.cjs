@@ -495,6 +495,47 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(citacao.retrato, 'inicial', `o retrato que cita um avatar que não existe saiu ${citacao.retrato}`);
     assert.deepEqual(citacao.recusas, [], 'citar uma imagem que a pessoa não tem virou recusa');
 
+    // 5a. **O avatar que existe, citado** (`capa.citacao` e
+    //     `regioes.pessoas.lista.pontos[4]`; a auditoria do v6, tabelas 5 e
+    //     6): o caso de cima cita um avatar que a pessoa não tem. Com um
+    //     `pessoa.avatar` registrado, o retrato do cartão mostra a imagem
+    //     dele — sem pedido de mídia novo —, e não a inicial.
+    const avatarCitado = await page.evaluate(async (alvo) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 32; canvas.height = 32;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#3250e6'; ctx.fillRect(0, 0, 32, 32);
+      const foto = canvas.toDataURL('image/png');
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: foto };
+      const avatar = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.avatar', modo: 'substituir', alvo,
+        conteudo: { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:avatar-citado' } } },
+      }).handle;
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      const pedidosAntes = testCalls.filter(c => c.cmd === 'ler_imagem_mod').length;
+      const cartao = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.cartao', modo: 'substituir', alvo,
+        conteudo: [{ forma: 'retrato', chave: 'r', daPessoa: 'avatar' }],
+      }).handle;
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      const linha = document.querySelector('li.pessoa-apresentada[data-apresentada-por="teste/perfis"]');
+      const retrato = linha?.querySelector('.pessoa-miolo [data-estado-do-retrato]');
+      const medido = {
+        estado: retrato?.dataset.estadoDoRetrato ?? null,
+        src: retrato?.querySelector('.regiao-de-mod-retrato-imagem')?.getAttribute('src') === foto,
+        pedidosNovos: testCalls.filter(c => c.cmd === 'ler_imagem_mod').length - pedidosAntes,
+      };
+      contribuicoesDosMods.revogar(cartao);
+      contribuicoesDosMods.revogar(avatar);
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      desenhar(testTable.snapshot);
+      return medido;
+    }, alvo);
+    assert.deepEqual(avatarCitado, { estado: 'imagem', src: true, pedidosNovos: 0 },
+      `o retrato que cita o avatar que a pessoa tem não o mostrou: ${JSON.stringify(avatarCitado)}`);
+
     // 5b. **A citação acompanha a troca** (o achado do PERFIS, 15/10; rascunho
     //     §4). A pessoa troca a capa pelo servidor: o MOD faz `atualizar` na
     //     contribuição da capa, e o cartão que a cita — no fundo e num retrato
