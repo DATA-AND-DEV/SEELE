@@ -65,11 +65,20 @@
 //    o botão da ação são os mesmos nós, o foco fica no botão e a seleção no
 //    texto do MOD; a ação que sai tira só o botão dela; e o clique depois de
 //    um retrato que muda o dado da ação (o canal aberto) age com o de agora.
+// 14. **A conversa reconciliada pelo id da mensagem**: alguém que chega ao
+//    servidor não muda nada nela; um retrato novo muda o avatar no lugar, e a
+//    imagem aparece (o `style` pelo CSSOM, que a CSP aceita); uma mensagem
+//    nova entra sem tirar nem mudar as outras, com a rolagem onde estava, ou
+//    seguindo o fim; a que sai leva só o nó dela; o REMOVER e o link de
+//    mensagens editadas são os mesmos nós e agem com o dado de agora; e os nós
+//    de MOD da conversa não saem do documento. O foco no link de uma mensagem
+//    e a seleção no corpo de outra atravessam tudo isso.
 //
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
 // salas repovoada, o caso 6; com a de canais, o caso 10; com o `textContent`
-// de volta, o caso 12; com a região de MOD repovoada, o caso 13.
+// de volta, o caso 12; com a região de MOD repovoada, o caso 13; com a
+// conversa repovoada, o caso 14.
 //
 // Rodar:  node apps/seele-app/bancada/linhas-pelo-id.cjs
 
@@ -127,8 +136,14 @@ async function abrir(browser, url, r) {
       };
       window.__TAURI__ = {
         core: {
-          invoke: async (cmd) => {
+          invoke: async (cmd, args) => {
+            // O que a página pediu, para o caso 14 conferir o link da conversa.
+            window.chamadas?.push({ cmd, args });
             if (cmd === "snapshot") return JSON.parse(JSON.stringify(testTable.snapshot));
+            // A conversa também é um objeto novo a cada pedido, como a ponte a manda.
+            if (cmd === "messages" && Array.isArray(testTable.messages)) {
+              return JSON.parse(JSON.stringify(testTable.messages));
+            }
             return testTable[cmd] ?? null;
           },
         },
@@ -1492,6 +1507,322 @@ async function abrir(browser, url, r) {
       );
     }
 
+    // 14. A conversa reconciliada pelo id da mensagem. Ela não é refeita a cada
+    //     tique — só quando a revisão das mensagens anda, ou quando os retratos
+    //     mudam (`sincronizarRetratos`) —, mas era refeita **inteira** nessas
+    //     vezes: o foco no link de uma mensagem caía no `<body>`, a seleção se
+    //     desfazia, e o leitor de tela perdia o nó (433 de 434 ids AX trocados
+    //     com uma mensagem nova, 512 de 513 com alguém chegando ao servidor,
+    //     sem nada mudar na conversa). Com 60 mensagens, pelo tique:
+    //     a) alguém chega ao servidor: nada muda na lista;
+    //     b) o retrato de quem escreve muda: o avatar muda no lugar, e a imagem
+    //        aparece de fato (o `style` passa pelo CSSOM: a CSP recusa o
+    //        atributo escrito), sem nó tirado nem posto na lista;
+    //     c) uma mensagem nova, com a conversa rolada para cima: ela entra, e
+    //        nenhuma outra sai nem muda; a rolagem fica onde estava;
+    //     d) outra, com a conversa no fim: a rolagem segue o fim;
+    //     e) uma mensagem sai: só o nó dela sai;
+    //     f) duas mensagens são editadas: o REMOVER de uma e o link da outra são
+    //        os mesmos nós, e agem com o dado de agora.
+    //     Em todos, o foco no link de uma mensagem e a seleção no corpo de outra
+    //     ficam, e cada `li` é o mesmo nó.
+    const agora = Math.floor(Date.now() / 1000);
+    const CONVERSA = Array.from({ length: 60 }, (_, i) => ({
+      id: i + 1,
+      channel: 1,
+      author: (i % 3) + 2,
+      author_nickname: apelido((i % 3) + 2),
+      at_seconds: agora - (60 - i) * 1200,
+      body: i === 10
+        ? `mensagem ${i}: veja https://exemplo.br/pagina-${i} antes de sair`
+        : i === 20
+          ? `mensagem ${i}: o túnel do norte está fechado até amanhã, e o desvio antigo continua aberto`
+          : `mensagem ${i}: texto comum da conversa, para ela ter altura e rolar`,
+      own: false,
+      edited: false,
+      attachment: null,
+      estado: "Confirmada",
+      client_message_id: null,
+    }));
+    const RETRATO_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const pagina14 = await abrir(browser, url, BASE);
+    const caso14 = await pagina14.page.evaluate(async ({ conversa, png }) => {
+      const tique = () => new Promise((ok) => setTimeout(ok, 1200));
+      const lista = document.getElementById("lista-mensagens");
+      // Quantas vezes a conversa foi desenhada: a prova de que cada passo
+      // redesenhou a lista, e não só o retrato.
+      let desenhosDaConversa = 0;
+      const desenharDeVerdade = window.desenharMensagens;
+      window.desenharMensagens = function contado(...args) {
+        desenhosDaConversa += 1;
+        return desenharDeVerdade.apply(this, args);
+      };
+      window.chamadas = [];
+      const liDe = (id) => lista.querySelector(`button[data-moderar-mensagem="${id}"]`)?.closest("li") ?? null;
+      const linhas = () => new Map([...lista.querySelectorAll(":scope > li.mensagem")]
+        .map((li) => [li.querySelector("button[data-moderar-mensagem]")?.dataset.moderarMensagem, li]));
+      const observar = () => {
+        const registros = [];
+        const observador = new MutationObserver((rs) => registros.push(...rs));
+        observador.observe(lista, { subtree: true, childList: true, attributes: true, characterData: true });
+        return () => {
+          registros.push(...observador.takeRecords());
+          observador.disconnect();
+          return registros;
+        };
+      };
+      const naLista = (registros) => registros.filter((r) => r.target === lista && r.type === "childList");
+      const tirados = (registros) => naLista(registros).flatMap((r) => [...r.removedNodes]);
+      const postos = (registros) => naLista(registros).flatMap((r) => [...r.addedNodes]);
+      const trocadas = (antes, fora = null) => {
+        const depois = linhas();
+        return [...antes].filter(([id, li]) => id !== fora && (depois.get(id) !== li || !li.isConnected)).map(([id]) => id);
+      };
+      const link = () => liDe(11)?.querySelector(".link-externo") ?? null;
+      const corpo20 = () => liDe(21)?.querySelector(".corpo")?.firstChild ?? null;
+      const comRevisao = (mensagens) => {
+        testTable.messages = mensagens;
+        const s = structuredClone(testTable.snapshot);
+        s.messages_revision += 1;
+        testTable.snapshot = s;
+      };
+
+      // A conversa chega, e a página a desenha.
+      comRevisao(conversa);
+      for (let i = 0; i < 60 && lista.querySelectorAll("li.mensagem").length < conversa.length; i += 1) await quadros(2);
+      await tique();
+
+      // O foco no link da mensagem 11 e a seleção no corpo da 21, que valem
+      // através de todos os passos; e a conversa rolada para cima.
+      const oLink = link();
+      oLink?.focus();
+      const oCorpo = corpo20();
+      const faixa = document.createRange();
+      faixa.setStart(oCorpo, 14);
+      faixa.setEnd(oCorpo, 60);
+      getSelection().removeAllRanges();
+      getSelection().addRange(faixa);
+      const selecionado = getSelection().toString();
+      lista.scrollTop = 800;
+      const preparo = {
+        mensagens: lista.querySelectorAll("li.mensagem").length,
+        focado: Boolean(oLink) && document.activeElement === oLink,
+        selecionado,
+        rolagem: lista.scrollTop,
+        cabe: lista.scrollHeight - lista.clientHeight,
+      };
+      const ficou = () => ({
+        foco: Boolean(oLink) && oLink.isConnected && document.activeElement === oLink,
+        focoEm: document.activeElement?.className || document.activeElement?.tagName,
+        selecao: getSelection().toString(),
+      });
+      const passo = async (mudar) => {
+        const antes = linhas();
+        const desenhos = desenhosDaConversa;
+        const parar = observar();
+        mudar();
+        await tique();
+        const registros = parar();
+        return { antes, registros, redesenhou: desenhosDaConversa > desenhos, ...ficou() };
+      };
+
+      // a) Alguém chega ao servidor, e não escreveu nada.
+      let r = await passo(() => {
+        const s = structuredClone(testTable.snapshot);
+        s.presentes.push({ ...s.presentes[1], id: 901, nickname: "recem-chegada-14", is_self: false });
+        testTable.snapshot = s;
+      });
+      const chega = {
+        redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
+        trocadas: trocadas(r.antes), mutacoes: r.registros.length, rolagem: lista.scrollTop,
+      };
+
+      // b) O retrato de quem escreve muda: a revisão dos retratos anda, e a
+      //    ponte passa a devolver uma imagem.
+      const avatar = liDe(1)?.querySelector(".mensagem-avatar");
+      testTable.imagem_da_pessoa = png;
+      r = await passo(() => {
+        const s = structuredClone(testTable.snapshot);
+        s.person_icons_revision = (s.person_icons_revision ?? 0) + 1;
+        testTable.snapshot = s;
+      });
+      const foraDoAvatar = r.registros.filter((reg) => {
+        const no = reg.target.nodeType === Node.ELEMENT_NODE ? reg.target : reg.target.parentElement;
+        return !no?.closest?.(".mensagem-avatar");
+      });
+      const retrato = {
+        redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
+        trocadas: trocadas(r.antes),
+        naLista: naLista(r.registros).length,
+        foraDoAvatar: foraDoAvatar.length,
+        mutacoes: r.registros.length,
+        mesmoAvatar: Boolean(avatar) && liDe(1)?.querySelector(".mensagem-avatar") === avatar,
+        imagem: avatar ? getComputedStyle(avatar).backgroundImage.slice(0, 22) : null,
+        rolagem: lista.scrollTop,
+      };
+
+      // c) Uma mensagem nova, com a conversa rolada para cima.
+      const comNova = (mensagens, id) => [...mensagens, {
+        ...mensagens[mensagens.length - 1], id, author: 4, author_nickname: "p-004",
+        at_seconds: Math.floor(Date.now() / 1000), body: `mensagem nova ${id}`,
+      }];
+      lista.scrollTop = 800;
+      const rolagemAntes = lista.scrollTop;
+      r = await passo(() => comRevisao(comNova(testTable.messages, 61)));
+      const nova = {
+        redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
+        trocadas: trocadas(r.antes),
+        tirados: tirados(r.registros).length,
+        postos: postos(r.registros).map((no) => no.className),
+        dentroDeOutras: r.registros.filter((reg) => reg.target !== lista).length,
+        entrou: Boolean(liDe(61)),
+        rolagem: [rolagemAntes, lista.scrollTop],
+      };
+
+      // d) Outra, com a conversa no fim: ela segue o fim.
+      lista.scrollTop = lista.scrollHeight;
+      r = await passo(() => comRevisao(comNova(testTable.messages, 62)));
+      const noFim = {
+        redesenhou: r.redesenhou,
+        trocadas: trocadas(r.antes),
+        entrou: Boolean(liDe(62)),
+        distanciaDoFim: lista.scrollHeight - lista.scrollTop - lista.clientHeight,
+      };
+      lista.scrollTop = 800;
+
+      // e) A mensagem 31 sai.
+      const li31 = liDe(31);
+      r = await passo(() => comRevisao(testTable.messages.filter((m) => m.id !== 31)));
+      const saiu = {
+        redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
+        trocadas: trocadas(r.antes, "31"),
+        foiEmbora: Boolean(li31) && !li31.isConnected && liDe(31) === null,
+        tirados: tirados(r.registros).map((no) => (no === li31 ? "a 31" : no.className)),
+        postos: postos(r.registros).length,
+      };
+
+      // f) A 12 e a 11 são editadas: o REMOVER da 12 e o link da 11 são os
+      //    mesmos nós, e o clique age com o texto e o endereço de agora.
+      const remover = liDe(12)?.querySelector("button.moderar-remover");
+      r = await passo(() => comRevisao(testTable.messages.map((m) => (
+        m.id === 12 ? { ...m, edited: true, body: "mensagem 11: corrigida depois" }
+          : m.id === 11 ? { ...m, edited: true, body: "mensagem 10: veja https://exemplo.br/outra-pagina antes de sair" }
+            : m))));
+      const editada = {
+        redesenhou: r.redesenhou, foco: r.foco, focoEm: r.focoEm, selecao: r.selecao,
+        trocadas: trocadas(r.antes),
+        mesmoRemover: Boolean(remover) && liDe(12)?.querySelector("button.moderar-remover") === remover && remover.isConnected,
+        mesmoLink: Boolean(oLink) && link() === oLink,
+      };
+      window.chamadas = [];
+      oLink?.click();
+      await quadros(2);
+      editada.abriu = window.chamadas.filter((c) => c.cmd === "abrir_no_navegador").map((c) => c.args?.url);
+      remover?.click();
+      await quadros(2);
+      editada.confirmacao = document.getElementById("moderar-consequencia")?.textContent ?? "";
+      document.getElementById("moderar-cancelar")?.click();
+
+      // g) Os nós de MOD da conversa (`conversa.mensagem`): o que um MOD
+      //    acrescenta à mensagem 5 e o corpo que ele desenha na 6 são os mesmos
+      //    nós entre um desenho e o seguinte, e uma mensagem nova não os tira
+      //    do documento — nem por um instante: o observador vê os removidos.
+      registrarMod("bancada/conversa", [
+        { ponto: "conversa.mensagem", modo: "adicionar", alvo: "5", prioridade: 0,
+          conteudo: [{ forma: "texto", chave: "t", dentro: "nota do MOD na mensagem 5" }] },
+        { ponto: "conversa.mensagem", modo: "substituir", alvo: "6", prioridade: 0,
+          conteudo: [{ forma: "texto", chave: "t", dentro: "a mensagem 6, desenhada pelo MOD" }] },
+      ]);
+      await quadros(3);
+      desenharMensagens();
+      const deMod = () => [...lista.querySelectorAll('.contribuicao-de-mod[data-ponto="conversa.mensagem"]')];
+      const nosDeModAntes = deMod();
+      const donoDe = (no) => no.closest("li")?.querySelector("button[data-moderar-mensagem]")?.dataset.moderarMensagem;
+      const donos = nosDeModAntes.map(donoDe);
+      r = await passo(() => comRevisao(comNova(testTable.messages, 63)));
+      const removidos = r.registros.flatMap((reg) => [...reg.removedNodes]);
+      const comMod = {
+        redesenhou: r.redesenhou,
+        nos: nosDeModAntes.length,
+        donos,
+        saiuDoDocumento: nosDeModAntes.filter((no) => removidos.some((m) => m === no || m.contains?.(no))).length,
+        trocados: nosDeModAntes.filter((no, i) => !no.isConnected || donoDe(no) !== donos[i]).length,
+        mesmos: deMod().length === nosDeModAntes.length && deMod().every((no, i) => no === nosDeModAntes[i]),
+        trocadas: trocadas(r.antes),
+      };
+      getSelection().removeAllRanges();
+      window.desenharMensagens = desenharDeVerdade;
+      return { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod };
+    }, { conversa: CONVERSA, png: RETRATO_PNG });
+    assert.deepEqual(pagina14.errors, [], "caso 14: erros na página");
+    await pagina14.page.close();
+    {
+      const { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod } = caso14;
+      assert.equal(preparo.mensagens, CONVERSA.length, `caso 14: a conversa desenhou ${preparo.mensagens} mensagens`);
+      assert.ok(preparo.focado, "caso 14: a bancada não conseguiu pôr o foco no link da mensagem 11");
+      assert.ok(selecionado.length > 20, `caso 14: a bancada não conseguiu selecionar o corpo da 21 (${JSON.stringify(selecionado)})`);
+      assert.ok(preparo.rolagem === 800 && preparo.cabe > 1600, `caso 14: a conversa não rola o bastante (${preparo.rolagem}, ${preparo.cabe})`);
+      const ficaram = (nome, p) => {
+        assert.ok(p.redesenhou, `caso 14 (${nome}): a conversa não foi redesenhada, e o passo não mediu nada`);
+        assert.ok(p.foco, `${nome}: o foco no link da mensagem 11 caiu (está em ${p.focoEm})`);
+        assert.equal(p.selecao, selecionado, `${nome}: a seleção no corpo da mensagem 21 foi de ${JSON.stringify(selecionado)} a ${JSON.stringify(p.selecao)}`);
+        assert.deepEqual(p.trocadas, [], `${nome}: ${p.trocadas.length} mensagens trocaram de nó (${p.trocadas.slice(0, 5).join(", ")}…)`);
+      };
+      ficaram("alguém chegou ao servidor", chega);
+      assert.equal(chega.mutacoes, 0, `alguém chegou ao servidor e a conversa, que não mudou, teve ${chega.mutacoes} mutações`);
+      assert.equal(chega.rolagem, 800, `alguém chegou ao servidor e a rolagem da conversa foi a ${chega.rolagem}`);
+      ficaram("o retrato de quem escreve mudou", retrato);
+      assert.equal(retrato.naLista, 0, `o retrato de quem escreve mudou e ${retrato.naLista} mutações tiraram ou puseram nós na lista`);
+      assert.equal(retrato.foraDoAvatar, 0, `o retrato mudou e ${retrato.foraDoAvatar} de ${retrato.mutacoes} mutações caíram fora dos avatares`);
+      assert.ok(retrato.mesmoAvatar, "o retrato mudou e o avatar da mensagem 1 trocou de nó");
+      assert.ok(
+        retrato.imagem?.startsWith('url("data:image/png'),
+        `o retrato mudou e o avatar da mensagem 1 não mostra a imagem (background-image ${JSON.stringify(retrato.imagem)}): ` +
+          "a CSP do produto recusa o `style` escrito como atributo",
+      );
+      assert.equal(retrato.rolagem, 800, `o retrato mudou e a rolagem da conversa foi a ${retrato.rolagem}`);
+      ficaram("uma mensagem nova", nova);
+      assert.ok(nova.entrou, "a mensagem nova não entrou na conversa");
+      assert.equal(nova.tirados, 0, `a mensagem nova tirou ${nova.tirados} nós da lista`);
+      // A mensagem, e o divisor de um dia novo se ela virou a meia-noite.
+      const feitio = (classe) => classe.split(" ")[0];
+      assert.ok(
+        nova.postos.filter((classe) => feitio(classe) === "mensagem").length === 1
+          && nova.postos.every((classe) => ["mensagem", "mensagens-dia"].includes(feitio(classe))),
+        `a mensagem nova pôs na lista: ${JSON.stringify(nova.postos)}`,
+      );
+      assert.equal(nova.dentroDeOutras, 0, `a mensagem nova mexeu em ${nova.dentroDeOutras} lugares dentro das outras`);
+      assert.equal(nova.rolagem[1], nova.rolagem[0], `a mensagem nova levou a conversa, rolada para cima, de ${nova.rolagem[0]} a ${nova.rolagem[1]}`);
+      assert.ok(noFim.redesenhou && noFim.entrou, "caso 14 (d): a mensagem nova não chegou à conversa");
+      assert.deepEqual(noFim.trocadas, [], `com a conversa no fim, ${noFim.trocadas.length} mensagens trocaram de nó`);
+      assert.ok(noFim.distanciaDoFim < 2, `com a conversa no fim, a mensagem nova a deixou a ${noFim.distanciaDoFim}px do fim`);
+      ficaram("a mensagem 31 saiu", saiu);
+      assert.ok(saiu.foiEmbora, "a mensagem 31 saiu da conversa e o nó dela ficou");
+      assert.deepEqual(saiu.tirados, ["a 31"], `a mensagem 31 saiu e a lista perdeu: ${JSON.stringify(saiu.tirados)}`);
+      assert.equal(saiu.postos, 0, `a mensagem 31 saiu e ${saiu.postos} nós foram postos na lista`);
+      ficaram("duas mensagens editadas", editada);
+      assert.ok(editada.mesmoRemover, "a mensagem 12 foi editada e o REMOVER dela trocou de nó");
+      assert.ok(editada.mesmoLink, "a mensagem 11 foi editada e o link dela trocou de nó");
+      assert.deepEqual(
+        editada.abriu, ["https://exemplo.br/outra-pagina"],
+        `o link editado abriu ${JSON.stringify(editada.abriu)}, e não o endereço de agora`,
+      );
+      assert.ok(
+        editada.confirmacao.includes("«mensagem 11: corrigida depois»"),
+        `o REMOVER da mensagem editada confirma ${JSON.stringify(editada.confirmacao)}, e não o texto de agora`,
+      );
+      assert.ok(comMod.redesenhou, "caso 14 (g): a mensagem nova não redesenhou a conversa");
+      assert.deepEqual(comMod.donos, ["5", "6"], `caso 14 (g): os nós de MOD da conversa estão nas mensagens ${JSON.stringify(comMod.donos)}`);
+      assert.equal(
+        comMod.saiuDoDocumento, 0,
+        `conversa.mensagem: ${comMod.saiuDoDocumento} de ${comMod.nos} nós de MOD saíram do documento com uma ` +
+          "mensagem nova: ou o marcador não está na mensagem montada, ou um nó do produto com o nó de MOD dentro foi refeito",
+      );
+      assert.equal(comMod.trocados, 0, `conversa.mensagem: ${comMod.trocados} nós de MOD trocaram de mensagem ou saíram`);
+      assert.ok(comMod.mesmos, "conversa.mensagem: os nós de MOD da conversa não são os mesmos depois de uma mensagem nova");
+      assert.deepEqual(comMod.trocadas, [], `com nós de MOD na conversa, ${comMod.trocadas.length} mensagens trocaram de nó`);
+    }
+
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
         `(${caso1.mutacoes} mutações, nenhuma fora dela) e o foco ficou; o mesmo retrato não ` +
@@ -1509,7 +1840,11 @@ async function abrir(browser, url, r) {
         "ficou; o que mudou (o ATRASO, o UPTIME, a média, o contador, o «no ar») mudou no mesmo nó. " +
         "Nas regiões de MOD, o retrato igual não mexeu em nada, o foco ficou no botão da ação e a seleção " +
         "no texto do MOD; a ação que saiu levou só o botão dela; e o clique depois de o canal aberto " +
-        "mudar mandou o canal novo.",
+        `mudar mandou o canal novo. Na conversa, com ${CONVERSA.length} mensagens, o foco no link e a ` +
+        "seleção ficaram com alguém chegando, com um retrato novo (o avatar mudou no lugar, com a " +
+        "imagem), com uma mensagem nova (só ela entrou, e a rolagem ficou, ou seguiu o fim), com uma " +
+        "que saiu (só ela saiu) e com duas editadas (o REMOVER e o link agiram com o dado de agora); " +
+        "e os nós de MOD da conversa não saíram do documento.",
     );
   } finally {
     await browser.close();
