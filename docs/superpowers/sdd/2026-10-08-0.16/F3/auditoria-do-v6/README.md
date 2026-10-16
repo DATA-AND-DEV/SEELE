@@ -296,10 +296,55 @@ bancada das saídas de quem hospeda, que o `ci.yml` rodava e o `publicar.sh`
 não (`aa306a5d`), e a prova do núcleo que media um ponto escondido atrás da
 barra quando a faixa de quem liga empurra a tela (`bc8bd1a5`).
 
+## O passo 7: as INCERTA e as SEM PROVA restantes
+
+A regra da orquestradora (16/10): consertar o produto sem mexer no texto do
+`v6.json` sempre que der, e o que pedir texto vai numa quarta e última
+emenda, no fim. Cada prova foi revertida contra o produto e reprovou; as
+reversões estão na mensagem de cada commit. As linhas estão remarcadas nas
+tabelas, com a prova e o commit.
+
+| lote | o que | onde | commit |
+|---|---|---|---|
+| 1 | as nove categorias, os sete estados, as cinco animações e o `fora` dos estilos, com o espelho | `regiao-do-mod.cjs` | `c7d19051` |
+| 2 | os tetos da superfície contra o texto; **a fundura cortava calada**, consertada (`teto-de-fundura`) | `regiao-do-mod.cjs` | `695dbf18` |
+| 3 | os eventos `escolha`, `numero`, `cor` e `arquivo` | `regiao-do-mod.cjs` | `c19cd321` |
+| 4 | o fim que diz só `terminou`, o laço pausado dentro da volta, o teto de figuras | `regiao-do-mod.cjs` | `10439d06` |
+| 5 | o `lugar` da sessão, nada da ligação, a cola do desenho e o `listen` do aviso | `eventos-da-tela.cjs` | `54eaf66f` |
+| 6 | o título, o ocultar e o `fechar-pedido` pelo roteador; os `cartoes` recusados na 6 | `camadas.cjs`, `contribuicoes-e-camadas.cjs` | `f5ee4da1` |
+| 7 | o link pelo dono de verdade; a forma e a preferência da capa; o ponto desconhecido na linha | `capa.cjs`, `contribuicoes-e-camadas.cjs` | `6946541f` |
+| 8 | cada par do tema recusa por ele, com o espelho | `tons-do-tema.cjs` | `4d68c2a9` |
+| 9 | o ouvinte do `aoEvento` recebe o evento | `casos.json` (nativo e `.wasm`) | `61ba268f` |
+| 10 | a recusa da API velha e a linha do cache apontam o launcher | `hospedar-com-mod-antigo.cjs` | `fe0a72cb` |
+| 11 | o contexto diz quem pediu e se ela administra | `pedidos.rs` | `41049fc7` |
+| 12 | o teto de canais do `mundo.avisar` e o `avisos-demais` | `aviso.rs` | `c8914ed0` |
+| 13 | o `TemaMudou` só do pedido que gravou; qualquer pessoa pede | `tema_do_servidor.rs` | `d69fe061` |
+| 14 | listar e apagar pelo JavaScript, o `volume.apagar`, a linha do `mundo.registrar` | `mods/mod.rs` | `4c825327` |
+| 15 | cada momento sai do evento dele, com a carga | `despacho.rs` | `36fc80bd` |
+| 16 | o pedaço só para quem escolheu, o `soltar`, o teto do escolhido, a mídia acima do teto | `main.rs` | `7fd1246c` |
+| 17 | uma imagem de MOD vai e volta pelo cliente de verdade | `ponte_de_pedidos.rs` | `a4a2b7a4` |
+
+E o que o `.wasm` cobrava, rodado pela primeira vez nesta máquina com o
+wasi-sdk conferido: dois consertos meus (a B2 e a B10) tinham deixado o
+`motor.mjs` e a `executor-no-navegador.cjs` vermelhos, e as cobranças foram
+postas na forma que o produto já tinha (`8e8dfea5`).
+
+**À espera da orquestradora**, sem mexer em nada:
+- o retrato e o `fundoDeMidia` recusados pelo bolso de bytes, ou com bytes que
+  não são imagem, não mandam `midia/recusada` ao MOD, e a `midia` manda;
+- o `ponto-desconhecido` chega ao MOD sem a lista do que existe, que vai só
+  ao registro.
+
+**A contagem das tabelas, depois do passo 7:** 415 PROVADA, 54 INCERTA, 31
+SEM PROVA, 35 SEM CÓDIGO e 16 NÃO SE APLICA. As SEM CÓDIGO e parte das
+INCERTA e SEM PROVA foram fechadas pelos consertos da B e pelas provas do
+passo 5, e ainda não foram remarcadas linha a linha (a tabela 4 foi).
+
 **Ainda abertos:**
-- as INCERTA e as SEM PROVA que nenhum porte usa (o passo 7);
-- nada que roda o `.wasm` rodou nesta máquina (`cargo xtask web`,
-  `executor-no-navegador.cjs`): falta o `WASI_SDK`. O CI os roda.
+- as INCERTA e as SEM PROVA do navegador e do celular, e as que não têm teste
+  automatizado possível (os rótulos que nada lê, o diálogo do sistema, a
+  pinça e o entalhe);
+- remarcar nas tabelas as linhas fechadas antes do passo 7.
 
 Os achados 1 e 2, as bancadas de navegador e a do celular no portão de
 publicação, são da F6.
