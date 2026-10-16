@@ -334,6 +334,10 @@ tabelas, com a prova e o commit.
 | — | **o achado do 23, consertado** (decisão da orquestradora): o `pessoa.detalhes` na linha nativa, num «⋯» próprio, com o nome do MOD por cima numa caixa que recorta, por um lugar só (`detalhesDaPessoaNaLinha`), e `CASCA.detalhesNaLinha` para o celular pô-lo na folha da pessoa (a F8) | `base.js`, `mods-controles.css`, `tela-sessao.js`, `regioes-do-produto.cjs` | `2ff19efb`, `701302c6`, `4aeab701` |
 | 25 | a portaria, a moderação e o aceite à vista no guarda 11; a linha de dono do «⋯» descoberta, fora do tema e acima de 4,5:1; o «⋯» nativo pelo teclado; o palco pelo ponteiro de verdade | `nucleo.cjs`, `palco-da-chamada.cjs`, `regioes-do-produto.cjs` | `8f537bd8` |
 | — | **dois consertos do lote 25** (decisão da orquestradora): a linha de dono no `--nucleo-rotulo`, 6,82:1, e não nos 4,11 do apagado (achado da F8); e **a portaria fora do alcance dos diálogos de MOD** — um diálogo (z 60) cobria o VER QUEM É e o DEPOIS (z 19), e com um modal eles ficavam inertes —, pelo recorte do modal, pela área do não modal e pela pilha de inércia, e não subindo o z dela, que cobriria as camadas do produto entre 20 e 40 | `tela-sessao.css`, `mods-controles.css`, `mods-superficies.js`, `mods-superficies.css` | `4e2e1497`, `87908e41` |
+| 26 | o véu de quem fala, a capa lisa enquanto carrega, a grade rolada (as de fora paradas) e a citação pelo id na folha | `capa.cjs` | `da214aa8` |
+| 27 | o movimento reduzido em toda região e camada — duas regras o entregam, e tirar as duas reprova | `regioes-do-produto.cjs` | `d319c7d9` |
+| 28 | o braço `pedido` do roteador chama o servidor com o id do MOD dele | `contribuicoes-e-camadas.cjs` | `df7e947d` |
+| — | o `superficie-classes` já estava provado na `camadas.cjs` (`2f76bc4c`, `71c976a7`, `5b7ff153`), e só não remarcado: as três reversões reprovam | — | — |
 
 E o que o `.wasm` cobrava, rodado pela primeira vez nesta máquina com o
 wasi-sdk conferido: dois consertos meus (a B2 e a B10) tinham deixado o
@@ -348,20 +352,18 @@ postas na forma que o produto já tinha (`8e8dfea5`).
   `tipo-desconhecido` (`021876f8`). Os dois nomes só entram no `v6.json` se
   houver uma quarta emenda por outro motivo.
 
-**A contagem das tabelas, até o lote 25:** 482 PROVADA, 9 INCERTA, 9 SEM
+**A contagem das tabelas, até o lote 28:** 489 PROVADA, 5 INCERTA, 6 SEM
 PROVA, 35 SEM CÓDIGO e 16 NÃO SE APLICA (551 linhas). As SEM CÓDIGO e parte
 das INCERTA e SEM PROVA foram fechadas pelos consertos da B e pelas provas do
 passo 5, e ainda não foram remarcadas linha a linha (a tabela 4 foi).
 
-**Ainda abertos (18):**
-- a capa (6:59, 6:64, 6:65, 6:69), a ligação no núcleo (9:24: CHAMANDO, SEU
-  CÓDIGO e «receber ligações»; a portaria e a faixa de quem liga estão
-  provadas), a conferência de todos os pares do tema (8:78) e a folha que
-  convive com o palco e a página (7:49, 7:50);
+**Ainda abertos (11):**
+- a ligação no núcleo (9:24: CHAMANDO, SEU CÓDIGO e «receber ligações»; a
+  portaria e a faixa de quem liga estão provadas), a conferência de todos os
+  pares do tema (8:78) e a folha que convive com o palco e a página (7:49,
+  7:50);
 - no celular: a «célula inteira» da aba SERVIDOR (5:70), o `listarNaBarra`
   (6:47), as abas do diálogo a 390 px (7:65), e as áreas seguras (7:47, 9:29);
-- o braço `pedido` do roteador (2:19), o `superficie-classes` (2:29) e o
-  movimento reduzido dos estilos (8:36);
 - sem teste automatizado possível, ou por decidir: os rótulos que nada lê
   (1:26, 1:27).
 - **Texto, para a quarta emenda, se houver uma:** o `listarNaBarra` diz
