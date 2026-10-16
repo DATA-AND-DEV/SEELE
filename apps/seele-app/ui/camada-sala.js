@@ -21,6 +21,14 @@
 /** O último estado da sala que chegou, ou `null` antes do primeiro. */
 let estadoDaSala = null;
 
+/**
+ * A regra nasceu por este botão: a frase de sucesso e o botão escondido valem
+ * até a sala subir de novo. O estado da sala é reanunciado a cada mudança do
+ * registro com a leitura do firewall de quando ela subiu, e sem isto um
+ * reanúncio devolveria o botão e a frase de antes à regra que já existe.
+ */
+let regraDoFirewallCriada = false;
+
 /** Escreve a frase da sala onde a pessoa está, ou esconde. */
 function desenharEstadoDaSala() {
   const frase = fraseDaSala(estadoDaSala);
@@ -33,12 +41,17 @@ function desenharEstadoDaSala() {
   // subindo, no ar ou que falhou ao subir são todas «quero receber».
   $("perfil-receber").checked = estadoDaSala?.estado !== "Desligada";
 
-  // O firewall do Windows (D-sala-1): a frase do Rust, o que a 8385 é, e o
-  // botão que pede a regra ao Windows.
-  const firewall = estadoDaSala?.estado === "NoAr" ? estadoDaSala.firewall_nao_cobre : null;
-  $("perfil-sala-firewall-frase").textContent = firewall
-    ? `${firewall} ${SALA_PESSOAL.firewall}`
-    : "";
+  // O firewall do Windows (D-sala-1): o motivo que o Rust leu, a frase com o
+  // que fazer, o que a 8385 é — e o botão que pede a regra ao Windows **só
+  // quando ele resolve** (`abrir_resolve`): na cópia portátil e no bloqueio do
+  // Windows ele não muda nada, e a frase diz o que fazer no lugar dele.
+  const firewall = estadoDaSala?.estado === "NoAr" ? estadoDaSala.firewall : null;
+  if (!regraDoFirewallCriada) {
+    $("perfil-sala-firewall-frase").textContent = firewall
+      ? `${firewall.frase} ${SALA_PESSOAL.firewall}`
+      : "";
+  }
+  $("perfil-sala-firewall-abrir").hidden = regraDoFirewallCriada || firewall?.abrir_resolve !== true;
   $("perfil-sala-firewall").hidden = !firewall;
 }
 
@@ -158,6 +171,7 @@ $("perfil-sala-firewall-abrir").addEventListener("click", async () => {
     await invoke("abrir_a_porta_no_firewall");
     $("perfil-sala-firewall-frase").textContent =
       "Regra criada. Quem liga pelo seu código de fora da sua rede passa a chegar.";
+    regraDoFirewallCriada = true;
     abrir.hidden = true;
   } catch (falha) {
     $("perfil-sala-firewall-frase").textContent = fraseDeErro(falha);
@@ -168,6 +182,8 @@ $("perfil-sala-firewall-abrir").addEventListener("click", async () => {
 
 listen("seele://sala", ({ payload }) => {
   estadoDaSala = payload;
+  // A sala que desce e sobe de novo traz uma leitura nova do firewall.
+  if (payload?.estado !== "NoAr") regraDoFirewallCriada = false;
   desenharEstadoDaSala();
 }).catch((falha) => console.warn("seele://sala:", falha));
 

@@ -254,6 +254,57 @@ function acordarDaPilha(no) {
   };
 }
 
+/**
+ * **Recolher e devolver uma superfície, pela casca** (D-estilo-1; desenho da
+ * F8 aprovado pela orquestradora em 15/10, para a F3 revisar).
+ *
+ * No celular, o diálogo de um MOD cobre a sessão inteira, e a prévia do tema
+ * que ele pede não se vê atrás dele. O VER NA SESSÃO recolhe o diálogo num
+ * selo, e o VOLTAR o devolve. Fechar não serve: a prévia é da superfície, e
+ * sairia com ela (`fechar` chama o `aoFecharASuperficie`).
+ *
+ * Recolher é o `ocultar` que já existe: a superfície sai da vista e da pilha de
+ * inércia (o `soltarFoco` a desempilha), e continua montada, com a prévia.
+ * Devolver é o `mostrar`: ela volta ao topo da pilha. **Só a casca chama, e só
+ * devolve o que ela mesma recolheu**: um `ocultar` que o MOD pediu não é
+ * desfeito por aqui.
+ *
+ * Achada pelo nó dela (`.superficie-de-mod`), que é o que a casca tem na mão.
+ * Só o diálogo se recolhe: é o único que cobre a sessão, e uma página recolhida
+ * por engano tiraria a página ativa do palco dela (`liberarDestino`).
+ *
+ * Qualquer `mostrar`, `ocultar` ou `fechar` que não seja daqui (o do MOD, o
+ * da saída do produto) tira a marca: a casca só devolve o que continua como
+ * ela deixou. Sem a do `fechar`, um diálogo que o MOD fechou com ele recolhido
+ * voltava montado pelo devolver.
+ */
+const superficiePorRaiz = new WeakMap();
+
+/** @returns {boolean} se recolheu. */
+function recolherSuperficie(raiz) {
+  const superficie = superficiePorRaiz.get(raiz);
+  if (!superficie || superficie.tipo !== "dialogo" || superficie.solta || !superficie.montada || !superficie.visivel) {
+    return false;
+  }
+  // O foco de quem a abriu: o `ocultar` o devolve e o esquece, e o `mostrar`
+  // da volta guardaria o VOLTAR da casca no lugar dele.
+  const focoAnterior = superficie.focoAnterior;
+  superficie.ocultar();
+  superficie.recolhidaPelaCasca = true;
+  superficie.focoAntesDeRecolher = focoAnterior;
+  return true;
+}
+
+/** @returns {boolean} se devolveu. */
+function devolverSuperficie(raiz) {
+  const superficie = superficiePorRaiz.get(raiz);
+  if (!superficie || superficie.solta || !superficie.recolhidaPelaCasca) return false;
+  const focoAnterior = superficie.focoAntesDeRecolher;
+  superficie.mostrar();
+  if (focoAnterior) superficie.focoAnterior = focoAnterior;
+  return true;
+}
+
 /** Os tipos de superfície, e o que cada um exige do host. */
 const TIPOS_DE_SUPERFICIE = Object.freeze({
   pagina: { host: "palco-de-paginas", foco: false, camada: false },
@@ -415,6 +466,7 @@ class SuperficieDeMod {
     this.focoAnterior = null;
 
     this.montarCasca(descricao);
+    superficiePorRaiz.set(this.raiz, this);
     this.renderer = new RegiaoDeMod(id, dono, this.corpo, PERFIS_DE_RENDER.superficie);
     // O secundário de um formulário sai pela saída do produto (Step 6f).
     this.renderer.aoCancelar = () => this.pedirFechamento("saida-do-produto");
@@ -812,6 +864,8 @@ class SuperficieDeMod {
     if (this.solta) throw new Error(`a superfície «${this.chave}» foi descartada`);
     // O teto da pilha de folhas, que o conjunto confere: reabrir também conta.
     this.antesDeMostrar?.();
+    this.recolhidaPelaCasca = false;
+    this.focoAntesDeRecolher = null;
     this.visivel = true;
     this.abrir();
   }
@@ -828,6 +882,8 @@ class SuperficieDeMod {
    */
   ocultar() {
     if (this.solta) return;
+    this.recolhidaPelaCasca = false;
+    this.focoAntesDeRecolher = null;
     this.visivel = false;
     this.liberarDestino();
     this.soltarFoco();
@@ -930,6 +986,9 @@ class SuperficieDeMod {
    */
   fechar() {
     if (this.solta) return;
+    // Fechada, deixa de estar como a casca a recolheu (`devolverSuperficie`).
+    this.recolhidaPelaCasca = false;
+    this.focoAntesDeRecolher = null;
     // A prévia do tema que era desta superfície sai com ela (tarefa 17g).
     this.dono.aoFecharASuperficie?.(this.chave);
     this.visivel = false;

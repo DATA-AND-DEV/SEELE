@@ -13889,13 +13889,35 @@ fn os_pacotes_que_nao_voltam_nao_se_chamam_sincronizacao() {
 
 #[test]
 fn a_parede_do_firewall_traz_o_conserto_junto() {
-    // «Mas uai, o instalador já não faz isso?» Faz quando pedem — a caixa nasce
-    // desmarcada no passo 02 —, e quem instala um app de conversa não está
-    // decidindo sobre firewall naquele instante. Quem aperta HOSPEDAR AQUI está.
+    // O instalador cria a regra por padrão (a caixa nasce marcada); a parede é
+    // para o que sobra dele. A frase sozinha mandava reinstalar, que é um preço
+    // alto por uma linha no firewall, e o botão faz o Windows perguntar uma vez.
     //
-    // A frase sozinha mandava reinstalar, que é um preço alto por uma linha no
-    // firewall. O botão faz o Windows perguntar uma vez.
+    // **E o botão só quando resolve** (D-sala-1, a orquestradora em 15/10): ele
+    // libera o SEELE instalado, e na cópia portátil e no bloqueio do Windows não
+    // muda nada. Quem decide é o leitor do Rust (`firewall::NaTela`), e a tela
+    // obedece: o botão nasce dentro do `if (firewall.abrir_resolve)`, e a parede
+    // diz a frase do motivo.
     let boot = without_comments(&read("ui/tela-boot.js"));
+    let alcance = js_function(&boot, "function mostrarAlcance(");
+    assert!(
+        alcance.contains("parede.textContent = firewall.frase"),
+        "a parede do firewall deixou de dizer a frase do motivo que o Rust leu:\n{alcance}"
+    );
+    let (Some(condicao), Some(botao)) = (
+        alcance.find("if (firewall.abrir_resolve)"),
+        alcance.find("document.createElement(\"button\")"),
+    ) else {
+        panic!(
+            "a parede do firewall perdeu o botão, ou o botão perdeu a condição de só \
+             aparecer quando resolve:\n{alcance}"
+        );
+    };
+    assert!(
+        condicao < botao,
+        "o botão da parede do firewall nasce antes de perguntar se resolve: na cópia \
+         portátil e no bloqueio do Windows ele aparece e não muda nada:\n{alcance}"
+    );
 
     assert!(
         boot.contains("abrir_a_porta_no_firewall"),

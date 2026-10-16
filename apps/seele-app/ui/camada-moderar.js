@@ -679,9 +679,13 @@ function dataDeInicio(segundos) {
 
 // ------------------------------------------------------------------- ligação
 
-// Delegação, e não um ouvinte por botão: as linhas das salas de voz são refeitas a
-// cada snapshot, duas vezes por segundo, e um ouvinte por botão seria
-// registrado de novo a cada quadro. A mesma técnica de `alternarCanal`.
+// Delegação, e não um ouvinte por botão. A lista de pessoas não é mais refeita a
+// cada retrato: desde o lote AX (pendência 63, (b)) a linha é reaproveitada pelo
+// id da pessoa (`reconciliarALista`, em `tela-sessao.js`), e o mesmo botão pode
+// passar a apontar outro verbo, ou nascer e sumir, de um quadro para o outro.
+// Um ouvinte por botão guardaria o que valia quando ele nasceu; o delegado lê o
+// `data-moderar-pessoa` de agora, que o `vestirComo` atualiza a cada quadro. A
+// mesma técnica de `alternarCanal`.
 // **A porta é o nome da pessoa na faixa, e não um botão ao lado dela.**
 //
 // Ela era um `MODERAR` escrito dentro da lista de salas, e a comp da 0.9.0 não
@@ -717,8 +721,9 @@ $("lista-mensagens").addEventListener("click", (evento) => {
 // regra é a mesma — dizer a consequência **é** a confirmação — e uma segunda
 // forma de confirmar seria uma segunda forma de esquecer de escrever a frase.
 //
-// Delegação como as duas de cima, e pelo mesmo motivo: as duas listas são
-// refeitas a cada snapshot, duas vezes por segundo.
+// Delegação, como as duas de cima: a coluna de salas também é reaproveitada,
+// pela sala e pela pessoa (`reconciliarALista`, lote AX), e o ouvinte delegado
+// lê os `data-*` de agora, que o `vestirComo` atualiza a cada quadro.
 $("lista-voice_rooms").addEventListener("click", async (evento) => {
   const alvo = evento.target.closest("button[data-apagar-voice_room]");
   if (!alvo) return;

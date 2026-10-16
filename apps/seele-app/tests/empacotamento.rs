@@ -470,10 +470,10 @@ fn a_regra_de_firewall_e_por_programa_e_nao_por_porta() {
     // A porta do encontro é a 8384, ao lado da 8383 do servidor, então uma
     // regra presa a uma porta deixaria metade do caminho fechada.
     //
-    // E `alcance::firewall::ha_regra_para` reconhece a nossa regra comparando a
-    // linha `Program` da saída do `netsh`. Uma regra por porta não tem essa
-    // linha: ela funcionaria, e o código que confere continuaria respondendo
-    // `Barrada` para uma máquina liberada.
+    // E o leitor do app (`src/firewall.rs`) reconhece a nossa regra comparando o
+    // programa dela com o caminho do que roda. Uma regra por porta não tem
+    // programa: ela funcionaria, e o código que confere continuaria dizendo
+    // «sem regra» para uma máquina liberada.
     let pos = gancho("NSIS_HOOK_POSTINSTALL");
     assert!(
         pos.contains("program="),
@@ -483,8 +483,8 @@ fn a_regra_de_firewall_e_por_programa_e_nao_por_porta() {
         !pos.contains("localport="),
         "a regra de firewall virou regra de porta.\n\
          Isso abre a porta para qualquer programa, deixa a 8384 do encontro de \
-         fora, e fica invisível para `alcance::firewall::ha_regra_para`, que \
-         compara a linha `Program`"
+         fora, e fica invisível para o leitor do app (`src/firewall.rs`), que \
+         compara o programa da regra"
     );
 }
 
@@ -663,7 +663,7 @@ fn o_modelo_bifurcado_guarda_o_que_faz_a_atualizacao_funcionar() {
     assert!(
         modelo.contains("{{#if installer_hooks}}") && modelo.contains("{{installer_hooks}}"),
         "o modelo bifurcado deixou de incluir os ganchos.\n\
-         São eles que criam a regra de firewall da 8383 e removem a instalação \
+         São eles que criam a regra de firewall do SEELE e removem a instalação \
          por usuário — ver `instalador.nsh`."
     );
     assert!(

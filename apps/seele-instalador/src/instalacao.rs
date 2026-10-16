@@ -18,7 +18,8 @@ use crate::{carga, registro, sistema};
 pub(crate) struct Escolhas {
     /// Atalho na área de trabalho e no menu Iniciar.
     pub(crate) atalho: bool,
-    /// Regra de entrada da 8383 no firewall.
+    /// A regra de entrada do SEELE no firewall: UDP, pelo programa, em qualquer
+    /// perfil. Cobre a 8383 do servidor guardado e a 8385 da sala ao mesmo tempo.
     pub(crate) porta: bool,
 }
 
@@ -173,7 +174,7 @@ pub(crate) fn executar(
     // voltaram a ser todos — ver `sistema::regra_de_firewall` —, e nomear o que
     // a regra cobre é o que permite alguém notar quando ela mudar.
     contar(if escolhas.porta {
-        "porta 8383 UDP aberta no firewall, em qualquer perfil de rede"
+        "SEELE liberado no firewall do Windows: entrada UDP pelo programa, em qualquer perfil de rede"
     } else {
         "firewall: regra não pedida"
     });
