@@ -133,6 +133,8 @@ nada dependa da memória de uma conversa.
 
 Medido em 16/10: com 25 GiB livres, a retirada dos 18 worktrees de lotes integrados levou a 67 GiB, e a dos `target/` da F4, da F6 e da linha 0.15 (ociosas) a 138 GiB. Os `target/` das frentes em trabalho somavam ~290 GiB (F7 68, F1 60, F3 56, F5 52 e o lote C64 39, F8 12).
 
+Depois da 18ª parte B (16/10): as frentes limparam os seus (F1 78,6 GiB, F8 35,8, F7 ~70, F3 56, F5 de 52 para 7,2), saíram os worktrees da bateria e dos lotes C64 e R63, e o `target/` da cópia principal ficou só com o `wasi-sdk` conferido, que as frentes copiam com `cp -c` para não baixar (o resto, 233 GiB de `debug/` e as pastas antigas de QA e do iOS, saiu). **De 25 GiB livres a 525 GiB.** A bateria clona o `target/` da cópia principal (`cp -c`, sem custo de disco no clone) para a árvore dela, e não o liga por link: um `target` partilhado ou movido guarda o caminho de outra árvore (lição da F5).
+
 ## As integrações feitas
 
 | quando | o que entrou | commit | bateria |
