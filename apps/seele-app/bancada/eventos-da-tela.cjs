@@ -227,6 +227,18 @@ const retrato = (extra = {}) => ({
   }
   confere("cola · só a API 6", !falados.some((f) => f.mod === "seele/velho"),
     "um MOD da API 5 recebeu evento da tela");
+  // **E quem sai sai pelo mesmo evento, com o id** (o PERFIS revoga as
+  // contribuições de quem saiu por ele; o cruzamento dos portes). O diff já
+  // dizia `sairam`, e nada provava que a cola o fala ao MOD.
+  const antesDaSaida = falados.length;
+  cola.__avisar(snapshot({
+    presentes: [{ id: 1, nickname: "ana", speaking: true, muted: false }],
+    voice_rooms: [{ id: 3, name: "Mesa", limit: 0, occupied_by_us: true, people: [{ id: 1 }] }],
+    channels: [{ id: 6, name: "geral", open: false }, { id: 7, name: "mesa", open: true }],
+  }));
+  const naSaida = falados.slice(antesDaSaida).filter((f) => f.mod === "seele/mesa").map((f) => JSON.stringify(f.dados));
+  confere("cola · quem sai", JSON.stringify(naSaida) === JSON.stringify(['{"nome":"pessoas","saiu":2}']),
+    `a saída da pessoa 2 não foi falada sozinha, com o id: ${JSON.stringify(naSaida)}`);
 }
 
 if (falhas.length) {
