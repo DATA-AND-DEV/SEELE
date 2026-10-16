@@ -422,8 +422,10 @@ const REGIOES = [
       const linhaDe = (no) => no.closest("li.pessoa")?.querySelector(".pessoa-nome")?.textContent.trim();
       const casos = [
         { ponto: "pessoa.identidade", alvo: lia.id, lugar: (no) => !!no.closest(".pessoa-identidade") && linhaDe(no) === lia.nickname },
-        // Só na linha apresentada por um MOD: a nativa não tem onde pô-lo (achado
-        // do passo 7, levado à orquestradora em 16/10).
+        // Nas duas linhas: a nativa ganhou o «⋯» dela (decisão da orquestradora,
+        // 16/10), e a apresentada o tinha.
+        { ponto: "pessoa.detalhes", alvo: lia.id,
+          lugar: (no) => !!no.closest("li.pessoa:not(.pessoa-apresentada) > details.pessoa-nativo .contribuicao-de-mod-caixa") && linhaDe(no) === lia.nickname },
         { ponto: "pessoa.detalhes", alvo: lia.id, comCartao: true,
           lugar: (no) => !!no.closest("li.pessoa-apresentada details.pessoa-nativo") && linhaDe(no) === lia.nickname },
         { ponto: "pessoa.acoes", alvo: lia.id, acao: true, lugar: (no) => !!no.closest(".pessoa-rodape") && linhaDe(no) === lia.nickname },
@@ -467,6 +469,80 @@ const REGIOES = [
       if (medido.erro) falhas.push(`cada ponto no lugar: ${medido.erro}`);
       else if (medido.achados !== 1 || medido.noLugar !== 1) {
         falhas.push(`cada ponto no lugar: «${medido.marca}» aparece ${medido.achados} vez(es), ${medido.noLugar} no lugar que o ponto promete`);
+      }
+    }
+
+    // ------------------------------------- o pessoa.detalhes, com dono
+    //
+    // Na linha nativa (decisão da orquestradora, 16/10): o «⋯» só nasce com uma
+    // contribuição, e a linha sem ela é a de sempre; cada seção leva o nome do
+    // MOD por cima, do produto, nas cores do núcleo, e o MOD não o cobre —
+    // nem com `mover` nem com `escalar`; e com `CASCA.detalhesNaLinha` falso
+    // (o celular, que o põe na folha) a linha não o monta.
+    const comDono = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const linhaDeLia = () => [...$("lista-roster").querySelectorAll("li.pessoa")]
+        .find((li) => li.querySelector(".pessoa-nome")?.textContent.trim() === lia.nickname);
+      const semNada = linhaDeLia()?.outerHTML;
+      const instancia = new InstanciaDeMod("mod/detalhes", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/detalhes", instancia);
+      const { handle } = contribuicoesDosMods.registrar({ id: "mod/detalhes" }, instancia, {
+        ponto: "pessoa.detalhes", modo: "adicionar", alvo: String(lia.id),
+        conteudo: [
+          { forma: "texto", chave: "t", dentro: "seção do MOD" },
+          { forma: "texto", chave: "cobre", dentro: "█".repeat(16), estilo: { mover: { x: 0, y: -60 }, escalar: 4 } },
+        ],
+      });
+      desenhar(r);
+      await quadro();
+      const li = linhaDeLia();
+      const detalhes = li?.querySelector(":scope > details.pessoa-nativo");
+      if (detalhes) detalhes.open = true;
+      await quadro();
+      const origem = detalhes?.querySelector(":scope > .contribuicao-de-mod-origem");
+      const caixa = origem?.nextElementSibling;
+      const centro = origem?.getBoundingClientRect();
+      const noCentro = centro ? document.elementFromPoint(centro.left + Math.min(centro.width, 40) / 2, centro.top + centro.height / 2) : null;
+      const cores = () => (origem ? [getComputedStyle(origem).color, getComputedStyle(origem).backgroundColor].join(" / ") : null);
+      const coresSemTema = cores();
+      temaDosMods.set("bancada", { fundo: "#f2ece0", painel: "#e6dfcf", texto: "#12100e", apagado: "#574e43", acento: "#a83a10", borda: "#b8ad9a" });
+      escreverOTemaDaSessao();
+      const coresComTema = cores();
+      temaDosMods.delete("bancada");
+      escreverOTemaDaSessao();
+      const medido = {
+        nativa: Boolean(li && !li.classList.contains("pessoa-apresentada")),
+        origem: origem?.textContent ?? null,
+        naCaixa: Boolean(caixa?.classList.contains("contribuicao-de-mod-caixa") && caixa.textContent.includes("seção do MOD")),
+        descoberta: Boolean(origem && noCentro && origem.contains(noCentro)),
+        temaNaoAlcanca: coresSemTema !== null && coresSemTema === coresComTema,
+        idNaLinha: li?.dataset.pessoaId === String(lia.id),
+      };
+      // Com a linha sem o ponto (o celular), nada dele na lista.
+      CASCA.detalhesNaLinha = false;
+      desenhar(r);
+      await quadro();
+      medido.semALinha = !$("lista-roster").textContent.includes("seção do MOD") && !linhaDeLia()?.querySelector("details.pessoa-nativo");
+      CASCA.detalhesNaLinha = true;
+      contribuicoesDosMods.revogar(handle, { id: "mod/detalhes", instancia });
+      modsCarregados.delete("mod/detalhes");
+      desenhar(r);
+      await quadro();
+      medido.voltou = linhaDeLia()?.outerHTML === semNada;
+      medido.semNadaSemDetalhes = Boolean(semNada) && !semNada.includes("pessoa-nativo") && !semNada.includes("pessoa-com-detalhes");
+      return medido;
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (comDono.erro) falhas.push(`pessoa.detalhes com dono: ${comDono.erro}`);
+    else {
+      const esperado = { nativa: true, origem: "mod/detalhes", naCaixa: true, descoberta: true, temaNaoAlcanca: true, idNaLinha: true,
+        semALinha: true, voltou: true, semNadaSemDetalhes: true };
+      if (JSON.stringify(comDono) !== JSON.stringify(esperado)) {
+        falhas.push(`pessoa.detalhes com dono: ${JSON.stringify(comDono)}, e o esperado é ${JSON.stringify(esperado)}`);
       }
     }
 
