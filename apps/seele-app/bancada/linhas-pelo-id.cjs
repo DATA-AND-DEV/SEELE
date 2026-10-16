@@ -52,9 +52,18 @@
 // 11. **Um id repetido num grupo do MOD** de `servidor.navegacao` não duplica
 //    a fileira da sala, com o ENTRAR NA SALA, nem a do canal.
 //
+// E o resto da pendência 63 (lote R63), numa seção própria no fim:
+//
+// 12. **O texto que não mudou não é reescrito**: o contador `#pessoas-conta`,
+//    a telemetria do rodapé e o `#voz-estado` (região viva) atravessam o tique
+//    com o retrato igual sem mutação nenhuma, com o mesmo nó de texto e com a
+//    seleção; o que muda (o ATRASO, o UPTIME, a média, o contador, o «no ar»)
+//    muda no mesmo nó, e a seleção num número vizinho fica.
+//
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
-// salas repovoada, o caso 6; com a de canais, o caso 10.
+// salas repovoada, o caso 6; com a de canais, o caso 10; com o `textContent`
+// de volta, o caso 12.
 //
 // Rodar:  node apps/seele-app/bancada/linhas-pelo-id.cjs
 
@@ -1049,6 +1058,226 @@ async function abrir(browser, url, r) {
     }
     assert.ok(caso11.mesmoEntrar, "caso 11: o ENTRAR da sala 1 trocou de nó com o tique");
 
+    // ------------------------------------------------------------------------
+    // O resto da pendência 63 (lote R63 da F5): o que o tique de 500 ms ainda
+    // refazia sem mudança nenhuma. Medido em 16/10, no Chromium e no WebKit
+    // da bancada: o contador, a telemetria e o `#voz-estado` trocavam o nó de
+    // texto em todo tique, mesmo com o texto igual; as regiões de MOD tiravam
+    // e punham o conteúdo e trocavam o botão da ação; e a conversa era refeita
+    // inteira a cada mensagem nova, a cada pessoa que chegava e a cada retrato
+    // que mudava. Com isso iam o foco, a seleção e o nó do leitor de tela.
+    // Todos pelo tique, como no caso 10: é ele que redesenha a sessão parada.
+    // ------------------------------------------------------------------------
+
+    // 12. O texto que não mudou não é reescrito: o contador `#pessoas-conta`,
+    //     a telemetria do rodapé e o `#voz-estado`, que é região viva. Com o
+    //     retrato igual, nenhuma mutação neles (fora o relógio do UPTIME, que
+    //     anda a cada segundo, e o `#telemetria-mods`, que é do caso 13), o nó
+    //     de texto é o mesmo e a seleção fica. Quando o texto muda, ele muda
+    //     no mesmo nó, e um número que não mudou não perde a seleção.
+    const pagina12 = await abrir(browser, url, BASE);
+    const caso12 = await pagina12.page.evaluate(async () => {
+      const tique = () => new Promise((ok) => setTimeout(ok, 1200));
+      const $id = (id) => document.getElementById(id);
+      const conta = $id("pessoas-conta");
+      const voz = $id("voz-estado");
+      const rodape = document.querySelector("footer.telemetria");
+      const uptime = $id("tel-uptime");
+      const modsDoRodape = $id("telemetria-mods");
+      const observar = (el) => {
+        const registros = [];
+        const observador = new MutationObserver((rs) => registros.push(...rs));
+        observador.observe(el, { subtree: true, childList: true, attributes: true, characterData: true });
+        return () => {
+          registros.push(...observador.takeRecords());
+          observador.disconnect();
+          return registros;
+        };
+      };
+      // O rodapé sem o relógio, que anda sozinho, e sem a região de MOD.
+      const doRodape = (registros) => registros.filter((r) =>
+        r.target !== uptime && r.target.parentNode !== uptime && !modsDoRodape.contains(r.target));
+      const descrever = (registros) => registros.map((r) => {
+        const alvo = r.target.nodeType === Node.TEXT_NODE ? r.target.parentElement : r.target;
+        return `${r.type}${r.attributeName ? `:${r.attributeName}` : ""}@${alvo?.id || alvo?.className || alvo?.tagName}`;
+      });
+      const selecionar = (no) => {
+        const faixa = document.createRange();
+        faixa.selectNodeContents(no);
+        getSelection().removeAllRanges();
+        getSelection().addRange(faixa);
+        return getSelection().toString();
+      };
+      const texto = (id) => $id(id).firstChild;
+      const nosDeTexto = () => ({
+        conta: conta.firstChild, voz: voz.firstChild, jitter: texto("tel-jit"), sinal: texto("tel-sinal-valor"),
+      });
+
+      // a) O mesmo retrato: o contador selecionado, e as três regiões observadas.
+      const nosA = nosDeTexto();
+      const selA = selecionar(conta);
+      const pararConta = observar(conta);
+      const pararVoz = observar(voz);
+      const pararRodape = observar(rodape);
+      let antes = desenhado;
+      const uptimeAntes = texto("tel-uptime");
+      const relogioAntes = uptime.textContent;
+      // O relógio adiantado cinco segundos: em 1,2 s ele pode não virar de
+      // segundo entre o desenho de antes e o de depois, e o caso não pode
+      // depender da fase do tique.
+      comecoDaSessao -= 5000;
+      await tique();
+      const nosDepoisA = nosDeTexto();
+      const igual = {
+        redesenhou: desenhado !== antes && desenhado !== null,
+        selecao: [selA, getSelection().toString()],
+        trocados: Object.keys(nosA).filter((nome) => nosA[nome] === null || !nosA[nome].isConnected
+          || nosDepoisA[nome] !== nosA[nome]),
+        conta: descrever(pararConta()),
+        voz: descrever(pararVoz()),
+        rodape: descrever(doRodape(pararRodape())),
+        // O relógio muda, e muda no mesmo nó.
+        relogio: [relogioAntes, uptime.textContent],
+        relogioMesmoNo: texto("tel-uptime") === uptimeAntes && uptimeAntes.isConnected,
+      };
+
+      // b) A telemetria muda: o ATRASO anda, o JITTER não. A seleção no JITTER
+      //    fica, e o ATRASO muda no mesmo nó.
+      const jitter = texto("tel-jit");
+      const atraso = texto("tel-rtt");
+      const selB = selecionar($id("tel-jit"));
+      antes = desenhado;
+      const comAtraso = structuredClone(testTable.snapshot);
+      comAtraso.telemetry.rtt_ms = 77;
+      testTable.snapshot = comAtraso;
+      await tique();
+      const telemetria = {
+        redesenhou: desenhado !== antes && desenhado?.telemetry?.rtt_ms === 77,
+        selecao: [selB, getSelection().toString()],
+        jitterMesmoNo: texto("tel-jit") === jitter && jitter.isConnected,
+        atrasoMesmoNo: texto("tel-rtt") === atraso && atraso.isConnected,
+        atraso: $id("tel-rtt").textContent,
+      };
+
+      // c) O `#voz-estado`, selecionado, com o retrato igual; e depois quem usa
+      //    começa a falar: o texto muda, no mesmo nó, e só ele muda.
+      const vozTexto = voz.firstChild;
+      const selC = selecionar(voz);
+      let pararVozC = observar(voz);
+      antes = desenhado;
+      await tique();
+      const vozIgual = {
+        redesenhou: desenhado !== antes && desenhado !== null,
+        selecao: [selC, getSelection().toString()],
+        mutacoes: descrever(pararVozC()),
+        mesmoNo: voz.firstChild === vozTexto && vozTexto.isConnected,
+      };
+      pararVozC = observar(voz);
+      antes = desenhado;
+      const falando = structuredClone(testTable.snapshot);
+      falando.speaking = true;
+      testTable.snapshot = falando;
+      await tique();
+      const registrosVoz = pararVozC();
+      const vozMuda = {
+        redesenhou: desenhado !== antes && desenhado?.speaking === true,
+        texto: voz.textContent,
+        mesmoNo: voz.firstChild === vozTexto && vozTexto.isConnected,
+        deNo: registrosVoz.filter((r) => r.type === "childList").length,
+        deTexto: registrosVoz.filter((r) => r.type === "characterData").length,
+      };
+
+      // d) A média da sala chega, e fica: do travessão (não medido) ao número,
+      //    no mesmo nó; e o retrato seguinte, igual, não muda nada na célula.
+      const sinalTexto = texto("tel-sinal-valor");
+      antes = desenhado;
+      const comMedia = structuredClone(testTable.snapshot);
+      comMedia.voice_rooms[0].sync = { ratio: 88, band: "Nominal" };
+      testTable.snapshot = comMedia;
+      await tique();
+      const pararCelula = observar($id("tel-sinal"));
+      const antesD = desenhado;
+      await tique();
+      const media = {
+        redesenhou: antesD !== antes && desenhado !== antesD && desenhado?.voice_rooms?.[0]?.sync?.ratio === 88,
+        valor: $id("tel-sinal-valor").textContent,
+        ausente: $id("tel-sinal-valor").classList.contains("ausente"),
+        title: $id("tel-sinal-valor").getAttribute("title"),
+        mesmoNo: texto("tel-sinal-valor") === sinalTexto && sinalTexto.isConnected,
+        mutacoes: descrever(pararCelula()),
+      };
+
+      // e) Alguém chega ao servidor: o contador muda, no mesmo nó.
+      const contaTexto = conta.firstChild;
+      antes = desenhado;
+      const comMais = structuredClone(testTable.snapshot);
+      comMais.presentes.push({ ...comMais.presentes[1], id: 900, nickname: "recem-chegada-12", is_self: false });
+      testTable.snapshot = comMais;
+      await tique();
+      const contador = {
+        redesenhou: desenhado !== antes && desenhado?.presentes?.length === comMais.presentes.length,
+        texto: conta.textContent,
+        mesmoNo: conta.firstChild === contaTexto && contaTexto.isConnected,
+      };
+      getSelection().removeAllRanges();
+      return { igual, telemetria, vozIgual, vozMuda, media, contador };
+    });
+    assert.deepEqual(pagina12.errors, [], "caso 12: erros na página");
+    await pagina12.page.close();
+    {
+      const { igual, telemetria, vozIgual, vozMuda, media, contador } = caso12;
+      assert.ok(igual.redesenhou, "caso 12 (a): o tique não redesenhou em 1,2 s, e o caso não mediu nada");
+      assert.equal(
+        igual.selecao[1], igual.selecao[0],
+        `o mesmo retrato, redesenhado pelo tique, desfez a seleção no contador: ${JSON.stringify(igual.selecao[0])} ` +
+          `→ ${JSON.stringify(igual.selecao[1])}. O nó de texto é trocado mesmo com o texto igual`,
+      );
+      assert.deepEqual(igual.trocados, [], `o mesmo retrato trocou o nó de texto de: ${igual.trocados.join(", ")}`);
+      assert.deepEqual(igual.conta, [], `o mesmo retrato fez mutações no contador: ${igual.conta.join(", ")}`);
+      assert.deepEqual(
+        igual.voz, [],
+        `o mesmo retrato fez mutações no #voz-estado, que é região viva (role="status"): ${igual.voz.join(", ")}`,
+      );
+      assert.deepEqual(
+        igual.rodape, [],
+        `o mesmo retrato fez mutações na telemetria, fora o relógio: ${igual.rodape.join(", ")}`,
+      );
+      assert.notEqual(igual.relogio[1], igual.relogio[0], "caso 12 (a): o UPTIME não andou em 1,2 s");
+      assert.ok(igual.relogioMesmoNo, "o UPTIME andou e trocou de nó de texto: o número muda, o nó fica");
+      assert.ok(telemetria.redesenhou, "caso 12 (b): o ATRASO novo não chegou à tela pelo tique");
+      assert.equal(telemetria.atraso, "77ms", `o ATRASO diz ${JSON.stringify(telemetria.atraso)}`);
+      assert.equal(
+        telemetria.selecao[1], telemetria.selecao[0],
+        `o ATRASO mudou e a seleção no JITTER, que não mudou, foi de ${JSON.stringify(telemetria.selecao[0])} ` +
+          `a ${JSON.stringify(telemetria.selecao[1])}`,
+      );
+      assert.ok(telemetria.jitterMesmoNo, "o ATRASO mudou e o JITTER, que não mudou, trocou de nó de texto");
+      assert.ok(telemetria.atrasoMesmoNo, "o ATRASO mudou trocando o nó de texto: o número muda, o nó fica");
+      assert.ok(vozIgual.redesenhou, "caso 12 (c): o tique não redesenhou em 1,2 s");
+      assert.equal(
+        vozIgual.selecao[1], vozIgual.selecao[0],
+        `o mesmo retrato desfez a seleção no #voz-estado: ${JSON.stringify(vozIgual.selecao[0])} → ` +
+          `${JSON.stringify(vozIgual.selecao[1])}`,
+      );
+      assert.deepEqual(vozIgual.mutacoes, [], `o mesmo retrato mexeu no #voz-estado: ${vozIgual.mutacoes.join(", ")}`);
+      assert.ok(vozIgual.mesmoNo, "o mesmo retrato trocou o nó de texto do #voz-estado");
+      assert.ok(vozMuda.redesenhou, "caso 12 (c): o retrato com quem usa falando não chegou à tela pelo tique");
+      assert.ok(vozMuda.texto.endsWith(" · no ar"), `o #voz-estado diz ${JSON.stringify(vozMuda.texto)}, e quem usa está falando`);
+      assert.ok(
+        vozMuda.mesmoNo && vozMuda.deNo === 0,
+        `o #voz-estado mudou trocando o nó de texto (${vozMuda.deNo} mutações de nó)`,
+      );
+      assert.ok(vozMuda.deTexto > 0, "o #voz-estado mudou sem mutação de texto: a bancada não mediu o que pensa");
+      assert.ok(media.redesenhou, "caso 12 (d): a média da sala não chegou à tela, ou o tique não a redesenhou");
+      assert.equal(media.valor, "88", `a média da sala diz ${JSON.stringify(media.valor)}`);
+      assert.ok(!media.ausente && media.title === null, "a média medida ainda está marcada como não medida");
+      assert.ok(media.mesmoNo, "a média passou do travessão ao número trocando o nó de texto");
+      assert.deepEqual(media.mutacoes, [], `a mesma média, redesenhada pelo tique, mexeu na célula: ${media.mutacoes.join(", ")}`);
+      assert.ok(contador.redesenhou, "caso 12 (e): quem chegou não chegou à tela pelo tique");
+      assert.equal(contador.texto, `${NA_SALA} EM SALAS · ${PESSOAS + 1} NO SERVIDOR`, `o contador diz ${JSON.stringify(contador.texto)}`);
+      assert.ok(contador.mesmoNo, "o contador mudou trocando o nó de texto");
+    }
+
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
         `(${caso1.mutacoes} mutações, nenhuma fora dela) e o foco ficou; o mesmo retrato não ` +
@@ -1061,7 +1290,9 @@ async function abrir(browser, url, r) {
         "segundo canal atravessou o tique com o mesmo retrato e com outro canal mudando de nome " +
         `(${outro.mutacoes} mutações, todas na fileira dele), quem saiu perdeu o nó, quem entrou ` +
         `ganhou um, o foco ficou no canal que virou o aberto, e os ${caso10m.nos} nós do canal.item ficaram ` +
-        "no documento; um id repetido no arranjo do MOD não duplicou nenhuma sala nem canal.",
+        "no documento; um id repetido no arranjo do MOD não duplicou nenhuma sala nem canal. " +
+        "Com o retrato igual, o contador, a telemetria e o #voz-estado não mudaram nada e a seleção " +
+        "ficou; o que mudou (o ATRASO, o UPTIME, a média, o contador, o «no ar») mudou no mesmo nó.",
     );
   } finally {
     await browser.close();
