@@ -9,32 +9,14 @@
    toque, foco visível e redução de movimento moram em `acessibilidade.css` e
    em `mods-superficies.css`, que carregam depois. */
 
-/* ---- a região dentro da faixa ----
-
-   A faixa em si — onde ela mora na tela, quanto ela ocupa, quando ela some —
-   continua em `tela-sessao.css`, porque é layout de sessão. O que está aqui é
-   a caixa de **uma** região dentro dela. */
-.regiao-de-mod {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: var(--seele-celula-y) var(--seele-celula-x);
-  border-right: 1px solid var(--seele-linha);
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-dado);
-  color: var(--seele-osso);
-}
-
-.regiao-de-mod:last-child { border-right: none; }
-
 /* ------------------------------------- o que a API 3 já desenhava
 
    Vindo de `tela-sessao.css` inteiro, e não copiado: a mesma gramática é
-   montada na faixa, na lista de pessoas e numa superfície, e duas folhas
-   descrevendo a mesma classe é a régua que discorda no dia em que só uma muda.
-   O guarda de classes duplicadas de `tests/frontend.rs` pegou exatamente isso.
+   montada numa contribuição e numa superfície, e duas folhas descrevendo a
+   mesma classe é a régua que discorda no dia em que só uma muda. O guarda de
+   classes duplicadas de `tests/frontend.rs` pegou exatamente isso.
 
-   Os seletores que começam com `.regiao-de-mod ` continuam presos à faixa: eles
-   descrevem o aperto dela, e não a gramática. */
+   (Os seletores presos à faixa da API 3, `.regiao-de-mod `, saíram com ela.) */
 
 /* Tudo o que um MOD declara sai por esta classe, e por isso ela é a única
    régua de espaçamento lá dentro: a gramática de `montarODeclarado` não tem
@@ -43,17 +25,6 @@
   margin: 0 0 var(--seele-celula-x);
   overflow-wrap: anywhere;
 }
-
-.regiao-de-mod h3.regiao-de-mod-parte {
-  font-family: var(--seele-display);
-  font-size: var(--seele-t-rotulo);
-  font-weight: var(--seele-cartela);
-  letter-spacing: var(--seele-tracking-rotulo);
-  text-transform: uppercase;
-  color: var(--seele-rotulo-painel);
-}
-
-.regiao-de-mod ul.regiao-de-mod-parte { padding-left: var(--seele-celula-x); }
 
 /* ---------- o que um MOD declara e a pessoa opera ----------
 
@@ -634,7 +605,11 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
 
    O botão é do produto e o conteúdo é do MOD: ele não recebe padding nem
    borda, porque a composição inteira é da declaração. O que ele garante é área
-   de toque e foco visível — as duas coisas que um MOD não tem como pedir. */
+   de toque e foco visível — as duas coisas que um MOD não tem como pedir.
+
+   E nenhuma altura: o resumo é declarado pelo MOD (`linhasMaximas`), nunca
+   cortado no meio pela folha. O renderer limita a árvore; a lista conserva a
+   rolagem. */
 .pessoa-apresentada-porta {
   display: block;
   width: 100%;
@@ -646,12 +621,6 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   text-align: inherit;
   cursor: pointer;
   min-height: 34px;
-}
-
-/* O resumo é declarado pelo MOD (linhasMaximas), nunca cortado no meio
-   pelo host. O renderer limita a árvore; a lista conserva sua rolagem. */
-.pessoa-apresentada-porta .pessoa-cartao {
-  max-height: none;
 }
 
 .pessoa-apresentada-porta:focus-visible {

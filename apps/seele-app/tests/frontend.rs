@@ -14592,7 +14592,8 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
     // é uma contribuição (`.contribuicao-de-mod`, `display: contents`): o que
     // o contém é o teto de nós e de fundura do perfil, acima, e o
     // `linhasMaximas` que o MOD declara — a folha não o corta no meio
-    // (`.pessoa-apresentada-porta`, em `mods-controles.css`).
+    // (`.pessoa-apresentada-porta`, em `mods-controles.css`). As regras do
+    // `.pessoa-cartao` saíram da folha com ele.
 }
 
 /// **O que a região cria nasce com dono, teto e descarte.**/// **O que a região cria nasce com dono, teto e descarte.**

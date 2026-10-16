@@ -107,8 +107,6 @@
 :where(:root[data-casca="celular"]) .roster-subgrupo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-nome { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-diagnostico-resumo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .pessoa-cartao { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .pessoa-cartao .regiao-de-mod-parte { font-size: inherit; }
 :where(:root[data-casca="celular"]) .sync-marca { font-size: 11px; }
 :where(:root[data-casca="celular"]) .pessoa-sync-valor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa .barra { font-size: 11px; }
@@ -228,8 +226,6 @@
 :where(:root[data-casca="celular"]) .aviso-de-mod { font-size: calc(var(--seele-t-dado, 11px) * var(--cel-escala)); }
 
 /* mods-controles.css */
-:where(:root[data-casca="celular"]) .regiao-de-mod { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
-:where(:root[data-casca="celular"]) .regiao-de-mod h3.regiao-de-mod-parte { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .regiao-de-mod-rotulo { font-size: calc(var(--seele-t-micro, 10px) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .regiao-de-mod-caixa,
 :where(:root[data-casca="celular"]) .regiao-de-mod-escolha { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }

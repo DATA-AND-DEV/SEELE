@@ -461,7 +461,7 @@
    oferecer versão estática.» */
 @media (prefers-reduced-motion: reduce) {
   .superficie-de-mod *,
-  .pessoa-cartao * {
+  .contribuicao-de-mod * {
     animation: none !important;
     transition: none !important;
   }
