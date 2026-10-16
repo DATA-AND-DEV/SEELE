@@ -329,6 +329,7 @@ tabelas, com a prova e o commit.
 | 21 | a aparência substituída veta o tema de outro MOD, pelo nome, e a prévia não disputa | `tema-sai-com-a-sessao.cjs` | `cd99338f` |
 | 22a | o papel que o MOD não pediu é `papel-nao-serve`, com o papel: a conferência sai do comando, que não sobe em teste | `main.rs` | `40c3d8c3` |
 | 22 | as linhas do celular pela bancada que roda no CI desde `937d4251`, caso a caso; **um guarda de enfeite** (a rolagem do `operador.barra` passava com `overflow: visible`), e medidos a letra de 16 dos campos, o zoom e os gestos e o `status.barra` na casca larga; o descarte com a instância, sem pergunta; a duração de cada aviso; a revogação que recalcula do estado de agora; as capas animadas com mais de seis à vista | `tools/bancada-do-celular.py`, `contribuicoes-e-camadas.cjs`, `ajustes-v013.cjs`, `regioes-do-produto.cjs`, `capa.cjs` | `fa31a7d1` |
+| 23 | cada ponto de contribuição põe o nó do MOD no lugar que promete; com a navegação e a lista substituídas, o ENTRAR, o renomear, o apagar e a moderação continuam do produto; o avatar que existe, citado. **Achado**: o `pessoa.detalhes` não tem lugar na linha nativa | `regioes-do-produto.cjs`, `capa.cjs` | `85a3292c` |
 
 E o que o `.wasm` cobrava, rodado pela primeira vez nesta máquina com o
 wasi-sdk conferido: dois consertos meus (a B2 e a B10) tinham deixado o
@@ -343,22 +344,24 @@ postas na forma que o produto já tinha (`8e8dfea5`).
   `tipo-desconhecido` (`021876f8`). Os dois nomes só entram no `v6.json` se
   houver uma quarta emenda por outro motivo.
 
-**A contagem das tabelas, até o lote 22:** 457 PROVADA, 32 INCERTA, 11 SEM
+**A contagem das tabelas, até o lote 23:** 473 PROVADA, 17 INCERTA, 10 SEM
 PROVA, 35 SEM CÓDIGO e 16 NÃO SE APLICA (551 linhas). As SEM CÓDIGO e parte
 das INCERTA e SEM PROVA foram fechadas pelos consertos da B e pelas provas do
 passo 5, e ainda não foram remarcadas linha a linha (a tabela 4 foi).
 
-**Ainda abertos (43):**
-- os pontos de contribuição nas linhas e nos cabeçalhos da janela, que só
-  contam o contêiner: 5:65, 5:67, 5:68, 5:80, 5:93, 5:100, 5:102 a 5:104,
-  5:106, 6:19, 6:21, 6:22 e 6:25 a 6:28 — um caso que registra e procura o nó do MOD dentro do lugar
-  dele fecha a maioria;
-- a capa (6:59, 6:61, 6:64, 6:65, 6:69), o núcleo na janela (9:20, 9:23,
-  9:24, 8:78, 8:82) e as superfícies (7:39, 7:42, 7:44, 7:49, 7:50, 7:88);
+**À espera da orquestradora (16/10):** o `pessoa.detalhes` (6:21, 5:102) só
+é desenhado na linha apresentada por um MOD; na linha nativa uma
+contribuição nele é aceita e não aparece, e a folha da pessoa do celular
+também não o desenha. Nenhum MOD oficial o registra hoje.
+
+**Ainda abertos (27):**
+- a capa (6:59, 6:64, 6:65, 6:69), o núcleo na janela (9:20, 9:23, 9:24,
+  8:78, 8:82) e as superfícies (7:39, 7:42, 7:44, 7:49, 7:50, 7:88);
 - no celular: a «célula inteira» da aba SERVIDOR (5:70), o `listarNaBarra`
   (6:47), as abas do diálogo a 390 px (7:65), e as áreas seguras (7:47, 9:29);
 - o braço `pedido` do roteador (2:19), o `superficie-classes` (2:29) e o
   movimento reduzido dos estilos (8:36);
+- o `pessoa.detalhes` (6:21, 5:102), acima;
 - sem teste automatizado possível, ou por decidir: os rótulos que nada lê
   (1:26, 1:27).
 - **Texto, para a quarta emenda, se houver uma:** o `listarNaBarra` diz
