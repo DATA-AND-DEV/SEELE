@@ -874,6 +874,33 @@ const { chromium } = require('./playwright.cjs');
     await page.press(campoUnico, 'Enter');
     assert.equal(await submetidos(), antesDoEnter + 1, 'o Enter enviou um formulário em progresso, sem primário');
 
+    // 14. **A saída da sessão solta as superfícies, a suja também, sem
+    //     perguntar** (o cruzamento dos portes; a exceção do garantias[5]).
+    //     Quem sai não fica preso numa pergunta sobre o rascunho de um MOD, o
+    //     MOD não recebe `fechar` de uma sessão que acabou, e o modal não deixa
+    //     a casca inerte. Por último, porque encerra os MODs desta bancada.
+    const naSaida = await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'na-saida', tipo: 'dialogo', modal: true, titulo: 'Na saída' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'na-saida', arvore: [
+        { forma: 'campo', chave: 'nota', rotulo: 'Nota', valor: 'o rascunho', inicial: 'o gravado' },
+      ] });
+      const estavaAberta = Boolean(document.querySelector('[data-superficie="na-saida"]')?.isConnected);
+      const inerteAberta = document.querySelectorAll('[inert]').length > 0;
+      const antes = eventosDe(6).length;
+      encerrarOAmbienteDosMods();
+      await new Promise(ok => setTimeout(ok, 100));
+      return {
+        estavaAberta,
+        inerteAberta,
+        aberta: Boolean(document.querySelector('[data-superficie="na-saida"]')?.isConnected),
+        perguntou: !$('moderar').hidden,
+        fechar: eventosDe(6).slice(antes).filter(e => e.nome === 'fechar' || e.nome === 'fechar-pedido').length,
+        inertes: document.querySelectorAll('[inert]').length,
+      };
+    });
+    assert.deepEqual(naSaida, { estavaAberta: true, inerteAberta: true, aberta: false, perguntou: false, fechar: 0, inertes: 0 },
+      `a saída da sessão não soltou a superfície suja como devia: ${JSON.stringify(naSaida)}`);
+
     assert.deepEqual(errors, []);
     console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e a 5 não cria superfície nenhuma; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial; e a ação destrutiva só chega ao MOD depois do sim; e o erro vale na escolha e na cor; e os botões do formulário são do produto.');
   } finally {
