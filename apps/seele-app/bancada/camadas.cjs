@@ -404,6 +404,12 @@ const { chromium } = require('./playwright.cjs');
           { forma: 'campo', chave: 'lema', rotulo: 'Lema', tamanhoMaximo: 10 },
           { forma: 'numero', chave: 'nivel', rotulo: 'Nível', minimo: 1, maximo: 20 },
           { forma: 'numero', chave: 'peso', rotulo: 'Peso', inteiro: true },
+          { forma: 'numero', chave: 'idade', rotulo: 'Idade', minimo: 18 },
+          // **No envio, a marca é booleana e a escolha é texto**, mesmo com um
+          // valor que parece número (o cruzamento dos portes: a MESA e o ESTILO
+          // convertem pelo tipo).
+          { forma: 'marca', chave: 'avisar', rotulo: 'Avisar', valor: true },
+          { forma: 'escolha', chave: 'classe', rotulo: 'Classe', valor: '2', opcoes: [{ valor: '2', dentro: 'Dois' }, { valor: 'b', dentro: 'Bê' }] },
         ],
       }] });
     });
@@ -420,19 +426,24 @@ const { chromium } = require('./playwright.cjs');
         foco: document.activeElement?.closest('[data-chave-do-mod]')?.dataset.chaveDoMod ?? null,
       };
     });
-    const VALIDOS = { nome: 'Alex', lema: 'curto', nivel: '5', peso: '70' };
+    const VALIDOS = { nome: 'Alex', lema: 'curto', nivel: '5', peso: '70', idade: '30' };
+    // **As frases são as do produto, inteiras** (o guia as cita; o PERFIS conta
+    // com «Use até 40 caracteres; este tem 41.»): cada regra, a sua.
     const CASOS = [
-      ['obrigatorio', { nome: '' }, 'nome'],
-      ['tamanhoMaximo', { lema: 'longo demais!' }, 'lema'],
-      ['minimo/maximo', { nivel: '25' }, 'nivel'],
-      ['inteiro', { peso: '70.5' }, 'peso'],
+      ['obrigatorio', { nome: '' }, 'nome', 'Preencha este campo.'],
+      ['tamanhoMaximo', { lema: 'longo demais!' }, 'lema', 'Use até 10 caracteres; este tem 13.'],
+      ['minimo/maximo, acima', { nivel: '25' }, 'nivel', 'Use um número de 1 a 20.'],
+      ['minimo/maximo, abaixo', { nivel: '0' }, 'nivel', 'Use um número de 1 a 20.'],
+      ['minimo', { idade: '17' }, 'idade', 'Use um número a partir de 18.'],
+      ['inteiro', { peso: '70.5' }, 'peso', 'Use um número inteiro.'],
     ];
-    for (const [regra, quebra, chave] of CASOS) {
+    for (const [regra, quebra, chave, fraseEsperada] of CASOS) {
       await preencher({ ...VALIDOS, ...quebra });
       const r = await enviar();
       assert.equal(r.foi, false, `${regra}: o submeter foi ao MOD com a regra violada`);
       assert.deepEqual(r.marcados.map((m) => m.chave), [chave], `${regra}: o campo marcado não é o da regra: ${JSON.stringify(r)}`);
       assert.ok(r.marcados[0].frase.length > 0 && r.marcados[0].aria === 'true', `${regra}: a marca não tem frase ou aria-invalid: ${JSON.stringify(r)}`);
+      assert.equal(r.marcados[0].frase, fraseEsperada, `${regra}: a frase do produto mudou: ${JSON.stringify(r)}`);
       assert.equal(r.foco, chave, `${regra}: o foco não foi ao campo inválido: ${JSON.stringify(r)}`);
       // **Corrigir apaga a frase antes do envio**: quem conserta o campo não
       // fica lendo o erro que já resolveu.
@@ -453,7 +464,8 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(certo.foi, true, `com tudo certo, o submeter não chegou: ${JSON.stringify(certo)}`);
     assert.deepEqual(certo.marcados, [], `com tudo certo, um campo ficou marcado: ${JSON.stringify(certo)}`);
     const valores = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'submeter').at(-1)?.valores);
-    assert.deepEqual(valores, { nome: 'Alex', lema: 'curto', nivel: 5, peso: 70 }, 'o submeter não levou os valores');
+    assert.deepEqual(valores, { nome: 'Alex', lema: 'curto', nivel: 5, peso: 70, idade: 30, avisar: true, classe: '2' },
+      `o submeter não levou os valores, cada um no seu tipo: ${JSON.stringify(valores)}`);
 
     // 8. A inércia com o que a casca pede acordado.
     const inercia = await page.evaluate(async () => {
