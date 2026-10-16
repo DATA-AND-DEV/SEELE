@@ -381,7 +381,10 @@ jobs:
       # A lista de pessoas reconciliada pelo id (pendência 63, (b)): um
       # PersonState mexe só na linha da pessoa, e o foco fica; o mesmo retrato
       # não mexe em nada; quem entra numa sala leva o nó. A lista repovoada a
-      # cada quadro sumia e voltava na árvore de acessibilidade.
+      # cada quadro sumia e voltava na árvore de acessibilidade. E a coluna de
+      # canais (pendência 64): o foco do teclado num canal atravessa o tique.
+      # E o resto da 63 (lote R63): o contador, a telemetria e o #voz-estado,
+      # as regiões de MOD e a conversa não refazem o que não mudou.
       - run: node apps/seele-app/bancada/linhas-pelo-id.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
