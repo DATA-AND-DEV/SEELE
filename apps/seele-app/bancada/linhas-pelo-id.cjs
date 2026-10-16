@@ -43,10 +43,16 @@
 //    de uma saída e de uma chegada, e depois de uma reordenação (a primeira da
 //    sala vai para o fim), na lista e na coluna de salas —, e cada linha é o
 //    mesmo nó.
+// 9. **O `<details>` que a pessoa abre continua aberto** através do tique.
+// 10. **A coluna de canais** (pendência 64): o foco do teclado no botão do
+//    segundo canal atravessa o tique — com o mesmo retrato, e com outro canal
+//    mudando de nome —, o botão é o mesmo nó e continua no documento; um canal
+//    que entra ganha um nó, um que sai perde o dele, os outros ficam; e o nó
+//    de MOD do `canal.item` não sai do documento.
 //
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
-// salas repovoada, o caso 6.
+// salas repovoada, o caso 6; com a de canais, o caso 10.
 //
 // Rodar:  node apps/seele-app/bancada/linhas-pelo-id.cjs
 
@@ -703,6 +709,235 @@ async function abrir(browser, url, r) {
     assert.ok(caso9.fechouSemMudo, `${apelido(6)} deixou de estar muda e o SINAL E ESTADO dela não fechou`);
     assert.ok(caso9.nativaSeguiuAberta && caso9.maisSeguiuAberto, "o que a pessoa abriu fechou com um PersonState de outra pessoa");
 
+    // 10. A coluna de canais (pendência 64). O foco do teclado no botão do
+    //     segundo canal atravessa o tique de 500 ms — com o mesmo retrato, e com
+    //     um retrato em que outro canal muda de nome —; um canal que entra ganha
+    //     um nó, um que sai perde o dele, e os outros ficam com o mesmo. Com a
+    //     coluna repovoada a cada retrato, o botão saía do documento e o foco
+    //     caía no `<body>`, em até meio segundo e com a sessão parada.
+    //
+    //     Pelo tique, e não pelo evento: é o tique que redesenha a sessão
+    //     parada, e é nele que quem navega pelo teclado perdia o lugar.
+    const CANAIS = [
+      { id: 1, name: "geral", open: true },
+      { id: 2, name: "combinados", open: false },
+      { id: 3, name: "avisos", open: false },
+      { id: 4, name: "musica", open: false },
+    ];
+    const comCanais = { ...BASE, channels: CANAIS };
+    const pagina10 = await abrir(browser, url, comCanais);
+    const caso10 = await pagina10.page.evaluate(async ({ focado, renomeado, nomeNovo, sai, chega }) => {
+      const coluna = document.getElementById("lista-linhas");
+      const tique = () => new Promise((ok) => setTimeout(ok, 1200));
+      const botoes = () => new Map([...coluna.querySelectorAll("button[data-linha]")].map((b) => [b.dataset.linha, b]));
+      const fileiras = () => new Map([...botoes()].map(([id, b]) => [id, b.closest("li")]));
+      const observar = () => {
+        const registros = [];
+        const observador = new MutationObserver((rs) => registros.push(...rs));
+        observador.observe(coluna, { subtree: true, childList: true, attributes: true, characterData: true });
+        return () => {
+          registros.push(...observador.takeRecords());
+          observador.disconnect();
+          return registros;
+        };
+      };
+      // O canal da fileira em que uma mutação caiu, ou `null` fora de fileira.
+      const donoDaMutacao = (registro) => {
+        const no = registro.target.nodeType === Node.ELEMENT_NODE ? registro.target : registro.target.parentElement;
+        return no?.closest?.("li")?.querySelector("button[data-linha]")?.dataset.linha ?? null;
+      };
+      const trocadas = (antes, depois, fora = null) =>
+        [...antes].filter(([id, no]) => id !== fora && depois.get(id) !== no).map(([id]) => id);
+      const ondeEstaOFoco = () => {
+        const ativo = document.activeElement;
+        return ativo?.dataset?.linha ? `canal ${ativo.dataset.linha}` : (ativo?.tagName ?? "nada");
+      };
+      const id = String(focado);
+
+      // a) O mesmo retrato, redesenhado pelo tique.
+      const botao = botoes().get(id);
+      botao?.focus();
+      const antesA = botoes();
+      const fileirasA = fileiras();
+      const focadoA = Boolean(botao) && document.activeElement === botao;
+      let parar = observar();
+      let retrato = desenhado;
+      await tique();
+      const mesmo = {
+        focado: focadoA,
+        redesenhou: desenhado !== retrato && desenhado !== null,
+        mesmoNo: botoes().get(id) === botao,
+        noDocumento: Boolean(botao?.isConnected),
+        focoFicou: document.activeElement === botao,
+        foco: ondeEstaOFoco(),
+        mutacoes: parar().length,
+        trocados: trocadas(antesA, botoes()),
+        fileirasTrocadas: trocadas(fileirasA, fileiras()),
+      };
+
+      // b) Outro canal muda de nome, pelo tique. O foco vai de novo ao botão
+      //    do segundo canal que está na tela, para este passo medir sozinho.
+      const botaoB = botoes().get(id);
+      botaoB?.focus();
+      const focadoB = Boolean(botaoB) && document.activeElement === botaoB;
+      const antesB = botoes();
+      const fileirasB = fileiras();
+      parar = observar();
+      retrato = desenhado;
+      const comNome = structuredClone(testTable.snapshot);
+      comNome.channels.find((c) => c.id === renomeado).name = nomeNovo;
+      testTable.snapshot = comNome;
+      await tique();
+      const registrosB = parar();
+      const outro = {
+        focado: focadoB,
+        redesenhou: desenhado !== retrato && desenhado?.channels?.find((c) => c.id === renomeado)?.name === nomeNovo,
+        mesmoNo: botoes().get(id) === botaoB,
+        noDocumento: Boolean(botaoB?.isConnected),
+        focoFicou: document.activeElement === botaoB,
+        foco: ondeEstaOFoco(),
+        mutacoes: registrosB.length,
+        foraDaFileira: registrosB.map(donoDaMutacao).filter((d) => d !== String(renomeado)).length,
+        trocados: trocadas(antesB, botoes()),
+        fileirasTrocadas: trocadas(fileirasB, fileiras()),
+        rotulo: botoes().get(String(renomeado))?.querySelector(".linha-rotulo")?.textContent ?? null,
+        renomearDiz: coluna.querySelector(`button[data-renomear-linha="${renomeado}"]`)?.getAttribute("aria-label") ?? null,
+      };
+
+      // c) Um canal sai e outro entra, pelo tique.
+      const botaoC = botoes().get(id);
+      botaoC?.focus();
+      const antesC = botoes();
+      const fileirasC = fileiras();
+      const mudado = structuredClone(testTable.snapshot);
+      mudado.channels = mudado.channels.filter((c) => c.id !== sai);
+      mudado.channels.push({ id: chega, name: "recem-criado", open: false });
+      testTable.snapshot = mudado;
+      await tique();
+      const depoisC = botoes();
+      const fileirasDepoisC = fileiras();
+      const fileiraQueEntrou = fileirasDepoisC.get(String(chega));
+      const entraESai = {
+        chegou: desenhado?.channels?.some((c) => c.id === chega) && !desenhado?.channels?.some((c) => c.id === sai),
+        saiu: !depoisC.has(String(sai)) && !fileirasC.get(String(sai))?.isConnected,
+        nasceu: Boolean(fileiraQueEntrou) && ![...fileirasC.values()].includes(fileiraQueEntrou)
+          && ![...antesC.values()].includes(depoisC.get(String(chega))),
+        trocados: trocadas(antesC, depoisC, String(sai)),
+        fileirasTrocadas: trocadas(fileirasC, fileirasDepoisC, String(sai)),
+        focoFicou: Boolean(botaoC) && document.activeElement === botaoC,
+        ordem: [...depoisC.keys()],
+        ordemDoRetrato: (desenhado?.channels ?? []).map((c) => String(c.id)),
+      };
+
+      // d) O RENOMEAR do canal renomeado, que atravessou os retratos, abre
+      //    com o nome de agora, e não com o do quadro em que o botão nasceu.
+      coluna.querySelector(`button[data-renomear-linha="${renomeado}"]`)?.click();
+      await quadros(2);
+      const valor = document.getElementById("nomear-valor")?.value ?? null;
+      document.getElementById("nomear-cancelar")?.click();
+      return { mesmo, outro, entraESai, valor };
+    }, { focado: 2, renomeado: 4, nomeNovo: "musica ao vivo", sai: 3, chega: 5 });
+    assert.deepEqual(pagina10.errors, [], "caso 10: erros na página");
+    await pagina10.page.close();
+    const { mesmo, outro, entraESai } = caso10;
+    assert.ok(mesmo.focado, "a bancada não conseguiu pôr o foco no botão do segundo canal");
+    assert.ok(mesmo.redesenhou, "caso 10: o tique não redesenhou em 1,2 s, e o caso não mediu nada");
+    assert.ok(
+      mesmo.mesmoNo && mesmo.noDocumento && mesmo.focoFicou,
+      `o mesmo retrato, redesenhado pelo tique, tirou o foco do segundo canal: o botão ${mesmo.mesmoNo ? "é" : "não é"} ` +
+        `o mesmo nó, ${mesmo.noDocumento ? "está" : "saiu"} do documento, e o foco está em ${mesmo.foco}. ` +
+        "Quem navega a coluna de canais pelo teclado perde o lugar a cada meio segundo",
+    );
+    assert.deepEqual(mesmo.trocados, [], `o mesmo retrato trocou o botão dos canais ${mesmo.trocados.join(", ")}`);
+    assert.deepEqual(mesmo.fileirasTrocadas, [], `o mesmo retrato trocou a fileira dos canais ${mesmo.fileirasTrocadas.join(", ")}`);
+    assert.equal(mesmo.mutacoes, 0, `o mesmo retrato, redesenhado pelo tique, fez ${mesmo.mutacoes} mutações na coluna de canais`);
+    assert.ok(outro.focado, "a bancada não conseguiu pôr o foco de novo no botão do segundo canal");
+    assert.ok(outro.redesenhou, "caso 10: o nome novo do quarto canal não chegou à tela pelo tique");
+    assert.ok(
+      outro.mesmoNo && outro.noDocumento && outro.focoFicou,
+      `o quarto canal mudou de nome e o foco saiu do segundo: o botão ${outro.mesmoNo ? "é" : "não é"} o mesmo nó, ` +
+        `${outro.noDocumento ? "está" : "saiu"} do documento, e o foco está em ${outro.foco}`,
+    );
+    assert.deepEqual(outro.trocados, [], `um canal mudou de nome e o botão dos canais ${outro.trocados.join(", ")} trocou de nó`);
+    assert.deepEqual(outro.fileirasTrocadas, [], `um canal mudou de nome e a fileira dos canais ${outro.fileirasTrocadas.join(", ")} trocou de nó`);
+    assert.ok(outro.mutacoes > 0, "o nome novo não mudou nada na coluna: a fileira do canal ficou velha");
+    assert.equal(
+      outro.foraDaFileira, 0,
+      `o quarto canal mudou de nome e ${outro.foraDaFileira} de ${outro.mutacoes} mutações caíram fora da fileira dele`,
+    );
+    assert.equal(outro.rotulo, "musica ao vivo", `a fileira do canal renomeado diz ${JSON.stringify(outro.rotulo)}`);
+    assert.equal(
+      outro.renomearDiz, "renomear o canal musica ao vivo",
+      `o lápis do canal renomeado diz ${JSON.stringify(outro.renomearDiz)} ao leitor de tela`,
+    );
+    assert.ok(entraESai.chegou, "caso 10: a saída e a entrada de um canal não chegaram à tela pelo tique");
+    assert.ok(entraESai.saiu, "o terceiro canal saiu do retrato e a fileira dele ficou no documento");
+    assert.ok(entraESai.nasceu, "o canal que entrou não ganhou uma fileira nova: herdou o nó de outro canal");
+    assert.deepEqual(
+      entraESai.trocados, [],
+      `um canal saiu e outro entrou, e o botão dos canais ${entraESai.trocados.join(", ")} trocou de nó`,
+    );
+    assert.deepEqual(
+      entraESai.fileirasTrocadas, [],
+      `um canal saiu e outro entrou, e a fileira dos canais ${entraESai.fileirasTrocadas.join(", ")} trocou de nó`,
+    );
+    assert.ok(entraESai.focoFicou, "um canal saiu e outro entrou, e o foco saiu do segundo canal");
+    assert.deepEqual(entraESai.ordem, entraESai.ordemDoRetrato, "a ordem da coluna de canais não é a do retrato");
+    assert.equal(
+      caso10.valor, "musica ao vivo",
+      `o RENOMEAR do canal renomeado abriu com ${JSON.stringify(caso10.valor)}, e não com o nome de agora`,
+    );
+
+    // 10, o ponto de MOD da fileira: o `canal.item`, dentro do botão do canal.
+    //     Um retrato em que outro canal muda de nome não tira nenhum nó de MOD
+    //     do documento, e cada um fica no botão do canal dele.
+    const pagina10m = await abrir(browser, url, comCanais);
+    const caso10m = await pagina10m.page.evaluate(async ({ renomeado, nomeNovo }) => {
+      registrarMod("bancada/canal", testTable.snapshot.channels.map((c) => ({
+        ponto: "canal.item", modo: "adicionar", alvo: String(c.id), prioridade: 0,
+        conteudo: [{ forma: "texto", chave: "c", dentro: `selo de ${c.name}` }],
+      })));
+      await quadros(3);
+      desenhar(testTable.snapshot);
+      const coluna = document.getElementById("lista-linhas");
+      const seletor = '.contribuicao-de-mod[data-ponto="canal.item"]';
+      const dono = (no) => no.closest("button[data-linha]")?.dataset.linha ?? null;
+      const nos = [...coluna.querySelectorAll(seletor)];
+      const donos = new Map(nos.map((no) => [no, dono(no)]));
+      const registros = [];
+      const observador = new MutationObserver((rs) => registros.push(...rs));
+      observador.observe(coluna, { subtree: true, childList: true, attributes: true, characterData: true });
+      const novo = structuredClone(testTable.snapshot);
+      novo.channels.find((c) => c.id === renomeado).name = nomeNovo;
+      testTable.snapshot = novo;
+      await new Promise((ok) => setTimeout(ok, 1200));
+      registros.push(...observador.takeRecords());
+      observador.disconnect();
+      const removidos = registros.flatMap((r) => [...r.removedNodes]);
+      return {
+        redesenhou: desenhado?.channels?.find((c) => c.id === renomeado)?.name === nomeNovo,
+        nos: nos.length,
+        esperados: testTable.snapshot.channels.length,
+        doCanalCerto: nos.filter((no) => donos.get(no) === no.dataset.destino).length,
+        saiuDoDocumento: nos.filter((no) => removidos.some((m) => m === no || m.contains?.(no))).length,
+        trocados: nos.filter((no) => !no.isConnected || dono(no) !== donos.get(no)).length,
+      };
+    }, { renomeado: 4, nomeNovo: "musica ao vivo" });
+    assert.deepEqual(pagina10m.errors, [], "caso 10, canal.item: erros na página");
+    await pagina10m.page.close();
+    assert.ok(caso10m.redesenhou, "caso 10, canal.item: o nome novo não chegou à tela pelo tique");
+    assert.ok(
+      caso10m.nos > 0 && caso10m.nos === caso10m.esperados && caso10m.doCanalCerto === caso10m.nos,
+      `caso 10, canal.item: ${caso10m.nos} nós de MOD na coluna (${caso10m.doCanalCerto} no botão do canal deles), ` +
+        `e eram ${caso10m.esperados}`,
+    );
+    assert.equal(
+      caso10m.saiuDoDocumento, 0,
+      `canal.item: ${caso10m.saiuDoDocumento} de ${caso10m.nos} nós de MOD saíram do documento com um canal ` +
+        "mudando de nome: ou o marcador deste ponto não está na fileira montada, ou o botão com o nó de MOD dentro foi refeito",
+    );
+    assert.equal(caso10m.trocados, 0, `canal.item: ${caso10m.trocados} nós de MOD trocaram de canal ou saíram da coluna`);
+
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
         `(${caso1.mutacoes} mutações, nenhuma fora dela) e o foco ficou; o mesmo retrato não ` +
@@ -711,7 +946,10 @@ async function abrir(browser, url, r) {
         `reordenação; na coluna de salas, ${caso6.doEvento} mutações, todas na linha da ` +
         "pessoa, o ENTRAR NA SALA o mesmo nó, quem saiu da sala levou só a linha dela, e o " +
         "RENOMEAR abriu com o nome de agora; e nenhum nó de MOD saiu do documento nem trocou " +
-        `de linha, ponto por ponto: ${caso5.join("; ")}.`,
+        `de linha, ponto por ponto: ${caso5.join("; ")}. Na coluna de canais, o foco no ` +
+        "segundo canal atravessou o tique com o mesmo retrato e com outro canal mudando de nome " +
+        `(${outro.mutacoes} mutações, todas na fileira dele), quem saiu perdeu o nó, quem entrou ` +
+        `ganhou um, e os ${caso10m.nos} nós do canal.item ficaram no documento.`,
     );
   } finally {
     await browser.close();
