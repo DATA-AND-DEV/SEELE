@@ -173,6 +173,11 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
         ['portaria', () => avisarQueBatem(1), null, () => avisarQueBatem(0)],
         ['moderação', () => abrirModeracao(), null, () => fecharModeracao()],
         ['aceite', () => abrirAceiteDeMods('127.0.0.1:8384', [{ id: 'teste/mesa', nome: 'MESA', hash: 'h', versao: '1.0.0', api: 6 }], 'c1', null), null, () => fecharAceiteDeMods()],
+        ['sala pessoal', async () => {
+          testTable.meu_codigo = 'K9P2-CSM7-NBFR-AYQ3';
+          await abrirPerfil();
+          await new Promise((ok) => setTimeout(ok, 200));
+        }, null, () => fecharPerfil()],
       ];
     }, { temas: { claro: TEMAS.claro, hostil: TEMAS.hostil } });
 
@@ -295,6 +300,10 @@ for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.ho
       ['portaria', ['#portaria-batendo-texto', '#portaria-batendo-ver']],
       ['moderação', ['#moderar-titulo', '#moderar-fechar']],
       ['aceite', ['#mods-titulo', '#mods-aceitar']],
+      // **A ligação, no PERFIL** (`itens[6]`): o SEU CÓDIGO, o COPIAR e o
+      // «receber ligações», que a sala pessoal da F7 põe no PERFIL. (O
+      // CHAMANDO ainda não existe na tela: é a tarefa 7f da F7.)
+      ['sala pessoal', ['#perfil-sala-titulo', '#perfil-copiar-codigo', '#perfil-receber']],
     ];
     for (const [item, seletores] of ESCONDIDOS) {
       const visto = await page.evaluate(async ({ indice, seletores }) => {
