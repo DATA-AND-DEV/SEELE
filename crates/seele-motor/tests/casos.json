@@ -29,6 +29,15 @@
       ]
     },
     {
+      "de": "o ouvinte de aoEvento recebe o evento como a janela o manda: o nome e os campos dele (handlers[2]; a auditoria do v6.json, tabela 1)",
+      "fonte": "SeeleUI.aoEvento((ev) => seele.postar(JSON.stringify([ev.tipo, ev.nome, ev.valor])));",
+      "passos": [{ "responder": "{\"tipo\":\"evento\",\"nome\":\"ping\",\"valor\":7}" }],
+      "esperado": [
+        { "tipo": "mensagem", "corpo": "[\"evento\",\"ping\",7]" },
+        { "tipo": "parou" }
+      ]
+    },
+    {
       "de": "um laço sem fim é cortado pelo prazo, e a linha diz o teto",
       "fonte": "SeeleUI.aoEvento(() => { while (true) {} });",
       "passos": [{ "responder": "{\"tipo\":\"evento\",\"nome\":\"x\"}" }],
