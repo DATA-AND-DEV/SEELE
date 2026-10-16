@@ -1269,6 +1269,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/gestao-do-tema.cjs
     uma_bancada node apps/seele-app/bancada/palco-da-chamada.cjs
     uma_bancada node apps/seele-app/bancada/um-redesenho-por-quadro.cjs
+    uma_bancada node apps/seele-app/bancada/linhas-pelo-id.cjs
     uma_bancada node apps/seele-app/bancada/executor-no-navegador.cjs target/wasm32-wasip1/release/seele_motor_web.wasm
     uma_bancada node apps/seele-app/bancada/voz-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
     uma_bancada node apps/seele-app/bancada/identidade-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
