@@ -751,6 +751,37 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   só na memória, saiu que `"tema"` em `CHAVES` e `TIPOS` não basta: a
   conferência de tipo recusa todo booleano. O guarda da união está escrito e
   medido, vermelho até o Step 6.
+- **15/10–16/10. A auditoria do `v6.json` contra o produto (D-api-8).** As
+  nove tabelas e o README estão em `auditoria-do-v6/` (`d1448c8b`). Os
+  consertos foram:
+  - o B inteiro: as recusas do volume pelo nome, a lista fechada, a
+    `forma-desconhecida`, o K2, os formulários, a prévia do tema, o
+    `escolhido`, os 44 px, a capa parada, o `lugar` e as capacidades por
+    plataforma;
+  - o toque que só prende a figura que se arrasta;
+  - a superfície suja que sempre pergunta (`0e9f8fbf`);
+  - a citação com `pessoa` (D-api-9, `1f701ebc`).
+
+  **Duas emendas** do `v6.json`, cada uma num commit com o sha refeito:
+  `44025ab5` e `563ecf8f` (v6 `58576e95…`). A segunda trouxe:
+  - a `pessoa`;
+  - a errata do `sujo`, achada pela MESA;
+  - o diálogo no celular, conferido pela F8;
+  - os nomes do par de uma recusa do tema, achados pelo ESTILO;
+  - o `teto` do `teto-de-alvos`.
+
+  **O passo 5**: o que a MESA, o PERFIS e o ESTILO usam, cruzado com as
+  provas. Consertei duas entregas: o `teto` do `teto-de-alvos` (`477e6ff0`)
+  e a parte errada de uma propriedade composta do estilo, que virava o
+  padrão calada (`6caf0b2d`). Entraram dez provas, todas com as reversões
+  na mensagem: formas e figuras com o espelho, a superfície fechada que
+  reabre, o `atualizar` de quem saiu, as frases da validação e os tipos do
+  `submeter`, as consultas pelo contêiner, o `saiu`, o clique nas ações, a
+  saída da sessão e o `ModAviso`. A tabela fica no README da auditoria.
+
+  Um erro meu, achado e consertado (`c9749e03`): uma conferência do caso da
+  `pessoa` contava eventos por um campo que não existe e passava sem medir
+  nada.
 - **Esperam:** do corte, o guarda da união, pronto em
   `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
   depois do Step 6 do dono (D-api-7). O `0.16/api-6` avançou para

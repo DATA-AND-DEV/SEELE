@@ -204,12 +204,64 @@ redução e a lista fechada das recusas inteira. Com ela entrou o guarda
 |---|---|---|
 | o `cancelou` do `traco` | MESA | `c41d04eb` |
 | a citação `daPessoa` que não acompanhava a troca | PERFIS | `fc7f32d2` |
+| a capa parada na lista | PERFIS | `821ac8df` |
+| a superfície suja que só perguntava com uma opção (`garantias[5]`) | auditoria, C | `0e9f8fbf` |
+| a citação que não resolvia numa superfície (`capa.onde.perfil`, D-api-9) | PERFIS | `1f701ebc` |
+| o `inicial` «da montagem», que se lia «de cada montagem» | MESA | `563ecf8f` (texto) |
+| o par do segundo apagado com outra grafia (`apagado-secundario`) | ESTILO | `0938697d` |
+| as cores de estado do par sem nome no contrato | ESTILO | `563ecf8f` (texto) |
+| o diálogo no celular descrito como tela cheia para os dois, e as abas do ESTILO | F8 | `563ecf8f` (texto) |
+
+**A segunda emenda:** `563ecf8f` (SHA-256 da v6 `58576e95…`). Ela escreveu a
+`pessoa` da citação, a errata do `sujo`, o diálogo no celular, os nomes do par
+de uma recusa do tema e o `teto` do `teto-de-alvos`.
+
+## O passo 5: o que os portes usam
+
+Três frentes de leitura levantaram, nos ramos dos portes (a MESA em
+`porte/api-6`, o PERFIS em `porte/4.0.0`, o ESTILO em `porte/api-6`), o que
+cada MOD usa da API 6 e de que comportamento do produto depende sem chamar.
+Uma quarta cruzou as 25 dependências com o código e as provas, em `0e9f8fbf`.
+
+**O que o produto não fazia como o MOD esperava**, consertado:
+
+| dependência | conserto |
+|---|---|
+| o `teto-de-alvos` com `teto` (o PERFIS lê `erro.teto`) | `477e6ff0` |
+| a parte errada de uma propriedade composta do estilo, que virava o padrão calada (a cor «vermelha» de uma sombra saía preta) | `6caf0b2d` |
+
+**As provas novas**, cada uma com as reversões na mensagem do commit:
+
+| o que | onde | commit |
+|---|---|---|
+| as 30 formas e as 4 figuras do `v6.json`, com o espelho nos dois sentidos | `regiao-do-mod.cjs` (portão) | `09c9a375` |
+| a citação com `pessoa` | `regiao-do-mod.cjs` (portão), `capa.cjs` | `1f701ebc`, `c9749e03` |
+| fechada, a superfície continua do MOD; `criar` com o mesmo id a reabre | `camadas.cjs` | `e43e4520` |
+| `atualizar` uma contribuição que saiu devolve `false` | `contribuicoes-e-camadas.cjs` (portão) | `4dd1918a` |
+| as frases da validação, o `minimo` sozinho, a marca booleana e a escolha em texto no `submeter` | `camadas.cjs` | `d3d04527` |
+| as consultas pela largura da superfície | `camadas.cjs` | `71c976a7` |
+| o `saiu` do evento `pessoas` | `eventos-da-tela.cjs` (portão) | `b3a46064` |
+| o clique numa ação de contribuição com o alvo: `pessoa` no cartão, `canal` na sala | `capa.cjs` | `7e122469` |
+| a saída da sessão solta a superfície suja sem perguntar | `camadas.cjs` | `34e4703c` |
+| o `ModAviso` com os nomes que o Rust serializa | `frontend.rs` (portão) | `46e57cf6` |
+
+O `c9749e03` conserta uma conferência minha que não media nada: o caso 5c da
+`capa.cjs` contava os eventos por `m.evento.nome`, que não existe.
+
+**O que fica de fora, e por quê:**
+- o diálogo no celular (o não modal até 85% da sessão, o rodapé do modal): só a
+  `tools/bancada-do-celular.py` mediria, e nenhum caso dela abre um diálogo
+  não modal ou com rodapé (a F8, 16/10);
+- o `lugar` da sessão sai só quando a casca muda de forma, como o texto diz, e
+  não ao chegar nem quando a janela muda de tamanho; vai para o guia;
+- o evento `acao` traz `pessoa` e `canal` em texto, e `atualizar` de quem saiu
+  do servidor devolve `true` (o produto não revoga por presença); os dois vão
+  para o guia.
 
 **Ainda abertos:**
-- `capa.onde.perfil`: a citação numa superfície, à espera da decisão sobre o `pessoa` na citação;
-- o `garantias[5]`: a superfície suja sempre pergunta;
 - a linha do tema na tela de aceite, quando a ponta da F1 chegar;
-- as provas das INCERTA e das SEM PROVA, e os dois guardas-espelho;
+- as INCERTA e as SEM PROVA que nenhum porte usa, e o espelho do prelúdio com o
+  roteador;
 - o guia (`docs/como-se-faz-um-mod.md` na API 6).
 
 Os achados 1 e 2, as bancadas de navegador e a do celular no portão de
