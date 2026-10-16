@@ -14550,11 +14550,16 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
     );
 
     // **Quem desenha a linha é o produto.** O nó chega montado e é anexado; o
-    // MOD não escolhe posição, e nada de fora escreve estilo nele.
-    let linha = js_function(&sessao, "function linhaNativaDoRoster(");
+    // MOD não escolhe posição, e nada de fora escreve estilo nele. Na 6, o
+    // cartão que acrescenta é o `pessoa.cartao` da contribuição, anexado
+    // depois da linha (os cartões da API 3, `pessoa.cartoes`, saíram com ela).
+    let linha = js_function(&sessao, "function linhaDoRoster(");
     assert!(
-        linha.contains("for (const cartao of pessoa.cartoes ?? []) item.append(cartao);"),
-        "a linha deixou de anexar o cartão montado: {linha}"
+        linha.contains(
+            "item.append(...nosDeMod(conteudoDasContribuicoes(\"pessoa.cartao\", String(pessoa.id))));"
+        ) && !sessao.contains("pessoa.cartoes"),
+        "a linha deixou de anexar o cartão montado pela contribuição, ou voltou a anexar os \
+         cartões da API 3: {linha}"
     );
 
     // **E a substituição não desfaz nenhuma das três garantias.**

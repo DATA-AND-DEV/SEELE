@@ -1103,16 +1103,19 @@ contexto.cartoesDosMods = new Map();
   );
   confere("R3b · a volta", dono.recursos.length === 0, "revogar deixou montagem retida na instância");
 
-  // **O legado continua valendo**, porque um pacote de API 3 é executado.
+  // **O legado saiu** (a limpeza das APIs 3 a 5): este build só executa a 6,
+  // e uma contribuição sem conteúdo não cai mais num cartão de
+  // `SeeleUI.cartoes`. Um cartão legado posto à mão, enquanto a tabela dele
+  // existir, não é usado: a linha fica com o que o produto desenha.
   const legado = new No("div", "");
-  contexto.cartoesDosMods.set("mod/a", { cartaoDe: (id) => (String(id) === "12" ? legado : null) });
+  contexto.cartoesDosMods?.set?.("mod/a", { cartaoDe: (id) => (String(id) === "12" ? legado : null) });
   const semConteudo = { mod: "mod/a", instancia: dono, ponto: "pessoa.cartao", conteudo: null };
   confere(
-    "R3b · o legado",
-    contexto.cartaoDeContribuicao(semConteudo, 12) === legado,
-    "uma contribuição sem conteúdo deixou de cair em `SeeleUI.cartoes`, que é o caminho da API 3",
+    "R3b · sem o legado",
+    !contexto.cartaoDeContribuicao(semConteudo, 12),
+    "uma contribuição sem conteúdo caiu num cartão de `SeeleUI.cartoes`, que saiu com as APIs 3 a 5",
   );
-  contexto.cartoesDosMods.clear();
+  contexto.cartoesDosMods?.clear?.();
 }
 
 // ------------- N4 · a escolha de apresentação alcança o caminho legado

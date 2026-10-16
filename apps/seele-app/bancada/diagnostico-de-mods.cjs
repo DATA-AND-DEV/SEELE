@@ -1706,25 +1706,6 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
     contribuicoesDosMods.revogarDoMod("mod/a");
   });
 
-  // 4. O cartão da API 3 sob «o SEELE desenha».
-  await pagina.evaluate(() => darCartoesDoMod({ id: "mod/b", hash: "mod-b" }, somB, {
-    2: [{ forma: "midia", chave: "cartao-de-b", fonte: "som/b.wav", tocando: true }],
-  }));
-  await esperarOSom("cartao-de-b", "tocando", "o som do cartão da API 3 não tocou");
-  const antesDoCartao = await contagem();
-  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", APRESENTACAO_NATIVA));
-  await esperarOSom(
-    "cartao-de-b",
-    "pausada",
-    "«o SEELE desenha» o cartão, o cartão da API 3 saiu da lista, e o MOD não ouviu «pausada»",
-  );
-  assert.equal(
-    (await contagem()).paradas,
-    antesDoCartao.paradas + 1,
-    "o cartão da API 3 saiu da lista e a fonte dele não foi parada",
-  );
-  await pagina.evaluate(() => escolherApresentacao("pessoa.cartao", ""));
-
   // 4b. A substituição que perde para outra, registrada depois: quem tira o
   // nó da lista é o `aoMudar` do registro, pelo `redesenharAsPessoas` que ele
   // chama, e não uma escolha nem um retrato.

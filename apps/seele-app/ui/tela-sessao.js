@@ -2221,7 +2221,7 @@ let abertoPedido = new WeakMap();
  * **O lugar de um nó de MOD na linha que se monta**, e não o nó.
  *
  * Os cartões e as contribuições chegam montados, e são o mesmo nó entre um
- * retrato e o seguinte (`cartoesDaPessoa`, `montarContribuicao`). Anexá-los à
+ * retrato e o seguinte (`montarContribuicao`). Anexá-los à
  * linha nova os tiraria da lista para que a reconciliação os devolvesse: um nó
  * que sai do documento e volta é, para a árvore de acessibilidade, outro nó, e
  * o som e a imagem dele recomeçam. O marcador fica no lugar dele na linha
@@ -2493,10 +2493,6 @@ function desenharPessoas(snapshot) {
               // sai a diferença entre «o microfone está aberto» e «a voz está
               // indo para alguém». Ver `estado` em `linhaNativaDoRoster`.
               emSala: true,
-              // Os cartões que os MODs de pé deram a esta pessoa. Eles
-              // declaram; quem monta é o renderer da região, e quem decide
-              // onde o cartão entra na linha é esta função.
-              cartoes: nosDeMod(cartoesDaPessoa(pessoa.id)),
               ratio: pessoa.signal,
               faixa: pessoa.sync_band,
               falando: pessoa.speaking,
@@ -2531,16 +2527,16 @@ function desenharPessoas(snapshot) {
             // Fora de sala: o microfone pode estar captando, e não há para
             // onde transmitir.
             emSala: false,
-            // **E o cartão, aqui também.** Esta ramificação e a do saguão eram
-            // as duas que não passavam `cartoes` ao renderer: um MOD que
-            // escrevesse o nome de perfil de alguém via aquele nome sumir no
-            // instante em que a pessoa saía da sala de voz — inclusive o dela
+            // **E o cartão, aqui também** (o `pessoa.cartao`, que a linha
+            // monta pela contribuição): esta ramificação e a do saguão eram as
+            // duas que não o levavam, e um MOD que escrevesse o nome de perfil
+            // de alguém via aquele nome sumir no instante em que a pessoa saía
+            // da sala de voz — inclusive o dela
             // mesma. A auditoria de 20/09/2026 observou exatamente isso: o nome
             // `PERFIL QA` aparecia dentro da sala e desaparecia ao sair.
             //
             // Um cartão é sobre **a pessoa**, e não sobre onde ela está
             // sentada. As três ramificações usam o mesmo modelo de apresentação.
-            cartoes: nosDeMod(cartoesDaPessoa(snapshot.me)),
             ratio: snapshot.telemetry.signal,
             faixa: snapshot.telemetry.sync_band,
             falando: snapshot.speaking,
@@ -2585,10 +2581,6 @@ function desenharPessoas(snapshot) {
               id: pessoa.id,
               nome: pessoa.nickname,
               emSala: false,
-              // O mesmo cartão da sala: quem está no saguão continua sendo a
-              // mesma pessoa, e o MOD que a apresenta não muda de opinião
-              // porque ela não sentou em sala nenhuma.
-              cartoes: nosDeMod(cartoesDaPessoa(pessoa.id)),
               // Sem medida: o sinal de quem não está numa sala não é medido por
               // ninguém — não há voz atravessando para medir. Travessão é o que
               // este produto escreve onde não mediu, e inventar zero aqui seria
@@ -2893,30 +2885,19 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
 /**
  * O conteúdo que um MOD declarou para esta pessoa, já montado.
  *
- * **Dois caminhos, e o genérico vem primeiro.**
+ * **Um caminho só: o da contribuição.**
  *
  * O `conteudo` da própria contribuição é o contrato que o guia ensina: quem
  * registra `pessoa.cartao/substituir` com uma declaração espera que ela seja
- * desenhada, e nada mais. Esta função procurava **só** `SeeleUI.cartoes` — a
- * chamada separada, da API 3 —, então um MOD que seguisse o contrato genérico
- * via a linha nativa continuar no lugar, sem recusa e sem explicação. O MOD
- * oficial usava o legado, e por isso o caminho funcionava sem revelar a falha.
- * É o que a revisão de 26ad0c2 encontrou.
- *
- * `SeeleUI.cartoes` continua valendo, e não por gentileza: ele é o caminho de
- * um pacote de API 3, que esta versão executa. Ele é a alternativa, e não a
- * primeira escolha — um MOD que mande os dois está dizendo a mesma coisa duas
- * vezes, e o que vale é o que ele declarou na contribuição.
+ * desenhada, e nada mais. O caminho de antes, o `SeeleUI.cartoes` das APIs 3 a
+ * 5, saiu com elas: este build só executa a 6.
  *
  * O destino atravessa porque a montagem é por destino: uma contribuição sem
  * `alvo` vale para todo mundo, e um nó só percorreria a lista movendo-se de
  * uma linha para a seguinte.
  */
 function cartaoDeContribuicao(contribuicao, id) {
-  const generico = montarContribuicao(contribuicao, String(id));
-  if (generico) return generico;
-  const regiao = cartoesDosMods.get(contribuicao.mod);
-  return regiao ? regiao.cartaoDe(id) : null;
+  return montarContribuicao(contribuicao, String(id));
 }
 
 /**
@@ -3071,21 +3052,6 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   diagnostico.append(resumo, numero, barra, rodape);
 
   item.append(cabeca, diagnostico);
-
-  // **Os cartões dos MODs, depois do que o produto diz sobre esta pessoa.**
-  //
-  // Depois, e não no meio: o sinal, a barra e a pastilha são o que esta tela
-  // existe para dizer, e um cartão de terceiro entre eles empurraria a
-  // informação do produto para baixo da dobra numa lista cheia.
-  //
-  // O nó vem montado — é o mesmo elemento entre um retrato e o seguinte, e
-  // movê-lo preserva o que ele segura. Recriá-lo faria uma imagem piscar e um
-  // som recomeçar a cada quatro segundos.
-  // Não dentro do detalhe recolhido: o cartão já foi desenhado por cima, e o
-  // mesmo nó não pode estar em dois lugares — movê-lo para cá o tiraria de lá.
-  if (!comoDetalhe) {
-    for (const cartao of pessoa.cartoes ?? []) item.append(cartao);
-  }
 
   // Volume por pessoa (`specs/03-audio.md`).
   if (pessoa.volume !== null && temAudio) {
