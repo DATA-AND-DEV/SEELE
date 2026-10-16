@@ -2549,6 +2549,19 @@ function anotando(...anotadas) {
       confere("retrato · o snapshot saiu da 6, no registro", dita("«snapshot»", "não conhece"),
         `a recusa do snapshot da 6 foi dita só ao MOD: ${JSON.stringify(anotadasDoRoteador)}`);
 
+      // **E os `cartoes` também saíram da 6** (`compatibilidade.saem.cartoes`):
+      // o cartão é o `pessoa.cartao` com alvo. A mensagem cai no `default`, com
+      // o tipo pedido, e a recusa chega ao registro.
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
+        tipo: "cartoes", n: 24, cartoes: { 3: [{ forma: "texto", dentro: "x" }] },
+      });
+      const cartoes = respostas.at(-1);
+      confere("retrato · os cartoes saíram da 6", cartoes?.ok === false
+        && cartoes.erro === "tipo-desconhecido" && cartoes.tipoPedido === "cartoes",
+      `um pacote da API 6 deu cartões pela mensagem da API 3: ${JSON.stringify(cartoes)}`);
+      confere("retrato · os cartoes saíram da 6, no registro", dita("«cartoes»", "não conhece"),
+        `a recusa dos cartões da 6 foi dita só ao MOD: ${JSON.stringify(anotadasDoRoteador)}`);
+
       // **E a 5 não alcança nem o `snapshot`** (o corte): uma API que este app
       // não roda não tem capacidade nenhuma, e a mensagem que não exige
       // capacidade também é recusada. Antes do corte, o `snapshot` inteiro

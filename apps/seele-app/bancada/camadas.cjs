@@ -168,6 +168,12 @@ const { chromium } = require('./playwright.cjs');
     });
     await page.click('#palco-de-paineis > .folha-de-mod[data-superficie="rascunho"] .superficie-de-mod-sair');
     assert.equal(await page.evaluate(() => $('moderar').hidden), false, 'fechar a folha com rascunho não perguntou');
+    // **E o MOD ouve o pedido antes da resposta** (`eventos[15]`,
+    // `fechar-pedido`): a superfície, o porquê e que há alterações.
+    const pedido = await page.evaluate(() => eventosDe(6).filter(e => e.nome === 'fechar-pedido').at(-1));
+    assert.deepEqual(pedido && { superficie: pedido.superficie, porque: pedido.porque, temAlteracoes: pedido.temAlteracoes },
+      { superficie: 'rascunho', porque: 'saida-do-produto', temAlteracoes: true },
+      `o MOD não ouviu o pedido de fechar a folha com rascunho: ${JSON.stringify(pedido)}`);
     assert.equal(await page.evaluate(() => folhasNoPalco().some(f => f.chave === 'rascunho' && f.aparece)), true,
       'a folha com rascunho fechou antes da resposta');
     await page.click('#moderar-confirmar');
@@ -494,6 +500,40 @@ const { chromium } = require('./playwright.cjs');
     assert.deepEqual(inercia.durante, { mudo: false, sair: false, outro: true, dialogo: false, noMesmoRamo: true },
       `com o modal aberto, o que a casca pede não ficou acordado, ou o resto não dormiu: ${JSON.stringify(inercia)}`);
     assert.deepEqual(inercia.depois, { mudo: false, sair: false, outro: false }, `fechar o modal não devolveu a sessão: ${JSON.stringify(inercia)}`);
+
+    // 8b. **O título e o ocultar pelo roteador** (`actions.superficie-titulo`
+    // e `actions.superficie-ocultar`; a auditoria do `v6.json`, tabela 2). O
+    // título troca o que a pessoa lê na caixa. Ocultar um modal solta a sessão
+    // que ele prendeu, esconde a camada e, sem outra de pé, o palco — e a
+    // superfície continua montada, que é a diferença para fechar.
+    const ocultarETitulo = await page.evaluate(async () => {
+      for (const api of [5, 6]) superficiesDoMod(modDe[api].mod, modDe[api].inst).soltarTudo();
+      const outro = document.querySelector('#tela-sessao textarea');
+      const inerte = (e) => Boolean(e?.closest('[inert]'));
+      const raiz = () => document.querySelector('[data-superficie="modal"]');
+      const titulo = () => raiz()?.querySelector('.dialogo-de-mod-titulo')?.textContent ?? null;
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'modal', tipo: 'dialogo', titulo: 'Antes' } });
+      const antes = { titulo: titulo(), outro: inerte(outro) };
+      const trocou = await pedir(6, { tipo: 'superficie-titulo', superficie: 'modal', titulo: 'Depois' });
+      const depoisDoTitulo = titulo();
+      const ocultou = await pedir(6, { tipo: 'superficie-ocultar', superficie: 'modal' });
+      const depois = {
+        outro: inerte(outro),
+        inertes: document.querySelectorAll('[inert]').length,
+        camada: raiz()?.closest('.camada-de-mod')?.hidden ?? null,
+        palco: $('palco-de-camadas').hidden,
+        montada: Boolean(raiz()?.isConnected),
+      };
+      await pedir(6, { tipo: 'superficie-descartar', superficie: 'modal' });
+      return { antes, trocou: trocou?.ok, depoisDoTitulo, ocultou: ocultou?.ok, depois };
+    });
+    assert.deepEqual(ocultarETitulo.antes, { titulo: 'Antes', outro: true },
+      `o caso não mede o que diz: o modal não abriu com o título, ou não prendeu a sessão: ${JSON.stringify(ocultarETitulo)}`);
+    assert.equal(ocultarETitulo.trocou === true && ocultarETitulo.depoisDoTitulo, 'Depois',
+      `\`superficie-titulo\` não trocou o título da caixa: ${JSON.stringify(ocultarETitulo)}`);
+    assert.deepEqual({ ok: ocultarETitulo.ocultou, ...ocultarETitulo.depois },
+      { ok: true, outro: false, inertes: 0, camada: true, palco: true, montada: true },
+      `ocultar o modal pelo roteador não soltou a sessão, não escondeu a camada e o palco, ou desmontou: ${JSON.stringify(ocultarETitulo)}`);
 
     // 9. A recusa do servidor de volta aos campos.
     const marcadosEm = (superficie) => page.evaluate((superficie) => [...document.querySelectorAll(`[data-superficie="${superficie}"] [data-chave-do-mod][data-invalido="sim"]`)]
