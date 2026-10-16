@@ -32,8 +32,12 @@
     camada.style.setProperty("--cel-ajustes-pe", `${innerHeight - pe}px`);
   }
   const observador = new ResizeObserver(encaixar);
+  // Tudo o que a medida lê, e os avisos do pé também: um que nasce com a camada
+  // aberta a encolhe. Medido antes, sem eles: o veredito que chegava com AJUSTES
+  // aberto ficava inteiro embaixo da camada, e o toque no dispensar dele caía num
+  // botão de AJUSTES.
   function vigiar() {
-    const partes = ":scope > :is(.cel-topo, .cel-selo-da-previa, #cel-aviso-persistencia, .voz-celular, .cel-abas)";
+    const partes = ":scope > :is(.cel-topo, #veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, #cel-aviso-persistencia, .voz-celular, .cel-abas)";
     for (const parte of sessao.querySelectorAll(partes)) observador.observe(parte);
   }
   vigiar();

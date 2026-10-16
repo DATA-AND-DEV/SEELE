@@ -1146,6 +1146,10 @@ function desenharCanais(snapshot) {
       ? `voltar para a grade de ${voice_room.name}; você já está dentro`
       : `entrar e falar com quem está em ${voice_room.name}`;
     item.append(cabeca, dentro, ir);
+    // O que a casca acrescenta à sala (`CASCA.vestirASala`, em `base.js`; no
+    // desktop, nada), na linha montada: antes da reconciliação, para ela casar
+    // o acréscimo com o do quadro anterior em vez de tirá-lo.
+    CASCA.vestirASala(item, voice_room, snapshot);
     return item;
   });
   // **`servidor.navegacao` substituído** (rascunho §3, tarefa 5): o MOD dá a
@@ -2416,9 +2420,10 @@ function nosDeMod(nos) {
  * **A coluna de salas passa por aqui também** (`desenharCanais`): ela lista
  * quem está em cada sala e tem o ENTRAR NA SALA, que, trocado a cada quadro,
  * saía da árvore com 100 pessoas. Lá a sala é a chave, e a pessoa dentro dela
- * também. A casca do celular adapta essa coluna depois de cada quadro
- * (`celular-servidor.js`) e o que ela acrescenta não está na lista montada:
- * sai aqui, e ela o põe de novo, como fazia com a coluna refeita.
+ * também. A casca do celular veste cada sala na linha montada
+ * (`CASCA.vestirASala`, no `desenharCanais`), antes de chegar aqui: o que ela
+ * acrescenta é casado como o resto, e o ENTRAR e o ENTRAR MUDO dela atravessam
+ * os quadros.
  *
  * **E a coluna de canais**, com o canal como chave: repovoada, ela tirava do
  * documento o botão com o foco do teclado a cada tique (pendência 64).
@@ -2579,12 +2584,12 @@ function mesmoFeitio(velho, novo) {
  * de dentro. O pedido vale quando muda (`abertoPedido`); fora disso, fica o
  * que a pessoa escolheu.
  *
- * **Fora o `open`, todo atributo que a linha montada não tem sai, e há quem
- * conte com isso** (M4 da revisão): a casca do celular marca com `data-celular`
- * o `li.voice_room` que adaptou (`celular-servidor.js`) e só o adapta de novo
- * porque a marca sai aqui no quadro seguinte. Preservar outro atributo faria o
- * celular parar de adaptar calado — o ENTRAR MUDO e as marcas da sala sumiriam.
- * A `tools/bancada-do-celular.py` (`aba_servidor`) prende isso.
+ * **Fora o `open`, todo atributo que a linha montada não tem sai.** A casca do
+ * celular contava com isso (M4 da revisão): ela vestia o `li.voice_room` depois
+ * do desenho, marcado com `data-celular`, e só o vestia de novo porque a marca
+ * saía aqui. Desde o `CASCA.vestirASala` (16/10) ela veste a linha montada, e o
+ * que acrescenta vem nos dois lados da comparação: nenhum atributo precisa sair
+ * para ela.
  *
  * **O `style` passa pelo CSSOM, e não pelo atributo** (lote R63). A CSP do
  * produto é `style-src 'self'`, e ela recusa o `style` escrito por

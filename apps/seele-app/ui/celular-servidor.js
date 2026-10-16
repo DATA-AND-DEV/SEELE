@@ -7,8 +7,10 @@
 // é a coluna de salas e canais do desktop, desenhada pelo tela-sessao.js de
 // sempre e reorganizada em cartões; este arquivo só acrescenta o que o celular
 // diz a mais (as marcas escritas, o ENTRAR MUDO, a frase do que fica no
-// computador). Como o desktop refaz a lista a cada quadro, o acréscimo volta a
-// cada quadro, pelo `CASCA.depoisDeDesenhar`.
+// computador). O acréscimo de cada sala entra na linha que o desktop monta,
+// pelo `CASCA.vestirASala`, antes de ele reconciliar a coluna pelo id: o ENTRAR
+// e o ENTRAR MUDO são os mesmos nós de um quadro ao seguinte, e o foco fica
+// neles (pendência 63(b)).
 
 "use strict";
 
@@ -72,9 +74,9 @@
         return;
       }
     }
-    // O botão da sala de agora, e não o do quadro em que o cartão nasceu: o
-    // desktop refaz a lista a cada quadro, e um clique num nó que saiu da página
-    // não chega a ninguém.
+    // O ENTRAR da sala pelo id, na hora do clique: o nó atravessa os quadros (a
+    // coluna é reconciliada), mas a sala pode ter saído da lista entre o toque e
+    // a resposta do MUDO, e aí não há o que apertar.
     doDesktop("lista-voice_rooms").querySelector(`button[data-voice_room="${sala}"]`)?.click();
   }
 
@@ -82,6 +84,12 @@
     return h("span", { class: `cel-marca ${classe}` }, ...filhos);
   }
 
+  /**
+   * O que o celular acrescenta a uma sala, na linha que o desktop monta (o
+   * `CASCA.vestirASala`). Sempre o mesmo feitio para o mesmo estado, e sem
+   * mexer na chave da linha: a reconciliação casa os filhos pela etiqueta e
+   * pela primeira classe, e é isso que mantém os nós.
+   */
   function adaptarSala(item, sala) {
     // Renomear é pelo SEELE no computador: o nome é só texto.
     const nome = item.querySelector("button.voice_room-nome");
@@ -103,11 +111,15 @@
     if (!sala.occupied_by_us && entrar) {
       const fileira = h("div", { class: "cel-sala-entrar" });
       entrar.replaceWith(fileira);
+      // O ouvinte é o do quadro em que o botão nasceu, e ele atravessa os
+      // outros: por isso só o id, que é a chave da linha. O rótulo, com o nome
+      // de agora, a reconciliação atualiza.
+      const id = sala.id;
       fileira.append(entrar, h("button", {
         class: "botao-fantasma cel-entrar-mudo",
         type: "button",
         "aria-label": PALAVRAS.entrarMudo(sala.name),
-        onclick: () => entrarMudo(sala.id),
+        onclick: () => entrarMudo(id),
       }, glifoComEstado("microfone", true), PALAVRAS.mudo));
     }
   }
@@ -124,19 +136,14 @@
     if (evento.target.closest("button[data-linha]")) CELULAR.ajudante("abrirAba")("conversa");
   });
 
+  CASCA.vestirASala = (item, sala) => adaptarSala(item, sala);
+
   CASCA.depoisDeDesenhar.push((snapshot) => {
     desenharTopo();
     mutado = !!snapshot.muted;
     if (mutado && quandoMudo) {
       quandoMudo();
       quandoMudo = null;
-    }
-    const porId = new Map(snapshot.voice_rooms.map((sala) => [String(sala.id), sala]));
-    for (const item of doDesktop("lista-voice_rooms").children) {
-      const sala = porId.get(item.querySelector("button[data-voice_room]")?.dataset.voice_room);
-      if (!sala || item.dataset.celular !== undefined) continue;
-      item.dataset.celular = "";
-      adaptarSala(item, sala);
     }
     foraSalas.hidden = snapshot.may_manage_voice_rooms !== true;
   });
