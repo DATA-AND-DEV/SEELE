@@ -109,6 +109,11 @@ pub const ESQUEMA_DA_SALA: &str = "seele://@";
 /// host, sem esquema e sem barra: é o que vem depois de `https://`.
 pub const ORIGEM_DO_NAVEGADOR: &str = "web.seele.app.br";
 
+/// O caminho do link do navegador que o produto escreve: **a raiz**
+/// (D-web-4, decidida pela orquestradora em 16/10/2026). A página é uma só, e
+/// o corpo inteiro vai no fragmento ([`Convite::link_do_navegador`]).
+pub const CAMINHO_DO_NAVEGADOR: &str = "/";
+
 /// Quantos hashes de certificado curto um link do navegador leva: as janelas
 /// vigentes e a próxima, no momento em que o convite foi feito. Os além disso
 /// são ignorados, como os endereços além de [`LIMITE_DE_ALVOS`].
@@ -794,6 +799,26 @@ impl Convite {
             texto.push_str(&format!("&ate={ate}"));
         }
         Ok(texto)
+    }
+
+    /// **O link do navegador que o produto escreve**: na origem do produto
+    /// ([`ORIGEM_DO_NAVEGADOR`]) e na raiz ([`CAMINHO_DO_NAVEGADOR`], D-web-4).
+    ///
+    /// O corpo inteiro — o endereço, a impressão, o `convite=`, os hashes e a
+    /// validade — vai no fragmento, que o navegador não manda a servidor
+    /// nenhum: o host estático da origem nunca o recebe, e ele fica fora do
+    /// registro de acesso dele. O teste
+    /// `o_link_do_produto_leva_o_corpo_so_no_fragmento` segura isso.
+    ///
+    /// # Errors
+    ///
+    /// Os de [`Self::no_navegador`].
+    pub fn link_do_navegador(
+        &self,
+        hashes: &[String],
+        ate: Option<u64>,
+    ) -> Result<String, ErroDoNavegador> {
+        self.no_navegador(ORIGEM_DO_NAVEGADOR, CAMINHO_DO_NAVEGADOR, hashes, ate)
     }
 }
 
@@ -1975,6 +2000,41 @@ mod a_forma_do_navegador {
             "{texto}"
         );
         let lido = analisar_no_navegador(&texto, ORIGEM).unwrap();
+        assert_eq!(lido.convite, convite);
+        assert_eq!(lido.hashes, vec![wh()]);
+        assert_eq!(lido.ate, Some(1_792_540_800));
+    }
+
+    /// **O link que o produto escreve leva o corpo só no fragmento** (D-web-4).
+    ///
+    /// Antes do `#` vem `https://<origem>/` e nada mais: nem caminho, nem
+    /// consulta. O navegador manda ao host estático só essa parte, e por isso
+    /// o endereço do servidor, a impressão, o token do convite, os hashes e a
+    /// validade não podem estar nela — iriam para o registro de acesso de quem
+    /// hospeda a página. E o link volta inteiro pela leitura da página.
+    #[test]
+    fn o_link_do_produto_leva_o_corpo_so_no_fragmento() {
+        let token = "7K4MNPQRSTVWXYZ23456";
+        let convite = Convite::novo("198.51.100.7:8383")
+            .com_impressao_digital(fp())
+            .com_token(token)
+            .com_versao("1.0");
+        let texto = convite
+            .link_do_navegador(&[wh()], Some(1_792_540_800))
+            .unwrap();
+        let (antes, fragmento) = texto.split_once('#').expect("o link tem fragmento");
+        assert_eq!(
+            antes,
+            format!("https://{ORIGEM_DO_NAVEGADOR}/"),
+            "antes do `#` vai algo além da origem e da raiz: {texto}"
+        );
+        for parte in ["198.51.100.7", &fp(), token, &wh(), "1792540800"] {
+            assert!(
+                !antes.contains(parte) && fragmento.contains(parte),
+                "`{parte}` não está só no fragmento: {texto}"
+            );
+        }
+        let lido = analisar_no_navegador(&texto, ORIGEM_DO_NAVEGADOR).unwrap();
         assert_eq!(lido.convite, convite);
         assert_eq!(lido.hashes, vec![wh()]);
         assert_eq!(lido.ate, Some(1_792_540_800));
