@@ -1258,3 +1258,38 @@ Antes delas:
 - **Em aberto:** o `connect` grava a visita com o alvo como veio, e um
   `@CÓDIGO` entraria na lista de visitados. Isso é da agenda, e fica para a
   orquestradora decidir.
+
+## A tarefa 28: CHAMANDO, CANCELAR e as frases de quem liga (16/10)
+
+| passo | o que | commit |
+|---|---|---|
+| — | os guardas da entrada aceitam a porta que escuta e se cancela (isolado, `frontend.rs`) | `11a2af0b` |
+| a | o `connect` entra por `connect_cancelavel`, com a vaga da ligação em voo na sessão (`ligar::LigacaoEmVoo`), e o comando `cancelar_ligacao` | `7bbf01e5` |
+| b | o código lido vem com o nome que a agenda dá a ele (`ligar::nome_na_agenda`) | `a18ba59e` |
+| c | a casca: «CHAMANDO ALICE…», o CANCELAR, e a `fraseDaLigacao`, com o roteiro `chamar.js` | `302cd403` |
+
+- **A vaga é da tentativa mais nova.** O guarda a devolve ao cair só se ela
+  ainda é dele: uma tentativa nova pode ter tomado o lugar (o E54), e o
+  CANCELAR passa a ser dela. Provado contra a sala de verdade, pelo `connect`
+  no runtime falso: ela toca, o CANCELAR larga, a sala vê
+  `ParouDeTocar(Cancelada)`, e a vaga fica vazia.
+- **O nome é decidido no Rust**: o da agenda, e sem ele o código. A consulta
+  mora em `ligar.rs`, e o comando continua sem citar `sala::`.
+- **Na casca**, o `conectar` ganhou o quarto argumento `ligacao`. O CANCELAR
+  fica à vista enquanto a ligação anda, e as frases da tabela da spec trazem o
+  nome. O que não é de ligação segue pela frase de sempre.
+- **Os guardas da F5 foram ajustados sem afrouxar:**
+  - o da credencial passou a ler o terceiro argumento do `conectar`, e
+    `undefined` ou `null` ali não levam credencial. Uma chamada nova que passe
+    algo de verdade continua reprovando, e isso foi medido;
+  - a linha do erro e a da etapa continuam escritas como os guardas as leem.
+- **Reversões:** quatro na vaga, duas no nome e sete na casca, cada uma
+  reprovando pela sua frase.
+- **Um achado que vale para a tela:** numa ligação atendida no mesmo instante,
+  quem liga pode não ver o `Tocando`, porque a ponte entrega as etapas por um
+  `watch`. O CHAMANDO não segura nada: a tentativa acaba pelo `connect`, e o
+  CANCELAR some com ela.
+
+**Como está a ponta** (`302cd403`): app, 765 de 765; clippy limpo; a bateria
+da casca inteira: os 45 roteiros, as duas pontes, o celular e 34 das 35 da
+janela; a conformidade inteira, 313 de 313, sem reprovação nenhuma.
