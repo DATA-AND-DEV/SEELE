@@ -1264,6 +1264,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/regioes-do-produto.cjs
     uma_bancada node apps/seele-app/bancada/capa.cjs
     uma_bancada node apps/seele-app/bancada/camadas.cjs
+    uma_bancada node apps/seele-app/bancada/saidas-de-quem-hospeda.cjs
     uma_bancada node apps/seele-app/bancada/nucleo.cjs
     uma_bancada node apps/seele-app/bancada/tema-do-servidor.cjs
     uma_bancada node apps/seele-app/bancada/gestao-do-tema.cjs
