@@ -625,10 +625,10 @@ fn every_command_the_frontend_calls_is_registered() {
 // SERVIDOR e o PARAR DE HOSPEDAR) passaram a chamá-los. A lista voltou a ser
 // vazia.
 //
-// `ler_entrada` (tarefa 30 da F7) está aqui entre o Rust e a tela: o diálogo de
-// servidores passa a mandar todo texto a ele no commit seguinte, com a ponte do
-// navegador e o duble, e sai daqui junto.
-const AGUARDANDO_TELA: &[&str] = &["ler_entrada"];
+// `ler_entrada` (tarefa 30 da F7) esteve aqui entre o Rust e a tela, e saiu
+// quando o diálogo de servidores passou a mandar todo texto a ele. A lista
+// voltou a ser vazia.
+const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -19978,6 +19978,50 @@ fn atender_sai_de_y_quando_ha_conexao_em_outro_lugar() {
         frase.contains("SAI DE ${"),
         "o `atenderSaiDe` não diz de onde a pessoa sai: {frase}"
     );
+}
+
+/// **O texto colado em CONECTAR vai inteiro ao Rust** (tarefa 30 da F7; spec de
+/// 23/09, «Como um texto colado é classificado»).
+///
+/// A tela decidia sozinha o que era convite (`startsWith("seele://")`) e tratava
+/// todo o resto como endereço: um código colado ali virava um nome de máquina
+/// que não resolve. Agora quem lê é o `ler_entrada`, e a tela segue pela
+/// variante de `ligar::EntradaColada`. Uma variante nova reprova aqui até a tela
+/// ter caminho para ela, e as duas que viram frase estão no `ENTRADA_COLADA`.
+#[test]
+fn o_dialogo_de_servidores_manda_todo_texto_ao_ler_entrada() {
+    let servidores = without_comments(&read("ui/camada-servidores.js"));
+    assert!(
+        !servidores.contains("startsWith(\"seele://\")"),
+        "o diálogo de servidores voltou a decidir sozinho o que é convite"
+    );
+    let Some(envio) = servidores
+        .split("$(\"servidores-forma\").addEventListener(\"submit\"")
+        .nth(1)
+    else {
+        panic!("o diálogo de servidores não tem mais o envio do campo");
+    };
+    assert!(
+        envio.contains("invoke(\"ler_entrada\", { texto: escrito })"),
+        "o envio do campo não manda o texto ao `ler_entrada`"
+    );
+    for variante in variantes_do_enum("src/ligar.rs", "EntradaColada") {
+        assert!(
+            envio.contains(&format!("\"{variante}\"")) || envio.contains(&format!(".{variante}")),
+            "o Rust lê um texto colado como `{variante}`, e o diálogo não tem caminho para ele"
+        );
+    }
+    let frases = without_comments(&read("ui/frases.js"));
+    let ditas: Vec<String> = sentences_of(&frases, "ENTRADA_COLADA")
+        .into_iter()
+        .map(|(variante, _)| variante)
+        .collect();
+    for unitaria in ["CodigoComErro", "SeuCodigo"] {
+        assert!(
+            ditas.iter().any(|dita| dita == unitaria),
+            "`EntradaColada::{unitaria}` não tem frase no `ENTRADA_COLADA`: {ditas:?}"
+        );
+    }
 }
 
 /// **Sair não derruba o servidor de ninguém** (tarefa 19 da F7, Plano 2).

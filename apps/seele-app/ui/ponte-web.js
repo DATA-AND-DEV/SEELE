@@ -210,7 +210,7 @@ const COMANDOS_DA_PONTE = new Set([
   "fechar_teste_de_microfone", "guardar_colado",
   "ha_ajustes_de_acessibilidade", "icone_do_server", "imagem_da_pessoa",
   "instalar_mod_do_catalogo", "leave_voice_room",
-  "lembrar_aparencia_do_servidor", "ler_imagem_mod", "limite_da_mensagem",
+  "lembrar_aparencia_do_servidor", "ler_entrada", "ler_imagem_mod", "limite_da_mensagem",
   "limites_dos_campos", "membros_fora_do_ar", "messages", "meu_retrato",
   "microfone_escolhido",
   "microfones",
@@ -297,6 +297,9 @@ const AINDA_A_FAZER = new Map([
   ["ajustar_limites_da_tela", TAREFA_310],
   ["ajustar_volume_da_tela", TAREFA_39],
   ["analisar_convite", TAREFA_34],
+  // O texto colado em CONECTAR (tarefa 30 da F7): a leitura é do núcleo, e o
+  // navegador não liga pelo código na 0.16.
+  ["ler_entrada", TAREFA_34],
   ["apagar_linha", TAREFA_26],
   ["apagar_voice_room", TAREFA_26],
   ["aplicar_icone_do_server", TAREFA_26],

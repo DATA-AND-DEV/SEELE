@@ -323,6 +323,15 @@ window.__TAURI__ = {
           && window.__SEELE_ARGS.connect.server === SEELE_RESPOSTAS.hospedar.aqui;
         return noMeu ? "Guardado" : "Outro";
       }
+      // **O `ler_entrada` pela forma de antes** (tarefa 30 da F7): o duble não
+      // tem a leitura do código nem a chave desta máquina. Um roteiro que quer
+      // um código, um erro de digitação ou o próprio código põe a resposta em
+      // `SEELE_RESPOSTAS.ler_entrada`, que vem antes; sem ela, um `seele://` é
+      // convite e o resto é endereço.
+      if (cmd === "ler_entrada") {
+        const texto = String(args?.texto ?? "").trim();
+        return texto.startsWith("seele://") ? { Convite: texto } : { Endereco: texto };
+      }
       if (/conhecid|fontes|lista|dispositiv|visitad|salas|canais|pessoas|^microfones$|^saidas$/i.test(cmd)) return [];
       // **Os três comandos do caminho de HOSPEDAR AQUI**, com o formato de
       // `servidores::Servidor` e `versoes::VersaoInstalada`. Sem eles o `null`

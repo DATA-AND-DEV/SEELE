@@ -402,6 +402,17 @@ const AVISO_DE_FONE =
  */
 const ENTRAR_SEM_NOME = "Você vai entrar com um nome tirado da sua chave. Dá para trocar no perfil.";
 
+/**
+ * O que um texto colado em CONECTAR não deixa fazer, dito sem consultar a rede
+ * (tarefa 30 da F7; spec de 23/09, «Do lado de quem liga», 1). Quem lê é o Rust
+ * (`ler_entrada`), e é ele quem decide «é o seu código?»: a tela só diz, pelo
+ * nome da variante de `ligar::EntradaColada`.
+ */
+const ENTRADA_COLADA = {
+  CodigoComErro: "ESSE CÓDIGO TEM UM ERRO DE DIGITAÇÃO",
+  SeuCodigo: "ESSE É O SEU CÓDIGO",
+};
+
 const ETAPAS = {
   Parada: "LENDO O CONVITE",
   // Provisória: a frase de uma ligação é da tarefa 7f (CHAMANDO e CANCELAR),

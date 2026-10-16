@@ -4419,6 +4419,19 @@ function consequenciaDeTrocar(daqui, ate, noMeuServidor) {
   return `${comum}\n${oMeuServidorContinua(daqui)}`;
 }
 
+/**
+ * O que ligar para alguém custa, de dentro de uma sessão (tarefa 30 da F7; spec
+ * de 23/09, «Do lado de quem liga», 2): «ligar sai de Y». O servidor que esta
+ * janela hospeda continua no ar, como na troca.
+ */
+function consequenciaDeLigar(daqui, para, noMeuServidor) {
+  const comum =
+    `Ligar para ${para} sai de ${daqui} agora, no meio do que estiver fazendo.\n` +
+    "Dá para estar em um lugar por vez: a ligação é numa sala só sua e de quem atender.";
+  if (!noMeuServidor) return comum;
+  return `${comum}\n${oMeuServidorContinua(daqui)}`;
+}
+
 /** O que ir à entrada custa. Mesma forma, e um destino que não é servidor nenhum. */
 function consequenciaDeIrParaAEntrada(daqui, noMeuServidor) {
   const comum =
@@ -4444,7 +4457,7 @@ function consequenciaDeIrParaAEntrada(daqui, noMeuServidor) {
  * produto: a que escreve a consequência com o nome dentro e põe o foco no
  * CANCELAR. Uma segunda seria uma segunda forma de esquecer de escrever a frase.
  */
-async function pedirTrocaDeServidor(alvo, apelido, nome) {
+async function pedirTrocaDeServidor(alvo, apelido, nome, ligar = false) {
   const daqui = nomeDesteServidor();
   const noMeuServidor = await estouNoMeuServidor();
   // **O nome, e o endereço só quando não há nome.**
@@ -4463,6 +4476,15 @@ async function pedirTrocaDeServidor(alvo, apelido, nome) {
   // esteve não tem outro, e uma caixa que dissesse `ENTRAR EM` e mais nada seria
   // pior que um endereço.
   const chamado = (nome ?? "").trim() || alvo;
+  if (ligar) {
+    abrirConfirmacao(
+      "LIGAR",
+      consequenciaDeLigar(daqui, chamado, noMeuServidor),
+      `LIGAR PARA ${chamado}`,
+      () => trocarDeServidor(alvo, apelido),
+    );
+    return;
+  }
   abrirConfirmacao(
     "TROCAR DE SERVIDOR",
     consequenciaDeTrocar(daqui, chamado, noMeuServidor),

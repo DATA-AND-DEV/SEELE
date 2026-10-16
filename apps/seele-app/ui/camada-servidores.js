@@ -153,7 +153,13 @@ $("servidores-lista").addEventListener("click", async (evento) => {
   irParaOServidor(linha.dataset.alvo, linha.dataset.apelido, null, linha.dataset.nome);
 });
 
-// O campo: um endereço cru ou um `seele://`.
+// O campo: um endereço cru, um `seele://`, ou o código de uma pessoa.
+//
+// **Quem lê é o Rust** (`ler_entrada`, tarefa 30 da F7; spec de 23/09, «Como um
+// texto colado é classificado»): todo texto vai a ele, e a tela segue pela
+// variante. O código com erro de digitação e o próprio código são ditos aqui,
+// sem consultar a rede; o código de outra pessoa vira o alvo `@CÓDIGO`, que se
+// basta sozinho.
 //
 // O link é resolvido **antes** de conectar, e não depois: ele carrega a
 // impressão digital do certificado, e é ela que faz quem recebe não precisar
@@ -178,9 +184,29 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
   };
   $("servidores-erro").hidden = true;
 
-  let alvo = escrito;
+  let lida;
+  try {
+    lida = await invoke("ler_entrada", { texto: escrito });
+  } catch (falha) {
+    console.warn("ler_entrada:", falha);
+    recusarServidor(fraseDeErro(falha));
+    return;
+  }
+  if (lida === "CodigoComErro" || lida === "SeuCodigo") {
+    recusarServidor(ENTRADA_COLADA[lida]);
+    return;
+  }
+  if (lida?.Codigo) {
+    // Ligar: o nome da caixa é o código, que é o que a pessoa colou.
+    consumirOCampo();
+    fecharServidores();
+    irParaOServidor(lida.Codigo.alvo, null, null, lida.Codigo.codigo, true);
+    return;
+  }
+
+  let alvo = lida?.Endereco ?? escrito;
   let token = null;
-  if (escrito.startsWith("seele://")) {
+  if (lida?.Convite) {
     try {
       const convite = await invoke("analisar_convite", { link: escrito });
       alvo = convite.alvo;
@@ -241,12 +267,13 @@ window.addEventListener(
  * O apelido vem junto quando se sabe — é o daquela visita, gravado com o
  * servidor. Sem ele, o campo da entrada decide.
  */
-function irParaOServidor(alvo, apelido, token, nome) {
+function irParaOServidor(alvo, apelido, token, nome, ligar = false) {
   const naSessao = !$("tela-sessao").hidden;
   if (naSessao) {
     // O nome junto: a caixa de confirmação fala por nome, e quem clicou numa
-    // linha desta lista acabou de ler o nome nela.
-    pedirTrocaDeServidor(alvo, apelido || undefined, nome);
+    // linha desta lista acabou de ler o nome nela. E se é uma ligação: aí a
+    // caixa diz «ligar sai de», e não «trocar de servidor».
+    pedirTrocaDeServidor(alvo, apelido || undefined, nome, ligar);
     return;
   }
   // O apelido daquela visita quando se sabe; senão nenhum, e `conectar` lê o
