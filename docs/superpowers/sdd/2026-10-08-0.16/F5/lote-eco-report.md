@@ -372,5 +372,17 @@ dela entrou em commit.
   - o foco fica no link, a seleção fica, e se move a 14;
   - só com a seleção, ela fica, e se move a 24.
 - Sem a preferência, o 14 (k) dá no WebKit o defeito da revisão: o foco no `BODY` e a seleção a «».
-- A bancada inteira não passa no WebKit, e isso não é deste lote. Ela reprova no 14 (a), «alguém chegou ao servidor e
-  a rolagem da conversa foi a 297», com e sem a preferência. A bancada é calibrada para o Chromium.
+- **A bancada inteira passa no WebKit** depois do `1c0b2acf`. Antes dele, ela reprovava no 14 (a), com e sem a
+  preferência: «alguém chegou ao servidor e a rolagem da conversa foi a 297».
+  - **O 297 era a ordem da bancada, e não perda de posição.** No WebKit, o `focus()` no link rola um quadro depois, e
+    essa rolagem caía por cima dos 800 que a bancada punha no mesmo passo.
+  - **A medida**, num script no scratchpad, nas árvores `1d0c7ebf`, `e37509f4` e `5213f5c4`:
+    - a lista rola 2755;
+    - o `scrollTop` dá 800 logo depois de pôr, e 297 dois quadros depois, sem nada redesenhado;
+    - sem o foco, os 800 ficam.
+  - **No Chromium, com a mesma janela** (1400 × 900, o `clientHeight` de 658 nos dois), o `focus()` rola na hora, e os
+    800 ficam.
+  - **O conserto:** o `1c0b2acf` espera dois quadros entre o foco e a rolagem. Com ele, a bancada inteira passa no
+    WebKit (duas vezes, na cópia de rascunho) e no Chromium, e nenhum outro caso falhou no WebKit.
+  - **A reversão**, com a ordem antiga, reprova só no WebKit, e o Chromium passa. O arquivo voltou idêntico pelo `cmp`.
+  - **O CI roda a bancada só no Chromium.** A passada no WebKit é a da cópia de rascunho, que não está em commit.
