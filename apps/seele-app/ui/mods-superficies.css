@@ -307,12 +307,14 @@
 
 .camada-de-mod[data-modal="nao"] {
   /* Um diálogo não modal não come os cliques do que está atrás: só a caixa
-     dele recebe ponteiro. */
+     dele recebe ponteiro. E a caixa termina antes do recorte, como a do
+     modal: a portaria acende embaixo, onde ele mora. */
   pointer-events: none;
   background: none;
   align-items: flex-end;
   justify-content: flex-end;
-  padding: 24px;
+  padding: calc(24px + var(--recorte-cima, 0px)) 24px calc(24px + var(--recorte-baixo, 0px))
+    calc(24px + var(--recorte-esquerda, 0px));
 }
 
 .dialogo-de-mod {

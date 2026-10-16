@@ -125,7 +125,13 @@ function inertarMenos(no, acordados, mudados) {
  *   MOD aberto é atendida ou recusada ali, e não depois do Esc. Medido em
  *   11/10: sem isto, o ATENDER e o RECUSAR ficavam inertes, e o diálogo largo
  *   cruzava a faixa. Ela fica nos dois mesmo escondida: quando acende, o
- *   `ResizeObserver` do recorte refaz o furo.
+ *   `ResizeObserver` do recorte refaz o furo. **E a portaria**
+ *   (`#portaria-batendo`; achado do passo 7 da auditoria do v6, decisão da
+ *   orquestradora, 16/10): a camada de um diálogo de MOD (60) passava por cima
+ *   dela (19), e o VER QUEM É e o DEPOIS ficavam cobertos e inertes — quem
+ *   hospeda não via quem batia. Pelo recorte, e não subindo o z dela: acima
+ *   de 60, ela cobriria as camadas do produto entre 20 e 40, a da própria
+ *   portaria entre elas.
  *
  * `acordados` são os nós que a pilha de inércia deixa acordados; `recortes`,
  * os retângulos que o véu não cobre. Perguntado a cada recálculo, porque a
@@ -141,9 +147,10 @@ function foraDoModal() {
   const achar = (seletor) => document.querySelector?.(seletor) ?? null;
   const porta = achar("#tela-sessao .linha-canais");
   const toque = achar("#toque");
+  const portaria = achar("#portaria-batendo");
   return {
-    acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), porta, toque].filter(deVerdade),
-    recortes: [achar("#tela-sessao .operador"), porta, toque].filter(deVerdade),
+    acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), porta, toque, portaria].filter(deVerdade),
+    recortes: [achar("#tela-sessao .operador"), porta, toque, portaria].filter(deVerdade),
   };
 }
 
@@ -600,6 +607,9 @@ class SuperficieDeMod {
 
     if ((this.tipo === "dialogo" && this.modal) || this.imersiva) this.prenderFoco();
     else if (this.tipo === "pagina") this.focarPrimeiro();
+    // O não modal também respeita o recorte: sem véu, a caixa dele termina
+    // antes do que o recorte guarda — a portaria, embaixo, onde ele mora.
+    if (this.tipo === "dialogo" && !this.modal) this.vigiarORecorte();
   }
 
   /**
@@ -668,7 +678,7 @@ class SuperficieDeMod {
    * `resize` da janela o refazem.
    */
   vigiarORecorte() {
-    if (this.tipo !== "dialogo" || !this.modal || !this.camada || this.pararORecorte) return;
+    if (this.tipo !== "dialogo" || !this.camada || this.pararORecorte) return;
     const refazer = () => this.recortarOVeu();
     const recortados = foraDoModal().recortes;
     const observador = typeof ResizeObserver === "function" ? new ResizeObserver(refazer) : null;
@@ -706,7 +716,8 @@ class SuperficieDeMod {
       const [x1, y1, x2, y2] = [r.left - caixa.left, r.top - caixa.top, r.right - caixa.left, r.bottom - caixa.top].map(px);
       caminho.push(`${x1} ${y1}`, `${x1} ${y2}`, `${x2} ${y2}`, `${x2} ${y1}`, `${x1} ${y1}`, "0 0");
     }
-    camada.style.clipPath = `polygon(evenodd, ${caminho.join(", ")})`;
+    // Só o modal tem véu para furar; o não modal só ganha a área do diálogo.
+    if (this.modal) camada.style.clipPath = `polygon(evenodd, ${caminho.join(", ")})`;
     // A área do diálogo: à direita dos furos da metade esquerda, abaixo dos da
     // metade de cima que não estão à esquerda, e acima dos da metade de baixo
     // que não estão à esquerda.
