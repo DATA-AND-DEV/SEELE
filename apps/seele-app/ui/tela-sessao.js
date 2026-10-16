@@ -1891,9 +1891,9 @@ function seloDoEnvio(mensagem) {
  * (`sincronizarRetratos`), sem nada mudar na conversa: o foco no link ou no
  * REMOVER caía no `<body>`, a seleção se desfazia, e o leitor de tela perdia o
  * nó (433 de 434 ids AX trocados, medido em 16/10). Agora é o caminho da lista
- * de pessoas (`reconciliarALista`): cada mensagem tem a chave do id que o
- * servidor deu — ou, numa própria, a do envio, a mesma na pendente e na
- * gravada (lote ECO) —, e cada divisor a do dia; a
+ * de pessoas (`reconciliarALista`): cada mensagem tem a chave do envio
+ * quando a traz — as próprias, a mesma na pendente e na gravada (lote ECO) —,
+ * e senão a do id que o servidor deu; e cada divisor a do dia; a
  * mensagem que chega entra, a que sai sai, e as outras ficam com o mesmo nó,
  * só com o que mudou nelas. O REMOVER e o link continuam agindo com o dado de
  * agora: os ouvintes são delegados na lista e leem o `data-*` que o
@@ -1967,7 +1967,8 @@ function desenharMensagens() {
     // servidor gravou. É a única coisa que a pendente e a gravada dividem, e
     // por isso vem antes do id: com o id na frente, a gravada caía noutra
     // chave, e quem a escreveu perdia o link, o REMOVER, a seleção e o nó do
-    // leitor de tela. O `vestirComo` troca o estado, o id e os `data-*` no nó.
+    // leitor de tela. O resto é no nó: a reconciliação dos filhos tira o selo
+    // do envio, e o `vestirComo` reescreve o id e os `data-*`.
     const chave = mensagem.client_message_id
       ? `envio:${mensagem.client_message_id}`
       : mensagem.id ? `mensagem:${mensagem.id}` : null;
@@ -2485,7 +2486,8 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
     // foco no link e a seleção no corpo. Os nós fora de ordem em relação ao
     // que tem o foco saem da conta; o que sobra é compatível com ele, e a maior
     // sequência do que sobra passa por ele. Custa mover mais quando é ele
-    // quem mudou de lugar, e nunca tira o foco de quem o tem.
+    // quem mudou de lugar. O que nenhuma ordem evita é o nó que muda de pai
+    // (a pessoa que entra numa sala): esse vem de fora, e é posto.
     const preferido = indiceDoQueGuardaOFoco(desejados, valores);
     if (preferido >= 0) {
       const ali = valores[preferido];
