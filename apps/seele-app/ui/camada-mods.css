@@ -186,6 +186,16 @@
   color: var(--seele-laranja-nerv);
 }
 
+/* A porta do tema (`"tema": true`): também à parte dos alcances, mas sem o
+ * laranja do código que roda na máquina de outra pessoa. É aparência, e não
+ * rede nem disco. */
+.mods-tema {
+  margin: 4px 0 0;
+  font-size: var(--seele-t-dado);
+  line-height: 1.4;
+  color: var(--seele-osso);
+}
+
 /* O que falhou no aceite, em linhas: `fraseDeErro` de uma falha que a casca não
  * sabe nomear tem três («ALGO FALHOU…», «Se for relatar, copie…», o texto), e
  * sem `pre-line` elas se emendam numa só, com «abaixo» apontando para nada. */

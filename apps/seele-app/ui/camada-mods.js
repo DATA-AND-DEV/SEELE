@@ -118,6 +118,20 @@ function linhaDeMod(mod, indice) {
     );
   }
 
+  // **E a porta do tema** (`tema.porta` do `api/v6.json`; D-api-8): um MOD com
+  // `"tema": true` pode mudar a aparência do servidor para todos que entram, e
+  // não só a desta máquina. Também não é mais um alcance entre outros, e quem
+  // aceita tem de saber disso antes de qualquer byte ser baixado.
+  if (mod.tema) {
+    corpo.append(
+      elemento(
+        "p",
+        "mods-tema",
+        "Pode mudar a aparência deste servidor para todos que entram: as cores, a fonte e a densidade.",
+      ),
+    );
+  }
+
   linha.append(ordem, corpo);
   return linha;
 }

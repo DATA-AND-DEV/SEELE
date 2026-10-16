@@ -792,6 +792,9 @@ function fraseDeErro(erro, apelido, deOnde) {
               "  roda na máquina de quem hospeda: rede de saída, relógio e registro",
             );
           }
+          if (mod.tema) {
+            linhas.push("  pode mudar a aparência deste servidor para todos que entram");
+          }
           return linhas.join("\n");
         })
         .join("\n");
