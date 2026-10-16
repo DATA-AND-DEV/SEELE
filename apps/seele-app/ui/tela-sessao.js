@@ -955,8 +955,12 @@ function emGrupos(linhas, dados, arranjo, tituloDosOutros, classe = "canais-grup
     return item;
   };
   for (const grupo of arranjo.grupos.slice(0, TETO_DE_GRUPOS)) {
-    const dele = (Array.isArray(grupo?.ids) ? grupo.ids : [])
-      .map(String)
+    // **Um id repetido no mesmo grupo também é ignorado**, pelo `Set`: o
+    // `filter` consulta `usadas` antes de o laço a encher, e o repetido
+    // passava. Com a lista repovoada, a mesma fileira posta duas vezes só se
+    // movia; reconciliada (`reconciliarALista`), a segunda vira uma fileira a
+    // mais — a mesma sala duas vezes na coluna.
+    const dele = [...new Set((Array.isArray(grupo?.ids) ? grupo.ids : []).map(String))]
       .filter((id) => porId.has(id) && !usadas.has(id));
     if (dele.length === 0) continue;
     saida.push(cabecalho(String(grupo.titulo ?? "").slice(0, TETO_DO_TITULO_DE_GRUPO)));
