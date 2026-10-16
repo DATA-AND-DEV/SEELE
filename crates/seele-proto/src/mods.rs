@@ -589,6 +589,10 @@ pub struct ComoEleSeChama {
     /// A API que ele pede. Zero quando o campo falta ou não é número.
     #[serde(default)]
     pub api: u32,
+    /// Se ele declara a porta do tema (`"tema": true`). Falso quando a chave
+    /// falta, como no [`Manifest`].
+    #[serde(default)]
+    pub tema: bool,
 }
 
 /// Lê só o que um manifesto diz de si, sem validar nada.
@@ -914,6 +918,15 @@ pub struct ModAnunciado {
     /// fora de [`identidade_do_conjunto`] porque já está dentro do hash: o
     /// `mod.json` faz parte do conteúdo.
     pub api: u32,
+    /// Se o manifesto declara `"tema": true`: a metade de servidor pode pintar
+    /// a aparência do servidor inteiro (rascunho da API 6, §9; D-api-8).
+    ///
+    /// **É para a tela de aceite**, como o [`Self::no_servidor`]: quem aceita um
+    /// MOD que muda a aparência de todo mundo tem de saber disso antes de
+    /// aceitar. Falso sem a chave. Fica fora de [`identidade_do_conjunto`] pelo
+    /// motivo da API: já está dentro do hash, porque o `mod.json` faz parte do
+    /// conteúdo.
+    pub tema: bool,
 }
 
 /// Um hash de conteúdo em hexadecimal minúsculo, e nada mais.
@@ -1355,6 +1368,7 @@ mod tests {
             reach: vec!["dom".to_owned()],
             no_servidor: false,
             api: 0,
+            tema: false,
         }
     }
 

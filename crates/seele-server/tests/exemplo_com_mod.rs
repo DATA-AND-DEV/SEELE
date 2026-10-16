@@ -48,6 +48,7 @@ async fn o_mod_que_o_exemplo_instala_responde_ao_pedido() {
             reach: manifesto.reach.clone(),
             server_half: manifesto.server.is_some(),
             api: manifesto.api,
+            tema: false,
         },
     )
     .unwrap();

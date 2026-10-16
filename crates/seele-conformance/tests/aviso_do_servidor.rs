@@ -129,6 +129,7 @@ async fn subir(raiz: &Path, hash: &str) -> Result<(Arc<Daemon>, SocketAddr, Stri
                 reach: Vec::new(),
                 server_half: true,
                 api: seele_proto::mods::MOD_API_VERSION,
+                tema: false,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&banco)?.identidade

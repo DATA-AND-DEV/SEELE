@@ -562,7 +562,7 @@ pub(crate) struct ModDeApiAntiga {
 ///
 /// **Uma função pura do app, que lê o banco só para leitura.** Ela não pode ler
 /// a coluna `api`: o banco de quem vem da 0.15 está no esquema 13 e não a tem, e
-/// quem a cria (migração 14) e a preenche (`preencher_as_apis`) é a subida do
+/// quem a cria (migração 14) e a preenche (`preencher_api_e_tema`) é a subida do
 /// servidor — depois do ponto em que esta pergunta é feita. Ela lê `id` e
 /// `hash` das linhas ligadas, que existem do esquema 11 ao 15, e a API pelo
 /// pacote, pela **mesma regra** da subida (`api_do_pacote`). Não migra nada.
@@ -627,6 +627,7 @@ pub(crate) fn linha_do_pacote(
         reach: instalado.reach,
         server_half: instalado.server,
         api: instalado.api,
+        tema: instalado.tema,
     })
 }
 

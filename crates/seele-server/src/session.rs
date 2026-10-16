@@ -6103,6 +6103,7 @@ mod o_aceite_dos_mods {
             reach: vec!["ler".to_owned()],
             server_half: no_servidor,
             api: 6,
+            tema: false,
         }
     }
 

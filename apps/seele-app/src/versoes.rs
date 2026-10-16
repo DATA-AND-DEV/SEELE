@@ -2637,6 +2637,7 @@ mod o_quintal_sobe_da_0_15 {
                     reach: instalado.reach,
                     server_half: instalado.server,
                     api: instalado.api,
+                    tema: false,
                 }],
             )
             .unwrap();

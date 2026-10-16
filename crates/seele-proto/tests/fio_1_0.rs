@@ -85,6 +85,7 @@ fn mods_exigidos() -> ServerMessage {
         reach: vec![],
         no_servidor: false,
         api: 6,
+        tema: true,
     }];
     let conjunto = seele_proto::mods::hex(&seele_proto::mods::identidade_do_conjunto(&mut mods));
     ServerMessage::ModsExigidos { mods, conjunto }

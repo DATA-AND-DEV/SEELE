@@ -1167,7 +1167,7 @@ pub fn carregar_do_disco(
 /// servidor dizer a quem entra que versão do app o roda, e quem hospeda saber
 /// que MOD o impede —, e `read_manifest` o recusaria antes de dizer o número.
 ///
-/// Os dois a chamam: `preencher_as_apis`, na subida, e a conferência de quem
+/// Os dois a chamam: `preencher_api_e_tema`, na subida (por [`do_pacote`]), e a conferência de quem
 /// hospeda, no app (`mods_de_api_antiga`, em `apps/seele-app/src/mods.rs`).
 /// Uma segunda leitura do `mod.json` seria um segundo jeito de errar, e os dois
 /// discordariam sobre o mesmo pacote.
@@ -1177,49 +1177,79 @@ pub fn carregar_do_disco(
 /// O motivo, em texto, para o `seele.log`: sem `mod.json` na pasta do hash, ou
 /// um que não declara a API.
 pub fn api_do_pacote(raizes: &crate::RaizesDosMods, hash: &str) -> Result<u32, String> {
+    do_pacote(raizes, hash).map(|declarado| declarado.api)
+}
+
+/// O que um pacote instalado declara de si para o anúncio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DoPacote {
+    /// A API que o manifesto pede.
+    pub api: u32,
+    /// Se o manifesto declara `"tema": true` (D-api-8). Falso sem a chave.
+    pub tema: bool,
+}
+
+/// **A API e o tema de um pacote instalado, numa leitura só** (D-api-8): a
+/// regra de [`api_do_pacote`], que agora é esta, e não uma segunda leitura do
+/// mesmo `mod.json`. Duas leituras seriam dois jeitos de errar sobre o mesmo
+/// pacote.
+///
+/// # Errors
+///
+/// Os de [`api_do_pacote`]: sem `mod.json` na pasta do hash, ou um que não
+/// declara a API. Um manifesto que não declara a API não diz o tema também:
+/// os dois saem do mesmo texto, e um texto que perdeu um não é prova do outro.
+pub fn do_pacote(raizes: &crate::RaizesDosMods, hash: &str) -> Result<DoPacote, String> {
     let dir = raizes.pacote_de(hash);
     let texto = std::fs::read_to_string(dir.join("mod.json"))
         .map_err(|erro| format!("sem mod.json em {}: {erro}", dir.display()))?;
-    match seele_proto::mods::como_ele_se_chama(&texto).api {
+    let declarado = seele_proto::mods::como_ele_se_chama(&texto);
+    match declarado.api {
         0 => Err("o mod.json não declara a API".to_owned()),
-        api => Ok(api),
+        api => Ok(DoPacote {
+            api,
+            tema: declarado.tema,
+        }),
     }
 }
 
-/// Preenche a API das linhas habilitadas que ainda não a têm (migração 14).
+/// Preenche a API e o tema das linhas habilitadas que ainda não os têm
+/// (migrações 14 e 16), na mesma passada e na mesma leitura.
 ///
 /// Lê o `mod.json` da pasta do **hash** que a linha exige — os bytes que a
 /// exigência cobre, e não «o que estiver na pasta do MOD» —, como
-/// [`carregar_do_disco`] faz, pela regra de [`api_do_pacote`]. Uma linha que não se preenche (pacote fora do
-/// disco, manifesto que não abre) fica zero, que é «não preenchida», e é
-/// **nomeada** na lista devolvida: zero em silêncio seria o anúncio dizendo «não
-/// sei» sem ninguém saber por quê.
+/// [`carregar_do_disco`] faz, pela regra de [`do_pacote`]. Uma linha que não se
+/// preenche (pacote fora do disco, manifesto que não abre) fica com a API zero
+/// e o tema nulo, «não preenchidos», e é **nomeada** na lista devolvida: em
+/// silêncio, seria o anúncio dizendo «não sei» da API, e «não pinta a
+/// aparência» do tema, sem ninguém saber por quê.
 #[must_use]
-pub fn preencher_as_apis(
+pub fn preencher_api_e_tema(
     persistence: &crate::persistence::Persistence,
     raizes: &crate::RaizesDosMods,
 ) -> Vec<String> {
-    let ligados = match crate::persistence::mods::enabled(persistence) {
-        Ok(ligados) => ligados,
+    let por_preencher = match crate::persistence::mods::por_preencher(persistence) {
+        Ok(linhas) => linhas,
         Err(erro) => return vec![format!("não deu para ler a tabela de MODs: {erro}")],
     };
     let mut queixas = Vec::new();
-    for ligado in ligados.into_iter().filter(|ligado| ligado.api == 0) {
-        match api_do_pacote(raizes, &ligado.hash) {
-            Ok(api) => {
-                if let Err(erro) = crate::persistence::mods::preencher_api(
+    for (id, hash) in por_preencher {
+        match do_pacote(raizes, &hash) {
+            Ok(DoPacote { api, tema }) => {
+                if let Err(erro) = crate::persistence::mods::preencher_do_pacote(
                     persistence,
-                    &ligado.id,
-                    &ligado.hash,
+                    &id,
+                    &hash,
                     api,
+                    tema,
                 ) {
-                    queixas.push(format!("{}: a API não foi gravada: {erro}", ligado.id));
+                    queixas.push(format!("{id}: a API e o tema não foram gravados: {erro}"));
                 }
             }
             Err(motivo) => {
                 queixas.push(format!(
-                    "{}: a API ficou não preenchida — {motivo}",
-                    ligado.id
+                    "{id}: a API e o tema ficaram não preenchidos, e o anúncio diz o tema \
+                     falso — {motivo}"
                 ));
             }
         }
@@ -1257,15 +1287,88 @@ mod tests {
     /// Um pacote no disco, com o `mod.json` dizendo a API pedida, na pasta do
     /// hash dele.
     fn pacote_com_api(raizes: &crate::RaizesDosMods, hash: &str, api: u32) {
+        pacote_com(raizes, hash, api, "");
+    }
+
+    /// Um pacote cujo `mod.json` termina com `resto` — `,"tema":true`, por
+    /// exemplo, ou nada.
+    fn pacote_com(raizes: &crate::RaizesDosMods, hash: &str, api: u32, resto: &str) {
         let dir = raizes.pacote_de(hash);
         std::fs::create_dir_all(&dir).expect("pasta do pacote");
         std::fs::write(
             dir.join("mod.json"),
             format!(
-                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{api},"repo":"https://github.com/seele/bot","reach":[]}}"#
+                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{api},"repo":"https://github.com/seele/bot","reach":[]{resto}}}"#
             ),
         )
         .expect("manifesto");
+    }
+
+    /// **As linhas habilitadas antes da migração 16 ganham o tema na subida**,
+    /// na mesma passada e na mesma leitura que preenchem a API (D-api-8). O
+    /// tema do pacote chega ao anúncio; sem a chave, falso; e uma linha que não
+    /// se preenche sai falsa no anúncio e é dita pelo nome no registro.
+    #[test]
+    fn a_subida_preenche_o_tema_das_linhas_antigas_e_o_anuncio_o_diz() {
+        use crate::persistence::mods::{enable, EnabledMod};
+        use crate::persistence::{Location, Persistence};
+
+        let raiz = pasta_de_teste("tema-na-subida");
+        let raizes = crate::RaizesDosMods {
+            pacotes: raiz.clone(),
+            dados: raiz.join("mod-data"),
+        };
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        let linha = |id: &str, hash: &str| EnabledMod {
+            id: id.to_owned(),
+            version: "1.0.0".to_owned(),
+            hash: hash.to_owned(),
+            repo: String::new(),
+            reach: Vec::new(),
+            server_half: true,
+            api: 6,
+            tema: false,
+        };
+        let pinta = "a1".repeat(32);
+        let sem_chave = "b2".repeat(32);
+        pacote_com(&raizes, &pinta, 6, r#","tema":true"#);
+        pacote_com(&raizes, &sem_chave, 6, "");
+        enable(&banco, &linha("seele/estilo", &pinta)).expect("habilitar");
+        enable(&banco, &linha("seele/bot", &sem_chave)).expect("habilitar");
+        enable(&banco, &linha("seele/sumido", &"c3".repeat(32))).expect("habilitar");
+        // Como uma linha gravada antes da coluna: o tema nulo.
+        banco
+            .connection()
+            .execute("UPDATE mods SET tema = NULL", [])
+            .expect("como antes da migração 16");
+
+        let queixas = preencher_api_e_tema(&banco, &raizes);
+
+        let conjunto = crate::mods::anuncio::conjunto_exigido(&banco).expect("montar");
+        let tema_de = |id: &str| {
+            conjunto
+                .mods
+                .iter()
+                .find(|anunciado| anunciado.id == id)
+                .map(|anunciado| anunciado.tema)
+        };
+        assert_eq!(
+            tema_de("seele/estilo"),
+            Some(true),
+            "a subida não preencheu o tema que o pacote declara, e o anúncio diz que \
+             um MOD que pinta a aparência não pinta"
+        );
+        assert_eq!(tema_de("seele/bot"), Some(false), "sem a chave, falso");
+        assert_eq!(
+            tema_de("seele/sumido"),
+            Some(false),
+            "o não preenchido sai falso"
+        );
+        assert_eq!(queixas.len(), 1, "{queixas:?}");
+        assert!(
+            queixas[0].contains("seele/sumido") && queixas[0].contains("tema"),
+            "a linha que não se preencheu não foi dita no registro: {queixas:?}"
+        );
     }
 
     /// **As linhas habilitadas antes da coluna ganham a API na subida**, lida
@@ -1290,13 +1393,14 @@ mod tests {
             reach: Vec::new(),
             server_half: false,
             api: 0,
+            tema: false,
         };
         let com_pacote = "e5".repeat(32);
         pacote_com_api(&raizes, &com_pacote, 6);
         enable(&banco, &linha("seele/bot", &com_pacote)).expect("habilitar");
         enable(&banco, &linha("seele/sumido", &"f6".repeat(32))).expect("habilitar");
 
-        let queixas = preencher_as_apis(&banco, &raizes);
+        let queixas = preencher_api_e_tema(&banco, &raizes);
 
         let lista = enabled(&banco).expect("listar");
         let api_de = |id: &str| lista.iter().find(|m| m.id == id).map(|m| m.api);
@@ -1356,7 +1460,7 @@ mod tests {
         };
 
         let banco = Persistence::open(&Location::File(caminho)).expect("abrir e migrar");
-        let queixas = preencher_as_apis(&banco, &raizes);
+        let queixas = preencher_api_e_tema(&banco, &raizes);
         assert!(queixas.is_empty(), "{queixas:?}");
 
         let preenchida = enabled(&banco)
