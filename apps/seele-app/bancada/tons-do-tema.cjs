@@ -277,6 +277,58 @@ for (const [nome, tema] of Object.entries({
   }
 }
 
+// ---------------------------------------- a função de referência do guia
+
+{
+  // **A cópia do guia faz o que a casca faz** (`tema.derivados-pelo-produto`:
+  // «publicada também como função de referência no guia»). O guia publica o
+  // cálculo inteiro para um MOD saber, sem uma janela aberta, o que a casca vai
+  // derivar e recusar; uma cópia que envelhecesse ensinaria a errar. Aqui ela
+  // roda sozinha, como um MOD a rodaria, e cada tema dá o mesmo resultado nas
+  // duas: os nomeados desta bancada e trezentos sorteados com semente fixa.
+  const guia = fs.readFileSync(`${repo}/docs/como-se-faz-um-mod.md`, "utf8");
+  const comeco = guia.indexOf("// ---- tonsDoTema: começo ----");
+  const fim = guia.indexOf("// ---- tonsDoTema: fim ----");
+  confere("guia · o bloco", comeco >= 0 && fim > comeco, "o guia não tem o bloco do tonsDoTema entre os marcadores");
+  if (comeco >= 0 && fim > comeco) {
+    const doGuia = vm.createContext({});
+    vm.runInContext(`${guia.slice(comeco, fim)}\nglobalThis.__guia = { tonsDoTema, corDoProduto, CORES_DO_PRODUTO };`, doGuia);
+    const ref = doGuia.__guia;
+    for (const [token, cor] of Object.entries(ref.CORES_DO_PRODUTO)) {
+      confere("guia · as cores do produto", PRODUTO[token] === cor,
+        `o guia diz ${token} ${cor}, e tokens.css diz ${PRODUTO[token]}`);
+    }
+    let semente = 0x5ee1e;
+    const sortear = () => {
+      semente = (semente + 0x6d2b79f5) | 0;
+      let t = Math.imul(semente ^ (semente >>> 15), 1 | semente);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const hex = () => `#${Math.floor(sortear() * 0x1000000).toString(16).padStart(6, "0")}`;
+    const temas = [
+      {}, CLARO, { ...CLARO, painel: "#2a2622" }, { acento: "#2f8fe0" },
+      { fundo: "#777777", painel: "#777777", texto: "#000000", apagado: "#000000", acento: "#000000" },
+      { fundo: "#404040", painel: "#aaaaaa", texto: "#000000", apagado: "#000000", acento: "#000000" },
+    ];
+    for (let i = 0; i < 300; i += 1) {
+      const tema = {};
+      for (const nome of ["fundo", "painel", "texto", "apagado", "acento"]) if (sortear() < 0.7) tema[nome] = hex();
+      temas.push(tema);
+    }
+    let divergentes = 0;
+    for (const tema of temas) {
+      const daCasca = JSON.stringify(tonsDoTema(tema, daRaiz));
+      const doGuiaR = JSON.stringify(ref.tonsDoTema(tema, ref.corDoProduto));
+      if (daCasca !== doGuiaR) {
+        divergentes += 1;
+        if (divergentes <= 3) confere("guia · o mesmo resultado", false, `${JSON.stringify(tema)}: a casca dá ${daCasca}, e o guia ${doGuiaR}`);
+      }
+    }
+    confere("guia · o mesmo resultado", divergentes === 0, `${divergentes} de ${temas.length} temas divergem entre a casca e o guia`);
+  }
+}
+
 if (falhas.length) {
   console.error(`tons-do-tema: ${falhas.length} falha(s)\n  ${falhas.join("\n  ")}`);
   process.exit(1);
