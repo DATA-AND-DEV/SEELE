@@ -59,11 +59,17 @@
 //    com o retrato igual sem mutação nenhuma, com o mesmo nó de texto e com a
 //    seleção; o que muda (o ATRASO, o UPTIME, a média, o contador, o «no ar»)
 //    muda no mesmo nó, e a seleção num número vizinho fica.
+// 13. **As regiões de MOD** (`#roster-mods`, `#telemetria-mods`, e o
+//    `#compositor-mods`, pelo mesmo `aplicarARegiao`): sem MOD, o tique não
+//    mexe nelas; com um MOD, o retrato igual não tira nem põe nó, o conteúdo e
+//    o botão da ação são os mesmos nós, o foco fica no botão e a seleção no
+//    texto do MOD; a ação que sai tira só o botão dela; e o clique depois de
+//    um retrato que muda o dado da ação (o canal aberto) age com o de agora.
 //
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
 // salas repovoada, o caso 6; com a de canais, o caso 10; com o `textContent`
-// de volta, o caso 12.
+// de volta, o caso 12; com a região de MOD repovoada, o caso 13.
 //
 // Rodar:  node apps/seele-app/bancada/linhas-pelo-id.cjs
 
@@ -1278,6 +1284,214 @@ async function abrir(browser, url, r) {
       assert.ok(contador.mesmoNo, "o contador mudou trocando o nó de texto");
     }
 
+    // 13. As regiões de MOD (`#roster-mods`, `pessoas.lista`, e
+    //     `#telemetria-mods`, `status.barra`; o caminho é o `aplicarARegiao`).
+    //     Sem MOD, o tique não mexe nelas (nem no `hidden`). Com um MOD que
+    //     contribui um texto e uma ação em cada uma: com o retrato igual,
+    //     nenhum nó sai nem entra, o conteúdo do MOD é o mesmo nó, o botão da
+    //     ação é o mesmo nó com o foco nele, e a seleção no texto do MOD fica.
+    //     O clique na ação depois do tique chega ao MOD certo. Uma ação que sai
+    //     tira só o botão dela: a do outro MOD, com o foco, fica (a ação tem
+    //     chave; casada pela posição, o botão de quem saiu viraria o do outro).
+    //     E o clique depois de um retrato que muda o dado da ação age com o
+    //     dado de agora: na região `compositor`, o mesmo caminho, o canal
+    //     aberto muda e o mesmo botão, com o foco, manda o canal novo.
+    const pagina13 = await abrir(browser, url, BASE);
+    const caso13 = await pagina13.page.evaluate(async () => {
+      const tique = () => new Promise((ok) => setTimeout(ok, 1200));
+      const $id = (id) => document.getElementById(id);
+      const observar = (...els) => {
+        const registros = [];
+        const observador = new MutationObserver((rs) => registros.push(...rs));
+        for (const el of els) {
+          observador.observe(el, { subtree: true, childList: true, attributes: true, characterData: true });
+        }
+        return () => {
+          registros.push(...observador.takeRecords());
+          observador.disconnect();
+          return registros.map((r) => {
+            const alvo = r.target.nodeType === Node.TEXT_NODE ? r.target.parentElement : r.target;
+            return `${r.type}${r.attributeName ? `:${r.attributeName}` : ""}@${alvo?.id || alvo?.className || alvo?.tagName}`;
+          });
+        };
+      };
+      const selecionar = (no) => {
+        const faixa = document.createRange();
+        faixa.selectNodeContents(no);
+        getSelection().removeAllRanges();
+        getSelection().addRange(faixa);
+        return getSelection().toString();
+      };
+      const lista = $id("roster-mods");
+      const barra = $id("telemetria-mods");
+      const compositor = $id("compositor-mods");
+
+      // a) Sem MOD: as regiões vazias e escondidas, e o tique não mexe nelas.
+      let parar = observar(lista, barra, compositor);
+      let antes = desenhado;
+      await tique();
+      const semMod = {
+        redesenhou: desenhado !== antes && desenhado !== null,
+        escondidas: lista.hidden && barra.hidden,
+        mutacoes: parar(),
+      };
+
+      // O MOD, pelo registro de verdade; o que ele recebe fica anotado.
+      const entregues = [];
+      const texto = (dentro) => [{ forma: "texto", chave: "t", dentro }];
+      const instanciaA = registrarMod("bancada/regioes-a", [
+        { ponto: "pessoas.lista", modo: "adicionar", prioridade: 0, conteudo: texto("faixa do MOD acima da lista") },
+        { ponto: "pessoas.lista", modo: "adicionar", prioridade: 0, acaoPrincipal: "a-lista", rotulo: "AÇÃO A", nomeAcessivel: "ação a" },
+        { ponto: "status.barra", modo: "adicionar", prioridade: 0, conteudo: texto("MOD 42 ms") },
+        { ponto: "status.barra", modo: "adicionar", prioridade: 0, acaoPrincipal: "a-barra", rotulo: "AÇÃO NA BARRA", nomeAcessivel: "ação na barra" },
+        { ponto: "compositor", modo: "adicionar", prioridade: 0, acaoPrincipal: "a-escrever", rotulo: "INSERIR", nomeAcessivel: "inserir" },
+      ]);
+      const instanciaB = registrarMod("bancada/regioes-b", [
+        { ponto: "pessoas.lista", modo: "adicionar", prioridade: 0, acaoPrincipal: "b-lista", rotulo: "AÇÃO B", nomeAcessivel: "ação b" },
+      ]);
+      for (const instancia of [instanciaA, instanciaB]) {
+        instancia.executor.entregar = (mensagem) => { entregues.push({ mod: instancia.id, ...mensagem }); };
+      }
+      await quadros(3);
+      desenhar(testTable.snapshot);
+      const acao = (regiao, nome) => regiao.querySelector(`button[data-acao-de-mod="${nome}"]`);
+      const conteudo = (regiao) => regiao.querySelector(".contribuicao-de-mod");
+      const textoDoMod = (regiao) => regiao.querySelector(".contribuicao-de-mod .regiao-de-mod-parte") ?? conteudo(regiao);
+      const nos = () => ({
+        listaConteudo: conteudo(lista), listaA: acao(lista, "a-lista"), listaB: acao(lista, "b-lista"),
+        barraConteudo: conteudo(barra), barraAcao: acao(barra, "a-barra"), escrever: acao(compositor, "a-escrever"),
+      });
+      const trocados = (antesDele) => {
+        const agora = nos();
+        return Object.keys(antesDele).filter((nome) => antesDele[nome] === null || !antesDele[nome].isConnected
+          || agora[nome] !== antesDele[nome]);
+      };
+      const ondeEstaOFoco = () => {
+        const ativo = document.activeElement;
+        return ativo?.dataset?.acaoDeMod ? `a ação ${ativo.dataset.acaoDeMod}` : (ativo?.tagName ?? "nada");
+      };
+
+      // b) O retrato igual, duas vezes: o foco na ação de uma região e a
+      //    seleção no texto do MOD da outra, e depois o contrário.
+      const passada = async (focar, selecionarEm) => {
+        const antesDela = nos();
+        focar.focus();
+        const focado = document.activeElement === focar;
+        const selecao = selecionar(textoDoMod(selecionarEm));
+        const pararDela = observar(lista, barra);
+        const retrato = desenhado;
+        await tique();
+        return {
+          redesenhou: desenhado !== retrato && desenhado !== null,
+          focado,
+          focoFicou: focado && document.activeElement === focar && focar.isConnected,
+          foco: ondeEstaOFoco(),
+          selecao: [selecao, getSelection().toString()],
+          trocados: trocados(antesDela),
+          mutacoes: pararDela(),
+        };
+      };
+      const naLista = await passada(acao(lista, "a-lista"), barra);
+      const naBarra = await passada(acao(barra, "a-barra"), lista);
+      getSelection().removeAllRanges();
+
+      // c) O clique na ação da lista, que atravessou os tiques, chega ao MOD A.
+      entregues.length = 0;
+      acao(lista, "a-lista").click();
+      const clique = entregues.map((e) => `${e.mod}:${e.nome}:${e.acao}`);
+
+      // d) A ação do MOD A sai da lista; o foco está na do MOD B, que fica.
+      const botaoB = acao(lista, "b-lista");
+      botaoB.focus();
+      const focadoB = document.activeElement === botaoB;
+      const botaoA = acao(lista, "a-lista");
+      const handleA = [...contribuicoesDosMods.porHandle.values()]
+        .find((c) => c.mod === "bancada/regioes-a" && c.acaoPrincipal === "a-lista").handle;
+      contribuicoesDosMods.revogar(handleA);
+      antes = desenhado;
+      await tique();
+      entregues.length = 0;
+      acao(lista, "b-lista")?.click();
+      const saiUma = {
+        redesenhou: desenhado !== antes && desenhado !== null,
+        focado: focadoB,
+        aSaiu: !botaoA.isConnected && acao(lista, "a-lista") === null,
+        bFicou: acao(lista, "b-lista") === botaoB && botaoB.isConnected && document.activeElement === botaoB,
+        foco: ondeEstaOFoco(),
+        rotuloB: botaoB.textContent,
+        clique: entregues.map((e) => `${e.mod}:${e.nome}:${e.acao}`),
+      };
+
+      // e) O dado da ação muda: o canal aberto passa do 1 ao 2. A ação do
+      //    compositor é o mesmo botão, com o foco, e o clique manda o canal 2.
+      const escrever = acao(compositor, "a-escrever");
+      escrever.focus();
+      const focadoE = document.activeElement === escrever;
+      const canalAntes = escrever.dataset.canalDaAcao;
+      antes = desenhado;
+      const outroCanal = structuredClone(testTable.snapshot);
+      for (const canal of outroCanal.channels) canal.open = canal.id === 2;
+      testTable.snapshot = outroCanal;
+      await tique();
+      entregues.length = 0;
+      document.activeElement?.click();
+      const dadoNovo = {
+        redesenhou: desenhado !== antes && desenhado?.channels?.find((c) => c.id === 2)?.open === true,
+        focado: focadoE,
+        mesmoNo: acao(compositor, "a-escrever") === escrever && escrever.isConnected,
+        focoFicou: document.activeElement === escrever,
+        foco: ondeEstaOFoco(),
+        canalAntes,
+        clique: entregues.map((e) => `${e.mod}:${e.acao}:canal ${e.canal}`),
+      };
+      return { semMod, naLista, naBarra, clique, saiUma, dadoNovo };
+    });
+    assert.deepEqual(pagina13.errors, [], "caso 13: erros na página");
+    await pagina13.page.close();
+    {
+      const { semMod, naLista, naBarra, clique, saiUma, dadoNovo } = caso13;
+      assert.ok(semMod.redesenhou, "caso 13 (a): o tique não redesenhou em 1,2 s");
+      assert.ok(semMod.escondidas, "caso 13 (a): sem MOD, as regiões de MOD não estão escondidas");
+      assert.deepEqual(semMod.mutacoes, [], `sem MOD, o tique mexeu nas regiões de MOD: ${semMod.mutacoes.join(", ")}`);
+      for (const [nome, p] of [["#roster-mods", naLista], ["#telemetria-mods", naBarra]]) {
+        assert.ok(p.redesenhou, `caso 13, ${nome}: o tique não redesenhou em 1,2 s`);
+        assert.ok(p.focado, `caso 13, ${nome}: a bancada não conseguiu pôr o foco na ação do MOD`);
+        assert.ok(p.selecao[0].length > 0, `caso 13, ${nome}: a bancada não conseguiu selecionar o texto do MOD`);
+        assert.ok(
+          p.focoFicou,
+          `o mesmo retrato, redesenhado pelo tique, tirou o foco da ação do MOD em ${nome}: o foco está em ${p.foco}`,
+        );
+        assert.equal(
+          p.selecao[1], p.selecao[0],
+          `o mesmo retrato desfez a seleção no texto do MOD (foco em ${nome}): ${JSON.stringify(p.selecao[0])} → ` +
+            `${JSON.stringify(p.selecao[1])}`,
+        );
+        assert.deepEqual(p.trocados, [], `o mesmo retrato trocou ou tirou do documento: ${p.trocados.join(", ")}`);
+        assert.deepEqual(p.mutacoes, [], `o mesmo retrato mexeu nas regiões de MOD (foco em ${nome}): ${p.mutacoes.join(", ")}`);
+      }
+      assert.deepEqual(clique, ["bancada/regioes-a:acao:a-lista"], `o clique na ação da lista entregou ${JSON.stringify(clique)}`);
+      assert.ok(saiUma.redesenhou, "caso 13 (d): o tique não redesenhou em 1,2 s");
+      assert.ok(saiUma.focado, "caso 13 (d): a bancada não conseguiu pôr o foco na ação do MOD B");
+      assert.ok(saiUma.aSaiu, "a ação do MOD A saiu do registro e o botão dela ficou na lista");
+      assert.ok(
+        saiUma.bFicou,
+        `a ação do MOD A saiu e a do MOD B, com o foco, não é mais o mesmo botão (o foco está em ${saiUma.foco}, ` +
+          `e o botão de B diz ${JSON.stringify(saiUma.rotuloB)})`,
+      );
+      assert.deepEqual(saiUma.clique, ["bancada/regioes-b:acao:b-lista"], `o clique na ação de B entregou ${JSON.stringify(saiUma.clique)}`);
+      assert.ok(dadoNovo.redesenhou, "caso 13 (e): o canal aberto novo não chegou à tela pelo tique");
+      assert.ok(dadoNovo.focado && dadoNovo.canalAntes === "1", `caso 13 (e): a ação do compositor não estava focada no canal 1 (${dadoNovo.canalAntes})`);
+      assert.ok(
+        dadoNovo.mesmoNo && dadoNovo.focoFicou,
+        `o canal aberto mudou e a ação do compositor, com o foco, não é o mesmo botão: o foco está em ${dadoNovo.foco}`,
+      );
+      assert.deepEqual(
+        dadoNovo.clique, ["bancada/regioes-a:a-escrever:canal 2"],
+        `o clique na ação focada, depois de o canal aberto passar ao 2, entregou ${JSON.stringify(dadoNovo.clique)}. ` +
+          "Com o canal 1, o botão reaproveitado age com o dado do retrato em que nasceu",
+      );
+    }
+
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
         `(${caso1.mutacoes} mutações, nenhuma fora dela) e o foco ficou; o mesmo retrato não ` +
@@ -1292,7 +1506,10 @@ async function abrir(browser, url, r) {
         `ganhou um, o foco ficou no canal que virou o aberto, e os ${caso10m.nos} nós do canal.item ficaram ` +
         "no documento; um id repetido no arranjo do MOD não duplicou nenhuma sala nem canal. " +
         "Com o retrato igual, o contador, a telemetria e o #voz-estado não mudaram nada e a seleção " +
-        "ficou; o que mudou (o ATRASO, o UPTIME, a média, o contador, o «no ar») mudou no mesmo nó.",
+        "ficou; o que mudou (o ATRASO, o UPTIME, a média, o contador, o «no ar») mudou no mesmo nó. " +
+        "Nas regiões de MOD, o retrato igual não mexeu em nada, o foco ficou no botão da ação e a seleção " +
+        "no texto do MOD; a ação que saiu levou só o botão dela; e o clique depois de o canal aberto " +
+        "mudar mandou o canal novo.",
     );
   } finally {
     await browser.close();
