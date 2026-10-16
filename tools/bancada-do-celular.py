@@ -1578,6 +1578,101 @@ def ajustes_e_avisos(pg: Page) -> list[str]:
     return falhas
 
 
+CONTEUDO_LONGO = [{"forma": "texto", "chave": f"p{n}", "dentro": f"Parágrafo {n} de um diálogo que passa da altura da tela."}
+                  for n in range(40)]
+
+O_DIALOGO_NO_CELULAR = """(seletor) => {
+  const d = document.querySelector(seletor);
+  if (!d?.checkVisibility()) return { aVista: false };
+  const sessao = document.getElementById('tela-sessao');
+  const s = sessao.getBoundingClientRect();
+  const pe = parseFloat(getComputedStyle(sessao).getPropertyValue('--cel-pe')) || 0;
+  const fimAcimaDoPe = s.bottom - pe;
+  const r = d.getBoundingClientRect();
+  const toca = (el) => { if (!el?.checkVisibility()) return false; const b = el.getBoundingClientRect();
+    const no = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!no && (no === el || el.contains(no)); };
+  const acima = r.top - 24 > s.top ? document.elementFromPoint(r.left + r.width / 2, r.top - 24) : null;
+  const corpo = d.querySelector('.dialogo-de-mod-corpo'), rodape = d.querySelector('.dialogo-de-mod-rodape');
+  const rr = rodape?.checkVisibility() ? rodape.getBoundingClientRect() : null;
+  const ultimo = corpo?.lastElementChild ? corpo.querySelector('[data-chave="p39"], :scope > :last-child') : null;
+  return { aVista: true,
+           embaixo: Math.abs(r.bottom - fimAcimaDoPe) <= 1,
+           fracao: Math.round(r.height / (fimAcimaDoPe - s.top) * 1000) / 1000,
+           sessaoAcima: !!acima && !!acima.closest('#tela-sessao') && !acima.closest('.camada-de-mod') && !acima.closest('[inert]'),
+           mudo: toca(document.getElementById('voz-mudo')),
+           aba: toca(document.getElementById('cel-aba-ajustes')),
+           rodape: rr ? { noFim: Math.abs(rr.bottom - r.bottom) <= 2, acimaDoPe: rr.bottom <= fimAcimaDoPe + 1,
+                          topo: Math.round(rr.top),
+                          botoes: [...rodape.querySelectorAll('button')].map((b) => [b.textContent.trim(), Math.round(b.getBoundingClientRect().height), toca(b)]) } : null,
+           rola: !!corpo && corpo.scrollHeight > corpo.clientHeight + 1,
+           corpoAcimaDoRodape: !!corpo && !!rr && corpo.getBoundingClientRect().bottom <= rr.top + 1 };
+}"""
+
+
+def dialogo_nao_modal(pg: Page) -> list[str]:
+    """O diálogo não modal no celular (`superficies.dialogo.celular` do
+    `v6.json`, emenda 563ecf8f): embaixo, até 85% da altura da sessão acima do
+    pé, com a sessão à vista acima, e a faixa de voz e as abas à vista e ao
+    toque. Com um conteúdo mais alto que a tela, ele para nos 85%."""
+    falhas = []
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("""async (arvore) => {
+      await __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'ao-lado', tipo: 'dialogo', modal: false, titulo: 'AO LADO' } });
+      await __pedirAoProduto({ tipo: 'superficie-montar', superficie: 'ao-lado', arvore });
+    }""", CONTEUDO_LONGO)
+    pg.wait_for_timeout(400)
+    r = pg.evaluate(O_DIALOGO_NO_CELULAR, ".dialogo-de-mod[data-superficie='ao-lado']")
+    if not r["aVista"]:
+        falhas.append("o diálogo não modal não abriu: a conferência não vale")
+        return falhas
+    if not r["embaixo"]:
+        falhas.append(f"o não modal não está embaixo, no alto do pé: {r}")
+    if not 0.84 <= r["fracao"] <= 0.86:
+        falhas.append(f"com o conteúdo mais alto que a tela, o não modal tem {r['fracao']:.1%} da sessão acima do pé, e não 85%")
+    if not r["sessaoAcima"]:
+        falhas.append("acima do não modal, a sessão não está à vista ou não recebe o toque")
+    if not r["mudo"] or not r["aba"]:
+        falhas.append(f"com o não modal aberto, o MUDO ou a aba AJUSTES não recebem o toque: {r}")
+    return falhas
+
+
+def dialogo_rodape(pg: Page) -> list[str]:
+    """O rodapé do diálogo modal no celular (`superficies.dialogo.celular`,
+    emenda 563ecf8f): as ações fixas do MOD no rodapé do produto, no fim do
+    diálogo e acima do pé, à vista e ao toque, e o conteúdo rolando acima
+    delas, sem passar por baixo. Rolado até o fim, o rodapé fica onde estava."""
+    falhas = []
+    pg.evaluate(MOD_DE_PE)
+    acoes = {"forma": "acoes", "fixas": True, "dentro": [
+        {"forma": "botao", "chave": "gravar", "dentro": "GRAVAR"},
+        {"forma": "botao", "chave": "desfazer", "dentro": "DESFAZER"},
+    ]}
+    pg.evaluate("""async (arvore) => {
+      await __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'ficha', tipo: 'dialogo', titulo: 'FICHA' } });
+      await __pedirAoProduto({ tipo: 'superficie-montar', superficie: 'ficha', arvore });
+    }""", [*CONTEUDO_LONGO, acoes])
+    pg.wait_for_timeout(400)
+    seletor = ".dialogo-de-mod[data-superficie='ficha']"
+    r = pg.evaluate(O_DIALOGO_NO_CELULAR, seletor)
+    if not r["aVista"] or r["rodape"] is None:
+        falhas.append(f"o diálogo com as ações fixas não abriu com o rodapé à vista: a conferência não vale: {r}")
+        return falhas
+    ro = r["rodape"]
+    if not ro["noFim"] or not ro["acimaDoPe"]:
+        falhas.append(f"o rodapé não está no fim do diálogo, acima do pé: {ro}")
+    if [b[0] for b in ro["botoes"]] != ["GRAVAR", "DESFAZER"] or any(b[1] < 44 or not b[2] for b in ro["botoes"]):
+        falhas.append(f"as ações do rodapé não estão à vista, com 44, e ao toque: {ro['botoes']}")
+    if not r["rola"] or not r["corpoAcimaDoRodape"]:
+        falhas.append(f"o conteúdo não rola acima do rodapé: rola={r['rola']}, acima={r['corpoAcimaDoRodape']}")
+    pg.evaluate(f"document.querySelector(\"{seletor} .dialogo-de-mod-corpo\").scrollTop = 1e6")
+    pg.wait_for_timeout(200)
+    rolado = pg.evaluate(O_DIALOGO_NO_CELULAR, seletor)
+    if rolado["rodape"] is None or rolado["rodape"]["topo"] != ro["topo"] or any(not b[2] for b in rolado["rodape"]["botoes"]):
+        falhas.append(f"rolado até o fim, o rodapé saiu do lugar ou deixou de receber o toque: {rolado['rodape']}")
+    return falhas
+
+
 def esperar_quadro(pg: Page) -> None:
     """A casca relê o `snapshot` a cada 500 ms; uma mudança no quadro do duble
     aparece no redesenho seguinte."""
@@ -3354,6 +3449,8 @@ CASOS: dict[str, Caso] = {
                          raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
     "salas-pelo-id": Caso(levar=salas_pelo_id, medir=False),
     "ajustes-e-avisos": Caso(levar=ajustes_e_avisos, medir=False),
+    "dialogo-nao-modal": Caso(levar=dialogo_nao_modal, medir=False),
+    "dialogo-rodape": Caso(levar=dialogo_rodape, medir=False),
     "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
     "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "claro", "hostil"),
