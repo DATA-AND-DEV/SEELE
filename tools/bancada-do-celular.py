@@ -2804,6 +2804,152 @@ def status_barra_na_larga(pg: Page) -> list[str]:
     return falhas
 
 
+def listar_na_barra(pg: Page) -> list[str]:
+    """As entradas DOS MODS na aba SERVIDOR (`contribuicoes.listarNaBarra` no
+    celular, e `regioes.servidor.navegacao.celular.forma`, «célula inteira»;
+    a auditoria do v6, tabela 5 e 6): uma entrada com `listarNaBarra: false` não
+    aparece na lista, sem mudar permissão, e a que aparece é um alvo da largura
+    da lista inteira, e não só do rótulo."""
+    falhas = []
+    if not ir_para_aba(pg, "servidor", falhas):
+        return falhas
+    pg.evaluate(MOD_DE_PE)
+    for rotulo, listar in (("ENTRADA À VISTA", True), ("ENTRADA OCULTA", False)):
+        pg.evaluate(f"__pedirAoProduto({{ tipo: 'contribuir', pedido: {{ ponto: 'servidor.navegacao', rotulo: '{rotulo}', listarNaBarra: {'true' if listar else 'false'} }} }})")
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    visto = pg.evaluate("""() => {
+        const lista = document.getElementById('lista-mods-navegacao');
+        const botoes = [...(lista?.querySelectorAll('button.entrada-de-mod') ?? [])].filter((b) => b.checkVisibility());
+        const aVista = botoes.find((b) => b.textContent.includes('ENTRADA À VISTA'));
+        aVista?.scrollIntoView({ block: 'center' });
+        const b = aVista?.getBoundingClientRect(), l = lista?.getBoundingClientRect();
+        return { textos: botoes.map((b) => b.textContent.trim()), oculta: botoes.some((b) => b.textContent.includes('ENTRADA OCULTA')),
+                 larguraDoAlvo: b ? Math.round(b.width) : null, larguraDaLista: l ? Math.round(l.width) : null,
+                 altura: b ? Math.round(b.height) : null };
+    }""")
+    if not any("ENTRADA À VISTA" in t for t in visto["textos"]):
+        falhas.append(f"a entrada listada não aparece na aba SERVIDOR: {visto}")
+    if visto["oculta"]:
+        falhas.append(f"a entrada com listarNaBarra falso aparece na aba SERVIDOR: {visto}")
+    if visto["larguraDoAlvo"] is None or visto["larguraDoAlvo"] < visto["larguraDaLista"] - 2 or visto["altura"] < 44:
+        falhas.append(f"a entrada não é a célula inteira, com 44 de altura: {visto}")
+    return falhas
+
+
+def dialogos_no_aparelho(pg: Page) -> list[str]:
+    """Os diálogos no aparelho (`superficies.dialogo.celular`; a auditoria do v6,
+    tabela 7): «o modal, em tela cheia, com as acoes fixas no rodapé do
+    produto; o não modal, embaixo, até 85% da altura da sessão acima do pé,
+    com a sessão à vista acima». O `superficies-de-mod` mede a tela cheia; aqui,
+    o rodapé de um formulário de quarenta campos à vista e ao toque, acima do
+    pé, com o corpo rolando, e a altura do não modal."""
+    falhas = []
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate(MOD_DE_PE)
+    # As ações fixas são as `acoes` com `fixas: true`, que o renderer leva
+    # ao rodapé do produto; o corpo, quarenta campos que rolam.
+    campos = [{"forma": "campo", "chave": f"c{i}", "rotulo": f"Campo {i}"} for i in range(40)]
+    pg.evaluate("(arvore) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'longo', tipo: 'dialogo', titulo: 'LONGO' } })"
+                ".then(() => __pedirAoProduto({ tipo: 'superficie-montar', superficie: 'longo', arvore }))",
+                [*campos, {"forma": "acoes", "chave": "fim", "fixas": True, "dentro": [{"forma": "botao", "chave": "salvar", "dentro": "SALVAR"}]}])
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    pe = "Math.min(...[...document.querySelectorAll('#tela-sessao > .voz-celular, #tela-sessao > .cel-abas')].map((e) => e.getBoundingClientRect().top))"
+    modal = pg.evaluate(f"""() => {{
+        const pe = {pe};
+        const salvar = [...document.querySelectorAll("[data-superficie='longo'] .dialogo-de-mod-rodape button")].find((b) => b.textContent === 'SALVAR');
+        const corpo = document.querySelector("[data-superficie='longo'] .dialogo-de-mod-corpo");
+        if (!salvar) return {{ salvar: null }};
+        const b = salvar.getBoundingClientRect();
+        const noCentro = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return {{ salvar: [Math.round(b.top), Math.round(b.bottom)], pe: Math.round(pe), acima: b.bottom <= pe + 1 && b.top >= 0,
+                 toque: !!noCentro && salvar.contains(noCentro), rola: !!corpo && corpo.scrollHeight > corpo.clientHeight }};
+    }}""")
+    if not modal.get("salvar") or not modal["acima"] or not modal["toque"] or not modal["rola"]:
+        falhas.append(f"o modal longo não deixa o SALVAR fixo no rodapé, à vista e ao toque acima do pé, com o corpo rolando: {modal}")
+    pg.evaluate("() => superficiesDoMod({ id: 'teste/bancada' }, modsCarregados.get('teste/bancada')).soltarTudo()")
+    esperar_quadro(pg)
+    linhas = [{"forma": "texto", "chave": f"l{i}", "dentro": f"linha {i} do não modal"} for i in range(60)]
+    pg.evaluate("(arvore) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'baixo', tipo: 'dialogo', modal: false, titulo: 'BAIXO' } })"
+                ".then(() => __pedirAoProduto({ tipo: 'superficie-montar', superficie: 'baixo', arvore }))", linhas)
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    naoModal = pg.evaluate(f"""() => {{
+        const pe = {pe};
+        const caixa = document.querySelector(".dialogo-de-mod[data-superficie='baixo']")?.getBoundingClientRect();
+        const sessao = document.getElementById('tela-sessao').getBoundingClientRect();
+        if (!caixa) return {{ caixa: null }};
+        const acimaDele = document.elementFromPoint(sessao.left + sessao.width / 2, Math.max(sessao.top, caixa.top - 12));
+        return {{ caixa: [Math.round(caixa.top), Math.round(caixa.bottom)], pe: Math.round(pe),
+                 proporcao: Number((caixa.height / (pe - sessao.top)).toFixed(3)),
+                 embaixo: Math.abs(caixa.bottom - pe) <= 24,
+                 sessaoAVista: !!acimaDele && !acimaDele.closest('.camada-de-mod') }};
+    }}""")
+    if not naoModal.get("caixa") or not naoModal["embaixo"] or naoModal["proporcao"] > 0.851 or not naoModal["sessaoAVista"]:
+        falhas.append(f"o não modal não fica embaixo, até 85% da sessão acima do pé, com a sessão à vista acima: {naoModal}")
+    pg.evaluate("() => superficiesDoMod({ id: 'teste/bancada' }, modsCarregados.get('teste/bancada')).soltarTudo()")
+    return falhas
+
+
+def superficies_nas_areas(pg: Page) -> list[str]:
+    """Nenhuma superfície de MOD desenha sob as áreas seguras do aparelho
+    (`superficies.garantias-do-produto[6]` e `nucleo-de-confianca.celular[3]`;
+    a auditoria do v6, tabelas 7 e 9): o `superficies-de-mod` mede a casca em
+    volta delas, e não elas. Cada uma aberta, medida pelo MEDIR com a raiz
+    nela: nada dela na ilha nem na barra de gestos."""
+    falhas = []
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate(MOD_DE_PE)
+    topo, pe = pg.evaluate("[parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cel-seguro-topo')) || 0,"
+                           " parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cel-seguro-pe')) || 0]")
+    for nome, descricao, seletor in SUPERFICIES_DE_MOD:
+        pg.evaluate("(d) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: d })"
+                    ".then(() => __pedirAoProduto({ tipo: 'superficie-montar', superficie: d.id, arvore: [{ forma: 'texto', chave: 't', dentro: 'um texto de MOD' }, { forma: 'botao', chave: 'b', dentro: 'UM BOTÃO' }] }))",
+                    descricao)
+        esperar_quadro(pg)
+        pg.wait_for_timeout(250)
+        m = pg.evaluate(MEDIR, [topo, pe, seletor])
+        if m["naIlha"]:
+            falhas.append(f"{nome} desenha na ilha: {m['naIlha']}")
+        if m["naBarra"]:
+            falhas.append(f"{nome} desenha na barra de gestos: {m['naBarra']}")
+        pg.evaluate("() => superficiesDoMod({ id: 'teste/bancada' }, modsCarregados.get('teste/bancada')).soltarTudo()")
+        esperar_quadro(pg)
+    return falhas
+
+
+def superficies_deitado(pg: Page) -> list[str]:
+    """As áreas seguras **laterais** (`superficies.garantias-do-produto[6]`; a
+    auditoria do v6, tabela 7): deitado, a ilha do iPhone vai para um lado, e
+    o aparelho declara 47 px de cada lado. Nenhum texto nem controle de uma
+    superfície de MOD fica dentro deles."""
+    falhas = []
+    pg.evaluate("""() => { document.documentElement.style.setProperty('--cel-seguro-esq', '47px');
+                           document.documentElement.style.setProperty('--cel-seguro-dir', '47px'); }""")
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate(MOD_DE_PE)
+    for nome, descricao, seletor in SUPERFICIES_DE_MOD:
+        pg.evaluate("(d) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: d })"
+                    ".then(() => __pedirAoProduto({ tipo: 'superficie-montar', superficie: d.id, arvore: [{ forma: 'texto', chave: 't', dentro: 'um texto de MOD' }, { forma: 'botao', chave: 'b', dentro: 'UM BOTÃO' }] }))",
+                    descricao)
+        esperar_quadro(pg)
+        pg.wait_for_timeout(250)
+        fora = pg.evaluate("""(seletor) => {
+            const W = innerWidth, lado = 47;
+            const temTexto = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+            return [...document.querySelectorAll(seletor)].flatMap((r) => [r, ...r.querySelectorAll('*')])
+              .filter((e) => e.checkVisibility() && (temTexto(e) || e.matches('button, input, select, textarea')))
+              .filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.left < lado - 1 || b.right > W - lado + 1); })
+              .slice(0, 4).map((e) => `${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]} [${Math.round(e.getBoundingClientRect().left)}, ${Math.round(e.getBoundingClientRect().right)}]`);
+        }""", seletor)
+        if fora:
+            falhas.append(f"deitado, {nome} desenha na área segura lateral: {fora}")
+        pg.evaluate("() => superficiesDoMod({ id: 'teste/bancada' }, modsCarregados.get('teste/bancada')).soltarTudo()")
+        esperar_quadro(pg)
+    return falhas
+
+
 # O contraste de cada texto de um quadro contra o fundo dele: a primeira cor
 # opaca entre o texto e o quadro. Com uma capa, chegar ao quadro é chegar à
 # capa (ela é a primeira camada dele, por cima do fundo próprio), e 'tinta' é
@@ -3351,6 +3497,14 @@ CASOS: dict[str, Caso] = {
     "superficies-de-mod": Caso(levar=superficies_de_mod, raiz=".cel-topo, #voz, .cel-abas, #avisos-de-mod"),
     # As regiões de MOD que o celular declara, e a que ele não tem.
     "regioes-do-celular": Caso(levar=regioes_do_celular, aparelhos=("390",), medir=False),
+    # As entradas DOS MODS: o listarNaBarra e a célula inteira.
+    "listar-na-barra": Caso(levar=listar_na_barra, medir=False),
+    # O rodapé do modal e a altura do não modal, no aparelho.
+    "dialogos-no-aparelho": Caso(levar=dialogos_no_aparelho, medir=False),
+    # Cada superfície de MOD fora das áreas seguras.
+    "superficies-nas-areas": Caso(levar=superficies_nas_areas, medir=False),
+    # E as laterais, deitado.
+    "superficies-deitado": Caso(levar=superficies_deitado, aparelhos=("deitado",), medir=False),
     # E a que ele não tem, na casca larga, onde ela existe como no desktop.
     "status-barra-na-larga": Caso(levar=status_barra_na_larga, marca="larga", aparelhos=("1440",), medir=False),
     # A região operador.barra no alto de AJUSTES (F3, passo 8b).
