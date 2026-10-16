@@ -960,3 +960,37 @@ começar.
 - **O que não se mediu:** a sessão debaixo da CSP (as imagens `data:` e o
   `connect-src https:`), porque a sessão pelo navegador é a 2.6.
 - **Em aberto:** o caminho do link (recomendo a raiz) e o pacote (3.6).
+
+## 16/10: a D-web-4, o pacote (3.6), e a ponta para a parte B da 18ª
+
+- **O `target/` deste worktree tinha sido apagado** pela orquestradora (o
+  disco). O wasi-sdk veio com `cp -c` do `target/` do checkout principal, com
+  o SHA-256 conferido contra o fixado antes de usar. Nada foi baixado.
+- **A D-web-4** (`75bc4291`): o link do navegador na raiz.
+  - `CAMINHO_DO_NAVEGADOR = "/"` e `Convite::link_do_navegador`.
+  - O teste `o_link_do_produto_leva_o_corpo_so_no_fragmento`: antes do `#`
+    vai só `https://<origem>/`.
+  - Duas reversões.
+- **A 3.6, steps 1 a 3** (`fa6a54de`): `cargo xtask pacote-web`.
+  - Monta a `ui/`, o `.wasm` sem a `prova`, o motor e o `_headers`, sem baixar
+    nada.
+  - A conferência tem cinco regras: os tokens da cópia, a CSP, o script de
+    fora, a ponte sem nada a fazer e o `.wasm` sem a `prova`.
+  - Hoje o pacote não sai, pelos 76 comandos da ponte a fazer.
+  - O `.wasm` do pacote tem 637 KB, contra 985 KB com a `prova`.
+  - Cada regra, tirada sozinha, reprova.
+- **O guarda da origem pegou a mim mesmo** (`6dd46520`): dois comentários do
+  pacote escreviam o nome da origem. Ele foi escrito para isso.
+- **A `versao/0.16` trazida** (`c95a066a`), e a conferência na ponta
+  `6dd46520`:
+  - fmt e clippy dos cinco alvos tocados;
+  - os testes: `seele-proto` 406, `seele-web` 22, `xtask` 240, `seele-app` 344
+    e os 6 do binário;
+  - `check-deps`, `xtask web` e `check-runtime`;
+  - as quatro bancadas de navegador;
+  - os 41 roteiros;
+  - a bancada do celular: 121 casos, e o desktop igual pixel a pixel no
+    Chromium e no WebKit.
+- **Para a F8:** a D-web-2 está pronta na casca; ESTE APARELHO e a chave curta
+  ainda não existem. Há proposta para os dois (`esteAparelho()` e
+  `chaveDe(impressao)`), e o quando é da orquestradora.
