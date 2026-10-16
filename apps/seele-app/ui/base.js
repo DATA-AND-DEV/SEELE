@@ -2321,7 +2321,7 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
     )
     : null;
   // Só quando alguém registrou o ponto: sem registro nenhum, o caminho é o de
-  // sempre — a posse de token —, e um MOD de API 3 continua aplicando tema.
+  // sempre — a posse de token.
   // **A prévia não passa por aqui** (17g): ela é de quem edita, nesta
   // máquina, e não disputa a aparência com ninguém.
   if (!previa && (escolha?.escolhida || escolha?.nativa)) {

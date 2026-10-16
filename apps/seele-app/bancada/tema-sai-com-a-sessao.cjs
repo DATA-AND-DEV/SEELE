@@ -24,6 +24,10 @@
 //    `v6.json`, tabela 8): o arredondamento, o brilho, a densidade e a fonte
 //    chegam à sessão como os tokens que prometem — o nome era provado, e o
 //    efeito não —, e saem com ela.
+// 4. **A aparência substituída veta o tema de outro MOD** (`contribuicoes.
+//    pontos.servidor.aparencia`): quem registra o ponto apresenta a aparência,
+//    e o tema do servidor de outro MOD é recusado pelo nome; o nativo
+//    escolhido também recusa; o do próprio MOD vale; e a prévia não disputa.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual. Rodada por
 // `cargo xtask check-runtime`.
@@ -189,6 +193,38 @@ function cobrar(ok, caso, visto) {
     api.entrarNaGeracao(12);
     cobrar(Object.keys(esperado).every((token) => !estilo.has(token)),
       "e saem com ela", Object.fromEntries(estilo));
+  }
+
+  // 4. A aparência substituída.
+  {
+    const tentar = (opcoes) => {
+      estilo.clear();
+      try {
+        api.aplicarOTemaDoMod("seele/estilo", TEMA, opcoes);
+        return { ok: true, escrito: estilo.size };
+      } catch (falha) {
+        return { ok: false, motivo: String(falha?.message ?? falha), escrito: estilo.size };
+      }
+    };
+    const com = (escolha, opcoes) => {
+      ctx.contribuicoesDosMods.escolherSubstituicao = () => escolha;
+      try {
+        return tentar(opcoes);
+      } finally {
+        ctx.contribuicoesDosMods.escolherSubstituicao = () => ({});
+      }
+    };
+    const deOutro = com({ escolhida: { mod: "outro/estilo" } });
+    cobrar(!deOutro.ok && /apresentada por «outro\/estilo»/.test(deOutro.motivo) && deOutro.escrito === 0,
+      "a aparência apresentada por outro MOD recusa o tema, pelo nome, sem pintar nada", deOutro);
+    const nativo = com({ nativa: true });
+    cobrar(!nativo.ok && /desenho do SEELE/.test(nativo.motivo) && nativo.escrito === 0,
+      "o desenho do SEELE escolhido recusa o tema", nativo);
+    const doMesmo = com({ escolhida: { mod: "seele/estilo" } });
+    cobrar(doMesmo.ok && doMesmo.escrito > 0, "o tema do MOD que apresenta a aparência vale", doMesmo);
+    const previa = com({ nativa: true }, { previa: { superficie: "ajustes" } });
+    cobrar(previa.ok, "a prévia não disputa a aparência", previa);
+    api.encerrarOAmbienteDosMods();
   }
 
   if (falhas.length) process.exit(1);
