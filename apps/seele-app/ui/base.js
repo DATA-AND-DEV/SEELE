@@ -3024,11 +3024,13 @@ function tonsDoTema(emVigor, daRaiz) {
   }
   // **O segundo apagado do produto** (`--seele-osso-apagado`), que nenhum tema
   // escreve: no piso dos apagados, 3:1 sobre o fundo e o painel.
+  // Recusado, o par leva o nome que o `v6.json` dá ao derivado
+  // (`apagadoSecundario`, em `tema.derivados-pelo-produto.nomes`).
   const apagado = raiz("--seele-osso-apagado");
   if (superficies && medida(apagado)) {
     const segundo = corDeEstadoPara(apagado, c.fundo, c.painel, 3);
     if (segundo) tons["--seele-osso-apagado"] = segundo;
-    else pares.push({ frente: "apagado-secundario", fundo: "painel", razao: Number(contrasteEntre(apagado, c.painel).toFixed(2)), piso: 3 });
+    else pares.push({ frente: "apagadoSecundario", fundo: "painel", razao: Number(contrasteEntre(apagado, c.painel).toFixed(2)), piso: 3 });
   }
   return { tons, pares };
 }

@@ -246,6 +246,24 @@ for (const [nome, tema] of Object.entries({
     `superfícies cinza-médio, onde nenhum fósforo alcança o piso, não recusaram pelo fósforo: ${JSON.stringify(cinza.pares)}`);
 }
 
+// ---------------------------------------- os pares, pelos nomes do contrato
+
+{
+  // **O segundo apagado, pelo nome que o `v6.json` dá ao derivado** (o achado
+  // do ESTILO, 16/10): `tema.derivados-pelo-produto.nomes` diz
+  // `apagadoSecundario`, e o par saía como `apagado-secundario`, que o MOD não
+  // acha no contrato. Um fundo escuro e um painel claro: nenhuma luminosidade
+  // dá 3:1 sobre os dois, nem acima, nem abaixo, nem entre eles.
+  const v6 = JSON.parse(fs.readFileSync(`${repo}/api/v6.json`, "utf8"));
+  const derivados = new Set(v6.tema["derivados-pelo-produto"].nomes);
+  const largo = tonsDoTema({ fundo: "#404040", painel: "#aaaaaa", texto: "#000000", apagado: "#000000", acento: "#000000" }, daRaiz);
+  const segundo = largo.pares.find((p) => p.piso === 3 && !["texto", "apagado", "acento"].includes(p.frente));
+  confere("par · o segundo apagado sem luminosidade que sirva", Boolean(segundo),
+    `as superfícies a 3:1 de nada não recusaram pelo segundo apagado: ${JSON.stringify(largo.pares)}`);
+  confere("par · o segundo apagado pelo nome do contrato", Boolean(segundo) && derivados.has(segundo.frente),
+    `o par do segundo apagado saiu como «${segundo?.frente}», e o v6.json o chama de ${[...derivados].join(" ou ")}`);
+}
+
 if (falhas.length) {
   console.error(`tons-do-tema: ${falhas.length} falha(s)\n  ${falhas.join("\n  ")}`);
   process.exit(1);
