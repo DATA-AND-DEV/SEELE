@@ -2258,6 +2258,44 @@ async function osTetosDaSuperficieSaoOsDoV6() {
   }
 }
 
+/**
+ * **O retrato e o fundo recusados dizem `recusada` ao MOD, com o porquê, como
+ * a `midia`** (a auditoria do `v6.json`, passo 7; a orquestradora, 16/10: o
+ * texto diz que eles «são recusados», e o produto sabia e não contava). Os
+ * dois motivos — o bolso de bytes, com os números, e bytes que não são
+ * imagem — iam ao registro e à aba, e o MOD não ouvia nada.
+ *
+ * **Um evento por caso**: o `falhou` do K2 (a imagem que não decodifica) não
+ * se soma ao `recusada`, e o `recusada` não vem com um `falhou` junto.
+ */
+async function oRetratoEOFundoRecusadosDizemRecusadaAoMod() {
+  const caso = "o retrato e o fundo recusados dizem recusada";
+  const teto = JSON.parse(fs.readFileSync(path.join(raiz, "../../api/v6.json"), "utf8")).superficies.limites.bytesDeMidia;
+  const formas = {
+    retrato: { forma: "retrato", chave: "r", fonte: "img/r.png", inicial: "R" },
+    fundo: { forma: "caixa", chave: "f", fundoDeMidia: { fonte: "img/f.png" }, dentro: [{ forma: "texto", dentro: "F" }] },
+  };
+  const casos = [
+    ["o bolso de bytes", { uri: "x:", papel: "imagem", bytes: teto + 1 }, "recusada", `passam do teto de ${teto}`],
+    ["bytes que não são imagem", { uri: "x:", papel: "som", bytes: 12 }, "recusada", "imagem"],
+    ["a imagem que não decodifica (K2)", { uri: URI_QUE_NAO_DECODIFICA, papel: "imagem", bytes: 12 }, "falhou", ""],
+  ];
+  for (const [nome, declaracao] of Object.entries(formas)) {
+    for (const [motivo, midia, estado, porque] of casos) {
+      const b = bancada();
+      const d = dono(b, () => Promise.resolve({ ...midia }));
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.superficie);
+      r.aplicar([declaracao]);
+      await assentar();
+      const ditos = d.ditos.filter((e) => e.nome === "midia" && e.chave === declaracao.chave);
+      confere(caso, ditos.length === 1 && ditos[0].estado === estado
+        && String(ditos[0].porque ?? "").includes(porque),
+        `${nome}, ${motivo}: o MOD ouviu ${JSON.stringify(ditos)}, e o certo é um \`${estado}\`` + (porque ? ` com «${porque}»` : ""));
+      r.soltar();
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 7. O quadro pendente do arraste não sobrevive à saída.
 // ---------------------------------------------------------------------------
@@ -6756,6 +6794,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     tirarUmNoSoltaOQueEleSegurava,
     osTetosContemEARecusaEDita,
     osTetosDaSuperficieSaoOsDoV6,
+    oRetratoEOFundoRecusadosDizemRecusadaAoMod,
     oQuadroPendenteNaoSobreviveASaida,
     tudoChegaAInstanciaESoltarDuasVezesNaoDoi,
     oCartaoUsaOMesmoRendererComGramaticaMenor,

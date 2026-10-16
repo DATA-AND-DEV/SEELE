@@ -2006,8 +2006,13 @@ class RegiaoDeMod {
       // do `seele.log` é de quem investiga; a anotação é o que «quem pinta
       // cada lugar» soma — sem ela, o fundo que não veio seria só uma caixa
       // lisa na gestão também.
+      // **E as duas recusas são ditas ao MOD**, como as da `midia`: «são
+      // recusados», diz o `v6.json`, e o MOD não ouvia nada (a auditoria,
+      // passo 7). Uma só por caso: o `falhou` do K2 é do `recusar`, abaixo.
       if (midia.papel !== "imagem") {
-        this.anotarMidia(elem, "recusada", `o fundo precisa ser imagem, e os bytes são ${midia.papel}`);
+        const porque = `o fundo precisa ser imagem, e os bytes são ${midia.papel}`;
+        this.anotarMidia(elem, "recusada", porque);
+        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada", porque });
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: o arquivo é ${midia.papel}, e fundo só mostra imagem`);
         return;
       }
@@ -2017,6 +2022,7 @@ class RegiaoDeMod {
         // demais ou se o lugar já estava cheio.
         const porque = `${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`;
         this.anotarMidia(elem, "recusada", `${porque} bytes de mídia deste lugar`, undefined, `bytes de mídia:${bolso.teto}`);
+        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada", porque });
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: ${porque}`);
         return;
       }
@@ -2129,8 +2135,13 @@ class RegiaoDeMod {
       // A citação de uma imagem que a pessoa não tem: a inicial fica, e isso
       // não é recusa.
       if (!midia) { this.esquecerMidia(elem); return; }
+      // **E as duas recusas são ditas ao MOD**, como as da `midia` (ver
+      // `montarFundoDeMidia`). Uma só por caso: o `falhou` do K2 é do
+      // `recusar`, acima.
       if (midia.papel !== "imagem") {
-        this.anotarMidia(elem, "recusada", `o retrato precisa ser imagem, e os bytes são ${midia.papel}`);
+        const porque = `o retrato precisa ser imagem, e os bytes são ${midia.papel}`;
+        this.anotarMidia(elem, "recusada", porque);
+        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada", porque });
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: o arquivo é ${midia.papel}, e retrato só mostra imagem`);
         return;
       }
@@ -2139,6 +2150,7 @@ class RegiaoDeMod {
         elem.dataset.estadoDoRetrato = "cheia";
         const porque = `${midia.bytes} bytes somados aos ${this[conta]} já montados passam do teto de ${teto}`;
         this.anotarMidia(elem, "recusada", `${porque} bytes de mídia deste lugar`, undefined, `bytes de mídia:${teto}`);
+        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada", porque });
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: ${porque}`);
         return;
       }

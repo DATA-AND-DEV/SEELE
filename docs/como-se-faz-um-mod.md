@@ -218,7 +218,7 @@ Os da interface que o MOD desenhou:
 | `aba` | escolheu uma aba | `chave` das `abas`, `valor` da aba |
 | `arquivo` | escolheu, ou desistiu de escolher, pela forma `arquivo` | `chave`, `resultado` (`cancelado` ou `falhou`, com `porque`), e `arquivo: { id, papel, bytes }` |
 | `traco` | arrastou numa `tela` | `chave`, `fase` (`comecou`, `moveu`, `terminou`, `cancelou`), `x`, `y`, e `alvo`: a `chave` da figura de cima onde o gesto começou |
-| `midia` | o estado de uma mídia mudou | `chave`, `estado` (`tocando`, `pausada` e `terminou`, num som; `recusada` ou `falhou`, numa mídia que não pôde ser mostrada ou tocada), `porque`; numa contribuição, `ponto` e `alvo` |
+| `midia` | o estado de uma mídia mudou | `chave`, `estado` (`tocando`, `pausada` e `terminou`, num som; `recusada` ou `falhou`, numa mídia que não pôde ser mostrada ou tocada — também num `retrato` e num `fundoDeMidia`: `recusada` pelo bolso de bytes ou por bytes que não são imagem, `falhou` quando a imagem não decodifica, um evento só por caso), `porque`; numa contribuição, `ponto` e `alvo` |
 | `link` | apertou um `link` | `chave`, `aberto`, e `porque` quando não abriu |
 | `tela` | o fundo de uma `tela` não carregou | `chave`, `estado: 'fundo-falhou'`, `porque` |
 | `acao` | apertou a ação principal de uma contribuição | `acao`, e o alvo que o produto escreveu: `pessoa` no cartão de uma pessoa, `canal` numa ação de sala, **em texto**, e vazios quando não há |
