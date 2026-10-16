@@ -2518,7 +2518,9 @@ function anotando(...anotadas) {
         "um pacote da API 6 desenhou pela mensagem `regiao`");
       confere(
         "R2 · a região saiu da 6, no registro",
-        dita("«regiao»", "não existe na API 6"),
+        // Sem `case` desde a limpeza da máquina das APIs 3 a 5: a mensagem cai
+        // no `default`, que diz que a API não a conhece.
+        dita("«regiao»", "não conhece"),
         `a recusa da região da 6 não chegou ao registro com o nível e o id: ${JSON.stringify(anotadasDoRoteador)}`,
       );
     }
@@ -2687,7 +2689,7 @@ function anotando(...anotadas) {
       await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "snapshot", n: 22 });
       confere("retrato · o snapshot saiu da 6", respostas.at(-1)?.ok === false,
         `um pacote da API 6 leu o Snapshot inteiro pela mensagem direta: ${JSON.stringify(respostas.at(-1))}`);
-      confere("retrato · o snapshot saiu da 6, no registro", dita("«snapshot»", "não existe na API 6"),
+      confere("retrato · o snapshot saiu da 6, no registro", dita("«snapshot»", "não conhece"),
         `a recusa do snapshot da 6 foi dita só ao MOD: ${JSON.stringify(anotadasDoRoteador)}`);
 
       // **E a 5 não alcança nem o `snapshot`** (o corte): uma API que este app

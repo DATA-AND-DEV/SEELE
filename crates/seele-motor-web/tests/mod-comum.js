@@ -22,8 +22,8 @@ SeeleUI.aoEvento((ev) => {
   }
 });
 (async () => {
-  const snap = await SeeleMods.snapshot();
-  await SeeleUI.regiao({ tipo: "texto", texto: "oi de " + snap.servidor });
+  // O retrato, e não o `snapshot` nem a `regiao`, que saíram com as APIs 3 a 5.
+  const retrato = await SeeleUI.retrato();
   const capacidades = SeeleUI.capacidades();
   await new Promise((ok) => setTimeout(ok, 30));
   let n = 0;
@@ -39,7 +39,7 @@ SeeleUI.aoEvento((ev) => {
     grande = e.message.slice(0, 40);
   }
   await SeeleMods.request("eco", "pronto", {
-    snap,
+    retrato,
     capacidades,
     intervalos: n,
     erro,

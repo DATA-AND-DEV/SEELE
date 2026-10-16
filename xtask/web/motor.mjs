@@ -197,9 +197,8 @@ async function oModComum(tabela) {
       const m = JSON.parse(fala.corpo);
       if (typeof m.n !== "number") continue;
       respostas.push(JSON.stringify(
-        m.tipo === "snapshot" ? { tipo: "resposta", n: m.n, ok: true, valor: { servidor: "bancada" } }
+        m.tipo === "retrato" ? { tipo: "resposta", n: m.n, ok: true, valor: { servidor: { nome: "bancada" } } }
           : m.tipo === "pedido" && m.id === "eco" ? { tipo: "resposta", n: m.n, ok: true, valor: m.valor }
-          : m.tipo === "regiao" ? { tipo: "resposta", n: m.n, ok: true, valor: null }
           : { tipo: "resposta", n: m.n, ok: false, erro: "desconhecido" },
       ));
     }
@@ -233,7 +232,7 @@ for (const caso of tabela.casos ?? []) {
 const comum = await oModComum(tabela);
 const v = comum.valor ?? {};
 if (!comum.valor) falhas.push(`MOD comum: não chegou ao pronto (${JSON.stringify(comum.falas).slice(0, 400)})`);
-else if (v.snap?.servidor !== "bancada" || JSON.stringify(v.capacidades) !== JSON.stringify(tabela.capacidades_padrao)
+else if (v.retrato?.servidor?.nome !== "bancada" || JSON.stringify(v.capacidades) !== JSON.stringify(tabela.capacidades_padrao)
   || v.intervalos !== 3 || v.erro !== "rejeitou: desconhecido" || !String(v.grande).startsWith("mensagem-grande: pedido tem 14062 bytes")
   || v.superficies !== "object" || v.console !== "function"
   || !comum.falas.some((f) => f.tipo === "console" && f.texto === "mod comum de pé")) {

@@ -147,16 +147,15 @@ const MOD_COMUM = fs.readFileSync(path.resolve(raiz, "../../crates/seele-motor-w
 /** Sobe um MOD com o executor e uma janela de mentira que responde como a casca. */
 const NA_PAGINA = `
 window.bancada = {
-  async subir(fonte, { capacidades = ["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes", "volume"], lento = 0, mudo = false } = {}) {
+  async subir(fonte, { capacidades = ["superficies", "contribuicoes", "estilos", "classes", "volume", "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor"], lento = 0, mudo = false } = {}) {
     const falas = [], falhas = [];
     const executor = executorNoNavegador("bancada", 1, "h");
     const instancia = new InstanciaDeMod("bancada", "h", 1, executor);
     instancia.estado = ESTADOS_DE_MOD.ativa;
     const responder = (m) => {
       if (mudo || typeof m.n !== "number") return;
-      const r = m.tipo === "snapshot" ? { ok: true, valor: { servidor: "bancada" } }
+      const r = m.tipo === "retrato" ? { ok: true, valor: { servidor: { nome: "bancada" } } }
         : m.tipo === "pedido" && m.id === "eco" ? { ok: true, valor: m.valor }
-        : m.tipo === "regiao" ? { ok: true, valor: null }
         : { ok: false, erro: "desconhecido" };
       executor.entregar({ tipo: "resposta", n: m.n, ...r }).catch((e) => falhas.push("entregar: " + e.message));
     };
@@ -218,7 +217,7 @@ async function caso(pagina, nome, corpo) {
       }, MOD_COMUM);
       confere("MOD comum", r.pronto, `não chegou ao pronto (falhas: ${JSON.stringify(r.falhas)}; erros da página: ${erros})`);
       if (r.pronto) {
-        confere("MOD comum", r.pronto.snap?.servidor === "bancada", `snapshot ${JSON.stringify(r.pronto.snap)}`);
+        confere("MOD comum", r.pronto.retrato?.servidor?.nome === "bancada", `retrato ${JSON.stringify(r.pronto.retrato)}`);
         confere("MOD comum", r.pronto.intervalos === 3, `intervalos ${r.pronto.intervalos}`);
         confere("MOD comum", r.pronto.erro === "rejeitou: desconhecido", `erro ${r.pronto.erro}`);
         confere("MOD comum", String(r.pronto.grande).startsWith("mensagem-grande"), `grande ${r.pronto.grande}`);

@@ -14174,10 +14174,10 @@ fn um_pedido_de_mod_nunca_fica_sem_resposta() {
          calar deixa o MOD preso: {recusa}"
     );
 
-    // O retrato é o caso que custou a medição: depois do `await`, ele não pode
-    // sair sem resposta nenhuma.
+    // O retrato é o caso que custou a medição (no `snapshot` das APIs 3 a 5,
+    // que saiu): depois do `await`, ele não pode sair sem resposta nenhuma.
     let depois = atender
-        .split_once("case \"snapshot\"")
+        .split_once("case \"retrato\"")
         .expect("o caso do retrato")
         .1
         .split_once("break;")
@@ -20315,7 +20315,7 @@ fn o_preludio_e_o_roteador_falam_os_mesmos_tipos_pela_mesma_capacidade() {
         .filter_map(|resto| resto.split_once("\":").map(|(tipo, _)| tipo.to_owned()))
         .collect();
     assert!(
-        do_preludio.len() > 20,
+        do_preludio.len() > 15,
         "a leitura dos tipos do prelúdio quebrou: {do_preludio:?}"
     );
     assert_eq!(
@@ -20345,6 +20345,18 @@ fn o_preludio_e_o_roteador_falam_os_mesmos_tipos_pela_mesma_capacidade() {
         exigidas.len() > 15,
         "a leitura da `CAPACIDADE_DA_MENSAGEM` quebrou: {exigidas:?}"
     );
+    // **E no sentido inverso** (a revisão das abertas da auditoria): tirar uma
+    // linha da tabela não reprovava nada, e o tipo passava a ser pedido sem
+    // capacidade nenhuma. Todo tipo do prelúdio está na tabela, menos o
+    // `pedido`, que toda API tem.
+    let nomes_da_tabela: BTreeSet<&str> = exigidas.iter().map(|(tipo, _)| tipo.as_str()).collect();
+    for tipo in do_preludio.iter().filter(|tipo| tipo.as_str() != "pedido") {
+        assert!(
+            nomes_da_tabela.contains(tipo.as_str()),
+            "o prelúdio pede «{tipo}», e a `CAPACIDADE_DA_MENSAGEM` não o confere: o roteador o \
+             atenderia sem capacidade nenhuma"
+        );
+    }
     for (tipo, capacidade) in &exigidas {
         assert!(
             do_preludio.contains(tipo),

@@ -3330,9 +3330,7 @@ const CAPACIDADES_POR_API = Object.freeze({
 
 /** Que capacidade cada mensagem exige. Ausente quer dizer «toda versão». */
 const CAPACIDADE_DA_MENSAGEM = Object.freeze({
-  regiao: "regiao",
   tema: "tema",
-  cartoes: "cartoes",
   pedaco: "arquivo",
   "enviar-imagem": "volume",
   "soltar-arquivo": "arquivo",
@@ -3354,18 +3352,6 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
 });
 
 /**
- * As mensagens que uma capacidade **substituiu**: quem a tem não as alcança.
- *
- * O `snapshot` inteiro é da API 5 para baixo; a 6 lê o retrato projetado
- * (rascunho da API 6, §6). O prelúdio da 6 não monta `SeeleMods.snapshot`, e
- * isto é a fronteira, pela razão de sempre: `seele.postar` continua lá, e um
- * pacote da 6 que emitisse `snapshot` direto leria o `Snapshot` inteiro.
- */
-const SUBSTITUIDA_PELA_CAPACIDADE = Object.freeze({
-  snapshot: "retrato",
-});
-
-/**
  * Este pacote pode pedir isto?
  *
  * `api` vem de `mods_instalados`, que o lê do manifesto do pacote cujo hash
@@ -3379,10 +3365,6 @@ const SUBSTITUIDA_PELA_CAPACIDADE = Object.freeze({
 function podePedir(mod, tipo) {
   const tem = CAPACIDADES_POR_API[Number(mod?.api)];
   if (!tem) return false;
-  // Antes da exigida: o `snapshot` não exige capacidade nenhuma, e é por isso
-  // mesmo que a substituição tem de ser perguntada primeiro.
-  const substituta = SUBSTITUIDA_PELA_CAPACIDADE[tipo];
-  if (substituta && tem.includes(substituta)) return false;
   const exigida = CAPACIDADE_DA_MENSAGEM[tipo];
   if (!exigida) return true;
   return tem.includes(exigida);
@@ -4055,25 +4037,15 @@ async function atenderOMod(mod, instancia, m) {
         responder(true, { valor: await pedirAoServidor(mod.id, m.canal, m.valor) });
         break;
       case "retrato": {
-        // O mesmo cuidado do `snapshot`, logo abaixo: depois do `await`, quem
-        // responde é `responder`, que recusa se a sessão já acabou.
+        // Depois do `await`: a sessão pode ter acabado enquanto o estado vinha,
+        // e entregá-lo daria ao MOD o de uma sessão que já não é a dele. Quem
+        // responde é `responder`, que recusa nesse caso — **e recusar é
+        // obrigatório**: um `return` calado aqui prendia o MOD para sempre (era
+        // o caso do `snapshot`, que saiu com as APIs 3 a 5).
         const valor = projetarORetrato(await invoke("snapshot"), cascaDoRetrato());
         responder(true, { valor });
         break;
       }
-      case "snapshot": {
-        const valor = await invoke("snapshot");
-        // Depois do `await`: a sessão pode ter acabado enquanto o retrato
-        // vinha, e entregá-lo daria ao MOD o estado de uma sessão que já não é
-        // a dele. `responder` recusa nesse caso — **e recusa é obrigatório**:
-        // era este `return` calado que prendia o MOD para sempre.
-        responder(true, { valor });
-        break;
-      }
-      case "regiao":
-        desenharARegiaoDoMod(mod, instancia, m.conteudo);
-        responder(true, { valor: null });
-        break;
       case "tema":
         // **Na 6, a janela só faz prévia** (rascunho §9, B4; tarefa 17g): o
         // tema publicado é o que a metade de servidor declara (`mundo.tema`).
@@ -4085,9 +4057,6 @@ async function atenderOMod(mod, instancia, m) {
         aplicarOTemaDoMod(mod.id, m.valores);
         darDonoAoTema(mod.id, instancia);
         responder(true, { valor: null });
-        break;
-      case "cartoes":
-        responder(true, { valor: darCartoesDoMod(mod, instancia, m.cartoes) });
         break;
       case "enviar-imagem":
         await invoke("enviar_imagem_mod", { geracao: geracaoDaSessao, id: mod.id, arquivo: m.arquivo, token: m.token });

@@ -324,13 +324,13 @@ pub const PRELUDIO: &str = r#"
     : []);
   delete globalThis.__seeleCapacidades;
 
-  // **O `snapshot` inteiro é da API 5 para baixo.** A 6 lê
-  // `SeeleUI.retrato()`, projetado por lista branca (rascunho da API 6, §6), e
-  // o `snapshot` falta do `SeeleMods` dela como qualquer coisa que a API não
-  // tem. Montado aqui, depois das capacidades, porque é delas que depende.
+  // **Sem `snapshot`.** O `Snapshot` inteiro era das APIs 3 a 5, que este
+  // build não executa (`APIS_ACEITAS = [6]`); a 6 lê `SeeleUI.retrato()`,
+  // projetado por lista branca (rascunho da API 6, §6). Ele saía pela falta da
+  // capacidade `retrato`, e um pacote sem ela ainda o ganhava: agora não há
+  // caminho que o monte (a limpeza da máquina das APIs 3 a 5, depois do corte).
   globalThis.SeeleMods = Object.freeze({
     request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
-    ...(capacidades.has('retrato') ? {} : { snapshot: () => pedir('snapshot', {}) }),
   });
 
   /**
@@ -388,11 +388,10 @@ pub const PRELUDIO: &str = r#"
   }));
 
   globalThis.SeeleUI = Object.freeze({
-    // **Pela capacidade, como o resto.** A API 6 não tem `regiao` nem
-    // `cartoes` (decisão do dono de 08/10), e eles faltam do `SeeleUI` dela
-    // como `superficies` falta do da 3: ausentes, e não montados para a
-    // janela recusar depois. As APIs 3 a 5 têm os dois.
-    ...(capacidades.has('regiao') ? { regiao: (conteudo) => pedir('regiao', { conteudo }) } : {}),
+    // **Sem `regiao` e sem `cartoes`** (decisão do dono de 08/10): a região é
+    // um ponto de contribuição, e o cartão de uma pessoa é o `pessoa.cartao`.
+    // Os dois eram das APIs 3 a 5, que este build não executa, e saíram do
+    // prelúdio com a máquina delas na janela.
     // Na 6, a janela só faz prévia (rascunho §9, B4): `{ previa: true,
     // superficie }`. Até a 5, o tema vai como sempre, e a janela ignora os dois.
     ...(capacidades.has('tema') ? {
@@ -410,11 +409,6 @@ pub const PRELUDIO: &str = r#"
     // já é a resposta — mas um nome explícito evita o truque.
     capacidades: () => [...capacidades],
 
-    // **Um cartão por pessoa na lista do produto.** A declaração é a mesma da
-    // região, montada pelo mesmo renderer, com uma gramática menor: nada que
-    // receba foco ou clique, porque a linha do roster já tem um botão do
-    // produto. É a única superfície fora da região, e ela sai com ela.
-    ...(capacidades.has('cartoes') ? { cartoes: (cartoes) => pedir('cartoes', { cartoes }) } : {}),
     // ---- os eventos ----
     //
     // **A janela fala com o MOD sem que ele tenha perguntado.** Um pedido tem
