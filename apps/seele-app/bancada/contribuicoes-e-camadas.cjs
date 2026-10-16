@@ -2197,6 +2197,26 @@ function anotando(...anotadas) {
     confere("R2 · o dono", registro.porHandle.has(handle), "mod/b removeu a contribuição de mod/a");
     confere("R2 · o dono", respostas.at(-1)?.ok === false, "o roteador respondeu sucesso a uma revogação de outro MOD");
 
+    // **O pedido ao servidor sai pelo braço `pedido`** (`actions.pedir`; a
+    // auditoria do v6, tabela 2): o fio, o núcleo e o servidor eram provados,
+    // e o braço do roteador não era exercitado por bancada nenhuma. Ele chama
+    // `pedirAoServidor` com o id **do MOD do roteador** — e não um que a
+    // mensagem traga —, o canal e o valor, e o que volta chega ao MOD como o
+    // valor da resposta. (O comando Tauri é uma volta fina sobre o
+    // `Client::mod_request` que a `ponte_de_pedidos.rs` exercita, e os nomes
+    // dos argumentos o `frontend.rs` confere.)
+    {
+      const pedidos = [];
+      contexto.pedirAoServidor = async (id, canal, valor) => { pedidos.push({ id, canal, valor }); return { eco: valor }; };
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "pedido", n: 41, canal: 3, valor: { abrir: "mesa" }, id: "outro/mod" });
+      const resposta = respostas.at(-1);
+      confere("R2 · o pedido", JSON.stringify(pedidos) === JSON.stringify([{ id: "mod/b", canal: 3, valor: { abrir: "mesa" } }]),
+        `o braço pedido chamou ${JSON.stringify(pedidos)}`);
+      confere("R2 · o pedido", resposta?.n === 41 && resposta?.ok === true && JSON.stringify(resposta?.valor) === JSON.stringify({ eco: { abrir: "mesa" } }),
+        `a resposta ao MOD saiu ${JSON.stringify(resposta)}`);
+      delete contexto.pedirAoServidor;
+    }
+
     // **As recusas do roteador chegam ao registro com o id do MOD em campo
     // próprio.** Elas sempre foram ditas ao MOD; o registro é de quem hospeda,
     // e o `modId` vai como `mod_id=`, o mesmo campo das linhas do Rust. Quatro
