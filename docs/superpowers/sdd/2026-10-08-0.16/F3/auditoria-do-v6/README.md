@@ -244,25 +244,33 @@ Uma quarta cruzou as 25 dependências com o código e as provas, em `0e9f8fbf`.
 | o clique numa ação de contribuição com o alvo: `pessoa` no cartão, `canal` na sala | `capa.cjs` | `7e122469` |
 | a saída da sessão solta a superfície suja sem perguntar | `camadas.cjs` | `34e4703c` |
 | o `ModAviso` com os nomes que o Rust serializa | `frontend.rs` (portão) | `46e57cf6` |
+| a errata do `inicial`: o da primeira montagem do campo | `camadas.cjs` | `d4a9dc51` |
+| o `tonsDoTema` do guia faz o que a casca faz | `tons-do-tema.cjs` (portão) | `c47b6874` |
+| o diálogo não modal e o rodapé do modal no celular, pela F8 | `tools/bancada-do-celular.py` | `cf031786` (na `0.16/celular`) |
 
 O `c9749e03` conserta uma conferência minha que não media nada: o caso 5c da
 `capa.cjs` contava os eventos por `m.evento.nome`, que não existe.
 
 **O que fica de fora, e por quê:**
-- o diálogo no celular (o não modal até 85% da sessão, o rodapé do modal): só a
-  `tools/bancada-do-celular.py` mediria, e nenhum caso dela abre um diálogo
-  não modal ou com rodapé (a F8, 16/10);
 - o `lugar` da sessão sai só quando a casca muda de forma, como o texto diz, e
   não ao chegar nem quando a janela muda de tamanho; vai para o guia;
 - o evento `acao` traz `pessoa` e `canal` em texto, e `atualizar` de quem saiu
   do servidor devolve `true` (o produto não revoga por presença); os dois vão
   para o guia.
 
+**O espelho do prelúdio com o roteador** (o achado 4): `154537e7`. Os tipos
+das duas pontas são o mesmo conjunto, e cada um é montado pela capacidade que o
+roteador confere. O espelho achou o `pedaco` e o `soltar` montados sem a
+`arquivo`, que no navegador existiam e sempre falhavam. As formas e as figuras
+têm o espelho em `09c9a375`, em runtime e no portão.
+
+**O guia:** `c47b6874`, na API 6, com o `tonsDoTema` executado pela bateria.
+
 **Ainda abertos:**
 - a linha do tema na tela de aceite, quando a ponta da F1 chegar;
-- as INCERTA e as SEM PROVA que nenhum porte usa, e o espelho do prelúdio com o
-  roteador;
-- o guia (`docs/como-se-faz-um-mod.md` na API 6).
+- as INCERTA e as SEM PROVA que nenhum porte usa;
+- duas decisões da orquestradora: a montagem com nós recusados, que responde
+  `falhou`, e o `classes` numa contribuição, que não pinta nada.
 
 Os achados 1 e 2, as bancadas de navegador e a do celular no portão de
 publicação, são da F6.
