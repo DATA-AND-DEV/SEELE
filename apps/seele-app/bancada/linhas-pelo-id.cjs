@@ -45,10 +45,10 @@
 //    mesmo nó.
 // 9. **O `<details>` que a pessoa abre continua aberto** através do tique.
 // 10. **A coluna de canais** (pendência 64): o foco do teclado no botão do
-//    segundo canal atravessa o tique — com o mesmo retrato, e com outro canal
-//    mudando de nome —, o botão é o mesmo nó e continua no documento; um canal
-//    que entra ganha um nó, um que sai perde o dele, os outros ficam; e o nó
-//    de MOD do `canal.item` não sai do documento.
+//    segundo canal atravessa o tique — com o mesmo retrato, com outro canal
+//    mudando de nome, e quando ele vira o aberto —, o botão é o mesmo nó e
+//    continua no documento; um canal que entra ganha um nó, um que sai perde o
+//    dele, os outros ficam; e o nó de MOD do `canal.item` não sai do documento.
 //
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
@@ -710,11 +710,12 @@ async function abrir(browser, url, r) {
     assert.ok(caso9.nativaSeguiuAberta && caso9.maisSeguiuAberto, "o que a pessoa abriu fechou com um PersonState de outra pessoa");
 
     // 10. A coluna de canais (pendência 64). O foco do teclado no botão do
-    //     segundo canal atravessa o tique de 500 ms — com o mesmo retrato, e com
-    //     um retrato em que outro canal muda de nome —; um canal que entra ganha
-    //     um nó, um que sai perde o dele, e os outros ficam com o mesmo. Com a
-    //     coluna repovoada a cada retrato, o botão saía do documento e o foco
-    //     caía no `<body>`, em até meio segundo e com a sessão parada.
+    //     segundo canal atravessa o tique de 500 ms — com o mesmo retrato, com
+    //     um retrato em que outro canal muda de nome, e quando ele mesmo vira o
+    //     aberto —; um canal que entra ganha um nó, um que sai perde o dele, e
+    //     os outros ficam com o mesmo. Com a coluna repovoada a cada retrato, o
+    //     botão saía do documento e o foco caía no `<body>`, em até meio
+    //     segundo e com a sessão parada.
     //
     //     Pelo tique, e não pelo evento: é o tique que redesenha a sessão
     //     parada, e é nele que quem navega pelo teclado perdia o lugar.
@@ -835,7 +836,37 @@ async function abrir(browser, url, r) {
       await quadros(2);
       const valor = document.getElementById("nomear-valor")?.value ?? null;
       document.getElementById("nomear-cancelar")?.click();
-      return { mesmo, outro, entraESai, valor };
+
+      // e) O canal com o foco vira o aberto: é o Enter de quem navega pelo
+      //    teclado (o `alternarCanal` pede o retrato, e ele vem com o canal
+      //    aberto). A classe passa de `linha` a `linha aberto`, e o botão só
+      //    continua o mesmo nó porque o feitio é a primeira classe
+      //    (`mesmoFeitio`): uma variante posta antes da base o refaria, e o
+      //    foco cairia no `<body>` (I1 da revisão do lote C64).
+      const botaoE = botoes().get(id);
+      botaoE?.focus();
+      const focadoE = Boolean(botaoE) && document.activeElement === botaoE;
+      const primeiroE = botoes().get("1");
+      retrato = desenhado;
+      const abrindo = structuredClone(testTable.snapshot);
+      for (const canal of abrindo.channels) canal.open = canal.id === focado;
+      testTable.snapshot = abrindo;
+      await tique();
+      const abriu = {
+        focado: focadoE,
+        redesenhou: desenhado !== retrato && desenhado?.channels?.find((c) => c.id === focado)?.open === true
+          && desenhado?.channels?.find((c) => c.id === 1)?.open === false,
+        mesmoNo: Boolean(botaoE) && botoes().get(id) === botaoE,
+        noDocumento: Boolean(botaoE?.isConnected),
+        focoFicou: Boolean(botaoE) && document.activeElement === botaoE,
+        foco: ondeEstaOFoco(),
+        classe: botaoE?.className ?? null,
+        atual: botaoE?.getAttribute("aria-current") ?? null,
+        primeiroMesmoNo: Boolean(primeiroE) && botoes().get("1") === primeiroE,
+        primeiroClasse: primeiroE?.className ?? null,
+        primeiroAtual: primeiroE?.getAttribute("aria-current") ?? null,
+      };
+      return { mesmo, outro, entraESai, valor, abriu };
     }, { focado: 2, renomeado: 4, nomeNovo: "musica ao vivo", sai: 3, chega: 5 });
     assert.deepEqual(pagina10.errors, [], "caso 10: erros na página");
     await pagina10.page.close();
@@ -887,6 +918,20 @@ async function abrir(browser, url, r) {
       caso10.valor, "musica ao vivo",
       `o RENOMEAR do canal renomeado abriu com ${JSON.stringify(caso10.valor)}, e não com o nome de agora`,
     );
+    const { abriu } = caso10;
+    assert.ok(abriu.focado, "caso 10 (e): a bancada não conseguiu pôr o foco no botão do segundo canal");
+    assert.ok(abriu.redesenhou, "caso 10 (e): o retrato com o segundo canal aberto não chegou à tela pelo tique");
+    assert.ok(
+      abriu.mesmoNo && abriu.noDocumento && abriu.focoFicou,
+      `o segundo canal, com o foco, virou o aberto e o foco saiu dele: o botão ${abriu.mesmoNo ? "é" : "não é"} o ` +
+        `mesmo nó, ${abriu.noDocumento ? "está" : "saiu"} do documento, e o foco está em ${abriu.foco}. ` +
+        "Quem abre um canal pelo teclado perde o lugar",
+    );
+    assert.equal(abriu.classe, "linha aberto", `o canal aberto tem a classe ${JSON.stringify(abriu.classe)}`);
+    assert.equal(abriu.atual, "true", `o canal aberto tem aria-current ${JSON.stringify(abriu.atual)}`);
+    assert.ok(abriu.primeiroMesmoNo, "o primeiro canal deixou de ser o aberto e o botão dele trocou de nó");
+    assert.equal(abriu.primeiroClasse, "linha", `o canal que deixou de ser o aberto tem a classe ${JSON.stringify(abriu.primeiroClasse)}`);
+    assert.equal(abriu.primeiroAtual, null, `o canal que deixou de ser o aberto ainda tem aria-current ${JSON.stringify(abriu.primeiroAtual)}`);
 
     // 10, o ponto de MOD da fileira: o `canal.item`, dentro do botão do canal.
     //     Um retrato em que outro canal muda de nome não tira nenhum nó de MOD
