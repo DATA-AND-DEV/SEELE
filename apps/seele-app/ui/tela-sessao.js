@@ -988,6 +988,10 @@ function desenharCanais(snapshot) {
       "li",
       voice_room.occupied_by_us ? "voice_room aberto" : "voice_room",
     );
+    // A coluna também é reconciliada, e a sala é a chave: o ENTRAR NA SALA
+    // trocado a cada quadro saía da árvore de acessibilidade (pendência 63,
+    // (b)). Ver `reconciliarALista`.
+    chaveNaLista.set(item, `sala:${voice_room.id}`);
 
     const cabeca = elemento("span", "canal-cabeca");
 
@@ -1005,11 +1009,15 @@ function desenharCanais(snapshot) {
       nome.title = `renomear ${voice_room.name}`;
       nome.setAttribute("aria-label", `Renomear ${voice_room.name}`);
       nome.addEventListener("click", () => {
+        // O nome de agora, e não o do quadro em que este botão nasceu: a coluna
+        // é reconciliada, e o botão atravessa os retratos com o ouvinte dele.
+        const agora = desenhado?.voice_rooms?.find((sala) => sala.id === voice_room.id)?.name
+          ?? voice_room.name;
         abrirNomear({
           titulo: "RENOMEAR A SALA",
           rotulo: "NOME DA SALA",
-          exemplo: voice_room.name,
-          valor: voice_room.name,
+          exemplo: agora,
+          valor: agora,
           acao: "RENOMEAR",
           aoConfirmar: (escolhido) =>
             invoke("renomear_voice_room", {
@@ -1087,7 +1095,7 @@ function desenharCanais(snapshot) {
     quantosIgnorados(arranjo?.salas, snapshot.voice_rooms.map((sala) => sala.id))
       + quantosIgnorados(arranjo?.canais, snapshot.channels.map((canal) => canal.id)),
   );
-  repovoar(
+  reconciliarALista(
     $("lista-voice_rooms"),
     emGrupos(voice_rooms, snapshot.voice_rooms, arranjo?.salas, "OUTRAS SALAS"),
   );
@@ -1181,6 +1189,7 @@ function desenharCanais(snapshot) {
  */
 function linhaDeQuemEstaDentro(pessoa, snapshot) {
   const item = elemento("li", "voice_room-pessoa");
+  chaveNaLista.set(item, `pessoa:${pessoa.id}`);
   item.append(glifo(pessoa.speaking ? "falando" : "silencio"));
   item.append(elemento("span", "voice_room-pessoa-nome", pessoa.nickname));
   if (pessoa.is_self) item.append(elemento("span", "voice_room-pessoa-eu", "(você)"));
@@ -2227,6 +2236,269 @@ function redesenharAsPessoas() {
   calarOsSonsQueSairamDaTela();
 }
 
+// ------------------------------------- a lista reconciliada pelo id da pessoa
+
+/**
+ * A chave de um nó da lista de pessoas: `pessoa:<id>` numa linha, `sala:<id>`
+ * ou `grupo:<nome>` num grupo. Num mapa, e não num atributo: ela é de quem
+ * reconcilia, e não da página.
+ */
+let chaveNaLista = new WeakMap();
+
+/** O nó de MOD que cada marcador guarda o lugar. Ver `noDeMod`. */
+let modDoMarcador = new WeakMap();
+
+/** Os nós de MOD que a reconciliação pôs na lista: ela não os desmonta. */
+let nosDeModNaLista = new WeakSet();
+
+/**
+ * O `open` que a linha montada pediu, da última vez, a cada `<details>` da
+ * lista: é por ele que `vestirComo` sabe se o pedido mudou ou se o que está
+ * aberto foi a pessoa quem abriu.
+ */
+let abertoPedido = new WeakMap();
+
+/**
+ * **O lugar de um nó de MOD na linha que se monta**, e não o nó.
+ *
+ * Os cartões e as contribuições chegam montados, e são o mesmo nó entre um
+ * retrato e o seguinte (`cartoesDaPessoa`, `montarContribuicao`). Anexá-los à
+ * linha nova os tiraria da lista para que a reconciliação os devolvesse: um nó
+ * que sai do documento e volta é, para a árvore de acessibilidade, outro nó, e
+ * o som e a imagem dele recomeçam. O marcador fica no lugar dele na linha
+ * montada, e `reconciliarALista` o troca pelo nó, que só se move quando muda
+ * de lugar.
+ */
+function noDeMod(no) {
+  if (!no) return no;
+  const marcador = document.createComment("");
+  modDoMarcador.set(marcador, no);
+  return marcador;
+}
+
+function nosDeMod(nos) {
+  return nos.map(noDeMod);
+}
+
+/**
+ * **A lista de pessoas reconciliada pelo id, e não repovoada** (pendência 63,
+ * a parte (b); lote AX da F5).
+ *
+ * Cada pessoa manda um `PersonState` por segundo, e cada retrato refazia a
+ * lista inteira: os nós trocados a cada quadro. Na árvore de acessibilidade
+ * isso é a lista sumindo e voltando — com 50 pessoas, o tamanho do `specs/04`,
+ * ela estava inteira em 18 de 38 consultas (`arvore-ax.py`, medido pela F3 em
+ * 11/10), e o foco de quem navegava por ela caía a cada quadro.
+ *
+ * A linha continua montada como sempre, por `linhaDoRoster`, e esta função faz
+ * a lista na tela ficar igual a ela mexendo só no que mudou:
+ *
+ * - **uma linha é a pessoa** (`chaveNaLista`): a que já existe fica com o mesmo
+ *   nó, onde quer que esteja — a pessoa que entra numa sala leva o nó para o
+ *   grupo dela —, a de quem saiu sai, e a de quem chegou entra;
+ * - **um grupo é a sala**, pela mesma regra;
+ * - **dentro deles, pela posição**: um filho sem chave casa com o próximo filho
+ *   velho da mesma etiqueta e da mesma classe, e recebe os atributos, o texto e
+ *   o valor do novo. O que está sob o dedo (`document.activeElement`) não tem o
+ *   valor trocado, como em `pintarVolumesDoRoster`;
+ * - **um nó de MOD é dele**: vem pelo marcador (`noDeMod`), vai para o lugar do
+ *   marcador, e nada aqui entra nele.
+ *
+ * Um nó só se move quando a ordem muda, e um retrato igual ao anterior não mexe
+ * em nada. A bancada `linhas-pelo-id.cjs` prende as duas coisas.
+ *
+ * **A coluna de salas passa por aqui também** (`desenharCanais`): ela lista
+ * quem está em cada sala e tem o ENTRAR NA SALA, que, trocado a cada quadro,
+ * saía da árvore com 100 pessoas. Lá a sala é a chave, e a pessoa dentro dela
+ * também. A casca do celular adapta essa coluna depois de cada quadro
+ * (`celular-servidor.js`) e o que ela acrescenta não está na lista montada:
+ * sai aqui, e ela o põe de novo, como fazia com a coluna refeita.
+ */
+function reconciliarALista(lista, filhos) {
+  const velhos = new Map();
+  for (const no of lista.querySelectorAll("li")) {
+    const chave = chaveNaLista.get(no);
+    if (chave !== undefined && !velhos.has(chave)) velhos.set(chave, no);
+  }
+  const contexto = {
+    velhos,
+    // Um nó velho com chave pode ser querido num grupo que ainda não foi visto:
+    // ele não sai até o fim.
+    comChave: new Set(velhos.values()),
+    usados: new Set(),
+    pendentes: [],
+  };
+  reconciliarOsFilhos(lista, filhos, contexto);
+  for (const no of contexto.pendentes) {
+    if (!contexto.usados.has(no)) no.remove();
+  }
+}
+
+/**
+ * Os filhos de `alvo` ficam os de `novos`, reaproveitando os velhos.
+ *
+ * `alvo` é um nó da lista ou um nó novo que entra nela — e aí os filhos dele
+ * são os próprios `novos`, que ainda podem trazer a linha velha de alguém (um
+ * grupo novo, de uma sala que acabou de ganhar a primeira pessoa).
+ */
+function reconciliarOsFilhos(alvo, novos, contexto) {
+  const antigos = Array.from(alvo.childNodes);
+  const desejados = [];
+  const pares = [];
+  let daqui = 0;
+  for (const novo of novos) {
+    const mod = modDoMarcador.get(novo);
+    if (mod) {
+      if (contexto.usados.has(mod)) continue;
+      contexto.usados.add(mod);
+      nosDeModNaLista.add(mod);
+      desejados.push(mod);
+      continue;
+    }
+    let velho = null;
+    const chave = chaveNaLista.get(novo);
+    if (chave !== undefined) {
+      const achado = contexto.velhos.get(chave);
+      if (achado && !contexto.usados.has(achado)) velho = achado;
+    } else {
+      for (let i = daqui; i < antigos.length; i += 1) {
+        if (contexto.usados.has(antigos[i]) || !mesmoFeitio(antigos[i], novo)) continue;
+        velho = antigos[i];
+        daqui = i + 1;
+        break;
+      }
+    }
+    const no = velho ?? novo;
+    contexto.usados.add(no);
+    desejados.push(no);
+    pares.push([no, novo]);
+  }
+
+  // A ordem: fica no lugar a maior sequência de nós que já está na ordem certa
+  // (a maior subsequência crescente das posições velhas), e só o resto se move,
+  // cada um para antes do seguinte. Mandar uma linha para trás movia todas as
+  // do meio, e o foco que estivesse numa delas caía (rodada 1, M1). O que não
+  // é daqui fica onde está, e sai depois.
+  const daquiMesmo = new Set(desejados);
+  // **O caminho rápido** (rodada 2, N1): em quase todo quadro nada mudou de
+  // lugar, e andar o cursor sobre os filhos confere isso sem alocar nada. A
+  // subsequência — um `Map` das posições, os vetores dela e um `Set` em todo
+  // elemento da lista, a todo quadro — deixava o redesenho de 251 pessoas uns
+  // 20% mais caro. Ela só roda quando há o que inserir ou mover.
+  let cursor = alvo.firstChild;
+  let emOrdem = true;
+  for (const no of desejados) {
+    while (cursor && !daquiMesmo.has(cursor)) cursor = cursor.nextSibling;
+    if (no !== cursor) {
+      emOrdem = false;
+      break;
+    }
+    cursor = cursor.nextSibling;
+  }
+  if (!emOrdem) {
+    const posicao = new Map(Array.from(alvo.childNodes, (filho, i) => [filho, i]));
+    const ficam = new Set(maiorSequenciaCrescente(desejados.map((no) => posicao.get(no) ?? -1))
+      .map((i) => desejados[i]));
+    for (let i = desejados.length - 1; i >= 0; i -= 1) {
+      if (!ficam.has(desejados[i])) alvo.insertBefore(desejados[i], desejados[i + 1] ?? null);
+    }
+  }
+  for (const filho of Array.from(alvo.childNodes)) {
+    if (daquiMesmo.has(filho)) continue;
+    if (contexto.comChave.has(filho) || nosDeModNaLista.has(filho)) contexto.pendentes.push(filho);
+    else filho.remove();
+  }
+
+  for (const [no, novo] of pares) {
+    if (no !== novo) vestirComo(no, novo);
+    else if (no.localName === "details") abertoPedido.set(no, no.open);
+    if (novo.nodeType === Node.ELEMENT_NODE) reconciliarOsFilhos(no, Array.from(novo.childNodes), contexto);
+  }
+}
+
+/**
+ * Os índices da maior subsequência estritamente crescente de `valores`, em
+ * ordem; os negativos (nós que ainda não estão ali) ficam de fora.
+ */
+function maiorSequenciaCrescente(valores) {
+  const pontas = []; // pontas[k]: o índice que termina a melhor sequência de tamanho k + 1
+  const anterior = new Array(valores.length).fill(-1);
+  valores.forEach((valor, i) => {
+    if (valor < 0) return;
+    let baixo = 0;
+    let alto = pontas.length;
+    while (baixo < alto) {
+      const meio = (baixo + alto) >> 1;
+      if (valores[pontas[meio]] < valor) baixo = meio + 1;
+      else alto = meio;
+    }
+    if (baixo > 0) anterior[i] = pontas[baixo - 1];
+    pontas[baixo] = i;
+  });
+  const indices = [];
+  for (let i = pontas.length ? pontas[pontas.length - 1] : -1; i >= 0; i = anterior[i]) indices.push(i);
+  return indices.reverse();
+}
+
+/**
+ * Se um filho velho sem chave pode virar o novo: a mesma etiqueta e o mesmo
+ * feitio, que é a **primeira** classe. A classe inteira muda com o estado — o
+ * detalhe nativo de quem começa a falar vira `pessoa falando`, o ENTRAR vira
+ * `voice_room-entrar aqui` —, e comparada inteira refazia o nó com o que ele
+ * tivesse dentro, um nó de MOD inclusive (rodada 1 do lote AX, M2). O resto da
+ * classe chega pelo `vestirComo`.
+ */
+function mesmoFeitio(velho, novo) {
+  if (velho.nodeType !== novo.nodeType) return false;
+  if (chaveNaLista.has(velho) || nosDeModNaLista.has(velho) || modDoMarcador.has(velho)) return false;
+  if (velho.nodeType === Node.TEXT_NODE) return true;
+  if (velho.nodeType !== Node.ELEMENT_NODE) return false;
+  return velho.localName === novo.localName && velho.classList[0] === novo.classList[0];
+}
+
+/**
+ * O nó velho com os atributos, o texto e o valor do novo.
+ *
+ * **O `open` de um `<details>` é de quem o abriu** (rodada 1 do lote AX, I1).
+ * A linha montada só pede aberto o que é «interessante» — o SINAL E ESTADO de
+ * quem está muda, por exemplo —, e copiar o pedido a cada quadro fechava, no
+ * tique seguinte, o «⋯» e o SINAL E ESTADO que a pessoa abriu, com o volume
+ * de dentro. O pedido vale quando muda (`abertoPedido`); fora disso, fica o
+ * que a pessoa escolheu.
+ *
+ * **Fora o `open`, todo atributo que a linha montada não tem sai, e há quem
+ * conte com isso** (M4 da revisão): a casca do celular marca com `data-celular`
+ * o `li.voice_room` que adaptou (`celular-servidor.js`) e só o adapta de novo
+ * porque a marca sai aqui no quadro seguinte. Preservar outro atributo faria o
+ * celular parar de adaptar calado — o ENTRAR MUDO e as marcas da sala sumiriam.
+ * A `tools/bancada-do-celular.py` (`aba_servidor`) prende isso.
+ */
+function vestirComo(velho, novo) {
+  if (velho.nodeType === Node.TEXT_NODE) {
+    if (velho.nodeValue !== novo.nodeValue) velho.nodeValue = novo.nodeValue;
+    return;
+  }
+  const detalhe = velho.localName === "details";
+  for (const nome of velho.getAttributeNames()) {
+    if (detalhe && nome === "open") continue;
+    if (!novo.hasAttribute(nome)) velho.removeAttribute(nome);
+  }
+  for (const nome of novo.getAttributeNames()) {
+    if (detalhe && nome === "open") continue;
+    const valor = novo.getAttribute(nome);
+    if (velho.getAttribute(nome) !== valor) velho.setAttribute(nome, valor);
+  }
+  if (detalhe) {
+    const pedido = novo.hasAttribute("open");
+    if (abertoPedido.get(velho) !== pedido) velho.open = pedido;
+    abertoPedido.set(velho, pedido);
+  }
+  // O valor de um deslizante é propriedade, e não atributo.
+  if (velho.localName === "input" && velho.value !== novo.value && velho !== document.activeElement) {
+    velho.value = novo.value;
+  }
+}
+
 function desenharPessoas(snapshot) {
   const nossa = snapshot.voice_rooms.find((c) => c.occupied_by_us);
   // **`pessoas.lista`** (rascunho §3, tarefa 5): o que os MODs acrescentam,
@@ -2265,7 +2537,7 @@ function desenharPessoas(snapshot) {
               // Os cartões que os MODs de pé deram a esta pessoa. Eles
               // declaram; quem monta é o renderer da região, e quem decide
               // onde o cartão entra na linha é esta função.
-              cartoes: cartoesDaPessoa(pessoa.id),
+              cartoes: nosDeMod(cartoesDaPessoa(pessoa.id)),
               ratio: pessoa.signal,
               faixa: pessoa.sync_band,
               falando: pessoa.speaking,
@@ -2309,7 +2581,7 @@ function desenharPessoas(snapshot) {
             //
             // Um cartão é sobre **a pessoa**, e não sobre onde ela está
             // sentada. As três ramificações usam o mesmo modelo de apresentação.
-            cartoes: cartoesDaPessoa(snapshot.me),
+            cartoes: nosDeMod(cartoesDaPessoa(snapshot.me)),
             ratio: snapshot.telemetry.signal,
             faixa: snapshot.telemetry.sync_band,
             falando: snapshot.speaking,
@@ -2357,7 +2629,7 @@ function desenharPessoas(snapshot) {
               // O mesmo cartão da sala: quem está no saguão continua sendo a
               // mesma pessoa, e o MOD que a apresenta não muda de opinião
               // porque ela não sentou em sala nenhuma.
-              cartoes: cartoesDaPessoa(pessoa.id),
+              cartoes: nosDeMod(cartoesDaPessoa(pessoa.id)),
               // Sem medida: o sinal de quem não está numa sala não é medido por
               // ninguém — não há voz atravessando para medir. Travessão é o que
               // este produto escreve onde não mediu, e inventar zero aqui seria
@@ -2381,7 +2653,11 @@ function desenharPessoas(snapshot) {
   // `foraDoAr`.
   if (foraDoAr.length > 0) grupos.push(grupoForaDoAr(foraDoAr));
 
-  repovoar($("lista-roster"), grupos);
+  // **Reconciliada pelo id, e não repovoada** (pendência 63, (b)): ver
+  // `reconciliarALista`. A lista refeita a cada retrato sumia e voltava na
+  // árvore de acessibilidade. O grupo FORA DO AR tem a chave do nome
+  // (`grupoDeSala`), e as linhas dele, sem chave, casam pela posição.
+  reconciliarALista($("lista-roster"), grupos);
   // Uma vez, e na lista: ver `ligarAcoesDeApresentacao` em `base.js`.
   ligarAcoesDeApresentacao($("lista-roster"));
 
@@ -2434,6 +2710,9 @@ function grupoForaDoAr(membros) {
 /** Um grupo da faixa: o nome de uma sala e os cartões de quem está nela. */
 function grupoDeSala(nome, ocupacao, nossa, cartoes, sala = null) {
   const grupo = elemento("li", "roster-grupo");
+  // A chave do grupo é a sala; `FORA DE SALA` e o saguão, que não são salas,
+  // pelo nome que esta tela lhes dá. Ver `reconciliarALista`.
+  chaveNaLista.set(grupo, sala !== null ? `sala:${sala}` : `grupo:${nome}`);
   if (nossa) grupo.dataset.nossa = "sim";
 
   const cabeca = elemento("h3", "roster-sala");
@@ -2447,7 +2726,7 @@ function grupoDeSala(nome, ocupacao, nossa, cartoes, sala = null) {
   // grupo dela. Só para salas de verdade: `FORA DE SALA` e o saguão são
   // agrupamentos que esta tela inventa, e não salas que alguém possa alcançar.
   if (sala !== null) {
-    cabeca.append(...conteudoDasContribuicoes("sala.acoes", String(sala)));
+    cabeca.append(...nosDeMod(conteudoDasContribuicoes("sala.acoes", String(sala))));
     const acoesDaSala = acoesDasContribuicoes("sala.acoes", String(sala), { canal: sala });
     if (acoesDaSala.length) {
       const caixa = elemento("span", "faixa-de-acoes-de-mod");
@@ -2557,8 +2836,11 @@ function linhaDoRoster(pessoa, temAudio) {
   // `linhaSubstituida` recebe o mesmo.
   const cartao = substituicao ? cartaoDeContribuicao(substituicao, pessoa.id) : null;
   const item = cartao
-    ? linhaSubstituida(pessoa, temAudio, substituicao, cartao)
+    ? linhaSubstituida(pessoa, temAudio, substituicao, noDeMod(cartao))
     : linhaNativaDoRoster(pessoa, temAudio);
+  // A chave da linha é a pessoa, e não o lugar dela na lista: ver
+  // `reconciliarALista`.
+  if (pessoa.id !== undefined && pessoa.id !== null) chaveNaLista.set(item, `pessoa:${pessoa.id}`);
 
   // **Mas o acesso ao MOD não some junto.** Quem não tem perfil é exatamente
   // quem precisa alcançar o editor. A ação principal do provedor vira um botão
@@ -2575,7 +2857,7 @@ function linhaDoRoster(pessoa, temAudio) {
   // Por último, pelo mesmo motivo escrito em `linhaNativaDoRoster`: o que o
   // produto diz sobre a pessoa vem antes do que um terceiro acrescenta.
   if (pessoa.id !== undefined && pessoa.id !== null) {
-    item.append(...conteudoDasContribuicoes("pessoa.cartao", String(pessoa.id)));
+    item.append(...nosDeMod(conteudoDasContribuicoes("pessoa.cartao", String(pessoa.id))));
   }
   return item;
 }
@@ -2671,7 +2953,7 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   // **`pessoa.detalhes`** — seções que o MOD acrescenta ao perfil detalhado.
   // Dentro do mesmo `<details>` da identidade verificável: quem abre para ver
   // quem a pessoa é encontra as duas coisas no mesmo gesto.
-  detalhes.append(...conteudoDasContribuicoes("pessoa.detalhes", String(pessoa.id)));
+  detalhes.append(...nosDeMod(conteudoDasContribuicoes("pessoa.detalhes", String(pessoa.id))));
   item.append(detalhes);
   return item;
 }
@@ -2771,7 +3053,7 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   // assumir o cartão inteiro. Ao lado do nome, dentro do mesmo nó, porque é
   // disso que o ponto fala: pronome, distintivo, cor, marca de papel.
   if (pessoa.id !== undefined && pessoa.id !== null) {
-    identidade.append(...conteudoDasContribuicoes("pessoa.identidade", String(pessoa.id)));
+    identidade.append(...nosDeMod(conteudoDasContribuicoes("pessoa.identidade", String(pessoa.id))));
   }
   cabeca.append(identidade);
 
@@ -4297,6 +4579,13 @@ function esquecerOEstadoDaSessao() {
   // retrato depois da saída. O quadro pendente também é recurso.
   if (quadroDaAtualizacao) cancelAnimationFrame(quadroDaAtualizacao);
   quadroDaAtualizacao = 0;
+  // As chaves da lista reconciliada (`reconciliarALista`): a pessoa 3 de um
+  // servidor não é a do seguinte, e a primeira lista da sessão nasce com nós
+  // novos, sem herdar linha nem cartão de MOD da que acabou.
+  chaveNaLista = new WeakMap();
+  modDoMarcador = new WeakMap();
+  nosDeModNaLista = new WeakSet();
+  abertoPedido = new WeakMap();
   rascunhos.clear();
   previas.clear();
   previasFechadas.clear();

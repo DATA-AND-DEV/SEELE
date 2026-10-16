@@ -1725,6 +1725,8 @@ const FRASES_DO_CELULAR = Object.freeze({
     fala: (quem) => `${quem} fala`,
     naSala: (n) => `${n} na sala`,
     sinal: (n) => `sinal ${n}`,
+    // Com o enlace caído (spec §2.5), no lugar de quem fala.
+    reconectando: "SEM SOM · RECONECTANDO",
     recolher: "RECOLHER",
     recolherChamada: "Recolher a chamada e voltar à sessão",
     telemetria: "telemetria da chamada",
@@ -1749,6 +1751,10 @@ const FRASES_DO_CELULAR = Object.freeze({
     foraSalas: NO_COMPUTADOR.salasECanais[1],
   }),
   folhas: Object.freeze({
+    // A prévia do tema (D-estilo-1): o diálogo recolhido num selo do núcleo.
+    verNaSessao: "VER NA SESSÃO",
+    seloDaPrevia: "PRÉVIA NÃO PUBLICADA · SÓ NESTE APARELHO",
+    voltarAoDialogo: "VOLTAR",
     senhaDaSala: "SENHA DA SALA",
     pedeSenha: (sala) => `${sala} pede senha para entrar.`,
     senha: "SENHA",
@@ -1846,6 +1852,9 @@ const FRASES_DO_CELULAR = Object.freeze({
       agoraNao: "AGORA NÃO",
       servidores: "SERVIDORES DESTE APARELHO",
     }),
+    // O botão do aviso da resposta na sessão: o mesmo dos avisos do pé ao lado
+    // dele (o de fone e o do áudio, do desktop).
+    dispensar: "dispensar",
     // A resposta do `navigator.storage.persist()` (ADR 0057), dita.
     persistencia: Object.freeze({
       concedida: "Este navegador guarda a sua identidade neste aparelho.",

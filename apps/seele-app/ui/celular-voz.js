@@ -200,7 +200,11 @@
     const abertura = ABERTURA_DO_AUDIO[snapshot.abertura_do_audio];
     const falando = aqui.people.find((p) => p.speaking && !p.is_self);
     const sinal = PALAVRAS.sinal(snapshot.telemetry?.signal ?? 0);
-    quem.textContent = abertura?.rodape
+    // Com o enlace caído, antes de tudo: não há som, e a conexão está voltando
+    // (spec §2.5). Quem fala e o sinal seriam do instante antes da queda.
+    const caido = Boolean(snapshot.link) && snapshot.link !== "Online";
+    faixa.toggleAttribute("data-caido", caido);
+    quem.textContent = caido ? PALAVRAS.reconectando : abertura?.rodape
       ?? (falando ? `${PALAVRAS.fala(falando.nickname)} · ${sinal}` : `${PALAVRAS.naSala(aqui.people.length)} · ${sinal}`);
 
     mutado = !!snapshot.muted;
