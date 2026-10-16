@@ -758,10 +758,12 @@ let soltouRenderer = 0;
 /** Os renderers que a montagem criou, na ordem: o que cada um recebeu é o que se confere. */
 const renderersMontados = [];
 contexto.RegiaoDeMod = class {
-  constructor(id, dono, raiz) {
+  constructor(id, dono, raiz, perfil) {
     this.id = id;
     this.dono = dono;
     this.raiz = raiz;
+    // O orçamento com que foi montado: o perfil do ponto (`PERFIS_DE_RENDER`).
+    this.perfil = perfil;
     renderersMontados.push(this);
   }
   aplicar() { return 0; }
@@ -1025,6 +1027,34 @@ contexto.donoDaRegiao = (mod, instancia) => ({ instancia, mod, falar() {} });
 
   contexto.RegiaoDeMod = rendererDeAntes;
   contexto.registrarNoAnfitriao = registrarDeAntes;
+}
+
+// ------------- o palco da chamada monta com o perfil da superfície
+
+{
+  // **`camadas.chamada.palco.perfil`** (a auditoria do `v6.json`, tabela 7): o
+  // palco é uma camada sobre a chamada, com o orçamento de uma superfície, e
+  // não o de um cartão. A `tela` do palco montava igual no perfil errado, e
+  // trocar o perfil da tabela passava. O perfil do texto, o da tabela de
+  // pontos, e o com que a montagem de verdade constrói o renderer.
+  const v6 = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../api/v6.json"), "utf8"));
+  const doTexto = v6.camadas["chamada.palco"].perfil;
+  const daTabela = vm.runInContext('PONTOS_DE_CONTRIBUICAO["chamada.palco"].perfil', contexto);
+  confere("o palco · o perfil", doTexto === "superficie" && daTabela === doTexto,
+    `o v6.json diz «${doTexto}», e a tabela de pontos diz «${daTabela}»`);
+  const registro = new R();
+  const dono = new I("mod/p", "p", 7, {});
+  dono.estado = contexto.ESTADOS_DE_MOD.ativa;
+  const { handle } = registro.registrar({ id: "mod/p" }, dono, {
+    ponto: "chamada.palco", modo: "substituir",
+    conteudo: [{ forma: "tela", chave: "mesa", largura: 10, altura: 10 }],
+  });
+  const antes = renderersMontados.length;
+  contexto.montarContribuicao(registro.porHandle.get(handle), "");
+  const montado = renderersMontados.slice(antes).at(-1);
+  confere("o palco · o perfil", montado?.perfil === contexto.PERFIS_DE_RENDER.superficie,
+    "a contribuição do palco não foi montada com o orçamento da superfície");
+  registro.revogar(handle, { id: "mod/p", instancia: dono });
 }
 
 // ------------- R3b · a substituição desenha o conteúdo da própria contribuição
