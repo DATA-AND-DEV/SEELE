@@ -1491,6 +1491,50 @@ def ir_para_aba(pg: Page, aba: str, falhas: list[str]) -> bool:
     return exigir_toque(pg, f"#cel-aba-{aba}", falhas)
 
 
+AJUSTES_CONTRA_O_AVISO = """(id) => {
+  const aviso = document.getElementById(id), camada = document.getElementById('tela-server');
+  if (!aviso.checkVisibility() || !camada.checkVisibility()) return { aVista: false };
+  const a = aviso.getBoundingClientRect(), c = camada.getBoundingClientRect();
+  const botao = aviso.querySelector('button');
+  const r = botao?.getBoundingClientRect();
+  const no = r && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return { aVista: true, sobreposto: Math.max(0, Math.round(Math.min(a.bottom, c.bottom) - Math.max(a.top, c.top))),
+           dispensarNoToque: !botao || no === botao, cobertoPor: !botao || no === botao ? null : (no?.id || no?.className) };
+}"""
+
+
+def ajustes_e_avisos(pg: Page) -> list[str]:
+    """A camada de AJUSTES contra os avisos do pé que nascem com ela aberta
+    (item 4 da orquestradora, 16/10): o veredito, o de fone e o do áudio. Ela
+    acaba no alto do primeiro aviso, e o dispensar dele recebe o toque. Medido
+    antes: aberta antes do aviso, ela o cobria inteiro (92 a 130 px), e o toque
+    no dispensar caía em SAIR DO SERVIDOR. Termina em AJUSTES com o veredito,
+    para a foto."""
+    falhas = []
+    esconder = "for (const id of ['veredito', 'aviso-fone', 'aviso-audio']) document.getElementById(id).hidden = true"
+    pg.evaluate(esconder)
+    esperar_quadro(pg)
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    pg.wait_for_timeout(300)
+    for aviso, mostrar, tirar in (
+        ("aviso-fone", "foneJaAvisado = false", "document.getElementById('aviso-fone').hidden = true"),
+        ("aviso-audio", "SEELE_QUADRO.abertura_do_audio = 'nao_abriu_no_prazo'", "SEELE_QUADRO.abertura_do_audio = 'aberto'"),
+        ("veredito", "mostrarVeredito({ FirstContact: { fingerprint: '3cbc fb02 3cbc fb02' } })", None),
+    ):
+        pg.evaluate(mostrar)
+        esperar_quadro(pg)
+        r = pg.evaluate(AJUSTES_CONTRA_O_AVISO, aviso)
+        if not r["aVista"]:
+            falhas.append(f"o #{aviso} não apareceu com AJUSTES aberto: a conferência não vale")
+        elif r["sobreposto"] or not r["dispensarNoToque"]:
+            falhas.append(f"com AJUSTES aberto antes, a camada cobre o #{aviso}: {r}")
+        if tirar:
+            pg.evaluate(tirar)
+            esperar_quadro(pg)
+    return falhas
+
+
 def esperar_quadro(pg: Page) -> None:
     """A casca relê o `snapshot` a cada 500 ms; uma mudança no quadro do duble
     aparece no redesenho seguinte."""
@@ -3265,6 +3309,7 @@ CASOS: dict[str, Caso] = {
     # Sem ela, o claro reprovava o «VOCÊ ESTÁ AQUI» a 2,6:1.
     "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
+    "ajustes-e-avisos": Caso(levar=ajustes_e_avisos, medir=False),
     "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
     "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "claro", "hostil"),
