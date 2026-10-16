@@ -1,5 +1,5 @@
 //! O pacote do web app (Tarefa 3.6 da F4): o que vai para a origem
-//! (`https://web.seele.app.br`, D-web-2), montado e conferido.
+//! (a `ORIGEM_DO_NAVEGADOR`, D-web-2), montado e conferido.
 //!
 //!     cargo xtask pacote-web
 //!

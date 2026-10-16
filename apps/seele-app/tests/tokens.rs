@@ -50,7 +50,7 @@ fn stylesheets() -> String {
 }
 
 /// The window's copy. The web app's copy — the one that goes to the origin
-/// (`https://web.seele.app.br`) inside the package — is held by the same rule
+/// (D-web-2) inside the package — is held by the same rule
 /// in `cargo xtask pacote-web` (`xtask/src/pacote_web.rs`, rule 1 of
 /// `conferir`), because this guard reads `ui/` and not the package.
 #[test]
