@@ -1161,6 +1161,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/barra-mac.js \
         --roteiro tools/roteiros/botoes-da-entrada.js \
         --roteiro tools/roteiros/catalogo-de-mods.js \
+        --roteiro tools/roteiros/chamar.js \
         --roteiro tools/roteiros/clique-nos-glifos.js \
         --roteiro tools/roteiros/compartilhar.js \
         --roteiro tools/roteiros/dispositivos.js \
@@ -1170,6 +1171,8 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/hospedar.js \
         --roteiro tools/roteiros/icone-do-server.js \
         --roteiro tools/roteiros/icone-na-trilha.js \
+        --roteiro tools/roteiros/ligar.js \
+        --roteiro tools/roteiros/ligar-na-sessao.js \
         --roteiro tools/roteiros/medidas.js \
         --roteiro tools/roteiros/meu-servidor.js \
         --roteiro tools/roteiros/nome-ao-hospedar.js \
