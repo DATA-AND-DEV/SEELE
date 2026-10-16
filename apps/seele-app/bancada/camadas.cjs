@@ -778,6 +778,30 @@ const { chromium } = require('./playwright.cjs');
       assert.ok(largura >= 44 && altura >= 44, `no celular, o estilo do MOD desceu «${chave}» a ${largura} × ${altura}: ${JSON.stringify(piso.medidas)}`);
     }
 
+    // 12e. **As consultas são do contêiner, e não da janela** (o cruzamento
+    //      dos portes: o ESTILO, o PERFIS e a MESA pedem uma coluna só abaixo
+    //      de um `ateLargura`). A mesma classe em dois diálogos da mesma
+    //      janela: o estreito ganha a consulta, e o largo não. Uma consulta
+    //      que perguntasse à janela daria a mesma resposta aos dois.
+    const consultas = await page.evaluate(async () => {
+      const colunas = {};
+      for (const [id, largura] of [['estreito', 400], ['largo', 900]]) {
+        await pedir(6, { tipo: 'superficie-criar', descricao: { id, tipo: 'dialogo', modal: false, titulo: id, tamanho: { largura } } });
+        await pedir(6, { tipo: 'superficie-classes', superficie: id,
+          classes: { fichas: { base: { colunas: 2 }, consultas: [{ ateLargura: 520, estilo: { colunas: 1 } }] } } });
+        await pedir(6, { tipo: 'superficie-montar', superficie: id, arvore: [
+          { forma: 'grade', chave: 'g', classe: 'fichas', dentro: [{ forma: 'texto', dentro: 'a' }, { forma: 'texto', dentro: 'b' }] },
+        ] });
+        const grade = document.querySelector(`[data-superficie="${id}"] [data-chave-do-mod="g"]`);
+        colunas[id] = grade ? getComputedStyle(grade).gridTemplateColumns.split(' ').filter(Boolean).length : null;
+        colunas[`${id}, largura`] = Math.round(document.querySelector(`[data-superficie="${id}"]`)?.getBoundingClientRect().width ?? 0);
+        await pedir(6, { tipo: 'superficie-descartar', superficie: id });
+      }
+      return colunas;
+    });
+    assert.ok(consultas.estreito === 1 && consultas.largo === 2,
+      `a consulta da classe não seguiu a largura da superfície: ${JSON.stringify(consultas)}`);
+
     // 13. Os botões do produto no formulário.
     const arvoreDaFicha = (extra = {}) => [{
       forma: 'formulario', chave: 'f', primario: 'SALVAR', secundario: 'CANCELAR', ...extra, dentro: [
