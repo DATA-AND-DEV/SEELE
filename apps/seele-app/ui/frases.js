@@ -422,6 +422,9 @@ const ETAPAS = {
   // coisa mais importante escrita nela. Esta linha diz onde a chegada parou; a
   // causa é de quem a tem, que é `fraseDeErro`.
   Desistiu: "A CHEGADA PAROU AQUI",
+  // Quem liga desistiu (tarefa 16 da F7): não é falha, e a frase não procura
+  // culpado. A tela de quem liga é da tarefa 7f, que pode trocá-la.
+  Cancelada: "LIGAÇÃO CANCELADA",
 };
 
 /**
@@ -983,6 +986,9 @@ const FRASES = {
     // cobrou antes do `Hello`. Por isso a segunda linha diz o que não saiu,
     // com o escopo «a ele» da recusa pela impressão (ver `InviteMismatch`, em
     // `fraseDeErro`).
+    // Quem liga desistiu antes de entrar (tarefa 16 da F7). A casca sabe que
+    // foi ela quem cancelou; a frase existe para nunca sair o nome cru.
+    Cancelada: "VOCÊ CANCELOU A LIGAÇÃO",
     ChaveNaoProvada:
         "QUEM ATENDEU NÃO PROVOU SER ESTE SERVIDOR.\n" +
         "Ele mostrou o certificado do servidor sem a chave que o assina. " +
