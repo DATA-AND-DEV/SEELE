@@ -163,7 +163,7 @@ const { chromium } = require('./playwright.cjs');
     // Com rascunho sujo, a saída do produto pergunta; descartar diz ao MOD.
     await page.evaluate(async () => {
       await pedir(6, { tipo: 'superficie-descartar', superficie: 'quatro' });
-      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'rascunho', tipo: 'folha', titulo: 'Editar', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'rascunho', tipo: 'folha', titulo: 'Editar' } });
       await pedir(6, { tipo: 'superficie-suja', superficie: 'rascunho', suja: true });
     });
     await page.click('#palco-de-paineis > .folha-de-mod[data-superficie="rascunho"] .superficie-de-mod-sair');
@@ -532,7 +532,7 @@ const { chromium } = require('./playwright.cjs');
       }));
     };
     await page.evaluate(async () => {
-      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'editor', tipo: 'dialogo', modal: false, titulo: 'Editor', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'editor', tipo: 'dialogo', modal: false, titulo: 'Editor' } });
       await pedir(6, { tipo: 'superficie-montar', superficie: 'editor', arvore: [{
         forma: 'formulario', chave: 'f', dentro: [
           { forma: 'campo', chave: 'bio', rotulo: 'Bio', valor: 'o rascunho guardado', inicial: 'o gravado' },
@@ -574,6 +574,29 @@ const { chromium } = require('./playwright.cjs');
     await page.click('#moderar-confirmar');
     const descartouSemAOpcao = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'fechar' && e.superficie === 'rascunho2').at(-1));
     assert.equal(descartouSemAOpcao?.descartou, true, `descartar sem a opção não disse descartou: ${JSON.stringify(descartouSemAOpcao)}`);
+
+    // 10d. **Sem `inicial`, o inicial é o da primeira montagem do campo**
+    //      (`formularios.sujo`, a errata da segunda emenda; o defeito da
+    //      MESA). Um controle que o MOD regrava sem declarar `inicial` fica
+    //      sujo, e fechar pergunta; com `inicial` igual ao valor, não.
+    const regravado = async (comInicial) => page.evaluate(async (comInicial) => {
+      const id = comInicial ? 'vivo-com' : 'vivo-sem';
+      const campo = (valor) => ({ forma: 'escolha', chave: 'trilha', rotulo: 'Trilha', valor,
+        opcoes: [{ valor: 'um', dentro: 'Um' }, { valor: 'dois', dentro: 'Dois' }], ...(comInicial ? { inicial: valor } : {}) });
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id, tipo: 'pagina', titulo: id } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: id, arvore: [campo('um')] });
+      // O MOD gravou a escolha e a declara de novo, já gravada.
+      await pedir(6, { tipo: 'superficie-montar', superficie: id, arvore: [campo('dois')] });
+      document.querySelector(`[data-superficie="${id}"] .superficie-de-mod-sair`).click();
+      const r = { perguntou: !$('moderar').hidden, aberta: Boolean(document.querySelector(`[data-superficie="${id}"]`)?.isConnected) };
+      if (r.perguntou) $('moderar-cancelar').click();
+      await pedir(6, { tipo: 'superficie-descartar', superficie: id });
+      return r;
+    }, comInicial);
+    assert.deepEqual(await regravado(false), { perguntou: true, aberta: true },
+      'o controle regravado sem inicial não ficou sujo: o inicial não é o da primeira montagem');
+    assert.deepEqual(await regravado(true), { perguntou: false, aberta: false },
+      'o controle regravado com inicial igual ao valor ficou sujo');
 
     // 10c. **Fechada, a superfície continua do MOD** (o cruzamento dos portes:
     //      a MESA e o PERFIS guardam o punho e reabrem). Fechar tira a página
@@ -645,7 +668,7 @@ const { chromium } = require('./playwright.cjs');
       ],
     }];
     await page.evaluate(async (arvore) => {
-      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'cores', tipo: 'dialogo', modal: false, titulo: 'Cores', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'cores', tipo: 'dialogo', modal: false, titulo: 'Cores' } });
       await pedir(6, { tipo: 'superficie-montar', superficie: 'cores', arvore });
     }, arvoreDasCores(true));
     assert.deepEqual(await marcaDe('paleta'), { invalido: 'sim', frase: 'esta paleta não combina com o tema', aria: 'true' }, 'a escolha não mostrou o erro do MOD');
@@ -688,7 +711,7 @@ const { chromium } = require('./playwright.cjs');
       ],
     }];
     await page.evaluate(async (arvore) => {
-      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'entradas', tipo: 'dialogo', modal: false, titulo: 'Entradas', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'entradas', tipo: 'dialogo', modal: false, titulo: 'Entradas' } });
       await pedir(6, { tipo: 'superficie-montar', superficie: 'entradas', arvore });
     }, arvoreDasEntradas(true));
     assert.deepEqual(await marcaDaEntrada('volume'), { invalido: 'sim', frase: 'alto demais para esta sala', aria: 'true' }, 'o deslizante não mostrou o erro do MOD');
@@ -820,7 +843,7 @@ const { chromium } = require('./playwright.cjs');
     });
     const submetidos = () => page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'submeter' && e.chave === 'f').length);
     await page.evaluate(async (arvore) => {
-      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'ficha2', tipo: 'dialogo', modal: false, titulo: 'Ficha', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'ficha2', tipo: 'dialogo', modal: false, titulo: 'Ficha' } });
       await pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore });
       window.botaoAntes = document.querySelector('[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario button');
     }, arvoreDaFicha());

@@ -126,6 +126,11 @@ async function desenhar() {
       // diz o que existe. O produto não o aplica enquanto a caixa tem foco, e
       // por isso os dois podem divergir sem atrapalhar ninguém.
       valor: estado.gravado,
+      // **E o inicial também é o gravado.** Sem ele, o inicial é o valor da
+      // primeira montagem do campo, e não muda quando este MOD regrava o
+      // valor: depois da primeira gravação o painel ficaria sujo para sempre,
+      // e fechar perguntaria «sem gravar?» de algo gravado (a MESA, 15/10).
+      inicial: estado.gravado,
     },
     { forma: "botao", chave: "gravar", dentro: "GRAVAR" },
     estado.aviso ? { forma: "texto", chave: "aviso", dentro: estado.aviso } : null,
@@ -426,9 +431,9 @@ async function exercitarASuperficie() {
     tipo: "dialogo",
     titulo: "Referência",
     tamanho: { largura: 480 },
-    // Com alterações não gravadas, fechar vira uma pergunta **do produto** —
-    // e a resposta da pessoa vence. Um MOD não veta a saída da sessão.
-    fecharComAlteracoes: "confirmar",
+    // Com alterações não gravadas, fechar vira uma pergunta **do produto**,
+    // sempre, sem opção a declarar — e a resposta da pessoa vence. Um MOD não
+    // veta a saída da sessão, que descarta sem perguntar.
     focoInicial: "nota",
   }), null);
   if (!janela) return;
