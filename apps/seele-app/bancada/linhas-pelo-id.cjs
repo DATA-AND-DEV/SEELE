@@ -42,7 +42,8 @@
 // 8. **A ordem é a do retrato** — depois de um PersonState, de uma entrada,
 //    de uma saída e de uma chegada, e depois de uma reordenação (a primeira da
 //    sala vai para o fim), na lista e na coluna de salas —, e cada linha é o
-//    mesmo nó.
+//    mesmo nó. Com dois vizinhos trocando de lugar, quem tem o foco fica, e
+//    o outro se move.
 // 9. **O `<details>` que a pessoa abre continua aberto** através do tique.
 // 10. **A coluna de canais** (pendência 64): o foco do teclado no botão do
 //    segundo canal atravessa o tique — com o mesmo retrato, com outro canal
@@ -79,7 +80,10 @@
 //    E a própria mensagem, gravada, fica no nó da pendente (lote ECO): o foco
 //    no link, a seleção no corpo e o REMOVER atravessam a gravação, e o
 //    REMOVER remove o id de agora; a de outra pessoa, sem chave, e a própria
-//    relida do histórico ganham um nó cada, sem tomar o de ninguém.
+//    relida do histórico ganham um nó cada, sem tomar o de ninguém. E a
+//    própria que, gravada, vai para antes de uma mensagem que já estava na
+//    tela (a pendente sem resposta) fica no lugar, com o foco e a seleção, e
+//    quem se move é a outra.
 //
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
@@ -450,6 +454,53 @@ async function abrir(browser, url, r) {
     assert.deepEqual(caso8.tela, caso8.retrato, "depois de uma reordenação, a ordem da lista não é a do retrato");
     assert.deepEqual(caso8.coluna, caso8.colunaDoRetrato, "depois de uma reordenação, a ordem da coluna de salas não é a do retrato");
     assert.equal(caso8.trocadas, 0, `${caso8.trocadas} linhas trocaram de nó com uma reordenação`);
+
+    //    E dois vizinhos trocam de lugar, com o foco no nome do que vem para a
+    //    frente (lote ECO, rodada 1, M1). Numa troca, qualquer um dos dois pode
+    //    ser o que se move, e o que se move perde o foco: fica o que tem o
+    //    foco, e o outro se move. Antes do conserto, o que se movia era este.
+    const caso8b = await page.evaluate(async () => {
+      const novo = structuredClone(testTable.snapshot);
+      const sala = novo.voice_rooms[0].people;
+      const [tras, frente] = [sala[4].nickname, sala[5].nickname];
+      [sala[4], sala[5]] = [sala[5], sala[4]];
+      const antes = linhasPorApelido();
+      const botao = antes.get(frente)?.querySelector("button.pessoa-nome-porta");
+      botao?.focus();
+      const focado = Boolean(botao) && document.activeElement === botao;
+      const ul = antes.get(frente)?.closest("ul.roster-pessoas");
+      const registros = [];
+      const observador = new MutationObserver((rs) => registros.push(...rs));
+      if (ul) observador.observe(ul, { childList: true });
+      const chegou = await pelaPonte(novo, (d) => d?.voice_rooms?.[0]?.people?.[4]?.nickname === frente);
+      registros.push(...observador.takeRecords());
+      observador.disconnect();
+      const movidos = registros.filter((r) => r.target === ul).flatMap((r) => [...r.addedNodes])
+        .map((li) => (li.querySelector(".pessoa-nome")?.textContent ?? "?").replace(" (você)", ""));
+      const depois = linhasPorApelido();
+      return {
+        chegou,
+        focado,
+        frente,
+        tras,
+        focoFicou: focado && botao.isConnected && document.activeElement === botao,
+        focoEm: document.activeElement?.className || document.activeElement?.tagName,
+        movidos,
+        tela: ordemNaTela(),
+        retrato: ordemDoRetrato(desenhado),
+        trocadas: [...antes].filter(([nome, li]) => depois.get(nome) !== li).length,
+      };
+    });
+    assert.ok(caso8b.chegou, "caso 8: a troca de dois vizinhos não chegou à tela");
+    assert.ok(caso8b.focado, `caso 8: a bancada não conseguiu pôr o foco no nome de ${caso8b.frente}`);
+    assert.ok(
+      caso8b.focoFicou,
+      `${caso8b.frente} e ${caso8b.tras} trocaram de lugar e o foco no nome de ${caso8b.frente} caiu (está em ` +
+        `${caso8b.focoEm}): moveu-se ${JSON.stringify(caso8b.movidos)}, e quem tem o foco fica`,
+    );
+    assert.deepEqual(caso8b.movidos, [caso8b.tras], `dois vizinhos trocaram de lugar e se moveram ${JSON.stringify(caso8b.movidos)}`);
+    assert.deepEqual(caso8b.tela, caso8b.retrato, "depois de dois vizinhos trocarem, a ordem da lista não é a do retrato");
+    assert.equal(caso8b.trocadas, 0, `${caso8b.trocadas} linhas trocaram de nó com dois vizinhos trocando de lugar`);
 
     // 6. A coluna de salas, que também lista quem está em cada sala e tem o
     //    ENTRAR NA SALA: um PersonState mexe só na linha da pessoa nela, o
@@ -1981,13 +2032,93 @@ async function abrir(browser, url, r) {
       eco.removeu = window.chamadas.filter((c) => c.cmd === "remover_mensagem").map((c) => c.args?.message);
       getSelection().removeAllRanges();
 
+      // k) A própria, gravada, vai para antes de uma mensagem que já estava na
+      //    tela (rodada 1, M1). Ao vivo não acontece: o servidor anuncia na
+      //    ordem do id. Acontece com a pendente sem resposta: outra pessoa fala
+      //    (a 14) enquanto o enlace está caído, e a repetição da chave devolve a
+      //    linha que o servidor já tinha gravado, com o id de antes (a 13). As
+      //    pendentes vêm depois das confirmadas, e a gravada vai para o lugar
+      //    do id dela. O nó é o mesmo; o que se move tem de ser o outro, ou o
+      //    foco no link e a seleção no corpo caem.
+      const corpoK = "a minha mensagem, sem resposta ainda: veja https://exemplo.br/lacuna antes de sair";
+      const pendenteK = minha({ id: 0, at_seconds: t + 120, body: corpoK, estado: "SemResposta", client_message_id: "88" });
+      const gravadaK = minha({ id: 13, at_seconds: t + 121, body: corpoK, client_message_id: "88" });
+      comRevisao([deOutra(11, 2, 0), deOutra(12, 3, 1), deOutra(14, 4, 3), pendenteK]);
+      await tique();
+      const liK = liPorId(0);
+      const linkK = liK?.querySelector(".link-externo") ?? null;
+      linkK?.focus();
+      const textoK = liK?.querySelector(".corpo")?.firstChild ?? null;
+      if (textoK?.nodeType === Node.TEXT_NODE) {
+        const faixaK = document.createRange();
+        faixaK.setStart(textoK, 2);
+        faixaK.setEnd(textoK, 36);
+        getSelection().removeAllRanges();
+        getSelection().addRange(faixaK);
+      }
+      const lacuna = {
+        achou: Boolean(liK && linkK),
+        semResposta: Boolean(liK?.querySelector('.envio[data-envio="sem-resposta"]')),
+        depoisDaOutra: Boolean(liK) && liPorId(14)?.nextElementSibling === liK,
+        focado: Boolean(linkK) && document.activeElement === linkK,
+        selecionado: getSelection().toString(),
+      };
+      r = await passo(() => comRevisao([deOutra(11, 2, 0), deOutra(12, 3, 1), gravadaK, deOutra(14, 4, 3)]));
+      Object.assign(lacuna, {
+        redesenhou: r.redesenhou,
+        gravadaNaTela: Boolean(liPorId(13)) && !liPorId(0),
+        mesmaLi: Boolean(liK) && liK.isConnected && liPorId(13) === liK,
+        foco: Boolean(linkK) && linkK.isConnected && document.activeElement === linkK,
+        focoEm: document.activeElement?.className || document.activeElement?.tagName,
+        selecao: getSelection().toString(),
+        // Quem foi tirado e posto de novo na lista: a própria ou a outra.
+        movidas: tirados(r.registros).filter((no) => no.nodeType === Node.ELEMENT_NODE)
+          .map((li) => li.querySelector("button[data-moderar-mensagem]")?.dataset.moderarMensagem ?? li.className),
+        ordem: [...lista.querySelectorAll(":scope > li.mensagem")]
+          .map((li) => li.querySelector("button[data-moderar-mensagem]")?.dataset.moderarMensagem),
+      });
+      getSelection().removeAllRanges();
+
+      //    O mesmo, sem foco nenhum e só com a seleção no corpo: quem lê com o
+      //    ponteiro e marca um trecho. Fica o nó que tem o começo da seleção.
+      const corpoK2 = "a minha outra mensagem, também sem resposta: veja https://exemplo.br/marcada antes de sair";
+      comRevisao([deOutra(21, 2, 0), deOutra(22, 3, 1), deOutra(24, 4, 3),
+        minha({ id: 0, at_seconds: t + 120, body: corpoK2, estado: "SemResposta", client_message_id: "89" })]);
+      await tique();
+      const liK2 = liPorId(0);
+      document.activeElement?.blur?.();
+      const textoK2 = liK2?.querySelector(".corpo")?.firstChild ?? null;
+      if (textoK2?.nodeType === Node.TEXT_NODE) {
+        const faixaK2 = document.createRange();
+        faixaK2.setStart(textoK2, 2);
+        faixaK2.setEnd(textoK2, 43);
+        getSelection().removeAllRanges();
+        getSelection().addRange(faixaK2);
+      }
+      lacuna.soSelecao = {
+        semFoco: document.activeElement === document.body,
+        selecionado: getSelection().toString(),
+      };
+      r = await passo(() => comRevisao([deOutra(21, 2, 0), deOutra(22, 3, 1),
+        minha({ id: 23, at_seconds: t + 121, body: corpoK2, client_message_id: "89" }), deOutra(24, 4, 3)]));
+      Object.assign(lacuna.soSelecao, {
+        redesenhou: r.redesenhou,
+        mesmaLi: Boolean(liK2) && liK2.isConnected && liPorId(23) === liK2,
+        selecao: getSelection().toString(),
+        movidas: tirados(r.registros).filter((no) => no.nodeType === Node.ELEMENT_NODE)
+          .map((li) => li.querySelector("button[data-moderar-mensagem]")?.dataset.moderarMensagem ?? li.className),
+        ordem: [...lista.querySelectorAll(":scope > li.mensagem")]
+          .map((li) => li.querySelector("button[data-moderar-mensagem]")?.dataset.moderarMensagem),
+      });
+      getSelection().removeAllRanges();
+
       window.desenharMensagens = desenharDeVerdade;
-      return { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod, gravada, voltaNoTempo, eco };
+      return { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod, gravada, voltaNoTempo, eco, lacuna };
     }, { conversa: CONVERSA, png: RETRATO_PNG });
     assert.deepEqual(pagina14.errors, [], "caso 14: erros na página");
     await pagina14.page.close();
     {
-      const { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod, gravada, voltaNoTempo, eco } = caso14;
+      const { preparo, selecionado, chega, retrato, nova, noFim, saiu, editada, comMod, gravada, voltaNoTempo, eco, lacuna } = caso14;
       assert.equal(preparo.mensagens, CONVERSA.length, `caso 14: a conversa desenhou ${preparo.mensagens} mensagens`);
       assert.ok(preparo.focado, "caso 14: a bancada não conseguiu pôr o foco no link da mensagem 11");
       assert.ok(selecionado.length > 20, `caso 14: a bancada não conseguiu selecionar o corpo da 21 (${JSON.stringify(selecionado)})`);
@@ -2113,6 +2244,36 @@ async function abrir(browser, url, r) {
         `o REMOVER da própria mensagem gravada confirma ${JSON.stringify(eco.confirmacao)}`,
       );
       assert.deepEqual(eco.removeu, [5], `o REMOVER da própria mensagem gravada pediu para remover ${JSON.stringify(eco.removeu)}, e não a 5`);
+      assert.ok(
+        lacuna.achou && lacuna.semResposta && lacuna.depoisDaOutra,
+        "caso 14 (k): a pendente sem resposta não foi desenhada depois da mensagem de outra pessoa, com o link",
+      );
+      assert.ok(lacuna.focado, "caso 14 (k): a bancada não conseguiu pôr o foco no link da pendente");
+      assert.ok(lacuna.selecionado.length > 20, `caso 14 (k): a bancada não conseguiu selecionar o corpo da pendente (${JSON.stringify(lacuna.selecionado)})`);
+      assert.ok(lacuna.redesenhou && lacuna.gravadaNaTela, "caso 14 (k): a própria gravada não chegou à conversa, ou a pendente ficou");
+      assert.ok(lacuna.mesmaLi, "a própria mensagem foi gravada antes de uma que já estava na tela e a linha dela trocou de nó");
+      assert.ok(
+        lacuna.foco,
+        "a própria mensagem foi gravada antes de uma que já estava na tela e o foco no link dela caiu (está em " +
+          `${lacuna.focoEm}): o nó é o mesmo, mas foi tirado e posto de novo (movidas: ${JSON.stringify(lacuna.movidas)})`,
+      );
+      assert.equal(
+        lacuna.selecao, lacuna.selecionado,
+        `a própria mensagem foi gravada antes de uma que já estava na tela e a seleção no corpo dela foi a ${JSON.stringify(lacuna.selecao)}`,
+      );
+      assert.deepEqual(lacuna.ordem, ["11", "12", "13", "14"], `caso 14 (k): a conversa ficou na ordem ${JSON.stringify(lacuna.ordem)}, e não na do retrato`);
+      const { soSelecao } = lacuna;
+      assert.ok(
+        soSelecao.semFoco && soSelecao.selecionado.length > 20,
+        `caso 14 (k), só a seleção: a bancada não conseguiu tirar o foco e selecionar o corpo (${JSON.stringify(soSelecao)})`,
+      );
+      assert.ok(soSelecao.redesenhou && soSelecao.mesmaLi, "caso 14 (k), só a seleção: a própria gravada não ficou no nó da pendente");
+      assert.equal(
+        soSelecao.selecao, soSelecao.selecionado,
+        "a própria mensagem foi gravada antes de uma que já estava na tela, sem foco nenhum, e a seleção no corpo dela " +
+          `foi a ${JSON.stringify(soSelecao.selecao)} (movidas: ${JSON.stringify(soSelecao.movidas)})`,
+      );
+      assert.deepEqual(soSelecao.ordem, ["21", "22", "23", "24"], `caso 14 (k), só a seleção: a conversa ficou na ordem ${JSON.stringify(soSelecao.ordem)}`);
     }
 
     console.log(
