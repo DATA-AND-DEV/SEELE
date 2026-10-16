@@ -1036,6 +1036,8 @@ function donoDaRegiao(mod, instancia) {
     api: Number(mod.api) || 0,
     // A imagem que uma pessoa já tem, para a citação `daPessoa` (Step 4b).
     imagemDaPessoa: (qual, pessoaId, opcoes) => imagemCitada(qual, pessoaId, opcoes),
+    // A pessoa que uma citação nomeia (`pessoa`) está na sessão? (D-api-9)
+    estaNaSessao: (pessoaId) => pessoaEstaNaSessao(pessoaId),
     /**
      * Um evento da janela para o MOD.
      *
@@ -3600,6 +3602,16 @@ function entregarOAvisoDoMod(aviso) {
 /** O retrato da última vez que os MODs souberam da tela, e de que sessão. */
 let retratoDosEventos = null;
 let geracaoDosEventos = 0;
+
+/**
+ * **Alguém na sessão**, pelo retrato que os MODs leem (D-api-9): a citação
+ * `daPessoa` com `pessoa` só cita quem o MOD vê presente. O retrato é o desta
+ * sessão (`avisarOsModsDaTela` o guarda a cada desenho); de outra, ninguém.
+ */
+function pessoaEstaNaSessao(pessoaId) {
+  if (geracaoDosEventos !== geracaoDaSessao || !retratoDosEventos) return false;
+  return retratoDosEventos.pessoas.some((p) => String(p.id) === String(pessoaId));
+}
 let ritmoDaFala = null;
 
 /** Cada MOD de pé cuja API tem os eventos da tela, com o dono dele. */

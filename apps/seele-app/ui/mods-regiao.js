@@ -467,9 +467,27 @@ const FORMAS_DE_CAIXA = Object.freeze(
 
 /** A fonte identifica o recurso; repintar texto não deve reiniciar uma imagem. */
 function fonteDaMidia(plano) {
+  // No retrato, a citação também é fonte: o mesmo nó que passa a citar outra
+  // pessoa (`pessoa`, D-api-9), ou a capa em vez do avatar, troca de imagem.
   return plano.forma === "midia" || plano.forma === "retrato"
-    ? JSON.stringify([plano.no.fonte ?? null, plano.no.doServidor ?? null])
+    ? JSON.stringify([plano.no.fonte ?? null, plano.no.doServidor ?? null, plano.no.daPessoa ?? null, plano.no.pessoa ?? null])
     : plano.no.fundoDeMidia ? JSON.stringify(plano.no.fundoDeMidia) : undefined;
+}
+
+/**
+ * **A pessoa que uma citação nomeia** (`pessoa`; D-api-9): um id inteiro, ou o
+ * texto dele. `undefined` quando a citação não nomeia ninguém, e vale a pessoa
+ * do destino; `null` quando nomeia mal, e a citação fica sem imagem.
+ *
+ * @param {object} fonte O `fundoDeMidia`, ou o nó do `retrato`.
+ * @returns {string | null | undefined}
+ */
+function pessoaNomeada(fonte) {
+  if (!fonte || !Object.hasOwn(fonte, "pessoa")) return undefined;
+  const pessoa = fonte.pessoa;
+  if (typeof pessoa === "number" && Number.isSafeInteger(pessoa) && pessoa >= 0) return String(pessoa);
+  if (typeof pessoa === "string" && /^\d{1,20}$/.test(pessoa)) return pessoa;
+  return null;
 }
 
 /**
@@ -692,6 +710,9 @@ class RegiaoDeMod {
    *   (`'avatar'` ou `'capa'`), para a citação `daPessoa` (rascunho da API 6,
    *   §4; tarefa 6, Step 4b) — uma promessa de `{ papel, bytes: 0, uri }`, ou de
    *   `null`. Sem ela, a citação fica sem imagem, sem erro.
+   * - `estaNaSessao(pessoaId)`: se a pessoa que uma citação nomeia (`pessoa`,
+   *   D-api-9) está na sessão, pelo retrato. Sem ela, a citação com `pessoa`
+   *   fica sem imagem.
    *
    * O do produto também leva `geracao`, que a região não lê: quem confere a
    * geração é `podeFalar`.
@@ -728,9 +749,11 @@ class RegiaoDeMod {
     this.citados = new Map();
     this.aoTrocarACitacao = (evento) => {
       const { ponto, pessoa } = evento?.detail ?? {};
-      if (this.solta || String(this.pessoaDoDestino ?? "") !== String(pessoa ?? "")) return;
+      if (this.solta) return;
+      // A pessoa de cada nó: a que ele nomeia (D-api-9), ou a do destino.
       for (const citado of Array.from(this.citados.values())) {
-        if (citado.ponto === ponto) citado.reaplicar();
+        const de = citado.pessoa ?? this.pessoaDoDestino ?? "";
+        if (citado.ponto === ponto && String(de) === String(pessoa ?? "")) citado.reaplicar();
       }
     };
     /** A folha de classes desta raiz, montada sob demanda. */
@@ -1894,7 +1917,7 @@ class RegiaoDeMod {
     // era (`soImagem`). **A citação `daPessoa`** (Step 4b) usa a imagem que a
     // pessoa do destino já tem, sem pedido novo; sem ela, nada.
     const vindo = soImagem(fonte.daPessoa
-      ? this.imagemCitada(fonte.daPessoa)
+      ? this.imagemCitada(fonte.daPessoa, pessoaNomeada(fonte))
       : fonte.doServidor
         ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
         : this.dono.carregarMidia(fonte.fonte));
@@ -1922,8 +1945,8 @@ class RegiaoDeMod {
     // A imagem citada que troca (o `atualizar` da contribuição) chega aqui de
     // novo: já decodificada pela contribuição, e sem bytes neste bolso.
     if (fonte.daPessoa) {
-      this.lembrarCitacao(elem, fonte.daPessoa, () => {
-        soImagem(this.imagemCitada(fonte.daPessoa))
+      this.lembrarCitacao(elem, fonte.daPessoa, pessoaNomeada(fonte), () => {
+        soImagem(this.imagemCitada(fonte.daPessoa, pessoaNomeada(fonte)))
           .then(aplicar)
           .catch((falha) => this.dizerTropecoDaMidia("o fundo citado", plano.no.chave, falha));
       });
@@ -2029,7 +2052,7 @@ class RegiaoDeMod {
     // O retrato só mostra imagem: o som recusado pelo teto chega como o som
     // que era (`soImagem`).
     const vindo = soImagem(plano.no.daPessoa
-      ? this.imagemCitada(plano.no.daPessoa)
+      ? this.imagemCitada(plano.no.daPessoa, pessoaNomeada(plano.no))
       : doServidor
         ? this.dono.carregarMidiaDoServidor(
             Number(doServidor.canal) || 0,
@@ -2044,8 +2067,8 @@ class RegiaoDeMod {
     // A imagem citada que troca chega aqui de novo, e troca o `<img>`: já
     // decodificada pela contribuição, e sem bytes neste bolso.
     if (plano.no.daPessoa) {
-      this.lembrarCitacao(elem, plano.no.daPessoa, () => {
-        soImagem(this.imagemCitada(plano.no.daPessoa))
+      this.lembrarCitacao(elem, plano.no.daPessoa, pessoaNomeada(plano.no), () => {
+        soImagem(this.imagemCitada(plano.no.daPessoa, pessoaNomeada(plano.no)))
           .then((midia) => {
             if (!midia || estado.cancelado || this.solta) return;
             tirarAImagem();
@@ -2087,24 +2110,36 @@ class RegiaoDeMod {
   }
 
   /**
-   * **A imagem que a pessoa deste destino já tem** (`daPessoa`; rascunho da API
-   * 6, §4; tarefa 6, Step 4b): `'avatar'` ou `'capa'`. Só num destino que é uma
-   * pessoa (`pessoaDoDestino`, que a montagem de uma contribuição de pessoa
-   * põe): num canal, «a pessoa 3» seria outra pessoa. Uma promessa de `null`
-   * quando não há o que citar.
+   * **A imagem que uma pessoa já tem** (`daPessoa`; rascunho da API 6, §4;
+   * tarefa 6, Step 4b): `'avatar'` ou `'capa'`. Uma promessa de `null` quando
+   * não há o que citar.
+   *
+   * De quem: da pessoa que a citação nomeia (`pessoa`, D-api-9), em qualquer
+   * destino, e só se ela estiver na sessão (`estaNaSessao`, pelo retrato); sem
+   * como conferir, ninguém. Sem `pessoa`, da pessoa do destino
+   * (`pessoaDoDestino`, que a montagem de uma contribuição de pessoa põe): num
+   * canal, ou numa superfície, ninguém.
+   *
+   * @param {string} qual `'avatar'` ou `'capa'`.
+   * @param {string | null | undefined} nomeada O que `pessoaNomeada` leu do nó.
    */
-  imagemCitada(qual) {
-    const pessoa = this.pessoaDoDestino ?? "";
+  imagemCitada(qual, nomeada) {
+    if (nomeada === null) return Promise.resolve(null);
+    if (nomeada !== undefined && this.dono.estaNaSessao?.(nomeada) !== true) return Promise.resolve(null);
+    const pessoa = nomeada ?? this.pessoaDoDestino ?? "";
     if (!pessoa || typeof this.dono.imagemDaPessoa !== "function") return Promise.resolve(null);
     return this.dono.imagemDaPessoa(String(qual), pessoa, { parada: this.citacaoParada === true });
   }
 
-  /** Lembra um nó que cita, para a troca da imagem citada o alcançar. */
-  lembrarCitacao(elem, qual, reaplicar) {
+  /**
+   * Lembra um nó que cita, para a troca da imagem citada o alcançar: a da
+   * pessoa que ele nomeia, ou, sem nome, a do destino.
+   */
+  lembrarCitacao(elem, qual, nomeada, reaplicar) {
     const ponto = qual === "capa" ? "pessoa.capa" : qual === "avatar" ? "pessoa.avatar" : "";
-    if (!ponto) return;
+    if (!ponto || nomeada === null) return;
     if (this.citados.size === 0) globalThis.addEventListener?.("seele-mods-citacao", this.aoTrocarACitacao);
-    this.citados.set(elem, { ponto, reaplicar });
+    this.citados.set(elem, { ponto, pessoa: nomeada, reaplicar });
   }
 
   /** Esquece o nó que citava, e o ouvinte com o último. */

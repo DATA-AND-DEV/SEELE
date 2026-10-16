@@ -524,8 +524,98 @@ const { chromium } = require('./playwright.cjs');
     assert.deepEqual(troca.depois, { fundo: true, retrato: true },
       `a citação não acompanhou a troca da capa: o cartão ficou com a velha (${JSON.stringify(troca)})`);
 
+    // 5c. **A citação com `pessoa`, numa superfície** (D-api-9; `capa.onde.perfil`).
+    //     A folha do PERFIS cita a capa de quem ela mostra pelo id, e a imagem
+    //     é a da contribuição: nenhum pedido novo, e animada, porque a folha
+    //     não é a lista. Com o movimento reduzido, o quadro parado. O id de
+    //     quem não está na sessão deixa o fundo liso, sem recusa. E a troca da
+    //     capa alcança a folha, como alcança o cartão.
+    await page.evaluate(async (alvo) => {
+      window.recusarCapa = false;
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      contribuicoesDosMods.revogar(handleCapa);
+      window.handleCapa = registrarCapa(alvo, 'volume:na-folha');
+      desenharChamada(testTable.snapshot);
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      let n = 5000;
+      window.pedirComoOPerfis = (m) => atenderOMod({ id: 'teste/perfis', api: 6 }, instanciaTeste, { ...m, n: ++n });
+      await pedirComoOPerfis({ tipo: 'superficie-criar', descricao: { id: 'perfil', tipo: 'folha', titulo: 'Perfil' } });
+      await pedirComoOPerfis({ tipo: 'superficie-mostrar', superficie: 'perfil' });
+      window.montarCitando = (sufixo, pessoa) => pedirComoOPerfis({ tipo: 'superficie-montar', superficie: 'perfil', arvore: [
+        { forma: 'caixa', chave: `cabeca-${sufixo}`, fundoDeMidia: { daPessoa: 'capa', pessoa }, dentro: [{ forma: 'texto', chave: 't', dentro: 'Lia' }] },
+        { forma: 'retrato', chave: `foto-${sufixo}`, daPessoa: 'capa', pessoa, inicial: 'L' },
+      ] });
+      window.naFolha = (sufixo) => {
+        const folha = document.querySelector('[data-superficie="perfil"]');
+        const cabeca = folha?.querySelector(`[data-chave-do-mod="cabeca-${sufixo}"]`);
+        const foto = folha?.querySelector(`[data-chave-do-mod="foto-${sufixo}"]`);
+        return {
+          fundo: cabeca?.style.backgroundImage ?? null,
+          retrato: foto?.querySelector('.regiao-de-mod-retrato-imagem')?.getAttribute('src') ?? '',
+          estadoDoRetrato: foto?.dataset.estadoDoRetrato ?? null,
+        };
+      };
+      window.pedidosDeMidia = () => testCalls.filter(c => c.cmd === 'ler_imagem_mod').length;
+    }, alvo);
+    const esperar = (ms) => page.evaluate(ms => new Promise(ok => setTimeout(ok, ms)), ms);
+
+    const pedidosAntesDaFolha = await page.evaluate(() => pedidosDeMidia());
+    await page.evaluate(alvo => montarCitando('viva', Number(alvo)), alvo);
+    await esperar(400);
+    const viva = await page.evaluate(() => naFolha('viva'));
+    assert.ok(viva.fundo?.includes(await page.evaluate(() => daCapa)),
+      `a folha que cita a capa pelo id não a mostrou, animada: ${JSON.stringify(viva)}`);
+    assert.ok(viva.retrato.startsWith('data:image/jpeg'), `o retrato da folha que cita pelo id não a mostrou: ${JSON.stringify(viva)}`);
+    assert.equal(await page.evaluate(() => pedidosDeMidia()) - pedidosAntesDaFolha, 0, 'citar a capa na folha abriu pedido de mídia novo');
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.evaluate(alvo => montarCitando('reduzida', Number(alvo)), alvo);
+    await esperar(400);
+    const reduzida = await page.evaluate(() => naFolha('reduzida'));
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    assert.ok(reduzida.fundo?.includes('data:image/png'),
+      `com o movimento reduzido, a capa citada na folha não é o quadro parado: ${JSON.stringify(reduzida)}`);
+
+    // A 99 não está na sessão, mas tem capa: a de quem saiu, que o MOD não
+    // revogou. É a presença, e não a falta de contribuição, que a deixa lisa.
+    await page.evaluate(() => { window.handleCapaDeQuemSaiu = registrarCapa('99', 'volume:quem-saiu'); });
+    await esperar(400);
+    const recusasAntes = await page.evaluate(() => entregues.filter(m => m.tipo === 'evento' && m.evento?.nome === 'midia').length);
+    const pedidosAntesDaAusente = await page.evaluate(() => pedidosDeMidia());
+    await page.evaluate(() => montarCitando('ausente', 99));
+    await esperar(400);
+    const ausente = await page.evaluate(() => naFolha('ausente'));
+    assert.equal(await page.evaluate(() => pedidosDeMidia()) - pedidosAntesDaAusente, 0,
+      'citar quem não está na sessão carregou a capa dele');
+    await page.evaluate(() => contribuicoesDosMods.revogar(handleCapaDeQuemSaiu));
+    assert.equal(ausente.fundo, '', `a citação de quem não está na sessão pintou o fundo: ${JSON.stringify(ausente)}`);
+    assert.equal(ausente.estadoDoRetrato, 'inicial', `a citação de quem não está na sessão saiu ${JSON.stringify(ausente)}`);
+    assert.equal(await page.evaluate(() => entregues.filter(m => m.tipo === 'evento' && m.evento?.nome === 'midia').length), recusasAntes,
+      'citar quem não está na sessão virou evento de mídia: devia ficar liso, sem recusa');
+
+    await page.evaluate(alvo => montarCitando('troca', Number(alvo)), alvo);
+    await esperar(400);
+    const antesDaTroca = await page.evaluate(() => naFolha('troca'));
+    await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 96; canvas.height = 32;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#e63232'; ctx.fillRect(0, 0, 96, 32);
+      window.capaNova = canvas.toDataURL('image/jpeg');
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: capaNova };
+      contribuicoesDosMods.atualizar(handleCapa, { id: 'teste/perfis', instancia: instanciaTeste }, {
+        doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:na-folha-depois' } },
+      });
+    });
+    await esperar(600);
+    const depoisDaTroca = await page.evaluate(() => naFolha('troca'));
+    assert.ok(depoisDaTroca.fundo !== antesDaTroca.fundo && depoisDaTroca.fundo.includes(await page.evaluate(() => capaNova)),
+      `a citação pelo id não acompanhou a troca da capa na folha: ${JSON.stringify({ antesDaTroca, depoisDaTroca })}`);
+    await page.evaluate(() => pedirComoOPerfis({ tipo: 'superficie-descartar', superficie: 'perfil' }));
+
     assert.deepEqual(errors, []);
-    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo, e que acompanha a troca da capa.');
+    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo, que acompanha a troca da capa, e que pelo id resolve numa folha.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

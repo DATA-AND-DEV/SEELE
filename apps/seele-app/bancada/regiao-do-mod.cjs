@@ -3182,6 +3182,110 @@ function registroDeVerdade() {
  * (`recusa-de-mod`), com o id do MOD na frente e em campo próprio — e não como
  * a recusa que ela não é. E nenhuma promessa fica sem quem a pegue.
  */
+/**
+ * **A citação com `pessoa`** (D-api-9; `capa.onde.perfil`): o `fundoDeMidia` e
+ * o `retrato` que citam `{ daPessoa, pessoa: id }` citam quem o MOD nomeia, em
+ * qualquer destino — numa superfície, onde não há pessoa do destino, e também
+ * num cartão, onde o id nomeado vale sobre o do destino. O id tem de ser de
+ * alguém na sessão (`estaNaSessao`, pelo retrato); sem isso, ou com um id que
+ * não é id, o fundo fica liso e o retrato fica na inicial, como na citação de
+ * uma imagem que a pessoa não tem: sem pedir a imagem, e sem recusa.
+ */
+async function aCitacaoComPessoaCitaQuemOModNomeia() {
+  const caso = "a citação com pessoa";
+  const b = bancada();
+  const d = dono(b);
+  const pedidas = [];
+  d.api.imagemDaPessoa = (qual, pessoa, opcoes) => {
+    pedidas.push({ qual, pessoa: String(pessoa), parada: opcoes?.parada === true });
+    return Promise.resolve({ papel: "imagem", bytes: 0, uri: `data:${qual}-${pessoa}` });
+  };
+  const presentes = new Set(["3", "7"]);
+  d.api.estaNaSessao = (pessoa) => presentes.has(String(pessoa));
+  // O evento da troca (`seele-mods-citacao`), como a janela o despacha.
+  const ouvintes = new Map();
+  b.janela.addEventListener = (nome, fn) => ouvintes.set(nome, [...(ouvintes.get(nome) ?? []), fn]);
+  b.janela.removeEventListener = (nome, fn) => ouvintes.set(nome, (ouvintes.get(nome) ?? []).filter((f) => f !== fn));
+  const trocar = (ponto, pessoa) => {
+    for (const fn of ouvintes.get("seele-mods-citacao") ?? []) fn({ detail: { ponto, pessoa } });
+  };
+
+  // Uma superfície: nenhum destino de pessoa.
+  const folha = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+  folha.aplicar([
+    { forma: "caixa", chave: "tres", fundoDeMidia: { daPessoa: "capa", pessoa: 3 } },
+    { forma: "retrato", chave: "foto", daPessoa: "avatar", pessoa: 3, inicial: "R" },
+    { forma: "caixa", chave: "ausente", fundoDeMidia: { daPessoa: "capa", pessoa: 99 } },
+    // Uma lista vira «3» pelo `String`, e passaria pela presença: só a forma do id a barra.
+    { forma: "caixa", chave: "torta", fundoDeMidia: { daPessoa: "capa", pessoa: [3] } },
+    { forma: "caixa", chave: "sem", fundoDeMidia: { daPessoa: "capa" } },
+  ]);
+  await assentar();
+  const [tres, foto, ausente, torta, sem] = folha.raiz.children;
+  confere(caso, String(tres.style.backgroundImage ?? "").includes("data:capa-3"),
+    `a capa citada pelo id numa superfície não apareceu: «${tres.style.backgroundImage}»`);
+  confere(caso, foto.dataset.estadoDoRetrato === "imagem",
+    `o retrato citado pelo id numa superfície ficou «${foto.dataset.estadoDoRetrato}»`);
+  for (const [nome, elem] of [["ausente", ausente], ["torta", torta], ["sem", sem]]) {
+    confere(caso, !elem.style.backgroundImage, `a citação «${nome}» pintou o fundo: «${elem.style.backgroundImage}»`);
+  }
+  confere(caso, pedidas.every((p) => p.pessoa === "3"),
+    `pediu a imagem de quem não devia: ${JSON.stringify(pedidas)}`);
+  confere(caso, pedidas.every((p) => p.parada === false), `a superfície pediu a capa parada: ${JSON.stringify(pedidas)}`);
+  confere(caso, !d.ditos.some((e) => e.nome === "midia"),
+    `o fundo liso virou evento de mídia: ${JSON.stringify(d.ditos.filter((e) => e.nome === "midia"))}`);
+
+  // Num cartão, o id que o MOD nomeia vale sobre o do destino; sem ele, o do destino.
+  const cartao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+  cartao.pessoaDoDestino = "7";
+  cartao.aplicar([
+    { forma: "caixa", chave: "nomeada", fundoDeMidia: { daPessoa: "capa", pessoa: 3 } },
+    { forma: "caixa", chave: "do-destino", fundoDeMidia: { daPessoa: "capa" } },
+  ]);
+  await assentar();
+  const [nomeada, doDestino] = cartao.raiz.children;
+  confere(caso, String(nomeada.style.backgroundImage ?? "").includes("data:capa-3"),
+    `no cartão da pessoa 7, a capa nomeada da 3 saiu «${nomeada.style.backgroundImage}»`);
+  confere(caso, String(doDestino.style.backgroundImage ?? "").includes("data:capa-7"),
+    `no cartão da pessoa 7, a citação sem pessoa saiu «${doDestino.style.backgroundImage}»`);
+
+  // A troca da capa da 3 reaplica quem cita a 3, e só ele.
+  pedidas.length = 0;
+  trocar("pessoa.capa", "3");
+  await assentar();
+  confere(caso, pedidas.filter((p) => p.qual === "capa" && p.pessoa === "3").length === 2,
+    `a troca da capa da 3 não alcançou os dois fundos que a citam pelo id: ${JSON.stringify(pedidas)}`);
+  confere(caso, !pedidas.some((p) => p.pessoa === "7"), `a troca da capa da 3 reaplicou quem cita a 7: ${JSON.stringify(pedidas)}`);
+
+  // A folha que passa a mostrar outra pessoa, com as mesmas chaves, cita a
+  // nova: a pessoa nomeada faz parte da fonte, no fundo e no retrato.
+  pedidas.length = 0;
+  folha.aplicar([
+    { forma: "caixa", chave: "tres", fundoDeMidia: { daPessoa: "capa", pessoa: 7 } },
+    { forma: "retrato", chave: "foto", daPessoa: "avatar", pessoa: 7, inicial: "R" },
+  ]);
+  await assentar();
+  confere(caso, String(folha.raiz.children[0].style.backgroundImage ?? "").includes("data:capa-7"),
+    `o fundo que passou a citar a 7, na mesma chave, saiu «${folha.raiz.children[0].style.backgroundImage}»`);
+  confere(caso, pedidas.some((p) => p.qual === "avatar" && p.pessoa === "7"),
+    `o retrato que passou a citar a 7, na mesma chave, não a pediu: ${JSON.stringify(pedidas)}`);
+
+  // Sem como conferir a presença, nada é citado pelo id: o lado seguro.
+  const semPresenca = dono(b);
+  semPresenca.api.imagemDaPessoa = d.api.imagemDaPessoa;
+  const outra = new b.RegiaoDeMod("seele/perfis", semPresenca.api, b.raiz());
+  pedidas.length = 0;
+  outra.aplicar([{ forma: "caixa", chave: "c", fundoDeMidia: { daPessoa: "capa", pessoa: 3 } }]);
+  await assentar();
+  confere(caso, pedidas.length === 0 && !outra.raiz.children[0].style.backgroundImage,
+    "sem estaNaSessao no dono, a citação pelo id foi feita assim mesmo");
+
+  folha.soltar();
+  cartao.soltar();
+  outra.soltar();
+  confere(caso, (ouvintes.get("seele-mods-citacao") ?? []).length === 0, "soltar as regiões deixou o ouvinte da troca preso");
+}
+
 async function aplicarQueLancaNaoViraRecusa() {
   const soltas = [];
   const pegar = (motivo) => soltas.push(String(motivo?.stack ?? motivo));
@@ -6188,6 +6292,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     umaImagemQueNaoDecodificaERecusadaEDita,
     oFundoDeTelaDizOEstado,
     osBytesSaoReservadosAntesDoDecode,
+    aCitacaoComPessoaCitaQuemOModNomeia,
     aplicarQueLancaNaoViraRecusa,
     oSomTocaPorWebAudioENuncaPorUmElementoDeMidia,
     oSomDoServidorVemDosBytesDoDataENaoDeUmElemento,
