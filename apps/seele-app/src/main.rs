@@ -4586,6 +4586,15 @@ const ARQUIVOS_DE_PE: usize = 4;
 /// servidor. Ele não atravessa inteiro: sai em pedaços que o MOD pede.
 const TETO_DO_ESCOLHIDO: usize = 10 * 1024 * 1024;
 
+/// O teto deste pedido de escolha: o do produto, que vale sempre, apertado
+/// pelo que o MOD declarou. Um MOD não amplia o que esta máquina aceita ler, e
+/// zero é «não declarou».
+fn teto_do_escolhido(limite_de_bytes: Option<usize>) -> usize {
+    limite_de_bytes
+        .filter(|n| *n > 0)
+        .map_or(TETO_DO_ESCOLHIDO, |n| n.min(TETO_DO_ESCOLHIDO))
+}
+
 /// Quanto de um arquivo escolhido sai por pedido.
 ///
 /// **Múltiplo de três**, e é o que importa aqui. O base64 codifica três bytes
@@ -4639,6 +4648,47 @@ impl ArquivosEscolhidos {
         let antes = self.guardados.len();
         self.guardados.retain(|_, a| a.geracao != geracao);
         antes - self.guardados.len()
+    }
+
+    /// Um pedaço do arquivo `arquivo`, em base64, para `id` na `geracao` —
+    /// o corpo de [`pedaco_do_escolhido`].
+    fn pedaco(
+        &self,
+        geracao: u64,
+        id: &str,
+        arquivo: u64,
+        inicio: usize,
+    ) -> Result<String, FalhaNoMod> {
+        let guardado = self.guardados.get(&arquivo).ok_or(FalhaNoMod::Recusado {
+            motivo: "arquivo-nao-esta-de-pe".to_owned(),
+        })?;
+        // **De quem pediu, e não de quem souber o número.** Sem esta linha, um
+        // MOD que adivinhasse um número leria o arquivo que outro pediu — e o
+        // número é pequeno e sequencial.
+        if guardado.de_quem != id || guardado.geracao != geracao {
+            return Err(FalhaNoMod::Recusado {
+                motivo: "arquivo-de-outro-mod".to_owned(),
+            });
+        }
+        let fim = inicio
+            .saturating_add(PEDACO_DO_ESCOLHIDO)
+            .min(guardado.bytes.len());
+        let fatia = guardado.bytes.get(inicio..fim).unwrap_or_default();
+        Ok(seele_ffi::base64_de(fatia))
+    }
+
+    /// Solta o arquivo `arquivo`, se ele é de `id` na `geracao` — o corpo de
+    /// [`soltar_escolhido`]. Soltar o que já não é de ninguém não é erro: a
+    /// saída pode ter passado na frente, e quem chama não tem como saber disso
+    /// sem uma corrida.
+    fn soltar(&mut self, geracao: u64, id: &str, arquivo: u64) {
+        if self
+            .guardados
+            .get(&arquivo)
+            .is_some_and(|a| a.de_quem == id && a.geracao == geracao)
+        {
+            self.guardados.remove(&arquivo);
+        }
     }
 }
 
@@ -9227,12 +9277,8 @@ async fn escolher_para_o_mod(
         .map_err(|_| FalhaNoMod::Recusado {
             motivo: "arquivo-ilegivel".to_owned(),
         })?;
-    // O teto do produto vale sempre; o que o MOD declarou só o aperta. Um MOD
-    // não amplia o que esta máquina aceita ler.
-    let teto = limite_de_bytes
-        .filter(|n| *n > 0)
-        .map_or(TETO_DO_ESCOLHIDO, |n| n.min(TETO_DO_ESCOLHIDO));
-    if tamanho > teto {
+    // O teto do produto vale sempre; o que o MOD declarou só o aperta.
+    if tamanho > teto_do_escolhido(limite_de_bytes) {
         return Err(FalhaNoMod::Recusado {
             motivo: "arquivo-grande-demais".to_owned(),
         });
@@ -9301,29 +9347,11 @@ fn pedaco_do_escolhido(
     inicio: usize,
 ) -> Result<String, FalhaNoMod> {
     session.recusar_se_morta(geracao)?;
-    let guardados = session
+    session
         .arquivos_escolhidos
         .lock()
-        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
-    let guardado = guardados
-        .guardados
-        .get(&arquivo)
-        .ok_or(FalhaNoMod::Recusado {
-            motivo: "arquivo-nao-esta-de-pe".to_owned(),
-        })?;
-    // **De quem pediu, e não de quem souber o número.** Sem esta linha, um MOD
-    // que adivinhasse um número leria o arquivo que outro pediu — e o número é
-    // pequeno e sequencial.
-    if guardado.de_quem != id || guardado.geracao != geracao {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "arquivo-de-outro-mod".to_owned(),
-        });
-    }
-    let fim = inicio
-        .saturating_add(PEDACO_DO_ESCOLHIDO)
-        .min(guardado.bytes.len());
-    let fatia = guardado.bytes.get(inicio..fim).unwrap_or_default();
-    Ok(seele_ffi::base64_de(fatia))
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+        .pedaco(geracao, &id, arquivo, inicio)
 }
 
 /// **Solta um arquivo escolhido**, agora, a pedido de quem o pediu.
@@ -9342,19 +9370,11 @@ fn soltar_escolhido(
     id: String,
     arquivo: u64,
 ) -> Result<(), FalhaNoMod> {
-    let mut guardados = session
+    session
         .arquivos_escolhidos
         .lock()
-        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
-    // Soltar o que já não é de ninguém não é erro: a saída pode ter passado na
-    // frente, e quem chama não tem como saber disso sem uma corrida.
-    if guardados
-        .guardados
-        .get(&arquivo)
-        .is_some_and(|a| a.de_quem == id && a.geracao == geracao)
-    {
-        guardados.guardados.remove(&arquivo);
-    }
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+        .soltar(geracao, &id, arquivo);
     Ok(())
 }
 
@@ -15184,6 +15204,133 @@ mod a_supervisao_dos_mods_nativos {
         // a sessão que acabou de começar.
         assert_eq!(guardados.guardados.len(), 1);
         assert!(guardados.guardados.values().all(|a| a.geracao == 8));
+    }
+
+    /// **O pedaço só sai para quem escolheu, e o `soltar` devolve agora**
+    /// (`actions.pedaco` e `actions.soltar-arquivo`; a auditoria do `v6.json`,
+    /// tabela 2). O teste dos pedaços provava a constante, e não a entrega:
+    /// tirar a conferência de dono passava, e o `soltar` não tinha prova
+    /// nenhuma. O corpo dos dois comandos, pela mesma função que eles chamam.
+    #[test]
+    fn o_pedaco_so_sai_para_quem_escolheu_e_o_soltar_devolve_agora() {
+        let mut guardados = super::ArquivosEscolhidos::default();
+        let bytes: Vec<u8> = (0..=255).collect();
+        let numero = guardados
+            .guardar(super::ArquivoEscolhidoDeMod {
+                de_quem: "prova/mod".to_owned(),
+                geracao: 7,
+                tipo: "image/png",
+                bytes: bytes.clone(),
+            })
+            .expect("guardou");
+        let motivo = |r: Result<String, super::FalhaNoMod>| match r {
+            Ok(_) => "(saiu)".to_owned(),
+            Err(falha) => super::motivo_de(&falha).to_owned(),
+        };
+
+        assert_eq!(
+            guardados.pedaco(7, "prova/mod", numero, 0).ok(),
+            Some(seele_ffi::base64_de(&bytes)),
+            "quem escolheu não recebeu o arquivo"
+        );
+        assert_eq!(
+            guardados.pedaco(7, "prova/mod", numero, 250).ok(),
+            Some(seele_ffi::base64_de(bytes.get(250..).unwrap_or_default())),
+            "o pedaço do meio não começou onde o MOD pediu"
+        );
+        assert_eq!(
+            motivo(guardados.pedaco(7, "outro/mod", numero, 0)),
+            "arquivo-de-outro-mod",
+            "um MOD que sabe o número leu o arquivo que outro escolheu"
+        );
+        assert_eq!(
+            motivo(guardados.pedaco(8, "prova/mod", numero, 0)),
+            "arquivo-de-outro-mod",
+            "a sessão seguinte leu o arquivo da anterior"
+        );
+
+        // O `soltar` de quem não é o dono não solta; o do dono solta agora.
+        guardados.soltar(7, "outro/mod", numero);
+        assert!(
+            guardados.guardados.contains_key(&numero),
+            "outro MOD soltou o arquivo que não era dele"
+        );
+        guardados.soltar(7, "prova/mod", numero);
+        assert_eq!(
+            motivo(guardados.pedaco(7, "prova/mod", numero, 0)),
+            "arquivo-nao-esta-de-pe",
+            "o arquivo solto continuou de pé"
+        );
+        // E soltar de novo não é erro.
+        guardados.soltar(7, "prova/mod", numero);
+    }
+
+    /// **O escolhido tem teto de 10 MiB, e o MOD só o aperta** (`volume.cliente`
+    /// e `recusas.volume[3]`; a auditoria do `v6.json`, tabela 9). O comando
+    /// abre o seletor do sistema e não sobe em teste: trocar o teto para 20 MiB
+    /// passava. O número é o do texto, lido dele.
+    #[test]
+    fn o_escolhido_tem_teto_de_10_mib_e_o_mod_so_o_aperta() {
+        const MIB: usize = 1024 * 1024;
+        let v6: serde_json::Value =
+            serde_json::from_str(include_str!("../../../api/v6.json")).expect("o v6.json");
+        let texto = v6
+            .get("volume")
+            .and_then(|volume| volume.get("cliente"))
+            .and_then(serde_json::Value::as_str)
+            .expect("o texto do volume.cliente");
+        assert!(
+            texto.contains(&format!("até {} MiB", super::TETO_DO_ESCOLHIDO / MIB)),
+            "o teto do escolhido ({} MiB) não é o que o v6.json diz: {texto}",
+            super::TETO_DO_ESCOLHIDO / MIB
+        );
+        assert_eq!(super::teto_do_escolhido(None), 10 * MIB);
+        assert_eq!(
+            super::teto_do_escolhido(Some(0)),
+            10 * MIB,
+            "zero é «não declarou»"
+        );
+        assert_eq!(
+            super::teto_do_escolhido(Some(MIB)),
+            MIB,
+            "o MOD não apertou o teto"
+        );
+        assert_eq!(
+            super::teto_do_escolhido(Some(20 * MIB)),
+            10 * MIB,
+            "o MOD ampliou o que esta máquina aceita ler"
+        );
+    }
+
+    /// **A mídia do servidor acima do teto é `arquivo-grande-demais`**
+    /// (`recusas.volume[3]`): antes de decodificar, pelo tamanho do texto, e
+    /// depois, pelo dos bytes. Nenhum teste passava do teto em nenhum dos
+    /// caminhos.
+    #[test]
+    fn a_midia_do_servidor_acima_do_teto_e_arquivo_grande_demais() {
+        let teto = seele_ffi::mods::TETO_DE_MIDIA;
+        let motivo = |base64: &str| match super::ler_midia_do_servidor(base64, None) {
+            Ok(_) => "(aceita)".to_owned(),
+            Err(falha) => super::motivo_de(&falha).to_owned(),
+        };
+        // Caracteres que não são base64: só a conferência de antes, pelo
+        // tamanho do texto, diz `arquivo-grande-demais`; decodificado, seria
+        // `nao-e-base64`.
+        assert_eq!(
+            motivo(&"!".repeat(teto * 2 + 4)),
+            "arquivo-grande-demais",
+            "o texto acima do dobro do teto foi decodificado antes de ser medido"
+        );
+        let um_a_mais = seele_ffi::base64_de(&vec![0_u8; teto + 1]);
+        assert!(
+            um_a_mais.len() <= teto * 2,
+            "o caso não mede o que diz: o texto já passa do corte de antes"
+        );
+        assert_eq!(
+            motivo(&um_a_mais),
+            "arquivo-grande-demais",
+            "os bytes acima do teto passaram"
+        );
     }
 
     /// **Dois pedaços seguidos, concatenados, são o arquivo.**
