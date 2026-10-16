@@ -282,14 +282,18 @@ function escreverOTexto(nodo, texto) {
  */
 function naoMedido(nodo, motivo) {
   escreverOTexto(nodo, SEM_MEDIDA);
-  nodo.classList.add("ausente");
-  nodo.title = motivo;
+  // A classe e o `title` também só quando mudam: `classList.add` de uma classe
+  // que já está, e o `title` igual, reescrevem o atributo do mesmo jeito — é
+  // uma mutação por campo, duas vezes por segundo (lote R63).
+  if (!nodo.classList.contains("ausente")) nodo.classList.add("ausente");
+  if (nodo.title !== motivo) nodo.title = motivo;
 }
 
 /** O contrário: um valor que existe, no mesmo campo. */
 function medido(nodo, texto) {
   escreverOTexto(nodo, texto);
-  nodo.classList.remove("ausente");
+  if (nodo.classList.contains("ausente")) nodo.classList.remove("ausente");
+  // Sem `title`, tirá-lo não muta nada: não há guarda a pôr.
   nodo.removeAttribute("title");
 }
 
@@ -2746,7 +2750,8 @@ function desenharMedia(voice_room) {
   }
 
   const sync = voice_room.sync;
-  celula.dataset.faixa = sync.band;
+  // Só quando muda, como o texto (lote R63): ver `escreverOTexto`.
+  if (celula.dataset.faixa !== sync.band) celula.dataset.faixa = sync.band;
   // A marca de bloco é a metade que sobrevive sem cor. Ela fica em face
   // monoespaçada ao lado do número porque a Saira Condensed, que desenha o
   // número, não tem `U+2588`.
@@ -3263,7 +3268,10 @@ function desenharTelemetria(snapshot) {
     medido($("tel-caminho"), caminho);
   }
 
-  $("tel-local").hidden = !tel.local_fault;
+  // O `hidden` também só quando muda: escrito igual, ele é uma mutação no
+  // rodapé a cada tique (lote R63).
+  const falhaLocal = $("tel-local");
+  if (falhaLocal.hidden !== !tel.local_fault) falhaLocal.hidden = !tel.local_fault;
   desenharAparelho(snapshot);
 
   desenharEnlace(snapshot.link);
@@ -3323,7 +3331,7 @@ function desenharAparelho(snapshot) {
     escreverOTexto(alvo, nome ? `ÁUDIO AGORA EM ${nome.toUpperCase()}` : "O APARELHO DE ÁUDIO MUDOU");
     return;
   }
-  alvo.hidden = true;
+  if (!alvo.hidden) alvo.hidden = true;
 }
 
 /** `HH:MM:SS` desde um instante local, ou o travessão antes de haver um. */
