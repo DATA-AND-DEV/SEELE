@@ -141,6 +141,16 @@ TEMAS = {
               "arredondamento": 4, "brilho": False},
 }
 
+# **E os acentos que o texto nomeia** (`tema.nucleo` do `v6.json`: «um guarda
+# prova que acento #331704, #050403 e #0a0806 não mudam o #veredito, o
+# #botao-mudo apertado, o #voz-mudo e o #voz-sair»; a auditoria, tabela 8). Os
+# temas de cima não usavam dois deles. Lidos do texto, cada um sobre o hostil.
+ACENTOS_DO_TEXTO = [a.lower() for a in re.findall(r"#[0-9a-fA-F]{6}", json.loads((RAIZ / "api" / "v6.json").read_text())["tema"]["nucleo"])]
+if len(ACENTOS_DO_TEXTO) != 3:
+    raise SystemExit(f"o tema.nucleo do v6.json não nomeia mais três acentos: {ACENTOS_DO_TEXTO}")
+for _acento in ACENTOS_DO_TEXTO:
+    TEMAS[f"acento-{_acento[1:]}"] = {**TEMAS["hostil"], "acento": _acento}
+
 
 def montar(destino: pathlib.Path, *, celular: bool, marca: str | None) -> pathlib.Path:
     """Uma cópia da `ui/` com o duble, e com ou sem os arquivos das cascas do navegador.
@@ -3305,7 +3315,7 @@ def escolha_sem_armazenamento(pg: Page) -> list[str]:
 
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
-    "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
+    "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil", *(f"acento-{a[1:]}" for a in ACENTOS_DO_TEXTO)),
                          raiz="#voz, .cel-abas, #aviso-fone, #aviso-audio"),
     "segurar": Caso(levar=segurar, raiz="#voz, .cel-abas"),
     # O claro voltou com a Tarefa 13: o azul da sala ocupada e o fósforo de quem
@@ -3458,7 +3468,7 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
                 m = pg.evaluate(MEDIR, [aparelho["topo"], aparelho["pe"], caso.raiz])
                 m["nucleo"] = pg.evaluate(NUCLEO)
                 (saida / f"{rotulo}.json").write_text(json.dumps(m, ensure_ascii=False, indent=2))
-                motivos += reprovacoes(m, aparelho, so_nucleo=tema == "hostil")
+                motivos += reprovacoes(m, aparelho, so_nucleo=tema == "hostil" or str(tema).startswith("acento-"))
                 if tema is None:
                     nucleo_nativo = m["nucleo"]
                 else:

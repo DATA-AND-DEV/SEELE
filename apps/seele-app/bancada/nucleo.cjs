@@ -42,6 +42,8 @@
 // Rodar:  node apps/seele-app/bancada/nucleo.cjs
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { servir, respostas, retrato } = require('./telas.cjs');
 const { chromium } = require('./playwright.cjs');
 
@@ -52,6 +54,14 @@ const TEMAS = {
   claro: { fundo: '#f2ece0', painel: '#e6dfcf', texto: '#12100e', apagado: '#574e43', acento: '#a83a10', borda: '#b8ad9a' },
   hostil: { fundo: '#050403', painel: '#0a0806', texto: '#eae3cf', apagado: '#908574', acento: '#050403', borda: '#241f19' },
 };
+// **E os acentos que o texto nomeia** (`tema.nucleo`: «um guarda prova que
+// acento #331704, #050403 e #0a0806 não mudam…»; a auditoria do v6, tabela 8):
+// os temas de cima são os do celular, e dois dos três nunca eram acento. Lidos
+// do texto, cada um sobre o hostil, por baixo da validação como ele.
+const ACENTOS_DO_TEXTO = [...JSON.parse(fs.readFileSync(path.join(__dirname, '../../../api/v6.json'), 'utf8'))
+  .tema.nucleo.matchAll(/#[0-9a-f]{6}/gi)].map((m) => m[0].toLowerCase());
+assert.equal(ACENTOS_DO_TEXTO.length, 3, `o tema.nucleo do v6.json não nomeia mais três acentos: ${ACENTOS_DO_TEXTO}`);
+for (const acento of ACENTOS_DO_TEXTO) TEMAS[`acento ${acento}`] = { ...TEMAS.hostil, acento };
 
 (async () => {
   const server = servir();
@@ -249,6 +259,10 @@ const TEMAS = {
           return Math.abs(f.top + f.height / 2 - c.top) <= 512 && Math.abs(f.left + f.width / 2 - c.left) <= 512;
         })(),
         barraComMod: Boolean(document.querySelector('#operador-mods')?.textContent.includes('uma linha do MOD')),
+        // **O cabeçalho diz de qual MOD é** (`superficies.garantias-do-produto[1]`;
+        // a auditoria do v6, tabela 7): o (a) e o (b) conferiam que a atribuição
+        // existe e não está coberta, e um texto vazio passava.
+        atribuicaoDiz: document.querySelector('[data-superficie="s"] .superficie-de-mod-origem')?.textContent ?? null,
       };
     });
     assert.ok(guarda.comCapa && guarda.barraComMod, `o guarda não mede o que diz: a capa ou a barra do MOD não montou: ${JSON.stringify(guarda)}`);
@@ -257,6 +271,7 @@ const TEMAS = {
     assert.deepEqual(guarda.ausentes, [], 'um item do núcleo sumiu do DOM, e o guarda não o mede');
     assert.deepEqual(guarda.dentro, [], 'um item do núcleo mora dentro do contêiner de um ponto de contribuição');
     assert.deepEqual(guarda.cobertos, [], 'uma contribuição cobre um item do núcleo');
+    assert.equal(guarda.atribuicaoDiz, 'teste/nucleo', 'o cabeçalho da superfície não diz de qual MOD ela é');
 
     // 3. O modal não cobre a barra.
     const abrirModal = () => page.evaluate(async () => {
@@ -327,7 +342,15 @@ const TEMAS = {
       return new Promise((ok) => setTimeout(ok, 150));
     }, evento);
     await tocar({ evento: 'Parou', quem: 'aa11bb22', desfecho: 'recusada' });
+    // **O foco entra na abertura e volta ao acionador** (`superficies.
+    // garantias-do-produto[3]`, (a) e (c); a auditoria do v6, tabela 7): o Tab
+    // de baixo passaria sem o foco de entrada, porque o primeiro Tab o puxa para
+    // dentro, e nada conferia a volta. O acionador é a lupa do cabeçalho do
+    // canal, do produto, que o modal adormece.
+    await page.focus('#botao-buscar');
     await abrirModal();
+    const focoNaAbertura = await page.evaluate(() => Boolean(document.activeElement?.closest('[data-superficie="alto"]')));
+    assert.ok(focoNaAbertura, 'o diálogo modal abriu, e o foco ficou fora dele até a primeira tecla');
     await tocar({ evento: 'Tocou', quem: 'aa11bb22', codigo: 'K9P2-CSM7-NBFR-AYQ3', apelido: 'rafa', nome_na_agenda: null, com_som: true });
     const largo = await medirOModal();
     assert.deepEqual({ atender: largo.atender, recusar: largo.recusar, cruzaToque: largo.cruzaToque },
@@ -349,6 +372,8 @@ const TEMAS = {
     assert.deepEqual(tabs, [true, true, true, true, true, true], 'um Tab levou o foco para fora do diálogo modal');
     await page.keyboard.press('Escape');
     assert.equal(await page.evaluate(() => Boolean(document.querySelector('[data-superficie="alto"]')?.isConnected)), false, 'o Esc não fechou o diálogo modal');
+    assert.equal(await page.evaluate(() => document.activeElement?.id ?? document.activeElement?.tagName), 'botao-buscar',
+      'fechado o diálogo modal, o foco não voltou a quem o tinha antes');
 
     // A 900, a coluna é gaveta: fechada, a porta dela fica alcançável; aberta,
     // o MUDO.
