@@ -2510,6 +2510,12 @@ function mesmoFeitio(velho, novo) {
  * porque a marca sai aqui no quadro seguinte. Preservar outro atributo faria o
  * celular parar de adaptar calado — o ENTRAR MUDO e as marcas da sala sumiriam.
  * A `tools/bancada-do-celular.py` (`aba_servidor`) prende isso.
+ *
+ * **O `style` passa pelo CSSOM, e não pelo atributo** (lote R63). A CSP do
+ * produto é `style-src 'self'`, e ela recusa o `style` escrito por
+ * `setAttribute`: medido no Chromium e no WebKit da bancada, o texto fica no
+ * atributo e nada é aplicado. `style.cssText` é aceito. É o avatar da conversa,
+ * que ganha o retrato (`aplicarAvatar`) num nó reaproveitado.
  */
 function vestirComo(velho, novo) {
   if (velho.nodeType === Node.TEXT_NODE) {
@@ -2524,7 +2530,9 @@ function vestirComo(velho, novo) {
   for (const nome of novo.getAttributeNames()) {
     if (detalhe && nome === "open") continue;
     const valor = novo.getAttribute(nome);
-    if (velho.getAttribute(nome) !== valor) velho.setAttribute(nome, valor);
+    if (velho.getAttribute(nome) === valor) continue;
+    if (nome === "style") velho.style.cssText = novo.style.cssText;
+    else velho.setAttribute(nome, valor);
   }
   if (detalhe) {
     const pedido = novo.hasAttribute("open");
