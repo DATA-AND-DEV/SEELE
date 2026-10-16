@@ -67,6 +67,7 @@ pub fn retratos(
         commands,
         shared: Arc::clone(&shared),
         encerrada: Mutex::new(None),
+        ligacao: None,
     };
     let mut retratos = vec![conexao.snapshot()];
     for mensagem in mensagens {

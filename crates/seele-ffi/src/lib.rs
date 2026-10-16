@@ -1578,6 +1578,9 @@ pub struct Connection {
     /// `Sync` e a casca segura a `Connection` atrás de um `Arc`; `None` depois
     /// de alguém já ter visto o fim, e na `Connection` montada à mão dos testes.
     encerrada: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// O código por que esta conexão foi discada, quando foi: ver
+    /// [`Connection::codigo_da_ligacao`].
+    ligacao: Option<Codigo>,
 }
 
 impl std::fmt::Debug for Connection {
@@ -1762,6 +1765,12 @@ impl Connection {
                 }
             }
         };
+        // A origem, lida do mesmo `Alvo` que o `drive` disca: o código que
+        // vai para a `Chegada::para_o_codigo` é o que a conexão vai dizer.
+        let ligacao = match &alvo {
+            Alvo::Codigo(codigo) => Some(*codigo),
+            Alvo::Enderecos { .. } => None,
+        };
         if config.codigo_esperado.is_some() && config.expected_fingerprint.is_some() {
             tracing::warn!(
                 "a conexão trouxe código e impressão: vale o código, e a impressão não é conferida"
@@ -1859,6 +1868,7 @@ impl Connection {
             commands: command_tx,
             shared,
             encerrada: Mutex::new(Some(encerrada_rx)),
+            ligacao,
         });
         Ok((connection, trust))
     }
@@ -3560,6 +3570,20 @@ impl Connection {
     pub fn disconnect(&self) {
         self.shared.running.store(false, Ordering::Relaxed);
         let _ = self.commands.send(Command::Shutdown);
+    }
+
+    /// **O código por que esta conexão foi discada**, quando ela foi uma
+    /// ligação: a tentativa veio de um `@CÓDIGO` e a ponte perguntou ao ponto
+    /// de encontro onde a pessoa mora (`Chegada::para_o_codigo`). `None` para
+    /// tudo o que chegou por um endereço — inclusive uma sala que tocou.
+    ///
+    /// É por aqui que a casca decide o que anotar: uma ligação vai para a
+    /// agenda, e não para a lista de visitados (decisão de 16/10 na F7). O
+    /// critério é a origem da tentativa, e não o texto do alvo parecer um
+    /// código.
+    #[must_use]
+    pub const fn codigo_da_ligacao(&self) -> Option<Codigo> {
+        self.ligacao
     }
 
     /// Encerra a sessão e espera a thread da conexão terminar, até `teto`.
@@ -8156,6 +8180,7 @@ mod tests {
             commands,
             shared: bare_shared(),
             encerrada: Mutex::new(Some(encerrada)),
+            ligacao: None,
         }
     }
 
@@ -8525,6 +8550,7 @@ mod tests {
             commands,
             shared: Arc::clone(&compartilhado),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         let mostrado = connection.snapshot().telemetry.jitter_ms;
 
@@ -8677,6 +8703,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert!(connection.snapshot().may_manage_voice_rooms);
 
@@ -8714,6 +8741,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
@@ -8783,6 +8811,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
@@ -8851,6 +8880,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         fold(
             &shared,
@@ -8907,6 +8937,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         fold(
@@ -8976,6 +9007,7 @@ mod tests {
             commands,
             shared,
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         assert_eq!(
@@ -9025,6 +9057,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
@@ -9067,6 +9100,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -9154,6 +9188,7 @@ mod tests {
             commands,
             shared: bare_shared(),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         for blank in ["", "   ", "\t\n"] {
@@ -9432,6 +9467,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         // O controle: o membro chegou, e a janela o lê pelo acessor. Sem isto,
         // um `Snapshot` sem ele não provaria nada.
@@ -10280,6 +10316,7 @@ mod uma_pendente_nao_e_uma_mensagem_do_servidor {
             commands: manda,
             shared: super::tests::compartilhado_de_teste(),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert_eq!(
             conexao.remove_message(0),
@@ -12204,6 +12241,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         connection.set_talking(true);
@@ -12328,6 +12366,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert_eq!(
             connection.ajustar_volume_da_tela(0.3),
@@ -12352,6 +12391,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(false),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert_eq!(
             sem_audio.ajustar_volume_da_tela(0.3),
@@ -12375,6 +12415,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         connection
             .calar_a_tela(true)
@@ -12406,6 +12447,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(false),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert_eq!(
             sem_audio.som_da_tela(),
@@ -12631,6 +12673,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(false),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert_eq!(
             connection.controles_da_voz(),
@@ -12655,6 +12698,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         connection.set_muted(true).expect("o mudo fora de sala");
@@ -12707,6 +12751,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         let retrato = serde_json::to_value(connection.snapshot()).expect("o retrato vira JSON");
         assert_eq!(
@@ -13200,6 +13245,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         {
             let mut room = connection.shared.room.lock().expect("a sala");
@@ -13248,6 +13294,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         {
             let mut room = connection.shared.room.lock().expect("a sala");
@@ -13307,6 +13354,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(false),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         sem_audio
             .shared

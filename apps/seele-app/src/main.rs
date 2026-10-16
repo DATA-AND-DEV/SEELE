@@ -1494,6 +1494,9 @@ async fn connect<R: tauri::Runtime>(
     }
 
     let snapshot = connection.snapshot();
+    // Se a ponte discou um código, e qual: a ligação não é visita
+    // (`ligar::anotar_a_chegada`). Lido aqui, antes de a conexão ir para o slot.
+    let ligou_para = connection.codigo_da_ligacao();
 
     // **A mesma conferência, com o slot na mão.** Entre a de cima e esta há os
     // efeitos de entrada, e uma tentativa nova pode ter começado no meio. Com o
@@ -1536,10 +1539,9 @@ async fn connect<R: tauri::Runtime>(
     }
     // Falso até a lista gravar, lá embaixo, a impressão que a conexão aceitou.
     let mut a_lista_guardou = false;
-    if !endereco_desta_maquina(&alvo) {
-        if let Ok(mut guardado) = session.alvo.lock() {
-            *guardado = Some(alvo.clone());
-        }
+    // Uma ligação vai para a agenda, e não para cá: é `anotar_a_chegada` quem
+    // decide, pela origem da tentativa, e quem guarda o alvo da sessão.
+    if ligar::anotar_a_chegada(&session, &casa, &alvo, ligou_para) {
         let aberta = seele_ffi::conhecidos::Conhecidos::abrir(
             std::path::PathBuf::from(&casa).join("conhecidos"),
         );

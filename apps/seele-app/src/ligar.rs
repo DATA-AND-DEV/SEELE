@@ -137,6 +137,66 @@ pub(crate) fn cancelar_em(sessao: &crate::Session) -> bool {
     true
 }
 
+/// **O que uma chegada anota, e se ela segue para a lista de visitados.**
+///
+/// - **Uma ligação não é visita** (decisão de 16/10 na F7): quem liga para uma
+///   pessoa não volta a um servidor. A ligação fica só na agenda, com a
+///   direção e a hora.
+/// - **O critério é a origem da tentativa**, e quem a sabe é a ponte: a
+///   conexão discada pelo código diz por qual
+///   (`Connection::codigo_da_ligacao`), e `ligou_para` é essa resposta. O
+///   texto do alvo não entra, e uma sala achada pelo endereço é visita, mesmo
+///   tendo tocado.
+/// - **Um servidor desta máquina também não segue**: `127.0.0.1` não é lugar
+///   aonde se volta, é o botão HOSPEDAR.
+///
+/// O alvo da sessão fica só com uma visita. É por ele que o caminho medido e a
+/// aparência do servidor vão para a lista, e o de uma visita anterior, que
+/// ficava na sessão, levaria para aquele servidor o que esta chegada mediu.
+pub(crate) fn anotar_a_chegada(
+    sessao: &crate::Session,
+    config: &str,
+    alvo: &str,
+    ligou_para: Option<seele_ffi::Codigo>,
+) -> bool {
+    let visita = match ligou_para {
+        Some(codigo) => {
+            anotar_a_ligacao_feita(config, codigo);
+            false
+        }
+        None => !crate::endereco_desta_maquina(alvo),
+    };
+    if let Ok(mut guardado) = sessao.alvo.lock() {
+        *guardado = visita.then(|| alvo.to_owned());
+    }
+    visita
+}
+
+/// A ligação feita, na agenda: para que lado e quando. O nome que esta máquina
+/// deu fica, e o apelido também — é o que a pessoa disse ao ligar para cá, e
+/// uma ligação daqui não traz outro.
+fn anotar_a_ligacao_feita(config: &str, codigo: seele_ffi::Codigo) {
+    let quando = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |desde| {
+            i64::try_from(desde.as_secs()).unwrap_or(i64::MAX)
+        });
+    let anotado = seele_ffi::agenda::Agenda::abrir(crate::toque::caminho_da_agenda(config))
+        .and_then(|mut agenda| {
+            let apelido = agenda
+                .buscar(&codigo)
+                .and_then(|contato| contato.apelido.clone())
+                .unwrap_or_default();
+            agenda.anotar_ligacao(codigo, &apelido, seele_ffi::agenda::Direcao::Liguei, quando)
+        });
+    if let Err(erro) = anotado {
+        tracing::warn!(
+            erro = %format!("{erro:#}"),
+            "a ligação feita não foi anotada na agenda"
+        );
+    }
+}
+
 /// A entrada colada em CONECTAR (tarefa 30 da F7): a leitura do núcleo, com «é o
 /// seu código?» respondido pela chave desta máquina.
 #[cfg(test)]
@@ -431,5 +491,152 @@ mod o_cancelar_da_ligacao {
             }
             servidor.shutdown();
         });
+    }
+}
+
+/// **Uma ligação não é visita** (decisão de 16/10 na F7): a chegada pelo
+/// código fica só na agenda, com a direção e a hora, e a lista de visitados
+/// não a vê. Que a chegada foi uma ligação, quem diz é a ponte, pela origem da
+/// tentativa — provado contra o ponto de encontro e a sala de verdade em
+/// `crates/seele-conformance/tests/ligar_pela_ponte.rs`.
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod a_chegada {
+    use super::anotar_a_chegada;
+    use crate::Session;
+    use seele_ffi::agenda::{Agenda, Direcao};
+    use seele_ffi::conhecidos::Conhecidos;
+    use seele_ffi::Codigo;
+
+    /// Um servidor visitado antes desta chegada.
+    const VISITADO: &str = "casa.exemplo:8383";
+
+    fn agora() -> i64 {
+        let desde = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap();
+        i64::try_from(desde.as_secs()).unwrap()
+    }
+
+    /// A casa depois de uma visita: o servidor na lista, e o alvo da sessão
+    /// ainda nele.
+    fn depois_de_uma_visita() -> (tempfile::TempDir, String, Session) {
+        let casa = tempfile::tempdir().expect("a pasta de teste não abriu");
+        let config = casa.path().display().to_string();
+        Conhecidos::abrir(casa.path().join("conhecidos"))
+            .unwrap()
+            .registrar(VISITADO, "eu", None)
+            .unwrap();
+        let sessao = Session::default();
+        *sessao.alvo.lock().unwrap() = Some(VISITADO.to_owned());
+        (casa, config, sessao)
+    }
+
+    #[test]
+    fn a_ligacao_vai_para_a_agenda_e_nao_para_os_visitados() {
+        let (casa, config, sessao) = depois_de_uma_visita();
+        let alice = Codigo::da_chave(&[1; 32]);
+        crate::sala::dar_nome_em(&config, &alice.to_string(), "Alice").unwrap();
+        let visitados = std::fs::read(casa.path().join("conhecidos")).unwrap();
+
+        let antes = agora();
+        let visita = anotar_a_chegada(
+            &sessao,
+            &config,
+            &seele_ffi::alvo_do_codigo(&alice),
+            Some(alice),
+        );
+
+        assert!(!visita, "a ligação seguiu para a lista de visitados");
+        assert_eq!(
+            std::fs::read(casa.path().join("conhecidos")).unwrap(),
+            visitados,
+            "a ligação mexeu na lista de visitados"
+        );
+        assert_eq!(
+            *sessao.alvo.lock().unwrap(),
+            None,
+            "a sessão da ligação ficou com o alvo da visita de antes: o caminho medido e a \
+             aparência dela iriam para aquele servidor"
+        );
+        let agenda = Agenda::abrir(crate::toque::caminho_da_agenda(&config)).unwrap();
+        let contato = agenda
+            .buscar(&alice)
+            .expect("a ligação feita não foi para a agenda");
+        assert_eq!(
+            contato.direcao,
+            Some(Direcao::Liguei),
+            "a agenda não diz para que lado foi a ligação"
+        );
+        assert!(
+            contato
+                .visto_em
+                .is_some_and(|quando| (antes..=agora()).contains(&quando)),
+            "a agenda não tem a hora da ligação: {:?}",
+            contato.visto_em
+        );
+        assert_eq!(
+            contato.nome.as_deref(),
+            Some("Alice"),
+            "a ligação apagou o nome que esta máquina deu"
+        );
+    }
+
+    #[test]
+    fn o_que_chega_por_um_endereco_e_visita_e_nao_ligacao() {
+        let (_casa, config, sessao) = depois_de_uma_visita();
+        let outro = "outro.exemplo:8383";
+
+        assert!(
+            anotar_a_chegada(&sessao, &config, outro, None),
+            "uma entrada por um endereço não seguiu para a lista de visitados"
+        );
+        assert_eq!(sessao.alvo.lock().unwrap().as_deref(), Some(outro));
+        let agenda = Agenda::abrir(crate::toque::caminho_da_agenda(&config)).unwrap();
+        assert!(
+            agenda.listar().is_empty(),
+            "uma entrada por um endereço foi anotada como ligação: {:?}",
+            agenda.listar()
+        );
+    }
+
+    /// **E o `connect` decide com a resposta da ponte.** Um código não se
+    /// disca sem um ponto de encontro, e o app não sobe um: o `seele-encontro`
+    /// só entra na conformidade (`cargo xtask check-deps`). As duas metades
+    /// se provam cada uma onde dá — a origem lá, contra o ponto e a sala de
+    /// verdade, e a decisão acima —, e esta é a costura entre elas, lida no
+    /// código sem os comentários.
+    #[test]
+    fn o_connect_decide_a_chegada_pela_origem_que_a_ponte_deu() {
+        let fonte = crate::fonte_sem_comentarios();
+        let connect: String = crate::corpo_de(&fonte, "async fn connect")
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        assert!(
+            connect.contains("letligou_para=connection.codigo_da_ligacao();")
+                && connect.contains("ifligar::anotar_a_chegada(&session,&casa,&alvo,ligou_para){"),
+            "o `connect` não decide a chegada pela origem que a ponte deu \
+             (`Connection::codigo_da_ligacao`): uma ligação voltaria para a lista de visitados"
+        );
+    }
+
+    #[test]
+    fn um_servidor_desta_maquina_nao_e_visita_nem_herda_o_alvo_de_antes() {
+        let (_casa, config, sessao) = depois_de_uma_visita();
+
+        assert!(
+            !anotar_a_chegada(&sessao, &config, "127.0.0.1:8383", None),
+            "o servidor desta máquina seguiu para a lista de visitados"
+        );
+        assert_eq!(
+            *sessao.alvo.lock().unwrap(),
+            None,
+            "a sessão no servidor desta máquina ficou com o alvo da visita de antes"
+        );
     }
 }

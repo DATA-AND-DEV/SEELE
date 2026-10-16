@@ -78,6 +78,30 @@ impl Drop for AmbienteDoEncontro {
     }
 }
 
+/// A casa de quem liga, com a identidade dele.
+fn casa_de_quem_liga() -> tempfile::TempDir {
+    let casa = tempfile::tempdir().unwrap();
+    std::fs::write(casa.path().join("identity.key"), [QUEM_LIGA; 32]).unwrap();
+    casa
+}
+
+fn config_para(server: String, casa: &tempfile::TempDir) -> ConnectConfig {
+    ConnectConfig {
+        server,
+        alternate_servers: Vec::new(),
+        nickname: "quem-liga".into(),
+        codigo_esperado: None,
+        home: casa.path().display().to_string(),
+        join_secret: None,
+        expected_fingerprint: None,
+        bilhete: None,
+        // Não há placa de som numa máquina de integração contínua.
+        audio: false,
+        capture_device: None,
+        playback_device: None,
+    }
+}
+
 /// As etapas que a ponte entrega, em ordem.
 #[derive(Default)]
 struct Etapas {
@@ -117,22 +141,8 @@ async fn quem_liga_pela_ponte_disca_o_codigo_e_entra_quando_atendem() {
     let recepcao = sala.recepcao().expect("a sala tem recepção");
     let mut avisos = recepcao.assinar();
 
-    let casa = tempfile::tempdir().unwrap();
-    std::fs::write(casa.path().join("identity.key"), [QUEM_LIGA; 32]).unwrap();
-    let config = ConnectConfig {
-        server: seele_ffi::alvo_do_codigo(&codigo_de(DONO)),
-        alternate_servers: Vec::new(),
-        nickname: "quem-liga".into(),
-        codigo_esperado: None,
-        home: casa.path().display().to_string(),
-        join_secret: None,
-        expected_fingerprint: None,
-        bilhete: None,
-        // Não há placa de som numa máquina de integração contínua.
-        audio: false,
-        capture_device: None,
-        playback_device: None,
-    };
+    let casa = casa_de_quem_liga();
+    let config = config_para(seele_ffi::alvo_do_codigo(&codigo_de(DONO)), &casa);
     let etapas = Arc::new(Etapas::default());
     let olhos = Arc::clone(&etapas) as Arc<dyn EventListener>;
     let ligando = tokio::task::spawn_blocking(move || Connection::connect_watching(config, olhos));
@@ -206,11 +216,69 @@ async fn quem_liga_pela_ponte_disca_o_codigo_e_entra_quando_atendem() {
         nomes.ends_with(&["Tocando", "Dentro"]),
         "a ligação não passou pelo toque até entrar: {nomes:?}"
     );
+    // A casca decide pela origem o que anotar: a ligação vai só para a agenda,
+    // e não para a lista de visitados (decisão de 16/10).
+    assert_eq!(
+        conexao.codigo_da_ligacao(),
+        Some(codigo_de(DONO)),
+        "a conexão discada pelo código não diz que foi uma ligação, nem para quem"
+    );
 
     let despediu =
         tokio::task::spawn_blocking(move || conexao.encerrar_e_esperar(Duration::from_secs(5)))
             .await
             .expect("a linha da despedida caiu");
     assert!(despediu, "a ligação não se despediu em 5 s");
+    sala.encerrar().await;
+}
+
+/// **Entrar na mesma sala pelo endereço não é ligar** (decisão de 16/10: um
+/// `@CÓDIGO` não entra na lista de visitados, e o resto continua entrando).
+///
+/// O critério é a origem da tentativa, e quem a sabe é a ponte: a conexão
+/// discada pelo código diz por qual código chegou, e a que veio de um endereço
+/// não diz nada — mesmo com uma sala do outro lado, que tocou e foi atendida.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_mesma_sala_pelo_endereco_nao_e_uma_ligacao() {
+    let _vaga = vaga::minha();
+    let sala = Hospedagem::iniciar_sala(0, &[DONO; 32], "dona", None)
+        .await
+        .expect("a sala não subiu");
+    let recepcao = sala.recepcao().expect("a sala tem recepção");
+    let mut avisos = recepcao.assinar();
+
+    let casa = casa_de_quem_liga();
+    let endereco = SocketAddr::from(([127, 0, 0, 1], sala.endereco().port()));
+    let config = config_para(endereco.to_string(), &casa);
+    let olhos = Arc::new(Etapas::default()) as Arc<dyn EventListener>;
+    let entrando = tokio::task::spawn_blocking(move || Connection::connect_watching(config, olhos));
+
+    let toque = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(Aviso::Tocou { toque, .. }) = avisos.recv().await {
+                return toque;
+            }
+        }
+    })
+    .await
+    .expect("a sala não tocou para quem entrou pelo endereço");
+    assert!(recepcao.atender(toque), "o toque não estava mais tocando");
+
+    let (conexao, _) = tokio::time::timeout(Duration::from_secs(10), entrando)
+        .await
+        .expect("quem foi atendido não entrou em 10 s")
+        .unwrap()
+        .unwrap_or_else(|falha| panic!("a entrada pelo endereço não entrou: {falha:?}"));
+    assert_eq!(
+        conexao.codigo_da_ligacao(),
+        None,
+        "uma entrada pelo endereço da sala saiu como ligação"
+    );
+
+    let despediu =
+        tokio::task::spawn_blocking(move || conexao.encerrar_e_esperar(Duration::from_secs(5)))
+            .await
+            .expect("a linha da despedida caiu");
+    assert!(despediu, "a entrada não se despediu em 5 s");
     sala.encerrar().await;
 }

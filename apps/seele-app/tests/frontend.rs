@@ -2132,11 +2132,14 @@ fn a_lista_que_nao_abre_ou_nao_grava_diz_isso_no_log() {
     );
 
     let Some(visita) = connect
-        .split("if!endereco_desta_maquina(&alvo){")
+        .split("ifligar::anotar_a_chegada(")
         .nth(1)
         .and_then(|resto| resto.split("lista.registrar(").next())
     else {
-        panic!("`connect` não anota mais a visita na lista, ou não pula o servidor desta máquina");
+        panic!(
+            "`connect` não anota mais a visita na lista, ou não pergunta antes ao \
+             `anotar_a_chegada` se a chegada é visita (nem ligação, nem o servidor desta máquina)"
+        );
     };
     assert!(
         visita.contains("Conhecidos::abrir(") && visita.contains("tracing::warn!("),
@@ -16528,7 +16531,7 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
     let conectar = body_of(&fonte, "async fn connect");
     let (Some(onde), Some(condicao)) = (
         conectar.find("session.endereco_da_sessao"),
-        conectar.find("if !endereco_desta_maquina"),
+        conectar.find("if ligar::anotar_a_chegada("),
     ) else {
         panic!("`connect` deixou de preencher o endereço da sessão, ou de filtrar a lista de visitados");
     };
@@ -16687,7 +16690,7 @@ fn a_sonda_e_semeada_fora_do_filtro_da_lista_de_visitados() {
 
     let (Some(semente), Some(filtro)) = (
         conectar.find("lembrar_o_caminho"),
-        conectar.find("if !endereco_desta_maquina"),
+        conectar.find("if ligar::anotar_a_chegada("),
     ) else {
         panic!("`connect` deixou de semear a sonda, ou de filtrar a lista de visitados");
     };
