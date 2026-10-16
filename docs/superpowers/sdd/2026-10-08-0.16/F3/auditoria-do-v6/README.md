@@ -340,7 +340,7 @@ tabelas, com a prova e o commit.
 | — | o `superficie-classes` já estava provado na `camadas.cjs` (`2f76bc4c`, `71c976a7`, `5b7ff153`), e só não remarcado: as três reversões reprovam | — | — |
 | 29 | a folha convive com o palco da chamada e com a página não imersiva | `palco-da-chamada.cjs`, `camadas.cjs` | `a0b67d34` |
 | 30 | o SEU CÓDIGO e o «receber ligações» no guarda 11 | `nucleo.cjs` | `c0a2f7cc` |
-| 31 | no aparelho: o `listarNaBarra`, a célula inteira, o rodapé e a altura dos diálogos, e as áreas seguras de cada superfície (as laterais, pelo teto da coluna) | `tools/bancada-do-celular.py` | `2bb317de` |
+| 31 | no aparelho: o `listarNaBarra`, a célula inteira e as áreas seguras de cada superfície (as laterais, pelo teto da coluna); o rodapé e a altura dos diálogos saíram, porque a F8 os mede (`cf031786`) | `tools/bancada-do-celular.py` | `2bb317de` |
 
 E o que o `.wasm` cobrava, rodado pela primeira vez nesta máquina com o
 wasi-sdk conferido: dois consertos meus (a B2 e a B10) tinham deixado o

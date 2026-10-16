@@ -2837,61 +2837,6 @@ def listar_na_barra(pg: Page) -> list[str]:
     return falhas
 
 
-def dialogos_no_aparelho(pg: Page) -> list[str]:
-    """Os diálogos no aparelho (`superficies.dialogo.celular`; a auditoria do v6,
-    tabela 7): «o modal, em tela cheia, com as acoes fixas no rodapé do
-    produto; o não modal, embaixo, até 85% da altura da sessão acima do pé,
-    com a sessão à vista acima». O `superficies-de-mod` mede a tela cheia; aqui,
-    o rodapé de um formulário de quarenta campos à vista e ao toque, acima do
-    pé, com o corpo rolando, e a altura do não modal."""
-    falhas = []
-    ir_para_aba(pg, "conversa", falhas)
-    pg.evaluate(MOD_DE_PE)
-    # As ações fixas são as `acoes` com `fixas: true`, que o renderer leva
-    # ao rodapé do produto; o corpo, quarenta campos que rolam.
-    campos = [{"forma": "campo", "chave": f"c{i}", "rotulo": f"Campo {i}"} for i in range(40)]
-    pg.evaluate("(arvore) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'longo', tipo: 'dialogo', titulo: 'LONGO' } })"
-                ".then(() => __pedirAoProduto({ tipo: 'superficie-montar', superficie: 'longo', arvore }))",
-                [*campos, {"forma": "acoes", "chave": "fim", "fixas": True, "dentro": [{"forma": "botao", "chave": "salvar", "dentro": "SALVAR"}]}])
-    esperar_quadro(pg)
-    pg.wait_for_timeout(300)
-    pe = "Math.min(...[...document.querySelectorAll('#tela-sessao > .voz-celular, #tela-sessao > .cel-abas')].map((e) => e.getBoundingClientRect().top))"
-    modal = pg.evaluate(f"""() => {{
-        const pe = {pe};
-        const salvar = [...document.querySelectorAll("[data-superficie='longo'] .dialogo-de-mod-rodape button")].find((b) => b.textContent === 'SALVAR');
-        const corpo = document.querySelector("[data-superficie='longo'] .dialogo-de-mod-corpo");
-        if (!salvar) return {{ salvar: null }};
-        const b = salvar.getBoundingClientRect();
-        const noCentro = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-        return {{ salvar: [Math.round(b.top), Math.round(b.bottom)], pe: Math.round(pe), acima: b.bottom <= pe + 1 && b.top >= 0,
-                 toque: !!noCentro && salvar.contains(noCentro), rola: !!corpo && corpo.scrollHeight > corpo.clientHeight }};
-    }}""")
-    if not modal.get("salvar") or not modal["acima"] or not modal["toque"] or not modal["rola"]:
-        falhas.append(f"o modal longo não deixa o SALVAR fixo no rodapé, à vista e ao toque acima do pé, com o corpo rolando: {modal}")
-    pg.evaluate("() => superficiesDoMod({ id: 'teste/bancada' }, modsCarregados.get('teste/bancada')).soltarTudo()")
-    esperar_quadro(pg)
-    linhas = [{"forma": "texto", "chave": f"l{i}", "dentro": f"linha {i} do não modal"} for i in range(60)]
-    pg.evaluate("(arvore) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'baixo', tipo: 'dialogo', modal: false, titulo: 'BAIXO' } })"
-                ".then(() => __pedirAoProduto({ tipo: 'superficie-montar', superficie: 'baixo', arvore }))", linhas)
-    esperar_quadro(pg)
-    pg.wait_for_timeout(300)
-    naoModal = pg.evaluate(f"""() => {{
-        const pe = {pe};
-        const caixa = document.querySelector(".dialogo-de-mod[data-superficie='baixo']")?.getBoundingClientRect();
-        const sessao = document.getElementById('tela-sessao').getBoundingClientRect();
-        if (!caixa) return {{ caixa: null }};
-        const acimaDele = document.elementFromPoint(sessao.left + sessao.width / 2, Math.max(sessao.top, caixa.top - 12));
-        return {{ caixa: [Math.round(caixa.top), Math.round(caixa.bottom)], pe: Math.round(pe),
-                 proporcao: Number((caixa.height / (pe - sessao.top)).toFixed(3)),
-                 embaixo: Math.abs(caixa.bottom - pe) <= 24,
-                 sessaoAVista: !!acimaDele && !acimaDele.closest('.camada-de-mod') }};
-    }}""")
-    if not naoModal.get("caixa") or not naoModal["embaixo"] or naoModal["proporcao"] > 0.851 or not naoModal["sessaoAVista"]:
-        falhas.append(f"o não modal não fica embaixo, até 85% da sessão acima do pé, com a sessão à vista acima: {naoModal}")
-    pg.evaluate("() => superficiesDoMod({ id: 'teste/bancada' }, modsCarregados.get('teste/bancada')).soltarTudo()")
-    return falhas
-
-
 def superficies_nas_areas(pg: Page) -> list[str]:
     """Nenhuma superfície de MOD desenha sob as áreas seguras do aparelho
     (`superficies.garantias-do-produto[6]` e `nucleo-de-confianca.celular[3]`;
@@ -3499,8 +3444,6 @@ CASOS: dict[str, Caso] = {
     "regioes-do-celular": Caso(levar=regioes_do_celular, aparelhos=("390",), medir=False),
     # As entradas DOS MODS: o listarNaBarra e a célula inteira.
     "listar-na-barra": Caso(levar=listar_na_barra, medir=False),
-    # O rodapé do modal e a altura do não modal, no aparelho.
-    "dialogos-no-aparelho": Caso(levar=dialogos_no_aparelho, medir=False),
     # Cada superfície de MOD fora das áreas seguras.
     "superficies-nas-areas": Caso(levar=superficies_nas_areas, medir=False),
     # E as laterais, deitado.
