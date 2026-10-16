@@ -82,6 +82,70 @@ process.on("beforeExit", () => {
   }
 }
 
+// **As partes de uma propriedade composta** (a borda, a sombra, o gradiente, o
+// mover, a transição e a animação; o cruzamento dos portes, 16/10): a parte
+// declarada que não serve é contada, como uma propriedade que não serve, e a
+// propriedade fica com o padrão nela. A parte que o MOD não declarou fica no
+// padrão sem recusa. Antes, a parte errada virava o padrão calada: uma sombra
+// com a cor «vermelha» saía preta, e o MOD não tinha como saber por quê. Um
+// número fora do intervalo não é parte errada: ele é preso no limite, como nas
+// propriedades soltas.
+{
+  const ctx = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(raiz, "ui/mods-estilos.js"), "utf8"), ctx);
+  const contar = (estilo) => {
+    const conta = { recusados: 0 };
+    const pares = ctx.estiloDeMod(estilo, conta);
+    return { recusados: conta.recusados, pares: Object.fromEntries(pares) };
+  };
+  for (const estilo of [
+    { borda: { largura: 2, estilo: "tracejada", cor: "#ff8800" } },
+    { borda: {} },
+    { sombra: { x: 1, y: 2, desfoque: 4, espalha: 1, cor: "#00000080", dentro: true } },
+    { sombra: {} },
+    { gradiente: { angulo: 90, paradas: [{ cor: "#000000", em: 0 }, { cor: "#ffffff", em: 100 }] } },
+    { gradiente: { paradas: [{ cor: "#000000" }, { cor: "#ffffff" }] } },
+    { mover: { x: 4 } },
+    { transicao: { duracao: 200, suavizacao: "entrada" } },
+    { transicao: {} },
+    { animacao: { nome: "pulso", duracao: 1200 } },
+    { animacao: "aurora" },
+  ]) {
+    const r = contar(estilo);
+    confere("partes · as válidas e as omitidas", r.recusados === 0, `${JSON.stringify(estilo)} contou ${r.recusados} recusa(s)`);
+  }
+  for (const [estilo, propriedade] of [
+    [{ borda: { largura: "grossa", cor: "#ff8800" } }, "border"],
+    [{ borda: { largura: 2, estilo: "ondulada" } }, "border"],
+    [{ borda: { largura: 2, cor: "vermelha" } }, "border"],
+    [{ sombra: { x: 1, cor: "vermelha" } }, "box-shadow"],
+    [{ sombra: { x: "um" } }, "box-shadow"],
+    [{ sombra: { desfoque: "muito" } }, "box-shadow"],
+    [{ sombra: { espalha: "pouco" } }, "box-shadow"],
+    [{ sombra: { dentro: "sim" } }, "box-shadow"],
+    [{ gradiente: { paradas: [{ cor: "#000000" }, { cor: "#ffffff" }, { cor: "azul" }] } }, "background-image"],
+    [{ gradiente: { paradas: [{ cor: "#000000", em: "meio" }, { cor: "#ffffff" }] } }, "background-image"],
+    [{ gradiente: { angulo: "noventa", paradas: [{ cor: "#000000" }, { cor: "#ffffff" }] } }, "background-image"],
+    [{ gradiente: { tipo: "conico", paradas: [{ cor: "#000000" }, { cor: "#ffffff" }] } }, "background-image"],
+    // Além do teto de 8 paradas: uma recusa, e as 8 primeiras ficam.
+    [{ gradiente: { paradas: Array.from({ length: 9 }, (_, i) => ({ cor: i % 2 ? "#ffffff" : "#000000" })) } }, "background-image"],
+    [{ mover: { x: "4px" } }, "translate"],
+    [{ transicao: { duracao: "lenta" } }, "transition"],
+    [{ transicao: { suavizacao: "elastica" } }, "transition"],
+    [{ animacao: { nome: "pulso", duracao: "longa" } }, "animation"],
+  ]) {
+    const r = contar(estilo);
+    confere("partes · a errada é contada", r.recusados === 1, `${JSON.stringify(estilo)} contou ${r.recusados} recusa(s)`);
+    confere("partes · a propriedade fica", typeof r.pares[propriedade] === "string",
+      `${JSON.stringify(estilo)} perdeu ${propriedade}: ${JSON.stringify(r.pares)}`);
+  }
+  // Um gradiente que fica com menos de duas paradas não vira gradiente: uma
+  // recusa só, a dele, e não uma por parada.
+  const curto = contar({ gradiente: { paradas: [{ cor: "#000000" }, { cor: "azul" }] } });
+  confere("partes · o gradiente sem duas paradas", curto.recusados === 1 && !curto.pares["background-image"],
+    `o gradiente de uma parada só contou ${curto.recusados} e saiu ${JSON.stringify(curto.pares)}`);
+}
+
 // --------------------------------------------------------------- o DOM falso
 
 const TEXTO = 3;

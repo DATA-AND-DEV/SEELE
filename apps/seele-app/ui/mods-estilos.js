@@ -169,34 +169,60 @@ function medidaDeMod(valor) {
   return px === null ? null : `${px}px`;
 }
 
+/**
+ * **Uma parte de uma propriedade composta** (a borda, a sombra, o gradiente, o
+ * mover, a transição, a animação): a parte conferida, ou o padrão.
+ *
+ * A parte que o MOD declarou e que não serve **é contada** (`recusar`), como
+ * uma propriedade que não serve, e a propriedade fica com o padrão nela. A que
+ * ele não declarou fica no padrão sem recusa. Antes a errada virava o padrão
+ * calada: a sombra com a cor «vermelha» saía preta, e o MOD não tinha como
+ * saber por quê.
+ */
+function parteDoEstilo(declarada, conferida, padrao, recusar) {
+  if (declarada === undefined) return padrao;
+  if (conferida === null || conferida === undefined) {
+    recusar();
+    return padrao;
+  }
+  return conferida;
+}
+
 /** Um gradiente declarado por paradas — nunca por texto de `linear-gradient`. */
-function gradienteDeMod(declarado) {
+function gradienteDeMod(declarado, recusar = () => {}) {
   if (!declarado || typeof declarado !== "object") return null;
-  const paradas = (Array.isArray(declarado.paradas) ? declarado.paradas : [])
+  const declaradas = Array.isArray(declarado.paradas) ? declarado.paradas : [];
+  let erradas = declaradas.length > LIMITES_DO_ESTILO.paradas ? 1 : 0;
+  const paradas = declaradas
     .slice(0, LIMITES_DO_ESTILO.paradas)
     .map((parada) => {
       const cor = corDeMod(parada?.cor);
-      if (!cor) return null;
+      if (!cor) { erradas += 1; return null; }
       const em = numeroNoIntervalo(parada?.em, { minimo: 0, maximo: 100 });
+      if (em === null && parada?.em !== undefined) erradas += 1;
       return em === null ? cor : `${cor} ${em}%`;
     })
     .filter(Boolean);
+  // Sem duas paradas não há gradiente: a recusa é a dele, uma só (`por`).
   if (paradas.length < 2) return null;
-  if (declarado.tipo === "radial") return `radial-gradient(circle, ${paradas.join(", ")})`;
-  const angulo = numeroNoIntervalo(declarado.angulo, { minimo: 0, maximo: 360 }) ?? 180;
+  for (let i = 0; i < erradas; i += 1) recusar();
+  const tipo = parteDoEstilo(declarado.tipo, ["linear", "radial"].includes(declarado.tipo) ? declarado.tipo : null, "linear", recusar);
+  if (tipo === "radial") return `radial-gradient(circle, ${paradas.join(", ")})`;
+  const angulo = parteDoEstilo(declarado.angulo, numeroNoIntervalo(declarado.angulo, { minimo: 0, maximo: 360 }), 180, recusar);
   return `linear-gradient(${angulo}deg, ${paradas.join(", ")})`;
 }
 
 /** Uma sombra montada de partes conferidas. */
-function sombraDeMod(declarada) {
+function sombraDeMod(declarada, recusar = () => {}) {
   if (declarada === false || declarada === "nenhuma") return "none";
   if (!declarada || typeof declarada !== "object") return null;
-  const cor = corDeMod(declarada.cor) ?? "#00000066";
-  const x = numeroNoIntervalo(declarada.x, LIMITES_DO_ESTILO.sombraDeslocamento) ?? 0;
-  const y = numeroNoIntervalo(declarada.y, LIMITES_DO_ESTILO.sombraDeslocamento) ?? 0;
-  const desfoque = numeroNoIntervalo(declarada.desfoque, LIMITES_DO_ESTILO.sombraDesfoque) ?? 0;
-  const espalha = numeroNoIntervalo(declarada.espalha, LIMITES_DO_ESTILO.sombraEspalha) ?? 0;
-  const dentro = declarada.dentro === true ? "inset " : "";
+  const parte = (nome, conferida, padrao) => parteDoEstilo(declarada[nome], conferida, padrao, recusar);
+  const cor = parte("cor", corDeMod(declarada.cor), "#00000066");
+  const x = parte("x", numeroNoIntervalo(declarada.x, LIMITES_DO_ESTILO.sombraDeslocamento), 0);
+  const y = parte("y", numeroNoIntervalo(declarada.y, LIMITES_DO_ESTILO.sombraDeslocamento), 0);
+  const desfoque = parte("desfoque", numeroNoIntervalo(declarada.desfoque, LIMITES_DO_ESTILO.sombraDesfoque), 0);
+  const espalha = parte("espalha", numeroNoIntervalo(declarada.espalha, LIMITES_DO_ESTILO.sombraEspalha), 0);
+  const dentro = parte("dentro", typeof declarada.dentro === "boolean" ? declarada.dentro : null, false) ? "inset " : "";
   return `${dentro}${x}px ${y}px ${desfoque}px ${espalha}px ${cor}`;
 }
 
@@ -231,7 +257,7 @@ function estiloDeMod(estilo, conta = null) {
       // ---- cor e preenchimento ----
       case "cor": por("color", corDeMod(valor)); break;
       case "fundo": por("background-color", corDeMod(valor)); break;
-      case "gradiente": por("background-image", gradienteDeMod(valor)); break;
+      case "gradiente": por("background-image", gradienteDeMod(valor, recusar)); break;
       case "opacidade": {
         const n = numeroNoIntervalo(valor, LIMITES_DO_ESTILO.opacidade);
         por("opacity", n === null ? null : String(n));
@@ -247,14 +273,14 @@ function estiloDeMod(estilo, conta = null) {
       case "borda": {
         if (valor === false || valor === "nenhuma") { por("border", "none"); break; }
         if (!valor || typeof valor !== "object") { recusar(); break; }
-        const largura = numeroNoIntervalo(valor.largura, LIMITES_DO_ESTILO.bordaLargura) ?? 1;
-        const forma = palavraDoEstilo("bordaEstilo", valor.estilo) ?? "solid";
-        const cor = corDeMod(valor.cor) ?? "currentColor";
+        const largura = parteDoEstilo(valor.largura, numeroNoIntervalo(valor.largura, LIMITES_DO_ESTILO.bordaLargura), 1, recusar);
+        const forma = parteDoEstilo(valor.estilo, palavraDoEstilo("bordaEstilo", valor.estilo), "solid", recusar);
+        const cor = parteDoEstilo(valor.cor, corDeMod(valor.cor), "currentColor", recusar);
         // Montada de três partes conferidas, e não de uma string do MOD.
         por("border", `${largura}px ${forma} ${cor}`);
         break;
       }
-      case "sombra": por("box-shadow", sombraDeMod(valor)); break;
+      case "sombra": por("box-shadow", sombraDeMod(valor, recusar)); break;
 
       // ---- tipografia ----
       case "familia": por("font-family", palavraDoEstilo("familia", valor)); break;
@@ -375,8 +401,8 @@ function estiloDeMod(estilo, conta = null) {
       }
       case "mover": {
         if (!valor || typeof valor !== "object") { recusar(); break; }
-        const x = numeroNoIntervalo(valor.x, LIMITES_DO_ESTILO.mover) ?? 0;
-        const y = numeroNoIntervalo(valor.y, LIMITES_DO_ESTILO.mover) ?? 0;
+        const x = parteDoEstilo(valor.x, numeroNoIntervalo(valor.x, LIMITES_DO_ESTILO.mover), 0, recusar);
+        const y = parteDoEstilo(valor.y, numeroNoIntervalo(valor.y, LIMITES_DO_ESTILO.mover), 0, recusar);
         por("translate", `${x}px ${y}px`);
         break;
       }
@@ -384,8 +410,8 @@ function estiloDeMod(estilo, conta = null) {
       // ---- movimento ----
       case "transicao": {
         if (!valor || typeof valor !== "object") { recusar(); break; }
-        const duracao = numeroNoIntervalo(valor.duracao, LIMITES_DO_ESTILO.duracao) ?? 160;
-        const suave = palavraDoEstilo("suavizacao", valor.suavizacao) ?? "cubic-bezier(0.2, 0, 0, 1)";
+        const duracao = parteDoEstilo(valor.duracao, numeroNoIntervalo(valor.duracao, LIMITES_DO_ESTILO.duracao), 160, recusar);
+        const suave = parteDoEstilo(valor.suavizacao, palavraDoEstilo("suavizacao", valor.suavizacao), "cubic-bezier(0.2, 0, 0, 1)", recusar);
         // `all` de propósito: o que muda é decidido pelos outros pares desta
         // mesma lista, que já passaram por aqui.
         por("transition", `all ${duracao}ms ${suave}`);
@@ -396,7 +422,7 @@ function estiloDeMod(estilo, conta = null) {
         const quadro = Object.hasOwn(ANIMACOES_DO_MOD, nome) ? ANIMACOES_DO_MOD[nome] : null;
         if (quadro === null) { recusar(); break; }
         if (!quadro) { por("animation", "none"); break; }
-        const duracao = numeroNoIntervalo(valor?.duracao, { minimo: 200, maximo: 8000 }) ?? 2400;
+        const duracao = parteDoEstilo(valor?.duracao, numeroNoIntervalo(valor?.duracao, { minimo: 200, maximo: 8000 }), 2400, recusar);
         por("animation", `${quadro} ${duracao}ms ease-in-out infinite`);
         break;
       }
