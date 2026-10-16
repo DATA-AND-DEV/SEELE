@@ -916,3 +916,109 @@ baixei, e não carrega a camada.
 **A regra, daqui em diante, para toda mexida na `ui/`, no duble ou na carga:**
 a carga, os roteiros, as duas bancadas da ponte, a do celular **e todas as
 bancadas da janela** (`apps/seele-app/bancada/*.cjs`), antes da entrega.
+
+## D-sala-2 decidida, e a conferência da D-sala-1 no Windows (15/10)
+
+- **D-sala-2 (do dono):** a sala pessoal sobe sozinha quando o app abre. É o
+  que a tarefa 23 já faz (`3f3c3aff`, `7546c9e8`), e nada muda no código.
+- **D-sala-1** continua «até o dono rever». O dono liberou a orquestradora para
+  conferir no PC de testes pelo SSH. O roteiro, sem tela e sem mexer no
+  firewall à mão, está em `conferencia-firewall-windows.md`. Ele já aponta,
+  pela leitura do código:
+  - a frase da sala fala da porta 8383, e a sala escuta na 8385;
+  - o app só pergunta se existe uma regra chamada `SEELE`, sem conferir se ela
+    permite ou bloqueia;
+  - a casca tem uma linha no PERFIL, e não uma pergunta ao abrir;
+  - o `alcance::firewall` do servidor não é chamado por ninguém.
+
+## A faixa do toque e os consertos da D-sala-1 (15/10)
+
+**A faixa do toque cobria o veredito** (achado da F3, pelo guarda 11): a 1024,
+o centro do texto de um primeiro contato caía embaixo dela; reproduzido aqui, e
+a 1440 ela também cruzava parte do texto. Agora ela **empurra a tela em vez de
+cobri-la** (`58b597b4`): acesa, a `.tela` à vista abre no topo o espaço até o pé
+dela. O passo 5 do `toque.js` mede retângulo contra retângulo.
+
+**A conferência no PC de testes** (a orquestradora, pelo SSH, só lendo; os
+passos que instalam ficaram com o dono): a v0.15.1 instalada, a regra `SEELE`
+certa (entrada, permite, qualquer perfil, UDP, pelo programa), e um par TCP/UDP
+`seele-app.exe` do aviso do Windows, só no perfil público, em minúsculas. O
+passo 6 confirmou no app de verdade o ramo «outra cópia». O instalador e o
+portátil da 0.16 saíram de `95ff2689`.
+
+**Os consertos pedidos pela orquestradora** (os achados 1, 2 e 4):
+
+| conserto | commit |
+|---|---|
+| 2: o app lê a regra num lugar só (`src/firewall.rs`), pelo PowerShell — ligada, de entrada, UDP, do caminho inteiro do programa que roda, no perfil da rede ativa, com o bloqueio vencendo | `1daa487a` |
+| 4: o `alcance::firewall` do `seele-server` sai (sem chamador, só o nome do arquivo) | `d7c51e41` |
+| 1: os textos do instalador e do ADR 0043 dizem o que a regra é; o comentário da caixa «desmarcada» sai | `4f6ca33e` |
+
+- **Os testes usam a saída de verdade do PC**, e não amostras inventadas. O
+  leitor que roda no Windows tem um teste `cfg(windows)` (o CI e o PC), e um
+  gêmeo diz «PARCIAL» fora dele.
+- **Reversões, cada uma reprovando:** o bloqueio ignorado; só o nome do arquivo;
+  o perfil ignorado; e a leitura de antes («existe uma regra chamada SEELE»),
+  que deixa passar um bloqueio com esse nome.
+- **Fica com o dono** (o achado 3): a D-sala-1 diz «pergunta», e a casca tem uma
+  linha no PERFIL com um botão.
+- **Fica anotado:** o botão «ABRIR A PORTA AGORA» (o da sala, meu, e o da tela
+  de hospedar, da F5) cria a regra do SEELE **instalado**; para a cópia
+  portátil e para um bloqueio do aviso do Windows ele não resolve nada, e hoje
+  aparece igual. Pedir a mudança passa pela orquestradora.
+
+**Medido no caminho:**
+- o scratchpad em `/private/tmp` foi limpo entre 11 e 15/10, com os scripts de
+  verificação e as pastas de comparação que eu tinha passado à F8; recriados;
+- a bancada do celular reprovou de forma intermitente o `entrada-desfechos-390`
+  («PONTE_NO_LUGAR_DO_TAURI is not defined»), sem relação com a faixa; foi à F8
+  com a pasta guardada.
+
+**Como está a ponta** (`4f6ca33e`, sobre a `versao/0.16` `95ff2689`): app
+743/743; os 40 roteiros; as duas bancadas da ponte; a do celular; e 33 das 34
+bancadas da janela (a do executor pede o motor com o wasi-sdk). A
+`voz-no-navegador` reprovou uma vez com «Could not start audio source» e passou
+na seguinte, com o `.wasm` recompilado: a minha verificação usava um `.wasm` de
+antes da integração, e passou a recompilá-lo sempre.
+
+## O motivo do firewall na tela, e o botão só quando resolve (15/10)
+
+**Provado no PC antes** (a orquestradora, na ponta `3ffdd92b`): o
+`cargo test -p seele-app --bin seele-app -- firewall::` deu 12 de 12, com a
+leitura de verdade pelo PowerShell (`no_windows_a_leitura_de_verdade_chega_ao_fim`,
+1,27 s), e o `cargo clippy -p seele-app -- -D warnings` saiu 0.
+
+**Pedido pela orquestradora:** um botão que aparece igual quando resolve e
+quando não resolve é o produto dizendo uma coisa que não é verdade. O ABRIR A
+PORTA AGORA cria a regra do SEELE **instalado**, em UDP e em qualquer perfil:
+resolve a falta de regra e o perfil não coberto, e só quando quem roda é o
+instalado, com o instalador ao lado.
+
+| etapa | commit |
+|---|---|
+| o `NaTela { motivo, frase, abrir_resolve }` no Rust; o estado da sala com ele; a linha da sala com o botão só quando resolve | `e0e48744` |
+| a parede da tela de hospedar lê o mesmo motivo (isolado, `tela-boot.js` da F5) | `3cdcafc7` |
+| o guarda da parede cobra o botão só quando resolve (isolado, `frontend.rs`) | `bf2624ab` |
+| sai o `firewall_nao_cobre` da resposta do `hospedar` | `cb3b4520` |
+
+- **A frase diz o que fazer:** com o botão, o Windows pergunta uma vez; na
+  cópia portátil, abrir o SEELE instalado; no bloqueio, onde ele sai (Regras de
+  Entrada); no perfil, que a rede ativa não está coberta; sem o instalado,
+  instalar.
+- **No perfil não coberto o botão também aparece**, quando quem roda é o
+  instalado: a regra que ele cria vale em qualquer perfil e soma às outras.
+  Fora da lista que a orquestradora escreveu, mas dentro da regra dela.
+- **Depois da regra criada**, um reanúncio do estado da sala (feito a cada
+  mudança do registro, com a leitura de quando ela subiu) não devolve o botão
+  nem a frase de antes, até a sala descer e subir com uma leitura nova.
+- **Reversões, cada uma reprovando:** o `abrir_resolve` sempre verdadeiro; o
+  botão em todos os motivos na linha da sala e na parede de hospedar; sem a
+  marca da regra criada; a parede sem a frase do motivo.
+- **Fica para o PC:** o `pasta_instalada` e o ramo do Windows do
+  `firewall_deste_executavel` não compilam no Mac.
+
+**Como está a ponta** (`cb3b4520`): app 744/744; os 40 roteiros; as duas
+bancadas da ponte; a do celular; e 33 das 34 da janela (a do executor pede o
+motor com o wasi-sdk). Com a máquina a 17–26 de carga, o `texto-maior-390` do
+celular e a `diagnostico-de-mods` reprovaram por tempo; com e sem esta mudança,
+sob carga de 10 a 14, passaram. A F5 revisou e aprovou a parede da tela dela.

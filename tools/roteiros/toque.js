@@ -12,6 +12,10 @@
 //    senta na sala de voz.
 // 4. **A falha dupla não deixa ninguém sozinho na sala**: a primeira entrada
 //    que não chega à sala oferece TENTAR DE NOVO, e a segunda encerra a ligação.
+// 5. **A faixa empurra a tela, e não a cobre** (medido pela F3, 15/10): acesa,
+//    ela termina antes de começar o conteúdo da tela à vista, na entrada e na
+//    sessão; e o veredito de um primeiro contato — a impressão digital que a
+//    pessoa compara — não fica embaixo dela.
 //
 // O duble não tem sala: o roteiro emite os eventos de `seele://toque` e
 // responde `atender` e `onde_estou` à mão.
@@ -30,6 +34,23 @@ const RAFA = {
   com_som: true,
 };
 const chamados = () => window.__SEELE_HISTORICO.map(([cmd]) => cmd);
+// A faixa acesa não cobre nada da tela à vista: ela termina antes de começar o
+// conteúdo dela (o topo mais o espaço que a tela abre para ela).
+const naoCobre = (tela) => {
+  const faixa = document.getElementById("toque").getBoundingClientRect();
+  const caixa = document.getElementById(tela);
+  const conteudo = caixa.getBoundingClientRect().top + parseFloat(getComputedStyle(caixa).paddingTop);
+  relatar(`${tela}: a faixa termina em ${Math.round(faixa.bottom)}, o conteúdo começa em ${Math.round(conteudo)}`);
+  exigir(
+    faixa.bottom <= conteudo + 0.5,
+    `a faixa do toque cobre o topo da #${tela}: ela termina em ${Math.round(faixa.bottom)} e o conteúdo começa em ${Math.round(conteudo)}`,
+  );
+};
+const cruzam = (a, b) => {
+  const x = document.getElementById(a).getBoundingClientRect();
+  const y = document.getElementById(b).getBoundingClientRect();
+  return x.left < y.right && y.left < x.right && x.top < y.bottom && y.top < x.bottom;
+};
 
 // 1. Na entrada.
 exigir(
@@ -56,6 +77,7 @@ exigir(
   document.activeElement === tecladoAntes,
   "a faixa tomou o teclado de quem estava noutra coisa",
 );
+naoCobre("tela-boot");
 // O `anunciar` escreve num `requestAnimationFrame`, e este navegador sem cabeça
 // não roda quadros (medido): o `#anuncio` fica vazio aqui mesmo com a frase
 // dita. O que se mede é a chamada.
@@ -83,6 +105,11 @@ exigir(
 toque({ evento: "Parou", quem: RAFA.quem, desfecho: "recusada" });
 await ate(() => visivel("toque") === "escondida", 1000);
 exigir(visivel("toque") === "escondida", "o toque parou e a faixa ficou");
+exigir(
+  !document.documentElement.hasAttribute("data-toque-aceso")
+    && parseFloat(getComputedStyle(document.getElementById("tela-boot")).paddingTop) === 0,
+  "o toque parou e a tela continuou com o espaço da faixa no topo",
+);
 
 // 3. ATENDER de dentro do servidor que esta janela hospeda.
 await entrarNaSessao();
@@ -92,6 +119,14 @@ await ate(() => visivel("toque") === "VISIVEL", 1000);
 await ate(() => document.getElementById("toque-atender").textContent.includes("SAI DE"), 1000);
 const rotulo = document.getElementById("toque-atender").textContent;
 relatar("atender, de dentro do servidor: " + rotulo);
+// 5, na sessão: com o veredito de um primeiro contato à vista.
+mostrarVeredito({ FirstContact: { fingerprint: "ab12".repeat(16) } });
+await espera(100);
+naoCobre("tela-sessao");
+exigir(
+  !cruzam("toque", "veredito"),
+  "a faixa do toque cobre o veredito do primeiro contato: a impressão digital fica embaixo dela enquanto toca",
+);
 exigir(rotulo.includes("SAI DE"), "ATENDER não diz que sai do servidor: «" + rotulo + "»");
 
 SEELE_RESPOSTAS.atender = { ja_na_sala: false, alvo: "127.0.0.1:8385" };

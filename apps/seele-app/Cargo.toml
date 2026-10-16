@@ -126,6 +126,10 @@ seele-lancador = { path = "../../crates/seele-lancador", features = ["fixtures"]
 # A lista de revogação de teste viaja em base64, como no manifesto. A mesma
 # versão do `seele-lancador`: não acrescenta crate ao grafo.
 base64 = "0.22"
+# O ocupante só IPv6 do teste da porta ocupada da sala (pendência 65): o `std`
+# não escolhe o `IPV6_V6ONLY`, e o seu padrão muda de sistema para sistema. Já
+# está na árvore, pelo `seele-server` e pelo `quinn`.
+socket2 = { workspace = true }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
