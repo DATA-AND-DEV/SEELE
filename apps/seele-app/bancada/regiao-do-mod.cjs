@@ -177,7 +177,12 @@ class Elemento {
     this.dataset = {};
     this.atributos = new Map();
     this.className = "";
-    this.style = {};
+    // `setProperty` e `removeProperty` como o navegador: é por eles que o
+    // estilo do MOD entra (`aplicarEstiloDeMod`).
+    this.style = {
+      setProperty(nome, valor) { this[nome] = valor; },
+      removeProperty(nome) { delete this[nome]; },
+    };
     this.ouvintes = new Map();
     this.value = "";
     this.width = 0;
@@ -3350,6 +3355,52 @@ async function aCitacaoComPessoaCitaQuemOModNomeia() {
   confere(caso, (ouvintes.get("seele-mods-citacao") ?? []).length === 0, "soltar as regiões deixou o ouvinte da troca preso");
 }
 
+/**
+ * **A recusa diz o que recusou** (`nos-recusados`, D-api-8; o achado 5 da
+ * auditoria). Uma montagem com nós que não couberam respondia só a conta, e
+ * quantos e por quê iam ao `seele.log`. A região guarda, ao lado da conta, uma
+ * amostra de até oito: o motivo, e o que identifica o nó (a `chave`, a forma,
+ * a propriedade do estilo, o tipo da figura). E a forma que a API não tem,
+ * numa região, passa a contar: ela sumia calada, porque só o cartão a contava.
+ */
+async function aRecusaDizOQueRecusou() {
+  const caso = "a recusa diz o que recusou";
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const arvore = [
+    { forma: "estrela", chave: "x" },
+    { forma: "caixa", chave: "c", estilo: { corDeFundo: "#000000", sombra: { cor: "vermelha" } } },
+    { forma: "tela", chave: "t", largura: 20, altura: 20, figuras: [{ tipo: "estrela", x: 1, y: 1 }] },
+  ];
+  // A tela pinta com o pincel dela: a primeira montagem a cria, e a segunda
+  // pinta as figuras (como no tabuleiro).
+  regiao.aplicar(arvore);
+  regiao.raiz.children.find((filho) => filho.tagName === "CANVAS").darPincel();
+  const recusados = regiao.aplicar(arvore);
+  const esperada = [
+    { motivo: "forma-desconhecida", forma: "estrela", chave: "x" },
+    { motivo: "estilo", chave: "c", propriedade: "corDeFundo" },
+    { motivo: "estilo", chave: "c", propriedade: "sombra" },
+    { motivo: "figura-desconhecida", chave: "t", tipo: "estrela" },
+  ];
+  confere(caso, recusados === 4, `contou ${recusados} recusa(s), e não 4`);
+  confere(caso, JSON.stringify(regiao.amostraDeRecusados) === JSON.stringify(esperada),
+    `a amostra é ${JSON.stringify(regiao.amostraDeRecusados)}`);
+
+  // A amostra tem teto, e a conta não: doze propriedades erradas contam doze, e
+  // a amostra guarda as oito primeiras.
+  const muitas = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`errada${i}`, 1]));
+  const doze = regiao.aplicar([{ forma: "caixa", chave: "m", estilo: muitas }]);
+  confere(caso, doze === 12 && regiao.amostraDeRecusados.length === 8,
+    `doze recusas contaram ${doze}, com ${regiao.amostraDeRecusados.length} na amostra`);
+
+  // E cada montagem começa a sua: a seguinte, sem recusa, não leva a de antes.
+  confere(caso, regiao.aplicar([{ forma: "texto", chave: "ok", dentro: "ok" }]) === 0
+    && regiao.amostraDeRecusados.length === 0, "a amostra de uma montagem passou para a seguinte");
+  regiao.soltar();
+}
+
 async function aplicarQueLancaNaoViraRecusa() {
   const soltas = [];
   const pegar = (motivo) => soltas.push(String(motivo?.stack ?? motivo));
@@ -6357,6 +6408,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     oFundoDeTelaDizOEstado,
     osBytesSaoReservadosAntesDoDecode,
     aCitacaoComPessoaCitaQuemOModNomeia,
+    aRecusaDizOQueRecusou,
     aplicarQueLancaNaoViraRecusa,
     oSomTocaPorWebAudioENuncaPorUmElementoDeMidia,
     oSomDoServidorVemDosBytesDoDataENaoDeUmElemento,

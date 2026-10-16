@@ -41,7 +41,7 @@
 # este guarda muda é que a próxima edição assim não passa em silêncio: ela vira
 # a versão seguinte.
 #
-# ## v6 foi emendada duas vezes, depois do corte e antes da publicação
+# ## v6 foi emendada três vezes, depois do corte e antes da publicação
 #
 # Congelada no corte da API 6 (15/10/2026) com SHA-256
 # 3e24f61b0d6e312d93c003a45dc9dc8f88d31a329018ce541f99de3305644fb4. A
@@ -56,7 +56,13 @@
 # - A segunda (16/10/2026) escreveu a `pessoa` da citação (D-api-9), a errata
 #   do `sujo` (o inicial é o da primeira montagem do campo), o diálogo não
 #   modal no celular, os nomes que vão no par de uma recusa do tema e o `teto`
-#   do `teto-de-alvos`.
+#   do `teto-de-alvos` (563ecf8f, SHA-256
+#   58576e950a7fbbc928610474aa13018e7ab949688b54ea8b78f8328cb16868b8).
+# - A terceira (16/10/2026) escreveu a recusa `nos-recusados`, com a conta e a
+#   amostra do que uma montagem recusou, e a amostra no evento `contribuicao`,
+#   no mesmo commit da entrega: o guarda da lista fechada das recusas amarra a
+#   janela ao contrato, e um nome entregue num commit e escrito no seguinte
+#   deixaria o do meio vermelho.
 #
 # Ver `api/README.md`, «A API 6». Nenhum build publicado leu a v6 de antes.
 # Depois que a 0.16 for publicada, a v6 não muda mais: a mudança vai para a v7.
@@ -65,4 +71,4 @@ f28d33eef08841daee7da58075d3513c0a7f3719bcf51fec784bc16b70e3505b  v2.json
 519b5e0d1c47138e009d63fffe1c7cfa0a528808293d0b34c71a08c7140a71e2  v3.json
 e31dda28805d2c4213889ea9437bfb7d7f49b14b041b127f47bb97676c50b973  v4.json
 7ff2570751fa4acbe52cf2d3cf7cec015453c12fae62ab5a469b74959aec046b  v5.json
-58576e950a7fbbc928610474aa13018e7ab949688b54ea8b78f8328cb16868b8  v6.json
+ddbd76f48362d5bb2bf5d7a9d31da222f7609f4df4eb394417fdbc9d659d237f  v6.json

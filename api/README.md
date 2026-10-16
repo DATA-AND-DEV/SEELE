@@ -168,6 +168,17 @@ construção, com a linha acompanhando cada edição.
 >
 > A linha do v6 em `congeladas.sha256` foi refeita no mesmo commit.
 
+> **Emendado em 16/10/2026 — a terceira emenda (D-api-8), antes da publicação,
+> no mesmo commit da entrega.** Uma montagem com o que não coube ou não serve
+> rejeitava com o genérico `falhou`, e quantos e por quê iam só ao `seele.log`.
+> A emenda escreveu a recusa `nos-recusados`, que leva `recusados` (a conta) e
+> `amostra` (até oito: o motivo, e a `chave`, a forma, a propriedade, o tipo ou
+> a classe), no `montar`, no `atualizar` e no `classes` de uma superfície. E o
+> evento `contribuicao` passou a levar a mesma amostra: uma forma que a API não
+> tem conta em todo ponto (sumia calada fora do cartão), e o `classes`, que é de
+> superfície, conta numa contribuição. A entrega e o texto vão juntos porque o
+> guarda da lista fechada amarra a janela ao contrato nos dois sentidos.
+
 O que muda na forma do arquivo:
 
 - **a v6 é escrita por inteiro**, sem `extends`: só a API 6 roda no app 0.16,

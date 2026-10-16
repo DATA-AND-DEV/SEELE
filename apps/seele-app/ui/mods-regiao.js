@@ -30,6 +30,18 @@
  * Números e não sensibilidades: cada um deles é o ponto em que um MOD deixa de
  * estar usando a API e passa a estar usando a memória de quem está na conversa.
  */
+/**
+ * **Quantas recusas a amostra guarda** (`nos-recusados`; D-api-8): o bastante
+ * para o MOD achar onde escreveu errado, e pouco para a resposta caber. A
+ * conta segue inteira à parte.
+ */
+const TETO_DA_AMOSTRA = 8;
+
+/** A `chave` que o MOD deu a um nó, para a amostra dizer qual foi, ou nada. */
+function chaveDoNo(no) {
+  return typeof no?.chave === "string" && no.chave ? { chave: no.chave.slice(0, 64) } : {};
+}
+
 const LIMITES_DA_REGIAO = Object.freeze({
   /** Nós na árvore inteira, somando todos os níveis. */
   nos: 512,
@@ -803,6 +815,12 @@ class RegiaoDeMod {
     this.raizesDeCartao = new Map();
     /** Quantos nós a última montagem recusou, por teto. */
     this.recusados = 0;
+    /**
+     * **O que ela recusou**, até `TETO_DA_AMOSTRA` (`nos-recusados`;
+     * D-api-8): `{ motivo, chave?, forma?, propriedade?, tipo? }`. A conta
+     * dizia quantos e o `seele.log` dizia por quê; o MOD recebia só a conta.
+     */
+    this.amostraDeRecusados = [];
     /** Onde cada figura ficou em cada tela, para o toque saber o que pegou. */
     this.acertoDaTela = new Map();
     /**
@@ -881,9 +899,21 @@ class RegiaoDeMod {
    * @param {*} conteudo O que o MOD declarou.
    * @returns {number} Quantos nós foram recusados por teto.
    */
+  /**
+   * Conta uma recusa, e a guarda na amostra enquanto ela tem lugar. `quantos`
+   * conta várias de uma vez, com a mesma descrição.
+   */
+  anotarRecusado(motivo, campos = {}, quantos = 1) {
+    this.recusados += quantos;
+    for (let i = 0; i < quantos && this.amostraDeRecusados.length < TETO_DA_AMOSTRA; i += 1) {
+      this.amostraDeRecusados.push({ motivo, ...campos });
+    }
+  }
+
   aplicar(conteudo) {
     if (this.solta) return 0;
     this.recusados = 0;
+    this.amostraDeRecusados = [];
     // Os recusados **por teto**, à parte dos recusados por forma: é o que
     // separa «não coube» de «não entra aqui» no aviso ao MOD.
     this.foraDoTeto = 0;
@@ -955,8 +985,10 @@ class RegiaoDeMod {
    */
   declararClasses(classes) {
     if (this.solta || !this.raiz) return 0;
-    const conta = { recusados: 0 };
+    const conta = { recusados: 0, amostra: [] };
     const texto = folhaDeClassesDeMod(this.escopo, classes, conta);
+    // A amostra das classes é a desta declaração (`nos-recusados`).
+    this.amostraDeRecusados = conta.amostra.map(({ motivo, campos }) => ({ motivo, ...campos }));
     if (texto === this.textoDaFolha) return conta.recusados;
     this.textoDaFolha = texto;
     if (!texto) {
@@ -1009,7 +1041,7 @@ class RegiaoDeMod {
       ));
     }
     if (typeof no === "string") {
-      if (orcamento.nos <= 0) { this.recusados += 1; this.foraDoTeto += 1; return []; }
+      if (orcamento.nos <= 0) { this.anotarRecusado("teto-de-nos"); this.foraDoTeto += 1; return []; }
       orcamento.nos -= 1;
       return [{ texto: no.slice(0, LIMITES_DA_REGIAO.texto) }];
     }
@@ -1022,12 +1054,19 @@ class RegiaoDeMod {
     // E num cartão, uma forma que a **região** conhece mas o cartão não é
     // recusada do mesmo jeito, e contada: o MOD precisa saber que pôs um botão
     // onde botão não entra, em vez de vê-lo sumir.
+    //
+    // **E numa região também** (o achado 5 da auditoria): a forma que a API
+    // não tem sumia calada fora do cartão, e uma contribuição com ela não
+    // dizia nada ao MOD. Uma superfície a recusa antes, pelo nome
+    // (`forma-desconhecida`); aqui ela conta, e a amostra diz qual.
+    const conhecida = Boolean(forma);
     if (forma && permitidas && !permitidas.has(forma)) forma = "";
     if (!forma) {
-      if (permitidas) this.recusados += 1;
+      this.anotarRecusado(conhecida ? "forma-fora-do-lugar" : "forma-desconhecida",
+        { forma: String(no.forma ?? "").slice(0, 64), ...chaveDoNo(no) });
       return [];
     }
-    if (orcamento.nos <= 0) { this.recusados += 1; this.foraDoTeto += 1; return []; }
+    if (orcamento.nos <= 0) { this.anotarRecusado("teto-de-nos", chaveDoNo(no)); this.foraDoTeto += 1; return []; }
     orcamento.nos -= 1;
 
     // A chave é o que faz a atualização ser incremental. Sem uma, a posição
@@ -1093,7 +1132,7 @@ class RegiaoDeMod {
             velho.remove();
           }
           no = this.criar(plano);
-          if (!no) { this.recusados += 1; continue; }
+          if (!no) { this.anotarRecusado("teto", { forma: plano.forma, ...chaveDoNo(plano.no) }); continue; }
         }
         if (FORMAS_COM_FILHOS.has(plano.forma)) {
           this.reconciliar(no, plano.dentro, fundura + 1, orcamento);
@@ -1185,9 +1224,10 @@ class RegiaoDeMod {
     // sempre: um MOD que escreveu `corDeFundo` em vez de `fundo` descobre onde
     // escreveu, em vez de ver a cor não aparecer e não saber por quê.
     if (plano.no.estilo) {
-      const conta = { recusados: 0 };
+      const conta = { recusados: 0, amostra: [] };
       aplicarEstiloDeMod(elem, plano.no.estilo, conta);
-      this.recusados += conta.recusados;
+      for (const recusa of conta.amostra) this.anotarRecusado(recusa.motivo, { ...chaveDoNo(plano.no), ...recusa.campos });
+      this.recusados += conta.recusados - conta.amostra.length;
     } else if (elem.dataset.estiloDeMod) {
       // O estilo saiu da declaração: o que ele escreveu sai da tela junto.
       aplicarEstiloDeMod(elem, null);
@@ -1902,7 +1942,7 @@ class RegiaoDeMod {
     const bolso = plano.cartao
       ? { conta: "bytesDeCartao", quantas: "midiasDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia, limite: LIMITES_DO_CARTAO.midias }
       : { conta: "bytesDeMidia", quantas: "midias", teto: this.perfil.bytesDeMidia, limite: this.perfil.midias };
-    if (this.contagem[bolso.quantas] >= bolso.limite) { this.recusados += 1; return; }
+    if (this.contagem[bolso.quantas] >= bolso.limite) { this.anotarRecusado("teto-de-midias", chaveDoNo(plano.no)); return; }
     this.contagem[bolso.quantas] += 1;
     let cancelado = false, bytes = 0;
     this.guardar(elem, `fundo ${plano.chave}`, () => {
@@ -2856,7 +2896,7 @@ class RegiaoDeMod {
       });
       pincel.stroke();
     }
-    if (tracos.length > LIMITES_DA_REGIAO.tracos) this.recusados += 1;
+    if (tracos.length > LIMITES_DA_REGIAO.tracos) this.anotarRecusado("teto-de-tracos", chaveDoNo(plano.no));
   }
 
   /**
@@ -2878,7 +2918,7 @@ class RegiaoDeMod {
   pintarFiguras(pincel, elem, plano) {
     const declaradas = Array.isArray(plano.no.figuras) ? plano.no.figuras : [];
     const figuras = declaradas.slice(0, LIMITES_DA_REGIAO.figuras);
-    if (declaradas.length > figuras.length) this.recusados += 1;
+    if (declaradas.length > figuras.length) this.anotarRecusado("teto-de-figuras", chaveDoNo(plano.no));
     // A lista de acerto é refeita a cada pintura: ela **é** o que está na tela,
     // e uma lista velha faria o arraste pegar uma peça que já saiu.
     const acerto = [];
@@ -2940,7 +2980,7 @@ class RegiaoDeMod {
         }
         default:
           // Um tipo que a API não conhece não vira retângulo por conveniência.
-          this.recusados += 1;
+          this.anotarRecusado("figura-desconhecida", { ...chaveDoNo(plano.no), tipo: String(figura?.tipo ?? "").slice(0, 32) });
           break;
       }
       pincel.restore();
@@ -4045,6 +4085,7 @@ class RegiaoDeMod {
   declararCartoes(cartoes) {
     if (this.solta) return 0;
     this.recusados = 0;
+    this.amostraDeRecusados = [];
     const pedidos = Object.entries(cartoes ?? {});
     if (pedidos.length > LIMITES_DO_CARTAO.cartoes) {
       throw new Error(

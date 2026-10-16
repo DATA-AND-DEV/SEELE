@@ -224,7 +224,7 @@ Os da interface que o MOD desenhou:
 | `acao` | apertou a ação principal de uma contribuição | `acao`, e o alvo que o produto escreveu: `pessoa` no cartão de uma pessoa, `canal` numa ação de sala, **em texto**, e vazios quando não há |
 | `fechar-pedido` | a pessoa pediu para fechar uma superfície suja | `superficie`, `porque`, `temAlteracoes` |
 | `fechar` | uma superfície fechou | `superficie`, `porque`, e `descartou: true` quando a pessoa descartou o que não estava gravado |
-| `contribuicao` | uma contribuição não coube, ou não tem onde entrar | `ponto`, `destino`, `recusados`, e `motivo`: `orcamento` (com `perfil`, `teto`, `tamanho`) ou `regiao-ausente` |
+| `contribuicao` | uma contribuição não coube, ou não tem onde entrar | `ponto`, `destino`, `recusados` e `amostra` (como a do `nos-recusados`), e `motivo`: `orcamento` (com `perfil`, `teto`, `tamanho`) ou `regiao-ausente` |
 
 E os da tela, que dizem o que mudou sem o MOD perguntar:
 
@@ -283,9 +283,11 @@ que recebe o foco), `lado`, `imersiva` e `visivel: false` (criar sem mostrar).
   não vai reabrir descarta.
 - **A saída da sessão descarta tudo, sem perguntar** e sem mandar `fechar`.
 
-Uma montagem cuja árvore tem nós que não couberam (um teto, uma forma que o
-cartão não aceita, um estilo com uma parte errada) **monta o que coube** e
-rejeita com `falhou`; quantos e por quê vão ao `seele.log`, com o seu `mod_id=`.
+Uma montagem cuja árvore tem o que não coube ou não serve (um teto, uma forma
+fora do lugar, um estilo com uma parte errada, uma figura que a API não tem)
+**monta o que coube** e rejeita com `nos-recusados`, que leva `recusados`, a
+conta, e `amostra`: até oito `{ motivo, chave, forma, propriedade, tipo, classe }`,
+com o que identifica cada uma. O `classes` rejeita do mesmo jeito.
 Uma forma que a API não tem rejeita com `forma-desconhecida`, com a `forma`, e
 a tela fica como estava.
 
@@ -395,7 +397,8 @@ imagem), `prioridade` (de -100 a 100: ordena duas substituições do mesmo ponto
 e quem escolhe é a pessoa), `rotulo`, `nomeAcessivel` e `acaoPrincipal`. A
 `acaoPrincipal` é o nome que volta no evento `acao` quando a pessoa aperta, com o
 alvo que o **produto** escreveu: trocar o que se desenha não troca a identidade.
-`classes` são de superfície: numa contribuição, elas não pintam nada.
+`classes` são de superfície: numa contribuição, elas não pintam nada, e o
+evento `contribuicao` conta isso (`classes-fora-da-superficie`).
 
 - **`atualizar(handle, conteudo)` troca sem sair**, e a linha não volta à nativa
   no meio. Ele resolve com `true`, ou com `false` quando o punho não está mais
@@ -450,7 +453,8 @@ acompanha o tema em vigor.
 validador não conhece, ou um valor que não serve, é contado como recusa — e,
 numa propriedade composta (`borda`, `sombra`, `gradiente`, `mover`, `transicao`,
 `animacao`), também a parte declarada que não serve: a propriedade sai com o
-padrão naquela parte, e a contagem chega à resposta. Um número fora do
+padrão naquela parte, e a recusa chega ao MOD como `nos-recusados`, com a
+propriedade na amostra. Um número fora do
 intervalo não é erro: ele é preso no limite.
 
 **Classes** são de superfície: `punho.classes({ nome: { base, sobre, foco,
@@ -820,7 +824,7 @@ try {
 | ponte | `falhou` (o genérico), `too-many-requests` (leva `teto`), `fila-cheia`, `mensagem-grande` (leva `tipoPedido`, `tamanho`, `teto`), `tipo-desconhecido` (leva `tipoPedido`), `sessao-encerrada` |
 | volume | `sem-espera`, `tipo-recusado` (leva `detectado`), `formato-desconhecido`, `arquivo-grande-demais`, `nao-gravei`, `incompleto`, `sessao-encerrada` |
 | arquivo | `banco-indisponivel`, `arquivo-nao-esta-de-pe`, `arquivo-de-outro-mod`, `arquivo-ilegivel`, `caminho-invalido`, `papel-nao-serve` (leva `papel`), `arquivos-demais-de-pe` |
-| superfícies | `tipo-desconhecido` (leva `tipoPedido` e `tipos`), `chave-desconhecida` (leva `chave`), `orcamento` (leva `perfil`, `teto`, `tamanho`), `forma-desconhecida` (leva `forma`), `superficie-desconhecida` (leva `superficie`), `sem-previa`, `contraste` (leva `pares`), `teto-de-folhas` e `teto-de-superficies` (levam `teto`) |
+| superfícies | `tipo-desconhecido` (leva `tipoPedido` e `tipos`), `chave-desconhecida` (leva `chave`), `orcamento` (leva `perfil`, `teto`, `tamanho`), `forma-desconhecida` (leva `forma`), `nos-recusados` (leva `recusados` e `amostra`), `superficie-desconhecida` (leva `superficie`), `sem-previa`, `contraste` (leva `pares`), `teto-de-folhas` e `teto-de-superficies` (levam `teto`) |
 | contribuições | `ponto-desconhecido`, `modo-recusado`, `sem-alvo`, `conteudo-invalido`, `teto-de-contribuicoes`, `teto-de-alvos` (leva `teto`), `contribuicao-ja-existe`, `contribuicao-de-outro-mod` |
 | tema, no servidor | `sem-porta-de-tema`, `tema-de-outro-mod`, `tema-invalido`, `tema-grande-demais`, `chave-desconhecida`, `valor-invalido`, `regiao-desconhecida` (em `mundo.tema`, como valor, e não como exceção) |
 

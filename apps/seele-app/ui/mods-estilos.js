@@ -145,6 +145,21 @@ function corDeMod(valor) {
   return `var(${TEMA_DA_API[citado]})`;
 }
 
+/** Quantas recusas de estilo a amostra guarda (o `TETO_DA_AMOSTRA` da região). */
+const AMOSTRA_DO_ESTILO = 8;
+
+/**
+ * Conta uma recusa de estilo em `conta` e, quando ela tem `amostra`, guarda o
+ * que foi enquanto há lugar (`nos-recusados`; D-api-8).
+ */
+function anotarNoEstilo(conta, motivo, campos) {
+  if (!conta) return;
+  conta.recusados += 1;
+  if (Array.isArray(conta.amostra) && conta.amostra.length < AMOSTRA_DO_ESTILO) {
+    conta.amostra.push({ motivo, campos });
+  }
+}
+
 /** Uma palavra de uma tabela, traduzida no valor do produto, ou `null`. */
 function palavraDoEstilo(grupo, valor) {
   const tabela = PALAVRAS_DO_ESTILO[grupo];
@@ -245,7 +260,9 @@ function sombraDeMod(declarada, recusar = () => {}) {
 function estiloDeMod(estilo, conta = null) {
   if (!estilo || typeof estilo !== "object" || Array.isArray(estilo)) return [];
   const pares = [];
-  const recusar = () => { if (conta) conta.recusados += 1; };
+  // A propriedade em que a recusa caiu, para a amostra (`nos-recusados`).
+  let atual = "";
+  const recusar = () => anotarNoEstilo(conta, "estilo", { propriedade: atual });
   const por = (propriedade, valor) => {
     if (valor === null || valor === undefined) { recusar(); return; }
     pares.push([propriedade, valor]);
@@ -253,6 +270,7 @@ function estiloDeMod(estilo, conta = null) {
 
   for (const [chave, valor] of Object.entries(estilo)) {
     if (valor === undefined) continue;
+    atual = String(chave).slice(0, 48);
     switch (chave) {
       // ---- cor e preenchimento ----
       case "cor": por("color", corDeMod(valor)); break;
@@ -521,8 +539,8 @@ function folhaDeClassesDeMod(escopo, classes, conta = null) {
   for (const [nome, declarado] of nomes) {
     if (regras.length >= LIMITES_DO_ESTILO.regrasPorSuperficie) break;
     const limpo = String(nome).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 48);
-    if (!limpo) { if (conta) conta.recusados += 1; continue; }
-    if (!declarado || typeof declarado !== "object") { if (conta) conta.recusados += 1; continue; }
+    if (!limpo) { anotarNoEstilo(conta, "classe", { classe: String(nome).slice(0, 48) }); continue; }
+    if (!declarado || typeof declarado !== "object") { anotarNoEstilo(conta, "classe", { classe: limpo }); continue; }
     const alvo = `${raiz} .mod-${limpo}`;
 
     for (const [estado, sufixo] of Object.entries(ESTADOS_DA_CLASSE)) {
@@ -544,7 +562,7 @@ function folhaDeClassesDeMod(escopo, classes, conta = null) {
       : [];
     for (const consulta of consultas) {
       const ate = numeroNoIntervalo(consulta?.ateLargura, { minimo: 120, maximo: 2400 });
-      if (ate === null) { if (conta) conta.recusados += 1; continue; }
+      if (ate === null) { anotarNoEstilo(conta, "consulta", { classe: limpo }); continue; }
       const corpo = corpoDaRegra(consulta.estilo);
       if (!corpo) continue;
       regras.push(`@container superficie-de-mod (max-width:${Math.round(ate)}px){${alvo}{${corpo}}}`);

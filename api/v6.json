@@ -164,7 +164,7 @@
   "eventos-mudam": {
     "midia": "passa a levar ponto e alvo (PERFIS R9); e o retrato que não decodifica manda midia/falhou (K2)",
     "traco": "ganha a fase cancelou (MESA M14)",
-    "contribuicao": "ganha o motivo regiao-ausente (celular) e o motivo orcamento: { ponto, destino, recusados, motivo: 'orcamento', perfil, teto, tamanho } quando a declaração passa do teto do ponto (tarefa 5); o orçamento é o perfil do ponto — pessoa.detalhes 4096 nós, as regiões 64 até a M3"
+    "contribuicao": "ganha o motivo regiao-ausente (celular) e o motivo orcamento: { ponto, destino, recusados, motivo: 'orcamento', perfil, teto, tamanho } quando a declaração passa do teto do ponto (tarefa 5); e leva a amostra do que recusou, como o nos-recusados: uma forma que a API não tem conta em todo ponto, e o classes, que é de superfície, conta como classes-fora-da-superficie (D-api-8); o orçamento é o perfil do ponto — pessoa.detalhes 4096 nós, as regiões 64 até a M3"
   },
   "eventos-da-tela": {
     "canal": "{ canal } — o canal aberto mudou",
@@ -737,6 +737,7 @@
       "chave-desconhecida (superficie.atualizar pediu uma chave que a superfície não tem, ou formulario.erros uma que não é de um campo; leva chave; tarefa 7)",
       "orcamento (superficie.atualizar levaria a superfície além do teto de nós; leva perfil, teto e tamanho; tarefa 7)",
       "forma-desconhecida (a árvore do montar ou a parte do atualizar declara uma forma que a API não tem; leva forma; a tela fica como estava)",
+      "nos-recusados (a árvore do montar, a parte do atualizar ou as classes têm o que não coube ou não serve: um teto, uma forma fora do lugar, uma propriedade ou a parte de uma propriedade de estilo, uma figura; o que coube é montado; leva recusados, a conta, e amostra, até 8 de { motivo, chave?, forma?, propriedade?, tipo?, classe? }; D-api-8)",
       "superficie-desconhecida (a mensagem nomeia uma superfície que não está de pé; leva superficie; tarefa 17g)",
       "sem-previa (SeeleUI.tema sem { previa: true }: na 6, o tema publicado é o da metade de servidor; tarefa 17g)",
       "contraste (a prévia do tema tem um par abaixo do piso; leva pares; tarefa 17g)",

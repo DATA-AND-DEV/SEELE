@@ -1723,14 +1723,25 @@ function imagemContribuida(ponto, pessoaId) {
  */
 function aplicarAContribuicao(contribuicao, chave, renderer, orcamento, mod, instancia) {
   try {
-    const recusados = renderer.aplicar(contribuicao.conteudo);
+    const daArvore = renderer.aplicar(contribuicao.conteudo);
+    // **O `classes` numa contribuição não pinta nada**: as classes são de
+    // superfície (D-api-8, a decisão (b)). Contado, e dito no evento, em vez de
+    // ignorado calado.
+    const classesFora = contribuicao.classes !== null && contribuicao.classes !== undefined;
+    if (classesFora) renderer.anotarRecusado?.("classes-fora-da-superficie");
+    const recusados = daArvore + (classesFora ? 1 : 0);
     if (recusados > 0) {
       // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
       // não coube onde ele a pôs. E dito a quem hospeda, que é quem investiga.
       //
       // **Com o perfil, o teto e o tamanho**, quando foi o teto: «8 recusados»
       // não diz a quem escreveu quanto a declaração tem nem quanto cabe ali.
-      const aviso = { nome: "contribuicao", ponto: contribuicao.ponto, destino: chave, recusados };
+      const aviso = {
+        nome: "contribuicao", ponto: contribuicao.ponto, destino: chave, recusados,
+        amostra: Array.isArray(renderer.amostraDeRecusados)
+          ? renderer.amostraDeRecusados.map((recusa) => ({ ...recusa }))
+          : [],
+      };
       if (renderer.foraDoTeto > 0) {
         Object.assign(aviso, {
           motivo: "orcamento",
@@ -3806,6 +3817,7 @@ const RECUSAS_AO_MOD = Object.freeze([
   "valor-invalido",
   "regiao-desconhecida",
   "forma-desconhecida",
+  "nos-recusados",
   "orcamento",
   "superficie-desconhecida",
   "sem-previa",
@@ -3828,6 +3840,18 @@ const RECUSAS_AO_MOD = Object.freeze([
  * `recusa` e os `camposDaRecusa`. A frase fica para o registro. Um nome fora da
  * lista fechada é defeito de quem escreveu, e lança na hora.
  */
+/**
+ * **A recusa de uma montagem que não coube inteira** (`nos-recusados`;
+ * D-api-8): quantos, e a amostra do que foi — o motivo, e a `chave`, a forma,
+ * a propriedade, o tipo ou a classe —, com a frase que vai ao `seele.log`.
+ */
+function recusaDosNos(superficie, recusados, frase) {
+  const amostra = Array.isArray(superficie?.renderer?.amostraDeRecusados)
+    ? superficie.renderer.amostraDeRecusados.map((recusa) => ({ ...recusa }))
+    : [];
+  return recusaAoMod("nos-recusados", `${recusados} ${frase}`, { recusados, amostra });
+}
+
 function recusaAoMod(nome, frase = nome, campos = undefined) {
   if (!RECUSAS_AO_MOD.includes(nome)) {
     throw new TypeError(`«${nome}» não está na lista fechada das recusas ao MOD`);
@@ -4094,13 +4118,14 @@ async function atenderOMod(mod, instancia, m) {
         });
         break;
       case "superficie-montar": {
-        const recusados = superficieDoMod(mod, instancia, m.superficie).montar(m.arvore);
+        const superficie = superficieDoMod(mod, instancia, m.superficie);
+        const recusados = superficie.montar(m.arvore);
         // **Recusar em silêncio é o defeito que este repositório mais paga.**
         // A mesma regra da região, e pelo mesmo motivo: um MOD cuja árvore não
-        // coube precisa saber disso onde ele a escreveu.
-        if (recusados > 0) {
-          throw new Error(`${recusados} nó(s) não couberam nos limites da superfície`);
-        }
+        // coube precisa saber disso onde ele a escreveu. **E saber o quê**
+        // (`nos-recusados`; D-api-8): a conta e a amostra, e não um `falhou`
+        // com o porquê só no `seele.log`. O que coube fica montado.
+        if (recusados > 0) throw recusaDosNos(superficie, recusados, "nó(s) não couberam nos limites da superfície");
         responder(true, { valor: null });
         break;
       }
@@ -4109,10 +4134,9 @@ async function atenderOMod(mod, instancia, m) {
         // 5c). A chave que não existe e a parte que passa do orçamento são
         // recusadas pelo nome, antes de mexer na tela; o que não coube por
         // forma é dito como no `montar`.
-        const recusados = superficieDoMod(mod, instancia, m.superficie).atualizar(m.chave, m.arvore);
-        if (recusados > 0) {
-          throw new Error(`${recusados} nó(s) não couberam nos limites da superfície`);
-        }
+        const superficie = superficieDoMod(mod, instancia, m.superficie);
+        const recusados = superficie.atualizar(m.chave, m.arvore);
+        if (recusados > 0) throw recusaDosNos(superficie, recusados, "nó(s) não couberam nos limites da superfície");
         responder(true, { valor: null });
         break;
       }
@@ -4124,11 +4148,9 @@ async function atenderOMod(mod, instancia, m) {
         responder(true, { valor: null });
         break;
       case "superficie-classes": {
-        const recusados = superficieDoMod(mod, instancia, m.superficie)
-          .declararClasses(m.classes);
-        if (recusados > 0) {
-          throw new Error(`${recusados} propriedade(s) de estilo não foram reconhecidas`);
-        }
+        const superficie = superficieDoMod(mod, instancia, m.superficie);
+        const recusados = superficie.declararClasses(m.classes);
+        if (recusados > 0) throw recusaDosNos(superficie, recusados, "propriedade(s) de estilo não foram reconhecidas");
         responder(true, { valor: null });
         break;
       }

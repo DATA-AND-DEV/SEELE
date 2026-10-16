@@ -825,6 +825,33 @@ const { chromium } = require('./playwright.cjs');
     assert.ok(consultas.estreito === 1 && consultas.largo === 2,
       `a consulta da classe não seguiu a largura da superfície: ${JSON.stringify(consultas)}`);
 
+    // 12f. **A montagem que não coube inteira diz o que recusou**
+    //      (`nos-recusados`, D-api-8). Ela respondia `falhou`, e quantos e
+    //      por quê iam só ao `seele.log`. Agora o nome, a conta e a amostra
+    //      chegam ao MOD no `montar`, no `atualizar` e no `classes`; o que
+    //      coube fica montado.
+    const naoCoube = await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'recusas', tipo: 'pagina', titulo: 'Recusas' } });
+      const montar = await pedir(6, { tipo: 'superficie-montar', superficie: 'recusas', arvore: [
+        { forma: 'texto', chave: 'ok', dentro: 'fica' },
+        { forma: 'caixa', chave: 'c', estilo: { corDeFundo: '#000000' } },
+      ] });
+      const ficou = Boolean(document.querySelector('[data-superficie="recusas"] [data-chave-do-mod="ok"]'));
+      const atualizar = await pedir(6, { tipo: 'superficie-atualizar', superficie: 'recusas', chave: 'c',
+        arvore: { forma: 'caixa', chave: 'c', estilo: { sombra: { cor: 'vermelha' } } } });
+      const classes = await pedir(6, { tipo: 'superficie-classes', superficie: 'recusas',
+        classes: { destaque: { base: { tamanhoDaLetra: 12 } } } });
+      await pedir(6, { tipo: 'superficie-descartar', superficie: 'recusas' });
+      const so = (r) => r && { ok: r.ok, erro: r.erro, recusados: r.recusados, amostra: r.amostra };
+      return { ficou, montar: so(montar), atualizar: so(atualizar), classes: so(classes) };
+    });
+    assert.deepEqual(naoCoube, {
+      ficou: true,
+      montar: { ok: false, erro: 'nos-recusados', recusados: 1, amostra: [{ motivo: 'estilo', chave: 'c', propriedade: 'corDeFundo' }] },
+      atualizar: { ok: false, erro: 'nos-recusados', recusados: 1, amostra: [{ motivo: 'estilo', chave: 'c', propriedade: 'sombra' }] },
+      classes: { ok: false, erro: 'nos-recusados', recusados: 1, amostra: [{ motivo: 'estilo', propriedade: 'tamanhoDaLetra' }] },
+    }, `a montagem que não coube não disse o que recusou: ${JSON.stringify(naoCoube)}`);
+
     // 13. Os botões do produto no formulário.
     const arvoreDaFicha = (extra = {}) => [{
       forma: 'formulario', chave: 'f', primario: 'SALVAR', secundario: 'CANCELAR', ...extra, dentro: [

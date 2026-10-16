@@ -907,6 +907,43 @@ const REGIOES = [
         + `de 40 linhas, com o aviso ${JSON.stringify(orcamento.avisoDosDetalhes)}`);
     }
 
+    // ------------------------------------------- o que a contribuição recusou
+    //
+    // (`nos-recusados`, D-api-8; o achado 5 da auditoria.) Uma forma que a API
+    // não tem sumia calada numa contribuição, e o `classes` (que é de
+    // superfície) era guardado e não pintava nada. Agora os dois contam, e o
+    // evento `contribuicao` diz o que foi, na amostra.
+    const recusadoNaContribuicao = await page.evaluate(() => {
+      const entregues = [];
+      const instancia = new InstanciaDeMod("mod/recusas", "h", geracaoDaSessao, {
+        pedirEncerramento() {},
+        async encerrou() { return true; },
+        entregar(mensagem) { entregues.push(mensagem); },
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/recusas", instancia);
+      // O `pessoa.detalhes` monta com o perfil «superficie», que não tem lista
+      // de formas: é onde a forma desconhecida sumia (o cartão já a contava).
+      const { handle } = contribuicoesDosMods.registrar({ id: "mod/recusas" }, instancia, {
+        ponto: "pessoa.detalhes", modo: "adicionar", alvo: "12",
+        classes: { destaque: { base: { cor: "#ff8800" } } },
+        conteudo: [{ forma: "texto", chave: "ok", dentro: "fica" }, { forma: "estrela", chave: "x" }],
+      });
+      const no = montarContribuicao(contribuicoesDosMods.porHandle.get(handle), "12");
+      const ficou = no ? [...no.querySelectorAll("*")].some((n) => n.textContent === "fica") : false;
+      contribuicoesDosMods.revogar(handle, { id: "mod/recusas", instancia });
+      modsCarregados.delete("mod/recusas");
+      const aviso = entregues.find((m) => m.nome === "contribuicao") ?? null;
+      return { ficou, recusados: aviso?.recusados ?? null, amostra: aviso?.amostra ?? null };
+    });
+    if (!recusadoNaContribuicao.ficou || recusadoNaContribuicao.recusados !== 2
+      || JSON.stringify(recusadoNaContribuicao.amostra) !== JSON.stringify([
+        { motivo: "forma-desconhecida", forma: "estrela", chave: "x" },
+        { motivo: "classes-fora-da-superficie" },
+      ])) {
+      falhas.push(`o que a contribuição recusou: a forma desconhecida e o classes não foram ditos no evento, ou o que coube não ficou: ${JSON.stringify(recusadoNaContribuicao)}`);
+    }
+
     // ------------------------------------------- as contagens saem com a sessão
     //
     // O aviso de região ausente mora na contribuição, que sai com a sessão: a

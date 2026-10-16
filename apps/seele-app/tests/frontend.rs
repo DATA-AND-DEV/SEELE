@@ -14060,12 +14060,17 @@ fn o_que_um_mod_declara_e_montado_e_nunca_interpretado() {
         "uma forma desconhecida deixou de ser recusada; a gramática passa a \
          crescer sem ninguém decidir: {planejar}"
     );
-    // E num cartão, a recusa é **contada**: uma forma que a região conhece e o
-    // cartão não é um `botao` que o MOD pôs e não vai aparecer, e ele precisa
-    // saber disso em vez de ver o nó sumir.
+    // E a recusa é **contada**, num cartão e fora dele: uma forma que a região
+    // conhece e o cartão não é um `botao` que o MOD pôs e não vai aparecer, e
+    // uma que a API não tem sumia calada fora do cartão (o achado 5 da
+    // auditoria do `v6.json`). O comportamento é medido em `regiao-do-mod.cjs`
+    // («a recusa diz o que recusou») e em `regioes-do-produto.cjs` («o que a
+    // contribuição recusou»); isto só impede o texto de voltar ao de antes.
     assert!(
-        planejar.contains("if (permitidas) this.recusados += 1;"),
-        "a forma recusada num cartão voltou a sumir calada: {planejar}"
+        planejar.contains(
+            "this.anotarRecusado(conhecida ? \"forma-fora-do-lugar\" : \"forma-desconhecida\""
+        ) && !planejar.contains("if (permitidas) this.anotarRecusado("),
+        "a forma recusada voltou a sumir calada, num cartão ou fora dele: {planejar}"
     );
 
     // E há teto de fundura: sem ele, uma árvore que o MOD manda estoura a pilha
