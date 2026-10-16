@@ -624,7 +624,11 @@ fn every_command_the_frontend_calls_is_registered() {
 // entre o Rust e a tela: saíram quando a trilha e a entrada (o VOLTAR AO MEU
 // SERVIDOR e o PARAR DE HOSPEDAR) passaram a chamá-los. A lista voltou a ser
 // vazia.
-const AGUARDANDO_TELA: &[&str] = &[];
+//
+// `ler_entrada` (tarefa 30 da F7) está aqui entre o Rust e a tela: o diálogo de
+// servidores passa a mandar todo texto a ele no commit seguinte, com a ponte do
+// navegador e o duble, e sai daqui junto.
+const AGUARDANDO_TELA: &[&str] = &["ler_entrada"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {

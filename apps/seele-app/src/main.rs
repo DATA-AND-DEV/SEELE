@@ -2876,6 +2876,15 @@ fn meu_codigo(app: AppHandle) -> Result<String, ()> {
     sala::meu_codigo_em(&config_dir(&app)).ok_or(())
 }
 
+/// O que um texto colado em CONECTAR é (tarefa 30 da F7, a 6g): a leitura do
+/// núcleo, com «é o seu código?» respondido pela chave desta máquina. Ver
+/// [`sala::EntradaColada`].
+#[tauri::command]
+fn ler_entrada(app: AppHandle, texto: String) -> sala::EntradaColada {
+    let meu = seele_ffi::codigo_desta_maquina(&config_dir(&app)).ok();
+    sala::ler_entrada_em(&texto, meu.as_ref())
+}
+
 /// A agenda (tarefa 29 da F7): os códigos com quem esta máquina já falou.
 ///
 /// # Errors
@@ -12747,6 +12756,7 @@ fn main() {
             recusar,
             encerrar_a_ligacao,
             meu_codigo,
+            ler_entrada,
             contatos_da_agenda,
             dar_nome_na_agenda,
             bloquear,
