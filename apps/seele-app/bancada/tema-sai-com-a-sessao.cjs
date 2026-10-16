@@ -1,24 +1,25 @@
-// O tema que um MOD pede sai com a sessão — e com o MOD.
+// O tema sai com a sessão.
 //
-// **O defeito.** O tema de um MOD (`case "tema"` → `aplicarOTemaDoMod`) é escrito
-// como variáveis em `#tela-sessao`, o mesmo elemento em toda sessão. A única
-// limpeza dele morava em `limparARegiaoDoMod`, registrada só quando o MOD cria
-// uma região — e o ESTILO 3.1.0, de API 4, não cria. O tema sobrevivia à saída,
-// e o servidor seguinte, sem MOD nenhum, aparecia com as cores do anterior.
-// Relato de 05/10/2026: um Mac entrou no servidor de um iPhone com a
-// personalização de outro servidor. A personalização é da sessão
-// (`specs/07-estetica.md`), e isto não pode acontecer em hipótese nenhuma.
+// **O defeito.** O tema é escrito como variáveis em `#tela-sessao`, o mesmo
+// elemento em toda sessão. A única limpeza dele morava em `limparARegiaoDoMod`,
+// registrada só quando o MOD criava uma região — e o ESTILO 3.1.0, de API 4,
+// não criava. O tema sobrevivia à saída, e o servidor seguinte, sem MOD nenhum,
+// aparecia com as cores do anterior. Relato de 05/10/2026: um Mac entrou no
+// servidor de um iPhone com a personalização de outro servidor. A
+// personalização é da sessão (`specs/07-estetica.md`), e isto não pode
+// acontecer em hipótese nenhuma.
 //
-// **Os três casos**, contra o código real de `ui/base.js` e `ui/mods-runtime.js`
+// **Na 6**, o tema que pinta a sessão é o do servidor, que entra por
+// `aplicarOTemaDoMod` com o id do MOD que o declarou (`aplicarOTemaDoServidor`),
+// e a janela só faz prévia. O tema que a janela aplicava para um MOD das APIs 3
+// a 5, com a limpeza por instância (`darDonoAoTema`), saiu com o corte; os
+// casos dele saíram junto.
+//
+// **Os dois casos**, contra o código real de `ui/base.js` e `ui/mods-runtime.js`
 // carregado num `vm`:
 //
-// 1. Sair do servidor apaga o tema — o caso do relato. (Com e sem região,
-//    enquanto a região da API 3 existia; ela saiu com a API 3, e a limpeza
-//    que morava nela também.)
-// 2. Um MOD que se encerra no meio da sessão leva o tema dele junto, sem
-//    esperar a sessão acabar (`darDonoAoTema`).
-// 3. Uma instância velha que termina de encerrar **depois** de a nova pedir tema
-//    não apaga o tema da nova.
+// 1. Sair do servidor apaga o tema na hora — o caso do relato.
+// 2. E a prévia, que é desta sessão como o tema.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual. Rodada por
 // `cargo xtask check-runtime`.
@@ -59,7 +60,7 @@ const codigo = [
   "const identificadoresIgnorados = new Map();",
   trecho(base, "function encerrarOAmbienteDosMods("),
   // O que `case "tema"` faz, base.js: `aplicarOTemaDoMod(mod.id, m.valores)`.
-  `globalThis.__api = { aplicarOTemaDoMod, darDonoAoTema, encerrarOAmbienteDosMods, entrarNaGeracao,
+  `globalThis.__api = { aplicarOTemaDoMod, encerrarOAmbienteDosMods, entrarNaGeracao,
      InstanciaDeMod, ESTADOS_DE_MOD, modsCarregados };`,
 ].join("\n");
 
@@ -70,6 +71,8 @@ const sessao = {
     removeProperty: (k) => estilo.delete(k),
   },
 };
+// O selo «prévia não publicada» (`pintarOSeloDaPrevia`): um nó só, no corpo.
+let selo = null;
 const raizCss = { "--seele-osso": "#e8e4dc", "--seele-negro-absoluto": "#000000" };
 const ctx = {
   console,
@@ -77,7 +80,12 @@ const ctx = {
   CustomEvent: class { constructor(t) { this.type = t; } },
   dispatchEvent: () => true,
   $: (id) => (id === "tela-sessao" ? sessao : null),
-  document: { documentElement: {} },
+  document: {
+    documentElement: {},
+    body: { append: (no) => { selo = no; } },
+    getElementById: (id) => (id === "selo-da-previa" ? selo : null),
+  },
+  elemento: (tag, classe, texto) => ({ tag, className: classe, textContent: texto, hidden: false, setAttribute() {} }),
   getComputedStyle: () => ({ getPropertyValue: (t) => raizCss[t] ?? "" }),
   contribuicoesDosMods: { escolherSubstituicao: () => ({}), revogarDoMod: () => {} },
   modsCarregados: new Map(),
@@ -113,10 +121,9 @@ function instanciaAtiva(geracao) {
   return inst;
 }
 
-/** O que `case "tema"` faz, em base.js. */
-function pedirTema(inst, valores) {
+/** O tema do servidor, como `aplicarOTemaDoServidor` o aplica, em base.js. */
+function pedirTema(valores) {
   api.aplicarOTemaDoMod("seele/estilo", valores);
-  api.darDonoAoTema("seele/estilo", inst);
 }
 
 const falhas = [];
@@ -131,7 +138,7 @@ function cobrar(ok, caso, visto) {
     estilo.clear();
     api.entrarNaGeracao(7);
     const inst = instanciaAtiva(7);
-    pedirTema(inst, TEMA);
+    pedirTema(TEMA);
     const durante = estilo.size;
     api.encerrarOAmbienteDosMods();
     const logoDepois = Object.fromEntries(estilo);
@@ -141,29 +148,22 @@ function cobrar(ok, caso, visto) {
       "sair do servidor apaga o tema na hora", logoDepois);
   }
 
-  // 2. O MOD se encerra no meio da sessão: o tema vai com ele.
-  estilo.clear();
-  api.entrarNaGeracao(9);
-  const sozinho = instanciaAtiva(9);
-  pedirTema(sozinho, TEMA);
-  await sozinho.encerrar();
-  cobrar(estilo.size === 0, "um MOD que sai no meio da sessão leva o tema dele", Object.fromEntries(estilo));
-
-  // 3. A instância velha termina tarde e não apaga o tema da nova.
-  estilo.clear();
-  api.entrarNaGeracao(10);
-  const velha = instanciaAtiva(10);
-  pedirTema(velha, TEMA);
-  let soltar;
-  velha.executor = { pedirEncerramento() {}, encerrou: () => new Promise((r) => { soltar = r; }) };
-  const encerrandoVelha = velha.encerrar();
-  const nova = instanciaAtiva(10);
-  pedirTema(nova, OUTRO);
-  soltar?.(true);
-  await encerrandoVelha.catch(() => {});
-  cobrar(estilo.get("--seele-laranja-nerv") === "#2f8fe0",
-    "a instância velha que termina tarde não apaga o tema da nova", Object.fromEntries(estilo));
+  // 2. A prévia, por cima do tema, sai junto.
+  {
+    estilo.clear();
+    api.entrarNaGeracao(9);
+    const inst = instanciaAtiva(9);
+    pedirTema(TEMA);
+    api.aplicarOTemaDoMod("seele/estilo", OUTRO, { previa: { superficie: "ajustes" } });
+    const comAPrevia = estilo.get("--seele-laranja-nerv");
+    api.encerrarOAmbienteDosMods();
+    const logoDepois = Object.fromEntries(estilo);
+    await inst.encerramento;
+    api.entrarNaGeracao(10);
+    cobrar(comAPrevia === "#2f8fe0" && Object.keys(logoDepois).length === 0 && selo?.hidden === true,
+      "sair do servidor apaga a prévia do tema na hora, e o selo dela", { comAPrevia, logoDepois, selo: selo?.hidden });
+  }
 
   if (falhas.length) process.exit(1);
-  console.log("\no tema sai com a sessão e com o MOD.");
+  console.log("\no tema e a prévia saem com a sessão.");
 })();

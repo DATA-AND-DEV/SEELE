@@ -1225,29 +1225,6 @@ const NOMES_DOS_PONTOS = Object.freeze({
 // 3: para cada lugar, o MOD que vale, os que perderam a disputa, a preferência
 // e o estado da mídia. Tudo aqui é leitura: nada escolhe, revoga ou grava.
 
-/**
- * Quem desenha um ponto fora do registro de contribuições.
- *
- * Um ponto tem esse segundo caminho: `SeeleUI.tema` pinta `servidor.aparencia`
- * (o ESTILO) sem registrar ponto nenhum. Sem esta leitura a aba diria «nenhum
- * MOD usa este lugar» sobre a sessão inteira pintada por um. (O outro,
- * `SeeleUI.cartoes` em `pessoa.cartao`, saiu com a API 3.)
- */
-function modsDoCaminhoAntigo(ponto) {
-  if (ponto === "servidor.aparencia") {
-    // **O tema do servidor não é o caminho antigo** (tarefa 17f): ele mora em
-    // `temaDosMods` porque entra por `aplicarOTemaDoMod`, e sem este filtro a
-    // aba o chamava de tema da API 3. Ele é dito por `temaDoServidor`.
-    const doServidor = oTemaDoServidorAqui()?.mod_id ?? null;
-    return {
-      rotulo: "tema pedido por",
-      valem: [...temaDosMods.keys()].filter((id) => id !== doServidor),
-      perdem: [],
-    };
-  }
-  return { rotulo: "", valem: [], perdem: [] };
-}
-
 /** Os onze pontos, na ordem da tabela da API, com tudo o que a aba diz de cada um. */
 function quemPintaCadaPonto() {
   return Object.keys(PONTOS_DE_CONTRIBUICAO).map((ponto) => {
@@ -1256,7 +1233,6 @@ function quemPintaCadaPonto() {
       ...contribuicoesDosMods.quemPinta(ponto, preferencia, (id) => modsCarregados.has(id)),
       preferencia,
       herdada: ponto === "pessoa.avatar" && !modPreferidoPara(ponto) && preferencia !== "",
-      antigos: modsDoCaminhoAntigo(ponto),
       // O que a linha de QUEM DESENHA O QUE diz do tema do servidor, ou nada.
       temaDoServidor: ponto === "servidor.aparencia"
         ? aLinhaDoTemaDoServidor(oTemaDoServidorAqui(), preferencia)?.estado ?? null
@@ -1347,11 +1323,7 @@ function frasesDaMidiaDosMods() {
  */
 function frasesDeQuemPinta(linha) {
   const frases = [];
-  const antigos = linha.antigos;
-  const ninguem = linha.contribuicoes === 0
-    && antigos.valem.length === 0
-    && antigos.perdem.length === 0
-    && !linha.temaDoServidor;
+  const ninguem = linha.contribuicoes === 0 && !linha.temaDoServidor;
   if (ninguem) {
     frases.push("nenhum MOD usa este lugar agora");
     if (linha.substituivel && linha.preferencia) frases.push(fraseDaPreferencia(linha));
@@ -1359,19 +1331,14 @@ function frasesDeQuemPinta(linha) {
   }
   if (linha.substituivel) {
     const osOutros = linha.oSeeleDesenhaOutros ? "; o SEELE desenha os outros" : "";
-    // **O tema da API 3 em vigor é dito junto de «o SEELE desenha».** O
-    // ESTILO pinta a sessão pela `SeeleUI.tema`, sem registrar ponto nenhum, e
-    // «o SEELE desenha» sozinho faria quem lê concluir que a sessão está com a
-    // cara do SEELE (m-3 da revisão ampla do Plano 1D).
-    const comOTema = linha.ponto === "servidor.aparencia" && antigos.valem.length
-      ? `, com o tema de ${antigos.valem.join(" e ")} em vigor (API 3)`
-      : "";
+    // (O tema da API 3 em vigor, dito junto de «o SEELE desenha», saiu com o
+    // corte: na 6, quem pinta a aparência é o tema do servidor, logo abaixo.)
     if (linha.temaDoServidor && linha.contribuicoes === 0) {
       // Na API 6, quem pinta a aparência é o tema do servidor, e não uma
       // contribuição: a mesma frase da linha de QUEM DESENHA O QUE.
       frases.push(linha.temaDoServidor);
     } else if (linha.ausente) {
-      frases.push(`você escolheu ${linha.ausente}, e ele não está de pé agora: o SEELE desenha${comOTema}`);
+      frases.push(`você escolheu ${linha.ausente}, e ele não está de pé agora: o SEELE desenha`);
     } else if (linha.escolhidoNaoSubstitui) {
       // De pé, e sem candidata aqui: o avatar que herda a escolha do cartão,
       // o escolhido que revogou o que tinha, o que só acrescenta.
@@ -1379,9 +1346,9 @@ function frasesDeQuemPinta(linha) {
         ? `a escolha de «${NOMES_DOS_PONTOS["pessoa.cartao"]}» é ${linha.escolhidoNaoSubstitui}, que não desenha `
           + "avatares: o SEELE desenha"
         : `você escolheu ${linha.escolhidoNaoSubstitui}, que está de pé e não substitui este lugar: `
-          + `o SEELE desenha${comOTema}`);
+          + "o SEELE desenha");
     } else if (linha.nativa) {
-      frases.push(`o SEELE desenha, por escolha desta máquina${comOTema}`);
+      frases.push("o SEELE desenha, por escolha desta máquina");
     } else if (linha.substitui.length > 1) {
       frases.push(`desenhado por ${linha.substitui.join(" e ")}, cada um para quem declarou${osOutros}`);
     } else if (linha.substitui.length === 1) {
@@ -1389,17 +1356,11 @@ function frasesDeQuemPinta(linha) {
         ? `desenhado por ${linha.substitui[0]}, para quem declarou${osOutros}`
         : `desenhado por ${linha.substitui[0]}`);
     } else {
-      frases.push(comOTema ? `o SEELE desenha${comOTema}` : "o SEELE desenha; nenhum MOD substitui este lugar");
-    }
-    // E o SEELE escolhido não apaga a cor: `escreverOTemaDaSessao`, em
-    // `base.js`, escreve o tema de quem pediu sem consultar a escolha.
-    if (comOTema && linha.preferencia === APRESENTACAO_NATIVA) {
-      frases.push("a escolha desta máquina não desliga o tema da API 3");
+      frases.push("o SEELE desenha; nenhum MOD substitui este lugar");
     }
   }
   if (linha.acrescentam.length) frases.push(`acrescentam: ${linha.acrescentam.join(", ")}`);
-  if (antigos.valem.length) frases.push(`${antigos.rotulo}: ${antigos.valem.join(", ")}`);
-  const perderam = [...new Set([...linha.perderam, ...antigos.perdem])];
+  const perderam = [...new Set(linha.perderam)];
   if (perderam.length) frases.push(`pediram e não receberam: ${perderam.join(", ")}`);
   if (linha.substituivel) frases.push(fraseDaPreferencia(linha));
   // **O que a casca deixou de fora, contado** (tarefa 5): sem isto, quem
