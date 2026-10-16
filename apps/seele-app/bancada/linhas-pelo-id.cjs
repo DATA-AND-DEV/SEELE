@@ -1922,10 +1922,15 @@ async function abrir(browser, url, r) {
       //    ponte manda a confirmada própria com a `client_message_id` da
       //    pendente, e tira a pendente na mesma revisão; a de outra pessoa vem
       //    com `null`, e a própria relida do histórico com a chave que o
-      //    servidor gravou (a F1, `0.16/protocolo-eco`). Os valores são os do
+      //    servidor gravou (a F1, `0.16/protocolo-eco`). Os valores vêm do
       //    teste dela, `a_confirmada_propria_chega_com_a_chave_da_pendente`: a
-      //    pendente "77" gravada como a 5, e a relida, a 2 com "31". A de outra
-      //    pessoa é a 7, e não a 6: o MOD do passo (g) desenha o corpo da 6.
+      //    pendente "77" gravada como a 5, e a relida, a 2. A de outra pessoa é
+      //    a 7, e não a 6: o MOD do passo (g) desenha o corpo da 6. A chave da
+      //    relida é "7", e não o "31" da F1, de propósito: é o número do id da
+      //    de outra pessoa, e a chave e o id não podem disputar um nó (rodada
+      //    1, B1). E duas próprias gravadas sem chave nenhuma, a 8 e a 9 — um
+      //    servidor antigo, ou o app sem a F1 —, que seguem pelo id e não
+      //    disputam uma chave vazia (rodada 1, B2).
       //    O foco no link da pendente e a seleção no corpo dela; e depois, com
       //    tudo gravado, a de outra pessoa que sai (a 3): as que ficam guardam
       //    o nó, pelo id ou pela chave.
@@ -1944,7 +1949,7 @@ async function abrir(browser, url, r) {
       const corpoMeu = "a minha mensagem, recém-escrita: veja https://exemplo.br/eco antes de sair";
       const pendenteJ = minha({ id: 0, at_seconds: t + 240, body: corpoMeu, estado: "Enviando", client_message_id: "77" });
       const gravadaJ = minha({ id: 5, at_seconds: t + 241, body: corpoMeu, client_message_id: "77" });
-      const relidaJ = minha({ id: 2, at_seconds: t + 60, body: "a minha, relida do histórico", client_message_id: "31" });
+      const relidaJ = minha({ id: 2, at_seconds: t + 60, body: "a minha, relida do histórico", client_message_id: "7" });
       comRevisao([deOutra(1, 2, 0), deOutra(3, 3, 2), deOutra(4, 4, 3), pendenteJ]);
       await tique();
       const liPorId = (id) => lista.querySelector(`button[data-moderar-mensagem="${id}"]`)?.closest("li") ?? null;
@@ -1976,9 +1981,12 @@ async function abrir(browser, url, r) {
         selecao: getSelection().toString(),
       });
 
-      // A gravação, e na mesma revisão a relida (a 2) e a de outra pessoa (a 7).
+      // A gravação, e na mesma revisão a relida (a 2), a de outra pessoa (a 7)
+      // e as duas próprias sem chave (a 8 e a 9).
       r = await passo(() => comRevisao([
         deOutra(1, 2, 0), relidaJ, deOutra(3, 3, 2), deOutra(4, 4, 3), gravadaJ, deOutra(7, 2, 5),
+        minha({ id: 8, at_seconds: t + 360, body: "a minha, gravada por um servidor sem a chave" }),
+        minha({ id: 9, at_seconds: t + 420, body: "a minha, de novo sem a chave" }),
       ]));
       const li2 = liPorId(2);
       const li7 = liPorId(7);
@@ -2008,8 +2016,9 @@ async function abrir(browser, url, r) {
       });
 
       // A 3, de outra pessoa, sai: cada uma das que ficam guarda o nó — as de
-      // outras pessoas pelo id, a relida e a gravada pela chave.
-      const fixas = new Map([1, 2, 4, 5, 7].map((id) => [id, liPorId(id)]));
+      // outras pessoas e as próprias sem chave pelo id, a relida e a gravada
+      // pela chave.
+      const fixas = new Map([1, 2, 4, 5, 7, 8, 9].map((id) => [id, liPorId(id)]));
       const li3 = liPorId(3);
       r = await passo(() => comRevisao(testTable.messages.filter((m) => m.id !== 3)));
       eco.saiA3 = {
