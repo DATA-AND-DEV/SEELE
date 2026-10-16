@@ -1491,6 +1491,49 @@ def ir_para_aba(pg: Page, aba: str, falhas: list[str]) -> bool:
     return exigir_toque(pg, f"#cel-aba-{aba}", falhas)
 
 
+AS_ENTRADAS_DA_SALA = """(guardar) => {
+  const li = [...document.querySelectorAll('#lista-voice_rooms > li')]
+    .find((item) => item.querySelector('button[data-voice_room]')?.dataset.dentro === 'nao');
+  const entrar = li?.querySelector('button[data-voice_room]');
+  const mudo = li?.querySelector('.cel-entrar-mudo');
+  if (guardar) { window.__entrarDaSala = entrar; window.__mudoDaSala = mudo; }
+  return { entrar: !!entrar, mudo: !!mudo,
+           mesmoEntrar: !!entrar && entrar === window.__entrarDaSala,
+           mesmoMudo: !!mudo && mudo === window.__mudoDaSala,
+           foco: document.activeElement === window.__entrarDaSala ? 'ENTRAR'
+             : document.activeElement === window.__mudoDaSala ? 'MUDO'
+             : (document.activeElement?.className || document.activeElement?.tagName) };
+}"""
+
+
+def salas_pelo_id(pg: Page) -> list[str]:
+    """A coluna de salas do celular reconciliada pelo id, como a do desktop
+    (pendência 63, a parte (b); lote AX da F5): com o mesmo retrato, o ENTRAR
+    e o ENTRAR MUDO de uma sala são os mesmos nós de um quadro ao seguinte, e o
+    foco de quem está num deles fica nele. Trocados a cada quadro, eles saíam
+    da árvore de acessibilidade, e o foco caía no BODY."""
+    falhas = []
+    if not ir_para_aba(pg, "servidor", falhas):
+        return falhas
+    pg.wait_for_timeout(300)
+    antes = pg.evaluate(AS_ENTRADAS_DA_SALA, True)
+    if not antes["entrar"] or not antes["mudo"]:
+        falhas.append(f"não há uma sala de fora com o ENTRAR e o ENTRAR MUDO: a conferência não vale: {antes}")
+        return falhas
+    for qual in ("__entrarDaSala", "__mudoDaSala"):
+        pg.evaluate(AS_ENTRADAS_DA_SALA, True)
+        pg.evaluate(f"window.{qual}.focus()")
+        esperar_quadro(pg)
+        esperar_quadro(pg)
+        depois = pg.evaluate(AS_ENTRADAS_DA_SALA, False)
+        nome = "ENTRAR" if qual == "__entrarDaSala" else "MUDO"
+        if not depois["mesmoEntrar"] or not depois["mesmoMudo"]:
+            falhas.append(f"com o mesmo retrato, dois quadros depois, o ENTRAR ou o ENTRAR MUDO é outro nó: {depois}")
+        if depois["foco"] != nome:
+            falhas.append(f"o foco no {nome} não sobreviveu a dois quadros: foi para {depois['foco']!r}")
+    return falhas
+
+
 AJUSTES_CONTRA_O_AVISO = """(id) => {
   const aviso = document.getElementById(id), camada = document.getElementById('tela-server');
   if (!aviso.checkVisibility() || !camada.checkVisibility()) return { aVista: false };
@@ -3309,6 +3352,7 @@ CASOS: dict[str, Caso] = {
     # Sem ela, o claro reprovava o «VOCÊ ESTÁ AQUI» a 2,6:1.
     "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
+    "salas-pelo-id": Caso(levar=salas_pelo_id, medir=False),
     "ajustes-e-avisos": Caso(levar=ajustes_e_avisos, medir=False),
     "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),

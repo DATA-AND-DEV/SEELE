@@ -3,9 +3,10 @@
 // Spec: docs/superpowers/specs/2026-10-09-0.16-celular-design.md, §2.2.
 //
 // A lista é a do desktop (`#lista-roster`, desenhada pelo tela-sessao.js e
-// refeita a cada quadro). O celular muda o toque: na linha de uma pessoa, ele
-// abre a folha dela, com o sinal, o volume e onde se modera. No desktop, o nome
-// abre a moderação, que no celular é pelo SEELE no computador.
+// reconciliada pelo id a cada quadro: a linha de uma pessoa é o mesmo nó de um
+// quadro ao seguinte, desde o lote AX). O celular muda o toque: na linha de uma
+// pessoa, ele abre a folha dela, com o sinal, o volume e onde se modera. No
+// desktop, o nome abre a moderação, que no celular é pelo SEELE no computador.
 
 "use strict";
 
