@@ -1185,6 +1185,7 @@ mod tests {
             commands,
             shared: std::sync::Arc::clone(&shared),
             encerrada: std::sync::Mutex::new(None),
+            ligacao: None,
         };
         let chave = conexao
             .send_message(CANAL.get(), "á".repeat(3_000))
@@ -1227,6 +1228,7 @@ mod tests {
             commands,
             shared: std::sync::Arc::clone(&shared),
             encerrada: std::sync::Mutex::new(None),
+            ligacao: None,
         };
         let antes = shared.room.lock().unwrap().current_voice_room;
 

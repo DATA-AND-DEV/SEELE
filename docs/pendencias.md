@@ -9970,8 +9970,11 @@ como porta ocupada. Antes do socket duplo, uma sonda em `0.0.0.0` e outra em
 duplo não vê, a sonda vê. O `SO_EXCLUSIVEADDRUSE` faria isso no socket, mas o
 `socket2` 0.6.5 não o expõe, e a folha de lints proíbe o `unsafe`. Os testes
 põem três ocupantes — outra escuta, um só IPv4, um só IPv6 — no `seele-server` e
-na sala, e no macOS o do só IPv6 reprovava antes. A prova do Windows, vermelho
-antes e verde depois, é a do PC de testes.
+na sala, e no macOS o do só IPv6 reprovava antes. **Provado no Windows em
+15/10**, no PC de testes: vermelho em `95271bc4` (o `a_porta_ocupada_e_dita`);
+verde em `4ed24ee0` (`alcance::testes` 44 de 44, `sala::` 22 de 22, clippy
+limpo); e, tirada uma sonda de cada vez, o teste reprova no ocupante da família
+dela.
 **Na linha 0.15:** fica como está. A 0.15.2 já está pronta para a tag.
 
 ## 66 · O teste da bomba da tela leva ~38 s e reprova quando a máquina está dividida

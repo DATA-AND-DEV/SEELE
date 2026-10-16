@@ -386,6 +386,24 @@ pub fn codigo_desta_maquina(home: &str) -> Result<Codigo, ConnectionError> {
     codigo_com(home, std::env::var(VARIAVEL_DA_IDENTIDADE).ok().as_deref())
 }
 
+/// **O alvo canônico de quem liga para um código**: `@CÓDIGO` (tarefa 30 da F7,
+/// a 6g; spec de 23/09, «Do lado de quem liga», 2).
+///
+/// Ele se basta sozinho: é o que a casca põe no `server` do [`ConnectConfig`],
+/// e a ponte pergunta ao ponto de encontro onde a sala mora. Sobrevive ao
+/// `ejetar`, que zera o convite da sessão, porque não depende dele. É o mesmo
+/// texto da chave do pino do código (`seele_core::confere_codigo::chave_do_pino`).
+#[must_use]
+pub fn alvo_do_codigo(codigo: &Codigo) -> String {
+    seele_core::confere_codigo::chave_do_pino(codigo)
+}
+
+/// O código de um alvo `@CÓDIGO`, ou nada quando o alvo é um endereço. A volta
+/// de [`alvo_do_codigo`], e a única leitura dela.
+fn codigo_do_alvo(alvo: &str) -> Option<Codigo> {
+    Codigo::ler(alvo.trim().strip_prefix('@')?).ok()
+}
+
 /// O mesmo, com o valor de `SEELE_IDENTIDADE` dito por quem chama.
 fn codigo_com(home: &str, variavel: Option<&str>) -> Result<Codigo, ConnectionError> {
     let chave = chave_com(home, variavel)?;
@@ -653,6 +671,16 @@ pub enum ConnectStage {
         /// De onde o furo veio.
         onde: String,
     },
+    /// Quem recebe está sendo chamado: uma sala pessoal mandou `Tocando`.
+    ///
+    /// Ver a variante do núcleo: quem tocou venceu a corrida, e daqui só se sai
+    /// para `Dentro` ou `Desistiu`.
+    Tocando {
+        /// Qual da lista tocou, contando do zero.
+        candidato: u8,
+        /// O prazo do toque, em segundos.
+        prazo_s: u16,
+    },
     /// Dentro: o aperto de mão terminou e há sessão.
     Dentro,
     /// Nenhum candidato entrou, e este é o motivo.
@@ -660,6 +688,9 @@ pub enum ConnectStage {
         /// O mesmo erro que a casca já sabe escrever.
         motivo: ConnectionError,
     },
+    /// Quem liga desistiu antes de entrar. Ver a variante do núcleo: não é
+    /// `Desistiu`, e daqui não se sai.
+    Cancelada,
 }
 
 /// Uma etapa e quando ela aconteceu.
@@ -728,8 +759,10 @@ impl ConnectStage {
             Self::Avisando { .. } => "Avisando",
             Self::Tentando { .. } => "Tentando",
             Self::CaminhoAberto { .. } => "CaminhoAberto",
+            Self::Tocando { .. } => "Tocando",
             Self::Dentro => "Dentro",
             Self::Desistiu { .. } => "Desistiu",
+            Self::Cancelada => "Cancelada",
         }
     }
 
@@ -789,10 +822,15 @@ impl From<&seele_core::chegada::Etapa> for ConnectStage {
             Etapa::CaminhoAberto { onde } => Self::CaminhoAberto {
                 onde: onde.to_string(),
             },
+            Etapa::Tocando { candidato, prazo_s } => Self::Tocando {
+                candidato: *candidato,
+                prazo_s: *prazo_s,
+            },
             Etapa::Dentro => Self::Dentro,
             Etapa::Desistiu(erro) => Self::Desistiu {
                 motivo: classify_connect_failure(erro),
             },
+            Etapa::Cancelada => Self::Cancelada,
         }
     }
 }
@@ -818,8 +856,10 @@ fn campos_do_passo(etapa: &seele_core::chegada::Etapa) -> (Option<String>, Optio
             ..
         } => (Some(onde.to_string()), Some(*candidato), Some(*de)),
         Etapa::CaminhoAberto { onde } => (Some(onde.to_string()), None, None),
+        // O endereço é o da `Tentando` do mesmo candidato, logo acima na trilha.
+        Etapa::Tocando { candidato, .. } => (None, Some(*candidato), None),
         Etapa::Parada { candidatos, .. } => (None, None, Some(*candidatos)),
-        Etapa::Dentro | Etapa::Desistiu(_) => (None, None, None),
+        Etapa::Dentro | Etapa::Desistiu(_) | Etapa::Cancelada => (None, None, None),
     }
 }
 
@@ -860,8 +900,10 @@ fn avisou_do_passo(etapa: &seele_core::chegada::Etapa) -> Option<bool> {
         | Etapa::Localizando { .. }
         | Etapa::Avisando { .. }
         | Etapa::CaminhoAberto { .. }
+        | Etapa::Tocando { .. }
         | Etapa::Dentro
-        | Etapa::Desistiu(_) => None,
+        | Etapa::Desistiu(_)
+        | Etapa::Cancelada => None,
     }
 }
 
@@ -1536,6 +1578,9 @@ pub struct Connection {
     /// `Sync` e a casca segura a `Connection` atrás de um `Arc`; `None` depois
     /// de alguém já ter visto o fim, e na `Connection` montada à mão dos testes.
     encerrada: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// O código por que esta conexão foi discada, quando foi: ver
+    /// [`Connection::codigo_da_ligacao`].
+    ligacao: Option<Codigo>,
 }
 
 impl std::fmt::Debug for Connection {
@@ -1555,6 +1600,40 @@ impl std::fmt::Debug for Connection {
 enum Lado {
     Entrada,
     Saida,
+}
+
+/// **O CANCELAR de quem está ligando** (tarefa 16 da F7): o pedido de largar a
+/// chegada em voo de [`Connection::connect_cancelavel`].
+///
+/// Entregue antes do bloqueio e usado de outra linha. Pedido uma vez, fica
+/// pedido: cancelar antes de a chegada começar a esperar também vale.
+pub struct Cancelamento {
+    pedido: tokio::sync::watch::Sender<bool>,
+}
+
+impl Cancelamento {
+    /// Um cancelamento ainda não pedido.
+    #[must_use]
+    pub fn novo() -> Arc<Self> {
+        Arc::new(Self {
+            pedido: tokio::sync::watch::Sender::new(false),
+        })
+    }
+
+    /// Larga a ligação em voo: o QUIC de cada candidato fecha, a sala que tocava
+    /// vê `ParouDeTocar(Cancelada)`, e o `connect` volta com
+    /// [`ConnectionError::Cancelada`]. Depois de a sessão abrir, não faz nada:
+    /// sair é o `disconnect`.
+    pub fn cancelar_ligacao(&self) {
+        self.pedido.send_replace(true);
+    }
+
+    /// Fica pronto quando o cancelamento é pedido.
+    async fn pedido(&self) {
+        let mut pedido = self.pedido.subscribe();
+        // O `Sender` mora em `self`, e não fecha enquanto isto espera.
+        let _ = pedido.wait_for(|pedido| *pedido).await;
+    }
 }
 
 impl Connection {
@@ -1588,7 +1667,7 @@ impl Connection {
     /// vem vazia quando a falha é de antes de haver chegada: um endereço que
     /// não resolve, uma identidade que não abre, uma thread que não sobe.
     pub fn connect_with_trail(config: ConnectConfig) -> Result<(Arc<Self>, Trust), ConnectFailure> {
-        Self::abrir(config, None)
+        Self::abrir(config, None, None)
     }
 
     /// O mesmo, com alguém ouvindo a chegada **enquanto** ela acontece.
@@ -1613,13 +1692,34 @@ impl Connection {
         config: ConnectConfig,
         olhos: Arc<dyn EventListener>,
     ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
-        Self::abrir(config, Some(olhos))
+        Self::abrir(config, Some(olhos), None)
     }
 
-    /// O corpo que as três portas compartilham.
+    /// O mesmo, com um [`Cancelamento`]: quem liga pode desistir enquanto a
+    /// chegada anda (tarefa 16 da F7). É a porta do CANCELAR de quem está
+    /// chamando alguém.
+    ///
+    /// O `Cancelamento` é entregue **antes** do bloqueio, como o ouvinte: é de
+    /// outra linha que alguém o usa, enquanto esta espera.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Connection::connect_with_trail`], e
+    /// [`ConnectionError::Cancelada`] quando o cancelamento chega antes da
+    /// sessão, com a trilha acabando em [`ConnectStage::Cancelada`].
+    pub fn connect_cancelavel(
+        config: ConnectConfig,
+        olhos: Option<Arc<dyn EventListener>>,
+        cancelamento: Arc<Cancelamento>,
+    ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
+        Self::abrir(config, olhos, Some(cancelamento))
+    }
+
+    /// O corpo que as quatro portas compartilham.
     fn abrir(
         config: ConnectConfig,
         olhos: Option<Arc<dyn EventListener>>,
+        cancelamento: Option<Arc<Cancelamento>>,
     ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
         // **O apelido que o `Hello` não leva é recusado aqui, antes de tudo**
         // (pendência 58, item 55; lote C55 da F5). O teto é do fio, em bytes,
@@ -1638,23 +1738,44 @@ impl Connection {
             }
             .into());
         }
-        let (address, server_name, pin_key) = resolve(&config.server)?;
+        // **Um código, e não um endereço** (tarefa 30 da F7): não há o que
+        // resolver, e quem diz onde a sala mora é o ponto de encontro. Cada
+        // candidato que ele der confere o código dentro do TLS: é a
+        // `Chegada::para_o_codigo` quem monta os destinos, e não o
+        // `build_destino`, então o `codigo_esperado` não entra aqui.
+        let alvo = match codigo_do_alvo(&config.server) {
+            Some(codigo) => Alvo::Codigo(codigo),
+            None => {
+                let (address, server_name, pin_key) = resolve(&config.server)?;
+                // The invite's other addresses, resolved here so the driver
+                // thread gets values. An alternative that does not resolve is
+                // dropped: the first address is the one the person is most
+                // likely on the same network as, and refusing the whole link
+                // over a spare would trade one path fewer for no path at all.
+                let alternates: Vec<(SocketAddr, String, String)> = config
+                    .alternate_servers
+                    .iter()
+                    .filter_map(|alternate| resolve(alternate).ok())
+                    .collect();
+                Alvo::Enderecos {
+                    address,
+                    server_name,
+                    pin_key,
+                    alternates,
+                }
+            }
+        };
+        // A origem, lida do mesmo `Alvo` que o `drive` disca: o código que
+        // vai para a `Chegada::para_o_codigo` é o que a conexão vai dizer.
+        let ligacao = match &alvo {
+            Alvo::Codigo(codigo) => Some(*codigo),
+            Alvo::Enderecos { .. } => None,
+        };
         if config.codigo_esperado.is_some() && config.expected_fingerprint.is_some() {
             tracing::warn!(
                 "a conexão trouxe código e impressão: vale o código, e a impressão não é conferida"
             );
         }
-        // The invite's other addresses, resolved here so the driver thread gets
-        // values. An alternative that does not resolve is dropped: the first
-        // address is the one the person is most likely on the same network as,
-        // and refusing the whole link over a spare would trade one path fewer
-        // for no path at all.
-        let alternates: Vec<(SocketAddr, String, String)> = config
-            .alternate_servers
-            .iter()
-            .filter_map(|alternate| resolve(alternate).ok())
-            .collect();
-
         let home = PathBuf::from(&config.home);
         // ADR 0061: a chave mora na pasta da identidade da máquina, quando o
         // launcher a diz; os pins e o resto continuam em `home`.
@@ -1716,16 +1837,14 @@ impl Connection {
                 };
                 runtime.block_on(drive(
                     thread_config,
-                    address,
-                    server_name,
-                    pin_key,
-                    alternates,
+                    alvo,
                     key,
                     pins,
                     thread_shared,
                     command_rx,
                     &ready_tx,
                     olhos,
+                    cancelamento,
                 ));
                 // **Antes de o runtime cair, e não depois.** `drive` voltou com
                 // a despedida do enlace feita (`Enlace::sair`), e é isso que
@@ -1749,6 +1868,7 @@ impl Connection {
             commands: command_tx,
             shared,
             encerrada: Mutex::new(Some(encerrada_rx)),
+            ligacao,
         });
         Ok((connection, trust))
     }
@@ -3452,6 +3572,20 @@ impl Connection {
         let _ = self.commands.send(Command::Shutdown);
     }
 
+    /// **O código por que esta conexão foi discada**, quando ela foi uma
+    /// ligação: a tentativa veio de um `@CÓDIGO` e a ponte perguntou ao ponto
+    /// de encontro onde a pessoa mora (`Chegada::para_o_codigo`). `None` para
+    /// tudo o que chegou por um endereço — inclusive uma sala que tocou.
+    ///
+    /// É por aqui que a casca decide o que anotar: uma ligação vai para a
+    /// agenda, e não para a lista de visitados (decisão de 16/10 na F7). O
+    /// critério é a origem da tentativa, e não o texto do alvo parecer um
+    /// código.
+    #[must_use]
+    pub const fn codigo_da_ligacao(&self) -> Option<Codigo> {
+        self.ligacao
+    }
+
     /// Encerra a sessão e espera a thread da conexão terminar, até `teto`.
     ///
     /// Para quem vai embora em seguida: a casca no `ExitRequested`, com o
@@ -4311,6 +4445,24 @@ fn build_destino(
     }
 }
 
+/// Para onde uma conexão vai.
+enum Alvo {
+    /// Os endereços de um servidor, o primeiro e os alternativos, já resolvidos.
+    Enderecos {
+        /// O primeiro endereço.
+        address: SocketAddr,
+        /// O nome que o TLS confere.
+        server_name: String,
+        /// A chave do pin e do aceite, na forma canônica.
+        pin_key: String,
+        /// Os outros endereços do convite.
+        alternates: Vec<(SocketAddr, String, String)>,
+    },
+    /// O código de uma pessoa (tarefa 30 da F7): quem diz onde a sala mora é o
+    /// ponto de encontro.
+    Codigo(Codigo),
+}
+
 /// The driver: connects, then pumps until told to stop.
 #[allow(
     clippy::too_many_arguments,
@@ -4318,16 +4470,14 @@ fn build_destino(
 )]
 async fn drive(
     config: ConnectConfig,
-    address: SocketAddr,
-    server_name: String,
-    pin_key: String,
-    alternates: Vec<(SocketAddr, String, String)>,
+    alvo: Alvo,
     key: seele_core::SigningKey,
     pins: Arc<FilePinStore>,
     shared: Arc<Shared>,
     mut commands: tokio::sync::mpsc::UnboundedReceiver<Command>,
     ready: &std::sync::mpsc::Sender<Result<Trust, ConnectFailure>>,
     olhos: Option<Arc<dyn EventListener>>,
+    cancelamento: Option<Arc<Cancelamento>>,
 ) {
     shared
         .link_state
@@ -4336,34 +4486,54 @@ async fn drive(
     // `Enlace` e não `Client`: é a sessão que atravessa quedas, com a bateria
     // interna dentro. Antes disto, o app pulava de "conectado" para "encerrado"
     // no primeiro soluço de rede.
-    // O alvo como a pessoa o digitou. É sob ele que a casca grava o sim, e é
-    // ele que vale para todos os candidatos desta chegada.
-    let chave_do_aceite = pin_key.clone();
-    let destinos = std::iter::once((address, server_name.clone(), pin_key.clone()))
-        .chain(alternates)
-        .map(|(address, server_name, pin_key)| {
-            build_destino(&config, address, &server_name, &pin_key, &chave_do_aceite)
-        })
-        .collect();
-    // Uma `Chegada` e não a chamada direta ao laço: ela é quem dá nome a cada
-    // etapa desta travessia e guarda a trilha. O laço continua exatamente onde
-    // estava — com o aviso por candidato e os prazos —, e o que muda aqui é que
-    // a falha deixa de ser uma frase só. O bilhete vai junto: com ele, quem
-    // entra avisa o ponto de encontro por candidato que precisa de furo, que é
-    // o degrau 4 do ADR 0022. Sem bilhete os dois caminhos são o mesmo.
-    let chegada = seele_core::chegada::Chegada::nova(destinos, config.bilhete.clone());
-    // **O quarto corre junto com a corrida** (a pendência 55, tarefa 14b da F7).
-    // Era o `connect` do app que perguntava, antes de chamar esta ponte, e quem
-    // estava na mesma casa pagava até 1,5 s de prazo do quarto com o ponto ou o
-    // DNS mudos. Agora a `Chegada` pergunta enquanto corre: quem não precisa de
-    // furo começa na hora, e o endereço de hoje entra quando chega.
-    //
-    // Com a impressão conferida, e o bilhete guardado (a `Chegada` só pergunta
-    // com bilhete): é a mesma condição em que o `connect` perguntava. Ver
-    // `quarto_de`.
-    let chegada = match quarto_de(&config, &chave_do_aceite) {
-        Some(quarto) => chegada.com_o_quarto(quarto),
-        None => chegada,
+    let chegada = match alvo {
+        // **Uma ligação** (tarefa 30 da F7): a `Chegada` pergunta ao ponto de
+        // encontro desta máquina onde a sala do código mora, e os candidatos
+        // saem da resposta, todos conferindo o código dentro do TLS. O ponto é o
+        // de quem liga, a mesma leitura do ambiente com que a sala se registra.
+        Alvo::Codigo(codigo) => seele_core::chegada::Chegada::para_o_codigo(
+            codigo,
+            seele_core::encontro::ponto_de_quem_liga(),
+            config.nickname.clone(),
+        ),
+        Alvo::Enderecos {
+            address,
+            server_name,
+            pin_key,
+            alternates,
+        } => {
+            // O alvo como a pessoa o digitou. É sob ele que a casca grava o
+            // sim, e é ele que vale para todos os candidatos desta chegada.
+            let chave_do_aceite = pin_key.clone();
+            let destinos = std::iter::once((address, server_name.clone(), pin_key.clone()))
+                .chain(alternates)
+                .map(|(address, server_name, pin_key)| {
+                    build_destino(&config, address, &server_name, &pin_key, &chave_do_aceite)
+                })
+                .collect();
+            // Uma `Chegada` e não a chamada direta ao laço: ela é quem dá nome
+            // a cada etapa desta travessia e guarda a trilha. O laço continua
+            // exatamente onde estava — com o aviso por candidato e os prazos —,
+            // e o que muda aqui é que a falha deixa de ser uma frase só. O
+            // bilhete vai junto: com ele, quem entra avisa o ponto de encontro
+            // por candidato que precisa de furo, que é o degrau 4 do ADR 0022.
+            // Sem bilhete os dois caminhos são o mesmo.
+            let chegada = seele_core::chegada::Chegada::nova(destinos, config.bilhete.clone());
+            // **O quarto corre junto com a corrida** (a pendência 55, tarefa
+            // 14b da F7). Era o `connect` do app que perguntava, antes de
+            // chamar esta ponte, e quem estava na mesma casa pagava até 1,5 s
+            // de prazo do quarto com o ponto ou o DNS mudos. Agora a `Chegada`
+            // pergunta enquanto corre: quem não precisa de furo começa na hora,
+            // e o endereço de hoje entra quando chega.
+            //
+            // Com a impressão conferida, e o bilhete guardado (a `Chegada` só
+            // pergunta com bilhete): é a mesma condição em que o `connect`
+            // perguntava. Ver `quarto_de`.
+            match quarto_de(&config, &chave_do_aceite) {
+                Some(quarto) => chegada.com_o_quarto(quarto),
+                None => chegada,
+            }
+        }
     };
 
     // O ouvinte entra **antes** do bloqueio, que é a coisa inteira: o `watch` da
@@ -4382,7 +4552,14 @@ async fn drive(
         })
     });
 
-    let chegou = chegada.chegar(key, pins).await;
+    let chegou = chegada
+        .chegar_ate(key, pins, async move {
+            match cancelamento {
+                Some(cancelamento) => cancelamento.pedido().await,
+                None => std::future::pending().await,
+            }
+        })
+        .await;
     // Esperada, e não abortada. A `Chegada` já morreu quando esta linha roda —
     // `chegar` a consome —, então o emissor do `watch` já caiu e a tarefa acima
     // termina sozinha depois de entregar a última etapa. Abortar aqui perderia
@@ -6714,8 +6891,10 @@ fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
         // trocado por outra versão, no meio da sessão.
         seele_core::ConnectError::OutraLinha { .. } => EndReason::Incompatible,
         // Não chega à volta hoje: ela é ao `IP:porta` que atendeu, e não ao
-        // código. Se chegar, é a conversa que caiu, como as de rede.
+        // código. Se chegar, é a conversa que caiu, como as de rede. E ninguém
+        // cancela uma volta: o `Cancelamento` é da chegada.
         seele_core::ConnectError::NaoLocalizou(_)
+        | seele_core::ConnectError::Cancelada
         | seele_core::ConnectError::LocalEndpoint
         | seele_core::ConnectError::Unreachable
         | seele_core::ConnectError::TlsRefused
@@ -6788,6 +6967,7 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
         seele_core::ConnectError::NaoLocalizou(falha) => ConnectionError::NaoLocalizou {
             motivo: (*falha).into(),
         },
+        seele_core::ConnectError::Cancelada => ConnectionError::Cancelada,
         // Era `TlsRefused`, e caía no braço de cima: o impostor que repete o
         // certificado sem ter a chave aparecia como versão incompatível, e a
         // tela mandava atualizar o SEELE nas duas máquinas.
@@ -8084,6 +8264,7 @@ mod tests {
             commands,
             shared: bare_shared(),
             encerrada: Mutex::new(Some(encerrada)),
+            ligacao: None,
         }
     }
 
@@ -8453,6 +8634,7 @@ mod tests {
             commands,
             shared: Arc::clone(&compartilhado),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         let mostrado = connection.snapshot().telemetry.jitter_ms;
 
@@ -8605,6 +8787,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert!(connection.snapshot().may_manage_voice_rooms);
 
@@ -8642,6 +8825,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
@@ -8711,6 +8895,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
@@ -8779,6 +8964,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         fold(
             &shared,
@@ -8835,6 +9021,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         fold(
@@ -8904,6 +9091,7 @@ mod tests {
             commands,
             shared,
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         assert_eq!(
@@ -8953,6 +9141,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
@@ -8995,6 +9184,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -9082,6 +9272,7 @@ mod tests {
             commands,
             shared: bare_shared(),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         for blank in ["", "   ", "\t\n"] {
@@ -9360,6 +9551,7 @@ mod tests {
             commands,
             shared: Arc::clone(&shared),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         // O controle: o membro chegou, e a janela o lê pelo acessor. Sem isto,
         // um `Snapshot` sem ele não provaria nada.
@@ -10208,6 +10400,7 @@ mod uma_pendente_nao_e_uma_mensagem_do_servidor {
             commands: manda,
             shared: super::tests::compartilhado_de_teste(),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert_eq!(
             conexao.remove_message(0),
@@ -10484,6 +10677,49 @@ mod trilha_no_log {
         assert_eq!(
             campos_do_passo(&localizando),
             (Some("encontro.exemplo:8384".into()), None, None)
+        );
+    }
+
+    #[test]
+    fn o_toque_atravessa_com_o_candidato_e_o_prazo() {
+        // Tarefa 16 da F7. A casca desenha o CHAMANDO a partir desta etapa, e
+        // lê o prazo pelo nome do campo.
+        use seele_core::chegada::Etapa;
+        let tocando = Etapa::Tocando {
+            candidato: 1,
+            prazo_s: 45,
+        };
+        let atravessou = ConnectStage::from(&tocando);
+        assert_eq!(
+            atravessou,
+            ConnectStage::Tocando {
+                candidato: 1,
+                prazo_s: 45
+            }
+        );
+        assert_eq!(atravessou.nome(), "Tocando");
+        assert_eq!(
+            serde_json::to_value(&atravessou).ok(),
+            Some(serde_json::json!({ "Tocando": { "candidato": 1, "prazo_s": 45 } }))
+        );
+        assert_eq!(campos_do_passo(&tocando), (None, Some(1), None));
+    }
+
+    #[test]
+    fn o_cancelamento_atravessa_como_etapa_e_como_erro_proprios() {
+        // Tarefa 16 da F7. A casca lê os dois pelo nome: a etapa no `ETAPAS`, e
+        // o erro no `FRASES`, que o `fraseDeErro` procura pela palavra que o
+        // serde escreve para uma variante unitária.
+        use seele_core::chegada::Etapa;
+        let cancelada = ConnectStage::from(&Etapa::Cancelada);
+        assert_eq!(cancelada, ConnectStage::Cancelada);
+        assert_eq!(cancelada.nome(), "Cancelada");
+        assert_eq!(campos_do_passo(&Etapa::Cancelada), (None, None, None));
+        let erro = classify_connect_failure(&seele_core::ConnectError::Cancelada);
+        assert_eq!(erro, ConnectionError::Cancelada);
+        assert_eq!(
+            serde_json::to_value(&erro).ok(),
+            Some(serde_json::json!("Cancelada"))
         );
     }
 
@@ -12089,6 +12325,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         connection.set_talking(true);
@@ -12213,6 +12450,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert_eq!(
             connection.ajustar_volume_da_tela(0.3),
@@ -12237,6 +12475,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(false),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert_eq!(
             sem_audio.ajustar_volume_da_tela(0.3),
@@ -12260,6 +12499,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         connection
             .calar_a_tela(true)
@@ -12291,6 +12531,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(false),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert_eq!(
             sem_audio.som_da_tela(),
@@ -12516,6 +12757,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(false),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         assert_eq!(
             connection.controles_da_voz(),
@@ -12540,6 +12782,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
 
         connection.set_muted(true).expect("o mudo fora de sala");
@@ -12592,6 +12835,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         let retrato = serde_json::to_value(connection.snapshot()).expect("o retrato vira JSON");
         assert_eq!(
@@ -13085,6 +13329,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         {
             let mut room = connection.shared.room.lock().expect("a sala");
@@ -13133,6 +13378,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(true),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         {
             let mut room = connection.shared.room.lock().expect("a sala");
@@ -13192,6 +13438,7 @@ mod o_audio_segue_a_sala {
             commands,
             shared: compartilhado(false),
             encerrada: Mutex::new(None),
+            ligacao: None,
         };
         sem_audio
             .shared
@@ -14024,6 +14271,40 @@ mod o_debug_da_configuracao {
             impresso.contains("join_secret: None"),
             "sem segredo, o `Debug` de `ConnectConfig` não diz `None`:\n{impresso}"
         );
+    }
+}
+
+/// O alvo canônico de quem liga (tarefa 30 da F7): a ida e a volta são a mesma
+/// regra, e só um código que fecha vira alvo.
+#[cfg(test)]
+mod o_alvo_do_codigo {
+    use super::{alvo_do_codigo, codigo_do_alvo, Codigo};
+
+    #[test]
+    fn o_alvo_e_arroba_codigo_e_volta_ao_mesmo_codigo() {
+        let codigo = Codigo::da_chave(&[0; 32]);
+        let alvo = alvo_do_codigo(&codigo);
+        assert_eq!(alvo, format!("@{codigo}"));
+        assert_eq!(codigo_do_alvo(&alvo), Some(codigo));
+        assert_eq!(codigo_do_alvo(&format!("  {alvo}  ")), Some(codigo));
+    }
+
+    #[test]
+    fn um_endereco_ou_um_codigo_que_nao_fecha_nao_e_alvo_de_codigo() {
+        for texto in [
+            "casa.exemplo:8383",
+            "10.0.0.1:8383",
+            "[::1]:8383",
+            "CSM7-NBFR-CAYQ-EV4Y",
+            "@CSM7-NBFR-CAYQ-EV4Z",
+            "@",
+        ] {
+            assert_eq!(
+                codigo_do_alvo(texto),
+                None,
+                "`{texto}` virou alvo de código"
+            );
+        }
     }
 }
 

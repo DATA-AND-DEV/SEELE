@@ -45,6 +45,7 @@ mod catalogo;
 mod executor;
 mod firewall;
 mod icone;
+mod ligar;
 mod mods;
 mod reducao;
 mod sala;
@@ -259,6 +260,10 @@ struct Session {
     /// é por isso que ele recusa com [`FalhaAoAtualizar::NadaEscolhido`] em vez
     /// de silenciosamente ir procurar.
     atualizacao: Mutex<Option<tauri_plugin_updater::Update>>,
+    /// **A ligação em voo, para o CANCELAR** (tarefa 28 da F7): o
+    /// [`seele_ffi::Cancelamento`] do `connect` que está andando, ou nada. Quem
+    /// abre e fecha a vaga é o [`ligar::LigacaoEmVoo`].
+    ligacao_em_voo: Mutex<Option<Arc<seele_ffi::Cancelamento>>>,
 }
 
 /// Com que intenção este processo foi aberto.
@@ -1368,10 +1373,16 @@ async fn connect<R: tauri::Runtime>(
         descartados: Arc::clone(&session.eventos_de_geracao_morta),
     }) as Arc<dyn EventListener>;
     let atento = Arc::clone(&ponte);
-    let resultado =
-        tauri::async_runtime::spawn_blocking(move || Connection::connect_watching(config, atento))
-            .await
-            .unwrap_or_else(|_| Err(ConnectFailure::from(ConnectionError::Unreachable)));
+    // **O CANCELAR desta tentativa** (tarefa 28 da F7): a vaga fica na sessão
+    // enquanto a chegada anda, e o `cancelar_ligacao` a acha lá.
+    let em_voo = ligar::LigacaoEmVoo::abrir(&session);
+    let cancelamento = em_voo.cancelamento();
+    let resultado = tauri::async_runtime::spawn_blocking(move || {
+        Connection::connect_cancelavel(config, Some(atento), cancelamento)
+    })
+    .await
+    .unwrap_or_else(|_| Err(ConnectFailure::from(ConnectionError::Unreachable)));
+    drop(em_voo);
     let (connection, veredito) = resultado.map_err(|falha| FalhaDaEntrada {
         falha,
         de_onde: DeOndeVeio {
@@ -1483,6 +1494,9 @@ async fn connect<R: tauri::Runtime>(
     }
 
     let snapshot = connection.snapshot();
+    // Se a ponte discou um código, e qual: a ligação não é visita
+    // (`ligar::anotar_a_chegada`). Lido aqui, antes de a conexão ir para o slot.
+    let ligou_para = connection.codigo_da_ligacao();
 
     // **A mesma conferência, com o slot na mão.** Entre a de cima e esta há os
     // efeitos de entrada, e uma tentativa nova pode ter começado no meio. Com o
@@ -1525,10 +1539,9 @@ async fn connect<R: tauri::Runtime>(
     }
     // Falso até a lista gravar, lá embaixo, a impressão que a conexão aceitou.
     let mut a_lista_guardou = false;
-    if !endereco_desta_maquina(&alvo) {
-        if let Ok(mut guardado) = session.alvo.lock() {
-            *guardado = Some(alvo.clone());
-        }
+    // Uma ligação vai para a agenda, e não para cá: é `anotar_a_chegada` quem
+    // decide, pela origem da tentativa, e quem guarda o alvo da sessão.
+    if ligar::anotar_a_chegada(&session, &casa, &alvo, ligou_para) {
         let aberta = seele_ffi::conhecidos::Conhecidos::abrir(
             std::path::PathBuf::from(&casa).join("conhecidos"),
         );
@@ -2876,6 +2889,25 @@ fn meu_codigo(app: AppHandle) -> Result<String, ()> {
     sala::meu_codigo_em(&config_dir(&app)).ok_or(())
 }
 
+/// O que um texto colado em CONECTAR é (tarefa 30 da F7, a 6g): a leitura do
+/// núcleo, com «é o seu código?» respondido pela chave desta máquina. Ver
+/// [`ligar::EntradaColada`].
+#[tauri::command]
+fn ler_entrada(app: AppHandle, texto: String) -> ligar::EntradaColada {
+    let config = config_dir(&app);
+    let meu = seele_ffi::codigo_desta_maquina(&config).ok();
+    ligar::ler_entrada_em(&texto, meu.as_ref(), |codigo| {
+        ligar::nome_na_agenda(&config, codigo)
+    })
+}
+
+/// CANCELAR (tarefa 28 da F7): larga a ligação em voo, se houver uma. Devolve
+/// se havia o que cancelar. Ver [`ligar::cancelar_em`].
+#[tauri::command]
+fn cancelar_ligacao(session: State<'_, Session>) -> bool {
+    ligar::cancelar_em(&session)
+}
+
 /// A agenda (tarefa 29 da F7): os códigos com quem esta máquina já falou.
 ///
 /// # Errors
@@ -3552,16 +3584,75 @@ async fn hospedar(
 /// O arquivo inteiro, e não só o `hospedar`: a sala pessoal (tarefa 4f da F7)
 /// e o G-casca do Plano 2 vão abrir pontos de entrada novos aqui, e o que
 /// esquecer o padrão reprova sem que alguém precise lembrar de pôr um guarda
-/// nele.
+/// nele. **Menos os módulos de teste**, que sobem pelo `iniciar` curto de
+/// propósito (o padrão seguro, acima): o MOD do guardado
+/// (`o_mod_do_guardado_continua_respondendo`, tarefa 20 da F7) precisa de uma
+/// hospedagem com MODs, e com o ponto padrão ela convocaria o ponto do projeto.
 #[cfg(test)]
 mod o_ponto_de_encontro_de_quem_hospeda {
     /// As duas formas, partidas para não casarem com este texto.
     const COM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar_com_o_ponto_padrao(");
     const SEM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar(");
 
+    /// Este arquivo sem comentários e sem os módulos `#[cfg(test)]`. Cada um é
+    /// de primeiro nível e fecha numa linha `}` sozinha, onde a produção
+    /// recomeça. Só os módulos: um `use` sob `#[cfg(test)]` não tem `}`, e
+    /// cortar até a próxima levaria junto a produção que vem depois dele.
+    fn producao() -> String {
+        producao_de(&super::fonte_sem_comentarios())
+    }
+
+    /// [`producao`] sobre um texto qualquer, para o recorte ter prova própria.
+    ///
+    /// **E ele se confere sozinho** (sugestão da F5, ao aceitar o recorte): o
+    /// que se corta é um módulo, e dentro de um módulo toda linha é recuada,
+    /// menos a do nome e a do `}` final. Um `#[cfg(test)] mod x;`, sem corpo,
+    /// levaria o corte até a `}` da próxima função de produção, e é essa linha
+    /// na coluna zero que acusa.
+    fn producao_de(fonte: &str) -> String {
+        let mut pedacos = fonte.split(concat!("\n#[cfg(test)]\n", "mod "));
+        let mut producao = pedacos.next().unwrap_or_default().to_owned();
+        for pedaco in pedacos {
+            if let Some(fim) = pedaco.find("\n}\n") {
+                let soltas: Vec<&str> = pedaco[..fim]
+                    .lines()
+                    .skip(1)
+                    .filter(|linha| linha.starts_with(|c: char| !c.is_whitespace()))
+                    .collect();
+                assert!(
+                    soltas.is_empty(),
+                    "o recorte de um módulo de teste levou linhas da coluna zero, que são de \
+                     produção: {soltas:?}"
+                );
+                producao.push_str(&pedaco[fim + 2..]);
+            }
+        }
+        producao
+    }
+
+    #[test]
+    #[should_panic(expected = "linhas da coluna zero")]
+    fn o_recorte_acusa_um_modulo_de_teste_sem_corpo() {
+        let fonte = concat!(
+            "fn antes() {}\n",
+            "#[cfg(test)]\n",
+            "mod fora;\n",
+            "\n",
+            "async fn hospedar_de_producao() {\n",
+            "    let _ = 1;\n",
+            "}\n",
+            "fn depois() {}\n",
+        );
+        let _ = producao_de(fonte);
+    }
+
     #[test]
     fn nenhuma_hospedagem_deste_arquivo_sobe_sem_o_ponto_padrao() {
-        let fonte = super::fonte_sem_comentarios();
+        let fonte = producao();
+        assert!(
+            fonte.contains("async fn hospedar(") && !fonte.contains("mod o_ponto_de_encontro"),
+            "o recorte da produção deste arquivo quebrou"
+        );
         let sem: Vec<&str> = fonte
             .lines()
             .filter(|linha| linha.contains(SEM_O_PADRAO))
@@ -3878,12 +3969,18 @@ fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
 /// dois eram o mesmo, e um saiu: dois verbos iguais são dois lugares para
 /// divergirem.
 ///
+/// Genérico no runtime, como o [`connect`]: o teste do MOD do guardado
+/// (`o_mod_do_guardado_continua_respondendo`) sai por ele, pelo runtime falso.
+///
 /// # Errors
 ///
 /// Nunca: o tipo existe para a ponte, e desmontar o que já está desmontado é o
 /// desfecho normal de quem apertou duas vezes.
 #[tauri::command]
-async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
+async fn disconnect<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    session: State<'_, Session>,
+) -> Result<(), ()> {
     desmontar_o_cliente(&app, &session);
     Ok(())
 }
@@ -3980,7 +4077,7 @@ fn meu_servidor_em(hospedagens: &Hospedagens, config: &str) -> Option<MeuServido
 ///
 /// Idempotente: desmontar o que já está desmontado gasta um número de geração e
 /// não faz mais nada, que é o desfecho certo para quem apertou duas vezes.
-fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
+fn desmontar_o_cliente<R: tauri::Runtime>(app: &tauri::AppHandle<R>, session: &State<'_, Session>) {
     let morta = session.revogar();
     tracing::debug!(geracao = morta, "sessão revogada antes de desmontar");
 
@@ -4035,6 +4132,194 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
     // disso iria para o endereço da conversa anterior.
     if let Ok(mut onde) = session.endereco_da_sessao.lock() {
         *onde = None;
+    }
+}
+
+/// **Um MOD do guardado continua respondendo enquanto o dono visita outro
+/// servidor** (tarefa 20 da F7, Plano 2).
+///
+/// Sair desmonta só o cliente (tarefa 19), e o servidor guardado continua no ar
+/// com quem estiver nele. Para quem ficou, isso inclui os MODs: o pedido dele
+/// chega à metade de servidor e volta com resposta, com o dono noutro servidor.
+/// E os comandos de MOD do app continuam achando o guardado
+/// ([`Hospedagens::do_guardado`]), e não o servidor em que a sessão está.
+///
+/// Pelo caminho de verdade: o `connect` e o `disconnect` da casca, pelo runtime
+/// falso do Tauri, e o MOD de referência, com as duas metades, ligado no banco
+/// do guardado antes de ele subir (como `seele-server/tests/exemplo_com_mod.rs`).
+/// O pedido entra por `pedidos::executar`, que é por onde o do fio entra
+/// (`seele-server/src/session.rs`), com a conta de quem ficou.
+#[cfg(test)]
+mod o_mod_do_guardado_continua_respondendo {
+    use super::a_entrada_velha_que_chega_tarde::{app, runtime, servidor, vez};
+    use super::{
+        connect, disconnect, onde_estou_na, parar_de_hospedar_em, servidor_do_mod, Hospedado,
+        OndeEstou, Session,
+    };
+    use seele_server::hospedagem::Hospedagem;
+    use seele_server::mods::instalar::{instalar_de_pasta, raizes_de_um_mundo};
+    use seele_server::permissions::Permissions;
+    use seele_server::persistence::mods::{enable, EnabledMod};
+    use seele_server::persistence::{Location, Persistence};
+    use std::time::Duration;
+    use tauri::test::MockRuntime;
+    use tauri::{AppHandle, Manager};
+
+    /// O MOD de referência do produto, que tem as duas metades.
+    const MOD_DE_REFERENCIA: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/testes/mod-de-referencia");
+
+    /// Entra em `alvo` pelo `connect` da casca, até 30 s cada tentativa. Um
+    /// servidor com MOD pergunta antes (`ModsNaoAceitos`): a dona aceita como a
+    /// casca aceita (o corpo de `aceitar_mods`) e entra de novo.
+    async fn entrar(app: &AppHandle<MockRuntime>, alvo: &str) {
+        for _ in 0..2 {
+            let tentativa = tokio::time::timeout(
+                Duration::from_secs(30),
+                connect(
+                    app.clone(),
+                    app.state::<Session>(),
+                    alvo.to_owned(),
+                    "dona".to_owned(),
+                    false,
+                    None,
+                ),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("o `connect` a {alvo} não voltou"));
+            let Err(falha) = tentativa else {
+                return;
+            };
+            let dita = serde_json::to_value(&falha).unwrap_or_default();
+            let Some(conjunto) = dita
+                .pointer("/error/ModsNaoAceitos/conjunto")
+                .and_then(serde_json::Value::as_str)
+            else {
+                panic!("o `connect` a {alvo} não entrou: {dita}");
+            };
+            seele_ffi::mods::aceitar(&super::config_dir(app), alvo, conjunto)
+                .expect("o sim aos MODs não gravou");
+        }
+        panic!("o `connect` a {alvo} não entrou nem com o sim aos MODs");
+    }
+
+    /// O que o MOD `id` responde a `contar`, pedido por quem ficou no
+    /// guardado, no servidor que os comandos de MOD do app acham. `quando` diz
+    /// onde a dona está, para a falha dizer em que ponto o guardado sumiu.
+    async fn contar(
+        session: &tauri::State<'_, Session>,
+        id: &str,
+        quando: &str,
+    ) -> serde_json::Value {
+        let servidor = servidor_do_mod(session).unwrap_or_else(|falha| {
+            panic!("{quando}, os comandos de MOD não acham o guardado: {falha:?}")
+        });
+        // Quem ficou: uma conta do guardado, criada depois da dona, que é a
+        // primeira e por isso a Comandante.
+        let quem_ficou = {
+            let banco = servidor.persistence.lock().await;
+            Permissions::new(&banco)
+                .register_or_find(&[7; 32], "quem-ficou")
+                .expect("a conta de quem ficou")
+                .id
+        };
+        let resposta = seele_server::mods::pedidos::executar(
+            &servidor,
+            quem_ficou,
+            // O canal zero, «nenhum canal»: por `into`, porque a casca não
+            // nomeia o `seele-proto` (ADR 0002).
+            0_u32.into(),
+            id,
+            r#"{"op":"contar"}"#,
+        )
+        .await;
+        serde_json::from_str(&resposta)
+            .unwrap_or_else(|_| serde_json::json!({ "resposta": resposta }))
+    }
+
+    #[test]
+    fn um_mod_do_guardado_continua_respondendo_enquanto_o_dono_visita_outro_servidor() {
+        let _vez = vez();
+        runtime().block_on(async {
+            let app = app();
+            let session = app.state::<Session>();
+
+            // O guardado, com o MOD de referência ligado antes de subir: a
+            // subida carrega o que está ligado.
+            let mundo = tempfile::tempdir().expect("a pasta do guardado não abriu");
+            let raizes = raizes_de_um_mundo(mundo.path());
+            let (manifesto, hash) =
+                instalar_de_pasta(std::path::Path::new(MOD_DE_REFERENCIA), &raizes)
+                    .expect("o MOD de referência não instalou");
+            let banco = Location::File(mundo.path().join("seele.db"));
+            enable(
+                &Persistence::open(&banco).expect("o banco do guardado não abriu"),
+                &EnabledMod {
+                    id: manifesto.id.clone(),
+                    version: manifesto.version.clone(),
+                    hash,
+                    repo: manifesto.repo.clone(),
+                    reach: manifesto.reach.clone(),
+                    server_half: manifesto.server.is_some(),
+                    api: manifesto.api,
+                },
+            )
+            .expect("o MOD de referência não ligou");
+            let guardado = Hospedagem::iniciar(0, banco, "Casa", Some(raizes), |_| Ok(()))
+                .await
+                .expect("o guardado não subiu");
+            let casa = format!("127.0.0.1:{}", guardado.endereco().port());
+            session.hospedagens.lock().expect("as hospedagens").guardado = Some(Hospedado {
+                hospedagem: guardado,
+                servidor: None,
+            });
+
+            // A dona entra no próprio servidor, e o MOD responde.
+            entrar(app, &casa).await;
+            assert_eq!(
+                onde_estou_na(&session),
+                OndeEstou::Guardado,
+                "a dona não entrou no próprio servidor, e o teste não mede a visita"
+            );
+            let dentro = contar(&session, &manifesto.id, "com a dona dentro").await;
+            assert_eq!(
+                dentro.get("vezes"),
+                Some(&serde_json::json!(1)),
+                "o MOD do guardado não responde nem com a dona dentro, e o teste não mede a \
+                 visita: {dentro}"
+            );
+
+            // A dona sai e vai a outro servidor.
+            disconnect(app.clone(), app.state::<Session>())
+                .await
+                .expect("o `disconnect` nunca falha");
+            let (outro, servidor_outro) = servidor("Outro").await;
+            entrar(app, &outro.to_string()).await;
+            assert_eq!(
+                onde_estou_na(&session),
+                OndeEstou::Outro,
+                "a dona não está noutro servidor, e o teste não mede a visita"
+            );
+
+            // E o MOD do guardado continua respondendo a quem ficou: a mesma
+            // instância, com a conta de antes.
+            let fora = contar(&session, &manifesto.id, "com a dona noutro servidor").await;
+            assert_eq!(
+                fora.get("vezes"),
+                Some(&serde_json::json!(2)),
+                "o MOD do guardado não continuou respondendo a quem ficou nele, com a dona \
+                 noutro servidor: {fora}"
+            );
+
+            disconnect(app.clone(), app.state::<Session>())
+                .await
+                .expect("o `disconnect` nunca falha");
+            assert!(
+                parar_de_hospedar_em(&session).await,
+                "o guardado não estava mais no ar no fim"
+            );
+            servidor_outro.shutdown();
+        });
     }
 }
 
@@ -12513,6 +12798,8 @@ fn main() {
             recusar,
             encerrar_a_ligacao,
             meu_codigo,
+            ler_entrada,
+            cancelar_ligacao,
             contatos_da_agenda,
             dar_nome_na_agenda,
             bloquear,

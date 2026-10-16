@@ -106,15 +106,17 @@ exigir(aberta.link === LINK,
 
 // O convite vai à outra versão, e só a ela: a recusa por versão vem antes do
 // Hello, e o convite não foi gasto. Ele não pode ir ao `seele.log` nem a uma
-// frase. Os três comandos que o levam por ofício são o `analisar_convite`, o
-// `connect` e o `abrir_versao`.
+// frase. Os comandos que o levam por ofício são o `analisar_convite`, o
+// `connect` e o `abrir_versao`, e o `ler_entrada` (tarefa 30 da F7), que recebe
+// o texto colado inteiro para dizer se é convite, endereço ou código, devolve o
+// convite como veio, e não guarda nem escreve nada (`seele_core::entrada`).
 const vazou = window.__SEELE_HISTORICO
-  .filter(([cmd]) => !["analisar_convite", "connect", "abrir_versao"].includes(cmd))
+  .filter(([cmd]) => !["analisar_convite", "connect", "abrir_versao", "ler_entrada"].includes(cmd))
   .filter(([, args]) => JSON.stringify(args ?? {}).includes(CONVITE))
   .map(([cmd]) => cmd);
 const nasFrases = ["boot-erro", "servidores-erro", "versoes-confirmar-frase", "versoes-confirmar-estado"]
   .filter((id) => texto(id).includes(CONVITE));
-relatar(`o convite fora dos três comandos: ${vazou.join(", ") || "nenhum"} · nas frases: ${nasFrases.join(", ") || "nenhuma"}`);
+relatar(`o convite fora dos comandos que o levam: ${vazou.join(", ") || "nenhum"} · nas frases: ${nasFrases.join(", ") || "nenhuma"}`);
 exigir(vazou.length === 0, `o convite do link foi a ${vazou.join(", ")}`);
 exigir(nasFrases.length === 0, `o convite do link apareceu em ${nasFrases.join(", ")}`);
 

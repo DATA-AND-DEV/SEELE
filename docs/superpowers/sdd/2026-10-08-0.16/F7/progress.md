@@ -1022,3 +1022,309 @@ bancadas da ponte; a do celular; e 33 das 34 da janela (a do executor pede o
 motor com o wasi-sdk). Com a máquina a 17–26 de carga, o `texto-maior-390` do
 celular e a `diagnostico-de-mods` reprovaram por tempo; com e sem esta mudança,
 sob carga de 10 a 14, passaram. A F5 revisou e aprovou a parede da tela dela.
+
+## A 65 provada no Windows, os guardas da spec «Testes» 8 e as caixas do plano (15/10)
+
+**A pendência 65, provada no PC de testes** (a orquestradora; o conserto é a
+`c8bb813c`, e a pendência está em `4ed24ee0`):
+
+- **vermelho antes** (`95271bc4`): o `sala::a_sala_pessoal::a_porta_ocupada_e_dita`
+  deu «left: None, right: Some(PortaOcupada)»;
+- **verde depois** (`4ed24ee0`): `alcance::testes` 44 de 44, com os dois novos;
+  `sala::` 22 de 22; o clippy `-p seele-server -p seele-app -D warnings` limpo;
+- **as reversões lá, uma por família:** sem o `ninguem_na_porta(…)`, o
+  `a_porta_ocupada_por_qualquer_ocupante_e_porta_ocupada` reprova no ocupante só
+  IPv4 e para ali; tirando só a sonda `[::]`, ele reprova no ocupante só IPv6, e
+  o `as_sondas_acham_o_ocupante_que_o_socket_duplo_nao_ve` reprova junto.
+
+A `4ed24ee0` entra na integração 18.
+
+**A tarefa 31, a metade dos guardas** (`fe01d33d`, isolado no `frontend.rs`,
+depois de trazer a `versao/0.16` em `52b8278b`, no merge `6b9107df`). Dos cinco
+itens da casca na spec, dois já tinham guarda: o `focus()` da faixa (`a53c1349`)
+e a `media-src` sem `data:` (`f97dcd4f`). Os três que faltavam leem o Rust do
+outro lado, para não casarem com o próprio texto:
+
+- **o toque por evento:** o canal que a faixa ouve é o `CANAL_DO_TOQUE`; cada
+  variante do `AvisoDoToque` tem o seu ramo; a faixa não tem `setInterval`; e o
+  `toques_agora` é uma pergunta só, na carga, que nenhum outro script faz;
+- **o apelido como alegação:** o `ligando` do `frases.js` põe todo apelido entre
+  aspas e mostra o código, e o script da faixa não lê `.apelido` por conta própria;
+- **«atender sai de Y»:** vale para toda variante do `OndeEstou` menos `Nenhum` e
+  `Pessoal`, e uma variante nova reprova até alguém decidir de que lado ela fica.
+  O roteiro `toque.js` prova só o caminho do `Guardado`, e a spec fala do `Outro`.
+
+As reversões, dez, uma por vez, reprovam cada uma pela sua frase:
+
+- o canal renomeado, um relógio de 5 s e o `Parou` sem ramo;
+- o apelido sem aspas, o apelido solto no anúncio e a frase sem o código;
+- o «sai de» só no `Outro`, ou também no `Pessoal`, ou sem perguntar ao
+  `onde_estou`, ou com uma variante nova no Rust.
+
+No `frontend.rs`, 299 de 299, e o clippy limpo. Como a mudança não toca a `ui/`
+nem o duble, a bateria da casca não se aplica.
+
+**As caixas do plano.** Marquei as da 23, 24, 25, 26 e 31, cada uma com o guarda
+e o commit. A 25 está feita desde a `fad0662a`: o `AlarmeDaJanela` toca na saída
+escolhida e para com o toque.
+
+**A D-sala-3** (15/10, pela recomendação da F7) já está no código desde a
+`e0e48744`. No `SoNoPerfil`, o botão aparece quando quem roda é o instalado, e o
+`firewall::o_botao_so_aparece_quando_resolve` prova isso.
+
+**Uma reprovação velha do celular, que não se repete.** A notificação de uma
+rodada das 11:27 chegou depois. O caso era o `entrada-desfechos-390`, com
+«Cannot access 'pedidoDeInstalar' before initialization» e
+«PONTE_NO_LUGAR_DO_TAURI is not defined». A pasta guardada mostra a ponta
+`a416f17f` com a árvore no meio da faixa do toque (`camada-toque.css`,
+`camada-toque.js` e `roteiros/toque.js` modificados). Não achei a causa. O que a
+medida diz:
+
+- as três rodadas inteiras depois dela passaram;
+- na ponta `4ed24ee0`, três rodadas só do `entrada-desfechos` deram 6 de 6.
+
+**O teste que faltava da 20** (`511aa0bc`): um MOD do guardado continua
+respondendo enquanto a dona visita outro servidor. O teste passa pelo `connect`
+e pelo `disconnect` de verdade, no runtime falso do Tauri, com o MOD de
+referência:
+
+- com a dona dentro, ele responde 1;
+- com ela noutro servidor (`Outro`), ele responde 2, pelo servidor que os
+  comandos de MOD do app acham.
+
+Três reversões reprovam, cada uma no ponto dela: o `disconnect` voltando a
+derrubar o guardado; os comandos de MOD seguindo a sessão; e a saída desligando
+o MOD.
+
+Para chegar lá:
+
+- o `disconnect` e o `desmontar_o_cliente` ficaram genéricos no runtime, como o
+  `connect`;
+- o guarda da revogação no `frontend.rs` passou a aceitar a assinatura genérica
+  (`da9580eb`, isolado);
+- o guarda do ponto de encontro do `main.rs` (lote G-servidor da F5) passou a
+  ler só a produção (`845e20e3`). Ele reprovava o `Hospedagem::iniciar` curto do
+  teste, que o próprio doc dele chama de padrão seguro dos testes. Três
+  reversões de produção ainda reprovam.
+
+App 748/748 e o clippy limpo em todos os alvos. Como a mudança não toca a `ui/`
+nem o duble, a bateria da casca não se aplica.
+
+## A P8 no ramo, e a tarefa 16: o `Tocando` no cliente (15/10)
+
+**A P8 no ramo.** A orquestradora liberou a 16 com a P8 fechada. Trouxe a
+`0410a462` (`20b6c281`) e, a pedido dela, a ponta `05e417df`, com o `OutraLinha`
+da F1 (`f9da6c11`), as duas com `--no-ff` e sem conflito. Na árvore integrada
+passaram o seele-core, o seele-ffi, o seele-sessao, o seele-app, o `outra_linha`
+da conformidade e o clippy. Na bateria inteira da casca passaram: a carga, os
+42 roteiros, as duas pontes, a bancada do celular (o `entrada-desfechos`
+inclusive) e 33 das 34 bancadas da janela.
+
+**Um achado da P8, levado à orquestradora:** o
+`dois_produtores_de_snapshot::cada_campo_do_snapshot_tem_um_lado` reprova na
+própria `05e417df`. O `fora_do_ar_revision` entrou no `Snapshot` com a
+`eae03135` (a P6 da F1), e o guarda não o classifica. O conserto é da F1.
+
+| passo | o que | commit |
+|---|---|---|
+| 1 | o aperto de mão em dois prazos: 10 s até o `Tocando`, e o prazo do toque mais 5 s depois dele | `721fbe07` |
+| 2 | quem toca vence a corrida: ninguém mais começa, quem corria cai, e o prazo do candidato se solta, sem segundo toque | `df17b0d9` |
+| — | a linha provisória do `Tocando` no `ETAPAS` (isolado, `frases.js`) | `75c7ee70` |
+| 3 | a `Etapa::Tocando` do núcleo à FFI, e o `caminho()` que lê quem tocou | `c0eda87a` |
+
+- **O que o cliente fazia:** o `Tocando` virava `ProtocolViolation` na hora,
+  porque o aperto de mão lia a resposta do `Response` esperando `Session`. A
+  recusa e o «ninguém atendeu» nem chegavam a ser lidos.
+- **A corrida e o segundo toque:** a sala anuncia a mesma pessoa por outro
+  candidato como outro `Tocou`, e fecha calado o toque de antes. O segundo
+  candidato saía aos 250 ms e chegava lá. E o prazo de cada candidato (4 s)
+  cortava a ligação que estava chamando.
+- **O `caminho()`:** ele lia a última `Tentando` antes de `Dentro` como a
+  vencedora; com o toque, ela pode ser de quem foi largado.
+- **Os testes:** `seele-conformance/tests/tocando.rs`, contra a sala de
+  verdade (seis), e os da corrida sem socket (quatro), da chegada (dois) e da
+  FFI (um). As reversões, dezessete, reprovam cada uma pela sua frase.
+
+**Uma lição de verificação, cara de aprender:** a conformidade inteira mede o
+que está no disco enquanto roda, e não só o que compilou no começo.
+- Um `cargo test --test tocando` rodado no meio dela recompila o binário do
+  `tocando` no mesmo `target/`, e a rodada roda o novo.
+- O `estados.rs` lê o `chegada.rs` do disco: com o passo seguinte editado, ele
+  comparou o fonte novo com o binário velho e reprovou.
+Durante a conformidade inteira, nenhum `cargo test` dela e nenhuma edição de
+fonte.
+
+**Como está a ponta** (`c0eda87a`):
+- seele-core e FFI, 689 de 689; app, 752 de 752; clippy limpo;
+- a conformidade inteira: 310 passaram, e só reprova o guarda da P8;
+- a bateria da casca: a carga, os 42 roteiros, as duas pontes, o celular e
+  33 das 34 da janela.
+
+**Falta da 16 o `cancelar_ligacao`.** Ele espera o sim da orquestradora: toca
+o `ConnectionError` da FFI e o `frases.js`. O desenho proposto é uma porta nova
+na FFI com um `Cancelamento`, sem mexer no `ConnectConfig`, e uma
+`Etapa::Cancelada` terminal. Um `Desistiu(Cancelada)` afrouxaria duas arestas
+que hoje são requisito escrito.
+
+## A tarefa 16 inteira: o `cancelar_ligacao` (16/10)
+
+A orquestradora aprovou o desenho em 16/10, e a F1 já tinha saído do
+`ConnectionError`.
+
+| passo | o que | commit |
+|---|---|---|
+| — | as frases de quem cancela, no `ETAPAS` e no `FRASES` (isolado) | `c2180905` |
+| 5 | `cancelar_ligacao`: `Chegada::chegar_ate`, a `Etapa::Cancelada`, o `ConnectError::Cancelada`, e na FFI o `Cancelamento` com a porta `connect_cancelavel` | `b6d02712` |
+| — | merge da `versao/0.16` (`e2c2474f`), com o conflito do FORA DO AR resolvido | `531b9cba` |
+| — | o guarda da frase do `Cancelada` (isolado, `frontend.rs`) | `821510bc` |
+
+- **Uma etapa própria, e não `Desistiu`:** a máquina proíbe
+  `Avisando → Desistiu` e só deixa o último candidato desistir, e quem cancela
+  no meio da corrida quebraria as duas regras. `Cancelada` sai de qualquer
+  etapa que não é fim, e de nenhuma que é.
+- **O cancelamento larga a chegada inteira:** a pergunta ao ponto de encontro,
+  ou a corrida com o QUIC de cada candidato. No laço da corrida, ele vem depois
+  dos passos já contados e antes da conexão.
+- **Medido pela FFI contra a sala:** um ouvinte cancela no instante do
+  `Tocando`, e a sala vê `ParouDeTocar(Cancelada)` na hora (o teste inteiro
+  levou 0,02 s): o QUIC fecha de verdade, e não no prazo ocioso. O `connect`
+  volta `Cancelada`, com a trilha acabando nela.
+- **O `ConnectConfig` não mudou:** são 38 montagens explícitas, quase todas em
+  testes de outras frentes. O `Cancelamento` vai numa porta nova, ao lado do
+  ouvinte.
+- **Reversões, sete:** a FFI que não entrega o cancelamento, a corrida e a
+  localização surdas, a aresta que falta, o cancelamento que vira `Desistiu`, e
+  no guarda da frase, a frase que falta e uma que se lê como falha.
+- **O conflito do merge** não era da F7. O grupo FORA DO AR da F1 (P6, com a
+  P8) repovoava a lista, e a pendência 63 (b) a passou a reconciliar pelo id.
+  A junção é empilhar o grupo e reconciliar: o grupo tem a chave do nome, e as
+  linhas dele, sem chave, casam pela posição. O roteiro `fora-do-ar.js` e a
+  bancada `linhas-pelo-id.cjs` passam.
+
+**Como está a ponta** (`821510bc`):
+- núcleo, FFI e app, 1445 de 1445, e o `frontend.rs`, 301 de 301;
+- clippy limpo;
+- a bateria inteira da casca na árvore do merge: os 42 roteiros, as duas
+  pontes, o celular e 34 das 35 da janela (a do executor pede o wasi-sdk);
+- a conformidade inteira: 311 passaram, e só reprova o guarda da P8
+  (`fora_do_ar_revision`), que a F1 vai classificar.
+
+O comando Tauri `cancelar_ligacao` e o CANCELAR da tela são da tarefa 28.
+
+## A tarefa 30: ligar pelo código, da ponte à casca (16/10)
+
+A orquestradora liberou a 28 e a 30 sem esperar a parte B da integração.
+Antes delas:
+- o `cargo clean` liberou a pasta de compilação inteira, uns 70 GB em disco;
+- a P8 com o conserto da F1 (`53bbc919`) entrou no ramo, e o guarda dos dois
+  produtores passa;
+- a sugestão da F5 ao `845e20e3` foi feita: o recorte da produção se confere
+  sozinho contra um módulo de teste sem corpo (`dafa0da5`).
+
+| passo | o que | commit |
+|---|---|---|
+| b | a FFI disca `@CÓDIGO`: o `abrir` reconhece o alvo, e o `drive` nasce pela `Chegada::para_o_codigo`, com o ponto de quem liga | `2278dd4c` |
+| a | o `ler_entrada`, com «é o seu código?» decidido pela chave desta máquina | `2e2947e9` |
+| — | a leitura muda para `ligar.rs`, o lado de quem liga | `a34674ed` |
+| — | merge da `versao/0.16` (`66540b05`, só docs) | — |
+| c | a casca: o diálogo manda todo texto ao `ler_entrada`, a caixa LIGAR na sessão, a ponte web, o duble e a bancada | `64b98205` |
+
+- **«Nada disca um código ainda»**, dizia a leitura da 14. O núcleo discava
+  desde a 14a, e a ponte e o app não. O teste da FFI sobe um ponto de encontro
+  de verdade, a sala de outra pessoa registrada nele, e aponta
+  `$SEELE_ENCONTRO` para ele enquanto roda.
+- **Uma linha que não fazia nada saiu.** Ligar o `codigo_esperado` no modo
+  código foi revertido e o teste continuou verde: ele só alimenta o caminho por
+  endereço.
+- **Um achado para a casca da 28:** a ponte entrega as etapas por um `watch`,
+  que guarda a última. Numa ligação atendida no mesmo instante, quem liga pode
+  não ver o `Tocando`, e a tela não deve depender dele para sair do CHAMANDO.
+- **Por que `ligar.rs`:** a ponte do navegador separa os comandos que citam
+  `sala::`, porque mexem na hospedagem local, e o `ler_entrada` só entrava na
+  conta por morar lá. Recusá-lo de vez no navegador trancaria a entrada dele
+  quando a F4 fizer a 3.4. Ele fica na `AINDA_A_FAZER` dela, com o
+  `analisar_convite`.
+- **A bancada `ajustes-v013.cjs` (lote R e W da F5) reprovou, e por causa da
+  mudança, não da carga.** Os dubles dela não conheciam o `ler_entrada`, e o
+  convite seguia como endereço, sem o token. Os oito aprenderam a forma de
+  antes, logo depois de registrar a chamada. Os dois guardas da credencial
+  contam o `ler_entrada` entre as leituras, ao lado do `analisar_convite`: ele
+  recebe o texto inteiro para dizer o que ele é, e não guarda nem escreve nada.
+- **Reversões:** na FFI, o alvo ignorado e o ponto que falta; no app, o «seu
+  código» e o alvo sem o `@`; na casca, o diálogo sem o `ler_entrada`, a caixa
+  que ignora a ligação, a frase que falta e o duble sem a regra.
+- **A bateria da casca** na ponte `64b98205` passou inteira: os 44 roteiros, as
+  duas pontes, o celular e 34 das 35 bancadas da janela.
+- **Em aberto:** o `connect` grava a visita com o alvo como veio, e um
+  `@CÓDIGO` entraria na lista de visitados. Isso é da agenda, e fica para a
+  orquestradora decidir. *Decidido em 16/10 e feito em `d85f55f4`: ver «A
+  decisão de 16/10» abaixo.*
+
+## A tarefa 28: CHAMANDO, CANCELAR e as frases de quem liga (16/10)
+
+| passo | o que | commit |
+|---|---|---|
+| — | os guardas da entrada aceitam a porta que escuta e se cancela (isolado, `frontend.rs`) | `11a2af0b` |
+| a | o `connect` entra por `connect_cancelavel`, com a vaga da ligação em voo na sessão (`ligar::LigacaoEmVoo`), e o comando `cancelar_ligacao` | `7bbf01e5` |
+| b | o código lido vem com o nome que a agenda dá a ele (`ligar::nome_na_agenda`) | `a18ba59e` |
+| c | a casca: «CHAMANDO ALICE…», o CANCELAR, e a `fraseDaLigacao`, com o roteiro `chamar.js` | `302cd403` |
+
+- **A vaga é da tentativa mais nova.** O guarda a devolve ao cair só se ela
+  ainda é dele: uma tentativa nova pode ter tomado o lugar (o E54), e o
+  CANCELAR passa a ser dela. Provado contra a sala de verdade, pelo `connect`
+  no runtime falso: ela toca, o CANCELAR larga, a sala vê
+  `ParouDeTocar(Cancelada)`, e a vaga fica vazia.
+- **O nome é decidido no Rust**: o da agenda, e sem ele o código. A consulta
+  mora em `ligar.rs`, e o comando continua sem citar `sala::`.
+- **Na casca**, o `conectar` ganhou o quarto argumento `ligacao`. O CANCELAR
+  fica à vista enquanto a ligação anda, e as frases da tabela da spec trazem o
+  nome. O que não é de ligação segue pela frase de sempre.
+- **Os guardas da F5 foram ajustados sem afrouxar:**
+  - o da credencial passou a ler o terceiro argumento do `conectar`, e
+    `undefined` ou `null` ali não levam credencial. Uma chamada nova que passe
+    algo de verdade continua reprovando, e isso foi medido;
+  - a linha do erro e a da etapa continuam escritas como os guardas as leem.
+- **Reversões:** quatro na vaga, duas no nome e sete na casca, cada uma
+  reprovando pela sua frase.
+- **Um achado que vale para a tela:** numa ligação atendida no mesmo instante,
+  quem liga pode não ver o `Tocando`, porque a ponte entrega as etapas por um
+  `watch`. O CHAMANDO não segura nada: a tentativa acaba pelo `connect`, e o
+  CANCELAR some com ela.
+
+**Como está a ponta** (`302cd403`): app, 765 de 765; clippy limpo; a bateria
+da casca inteira: os 45 roteiros, as duas pontes, o celular e 34 das 35 da
+janela; a conformidade inteira, 313 de 313, sem reprovação nenhuma.
+
+## A decisão de 16/10: um @CÓDIGO não entra na lista de visitados
+
+`d85f55f4`, isolado. Ligar para uma pessoa não é visitar um servidor: a
+ligação fica só na agenda, com a direção e a hora.
+
+- **A origem é da ponte**: `Connection::codigo_da_ligacao`, lido do mesmo
+  `Alvo` que vai à `Chegada::para_o_codigo`. Uma sala achada pelo endereço
+  não é ligação, mesmo tendo tocado.
+- **A decisão é do `ligar::anotar_a_chegada`**: a ligação vai para a agenda
+  (`Liguei` e a hora; o nome e o apelido ficam), e só uma visita segue para
+  a lista.
+- **O alvo da sessão fica só com uma visita.** Ele nunca era limpo. Depois de
+  visitar X, uma ligação, ou uma hospedagem aqui, levava para X ao sair o
+  caminho medido e a aparência dela. Agora fica vazio fora de uma visita, o
+  que muda também a sessão no servidor desta máquina.
+- **As provas**, em duas metades e uma costura:
+  - a conformidade (`ligar_pela_ponte.rs`): a ligação de verdade diz o
+    código, e a mesma sala pelo endereço não diz nenhum;
+  - o app (`ligar::a_chegada`): a lista de visitados byte a byte como
+    estava, o `Liguei` com a hora e o nome de antes, e o alvo de antes fora;
+  - a costura, lida no `connect` sem os comentários.
+- **Por que a costura é lida, e não ligada.** Um código não se disca sem um
+  ponto de encontro, e o `check-deps` não deixa o app depender do
+  `seele-encontro`, nem como dev-dependência. A ligação inteira pelo
+  `connect` pede essa aresta, e a decisão não é desta frente. A
+  `Vizinhanca::TambemAqui` ainda pediria o `seele-proto`, ou um construtor
+  do ponto que não a peça.
+- **Sete reversões**, cada uma reprovando pela sua frase. Os três guardas da
+  `frontend.rs` acham o filtro dos visitados pelo nome novo e cobram o mesmo
+  que antes.
+
+**Como está a ponta** (`d85f55f4`): app, 769 de 769; FFI, 217; clippy limpo;
+a conformidade inteira, 314 de 314 (a 314ª é a sala pelo endereço).

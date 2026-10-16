@@ -1684,6 +1684,10 @@ pub enum ConnectionError {
         /// O que faltou para achar a sala.
         motivo: FalhaAoLocalizar,
     },
+    /// Quem liga desistiu antes de entrar: o [`crate::Cancelamento`] desta
+    /// ligação foi usado (tarefa 16 da F7). Não é falha, e a casca sabe que foi
+    /// ela quem cancelou; a frase existe para a tela nunca escrever o nome cru.
+    Cancelada,
     /// Quem atendeu mostrou o certificado do servidor sem provar ter a chave
     /// que o assina.
     ///
