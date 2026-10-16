@@ -952,6 +952,10 @@ button.voice_room-nome:hover { text-decoration: underline; }
   --nucleo-acento: var(--seele-laranja-nerv);
   --nucleo-acento-fraco: var(--seele-laranja-fraco);
   --nucleo-borda: var(--seele-linha-forte);
+  /* O rótulo miúdo do núcleo (6,82:1 sobre o painel): o nome do MOD por cima de
+     cada seção do «⋯». O apagado ficava a 4,11:1, abaixo dos 4,5 de uma letra de
+     10 px (medido pela F8 na folha do celular, 16/10). */
+  --nucleo-rotulo: var(--seele-rotulo-claro);
 }
 
 #voz-estado {

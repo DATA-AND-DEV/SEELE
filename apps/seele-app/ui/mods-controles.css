@@ -685,7 +685,7 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   font-size: var(--seele-t-micro, 10px);
   letter-spacing: var(--seele-tracking-rotulo);
   text-transform: uppercase;
-  color: var(--nucleo-apagado);
+  color: var(--nucleo-rotulo);
   background: var(--nucleo-painel);
 }
 .contribuicao-de-mod-caixa {
