@@ -109,6 +109,7 @@ fn um_mod(id: &str, hash_de: u8) -> EnabledMod {
         reach: vec!["ler".to_owned()],
         server_half: true,
         api: 6,
+        tema: false,
     }
 }
 
@@ -196,6 +197,42 @@ async fn um_servidor_com_mod_devolve_a_lista_a_quem_nao_aceitou() -> Result<()> 
         mods[0].no_servidor,
         "a tela não teria como dizer que este MOD roda na máquina de quem hospeda"
     );
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **O tema chega à pergunta** (D-api-8): um MOD cujo manifesto declara
+/// `"tema": true` pode pintar a aparência do servidor inteiro, e quem aceita tem
+/// de saber disso antes de aceitar. Do banco do servidor ao anúncio no fio, e
+/// dele à exigência que a FFI entrega à tela de aceite (`ModExigido`). Sem a
+/// porta, falso, pelo mesmo caminho.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_tema_de_um_mod_chega_a_pergunta_da_tela_de_aceite() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, daemon) = servidor().await?;
+    let mut estilo = um_mod("seele/estilo", 0xa1);
+    estilo.tema = true;
+    habilitar(&daemon, &estilo).await;
+    habilitar(&daemon, &um_mod("seele/bot", 0xb2)).await;
+
+    let Err(erro) = entrar(endereco, 2).await else {
+        panic!("entrou num servidor com MOD habilitado sem aceitar nada");
+    };
+    let ConnectError::ModsNaoAceitos { mods, .. } = erro else {
+        panic!("a casca não recebeu a pergunta, recebeu {erro:?}");
+    };
+    let exigidos: Vec<seele_ffi::types::ModExigido> = mods
+        .into_iter()
+        .map(seele_ffi::types::ModExigido::from)
+        .collect();
+    let tema_de = |id: &str| exigidos.iter().find(|m| m.id == id).map(|m| m.tema);
+    assert_eq!(
+        tema_de("seele/estilo"),
+        Some(true),
+        "a tela de aceite não teria como dizer que este MOD pinta a aparência do servidor"
+    );
+    assert_eq!(tema_de("seele/bot"), Some(false), "sem a porta, falso");
 
     daemon.shutdown();
     Ok(())
@@ -798,6 +835,7 @@ fn anunciado(id: &str, hash_de: u8) -> seele_proto::mods::ModAnunciado {
         reach: vec!["ler".to_owned()],
         no_servidor: true,
         api: 0,
+        tema: false,
     }
 }
 

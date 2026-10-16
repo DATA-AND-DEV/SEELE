@@ -50,8 +50,17 @@ pub struct EnabledMod {
     ///
     /// **Zero é «não preenchida»**: uma linha gravada antes da coluna, que a
     /// subida do servidor preenche pelo `mod.json` dos bytes do hash
-    /// ([`preencher_api`]).
+    /// ([`preencher_do_pacote`]).
     pub api: u32,
+    /// Se o manifesto deste MOD declara `"tema": true` (D-api-8; migração 16):
+    /// a metade de servidor pode pintar a aparência do servidor inteiro, e a
+    /// tela de aceite tem de dizer isso.
+    ///
+    /// **Uma linha gravada antes da coluna se lê falsa** até a subida a
+    /// preencher pelo `mod.json` dos bytes do hash ([`preencher_do_pacote`]).
+    /// O «não preenchido» mora só no banco, nulo, e é [`por_preencher`] que o
+    /// encontra.
+    pub tema: bool,
 }
 
 /// Turns a MOD on, or updates everything about one already known.
@@ -66,11 +75,11 @@ pub struct EnabledMod {
 pub fn enable(persistence: &Persistence, ligado: &EnabledMod) -> Result<()> {
     let reach = serde_json::to_string(&ligado.reach).unwrap_or_else(|_| "[]".to_owned());
     persistence.connection().execute(
-        "INSERT INTO mods (id, version, hash, repo, reach, server_half, api, enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)
+        "INSERT INTO mods (id, version, hash, repo, reach, server_half, api, tema, enabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)
          ON CONFLICT(id) DO UPDATE SET
             version = ?2, hash = ?3, repo = ?4, reach = ?5, server_half = ?6, api = ?7,
-            enabled = 1",
+            tema = ?8, enabled = 1",
         params![
             ligado.id,
             ligado.version,
@@ -78,7 +87,8 @@ pub fn enable(persistence: &Persistence, ligado: &EnabledMod) -> Result<()> {
             ligado.repo,
             reach,
             i64::from(ligado.server_half),
-            i64::from(ligado.api)
+            i64::from(ligado.api),
+            i64::from(ligado.tema)
         ],
     )?;
     // Depois de gravado, e não antes: quem acorda vai ao banco, e acordar antes
@@ -120,10 +130,11 @@ pub fn definir_conjunto(persistence: &Persistence, ligados: &[EnabledMod]) -> Re
     for ligado in ligados {
         let reach = serde_json::to_string(&ligado.reach).unwrap_or_else(|_| "[]".to_owned());
         transaction.execute(
-            "INSERT INTO mods (id, version, hash, repo, reach, server_half, api, enabled)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)
+            "INSERT INTO mods (id, version, hash, repo, reach, server_half, api, tema, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)
              ON CONFLICT(id) DO UPDATE SET
-                version = ?2, hash = ?3, repo = ?4, reach = ?5, server_half = ?6, api = ?7, enabled = 1",
+                version = ?2, hash = ?3, repo = ?4, reach = ?5, server_half = ?6, api = ?7,
+                tema = ?8, enabled = 1",
             params![
                 ligado.id,
                 ligado.version,
@@ -131,7 +142,8 @@ pub fn definir_conjunto(persistence: &Persistence, ligados: &[EnabledMod]) -> Re
                 ligado.repo,
                 reach,
                 i64::from(ligado.server_half),
-                i64::from(ligado.api)
+                i64::from(ligado.api),
+                i64::from(ligado.tema)
             ],
         )?;
     }
@@ -165,7 +177,7 @@ pub fn disable(persistence: &Persistence, id: &str) -> Result<()> {
 pub fn enabled(persistence: &Persistence) -> Result<Vec<EnabledMod>> {
     let connection = persistence.connection();
     let mut statement = connection.prepare(
-        "SELECT id, version, hash, repo, reach, server_half, api
+        "SELECT id, version, hash, repo, reach, server_half, api, tema
          FROM mods WHERE enabled = 1 ORDER BY id",
     )?;
     let rows = statement.query_map([], |row| {
@@ -186,24 +198,55 @@ pub fn enabled(persistence: &Persistence) -> Result<Vec<EnabledMod>> {
             // «não preenchida» em vez de uma leitura que falha, pelo mesmo
             // motivo do `reach` acima.
             api: u32::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
+            // Nulo, «não preenchido», lê-se falso: o anúncio não diz que um MOD
+            // pinta a aparência sem o pacote dizer. A subida o preenche, e
+            // nomeia no registro a linha que não consegue.
+            tema: row.get::<_, Option<i64>>(7)?.is_some_and(|tema| tema != 0),
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-/// Preenche a API de uma linha que ainda não a tem, e só ela.
+/// As linhas habilitadas que ainda não têm o que o pacote declara: a API zero
+/// (migração 14) ou o tema nulo (migração 16). O par, porque é o hash que diz
+/// de que bytes ler.
 ///
-/// Só toca a linha de `id` **com o mesmo `hash`** e com a API zero: uma linha
-/// que outro caminho já preencheu, ou que passou a exigir outros bytes, não é
-/// sobrescrita. Devolve se alguma linha mudou.
+/// # Errors
+///
+/// Falha se a tabela não puder ser lida.
+pub fn por_preencher(persistence: &Persistence) -> Result<Vec<(String, String)>> {
+    let connection = persistence.connection();
+    let mut statement = connection.prepare(
+        "SELECT id, hash FROM mods
+         WHERE enabled = 1 AND (api = 0 OR tema IS NULL) ORDER BY id",
+    )?;
+    let linhas = statement.query_map([], |linha| Ok((linha.get(0)?, linha.get(1)?)))?;
+    Ok(linhas.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Preenche a API e o tema de uma linha que ainda não os tem, e só eles.
+///
+/// Só toca a linha de `id` **com o mesmo `hash`**, e só o que falta: a API se
+/// ela for zero, o tema se ele for nulo. Uma linha que outro caminho já
+/// preencheu, ou que passou a exigir outros bytes, não é sobrescrita. Devolve
+/// se alguma linha mudou.
 ///
 /// # Errors
 ///
 /// Falha se o banco não aceitar a escrita.
-pub fn preencher_api(persistence: &Persistence, id: &str, hash: &str, api: u32) -> Result<bool> {
+pub fn preencher_do_pacote(
+    persistence: &Persistence,
+    id: &str,
+    hash: &str,
+    api: u32,
+    tema: bool,
+) -> Result<bool> {
     let mudou = persistence.connection().execute(
-        "UPDATE mods SET api = ?3 WHERE id = ?1 AND hash = ?2 AND api = 0",
-        params![id, hash, i64::from(api)],
+        "UPDATE mods
+            SET api = CASE WHEN api = 0 THEN ?3 ELSE api END,
+                tema = COALESCE(tema, ?4)
+          WHERE id = ?1 AND hash = ?2 AND (api = 0 OR tema IS NULL)",
+        params![id, hash, i64::from(api), i64::from(tema)],
     )?;
     Ok(mudou > 0)
 }
@@ -353,6 +396,7 @@ mod tests {
             reach: vec!["dom".to_owned()],
             server_half: false,
             api: 6,
+            tema: false,
         }
     }
 
@@ -487,10 +531,15 @@ mod tests {
         com_api.api = 5;
         enable(&persistence, &com_api).expect("habilitar");
 
-        assert!(preencher_api(&persistence, "seele/sem", &hash, 6).expect("preencher"));
-        assert!(!preencher_api(&persistence, "seele/com", &hash, 6).expect("preencher"));
         assert!(
-            !preencher_api(&persistence, "seele/sem", &"d4".repeat(32), 9).expect("preencher"),
+            preencher_do_pacote(&persistence, "seele/sem", &hash, 6, false).expect("preencher")
+        );
+        assert!(
+            !preencher_do_pacote(&persistence, "seele/com", &hash, 6, false).expect("preencher")
+        );
+        assert!(
+            !preencher_do_pacote(&persistence, "seele/sem", &"d4".repeat(32), 9, false)
+                .expect("preencher"),
             "outro hash não é a mesma linha"
         );
 
@@ -518,6 +567,7 @@ mod tests {
                 reach: vec!["ler".to_owned(), "escrever".to_owned()],
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )
         .expect("habilitar");

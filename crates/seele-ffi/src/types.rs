@@ -180,6 +180,9 @@ pub struct ModExigido {
     pub reach: Vec<String>,
     /// Se ele roda na máquina de quem hospeda, com o alcance do bloco `world`.
     pub no_servidor: bool,
+    /// Se ele pode pintar a aparência do servidor inteiro (D-api-8): a linha
+    /// que a tela de aceite diz, porque quem aceita tem de saber.
+    pub tema: bool,
 }
 
 impl From<seele_core::mods::ModAnunciado> for ModExigido {
@@ -191,6 +194,7 @@ impl From<seele_core::mods::ModAnunciado> for ModExigido {
             repo: anunciado.repo,
             reach: anunciado.reach,
             no_servidor: anunciado.no_servidor,
+            tema: anunciado.tema,
         }
     }
 }

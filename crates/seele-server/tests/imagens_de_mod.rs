@@ -288,6 +288,7 @@ async fn dez_mib_em_fluxo_substituicao_e_duas_leituras_sem_fila_de_controle() ->
         reach: vec!["imagens".into()],
         server_half: true,
         api: 6,
+        tema: false,
     };
     let (endereco, _daemon) = server(Location::Memory, raizes.clone(), ligado).await?;
     let mut par = abrir(endereco, 1).await?;

@@ -817,6 +817,7 @@ mod tests {
                     reach: vec!["estado no servidor".to_owned()],
                     server_half: true,
                     api: seele_proto::mods::MOD_API_VERSION,
+                    tema: false,
                 },
             )
             .expect("ligar o MOD");

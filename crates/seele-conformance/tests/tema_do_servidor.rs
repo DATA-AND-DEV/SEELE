@@ -140,6 +140,7 @@ fn ligado(id: &str, hash: &str) -> EnabledMod {
         reach: Vec::new(),
         server_half: true,
         api: seele_proto::mods::MOD_API_VERSION,
+        tema: false,
     }
 }
 

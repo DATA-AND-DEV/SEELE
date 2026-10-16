@@ -87,6 +87,7 @@ fn mod_exigido() -> EnabledMod {
         reach: vec!["ler".into()],
         server_half: false,
         api: 0,
+        tema: false,
     }
 }
 

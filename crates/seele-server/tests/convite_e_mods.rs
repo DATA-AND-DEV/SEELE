@@ -194,6 +194,7 @@ async fn servidor_fechado() -> Result<(SocketAddr, Arc<Daemon>, String)> {
                 reach: vec!["ler".into()],
                 server_half: false,
                 api: 0,
+                tema: false,
             },
         )?;
         seele_server::portaria::ligar(&mut banco, false)?;

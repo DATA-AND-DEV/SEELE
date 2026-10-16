@@ -6932,6 +6932,7 @@ mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
             reach: vec!["dom".to_owned()],
             server_half: false,
             api: seele_ffi::mods::MOD_API_VERSION,
+            tema: false,
         }
     }
 
@@ -9519,6 +9520,7 @@ async fn aplicar_conjunto_de_mods(
             reach: instalado.reach,
             server_half: instalado.server,
             api: instalado.api,
+            tema: false,
         });
     }
 
@@ -9882,6 +9884,7 @@ mod so_a_gestao_reaplica_no_servidor_hospedado {
             reach: vec!["dom".to_owned()],
             server_half: false,
             api: seele_ffi::mods::MOD_API_VERSION,
+            tema: false,
         }
     }
 

@@ -96,6 +96,7 @@ async fn main() -> Result<()> {
             reach: manifesto.reach.clone(),
             server_half: manifesto.server.is_some(),
             api: manifesto.api,
+            tema: false,
         },
     )?;
     // O que a subida diz só no registro, dito aqui também: sem um assinante do
