@@ -9970,14 +9970,30 @@ relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-r63-report.md`.
   revisão em que a pendente sai; a de outra pessoa, com `null`; a própria relida do histórico, com a chave gravada.
   **A casca foi consertada** (16/10, lote ECO da F5, no ramo `0.16/lotes-eco`, aberto no `e37509f4`), só no
   `tela-sessao.js`: a chave é `envio:<client_message_id>` quando a mensagem tem uma, e `mensagem:<id>` quando não
-  tem, e o `vestirComo` troca no mesmo nó o selo do envio, o `data-mensagem` e o id do REMOVER. Os commits:
-  `e91da621` (o caso 14 (j) da `linhas-pelo-id.cjs`, vermelho no `e37509f4` com «a própria mensagem foi gravada e a
-  linha dela trocou de nó: o foco está em BODY, o REMOVER não é o mesmo, e a seleção foi de "minha mensagem,
-  recém-escrita" a ""»), `3944d2c8` (o conserto; com a chave antiga de volta, o caso reprova com a mesma frase, e o
-  arquivo voltou idêntico pelo `cmp`) e o dos documentos. **Para valer no app, depende do eco da F1**, que ainda não
-  está neste ramo: sem ele, a confirmada chega sem a chave e cai em `mensagem:<id>`, como antes — nada quebra, e
-  nada melhora. A bancada simula a ponte com a forma da F1; o app com os dois juntos é da integração e da
-  conferência da orquestradora. O relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-eco-report.md`;
+  tem; no mesmo nó, a reconciliação dos filhos tira o selo do envio, e o `vestirComo` reescreve o `data-mensagem` e
+  o id do REMOVER. Os commits: `e91da621` (o caso 14 (j) da `linhas-pelo-id.cjs`, vermelho no `e37509f4` com «a
+  própria mensagem foi gravada e a linha dela trocou de nó: o foco está em BODY, o REMOVER não é o mesmo, e a seleção
+  foi de "minha mensagem, recém-escrita" a ""»), `3944d2c8` (o conserto; com a chave antiga de volta, o caso reprova
+  com a mesma frase, e o arquivo voltou idêntico pelo `cmp`) e `2466426d` (os documentos).
+  **A exceção da posição, e o conserto dela** (rodada 1 do lote, M1 da revisão). Com só a chave, o nó era o mesmo,
+  mas, quando a gravada tinha de ir para **antes** de uma mensagem que já estava na tela, ele era **movido** — tirado
+  e posto —, e o foco no link e a seleção no corpo caíam (medido pela revisão no Chromium e no WebKit). Ao vivo isso
+  não acontece, porque o servidor anuncia na ordem do id; acontece com a pendente sem resposta, quando outra pessoa
+  fala enquanto o enlace está caído e a repetição da chave devolve a linha que o servidor já tinha gravado, com o id
+  de antes, e no preenchimento da lacuna depois de uma queda. O conserto é no reconciliador comum
+  (`reconciliarOsFilhos`, `82be2db2`, só no `tela-sessao.js`): fica no lugar o nó que tem o foco do teclado, ou, sem
+  foco, o começo da seleção, e os outros se movem em volta dele. O caminho rápido, quando nada muda de lugar, não muda.
+  O vermelho é o `ad19f06d`: o 14 (k), com o foco e a seleção e depois só com a seleção, e no caso 8 dois vizinhos
+  trocando de lugar com o foco no que se movia, os dois reprovando no `2466426d`. Sem a preferência, o caso 8 e o 14
+  (k) reprovam; sem a âncora da seleção, o 14 (k) só com a seleção. **O preço**, medido: quando quem tem o foco é
+  justo quem mudou de lugar (a última da sala vai para a frente), ficam no lugar ele e mais ninguém, e as outras 18
+  linhas do grupo se movem — antes, movia-se uma, e o foco caía. E dois controles a mais, só na bancada (`53a447a6`):
+  a chave da relida com o número do id de outra mensagem, e duas próprias gravadas sem chave, que fazem reprovar os
+  mutantes sem os prefixos e `own ? envio:…`.
+  **Para valer no app, depende do eco da F1**, que ainda não está neste ramo: sem ele, a confirmada chega sem a chave
+  e cai em `mensagem:<id>`, como antes — nada quebra, e nada melhora (a revisão mediu isso). A bancada simula a ponte
+  com a forma da F1; o app com os dois juntos é da integração e da conferência da orquestradora. O relatório é o
+  `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-eco-report.md`;
 - **o grupo FORA DO AR** (`grupoForaDoAr`), que só existe no `0.16/sala-viva`: as linhas dele não têm chave e casam
   pela posição, e um leitor de tela parado em «Bruno» passa a ler «Carla» no mesmo nó quando alguém do meio se
   conecta. Medido em 16/10 no `531b9cba`: com a chave `membro:<id>` na linha, as que ficam são os mesmos nós e
