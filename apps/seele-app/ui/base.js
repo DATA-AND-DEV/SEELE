@@ -163,6 +163,10 @@ async function passaDoTeto(campo, texto) {
 //     este veredito (P11, em `entrarNaAutenticacao`; D-celular-3). Devolve
 //     `null`, e o aperto aparece como hoje, ou as frases do registro e do
 //     anúncio da entrada direta. O passo de entrar roda igual nos dois casos.
+//   - `detalhesNaLinha`: se a linha de uma pessoa acrescenta o `pessoa.detalhes`
+//     dela, no «⋯». O celular o tira da linha, e a folha da pessoa é o único
+//     lugar dele lá: um nó por pessoa, num lugar só (decisão da orquestradora,
+//     16/10; a linha o pede em `detalhesDaPessoaNaLinha`, no tela-sessao.js).
 //
 // Selado, e não congelado: a casca troca os valores, e ninguém acrescenta
 // campo. Um campo novo é um ponto novo, e entra aqui com o nome dele.
@@ -173,6 +177,7 @@ const CASCA = Object.seal({
   avisoDeFone: () => AVISO_DE_FONE,
   fraseDoModo: (_modo, doDesktop) => doDesktop,
   entradaDireta: (_veredito, _deOnde) => null,
+  detalhesNaLinha: true,
 });
 
 // --------------------------------------------------------------- o snapshot

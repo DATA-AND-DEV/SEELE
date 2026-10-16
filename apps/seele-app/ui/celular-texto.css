@@ -241,6 +241,7 @@
 :where(:root[data-casca="celular"]) span.regiao-de-mod-parte[data-forma="distintivo"] { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .entrada-de-mod-origem { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-apresentada-porta { font-size: inherit; }
+:where(:root[data-casca="celular"]) .contribuicao-de-mod-origem { font-size: calc(var(--seele-t-micro, 10px) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-nativo-resumo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-apresentada-porta-rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .contribuicao-de-mod > .regiao-de-mod-parte { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
