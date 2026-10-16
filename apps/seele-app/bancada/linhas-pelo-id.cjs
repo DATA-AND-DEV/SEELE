@@ -1700,6 +1700,11 @@ async function abrir(browser, url, r) {
       getSelection().removeAllRanges();
       getSelection().addRange(faixa);
       const selecionado = getSelection().toString();
+      // Dois quadros antes de rolar: o WebKit (o do app no Mac) traz o link
+      // focado à vista só no desenho seguinte, e essa rolagem caía por cima
+      // dos 800 (medido: 800 logo depois de pôr, 297 dois quadros depois, sem
+      // nada redesenhado). O Chromium rola no `focus()`, e para ele nada muda.
+      await quadros(2);
       lista.scrollTop = 800;
       const preparo = {
         mensagens: lista.querySelectorAll("li.mensagem").length,
