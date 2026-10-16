@@ -244,6 +244,31 @@ let ocorrenciaAtual = null;
 const SEM_MEDIDA = "—";
 
 /**
+ * **Escreve o texto de um campo só quando ele muda, e no nó que já existe**
+ * (pendência 63; lote R63 da F5).
+ *
+ * `textContent =` troca o nó de texto por um novo **mesmo com o texto igual** —
+ * medido no Chromium e no WebKit, que não pulam a troca. O tique de 500 ms
+ * escreve o contador, a telemetria e o `#voz-estado` duas vezes por segundo, e
+ * cada troca desfazia a seleção de quem copiava um número, dava ao leitor de
+ * tela outro nó, e mexia numa região viva sem nada para dizer.
+ *
+ * Com o texto igual, nada é escrito. Com o texto novo, muda o `nodeValue` do
+ * nó que está ali, e não o nó: para o leitor de tela é o mesmo texto com outro
+ * conteúdo, e uma seleção num número vizinho, que não mudou, não é tocada.
+ * Fora desse caso — o campo vazio, ou com mais de um filho — vale o
+ * `textContent` de sempre, e o resultado na tela é o mesmo.
+ */
+function escreverOTexto(nodo, texto) {
+  const so = nodo.firstChild;
+  if (so !== null && so === nodo.lastChild && so.nodeType === Node.TEXT_NODE && texto !== "") {
+    if (so.nodeValue !== texto) so.nodeValue = texto;
+  } else if (so !== null || texto !== "") {
+    nodo.textContent = texto;
+  }
+}
+
+/**
  * Marca um campo como não medido, e diz o que faltaria para medi-lo.
  *
  * O travessão é o mesmo que `quando()` já usava em `base.js`, e é deliberado
@@ -256,14 +281,14 @@ const SEM_MEDIDA = "—";
  * quem reparou no travessão está fazendo.
  */
 function naoMedido(nodo, motivo) {
-  nodo.textContent = SEM_MEDIDA;
+  escreverOTexto(nodo, SEM_MEDIDA);
   nodo.classList.add("ausente");
   nodo.title = motivo;
 }
 
 /** O contrário: um valor que existe, no mesmo campo. */
 function medido(nodo, texto) {
-  nodo.textContent = texto;
+  escreverOTexto(nodo, texto);
   nodo.classList.remove("ausente");
   nodo.removeAttribute("title");
 }
@@ -1306,7 +1331,11 @@ function desenharOperador(snapshot) {
   //    passou a querer dizer só o terceiro caso, que é o único em que ele
   //    está aberto o tempo todo;
   // 3. **se está indo ao ar agora**, que é o que `speaking` mede.
-  $("voz-estado").textContent = [
+  //
+  // **E só quando muda** (pendência 63; lote R63): a linha é `role="status"` e
+  // está à vista, e o tique a reescrevia com o mesmo texto duas vezes por
+  // segundo — uma região viva mexida sem nada para dizer. Ver `escreverOTexto`.
+  escreverOTexto($("voz-estado"), [
     estadoDoMicrofone,
     // E a linha de estado diz o mesmo: quem lê «não está ouvindo» entende
     // «ninguém está falando comigo», e não «o som da tela também está calado».
@@ -1314,7 +1343,7 @@ function desenharOperador(snapshot) {
     !snapshot.muted && snapshot.speaking ? "no ar" : null,
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(" · "));
 
 }
 
@@ -2711,7 +2740,7 @@ function desenharMedia(voice_room) {
     // Sem sala, ou numa sala vazia. Não é uma média baixa: é a ausência de
     // qualquer coisa para tirar média de.
     delete celula.dataset.faixa;
-    marca.textContent = "";
+    escreverOTexto(marca, "");
     naoMedido(valor, voice_room ? "esta sala está vazia" : "você não entrou em nenhuma sala");
     return;
   }
@@ -2721,7 +2750,7 @@ function desenharMedia(voice_room) {
   // A marca de bloco é a metade que sobrevive sem cor. Ela fica em face
   // monoespaçada ao lado do número porque a Saira Condensed, que desenha o
   // número, não tem `U+2588`.
-  marca.textContent = marcaSync(sync.band);
+  escreverOTexto(marca, marcaSync(sync.band));
   medido(valor, String(sync.ratio));
 }
 
@@ -3280,18 +3309,18 @@ function desenharAparelho(snapshot) {
 
   if (snapshot.aparelho === "trocando") {
     alvo.hidden = false;
-    alvo.textContent = "TROCANDO DE APARELHO";
+    escreverOTexto(alvo, "TROCANDO DE APARELHO");
     return;
   }
   if (snapshot.aparelho === "perdido") {
     alvo.hidden = false;
-    alvo.textContent = "SEM APARELHO DE ÁUDIO";
+    escreverOTexto(alvo, "SEM APARELHO DE ÁUDIO");
     return;
   }
   if (Date.now() < ateQuandoAnunciarOAparelho) {
     const nome = snapshot.playback?.name ?? snapshot.capture?.name;
     alvo.hidden = false;
-    alvo.textContent = nome ? `ÁUDIO AGORA EM ${nome.toUpperCase()}` : "O APARELHO DE ÁUDIO MUDOU";
+    escreverOTexto(alvo, nome ? `ÁUDIO AGORA EM ${nome.toUpperCase()}` : "O APARELHO DE ÁUDIO MUDOU");
     return;
   }
   alvo.hidden = true;
