@@ -581,7 +581,7 @@ const { chromium } = require('./playwright.cjs');
     // revogou. É a presença, e não a falta de contribuição, que a deixa lisa.
     await page.evaluate(() => { window.handleCapaDeQuemSaiu = registrarCapa('99', 'volume:quem-saiu'); });
     await esperar(400);
-    const recusasAntes = await page.evaluate(() => entregues.filter(m => m.tipo === 'evento' && m.evento?.nome === 'midia').length);
+    const recusasAntes = await page.evaluate(() => entregues.filter(m => m.tipo === 'evento' && m.nome === 'midia').length);
     const pedidosAntesDaAusente = await page.evaluate(() => pedidosDeMidia());
     await page.evaluate(() => montarCitando('ausente', 99));
     await esperar(400);
@@ -591,7 +591,7 @@ const { chromium } = require('./playwright.cjs');
     await page.evaluate(() => contribuicoesDosMods.revogar(handleCapaDeQuemSaiu));
     assert.equal(ausente.fundo, '', `a citação de quem não está na sessão pintou o fundo: ${JSON.stringify(ausente)}`);
     assert.equal(ausente.estadoDoRetrato, 'inicial', `a citação de quem não está na sessão saiu ${JSON.stringify(ausente)}`);
-    assert.equal(await page.evaluate(() => entregues.filter(m => m.tipo === 'evento' && m.evento?.nome === 'midia').length), recusasAntes,
+    assert.equal(await page.evaluate(() => entregues.filter(m => m.tipo === 'evento' && m.nome === 'midia').length), recusasAntes,
       'citar quem não está na sessão virou evento de mídia: devia ficar liso, sem recusa');
 
     await page.evaluate(alvo => montarCitando('troca', Number(alvo)), alvo);
