@@ -1892,7 +1892,8 @@ function seloDoEnvio(mensagem) {
  * REMOVER caía no `<body>`, a seleção se desfazia, e o leitor de tela perdia o
  * nó (433 de 434 ids AX trocados, medido em 16/10). Agora é o caminho da lista
  * de pessoas (`reconciliarALista`): cada mensagem tem a chave do id que o
- * servidor deu — ou, numa pendente, a da máquina —, e cada divisor a do dia; a
+ * servidor deu — ou, numa própria, a do envio, a mesma na pendente e na
+ * gravada (lote ECO) —, e cada divisor a do dia; a
  * mensagem que chega entra, a que sai sai, e as outras ficam com o mesmo nó,
  * só com o que mudou nelas. O REMOVER e o link continuam agindo com o dado de
  * agora: os ouvintes são delegados na lista e leem o `data-*` que o
@@ -1959,11 +1960,17 @@ function desenharMensagens() {
       Boolean(mensagem.at_seconds) &&
       mensagem.at_seconds - anterior.at_seconds <= JUNTA_ATE_SEGUNDOS;
     const item = itemDeMensagem(mensagem, indice, segue);
-    // O id do servidor, ou — numa pendente, que tem id zero — a chave desta
-    // máquina. A pendente que é gravada troca de chave, e só ela ganha nó novo.
-    const chave = mensagem.id
-      ? `mensagem:${mensagem.id}`
-      : mensagem.client_message_id ? `pendente:${mensagem.client_message_id}` : null;
+    // A chave do envio, quando há uma, e o id do servidor quando não há (lote
+    // ECO). A ponte só manda a `client_message_id` nas próprias: na pendente,
+    // que tem id zero, na confirmada que a substitui — a mesma, na mesma
+    // revisão em que a pendente sai — e na relida do histórico, com a que o
+    // servidor gravou. É a única coisa que a pendente e a gravada dividem, e
+    // por isso vem antes do id: com o id na frente, a gravada caía noutra
+    // chave, e quem a escreveu perdia o link, o REMOVER, a seleção e o nó do
+    // leitor de tela. O `vestirComo` troca o estado, o id e os `data-*` no nó.
+    const chave = mensagem.client_message_id
+      ? `envio:${mensagem.client_message_id}`
+      : mensagem.id ? `mensagem:${mensagem.id}` : null;
     if (chave !== null) chaveNaLista.set(item, chave);
     itens.push(item);
     anterior = mensagem;
