@@ -271,6 +271,27 @@ for (const [nome, tema] of Object.entries({
   }
 }
 
+// ---------------------------------------- os números da fórmula, os do texto
+
+{
+  // **O croma e o passo do preenchimento** (`tema.derivados-pelo-produto.
+  // formula`; a auditoria do `v6.json`, tabela 8): o 4,5:1 e o ΔE eram
+  // conferidos, e os números não — trocar o croma para 0,5 ou o passo para
+  // 0,2 passava. Lidos do texto («0,23 do croma», «um passo de 0,122») e
+  // comparados com as constantes de `base.js`.
+  const v6 = JSON.parse(fs.readFileSync(`${repo}/api/v6.json`, "utf8"));
+  const formula = v6.tema["derivados-pelo-produto"].formula;
+  const numero = (re) => Number.parseFloat((formula.match(re)?.[1] ?? "").replace(",", "."));
+  const croma = numero(/([0-9]+,[0-9]+) do croma/);
+  const passo = numero(/um passo de ([0-9]+,[0-9]+)/);
+  const daCasca = {
+    croma: vm.runInContext("CROMA_DO_PREENCHIMENTO", contexto),
+    passo: vm.runInContext("PASSO_DO_PREENCHIMENTO", contexto),
+  };
+  confere("a fórmula · os números", croma === daCasca.croma && passo === daCasca.passo,
+    `o v6.json diz croma ${croma} e passo ${passo}, e a casca usa ${JSON.stringify(daCasca)}`);
+}
+
 // ---------------------------------------- os pares, pelos nomes do contrato
 
 {
