@@ -1680,6 +1680,29 @@ async function cadaFiguraDoV6Pinta() {
   }
   const estranha = pintar({ tipo: "estrela", x: 1, y: 1 });
   confere(caso, estranha.recusados === 1, `um tipo que o v6 não tem não foi contado como recusa (${estranha.recusados})`);
+
+  // **O teto de figuras por tela** (`limites.figuras-por-tela`): o número que
+  // o texto começa dizendo. Até ele, todas pintam; uma a mais é recusada e
+  // dita, com a chave da tela — e as de antes continuam pintadas. (O teto de
+  // bytes da mensagem, que segura antes dele, é do prelúdio: medido no motor.)
+  const teto = Number.parseInt(V6.limites["figuras-por-tela"], 10);
+  confere(caso, teto === 256, `o v6.json diz «${V6.limites["figuras-por-tela"].slice(0, 20)}…», e esta prova lê ${teto}`);
+  for (const [quantas, recusadas] of [[teto, 0], [teto + 1, 1]]) {
+    const b = bancada();
+    const d = dono(b);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.superficie);
+    const figuras = Array.from({ length: quantas }, (_, i) => ({ tipo: "retangulo", x: i % 20, y: 0, largura: 1, altura: 1 }));
+    const tela = [{ forma: "tela", chave: "mapa", largura: 20, altura: 20, figuras }];
+    regiao.aplicar(tela);
+    regiao.raiz.children[0].darPincel();
+    const recusados = regiao.aplicar(tela);
+    const retangulos = regiao.raiz.children[0].pincel.pintado.filter((p) => Array.isArray(p) && p[0] === "retangulo").length;
+    confere(caso, recusados === recusadas && retangulos === teto
+      && (recusadas === 0 || regiao.amostraDeRecusados.some((a) => a.motivo === "teto-de-figuras" && a.chave === "mapa")),
+      `${quantas} figuras numa tela de teto ${teto}: pintou ${retangulos}, recusou ${recusados}, `
+        + `amostra ${JSON.stringify(regiao.amostraDeRecusados)}`);
+    regiao.soltar();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -4949,6 +4972,63 @@ async function oSomComRepetirTocaEmLaco() {
   confere(caso, terminou(d) === 1, `sem repetir, o fim da trilha não foi dito: «terminou» ${terminou(d)} vez(es)`);
 }
 
+/**
+ * **O fim diz só `terminou`, e o laço pausado volta dentro da volta**
+ * (`som.tocando[2]` e `som.repetir`; a auditoria do `v6.json`, tabela 9).
+ *
+ * - No fim natural de um som sem `repetir`, o MOD recebe um aviso, e só um:
+ *   `terminou` — e não um `pausada` junto, que diria que alguém parou.
+ * - Com `repetir`, pausado pelo botão do produto aos 5,5 s de um som de 2 s,
+ *   ele volta de 1,5 s, e não do começo nem de 5,5 s (que passaria do fim).
+ */
+async function oSomNoFimDizSoTerminouERetomaDentroDaVolta() {
+  const caso = "o fim diz só terminou, e o laço volta dentro da volta";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+  const doSom = (d) => d.ditos.filter((e) => e.nome === "midia" && e.chave === "trilha").map((e) => e.estado);
+  {
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.superficie);
+    regiao.aplicar([{ forma: "midia", chave: "trilha", fonte: "som/trilha.wav", tocando: true }]);
+    await assentar();
+    const fonte = Audio.ultimo?.fontes[0];
+    confere(caso, fonte?.tocando === true, "a trilha declarada `tocando` não tocou");
+    const antes = doSom(d).length;
+    fonte?.onended?.();
+    await assentar();
+    const depois = doSom(d).slice(antes);
+    confere(caso, JSON.stringify(depois) === JSON.stringify(["terminou"]),
+      `no fim natural, o MOD ouviu ${JSON.stringify(depois)}, e não só \`terminou\``);
+    regiao.soltar();
+  }
+  {
+    const Audio = audioDeMentira({ decodificado: { duration: 2, length: 96000, numberOfChannels: 2, sampleRate: 48000 } });
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.superficie);
+    regiao.aplicar([{ forma: "midia", chave: "trilha", fonte: "som/trilha.wav", tocando: true, repetir: true }]);
+    await assentar();
+    const contexto = Audio.ultimo;
+    const botao = acharTag(regiao.raiz, "button");
+    confere(caso, contexto?.fontes[0]?.tocando === true && Boolean(botao), "a trilha em laço não tocou, ou ficou sem o botão do produto");
+    if (!contexto || !botao) { regiao.soltar(); return; }
+    contexto.currentTime = 5.5;
+    botao.disparar("click");
+    await assentar();
+    confere(caso, doSom(d).at(-1) === "pausada" && contexto.fontes[0].parou === true,
+      `o botão não pausou a trilha em laço: ${JSON.stringify(doSom(d))}`);
+    botao.disparar("click");
+    await assentar();
+    const retomada = contexto.fontes.at(-1);
+    confere(caso, contexto.fontes.length === 2 && retomada.tocando === true && retomada.loop === true
+      && Math.abs(retomada.de - 1.5) < 1e-9,
+      `a trilha em laço pausada aos 5,5 s de um som de 2 s voltou de ${retomada?.de} s (o certo é 1,5), `
+        + `em laço ${retomada?.loop}, com ${contexto.fontes.length} fonte(s)`);
+    regiao.soltar();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 16. O som que sai da tela para, como o `<audio>` parava.
 // ---------------------------------------------------------------------------
@@ -6703,6 +6783,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     asProtecoesDoTocadorEDaMontagemDoSom,
     oSomQueTerminouVoltaComOTocandoDeclarado,
     oSomComRepetirTocaEmLaco,
+    oSomNoFimDizSoTerminouERetomaDentroDaVolta,
     oSomQueSaiDaTelaParaComoOAudioParava,
     oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar,
     oSomDaContribuicaoMudaDeDestino,
