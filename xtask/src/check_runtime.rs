@@ -41,8 +41,10 @@
 //!
 //! As de navegador (Playwright) não estão aqui: elas precisam de um Chromium,
 //! e quem as roda, por nome, é o job `bancadas` do `ci.yml`, que só roda
-//! quando alguém o dispara — nem o `validar` do `release.yml` nem a bateria do
-//! `publicar.sh` as rodam. A exceção é a do executor de MODs no navegador
+//! quando alguém o dispara, e a bateria do `publicar.sh`, desde a D-api-8 (a
+//! etapa `bancadas_de_navegador`, com a mesma lista: ver o teste
+//! `toda_bancada_de_navegador_e_a_do_celular_rodam_no_ci_e_no_publicar`). O
+//! `validar` do `release.yml` não as roda. A exceção é a do executor de MODs no navegador
 //! (`executor-no-navegador.cjs`), que precisa do `.wasm` do motor: ela roda no
 //! job `bancadas-de-mod`, depois do `cargo xtask web` que o compila. Quantas
 //! são e onde cada uma roda não está escrito em comentário nenhum: o teste
@@ -859,6 +861,144 @@ mod tests {
              nomeia estes, que a pasta não tem: {sobram:?}. Uma versão sai com um roteiro \
              vermelho sem ninguém ver: ele entra como `--roteiro tools/roteiros/<nome>` na \
              chamada da carga em `roteiros_da_casca`"
+        );
+    }
+
+    /// Os comandos das bancadas de navegador do `ci.yml`, como o `run:` os
+    /// escreve: os `node apps/seele-app/bancada/<nome> [argumentos]` dos dois
+    /// jobs de navegador, e as bancadas de `tools/` (`python3
+    /// tools/bancada-<nome>.py …`) de qualquer job.
+    fn bancadas_de_navegador_no_ci() -> Vec<String> {
+        let texto = ler(".github/workflows/ci.yml");
+        let linhas = sem_comentario(&texto);
+        let mut comandos: Vec<String> = JOBS_COM_BANCADA_DE_NAVEGADOR
+            .iter()
+            .flat_map(|job| passos_do_job(job))
+            .filter_map(|passo| chave_do_passo(&passo, "run").map(str::to_owned))
+            .filter(|run| run.starts_with("node apps/seele-app/bancada/"))
+            .collect();
+        comandos.extend(
+            linhas
+                .iter()
+                .map(|linha| linha.trim())
+                .filter_map(|linha| linha.strip_prefix("- run: "))
+                .filter(|run| run.starts_with("python3 tools/bancada-"))
+                .map(str::to_owned),
+        );
+        comandos
+    }
+
+    /// Os comandos das bancadas de navegador da bateria do `publicar.sh`: cada
+    /// `uma_bancada <comando…>` da `todas_as_bancadas_de_navegador`.
+    fn bancadas_de_navegador_no_publicar() -> Vec<String> {
+        comandos_da_funcao("todas_as_bancadas_de_navegador")
+            .into_iter()
+            .filter(|palavras| {
+                palavras
+                    .first()
+                    .is_some_and(|primeira| primeira == "uma_bancada")
+            })
+            .map(|palavras| palavras.get(1..).unwrap_or_default().join(" "))
+            .collect()
+    }
+
+    /// O comando de uma bancada de `tools/` sem o que vem depois do arquivo: a
+    /// pasta de saída é a de cada lugar (`$RUNNER_TEMP` no CI, `$TEMPORARIO` no
+    /// `publicar.sh`).
+    fn sem_a_saida(comando: &str) -> String {
+        if comando.starts_with("python3 tools/bancada-") {
+            comando
+                .split_whitespace()
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            comando.to_owned()
+        }
+    }
+
+    /// **Toda bancada de navegador, e a do celular, roda no CI e na bateria do
+    /// `publicar.sh`** (D-api-8).
+    ///
+    /// O `ci.yml` só roda quando alguém o dispara, e a bateria do `publicar.sh`,
+    /// que é o portão das versões, não rodava nenhuma bancada de navegador:
+    /// muitas promessas da API 6 (camadas, capa, núcleo, regiões do produto)
+    /// só têm prova nelas. E a bancada do celular (`tools/bancada-do-celular.py`,
+    /// da F8) não rodava em lugar nenhum, e o guarda dos roteiros não a via.
+    /// Este teste é a conta, como o dos roteiros: as bancadas dos jobs de
+    /// navegador do `ci.yml`, com os mesmos argumentos, são as da lista do
+    /// `publicar.sh`; toda `tools/bancada-*.py` roda nos dois; e a etapa vem
+    /// depois do `cargo xtask web`, porque três delas leem o `.wasm` que ele
+    /// compila.
+    #[test]
+    fn toda_bancada_de_navegador_e_a_do_celular_rodam_no_ci_e_no_publicar() {
+        let no_ci: Vec<String> = bancadas_de_navegador_no_ci()
+            .iter()
+            .map(|comando| sem_a_saida(comando))
+            .collect();
+        let no_publicar: Vec<String> = bancadas_de_navegador_no_publicar()
+            .iter()
+            .map(|comando| sem_a_saida(comando))
+            .collect();
+        assert!(
+            no_ci.len() > 1,
+            "não achei bancada de navegador no `ci.yml`, e este guarda passaria sem medir nada"
+        );
+        let (faltam, sobram) = diferenca(&no_publicar, &no_ci);
+        assert!(
+            faltam.is_empty() && sobram.is_empty(),
+            "empacotar/publicar.sh: a bateria não roda estas bancadas do `ci.yml`: {faltam:?}; e \
+             roda estas, que o `ci.yml` não roda: {sobram:?}. Uma versão sai com uma bancada \
+             vermelha sem ninguém ver: ela entra como `uma_bancada <o mesmo comando do run:>` em \
+             `todas_as_bancadas_de_navegador`"
+        );
+
+        let ferramentas = raiz().join("tools");
+        let mut de_tools: Vec<String> = std::fs::read_dir(&ferramentas)
+            .expect("a pasta tools/ é legível")
+            .map(|entrada| {
+                entrada
+                    .expect("cada entrada de tools/ é legível")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .filter(|nome| nome.starts_with("bancada-") && nome.ends_with(".py"))
+            .map(|nome| format!("python3 tools/{nome}"))
+            .collect();
+        de_tools.sort();
+        assert!(
+            !de_tools.is_empty(),
+            "não achei a bancada do celular em tools/, e este guarda passaria sem medir nada"
+        );
+        for bancada in &de_tools {
+            assert!(
+                no_ci.contains(bancada) && no_publicar.contains(bancada),
+                "`{bancada}` não roda nos dois lugares (ci.yml: {}; publicar.sh: {}). Uma \
+                 bancada de tools/ que não roda fica verde para sempre: ela entra num `run:` do \
+                 job `bancadas` do `ci.yml` e como `uma_bancada` em \
+                 `todas_as_bancadas_de_navegador`",
+                no_ci.contains(bancada),
+                no_publicar.contains(bancada)
+            );
+        }
+
+        let bateria = comandos_da_funcao("bateria");
+        let web = bateria
+            .iter()
+            .position(|palavras| palavras.windows(2).any(|par| par == ["xtask", "web"]))
+            .expect("a `bateria()` do `publicar.sh` roda o `cargo xtask web`");
+        let bancadas = bateria
+            .iter()
+            .position(|palavras| palavras.as_slice() == ["bancadas_de_navegador"])
+            .expect(
+                "a `bateria()` do `publicar.sh` não chama `bancadas_de_navegador`, e uma versão \
+                 sai com uma bancada de navegador vermelha",
+            );
+        assert!(
+            web < bancadas,
+            "a `bateria()` do `publicar.sh` roda as bancadas de navegador antes do `cargo xtask \
+             web`, e as três que leem o `.wasm` do motor mediriam um `.wasm` velho, ou nenhum"
         );
     }
 
