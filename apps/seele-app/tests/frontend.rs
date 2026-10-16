@@ -2761,8 +2761,12 @@ fn the_arrival_stage_reaches_the_screen_while_the_arrival_is_happening() {
     // to cross under the name serde writes, and the script has to branch on
     // that name.
     let corpo = body_of(&read("src/main.rs"), "async fn connect(");
+    // Either door that takes the listener before blocking: `connect_watching`,
+    // or `connect_cancelavel` with the listener in it (task 28 of F7, the
+    // CANCELAR of whoever is calling).
     assert!(
-        corpo.contains("Connection::connect_watching"),
+        corpo.contains("Connection::connect_watching")
+            || corpo.contains("Connection::connect_cancelavel(config, Some("),
         "the app still enters by the door that blocks with nobody listening, so \
          the stages happen inside a channel that answers only at the end:\n{corpo}"
     );
@@ -18692,9 +18696,14 @@ fn a_casca_veste_a_sessao_com_o_disco_logo_depois_do_connect() {
              gravadas não valem até a pessoa mexer de novo"
         );
     };
-    let Some(conectou) = conectar.find("Connection::connect_watching(") else {
+    // Pela porta que escuta, ou pela que escuta e se cancela (tarefa 28 da F7).
+    let Some(conectou) = conectar
+        .find("Connection::connect_watching(")
+        .or_else(|| conectar.find("Connection::connect_cancelavel("))
+    else {
         panic!(
-            "`connect` não conecta mais por `connect_watching`, e este guarda mediu outra coisa"
+            "`connect` não conecta mais por `connect_watching` nem por `connect_cancelavel`, e \
+             este guarda mediu outra coisa"
         );
     };
     assert!(
