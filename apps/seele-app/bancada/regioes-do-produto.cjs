@@ -405,6 +405,54 @@ const REGIOES = [
       if (!linha.foraDoMiolo) falhas.push("pessoa.cartao: o apelido verificado está dentro da raiz do MOD");
     }
 
+    // ------------------------------------- revogar recalcula do estado de agora
+    //
+    // `contribuicoes.garantias-do-produto[4]` («ao revogar, o nativo é
+    // recalculado do estado atual»; a auditoria do v6, tabela 6): todo caso
+    // revogava com o mesmo retrato de antes, e devolver a linha guardada na
+    // hora da substituição passaria igual. Aqui Lia troca de apelido com o
+    // cartão substituído, e a revogação, **sem retrato novo**, desenha a linha
+    // nativa com o apelido de agora — quem redesenha é o próprio registro.
+    const recalculo = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const deAntes = lia.nickname;
+      const instancia = new InstanciaDeMod("mod/recalculo", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/recalculo", instancia);
+      const { handle } = contribuicoesDosMods.registrar({ id: "mod/recalculo" }, instancia, {
+        ponto: "pessoa.cartao", modo: "substituir", alvo: String(lia.id),
+        conteudo: [{ forma: "texto", chave: "c", dentro: "CARTÃO DO MOD" }],
+      });
+      desenhar(r);
+      await quadro();
+      const apresentada = () => Boolean(document.querySelector('li.pessoa-apresentada[data-apresentada-por="mod/recalculo"]'));
+      const substituida = apresentada();
+      lia.nickname = "lia-de-agora";
+      desenhar(r);
+      await quadro();
+      contribuicoesDosMods.revogar(handle, { id: "mod/recalculo", instancia });
+      modsCarregados.delete("mod/recalculo");
+      await quadro();
+      const nomes = [...$("lista-roster").querySelectorAll("li.pessoa .pessoa-nome")].map((e) => e.textContent.trim());
+      const medido = { substituida, depois: apresentada(), nomes, deAntes };
+      lia.nickname = deAntes;
+      desenhar(r);
+      await quadro();
+      return medido;
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (recalculo.erro) falhas.push(`revogar recalcula: ${recalculo.erro}`);
+    else {
+      if (!recalculo.substituida) falhas.push("revogar recalcula: a linha de Lia não foi apresentada pelo MOD, e o caso não mede nada");
+      if (recalculo.depois) falhas.push("revogar recalcula: revogado, e a linha continua a do MOD até um retrato novo");
+      else if (!recalculo.nomes.includes("lia-de-agora") || recalculo.nomes.includes(recalculo.deAntes)) {
+        falhas.push(`revogar recalcula: a linha nativa voltou com ${JSON.stringify(recalculo.nomes)}, e não com o apelido de agora`);
+      }
+    }
+
     // ------------------------------------- a lista de pessoas, substituída
     //
     // `pessoas.lista` substituída (rascunho §3; decisão (a) da orquestradora,

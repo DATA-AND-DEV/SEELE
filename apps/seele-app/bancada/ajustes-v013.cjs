@@ -1,5 +1,7 @@
 // Navegador com HTML/CSS reais; a ponte nativa é simulada.
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { servir, respostas, retrato } = require('./telas.cjs');
 const { chromium: abrirChromium } = require('./playwright.cjs');
 const chromium = abrirChromium();
@@ -1770,6 +1772,21 @@ async function aEntradaVelhaNaoTomaATela(browser, porta) {
     await page.waitForTimeout(3700);
     assert.equal(await page.locator('.aviso-de-mod').count(), 0);
     assert.equal(await page.evaluate(() => testSurfaces.porChave.size), 1, 'avisos expirados retidos');
+
+    // **A duração de cada aviso é a do texto** (`superficies.avisos-duracao-ms`;
+    // a auditoria do v6, tabela 7): o caso de cima só limita por cima — trocar
+    // 3500 por 500 passava —, e o tom de erro não tinha caso. Com o relógio de
+    // mentira do Playwright (a `page` não serve a mais nada depois daqui), cada
+    // tom ainda à vista 200 ms antes do número, e fora 200 ms depois.
+    const duracoes = JSON.parse(fs.readFileSync(path.join(__dirname, '../../../api/v6.json'), 'utf8')).superficies['avisos-duracao-ms'];
+    await page.clock.install();
+    for (const tom of ['normal', 'erro']) {
+      await page.evaluate(tom => testSurfaces.criar({ id: 'duracao-' + tom, tipo: 'aviso', titulo: 'Aviso ' + tom, tom }), tom);
+      await page.clock.runFor(duracoes[tom] - 200);
+      assert.equal(await page.locator('.aviso-de-mod').count(), 1, `o aviso ${tom} saiu antes dos ${duracoes[tom]} ms do v6.json`);
+      await page.clock.runFor(400);
+      assert.equal(await page.locator('.aviso-de-mod').count(), 0, `o aviso ${tom} ficou além dos ${duracoes[tom]} ms do v6.json`);
+    }
     assert.deepEqual(errors, []);
 
     // **A entrada por link, sem nome nesta máquina** (lote J da F5). O launcher

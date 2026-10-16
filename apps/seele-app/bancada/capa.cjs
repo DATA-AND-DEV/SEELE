@@ -435,6 +435,9 @@ const { chromium } = require('./playwright.cjs');
       return resultado;
     });
     assert.ok(animadas.capas >= 9, `só ${animadas.capas} capas na tela: o cenário não se montou`);
+    // Mais de seis à vista, ou o teto não se mede: com seis ou menos, trocar o
+    // TETO_DE_CAPAS_ANIMADAS para nove passava (a auditoria do v6, tabela 9).
+    assert.ok(animadas.visiveis > 6, `só ${animadas.visiveis} capas à vista, e o teto de seis não se mede: ${JSON.stringify(animadas)}`);
     assert.equal(animadas.animadas, Math.min(6, animadas.visiveis), `animam ${JSON.stringify(animadas)}`);
     assert.equal(animadas.animadasFora, 0, `uma capa fora da vista anima: ${JSON.stringify(animadas)}`);
     assert.ok(animadas.quemFalouAnima, `quem falou por último não anima: ${JSON.stringify(animadas)}`);

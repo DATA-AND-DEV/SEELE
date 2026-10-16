@@ -12,8 +12,9 @@ promessas que mais importam só se veem desenhadas:
   substituto do WKWebView do Mac e do WebKitGTK do Linux), cada motor contra
   ele mesmo;
 - **o celular cabe no aparelho**: a 390 × 844 e a 360 × 800, nada rola de lado
-  fora de um trilho marcado, todo controle tem 44 de alvo, nada fica na ilha nem
-  na barra de gestos, nenhum texto passa da caixa, todo texto tem contraste, e o
+  fora de um trilho marcado, todo controle tem 44 de alvo, todo campo tem letra
+  de 16, o toque duplo não amplia e a pinça continua, nada fica na ilha nem na
+  barra de gestos, nenhum texto passa da caixa, todo texto tem contraste, e o
   núcleo (MUDO, SURDO, SAIR…) tem a mesma cor com e sem o tema do servidor.
 
 As medidas são as do protótipo (`spikes/casca-do-celular/fotos.py`), portadas
@@ -257,6 +258,10 @@ MEDIR = r"""
       if (y < 0 || y > H) return false; const alvo = document.elementFromPoint(x, y); return alvo && (e === alvo || e.contains(alvo)); };
   const controles = todos.filter((e) => e.matches("button, a[href], input:not([type=hidden]), select, textarea, summary, [role=button]")).filter(tocavel);
   const pequenos = controles.filter((e) => { const r = e.getBoundingClientRect(); return (r.width < 44 || r.height < 44) && !e.matches("input[type=range]"); });
+  // A letra de um campo (regioes.compositor.celular.forma, «campos de 16 px»):
+  // abaixo de 16 o Safari do iOS amplia a página inteira ao focar o campo.
+  const letraMiuda = todos.filter((e) => e.matches("input:not([type=hidden], [type=range], [type=checkbox], [type=radio]), textarea, select")
+      && parseFloat(getComputedStyle(e).fontSize) < 16);
   const temTexto = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
   const naIlha = todos.filter((e) => (controles.includes(e) || temTexto(e)) && e.getBoundingClientRect().top < topo - 1 && e.getBoundingClientRect().bottom > 0 && !rolaY(e))
     .map((e) => nome(e) + " y=" + Math.round(e.getBoundingClientRect().top));
@@ -289,6 +294,13 @@ MEDIR = r"""
     contraste: [...new Set(baixo)].slice(0, 8),
     transborda: transborda.slice(0, 6),
     vaza: vaza.slice(0, 6).map((e) => nome(e) + " r=" + Math.round(e.getBoundingClientRect().right)),
+    letraMiuda: letraMiuda.slice(0, 6).map((e) => nome(e) + " " + getComputedStyle(e).fontSize),
+    // O zoom e os gestos (nucleo-de-confianca.celular[5]): o toque duplo não
+    // amplia (touch-action da raiz), e a pinça continua (o viewport não a trava).
+    gestos: (() => { const toque = getComputedStyle(document.documentElement).touchAction;
+      const vista = document.querySelector("meta[name=viewport]")?.content ?? "";
+      return toque === "manipulation" && !/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(\.0*)?(\s|,|$)/.test(vista)
+        ? null : `touch-action ${toque}, viewport «${vista}»`; })(),
     pequenos: pequenos.slice(0, 8).map((e) => { const r = e.getBoundingClientRect(); return nome(e) + ` ${Math.round(r.width)}x${Math.round(r.height)}`; }),
     naIlha: naIlha.slice(0, 6), naBarra: naBarra.slice(0, 6),
     larguraDoDocumento: document.documentElement.scrollWidth,
@@ -333,6 +345,10 @@ def reprovacoes(m: dict, aparelho: dict, *, so_nucleo: bool) -> list[str]:
             motivos.append(f"texto passa da caixa: {m['transborda']}")
         if m["pequenos"]:
             motivos.append(f"alvos abaixo de 44: {m['pequenos']}")
+        if m["letraMiuda"]:
+            motivos.append(f"campos com a letra abaixo de 16: {m['letraMiuda']}")
+        if m["gestos"]:
+            motivos.append(f"o zoom e os gestos não são os do celular: {m['gestos']}")
         if m["naIlha"]:
             motivos.append(f"na ilha: {m['naIlha']}")
         if m["naBarra"]:
@@ -2660,7 +2676,10 @@ def operador_barra(pg: Page) -> list[str]:
     pg.wait_for_timeout(300)
     visto = pg.evaluate("""() => { const o = document.getElementById('operador-mods'); const g = document.getElementById('secao-mods'); const b = g.getBoundingClientRect();
         const noCentro = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-        return { altura: Math.round(o.getBoundingClientRect().height), rola: o.scrollHeight > o.clientHeight,
+        // Rolar é o scrollTop andar: com overflow-y: visible o scrollHeight
+        // passa do clientHeight igual, e o conteúdo vaza por cima da gestão.
+        o.scrollTop = o.scrollHeight; const rola = o.scrollTop > 0; o.scrollTop = 0;
+        return { altura: Math.round(o.getBoundingClientRect().height), rola,
                  gestao: [Math.round(b.left), Math.round(b.top), Math.round(b.right), Math.round(b.bottom)],
                  inteira: b.top >= 0 && b.left >= 0 && b.bottom <= innerHeight && b.right <= innerWidth,
                  acima: b.bottom <= document.querySelector('.voz-celular').getBoundingClientRect().top,
@@ -2743,6 +2762,35 @@ def regioes_do_celular(pg: Page) -> list[str]:
     regioes = pg.evaluate("cascaDoRetrato().regioes")
     if "status.barra" in regioes or any(r not in regioes for r, *_ in REGIOES_DO_CELULAR):
         falhas.append(f"o retrato diz as regiões {regioes}")
+    return falhas
+
+
+def status_barra_na_larga(pg: Page) -> list[str]:
+    """O `status.barra` na casca larga (`regioes.status.barra.celular.forma`:
+    «No PC no navegador, existe como no desktop»). O celular tira o rodapé da
+    telemetria, e a casca larga, que é o desktop no navegador de um computador,
+    não: uma contribuição nele fica à vista no rodapé, sem `regiao-ausente`, e
+    o retrato lista a região. O par do fim de `regioes-do-celular`."""
+    falhas = []
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("__pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'status.barra', modo: 'adicionar', conteudo: [{ forma: 'texto', chave: 's', dentro: 'SONDA STATUS.BARRA' }] } })")
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    visto = pg.evaluate("""() => {
+        const d = [...document.querySelectorAll('#telemetria-mods *')].find((e) => e.children.length === 0 && e.textContent.trim() === 'SONDA STATUS.BARRA');
+        if (!d) return 'o texto da contribuição não está no rodapé';
+        if (!d.checkVisibility()) return 'escondido';
+        const b = d.getBoundingClientRect();
+        if (b.height === 0 || b.top < 0 || b.bottom > innerHeight) return `fora da janela, em ${Math.round(b.top)}`;
+        const noCentro = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return d.contains(noCentro) || noCentro?.contains(d) ? 'à vista' : 'coberto por ' + (noCentro?.id || noCentro?.className);
+    }""")
+    if visto != "à vista":
+        falhas.append(f"na casca larga, uma contribuição no status.barra não fica no rodapé: {visto}")
+    if pg.evaluate("(window.__entregues ?? []).some((m) => m.motivo === 'regiao-ausente')"):
+        falhas.append("na casca larga, uma contribuição no status.barra recebeu regiao-ausente")
+    if "status.barra" not in pg.evaluate("cascaDoRetrato().regioes"):
+        falhas.append("na casca larga, o retrato não lista o status.barra")
     return falhas
 
 
@@ -3293,6 +3341,8 @@ CASOS: dict[str, Caso] = {
     "superficies-de-mod": Caso(levar=superficies_de_mod, raiz=".cel-topo, #voz, .cel-abas, #avisos-de-mod"),
     # As regiões de MOD que o celular declara, e a que ele não tem.
     "regioes-do-celular": Caso(levar=regioes_do_celular, aparelhos=("390",), medir=False),
+    # E a que ele não tem, na casca larga, onde ela existe como no desktop.
+    "status-barra-na-larga": Caso(levar=status_barra_na_larga, marca="larga", aparelhos=("1440",), medir=False),
     # A região operador.barra no alto de AJUSTES (F3, passo 8b).
     "operador-barra": Caso(levar=operador_barra, medir=False),
     # O tema de região do operador.barra nos contêineres que a casca declara.

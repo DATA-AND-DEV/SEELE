@@ -3001,6 +3001,69 @@ function anotando(...anotadas) {
       }
     }
 
+
+    // ------------- R4e · a saída da instância leva as superfícies, sem pergunta
+    //
+    // `superficies.descarte` (a auditoria do v6, tabela 7): «sai com a
+    // instância; a saída da sessão descarta sem perguntar». R4c descarta à mão;
+    // aqui quem descarta é o `encerrar` da instância, com um diálogo **sujo**
+    // aberto — que, fechado pela pessoa, perguntaria —, por cada um dos dois
+    // registros: o do conjunto (`superficiesDoMod`, de base.js, de verdade) e
+    // o de cada superfície. Tirar qualquer um passava.
+    {
+      const base = ler("base.js");
+      const inicio = base.indexOf("function superficiesDoMod(");
+      const fim = base.indexOf("\n}\n", inicio) + 3;
+      confere("R4e · o recorte", inicio >= 0 && base.slice(inicio, fim).includes("instancia.registrar("),
+        "`superficiesDoMod` mudou de forma e o recorte não a achou");
+      contexto.superficiesDosMods = new Map();
+      contexto.palcosDeSuperficie = () => ({});
+      vm.runInContext(base.slice(inicio, fim), contexto);
+      const cascaReal = S.prototype.montarCasca;
+      S.prototype.montarCasca = function montarCascaDeTeste() {
+        this.raiz = new No("div", "");
+        this.corpo = new No("div", "");
+        // O diálogo sai pela camada dele, e não pela raiz.
+        this.camada = new No("div", "");
+      };
+      const perguntas = [];
+      contexto.abrirConfirmacao = (titulo) => perguntas.push(titulo);
+      const deSaida = () => {
+        const instancia = new I("mod/s", "s", 7, { pedirEncerramento() {}, async encerrou() { return true; } });
+        instancia.estado = contexto.ESTADOS_DE_MOD.ativa;
+        return instancia;
+      };
+      try {
+        // Pelo conjunto, como o roteador cria. A superfície entra nele sem se
+        // registrar na instância: só o registro do conjunto a tira.
+        const doConjunto = deSaida();
+        const conjunto = contexto.superficiesDoMod({ id: "mod/s" }, doConjunto);
+        const noConjunto = new S("mod/s", { instancia: null, falar() {} }, { id: "d", tipo: "dialogo" }, {});
+        noConjunto.marcarSuja(true);
+        conjunto.porChave.set("d", noConjunto);
+        await doConjunto.encerrar();
+        confere("R4e", noConjunto.solta && conjunto.porChave.size === 0 && !contexto.superficiesDosMods.has(doConjunto),
+          `a saída da instância não levou o conjunto: solta ${noConjunto.solta}, `
+            + `${conjunto.porChave.size} de pé, no mapa ${contexto.superficiesDosMods.has(doConjunto)}`);
+        // Pela própria superfície, registrada na instância, sem conjunto.
+        const daSuperficie = deSaida();
+        const sozinha = new S("mod/s", { instancia: daSuperficie, falar() {} }, { id: "e", tipo: "dialogo" }, {});
+        sozinha.marcarSuja(true);
+        await daSuperficie.encerrar();
+        confere("R4e", sozinha.solta, "a saída da instância não levou a superfície registrada nela");
+        confere("R4e", perguntas.length === 0,
+          `a saída da instância perguntou antes de descartar: ${JSON.stringify(perguntas)}`);
+        confere("R4e", doConjunto.recursos.length === 0 && daSuperficie.recursos.length === 0
+          && doConjunto.naoSairam.length === 0 && daSuperficie.naoSairam.length === 0,
+        "a saída deixou recurso de pé, ou um que não saiu");
+      } finally {
+        S.prototype.montarCasca = cascaReal;
+        delete contexto.abrirConfirmacao;
+        delete contexto.superficiesDosMods;
+        delete contexto.palcosDeSuperficie;
+      }
+    }
+
     terminar();
   })().catch((erro) => {
     falhas.push(`R2: o roteador lançou — ${erro?.stack || erro}`);
