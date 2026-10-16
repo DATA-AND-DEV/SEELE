@@ -1891,8 +1891,9 @@ function seloDoEnvio(mensagem) {
  * (`sincronizarRetratos`), sem nada mudar na conversa: o foco no link ou no
  * REMOVER caía no `<body>`, a seleção se desfazia, e o leitor de tela perdia o
  * nó (433 de 434 ids AX trocados, medido em 16/10). Agora é o caminho da lista
- * de pessoas (`reconciliarALista`): cada mensagem tem a chave do id que o
- * servidor deu — ou, numa pendente, a da máquina —, e cada divisor a do dia; a
+ * de pessoas (`reconciliarALista`): cada mensagem tem a chave do envio
+ * quando a traz — as próprias, a mesma na pendente e na gravada (lote ECO) —,
+ * e senão a do id que o servidor deu; e cada divisor a do dia; a
  * mensagem que chega entra, a que sai sai, e as outras ficam com o mesmo nó,
  * só com o que mudou nelas. O REMOVER e o link continuam agindo com o dado de
  * agora: os ouvintes são delegados na lista e leem o `data-*` que o
@@ -1959,11 +1960,18 @@ function desenharMensagens() {
       Boolean(mensagem.at_seconds) &&
       mensagem.at_seconds - anterior.at_seconds <= JUNTA_ATE_SEGUNDOS;
     const item = itemDeMensagem(mensagem, indice, segue);
-    // O id do servidor, ou — numa pendente, que tem id zero — a chave desta
-    // máquina. A pendente que é gravada troca de chave, e só ela ganha nó novo.
-    const chave = mensagem.id
-      ? `mensagem:${mensagem.id}`
-      : mensagem.client_message_id ? `pendente:${mensagem.client_message_id}` : null;
+    // A chave do envio, quando há uma, e o id do servidor quando não há (lote
+    // ECO). A ponte só manda a `client_message_id` nas próprias: na pendente,
+    // que tem id zero, na confirmada que a substitui — a mesma, na mesma
+    // revisão em que a pendente sai — e na relida do histórico, com a que o
+    // servidor gravou. É a única coisa que a pendente e a gravada dividem, e
+    // por isso vem antes do id: com o id na frente, a gravada caía noutra
+    // chave, e quem a escreveu perdia o link, o REMOVER, a seleção e o nó do
+    // leitor de tela. O resto é no nó: a reconciliação dos filhos tira o selo
+    // do envio, e o `vestirComo` reescreve o id e os `data-*`.
+    const chave = mensagem.client_message_id
+      ? `envio:${mensagem.client_message_id}`
+      : mensagem.id ? `mensagem:${mensagem.id}` : null;
     if (chave !== null) chaveNaLista.set(item, chave);
     itens.push(item);
     anterior = mensagem;
@@ -2469,8 +2477,25 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
   }
   if (!emOrdem) {
     const posicao = new Map(Array.from(alvo.childNodes, (filho, i) => [filho, i]));
-    const ficam = new Set(maiorSequenciaCrescente(desejados.map((no) => posicao.get(no) ?? -1))
-      .map((i) => desejados[i]));
+    const valores = desejados.map((no) => posicao.get(no) ?? -1);
+    // **Quem tem o foco fica, e os outros se movem em volta dele** (lote ECO,
+    // rodada 1, M1). Mover é tirar e pôr, e o nó tirado perde o foco e a
+    // seleção, mesmo voltando. Numa troca, qualquer um dos dois pode ser o que
+    // se move, e o desempate da subsequência escolhia sem olhar: a própria
+    // mensagem gravada com um id de antes ia para antes da outra, e caíam o
+    // foco no link e a seleção no corpo. Os nós fora de ordem em relação ao
+    // que tem o foco saem da conta; o que sobra é compatível com ele, e a maior
+    // sequência do que sobra passa por ele. Custa mover mais quando é ele
+    // quem mudou de lugar. O que nenhuma ordem evita é o nó que muda de pai
+    // (a pessoa que entra numa sala): esse vem de fora, e é posto.
+    const preferido = indiceDoQueGuardaOFoco(desejados, valores);
+    if (preferido >= 0) {
+      const ali = valores[preferido];
+      for (let i = 0; i < valores.length; i += 1) {
+        if (i < preferido ? valores[i] > ali : valores[i] < ali) valores[i] = -1;
+      }
+    }
+    const ficam = new Set(maiorSequenciaCrescente(valores).map((i) => desejados[i]));
     for (let i = desejados.length - 1; i >= 0; i -= 1) {
       if (!ficam.has(desejados[i])) alvo.insertBefore(desejados[i], desejados[i + 1] ?? null);
     }
@@ -2486,6 +2511,21 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
     else if (no.localName === "details") abertoPedido.set(no, no.open);
     if (novo.nodeType === Node.ELEMENT_NODE) reconciliarOsFilhos(no, Array.from(novo.childNodes), contexto);
   }
+}
+
+/**
+ * O índice, em `desejados`, do nó que já está ali (`valores[i] >= 0`) e tem
+ * dentro dele o foco do teclado; sem o foco em nenhum deles, o que tem o
+ * começo da seleção. `-1` quando não há. Ver `reconciliarOsFilhos`.
+ */
+function indiceDoQueGuardaOFoco(desejados, valores) {
+  const foco = document.activeElement;
+  for (const dentro of [foco === document.body ? null : foco, document.getSelection()?.anchorNode]) {
+    if (!dentro) continue;
+    const i = desejados.findIndex((no, j) => valores[j] >= 0 && no.contains(dentro));
+    if (i >= 0) return i;
+  }
+  return -1;
 }
 
 /**
