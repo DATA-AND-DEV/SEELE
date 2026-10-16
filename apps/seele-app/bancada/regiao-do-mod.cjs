@@ -146,6 +146,187 @@ process.on("beforeExit", () => {
     `o gradiente de uma parada só contou ${curto.recusados} e saiu ${JSON.stringify(curto.pares)}`);
 }
 
+// **O que o `v6.json` promete dos estilos, conferido contra ele** (a auditoria
+// do `v6.json`, tabela 8; D-api-8, passo 7). As categorias, os estados, as
+// animações e o que fica de fora são listas do contrato; cada uma tem aqui uma
+// tabela própria do que monta, e o espelho nos dois sentidos: uma categoria,
+// um estado ou uma animação que entre no `v6.json` sem entrar aqui reprova, e
+// uma que saia daqui também.
+{
+  const ctx = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(raiz, "ui/mods-estilos.js"), "utf8"), ctx);
+  const v6 = JSON.parse(fs.readFileSync(path.join(raiz, "../../api/v6.json"), "utf8")).estilos;
+  const caso = "estilos do v6";
+  // As tabelas são `const` de topo, que não viram propriedade do contexto.
+  const ESTADOS_DA_CLASSE = vm.runInContext("ESTADOS_DA_CLASSE", ctx);
+  const ANIMACOES_DO_MOD = vm.runInContext("ANIMACOES_DO_MOD", ctx);
+  const montar = (estilo) => {
+    const conta = { recusados: 0 };
+    return { pares: Object.fromEntries(ctx.estiloDeMod(estilo, conta)), recusados: conta.recusados };
+  };
+  const igualNosDoisSentidos = (nome, doContrato, daqui) => {
+    const a = [...doContrato].sort().join("|");
+    const b = [...daqui].sort().join("|");
+    confere(caso, a === b, `${nome}: o v6.json diz «${a}», e esta prova (ou o produto) diz «${b}»`);
+  };
+
+  // **Cada categoria monta o que ela nomeia**, de partes conferidas.
+  const O_QUE_CADA_CATEGORIA_MONTA = {
+    "cor e transparência": [
+      [{ cor: "#112233" }, { color: "#112233" }],
+      [{ opacidade: 0.5 }, { opacity: "0.5" }],
+      [{ opacidade: 3 }, { opacity: "1" }],
+    ],
+    "preenchimento e gradiente": [
+      [{ fundo: "#000000" }, { "background-color": "#000000" }],
+      [{ gradiente: { angulo: 90, paradas: [{ cor: "#000000", em: 0 }, { cor: "#ffffff", em: 100 }] } },
+        { "background-image": "linear-gradient(90deg, #000000 0%, #ffffff 100%)" }],
+      [{ gradiente: { tipo: "radial", paradas: [{ cor: "#000000" }, { cor: "#ffffff" }] } },
+        { "background-image": "radial-gradient(circle, #000000, #ffffff)" }],
+    ],
+    "borda e raio": [
+      [{ borda: { largura: 2, estilo: "tracejada", cor: "#ff0000" } }, { border: "2px dashed #ff0000" }],
+      [{ borda: "nenhuma" }, { border: "none" }],
+      [{ raio: 8 }, { "border-radius": "8px" }],
+    ],
+    sombra: [
+      [{ sombra: { x: 1, y: 2, desfoque: 4, espalha: 1, cor: "#00000080", dentro: true } },
+        { "box-shadow": "inset 1px 2px 4px 1px #00000080" }],
+      [{ sombra: { desfoque: 4000 } }, { "box-shadow": "0px 0px 96px 0px #00000066" }],
+    ],
+    tipografia: [
+      [{ familia: "mono" }, { "font-family": "var(--seele-mono)" }],
+      [{ peso: "forte" }, { "font-weight": "700" }],
+      [{ corpo: 4 }, { "font-size": "9px" }],
+      [{ entrelinha: 1.4 }, { "line-height": "1.4" }],
+      [{ espacamento: 1 }, { "letter-spacing": "1px" }],
+      [{ alinhamento: "centro" }, { "text-align": "center" }],
+      [{ transformar: "maiuscula" }, { "text-transform": "uppercase" }],
+    ],
+    layout: [
+      [{ direcao: "linha" }, { display: "flex", "flex-direction": "row" }],
+      [{ alinhar: "centro", distribuir: "entre", quebra: "sim" },
+        { "align-items": "center", "justify-content": "space-between", "flex-wrap": "wrap" }],
+      [{ base: 0, crescer: 1 }, { "flex-basis": "0px", "flex-grow": "1" }],
+      [{ largura: "total", alturaMaxima: { de: 50 } }, { width: "100%", "max-height": "50%" }],
+      [{ colunas: 3 }, { "grid-template-columns": "repeat(3, minmax(0, 1fr))" }],
+      [{ posicao: "presa" }, { position: "sticky" }],
+    ],
+    "transformação": [
+      [{ girar: 45 }, { rotate: "45deg" }],
+      [{ escalar: 400 }, { scale: "4" }],
+      [{ mover: { x: 3, y: 4 } }, { translate: "3px 4px" }],
+    ],
+    recorte: [
+      [{ recortar: "cortar" }, { overflow: "hidden" }],
+      [{ recortar: "rolar" }, { overflow: "auto" }],
+    ],
+    "transição e animação": [
+      [{ transicao: { duracao: 200, suavizacao: "linear" } }, { transition: "all 200ms linear" }],
+      [{ animacao: "pulso" }, { animation: "seele-mod-pulso 2400ms ease-in-out infinite" }],
+    ],
+  };
+  igualNosDoisSentidos("as categorias", v6.categorias, Object.keys(O_QUE_CADA_CATEGORIA_MONTA));
+  for (const [categoria, exemplos] of Object.entries(O_QUE_CADA_CATEGORIA_MONTA)) {
+    for (const [estilo, esperado] of exemplos) {
+      const r = montar(estilo);
+      confere(
+        caso,
+        r.recusados === 0 && JSON.stringify(r.pares) === JSON.stringify(esperado),
+        `«${categoria}»: ${JSON.stringify(estilo)} montou ${JSON.stringify(r.pares)} com ${r.recusados} recusa(s), `
+          + `e o certo é ${JSON.stringify(esperado)}`,
+      );
+    }
+  }
+
+  // **Nunca texto de CSS** (`o-que-e`): a propriedade composta escrita como
+  // texto, a cor por nome ou por função e a medida com unidade são recusadas e
+  // contadas, e não escritas.
+  for (const estilo of [
+    { borda: "1px solid red" }, { sombra: "0 0 4000px red" }, { gradiente: "linear-gradient(red, blue)" },
+    { cor: "red" }, { fundo: "rgb(0, 0, 0)" }, { largura: "50%" }, { corDeFundo: "#000000" },
+  ]) {
+    const r = montar(estilo);
+    confere(caso, r.recusados === 1 && Object.keys(r.pares).length === 0,
+      `${JSON.stringify(estilo)} é texto de CSS ou um nome que não existe, e montou ${JSON.stringify(r.pares)} com `
+        + `${r.recusados} recusa(s)`);
+  }
+
+  // **Cada estado vira o seletor dele, preso ao escopo da superfície.**
+  const SELETOR_DE_CADA_ESTADO = {
+    base: ['[data-escopo-de-mod="e"] .mod-x'],
+    sobre: ['[data-escopo-de-mod="e"] .mod-x:hover'],
+    foco: ['[data-escopo-de-mod="e"] .mod-x:focus-visible'],
+    ativo: ['[data-escopo-de-mod="e"] .mod-x:active'],
+    desligado: ['[data-escopo-de-mod="e"] .mod-x:disabled', '[data-escopo-de-mod="e"] .mod-x[aria-disabled="true"]'],
+    invalido: ['[data-escopo-de-mod="e"] .mod-x[data-invalido="sim"]'],
+    escolhido: ['[data-escopo-de-mod="e"] .mod-x[data-escolhido="sim"]'],
+  };
+  igualNosDoisSentidos("os estados", v6.estados, Object.keys(SELETOR_DE_CADA_ESTADO));
+  igualNosDoisSentidos("os estados, no produto", v6.estados, Object.keys(ESTADOS_DA_CLASSE));
+  for (const [estado, seletores] of Object.entries(SELETOR_DE_CADA_ESTADO)) {
+    const folha = ctx.folhaDeClassesDeMod("e", { x: { [estado]: { cor: "#123456" } } });
+    confere(caso, folha === `${seletores.join(",")}{color:#123456}`,
+      `o estado «${estado}» virou ${JSON.stringify(folha)}, e o certo é ${JSON.stringify(`${seletores.join(",")}{color:#123456}`)}`);
+  }
+
+  // **Cada animação é um preset do produto**, com os quadros na folha dele.
+  const folhaDasSuperficies = fs.readFileSync(path.join(raiz, "ui/mods-superficies.css"), "utf8");
+  igualNosDoisSentidos("as animações", v6.animacoes, Object.keys(ANIMACOES_DO_MOD));
+  for (const nome of v6.animacoes) {
+    const r = montar({ animacao: nome });
+    const quadros = ANIMACOES_DO_MOD[nome];
+    if (nome === "nenhuma") {
+      confere(caso, r.recusados === 0 && r.pares.animation === "none",
+        `«nenhuma» montou ${JSON.stringify(r.pares)}, e o certo é \`animation: none\``);
+      continue;
+    }
+    confere(caso, r.recusados === 0 && r.pares.animation === `${quadros} 2400ms ease-in-out infinite`,
+      `«${nome}» montou ${JSON.stringify(r.pares)}`);
+    confere(caso, Boolean(quadros) && folhaDasSuperficies.includes(`@keyframes ${quadros} {`),
+      `«${nome}» aponta para \`${quadros}\`, e \`mods-superficies.css\` não tem os quadros dele: a animação não anda`);
+  }
+
+  // **O que fica de fora** (`fora`), cada item medido: nada disso vira regra.
+  const naoEntra = (rotulo, condicao, visto) => confere(caso, condicao, `«${rotulo}» entrou: ${visto}`);
+  {
+    const r = montar({ fundo: "url(x.png)" });
+    const g = montar({ gradiente: { paradas: [{ cor: "url(x.png)" }, { cor: "#ffffff" }] } });
+    naoEntra("url(...)", r.recusados === 1 && !r.pares["background-color"] && !g.pares["background-image"],
+      JSON.stringify([r, g]));
+  }
+  {
+    const folha = ctx.folhaDeClassesDeMod("e", { "x}@import url(y);{": { base: { cor: "#123456" } } });
+    naoEntra("@import", !folha.includes("@import") && !folha.includes("url("), JSON.stringify(folha));
+  }
+  {
+    const folha = ctx.folhaDeClassesDeMod("e", {
+      "roster-linha, body": { base: { cor: "#123456" } },
+      fora: { base: { cor: "#123456" }, consultas: [{ ateLargura: 600, estilo: { cor: "#654321" } }] },
+    });
+    const seletores = folha.split("\n").flatMap((regra) => regra.replace(/^@container [^{]*\{/, "").split("{")[0].split(","));
+    naoEntra("seletor que alcance fora da superfície",
+      seletores.length >= 3 && seletores.every((s) => s.startsWith('[data-escopo-de-mod="e"] .mod-')),
+      JSON.stringify(folha));
+  }
+  {
+    const r = montar({ animacao: { nome: "minha", quadros: "@keyframes minha { from { opacity: 0 } }" } });
+    const folha = ctx.folhaDeClassesDeMod("e", { x: { base: { animacao: { nome: "minha" } } } });
+    naoEntra("keyframes declarados pelo MOD", r.recusados === 1 && !r.pares.animation && !folha.includes("@keyframes"),
+      JSON.stringify([r, folha]));
+  }
+  {
+    const r = montar({ familia: "Comic Sans MS" });
+    naoEntra("família de tipo livre", r.recusados === 1 && !r.pares["font-family"], JSON.stringify(r));
+  }
+  // «HTML ativo» não é estilo: a região monta por `createElement` e
+  // `textContent`, medido nas formas (`cadaFormaDoV6MontaOQuePromete`).
+  igualNosDoisSentidos("o que fica de fora", v6.fora, [
+    "url(...)", "@import", "HTML ativo", "seletor que alcance fora da superfície",
+    "keyframes declarados pelo MOD", "família de tipo livre",
+  ]);
+}
+
 // --------------------------------------------------------------- o DOM falso
 
 const TEXTO = 3;

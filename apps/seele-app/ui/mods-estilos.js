@@ -110,7 +110,8 @@ const PALAVRAS_DO_ESTILO = Object.freeze({
  * pediu de volta — o PERFIS antigo tinha aurora, brilho e pulso — e são
  * compostas de propriedades que este arquivo já valida.
  *
- * Todas param sob `prefers-reduced-motion`: ver `mods-estilos.css`.
+ * Todas param sob `prefers-reduced-motion`, e os quadros moram em
+ * `mods-superficies.css`.
  */
 const ANIMACOES_DO_MOD = Object.freeze({
   nenhuma: "",
