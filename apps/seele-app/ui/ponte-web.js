@@ -199,7 +199,7 @@ const COMANDOS_DA_PONTE = new Set([
   "aceites_de_mods", "ajustar_sensibilidade_da_voz", "ajustar_volume_da_tela",
   "analisar_convite", "apelido_local", "apis_de_mod_aceitas", "assistir",
   "atualizacao_que_nao_pegou", "busca_andar", "busca_limpar", "buscar",
-  "calar_a_tela", "codigo_do_mod", "conferir_esta_versao", "conhecidos",
+  "calar_a_tela", "cancelar_ligacao", "codigo_do_mod", "conferir_esta_versao", "conhecidos",
   "connect", "consentir_previa", "controles_da_voz", "descartar_mensagem",
   "destino_do_anexo", "disconnect", "dispensar_aviso",
   "dominios_de_gif", "enter_voice_room", "enviar_anexo", "enviar_imagem_mod",
@@ -297,9 +297,10 @@ const AINDA_A_FAZER = new Map([
   ["ajustar_limites_da_tela", TAREFA_310],
   ["ajustar_volume_da_tela", TAREFA_39],
   ["analisar_convite", TAREFA_34],
-  // O texto colado em CONECTAR (tarefa 30 da F7): a leitura é do núcleo, e o
-  // navegador não liga pelo código na 0.16.
+  // O texto colado em CONECTAR e o CANCELAR de quem liga (tarefas 30 e 28 da
+  // F7): o navegador não liga pelo código na 0.16.
   ["ler_entrada", TAREFA_34],
+  ["cancelar_ligacao", TAREFA_34],
   ["apagar_linha", TAREFA_26],
   ["apagar_voice_room", TAREFA_26],
   ["aplicar_icone_do_server", TAREFA_26],

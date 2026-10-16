@@ -197,10 +197,11 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
     return;
   }
   if (lida?.Codigo) {
-    // Ligar: o nome da caixa é o código, que é o que a pessoa colou.
+    // Ligar: o nome é o que a agenda dá a quem tem esse código, e sem ele o
+    // código, que é o que a pessoa colou.
     consumirOCampo();
     fecharServidores();
-    irParaOServidor(lida.Codigo.alvo, null, null, lida.Codigo.codigo, true);
+    irParaOServidor(lida.Codigo.alvo, null, null, lida.Codigo.nome ?? lida.Codigo.codigo, true);
     return;
   }
 
@@ -282,7 +283,9 @@ function irParaOServidor(alvo, apelido, token, nome, ligar = false) {
   // Esta leitura morava aqui, e era a **única** porta que a fazia: quem
   // hospedava não passava por ela e conectava sem nome. Ela desceu para o
   // `conectar`, que é por onde toda conexão passa.
-  conectar(alvo, apelido || undefined, token).catch((falha) =>
+  // Numa ligação, o nome de quem é chamado vai junto: é dele que saem o
+  // CHAMANDO e as frases de quem liga (tarefa 28 da F7).
+  conectar(alvo, apelido || undefined, token, ligar ? { nome } : null).catch((falha) =>
     console.warn("conectar:", falha),
   );
 }

@@ -38,10 +38,17 @@ exigir(frase.includes("continua no ar"),
   `ligar de dentro do próprio servidor não diz que ele continua no ar: «${frase}»`);
 exigir(!chamou("connect") && !chamou("disconnect"), "ligar de dentro da sessão não esperou o sim");
 
-// 2. No sim, liga.
+// 2. No sim, liga, e a ligação leva o nome até a frase do desfecho (tarefa 28).
 delete window.__SEELE_ARGS.connect;
+SEELE_RESPOSTAS.connect = { __recusa: { error: { Refused: { reason: "NinguemAtendeu" } }, trail: [] } };
 document.getElementById("moderar-confirmar").click();
 await ate(() => window.__SEELE_ARGS.connect?.server === ALVO, 1500);
 relatar(`no sim, ligou para: ${window.__SEELE_ARGS.connect?.server}`);
 exigir(window.__SEELE_ARGS.connect?.server === ALVO,
   `o sim da caixa não ligou para o alvo: ${window.__SEELE_ARGS.connect?.server}`);
+const erroNaEntrada = () =>
+  visivel("boot-erro") === "VISIVEL" ? document.getElementById("boot-erro").textContent : "";
+await ate(() => erroNaEntrada() !== "", 1000);
+relatar(`desfecho: «${erroNaEntrada()}»`);
+exigir(erroNaEntrada() === `${CODIGO} NÃO ATENDEU`,
+  `a ligação de dentro da sessão perdeu o nome de quem foi chamado: «${erroNaEntrada()}»`);

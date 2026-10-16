@@ -4481,7 +4481,7 @@ async function pedirTrocaDeServidor(alvo, apelido, nome, ligar = false) {
       "LIGAR",
       consequenciaDeLigar(daqui, chamado, noMeuServidor),
       `LIGAR PARA ${chamado}`,
-      () => trocarDeServidor(alvo, apelido),
+      () => trocarDeServidor(alvo, apelido, { nome: chamado }),
     );
     return;
   }
@@ -4523,7 +4523,7 @@ async function pedirAEntrada() {
  * O apelido é o do histórico, e não o desta sessão: é com aquele nome que esta
  * pessoa entrou naquele servidor da última vez.
  */
-async function trocarDeServidor(alvo, apelido) {
+async function trocarDeServidor(alvo, apelido, ligacao = null) {
   await ejetar();
   // **O convite do servidor anterior fica para trás**, e sem esta linha a troca
   // simplesmente não funcionava.
@@ -4537,8 +4537,9 @@ async function trocarDeServidor(alvo, apelido) {
   // O sintoma é cruel de depurar porque a recusa fala da coisa errada:
   // «credencial recusada» num servidor que não pediu credencial nenhuma.
   // Os valores vão por argumento desde a 0.9.0: a entrada não tem mais campos
-  // para carregá-los. Ver `conectar` em `tela-boot.js`.
-  await conectar(alvo, apelido);
+  // para carregá-los. Ver `conectar` em `tela-boot.js`. Numa ligação, o nome de
+  // quem é chamado vai junto (tarefa 28 da F7).
+  await conectar(alvo, apelido, undefined, ligacao);
 }
 
 /**

@@ -628,9 +628,9 @@ fn every_command_the_frontend_calls_is_registered() {
 // `ler_entrada` (tarefa 30 da F7) esteve aqui entre o Rust e a tela, e saiu
 // quando o diálogo de servidores passou a mandar todo texto a ele.
 //
-// `cancelar_ligacao` (tarefa 28 da F7) está aqui entre o Rust e a tela: o
-// CANCELAR do CHAMANDO passa a chamá-lo no commit da casca, e sai daqui junto.
-const AGUARDANDO_TELA: &[&str] = &["cancelar_ligacao"];
+// `cancelar_ligacao` (tarefa 28 da F7) também, e saiu quando o CANCELAR do
+// CHAMANDO passou a chamá-lo. A lista voltou a ser vazia.
+const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -10809,7 +10809,7 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
-        ("tela-boot.js", "async function conectar(alvo, apelido, credencial) {"),
+        ("tela-boot.js", "async function conectar(alvo, apelido, credencial, ligacao = null) {"),
         ("tela-boot.js", "joinSecret: credencial ?? null,"),
         // O apelido tomado (lote W): o lugar, a leitura presa ao alvo e o
         // esquecimento no começo de toda tentativa, e a guarda na recusa.
@@ -11049,9 +11049,15 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     }
 
     // 3. Só quatro chamadas de `conectar` passam credencial por argumento (a do
-    //    apelido tomado, `conectar` anexa sozinho: ver a parte 6).
+    //    apelido tomado, `conectar` anexa sozinho: ver a parte 6). A credencial é
+    //    o terceiro argumento; o quarto é a ligação (tarefa 28 da F7), que leva
+    //    só o nome de quem é chamado, e uma chamada com `undefined` ou `null`
+    //    escrito no terceiro não leva credencial nenhuma.
     const LEVAM: &[(&str, &str)] = &[
-        ("camada-servidores.js", "alvo, apelido || undefined, token"),
+        (
+            "camada-servidores.js",
+            "alvo, apelido || undefined, token, ligar ? { nome } : null",
+        ),
         ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
         ("camada-mods.js", "alvo, null, credencial"),
         // A entrada pelo navegador (3.4): o link da página, com o token da
@@ -11073,7 +11079,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 continue;
             }
             let mut fundo = 1_i32;
-            let mut virgulas = 0;
+            let mut virgulas: Vec<usize> = Vec::new();
             let mut fim = depois.len();
             for (i, c) in depois.char_indices() {
                 match c {
@@ -11085,11 +11091,17 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                             break;
                         }
                     }
-                    ',' if fundo == 1 => virgulas += 1,
+                    ',' if fundo == 1 => virgulas.push(i),
                     _ => {}
                 }
             }
-            if virgulas >= 2 {
+            // O terceiro argumento, entre a segunda vírgula e a terceira (ou o
+            // fim): `undefined` e `null` escritos ali não são credencial.
+            let terceiro = virgulas.get(1).map(|&depois_da_segunda| {
+                let ate = virgulas.get(2).copied().unwrap_or(fim);
+                depois[depois_da_segunda + 1..ate].trim()
+            });
+            if terceiro.is_some_and(|terceiro| !matches!(terceiro, "undefined" | "null")) {
                 levam.push((nome.clone(), depois[..fim].trim().to_owned()));
             }
         }
@@ -20033,6 +20045,93 @@ fn o_dialogo_de_servidores_manda_todo_texto_ao_ler_entrada() {
             "`EntradaColada::{unitaria}` não tem frase no `ENTRADA_COLADA`: {ditas:?}"
         );
     }
+}
+
+/// O nome de uma variante como o serde a escreve: a palavra de uma unitária, ou
+/// a chave única de uma com campos.
+fn nome_no_fio(valor: &impl serde::Serialize) -> String {
+    match serde_json::to_value(valor) {
+        Ok(serde_json::Value::String(nome)) => nome,
+        Ok(serde_json::Value::Object(campos)) => campos.keys().next().cloned().unwrap_or_default(),
+        outro => panic!("uma variante que não se escreve como nome: {outro:?}"),
+    }
+}
+
+/// **Quem liga lê o desfecho com o nome de quem chamou, e tem o CANCELAR**
+/// (tarefa 28 da F7; spec de 23/09, «Erros e frases», quem liga).
+///
+/// As frases de quem liga moram em `fraseDaLigacao`, e cada desfecho da tabela
+/// da spec tem a sua, lida pelo nome que a FFI escreve: uma razão renomeada no
+/// Rust reprova aqui, em vez de cair calada na frase sem nome. O comportamento
+/// é provado num navegador, em `tools/roteiros/chamar.js`.
+#[test]
+fn quem_liga_le_o_desfecho_com_o_nome_e_tem_o_cancelar() {
+    let frases = without_comments(&read("ui/frases.js"));
+    let ligacao = js_function(&frases, "function fraseDaLigacao(");
+    for razao in [
+        seele_ffi::EndReason::NinguemAtendeu,
+        seele_ffi::EndReason::ChamadaRecusada,
+        seele_ffi::EndReason::ChamadaEncerrada,
+        seele_ffi::EndReason::RateLimited,
+        seele_ffi::EndReason::ServerFull,
+    ] {
+        let nome = nome_no_fio(&razao);
+        assert!(
+            ligacao.contains(&format!("razao === \"{nome}\"")),
+            "quem liga não tem frase para `{nome}`, e lê a recusa sem o nome de quem chamou"
+        );
+    }
+    for motivo in [
+        seele_ffi::FalhaAoLocalizar::NinguemMora,
+        seele_ffi::FalhaAoLocalizar::PontoMudo,
+    ] {
+        let nome = nome_no_fio(&motivo);
+        assert!(
+            ligacao.contains(&format!("localizar === \"{nome}\"")),
+            "quem liga não tem frase para o ponto que respondeu `{nome}`"
+        );
+    }
+    for erro in [
+        seele_ffi::ConnectionError::CodigoNaoBate {
+            esperado: String::new(),
+            veio: None,
+        },
+        seele_ffi::ConnectionError::SePassouPorCodigo {
+            codigo: String::new(),
+        },
+        seele_ffi::ConnectionError::OutraLinha {
+            numero: 0,
+            servidor: None,
+            mais_nova: false,
+        },
+    ] {
+        let nome = nome_no_fio(&erro);
+        assert!(
+            ligacao.contains(&format!("erro?.{nome}")),
+            "quem liga não tem frase para `{nome}`"
+        );
+    }
+    assert!(
+        ligacao.matches("${quem}").count() >= 8,
+        "as frases de quem liga deixaram de dizer o nome de quem foi chamado:\n{ligacao}"
+    );
+
+    let boot = without_comments(&read("ui/tela-boot.js"));
+    assert!(
+        boot.contains("invoke(\"cancelar_ligacao\")"),
+        "o CANCELAR de quem liga não chama `cancelar_ligacao`"
+    );
+    let conectar = js_function(&boot, "async function conectar(");
+    assert!(
+        conectar.contains("fraseDaLigacao(motivo, ligacao.nome, falha?.trail)"),
+        "a falha de uma ligação não passa pela frase de quem liga:\n{conectar}"
+    );
+    assert!(
+        boot.contains(
+            "fraseDaEtapaDaLigacao(payload.ConnectStageChanged.stage, ligacaoEmCurso.nome)"
+        ),
+        "o toque de uma ligação não diz quem está sendo chamado"
+    );
 }
 
 /// **Sair não derruba o servidor de ninguém** (tarefa 19 da F7, Plano 2).

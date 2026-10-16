@@ -422,8 +422,8 @@ const ETAPAS = {
   Tentando: "TENTANDO UM ENDEREÇO DO CONVITE",
   // Diz o que abriu e não o que vem: quem lê isto ainda pode não entrar.
   CaminhoAberto: "O CAMINHO ATÉ AQUI ABRIU",
-  // Provisória: a frase de quem liga é da tarefa 7f (CHAMANDO ALICE… e
-  // CANCELAR), que troca esta. Diz que chama, e não que alguém atendeu.
+  // Sem nome: numa ligação da tela, quem escreve é `fraseDaEtapaDaLigacao`,
+  // com o nome de quem é chamado. Diz que chama, e não que alguém atendeu.
   Tocando: "CHAMANDO",
   Dentro: "DENTRO",
   // Neutra de propósito. `Desistiu` carrega o `ConnectError` inteiro — o núcleo
@@ -600,6 +600,63 @@ const NOMES_RECUSADOS = {
   ComCaractereQueNaoServe:
     "ESTE NOME TEM CARACTERE QUE ENDEREÇO NÃO TEM.\nValem letras, números, hífen e ponto — e os dois-pontos da porta.",
 };
+
+/**
+ * A etapa de uma ligação, com o nome de quem é chamado (tarefa 28 da F7; spec de
+ * 23/09, «Erros e frases»), ou `null` para a frase de sempre.
+ */
+function fraseDaEtapaDaLigacao(etapa, nome) {
+  if (etapa && typeof etapa === "object" && etapa.Tocando) {
+    return `CHAMANDO ${nomeNaFrase(nome)}…`;
+  }
+  return null;
+}
+
+/** O nome de quem é chamado, como as frases o escrevem. */
+function nomeNaFrase(nome) {
+  return String(nome ?? "").toLocaleUpperCase("pt-BR");
+}
+
+/**
+ * **A frase de quem liga** (tarefa 28 da F7; spec de 23/09, «Erros e frases»,
+ * quem liga), com o nome de quem foi chamado, ou `null` quando o desfecho não é
+ * de uma ligação e a frase de sempre (`fraseDeErro`) serve.
+ *
+ * A trilha decide uma linha só: «está no ar, mas o caminho não abriu» é quando o
+ * ponto de encontro deu onde a sala mora (houve tentativa) e nenhum candidato
+ * respondeu.
+ */
+function fraseDaLigacao(erro, nome, trilha) {
+  const quem = nomeNaFrase(nome);
+  const razao = erro?.Refused?.reason;
+  if (razao === "NinguemAtendeu") return `${quem} NÃO ATENDEU`;
+  if (razao === "ChamadaRecusada") return `${quem} RECUSOU`;
+  if (razao === "ChamadaEncerrada") return `${quem} ENCERROU A LIGAÇÃO`;
+  if (razao === "RateLimited") return `ESPERE UM POUCO PARA LIGAR DE NOVO PARA ${quem}`;
+  if (razao === "ServerFull") return `A LIGAÇÃO DE ${quem} ESTÁ CHEIA (6 PESSOAS)`;
+  const localizar = erro?.NaoLocalizou?.motivo;
+  if (localizar === "PontoMudo" || localizar === "PontoNaoResolve") {
+    return (
+      "O PONTO DE ENCONTRO NÃO RESPONDEU: sem ele, código não funciona; " +
+      "link com endereço continua funcionando"
+    );
+  }
+  if (localizar === "NinguemMora") {
+    return (
+      `${quem} NÃO ESTÁ DISPONÍVEL: o SEELE do outro lado está fechado ` +
+      "ou não está recebendo ligações"
+    );
+  }
+  if (erro?.CodigoNaoBate) return "QUEM ATENDEU NÃO É O DONO DESTE CÓDIGO. Nada foi enviado.";
+  if (erro?.SePassouPorCodigo) return `ALGUÉM TENTOU SE PASSAR POR ${quem}`;
+  if (erro?.OutraLinha) return `${quem} USA UMA VERSÃO QUE NÃO CONVERSA COM A SUA`;
+  const semCaminho = erro === "Unreachable" || erro === "SemResposta" || erro === "HandshakeTimeout";
+  const tentou =
+    Array.isArray(trilha) &&
+    trilha.some((passo) => passo?.etapa && typeof passo.etapa === "object" && passo.etapa.Tentando);
+  if (semCaminho && tentou) return `${quem} ESTÁ NO AR, MAS O CAMINHO NÃO ABRIU`;
+  return null;
+}
 
 function fraseDeErro(erro, apelido, deOnde) {
   if (typeof erro === "string") return FRASES[erro] ?? erro;
