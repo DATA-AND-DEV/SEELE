@@ -1257,7 +1257,8 @@ Antes delas:
   duas pontes, o celular e 34 das 35 bancadas da janela.
 - **Em aberto:** o `connect` grava a visita com o alvo como veio, e um
   `@CÓDIGO` entraria na lista de visitados. Isso é da agenda, e fica para a
-  orquestradora decidir.
+  orquestradora decidir. *Decidido em 16/10 e feito em `d85f55f4`: ver «A
+  decisão de 16/10» abaixo.*
 
 ## A tarefa 28: CHAMANDO, CANCELAR e as frases de quem liga (16/10)
 
@@ -1293,3 +1294,37 @@ Antes delas:
 **Como está a ponta** (`302cd403`): app, 765 de 765; clippy limpo; a bateria
 da casca inteira: os 45 roteiros, as duas pontes, o celular e 34 das 35 da
 janela; a conformidade inteira, 313 de 313, sem reprovação nenhuma.
+
+## A decisão de 16/10: um @CÓDIGO não entra na lista de visitados
+
+`d85f55f4`, isolado. Ligar para uma pessoa não é visitar um servidor: a
+ligação fica só na agenda, com a direção e a hora.
+
+- **A origem é da ponte**: `Connection::codigo_da_ligacao`, lido do mesmo
+  `Alvo` que vai à `Chegada::para_o_codigo`. Uma sala achada pelo endereço
+  não é ligação, mesmo tendo tocado.
+- **A decisão é do `ligar::anotar_a_chegada`**: a ligação vai para a agenda
+  (`Liguei` e a hora; o nome e o apelido ficam), e só uma visita segue para
+  a lista.
+- **O alvo da sessão fica só com uma visita.** Ele nunca era limpo. Depois de
+  visitar X, uma ligação, ou uma hospedagem aqui, levava para X ao sair o
+  caminho medido e a aparência dela. Agora fica vazio fora de uma visita, o
+  que muda também a sessão no servidor desta máquina.
+- **As provas**, em duas metades e uma costura:
+  - a conformidade (`ligar_pela_ponte.rs`): a ligação de verdade diz o
+    código, e a mesma sala pelo endereço não diz nenhum;
+  - o app (`ligar::a_chegada`): a lista de visitados byte a byte como
+    estava, o `Liguei` com a hora e o nome de antes, e o alvo de antes fora;
+  - a costura, lida no `connect` sem os comentários.
+- **Por que a costura é lida, e não ligada.** Um código não se disca sem um
+  ponto de encontro, e o `check-deps` não deixa o app depender do
+  `seele-encontro`, nem como dev-dependência. A ligação inteira pelo
+  `connect` pede essa aresta, e a decisão não é desta frente. A
+  `Vizinhanca::TambemAqui` ainda pediria o `seele-proto`, ou um construtor
+  do ponto que não a peça.
+- **Sete reversões**, cada uma reprovando pela sua frase. Os três guardas da
+  `frontend.rs` acham o filtro dos visitados pelo nome novo e cobram o mesmo
+  que antes.
+
+**Como está a ponta** (`d85f55f4`): app, 769 de 769; FFI, 217; clippy limpo;
+a conformidade inteira, 314 de 314 (a 314ª é a sala pelo endereço).
