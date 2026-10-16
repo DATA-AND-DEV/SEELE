@@ -720,8 +720,25 @@ async function recarregarTrilha() {
  * região. Escondida quando ninguém acrescenta nada: uma faixa vazia é uma
  * régua sobre nada.
  *
- * Repovoada e não reconstruída: os nós vêm montados do registro, e movê-los
- * preserva o que eles seguram — como em `canal.cabecalho`.
+ * **Reconciliada, e não repovoada** (pendência 63; lote R63 da F5). O tique
+ * de 500 ms passa por aqui em cada região, e o `replaceChildren` de antes
+ * tirava o conteúdo do MOD do documento e o punha de volta, e trocava o botão
+ * da ação por um novo, que `acoesDasContribuicoes` monta a cada retrato: o
+ * foco nele caía no `<body>` e a seleção no texto do MOD se desfazia, duas
+ * vezes por segundo. Agora é o caminho da lista de pessoas
+ * (`reconciliarALista`):
+ *
+ * - o conteúdo vem montado do registro, e é o mesmo nó entre um retrato e o
+ *   seguinte (`montarContribuicao`): entra pelo marcador (`nosDeMod`), e não
+ *   sai do documento;
+ * - o botão da ação tem chave — o MOD e a ação, contados —, e o que já estava
+ *   na tela fica, vestido com o botão montado agora. Pela posição, a saída da
+ *   ação de um MOD daria o botão dela à ação do vizinho;
+ * - **o clique age com o dado de agora**: o ouvinte é um só, no contêiner
+ *   (`ligarAcoesDeApresentacao`), e lê os `data-*` do botão na hora do
+ *   clique; o `vestirComo` os reescreve no botão reaproveitado — o canal do
+ *   `compositor`, quando o canal aberto muda. Nada no botão guarda o retrato
+ *   em que ele nasceu.
  *
  * `contexto` `null` é a região sem onde valer agora — o compositor sem canal
  * aberto —, e ela fica vazia.
@@ -730,13 +747,24 @@ function aplicarARegiao(ponto, conteiner, alvo = "", contexto = {}) {
   if (!conteiner) return;
   // A região que a casca não tem fica vazia, e quem contribui para ela sabe
   // (`regiaoAusente`, em `base.js`; tarefa 5, Step 8).
-  const nos = contexto === null || regiaoAusente(ponto) ? [] : [
-    ...conteudoDasContribuicoes(ponto, alvo),
-    ...acoesDasContribuicoes(ponto, alvo, contexto),
-  ];
-  repovoar(conteiner, nos);
+  const vale = contexto !== null && !regiaoAusente(ponto);
+  const conteudo = vale ? conteudoDasContribuicoes(ponto, alvo) : [];
+  const acoes = vale ? acoesDasContribuicoes(ponto, alvo, contexto) : [];
+  const vazia = conteudo.length + acoes.length === 0;
+  // Vazia e sem nada na tela, o caso de quase todo quadro: nada a reconciliar.
+  if (!vazia || conteiner.firstChild !== null) {
+    const vezes = new Map();
+    for (const botao of acoes) {
+      const chave = `acao:${botao.dataset.modDaAcao}\u0000${botao.dataset.acaoDeMod}`;
+      const vez = vezes.get(chave) ?? 0;
+      vezes.set(chave, vez + 1);
+      chaveNaLista.set(botao, `${chave}#${vez}`);
+    }
+    reconciliarALista(conteiner, [...nosDeMod(conteudo), ...acoes], ":scope > [data-acao-de-mod]");
+  }
   ligarAcoesDeApresentacao(conteiner);
-  conteiner.hidden = nos.length === 0;
+  // E o `hidden` só quando muda, como o texto do rodapé (`escreverOTexto`).
+  if (conteiner.hidden !== vazia) conteiner.hidden = vazia;
 }
 
 /**
@@ -2319,10 +2347,14 @@ function nosDeMod(nos) {
  *
  * **E a coluna de canais**, com o canal como chave: repovoada, ela tirava do
  * documento o botão com o foco do teclado a cada tique (pendência 64).
+ *
+ * **E as regiões de MOD** (`aplicarARegiao`; lote R63), onde a chave mora nos
+ * botões de ação, filhos diretos do contêiner, e não em `li`: é o que
+ * `comChave` diz — onde procurar os nós velhos com chave.
  */
-function reconciliarALista(lista, filhos) {
+function reconciliarALista(lista, filhos, comChave = "li") {
   const velhos = new Map();
-  for (const no of lista.querySelectorAll("li")) {
+  for (const no of lista.querySelectorAll(comChave)) {
     const chave = chaveNaLista.get(no);
     if (chave !== undefined && !velhos.has(chave)) velhos.set(chave, no);
   }
