@@ -2131,6 +2131,152 @@ mod tests {
         assert!(pasta.join("fichas/coelho.json").exists());
     }
 
+    /// **Listar e apagar, pelo JavaScript, na pasta e no volume**
+    /// (`own.arquivos.listar`, `own.arquivos.apagar` e `own.volume.apagar`; a
+    /// auditoria do `v6.json`, tabela 2). As funções Rust tinham prova, e a
+    /// ligação não: trocar o corpo do `listar` por uma lista vazia, ou ligar o
+    /// `apagar` a `false`, passava. E o `volume.apagar` apaga **do volume**, e
+    /// não da pasta do MOD: um arquivo com o mesmo nome nos dois lugares fica
+    /// na pasta.
+    #[test]
+    fn um_mod_lista_e_apaga_pelo_javascript_na_pasta_e_no_volume() {
+        let pasta = pasta_de_teste("js-lista-apaga");
+        std::fs::create_dir_all(pasta.join(volume::PASTA)).expect("o volume");
+        std::fs::write(pasta.join(volume::PASTA).join("mapa.png"), b"x").expect("no volume");
+        std::fs::write(pasta.join("mapa.png"), b"x").expect("na pasta");
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/rpg",
+                "globalThis.aoAcontecer = () => { \
+                   arquivos.escrever('fichas/a.json', '1'); \
+                   arquivos.escrever('fichas/b.json', '2'); \
+                   dados.antes = JSON.stringify(arquivos.listar()); \
+                   dados.apagou = String(arquivos.apagar('fichas/a.json')); \
+                   dados.depois = JSON.stringify(arquivos.listar()); \
+                   dados.doVolume = String(volume.apagar('mapa.png')); \
+                   dados.deNovo = String(volume.apagar('mapa.png')); \
+                 };",
+                &pasta,
+            )
+            .expect("carregar");
+
+        let mut quintal = BTreeMap::new();
+        anfitriao
+            .chamar("seele/rpg", "PersonJoined", "{}", &mut quintal)
+            .expect("chamar");
+
+        let lido = |chave: &str| quintal.get(chave).map(String::as_str);
+        let antes: Vec<String> =
+            serde_json::from_str(lido("antes").unwrap_or("[]")).expect("a lista");
+        assert!(
+            antes.iter().any(|n| n == "fichas/a.json")
+                && antes.iter().any(|n| n == "fichas/b.json"),
+            "o `arquivos.listar` do JavaScript não disse o que está na pasta: {antes:?}"
+        );
+        assert_eq!(
+            lido("apagou"),
+            Some("true"),
+            "o `arquivos.apagar` não apagou"
+        );
+        let depois: Vec<String> =
+            serde_json::from_str(lido("depois").unwrap_or("[]")).expect("a lista");
+        assert!(
+            !depois.iter().any(|n| n == "fichas/a.json")
+                && depois.iter().any(|n| n == "fichas/b.json"),
+            "a lista depois de apagar não é a de antes sem o apagado: {depois:?}"
+        );
+        assert!(
+            !pasta.join("fichas/a.json").exists(),
+            "o arquivo apagado continua no disco"
+        );
+        assert_eq!(
+            lido("doVolume"),
+            Some("true"),
+            "o `volume.apagar` não apagou do volume"
+        );
+        assert_eq!(
+            lido("deNovo"),
+            Some("false"),
+            "apagar de novo o que já saiu disse que apagou"
+        );
+        assert!(
+            !pasta.join(volume::PASTA).join("mapa.png").exists(),
+            "o arquivo do volume continua lá"
+        );
+        assert!(
+            pasta.join("mapa.png").exists(),
+            "o `volume.apagar` apagou da pasta do MOD, e não do volume"
+        );
+    }
+
+    /// **O `mundo.registrar` é uma linha INFO, com o `mod_id`, cortada em 500**
+    /// (`world.mundo.registrar`; a auditoria do `v6.json`, tabela 2). O teste
+    /// do relógio chamava `mundo.registrar` e não lia o registro: esvaziar o
+    /// corpo da função passava.
+    #[test]
+    fn o_registrar_do_mod_e_uma_linha_info_com_o_id_cortada_em_500() {
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Default)]
+        struct Buffer(Arc<Mutex<Vec<u8>>>);
+        impl Write for Buffer {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().expect("o buffer").extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let pasta = pasta_de_teste("js-registra");
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/rpg",
+                "globalThis.aoAcontecer = () => { mundo.registrar('oi ' + 'x'.repeat(600)); };",
+                &pasta,
+            )
+            .expect("carregar");
+
+        let buffer = Buffer::default();
+        let capturado = buffer.clone();
+        let assinante = tracing_subscriber::fmt()
+            .with_writer(move || capturado.clone())
+            .without_time()
+            .with_ansi(false)
+            .finish();
+        // Ver `rastro_de_teste::segundo_despachante`.
+        crate::rastro_de_teste::segundo_despachante();
+        tracing::subscriber::with_default(assinante, || {
+            let mut quintal = BTreeMap::new();
+            anfitriao
+                .chamar("seele/rpg", "PersonJoined", "{}", &mut quintal)
+                .expect("chamar");
+        });
+
+        let log = String::from_utf8(buffer.0.lock().expect("o buffer").clone()).expect("o log");
+        let linhas: Vec<&str> = log.lines().filter(|l| l.contains("oi xxx")).collect();
+        assert_eq!(
+            linhas.len(),
+            1,
+            "o `mundo.registrar` não deu uma linha só: {log}"
+        );
+        let linha = linhas[0];
+        assert!(linha.contains("INFO"), "a linha do MOD não é INFO: {linha}");
+        assert!(
+            linha.contains("mod_id=seele/rpg"),
+            "a linha do MOD não diz o `mod_id`: {linha}"
+        );
+        let escrito = format!("oi {}", "x".repeat(497));
+        assert!(
+            linha.contains(&escrito) && !linha.contains(&format!("{escrito}x")),
+            "a linha do MOD não foi cortada em 500 caracteres: {linha}"
+        );
+    }
+
     /// E o mesmo MOD, tentando sair, recebe `false` em vez da chave de
     /// identidade de quem hospeda.
     #[test]
