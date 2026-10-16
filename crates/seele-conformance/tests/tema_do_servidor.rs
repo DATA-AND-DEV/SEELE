@@ -42,8 +42,13 @@ use std::{
 mod vaga;
 
 /// Declara o tema que o pedido trouxe e devolve o que `mundo.tema` respondeu.
-const MOD_DE_TEMA: &str = "globalThis.aoPedir = (contexto, pedido) => \
-     JSON.stringify(mundo.tema(JSON.parse(pedido).tema));";
+/// Com `encher`, grava depois um quintal grande demais na mesma chamada: o
+/// pedido inteiro falha ao gravar.
+const MOD_DE_TEMA: &str = "globalThis.aoPedir = (contexto, pedido) => { \
+     const p = JSON.parse(pedido); \
+     const r = JSON.stringify(mundo.tema(p.tema)); \
+     if (p.encher) dados.grande = 'a'.repeat(300 * 1024); \
+     return r; };";
 
 const CLARO: &str = r##"{"acento":"#c86b1f"}"##;
 const ESCURO: &str = r##"{"acento":"#331704"}"##;
@@ -238,15 +243,15 @@ impl Pessoa {
     /// Pede ao MOD `id` que declare `tema`, no escopo do servidor (canal zero),
     /// e devolve o que `mundo.tema` respondeu.
     async fn declarar(&mut self, id: &str, tema: serde_json::Value) -> Result<serde_json::Value> {
+        self.pedir(id, serde_json::json!({ "tema": tema })).await
+    }
+
+    /// O pedido inteiro, como a janela o mandaria, e a resposta do MOD.
+    async fn pedir(&mut self, id: &str, corpo: serde_json::Value) -> Result<serde_json::Value> {
         self.pedidos += 1;
         let pedido = self.pedidos;
         self.cliente
-            .mod_request(
-                pedido,
-                id.to_owned(),
-                ChannelId(0),
-                serde_json::json!({ "tema": tema }).to_string(),
-            )
+            .mod_request(pedido, id.to_owned(), ChannelId(0), corpo.to_string())
             .await?;
         let fim = tokio::time::Instant::now() + PRAZO;
         loop {
@@ -446,6 +451,58 @@ async fn so_o_escolhido_pinta_e_quem_nao_tem_a_porta_e_recusado() -> Result<()> 
             tema("seele/estilo", ESCURO)
         ],
         "um TemaMudou saiu por causa de uma declaração recusada"
+    );
+
+    derrubar(daemon, tarefa).await;
+    std::fs::remove_dir_all(raiz)?;
+    Ok(())
+}
+
+/// **O `TemaMudou` só sai do pedido que gravou, e qualquer pessoa pode pedir**
+/// (`sentido.mundo.tema`: «só vale se a chamada terminar», «o `TemaMudou` sai
+/// depois do quintal e do tema gravados», «o servidor não confere quem
+/// pediu»; a auditoria do `v6.json`, tabela 2). O par do aviso existia
+/// (`um_aviso_de_um_pedido_que_nao_gravou_nao_sai`), e o do tema não: nenhum
+/// teste combinava `mundo.tema` com um quintal que não grava.
+///
+/// Uma Pessoa comum — a segunda a entrar; a primeira tem o comando — declara o
+/// tema claro num pedido cujo quintal passa do teto: o pedido falha, e o tema
+/// não sai. O seguinte, escuro, grava: o segundo `TemaMudou` que chega a quem
+/// tem o comando é o dele, e não o claro.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_tema_de_um_pedido_que_nao_gravou_nao_sai_e_qualquer_pessoa_pede() -> Result<()> {
+    let _vaga = vaga::minha();
+    let raiz = temporario("quintal")?;
+    let hash = instalar(&raiz, "seele/estilo", true)?;
+    let (daemon, endereco, tarefa) = subir(&raiz).await?;
+    let conjunto = habilitar(&daemon, &[("seele/estilo", &hash)]).await?;
+
+    let mut comando = Pessoa::entrar(endereco, 251, &conjunto).await?;
+    let mut comum = Pessoa::entrar(endereco, 252, &conjunto).await?;
+    assert_eq!(comando.tema_da_chegada().await?, None);
+    assert_eq!(comum.tema_da_chegada().await?, None);
+
+    let recusado = comum
+        .pedir(
+            "seele/estilo",
+            serde_json::json!({ "tema": serde_json::from_str::<serde_json::Value>(CLARO)?, "encher": true }),
+        )
+        .await?;
+    assert_eq!(
+        recusado["ok"], false,
+        "o quintal grande demais foi gravado: {recusado}"
+    );
+    assert_eq!(
+        comum
+            .declarar("seele/estilo", serde_json::from_str(ESCURO)?)
+            .await?,
+        serde_json::json!({ "ok": true }),
+        "uma Pessoa comum não pôde declarar o tema, e o servidor não confere quem pediu"
+    );
+    assert_eq!(
+        comando.esperar_temas(2).await?,
+        &[None, tema("seele/estilo", ESCURO)],
+        "o tema de um pedido cujo quintal foi recusado saiu"
     );
 
     derrubar(daemon, tarefa).await;
