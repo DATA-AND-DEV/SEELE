@@ -1057,6 +1057,80 @@ async fn a_recusa_de_um_fluxo_de_imagem_chega_a_janela_pelo_nome() -> Result<()>
     Ok(())
 }
 
+/// **Uma imagem de MOD vai e volta inteira, pelo cliente de verdade**
+/// (`actions.enviar-imagem` e `actions.ler-imagem`; a auditoria do `v6.json`,
+/// tabela 2). O teste do servidor reimplementa o lado do cliente, e a
+/// conformidade só usava `Transfers::imagem_de_mod` para recusas: o elo do meio
+/// — o núcleo que manda em blocos e lê de volta — não tinha caminho feliz. Uma
+/// imagem de mais de três blocos, autorizada pelo MOD, chega ao disco inteira e
+/// volta igual pela leitura que o MOD autoriza.
+#[tokio::test(flavor = "multi_thread")]
+async fn uma_imagem_de_mod_vai_e_volta_inteira_pelo_cliente_de_verdade() -> Result<()> {
+    use seele_proto::volume::{PedidoDeImagem, VolumeHeader};
+    let _vaga = vaga::minha();
+    let (_daemon, root, mut cliente, serving) = servidor_com_o_mod(209).await?;
+    let transferencias = cliente.transfers();
+    autorizar(&mut cliente, 1, "t-ida", &["png"]).await?;
+
+    // Mais de três blocos, e bytes que não se repetem: um bloco perdido, dobrado
+    // ou fora de ordem não passa por igual.
+    let mut bytes = png_minimo();
+    bytes.extend((0..3 * seele_proto::attachment::BLOCK_LEN + 17).map(|i| (i % 251) as u8));
+    transferencias
+        .imagem_de_mod(
+            PedidoDeImagem::Enviar {
+                cabecalho: VolumeHeader {
+                    mod_id: "prova/ponte".into(),
+                    token: "t-ida".into(),
+                },
+                bytes: bytes.len() as u64,
+            },
+            &bytes,
+        )
+        .await?;
+
+    let destino = root
+        .join("mod-data")
+        .join("prova")
+        .join("ponte")
+        .join("volume")
+        .join("retratos")
+        .join("um.png");
+    for _ in 0..50 {
+        if std::fs::metadata(&destino).is_ok_and(|m| m.len() == bytes.len() as u64) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        std::fs::read(&destino).ok().as_deref() == Some(bytes.as_slice()),
+        "a imagem enviada pelo cliente não chegou inteira em {}",
+        destino.display()
+    );
+
+    let lida = transferencias
+        .imagem_de_mod(
+            PedidoDeImagem::Ler {
+                mod_id: "prova/ponte".into(),
+                channel: ChannelId(0),
+                payload: serde_json::json!({ "op": "volume", "caminho": "retratos/um.png" })
+                    .to_string(),
+            },
+            &[],
+        )
+        .await?;
+    assert!(
+        lida == bytes,
+        "a leitura pelo volume não devolveu a imagem que foi: {} bytes, e eram {}",
+        lida.len(),
+        bytes.len()
+    );
+
+    serving.abort();
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
 /// **O tipo é lido dos bytes, e não do que alguém declara.**
 ///
 /// Decisão 2 do ADR 0048: quem confere é o servidor, porque o MOD deixou de ver
