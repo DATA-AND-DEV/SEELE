@@ -79,9 +79,37 @@ assert.match(outroMod, /NÃO SERVE: o pacote baixado é de outro MOD/, `a recusa
 assert.match(outroMod, /continua como estava/, `a recusa do pacote não diz que nada mudou: ${outroMod}`);
 const apiVelha = contexto.fraseDeErro({ PacoteNaoServe: "api-too-old" });
 assert.match(apiVelha, /roda no Servidor 0\.15/, `um motivo do núcleo não sai pela frase dele: ${apiVelha}`);
+// **E aponta o Servidor 0.15 no launcher** (`compatibilidade.porque`; a
+// auditoria do `v6.json`, tabela 1): dizer onde ele roda sem dizer onde
+// abri-lo deixa quem lê sem o caminho.
+assert.match(apiVelha, /use o Servidor 0\.15 pelo launcher/, `a recusa da API velha não aponta o launcher: ${apiVelha}`);
 const banco = contexto.fraseDeErro({ BancoNaoRespondeu: "database is locked" });
 assert.doesNotMatch(banco, /ALGO FALHOU|BancoNaoRespondeu/, `a falha do banco caiu no recuo: ${banco}`);
 assert.match(banco, /database is locked/, `a falha do banco não diz o que o banco disse: ${banco}`);
 assert.match(banco, /continua como estava/, `a falha do banco não diz que nada mudou: ${banco}`);
+
+// 4. **A linha do pacote no cache diz o mesmo** (`linhaDePacoteNoCache`, em
+//    `camada-mods.js`; a frase que o rascunho §2 cita): um pacote da API 4
+//    recusado diz que roda no Servidor 0.15, e que ele se abre pelo launcher.
+{
+  const camada = fs.readFileSync(path.join(__dirname, "../ui/camada-mods.js"), "utf8");
+  const i = camada.indexOf("function linhaDePacoteNoCache(pacote) {");
+  const j = camada.indexOf("\n}\n", i);
+  assert.ok(i >= 0 && j > i, "`linhaDePacoteNoCache` mudou de forma, e o recorte não a achou");
+  const no = (tag, classe = "", texto = "") => ({
+    tag, className: classe, textContent: String(texto ?? ""), filhos: [], dataset: {}, hidden: false,
+    append(...outros) { this.filhos.push(...outros); },
+    addEventListener() {}, setAttribute() {},
+  });
+  const linha = vm.createContext({
+    elemento: no, emBytes: (n) => `${n} B`,
+    API_DESTE_APLICATIVO: 6, APIS_QUE_ESTE_APLICATIVO_ACEITA: [6],
+  });
+  vm.runInContext(camada.slice(i, j + 3), linha);
+  const textos = (n) => [n.textContent, ...n.filhos.flatMap(textos)].filter(Boolean);
+  const dita = textos(linha.linhaDePacoteNoCache({ id: "seele/estilo", version: "3.1.0", bytes: 10, hash: "abc", recusado: true, api: 4 })).join(" | ");
+  assert.match(dita, /feito para a API 4, que roda no Servidor 0\.15/, `a linha do pacote da API 4 não diz onde ele roda: ${dita}`);
+  assert.match(dita, /use o Servidor 0\.15 pelo launcher/, `a linha do pacote da API 4 não aponta o launcher: ${dita}`);
+}
 
 console.log("hospedar com MOD antigo: a frase diz o MOD, a API e as três saídas na ordem do dono; sem o pacote, diz que ele falta, sem número; e toda recusa das saídas tem frase.");
