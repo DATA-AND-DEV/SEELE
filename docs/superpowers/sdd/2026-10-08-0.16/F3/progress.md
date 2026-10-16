@@ -823,6 +823,19 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
     do `operador.barra` passava com `overflow: visible`. E a letra de 16 dos
     campos não era medida. Os dois consertados, e medidos também o zoom e os
     gestos e o `status.barra` na casca larga.
+- **16/10, à tarde. O passo 7 até o lote 31: 497 PROVADA, 3 abertas.**
+  - O `pessoa.detalhes` ganhou a linha nativa, com o dono por cima e a caixa
+    que recorta, e o ponto da casca para a folha do celular (a F8): decisão
+    da orquestradora, consertado, e o contraste do dono corrigido (achado da
+    F8: 4,11 → 6,82).
+  - **A portaria ficava sob os diálogos de MOD** (o z 60 da camada sobre o
+    19 dela), coberta e inerte: consertado pelo recorte do modal e pela área
+    do não modal, e não subindo o z dela, que cobriria as camadas do
+    produto entre 20 e 40 — a da própria portaria entre elas.
+  - Os três portes conferiram o `0.16/api-6` em `85a3292c` contra o aviso, e
+    nada deles dependia do silêncio de antes.
+  - À espera: o par fora da tabela do tema (8:78), os rótulos 1:26 e 1:27, e
+    o avanço do `0.16/api-6` até a ponta do corte.
 - **Esperam:** do corte, o guarda da união, pronto em
   `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
   depois do Step 6 do dono (D-api-7); o resto do passo 7 (o que pedir texto

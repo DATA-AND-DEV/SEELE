@@ -338,6 +338,9 @@ tabelas, com a prova e o commit.
 | 27 | o movimento reduzido em toda região e camada — duas regras o entregam, e tirar as duas reprova | `regioes-do-produto.cjs` | `d319c7d9` |
 | 28 | o braço `pedido` do roteador chama o servidor com o id do MOD dele | `contribuicoes-e-camadas.cjs` | `df7e947d` |
 | — | o `superficie-classes` já estava provado na `camadas.cjs` (`2f76bc4c`, `71c976a7`, `5b7ff153`), e só não remarcado: as três reversões reprovam | — | — |
+| 29 | a folha convive com o palco da chamada e com a página não imersiva | `palco-da-chamada.cjs`, `camadas.cjs` | `a0b67d34` |
+| 30 | o SEU CÓDIGO e o «receber ligações» no guarda 11 | `nucleo.cjs` | `c0a2f7cc` |
+| 31 | no aparelho: o `listarNaBarra`, a célula inteira, o rodapé e a altura dos diálogos, e as áreas seguras de cada superfície (as laterais, pelo teto da coluna) | `tools/bancada-do-celular.py` | `2bb317de` |
 
 E o que o `.wasm` cobrava, rodado pela primeira vez nesta máquina com o
 wasi-sdk conferido: dois consertos meus (a B2 e a B10) tinham deixado o
@@ -352,23 +355,28 @@ postas na forma que o produto já tinha (`8e8dfea5`).
   `tipo-desconhecido` (`021876f8`). Os dois nomes só entram no `v6.json` se
   houver uma quarta emenda por outro motivo.
 
-**A contagem das tabelas, até o lote 28:** 489 PROVADA, 5 INCERTA, 6 SEM
-PROVA, 35 SEM CÓDIGO e 16 NÃO SE APLICA (551 linhas). As SEM CÓDIGO e parte
-das INCERTA e SEM PROVA foram fechadas pelos consertos da B e pelas provas do
-passo 5, e ainda não foram remarcadas linha a linha (a tabela 4 foi).
+**A contagem das tabelas, até o lote 31:** 497 PROVADA, 3 INCERTA, 0 SEM
+PROVA, 35 SEM CÓDIGO e 16 NÃO SE APLICA (551 linhas). As SEM CÓDIGO foram
+fechadas pelos consertos da B e pelas decisões, e ainda não foram remarcadas
+linha a linha (a tabela 4 foi).
 
-**Ainda abertos (11):**
-- a ligação no núcleo (9:24: CHAMANDO, SEU CÓDIGO e «receber ligações»; a
-  portaria e a faixa de quem liga estão provadas), a conferência de todos os
-  pares do tema (8:78) e a folha que convive com o palco e a página (7:49,
-  7:50);
-- no celular: a «célula inteira» da aba SERVIDOR (5:70), o `listarNaBarra`
-  (6:47), as abas do diálogo a 390 px (7:65), e as áreas seguras (7:47, 9:29);
-- sem teste automatizado possível, ou por decidir: os rótulos que nada lê
-  (1:26, 1:27).
+**Ainda abertos (3), os três à espera de decisão:**
+- **8:78, um par que o produto desenha fora da tabela.** Uma varredura do
+  contraste computado de todo texto à vista, sob temas que passam nos pares
+  (o claro, o papel e o profundo; o script ficou no scratchpad), acha um
+  só: na sala aberta, o `--seele-osso-apagado` (#7a7061, que não muda com o
+  tema) sobre o `--seele-laranja-fraco` derivado do acento — 2,85:1 sob o
+  papel, abaixo do piso de 3:1 do apagado (sem tema, 3,41:1). A derivação
+  garante o acento sobre o preenchimento, e não o apagado.
+- 1:26 e 1:27, os rótulos `estilos` e `classes` da 6, que nada lê.
 - **Texto, para a quarta emenda, se houver uma:** o `listarNaBarra` diz
   «no celular, vale na gaveta SALAS», e a aba se chama SERVIDOR desde o
   rascunho (§11).
+
+**Fora da auditoria, ditos:** o «×» desligado da sala aberta (o último, que
+não se apaga) fica a 1,32:1 sem tema — o comentário dele promete «legível»,
+e a WCAG dispensa controle inativo; e as superfícies do celular não aplicam
+o inset lateral, e a área segura deitado vale pelo teto da coluna.
 
 Os achados 1 e 2, as bancadas de navegador e a do celular no portão de
 publicação, são da F6.
