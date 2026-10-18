@@ -55,9 +55,17 @@ tauri-plugin-dialog = "2.7"
 # (`configure_client`) e o próprio README avisa que a versão do reqwest muda em
 # lançamentos menores. `rustls-tls` é o padrão e é o que queremos: a alternativa
 # arrastaria OpenSSL para uma árvore que o `deny.toml` já diz que não o quer.
+#
+# **Sem o `zip`** (18/10/2026). Ele só liga duas coisas no plugin: extrair uma
+# atualização `.zip` no Windows e um AppImage `.tar.gz` no Linux. As do SEELE no
+# Windows são o próprio instalador (`…_x64-instalador.exe`, no `latest.json`),
+# que o plugin abre sem extrair, e o Linux não está no manifesto de atualização;
+# no macOS, o `tar` e o `flate2` não dependem dele. Com ele, a árvore trazia o
+# `zip` 4.6.1, com três vulnerabilidades (RUSTSEC-2026-0367, 0368 e 0369) que só
+# a 9.0 corrige, e o plugin, até a 2.14, não passa da 4. Tirá-lo tira o crate, e
+# o `deny.toml` não precisa abrir exceção para vulnerabilidade, que ele não abre.
 tauri-plugin-updater = { version = "2.10", default-features = false, features = [
     "rustls-tls",
-    "zip",
 ] }
 # Para buscar o módulo do OpenH264, uma vez, quando a pessoa pede.
 #
