@@ -2358,8 +2358,9 @@ function redesenharAsPessoas() {
 
 /**
  * A chave de um nó da lista de pessoas: `pessoa:<id>` numa linha, `sala:<id>`
- * ou `grupo:<nome>` num grupo; na coluna de canais, `canal:<id>`. Num mapa, e
- * não num atributo: ela é de quem reconcilia, e não da página.
+ * ou `grupo:<nome>` num grupo, `membro:<id>` numa linha do FORA DO AR; na coluna
+ * de canais, `canal:<id>`. Num mapa, e não num atributo: ela é de quem
+ * reconcilia, e não da página.
  */
 let chaveNaLista = new WeakMap();
 
@@ -2822,7 +2823,7 @@ function desenharPessoas(snapshot) {
   // **Reconciliada pelo id, e não repovoada** (pendência 63, (b)): ver
   // `reconciliarALista`. A lista refeita a cada retrato sumia e voltava na
   // árvore de acessibilidade. O grupo FORA DO AR tem a chave do nome
-  // (`grupoDeSala`), e as linhas dele, sem chave, casam pela posição.
+  // (`grupoDeSala`), e cada linha dele a do membro (`grupoForaDoAr`).
   reconciliarALista($("lista-roster"), grupos);
   // Uma vez, e na lista: ver `ligarAcoesDeApresentacao` em `base.js`.
   ligarAcoesDeApresentacao($("lista-roster"));
@@ -2865,9 +2866,23 @@ function pintarVolumesDoRoster() {
  * ao toque (`celular-pessoas.js`), e ela carrega sinal e volume. Nada disso
  * cabe a quem está fora: nenhuma medida existe, nenhuma ação o alcança, e
  * nenhum MOD ganhou a lista de membros.
+ *
+ * **Cada linha é o membro** (`membro:<id>`; lote FORA, pendência 63). Sem chave,
+ * as linhas casavam pela posição em `reconciliarALista`, e quando alguém do
+ * meio se conectava os nomes escorregavam pelos nós: o leitor de tela parado em
+ * «Carla» passava a ler «Bruno» no mesmo nó, e quem saía do documento era o nó
+ * do último, e não o de quem se conectou. O prefixo é um espaço só dele: a
+ * mesma conta é `pessoa:<id>` quando está conectada, e por um instante é as duas
+ * — o retrato chega antes de a lista de membros ser buscada —, sem uma tomar o
+ * nó da outra. O `id` é a conta, e fica na chave: o texto da linha segue sendo
+ * só o apelido.
  */
 function grupoForaDoAr(membros) {
-  const linhas = membros.map((membro) => elemento("li", "membro-fora-do-ar", membro.nickname));
+  const linhas = membros.map((membro) => {
+    const li = elemento("li", "membro-fora-do-ar", membro.nickname);
+    chaveNaLista.set(li, `membro:${membro.id}`);
+    return li;
+  });
   const grupo = grupoDeSala("FORA DO AR", `${membros.length}`, false, linhas);
   grupo.dataset.foraDoAr = "sim";
   return grupo;

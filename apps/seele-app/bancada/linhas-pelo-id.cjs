@@ -85,11 +85,27 @@
 //    tela (a pendente sem resposta) fica no lugar, com o foco e a seleção, e
 //    quem se move é a outra.
 //
+// E o grupo FORA DO AR (lote FORA), numa seção própria no fim:
+//
+// 15. **As linhas do FORA DO AR têm a chave do membro** (`membro:<id>`), e não
+//    casam pela posição. A lista vem do acessor `membros_fora_do_ar`, quando o
+//    retrato anda a `fora_do_ar_revision`. Com `[A, B, C] → [B, C]` (o A se
+//    conectou), os nós de B e de C são os mesmos e seguem no documento, nenhuma
+//    mutação cai nas linhas que ficaram, o nó que sai é o do A, e a seleção no
+//    nome do C é a mesma. Com `[A, C] → [A, B, C]`, os nós de A e de C ficam, o
+//    do C continua dizendo o nome do C, e só o B ganha um nó. Com o retrato
+//    igual, nenhuma mutação. E a chave é de um espaço só dela: com a Ana
+//    conectada e o acessor ainda com a lista velha (a janela real entre o
+//    retrato e a resposta), ela é uma `li.pessoa` e uma
+//    `li.membro-fora-do-ar` ao mesmo tempo, com o mesmo id, e nenhuma leva o nó
+//    da outra.
+//
 // Com o conserto revertido (a lista repovoada a cada retrato), o caso 1 conta
 // mutações fora da linha e nós trocados em todas as outras; com a coluna de
 // salas repovoada, o caso 6; com a de canais, o caso 10; com o `textContent`
 // de volta, o caso 12; com a região de MOD repovoada, o caso 13; com a
-// conversa repovoada, o caso 14.
+// conversa repovoada, o caso 14; com as linhas do FORA DO AR sem a chave do
+// membro, o caso 15.
 //
 // Rodar:  node apps/seele-app/bancada/linhas-pelo-id.cjs
 
@@ -2290,6 +2306,238 @@ async function abrir(browser, url, r) {
       assert.deepEqual(soSelecao.ordem, ["21", "22", "23", "24"], `caso 14 (k), só a seleção: a conversa ficou na ordem ${JSON.stringify(soSelecao.ordem)}`);
     }
 
+    // 15. O grupo FORA DO AR com a chave do membro (pendência 63; lote FORA).
+    //     A lista vem do acessor `membros_fora_do_ar` quando o retrato anda a
+    //     `fora_do_ar_revision`, e não do retrato; cada membro é uma linha, e a
+    //     linha é o membro (`membro:<id>`), e não a posição. Sem a chave, quando
+    //     alguém se conecta os nomes escorregam pelos nós: o leitor de tela
+    //     parado em «Carla» perde o nó, e a seleção no nome se desfaz.
+    //
+    //     A, B e C são Ana, Bruno e Carla, nessa ordem: o Rust ordena o FORA DO
+    //     AR pelo apelido (`Room::fora_do_ar`).
+    {
+      const A = { id: 101, nickname: "Ana" };
+      const B = { id: 102, nickname: "Bruno" };
+      const C = { id: 103, nickname: "Carla" };
+      const base15 = { ...BASE, fora_do_ar_revision: 1 };
+
+      /** Na página: os ajudantes do FORA DO AR, que vem do acessor. */
+      const preparar15 = () => {
+        window.grupoFora = () => document.querySelector('#lista-roster li.roster-grupo[data-fora-do-ar="sim"]');
+        window.linhasFora = () => [...(grupoFora()?.querySelectorAll("li.membro-fora-do-ar") ?? [])];
+        window.textosFora = () => linhasFora().map((li) => li.textContent);
+        /**
+         * O FORA DO AR passa a ser `membros`: o acessor responde com eles, e o
+         * retrato chega com a revisão adiante — e com `chegam` em `presentes`,
+         * quando alguém se conectou. Espera o retrato, e a lista que o tique
+         * busca depois dele.
+         */
+        window.irParaFora = async (membros, chegam = []) => {
+          testTable.membros_fora_do_ar = structuredClone(membros);
+          const novo = structuredClone(testTable.snapshot);
+          novo.fora_do_ar_revision += 1;
+          novo.presentes.push(...chegam);
+          const revisao = novo.fora_do_ar_revision;
+          const retratoChegou = await pelaPonte(novo, (d) => d?.fora_do_ar_revision === revisao);
+          for (let i = 0; i < 100 && revisaoDoForaDoAr !== revisao; i += 1) await quadros(1);
+          await quadros(2);
+          return retratoChegou && revisaoDoForaDoAr === revisao
+            && JSON.stringify(textosFora()) === JSON.stringify(membros.map((m) => m.nickname));
+        };
+      };
+
+      /** Uma transição do FORA DO AR, de `de` a `para`, com a seleção no nome de `selecionar`. */
+      const medirFora = async ({ de, para, selecionar }) => {
+        const montou = await irParaFora(de);
+        const antes = new Map(linhasFora().map((li) => [li.textContent, li]));
+        const textoAntes = new Map(linhasFora().map((li) => [li, li.textContent]));
+        const grupoAntes = grupoFora();
+        const ulAntes = grupoAntes.querySelector("ul.roster-pessoas");
+
+        // A seleção no nome de uma das que ficam.
+        const textoDoAlvo = antes.get(selecionar).firstChild;
+        const faixa = document.createRange();
+        faixa.selectNodeContents(textoDoAlvo);
+        getSelection().removeAllRanges();
+        getSelection().addRange(faixa);
+        const selecionado = getSelection().toString();
+
+        const parar = observarALista();
+        const chegou = await irParaFora(para);
+        const registros = parar();
+
+        const depois = new Map(linhasFora().map((li) => [li.textContent, li]));
+        // As linhas de antes que seguem no documento: nada pode mexer nelas.
+        const queFicaram = [...antes.values()].filter((li) => li.isConnected);
+        const dentro = registros.filter((r) => queFicaram.some((li) => li.contains(r.target)));
+        const resultado = {
+          montou,
+          chegou,
+          ordem: textosFora(),
+          conta: grupoFora()?.querySelector(".roster-sala-conta")?.textContent ?? null,
+          mesmoGrupo: grupoFora() === grupoAntes,
+          // Por nome de antes: o nó de então é o de agora? Está no documento? O que diz?
+          nos: Object.fromEntries([...antes].map(([nome, li]) => [nome, {
+            mesmo: depois.get(nome) === li, conectado: li.isConnected, diz: li.textContent,
+          }])),
+          entraram: [...depois].filter(([, li]) => !textoAntes.has(li)).map(([nome]) => nome),
+          sairam: [...antes].filter(([, li]) => !li.isConnected).map(([nome]) => nome),
+          tiradas: registros
+            .filter((r) => r.type === "childList" && r.target === ulAntes)
+            .flatMap((r) => [...r.removedNodes].map((no) => textoAntes.get(no) ?? "(nó novo)")),
+          mutacoesNasQueFicaram: dentro.length,
+          textoNasQueFicaram: dentro.filter((r) => r.type === "characterData").length,
+          selecao: {
+            alvo: selecionar,
+            antes: selecionado,
+            depois: getSelection().toString(),
+            mesmoNo: getSelection().anchorNode === textoDoAlvo,
+          },
+        };
+
+        // O mesmo retrato, de novo: o tique de 500 ms o redesenha, e nada muda.
+        const linhasDeAntes = linhasFora();
+        const desenhadoAntes = desenhado;
+        const pararIgual = observarALista();
+        await new Promise((ok) => setTimeout(ok, 1200));
+        resultado.igual = {
+          redesenhou: desenhado !== desenhadoAntes && desenhado !== null,
+          mutacoes: pararIgual().length,
+          mesmosNos: linhasFora().length === linhasDeAntes.length
+            && linhasFora().every((li, i) => li === linhasDeAntes[i]),
+        };
+        getSelection().removeAllRanges();
+        return resultado;
+      };
+
+      const fora15 = async (de, para, selecionar) => {
+        const aberta = await abrir(browser, url, base15);
+        await aberta.page.evaluate(preparar15);
+        const resultado = await aberta.page.evaluate(medirFora, { de, para, selecionar });
+        await aberta.page.close();
+        assert.deepEqual(aberta.errors, [], "caso 15: erros na página");
+        return resultado;
+      };
+
+      /** O que vale nas duas transições, e as asserções do pedido. */
+      const guardar15 = (rotulo, r, { ficam, saiu = null, entrou = null, ordem, selecionada }) => {
+        assert.ok(r.montou, `caso 15, ${rotulo}: o FORA DO AR de antes não chegou à tela`);
+        assert.ok(r.chegou, `caso 15, ${rotulo}: o FORA DO AR de depois não chegou à tela (${JSON.stringify(r.ordem)})`);
+        assert.deepEqual(r.ordem, ordem, `caso 15, ${rotulo}: o FORA DO AR ficou ${JSON.stringify(r.ordem)}`);
+        assert.equal(r.conta, `${ordem.length}`, `caso 15, ${rotulo}: o cabeçalho do grupo diz ${JSON.stringify(r.conta)}`);
+        assert.ok(r.mesmoGrupo, `caso 15, ${rotulo}: o grupo FORA DO AR trocou de nó`);
+        for (const nome of ficam) {
+          const no = r.nos[nome];
+          assert.ok(
+            no.mesmo && no.conectado,
+            `caso 15, ${rotulo}: o nó de ${nome} não é o mesmo (no documento: ${no.conectado}, e o nó de antes diz agora ` +
+              `${JSON.stringify(no.diz)}). Os nomes escorregam pelos nós, e o leitor de tela parado em ${nome} perde o dele`,
+          );
+          assert.equal(no.diz, nome, `caso 15, ${rotulo}: o nó que era de ${nome} diz agora ${JSON.stringify(no.diz)}`);
+        }
+        assert.equal(
+          r.mutacoesNasQueFicaram, 0,
+          `caso 15, ${rotulo}: ${r.mutacoesNasQueFicaram} mutações dentro das linhas que ficaram ` +
+            `(${r.textoNasQueFicaram} de texto): linhas reescritas pela posição, e não pelo membro`,
+        );
+        assert.deepEqual(
+          r.sairam, saiu === null ? [] : [saiu],
+          `caso 15, ${rotulo}: saíram do documento os nós de ${JSON.stringify(r.sairam)}, e deviam sair só ${JSON.stringify(saiu)}`,
+        );
+        assert.deepEqual(
+          r.tiradas, saiu === null ? [] : [saiu],
+          `caso 15, ${rotulo}: o nó que a lista tirou foi o de ${JSON.stringify(r.tiradas)}, e não o de ${JSON.stringify(saiu)}`,
+        );
+        assert.deepEqual(
+          r.entraram, entrou === null ? [] : [entrou],
+          `caso 15, ${rotulo}: entraram nós para ${JSON.stringify(r.entraram)}, e devia entrar só ${JSON.stringify(entrou)}`,
+        );
+        assert.equal(r.selecao.antes, selecionada, `caso 15, ${rotulo}: a bancada não conseguiu selecionar ${selecionada}`);
+        assert.equal(
+          r.selecao.depois, selecionada,
+          `caso 15, ${rotulo}: a seleção no nome de ${selecionada} foi a ${JSON.stringify(r.selecao.depois)}`,
+        );
+        assert.ok(r.selecao.mesmoNo, `caso 15, ${rotulo}: a seleção em ${selecionada} não está mais no nó de texto dele`);
+        assert.ok(r.igual.redesenhou, `caso 15, ${rotulo}: o tique não redesenhou em 1,2 s, e o retrato igual não mediu nada`);
+        assert.equal(r.igual.mutacoes, 0, `caso 15, ${rotulo}: o mesmo retrato, redesenhado pelo tique, fez ${r.igual.mutacoes} mutações na lista`);
+        assert.ok(r.igual.mesmosNos, `caso 15, ${rotulo}: o mesmo retrato trocou os nós do FORA DO AR`);
+      };
+
+      // (a) O A se conectou: [A, B, C] → [B, C]. O B e o C ficam com os nós,
+      //     sai o do A, e a seleção no nome do C continua nele.
+      const sai = await fora15([A, B, C], [B, C], "Carla");
+      guardar15("o A se conectou", sai, {
+        ficam: ["Bruno", "Carla"], saiu: "Ana", ordem: ["Bruno", "Carla"], selecionada: "Carla",
+      });
+
+      // (b) O B entra no meio: [A, C] → [A, B, C]. O A e o C ficam, o C
+      //     continua dizendo Carla, e só o B ganha um nó.
+      const entra = await fora15([A, C], [A, B, C], "Carla");
+      guardar15("o B entrou no meio", entra, {
+        ficam: ["Ana", "Carla"], entrou: "Bruno", ordem: ["Ana", "Bruno", "Carla"], selecionada: "Carla",
+      });
+
+      // (c) A chave do membro mora num espaço só dela. Quem se conecta aparece
+      //     em `presentes` no retrato, e o acessor só responde depois: por um
+      //     instante a Ana é uma `li.pessoa` e uma `li.membro-fora-do-ar` ao
+      //     mesmo tempo, com o mesmo id. Se as chaves fossem a mesma
+      //     (`pessoa:<id>`), uma levaria o nó da outra.
+      const aberta15 = await abrir(browser, url, base15);
+      await aberta15.page.evaluate(preparar15);
+      const caso15c =await aberta15.page.evaluate(async ({ todos, restantes, chegada }) => {
+        const ok = {};
+        ok.montou = await irParaFora(todos);
+        const noDaAna = linhasFora().find((li) => li.textContent === "Ana");
+        const nosDeOutros = Object.fromEntries(linhasFora().map((li) => [li.textContent, li]));
+
+        // O retrato com a Ana conectada, e o acessor ainda com a lista velha.
+        ok.chegou = await irParaFora(todos, [chegada]);
+        const dela = linhasPorApelido().get("Ana");
+        ok.janela = {
+          linhaDaPessoa: Boolean(dela) && dela.matches("li.pessoa"),
+          outroNo: dela !== noDaAna,
+          noDoMembroNoGrupo: noDaAna.isConnected && noDaAna.matches("li.membro-fora-do-ar")
+            && noDaAna.closest("li.roster-grupo")?.dataset.foraDoAr === "sim",
+          diz: noDaAna.textContent,
+          ordem: textosFora(),
+          outrosNos: linhasFora().filter((li) => li !== noDaAna && nosDeOutros[li.textContent] === li).length,
+        };
+
+        // E o acessor responde: a Ana sai do FORA DO AR, e a linha de pessoa dela
+        // fica. O retrato já a tem em `presentes`, e anda só a revisão.
+        ok.respondeu = await irParaFora(restantes);
+        ok.depois = {
+          ordem: textosFora(),
+          noDoMembroFora: !noDaAna.isConnected,
+          mesmaLinhaDaPessoa: linhasPorApelido().get("Ana") === dela && dela.isConnected,
+          outrosNos: linhasFora().filter((li) => li !== noDaAna && nosDeOutros[li.textContent] === li).length,
+        };
+        return ok;
+      }, {
+        todos: [A, B, C],
+        restantes: [B, C],
+        chegada: pessoa(A.id, { nickname: A.nickname }),
+      });
+      assert.deepEqual(aberta15.errors, [], "caso 15 (c): erros na página");
+      await aberta15.page.close();
+      assert.ok(caso15c.montou && caso15c.chegou && caso15c.respondeu, "caso 15 (c): os retratos não chegaram à tela");
+      assert.ok(
+        caso15c.janela.linhaDaPessoa && caso15c.janela.outroNo,
+        "caso 15 (c): a Ana conectada não ganhou a linha de pessoa dela, ou a ganhou no nó do membro dela " +
+          `(${JSON.stringify(caso15c.janela)}): a chave do membro colide com a da pessoa`,
+      );
+      assert.ok(
+        caso15c.janela.noDoMembroNoGrupo && caso15c.janela.diz === "Ana",
+        `caso 15 (c): o nó do membro Ana saiu do FORA DO AR, ou deixou de ser dele (${JSON.stringify(caso15c.janela)})`,
+      );
+      assert.deepEqual(caso15c.janela.ordem, ["Ana", "Bruno", "Carla"], "caso 15 (c): o FORA DO AR da janela não é o velho");
+      assert.equal(caso15c.janela.outrosNos, 2, "caso 15 (c): o B e o C trocaram de nó com a Ana se conectando");
+      assert.deepEqual(caso15c.depois.ordem, ["Bruno", "Carla"], "caso 15 (c): o acessor respondeu e a Ana seguiu no FORA DO AR");
+      assert.ok(caso15c.depois.noDoMembroFora, "caso 15 (c): o nó do membro Ana segue no documento");
+      assert.ok(caso15c.depois.mesmaLinhaDaPessoa, "caso 15 (c): a linha de pessoa da Ana trocou de nó quando ela saiu do FORA DO AR");
+      assert.equal(caso15c.depois.outrosNos, 2, "caso 15 (c): o B e o C trocaram de nó quando a Ana saiu do FORA DO AR");
+    }
+
     console.log(
       `linhas-pelo-id: com ${PESSOAS} pessoas, um PersonState mexeu só na linha da pessoa ` +
         `(${caso1.mutacoes} mutações, nenhuma fora dela) e o foco ficou; o mesmo retrato não ` +
@@ -2314,7 +2562,10 @@ async function abrir(browser, url, r) {
         "e os nós de MOD da conversa não saíram do documento. A ação repetida guardou o foco no segundo " +
         "botão, a pendente gravada não tirou o foco da outra, e dois divisores do mesmo dia ficaram. " +
         "A própria mensagem, gravada, ficou no nó da pendente, com o foco no link, a seleção e o " +
-        "REMOVER, que removeu a 5.",
+        "REMOVER, que removeu a 5. No FORA DO AR, quem se conectou levou só o nó dele (o dos que " +
+        "ficaram é o mesmo, sem uma mutação, e a seleção no nome ficou), quem entrou no meio " +
+        "ganhou só o dele, o retrato igual não mexeu em nada, e a chave do membro não tomou o nó " +
+        "da linha de pessoa de mesmo id.",
     );
   } finally {
     await browser.close();
