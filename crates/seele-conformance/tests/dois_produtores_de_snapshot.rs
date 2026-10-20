@@ -255,6 +255,11 @@ const CONTADOS_POR_QUEM_DOBRA: &[(&str, &str)] = &[
     ("icon_revision", "sobe no `ServerIconChanged`"),
     ("person_icons_revision", "sobe no `PersonIconChanged`"),
     ("messages_revision", "sobe quando a conversa muda"),
+    (
+        "fora_do_ar_revision",
+        "sobe quando os membros mudam (`Changed.membros`), antes do `RosterChanged`; a casca \
+         rebusca o FORA DO AR pelo acessor, e a lista nunca entra no retrato (P6)",
+    ),
 ];
 
 /// **Cada campo do `Snapshot` tem um lado**, e um campo novo reprova até

@@ -166,8 +166,31 @@ pub enum Etapa {
         /// De onde o furo veio.
         onde: SocketAddr,
     },
+    /// Quem recebe está sendo chamado: uma sala pessoal mandou `Tocando`
+    /// (tarefa 16 da F7, o 6e do Plano 5).
+    ///
+    /// O candidato que tocou venceu a corrida: ninguém mais começa, e quem
+    /// corria é largado, porque a mesma pessoa chegando por outro caminho seria
+    /// um segundo toque. Daqui só se sai para [`Etapa::Dentro`], quando atendem,
+    /// ou para [`Etapa::Desistiu`], com a razão da sala.
+    Tocando {
+        /// Qual da lista tocou, contando do zero: o índice da [`Etapa::Tentando`]
+        /// dele.
+        candidato: u8,
+        /// O prazo do toque que a sala mandou, em segundos.
+        prazo_s: u16,
+    },
     /// Dentro: o aperto de mão terminou e há sessão.
     Dentro,
+    /// Quem liga desistiu antes de entrar (tarefa 16 da F7, o
+    /// `cancelar_ligacao`): a chegada em voo foi largada inteira.
+    ///
+    /// **Uma etapa própria, e não um [`Etapa::Desistiu`]**: a máquina proíbe
+    /// `Avisando → Desistiu` (o aviso nunca reprova uma chegada) e só deixa o
+    /// último candidato desistir. Quem cancela no meio da corrida quebraria as
+    /// duas regras, e elas continuam valendo para o que é falha. Daqui não se
+    /// sai.
+    Cancelada,
     /// Nenhum candidato entrou, e este é o motivo.
     ///
     /// Carrega o [`ConnectError`] que já existe, inteiro. Achatar `PinChanged`
@@ -201,7 +224,7 @@ impl Etapa {
     ///
     /// Os valores são de exemplo e não significam nada — o que se lê deles é a
     /// variante.
-    pub const TODAS: [Self; 7] = [
+    pub const TODAS: [Self; 9] = [
         Self::Parada {
             candidatos: 0,
             com_bilhete_e_impressao: false,
@@ -219,8 +242,13 @@ impl Etapa {
             avisou: false,
         },
         Self::CaminhoAberto { onde: EXEMPLO },
+        Self::Tocando {
+            candidato: 0,
+            prazo_s: 0,
+        },
         Self::Dentro,
         Self::Desistiu(ConnectError::Unreachable),
+        Self::Cancelada,
     ];
 
     /// O nome estável que atravessa para a casca.
@@ -232,8 +260,10 @@ impl Etapa {
             Self::Avisando { .. } => "Avisando",
             Self::Tentando { .. } => "Tentando",
             Self::CaminhoAberto { .. } => "CaminhoAberto",
+            Self::Tocando { .. } => "Tocando",
             Self::Dentro => "Dentro",
             Self::Desistiu(_) => "Desistiu",
+            Self::Cancelada => "Cancelada",
         }
     }
 
@@ -291,6 +321,16 @@ impl Etapa {
     /// `Avisando`, para `Tentando` ou para `Desistiu`, e esta última é honesta
     /// pela razão oposta à do aviso: numa ligação, os candidatos **dependem**
     /// do quarto.
+    ///
+    /// `Tocando` vem de uma tentativa, e dele só se sai para `Dentro` ou para
+    /// `Desistiu`, de qualquer candidato: quem tocou levou a corrida, e não há
+    /// próximo a tentar. Uma `Tentando` depois dele seria um segundo toque.
+    ///
+    /// # Cancelar
+    ///
+    /// `Cancelada` sai de qualquer etapa que não é fim, e de nenhuma que é:
+    /// quem liga desiste quando quer, até entrar. As regras de cima continuam
+    /// sendo sobre falhas, e é por isso que cancelar não passa por `Desistiu`.
     #[must_use]
     pub fn transicao_legal(atual: &Self, para: &str) -> bool {
         match (atual, para) {
@@ -321,8 +361,11 @@ impl Etapa {
             (Self::Tentando { candidato, de, .. }, "Desistiu") => {
                 u16::from(*candidato) + 1 == u16::from(*de)
             }
-            (Self::Tentando { .. }, "CaminhoAberto" | "Tentando" | "Dentro") => true,
-            (Self::CaminhoAberto { .. }, "Tentando" | "Dentro" | "Desistiu") => true,
+            (Self::Tentando { .. }, "CaminhoAberto" | "Tentando" | "Tocando" | "Dentro") => true,
+            (Self::CaminhoAberto { .. }, "Tentando" | "Tocando" | "Dentro" | "Desistiu") => true,
+            (Self::Tocando { .. }, "Dentro" | "Desistiu") => true,
+            (Self::Dentro | Self::Desistiu(_) | Self::Cancelada, "Cancelada") => false,
+            (_, "Cancelada") => true,
             _ => false,
         }
     }
@@ -494,24 +537,39 @@ impl Caminho {
 ///
 /// Lê a **última** [`Etapa::Tentando`] antes de [`Etapa::Dentro`], que é a que
 /// venceu: as anteriores falharam, e o laço só publica um passo por candidato.
+///
+/// **Menos quando alguém tocou** (tarefa 16 da F7): quem venceu é o candidato
+/// da [`Etapa::Tocando`], e a última tentativa pode ser de outro, que começou
+/// antes do toque e foi largado nele.
 #[must_use]
 pub fn caminho(trilha: &[Passo]) -> Option<Caminho> {
     let dentro = trilha
         .iter()
         .rposition(|passo| passo.etapa == Etapa::Dentro)?;
-    trilha
-        .iter()
-        .take(dentro)
-        .rev()
-        .find_map(|passo| match &passo.etapa {
-            Etapa::Tentando { onde, avisou, .. } => Some(Caminho::de(*onde, *avisou)),
-            Etapa::Parada { .. }
-            | Etapa::Localizando { .. }
-            | Etapa::Avisando { .. }
-            | Etapa::CaminhoAberto { .. }
-            | Etapa::Dentro
-            | Etapa::Desistiu(_) => None,
-        })
+    let antes = trilha.get(..dentro)?;
+    let quem_tocou = antes.iter().rev().find_map(|passo| match passo.etapa {
+        Etapa::Tocando { candidato, .. } => Some(candidato),
+        _ => None,
+    });
+    antes.iter().rev().find_map(|passo| match &passo.etapa {
+        Etapa::Tentando {
+            candidato,
+            onde,
+            avisou,
+            ..
+        } if quem_tocou.is_none_or(|tocou| tocou == *candidato) => {
+            Some(Caminho::de(*onde, *avisou))
+        }
+        Etapa::Tentando { .. }
+        | Etapa::Parada { .. }
+        | Etapa::Localizando { .. }
+        | Etapa::Avisando { .. }
+        | Etapa::CaminhoAberto { .. }
+        | Etapa::Tocando { .. }
+        | Etapa::Dentro
+        | Etapa::Desistiu(_)
+        | Etapa::Cancelada => None,
+    })
 }
 
 /// Uma etapa e quando ela aconteceu.
@@ -726,16 +784,45 @@ impl Chegada {
     /// motivo escolhido é o mesmo de [`crate::enlace::Enlace::conectar_entre`]:
     /// o de quem respondeu, se algum respondeu.
     pub async fn chegar(
-        mut self,
+        self,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Chegado, Frustrada> {
+        self.chegar_ate(chave, pins, std::future::pending()).await
+    }
+
+    /// [`Self::chegar`], até `cancelado` ficar pronto: quem liga desistiu
+    /// (tarefa 16 da F7, o `cancelar_ligacao`).
+    ///
+    /// Cancelar larga a chegada em voo inteira — a pergunta ao ponto de
+    /// encontro, ou a corrida com todos os candidatos e o QUIC de cada um —, e a
+    /// trilha acaba em [`Etapa::Cancelada`], com [`ConnectError::Cancelada`]
+    /// como motivo. Uma sala que tocava vê a conexão fechar, que para ela é
+    /// `ParouDeTocar(Cancelada)`.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Self::chegar`], e [`ConnectError::Cancelada`].
+    pub async fn chegar_ate(
+        mut self,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+        cancelado: impl std::future::Future<Output = ()>,
+    ) -> Result<Chegado, Frustrada> {
+        tokio::pin!(cancelado);
         // Numa ligação, o quarto vem antes da corrida: é ele quem dá os
         // candidatos. A consulta em paralelo com a rede local é dos servidores
         // guardados (a pendência 55), e não daqui.
         if let Some(pelo_codigo) = self.pelo_codigo.take() {
-            if let Err(falha) = self.localizar(pelo_codigo).await {
-                return Err(self.desistir(ConnectError::NaoLocalizou(falha)));
+            let localizado = tokio::select! {
+                biased;
+                () = &mut cancelado => None,
+                localizado = self.localizar(pelo_codigo) => Some(localizado),
+            };
+            match localizado {
+                None => return Err(self.cancelar()),
+                Some(Err(falha)) => return Err(self.desistir(ConnectError::NaoLocalizou(falha))),
+                Some(Ok(())) => {}
             }
         }
 
@@ -797,7 +884,7 @@ impl Chegada {
                 // fim — e a etapa ao vivo existe para acompanhar a travessia,
                 // não para resumi-la depois.
                 biased;
-                Some(tentativa) = tentativas.recv() => self.tentando(tentativa, de),
+                Some(andamento) = tentativas.recv() => self.andou(andamento, de),
                 no_quarto = &mut perguntando, if !perguntado => {
                     perguntado = true;
                     if let Some(entrega) = entrega.take() {
@@ -812,15 +899,22 @@ impl Chegada {
                         let _ = entrega.send(do_quarto);
                     }
                 }
-                resultado = &mut conectando => break resultado,
+                // Depois dos passos já contados, e antes da conexão: um
+                // cancelamento no mesmo instante em que ela fica pronta é a
+                // vontade de quem apertou.
+                () = &mut cancelado => break None,
+                resultado = &mut conectando => break Some(resultado),
             }
         };
         // O que o laço mandou no mesmo instante em que terminou. Sem isto, o
         // candidato que venceu ficaria de fora da trilha justamente por ter
         // vencido — e é dele que sai o [`Caminho`].
-        while let Ok(tentativa) = tentativas.try_recv() {
-            self.tentando(tentativa, de);
+        while let Ok(andamento) = tentativas.try_recv() {
+            self.andou(andamento, de);
         }
+        let Some(resultado) = resultado else {
+            return Err(self.cancelar());
+        };
 
         match resultado {
             Ok(enlace) => {
@@ -834,14 +928,21 @@ impl Chegada {
         }
     }
 
-    /// Publica um candidato que o laço acabou de começar a tentar.
-    fn tentando(&mut self, tentativa: crate::enlace::Tentativa, de: u8) {
-        self.marcar(Etapa::Tentando {
-            candidato: tentativa.candidato,
-            de,
-            onde: tentativa.onde,
-            avisou: tentativa.avisou,
-        });
+    /// Publica o que o laço contou: um candidato que ele acabou de começar a
+    /// tentar, ou o que tocou.
+    fn andou(&mut self, andamento: crate::enlace::Andamento, de: u8) {
+        use crate::enlace::Andamento;
+        match andamento {
+            Andamento::Tentando(tentativa) => self.marcar(Etapa::Tentando {
+                candidato: tentativa.candidato,
+                de,
+                onde: tentativa.onde,
+                avisou: tentativa.avisou,
+            }),
+            Andamento::Tocando { candidato, prazo_s } => {
+                self.marcar(Etapa::Tocando { candidato, prazo_s });
+            }
+        }
     }
 
     /// Pergunta ao quarto onde a sala do código mora, e faz da resposta os
@@ -912,6 +1013,15 @@ impl Chegada {
     }
 
     /// Fecha a chegada no motivo, e entrega a trilha a quem vai lê-la.
+    /// Quem liga desistiu: a trilha acaba em [`Etapa::Cancelada`].
+    fn cancelar(mut self) -> Frustrada {
+        self.marcar(Etapa::Cancelada);
+        Frustrada {
+            motivo: ConnectError::Cancelada,
+            trilha: self.trilha,
+        }
+    }
+
     fn desistir(mut self, motivo: ConnectError) -> Frustrada {
         self.marcar(Etapa::Desistiu(motivo.clone()));
         Frustrada {
@@ -1342,6 +1452,185 @@ mod tests {
                 "`Tentando → {saida}` deixou de valer no primeiro candidato"
             );
         }
+    }
+
+    /// Uma tentativa do candidato `candidato` de `de`, contra `onde`.
+    fn tentando_o(candidato: u8, de: u8, onde: &str, avisou: bool) -> Passo {
+        let Ok(onde) = onde.parse::<SocketAddr>() else {
+            panic!("o endereço de teste `{onde}` não é um endereço");
+        };
+        passo(Etapa::Tentando {
+            candidato,
+            de,
+            onde,
+            avisou,
+        })
+    }
+
+    #[test]
+    fn cancelar_sai_de_qualquer_etapa_antes_do_fim_e_de_nenhuma_depois() {
+        // Tarefa 16 da F7: quem liga desiste quando quer, até entrar. Uma etapa
+        // própria, e não `Desistiu`: o aviso nunca reprova uma chegada, e só o
+        // último candidato desiste, e cancelar no meio quebraria as duas.
+        for etapa in &Etapa::TODAS {
+            let fim = matches!(etapa, Etapa::Dentro | Etapa::Desistiu(_) | Etapa::Cancelada);
+            assert_eq!(
+                Etapa::transicao_legal(etapa, "Cancelada"),
+                !fim,
+                "`{} → Cancelada`",
+                etapa.nome()
+            );
+        }
+        for etapa in &Etapa::TODAS {
+            assert!(
+                !Etapa::transicao_legal(&Etapa::Cancelada, etapa.nome()),
+                "`Cancelada → {}` vale, e cancelar é fim",
+                etapa.nome()
+            );
+        }
+    }
+
+    /// Um endereço que recebe e nunca responde, e o destino dele.
+    fn mudo() -> (std::net::UdpSocket, Destino) {
+        let Ok(socket) = std::net::UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))) else {
+            panic!("o socket mudo não abriu");
+        };
+        let Ok(onde) = socket.local_addr() else {
+            panic!("o socket mudo não sabe onde está");
+        };
+        (socket, destino(onde.port()))
+    }
+
+    #[tokio::test]
+    async fn cancelar_no_meio_da_corrida_acaba_em_cancelada_sem_esperar_os_prazos() {
+        // Três candidatos que nunca respondem: sem cancelar, a corrida queimaria
+        // o prazo de cada um.
+        let (mudos, destinos): (Vec<_>, Vec<_>) = (0..3).map(|_| mudo()).unzip();
+        let comeco = Instant::now();
+        let resultado = Chegada::nova(destinos, None)
+            .chegar_ate(
+                SigningKey::from_bytes(&[7; 32]),
+                Arc::new(crate::tofu::MemoryPinStore::new()),
+                tokio::time::sleep(Duration::from_millis(400)),
+            )
+            .await;
+        let Err(frustrada) = resultado else {
+            panic!("três endereços mudos deixaram alguém entrar");
+        };
+
+        assert_eq!(frustrada.motivo(), &ConnectError::Cancelada);
+        let nomes: Vec<&str> = frustrada
+            .trilha()
+            .iter()
+            .map(|passo| passo.etapa.nome())
+            .collect();
+        assert_eq!(
+            nomes,
+            ["Parada", "Tentando", "Tentando", "Cancelada"],
+            "a trilha de quem cancelou no meio da corrida"
+        );
+        assert!(
+            comeco.elapsed() < Duration::from_secs(2),
+            "cancelar esperou a corrida: {:?}",
+            comeco.elapsed()
+        );
+        drop(mudos);
+    }
+
+    #[tokio::test]
+    async fn cancelar_enquanto_localiza_acaba_em_cancelada() {
+        // Um ponto de encontro que nunca responde: sem cancelar, a ligação
+        // esperaria o prazo do quarto inteiro.
+        let (ponto, _) = mudo();
+        let Ok(onde) = ponto.local_addr() else {
+            panic!("o ponto mudo não sabe onde está");
+        };
+        let codigo = Codigo::da_chave(&[9; 32]);
+        let comeco = Instant::now();
+        let resultado = Chegada::para_o_codigo(codigo, Some(onde.to_string()), "pessoa".into())
+            .chegar_ate(
+                SigningKey::from_bytes(&[7; 32]),
+                Arc::new(crate::tofu::MemoryPinStore::new()),
+                tokio::time::sleep(Duration::from_millis(200)),
+            )
+            .await;
+        let Err(frustrada) = resultado else {
+            panic!("um ponto mudo deixou alguém entrar");
+        };
+
+        assert_eq!(frustrada.motivo(), &ConnectError::Cancelada);
+        let nomes: Vec<&str> = frustrada
+            .trilha()
+            .iter()
+            .map(|passo| passo.etapa.nome())
+            .collect();
+        assert_eq!(nomes, ["Parada", "Localizando", "Cancelada"]);
+        assert!(
+            comeco.elapsed() < crate::encontro::PRAZO_DO_QUARTO,
+            "cancelar esperou o quarto: {:?}",
+            comeco.elapsed()
+        );
+    }
+
+    #[test]
+    fn com_toque_o_caminho_e_o_de_quem_tocou_e_nao_o_da_ultima_tentativa() {
+        // Tarefa 16 da F7. O 0 toca depois que o 1 começou: a última tentativa
+        // da trilha é a do 1, que foi largado no toque, e quem entrou foi o 0.
+        let trilha = vec![
+            passo(Etapa::Parada {
+                candidatos: 2,
+                com_bilhete_e_impressao: true,
+            }),
+            tentando_o(0, 2, "203.0.113.7:8385", true),
+            tentando_o(1, 2, "192.168.1.5:8385", false),
+            passo(Etapa::Tocando {
+                candidato: 0,
+                prazo_s: 45,
+            }),
+            passo(Etapa::Dentro),
+        ];
+
+        assert_eq!(caminho(&trilha).map(|c| c.nome()), Some("FuroDeNat"));
+    }
+
+    #[test]
+    fn do_toque_so_se_sai_para_dentro_ou_para_a_razao_da_sala() {
+        // Tarefa 16 da F7: quem tocou levou a corrida.
+        let tocando = Etapa::Tocando {
+            candidato: 0,
+            prazo_s: 45,
+        };
+        for saida in ["Dentro", "Desistiu"] {
+            assert!(
+                Etapa::transicao_legal(&tocando, saida),
+                "`Tocando → {saida}` não vale"
+            );
+        }
+        for proibida in [
+            "Tentando",
+            "CaminhoAberto",
+            "Tocando",
+            "Avisando",
+            "Localizando",
+            "Parada",
+        ] {
+            assert!(
+                !Etapa::transicao_legal(&tocando, proibida),
+                "`Tocando → {proibida}` vale, e depois de um toque nada mais corre"
+            );
+        }
+        // Toca qualquer candidato, e não só o último.
+        let primeiro_de_tres = Etapa::Tentando {
+            candidato: 0,
+            de: 3,
+            onde: EXEMPLO,
+            avisou: false,
+        };
+        assert!(Etapa::transicao_legal(&primeiro_de_tres, "Tocando"));
+        assert!(Etapa::transicao_legal(
+            &Etapa::CaminhoAberto { onde: EXEMPLO },
+            "Tocando"
+        ));
     }
 
     #[test]

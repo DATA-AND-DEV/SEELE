@@ -43,7 +43,9 @@ mod catalogo;
 // disso. Ela sai no dia em que a decisão de E1 for tomada, junto com o
 // executor que perder.
 mod executor;
+mod firewall;
 mod icone;
+mod ligar;
 mod mods;
 mod reducao;
 mod sala;
@@ -258,6 +260,10 @@ struct Session {
     /// é por isso que ele recusa com [`FalhaAoAtualizar::NadaEscolhido`] em vez
     /// de silenciosamente ir procurar.
     atualizacao: Mutex<Option<tauri_plugin_updater::Update>>,
+    /// **A ligação em voo, para o CANCELAR** (tarefa 28 da F7): o
+    /// [`seele_ffi::Cancelamento`] do `connect` que está andando, ou nada. Quem
+    /// abre e fecha a vaga é o [`ligar::LigacaoEmVoo`].
+    ligacao_em_voo: Mutex<Option<Arc<seele_ffi::Cancelamento>>>,
 }
 
 /// Com que intenção este processo foi aberto.
@@ -1367,10 +1373,16 @@ async fn connect<R: tauri::Runtime>(
         descartados: Arc::clone(&session.eventos_de_geracao_morta),
     }) as Arc<dyn EventListener>;
     let atento = Arc::clone(&ponte);
-    let resultado =
-        tauri::async_runtime::spawn_blocking(move || Connection::connect_watching(config, atento))
-            .await
-            .unwrap_or_else(|_| Err(ConnectFailure::from(ConnectionError::Unreachable)));
+    // **O CANCELAR desta tentativa** (tarefa 28 da F7): a vaga fica na sessão
+    // enquanto a chegada anda, e o `cancelar_ligacao` a acha lá.
+    let em_voo = ligar::LigacaoEmVoo::abrir(&session);
+    let cancelamento = em_voo.cancelamento();
+    let resultado = tauri::async_runtime::spawn_blocking(move || {
+        Connection::connect_cancelavel(config, Some(atento), cancelamento)
+    })
+    .await
+    .unwrap_or_else(|_| Err(ConnectFailure::from(ConnectionError::Unreachable)));
+    drop(em_voo);
     let (connection, veredito) = resultado.map_err(|falha| FalhaDaEntrada {
         falha,
         de_onde: DeOndeVeio {
@@ -1482,6 +1494,9 @@ async fn connect<R: tauri::Runtime>(
     }
 
     let snapshot = connection.snapshot();
+    // Se a ponte discou um código, e qual: a ligação não é visita
+    // (`ligar::anotar_a_chegada`). Lido aqui, antes de a conexão ir para o slot.
+    let ligou_para = connection.codigo_da_ligacao();
 
     // **A mesma conferência, com o slot na mão.** Entre a de cima e esta há os
     // efeitos de entrada, e uma tentativa nova pode ter começado no meio. Com o
@@ -1524,10 +1539,9 @@ async fn connect<R: tauri::Runtime>(
     }
     // Falso até a lista gravar, lá embaixo, a impressão que a conexão aceitou.
     let mut a_lista_guardou = false;
-    if !endereco_desta_maquina(&alvo) {
-        if let Ok(mut guardado) = session.alvo.lock() {
-            *guardado = Some(alvo.clone());
-        }
+    // Uma ligação vai para a agenda, e não para cá: é `anotar_a_chegada` quem
+    // decide, pela origem da tentativa, e quem guarda o alvo da sessão.
+    if ligar::anotar_a_chegada(&session, &casa, &alvo, ligou_para) {
         let aberta = seele_ffi::conhecidos::Conhecidos::abrir(
             std::path::PathBuf::from(&casa).join("conhecidos"),
         );
@@ -2875,6 +2889,25 @@ fn meu_codigo(app: AppHandle) -> Result<String, ()> {
     sala::meu_codigo_em(&config_dir(&app)).ok_or(())
 }
 
+/// O que um texto colado em CONECTAR é (tarefa 30 da F7, a 6g): a leitura do
+/// núcleo, com «é o seu código?» respondido pela chave desta máquina. Ver
+/// [`ligar::EntradaColada`].
+#[tauri::command]
+fn ler_entrada(app: AppHandle, texto: String) -> ligar::EntradaColada {
+    let config = config_dir(&app);
+    let meu = seele_ffi::codigo_desta_maquina(&config).ok();
+    ligar::ler_entrada_em(&texto, meu.as_ref(), |codigo| {
+        ligar::nome_na_agenda(&config, codigo)
+    })
+}
+
+/// CANCELAR (tarefa 28 da F7): larga a ligação em voo, se houver uma. Devolve
+/// se havia o que cancelar. Ver [`ligar::cancelar_em`].
+#[tauri::command]
+fn cancelar_ligacao(session: State<'_, Session>) -> bool {
+    ligar::cancelar_em(&session)
+}
+
 /// A agenda (tarefa 29 da F7): os códigos com quem esta máquina já falou.
 ///
 /// # Errors
@@ -3130,7 +3163,11 @@ struct Anfitriao {
     /// quase nunca funciona.
     ///
     /// Nada nesta tela dizia isso. O relato foi «teste em LAN não funciona».
-    firewall_nao_cobre: Option<String>,
+    ///
+    /// Com o motivo, a frase com o que fazer e se o botão que pede a regra
+    /// resolve ([`firewall::NaTela`]): a tela mostra o botão só quando ele
+    /// resolve (D-sala-1).
+    firewall: Option<firewall::NaTela>,
     /// O roteador abriu a porta, só que não a canônica (8383) — ver "O
     /// quarto" no ADR 0022.
     ///
@@ -3508,6 +3545,7 @@ async fn hospedar(
     .map_err(|erro| classificar(&erro))?;
 
     let alcance = server.alcance();
+    let firewall = firewall_deste_executavel();
     let anfitriao = Anfitriao {
         aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
         convite: server.convite_com_nome(nome_publico.as_deref()),
@@ -3515,7 +3553,7 @@ async fn hospedar(
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
         encontro_recusado: alcance
             .and_then(|alcance| alcance.encontro_recusado().map(str::to_owned)),
-        firewall_nao_cobre: firewall_nao_cobre_este_executavel(),
+        firewall,
         porta_nao_canonica: alcance
             .and_then(|alcance| alcance.porta_nao_canonica().map(str::to_owned)),
     };
@@ -3546,16 +3584,75 @@ async fn hospedar(
 /// O arquivo inteiro, e não só o `hospedar`: a sala pessoal (tarefa 4f da F7)
 /// e o G-casca do Plano 2 vão abrir pontos de entrada novos aqui, e o que
 /// esquecer o padrão reprova sem que alguém precise lembrar de pôr um guarda
-/// nele.
+/// nele. **Menos os módulos de teste**, que sobem pelo `iniciar` curto de
+/// propósito (o padrão seguro, acima): o MOD do guardado
+/// (`o_mod_do_guardado_continua_respondendo`, tarefa 20 da F7) precisa de uma
+/// hospedagem com MODs, e com o ponto padrão ela convocaria o ponto do projeto.
 #[cfg(test)]
 mod o_ponto_de_encontro_de_quem_hospeda {
     /// As duas formas, partidas para não casarem com este texto.
     const COM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar_com_o_ponto_padrao(");
     const SEM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar(");
 
+    /// Este arquivo sem comentários e sem os módulos `#[cfg(test)]`. Cada um é
+    /// de primeiro nível e fecha numa linha `}` sozinha, onde a produção
+    /// recomeça. Só os módulos: um `use` sob `#[cfg(test)]` não tem `}`, e
+    /// cortar até a próxima levaria junto a produção que vem depois dele.
+    fn producao() -> String {
+        producao_de(&super::fonte_sem_comentarios())
+    }
+
+    /// [`producao`] sobre um texto qualquer, para o recorte ter prova própria.
+    ///
+    /// **E ele se confere sozinho** (sugestão da F5, ao aceitar o recorte): o
+    /// que se corta é um módulo, e dentro de um módulo toda linha é recuada,
+    /// menos a do nome e a do `}` final. Um `#[cfg(test)] mod x;`, sem corpo,
+    /// levaria o corte até a `}` da próxima função de produção, e é essa linha
+    /// na coluna zero que acusa.
+    fn producao_de(fonte: &str) -> String {
+        let mut pedacos = fonte.split(concat!("\n#[cfg(test)]\n", "mod "));
+        let mut producao = pedacos.next().unwrap_or_default().to_owned();
+        for pedaco in pedacos {
+            if let Some(fim) = pedaco.find("\n}\n") {
+                let soltas: Vec<&str> = pedaco[..fim]
+                    .lines()
+                    .skip(1)
+                    .filter(|linha| linha.starts_with(|c: char| !c.is_whitespace()))
+                    .collect();
+                assert!(
+                    soltas.is_empty(),
+                    "o recorte de um módulo de teste levou linhas da coluna zero, que são de \
+                     produção: {soltas:?}"
+                );
+                producao.push_str(&pedaco[fim + 2..]);
+            }
+        }
+        producao
+    }
+
+    #[test]
+    #[should_panic(expected = "linhas da coluna zero")]
+    fn o_recorte_acusa_um_modulo_de_teste_sem_corpo() {
+        let fonte = concat!(
+            "fn antes() {}\n",
+            "#[cfg(test)]\n",
+            "mod fora;\n",
+            "\n",
+            "async fn hospedar_de_producao() {\n",
+            "    let _ = 1;\n",
+            "}\n",
+            "fn depois() {}\n",
+        );
+        let _ = producao_de(fonte);
+    }
+
     #[test]
     fn nenhuma_hospedagem_deste_arquivo_sobe_sem_o_ponto_padrao() {
-        let fonte = super::fonte_sem_comentarios();
+        let fonte = producao();
+        assert!(
+            fonte.contains("async fn hospedar(") && !fonte.contains("mod o_ponto_de_encontro"),
+            "o recorte da produção deste arquivo quebrou"
+        );
         let sem: Vec<&str> = fonte
             .lines()
             .filter(|linha| linha.contains(SEM_O_PADRAO))
@@ -3681,116 +3778,50 @@ fn abrir_no_navegador(url: String) -> Result<(), String> {
         .map_err(|erro| format!("não consegui abrir o navegador: {erro}"))
 }
 
-/// Se a regra de firewall desta máquina **não** cobre o executável que está
-/// rodando, e por quê.
+/// Se o firewall do Windows **não** deixa chegar conexão a este SEELE, e por
+/// quê: a frase que a linha da sala e a tela de hospedar mostram.
 ///
-/// # Por que comparar com o registro em vez de ler a regra
+/// Quem lê a regra é [`firewall`], num lugar só (D-sala-1, a conferência de
+/// 15/10): a regra ligada, de entrada, UDP, do caminho inteiro deste programa,
+/// no perfil da rede ativa, com o bloqueio vencendo a liberação. Era aqui, e
+/// perguntava só se existia uma regra chamada `SEELE` — um bloqueio com esse
+/// nome passava por coberto.
 ///
-/// Ler a regra seria perguntar ao `netsh`, e a saída dele é traduzida: o campo é
-/// `Programa:` num Windows em português e `Program:` num em inglês. Um
-/// diagnóstico que depende do idioma do sistema é um diagnóstico que erra
-/// justamente na máquina de outra pessoa.
-///
-/// O registro responde a mesma pergunta sem ambiguidade. `InstallLocation` é
-/// escrito pelo nosso instalador, e é dele que sai o caminho que a regra nomeia.
-/// Se este executável não está lá dentro, a regra não é sobre ele.
-///
-/// Duas formas de estar errado, e as duas dão a mesma tela vazia do outro lado:
-///
-///   1. **A pasta não existe.** Alguém apagou a instalação sem passar pelo
-///      desinstalador; a regra continua apontando para o nada.
-///   2. **Este não é o executável instalado.** Uma cópia compilada à mão, um
-///      atalho para outra pasta. A regra cobre a instalada, não esta.
-///
-/// Medido numa máquina de verdade em 04/09/2026: o registro dizia uma pasta que
-/// não existia, a regra apontava para o executável que estaria lá, o anfitrião
-/// subia anunciando furo de NAT, e quem estava na mesma LAN batia três vezes sem
-/// entrar. Nada na tela dizia isso, e o relato foi «teste em LAN não funciona».
-///
-/// `None` fora do Windows e quando está tudo certo. Um `None` por não conseguir
-/// ler o registro também é `None`: não saber não é motivo para acusar.
-fn firewall_nao_cobre_este_executavel() -> Option<String> {
-    #[cfg(not(windows))]
-    {
-        None
-    }
+/// A resposta vai ao `seele.log` no Windows, inclusive quando é «não sei»:
+/// `None` na tela, mas o motivo no registro. O botão que pede a regra só
+/// aparece quando este é o SEELE instalado, com o instalador ao lado
+/// ([`pasta_instalada`]), que é quem o botão chama.
+fn firewall_deste_executavel() -> Option<firewall::NaTela> {
+    let entrada = firewall::ler_deste_programa();
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
+    tracing::info!(?entrada, "o firewall do Windows, para este SEELE");
+    let eu = std::env::current_exe().ok()?;
+    #[cfg(windows)]
+    let instalado = pasta_instalada()
+        .filter(|pasta| pasta.join("desinstalar.exe").is_file())
+        .map(|pasta| pasta.join("SEELE.exe"));
+    #[cfg(not(windows))]
+    let instalado: Option<std::path::PathBuf> = None;
+    firewall::na_tela(&entrada, &eu, instalado.as_deref())
+}
 
-        let eu = std::env::current_exe().ok()?;
+/// A pasta da instalação, como o instalador a registrou (`InstallLocation`).
+#[cfg(windows)]
+fn pasta_instalada() -> Option<std::path::PathBuf> {
+    use std::os::windows::process::CommandExt;
 
-        // **Antes de comparar caminhos: existe regra?**
-        //
-        // A primeira versão disto comparava o executável com o `InstallLocation`
-        // e nada mais — então ela pegava «a regra aponta para outro lugar» e
-        // deixava passar o caso mais comum de todos: **regra nenhuma**. A caixa
-        // que a cria nasce desmarcada no passo 02 do instalador, com o argumento
-        // de que uma porta aberta é decisão; quem não a marcou não tem regra, e
-        // nada nesta tela dizia isso.
-        //
-        // Foi assim que a pergunta chegou: «mas uai, o instalador já não faz
-        // isso? E eu nunca travei meu firewall, ele já era liberado». As duas
-        // metades são verdade e nenhuma delas produz uma regra: o instalador só
-        // faz quando pedem, e o que estava liberado era o `seele-app.exe` do
-        // instalador antigo — o aviso do Windows cria regra para **um arquivo**,
-        // e este programa passou a se chamar `SEELE.exe`.
-        //
-        // Só a existência é lida, e não os campos: a saída do `netsh` é
-        // traduzida — `Programa:` num Windows em português, `Program:` num em
-        // inglês — e um diagnóstico que depende do idioma erra na máquina de
-        // outra pessoa. Existir ou não existir, isso o código de saída responde.
-        let ha_regra = std::process::Command::new("netsh")
-            .args([
-                "advfirewall",
-                "firewall",
-                "show",
-                "rule",
-                "name=SEELE",
-                "dir=in",
-            ])
-            .creation_flags(SEM_CONSOLE)
-            .output()
-            .ok()
-            .is_some_and(|saida| saida.status.success());
-        if !ha_regra {
-            return Some(
-                "não há regra de firewall para o SEELE nesta máquina, então \
-                 conexão de fora não chega — nem de quem está na mesma rede. \
-                 Reinstale marcando a caixa «abrir a porta 8383 UDP» no passo 02."
-                    .to_owned(),
-            );
-        }
-
-        let instalado = std::process::Command::new("reg")
-            .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
-            .creation_flags(SEM_CONSOLE)
-            .output()
-            .ok()
-            .filter(|saida| saida.status.success())
-            .and_then(|saida| {
-                String::from_utf8_lossy(&saida.stdout)
-                    .lines()
-                    .find_map(|linha| linha.split("REG_SZ").nth(1).map(|r| r.trim().to_owned()))
-            })?;
-
-        let pasta = std::path::Path::new(&instalado);
-        if !pasta.is_dir() {
-            return Some(format!(
-                "a regra de firewall aponta para {instalado}, e essa pasta não existe \
-                 mais — então ela não deixa entrar nada. Reinstale o SEELE marcando a \
-                 caixa da porta."
-            ));
-        }
-        if !eu.starts_with(pasta) {
-            return Some(format!(
-                "este SEELE está rodando de {}, e a regra de firewall cobre o que está \
-                 instalado em {instalado}. Conexões de fora não chegam a esta cópia.",
-                eu.display()
-            ));
-        }
-        None
-    }
+    std::process::Command::new("reg")
+        .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
+        .creation_flags(SEM_CONSOLE)
+        .output()
+        .ok()
+        .filter(|saida| saida.status.success())
+        .and_then(|saida| {
+            String::from_utf8_lossy(&saida.stdout)
+                .lines()
+                .find_map(|linha| linha.split("REG_SZ").nth(1).map(|r| r.trim().to_owned()))
+        })
+        .map(std::path::PathBuf::from)
 }
 
 /// Onde o instalador grava o que se sabe sobre a instalação.
@@ -3809,14 +3840,18 @@ const CHAVE_DA_INSTALACAO: &str = r"HKLM\Software\Microsoft\Windows\CurrentVersi
 /// cópia que a instalação deixa na pasta é ele mesmo. Então o app o chama, o
 /// Windows pergunta uma vez, e a regra nasce.
 ///
-/// # Por que a pergunta mudou de lugar
+/// # Por que também aqui, e não só no instalador
 ///
-/// Ela era uma caixa no passo 02 do instalador, desmarcada, perguntando «quer
-/// abrir a porta?» a quem ainda não sabia se ia hospedar. Perguntado assim:
-/// «mas uai, o instalador já não faz isso?». Faz quando pedem, e quem instala um
-/// app de conversa não está decidindo sobre firewall naquele instante.
+/// O instalador cria a regra por padrão: a caixa «Liberar o SEELE no firewall
+/// do Windows» nasce marcada, e a atualização silenciosa guarda a escolha. Este
+/// caminho é para o que sobra dele — quem a desmarcou, a regra que alguém
+/// apagou, a que uma política não deixou nascer. A linha da sala e a tela de
+/// hospedar mostram o botão quando o leitor ([`firewall`]) diz que de fora não
+/// se chega.
 ///
-/// Quem aperta HOSPEDAR AQUI **está**. É aqui que a pergunta cabe.
+/// Ele libera o SEELE **instalado**, que é o caminho que o instalador conhece:
+/// uma cópia portátil não ganha nada com ele, e um bloqueio criado pelo aviso
+/// do Windows também não sai por aqui.
 ///
 /// # Errors
 ///
@@ -3833,20 +3868,9 @@ fn abrir_a_porta_no_firewall() -> Result<(), String> {
     {
         use std::os::windows::process::CommandExt;
 
-        let instalado = std::process::Command::new("reg")
-            .args(["query", CHAVE_DA_INSTALACAO, "/v", "InstallLocation"])
-            .creation_flags(SEM_CONSOLE)
-            .output()
-            .ok()
-            .filter(|saida| saida.status.success())
-            .and_then(|saida| {
-                String::from_utf8_lossy(&saida.stdout)
-                    .lines()
-                    .find_map(|linha| linha.split("REG_SZ").nth(1).map(|r| r.trim().to_owned()))
-            })
-            .ok_or_else(|| {
-                "não achei a instalação do SEELE no registro desta máquina.".to_owned()
-            })?;
+        let instalado = pasta_instalada().ok_or_else(|| {
+            "não achei a instalação do SEELE no registro desta máquina.".to_owned()
+        })?;
 
         let ferramenta = std::path::Path::new(&instalado).join("desinstalar.exe");
         if !ferramenta.is_file() {
@@ -3945,12 +3969,18 @@ fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
 /// dois eram o mesmo, e um saiu: dois verbos iguais são dois lugares para
 /// divergirem.
 ///
+/// Genérico no runtime, como o [`connect`]: o teste do MOD do guardado
+/// (`o_mod_do_guardado_continua_respondendo`) sai por ele, pelo runtime falso.
+///
 /// # Errors
 ///
 /// Nunca: o tipo existe para a ponte, e desmontar o que já está desmontado é o
 /// desfecho normal de quem apertou duas vezes.
 #[tauri::command]
-async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
+async fn disconnect<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    session: State<'_, Session>,
+) -> Result<(), ()> {
     desmontar_o_cliente(&app, &session);
     Ok(())
 }
@@ -4047,7 +4077,7 @@ fn meu_servidor_em(hospedagens: &Hospedagens, config: &str) -> Option<MeuServido
 ///
 /// Idempotente: desmontar o que já está desmontado gasta um número de geração e
 /// não faz mais nada, que é o desfecho certo para quem apertou duas vezes.
-fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
+fn desmontar_o_cliente<R: tauri::Runtime>(app: &tauri::AppHandle<R>, session: &State<'_, Session>) {
     let morta = session.revogar();
     tracing::debug!(geracao = morta, "sessão revogada antes de desmontar");
 
@@ -4102,6 +4132,194 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
     // disso iria para o endereço da conversa anterior.
     if let Ok(mut onde) = session.endereco_da_sessao.lock() {
         *onde = None;
+    }
+}
+
+/// **Um MOD do guardado continua respondendo enquanto o dono visita outro
+/// servidor** (tarefa 20 da F7, Plano 2).
+///
+/// Sair desmonta só o cliente (tarefa 19), e o servidor guardado continua no ar
+/// com quem estiver nele. Para quem ficou, isso inclui os MODs: o pedido dele
+/// chega à metade de servidor e volta com resposta, com o dono noutro servidor.
+/// E os comandos de MOD do app continuam achando o guardado
+/// ([`Hospedagens::do_guardado`]), e não o servidor em que a sessão está.
+///
+/// Pelo caminho de verdade: o `connect` e o `disconnect` da casca, pelo runtime
+/// falso do Tauri, e o MOD de referência, com as duas metades, ligado no banco
+/// do guardado antes de ele subir (como `seele-server/tests/exemplo_com_mod.rs`).
+/// O pedido entra por `pedidos::executar`, que é por onde o do fio entra
+/// (`seele-server/src/session.rs`), com a conta de quem ficou.
+#[cfg(test)]
+mod o_mod_do_guardado_continua_respondendo {
+    use super::a_entrada_velha_que_chega_tarde::{app, runtime, servidor, vez};
+    use super::{
+        connect, disconnect, onde_estou_na, parar_de_hospedar_em, servidor_do_mod, Hospedado,
+        OndeEstou, Session,
+    };
+    use seele_server::hospedagem::Hospedagem;
+    use seele_server::mods::instalar::{instalar_de_pasta, raizes_de_um_mundo};
+    use seele_server::permissions::Permissions;
+    use seele_server::persistence::mods::{enable, EnabledMod};
+    use seele_server::persistence::{Location, Persistence};
+    use std::time::Duration;
+    use tauri::test::MockRuntime;
+    use tauri::{AppHandle, Manager};
+
+    /// O MOD de referência do produto, que tem as duas metades.
+    const MOD_DE_REFERENCIA: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/testes/mod-de-referencia");
+
+    /// Entra em `alvo` pelo `connect` da casca, até 30 s cada tentativa. Um
+    /// servidor com MOD pergunta antes (`ModsNaoAceitos`): a dona aceita como a
+    /// casca aceita (o corpo de `aceitar_mods`) e entra de novo.
+    async fn entrar(app: &AppHandle<MockRuntime>, alvo: &str) {
+        for _ in 0..2 {
+            let tentativa = tokio::time::timeout(
+                Duration::from_secs(30),
+                connect(
+                    app.clone(),
+                    app.state::<Session>(),
+                    alvo.to_owned(),
+                    "dona".to_owned(),
+                    false,
+                    None,
+                ),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("o `connect` a {alvo} não voltou"));
+            let Err(falha) = tentativa else {
+                return;
+            };
+            let dita = serde_json::to_value(&falha).unwrap_or_default();
+            let Some(conjunto) = dita
+                .pointer("/error/ModsNaoAceitos/conjunto")
+                .and_then(serde_json::Value::as_str)
+            else {
+                panic!("o `connect` a {alvo} não entrou: {dita}");
+            };
+            seele_ffi::mods::aceitar(&super::config_dir(app), alvo, conjunto)
+                .expect("o sim aos MODs não gravou");
+        }
+        panic!("o `connect` a {alvo} não entrou nem com o sim aos MODs");
+    }
+
+    /// O que o MOD `id` responde a `contar`, pedido por quem ficou no
+    /// guardado, no servidor que os comandos de MOD do app acham. `quando` diz
+    /// onde a dona está, para a falha dizer em que ponto o guardado sumiu.
+    async fn contar(
+        session: &tauri::State<'_, Session>,
+        id: &str,
+        quando: &str,
+    ) -> serde_json::Value {
+        let servidor = servidor_do_mod(session).unwrap_or_else(|falha| {
+            panic!("{quando}, os comandos de MOD não acham o guardado: {falha:?}")
+        });
+        // Quem ficou: uma conta do guardado, criada depois da dona, que é a
+        // primeira e por isso a Comandante.
+        let quem_ficou = {
+            let banco = servidor.persistence.lock().await;
+            Permissions::new(&banco)
+                .register_or_find(&[7; 32], "quem-ficou")
+                .expect("a conta de quem ficou")
+                .id
+        };
+        let resposta = seele_server::mods::pedidos::executar(
+            &servidor,
+            quem_ficou,
+            // O canal zero, «nenhum canal»: por `into`, porque a casca não
+            // nomeia o `seele-proto` (ADR 0002).
+            0_u32.into(),
+            id,
+            r#"{"op":"contar"}"#,
+        )
+        .await;
+        serde_json::from_str(&resposta)
+            .unwrap_or_else(|_| serde_json::json!({ "resposta": resposta }))
+    }
+
+    #[test]
+    fn um_mod_do_guardado_continua_respondendo_enquanto_o_dono_visita_outro_servidor() {
+        let _vez = vez();
+        runtime().block_on(async {
+            let app = app();
+            let session = app.state::<Session>();
+
+            // O guardado, com o MOD de referência ligado antes de subir: a
+            // subida carrega o que está ligado.
+            let mundo = tempfile::tempdir().expect("a pasta do guardado não abriu");
+            let raizes = raizes_de_um_mundo(mundo.path());
+            let (manifesto, hash) =
+                instalar_de_pasta(std::path::Path::new(MOD_DE_REFERENCIA), &raizes)
+                    .expect("o MOD de referência não instalou");
+            let banco = Location::File(mundo.path().join("seele.db"));
+            enable(
+                &Persistence::open(&banco).expect("o banco do guardado não abriu"),
+                &EnabledMod {
+                    id: manifesto.id.clone(),
+                    version: manifesto.version.clone(),
+                    hash,
+                    repo: manifesto.repo.clone(),
+                    reach: manifesto.reach.clone(),
+                    server_half: manifesto.server.is_some(),
+                    api: manifesto.api,
+                },
+            )
+            .expect("o MOD de referência não ligou");
+            let guardado = Hospedagem::iniciar(0, banco, "Casa", Some(raizes), |_| Ok(()))
+                .await
+                .expect("o guardado não subiu");
+            let casa = format!("127.0.0.1:{}", guardado.endereco().port());
+            session.hospedagens.lock().expect("as hospedagens").guardado = Some(Hospedado {
+                hospedagem: guardado,
+                servidor: None,
+            });
+
+            // A dona entra no próprio servidor, e o MOD responde.
+            entrar(app, &casa).await;
+            assert_eq!(
+                onde_estou_na(&session),
+                OndeEstou::Guardado,
+                "a dona não entrou no próprio servidor, e o teste não mede a visita"
+            );
+            let dentro = contar(&session, &manifesto.id, "com a dona dentro").await;
+            assert_eq!(
+                dentro.get("vezes"),
+                Some(&serde_json::json!(1)),
+                "o MOD do guardado não responde nem com a dona dentro, e o teste não mede a \
+                 visita: {dentro}"
+            );
+
+            // A dona sai e vai a outro servidor.
+            disconnect(app.clone(), app.state::<Session>())
+                .await
+                .expect("o `disconnect` nunca falha");
+            let (outro, servidor_outro) = servidor("Outro").await;
+            entrar(app, &outro.to_string()).await;
+            assert_eq!(
+                onde_estou_na(&session),
+                OndeEstou::Outro,
+                "a dona não está noutro servidor, e o teste não mede a visita"
+            );
+
+            // E o MOD do guardado continua respondendo a quem ficou: a mesma
+            // instância, com a conta de antes.
+            let fora = contar(&session, &manifesto.id, "com a dona noutro servidor").await;
+            assert_eq!(
+                fora.get("vezes"),
+                Some(&serde_json::json!(2)),
+                "o MOD do guardado não continuou respondendo a quem ficou nele, com a dona \
+                 noutro servidor: {fora}"
+            );
+
+            disconnect(app.clone(), app.state::<Session>())
+                .await
+                .expect("o `disconnect` nunca falha");
+            assert!(
+                parar_de_hospedar_em(&session).await,
+                "o guardado não estava mais no ar no fim"
+            );
+            servidor_outro.shutdown();
+        });
     }
 }
 
@@ -4742,6 +4960,19 @@ fn estado_da_sessao(session: State<'_, Session>) -> EstadoDaSessao {
 #[tauri::command]
 fn messages(session: State<'_, Session>) -> Result<Vec<seele_ffi::Message>, ConnectionError> {
     Ok(session.connection()?.messages())
+}
+
+/// O FORA DO AR: os membros deste servidor que não estão conectados agora (P6,
+/// D-fio-4).
+///
+/// Fora do `snapshot` como a conversa, e por mais um motivo: um MOD da API 5
+/// recebe o retrato inteiro, e nenhum MOD ganhou a lista de membros. A tela
+/// pede este quando o `fora_do_ar_revision` do snapshot muda.
+#[tauri::command]
+fn membros_fora_do_ar(
+    session: State<'_, Session>,
+) -> Result<Vec<seele_ffi::MembroForaDoAr>, ConnectionError> {
+    Ok(session.connection()?.membros_fora_do_ar())
 }
 
 #[tauri::command]
@@ -5808,18 +6039,31 @@ async fn pacotes_no_cache(
     let pasta = config_dir(&app);
     Ok(seele_ffi::mods::listar_por_conteudo(&pasta)
         .into_iter()
-        .map(|instalado| PacoteNoCache {
-            bytes: seele_ffi::mods::bytes_do_pacote(&pasta, &instalado.hash),
-            exigido_aqui: ligados
-                .iter()
-                .any(|(id, hash)| *id == instalado.id && *hash == instalado.hash),
-            api: instalado.api,
-            recusado: instalado.refused,
-            id: instalado.id,
-            version: instalado.version,
-            hash: instalado.hash,
-        })
+        .map(|instalado| pacote_no_cache_de(&pasta, instalado, &ligados))
         .collect())
+}
+
+/// Um pacote do cache como a tela de MODs o desenha.
+///
+/// **A API é a que o manifesto do pacote declara**, a mesma que
+/// [`habilitado_de`] grava quando ele é exigido: a tela e o banco não podem
+/// discordar sobre qual API um pacote pede. Ver `a_api_do_mod_habilitado`.
+fn pacote_no_cache_de(
+    pasta: &str,
+    instalado: seele_ffi::mods::ModInstalado,
+    ligados: &[(String, String)],
+) -> PacoteNoCache {
+    PacoteNoCache {
+        bytes: seele_ffi::mods::bytes_do_pacote(pasta, &instalado.hash),
+        exigido_aqui: ligados
+            .iter()
+            .any(|(id, hash)| *id == instalado.id && *hash == instalado.hash),
+        api: instalado.api,
+        recusado: instalado.refused,
+        id: instalado.id,
+        version: instalado.version,
+        hash: instalado.hash,
+    }
 }
 
 /// Tira um pacote do cache local.
@@ -6648,26 +6892,33 @@ async fn habilitar_mod(
 
     let persistence = persistence_do_mod(&session)?;
     let persistence = persistence.lock().await;
-    // Os seis campos de uma vez, e não só os três de identidade: o que a tela
-    // de aceite de quem entra vai ler — repositório, alcance declarado, e se o
-    // MOD roda na máquina de quem hospeda — é gravado **no mesmo ato** que
-    // grava o hash, e por isso descreve exatamente os bytes que o hash cobre.
-    // Ver a migração 12.
-    seele_server::persistence::mods::enable(
-        &persistence,
-        &seele_server::persistence::mods::EnabledMod {
-            id: instalado.id,
-            version: instalado.version,
-            hash: instalado.hash,
-            repo: instalado.repo,
-            reach: instalado.reach,
-            server_half: instalado.server,
-            // A API que o manifesto pede, gravada no mesmo ato que o hash
-            // (migração 14; D-fio-7). É ela que o anúncio diz.
-            api: instalado.api,
-        },
-    )
-    .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
+    seele_server::persistence::mods::enable(&persistence, &habilitado_de(instalado))
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
+}
+
+/// A linha do banco em que um pacote instalado vira ao ser exigido aqui.
+///
+/// **Uma construção só, para os dois caminhos que gravam**: `habilitar_mod` e
+/// `aplicar_conjunto_de_mods`. Os campos de uma vez, e não só os três de
+/// identidade: o que a tela de aceite de quem entra vai ler — repositório,
+/// alcance declarado, e se o MOD roda na máquina de quem hospeda — é gravado
+/// **no mesmo ato** que grava o hash, e por isso descreve exatamente os bytes que
+/// o hash cobre (migração 12).
+///
+/// **A API é a que o manifesto do pacote declara** (migração 14; D-fio-7), e não
+/// a deste build: é ela que o anúncio diz. Ver `a_api_do_mod_habilitado`.
+fn habilitado_de(
+    instalado: seele_ffi::mods::ModInstalado,
+) -> seele_server::persistence::mods::EnabledMod {
+    seele_server::persistence::mods::EnabledMod {
+        id: instalado.id,
+        version: instalado.version,
+        hash: instalado.hash,
+        repo: instalado.repo,
+        reach: instalado.reach,
+        server_half: instalado.server,
+        api: instalado.api,
+    }
 }
 
 /// Desliga um MOD. Os dados dele ficam — ADR 0045.
@@ -9417,15 +9668,7 @@ async fn aplicar_conjunto_de_mods(
                 motivo: "conteudo-de-outro-mod".to_owned(),
             });
         }
-        linhas.push(seele_server::persistence::mods::EnabledMod {
-            id: instalado.id,
-            version: instalado.version,
-            hash: instalado.hash,
-            repo: instalado.repo,
-            reach: instalado.reach,
-            server_half: instalado.server,
-            api: instalado.api,
-        });
+        linhas.push(habilitado_de(instalado));
     }
 
     let identidade = {
@@ -11271,6 +11514,25 @@ fn analisar_convite(
     Ok(lido)
 }
 
+/// O caminho pela recusa (tarefa 13 da F6, passo 5; P8 da F1): o servidor
+/// recusou o número deste app dizendo, no byte 0 da resposta, que fala o
+/// Servidor `linha`. Responde o mesmo `versoes::ParaEntrar` do
+/// `analisar_convite`, pelo mesmo núcleo, para a casca seguir pelo mesmo
+/// `entrarPelaLinha`.
+///
+/// `linha` é o `ConnectionError::OutraLinha::servidor`, que a FFI só manda
+/// para uma versão que o launcher abre («0.15»).
+#[tauri::command]
+fn para_entrar_pela_recusa(app: AppHandle, linha: String) -> versoes::ParaEntrar {
+    versoes::para_entrar_pela_recusa(
+        &config_dir(&app),
+        versoes::atualizador_do_app(&app)
+            .as_ref()
+            .map(|atualizador| &atualizador.chave),
+        &linha,
+    )
+}
+
 /// O nome estável de uma falha ao ler um convite.
 ///
 /// Um `match` e não o `Display` do core. O `Display` de `ErroDeUri` hoje escreve
@@ -12536,6 +12798,8 @@ fn main() {
             recusar,
             encerrar_a_ligacao,
             meu_codigo,
+            ler_entrada,
+            cancelar_ligacao,
             contatos_da_agenda,
             dar_nome_na_agenda,
             bloquear,
@@ -12552,6 +12816,7 @@ fn main() {
             meu_servidor,
             snapshot,
             messages,
+            membros_fora_do_ar,
             enter_voice_room,
             leave_voice_room,
             open_channel,
@@ -12640,6 +12905,7 @@ fn main() {
             conhecidos,
             esquecer,
             analisar_convite,
+            para_entrar_pela_recusa,
             buscar,
             busca_andar,
             busca_limpar,
@@ -19896,6 +20162,126 @@ mod a_resposta_a_estou_no_meu_servidor {
              em segundo e as das hospedagens, na ordem de `impressoes()`, em terceiro e \
              quarto: a sessão em S ou na sala passa por guardado, e o sim de quem hospeda vai \
              a ela (ADR 0045):\n{corpo}"
+        );
+    }
+}
+
+/// **A P7b: a API que o manifesto declara chega à coluna do banco** por quem a
+/// grava a partir da tela.
+///
+/// O código entrou com a P7a (`4112f96b`), e o teste da tela ficou esperando a
+/// fila do `main.rs`. Ele vai do pacote em disco, pelo mesmo `ler_por_hash` que
+/// os dois comandos usam, até a linha que o banco devolve; o guarda de fonte
+/// prende os dois comandos na mesma construção, que é o que sobra entre a tela e
+/// este teste.
+#[cfg(test)]
+mod a_api_do_mod_habilitado {
+    use super::*;
+
+    /// Um pacote no cache de uma casa temporária, com a API que o manifesto
+    /// declara. Devolve a casa e o hash do pacote.
+    fn pacote_no_cache(api: u32) -> (std::path::PathBuf, String) {
+        // Uma pasta por chamada: os testes deste módulo rodam em paralelo no mesmo
+        // processo, e uma pasta só deixaria um apagar o pacote do outro.
+        static QUAL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = QUAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let raiz = std::env::temp_dir().join(format!("seele-app-p7b-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&raiz);
+        let fonte = raiz.join("fonte");
+        std::fs::create_dir_all(fonte.join("servidor")).expect("temporário");
+        std::fs::write(
+            fonte.join("mod.json"),
+            format!(
+                r#"{{"schema":1,"id":"seele/p7b","version":"1.0.0","api":{api},"repo":"https://github.com/seele/p7b","reach":[],"server":"servidor/main.js"}}"#
+            ),
+        )
+        .expect("manifesto");
+        std::fs::write(
+            fonte.join("servidor/main.js"),
+            "globalThis.aoPedir = () => '';",
+        )
+        .expect("metade de servidor");
+        let lido =
+            seele_ffi::mods::ler_pasta(&fonte.to_string_lossy()).expect("pacote válido recusado");
+        let casa = raiz.join("casa");
+        let guardado = casa.join(seele_ffi::mods::PACOTES).join(&lido.hash);
+        std::fs::create_dir_all(guardado.join("servidor")).expect("cache");
+        for arquivo in ["mod.json", "servidor/main.js"] {
+            std::fs::copy(fonte.join(arquivo), guardado.join(arquivo)).expect("copiar");
+        }
+        (casa, lido.hash)
+    }
+
+    #[test]
+    fn exigir_um_mod_grava_no_banco_a_api_que_o_manifesto_declara() {
+        // A 4: aceita por este build, e diferente do zero de «não preenchida» e
+        // da API deste build. Gravar uma das duas no lugar da do pacote reprova.
+        let declarada = 4;
+        assert!(
+            declarada != 0 && declarada != seele_ffi::mods::MOD_API_VERSION,
+            "o teste precisa de uma API que não é nem o zero nem a deste build"
+        );
+        let (casa, hash) = pacote_no_cache(declarada);
+        let instalado = seele_ffi::mods::ler_por_hash(&casa.to_string_lossy(), &hash)
+            .expect("o pacote não foi achado por hash");
+        let banco = seele_server::persistence::Persistence::open(
+            &seele_server::persistence::Location::Memory,
+        )
+        .expect("banco em memória");
+        seele_server::persistence::mods::enable(&banco, &habilitado_de(instalado))
+            .expect("exigir o MOD");
+        let gravada = seele_server::persistence::mods::enabled(&banco)
+            .expect("ler os exigidos")
+            .into_iter()
+            .find(|exigido| exigido.id == "seele/p7b")
+            .map(|exigido| exigido.api);
+        let _ = std::fs::remove_dir_all(casa.parent().unwrap_or(&casa));
+        assert_eq!(
+            gravada,
+            Some(declarada),
+            "a coluna `api` não recebeu a API que o manifesto declara: o anúncio diria outra"
+        );
+    }
+
+    /// A terceira escrita da API, a da lista do cache que a tela de MODs
+    /// desenha: o mesmo pacote, pelo mesmo `listar_por_conteudo` do comando.
+    #[test]
+    fn a_lista_do_cache_mostra_a_api_que_o_manifesto_declara() {
+        let declarada = 4;
+        let (casa, hash) = pacote_no_cache(declarada);
+        let pasta = casa.to_string_lossy().into_owned();
+        let instalado = seele_ffi::mods::listar_por_conteudo(&pasta)
+            .into_iter()
+            .find(|instalado| instalado.hash == hash)
+            .expect("o pacote não está na lista do cache");
+        let na_tela = pacote_no_cache_de(&pasta, instalado, &[]);
+        let _ = std::fs::remove_dir_all(casa.parent().unwrap_or(&casa));
+        assert_eq!(
+            na_tela.api, declarada,
+            "a lista do cache mostra outra API que a do manifesto, e a tela e o banco discordam"
+        );
+    }
+
+    #[test]
+    fn os_dois_comandos_que_gravam_passam_pela_mesma_construcao() {
+        let fonte = fonte_sem_comentarios();
+        // Montada, e não escrita: escrita aqui, a própria agulha seria achada
+        // no texto deste teste.
+        let a_mao = concat!("EnabledMod", " {");
+        for comando in [
+            "async fn habilitar_mod(",
+            "async fn aplicar_conjunto_de_mods(",
+        ] {
+            let corpo = corpo_de(&fonte, comando);
+            assert!(
+                corpo.contains("habilitado_de(") && !corpo.contains(a_mao),
+                "`{comando}` deixou de gravar pela construção que leva a API do manifesto"
+            );
+        }
+        let lista = corpo_de(&fonte, "async fn pacotes_no_cache(");
+        assert!(
+            lista.contains("pacote_no_cache_de(") && !lista.contains(concat!("PacoteNoCache", " {")),
+            "`pacotes_no_cache` deixou de montar a lista pela construção que leva a API do manifesto"
         );
     }
 }

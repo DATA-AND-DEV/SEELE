@@ -24,7 +24,7 @@ fn larga(texto: &str) -> Vec<u16> {
     texto.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// Põe ou tira a regra de entrada da porta 8383.
+/// Põe ou tira a regra de entrada do SEELE: UDP, pelo programa.
 ///
 /// **Do programa, e não da porta solta.** A regra vale para o executável do
 /// SEELE e para mais nada: uma regra por número de porta abriria a 8383 para

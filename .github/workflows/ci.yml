@@ -424,17 +424,23 @@ jobs:
           --roteiro tools/roteiros/barra-mac.js
           --roteiro tools/roteiros/botoes-da-entrada.js
           --roteiro tools/roteiros/catalogo-de-mods.js
+          --roteiro tools/roteiros/chamar.js
           --roteiro tools/roteiros/clique-nos-glifos.js
           --roteiro tools/roteiros/compartilhar.js
           --roteiro tools/roteiros/dispositivos.js
           --roteiro tools/roteiros/escolher-transmissao.js
           --roteiro tools/roteiros/fechar.js
+          --roteiro tools/roteiros/fora-do-ar.js
           --roteiro tools/roteiros/hospedar.js
           --roteiro tools/roteiros/icone-do-server.js
           --roteiro tools/roteiros/icone-na-trilha.js
+          --roteiro tools/roteiros/ligar.js
+          --roteiro tools/roteiros/ligar-na-sessao.js
           --roteiro tools/roteiros/medidas.js
           --roteiro tools/roteiros/meu-servidor.js
           --roteiro tools/roteiros/nome-ao-hospedar.js
+          --roteiro tools/roteiros/outra-linha.js
+          --roteiro tools/roteiros/outra-linha-pelo-launcher.js
           --roteiro tools/roteiros/palco.js
           --roteiro tools/roteiros/perfil-entrada.js
           --roteiro tools/roteiros/perfil-salva-sessao.js
@@ -452,6 +458,27 @@ jobs:
           --roteiro tools/roteiros/toque.js
           --roteiro tools/roteiros/trocar-de-janela.js
           --roteiro tools/roteiros/versao-do-servidor.js
+      # A bancada do celular (F8; D-api-8): a casca desenhada no Chromium e no
+      # WebKit, a 390 × 844 e a 360 × 800, e o desktop igual pixel a pixel sem a
+      # marca do celular. Ela não rodava em lugar nenhum. É Python, com o
+      # Playwright e o Pillow dele, e o Python do runner é gerenciado pelo
+      # sistema (PEP 668, recusa o `pip install`): por isso o do
+      # `setup-python`, e no fim do job, para não trocar o Python dos roteiros.
+      # O teste `toda_bancada_de_navegador_e_a_do_celular_rodam_no_ci_e_no_publicar`
+      # exige este passo aqui e na bateria do `publicar.sh`.
+      - uses: actions/setup-python@v5
+        if: ${{ !cancelled() }}
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install playwright pillow
+        if: ${{ !cancelled() }}
+      - run: python3 -m playwright install --with-deps chromium webkit
+        if: ${{ !cancelled() }}
+      # Ela é lenta: 561 s num Mac M-series em 15/10/2026, contra uns 74 das
+      # outras 18 somadas. O prazo é três vezes isso, para um runner mais lento.
+      - run: python3 tools/bancada-do-celular.py "$RUNNER_TEMP/bancada-do-celular"
+        if: ${{ !cancelled() }}
+        timeout-minutes: 30
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as

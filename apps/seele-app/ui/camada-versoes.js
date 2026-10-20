@@ -110,6 +110,10 @@ function confirmarOutraVersao(servidor, perdeConversas, vaiBaixar) {
   sim.hidden = false;
   sim.disabled = false;
   caixa.hidden = false;
+  // **O foco vai à pergunta**: ela é a próxima coisa que a pessoa decide, e
+  // um diálogo que aparece sem o teclado é um diálogo que o leitor de tela
+  // não anuncia.
+  sim.focus();
   return new Promise((resolver) => {
     const responder = (resposta) => {
       sim.removeEventListener("click", aoSim);
@@ -130,12 +134,25 @@ function confirmarOutraVersao(servidor, perdeConversas, vaiBaixar) {
  * Entra num servidor de outra linha: abre o SEELE dela, baixando antes se for
  * preciso, já indo para lá.
  *
- * `decisao` é o `versoes::ParaEntrar` que o `analisar_convite` devolveu.
+ * `decisao` é o `versoes::ParaEntrar` que o `analisar_convite` (o link com
+ * `v=`) ou o `para_entrar_pela_recusa` (a recusa do servidor) devolveu.
  * **Esta janela não fecha**: quem lançou não segura o processo filho, e fechar
  * daqui deixaria a pessoa sem nada na tela se o outro não subisse.
+ *
+ * `link` é o `seele://` inteiro, quando houve um: ele leva a outra versão já ao
+ * servidor. Sem ele, ela abre na tela de entrada dela.
+ *
+ * `aoVoltar` devolve a pessoa ao lugar de onde ela veio quando recusa. Sem ele,
+ * o campo do painel, que é de onde o link colado veio.
  */
-async function entrarPelaLinha(decisao, link) {
+async function entrarPelaLinha(decisao, link, aoVoltar) {
   $("servidores-erro").hidden = true;
+  if (decisao.MaisNova) {
+    recusarServidor(
+      "Este servidor é de uma versão mais nova do SEELE. Atualize o app para entrar nele.",
+    );
+    return;
+  }
   if (decisao.LinhaNaoOferecida) {
     recusarServidor(
       `Este servidor roda o Servidor ${decisao.LinhaNaoOferecida.linha}, que ` +
@@ -147,6 +164,8 @@ async function entrarPelaLinha(decisao, link) {
   if (!dados) return;
   const vaiBaixar = Boolean(decisao.Baixar);
   if (!(await confirmarOutraVersao(dados.servidor, dados.perde_conversas, vaiBaixar))) {
+    if (aoVoltar) aoVoltar();
+    else $("servidores-endereco").focus();
     return;
   }
 
@@ -172,15 +191,57 @@ async function entrarPelaLinha(decisao, link) {
       nomePublico: null,
       link,
     });
-    estado.textContent =
-      `O SEELE do Servidor ${dados.servidor} abriu noutra janela, já indo para lá. ` +
-      "Esta continua aberta.";
+    // **Sem link, ela não vai sozinha ao servidor**, e a frase não promete:
+    // uma entrada da lista e um endereço digitado não têm o `seele://` que a
+    // outra versão lê no `--entrar`.
+    estado.textContent = link
+      ? `O SEELE do Servidor ${dados.servidor} abriu noutra janela, já indo para lá. ` +
+        "Esta continua aberta."
+      : `O SEELE do Servidor ${dados.servidor} abriu noutra janela. Entre no servidor ` +
+        "por lá, pela lista ou pelo link. Esta continua aberta.";
     sim.hidden = true;
   } catch (falha) {
     estado.textContent = "";
     sim.disabled = false;
     recusarServidor(fraseDaVersao(falha));
   }
+}
+
+/**
+ * O caminho pela recusa (tarefa 13 da F6, passo 5; P8 da F1; ADR 0058).
+ *
+ * O servidor recusou o número deste app e disse, no byte 0 da resposta, qual
+ * fala. **Só com o `servidor` presente** — a FFI o manda só para uma versão que
+ * o launcher abre — a casca pergunta ao Rust o que fazer e segue pelo mesmo
+ * `entrarPelaLinha` do link com `v=`. Sem ele (um servidor mais novo, ou de
+ * antes da 0.15), não há versão a abrir: mais nova quer dizer «atualize», e a
+ * frase da recusa é tudo.
+ *
+ * `link` é o `seele://` colado nesta tentativa, quando houve um. Ele vai ao
+ * `abrir_versao` e a nenhum outro lugar: pode levar um convite de uso único,
+ * que não foi gasto, porque a recusa por versão vem antes do Hello, e por isso
+ * não entra em registro nem em frase.
+ *
+ * A pergunta mora no painel de servidores, que está fechado na hora da recusa:
+ * ele reabre, e o VOLTAR o fecha e devolve o foco ao CONECTAR, de onde a
+ * pessoa veio.
+ *
+ * Responde se ofereceu.
+ */
+async function entrarPelaRecusa(motivo, link) {
+  const servidor = motivo?.OutraLinha?.servidor;
+  if (!servidor) return false;
+  let decisao;
+  try {
+    decisao = await invoke("para_entrar_pela_recusa", { linha: servidor });
+  } catch (falha) {
+    console.warn("para_entrar_pela_recusa:", falha);
+    return false;
+  }
+  if (!decisao || typeof decisao !== "object") return false;
+  await abrirServidores($("botao-conectar"));
+  entrarPelaLinha(decisao, link ?? null, fecharServidores);
+  return true;
 }
 
 /** Um tamanho em bytes, para gente: «12 MB», «840 KB». */

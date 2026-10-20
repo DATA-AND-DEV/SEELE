@@ -239,7 +239,7 @@
   // primeiro deles que aparece, e o `celular-folhas.css` posiciona os palcos por
   // ela. Medida, e não somada das alturas: a faixa só existe numa sala, os avisos
   // vão e vêm, e o teclado põe a faixa no alto.
-  const PE = ":scope > :is(#veredito, #aviso-fone, #aviso-audio, .voz-celular, .cel-abas, .cel-telemetria)";
+  const PE = ":scope > :is(#veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, #cel-aviso-persistencia, .voz-celular, .cel-abas, .cel-telemetria)";
   function medirOPe() {
     const fim = sessao.getBoundingClientRect().bottom;
     const altos = [...sessao.querySelectorAll(PE)]
@@ -253,12 +253,160 @@
   // observador às vezes não via a área segura chegar, e o diálogo terminava
   // 34 px abaixo do alto da faixa.
   const observador = new ResizeObserver(medirOPe);
-  observador.observe(sessao, { box: "border-box" });
-  for (const parte of sessao.querySelectorAll(PE)) observador.observe(parte, { box: "border-box" });
+  function vigiarOPe() {
+    observador.observe(sessao, { box: "border-box" });
+    for (const parte of sessao.querySelectorAll(PE)) observador.observe(parte, { box: "border-box" });
+  }
+  vigiarOPe();
+  // O que entra no pé depois (o selo da prévia, abaixo; o aviso da resposta do
+  // `persist()`, do `celular-entrada.js`, que carrega depois deste) entra na
+  // medida também.
+  new MutationObserver(vigiarOPe).observe(sessao, { childList: true });
   window.addEventListener("resize", medirOPe);
   medirOPe();
 
   CELULAR.registrar("folhaDaMensagem", folhaDaMensagem);
+
+  // ------------------------------------------------------ a confirmação
+  //
+  // A caixa `#moderar` do desktop, que pergunta antes de todo ato sem volta
+  // (apagar uma mensagem, o `confirmar` de um MOD), é no celular uma folha de
+  // baixo (spec §2.4; o desenho é do `celular-folhas.css`). Como toda folha, o
+  // voltar do aparelho a fecha, pelo mesmo caminho do Escape do desktop
+  // (`fecharModeracao`). Sem isto, o voltar com a
+  // confirmação aberta saía da página, e a sessão caía junto (medido na
+  // bancada, caso `confirmacao`). A saída da folha é o CANCELAR dela, que o
+  // desktop já põe embaixo do verbo; um FECHAR a mais seria o mesmo botão duas
+  // vezes.
+  const caixaDeConfirmar = document.getElementById("moderar");
+  let tirarDaPilha = null;
+  new MutationObserver(() => {
+    if (!caixaDeConfirmar.hidden && !tirarDaPilha) {
+      tirarDaPilha = CELULAR.ajudante("empilhar")(() => {
+        tirarDaPilha = null;
+        fecharModeracao();
+      });
+    } else if (caixaDeConfirmar.hidden && tirarDaPilha) {
+      const tirar = tirarDaPilha;
+      tirarDaPilha = null;
+      tirar();
+    }
+  }).observe(caixaDeConfirmar, { attributes: true, attributeFilter: ["hidden"] });
+
+  // ---------------------------------------------------- a prévia do tema
+  //
+  // D-estilo-1. No celular, o diálogo de um MOD cobre a sessão, e a prévia do
+  // tema que ele pede não se vê atrás dele. O VER NA SESSÃO, no cabeçalho do
+  // produto e só no diálogo que pediu a prévia, recolhe o diálogo num selo do
+  // núcleo, acima da faixa, com VOLTAR; o voltar do aparelho também o devolve.
+  // Recolher e devolver são do `mods-superficies.js` (`recolherSuperficie`):
+  // o diálogo continua montado, com a prévia, e sai da pilha de inércia.
+  //
+  // O selo do desktop (`#selo-da-previa`, no alto e sem clique) o
+  // `celular-folhas.css` esconde: este diz o mesmo, e é por onde se volta. Ele
+  // aparece com qualquer prévia em vigor e nenhum diálogo de MOD à vista; o
+  // VOLTAR, só quando há um diálogo que a casca recolheu.
+  const palcoDeCamadas = document.getElementById("palco-de-camadas");
+  const fraseDoSelo = h("span", { id: "cel-selo-da-previa-frase", text: PALAVRAS.seloDaPrevia });
+  const voltarAoDialogo = h("button", {
+    type: "button",
+    "aria-describedby": "cel-selo-da-previa-frase",
+    hidden: true,
+    onclick: () => devolver(),
+  }, PALAVRAS.voltarAoDialogo);
+  const seloDaPrevia = h("div", {
+    class: "cel-selo-da-previa",
+    role: "status",
+    "data-nucleo": true,
+    hidden: true,
+  }, fraseDoSelo, voltarAoDialogo);
+  // Do pé: o `--cel-pe` o mede, e os palcos dos MODs ficam acima dele.
+  sessao.append(seloDaPrevia);
+
+  // O diálogo recolhido e a entrada dele no voltar. O foco de quem o abriu é do
+  // `mods-superficies.js`, que o guarda no recolher e o repõe no devolver.
+  let recolhida = null;
+
+  function esquecerARecolhida() {
+    const { tirarDoVoltar } = recolhida;
+    recolhida = null;
+    tirarDoVoltar();
+  }
+
+  function recolher(raiz) {
+    if (recolhida || !recolherSuperficie(raiz)) return;
+    recolhida = {
+      raiz,
+      // Tirar uma entrada que o voltar já tirou não faz nada.
+      tirarDoVoltar: CELULAR.ajudante("empilhar")(() => devolver()),
+    };
+    pintarAPrevia();
+    voltarAoDialogo.focus();
+  }
+
+  function devolver() {
+    if (!recolhida) return;
+    const { raiz } = recolhida;
+    esquecerARecolhida();
+    // Um diálogo que o MOD ocultou enquanto estava recolhido não volta: o
+    // ocultar dele vale. Nada no palco muda, e quem tira o VOLTAR é este; o
+    // foco, que estava nele, vai à sessão, e não ao `<body>`.
+    if (!devolverSuperficie(raiz)) {
+      pintarAPrevia();
+      sessao.focus({ preventScroll: true });
+    }
+  }
+
+  // Cada atribuição só quando muda: os observadores abaixo veem o que este
+  // escreve, e escrever o mesmo valor de novo os chamaria sem fim.
+  function mostrarSe(no, aVista) {
+    if (no.hidden === aVista) no.hidden = !aVista;
+  }
+
+  function pintarAPrevia() {
+    for (const raiz of palcoDeCamadas.querySelectorAll(".dialogo-de-mod")) {
+      const cabeca = raiz.querySelector(":scope > .dialogo-de-mod-cabecalho");
+      if (!cabeca) continue;
+      let ver = cabeca.querySelector(":scope > .cel-ver-na-sessao");
+      if (!ver) {
+        ver = h("button", { type: "button", class: "cel-ver-na-sessao", hidden: true, onclick: () => recolher(raiz) },
+          PALAVRAS.verNaSessao);
+        const sair = cabeca.querySelector(":scope > .superficie-de-mod-sair");
+        if (sair) sair.before(ver);
+        else cabeca.append(ver);
+      }
+      mostrarSe(ver, previasDoTema.get(raiz.dataset.mod)?.superficie === raiz.dataset.superficie);
+    }
+    // Voltou por outro caminho (o MOD o mostrou) ou saiu (o MOD o fechou, ou a
+    // sessão acabou): a entrada no voltar sai junto.
+    if (recolhida && (!recolhida.raiz.isConnected || recolhida.raiz.checkVisibility())) esquecerARecolhida();
+    const dialogoAVista = [...palcoDeCamadas.children].some((camada) => !camada.hidden);
+    mostrarSe(seloDaPrevia, previasDoTema.size > 0 && !dialogoAVista);
+    mostrarSe(voltarAoDialogo, recolhida !== null);
+  }
+
+  // A prévia muda pelo `escreverOTemaDaSessao`, que escreve o tema no estilo da
+  // sessão e mostra ou esconde o selo do desktop; os diálogos, pelo palco.
+  const vigia = new MutationObserver(pintarAPrevia);
+  vigia.observe(palcoDeCamadas, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
+  vigia.observe(sessao, { attributes: true, attributeFilter: ["style"] });
+  const vigiarOSeloDoDesktop = () => {
+    const doDesktop = document.getElementById("selo-da-previa");
+    if (!doDesktop) return false;
+    vigia.observe(doDesktop, { attributes: true, attributeFilter: ["hidden"] });
+    return true;
+  };
+  if (!vigiarOSeloDoDesktop()) {
+    const espera = new MutationObserver(() => {
+      if (vigiarOSeloDoDesktop()) {
+        espera.disconnect();
+        pintarAPrevia();
+      }
+    });
+    espera.observe(document.body, { childList: true });
+  }
+  pintarAPrevia();
+
   CELULAR.registrar("folhaDeAnexar", folhaDeAnexar);
   CELULAR.registrar("folhaDaPessoa", folhaDaPessoa);
   CELULAR.registrar("folhaDeFrase", folhaDeFrase);

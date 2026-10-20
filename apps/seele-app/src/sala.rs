@@ -42,10 +42,11 @@ pub(crate) enum EstadoDaSala {
     NoAr {
         /// Se o código está achável pelo ponto de encontro, e por que não.
         registro: Registro,
-        /// Windows: a regra do firewall não cobre este executável, e quem liga
-        /// de fora da casa não chega (D-sala-1). `None` fora do Windows e quando
-        /// está tudo certo. A mesma conferência do HOSPEDAR.
-        firewall_nao_cobre: Option<String>,
+        /// Windows: o firewall não deixa chegar a este executável, com o motivo,
+        /// a frase com o que fazer e se o botão resolve (D-sala-1;
+        /// [`crate::firewall::NaTela`]). `None` fora do Windows, quando está tudo
+        /// certo e quando não se sabe. A mesma leitura do HOSPEDAR.
+        firewall: Option<crate::firewall::NaTela>,
     },
     /// Não subiu, e o motivo.
     Falhou {
@@ -268,10 +269,10 @@ pub(crate) async fn subir_agora<R: Runtime>(app: AppHandle<R>, subida: Subida) {
         }
         None => tracing::error!("a sala subiu sem campainha: ninguém vai ouvir quem tocar"),
     }
-    let firewall_nao_cobre = crate::firewall_nao_cobre_este_executavel();
+    let firewall = crate::firewall_deste_executavel();
     let no_ar = |registro| EstadoDaSala::NoAr {
         registro,
-        firewall_nao_cobre: firewall_nao_cobre.clone(),
+        firewall: firewall.clone(),
     };
     let Some(mut registro) = registro else {
         anunciar(&app, no_ar(Registro::SemPonto));
@@ -621,16 +622,51 @@ mod a_sala_pessoal {
 
     #[tokio::test]
     async fn a_porta_ocupada_e_dita() {
+        // **Três ocupantes, e não só o `[::]` do `std`** (pendência 65): este
+        // teste rodou pela primeira vez no Windows em 15/10 e reprovou — o
+        // `[::]` do `std` lá é só IPv6, e a sala subia ao lado dele, só em IPv4.
+        // Outra sala na porta, um programa só IPv4 e um só IPv6: os três são
+        // «a porta 8385 está em uso».
         let casa = casa_com_a_chave(3);
-        let ocupante = std::net::UdpSocket::bind("[::]:0").unwrap();
-        let porta = ocupante.local_addr().unwrap().port();
-        let subida = subir_em(casa.path().to_str().unwrap(), porta, None).await;
-        assert_eq!(
-            subida.err(),
-            Some(FalhaDaSala::PortaOcupada),
-            "a porta ocupada virou outra falha, e a casca não diria «a porta 8385 está em uso»"
-        );
-        drop(ocupante);
+        let outra_casa = casa_com_a_chave(4);
+        let Ok(outra) = subir_em(outra_casa.path().to_str().unwrap(), 0, None).await else {
+            panic!("a primeira sala não subiu");
+        };
+        let porta = outra.endereco().port();
+        let so_quatro = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+        let so_seis = {
+            use socket2::{Domain, Protocol, Socket, Type};
+            let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).unwrap();
+            socket.set_only_v6(true).unwrap();
+            socket
+                .bind(&std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0)).into())
+                .unwrap();
+            socket
+        };
+        for (quem, porta) in [
+            ("outra sala", porta),
+            (
+                "um programa só IPv4",
+                so_quatro.local_addr().unwrap().port(),
+            ),
+            (
+                "um programa só IPv6",
+                so_seis.local_addr().unwrap().as_socket().unwrap().port(),
+            ),
+        ] {
+            let subida = subir_em(casa.path().to_str().unwrap(), porta, None).await;
+            assert_eq!(
+                subida.as_ref().err(),
+                Some(&FalhaDaSala::PortaOcupada),
+                "com {quem} na porta {porta}, a sala subiu ou falhou por outro motivo, e a \
+                 casca não diria «a porta 8385 está em uso»"
+            );
+            if let Ok(sala) = subida {
+                sala.encerrar().await;
+            }
+        }
+        outra.encerrar().await;
+        drop((so_quatro, so_seis));
     }
 
     #[tokio::test]
@@ -664,15 +700,33 @@ mod a_sala_pessoal {
     fn o_estado_chega_a_casca_com_os_nomes_que_ela_le() {
         let estado = EstadoDaSala::NoAr {
             registro: Registro::RelogioTorto { diferenca_s: 400 },
-            firewall_nao_cobre: None,
+            firewall: None,
         };
         assert_eq!(
             serde_json::to_value(&estado).unwrap(),
             serde_json::json!({
                 "estado": "NoAr",
                 "registro": { "registro": "RelogioTorto", "diferenca_s": 400 },
-                "firewall_nao_cobre": null,
+                "firewall": null,
             })
+        );
+        // E o firewall com o motivo e o botão, com os nomes que a
+        // `camada-sala.js` e a `tela-boot.js` leem.
+        let com_firewall = EstadoDaSala::NoAr {
+            registro: Registro::Registrado,
+            firewall: Some(crate::firewall::NaTela {
+                motivo: crate::firewall::Motivo::OutraCopia,
+                frase: "a frase".to_owned(),
+                abrir_resolve: false,
+            }),
+        };
+        assert_eq!(
+            serde_json::to_value(&com_firewall)
+                .unwrap()
+                .get("firewall")
+                .cloned()
+                .unwrap(),
+            serde_json::json!({ "motivo": "OutraCopia", "frase": "a frase", "abrir_resolve": false })
         );
         assert_eq!(
             serde_json::to_value(EstadoDaSala::Falhou {
@@ -742,7 +796,7 @@ mod a_sala_pessoal {
             estado(&app),
             EstadoDaSala::NoAr {
                 registro: Registro::SemPonto,
-                firewall_nao_cobre: crate::firewall_nao_cobre_este_executavel(),
+                firewall: crate::firewall_deste_executavel(),
             }
         );
         assert!(no_ar(&app), "a sala subiu e não ficou nas hospedagens");

@@ -279,8 +279,8 @@ const OPCOES: [(&str, &str); 2] = [
         "e uma entrada no menu Iniciar",
     ),
     (
-        "Abrir a porta 8383 UDP no firewall do Windows",
-        "só é necessário se você for hospedar um servidor",
+        "Liberar o SEELE no firewall do Windows",
+        "para receber ligações e hospedar um servidor",
     ),
 ];
 

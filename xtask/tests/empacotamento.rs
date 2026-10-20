@@ -653,6 +653,57 @@ print("roteiros: os 2 passaram.")
             true,
         );
 
+        // Os dublês das bancadas de navegador (`todas_as_bancadas_de_navegador`,
+        // D-api-8). As de verdade abrem um Chromium cada uma; aqui um `node` de
+        // mentira à frente do PATH anota cada bancada, reprova a que
+        // `FALSO_BANCADA_VERMELHA` nomeia e trava na que `FALSO_BANCADA_PENDURA`
+        // nomeia, e repassa qualquer outra chamada ao `node` de verdade, se
+        // houver. A do celular é um script no lugar dela, que reprova com
+        // `FALSO_BANCADA_DO_CELULAR`.
+        let node_de_verdade = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .map(|pasta| pasta.join("node"))
+            .find(|node| node.is_file())
+            .map_or_else(String::new, |node| node.display().to_string());
+        escrever(
+            &base.join("ferramentas/node"),
+            &format!(
+                r#"#!/bin/sh
+case "${{1:-}}" in
+    apps/seele-app/bancada/*)
+        printf 'bancada %s\n' "$1" >> "$SEELE_TESTE_DIARIO"
+        nome=$(basename "$1")
+        if [ "$nome" = "${{FALSO_BANCADA_VERMELHA:-}}" ]; then
+            echo "REPROVADO: a bancada de mentira $nome reprovou"
+            exit 1
+        fi
+        if [ "$nome" = "${{FALSO_BANCADA_PENDURA:-}}" ]; then
+            sleep 30
+        fi
+        exit 0
+        ;;
+esac
+[ -n "{node}" ] || {{ echo "não há node de verdade nesta máquina" >&2; exit 127; }}
+exec "{node}" "$@"
+"#,
+                node = node_de_verdade
+            ),
+            true,
+        );
+        escrever(
+            &repo.join("tools/bancada-do-celular.py"),
+            r#"#!/usr/bin/env python3
+import os, sys
+
+with open(os.environ["SEELE_TESTE_DIARIO"], "a", encoding="utf-8") as diario:
+    diario.write("bancada tools/bancada-do-celular.py " + " ".join(sys.argv[1:]) + "\n")
+if os.environ.get("FALSO_BANCADA_DO_CELULAR", "ok") != "ok":
+    print("REPROVADO: o MUDO tem 38 de alvo a 360 x 800")
+    sys.exit(1)
+print("bancada do celular: tudo passou")
+"#,
+            true,
+        );
+
         // O `tauri.conf.json` como o script espera achá-lo: sem BOM, com o
         // título inteiro e com a metade pública da chave.
         escrever(
@@ -4410,6 +4461,139 @@ fn os_crates_do_celular_vermelhos_no_wasm_param_a_publicacao_antes_de_empacotar(
     assert!(
         saida.nada_foi_empacotado(),
         "os crates do celular reprovaram e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn uma_bancada_de_navegador_vermelha_para_a_publicacao_e_as_seguintes_rodam() {
+    // **As bancadas de navegador são o portão também** (D-api-8): muitas
+    // promessas da API 6 só têm prova nelas, e o `ci.yml` só roda quando
+    // alguém o dispara. Uma vermelha para a publicação antes de empacotar, e
+    // as seguintes rodam mesmo assim, como os passos do job: o fim diz todas
+    // as que reprovaram, e não só a primeira.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let codec = codec_de_mentira(&bancada);
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "windows"],
+        &[
+            ("SEELE_OPENH264", codec.as_str()),
+            ("FALSO_BANCADA_VERMELHA", "capa.cjs"),
+        ],
+    );
+
+    assert_ne!(
+        saida.estado, 0,
+        "uma bancada de navegador reprovou e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida
+            .texto
+            .contains("bancadas que reprovaram: apps/seele-app/bancada/capa.cjs"),
+        "o fim da etapa não diz qual bancada reprovou:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida
+            .diario
+            .contains("bancada apps/seele-app/bancada/um-redesenho-por-quadro.cjs")
+            && saida.diario.contains("bancada tools/bancada-do-celular.py"),
+        "a vermelha parou as bancadas que vinham depois dela:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida.nada_foi_empacotado(),
+        "uma bancada de navegador reprovou e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn a_bancada_do_celular_vermelha_tambem_para_a_publicacao() {
+    // A bancada do celular (`tools/bancada-do-celular.py`, da F8) não rodava em
+    // lugar nenhum. Aqui ela é o portão como as outras.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let codec = codec_de_mentira(&bancada);
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "windows"],
+        &[
+            ("SEELE_OPENH264", codec.as_str()),
+            ("FALSO_BANCADA_DO_CELULAR", "reprova"),
+        ],
+    );
+    assert_ne!(
+        saida.estado, 0,
+        "a bancada do celular reprovou e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida
+            .texto
+            .contains("bancadas que reprovaram: tools/bancada-do-celular.py"),
+        "o fim da etapa não diz que foi a do celular:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.nada_foi_empacotado(),
+        "a bancada do celular reprovou e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn uma_bancada_que_trava_e_nomeada_quando_o_prazo_da_etapa_vence() {
+    // Como a dos roteiros: a frase de sempre do prazo fala do `seele-video`, e
+    // a das bancadas diz a última que a etapa disse que rodava.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let codec = codec_de_mentira(&bancada);
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "windows"],
+        &[
+            ("SEELE_OPENH264", codec.as_str()),
+            ("FALSO_BANCADA_PENDURA", "nucleo.cjs"),
+            ("SEELE_PRAZO_DA_ETAPA_S", "5"),
+        ],
+    );
+    assert_ne!(
+        saida.estado, 0,
+        "uma bancada travou até o prazo e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida
+            .texto
+            .contains("A que travou: node apps/seele-app/bancada/nucleo.cjs."),
+        "o prazo das bancadas venceu e a frase não diz qual travou:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("seele-video"),
+        "o prazo das bancadas venceu e a frase fala do `seele-video`:\n{}",
+        saida.texto
+    );
+}
+
+#[test]
+fn o_sem_bateria_pula_tambem_as_bancadas_de_navegador() {
+    // A saída de emergência pula a bateria inteira, e as bancadas de navegador
+    // não podem virar uma etapa que roda mesmo assim.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("FALSO_BANCADA_VERMELHA", "capa.cjs")],
+    );
+    assert!(
+        !saida.diario.contains("bancada "),
+        "o --sem-bateria deixou de pular as bancadas de navegador:\n{}",
         saida.diario
     );
 }

@@ -1843,6 +1843,24 @@ button.linha-nome:hover { text-decoration: underline; }
   padding: 0;
 }
 
+/* **FORA DO AR** (D-fio-4, P6): quem é membro e não está conectado. Apagado, e
+   só o nome — nada ali foi medido e nada ali responde.
+
+   Apagado com `--seele-rotulo-painel`, e não com `osso-apagado`: o nome é a
+   única coisa que a linha diz, e aquele mede 4,11:1, que só vale para texto
+   grande. Este mede 5,52:1 e continua abaixo do `osso` de quem está aqui, que
+   é a diferença que o grupo precisa mostrar. */
+.membro-fora-do-ar {
+  border-bottom: 1px solid var(--seele-linha);
+  padding: 6px 14px;
+  font-size: var(--seele-t-corpo);
+  letter-spacing: 0.02em;
+  color: var(--seele-rotulo-painel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A região `pessoas.lista` (rascunho da API 6, §3): acima da lista, fechada e
    com teto de altura, como as outras regiões. */
 .roster-mods {

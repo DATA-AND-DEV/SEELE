@@ -64,6 +64,14 @@ let ultimoAlvo = null;
 let ultimoApelido = null;
 
 /**
+ * **A ligação da tentativa mais nova**, ou `null` (tarefa 28 da F7): `{ nome }`,
+ * o nome de quem é chamado, como a agenda o dá, ou o código. É dele que saem o
+ * «CHAMANDO ALICE…», o CANCELAR e as frases de quem liga. Da tentativa mais
+ * nova, como o CONECTAR: a que outra substituiu não fala na tela.
+ */
+let ligacaoEmCurso = null;
+
+/**
  * **A credencial de uma tentativa recusada pelo apelido, e o alvo dela** — lote
  * W da F5. `{ alvo, credencial }`, ou `null`.
  *
@@ -218,7 +226,10 @@ function largarAEntrada(alvo, geracao, porque) {
   );
 }
 
-async function conectar(alvo, apelido, credencial) {
+async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = null) {
+  // O `seele://` colado, quando esta tentativa veio de um. Como a credencial,
+  // **não** é lembrado: ele pode levar o convite de uso único, e só serve à
+  // recusa por versão desta tentativa (`entrarPelaRecusa`).
   ultimoAlvo = alvo ?? ultimoAlvo;
   ultimoApelido = apelido ?? ultimoApelido;
   // A credencial — o token do convite, ou a senha do servidor: as duas viajam
@@ -245,6 +256,8 @@ async function conectar(alvo, apelido, credencial) {
   if (recusaDoApelido?.alvo === alvo) credencial ??= recusaDoApelido.credencial;
   recusaDoApelido = null;
   const esta = ++tentativas;
+  ligacaoEmCurso = ligacao;
+  mostrarCancelar();
   // **O apelido desta máquina, quando esta chamada não trouxe um.**
   //
   // Ele era `ultimoApelido ?? ""`, e o `ultimoApelido` só existe depois de
@@ -507,6 +520,18 @@ async function conectar(alvo, apelido, credencial) {
       // poder dizer **qual** nome foi recusado, e de onde veio a impressão,
       // para a recusa por ela acusar o link ou a lista. Ver `fraseDeErro`.
       erro.textContent = fraseDeErro(motivo, apelido, deOndeVeio(falha));
+      // **Numa ligação, a frase de quem liga**, com o nome de quem foi chamado
+      // (tarefa 28 da F7; spec de 23/09, «Erros e frases»). O que não é dela
+      // fica com a frase de sempre, logo acima.
+      if (ligacao) {
+        erro.textContent =
+          fraseDaLigacao(motivo, ligacao.nome, falha?.trail) ?? erro.textContent;
+      }
+      // **O servidor fala outra versão, e o launcher a abre** (tarefa 13 da
+      // F6, passo 5). A frase fica, porque diz o que houve; a pergunta vem
+      // junto, porque diz o que dá para fazer. Sem esperar: a pergunta é da
+      // pessoa, e esta tentativa termina agora, devolvendo o CONECTAR.
+      entrarPelaRecusa(motivo, linkColado).catch((f) => console.warn("entrar pela recusa:", f));
     }
   } finally {
     // **Só a tentativa mais nova devolve o CONECTAR** (lote W2 da F5). A que
@@ -521,6 +546,11 @@ async function conectar(alvo, apelido, credencial) {
     // velha ainda o apagava depois de a nova o ter devolvido, e ele ficava
     // apagado sem dono: a revisão mediu, com a velha parada na pergunta do nome.
     if (esta === tentativas) botao.disabled = false;
+    // A ligação acabou com a tentativa, de um jeito ou de outro.
+    if (esta === tentativas) {
+      ligacaoEmCurso = null;
+      mostrarCancelar();
+    }
     // A travessia acabou, de um jeito ou de outro. O que sobra na tela é o
     // veredito ou o erro, e não o último candidato tentado.
     //
@@ -568,7 +598,29 @@ listen("seele://event", (evento) => {
   // Só com a tela de entrada na frente. Uma reconexão futura que publicasse
   // etapas escreveria numa tela escondida atrás da sessão.
   if ($("tela-boot").hidden) return;
-  mostrarEtapa(fraseDeEtapa(payload.ConnectStageChanged.stage));
+  // Numa ligação, o `Tocando` diz quem está sendo chamado (tarefa 28 da F7).
+  mostrarEtapa(
+    (ligacaoEmCurso
+      ? fraseDaEtapaDaLigacao(payload.ConnectStageChanged.stage, ligacaoEmCurso.nome)
+      : null) ?? fraseDeEtapa(payload.ConnectStageChanged.stage),
+  );
+});
+
+/**
+ * **O CANCELAR de quem está chamando alguém** (tarefa 28 da F7; spec de 23/09,
+ * «Do lado de quem liga», 5): à vista enquanto uma ligação anda, desde a
+ * pergunta ao ponto de encontro até alguém atender. Ele larga a chegada inteira
+ * (`cancelar_ligacao`), e quem toca do outro lado vê a ligação cancelada.
+ */
+function mostrarCancelar() {
+  const botao = $("boot-cancelar-ligacao");
+  botao.hidden = ligacaoEmCurso === null;
+  botao.disabled = false;
+}
+
+$("boot-cancelar-ligacao").addEventListener("click", () => {
+  $("boot-cancelar-ligacao").disabled = true;
+  invoke("cancelar_ligacao").catch((falha) => console.warn("cancelar_ligacao:", falha));
 });
 
 /**
@@ -589,7 +641,7 @@ function mostrarAlcance(
   alcance,
   portaRecusada,
   encontroRecusado,
-  firewallNaoCobre,
+  firewall,
   portaNaoCanonica,
 ) {
   const onde = $("convite-alcance");
@@ -639,45 +691,47 @@ function mostrarAlcance(
   // quem estava na mesma LAN batia três vezes sem entrar. A escada dizia até
   // onde o link ia; nada dizia que a porta estava fechada atrás dela. O relato
   // foi «teste em LAN não funciona».
-  if (firewallNaoCobre) {
+  //
+  // Desde a D-sala-1 (15/10) ela vem do leitor do Rust com o motivo: a frase diz
+  // o que fazer, e o botão só aparece quando resolve (`abrir_resolve`).
+  if (firewall) {
     const parede = document.createElement("span");
     parede.className = "convite-alcance-parede";
-    parede.textContent = firewallNaoCobre;
+    parede.textContent = firewall.frase;
     onde.append(parede);
 
-    // **E o botão que resolve, em vez da frase que manda reinstalar.**
+    // **E o botão que resolve — só quando resolve.**
     //
-    // A pergunta estava no lugar errado: uma caixa no passo 02 do instalador,
-    // desmarcada, perguntando «quer abrir a porta?» a quem ainda não sabia se ia
-    // hospedar. Perguntado assim: «mas uai, o instalador já não faz isso?». Faz
-    // quando pedem — e quem instala um app de conversa não está decidindo sobre
-    // firewall naquele instante.
-    //
-    // Quem acabou de apertar HOSPEDAR AQUI **está**, e é aqui que a decisão
-    // cabe. O Windows pergunta uma vez, e a regra nasce.
-    const abrir = document.createElement("button");
-    abrir.type = "button";
-    abrir.className = "convite-alcance-conserto";
-    abrir.textContent = "ABRIR A PORTA AGORA";
-    abrir.title = "o Windows vai pedir permissão de administrador uma vez";
-    abrir.addEventListener("click", async () => {
-      abrir.disabled = true;
-      abrir.textContent = "PEDINDO AO WINDOWS…";
-      try {
-        await invoke("abrir_a_porta_no_firewall");
-        // Relido e não presumido: quem responde se a regra existe é o Windows,
-        // e o botão que se declara vitorioso é o mesmo defeito do atualizador
-        // que fechava o app sem saber se instalou.
-        parede.textContent =
-          "Regra criada. Mande o link de novo — agora as conexões chegam.";
-        abrir.remove();
-      } catch (falha) {
-        abrir.disabled = false;
-        abrir.textContent = "ABRIR A PORTA AGORA";
-        parede.textContent = fraseDeErro(falha);
-      }
-    });
-    onde.append(abrir);
+    // O instalador cria a regra por padrão (a caixa nasce marcada); este botão
+    // é para o que sobra dele: quem a desmarcou, a regra que alguém apagou. Ele
+    // libera o SEELE **instalado**, e por isso não aparece na cópia portátil
+    // nem no bloqueio do Windows, onde não muda nada — a frase diz o que fazer
+    // no lugar dele. O Windows pergunta uma vez, e a regra nasce.
+    if (firewall.abrir_resolve) {
+      const abrir = document.createElement("button");
+      abrir.type = "button";
+      abrir.className = "convite-alcance-conserto";
+      abrir.textContent = "ABRIR A PORTA AGORA";
+      abrir.title = "o Windows vai pedir permissão de administrador uma vez";
+      abrir.addEventListener("click", async () => {
+        abrir.disabled = true;
+        abrir.textContent = "PEDINDO AO WINDOWS…";
+        try {
+          await invoke("abrir_a_porta_no_firewall");
+          // Relido e não presumido: quem responde se a regra existe é o Windows,
+          // e o botão que se declara vitorioso é o mesmo defeito do atualizador
+          // que fechava o app sem saber se instalou.
+          parede.textContent =
+            "Regra criada. Mande o link de novo — agora as conexões chegam.";
+          abrir.remove();
+        } catch (falha) {
+          abrir.disabled = false;
+          abrir.textContent = "ABRIR A PORTA AGORA";
+          parede.textContent = fraseDeErro(falha);
+        }
+      });
+      onde.append(abrir);
+    }
   }
 
   for (const motivo of [portaRecusada, encontroRecusado, portaNaoCanonica]) {
@@ -726,7 +780,7 @@ async function hospedar() {
       anfitriao.alcance,
       anfitriao.porta_recusada,
       anfitriao.encontro_recusado,
-      anfitriao.firewall_nao_cobre,
+      anfitriao.firewall,
       anfitriao.porta_nao_canonica,
     );
 

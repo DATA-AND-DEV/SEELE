@@ -37,3 +37,14 @@
   margin: 0;
   color: var(--seele-laranja-nerv);
 }
+
+/* **A faixa empurra a tela, e não a cobre** (medido pela F3, 15/10). Por cima,
+   a 1024 ela escondia o texto do veredito de um primeiro contato — a impressão
+   digital que a pessoa compara — enquanto tocava, e a 1440 escondia parte dele.
+   Acesa, a raiz ganha `data-toque-aceso`, e a tela à vista abre no topo o
+   espaço até o pé da faixa (`--toque-ocupa`, medido em `camada-toque.js`):
+   nada da tela fica embaixo dela, em largura nenhuma, e a `#tela-auth` com a
+   impressão desce junto. */
+:root[data-toque-aceso] .tela {
+  padding-top: calc(var(--toque-ocupa, 0px) - var(--seele-barra-janela) + var(--seele-e1));
+}

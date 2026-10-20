@@ -9882,7 +9882,9 @@ desbloqueada, consultas a cada ~3 s por 2 min, cada uma em até 0,2 s): a lista 
 oscilando entre 0 e 49 nomes; com 10 pessoas, em 39 de 39; com 100, em nenhuma. O ENTRAR NA SALA ficou na árvore
 com 50 e 100 (37 de 38), e o aperto pegou. **Decisão da orquestradora: a (b) é da 0.16**, com a F5: as linhas
 reconciliadas pelo id da pessoa, e um `PersonState` mexendo só na linha dela; o guarda é a sonda da F3
-(`arvore-ax.py`), com 50 pessoas em 38 de 38.
+(`arvore-ax.py`, `3436980d`), com 10, 50 e 100 pessoas em toda consulta. Ao prová-la como guarda, a F3 viu a
+perda também com 10: numa de 39 consultas a lista inteira sumiu (0 nomes). É rara com poucas pessoas, mas existe,
+porque a lista é trocada de uma vez.
 
 **A (b) entrou** (15/10, lote AX da F5: `c5691d78` e `d44f7c1f`, só no `tela-sessao.js`, com a bancada
 `linhas-pelo-id.cjs` no CI em `22a66313`, `bede50d9` e `c0d26666`). A lista de pessoas é reconciliada pelo id da
@@ -10088,3 +10090,58 @@ mudou código de produção); as 19 bancadas do job `bancadas`, os 40 roteiros, 
   `emGrupos` funde, e o grupo dos outros poria o mesmo nó duas vezes —, o que exigiria um servidor repetindo id. Pular
   um `novo` já visto, com um `Set` no contexto, fecharia isso, ao custo de mais uma alocação por quadro; ficou fora
   por decisão da orquestradora.
+
+## 65 · No Windows, a sala e o servidor guardado sobem na porta de outro SEELE, só em IPv4, calados
+
+**Aberta em 2026-10-15**, medida pela orquestradora no PC de testes quando o
+`sala::` rodou pela primeira vez no Windows: o `a_porta_ocupada_e_dita`
+reprovou («left: None, right: Some(PortaOcupada)»). **Existe na v0.15.1
+publicada**: o recuo do `alcance::abrir_escuta` é de antes dela. A dona é a F7.
+
+**O mecanismo (medido no PC, com o .NET e com uma sonda no próprio
+`abrir_escuta`):** no Windows, a mesma família na mesma porta é recusada, e uma
+família diferente liga — inclusive a pilha dupla ao lado de um só IPv4. O recuo
+tratava o `AddrInUse` do socket duplo como «sem pilha dupla nesta máquina», e o
+`0.0.0.0` ligava, porque um socket duplo de lá não reserva o IPv4 da porta. Com
+outra escuta do SEELE na porta, a segunda ligou `SoIpv4`; com um programa só
+IPv4, ligou `Dupla`; com o `[::]` do `std`, que no Windows é só IPv6, ligou
+`Dupla`. No macOS e no Linux o socket duplo segura as duas famílias, e o recuo é
+recusado. A irmã do lado do cliente é a 60.
+
+**O custo:** duas cópias abertas — a instalada e a portátil, o caso
+«outra cópia» da D-sala-1 — sobem as duas a sala na 8385, a segunda calada e só
+em IPv4, dividindo a porta. O registro diz uma coisa falsa, e a tela diz «no
+ar»: é ligação perdida sem aviso. Com a D-sala-2 a sala sobe sozinha ao abrir o
+app, e isso fica bem mais provável. O mesmo vale para hospedar na 8383. Não é de
+segurança: quem liga confere a impressão.
+
+**Na 0.16:** consertado pela F7 (`c8bb813c`). O recuo para IPv4 só acontece
+quando a pilha dupla não existe; um `AddrInUse` volta como está, e o app o lê
+como porta ocupada. Antes do socket duplo, uma sonda em `0.0.0.0` e outra em
+`[::]` (só IPv6 no Windows) ligam e soltam a porta: o ocupante que o socket
+duplo não vê, a sonda vê. O `SO_EXCLUSIVEADDRUSE` faria isso no socket, mas o
+`socket2` 0.6.5 não o expõe, e a folha de lints proíbe o `unsafe`. Os testes
+põem três ocupantes — outra escuta, um só IPv4, um só IPv6 — no `seele-server` e
+na sala, e no macOS o do só IPv6 reprovava antes. **Provado no Windows em
+15/10**, no PC de testes: vermelho em `95271bc4` (o `a_porta_ocupada_e_dita`);
+verde em `4ed24ee0` (`alcance::testes` 44 de 44, `sala::` 22 de 22, clippy
+limpo); e, tirada uma sonda de cada vez, o teste reprova no ocupante da família
+dela.
+**Na linha 0.15:** fica como está. A 0.15.2 já está pronta para a tag.
+
+## 66 · O teste da bomba da tela leva ~38 s e reprova quando a máquina está dividida
+
+**Aberta em 2026-10-16**, medida pela orquestradora na bateria da 18ª integração, parte A. O
+`seele-core` `bomba::tests::a_bomba_atravessa_a_conexao_e_o_outro_lado_le_o_que_saiu` espera o
+primeiro fluxo de tela com uma paciência de 60 s (`PACIENCIA`, `bomba.rs`), e com a máquina livre
+ele já leva ~38 s (medido: 38,1 a 45,3 s em oito rodadas). Com outro `cargo test` rodando ao lado,
+passa dos 60 s e reprova com «nenhum fluxo de tela chegou em 60s: a tarefa que escoa ainda espera
+a bomba armar» (4 de 5). Intercalado com o mesmo teste antes da 18ª (`95ff2689`), com o código do
+`seele-core` idêntico, o de antes também reprovou (1 de 4). O `cefa6a93` (10/10) já tinha tirado o
+prazo escondido do QUIC desse teste; o que sobra é o tempo da primeira sessão de codificação.
+
+**A direção:** medir onde vão os ~38 s (a primeira sessão do OpenH264 no build de teste, a
+captura de mentira, a espera da bomba armar) antes de mexer na paciência: um teste que só passa com
+a máquina parada não prova nada numa bateria, e um prazo maior sem a medida esconde uma lentidão
+do produto. **Sem dona ainda.**
+

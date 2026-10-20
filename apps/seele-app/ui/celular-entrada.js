@@ -305,12 +305,77 @@
       // tela-boot.js): a geração, o desenho e a tela de entrada, com a resposta
       // do `connect` que a identidade devolveu. Sem resposta, o contrato da
       // identidade quebrou, e a tela diz isso em vez de ficar conectando.
-      if (desfecho.resposta) return depoisDeConectar(desfecho.resposta, endereco);
+      if (desfecho.resposta) {
+        dizerAPersistencia(desfecho.persistencia);
+        return depoisDeConectar(desfecho.resposta, endereco);
+      }
       desfecho = { erro: "recusado", razao: "sem-resposta" };
     }
     if (desfecho?.erro === "mods-a-aceitar") return aceite(endereco, desfecho, lido);
     if (lido) return entrarEm(identidade.ler() ?? lido, desfecho);
     return inicio(conhecido && desfecho);
+  }
+
+  // ------------------------------------------- a resposta do persist() na sessão
+
+  // A matriz (N-07) pede a resposta do `persist()` dita depois da entrada que
+  // deu certo; aprovado pela orquestradora em 15/10 (itens 1 e 2). Um aviso do
+  // núcleo na pilha de baixo da sessão, acima da faixa, como o de fone, que o
+  // `celular-sessao.css` põe no pé: os palcos dos MODs e AJUSTES ficam acima
+  // dele. A região `role="status"` existe sempre, vazia: o leitor de tela
+  // anuncia o que entra numa região que ele já conhece.
+  //
+  // Dita na primeira entrada e quando a resposta muda, guardada na origem;
+  // com o armazenamento recusado, de novo a cada entrada, que é a verdade.
+  // **Dita só quando a frase apareceu inteira**: uma entrada que para no
+  // aperto e volta não viu a sessão, e a próxima diz de novo. É o «negada»,
+  // o único dos três em que a pessoa pode perder a identidade sem saber.
+  const DITA = "seele.persistencia-dita";
+  const sessao = document.getElementById("tela-sessao");
+  const avisoDaPersistencia = h("div", { id: "cel-aviso-persistencia", class: "veredito", role: "status" });
+  sessao.append(avisoDaPersistencia);
+  let vigiaDaFrase = null;
+
+  function jaDita() {
+    try {
+      return localStorage.getItem(DITA);
+    } catch {
+      return null;
+    }
+  }
+
+  function calarAPersistencia() {
+    vigiaDaFrase?.disconnect();
+    vigiaDaFrase = null;
+    avisoDaPersistencia.replaceChildren();
+  }
+
+  function dizerAPersistencia(resposta) {
+    calarAPersistencia();
+    const frase = PALAVRAS.persistencia[resposta];
+    if (!frase || jaDita() === resposta) return;
+    const texto = h("span", { class: "veredito-texto", text: frase });
+    avisoDaPersistencia.append(texto, h("button", {
+      class: "botao-fantasma",
+      type: "button",
+      onclick: () => {
+        calarAPersistencia();
+        sessao.focus({ preventScroll: true });
+      },
+    }, PALAVRAS.dispensar));
+    // Inteira: a frase toda na tela, sem corte de quem a contém. Com a sessão
+    // escondida (o aperto, a espera), nada se cruza, e nada é dito.
+    vigiaDaFrase = new IntersectionObserver((vistas) => {
+      if (!vistas.some((vista) => vista.intersectionRatio >= 1)) return;
+      vigiaDaFrase.disconnect();
+      vigiaDaFrase = null;
+      try {
+        localStorage.setItem(DITA, resposta);
+      } catch {
+        // Sem o armazenamento da origem, a próxima entrada diz de novo.
+      }
+    }, { threshold: 1 });
+    vigiaDaFrase.observe(texto);
   }
 
   async function entrar(lido, apelido) {

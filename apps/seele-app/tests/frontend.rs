@@ -629,6 +629,12 @@ fn every_command_the_frontend_calls_is_registered() {
 // entre o Rust e a tela: saíram quando a trilha e a entrada (o VOLTAR AO MEU
 // SERVIDOR e o PARAR DE HOSPEDAR) passaram a chamá-los. A lista voltou a ser
 // vazia.
+//
+// `ler_entrada` (tarefa 30 da F7) esteve aqui entre o Rust e a tela, e saiu
+// quando o diálogo de servidores passou a mandar todo texto a ele.
+//
+// `cancelar_ligacao` (tarefa 28 da F7) também, e saiu quando o CANCELAR do
+// CHAMANDO passou a chamá-lo. A lista voltou a ser vazia.
 const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
@@ -2131,11 +2137,14 @@ fn a_lista_que_nao_abre_ou_nao_grava_diz_isso_no_log() {
     );
 
     let Some(visita) = connect
-        .split("if!endereco_desta_maquina(&alvo){")
+        .split("ifligar::anotar_a_chegada(")
         .nth(1)
         .and_then(|resto| resto.split("lista.registrar(").next())
     else {
-        panic!("`connect` não anota mais a visita na lista, ou não pula o servidor desta máquina");
+        panic!(
+            "`connect` não anota mais a visita na lista, ou não pergunta antes ao \
+             `anotar_a_chegada` se a chegada é visita (nem ligação, nem o servidor desta máquina)"
+        );
     };
     assert!(
         visita.contains("Conhecidos::abrir(") && visita.contains("tracing::warn!("),
@@ -2762,8 +2771,12 @@ fn the_arrival_stage_reaches_the_screen_while_the_arrival_is_happening() {
     // to cross under the name serde writes, and the script has to branch on
     // that name.
     let corpo = body_of(&read("src/main.rs"), "async fn connect(");
+    // Either door that takes the listener before blocking: `connect_watching`,
+    // or `connect_cancelavel` with the listener in it (task 28 of F7, the
+    // CANCELAR of whoever is calling).
     assert!(
-        corpo.contains("Connection::connect_watching"),
+        corpo.contains("Connection::connect_watching")
+            || corpo.contains("Connection::connect_cancelavel(config, Some("),
         "the app still enters by the door that blocks with nobody listening, so \
          the stages happen inside a channel that answers only at the end:\n{corpo}"
     );
@@ -8078,6 +8091,35 @@ fn quem_nao_prova_a_chave_tem_frase_propria_e_nao_a_de_versao_incompativel() {
     );
 }
 
+#[test]
+fn quem_cancela_a_ligacao_le_que_cancelou_e_nao_uma_falha() {
+    // Tarefa 16 da F7. `ConnectionError::Cancelada` é unitária, como a
+    // `ChaveNaoProvada` logo acima, e o `fraseDeErro` a lê em `FRASES` por esse
+    // nome: sem a entrada, a tela escreveria o nome de uma variante do Rust a
+    // quem acabou de apertar CANCELAR. E a frase diz que foi a pessoa, e não
+    // uma falha de rede ou de alguém.
+    //
+    // O nome vem do serde, e não de um texto aqui: renomear a variante reprova
+    // este guarda, em vez de deixar uma frase que ninguém lê.
+    let Ok(json) = serde_json::to_string(&seele_ffi::ConnectionError::Cancelada) else {
+        panic!("ConnectionError does not serialise, so no shell can read it at all");
+    };
+    let nome = json.trim_matches('"');
+    let arquivo = without_comments(&read("ui/frases.js"));
+    let frases = sentences_of(&arquivo, "FRASES");
+    let Some((_, frase)) = frases.iter().find(|(variante, _)| variante == nome) else {
+        panic!(
+            "`ConnectionError::{nome}` chega à tela sem frase em `FRASES`, e a tela escreve \
+             o nome de uma variante do Rust a quem cancelou a ligação"
+        );
+    };
+    assert!(
+        frase.contains("CANCELOU"),
+        "a frase de `{nome}` não diz que foi a pessoa quem cancelou, e se lê como uma \
+         falha: {frase}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // What the owner asked for after installing the app and using it. Four guards,
 // and three of them guard an **absence** — the hardest kind to keep, because
@@ -10765,6 +10807,14 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 ///    mesma conferência vale para a pergunta dos MODs: só a tentativa mais
 ///    nova a abre com a credencial dela.
 ///
+/// 7. **O link colado vai à outra versão, e só a ela** (tarefa 13 da F6, passo
+///    5). Ele carrega o mesmo convite, e desce do painel de servidores ao
+///    `conectar` como `linkColado`, sem ser lembrado entre tentativas. Quando o
+///    servidor recusa por falar outra versão, a recusa vem antes do Hello e o
+///    convite não foi gasto: o `entrarPelaRecusa` o entrega ao `abrir_versao`,
+///    para a versão aberta entrar com ele. Ele não vai a registro nem a frase,
+///    e o roteiro `outra-linha-pelo-launcher.js` reprova se for.
+///
 /// **A entrada pelo navegador segue o mesmo contrato** (Tarefa 3.4 da F4): a
 /// `identidade-web.js` guarda o token do link, e o link inteiro que o carrega,
 /// em `segredos`, na memória da tentativa. Cada linha dela que nomeia
@@ -10775,7 +10825,13 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
-        ("tela-boot.js", "async function conectar(alvo, apelido, credencial) {"),
+        ("tela-boot.js", "async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = null) {"),
+        // O link colado (parte 7): o caminho pela recusa por versão o leva
+        // ao `abrir_versao` da outra versão, e a nenhum outro lugar.
+        (
+            "tela-boot.js",
+            "entrarPelaRecusa(motivo, linkColado).catch((f) => console.warn(\"entrar pela recusa:\", f));",
+        ),
         ("tela-boot.js", "joinSecret: credencial ?? null,"),
         // O apelido tomado (lote W): o lugar, a leitura presa ao alvo e o
         // esquecimento no começo de toda tentativa, e a guarda na recusa.
@@ -10932,6 +10988,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         for linha in texto.lines().map(str::trim) {
             if [
                 "credencial",
+                "linkColado",
                 "aceitePendente",
                 "recusaDoApelido",
                 "segredos",
@@ -11015,9 +11072,15 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     }
 
     // 3. Só quatro chamadas de `conectar` passam credencial por argumento (a do
-    //    apelido tomado, `conectar` anexa sozinho: ver a parte 6).
+    //    apelido tomado, `conectar` anexa sozinho: ver a parte 6). A credencial é
+    //    o terceiro argumento; o quarto é o link colado (parte 7, da F6), e o quinto
+    //    a ligação (tarefa 28 da F7), que leva só o nome de quem é chamado, e uma chamada com `undefined` ou `null`
+    //    escrito no terceiro não leva credencial nenhuma.
     const LEVAM: &[(&str, &str)] = &[
-        ("camada-servidores.js", "alvo, apelido || undefined, token"),
+        (
+            "camada-servidores.js",
+            "alvo, apelido || undefined, token, linkColado ?? null, ligar ? { nome } : null",
+        ),
         ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
         ("camada-mods.js", "alvo, null, credencial"),
         // A entrada pelo navegador (3.4): o link da página, com o token da
@@ -11039,7 +11102,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 continue;
             }
             let mut fundo = 1_i32;
-            let mut virgulas = 0;
+            let mut virgulas: Vec<usize> = Vec::new();
             let mut fim = depois.len();
             for (i, c) in depois.char_indices() {
                 match c {
@@ -11051,11 +11114,17 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                             break;
                         }
                     }
-                    ',' if fundo == 1 => virgulas += 1,
+                    ',' if fundo == 1 => virgulas.push(i),
                     _ => {}
                 }
             }
-            if virgulas >= 2 {
+            // O terceiro argumento, entre a segunda vírgula e a terceira (ou o
+            // fim): `undefined` e `null` escritos ali não são credencial.
+            let terceiro = virgulas.get(1).map(|&depois_da_segunda| {
+                let ate = virgulas.get(2).copied().unwrap_or(fim);
+                depois[depois_da_segunda + 1..ate].trim()
+            });
+            if terceiro.is_some_and(|terceiro| !matches!(terceiro, "undefined" | "null")) {
                 levam.push((nome.clone(), depois[..fim].trim().to_owned()));
             }
         }
@@ -13883,13 +13952,35 @@ fn os_pacotes_que_nao_voltam_nao_se_chamam_sincronizacao() {
 
 #[test]
 fn a_parede_do_firewall_traz_o_conserto_junto() {
-    // «Mas uai, o instalador já não faz isso?» Faz quando pedem — a caixa nasce
-    // desmarcada no passo 02 —, e quem instala um app de conversa não está
-    // decidindo sobre firewall naquele instante. Quem aperta HOSPEDAR AQUI está.
+    // O instalador cria a regra por padrão (a caixa nasce marcada); a parede é
+    // para o que sobra dele. A frase sozinha mandava reinstalar, que é um preço
+    // alto por uma linha no firewall, e o botão faz o Windows perguntar uma vez.
     //
-    // A frase sozinha mandava reinstalar, que é um preço alto por uma linha no
-    // firewall. O botão faz o Windows perguntar uma vez.
+    // **E o botão só quando resolve** (D-sala-1, a orquestradora em 15/10): ele
+    // libera o SEELE instalado, e na cópia portátil e no bloqueio do Windows não
+    // muda nada. Quem decide é o leitor do Rust (`firewall::NaTela`), e a tela
+    // obedece: o botão nasce dentro do `if (firewall.abrir_resolve)`, e a parede
+    // diz a frase do motivo.
     let boot = without_comments(&read("ui/tela-boot.js"));
+    let alcance = js_function(&boot, "function mostrarAlcance(");
+    assert!(
+        alcance.contains("parede.textContent = firewall.frase"),
+        "a parede do firewall deixou de dizer a frase do motivo que o Rust leu:\n{alcance}"
+    );
+    let (Some(condicao), Some(botao)) = (
+        alcance.find("if (firewall.abrir_resolve)"),
+        alcance.find("document.createElement(\"button\")"),
+    ) else {
+        panic!(
+            "a parede do firewall perdeu o botão, ou o botão perdeu a condição de só \
+             aparecer quando resolve:\n{alcance}"
+        );
+    };
+    assert!(
+        condicao < botao,
+        "o botão da parede do firewall nasce antes de perguntar se resolve: na cópia \
+         portátil e no bloqueio do Windows ele aparece e não muda nada:\n{alcance}"
+    );
 
     assert!(
         boot.contains("abrir_a_porta_no_firewall"),
@@ -15770,9 +15861,13 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
         rust.contains("fn revogar(&self) -> u64"),
         "a sessão deixou de ter como revogar a geração"
     );
-    // Revogar é a **primeira** coisa que a desmontagem faz.
+    // Revogar é a **primeira** coisa que a desmontagem faz. Com ou sem
+    // genéricos, como o `body_of`: o `desmontar_o_cliente` é genérico no
+    // runtime desde que um teste do `main.rs` sai pelo `disconnect` no runtime
+    // falso do Tauri (tarefa 20 da F7).
     let desmontar = rust
         .split_once("fn desmontar_o_cliente(")
+        .or_else(|| rust.split_once("fn desmontar_o_cliente<"))
         .expect("`desmontar_o_cliente`")
         .1;
     let desmontar = desmontar.split_once("\n}\n").map_or(desmontar, |(a, _)| a);
@@ -16456,7 +16551,7 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
     let conectar = body_of(&fonte, "async fn connect");
     let (Some(onde), Some(condicao)) = (
         conectar.find("session.endereco_da_sessao"),
-        conectar.find("if !endereco_desta_maquina"),
+        conectar.find("if ligar::anotar_a_chegada("),
     ) else {
         panic!("`connect` deixou de preencher o endereço da sessão, ou de filtrar a lista de visitados");
     };
@@ -16615,7 +16710,7 @@ fn a_sonda_e_semeada_fora_do_filtro_da_lista_de_visitados() {
 
     let (Some(semente), Some(filtro)) = (
         conectar.find("lembrar_o_caminho"),
-        conectar.find("if !endereco_desta_maquina"),
+        conectar.find("if ligar::anotar_a_chegada("),
     ) else {
         panic!("`connect` deixou de semear a sonda, ou de filtrar a lista de visitados");
     };
@@ -18638,9 +18733,14 @@ fn a_casca_veste_a_sessao_com_o_disco_logo_depois_do_connect() {
              gravadas não valem até a pessoa mexer de novo"
         );
     };
-    let Some(conectou) = conectar.find("Connection::connect_watching(") else {
+    // Pela porta que escuta, ou pela que escuta e se cancela (tarefa 28 da F7).
+    let Some(conectou) = conectar
+        .find("Connection::connect_watching(")
+        .or_else(|| conectar.find("Connection::connect_cancelavel("))
+    else {
         panic!(
-            "`connect` não conecta mais por `connect_watching`, e este guarda mediu outra coisa"
+            "`connect` não conecta mais por `connect_watching` nem por `connect_cancelavel`, e \
+             este guarda mediu outra coisa"
         );
     };
     assert!(
@@ -18767,6 +18867,11 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
             "buscandoMensagens",
             "pedido em voo: o `finally` o apaga, e a resposta de outra sessão é \
              descartada (`sincronizarMensagens` confere a geração)",
+        ),
+        (
+            "buscandoForaDoAr",
+            "pedido em voo: o `finally` o apaga, e a resposta de outra sessão é \
+             descartada (`sincronizarForaDoAr` confere a geração)",
         ),
         (
             "abrindoLinha",
@@ -19616,12 +19721,13 @@ fn o_connect_confere_a_sala_desta_maquina_pelo_codigo() {
     );
 }
 
-/// As variantes de um `enum` de `src/sala.rs`, pelo texto: cada linha de quatro
-/// espaços que começa com maiúscula, entre `enum {nome}` e o `}` que o fecha.
-fn variantes_da_sala(nome: &str) -> Vec<String> {
-    let sala = without_comments(&read("src/sala.rs"));
-    let Some(depois) = sala.split(&format!("enum {nome} {{")).nth(1) else {
-        panic!("`src/sala.rs` não tem mais o `enum {nome}`");
+/// As variantes de um `enum` de um arquivo do app, pelo texto: cada linha de
+/// quatro espaços que começa com maiúscula, entre `enum {nome}` e o `}` que o
+/// fecha.
+fn variantes_do_enum(arquivo: &str, nome: &str) -> Vec<String> {
+    let fonte = without_comments(&read(arquivo));
+    let Some(depois) = fonte.split(&format!("enum {nome} {{")).nth(1) else {
+        panic!("`{arquivo}` não tem mais o `enum {nome}`");
     };
     let corpo = depois.split("\n}").next().unwrap_or_default();
     let variantes: Vec<String> = corpo
@@ -19666,7 +19772,7 @@ fn toda_variante_da_sala_pessoal_tem_frase() {
         "FalhaAoAtender",
         "FalhaNaAgenda",
     ] {
-        for variante in variantes_da_sala(tipo) {
+        for variante in variantes_do_enum("src/sala.rs", tipo) {
             if !bloco.contains(&format!("{variante}:")) {
                 faltam.push(format!("{tipo}::{variante}"));
             }
@@ -19764,6 +19870,290 @@ fn a_faixa_do_toque_chama_nao_toma_a_tela_e_nenhum_mod_sabe_dela() {
     assert!(
         entrar.contains("ejetar()") && !entrar.contains("parar_de_hospedar"),
         "o ATENDER não desmonta só o cliente:\n{entrar}"
+    );
+}
+
+/// **O toque chega por evento, e não por relógio** (tarefa 31 da F7; spec de
+/// 23/09, «Testes» 8).
+///
+/// O toque de antes vinha de um `setInterval` de 5 s, que a webview minimizada
+/// estrangula e até suspende: quem estava noutro programa só via o toque quando
+/// já tinham desistido. O vigia do Rust emite por `CANAL_DO_TOQUE`, e os testes
+/// de `src/toque.rs` provam isso sozinhos; o que só se vê aqui é a casca do
+/// outro lado. Ela ouve o mesmo canal, reage a cada aviso que o Rust manda, e
+/// pergunta `toques_agora` uma vez só, na carga, para a tela que abre com o
+/// toque já tocando. Um canal renomeado de um lado só, ou um evento que a faixa
+/// não conhece, é um toque que não chega a ninguém, sem erro nenhum.
+#[test]
+fn o_toque_chega_por_evento_e_nunca_por_relogio() {
+    let rust = without_comments(&read("src/toque.rs"));
+    let Some(canal) = rust
+        .split("const CANAL_DO_TOQUE: &str = \"")
+        .nth(1)
+        .and_then(|depois| depois.split('"').next())
+    else {
+        panic!("`src/toque.rs` não tem mais o `CANAL_DO_TOQUE`");
+    };
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    assert!(
+        toque.contains(&format!("listen(\"{canal}\",")),
+        "a faixa do toque não ouve `{canal}`, o canal em que o Rust avisa: o toque não chega \
+         à casca"
+    );
+    for evento in variantes_do_enum("src/toque.rs", "AvisoDoToque") {
+        assert!(
+            toque.contains(&format!("payload?.evento === \"{evento}\"")),
+            "o Rust avisa `{evento}` pelo canal do toque, e a faixa não reage a ele"
+        );
+    }
+    assert!(
+        !toque.contains("setInterval("),
+        "a faixa do toque voltou a um relógio: a webview minimizada o estrangula, e o toque \
+         chega quando já desistiram"
+    );
+    let pedidos: Vec<&str> = toque
+        .lines()
+        .filter(|linha| linha.contains("\"toques_agora\""))
+        .collect();
+    assert!(
+        pedidos == ["invoke(\"toques_agora\")"],
+        "o `toques_agora` deixou de ser uma pergunta só, na carga: {pedidos:?}"
+    );
+    for arquivo in ui_files(".js") {
+        if arquivo == "camada-toque.js" || arquivo == "ponte-web.js" {
+            continue;
+        }
+        assert!(
+            !read(&format!("ui/{arquivo}")).contains("\"toques_agora\""),
+            "`ui/{arquivo}` pergunta pelos toques, e o toque chega por evento à faixa"
+        );
+    }
+}
+
+/// **O apelido de quem liga é citado como alegação** (tarefa 31 da F7; spec de
+/// 23/09, «O toque» e «Testes» 8).
+///
+/// O apelido é o que a pessoa diz que é, e qualquer um diz ser qualquer um; só o
+/// código é prova. Por isso a faixa o mostra entre aspas, ao lado do código, e o
+/// nome que a pessoa deu na agenda (que é dela, e não de quem liga) vem de fora
+/// das aspas. A faixa escreve só a frase do `frases.js`: um `.apelido` solto no
+/// script da faixa seria o apelido sem aspas na tela de alguém.
+/// O comportamento é provado num navegador, em `tools/roteiros/toque.js`.
+#[test]
+fn o_apelido_de_quem_liga_e_citado_como_alegacao() {
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(depois) = frases
+        .split("const SALA_PESSOAL = Object.freeze({")
+        .nth(1)
+        .and_then(|sala| sala.split("\n  ligando:").nth(1))
+    else {
+        panic!("o `SALA_PESSOAL` do `frases.js` não tem mais o `ligando`");
+    };
+    let ligando = js_function(depois, "=>");
+    let citado = ligando.matches("«${apelido}»").count();
+    assert!(
+        citado > 0 && citado == ligando.matches("${apelido}").count(),
+        "a faixa do toque mostra o apelido de quem liga fora das aspas, como se fosse prova:\n\
+         {ligando}"
+    );
+    assert!(
+        ligando.contains("${codigo}"),
+        "a faixa do toque não mostra o código de quem liga, que é a única prova:\n{ligando}"
+    );
+
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    assert!(
+        js_function(&toque, "async function desenharToque(")
+            .contains("frase = SALA_PESSOAL.ligando(tocando);"),
+        "a faixa do toque não escreve mais a frase do `frases.js`"
+    );
+    assert!(
+        !toque.contains(".apelido"),
+        "o script da faixa do toque lê o apelido por conta própria, fora da frase que o cita"
+    );
+}
+
+/// **«Atender sai de Y» aparece quando há conexão em outro lugar** (tarefa 31
+/// da F7; spec de 23/09, «O toque» e «Testes» 8).
+///
+/// Atender desmonta a sessão desta janela, e quem está num servidor sai dele: o
+/// botão diz isso antes, com o nome. Quem responde é o `onde_estou`, a resposta
+/// única. Sai dizendo de onde quem está no servidor guardado (que continua no
+/// ar) e quem está em outro lugar; não diz nada quem não tem sessão (`Nenhum`) e
+/// quem já está na própria sala (`Pessoal`, o grupo crescendo). Uma variante
+/// nova do `OndeEstou` reprova aqui até alguém decidir de que lado ela fica.
+/// O caminho do `Guardado` é provado num navegador, em `tools/roteiros/toque.js`.
+#[test]
+fn atender_sai_de_y_quando_ha_conexao_em_outro_lugar() {
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    let desenhar = js_function(&toque, "async function desenharToque(");
+    assert!(
+        desenhar.contains("const onde = await invoke(\"onde_estou\")"),
+        "a faixa do toque não pergunta ao `onde_estou` onde a janela está:\n{desenhar}"
+    );
+    let Some(sai) = desenhar.find("SALA_PESSOAL.atenderSaiDe(") else {
+        panic!("o ATENDER não diz mais de onde sai:\n{desenhar}");
+    };
+    let Some(se) = desenhar[..sai].rfind("if (") else {
+        panic!("o «atender sai de» não depende de onde a janela está:\n{desenhar}");
+    };
+    let condicao = &desenhar[se..sai];
+    for onde in variantes_do_enum("src/main.rs", "OndeEstou") {
+        let sem_sessao_ou_na_sala = onde == "Nenhum" || onde == "Pessoal";
+        assert_eq!(
+            condicao.contains(&format!("onde === \"{onde}\"")),
+            !sem_sessao_ou_na_sala,
+            "com o `onde_estou` em `{onde}`, o ATENDER {} — a regra é sair dizendo de onde \
+             sempre que há conexão em outro lugar: {condicao}",
+            if sem_sessao_ou_na_sala {
+                "anuncia uma saída que não acontece"
+            } else {
+                "tira a pessoa de onde ela está sem avisar"
+            }
+        );
+    }
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(frase) = frases
+        .split("\n  atenderSaiDe:")
+        .nth(1)
+        .and_then(|depois| depois.lines().next())
+    else {
+        panic!("o `frases.js` não tem mais o `atenderSaiDe`");
+    };
+    assert!(
+        frase.contains("SAI DE ${"),
+        "o `atenderSaiDe` não diz de onde a pessoa sai: {frase}"
+    );
+}
+
+/// **O texto colado em CONECTAR vai inteiro ao Rust** (tarefa 30 da F7; spec de
+/// 23/09, «Como um texto colado é classificado»).
+///
+/// A tela decidia sozinha o que era convite (`startsWith("seele://")`) e tratava
+/// todo o resto como endereço: um código colado ali virava um nome de máquina
+/// que não resolve. Agora quem lê é o `ler_entrada`, e a tela segue pela
+/// variante de `ligar::EntradaColada`. Uma variante nova reprova aqui até a tela
+/// ter caminho para ela, e as duas que viram frase estão no `ENTRADA_COLADA`.
+#[test]
+fn o_dialogo_de_servidores_manda_todo_texto_ao_ler_entrada() {
+    let servidores = without_comments(&read("ui/camada-servidores.js"));
+    assert!(
+        !servidores.contains("startsWith(\"seele://\")"),
+        "o diálogo de servidores voltou a decidir sozinho o que é convite"
+    );
+    let Some(envio) = servidores
+        .split("$(\"servidores-forma\").addEventListener(\"submit\"")
+        .nth(1)
+    else {
+        panic!("o diálogo de servidores não tem mais o envio do campo");
+    };
+    assert!(
+        envio.contains("invoke(\"ler_entrada\", { texto: escrito })"),
+        "o envio do campo não manda o texto ao `ler_entrada`"
+    );
+    for variante in variantes_do_enum("src/ligar.rs", "EntradaColada") {
+        assert!(
+            envio.contains(&format!("\"{variante}\"")) || envio.contains(&format!(".{variante}")),
+            "o Rust lê um texto colado como `{variante}`, e o diálogo não tem caminho para ele"
+        );
+    }
+    let frases = without_comments(&read("ui/frases.js"));
+    let ditas: Vec<String> = sentences_of(&frases, "ENTRADA_COLADA")
+        .into_iter()
+        .map(|(variante, _)| variante)
+        .collect();
+    for unitaria in ["CodigoComErro", "SeuCodigo"] {
+        assert!(
+            ditas.iter().any(|dita| dita == unitaria),
+            "`EntradaColada::{unitaria}` não tem frase no `ENTRADA_COLADA`: {ditas:?}"
+        );
+    }
+}
+
+/// O nome de uma variante como o serde a escreve: a palavra de uma unitária, ou
+/// a chave única de uma com campos.
+fn nome_no_fio(valor: &impl serde::Serialize) -> String {
+    match serde_json::to_value(valor) {
+        Ok(serde_json::Value::String(nome)) => nome,
+        Ok(serde_json::Value::Object(campos)) => campos.keys().next().cloned().unwrap_or_default(),
+        outro => panic!("uma variante que não se escreve como nome: {outro:?}"),
+    }
+}
+
+/// **Quem liga lê o desfecho com o nome de quem chamou, e tem o CANCELAR**
+/// (tarefa 28 da F7; spec de 23/09, «Erros e frases», quem liga).
+///
+/// As frases de quem liga moram em `fraseDaLigacao`, e cada desfecho da tabela
+/// da spec tem a sua, lida pelo nome que a FFI escreve: uma razão renomeada no
+/// Rust reprova aqui, em vez de cair calada na frase sem nome. O comportamento
+/// é provado num navegador, em `tools/roteiros/chamar.js`.
+#[test]
+fn quem_liga_le_o_desfecho_com_o_nome_e_tem_o_cancelar() {
+    let frases = without_comments(&read("ui/frases.js"));
+    let ligacao = js_function(&frases, "function fraseDaLigacao(");
+    for razao in [
+        seele_ffi::EndReason::NinguemAtendeu,
+        seele_ffi::EndReason::ChamadaRecusada,
+        seele_ffi::EndReason::ChamadaEncerrada,
+        seele_ffi::EndReason::RateLimited,
+        seele_ffi::EndReason::ServerFull,
+    ] {
+        let nome = nome_no_fio(&razao);
+        assert!(
+            ligacao.contains(&format!("razao === \"{nome}\"")),
+            "quem liga não tem frase para `{nome}`, e lê a recusa sem o nome de quem chamou"
+        );
+    }
+    for motivo in [
+        seele_ffi::FalhaAoLocalizar::NinguemMora,
+        seele_ffi::FalhaAoLocalizar::PontoMudo,
+    ] {
+        let nome = nome_no_fio(&motivo);
+        assert!(
+            ligacao.contains(&format!("localizar === \"{nome}\"")),
+            "quem liga não tem frase para o ponto que respondeu `{nome}`"
+        );
+    }
+    for erro in [
+        seele_ffi::ConnectionError::CodigoNaoBate {
+            esperado: String::new(),
+            veio: None,
+        },
+        seele_ffi::ConnectionError::SePassouPorCodigo {
+            codigo: String::new(),
+        },
+        seele_ffi::ConnectionError::OutraLinha {
+            numero: 0,
+            servidor: None,
+            mais_nova: false,
+        },
+    ] {
+        let nome = nome_no_fio(&erro);
+        assert!(
+            ligacao.contains(&format!("erro?.{nome}")),
+            "quem liga não tem frase para `{nome}`"
+        );
+    }
+    assert!(
+        ligacao.matches("${quem}").count() >= 8,
+        "as frases de quem liga deixaram de dizer o nome de quem foi chamado:\n{ligacao}"
+    );
+
+    let boot = without_comments(&read("ui/tela-boot.js"));
+    assert!(
+        boot.contains("invoke(\"cancelar_ligacao\")"),
+        "o CANCELAR de quem liga não chama `cancelar_ligacao`"
+    );
+    let conectar = js_function(&boot, "async function conectar(");
+    assert!(
+        conectar.contains("fraseDaLigacao(motivo, ligacao.nome, falha?.trail)"),
+        "a falha de uma ligação não passa pela frase de quem liga:\n{conectar}"
+    );
+    assert!(
+        boot.contains(
+            "fraseDaEtapaDaLigacao(payload.ConnectStageChanged.stage, ligacaoEmCurso.nome)"
+        ),
+        "o toque de uma ligação não diz quem está sendo chamado"
     );
 }
 
@@ -20002,4 +20392,82 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
              uma exceção sem dono é uma porta que ninguém confere"
         );
     }
+}
+
+#[test]
+fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
+    // **D-fio-4: «todos veem, sem papéis e sem horário».** O grupo FORA DO AR
+    // (P6) lista os membros deste servidor que não estão conectados, e um
+    // «visto por último» ali diria a todo membro quando cada outro sai — é o
+    // que a decisão recusou. As duas metades: o tipo que atravessa a ponte só
+    // tem id e apelido, e a linha da casca só lê o apelido.
+    //
+    // E a linha não passa pelo caminho das linhas de quem está aqui: aquelas
+    // um MOD apresenta (`pessoa.cartao`, `pessoa.identidade`), e nenhum MOD
+    // ganhou a lista de membros.
+    let tipos = without_comments(&read("../../crates/seele-ffi/src/types.rs"));
+    let Some(depois) = tipos.split("pub struct MembroForaDoAr {").nth(1) else {
+        panic!("`seele-ffi/src/types.rs` não declara mais `MembroForaDoAr`");
+    };
+    let Some(corpo_do_tipo) = depois.split('}').next() else {
+        panic!("`MembroForaDoAr` não fecha");
+    };
+    let campos: Vec<&str> = corpo_do_tipo
+        .lines()
+        .filter_map(|linha| linha.trim().strip_prefix("pub ")?.split(':').next())
+        .map(str::trim)
+        .collect();
+    assert_eq!(
+        campos,
+        ["id", "nickname"],
+        "`MembroForaDoAr` passou a levar mais que id e apelido até a casca; D-fio-4 \
+         recusa papéis e horário no FORA DO AR"
+    );
+
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let linha = body_of(&sessao, "function grupoForaDoAr(");
+    let lidos: std::collections::BTreeSet<&str> = linha
+        .match_indices("membro.")
+        .filter(|(onde, _)| {
+            linha[..*onde]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+        })
+        .filter_map(|(onde, achado)| {
+            let resto = &linha[onde + achado.len()..];
+            resto
+                .split(|c: char| !c.is_alphanumeric() && c != '_')
+                .next()
+        })
+        .collect();
+    assert_eq!(
+        lidos.into_iter().collect::<Vec<_>>(),
+        ["nickname"],
+        "a linha do FORA DO AR lê do membro mais que o apelido:\n{linha}"
+    );
+    for proibido in [
+        "Date",
+        "at_seconds",
+        "segundos",
+        "linhaDoRoster",
+        "linhaNativaDoRoster",
+        "cartoesDaPessoa",
+        "conteudoDasContribuicoes",
+        "\"pessoa",
+    ] {
+        assert!(
+            !linha.contains(proibido),
+            "a linha do FORA DO AR usa `{proibido}`: ela é só o nome, sem horário, e não passa \
+             pelo caminho que os MODs apresentam:\n{linha}"
+        );
+    }
+    // E o grupo é desenhado: uma função que ninguém chama guardaria nada.
+    assert!(
+        names(
+            &body_of(&sessao, "function desenharPessoas("),
+            "grupoForaDoAr"
+        ),
+        "`desenharPessoas` não desenha mais o grupo FORA DO AR"
+    );
 }

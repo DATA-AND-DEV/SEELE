@@ -390,13 +390,33 @@ class Caso:
     http: bool = False
 
 
+# O que a página pede e a cópia da `ui/` não tem, de propósito. O `.wasm` sai do
+# `cargo xtask web`, e não mora na `ui/`: a `identidadeDaPagina()` da F4 o pede
+# na carga, falha, e a tela do celular segue sem ela (o `catch` do
+# `celular-entrada.js`); os casos da entrada passam a identidade deles.
+AUSENTES_NA_COPIA = frozenset({"seele_web.wasm"})
+
+
 @contextlib.contextmanager
 def servida(pasta: pathlib.Path):
     """A cópia servida em 127.0.0.1, numa porta efêmera: nada disputa a 8384."""
     class Calado(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *_):
             pass
-    servidor = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Calado, directory=str(pasta)))
+
+    class ComFila(http.server.ThreadingHTTPServer):
+        # **A fila do `listen`**, que o `socketserver` deixa em 5. A página pede
+        # uns setenta arquivos de uma vez, e o Chromium abre seis conexões em
+        # paralelo: com a máquina ocupada, a linha que aceita as conexões
+        # atrasa, a fila enche, e o sistema recusa a conexão seguinte
+        # (`net::ERR_CONNECTION_RESET`). O script que não chegou não roda, e o
+        # seguinte reprova lendo o que ele declarava: a reprovação que a F7
+        # guardou em 15/10 («PONTE_NO_LUGAR_DO_TAURI is not defined»).
+        # Medido: com a fila em 1 e carga, quatro rodadas em quatro reprovam
+        # assim; com esta, nenhuma.
+        request_queue_size = 128
+
+    servidor = ComFila(("127.0.0.1", 0), functools.partial(Calado, directory=str(pasta)))
     fio = threading.Thread(target=servidor.serve_forever, daemon=True)
     fio.start()
     try:
@@ -819,12 +839,561 @@ def entrada_abre_a_sessao(pg: Page) -> list[str]:
     return falhas
 
 
+LER_A_PERSISTENCIA = r"""() => {
+  const aviso = document.getElementById('cel-aviso-persistencia');
+  const texto = aviso?.querySelector('.veredito-texto');
+  const botao = aviso?.querySelector('button');
+  const faixa = document.getElementById('voz').getBoundingClientRect();
+  let dita;
+  try { dita = localStorage.getItem('seele.persistencia-dita'); } catch { dita = 'recusado'; }
+  return { sessao: !document.getElementById('tela-sessao').hidden,
+           aperto: !document.getElementById('tela-auth').hidden && document.getElementById('tela-auth').dataset.modo === 'aperto',
+           texto: texto?.checkVisibility() ? texto.textContent : null,
+           inteiro: !!texto && texto.scrollWidth <= texto.clientWidth + 1 && texto.scrollHeight <= texto.clientHeight + 1,
+           papel: aviso?.getAttribute('role') ?? null,
+           dispensar: botao?.checkVisibility() ? Math.round(botao.getBoundingClientRect().height) : 0,
+           acimaDaFaixa: !!aviso && aviso.getBoundingClientRect().bottom <= faixa.top + 1,
+           inerte: !!aviso?.closest('[inert], [aria-hidden="true"]'),
+           dita };
+}"""
+
+
+SOBRE_O_AVISO_DA_PERSISTENCIA = """(seletor) => {
+  const a = document.getElementById('cel-aviso-persistencia').getBoundingClientRect();
+  const el = document.querySelector(seletor);
+  if (!el?.checkVisibility()) return null;
+  const r = el.getBoundingClientRect();
+  return Math.max(0, Math.round(Math.min(r.bottom, a.bottom) - Math.max(r.top, a.top)));
+}"""
+
+
+def persistencia_dita(pg: Page) -> list[str]:
+    """A resposta do `persist()` na sessão (N-07; aprovado em 15/10, itens 1 e
+    2): um aviso do núcleo na pilha de baixo, acima da faixa, `role="status"`,
+    com o dispensar de 44. Dito na primeira entrada e quando a resposta muda;
+    repetido só com o armazenamento da origem recusado, porque aí é verdade.
+
+    **Dita é dita de verdade**: só quando a frase apareceu inteira. Uma entrada
+    que para no aperto (a impressão sem conferir) e volta não viu a sessão, e a
+    próxima diz de novo; sem isso, o «negada», o único dos três em que a
+    pessoa pode perder a identidade sem saber, se perdia sem ter sido lido.
+
+    Cada entrada é uma página nova (o recarregar), com o mesmo armazenamento
+    da origem e o mesmo IndexedDB, como a próxima vez que a pessoa abre."""
+    falhas = []
+    f = pg.evaluate("FRASES_DO_CELULAR.entrada.persistencia")
+
+    def entrar_com(resposta: str, veredito: str = CONFERIDA, recusado: bool = False) -> dict:
+        pg.evaluate(IDENTIDADE_DO_CASO)
+        pg.evaluate(f"""() => {{
+          const resposta = {json.dumps(resposta)};
+          navigator.storage.persist = resposta === 'sem-suporte' ? undefined : async () => resposta === 'concedida';
+          if ({json.dumps(recusado)}) {{
+            const recusar = () => {{ throw new DOMException('recusado', 'SecurityError'); }};
+            Storage.prototype.getItem = recusar;
+            Storage.prototype.setItem = recusar;
+          }}
+          SEELE_RESPOSTAS.connect = {{ snapshot: SEELE_QUADRO, veredito: {veredito} }};
+          window.__respostas.push('connect');
+        }}""")
+        usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+        if pg.evaluate("!!document.getElementById('cel-entrada-apelido')"):
+            pg.fill("#cel-entrada-apelido", "rafa")
+        tocar_acao(pg, pg.evaluate("FRASES_DO_CELULAR.entrada.entrarEm.entrar"))
+        pg.wait_for_timeout(1500)
+        return pg.evaluate(LER_A_PERSISTENCIA)
+
+    def de_novo() -> None:
+        pg.reload()
+        pg.wait_for_function("typeof criarIdentidadeDoNavegador === 'function' && !!CELULAR.ajudante('entrada')")
+        pg.wait_for_timeout(300)
+
+    pg.evaluate("localStorage.removeItem('seele.persistencia-dita')")
+
+    # Para no aperto, e volta: a sessão não apareceu, e nada foi dito.
+    r = entrar_com("negada", veredito='{ FirstContact: { fingerprint: "3cbc fb02 3cbc fb02" } }')
+    if r["sessao"] or not r["aperto"]:
+        falhas.append(f"a entrada com a impressão sem conferir não parou no aperto: a conferência abaixo não vale: {r}")
+    elif r["dita"] is not None:
+        falhas.append(f"a entrada parou no aperto, a sessão não apareceu, e a resposta já ficou dita: {r['dita']!r}")
+    tocar(pg, "#auth-voltar")
+    pg.wait_for_timeout(300)
+
+    # A primeira sessão: o aviso, e só depois de visto, dito.
+    de_novo()
+    r = entrar_com("negada")
+    esperado = {"sessao": True, "texto": f["negada"], "inteiro": True, "papel": "status", "acimaDaFaixa": True, "inerte": False, "dita": "negada"}
+    diferente = {k: r[k] for k in esperado if r[k] != esperado[k]}
+    if diferente or r["dispensar"] < 44:
+        falhas.append(f"na primeira sessão, o aviso do «negada» não está como deve: {diferente}, o dispensar com {r['dispensar']}")
+    tocar(pg, "#cel-aviso-persistencia button")
+    pg.wait_for_timeout(200)
+    if pg.evaluate("document.getElementById('cel-aviso-persistencia')?.checkVisibility() && !!document.querySelector('#cel-aviso-persistencia .veredito-texto')"):
+        falhas.append("o dispensar não tirou o aviso")
+    if pg.evaluate("document.activeElement === document.body"):
+        falhas.append("o dispensar deixou o foco no BODY")
+
+    # A mesma resposta: não repete.
+    de_novo()
+    r = entrar_com("negada")
+    if not r["sessao"] or r["texto"] is not None:
+        falhas.append(f"a mesma resposta foi dita de novo: {r}")
+
+    # A resposta muda: diz a nova. E a que o navegador não dá.
+    for resposta in ("concedida", "sem-suporte"):
+        de_novo()
+        r = entrar_com(resposta)
+        if not r["sessao"] or r["texto"] != f[resposta] or r["dita"] != resposta:
+            falhas.append(f"a resposta mudou para «{resposta}», e o aviso não a disse: {r}")
+
+    # Com o armazenamento da origem recusado, a mesma resposta é dita de novo:
+    # o navegador não guarda nada, e o aviso diz a verdade.
+    de_novo()
+    r = entrar_com("sem-suporte", recusado=True)
+    if not r["sessao"] or r["texto"] != f["sem-suporte"]:
+        falhas.append(f"com o armazenamento recusado, a resposta não foi dita de novo: {r}")
+        return falhas
+
+    # O aviso é do pé, como o de fone: o aviso de um MOD e a camada de AJUSTES
+    # ficam acima dele. Os outros avisos do pé saem antes: estando acima dele,
+    # o alto do pé seria o deles, e a conferência não veria este. Ele nasce no
+    # `celular-entrada.js`, que carrega depois de quem mede o pé, e a medida
+    # tem de vê-lo sair também: dispensado, o pé volta à faixa.
+    for dispensar in ("#veredito-fechar", "#aviso-fone-fechar"):
+        if pg.evaluate(f"document.querySelector('{dispensar}')?.checkVisibility() ?? false"):
+            tocar(pg, dispensar)
+    pg.wait_for_timeout(300)
+    pg.evaluate(MOD_DE_PE)
+    # O de erro, que dura 10 s, e não os 3,5 s do normal: a conferência do fim,
+    # depois de AJUSTES, cairia perto do prazo dele.
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'um-aviso', tipo: 'aviso', tom: 'erro', titulo: 'UM AVISO DO MOD' } })")
+    pg.wait_for_timeout(300)
+    aviso_do_mod = ".superficie-de-mod[data-superficie='um-aviso']"
+    sobre = pg.evaluate(SOBRE_O_AVISO_DA_PERSISTENCIA, aviso_do_mod)
+    if sobre is None:
+        falhas.append("o aviso do MOD não abriu: a conferência do pé não vale")
+    elif sobre:
+        falhas.append(f"o aviso do MOD e o da resposta do persist() se cobrem em {sobre} px")
+    acima_da_faixa = """(seletor) => { const no = document.querySelector(seletor);
+        return no?.checkVisibility() ? Math.round(document.getElementById('voz').getBoundingClientRect().top - no.getBoundingClientRect().bottom) : null; }"""
+    if ir_para_aba(pg, "ajustes", falhas):
+        pg.wait_for_timeout(300)
+        sobre = pg.evaluate(SOBRE_O_AVISO_DA_PERSISTENCIA, "#tela-server")
+        if sobre:
+            falhas.append(f"em AJUSTES, a camada cobre {sobre} px do aviso da resposta do persist()")
+        if not tocar(pg, "#cel-aviso-persistencia button"):
+            falhas.append(f"em AJUSTES, o dispensar do aviso não recebe o toque: {motivo_do_ultimo_toque}")
+        pg.wait_for_timeout(300)
+        if (vao := pg.evaluate(acima_da_faixa, "#tela-server")) is None or vao > 1:
+            falhas.append(f"dispensado o aviso em AJUSTES, a camada ficou {vao} px acima da faixa")
+        ir_para_aba(pg, "conversa", falhas)
+        pg.wait_for_timeout(300)
+    if (vao := pg.evaluate(acima_da_faixa, aviso_do_mod)) is None:
+        falhas.append("dispensado o aviso, o do MOD saiu de vista: a conferência do pé não vale")
+    elif vao > 9:
+        falhas.append(f"dispensado o aviso, o do MOD ficou {vao} px acima da faixa, e não 8")
+    return falhas
+
+
 def entrada_direta_na_larga(pg: Page) -> list[str]:
     """A casca larga não muda (D-celular-3): com a mesma impressão conferida, o
     aperto aparece como no desktop."""
     entrar_com_veredito(pg, CONFERIDA)
     e = pg.evaluate(ESTADO_DA_ENTRADA)
     return [] if (not e["sessao"] and e["auth"] and not e["direta"] and e["apertos"]) else [f"na larga, a impressão conferida pulou o aperto: {e}"]
+
+
+# ------------------------------------------- as camadas sobre a sessão (Tarefa 11)
+
+MUDO_ALCANCAVEL = """() => { const b = document.getElementById('voz-mudo').getBoundingClientRect();
+    return !!document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)?.closest('#voz-mudo'); }"""
+
+
+def queda(pg: Page) -> list[str]:
+    """A queda (spec §2.5; specs/07): uma faixa no alto, em largura cheia, e não
+    uma caixa sobre a conversa. A sessão esmaece e continua legível: uma
+    mensagem à vista embaixo da faixa recebe o toque. A faixa de voz diz «SEM
+    SOM · RECONECTANDO», e o MUDO continua ao alcance. Quando o enlace volta,
+    tudo volta. Termina na queda, para a foto."""
+    falhas = []
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate("SEELE_QUADRO.link = { InternalBattery: { remaining_seconds: 287, attempts: 2 } }")
+    esperar_quadro(pg)
+    v = pg.evaluate("""() => {
+        const caixa = document.querySelector('#bateria .bateria-caixa'); const b = caixa?.getBoundingClientRect();
+        const legivel = [...document.querySelectorAll('#lista-mensagens li.mensagem')].some((li) => {
+            const r = li.getBoundingClientRect(); if (!b || r.top < b.bottom || r.height === 0) return false;
+            const c = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 12)); return !!c && li.contains(c); });
+        return { visivel: !!caixa && caixa.checkVisibility(), caixa: b ? [Math.round(b.top), Math.round(b.width), Math.round(b.height)] : null,
+                 legivel, faixa: document.querySelector('.voz-celular .voz-sala-quem')?.textContent ?? '',
+                 inteira: ((q, f) => q.scrollWidth <= q.clientWidth + 1 && q.getBoundingClientRect().bottom <= f.getBoundingClientRect().bottom + 1)(
+                     document.querySelector('.voz-celular .voz-sala-quem'), document.querySelector('.voz-celular')),
+                 vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    largura, altura = pg.evaluate("[innerWidth, innerHeight]")
+    # A altura conta sem a área segura do alto: aquela faixa é do sistema (a
+    # ilha), e não da conversa.
+    seguro = pg.evaluate("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cel-seguro-topo')) || 0")
+    if not v["visivel"] or v["caixa"][0] > 1 or v["caixa"][1] < largura - 1 or v["caixa"][2] - seguro > altura / 3:
+        falhas.append(f"a queda não é uma faixa no alto, em largura cheia: {v['caixa']} numa tela de {largura}×{altura}, com {seguro} de área segura")
+    if not v["legivel"]:
+        falhas.append("com a queda, nenhuma mensagem fica à vista e ao toque embaixo da faixa")
+    reconectando = pg.evaluate("FRASES_DO_CELULAR.voz.reconectando")
+    if v["faixa"] != reconectando:
+        falhas.append(f"com a queda, a faixa de voz diz «{v['faixa']}», e não «{reconectando}»")
+    elif not v["inteira"]:
+        falhas.append(f"com a queda, «{reconectando}» sai cortado na faixa de voz")
+    if not pg.evaluate(MUDO_ALCANCAVEL):
+        falhas.append("com a queda, o MUDO não recebe o toque")
+    if v["vaza"]:
+        falhas.append("com a queda, a página rola de lado")
+    pg.evaluate("SEELE_QUADRO.link = 'Online'")
+    esperar_quadro(pg)
+    volta = pg.evaluate("[document.getElementById('bateria').hidden, document.querySelector('.voz-celular .voz-sala-quem')?.textContent ?? '']")
+    if not volta[0] or volta[1] == reconectando:
+        falhas.append(f"o enlace voltou, e a queda ficou: {volta}")
+    pg.evaluate("SEELE_QUADRO.link = { InternalBattery: { remaining_seconds: 287, attempts: 2 } }")
+    esperar_quadro(pg)
+    return falhas
+
+
+def alerta(pg: Page) -> list[str]:
+    """O alerta (`#banner`; spec §2.5) em largura cheia, com o fechar de 44. A
+    porta de moderar do alerta não aparece no celular: moderar é pelo SEELE no
+    computador. Termina com o alerta aberto, para a foto."""
+    falhas = []
+    pg.evaluate("SEELE_QUADRO.notice = { severity: 'Alta', reason: 'ServerShuttingDown', operator_text: null }")
+    esperar_quadro(pg)
+    v = pg.evaluate("""() => {
+        const caixa = document.querySelector('#banner .alerta-caixa'); const b = caixa?.getBoundingClientRect();
+        const fechar = document.getElementById('banner-fechar').getBoundingClientRect();
+        return { visivel: !!caixa && caixa.checkVisibility(), largura: b ? Math.round(b.width) : 0,
+                 fechar: [Math.round(fechar.width), Math.round(fechar.height)],
+                 porta: document.getElementById('alerta-ejetar').checkVisibility(),
+                 vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    if not v["visivel"] or v["largura"] < pg.evaluate("innerWidth") - 1:
+        falhas.append(f"o alerta não está em largura cheia: {v['largura']} px")
+    if min(v["fechar"]) < 44:
+        falhas.append(f"o fechar do alerta tem {v['fechar']}")
+    if v["porta"]:
+        falhas.append("o alerta oferece moderar no celular")
+    if v["vaza"]:
+        falhas.append("com o alerta, a página rola de lado")
+    return falhas
+
+
+def confirmacao(pg: Page) -> list[str]:
+    """A confirmação (spec §2.4) é uma folha de baixo, como as do celular: em
+    largura cheia, presa ao pé, com a borda vermelha, o verbo inteiro no botão,
+    o CANCELAR com 44 como saída, e o voltar do aparelho a fecha. Termina com
+    ela aberta, para a foto."""
+    falhas = []
+    abrir = "abrirConfirmacao('APAGAR A MENSAGEM', 'A mensagem sai da conversa para todo mundo, e não volta.', 'APAGAR A MENSAGEM', () => {})"
+    pg.evaluate(abrir)
+    pg.wait_for_timeout(300)
+    v = pg.evaluate("""() => {
+        const caixa = document.querySelector('#moderar .moderar-caixa'); const b = caixa.getBoundingClientRect();
+        const verbo = document.getElementById('moderar-confirmar'), cancelar = document.getElementById('moderar-cancelar');
+        return { caixa: [Math.round(b.left), Math.round(b.bottom), Math.round(b.width)], borda: getComputedStyle(caixa).borderTopColor,
+                 vermelho: getComputedStyle(document.documentElement).getPropertyValue('--seele-vermelho-alerta').trim(),
+                 verbo: [verbo.textContent.trim(), Math.round(verbo.getBoundingClientRect().height)],
+                 cancelar: cancelar.checkVisibility() ? Math.round(cancelar.getBoundingClientRect().height) : 0,
+                 vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    largura, altura = pg.evaluate("[innerWidth, innerHeight]")
+    if v["caixa"][0] > 0 or v["caixa"][2] < largura - 1 or abs(v["caixa"][1] - altura) > 1:
+        falhas.append(f"a confirmação não é uma folha presa ao pé, em largura cheia: {v['caixa']}")
+    vermelho = pg.evaluate("(cor) => { const e = document.createElement('i'); e.style.color = cor; document.body.append(e); const c = getComputedStyle(e).color; e.remove(); return c; }", v["vermelho"])
+    if v["borda"] != vermelho:
+        falhas.append(f"a borda da confirmação é {v['borda']}, e não o vermelho do alerta ({vermelho})")
+    if v["verbo"][0] != "APAGAR A MENSAGEM" or v["verbo"][1] < 44:
+        falhas.append(f"o botão da confirmação diz «{v['verbo'][0]}», com {v['verbo'][1]} de altura")
+    if v["cancelar"] < 44:
+        falhas.append(f"a saída da confirmação (CANCELAR) tem {v['cancelar']} de altura")
+    if v["vaza"]:
+        falhas.append("com a confirmação, a página rola de lado")
+    pg.go_back()
+    pg.wait_for_timeout(400)
+    if not pg.evaluate("document.getElementById('moderar').hidden"):
+        falhas.append("o voltar do aparelho não fechou a confirmação")
+    if pg.evaluate("document.getElementById('tela-sessao').hidden"):
+        falhas.append("o voltar saiu da sessão em vez de fechar a confirmação")
+    pg.evaluate(abrir)
+    pg.wait_for_timeout(300)
+    return falhas
+
+
+# --------------------------------------------- a prévia do tema (D-estilo-1)
+
+DIALOGO_COM_PREVIA = """async (tema) => {
+  await __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'estilo', tipo: 'dialogo', titulo: 'APARÊNCIA DO SERVIDOR' } });
+  await __pedirAoProduto({ tipo: 'tema', valores: tema, previa: true, superficie: 'estilo' });
+}"""
+
+ESTADO_DA_PREVIA = """(fundo) => {
+  const raiz = document.querySelector('.dialogo-de-mod[data-superficie="estilo"]');
+  const camada = raiz?.closest('.camada-de-mod');
+  return { dialogo: !!camada && !camada.hidden && raiz.checkVisibility(),
+           noTopo: !!camada && pilhaDeCamadas.at(-1) === camada,
+           sessaoInerte: !!document.getElementById('lista-mensagens').closest('[inert]'),
+           previa: previasDoTema.get('teste/bancada')?.superficie ?? null,
+           tema: document.getElementById('tela-sessao').style.getPropertyValue('--seele-negro-absoluto').trim().toLowerCase() === fundo };
+}"""
+
+
+def previa_recolhida(pg: Page) -> list[str]:
+    """O gancho da pilha de inércia para a prévia do tema (D-estilo-1), chamado
+    como a casca o chama. Com o diálogo do MOD aberto e a prévia dele, a
+    sessão está inerte; recolhido (`recolherSuperficie`), o diálogo sai da
+    vista e da pilha, a sessão deixa de ser inerte, e a prévia continua; de
+    volta (`devolverSuperficie`), o diálogo volta ao topo da pilha, a sessão
+    volta a ficar inerte, e a prévia está intacta. Fechado depois, o foco
+    volta a quem o abriu, e não ao VOLTAR da casca, que já saiu (A da revisão
+    da F3, 15/10). Um `ocultar`, um `fechar` ou um `mostrar` do MOD com o
+    diálogo recolhido não são desfeitos pelo devolver (B), e uma página não se
+    recolhe."""
+    falhas = []
+    pg.evaluate(MOD_DE_PE)
+    tema = TEMAS["papel"]
+    pg.evaluate("document.getElementById('campo-mensagem').focus()")
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    aberto = pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])
+    if aberto != {"dialogo": True, "noTopo": True, "sessaoInerte": True, "previa": "estilo", "tema": True}:
+        falhas.append(f"o diálogo com a prévia não abriu como devia: {aberto}")
+        return falhas
+    raiz = "document.querySelector('.dialogo-de-mod[data-superficie=\"estilo\"]')"
+    if not pg.evaluate(f"recolherSuperficie({raiz})"):
+        falhas.append("o recolherSuperficie não recolheu o diálogo")
+    recolhido = pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])
+    if recolhido != {"dialogo": False, "noTopo": False, "sessaoInerte": False, "previa": "estilo", "tema": True}:
+        falhas.append(f"recolhido, o diálogo deixa a sessão inerte ou leva a prévia: {recolhido}")
+    # O VOLTAR da casca: pega o foco, devolve, e sai de vista.
+    devolvido = pg.evaluate(f"""() => {{
+      const voltar = document.createElement('button');
+      document.getElementById('tela-sessao').append(voltar);
+      voltar.focus();
+      const devolveu = devolverSuperficie({raiz});
+      voltar.remove();
+      return devolveu;
+    }}""")
+    if not devolvido:
+        falhas.append("o devolverSuperficie não devolveu o diálogo")
+    de_volta = pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])
+    if de_volta != {"dialogo": True, "noTopo": True, "sessaoInerte": True, "previa": "estilo", "tema": True}:
+        falhas.append(f"de volta, o diálogo não está no topo da pilha com a prévia: {de_volta}")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-fechar', superficie: 'estilo' })")
+    pg.wait_for_timeout(200)
+    if (onde := pg.evaluate("document.activeElement?.id || document.activeElement?.tagName")) != "campo-mensagem":
+        falhas.append(f"recolhido, devolvido e fechado, o diálogo devolveu o foco a {onde!r}, e não ao campo que o abriu")
+    # B: o MOD oculta o diálogo enquanto a casca o tem recolhido. O devolver
+    # não o mostra: o ocultar é do MOD, e vale o último.
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    pg.evaluate(f"recolherSuperficie({raiz})")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-ocultar', superficie: 'estilo' })")
+    pg.wait_for_timeout(200)
+    if pg.evaluate(f"devolverSuperficie({raiz})") or pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])["dialogo"]:
+        falhas.append("recolhido, o MOD ocultou o diálogo, e o devolverSuperficie o mostrou")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-mostrar', superficie: 'estilo' })")
+    pg.wait_for_timeout(200)
+    # Só a casca devolve o que ela recolheu: um diálogo que o MOD ocultou não
+    # volta por aqui.
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-ocultar', superficie: 'estilo' })")
+    pg.wait_for_timeout(200)
+    if pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])["dialogo"]:
+        falhas.append("o MOD pediu para ocultar o diálogo, e ele continua à vista: a conferência abaixo não vale")
+    elif pg.evaluate(f"devolverSuperficie({raiz})") or pg.evaluate(ESTADO_DA_PREVIA, tema["fundo"])["dialogo"]:
+        falhas.append("o devolverSuperficie mostrou um diálogo que o MOD tinha ocultado")
+    # Recolhido, o MOD o fecha, ou o mostra: o devolver não tem o que devolver.
+    # Com o fechar, ele remontaria um diálogo que o MOD fechou; com o mostrar,
+    # diria ter devolvido o que já estava à vista (o caminho do meio é o da F3).
+    for caminho in (["superficie-fechar"], ["superficie-mostrar"], ["superficie-mostrar", "superficie-fechar"]):
+        pg.evaluate("__pedirAoProduto({ tipo: 'superficie-mostrar', superficie: 'estilo' })")
+        pg.evaluate(DIALOGO_COM_PREVIA, tema)
+        pg.wait_for_timeout(300)
+        pg.evaluate(f"window.__recolhido = {raiz}")
+        if not pg.evaluate("recolherSuperficie(window.__recolhido)"):
+            falhas.append(f"o diálogo não recolheu antes de {caminho}: a conferência abaixo não vale")
+            continue
+        for pedido in caminho:
+            pg.evaluate(f"__pedirAoProduto({{ tipo: '{pedido}', superficie: 'estilo' }})")
+            pg.wait_for_timeout(200)
+        a_vista = pg.evaluate("window.__recolhido.isConnected && window.__recolhido.checkVisibility()")
+        devolveu = pg.evaluate("devolverSuperficie(window.__recolhido)")
+        depois = pg.evaluate("window.__recolhido.isConnected && window.__recolhido.checkVisibility()")
+        if devolveu or depois != a_vista:
+            falhas.append(f"recolhido, {' e '.join(caminho)} do MOD, e o devolverSuperficie deu {devolveu}, "
+                          f"com o diálogo {'à vista' if depois else 'fora'} (antes, {'à vista' if a_vista else 'fora'})")
+    # Só o diálogo se recolhe: uma página que a casca pedisse por engano sairia
+    # do palco dela.
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'pagina', tipo: 'pagina', titulo: 'PÁGINA' } })")
+    pg.wait_for_timeout(300)
+    pagina = "document.querySelector('.pagina-de-mod[data-superficie=\"pagina\"]')"
+    if not pg.evaluate(f"{pagina}?.checkVisibility() ?? false"):
+        falhas.append("a página do MOD não abriu: a conferência de que ela não se recolhe não vale")
+    elif pg.evaluate(f"recolherSuperficie({pagina})") or not pg.evaluate(f"{pagina}.checkVisibility()"):
+        falhas.append("o recolherSuperficie recolheu uma página, e só o diálogo se recolhe")
+    return falhas
+
+
+LER_A_PREVIA = """(fundo) => {
+  const visivel = (e) => !!e && e.checkVisibility();
+  const raiz = document.querySelector('.dialogo-de-mod[data-superficie="estilo"]');
+  const ver = raiz?.querySelector('.cel-ver-na-sessao');
+  const selo = document.querySelector('.cel-selo-da-previa');
+  const voltar = selo?.querySelector('button');
+  const faixa = document.getElementById('voz').getBoundingClientRect();
+  const mudo = document.getElementById('voz-mudo').getBoundingClientRect();
+  const noMudo = document.elementFromPoint(mudo.left + mudo.width / 2, mudo.top + mudo.height / 2);
+  const nucleo = (() => { const e = document.createElement('i'); e.style.color = 'var(--nucleo-texto)'; document.documentElement.append(e); const c = getComputedStyle(e).color; e.remove(); return c; })();
+  return { dialogo: visivel(raiz), ver: visivel(ver) ? Math.round(ver.getBoundingClientRect().height) : 0,
+           selo: visivel(selo) ? selo.firstChild?.textContent ?? selo.textContent : null,
+           acimaDaFaixa: !!selo && selo.getBoundingClientRect().bottom <= faixa.top + 1,
+           doNucleo: !!selo && getComputedStyle(selo).color === nucleo,
+           voltar: visivel(voltar) ? Math.round(voltar.getBoundingClientRect().height) : 0,
+           sessaoInerte: !!document.getElementById('lista-mensagens').closest('[inert]'),
+           previa: previasDoTema.has('teste/bancada'),
+           tema: document.getElementById('tela-sessao').style.getPropertyValue('--seele-negro-absoluto').trim().toLowerCase() === fundo,
+           mudo: !!noMudo?.closest('#voz-mudo'),
+           seloDoDesktop: visivel(document.getElementById('selo-da-previa')) };
+}"""
+
+
+SELO_E_O_MOD = """(seletor) => {
+  const selo = document.querySelector('.cel-selo-da-previa');
+  const s = selo.getBoundingClientRect();
+  const el = document.querySelector(seletor);
+  if (!el?.checkVisibility()) return { aVista: false };
+  const r = el.getBoundingClientRect();
+  const voltar = selo.querySelector('button').getBoundingClientRect();
+  const noVoltar = document.elementFromPoint(voltar.left + voltar.width / 2, voltar.top + voltar.height / 2);
+  return { aVista: true, sobreposto: Math.max(0, Math.round(Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top))),
+           voltarNoToque: !!noVoltar?.closest('.cel-selo-da-previa button') };
+}"""
+
+
+def previa_do_tema(pg: Page) -> list[str]:
+    """A prévia do tema no celular (D-estilo-1): o diálogo do MOD cobre a
+    sessão, e o VER NA SESSÃO, na barra do produto e só com uma prévia daquela
+    superfície, o recolhe num selo do núcleo, «PRÉVIA NÃO PUBLICADA · SÓ NESTE
+    APARELHO», acima da faixa, com VOLTAR. A sessão aparece com a prévia e
+    deixa de ser inerte; o MUDO responde. O VOLTAR, e o voltar do aparelho,
+    devolvem o diálogo com a prévia intacta. Um diálogo sem prévia não tem o
+    VER NA SESSÃO. O foco vai ao VOLTAR, volta ao diálogo, e, fechado o
+    diálogo, a quem o abriu, e não ao VOLTAR que saiu de vista. Termina
+    recolhido, para a foto."""
+    falhas = []
+    pg.evaluate(MOD_DE_PE)
+    tema = TEMAS["papel"]
+    frase = pg.evaluate("FRASES_DO_CELULAR.folhas.seloDaPrevia")
+    foco = ("document.activeElement?.closest('.cel-selo-da-previa button, .dialogo-de-mod, #campo-mensagem')"
+            "?.textContent.trim().slice(0, 40) ?? document.activeElement?.tagName")
+    pg.evaluate("document.getElementById('campo-mensagem').focus()")
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    aberto = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+    if not aberto["dialogo"] or aberto["ver"] < 44 or aberto["selo"] is not None or aberto["seloDoDesktop"]:
+        falhas.append(f"com o diálogo e a prévia, o VER NA SESSÃO não está com 44, ou o selo aparece por cima: {aberto}")
+        return falhas
+    for como in ("VOLTAR", "o voltar do aparelho"):
+        tocar(pg, ".dialogo-de-mod[data-superficie='estilo'] .cel-ver-na-sessao")
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+        esperado = {"dialogo": False, "selo": frase, "acimaDaFaixa": True, "doNucleo": True, "sessaoInerte": False,
+                    "previa": True, "tema": True, "mudo": True, "seloDoDesktop": False}
+        diferente = {k: r[k] for k in esperado if r[k] != esperado[k]}
+        if diferente or r["voltar"] < 44:
+            falhas.append(f"recolhido, o selo, a sessão ou a prévia não estão como devem ({como}): {diferente}, VOLTAR com {r['voltar']}")
+        if (onde := pg.evaluate(foco)) != pg.evaluate("FRASES_DO_CELULAR.folhas.voltarAoDialogo"):
+            falhas.append(f"recolhido, o foco não está no VOLTAR, e sim em {onde!r}")
+        if como == "VOLTAR":
+            tocar(pg, ".cel-selo-da-previa button")
+        else:
+            pg.go_back()
+        pg.wait_for_timeout(300)
+        de_volta = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+        if not de_volta["dialogo"] or not de_volta["sessaoInerte"] or not de_volta["previa"] or de_volta["selo"] is not None:
+            falhas.append(f"{como} não devolveu o diálogo com a prévia: {de_volta}")
+        if pg.evaluate("document.getElementById('tela-sessao').hidden"):
+            falhas.append(f"{como} saiu da sessão")
+            return falhas
+    # Um diálogo sem prévia não tem o VER NA SESSÃO.
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'outro', tipo: 'dialogo', titulo: 'OUTRO' } })")
+    pg.wait_for_timeout(300)
+    if pg.evaluate("document.querySelector('.dialogo-de-mod[data-superficie=\"outro\"] .cel-ver-na-sessao')?.checkVisibility() ?? false"):
+        falhas.append("um diálogo sem prévia oferece o VER NA SESSÃO")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-fechar', superficie: 'outro' })")
+    pg.wait_for_timeout(300)
+    if not pg.evaluate("!!document.activeElement?.closest('.dialogo-de-mod[data-superficie=\"estilo\"]')"):
+        falhas.append(f"de volta, o foco não está no diálogo, e sim em {pg.evaluate(foco)!r}")
+    # Fechado o diálogo, o foco volta a quem o abriu, e o selo sai com a prévia.
+    tocar(pg, ".dialogo-de-mod[data-superficie='estilo'] .superficie-de-mod-sair")
+    pg.wait_for_timeout(300)
+    if not pg.evaluate("document.activeElement?.id === 'campo-mensagem'"):
+        falhas.append(f"fechado o diálogo, o foco não voltou ao campo de onde ele abriu, e sim a {pg.evaluate(foco)!r}")
+    if pg.evaluate(LER_A_PREVIA, tema["fundo"])["selo"] is not None:
+        falhas.append("fechado o diálogo, e com ele a prévia, o selo continua")
+    # Recolhido, o MOD o mostra de novo, ou o fecha: a casca larga o que
+    # guardava, e o VER NA SESSÃO seguinte ainda recolhe.
+    ver = ".dialogo-de-mod[data-superficie='estilo'] .cel-ver-na-sessao"
+    for pedido in ("superficie-mostrar", "superficie-fechar"):
+        pg.evaluate(DIALOGO_COM_PREVIA, tema)
+        pg.wait_for_timeout(300)
+        tocar(pg, ver)
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+        if r["dialogo"] or not r["voltar"]:
+            falhas.append(f"antes do {pedido}, o VER NA SESSÃO não recolheu o diálogo: {r}")
+        pg.evaluate(f"__pedirAoProduto({{ tipo: '{pedido}', superficie: 'estilo' }})")
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+        if r["voltar"] or (pedido == "superficie-fechar" and r["selo"] is not None):
+            falhas.append(f"recolhido, o MOD pediu {pedido}, e o selo ficou com o VOLTAR para um diálogo que não está recolhido: {r}")
+    # O MOD oculta o diálogo recolhido: nada no palco muda, e o VOLTAR não o
+    # mostra. Ele sai, o selo fica com a prévia, e o foco vai à sessão.
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    tocar(pg, ver)
+    pg.wait_for_timeout(300)
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-ocultar', superficie: 'estilo' })")
+    pg.wait_for_timeout(300)
+    tocar(pg, ".cel-selo-da-previa button")
+    pg.wait_for_timeout(300)
+    r = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+    if r["dialogo"] or r["voltar"] or r["selo"] != frase:
+        falhas.append(f"recolhido e ocultado pelo MOD, o VOLTAR o mostrou ou ficou de pé: {r}")
+    if (onde := pg.evaluate("document.activeElement?.id || document.activeElement?.tagName")) != "tela-sessao":
+        falhas.append(f"o VOLTAR que não tinha o que devolver deixou o foco em {onde!r}, e não na sessão")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-fechar', superficie: 'estilo' })")
+    pg.wait_for_timeout(300)
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    tocar(pg, ver)
+    pg.wait_for_timeout(300)
+    r = pg.evaluate(LER_A_PREVIA, tema["fundo"])
+    if r["dialogo"] or r["selo"] != frase or r["voltar"] < 44:
+        falhas.append(f"depois de o MOD fechar o diálogo recolhido, o VER NA SESSÃO não recolhe mais: {r}")
+    # Recolhido, em AJUSTES (onde se desliga o MOD): a camada acaba no alto do
+    # selo, que continua à vista e no toque.
+    if ir_para_aba(pg, "ajustes", falhas):
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(SELO_E_O_MOD, "#tela-server")
+        if not r["aVista"] or r["sobreposto"] or not r["voltarNoToque"]:
+            falhas.append(f"recolhido, em AJUSTES, a camada e o selo se cobrem: {r}")
+        ir_para_aba(pg, "conversa", falhas)
+        pg.wait_for_timeout(300)
+    # O selo é do pé: uma folha e um aviso do MOD, com o diálogo recolhido,
+    # ficam acima dele, sem cobri-lo e sem ser cobertos. Medido antes, com o
+    # selo solto por cima do pé: o aviso o cobria inteiro, VOLTAR junto. O
+    # aviso fica, para a foto.
+    for tipo in ("folha", "aviso"):
+        pg.evaluate(f"__pedirAoProduto({{ tipo: 'superficie-criar', descricao: {{ id: 'um-{tipo}', tipo: '{tipo}', titulo: 'UM {tipo.upper()} DO MOD' }} }})")
+        pg.wait_for_timeout(300)
+        r = pg.evaluate(SELO_E_O_MOD, f".superficie-de-mod[data-superficie='um-{tipo}']")
+        if not r["aVista"] or r["sobreposto"] or not r["voltarNoToque"]:
+            falhas.append(f"com o diálogo recolhido, {'a folha' if tipo == 'folha' else 'o aviso'} do MOD e o selo se cobrem: {r}")
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-fechar', superficie: 'um-folha' })")
+    pg.wait_for_timeout(300)
+    return falhas
 
 
 def sessao_entrou(pg: Page) -> list[str]:
@@ -854,15 +1423,40 @@ def sessao_entrou(pg: Page) -> list[str]:
     return falhas
 
 
+# **Por que o último `tocar` não tocou**: o alvo ausente, escondido, ou o que o
+# Playwright disse ao desistir (coberto por outro nó, instável, desabilitado).
+# O `exigir_toque` o põe na reprovação. «Não há como tocar» sozinho não separa
+# uma máquina lenta de um alvo coberto: a reprovação que a F7 viu em 11/10, com
+# a máquina carregada, ficou sem causa por isso.
+motivo_do_ultimo_toque = ""
+
+PISTAS_DO_PLAYWRIGHT = ("intercepts pointer events", "not stable", "not visible", "not enabled",
+                        "detached", "outside of the viewport")
+
+
+def motivo_do_playwright(erro: Exception) -> str:
+    """A linha do registro do Playwright que diz por que ele desistiu, ou a
+    primeira do erro."""
+    linhas = [linha.strip() for linha in str(erro).splitlines() if linha.strip()]
+    pistas = [linha for linha in linhas if any(p in linha for p in PISTAS_DO_PLAYWRIGHT)]
+    return (pistas[-1] if pistas else linhas[0] if linhas else "sem mensagem")[:200]
+
+
 def tocar(pg: Page, seletor: str) -> bool:
     """Um toque no primeiro alvo que casa, se ele estiver à vista.
 
     Devolve `False` sem tocar quando o alvo não existe ou está escondido: um
     caso que toca num controle ausente diz o que faltou, em vez de esperar o
-    tempo-limite do Playwright e estourar.
+    tempo-limite do Playwright e estourar. O porquê fica em
+    `motivo_do_ultimo_toque`.
     """
+    global motivo_do_ultimo_toque
     alvo = pg.locator(seletor).first
-    if alvo.count() == 0 or not alvo.is_visible():
+    if alvo.count() == 0:
+        motivo_do_ultimo_toque = "o alvo não existe"
+        return False
+    if not alvo.is_visible():
+        motivo_do_ultimo_toque = "o alvo está escondido"
         return False
     try:
         # Um alvo coberto, ou que não recebe toque, é um alvo que o dedo não
@@ -872,8 +1466,10 @@ def tocar(pg: Page, seletor: str) -> bool:
             alvo.tap(timeout=3000)
         else:
             alvo.click(timeout=3000)
-    except ErroDoPlaywright:
+    except ErroDoPlaywright as erro:
+        motivo_do_ultimo_toque = motivo_do_playwright(erro)
         return False
+    motivo_do_ultimo_toque = ""
     return True
 
 
@@ -881,7 +1477,7 @@ def exigir_toque(pg: Page, seletor: str, falhas: list[str]) -> bool:
     """O `tocar`, e a reprovação quando o alvo não está ao alcance do dedo."""
     if tocar(pg, seletor):
         return True
-    falhas.append(f"não há como tocar {seletor}")
+    falhas.append(f"não há como tocar {seletor}: {motivo_do_ultimo_toque}")
     return False
 
 
@@ -893,6 +1489,188 @@ def ir_para_aba(pg: Page, aba: str, falhas: list[str]) -> bool:
             return False
         pg.wait_for_timeout(200)
     return exigir_toque(pg, f"#cel-aba-{aba}", falhas)
+
+
+AS_ENTRADAS_DA_SALA = """(guardar) => {
+  const li = [...document.querySelectorAll('#lista-voice_rooms > li')]
+    .find((item) => item.querySelector('button[data-voice_room]')?.dataset.dentro === 'nao');
+  const entrar = li?.querySelector('button[data-voice_room]');
+  const mudo = li?.querySelector('.cel-entrar-mudo');
+  if (guardar) { window.__entrarDaSala = entrar; window.__mudoDaSala = mudo; }
+  return { entrar: !!entrar, mudo: !!mudo,
+           mesmoEntrar: !!entrar && entrar === window.__entrarDaSala,
+           mesmoMudo: !!mudo && mudo === window.__mudoDaSala,
+           foco: document.activeElement === window.__entrarDaSala ? 'ENTRAR'
+             : document.activeElement === window.__mudoDaSala ? 'MUDO'
+             : (document.activeElement?.className || document.activeElement?.tagName) };
+}"""
+
+
+def salas_pelo_id(pg: Page) -> list[str]:
+    """A coluna de salas do celular reconciliada pelo id, como a do desktop
+    (pendência 63, a parte (b); lote AX da F5): com o mesmo retrato, o ENTRAR
+    e o ENTRAR MUDO de uma sala são os mesmos nós de um quadro ao seguinte, e o
+    foco de quem está num deles fica nele. Trocados a cada quadro, eles saíam
+    da árvore de acessibilidade, e o foco caía no BODY."""
+    falhas = []
+    if not ir_para_aba(pg, "servidor", falhas):
+        return falhas
+    pg.wait_for_timeout(300)
+    antes = pg.evaluate(AS_ENTRADAS_DA_SALA, True)
+    if not antes["entrar"] or not antes["mudo"]:
+        falhas.append(f"não há uma sala de fora com o ENTRAR e o ENTRAR MUDO: a conferência não vale: {antes}")
+        return falhas
+    for qual in ("__entrarDaSala", "__mudoDaSala"):
+        pg.evaluate(AS_ENTRADAS_DA_SALA, True)
+        pg.evaluate(f"window.{qual}.focus()")
+        esperar_quadro(pg)
+        esperar_quadro(pg)
+        depois = pg.evaluate(AS_ENTRADAS_DA_SALA, False)
+        nome = "ENTRAR" if qual == "__entrarDaSala" else "MUDO"
+        if not depois["mesmoEntrar"] or not depois["mesmoMudo"]:
+            falhas.append(f"com o mesmo retrato, dois quadros depois, o ENTRAR ou o ENTRAR MUDO é outro nó: {depois}")
+        if depois["foco"] != nome:
+            falhas.append(f"o foco no {nome} não sobreviveu a dois quadros: foi para {depois['foco']!r}")
+    return falhas
+
+
+AJUSTES_CONTRA_O_AVISO = """(id) => {
+  const aviso = document.getElementById(id), camada = document.getElementById('tela-server');
+  if (!aviso.checkVisibility() || !camada.checkVisibility()) return { aVista: false };
+  const a = aviso.getBoundingClientRect(), c = camada.getBoundingClientRect();
+  const botao = aviso.querySelector('button');
+  const r = botao?.getBoundingClientRect();
+  const no = r && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return { aVista: true, sobreposto: Math.max(0, Math.round(Math.min(a.bottom, c.bottom) - Math.max(a.top, c.top))),
+           dispensarNoToque: !botao || no === botao, cobertoPor: !botao || no === botao ? null : (no?.id || no?.className) };
+}"""
+
+
+def ajustes_e_avisos(pg: Page) -> list[str]:
+    """A camada de AJUSTES contra os avisos do pé que nascem com ela aberta
+    (item 4 da orquestradora, 16/10): o veredito, o de fone e o do áudio. Ela
+    acaba no alto do primeiro aviso, e o dispensar dele recebe o toque. Medido
+    antes: aberta antes do aviso, ela o cobria inteiro (92 a 130 px), e o toque
+    no dispensar caía em SAIR DO SERVIDOR. Termina em AJUSTES com o veredito,
+    para a foto."""
+    falhas = []
+    esconder = "for (const id of ['veredito', 'aviso-fone', 'aviso-audio']) document.getElementById(id).hidden = true"
+    pg.evaluate(esconder)
+    esperar_quadro(pg)
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    pg.wait_for_timeout(300)
+    for aviso, mostrar, tirar in (
+        ("aviso-fone", "foneJaAvisado = false", "document.getElementById('aviso-fone').hidden = true"),
+        ("aviso-audio", "SEELE_QUADRO.abertura_do_audio = 'nao_abriu_no_prazo'", "SEELE_QUADRO.abertura_do_audio = 'aberto'"),
+        ("veredito", "mostrarVeredito({ FirstContact: { fingerprint: '3cbc fb02 3cbc fb02' } })", None),
+    ):
+        pg.evaluate(mostrar)
+        esperar_quadro(pg)
+        r = pg.evaluate(AJUSTES_CONTRA_O_AVISO, aviso)
+        if not r["aVista"]:
+            falhas.append(f"o #{aviso} não apareceu com AJUSTES aberto: a conferência não vale")
+        elif r["sobreposto"] or not r["dispensarNoToque"]:
+            falhas.append(f"com AJUSTES aberto antes, a camada cobre o #{aviso}: {r}")
+        if tirar:
+            pg.evaluate(tirar)
+            esperar_quadro(pg)
+    return falhas
+
+
+CONTEUDO_LONGO = [{"forma": "texto", "chave": f"p{n}", "dentro": f"Parágrafo {n} de um diálogo que passa da altura da tela."}
+                  for n in range(40)]
+
+O_DIALOGO_NO_CELULAR = """(seletor) => {
+  const d = document.querySelector(seletor);
+  if (!d?.checkVisibility()) return { aVista: false };
+  const sessao = document.getElementById('tela-sessao');
+  const s = sessao.getBoundingClientRect();
+  const pe = parseFloat(getComputedStyle(sessao).getPropertyValue('--cel-pe')) || 0;
+  const fimAcimaDoPe = s.bottom - pe;
+  const r = d.getBoundingClientRect();
+  const toca = (el) => { if (!el?.checkVisibility()) return false; const b = el.getBoundingClientRect();
+    const no = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!no && (no === el || el.contains(no)); };
+  const acima = r.top - 24 > s.top ? document.elementFromPoint(r.left + r.width / 2, r.top - 24) : null;
+  const corpo = d.querySelector('.dialogo-de-mod-corpo'), rodape = d.querySelector('.dialogo-de-mod-rodape');
+  const rr = rodape?.checkVisibility() ? rodape.getBoundingClientRect() : null;
+  const ultimo = corpo?.lastElementChild ? corpo.querySelector('[data-chave="p39"], :scope > :last-child') : null;
+  return { aVista: true,
+           embaixo: Math.abs(r.bottom - fimAcimaDoPe) <= 1,
+           fracao: Math.round(r.height / (fimAcimaDoPe - s.top) * 1000) / 1000,
+           sessaoAcima: !!acima && !!acima.closest('#tela-sessao') && !acima.closest('.camada-de-mod') && !acima.closest('[inert]'),
+           mudo: toca(document.getElementById('voz-mudo')),
+           aba: toca(document.getElementById('cel-aba-ajustes')),
+           rodape: rr ? { noFim: Math.abs(rr.bottom - r.bottom) <= 2, acimaDoPe: rr.bottom <= fimAcimaDoPe + 1,
+                          topo: Math.round(rr.top),
+                          botoes: [...rodape.querySelectorAll('button')].map((b) => [b.textContent.trim(), Math.round(b.getBoundingClientRect().height), toca(b)]) } : null,
+           rola: !!corpo && corpo.scrollHeight > corpo.clientHeight + 1,
+           corpoAcimaDoRodape: !!corpo && !!rr && corpo.getBoundingClientRect().bottom <= rr.top + 1 };
+}"""
+
+
+def dialogo_nao_modal(pg: Page) -> list[str]:
+    """O diálogo não modal no celular (`superficies.dialogo.celular` do
+    `v6.json`, emenda 563ecf8f): embaixo, até 85% da altura da sessão acima do
+    pé, com a sessão à vista acima, e a faixa de voz e as abas à vista e ao
+    toque. Com um conteúdo mais alto que a tela, ele para nos 85%."""
+    falhas = []
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("""async (arvore) => {
+      await __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'ao-lado', tipo: 'dialogo', modal: false, titulo: 'AO LADO' } });
+      await __pedirAoProduto({ tipo: 'superficie-montar', superficie: 'ao-lado', arvore });
+    }""", CONTEUDO_LONGO)
+    pg.wait_for_timeout(400)
+    r = pg.evaluate(O_DIALOGO_NO_CELULAR, ".dialogo-de-mod[data-superficie='ao-lado']")
+    if not r["aVista"]:
+        falhas.append("o diálogo não modal não abriu: a conferência não vale")
+        return falhas
+    if not r["embaixo"]:
+        falhas.append(f"o não modal não está embaixo, no alto do pé: {r}")
+    if not 0.84 <= r["fracao"] <= 0.86:
+        falhas.append(f"com o conteúdo mais alto que a tela, o não modal tem {r['fracao']:.1%} da sessão acima do pé, e não 85%")
+    if not r["sessaoAcima"]:
+        falhas.append("acima do não modal, a sessão não está à vista ou não recebe o toque")
+    if not r["mudo"] or not r["aba"]:
+        falhas.append(f"com o não modal aberto, o MUDO ou a aba AJUSTES não recebem o toque: {r}")
+    return falhas
+
+
+def dialogo_rodape(pg: Page) -> list[str]:
+    """O rodapé do diálogo modal no celular (`superficies.dialogo.celular`,
+    emenda 563ecf8f): as ações fixas do MOD no rodapé do produto, no fim do
+    diálogo e acima do pé, à vista e ao toque, e o conteúdo rolando acima
+    delas, sem passar por baixo. Rolado até o fim, o rodapé fica onde estava."""
+    falhas = []
+    pg.evaluate(MOD_DE_PE)
+    acoes = {"forma": "acoes", "fixas": True, "dentro": [
+        {"forma": "botao", "chave": "gravar", "dentro": "GRAVAR"},
+        {"forma": "botao", "chave": "desfazer", "dentro": "DESFAZER"},
+    ]}
+    pg.evaluate("""async (arvore) => {
+      await __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'ficha', tipo: 'dialogo', titulo: 'FICHA' } });
+      await __pedirAoProduto({ tipo: 'superficie-montar', superficie: 'ficha', arvore });
+    }""", [*CONTEUDO_LONGO, acoes])
+    pg.wait_for_timeout(400)
+    seletor = ".dialogo-de-mod[data-superficie='ficha']"
+    r = pg.evaluate(O_DIALOGO_NO_CELULAR, seletor)
+    if not r["aVista"] or r["rodape"] is None:
+        falhas.append(f"o diálogo com as ações fixas não abriu com o rodapé à vista: a conferência não vale: {r}")
+        return falhas
+    ro = r["rodape"]
+    if not ro["noFim"] or not ro["acimaDoPe"]:
+        falhas.append(f"o rodapé não está no fim do diálogo, acima do pé: {ro}")
+    if [b[0] for b in ro["botoes"]] != ["GRAVAR", "DESFAZER"] or any(b[1] < 44 or not b[2] for b in ro["botoes"]):
+        falhas.append(f"as ações do rodapé não estão à vista, com 44, e ao toque: {ro['botoes']}")
+    if not r["rola"] or not r["corpoAcimaDoRodape"]:
+        falhas.append(f"o conteúdo não rola acima do rodapé: rola={r['rola']}, acima={r['corpoAcimaDoRodape']}")
+    pg.evaluate(f"document.querySelector(\"{seletor} .dialogo-de-mod-corpo\").scrollTop = 1e6")
+    pg.wait_for_timeout(200)
+    rolado = pg.evaluate(O_DIALOGO_NO_CELULAR, seletor)
+    if rolado["rodape"] is None or rolado["rodape"]["topo"] != ro["topo"] or any(not b[2] for b in rolado["rodape"]["botoes"]):
+        falhas.append(f"rolado até o fim, o rodapé saiu do lugar ou deixou de receber o toque: {rolado['rodape']}")
+    return falhas
 
 
 def esperar_quadro(pg: Page) -> None:
@@ -2669,6 +3447,10 @@ CASOS: dict[str, Caso] = {
     # Sem ela, o claro reprovava o «VOCÊ ESTÁ AQUI» a 2,6:1.
     "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
+    "salas-pelo-id": Caso(levar=salas_pelo_id, medir=False),
+    "ajustes-e-avisos": Caso(levar=ajustes_e_avisos, medir=False),
+    "dialogo-nao-modal": Caso(levar=dialogo_nao_modal, medir=False),
+    "dialogo-rodape": Caso(levar=dialogo_rodape, medir=False),
     "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
     "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "claro", "hostil"),
@@ -2711,6 +3493,13 @@ CASOS: dict[str, Caso] = {
     "deitado": Caso(levar=deitado, aparelhos=("deitado",), raiz="#palco, #voz"),
     # A casca larga (Tarefa 17): o computador, com a marca larga.
     "casca-larga": Caso(levar=casca_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
+    # O gancho da pilha de inércia para a prévia do tema (D-estilo-1).
+    "previa-recolhida": Caso(levar=previa_recolhida, aparelhos=("390",), medir=False),
+    "previa-do-tema": Caso(levar=previa_do_tema, medir=False),
+    # As camadas sobre a sessão e a confirmação (Tarefa 11).
+    "queda": Caso(levar=queda, medir=False),
+    "alerta": Caso(levar=alerta, medir=False),
+    "confirmacao": Caso(levar=confirmacao, raiz="#moderar"),
     # A entrada do celular (Tarefa 10), sobre a identidade da F4.
     "entrada": Caso(levar=entrada, entrar=False, raiz="#tela-boot"),
     "entrada-desfechos": Caso(levar=entrada_desfechos, entrar=False, medir=False, http=True),
@@ -2720,6 +3509,7 @@ CASOS: dict[str, Caso] = {
     "entrada-direta-falha": Caso(levar=entrada_direta_falha, entrar=False, raiz="#tela-auth"),
     "entrada-espera": Caso(levar=entrada_espera, entrar=False, raiz="#tela-auth"),
     "entrada-abre-a-sessao": Caso(levar=entrada_abre_a_sessao, entrar=False, medir=False),
+    "persistencia": Caso(levar=persistencia_dita, entrar=False, medir=False, http=True),
     "entrada-direta-larga": Caso(levar=entrada_direta_na_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
     # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
     # A tela cheia da larga sai junto com a do navegador (achado da F4).
@@ -2759,6 +3549,14 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             pg.set_default_timeout(5000)
             erros = []
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
+            # **Um arquivo da página que não chegou** diz qual, e por quê. Sem
+            # isto, um script que a cópia servida por HTTP não entregou aparecia
+            # só como o erro do seguinte, que o lia («PONTE_NO_LUGAR_DO_TAURI is
+            # not defined», a reprovação que a F7 guardou em 15/10).
+            nao_chegaram = []
+            pg.on("requestfailed", lambda r: nao_chegaram.append(f"{r.url.rsplit('/', 1)[-1]} ({r.failure})"))
+            pg.on("response", lambda r: r.status >= 400 and r.url.rsplit("/", 1)[-1] not in AUSENTES_NA_COPIA
+                  and nao_chegaram.append(f"{r.url.rsplit('/', 1)[-1]} (HTTP {r.status})"))
             servindo = contextlib.ExitStack()
             if caso.http:
                 origem = servindo.enter_context(servida(pagina.parent))
@@ -2805,6 +3603,8 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
                         chaves = ("cor", "fundo", "borda", "emVolta") if id_.startswith("voz-") else ("cor", "fundo", "borda")
                         if nativo and {k: n[k] for k in chaves} != {k: nativo[k] for k in chaves}:
                             motivos.append(f"{id_} mudou com o tema: {n} contra {nativo}")
+            if nao_chegaram:
+                motivos.append(f"arquivos da página que não chegaram: {nao_chegaram}")
             if erros:
                 motivos.append(f"erros de script: {erros}")
             ctx.close()
