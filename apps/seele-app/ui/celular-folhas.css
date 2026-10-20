@@ -403,3 +403,22 @@
 :root[data-casca="celular"] .cel-selo-da-previa[data-nucleo] > button[hidden] {
   display: none;
 }
+
+/* ------------------------------------------- o pessoa.detalhes na folha
+ *
+ * As seções que um MOD acrescenta ao perfil da pessoa, na folha dela, uma
+ * embaixo da outra (o `celular-folhas.js` as monta). Sem contribuição, nada. */
+:root[data-casca="celular"] .cel-folha-detalhes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+:root[data-casca="celular"] .cel-folha-detalhes:empty {
+  display: none;
+}
+
+:root[data-casca="celular"] .cel-folha-detalhe {
+  min-width: 0;
+}

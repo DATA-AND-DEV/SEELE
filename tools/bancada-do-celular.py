@@ -1517,6 +1517,139 @@ def ir_para_aba(pg: Page, aba: str, falhas: list[str]) -> bool:
     return exigir_toque(pg, f"#cel-aba-{aba}", falhas)
 
 
+O_DETALHE_NA_FOLHA = """(texto) => {
+  const folha = document.getElementById('cel-folha-pessoa');
+  const nos = [...document.querySelectorAll('#tela-sessao *')].filter((no) => no.childElementCount === 0 && no.textContent.trim() === texto);
+  const naFolha = nos.find((no) => folha?.contains(no));
+  if (naFolha && !window.__detalheNaFolha) window.__detalheNaFolha = naFolha;
+  return { folha: !!folha?.checkVisibility(), copias: nos.length, naFolha: !!naFolha?.checkVisibility(),
+           mesmoNo: !!naFolha && naFolha === window.__detalheNaFolha,
+           foraDaFolhaAVista: nos.filter((no) => !folha?.contains(no) && no.checkVisibility()).length };
+}"""
+
+
+O_DONO_DAS_SECOES = """() => {
+  const folha = document.getElementById('cel-folha-pessoa');
+  const rgb = (c) => c.match(/[\\d.]+/g).slice(0, 3).map(Number);
+  const luz = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+  const razao = (a, b) => { const [x, y] = [luz(rgb(a)), luz(rgb(b))].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+  return [...(folha?.querySelectorAll('.contribuicao-de-mod') ?? [])].map((raiz) => {
+    const secao = raiz.closest('.cel-folha-detalhe');
+    const origem = secao?.querySelector(':scope > .contribuicao-de-mod-origem');
+    if (!origem?.checkVisibility()) return { mod: raiz.dataset.mod, origem: null };
+    const r = origem.getBoundingClientRect(), s = getComputedStyle(origem);
+    const conteudo = secao.querySelector(':scope > .contribuicao-de-mod-caixa')?.getBoundingClientRect();
+    const no = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return { mod: raiz.dataset.mod, origem: origem.textContent, foraDoMod: !raiz.contains(origem),
+             acima: !!conteudo && r.bottom <= conteudo.top + 1,
+             contraste: Math.round(razao(s.color, s.backgroundColor) * 100) / 100, noToque: no === origem };
+  });
+}"""
+
+
+def detalhes_da_pessoa(pg: Page) -> list[str]:
+    """O `pessoa.detalhes` na folha da pessoa (spec do celular, § das regiões:
+    «o pessoa.detalhes sempre tem lugar na folha»; tarefa da orquestradora,
+    16/10, da auditoria da F3). Numa linha nativa, a contribuição de um MOD
+    para a pessoa aparece na folha dela, numa cópia só no documento, e
+    continua o mesmo nó com a folha aberta por dois quadros; fechada, sai do
+    documento (fica no cache, e não na linha); aberta de novo, volta. Nunca
+    há duas cópias. A folha de quem não tem contribuição não ganha nada. O
+    `data-pessoa-id` de cada linha concorda com a chave dela (`chaveNaLista`).
+
+    **De quem é cada seção** (núcleo de confiança; orquestradora, 16/10):
+    acima de toda seção de MOD, a linha do produto com o nome do MOD, fora do
+    nó dele, nas cores do núcleo e com contraste de 4,5:1 sob os temas da
+    bancada, o hostil inclusive. Uma segunda contribuição tenta cobri-la (um
+    «MODERAR» com `mover` para cima, `escalar: 4` e fundo vermelho), e a linha
+    continua recebendo o toque."""
+    falhas = []
+    texto = "DETALHE DA BANCADA"
+    if not ir_para_aba(pg, "pessoas", falhas):
+        return falhas
+    pg.evaluate(MOD_DE_PE)
+    juli = pg.evaluate("String(SEELE_QUADRO.voice_rooms.flatMap((s) => s.people).find((p) => p.nickname === 'juli')?.id)")
+    pg.evaluate("""([alvo, texto]) => __pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'pessoa.detalhes', modo: 'adicionar', alvo,
+        conteudo: [{ forma: 'texto', chave: 'detalhe', dentro: texto }] } })""", [juli, texto])
+    # Um segundo MOD, dono da segunda seção, que tenta cobrir a linha do produto.
+    pg.evaluate(MOD_DE_PE.replace("'teste/bancada'", "'teste/tampa'"))
+    pg.evaluate("""(alvo) => __pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'pessoa.detalhes', modo: 'adicionar', alvo,
+        conteudo: [{ forma: 'caixa', chave: 'tampa', estilo: { mover: { x: 0, y: -60 }, escalar: 4, fundo: '#ff0000' },
+                     dentro: [{ forma: 'texto', chave: 'falso', dentro: 'MODERAR' }] }] } })""", juli)
+    esperar_quadro(pg)
+    linha = "#lista-roster li.pessoa:has(.pessoa-nome)"
+    nativa = pg.evaluate(f"""() => {{ const li = [...document.querySelectorAll('{linha}')].find((l) => l.querySelector('.pessoa-nome').textContent.startsWith('juli'));
+        return li ? !li.querySelector('.pessoa-apresentada-faixa') : null; }}""")
+    if nativa is not True:
+        falhas.append(f"a linha de juli não é nativa, ou não existe ({nativa}): a conferência não vale")
+        return falhas
+    discordam = pg.evaluate("""() => [...document.querySelectorAll('#lista-roster li.pessoa')].map((li) => {
+        const chave = chaveNaLista.get(li);
+        const doId = typeof chave === 'string' && chave.startsWith('pessoa:') ? chave.slice('pessoa:'.length) : undefined;
+        return [li.querySelector('.pessoa-nome')?.textContent ?? '?', li.dataset.pessoaId, doId];
+      }).filter(([, attr, doId]) => attr !== doId)""")
+    if discordam:
+        falhas.append(f"o data-pessoa-id e a chave da linha discordam: {discordam}")
+    if pg.evaluate("document.querySelectorAll('#lista-roster li.pessoa[data-pessoa-id]').length") == 0:
+        falhas.append("nenhuma linha tem data-pessoa-id: a conferência da concordância não vale")
+    abrir = f"""() => [...document.querySelectorAll('{linha}')].find((l) => l.querySelector('.pessoa-nome').textContent.startsWith('juli'))
+        .querySelector('.pessoa-nome').click()"""
+    pg.evaluate(abrir)
+    pg.wait_for_timeout(300)
+    r = pg.evaluate(O_DETALHE_NA_FOLHA, texto)
+    if not r["folha"] or not r["naFolha"] or r["copias"] != 1:
+        falhas.append(f"a folha de juli não mostra a contribuição pessoa.detalhes dela, numa cópia só: {r}")
+    donos = pg.evaluate(O_DONO_DAS_SECOES)
+    if len(donos) != 2:
+        falhas.append(f"a folha de juli tem {len(donos)} seções de MOD, e não as dos dois MODs: a conferência do dono não vale")
+    for d in donos:
+        if d["origem"] != d["mod"] or not d["foraDoMod"] or not d["acima"]:
+            falhas.append(f"uma seção de MOD na folha sem a linha do produto com o nome dele, fora do nó e acima: {d}")
+        elif d["contraste"] < 4.5:
+            falhas.append(f"a linha de quem é a seção tem {d['contraste']}:1, abaixo de 4,5:1: {d}")
+        elif not d["noToque"]:
+            falhas.append(f"o conteúdo do MOD cobre a linha de quem é a seção: {d}")
+    # Nenhum nó sai e volta enquanto nada muda: tirar e repor o mesmo nó também
+    # o tira da árvore, e o foco de dentro dele cairia.
+    pg.evaluate("""() => { window.__trocasNaFolha = 0;
+        new MutationObserver((rs) => { for (const r of rs) window.__trocasNaFolha += r.removedNodes.length; })
+          .observe(document.querySelector('#cel-folha-pessoa .cel-folha-detalhes'), { childList: true, subtree: true }); }""")
+    esperar_quadro(pg)
+    esperar_quadro(pg)
+    r = pg.evaluate(O_DETALHE_NA_FOLHA, texto)
+    if not r["naFolha"] or not r["mesmoNo"] or r["copias"] != 1:
+        falhas.append(f"com a folha aberta por dois quadros, a contribuição saiu dela ou é outro nó: {r}")
+    if (trocas := pg.evaluate("window.__trocasNaFolha")):
+        falhas.append(f"com a folha aberta e nada mudando, {trocas} nós saíram dela em dois quadros")
+    # Uma contribuição que chega com a folha aberta aparece nela no quadro seguinte.
+    pg.evaluate(MOD_DE_PE.replace("'teste/bancada'", "'teste/tarde'"))
+    pg.evaluate("""(alvo) => __pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'pessoa.detalhes', modo: 'adicionar', alvo,
+        conteudo: [{ forma: 'texto', chave: 'tarde', dentro: 'CHEGOU COM A FOLHA ABERTA' }] } })""", juli)
+    esperar_quadro(pg)
+    if not (r := pg.evaluate(O_DETALHE_NA_FOLHA, "CHEGOU COM A FOLHA ABERTA"))["naFolha"]:
+        falhas.append(f"a contribuição que chegou com a folha aberta não apareceu nela: {r}")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(300)
+    esperar_quadro(pg)
+    if (r := pg.evaluate(O_DETALHE_NA_FOLHA, texto))["copias"] != 0:
+        falhas.append(f"fechada a folha, a contribuição ficou no documento (na linha, ou à toa): {r}")
+    pg.evaluate(abrir)
+    pg.wait_for_timeout(300)
+    if not (r := pg.evaluate(O_DETALHE_NA_FOLHA, texto))["naFolha"]:
+        falhas.append(f"aberta de novo, a folha de juli não mostra a contribuição: {r}")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(300)
+    pg.evaluate(f"""() => [...document.querySelectorAll('{linha}')].find((l) => l.querySelector('.pessoa-nome').textContent.startsWith('vitor'))
+        .querySelector('.pessoa-nome').click()""")
+    pg.wait_for_timeout(300)
+    if (r := pg.evaluate(O_DETALHE_NA_FOLHA, texto))["naFolha"]:
+        falhas.append("a folha de vitor, sem contribuição, mostra a de juli")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(200)
+    return falhas
+
+
 def esperar_quadro(pg: Page) -> None:
     """A casca relê o `snapshot` a cada 500 ms; uma mudança no quadro do duble
     aparece no redesenho seguinte."""
@@ -3414,6 +3547,7 @@ CASOS: dict[str, Caso] = {
     # Sem ela, o claro reprovava o «VOCÊ ESTÁ AQUI» a 2,6:1.
     "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
+    "detalhes-da-pessoa": Caso(levar=detalhes_da_pessoa, medir=False, temas=("papel", "claro", "hostil")),
     "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
     "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "claro", "hostil"),

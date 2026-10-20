@@ -176,7 +176,58 @@
    * com o ponteiro em cima. A folha escreve no deslizante do desktop, que é quem
    * manda o `set_volume`. Quem usa o aparelho não tem volume para si.
    */
-  function folhaDaPessoa({ nome, sinal, estado, volume, mudarVolume, podeModerar }) {
+  // As contribuições `pessoa.detalhes` de quem a folha mostra (spec, § das
+  // regiões: «o pessoa.detalhes sempre tem lugar na folha»; aprovado pela
+  // orquestradora em 16/10). A contribuição é **um nó por pessoa** (o cache de
+  // `montarContribuicao`, pelo id), e no celular só a folha o monta: a linha da
+  // lista não (`CASCA.detalhesNaLinha`). A folha o põe ao abrir, o acompanha a
+  // cada quadro enquanto aberta, sem trocar o nó que não mudou, e ele sai do
+  // documento com ela, de volta ao cache.
+  CASCA.detalhesNaLinha = false;
+  let pintarOsDetalhes = null;
+  CASCA.depoisDeDesenhar.push(() => pintarOsDetalhes?.());
+
+  //
+  // **De quem é cada seção** (núcleo de confiança; decidido pela orquestradora
+  // em 16/10): acima do que o MOD desenha, a linha do produto com o nome dele
+  // (o `data-mod` da raiz), nas cores do núcleo. É o par do «⋯» do desktop (F3,
+  // `mods-controles.css`), com as mesmas classes: a linha
+  // `contribuicao-de-mod-origem`, fora do nó da contribuição, e a caixa
+  // `contribuicao-de-mod-caixa`, que recorta o que o MOD desenha: com `mover`,
+  // `escalar` ou sombra, ele não cobre a linha. Sem ela, um «MODERAR» de MOD
+  // entre o volume e o MODERAR do produto se passaria pelo produto.
+  let secoesDeDetalhe = 0;
+
+  function detalhesNaFolha(id) {
+    const caixa = h("div", { class: "cel-folha-detalhes" });
+    // Uma seção por nó, e a mesma de um quadro ao seguinte.
+    const secoes = new Map();
+    const secaoDe = (no) => {
+      let secao = secoes.get(no);
+      if (!secao) {
+        secoesDeDetalhe += 1;
+        const origem = `cel-detalhe-origem-${secoesDeDetalhe}`;
+        secao = h("section", { class: "cel-folha-detalhe", "aria-labelledby": origem },
+          h("p", { id: origem, class: "contribuicao-de-mod-origem", text: no.dataset.mod ?? "" }),
+          h("div", { class: "contribuicao-de-mod-caixa" }, no));
+        secoes.set(no, secao);
+      }
+      return secao;
+    };
+    const pintar = () => {
+      if (!caixa.isConnected) {
+        if (pintarOsDetalhes === pintar) pintarOsDetalhes = null;
+        return;
+      }
+      const desejadas = conteudoDasContribuicoes("pessoa.detalhes", id).map(secaoDe);
+      if (desejadas.length !== caixa.children.length || desejadas.some((secao, i) => caixa.children[i] !== secao)) {
+        caixa.replaceChildren(...desejadas);
+      }
+    };
+    return { caixa, pintar };
+  }
+
+  function folhaDaPessoa({ id, nome, sinal, estado, volume, mudarVolume, podeModerar }) {
     let fechar = null;
     let deslizante = null;
     const corpo = [h("div", { class: "cel-folha-sinal" },
@@ -200,12 +251,18 @@
       });
       corpo.push(h("label", { class: "cel-folha-campo-volume" }, rotulo, deslizante));
     }
+    const detalhes = id === null ? null : detalhesNaFolha(String(id));
+    if (detalhes) corpo.push(detalhes.caixa);
     if (podeModerar) {
       corpo.push(h("p", { class: "cel-fora" }, h("span", { class: "rotulo", text: PALAVRAS.moderar }), PALAVRAS.foraModerar));
     }
     const fecharBotao = h("button", { class: "botao-fantasma", type: "button", onclick: () => fechar() }, PALAVRAS.fechar);
     corpo.push(h("div", { class: "cel-folha-acoes" }, fecharBotao));
     fechar = abrirFolha(folha("cel-folha-pessoa", nome, ...corpo), () => fechar());
+    if (detalhes) {
+      pintarOsDetalhes = detalhes.pintar;
+      detalhes.pintar();
+    }
     // O foco entra na folha, como nas outras: sem ele, o leitor da tela lia a
     // sessão por baixo dela (medido na árvore do WebKit).
     (deslizante ?? fecharBotao).focus();

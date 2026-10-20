@@ -778,3 +778,56 @@ fn nenhum_script_das_cascas_do_navegador_escreve_frase_de_tela() {
         escritas.join("\n")
     );
 }
+
+/// G9. O `pessoa.detalhes` tem um dono por casca (aprovado pela orquestradora em
+/// 16/10). A contribuição é um nó por pessoa (o cache de `montarContribuicao`),
+/// e um nó não mora em dois lugares: no desktop e na larga, a linha da pessoa o
+/// monta; no celular, só a folha. Quem decide é o `CASCA.detalhesNaLinha`,
+/// **consultado num lugar só** do `tela-sessao.js`, onde as duas linhas (a
+/// nativa e a apresentada) o acrescentam; e ninguém mais monta `pessoa.detalhes`.
+/// Uma segunda consulta, ou um terceiro lugar que o monte, é a porta para o nó
+/// voltar a ser disputado (a folha o tirava da linha, e a linha o tomava de volta
+/// a cada quadro: o caso `detalhes-da-pessoa` da bancada mede isso).
+#[test]
+fn o_detalhe_da_pessoa_tem_um_dono_por_casca() {
+    let sessao = codigo_de("tela-sessao.js", &ler("tela-sessao.js"));
+    let consultas = sessao.matches("CASCA.detalhesNaLinha").count();
+    assert_eq!(
+        consultas, 1,
+        "tela-sessao.js consulta o CASCA.detalhesNaLinha {consultas} vezes, e não uma"
+    );
+
+    let montagem = "conteudoDasContribuicoes(\"pessoa.detalhes\"";
+    let mut onde = Vec::new();
+    for entrada in std::fs::read_dir(ui()).expect("ui/ ilegível") {
+        let nome = entrada
+            .expect("ui/ ilegível")
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        if !nome.ends_with(".js") {
+            continue;
+        }
+        let vezes = codigo_de(&nome, &ler(&nome)).matches(montagem).count();
+        if vezes > 0 {
+            onde.push(format!("{nome} ×{vezes}"));
+        }
+    }
+    onde.sort();
+    assert_eq!(
+        onde,
+        ["celular-folhas.js ×1", "tela-sessao.js ×1"],
+        "o pessoa.detalhes é montado fora dos dois lugares combinados (a linha, pelo ponto, e a folha do celular)"
+    );
+
+    let base = codigo_de("base.js", &ler("base.js"));
+    assert!(
+        base.contains("detalhesNaLinha: true"),
+        "o CASCA do base.js tem de declarar o detalhesNaLinha verdadeiro: no desktop, a linha monta"
+    );
+    let folhas = codigo_de("celular-folhas.js", &ler("celular-folhas.js"));
+    assert!(
+        folhas.contains("CASCA.detalhesNaLinha = false"),
+        "o celular tem de desligar o detalhesNaLinha: lá, só a folha monta"
+    );
+}

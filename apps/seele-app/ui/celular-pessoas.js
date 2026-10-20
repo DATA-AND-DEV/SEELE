@@ -31,6 +31,9 @@
     const deslizante = linha.querySelector("input.volume");
     const apelido = deslizante?.getAttribute("data-pessoa") ?? null;
     CELULAR.ajudante("folhaDaPessoa")({
+      // O id da pessoa, que a linha traz do mesmo `pessoa.id` da chave dela: é
+      // o alvo das contribuições `pessoa.detalhes`, que a folha mostra.
+      id: linha.dataset.pessoaId ?? null,
       nome: linha.querySelector(".pessoa-nome")?.textContent ?? "",
       sinal: linha.querySelector(".pessoa-sync-valor")?.textContent ?? "",
       estado: linha.querySelector(".pastilha")?.textContent ?? "",
