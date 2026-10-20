@@ -2256,6 +2256,37 @@ async function osTetosDaSuperficieSaoOsDoV6() {
     }
     r.soltar();
   }
+
+  // **A soma, e não cada uma** (`superficies.limites-o-que-e`: «midia, retrato
+  // e fundoDeMidia dividem um bolso de bytes por superfície»; a auditoria do
+  // v6, tabela 7, 7:81): cada uma sozinha cabia, e nada media a soma. Duas
+  // `midia` de 6 MiB — a segunda passa dos 10 —, um retrato de 20 MiB e uma
+  // `midia` de 1 depois — ela passa dos 10 —, e uma `midia` de 6 e um retrato
+  // de 20 depois — ele passa dos 24.
+  for (const [nome, sequencia, recusadaNo] of [
+    ["duas midia de 6 MiB", [["midia", 6], ["midia", 6]], 1],
+    ["um retrato de 20 MiB e uma midia de 1", [["retrato", 20], ["midia", 1]], 1],
+    ["uma midia de 6 MiB e um retrato de 20", [["midia", 6], ["retrato", 20]], 1],
+  ]) {
+    const bb = bancada();
+    const fila = sequencia.map(([, mib]) => mib * MIB);
+    const dd = dono(bb, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: fila.shift() }));
+    const r = nova(bb, dd);
+    // Uma depois da outra: duas cargas juntas se contam na ordem em que
+    // chegam, e não na ordem da árvore — a primeira montada, a segunda
+    // acrescentada depois, conta sobre ela.
+    const nos = sequencia.map(([forma], i) => (forma === "retrato"
+      ? { forma: "retrato", chave: `s${i}`, fonte: `img/s${i}.png`, inicial: "S" }
+      : { forma: "midia", chave: `s${i}`, fonte: `img/s${i}.png` }));
+    r.aplicar([nos[0]]);
+    await assentar();
+    r.aplicar(nos);
+    await assentar();
+    const situacoes = r.midiasAnotadas().map((m) => m.situacao);
+    confere(caso, situacoes.length === 2 && situacoes[recusadaNo] === "recusada" && situacoes[1 - recusadaNo] === "pronta",
+      `${nome}, no mesmo bolso: as situações saíram ${JSON.stringify(situacoes)}, e a segunda devia passar da soma`);
+    r.soltar();
+  }
 }
 
 /**
