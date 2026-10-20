@@ -41,10 +41,10 @@
      `--nucleo-*` herdado ali continua sendo a cor do produto. É isso que
      garante o MUDO, o SURDO e o SAIR qualquer que seja o tema (spec, §6). O
      tema não escreve `--nucleo-*` nenhum: as tabelas dele são fechadas, e o G7
-     confere. O fundo, o painel, o texto, o acento e a borda o desktop declara
-     com os mesmos nomes e valores (`tela-sessao.css`, `e26e9edc`); aqui ficam
-     só os que a casca lê e ele não. */
-  --nucleo-rotulo: var(--seele-rotulo-claro);
+     confere. O fundo, o painel, o texto, o acento, a borda e o rótulo o desktop
+     declara com os mesmos nomes e valores (`tela-sessao.css`, `e26e9edc`; o
+     rótulo desde `4e2e1497`, da F3, que a linha de dono do `pessoa.detalhes`
+     lê nos dois lados); aqui ficam só os que a casca lê e ele não. */
   --nucleo-seguro: var(--seele-padrao-azul);
   --nucleo-alerta: var(--seele-vermelho-alerta);
   --nucleo-alerta-fundo: var(--seele-vermelho-fraco);
