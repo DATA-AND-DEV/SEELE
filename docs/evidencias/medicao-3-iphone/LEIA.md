@@ -22,9 +22,9 @@ agent). Esta página tira os endereços.
 | porta fechada, 3 vezes | 7, 9 e 9 ms, o mesmo erro |
 | mudo (lê e descarta) | 30 005 ms, o mesmo erro |
 | ninguém (um IP sem máquina, o `.250` da rede, conferido sem resposta ao ping e sem entrada no ARP) | **30 010 ms**, o mesmo erro (medido em 20/10, pela automação; abaixo) |
-| sem áudio, tela bloqueada 30 s e 2 min | **não medido**: a sessão sem áudio ficou aberta 5 s, à vista, e foi fechada ao começar o caso com áudio |
+| sem áudio, tela bloqueada (~1 min e ~2 min 30 s) | **a sessão cai ~25 s depois de bloquear** (medido em 20/10, à mão; abaixo) |
 | **com o áudio do produto** (`play-and-record`), tela bloqueada ~2 min 14 s | **sobreviveu**: oculta de ~13 s a ~143 s, 149 de 150 pings voltaram, e o servidor viu a sessão durar 152 375 ms até ela ser parada à mão |
-| com áudio, 5 min bloqueada | **não medido** |
+| com áudio, tela bloqueada ~3 min 14 s | **sobreviveu**, 189 de 190 pings (medido em 20/10, à mão); os 5 min não foram alcançados |
 | como web app da Tela de Início | **não medido** |
 
 No servidor, toda recusa do certificado é o iPhone abortando o aperto de mão
@@ -52,6 +52,32 @@ em menos de 50 ms) e **quem não responde** (o servidor mudo e o IP sem máquina
 resposta» depois de 30 s, mas não separa a recusa da porta fechada, nem o mudo do
 IP vazio.
 
+## 20/10: a tela bloqueada, à mão
+
+**Pela automação, não vale.** Com a sessão do `safaridriver`, bloquear a tela
+encerrou a própria sessão de automação: a página parou de mandar tudo no instante
+do bloqueio (nem o «ficou oculta» chegou), a conexão caiu no servidor por tempo
+esgotado, e ao desbloquear a sessão já não existia. Não dá para separar o que o iOS
+faz com uma aba comum do que ele faz com a aba automatizada. Os casos de tela
+bloqueada foram refeitos à mão, numa aba comum, com o servidor no Mac registrando.
+
+| caso (aba comum, iOS 27.0.1) | bloqueada | o que aconteceu |
+|---|---|---|
+| sem áudio, 1ª | de 10:47:25 a 10:48:30 (~65 s) | o servidor fechou por tempo esgotado às 10:47:51, **26 s depois do bloqueio**; ao desbloquear, a página viu `WebTransportError` |
+| sem áudio, 2ª | de 10:48:41 a 10:51:12 (~2 min 30 s) | o servidor fechou por tempo esgotado às 10:49:06, **25 s depois do bloqueio**; ao desbloquear, `WebTransportError` e «escrita falhou» |
+| com o áudio do produto | de 10:51:24 a 10:54:38 (~3 min 14 s) | **sobreviveu**: 189 de 190 pings voltaram com a tela bloqueada, e a sessão foi fechada à mão depois |
+
+**O que decide:** sem áudio, a página para de mandar ao bloquear, e o servidor a
+derruba quando o ocioso esgota: a sessão de quem está só no texto **cai uns 25 s
+depois de bloquear o iPhone**, mesmo num bloqueio curto. A reconexão ao voltar é
+o caminho normal do celular sem áudio, e não a exceção. Com o áudio do produto
+(`play-and-record`), a sessão segura a tela bloqueada: 2 min 14 s em 18/10 e 3 min
+14 s em 20/10, com os pings passando.
+
+(Os eventos de «ficou oculta» e «voltou à frente» chegam repetidos, um por caso já
+aberto na mesma página; os tempos acima são os do servidor e os da primeira
+ocorrência de cada um.)
+
 ## O que isso decide (pelo «Como ler o resultado» da F4)
 
 - **A mesma chave serve.** O curto pode ter a chave do longo: o A abriu, e o A2
@@ -67,9 +93,8 @@ IP vazio.
   mesmo erro), como a bancada já sugeria. Só o silêncio se separa, pelos 30 s.
   A tela não tem como separar «recusado» de «fechado», e diz isso.
 
-## O que falta, e leva uns 10 minutos com o servidor ainda no ar
+## O que falta
 
-1. **Sem áudio:** o caso «4 · ficar aberto, sem áudio», com a tela bloqueada 30 s e
-   depois 2 min. É o que decide se quem está só no texto cai ao bloquear.
-2. **Com áudio, 5 min** bloqueada.
-4. *(Opcional)* os mesmos casos como web app da Tela de Início.
+- **Com áudio, os 5 min completos** (chegou a 3 min 14 s). Opcional: o que se queria
+  saber, se o áudio segura a sessão bloqueada, já está respondido.
+- *(Opcional)* os mesmos casos como web app da Tela de Início.
