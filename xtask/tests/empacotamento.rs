@@ -149,7 +149,9 @@ fn a_soma_da_entrega_do_windows_so_lista_arquivos() {
             continue;
         }
         somas += 1;
-        let origem = linhas[..=numero]
+        let origem = linhas
+            .get(..=numero)
+            .unwrap_or(&[])
             .iter()
             .enumerate()
             .rev()
