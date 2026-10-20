@@ -402,6 +402,17 @@ const AVISO_DE_FONE =
  */
 const ENTRAR_SEM_NOME = "Você vai entrar com um nome tirado da sua chave. Dá para trocar no perfil.";
 
+/**
+ * O que um texto colado em CONECTAR não deixa fazer, dito sem consultar a rede
+ * (tarefa 30 da F7; spec de 23/09, «Do lado de quem liga», 1). Quem lê é o Rust
+ * (`ler_entrada`), e é ele quem decide «é o seu código?»: a tela só diz, pelo
+ * nome da variante de `ligar::EntradaColada`.
+ */
+const ENTRADA_COLADA = {
+  CodigoComErro: "ESSE CÓDIGO TEM UM ERRO DE DIGITAÇÃO",
+  SeuCodigo: "ESSE É O SEU CÓDIGO",
+};
+
 const ETAPAS = {
   Parada: "LENDO O CONVITE",
   // Provisória: a frase de uma ligação é da tarefa 7f (CHAMANDO e CANCELAR),
@@ -411,6 +422,9 @@ const ETAPAS = {
   Tentando: "TENTANDO UM ENDEREÇO DO CONVITE",
   // Diz o que abriu e não o que vem: quem lê isto ainda pode não entrar.
   CaminhoAberto: "O CAMINHO ATÉ AQUI ABRIU",
+  // Sem nome: numa ligação da tela, quem escreve é `fraseDaEtapaDaLigacao`,
+  // com o nome de quem é chamado. Diz que chama, e não que alguém atendeu.
+  Tocando: "CHAMANDO",
   Dentro: "DENTRO",
   // Neutra de propósito. `Desistiu` carrega o `ConnectError` inteiro — o núcleo
   // o guardou assim para não achatar `PinChanged` e `InviteMismatch`, os dois
@@ -419,6 +433,9 @@ const ETAPAS = {
   // coisa mais importante escrita nela. Esta linha diz onde a chegada parou; a
   // causa é de quem a tem, que é `fraseDeErro`.
   Desistiu: "A CHEGADA PAROU AQUI",
+  // Quem liga desistiu (tarefa 16 da F7): não é falha, e a frase não procura
+  // culpado. A tela de quem liga é da tarefa 7f, que pode trocá-la.
+  Cancelada: "LIGAÇÃO CANCELADA",
 };
 
 /**
@@ -584,6 +601,63 @@ const NOMES_RECUSADOS = {
     "ESTE NOME TEM CARACTERE QUE ENDEREÇO NÃO TEM.\nValem letras, números, hífen e ponto — e os dois-pontos da porta.",
 };
 
+/**
+ * A etapa de uma ligação, com o nome de quem é chamado (tarefa 28 da F7; spec de
+ * 23/09, «Erros e frases»), ou `null` para a frase de sempre.
+ */
+function fraseDaEtapaDaLigacao(etapa, nome) {
+  if (etapa && typeof etapa === "object" && etapa.Tocando) {
+    return `CHAMANDO ${nomeNaFrase(nome)}…`;
+  }
+  return null;
+}
+
+/** O nome de quem é chamado, como as frases o escrevem. */
+function nomeNaFrase(nome) {
+  return String(nome ?? "").toLocaleUpperCase("pt-BR");
+}
+
+/**
+ * **A frase de quem liga** (tarefa 28 da F7; spec de 23/09, «Erros e frases»,
+ * quem liga), com o nome de quem foi chamado, ou `null` quando o desfecho não é
+ * de uma ligação e a frase de sempre (`fraseDeErro`) serve.
+ *
+ * A trilha decide uma linha só: «está no ar, mas o caminho não abriu» é quando o
+ * ponto de encontro deu onde a sala mora (houve tentativa) e nenhum candidato
+ * respondeu.
+ */
+function fraseDaLigacao(erro, nome, trilha) {
+  const quem = nomeNaFrase(nome);
+  const razao = erro?.Refused?.reason;
+  if (razao === "NinguemAtendeu") return `${quem} NÃO ATENDEU`;
+  if (razao === "ChamadaRecusada") return `${quem} RECUSOU`;
+  if (razao === "ChamadaEncerrada") return `${quem} ENCERROU A LIGAÇÃO`;
+  if (razao === "RateLimited") return `ESPERE UM POUCO PARA LIGAR DE NOVO PARA ${quem}`;
+  if (razao === "ServerFull") return `A LIGAÇÃO DE ${quem} ESTÁ CHEIA (6 PESSOAS)`;
+  const localizar = erro?.NaoLocalizou?.motivo;
+  if (localizar === "PontoMudo" || localizar === "PontoNaoResolve") {
+    return (
+      "O PONTO DE ENCONTRO NÃO RESPONDEU: sem ele, código não funciona; " +
+      "link com endereço continua funcionando"
+    );
+  }
+  if (localizar === "NinguemMora") {
+    return (
+      `${quem} NÃO ESTÁ DISPONÍVEL: o SEELE do outro lado está fechado ` +
+      "ou não está recebendo ligações"
+    );
+  }
+  if (erro?.CodigoNaoBate) return "QUEM ATENDEU NÃO É O DONO DESTE CÓDIGO. Nada foi enviado.";
+  if (erro?.SePassouPorCodigo) return `ALGUÉM TENTOU SE PASSAR POR ${quem}`;
+  if (erro?.OutraLinha) return `${quem} USA UMA VERSÃO QUE NÃO CONVERSA COM A SUA`;
+  const semCaminho = erro === "Unreachable" || erro === "SemResposta" || erro === "HandshakeTimeout";
+  const tentou =
+    Array.isArray(trilha) &&
+    trilha.some((passo) => passo?.etapa && typeof passo.etapa === "object" && passo.etapa.Tentando);
+  if (semCaminho && tentou) return `${quem} ESTÁ NO AR, MAS O CAMINHO NÃO ABRIU`;
+  return null;
+}
+
 function fraseDeErro(erro, apelido, deOnde) {
   if (typeof erro === "string") return FRASES[erro] ?? erro;
   if (erro && typeof erro === "object") {
@@ -694,6 +768,39 @@ function fraseDeErro(erro, apelido, deOnde) {
         comparacao +
         "O convite, a senha e o apelido não chegaram a ele.\n" +
         "Confirme o link com quem o mandou."
+      );
+    }
+    // **O servidor fala uma versão que este app não fala** (P8 do plano F1b;
+    // ADR 0058). Até a 0.15 isto era NADA RESPONDEU NESSE ENDEREÇO, de um
+    // servidor que tinha respondido, e respondido justamente a versão dele, no
+    // primeiro byte da resposta. A frase diz a versão do servidor, e não o
+    // número do fio.
+    //
+    // **Pelos dois campos que a FFI manda, e não pela forma do texto da
+    // versão** (decisão da orquestradora de 15/10):
+    // - `servidor`, só quando é uma versão que o launcher abre («0.15»);
+    // - `mais_nova`, quando o número está acima do deste app: toda 1.x fala o
+    //   primeiro número da 1.0 (ADR 0058), então quem o recusa é mais novo, e o
+    //   remédio é atualizar;
+    // - nenhum dos dois: um número de antes da 0.15, que nenhum app oferecido
+    //   fala.
+    if (erro.OutraLinha) {
+      const { servidor, mais_nova: maisNova } = erro.OutraLinha;
+      if (servidor) {
+        return (
+          `ESTE SERVIDOR É O SERVIDOR ${servidor}.\n` +
+          `Esta versão do app não conversa com ele. Para entrar, use o SEELE ${servidor}.`
+        );
+      }
+      if (maisNova) {
+        return (
+          "ESTE SERVIDOR É DE UMA VERSÃO MAIS NOVA DO SEELE.\n" +
+          "Atualize o app para entrar nele."
+        );
+      }
+      return (
+        "ESTE SERVIDOR É DE UMA VERSÃO ANTIGA DO SEELE.\n" +
+        "Esta versão do app não conversa com ele, e nenhuma versão oferecida hoje conversa."
       );
     }
     // **O servidor exige MODs que esta máquina não aceitou.** ADR 0045.
@@ -947,6 +1054,9 @@ const FRASES = {
     // cobrou antes do `Hello`. Por isso a segunda linha diz o que não saiu,
     // com o escopo «a ele» da recusa pela impressão (ver `InviteMismatch`, em
     // `fraseDeErro`).
+    // Quem liga desistiu antes de entrar (tarefa 16 da F7). A casca sabe que
+    // foi ela quem cancelou; a frase existe para nunca sair o nome cru.
+    Cancelada: "VOCÊ CANCELOU A LIGAÇÃO",
     ChaveNaoProvada:
         "QUEM ATENDEU NÃO PROVOU SER ESTE SERVIDOR.\n" +
         "Ele mostrou o certificado do servidor sem a chave que o assina. " +

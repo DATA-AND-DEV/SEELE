@@ -134,7 +134,7 @@ nenhum. Foram refeitas com `perl -e 'alarm …'` e aí provaram.
 | 10 | revogação nos atos do próprio processo | feito, com reversão. O hospedar confere em Rust; o entrar confere por um comando à parte antes do único `connect` (o erro dele é o da FFI), com um guarda que prende a ordem | `f88f2e0`, frases em `0c01558` |
 | 11 | a guarda da linha legada | feito, com reversão (três peças). O botão de baixar de novo para a `InstalacaoAlterada` vem com a tela de disco (15) | `8312d67`, frase em `0ba303f` |
 | 12 | a primeira abertura | feito, com reversão (três peças). A busca da linha legada foi para depois do `set_var` do módulo de vídeo, porque o `reqwest` lê o ambiente | `82fd3f5` |
-| 13 | entrar por linha | feito, com reversão. O caminho pela recusa espera o `OutraLinha { numero }` da F1, que vem pelo byte 0 do quadro (mudou de forma em 08/10: a linha não é razão no fio) | `4818927` |
+| 13 | entrar por linha | feito, com reversão. O caminho pela recusa fechou em 15/10, sobre a P8 da F1 (`05e417df`), no ramo `0.16/launcher-recusa`: ver «O caminho pela recusa», abaixo | `4818927` |
 | 14 | hospedar por linha | feito, com reversão. A primeira forma do guarda de texto passava revertida (casava com a chamada de `baixar_versao`); ficou presa à de `abrir_versao` | `a2160d7` |
 | 15 | tela de disco mínima | feito, com reversão. Fecha também o conserto da `InstalacaoAlterada` (apagar, e o app é baixado de novo no próximo uso) | `0258aea` |
 | 16 | documentos; sai o segundo endereço | feito, com reversão (o guarda do endereço). O exemplo de `docs/assinatura-e-atualizacao.md` já mostrava só o endereço novo, e não precisou mudar | `de11305` |
@@ -168,10 +168,9 @@ mudar, ela roda de novo antes de publicar.
 `versao/0.16` (`a2b9f9d0`, verde), e o merge de volta foi um avanço rápido.
 
 **O que falta:**
-- a parte 2 da tarefa 17, com o dono, no Mac e no Windows; ela também libera
-  as notas da 0.15.2;
-- o caminho pela recusa na tarefa 13, que espera o `OutraLinha { numero }` da
-  F1;
+- a parte 2 da tarefa 17, com o dono, no Mac e no Windows (as notas da
+  0.15.2 deixaram de esperar por ela com a D-linha-2, abaixo);
+- ~~o caminho pela recusa na tarefa 13~~: fechado em 15/10, abaixo;
 - a publicação da 0.15.2, que espera a sequência de publicação.
 
 ## D-linha-2: a 0.15.2 sai como atualização normal (09/10)
@@ -195,3 +194,25 @@ O dono reviu a D-linha-1 por causa do conserto da sala cheia, que foi levado ao
   e a persistência não mudou desde `54f542f`.
 - **Esconder o atualizador quando o launcher a abre continua**, e não afeta
   quem a abre direto. Os três testes de `a_abertura_pelo_launcher` passam.
+
+## O caminho pela recusa (15/10)
+
+O passo 5 da tarefa 13, no ramo `0.16/launcher-recusa`, a partir da P8 da F1
+(`05e417df`). A FFI manda `OutraLinha { numero, servidor, mais_nova }`, com o
+`servidor` só para uma versão que o launcher abre.
+- **Rust** (`595f755e`, e o comando em `472c3d00`): o núcleo do link com `v=`
+  passou a servir também à recusa (`para_entrar_na_linha`). Um defeito da
+  tarefa 13 foi consertado junto: um link de versão mais nova dizia «deixou
+  de ser oferecido», ou oferecia baixar; agora é `MaisNova`, «atualize».
+- **Casca** (`d9652cfd`, e o `tela-boot.js` isolado em `e21c91bd`): só com o
+  `servidor` presente, o painel reabre com a pergunta das conversas, pelo
+  mesmo `entrarPelaLinha` do link com `v=`. O link colado desce com a
+  tentativa e vai só ao `abrir_versao`. O foco vai à pergunta, e o VOLTAR o
+  devolve ao CONECTAR. O caminho da F3 (`af743f51`) não serve a quem entra, e
+  o porquê está no commit.
+- **Prova** (`e0ea9d1f`): o roteiro `outra-linha-pelo-launcher.js`, com cinco
+  casos, e o guarda da credencial com o `linkColado`. Oito reversões, cada
+  uma reprovando no seu caso, e uma do Rust.
+- **Fica de fora:** o `cumprirAAbertura`, quando a 0.16 é aberta com
+  `--entrar` por outro launcher, chama o `conectar` sem o link. Ligar isso
+  pede um teste próprio.

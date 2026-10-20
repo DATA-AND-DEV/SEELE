@@ -778,3 +778,43 @@ fn nenhum_script_das_cascas_do_navegador_escreve_frase_de_tela() {
         escritas.join("\n")
     );
 }
+
+/// G8. O ponto da casca na coluna de salas (`CASCA.vestirASala`, aprovado pela
+/// orquestradora em 16/10; pendência 63(b) no celular): **uma chamada só**, no
+/// `desenharCanais`, sobre o `li` montado, **antes** do `reconciliarALista` da
+/// coluna. Depois da reconciliação, o que a casca acrescenta sairia no quadro
+/// seguinte, e o ENTRAR e o ENTRAR MUDO voltariam a ser outros nós a cada quadro
+/// (o caso `salas-pelo-id` da `bancada-do-celular.py` mede isso no navegador).
+/// Duas chamadas vestiriam a sala duas vezes. No desktop o ponto não faz nada: o
+/// `CASCA` do `base.js` o declara vazio.
+#[test]
+fn a_casca_veste_a_sala_uma_vez_e_antes_da_reconciliacao() {
+    let sessao = codigo_de("tela-sessao.js", &ler("tela-sessao.js"));
+    let chamadas: Vec<usize> = sessao
+        .match_indices("CASCA.vestirASala(")
+        .map(|(onde, _)| onde)
+        .collect();
+    assert_eq!(
+        chamadas.len(),
+        1,
+        "tela-sessao.js chama o CASCA.vestirASala {} vezes, e não uma",
+        chamadas.len()
+    );
+    let desenhar = sessao
+        .find("function desenharCanais(")
+        .expect("tela-sessao.js sem o desenharCanais: a leitura deste guarda quebrou");
+    let reconciliar = sessao[desenhar..]
+        .find("reconciliarALista(")
+        .map(|onde| desenhar + onde)
+        .expect("o desenharCanais sem o reconciliarALista: a leitura deste guarda quebrou");
+    assert!(
+        desenhar < chamadas[0] && chamadas[0] < reconciliar,
+        "o CASCA.vestirASala tem de estar no desenharCanais, antes do reconciliarALista da coluna de salas"
+    );
+
+    let base = codigo_de("base.js", &ler("base.js"));
+    assert!(
+        base.contains("vestirASala: (_item, _sala, _snapshot) => {}"),
+        "o CASCA do base.js tem de declarar o vestirASala vazio: no desktop, o ponto não faz nada"
+    );
+}

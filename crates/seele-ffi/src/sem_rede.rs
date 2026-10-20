@@ -23,6 +23,7 @@ pub(crate) fn shared(apelido: &str) -> Arc<Shared> {
         link_seconds: std::sync::atomic::AtomicU64::new(0),
         link_attempts: std::sync::atomic::AtomicU32::new(0),
         messages_revision: std::sync::atomic::AtomicU64::new(0),
+        fora_do_ar_revision: std::sync::atomic::AtomicU64::new(0),
         icon_revision: std::sync::atomic::AtomicU64::new(0),
         person_icons_revision: std::sync::atomic::AtomicU64::new(0),
         room: Mutex::new(Room::new()),
@@ -66,6 +67,7 @@ pub fn retratos(
         commands,
         shared: Arc::clone(&shared),
         encerrada: Mutex::new(None),
+        ligacao: None,
     };
     let mut retratos = vec![conexao.snapshot()];
     for mensagem in mensagens {

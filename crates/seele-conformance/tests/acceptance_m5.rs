@@ -381,8 +381,18 @@ async fn a_second_client_resumes_the_conversation_with_its_history() -> Result<(
     first.enter_voice_room(VOICE_ROOM, None)?;
     first.open_channel(CHANNEL)?;
     first.send_message(CHANNEL, "primeira coisa dita".into())?;
+    // **A confirmada, e não a pendente** — o mesmo defeito que `moderacao.rs`
+    // consertou. `messages()` traz a pendente desde o envio (`send_message`
+    // a anota antes do comando), e esperar «não vazio» voltava na primeira
+    // volta, sem esperar gravação nenhuma: a primeira sessão podia acabar
+    // antes de o servidor gravar, e a segunda via a sala vazia. Reprovou assim
+    // uma vez na conformidade inteira, sob carga, e passou 40 de 40 sozinho.
+    // Uma confirmada tem o id do servidor; a pendente tem zero.
     assert!(
-        until(&first, |connection| !connection.messages().is_empty()),
+        until(&first, |connection| connection
+            .messages()
+            .iter()
+            .any(|mensagem| mensagem.id != 0)),
         "the message was never committed"
     );
     // Ending the first session is what makes this a resumption rather than two
@@ -877,7 +887,11 @@ async fn quem_nao_abriu_a_linha_nao_recebe_nada_e_isso_e_a_regra() -> Result<()>
     // A ida e volta de quem falou é o relógio: quando **ele** já tem a
     // mensagem, o servidor já a difundiu, e o silêncio do outro lado deixa de
     // poder ser «ainda não chegou».
-    let voltou = espere_ate(|| !speaker.messages().is_empty());
+    //
+    // **A confirmada, e não a pendente**, pelo mesmo motivo do teste da
+    // retomada: a pendente já está em `messages()` desde o envio, e com ela o
+    // relógio parava antes da difusão, e o silêncio de baixo não provava nada.
+    let voltou = espere_ate(|| speaker.messages().iter().any(|mensagem| mensagem.id != 0));
     assert!(voltou, "nem quem falou recebeu a própria mensagem de volta");
 
     assert!(
