@@ -203,6 +203,22 @@
   padding-top: 0;
 }
 
+/* As áreas seguras laterais (deitado, a ilha vai para um lado), pelas próprias
+   superfícies, e não pelo teto da coluna: medido pela F3 (16/10), com o teto
+   revertido as quatro desenhavam a 25 px da borda. `--cel-lado-*` é o quanto das
+   áreas a sessão ainda cobre (`celular-sessao.css`): zero quando a coluna já
+   as afasta, e a superfície não perde largura à toa. A página soma à margem
+   que já tem. */
+:root[data-casca="celular"] #tela-sessao :is(.dialogo-de-mod, .folha-de-mod, .painel-de-mod) {
+  padding-left: var(--cel-lado-esq);
+  padding-right: var(--cel-lado-dir);
+}
+
+:root[data-casca="celular"] #tela-sessao .pagina-de-mod {
+  padding-left: calc(var(--mod-margem) + var(--cel-lado-esq));
+  padding-right: calc(var(--mod-margem) + var(--cel-lado-dir));
+}
+
 /* Os avisos, numa fila na faixa de baixo, acima do pé. */
 :root[data-casca="celular"] #tela-sessao .avisos-de-mod {
   position: absolute;

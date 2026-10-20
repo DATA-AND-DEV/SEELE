@@ -1650,6 +1650,57 @@ def detalhes_da_pessoa(pg: Page) -> list[str]:
     return falhas
 
 
+FORA_DOS_LADOS = """([seletor, lado]) => {
+  const W = innerWidth;
+  const temTexto = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+  const nos = [...document.querySelectorAll(seletor)].flatMap((r) => [r, ...r.querySelectorAll('*')])
+    .filter((e) => e.checkVisibility() && (temTexto(e) || e.matches('button, input, select, textarea')));
+  const dentro = nos.filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.left < lado - 1 || b.right > W - lado + 1); });
+  const texto = nos.find((e) => temTexto(e) && e.textContent.trim() === 'um texto de MOD');
+  return { naArea: dentro.slice(0, 3).map((e) => `${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]} [${Math.round(e.getBoundingClientRect().left)}, ${Math.round(e.getBoundingClientRect().right)}]`),
+           texto: texto ? Math.round(texto.getBoundingClientRect().left) : null };
+}"""
+
+
+def lados_das_superficies(pg: Page) -> list[str]:
+    """As áreas seguras laterais nas superfícies de MOD, deitado, pelas próprias
+    superfícies, e não pelo teto da coluna (achado da F3, 16/10, no caso
+    `superficies-deitado`: com o teto de 480 px revertido para 4000, as quatro
+    desenhavam a 25 px da borda). Com o teto a 4000, nada de MOD fica nos 47 px
+    de cada lado. Com o teto a 480, a coluna já os afasta, e a superfície não
+    perde largura por isso: o texto fica onde ficaria sem área nenhuma."""
+    falhas = []
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate(MOD_DE_PE)
+    lados = "(px) => { document.documentElement.style.setProperty('--cel-seguro-esq', px); document.documentElement.style.setProperty('--cel-seguro-dir', px); }"
+    for nome, descricao, seletor in [s for s in SUPERFICIES_DE_MOD if s[1]["tipo"] != "aviso"]:
+        pg.evaluate("(d) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: d })"
+                    ".then(() => __pedirAoProduto({ tipo: 'superficie-montar', superficie: d.id, arvore: [{ forma: 'texto', chave: 't', dentro: 'um texto de MOD' }, { forma: 'botao', chave: 'b', dentro: 'UM BOTÃO' }] }))",
+                    descricao)
+        esperar_quadro(pg)
+        medidas = {}
+        for coluna, px in (("480px", "0px"), ("480px", "47px"), ("4000px", "47px")):
+            pg.evaluate(f"document.documentElement.style.setProperty('--cel-coluna', '{coluna}')")
+            pg.evaluate(lados, px)
+            pg.wait_for_timeout(150)
+            medidas[(coluna, px)] = pg.evaluate(FORA_DOS_LADOS, [seletor, 47])
+        if medidas[("4000px", "47px")]["naArea"]:
+            falhas.append(f"com a coluna sem teto, {nome} desenha nos 47 px laterais: {medidas[('4000px', '47px')]['naArea']}")
+        # E o texto começa logo depois da área, à vista: uma margem que crescesse
+        # sem piso (a da coluna, negativa quando o teto passa da tela) o
+        # empurraria para fora, e a conferência de cima passaria por não vê-lo.
+        if not 47 <= (medidas[("4000px", "47px")]["texto"] or -1) < 200:
+            falhas.append(f"com a coluna sem teto, o texto de {nome} não começa logo depois da área lateral: {medidas[('4000px', '47px')]['texto']} px")
+        if medidas[("480px", "47px")]["texto"] != medidas[("480px", "0px")]["texto"]:
+            falhas.append(f"com o teto de 480, a coluna já afasta as áreas, e {nome} perde largura por elas mesmo assim: "
+                          f"o texto vai de {medidas[('480px', '0px')]['texto']} a {medidas[('480px', '47px')]['texto']} px")
+        pg.evaluate("document.documentElement.style.removeProperty('--cel-coluna')")
+        pg.evaluate(lados, "0px")
+        pg.evaluate("() => superficiesDoMod({ id: 'teste/bancada' }, modsCarregados.get('teste/bancada')).soltarTudo()")
+        esperar_quadro(pg)
+    return falhas
+
+
 def esperar_quadro(pg: Page) -> None:
     """A casca relê o `snapshot` a cada 500 ms; uma mudança no quadro do duble
     aparece no redesenho seguinte."""
@@ -3582,6 +3633,7 @@ CASOS: dict[str, Caso] = {
     "superficies-nas-areas": Caso(levar=superficies_nas_areas, medir=False),
     # E as laterais, deitado.
     "superficies-deitado": Caso(levar=superficies_deitado, aparelhos=("deitado",), medir=False),
+    "lados-das-superficies": Caso(levar=lados_das_superficies, aparelhos=("deitado",), medir=False),
     # E a que ele não tem, na casca larga, onde ela existe como no desktop.
     "status-barra-na-larga": Caso(levar=status_barra_na_larga, marca="larga", aparelhos=("1440",), medir=False),
     # A região operador.barra no alto de AJUSTES (F3, passo 8b).
