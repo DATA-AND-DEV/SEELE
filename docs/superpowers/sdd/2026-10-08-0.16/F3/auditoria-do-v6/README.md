@@ -341,6 +341,8 @@ tabelas, com a prova e o commit.
 | 29 | a folha convive com o palco da chamada e com a página não imersiva | `palco-da-chamada.cjs`, `camadas.cjs` | `a0b67d34` |
 | 30 | o SEU CÓDIGO e o «receber ligações» no guarda 11 | `nucleo.cjs` | `c0a2f7cc` |
 | 31 | no aparelho: o `listarNaBarra`, a célula inteira e as áreas seguras de cada superfície (as laterais, pelo teto da coluna); o rodapé e a altura dos diálogos saíram, porque a F8 os mede (`cf031786`) | `tools/bancada-do-celular.py` | `2bb317de` |
+| — | **a sala aberta** (8:78; D-api-10): a ocupação e os nomes no acento, que a derivação garante sobre o preenchimento | `tela-sessao.css`, `tema-claro-legivel.cjs` | `150020b6` |
+| — | **a quarta e última emenda** (D-api-10): o `listarNaBarra` na aba SERVIDOR, o `pontoPedido` e os `pontos`, e `estilos` e `classes` como rótulos sem efeito (1:26, 1:27) | `api/v6.json` | `206d1b4b` |
 
 E o que o `.wasm` cobrava, rodado pela primeira vez nesta máquina com o
 wasi-sdk conferido: dois consertos meus (a B2 e a B10) tinham deixado o
@@ -355,28 +357,20 @@ postas na forma que o produto já tinha (`8e8dfea5`).
   `tipo-desconhecido` (`021876f8`). Os dois nomes só entram no `v6.json` se
   houver uma quarta emenda por outro motivo.
 
-**A contagem das tabelas, até o lote 31:** 497 PROVADA, 3 INCERTA, 0 SEM
-PROVA, 35 SEM CÓDIGO e 16 NÃO SE APLICA (551 linhas). As SEM CÓDIGO foram
-fechadas pelos consertos da B e pelas decisões, e ainda não foram remarcadas
-linha a linha (a tabela 4 foi).
+**O passo 7 está fechado (20/10/2026).** A contagem das tabelas: 500 PROVADA,
+0 INCERTA, 0 SEM PROVA, 35 SEM CÓDIGO e 16 NÃO SE APLICA (551 linhas). Cada
+prova foi revertida contra o produto e reprovou. O que pedia texto foi numa
+quarta e última emenda (`206d1b4b`); depois dela, a v6 só muda na API 7.
 
-**Ainda abertos (3), os três à espera de decisão:**
-- **8:78, um par que o produto desenha fora da tabela.** Uma varredura do
-  contraste computado de todo texto à vista, sob temas que passam nos pares
-  (o claro, o papel e o profundo; o script ficou no scratchpad), acha um
-  só: na sala aberta, o `--seele-osso-apagado` (#7a7061, que não muda com o
-  tema) sobre o `--seele-laranja-fraco` derivado do acento — 2,85:1 sob o
-  papel, abaixo do piso de 3:1 do apagado (sem tema, 3,41:1). A derivação
-  garante o acento sobre o preenchimento, e não o apagado.
-- 1:26 e 1:27, os rótulos `estilos` e `classes` da 6, que nada lê.
-- **Texto, para a quarta emenda, se houver uma:** o `listarNaBarra` diz
-  «no celular, vale na gaveta SALAS», e a aba se chama SERVIDOR desde o
-  rascunho (§11).
+**O que sobra, e não é do passo 7:** as 35 SEM CÓDIGO foram fechadas pelos
+consertos da B, pelas três primeiras emendas e pelas decisões da C, e ainda não
+foram remarcadas linha a linha (a tabela 4 foi): remarcá-las é conferir, em
+cada uma, o commit que a fechou.
 
-**Fora da auditoria, ditos:** o «×» desligado da sala aberta (o último, que
-não se apaga) fica a 1,32:1 sem tema — o comentário dele promete «legível»,
-e a WCAG dispensa controle inativo; e as superfícies do celular não aplicam
-o inset lateral, e a área segura deitado vale pelo teto da coluna.
+**Ditos, fora da auditoria:** o «×» desligado da sala aberta fica a 1,32:1, e o
+comentário dele agora diz que é inativo, dispensado pela WCAG 1.4.3
+(`150020b6`); e as superfícies do celular não aplicam o inset lateral — deitado,
+a área segura vale pelo teto da coluna, e a F8 vai pô-lo nas superfícies.
 
 Os achados 1 e 2, as bancadas de navegador e a do celular no portão de
 publicação, são da F6.

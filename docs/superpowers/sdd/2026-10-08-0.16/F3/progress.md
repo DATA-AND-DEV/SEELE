@@ -836,8 +836,24 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
     nada deles dependia do silêncio de antes.
   - À espera: o par fora da tabela do tema (8:78), os rótulos 1:26 e 1:27, e
     o avanço do `0.16/api-6` até a ponta do corte.
+- **20/10. O passo 7 fechado, e a versao/0.16 no corte.**
+  - As decisões da orquestradora (D-api-10): o `0.16/api-6` em `3354544f`, os
+    três portes avisados (os três conferiram, e nada deles dependia do que
+    mudou); a sala aberta no acento (`150020b6`), medida também pelo ESTILO no
+    lab dele; o comentário do «×» desligado; e a quarta e última emenda
+    (`206d1b4b`): o `listarNaBarra` na aba SERVIDOR, o `pontoPedido` e os
+    `pontos`, e `estilos` e `classes` como rótulos — nenhum `mod.json` dos três
+    portes declara capacidade.
+  - **A versao/0.16 no corte** (`9565d2bf`): a integração 18 parte B e o
+    conserto de segurança (quinn-proto 0.11.19, rustls 0.23.46; `cargo deny
+    check advisories` ok). Três conflitos, e um defeito do corte achado neles:
+    o conjunto gravava `tema: false` para todo MOD, e a tela de aceite não diria
+    que um MOD de tema pinta a aparência do servidor. A construção única da
+    versao (`habilitado_de`) leva o tema do pacote.
+  - A auditoria: 500 PROVADA, 0 INCERTA, 0 SEM PROVA. Sobram as 35 SEM CÓDIGO
+    para remarcar com o commit que fechou cada uma.
 - **Esperam:** do corte, o guarda da união, pronto em
   `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
-  depois do Step 6 do dono (D-api-7); o resto do passo 7 (o que pedir texto
-  vai numa quarta e última emenda, e até aqui nada pediu); e o Step 3 da
-  tarefa 7 (o teto da `midia`, que a M3 não mediu).
+  depois do Step 6 do dono (D-api-7; o indexador ainda está na API 5); o
+  avanço do `0.16/api-6` até a ponta do corte; e o Step 3 da tarefa 7 (o teto
+  da `midia`, que a M3 não mediu).
