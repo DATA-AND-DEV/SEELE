@@ -854,6 +854,6 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
     para remarcar com o commit que fechou cada uma.
 - **Esperam:** do corte, o guarda da união, pronto em
   `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
-  depois do Step 6 do dono (D-api-7; o indexador ainda está na API 5); o
-  avanço do `0.16/api-6` até a ponta do corte; e o Step 3 da tarefa 7 (o teto
-  da `midia`, que a M3 não mediu).
+  depois do Step 6 do dono (D-api-7; o indexador ainda está na API 5); e,
+  depois da 0.16 (decisão de 20/10), o Step 3 da tarefa 7 (o teto da
+  `midia`: o texto já diz a soma real).
