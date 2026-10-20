@@ -434,7 +434,14 @@ try {
     Write-Host "→ instalador próprio: $NomeProprio" -ForegroundColor Cyan
 
     Write-Host "`n--- entrega ---" -ForegroundColor Green
-    Get-ChildItem $Destino | ForEach-Object {
+    # **Só arquivos.** O `Get-FileHash` de uma pasta devolve nulo, e o
+    # `.Hash.ToLower()` quebra com «não é possível chamar um método em uma
+    # expressão de valor nulo» — depois de os três pacotes já estarem prontos,
+    # e o `publicar.sh` dá o Windows como falho. Foi assim que a 0.15.2 parou
+    # duas vezes em outubro de 2026: duas pastas de um teste manual (`portatil`,
+    # `casa-portatil`) tinham ficado em entrega\, e a limpeza do `publicar.sh`
+    # também lista com `-File`, então nunca as tirava dali.
+    Get-ChildItem $Destino -File | ForEach-Object {
         $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
         "{0}  {1}" -f $h, $_.Name
     }

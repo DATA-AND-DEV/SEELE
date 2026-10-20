@@ -130,6 +130,51 @@ fn o_script_do_windows_mantem_o_bom_que_ele_proprio_precisa() {
 }
 
 #[test]
+fn a_soma_da_entrega_do_windows_so_lista_arquivos() {
+    // A 0.15.2 parou duas vezes no fim do `windows.ps1`, com os três pacotes
+    // prontos: havia duas **pastas** em `entrega\`, restos de um teste manual, e
+    // o `Get-FileHash` de uma pasta devolve nulo — o `.Hash.ToLower()` quebrava
+    // com «não é possível chamar um método em uma expressão de valor nulo», e o
+    // `publicar.sh` dava o Windows como falho.
+    //
+    // Todo `Get-FileHash` do script vem de um laço sobre um `Get-ChildItem`; o
+    // `Get-ChildItem` que alimenta esse laço tem que pedir `-File`. Lido sem
+    // comentário, porque o comentário do conserto cita a linha errada.
+    let corpo = std::fs::read_to_string(raiz().join("empacotar/windows.ps1")).expect("legível");
+    let linhas: Vec<String> = sem_comentario(&corpo).lines().map(str::to_owned).collect();
+
+    let mut somas = 0;
+    for (numero, linha) in linhas.iter().enumerate() {
+        if !linha.contains("Get-FileHash") {
+            continue;
+        }
+        somas += 1;
+        let origem = linhas[..=numero]
+            .iter()
+            .enumerate()
+            .rev()
+            .take(6)
+            .find(|(_, anterior)| anterior.contains("Get-ChildItem"));
+        if let Some((de, anterior)) = origem {
+            assert!(
+                anterior.contains("-File"),
+                "empacotar/windows.ps1:{} soma o que o Get-ChildItem da linha {} \
+                 lista, e ele não pede -File: uma pasta em entrega\\ faz o \
+                 Get-FileHash devolver nulo e a listagem quebrar.\n  {}",
+                numero + 1,
+                de + 1,
+                anterior.trim()
+            );
+        }
+    }
+    assert!(
+        somas > 0,
+        "não achei nenhum Get-FileHash em empacotar/windows.ps1; se a listagem \
+         mudou de forma, este teste tem que mudar junto"
+    );
+}
+
+#[test]
 fn a_chave_publica_do_atualizador_decodifica_no_que_ela_diz_ser() {
     // Vazia é estado legítimo — é o que diz «este build não atualiza ninguém», e
     // o app tem frase própria para isso. O que não pode é ser **quase** uma
