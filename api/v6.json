@@ -21,6 +21,7 @@
         "aviso-do-servidor"
       ]
     },
+    "rotulos": "estilos e classes são rótulos, sem efeito: SeeleUI.capacidades() os lista na 6, e nada pergunta por eles. O estilo de um nó vale onde a forma dele monta, numa superfície ou numa contribuição, e o superficie-classes pede superficies; nenhum manifesto declara capacidade, que vem com a api (D-api-10)",
     "por-plataforma": "o executor omite, como já omite por versão, o que a plataforma não tem: no celular, enviar e arquivo somem se a ponte web não tiver enviar_imagem_mod, ler_imagem_mod ou o seletor (PERFIS R13)",
     "nao-volta": "as APIs 2 a 5. A 2 executava na janela (ADR 0049); a 3, a 4 e a 5 rodam na linha legada, o Servidor 0.15",
     "saem": {
@@ -416,7 +417,7 @@
     "teto": 128,
     "descarte": "sai com a instância do MOD",
     "servidor.aparencia": "um ponto registrável na 6 (decidido em 10/10, D-api-2): na 6, o MOD de janela não pinta a aparência por ele: a janela só faz a prévia (SeeleUI.tema com previa), e o tema publicado é o da metade de servidor (mundo.tema, 17d); é também a porta de quem vê («o SEELE desenha» tira o tema daquele servidor nesta máquina)",
-    "listarNaBarra": "booleano opcional numa entrada de servidor.navegacao; padrão true; false tira a entrada da lista de quem não tem uso para ela, sem mudar permissão; no celular, vale na gaveta SALAS",
+    "listarNaBarra": "booleano opcional numa entrada de servidor.navegacao; padrão true; false tira a entrada da lista de quem não tem uso para ela, sem mudar permissão; no celular, vale na aba SERVIDOR",
     "alvos-por-ponto": 256,
     "teto-o-que-e": "os pontos por alvo (pessoa.*, canal.item, sala.acoes) não contam no teto: uma contribuição por alvo, por MOD e por modo, até alvos-por-ponto alvos em cada ponto; o teto é o das contribuições sem alvo de pé, por MOD",
     "medido": "numa bancada (tools/lista-grande.cjs, no Chromium, com a ponte simulada), depois do redesenho da lista juntado em um por quadro: 251 pessoas deixam a página a 98% sem MOD e a 99% com um cartão de 32 linhas em cada uma e as 128 sem alvo — quem satura a página é a lista, e não o MOD; no app, a lista de 251 não se mede pela acessibilidade, e o servidor é dimensionado em 50 pessoas"
@@ -745,7 +746,7 @@
       "teto-de-superficies (o MOD já mantém 12 superfícies de pé; leva teto; tarefa 7)"
     ],
     "contribuicoes": [
-      "ponto-desconhecido (o ponto não está na tabela)",
+      "ponto-desconhecido (o ponto não está na tabela; leva pontoPedido, o que veio, cortado em 64, e pontos, os que a API tem)",
       "modo-recusado (o ponto não aceita o modo; inclusive decorar)",
       "sem-alvo (o ponto exige alvo, o pessoa.avatar)",
       "conteudo-invalido (o conteúdo não tem a forma que o ponto exige)",

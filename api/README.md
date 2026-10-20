@@ -179,6 +179,18 @@ construção, com a linha acompanhando cada edição.
 > superfície, conta numa contribuição. A entrega e o texto vão juntos porque o
 > guarda da lista fechada amarra a janela ao contrato nos dois sentidos.
 
+> **Emendado em 20/10/2026 — a quarta e última emenda (D-api-10), no fim do
+> passo 7 da auditoria.** Cada prova do passo 7 foi revertida contra o produto,
+> e o que ele achou foi consertado no produto sempre que deu; esta emenda
+> escreve só o que pedia texto. O `listarNaBarra` vale na aba SERVIDOR do
+> celular (o texto ainda dizia a gaveta SALAS, de antes do rascunho §11). O
+> `ponto-desconhecido` leva `pontoPedido` (o que veio, cortado em 64) e
+> `pontos` (os que a API tem), entregues em `021876f8`. E `estilos` e `classes`,
+> na lista da 6, são rótulos sem efeito (`compatibilidade.rotulos`): nenhum
+> manifesto declara capacidade — ela vem com a `api` —, e nada pergunta por
+> eles; o estilo vale onde a forma monta, e o `superficie-classes` pede
+> `superficies`. Depois desta, a v6 só muda na API 7.
+
 O que muda na forma do arquivo:
 
 - **a v6 é escrita por inteiro**, sem `extends`: só a API 6 roda no app 0.16,

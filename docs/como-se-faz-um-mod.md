@@ -139,7 +139,7 @@ SeeleUI.contribuicoes.registrar({
 | `SeeleUI.aoEvento(fn)` | o que a pessoa faz no que o MOD desenhou, o que muda na tela e o aviso da metade de servidor voltam por aqui, sem número e sem resposta. Um ouvinte só, e o último vence. |
 | `SeeleUI.pedaco(arquivo, inicio)` e `SeeleUI.soltar(arquivo)` | leem em pedaços o arquivo que alguém escolheu pela forma `arquivo`, e o devolvem. O MOD recebe identificador, papel e tamanho, e nunca o caminho. |
 | `SeeleUI.enviar(arquivo, token)` | manda à sua metade de servidor uma imagem escolhida, até 10 MiB, por um fluxo próprio. A metade de servidor autoriza antes, com `volume.esperar`. **Só existe onde a plataforma tem o volume**: no navegador, não existe. |
-| `SeeleUI.capacidades()` | o que este build oferece ao seu MOD, nesta plataforma. |
+| `SeeleUI.capacidades()` | o que este build oferece ao seu MOD, nesta plataforma. `estilos` e `classes` estão na lista como rótulos: nada pergunta por eles, e o estilo de um nó vale onde a forma dele monta. |
 | `console` | cada chamada vira uma linha no `seele.log` da máquina que roda o MOD (ver «Quando o MOD não faz o que devia»). |
 | `setTimeout`, `setInterval` e os dois `clear` | a fachada do relógio do anfitrião, com até 256 de pé; acima disso devolvem `0`, que é o «não deu». |
 
@@ -384,7 +384,7 @@ cada um estão em `contribuicoes.pontos`, no `api/v6.json`:
 
 | ponto | modos | o que é |
 |---|---|---|
-| `servidor.navegacao` | `substituir`, `adicionar` | a lista do servidor; `listarNaBarra: false` tira a entrada da lista de quem não tem uso para ela |
+| `servidor.navegacao` | `substituir`, `adicionar` | a lista do servidor; `listarNaBarra: false` tira a entrada da lista de quem não tem uso para ela (no celular, da aba SERVIDOR) |
 | `canal.cabecalho` | `substituir`, `adicionar` | o cabeçalho do canal |
 | `canal.item` | `adicionar` | um canal da lista, por `alvo` |
 | `compositor.ferramentas` | `adicionar` | ao lado do campo de mensagem |
