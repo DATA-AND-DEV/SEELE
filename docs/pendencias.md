@@ -9996,10 +9996,24 @@ relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-r63-report.md`.
   e cai em `mensagem:<id>`, como antes — nada quebra, e nada melhora (a revisão mediu isso). A bancada simula a ponte
   com a forma da F1; o app com os dois juntos é da integração e da conferência da orquestradora. O relatório é o
   `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-eco-report.md`;
-- **o grupo FORA DO AR** (`grupoForaDoAr`), que só existe no `0.16/sala-viva`: as linhas dele não têm chave e casam
-  pela posição, e um leitor de tela parado em «Bruno» passa a ler «Carla» no mesmo nó quando alguém do meio se
-  conecta. Medido em 16/10 no `531b9cba`: com a chave `membro:<id>` na linha, as que ficam são os mesmos nós e
-  nenhum texto é reescrito. Fica para quando o `0.16/sala-viva` entrar;
+- **o grupo FORA DO AR** (`grupoForaDoAr`) — **consertado** (20/10, lote FORA da F5, no ramo `0.16/lotes-fora`,
+  aberto no `bec085df`, que já tem o `0.16/sala-viva`). As linhas dele não tinham chave e casavam pela posição:
+  quando alguém se conectava, os nomes escorregavam pelos nós, e o leitor de tela parado em «Bruno» passava a ler
+  «Carla» no mesmo nó. Medido em 16/10 no `531b9cba` e de novo no `bec085df`, com `[A, B, C] → [B, C]` (o A se
+  conectou): os nós de B e de C não ficavam, 2 linhas que ficaram tinham o texto reescrito, **saía o nó do C, e não o
+  do A**, e a seleção no nome ia a «»; com `[A, C] → [A, B, C]`, o nó do C passava a dizer «Bruno». **O conserto** é
+  uma linha, só no `tela-sessao.js` (`5591aab3`): ``chaveNaLista.set(li, `membro:${membro.id}`)``. O
+  `MembroForaDoAr` já trazia o `id`, e o prefixo `membro:` é um espaço só dele (não colide com `pessoa:<id>`, a mesma
+  conta conectada, nem com `sala:`, `grupo:` e os outros). Agora os nós de B e de C são os mesmos, nenhum texto é
+  reescrito, sai o nó do A, e a seleção fica. **O guarda** é o caso 15 da `linhas-pelo-id.cjs` (`b0df8fda`, no CI), no
+  Chromium e no WebKit, com um controle de que a chave do membro não toma o nó da linha de pessoa de mesmo id.
+  Vermelho no `bec085df` («caso 15, o A se conectou: o nó de Bruno não é o mesmo (no documento: true, e o nó de antes
+  diz agora "Carla")»); sem a linha do conserto reprova com a mesma frase e o arquivo voltou idêntico pelo `cmp`; com
+  o prefixo `pessoa:` no lugar de `membro:` reprova o controle. O guarda estático
+  `o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario` passou a aceitar o `id` do membro, só dentro da chave
+  (`8483ed28`). **O celular não tem o que adaptar aqui:** o `celular-pessoas.js` só lê `li.pessoa`, e as linhas do
+  FORA DO AR são `li.membro-fora-do-ar`. O relatório é o
+  `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-fora-report.md`;
 - **a lista de canais** perde o foco do teclado a cada tique: é a pendência 64 — fechada em 16/10, no lote C64,
   que achou também uma regressão do AX na coluna de salas (um id de sala repetido no arranjo de
   `servidor.navegacao` duplicava a fileira) e a consertou (`627666f8`, guardado pelo caso 11 da
