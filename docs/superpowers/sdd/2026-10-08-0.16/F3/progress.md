@@ -850,8 +850,12 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
     o conjunto gravava `tema: false` para todo MOD, e a tela de aceite não diria
     que um MOD de tema pinta a aparência do servidor. A construção única da
     versao (`habilitado_de`) leva o tema do pacote.
-  - A auditoria: 500 PROVADA, 0 INCERTA, 0 SEM PROVA. Sobram as 35 SEM CÓDIGO
-    para remarcar com o commit que fechou cada uma.
+  - A auditoria: 500 PROVADA, 0 INCERTA, 0 SEM PROVA; e depois, a pedido da
+    orquestradora, as 35 SEM CÓDIGO remarcadas com o commit que fechou cada
+    uma — 526 PROVADA e 25 NÃO SE APLICA, das 551. Para isso, duas provas
+    que faltavam: a soma do bolso de bytes (`00a42671`) e o servidor que não
+    confere contraste (`a7766d6d`). O `0.16/api-6` em `22082608`, os três
+    portes avisados do hash novo do contrato (`8dcf4aaf…`).
 - **Esperam:** do corte, o guarda da união, pronto em
   `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
   depois do Step 6 do dono (D-api-7; o indexador ainda está na API 5); e,

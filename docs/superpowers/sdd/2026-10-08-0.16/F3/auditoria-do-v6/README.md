@@ -343,6 +343,8 @@ tabelas, com a prova e o commit.
 | 31 | no aparelho: o `listarNaBarra`, a célula inteira e as áreas seguras de cada superfície (as laterais, pelo teto da coluna); o rodapé e a altura dos diálogos saíram, porque a F8 os mede (`cf031786`) | `tools/bancada-do-celular.py` | `2bb317de` |
 | — | **a sala aberta** (8:78; D-api-10): a ocupação e os nomes no acento, que a derivação garante sobre o preenchimento | `tela-sessao.css`, `tema-claro-legivel.cjs` | `150020b6` |
 | — | **a quarta e última emenda** (D-api-10): o `listarNaBarra` na aba SERVIDOR, o `pontoPedido` e os `pontos`, e `estilos` e `classes` como rótulos sem efeito (1:26, 1:27) | `api/v6.json` | `206d1b4b` |
+| 32 | a `midia`, o retrato e o fundo dividem o bolso de bytes da superfície, pela soma | `regiao-do-mod.cjs` | `00a42671` |
+| — | o servidor não confere contraste: um tema de forma válida e acento igual ao fundo passa nas duas pontas | `chaves-do-tema.json` | `a7766d6d` |
 
 E o que o `.wasm` cobrava, rodado pela primeira vez nesta máquina com o
 wasi-sdk conferido: dois consertos meus (a B2 e a B10) tinham deixado o
@@ -357,15 +359,20 @@ postas na forma que o produto já tinha (`8e8dfea5`).
   `tipo-desconhecido` (`021876f8`). Os dois nomes só entram no `v6.json` se
   houver uma quarta emenda por outro motivo.
 
-**O passo 7 está fechado (20/10/2026).** A contagem das tabelas: 500 PROVADA,
-0 INCERTA, 0 SEM PROVA, 35 SEM CÓDIGO e 16 NÃO SE APLICA (551 linhas). Cada
-prova foi revertida contra o produto e reprovou. O que pedia texto foi numa
-quarta e última emenda (`206d1b4b`); depois dela, a v6 só muda na API 7.
+**O passo 7 está fechado (20/10/2026), e a tabela inteira remarcada.** A
+contagem: **526 PROVADA e 25 NÃO SE APLICA**, das 551 linhas, sem nenhuma
+INCERTA, SEM PROVA ou SEM CÓDIGO. Cada prova foi revertida contra o produto e
+reprovou. O que pedia texto foi numa quarta e última emenda (`206d1b4b`);
+depois dela, a v6 só muda na API 7.
 
-**O que sobra, e não é do passo 7:** as 35 SEM CÓDIGO foram fechadas pelos
-consertos da B, pelas três primeiras emendas e pelas decisões da C, e ainda não
-foram remarcadas linha a linha (a tabela 4 foi): remarcá-las é conferir, em
-cada uma, o commit que a fechou.
+As 35 SEM CÓDIGO, remarcadas a pedido da orquestradora (20/10), cada uma com o
+commit que a fechou: 26 PROVADA pelos consertos da B (B1 a B10), pelo C6, pelas
+entregas que a C decidiu (`0e9f8fbf`, `41cfbec5`, `c47b6874`), e pelo texto
+que a primeira emenda corrigiu, provado hoje (o 7:81, a soma do bolso, pelo
+lote 32, `00a42671`; o 8:80, o servidor que não confere contraste, pelo vetor
+`a7766d6d`); e 9 NÃO SE APLICA, as cláusulas que a primeira emenda
+(`44025ab5`) tirou do texto. As contagens no topo de cada tabela e em «A
+contagem, em 48b6a1ba» são as do dia da auditoria, e ficam como registro.
 
 **Ditos, fora da auditoria:** o «×» desligado da sala aberta fica a 1,32:1, e o
 comentário dele agora diz que é inativo, dispensado pela WCAG 1.4.3
