@@ -209,7 +209,12 @@ pub fn server_config(identity: Identity) -> Result<quinn::ServerConfig> {
     // Refuse a mismatched peer during the TLS handshake, before a single
     // application byte is exchanged.
     tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+    com_o_transporte(tls)
+}
 
+/// O TLS dentro do QUIC, com o transporte do `seeled`: o ocioso, o keepalive e
+/// os datagramas da voz. Um lugar só, para o `seele/1` e o `h3` não divergirem.
+fn com_o_transporte(tls: rustls::ServerConfig) -> Result<quinn::ServerConfig> {
     let quic = QuicServerConfig::try_from(tls).context("could not build the QUIC TLS config")?;
     let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic));
 
@@ -226,6 +231,239 @@ pub fn server_config(identity: Identity) -> Result<quinn::ServerConfig> {
     config.transport_config(Arc::new(transport));
 
     Ok(config)
+}
+
+// ------------------------------------------------- o `h3` do navegador
+//
+// ADR 0057 (emenda ao 0003): o `seeled` anuncia `seele/1` e `h3` no mesmo
+// socket, e escolhe o certificado pelo ALPN do ClientHello. O nativo recebe o
+// longo, como sempre. O navegador recebe um **curto**: ele só aceita, pelo
+// hash (`serverCertificateHashes`), um certificado de no máximo 14 dias.
+//
+// A medição 3 no iPhone (`docs/evidencias/medicao-3-iphone/LEIA.md`, 18 e
+// 20/10/2026) decidiu o caminho simples: **o curto tem a chave do longo**. O
+// Safari abriu o curto da mesma chave, e recusou só o longo.
+
+/// O começo da janela de índice 0: 01/01/2026, 00:00 UTC. As janelas andam de
+/// [`seele_proto::transport::PASSO_DA_JANELA`] em diante a partir daqui, e por
+/// isso são as mesmas em toda abertura do servidor.
+pub const EPOCA_DAS_JANELAS: u64 = 1_767_225_600;
+
+/// O nome que o certificado curto leva. O navegador confere o certificado pelo
+/// hash, e não pelo nome: o curto não nomeia endereço nenhum.
+const NOME_DO_CURTO: &str = "seele.invalid";
+
+/// Um certificado curto do `h3`, com a validade dele em segundos Unix UTC.
+#[derive(Clone)]
+pub struct Curto {
+    /// O DER, assinado pela chave do longo.
+    pub der: CertificateDer<'static>,
+    /// Desde quando ele vale: o começo da janela, menos
+    /// [`seele_proto::transport::ANTES_DA_JANELA`].
+    pub nao_antes: u64,
+    /// Até quando: [`seele_proto::transport::VALIDADE_DO_CURTO`] depois.
+    pub nao_depois: u64,
+}
+
+impl Curto {
+    /// O que o navegador confere: o SHA-256 do DER.
+    #[must_use]
+    pub fn hash(&self) -> [u8; 32] {
+        seele_proto::transport::certificate_digest(self.der.as_ref())
+    }
+
+    /// A janela como o `HashesDoNavegador` a leva.
+    #[must_use]
+    pub fn janela(&self) -> seele_proto::control::JanelaDoNavegador {
+        seele_proto::control::JanelaDoNavegador {
+            hash: self.hash(),
+            nao_antes: self.nao_antes,
+            nao_depois: self.nao_depois,
+        }
+    }
+}
+
+impl std::fmt::Debug for Curto {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Curto")
+            .field("nao_antes", &self.nao_antes)
+            .field("nao_depois", &self.nao_depois)
+            .finish_non_exhaustive()
+    }
+}
+
+/// O índice da janela que começou por último até `agora`.
+#[must_use]
+pub fn janela_de(agora: u64) -> u64 {
+    agora.saturating_sub(EPOCA_DAS_JANELAS) / seele_proto::transport::PASSO_DA_JANELA.as_secs()
+}
+
+/// O dia civil (ano, mês, dia) de um instante Unix UTC, pelo algoritmo de
+/// Howard Hinnant (`civil_from_days`). As janelas começam à meia-noite, e o
+/// `rcgen` monta a data por dia.
+fn dia_civil(segundos: u64) -> (i32, u8, u8) {
+    let dias = i64::try_from(segundos / 86_400).unwrap_or(i64::MAX) + 719_468;
+    let era = dias.div_euclid(146_097);
+    let do_ciclo = dias.rem_euclid(146_097);
+    let do_ano = (do_ciclo - do_ciclo / 1_460 + do_ciclo / 36_524 - do_ciclo / 146_096) / 365;
+    let ano = do_ano + era * 400;
+    let dia_do_ano = do_ciclo - (365 * do_ano + do_ano / 4 - do_ano / 100);
+    let mp = (5 * dia_do_ano + 2) / 153;
+    let dia = dia_do_ano - (153 * mp + 2) / 5 + 1;
+    let mes = if mp < 10 { mp + 3 } else { mp - 9 };
+    let ano = if mes <= 2 { ano + 1 } else { ano };
+    (
+        i32::try_from(ano).unwrap_or(i32::MAX),
+        u8::try_from(mes).unwrap_or(1),
+        u8::try_from(dia).unwrap_or(1),
+    )
+}
+
+/// Os curtos das janelas `de` em diante, `quantas`, assinados pela chave de
+/// `identity`.
+///
+/// **Vazio quando a chave não é P-256**: o navegador só aceita ECDSA P-256 pelo
+/// hash, e a sala pessoal, com a chave Ed25519 dela, não serve ao navegador (o
+/// celular não liga pelo código na 0.16; ADR 0057, emenda de 09/10/2026).
+///
+/// # Errors
+///
+/// Falha se o `rcgen` recusar os parâmetros ou não assinar.
+pub fn curtos_de(identity: &Identity, de: u64, quantas: usize) -> Result<Vec<Curto>> {
+    let Ok(par) = rcgen::KeyPair::try_from(identity.key.secret_der()) else {
+        return Ok(Vec::new());
+    };
+    if par.algorithm() != &rcgen::PKCS_ECDSA_P256_SHA256 {
+        return Ok(Vec::new());
+    }
+    let passo = seele_proto::transport::PASSO_DA_JANELA.as_secs();
+    let antes = seele_proto::transport::ANTES_DA_JANELA.as_secs();
+    let validade = seele_proto::transport::VALIDADE_DO_CURTO.as_secs();
+    let mut curtos = Vec::with_capacity(quantas);
+    for indice in de..de.saturating_add(u64::try_from(quantas).unwrap_or(u64::MAX)) {
+        let nao_antes = EPOCA_DAS_JANELAS + indice * passo - antes;
+        let nao_depois = nao_antes + validade;
+        let mut params = rcgen::CertificateParams::new(vec![NOME_DO_CURTO.to_owned()])
+            .context("o nome do curto não serve de nome de certificado")?;
+        let (ano, mes, dia) = dia_civil(nao_antes);
+        params.not_before = rcgen::date_time_ymd(ano, mes, dia);
+        let (ano, mes, dia) = dia_civil(nao_depois);
+        params.not_after = rcgen::date_time_ymd(ano, mes, dia);
+        let certificado = params
+            .self_signed(&par)
+            .context("o rcgen não assinou o certificado curto")?;
+        curtos.push(Curto {
+            der: certificado.der().clone(),
+            nao_antes,
+            nao_depois,
+        });
+    }
+    Ok(curtos)
+}
+
+/// O certificado de cada ALPN: o longo para `seele/1`, o curto vigente para
+/// `h3`. O molde é o de `spikes/alpn-no-mesmo-socket`.
+#[derive(Debug)]
+struct PorAlpn {
+    longo: Arc<rustls::sign::CertifiedKey>,
+    curtos: Vec<(Curto, Arc<rustls::sign::CertifiedKey>)>,
+}
+
+impl PorAlpn {
+    /// O curto da janela de agora, pelo índice ([`janela_de`]), e não o que
+    /// começou por último.
+    ///
+    /// O `not_before` de cada curto recua um dia
+    /// ([`seele_proto::transport::ANTES_DA_JANELA`]), para o relógio atrasado
+    /// do celular; com isso, no último dia de uma janela a seguinte já vale.
+    /// Mas um link feito antes leva só os hashes de algumas janelas a partir da
+    /// dele, e a seguinte pode não estar entre eles: apresentar a seguinte
+    /// nesse dia seria recusado por um link que a de agora ainda atende.
+    fn vigente(&self, agora: u64) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        indice_vigente(self.curtos.iter().map(|(curto, _)| curto), agora)
+            .and_then(|indice| self.curtos.get(indice))
+            .map(|(_, certificado)| Arc::clone(certificado))
+    }
+}
+
+/// A posição, em `curtos`, do curto da janela de `agora`, se ele está lá e
+/// ainda vale.
+fn indice_vigente<'a>(curtos: impl Iterator<Item = &'a Curto>, agora: u64) -> Option<usize> {
+    let antes = seele_proto::transport::ANTES_DA_JANELA.as_secs();
+    let de_agora = janela_de(agora);
+    curtos
+        .enumerate()
+        .find(|(_, curto)| {
+            janela_de(curto.nao_antes + antes) == de_agora && agora < curto.nao_depois
+        })
+        .map(|(posicao, _)| posicao)
+}
+
+impl rustls::server::ResolvesServerCert for PorAlpn {
+    fn resolve(
+        &self,
+        hello: rustls::server::ClientHello<'_>,
+    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        let pede = |alpn: &[u8]| {
+            hello
+                .alpn()
+                .is_some_and(|mut oferecidos| oferecidos.any(|o| o == alpn))
+        };
+        if pede(seele_proto::transport::ALPN) || !pede(seele_proto::transport::ALPN_DO_NAVEGADOR) {
+            return Some(Arc::clone(&self.longo));
+        }
+        let agora = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let vigente = self.vigente(agora);
+        if vigente.is_none() {
+            tracing::warn!(
+                agora,
+                "um navegador pediu o `h3`, e nenhum certificado curto vale agora: o aperto de mão falha"
+            );
+        }
+        vigente
+    }
+}
+
+/// A configuração QUIC do `seeled`: a de [`server_config`] e, com `curtos`,
+/// também o `h3` do navegador, com o certificado escolhido pelo ALPN.
+///
+/// Sem curtos (a sala pessoal, ou uma chave que não é P-256), é a mesma de
+/// [`server_config`]: só `seele/1`.
+///
+/// # Errors
+///
+/// Falha se o rustls recusar uma chave ou um certificado.
+pub fn server_config_do_seeled(
+    identity: Identity,
+    curtos: &[Curto],
+) -> Result<quinn::ServerConfig> {
+    if curtos.is_empty() {
+        return server_config(identity);
+    }
+    let assina = rustls::crypto::ring::sign::any_supported_type(&identity.key)
+        .context("o rustls recusou a chave do servidor")?;
+    let longo = Arc::new(rustls::sign::CertifiedKey::new(
+        identity.chain,
+        Arc::clone(&assina),
+    ));
+    let curtos = curtos
+        .iter()
+        .map(|curto| {
+            let certificado =
+                rustls::sign::CertifiedKey::new(vec![curto.der.clone()], Arc::clone(&assina));
+            (curto.clone(), Arc::new(certificado))
+        })
+        .collect();
+    let mut tls = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(PorAlpn { longo, curtos }));
+    tls.alpn_protocols = vec![
+        seele_proto::transport::ALPN.to_vec(),
+        seele_proto::transport::ALPN_DO_NAVEGADOR.to_vec(),
+    ];
+    com_o_transporte(tls)
 }
 
 /// O par guardado neste banco, quando há um e os dois lados estão cheios.
@@ -418,5 +656,83 @@ mod uma_chave_por_maquina {
             Some(cert),
             "subir usa a chave herdada, e não uma recém-gerada"
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod os_curtos_do_h3 {
+    use super::{curtos_de, dia_civil, indice_vigente, janela_de, Identity, EPOCA_DAS_JANELAS};
+    use seele_proto::transport::{ANTES_DA_JANELA, PASSO_DA_JANELA, VALIDADE_DO_CURTO};
+
+    const DIA: u64 = 86_400;
+
+    /// O dia civil de instantes conhecidos, conferidos à parte (o `calendar` do
+    /// Python): o começo do Unix, a época das janelas, o mês depois de um
+    /// fevereiro comum, um 29 de fevereiro, e o ano secular que não é bissexto.
+    #[test]
+    fn o_dia_civil_bate_com_o_calendario() {
+        for (segundos, dia) in [
+            (0, (1970, 1, 1)),
+            (EPOCA_DAS_JANELAS, (2026, 1, 1)),
+            (1_772_323_200, (2026, 3, 1)),
+            (1_835_395_200, (2028, 2, 29)),
+            (4_107_542_400, (2100, 3, 1)),
+        ] {
+            assert_eq!(dia_civil(segundos), dia, "{segundos}");
+        }
+    }
+
+    #[test]
+    fn a_chave_ed25519_da_sala_nao_tem_curtos() {
+        let sala = Identity::da_semente(&[3; 32]).unwrap();
+        assert!(curtos_de(&sala, 0, 4).unwrap().is_empty());
+    }
+
+    /// Cada curto começa à meia-noite (o `rcgen` monta a data por dia, e o
+    /// DER diz exatamente o `nao_antes` anunciado), vale 13 dias, e a janela
+    /// `k` começa `k` passos depois da época, um dia antes.
+    #[test]
+    fn os_curtos_comecam_a_meia_noite_e_valem_treze_dias() {
+        let longo = Identity::self_signed(vec!["localhost".into()]).unwrap();
+        let curtos = curtos_de(&longo, 5, 3).unwrap();
+        assert_eq!(curtos.len(), 3);
+        for (k, curto) in (5_u64..).zip(&curtos) {
+            assert_eq!(
+                curto.nao_antes,
+                EPOCA_DAS_JANELAS + k * PASSO_DA_JANELA.as_secs() - ANTES_DA_JANELA.as_secs()
+            );
+            assert_eq!(curto.nao_antes % DIA, 0);
+            assert_eq!(
+                curto.nao_depois - curto.nao_antes,
+                VALIDADE_DO_CURTO.as_secs()
+            );
+        }
+    }
+
+    /// **No último dia de uma janela, o vigente é ela, e não a seguinte** —
+    /// mesmo com a seguinte já valendo pelo `not_before`, que recua um dia.
+    #[test]
+    fn no_ultimo_dia_da_janela_o_vigente_e_ela_e_nao_a_seguinte() {
+        let longo = Identity::self_signed(vec!["localhost".into()]).unwrap();
+        let curtos = curtos_de(&longo, 3, 4).unwrap();
+        let inicio_da_3 = EPOCA_DAS_JANELAS + 3 * PASSO_DA_JANELA.as_secs();
+        let ultimo_dia = inicio_da_3 + PASSO_DA_JANELA.as_secs() - DIA / 2;
+        assert_eq!(janela_de(ultimo_dia), 3);
+        assert!(
+            curtos[1].nao_antes <= ultimo_dia,
+            "a armadilha não existe: a janela 4 ainda não vale no último dia da 3"
+        );
+        assert_eq!(indice_vigente(curtos.iter(), ultimo_dia), Some(0));
+        assert_eq!(
+            indice_vigente(curtos.iter(), inicio_da_3 + PASSO_DA_JANELA.as_secs()),
+            Some(1)
+        );
+        // Antes da primeira gerada, nenhuma é a de agora.
+        assert_eq!(indice_vigente(curtos.iter(), inicio_da_3 - 1), None);
     }
 }
