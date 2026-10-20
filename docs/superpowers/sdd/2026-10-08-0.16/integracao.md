@@ -135,6 +135,10 @@ Medido em 16/10: com 25 GiB livres, a retirada dos 18 worktrees de lotes integra
 
 Depois da 18ª parte B (16/10): as frentes limparam os seus (F1 78,6 GiB, F8 35,8, F7 ~70, F3 56, F5 de 52 para 7,2), saíram os worktrees da bateria e dos lotes C64 e R63, e o `target/` da cópia principal ficou só com o `wasi-sdk` conferido, que as frentes copiam com `cp -c` para não baixar (o resto, 233 GiB de `debug/` e as pastas antigas de QA e do iOS, saiu). **De 25 GiB livres a 525 GiB.** A bateria clona o `target/` da cópia principal (`cp -c`, sem custo de disco no clone) para a árvore dela, e não o liga por link: um `target` partilhado ou movido guarda o caminho de outra árvore (lição da F5).
 
+## Lições de integração
+
+- **Um agente auxiliar não troca o ramo da cópia principal** (20/10). O agente que consertou o `windows.ps1` criou o ramo `0.16/windows-entrega` com um `checkout` na cópia principal, e não num worktree, e a deixou nele. Os cinco commits de documentação seguintes da orquestradora caíram nesse ramo, e a `versao/0.16` ficou para trás. Achado na preparação da 19ª, pelo reflog. Como a `versao/0.16` era ancestral, ela avançou sem conflito (`a3a09f27`), com o conserto (`46b8fac9`) em sequência. Todo pedido a agente auxiliar que mexa em git passa a dizer: worktree próprio, nunca `checkout` na cópia principal. E toda integração começa conferindo `git branch --show-current`.
+
 ## As integrações feitas
 
 | quando | o que entrou | commit | bateria |
