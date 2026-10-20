@@ -20400,7 +20400,7 @@ fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
     // (P6) lista os membros deste servidor que não estão conectados, e um
     // «visto por último» ali diria a todo membro quando cada outro sai — é o
     // que a decisão recusou. As duas metades: o tipo que atravessa a ponte só
-    // tem id e apelido, e a linha da casca só lê o apelido.
+    // tem id e apelido, e a linha da casca só mostra o apelido (o id é a chave).
     //
     // E a linha não passa pelo caminho das linhas de quem está aqui: aquelas
     // um MOD apresenta (`pessoa.cartao`, `pessoa.identidade`), e nenhum MOD
@@ -20441,10 +20441,22 @@ fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
                 .next()
         })
         .collect();
+    // O apelido é o que a linha mostra, e o `id` é a conta: entra só na chave da
+    // linha (`membro:<id>`, lote FORA), que é o que faz o nó ser do membro e não
+    // da posição, e nunca no texto dela. Papel, horário e o resto não chegam.
+    assert!(
+        lidos.contains("nickname"),
+        "a linha do FORA DO AR não lê mais o apelido do membro:\n{linha}"
+    );
+    assert!(
+        lidos.iter().all(|campo| ["id", "nickname"].contains(campo)),
+        "a linha do FORA DO AR lê do membro mais que o apelido e o id: {lidos:?}\n{linha}"
+    );
     assert_eq!(
-        lidos.into_iter().collect::<Vec<_>>(),
-        ["nickname"],
-        "a linha do FORA DO AR lê do membro mais que o apelido:\n{linha}"
+        linha.matches("membro.id").count(),
+        linha.matches("`membro:${membro.id}`").count(),
+        "a linha do FORA DO AR lê o `id` do membro fora da chave `membro:<id>`: o id é a conta, e \
+         não vai para o texto da linha:\n{linha}"
     );
     for proibido in [
         "Date",
