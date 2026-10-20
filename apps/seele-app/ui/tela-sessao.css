@@ -623,6 +623,15 @@
 
 .voice_room.aberto .voice_room-nome { color: var(--seele-laranja-nerv); }
 
+/* **Na sala aberta, a ocupação e quem está dentro no acento**, como o nome
+   dela: o preenchimento da sala é derivado do acento, e a derivação garante ao
+   acento 4,5:1 sobre ele (tema.derivados-pelo-produto). O apagado, que não
+   acompanha o tema, saía a 2,85:1 sob o papel — um par que o produto desenha e
+   que a tabela do tema não tem (8:78 da auditoria do v6; D-api-10). O «(você)»
+   e a marca de quem fala têm cor própria. */
+.voice_room.aberto .voice_room-ocupacao,
+.voice_room.aberto .voice_room-pessoa { color: var(--seele-laranja-nerv); }
+
 /* O nome como botão de renomear, para quem administra as salas.
  *
  * Sem moldura e sem fundo: ele **é** o nome, e desenhá-lo como botão faria a
@@ -778,8 +787,12 @@ button.voice_room-nome:hover { text-decoration: underline; }
   border-color: var(--seele-osso-apagado);
 }
 
-/* O último VoiceRoom. Desabilitado e legível — o `title` diz por que, e um controle
-   apagado a ponto de não se ler é um controle que não explica nada. */
+/* O último VoiceRoom, que não se apaga: desligado. **Ele não é legível** — o
+   `--seele-linha-forte` dá 1,32:1 sobre o preenchimento da sala aberta, e a
+   1,1:1 sob um tema escuro —, e não precisa ser: a WCAG 1.4.3 dispensa de
+   contraste o controle inativo. O porquê está no `title` (o
+   `botaoDeApagarVoiceRoom`), e não na cor (medido na auditoria do v6, 8:78;
+   D-api-10). */
 .voice_room-apagar:disabled {
   color: var(--seele-linha-forte);
   border-color: var(--seele-linha);
