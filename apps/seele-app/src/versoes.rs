@@ -1044,6 +1044,13 @@ pub(crate) enum ParaEntrar {
         /// A linha que faltou.
         linha: String,
     },
+    /// A linha do servidor é mais nova que a deste app: o remédio é
+    /// atualizar, e não abrir uma versão (decisão da orquestradora de 15/10,
+    /// a mesma do `mais_nova` da FFI).
+    MaisNova {
+        /// A linha do servidor.
+        linha: String,
+    },
 }
 
 /// O que fazer com o `v=` deste link, sabendo a linha deste app.
@@ -1068,16 +1075,60 @@ pub(crate) fn para_entrar_com_linha_propria(
     let (Some(linha), Some(propria)) = (linha, propria) else {
         return ParaEntrar::NaoSabe;
     };
+    para_entrar_na_linha(config, manifesto, &linha, &propria)
+}
+
+/// O que fazer quando o servidor recusou o número deste app e disse qual
+/// versão fala (o caminho pela recusa: tarefa 13, passo 5; P8 da F1).
+///
+/// `servidor` é o `ConnectionError::OutraLinha::servidor` da FFI, no texto
+/// canônico da linha («0.15»). A FFI só o manda para uma versão que o launcher
+/// abre; um texto que não é linha não abre nada.
+pub(crate) fn para_entrar_pela_recusa_com_linha_propria(
+    config: &str,
+    chave: Option<&Chave>,
+    servidor: &str,
+    propria: Option<Linha>,
+) -> ParaEntrar {
+    let (Ok(linha), Some(propria)) = (Linha::nova(servidor), propria) else {
+        return ParaEntrar::NaoSabe;
+    };
+    let manifesto = chave.and_then(|c| catalogo_guardado(config, c));
+    para_entrar_na_linha(config, manifesto, &linha, &propria)
+}
+
+/// O caminho pela recusa, com a linha deste app.
+pub(crate) fn para_entrar_pela_recusa(
+    config: &str,
+    chave: Option<&Chave>,
+    servidor: &str,
+) -> ParaEntrar {
+    para_entrar_pela_recusa_com_linha_propria(config, chave, servidor, linha_deste_app())
+}
+
+/// O núcleo dos dois caminhos, o do link com `v=` e o da recusa, a partir da
+/// linha do servidor já sabida. Um só, para as duas entradas não discordarem.
+fn para_entrar_na_linha(
+    config: &str,
+    manifesto: Option<Manifesto>,
+    linha: &Linha,
+    propria: &Linha,
+) -> ParaEntrar {
     if linha == propria {
         return ParaEntrar::Aqui;
     }
-    if linha_que_saiu(&linha) {
+    if linha > propria {
+        return ParaEntrar::MaisNova {
+            linha: linha.como_texto(),
+        };
+    }
+    if linha_que_saiu(linha) {
         return ParaEntrar::LinhaNaoOferecida {
             linha: linha.como_texto(),
         };
     }
     let perde_conversas = Deposito::em(raiz_do_deposito(config))
-        .plano_da_linha(&linha, ha_conversa_na_pasta(config))
+        .plano_da_linha(linha, ha_conversa_na_pasta(config))
         .perde_conversas;
     let Some(manifesto) = manifesto else {
         return ParaEntrar::Baixar {
@@ -1087,7 +1138,7 @@ pub(crate) fn para_entrar_com_linha_propria(
             perde_conversas,
         };
     };
-    let Some(publicacao) = manifesto.mais_nova_da_linha(&linha) else {
+    let Some(publicacao) = manifesto.mais_nova_da_linha(linha) else {
         return ParaEntrar::LinhaNaoOferecida {
             linha: linha.como_texto(),
         };
@@ -2081,6 +2132,124 @@ mod o_launcher_ligado_ao_produto {
             super::para_entrar_com_linha_propria(&config, None, Some("lixo"), Some(linha("1"))),
             super::ParaEntrar::NaoSabe
         );
+    }
+
+    /// Um link de um servidor mais novo que esta build pede para atualizar.
+    ///
+    /// Caía em «deixou de ser oferecido» com o catálogo, e em «baixar» sem
+    /// ele: as duas frases falsas. Mais nova quer dizer «atualize», e não
+    /// «abra uma versão» (decisão da orquestradora de 15/10, a mesma do
+    /// `mais_nova` da FFI).
+    #[test]
+    fn um_link_de_uma_versao_mais_nova_pede_para_atualizar() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let mais_nova = super::ParaEntrar::MaisNova {
+            linha: "2".to_owned(),
+        };
+        // Sem o catálogo guardado, e com ele.
+        assert_eq!(
+            super::para_entrar_com_linha_propria(
+                &config,
+                Some(&chave()),
+                Some("2.0"),
+                Some(linha("1"))
+            ),
+            mais_nova
+        );
+        let json = manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None);
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+        assert_eq!(
+            super::para_entrar_com_linha_propria(
+                &config,
+                Some(&chave()),
+                Some("2.0"),
+                Some(linha("1"))
+            ),
+            mais_nova
+        );
+    }
+
+    /// **O caminho pela recusa** (tarefa 13, passo 5): o servidor recusou o
+    /// número deste app e disse, pelo byte 0 da resposta, que fala o Servidor
+    /// 0.15. A resposta é a mesma do link com `v=`, pelo mesmo núcleo.
+    #[test]
+    fn a_recusa_de_um_servidor_0_15_abre_a_linha_legada_quando_ela_esta_guardada() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None);
+        instalado(&config, &json, "0.15.2");
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+
+        assert_eq!(
+            super::para_entrar_pela_recusa_com_linha_propria(
+                &config,
+                Some(&chave()),
+                "0.15",
+                Some(linha("1"))
+            ),
+            super::ParaEntrar::Abrir {
+                linha: "0.15".to_owned(),
+                servidor: "0.15".to_owned(),
+                versao: "0.15.2".to_owned(),
+                perde_conversas: false,
+            }
+        );
+    }
+
+    #[test]
+    fn a_recusa_de_um_servidor_0_15_que_nao_esta_aqui_pede_para_baixar() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None);
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+        assert_eq!(
+            super::para_entrar_pela_recusa_com_linha_propria(
+                &config,
+                Some(&chave()),
+                "0.15",
+                Some(linha("1"))
+            ),
+            super::ParaEntrar::Baixar {
+                linha: "0.15".to_owned(),
+                servidor: "0.15".to_owned(),
+                tem_pacote: true,
+                perde_conversas: false,
+            }
+        );
+    }
+
+    /// O launcher age só com uma versão que ele abre. A própria linha, uma
+    /// mais nova e um texto que não é versão não abrem nada: a casca não os
+    /// manda, e o Rust também não os aceita.
+    #[test]
+    fn a_recusa_nao_abre_a_propria_versao_nem_uma_mais_nova() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None);
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+        let pela_recusa = |servidor: &str| {
+            super::para_entrar_pela_recusa_com_linha_propria(
+                &config,
+                Some(&chave()),
+                servidor,
+                Some(linha("1")),
+            )
+        };
+        assert_eq!(pela_recusa("1"), super::ParaEntrar::Aqui);
+        assert_eq!(
+            pela_recusa("2"),
+            super::ParaEntrar::MaisNova {
+                linha: "2".to_owned()
+            }
+        );
+        for lixo in ["", "lixo", "0.15.2"] {
+            assert_eq!(
+                pela_recusa(lixo),
+                super::ParaEntrar::NaoSabe,
+                "com «{lixo}»"
+            );
+        }
     }
 
     /// O manifesto de teste com as APIs de cada versão escolhidas.

@@ -178,6 +178,12 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     window.__TAURI__ = {
       core: { invoke: async (cmd, args) => {
         window.testCalls.push({ cmd, args });
+        // O texto colado vai antes ao `ler_entrada` (tarefa 30 da F7); sem a
+        // leitura do código aqui, `seele://` é convite e o resto é endereço.
+        if (cmd === 'ler_entrada') {
+          const texto = String(args?.texto ?? '').trim();
+          return texto.startsWith('seele://') ? { Convite: texto } : { Endereco: texto };
+        }
         if (window.testAtraso[cmd]) await new Promise(ok => setTimeout(ok, window.testAtraso[cmd]));
         if (window.testFalhas[cmd]) throw window.testFalhas[cmd];
         if (cmd === 'aceitar_mods') { window.testServidor.aceitou = true; window.testAceites[args.alvo] = args.conjunto; }
@@ -519,9 +525,13 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     if ([...document.querySelectorAll('input, textarea')].some((campo) => campo.value.includes(convite))) onde.push('um campo');
     if (testConsole.some((linha) => linha.includes(convite))) onde.push('o console');
     // O `connect` a leva de propósito, e o `analisar_convite` recebe o link de
-    // onde ela sai: é a leitura dele, e não um caminho dela.
+    // onde ela sai: é a leitura dele, e não um caminho dela. O `ler_entrada`
+    // também (tarefa 30 da F7): ele recebe o texto colado inteiro para dizer se
+    // é convite, endereço ou código, devolve o convite como veio, e não guarda
+    // nem escreve nada (`seele_core::entrada::ler_entrada`).
+    const leituras = ['connect', 'analisar_convite', 'ler_entrada'];
     for (const chamada of testCalls) {
-      if (chamada.cmd === 'connect' || chamada.cmd === 'analisar_convite') continue;
+      if (leituras.includes(chamada.cmd)) continue;
       if (JSON.stringify(chamada.args ?? null).includes(convite)) onde.push(`o comando ${chamada.cmd}`);
     }
     return onde;
@@ -624,6 +634,12 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
     window.__TAURI__ = {
       core: { invoke: async (cmd, args) => {
         window.testCalls.push({ cmd, args });
+        // O texto colado vai antes ao `ler_entrada` (tarefa 30 da F7); sem a
+        // leitura do código aqui, `seele://` é convite e o resto é endereço.
+        if (cmd === 'ler_entrada') {
+          const texto = String(args?.texto ?? '').trim();
+          return texto.startsWith('seele://') ? { Convite: texto } : { Endereco: texto };
+        }
         if (cmd === 'escolher_apelido_local') window.testTable.apelido_local = args.apelido;
         // O link novo: o `analisar_convite` devolve o token dele.
         if (cmd === 'analisar_convite' && String(args?.link).includes(novo)) return { alvo, token: novo, para_entrar: null };
@@ -831,7 +847,9 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
     if ([...document.querySelectorAll('input, textarea')].some((campo) => campo.value.includes(convite))) onde.push('um campo');
     if (testConsole.some((linha) => linha.includes(convite))) onde.push('o console');
     for (const chamada of testCalls) {
-      if (chamada.cmd === 'connect' || chamada.cmd === 'analisar_convite') continue;
+      // O `ler_entrada` lê o texto colado como o `analisar_convite`, e não o
+      // guarda (ver a cena do lote R, logo acima).
+      if (['connect', 'analisar_convite', 'ler_entrada'].includes(chamada.cmd)) continue;
       if (JSON.stringify(chamada.args ?? null).includes(convite)) onde.push(`o comando ${chamada.cmd}`);
     }
     return onde;
@@ -878,6 +896,12 @@ async function aTentativaSubstituidaNaoFala(browser, porta) {
       core: { invoke: async (cmd, args) => {
         const chamada = { cmd, args };
         window.testCalls.push(chamada);
+        // O texto colado vai antes ao `ler_entrada` (tarefa 30 da F7); sem a
+        // leitura do código aqui, `seele://` é convite e o resto é endereço.
+        if (cmd === 'ler_entrada') {
+          const texto = String(args?.texto ?? '').trim();
+          return texto.startsWith('seele://') ? { Convite: texto } : { Endereco: texto };
+        }
         if (cmd === 'connect') {
           const atraso = window.testAtrasoPorAlvo[args.server];
           const recusa = window.testRecusaPorAlvo[args.server];
@@ -1080,6 +1104,12 @@ async function oConectarTemDono(browser, porta) {
       core: { invoke: async (cmd, args) => {
         const chamada = { cmd, args };
         window.testCalls.push(chamada);
+        // O texto colado vai antes ao `ler_entrada` (tarefa 30 da F7); sem a
+        // leitura do código aqui, `seele://` é convite e o resto é endereço.
+        if (cmd === 'ler_entrada') {
+          const texto = String(args?.texto ?? '').trim();
+          return texto.startsWith('seele://') ? { Convite: texto } : { Endereco: texto };
+        }
         const espera = window.testAtrasoPorComando[cmd];
         if (espera) await new Promise(ok => setTimeout(ok, espera));
         if (cmd === 'connect') {
@@ -1248,6 +1278,12 @@ async function aBatidaDaEsperaSoCalaASiMesma(browser, porta) {
       core: { invoke: async (cmd, args) => {
         const chamada = { cmd, args };
         window.testCalls.push(chamada);
+        // O texto colado vai antes ao `ler_entrada` (tarefa 30 da F7); sem a
+        // leitura do código aqui, `seele://` é convite e o resto é endereço.
+        if (cmd === 'ler_entrada') {
+          const texto = String(args?.texto ?? '').trim();
+          return texto.startsWith('seele://') ? { Convite: texto } : { Endereco: texto };
+        }
         if (cmd === 'connect') {
           const atraso = window.testAtrasoPorAlvo[args.server];
           const recusa = window.testRecusaPorAlvo[args.server];
@@ -1433,6 +1469,12 @@ async function aEntradaVelhaNaoTomaATela(browser, porta) {
       core: { invoke: async (cmd, args) => {
         const chamada = { cmd, args };
         window.testCalls.push(chamada);
+        // O texto colado vai antes ao `ler_entrada` (tarefa 30 da F7); sem a
+        // leitura do código aqui, `seele://` é convite e o resto é endereço.
+        if (cmd === 'ler_entrada') {
+          const texto = String(args?.texto ?? '').trim();
+          return texto.startsWith('seele://') ? { Convite: texto } : { Endereco: texto };
+        }
         if (cmd === 'connect') {
           if (window.testModeloDoSlot && window.testSlot) {
             chamada.respondida = true;
@@ -1654,6 +1696,12 @@ async function aEntradaVelhaNaoTomaATela(browser, porta) {
       window.__TAURI__ = {
         core: { invoke: async (cmd, args) => {
           window.testCalls.push({cmd,args});
+          // O texto colado vai antes ao `ler_entrada` (tarefa 30 da F7); sem a
+          // leitura do código aqui, `seele://` é convite e o resto é endereço.
+          if (cmd === 'ler_entrada') {
+            const texto = String(args?.texto ?? '').trim();
+            return texto.startsWith('seele://') ? { Convite: texto } : { Endereco: texto };
+          }
           // Uma ponte lenta, por comando, para as cenas que medem o que aparece
           // antes de a resposta chegar.
           if (window.testAtraso[cmd]) await new Promise(ok => setTimeout(ok, window.testAtraso[cmd]));
@@ -1802,6 +1850,12 @@ async function aEntradaVelhaNaoTomaATela(browser, porta) {
       window.__TAURI__ = {
         core: { invoke: async (cmd, args) => {
           window.testCalls.push({ cmd, args });
+          // O texto colado vai antes ao `ler_entrada` (tarefa 30 da F7); sem a
+          // leitura do código aqui, `seele://` é convite e o resto é endereço.
+          if (cmd === 'ler_entrada') {
+            const texto = String(args?.texto ?? '').trim();
+            return texto.startsWith('seele://') ? { Convite: texto } : { Endereco: texto };
+          }
           // O que se grava fica gravado: a pergunta relê o nome depois de fechar.
           if (cmd === 'escolher_apelido_local') window.testTable.apelido_local = args.apelido;
           return window.testTable[cmd] ?? null;

@@ -9908,15 +9908,78 @@ bancada guarda cada um dos oito pontos de montagem de MOD (`68c4544d`). Pela mes
 (`ec8ec2ce`): com 10, 38 de 38 duas vezes; com 50, 37 de 37 duas vezes; com 100, 37 de 37 duas vezes — sempre com o
 ENTRAR NA SALA e o aperto entrando. O relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-ax-report.md`.
 
+**O resto da (b) entrou** (16/10, lote R63 da F5, no ramo `0.16/lotes-r63`, aberto no `1d0c7ebf`). **A medida
+antes** (16/10, no Chromium 151 e no WebKit 26.5 da bancada, com os mesmos números nos dois; a árvore AX só no
+Chromium): o tique de 500 ms refazia, sem mudança nenhuma, cinco regiões da sessão —
+- o contador `#pessoas-conta` e os sete números da telemetria (`medido`/`naoMedido`): `textContent =` troca o nó
+  de texto mesmo com o texto igual, e a seleção num número que não mudou ia a «» em todo tique (2 de 3 ids AX
+  trocados no contador, 14 de 51 na telemetria);
+- o `#voz-estado`, `role="status"` e à vista: uma região viva reescrita duas vezes por segundo com o mesmo texto;
+- `#roster-mods` e `#telemetria-mods`, com MOD (`aplicarARegiao` → `repovoar`): o foco na ação do MOD caía no
+  `BODY` e a seleção no texto do MOD se desfazia em todo tique;
+- a conversa: não a cada tique, mas **inteira** a cada mensagem nova e também a cada pessoa que chegava ou retrato
+  que mudava (`sincronizarRetratos`), sem nada mudar nela — o foco no link e no REMOVER no `BODY`, a seleção a «», e
+  433 de 434 ids AX trocados (512 de 513 com alguém chegando).
+
+**O conserto**, só no `tela-sessao.js`, em commits isolados:
+- `f642679c`: `escreverOTexto` escreve só quando o texto muda, e pelo `nodeValue` do nó que está ali — no contador,
+  na telemetria, no `#voz-estado`, na marca da média e no `#tel-aparelho`;
+- `59d08b0f`: a classe e o `title` de `medido`/`naoMedido`, o `data-faixa` da média e o `hidden` do `#tel-local` e
+  do `#tel-aparelho` também só quando mudam. A medida diz que, no Chromium, eles não trocam id AX nem tocam a
+  seleção; eles aparecem a todo observador de mutações, e por uma comparação a guarda fica «nenhuma mutação»;
+- `4824d313`: as regiões de MOD passam pelo `reconciliarALista` do AX (que ganha `comChave`, onde procurar os nós
+  velhos com chave): o conteúdo pelo marcador, o botão da ação com a chave do MOD e da ação. O clique continua
+  delegado no contêiner e lê os `data-*` na hora, que o `vestirComo` reescreve no botão reaproveitado: nada guarda
+  o retrato em que o botão nasceu. Vale para as cinco regiões do `aplicarARegiao`, o `#operador-mods`, o
+  `#compositor-mods` e o `#trilha-mods` inclusive;
+- `3dd4d100`: o `vestirComo` escreve o `style` pelo CSSOM — a CSP do produto (`style-src 'self'`) recusa o
+  `style` escrito por `setAttribute`, medido nos dois motores —, para o avatar da conversa ganhar o retrato num nó
+  reaproveitado;
+- `98f4e6cd`: a conversa reconciliada pelo id da mensagem (`mensagem:<id>`, ou `pendente:<client_message_id>`
+  numa pendente), com o divisor pela chave do dia, contada, e os nós de `conversa.mensagem` pelo marcador. A
+  rolagem segue como antes.
+
+**Os guardas:** os casos 12, 13 e 14 da `linhas-pelo-id.cjs` (`644efc18`, `557ebae0`, `1c0760bd`, e na rodada 1 da
+revisão `a3382f33`: a mesma ação contribuída duas vezes, duas pendentes com a primeira gravada, e dois divisores do
+mesmo dia, cada um provado pelo mutante da revisão), numa seção
+própria — o nó `===` e no documento, o `document.activeElement`, a seleção, 0 mutações com o retrato igual, e a
+prova de que o tique (ou a conversa) redesenhou; o clique na ação do MOD depois de um retrato que muda o canal
+aberto manda o canal novo, e o REMOVER e o link de mensagens editadas agem com o dado de agora. Cada conserto tem a
+reversão que reprova o seu caso, e o arquivo voltou idêntico pelo `cmp` em todas. **Depois**, pela mesma medida,
+nos dois motores: 0 de 48 focos perdidos; a seleção só se perde no número que **mudou** (o ATRASO, o contador com
+alguém chegando), que é o dado mudando; no Chromium, o contador mantém 3 de 3 ids AX, a telemetria 57 de 58 com
+MOD (o que troca é a `InlineTextBox` do UPTIME, o relógio andando), as regiões de MOD 7 de 7 e a conversa 434 de
+434, e com a mensagem nova os 434 ficam e 7 entram. A `um-redesenho-por-quadro.cjs`, intercalada com o `1d0c7ebf`,
+deu 30, 28 e 29 ms antes e 29, 31 e 30 ms depois; a conversa com 300 mensagens custa ~1 ms a menos por desenho. O
+relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-r63-report.md`.
+
 **Seguem abertos da (b):**
 - **o celular**: o ENTRAR e o ENTRAR MUDO da coluna de salas seguem recriados a cada quadro pelo
   `celular-servidor.js`, que adapta a coluna depois de cada desenho contando com ela refeita, e a reconciliação tira o
-  que ele pôs para ele pôr de novo. A (b) **não** está resolvida no celular. Dona: a F8;
-- **a lista de canais** perde o foco do teclado a cada tique: é a pendência 64;
-- **o `roster-mods`, o contador do cabeçalho (`pessoas-conta`), a conversa e a telemetria** seguem repovoados a
-  cada retrato, pelo mesmo mecanismo, sem dona por ora.
+  que ele pôs para ele pôr de novo. A (b) **não** está resolvida no celular. Dona: a F8. E, para a F8, desde o
+  lote R63: o comentário de `celular-conversa.js:62-63` («a lista é refeita quando chega mensagem») ficou falso; o
+  código está certo com a conversa reconciliada, porque o ouvinte é delegado e lê o `data-mensagem` na hora do
+  toque. A troca do comentário é dela;
+- **a própria mensagem gravada perde o nó — limite conhecido do lote R63.** Na conversa, a pendente tem a chave da
+  máquina (`pendente:<client_message_id>`) e a confirmada a do servidor (`mensagem:<id>`), e as duas não casam:
+  quando a mensagem que a própria pessoa mandou é gravada, a `li` é outra, e vão com ela o link, o REMOVER, a seleção
+  e o nó do leitor de tela — em toda mensagem que a pessoa manda. O fio já leva o eco (`client_message_id` no
+  `MessageReceived`, `crates/seele-proto/src/control.rs:1934-1936`: «so a client can match its own pending send»);
+  quem o perde é o cliente — a `Message` da sala (`crates/seele-sessao/src/state.rs`) não o guarda, e a FFI monta
+  `client_message_id: None` nas confirmadas (`crates/seele-ffi/src/lib.rs:3646`). **O caminho:** a F1 guarda o eco
+  e o leva pela FFI nas confirmadas próprias (a orquestradora já o pediu a ela); depois que a ponta dela chegar, a
+  F5 faz a pendente e a confirmada própria casarem pela mesma chave na conversa, com um caso na
+  `linhas-pelo-id.cjs` que começa vermelho: a própria mensagem gravada mantém o nó, a seleção e o REMOVER;
+- **o grupo FORA DO AR** (`grupoForaDoAr`), que só existe no `0.16/sala-viva`: as linhas dele não têm chave e casam
+  pela posição, e um leitor de tela parado em «Bruno» passa a ler «Carla» no mesmo nó quando alguém do meio se
+  conecta. Medido em 16/10 no `531b9cba`: com a chave `membro:<id>` na linha, as que ficam são os mesmos nós e
+  nenhum texto é reescrito. Fica para quando o `0.16/sala-viva` entrar;
+- **a lista de canais** perde o foco do teclado a cada tique: é a pendência 64 — fechada em 16/10, no lote C64,
+  que achou também uma regressão do AX na coluna de salas (um id de sala repetido no arranjo de
+  `servidor.navegacao` duplicava a fileira) e a consertou (`627666f8`, guardado pelo caso 11 da
+  `linhas-pelo-id.cjs`, `b11d1464`); ver a 64.
 
-## 64 · A lista de canais perde o foco do teclado a cada tique
+## 64 · Fechada em 2026-10-16 · A lista de canais perde o foco do teclado a cada tique
 
 **Aberta em 2026-10-15**, achada pela revisão do lote AX (pendência 63, (b)) e medida pela F5. **Dona: a F5, na
 0.16, num lote à parte depois do merge do AX.**
@@ -9938,6 +10001,69 @@ documento, o foco no `BODY`. Nos dois, o retrato desenhado mudou (o tique redese
 - um caso na `linhas-pelo-id.cjs` em que o foco do teclado num canal sobrevive a um retrato igual e a um retrato
   em que outro canal muda;
 - uma reversão que reprova o caso.
+
+**Fechada em 2026-10-16**, `627666f8`, `ea11880e`, `17953e77` e `365e8695`, e na rodada 1 da revisão `ffba93b5`,
+`b11d1464` e `d5246bc7` (lote C64 da F5 da 0.16, no ramo `0.16/lotes-c64`, aberto no `8cc38f6a`):
+- `ea11880e` (só `tela-sessao.js`): a coluna de canais passa pelo `reconciliarALista` do AX, com o canal como chave
+  (`canal:<id>`), como a sala na coluna de salas. O ponto de MOD da fileira, o `canal.item`, dentro do botão, passa
+  pelo marcador (`nosDeMod`). Os ouvintes do canal já eram delegados no `#lista-linhas` — o abrir
+  (`alternarCanal`), o renomear e o apagar — e leem o id do botão e o retrato de agora; a fileira não tem ouvinte
+  próprio, e nenhuma closure prende o canal velho. Não há menu de contexto no canal;
+- `17953e77` e `ffba93b5`: o caso 10 da `linhas-pelo-id.cjs`, com 4 canais e pelo tique (é ele que redesenha a
+  sessão parada). Com o foco no botão do segundo canal: depois de um tique com o **mesmo** retrato, o botão é o
+  mesmo nó, está no documento e é o `document.activeElement`, o retrato desenhado é outro objeto e a coluna não
+  muta; com **outro** canal mudando de nome, o mesmo, e toda mutação cai na fileira dele; um canal que sai perde o
+  nó, um que entra ganha um que não era de ninguém, e os outros ficam; o RENOMEAR do renomeado abre com o nome de
+  agora; **o canal com o foco vira o aberto** (o Enter de quem navega pelo teclado, `ffba93b5`): o botão é o mesmo
+  nó, com o foco, a classe `linha aberto` e `aria-current="true"`, e o que deixou de ser o aberto é o mesmo nó, sem
+  os dois; e, numa página nova, os 4 nós de um `canal.item` não saem do documento nem trocam de botão;
+- `627666f8` (só `tela-sessao.js`, antes dos outros): `emGrupos` ignora um id repetido **dentro** de um grupo,
+  como já dizia. O `filter` consultava `usadas` antes de o laço a encher, e `ids: [2, 2, 99]` punha a mesma fileira
+  duas vezes; com a coluna repovoada isso era só um movimento, e reconciliada vira uma fileira a mais. A
+  `regioes-do-produto.cjs`, que dá esse arranjo aos canais, reprova sem ele («os canais saíram ["MESA 1",
+  "combinados","combinados","OUTROS CANAIS","geral"]»). **A coluna de salas já tinha isso desde o AX**: com o
+  arranjo de salas trocado para `ids: [1, 1]`, numa sonda, as salas saem `["MESA 1","Sala principal","Sala
+  principal"]` no `8cc38f6a`, e certas no `1bb6450a` e com este commit;
+- `b11d1464`: o caso 11 da `linhas-pelo-id.cjs` guarda isso nas duas colunas, sem tocar na `regioes-do-produto.cjs`
+  da F3: um MOD de `servidor.navegacao` com `ids: [1, 1]` nas salas e `[2, 2]` nos canais, dois retratos e um
+  tique; um `li.voice_room` e um ENTRAR por sala, um botão por canal, e o ENTRAR da sala 1 o mesmo nó;
+- `365e8695` e `d5246bc7`: só comentário — o RENOMEAR do canal em `camada-moderar.js`, e a nota histórica do
+  `renomear_linha` em `tests/frontend.rs`, que dizia que a fileira de `#lista-linhas` é refeita a cada retrato e
+  que isso «continua verdade».
+
+**O vermelho**, no `8cc38f6a`: «o mesmo retrato, redesenhado pelo tique, tirou o foco do segundo canal: o botão não
+é o mesmo nó, saiu do documento, e o foco está em BODY». Medidos um a um, os outros passos também reprovam: com outro
+canal mudando de nome, o foco no `BODY`; com um canal saindo, os botões dos canais 1, 2 e 4 trocados; 4 de 4 nós do
+`canal.item` fora do documento.
+
+**As reversões**, cada uma voltando idêntica pelo `cmp` (sha256 do `tela-sessao.js` `7595a9e0…21f6` antes e depois):
+o arquivo inteiro do `8cc38f6a` e a coluna de volta ao `repovoar` reprovam no caso 10 com o foco no `BODY`; sem a
+chave do canal, «o terceiro canal saiu do retrato e a fileira dele ficou no documento»; sem o marcador do
+`canal.item`, «4 de 4 nós de MOD saíram do documento»; o `emGrupos` sem o `Set`, a `regioes-do-produto.cjs` com o
+canal duplicado e, desde a rodada 1, o caso 11 nas salas («depois de dois retratos, 3 li.voice_room e 3 ENTRAR para
+2 salas»); e a variante da classe antes da base (`"aberto linha"`, o mutante da revisão, que antes passava verde),
+o caso 10 (e) com o foco no `BODY`.
+
+**O que não piorou:** a `um-redesenho-por-quadro.cjs`, intercalada, deu 32, 29 e 32 ms de atraso máximo no
+`8cc38f6a` e 30, 31 e 32 ms na ponta — **mas o retrato dela tem 2 canais**, e ela mede o caminho geral, e não uma
+coluna de canais grande. A coluna grande foi medida pela revisão: o `desenharCanais` com 60 canais, mediana de 300
+chamadas, 3 rodadas intercaladas, com a carga entre 11 e 17 — só o JS, com a sessão escondida, 0,5 ms no `8cc38f6a`
+e 1,6–1,7 ms na ponta; com o estilo e o layout forçados, na sessão visível, 1,5 ms no `8cc38f6a` e 1,4–1,5 ms na
+ponta, com o p90 de 1,9–2,0 contra 1,7–1,8. Custa mais JS e menos layout, e o quadro não piora. A bancada do
+celular inteira passa, 110 casos, com o G3 IGUAL pixel a pixel no Chromium e no WebKit (antes da rodada 1, que não
+mudou código de produção); as 19 bancadas do job `bancadas`, os 40 roteiros, o `--test frontend` (296), o `xtask`
+(230) e o `check-runtime` passam. O relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-c64-report.md`.
+
+**Fica de fora:**
+- **a árvore de acessibilidade num WebView de verdade** não foi medida: a bancada prende o foco e a identidade do nó
+  no Chromium, e a sonda `arvore-ax.py` não rodou para os canais;
+- **a bancada do celular** não tem caso de foco na coluna de canais, que no celular só ouve cliques;
+- **o `reconciliarOsFilhos` não tolera o mesmo nó duas vezes** no vetor de filhos, como o `replaceChildren`
+  tolerava. Hoje ninguém o passa: a causa estava no `emGrupos`, consertada e guardada pelo caso 11. Voltaria com um
+  chamador futuro que pusesse o mesmo nó duas vezes, ou com um id duplicado no próprio retrato — o `porId` do
+  `emGrupos` funde, e o grupo dos outros poria o mesmo nó duas vezes —, o que exigiria um servidor repetindo id. Pular
+  um `novo` já visto, com um `Set` no contexto, fecharia isso, ao custo de mais uma alocação por quadro; ficou fora
+  por decisão da orquestradora.
 
 ## 65 · No Windows, a sala e o servidor guardado sobem na porta de outro SEELE, só em IPv4, calados
 
@@ -9970,6 +10096,26 @@ como porta ocupada. Antes do socket duplo, uma sonda em `0.0.0.0` e outra em
 duplo não vê, a sonda vê. O `SO_EXCLUSIVEADDRUSE` faria isso no socket, mas o
 `socket2` 0.6.5 não o expõe, e a folha de lints proíbe o `unsafe`. Os testes
 põem três ocupantes — outra escuta, um só IPv4, um só IPv6 — no `seele-server` e
-na sala, e no macOS o do só IPv6 reprovava antes. A prova do Windows, vermelho
-antes e verde depois, é a do PC de testes.
+na sala, e no macOS o do só IPv6 reprovava antes. **Provado no Windows em
+15/10**, no PC de testes: vermelho em `95271bc4` (o `a_porta_ocupada_e_dita`);
+verde em `4ed24ee0` (`alcance::testes` 44 de 44, `sala::` 22 de 22, clippy
+limpo); e, tirada uma sonda de cada vez, o teste reprova no ocupante da família
+dela.
 **Na linha 0.15:** fica como está. A 0.15.2 já está pronta para a tag.
+
+## 66 · O teste da bomba da tela leva ~38 s e reprova quando a máquina está dividida
+
+**Aberta em 2026-10-16**, medida pela orquestradora na bateria da 18ª integração, parte A. O
+`seele-core` `bomba::tests::a_bomba_atravessa_a_conexao_e_o_outro_lado_le_o_que_saiu` espera o
+primeiro fluxo de tela com uma paciência de 60 s (`PACIENCIA`, `bomba.rs`), e com a máquina livre
+ele já leva ~38 s (medido: 38,1 a 45,3 s em oito rodadas). Com outro `cargo test` rodando ao lado,
+passa dos 60 s e reprova com «nenhum fluxo de tela chegou em 60s: a tarefa que escoa ainda espera
+a bomba armar» (4 de 5). Intercalado com o mesmo teste antes da 18ª (`95ff2689`), com o código do
+`seele-core` idêntico, o de antes também reprovou (1 de 4). O `cefa6a93` (10/10) já tinha tirado o
+prazo escondido do QUIC desse teste; o que sobra é o tempo da primeira sessão de codificação.
+
+**A direção:** medir onde vão os ~38 s (a primeira sessão do OpenH264 no build de teste, a
+captura de mentira, a espera da bomba armar) antes de mexer na paciência: um teste que só passa com
+a máquina parada não prova nada numa bateria, e um prazo maior sem a medida esconde uma lentidão
+do produto. **Sem dona ainda.**
+

@@ -163,6 +163,15 @@ async function passaDoTeto(campo, texto) {
 //     este veredito (P11, em `entrarNaAutenticacao`; D-celular-3). Devolve
 //     `null`, e o aperto aparece como hoje, ou as frases do registro e do
 //     anúncio da entrada direta. O passo de entrar roda igual nos dois casos.
+//   - `vestirASala`: o que a casca acrescenta ao `li` de uma sala de voz (no
+//     `desenharCanais`), sobre a linha **montada** e antes da reconciliação da
+//     coluna: o que ela põe ali é casado com o quadro anterior como o resto, e
+//     o ENTRAR e o que a casca acrescenta ficam os mesmos nós de um quadro ao
+//     seguinte (pendência 63(b) no celular; aprovado pela orquestradora em
+//     16/10). **Não mexe na chave da linha** (`chaveNaLista`, a sala), não troca
+//     o `li` e veste a mesma sala sempre do mesmo jeito: a reconciliação casa
+//     os filhos pela etiqueta e pela primeira classe, e um feitio que mudasse a
+//     cada quadro trocaria os nós. Uma chamada só, e no desktop não faz nada.
 //   - `detalhesNaLinha`: se a linha de uma pessoa acrescenta o `pessoa.detalhes`
 //     dela, no «⋯». O celular o tira da linha, e a folha da pessoa é o único
 //     lugar dele lá: um nó por pessoa, num lugar só (decisão da orquestradora,
@@ -177,6 +186,7 @@ const CASCA = Object.seal({
   avisoDeFone: () => AVISO_DE_FONE,
   fraseDoModo: (_modo, doDesktop) => doDesktop,
   entradaDireta: (_veredito, _deOnde) => null,
+  vestirASala: (_item, _sala, _snapshot) => {},
   detalhesNaLinha: true,
 });
 

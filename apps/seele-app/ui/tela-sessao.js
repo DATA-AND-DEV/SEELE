@@ -244,6 +244,31 @@ let ocorrenciaAtual = null;
 const SEM_MEDIDA = "—";
 
 /**
+ * **Escreve o texto de um campo só quando ele muda, e no nó que já existe**
+ * (pendência 63; lote R63 da F5).
+ *
+ * `textContent =` troca o nó de texto por um novo **mesmo com o texto igual** —
+ * medido no Chromium e no WebKit, que não pulam a troca. O tique de 500 ms
+ * escreve o contador, a telemetria e o `#voz-estado` duas vezes por segundo, e
+ * cada troca desfazia a seleção de quem copiava um número, dava ao leitor de
+ * tela outro nó, e mexia numa região viva sem nada para dizer.
+ *
+ * Com o texto igual, nada é escrito. Com o texto novo, muda o `nodeValue` do
+ * nó que está ali, e não o nó: para o leitor de tela é o mesmo texto com outro
+ * conteúdo, e uma seleção num número vizinho, que não mudou, não é tocada.
+ * Fora desse caso — o campo vazio, ou com mais de um filho — vale o
+ * `textContent` de sempre, e o resultado na tela é o mesmo.
+ */
+function escreverOTexto(nodo, texto) {
+  const so = nodo.firstChild;
+  if (so !== null && so === nodo.lastChild && so.nodeType === Node.TEXT_NODE && texto !== "") {
+    if (so.nodeValue !== texto) so.nodeValue = texto;
+  } else if (so !== null || texto !== "") {
+    nodo.textContent = texto;
+  }
+}
+
+/**
  * Marca um campo como não medido, e diz o que faltaria para medi-lo.
  *
  * O travessão é o mesmo que `quando()` já usava em `base.js`, e é deliberado
@@ -256,15 +281,19 @@ const SEM_MEDIDA = "—";
  * quem reparou no travessão está fazendo.
  */
 function naoMedido(nodo, motivo) {
-  nodo.textContent = SEM_MEDIDA;
-  nodo.classList.add("ausente");
-  nodo.title = motivo;
+  escreverOTexto(nodo, SEM_MEDIDA);
+  // A classe e o `title` também só quando mudam: `classList.add` de uma classe
+  // que já está, e o `title` igual, reescrevem o atributo do mesmo jeito — é
+  // uma mutação por campo, duas vezes por segundo (lote R63).
+  if (!nodo.classList.contains("ausente")) nodo.classList.add("ausente");
+  if (nodo.title !== motivo) nodo.title = motivo;
 }
 
 /** O contrário: um valor que existe, no mesmo campo. */
 function medido(nodo, texto) {
-  nodo.textContent = texto;
-  nodo.classList.remove("ausente");
+  escreverOTexto(nodo, texto);
+  if (nodo.classList.contains("ausente")) nodo.classList.remove("ausente");
+  // Sem `title`, tirá-lo não muta nada: não há guarda a pôr.
   nodo.removeAttribute("title");
 }
 
@@ -506,6 +535,7 @@ function desenhar(snapshot) {
   desenharTransmissoes(snapshot);
   abrirLinhaSozinho(snapshot);
   sincronizarMensagens(snapshot.messages_revision);
+  sincronizarForaDoAr(snapshot.fora_do_ar_revision);
   // Os eventos da tela aos MODs da API 6, pela comparação com o retrato de
   // antes (rascunho da API 6, §7.2).
   avisarOsModsDaTela(snapshot);
@@ -691,8 +721,25 @@ async function recarregarTrilha() {
  * região. Escondida quando ninguém acrescenta nada: uma faixa vazia é uma
  * régua sobre nada.
  *
- * Repovoada e não reconstruída: os nós vêm montados do registro, e movê-los
- * preserva o que eles seguram — como em `canal.cabecalho`.
+ * **Reconciliada, e não repovoada** (pendência 63; lote R63 da F5). O tique
+ * de 500 ms passa por aqui em cada região, e o `replaceChildren` de antes
+ * tirava o conteúdo do MOD do documento e o punha de volta, e trocava o botão
+ * da ação por um novo, que `acoesDasContribuicoes` monta a cada retrato: o
+ * foco nele caía no `<body>` e a seleção no texto do MOD se desfazia, duas
+ * vezes por segundo. Agora é o caminho da lista de pessoas
+ * (`reconciliarALista`):
+ *
+ * - o conteúdo vem montado do registro, e é o mesmo nó entre um retrato e o
+ *   seguinte (`montarContribuicao`): entra pelo marcador (`nosDeMod`), e não
+ *   sai do documento;
+ * - o botão da ação tem chave — o MOD e a ação, contados —, e o que já estava
+ *   na tela fica, vestido com o botão montado agora. Pela posição, a saída da
+ *   ação de um MOD daria o botão dela à ação do vizinho;
+ * - **o clique age com o dado de agora**: o ouvinte é um só, no contêiner
+ *   (`ligarAcoesDeApresentacao`), e lê os `data-*` do botão na hora do
+ *   clique; o `vestirComo` os reescreve no botão reaproveitado — o canal do
+ *   `compositor`, quando o canal aberto muda. Nada no botão guarda o retrato
+ *   em que ele nasceu.
  *
  * `contexto` `null` é a região sem onde valer agora — o compositor sem canal
  * aberto —, e ela fica vazia.
@@ -701,13 +748,24 @@ function aplicarARegiao(ponto, conteiner, alvo = "", contexto = {}) {
   if (!conteiner) return;
   // A região que a casca não tem fica vazia, e quem contribui para ela sabe
   // (`regiaoAusente`, em `base.js`; tarefa 5, Step 8).
-  const nos = contexto === null || regiaoAusente(ponto) ? [] : [
-    ...conteudoDasContribuicoes(ponto, alvo),
-    ...acoesDasContribuicoes(ponto, alvo, contexto),
-  ];
-  repovoar(conteiner, nos);
+  const vale = contexto !== null && !regiaoAusente(ponto);
+  const conteudo = vale ? conteudoDasContribuicoes(ponto, alvo) : [];
+  const acoes = vale ? acoesDasContribuicoes(ponto, alvo, contexto) : [];
+  const vazia = conteudo.length + acoes.length === 0;
+  // Vazia e sem nada na tela, o caso de quase todo quadro: nada a reconciliar.
+  if (!vazia || conteiner.firstChild !== null) {
+    const vezes = new Map();
+    for (const botao of acoes) {
+      const chave = `acao:${botao.dataset.modDaAcao}\u0000${botao.dataset.acaoDeMod}`;
+      const vez = vezes.get(chave) ?? 0;
+      vezes.set(chave, vez + 1);
+      chaveNaLista.set(botao, `${chave}#${vez}`);
+    }
+    reconciliarALista(conteiner, [...nosDeMod(conteudo), ...acoes], ":scope > [data-acao-de-mod]");
+  }
   ligarAcoesDeApresentacao(conteiner);
-  conteiner.hidden = nos.length === 0;
+  // E o `hidden` só quando muda, como o texto do rodapé (`escreverOTexto`).
+  if (conteiner.hidden !== vazia) conteiner.hidden = vazia;
 }
 
 /**
@@ -955,8 +1013,12 @@ function emGrupos(linhas, dados, arranjo, tituloDosOutros, classe = "canais-grup
     return item;
   };
   for (const grupo of arranjo.grupos.slice(0, TETO_DE_GRUPOS)) {
-    const dele = (Array.isArray(grupo?.ids) ? grupo.ids : [])
-      .map(String)
+    // **Um id repetido no mesmo grupo também é ignorado**, pelo `Set`: o
+    // `filter` consulta `usadas` antes de o laço a encher, e o repetido
+    // passava. Com a lista repovoada, a mesma fileira posta duas vezes só se
+    // movia; reconciliada (`reconciliarALista`), a segunda vira uma fileira a
+    // mais — a mesma sala duas vezes na coluna.
+    const dele = [...new Set((Array.isArray(grupo?.ids) ? grupo.ids : []).map(String))]
       .filter((id) => porId.has(id) && !usadas.has(id));
     if (dele.length === 0) continue;
     saida.push(cabecalho(String(grupo.titulo ?? "").slice(0, TETO_DO_TITULO_DE_GRUPO)));
@@ -1084,6 +1146,10 @@ function desenharCanais(snapshot) {
       ? `voltar para a grade de ${voice_room.name}; você já está dentro`
       : `entrar e falar com quem está em ${voice_room.name}`;
     item.append(cabeca, dentro, ir);
+    // O que a casca acrescenta à sala (`CASCA.vestirASala`, em `base.js`; no
+    // desktop, nada), na linha montada: antes da reconciliação, para ela casar
+    // o acréscimo com o do quadro anterior em vez de tirá-lo.
+    CASCA.vestirASala(item, voice_room, snapshot);
     return item;
   });
   // **`servidor.navegacao` substituído** (rascunho §3, tarefa 5): o MOD dá a
@@ -1101,6 +1167,12 @@ function desenharCanais(snapshot) {
 
   const linhas = snapshot.channels.map((linha) => {
     const item = elemento("li", null);
+    // A coluna de canais também é reconciliada, e o canal é a chave: repovoada
+    // a cada retrato, ela tirava do documento o botão que tinha o foco do
+    // teclado, e o foco caía no `<body>` a cada tique (pendência 64). Os
+    // ouvintes do canal são delegados no `#lista-linhas` e leem o id do botão
+    // e o retrato de agora, e não um canal preso no quadro em que ele nasceu.
+    chaveNaLista.set(item, `canal:${linha.id}`);
 
     // Botão de verdade, e não um `<li>` com `cursor: pointer`: o ouvinte estava
     // no `<ul>`, então a lista inteira era inalcançável pelo teclado e nenhum
@@ -1117,8 +1189,9 @@ function desenharCanais(snapshot) {
     botao.append(cerquilha, elemento("span", "linha-rotulo", linha.name));
     // **`canal.item`** — ícone, distintivo, contagem ou decoração que um MOD
     // põe ao lado do nome do canal. Dentro do botão, porque é dele que a linha
-    // fala; o clique continua sendo o do produto — abrir o canal.
-    botao.append(...conteudoDasContribuicoes("canal.item", String(linha.id)));
+    // fala; o clique continua sendo o do produto — abrir o canal. Pelo
+    // marcador, como os pontos da lista de pessoas (`noDeMod`).
+    botao.append(...nosDeMod(conteudoDasContribuicoes("canal.item", String(linha.id))));
 
     // A contagem de pendências do comp não entra. `Channel` é `{id, name, open}` —
     // não há contagem de não-lidas nem marca d'água de leitura em lugar nenhum
@@ -1146,7 +1219,7 @@ function desenharCanais(snapshot) {
     if (linha.open) linhaAberta = linha.id;
     return item;
   });
-  repovoar($("lista-linhas"), emGrupos(linhas, snapshot.channels, arranjo?.canais, "OUTROS CANAIS"));
+  reconciliarALista($("lista-linhas"), emGrupos(linhas, snapshot.channels, arranjo?.canais, "OUTROS CANAIS"));
 
   // Os dois formulários de criar sala só aparecem para quem pode criar. Quem
   // responde é o servidor, em `may_manage_voice_rooms`, resolvido pelo PERMISSIONS a
@@ -1295,7 +1368,11 @@ function desenharOperador(snapshot) {
   //    passou a querer dizer só o terceiro caso, que é o único em que ele
   //    está aberto o tempo todo;
   // 3. **se está indo ao ar agora**, que é o que `speaking` mede.
-  $("voz-estado").textContent = [
+  //
+  // **E só quando muda** (pendência 63; lote R63): a linha é `role="status"` e
+  // está à vista, e o tique a reescrevia com o mesmo texto duas vezes por
+  // segundo — uma região viva mexida sem nada para dizer. Ver `escreverOTexto`.
+  escreverOTexto($("voz-estado"), [
     estadoDoMicrofone,
     // E a linha de estado diz o mesmo: quem lê «não está ouvindo» entende
     // «ninguém está falando comigo», e não «o som da tela também está calado».
@@ -1303,7 +1380,7 @@ function desenharOperador(snapshot) {
     !snapshot.muted && snapshot.speaking ? "no ar" : null,
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(" · "));
 
 }
 
@@ -1464,6 +1541,20 @@ let mensagens = [];
 let revisaoDesenhada = null;
 let buscandoMensagens = false;
 
+/**
+ * O FORA DO AR que esta tela tem em mãos, e qual revisão dele (P6, D-fio-4):
+ * os membros deste servidor que não estão conectados agora, só id e apelido.
+ *
+ * Fora do `snapshot` pelo motivo da conversa, e por mais um: um MOD da API 5
+ * recebe o retrato inteiro, e a lista de membros de um servidor não é coisa que
+ * um MOD que roda hoje tenha ganhado. O retrato diz só o número
+ * (`fora_do_ar_revision`), e esta tela busca a lista quando ele anda — pelo
+ * `membros_fora_do_ar`, como a conversa pelo `messages`.
+ */
+let foraDoAr = [];
+let revisaoDoForaDoAr = null;
+let buscandoForaDoAr = false;
+
 /** Se um pedido de abrir Linha está em voo, para não mandar outro por cima. */
 let abrindoLinha = false;
 
@@ -1531,6 +1622,32 @@ async function sincronizarMensagens(revisao) {
     if (erro !== "NotConnected") console.warn("messages:", erro);
   } finally {
     buscandoMensagens = false;
+  }
+}
+
+/**
+ * Busca o FORA DO AR e repinta a lista de pessoas, se ele mudou desde a última
+ * vez. As mesmas duas guardas de `sincronizarMensagens`: uma busca em voo por
+ * vez, e a resposta só vale na sessão que a pediu.
+ *
+ * O número não anda a cada `PersonState` (pendência 63): só a lista de
+ * membros, um apelido de membro, ou alguém entrando ou saindo do servidor o
+ * movem (`Changed.membros`, em `seele-sessao`).
+ */
+async function sincronizarForaDoAr(revisao) {
+  if (revisao === revisaoDoForaDoAr || buscandoForaDoAr) return;
+  buscandoForaDoAr = true;
+  const geracao = geracaoDaSessao;
+  try {
+    const lidos = await invoke("membros_fora_do_ar");
+    if (geracao !== geracaoDaSessao) return;
+    foraDoAr = lidos ?? [];
+    revisaoDoForaDoAr = revisao;
+    redesenharAsPessoas();
+  } catch (erro) {
+    if (erro !== "NotConnected") console.warn("membros_fora_do_ar:", erro);
+  } finally {
+    buscandoForaDoAr = false;
   }
 }
 
@@ -1683,9 +1800,12 @@ function itemDeMensagem(mensagem, indice, segue) {
     ).escolhida
     : null;
   const desenhoDoMod = substituta ? montarContribuicao(substituta, alvoDaMensagem) : null;
+  // Os nós do MOD entram pelo marcador (`noDeMod`): são os mesmos de um desenho
+  // para o outro, e a conversa reconciliada (`desenharMensagens`) os põe onde o
+  // marcador está, sem tirá-los do documento (lote R63).
   if (desenhoDoMod) {
     const miolo = elemento("span", "mensagem-miolo");
-    miolo.append(desenhoDoMod);
+    miolo.append(noDeMod(desenhoDoMod));
     conteudo.append(miolo);
   } else {
     const corpo = elemento("span", "corpo");
@@ -1693,7 +1813,7 @@ function itemDeMensagem(mensagem, indice, segue) {
     corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
     conteudo.append(corpo);
   }
-  if (alvoDaMensagem) conteudo.append(...conteudoDasContribuicoes("conversa.mensagem", alvoDaMensagem));
+  if (alvoDaMensagem) conteudo.append(...nosDeMod(conteudoDasContribuicoes("conversa.mensagem", alvoDaMensagem)));
   // O arquivo, embaixo do texto. ADR 0027: o texto sobrevive ao arquivo, e é
   // por isso que este bloco continua aparecendo depois de os bytes irem
   // embora — com o nome, o tamanho, e a frase que diz o que houve.
@@ -1809,6 +1929,19 @@ function seloDoEnvio(mensagem) {
  * `data-mensagem`. `desenharBusca` alcançava a mensagem pelo lugar dela entre
  * os filhos, e o primeiro divisor desalinharia essa conta em um, calado, para
  * todas as mensagens do dia seguinte.
+ *
+ * **Reconciliada pelo id da mensagem, e não repovoada** (pendência 63; lote
+ * R63 da F5). A lista era refeita inteira quando chegava mensagem, e também
+ * quando alguém chegava ao servidor ou um retrato mudava
+ * (`sincronizarRetratos`), sem nada mudar na conversa: o foco no link ou no
+ * REMOVER caía no `<body>`, a seleção se desfazia, e o leitor de tela perdia o
+ * nó (433 de 434 ids AX trocados, medido em 16/10). Agora é o caminho da lista
+ * de pessoas (`reconciliarALista`): cada mensagem tem a chave do id que o
+ * servidor deu — ou, numa pendente, a da máquina —, e cada divisor a do dia; a
+ * mensagem que chega entra, a que sai sai, e as outras ficam com o mesmo nó,
+ * só com o que mudou nelas. O REMOVER e o link continuam agindo com o dado de
+ * agora: os ouvintes são delegados na lista e leem o `data-*` que o
+ * `vestirComo` reescreve, e `mensagens`.
  */
 function desenharMensagens() {
   const lista = $("lista-mensagens");
@@ -1818,8 +1951,8 @@ function desenharMensagens() {
   // que chegue com uma delas aberta cai aqui com a lista em `display: none` —
   // onde `scrollHeight`, `scrollTop` e `clientHeight` valem todos 0. A conta
   // abaixo vira `0 - 0 - 0 < 32`, isto é, "estava no fim", para justamente
-  // quem tinha subido para ler. O `repovoar` seguinte ainda troca todos os
-  // filhos, o que zera a rolagem de qualquer forma.
+  // quem tinha subido para ler. (E o `repovoar` de antes da reconciliação
+  // trocava todos os filhos, o que zerava a rolagem de qualquer forma.)
   //
   // A lista é redesenhada ao voltar — `fecharChamada` e `fecharServer` pedem
   // isso —, então sair daqui não deixa nada velho na tela.
@@ -1842,11 +1975,20 @@ function desenharMensagens() {
   const noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 32;
 
   const itens = [];
+  // O mesmo dia pode abrir dois divisores — a hora é do servidor, e a ordem é
+  // a do id —, e cada um tem a chave contada, para os dois não disputarem um nó.
+  const dias = new Map();
   let anterior = null;
   mensagens.forEach((mensagem, indice) => {
     const dia = diaDaMensagem(mensagem.at_seconds);
     const trocouDeDia = dia !== null && dia !== diaDaMensagem(anterior?.at_seconds);
-    if (trocouDeDia) itens.push(divisorDeDia(mensagem.at_seconds));
+    if (trocouDeDia) {
+      const divisor = divisorDeDia(mensagem.at_seconds);
+      const vez = dias.get(dia) ?? 0;
+      dias.set(dia, vez + 1);
+      chaveNaLista.set(divisor, `dia:${dia}#${vez}`);
+      itens.push(divisor);
+    }
     // Sem hora dos dois lados não há como saber se a rajada é a mesma, e o
     // desconhecido abre cabeçalho: repetir o nome custa uma linha, e engolir
     // o nome de quem falou custa a autoria.
@@ -1861,11 +2003,18 @@ function desenharMensagens() {
       Boolean(anterior.at_seconds) &&
       Boolean(mensagem.at_seconds) &&
       mensagem.at_seconds - anterior.at_seconds <= JUNTA_ATE_SEGUNDOS;
-    itens.push(itemDeMensagem(mensagem, indice, segue));
+    const item = itemDeMensagem(mensagem, indice, segue);
+    // O id do servidor, ou — numa pendente, que tem id zero — a chave desta
+    // máquina. A pendente que é gravada troca de chave, e só ela ganha nó novo.
+    const chave = mensagem.id
+      ? `mensagem:${mensagem.id}`
+      : mensagem.client_message_id ? `pendente:${mensagem.client_message_id}` : null;
+    if (chave !== null) chaveNaLista.set(item, chave);
+    itens.push(item);
     anterior = mensagem;
   });
 
-  repovoar(lista, itens);
+  reconciliarALista(lista, itens, ":scope > li");
   if (noFim) lista.scrollTop = lista.scrollHeight;
 }
 
@@ -2123,8 +2272,10 @@ async function mostrarAPrevia(evento) {
  * Abre o endereço de um link de mensagem, fora desta janela.
  *
  * Ouvinte único na lista, e não um por link: uma conversa longa tem centenas
- * de mensagens, e redesenhá-la é trocar todos os filhos — ouvintes por
- * elemento seriam criados e jogados fora a cada desenho.
+ * de mensagens, e ouvintes por elemento seriam criados a cada desenho. E, com
+ * a conversa reconciliada pelo id (lote R63), o link é reaproveitado entre os
+ * desenhos: um ouvinte nele guardaria o endereço do desenho em que nasceu. Este
+ * lê o `data-url` na hora do clique, e o `vestirComo` o reescreve.
  */
 function abrirLinkDaMensagem(evento) {
   const link = evento.target.closest?.("[data-url]");
@@ -2199,8 +2350,8 @@ function redesenharAsPessoas() {
 
 /**
  * A chave de um nó da lista de pessoas: `pessoa:<id>` numa linha, `sala:<id>`
- * ou `grupo:<nome>` num grupo. Num mapa, e não num atributo: ela é de quem
- * reconcilia, e não da página.
+ * ou `grupo:<nome>` num grupo; na coluna de canais, `canal:<id>`. Num mapa, e
+ * não num atributo: ela é de quem reconcilia, e não da página.
  */
 let chaveNaLista = new WeakMap();
 
@@ -2288,13 +2439,21 @@ function detalhesDaPessoaNaLinha(pessoa) {
  * **A coluna de salas passa por aqui também** (`desenharCanais`): ela lista
  * quem está em cada sala e tem o ENTRAR NA SALA, que, trocado a cada quadro,
  * saía da árvore com 100 pessoas. Lá a sala é a chave, e a pessoa dentro dela
- * também. A casca do celular adapta essa coluna depois de cada quadro
- * (`celular-servidor.js`) e o que ela acrescenta não está na lista montada:
- * sai aqui, e ela o põe de novo, como fazia com a coluna refeita.
+ * também. A casca do celular veste cada sala na linha montada
+ * (`CASCA.vestirASala`, no `desenharCanais`), antes de chegar aqui: o que ela
+ * acrescenta é casado como o resto, e o ENTRAR e o ENTRAR MUDO dela atravessam
+ * os quadros.
+ *
+ * **E a coluna de canais**, com o canal como chave: repovoada, ela tirava do
+ * documento o botão com o foco do teclado a cada tique (pendência 64).
+ *
+ * **E as regiões de MOD** (`aplicarARegiao`; lote R63), onde a chave mora nos
+ * botões de ação, filhos diretos do contêiner, e não em `li`: é o que
+ * `comChave` diz — onde procurar os nós velhos com chave.
  */
-function reconciliarALista(lista, filhos) {
+function reconciliarALista(lista, filhos, comChave = "li") {
   const velhos = new Map();
-  for (const no of lista.querySelectorAll("li")) {
+  for (const no of lista.querySelectorAll(comChave)) {
     const chave = chaveNaLista.get(no);
     if (chave !== undefined && !velhos.has(chave)) velhos.set(chave, no);
   }
@@ -2444,12 +2603,18 @@ function mesmoFeitio(velho, novo) {
  * de dentro. O pedido vale quando muda (`abertoPedido`); fora disso, fica o
  * que a pessoa escolheu.
  *
- * **Fora o `open`, todo atributo que a linha montada não tem sai, e há quem
- * conte com isso** (M4 da revisão): a casca do celular marca com `data-celular`
- * o `li.voice_room` que adaptou (`celular-servidor.js`) e só o adapta de novo
- * porque a marca sai aqui no quadro seguinte. Preservar outro atributo faria o
- * celular parar de adaptar calado — o ENTRAR MUDO e as marcas da sala sumiriam.
- * A `tools/bancada-do-celular.py` (`aba_servidor`) prende isso.
+ * **Fora o `open`, todo atributo que a linha montada não tem sai.** A casca do
+ * celular contava com isso (M4 da revisão): ela vestia o `li.voice_room` depois
+ * do desenho, marcado com `data-celular`, e só o vestia de novo porque a marca
+ * saía aqui. Desde o `CASCA.vestirASala` (16/10) ela veste a linha montada, e o
+ * que acrescenta vem nos dois lados da comparação: nenhum atributo precisa sair
+ * para ela.
+ *
+ * **O `style` passa pelo CSSOM, e não pelo atributo** (lote R63). A CSP do
+ * produto é `style-src 'self'`, e ela recusa o `style` escrito por
+ * `setAttribute`: medido no Chromium e no WebKit da bancada, o texto fica no
+ * atributo e nada é aplicado. `style.cssText` é aceito. É o avatar da conversa,
+ * que ganha o retrato (`aplicarAvatar`) num nó reaproveitado.
  */
 function vestirComo(velho, novo) {
   if (velho.nodeType === Node.TEXT_NODE) {
@@ -2464,7 +2629,9 @@ function vestirComo(velho, novo) {
   for (const nome of novo.getAttributeNames()) {
     if (detalhe && nome === "open") continue;
     const valor = novo.getAttribute(nome);
-    if (velho.getAttribute(nome) !== valor) velho.setAttribute(nome, valor);
+    if (velho.getAttribute(nome) === valor) continue;
+    if (nome === "style") velho.style.cssText = novo.style.cssText;
+    else velho.setAttribute(nome, valor);
   }
   if (detalhe) {
     const pedido = novo.hasAttribute("open");
@@ -2618,9 +2785,15 @@ function desenharPessoas(snapshot) {
     );
   }
 
+  // **FORA DO AR** (D-fio-4, P6), por último: quem é membro deste servidor e
+  // não está conectado agora. A lista vem do acessor, e não do retrato — ver
+  // `foraDoAr`.
+  if (foraDoAr.length > 0) grupos.push(grupoForaDoAr(foraDoAr));
+
   // **Reconciliada pelo id, e não repovoada** (pendência 63, (b)): ver
   // `reconciliarALista`. A lista refeita a cada retrato sumia e voltava na
-  // árvore de acessibilidade.
+  // árvore de acessibilidade. O grupo FORA DO AR tem a chave do nome
+  // (`grupoDeSala`), e as linhas dele, sem chave, casam pela posição.
   reconciliarALista($("lista-roster"), grupos);
   // Uma vez, e na lista: ver `ligarAcoesDeApresentacao` em `base.js`.
   ligarAcoesDeApresentacao($("lista-roster"));
@@ -2648,6 +2821,27 @@ function pintarVolumesDoRoster() {
     if (deslizante === document.activeElement) continue;
     deslizante.value = String(volumesLidos.get(deslizante.dataset.pessoa) ?? 100);
   }
+}
+
+/**
+ * O grupo FORA DO AR: os membros que não estão conectados, apagados e só com o
+ * nome.
+ *
+ * **Só o nome**, e é a decisão D-fio-4: sem papéis e sem horário. O fio nem os
+ * traz (`MembroForaDoAr` é id e apelido), e esta linha não os inventa — «visto
+ * por último» seria dizer a todo membro quando cada outro sai.
+ *
+ * **Não é um `li.pessoa`.** Aquela é a linha de quem está aqui: um MOD a
+ * apresenta (`pessoa.cartao`, `pessoa.identidade`), o celular abre a folha dela
+ * ao toque (`celular-pessoas.js`), e ela carrega sinal e volume. Nada disso
+ * cabe a quem está fora: nenhuma medida existe, nenhuma ação o alcança, e
+ * nenhum MOD ganhou a lista de membros.
+ */
+function grupoForaDoAr(membros) {
+  const linhas = membros.map((membro) => elemento("li", "membro-fora-do-ar", membro.nickname));
+  const grupo = grupoDeSala("FORA DO AR", `${membros.length}`, false, linhas);
+  grupo.dataset.foraDoAr = "sim";
+  return grupo;
 }
 
 /** Um grupo da faixa: o nome de uma sala e os cartões de quem está nela. */
@@ -2708,17 +2902,18 @@ function desenharMedia(voice_room) {
     // Sem sala, ou numa sala vazia. Não é uma média baixa: é a ausência de
     // qualquer coisa para tirar média de.
     delete celula.dataset.faixa;
-    marca.textContent = "";
+    escreverOTexto(marca, "");
     naoMedido(valor, voice_room ? "esta sala está vazia" : "você não entrou em nenhuma sala");
     return;
   }
 
   const sync = voice_room.sync;
-  celula.dataset.faixa = sync.band;
+  // Só quando muda, como o texto (lote R63): ver `escreverOTexto`.
+  if (celula.dataset.faixa !== sync.band) celula.dataset.faixa = sync.band;
   // A marca de bloco é a metade que sobrevive sem cor. Ela fica em face
   // monoespaçada ao lado do número porque a Saira Condensed, que desenha o
   // número, não tem `U+2588`.
-  marca.textContent = marcaSync(sync.band);
+  escreverOTexto(marca, marcaSync(sync.band));
   medido(valor, String(sync.ratio));
 }
 
@@ -3227,7 +3422,10 @@ function desenharTelemetria(snapshot) {
     medido($("tel-caminho"), caminho);
   }
 
-  $("tel-local").hidden = !tel.local_fault;
+  // O `hidden` também só quando muda: escrito igual, ele é uma mutação no
+  // rodapé a cada tique (lote R63).
+  const falhaLocal = $("tel-local");
+  if (falhaLocal.hidden !== !tel.local_fault) falhaLocal.hidden = !tel.local_fault;
   desenharAparelho(snapshot);
 
   desenharEnlace(snapshot.link);
@@ -3273,21 +3471,21 @@ function desenharAparelho(snapshot) {
 
   if (snapshot.aparelho === "trocando") {
     alvo.hidden = false;
-    alvo.textContent = "TROCANDO DE APARELHO";
+    escreverOTexto(alvo, "TROCANDO DE APARELHO");
     return;
   }
   if (snapshot.aparelho === "perdido") {
     alvo.hidden = false;
-    alvo.textContent = "SEM APARELHO DE ÁUDIO";
+    escreverOTexto(alvo, "SEM APARELHO DE ÁUDIO");
     return;
   }
   if (Date.now() < ateQuandoAnunciarOAparelho) {
     const nome = snapshot.playback?.name ?? snapshot.capture?.name;
     alvo.hidden = false;
-    alvo.textContent = nome ? `ÁUDIO AGORA EM ${nome.toUpperCase()}` : "O APARELHO DE ÁUDIO MUDOU";
+    escreverOTexto(alvo, nome ? `ÁUDIO AGORA EM ${nome.toUpperCase()}` : "O APARELHO DE ÁUDIO MUDOU");
     return;
   }
-  alvo.hidden = true;
+  if (!alvo.hidden) alvo.hidden = true;
 }
 
 /** `HH:MM:SS` desde um instante local, ou o travessão antes de haver um. */
@@ -4358,6 +4556,19 @@ function consequenciaDeTrocar(daqui, ate, noMeuServidor) {
   return `${comum}\n${oMeuServidorContinua(daqui)}`;
 }
 
+/**
+ * O que ligar para alguém custa, de dentro de uma sessão (tarefa 30 da F7; spec
+ * de 23/09, «Do lado de quem liga», 2): «ligar sai de Y». O servidor que esta
+ * janela hospeda continua no ar, como na troca.
+ */
+function consequenciaDeLigar(daqui, para, noMeuServidor) {
+  const comum =
+    `Ligar para ${para} sai de ${daqui} agora, no meio do que estiver fazendo.\n` +
+    "Dá para estar em um lugar por vez: a ligação é numa sala só sua e de quem atender.";
+  if (!noMeuServidor) return comum;
+  return `${comum}\n${oMeuServidorContinua(daqui)}`;
+}
+
 /** O que ir à entrada custa. Mesma forma, e um destino que não é servidor nenhum. */
 function consequenciaDeIrParaAEntrada(daqui, noMeuServidor) {
   const comum =
@@ -4383,7 +4594,7 @@ function consequenciaDeIrParaAEntrada(daqui, noMeuServidor) {
  * produto: a que escreve a consequência com o nome dentro e põe o foco no
  * CANCELAR. Uma segunda seria uma segunda forma de esquecer de escrever a frase.
  */
-async function pedirTrocaDeServidor(alvo, apelido, nome) {
+async function pedirTrocaDeServidor(alvo, apelido, nome, ligar = false) {
   const daqui = nomeDesteServidor();
   const noMeuServidor = await estouNoMeuServidor();
   // **O nome, e o endereço só quando não há nome.**
@@ -4402,6 +4613,15 @@ async function pedirTrocaDeServidor(alvo, apelido, nome) {
   // esteve não tem outro, e uma caixa que dissesse `ENTRAR EM` e mais nada seria
   // pior que um endereço.
   const chamado = (nome ?? "").trim() || alvo;
+  if (ligar) {
+    abrirConfirmacao(
+      "LIGAR",
+      consequenciaDeLigar(daqui, chamado, noMeuServidor),
+      `LIGAR PARA ${chamado}`,
+      () => trocarDeServidor(alvo, apelido, { nome: chamado }),
+    );
+    return;
+  }
   abrirConfirmacao(
     "TROCAR DE SERVIDOR",
     consequenciaDeTrocar(daqui, chamado, noMeuServidor),
@@ -4440,7 +4660,7 @@ async function pedirAEntrada() {
  * O apelido é o do histórico, e não o desta sessão: é com aquele nome que esta
  * pessoa entrou naquele servidor da última vez.
  */
-async function trocarDeServidor(alvo, apelido) {
+async function trocarDeServidor(alvo, apelido, ligacao = null) {
   await ejetar();
   // **O convite do servidor anterior fica para trás**, e sem esta linha a troca
   // simplesmente não funcionava.
@@ -4454,8 +4674,9 @@ async function trocarDeServidor(alvo, apelido) {
   // O sintoma é cruel de depurar porque a recusa fala da coisa errada:
   // «credencial recusada» num servidor que não pediu credencial nenhuma.
   // Os valores vão por argumento desde a 0.9.0: a entrada não tem mais campos
-  // para carregá-los. Ver `conectar` em `tela-boot.js`.
-  await conectar(alvo, apelido);
+  // para carregá-los. Ver `conectar` em `tela-boot.js`. Numa ligação, o nome de
+  // quem é chamado vai junto (tarefa 28 da F7).
+  await conectar(alvo, apelido, undefined, null, ligacao);
 }
 
 /**
@@ -4549,6 +4770,10 @@ function esquecerOEstadoDaSessao() {
   // abria com a conversa de outro servidor. Antes de `limparBusca`, que redesenha.
   mensagens = [];
   revisaoDesenhada = null;
+  // O FORA DO AR, pelo mesmo motivo: os membros são de um servidor, e a revisão
+  // do seguinte começa do zero.
+  foraDoAr = [];
+  revisaoDoForaDoAr = null;
   // O que cada retrato recalcula, e que até o primeiro dele seria do anterior:
   // a permissão de tirar mensagem, os lugares de uma sala nova (copiados de uma
   // sala daquele servidor), a trilha desenhada e o anúncio de troca de

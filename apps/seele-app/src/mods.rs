@@ -619,16 +619,8 @@ pub(crate) fn linha_do_pacote(
     if instalado.id != id {
         return Err("conteudo-de-outro-mod".to_owned());
     }
-    Ok(seele_server::persistence::mods::EnabledMod {
-        id: instalado.id,
-        version: instalado.version,
-        hash: instalado.hash,
-        repo: instalado.repo,
-        reach: instalado.reach,
-        server_half: instalado.server,
-        api: instalado.api,
-        tema: instalado.tema,
-    })
+    // A mesma construção dos dois comandos que gravam (`habilitado_de`).
+    Ok(crate::habilitado_de(instalado))
 }
 
 /// A saída que quem hospeda escolheu para um MOD de API antiga (decisão do

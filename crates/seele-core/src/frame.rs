@@ -16,7 +16,7 @@
 //! service there is.
 
 use anyhow::{bail, Result};
-use seele_proto::control::{ControlError, Validate, MAX_FRAME_LEN};
+use seele_proto::control::{ControlError, Lido, ListaDeCima, Validate, MAX_FRAME_LEN};
 use serde::{Deserialize, Serialize};
 
 /// Reads one frame and decodes it.
@@ -28,6 +28,21 @@ pub async fn read<T>(stream: &mut quinn::RecvStream) -> Result<T>
 where
     T: for<'de> Deserialize<'de> + Validate,
 {
+    let frame = ler_bruto(stream).await?;
+    Ok(seele_proto::control::decode::<T>(&frame)?)
+}
+
+/// Um quadro inteiro, com o carimbo no byte 0, **sem decodificar**.
+///
+/// É o que deixa o aperto de mão olhar o carimbo da primeira resposta antes do
+/// `decode`, que recusaria um número de fora sem dizer qual veio — e é pelo
+/// número que se sabe a versão de quem respondeu (`ConnectError::OutraLinha`).
+/// Nunca devolve um quadro vazio: o comprimento zero é recusado antes.
+///
+/// # Errors
+///
+/// Fails on a closed stream, or an empty or oversized length.
+pub async fn ler_bruto(stream: &mut quinn::RecvStream) -> Result<Vec<u8>> {
     let mut prefixo = [0_u8; seele_proto::quadro::PREFIXO_LEN];
     stream.read_exact(&mut prefixo).await?;
 
@@ -43,10 +58,26 @@ where
 
     let mut frame = vec![0_u8; length];
     stream.read_exact(&mut frame).await?;
-    Ok(seele_proto::control::decode::<T>(&frame)?)
+    Ok(frame)
+}
+
+/// Como [`read`], para uma das listas de cima: um ordinal que esta build não
+/// conhece vira [`Lido::Desconhecida`] em vez de erro (adendo de 08/10/2026,
+/// §6). Um ordinal conhecido com o corpo errado continua erro.
+///
+/// # Errors
+///
+/// Os mesmos de [`read`].
+pub async fn ler_da_lista<T: ListaDeCima>(stream: &mut quinn::RecvStream) -> Result<Lido<T>> {
+    let frame = ler_bruto(stream).await?;
+    Ok(seele_proto::control::decode_da_lista::<T>(&frame)?)
 }
 
 /// Encodes a message and writes it as one frame.
+///
+/// Carimbado com o número **desta build**. O fluxo de controle de uma sessão
+/// escreve com [`write_em`], no número que o servidor carimbou na primeira
+/// resposta (adendo de 08/10/2026, §4); este serve aos fluxos sem negociação.
 ///
 /// # Errors
 ///
@@ -55,7 +86,23 @@ pub async fn write<T>(stream: &mut quinn::SendStream, message: &T) -> Result<()>
 where
     T: Serialize + Validate,
 {
-    let frame = seele_proto::control::encode(message)?;
+    write_em(stream, seele_proto::version::PROTOCOL_VERSION, message).await
+}
+
+/// Como [`write`], com o carimbo escolhido por quem escreve.
+///
+/// O `Hello` sai com a mínima desta build, que qualquer servidor da mesma linha
+/// lê; o resto da sessão, com o número que o servidor carimbou na primeira
+/// resposta. Na 1.0 os dois são 9 e o quadro é o mesmo de [`write`].
+///
+/// # Errors
+///
+/// Fails if the message is invalid or the stream is closed.
+pub async fn write_em<T>(stream: &mut quinn::SendStream, versao: u8, message: &T) -> Result<()>
+where
+    T: Serialize + Validate,
+{
+    let frame = seele_proto::control::encode_em(versao, message)?;
     stream
         .write_all(&seele_proto::quadro::enquadrar(&frame)?)
         .await?;
