@@ -2257,10 +2257,17 @@ function linhaDePacoteNoCache(pacote) {
         // delas tem dois caminhos, e a frase diz os dois: a versão dele para
         // a API 6, quando existir, ou o Servidor 0.15 pelo launcher, que as
         // roda como sempre rodou.
-        : `este pacote foi feito para a API ${dele}, que roda no Servidor `
-          + `0.15, e este SEELE roda a ${APIS_QUE_ESTE_APLICATIVO_ACEITA.join(" e ")}. `
-          + "Procure a versão dele para a API 6 no catálogo do servidor, ou "
-          + "use o Servidor 0.15 pelo launcher, que roda o pacote como está.";
+        : APIS_DO_SERVIDOR_0_15.includes(dele)
+          ? `este pacote foi feito para a API ${dele}, que roda no Servidor `
+            + `0.15, e este SEELE roda a ${APIS_QUE_ESTE_APLICATIVO_ACEITA.join(" e ")}. `
+            + "Procure a versão dele para a API 6 no catálogo do servidor, ou "
+            + "use o Servidor 0.15 pelo launcher, que roda o pacote como está."
+          // Uma mais velha que essas, como as do layout antigo, nenhum
+          // servidor de hoje roda (lote 58-1, rodada 2): só a versão nova serve.
+          : `este pacote foi feito para a API ${dele}, que nenhum servidor de hoje `
+            + `roda: este SEELE roda a ${APIS_QUE_ESTE_APLICATIVO_ACEITA.join(" e ")}, e o `
+            + `Servidor 0.15, as ${APIS_DO_SERVIDOR_0_15_DITAS}. `
+            + "Procure a versão dele para a API 6 no catálogo do servidor.";
     texto.append(elemento("span", "mods-recusado", explicacao));
   }
   caixa.append(texto);

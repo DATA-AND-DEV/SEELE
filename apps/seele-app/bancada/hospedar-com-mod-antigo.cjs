@@ -26,6 +26,27 @@ const contexto = vm.createContext({ console });
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../ui/frases.js"), "utf8"), contexto);
 const frase = (mods) => contexto.fraseDeErro({ ModsDeApiAntiga: { mods } });
 
+// **As APIs de cada linha de servidor**, lidas de `APIS_POR_LINHA`
+// (`crates/seele-proto/src/mods.rs`), a tabela de onde o app tira as dele. O
+// JavaScript não tem ponte para ela, e as frases que dizem as APIs do Servidor
+// 0.15 são conferidas aqui contra ela (lote 58-1, rodadas 1 e 2, M4).
+const proto = fs.readFileSync(path.join(__dirname, "../../../crates/seele-proto/src/mods.rs"), "utf8");
+const tabela = /pub const APIS_POR_LINHA:[^=]*=\s*\[(.*?)\];/s.exec(proto);
+assert.ok(tabela, "`APIS_POR_LINHA` sumiu de crates/seele-proto/src/mods.rs, ou mudou de forma, e as frases das APIs não têm com o que se conferir");
+const porLinha = Object.fromEntries([...tabela[1].matchAll(/\("([^"]+)",\s*&\[([^\]]*)\]\)/g)]
+  .map(([, linha, apis]) => [linha, apis.split(",").map((n) => Number(n.trim())).sort((a, b) => a - b)]));
+const legada = porLinha["0.15"];
+const desta = porLinha["1"];
+assert.ok(legada?.length > 0 && desta?.length === 1, `a leitura de \`APIS_POR_LINHA\` ficou cega: ${JSON.stringify(porLinha)}`);
+const [menor, maior] = [legada[0], legada.at(-1)];
+assert.equal(legada.length, maior - menor + 1,
+  `as APIs do Servidor 0.15 deixaram de ser seguidas (${legada}), e «as APIs ${menor} a ${maior}» não as diz`);
+// Uma API que o Servidor 0.15 roda, e uma mais velha que nenhum servidor roda.
+const DENTRO = 4;
+const FORA = 2;
+assert.ok(legada.includes(DENTRO) && !legada.includes(FORA) && FORA > 0 && FORA < desta[0],
+  `a tabela mudou, e os casos ${DENTRO} e ${FORA} deixaram de ser um dentro e um fora do Servidor 0.15: ${JSON.stringify(porLinha)}`);
+
 // 1. Com a API lida.
 const comApi = frase([["seele/estilo", 4]]);
 assert.match(comApi, /seele\/estilo/, `a frase não diz qual MOD: ${comApi}`);
@@ -38,6 +59,23 @@ for (const saida of saidas) {
   antes = onde;
 }
 assert.match(comApi, /os dados dele ficam/, `a saída de desligar não diz que os dados ficam: ${comApi}`);
+assert.match(frase([["seele/estilo", DENTRO]]), new RegExp(`feito para a API ${DENTRO}, que roda no Servidor 0\\.15`),
+  `um MOD da API ${DENTRO} não diz que roda no Servidor 0.15`);
+
+// 1b. **Uma API que nenhum servidor de hoje roda** (lote 58-1, rodada 2): a
+//     frase dizia «feito para a API 2, que roda no Servidor 0.15», e o Servidor
+//     0.15 roda só as da tabela. E a saída de hospedar por ele não vale para
+//     esse MOD.
+const fora = frase([["x/antigo", FORA]]);
+assert.doesNotMatch(fora, /roda no Servidor 0\.15/, `um MOD da API ${FORA} diz que roda no Servidor 0.15, e não roda: ${fora}`);
+assert.match(fora, new RegExp(`x/antigo: feito para a API ${FORA}, que nenhum servidor de hoje roda`),
+  `um MOD da API ${FORA} não diz que nenhum servidor de hoje o roda: ${fora}`);
+assert.doesNotMatch(fora, /hospede pelo Servidor 0\.15/, `a frase oferece o Servidor 0.15 a um MOD da API ${FORA}, que ele não roda: ${fora}`);
+assert.match(fora, /[Aa]tualize o MOD para a versão da API 6/, `a frase da API ${FORA} não oferece a versão da API 6: ${fora}`);
+assert.match(fora, /desligue o MOD e hospede sem ele/, `a frase da API ${FORA} não oferece desligar o MOD: ${fora}`);
+// E junto de um que o Servidor 0.15 roda, a saída dele volta.
+const misturados = frase([["seele/estilo", DENTRO], ["x/antigo", FORA]]);
+assert.match(misturados, /hospede pelo Servidor 0\.15/, `com um MOD da API ${DENTRO}, a saída do Servidor 0.15 sumiu: ${misturados}`);
 
 // 2. Sem a API: o pacote não está aqui, e nenhum número.
 const semApi = frase([["x/sumido", null]]);
@@ -78,7 +116,24 @@ const outroMod = contexto.fraseDeErro({ PacoteNaoServe: "conteudo-de-outro-mod" 
 assert.match(outroMod, /NÃO SERVE: o pacote baixado é de outro MOD/, `a recusa do pacote não diz por quê: ${outroMod}`);
 assert.match(outroMod, /continua como estava/, `a recusa do pacote não diz que nada mudou: ${outroMod}`);
 const apiVelha = contexto.fraseDeErro({ PacoteNaoServe: "api-too-old" });
-assert.match(apiVelha, /roda no Servidor 0\.15/, `um motivo do núcleo não sai pela frase dele: ${apiVelha}`);
+// **Verdadeira para toda API mais velha que a deste app** (rodada 1 do lote
+// 58-1, M4). A frase dizia que o MOD «é de uma API que roda no Servidor 0.15»,
+// e o `api-too-old` vale também para as APIs 0 a 2, que nenhum servidor roda.
+// Ela diz quais o Servidor 0.15 roda, conferidas contra `APIS_POR_LINHA`
+// (`crates/seele-proto/src/mods.rs`), a tabela de onde o app tira as dele: o
+// `frases.js` é um dicionário estático, sem ponte para lê-la.
+{
+  assert.doesNotMatch(apiVelha, /é de uma API que roda no Servidor 0\.15/,
+    `a frase do \`api-too-old\` diz que o MOD roda no Servidor 0.15, e uma API ${menor - 1} não roda: ${apiVelha}`);
+  assert.ok(apiVelha.includes(`que roda as APIs ${menor} a ${maior}`),
+    `a frase do \`api-too-old\` não diz que o Servidor 0.15 roda as APIs ${menor} a ${maior}: ${apiVelha}`);
+  assert.ok(apiVelha.includes(`mais velha que a ${desta[0]}`) && apiVelha.includes(`a versão dele para a API ${desta[0]}`),
+    `a frase do \`api-too-old\` não diz a API deste app, ${desta[0]}: ${apiVelha}`);
+  // **A cópia do `frases.js` é a da tabela** (rodada 2): as três frases que
+  // dizem as APIs do Servidor 0.15 a leem de um lugar só.
+  assert.deepEqual([...vm.runInContext("APIS_DO_SERVIDOR_0_15", contexto)], legada,
+    "`APIS_DO_SERVIDOR_0_15`, no frases.js, não é a linha 0.15 de `APIS_POR_LINHA`");
+}
 // **E aponta o Servidor 0.15 no launcher** (`compatibilidade.porque`; a
 // auditoria do `v6.json`, tabela 1): dizer onde ele roda sem dizer onde
 // abri-lo deixa quem lê sem o caminho.
@@ -102,14 +157,153 @@ assert.match(banco, /continua como estava/, `a falha do banco não diz que nada 
     addEventListener() {}, setAttribute() {},
   });
   const linha = vm.createContext({
-    elemento: no, emBytes: (n) => `${n} B`,
+    console, elemento: no, emBytes: (n) => `${n} B`,
     API_DESTE_APLICATIVO: 6, APIS_QUE_ESTE_APLICATIVO_ACEITA: [6],
   });
+  // O `frases.js` vem antes, como no `index.html`: a linha diz as APIs do
+  // Servidor 0.15 pela cópia de lá.
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../ui/frases.js"), "utf8"), linha);
   vm.runInContext(camada.slice(i, j + 3), linha);
   const textos = (n) => [n.textContent, ...n.filhos.flatMap(textos)].filter(Boolean);
   const dita = textos(linha.linhaDePacoteNoCache({ id: "seele/estilo", version: "3.1.0", bytes: 10, hash: "abc", recusado: true, api: 4 })).join(" | ");
   assert.match(dita, /feito para a API 4, que roda no Servidor 0\.15/, `a linha do pacote da API 4 não diz onde ele roda: ${dita}`);
   assert.match(dita, /use o Servidor 0\.15 pelo launcher/, `a linha do pacote da API 4 não aponta o launcher: ${dita}`);
+
+  // 4b. **E a de uma API que nenhum servidor de hoje roda** (lote 58-1, rodada
+  //     2): um pacote da API 2, como os do layout antigo, lia «que roda no
+  //     Servidor 0.15», e era falso; e o launcher não o abre.
+  const antiga = textos(linha.linhaDePacoteNoCache({ id: "x/antigo", version: "0.1.0", bytes: 10, hash: "abc", recusado: true, api: FORA })).join(" | ");
+  assert.doesNotMatch(antiga, /roda no Servidor 0\.15/, `a linha do pacote da API ${FORA} diz que ele roda no Servidor 0.15, e não roda: ${antiga}`);
+  assert.match(antiga, new RegExp(`feito para a API ${FORA}, que nenhum servidor de hoje roda`),
+    `a linha do pacote da API ${FORA} não diz que nenhum servidor de hoje o roda: ${antiga}`);
+  assert.doesNotMatch(antiga, /pelo launcher/, `a linha do pacote da API ${FORA} manda abrir o Servidor 0.15, que não o roda: ${antiga}`);
+  assert.ok(antiga.includes(`as ${menor} a ${maior}`), `a linha do pacote da API ${FORA} não diz quais APIs o Servidor 0.15 roda: ${antiga}`);
 }
 
+// 5. **As recusas de instalar um MOD e de apagar um pacote do cache**
+//    (pendência 58). Moram aqui porque a pergunta é a mesma das saídas acima:
+//    o produto sabe por que recusou, e a frase tem de dizer isso a quem lê, e
+//    não um código que ninguém sabe o que fazer com ele.
+{
+  // 5a. **O `mod.json` recusado diz o motivo pela frase de `RECUSAS_DE_PACOTE`**
+  //     (item 8), a mesma da gestão e do pacote que não serve. Depois do corte
+  //     da API 6, um MOD da API 5 instalado de uma pasta cai aqui, e a frase
+  //     dizia «DESTA PASTA: api-too-old». Os códigos vêm do próprio dicionário,
+  //     que o `todo_pacote_recusado_e_dito_com_uma_frase` (`frontend.rs`) cobra
+  //     contra o `refusal_name` do núcleo.
+  const recusasDePacote = vm.runInContext("RECUSAS_DE_PACOTE", contexto);
+  const codigos = Object.keys(recusasDePacote);
+  assert.ok(codigos.length >= 9, `\`RECUSAS_DE_PACOTE\` encolheu, e esta conferência compara com quase nada: ${codigos}`);
+  // Todos os códigos antes de reprovar: saber que um só cai cru é outra
+  // informação que saber que todos caem.
+  const crus = codigos.filter((codigo) => {
+    const dita = contexto.fraseDeErro({ ManifestoRecusado: codigo });
+    return !dita.includes(recusasDePacote[codigo]) || dita.includes(`: ${codigo}.`);
+  });
+  assert.deepEqual(crus, [],
+    `o «mod.json» recusado por estes códigos não sai pela frase de \`RECUSAS_DE_PACOTE\`, e a tela diz o código cru: ${crus.join(", ")}\n` +
+    `por exemplo: ${contexto.fraseDeErro({ ManifestoRecusado: crus[0] ?? codigos[0] })}`);
+  for (const codigo of codigos) {
+    const dita = contexto.fraseDeErro({ ManifestoRecusado: codigo });
+    assert.match(dita, /Nada foi instalado/, `a recusa do «mod.json» deixou de dizer que nada foi instalado: ${dita}`);
+  }
+  // E um código que o dicionário ainda não tem continua aparecendo cru, como
+  // no resto das frases: feio, e honesto.
+  const novo = contexto.fraseDeErro({ ManifestoRecusado: "um-codigo-novo" });
+  assert.match(novo, /DESTA PASTA: um-codigo-novo\./, `um código sem frase sumiu da recusa: ${novo}`);
+
+  // 5b. **A recusa local de um MOD do catálogo diz a recusa de instalar**
+  //     (item 9; `FalhaNoCatalogo::NaoInstalou`, em `src/catalogo.rs`), e não
+  //     culpa o catálogo nem a rede. O catálogo entregou os bytes certos: um
+  //     disco cheio dizia «O CATÁLOGO VEIO QUEBRADO… Avise quem publica».
+  //     Montadas como o serde as manda: a de instalar com campo, como objeto
+  //     dentro do objeto.
+  for (const recusa of [
+    { NaoCopiei: "No space left on device (os error 28)" },
+    { ManifestoRecusado: "api-too-new" },
+    { TemAtalho: "/tmp/x/atalho" },
+  ]) {
+    const dita = contexto.fraseDeErro({ NaoInstalou: recusa });
+    assert.doesNotMatch(dita, /CATÁLOGO|Avise quem publica|sua rede|ALGO FALHOU|NaoInstalou/,
+      `a recusa local de um MOD do catálogo culpa o catálogo ou a rede, ou caiu no recuo: ${dita}`);
+    if (recusa.ManifestoRecusado) {
+      // **Um MOD do catálogo não vem de pasta nenhuma** (rodada 1, I1): a de
+      // passagem é do app e já foi apagada, e «DESTA PASTA» apontava para lugar
+      // nenhum. O motivo é o mesmo do dicionário, e nada foi instalado.
+      assert.doesNotMatch(dita, /PASTA/, `a recusa de um MOD do catálogo fala de uma pasta que ninguém escolheu: ${dita}`);
+      assert.match(dita, /DESTE MOD/, `a recusa do «mod.json» de um MOD do catálogo não diz de quem é: ${dita}`);
+      assert.ok(dita.includes(recusasDePacote[recusa.ManifestoRecusado]),
+        `a recusa do «mod.json» de um MOD do catálogo não sai pela frase de \`RECUSAS_DE_PACOTE\`: ${dita}`);
+      assert.match(dita, /Nada foi instalado/, `a recusa do «mod.json» de um MOD do catálogo não diz que nada foi instalado: ${dita}`);
+    } else {
+      assert.equal(dita, contexto.fraseDeErro(recusa),
+        `a recusa local de um MOD do catálogo não diz a frase de instalar: ${dita}`);
+    }
+  }
+  const semManifesto = contexto.fraseDeErro({ NaoInstalou: "SemManifesto" });
+  assert.equal(semManifesto, contexto.fraseDeErro("SemManifesto"),
+    `a recusa de unidade dentro de \`NaoInstalou\` não diz a frase dela: ${semManifesto}`);
+
+  // 5c. **Apagar um pacote do cache** (item 10): os três motivos de
+  //     `FalhaAoApagarPacote` (`src/mods.rs`), que o `apagar_pacote_do_cache`
+  //     manda como `Recusado { motivo }`, saíam crus — «nao-apaguei» na tela, e
+  //     nada sobre o que fazer.
+  const doCache = {
+    "nao-esta-aqui": /já não estava no cache/,
+    "nao-apaguei": /feche o que usa o MOD e tente de novo/i,
+    "hash-torto": /nada foi apagado/,
+  };
+  const crusDoCache = Object.keys(doCache).filter((motivo) => {
+    const dita = contexto.fraseDeErro({ Recusado: { motivo } });
+    return dita === motivo || dita.includes(motivo);
+  });
+  assert.deepEqual(crusDoCache, [], `estes motivos de apagar do cache saem crus na tela: ${crusDoCache.join(", ")}`);
+  for (const [motivo, esperada] of Object.entries(doCache)) {
+    const dita = contexto.fraseDeErro({ Recusado: { motivo } });
+    assert.match(dita, esperada, `a frase de «${motivo}» não diz ${esperada}: ${dita}`);
+  }
+}
+
+// 5d. **A busca automática do que um servidor já aceito exige** (rodada 1 do
+//     lote 58-1, M2; `buscarOQueFaltaSeJaFoiAceito`, em `base.js`, recortada e
+//     rodada aqui com o `frases.js` de verdade). A falha chega do Tauri como o
+//     objeto do serde, e `String(objeto)` punha «[object Object]» na linha do
+//     MOD, depois de «reconecte para tentar de novo —». A recusa local do item
+//     9 nunca chegava a ser dita nesta rota.
+(async () => {
+  const base = fs.readFileSync(path.join(__dirname, "../ui/base.js"), "utf8");
+  const i = base.indexOf("async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes) {");
+  const j = base.indexOf("\n}\n", i);
+  assert.ok(i >= 0 && j > i, "`buscarOQueFaltaSeJaFoiAceito` mudou de forma, e o recorte não a achou");
+  const falha = { NaoInstalou: { NaoCopiei: "No space left on device (os error 28)" } };
+  const anotados = [];
+  const busca = vm.createContext({
+    console,
+    alvoDaSessao: () => "casa.exemplo:4000",
+    invoke: async (comando) => {
+      if (comando === "aceite_de_mods") return "conjunto-aceito";
+      if (comando === "instalar_mod_do_catalogo") throw falha;
+      throw new Error(`comando inesperado: ${comando}`);
+    },
+    anotarEstadoDoMod: (id, fase, detalhe = "") => anotados.push({ id, fase, detalhe }),
+  });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../ui/frases.js"), "utf8"), busca);
+  vm.runInContext(`let conjuntoJaBuscado = "";\n${base.slice(i, j + 3)}`, busca);
+  await busca.buscarOQueFaltaSeJaFoiAceito(
+    { conjunto: "conjunto-aceito" },
+    [{ id: "alguem/rpg", version: "1.0.0" }],
+  );
+  const naoObtive = anotados.find((a) => a.fase === "nao-obtive");
+  assert.ok(naoObtive, `a busca que falhou não anotou o MOD como não obtido: ${JSON.stringify(anotados)}`);
+  assert.doesNotMatch(naoObtive.detalhe, /\[object Object\]/,
+    `a linha do MOD que não veio diz «[object Object]» no lugar do motivo: ${naoObtive.detalhe}`);
+  assert.equal(naoObtive.detalhe, busca.fraseDeErro(falha),
+    `a linha do MOD que não veio não diz a frase da recusa: ${naoObtive.detalhe}`);
+  console.log("busca automática: o MOD que não veio diz a frase da recusa, e não «[object Object]».");
+})().catch((erro) => {
+  console.error(erro);
+  process.exitCode = 1;
+});
+
 console.log("hospedar com MOD antigo: a frase diz o MOD, a API e as três saídas na ordem do dono; sem o pacote, diz que ele falta, sem número; e toda recusa das saídas tem frase.");
+console.log("recusas de instalar: o «mod.json» recusado diz o motivo pela frase do código, e não o código cru; e a recusa local de um MOD do catálogo diz a de instalar, sem culpar o catálogo nem a rede; e apagar do cache tem frase para os três motivos.");
