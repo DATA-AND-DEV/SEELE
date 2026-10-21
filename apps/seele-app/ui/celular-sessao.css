@@ -34,6 +34,13 @@
 :root[data-casca="celular"] #tela-sessao {
   /* `relative` porque as folhas se prendem ao pé dela. */
   position: relative;
+  /* As áreas seguras laterais **dentro da sessão**: o quanto delas a sessão
+     ainda cobre. Na tela toda, são as do aparelho; com a coluna de uma tela
+     grande (abaixo), a margem da coluna já as afasta, e sobra só o que passar
+     dela. É o que as superfícies de MOD usam (`celular-folhas.css`), para não
+     dependerem do teto da coluna nem perderem largura onde ele já basta. */
+  --cel-lado-esq: var(--cel-seguro-esq);
+  --cel-lado-dir: var(--cel-seguro-dir);
   height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -1277,6 +1284,8 @@
     width: 100%;
     max-width: var(--cel-coluna);
     margin-inline: auto;
+    --cel-lado-esq: max(0px, calc(var(--cel-seguro-esq) - max(0px, (100vw - var(--cel-coluna)) / 2)));
+    --cel-lado-dir: max(0px, calc(var(--cel-seguro-dir) - max(0px, (100vw - var(--cel-coluna)) / 2)));
     border-left: 1px solid var(--seele-linha);
     border-right: 1px solid var(--seele-linha);
   }
