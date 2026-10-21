@@ -172,10 +172,11 @@ impl Agenda {
     /// abrir.** Quem anota abre a agenda na hora — o toque que termina, o nome
     /// dado, a ligação feita —, e duas abertas antes de qualquer uma gravar
     /// perdiam uma das escritas: a segunda regravava o arquivo com a lista
-    /// velha dela. Agora ler, mudar e gravar acontecem sob a [`travar`], e a
-    /// gravação é trocada inteira pelo `rename` ([`gravar`]).
+    /// velha dela. Agora ler, mudar e gravar acontecem sob a trava
+    /// ([`crate::conhecidos::travar`]), e a gravação é trocada inteira pelo
+    /// `rename` ([`gravar`]).
     fn mudar(&mut self, codigo: Codigo, mudanca: impl FnOnce(&mut Contato)) -> Result<()> {
-        let _trava = travar(&self.caminho)?;
+        let _trava = crate::conhecidos::travar(&self.caminho)?;
         let mut contatos = ler(&self.caminho)
             .with_context(|| format!("não consegui ler {}", self.caminho.display()))?;
         match contatos.iter_mut().find(|c| c.codigo == codigo) {
@@ -213,45 +214,6 @@ fn ler(caminho: &Path) -> std::io::Result<Vec<Contato>> {
     }
 }
 
-/// O arquivo ao lado da agenda com este sufixo: `agenda.trava`, `agenda.nova`.
-fn ao_lado(caminho: &Path, sufixo: &str) -> PathBuf {
-    let mut nome = caminho.file_name().unwrap_or_default().to_os_string();
-    nome.push(".");
-    nome.push(sufixo);
-    caminho.with_file_name(nome)
-}
-
-/// **A trava das gravações**, num arquivo ao lado que nunca é trocado: a
-/// agenda é trocada a cada gravação, e uma trava nela ficaria presa no arquivo
-/// velho.
-///
-/// `File::lock` é o `flock` no Unix e o `LockFileEx` no Windows: vale entre
-/// dois processos e entre duas aberturas no mesmo processo, e sai quando o
-/// arquivo fecha. Num sistema sem trava de arquivo a gravação segue sem ela, e
-/// o `seele.log` diz.
-fn travar(caminho: &Path) -> Result<Option<std::fs::File>> {
-    let trava = ao_lado(caminho, "trava");
-    let mut opcoes = std::fs::OpenOptions::new();
-    opcoes.create(true).write(true).truncate(false);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut opcoes, 0o600);
-    let arquivo = opcoes
-        .open(&trava)
-        .with_context(|| format!("não consegui abrir {}", trava.display()))?;
-    match arquivo.lock() {
-        Ok(()) => Ok(Some(arquivo)),
-        Err(erro) if erro.kind() == std::io::ErrorKind::Unsupported => {
-            tracing::warn!(
-                %erro,
-                "este sistema não trava arquivos: duas gravações da agenda ao mesmo tempo \
-                 podem perder uma delas"
-            );
-            Ok(None)
-        }
-        Err(erro) => Err(erro).with_context(|| format!("não consegui travar {}", trava.display())),
-    }
-}
-
 /// Grava a agenda **inteira de uma vez**: num arquivo ao lado, trocado pelo
 /// `rename`. Quem lê no meio vê a agenda de antes ou a de depois, e nunca uma
 /// pela metade. A sala que sobe lê os [`Agenda::bloqueados`] uma vez e os
@@ -272,11 +234,7 @@ fn gravar(caminho: &Path, contatos: &[Contato]) -> Result<()> {
             )
         })
         .collect();
-    let nova = ao_lado(caminho, "nova");
-    crate::conhecidos::escrever_privado(&nova, texto.as_bytes())
-        .with_context(|| format!("não consegui gravar {}", nova.display()))?;
-    std::fs::rename(&nova, caminho)
-        .with_context(|| format!("não consegui trocar {} pela nova", caminho.display()))
+    crate::conhecidos::trocar_privado(caminho, texto.as_bytes())
 }
 
 /// Uma linha do arquivo, ou nada se ela não se lê.

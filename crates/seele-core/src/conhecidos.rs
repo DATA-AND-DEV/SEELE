@@ -137,27 +137,8 @@ impl Conhecidos {
                 .with_context(|| format!("não consegui criar {}", pai.display()))?;
         }
 
-        let entradas: Vec<Conhecido> = std::fs::read_to_string(&caminho)
-            .map(|texto| texto.lines().filter_map(analisar_linha).collect())
-            .unwrap_or_default();
-
-        let mut lista = Self { caminho, entradas };
-        // As imagens vêm do disco aqui, e não a cada `listar`: a lista é
-        // desenhada na tela de entrada, que a lê mais de uma vez, e reler
-        // alguns arquivos por desenho seria pagar disco por uma decoração.
-        //
-        // Um arquivo que não abre é ausência de imagem, e não erro: a lista de
-        // para-onde-voltar não pode deixar de abrir por causa de um enfeite.
-        for indice in 0..lista.entradas.len() {
-            let Some(alvo) = lista.entradas.get(indice).map(|e| e.alvo.clone()) else {
-                continue;
-            };
-            let bytes = std::fs::read(lista.caminho_do_icone(&alvo)).ok();
-            if let Some(entrada) = lista.entradas.get_mut(indice) {
-                entrada.icone = bytes;
-            }
-        }
-        Ok(lista)
+        let entradas = ler(&caminho).unwrap_or_default();
+        Ok(Self { caminho, entradas })
     }
 
     /// Os servidores conhecidos, do mais recente para o mais antigo.
@@ -188,52 +169,51 @@ impl Conhecidos {
         // entende um registro como dois.
         let alvo = higienizar(alvo);
         let apelido = higienizar(apelido);
+        self.mudar(|entradas| {
+            // O nome e a imagem que já estavam anotados sobrevivem a uma visita que
+            // não os traz: `registrar` reescreve a entrada inteira, e apagá-los aqui
+            // faria a lista esquecer a aparência a cada conexão do terminal, que não
+            // tem como saber dela.
+            // Os caminhos e o bilhete sobrevivem pela mesma razão que o nome e a
+            // imagem: uma visita que não os traz — o terminal, um endereço digitado
+            // — não pode apagar o que o convite ensinou.
+            let (nome, icone, caminhos, bilhete, impressao) = entradas
+                .iter()
+                .find(|e| e.alvo == alvo)
+                .map_or((None, None, Vec::new(), None, None), |e| {
+                    (
+                        e.nome.clone(),
+                        e.icone.clone(),
+                        e.caminhos.clone(),
+                        e.bilhete.clone(),
+                        e.impressao.clone(),
+                    )
+                });
 
-        // O nome e a imagem que já estavam anotados sobrevivem a uma visita que
-        // não os traz: `registrar` reescreve a entrada inteira, e apagá-los aqui
-        // faria a lista esquecer a aparência a cada conexão do terminal, que não
-        // tem como saber dela.
-        // Os caminhos e o bilhete sobrevivem pela mesma razão que o nome e a
-        // imagem: uma visita que não os traz — o terminal, um endereço digitado
-        // — não pode apagar o que o convite ensinou.
-        let (nome, icone, caminhos, bilhete, impressao) = self
-            .entradas
-            .iter()
-            .find(|e| e.alvo == alvo)
-            .map_or((None, None, Vec::new(), None, None), |e| {
-                (
-                    e.nome.clone(),
-                    e.icone.clone(),
-                    e.caminhos.clone(),
-                    e.bilhete.clone(),
-                    e.impressao.clone(),
-                )
+            // **A medida do caminho sobrevive ao reencontro.** Esta função apaga a
+            // entrada e põe outra no lugar, então um campo não repescado aqui é um
+            // campo zerado a cada conexão — e uma medida que se perde a cada
+            // conexão nunca chega a servir para nada, que é justamente o defeito
+            // que ela existe para corrigir.
+            let caminho_bps = entradas
+                .iter()
+                .find(|e| e.alvo == alvo)
+                .and_then(|e| e.caminho_bps);
+            entradas.retain(|e| e.alvo != alvo);
+            entradas.push(Conhecido {
+                alvo,
+                apelido,
+                voice_room,
+                visto_em: agora,
+                nome,
+                icone,
+                caminhos,
+                bilhete,
+                impressao,
+                caminho_bps,
             });
-
-        // **A medida do caminho sobrevive ao reencontro.** Esta função apaga a
-        // entrada e põe outra no lugar, então um campo não repescado aqui é um
-        // campo zerado a cada conexão — e uma medida que se perde a cada
-        // conexão nunca chega a servir para nada, que é justamente o defeito
-        // que ela existe para corrigir.
-        let caminho_bps = self
-            .entradas
-            .iter()
-            .find(|e| e.alvo == alvo)
-            .and_then(|e| e.caminho_bps);
-        self.entradas.retain(|e| e.alvo != alvo);
-        self.entradas.push(Conhecido {
-            alvo,
-            apelido,
-            voice_room,
-            visto_em: agora,
-            nome,
-            icone,
-            caminhos,
-            bilhete,
-            impressao,
-            caminho_bps,
-        });
-        self.gravar()
+            true
+        })
     }
 
     /// Guarda os outros endereços do mesmo servidor, e o bilhete de encontro.
@@ -243,7 +223,7 @@ impl Conhecidos {
     ///
     /// # Errors
     ///
-    /// O que [`Self::gravar`] devolver.
+    /// Falha se o arquivo não puder ser gravado.
     pub fn anotar_caminhos(
         &mut self,
         alvo: &str,
@@ -252,26 +232,28 @@ impl Conhecidos {
         impressao: Option<&str>,
     ) -> Result<()> {
         let alvo = higienizar(alvo);
-        let Some(entrada) = self.entradas.iter_mut().find(|e| e.alvo == alvo) else {
-            return Ok(());
-        };
         // Só quando há o que guardar: uma reconexão pelo endereço salvo não
         // traz convite, e passar vazio aqui apagaria a escada que o link
         // ensinou — o oposto do que esta função existe para fazer.
         if caminhos.is_empty() && bilhete.is_none() && impressao.is_none() {
             return Ok(());
         }
-        if !caminhos.is_empty() || bilhete.is_some() {
-            entrada.caminhos = caminhos.iter().map(|c| higienizar(c)).collect();
-            entrada.bilhete = bilhete.map(higienizar);
-        }
-        // **A impressão sobrevive sozinha, e por cima.** Ela não envelhece — é a
-        // chave do servidor — e uma visita que não a traz não pode apagá-la, do
-        // mesmo jeito que não apaga o nome nem a imagem.
-        if let Some(impressao) = impressao {
-            entrada.impressao = Some(higienizar(impressao));
-        }
-        self.gravar()
+        self.mudar(|entradas| {
+            let Some(entrada) = entradas.iter_mut().find(|e| e.alvo == alvo) else {
+                return false;
+            };
+            if !caminhos.is_empty() || bilhete.is_some() {
+                entrada.caminhos = caminhos.iter().map(|c| higienizar(c)).collect();
+                entrada.bilhete = bilhete.map(higienizar);
+            }
+            // **A impressão sobrevive sozinha, e por cima.** Ela não envelhece — é a
+            // chave do servidor — e uma visita que não a traz não pode apagá-la, do
+            // mesmo jeito que não apaga o nome nem a imagem.
+            if let Some(impressao) = impressao {
+                entrada.impressao = Some(higienizar(impressao));
+            }
+            true
+        })
     }
 
     /// Anota o caminho de subida medido para este servidor.
@@ -288,14 +270,16 @@ impl Conhecidos {
         if bps == 0 {
             return Ok(());
         }
-        let Some(entrada) = self.entradas.iter_mut().find(|e| e.alvo == alvo) else {
-            return Ok(());
-        };
-        if entrada.caminho_bps == Some(bps) {
-            return Ok(());
-        }
-        entrada.caminho_bps = Some(bps);
-        self.gravar()
+        self.mudar(|entradas| {
+            let Some(entrada) = entradas.iter_mut().find(|e| e.alvo == alvo) else {
+                return false;
+            };
+            if entrada.caminho_bps == Some(bps) {
+                return false;
+            }
+            entrada.caminho_bps = Some(bps);
+            true
+        })
     }
 
     /// Anota como o servidor se chama e qual é a imagem dele.
@@ -318,28 +302,14 @@ impl Conhecidos {
         icone: Option<&[u8]>,
     ) -> Result<()> {
         let alvo = higienizar(alvo);
-        let Some(entrada) = self.entradas.iter_mut().find(|e| e.alvo == alvo) else {
-            return Ok(());
-        };
-        entrada.nome = nome.map(higienizar);
-        entrada.icone = icone.map(<[u8]>::to_vec);
-        self.gravar()
-    }
-
-    /// Onde a imagem de um servidor é guardada.
-    ///
-    /// Um arquivo por server, num diretório ao lado da lista. O nome vem do
-    /// endereço passado por um digestor, e não do endereço: um `alvo` é texto
-    /// que alguém digitou, e texto que alguém digitou não pode virar caminho de
-    /// arquivo sem alguém escrever `../` mais cedo ou mais tarde.
-    fn caminho_do_icone(&self, alvo: &str) -> PathBuf {
-        let mut pasta = self.caminho.clone();
-        let nome = pasta.file_name().map_or_else(
-            || "conhecidos".to_owned(),
-            |n| n.to_string_lossy().into_owned(),
-        );
-        pasta.set_file_name(format!("{nome}-icones"));
-        pasta.join(format!("{}.png", digerir(alvo)))
+        self.mudar(|entradas| {
+            let Some(entrada) = entradas.iter_mut().find(|e| e.alvo == alvo) else {
+                return false;
+            };
+            entrada.nome = nome.map(higienizar);
+            entrada.icone = icone.map(<[u8]>::to_vec);
+            true
+        })
     }
 
     /// Esquece um servidor.
@@ -348,58 +318,122 @@ impl Conhecidos {
     ///
     /// Falha se o arquivo não puder ser escrito.
     pub fn esquecer(&mut self, alvo: &str) -> Result<()> {
-        self.entradas.retain(|e| e.alvo != alvo);
-        self.gravar()
+        self.mudar(|entradas| {
+            entradas.retain(|e| e.alvo != alvo);
+            true
+        })
     }
 
-    fn gravar(&self) -> Result<()> {
-        let texto: String = self
-            .entradas
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
-                    e.alvo,
-                    e.apelido,
-                    e.voice_room
-                        .map_or_else(|| "-".to_owned(), |c| c.to_string()),
-                    e.visto_em,
-                    // Colunas a mais vão sempre no fim, e nunca no meio: uma
-                    // linha de quatro campos escrita por uma versão anterior
-                    // continua sendo lida, e cada campo que falta vira ausência.
-                    e.nome.as_deref().unwrap_or(""),
-                    e.caminhos.join(","),
-                    e.bilhete.as_deref().unwrap_or(""),
-                    e.impressao.as_deref().unwrap_or(""),
-                    e.caminho_bps
-                        .map_or_else(String::new, |bps| bps.to_string())
-                )
-            })
-            .collect();
-        escrever_privado(&self.caminho, texto.as_bytes())
-            .with_context(|| format!("não consegui gravar {}", self.caminho.display()))?;
-
-        // As imagens, uma por arquivo. Falhar aqui **não** derruba a gravação da
-        // lista: um distintivo que não coube em disco é uma tela sem enfeite, e
-        // a lista de para-onde-voltar é a coisa que precisa sobreviver.
-        for entrada in &self.entradas {
-            let caminho = self.caminho_do_icone(&entrada.alvo);
-            match entrada.icone.as_deref() {
-                Some(bytes) => {
-                    if let Some(pasta) = caminho.parent() {
-                        let _ = std::fs::create_dir_all(pasta);
-                    }
-                    if let Err(erro) = escrever_privado(&caminho, bytes) {
-                        tracing::debug!(%erro, caminho = %caminho.display(), "não gravei a imagem");
-                    }
-                }
-                None => {
-                    let _ = std::fs::remove_file(&caminho);
-                }
-            }
+    /// Muda a lista e grava, quando `mudanca` diz que houve o que gravar.
+    ///
+    /// **Sobre o arquivo como ele está, e não sobre o que esta lista leu ao
+    /// abrir.** O `connect` abre a lista para semear a sonda e para anotar a
+    /// visita, a aparência chega depois por outra abertura, e o caminho medido,
+    /// ao sair, por mais uma. Duas abertas antes de qualquer uma gravar perdiam
+    /// uma das escritas: a segunda regravava a lista velha dela, e apagava o
+    /// ícone que a cópia dela não tinha. Agora ler, mudar e gravar acontecem
+    /// sob a [`travar`], e a lista é trocada inteira pelo `rename`
+    /// ([`trocar_privado`]).
+    fn mudar(&mut self, mudanca: impl FnOnce(&mut Vec<Conhecido>) -> bool) -> Result<()> {
+        let _trava = travar(&self.caminho)?;
+        let mut entradas = ler(&self.caminho)
+            .with_context(|| format!("não consegui ler {}", self.caminho.display()))?;
+        if mudanca(&mut entradas) {
+            gravar(&self.caminho, &entradas)?;
         }
+        self.entradas = entradas;
         Ok(())
     }
+}
+
+/// As entradas do arquivo, com as imagens. Um arquivo que ainda não existe é
+/// uma lista vazia, e uma linha ilegível é pulada — inclusive a que não é
+/// UTF-8, sem levar as outras junto.
+fn ler(caminho: &Path) -> std::io::Result<Vec<Conhecido>> {
+    let mut entradas: Vec<Conhecido> = match std::fs::read(caminho) {
+        Ok(bytes) => String::from_utf8_lossy(&bytes)
+            .lines()
+            .filter_map(analisar_linha)
+            .collect(),
+        Err(erro) if erro.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(erro) => return Err(erro),
+    };
+    // As imagens vêm do disco aqui, e não a cada `listar`: a lista é
+    // desenhada na tela de entrada, que a lê mais de uma vez, e reler
+    // alguns arquivos por desenho seria pagar disco por uma decoração.
+    //
+    // Um arquivo que não abre é ausência de imagem, e não erro: a lista de
+    // para-onde-voltar não pode deixar de abrir por causa de um enfeite.
+    for entrada in &mut entradas {
+        entrada.icone = std::fs::read(caminho_do_icone(caminho, &entrada.alvo)).ok();
+    }
+    Ok(entradas)
+}
+
+/// Onde a imagem de um servidor é guardada.
+///
+/// Um arquivo por server, num diretório ao lado da lista. O nome vem do
+/// endereço passado por um digestor, e não do endereço: um `alvo` é texto
+/// que alguém digitou, e texto que alguém digitou não pode virar caminho de
+/// arquivo sem alguém escrever `../` mais cedo ou mais tarde.
+fn caminho_do_icone(lista: &Path, alvo: &str) -> PathBuf {
+    let mut pasta = lista.to_path_buf();
+    let nome = pasta.file_name().map_or_else(
+        || "conhecidos".to_owned(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    pasta.set_file_name(format!("{nome}-icones"));
+    pasta.join(format!("{}.png", digerir(alvo)))
+}
+
+/// Grava a lista **inteira de uma vez** ([`trocar_privado`]): quem lê no meio
+/// — a tela de entrada, enquanto uma sessão anota — vê a de antes ou a de
+/// depois, e nunca uma pela metade. Depois, as imagens, uma por arquivo.
+fn gravar(caminho: &Path, entradas: &[Conhecido]) -> Result<()> {
+    let texto: String = entradas
+        .iter()
+        .map(|e| {
+            format!(
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                e.alvo,
+                e.apelido,
+                e.voice_room
+                    .map_or_else(|| "-".to_owned(), |c| c.to_string()),
+                e.visto_em,
+                // Colunas a mais vão sempre no fim, e nunca no meio: uma
+                // linha de quatro campos escrita por uma versão anterior
+                // continua sendo lida, e cada campo que falta vira ausência.
+                e.nome.as_deref().unwrap_or(""),
+                e.caminhos.join(","),
+                e.bilhete.as_deref().unwrap_or(""),
+                e.impressao.as_deref().unwrap_or(""),
+                e.caminho_bps
+                    .map_or_else(String::new, |bps| bps.to_string())
+            )
+        })
+        .collect();
+    trocar_privado(caminho, texto.as_bytes())?;
+
+    // As imagens, uma por arquivo. Falhar aqui **não** derruba a gravação da
+    // lista: um distintivo que não coube em disco é uma tela sem enfeite, e
+    // a lista de para-onde-voltar é a coisa que precisa sobreviver.
+    for entrada in entradas {
+        let do_icone = caminho_do_icone(caminho, &entrada.alvo);
+        match entrada.icone.as_deref() {
+            Some(bytes) => {
+                if let Some(pasta) = do_icone.parent() {
+                    let _ = std::fs::create_dir_all(pasta);
+                }
+                if let Err(erro) = escrever_privado(&do_icone, bytes) {
+                    tracing::debug!(%erro, caminho = %do_icone.display(), "não gravei a imagem");
+                }
+            }
+            None => {
+                let _ = std::fs::remove_file(&do_icone);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Quantos caminhos a lista guarda por servidor, além do endereço da entrada.
@@ -539,6 +573,69 @@ pub(crate) fn escrever_privado(caminho: &Path, bytes: &[u8]) -> std::io::Result<
     std::fs::write(caminho, bytes)
 }
 
+/// O arquivo ao lado deste, com o sufixo: `conhecidos.trava`, `agenda.nova`.
+pub(crate) fn ao_lado(caminho: &Path, sufixo: &str) -> PathBuf {
+    let mut nome = caminho.file_name().unwrap_or_default().to_os_string();
+    nome.push(".");
+    nome.push(sufixo);
+    caminho.with_file_name(nome)
+}
+
+/// **A trava das gravações** de um arquivo regravado inteiro — esta lista e a
+/// [`crate::agenda`] —, num arquivo ao lado que nunca é trocado: o arquivo é
+/// trocado a cada gravação ([`trocar_privado`]), e uma trava nele ficaria
+/// presa no arquivo velho.
+///
+/// `File::lock` é o `flock` no Unix e o `LockFileEx` no Windows: vale entre
+/// dois processos e entre duas aberturas no mesmo processo, e sai quando o
+/// arquivo fecha. Num sistema sem trava de arquivo a gravação segue sem ela, e
+/// o `seele.log` diz.
+///
+/// # Errors
+///
+/// Falha se o caminho não nomear um arquivo, ou se a trava não abrir.
+pub(crate) fn travar(caminho: &Path) -> Result<Option<std::fs::File>> {
+    if caminho.file_name().is_none() {
+        anyhow::bail!("{} não é um arquivo para travar", caminho.display());
+    }
+    let trava = ao_lado(caminho, "trava");
+    let mut opcoes = std::fs::OpenOptions::new();
+    opcoes.create(true).write(true).truncate(false);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opcoes, 0o600);
+    let arquivo = opcoes
+        .open(&trava)
+        .with_context(|| format!("não consegui abrir {}", trava.display()))?;
+    match arquivo.lock() {
+        Ok(()) => Ok(Some(arquivo)),
+        Err(erro) if erro.kind() == std::io::ErrorKind::Unsupported => {
+            tracing::warn!(
+                %erro,
+                arquivo = %caminho.display(),
+                "este sistema não trava arquivos: duas gravações ao mesmo tempo podem perder \
+                 uma delas"
+            );
+            Ok(None)
+        }
+        Err(erro) => Err(erro).with_context(|| format!("não consegui travar {}", trava.display())),
+    }
+}
+
+/// Grava um arquivo **inteiro de uma vez**: num arquivo ao lado, só para o
+/// dono, trocado pelo `rename`. Quem lê no meio vê o de antes ou o de depois,
+/// e nunca um pela metade.
+///
+/// # Errors
+///
+/// Falha se o arquivo ao lado não puder ser gravado, ou a troca não acontecer.
+pub(crate) fn trocar_privado(caminho: &Path, bytes: &[u8]) -> Result<()> {
+    let nova = ao_lado(caminho, "nova");
+    escrever_privado(&nova, bytes)
+        .with_context(|| format!("não consegui gravar {}", nova.display()))?;
+    std::fs::rename(&nova, caminho)
+        .with_context(|| format!("não consegui trocar {} pela nova", caminho.display()))
+}
+
 fn agora_em_segundos() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -659,9 +756,19 @@ mod tests {
         let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
 
         lista.registrar("antigo:8383", "a", None).expect("um");
-        // O relógio tem segundos de resolução, então o segundo registro é
+        // O relógio tem segundos de resolução, então o primeiro registro é
         // envelhecido à mão para o teste não depender de esperar um segundo.
-        lista.entradas[0].visto_em -= 100;
+        // No arquivo, e não na memória: cada gravação relê a lista do disco.
+        let visto_em = lista.entradas[0].visto_em;
+        let texto = std::fs::read_to_string(&caminho).expect("ler");
+        std::fs::write(
+            &caminho,
+            texto.replace(
+                &format!("\t{visto_em}\t"),
+                &format!("\t{}\t", visto_em - 100),
+            ),
+        )
+        .expect("envelhecer");
         lista.registrar("recente:8383", "b", None).expect("dois");
 
         let ordenada = lista.listar();
@@ -738,6 +845,160 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(modo & 0o077, 0, "outros conseguem ler a lista");
+
+        let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
+    }
+
+    /// **Duas listas abertas antes de qualquer uma gravar.** O `connect` abre a
+    /// lista para semear a sonda e para anotar a visita, a aparência chega
+    /// depois por outra abertura, e o caminho medido, ao sair, por mais uma. A
+    /// segunda a gravar regravava a lista que leu ao abrir: apagava o que a
+    /// primeira tinha escrito, e o ícone que a cópia dela não tinha.
+    #[test]
+    fn duas_listas_abertas_antes_de_gravar_nao_perdem_nenhuma_escrita() {
+        let caminho = rascunho("duas-abertas");
+        Conhecidos::abrir(caminho.clone())
+            .expect("abrir")
+            .registrar("casa.exemplo:8383", "marcela", Some(1))
+            .expect("a visita");
+        let mut da_aparencia = Conhecidos::abrir(caminho.clone()).expect("abrir");
+        let mut da_saida = Conhecidos::abrir(caminho.clone()).expect("abrir");
+
+        da_aparencia
+            .anotar_aparencia("casa.exemplo:8383", Some("Casa"), Some(&[1, 2, 3]))
+            .expect("a aparência");
+        da_aparencia
+            .registrar("outro.exemplo:8383", "marcela", None)
+            .expect("outra visita");
+        // O caminho medido do mesmo servidor, gravado por quem abriu antes de
+        // a aparência chegar, e um servidor novo, acrescentado quase junto.
+        da_saida
+            .anotar_caminho_medido("casa.exemplo:8383", 12_480_000)
+            .expect("o caminho medido");
+        da_saida
+            .registrar("mais.exemplo:8383", "marcela", None)
+            .expect("mais uma visita");
+
+        let de_volta = Conhecidos::abrir(caminho.clone()).expect("reabrir");
+        let casa = de_volta
+            .buscar("casa.exemplo:8383")
+            .expect("o servidor visitado sumiu da lista");
+        assert_eq!(
+            (
+                casa.nome.as_deref(),
+                casa.icone.as_deref(),
+                casa.caminho_bps
+            ),
+            (Some("Casa"), Some(&[1, 2, 3][..]), Some(12_480_000)),
+            "a aparência e o caminho medido do mesmo servidor não ficaram os dois"
+        );
+        assert!(
+            de_volta.buscar("outro.exemplo:8383").is_some(),
+            "a visita que a aparência acrescentou se perdeu quando o caminho foi gravado"
+        );
+        assert!(de_volta.buscar("mais.exemplo:8383").is_some());
+        assert_eq!(
+            da_saida.listar().len(),
+            3,
+            "a lista que gravou o caminho não ficou com o que está no arquivo"
+        );
+
+        let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
+    }
+
+    /// **Muitas escritas ao mesmo tempo, cada uma pela sua lista.** Várias
+    /// gravações por linha: a trava posta na própria lista, que o `rename`
+    /// troca, só deixa duas gravações entrarem juntas quando três se cruzam.
+    #[test]
+    fn escritas_ao_mesmo_tempo_nao_perdem_nenhum_servidor() {
+        const LINHAS: usize = 16;
+        const POR_LINHA: usize = 8;
+        let caminho = rascunho("ao-mesmo-tempo");
+        let largada = std::sync::Arc::new(std::sync::Barrier::new(LINHAS));
+        let linhas: Vec<_> = (0..LINHAS)
+            .map(|linha| {
+                let caminho = caminho.clone();
+                let largada = std::sync::Arc::clone(&largada);
+                std::thread::spawn(move || {
+                    let mut lista = Conhecidos::abrir(caminho).expect("abrir");
+                    largada.wait();
+                    for n in linha * POR_LINHA..(linha + 1) * POR_LINHA {
+                        lista
+                            .registrar(&format!("servidor-{n}.exemplo:8383"), "marcela", None)
+                            .expect("registrar");
+                    }
+                })
+            })
+            .collect();
+        for linha in linhas {
+            linha.join().expect("uma escrita caiu");
+        }
+
+        let de_volta = Conhecidos::abrir(caminho.clone()).expect("reabrir");
+        let faltam: Vec<usize> = (0..LINHAS * POR_LINHA)
+            .filter(|n| {
+                de_volta
+                    .buscar(&format!("servidor-{n}.exemplo:8383"))
+                    .is_none()
+            })
+            .collect();
+        assert!(
+            faltam.is_empty(),
+            "escritas ao mesmo tempo perderam {} de {} servidores: {faltam:?}",
+            faltam.len(),
+            LINHAS * POR_LINHA
+        );
+
+        let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
+    }
+
+    /// **Quem lê no meio de uma gravação vê a lista inteira**, a de antes ou a
+    /// de depois. A tela de entrada lê a lista enquanto uma sessão anota nela,
+    /// e uma lista lida pela metade mostraria servidores a menos.
+    #[test]
+    fn quem_le_no_meio_de_uma_gravacao_ve_a_lista_inteira() {
+        const ANTES: u32 = 120;
+        let caminho = rascunho("no-meio");
+        let mut lista = Conhecidos::abrir(caminho.clone()).expect("abrir");
+        for n in 0..ANTES {
+            lista
+                .registrar(&format!("servidor-{n}.exemplo:8383"), "marcela", None)
+                .expect("registrar");
+        }
+
+        let parar = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let leitora = {
+            let caminho = caminho.clone();
+            let parar = std::sync::Arc::clone(&parar);
+            std::thread::spawn(move || {
+                let mut menor = usize::MAX;
+                let mut leituras = 0_u32;
+                while !parar.load(std::sync::atomic::Ordering::Relaxed) {
+                    let vistos = Conhecidos::abrir(caminho.clone())
+                        .expect("abrir")
+                        .listar()
+                        .len();
+                    menor = menor.min(vistos);
+                    leituras += 1;
+                }
+                (menor, leituras)
+            })
+        };
+        for n in 0..ANTES {
+            // Um caminho medido a cada gravação: a lista é regravada inteira.
+            lista
+                .anotar_caminho_medido(&format!("servidor-{n}.exemplo:8383"), 1_000_000 + n)
+                .expect("o caminho medido");
+        }
+        parar.store(true, std::sync::atomic::Ordering::Relaxed);
+        let (menor, leituras) = leitora.join().expect("a leitora caiu");
+
+        assert!(leituras > 0, "a leitora não leu nenhuma vez");
+        assert_eq!(
+            menor, ANTES as usize,
+            "uma leitura no meio da gravação viu {menor} de {ANTES} servidores, em {leituras} \
+             leituras"
+        );
 
         let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
     }

@@ -1359,8 +1359,40 @@ orquestradora. Antes, a `versao/0.16` (`e33b2921`) entrou por fast-forward.
 - **O mesmo defeito na lista de visitados, que fica:** `conhecidos.rs` também
   regrava o arquivo inteiro, a partir do que leu ao abrir, e no lugar. O
   `connect` abre a lista em mais de um ponto. Não foi pedido, e vai dito à
-  orquestradora.
+  orquestradora. *Pedido em seguida e consertado em `9fd8327c`: ver «A lista de
+  visitados que não perde escrita» abaixo.*
 
 **Como está a ponta** (`74796332`): núcleo, 481; FFI, 218; app, 796; clippy e
 fmt limpos; `ligar_pela_ponte`, 2 de 2. A agenda não entra em nenhuma outra
 prova da conformidade.
+
+## A lista de visitados que não perde escrita (21/10)
+
+`9fd8327c`, isolado, em `seele-core` (`conhecidos.rs` e `agenda.rs`), sobre a
+`versao/0.16` em `e4bcee83`, trazida por fast-forward.
+
+- **Medido no código de hoje** (3 de 3 rodadas):
+  - duas listas abertas antes de gravar: o caminho medido apagava a aparência
+    do mesmo servidor, e a cópia velha apagava o ícone do disco;
+  - escritas ao mesmo tempo perdiam 120 de 128;
+  - uma leitura no meio viu 0 de 120.
+- **O conserto é o da agenda.** Os cinco que gravam passam por `mudar`: trava
+  ao lado, releitura sob ela com as imagens, gravação só quando houve o que
+  gravar, e troca pelo `rename`. A trava, o arquivo ao lado e a troca moram
+  agora em `conhecidos.rs`, e a agenda usa os mesmos.
+- **Um teste de hoje mudou:** `a_lista_vem_do_mais_recente_para_o_mais_antigo`
+  envelhecia a entrada na memória e contava com a gravação seguinte para
+  levá-la ao disco, que era o defeito. Agora envelhece no arquivo, e continua
+  reprovando sem a ordenação.
+- **As provas:**
+  - os três testes passam em 10 de 10, junto com os da agenda;
+  - cada peça tirada reprova pela sua frase, em 5 de 5: sem reler, sem a
+    trava, a trava no próprio arquivo e sem o `rename`.
+- **Fica de fora:**
+  - as imagens continuam gravadas no lugar, e uma leitura no meio pode pegar
+    um ícone pela metade;
+  - `esquecer` deixa o ícone no disco, como já deixava.
+
+**Como está a ponta** (`9fd8327c`): núcleo, 484; FFI, 218; app, 796; clippy e
+fmt limpos; na conformidade, os três que usam a lista: `estados` 10,
+`quarto_pelo_link` 4, `volta_pela_trilha` 6.
