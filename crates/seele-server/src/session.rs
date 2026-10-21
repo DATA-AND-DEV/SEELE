@@ -313,7 +313,7 @@ pub struct Session {
 ///
 /// Returns the reason the connection ended.
 pub async fn serve(
-    connection: quinn::Connection,
+    connection: crate::transporte::Conexao,
     config: Arc<ServerConfig>,
     registry: Arc<Registry>,
     server: Arc<Server>,
@@ -555,7 +555,7 @@ fn manda_esta_sessao_embora(event: &Event, person: PersonId) -> bool {
 /// Recusa quem não passou do aperto de mão: o motivo no carimbo que o par lê,
 /// e a despedida. Devolve o erro da sessão, com `detalhe`.
 async fn recusar_o_aperto(
-    connection: &quinn::Connection,
+    connection: &crate::transporte::Conexao,
     send: &mut quinn::SendStream,
     carimbo: u8,
     reason: DisconnectReason,
@@ -584,7 +584,7 @@ enum Toque {
 /// coisas: a decisão de quem recebe, o prazo, ou a conexão fechar. Quem recebe
 /// e quem já foi atendido nesta ligação seguem sem tocar.
 async fn tocar(
-    connection: &quinn::Connection,
+    connection: &crate::transporte::Conexao,
     send: &mut quinn::SendStream,
     recepcao: &crate::recepcao::Recepcao,
     provado: &Provado,
@@ -664,7 +664,11 @@ fn sair_da_sala(server: &Server, chave: Option<crate::campainha::Chave>) {
 /// prova de que ele leu. O prazo existe porque um cliente que sumiu no meio da
 /// recusa não pode segurar a tarefa: um segundo é muito mais do que o
 /// loopback precisa e pouco para quem não está mais lá.
-async fn despedir(connection: &quinn::Connection, send: &mut quinn::SendStream, motivo: &[u8]) {
+async fn despedir(
+    connection: &crate::transporte::Conexao,
+    send: &mut quinn::SendStream,
+    motivo: &[u8],
+) {
     let _ = tokio::time::timeout(Duration::from_secs(1), send.stopped()).await;
     // Fechar com motivo, em vez de deixar cair: dá ao outro lado um encerramento
     // limpo em vez de um tempo esgotado.
@@ -1704,9 +1708,9 @@ fn read_server(
 /// The session loop.
 #[allow(clippy::too_many_lines, reason = "one select over every event source")]
 async fn run_session(
-    connection: quinn::Connection,
-    mut send: quinn::SendStream,
-    recv: quinn::RecvStream,
+    connection: crate::transporte::Conexao,
+    mut send: crate::transporte::Envio,
+    recv: crate::transporte::Recebe,
     session: &Session,
     server: &Arc<Server>,
     voice_rooms: &Arc<crate::voice_room::VoiceRooms>,
@@ -2121,7 +2125,7 @@ async fn run_session(
                         midia.chegou(inicio);
                         let _ = voice_rooms.of(id).await.send(VoiceRoomCommand::Datagram {
                             from: ssrc,
-                            bytes: bytes.to_vec(),
+                            bytes,
                         }).await;
                     }
 
@@ -2139,7 +2143,7 @@ async fn run_session(
                         // quadro: isto passa cinquenta vezes por segundo, e um
                         // log por quadro afogaria o arquivo no instante em que
                         // alguém precisa lê-lo.
-                        if connection.send_datagram(bytes.into()).is_err() {
+                        if connection.send_datagram(bytes).is_err() {
                             midia.recusados.fetch_add(1, Ordering::Relaxed);
                         }
                     }

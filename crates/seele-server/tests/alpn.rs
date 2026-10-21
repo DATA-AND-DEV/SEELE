@@ -7,10 +7,8 @@
 //! (`docs/evidencias/medicao-3-iphone/LEIA.md`). As janelas são o que o
 //! `HashesDoNavegador` vai levar, e o link do navegador escreve no `wh=`.
 //!
-//! Enquanto a sessão pelo navegador (2.6) não existe, o `h3` faz o aperto de
-//! mão — é ele que prova o certificado — e é fechado dizendo por quê. Um
-//! navegador que recusa o certificado é contado, e o registro diz a frase do
-//! ADR.
+//! A sessão pelo `h3` é a de `tests/sessao_por_h3.rs`. Um navegador que
+//! recusa o certificado é contado, e o registro diz a frase do ADR.
 //!
 //! O cliente daqui anota o certificado que o servidor apresentou, como o do
 //! `spikes/alpn-no-mesmo-socket`.
@@ -247,26 +245,6 @@ async fn as_janelas_cobrem_um_ano_de_treze_em_treze_dias() {
         janelas.last().unwrap().nao_depois > agora + 360 * 86_400,
         "as janelas não chegam a um ano"
     );
-}
-
-#[tokio::test]
-async fn o_h3_e_fechado_dizendo_por_que_ate_a_sessao_pelo_navegador() {
-    let (endereco, _daemon) = servidor(None).await.unwrap();
-    let (_, conexao, _ponta) = apertar(endereco, ALPN_DO_NAVEGADOR, false).await;
-    let conexao = conexao.expect("o aperto de mão do `h3` não acabou");
-    let fechou = tokio::time::timeout(Duration::from_secs(5), conexao.closed())
-        .await
-        .expect("o servidor não fechou o `h3`");
-    match fechou {
-        quinn::ConnectionError::ApplicationClosed(fechou) => {
-            assert_eq!(fechou.error_code, quinn::VarInt::from_u32(0x100));
-            assert!(
-                String::from_utf8_lossy(&fechou.reason).contains("navegador"),
-                "o motivo não diz por quê: {fechou:?}"
-            );
-        }
-        outro => panic!("o `h3` fechou sem o motivo: {outro:?}"),
-    }
 }
 
 #[tokio::test]

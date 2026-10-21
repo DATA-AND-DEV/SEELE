@@ -51,6 +51,7 @@ pub mod taxa;
 pub mod tela;
 pub mod tls;
 pub mod transfer;
+pub mod transporte;
 pub mod voice_room;
 
 /// O vocabulário de fio de um ponto de encontro, e **só** ele.
@@ -514,23 +515,68 @@ pub struct Daemon {
     voice_rooms: Arc<voice_room::VoiceRooms>,
 }
 
-/// O código com que o `seeled` fecha um `h3` enquanto a sessão pelo
-/// navegador não existe: o `H3_NO_ERROR` (RFC 9114, §8.1).
-const H3_SEM_SESSAO: u32 = 0x100;
-
 /// Se um aperto de mão acabou porque o cliente recusou o certificado, o alerta
 /// de TLS com que ele recusou: do 42 ao 46 (o certificado ruim, sem suporte,
 /// revogado, vencido ou desconhecido) e o 48 (a autoridade desconhecida). O
 /// Safari do iPhone recusa com o 46 (a medição 3).
-fn recusou_o_certificado(erro: &quinn::ConnectionError) -> Option<u8> {
-    let codigo = match erro {
-        quinn::ConnectionError::ConnectionClosed(fechou) => fechou.error_code,
-        quinn::ConnectionError::TransportError(erro) => erro.code,
-        _ => return None,
-    };
+///
+/// **Pelo texto do erro**, e não pelo código: o `wtransport` embrulha o
+/// fechamento do `quinn` sem expor o código, e o texto que o `quinn-proto`
+/// escreve para um alerta de TLS é fixo (`the cryptographic handshake failed:
+/// error N`, em `TransportErrorCode`). Uma versão que o mude reprova
+/// `o_navegador_que_recusa_o_certificado_e_contado`, em `tests/alpn.rs`.
+fn alerta_de_certificado(erro: &str) -> Option<u8> {
+    let depois = erro
+        .split("the cryptographic handshake failed: error ")
+        .nth(1)?;
+    let numero: String = depois.chars().take_while(char::is_ascii_digit).collect();
+    let alerta = numero.parse::<u8>().ok()?;
     [42_u8, 43, 44, 45, 46, 48]
-        .into_iter()
-        .find(|&alerta| codigo == quinn::TransportErrorCode::crypto(alerta))
+        .contains(&alerta)
+        .then_some(alerta)
+}
+
+/// **A sessão do navegador**: o `wtransport` adota a conexão `h3` que este
+/// endpoint aceitou e lê o pedido da WebTransport, e a sessão segue pelo mesmo
+/// `session::serve` do nativo (Tarefa 2.6 da F4).
+///
+/// O caminho e a `Origin` do pedido vão ao registro. **Conferir a `Origin` está
+/// em aberto no ADR 0057** («O que este ADR não decide»): até o dono decidir, o
+/// pedido é aceito com qualquer uma, e o registro diz qual veio.
+async fn aceitar_o_navegador(
+    conectando: quinn::Connecting,
+    recusas_do_navegador: &std::sync::atomic::AtomicU64,
+) -> Option<transporte::Conexao> {
+    let pedido = match wtransport::endpoint::IncomingSessionFuture::with_quic_connecting(conectando)
+        .await
+    {
+        Ok(pedido) => pedido,
+        Err(erro) if alerta_de_certificado(&erro.to_string()).is_some() => {
+            recusas_do_navegador.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tracing::warn!(
+                %erro,
+                "um navegador recusou o certificado: link velho, ou link de outro \
+                 servidor que atende neste endereço noutra rede"
+            );
+            return None;
+        }
+        Err(erro) => {
+            tracing::warn!(%erro, "a sessão do navegador não abriu: a conexão caiu antes do pedido");
+            return None;
+        }
+    };
+    tracing::info!(
+        caminho = pedido.path(),
+        origem = pedido.origin().unwrap_or("(nenhuma)"),
+        "um navegador pediu a sessão pelo `h3`"
+    );
+    match pedido.accept().await {
+        Ok(conexao) => Some(transporte::Conexao::Web(conexao)),
+        Err(erro) => {
+            tracing::warn!(%erro, "a sessão do navegador caiu ao ser aceita");
+            None
+        }
+    }
 }
 
 impl Daemon {
@@ -929,38 +975,25 @@ impl Daemon {
                     .and_then(|dados| dados.protocol);
                 let do_navegador =
                     alpn.as_deref() == Some(seele_proto::transport::ALPN_DO_NAVEGADOR);
-                let connection = match conectando.await {
-                    Ok(connection) => connection,
-                    Err(error) if do_navegador && recusou_o_certificado(&error).is_some() => {
-                        recusas_do_navegador.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        tracing::warn!(
-                            %error,
-                            "um navegador recusou o certificado: link velho, ou link de outro \
-                             servidor que atende neste endereço noutra rede"
-                        );
-                        return;
+                let conexao = if do_navegador {
+                    match aceitar_o_navegador(conectando, &recusas_do_navegador).await {
+                        Some(conexao) => conexao,
+                        None => return,
                     }
-                    Err(error) => {
-                        tracing::warn!(%error, "connection failed before the handshake");
-                        return;
+                } else {
+                    match conectando.await {
+                        Ok(connection) => transporte::Conexao::Quic(connection),
+                        Err(error) => {
+                            tracing::warn!(%error, "connection failed before the handshake");
+                            return;
+                        }
                     }
                 };
-                let peer = connection.remote_address();
-                if do_navegador {
-                    // A sessão sobre a WebTransport é a Tarefa 2.6 da F4. Até lá, o
-                    // aperto de mão do `h3` acontece (é o que prova o certificado
-                    // curto), e a conexão é fechada dizendo por quê.
-                    tracing::info!(%peer, "um navegador entrou pelo `h3`, e a sessão por ele ainda não existe");
-                    connection.close(
-                        quinn::VarInt::from_u32(H3_SEM_SESSAO),
-                        b"a sessao pelo navegador ainda nao existe neste servidor",
-                    );
-                    return;
-                }
-                tracing::info!(%peer, "link unverified");
+                let peer = conexao.remote_address();
+                tracing::info!(%peer, navegador = conexao.do_navegador(), "link unverified");
 
                 if let Err(error) =
-                    session::serve(connection, config, registry, server, voice_rooms).await
+                    session::serve(conexao, config, registry, server, voice_rooms).await
                 {
                     tracing::info!(%peer, %error, "session closed");
                 }

@@ -83,6 +83,13 @@ rusqlite = { version = "0.40.1", features = ["bundled"] }
 # chamada é custo puro. No Windows é a diferença entre instalar o Rust e
 # instalar o Rust mais duas ferramentas de build.
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+# A WebTransport do navegador (ADR 0057; Tarefa 2.6 da F4): adota a conexão
+# `h3` que o `quinn` deste mesmo endpoint aceitou (`with_quic_connecting`), e
+# entrega o fluxo QUIC de baixo, que o `frame.rs` lê como o do nativo. A versão
+# fixa é a que o spike `alpn-no-mesmo-socket` mediu no iPhone (a medição 3).
+# Sem o `self-signed` e sem o `aws-lc-rs`: os certificados são os do `tls.rs`,
+# e o provider é o `ring`, como o do resto.
+wtransport = { version = "=0.7.2", default-features = false, features = ["ring", "quinn"] }
 serde = "1.0.229"
 serde_json = "1.0.151"
 # Só por causa de `IPV6_V6ONLY`, cujo padrão difere entre Linux, macOS e

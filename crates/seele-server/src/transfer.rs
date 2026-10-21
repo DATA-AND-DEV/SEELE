@@ -411,7 +411,7 @@ async fn drain<R: tokio::io::AsyncRead + Unpin>(
 pub async fn deliver(
     vault: &Vault,
     server: &Server,
-    connection: &quinn::Connection,
+    connection: &crate::transporte::Conexao,
     id: AttachmentId,
 ) -> Result<std::result::Result<u64, AttachmentRefusal>> {
     let row = {
