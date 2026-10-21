@@ -599,11 +599,23 @@ const MOTIVOS_DE_REVOGACAO = {
  * código não diz a ninguém o que fazer. Um nome que chegue sem frase continua
  * aparecendo cru, como em `MOTIVOS_DE_REVOGACAO`: feio, e honesto.
  */
+/**
+ * **As APIs de MOD que o Servidor 0.15 roda**: a linha `0.15` de
+ * `APIS_POR_LINHA` (`crates/seele-proto/src/mods.rs`). Escritas aqui uma vez
+ * só, para as três frases que as dizem (o `api-too-old`, o `ModsDeApiAntiga` e
+ * a linha do pacote no cache, em `camada-mods.js`). O JavaScript não tem ponte
+ * para a tabela, e a bancada `hospedar-com-mod-antigo.cjs` confere esta cópia
+ * contra ela. Uma API mais velha que todas estas nenhum servidor de hoje roda.
+ */
+const APIS_DO_SERVIDOR_0_15 = Object.freeze([3, 4, 5]);
+/** As mesmas, como as frases as dizem: «3 a 5». */
+const APIS_DO_SERVIDOR_0_15_DITAS = `${APIS_DO_SERVIDOR_0_15[0]} a ${APIS_DO_SERVIDOR_0_15.at(-1)}`;
+
 const RECUSAS_DE_PACOTE = {
   "malformed": "o mod.json dele não é um JSON que este app lê, ou tem uma chave que ele não conhece",
   "schema-too-new": "o mod.json dele é de um formato mais novo que este app; atualize o aplicativo",
   "api-too-new": "ele é de uma API mais nova que a deste app; atualize o aplicativo",
-  "api-too-old": "ele é de uma API mais velha que a 6, a deste app; procure a versão dele para a API 6, ou use o Servidor 0.15 pelo launcher, que roda as APIs 3 a 5",
+  "api-too-old": `ele é de uma API mais velha que a 6, a deste app; procure a versão dele para a API 6, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
   "malformed-id": "o identificador dele não é «autor/nome»",
   "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",
   "tema-sem-metade-de-servidor": "ele declara a porta do tema sem a metade de servidor, que é quem pinta a aparência: o tema nunca apareceria",
@@ -715,15 +727,22 @@ function fraseDeErro(erro, apelido, deOnde) {
       const mods = erro.ModsDeApiAntiga.mods ?? [];
       // Zero também é «não sei»: o Rust manda `None`, e um zero que chegasse
       // por outro caminho não vira número escrito.
+      // Uma API fora das do Servidor 0.15 nenhum servidor de hoje roda, e a
+      // saída de hospedar por ele só vale para quem ele roda (lote 58-1,
+      // rodada 2).
       const ditos = mods.map(([id, api]) => (!api
         ? `${id}: o pacote deste MOD não está nesta máquina — baixe-o de novo, ou desligue o MOD.`
-        : `${id}: feito para a API ${api}, que roda no Servidor 0.15.`));
+        : APIS_DO_SERVIDOR_0_15.includes(api)
+          ? `${id}: feito para a API ${api}, que roda no Servidor 0.15.`
+          : `${id}: feito para a API ${api}, que nenhum servidor de hoje roda.`));
       const algumComApi = mods.some(([, api]) => Boolean(api));
+      const algumDo015 = mods.some(([, api]) => APIS_DO_SERVIDOR_0_15.includes(api));
       return (
         "ESTE SERVIDOR TEM MOD QUE ESTE APP NÃO RODA.\n" +
         ditos.join("\n") +
         (algumComApi
-          ? "\nAtualize o MOD para a versão da API 6; ou hospede pelo Servidor 0.15, no launcher; " +
+          ? "\nAtualize o MOD para a versão da API 6; " +
+            (algumDo015 ? "ou hospede pelo Servidor 0.15, no launcher; " : "") +
             "ou desligue o MOD e hospede sem ele — os dados dele ficam."
           : "")
       );

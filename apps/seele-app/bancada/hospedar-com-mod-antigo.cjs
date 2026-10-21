@@ -26,6 +26,27 @@ const contexto = vm.createContext({ console });
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../ui/frases.js"), "utf8"), contexto);
 const frase = (mods) => contexto.fraseDeErro({ ModsDeApiAntiga: { mods } });
 
+// **As APIs de cada linha de servidor**, lidas de `APIS_POR_LINHA`
+// (`crates/seele-proto/src/mods.rs`), a tabela de onde o app tira as dele. O
+// JavaScript não tem ponte para ela, e as frases que dizem as APIs do Servidor
+// 0.15 são conferidas aqui contra ela (lote 58-1, rodadas 1 e 2, M4).
+const proto = fs.readFileSync(path.join(__dirname, "../../../crates/seele-proto/src/mods.rs"), "utf8");
+const tabela = /pub const APIS_POR_LINHA:[^=]*=\s*\[(.*?)\];/s.exec(proto);
+assert.ok(tabela, "`APIS_POR_LINHA` sumiu de crates/seele-proto/src/mods.rs, ou mudou de forma, e as frases das APIs não têm com o que se conferir");
+const porLinha = Object.fromEntries([...tabela[1].matchAll(/\("([^"]+)",\s*&\[([^\]]*)\]\)/g)]
+  .map(([, linha, apis]) => [linha, apis.split(",").map((n) => Number(n.trim())).sort((a, b) => a - b)]));
+const legada = porLinha["0.15"];
+const desta = porLinha["1"];
+assert.ok(legada?.length > 0 && desta?.length === 1, `a leitura de \`APIS_POR_LINHA\` ficou cega: ${JSON.stringify(porLinha)}`);
+const [menor, maior] = [legada[0], legada.at(-1)];
+assert.equal(legada.length, maior - menor + 1,
+  `as APIs do Servidor 0.15 deixaram de ser seguidas (${legada}), e «as APIs ${menor} a ${maior}» não as diz`);
+// Uma API que o Servidor 0.15 roda, e uma mais velha que nenhum servidor roda.
+const DENTRO = 4;
+const FORA = 2;
+assert.ok(legada.includes(DENTRO) && !legada.includes(FORA) && FORA > 0 && FORA < desta[0],
+  `a tabela mudou, e os casos ${DENTRO} e ${FORA} deixaram de ser um dentro e um fora do Servidor 0.15: ${JSON.stringify(porLinha)}`);
+
 // 1. Com a API lida.
 const comApi = frase([["seele/estilo", 4]]);
 assert.match(comApi, /seele\/estilo/, `a frase não diz qual MOD: ${comApi}`);
@@ -38,6 +59,23 @@ for (const saida of saidas) {
   antes = onde;
 }
 assert.match(comApi, /os dados dele ficam/, `a saída de desligar não diz que os dados ficam: ${comApi}`);
+assert.match(frase([["seele/estilo", DENTRO]]), new RegExp(`feito para a API ${DENTRO}, que roda no Servidor 0\\.15`),
+  `um MOD da API ${DENTRO} não diz que roda no Servidor 0.15`);
+
+// 1b. **Uma API que nenhum servidor de hoje roda** (lote 58-1, rodada 2): a
+//     frase dizia «feito para a API 2, que roda no Servidor 0.15», e o Servidor
+//     0.15 roda só as da tabela. E a saída de hospedar por ele não vale para
+//     esse MOD.
+const fora = frase([["x/antigo", FORA]]);
+assert.doesNotMatch(fora, /roda no Servidor 0\.15/, `um MOD da API ${FORA} diz que roda no Servidor 0.15, e não roda: ${fora}`);
+assert.match(fora, new RegExp(`x/antigo: feito para a API ${FORA}, que nenhum servidor de hoje roda`),
+  `um MOD da API ${FORA} não diz que nenhum servidor de hoje o roda: ${fora}`);
+assert.doesNotMatch(fora, /hospede pelo Servidor 0\.15/, `a frase oferece o Servidor 0.15 a um MOD da API ${FORA}, que ele não roda: ${fora}`);
+assert.match(fora, /[Aa]tualize o MOD para a versão da API 6/, `a frase da API ${FORA} não oferece a versão da API 6: ${fora}`);
+assert.match(fora, /desligue o MOD e hospede sem ele/, `a frase da API ${FORA} não oferece desligar o MOD: ${fora}`);
+// E junto de um que o Servidor 0.15 roda, a saída dele volta.
+const misturados = frase([["seele/estilo", DENTRO], ["x/antigo", FORA]]);
+assert.match(misturados, /hospede pelo Servidor 0\.15/, `com um MOD da API ${DENTRO}, a saída do Servidor 0.15 sumiu: ${misturados}`);
 
 // 2. Sem a API: o pacote não está aqui, e nenhum número.
 const semApi = frase([["x/sumido", null]]);
@@ -85,23 +123,16 @@ const apiVelha = contexto.fraseDeErro({ PacoteNaoServe: "api-too-old" });
 // (`crates/seele-proto/src/mods.rs`), a tabela de onde o app tira as dele: o
 // `frases.js` é um dicionário estático, sem ponte para lê-la.
 {
-  const proto = fs.readFileSync(path.join(__dirname, "../../../crates/seele-proto/src/mods.rs"), "utf8");
-  const tabela = /pub const APIS_POR_LINHA:[^=]*=\s*\[(.*?)\];/s.exec(proto);
-  assert.ok(tabela, "`APIS_POR_LINHA` sumiu de crates/seele-proto/src/mods.rs, ou mudou de forma, e a frase do `api-too-old` não tem com o que se conferir");
-  const porLinha = Object.fromEntries([...tabela[1].matchAll(/\("([^"]+)",\s*&\[([^\]]*)\]\)/g)]
-    .map(([, linha, apis]) => [linha, apis.split(",").map((n) => Number(n.trim())).sort((a, b) => a - b)]));
-  const legada = porLinha["0.15"];
-  const desta = porLinha["1"];
-  assert.ok(legada?.length > 0 && desta?.length === 1, `a leitura de \`APIS_POR_LINHA\` ficou cega: ${JSON.stringify(porLinha)}`);
-  const [menor, maior] = [legada[0], legada.at(-1)];
-  assert.equal(legada.length, maior - menor + 1,
-    `as APIs do Servidor 0.15 deixaram de ser seguidas (${legada}), e «as APIs ${menor} a ${maior}» não as diz`);
   assert.doesNotMatch(apiVelha, /é de uma API que roda no Servidor 0\.15/,
     `a frase do \`api-too-old\` diz que o MOD roda no Servidor 0.15, e uma API ${menor - 1} não roda: ${apiVelha}`);
   assert.ok(apiVelha.includes(`que roda as APIs ${menor} a ${maior}`),
     `a frase do \`api-too-old\` não diz que o Servidor 0.15 roda as APIs ${menor} a ${maior}: ${apiVelha}`);
   assert.ok(apiVelha.includes(`mais velha que a ${desta[0]}`) && apiVelha.includes(`a versão dele para a API ${desta[0]}`),
     `a frase do \`api-too-old\` não diz a API deste app, ${desta[0]}: ${apiVelha}`);
+  // **A cópia do `frases.js` é a da tabela** (rodada 2): as três frases que
+  // dizem as APIs do Servidor 0.15 a leem de um lugar só.
+  assert.deepEqual([...vm.runInContext("APIS_DO_SERVIDOR_0_15", contexto)], legada,
+    "`APIS_DO_SERVIDOR_0_15`, no frases.js, não é a linha 0.15 de `APIS_POR_LINHA`");
 }
 // **E aponta o Servidor 0.15 no launcher** (`compatibilidade.porque`; a
 // auditoria do `v6.json`, tabela 1): dizer onde ele roda sem dizer onde
@@ -126,14 +157,27 @@ assert.match(banco, /continua como estava/, `a falha do banco não diz que nada 
     addEventListener() {}, setAttribute() {},
   });
   const linha = vm.createContext({
-    elemento: no, emBytes: (n) => `${n} B`,
+    console, elemento: no, emBytes: (n) => `${n} B`,
     API_DESTE_APLICATIVO: 6, APIS_QUE_ESTE_APLICATIVO_ACEITA: [6],
   });
+  // O `frases.js` vem antes, como no `index.html`: a linha diz as APIs do
+  // Servidor 0.15 pela cópia de lá.
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../ui/frases.js"), "utf8"), linha);
   vm.runInContext(camada.slice(i, j + 3), linha);
   const textos = (n) => [n.textContent, ...n.filhos.flatMap(textos)].filter(Boolean);
   const dita = textos(linha.linhaDePacoteNoCache({ id: "seele/estilo", version: "3.1.0", bytes: 10, hash: "abc", recusado: true, api: 4 })).join(" | ");
   assert.match(dita, /feito para a API 4, que roda no Servidor 0\.15/, `a linha do pacote da API 4 não diz onde ele roda: ${dita}`);
   assert.match(dita, /use o Servidor 0\.15 pelo launcher/, `a linha do pacote da API 4 não aponta o launcher: ${dita}`);
+
+  // 4b. **E a de uma API que nenhum servidor de hoje roda** (lote 58-1, rodada
+  //     2): um pacote da API 2, como os do layout antigo, lia «que roda no
+  //     Servidor 0.15», e era falso; e o launcher não o abre.
+  const antiga = textos(linha.linhaDePacoteNoCache({ id: "x/antigo", version: "0.1.0", bytes: 10, hash: "abc", recusado: true, api: FORA })).join(" | ");
+  assert.doesNotMatch(antiga, /roda no Servidor 0\.15/, `a linha do pacote da API ${FORA} diz que ele roda no Servidor 0.15, e não roda: ${antiga}`);
+  assert.match(antiga, new RegExp(`feito para a API ${FORA}, que nenhum servidor de hoje roda`),
+    `a linha do pacote da API ${FORA} não diz que nenhum servidor de hoje o roda: ${antiga}`);
+  assert.doesNotMatch(antiga, /pelo launcher/, `a linha do pacote da API ${FORA} manda abrir o Servidor 0.15, que não o roda: ${antiga}`);
+  assert.ok(antiga.includes(`as ${menor} a ${maior}`), `a linha do pacote da API ${FORA} não diz quais APIs o Servidor 0.15 roda: ${antiga}`);
 }
 
 // 5. **As recusas de instalar um MOD e de apagar um pacote do cache**
