@@ -47,10 +47,15 @@ pub mod identity;
 pub mod mods;
 pub mod par;
 pub mod preferences;
-pub mod preview;
+/// O juiz das prévias mora no `seele-sessao` desde a Tarefa 2.6 da F4, como a
+/// busca: é a mesma regra no desktop e no navegador.
+pub use seele_sessao::preview;
 #[cfg(test)]
 mod rastro_de_teste;
-pub mod search;
+/// A busca no que a casca mostra mora no `seele-sessao` desde a Tarefa 2.6 da
+/// F4: é a mesma regra no desktop e no navegador, e o navegador não leva o
+/// `seele-core`.
+pub use seele_sessao::search;
 pub mod som_que_segue;
 pub use seele_sessao::state;
 pub mod tela;
@@ -111,6 +116,11 @@ pub use seele_audio::gate::{
 };
 /// O volume padrão do toque: audível, e longe do teto da escala.
 pub use seele_audio::toque::VOLUME as VOLUME_DO_TOQUE;
+/// As medidas de um degrau na proporção da fonte e o teto de banda da prova:
+/// o navegador compartilha a tela com cópias deles (`seele_web::tela`, Tarefa
+/// 3.10 da F4), e a conformidade as confere por aqui, que é por onde a regra de
+/// dependências deixa um teste ver o `seele-video`.
+pub use seele_video::codec::{medidas_para, TETO_DA_PROVA_BPS};
 /// O módulo do Cisco e os degraus que a pessoa escolhe.
 ///
 /// Reexportados porque [`PedidoDeTela`] pede os três e o ADR 0002 não deixa uma

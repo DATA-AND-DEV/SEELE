@@ -106,6 +106,13 @@ function carregarOWasmDaPagina() {
 const ALCA_DO_MONITOR = 0;
 
 /**
+ * A alça do som da tela na mistura: a última que cabe num `u32`, que a
+ * recepção (de 1 em diante, uma por voz) nunca alcança — como o `SSRC_DA_TELA`
+ * do desktop.
+ */
+const ALCA_DA_TELA = 0xffffffff;
+
+/**
  * A voz do navegador, em volta das exportações do `.wasm` do `seele-web`.
  *
  * - `wasm`: as exportações da instância da página (a mesma da sessão, quando
@@ -393,6 +400,50 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     } catch (erro) {
       falha(`decodificador da alça ${alca}`, erro);
     }
+  }
+
+  // ------------------------------------------- o som da tela (R17, ADR 0054)
+
+  /**
+   * **O som da transmissão que se assiste**, como o do desktop: uma tela por
+   * vez (trocar de tela joga fora o que sobrou da anterior), numa fonte própria
+   * da mistura, com o volume e o mudo dela — que não mexem na voz de ninguém.
+   * Os quadros de som chegam pelo fluxo da tela, sem número nem carimbo: a
+   * ordem de chegada é a de saída, e cada um é um quadro de 20 ms.
+   */
+  const somDaTela = { tela: null, seq: 0, carimbo: 0, volume: 1, calada: false, quadros: 0 };
+
+  function aplicarOGanhoDaTela() {
+    mandarAReproducao({ tipo: "ganho", alca: ALCA_DA_TELA, ganho: somDaTela.calada ? 0 : somDaTela.volume });
+  }
+
+  function tocarATela(tela, opus) {
+    if (!vivo.reproducao || !vivo.dentro) return;
+    if (somDaTela.tela !== tela) {
+      esquecerOSomDaTela();
+      somDaTela.tela = tela;
+      aplicarOGanhoDaTela();
+    }
+    const numero = proximaChegada++;
+    chegadas.set(numero, { seq: somDaTela.seq, carimbo: somDaTela.carimbo, chegada: performance.now() });
+    if (chegadas.size > 500) chegadas.delete(chegadas.keys().next().value);
+    somDaTela.seq = (somDaTela.seq + 1) & 0xffff;
+    somDaTela.carimbo = (somDaTela.carimbo + cfg.quadro) >>> 0;
+    somDaTela.quadros += 1;
+    try {
+      decoderDe(ALCA_DA_TELA).decode(new EncodedAudioChunk({ type: "key", timestamp: numero * 20000, data: opus }));
+    } catch (erro) {
+      falha("decodificador do som da tela", erro);
+    }
+  }
+
+  /** Esquece o som da tela: o de `tela`, ou, sem ela, o que estiver tocando. */
+  function esquecerOSomDaTela(tela) {
+    if (tela !== undefined && somDaTela.tela !== tela) return;
+    if (somDaTela.tela === null) return;
+    fecharDecoder(ALCA_DA_TELA);
+    mandarAReproducao({ tipo: "esquecer", alca: ALCA_DA_TELA });
+    Object.assign(somDaTela, { tela: null, seq: 0, carimbo: 0 });
   }
 
   /** Esquece quem calou: o `.wasm` diz quem, e o decodificador de cada um fecha. */
@@ -763,5 +814,19 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
       controles.ganhos.set(alca, ganho);
       mandarAReproducao({ tipo: "ganho", alca, ganho });
     },
+    /** Um quadro de som da tela `tela` (o Opus), para a mistura. */
+    somDaTela: tocarATela,
+    esquecerOSomDaTela,
+    /** O volume do som da tela, de 0 a 4; 1 é o de origem. */
+    volumeDaTela(volume) {
+      somDaTela.volume = Math.min(4, Math.max(0, Number(volume) || 0));
+      if (somDaTela.tela !== null) aplicarOGanhoDaTela();
+    },
+    calarATela(calada) {
+      somDaTela.calada = Boolean(calada);
+      if (somDaTela.tela !== null) aplicarOGanhoDaTela();
+    },
+    /** O que o `som_da_tela` do desktop devolve, e quantos quadros tocaram. */
+    estadoDoSomDaTela: () => ({ volume: somDaTela.volume, calada: somDaTela.calada, tela: somDaTela.tela, quadros: somDaTela.quadros }),
   };
 }

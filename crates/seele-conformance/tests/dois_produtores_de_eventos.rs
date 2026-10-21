@@ -17,10 +17,14 @@
 use std::collections::BTreeSet;
 
 use seele_proto::control::{
-    AlertReason, AlertSeverity, ChannelInfo, DisconnectReason, Membro, Permission, PersonProfile,
-    ServerMessage, Telemetry, TemaDoServidor, VoiceRoomInfo,
+    AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal, AttachmentState, ChannelInfo,
+    DisconnectReason, Membro, Permission, PersonProfile, ServerMessage, Telemetry, TemaDoServidor,
+    VoiceRoomInfo,
 };
-use seele_proto::ids::{ChannelId, MessageId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
+use seele_proto::ids::{
+    AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, SessionId, Ssrc,
+    VoiceRoomId,
+};
 use seele_web::sessao::Sessao;
 
 const EU: PersonId = PersonId(7);
@@ -100,7 +104,13 @@ fn mensagens() -> Vec<ServerMessage> {
             body: "oi".into(),
             replies_to: None,
             client_message_id: None,
-            attachment: None,
+            attachment: Some(AttachmentInfo {
+                id: AttachmentId(951),
+                file_name: "foto.png".into(),
+                declared_type: "image/png".into(),
+                byte_size: 1234,
+                state: AttachmentState::Available,
+            }),
         },
         // A mesma mensagem outra vez, como a de um histórico que se sobrepõe:
         // nenhum evento nos dois.
@@ -113,7 +123,13 @@ fn mensagens() -> Vec<ServerMessage> {
             body: "oi".into(),
             replies_to: None,
             client_message_id: None,
-            attachment: None,
+            attachment: Some(AttachmentInfo {
+                id: AttachmentId(951),
+                file_name: "foto.png".into(),
+                declared_type: "image/png".into(),
+                byte_size: 1234,
+                state: AttachmentState::Available,
+            }),
         },
         ServerMessage::ChannelCreated {
             channel: ChannelInfo {
@@ -138,6 +154,21 @@ fn mensagens() -> Vec<ServerMessage> {
             subsystems: Vec::new(),
         }),
         ServerMessage::UplinkLoss { fraction: 0.04 },
+        // As recusas de transferência: o laço da conexão as drena depois da
+        // mensagem, e elas saem como `TransferChanged`. O anexo vencido da
+        // mensagem de antes também muda a conversa.
+        ServerMessage::AttachmentRefused {
+            client_message_id: ClientMessageId(77),
+            reason: AttachmentRefusal::TooLarge { limit: 1024 },
+        },
+        ServerMessage::AttachmentUnavailable {
+            attachment: AttachmentId(951),
+            reason: AttachmentRefusal::Expired,
+        },
+        ServerMessage::VolumeRecusado {
+            token: "t-1".into(),
+            motivo: seele_proto::volume::VolumeRefusal::TipoRecusado,
+        },
         ServerMessage::ModReply {
             request: 3,
             part: 0,
@@ -226,6 +257,7 @@ const DO_FOLD: &[&str] = &[
     "TelemetryChanged",
     "NoticeRaised",
     "ScreenChanged",
+    "TransferChanged",
     "Ended",
 ];
 
@@ -279,7 +311,7 @@ fn os_dois_produtores_dao_os_mesmos_eventos_depois_de_cada_mensagem() {
     assert!(
         fim.icon_revision == 1
             && fim.person_icons_revision == 1
-            && fim.messages_revision == 2
+            && fim.messages_revision == 3
             && fim.fora_do_ar_revision >= 2,
         "algum número não subiu como a sequência pede: {fim:?}"
     );

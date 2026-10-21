@@ -1084,3 +1084,35 @@ os anexos, os ícones escolhidos e a prévia de link), 11 dos MODs e o
 
 **Volta da conexão** (o caminho normal do celular) ainda não existe: uma
 queda vira `Ended { LinkLost }`.
+
+## 21/10, mais tarde — 68 dos 79 atendidos; faltam os MODs
+
+Desde a integração em `615bd2d1` (que levou até `e33486b1`), no ramo:
+- `90e6bbef`: a busca (a `seele_core::search` passa a morar no
+  `seele-sessao`) e o volume de cada pessoa pela alça (a SSRC não chega ao JS);
+- `a1911c79`: o PC no navegador entra pelos comandos do desktop (o link
+  colado, a volta pela lista, os aceites de MODs pelo endereço, o CANCELAR, o
+  esquecer, a aparência), pela identidade;
+- `fd8ffa6e`: as imagens (o ícone e o retrato) pela escada do desktop no canvas;
+- `2690972e` e `acf2cacd`: os fluxos que o servidor abre, a tela assistida, os
+  anexos (enviar, receber pelo hash, prever, salvar), as recusas de
+  transferência e o peso recusado como o `receber` da FFI; o juiz das prévias e
+  as regras do nome do anexo passam a morar no `seele-sessao`;
+- `eddef1ff`: a prévia de um link (as regras de destino e da página de GIF
+  passam a morar no `seele-sessao`);
+- `699c9481`: compartilhar a tela pelo PC e assistir com imagem e som.
+
+Cada um com a conformidade dos dois produtores quando há um do desktop
+(eventos, recusa, conversa, tela, prévia, degraus da tela) e com a bancada de
+ponta a ponta (`sessao-no-navegador.cjs`, 12 casos, com o Daemon de verdade),
+provados pela reversão.
+
+**Faltam os 11 dos MODs** (instalar do catálogo, o código, as mídias, as
+imagens pelo volume, o seletor de arquivo do MOD). O catálogo libera CORS
+(`access-control-allow-origin: *`, conferido em 21/10), então o navegador
+busca como o desktop. As regras dele (ler o catálogo e as revogações, a
+assinatura, planejar a versão, conferir o conjunto) moram no binário do app e
+vão precisar de um lugar comum, como as da prévia foram.
+
+**E a volta da conexão** (o caminho normal do celular) ainda não existe: uma
+queda vira `Ended { LinkLost }`.

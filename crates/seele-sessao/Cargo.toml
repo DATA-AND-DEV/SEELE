@@ -13,6 +13,9 @@ seele-proto = { path = "../seele-proto" }
 # Os tipos de vista do retrato (`retrato`) vão à casca em JSON, como iam do
 # `seele-ffi`. A mesma versão do `seele-proto`.
 serde = { version = "1.0.229", features = ["derive"] }
+# O `NomeRecusado` das regras do nome de um anexo (`nome_do_anexo`), que veio
+# do `seele-core` com o `Error` dele. A mesma versão do `seele-proto`.
+thiserror = "2.0.19"
 
 [lints]
 workspace = true

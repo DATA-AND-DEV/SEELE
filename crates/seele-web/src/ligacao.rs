@@ -100,7 +100,7 @@ impl Pedido {
 }
 
 /// 32 bytes de 64 dígitos hex, em maiúsculas ou minúsculas.
-fn bytes_do_hex(hex: &str) -> Option<[u8; 32]> {
+pub(crate) fn bytes_do_hex(hex: &str) -> Option<[u8; 32]> {
     if hex.len() != 64 || !hex.is_ascii() {
         return None;
     }
@@ -154,6 +154,15 @@ pub enum Passo {
     /// O fluxo de controle se perdeu (um quadro torto ou grande demais): a
     /// sessão acabou. O motivo, para o registro.
     Perdida(String),
+    /// O servidor recusou o peso de uma linha que esta ponta pediu: o primeiro
+    /// pedido na fila, que a página rejeita com o `PedidoRecusado` do desktop.
+    /// O aviso não é dobrado, como no `receber` da FFI.
+    PesoRecusado {
+        /// O canal do pedido recusado.
+        canal: u32,
+        /// O motivo, no JSON do `CausaDaRecusa`.
+        causa: Value,
+    },
 }
 
 impl Passo {
@@ -169,6 +178,9 @@ impl Passo {
             Self::Desconhecida { ordinal } => json!({ "desconhecida": ordinal }),
             Self::Recusada(motivo) => json!({ "recusada": motivo }),
             Self::Perdida(motivo) => json!({ "perdida": motivo }),
+            Self::PesoRecusado { canal, causa } => {
+                json!({ "peso_recusado": { "channel": canal, "causa": causa } })
+            }
         }
     }
 }
@@ -388,6 +400,10 @@ impl Ligacao {
             Etapa::Dentro(mut sessao) => {
                 let passo = match decode_da_lista::<ServerMessage>(quadro) {
                     Ok(Lido::Mensagem(mensagem)) => {
+                        if let Some(recusa) = peso_recusado(&mut sessao, &mensagem) {
+                            self.etapa = Etapa::Dentro(sessao);
+                            return vec![recusa];
+                        }
                         let eventos = sessao.dobrar_com_eventos(&mensagem);
                         serde_json::to_value(&mensagem)
                             .map(|mensagem| Passo::Chegou { mensagem, eventos })
@@ -500,6 +516,32 @@ impl Ligacao {
             }
             _ => self.recusar(json!("Unreachable")),
         }
+    }
+}
+
+/// **O `receber` da FFI, antes de dobrar**: o peso que chegou responde todos
+/// os pedidos daquele canal, e a recusa de um pedido de peso, com pedido na
+/// fila, responde o primeiro e não é dobrada (o aviso não aparece, porque quem
+/// pediu já ouve a recusa).
+fn peso_recusado(sessao: &mut Sessao, mensagem: &ServerMessage) -> Option<Passo> {
+    use seele_proto::control::{nome_do_pedido, AlertReason};
+    match mensagem {
+        ServerMessage::ChannelWeighed { channel, .. } => {
+            sessao.pesos_pendentes.retain(|pedido| pedido != channel);
+            None
+        }
+        ServerMessage::Alert {
+            reason: AlertReason::PedidoRecusado { pedido, causa },
+            ..
+        } if nome_do_pedido(*pedido) == Some("WeighChannel") => {
+            let canal = sessao.pesos_pendentes.pop_front()?;
+            Some(Passo::PesoRecusado {
+                canal: canal.0,
+                causa: serde_json::to_value(seele_sessao::retrato::CausaDaRecusa::from(*causa))
+                    .unwrap_or(Value::Null),
+            })
+        }
+        _ => None,
     }
 }
 

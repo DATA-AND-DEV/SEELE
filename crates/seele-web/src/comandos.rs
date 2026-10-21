@@ -28,6 +28,7 @@ use seele_proto::control::{
 use seele_proto::ids::{ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId};
 use seele_sessao::assento::carimbo_da_entrada;
 use seele_sessao::retrato::aviso_de;
+use seele_sessao::search::Search;
 use seele_sessao::state::Notice;
 use serde_json::{json, Value};
 
@@ -67,6 +68,29 @@ impl Chaves {
     }
 }
 
+/// **O que é da página, e não de uma conexão**: as chaves das mensagens e a
+/// busca. No desktop, a busca mora no `Session` do app e atravessa as
+/// conexões (`busca_andar` e `busca_limpar` respondem sem sessão nenhuma); aqui
+/// ela mora na página, pelo mesmo motivo.
+#[derive(Debug)]
+pub struct DaPagina {
+    /// As chaves das mensagens.
+    pub chaves: Chaves,
+    /// A busca corrente, com o cursor.
+    pub busca: Option<Search>,
+}
+
+impl DaPagina {
+    /// A página que acabou de carregar.
+    #[must_use]
+    pub const fn nova(semente: u32) -> Self {
+        Self {
+            chaves: Chaves::com_semente(semente),
+            busca: None,
+        }
+    }
+}
+
 /// Um comando atendido: a resposta do `invoke`, os eventos, e o que não saiu.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Feito {
@@ -97,11 +121,26 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "apagar_linha",
     "apagar_voice_room",
     "aplicar_icone_do_server",
+    "abertura_da_tela",
+    "ajustar_limites_da_tela",
     "assistir",
     "banir_pessoa",
+    "busca_andar",
+    "busca_limpar",
+    "buscar",
+    "codec_da_tela",
+    "codificacao_da_tela",
+    "compartilhar_tela",
+    // Os três dos anexos que a ponte chama por dentro: o cabeçalho do envio,
+    // o destino (com as regras do nome) e o pedido de um anexo ao servidor.
+    "cabecalho_do_anexo",
     "criar_linha",
     "criar_voice_room",
     "descartar_mensagem",
+    // As duas regras da prévia de um link que a ponte pergunta sem sessão:
+    // aonde a prévia não vai, e que mídia uma página de GIF declara.
+    "destino_de_previa",
+    "destino_do_anexo",
     "dispensar_aviso",
     "enter_voice_room",
     "escolher_apelido",
@@ -111,10 +150,13 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "leave_voice_room",
     "membros_fora_do_ar",
     "messages",
+    "midia_da_pagina",
     "minha_imagem",
     "mod_request",
     "mover_pessoa",
     "open_channel",
+    "parar_de_compartilhar",
+    "pedir_anexo",
     "pedir_quadro_chave",
     "peso_da_linha",
     "reenviar_mensagem",
@@ -129,7 +171,9 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "sala_da_voz",
     "set_muted",
     "set_total_isolation",
+    "set_volume",
     "tirar_icone_do_server",
+    "volumes_locais",
 ];
 
 /// O que um comando escreve e diz, montado antes de ir ao fio.
@@ -139,16 +183,99 @@ struct Saida {
     eventos: Vec<Value>,
 }
 
+/// Atende um comando da casca, com a ligação desta página se houver uma.
+/// `None` quando o comando não é desta camada.
+///
+/// `agora_s` é o relógio da página, em segundos desde 1970: a hora de uma
+/// pendente, como o `agora_em_segundos` do desktop.
+pub fn atender(
+    ligacao: Option<&mut Ligacao>,
+    comando: &str,
+    args: &Value,
+    pagina: &mut DaPagina,
+    agora_s: i64,
+) -> Option<Atendido> {
+    if !COMANDOS_DA_SESSAO.contains(&comando) {
+        return None;
+    }
+    // Os dois da busca que o desktop responde sem sessão.
+    match comando {
+        "busca_andar" => {
+            let a = Args { comando, args };
+            return Some(a.booleano("adiante").map(|adiante| {
+                feito(pagina.busca.as_mut().map_or_else(estado_vazio, |busca| {
+                    if adiante {
+                        busca.next_match();
+                    } else {
+                        busca.previous_match();
+                    }
+                    estado_da_busca(busca)
+                }))
+            }));
+        }
+        "busca_limpar" => {
+            pagina.busca = None;
+            return Some(Ok(feito(Value::Null)));
+        }
+        // O codec que o navegador codifica, para a sonda de antes da sessão.
+        "codec_da_tela" => return Some(Ok(feito(json!(crate::tela::CODEC_DO_NAVEGADOR)))),
+        "destino_de_previa" => {
+            let a = Args { comando, args };
+            return Some(
+                a.texto("host")
+                    .map(|host| feito(json!(seele_sessao::preview::host_de_previa(&host)))),
+            );
+        }
+        "midia_da_pagina" => {
+            let a = Args { comando, args };
+            return Some(a.texto("html").map(|html| {
+                feito(json!(seele_sessao::preview::midia_declarada_pela_pagina(
+                    &html
+                )))
+            }));
+        }
+        _ => {}
+    }
+    let Some(ligacao) = ligacao else {
+        return Some(Err(json!("NotConnected")));
+    };
+    ligacao.atender(comando, args, pagina, agora_s)
+}
+
+const fn feito(resposta: Value) -> Feito {
+    Feito {
+        resposta,
+        eventos: Vec::new(),
+        nao_saiu: None,
+    }
+}
+
+/// O `BuscaEstado` do desktop (`main.rs`): todos os casamentos, o do cursor,
+/// qual ele é dentro da mensagem, e a posição de um em diante.
+fn estado_da_busca(busca: &Search) -> Value {
+    let (posicao, total) = busca.position();
+    json!({
+        "casamentos": busca.matches(),
+        "atual": busca.current(),
+        "ordinal": busca.ordinal_in_message().and_then(|ordinal| u32::try_from(ordinal).ok()),
+        "posicao": u32::try_from(posicao).unwrap_or(0),
+        "total": u32::try_from(total).unwrap_or(0),
+    })
+}
+
+/// O `BuscaEstado::default()`: sem busca guardada.
+fn estado_vazio() -> Value {
+    json!({ "casamentos": [], "atual": null, "ordinal": null, "posicao": 0, "total": 0 })
+}
+
 impl Ligacao {
-    /// Atende um comando da casca. `None` quando o comando não é desta camada.
-    ///
-    /// `agora_s` é o relógio da página, em segundos desde 1970: a hora de uma
-    /// pendente, como o `agora_em_segundos` do desktop.
+    /// Atende um comando da sessão desta ligação. `None` quando o comando não
+    /// é desta camada.
     pub fn atender(
         &mut self,
         comando: &str,
         args: &Value,
-        chaves: &mut Chaves,
+        pagina: &mut DaPagina,
         agora_s: i64,
     ) -> Option<Atendido> {
         if !COMANDOS_DA_SESSAO.contains(&comando) {
@@ -158,7 +285,7 @@ impl Ligacao {
             return Some(Err(json!("NotConnected")));
         };
         let mut saida = Saida::default();
-        let resposta = match atender_na_sessao(sessao, comando, args, chaves, agora_s, &mut saida) {
+        let resposta = match atender_na_sessao(sessao, comando, args, pagina, agora_s, &mut saida) {
             Ok(resposta) => resposta,
             Err(erro) => return Some(Err(erro)),
         };
@@ -194,7 +321,7 @@ fn atender_na_sessao(
     sessao: &mut Sessao,
     comando: &str,
     args: &Value,
-    chaves: &mut Chaves,
+    pagina: &mut DaPagina,
     agora_s: i64,
     saida: &mut Saida,
 ) -> Result<Value, Value> {
@@ -219,7 +346,7 @@ fn atender_na_sessao(
             if corpo.is_empty() {
                 return Ok(json!(""));
             }
-            let chave = chaves.tirar();
+            let chave = pagina.chaves.tirar();
             sessao
                 .room
                 .anotar_envio(channel, chave, corpo.clone(), agora_s);
@@ -292,6 +419,26 @@ fn atender_na_sessao(
             Ok(Value::Null)
         }
         "messages" => Ok(Value::Array(conversa_de(&sessao.room))),
+        // Sobre os corpos que o `messages` devolve, crus e com as pendentes,
+        // como o `buscar` do desktop; o cursor atravessa a reconstrução
+        // (`Search::resume_at`).
+        "buscar" => {
+            let termo = a.texto("termo")?;
+            let conversa = conversa_de(&sessao.room);
+            let corpos = conversa.iter().map(|mensagem| {
+                mensagem
+                    .get("body")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+            });
+            let mut busca = Search::new(corpos, &termo);
+            if let Some(anterior) = pagina.busca.as_ref().and_then(Search::current) {
+                busca.resume_at(anterior);
+            }
+            let estado = estado_da_busca(&busca);
+            pagina.busca = Some(busca);
+            Ok(estado)
+        }
         "membros_fora_do_ar" => Ok(Value::Array(fora_do_ar_de(&sessao.room))),
         "dispensar_aviso" => {
             if sessao.room.dispensar_aviso() {
@@ -312,6 +459,72 @@ fn atender_na_sessao(
             Ok(json!(sessao.room.person_icons.get(&pessoa).map(
                 |png| format!("data:image/png;base64,{}", base64(png))
             )))
+        }
+        // Pede um anexo ao servidor, que o manda num fluxo próprio; diz o que o
+        // histórico sabe dele (o nome, o tipo alegado e o tamanho), ou `null`.
+        "pedir_anexo" => {
+            let anexo = a.u64("anexo")?;
+            saida.mensagens.push(ClientMessage::FetchAttachment {
+                attachment: seele_proto::ids::AttachmentId(anexo),
+            });
+            Ok(descricao_do_anexo(&sessao.room, anexo))
+        }
+        // O `destino_de` do desktop, com a pasta que a página diz: o anexo do
+        // histórico, o nome conferido pelas regras de lá, e o nome ao lado.
+        "destino_do_anexo" => {
+            let anexo = a.u64("anexo")?;
+            let pasta = a.texto("pasta")?;
+            let Some((nome, _, _)) = crate::previa::anexo_no_historico(&sessao.room, anexo) else {
+                return Err(
+                    json!({ "reason": "AnexoDesconhecido", "claimed": "", "folder": pasta }),
+                );
+            };
+            let mostrado = seele_sessao::nome_do_anexo::para_mostrar(&nome);
+            match seele_sessao::nome_do_anexo::nome_seguro(&nome) {
+                Ok(seguro) => Ok(json!({
+                    "folder": pasta,
+                    "file_name": seguro,
+                    "beside": seele_sessao::nome_do_anexo::nome_ao_lado(seguro, 2),
+                })),
+                Err(_) => {
+                    Err(json!({ "reason": "NomeRecusado", "claimed": mostrado, "folder": pasta }))
+                }
+            }
+        }
+        // O que vai na frente dos bytes de um anexo que sobe: o tipo do fluxo e
+        // o `AttachmentHeader` enquadrado, com a chave da página (o número que o
+        // `enviar_anexo` do desktop devolve). O hash é o dos bytes, em hex.
+        "cabecalho_do_anexo" => {
+            let hash = a.texto("hash")?;
+            let Some(content_hash) = crate::ligacao::bytes_do_hex(&hash) else {
+                return Err(json!(format!(
+                    "invalid args `hash` for command `{comando}`: esperava 32 bytes em hex"
+                )));
+            };
+            let chave = pagina.chaves.tirar();
+            let cabecalho = seele_proto::attachment::AttachmentHeader {
+                channel: ChannelId(a.u32("channel")?),
+                client_message_id: chave,
+                body: a.texto("body")?,
+                replies_to: None,
+                file_name: a.texto("nome")?,
+                declared_type: a.texto("tipo")?,
+                declared_len: a.u64("tamanho")?,
+                content_hash,
+            };
+            let mut fluxo = vec![seele_proto::stream::StreamType::Attachment.byte()];
+            let enquadrado =
+                seele_proto::control::encode_em(seele_proto::version::PROTOCOL_VERSION, &cabecalho)
+                    .and_then(|quadro| seele_proto::quadro::enquadrar(&quadro));
+            match enquadrado {
+                Ok(bytes) => {
+                    fluxo.extend(bytes);
+                    Ok(json!({ "id": chave.get(), "cabecalho": fluxo }))
+                }
+                // O que o fio não leva cai como a transferência do desktop cai:
+                // a página o diz com o número, e nada sobe.
+                Err(erro) => Ok(json!({ "id": chave.get(), "recusa": format!("{erro:?}") })),
+            }
         }
         "mod_request" => {
             saida.mensagens.push(ClientMessage::ModRequest {
@@ -406,9 +619,12 @@ fn atender_na_sessao(
         }
         // A resposta é o `ChannelWeighed`, e quem espera por ela é a ponte.
         "peso_da_linha" => {
-            saida.mensagens.push(ClientMessage::WeighChannel {
-                channel: ChannelId(a.u32("channel")?),
-            });
+            let channel = ChannelId(a.u32("channel")?);
+            // Guardado **antes** de sair, como o `pending_weights` do desktop.
+            sessao.pesos_pendentes.push_back(channel);
+            saida
+                .mensagens
+                .push(ClientMessage::WeighChannel { channel });
             Ok(Value::Null)
         }
         "aplicar_icone_do_server" => {
@@ -479,6 +695,21 @@ fn atender_na_sessao(
             "sala": sessao.room.sala_confirmada().map(|sala| sala.0),
             "voz": sessao.room.ssrc.map(|ssrc| ssrc.0),
         })),
+        // A ordem dos erros é a do desktop: quem não está na sala, e depois a
+        // página sem áudio (`comAudio`, que a ponte diz).
+        "set_volume" => {
+            let apelido = a.texto("nickname")?;
+            let percent = a.u16("percent")?;
+            if sessao.room.ssrc_of(&apelido).is_none() {
+                return Err(json!("UnknownPerson"));
+            }
+            if !a.booleano("comAudio")? {
+                return Err(json!("NoAudioDevice"));
+            }
+            sessao.guardar_volume(&apelido, percent);
+            Ok(Value::Null)
+        }
+        "volumes_locais" => Ok(json!(sessao.volumes())),
         "set_muted" => {
             saida
                 .mensagens
@@ -514,6 +745,45 @@ fn atender_na_sessao(
             });
             Ok(Value::Null)
         }
+        // **A tela que esta ponta compartilha** (3.10): o pedido fica guardado
+        // (o `minha_transmissao.pedido` do retrato), e o servidor responde com o
+        // `ScreenShareStarted` que abre o fluxo. Quem captura é a página.
+        "compartilhar_tela" => {
+            let limites = a.limites("limites")?;
+            sessao.pedir(Some(limites));
+            saida.mensagens.push(ClientMessage::StartScreenShare);
+            Ok(Value::Null)
+        }
+        // Idempotente: o pedido sai, e o servidor fica sabendo.
+        "parar_de_compartilhar" => {
+            sessao.pedir(None);
+            saida.mensagens.push(ClientMessage::StopScreenShare);
+            Ok(Value::Null)
+        }
+        // Só com a transmissão no ar, e nada no fio: o teto é desta ponta.
+        "ajustar_limites_da_tela" => {
+            let limites = a.limites("limites")?;
+            if seele_sessao::retrato::minha_tela_de(&sessao.room, None).is_some() {
+                sessao.pedir(Some(limites));
+            }
+            Ok(Value::Null)
+        }
+        "codificacao_da_tela" => Ok(crate::tela::codificacao(
+            &a.limites("limites")?,
+            a.u32("largura")?,
+            a.u32("altura")?,
+        )),
+        "abertura_da_tela" => {
+            let lado = |nome: &str| -> Result<u16, Value> { a.u16(nome) };
+            crate::tela::abertura(
+                a.u32("tela")?,
+                a.booleano("monitor")?,
+                lado("largura")?,
+                lado("altura")?,
+            )
+            .map(|bytes| json!(bytes))
+            .map_err(|motivo| json!(format!("a abertura da tela: {motivo}")))
+        }
         "pedir_quadro_chave" => {
             saida.mensagens.push(ClientMessage::RequestKeyFrame {
                 screen: ScreenId(a.u32("tela")?),
@@ -522,6 +792,14 @@ fn atender_na_sessao(
         }
         _ => Err(json!({ "ComandoDesconhecido": { "comando": comando } })),
     }
+}
+
+/// O que o histórico sabe de um anexo: `{nome, tipo, tamanho}`, ou `null`.
+fn descricao_do_anexo(room: &seele_sessao::state::Room, anexo: u64) -> Value {
+    crate::previa::anexo_no_historico(room, anexo).map_or(
+        Value::Null,
+        |(nome, tipo, tamanho)| json!({ "nome": nome, "tipo": tipo, "tamanho": tamanho }),
+    )
 }
 
 /// O corpo acima do teto do fio: o `volta::grande_demais` da FFI.
@@ -618,36 +896,24 @@ impl Args<'_> {
             .collect()
     }
 
+    fn limites(&self, nome: &str) -> Result<seele_sessao::retrato::LimitesDeTela, Value> {
+        self.campo(nome)
+            .cloned()
+            .and_then(|valor| serde_json::from_value(valor).ok())
+            .ok_or_else(|| self.invalido(nome, "os limites da tela"))
+    }
+
     fn bytes_opcional(&self, nome: &str) -> Result<Option<Vec<u8>>, Value> {
         self.campo(nome).map(|_| self.bytes(nome)).transpose()
     }
 }
 
-/// Base64 padrão, com o preenchimento: o `base64_de` da FFI.
+/// Base64 padrão, com o preenchimento: o codificador do produto
+/// (`seele_sessao::preview`), o mesmo alfabeto do `base64_de` da FFI.
 #[must_use]
 pub fn base64(bytes: &[u8]) -> String {
-    const ALFABETO: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let letra = |indice: u32| {
-        ALFABETO
-            .get((indice & 63) as usize)
-            .copied()
-            .map_or('=', char::from)
-    };
     let mut texto = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for bloco in bytes.chunks(3) {
-        let b0 = bloco.first().copied().map_or(0, u32::from);
-        let b1 = bloco.get(1).copied().map_or(0, u32::from);
-        let b2 = bloco.get(2).copied().map_or(0, u32::from);
-        let junto = (b0 << 16) | (b1 << 8) | b2;
-        texto.push(letra(junto >> 18));
-        texto.push(letra(junto >> 12));
-        texto.push(if bloco.len() > 1 {
-            letra(junto >> 6)
-        } else {
-            '='
-        });
-        texto.push(if bloco.len() > 2 { letra(junto) } else { '=' });
-    }
+    seele_sessao::preview::encode_base64_publico(bytes, &mut texto);
     texto
 }
 
@@ -710,7 +976,7 @@ mod tests {
         quadros
     }
 
-    fn atender(ligacao: &mut Ligacao, chaves: &mut Chaves, comando: &str, args: Value) -> Feito {
+    fn atender(ligacao: &mut Ligacao, chaves: &mut DaPagina, comando: &str, args: Value) -> Feito {
         ligacao
             .atender(comando, &args, chaves, 1_790_000_000)
             .expect("um comando da sessão")
@@ -727,7 +993,7 @@ mod tests {
             aceito: None,
         })
         .unwrap();
-        let mut chaves = Chaves::com_semente(SEMENTE);
+        let mut chaves = DaPagina::nova(SEMENTE);
         assert_eq!(
             ligacao.atender("messages", &json!({}), &mut chaves, 0),
             Some(Err(json!("NotConnected")))
@@ -741,7 +1007,7 @@ mod tests {
     #[test]
     fn abrir_o_canal_pede_a_entrada_e_o_historico_e_avisa_a_conversa() {
         let mut ligacao = dentro();
-        let mut chaves = Chaves::com_semente(SEMENTE);
+        let mut chaves = DaPagina::nova(SEMENTE);
         let feito = atender(
             &mut ligacao,
             &mut chaves,
@@ -771,7 +1037,7 @@ mod tests {
     #[test]
     fn a_mensagem_sai_aparada_com_a_chave_da_pagina_e_fica_pendente() {
         let mut ligacao = dentro();
-        let mut chaves = Chaves::com_semente(SEMENTE);
+        let mut chaves = DaPagina::nova(SEMENTE);
         let _ = atender(
             &mut ligacao,
             &mut chaves,
@@ -825,7 +1091,7 @@ mod tests {
     #[test]
     fn a_mensagem_grande_demais_fica_recusada_e_nao_sai() {
         let mut ligacao = dentro();
-        let mut chaves = Chaves::com_semente(SEMENTE);
+        let mut chaves = DaPagina::nova(SEMENTE);
         let _ = atender(
             &mut ligacao,
             &mut chaves,
@@ -891,7 +1157,7 @@ mod tests {
     #[test]
     fn reenviar_manda_de_novo_com_a_mesma_chave() {
         let mut ligacao = dentro();
-        let mut chaves = Chaves::com_semente(SEMENTE);
+        let mut chaves = DaPagina::nova(SEMENTE);
         let _ = atender(
             &mut ligacao,
             &mut chaves,
@@ -925,7 +1191,7 @@ mod tests {
     #[test]
     fn a_entrada_na_sala_leva_o_ping_marcado_e_a_senha_longa_e_recusada_aqui() {
         let mut ligacao = dentro();
-        let mut chaves = Chaves::com_semente(SEMENTE);
+        let mut chaves = DaPagina::nova(SEMENTE);
         let feito = atender(
             &mut ligacao,
             &mut chaves,
@@ -976,7 +1242,7 @@ mod tests {
     #[test]
     fn assistir_segue_os_tres_estados_da_ffi() {
         let mut ligacao = dentro();
-        let mut chaves = Chaves::com_semente(SEMENTE);
+        let mut chaves = DaPagina::nova(SEMENTE);
         // Ninguém escolheu: não querer a 3 vira «nenhuma», e avisa.
         let feito = atender(
             &mut ligacao,
@@ -1014,7 +1280,7 @@ mod tests {
     #[test]
     fn nomes_em_branco_nao_saem_e_os_compridos_saem_ditos() {
         let mut ligacao = dentro();
-        let mut chaves = Chaves::com_semente(SEMENTE);
+        let mut chaves = DaPagina::nova(SEMENTE);
         for (comando, args) in [
             ("criar_linha", json!({ "name": "  " })),
             ("renomear_linha", json!({ "channel": 1, "name": "" })),
@@ -1058,8 +1324,8 @@ mod tests {
     #[test]
     fn os_erros_sao_os_do_desktop() {
         let mut ligacao = dentro();
-        let mut chaves = Chaves::com_semente(SEMENTE);
-        let erro = |ligacao: &mut Ligacao, chaves: &mut Chaves, comando: &str, args: Value| {
+        let mut chaves = DaPagina::nova(SEMENTE);
+        let erro = |ligacao: &mut Ligacao, chaves: &mut DaPagina, comando: &str, args: Value| {
             ligacao
                 .atender(comando, &args, chaves, 0)
                 .unwrap()
@@ -1106,6 +1372,285 @@ mod tests {
         assert_eq!(
             escritos(&mut ligacao),
             vec![ClientMessage::SetServerIcon { icon: None }]
+        );
+    }
+
+    #[test]
+    fn a_busca_e_a_do_desktop_e_o_cursor_atravessa_a_reconstrucao() {
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        // Sem busca, andar e limpar respondem sem sessão, como no desktop.
+        assert_eq!(
+            atender_sem_ligacao(&mut chaves, "busca_andar", json!({ "adiante": true })),
+            Ok(estado_vazio())
+        );
+        assert_eq!(
+            atender_sem_ligacao(&mut chaves, "buscar", json!({ "termo": "x" })),
+            Err(json!("NotConnected"))
+        );
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "open_channel",
+            json!({ "channel": 1 }),
+        );
+        for corpo in ["sync caiu", "o Sync voltou", "e o SYNC nem caiu"] {
+            let _ = atender(
+                &mut ligacao,
+                &mut chaves,
+                "send_message",
+                json!({ "channel": 1, "body": corpo }),
+            );
+        }
+        let achou = atender(
+            &mut ligacao,
+            &mut chaves,
+            "buscar",
+            json!({ "termo": "sync" }),
+        )
+        .resposta;
+        assert_eq!(achou["total"], 3);
+        assert_eq!(achou["posicao"], 1);
+        assert_eq!(
+            achou["atual"],
+            json!({ "message": 0, "start": 0, "end": 4 })
+        );
+        let andou =
+            atender_sem_ligacao(&mut chaves, "busca_andar", json!({ "adiante": true })).unwrap();
+        assert_eq!(andou["posicao"], 2);
+        // Uma mensagem nova e a busca de novo: o cursor fica na segunda.
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "send_message",
+            json!({ "channel": 1, "body": "sync" }),
+        );
+        let refeita = atender(
+            &mut ligacao,
+            &mut chaves,
+            "buscar",
+            json!({ "termo": "sync" }),
+        )
+        .resposta;
+        assert_eq!(
+            (refeita["posicao"].clone(), refeita["total"].clone()),
+            (json!(2), json!(4))
+        );
+        // E dá a volta pela ponta de trás.
+        let _ = atender_sem_ligacao(&mut chaves, "busca_limpar", json!({}));
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "buscar",
+            json!({ "termo": "sync" }),
+        );
+        let volta =
+            atender_sem_ligacao(&mut chaves, "busca_andar", json!({ "adiante": false })).unwrap();
+        assert_eq!(volta["posicao"], 4);
+    }
+
+    #[test]
+    fn o_volume_segue_o_apelido_e_a_ordem_dos_erros_e_a_do_desktop() {
+        let mut ligacao = dentro();
+        let mut pagina = DaPagina::nova(SEMENTE);
+        let _ = ligacao.chegou(&do_servidor(&ServerMessage::PersonPresent {
+            profile: seele_proto::control::PersonProfile {
+                id: PersonId(8),
+                nickname: "Ana".into(),
+                roles: Vec::new(),
+                material_e2ee: None,
+            },
+            ssrc: Ssrc(800),
+        }));
+        let erro = |ligacao: &mut Ligacao, pagina: &mut DaPagina, args: Value| {
+            ligacao
+                .atender("set_volume", &args, pagina, 0)
+                .unwrap()
+                .err()
+        };
+        assert_eq!(
+            erro(
+                &mut ligacao,
+                &mut pagina,
+                json!({ "nickname": "bia", "percent": 50, "comAudio": false })
+            ),
+            Some(json!("UnknownPerson"))
+        );
+        assert_eq!(
+            erro(
+                &mut ligacao,
+                &mut pagina,
+                json!({ "nickname": "ana", "percent": 50, "comAudio": false })
+            ),
+            Some(json!("NoAudioDevice"))
+        );
+        assert_eq!(
+            erro(
+                &mut ligacao,
+                &mut pagina,
+                json!({ "nickname": "ana", "percent": 900, "comAudio": true })
+            ),
+            None
+        );
+        assert_eq!(ligacao.sessao().unwrap().ganhos(), vec![(800, 4.0)]);
+        // Outra caixa, o mesmo nome: substitui.
+        let _ = erro(
+            &mut ligacao,
+            &mut pagina,
+            json!({ "nickname": "ANA", "percent": 50, "comAudio": true }),
+        );
+        assert_eq!(
+            atender(&mut ligacao, &mut pagina, "volumes_locais", json!({})).resposta,
+            json!({ "ANA": 50 })
+        );
+        // Trocou de nome: o volume vai junto. Voltou com outra SSRC: o ganho também.
+        let _ = ligacao.chegou(&do_servidor(&ServerMessage::PersonRenamed {
+            person: PersonId(8),
+            nickname: "aninha".into(),
+        }));
+        assert_eq!(
+            atender(&mut ligacao, &mut pagina, "volumes_locais", json!({})).resposta,
+            json!({ "aninha": 50 })
+        );
+        let _ = ligacao.chegou(&do_servidor(&ServerMessage::PersonPresent {
+            profile: seele_proto::control::PersonProfile {
+                id: PersonId(8),
+                nickname: "aninha".into(),
+                roles: Vec::new(),
+                material_e2ee: None,
+            },
+            ssrc: Ssrc(801),
+        }));
+        assert_eq!(ligacao.sessao().unwrap().ganhos(), vec![(801, 0.5)]);
+    }
+
+    fn atender_sem_ligacao(
+        pagina: &mut DaPagina,
+        comando: &str,
+        args: Value,
+    ) -> Result<Value, Value> {
+        super::atender(None, comando, &args, pagina, 0)
+            .expect("um comando da sessão")
+            .map(|feito| feito.resposta)
+    }
+
+    #[test]
+    fn o_anexo_tem_destino_pelas_regras_do_nome_e_o_cabecalho_volta_lido() {
+        use seele_proto::attachment::AttachmentHeader;
+        use seele_proto::control::{AttachmentInfo, AttachmentState};
+        use seele_proto::ids::{AttachmentId, MessageId};
+        let mut ligacao = dentro();
+        let mut pagina = DaPagina::nova(SEMENTE);
+        for (id, nome) in [
+            (1_u64, "foto.png"),
+            (2, "../.zshrc"),
+            (3, "foto\u{202E}gnp.exe"),
+        ] {
+            let _ = ligacao.chegou(&do_servidor(&ServerMessage::MessageReceived {
+                channel: ChannelId(1),
+                id: MessageId(100 + id),
+                author: PersonId(8),
+                at_seconds: 1,
+                author_nickname: "ana".into(),
+                body: String::new(),
+                replies_to: None,
+                client_message_id: None,
+                attachment: Some(AttachmentInfo {
+                    id: AttachmentId(id),
+                    file_name: nome.into(),
+                    declared_type: "image/png".into(),
+                    byte_size: 10,
+                    state: AttachmentState::Available,
+                }),
+            }));
+        }
+        let destino = |ligacao: &mut Ligacao, pagina: &mut DaPagina, anexo: u64| {
+            ligacao
+                .atender(
+                    "destino_do_anexo",
+                    &json!({ "anexo": anexo, "pasta": "Downloads" }),
+                    pagina,
+                    0,
+                )
+                .unwrap()
+                .map(|feito| feito.resposta)
+        };
+        assert_eq!(
+            destino(&mut ligacao, &mut pagina, 1),
+            Ok(json!({ "folder": "Downloads", "file_name": "foto.png", "beside": "foto (2).png" }))
+        );
+        assert_eq!(
+            destino(&mut ligacao, &mut pagina, 2).unwrap_err()["reason"],
+            "NomeRecusado"
+        );
+        let invisivel = destino(&mut ligacao, &mut pagina, 3).unwrap_err();
+        assert_eq!(invisivel["reason"], "NomeRecusado");
+        assert!(
+            !invisivel["claimed"].as_str().unwrap().contains('\u{202E}'),
+            "{invisivel}"
+        );
+        assert_eq!(
+            destino(&mut ligacao, &mut pagina, 9),
+            Err(json!({ "reason": "AnexoDesconhecido", "claimed": "", "folder": "Downloads" }))
+        );
+
+        let feito = atender(
+            &mut ligacao,
+            &mut pagina,
+            "cabecalho_do_anexo",
+            json!({ "channel": 1, "body": " oi ", "nome": "a.txt", "tipo": "text/plain", "tamanho": 3, "hash": "ab".repeat(32) }),
+        );
+        let bytes: Vec<u8> = feito.resposta["cabecalho"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|byte| u8::try_from(byte.as_u64().unwrap()).unwrap())
+            .collect();
+        assert_eq!(bytes[0], seele_proto::stream::StreamType::Attachment.byte());
+        let mut leitor = Desenquadrador::default();
+        leitor.empurrar(&bytes[1..]);
+        let lido: AttachmentHeader = decode(&leitor.proximo().unwrap().unwrap()).unwrap();
+        assert_eq!(
+            lido.client_message_id.get(),
+            feito.resposta["id"].as_u64().unwrap()
+        );
+        assert_eq!(
+            (lido.body.as_str(), lido.declared_len, lido.content_hash),
+            (" oi ", 3, [0xab; 32])
+        );
+        // Um anexo vazio não sai: a recusa vem com o número, como a queda do desktop.
+        let vazio = atender(
+            &mut ligacao,
+            &mut pagina,
+            "cabecalho_do_anexo",
+            json!({ "channel": 1, "body": "", "nome": "a.txt", "tipo": "text/plain", "tamanho": 0, "hash": "ab".repeat(32) }),
+        );
+        assert!(vazio.resposta["recusa"].is_string() && vazio.resposta["id"].is_u64());
+    }
+
+    #[test]
+    fn as_regras_da_previa_de_link_respondem_sem_sessao() {
+        let mut pagina = DaPagina::nova(SEMENTE);
+        for (host, vale) in [
+            ("tenor.com", true),
+            ("127.0.0.1", false),
+            ("[::ffff:192.168.0.1]", false),
+            ("roteador.local", false),
+            ("10.0.0.8", false),
+        ] {
+            assert_eq!(
+                atender_sem_ligacao(&mut pagina, "destino_de_previa", json!({ "host": host })),
+                Ok(json!(vale)),
+                "{host}"
+            );
+        }
+        assert_eq!(
+            atender_sem_ligacao(
+                &mut pagina,
+                "midia_da_pagina",
+                json!({ "html": r#"<META property="og:image" content="https://media.tenor.com/a.gif?x=1&amp;y=2">"# })
+            ),
+            Ok(json!("https://media.tenor.com/a.gif?x=1&y=2"))
         );
     }
 

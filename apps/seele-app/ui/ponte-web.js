@@ -304,52 +304,17 @@ const TAREFA_MODS = "2.6 e 3.4 (os MODs da sessão)";
 
 /** Atendidos que ainda não têm corpo, com a tarefa do plano que os traz. */
 const AINDA_A_FAZER = new Map([
-  ["aceitar_mods", TAREFA_34],
-  ["aceite_de_mods", TAREFA_34],
-  ["aceites_de_mods", TAREFA_34],
-  ["ajustar_limites_da_tela", TAREFA_310],
-  ["ajustar_volume_da_tela", TAREFA_39],
-  ["analisar_convite", TAREFA_34],
-  // O texto colado em CONECTAR e o CANCELAR de quem liga (tarefas 30 e 28 da
-  // F7): o navegador não liga pelo código na 0.16.
-  ["ler_entrada", TAREFA_34],
-  ["cancelar_ligacao", TAREFA_34],
-  ["busca_andar", TAREFA_26],
-  ["busca_limpar", TAREFA_26],
-  ["buscar", TAREFA_26],
-  ["calar_a_tela", TAREFA_39],
   ["codigo_do_mod", TAREFA_MODS],
-  ["compartilhar_tela", TAREFA_310],
-  ["conhecidos", TAREFA_34],
-  ["destino_do_anexo", TAREFA_26],
-  ["enviar_anexo", TAREFA_26],
   ["enviar_imagem_mod", TAREFA_MODS],
-  ["escolher_icone_do_server", TAREFA_26],
-  ["escolher_minha_imagem", TAREFA_26],
   ["escolher_para_o_mod", TAREFA_MODS],
-  ["esquecer", TAREFA_34],
-  ["esquecer_aceite_de_mods", TAREFA_34],
-  ["exclusao_do_som_da_captura", TAREFA_310],
-  ["fontes_de_tela", TAREFA_310],
   ["instalar_mod_do_catalogo", TAREFA_MODS],
-  ["lembrar_aparencia_do_servidor", TAREFA_26],
   ["ler_imagem_mod", TAREFA_MODS],
   ["midia_do_mod", TAREFA_MODS],
   ["midia_em_bytes", TAREFA_MODS],
   ["mods_instalados", TAREFA_MODS],
-  ["parar_de_compartilhar", TAREFA_310],
   ["pedaco_do_escolhido", TAREFA_MODS],
-  ["pedir_permissao_de_tela", TAREFA_310],
-  ["permissao_de_tela", TAREFA_310],
-  ["preparar_icone_do_server", TAREFA_26],
-  ["prever_anexo", TAREFA_26],
-  ["previa_de_link", TAREFA_26],
-  ["salvar_anexo", TAREFA_26],
-  ["set_volume", TAREFA_33],
   ["soltar_escolhido", TAREFA_MODS],
-  ["som_da_tela", TAREFA_39],
   ["som_do_mod", TAREFA_MODS],
-  ["tirar_minha_imagem", TAREFA_26]
 ]);
 
 /**
@@ -448,9 +413,101 @@ async function sairDaSessaoDaPonte() {
   sessaoDaPonte.atual = null;
   ALCAS_DA_PONTE.clear();
   fecharAVozDaSessao();
+  sessao?.transmissao?.fechar();
   await sessao?.encerrar?.();
   return null;
 }
+
+// ------------------------------------------- a entrada pela casca larga
+
+/**
+ * **O link colado no SERVIDORES** (`analisar_convite`), só na memória e só até
+ * o `connect` que o usa: é o caminho do segredo do convite na casca larga do PC
+ * (D-web-3), como a tentativa da identidade o é no celular. O `connect` o
+ * entrega à identidade, que o abre e entra; ninguém mais o lê.
+ */
+let linkColadoDaPonte = null;
+
+/** A entrada em curso, para o `cancelar_ligacao`. */
+const entradaEmCurso = { cancelar: null };
+
+/** As frases dos links que o navegador não abre, pelo erro do `analisar_link`. */
+const FRASES_DO_LINK = Object.freeze({
+  OutraOrigem: "este não é um link do navegador para o SEELE: peça a quem hospeda o link do navegador",
+  SemHashesDoNavegador:
+    "este link é de um servidor que não recebe o navegador (um Servidor 0.15, ou o link do app): peça a quem hospeda o link do navegador",
+  SemFragmento: "o link chegou sem o servidor: copie-o de novo, inteiro",
+  ConsultaForaDoFragmento: "o link chegou partido: copie-o de novo, inteiro",
+  SemImpressaoDigital: "o link chegou sem a impressão do servidor: copie-o de novo, inteiro",
+  Convite: "o link chegou incompleto ou alterado: copie-o de novo, inteiro",
+});
+
+/** As entradas pela identidade que acabam antes do servidor, com a frase. */
+const FRASES_DA_IDENTIDADE = Object.freeze({
+  "link-vencido": "o link deste servidor venceu, e ele não trouxe um novo: peça a quem hospeda um link novo",
+  "convite-vencido": "este link venceu: peça a quem hospeda um link novo",
+  "sem-tentativa": "outra entrada começou no meio desta",
+});
+
+/** O link lido pelo `.wasm` da página, com as regras do produto. */
+async function lerOLink(texto) {
+  const { instancia } = await carregarOWasmDaPagina();
+  return analisadorDoWasm(instancia.exports)(texto);
+}
+
+/**
+ * **O `connect` da casca larga**: um endereço em texto, como o desktop o
+ * recebe. A chave e os hashes estão com a identidade: o link colado que ainda
+ * espera, a tentativa que ela tem aberta (a volta depois do aceite de MODs), ou
+ * um servidor deste aparelho. Um endereço que ela não conhece não traz a chave
+ * que confere quem atendeu, e é recusado com a frase.
+ */
+async function entrarPeloEndereco({ server, nickname } = {}) {
+  const identidade = await identidadeDaPagina();
+  const apelido = (nickname ?? "").trim() || guardadoNaOrigem(CHAVES_DA_ORIGEM.apelido) || "pessoa";
+  let resultado;
+  if (linkColadoDaPonte?.alvo === server) {
+    const { texto } = linkColadoDaPonte;
+    linkColadoDaPonte = null;
+    await identidade.abrir(texto);
+    resultado = await identidade.entrar(apelido);
+  } else if (identidade.ler()?.endereco === server) {
+    resultado = await identidade.entrar(apelido);
+  } else {
+    const conhecido = (await identidade.conhecidos()).find((servidor) => servidor.endereco === server);
+    if (!conhecido) {
+      return Promise.reject({ RecusaDaPonte: { comando: "connect", frase: RECUSA_ENDERECO_SOZINHO } });
+    }
+    resultado = await identidade.entrarNoConhecido(conhecido.impressao, apelido);
+  }
+  if (resultado.ok) return resultado.resposta;
+  if (resultado.motivo !== undefined) return Promise.reject(resultado.motivo);
+  const frase = FRASES_DA_IDENTIDADE[resultado.erro] ?? resultado.razao ?? resultado.erro;
+  return Promise.reject({ RecusaDaPonte: { comando: "connect", frase } });
+}
+
+/**
+ * A impressão do servidor de um endereço: o da sessão aberta, o do link colado,
+ * ou um deste aparelho. Os aceites de MODs são guardados por ela, e a casca do
+ * desktop pergunta pelo endereço.
+ */
+async function impressaoDoEndereco(alvo) {
+  const sessao = sessaoDaPonte.atual;
+  if (sessao?.alvo?.endereco === alvo) return sessao.alvo.impressao;
+  if (linkColadoDaPonte?.alvo === alvo) return linkColadoDaPonte.impressao;
+  try {
+    const identidade = await identidadeDaPagina();
+    return (await identidade.conhecidos()).find((servidor) => servidor.endereco === alvo)?.impressao ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** A fonte da tela no navegador: quem escolhe é o seletor dele. */
+const FONTE_DO_NAVEGADOR = "a tela ou a janela que o navegador oferecer";
+
+/** A captura que o navegador não deu (a pessoa fechou o seletor, ou a permissão está negada). */
+const RECUSA_DA_CAPTURA = "o navegador não deu a tela a esta página: escolha a tela ou a janela no seletor dele";
 
 /** Um endereço digitado não traz a chave do servidor: no navegador se entra pelo link. */
 const RECUSA_ENDERECO_SOZINHO =
@@ -463,8 +520,9 @@ const RECUSA_ENDERECO_SOZINHO =
  * origem_da_impressao, a_lista_guardou}`) e rejeita com o `ConnectionError`
  * dele, nu: é o que o `desfecho` da identidade lê.
  */
-async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret } = {}) {
+async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}) {
   if (!alvo || typeof alvo !== "object" || !alvo.chave) {
+    if (typeof server === "string") return entrarPeloEndereco({ server, nickname });
     return Promise.reject({ RecusaDaPonte: { comando: "connect", frase: RECUSA_ENDERECO_SOZINHO } });
   }
   if (sessaoDaPonte.atual && !sessaoDaPonte.atual.acabou) return Promise.reject("AlreadyConnected");
@@ -478,24 +536,39 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret } = {}) {
     console.warn("ponte: o .wasm da página não carregou para a sessão:", falha);
     return Promise.reject("Unreachable");
   }
-  const sessao = await abrirASessaoDoNavegador({
-    wasm,
-    alvo,
-    apelido: nickname ?? "",
-    convite: joinSecret ?? null,
-    aceito: aceiteDeModsGuardado(alvo.impressao),
-    emitir: (evento) => {
-      if (valeAinda()) emitirNaPonte("seele://event", evento);
-    },
-    aoAcabar: () => {
-      if (valeAinda()) fecharAVozDaSessao();
-    },
-    aoReceberOsHashes: (janelas) => {
-      identidadeDaPagina()
-        .then((identidade) => identidade.lembrarOsHashes(alvo.impressao, janelas))
-        .catch((falha) => console.warn("ponte: os hashes do servidor não ficaram guardados:", falha));
-    },
-  });
+  const cancelamento = { cancelada: false, aoCancelar: null };
+  entradaEmCurso.cancelar = () => {
+    cancelamento.cancelada = true;
+    cancelamento.aoCancelar?.();
+  };
+  let sessao;
+  try {
+    sessao = await abrirASessaoDoNavegador({
+      wasm,
+      alvo,
+      cancelamento,
+      apelido: nickname ?? "",
+      convite: joinSecret ?? null,
+      aceito: aceiteDeModsGuardado(alvo.impressao),
+      emitir: (evento) => {
+        if (!valeAinda()) return;
+        if (evento && evento.ScreenClosed) vozDaPonte.atual?.esquecerOSomDaTela(evento.ScreenClosed.screen);
+        emitirNaPonte("seele://event", evento);
+      },
+      aoAcabar: () => {
+        if (!valeAinda()) return;
+        fecharAVozDaSessao();
+        sessaoDaPonte.atual?.transmissao?.fechar();
+      },
+      aoReceberOsHashes: (janelas) => {
+        identidadeDaPagina()
+          .then((identidade) => identidade.lembrarOsHashes(alvo.impressao, janelas))
+          .catch((falha) => console.warn("ponte: os hashes do servidor não ficaram guardados:", falha));
+      },
+    });
+  } finally {
+    entradaEmCurso.cancelar = null;
+  }
   // Outra entrada começou enquanto esta abria: esta é solta, como a
   // substituída do desktop.
   if (!valeAinda()) {
@@ -505,8 +578,27 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret } = {}) {
   sessao.geracao = geracao;
   sessao.alvo = alvo;
   sessao.snapshot = () => retratoDaSessao(sessao);
-  sessao.aoDobrar = () => conferirAVozDaSessao(sessao);
+  sessao.transmissao = criarATransmissaoDoNavegador({
+    sessao,
+    wasm,
+    eu: () => sessao.retrato()?.sala?.me ?? null,
+    emitir: (evento) => {
+      if (valeAinda()) emitirNaPonte("seele://event", evento);
+    },
+  });
+  sessao.aoDobrar = (mensagem) => {
+    conferirAVozDaSessao(sessao);
+    sessao.transmissao.aoDobrar(mensagem);
+  };
+  sessao.aCadaVolta = () => seguirOsVolumes();
+  // O som da tela vai à mistura; a tela que fecha leva o dela.
+  sessao.aoSomDaTela = (tela, opus) => {
+    if (vozDaSessao.dentro) vozDaPonte.atual?.somDaTela(tela, Uint8Array.from(opus));
+  };
   sessaoDaPonte.atual = sessao;
+  // O retrato guardado sobe com a entrada, como no `connect` do desktop.
+  const retrato = bytesDoDataUri(guardadoNaOrigem(CHAVES_DA_ORIGEM.retrato));
+  if (retrato) sessao.atender("minha_imagem", { icone: Array.from(retrato) });
   aVozDaPonte().catch((falha) => console.warn("ponte: a voz da página não carregou:", falha));
   return {
     snapshot: sessao.snapshot(),
@@ -547,7 +639,7 @@ function retratoDaSessao(sessao) {
     total_isolation: voz.isolado,
     speaking: voz.falando,
     voice_mode: modoDeVozGuardado(),
-    audio_available: Boolean(navigator.mediaDevices?.getUserMedia) && typeof AudioContext === "function",
+    audio_available: audioDisponivel(),
     abertura_do_audio: voz.abertura,
     capture: null,
     playback: null,
@@ -556,10 +648,25 @@ function retratoDaSessao(sessao) {
   };
 }
 
-/** Um comando da sessão pelo `.wasm` (`seele_web::comandos`). */
+/**
+ * Um comando que o `.wasm` responde sem sessão (a busca, que é da página):
+ * pela ligação da página, aberta ou não.
+ */
+function pelaPagina(comando) {
+  return async (args) => {
+    const { instancia } = await carregarOWasmDaPagina();
+    const lido = fronteiraDaLigacao(instancia.exports).atender(comando, args);
+    return lido.codigo === 0 ? lido.resposta : Promise.reject(lido.erro);
+  };
+}
+
+/**
+ * Um comando da sessão pelo `.wasm` (`seele_web::comandos`), sempre numa
+ * promessa: o `.wasm` responde na hora, e quem chama encadeia como no `invoke`.
+ */
 function pelaSessao(comando) {
   return (args) =>
-    comASessao((sessao) => {
+    comASessao(async (sessao) => {
       const feito = sessao.atender(comando, args);
       if (!feito) return Promise.reject({ ComandoDesconhecido: { comando } });
       return "erro" in feito ? Promise.reject(feito.erro) : feito.resposta;
@@ -580,6 +687,9 @@ const vozDaSessao = {
   ligando: null,
   abertura: "fora_de_sala",
   falando: false,
+  /** O volume (0 a 4) e o mudo do som da tela, como o desktop os guarda. */
+  volumeDaTela: 1,
+  telaCalada: false,
   nivel: 0,
   bitrate: 0,
   recusados: 0,
@@ -639,7 +749,11 @@ function conferirAVozDaSessao(sessao) {
       voz.tecla(vozDaSessao.tecla);
       const sensibilidade = milesimosGuardados(CHAVES_DA_ORIGEM.sensibilidade);
       voz.regua(sensibilidade === null ? 0 : Math.round(sensibilidade * 1000));
+      voz.volumeDaTela(vozDaSessao.volumeDaTela);
+      voz.calarATela(vozDaSessao.telaCalada);
       voz.entrar(sessao.transporteDaVoz, numero);
+      // A recepção recomeça as alças: os ganhos se aplicam de novo.
+      ganhosAplicados.clear();
       mudarAAbertura("aberto");
     },
     (falha) => {
@@ -665,6 +779,28 @@ function fecharAVozDaSessao() {
     ligando.then(() => vozDaPonte.atual?.desligar()).catch(() => {});
   }
 }
+
+/** As alças cujo ganho já foi aplicado, e com que ganho. */
+const ganhosAplicados = new Map();
+
+/**
+ * **Os volumes seguem as pessoas**, como o `seguir_os_volumes` do desktop: a
+ * cada volta, o ganho de quem tem volume escolhido, pela alça de agora (quem
+ * voltou com outra voz ganha outra alça, e o mesmo ganho).
+ */
+function seguirOsVolumes() {
+  const sessao = sessaoDaPonte.atual;
+  const voz = vozDaPonte.atual;
+  if (!sessao || !voz || !vozDaSessao.dentro) return;
+  for (const [alca, ganho] of sessao.ganhosDaVoz()) {
+    if (ganhosAplicados.get(alca) === ganho) continue;
+    voz.ganho(alca, ganho);
+    ganhosAplicados.set(alca, ganho);
+  }
+}
+
+/** Se esta página pode ter áudio: o `quer_audio` do desktop. */
+const audioDisponivel = () => Boolean(navigator.mediaDevices?.getUserMedia) && typeof AudioContext === "function";
 
 /** O modo de voz guardado nesta origem (o `modo_de_voz_escolhido`). */
 function modoDeVozGuardado() {
@@ -778,6 +914,282 @@ function ouvirOArraste() {
       position: { x: evento.clientX ?? 0, y: evento.clientY ?? 0 },
     });
   });
+}
+
+// ------------------------------------------------------------- os anexos
+
+/** Onde o navegador grava um anexo salvo, para a frase do SALVAR: a página não vê a pasta. */
+const PASTA_DO_NAVEGADOR = "a pasta de downloads do navegador";
+
+/** O passo do andamento de um anexo: o bloco do `seele_proto::attachment`. */
+const BLOCO_DO_ANEXO = 64 * 1024;
+
+/** Um `TransferChanged` para a casca, como o do desktop. */
+const transferencia = (transfer) => emitirNaPonte("seele://event", { TransferChanged: { transfer } });
+
+/**
+ * **Um anexo pedido ao servidor**, inteiro na memória, ou o porquê de não.
+ * `teto` desiste ao saber o tamanho (a prévia não lê mais que o dela), e
+ * `aoAndar(feito, total)` diz o andamento. Resolve `{ bytes }`, `{ grande }`
+ * ou `{ naoVeio }`, sempre com a `descricao` que o histórico tem dele (o nome,
+ * o tipo alegado, o tamanho); rejeita `"NotConnected"` se a sessão acaba antes.
+ */
+function receberUmAnexo(sessao, anexo, opcoes = {}) {
+  const teto = opcoes.teto ?? Infinity;
+  return new Promise((responder, rejeitar) => {
+    let descricao = null;
+    const resolver = (lido) => responder({ ...lido, descricao });
+    const pedacos = [];
+    let total = 0;
+    let feito = 0;
+    sessao.receberOAnexo(anexo, {
+      abriu(tamanho, cancelar) {
+        total = tamanho;
+        if (tamanho > teto) {
+          cancelar();
+          resolver({ grande: true });
+        }
+      },
+      pedaco(bytes) {
+        pedacos.push(bytes);
+        feito += bytes.length;
+        opcoes.aoAndar?.(feito, total);
+      },
+      chegou(inteiro) {
+        if (!inteiro) return resolver({ naoVeio: true });
+        const bytes = new Uint8Array(feito);
+        let onde = 0;
+        for (const pedaco of pedacos) {
+          bytes.set(pedaco, onde);
+          onde += pedaco.length;
+        }
+        resolver({ bytes });
+      },
+      acabou: () => rejeitar("NotConnected"),
+    });
+    const pedido = sessao.atender("pedir_anexo", { anexo });
+    if (!pedido || "erro" in pedido) rejeitar(pedido?.erro ?? "NotConnected");
+    else descricao = pedido.resposta;
+  });
+}
+
+/** Entrega bytes ao download do navegador, com o nome conferido. */
+function baixar(bytes, nome) {
+  const endereco = URL.createObjectURL(new Blob([bytes]));
+  const ancora = document.createElement("a");
+  ancora.href = endereco;
+  ancora.download = nome;
+  ancora.hidden = true;
+  document.body.append(ancora);
+  ancora.click();
+  ancora.remove();
+  setTimeout(() => URL.revokeObjectURL(endereco), 60_000);
+}
+
+/** O SHA-256 dos bytes, em hex: o `content_hash` do cabeçalho do envio. */
+async function hashDoArquivo(bytes) {
+  return hexDe(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+}
+
+/**
+ * **O envio de um anexo**, depois de a casca ter o número: o fluxo próprio, o
+ * cabeçalho que o `.wasm` montou e os bytes em blocos, com o andamento. O fim é
+ * o do desktop: `Sent`, `Refused` quando o servidor para o fluxo, `Fell` quando
+ * ele cai.
+ */
+async function subirOAnexo(sessao, id, cabecalho, bytes) {
+  let escritor;
+  try {
+    escritor = (await sessao.abrirUmFluxo()).getWriter();
+    await escritor.write(new Uint8Array(cabecalho));
+    for (let feito = 0; feito < bytes.length; ) {
+      const bloco = bytes.subarray(feito, feito + BLOCO_DO_ANEXO);
+      await escritor.write(bloco);
+      feito += bloco.length;
+      transferencia({ kind: "Sending", client_message_id: id, done: feito, total: bytes.length });
+    }
+    await escritor.close();
+    transferencia({ kind: "Sent", client_message_id: id });
+  } catch (falha) {
+    const parado = falha && falha.source === "stream";
+    transferencia({ kind: parado ? "Refused" : "Fell", client_message_id: id });
+  }
+}
+
+// ----------------------------------------------------- a prévia de um link
+
+/** O prazo de uma busca de prévia: o do `buscar_com_teto` do desktop. */
+const PRAZO_DA_PREVIA_MS = 15_000;
+
+/**
+ * **Os bytes de um endereço, até o teto da prévia**: o `buscar_com_teto` do
+ * desktop, pelo `fetch` do navegador — sem cookie, sem referência, e com o
+ * corpo cortado ao passar do teto. O navegador segue os redirecionamentos e
+ * resolve os nomes por conta própria (o desktop confere cada um; aqui o que
+ * protege é a regra de rede privada do navegador), e só lê o que o site libera
+ * a uma página de fora (CORS): o que ele não libera volta como `NaoRespondeu`.
+ */
+async function buscarComTeto(endereco) {
+  const teto = CONSTANTES_DO_DESKTOP.regras_de_previa.limit;
+  let resposta;
+  try {
+    resposta = await fetch(endereco, {
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+      cache: "no-store",
+      signal: AbortSignal.timeout(PRAZO_DA_PREVIA_MS),
+    });
+  } catch (falha) {
+    return Promise.reject({
+      NaoRespondeu: `o site não respondeu, ou não deixa uma página de fora ler o que ele serve (${falha && falha.name ? falha.name : falha})`,
+    });
+  }
+  if (!resposta.ok) return Promise.reject({ NaoRespondeu: `o site respondeu ${resposta.status}` });
+  const alegado = minusculasAscii((resposta.headers.get("content-type") ?? "").split(";")[0].trim());
+  const pedacos = [];
+  let lidos = 0;
+  const leitor = resposta.body.getReader();
+  for (;;) {
+    const { value, done } = await leitor.read();
+    if (done) break;
+    lidos += value.length;
+    if (lidos > teto) {
+      leitor.cancel().catch(() => {});
+      return Promise.reject("GrandeDemais");
+    }
+    pedacos.push(value);
+  }
+  const bytes = new Uint8Array(lidos);
+  let onde = 0;
+  for (const pedaco of pedacos) {
+    bytes.set(pedaco, onde);
+    onde += pedaco.length;
+  }
+  return { alegado, bytes };
+}
+
+/** O `data:` de uns bytes que o juiz do desktop desenha, ou `null`. */
+async function desenhavel({ alegado, bytes }) {
+  const { instancia } = await carregarOWasmDaPagina();
+  return fronteiraDaLigacao(instancia.exports).previa({ attachment: 0, claimed: alegado, chegada: "bytes" }, bytes).image;
+}
+
+/** Se o endereço é de um domínio de GIF desta máquina, ou de um subdomínio dele. */
+function eDeUmDominioDeGif(endereco) {
+  let host;
+  try {
+    host = minusculasAscii(new URL(endereco).hostname);
+  } catch {
+    return false;
+  }
+  return CONSTANTES_DO_DESKTOP.dominios_de_gif.some((dominio) => host === dominio || host.endsWith(`.${dominio}`));
+}
+
+// ------------------------------------------------------------- as imagens
+
+/**
+ * **A escada do ícone do desktop** (`apps/seele-app/src/icone.rs`), JSON
+ * estrito: `tests/web.rs` a confere contra o `DEGRAUS` de lá. Cada degrau é o
+ * maior lado e os bits por canal de cor; a primeira imagem que cabe no teto do
+ * fio (`regras_do_icone_do_server`) vale. E o teto do arquivo de origem, acima
+ * do qual não se lê.
+ */
+const REGRAS_DO_ICONE = Object.freeze({
+  "degraus": [[256, 8], [256, 5], [256, 4], [192, 4], [160, 4], [128, 3], [96, 3], [64, 2]],
+  "teto_da_origem": 12582912
+});
+
+/**
+ * **O seletor de imagem, dentro do gesto**: nenhum `await` antes do
+ * `click()`, como o `escolher_arquivo`. Desistir resolve `null`.
+ */
+function escolherUmaImagem() {
+  return new Promise((responder) => {
+    const entrada = document.createElement("input");
+    entrada.type = "file";
+    // Os formatos que o `image` do desktop lê (PNG, JPEG, WebP e GIF): o iOS
+    // converte a foto HEIC para um deles ao entregar.
+    entrada.accept = "image/png,image/jpeg,image/webp,image/gif";
+    entrada.hidden = true;
+    let respondido = false;
+    const fim = (valor) => {
+      if (respondido) return;
+      respondido = true;
+      entrada.remove();
+      responder(valor);
+    };
+    entrada.addEventListener("change", () => fim(entrada.files?.[0] ?? null));
+    entrada.addEventListener("cancel", () => fim(null));
+    document.body.append(entrada);
+    entrada.click();
+  });
+}
+
+/**
+ * **A imagem escolhida, virada num ícone que cabe**: o `icone::encolher` do
+ * desktop, pela escada dele, com o canvas no lugar do `image`. Os bytes não são
+ * os do desktop (o PNG do navegador é outro codificador), e a regra é a mesma:
+ * menos cores antes de menos pixels, a proporção mantida, nunca ampliar, e o
+ * alfa intacto. `null` quando não é imagem, ou quando nem o último degrau cabe.
+ */
+async function encolherAImagem(arquivo) {
+  const { limite_bytes: teto } = CONSTANTES_DO_DESKTOP.regras_do_icone_do_server;
+  if (arquivo.size > REGRAS_DO_ICONE.teto_da_origem) return null;
+  let imagem;
+  try {
+    imagem = await createImageBitmap(arquivo);
+  } catch {
+    return null;
+  }
+  try {
+    for (const [ladoMaximo, bits] of REGRAS_DO_ICONE.degraus) {
+      const escala = Math.min(1, ladoMaximo / Math.max(imagem.width, imagem.height));
+      const largura = Math.max(1, Math.round(imagem.width * escala));
+      const altura = Math.max(1, Math.round(imagem.height * escala));
+      const tela = document.createElement("canvas");
+      tela.width = largura;
+      tela.height = altura;
+      const contexto = tela.getContext("2d");
+      contexto.imageSmoothingQuality = "high";
+      contexto.drawImage(imagem, 0, 0, largura, altura);
+      if (bits < 8) achatarAsCores(contexto, largura, altura, bits);
+      const png = await new Promise((resolver) => tela.toBlob(resolver, "image/png"));
+      if (png && png.size <= teto) return new Uint8Array(await png.arrayBuffer());
+    }
+    return null;
+  } finally {
+    imagem.close();
+  }
+}
+
+/** Cada canal de cor em `bits` níveis, o preto preto e o branco branco: o `achatar_cores` do desktop. */
+function achatarAsCores(contexto, largura, altura, bits) {
+  const quadro = contexto.getImageData(0, 0, largura, altura);
+  const passo = 255 / Math.max(1, 2 ** bits - 1);
+  for (let i = 0; i < quadro.data.length; i += 4) {
+    for (let canal = 0; canal < 3; canal += 1) {
+      quadro.data[i + canal] = Math.min(255, Math.max(0, Math.round(Math.round(quadro.data[i + canal] / passo) * passo)));
+    }
+  }
+  contexto.putImageData(quadro, 0, 0);
+}
+
+/** Um `data:` de PNG, como o `meu_retrato` do desktop o devolve. */
+function dataUriDoPng(bytes) {
+  let binario = "";
+  for (const byte of bytes) binario += String.fromCharCode(byte);
+  return `data:image/png;base64,${btoa(binario)}`;
+}
+
+/** Os bytes de um `data:` em base64, ou `null`. */
+function bytesDoDataUri(uri) {
+  const virgula = typeof uri === "string" ? uri.indexOf(",") : -1;
+  if (virgula < 0) return null;
+  try {
+    return Uint8Array.from(atob(uri.slice(virgula + 1)), (letra) => letra.charCodeAt(0));
+  } catch {
+    return null;
+  }
 }
 
 /** O que a origem guarda, ou `null` quando ela não guarda ou não deixa ler. */
@@ -1030,7 +1442,7 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   dominios_de_gif: () => structuredClone(CONSTANTES_DO_DESKTOP.dominios_de_gif),
   controles_da_voz: controlesDaVozGuardados,
   // Sem sessão, o mapa vazio, como o `unwrap_or_default` do desktop.
-  volumes_locais: () => sessaoDaPonte.atual?.volumesLocais?.() ?? {},
+  volumes_locais: () => (sessaoDaPonte.atual ? Promise.resolve(pelaSessao("volumes_locais")({})).catch(() => ({})) : {}),
   snapshot: () => comASessao((sessao) => sessao.snapshot()),
   disconnect: sairDaSessaoDaPonte,
   // **A sessão pelo navegador** (2.6): o `connect` pela WebTransport, e os
@@ -1040,6 +1452,221 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     const sessao = sessaoDaPonte.atual;
     if (!sessao || sessao.acabou || geracao == null || sessao.geracao !== geracao) return false;
     return sairDaSessaoDaPonte().then(() => true);
+  },
+  // **A entrada pela casca larga** (D-web-3): o SERVIDORES e o link colado.
+  // Um link do produto é convite; o resto, endereço, que o `connect` só aceita
+  // de um servidor deste aparelho.
+  ler_entrada: async ({ texto } = {}) => {
+    const escrito = String(texto ?? "").trim();
+    const lido = await lerOLink(escrito);
+    return lido.erro === "OutraOrigem" ? { Endereco: escrito } : { Convite: escrito };
+  },
+  analisar_convite: async ({ link } = {}) => {
+    const texto = String(link ?? "").trim();
+    const lido = await lerOLink(texto);
+    if (lido.erro) {
+      const frase = FRASES_DO_LINK[lido.erro] ?? FRASES_DO_LINK.Convite;
+      return Promise.reject({ RecusaDaPonte: { comando: "analisar_convite", frase } });
+    }
+    linkColadoDaPonte = { texto, alvo: lido.link.alvo, impressao: lido.link.impressao };
+    // A página fala só a linha dela: o link do navegador entra aqui mesmo.
+    return { alvo: lido.link.alvo, token: lido.link.convite ?? null, versao: lido.link.versao ?? null, para_entrar: "Aqui" };
+  },
+  cancelar_ligacao: () => {
+    const cancelar = entradaEmCurso.cancelar;
+    if (!cancelar) return false;
+    cancelar();
+    return true;
+  },
+  // Os SERVIDORES DESTE APARELHO da identidade, na forma do `Conhecido` do
+  // desktop. Sem identidade, a lista vazia, como o desktop sem o arquivo.
+  conhecidos: async () => {
+    try {
+      const identidade = await identidadeDaPagina();
+      return (await identidade.conhecidos()).map((servidor) => ({
+        alvo: servidor.endereco,
+        apelido: servidor.apelido ?? "",
+        voice_room: null,
+        visto_em: servidor.visto ? Math.floor(servidor.visto / 1000) : 0,
+        nome: servidor.nome ?? null,
+        ...(servidor.icone ? { icone: servidor.icone } : {}),
+        caminhos: [],
+        bilhete: null,
+        impressao: servidor.impressao,
+        caminho_bps: null,
+      }));
+    } catch (falha) {
+      console.warn("ponte: os servidores deste aparelho não abriram:", falha);
+      return [];
+    }
+  },
+  esquecer: async ({ alvo } = {}) => {
+    const identidade = await identidadeDaPagina();
+    for (const servidor of await identidade.conhecidos()) {
+      if (servidor.endereco === alvo) await identidade.esquecerOServidor(servidor.impressao);
+    }
+    return null;
+  },
+  // Os aceites de MODs são guardados pela impressão do servidor (a chave da
+  // identidade); a casca do desktop pergunta pelo endereço.
+  aceite_de_mods: async ({ alvo } = {}) => {
+    const impressao = await impressaoDoEndereco(alvo);
+    return impressao ? aceiteDeModsGuardado(impressao) : null;
+  },
+  aceitar_mods: async ({ alvo, conjunto } = {}) => {
+    const impressao = await impressaoDoEndereco(alvo);
+    if (!impressao) return Promise.reject({ Recusado: { motivo: "EnderecoInvalido" } });
+    return guardarOAceiteDeMods(impressao, String(conjunto ?? "")) ? null : Promise.reject({ Recusado: { motivo: "NaoDeuParaGravar" } });
+  },
+  esquecer_aceite_de_mods: async ({ alvo } = {}) => {
+    const impressao = await impressaoDoEndereco(alvo);
+    if (!impressao) return Promise.reject({ Recusado: { motivo: "EnderecoInvalido" } });
+    return guardarOAceiteDeMods(impressao, null) ? null : Promise.reject({ Recusado: { motivo: "NaoDeuParaGravar" } });
+  },
+  aceites_de_mods: async () => {
+    let servidores = [];
+    try {
+      servidores = await (await identidadeDaPagina()).conhecidos();
+    } catch {
+      servidores = [];
+    }
+    return aceitesDeModsGuardados().map((aceite) => ({
+      alvo: servidores.find((servidor) => servidor.impressao === aceite.impressao)?.endereco ?? aceite.impressao,
+      conjunto: aceite.conjunto,
+      quando: aceite.quando,
+    }));
+  },
+  // O nome e o ícone do servidor, anotados com ele neste aparelho; calado em
+  // toda falha, como no desktop.
+  lembrar_aparencia_do_servidor: async () => {
+    const sessao = sessaoDaPonte.atual;
+    if (!sessao || sessao.acabou) return null;
+    try {
+      const nome = sessao.snapshot().server;
+      const icone = sessao.atender("icone_do_server", {})?.resposta ?? null;
+      await (await identidadeDaPagina()).lembrarAAparencia(sessao.alvo.impressao, { nome, icone });
+    } catch (falha) {
+      console.warn("ponte: a aparência do servidor não ficou guardada:", falha);
+    }
+    return null;
+  },
+  // **A prévia de um link** (ADR 0053), com as regras do desktop: o endereço
+  // que pode sair, o destino que não é reservado, o consentimento do domínio, o
+  // juiz das imagens, e a mídia que uma página de GIF declara.
+  previa_de_link: async ({ url } = {}) => {
+    const { alvo, recusa } = enderecoQuePodeSair(String(url ?? ""));
+    if (recusa) return Promise.reject({ NaoEAberto: recusa });
+    let host;
+    try {
+      host = new URL(alvo).hostname;
+    } catch (falha) {
+      return Promise.reject({ NaoEAberto: String(falha && falha.message ? falha.message : falha) });
+    }
+    if (!(await pelaPagina("destino_de_previa")({ host }))) return Promise.reject({ DestinoPrivado: minusculasAscii(host) });
+    const dominio = minusculasAscii(host);
+    if (!previaConsentida(previasConsentidas(), dominio)) return Promise.reject({ SemConsentimento: { dominio } });
+    const primeira = await buscarComTeto(alvo);
+    const imagem = await desenhavel(primeira);
+    if (imagem) return imagem;
+    if (eDeUmDominioDeGif(alvo) && primeira.alegado.startsWith("text/html")) {
+      const midia = await pelaPagina("midia_da_pagina")({ html: new TextDecoder().decode(primeira.bytes) });
+      if (!midia || !eDeUmDominioDeGif(midia)) return Promise.reject("NaoEImagem");
+      const daMidia = await desenhavel(await buscarComTeto(midia));
+      return daMidia ?? Promise.reject("NaoEImagem");
+    }
+    return Promise.reject("NaoEImagem");
+  },
+  // **Os anexos**: pedidos ao servidor e lidos pelo `.wasm` (o hash
+  // conferido lá), julgados pelo mesmo juiz do desktop na prévia, e salvos pelo
+  // download do navegador com o nome conferido pelas regras do desktop.
+  prever_anexo: ({ anexo } = {}) =>
+    comASessao(async (sessao) => {
+      const lido = await receberUmAnexo(sessao, anexo, { teto: CONSTANTES_DO_DESKTOP.regras_de_previa.limit });
+      const chegada = lido.bytes ? "bytes" : lido.grande ? "grande_demais" : "nao_veio";
+      return sessao.previa({ attachment: anexo, claimed: lido.descricao?.tipo ?? "", chegada }, lido.bytes);
+    }),
+  destino_do_anexo: async ({ anexo } = {}) => {
+    const sessao = sessaoDaPonte.atual;
+    if (!sessao) return Promise.reject({ reason: "AnexoDesconhecido", claimed: "", folder: PASTA_DO_NAVEGADOR });
+    return pelaSessao("destino_do_anexo")({ anexo, pasta: PASTA_DO_NAVEGADOR });
+  },
+  // Responde já, como o desktop; o andamento e o fim vêm como
+  // `TransferChanged`, e o arquivo vai ao download do navegador.
+  salvar_anexo: ({ anexo } = {}) =>
+    comASessao(async (sessao) => {
+      const destino = sessao.atender("destino_do_anexo", { anexo, pasta: PASTA_DO_NAVEGADOR });
+      if (!destino || "erro" in destino) {
+        transferencia({ kind: "NotSaved", attachment: anexo, reason: destino?.erro?.reason ?? "Falhou" });
+        return null;
+      }
+      const { file_name: nome } = destino.resposta;
+      receberUmAnexo(sessao, anexo, {
+        aoAndar: (feito, total) => transferencia({ kind: "Receiving", attachment: anexo, done: feito, total }),
+      }).then(
+        (lido) => {
+          if (!lido.bytes) return transferencia({ kind: "NotSaved", attachment: anexo, reason: "Falhou" });
+          baixar(lido.bytes, nome);
+          transferencia({ kind: "Saved", attachment: anexo, path: nome });
+        },
+        () => transferencia({ kind: "NotSaved", attachment: anexo, reason: "Falhou" }),
+      );
+      return null;
+    }),
+  // O número volta quando o cabeçalho está pronto (o hash pede os bytes); a
+  // subida segue depois, como no desktop. O arquivo que não está mais aqui cai
+  // com o número, como o caminho que sumiu do desktop.
+  enviar_anexo: ({ channel, body, caminho, nome, tipo } = {}) =>
+    comASessao(async (sessao) => {
+      const guardado = ALCAS_DA_PONTE.get(String(caminho ?? ""));
+      const bytes = guardado ? new Uint8Array(await guardado.arquivo.arrayBuffer()) : new Uint8Array(0);
+      const hash = guardado ? await hashDoArquivo(bytes) : "0".repeat(64);
+      const feito = await pelaSessao("cabecalho_do_anexo")({
+        channel,
+        body: String(body ?? ""),
+        nome: String(nome ?? ""),
+        tipo: String(tipo ?? ""),
+        tamanho: bytes.length,
+        hash,
+      });
+      if (feito.recusa) {
+        console.warn(`ponte: o anexo ${feito.id} não sobe: ${feito.recusa}`);
+        setTimeout(() => transferencia({ kind: "Fell", client_message_id: feito.id }), 0);
+        return feito.id;
+      }
+      setTimeout(() => subirOAnexo(sessao, feito.id, feito.cabecalho, bytes), 0);
+      return feito.id;
+    }),
+  // **As imagens**: o seletor dentro do gesto, a escada do desktop, e o fio
+  // pelo `.wasm` (que confere o PNG como o `check_server_icon`).
+  preparar_icone_do_server: () =>
+    escolherUmaImagem().then(async (arquivo) => {
+      if (!arquivo) return null;
+      const png = await encolherAImagem(arquivo);
+      return png ? Array.from(png) : Promise.reject("IconNotAPicture");
+    }),
+  // O seletor abre antes de a sessão ser conferida, como no desktop.
+  escolher_icone_do_server: () =>
+    escolherUmaImagem().then(async (arquivo) => {
+      if (!arquivo) return false;
+      const png = await encolherAImagem(arquivo);
+      if (!png) return Promise.reject("IconNotAPicture");
+      await pelaSessao("aplicar_icone_do_server")({ icone: Array.from(png) });
+      return true;
+    }),
+  // Guardada nesta origem, e subida agora se há sessão; sem sessão, sobe na
+  // próxima entrada, como no desktop.
+  escolher_minha_imagem: () =>
+    escolherUmaImagem().then(async (arquivo) => {
+      if (!arquivo) return false;
+      const png = await encolherAImagem(arquivo);
+      if (!png || !gravarNaOrigem(CHAVES_DA_ORIGEM.retrato, dataUriDoPng(png))) return Promise.reject("IconNotAPicture");
+      if (sessaoDaPonte.atual) await pelaSessao("minha_imagem")({ icone: Array.from(png) });
+      return true;
+    }),
+  tirar_minha_imagem: async () => {
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.retrato, null)) return Promise.reject("IconNotAPicture");
+    if (sessaoDaPonte.atual) await pelaSessao("minha_imagem")({ icone: null });
+    return null;
   },
   estado_da_sessao: () => ({
     geracao: sessaoDaPonte.atual?.geracao ?? 0,
@@ -1121,6 +1748,93 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
       vozDaSessao.isolado = Boolean(on);
       vozDaPonte.atual?.isolar(vozDaSessao.isolado);
       return pelaSessao("set_total_isolation")({ on: vozDaSessao.isolado });
+    }),
+  // O volume de cada pessoa é da sessão, pelo apelido; o ganho vai à mistura
+  // pela alça, que o `.wasm` traduz (a SSRC não chega aqui).
+  set_volume: ({ nickname, percent } = {}) =>
+    comASessao(() =>
+      Promise.resolve(pelaSessao("set_volume")({ nickname, percent, comAudio: audioDisponivel() })).then((resposta) => {
+        seguirOsVolumes();
+        return resposta;
+      }),
+    ),
+  // A busca: `buscar` lê a conversa da sessão; andar e limpar respondem sem
+  // sessão, como no desktop, porque a busca é da página.
+  buscar: pelaSessao("buscar"),
+  busca_andar: pelaPagina("busca_andar"),
+  busca_limpar: pelaPagina("busca_limpar"),
+  // **O som da tela que se assiste** (R17): o volume e o mudo são escolhas
+  // desta ponta, que valem antes de a tela tocar; sem áudio na página, o
+  // desktop responde `null` e recusa os dois ajustes.
+  som_da_tela: () => comASessao(async () => (audioDisponivel() ? { volume: vozDaSessao.volumeDaTela, calada: vozDaSessao.telaCalada } : null)),
+  ajustar_volume_da_tela: ({ volume } = {}) =>
+    comASessao(async () => {
+      if (!audioDisponivel()) return Promise.reject("NotConnected");
+      vozDaSessao.volumeDaTela = Math.min(4, Math.max(0, Number(volume) || 0));
+      vozDaPonte.atual?.volumeDaTela(vozDaSessao.volumeDaTela);
+      return null;
+    }),
+  calar_a_tela: ({ calada } = {}) =>
+    comASessao(async () => {
+      if (!audioDisponivel()) return Promise.reject("NotConnected");
+      vozDaSessao.telaCalada = Boolean(calada);
+      vozDaPonte.atual?.calarATela(vozDaSessao.telaCalada);
+      return null;
+    }),
+  // **Compartilhar a tela pelo PC** (3.10; no celular, recusado com a frase):
+  // o seletor é o do navegador, chamado dentro do gesto, e a transmissão é a
+  // de `compartilhar-web.js`. Sem codificador que tire um quadro de verdade,
+  // o controle some (`NaoSeSabe`), como no desktop sem captura.
+  fontes_de_tela: () =>
+    comASessao(async () => {
+      if (!(await sondarATela(await pelaPagina("codec_da_tela")({})))) return Promise.reject("ScreenShareUnavailable");
+      return [{ id: 1, nome: FONTE_DO_NAVEGADOR, monitor: true, largura: Math.round(screen.width * devicePixelRatio), altura: Math.round(screen.height * devicePixelRatio) }];
+    }),
+  permissao_de_tela: () => comASessao(async () => ((await sondarATela(await pelaPagina("codec_da_tela")({}))) ? "Concedida" : "NaoSeSabe")),
+  pedir_permissao_de_tela: () =>
+    comASessao(async () => ((await sondarATela(await pelaPagina("codec_da_tela")({}))) ? "Concedida" : "NaoSeSabe")),
+  // O som desta página fora da captura: o `suppressLocalAudioPlayback` do
+  // navegador, quando ele o tem.
+  exclusao_do_som_da_captura: () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) return "SemCaptura";
+    return navigator.mediaDevices.getSupportedConstraints?.().suppressLocalAudioPlayback ? "Excluido" : "NaoExcluido";
+  },
+  compartilhar_tela: ({ limites } = {}) =>
+    comASessao((sessao) => {
+      if (!navigator.mediaDevices?.getDisplayMedia || !sessao.transmissao) return Promise.reject("ScreenShareUnavailable");
+      const comSom = limites?.com_som !== false;
+      // Dentro do gesto: nada espera antes do seletor.
+      return navigator.mediaDevices
+        .getDisplayMedia({
+          video: { frameRate: { ideal: limites?.quadros_maximos ?? 30 }, height: { ideal: limites?.altura_maxima ?? 720 } },
+          audio: comSom ? { suppressLocalAudioPlayback: true } : false,
+          systemAudio: comSom ? "include" : "exclude",
+          selfBrowserSurface: "exclude",
+        })
+        .then(
+          (midia) => {
+            sessao.transmissao.comecar(midia, limites);
+            return null;
+          },
+          (falha) =>
+            Promise.reject(
+              falha && falha.name === "NotAllowedError"
+                ? { RecusaDaPonte: { comando: "compartilhar_tela", frase: RECUSA_DA_CAPTURA } }
+                : "ScreenShareUnavailable",
+            ),
+        );
+    }),
+  parar_de_compartilhar: () =>
+    comASessao(async (sessao) => {
+      if (sessao.transmissao?.noAr) sessao.transmissao.parar();
+      else await pelaSessao("parar_de_compartilhar")({});
+      return null;
+    }),
+  ajustar_limites_da_tela: ({ limites } = {}) =>
+    comASessao(async (sessao) => {
+      if (sessao.transmissao?.noAr) sessao.transmissao.ajustar(limites);
+      else await pelaSessao("ajustar_limites_da_tela")({ limites });
+      return null;
     }),
   // Nunca erra, com ou sem sessão: só a tecla da voz.
   set_talking: ({ talking } = {}) => {
