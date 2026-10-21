@@ -1702,6 +1702,8 @@ async function aEntradaVelhaNaoTomaATela(browser, porta) {
 // **O duble emite etapas**, o que nenhuma cena fazia (o `listen` delas é
 // vazio), e modela a geração como o `main.rs`: cada `connect` revoga a anterior
 // ao começar, e a `Bridge` de uma geração revogada descarta as etapas dela.
+// E cada etapa leva a `tentativa` que o `connect` recebeu, como a
+// `carga_do_evento` da `Bridge` (`0975f08a`): só quando ele recebeu uma.
 // Cada emissão guarda o que a linha diz logo depois dela: o ouvinte escreve na
 // mesma volta, então a leitura não depende de amostrar no tempo certo.
 
@@ -1746,7 +1748,8 @@ async function aLinhaDeEtapaEDaMaisNova(browser, porta) {
           for (const [ms, etapa] of window.testEtapasPorAlvo[args.server] ?? []) {
             setTimeout(() => {
               const emitida = geracao === window.testGeracao;
-              if (emitida) for (const f of ouvintes) f({ payload: { ConnectStageChanged: { stage: etapa } } });
+              const carga = args.tentativa != null ? { stage: etapa, tentativa: args.tentativa } : { stage: etapa };
+              if (emitida) for (const f of ouvintes) f({ payload: { ConnectStageChanged: carga } });
               window.testEtapas.push({ alvo: args.server, frase: fraseDeEtapa(etapa), emitida, linha: linha() });
             }, ms);
           }
