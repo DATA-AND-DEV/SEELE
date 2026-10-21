@@ -129,8 +129,11 @@ impl<'a> Channels<'a> {
 
         self.connection
             .execute(
-                "INSERT INTO voice_rooms (name, member_limit, channel_id, position)
-                 VALUES (?1, ?2, ?3, (SELECT COALESCE(MAX(position), 0) + 1 FROM voice_rooms))",
+                // O id **depois do maior já usado**, e não o maior que existe
+                // mais um: o de uma sala apagada nunca volta (migração 17).
+                "INSERT INTO voice_rooms (id, name, member_limit, channel_id, position)
+                 VALUES ((SELECT maior + 1 FROM maiores_ids WHERE tabela = 'voice_rooms'),
+                         ?1, ?2, ?3, (SELECT COALESCE(MAX(position), 0) + 1 FROM voice_rooms))",
                 params![
                     name,
                     i64::from(limit),
@@ -161,8 +164,11 @@ impl<'a> Channels<'a> {
         let name = name.trim();
         self.connection
             .execute(
-                "INSERT INTO channels (name, position)
-                 VALUES (?1, (SELECT COALESCE(MAX(position), 0) + 1 FROM channels))",
+                // O id depois do maior já usado: o de um canal apagado nunca
+                // volta (migração 17).
+                "INSERT INTO channels (id, name, position)
+                 VALUES ((SELECT maior + 1 FROM maiores_ids WHERE tabela = 'channels'),
+                         ?1, (SELECT COALESCE(MAX(position), 0) + 1 FROM channels))",
                 params![name],
             )
             .context("could not create the Channel")?;
@@ -400,6 +406,148 @@ mod tests {
 
     fn store() -> Persistence {
         Persistence::open(&Location::Memory).unwrap()
+    }
+
+    /// **O id de uma sala apagada nunca volta** (revisão do lote 58-2 da F5,
+    /// O2). Sem isto, apagar a sala mais nova e criar outra dava à nova o id
+    /// da apagada: o SQLite dá a uma linha sem id o maior que existe mais um, e
+    /// o maior tinha acabado de sair. O cliente não distinguia a sala que sumiu
+    /// da que nasceu — o lugar guardado, a contribuição de MOD, a sala aberta
+    /// na tela —, e só o servidor conserta isso.
+    #[test]
+    fn apagar_a_sala_mais_nova_nao_devolve_o_id_dela_a_proxima() {
+        let persistence = store();
+        let channels = Channels::new(&persistence);
+        channels.create_voice_room("SALA-01", 10, None).unwrap();
+        let mais_nova = channels.create_voice_room("SALA-02", 10, None).unwrap();
+        channels.delete_voice_room(mais_nova.id).unwrap();
+
+        let seguinte = channels.create_voice_room("SALA-03", 10, None).unwrap();
+        assert!(
+            seguinte.id.get() > mais_nova.id.get(),
+            "a sala nova ganhou o id {} da apagada {}: o cliente não distingue uma da outra",
+            seguinte.id.get(),
+            mais_nova.id.get()
+        );
+    }
+
+    /// E o mesmo para os canais de texto, que têm a mesma forma de id.
+    #[test]
+    fn apagar_o_canal_mais_novo_nao_devolve_o_id_dele_ao_proximo() {
+        let persistence = store();
+        let channels = Channels::new(&persistence);
+        channels.create_channel("geral").unwrap();
+        let mais_novo = channels.create_channel("obras").unwrap();
+        channels.delete_channel(mais_novo.id).unwrap();
+
+        let seguinte = channels.create_channel("links").unwrap();
+        assert!(
+            seguinte.id.get() > mais_novo.id.get(),
+            "o canal novo ganhou o id {} do apagado {}: o cliente não distingue um do outro",
+            seguinte.id.get(),
+            mais_novo.id.get()
+        );
+    }
+
+    /// **Um banco de antes da migração 17** — o da v0.15.1 publicada, no
+    /// esquema 13, com salas e canais gravados como ela os grava. Os que
+    /// existem ficam com os ids deles, a marca começa no maior, e daí em diante
+    /// nenhum id volta. E uma inserção com id explícito — a semente da primeira
+    /// subida grava assim — também sobe a marca.
+    #[test]
+    fn um_banco_de_antes_comeca_no_maior_id_e_dai_nenhum_volta() {
+        const DUMP: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../apps/seele-app/testes/pasta-da-0.15.1/pasta/seele.sql"
+        );
+        let pasta = std::env::temp_dir().join(format!("seele-ids-de-antes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).unwrap();
+        let arquivo = pasta.join("seele.db");
+        {
+            let conexao = rusqlite::Connection::open(&arquivo).unwrap();
+            conexao
+                .execute_batch(&std::fs::read_to_string(DUMP).unwrap())
+                .unwrap();
+            conexao
+                .execute_batch(
+                    "INSERT INTO channels (id, name) VALUES (1, 'geral'), (4, 'obras');
+                     INSERT INTO voice_rooms (id, name, member_limit, channel_id)
+                         VALUES (1, 'SALA-01', 20, 1), (3, 'SALA-03', 20, NULL);",
+                )
+                .unwrap();
+        }
+
+        let persistence = Persistence::open(&Location::File(arquivo)).unwrap();
+        let channels = Channels::new(&persistence);
+        let ids_das_salas = |c: &Channels<'_>| -> Vec<u32> {
+            c.voice_rooms()
+                .unwrap()
+                .iter()
+                .map(|sala| sala.id.get())
+                .collect()
+        };
+        let ids_dos_canais = |c: &Channels<'_>| -> Vec<u32> {
+            c.channels()
+                .unwrap()
+                .iter()
+                .map(|canal| canal.id.get())
+                .collect()
+        };
+        assert_eq!(
+            ids_das_salas(&channels),
+            [1, 3],
+            "as salas de antes mudaram de id"
+        );
+        assert_eq!(
+            ids_dos_canais(&channels),
+            [1, 4],
+            "os canais de antes mudaram de id"
+        );
+
+        let canal = channels.create_channel("links").unwrap();
+        assert_eq!(
+            canal.id.get(),
+            5,
+            "a marca dos canais não começou no maior de antes"
+        );
+        channels.delete_channel(canal.id).unwrap();
+        assert_eq!(channels.create_channel("ruido").unwrap().id.get(), 6);
+
+        let sala = channels.create_voice_room("SALA-04", 10, None).unwrap();
+        assert_eq!(
+            sala.id.get(),
+            4,
+            "a marca das salas não começou no maior de antes"
+        );
+        channels.delete_voice_room(sala.id).unwrap();
+        assert_eq!(
+            channels
+                .create_voice_room("SALA-05", 10, None)
+                .unwrap()
+                .id
+                .get(),
+            5
+        );
+
+        // Com id explícito, como a semente grava: a marca sobe junto.
+        persistence
+            .connection()
+            .execute(
+                "INSERT INTO voice_rooms (id, name, member_limit) VALUES (9, 'SALA-09', 10)",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            channels
+                .create_voice_room("SALA-10", 10, None)
+                .unwrap()
+                .id
+                .get(),
+            10,
+            "uma inserção com id explícito não subiu a marca"
+        );
+        let _ = std::fs::remove_dir_all(&pasta);
     }
 
     #[test]

@@ -657,6 +657,45 @@ pub const MIGRATIONS: &[Migration] = &[
             ALTER TABLE mods ADD COLUMN tema INTEGER;
         "#,
     },
+    Migration {
+        version: 17,
+        description: "o id de uma sala de voz ou de um canal apagado nunca volta",
+        sql: r#"
+            -- Revisão do lote 58-2 da F5 (O2). `voice_rooms` e `channels`
+            -- nasceram com `id INTEGER PRIMARY KEY`, sem `AUTOINCREMENT`, e o
+            -- SQLite dá a uma linha sem id o maior que existe mais um: apagar a
+            -- sala mais nova e criar outra dava à nova o id da apagada. O cliente
+            -- não distinguia uma da outra, e só o servidor conserta isso.
+            --
+            -- **Uma marca do maior id já usado, e não o `AUTOINCREMENT`.** Ele
+            -- pede refazer as duas tabelas, e refazer `channels` com as chaves
+            -- estrangeiras ligadas apaga em cascata as mensagens; desligá-las não
+            -- vale dentro da transação em que cada migração roda. A marca chega
+            -- ao mesmo lugar sem tocar nas tabelas: começa no maior id de cada
+            -- uma, os gatilhos a sobem a cada inserção (com id explícito também,
+            -- como a semente da primeira subida), e quem cria pede o seguinte a
+            -- ela (`Channels::create_voice_room` e `create_channel`).
+            --
+            -- O limite, que nenhuma migração desfaz: um id apagado antes desta
+            -- migração, acima do maior que sobrou, não deixou rastro, e pode
+            -- voltar uma vez.
+            CREATE TABLE maiores_ids (
+                tabela TEXT    PRIMARY KEY NOT NULL,
+                maior  INTEGER NOT NULL
+            ) STRICT;
+            INSERT INTO maiores_ids (tabela, maior) VALUES
+                ('voice_rooms', COALESCE((SELECT MAX(id) FROM voice_rooms), 0)),
+                ('channels',    COALESCE((SELECT MAX(id) FROM channels), 0));
+            CREATE TRIGGER voice_rooms_sobem_o_maior_id AFTER INSERT ON voice_rooms
+            BEGIN
+                UPDATE maiores_ids SET maior = MAX(maior, NEW.id) WHERE tabela = 'voice_rooms';
+            END;
+            CREATE TRIGGER channels_sobem_o_maior_id AFTER INSERT ON channels
+            BEGIN
+                UPDATE maiores_ids SET maior = MAX(maior, NEW.id) WHERE tabela = 'channels';
+            END;
+        "#,
+    },
 ];
 
 #[cfg(test)]

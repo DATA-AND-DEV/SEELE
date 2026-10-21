@@ -683,6 +683,15 @@ mod tests {
                     "UPDATE roles SET permissions = replace(permissions, ',\"AttachFile\"', ''),
                                       denials     = replace(denials,     ',\"AttachFile\"', '');
                      DELETE FROM schema_version WHERE version >= 3;
+
+                     -- A parte da migração 17 (os ids que não voltam), pela
+                     -- regra de baixo: a marca e os dois gatilhos que a sobem.
+                     -- Antes das renomeações das migrações 6 e 8, porque os
+                     -- gatilhos são das tabelas que elas renomeiam.
+                     DROP TRIGGER voice_rooms_sobem_o_maior_id;
+                     DROP TRIGGER channels_sobem_o_maior_id;
+                     DROP TABLE maiores_ids;
+
                      DROP TABLE attachments;
                      DROP TABLE portaria;
 
