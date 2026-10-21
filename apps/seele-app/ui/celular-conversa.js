@@ -59,8 +59,10 @@
       texto,
       propria: item.classList.contains("propria"),
       podeRemoverDosOutros: podeRemoverMensagem,
-      // O `remover` da lista de agora, e não o do quadro em que a folha abriu:
-      // a lista é refeita quando chega mensagem.
+      // O REMOVER pelo id da mensagem, na hora do toque. A lista é reconciliada
+      // pelo id (lote R63 da F5), e o botão é o mesmo nó de um quadro ao
+      // seguinte; mas a mensagem pode ter saído da conversa enquanto a folha
+      // estava aberta, e aí não há o que apertar.
       remover: () => doDesktop("lista-mensagens").querySelector(`button[data-moderar-mensagem="${id}"]`)?.click(),
     });
   });
