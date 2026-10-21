@@ -10824,12 +10824,15 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 ///    fica guardada depois de uma recusa que não gastou nada, e toda tentativa
 ///    a esquece ao começar (parte 6).
 /// 4. **Fechar a janela a leva junto.** Ela só existe na memória da página, e
-///    fechar a janela encerra o processo: nada no `main.rs` segura a saída nem
-///    troca o fechar por esconder. Se um dia segurar, a credencial passa a
-///    sobreviver ao fechar, e precisa ser esquecida nele.
+///    fechar a janela encerra o processo: nada no código do app (o `main.rs` e
+///    os outros arquivos de `src/`) segura a saída nem troca o fechar por
+///    esconder. Se um dia segurar, a credencial passa a sobreviver ao fechar,
+///    e precisa ser esquecida nele.
 /// 5. **Do outro lado da ponte, ela não vira log nem retrato.** O `main.rs`
 ///    nomeia o `join_secret` só no parâmetro do `connect` e no campo da
-///    configuração, e o `Snapshot` da FFI não tem campo de segredo.
+///    configuração, e o `Snapshot` da FFI não tem campo de segredo. A leitura
+///    do `Snapshot` é conferida contra o que ela deve achar (a contagem exata
+///    e nenhuma declaração fora da leitura), para não ficar cega calada.
 /// 6. **A do apelido tomado morre na tentativa seguinte, qualquer que seja.**
 ///    `conectar` a esquece e conta a tentativa antes da primeira espera, e a
 ///    recusa só a guarda se a tentativa dela ainda é a mais nova: uma
@@ -11289,20 +11292,36 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          lista, e então troque `RUNTIME_MEDIDO`"
     );
     let main = without_comments(&read("src/main.rs"));
+    // **Em qualquer arquivo de `src/`, e não só no `main.rs`.** Medido na
+    // reversão (lote 58-4): um `prevent_close` ou um `prevent_exit` em outro
+    // módulo do app (`sala.rs`, na reversão) passava calado, porque o guarda só
+    // lia o `main.rs`.
+    let mut fontes = String::new();
+    for entrada in std::fs::read_dir(app_dir().join("src")).expect("a pasta src") {
+        let caminho = entrada.expect("uma entrada de src").path();
+        if caminho.extension().is_some_and(|extensao| extensao == "rs") {
+            let nome = caminho.file_name().and_then(|nome| nome.to_str());
+            fontes.push_str(&without_comments(&read(&format!(
+                "src/{}",
+                nome.expect("um nome de arquivo")
+            ))));
+        }
+    }
     for segura in ["prevent_close", "CloseRequested"] {
         assert!(
-            !main.contains(segura),
-            "o `main.rs` passou a usar `{segura}`: fechar a janela pode não encerrar \
+            !fontes.contains(segura),
+            "o app passou a usar `{segura}` (em `src/`): fechar a janela pode não encerrar \
              mais a página, e a credencial da tentativa, que só existe na memória \
              dela, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
         );
     }
-    let compacto: String = main.split_whitespace().collect();
+    let compacto: String = fontes.split_whitespace().collect();
     assert!(
         compacto.matches("prevent_exit").count() <= 1
             && (!compacto.contains("prevent_exit")
                 || compacto.contains("ExitRequested{code:None,api,..}=&evento{api.prevent_exit()")),
-        "o `main.rs` segura a saída de um jeito que não é o `ExitRequested` com `code: None`: \
+        "o app segura a saída de um jeito que não é o `ExitRequested` com `code: None` do \
+         `main.rs`: \
          uma saída pedida com a janela aberta, segurada, manteria a página viva, e a \
          credencial da tentativa sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
     );
@@ -11484,10 +11503,36 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         .filter_map(|linha| linha.strip_prefix("pub "))
         .map(|campo| campo.split(':').next().unwrap_or_default())
         .collect();
+    // **A contagem é exata, e nada no corpo fica fora da leitura** (lote 58-4,
+    // medido na reversão). O piso de 30 sobrava 7 sobre os 37 campos: um campo
+    // a menos na leitura passava calado. E a leitura só via `pub `: um
+    // `pub(crate)` serializa do mesmo jeito (o `derive` não olha a
+    // visibilidade) e escapava dela. Campo novo no retrato é um campo que vai à
+    // janela duas vezes por segundo: quem o acrescenta confere que não é segredo
+    // e acerta o número.
+    const CAMPOS_DO_SNAPSHOT: usize = 37;
+    let fora_da_leitura: Vec<&str> = retrato
+        .lines()
+        .map(str::trim)
+        .filter(|linha| {
+            !linha.is_empty()
+                && !linha.starts_with("//")
+                && !linha.starts_with("#[")
+                && !linha.starts_with("pub ")
+        })
+        .collect();
     assert!(
-        campos.len() >= 30 && campos.contains(&"ended"),
-        "li só {} campos do `Snapshot` da FFI ({campos:?}): a forma dele mudou, e esta \
-         parte do guarda ficou cega",
+        fora_da_leitura.is_empty(),
+        "o `Snapshot` da FFI tem linhas que esta parte do guarda não lê como campo \
+         (`pub(crate)`, sem `pub`, tipo em várias linhas?): {fora_da_leitura:?}. O \
+         `derive(Serialize)` manda todo campo à janela, qualquer que seja a visibilidade"
+    );
+    assert!(
+        campos.len() == CAMPOS_DO_SNAPSHOT && campos.contains(&"ended"),
+        "li {} campos do `Snapshot` da FFI, e o guarda espera {CAMPOS_DO_SNAPSHOT} \
+         ({campos:?}). Se um campo entrou ou saiu de propósito, confira que ele não carrega \
+         segredo (o retrato vai à janela duas vezes por segundo) e acerte \
+         `CAMPOS_DO_SNAPSHOT`; se não, a forma dele mudou e esta parte do guarda ficou cega",
         campos.len()
     );
     for campo in campos {
@@ -11498,6 +11543,12 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "senha",
             "convite",
             "credencial",
+            // O mesmo em inglês (lote 58-4): `invite_code`, `password` e
+            // `credential` não casavam com nenhum dos nomes acima.
+            "password",
+            "passphrase",
+            "invite",
+            "credential",
         ] {
             assert!(
                 !campo.contains(segredo),
@@ -16519,9 +16570,18 @@ fn o_carregador_de_mods_diz_na_tela_e_monta_a_url_pelo_tauri() {
         let chamada = resto.get(..fim).unwrap_or("");
         // Toda string literal da chamada que tem cara de identificador de fase:
         // minúsculas e hífen. O detalhe é frase, e frase tem espaço ou acento.
-        for pedaco in chamada.split('"').skip(1).step_by(2) {
+        let partes: Vec<&str> = chamada.split('"').collect();
+        for (i, pedaco) in partes.iter().enumerate().skip(1).step_by(2) {
+            // A literal que vem logo depois de `===` ou de `!==` (também a de
+            // `typeof x === "function"`) é o lado de uma comparação, e não um
+            // argumento de fase: sem esta exceção o guarda lia `"function"` como
+            // fase e só passava porque o painel cita `"function"` por acaso.
+            let antes = partes.get(i - 1).map_or("", |p| p.trim_end());
+            if antes.ends_with("===") || antes.ends_with("!==") {
+                continue;
+            }
             if !pedaco.is_empty() && pedaco.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
-                fases.insert(pedaco.to_owned());
+                fases.insert((*pedaco).to_owned());
             }
         }
     }

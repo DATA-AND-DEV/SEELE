@@ -4053,7 +4053,7 @@ async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes) {
       // **Visível, e não só no console.** A falha é de um MOD que o servidor
       // exige: sem frase, a sessão continuaria sem ele e a pessoa descobriria
       // pela cor que não mudou.
-      anotarEstadoDoMod(m.id, "nao-obtive", String(falha?.message ?? falha));
+      anotarEstadoDoMod(m.id, "nao-obtive", typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha));
     }
   }
 }

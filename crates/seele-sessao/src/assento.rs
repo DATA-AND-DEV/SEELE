@@ -86,18 +86,40 @@ struct Entrada {
     /// Se é este pedido que define o assento agora.
     ///
     /// Deixa de valer quando outra coisa muda o assento depois dele — um pedido
-    /// novo, a saída, o operador que move, a sala apagada. A recusa de um
-    /// pedido que já não vale não move ninguém: o assento de agora é de outra
-    /// decisão.
+    /// novo, a saída, o operador que move. A recusa de um pedido que já não
+    /// vale não move ninguém: o assento de agora é de outra decisão.
+    ///
+    /// **A sala apagada não o derruba.** Se é a sala dele, ele segue valendo
+    /// até a resposta, com o assento em `None` ([`Entrada::apagada`]). Se é
+    /// outra, o assento não está nela. Os pedidos de antes dele já não valiam.
+    ///
+    /// **O invariante** (desde o item 12 da pendência 58). Só o último pedido
+    /// da fila pode valer: `pedir` supera todos antes de empilhar, e `desfazer`
+    /// só devolve a validade ao último. Quando ele vale, o assento é a sala
+    /// dele **ou `None`**, se a sala dele foi apagada com ele no ar. Quem lê
+    /// `vale` não pode supor `assento == Some(sala)`.
     vale: bool,
     /// Se a recusa dele já chegou. O `Pong` que vem atrás o tira da fila.
     recusada: bool,
+    /// Se a sala dele foi apagada com ele no ar (item 12 da pendência 58).
+    ///
+    /// Fica para a resposta dele: recusado, o servidor nunca sentou a pessoa
+    /// na sala, e a recusa devolve o de antes; aceito — o `Pong` sem recusa —,
+    /// o servidor a sentou e a tirou ao apagar, e quem partia da sala parte de
+    /// fora de sala.
+    apagada: bool,
     /// O número dele nesta conexão, que vai no carimbo do `Ping` marcado.
     numero: u64,
 }
 
 /// As entradas pedidas que o servidor ainda não decidiu, na ordem em que foram
 /// pedidas — que é a ordem em que o servidor as decide.
+///
+/// **O assento pode ser `None` com um pedido no ar que ainda o define** (item
+/// 12 da pendência 58): a sala pedida foi apagada antes da resposta. A tela
+/// sai da sala; [`Self::confirmada`] segue dando o assento de antes do pedido,
+/// e a resposta decide — a recusa devolve a pessoa a ele, e o `Pong` sem
+/// recusa a deixa fora de sala.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EntradasPendentes {
     fila: VecDeque<Entrada>,
@@ -116,6 +138,7 @@ impl EntradasPendentes {
             antes: *assento,
             vale: true,
             recusada: false,
+            apagada: false,
             numero: self.ultimo,
         });
         *assento = Some(sala);
@@ -162,8 +185,10 @@ impl EntradasPendentes {
                 //
                 // Menos quando a sala apagada é ela mesma um pedido ainda no
                 // ar: aí o servidor pode tê-la recusado sem nunca sentar a
-                // pessoa nela, e quem conserta o `antes` dos pedidos seguintes
-                // é a recusa dela, pela corrente de `recusar`.
+                // pessoa nela, e o pedido fica marcado para a resposta dele
+                // (`apagada`). A recusa conserta o `antes` dos pedidos
+                // seguintes pela corrente de `recusar`; o `Pong` sem recusa os
+                // deixa partindo de fora de sala.
                 let mut pedida_no_ar = false;
                 for entrada in &mut self.fila {
                     if entrada.antes == Some(*voice_room) && !pedida_no_ar {
@@ -171,12 +196,17 @@ impl EntradasPendentes {
                     }
                     if entrada.sala == *voice_room && !entrada.recusada {
                         pedida_no_ar = true;
+                        entrada.apagada = true;
                     }
                 }
                 if *assento != Some(*voice_room) {
                     return false;
                 }
-                self.superar();
+                // A sala some da tela, e nenhum pedido deixa de valer. Se o
+                // assento estava nela por um pedido no ar, ele é o último da
+                // fila, o único que pode valer (ver `Entrada::vale`), e segue
+                // valendo até a resposta: a recusa dele devolve o de antes.
+                // Senão, nenhum pedido valia.
                 *assento = None;
                 true
             }
@@ -200,12 +230,26 @@ impl EntradasPendentes {
                 // o assento especulativo era o de verdade; ou perdidos no
                 // limitador do servidor, sem resposta que ainda vá chegar.
                 if let Some(numero) = numero_do_carimbo(*timestamp) {
-                    while self
+                    while let Some(fechada) = self
                         .fila
                         .front()
-                        .is_some_and(|entrada| entrada.numero <= numero)
+                        .copied()
+                        .filter(|entrada| entrada.numero <= numero)
                     {
                         self.fila.pop_front();
+                        // Aceito, e a sala dele apagada depois: o servidor
+                        // tirou a pessoa dela, e o pedido seguinte, se partia
+                        // dela, parte de fora de sala. Só o seguinte, como na
+                        // corrente de `recusar`: um mais adiante que parte de
+                        // uma sala de mesmo id partia de outro pedido dela, e
+                        // é a resposta daquele que o decide.
+                        if fechada.apagada && !fechada.recusada {
+                            if let Some(seguinte) = self.fila.front_mut() {
+                                if seguinte.antes == Some(fechada.sala) {
+                                    seguinte.antes = None;
+                                }
+                            }
+                        }
                     }
                 }
                 false
@@ -396,6 +440,7 @@ mod testes {
     const A: VoiceRoomId = VoiceRoomId(1);
     const B: VoiceRoomId = VoiceRoomId(2);
     const C: VoiceRoomId = VoiceRoomId(3);
+    const D: VoiceRoomId = VoiceRoomId(4);
 
     fn recusa(reason: AlertReason) -> ServerMessage {
         ServerMessage::Alert {
@@ -693,6 +738,123 @@ mod testes {
             assento,
             Some(A),
             "o servidor recusou B e C e manteve a pessoa em A, e a tela a tirou de toda sala"
+        );
+    }
+
+    /// Item 12 da pendência 58, o primeiro caso: a sala pedida, apagada antes
+    /// de o servidor ler o pedido. Em A, pedir B; o servidor apaga B, recusa B
+    /// (a sala não existe) e mantém a pessoa em A. O aviso chega com o assento
+    /// especulativo em B, e o pedido fica para a resposta dele: a recusa devolve
+    /// a A; o `Pong` sem recusa — o servidor leu o pedido antes de apagar, e
+    /// tirou a pessoa de B ao apagar — deixa fora de sala.
+    #[test]
+    fn a_recusa_da_sala_pedida_que_foi_apagada_devolve_a_de_antes() {
+        let (mut entradas, mut assento) = em_a();
+        let b = entradas.pedir(&mut assento, B);
+        entradas.ouvir(
+            &mut assento,
+            &ServerMessage::VoiceRoomDeleted { voice_room: B },
+        );
+        assert_eq!(
+            assento, None,
+            "a tela segue mostrando a pessoa em B, que o servidor apagou"
+        );
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
+
+        assert_eq!(
+            assento,
+            Some(A),
+            "o servidor recusou B, que tinha apagado, e manteve a pessoa em A, e a tela a deixou \
+             fora de toda sala"
+        );
+        assert_eq!(entradas.confirmada(assento), Some(A));
+
+        // O servidor leu o pedido antes de apagar: sem recusa, o `Pong` deixa
+        // a pessoa fora de sala, como o servidor a deixou.
+        let (mut entradas, mut assento) = em_a();
+        let b = entradas.pedir(&mut assento, B);
+        entradas.ouvir(
+            &mut assento,
+            &ServerMessage::VoiceRoomDeleted { voice_room: B },
+        );
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
+        assert_eq!(
+            (assento, entradas.confirmada(assento)),
+            (None, None),
+            "o servidor aceitou B e a tirou de lá ao apagar, e a tela a pôs de volta noutra sala"
+        );
+    }
+
+    /// Item 12 da pendência 58, o segundo caso: em A, pedir B e C; o servidor
+    /// aceita B, apaga B antes de ler o `Ping` marcado dele — e tira a pessoa
+    /// de B ao apagar —, e recusa C. A pessoa fica fora de sala no servidor, e
+    /// a recusa de C não pode devolvê-la a B, que não existe.
+    #[test]
+    fn a_recusa_seguinte_nao_devolve_a_sala_pedida_que_foi_aceita_e_apagada() {
+        let (mut entradas, mut assento) = em_a();
+        let b = entradas.pedir(&mut assento, B);
+        let c = entradas.pedir(&mut assento, C);
+        entradas.ouvir(
+            &mut assento,
+            &ServerMessage::VoiceRoomDeleted { voice_room: B },
+        );
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
+        let confirmada_depois_de_b = entradas.confirmada(assento);
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        entradas.ouvir(&mut assento, &pong_do_pedido(c));
+
+        assert_eq!(
+            assento, None,
+            "a recusa de C devolveu a pessoa a B, que o servidor aceitou e apagou: a tela a \
+             mostra numa sala que não existe"
+        );
+        assert_eq!(entradas.confirmada(assento), None);
+        assert_eq!(
+            confirmada_depois_de_b, None,
+            "com C no ar, o áudio abriria em B, que não existe"
+        );
+    }
+
+    /// Rodada 1 do lote 58-2 (o I1 da revisão, o cenário S25): o `Pong` de um
+    /// pedido aceito e apagado corrige só o pedido que vem logo atrás dele,
+    /// como a corrente de `recusar`.
+    ///
+    /// Em A, pedir B, C, B de novo e D, tudo dentro da volta. O servidor aceita
+    /// B, apaga B (e tira a pessoa dela), aceita C, recusa o segundo B, que não
+    /// existe, e recusa D: a pessoa fica em C. O `antes` de D é o segundo B, e
+    /// quem o conserta para C é a recusa dele, pela corrente. Limpar, no `Pong`
+    /// do primeiro B, todo `antes` que aponta para B deixava a pessoa fora de
+    /// sala na tela, com o áudio fechado, e em C no servidor.
+    #[test]
+    fn o_pong_do_pedido_aceito_e_apagado_so_corrige_o_pedido_seguinte() {
+        let (mut entradas, mut assento) = em_a();
+        let b = entradas.pedir(&mut assento, B);
+        let c = entradas.pedir(&mut assento, C);
+        let b_de_novo = entradas.pedir(&mut assento, B);
+        let d = entradas.pedir(&mut assento, D);
+        entradas.ouvir(
+            &mut assento,
+            &ServerMessage::VoiceRoomDeleted { voice_room: B },
+        );
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
+        entradas.ouvir(&mut assento, &pong_do_pedido(c));
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        entradas.ouvir(&mut assento, &pong_do_pedido(b_de_novo));
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        entradas.ouvir(&mut assento, &pong_do_pedido(d));
+
+        assert_eq!(
+            assento,
+            Some(C),
+            "o servidor aceitou C e recusou o segundo B e D, e a tela tirou a pessoa de toda sala: \
+             o `Pong` do primeiro B limpou o `antes` de D, que a recusa do segundo B consertaria \
+             para C"
+        );
+        assert_eq!(
+            entradas.confirmada(assento),
+            Some(C),
+            "o áudio fechou com a pessoa em C no servidor"
         );
     }
 

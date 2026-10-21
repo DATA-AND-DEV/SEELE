@@ -104,6 +104,16 @@ pub(crate) enum FalhaNoCatalogo {
         /// Em que versão ele foi corrigido, quando a lista diz.
         corrigido_em: Option<String>,
     },
+    /// **O catálogo entregou os bytes certos, e esta máquina não os instalou**:
+    /// o disco recusou, ou o `mod.json` não serve a este SEELE. Com a recusa de
+    /// instalar dentro, e a tela diz a frase dela (pendência 58, item 9).
+    ///
+    /// Separado de [`Self::NaoEUmCatalogo`] e de [`Self::NaoRespondeu`] porque
+    /// os conselhos se opõem: a falha é daqui, e não de quem publica nem da
+    /// rede. Antes, um disco cheio chegava à tela como «O CATÁLOGO VEIO
+    /// QUEBRADO… Avise quem publica», e uma falha ao escrever a pasta de
+    /// passagem, como «NÃO RESPONDEU… Pode ser a sua rede».
+    NaoInstalou(crate::mods::FalhaAoInstalarMod),
 }
 
 /// O esquema de catálogo que este build lê.
@@ -453,11 +463,39 @@ pub(crate) async fn instalar_do_catalogo(
         baixados.push((relativo.clone(), bytes.to_vec()));
     }
     conferir_conjunto(&mut baixados, &plano.hash)?;
+    instalar_os_baixados(std::path::Path::new(config), id, versao, &baixados)
+}
 
-    // Escritos numa pasta de passagem e instalados pelo caminho de sempre: ele
-    // valida o manifesto, recusa atalho e recusa sobrescrever. Um segundo
-    // caminho de instalação seria um segundo conjunto de recusas para
-    // discordar do primeiro.
+/// Instala nesta máquina os arquivos de uma versão já conferida, e devolve o
+/// hash do que foi publicado.
+///
+/// Escritos numa pasta de passagem e instalados pelo caminho de sempre: ele
+/// valida o manifesto, recusa atalho e recusa sobrescrever. Um segundo
+/// caminho de instalação seria um segundo conjunto de recusas para discordar
+/// do primeiro.
+///
+/// Síncrona e separada da rede para que a recusa local se prove num teste.
+///
+/// # A recusa daqui é dita como daqui
+///
+/// Toda recusa desta função é desta máquina: o catálogo já entregou os bytes
+/// que declarou. Ela volta como [`FalhaNoCatalogo::NaoInstalou`], com a recusa
+/// de instalar dentro, e não como uma falha do catálogo ou da rede; e fica no
+/// `seele.log` numa linha com o MOD e a versão. A pasta de passagem vai na
+/// linha só como passagem, com `passagem_apagada=` dizendo se ela saiu do
+/// disco, o que é conferido e não suposto: como `origem=`, pelo registro de
+/// [`crate::mods::instalar_de`], ela parecia a pasta de onde a pessoa
+/// instalou, e não dizia qual MOD do catálogo era.
+///
+/// # Errors
+///
+/// [`FalhaNoCatalogo::NaoInstalou`], com o que a instalação recusou.
+pub(crate) fn instalar_os_baixados(
+    config: &std::path::Path,
+    id: &str,
+    versao: &str,
+    baixados: &[(String, Vec<u8>)],
+) -> Result<String, FalhaNoCatalogo> {
     let passagem = std::env::temp_dir().join(format!(
         "seele-mod-{}-{}",
         std::process::id(),
@@ -466,22 +504,42 @@ pub(crate) async fn instalar_do_catalogo(
             .map(|d| d.as_nanos())
             .unwrap_or_default()
     ));
-    for (relativo, bytes) in &baixados {
-        let destino = passagem.join(relativo);
-        if let Some(pai) = destino.parent() {
-            std::fs::create_dir_all(pai)
-                .map_err(|erro| FalhaNoCatalogo::NaoRespondeu(erro.to_string()))?;
-        }
-        std::fs::write(&destino, bytes)
-            .map_err(|erro| FalhaNoCatalogo::NaoRespondeu(erro.to_string()))?;
-    }
+    let publicado = escrever_e_publicar(config, &passagem, baixados);
+    // Conferido, e não afirmado: a linha diz se a passagem saiu do disco.
+    let apagada = std::fs::remove_dir_all(&passagem).is_ok();
     // O hash do que foi publicado volta para quem chamou: é por ele que o
     // servidor passa a exigir estes bytes, e não «o que estiver instalado».
-    let resultado = crate::mods::instalar_de(std::path::Path::new(config), &passagem)
-        .map(|publicado| publicado.hash)
-        .map_err(|erro| FalhaNoCatalogo::NaoEUmCatalogo(format!("{erro:?}")));
-    let _ = std::fs::remove_dir_all(&passagem);
-    resultado
+    publicado.map(|publicado| publicado.hash).map_err(|recusa| {
+        tracing::warn!(
+            mod_id = %crate::id_no_registro(id),
+            ?versao,
+            ?recusa,
+            passagem = %crate::caminho_no_registro(&passagem.to_string_lossy()),
+            passagem_apagada = apagada,
+            "não instalei o MOD do catálogo"
+        );
+        FalhaNoCatalogo::NaoInstalou(recusa)
+    })
+}
+
+/// Escreve os arquivos na pasta de passagem e os publica pelo caminho de
+/// sempre. Uma falha ao escrever a passagem é do disco daqui, como a da cópia:
+/// [`crate::mods::FalhaAoInstalarMod::NaoCopiei`].
+fn escrever_e_publicar(
+    config: &std::path::Path,
+    passagem: &std::path::Path,
+    baixados: &[(String, Vec<u8>)],
+) -> Result<crate::mods::Publicado, crate::mods::FalhaAoInstalarMod> {
+    use crate::mods::FalhaAoInstalarMod;
+    let no_disco = |erro: std::io::Error| FalhaAoInstalarMod::NaoCopiei(erro.to_string());
+    for (relativo, bytes) in baixados {
+        let destino = passagem.join(relativo);
+        if let Some(pai) = destino.parent() {
+            std::fs::create_dir_all(pai).map_err(no_disco)?;
+        }
+        std::fs::write(&destino, bytes).map_err(no_disco)?;
+    }
+    crate::mods::publicar_de(config, passagem)
 }
 
 #[cfg(test)]
@@ -492,6 +550,7 @@ pub(crate) async fn instalar_do_catalogo(
 )]
 mod o_catalogo {
     use super::{conferir_conjunto, ler_catalogo, planejar, Catalogo, FalhaNoCatalogo, Revogacoes};
+    use crate::mods::FalhaAoInstalarMod;
 
     /// Um catálogo de mentira, no formato que o indexador publica.
     fn catalogo_json() -> Vec<u8> {
@@ -785,6 +844,203 @@ mod o_catalogo {
             conferir_conjunto(&mut faltando, &esperado),
             Err(FalhaNoCatalogo::ConteudoDivergente { .. })
         ));
+    }
+
+    /// Uma pasta só deste teste, fora de qualquer `config` de verdade.
+    fn pasta_de_teste(nome: &str) -> std::path::PathBuf {
+        let caminho = std::env::temp_dir().join(format!(
+            "seele-catalogo-{}-{}-{nome}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&caminho).unwrap();
+        caminho
+    }
+
+    /// Os arquivos de uma versão como chegam do catálogo, já conferidos, com o
+    /// `mod.json` declarando a API `api`.
+    fn baixados(api: u32) -> Vec<(String, Vec<u8>)> {
+        let manifesto = format!(
+            r#"{{"schema":1,"id":"alguem/rpg","version":"1.0.0","api":{api},
+                "repo":"https://example.invalid/rpg","reach":["dom"],
+                "client":"cliente/main.js"}}"#
+        );
+        vec![
+            ("mod.json".to_owned(), manifesto.into_bytes()),
+            ("cliente/main.js".to_owned(), b"globalThis.x = 1;".to_vec()),
+        ]
+    }
+
+    /// A recusa é a variante própria, com a recusa de instalar dentro, e a
+    /// linha WARN diz o MOD e a versão; a pasta de passagem só aparece como
+    /// passagem.
+    fn exige_a_recusa_local(
+        resultado: &Result<String, FalhaNoCatalogo>,
+        rastro: &str,
+        esperada: impl Fn(&FalhaAoInstalarMod) -> bool,
+    ) {
+        assert!(
+            matches!(resultado, Err(FalhaNoCatalogo::NaoInstalou(recusa)) if esperada(recusa)),
+            "a recusa desta máquina não chegou como `NaoInstalou` com a recusa de instalar \
+             dentro, e a tela culpa o catálogo ou a rede: {resultado:?}"
+        );
+        assert!(
+            rastro.lines().any(|linha| linha.contains("WARN")
+                && linha.contains("mod_id=alguem/rpg")
+                && linha.contains(r#"versao="1.0.0""#)
+                && linha.contains("recusa=")),
+            "a recusa local de um MOD do catálogo não deixou linha WARN com o MOD, a versão e a \
+             recusa, e quem relata «não instala» chega sem dado nenhum:\n{rastro}"
+        );
+        assert!(
+            !rastro.contains("origem="),
+            "a pasta de passagem, apagada logo depois, aparece no `seele.log` como a origem do \
+             MOD:\n{rastro}"
+        );
+        // **A passagem que a linha nomeia já não existe** (rodada 1, M1), em todo
+        // caminho de falha, e a linha diz que conferiu. A pasta vai no registro
+        // pelo `Debug`, que dobra a barra invertida do Windows.
+        let passagem = rastro
+            .split("passagem=\"")
+            .nth(1)
+            .and_then(|resto| resto.split('"').next())
+            .expect("a linha WARN não nomeia a pasta de passagem")
+            .replace(r"\\", r"\");
+        let passagem = std::path::Path::new(&passagem);
+        assert_eq!(
+            passagem.parent(),
+            Some(std::env::temp_dir().as_path()),
+            "a pasta lida da linha não é uma passagem em `temp_dir()`, e conferir que ela não \
+             existe não provaria nada: {}",
+            passagem.display()
+        );
+        assert!(
+            !passagem.exists(),
+            "a pasta de passagem ficou em `temp_dir()` depois da recusa: {}",
+            passagem.display()
+        );
+        assert!(
+            rastro.contains("passagem_apagada=true"),
+            "a linha WARN não diz que a pasta de passagem foi apagada:\n{rastro}"
+        );
+    }
+
+    /// **A recusa local chega à janela na forma que o `frases.js` lê** (rodada
+    /// 1, M3). A bancada `hospedar-com-mod-antigo.cjs` monta as quatro à mão,
+    /// «como o serde as manda»: um `#[serde(rename)]` ou um `tag` posto na enum
+    /// deixaria a bancada verde e a tela em «ALGO FALHOU».
+    #[test]
+    fn a_recusa_local_chega_a_janela_na_forma_que_a_frase_le() {
+        use serde_json::json;
+        let forma = |recusa| serde_json::to_value(FalhaNoCatalogo::NaoInstalou(recusa)).unwrap();
+        for (recusa, esperada) in [
+            (
+                FalhaAoInstalarMod::NaoCopiei("x".to_owned()),
+                json!({"NaoInstalou": {"NaoCopiei": "x"}}),
+            ),
+            (
+                FalhaAoInstalarMod::ManifestoRecusado("api-too-new".to_owned()),
+                json!({"NaoInstalou": {"ManifestoRecusado": "api-too-new"}}),
+            ),
+            (
+                FalhaAoInstalarMod::TemAtalho("/x".to_owned()),
+                json!({"NaoInstalou": {"TemAtalho": "/x"}}),
+            ),
+            (
+                FalhaAoInstalarMod::SemManifesto,
+                json!({"NaoInstalou": "SemManifesto"}),
+            ),
+        ] {
+            assert_eq!(
+                forma(recusa),
+                esperada,
+                "a recusa local chega à janela numa forma que o `fraseDeErro` não lê"
+            );
+        }
+    }
+
+    /// **A recusa local de um MOD do catálogo é dita como a recusa de instalar,
+    /// e fica no `seele.log` com o MOD e a versão** (pendência 58, item 9).
+    ///
+    /// O catálogo entregou os bytes certos, e quem recusou foi esta máquina.
+    /// Antes, o `mod.json` recusado chegava à tela como `NaoEUmCatalogo` («O
+    /// CATÁLOGO VEIO QUEBRADO… Avise quem publica»), e a linha do registro
+    /// apontava a pasta de passagem, já apagada, sem dizer qual MOD era.
+    #[test]
+    fn o_mod_json_recusado_de_um_mod_do_catalogo_nao_culpa_o_catalogo() {
+        let raiz = pasta_de_teste("recusa-local");
+        let config = raiz.join("config");
+
+        // O `mod.json` que este SEELE recusa: uma API que ele não roda.
+        let (resultado, rastro) = crate::rastro_de_teste::capturar(|| {
+            super::instalar_os_baixados(&config, "alguem/rpg", "1.0.0", &baixados(99))
+        });
+        let _ = std::fs::remove_dir_all(&raiz);
+
+        exige_a_recusa_local(&resultado, &rastro, |recusa| {
+            let FalhaAoInstalarMod::ManifestoRecusado(motivo) = recusa else {
+                return false;
+            };
+            motivo == "api-too-new"
+        });
+    }
+
+    /// **A pasta de passagem que não se escreve é falha do disco daqui**, e não
+    /// da rede: antes ela chegava como `NaoRespondeu` («Pode ser a sua rede»).
+    /// A falha é injetada com um arquivo e uma pasta do mesmo nome.
+    #[test]
+    fn a_passagem_que_nao_se_escreve_nao_culpa_a_rede() {
+        let raiz = pasta_de_teste("sem-passagem");
+        let config = raiz.join("config");
+        let mut sem_passagem = baixados(seele_ffi::mods::MOD_API_VERSION);
+        sem_passagem.push(("cliente".to_owned(), b"sou um arquivo".to_vec()));
+
+        let (resultado, rastro) = crate::rastro_de_teste::capturar(|| {
+            super::instalar_os_baixados(&config, "alguem/rpg", "1.0.0", &sem_passagem)
+        });
+        let _ = std::fs::remove_dir_all(&raiz);
+
+        exige_a_recusa_local(&resultado, &rastro, |recusa| {
+            matches!(recusa, FalhaAoInstalarMod::NaoCopiei(_))
+        });
+    }
+
+    /// **E o disco de `config` que não deixa copiar**, a recusa local mais
+    /// provável: disco cheio, ou sem permissão.
+    // **Só onde há permissão de Unix.** O Windows não tem `PermissionsExt`.
+    #[cfg(unix)]
+    #[test]
+    fn o_disco_que_nao_deixa_instalar_um_mod_do_catalogo_nao_culpa_o_catalogo() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let raiz = pasta_de_teste("sem-permissao");
+        let config = raiz.join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let tranca_vale = std::fs::write(config.join("teste"), b"x").is_err();
+
+        let (resultado, rastro) = crate::rastro_de_teste::capturar(|| {
+            super::instalar_os_baixados(
+                &config,
+                "alguem/rpg",
+                "1.0.0",
+                &baixados(seele_ffi::mods::MOD_API_VERSION),
+            )
+        });
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let _ = std::fs::remove_dir_all(&raiz);
+
+        assert!(
+            tranca_vale,
+            "a pasta sem permissão de escrita ainda se escreve (este teste roda como root?), e \
+             sem a falha injetada a instalação termina e o teste não prova nada"
+        );
+        exige_a_recusa_local(&resultado, &rastro, |recusa| {
+            matches!(recusa, FalhaAoInstalarMod::NaoCopiei(_))
+        });
     }
 
     #[test]

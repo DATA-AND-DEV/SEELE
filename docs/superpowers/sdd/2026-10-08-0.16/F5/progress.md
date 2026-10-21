@@ -474,3 +474,43 @@ pasta (`lote-<id>-report.md`).
   de uma linha descrita pela revisão, com o vermelho e a reversão medidos.
 - A D do porte da voz foi para um commit à parte, para a orquestradora levar ou
   deixar.
+
+## 13 a 20/10: os lotes depois da décima sétima integração
+
+Os mesmos critérios de antes: o vermelho medido antes do conserto, a reversão que
+reprova, a revisão cética até não sobrar Importante, e o `--no-ff` no
+`0.16/lotes`. Cada relatório está nesta pasta (`lote-<id>-report.md`, menos o do
+S64, que está no item 55 da 58).
+
+- **S64 → integrado** (`3c997058`; na 17ª, `3c452570`): a sala pessoal sobe com um
+  apelido antigo acima de 64 B, cortado na fronteira de caractere dentro do teto do
+  fio, com WARN no `seele.log`; antes, quem ligava recebia `ProtocolViolation`.
+- **AX → integrado** (`8cc38f6a`; na 18ª, parte A, `4e87191a`), a pendência 63 (b):
+  a lista de pessoas e a coluna de salas reconciliadas pelo id; a sonda
+  `arvore-ax.py` assenta em toda consulta com 10, 50 e 100 pessoas.
+- **C64 → integrado** (`1d0c7ebf`; na 18ª, parte B, `162a83ac`), a pendência 64: a
+  coluna de canais pelo id, e o foco do teclado num canal atravessa o tique; junto,
+  a regressão do AX com o id repetido no arranjo de MOD (`627666f8`).
+- **R63 → integrado** (`e37509f4`; na 18ª, parte B, `162a83ac`), o resto da 63: o
+  contador, a telemetria e o `#voz-estado` não reescrevem o texto igual; as regiões
+  de MOD e a conversa reconciliadas, com o clique delegado lendo os `data-*` na hora.
+- **ECO → integrado** (`27251d52`; na 19ª, `c101b1de`), item da 63: a própria
+  mensagem gravada fica no nó da pendente (com o eco da F1), e o nó com o foco não é
+  o que se move numa reordenação.
+- **FORA → integrado** (`e8289b18`; na 19ª, `c101b1de`), item da 63: as linhas do
+  FORA DO AR chaveadas por `membro:<id>`.
+
+### O que deu errado comigo nesse trecho, e ficou corrigido
+
+- **Um download sem aprovação.** O `cargo xtask web` do AX baixou o wasi-sdk-24
+  (108 MB, SHA-256 conferido com o fixado). Contei à orquestradora; a conferência
+  passou a clonar o SDK do disco e a rodar com um `curl` de mentira que reprova.
+- **Um `target` movido entre worktrees.** Para não refazer a build, movi o meu
+  `target/debug` para o worktree do R63 e o trouxe de volta: os binários levaram o
+  caminho do outro worktree (`env!("CARGO_MANIFEST_DIR")`), o `xtask web` tentou
+  baixar lá, e os testes leram os arquivos de lá (idênticos, então os resultados
+  valeram). `cargo clean -p` dos membros, e a lição: semear com `cp -c` num
+  checkout novo, nunca mover.
+- **Uma afirmação repassada sem medida.** Disse à orquestradora que a própria
+  mensagem gravada precisava de fio novo, como a revisão do R63 dizia; o fio já
+  levava o `client_message_id`, e quem o perdia era a FFI.
