@@ -2425,7 +2425,8 @@ fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
     // commands talk to this machine's own server rather than across the bridge,
     // so the FFI has no name for either of their failures.
     //
-    // **E `FalhaAoInstalarMod`, que mora em `mods.rs`** (pendência 53). Este
+    // **E `FalhaAoInstalarMod`, que mora no `seele-sessao`** (pendência 53;
+    // saiu do `mods.rs` do app na Tarefa 2.6 da F4, e o navegador a usa). Este
     // guarda lia só o `main.rs`, e as quatro recusas de instalar um MOD
     // chegavam à tela sem frase nenhuma — a do atalho como «ALGO FALHOU E ESTE
     // APP NÃO SABE EXPLICAR O QUÊ», com o JSON cru, a quem só tinha apontado
@@ -2435,7 +2436,10 @@ fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
         ("src/main.rs", "FalhaAoHospedar"),
         ("src/main.rs", "FalhaAoEscolher"),
         ("src/main.rs", "FalhaNaPortaria"),
-        ("src/mods.rs", "FalhaAoInstalarMod"),
+        (
+            "../../crates/seele-sessao/src/catalogo.rs",
+            "FalhaAoInstalarMod",
+        ),
         // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
         // tarefa 13 do plano da F3, Step 5b). O nome sozinho não basta para a
         // `BancoNaoRespondeu(String)`, que divide o nome com a de unidade da
@@ -2516,7 +2520,10 @@ fn variants_of_le_toda_forma_de_variante_e_nao_cala_a_que_tem_campo() {
              não reprovaria guarda nenhum: {hospedar:?}"
         );
     }
-    let instalar = variants_of(&read("src/mods.rs"), "FalhaAoInstalarMod");
+    let instalar = variants_of(
+        &read("../../crates/seele-sessao/src/catalogo.rs"),
+        "FalhaAoInstalarMod",
+    );
     assert_eq!(
         instalar,
         [
@@ -20549,19 +20556,20 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
 /// A gestão escrevia `não serve: ${mod.refused}`, e o que aparecia era o nome
 /// de `refusal_name` cru — «não serve: empty», «não serve: api-too-old».
 /// Quem lê não sabe o que fazer com um código. A lista de nomes sai do próprio
-/// `refusal_name`, em `crates/seele-core/src/mods.rs`, e não é escrita aqui:
+/// `refusal_name`, em `crates/seele-sessao/src/mods.rs` (de onde o núcleo e o
+/// navegador a leem desde a Tarefa 2.6 da F4), e não é escrita aqui:
 /// uma variante nova de `Refused` sem frase reprova nesta rodada, em vez de
 /// aparecer como código na tela de alguém.
 #[test]
 fn todo_pacote_recusado_e_dito_com_uma_frase() {
     let nucleo = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../crates/seele-core/src/mods.rs"),
+            .join("../../crates/seele-sessao/src/mods.rs"),
     )
-    .expect("crates/seele-core/src/mods.rs");
+    .expect("crates/seele-sessao/src/mods.rs");
     let corpo = nucleo
         .split_once("pub fn refusal_name(")
-        .expect("`refusal_name` sumiu do núcleo")
+        .expect("`refusal_name` sumiu do `seele-sessao`")
         .1
         .split_once("\n}\n")
         .expect("o fim de `refusal_name`")

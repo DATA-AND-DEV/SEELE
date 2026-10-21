@@ -1,7 +1,7 @@
 //! **Um servidor para as bancadas do navegador** (Tarefa 2.6 da F4): o
 //! `Daemon` de verdade, num endereço local, com o banco na memória.
 //!
-//!     cargo run -p seele-server --example servidor_da_bancada
+//!     cargo run -p seele-server --example servidor_da_bancada [pasta-de-um-mod]
 //!
 //! A primeira linha da saída é um JSON com o que a bancada precisa para entrar
 //! pela página: `{"endereco", "impressao", "link"}`, em que `link` é o link do
@@ -10,9 +10,15 @@
 //! fechar: a bancada o encerra fechando o tubo, e um processo esquecido não
 //! segura a porta.
 //!
-//! **Não é o `seeled`**: sem arquivo de configuração, sem banco em disco, sem
-//! ponto de encontro. É o mesmo servidor, para a mesma sessão, com os anexos
-//! numa pasta temporária, e nada mais.
+//! **Com um MOD** (a pasta do pacote, a que tem o `mod.json`): o servidor o
+//! exige de quem entra, como o `servidor-com-mod` — instalado por hash
+//! (`instalar_de_pasta`) e ligado antes da subida, num banco em arquivo numa
+//! pasta temporária, para a subida carregar a metade de servidor. A saída
+//! ganha `"mod": {"id", "version", "hash"}`.
+//!
+//! **Não é o `seeled`**: sem arquivo de configuração, sem ponto de encontro. É
+//! o mesmo servidor, para a mesma sessão, com os anexos (e o MOD) numa pasta
+//! temporária, e nada mais.
 
 #![allow(clippy::print_stdout, reason = "a saída é o contrato com a bancada")]
 
@@ -23,7 +29,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use seele_proto::uri::Convite;
-use seele_server::persistence::Location;
+use seele_server::mods::instalar::{instalar_de_pasta, raizes_de_um_mundo};
+use seele_server::persistence::mods::{enable, EnabledMod};
+use seele_server::persistence::{Location, Persistence};
 use seele_server::{Daemon, ServerConfig};
 
 #[tokio::main]
@@ -32,13 +40,37 @@ async fn main() -> Result<()> {
     // todo anexo com `Unavailable`, e a bancada não provaria a subida.
     let anexos = std::env::temp_dir().join(format!("servidor-da-bancada-{}", std::process::id()));
     std::fs::create_dir_all(&anexos)?;
-    let config = ServerConfig {
+    let mut config = ServerConfig {
         name: "Bancada".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
         anexos: Some(anexos.clone()),
         ..ServerConfig::default()
     };
+    let mut exigido = serde_json::Value::Null;
+    if let Some(origem) = std::env::args_os().nth(1) {
+        let mundo = anexos.join("mundo");
+        let raizes = raizes_de_um_mundo(&mundo);
+        let (manifesto, hash) = instalar_de_pasta(std::path::Path::new(&origem), &raizes)?;
+        let banco = Location::File(mundo.join("seele.db"));
+        enable(
+            &Persistence::open(&banco)?,
+            &EnabledMod {
+                id: manifesto.id.clone(),
+                version: manifesto.version.clone(),
+                hash: hash.clone(),
+                repo: manifesto.repo.clone(),
+                reach: manifesto.reach.clone(),
+                server_half: manifesto.server.is_some(),
+                api: manifesto.api,
+                tema: false,
+            },
+        )?;
+        exigido =
+            serde_json::json!({ "id": manifesto.id, "version": manifesto.version, "hash": hash });
+        config.database = banco;
+        config.mods_dir = Some(raizes);
+    }
     let daemon = Arc::new(Daemon::bind(config).await?);
     let endereco = daemon.local_addr()?;
     let agora = SystemTime::now()
@@ -72,6 +104,7 @@ async fn main() -> Result<()> {
             "endereco": endereco.to_string(),
             "impressao": daemon.fingerprint(),
             "link": link,
+            "mod": exigido,
         })
     );
 

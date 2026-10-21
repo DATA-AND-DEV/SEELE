@@ -30,67 +30,14 @@ pub use seele_core::mods::{
     ler_midia, ler_tipo, reconhecido_e_nao_aceito, MidiaDeMod, TipoLido, TETO_DE_MIDIA,
 };
 
-/// Um MOD em disco, como a janela o desenha.
-///
-/// Um MOD recusado chega com `refused` preenchido em vez de ficar de fora da
-/// lista: quem largou o diretório ali tem direito ao motivo, e o defeito que o
-/// `CLAUDE.md` deste repositório nomeia como o mais caro é «o produto sabe e não
-/// conta».
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ModInstalado {
-    /// `autor/nome`.
-    pub id: String,
-    /// A versão que o autor declara, ou vazio quando o manifesto não foi lido.
-    pub version: String,
-    /// **A API que este pacote declara**, e não a que este build oferece.
-    ///
-    /// Desde a API 4 o produto executa um conjunto de versões, e não uma só
-    /// (ver `seele_proto::mods::APIS_ACEITAS`). O que um pacote pode chamar
-    /// passa a depender do que **ele** declarou: um pacote de API 3 recebe
-    /// `SeeleUI` sem superfícies nem contribuições, e é este campo que o
-    /// prelúdio lê para montá-lo.
-    ///
-    /// Zero quando o manifesto não foi lido — e zero não dá capacidade nenhuma.
-    pub api: u32,
-    /// O hash do conteúdo em hexadecimal, ou vazio. É o que uma pessoa compara
-    /// a olho com o que o indexador publica.
-    pub hash: String,
-    /// O caminho do script que a janela carrega, se há metade de cliente.
-    pub client: Option<String>,
-    /// Os arquivos que este MOD traz para mostrar ou tocar.
-    ///
-    /// **Declarados no manifesto**, e é por esta lista que a leitura passa: um
-    /// arquivo na pasta que ninguém nomeou não é servido. Vai para a tela de
-    /// aceite pela mesma razão que [`Self::reach`] vai — quem instala lê o que
-    /// o pacote traz antes de dizer sim.
-    pub arquivos: Vec<String>,
-    /// O repositório público que o manifesto declara. ADR 0045 o torna
-    /// condição de publicação, e é o que uma pessoa abre para ler o que vai
-    /// rodar na máquina dela.
-    pub repo: String,
-    /// O que este MOD declara alcançar.
-    ///
-    /// Vai para a tela **antes** de qualquer byte ser baixado: ADR 0045 exige
-    /// que quem entra leia o alcance declarado antes de aceitar.
-    pub reach: Vec<String>,
-    /// Se este MOD tem metade de servidor.
-    ///
-    /// **A linha que a tela de aceite não pode omitir.** Um MOD com metade de
-    /// servidor roda na máquina de quem hospeda e alcança o bloco `world` do
-    /// `api/v1.json` — rede de saída, relógio e log. A diferença entre isto e um
-    /// MOD só de aparência é a diferença entre repintar uma janela e abrir
-    /// conexões a partir da casa de alguém.
-    pub server: bool,
-    /// **A porta do tema** (rascunho da API 6, §9): o manifesto declara
-    /// `"tema": true`, e a metade de servidor pode pintar a aparência do
-    /// servidor inteiro.
-    ///
-    /// A gestão de MODs a lê para a escolha de quem administra (D-api-5): com
-    /// dois MODs com a porta ligados, um só pinta, e é ela que pergunta qual.
-    pub tema: bool,
-    /// O nome da recusa, de uma lista fechada, quando houve uma.
-    pub refused: Option<String>,
-}
+/// Um MOD em disco, como a janela o desenha: o do `seele-sessao`, que o
+/// navegador monta igual (Tarefa 2.6 da F4). Ver
+/// [`seele_core::mods::ModInstalado`].
+pub use seele_core::mods::ModInstalado;
+
+/// O arquivo que um MOD serve, pela regra que o navegador usa também — ver
+/// [`seele_core::mods::caminho_declarado`].
+pub use seele_core::mods::caminho_declarado;
 
 /// Onde os pacotes moram, endereçados pelo conteúdo — ver
 /// [`seele_core::mods::PACOTES`].
@@ -131,26 +78,12 @@ pub fn listar_por_conteudo(pasta: &str) -> Vec<ModInstalado> {
 /// conteúdo não é o que o nome da pasta promete.
 pub fn ler_por_hash(pasta: &str, hash: &str) -> Result<ModInstalado, String> {
     let dir = std::path::Path::new(pasta).join(PACOTES).join(hash);
-    match seele_core::mods::read_one(&dir) {
-        Ok(instalado) if seele_core::mods::hex(&instalado.hash) == hash => Ok(ModInstalado {
-            id: instalado.manifest.id,
-            version: instalado.manifest.version,
-            api: instalado.manifest.api,
-            hash: hash.to_owned(),
-            client: instalado.manifest.client,
-            arquivos: instalado.manifest.arquivos,
-            repo: instalado.manifest.repo,
-            reach: instalado.manifest.reach,
-            server: instalado.manifest.server.is_some(),
-            tema: instalado.manifest.tema,
-            refused: None,
-        }),
-        // O conteúdo não é o que o nome promete. Servir assim mesmo seria
-        // entregar à janela bytes que ninguém revisou sob o hash de bytes que
-        // alguém revisou — que é exatamente a promessa que o hash faz.
-        Ok(_) => Err("conteudo-nao-bate".to_owned()),
-        Err(motivo) => Err(refusal_name(&motivo).to_owned()),
-    }
+    // A decisão é a do navegador também: o conteúdo que não é o que o nome
+    // promete não é servido (`conteudo-nao-bate`).
+    seele_core::mods::pelo_hash(
+        seele_core::mods::read_one(&dir).map(|lido| (lido.manifest, lido.hash)),
+        hash,
+    )
 }
 
 /// Todo MOD instalado nesta máquina, válido ou não.
@@ -173,19 +106,7 @@ pub fn listar(pasta: &str) -> Vec<ModInstalado> {
 pub fn ler_um(pasta: &str, id: &str) -> Result<ModInstalado, String> {
     let dir = std::path::Path::new(pasta).join("mods").join(id);
     match seele_core::mods::read_one(&dir) {
-        Ok(instalado) => Ok(ModInstalado {
-            id: instalado.manifest.id,
-            version: instalado.manifest.version,
-            api: instalado.manifest.api,
-            hash: hex(&instalado.hash),
-            client: instalado.manifest.client,
-            arquivos: instalado.manifest.arquivos,
-            repo: instalado.manifest.repo,
-            reach: instalado.manifest.reach,
-            server: instalado.manifest.server.is_some(),
-            tema: instalado.manifest.tema,
-            refused: None,
-        }),
+        Ok(instalado) => Ok(ModInstalado::lido(instalado.manifest, hex(&instalado.hash))),
         Err(why) => Err(refusal_name(&why).to_owned()),
     }
 }
@@ -205,19 +126,7 @@ pub fn ler_um(pasta: &str, id: &str) -> Result<ModInstalado, String> {
 /// Devolve o nome da recusa quando o manifesto falta ou não vale.
 pub fn ler_pasta(caminho: &str) -> Result<ModInstalado, String> {
     match seele_core::mods::read_one(std::path::Path::new(caminho)) {
-        Ok(instalado) => Ok(ModInstalado {
-            id: instalado.manifest.id,
-            version: instalado.manifest.version,
-            api: instalado.manifest.api,
-            hash: hex(&instalado.hash),
-            client: instalado.manifest.client,
-            arquivos: instalado.manifest.arquivos,
-            repo: instalado.manifest.repo,
-            reach: instalado.manifest.reach,
-            server: instalado.manifest.server.is_some(),
-            tema: instalado.manifest.tema,
-            refused: None,
-        }),
+        Ok(instalado) => Ok(ModInstalado::lido(instalado.manifest, hex(&instalado.hash))),
         Err(why) => Err(refusal_name(&why).to_owned()),
     }
 }
@@ -232,53 +141,13 @@ pub fn ler_pasta(caminho: &str) -> Result<ModInstalado, String> {
 ///
 /// Toma `&mut` porque a ordenação acontece em quem digere: uma lista de
 /// arquivos em ordem diferente tem de dar o mesmo hash em toda máquina.
-#[must_use]
-pub fn hash_do_conjunto(arquivos: &mut [(String, Vec<u8>)]) -> String {
-    hex(&seele_core::mods::content_hash(arquivos))
-}
+pub use seele_core::mods::hash_do_conjunto;
 
 /// Um achado do `seele-core` em campos que atravessam a fronteira.
 fn achatar(found: Found) -> ModInstalado {
     match found {
-        Found::Ok(instalado) => ModInstalado {
-            id: instalado.manifest.id,
-            version: instalado.manifest.version,
-            api: instalado.manifest.api,
-            hash: hex(&instalado.hash),
-            client: instalado.manifest.client,
-            arquivos: instalado.manifest.arquivos,
-            repo: instalado.manifest.repo,
-            reach: instalado.manifest.reach,
-            server: instalado.manifest.server.is_some(),
-            tema: instalado.manifest.tema,
-            refused: None,
-        },
-        // **O que ele diz ser, quando dá para ler** — U10.
-        //
-        // A recusa continua total para executar: nada aqui faz um pacote
-        // incompatível rodar, e `refused` continua preenchido. O que ela deixa
-        // de ser é total para **descrever**: quem vai decidir entre apagar e
-        // atualizar precisa do nome e da versão, e o nome da pasta é um hash.
-        Found::Refused { id, why, diz_ser } => ModInstalado {
-            id: if diz_ser.id.is_empty() {
-                id
-            } else {
-                diz_ser.id
-            },
-            version: diz_ser.version,
-            // A API que ele **pede**, e não a que este build oferece. É o
-            // número que diz se atualizar o aplicativo resolve, ou se é o
-            // pacote que precisa de uma versão nova.
-            api: diz_ser.api,
-            hash: String::new(),
-            client: None,
-            arquivos: Vec::new(),
-            repo: String::new(),
-            reach: Vec::new(),
-            server: false,
-            tema: false,
-            refused: Some(refusal_name(&why).to_owned()),
-        },
+        Found::Ok(instalado) => ModInstalado::lido(instalado.manifest, hex(&instalado.hash)),
+        Found::Refused { id, why, diz_ser } => ModInstalado::recusado(id, &why, diz_ser),
     }
 }
 

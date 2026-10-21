@@ -512,10 +512,11 @@ mod tests {
         }
     }
 
-    /// **A bancada da sessão pelo navegador lê o `.wasm` e o servidor que o job
-    /// acabou de compilar** (Tarefa 2.6 da F4): depois do `cargo xtask web`, e
-    /// depois do build do exemplo `servidor_da_bancada`, com os dois caminhos.
-    /// Antes de qualquer um, ela entraria num servidor ou numa página do cache.
+    /// **A bancada da sessão pelo navegador lê os `.wasm` e o servidor que o
+    /// job acabou de compilar** (Tarefa 2.6 da F4): depois do `cargo xtask web`
+    /// (o `seele-web` e o motor dos MODs), e depois do build do exemplo
+    /// `servidor_da_bancada`, com os três caminhos. Antes de qualquer um, ela
+    /// entraria num servidor, numa página ou num motor do cache.
     #[test]
     fn a_bancada_da_sessao_roda_depois_do_wasm_e_do_servidor_compilados() {
         let passos = passos_do_job("bancadas-de-mod");
@@ -532,7 +533,8 @@ mod tests {
         let roda = posicao_do_run(
             "node apps/seele-app/bancada/sessao-no-navegador.cjs \
              target/wasm32-unknown-unknown/release/seele_web.wasm \
-             target/debug/examples/servidor_da_bancada",
+             target/debug/examples/servidor_da_bancada \
+             target/wasm32-wasip1/release/seele_motor_web.wasm",
         );
         assert!(
             wasm < roda && servidor < roda,
@@ -542,9 +544,10 @@ mod tests {
             ler("empacotar/publicar.sh").contains(
                 "uma_bancada node apps/seele-app/bancada/sessao-no-navegador.cjs \
                  target/wasm32-unknown-unknown/release/seele_web.wasm \
-                 target/debug/examples/servidor_da_bancada"
+                 target/debug/examples/servidor_da_bancada \
+                 target/wasm32-wasip1/release/seele_motor_web.wasm"
             ),
-            "a bateria do `publicar.sh` não roda a `sessao-no-navegador.cjs` com os dois caminhos"
+            "a bateria do `publicar.sh` não roda a `sessao-no-navegador.cjs` com os três caminhos"
         );
     }
 

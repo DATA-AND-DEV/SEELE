@@ -32,329 +32,40 @@
 //! adulterado sem levantar servidor nenhum — e é o mesmo corte que o
 //! `seele-lancador` faz, pela mesma razão.
 
-use serde::Deserialize;
+// **O que decide mora no `seele-sessao`** desde a Tarefa 2.6 da F4: o
+// navegador baixa pelo `fetch` e confere, lê, planeja e recusa pelas mesmas
+// funções (`seele_ffi::catalogo`). Aqui ficam a chave deste build, a rede e o
+// disco.
+pub(crate) use seele_ffi::catalogo::{
+    conferir_conjunto, planejar, Catalogo, FalhaNoCatalogo, Revogacoes, ENDERECO,
+};
 
 /// A chave pública que este build confere, compilada para dentro dele.
 ///
 /// Cópia byte a byte da que o indexador usa para assinar. Ver
 /// `apps/seele-app/chaves/LEIA.md` para por que ela é a segunda chave e o que
-/// custa trocá-la.
+/// custa trocá-la. O `.wasm` do navegador compila o mesmo arquivo.
 const CHAVE_DO_CATALOGO: &str = include_str!("../chaves/mods.pub");
 
-/// Onde o catálogo mora.
-///
-/// Uma constante e não configuração: um endereço que a pessoa pudesse trocar
-/// seria um endereço que alguém troca por ela. A assinatura protege o conteúdo;
-/// o que protege a **origem** é não haver nada a apontar para outro lugar.
-pub(crate) const ENDERECO: &str = "https://mods.seele.app.br";
-
-/// Por que o catálogo não pôde ser usado.
-#[derive(Debug, Clone, serde::Serialize)]
-pub(crate) enum FalhaNoCatalogo {
-    /// Não respondeu, ou respondeu erro.
-    NaoRespondeu(String),
-    /// **A assinatura do catálogo não confere.** Não se tenta de novo, e não se
-    /// tenta outro endereço: um catálogo que não passa é um catálogo adulterado
-    /// ou um endereço sequestrado, e insistir é o comportamento que o atacante
-    /// quer.
-    ///
-    /// **O nome é longo de propósito.** `AssinaturaRecusada` já é de outra
-    /// coisa — o pacote do atualizador, no `FRASES` do JavaScript —, e as duas
-    /// pedem conselhos diferentes. Os dois nomes colidiram uma vez, calados,
-    /// num objeto literal onde a última chave vence: a frase que a pessoa lia
-    /// era a do atualizador, falando de um pacote que ninguém tinha baixado.
-    AssinaturaDoCatalogoRecusada,
-    /// A assinatura passou e o conteúdo não é um catálogo que este build lê.
-    NaoEUmCatalogo(String),
-    /// O esquema é mais novo que este build.
-    ///
-    /// Separado de [`Self::NaoEUmCatalogo`] porque o conserto é outro: aqui não
-    /// há nada errado com o catálogo — quem está velho é este SEELE.
-    MaisNovoQueEsteBuild {
-        /// O que o arquivo pede.
-        pedido: u32,
-        /// O que este build lê.
-        conhecido: u32,
-    },
-    /// Um MOD ou uma versão que o catálogo não lista.
-    /// Os bytes chegaram e a exigência do servidor não acompanhou.
-    ///
-    /// QA-01 de 17/09. Atualizar um MOD que estava ligado troca os arquivos no
-    /// disco, e a linha que o servidor guarda — a que carrega o hash e vai no
-    /// anúncio — continua descrevendo a versão anterior. Reaplicar fecha a
-    /// operação; quando **isso** falha, o desfecho é próprio e merece nome
-    /// próprio: o pacote novo está instalado e o servidor ainda pede o velho.
-    NaoAplicou(String),
-    NaoEstaNoCatalogo(String),
-    /// Os bytes baixados não são os que o catálogo declara.
-    ///
-    /// Separado da assinatura de propósito, e as respostas são opostas: aqui a
-    /// causa provável é um download truncado e a coisa a fazer é tentar de
-    /// novo; ali é **não** tentar de novo.
-    ConteudoDivergente {
-        /// O que o catálogo diz.
-        esperado: String,
-        /// O que chegou.
-        obtido: String,
-    },
-    /// Esta versão foi revogada, e por quê.
-    Revogada {
-        /// O identificador do defeito, da lista fechada do indexador.
-        motivo: String,
-        /// Em que versão ele foi corrigido, quando a lista diz.
-        corrigido_em: Option<String>,
-    },
-    /// **O catálogo entregou os bytes certos, e esta máquina não os instalou**:
-    /// o disco recusou, ou o `mod.json` não serve a este SEELE. Com a recusa de
-    /// instalar dentro, e a tela diz a frase dela (pendência 58, item 9).
-    ///
-    /// Separado de [`Self::NaoEUmCatalogo`] e de [`Self::NaoRespondeu`] porque
-    /// os conselhos se opõem: a falha é daqui, e não de quem publica nem da
-    /// rede. Antes, um disco cheio chegava à tela como «O CATÁLOGO VEIO
-    /// QUEBRADO… Avise quem publica», e uma falha ao escrever a pasta de
-    /// passagem, como «NÃO RESPONDEU… Pode ser a sua rede».
-    NaoInstalou(crate::mods::FalhaAoInstalarMod),
-}
-
-/// O esquema de catálogo que este build lê.
-const ESQUEMA_CONHECIDO: u32 = 1;
-
-/// O catálogo inteiro.
-#[derive(Debug, Clone, Deserialize, serde::Serialize)]
-pub(crate) struct Catalogo {
-    /// A versão do formato.
-    pub(crate) esquema: u32,
-    /// Quando foi gerado, em segundos desde a época.
-    #[serde(default)]
-    pub(crate) gerado_em: i64,
-    /// Um por MOD.
-    #[serde(default)]
-    pub(crate) mods: Vec<ModNoCatalogo>,
-}
-
-/// Um MOD, como o catálogo o lista.
-#[derive(Debug, Clone, Deserialize, serde::Serialize)]
-pub(crate) struct ModNoCatalogo {
-    /// `autor/nome`.
-    pub(crate) id: String,
-    /// O nome legível.
-    #[serde(default)]
-    pub(crate) titulo: String,
-    /// Uma linha sobre o que ele faz.
-    #[serde(default)]
-    pub(crate) resumo: String,
-    /// O repositório público.
-    #[serde(default)]
-    pub(crate) repo: String,
-    /// O veredito mais recente, para listar e filtrar.
-    ///
-    /// **Não carimba a versão**: quem carimba um número de versão é o `nivel`
-    /// de dentro de `versoes[]`, porque o veredito ao lado de um hash tem de
-    /// ser o veredito daqueles bytes. O `indexador-de-mods.md` é explícito.
-    #[serde(default)]
-    pub(crate) nivel: String,
-    /// As versões publicadas, da mais antiga para a mais nova.
-    #[serde(default)]
-    pub(crate) versoes: Vec<VersaoNoCatalogo>,
-}
-
-/// Uma versão publicada de um MOD.
-#[derive(Debug, Clone, Deserialize, serde::Serialize)]
-pub(crate) struct VersaoNoCatalogo {
-    /// O número que o autor declara.
-    pub(crate) versao: String,
-    /// Contra que API do MOD ela foi escrita.
-    #[serde(default)]
-    pub(crate) api: u32,
-    /// O hash do conjunto, em hexadecimal minúsculo.
-    pub(crate) hash: String,
-    /// O veredito **destes bytes**.
-    #[serde(default)]
-    pub(crate) nivel: String,
-    /// Os avisos do terceiro nível, como identificadores.
-    #[serde(default)]
-    pub(crate) notas: Vec<String>,
-    /// O que esta versão declara alcançar.
-    #[serde(default)]
-    pub(crate) alcanca: Vec<String>,
-    /// A lista exata de arquivos a buscar.
-    ///
-    /// **O cliente não descobre nada.** Ele lê esta lista, busca aquilo, e
-    /// confere o hash do conjunto — um catálogo adulterado que omitisse um
-    /// arquivo mudaria o hash, e a conferência o pega.
-    #[serde(default)]
-    pub(crate) arquivos: Vec<String>,
-}
-
-/// Uma revogação: uma versão que saiu de circulação, e por quê.
-#[derive(Debug, Clone, Deserialize, serde::Serialize)]
-pub(crate) struct Revogacao {
-    /// Qual MOD.
-    pub(crate) id: String,
-    /// Qual versão.
-    pub(crate) versao: String,
-    /// O identificador do defeito, da lista fechada.
-    #[serde(default)]
-    pub(crate) motivo: String,
-    /// Em que versão ele foi corrigido, quando há uma.
-    #[serde(default)]
-    pub(crate) corrigido_em: Option<String>,
-}
-
-/// A lista de revogações inteira.
-#[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
-pub(crate) struct Revogacoes {
-    /// A versão do formato.
-    #[serde(default)]
-    pub(crate) esquema: u32,
-    /// As versões de MOD retiradas.
-    #[serde(default)]
-    pub(crate) mods: Vec<Revogacao>,
-}
-
-/// Confere a assinatura e só então analisa.
+/// Confere a assinatura, contra a chave deste build, e só então analisa.
 ///
 /// # Errors
 ///
-/// [`FalhaNoCatalogo::AssinaturaDoCatalogoRecusada`] quando a assinatura não bate — e
-/// **quem chama não tenta outro endereço depois desta**. As demais quando o
-/// conteúdo conferido não é um catálogo que este build lê.
+/// As de [`seele_ffi::catalogo::ler_catalogo`].
 pub(crate) fn ler_catalogo(bytes: &[u8], assinatura: &str) -> Result<Catalogo, FalhaNoCatalogo> {
-    conferir_assinatura(bytes, assinatura)?;
-    let catalogo: Catalogo = serde_json::from_slice(bytes)
-        .map_err(|erro| FalhaNoCatalogo::NaoEUmCatalogo(erro.to_string()))?;
-    if catalogo.esquema > ESQUEMA_CONHECIDO {
-        return Err(FalhaNoCatalogo::MaisNovoQueEsteBuild {
-            pedido: catalogo.esquema,
-            conhecido: ESQUEMA_CONHECIDO,
-        });
-    }
-    Ok(catalogo)
+    seele_ffi::catalogo::ler_catalogo(bytes, assinatura, CHAVE_DO_CATALOGO)
 }
 
 /// O mesmo, para a lista de revogações.
 ///
 /// # Errors
 ///
-/// As mesmas de [`ler_catalogo`].
+/// As de [`seele_ffi::catalogo::ler_revogacoes`].
 pub(crate) fn ler_revogacoes(
     bytes: &[u8],
     assinatura: &str,
 ) -> Result<Revogacoes, FalhaNoCatalogo> {
-    conferir_assinatura(bytes, assinatura)?;
-    serde_json::from_slice(bytes).map_err(|erro| FalhaNoCatalogo::NaoEUmCatalogo(erro.to_string()))
-}
-
-/// A assinatura, contra a chave **embutida neste build**.
-///
-/// Nunca contra uma chave que venha junto do arquivo: uma chave que chega pela
-/// mesma porta que o conteúdo não prova nada sobre ele.
-fn conferir_assinatura(bytes: &[u8], assinatura: &str) -> Result<(), FalhaNoCatalogo> {
-    // O arquivo `.pub` **inteiro**, e não a segunda linha dele: `do_arquivo_pub`
-    // lê o formato cru do `minisign`, que é o que o indexador comita. A outra
-    // função, a do atualizador, espera base64 do arquivo — e passar uma para a
-    // outra foi metade deste defeito.
-    //
-    // **A chave que não abre não é assinatura recusada**, e a diferença não é
-    // sutil: a primeira é defeito deste build e a segunda é um catálogo
-    // adulterado. Eu as juntei numa variante só, e o resultado foi o produto me
-    // dizendo «a assinatura não confere» enquanto o erro era eu estar passando a
-    // chave no formato errado — o produto sabendo e contando outra coisa.
-    let chave = seele_lancador::Chave::do_arquivo_pub(CHAVE_DO_CATALOGO).map_err(|erro| {
-        FalhaNoCatalogo::NaoEUmCatalogo(format!("a chave embutida neste SEELE não abre: {erro:?}"))
-    })?;
-    // `conferir_minisig` e não `conferir`: o indexador publica o `.minisig`
-    // cru ao lado do arquivo, e não o base64 dele num campo de JSON. Ver o
-    // porquê dos dois formatos na doc daquela função.
-    chave
-        .conferir_minisig(bytes, assinatura)
-        .map_err(|_| FalhaNoCatalogo::AssinaturaDoCatalogoRecusada)
-}
-
-/// Onde buscar cada arquivo de uma versão, e o hash que o conjunto tem de dar.
-///
-/// O caminho carrega a versão — `mods/<autor>/<nome>/<versao>/<arquivo>` — e é
-/// isso que torna cada arquivo imutável: uma versão nova é um caminho novo, e
-/// «o MOD que você baixou é o MOD que revisamos» vale sem mecanismo nenhum.
-#[derive(Debug, Clone)]
-pub(crate) struct PlanoDeDownload {
-    /// Cada par `(caminho dentro do MOD, URL absoluta)`.
-    pub(crate) arquivos: Vec<(String, String)>,
-    /// O hash que o conjunto baixado tem de dar.
-    pub(crate) hash: String,
-}
-
-/// Monta o plano, ou diz por que não há.
-///
-/// # Errors
-///
-/// [`FalhaNoCatalogo::NaoEstaNoCatalogo`] quando o MOD ou a versão não existem,
-/// e [`FalhaNoCatalogo::Revogada`] quando aquela versão foi retirada.
-pub(crate) fn planejar(
-    catalogo: &Catalogo,
-    revogacoes: &Revogacoes,
-    id: &str,
-    versao: &str,
-) -> Result<PlanoDeDownload, FalhaNoCatalogo> {
-    let achado = catalogo
-        .mods
-        .iter()
-        .find(|m| m.id == id)
-        .ok_or_else(|| FalhaNoCatalogo::NaoEstaNoCatalogo(id.to_owned()))?;
-    let publicada = achado
-        .versoes
-        .iter()
-        .find(|v| v.versao == versao)
-        .ok_or_else(|| FalhaNoCatalogo::NaoEstaNoCatalogo(format!("{id} {versao}")))?;
-
-    // **A revogação é conferida aqui, antes de baixar.** Baixar e recusar
-    // depois gastaria a rede de quem usa para chegar à mesma resposta — e,
-    // pior, deixaria os bytes de uma versão furada passarem pelo disco.
-    if let Some(retirada) = revogacoes
-        .mods
-        .iter()
-        .find(|r| r.id == id && r.versao == versao)
-    {
-        return Err(FalhaNoCatalogo::Revogada {
-            motivo: retirada.motivo.clone(),
-            corrigido_em: retirada.corrigido_em.clone(),
-        });
-    }
-
-    let arquivos = publicada
-        .arquivos
-        .iter()
-        .map(|relativo| {
-            (
-                relativo.clone(),
-                format!("{ENDERECO}/mods/{id}/{versao}/{relativo}"),
-            )
-        })
-        .collect();
-    Ok(PlanoDeDownload {
-        arquivos,
-        hash: publicada.hash.clone(),
-    })
-}
-
-/// Confere que o que chegou é o que o catálogo declarou.
-///
-/// # Errors
-///
-/// [`FalhaNoCatalogo::ConteudoDivergente`], com os dois números, para a tela
-/// poder dizer qual é qual.
-pub(crate) fn conferir_conjunto(
-    baixados: &mut [(String, Vec<u8>)],
-    esperado: &str,
-) -> Result<(), FalhaNoCatalogo> {
-    let obtido = seele_ffi::mods::hash_do_conjunto(baixados);
-    if obtido.eq_ignore_ascii_case(esperado) {
-        return Ok(());
-    }
-    Err(FalhaNoCatalogo::ConteudoDivergente {
-        esperado: esperado.to_owned(),
-        obtido,
-    })
+    seele_ffi::catalogo::ler_revogacoes(bytes, assinatura, CHAVE_DO_CATALOGO)
 }
 
 /// Busca um arquivo e a assinatura dele, e devolve os dois.

@@ -96,7 +96,7 @@ pub use types::{
 /// de «o tipo alegado tem de bater com o que os bytes dizem» é a mesma do
 /// anexo, e uma segunda cópia dela seria duas regras para discordarem no dia
 /// em que uma mudasse.
-pub use seele_core::{conhecidos, preferences, preview, search, uri};
+pub use seele_core::{catalogo, conhecidos, preferences, preview, search, uri};
 
 /// A agenda, a leitura de um texto colado e o código de uma pessoa, para a sala
 /// pessoal (a F7).

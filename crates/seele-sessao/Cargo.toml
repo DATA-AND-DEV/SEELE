@@ -16,6 +16,11 @@ serde = { version = "1.0.229", features = ["derive"] }
 # O `NomeRecusado` das regras do nome de um anexo (`nome_do_anexo`), que veio
 # do `seele-core` com o `Error` dele. A mesma versão do `seele-proto`.
 thiserror = "2.0.19"
+# O catálogo de MODs (`catalogo`), que o desktop e o navegador leem pelas
+# mesmas funções: o JSON dele, e a assinatura pelo mesmo `minisign-verify` do
+# `seele-lancador`, na mesma versão. Os dois compilam para o navegador.
+serde_json = "1.0.151"
+minisign-verify = "0.2.5"
 
 [lints]
 workspace = true

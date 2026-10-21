@@ -580,11 +580,12 @@ jobs:
         timeout-minutes: 5
       # A sessão pelo navegador de ponta a ponta (Tarefa 2.6 da F4): a página
       # inteira entra pela WebTransport num servidor de verdade (o `Daemon`, pelo
-      # exemplo `servidor_da_bancada`), conversa, e a voz atravessa entre duas
-      # páginas. O mesmo teste de ordem segura esta.
+      # exemplo `servidor_da_bancada`), conversa, a voz atravessa entre duas
+      # páginas, e um MOD exigido sobe no executor com o motor que o
+      # `cargo xtask web` compilou. O mesmo teste de ordem segura esta.
       - run: cargo build --quiet --package seele-server --example servidor_da_bancada
         if: ${{ !cancelled() }}
-      - run: node apps/seele-app/bancada/sessao-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada
+      - run: node apps/seele-app/bancada/sessao-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm
         if: ${{ !cancelled() }}
         timeout-minutes: 5
 

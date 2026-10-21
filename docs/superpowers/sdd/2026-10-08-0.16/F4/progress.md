@@ -1157,3 +1157,56 @@ a sessão vai para a bateria do desktop e volta sozinha.
 - **O que a bancada não alcança:** o servidor resgata o assento (o mesmo
   número de voz, medido), então o ramo do número novo só tem a leitura; e a
   página do buraco é uma só, de 200 (o desktop pede até 10, com as cercas).
+
+## 21/10, noite — os MODs da sessão no navegador: obter, guardar e subir (3 dos 11)
+
+Da `versao/0.16` em `4a875054`. Os três que fazem um MOD exigido rodar na
+página: `mods_instalados`, `instalar_mod_do_catalogo` e `codigo_do_mod`.
+
+- **As regras moram num lugar só.** Saem do app, do `seele-core` e do
+  `seele-ffi` para o `seele-sessao`, e os três os reexportam:
+  - `seele_sessao::mods`: o pacote lido dos bytes (`ler_pacote`), conferido
+    contra o hash pelo qual foi pedido (`pelo_hash`, a decisão do
+    `ler_por_hash`) ou guardado (`guardado_em`, a do `listar_por_conteudo`),
+    o `ModInstalado` com os construtores (os quatro literais da FFI viraram
+    dois), o nome da recusa, o tipo e o `data:` da mídia, e o caminho que um
+    MOD serve (`caminho_declarado`, a regra do `serve` do desktop);
+  - `seele_sessao::catalogo`: a assinatura (o mesmo `minisign-verify`, com o
+    modo legado), a leitura, o plano, o conjunto e as recusas
+    (`FalhaNoCatalogo`, `FalhaAoInstalarMod`). A chave vem de quem chama: o
+    desktop e o `.wasm` compilam o mesmo `chaves/mods.pub`. O catálogo do
+    desktop deixou de passar pelo invólucro do `seele-lancador`; a conferência
+    viva é uma só.
+- **No navegador** (`seele_web::mods` e a ponte): o armazém da página é um
+  IndexedDB próprio (`seele-mods`), um pacote por hash; a instalação segue a
+  ordem do desktop (catálogo conferido, revogações conferidas, plano, bytes,
+  conjunto, e só então o armazém); o código sai com as capacidades da API do
+  pacote, que o executor do navegador recebe; e a geração morta é recusada com
+  `sessao-encerrada`.
+- **Achado no caminho:** o `camada-mods.js` declara uma `instalarDoCatalogo`
+  global, carrega depois da ponte, e tomava o lugar da dela: o
+  `instalar_mod_do_catalogo` respondia `false` sem buscar nada. Renomeada, e a
+  bancada pega a volta do nome.
+- **Consertado junto:** a capacidade `arquivo` dependia do `escolher_arquivo`
+  (o seletor de anexo) em vez do `escolher_para_o_mod`, e ia ser liberada
+  antes da hora.
+- **A bancada** ganha o caso 14, com um segundo servidor que exige o MOD de
+  referência (o `servidor_da_bancada` aceita a pasta de um MOD) e o motor do
+  `cargo xtask web` como terceiro argumento (o CI e o `publicar.sh` mudaram
+  junto, e o guarda da ordem também). O catálogo é de teste, assinado pela
+  bancada no formato do minisign e servido no endereço do catálogo; a `prova`
+  troca a chave (`prova_chave_do_catalogo`, que a regra 5 do `pacote-web` tira
+  do `.wasm` da página). As recusas antes de entrar (o arquivo trocado no
+  caminho, o catálogo de outra chave, nada guardado), e depois a entrada pelo
+  passo da tela: o laço da casca obtém o pacote, o MOD sobe no executor do
+  navegador, e o painel dele diz a resposta da metade de servidor. Provados
+  pela reversão: sem a conferência do conjunto, sem a assinatura, sem a
+  geração, e com o nome que colidia.
+- **A conformidade** (`dois_produtores_dos_mods.rs`) dá a mesma lista nas duas
+  pontas para um pacote bom, um mexido e um recusado, prende a exigência na
+  rede do navegador à do servidor e confere o que cada ponta serve. Medido
+  nela: dois pacotes do mesmo MOD ficam, no desktop, na ordem do `read_dir`, e
+  a comparação não depende desse desempate.
+
+**Faltam 8 dos MODs** (as mídias, as imagens pelo volume e o seletor), e
+depois o buraco igual ao do desktop.

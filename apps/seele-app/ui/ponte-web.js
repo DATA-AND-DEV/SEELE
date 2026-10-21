@@ -304,14 +304,11 @@ const TAREFA_MODS = "2.6 e 3.4 (os MODs da sessão)";
 
 /** Atendidos que ainda não têm corpo, com a tarefa do plano que os traz. */
 const AINDA_A_FAZER = new Map([
-  ["codigo_do_mod", TAREFA_MODS],
   ["enviar_imagem_mod", TAREFA_MODS],
   ["escolher_para_o_mod", TAREFA_MODS],
-  ["instalar_mod_do_catalogo", TAREFA_MODS],
   ["ler_imagem_mod", TAREFA_MODS],
   ["midia_do_mod", TAREFA_MODS],
   ["midia_em_bytes", TAREFA_MODS],
-  ["mods_instalados", TAREFA_MODS],
   ["pedaco_do_escolhido", TAREFA_MODS],
   ["soltar_escolhido", TAREFA_MODS],
   ["som_do_mod", TAREFA_MODS],
@@ -326,7 +323,7 @@ const AINDA_A_FAZER = new Map([
  */
 const COMANDOS_DE_CADA_CAPACIDADE = Object.freeze({
   volume: Object.freeze(["enviar_imagem_mod", "ler_imagem_mod"]),
-  arquivo: Object.freeze(["escolher_arquivo", "pedaco_do_escolhido"]),
+  arquivo: Object.freeze(["escolher_para_o_mod", "pedaco_do_escolhido", "soltar_escolhido"]),
 });
 
 function capacidadesDaPlataforma(capacidades) {
@@ -1428,6 +1425,173 @@ function enderecoQuePodeSair(bruto) {
   return { alvo: url };
 }
 
+// ------------------------------------------------------------ os MODs da sessão
+
+/**
+ * **O armazém dos pacotes desta origem**: o `mod-packages` do desktop, num
+ * IndexedDB à parte da identidade, endereçado pelo conteúdo. Cada pacote é
+ * `{ hash, id, versao, arquivos: [[caminho, bytes], …] }`, guardado sob o hash
+ * que a conferência deu, e lido de novo pelas regras do desktop (o `.wasm`
+ * confere o conteúdo contra o hash a cada leitura, como o `ler_por_hash`).
+ */
+const ARMAZEM_DOS_MODS = Object.freeze({ banco: "seele-mods", versao: 1, pacotes: "pacotes" });
+
+/** O prazo de cada busca ao catálogo: o do `cliente()` do desktop. */
+const PRAZO_DO_CATALOGO_MS = 20000;
+
+function abrirOArmazemDosMods() {
+  return new Promise((resolver, rejeitar) => {
+    const pedido = indexedDB.open(ARMAZEM_DOS_MODS.banco, ARMAZEM_DOS_MODS.versao);
+    pedido.onupgradeneeded = () => pedido.result.createObjectStore(ARMAZEM_DOS_MODS.pacotes, { keyPath: "hash" });
+    pedido.onsuccess = () => resolver(pedido.result);
+    pedido.onerror = () => rejeitar(pedido.error);
+  });
+}
+
+/** Uma transação no armazém; resolve com o resultado do pedido que `fazer` devolve. */
+async function noArmazemDosMods(modo, fazer) {
+  const banco = await abrirOArmazemDosMods();
+  try {
+    return await new Promise((resolver, rejeitar) => {
+      const transacao = banco.transaction(ARMAZEM_DOS_MODS.pacotes, modo);
+      const pedido = fazer(transacao.objectStore(ARMAZEM_DOS_MODS.pacotes));
+      transacao.oncomplete = () => resolver(pedido?.result);
+      transacao.onerror = () => rejeitar(transacao.error);
+      transacao.onabort = () => rejeitar(transacao.error);
+    });
+  } finally {
+    banco.close();
+  }
+}
+
+const pacotesGuardados = () => noArmazemDosMods("readonly", (loja) => loja.getAll());
+const pacoteGuardado = (hash) => noArmazemDosMods("readonly", (loja) => loja.get(String(hash ?? "")));
+const guardarOPacote = (pacote) => noArmazemDosMods("readwrite", (loja) => loja.put(pacote));
+
+/** As funções dos MODs no `.wasm` da página (`seele_web::mods`). */
+function fronteiraDosMods(w) {
+  const codificador = new TextEncoder();
+  const decodificador = new TextDecoder();
+  const memoria = () => new Uint8Array(w.memory.buffer);
+  const saida = () => decodificador.decode(memoria().slice(w.saida_ptr(), w.saida_ptr() + w.saida_len()));
+  const texto = (valor) => codificador.encode(valor);
+  /** Põe cada bloco na memória do `.wasm`, chama com os pares, e os solta. */
+  function comBlocos(blocos, fazer) {
+    const postos = [];
+    try {
+      for (const bytes of blocos) {
+        const p = w.alocar(bytes.length);
+        memoria().set(bytes, p);
+        postos.push([p, bytes.length]);
+      }
+      return fazer(...postos.flat());
+    } finally {
+      for (const [p, n] of postos) w.liberar(p, n);
+    }
+  }
+  /** Entrega os pacotes, um arquivo por vez: o comando lê o último (ou todos). */
+  function entregar(pacotes) {
+    w.pacotes_limpar();
+    for (const { hash, arquivos } of pacotes) {
+      comBlocos([texto(hash ?? "")], (p, n) => w.pacote_novo(p, n));
+      for (const [caminho, bytes] of arquivos ?? []) {
+        comBlocos([texto(caminho), bytes], (cp, cn, bp, bn) => w.pacote_arquivo(cp, cn, bp, bn));
+      }
+    }
+  }
+  const lido = (codigo) => (codigo === 0 ? { ok: JSON.parse(saida() || "null") } : { falha: JSON.parse(saida()) });
+  return {
+    naTela(pacotes) {
+      entregar(pacotes);
+      w.mods_na_tela();
+      return JSON.parse(saida());
+    },
+    codigo(pacote, pedido) {
+      entregar(pacote ? [pacote] : []);
+      return lido(comBlocos([texto(JSON.stringify(pedido))], (p, n) => w.mod_codigo(p, n)));
+    },
+    endereco: () => (w.catalogo_endereco(), saida()),
+    lerOCatalogo: (catalogo) => lido(comBlocos([catalogo.bytes, texto(catalogo.assinatura)], (...pares) => w.catalogo_ler(...pares))),
+    planejar(catalogo, revogacoes, pedido) {
+      const blocos = [catalogo.bytes, texto(catalogo.assinatura), revogacoes.bytes, texto(revogacoes.assinatura), texto(JSON.stringify(pedido))];
+      return lido(comBlocos(blocos, (...pares) => w.catalogo_planejar(...pares)));
+    },
+    conferir(arquivos, hash) {
+      entregar([{ hash: "", arquivos }]);
+      return lido(comBlocos([texto(hash)], (p, n) => w.catalogo_conferir(p, n)));
+    },
+  };
+}
+
+/** Os MODs no `.wasm` desta página. */
+async function osModsDaPagina() {
+  return fronteiraDosMods((await carregarOWasmDaPagina()).instancia.exports);
+}
+
+/**
+ * **A geração de um comando de MOD** (`recusar_se_morta` do desktop): zero, ou
+ * a de uma sessão que acabou, é recusada com `sessao-encerrada`.
+ */
+function recusarSeMorta(geracao) {
+  const sessao = sessaoDaPonte.atual;
+  if (!sessao || sessao.acabou || !geracao || sessao.geracao !== geracao) {
+    throw { Recusado: { motivo: "sessao-encerrada" } };
+  }
+  return sessao;
+}
+
+/** Uma busca ao catálogo, com o prazo do desktop: os bytes, ou o texto. */
+async function buscarNoCatalogo(url, comoTexto) {
+  try {
+    const resposta = await fetch(url, {
+      signal: AbortSignal.timeout(PRAZO_DO_CATALOGO_MS),
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+    });
+    if (!resposta.ok) throw new Error(`${url}: ${resposta.status}`);
+    return comoTexto ? await resposta.text() : new Uint8Array(await resposta.arrayBuffer());
+  } catch (falha) {
+    throw { NaoRespondeu: String(falha?.message ?? falha) };
+  }
+}
+
+/** Um arquivo do catálogo e a assinatura dele: um sem o outro não serve. */
+async function buscarAssinado(endereco, nome) {
+  const url = `${endereco}/${nome}`;
+  const bytes = await buscarNoCatalogo(url, false);
+  return { bytes, assinatura: await buscarNoCatalogo(`${url}.minisig`, true) };
+}
+
+/**
+ * **O `instalar_do_catalogo` do desktop**, na mesma ordem: o catálogo
+ * conferido, as revogações conferidas, o plano, os bytes baixados, **o
+ * conjunto conferido**, e só então o armazém. Rejeita com a `FalhaNoCatalogo`
+ * do desktop; resolve com o hash do que ficou guardado.
+ */
+async function instalarDoCatalogoNaPagina(id, versao) {
+  const mods = await osModsDaPagina();
+  const endereco = mods.endereco();
+  const catalogo = await buscarAssinado(endereco, "catalogo.json");
+  const lido = mods.lerOCatalogo(catalogo);
+  if (lido.falha) throw lido.falha;
+  // As revogações que não respondem **não** viram lista vazia: seguir sem
+  // elas é instalar sem saber se aquela versão foi retirada.
+  const revogacoes = await buscarAssinado(endereco, "revogacoes.json");
+  const plano = mods.planejar(catalogo, revogacoes, { id, versao });
+  if (plano.falha) throw plano.falha;
+  const arquivos = [];
+  for (const [caminho, url] of plano.ok.arquivos) arquivos.push([caminho, await buscarNoCatalogo(url, false)]);
+  const conferido = mods.conferir(arquivos, plano.ok.hash);
+  if (conferido.falha) throw conferido.falha;
+  try {
+    await guardarOPacote({ hash: conferido.ok.hash, id: conferido.ok.id, versao, arquivos });
+  } catch (falha) {
+    // A falha é desta página, e não do catálogo nem da rede.
+    throw { NaoInstalou: { NaoCopiei: String(falha?.message ?? falha) } };
+  }
+  return conferido.ok.hash;
+}
+
 // ------------------------------------------------------------------- os corpos
 
 /**
@@ -1707,6 +1871,35 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   imagem_da_pessoa: (args) => (sessaoDaPonte.atual ? pelaSessao("imagem_da_pessoa")(args).catch(() => null) : null),
   // A geração que a casca guardou do `connect`: zero ou velha é a de uma
   // sessão que acabou (`confere_geracao`).
+  // **Os MODs da sessão**: os pacotes no armazém da página, lidos pelas
+  // regras do desktop no `.wasm`.
+  mods_instalados: async () => {
+    let pacotes;
+    try {
+      pacotes = await pacotesGuardados();
+    } catch (falha) {
+      // Sem armazém, a lista vazia, e dito: um MOD que some da lista sem
+      // motivo é a pergunta que volta dias depois.
+      console.warn("ponte: o armazém dos MODs não abriu:", falha);
+      pacotes = [];
+    }
+    return (await osModsDaPagina()).naTela(pacotes);
+  },
+  codigo_do_mod: async ({ geracao, id, hash } = {}) => {
+    recusarSeMorta(geracao);
+    const pacote = await pacoteGuardado(hash).catch((falha) => {
+      console.warn("ponte: o armazém dos MODs não abriu:", falha);
+      return null;
+    });
+    const lido = (await osModsDaPagina()).codigo(pacote, { id, hash });
+    if (lido.falha) throw lido.falha;
+    return lido.ok;
+  },
+  // `false`: o navegador não hospeda, e não há servidor daqui a reaplicar.
+  instalar_mod_do_catalogo: async ({ id, versao } = {}) => {
+    await instalarDoCatalogoNaPagina(String(id ?? ""), String(versao ?? ""));
+    return false;
+  },
   mod_request: ({ geracao, ...pedido } = {}) => {
     const sessao = sessaoDaPonte.atual;
     if (!sessao || !geracao || sessao.geracao !== geracao) return Promise.reject("NotConnected");
