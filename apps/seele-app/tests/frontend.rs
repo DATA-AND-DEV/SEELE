@@ -9453,14 +9453,16 @@ fn a_recusa_do_nome_so_diz_o_que_a_regra_pode_ter_pegado() {
     //
     // A tabela diz, regra a regra, que pedaço da frase a cobre. Uma regra nova
     // em `NomeRecusado` não passa daqui até alguém dizer qual.
-    let regra = without_comments(&read("../../crates/seele-core/src/anexo_no_disco.rs"));
+    // As regras moram no `seele-sessao` desde a Tarefa 2.6 da F4 (o navegador
+    // recusa os mesmos nomes), e o `anexo_no_disco` as reexporta.
+    let regra = without_comments(&read("../../crates/seele-sessao/src/nome_do_anexo.rs"));
     let Some(enumeracao) = regra
         .split("pub enum NomeRecusado {")
         .nth(1)
         .and_then(|resto| resto.split("\n}").next())
     else {
         panic!(
-            "`NomeRecusado` sumiu de `anexo_no_disco.rs`, e este guarda não sabe \
+            "`NomeRecusado` sumiu de `nome_do_anexo.rs`, e este guarda não sabe \
              mais que regras a frase de recusa tem de cobrir"
         );
     };

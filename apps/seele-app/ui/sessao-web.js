@@ -73,6 +73,21 @@ function fronteiraDaLigacao(w) {
       return { codigo, ...saidaEmJson() };
     },
     ganhosDaVoz: () => (w.voz_ganhos() === 0 ? saidaEmJson() : []),
+    fluxoNovo: () => w.fluxo_novo(),
+    fluxoChegou: (alca, bytes) => passos(comBytes(bytes, (p, n) => w.fluxo_chegou(alca, p, n))),
+    fluxoAcabou: (alca) => passos(w.fluxo_acabou(alca)),
+    /** O `Preview` do desktop para um anexo: o pedido e os bytes que chegaram. */
+    previa(pedido, bytes) {
+      const texto = codificador.encode(JSON.stringify(pedido));
+      const p = w.alocar(texto.length);
+      memoria().set(texto, p);
+      try {
+        comBytes(bytes ?? new Uint8Array(0), (pb, nb) => w.previa_julgar(p, texto.length, pb, nb));
+      } finally {
+        w.liberar(p, texto.length);
+      }
+      return saidaEmJson();
+    },
     medir: (rttMicros, jitterMs, perda) => w.ligacao_medir(BigInt(Math.max(0, Math.round(rttMicros))), jitterMs, perda) === 1,
     fechar: () => w.ligacao_fechar(),
   };
@@ -211,8 +226,10 @@ function criarASessaoAberta({ ligacao, wt, alvo, emitir, aoAcabar, aoReceberOsHa
     resolverOAperto = resolver;
     rejeitarOAperto = rejeitar;
   });
-  /** Quem espera o peso de cada canal (`peso_da_linha`). */
+  /** Quem espera o peso de cada canal (`peso_da_linha`): `{ resolver, rejeitar }`. */
   const pesos = new Map();
+  /** Quem espera cada anexo pedido, pela id: `{ abriu, pedaco, chegou }`. */
+  const anexos = new Map();
   /** Quantas mensagens de um vocabulário mais novo foram puladas. */
   const contas = { desconhecidas: 0, naoSairam: 0 };
   /** Uma escrita por vez no fluxo de controle, na ordem. */
@@ -248,6 +265,13 @@ function criarASessaoAberta({ ligacao, wt, alvo, emitir, aoAcabar, aoReceberOsHa
       } else if (passo.perdida !== undefined) {
         console.warn("sessão: o fluxo de controle se perdeu:", passo.perdida);
         acabar("LinkLost");
+      } else if (passo.peso_recusado) {
+        // O primeiro pedido daquele canal: a recusa do desktop, com o motivo.
+        const { channel, causa } = passo.peso_recusado;
+        const fila = pesos.get(channel) ?? [];
+        const primeiro = fila.shift();
+        if (fila.length === 0) pesos.delete(channel);
+        primeiro?.rejeitar({ PedidoRecusado: { causa } });
       }
     }
     await escreverOQueEspera();
@@ -257,8 +281,14 @@ function criarASessaoAberta({ ligacao, wt, alvo, emitir, aoAcabar, aoReceberOsHa
     if (mensagem && mensagem.HashesDoNavegador) aoReceberOsHashes(mensagem.HashesDoNavegador.janelas ?? []);
     if (mensagem && mensagem.ChannelWeighed) {
       const peso = mensagem.ChannelWeighed;
-      for (const resolver of pesos.get(peso.channel) ?? []) resolver(peso);
+      for (const { resolver } of pesos.get(peso.channel) ?? []) resolver(peso);
       pesos.delete(peso.channel);
+    }
+    // O anexo que o servidor não entrega: quem o esperava sabe que não veio.
+    if (mensagem && mensagem.AttachmentUnavailable) {
+      const id = mensagem.AttachmentUnavailable.attachment;
+      anexos.get(id)?.chegou(false);
+      anexos.delete(id);
     }
     for (const evento of eventos ?? []) {
       emitir(evento);
@@ -286,8 +316,10 @@ function criarASessaoAberta({ ligacao, wt, alvo, emitir, aoAcabar, aoReceberOsHa
     if (acabou) return;
     acabou = true;
     if (medindo) clearInterval(medindo);
-    for (const [, resolvidos] of pesos) for (const resolver of resolvidos) resolver(null);
+    for (const [, esperando] of pesos) for (const { resolver } of esperando) resolver(null);
     pesos.clear();
+    for (const [, esperando] of anexos) esperando.acabou?.();
+    anexos.clear();
     if (dentro && motivo) emitir({ Ended: { reason: motivo } });
     try {
       wt.close();
@@ -313,6 +345,56 @@ function criarASessaoAberta({ ligacao, wt, alvo, emitir, aoAcabar, aoReceberOsHa
     () => acabar("LinkLost"),
     () => acabar("LinkLost"),
   );
+
+  /**
+   * **Os fluxos que o servidor abre** (a tela assistida, o anexo pedido): cada
+   * um passa pelo leitor do `.wasm`, pedaço a pedaço, e os passos dizem o que
+   * fazer — o evento para a casca, o som para a mistura, os bytes do anexo
+   * para quem o pediu.
+   */
+  (async () => {
+    try {
+      const leitor = wt.incomingUnidirectionalStreams.getReader();
+      for (;;) {
+        const { value: fluxo, done } = await leitor.read();
+        if (done) break;
+        lerUmFluxo(fluxo);
+      }
+    } catch {
+      // A conexão acabou; o fim é dito por `acabar`.
+    }
+  })();
+
+  async function lerUmFluxo(fluxo) {
+    const alca = ligacao.fluxoNovo();
+    const leitor = fluxo.getReader();
+    let anexo = null;
+    const seguir = (passos, pedaco) => {
+      for (const passo of passos) {
+        if (passo.evento !== undefined) emitir(passo.evento);
+        else if (passo.som) sessao.aoSomDaTela?.(passo.som.tela, passo.som.opus);
+        else if (passo.anexo_abriu) {
+          anexo = { id: passo.anexo_abriu.anexo, ...(anexos.get(passo.anexo_abriu.anexo) ?? {}) };
+          anexo.abriu?.(passo.anexo_abriu.tamanho, () => leitor.cancel().catch(() => {}));
+        } else if (passo.bytes) anexo?.pedaco?.(pedaco.slice(passo.bytes[0], passo.bytes[1]));
+        else if (passo.anexo_chegou) {
+          anexos.get(passo.anexo_chegou.anexo)?.chegou(passo.anexo_chegou.inteiro);
+          anexos.delete(passo.anexo_chegou.anexo);
+          anexo = null;
+        } else if (passo.ignorado) console.warn("sessão: um fluxo do servidor foi ignorado:", passo.ignorado);
+      }
+    };
+    try {
+      for (;;) {
+        const { value, done } = await leitor.read();
+        if (done) break;
+        seguir(ligacao.fluxoChegou(alca, value), value);
+      }
+    } catch {
+      // O fluxo caiu, ou quem o lia o cancelou: o que faltava é dito abaixo.
+    }
+    if (!acabou) seguir(ligacao.fluxoAcabou(alca), null);
+  }
 
   /** Os datagramas da voz, no contrato do `voz-web.js`. */
   let ouvinteDaVoz = null;
@@ -396,15 +478,30 @@ function criarASessaoAberta({ ligacao, wt, alvo, emitir, aoAcabar, aoReceberOsHa
       for (const evento of lido.eventos ?? []) emitir(evento);
       return { resposta: lido.resposta };
     },
-    /** Espera o `ChannelWeighed` de um canal; `null` se a sessão acabar antes. */
+    /**
+     * Espera o `ChannelWeighed` de um canal; `null` se a sessão acabar antes,
+     * e a rejeição do desktop se o servidor recusar o pedido.
+     */
     esperarOPeso(canal) {
-      return new Promise((resolver) => {
+      return new Promise((resolver, rejeitar) => {
         if (acabou) return resolver(null);
         const lista = pesos.get(canal) ?? [];
-        lista.push(resolver);
+        lista.push({ resolver, rejeitar });
         pesos.set(canal, lista);
       });
     },
+    /**
+     * Quem espera um anexo pedido (`pedir_anexo`): `abriu(tamanho, cancelar)`,
+     * `pedaco(bytes)`, `chegou(inteiro)` e `acabou()`, a sessão que caiu.
+     * Guardado **antes** de pedir.
+     */
+    receberOAnexo(id, quem) {
+      anexos.set(id, quem);
+    },
+    /** Um fluxo unidirecional para o servidor: o envio de um anexo. */
+    abrirUmFluxo: () => wt.createUnidirectionalStream(),
+    /** O `Preview` do desktop, pelo juiz do `.wasm`. */
+    previa: (pedido, bytes) => ligacao.previa(pedido, bytes),
     /**
      * Fecha a sessão, sem `Ended`: quem fecha é esta ponta (o `disconnect`, a
      * recusa, o prazo do aperto, o CANCELAR), e a casca já sabe.

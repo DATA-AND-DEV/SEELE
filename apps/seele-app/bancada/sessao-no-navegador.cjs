@@ -37,7 +37,10 @@
 //    recusado com a frase, o CANCELAR de quem espera, e o esquecer;
 // 9. **as imagens**: uma foto grande escolhida no seletor desce a escada do
 //    desktop até caber no teto do ícone, o retrato fica guardado e volta do
-//    servidor como a imagem da pessoa, e sai quando é tirado.
+//    servidor como a imagem da pessoa, e sai quando é tirado;
+// 10. **os anexos**: um arquivo escolhido sobe pelo fluxo próprio (`Sent`),
+//     volta na conversa, a prévia o desenha pelo juiz do desktop, e salvar o
+//     entrega ao download do navegador com os mesmos bytes.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual.
 
@@ -178,7 +181,7 @@ async function esperar(aba, funcao, arg, prazoMs = 10_000) {
 
 /** Uma página da casca, ouvindo os eventos desde a carga. */
 async function abrirUmaPagina(navegador, endereco) {
-  const contexto = await navegador.newContext({ permissions: ["microphone"] });
+  const contexto = await navegador.newContext({ permissions: ["microphone"], acceptDownloads: true });
   const aba = await contexto.newPage();
   const doConsole = [];
   aba.on("console", (mensagem) => doConsole.push(`${mensagem.type()}: ${mensagem.text()}`));
@@ -393,6 +396,43 @@ const invocar = (aba, comando, args) =>
     confere("9", (await invocar(a.aba, "tirar_minha_imagem", {})).ok === null, "o tirar_minha_imagem não respondeu null");
     confere("9", (await invocar(a.aba, "meu_retrato", {})).ok === null, "o retrato ficou guardado depois de tirado");
     fs.rmSync(imagem, { force: true });
+
+    // ------------------------------------------------------------ 10. os anexos
+    const arquivo = path.join(os.tmpdir(), `anexo-${process.pid}.png`);
+    const original = pngDeRuido(16, 16);
+    fs.writeFileSync(arquivo, original);
+    const escolhido = (await escolherNoSeletor(a.aba, arquivo, "escolher_arquivo")).ok;
+    confere("10", escolhido?.tipo === "image/png" && escolhido?.tamanho === original.length, `o arquivo escolhido: ${JSON.stringify(escolhido)}`);
+    const antesDoEnvio = await a.aba.evaluate(() => window.eventosDaBancada.length);
+    const id = (await invocar(a.aba, "enviar_anexo", { channel: canal, body: "o anexo", caminho: escolhido?.caminho, nome: "ruido.png", tipo: "image/png" })).ok;
+    confere("10", Number.isInteger(id), `o número do anexo enviado: ${JSON.stringify(id)}`);
+    const enviado = await esperar(a.aba, async ({ antes, id }) => {
+      const transferencias = window.eventosDaBancada.slice(antes).filter((e) => e && e.TransferChanged).map((e) => e.TransferChanged.transfer);
+      return { pronto: transferencias.some((t) => t.kind === "Sent" && t.client_message_id === id), transferencias };
+    }, { antes: antesDoEnvio, id });
+    confere("10", enviado.pronto, `o anexo não subiu: ${JSON.stringify(enviado.transferencias)}`);
+    const naConversa = await esperar(a.aba, async (antes) => {
+      const lista = await window.__TAURI__.core.invoke("messages");
+      const com = lista.find((m) => m.attachment && m.attachment.file_name === "ruido.png");
+      const transferencias = window.eventosDaBancada.slice(antes).filter((e) => e && (e.TransferChanged || e.NoticeRaised));
+      return { pronto: Boolean(com), com, transferencias, ultimas: lista.slice(-2) };
+    }, antesDoEnvio);
+    confere("10", naConversa.pronto, `o anexo não voltou na conversa: ${JSON.stringify({ eventos: naConversa.transferencias, ultimas: naConversa.ultimas })}`);
+    const anexo = naConversa.com?.attachment?.id;
+    const previa = (await invocar(a.aba, "prever_anexo", { anexo })).ok;
+    confere(
+      "10",
+      previa?.refusal === null && previa?.found === "image/png" && String(previa?.image).startsWith("data:image/png;base64,"),
+      `a prévia do anexo: ${JSON.stringify({ ...previa, image: String(previa?.image).slice(0, 30) })}`,
+    );
+    const destino = (await invocar(a.aba, "destino_do_anexo", { anexo })).ok;
+    confere("10", destino?.file_name === "ruido.png" && destino?.beside === "ruido (2).png", `o destino: ${JSON.stringify(destino)}`);
+    const baixando = a.aba.waitForEvent("download");
+    confere("10", (await invocar(a.aba, "salvar_anexo", { anexo })).ok === null, "o salvar_anexo não respondeu null");
+    const baixado = await baixando;
+    const salvo = fs.readFileSync(await baixado.path());
+    confere("10", baixado.suggestedFilename() === "ruido.png" && Buffer.compare(salvo, original) === 0, `o arquivo salvo: ${baixado.suggestedFilename()}, ${salvo.length} bytes`);
+    fs.rmSync(arquivo, { force: true });
 
     // ------------------------------------------------------------ 8. a casca larga
     const d = await abrirUmaPagina(navegador, endereco);

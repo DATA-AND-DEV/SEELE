@@ -11,7 +11,8 @@
 //! segura a porta.
 //!
 //! **Não é o `seeled`**: sem arquivo de configuração, sem banco em disco, sem
-//! ponto de encontro. É o mesmo servidor, para a mesma sessão, e nada mais.
+//! ponto de encontro. É o mesmo servidor, para a mesma sessão, com os anexos
+//! numa pasta temporária, e nada mais.
 
 #![allow(clippy::print_stdout, reason = "a saída é o contrato com a bancada")]
 
@@ -27,10 +28,15 @@ use seele_server::{Daemon, ServerConfig};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Os anexos numa pasta própria, apagada ao sair: sem ela, o servidor recusa
+    // todo anexo com `Unavailable`, e a bancada não provaria a subida.
+    let anexos = std::env::temp_dir().join(format!("servidor-da-bancada-{}", std::process::id()));
+    std::fs::create_dir_all(&anexos)?;
     let config = ServerConfig {
         name: "Bancada".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
+        anexos: Some(anexos.clone()),
         ..ServerConfig::default()
     };
     let daemon = Arc::new(Daemon::bind(config).await?);
@@ -79,5 +85,6 @@ async fn main() -> Result<()> {
         let _ = std::io::stdin().read_to_end(&mut resto);
     })
     .await?;
+    let _ = std::fs::remove_dir_all(&anexos);
     Ok(())
 }

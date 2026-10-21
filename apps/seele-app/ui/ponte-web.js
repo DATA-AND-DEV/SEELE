@@ -309,8 +309,6 @@ const AINDA_A_FAZER = new Map([
   ["calar_a_tela", TAREFA_39],
   ["codigo_do_mod", TAREFA_MODS],
   ["compartilhar_tela", TAREFA_310],
-  ["destino_do_anexo", TAREFA_26],
-  ["enviar_anexo", TAREFA_26],
   ["enviar_imagem_mod", TAREFA_MODS],
   ["escolher_para_o_mod", TAREFA_MODS],
   ["exclusao_do_som_da_captura", TAREFA_310],
@@ -324,9 +322,7 @@ const AINDA_A_FAZER = new Map([
   ["pedaco_do_escolhido", TAREFA_MODS],
   ["pedir_permissao_de_tela", TAREFA_310],
   ["permissao_de_tela", TAREFA_310],
-  ["prever_anexo", TAREFA_26],
   ["previa_de_link", TAREFA_26],
-  ["salvar_anexo", TAREFA_26],
   ["soltar_escolhido", TAREFA_MODS],
   ["som_da_tela", TAREFA_39],
   ["som_do_mod", TAREFA_MODS],
@@ -900,6 +896,106 @@ function ouvirOArraste() {
   });
 }
 
+// ------------------------------------------------------------- os anexos
+
+/** Onde o navegador grava um anexo salvo, para a frase do SALVAR: a página não vê a pasta. */
+const PASTA_DO_NAVEGADOR = "a pasta de downloads do navegador";
+
+/** O passo do andamento de um anexo: o bloco do `seele_proto::attachment`. */
+const BLOCO_DO_ANEXO = 64 * 1024;
+
+/** Um `TransferChanged` para a casca, como o do desktop. */
+const transferencia = (transfer) => emitirNaPonte("seele://event", { TransferChanged: { transfer } });
+
+/**
+ * **Um anexo pedido ao servidor**, inteiro na memória, ou o porquê de não.
+ * `teto` desiste ao saber o tamanho (a prévia não lê mais que o dela), e
+ * `aoAndar(feito, total)` diz o andamento. Resolve `{ bytes }`, `{ grande }`
+ * ou `{ naoVeio }`, sempre com a `descricao` que o histórico tem dele (o nome,
+ * o tipo alegado, o tamanho); rejeita `"NotConnected"` se a sessão acaba antes.
+ */
+function receberUmAnexo(sessao, anexo, opcoes = {}) {
+  const teto = opcoes.teto ?? Infinity;
+  return new Promise((responder, rejeitar) => {
+    let descricao = null;
+    const resolver = (lido) => responder({ ...lido, descricao });
+    const pedacos = [];
+    let total = 0;
+    let feito = 0;
+    sessao.receberOAnexo(anexo, {
+      abriu(tamanho, cancelar) {
+        total = tamanho;
+        if (tamanho > teto) {
+          cancelar();
+          resolver({ grande: true });
+        }
+      },
+      pedaco(bytes) {
+        pedacos.push(bytes);
+        feito += bytes.length;
+        opcoes.aoAndar?.(feito, total);
+      },
+      chegou(inteiro) {
+        if (!inteiro) return resolver({ naoVeio: true });
+        const bytes = new Uint8Array(feito);
+        let onde = 0;
+        for (const pedaco of pedacos) {
+          bytes.set(pedaco, onde);
+          onde += pedaco.length;
+        }
+        resolver({ bytes });
+      },
+      acabou: () => rejeitar("NotConnected"),
+    });
+    const pedido = sessao.atender("pedir_anexo", { anexo });
+    if (!pedido || "erro" in pedido) rejeitar(pedido?.erro ?? "NotConnected");
+    else descricao = pedido.resposta;
+  });
+}
+
+/** Entrega bytes ao download do navegador, com o nome conferido. */
+function baixar(bytes, nome) {
+  const endereco = URL.createObjectURL(new Blob([bytes]));
+  const ancora = document.createElement("a");
+  ancora.href = endereco;
+  ancora.download = nome;
+  ancora.hidden = true;
+  document.body.append(ancora);
+  ancora.click();
+  ancora.remove();
+  setTimeout(() => URL.revokeObjectURL(endereco), 60_000);
+}
+
+/** O SHA-256 dos bytes, em hex: o `content_hash` do cabeçalho do envio. */
+async function hashDoArquivo(bytes) {
+  return hexDe(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+}
+
+/**
+ * **O envio de um anexo**, depois de a casca ter o número: o fluxo próprio, o
+ * cabeçalho que o `.wasm` montou e os bytes em blocos, com o andamento. O fim é
+ * o do desktop: `Sent`, `Refused` quando o servidor para o fluxo, `Fell` quando
+ * ele cai.
+ */
+async function subirOAnexo(sessao, id, cabecalho, bytes) {
+  let escritor;
+  try {
+    escritor = (await sessao.abrirUmFluxo()).getWriter();
+    await escritor.write(new Uint8Array(cabecalho));
+    for (let feito = 0; feito < bytes.length; ) {
+      const bloco = bytes.subarray(feito, feito + BLOCO_DO_ANEXO);
+      await escritor.write(bloco);
+      feito += bloco.length;
+      transferencia({ kind: "Sending", client_message_id: id, done: feito, total: bytes.length });
+    }
+    await escritor.close();
+    transferencia({ kind: "Sent", client_message_id: id });
+  } catch (falha) {
+    const parado = falha && falha.source === "stream";
+    transferencia({ kind: parado ? "Refused" : "Fell", client_message_id: id });
+  }
+}
+
 // ------------------------------------------------------------- as imagens
 
 /**
@@ -1365,6 +1461,66 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     }
     return null;
   },
+  // **Os anexos**: pedidos ao servidor e lidos pelo `.wasm` (o hash
+  // conferido lá), julgados pelo mesmo juiz do desktop na prévia, e salvos pelo
+  // download do navegador com o nome conferido pelas regras do desktop.
+  prever_anexo: ({ anexo } = {}) =>
+    comASessao(async (sessao) => {
+      const lido = await receberUmAnexo(sessao, anexo, { teto: CONSTANTES_DO_DESKTOP.regras_de_previa.limit });
+      const chegada = lido.bytes ? "bytes" : lido.grande ? "grande_demais" : "nao_veio";
+      return sessao.previa({ attachment: anexo, claimed: lido.descricao?.tipo ?? "", chegada }, lido.bytes);
+    }),
+  destino_do_anexo: async ({ anexo } = {}) => {
+    const sessao = sessaoDaPonte.atual;
+    if (!sessao) return Promise.reject({ reason: "AnexoDesconhecido", claimed: "", folder: PASTA_DO_NAVEGADOR });
+    return pelaSessao("destino_do_anexo")({ anexo, pasta: PASTA_DO_NAVEGADOR });
+  },
+  // Responde já, como o desktop; o andamento e o fim vêm como
+  // `TransferChanged`, e o arquivo vai ao download do navegador.
+  salvar_anexo: ({ anexo } = {}) =>
+    comASessao(async (sessao) => {
+      const destino = sessao.atender("destino_do_anexo", { anexo, pasta: PASTA_DO_NAVEGADOR });
+      if (!destino || "erro" in destino) {
+        transferencia({ kind: "NotSaved", attachment: anexo, reason: destino?.erro?.reason ?? "Falhou" });
+        return null;
+      }
+      const { file_name: nome } = destino.resposta;
+      receberUmAnexo(sessao, anexo, {
+        aoAndar: (feito, total) => transferencia({ kind: "Receiving", attachment: anexo, done: feito, total }),
+      }).then(
+        (lido) => {
+          if (!lido.bytes) return transferencia({ kind: "NotSaved", attachment: anexo, reason: "Falhou" });
+          baixar(lido.bytes, nome);
+          transferencia({ kind: "Saved", attachment: anexo, path: nome });
+        },
+        () => transferencia({ kind: "NotSaved", attachment: anexo, reason: "Falhou" }),
+      );
+      return null;
+    }),
+  // O número volta quando o cabeçalho está pronto (o hash pede os bytes); a
+  // subida segue depois, como no desktop. O arquivo que não está mais aqui cai
+  // com o número, como o caminho que sumiu do desktop.
+  enviar_anexo: ({ channel, body, caminho, nome, tipo } = {}) =>
+    comASessao(async (sessao) => {
+      const guardado = ALCAS_DA_PONTE.get(String(caminho ?? ""));
+      const bytes = guardado ? new Uint8Array(await guardado.arquivo.arrayBuffer()) : new Uint8Array(0);
+      const hash = guardado ? await hashDoArquivo(bytes) : "0".repeat(64);
+      const feito = await pelaSessao("cabecalho_do_anexo")({
+        channel,
+        body: String(body ?? ""),
+        nome: String(nome ?? ""),
+        tipo: String(tipo ?? ""),
+        tamanho: bytes.length,
+        hash,
+      });
+      if (feito.recusa) {
+        console.warn(`ponte: o anexo ${feito.id} não sobe: ${feito.recusa}`);
+        setTimeout(() => transferencia({ kind: "Fell", client_message_id: feito.id }), 0);
+        return feito.id;
+      }
+      setTimeout(() => subirOAnexo(sessao, feito.id, feito.cabecalho, bytes), 0);
+      return feito.id;
+    }),
   // **As imagens**: o seletor dentro do gesto, a escada do desktop, e o fio
   // pelo `.wasm` (que confere o PNG como o `check_server_icon`).
   preparar_icone_do_server: () =>
