@@ -361,6 +361,143 @@ pub fn curtos_de(identity: &Identity, de: u64, quantas: usize) -> Result<Vec<Cur
     Ok(curtos)
 }
 
+/// A chave da tabela `configuracao` onde os curtos ficam, ao lado de
+/// `tls_cert` e `tls_key`.
+const CHAVE_DOS_CURTOS: &str = "tls_curtos";
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn de_hex(texto: &str) -> Option<Vec<u8>> {
+    texto.len().is_multiple_of(2)
+        .then(|| {
+            (0..texto.len())
+                .step_by(2)
+                .map(|i| {
+                    texto
+                        .get(i..i + 2)
+                        .and_then(|par| u8::from_str_radix(par, 16).ok())
+                })
+                .collect()
+        })
+        .flatten()
+}
+
+/// Os curtos guardados neste banco, se são da identidade de impressão
+/// `longo`. Os de outra identidade não servem: a chave deles é outra.
+fn curtos_guardados(persistence: &crate::persistence::Persistence, longo: &str) -> Vec<Curto> {
+    let Ok(texto) = persistence.connection().query_row(
+        "SELECT valor FROM configuracao WHERE chave = ?1",
+        rusqlite::params![CHAVE_DOS_CURTOS],
+        |linha| linha.get::<_, String>(0),
+    ) else {
+        return Vec::new();
+    };
+    let Ok(guardado) = serde_json::from_str::<serde_json::Value>(&texto) else {
+        return Vec::new();
+    };
+    if guardado.get("longo").and_then(serde_json::Value::as_str) != Some(longo) {
+        return Vec::new();
+    }
+    guardado
+        .get("curtos")
+        .and_then(serde_json::Value::as_array)
+        .map(|lista| {
+            lista
+                .iter()
+                .filter_map(|curto| {
+                    Some(Curto {
+                        der: CertificateDer::from(de_hex(curto.get("der")?.as_str()?)?),
+                        nao_antes: curto.get("nao_antes")?.as_u64()?,
+                        nao_depois: curto.get("nao_depois")?.as_u64()?,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn guardar_curtos(
+    persistence: &crate::persistence::Persistence,
+    longo: &str,
+    curtos: &[Curto],
+) -> Result<()> {
+    let lista: Vec<serde_json::Value> = curtos
+        .iter()
+        .map(|curto| {
+            serde_json::json!({
+                "nao_antes": curto.nao_antes,
+                "nao_depois": curto.nao_depois,
+                "der": hex(curto.der.as_ref()),
+            })
+        })
+        .collect();
+    let texto = serde_json::json!({ "longo": longo, "curtos": lista }).to_string();
+    persistence.connection().execute(
+        "INSERT INTO configuracao (chave, valor) VALUES (?1, ?2)
+         ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
+        rusqlite::params![CHAVE_DOS_CURTOS, texto],
+    )?;
+    Ok(())
+}
+
+/// **Os curtos deste servidor, guardados no banco** (Tarefa 2.5 da F4): da
+/// janela de agora até as [`seele_proto::transport::JANELAS_ANUNCIADAS`]
+/// seguintes.
+///
+/// **Um curto anunciado nunca é regenerado.** O ECDSA do `ring` assina com um
+/// número aleatório, e o mesmo certificado assinado de novo sai com outro DER e
+/// outro hash: sem o banco, reabrir o `seeled` trocava todos os hashes, e todo
+/// link já mandado deixava de abrir. Os guardados que ainda valem ficam como
+/// estão; só as janelas que faltam são geradas, e os vencidos saem.
+///
+/// Guardados com a impressão do longo: uma identidade nova descarta os curtos
+/// da antiga. Vazio, e nada guardado, para uma chave que não é P-256.
+///
+/// # Errors
+///
+/// Falha se o `rcgen` não assinar ou o banco não aceitar a escrita.
+pub fn curtos_do_banco(
+    persistence: &crate::persistence::Persistence,
+    identity: &Identity,
+    agora: u64,
+) -> Result<Vec<Curto>> {
+    let longo = identity.fingerprint();
+    let de_agora = janela_de(agora);
+    let antes = seele_proto::transport::ANTES_DA_JANELA.as_secs();
+    let guardados = curtos_guardados(persistence, &longo);
+    let mut curtos: Vec<Curto> = guardados
+        .iter()
+        .filter(|curto| janela_de(curto.nao_antes + antes) >= de_agora && agora < curto.nao_depois)
+        .cloned()
+        .collect();
+    let quantas = u64::try_from(seele_proto::transport::JANELAS_ANUNCIADAS).unwrap_or(u64::MAX);
+    for indice in de_agora..de_agora.saturating_add(quantas) {
+        if curtos
+            .iter()
+            .any(|curto| janela_de(curto.nao_antes + antes) == indice)
+        {
+            continue;
+        }
+        let novo = curtos_de(identity, indice, 1)?;
+        if novo.is_empty() {
+            return Ok(Vec::new());
+        }
+        curtos.extend(novo);
+    }
+    curtos.sort_by_key(|curto| curto.nao_antes);
+    let mudou = curtos.len() != guardados.len()
+        || curtos
+            .iter()
+            .zip(&guardados)
+            .any(|(agora, antes)| agora.der != antes.der);
+    if mudou {
+        guardar_curtos(persistence, &longo, &curtos)?;
+    }
+    Ok(curtos)
+}
+
 /// O certificado de cada ALPN: o longo para `seele/1`, o curto vigente para
 /// `h3`. O molde é o de `spikes/alpn-no-mesmo-socket`.
 #[derive(Debug)]
@@ -553,11 +690,39 @@ pub fn herdar_identidade(
     let Some((cert, key)) = identidade_guardada(de) else {
         return Ok(false);
     };
-    if identidade_guardada(para).as_ref() == Some(&(cert.clone(), key.clone())) {
-        return Ok(false);
+    let herdou = identidade_guardada(para).as_ref() != Some(&(cert.clone(), key.clone()));
+    if herdou {
+        guardar_identidade(para, &cert, &key)?;
     }
-    guardar_identidade(para, &cert, &key)?;
-    Ok(true)
+    // **E os curtos do `h3`, sempre da máquina** (Tarefa 2.5 da F4): os
+    // servidores guardados desta máquina atendem no mesmo endereço com a mesma
+    // chave, e o navegador confere pelo hash que o link levou. Um curto gerado
+    // por cada servidor teria outro DER e outro hash, e o link feito enquanto
+    // um rodava falharia no outro. Por isso eles nascem e se completam no banco
+    // da máquina (`de`), e vão iguais para `para` — também quando a chave já
+    // era a mesma, porque um servidor que herdou antes da 2.5 tem os próprios.
+    let identidade = Identity {
+        chain: vec![CertificateDer::from(cert)],
+        key: PrivateKeyDer::try_from(key)
+            .map_err(|erro| anyhow::anyhow!("a chave guardada não é uma chave: {erro}"))?,
+    };
+    let agora = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let curtos = curtos_do_banco(de, &identidade, agora)?;
+    let longo = identidade.fingerprint();
+    let ja_tem: Vec<Vec<u8>> = curtos_guardados(para, &longo)
+        .iter()
+        .map(|curto| curto.der.as_ref().to_vec())
+        .collect();
+    let da_maquina: Vec<Vec<u8>> = curtos
+        .iter()
+        .map(|curto| curto.der.as_ref().to_vec())
+        .collect();
+    if !curtos.is_empty() && ja_tem != da_maquina {
+        guardar_curtos(para, &longo, &curtos)?;
+    }
+    Ok(herdou)
 }
 
 #[cfg(test)]
@@ -734,5 +899,142 @@ mod os_curtos_do_h3 {
         );
         // Antes da primeira gerada, nenhuma é a de agora.
         assert_eq!(indice_vigente(curtos.iter(), inicio_da_3 - 1), None);
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod os_curtos_no_banco {
+    use super::{
+        curtos_do_banco, curtos_guardados, guardar_identidade, herdar_identidade,
+        identidade_guardada, Curto, Identity, EPOCA_DAS_JANELAS,
+    };
+    use crate::persistence::{Location, Persistence};
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use seele_proto::transport::{JANELAS_ANUNCIADAS, PASSO_DA_JANELA};
+
+    fn banco() -> Persistence {
+        Persistence::open(&Location::Memory).expect("um banco em memória")
+    }
+
+    fn ders(curtos: &[Curto]) -> Vec<Vec<u8>> {
+        curtos
+            .iter()
+            .map(|curto| curto.der.as_ref().to_vec())
+            .collect()
+    }
+
+    fn identidade_de(banco: &Persistence) -> Identity {
+        let (cert, key) = identidade_guardada(banco).expect("uma identidade");
+        Identity {
+            chain: vec![CertificateDer::from(cert)],
+            key: PrivateKeyDer::try_from(key).unwrap(),
+        }
+    }
+
+    fn agora() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    const EM: u64 = EPOCA_DAS_JANELAS + 10 * 6 * 86_400 + 3_600;
+
+    /// **Um curto anunciado não é regenerado**: o ECDSA assina com um número
+    /// aleatório, e regenerar trocaria o hash que um link já levou.
+    #[test]
+    fn reabrir_nao_regenera_o_que_ja_foi_anunciado() {
+        let p = banco();
+        let id = Identity::load_or_create(&p, vec!["localhost".into()]).unwrap();
+        let primeira = curtos_do_banco(&p, &id, EM).unwrap();
+        let segunda = curtos_do_banco(&p, &id, EM).unwrap();
+        assert_eq!(primeira.len(), JANELAS_ANUNCIADAS);
+        assert_eq!(
+            ders(&primeira),
+            ders(&segunda),
+            "reabrir regenerou os curtos"
+        );
+    }
+
+    #[test]
+    fn com_o_tempo_os_vencidos_saem_e_os_que_ficam_sao_os_mesmos() {
+        let p = banco();
+        let id = Identity::load_or_create(&p, vec!["localhost".into()]).unwrap();
+        let antes = curtos_do_banco(&p, &id, EM).unwrap();
+        let depois = curtos_do_banco(&p, &id, EM + 3 * PASSO_DA_JANELA.as_secs()).unwrap();
+        assert_eq!(depois.len(), JANELAS_ANUNCIADAS);
+        assert_eq!(
+            ders(&depois[..JANELAS_ANUNCIADAS - 3]),
+            ders(&antes[3..]),
+            "as janelas que continuam valendo foram regeneradas"
+        );
+    }
+
+    #[test]
+    fn uma_identidade_nova_descarta_os_curtos_da_velha() {
+        let p = banco();
+        let velha = Identity::load_or_create(&p, vec!["localhost".into()]).unwrap();
+        let da_velha = curtos_do_banco(&p, &velha, EM).unwrap();
+        let nova = Identity::self_signed(vec!["localhost".into()]).unwrap();
+        let da_nova = curtos_do_banco(&p, &nova, EM).unwrap();
+        assert!(
+            ders(&da_nova)
+                .iter()
+                .all(|der| !ders(&da_velha).contains(der)),
+            "a identidade nova anunciou um curto da velha, de outra chave"
+        );
+    }
+
+    /// **Os servidores guardados desta máquina anunciam os mesmos curtos**: eles
+    /// atendem no mesmo endereço, e o link de um tem de abrir no outro.
+    #[test]
+    fn os_servidores_da_maquina_anunciam_os_mesmos_curtos() {
+        let maquina = banco();
+        Identity::load_or_create(&maquina, vec!["localhost".into()]).unwrap();
+        let (a, b) = (banco(), banco());
+        assert!(herdar_identidade(&maquina, &a).unwrap());
+        assert!(herdar_identidade(&maquina, &b).unwrap());
+        let de_a = curtos_do_banco(&a, &identidade_de(&a), agora()).unwrap();
+        let de_b = curtos_do_banco(&b, &identidade_de(&b), agora()).unwrap();
+        assert_eq!(de_a.len(), JANELAS_ANUNCIADAS);
+        assert_eq!(
+            ders(&de_a),
+            ders(&de_b),
+            "dois servidores da máquina anunciaram curtos diferentes"
+        );
+    }
+
+    /// Um servidor que herdou a chave antes da 2.5 gerou os próprios curtos; a
+    /// herança seguinte troca os dele pelos da máquina, mesmo com a chave igual.
+    #[test]
+    fn um_servidor_que_herdou_antes_passa_a_ter_os_da_maquina() {
+        let maquina = banco();
+        Identity::load_or_create(&maquina, vec!["localhost".into()]).unwrap();
+        let a = banco();
+        let (cert, key) = identidade_guardada(&maquina).unwrap();
+        guardar_identidade(&a, &cert, &key).unwrap();
+        let proprios = curtos_do_banco(&a, &identidade_de(&a), agora()).unwrap();
+        assert!(
+            !herdar_identidade(&maquina, &a).unwrap(),
+            "a chave já era a mesma"
+        );
+        let longo = identidade_de(&a).fingerprint();
+        let agora_em_a = curtos_guardados(&a, &longo);
+        let da_maquina = curtos_guardados(&maquina, &longo);
+        assert_eq!(ders(&agora_em_a), ders(&da_maquina));
+        assert_ne!(ders(&agora_em_a), ders(&proprios));
+    }
+
+    #[test]
+    fn a_sala_com_a_chave_ed25519_nao_guarda_curtos() {
+        let p = banco();
+        let sala = Identity::da_semente(&[5; 32]).unwrap();
+        assert!(curtos_do_banco(&p, &sala, EM).unwrap().is_empty());
+        assert!(curtos_guardados(&p, &sala.fingerprint()).is_empty());
     }
 }

@@ -284,3 +284,31 @@ async fn a_sala_pessoal_nao_anuncia_o_h3() {
     let (_, conexao, _ponta) = apertar(endereco, ALPN, false).await;
     assert!(conexao.is_some(), "a sala deixou de atender o `seele/1`");
 }
+
+/// **Reabrir o `seeled` no mesmo banco anuncia os mesmos hashes** (Tarefa 2.5):
+/// o link que o navegador levou continua abrindo.
+#[tokio::test]
+async fn reabrir_o_servidor_mantem_os_hashes_das_janelas() {
+    let pasta = tempfile::tempdir().unwrap();
+    let banco = pasta.path().join("seele.db");
+    let abrir = |banco: std::path::PathBuf| async move {
+        let config = ServerConfig {
+            name: "Casa".into(),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            database: Location::File(banco),
+            ..ServerConfig::default()
+        };
+        Daemon::bind(config).await.unwrap()
+    };
+    let primeiro = abrir(banco.clone()).await;
+    let antes = primeiro.janelas_do_navegador().to_vec();
+    primeiro.shutdown();
+    drop(primeiro);
+    let segundo = abrir(banco).await;
+    assert_eq!(antes.len(), JANELAS_ANUNCIADAS);
+    assert_eq!(
+        segundo.janelas_do_navegador(),
+        antes.as_slice(),
+        "reabrir o servidor trocou os hashes, e os links já mandados deixariam de abrir"
+    );
+}

@@ -629,11 +629,7 @@ impl Daemon {
         let agora = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        let curtos = tls::curtos_de(
-            &identity,
-            tls::janela_de(agora),
-            seele_proto::transport::JANELAS_ANUNCIADAS,
-        )?;
+        let curtos = tls::curtos_do_banco(&persistence, &identity, agora)?;
         let janelas = curtos.iter().map(tls::Curto::janela).collect();
         let server_config = tls::server_config_do_seeled(identity, &curtos)?;
 
