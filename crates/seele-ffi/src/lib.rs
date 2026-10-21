@@ -943,6 +943,10 @@ pub trait EventListener: Send + Sync {
 }
 
 /// A command on its way to the driver thread.
+/// Onde a resposta de uma pesagem chega: o peso, ou a causa com que o servidor
+/// recusou a pergunta (`AlertReason::PedidoRecusado`).
+type RespostaDoPeso = tokio::sync::oneshot::Sender<Result<ChannelWeight, types::CausaDaRecusa>>;
+
 enum Command {
     ImagemDeMod {
         pedido: seele_core::PedidoDeImagem,
@@ -1035,7 +1039,7 @@ enum Command {
     /// the box it fills is still open.
     WeighChannel {
         channel: ChannelId,
-        answer: tokio::sync::oneshot::Sender<ChannelWeight>,
+        answer: RespostaDoPeso,
     },
     /// A file, on a stream of its own. ADR 0027.
     ///
@@ -1274,7 +1278,7 @@ struct Shared {
     /// mesmo tempo não acontecem numa janela só, e se acontecessem um mapa
     /// atenderia uma e deixaria a outra esperando para sempre. Aqui as duas
     /// recebem a mesma resposta.
-    pending_weights: Mutex<Vec<(ChannelId, tokio::sync::oneshot::Sender<ChannelWeight>)>>,
+    pending_weights: Mutex<Vec<(ChannelId, RespostaDoPeso)>>,
     /// Os limites que esta sessão pediu para a transmissão de tela dela.
     ///
     /// **Mora aqui porque a janela não sobrevive à transmissão.** O §5 manda
@@ -1545,12 +1549,35 @@ impl Shared {
         let mut esperando = Vec::new();
         for (channel, answer) in pending.drain(..) {
             if channel.get() == weight.channel {
-                let _ = answer.send(weight);
+                let _ = answer.send(Ok(weight));
             } else {
                 esperando.push((channel, answer));
             }
         }
         *pending = esperando;
+    }
+
+    /// **Uma pesagem que o servidor recusou volta a quem perguntou**, com a
+    /// causa. Devolve se havia alguém esperando.
+    ///
+    /// O servidor responde a um `WeighChannel` que não deu com o
+    /// `PedidoRecusado` do `nao_deu`, e não com um `ChannelWeighed`. Sem isto,
+    /// a espera ficava viva até a sessão acabar: o APAGAR de um canal ficava
+    /// sem resposta, a caixa «Não consegui contar…» nunca abria, e cada clique
+    /// a mais empilhava outra espera.
+    ///
+    /// **A mais antiga**, uma por recusa: o servidor responde aos pedidos de um
+    /// mesmo ordinal na ordem em que chegaram (`AlertReason::PedidoRecusado`).
+    fn recusar_peso(&self, causa: types::CausaDaRecusa) -> bool {
+        let Ok(mut pending) = self.pending_weights.lock() else {
+            return false;
+        };
+        if pending.is_empty() {
+            return false;
+        }
+        let (_, answer) = pending.remove(0);
+        let _ = answer.send(Err(causa));
+        true
     }
 
     fn notify(&self, event: &Event) {
@@ -2637,7 +2664,10 @@ impl Connection {
             channel: ChannelId(channel),
             answer,
         })?;
-        resposta.await.map_err(|_| ConnectionError::NotConnected)
+        resposta
+            .await
+            .map_err(|_| ConnectionError::NotConnected)?
+            .map_err(|causa| ConnectionError::PedidoRecusado { causa })
     }
 
     /// Mutes or unmutes the microphone — mudo.
@@ -4643,21 +4673,7 @@ async fn drive(
             aviso = client.proximo() => {
                 match aviso {
                     seele_core::enlace::Aviso::Mensagem(message) => {
-                        // A resposta a uma pergunta, e não um fato sobre a
-                        // sala: ela vai para quem perguntou e não entra no
-                        // `Room`. Antes do `fold` porque é onde ela para —
-                        // `Room::apply` não tem arm que a guarde, de propósito.
-                        if let seele_core::ServerMessage::ChannelWeighed {
-                            channel, messages, authors, oldest_at_seconds,
-                        } = message.as_ref() {
-                            shared.answer_weight(ChannelWeight {
-                                channel: channel.get(),
-                                messages: *messages,
-                                authors: *authors,
-                                oldest_at_seconds: *oldest_at_seconds,
-                            });
-                        }
-                        fold(&shared, &message);
+                        receber(&shared, &message);
                         // A razão de uma recusa, que o `Room` guardou ao dobrar
                         // a mensagem. Drenada em vez de lida: duas
                         // transferências podem estar no ar, e a segunda falhar
@@ -6003,6 +6019,43 @@ fn renomeacao(room: &Room, message: &seele_core::ServerMessage) -> Option<(Strin
 }
 
 /// Folds a server message into the room and tells the shell what moved.
+/// Uma mensagem do servidor, dobrada no `Room` — menos a resposta a uma
+/// pergunta, que vai a quem perguntou.
+///
+/// - **O peso** (`ChannelWeighed`) vai à caixa que o pediu. Antes do `fold`,
+///   porque é onde ele para: `Room::apply` não tem arm que o guarde, de
+///   propósito.
+/// - **A recusa de uma pesagem** (`PedidoRecusado` de um `WeighChannel`) vai à
+///   mesma caixa, com a causa, e **não vira faixa**: a caixa está onde a pessoa
+///   agiu, e as duas juntas diriam a mesma coisa duas vezes. Sem ninguém
+///   esperando — uma recusa que chega depois de a caixa fechar —, ela dobra
+///   como qualquer aviso, e a faixa diz.
+fn receber(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
+    match message {
+        seele_core::ServerMessage::ChannelWeighed {
+            channel,
+            messages,
+            authors,
+            oldest_at_seconds,
+        } => shared.answer_weight(ChannelWeight {
+            channel: channel.get(),
+            messages: *messages,
+            authors: *authors,
+            oldest_at_seconds: *oldest_at_seconds,
+        }),
+        seele_core::ServerMessage::Alert {
+            reason: seele_core::AlertReason::PedidoRecusado { pedido, causa },
+            ..
+        } if seele_core::nome_do_pedido(*pedido) == Some("WeighChannel")
+            && shared.recusar_peso((*causa).into()) =>
+        {
+            return;
+        }
+        _ => {}
+    }
+    fold(shared, message);
+}
+
 fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
     if let seele_core::ServerMessage::ModReply {
         request,
@@ -9225,6 +9278,127 @@ mod tests {
         // asking for it left the room exactly as it was.
         assert!(shared.room.lock().expect("room").channels.is_empty());
         assert!(shared.pending_weights.lock().expect("pending").is_empty());
+    }
+
+    /// A recusa do servidor a uma pesagem, como o `nao_deu` a manda.
+    fn recusa_do_peso(causa: seele_core::CausaDaRecusa) -> seele_core::ServerMessage {
+        let pedido = (0..256)
+            .find(|n| seele_core::nome_do_pedido(*n) == Some("WeighChannel"))
+            .expect("o ordinal do WeighChannel");
+        seele_core::ServerMessage::Alert {
+            severity: seele_core::AlertSeverity::Warning,
+            reason: seele_core::AlertReason::PedidoRecusado { pedido, causa },
+            operator_text: None,
+        }
+    }
+
+    /// **Cada recusa de uma pesagem volta a uma espera, e nenhuma vira faixa.**
+    ///
+    /// Era o APAGAR de um canal pendurado: o servidor recusa o `WeighChannel`
+    /// pelo `nao_deu`, e nada resolvia a espera — a caixa «Não consegui
+    /// contar…» nunca abria, e cada clique a mais empilhava outra espera, viva
+    /// até a sessão acabar. Dois cliques aqui: duas esperas, duas recusas, as
+    /// duas voltam com a causa, e nada fica. E nenhuma faixa, porque a caixa
+    /// diz. Uma terceira recusa, sem ninguém esperando, vira faixa como
+    /// qualquer aviso.
+    #[test]
+    fn cada_recusa_de_uma_pesagem_volta_a_quem_perguntou_e_sem_faixa() {
+        let shared = bare_shared();
+        let (primeira, mut primeira_volta) = tokio::sync::oneshot::channel();
+        let (segunda, mut segunda_volta) = tokio::sync::oneshot::channel();
+        {
+            let mut pending = shared.pending_weights.lock().expect("pending");
+            pending.push((seele_core::ChannelId(7), primeira));
+            pending.push((seele_core::ChannelId(7), segunda));
+        }
+
+        receber(
+            &shared,
+            &recusa_do_peso(seele_core::CausaDaRecusa::FalhaDoServidor),
+        );
+        receber(
+            &shared,
+            &recusa_do_peso(seele_core::CausaDaRecusa::NaoExiste),
+        );
+
+        assert_eq!(
+            primeira_volta.try_recv(),
+            Ok(Err(types::CausaDaRecusa::FalhaDoServidor)),
+            "a primeira espera não voltou com a primeira recusa, e o APAGAR fica pendurado"
+        );
+        assert_eq!(
+            segunda_volta.try_recv(),
+            Ok(Err(types::CausaDaRecusa::NaoExiste)),
+            "a segunda espera não voltou com a segunda recusa"
+        );
+        assert!(shared.pending_weights.lock().expect("pending").is_empty());
+        assert_eq!(
+            shared.room.lock().expect("room").notice,
+            None,
+            "a recusa respondida virou faixa também, e a caixa e a faixa dizem a mesma coisa"
+        );
+
+        receber(
+            &shared,
+            &recusa_do_peso(seele_core::CausaDaRecusa::FalhaDoServidor),
+        );
+        assert!(
+            shared.room.lock().expect("room").notice.is_some(),
+            "sem ninguém esperando, a recusa sumiu calada em vez de virar faixa"
+        );
+    }
+
+    /// E pela pergunta inteira: `weigh_channel` volta com a causa, e não fica
+    /// esperando um peso que não vem.
+    #[test]
+    fn uma_pesagem_recusada_devolve_a_causa_a_quem_perguntou() {
+        let shared = bare_shared();
+        let (commands, mut queue) = tokio::sync::mpsc::unbounded_channel();
+        let connection = Connection {
+            commands,
+            shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
+            ligacao: None,
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("runtime");
+        let resposta = runtime.block_on(async {
+            let motor = tokio::spawn({
+                let shared = Arc::clone(&shared);
+                async move {
+                    let Some(Command::WeighChannel { channel, answer }) = queue.recv().await else {
+                        panic!("nada pediu a pesagem");
+                    };
+                    shared
+                        .pending_weights
+                        .lock()
+                        .expect("pending")
+                        .push((channel, answer));
+                    receber(
+                        &shared,
+                        &recusa_do_peso(seele_core::CausaDaRecusa::FalhaDoServidor),
+                    );
+                }
+            });
+            // Com prazo: sem o conserto a pergunta espera para sempre, e um
+            // teste que pendura não reprova, só não termina.
+            let resposta = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                connection.weigh_channel(7),
+            )
+            .await
+            .expect("a pesagem recusada ficou esperando um peso que não vem");
+            motor.await.expect("motor");
+            resposta
+        });
+        assert_eq!(
+            resposta.map(|peso| peso.messages),
+            Err(ConnectionError::PedidoRecusado {
+                causa: types::CausaDaRecusa::FalhaDoServidor,
+            })
+        );
     }
 
     #[test]

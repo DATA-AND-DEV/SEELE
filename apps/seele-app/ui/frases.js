@@ -818,6 +818,14 @@ function fraseDeErro(erro, apelido, deOnde) {
     // 0.16, §8). O servidor recusou o banco sem tocar nele, e o remédio é um só:
     // atualizar. Os números do esquema vão ao fim, para quem relata, e não no
     // título — quem lê precisa saber que é a versão e o que fazer.
+    // **O servidor recusou a pergunta** (`ConnectionError::PedidoRecusado`):
+    // hoje, a pesagem de um canal antes de apagá-lo. A caixa de quem perguntou
+    // já diz o que não deu («Não consegui contar…»); daqui vão o porquê e o que
+    // fazer, os mesmos da faixa do «NÃO DEU» (`CAUSAS_DE_RECUSA`).
+    if (erro.PedidoRecusado) {
+      const porque = CAUSAS_DE_RECUSA[erro.PedidoRecusado.causa];
+      return porque ? `${porque.causa}.\n${porque.fazer}` : `${AVISOS.PedidoRecusado}.`;
+    }
     if (erro.BancoDoFuturo) {
       const { gravado, conhecido } = erro.BancoDoFuturo;
       return (

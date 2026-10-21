@@ -1747,6 +1747,14 @@ pub enum ConnectionError {
         /// servidor é mais novo, e o remédio é atualizar este app.
         mais_nova: bool,
     },
+    /// **O servidor recusou a pergunta**, com a causa do fio
+    /// (`AlertReason::PedidoRecusado`). Hoje, só a pesagem de um canal antes de
+    /// apagá-lo (`weigh_channel`), o único pedido que a FFI espera responder e
+    /// que o servidor recusa pelo `nao_deu`.
+    PedidoRecusado {
+        /// Por que não deu.
+        causa: CausaDaRecusa,
+    },
     /// The identity on disk could not be read or written.
     IdentityUnavailable,
     /// No usable microphone or speaker.
