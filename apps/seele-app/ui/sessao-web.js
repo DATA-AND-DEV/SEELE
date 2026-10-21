@@ -72,6 +72,7 @@ function fronteiraDaLigacao(w) {
       const codigo = comJson(pedido, (p, n) => w.ligacao_atender(p, n));
       return { codigo, ...saidaEmJson() };
     },
+    ganhosDaVoz: () => (w.voz_ganhos() === 0 ? saidaEmJson() : []),
     medir: (rttMicros, jitterMs, perda) => w.ligacao_medir(BigInt(Math.max(0, Math.round(rttMicros))), jitterMs, perda) === 1,
     fechar: () => w.ligacao_fechar(),
   };
@@ -344,12 +345,17 @@ function criarASessaoAberta({ ligacao, wt, alvo, emitir, aoAcabar, aoReceberOsHa
     aoDobrar: null,
     /** O que esta ponta mede, para o retrato; a ponte o troca. */
     medidas: () => ({ jitterMs: 0, perda: 0 }),
+    /** O que a ponte faz a cada volta da medida (os volumes, a voz). */
+    aCadaVolta: null,
     comecarAMedir() {
       medindo = setInterval(async () => {
         const { jitterMs, perda } = sessao.medidas();
         if (ligacao.medir(await idaEVolta(), jitterMs, perda)) emitir("TelemetryChanged");
+        sessao.aCadaVolta?.();
       }, VOLTA_DA_MEDIDA_MS);
     },
+    /** O ganho de cada voz com volume escolhido, pela alça da mistura. */
+    ganhosDaVoz: () => (acabou ? [] : ligacao.ganhosDaVoz()),
     /** O retrato do `.wasm`: a sala, os contados e a telemetria. */
     retrato: () => ligacao.retrato(),
     /**

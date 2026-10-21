@@ -32,6 +32,7 @@ use seele_proto::ids::{PersonId, SessionId, Ssrc};
 pub mod assento;
 pub mod despedida;
 pub mod retrato;
+pub mod search;
 pub mod state;
 
 /// Everything the server told us on the way in.

@@ -59,6 +59,7 @@
 //! | | 2 | nada: a própria voz |
 //! | | 1 | `{"erro": …}` |
 //! | `voz_esquecer(agora_ms)` | quantas alças | cada alça esquecida, u32 em little-endian |
+//! | `voz_ganhos()` | 0 | `[[alça, ganho], …]`: os volumes escolhidos na sessão, pela alça (Tarefa 2.6) |
 //!
 //! **O teste do microfone do PC** (lote C), na instância da página, à parte da
 //! voz da sala:
@@ -103,7 +104,7 @@ use std::cell::RefCell;
 use seele_proto::control::ControlError;
 use seele_voz::gate::GateMode;
 
-use crate::comandos::Chaves;
+use crate::comandos::DaPagina;
 use crate::ligacao::{Ligacao, Passo, Pedido};
 use crate::voz::{Envio, Recepcao, Reproducao, TesteDoMicrofone};
 use crate::{codificar_do_cliente, decodificar_do_servidor, DoServidor, ErroDaPonte};
@@ -111,7 +112,7 @@ use crate::{codificar_do_cliente, decodificar_do_servidor, DoServidor, ErroDaPon
 thread_local! {
     static SAIDA: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static LIGACAO: RefCell<Option<Ligacao>> = const { RefCell::new(None) };
-    static CHAVES: RefCell<Option<Chaves>> = const { RefCell::new(None) };
+    static PAGINA: RefCell<Option<DaPagina>> = const { RefCell::new(None) };
     static ENVIO: RefCell<Option<Envio>> = const { RefCell::new(None) };
     static RECEPCAO: RefCell<Option<Recepcao>> = const { RefCell::new(None) };
     static REPRODUCAO: RefCell<Option<Reproducao>> = const { RefCell::new(None) };
@@ -376,12 +377,12 @@ pub extern "C" fn ligacao_retrato() -> u32 {
 }
 
 /// A semente das chaves das mensagens desta página: só a primeira vale, e a
-/// contagem segue pelas ligações seguintes (ver [`Chaves`]).
+/// contagem segue pelas ligações seguintes (ver [`DaPagina`]).
 #[no_mangle]
 pub extern "C" fn ligacao_semente(semente: u32) {
-    CHAVES.with(|c| {
-        c.borrow_mut()
-            .get_or_insert_with(|| Chaves::com_semente(semente));
+    PAGINA.with(|p| {
+        p.borrow_mut()
+            .get_or_insert_with(|| DaPagina::nova(semente));
     });
 }
 
@@ -415,15 +416,10 @@ pub unsafe extern "C" fn ligacao_atender(ptr: *const u8, len: usize) -> u32 {
         .and_then(serde_json::Value::as_i64)
         .unwrap_or_default();
     let atendido = LIGACAO.with(|l| {
-        CHAVES.with(|c| {
-            let mut chaves = c.borrow_mut();
-            let chaves = chaves.get_or_insert_with(|| Chaves::com_semente(0));
-            match l.borrow_mut().as_mut() {
-                Some(ligacao) => ligacao.atender(comando, &args, chaves, agora_s),
-                None => crate::comandos::COMANDOS_DA_SESSAO
-                    .contains(&comando)
-                    .then(|| Err(serde_json::json!("NotConnected"))),
-            }
+        PAGINA.with(|p| {
+            let mut pagina = p.borrow_mut();
+            let pagina = pagina.get_or_insert_with(|| DaPagina::nova(0));
+            crate::comandos::atender(l.borrow_mut().as_mut(), comando, &args, pagina, agora_s)
         })
     });
     match atendido {
@@ -624,6 +620,35 @@ pub extern "C" fn voz_reabrir(ssrc: u32) {
 #[no_mangle]
 pub extern "C" fn voz_recepcao(ssrc: u32) {
     RECEPCAO.with(|r| *r.borrow_mut() = Some(Recepcao::nova(ssrc)));
+}
+
+/// **O ganho de cada voz com volume escolhido, pela alça da recepção**: o
+/// `seguir_os_volumes` do desktop, com a SSRC traduzida aqui dentro — a página
+/// recebe a alça, que é o que a mistura conhece, e nunca a SSRC. Quem ainda não
+/// falou nesta recepção não tem alça, e fica de fora até falar. Devolve 0 com
+/// `[[alça, ganho], …]`.
+#[no_mangle]
+pub extern "C" fn voz_ganhos() -> u32 {
+    let ganhos = LIGACAO.with(|l| {
+        l.borrow()
+            .as_ref()
+            .and_then(Ligacao::sessao)
+            .map(crate::sessao::Sessao::ganhos)
+            .unwrap_or_default()
+    });
+    let por_alca: Vec<(u32, f32)> = RECEPCAO.with(|r| {
+        let recepcao = r.borrow();
+        ganhos
+            .into_iter()
+            .filter_map(|(ssrc, ganho)| {
+                recepcao
+                    .as_ref()
+                    .and_then(|recepcao| recepcao.alca_de(ssrc))
+                    .map(|alca| (alca, ganho))
+            })
+            .collect()
+    });
+    dizer(serde_json::json!(por_alca).to_string().into_bytes(), 0)
 }
 
 /// Um datagrama que chegou em `agora_ms`.

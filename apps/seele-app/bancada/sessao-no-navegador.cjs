@@ -18,12 +18,13 @@
 //    conferido e a geração), e as etapas da chegada chegam à casca;
 // 2. **a conversa**: abrir o canal, mandar, e a mensagem volta confirmada
 //    pelo servidor (`estado: "Confirmada"`, com a chave do eco), depois de um
-//    `MessagesChanged`;
+//    `MessagesChanged`; e a busca a acha;
 // 3. **duas pessoas**: a segunda página entra, e a primeira a vê na sala
 //    depois de um `RosterChanged`;
 // 4. **a voz atravessa**: as duas entram na mesma sala de voz, o áudio abre
 //    (`abertura_do_audio: "aberto"`), e os datagramas que uma manda chegam e
-//    são decodificados na outra;
+//    são decodificados na outra; e o volume escolhido para a primeira chega à
+//    mistura da segunda, pela alça;
 // 5. **os hashes ficam guardados**: o `HashesDoNavegador` do servidor chega à
 //    identidade, que guarda as janelas com o servidor;
 // 6. **o fim**: o `disconnect` fecha, e o `snapshot` volta `NotConnected`;
@@ -210,6 +211,15 @@ const invocar = (aba, comando, args) =>
     const conversaMudou = await a.aba.evaluate(() => window.eventosDaBancada.filter((e) => e === "MessagesChanged").length);
     confere("2", conversaMudou >= 3, `a casca ouviu ${conversaMudou} MessagesChanged (abrir, mandar, o eco)`);
 
+    // A busca sobre a conversa: o termo em outra caixa acha a mensagem, com o
+    // deslocamento em caracteres (o «á» de «olá» conta um), o cursor anda, e
+    // limpar responde sem erro.
+    const busca = (await invocar(a.aba, "buscar", { termo: "BANCADA" })).ok;
+    confere("2", busca?.total === 1 && busca?.atual?.start === 7 && busca?.atual?.end === 14, `a busca: ${JSON.stringify(busca)}`);
+    const andou = (await invocar(a.aba, "busca_andar", { adiante: true })).ok;
+    confere("2", andou?.posicao === 1, `a busca deu a volta: ${JSON.stringify(andou)}`);
+    confere("2", (await invocar(a.aba, "busca_limpar", {})).ok === null, "o busca_limpar não respondeu null");
+
     // ------------------------------------------------------------ 3. duas pessoas
     const antesDaB = await a.aba.evaluate(() => window.eventosDaBancada.length);
     const b = await abrirUmaPagina(navegador, endereco);
@@ -250,6 +260,19 @@ const invocar = (aba, comando, args) =>
       chegou.pronto,
       `a voz da primeira não chegou à segunda: a enviou ${daA.enviados}, b recebeu ${chegou.pagina?.chegados} e decodificou ${chegou.pagina?.decodificados}`,
     );
+
+    // O volume de quem fala: escolhido pelo apelido, aplicado pela alça.
+    const desconhecida = await invocar(b.aba, "set_volume", { nickname: "ninguem", percent: 50 });
+    confere("4", desconhecida.erro === "UnknownPerson", `o volume de quem não está: ${JSON.stringify(desconhecida)}`);
+    confere("4", (await invocar(b.aba, "set_volume", { nickname: "ANA", percent: 0 })).ok === null, "o set_volume não respondeu null");
+    const calada = await esperar(b.aba, async () => {
+      const contas = await vozDaPonte.atual.contas();
+      const ganhos = Object.values(contas.controles.ganhos);
+      return { pronto: ganhos.length === 1 && ganhos[0] === 0, ganhos: contas.controles.ganhos };
+    });
+    confere("4", calada.pronto, `o ganho da primeira não chegou à mistura da segunda: ${JSON.stringify(calada.ganhos)}`);
+    const volumes = (await invocar(b.aba, "volumes_locais", {})).ok;
+    confere("4", JSON.stringify(volumes) === '{"ANA":0}', `os volumes locais: ${JSON.stringify(volumes)}`);
 
     // ------------------------------------------------------------ 5. os hashes guardados
     const guardado = await esperar(a.aba, async (impressao) => {

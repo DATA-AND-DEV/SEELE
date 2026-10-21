@@ -50,7 +50,10 @@ pub mod preferences;
 pub mod preview;
 #[cfg(test)]
 mod rastro_de_teste;
-pub mod search;
+/// A busca no que a casca mostra mora no `seele-sessao` desde a Tarefa 2.6 da
+/// F4: é a mesma regra no desktop e no navegador, e o navegador não leva o
+/// `seele-core`.
+pub use seele_sessao::search;
 pub mod som_que_segue;
 pub use seele_sessao::state;
 pub mod tela;

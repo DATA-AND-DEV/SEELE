@@ -314,9 +314,6 @@ const AINDA_A_FAZER = new Map([
   // F7): o navegador não liga pelo código na 0.16.
   ["ler_entrada", TAREFA_34],
   ["cancelar_ligacao", TAREFA_34],
-  ["busca_andar", TAREFA_26],
-  ["busca_limpar", TAREFA_26],
-  ["buscar", TAREFA_26],
   ["calar_a_tela", TAREFA_39],
   ["codigo_do_mod", TAREFA_MODS],
   ["compartilhar_tela", TAREFA_310],
@@ -345,7 +342,6 @@ const AINDA_A_FAZER = new Map([
   ["prever_anexo", TAREFA_26],
   ["previa_de_link", TAREFA_26],
   ["salvar_anexo", TAREFA_26],
-  ["set_volume", TAREFA_33],
   ["soltar_escolhido", TAREFA_MODS],
   ["som_da_tela", TAREFA_39],
   ["som_do_mod", TAREFA_MODS],
@@ -506,6 +502,7 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret } = {}) {
   sessao.alvo = alvo;
   sessao.snapshot = () => retratoDaSessao(sessao);
   sessao.aoDobrar = () => conferirAVozDaSessao(sessao);
+  sessao.aCadaVolta = () => seguirOsVolumes();
   sessaoDaPonte.atual = sessao;
   aVozDaPonte().catch((falha) => console.warn("ponte: a voz da página não carregou:", falha));
   return {
@@ -547,12 +544,24 @@ function retratoDaSessao(sessao) {
     total_isolation: voz.isolado,
     speaking: voz.falando,
     voice_mode: modoDeVozGuardado(),
-    audio_available: Boolean(navigator.mediaDevices?.getUserMedia) && typeof AudioContext === "function",
+    audio_available: audioDisponivel(),
     abertura_do_audio: voz.abertura,
     capture: null,
     playback: null,
     aparelho: "funcionando",
     trocas_de_aparelho: 0,
+  };
+}
+
+/**
+ * Um comando que o `.wasm` responde sem sessão (a busca, que é da página):
+ * pela ligação da página, aberta ou não.
+ */
+function pelaPagina(comando) {
+  return async (args) => {
+    const { instancia } = await carregarOWasmDaPagina();
+    const lido = fronteiraDaLigacao(instancia.exports).atender(comando, args);
+    return lido.codigo === 0 ? lido.resposta : Promise.reject(lido.erro);
   };
 }
 
@@ -640,6 +649,8 @@ function conferirAVozDaSessao(sessao) {
       const sensibilidade = milesimosGuardados(CHAVES_DA_ORIGEM.sensibilidade);
       voz.regua(sensibilidade === null ? 0 : Math.round(sensibilidade * 1000));
       voz.entrar(sessao.transporteDaVoz, numero);
+      // A recepção recomeça as alças: os ganhos se aplicam de novo.
+      ganhosAplicados.clear();
       mudarAAbertura("aberto");
     },
     (falha) => {
@@ -665,6 +676,28 @@ function fecharAVozDaSessao() {
     ligando.then(() => vozDaPonte.atual?.desligar()).catch(() => {});
   }
 }
+
+/** As alças cujo ganho já foi aplicado, e com que ganho. */
+const ganhosAplicados = new Map();
+
+/**
+ * **Os volumes seguem as pessoas**, como o `seguir_os_volumes` do desktop: a
+ * cada volta, o ganho de quem tem volume escolhido, pela alça de agora (quem
+ * voltou com outra voz ganha outra alça, e o mesmo ganho).
+ */
+function seguirOsVolumes() {
+  const sessao = sessaoDaPonte.atual;
+  const voz = vozDaPonte.atual;
+  if (!sessao || !voz || !vozDaSessao.dentro) return;
+  for (const [alca, ganho] of sessao.ganhosDaVoz()) {
+    if (ganhosAplicados.get(alca) === ganho) continue;
+    voz.ganho(alca, ganho);
+    ganhosAplicados.set(alca, ganho);
+  }
+}
+
+/** Se esta página pode ter áudio: o `quer_audio` do desktop. */
+const audioDisponivel = () => Boolean(navigator.mediaDevices?.getUserMedia) && typeof AudioContext === "function";
 
 /** O modo de voz guardado nesta origem (o `modo_de_voz_escolhido`). */
 function modoDeVozGuardado() {
@@ -1030,7 +1063,7 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   dominios_de_gif: () => structuredClone(CONSTANTES_DO_DESKTOP.dominios_de_gif),
   controles_da_voz: controlesDaVozGuardados,
   // Sem sessão, o mapa vazio, como o `unwrap_or_default` do desktop.
-  volumes_locais: () => sessaoDaPonte.atual?.volumesLocais?.() ?? {},
+  volumes_locais: () => (sessaoDaPonte.atual ? Promise.resolve(pelaSessao("volumes_locais")({})).catch(() => ({})) : {}),
   snapshot: () => comASessao((sessao) => sessao.snapshot()),
   disconnect: sairDaSessaoDaPonte,
   // **A sessão pelo navegador** (2.6): o `connect` pela WebTransport, e os
@@ -1122,6 +1155,20 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
       vozDaPonte.atual?.isolar(vozDaSessao.isolado);
       return pelaSessao("set_total_isolation")({ on: vozDaSessao.isolado });
     }),
+  // O volume de cada pessoa é da sessão, pelo apelido; o ganho vai à mistura
+  // pela alça, que o `.wasm` traduz (a SSRC não chega aqui).
+  set_volume: ({ nickname, percent } = {}) =>
+    comASessao(() =>
+      Promise.resolve(pelaSessao("set_volume")({ nickname, percent, comAudio: audioDisponivel() })).then((resposta) => {
+        seguirOsVolumes();
+        return resposta;
+      }),
+    ),
+  // A busca: `buscar` lê a conversa da sessão; andar e limpar respondem sem
+  // sessão, como no desktop, porque a busca é da página.
+  buscar: pelaSessao("buscar"),
+  busca_andar: pelaPagina("busca_andar"),
+  busca_limpar: pelaPagina("busca_limpar"),
   // Nunca erra, com ou sem sessão: só a tecla da voz.
   set_talking: ({ talking } = {}) => {
     vozDaSessao.tecla = Boolean(talking);

@@ -13,6 +13,8 @@
 //! (`dois_produtores_de_snapshot.rs`) a confere contra o desktop, mensagem a
 //! mensagem.
 
+use std::collections::BTreeMap;
+
 use seele_proto::control::{decode_da_lista, Lido, ServerMessage};
 use seele_proto::ids::ScreenId;
 use seele_sessao::retrato::{
@@ -92,7 +94,13 @@ pub struct Sessao {
     /// que vai atrás de cada uma (`seele_sessao::assento`), contado como o
     /// motor do desktop conta, de um em um a partir de 1.
     pub(crate) entradas_pedidas: u64,
+    /// O volume que esta pessoa escolheu para cada outra, pelo apelido (o
+    /// `set_volume` do desktop): sem distinguir maiúsculas, até 400%.
+    pub(crate) volumes: BTreeMap<String, u16>,
 }
+
+/// O volume mais alto que se escolhe para alguém: o `VOLUME_MAXIMO` da FFI.
+pub const VOLUME_MAXIMO: u16 = 400;
 
 impl Sessao {
     /// A sessão que o aperto de mão entregou, adotada como o desktop a adota.
@@ -107,6 +115,7 @@ impl Sessao {
             pedido: None,
             contados: Contados::default(),
             entradas_pedidas: 0,
+            volumes: BTreeMap::new(),
         }
     }
 
@@ -139,6 +148,20 @@ impl Sessao {
                 } })];
             }
             _ => {}
+        }
+        // O volume escolhido segue quem trocou de nome, como no `dobrar_no_room`
+        // da FFI: o nome de antes é lido antes de o `Room` o trocar.
+        if let ServerMessage::PersonRenamed { person, nickname } = mensagem {
+            if let Some(antes) = self
+                .room
+                .people
+                .get(person)
+                .map(|pessoa| pessoa.nickname.clone())
+            {
+                if antes != *nickname {
+                    self.renomear_volume(&antes, nickname);
+                }
+            }
         }
         let mudou = self.room.apply(mensagem);
         let mut eventos = Vec::new();
@@ -243,6 +266,53 @@ impl Sessao {
     #[must_use]
     pub const fn room(&self) -> &Room {
         &self.room
+    }
+
+    /// Guarda o volume de alguém pelo apelido, no lugar do que havia com o
+    /// mesmo nome em outra caixa: o `guardar_volume` da FFI.
+    pub(crate) fn guardar_volume(&mut self, apelido: &str, percent: u16) {
+        self.volumes
+            .retain(|guardado, _| !guardado.eq_ignore_ascii_case(apelido));
+        self.volumes
+            .insert(apelido.to_owned(), percent.min(VOLUME_MAXIMO));
+    }
+
+    fn renomear_volume(&mut self, antes: &str, agora: &str) {
+        let Some(dela) = self
+            .volumes
+            .keys()
+            .find(|guardado| guardado.eq_ignore_ascii_case(antes))
+            .cloned()
+        else {
+            return;
+        };
+        if let Some(percent) = self.volumes.remove(&dela) {
+            self.guardar_volume(agora, percent);
+        }
+    }
+
+    /// Os volumes escolhidos, como o `volumes_locais` do desktop os devolve.
+    #[must_use]
+    pub const fn volumes(&self) -> &BTreeMap<String, u16> {
+        &self.volumes
+    }
+
+    /// O ganho de cada voz que tem volume escolhido, pela SSRC de agora: o
+    /// `ganhos_a_aplicar` da FFI. Quem voltou com outra SSRC volta com o
+    /// mesmo ganho.
+    #[must_use]
+    pub fn ganhos(&self) -> Vec<(u32, f32)> {
+        let mut ganhos: Vec<(u32, f32)> = self
+            .volumes
+            .iter()
+            .filter_map(|(apelido, percent)| {
+                self.room
+                    .ssrc_of(apelido)
+                    .map(|ssrc| (ssrc.0, f32::from((*percent).min(VOLUME_MAXIMO)) / 100.0))
+            })
+            .collect();
+        ganhos.sort_by_key(|(ssrc, _)| *ssrc);
+        ganhos
     }
 
     /// Sobe a revisão da conversa e diz à casca: o `messages_changed` da FFI.
