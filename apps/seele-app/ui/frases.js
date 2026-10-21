@@ -700,6 +700,10 @@ function fraseDeErro(erro, apelido, deOnde) {
         // confere de novo o que a tela mostrou, e nada mudou.
         "mod-desligado": "Este MOD não está ligado neste servidor: ligue-o e salve antes de escolhê-lo.",
         "sem-porta-de-tema": "Este MOD não declara a porta do tema, e não pode pintar a aparência do servidor.",
+        // Apagar um pacote do cache (`FalhaAoApagarPacote`, em `mods.rs`).
+        "nao-esta-aqui": "Este pacote já não estava no cache.",
+        "nao-apaguei": "O disco não deixou apagar este pacote, e o motivo está no seele.log. Feche o que usa o MOD e tente de novo.",
+        "hash-torto": "Este pedido não nomeia um pacote do cache, e nada foi apagado.",
       }[motivo] ?? motivo;
     }
     // **Um MOD ligado que este app não roda** (o corte da API 6; tarefa 13 do

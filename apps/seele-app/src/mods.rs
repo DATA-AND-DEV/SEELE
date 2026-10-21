@@ -265,7 +265,12 @@ pub(crate) fn apagar_do_cache(config_dir: &Path, hash: &str) -> Result<(), Falha
     if !dir.is_dir() {
         return Err(FalhaAoApagarPacote::NaoEstaAqui);
     }
-    std::fs::remove_dir_all(&dir).map_err(|erro| FalhaAoApagarPacote::NaoApaguei(erro.to_string()))
+    std::fs::remove_dir_all(&dir).map_err(|erro| {
+        // **O que o disco disse fica aqui**, porque o comando o descarta: a
+        // tela recebe só `nao-apaguei` (pendência 58, item 10).
+        tracing::warn!(%hash, %erro, "o disco não deixou apagar este pacote do cache");
+        FalhaAoApagarPacote::NaoApaguei(erro.to_string())
+    })
 }
 
 /// Por que um pacote não saiu do cache.
@@ -1611,6 +1616,51 @@ mod instalar {
             "a travessia alcançou o que está fora do cache"
         );
         let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **O disco que não deixa apagar um pacote deixa linha no `seele.log`, com
+    /// o que ele disse** (pendência 58, item 10).
+    ///
+    /// A tela recebe só `nao-apaguei`: o comando (`apagar_pacote_do_cache`, em
+    /// `main.rs`) descarta o texto do disco. Sem a linha, «permissão negada» e
+    /// «arquivo em uso» chegavam a quem conserta como a mesma coisa, sem dado
+    /// nenhum. A falha é injetada com o pacote numa pasta sem permissão de
+    /// escrita: o arquivo de dentro não sai.
+    // **Só onde há permissão de Unix.** O Windows não tem `PermissionsExt`.
+    #[cfg(unix)]
+    #[test]
+    fn o_disco_que_nao_deixa_apagar_um_pacote_fica_no_registro_com_o_erro() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let raiz = pasta("apagar-trancado");
+        let config = raiz.join("config");
+        let hash = "a".repeat(64);
+        let pacote = config.join(seele_ffi::mods::PACOTES).join(&hash);
+        std::fs::create_dir_all(&pacote).unwrap();
+        std::fs::write(pacote.join("mod.json"), b"{}").unwrap();
+        std::fs::set_permissions(&pacote, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let tranca_vale = std::fs::remove_file(pacote.join("mod.json")).is_err();
+
+        let (resultado, rastro) =
+            crate::rastro_de_teste::capturar(|| super::apagar_do_cache(&config, &hash));
+        std::fs::set_permissions(&pacote, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let _ = std::fs::remove_dir_all(&raiz);
+
+        assert!(
+            tranca_vale,
+            "o arquivo da pasta sem permissão ainda se apaga (este teste roda como root?), e \
+             sem a falha injetada o pacote sai e o teste não prova nada"
+        );
+        let Err(super::FalhaAoApagarPacote::NaoApaguei(erro)) = resultado else {
+            panic!("o disco que não deixa apagar não chegou como `NaoApaguei`: {resultado:?}");
+        };
+        assert!(
+            rastro.lines().any(|linha| linha.contains("WARN")
+                && linha.contains(&format!("hash={hash}"))
+                && linha.contains(&erro)),
+            "o disco não deixou apagar o pacote e o `seele.log` não ganhou linha WARN com o \
+             hash e o que o disco disse ({erro}); a tela só diz «nao-apaguei»:\n{rastro}"
+        );
     }
 
     /// E um pacote que não está aqui é **dito**, e não engolido: apagar duas

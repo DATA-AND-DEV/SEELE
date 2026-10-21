@@ -164,7 +164,26 @@ assert.match(banco, /continua como estava/, `a falha do banco não diz que nada 
   const semManifesto = contexto.fraseDeErro({ NaoInstalou: "SemManifesto" });
   assert.equal(semManifesto, contexto.fraseDeErro("SemManifesto"),
     `a recusa de unidade dentro de \`NaoInstalou\` não diz a frase dela: ${semManifesto}`);
+
+  // 5c. **Apagar um pacote do cache** (item 10): os três motivos de
+  //     `FalhaAoApagarPacote` (`src/mods.rs`), que o `apagar_pacote_do_cache`
+  //     manda como `Recusado { motivo }`, saíam crus — «nao-apaguei» na tela, e
+  //     nada sobre o que fazer.
+  const doCache = {
+    "nao-esta-aqui": /já não estava no cache/,
+    "nao-apaguei": /feche o que usa o MOD e tente de novo/i,
+    "hash-torto": /nada foi apagado/,
+  };
+  const crusDoCache = Object.keys(doCache).filter((motivo) => {
+    const dita = contexto.fraseDeErro({ Recusado: { motivo } });
+    return dita === motivo || dita.includes(motivo);
+  });
+  assert.deepEqual(crusDoCache, [], `estes motivos de apagar do cache saem crus na tela: ${crusDoCache.join(", ")}`);
+  for (const [motivo, esperada] of Object.entries(doCache)) {
+    const dita = contexto.fraseDeErro({ Recusado: { motivo } });
+    assert.match(dita, esperada, `a frase de «${motivo}» não diz ${esperada}: ${dita}`);
+  }
 }
 
 console.log("hospedar com MOD antigo: a frase diz o MOD, a API e as três saídas na ordem do dono; sem o pacote, diz que ele falta, sem número; e toda recusa das saídas tem frase.");
-console.log("recusas de instalar: o «mod.json» recusado diz o motivo pela frase do código, e não o código cru; e a recusa local de um MOD do catálogo diz a de instalar, sem culpar o catálogo nem a rede.");
+console.log("recusas de instalar: o «mod.json» recusado diz o motivo pela frase do código, e não o código cru; e a recusa local de um MOD do catálogo diz a de instalar, sem culpar o catálogo nem a rede; e apagar do cache tem frase para os três motivos.");
