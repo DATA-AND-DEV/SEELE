@@ -1039,3 +1039,48 @@ pedido WebTransport. Hoje o `seeled` aceita qualquer uma e a registra.
 os eventos e os contadores da FFI, provados contra ela), a prova do aperto de
 mão, a sessão pela WebTransport na página, os comandos da `ponte-web.js`, a
 voz pelos datagramas, ESTE APARELHO e a chave curta, e o pacote saindo.
+
+## 21/10, noite — a sessão pelo navegador funciona de ponta a ponta (2.6)
+
+Uma página no Chromium entra num servidor de verdade pela WebTransport,
+conversa, vê a outra pessoa, e **a voz de uma página chega decodificada à
+outra**. A bancada `sessao-no-navegador.cjs` prova isso a cada rodada, com o
+`Daemon` do `seeled` (exemplo `servidor_da_bancada`, que dá o link que o
+desktop daria).
+
+**Os commits, nesta ordem, todos na `0.16/web`:**
+- `5ed6c541`: os eventos do navegador são os do desktop — o
+  `Sessao::dobrar_com_eventos` e os quatro números que quem dobra conta,
+  conferidos contra o `fold` da FFI (`dois_produtores_de_eventos.rs`; oito
+  reversões, oito reprovações);
+- `caf92307`: a ligação no `.wasm` — o aperto de mão do desktop (o carimbo
+  antes do decode, a prova sobre a impressão do longo, os MODs aceitos ou
+  recusados com nome, a sessão), com a página só carregando bytes e
+  assinando; a recusa no JSON do `ConnectionError`, conferida contra o
+  `classify_connect_failure` (`dois_produtores_de_recusa.rs`; sete
+  reversões);
+- `e3c3864f`: os comandos da sessão no `.wasm` (32), cada um como o método da
+  FFI, e a conversa e o FORA DO AR pela mesma projeção do desktop
+  (`dois_produtores_da_conversa.rs`; dez reversões nos comandos e sete na
+  projeção);
+- `d6c6277c`: a sessão na página — `sessao-web.js`, o `connect` da ponte, 35
+  comandos fora do `AINDA_A_FAZER`, a voz pela sala confirmada, as janelas de
+  hashes guardadas na identidade; a bancada de ponta a ponta (seis
+  reversões), na CI e na bateria, com o guarda da ordem.
+
+**A conferência, na ponta `d6c6277c`:**
+- fmt; clippy `-D warnings` em `seele-web` (nativo e `wasm32`), `seele-ffi`
+  (com `conformidade`), `seele-conformance`, `seele-server` e `xtask`;
+- `seele-web` 30; a conformidade dos quatro produtores (snapshot 2, eventos 2,
+  recusa 5, conversa 1); os guardas do app (`frontend` 306, `web` 15);
+  `xtask` inteiro;
+- as bancadas `ponte-web` (21), `ponte-sem-gesto` (as duas cascas, com a CSP),
+  `identidade-no-navegador` e `sessao-no-navegador`, num Chromium.
+
+**Ainda no `AINDA_A_FAZER` (44):** 9 da 3.4 (os aceites de MODs, os
+conhecidos e a leitura de entrada), 7 da 3.10, 3 da 3.9, 13 da 2.6 (a busca,
+os anexos, os ícones escolhidos e a prévia de link), 11 dos MODs e o
+`set_volume`. O `cargo xtask pacote-web` ainda não sai por eles.
+
+**Volta da conexão** (o caminho normal do celular) ainda não existe: uma
+queda vira `Ended { LinkLost }`.
