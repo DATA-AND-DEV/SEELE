@@ -146,3 +146,13 @@ pub fn eventos(
         })
         .collect()
 }
+
+/// O que a casca do desktop recebe de uma entrada que falhou: a regra do
+/// `classify_connect_failure`, para a conformidade dos dois produtores de
+/// recusa (`dois_produtores_de_recusa.rs`). O navegador recusa pela
+/// `seele_web::ligacao`, e a frase na tela tem de ser a mesma.
+#[cfg(feature = "conformidade")]
+#[must_use]
+pub fn recusa(erro: &seele_core::ConnectError) -> crate::ConnectionError {
+    crate::classify_connect_failure(erro)
+}
