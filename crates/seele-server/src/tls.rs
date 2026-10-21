@@ -370,7 +370,9 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn de_hex(texto: &str) -> Option<Vec<u8>> {
-    texto.len().is_multiple_of(2)
+    texto
+        .len()
+        .is_multiple_of(2)
         .then(|| {
             (0..texto.len())
                 .step_by(2)
