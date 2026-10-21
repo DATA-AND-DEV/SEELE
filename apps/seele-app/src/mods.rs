@@ -323,6 +323,10 @@ pub(crate) enum FalhaAoApagarPacote {
 ///
 /// Silenciosa quando não há o que levar, que é toda máquina depois da primeira
 /// vez — o destino é o hash, e um pacote já levado já está lá.
+///
+/// **Um pacote que ela pula deixa linha WARN** no `seele.log`, com o MOD e a
+/// recusa (pendência 58, item 11): ele some da lista, e quem relata «perdi o
+/// MOD» chegava sem dado nenhum.
 pub(crate) fn levar_pacotes_antigos_para_o_cache(config_dir: &Path) {
     let antigos = config_dir.join("mods");
     let Ok(autores) = std::fs::read_dir(&antigos) else {
@@ -337,8 +341,25 @@ pub(crate) fn levar_pacotes_antigos_para_o_cache(config_dir: &Path) {
             if !dir.join("mod.json").is_file() {
                 continue;
             }
-            let Ok(lido) = seele_ffi::mods::ler_pasta(&dir.to_string_lossy()) else {
-                continue;
+            let lido = match seele_ffi::mods::ler_pasta(&dir.to_string_lossy()) {
+                Ok(lido) => lido,
+                // Sem manifesto lido, o id é o das pastas: o layout antigo era
+                // `mods/<autor>/<nome>/`. Um MOD de antes da 0.12 sai aqui como
+                // `api-too-old`.
+                Err(recusa) => {
+                    let pelas_pastas = format!(
+                        "{}/{}",
+                        autor.file_name().to_string_lossy(),
+                        nome.file_name().to_string_lossy()
+                    );
+                    tracing::warn!(
+                        mod_id = %crate::id_no_registro(&pelas_pastas),
+                        %recusa,
+                        pasta = %crate::caminho_no_registro(&dir.to_string_lossy()),
+                        "não consegui levar este pacote: o mod.json foi recusado"
+                    );
+                    continue;
+                }
             };
             let destino = config_dir.join(seele_ffi::mods::PACOTES).join(&lido.hash);
             if destino.exists() {
@@ -350,13 +371,31 @@ pub(crate) fn levar_pacotes_antigos_para_o_cache(config_dir: &Path) {
             // que não existe.
             let estufa = config_dir.join(".mods-em-obras").join(&lido.hash);
             let _ = std::fs::remove_dir_all(&estufa);
-            if copiar_arvore(&dir, &estufa).is_err() {
+            if let Err(falha) = copiar_arvore(&dir, &estufa) {
                 let _ = std::fs::remove_dir_all(&estufa);
+                match falha {
+                    FalhaNaCopia::Atalho(atalho) => tracing::warn!(
+                        mod_id = %lido.id,
+                        atalho = %crate::caminho_no_registro(&atalho.to_string_lossy()),
+                        "não consegui levar este pacote: ele tem um atalho"
+                    ),
+                    FalhaNaCopia::Disco(erro) => tracing::warn!(
+                        mod_id = %lido.id,
+                        %erro,
+                        pasta = %crate::caminho_no_registro(&dir.to_string_lossy()),
+                        "não consegui levar este pacote: a cópia falhou"
+                    ),
+                }
                 continue;
             }
             if let Some(pai) = destino.parent() {
-                if std::fs::create_dir_all(pai).is_err() {
+                if let Err(erro) = std::fs::create_dir_all(pai) {
                     let _ = std::fs::remove_dir_all(&estufa);
+                    tracing::warn!(
+                        mod_id = %lido.id,
+                        %erro,
+                        "não consegui levar este pacote: a pasta do cache não se cria"
+                    );
                     continue;
                 }
             }
@@ -1742,5 +1781,143 @@ mod instalar {
             "a migração deixou estufa para trás"
         );
         let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// Um pacote no layout antigo, `config/mods/<id>/`, com o manifesto dado.
+    fn pacote_antigo(config: &std::path::Path, id: &str, manifesto: &str) -> std::path::PathBuf {
+        let antigo = config.join("mods").join(id);
+        std::fs::create_dir_all(antigo.join("cliente")).unwrap();
+        std::fs::write(antigo.join("mod.json"), manifesto).unwrap();
+        std::fs::write(antigo.join("cliente/main.js"), b"globalThis.x = 1;").unwrap();
+        antigo
+    }
+
+    /// Roda a migração sob captura e devolve as linhas WARN do rastro.
+    fn avisos_da_migracao(config: &std::path::Path) -> Vec<String> {
+        let ((), rastro) =
+            crate::rastro_de_teste::capturar(|| super::levar_pacotes_antigos_para_o_cache(config));
+        rastro
+            .lines()
+            .filter(|linha| linha.contains("WARN"))
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// **A migração que pula um pacote diz qual, e por quê** (pendência 58,
+    /// item 11).
+    ///
+    /// O pacote pulado some da lista, e quem relata «perdi o MOD» chegava sem
+    /// dado nenhum: o `mod.json` recusado — um MOD de antes da 0.12 sai como
+    /// `api-too-old` — e o cache que não se cria faziam `continue` calado.
+    #[test]
+    fn a_migracao_que_pula_um_pacote_deixa_linha_com_o_mod_e_a_recusa() {
+        let raiz = pasta("migracao-recusada");
+        let config = raiz.join("config");
+        pacote_antigo(
+            &config,
+            "seele/velho",
+            &manifesto_de_teste("seele/velho").replacen(
+                &format!(r#""api":{}"#, seele_ffi::mods::MOD_API_VERSION),
+                r#""api":99"#,
+                1,
+            ),
+        );
+        let avisos = avisos_da_migracao(&config);
+        assert!(
+            avisos
+                .iter()
+                .any(|linha| linha.contains("mod_id=seele/velho") && linha.contains("api-too-new")),
+            "o pacote do layout antigo com o `mod.json` recusado foi pulado sem linha WARN com o \
+             MOD e a recusa: {avisos:#?}"
+        );
+
+        // O cache que não se cria: um arquivo onde a pasta dos pacotes iria.
+        let _ = std::fs::remove_dir_all(config.join("mods"));
+        pacote_antigo(
+            &config,
+            "seele/exemplo",
+            &manifesto_de_teste("seele/exemplo"),
+        );
+        std::fs::write(config.join(seele_ffi::mods::PACOTES), b"sou um arquivo").unwrap();
+        let avisos = avisos_da_migracao(&config);
+        let _ = std::fs::remove_dir_all(&raiz);
+        assert!(
+            avisos
+                .iter()
+                .any(|linha| linha.contains("mod_id=seele/exemplo") && linha.contains("erro=")),
+            "o pacote do layout antigo cujo cache não se cria foi pulado sem linha WARN com o MOD \
+             e o que o disco disse: {avisos:#?}"
+        );
+    }
+
+    /// **E o atalho dentro de um pacote do layout antigo**, com o caminho dele:
+    /// a cópia o recusa, como na instalação, e quem lê o registro sabe o que
+    /// tirar.
+    // **Só onde há atalho.** O Windows não tem `std::os::unix::fs::symlink`.
+    #[cfg(unix)]
+    #[test]
+    fn a_migracao_que_pula_um_pacote_com_atalho_diz_o_atalho() {
+        let raiz = pasta("migracao-atalho");
+        let config = raiz.join("config");
+        let antigo = pacote_antigo(
+            &config,
+            "seele/exemplo",
+            &manifesto_de_teste("seele/exemplo"),
+        );
+        let atalho = antigo.join("atalho.txt");
+        std::os::unix::fs::symlink("/etc/hosts", &atalho).unwrap();
+
+        let avisos = avisos_da_migracao(&config);
+        let _ = std::fs::remove_dir_all(&raiz);
+
+        let caminho = crate::caminho_no_registro(&atalho.to_string_lossy());
+        assert!(
+            avisos
+                .iter()
+                .any(|linha| linha.contains("mod_id=seele/exemplo") && linha.contains(&caminho)),
+            "o pacote do layout antigo com um atalho foi pulado sem linha WARN com o MOD e o \
+             caminho do atalho, {caminho}: {avisos:#?}"
+        );
+    }
+
+    /// **E a cópia que o disco não deixa terminar**, com o que ele disse e a
+    /// pasta. A falha é injetada com um arquivo que ninguém pode ler: a leitura
+    /// do manifesto não tropeça nele, porque o hash pula o que não abre.
+    // **Só onde há permissão de Unix.** O Windows não tem `PermissionsExt`.
+    #[cfg(unix)]
+    #[test]
+    fn a_migracao_que_pula_um_pacote_que_nao_se_copia_diz_o_erro() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let raiz = pasta("migracao-trancada");
+        let config = raiz.join("config");
+        let antigo = pacote_antigo(
+            &config,
+            "seele/exemplo",
+            &manifesto_de_teste("seele/exemplo"),
+        );
+        let trancado = antigo.join("trancado.txt");
+        std::fs::write(&trancado, b"ninguem le").unwrap();
+        std::fs::set_permissions(&trancado, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let tranca_vale = std::fs::read(&trancado).is_err();
+
+        let avisos = avisos_da_migracao(&config);
+        let _ = std::fs::remove_dir_all(&raiz);
+
+        assert!(
+            tranca_vale,
+            "o arquivo trancado ainda se lê (este teste roda como root?), e sem a falha injetada \
+             a cópia termina e o teste não prova nada"
+        );
+        let pasta = crate::caminho_no_registro(&antigo.to_string_lossy());
+        assert!(
+            avisos
+                .iter()
+                .any(|linha| linha.contains("mod_id=seele/exemplo")
+                    && linha.contains("erro=")
+                    && linha.contains(&pasta)),
+            "o pacote do layout antigo que não se copia foi pulado sem linha WARN com o MOD, o \
+             que o disco disse e a pasta: {avisos:#?}"
+        );
     }
 }
