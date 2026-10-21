@@ -156,3 +156,30 @@ pub fn eventos(
 pub fn recusa(erro: &seele_core::ConnectError) -> crate::ConnectionError {
     crate::classify_connect_failure(erro)
 }
+
+/// A conversa do canal aberto que a casca do desktop lê (o `messages` da
+/// `Connection`), de um `Room` montado à mão: para a conformidade dos dois
+/// produtores da conversa (`dois_produtores_da_conversa.rs`).
+#[cfg(feature = "conformidade")]
+#[must_use]
+pub fn conversa(room: &Room) -> Vec<crate::Message> {
+    crate::messages_of(room)
+}
+
+/// O FORA DO AR que a casca do desktop lê (o `membros_fora_do_ar`).
+#[cfg(feature = "conformidade")]
+#[must_use]
+pub fn fora_do_ar(room: &Room) -> Vec<crate::MembroForaDoAr> {
+    let shared = shared("");
+    if let Ok(mut dentro) = shared.room.lock() {
+        *dentro = room.clone();
+    }
+    let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+    let conexao = crate::Connection {
+        commands,
+        shared,
+        encerrada: Mutex::new(None),
+        ligacao: None,
+    };
+    conexao.membros_fora_do_ar()
+}

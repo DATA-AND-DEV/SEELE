@@ -30,6 +30,10 @@
 //! | `ligacao_para_o_fio()` | 0 | os bytes enquadrados (talvez nenhum) |
 //! | `ligacao_retrato()` | 0 | `{"sala": RetratoDaSala, "contados": {…}}` |
 //! | | 1 | `{"erro": "sem-sessao"}` |
+//! | `ligacao_semente(semente)` | — | — |
+//! | `ligacao_atender(pedido)` | 0 | `{"resposta", "eventos", "nao_saiu"}` |
+//! | | 1 | `{"erro": …}`, o erro do desktop |
+//! | | 2 | `{"nao_e_da_sessao": true}` |
 //! | `ligacao_fechar()` | — | — |
 //!
 //! **A voz que sai e a que chega** (Tarefa 3.3, lotes A e C; [`crate::voz`]),
@@ -98,6 +102,7 @@ use std::cell::RefCell;
 use seele_proto::control::ControlError;
 use seele_voz::gate::GateMode;
 
+use crate::comandos::Chaves;
 use crate::ligacao::{Ligacao, Passo, Pedido};
 use crate::voz::{Envio, Recepcao, Reproducao, TesteDoMicrofone};
 use crate::{codificar_do_cliente, decodificar_do_servidor, DoServidor, ErroDaPonte};
@@ -105,6 +110,7 @@ use crate::{codificar_do_cliente, decodificar_do_servidor, DoServidor, ErroDaPon
 thread_local! {
     static SAIDA: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static LIGACAO: RefCell<Option<Ligacao>> = const { RefCell::new(None) };
+    static CHAVES: RefCell<Option<Chaves>> = const { RefCell::new(None) };
     static ENVIO: RefCell<Option<Envio>> = const { RefCell::new(None) };
     static RECEPCAO: RefCell<Option<Recepcao>> = const { RefCell::new(None) };
     static REPRODUCAO: RefCell<Option<Reproducao>> = const { RefCell::new(None) };
@@ -359,6 +365,69 @@ pub extern "C" fn ligacao_retrato() -> u32 {
         },
         None => dizer(br#"{"erro":"sem-sessao"}"#.to_vec(), 1),
     })
+}
+
+/// A semente das chaves das mensagens desta página: só a primeira vale, e a
+/// contagem segue pelas ligações seguintes (ver [`Chaves`]).
+#[no_mangle]
+pub extern "C" fn ligacao_semente(semente: u32) {
+    CHAVES.with(|c| {
+        c.borrow_mut()
+            .get_or_insert_with(|| Chaves::com_semente(semente));
+    });
+}
+
+/// Um comando da casca: `{"comando", "args", "agora_s"}`. Devolve 0 com
+/// `{"resposta", "eventos", "nao_saiu"}`, 1 com `{"erro": …}` (o JSON do erro
+/// do desktop), ou 2 quando o comando não é da sessão (a ponte o atende).
+/// Sem semente, as chaves começam do zero alto: a página chama
+/// [`ligacao_semente`] antes.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn ligacao_atender(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let pedido: serde_json::Value = match serde_json::from_slice(bytes) {
+        Ok(pedido) => pedido,
+        Err(e) => return erro(&ErroDaPonte::Json(e.to_string())),
+    };
+    let comando = pedido
+        .get("comando")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let args = pedido
+        .get("args")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let agora_s = pedido
+        .get("agora_s")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or_default();
+    let atendido = LIGACAO.with(|l| {
+        CHAVES.with(|c| {
+            let mut chaves = c.borrow_mut();
+            let chaves = chaves.get_or_insert_with(|| Chaves::com_semente(0));
+            match l.borrow_mut().as_mut() {
+                Some(ligacao) => ligacao.atender(comando, &args, chaves, agora_s),
+                None => crate::comandos::COMANDOS_DA_SESSAO
+                    .contains(&comando)
+                    .then(|| Err(serde_json::json!("NotConnected"))),
+            }
+        })
+    });
+    match atendido {
+        Some(Ok(feito)) => dizer(feito.em_json().to_string().into_bytes(), 0),
+        Some(Err(motivo)) => dizer(
+            serde_json::json!({ "erro": motivo })
+                .to_string()
+                .into_bytes(),
+            1,
+        ),
+        None => dizer(br#"{"nao_e_da_sessao":true}"#.to_vec(), 2),
+    }
 }
 
 /// Esquece a ligação desta página.

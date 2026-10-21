@@ -16,6 +16,7 @@
 //! bytes-ouro da F1 (`tests/pelo_fio_1_0.rs`), e a fronteira é provada dentro do
 //! `.wasm` pelo `cargo xtask web`.
 
+pub mod comandos;
 pub mod fronteira;
 pub mod ligacao;
 pub mod sessao;
