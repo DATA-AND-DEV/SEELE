@@ -293,7 +293,11 @@ function executorNoNavegador(id, geracao, hash) {
               break;
           }
         });
-        mandarAoIframe({ tipo: "subir", n: numero, fonte, capacidades, mod: id, geracao, hash });
+        // Só o que esta plataforma tem (`capacidadesDaPlataforma`, na ponte;
+        // `compatibilidade.por-plataforma`).
+        mandarAoIframe({
+          tipo: "subir", n: numero, fonte, capacidades: capacidadesDaPlataforma(capacidades), mod: id, geracao, hash,
+        });
       });
     },
     /**

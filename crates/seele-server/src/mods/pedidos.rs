@@ -817,6 +817,7 @@ mod tests {
                     reach: vec!["estado no servidor".to_owned()],
                     server_half: true,
                     api: seele_proto::mods::MOD_API_VERSION,
+                    tema: false,
                 },
             )
             .expect("ligar o MOD");
@@ -920,6 +921,42 @@ mod tests {
             sem_canal["contexto"]["write"], true,
             "no escopo de servidor, o `write` deixou de ser a permissão global: {sem_canal}"
         );
+    }
+
+    /// **O contexto diz quem pediu, e se ela administra** (`reads.contexto.pessoa`
+    /// e `reads.servidor.contexto`; a auditoria do `v6.json`, tabela 1). As
+    /// provas de fora conferiam só que o campo não é vazio e que não se forja:
+    /// um `person` constante, ou um `admin` sempre falso, passavam. Aqui, o
+    /// `person` é o `PersonId` de quem pediu, em texto, e o `admin` é o do
+    /// papel dela — a primeira conta, que tem o comando, administra; uma Pessoa
+    /// comum, não.
+    #[tokio::test(flavor = "current_thread")]
+    async fn o_contexto_diz_quem_pediu_e_se_ela_administra() {
+        let pasta = tempfile::tempdir().expect("a pasta");
+        let (servidor, pessoa) = servidor_com_eco(pasta.path()).await;
+        let comando = {
+            let db = servidor.persistence.lock().await;
+            crate::permissions::Permissions::new(&db)
+                .register_or_find(&[1; 32], "comando")
+                .expect("a primeira conta")
+                .id
+        };
+        assert_ne!(
+            comando, pessoa,
+            "o caso não mede o que diz: as duas contas são a mesma"
+        );
+        for (quem, administra) in [(pessoa, false), (comando, true)] {
+            let resposta = pedir(&servidor, quem, 0).await;
+            assert_eq!(
+                resposta["contexto"]["person"],
+                serde_json::Value::from(quem.0.to_string()),
+                "o MOD não leu quem pediu: {resposta}"
+            );
+            assert_eq!(
+                resposta["contexto"]["admin"], administra,
+                "o MOD leu o `admin` errado de {quem:?}: {resposta}"
+            );
+        }
     }
 
     /// Os `.rs` do `src/` de cada crate e app, sem `target/` e `node_modules/`.

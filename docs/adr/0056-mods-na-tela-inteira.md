@@ -1,8 +1,9 @@
 # 0056 — MODs na tela inteira
 
-Status: **proposto** — esqueleto de 2026-10-08. As decisões de 29/09 e de 08/10
-estão tomadas; o contrato que este ADR fecha (`api/v6.json`) ainda é rascunho,
-e os limites esperam a medição com as regiões da API 6.
+Status: **aceito** — no corte da API 6 (0.16, 15/10/2026): o `api/v6.json`
+congelou com `MOD_API_VERSION = 6` e `APIS_ACEITAS = [6]`, e os limites saíram
+da M3 com as regiões da API 6 (abaixo, «Os números depois»). Era `proposto`,
+esqueleto de 2026-10-08.
 Data: 2026-10-08
 Sobre `versao/0.16` em `92e0d79`, cujo código é o da v0.15.1 publicada
 (`54f542f`).
@@ -202,6 +203,36 @@ aparece esticado na largura da página, com casas de ~57 pontos.
 - **A rodada do editor das 14:03 teve entrada de uma pessoa durante a janela.**
   As das 15:30 e 15:32, sem entrada, confirmam os números (~298 MiB, ~10 %).
 
+### Os números depois (a API 6, 10/10 e 11/10)
+
+A campanha da API 6: 24 cenários válidos no `6e845e0d`
+([`medidas-api6.json`](../evidencias/m3-custo-dos-mods/medidas-api6.json), lidos
+pelo `resumir-api6.py` contra o `sem-mod` da própria campanha, porque a 0.16 sobe
+a sala pessoal ao abrir). Cada ponto da API 6 foi posto no teto por um MOD de
+carga sintético, um de cada vez e todos juntos (`carga-tudo`). **O critério que
+ela fixou** (rascunho, §12): com cada ponto no teto, e com todos juntos, nenhum
+commit de quadro passa de um quadro de 60 Hz, o p95 do commit fica abaixo de
+1 ms, e o jitter da voz sobe no máximo meio milissegundo.
+
+| cenário | o que se mediu |
+|---|---|
+| todos os 24 | nenhum commit acima de um quadro |
+| `carga-tudo+voz` | o p95 mais alto, 0,78 ms; o jitter +0,32 ms (1,56 contra 1,24) |
+| `carga-tudo` | +33,3 pontos de CPU e +374 MiB |
+| as capas (6 animadas, 20 paradas) | +17,5 pontos e +151 MiB, o ponto mais caro |
+| o aviso do servidor no teto | +9,4 pontos e +53 MiB |
+| as oito regiões no teto | +4,4 pontos e +38 MiB |
+| três folhas empilhadas de 3980 nós | +2,5 pontos e +75 MiB |
+
+**A lista de 251** (11/10) não se mediu no app: a página travava pela lista
+inteira redesenhada a cada `PersonState` (pendência 63, consertada no
+`6717dc2c`), e, depois do conserto, a árvore de acessibilidade não assentava
+com 251 pessoas — a metade (b) da 63, que a F5 conserta. **O teto de
+contribuições (256 alvos por ponto, 128 sem alvo) congelou pela bancada**
+(`tools/lista-grande.cjs`, no Chromium): com 251 pessoas, a página fica a 98%
+sem MOD e a 99% com um cartão em cada — quem satura é a lista, e não o MOD — e
+o servidor é dimensionado em 50 pessoas (`specs/04`).
+
 ### O que falta medir, e quem mede
 
 - **Windows (WebView2)**: o mesmo roteiro pede um equivalente do `footprint` e
@@ -209,7 +240,8 @@ aparece esticado na largura da página, com casas de ~57 pontos.
 - **iPhone**: memória e tempo de quadro com os três MODs oficiais, e o cenário
   da capa (sete capas animadas de 60 quadros na chamada e na barra, mais a
   lista com 20 capas paradas — PERFIS R1). É o item 3 da F4, e do dono.
-- **Com as regiões da API 6**: depois do porte, na tarefa 11 do plano da F3.
+- **Com as regiões da API 6**: feito em 10/10 e 11/10 (acima). O app com a
+  lista de 251 fica para depois da metade (b) da pendência 63.
 
 ## Os candidatos da API 7
 

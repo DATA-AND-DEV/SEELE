@@ -246,6 +246,135 @@ for (const [nome, tema] of Object.entries({
     `superfícies cinza-médio, onde nenhum fósforo alcança o piso, não recusaram pelo fósforo: ${JSON.stringify(cinza.pares)}`);
 }
 
+// ---------------------------------------- cada par do v6.json recusa por ele
+
+{
+  // **Cada par do contrato, com o piso dele** (`tema.pares`; a auditoria do
+  // `v6.json`, tabela 8): `apagado/fundo`, `apagado/painel` e `acento/painel`
+  // não tinham caso nenhum, e tirar a linha deles de `PARES_DO_TEMA` passava.
+  // O espelho nos dois sentidos — o `acento/acentoFraco` é derivado pelo
+  // produto, e não recusado: o texto diz, e ele fica de fora —, e para cada
+  // par um tema em que só a frente dele quase some sobre o fundo dele.
+  const v6 = JSON.parse(fs.readFileSync(`${repo}/api/v6.json`, "utf8"));
+  const doContrato = Object.entries(v6.tema.pares)
+    .filter(([, piso]) => !/não recusado/.test(piso))
+    .map(([par, piso]) => [...par.split("/"), Number.parseFloat(piso.replace(",", "."))]);
+  const daCasca = vm.runInContext("PARES_DO_TEMA", contexto).map((p) => [...p]);
+  const comoTexto = (lista) => lista.map((p) => p.join(" ")).sort().join(" | ");
+  confere("os pares · o espelho", comoTexto(doContrato) === comoTexto(daCasca),
+    `o v6.json diz «${comoTexto(doContrato)}», e a casca recusa por «${comoTexto(daCasca)}»`);
+  for (const [frente, fundo, piso] of doContrato) {
+    const r = tonsDoTema({ ...CLARO, [fundo]: "#000000", [frente]: "#111111" }, daRaiz);
+    const par = r.pares.find((p) => p.frente === frente && p.fundo === fundo);
+    confere(`os pares · ${frente}/${fundo}`, Boolean(par) && par.piso === piso && par.razao < piso,
+      `«${frente}» quase preto sobre «${fundo}» preto não foi recusado pelo par, com o piso ${piso}: ${JSON.stringify(r.pares)}`);
+  }
+}
+
+// ---------------------------------------- os números da fórmula, os do texto
+
+{
+  // **O croma e o passo do preenchimento** (`tema.derivados-pelo-produto.
+  // formula`; a auditoria do `v6.json`, tabela 8): o 4,5:1 e o ΔE eram
+  // conferidos, e os números não — trocar o croma para 0,5 ou o passo para
+  // 0,2 passava. Lidos do texto («0,23 do croma», «um passo de 0,122») e
+  // comparados com as constantes de `base.js`.
+  const v6 = JSON.parse(fs.readFileSync(`${repo}/api/v6.json`, "utf8"));
+  const formula = v6.tema["derivados-pelo-produto"].formula;
+  const numero = (re) => Number.parseFloat((formula.match(re)?.[1] ?? "").replace(",", "."));
+  const croma = numero(/([0-9]+,[0-9]+) do croma/);
+  const passo = numero(/um passo de ([0-9]+,[0-9]+)/);
+  const daCasca = {
+    croma: vm.runInContext("CROMA_DO_PREENCHIMENTO", contexto),
+    passo: vm.runInContext("PASSO_DO_PREENCHIMENTO", contexto),
+  };
+  confere("a fórmula · os números", croma === daCasca.croma && passo === daCasca.passo,
+    `o v6.json diz croma ${croma} e passo ${passo}, e a casca usa ${JSON.stringify(daCasca)}`);
+}
+
+// ---------------------------------------- os pares, pelos nomes do contrato
+
+{
+  // **O segundo apagado, pelo nome que o `v6.json` dá ao derivado** (o achado
+  // do ESTILO, 16/10): `tema.derivados-pelo-produto.nomes` diz
+  // `apagadoSecundario`, e o par saía como `apagado-secundario`, que o MOD não
+  // acha no contrato. Um fundo escuro e um painel claro: nenhuma luminosidade
+  // dá 3:1 sobre os dois, nem acima, nem abaixo, nem entre eles.
+  const v6 = JSON.parse(fs.readFileSync(`${repo}/api/v6.json`, "utf8"));
+  const derivados = new Set(v6.tema["derivados-pelo-produto"].nomes);
+  const largo = tonsDoTema({ fundo: "#404040", painel: "#aaaaaa", texto: "#000000", apagado: "#000000", acento: "#000000" }, daRaiz);
+  const segundo = largo.pares.find((p) => p.piso === 3 && !["texto", "apagado", "acento"].includes(p.frente));
+  confere("par · o segundo apagado sem luminosidade que sirva", Boolean(segundo),
+    `as superfícies a 3:1 de nada não recusaram pelo segundo apagado: ${JSON.stringify(largo.pares)}`);
+  confere("par · o segundo apagado pelo nome do contrato", Boolean(segundo) && derivados.has(segundo.frente),
+    `o par do segundo apagado saiu como «${segundo?.frente}», e o v6.json o chama de ${[...derivados].join(" ou ")}`);
+
+  // **E as cores de estado**, que não são chaves do tema: o nome que vai na
+  // frente do par está escrito em `tema.cores-de-estado` (a segunda emenda).
+  const cinza = tonsDoTema({ fundo: "#777777", painel: "#777777", texto: "#000000", apagado: "#000000", acento: "#000000" }, daRaiz);
+  const chaves = new Set(["texto", "apagado", "acento", "fundo", "painel", "borda"]);
+  const deEstado = [...new Set([...cinza.pares, ...largo.pares].map((p) => p.frente))]
+    .filter((frente) => !chaves.has(frente) && !derivados.has(frente));
+  confere("par · as cores de estado têm nome no contrato", deEstado.length > 0,
+    `nenhum par de cor de estado saiu para conferir: ${JSON.stringify(cinza.pares)}`);
+  for (const frente of deEstado) {
+    confere("par · as cores de estado têm nome no contrato", v6.tema["cores-de-estado"].includes(`'${frente}'`),
+      `o par sai com frente «${frente}», que tema.cores-de-estado não escreve`);
+  }
+}
+
+// ---------------------------------------- a função de referência do guia
+
+{
+  // **A cópia do guia faz o que a casca faz** (`tema.derivados-pelo-produto`:
+  // «publicada também como função de referência no guia»). O guia publica o
+  // cálculo inteiro para um MOD saber, sem uma janela aberta, o que a casca vai
+  // derivar e recusar; uma cópia que envelhecesse ensinaria a errar. Aqui ela
+  // roda sozinha, como um MOD a rodaria, e cada tema dá o mesmo resultado nas
+  // duas: os nomeados desta bancada e trezentos sorteados com semente fixa.
+  const guia = fs.readFileSync(`${repo}/docs/como-se-faz-um-mod.md`, "utf8");
+  const comeco = guia.indexOf("// ---- tonsDoTema: começo ----");
+  const fim = guia.indexOf("// ---- tonsDoTema: fim ----");
+  confere("guia · o bloco", comeco >= 0 && fim > comeco, "o guia não tem o bloco do tonsDoTema entre os marcadores");
+  if (comeco >= 0 && fim > comeco) {
+    const doGuia = vm.createContext({});
+    vm.runInContext(`${guia.slice(comeco, fim)}\nglobalThis.__guia = { tonsDoTema, corDoProduto, CORES_DO_PRODUTO };`, doGuia);
+    const ref = doGuia.__guia;
+    for (const [token, cor] of Object.entries(ref.CORES_DO_PRODUTO)) {
+      confere("guia · as cores do produto", PRODUTO[token] === cor,
+        `o guia diz ${token} ${cor}, e tokens.css diz ${PRODUTO[token]}`);
+    }
+    let semente = 0x5ee1e;
+    const sortear = () => {
+      semente = (semente + 0x6d2b79f5) | 0;
+      let t = Math.imul(semente ^ (semente >>> 15), 1 | semente);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const hex = () => `#${Math.floor(sortear() * 0x1000000).toString(16).padStart(6, "0")}`;
+    const temas = [
+      {}, CLARO, { ...CLARO, painel: "#2a2622" }, { acento: "#2f8fe0" },
+      { fundo: "#777777", painel: "#777777", texto: "#000000", apagado: "#000000", acento: "#000000" },
+      { fundo: "#404040", painel: "#aaaaaa", texto: "#000000", apagado: "#000000", acento: "#000000" },
+    ];
+    for (let i = 0; i < 300; i += 1) {
+      const tema = {};
+      for (const nome of ["fundo", "painel", "texto", "apagado", "acento"]) if (sortear() < 0.7) tema[nome] = hex();
+      temas.push(tema);
+    }
+    let divergentes = 0;
+    for (const tema of temas) {
+      const daCasca = JSON.stringify(tonsDoTema(tema, daRaiz));
+      const doGuiaR = JSON.stringify(ref.tonsDoTema(tema, ref.corDoProduto));
+      if (daCasca !== doGuiaR) {
+        divergentes += 1;
+        if (divergentes <= 3) confere("guia · o mesmo resultado", false, `${JSON.stringify(tema)}: a casca dá ${daCasca}, e o guia ${doGuiaR}`);
+      }
+    }
+    confere("guia · o mesmo resultado", divergentes === 0, `${divergentes} de ${temas.length} temas divergem entre a casca e o guia`);
+  }
+}
+
 if (falhas.length) {
   console.error(`tons-do-tema: ${falhas.length} falha(s)\n  ${falhas.join("\n  ")}`);
   process.exit(1);

@@ -731,7 +731,133 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   `carga-cartoes` com 251, contra a `lista-251` — os mesmos calados sem MOD,
   a referência que o §12 usa (`36fbc79f`). O «diz e segue» aplicado
   (`94fee0c0`).
-- **Esperam:** a `carga-cartoes` consertada (com ela, o teto de
-  contribuições no §12 e no `v6.json`), a tarefa 13 (o corte), o Step 5 da
-  tarefa 9 (a 7d) e o Step 3 da tarefa 7 (o teto da `midia`, que a M3 não
-  mediu).
+- **11/10–15/10.** O teto de contribuições congelou no `v6.json` pela
+  bancada (`78972cc0`): no app a lista de 251 não se mede pela
+  acessibilidade, e a (b) da 63 entrou na 0.16 com a F5, guardada pela sonda
+  `arvore-ax.py` (`3436980d`). O jitter zero da rodada de 11/10 era o áudio do
+  Mac que não abriu para o app, e não o conserto (`d9e7f475`). A tarefa 9,
+  Step 5 (`69dcb3b7`): o `#toque` no guarda 11, e um modal de MOD deixando de
+  adormecê-lo. **O corte (tarefa 13)**, no ramo local `0.16/api-6-corte`:
+  Steps 0 a 4, 5b e 6b feitos. O 5b ganhou as três saídas como botões, nas
+  decisões (i) a (iii): a regra das saídas com o servidor parado
+  (`4ed543e4`), o comando (`4bf9f6b3`), as frases (`6aff1990`), os botões
+  com a bancada `saidas-de-quem-hospeda.cjs` (`af743f51`) e a saída 3 de
+  ponta a ponta (`6e6e0748`). E um conserto meu (`6eb73c23`): o `c4eb6d03`
+  mudou a forma de `APIS_ACEITAS`, e três leitores pelo texto quebraram — um
+  guarda do frontend, o gerador do manifesto e o dublê dos roteiros. Do
+  Step 5, a `APIS_POR_LINHA` (`c4eb6d03`, com a revisão da F1 em
+  `8d204e4a`), e o texto
+  do dono para o indexador (`o-indexador-na-api-6.md`). Medindo o indexador
+  só na memória, saiu que `"tema"` em `CHAVES` e `TIPOS` não basta: a
+  conferência de tipo recusa todo booleano. O guarda da união está escrito e
+  medido, vermelho até o Step 6.
+- **15/10–16/10. A auditoria do `v6.json` contra o produto (D-api-8).** As
+  nove tabelas e o README estão em `auditoria-do-v6/` (`d1448c8b`). Os
+  consertos foram:
+  - o B inteiro: as recusas do volume pelo nome, a lista fechada, a
+    `forma-desconhecida`, o K2, os formulários, a prévia do tema, o
+    `escolhido`, os 44 px, a capa parada, o `lugar` e as capacidades por
+    plataforma;
+  - o toque que só prende a figura que se arrasta;
+  - a superfície suja que sempre pergunta (`0e9f8fbf`);
+  - a citação com `pessoa` (D-api-9, `1f701ebc`).
+
+  **Duas emendas** do `v6.json`, cada uma num commit com o sha refeito:
+  `44025ab5` e `563ecf8f` (v6 `58576e95…`). A segunda trouxe:
+  - a `pessoa`;
+  - a errata do `sujo`, achada pela MESA;
+  - o diálogo no celular, conferido pela F8;
+  - os nomes do par de uma recusa do tema, achados pelo ESTILO;
+  - o `teto` do `teto-de-alvos`.
+
+  **O passo 5**: o que a MESA, o PERFIS e o ESTILO usam, cruzado com as
+  provas. Consertei duas entregas: o `teto` do `teto-de-alvos` (`477e6ff0`)
+  e a parte errada de uma propriedade composta do estilo, que virava o
+  padrão calada (`6caf0b2d`). Entraram dez provas, todas com as reversões
+  na mensagem: formas e figuras com o espelho, a superfície fechada que
+  reabre, o `atualizar` de quem saiu, as frases da validação e os tipos do
+  `submeter`, as consultas pelo contêiner, o `saiu`, o clique nas ações, a
+  saída da sessão e o `ModAviso`. A tabela fica no README da auditoria.
+
+  Um erro meu, achado e consertado (`c9749e03`): uma conferência do caso da
+  `pessoa` contava eventos por um campo que não existe e passava sem medir
+  nada.
+- **16/10. A terceira emenda, as integrações e as limpezas das APIs 3 a 5.**
+  - O P7c e o tema da F1 entraram no `0.16/api-6` por merge, e ele avançou
+    até `abea7352` (a linha do tema na tela de aceite, com a
+    `aceite-dos-mods.cjs` no portão) e depois até `5b7ff153`: o
+    `nos-recusados`, o `classes` contado no evento `contribuicao`, e a
+    terceira emenda do `v6.json` (`ddbd76f4…`) no mesmo commit. Os três
+    portes a conferiram; a MESA achou nela um defeito dela, e o consertou.
+  - A versao/0.16 entrou no corte (`29f6454f`), e as limpezas por cima: o
+    prelúdio e o roteador (`282c8e7c`), a lista de pessoas (`a84f7da4`, o
+    `tela-sessao.js` isolado), as provas do cartão (`9ab16437`), a região e
+    os cartões da 3 fora da casca, com `APOSENTADOS_PELO_CORTE` no
+    `check-api` (`960290af`), e as regras de folha sem nó (`8f589060`).
+  - **Dois defeitos da minha integração**, achados na casca inteira e não na
+    que rodei ao integrar: a bancada das saídas de quem hospeda, no `ci.yml`
+    e fora do `publicar.sh`, que deixava o `cargo test -p xtask` vermelho
+    (`aa306a5d`); e a prova do núcleo que, com a faixa de quem liga
+    empurrando a tela (da versao/0.16), media o centro de uma lista cortada
+    atrás da barra (`bc8bd1a5`). A lição: integrar é rodar a casca inteira,
+    o xtask e a bancada do celular junto.
+  - Medido e não consertado, porque o texto já diz: numa superfície, a
+    `midia` para nos 10 MiB dela, e o retrato e o fundo no bolso de 24 MiB
+    (`superficies.limites-o-que-e`). O teto de altura que o guarda do cartão
+    conferia era o do `.pessoa-cartao` da 3: o cartão da 6 é contido pelo
+    teto de nós e pelo `linhasMaximas`, e fica dito no guarda.
+- **16/10. O passo 7 da auditoria: as INCERTA e as SEM PROVA restantes.**
+  - O `0.16/api-6` avançou até `8e8dfea5` com o aval da orquestradora, e o
+    `.wasm` rodou nesta máquina com o wasi-sdk conferido: dois consertos meus
+    (a B2 e a B10) tinham deixado o `motor.mjs` e a `executor-no-navegador.cjs`
+    vermelhos (`8e8dfea5`).
+  - Os lotes 1 a 22 no `0.16/api-6-corte`, cada prova revertida contra o
+    produto: a tabela está no README da auditoria. Dois consertos decididos
+    pela orquestradora, e não emenda: o retrato e o `fundoDeMidia` recusados
+    dizem `midia/recusada` ao MOD (`b1a4c3cf`), e o `ponto-desconhecido` leva
+    `pontoPedido` e `pontos` (`021876f8`). E o que o produto calava, achado
+    medindo: a fundura acima do teto cortava calada (`teto-de-fundura`, lote 2).
+  - **A bancada do celular roda no CI desde `937d4251`**, e as linhas do
+    celular que a auditoria deu como «não roda» se provam por ela, caso a caso
+    (`--so`), revertidas (lote 22). Um guarda dela era de enfeite: a rolagem
+    do `operador.barra` passava com `overflow: visible`. E a letra de 16 dos
+    campos não era medida. Os dois consertados, e medidos também o zoom e os
+    gestos e o `status.barra` na casca larga.
+- **16/10, à tarde. O passo 7 até o lote 31: 497 PROVADA, 3 abertas.**
+  - O `pessoa.detalhes` ganhou a linha nativa, com o dono por cima e a caixa
+    que recorta, e o ponto da casca para a folha do celular (a F8): decisão
+    da orquestradora, consertado, e o contraste do dono corrigido (achado da
+    F8: 4,11 → 6,82).
+  - **A portaria ficava sob os diálogos de MOD** (o z 60 da camada sobre o
+    19 dela), coberta e inerte: consertado pelo recorte do modal e pela área
+    do não modal, e não subindo o z dela, que cobriria as camadas do
+    produto entre 20 e 40 — a da própria portaria entre elas.
+  - Os três portes conferiram o `0.16/api-6` em `85a3292c` contra o aviso, e
+    nada deles dependia do silêncio de antes.
+  - À espera: o par fora da tabela do tema (8:78), os rótulos 1:26 e 1:27, e
+    o avanço do `0.16/api-6` até a ponta do corte.
+- **20/10. O passo 7 fechado, e a versao/0.16 no corte.**
+  - As decisões da orquestradora (D-api-10): o `0.16/api-6` em `3354544f`, os
+    três portes avisados (os três conferiram, e nada deles dependia do que
+    mudou); a sala aberta no acento (`150020b6`), medida também pelo ESTILO no
+    lab dele; o comentário do «×» desligado; e a quarta e última emenda
+    (`206d1b4b`): o `listarNaBarra` na aba SERVIDOR, o `pontoPedido` e os
+    `pontos`, e `estilos` e `classes` como rótulos — nenhum `mod.json` dos três
+    portes declara capacidade.
+  - **A versao/0.16 no corte** (`9565d2bf`): a integração 18 parte B e o
+    conserto de segurança (quinn-proto 0.11.19, rustls 0.23.46; `cargo deny
+    check advisories` ok). Três conflitos, e um defeito do corte achado neles:
+    o conjunto gravava `tema: false` para todo MOD, e a tela de aceite não diria
+    que um MOD de tema pinta a aparência do servidor. A construção única da
+    versao (`habilitado_de`) leva o tema do pacote.
+  - A auditoria: 500 PROVADA, 0 INCERTA, 0 SEM PROVA; e depois, a pedido da
+    orquestradora, as 35 SEM CÓDIGO remarcadas com o commit que fechou cada
+    uma — 526 PROVADA e 25 NÃO SE APLICA, das 551. Para isso, duas provas
+    que faltavam: a soma do bolso de bytes (`00a42671`) e o servidor que não
+    confere contraste (`a7766d6d`). O `0.16/api-6` em `22082608`, os três
+    portes avisados do hash novo do contrato (`8dcf4aaf…`).
+- **Esperam:** do corte, o guarda da união, pronto em
+  `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
+  depois do Step 6 do dono (D-api-7; o indexador ainda está na API 5); e,
+  depois da 0.16 (decisão de 20/10), o Step 3 da tarefa 7 (o teto da
+  `midia`: o texto já diz a soma real).

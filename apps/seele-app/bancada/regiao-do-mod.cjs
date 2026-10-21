@@ -82,6 +82,251 @@ process.on("beforeExit", () => {
   }
 }
 
+// **As partes de uma propriedade composta** (a borda, a sombra, o gradiente, o
+// mover, a transição e a animação; o cruzamento dos portes, 16/10): a parte
+// declarada que não serve é contada, como uma propriedade que não serve, e a
+// propriedade fica com o padrão nela. A parte que o MOD não declarou fica no
+// padrão sem recusa. Antes, a parte errada virava o padrão calada: uma sombra
+// com a cor «vermelha» saía preta, e o MOD não tinha como saber por quê. Um
+// número fora do intervalo não é parte errada: ele é preso no limite, como nas
+// propriedades soltas.
+{
+  const ctx = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(raiz, "ui/mods-estilos.js"), "utf8"), ctx);
+  const contar = (estilo) => {
+    const conta = { recusados: 0 };
+    const pares = ctx.estiloDeMod(estilo, conta);
+    return { recusados: conta.recusados, pares: Object.fromEntries(pares) };
+  };
+  for (const estilo of [
+    { borda: { largura: 2, estilo: "tracejada", cor: "#ff8800" } },
+    { borda: {} },
+    { sombra: { x: 1, y: 2, desfoque: 4, espalha: 1, cor: "#00000080", dentro: true } },
+    { sombra: {} },
+    { gradiente: { angulo: 90, paradas: [{ cor: "#000000", em: 0 }, { cor: "#ffffff", em: 100 }] } },
+    { gradiente: { paradas: [{ cor: "#000000" }, { cor: "#ffffff" }] } },
+    { mover: { x: 4 } },
+    { transicao: { duracao: 200, suavizacao: "entrada" } },
+    { transicao: {} },
+    { animacao: { nome: "pulso", duracao: 1200 } },
+    { animacao: "aurora" },
+  ]) {
+    const r = contar(estilo);
+    confere("partes · as válidas e as omitidas", r.recusados === 0, `${JSON.stringify(estilo)} contou ${r.recusados} recusa(s)`);
+  }
+  for (const [estilo, propriedade] of [
+    [{ borda: { largura: "grossa", cor: "#ff8800" } }, "border"],
+    [{ borda: { largura: 2, estilo: "ondulada" } }, "border"],
+    [{ borda: { largura: 2, cor: "vermelha" } }, "border"],
+    [{ sombra: { x: 1, cor: "vermelha" } }, "box-shadow"],
+    [{ sombra: { x: "um" } }, "box-shadow"],
+    [{ sombra: { desfoque: "muito" } }, "box-shadow"],
+    [{ sombra: { espalha: "pouco" } }, "box-shadow"],
+    [{ sombra: { dentro: "sim" } }, "box-shadow"],
+    [{ gradiente: { paradas: [{ cor: "#000000" }, { cor: "#ffffff" }, { cor: "azul" }] } }, "background-image"],
+    [{ gradiente: { paradas: [{ cor: "#000000", em: "meio" }, { cor: "#ffffff" }] } }, "background-image"],
+    [{ gradiente: { angulo: "noventa", paradas: [{ cor: "#000000" }, { cor: "#ffffff" }] } }, "background-image"],
+    [{ gradiente: { tipo: "conico", paradas: [{ cor: "#000000" }, { cor: "#ffffff" }] } }, "background-image"],
+    // Além do teto de 8 paradas: uma recusa, e as 8 primeiras ficam.
+    [{ gradiente: { paradas: Array.from({ length: 9 }, (_, i) => ({ cor: i % 2 ? "#ffffff" : "#000000" })) } }, "background-image"],
+    [{ mover: { x: "4px" } }, "translate"],
+    [{ transicao: { duracao: "lenta" } }, "transition"],
+    [{ transicao: { suavizacao: "elastica" } }, "transition"],
+    [{ animacao: { nome: "pulso", duracao: "longa" } }, "animation"],
+  ]) {
+    const r = contar(estilo);
+    confere("partes · a errada é contada", r.recusados === 1, `${JSON.stringify(estilo)} contou ${r.recusados} recusa(s)`);
+    confere("partes · a propriedade fica", typeof r.pares[propriedade] === "string",
+      `${JSON.stringify(estilo)} perdeu ${propriedade}: ${JSON.stringify(r.pares)}`);
+  }
+  // Um gradiente que fica com menos de duas paradas não vira gradiente: uma
+  // recusa só, a dele, e não uma por parada.
+  const curto = contar({ gradiente: { paradas: [{ cor: "#000000" }, { cor: "azul" }] } });
+  confere("partes · o gradiente sem duas paradas", curto.recusados === 1 && !curto.pares["background-image"],
+    `o gradiente de uma parada só contou ${curto.recusados} e saiu ${JSON.stringify(curto.pares)}`);
+}
+
+// **O que o `v6.json` promete dos estilos, conferido contra ele** (a auditoria
+// do `v6.json`, tabela 8; D-api-8, passo 7). As categorias, os estados, as
+// animações e o que fica de fora são listas do contrato; cada uma tem aqui uma
+// tabela própria do que monta, e o espelho nos dois sentidos: uma categoria,
+// um estado ou uma animação que entre no `v6.json` sem entrar aqui reprova, e
+// uma que saia daqui também.
+{
+  const ctx = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(raiz, "ui/mods-estilos.js"), "utf8"), ctx);
+  const v6 = JSON.parse(fs.readFileSync(path.join(raiz, "../../api/v6.json"), "utf8")).estilos;
+  const caso = "estilos do v6";
+  // As tabelas são `const` de topo, que não viram propriedade do contexto.
+  const ESTADOS_DA_CLASSE = vm.runInContext("ESTADOS_DA_CLASSE", ctx);
+  const ANIMACOES_DO_MOD = vm.runInContext("ANIMACOES_DO_MOD", ctx);
+  const montar = (estilo) => {
+    const conta = { recusados: 0 };
+    return { pares: Object.fromEntries(ctx.estiloDeMod(estilo, conta)), recusados: conta.recusados };
+  };
+  const igualNosDoisSentidos = (nome, doContrato, daqui) => {
+    const a = [...doContrato].sort().join("|");
+    const b = [...daqui].sort().join("|");
+    confere(caso, a === b, `${nome}: o v6.json diz «${a}», e esta prova (ou o produto) diz «${b}»`);
+  };
+
+  // **Cada categoria monta o que ela nomeia**, de partes conferidas.
+  const O_QUE_CADA_CATEGORIA_MONTA = {
+    "cor e transparência": [
+      [{ cor: "#112233" }, { color: "#112233" }],
+      [{ opacidade: 0.5 }, { opacity: "0.5" }],
+      [{ opacidade: 3 }, { opacity: "1" }],
+    ],
+    "preenchimento e gradiente": [
+      [{ fundo: "#000000" }, { "background-color": "#000000" }],
+      [{ gradiente: { angulo: 90, paradas: [{ cor: "#000000", em: 0 }, { cor: "#ffffff", em: 100 }] } },
+        { "background-image": "linear-gradient(90deg, #000000 0%, #ffffff 100%)" }],
+      [{ gradiente: { tipo: "radial", paradas: [{ cor: "#000000" }, { cor: "#ffffff" }] } },
+        { "background-image": "radial-gradient(circle, #000000, #ffffff)" }],
+    ],
+    "borda e raio": [
+      [{ borda: { largura: 2, estilo: "tracejada", cor: "#ff0000" } }, { border: "2px dashed #ff0000" }],
+      [{ borda: "nenhuma" }, { border: "none" }],
+      [{ raio: 8 }, { "border-radius": "8px" }],
+    ],
+    sombra: [
+      [{ sombra: { x: 1, y: 2, desfoque: 4, espalha: 1, cor: "#00000080", dentro: true } },
+        { "box-shadow": "inset 1px 2px 4px 1px #00000080" }],
+      [{ sombra: { desfoque: 4000 } }, { "box-shadow": "0px 0px 96px 0px #00000066" }],
+    ],
+    tipografia: [
+      [{ familia: "mono" }, { "font-family": "var(--seele-mono)" }],
+      [{ peso: "forte" }, { "font-weight": "700" }],
+      [{ corpo: 4 }, { "font-size": "9px" }],
+      [{ entrelinha: 1.4 }, { "line-height": "1.4" }],
+      [{ espacamento: 1 }, { "letter-spacing": "1px" }],
+      [{ alinhamento: "centro" }, { "text-align": "center" }],
+      [{ transformar: "maiuscula" }, { "text-transform": "uppercase" }],
+    ],
+    layout: [
+      [{ direcao: "linha" }, { display: "flex", "flex-direction": "row" }],
+      [{ alinhar: "centro", distribuir: "entre", quebra: "sim" },
+        { "align-items": "center", "justify-content": "space-between", "flex-wrap": "wrap" }],
+      [{ base: 0, crescer: 1 }, { "flex-basis": "0px", "flex-grow": "1" }],
+      [{ largura: "total", alturaMaxima: { de: 50 } }, { width: "100%", "max-height": "50%" }],
+      [{ colunas: 3 }, { "grid-template-columns": "repeat(3, minmax(0, 1fr))" }],
+      [{ posicao: "presa" }, { position: "sticky" }],
+    ],
+    "transformação": [
+      [{ girar: 45 }, { rotate: "45deg" }],
+      [{ escalar: 400 }, { scale: "4" }],
+      [{ mover: { x: 3, y: 4 } }, { translate: "3px 4px" }],
+    ],
+    recorte: [
+      [{ recortar: "cortar" }, { overflow: "hidden" }],
+      [{ recortar: "rolar" }, { overflow: "auto" }],
+    ],
+    "transição e animação": [
+      [{ transicao: { duracao: 200, suavizacao: "linear" } }, { transition: "all 200ms linear" }],
+      [{ animacao: "pulso" }, { animation: "seele-mod-pulso 2400ms ease-in-out infinite" }],
+    ],
+  };
+  igualNosDoisSentidos("as categorias", v6.categorias, Object.keys(O_QUE_CADA_CATEGORIA_MONTA));
+  for (const [categoria, exemplos] of Object.entries(O_QUE_CADA_CATEGORIA_MONTA)) {
+    for (const [estilo, esperado] of exemplos) {
+      const r = montar(estilo);
+      confere(
+        caso,
+        r.recusados === 0 && JSON.stringify(r.pares) === JSON.stringify(esperado),
+        `«${categoria}»: ${JSON.stringify(estilo)} montou ${JSON.stringify(r.pares)} com ${r.recusados} recusa(s), `
+          + `e o certo é ${JSON.stringify(esperado)}`,
+      );
+    }
+  }
+
+  // **Nunca texto de CSS** (`o-que-e`): a propriedade composta escrita como
+  // texto, a cor por nome ou por função e a medida com unidade são recusadas e
+  // contadas, e não escritas.
+  for (const estilo of [
+    { borda: "1px solid red" }, { sombra: "0 0 4000px red" }, { gradiente: "linear-gradient(red, blue)" },
+    { cor: "red" }, { fundo: "rgb(0, 0, 0)" }, { largura: "50%" }, { corDeFundo: "#000000" },
+  ]) {
+    const r = montar(estilo);
+    confere(caso, r.recusados === 1 && Object.keys(r.pares).length === 0,
+      `${JSON.stringify(estilo)} é texto de CSS ou um nome que não existe, e montou ${JSON.stringify(r.pares)} com `
+        + `${r.recusados} recusa(s)`);
+  }
+
+  // **Cada estado vira o seletor dele, preso ao escopo da superfície.**
+  const SELETOR_DE_CADA_ESTADO = {
+    base: ['[data-escopo-de-mod="e"] .mod-x'],
+    sobre: ['[data-escopo-de-mod="e"] .mod-x:hover'],
+    foco: ['[data-escopo-de-mod="e"] .mod-x:focus-visible'],
+    ativo: ['[data-escopo-de-mod="e"] .mod-x:active'],
+    desligado: ['[data-escopo-de-mod="e"] .mod-x:disabled', '[data-escopo-de-mod="e"] .mod-x[aria-disabled="true"]'],
+    invalido: ['[data-escopo-de-mod="e"] .mod-x[data-invalido="sim"]'],
+    escolhido: ['[data-escopo-de-mod="e"] .mod-x[data-escolhido="sim"]'],
+  };
+  igualNosDoisSentidos("os estados", v6.estados, Object.keys(SELETOR_DE_CADA_ESTADO));
+  igualNosDoisSentidos("os estados, no produto", v6.estados, Object.keys(ESTADOS_DA_CLASSE));
+  for (const [estado, seletores] of Object.entries(SELETOR_DE_CADA_ESTADO)) {
+    const folha = ctx.folhaDeClassesDeMod("e", { x: { [estado]: { cor: "#123456" } } });
+    confere(caso, folha === `${seletores.join(",")}{color:#123456}`,
+      `o estado «${estado}» virou ${JSON.stringify(folha)}, e o certo é ${JSON.stringify(`${seletores.join(",")}{color:#123456}`)}`);
+  }
+
+  // **Cada animação é um preset do produto**, com os quadros na folha dele.
+  const folhaDasSuperficies = fs.readFileSync(path.join(raiz, "ui/mods-superficies.css"), "utf8");
+  igualNosDoisSentidos("as animações", v6.animacoes, Object.keys(ANIMACOES_DO_MOD));
+  for (const nome of v6.animacoes) {
+    const r = montar({ animacao: nome });
+    const quadros = ANIMACOES_DO_MOD[nome];
+    if (nome === "nenhuma") {
+      confere(caso, r.recusados === 0 && r.pares.animation === "none",
+        `«nenhuma» montou ${JSON.stringify(r.pares)}, e o certo é \`animation: none\``);
+      continue;
+    }
+    confere(caso, r.recusados === 0 && r.pares.animation === `${quadros} 2400ms ease-in-out infinite`,
+      `«${nome}» montou ${JSON.stringify(r.pares)}`);
+    confere(caso, Boolean(quadros) && folhaDasSuperficies.includes(`@keyframes ${quadros} {`),
+      `«${nome}» aponta para \`${quadros}\`, e \`mods-superficies.css\` não tem os quadros dele: a animação não anda`);
+  }
+
+  // **O que fica de fora** (`fora`), cada item medido: nada disso vira regra.
+  const naoEntra = (rotulo, condicao, visto) => confere(caso, condicao, `«${rotulo}» entrou: ${visto}`);
+  {
+    const r = montar({ fundo: "url(x.png)" });
+    const g = montar({ gradiente: { paradas: [{ cor: "url(x.png)" }, { cor: "#ffffff" }] } });
+    naoEntra("url(...)", r.recusados === 1 && !r.pares["background-color"] && !g.pares["background-image"],
+      JSON.stringify([r, g]));
+  }
+  {
+    const folha = ctx.folhaDeClassesDeMod("e", { "x}@import url(y);{": { base: { cor: "#123456" } } });
+    naoEntra("@import", !folha.includes("@import") && !folha.includes("url("), JSON.stringify(folha));
+  }
+  {
+    const folha = ctx.folhaDeClassesDeMod("e", {
+      "roster-linha, body": { base: { cor: "#123456" } },
+      fora: { base: { cor: "#123456" }, consultas: [{ ateLargura: 600, estilo: { cor: "#654321" } }] },
+    });
+    const seletores = folha.split("\n").flatMap((regra) => regra.replace(/^@container [^{]*\{/, "").split("{")[0].split(","));
+    naoEntra("seletor que alcance fora da superfície",
+      seletores.length >= 3 && seletores.every((s) => s.startsWith('[data-escopo-de-mod="e"] .mod-')),
+      JSON.stringify(folha));
+  }
+  {
+    const r = montar({ animacao: { nome: "minha", quadros: "@keyframes minha { from { opacity: 0 } }" } });
+    const folha = ctx.folhaDeClassesDeMod("e", { x: { base: { animacao: { nome: "minha" } } } });
+    naoEntra("keyframes declarados pelo MOD", r.recusados === 1 && !r.pares.animation && !folha.includes("@keyframes"),
+      JSON.stringify([r, folha]));
+  }
+  {
+    const r = montar({ familia: "Comic Sans MS" });
+    naoEntra("família de tipo livre", r.recusados === 1 && !r.pares["font-family"], JSON.stringify(r));
+  }
+  // «HTML ativo» não é estilo: a região monta por `createElement` e
+  // `textContent`, medido nas formas (`cadaFormaDoV6MontaOQuePromete`).
+  igualNosDoisSentidos("o que fica de fora", v6.fora, [
+    "url(...)", "@import", "HTML ativo", "seletor que alcance fora da superfície",
+    "keyframes declarados pelo MOD", "família de tipo livre",
+  ]);
+}
+
 // --------------------------------------------------------------- o DOM falso
 
 const TEXTO = 3;
@@ -113,7 +358,12 @@ class Elemento {
     this.dataset = {};
     this.atributos = new Map();
     this.className = "";
-    this.style = {};
+    // `setProperty` e `removeProperty` como o navegador: é por eles que o
+    // estilo do MOD entra (`aplicarEstiloDeMod`).
+    this.style = {
+      setProperty(nome, valor) { this[nome] = valor; },
+      removeProperty(nome) { delete this[nome]; },
+    };
     this.ouvintes = new Map();
     this.value = "";
     this.width = 0;
@@ -149,6 +399,10 @@ class Elemento {
   insertBefore(no, antes) {
     this.inserir(no, antes);
     return no;
+  }
+  replaceChildren(...nos) {
+    for (const filho of [...this.filhos]) this.tirar(filho);
+    this.append(...nos);
   }
   inserir(no, antes) {
     if (no.pai) no.pai.tirar(no);
@@ -524,7 +778,7 @@ function bancada(opcoes = {}) {
   // propriedades do contexto, e por isso saem por esta linha em vez de por uma
   // leitura de `contexto.RegiaoDeMod`, que devolveria `undefined`.
   vm.runInContext(
-    `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO, PERFIS_DE_RENDER,
+    `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO, FORMAS_DA_REGIAO, PERFIS_DE_RENDER,
       SILENCIO: typeof SILENCIO_ANTES_DE_SUSPENDER_MS === "number" ? SILENCIO_ANTES_DE_SUSPENDER_MS : undefined,
       encerrarOSomDosMods: typeof encerrarOSomDosMods === "function" ? encerrarOSomDosMods : undefined,
       tocadoresDePe: typeof tocadoresDeSomDeMod === "object" ? () => tocadoresDeSomDeMod.size : undefined };`,
@@ -540,6 +794,8 @@ function bancada(opcoes = {}) {
     LIMITES: contexto.api.LIMITES_DA_REGIAO,
     CARTAO: contexto.api.LIMITES_DO_CARTAO,
     FORMAS_DO_CARTAO: contexto.api.FORMAS_DO_CARTAO,
+    /** A tabela do renderer: o espelho dela contra o `v6.json` é `cadaFormaDoV6MontaOQuePromete`. */
+    FORMAS_DA_REGIAO: contexto.api.FORMAS_DA_REGIAO,
     PERFIS: contexto.api.PERFIS_DE_RENDER,
     /** Quanto o áudio calado espera antes de ser suspenso — ver `SILENCIO_ANTES_DE_SUSPENDER_MS`. */
     SILENCIO: contexto.api.SILENCIO,
@@ -581,9 +837,8 @@ function bancada(opcoes = {}) {
  * quem saiu, e outra que a oferece a quem desenha. Uma cópia aqui ficaria
  * verde com a segunda volta tirada de `base.js`.
  *
- * As tabelas que ela lê são desta prova: nenhuma região de MOD, nenhum MOD com
- * cartão que valha, e as contribuições que a prova passa, cada uma com o seu
- * `montadas` e o seu `sons`, como `montarContribuicao` os deixa.
+ * A tabela que ela lê é desta prova: as contribuições que a prova passa, cada
+ * uma com o seu `montadas` e o seu `sons`, como `montarContribuicao` os deixa.
  *
  * @param {object} b A bancada.
  * @param {object[]} contribuicoes `{ modo, ponto, sons, montadas }`.
@@ -605,8 +860,6 @@ function varreduraDeBase(b, contribuicoes) {
       + "as provas do som que muda de destino mediriam outra varredura",
   );
   if (!pinta || !varre) return () => {};
-  b.janela.modsDeCartaoQueValem = () => [];
-  b.janela.regioesDosMods = new Map();
   b.janela.contribuicoesDosMods = {
     porHandle: new Map(contribuicoes.map((contribuicao, i) => [`c${i + 1}`, contribuicao])),
   };
@@ -710,26 +963,32 @@ function contarNos(no) {
   return no.filhos.reduce((soma, filho) => soma + 1 + contarNos(filho), 0);
 }
 
+/**
+ * **Um cartão da 6**: o renderer de um destino de `pessoa.cartao`, com o
+ * perfil do cartão, como `montarContribuicao` (`base.js`) o monta. Os cartões
+ * da API 3 (`declararCartoes`) saíram com ela; a gramática, os tetos e o som
+ * sem botão do cartão são os deste perfil.
+ */
+function umCartao(b, d) {
+  return new b.RegiaoDeMod("seele/perfis", d.api, b.raiz(), b.PERFIS.cartao);
+}
+
 async function oCartaoUsaOMesmoRendererComGramaticaMenor() {
   const b = bancada();
   const d = dono(b);
-  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+  const regiao = umCartao(b, d);
 
-  const recusados = regiao.declararCartoes({
-    7: [
-      { forma: "titulo", dentro: "Lia" },
-      { forma: "texto", dentro: "ela/dela" },
-      // As três que um cartão não aceita. Elas não somem caladas: contam como
-      // recusa, porque o MOD precisa saber que pôs botão onde botão não entra.
-      { forma: "botao", chave: "b", dentro: "APERTE" },
-      { forma: "campo", chave: "c", rotulo: "R", valor: "v" },
-      { forma: "tela", chave: "t", largura: 10, altura: 10 },
-    ],
-  });
+  const recusados = regiao.aplicar([
+    { forma: "titulo", dentro: "Lia" },
+    { forma: "texto", dentro: "ela/dela" },
+    // As três que um cartão não aceita. Elas não somem caladas: contam como
+    // recusa, porque o MOD precisa saber que pôs botão onde botão não entra.
+    { forma: "botao", chave: "b", dentro: "APERTE" },
+    { forma: "campo", chave: "c", rotulo: "R", valor: "v" },
+    { forma: "tela", chave: "t", largura: 10, altura: 10 },
+  ]);
 
-  const cartao = regiao.cartaoDe(7);
-  confere("o cartão existe", Boolean(cartao), "não foi montado");
-  confere("o cartão é do produto", cartao?.className === "pessoa-cartao", String(cartao?.className));
+  const cartao = regiao.raiz;
 
   // **Montado pelo renderer, e não por HTML.** As etiquetas são as que
   // `FORMAS_DA_REGIAO` dita, e o texto entrou por `textContent`.
@@ -760,80 +1019,30 @@ async function oCartaoUsaOMesmoRendererComGramaticaMenor() {
   }
 }
 
-async function oCartaoSaiQuandoOModParaDeDeclararOuQuandoAReGiaoSai() {
-  const b = bancada();
-  const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: 1000 }));
-  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
-
-  regiao.declararCartoes({
-    7: [{ forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } }],
-    9: [{ forma: "texto", dentro: "outro" }],
-  });
-  await volta();
-  await volta();
-
-  const soltos = () => d.registrados.filter((r) => r.porque.includes("midia")).length;
-  confere("o retrato foi registrado", soltos() === 1, `${soltos()} registros`);
-  confere("os bytes entraram na conta do cartão", regiao.bytesDeCartao === 1000, String(regiao.bytesDeCartao));
-  confere("e não na conta da região", regiao.bytesDeMidia === 0, String(regiao.bytesDeMidia));
-
-  // Parar de declarar uma pessoa tira o cartão dela e solta o que ele segurava.
-  regiao.declararCartoes({ 9: [{ forma: "texto", dentro: "outro" }] });
-  confere("o cartão de 7 saiu", regiao.cartaoDe(7) === null, "continuou lá");
-  confere("o de 9 ficou", regiao.cartaoDe(9) !== null, "sumiu junto");
-  confere("os bytes voltaram", regiao.bytesDeCartao === 0, String(regiao.bytesDeCartao));
-  confere("a contagem voltou", regiao.contagem.midiasDeCartao === 0, String(regiao.contagem.midiasDeCartao));
-
-  // E soltar a região tira o resto, **mesmo o que nunca esteve sob a raiz
-  // dela**. Um cartão mora na lista do produto, e não na região: pendurá-lo
-  // aqui é o que faz esta prova medir alguma coisa.
-  //
-  // A primeira versão disto media nada: `cartaoDe` devolve `null` assim que a
-  // região está solta, e a raiz nunca fora pendurada em lugar nenhum — as duas
-  // asserções passavam com o descarte **removido**. A reversão pegou.
-  regiao.declararCartoes({
-    9: [{ forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } }],
-  });
-  await volta();
-  await volta();
-  const lista = b.doc.createElement("li");
-  const noDoNove = regiao.cartaoDe(9);
-  lista.append(noDoNove);
-  confere("o cartão está na lista", noDoNove.pai === lista, "não foi pendurado");
-  confere("e segura o retrato", regiao.bytesDeCartao === 1000, String(regiao.bytesDeCartao));
-
-  regiao.soltar();
-  confere("o cartão saiu da lista do produto", noDoNove.pai === null, "continuou pendurado ao lado do nome");
-  confere("e a região esqueceu a raiz", regiao.raizesDeCartao.size === 0, `${regiao.raizesDeCartao.size} raiz(es)`);
-  confere("e o retrato foi solto", regiao.bytesDeCartao === 0, String(regiao.bytesDeCartao));
-}
-
 async function oRetratoDoCartaoEOMesmoNoEntreDoisRetratos() {
   const b = bancada();
   const d = dono(b, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: 10 }));
-  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+  const regiao = umCartao(b, d);
 
   const declarar = (nome) =>
-    regiao.declararCartoes({
-      7: [
-        { forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } },
-        { forma: "texto", chave: "nome", dentro: nome },
-      ],
-    });
+    regiao.aplicar([
+      { forma: "midia", chave: "retrato", doServidor: { canal: 1, pedido: {}, campo: "image" } },
+      { forma: "texto", chave: "nome", dentro: nome },
+    ]);
 
   declarar("Lia");
   await volta();
   await volta();
-  const antes = acharTag(regiao.cartaoDe(7), "img");
+  const antes = acharTag(regiao.raiz, "img");
   confere("o retrato montou", Boolean(antes), "sem img");
 
   // **O mesmo nó.** Um `<img>` recriado a cada quatro segundos pisca, e um
   // `<audio>` recriado recomeça — é o motivo de a lista receber o nó montado
   // em vez de uma cópia, e de a reconciliação valer aqui como vale na região.
   declarar("Lia Nova");
-  const depois = acharTag(regiao.cartaoDe(7), "img");
+  const depois = acharTag(regiao.raiz, "img");
   confere("o retrato não foi recriado", antes === depois, "o nó da imagem trocou");
-  confere("e o texto mudou", textoDe(regiao.cartaoDe(7)).includes("Lia Nova"), textoDe(regiao.cartaoDe(7)));
+  confere("e o texto mudou", textoDe(regiao.raiz).includes("Lia Nova"), textoDe(regiao.raiz));
   confere("os bytes não dobraram", regiao.bytesDeCartao === 10, String(regiao.bytesDeCartao));
 }
 
@@ -870,26 +1079,13 @@ async function aImagemAcompanhaAMudancaDaFonte() {
 async function osTetosDoCartaoSaoDoCartaoENaoDaRegiao() {
   const b = bancada();
   const d = dono(b);
-  const regiao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+  const regiao = umCartao(b, d);
 
-  // Pessoas demais é recusa **inteira**, e com o teto escrito: o MOD pediu um
-  // conjunto, e um conjunto pela metade é pior que nenhum.
-  const demais = {};
-  for (let i = 0; i <= b.CARTAO.cartoes; i += 1) demais[i] = [{ forma: "texto", dentro: "a" }];
-  let recusou = "";
-  try {
-    regiao.declararCartoes(demais);
-  } catch (erro) {
-    recusou = String(erro.message);
-  }
-  confere("pessoas demais é recusa", recusou.includes(String(b.CARTAO.cartoes)), recusou || "aceitou");
-  confere("e nada ficou pela metade", regiao.cartaoDe(0) === null, "gravou parte do conjunto");
-
-  // O teto de nós é o do cartão, e não o da região: vinte e quatro, e não 512.
+  // O teto de nós é o do cartão, e não o da região.
   const muitos = [];
   for (let i = 0; i < b.CARTAO.nos + 30; i += 1) muitos.push({ forma: "texto", dentro: `n${i}` });
-  const recusados = regiao.declararCartoes({ 3: muitos });
-  const quantos = contarNos(regiao.cartaoDe(3));
+  const recusados = regiao.aplicar(muitos);
+  const quantos = contarNos(regiao.raiz);
   confere("o cartão parou no teto dele", quantos <= b.CARTAO.nos, `montou ${quantos}`);
   confere("e a recusa foi contada", recusados > 0, "recusou calado");
   confere(
@@ -897,10 +1093,6 @@ async function osTetosDoCartaoSaoDoCartaoENaoDaRegiao() {
     b.CARTAO.nos < b.LIMITES.nos,
     `cartão ${b.CARTAO.nos} · região ${b.LIMITES.nos}`,
   );
-
-  // Um cartão vazio não vira moldura vazia ao lado de um nome.
-  regiao.declararCartoes({ 5: [] });
-  confere("cartão vazio não entra", regiao.cartaoDe(5) === null, "montou uma moldura vazia");
 }
 
 // ---------------------------------------------------------------------------
@@ -1036,6 +1228,481 @@ async function oArrasteViraTracoAgregado() {
     },
   ]);
   confere(caso, tela.pincel.tracos === 1, "o traço declarado não foi pintado");
+}
+
+// ---------------------------------------------------------------------------
+// 2a. O gesto que o sistema toma é «cancelou», e não «terminou» (MESA M14;
+//     rascunho da API 6, §7.1; prometido no `api/v6.json`).
+// ---------------------------------------------------------------------------
+
+async function oGestoCanceladoDizCancelou() {
+  const caso = "o gesto cancelado diz cancelou";
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const tabuleiro = [{
+    forma: "tela",
+    chave: "mapa",
+    largura: 200,
+    altura: 200,
+    figuras: [{ tipo: "circulo", chave: "peca", x: 60, y: 60, raio: 15, cor: "#6bffb6" }],
+  }];
+  regiao.aplicar(tabuleiro);
+  const tela = regiao.raiz.children[0];
+  tela.darPincel();
+  regiao.aplicar(tabuleiro);
+
+  // A peça pega, levada até outro lugar, e o sistema toma o gesto — uma
+  // ligação, a notificação, o gesto de voltar do celular — com um movimento
+  // ainda esperando o quadro.
+  tela.disparar("pointerdown", { clientX: 60, clientY: 60, pointerId: 1 });
+  tela.disparar("pointermove", { clientX: 150, clientY: 150, pointerId: 1 });
+  tela.disparar("pointercancel", { clientX: 150, clientY: 150, pointerId: 1 });
+  const fim = d.ditos.at(-1);
+  confere(
+    caso,
+    fim?.fase === "cancelou" && fim?.alvo === "peca",
+    `o gesto cancelado não chegou como «cancelou» da peça: ${JSON.stringify(fim)}`,
+  );
+  confere(
+    caso,
+    !d.ditos.some((e) => e.fase === "terminou"),
+    "o gesto cancelado também disse «terminou», e a peça se moveria para onde o dedo não soltou",
+  );
+  // O movimento que esperava o quadro não sai depois do fim.
+  b.quadros.shift()?.();
+  confere(
+    caso,
+    d.ditos.at(-1)?.fase === "cancelou",
+    `um movimento saiu depois do «cancelou»: ${JSON.stringify(d.ditos.at(-1))}`,
+  );
+  // E o gesto seguinte começa limpo: soltar sem ter descido não diz nada.
+  const ditos = d.ditos.length;
+  tela.disparar("pointerup", { clientX: 10, clientY: 10, pointerId: 2 });
+  confere(caso, d.ditos.length === ditos, "soltar depois do «cancelou» disse alguma coisa");
+}
+
+// ---------------------------------------------------------------------------
+// 2a'. No toque, só o que se arrasta prende o dedo; o vazio rola a página
+//      (D-api-8, item 6; `celular.toque-na-tela`).
+// ---------------------------------------------------------------------------
+
+async function oToqueSoPrendeOQueSeArrasta() {
+  const caso = "o toque só prende o que se arrasta";
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const tabuleiro = [{
+    forma: "tela",
+    chave: "mapa",
+    largura: 200,
+    altura: 200,
+    figuras: [
+      { tipo: "linha", chave: "parede", x: 0, y: 0, ate_x: 200, ate_y: 200 },
+      { tipo: "circulo", chave: "peca", x: 60, y: 60, raio: 15, cor: "#6bffb6" },
+    ],
+  }];
+  regiao.aplicar(tabuleiro);
+  const tela = regiao.raiz.children[0];
+  tela.darPincel();
+  regiao.aplicar(tabuleiro);
+
+  // O dedo que desce: prender é impedir que o navegador role a página.
+  const prende = (x, y) => {
+    let impedido = false;
+    tela.disparar("touchstart", {
+      touches: [{ clientX: x, clientY: y }],
+      preventDefault() { impedido = true; },
+    });
+    return impedido;
+  };
+  confere(caso, prende(60, 60) === true,
+    "o dedo sobre a peça não prendeu o gesto: no celular, a página rolaria em vez de a peça andar");
+  confere(caso, prende(5, 150) === false,
+    "o dedo no vazio da tela prendeu o gesto: no celular, a página não rola por cima de um tabuleiro");
+  confere(caso, prende(100, 100) === false,
+    "o dedo sobre uma parede, que não se arrasta, prendeu o gesto");
+
+  // E a folha deixa a página rolar: o `touch-action: none` em todo o canvas
+  // prendia o dedo no vazio também, e o script não tem como soltá-lo depois.
+  const folha = fs.readFileSync(path.join(__dirname, "../ui/mods-controles.css"), "utf8");
+  const regra = folha.split("canvas.regiao-de-mod-parte {")[1]?.split("}")[0] ?? "";
+  confere(caso, /touch-action:\s*pan-x pan-y;/.test(regra) && !/touch-action:\s*none/.test(regra),
+    `o canvas da tela não deixa a página rolar: ${regra.trim()}`);
+}
+
+// ---------------------------------------------------------------------------
+// 2a''. O estado `escolhido` de uma classe tem quem o escreva (`estilos.estados`;
+//       a auditoria do `v6.json`, B6): a marca e o interruptor ligados, e a aba
+//       ativa. O seletor `[data-escolhido="sim"]` existia, e nada o escrevia.
+//       A aba é medida no navegador (`camadas.cjs`): este DOM de mentira não
+//       monta abas.
+// ---------------------------------------------------------------------------
+
+async function oEstadoEscolhidoTemQuemOEscreva() {
+  const caso = "o estado escolhido";
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([
+    { forma: "marca", chave: "ligada", rotulo: "Ligada", valor: true },
+    { forma: "interruptor", chave: "desligado", rotulo: "Desligado", valor: false },
+  ]);
+  const [marca, interruptor] = regiao.raiz.children;
+  confere(caso, marca.dataset.escolhido === "sim", `a marca ligada não está escolhida: ${marca.dataset.escolhido}`);
+  confere(caso, interruptor.dataset.escolhido === undefined,
+    `o interruptor desligado está escolhido: ${interruptor.dataset.escolhido}`);
+  const caixa = acharTag(marca, "input");
+  caixa.checked = false;
+  caixa.disparar("change");
+  confere(caso, marca.dataset.escolhido === undefined, "desligar a marca não tirou o escolhido");
+  regiao.soltar();
+}
+
+// ---------------------------------------------------------------------------
+// 2a. As formas e as figuras do `v6.json`: cada uma monta o que promete.
+// ---------------------------------------------------------------------------
+
+/**
+ * O contrato publicado. As listas `formas` e `figuras` saem dele, e não desta
+ * bancada: uma forma que entrar no `v6.json` sem prova aqui reprova.
+ */
+const V6 = JSON.parse(fs.readFileSync(path.join(raiz, "../../api/v6.json"), "utf8"));
+
+/**
+ * O que cada forma do `v6.json` monta, escrito aqui, à parte da tabela do
+ * renderer (a auditoria do `v6.json`, tabela 4: 16 formas e a figura `linha`
+ * estavam SEM PROVA, e tirar uma delas de `FORMAS_DA_REGIAO` passava).
+ *
+ * **Escrito, e não lido de `FORMAS_DA_REGIAO`:** uma prova que copiasse a
+ * tabela concordaria com qualquer mudança dela, inclusive a de tirar uma forma.
+ *
+ * Cada entrada declara um nó e diz a etiqueta que ele vira. `achar` acha o
+ * elemento da forma: o da raiz, salvo em `item` e `aba`, que moram dentro de
+ * outra. `faz`, nas formas que nenhuma outra prova exercita, confere o que ela
+ * promete além de existir, e devolve o que faltou.
+ */
+const O_QUE_CADA_FORMA_MONTA = {
+  titulo: { no: { forma: "titulo", dentro: "Mapa" }, tag: "H3", texto: "Mapa" },
+  texto: { no: { forma: "texto", dentro: "um texto" }, tag: "P", texto: "um texto" },
+  linha: {
+    no: { forma: "linha", dentro: [{ forma: "texto", dentro: "a" }, { forma: "texto", dentro: "b" }] },
+    tag: "DIV",
+    faz: (elem) => (elem.children.map((f) => f.tagName).join() === "P,P" ? "" : "a linha não guardou os dois textos"),
+  },
+  lista: {
+    no: { forma: "lista", dentro: [{ forma: "item", dentro: "um" }, { forma: "item", dentro: "dois" }] },
+    tag: "UL",
+    faz: (elem) => (elem.children.map((f) => f.tagName).join() === "LI,LI" ? "" : "a lista não tem os dois itens"),
+  },
+  item: {
+    no: { forma: "lista", dentro: [{ forma: "item", dentro: "um" }] },
+    achar: (raiz) => raiz.children[0]?.children[0],
+    tag: "LI",
+    texto: "um",
+  },
+  campo: { no: { forma: "campo", chave: "nome", rotulo: "Nome", valor: "Lia" }, tag: "LABEL" },
+  escolha: {
+    no: { forma: "escolha", chave: "cor", rotulo: "Cor", opcoes: [{ valor: "a", dentro: "A" }] },
+    tag: "LABEL",
+    // **O evento `escolha`** (`eventos[1]`): trocar a opção diz a chave e o valor.
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "select");
+      if (!caixa) return "a escolha não tem select";
+      caixa.value = "a";
+      caixa.disparar("change");
+      const dito = d.ditos.at(-1);
+      return dito?.nome === "escolha" && dito.chave === "cor" && dito.valor === "a" ? "" : `trocar disse ${JSON.stringify(dito)}`;
+    },
+  },
+  botao: { no: { forma: "botao", chave: "ok", dentro: "OK" }, tag: "BUTTON" },
+  arquivo: { no: { forma: "arquivo", chave: "foto", rotulo: "Foto" }, tag: "BUTTON" },
+  tela: { no: { forma: "tela", chave: "mapa", largura: 10, altura: 10 }, tag: "CANVAS" },
+  midia: { no: { forma: "midia", chave: "faixa" }, tag: "FIGURE" },
+  caixa: { no: { forma: "caixa", dentro: [{ forma: "texto", dentro: "a" }] }, tag: "DIV" },
+  pilha: { no: { forma: "pilha", dentro: [{ forma: "texto", dentro: "a" }] }, tag: "DIV" },
+  grade: { no: { forma: "grade", dentro: [{ forma: "texto", dentro: "a" }] }, tag: "DIV" },
+  rolagem: { no: { forma: "rolagem", dentro: [{ forma: "texto", dentro: "a" }] }, tag: "DIV" },
+  separador: { no: { forma: "separador" }, tag: "HR" },
+  espaco: { no: { forma: "espaco" }, tag: "DIV" },
+  formulario: {
+    no: { forma: "formulario", chave: "perfil", dentro: [{ forma: "campo", chave: "nome", rotulo: "Nome" }] },
+    tag: "FORM",
+  },
+  acoes: { no: { forma: "acoes", dentro: [{ forma: "botao", chave: "ok", dentro: "OK" }] }, tag: "DIV" },
+  abas: {
+    no: {
+      forma: "abas",
+      chave: "abas",
+      valor: "b",
+      dentro: [
+        { forma: "aba", chave: "a", rotulo: "A", dentro: "painel a" },
+        { forma: "aba", chave: "b", rotulo: "B", dentro: "painel b" },
+      ],
+    },
+    tag: "DIV",
+    // **Só o painel ativo**, as tiras com papel de aba, e o clique que fala `aba`.
+    faz: (elem, d) => {
+      const [tiras, palco] = elem.children;
+      if (tiras?.getAttribute("role") !== "tablist") return "as tiras não são um tablist";
+      const tiras2 = tiras.children;
+      if (tiras2.length !== 2 || tiras2.some((t) => t.getAttribute("role") !== "tab")) return "as tiras não são duas abas";
+      if (tiras2[1].getAttribute("aria-selected") !== "true") return "a aba escolhida não está selecionada";
+      if (palco?.children.length !== 1 || textoDe(palco) !== "painel b") return `o palco mostra «${textoDe(palco)}», e não só o painel ativo`;
+      tiras.disparar("click", { target: { closest: () => tiras2[0] } });
+      const dito = d.ditos.at(-1);
+      return dito?.nome === "aba" && dito.chave === "abas" && dito.valor === "a" ? "" : `o clique disse ${JSON.stringify(dito)}`;
+    },
+  },
+  aba: {
+    no: { forma: "abas", chave: "abas", dentro: [{ forma: "aba", chave: "a", rotulo: "A", dentro: "painel a" }] },
+    achar: (raiz) => raiz.children[0]?.children[1]?.children[0],
+    tag: "SECTION",
+    faz: (elem) => (elem.getAttribute("role") === "tabpanel" ? "" : "a aba não é um tabpanel"),
+  },
+  textoLongo: {
+    no: { forma: "textoLongo", chave: "bio", rotulo: "Bio" },
+    tag: "LABEL",
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "textarea");
+      if (!caixa) return "sem textarea";
+      caixa.value = "duas\nlinhas";
+      caixa.disparar("input");
+      const dito = d.ditos.at(-1);
+      return dito?.nome === "campo" && dito.chave === "bio" && dito.valor === "duas\nlinhas" ? "" : `digitar disse ${JSON.stringify(dito)}`;
+    },
+  },
+  numero: {
+    no: { forma: "numero", chave: "pv", rotulo: "PV", valor: 3 },
+    tag: "LABEL",
+    // **O evento `numero`** (`eventos[6]`): o número, e o texto; vazio é `null`, e não zero.
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "input");
+      if (caixa?.type !== "number") return "o número não é um input number";
+      caixa.value = "5";
+      caixa.disparar("input");
+      const cinco = d.ditos.at(-1);
+      caixa.value = "";
+      caixa.disparar("input");
+      const vazio = d.ditos.at(-1);
+      return cinco?.nome === "numero" && cinco.chave === "pv" && cinco.valor === 5 && cinco.texto === "5"
+        && vazio?.nome === "numero" && vazio.valor === null && vazio.texto === ""
+        ? "" : `digitar disse ${JSON.stringify([cinco, vazio])}`;
+    },
+  },
+  deslizante: {
+    no: { forma: "deslizante", chave: "volume", rotulo: "Volume", valor: 3, minimo: 0, maximo: 10 },
+    tag: "LABEL",
+    // **O valor legível**: o `output` diz o número, ao montar e ao mexer.
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "input");
+      const lido = acharTag(elem, "output");
+      if (caixa?.type !== "range") return "o deslizante não é um input range";
+      if (lido?.textContent !== "3") return `o valor legível ao montar é «${lido?.textContent}»`;
+      caixa.value = "7";
+      caixa.disparar("input");
+      const dito = d.ditos.at(-1);
+      if (lido.textContent !== "7") return `o valor legível depois de mexer é «${lido.textContent}»`;
+      return dito?.nome === "numero" && dito.chave === "volume" && dito.valor === 7 ? "" : `mexer disse ${JSON.stringify(dito)}`;
+    },
+  },
+  marca: {
+    no: { forma: "marca", chave: "previa", rotulo: "Prévia", valor: false },
+    tag: "LABEL",
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "input");
+      if (caixa?.type !== "checkbox") return "a marca não é um checkbox";
+      if (caixa.getAttribute("role") !== null) return "a marca tem papel de interruptor";
+      caixa.checked = true;
+      caixa.disparar("change");
+      const dito = d.ditos.at(-1);
+      return dito?.nome === "marca" && dito.chave === "previa" && dito.valor === true ? "" : `ligar disse ${JSON.stringify(dito)}`;
+    },
+  },
+  interruptor: {
+    no: { forma: "interruptor", chave: "tema", rotulo: "Tema", valor: true },
+    tag: "LABEL",
+    // O mesmo controle da marca, com o papel de interruptor para quem usa leitor de tela, e o mesmo evento.
+    faz: (elem, d) => {
+      const caixa = acharTag(elem, "input");
+      if (caixa?.getAttribute("role") !== "switch") return "o interruptor não tem role=switch";
+      caixa.checked = false;
+      caixa.disparar("change");
+      const dito = d.ditos.at(-1);
+      return dito?.nome === "marca" && dito.chave === "tema" && dito.valor === false ? "" : `desligar disse ${JSON.stringify(dito)}`;
+    },
+  },
+  cor: {
+    no: { forma: "cor", chave: "acento", rotulo: "Acento", valor: "#ff8800" },
+    tag: "LABEL",
+    // **O evento `cor`** (`eventos[8]`): pelo seletor, e pelo hexadecimal só
+    // quando ele está completo — `#12` no meio da digitação não vira pedido.
+    faz: (elem, d) => {
+      const seletor = acharTag(elem, "input");
+      const hexa = elem.querySelector(".regiao-de-mod-hexa");
+      if (seletor?.type !== "color") return "a cor não tem input color";
+      if (!hexa) return "a cor não tem o hexadecimal";
+      seletor.value = "#00ff00";
+      seletor.disparar("input");
+      const doSeletor = d.ditos.at(-1);
+      const antes = d.ditos.length;
+      hexa.value = "#12";
+      hexa.disparar("input");
+      const incompleto = d.ditos.length === antes;
+      hexa.value = "#123456";
+      hexa.disparar("input");
+      const doHexa = d.ditos.at(-1);
+      return doSeletor?.nome === "cor" && doSeletor.chave === "acento" && doSeletor.valor === "#00ff00"
+        && incompleto && doHexa?.nome === "cor" && doHexa.valor === "#123456"
+        ? "" : `o seletor e o hexadecimal disseram ${JSON.stringify([doSeletor, incompleto, doHexa])}`;
+    },
+  },
+  retrato: {
+    no: { forma: "retrato", chave: "foto", inicial: "L" },
+    tag: "SPAN",
+    faz: (elem) => (elem.querySelector(".regiao-de-mod-retrato-inicial") ? "" : "o retrato não tem a inicial"),
+  },
+  distintivo: { no: { forma: "distintivo", dentro: "MESTRE" }, tag: "SPAN", texto: "MESTRE" },
+  link: {
+    no: { forma: "link", chave: "site", endereco: "https://exemplo.org/regras", dentro: "REGRAS" },
+    tag: "BUTTON",
+    // **O endereço fica à vista**, e o clique o abre pelo produto, com a chave.
+    faz: (elem, d) => {
+      if (elem.title !== "https://exemplo.org/regras") return `o endereço à vista é «${elem.title}»`;
+      if (elem.disabled) return "o link com endereço nasceu desligado";
+      elem.disparar("click");
+      const aberto = d.abertos.at(-1);
+      return aberto?.url === "https://exemplo.org/regras" && aberto.chave === "site" ? "" : `o clique abriu ${JSON.stringify(aberto)}`;
+    },
+  },
+};
+
+/** Compara duas listas de nomes como conjuntos, e diz o que sobra de cada lado. */
+function diferencaDeNomes(rotuloA, a, rotuloB, b) {
+  const faltam = [...a].filter((n) => !b.has(n));
+  const sobram = [...b].filter((n) => !a.has(n));
+  return [
+    faltam.length ? `${rotuloA} tem e ${rotuloB} não: ${faltam.join(", ")}` : "",
+    sobram.length ? `${rotuloB} tem e ${rotuloA} não: ${sobram.join(", ")}` : "",
+  ].filter(Boolean).join("; ");
+}
+
+async function cadaFormaDoV6MontaOQuePromete() {
+  const caso = "cada forma do v6 monta o que promete";
+  const doV6 = new Set(V6.formas);
+  // **O espelho, nos dois sentidos**: o contrato contra esta prova, e o
+  // contrato contra o renderer. Uma forma nova no `v6.json` sem prova reprova
+  // aqui; uma forma no renderer que o `v6.json` não promete também.
+  const espelhoDaProva = diferencaDeNomes("o v6.json", doV6, "esta prova", new Set(Object.keys(O_QUE_CADA_FORMA_MONTA)));
+  confere(caso, espelhoDaProva === "", espelhoDaProva);
+  const b0 = bancada();
+  const espelhoDoRenderer = diferencaDeNomes("o v6.json", doV6, "FORMAS_DA_REGIAO", new Set(Object.keys(b0.FORMAS_DA_REGIAO ?? {})));
+  confere(caso, espelhoDoRenderer === "", espelhoDoRenderer);
+
+  for (const forma of V6.formas) {
+    const esperado = O_QUE_CADA_FORMA_MONTA[forma];
+    if (!esperado) continue;
+    const b = bancada();
+    const d = dono(b);
+    d.abertos = [];
+    d.api.abrirEndereco = (url, chave) => d.abertos.push({ url, chave });
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([esperado.no]);
+    const elem = (esperado.achar ?? ((raiz) => raiz.children[0]))(regiao.raiz);
+    const montou = elem?.tagName === esperado.tag;
+    confere(caso, montou, `«${forma}» virou ${elem?.tagName ?? "nada"}, e não ${esperado.tag}`);
+    if (!montou) {
+      regiao.soltar();
+      continue;
+    }
+    confere(caso, elem.dataset.forma === forma, `«${forma}» saiu com data-forma «${elem.dataset.forma}»: a folha não o pinta`);
+    if (esperado.texto !== undefined) {
+      confere(caso, textoDe(elem) === esperado.texto, `«${forma}» diz «${textoDe(elem)}», e não «${esperado.texto}»`);
+    }
+    if (esperado.faz) {
+      const faltou = esperado.faz(elem, d);
+      confere(caso, faltou === "", `«${forma}»: ${faltou}`);
+    }
+    regiao.soltar();
+  }
+
+  // E o link sem endereço não abre nada: nasce desligado.
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([{ forma: "link", chave: "vazio", dentro: "NADA" }]);
+  confere(caso, regiao.raiz.children[0]?.disabled === true, "o link sem endereço nasceu ligado");
+  regiao.soltar();
+}
+
+/**
+ * O que cada figura do `v6.json` pinta, no pincel de mentira: `linha` é a
+ * única que traça sem preencher, e por isso o `traco` é o dela.
+ */
+const O_QUE_CADA_FIGURA_PINTA = {
+  retangulo: {
+    figura: { tipo: "retangulo", x: 1, y: 1, largura: 5, altura: 5, cor: "#112233" },
+    pintou: (p) => p.some((x) => x[0] === "retangulo"),
+  },
+  circulo: { figura: { tipo: "circulo", x: 5, y: 5, raio: 3, cor: "#112233" }, pintou: (p) => p.includes("circulo") },
+  texto: {
+    figura: { tipo: "texto", x: 1, y: 9, dentro: "GOBLIN", corpo: 12 },
+    pintou: (p) => p.some((x) => x[0] === "texto" && x[1] === "GOBLIN"),
+  },
+  linha: { figura: { tipo: "linha", x: 0, y: 0, ate_x: 9, ate_y: 9, cor: "#112233" }, pintou: (p) => p.includes("traco") },
+};
+
+async function cadaFiguraDoV6Pinta() {
+  const caso = "cada figura do v6 pinta";
+  const espelho = diferencaDeNomes("o v6.json", new Set(V6.figuras), "esta prova", new Set(Object.keys(O_QUE_CADA_FIGURA_PINTA)));
+  confere(caso, espelho === "", espelho);
+
+  // Cada figura sozinha numa tela: o que o pincel anotou é dela, e uma figura
+  // que o renderer não pinta mais vira recusa contada, e não traço nenhum.
+  const pintar = (figura) => {
+    const b = bancada();
+    const d = dono(b);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    const tela = [{ forma: "tela", chave: "mapa", largura: 20, altura: 20, figuras: [figura] }];
+    regiao.aplicar(tela);
+    regiao.raiz.children[0].darPincel();
+    const recusados = regiao.aplicar(tela);
+    const pintado = regiao.raiz.children[0].pincel.pintado;
+    regiao.soltar();
+    return { recusados, pintado };
+  };
+  for (const tipo of V6.figuras) {
+    const esperado = O_QUE_CADA_FIGURA_PINTA[tipo];
+    if (!esperado) continue;
+    const { recusados, pintado } = pintar(esperado.figura);
+    confere(caso, recusados === 0, `a figura «${tipo}» foi recusada (${recusados})`);
+    confere(caso, esperado.pintou(pintado), `a figura «${tipo}» não foi pintada: ${JSON.stringify(pintado)}`);
+  }
+  const estranha = pintar({ tipo: "estrela", x: 1, y: 1 });
+  confere(caso, estranha.recusados === 1, `um tipo que o v6 não tem não foi contado como recusa (${estranha.recusados})`);
+
+  // **O teto de figuras por tela** (`limites.figuras-por-tela`): o número que
+  // o texto começa dizendo. Até ele, todas pintam; uma a mais é recusada e
+  // dita, com a chave da tela — e as de antes continuam pintadas. (O teto de
+  // bytes da mensagem, que segura antes dele, é do prelúdio: medido no motor.)
+  const teto = Number.parseInt(V6.limites["figuras-por-tela"], 10);
+  confere(caso, teto === 256, `o v6.json diz «${V6.limites["figuras-por-tela"].slice(0, 20)}…», e esta prova lê ${teto}`);
+  for (const [quantas, recusadas] of [[teto, 0], [teto + 1, 1]]) {
+    const b = bancada();
+    const d = dono(b);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.superficie);
+    const figuras = Array.from({ length: quantas }, (_, i) => ({ tipo: "retangulo", x: i % 20, y: 0, largura: 1, altura: 1 }));
+    const tela = [{ forma: "tela", chave: "mapa", largura: 20, altura: 20, figuras }];
+    regiao.aplicar(tela);
+    regiao.raiz.children[0].darPincel();
+    const recusados = regiao.aplicar(tela);
+    const retangulos = regiao.raiz.children[0].pincel.pintado.filter((p) => Array.isArray(p) && p[0] === "retangulo").length;
+    confere(caso, recusados === recusadas && retangulos === teto
+      && (recusadas === 0 || regiao.amostraDeRecusados.some((a) => a.motivo === "teto-de-figuras" && a.chave === "mapa")),
+      `${quantas} figuras numa tela de teto ${teto}: pintou ${retangulos}, recusou ${recusados}, `
+        + `amostra ${JSON.stringify(regiao.amostraDeRecusados)}`);
+    regiao.soltar();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1466,8 +2133,8 @@ async function osTetosContemEARecusaEDita() {
     const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
     const bs = bancada({ audio: Audio });
     const ds = dono(bs, () => Promise.resolve({ papel: "som", bytes: 12 }));
-    const r = new bs.RegiaoDeMod("a/b", ds.api, bs.raiz());
-    r.declararCartoes({ 7: [{ forma: "midia", chave: "c", fonte: "som/c.ogg", tocando: true }] });
+    const r = umCartao(bs, ds);
+    r.aplicar([{ forma: "midia", chave: "c", fonte: "som/c.ogg", tocando: true }]);
     await assentar();
     confere(
       caso,
@@ -1486,6 +2153,177 @@ async function osTetosContemEARecusaEDita() {
     );
     confere(caso, r.bytesDeSomDeCartao === 0, `o som recusado entrou na conta dos cartões: ${r.bytesDeSomDeCartao}`);
     r.soltar();
+  }
+}
+
+/**
+ * **Os tetos da superfície são os do `v6.json`, e cada um recusa e diz**
+ * (`superficies.limites`; a auditoria do `v6.json`, tabela 7, linhas 70 a 74).
+ *
+ * Os números do perfil contra os do contrato, e cada teto medido na borda: o
+ * que cabe monta sem recusa, e o que passa é recusado com o motivo na amostra
+ * (`nos-recusados`). O bolso de bytes é o que o `limites-o-que-e` diz: o
+ * retrato e o fundo param na soma de 24 MiB, e a `midia` nos 10 MiB dela.
+ *
+ * **A fundura recusava calada.** `planejar` devolvia `[]` para o que passava
+ * dela, sem `anotarRecusado`: uma árvore funda demais perdia os galhos de
+ * baixo, e o MOD não ouvia nada — o texto diz que «um teto» é recusa.
+ */
+async function osTetosDaSuperficieSaoOsDoV6() {
+  const caso = "os tetos da superfície são os do v6";
+  const v6 = JSON.parse(fs.readFileSync(path.join(raiz, "../../api/v6.json"), "utf8")).superficies.limites;
+  const b = bancada();
+  const perfil = b.PERFIS.superficie;
+  for (const teto of ["nos", "fundura", "campos", "telas", "midias", "bytesDeMidia"]) {
+    confere(caso, perfil[teto] === v6[teto],
+      `o perfil da superfície tem \`${teto}\` = ${perfil[teto]}, e o v6.json promete ${v6[teto]}`);
+  }
+  const nova = (bb = b, dd = dono(bb)) => new bb.RegiaoDeMod("a/b", dd.api, bb.raiz(), bb.PERFIS.superficie);
+  const motivos = (r) => r.amostraDeRecusados.map((a) => a.motivo);
+
+  // **A fundura**: `n` caixas encaixadas em volta de uma folha ocupam os
+  // níveis 0 a `n`. Até a fundura, tudo monta; um nível a mais é recusado.
+  const encaixar = (n, folha = { forma: "separador", chave: "folha" }) => {
+    let no = folha;
+    for (let i = 0; i < n; i += 1) no = { forma: "caixa", chave: `n${i}`, dentro: [no] };
+    return [no];
+  };
+  const profundidade = (no) => (no.filhos?.length ? 1 + Math.max(...no.filhos.map(profundidade)) : 0);
+  {
+    const cabe = nova();
+    const recusados = cabe.aplicar(encaixar(v6.fundura));
+    confere(caso, recusados === 0 && profundidade(cabe.raiz) === v6.fundura + 1,
+      `${v6.fundura} níveis de caixa cabem na fundura de ${v6.fundura}, e montaram ${profundidade(cabe.raiz)} níveis com `
+        + `${recusados} recusa(s)`);
+    // **O texto é um nível**: a palavra dentro de um `texto` é um nó, como no
+    // orçamento de nós. Um `texto` no penúltimo nível mostra o que diz; no
+    // último, a palavra passa da fundura — e sumia calada, com a caixa vazia
+    // na tela. Agora ela é recusada e dita.
+    const comTexto = nova();
+    const folhaDeTexto = { forma: "texto", chave: "folha", dentro: "no fundo" };
+    const recusadosDoTexto = comTexto.aplicar(encaixar(v6.fundura - 1, folhaDeTexto));
+    confere(caso, recusadosDoTexto === 0 && textoDe(comTexto.raiz).includes("no fundo"),
+      `o texto de um \`texto\` no penúltimo nível da fundura sumiu ou foi recusado: `
+        + `${recusadosDoTexto} recusa(s), ${JSON.stringify(textoDe(comTexto.raiz))}`);
+    const textoNoFundo = nova();
+    const recusadosNoFundo = textoNoFundo.aplicar(encaixar(v6.fundura, folhaDeTexto));
+    confere(caso, recusadosNoFundo === 1 && motivos(textoNoFundo).includes("teto-de-fundura"),
+      "a palavra de um `texto` no último nível passou da fundura e sumiu calada: "
+        + `${recusadosNoFundo} recusa(s), amostra ${JSON.stringify(textoNoFundo.amostraDeRecusados)}`);
+    const passa = nova();
+    const recusadosDaFunda = passa.aplicar(encaixar(v6.fundura + 1));
+    confere(caso, recusadosDaFunda === 1 && motivos(passa).includes("teto-de-fundura")
+      && passa.amostraDeRecusados.some((a) => a.chave === "folha"),
+      "um nível além da fundura foi cortado calado: a folha de baixo sumiu, e a recusa não foi contada nem a "
+        + `amostra a nomeou (${recusadosDaFunda} recusa(s), amostra ${JSON.stringify(passa.amostraDeRecusados)})`);
+  }
+
+  // **Os tetos por forma**, na borda.
+  for (const [teto, forma, extra] of [
+    ["campos", { forma: "campo", rotulo: "X" }, 3],
+    ["telas", { forma: "tela", largura: 10, altura: 10 }, 2],
+    ["midias", { forma: "midia", fonte: "img/a.png" }, 2],
+  ]) {
+    const r = nova(b, dono(b, () => new Promise(() => {})));
+    const pedidas = Array.from({ length: v6[teto] + extra }, (_, i) => ({ ...forma, chave: `${teto}${i}` }));
+    const recusados = r.aplicar(pedidas);
+    confere(caso, recusados === extra && r.contagem[teto] === v6[teto],
+      `${v6[teto] + extra} de \`${forma.forma}\` numa superfície de teto ${v6[teto]}: montou ${r.contagem[teto]}, `
+        + `recusou ${recusados}`);
+    r.soltar();
+  }
+
+  // **O bolso de bytes**: o retrato entre 10 e 24 MiB monta, o que passa dos
+  // 24 é recusado com os números; a `midia` acima de 10 MiB é recusada nos 10.
+  const MIB = 1024 * 1024;
+  for (const [declarado, bytes, monta, teto] of [
+    [{ forma: "retrato", chave: "r", fonte: "img/r.png", inicial: "R" }, 20 * MIB, true, null],
+    [{ forma: "retrato", chave: "r", fonte: "img/r.png", inicial: "R" }, v6.bytesDeMidia + 1, false, v6.bytesDeMidia],
+    [{ forma: "midia", chave: "m", fonte: "img/m.png" }, 11 * MIB, false, 10 * MIB],
+  ]) {
+    const bb = bancada();
+    const dd = dono(bb, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes }));
+    const r = nova(bb, dd);
+    r.aplicar([declarado]);
+    await assentar();
+    const anotada = r.midiasAnotadas()[0];
+    if (monta) {
+      confere(caso, anotada?.situacao === "pronta",
+        `um ${declarado.forma} de ${bytes} bytes cabe no bolso de ${v6.bytesDeMidia}, e ficou ${JSON.stringify(anotada)}`);
+    } else {
+      confere(caso, anotada?.situacao === "recusada" && String(anotada.motivo).includes(`passam do teto de ${teto} bytes`),
+        `um ${declarado.forma} de ${bytes} bytes passa do teto de ${teto}, e ficou ${JSON.stringify(anotada)}`);
+    }
+    r.soltar();
+  }
+
+  // **A soma, e não cada uma** (`superficies.limites-o-que-e`: «midia, retrato
+  // e fundoDeMidia dividem um bolso de bytes por superfície»; a auditoria do
+  // v6, tabela 7, 7:81): cada uma sozinha cabia, e nada media a soma. Duas
+  // `midia` de 6 MiB — a segunda passa dos 10 —, um retrato de 20 MiB e uma
+  // `midia` de 1 depois — ela passa dos 10 —, e uma `midia` de 6 e um retrato
+  // de 20 depois — ele passa dos 24.
+  for (const [nome, sequencia, recusadaNo] of [
+    ["duas midia de 6 MiB", [["midia", 6], ["midia", 6]], 1],
+    ["um retrato de 20 MiB e uma midia de 1", [["retrato", 20], ["midia", 1]], 1],
+    ["uma midia de 6 MiB e um retrato de 20", [["midia", 6], ["retrato", 20]], 1],
+  ]) {
+    const bb = bancada();
+    const fila = sequencia.map(([, mib]) => mib * MIB);
+    const dd = dono(bb, () => Promise.resolve({ uri: "x:", papel: "imagem", bytes: fila.shift() }));
+    const r = nova(bb, dd);
+    // Uma depois da outra: duas cargas juntas se contam na ordem em que
+    // chegam, e não na ordem da árvore — a primeira montada, a segunda
+    // acrescentada depois, conta sobre ela.
+    const nos = sequencia.map(([forma], i) => (forma === "retrato"
+      ? { forma: "retrato", chave: `s${i}`, fonte: `img/s${i}.png`, inicial: "S" }
+      : { forma: "midia", chave: `s${i}`, fonte: `img/s${i}.png` }));
+    r.aplicar([nos[0]]);
+    await assentar();
+    r.aplicar(nos);
+    await assentar();
+    const situacoes = r.midiasAnotadas().map((m) => m.situacao);
+    confere(caso, situacoes.length === 2 && situacoes[recusadaNo] === "recusada" && situacoes[1 - recusadaNo] === "pronta",
+      `${nome}, no mesmo bolso: as situações saíram ${JSON.stringify(situacoes)}, e a segunda devia passar da soma`);
+    r.soltar();
+  }
+}
+
+/**
+ * **O retrato e o fundo recusados dizem `recusada` ao MOD, com o porquê, como
+ * a `midia`** (a auditoria do `v6.json`, passo 7; a orquestradora, 16/10: o
+ * texto diz que eles «são recusados», e o produto sabia e não contava). Os
+ * dois motivos — o bolso de bytes, com os números, e bytes que não são
+ * imagem — iam ao registro e à aba, e o MOD não ouvia nada.
+ *
+ * **Um evento por caso**: o `falhou` do K2 (a imagem que não decodifica) não
+ * se soma ao `recusada`, e o `recusada` não vem com um `falhou` junto.
+ */
+async function oRetratoEOFundoRecusadosDizemRecusadaAoMod() {
+  const caso = "o retrato e o fundo recusados dizem recusada";
+  const teto = JSON.parse(fs.readFileSync(path.join(raiz, "../../api/v6.json"), "utf8")).superficies.limites.bytesDeMidia;
+  const formas = {
+    retrato: { forma: "retrato", chave: "r", fonte: "img/r.png", inicial: "R" },
+    fundo: { forma: "caixa", chave: "f", fundoDeMidia: { fonte: "img/f.png" }, dentro: [{ forma: "texto", dentro: "F" }] },
+  };
+  const casos = [
+    ["o bolso de bytes", { uri: "x:", papel: "imagem", bytes: teto + 1 }, "recusada", `passam do teto de ${teto}`],
+    ["bytes que não são imagem", { uri: "x:", papel: "som", bytes: 12 }, "recusada", "imagem"],
+    ["a imagem que não decodifica (K2)", { uri: URI_QUE_NAO_DECODIFICA, papel: "imagem", bytes: 12 }, "falhou", ""],
+  ];
+  for (const [nome, declaracao] of Object.entries(formas)) {
+    for (const [motivo, midia, estado, porque] of casos) {
+      const b = bancada();
+      const d = dono(b, () => Promise.resolve({ ...midia }));
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.superficie);
+      r.aplicar([declaracao]);
+      await assentar();
+      const ditos = d.ditos.filter((e) => e.nome === "midia" && e.chave === declaracao.chave);
+      confere(caso, ditos.length === 1 && ditos[0].estado === estado
+        && String(ditos[0].porque ?? "").includes(porque),
+        `${nome}, ${motivo}: o MOD ouviu ${JSON.stringify(ditos)}, e o certo é um \`${estado}\`` + (porque ? ` com «${porque}»` : ""));
+      r.soltar();
+    }
   }
 }
 
@@ -1674,6 +2512,40 @@ async function aRecusaDoSeletorChegaPeloNome() {
       confere(caso, dito?.resultado === "falhou" && typeof dito?.porque === "string" && !("erro" in dito),
         `o MOD da API 5 deixou de receber o \`porque\` de antes: ${JSON.stringify(dito)}`);
     }
+    r.soltar();
+  }
+}
+
+/**
+ * **O evento `arquivo`, pelos três caminhos** (`eventos[3]`; a auditoria do
+ * `v6.json`, tabela 3): a pessoa escolhe e o MOD recebe o identificador com
+ * `resultado: "escolhido"`; fecha o seletor e ele recebe `arquivo: null` com
+ * `cancelado` — «não escolhi» e «não deu» chegam diferentes. O `falhou` é a
+ * prova de cima. E o botão fica desligado enquanto o seletor está aberto.
+ */
+async function oArquivoEscolhidoOuCanceladoChegaAoMod() {
+  const caso = "o arquivo escolhido ou cancelado chega ao MOD";
+  for (const [resposta, esperado] of [
+    [{ id: "arq-1", nome: "mapa.png", tipo: "imagem", bytes: 12 }, "escolhido"],
+    [null, "cancelado"],
+  ]) {
+    const b = bancada();
+    const d = dono(b);
+    let soltar;
+    d.api.escolherArquivo = () => new Promise((ok) => { soltar = () => ok(resposta); });
+    const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.superficie);
+    r.aplicar([{ forma: "arquivo", chave: "mapa", rotulo: "Mapa", dentro: "ENVIAR" }]);
+    const botao = acharTag(r.raiz, "button");
+    botao?.disparar("click");
+    confere(caso, botao?.disabled === true, "o botão do arquivo continuou ligado com o seletor aberto");
+    soltar?.();
+    await volta();
+    await volta();
+    const dito = d.ditos.find((e) => e.nome === "arquivo");
+    confere(caso, dito?.chave === "mapa" && dito.resultado === esperado
+      && JSON.stringify(dito.arquivo) === JSON.stringify(resposta),
+      `com o seletor respondendo ${JSON.stringify(resposta)}, o MOD ouviu ${JSON.stringify(dito)}`);
+    confere(caso, botao?.disabled === false, "o botão do arquivo ficou desligado depois do seletor");
     r.soltar();
   }
 }
@@ -2469,8 +3341,9 @@ async function oFundoEORetratoTambemDizemOEstado() {
  * o fundo por `midia`/`falhou`, o fundo de tela por `tela`/`fundo-falhou` — e
  * os bytes que ela reservou voltam à conta. O tropeço de aplicar cai no
  * `.catch` do fim, e não aqui (ver `aplicarQueLancaNaoViraRecusa`).
- * **O retrato não fala com o MOD**, e continua sem falar: um evento novo seria
- * promessa nova da API.
+ * **E o retrato fala com o MOD**, por `midia`/`falhou` com a chave e o motivo,
+ * como o fundo: o `v6.json` o promete (`eventos-mudam.midia`, o K2 da F5), e
+ * esta bancada exigia o contrário (a auditoria do `v6.json`, B3).
  *
  * E o `<img>` do retrato ganha o ouvinte de `error` que o da mídia já tinha
  * (`naoAbriu`, em `montarMidia`): a imagem que decodificou e depois não abriu
@@ -2481,7 +3354,7 @@ async function umaImagemQueNaoDecodificaERecusadaEDita() {
     {
       nome: "o retrato",
       no: { forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" },
-      evento: null,
+      evento: { nome: "midia", estado: "falhou" },
       nadaPintado: (elem) => !acharTag(elem, "img") && elem.dataset.estadoDoRetrato === "inicial",
     },
     {
@@ -2558,7 +3431,7 @@ async function umaImagemQueNaoDecodificaERecusadaEDita() {
 
   // **O `<img>` do retrato que decodificou e depois não abriu.** O mesmo
   // caminho de recusa: a inicial volta, os bytes voltam, a aba e o registro
-  // dizem — e o MOD continua sem evento.
+  // dizem — e o MOD recebe `midia`/`falhou`, como no `decode()` recusado.
   {
     const nome = "o retrato cujo <img> não abriu";
     const b = bancada();
@@ -2591,10 +3464,12 @@ async function umaImagemQueNaoDecodificaERecusadaEDita() {
       d.anotadas.some((texto) => texto.includes("«rosto»")),
       `o <img> do retrato que não abriu não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
     );
+    const aoMod = d.ditos.filter((dito) => dito.nome === "midia");
     confere(
       nome,
-      !d.ditos.some((dito) => dito.nome === "midia"),
-      `o retrato passou a falar com o MOD: ${JSON.stringify(d.ditos)}`,
+      aoMod.length === 1 && aoMod[0].chave === "rosto" && aoMod[0].estado === "falhou"
+        && /não decodificou/.test(String(aoMod[0].porque ?? "")),
+      `o MOD não recebeu «midia»/«falhou» do <img> do retrato que não abriu: ${JSON.stringify(aoMod)}`,
     );
     confere(nome, img?.ouvintesDePe() === 0, "o ouvinte de `error` ficou preso ao <img> que saiu");
     regiao.soltar();
@@ -2762,6 +3637,156 @@ function registroDeVerdade() {
  * (`recusa-de-mod`), com o id do MOD na frente e em campo próprio — e não como
  * a recusa que ela não é. E nenhuma promessa fica sem quem a pegue.
  */
+/**
+ * **A citação com `pessoa`** (D-api-9; `capa.onde.perfil`): o `fundoDeMidia` e
+ * o `retrato` que citam `{ daPessoa, pessoa: id }` citam quem o MOD nomeia, em
+ * qualquer destino — numa superfície, onde não há pessoa do destino, e também
+ * num cartão, onde o id nomeado vale sobre o do destino. O id tem de ser de
+ * alguém na sessão (`estaNaSessao`, pelo retrato); sem isso, ou com um id que
+ * não é id, o fundo fica liso e o retrato fica na inicial, como na citação de
+ * uma imagem que a pessoa não tem: sem pedir a imagem, e sem recusa.
+ */
+async function aCitacaoComPessoaCitaQuemOModNomeia() {
+  const caso = "a citação com pessoa";
+  const b = bancada();
+  const d = dono(b);
+  const pedidas = [];
+  d.api.imagemDaPessoa = (qual, pessoa, opcoes) => {
+    pedidas.push({ qual, pessoa: String(pessoa), parada: opcoes?.parada === true });
+    return Promise.resolve({ papel: "imagem", bytes: 0, uri: `data:${qual}-${pessoa}` });
+  };
+  const presentes = new Set(["3", "7"]);
+  d.api.estaNaSessao = (pessoa) => presentes.has(String(pessoa));
+  // O evento da troca (`seele-mods-citacao`), como a janela o despacha.
+  const ouvintes = new Map();
+  b.janela.addEventListener = (nome, fn) => ouvintes.set(nome, [...(ouvintes.get(nome) ?? []), fn]);
+  b.janela.removeEventListener = (nome, fn) => ouvintes.set(nome, (ouvintes.get(nome) ?? []).filter((f) => f !== fn));
+  const trocar = (ponto, pessoa) => {
+    for (const fn of ouvintes.get("seele-mods-citacao") ?? []) fn({ detail: { ponto, pessoa } });
+  };
+
+  // Uma superfície: nenhum destino de pessoa.
+  const folha = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+  folha.aplicar([
+    { forma: "caixa", chave: "tres", fundoDeMidia: { daPessoa: "capa", pessoa: 3 } },
+    { forma: "retrato", chave: "foto", daPessoa: "avatar", pessoa: 3, inicial: "R" },
+    { forma: "caixa", chave: "ausente", fundoDeMidia: { daPessoa: "capa", pessoa: 99 } },
+    // Uma lista vira «3» pelo `String`, e passaria pela presença: só a forma do id a barra.
+    { forma: "caixa", chave: "torta", fundoDeMidia: { daPessoa: "capa", pessoa: [3] } },
+    { forma: "caixa", chave: "sem", fundoDeMidia: { daPessoa: "capa" } },
+  ]);
+  await assentar();
+  const [tres, foto, ausente, torta, sem] = folha.raiz.children;
+  confere(caso, String(tres.style.backgroundImage ?? "").includes("data:capa-3"),
+    `a capa citada pelo id numa superfície não apareceu: «${tres.style.backgroundImage}»`);
+  confere(caso, foto.dataset.estadoDoRetrato === "imagem",
+    `o retrato citado pelo id numa superfície ficou «${foto.dataset.estadoDoRetrato}»`);
+  for (const [nome, elem] of [["ausente", ausente], ["torta", torta], ["sem", sem]]) {
+    confere(caso, !elem.style.backgroundImage, `a citação «${nome}» pintou o fundo: «${elem.style.backgroundImage}»`);
+  }
+  confere(caso, pedidas.every((p) => p.pessoa === "3"),
+    `pediu a imagem de quem não devia: ${JSON.stringify(pedidas)}`);
+  confere(caso, pedidas.every((p) => p.parada === false), `a superfície pediu a capa parada: ${JSON.stringify(pedidas)}`);
+  confere(caso, !d.ditos.some((e) => e.nome === "midia"),
+    `o fundo liso virou evento de mídia: ${JSON.stringify(d.ditos.filter((e) => e.nome === "midia"))}`);
+
+  // Num cartão, o id que o MOD nomeia vale sobre o do destino; sem ele, o do destino.
+  const cartao = new b.RegiaoDeMod("seele/perfis", d.api, b.raiz());
+  cartao.pessoaDoDestino = "7";
+  cartao.aplicar([
+    { forma: "caixa", chave: "nomeada", fundoDeMidia: { daPessoa: "capa", pessoa: 3 } },
+    { forma: "caixa", chave: "do-destino", fundoDeMidia: { daPessoa: "capa" } },
+  ]);
+  await assentar();
+  const [nomeada, doDestino] = cartao.raiz.children;
+  confere(caso, String(nomeada.style.backgroundImage ?? "").includes("data:capa-3"),
+    `no cartão da pessoa 7, a capa nomeada da 3 saiu «${nomeada.style.backgroundImage}»`);
+  confere(caso, String(doDestino.style.backgroundImage ?? "").includes("data:capa-7"),
+    `no cartão da pessoa 7, a citação sem pessoa saiu «${doDestino.style.backgroundImage}»`);
+
+  // A troca da capa da 3 reaplica quem cita a 3, e só ele.
+  pedidas.length = 0;
+  trocar("pessoa.capa", "3");
+  await assentar();
+  confere(caso, pedidas.filter((p) => p.qual === "capa" && p.pessoa === "3").length === 2,
+    `a troca da capa da 3 não alcançou os dois fundos que a citam pelo id: ${JSON.stringify(pedidas)}`);
+  confere(caso, !pedidas.some((p) => p.pessoa === "7"), `a troca da capa da 3 reaplicou quem cita a 7: ${JSON.stringify(pedidas)}`);
+
+  // A folha que passa a mostrar outra pessoa, com as mesmas chaves, cita a
+  // nova: a pessoa nomeada faz parte da fonte, no fundo e no retrato.
+  pedidas.length = 0;
+  folha.aplicar([
+    { forma: "caixa", chave: "tres", fundoDeMidia: { daPessoa: "capa", pessoa: 7 } },
+    { forma: "retrato", chave: "foto", daPessoa: "avatar", pessoa: 7, inicial: "R" },
+  ]);
+  await assentar();
+  confere(caso, String(folha.raiz.children[0].style.backgroundImage ?? "").includes("data:capa-7"),
+    `o fundo que passou a citar a 7, na mesma chave, saiu «${folha.raiz.children[0].style.backgroundImage}»`);
+  confere(caso, pedidas.some((p) => p.qual === "avatar" && p.pessoa === "7"),
+    `o retrato que passou a citar a 7, na mesma chave, não a pediu: ${JSON.stringify(pedidas)}`);
+
+  // Sem como conferir a presença, nada é citado pelo id: o lado seguro.
+  const semPresenca = dono(b);
+  semPresenca.api.imagemDaPessoa = d.api.imagemDaPessoa;
+  const outra = new b.RegiaoDeMod("seele/perfis", semPresenca.api, b.raiz());
+  pedidas.length = 0;
+  outra.aplicar([{ forma: "caixa", chave: "c", fundoDeMidia: { daPessoa: "capa", pessoa: 3 } }]);
+  await assentar();
+  confere(caso, pedidas.length === 0 && !outra.raiz.children[0].style.backgroundImage,
+    "sem estaNaSessao no dono, a citação pelo id foi feita assim mesmo");
+
+  folha.soltar();
+  cartao.soltar();
+  outra.soltar();
+  confere(caso, (ouvintes.get("seele-mods-citacao") ?? []).length === 0, "soltar as regiões deixou o ouvinte da troca preso");
+}
+
+/**
+ * **A recusa diz o que recusou** (`nos-recusados`, D-api-8; o achado 5 da
+ * auditoria). Uma montagem com nós que não couberam respondia só a conta, e
+ * quantos e por quê iam ao `seele.log`. A região guarda, ao lado da conta, uma
+ * amostra de até oito: o motivo, e o que identifica o nó (a `chave`, a forma,
+ * a propriedade do estilo, o tipo da figura). E a forma que a API não tem,
+ * numa região, passa a contar: ela sumia calada, porque só o cartão a contava.
+ */
+async function aRecusaDizOQueRecusou() {
+  const caso = "a recusa diz o que recusou";
+  const b = bancada();
+  const d = dono(b);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const arvore = [
+    { forma: "estrela", chave: "x" },
+    { forma: "caixa", chave: "c", estilo: { corDeFundo: "#000000", sombra: { cor: "vermelha" } } },
+    { forma: "tela", chave: "t", largura: 20, altura: 20, figuras: [{ tipo: "estrela", x: 1, y: 1 }] },
+  ];
+  // A tela pinta com o pincel dela: a primeira montagem a cria, e a segunda
+  // pinta as figuras (como no tabuleiro).
+  regiao.aplicar(arvore);
+  regiao.raiz.children.find((filho) => filho.tagName === "CANVAS").darPincel();
+  const recusados = regiao.aplicar(arvore);
+  const esperada = [
+    { motivo: "forma-desconhecida", forma: "estrela", chave: "x" },
+    { motivo: "estilo", chave: "c", propriedade: "corDeFundo" },
+    { motivo: "estilo", chave: "c", propriedade: "sombra" },
+    { motivo: "figura-desconhecida", chave: "t", tipo: "estrela" },
+  ];
+  confere(caso, recusados === 4, `contou ${recusados} recusa(s), e não 4`);
+  confere(caso, JSON.stringify(regiao.amostraDeRecusados) === JSON.stringify(esperada),
+    `a amostra é ${JSON.stringify(regiao.amostraDeRecusados)}`);
+
+  // A amostra tem teto, e a conta não: doze propriedades erradas contam doze, e
+  // a amostra guarda as oito primeiras.
+  const muitas = Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`errada${i}`, 1]));
+  const doze = regiao.aplicar([{ forma: "caixa", chave: "m", estilo: muitas }]);
+  confere(caso, doze === 12 && regiao.amostraDeRecusados.length === 8,
+    `doze recusas contaram ${doze}, com ${regiao.amostraDeRecusados.length} na amostra`);
+
+  // E cada montagem começa a sua: a seguinte, sem recusa, não leva a de antes.
+  confere(caso, regiao.aplicar([{ forma: "texto", chave: "ok", dentro: "ok" }]) === 0
+    && regiao.amostraDeRecusados.length === 0, "a amostra de uma montagem passou para a seguinte");
+  regiao.soltar();
+}
+
 async function aplicarQueLancaNaoViraRecusa() {
   const soltas = [];
   const pegar = (motivo) => soltas.push(String(motivo?.stack ?? motivo));
@@ -3118,13 +4143,12 @@ async function oSomNumCartaoNaoTemBotao() {
   const d = dono(b, () =>
     Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }),
   );
-  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
-  regiao.declararCartoes({ 7: [{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }] });
-  // A lista de pessoas pendura o cartão na linha da pessoa no mesmo desenho
-  // (`darCartoesDoMod` → `redesenharAsPessoas`), antes de os bytes chegarem.
-  b.doc.body.append(regiao.cartaoDe(7));
+  // O cartão já nasce no documento (`b.raiz()`), como o destino que a linha
+  // da pessoa pendura antes de os bytes chegarem.
+  const regiao = umCartao(b, d);
+  regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }]);
   await assentar();
-  const cartao = regiao.cartaoDe(7);
+  const cartao = regiao.raiz;
   confere(caso, acharTag(cartao, "button") === null, "um cartão ganhou um botão, e cartão não recebe foco (ver FORMAS_DO_CARTAO)");
   confere(caso, Audio.ultimo?.fontes[0]?.tocando === true, "o som que o MOD declarou no cartão não tocou");
   confere(caso, regiao.midiasAnotadas()[0]?.cartao === true, "a mídia do cartão não foi anotada como de cartão");
@@ -3801,11 +4825,11 @@ async function asProtecoesDoTocadorEDaMontagemDoSom() {
   {
     const b = bancada();
     const d = dono(b, () => Promise.resolve({ uri: "data:image/png;base64,AA", papel: "imagem", bytes: 12 }));
-    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
-    regiao.declararCartoes({ 7: [{ forma: "midia", chave: "m", fonte: "img/a.png" }] });
+    const regiao = umCartao(b, d);
+    regiao.aplicar([{ forma: "midia", chave: "m", fonte: "img/a.png" }]);
     await assentar();
     const antes = d.mudancas();
-    regiao.declararCartoes({});
+    regiao.aplicar([]);
     confere(
       caso,
       d.mudancas() > antes && regiao.midiasAnotadas().length === 0,
@@ -4017,6 +5041,63 @@ async function oSomComRepetirTocaEmLaco() {
   confere(caso, terminou(d) === 1, `sem repetir, o fim da trilha não foi dito: «terminou» ${terminou(d)} vez(es)`);
 }
 
+/**
+ * **O fim diz só `terminou`, e o laço pausado volta dentro da volta**
+ * (`som.tocando[2]` e `som.repetir`; a auditoria do `v6.json`, tabela 9).
+ *
+ * - No fim natural de um som sem `repetir`, o MOD recebe um aviso, e só um:
+ *   `terminou` — e não um `pausada` junto, que diria que alguém parou.
+ * - Com `repetir`, pausado pelo botão do produto aos 5,5 s de um som de 2 s,
+ *   ele volta de 1,5 s, e não do começo nem de 5,5 s (que passaria do fim).
+ */
+async function oSomNoFimDizSoTerminouERetomaDentroDaVolta() {
+  const caso = "o fim diz só terminou, e o laço volta dentro da volta";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+  const doSom = (d) => d.ditos.filter((e) => e.nome === "midia" && e.chave === "trilha").map((e) => e.estado);
+  {
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.superficie);
+    regiao.aplicar([{ forma: "midia", chave: "trilha", fonte: "som/trilha.wav", tocando: true }]);
+    await assentar();
+    const fonte = Audio.ultimo?.fontes[0];
+    confere(caso, fonte?.tocando === true, "a trilha declarada `tocando` não tocou");
+    const antes = doSom(d).length;
+    fonte?.onended?.();
+    await assentar();
+    const depois = doSom(d).slice(antes);
+    confere(caso, JSON.stringify(depois) === JSON.stringify(["terminou"]),
+      `no fim natural, o MOD ouviu ${JSON.stringify(depois)}, e não só \`terminou\``);
+    regiao.soltar();
+  }
+  {
+    const Audio = audioDeMentira({ decodificado: { duration: 2, length: 96000, numberOfChannels: 2, sampleRate: 48000 } });
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.superficie);
+    regiao.aplicar([{ forma: "midia", chave: "trilha", fonte: "som/trilha.wav", tocando: true, repetir: true }]);
+    await assentar();
+    const contexto = Audio.ultimo;
+    const botao = acharTag(regiao.raiz, "button");
+    confere(caso, contexto?.fontes[0]?.tocando === true && Boolean(botao), "a trilha em laço não tocou, ou ficou sem o botão do produto");
+    if (!contexto || !botao) { regiao.soltar(); return; }
+    contexto.currentTime = 5.5;
+    botao.disparar("click");
+    await assentar();
+    confere(caso, doSom(d).at(-1) === "pausada" && contexto.fontes[0].parou === true,
+      `o botão não pausou a trilha em laço: ${JSON.stringify(doSom(d))}`);
+    botao.disparar("click");
+    await assentar();
+    const retomada = contexto.fontes.at(-1);
+    confere(caso, contexto.fontes.length === 2 && retomada.tocando === true && retomada.loop === true
+      && Math.abs(retomada.de - 1.5) < 1e-9,
+      `a trilha em laço pausada aos 5,5 s de um som de 2 s voltou de ${retomada?.de} s (o certo é 1,5), `
+        + `em laço ${retomada?.loop}, com ${contexto.fontes.length} fonte(s)`);
+    regiao.soltar();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 16. O som que sai da tela para, como o `<audio>` parava.
 // ---------------------------------------------------------------------------
@@ -4029,7 +5110,9 @@ async function oSomComRepetirTocaEmLaco() {
  * Plano 1D mediu (I-1) o som seguia até o fim, sem controle à vista e sem
  * `pausada` ao MOD: a página fechada, a contribuição que perde a disputa, o
  * cartão da API 3 sob «o SEELE desenha», o destino de quem saiu da sala, e a
- * página fechada que recebe um som novo `tocando`.
+ * página fechada que recebe um som novo `tocando`. O cartão da API 3 saiu com
+ * ela; o que ele media — o cartão que não desenha cala, e não volta com o
+ * próximo `tocando: true` — vale para o destino de uma contribuição.
  *
  * Esta prova mede `RegiaoDeMod#calarSonsForaDaTela` — quem a chama nos
  * desenhos do produto é medido em `contribuicoes-e-camadas.cjs` (a página
@@ -4199,46 +5282,32 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     regiao.soltar();
   }
 
-  // O cartão da API 3: quando o SEELE desenha o cartão, o som do cartão para
-  // — e o da região, não. E o cartão que sai da lista, também.
+  // O destino de uma contribuição que não desenha (`aContribuicaoPinta`): o
+  // som de cartão dele para, mesmo com o nó no documento, e o MOD que o
+  // redeclara `tocando: true` não o religa.
   {
     const Audio = audioDeMentira();
     const b = bancada({ audio: Audio });
     const d = dono(b, midiaDeSom);
-    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
-    const cartoes = {
-      7: [{ forma: "midia", chave: "cartao-7", fonte: "som/c7.wav", tocando: true }],
-      8: [{ forma: "midia", chave: "cartao-8", fonte: "som/c8.wav", tocando: true }],
-    };
-    regiao.aplicar([{ forma: "midia", chave: "faixa", fonte: "som/f.wav", tocando: true }]);
-    regiao.declararCartoes(cartoes);
-    b.doc.body.append(regiao.cartaoDe(7), regiao.cartaoDe(8));
+    const cartao = umCartao(b, d);
+    const vinheta = [{ forma: "midia", chave: "vinheta", fonte: "som/v.wav", tocando: true }];
+    cartao.aplicar(vinheta);
     await assentar();
     const tocando = () => (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
-    confere(caso, tocando() === 3, `a faixa e os dois cartões não tocaram: ${tocando()} fonte(s)`);
-
-    // A pessoa 8 sai da sala: o cartão dela sai da lista, e o MOD vale.
-    regiao.cartaoDe(8).remove();
-    regiao.calarSonsForaDaTela(true);
+    confere(caso, tocando() === 1, `o som do cartão não tocou: ${tocando()} fonte(s)`);
+    cartao.calarSonsForaDaTela(true);
+    confere(caso, tocando() === 1, "o cartão que desenha, na tela, foi calado");
+    cartao.calarSonsForaDaTela(false);
     confere(
       caso,
-      ditos(d, "cartao-8", "pausada").length === 1 && tocando() === 2,
-      `o cartão de quem saiu da lista seguiu tocando: ${tocando()} fonte(s), «pausada» dita `
-        + `${ditos(d, "cartao-8", "pausada").length} vez(es)`,
+      tocando() === 0 && ditos(d, "vinheta", "pausada").length === 1,
+      "o cartão que não desenha seguiu tocando: "
+        + `${tocando()} fonte(s), «pausada» dita ${ditos(d, "vinheta", "pausada").length} vez(es)`,
     );
-    // «O SEELE desenha» o cartão: os cartões deste MOD deixam de valer.
-    regiao.calarSonsForaDaTela(false);
-    confere(
-      caso,
-      ditos(d, "cartao-7", "pausada").length === 1 && ditos(d, "faixa", "pausada").length === 0 && tocando() === 1,
-      "com «o SEELE desenha» o cartão, o som do cartão do MOD seguiu, ou o da faixa parou junto: "
-        + `${tocando()} fonte(s), cartão ${ditos(d, "cartao-7", "pausada").length}, faixa ${ditos(d, "faixa", "pausada").length}`,
-    );
-    // O MOD redeclara os cartões com `tocando: true`, e eles não voltam.
-    regiao.declararCartoes(cartoes);
+    cartao.aplicar(vinheta);
     await assentar();
-    confere(caso, tocando() === 1, `o MOD redeclarou os cartões e um som calado voltou a tocar: ${tocando()} fonte(s)`);
-    regiao.soltar();
+    confere(caso, tocando() === 0, `o MOD redeclarou o cartão e o som calado voltou a tocar: ${tocando()} fonte(s)`);
+    cartao.soltar();
   }
 
   // O destino que tomou os sons de uma contribuição e perde a disputa: o som
@@ -5742,17 +6811,24 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     aChaveDoCampoNaoPartePar,
     aFinalidadeDoArquivoNaoPartePar,
     aRecusaDoSeletorChegaPeloNome,
+    oArquivoEscolhidoOuCanceladoChegaAoMod,
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
+    oGestoCanceladoDizCancelou,
+    oToqueSoPrendeOQueSeArrasta,
+    oEstadoEscolhidoTemQuemOEscreva,
+    cadaFormaDoV6MontaOQuePromete,
+    cadaFiguraDoV6Pinta,
     sairDuranteOCarregamentoNaoMonta,
     aMidiaDoServidorTemOMesmoDono,
     sairDuranteAReproducaoPara,
     tirarUmNoSoltaOQueEleSegurava,
     osTetosContemEARecusaEDita,
+    osTetosDaSuperficieSaoOsDoV6,
+    oRetratoEOFundoRecusadosDizemRecusadaAoMod,
     oQuadroPendenteNaoSobreviveASaida,
     tudoChegaAInstanciaESoltarDuasVezesNaoDoi,
     oCartaoUsaOMesmoRendererComGramaticaMenor,
-    oCartaoSaiQuandoOModParaDeDeclararOuQuandoAReGiaoSai,
     oRetratoDoCartaoEOMesmoNoEntreDoisRetratos,
     osTetosDoCartaoSaoDoCartaoENaoDaRegiao,
     aImagemAcompanhaAMudancaDaFonte,
@@ -5763,6 +6839,8 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     umaImagemQueNaoDecodificaERecusadaEDita,
     oFundoDeTelaDizOEstado,
     osBytesSaoReservadosAntesDoDecode,
+    aCitacaoComPessoaCitaQuemOModNomeia,
+    aRecusaDizOQueRecusou,
     aplicarQueLancaNaoViraRecusa,
     oSomTocaPorWebAudioENuncaPorUmElementoDeMidia,
     oSomDoServidorVemDosBytesDoDataENaoDeUmElemento,
@@ -5775,6 +6853,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     asProtecoesDoTocadorEDaMontagemDoSom,
     oSomQueTerminouVoltaComOTocandoDeclarado,
     oSomComRepetirTocaEmLaco,
+    oSomNoFimDizSoTerminouERetomaDentroDaVolta,
     oSomQueSaiDaTelaParaComoOAudioParava,
     oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar,
     oSomDaContribuicaoMudaDeDestino,

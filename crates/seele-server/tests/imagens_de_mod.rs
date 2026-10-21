@@ -147,7 +147,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
             material_e2ee: None,
-            apis_de_mod: Vec::new(),
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
         },
     )
     .await?;
@@ -288,6 +288,7 @@ async fn dez_mib_em_fluxo_substituicao_e_duas_leituras_sem_fila_de_controle() ->
         reach: vec!["imagens".into()],
         server_half: true,
         api: 6,
+        tema: false,
     };
     let (endereco, _daemon) = server(Location::Memory, raizes.clone(), ligado).await?;
     let mut par = abrir(endereco, 1).await?;

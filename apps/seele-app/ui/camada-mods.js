@@ -118,6 +118,20 @@ function linhaDeMod(mod, indice) {
     );
   }
 
+  // **E a porta do tema** (`tema.porta` do `api/v6.json`; D-api-8): um MOD com
+  // `"tema": true` pode mudar a aparência do servidor para todos que entram, e
+  // não só a desta máquina. Também não é mais um alcance entre outros, e quem
+  // aceita tem de saber disso antes de qualquer byte ser baixado.
+  if (mod.tema) {
+    corpo.append(
+      elemento(
+        "p",
+        "mods-tema",
+        "Pode mudar a aparência deste servidor para todos que entram: as cores, a fonte e a densidade.",
+      ),
+    );
+  }
+
   linha.append(ordem, corpo);
   return linha;
 }
@@ -607,7 +621,7 @@ function linhaDeModInstalado(mod, hospedando) {
   // silêncio — «o produto sabe e não conta».
   if (mod.refused) {
     texto.append(
-      elemento("span", "mods-recusado", `não serve: ${mod.refused}`),
+      elemento("span", "mods-recusado", `não serve: ${RECUSAS_DE_PACOTE[mod.refused] ?? mod.refused}`),
     );
     caixa.append(texto);
     linha.append(caixa);
@@ -1101,17 +1115,11 @@ function oQueAGestaoDiz(linha, escolha) {
   const botoes = [];
   // **«Usar» só quem pode desenhar este lugar.** Escolher um MOD que só
   // acrescenta não o faz desenhar nada: o SEELE desenha, e o botão mentiria.
-  // A exceção é o cartão, em que um MOD da API 3 desenha pelos cartões dele
-  // (`SeeleUI.cartoes`) — e escolhê-lo é o que os faz valer sozinhos
-  // (`modsDeCartaoQueValem`).
   const podemDesenhar = new Set(linha.substituem);
-  if (linha.ponto === "pessoa.cartao") {
-    for (const id of cartoesDosMods.keys()) podemDesenhar.add(id);
-  }
   // **E nenhum «usar» para o que já vale.** O escolhido desta máquina não
   // ganha botão — um botão que não muda nada é uma pergunta sem resposta —, e
-  // a escolha é a gravada, e não a disputa do alvo vazio: o MOD da API 3
-  // escolhido não tem candidata ali, e só acrescenta pelo registro (D-m1 da
+  // a escolha é a gravada, e não a disputa do alvo vazio: um MOD escolhido
+  // pode não ter candidata ali, e só acrescentar pelo registro (D-m1 da
   // revisão do Lote Diagnóstico da correção ampla do Plano 1D). Sem escolha,
   // quem não ganha botão é quem vence no automático o lugar de todos, quando
   // alguém o pede.
@@ -1217,42 +1225,6 @@ const NOMES_DOS_PONTOS = Object.freeze({
 // 3: para cada lugar, o MOD que vale, os que perderam a disputa, a preferência
 // e o estado da mídia. Tudo aqui é leitura: nada escolhe, revoga ou grava.
 
-/**
- * Quem desenha um ponto pelo caminho da API 3, fora do registro de
- * contribuições.
- *
- * Dois pontos têm esse segundo caminho, e os dois são usados pelos MODs
- * oficiais: `SeeleUI.cartoes` desenha em `pessoa.cartao` (o PERFIS), e
- * `SeeleUI.tema` pinta `servidor.aparencia` (o ESTILO) sem registrar ponto
- * nenhum. Sem esta leitura a aba diria «nenhum MOD usa este lugar» sobre a
- * sessão inteira pintada por um.
- *
- * A regra dos cartões é `modsDeCartaoQueValem`, em `base.js` — a mesma que
- * `cartoesDaPessoa` usa para desenhar.
- */
-function modsDoCaminhoAntigo(ponto) {
-  if (ponto === "pessoa.cartao") {
-    const valem = modsDeCartaoQueValem();
-    return {
-      rotulo: "cartões pela API 3",
-      valem,
-      perdem: [...cartoesDosMods.keys()].filter((id) => !valem.includes(id)),
-    };
-  }
-  if (ponto === "servidor.aparencia") {
-    // **O tema do servidor não é o caminho antigo** (tarefa 17f): ele mora em
-    // `temaDosMods` porque entra por `aplicarOTemaDoMod`, e sem este filtro a
-    // aba o chamava de tema da API 3. Ele é dito por `temaDoServidor`.
-    const doServidor = oTemaDoServidorAqui()?.mod_id ?? null;
-    return {
-      rotulo: "tema pedido por",
-      valem: [...temaDosMods.keys()].filter((id) => id !== doServidor),
-      perdem: [],
-    };
-  }
-  return { rotulo: "", valem: [], perdem: [] };
-}
-
 /** Os onze pontos, na ordem da tabela da API, com tudo o que a aba diz de cada um. */
 function quemPintaCadaPonto() {
   return Object.keys(PONTOS_DE_CONTRIBUICAO).map((ponto) => {
@@ -1261,7 +1233,6 @@ function quemPintaCadaPonto() {
       ...contribuicoesDosMods.quemPinta(ponto, preferencia, (id) => modsCarregados.has(id)),
       preferencia,
       herdada: ponto === "pessoa.avatar" && !modPreferidoPara(ponto) && preferencia !== "",
-      antigos: modsDoCaminhoAntigo(ponto),
       // O que a linha de QUEM DESENHA O QUE diz do tema do servidor, ou nada.
       temaDoServidor: ponto === "servidor.aparencia"
         ? aLinhaDoTemaDoServidor(oTemaDoServidorAqui(), preferencia)?.estado ?? null
@@ -1323,21 +1294,17 @@ function porqueDaMidia(midias) {
  * A mídia da região e das páginas de cada MOD, uma frase por MOD.
  *
  * O bloco que a aba ganhou com a pendência 49, item 5: os onze lugares contam
- * a mídia de quem pinta cada um, e a faixa e as superfícies de um MOD não são
- * lugar nenhum deles. A soma é `midiasDaRegiaoEDasPaginas`, em `base.js`.
- *
- * **A mídia de um cartão aparece aqui e em «O cartão de cada pessoa».** Os
- * cartões que um MOD dá à lista moram na região dele: são duas vistas da mesma
- * mídia, e não duas mídias.
+ * a mídia de quem pinta cada um, e as superfícies de um MOD não são lugar
+ * nenhum deles. A soma é `midiasDasPaginas`, em `base.js`.
  */
 function frasesDaMidiaDosMods() {
-  const porMod = midiasDaRegiaoEDasPaginas(regioesDosMods, superficiesDosMods);
-  if (porMod.size === 0) return ["nenhum MOD tem região nem página de pé agora"];
+  const porMod = midiasDasPaginas(superficiesDosMods);
+  if (porMod.size === 0) return ["nenhum MOD tem página de pé agora"];
   return [...porMod].map(([id, midias]) => {
     const partes = partesDaMidia(midias);
     return partes.length === 0
-      ? `a região e as páginas de ${id}: nenhuma mídia montada`
-      : `a região e as páginas de ${id}: ${partes.join(" · ")}${porqueDaMidia(midias)}`;
+      ? `as páginas de ${id}: nenhuma mídia montada`
+      : `as páginas de ${id}: ${partes.join(" · ")}${porqueDaMidia(midias)}`;
   });
 }
 
@@ -1356,11 +1323,7 @@ function frasesDaMidiaDosMods() {
  */
 function frasesDeQuemPinta(linha) {
   const frases = [];
-  const antigos = linha.antigos;
-  const ninguem = linha.contribuicoes === 0
-    && antigos.valem.length === 0
-    && antigos.perdem.length === 0
-    && !linha.temaDoServidor;
+  const ninguem = linha.contribuicoes === 0 && !linha.temaDoServidor;
   if (ninguem) {
     frases.push("nenhum MOD usa este lugar agora");
     if (linha.substituivel && linha.preferencia) frases.push(fraseDaPreferencia(linha));
@@ -1368,19 +1331,14 @@ function frasesDeQuemPinta(linha) {
   }
   if (linha.substituivel) {
     const osOutros = linha.oSeeleDesenhaOutros ? "; o SEELE desenha os outros" : "";
-    // **O tema da API 3 em vigor é dito junto de «o SEELE desenha».** O
-    // ESTILO pinta a sessão pela `SeeleUI.tema`, sem registrar ponto nenhum, e
-    // «o SEELE desenha» sozinho faria quem lê concluir que a sessão está com a
-    // cara do SEELE (m-3 da revisão ampla do Plano 1D).
-    const comOTema = linha.ponto === "servidor.aparencia" && antigos.valem.length
-      ? `, com o tema de ${antigos.valem.join(" e ")} em vigor (API 3)`
-      : "";
+    // (O tema da API 3 em vigor, dito junto de «o SEELE desenha», saiu com o
+    // corte: na 6, quem pinta a aparência é o tema do servidor, logo abaixo.)
     if (linha.temaDoServidor && linha.contribuicoes === 0) {
       // Na API 6, quem pinta a aparência é o tema do servidor, e não uma
       // contribuição: a mesma frase da linha de QUEM DESENHA O QUE.
       frases.push(linha.temaDoServidor);
     } else if (linha.ausente) {
-      frases.push(`você escolheu ${linha.ausente}, e ele não está de pé agora: o SEELE desenha${comOTema}`);
+      frases.push(`você escolheu ${linha.ausente}, e ele não está de pé agora: o SEELE desenha`);
     } else if (linha.escolhidoNaoSubstitui) {
       // De pé, e sem candidata aqui: o avatar que herda a escolha do cartão,
       // o escolhido que revogou o que tinha, o que só acrescenta.
@@ -1388,9 +1346,9 @@ function frasesDeQuemPinta(linha) {
         ? `a escolha de «${NOMES_DOS_PONTOS["pessoa.cartao"]}» é ${linha.escolhidoNaoSubstitui}, que não desenha `
           + "avatares: o SEELE desenha"
         : `você escolheu ${linha.escolhidoNaoSubstitui}, que está de pé e não substitui este lugar: `
-          + `o SEELE desenha${comOTema}`);
+          + "o SEELE desenha");
     } else if (linha.nativa) {
-      frases.push(`o SEELE desenha, por escolha desta máquina${comOTema}`);
+      frases.push("o SEELE desenha, por escolha desta máquina");
     } else if (linha.substitui.length > 1) {
       frases.push(`desenhado por ${linha.substitui.join(" e ")}, cada um para quem declarou${osOutros}`);
     } else if (linha.substitui.length === 1) {
@@ -1398,17 +1356,11 @@ function frasesDeQuemPinta(linha) {
         ? `desenhado por ${linha.substitui[0]}, para quem declarou${osOutros}`
         : `desenhado por ${linha.substitui[0]}`);
     } else {
-      frases.push(comOTema ? `o SEELE desenha${comOTema}` : "o SEELE desenha; nenhum MOD substitui este lugar");
-    }
-    // E o SEELE escolhido não apaga a cor: `escreverOTemaDaSessao`, em
-    // `base.js`, escreve o tema de quem pediu sem consultar a escolha.
-    if (comOTema && linha.preferencia === APRESENTACAO_NATIVA) {
-      frases.push("a escolha desta máquina não desliga o tema da API 3");
+      frases.push("o SEELE desenha; nenhum MOD substitui este lugar");
     }
   }
   if (linha.acrescentam.length) frases.push(`acrescentam: ${linha.acrescentam.join(", ")}`);
-  if (antigos.valem.length) frases.push(`${antigos.rotulo}: ${antigos.valem.join(", ")}`);
-  const perderam = [...new Set([...linha.perderam, ...antigos.perdem])];
+  const perderam = [...new Set(linha.perderam)];
   if (perderam.length) frases.push(`pediram e não receberam: ${perderam.join(", ")}`);
   if (linha.substituivel) frases.push(fraseDaPreferencia(linha));
   // **O que a casca deixou de fora, contado** (tarefa 5): sem isto, quem
@@ -1457,7 +1409,7 @@ function desenharQuemPinta() {
 }
 
 /**
- * O bloco «a região e as páginas de cada MOD», numa lista irmã da dos onze.
+ * O bloco «as páginas de cada MOD», numa lista irmã da dos onze.
  *
  * **Irmã, e não mais uma linha dela.** A lista dos lugares é a lista inteira
  * deles — «os onze, sempre» —, e um MOD não é um lugar. Criada aqui na
@@ -2179,8 +2131,8 @@ async function desenharMods() {
  * discordam no dia em que só uma sobe, e esta é usada para dizer a alguém se o
  * problema está no aplicativo ou no pacote.
  */
-const API_DESTE_APLICATIVO = 5;
-const APIS_QUE_ESTE_APLICATIVO_ACEITA = [5,4,3];
+const API_DESTE_APLICATIVO = 6;
+const APIS_QUE_ESTE_APLICATIVO_ACEITA = [6];
 
 /** Os pacotes guardados nesta máquina, com tamanho e com quem os exige. */
 async function desenharOCache() {
@@ -2300,9 +2252,15 @@ function linhaDePacoteNoCache(pacote) {
       : dele > nossa
         ? `este pacote foi feito para a API ${dele}, e este SEELE oferece a `
           + `${nossa}. Atualize o aplicativo em CONFIGURAÇÕES › ATUALIZAÇÃO.`
-        : `este pacote foi feito para a API ${dele}, que este SEELE já não `
-          + `executa (ele aceita ${APIS_QUE_ESTE_APLICATIVO_ACEITA.join(" e ")}). `
-          + "Procure uma versão nova dele no catálogo do servidor.";
+        // **As APIs 3, 4 e 5 não sumiram: rodam no Servidor 0.15**
+        // (o corte da API 6; tarefa 13 do plano da F3). Quem tem um MOD
+        // delas tem dois caminhos, e a frase diz os dois: a versão dele para
+        // a API 6, quando existir, ou o Servidor 0.15 pelo launcher, que as
+        // roda como sempre rodou.
+        : `este pacote foi feito para a API ${dele}, que roda no Servidor `
+          + `0.15, e este SEELE roda a ${APIS_QUE_ESTE_APLICATIVO_ACEITA.join(" e ")}. `
+          + "Procure a versão dele para a API 6 no catálogo do servidor, ou "
+          + "use o Servidor 0.15 pelo launcher, que roda o pacote como está.";
     texto.append(elemento("span", "mods-recusado", explicacao));
   }
   caixa.append(texto);
@@ -2503,6 +2461,25 @@ function ultimaQueEsteBuildEntende(versoes) {
   if (apisDeModAceitas.length === 0) return lista[lista.length - 1];
   for (let i = lista.length - 1; i >= 0; i--) {
     if (apisDeModAceitas.includes(lista[i].api)) return lista[i];
+  }
+  return undefined;
+}
+
+/**
+ * **A versão do catálogo que este app roda**, para o ATUALIZAR de quem hospeda
+ * com um MOD de API antiga (o corte da API 6; tarefa 13 do plano da F3, Step
+ * 5b; decisão (ii) da orquestradora, 15/10): a mais nova cuja API este app
+ * aceita, **ou nenhuma**.
+ *
+ * Ao contrário de `ultimaQueEsteBuildEntende`, ela não cai na última da lista:
+ * ali, oferecer uma versão que o app recusa ainda deixa a pessoa na gestão,
+ * com a frase da recusa; aqui, ATUALIZAR para ela seria uma saída que não sai
+ * — e a tela diz que ainda não há versão para a API deste app.
+ */
+function versaoParaEsteApp(versoes) {
+  const lista = versoes ?? [];
+  for (let i = lista.length - 1; i >= 0; i--) {
+    if (APIS_QUE_ESTE_APLICATIVO_ACEITA.includes(Number(lista[i].api))) return lista[i];
   }
   return undefined;
 }

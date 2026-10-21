@@ -1158,53 +1158,98 @@ pub fn carregar_do_disco(
     (prontos, queixas)
 }
 
-/// Preenche a API das linhas habilitadas que ainda não a têm (migração 14).
+/// **A API de um pacote instalado, pela regra só** (tarefa 13 do plano da F3,
+/// Step 5b; condição da orquestradora, 10/10).
+///
+/// O `mod.json` da pasta do hash, pelo `como_ele_se_chama`, e zero como «não
+/// declara». **O que o manifesto declara, e não se esta build o aceita**: um
+/// MOD da API 5 numa build da 6 tem de ser dito como da 5 — é isso que deixa o
+/// servidor dizer a quem entra que versão do app o roda, e quem hospeda saber
+/// que MOD o impede —, e `read_manifest` o recusaria antes de dizer o número.
+///
+/// Os dois a chamam: `preencher_api_e_tema`, na subida (por [`do_pacote`]), e a conferência de quem
+/// hospeda, no app (`mods_de_api_antiga`, em `apps/seele-app/src/mods.rs`).
+/// Uma segunda leitura do `mod.json` seria um segundo jeito de errar, e os dois
+/// discordariam sobre o mesmo pacote.
+///
+/// # Errors
+///
+/// O motivo, em texto, para o `seele.log`: sem `mod.json` na pasta do hash, ou
+/// um que não declara a API.
+pub fn api_do_pacote(raizes: &crate::RaizesDosMods, hash: &str) -> Result<u32, String> {
+    do_pacote(raizes, hash).map(|declarado| declarado.api)
+}
+
+/// O que um pacote instalado declara de si para o anúncio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DoPacote {
+    /// A API que o manifesto pede.
+    pub api: u32,
+    /// Se o manifesto declara `"tema": true` (D-api-8). Falso sem a chave.
+    pub tema: bool,
+}
+
+/// **A API e o tema de um pacote instalado, numa leitura só** (D-api-8): a
+/// regra de [`api_do_pacote`], que agora é esta, e não uma segunda leitura do
+/// mesmo `mod.json`. Duas leituras seriam dois jeitos de errar sobre o mesmo
+/// pacote.
+///
+/// # Errors
+///
+/// Os de [`api_do_pacote`]: sem `mod.json` na pasta do hash, ou um que não
+/// declara a API. Um manifesto que não declara a API não diz o tema também:
+/// os dois saem do mesmo texto, e um texto que perdeu um não é prova do outro.
+pub fn do_pacote(raizes: &crate::RaizesDosMods, hash: &str) -> Result<DoPacote, String> {
+    let dir = raizes.pacote_de(hash);
+    let texto = std::fs::read_to_string(dir.join("mod.json"))
+        .map_err(|erro| format!("sem mod.json em {}: {erro}", dir.display()))?;
+    let declarado = seele_proto::mods::como_ele_se_chama(&texto);
+    match declarado.api {
+        0 => Err("o mod.json não declara a API".to_owned()),
+        api => Ok(DoPacote {
+            api,
+            tema: declarado.tema,
+        }),
+    }
+}
+
+/// Preenche a API e o tema das linhas habilitadas que ainda não os têm
+/// (migrações 14 e 16), na mesma passada e na mesma leitura.
 ///
 /// Lê o `mod.json` da pasta do **hash** que a linha exige — os bytes que a
 /// exigência cobre, e não «o que estiver na pasta do MOD» —, como
-/// [`carregar_do_disco`] faz. Uma linha que não se preenche (pacote fora do
-/// disco, manifesto que não abre) fica zero, que é «não preenchida», e é
-/// **nomeada** na lista devolvida: zero em silêncio seria o anúncio dizendo «não
-/// sei» sem ninguém saber por quê.
+/// [`carregar_do_disco`] faz, pela regra de [`do_pacote`]. Uma linha que não se
+/// preenche (pacote fora do disco, manifesto que não abre) fica com a API zero
+/// e o tema nulo, «não preenchidos», e é **nomeada** na lista devolvida: em
+/// silêncio, seria o anúncio dizendo «não sei» da API, e «não pinta a
+/// aparência» do tema, sem ninguém saber por quê.
 #[must_use]
-pub fn preencher_as_apis(
+pub fn preencher_api_e_tema(
     persistence: &crate::persistence::Persistence,
     raizes: &crate::RaizesDosMods,
 ) -> Vec<String> {
-    let ligados = match crate::persistence::mods::enabled(persistence) {
-        Ok(ligados) => ligados,
+    let por_preencher = match crate::persistence::mods::por_preencher(persistence) {
+        Ok(linhas) => linhas,
         Err(erro) => return vec![format!("não deu para ler a tabela de MODs: {erro}")],
     };
     let mut queixas = Vec::new();
-    for ligado in ligados.into_iter().filter(|ligado| ligado.api == 0) {
-        let dir = raizes.pacote_de(&ligado.hash);
-        // **O que o manifesto declara, e não se esta build o aceita.** Um MOD
-        // da API 5 numa build da 6 tem de ser anunciado como da 5 — é isso
-        // que deixa o servidor dizer a quem entra que versão do app o roda —,
-        // e `read_manifest` o recusaria antes de dizer o número.
-        let api = std::fs::read_to_string(dir.join("mod.json"))
-            .map_err(|erro| format!("sem mod.json em {}: {erro}", dir.display()))
-            .and_then(
-                |texto| match seele_proto::mods::como_ele_se_chama(&texto).api {
-                    0 => Err("o mod.json não declara a API".to_owned()),
-                    api => Ok(api),
-                },
-            );
-        match api {
-            Ok(api) => {
-                if let Err(erro) = crate::persistence::mods::preencher_api(
+    for (id, hash) in por_preencher {
+        match do_pacote(raizes, &hash) {
+            Ok(DoPacote { api, tema }) => {
+                if let Err(erro) = crate::persistence::mods::preencher_do_pacote(
                     persistence,
-                    &ligado.id,
-                    &ligado.hash,
+                    &id,
+                    &hash,
                     api,
+                    tema,
                 ) {
-                    queixas.push(format!("{}: a API não foi gravada: {erro}", ligado.id));
+                    queixas.push(format!("{id}: a API e o tema não foram gravados: {erro}"));
                 }
             }
             Err(motivo) => {
                 queixas.push(format!(
-                    "{}: a API ficou não preenchida — {motivo}",
-                    ligado.id
+                    "{id}: a API e o tema ficaram não preenchidos, e o anúncio diz o tema \
+                     falso — {motivo}"
                 ));
             }
         }
@@ -1242,15 +1287,88 @@ mod tests {
     /// Um pacote no disco, com o `mod.json` dizendo a API pedida, na pasta do
     /// hash dele.
     fn pacote_com_api(raizes: &crate::RaizesDosMods, hash: &str, api: u32) {
+        pacote_com(raizes, hash, api, "");
+    }
+
+    /// Um pacote cujo `mod.json` termina com `resto` — `,"tema":true`, por
+    /// exemplo, ou nada.
+    fn pacote_com(raizes: &crate::RaizesDosMods, hash: &str, api: u32, resto: &str) {
         let dir = raizes.pacote_de(hash);
         std::fs::create_dir_all(&dir).expect("pasta do pacote");
         std::fs::write(
             dir.join("mod.json"),
             format!(
-                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{api},"repo":"https://github.com/seele/bot","reach":[]}}"#
+                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{api},"repo":"https://github.com/seele/bot","reach":[]{resto}}}"#
             ),
         )
         .expect("manifesto");
+    }
+
+    /// **As linhas habilitadas antes da migração 16 ganham o tema na subida**,
+    /// na mesma passada e na mesma leitura que preenchem a API (D-api-8). O
+    /// tema do pacote chega ao anúncio; sem a chave, falso; e uma linha que não
+    /// se preenche sai falsa no anúncio e é dita pelo nome no registro.
+    #[test]
+    fn a_subida_preenche_o_tema_das_linhas_antigas_e_o_anuncio_o_diz() {
+        use crate::persistence::mods::{enable, EnabledMod};
+        use crate::persistence::{Location, Persistence};
+
+        let raiz = pasta_de_teste("tema-na-subida");
+        let raizes = crate::RaizesDosMods {
+            pacotes: raiz.clone(),
+            dados: raiz.join("mod-data"),
+        };
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        let linha = |id: &str, hash: &str| EnabledMod {
+            id: id.to_owned(),
+            version: "1.0.0".to_owned(),
+            hash: hash.to_owned(),
+            repo: String::new(),
+            reach: Vec::new(),
+            server_half: true,
+            api: 6,
+            tema: false,
+        };
+        let pinta = "a1".repeat(32);
+        let sem_chave = "b2".repeat(32);
+        pacote_com(&raizes, &pinta, 6, r#","tema":true"#);
+        pacote_com(&raizes, &sem_chave, 6, "");
+        enable(&banco, &linha("seele/estilo", &pinta)).expect("habilitar");
+        enable(&banco, &linha("seele/bot", &sem_chave)).expect("habilitar");
+        enable(&banco, &linha("seele/sumido", &"c3".repeat(32))).expect("habilitar");
+        // Como uma linha gravada antes da coluna: o tema nulo.
+        banco
+            .connection()
+            .execute("UPDATE mods SET tema = NULL", [])
+            .expect("como antes da migração 16");
+
+        let queixas = preencher_api_e_tema(&banco, &raizes);
+
+        let conjunto = crate::mods::anuncio::conjunto_exigido(&banco).expect("montar");
+        let tema_de = |id: &str| {
+            conjunto
+                .mods
+                .iter()
+                .find(|anunciado| anunciado.id == id)
+                .map(|anunciado| anunciado.tema)
+        };
+        assert_eq!(
+            tema_de("seele/estilo"),
+            Some(true),
+            "a subida não preencheu o tema que o pacote declara, e o anúncio diz que \
+             um MOD que pinta a aparência não pinta"
+        );
+        assert_eq!(tema_de("seele/bot"), Some(false), "sem a chave, falso");
+        assert_eq!(
+            tema_de("seele/sumido"),
+            Some(false),
+            "o não preenchido sai falso"
+        );
+        assert_eq!(queixas.len(), 1, "{queixas:?}");
+        assert!(
+            queixas[0].contains("seele/sumido") && queixas[0].contains("tema"),
+            "a linha que não se preencheu não foi dita no registro: {queixas:?}"
+        );
     }
 
     /// **As linhas habilitadas antes da coluna ganham a API na subida**, lida
@@ -1275,13 +1393,14 @@ mod tests {
             reach: Vec::new(),
             server_half: false,
             api: 0,
+            tema: false,
         };
         let com_pacote = "e5".repeat(32);
         pacote_com_api(&raizes, &com_pacote, 6);
         enable(&banco, &linha("seele/bot", &com_pacote)).expect("habilitar");
         enable(&banco, &linha("seele/sumido", &"f6".repeat(32))).expect("habilitar");
 
-        let queixas = preencher_as_apis(&banco, &raizes);
+        let queixas = preencher_api_e_tema(&banco, &raizes);
 
         let lista = enabled(&banco).expect("listar");
         let api_de = |id: &str| lista.iter().find(|m| m.id == id).map(|m| m.api);
@@ -1289,6 +1408,72 @@ mod tests {
         assert_eq!(api_de("seele/sumido"), Some(0));
         assert_eq!(queixas.len(), 1, "{queixas:?}");
         assert!(queixas[0].contains("seele/sumido"), "{queixas:?}");
+    }
+
+    /// **Uma regra só para a API de um pacote** (tarefa 13 do plano da F3, Step
+    /// 5b): na pasta da 0.15.1 — o banco no esquema 13 e o `seele/estilo`
+    /// 3.1.0, da API 4 —, a subida preenche a API que `api_do_pacote` devolve.
+    /// Uma leitura diferente na subida (o `read_manifest`, que depois do corte
+    /// recusa a 4) faria o servidor e a conferência de quem hospeda discordarem
+    /// sobre o mesmo pacote.
+    #[test]
+    fn a_subida_e_a_conferencia_leem_a_api_pela_mesma_regra_na_pasta_da_0_15_1() {
+        use crate::persistence::mods::enabled;
+        use crate::persistence::{Location, Persistence};
+
+        const PASTA: &str = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../apps/seele-app/testes/pasta-da-0.15.1/pasta"
+        );
+        const HASH_DA_0_15: &str =
+            "ca0b79565bbb41a79403ce69b500c62f908a080efbb9bcbd4e3486a302d21682";
+        let raiz = pasta_de_teste("api-da-0-15");
+        let copiar = |de: &std::path::Path, para: &std::path::Path| {
+            fn copiar(de: &std::path::Path, para: &std::path::Path) {
+                std::fs::create_dir_all(para).expect("pasta");
+                for entrada in std::fs::read_dir(de).expect("ler") {
+                    let entrada = entrada.expect("entrada");
+                    let destino = para.join(entrada.file_name());
+                    if entrada.path().is_dir() {
+                        copiar(&entrada.path(), &destino);
+                    } else {
+                        std::fs::copy(entrada.path(), destino).expect("copiar");
+                    }
+                }
+            }
+            copiar(de, para);
+        };
+        copiar(
+            &std::path::Path::new(PASTA).join("mod-packages"),
+            &raiz.join("mod-packages"),
+        );
+        let caminho = raiz.join("seele.db");
+        rusqlite::Connection::open(&caminho)
+            .expect("banco da 0.15.1")
+            .execute_batch(
+                &std::fs::read_to_string(format!("{PASTA}/seele.sql")).expect("seele.sql"),
+            )
+            .expect("o esquema 13");
+        let raizes = crate::RaizesDosMods {
+            pacotes: raiz.clone(),
+            dados: raiz.join("mod-data"),
+        };
+
+        let banco = Persistence::open(&Location::File(caminho)).expect("abrir e migrar");
+        let queixas = preencher_api_e_tema(&banco, &raizes);
+        assert!(queixas.is_empty(), "{queixas:?}");
+
+        let preenchida = enabled(&banco)
+            .expect("listar")
+            .into_iter()
+            .find(|m| m.id == "seele/estilo")
+            .map(|m| m.api);
+        assert_eq!(api_do_pacote(&raizes, HASH_DA_0_15), Ok(4));
+        assert_eq!(
+            preenchida,
+            Some(4),
+            "a subida preencheu outra API que a da regra só para o 3.1.0 da pasta da 0.15.1"
+        );
     }
 
     /// **A pessoa de uma espera vem do servidor, e não do MOD** — ADR 0048.
@@ -1944,6 +2129,152 @@ mod tests {
             Some("{\"forca\":18}")
         );
         assert!(pasta.join("fichas/coelho.json").exists());
+    }
+
+    /// **Listar e apagar, pelo JavaScript, na pasta e no volume**
+    /// (`own.arquivos.listar`, `own.arquivos.apagar` e `own.volume.apagar`; a
+    /// auditoria do `v6.json`, tabela 2). As funções Rust tinham prova, e a
+    /// ligação não: trocar o corpo do `listar` por uma lista vazia, ou ligar o
+    /// `apagar` a `false`, passava. E o `volume.apagar` apaga **do volume**, e
+    /// não da pasta do MOD: um arquivo com o mesmo nome nos dois lugares fica
+    /// na pasta.
+    #[test]
+    fn um_mod_lista_e_apaga_pelo_javascript_na_pasta_e_no_volume() {
+        let pasta = pasta_de_teste("js-lista-apaga");
+        std::fs::create_dir_all(pasta.join(volume::PASTA)).expect("o volume");
+        std::fs::write(pasta.join(volume::PASTA).join("mapa.png"), b"x").expect("no volume");
+        std::fs::write(pasta.join("mapa.png"), b"x").expect("na pasta");
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/rpg",
+                "globalThis.aoAcontecer = () => { \
+                   arquivos.escrever('fichas/a.json', '1'); \
+                   arquivos.escrever('fichas/b.json', '2'); \
+                   dados.antes = JSON.stringify(arquivos.listar()); \
+                   dados.apagou = String(arquivos.apagar('fichas/a.json')); \
+                   dados.depois = JSON.stringify(arquivos.listar()); \
+                   dados.doVolume = String(volume.apagar('mapa.png')); \
+                   dados.deNovo = String(volume.apagar('mapa.png')); \
+                 };",
+                &pasta,
+            )
+            .expect("carregar");
+
+        let mut quintal = BTreeMap::new();
+        anfitriao
+            .chamar("seele/rpg", "PersonJoined", "{}", &mut quintal)
+            .expect("chamar");
+
+        let lido = |chave: &str| quintal.get(chave).map(String::as_str);
+        let antes: Vec<String> =
+            serde_json::from_str(lido("antes").unwrap_or("[]")).expect("a lista");
+        assert!(
+            antes.iter().any(|n| n == "fichas/a.json")
+                && antes.iter().any(|n| n == "fichas/b.json"),
+            "o `arquivos.listar` do JavaScript não disse o que está na pasta: {antes:?}"
+        );
+        assert_eq!(
+            lido("apagou"),
+            Some("true"),
+            "o `arquivos.apagar` não apagou"
+        );
+        let depois: Vec<String> =
+            serde_json::from_str(lido("depois").unwrap_or("[]")).expect("a lista");
+        assert!(
+            !depois.iter().any(|n| n == "fichas/a.json")
+                && depois.iter().any(|n| n == "fichas/b.json"),
+            "a lista depois de apagar não é a de antes sem o apagado: {depois:?}"
+        );
+        assert!(
+            !pasta.join("fichas/a.json").exists(),
+            "o arquivo apagado continua no disco"
+        );
+        assert_eq!(
+            lido("doVolume"),
+            Some("true"),
+            "o `volume.apagar` não apagou do volume"
+        );
+        assert_eq!(
+            lido("deNovo"),
+            Some("false"),
+            "apagar de novo o que já saiu disse que apagou"
+        );
+        assert!(
+            !pasta.join(volume::PASTA).join("mapa.png").exists(),
+            "o arquivo do volume continua lá"
+        );
+        assert!(
+            pasta.join("mapa.png").exists(),
+            "o `volume.apagar` apagou da pasta do MOD, e não do volume"
+        );
+    }
+
+    /// **O `mundo.registrar` é uma linha INFO, com o `mod_id`, cortada em 500**
+    /// (`world.mundo.registrar`; a auditoria do `v6.json`, tabela 2). O teste
+    /// do relógio chamava `mundo.registrar` e não lia o registro: esvaziar o
+    /// corpo da função passava.
+    #[test]
+    fn o_registrar_do_mod_e_uma_linha_info_com_o_id_cortada_em_500() {
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Default)]
+        struct Buffer(Arc<Mutex<Vec<u8>>>);
+        impl Write for Buffer {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().expect("o buffer").extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let pasta = pasta_de_teste("js-registra");
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/rpg",
+                "globalThis.aoAcontecer = () => { mundo.registrar('oi ' + 'x'.repeat(600)); };",
+                &pasta,
+            )
+            .expect("carregar");
+
+        let buffer = Buffer::default();
+        let capturado = buffer.clone();
+        let assinante = tracing_subscriber::fmt()
+            .with_writer(move || capturado.clone())
+            .without_time()
+            .with_ansi(false)
+            .finish();
+        // Ver `rastro_de_teste::segundo_despachante`.
+        crate::rastro_de_teste::segundo_despachante();
+        tracing::subscriber::with_default(assinante, || {
+            let mut quintal = BTreeMap::new();
+            anfitriao
+                .chamar("seele/rpg", "PersonJoined", "{}", &mut quintal)
+                .expect("chamar");
+        });
+
+        let log = String::from_utf8(buffer.0.lock().expect("o buffer").clone()).expect("o log");
+        let linhas: Vec<&str> = log.lines().filter(|l| l.contains("oi xxx")).collect();
+        assert_eq!(
+            linhas.len(),
+            1,
+            "o `mundo.registrar` não deu uma linha só: {log}"
+        );
+        let linha = linhas[0];
+        assert!(linha.contains("INFO"), "a linha do MOD não é INFO: {linha}");
+        assert!(
+            linha.contains("mod_id=seele/rpg"),
+            "a linha do MOD não diz o `mod_id`: {linha}"
+        );
+        let escrito = format!("oi {}", "x".repeat(497));
+        assert!(
+            linha.contains(&escrito) && !linha.contains(&format!("{escrito}x")),
+            "a linha do MOD não foi cortada em 500 caracteres: {linha}"
+        );
     }
 
     /// E o mesmo MOD, tentando sair, recebe `false` em vez da chave de

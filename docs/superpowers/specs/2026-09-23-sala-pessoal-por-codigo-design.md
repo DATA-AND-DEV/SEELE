@@ -605,6 +605,13 @@ das regiões: os cinco `pessoa.*` em `pessoas.lista`, `canal.item` e
 `compositor`. `canal.cabecalho` e `servidor.navegacao` já são regiões, e
 `servidor.aparencia` continua como está. Nenhum MOD publicado quebra.
 
+> **Emendado em 15/10/2026 — o corte da API 6.** Os pontos continuam com o
+> mesmo nome, mas a 6 saiu como ruptura, e não como soma: `regiao` e `cartoes`
+> saíram (decisão do dono de 08/10), e um MOD publicado nas APIs 3, 4 e 5 não
+> roda no app 0.16 — ele roda na linha do Servidor 0.15, pelo launcher. Os três
+> oficiais saem como 4.0.0 na API 6 (D-mods-1). O contrato é o `api/v6.json`,
+> congelado no corte (tarefa 13 do plano da F3).
+
 **`pessoa.faixa`**: o banner de uma pessoa por id, como `pessoa.avatar`. Ele é
 aplicado ao cartão na chamada, ao fundo da barra do operador e ao cabeçalho do
 perfil. O PERFIS 3.4.0 é quem leva o banner a esses lugares.
@@ -693,6 +700,13 @@ quadro da janela, com os números escritos no ADR 0056.
 - **A API 6 entra somada.** As aceitas passam a `[6, 5, 4, 3]`, e os pacotes 3,
   4 e 5 continuam funcionando. O ESTILO e o MESA (API 4) não precisam de nada; o
   PERFIS vai para a 3.4.0 na API 6, pelo banner.
+
+  > **Emendado em 15/10/2026 — o corte da API 6.** Ela não entrou somada: as
+  > aceitas são `[6]`, e os pacotes 3, 4 e 5 são recusados pelo nome
+  > (`ApiTooOld`), com a frase que diz onde eles rodam — o Servidor 0.15, pelo
+  > launcher. Os três oficiais saem como **4.0.0** (D-mods-1), e não 3.4.0; a
+  > linha 3.x deles continua no Servidor 0.15. A ordem de publicação inverte:
+  > os pacotes da 6 saem **antes** do app (spec-mestre, §4).
 - **App primeiro, pacote depois**, pela ordem do runbook do indexador. Desde a
   v0.14.2, a tela de MODs escolhe a versão do pacote pela API, então quem não
   atualizou recebe a versão anterior em vez de uma falha.
@@ -802,6 +816,12 @@ Da Parte II:
     - todo momento e todo evento listados em `api/v6.json` têm quem os
       despache;
     - um pacote de cada API aceita (3, 4, 5 e 6) monta.
+
+    > **Emendado em 15/10/2026 — o corte da API 6.** A API aceita é só a 6: o
+    > MOD de referência na 6 monta, e um pacote das 3, 4 e 5 é recusado pelo
+    > nome ao carregar, e pela versão no anfitrião
+    > (`as_apis_3_4_e_5_sao_recusadas_com_api_too_old`, `mod_de_referencia.rs`,
+    > e as bancadas que provam a recusa).
 14. **Som de MOD**: um MOD com papel `som` toca no app de verdade (WKWebView e
     WebView2), e a CSP continua sem `data:` em `media-src`.
 15. **Custo sob carga**: a medição do ADR 0052 roda e os números entram no ADR

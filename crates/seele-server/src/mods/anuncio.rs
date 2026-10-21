@@ -130,6 +130,10 @@ pub fn conjunto_exigido(persistence: &Persistence) -> Result<Conjunto, NaoDaPara
             // «não preenchida»: uma linha antiga cujo pacote a subida não
             // conseguiu ler, e que foi dita no registro.
             api: ligado.api,
+            // O tema que o manifesto declara (D-api-8; migração 16). Uma linha
+            // que a subida não conseguiu preencher sai falsa, e foi dita no
+            // registro, como a API zero.
+            tema: ligado.tema,
         });
     }
 
@@ -290,6 +294,7 @@ mod tests {
             reach: vec!["dom".to_owned()],
             server_half: false,
             api: 6,
+            tema: false,
         }
     }
 
@@ -335,6 +340,32 @@ mod tests {
         enable(&persistence, &ligado).expect("habilitar");
         let conjunto = conjunto_exigido(&persistence).expect("montar");
         assert_eq!(conjunto.mods[0].api, 6);
+    }
+
+    /// **O anúncio diz o tema que o banco guardou** (D-api-8): quem aceita um MOD
+    /// que pinta a aparência do servidor tem de saber disso antes de aceitar.
+    /// Sem a porta, falso.
+    #[test]
+    fn o_anuncio_diz_se_o_mod_pinta_a_aparencia() {
+        let persistence = banco();
+        let mut pinta = linha("seele/estilo", 0xa1);
+        pinta.tema = true;
+        enable(&persistence, &pinta).expect("habilitar");
+        enable(&persistence, &linha("seele/bot", 0xb2)).expect("habilitar");
+        let conjunto = conjunto_exigido(&persistence).expect("montar");
+        let tema_de = |id: &str| {
+            conjunto
+                .mods
+                .iter()
+                .find(|anunciado| anunciado.id == id)
+                .map(|anunciado| anunciado.tema)
+        };
+        assert_eq!(
+            tema_de("seele/estilo"),
+            Some(true),
+            "um MOD que pinta a aparência foi anunciado como se não pintasse"
+        );
+        assert_eq!(tema_de("seele/bot"), Some(false));
     }
 
     /// **Instalado, habilitado e exigido são três coisas.** Desabilitar tira do

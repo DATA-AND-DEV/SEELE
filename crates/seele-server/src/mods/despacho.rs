@@ -624,6 +624,94 @@ fn texto_json(bruto: &str) -> String {
 mod tests {
     use super::*;
 
+    /// **Cada momento do `v6.json` sai do evento dele, com a carga dele**
+    /// (`moments`; a auditoria do `v6.json`, tabela 3). O `check-api` acha o
+    /// braço de `momento_de` pelo texto, e só o `PersonLeft` passava pelo
+    /// barramento num teste: um `if false` no braço do `PersonJoined`, do
+    /// `MessagePosted` ou do `MessageRemoved` passava. Aqui, a lista é a do
+    /// texto, cada evento tem o seu caso, e a carga é lida como JSON — com um
+    /// apelido e um texto que precisam de escape. O caminho do barramento até o
+    /// MOD é o de `um_evento_do_barramento_chega_ao_mod_e_o_quintal_e_gravado`.
+    #[test]
+    fn cada_momento_do_v6_sai_do_evento_dele_com_a_carga() {
+        use crate::persistence::messages::StoredMessage;
+        use crate::server::Event;
+        use seele_proto::ids::{ChannelId, MessageId, PersonId, Ssrc, VoiceRoomId};
+
+        let v6: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../api/v6.json")).expect("o v6.json");
+        let mut prometidos: Vec<&str> = v6["moments"]
+            .as_array()
+            .expect("os momentos")
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        let casos = vec![
+            (
+                "PersonJoined",
+                Event::PersonJoined {
+                    voice_room: VoiceRoomId(3),
+                    profile: seele_proto::control::PersonProfile {
+                        id: PersonId(7),
+                        nickname: "ana \"e\" <b>".to_owned(),
+                        roles: Vec::new(),
+                        material_e2ee: None,
+                    },
+                    ssrc: Ssrc(9),
+                },
+                serde_json::json!({ "sala": 3, "pessoa": 7, "apelido": "ana \"e\" <b>" }),
+            ),
+            (
+                "PersonLeft",
+                Event::PersonLeft {
+                    voice_room: VoiceRoomId(3),
+                    person: PersonId(7),
+                },
+                serde_json::json!({ "sala": 3, "pessoa": 7 }),
+            ),
+            (
+                "MessageReceived",
+                Event::MessagePosted(StoredMessage {
+                    id: MessageId(11),
+                    channel: ChannelId(2),
+                    author: PersonId(7),
+                    author_nickname: String::new(),
+                    body: "oi\n\"x\"".to_owned(),
+                    created_at: 0,
+                    edited_at: None,
+                    replies_to: None,
+                    client_message_id: None,
+                    attachment: None,
+                }),
+                serde_json::json!({ "canal": 2, "mensagem": 11, "autor": 7, "texto": "oi\n\"x\"" }),
+            ),
+            (
+                "MessageRemoved",
+                Event::MessageRemoved {
+                    channel: ChannelId(2),
+                    id: MessageId(11),
+                },
+                serde_json::json!({ "canal": 2, "mensagem": 11 }),
+            ),
+        ];
+        let mut cobertos: Vec<&str> = casos.iter().map(|(nome, _, _)| *nome).collect();
+        prometidos.sort_unstable();
+        cobertos.sort_unstable();
+        assert_eq!(
+            prometidos, cobertos,
+            "os momentos do v6.json e os desta prova divergem: um momento novo precisa do seu caso"
+        );
+        for (nome, evento, carga) in casos {
+            let Some((saiu, texto)) = momento_de(&evento) else {
+                panic!("o evento de «{nome}» não virou momento nenhum");
+            };
+            assert_eq!(saiu, nome, "o evento de «{nome}» saiu com outro nome");
+            let lida: serde_json::Value = serde_json::from_str(&texto)
+                .unwrap_or_else(|erro| panic!("a carga de «{nome}» não é JSON ({erro}): {texto}"));
+            assert_eq!(lida, carga, "a carga de «{nome}» não é a que o MOD lê");
+        }
+    }
+
     fn pasta(nome: &str) -> std::path::PathBuf {
         let dir =
             std::env::temp_dir().join(format!("seele-despacho-{nome}-{}", std::process::id()));
@@ -653,6 +741,7 @@ mod tests {
                 reach: Vec::new(),
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )
         .expect("ligar");
@@ -732,6 +821,7 @@ mod tests {
                 reach: Vec::new(),
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )
         .expect("ligar");
@@ -807,6 +897,7 @@ mod tests {
                 reach: Vec::new(),
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )
         .expect("ligar");
@@ -887,6 +978,7 @@ mod tests {
                 reach: Vec::new(),
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )
         .expect("ligar");
@@ -1346,6 +1438,7 @@ mod tests {
                     reach: Vec::new(),
                     server_half: true,
                     api: 6,
+                    tema: false,
                 },
             )
             .expect("ligar");
@@ -1424,6 +1517,7 @@ mod tests {
                 reach: Vec::new(),
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )
         .expect("ligar");

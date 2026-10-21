@@ -68,6 +68,10 @@ globalThis.aoPedir = (contextoJSON, pedidoJSON) => {
   if (pedido.op === 'grande') {
     return JSON.stringify({ ok: true, enchimento: 'á🧙'.repeat(pedido.vezes), contexto });
   }
+  if (pedido.op === 'volume') {
+    // A leitura por volume: o MOD autoriza e diz qual arquivo é.
+    return JSON.stringify({ ok: true, volume: pedido.caminho, contexto });
+  }
   return JSON.stringify({ ok: true, contexto });
 };
 "#;
@@ -192,6 +196,7 @@ async fn a_ponte_entrega_a_identidade_da_sessao_e_ignora_a_que_o_pedido_afirma()
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -281,6 +286,7 @@ async fn a_resposta_volta_so_para_quem_pediu_e_sobrevive_a_reconexao() -> Result
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -400,6 +406,7 @@ async fn a_resposta_grande_chega_inteira_em_partes_numeradas() -> Result<()> {
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -499,6 +506,7 @@ async fn um_mod_de_escopo_de_servidor_le_sem_canal_aberto() -> Result<()> {
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -597,6 +605,7 @@ async fn o_catalogo_diz_qual_conjunto_ele_descreve() -> Result<()> {
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -694,6 +703,7 @@ async fn uma_espera_de_volume_sobrevive_ao_pedido_que_a_emitiu() -> Result<()> {
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -806,6 +816,7 @@ async fn servidor_com_o_mod(
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -941,6 +952,179 @@ async fn um_token_que_ninguem_autorizou_nao_escreve_nada() -> Result<()> {
     .await??;
     assert_eq!(recusa.0, "inventado");
     assert_eq!(recusa.1, seele_proto::volume::VolumeRefusal::SemEspera);
+
+    serving.abort();
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// **O que a janela recebe de um fluxo de imagem recusado é o nome da recusa**
+/// (o corte da API 6; a auditoria do `v6.json`, `recusas.volume`).
+///
+/// O fluxo de imagem achatava a recusa em «imagem recusada: SemEspera», o
+/// `Debug` do enum, e o MOD a recebia assim em `e.erro`, fora da lista fechada
+/// que o `v6.json` promete. A bancada não via, porque o dublê dela já rejeita
+/// com o nome. Aqui a pergunta é feita pelo cliente de verdade
+/// (`Transfers::imagem_de_mod`), que é o que a janela usa, e o que se confere é
+/// o texto que ele devolve — o que vira `e.erro`:
+///
+/// - um token que ninguém autorizou → `sem-espera`;
+/// - um GIF para um MOD que só autorizou PNG → `tipo-recusado:gif` (o
+///   `recusaParaOMod` da casca faz disso `erro: 'tipo-recusado'` e
+///   `detectado: 'gif'`);
+/// - bytes de formato nenhum → `formato-desconhecido`, e não `tipo-recusado`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recusa_de_um_fluxo_de_imagem_chega_a_janela_pelo_nome() -> Result<()> {
+    use seele_proto::volume::{PedidoDeImagem, VolumeHeader};
+    let _vaga = vaga::minha();
+    let (_daemon, root, mut cliente, serving) = servidor_com_o_mod(208).await?;
+    let transferencias = cliente.transfers();
+    let enviar = |token: &str, bytes: Vec<u8>| {
+        let transferencias = transferencias.clone();
+        let token = token.to_owned();
+        async move {
+            transferencias
+                .imagem_de_mod(
+                    PedidoDeImagem::Enviar {
+                        cabecalho: VolumeHeader {
+                            mod_id: "prova/ponte".into(),
+                            token,
+                        },
+                        bytes: bytes.len() as u64,
+                    },
+                    &bytes,
+                )
+                .await
+                .map(|_| ())
+                .map_err(|erro| erro.to_string())
+        }
+    };
+
+    assert_eq!(
+        enviar("inventado", png_minimo()).await,
+        Err("sem-espera".to_owned()),
+        "o token que ninguém autorizou não chegou à janela pelo nome"
+    );
+
+    autorizar(&mut cliente, 1, "t-gif", &["png"]).await?;
+    let mut gif = b"GIF89a".to_vec();
+    gif.extend_from_slice(&[1, 0, 1, 0, 0, 0, 0, 0x3B]);
+    assert_eq!(
+        enviar("t-gif", gif).await,
+        Err("tipo-recusado:gif".to_owned()),
+        "o tipo recusado não chegou à janela pelo nome, com o que foi detectado"
+    );
+
+    autorizar(&mut cliente, 2, "t-nada", &["png"]).await?;
+    assert_eq!(
+        enviar("t-nada", b"isto nao e imagem nenhuma".to_vec()).await,
+        Err("formato-desconhecido".to_owned()),
+        "bytes de formato nenhum não chegaram à janela como formato-desconhecido"
+    );
+
+    // E a leitura de um arquivo maior que o teto é `arquivo-grande-demais`:
+    // era «imagem excede 10 MiB».
+    let pasta = root
+        .join("mod-data")
+        .join("prova")
+        .join("ponte")
+        .join("volume");
+    std::fs::create_dir_all(&pasta)?;
+    std::fs::write(
+        pasta.join("grande.png"),
+        vec![0_u8; seele_proto::midia_de_mod::TETO_DE_ARQUIVO + 1],
+    )?;
+    let lido = transferencias
+        .imagem_de_mod(
+            PedidoDeImagem::Ler {
+                mod_id: "prova/ponte".into(),
+                channel: ChannelId(0),
+                payload: serde_json::json!({ "op": "volume", "caminho": "grande.png" }).to_string(),
+            },
+            &[],
+        )
+        .await
+        .map(|_| ())
+        .map_err(|erro| erro.to_string());
+    assert_eq!(
+        lido,
+        Err("arquivo-grande-demais".to_owned()),
+        "a leitura de um arquivo maior que o teto não chegou à janela pelo nome"
+    );
+
+    serving.abort();
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// **Uma imagem de MOD vai e volta inteira, pelo cliente de verdade**
+/// (`actions.enviar-imagem` e `actions.ler-imagem`; a auditoria do `v6.json`,
+/// tabela 2). O teste do servidor reimplementa o lado do cliente, e a
+/// conformidade só usava `Transfers::imagem_de_mod` para recusas: o elo do meio
+/// — o núcleo que manda em blocos e lê de volta — não tinha caminho feliz. Uma
+/// imagem de mais de três blocos, autorizada pelo MOD, chega ao disco inteira e
+/// volta igual pela leitura que o MOD autoriza.
+#[tokio::test(flavor = "multi_thread")]
+async fn uma_imagem_de_mod_vai_e_volta_inteira_pelo_cliente_de_verdade() -> Result<()> {
+    use seele_proto::volume::{PedidoDeImagem, VolumeHeader};
+    let _vaga = vaga::minha();
+    let (_daemon, root, mut cliente, serving) = servidor_com_o_mod(209).await?;
+    let transferencias = cliente.transfers();
+    autorizar(&mut cliente, 1, "t-ida", &["png"]).await?;
+
+    // Mais de três blocos, e bytes que não se repetem: um bloco perdido, dobrado
+    // ou fora de ordem não passa por igual.
+    let mut bytes = png_minimo();
+    bytes.extend((0..3 * seele_proto::attachment::BLOCK_LEN + 17).map(|i| (i % 251) as u8));
+    transferencias
+        .imagem_de_mod(
+            PedidoDeImagem::Enviar {
+                cabecalho: VolumeHeader {
+                    mod_id: "prova/ponte".into(),
+                    token: "t-ida".into(),
+                },
+                bytes: bytes.len() as u64,
+            },
+            &bytes,
+        )
+        .await?;
+
+    let destino = root
+        .join("mod-data")
+        .join("prova")
+        .join("ponte")
+        .join("volume")
+        .join("retratos")
+        .join("um.png");
+    for _ in 0..50 {
+        if std::fs::metadata(&destino).is_ok_and(|m| m.len() == bytes.len() as u64) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        std::fs::read(&destino).ok().as_deref() == Some(bytes.as_slice()),
+        "a imagem enviada pelo cliente não chegou inteira em {}",
+        destino.display()
+    );
+
+    let lida = transferencias
+        .imagem_de_mod(
+            PedidoDeImagem::Ler {
+                mod_id: "prova/ponte".into(),
+                channel: ChannelId(0),
+                payload: serde_json::json!({ "op": "volume", "caminho": "retratos/um.png" })
+                    .to_string(),
+            },
+            &[],
+        )
+        .await?;
+    assert!(
+        lida == bytes,
+        "a leitura pelo volume não devolveu a imagem que foi: {} bytes, e eram {}",
+        lida.len(),
+        bytes.len()
+    );
 
     serving.abort();
     std::fs::remove_dir_all(root)?;

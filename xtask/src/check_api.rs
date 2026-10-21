@@ -80,6 +80,37 @@ const DESPACHO: &str = "crates/seele-server/src/mods/despacho.rs";
 /// o lado que ainda pode mudar.
 const PRIMEIRA_API_COBRADA: u64 = 6;
 
+/// **Os apontadores que o corte da API 6 aposentou**: `(bloco, nome,
+/// interior)` das versões congeladas cujo interior saiu do produto com a
+/// máquina das APIs 3 a 5.
+///
+/// Este build só executa a 6 (o corte; rascunho da API 6, §2): um pacote das
+/// APIs 3 a 5 não carrega, e as mensagens `regiao` e `cartoes` caem no
+/// `default` do roteador, que diz que a API não as conhece. As funções da
+/// janela que as atendiam saíram na limpeza das APIs 3 a 5 — e `api/v3.json` a
+/// `v5.json`, congelados, continuam apontando para elas. A promessa não se
+/// edita; o que se diz aqui é que o interior foi aposentado de propósito.
+///
+/// **Até a limpeza, os dois passavam por acidente**: o nome aparecia num guarda
+/// de `tests/frontend.rs`, e a procura é por texto (ver o cabeçalho). Sem esta
+/// lista, tirar o guarda deixaria o `check-api` vermelho sem nada a consertar;
+/// com ela, nenhum texto precisa ficar de pé só para o apontador resolver.
+///
+/// **Uma lista fechada, pelo trio, e só nas congeladas.** Outro nome órfão de
+/// uma congelada continua voltando como violação
+/// (`um_nome_orfao_numa_api_congelada_volta_com_a_violacao_e_sem_cobranca`), e
+/// uma versão cobrada que aponte para um aposentado reprova como qualquer
+/// órfão. O resumo do `check-api` diz quais não foram procurados.
+const APOSENTADOS_PELO_CORTE: &[(&str, &str, &str)] = &[
+    ("actions", "regiao", "desenharARegiaoDoMod"),
+    ("actions", "cartoes", "darCartoesDoMod"),
+];
+
+/// Se este apontador é um dos [`APOSENTADOS_PELO_CORTE`].
+fn aposentado_pelo_corte(bloco: &str, nome: &str, interior: &str) -> bool {
+    APOSENTADOS_PELO_CORTE.contains(&(bloco, nome, interior))
+}
+
 /// Um bloco de `api/vN.json` que lista coisas que alguém tem de despachar.
 struct Promessa<'a> {
     /// A chave do descritor que lista o prometido: `moments`, por exemplo.
@@ -844,9 +875,15 @@ fn conferir_arquivo(
     casca: &Casca,
 ) -> (Vec<Violation>, bool) {
     let todos = apontadores(json);
+    // Os aposentados pelo corte só saem da procura numa congelada.
+    let congelada = versao_do_arquivo(caminho).is_some_and(|versao| versao < PRIMEIRA_API_COBRADA);
     let mapa: Vec<(&str, &str)> = todos
         .iter()
-        .filter_map(|(_, nome, interior)| Some((nome.as_str(), interior.as_str()?)))
+        .filter_map(|(bloco, nome, interior)| {
+            let interior = interior.as_str()?;
+            let aposentado = congelada && aposentado_pelo_corte(bloco, nome, interior);
+            (!aposentado).then_some((nome.as_str(), interior))
+        })
         .collect();
     let mut violacoes = evaluate(&mapa, fonte);
     let cobranca = cobrar(caminho, json, promessas);
@@ -953,12 +990,18 @@ fn relatar(
 ) -> ExitCode {
     match resultado {
         Ok(Resumo { versoes, cobradas }) => {
+            let aposentados = APOSENTADOS_PELO_CORTE
+                .iter()
+                .map(|(bloco, nome, _)| format!("`{bloco}.{nome}`"))
+                .collect::<Vec<_>>()
+                .join(" e ");
             let escrito = writeln!(
                 saida,
                 "check-api: toda a superfície de MOD ainda aponta para algo ({versoes} \
                  versão(ões)); `momento_de` despacha {n_momentos} momento(s) e a janela, \
                  {n_eventos} evento(s), cobrados em {cobradas} versão(ões) a partir da \
-                 {PRIMEIRA_API_COBRADA}."
+                 {PRIMEIRA_API_COBRADA}. Nas congeladas, {aposentados} saíram com o corte da \
+                 {PRIMEIRA_API_COBRADA} e não são procurados."
             );
             match escrito {
                 Ok(()) => ExitCode::SUCCESS,
@@ -1533,6 +1576,81 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             "`pessoa.apelido` aponta para `Person::nick`, que sumiu, e a violação não voltou ao \
              `run`: o `check-api` sairia com 0. Vieram {violacoes:?}"
         );
+    }
+
+    /// **O aposentado pelo corte não reprova a congelada**, e só ele: a v5 de
+    /// verdade aponta `actions.regiao` e `actions.cartoes` para as funções da
+    /// janela que saíram com a máquina das APIs 3 a 5. Contra uma fonte em que
+    /// nenhuma das duas existe, nada volta.
+    #[test]
+    fn um_apontador_aposentado_pelo_corte_nao_reprova_a_congelada() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let v5 = serde_json::json!({
+            "version": 5,
+            "actions": { "regiao": "desenharARegiaoDoMod", "cartoes": "darCartoesDoMod" },
+        });
+        let (violacoes, _) = conferir_arquivo(
+            std::path::Path::new("api/v5.json"),
+            &v5,
+            "",
+            &promessas_cobradas(&momentos, &eventos),
+            &Casca::default(),
+        );
+        assert!(
+            violacoes.is_empty(),
+            "os apontadores que o corte da 6 aposentou reprovaram a v5 congelada, que não se \
+             edita: o `check-api` ficaria vermelho sem nada a consertar. Vieram {violacoes:?}"
+        );
+    }
+
+    /// O outro lado: **a lista é fechada, pelo trio**. O mesmo interior com
+    /// outro nome, o mesmo nome com outro interior, e o trio inteiro numa
+    /// versão cobrada voltam como qualquer órfão.
+    #[test]
+    fn o_aposentado_pelo_corte_e_o_trio_e_so_nas_congeladas() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let promessas = promessas_cobradas(&momentos, &eventos);
+        let v5 = serde_json::json!({
+            "version": 5,
+            "actions": { "pintar": "desenharARegiaoDoMod", "regiao": "outraFuncao" },
+            "reads": { "cartoes": "darCartoesDoMod" },
+        });
+        let (violacoes, _) = conferir_arquivo(
+            std::path::Path::new("api/v5.json"),
+            &v5,
+            "",
+            &promessas,
+            &Casca::default(),
+        );
+        for nome in ["`pintar`", "`regiao`", "`cartoes`"] {
+            assert!(
+                violacoes.iter().any(|v| v.starts_with(nome)),
+                "{nome} aponta para algo que não existe, fora do trio aposentado, e passou na \
+                 v5: a lista deixou de ser fechada. Vieram {violacoes:?}"
+            );
+        }
+        let v6 = serde_json::json!({
+            "version": 6,
+            "actions": { "regiao": "desenharARegiaoDoMod", "cartoes": "darCartoesDoMod" },
+        });
+        let (violacoes, _) = conferir_arquivo(
+            std::path::Path::new("api/v6.json"),
+            &v6,
+            "",
+            &promessas,
+            &Casca::default(),
+        );
+        for alvo in ["desenharARegiaoDoMod", "darCartoesDoMod"] {
+            assert!(
+                violacoes
+                    .iter()
+                    .any(|v| v.contains(&format!("`{alvo}` não existe mais"))),
+                "a v6, cobrada, aponta para `{alvo}`, que saiu, e passou: o aposentado das \
+                 congeladas valeu numa versão que se cobra. Vieram {violacoes:?}"
+            );
+        }
     }
 
     /// Uma pasta só deste teste, com os `arquivos` dados, para [`conferir_api`]

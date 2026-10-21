@@ -224,6 +224,22 @@ pub(crate) fn apagar(config: &str, id: &str) -> Result<(), String> {
     std::fs::write(registro(config), texto).map_err(|e| e.to_string())
 }
 
+/// **O banco que HOSPEDAR abre**: o do servidor guardado, ou, sem escolha, o
+/// de sempre (`banco_do_cliente`, que também adota o `dogma.db` antigo).
+///
+/// Um lugar só, porque são dois que precisam abrir o mesmo arquivo: o
+/// `hospedar` e as saídas de quem hospeda com um MOD de API antiga
+/// ([`crate::mods::resolver_mod_de_api_antiga`]), que mexem no banco que o
+/// HOSPEDAR seguinte vai subir.
+pub(crate) fn banco_de_hospedar(config: &str, id: Option<&str>) -> PathBuf {
+    match id {
+        Some(id) => banco(config, Some(id)),
+        // O legado, e ele não é um caso de canto: é toda máquina que já
+        // hospedou antes de os servidores guardados existirem.
+        None => seele_server::persistence::banco_do_cliente(Path::new(config)),
+    }
+}
+
 /// O banco daquele servidor, com a pasta dele já criada.
 ///
 /// Um id que não está no registro devolve o banco de sempre. É o desfecho

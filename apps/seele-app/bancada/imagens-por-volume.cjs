@@ -28,27 +28,30 @@ process.on('exit', codigo => {
     invoke: (cmd, args) => { chamadas.push({cmd, args}); return new Promise(resolve => { concluir = resolve; }); },
   });
   vm.runInContext(ponte, ctx);
-  for (const api of [3, 4]) {
+  // As 3 e 4 nunca tiveram volume, e a 5 deixou de rodar no corte da API 6
+  // (tarefa 13 do plano da F3): as três são recusadas sem chegar ao Rust.
+  for (const api of [3, 4, 5]) {
     await ctx.atenderOMod({id:'seele/perfis',api}, instancia, {n:api,tipo:'enviar-imagem',arquivo:1,token:'t'});
     assert.equal(respostas.at(-1).ok, false);
   }
   assert.equal(chamadas.length, 0);
-  const envio = ctx.atenderOMod({id:'seele/perfis',api:5}, instancia,
+  const recusadas = respostas.length;
+  const envio = ctx.atenderOMod({id:'seele/perfis',api:6}, instancia,
     {n:5,tipo:'enviar-imagem',arquivo:11,token:'t',id:'outro/mod',geracao:999});
   assert.equal(chamadas[0].cmd, 'enviar_imagem_mod');
   assert.equal(chamadas[0].args.id, 'seele/perfis');
   assert.equal(chamadas[0].args.geracao, 8);
-  assert.equal(respostas.length, 2, 'confirmação anterior à gravação');
+  assert.equal(respostas.length, recusadas, 'confirmação anterior à gravação');
   concluir(); await envio;
   assert.equal(respostas.at(-1).ok, true);
-  const tardio = ctx.atenderOMod({id:'seele/perfis',api:5}, instancia, {n:6,tipo:'enviar-imagem',arquivo:12,token:'t2'});
+  const tardio = ctx.atenderOMod({id:'seele/perfis',api:6}, instancia, {n:6,tipo:'enviar-imagem',arquivo:12,token:'t2'});
   ativa = false; concluir(); await tardio;
   assert.equal(respostas.at(-1).erro, 'sessao-encerrada');
 
   for (const volume of [false, true]) {
     const mensagens = [];
     const sandbox = vm.createContext({
-      __seeleCapacidades: ['regiao', 'arquivo', ...(volume ? ['volume'] : [])],
+      __seeleCapacidades: ['arquivo', 'retrato', ...(volume ? ['volume'] : [])],
       seele: { postar: texto => { mensagens.push(JSON.parse(texto)); return true; } },
     });
     vm.runInContext(preludio, sandbox);

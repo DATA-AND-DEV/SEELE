@@ -107,7 +107,7 @@ async fn bater_com(
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
             material_e2ee: None,
-            apis_de_mod: Vec::new(),
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
         },
     )
     .await?;
@@ -208,7 +208,7 @@ async fn a_prova_da_0_15_sobre_o_nonce_cru_e_recusada() -> Result<()> {
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
             material_e2ee: None,
-            apis_de_mod: Vec::new(),
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
         },
     )
     .await?;
@@ -279,7 +279,7 @@ async fn uma_chave_de_ordem_pequena_e_recusada_antes_do_desafio() -> Result<()> 
             public_key: identidade.to_vec(),
             join_secret: None,
             material_e2ee: None,
-            apis_de_mod: Vec::new(),
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
         },
     )
     .await?;

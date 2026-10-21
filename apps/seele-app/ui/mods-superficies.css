@@ -296,21 +296,25 @@
   padding: max(24px, env(safe-area-inset-top)) 16px;
   /* **O furo do véu** (rascunho da API 6, §10; tarefa 9): a área do diálogo
      começa depois da barra do operador, e o `clip-path` que
-     `mods-superficies.js` escreve deixa a barra fora do véu. Sem recorte, as
-     duas variáveis são zero. */
+     `mods-superficies.js` escreve deixa a barra fora do véu — e a faixa de
+     quem liga, em cima (tarefa 9, Step 5). Sem recorte, as três variáveis são
+     zero. */
   padding-left: calc(16px + var(--recorte-esquerda, 0px));
+  padding-top: calc(max(24px, env(safe-area-inset-top)) + var(--recorte-cima, 0px));
   padding-bottom: calc(max(24px, env(safe-area-inset-top)) + var(--recorte-baixo, 0px));
   background: color-mix(in srgb, var(--seele-negro-absoluto) 78%, transparent);
 }
 
 .camada-de-mod[data-modal="nao"] {
   /* Um diálogo não modal não come os cliques do que está atrás: só a caixa
-     dele recebe ponteiro. */
+     dele recebe ponteiro. E a caixa termina antes do recorte, como a do
+     modal: a portaria acende embaixo, onde ele mora. */
   pointer-events: none;
   background: none;
   align-items: flex-end;
   justify-content: flex-end;
-  padding: 24px;
+  padding: calc(24px + var(--recorte-cima, 0px)) 24px calc(24px + var(--recorte-baixo, 0px))
+    calc(24px + var(--recorte-esquerda, 0px));
 }
 
 .dialogo-de-mod {
@@ -459,7 +463,7 @@
    oferecer versão estática.» */
 @media (prefers-reduced-motion: reduce) {
   .superficie-de-mod *,
-  .pessoa-cartao * {
+  .contribuicao-de-mod * {
     animation: none !important;
     transition: none !important;
   }
