@@ -112,4 +112,38 @@ assert.match(banco, /continua como estava/, `a falha do banco não diz que nada 
   assert.match(dita, /use o Servidor 0\.15 pelo launcher/, `a linha do pacote da API 4 não aponta o launcher: ${dita}`);
 }
 
+// 5. **As recusas de instalar um MOD e de apagar um pacote do cache**
+//    (pendência 58). Moram aqui porque a pergunta é a mesma das saídas acima:
+//    o produto sabe por que recusou, e a frase tem de dizer isso a quem lê, e
+//    não um código que ninguém sabe o que fazer com ele.
+{
+  // 5a. **O `mod.json` recusado diz o motivo pela frase de `RECUSAS_DE_PACOTE`**
+  //     (item 8), a mesma da gestão e do pacote que não serve. Depois do corte
+  //     da API 6, um MOD da API 5 instalado de uma pasta cai aqui, e a frase
+  //     dizia «DESTA PASTA: api-too-old». Os códigos vêm do próprio dicionário,
+  //     que o `todo_pacote_recusado_e_dito_com_uma_frase` (`frontend.rs`) cobra
+  //     contra o `refusal_name` do núcleo.
+  const recusasDePacote = vm.runInContext("RECUSAS_DE_PACOTE", contexto);
+  const codigos = Object.keys(recusasDePacote);
+  assert.ok(codigos.length >= 9, `\`RECUSAS_DE_PACOTE\` encolheu, e esta conferência compara com quase nada: ${codigos}`);
+  // Todos os códigos antes de reprovar: saber que um só cai cru é outra
+  // informação que saber que todos caem.
+  const crus = codigos.filter((codigo) => {
+    const dita = contexto.fraseDeErro({ ManifestoRecusado: codigo });
+    return !dita.includes(recusasDePacote[codigo]) || dita.includes(`: ${codigo}.`);
+  });
+  assert.deepEqual(crus, [],
+    `o «mod.json» recusado por estes códigos não sai pela frase de \`RECUSAS_DE_PACOTE\`, e a tela diz o código cru: ${crus.join(", ")}\n` +
+    `por exemplo: ${contexto.fraseDeErro({ ManifestoRecusado: crus[0] ?? codigos[0] })}`);
+  for (const codigo of codigos) {
+    const dita = contexto.fraseDeErro({ ManifestoRecusado: codigo });
+    assert.match(dita, /Nada foi instalado/, `a recusa do «mod.json» deixou de dizer que nada foi instalado: ${dita}`);
+  }
+  // E um código que o dicionário ainda não tem continua aparecendo cru, como
+  // no resto das frases: feio, e honesto.
+  const novo = contexto.fraseDeErro({ ManifestoRecusado: "um-codigo-novo" });
+  assert.match(novo, /DESTA PASTA: um-codigo-novo\./, `um código sem frase sumiu da recusa: ${novo}`);
+}
+
 console.log("hospedar com MOD antigo: a frase diz o MOD, a API e as três saídas na ordem do dono; sem o pacote, diz que ele falta, sem número; e toda recusa das saídas tem frase.");
+console.log("recusas de instalar: o «mod.json» recusado diz o motivo pela frase do código, e não o código cru.");

@@ -987,7 +987,7 @@ function fraseDeErro(erro, apelido, deOnde) {
     }
     if (erro.ManifestoRecusado) {
       return (
-        `ESTE SEELE RECUSOU O «mod.json» DESTA PASTA: ${erro.ManifestoRecusado}.\n` +
+        `ESTE SEELE RECUSOU O «mod.json» DESTA PASTA: ${RECUSAS_DE_PACOTE[erro.ManifestoRecusado] ?? erro.ManifestoRecusado}.\n` +
         "Nada foi instalado."
       );
     }
