@@ -12623,6 +12623,9 @@ fn no_script_calls_a_function_that_no_script_declares() {
         "registerProcessor",
         // A sessão pelo navegador (Tarefa 2.6 da F4): o transporte da página.
         "WebTransport",
+        // E a imagem escolhida, decodificada pelo navegador para o canvas que
+        // a encolhe (o ícone e o retrato).
+        "createImageBitmap",
         "parseInt",
         "parseFloat",
         "isNaN",

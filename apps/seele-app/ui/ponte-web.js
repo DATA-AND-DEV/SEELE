@@ -312,8 +312,6 @@ const AINDA_A_FAZER = new Map([
   ["destino_do_anexo", TAREFA_26],
   ["enviar_anexo", TAREFA_26],
   ["enviar_imagem_mod", TAREFA_MODS],
-  ["escolher_icone_do_server", TAREFA_26],
-  ["escolher_minha_imagem", TAREFA_26],
   ["escolher_para_o_mod", TAREFA_MODS],
   ["exclusao_do_som_da_captura", TAREFA_310],
   ["fontes_de_tela", TAREFA_310],
@@ -326,14 +324,12 @@ const AINDA_A_FAZER = new Map([
   ["pedaco_do_escolhido", TAREFA_MODS],
   ["pedir_permissao_de_tela", TAREFA_310],
   ["permissao_de_tela", TAREFA_310],
-  ["preparar_icone_do_server", TAREFA_26],
   ["prever_anexo", TAREFA_26],
   ["previa_de_link", TAREFA_26],
   ["salvar_anexo", TAREFA_26],
   ["soltar_escolhido", TAREFA_MODS],
   ["som_da_tela", TAREFA_39],
   ["som_do_mod", TAREFA_MODS],
-  ["tirar_minha_imagem", TAREFA_26]
 ]);
 
 /**
@@ -589,6 +585,9 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
   sessao.aoDobrar = () => conferirAVozDaSessao(sessao);
   sessao.aCadaVolta = () => seguirOsVolumes();
   sessaoDaPonte.atual = sessao;
+  // O retrato guardado sobe com a entrada, como no `connect` do desktop.
+  const retrato = bytesDoDataUri(guardadoNaOrigem(CHAVES_DA_ORIGEM.retrato));
+  if (retrato) sessao.atender("minha_imagem", { icone: Array.from(retrato) });
   aVozDaPonte().catch((falha) => console.warn("ponte: a voz da página não carregou:", falha));
   return {
     snapshot: sessao.snapshot(),
@@ -899,6 +898,113 @@ function ouvirOArraste() {
       position: { x: evento.clientX ?? 0, y: evento.clientY ?? 0 },
     });
   });
+}
+
+// ------------------------------------------------------------- as imagens
+
+/**
+ * **A escada do ícone do desktop** (`apps/seele-app/src/icone.rs`), JSON
+ * estrito: `tests/web.rs` a confere contra o `DEGRAUS` de lá. Cada degrau é o
+ * maior lado e os bits por canal de cor; a primeira imagem que cabe no teto do
+ * fio (`regras_do_icone_do_server`) vale. E o teto do arquivo de origem, acima
+ * do qual não se lê.
+ */
+const REGRAS_DO_ICONE = Object.freeze({
+  "degraus": [[256, 8], [256, 5], [256, 4], [192, 4], [160, 4], [128, 3], [96, 3], [64, 2]],
+  "teto_da_origem": 12582912
+});
+
+/**
+ * **O seletor de imagem, dentro do gesto**: nenhum `await` antes do
+ * `click()`, como o `escolher_arquivo`. Desistir resolve `null`.
+ */
+function escolherUmaImagem() {
+  return new Promise((responder) => {
+    const entrada = document.createElement("input");
+    entrada.type = "file";
+    // Os formatos que o `image` do desktop lê (PNG, JPEG, WebP e GIF): o iOS
+    // converte a foto HEIC para um deles ao entregar.
+    entrada.accept = "image/png,image/jpeg,image/webp,image/gif";
+    entrada.hidden = true;
+    let respondido = false;
+    const fim = (valor) => {
+      if (respondido) return;
+      respondido = true;
+      entrada.remove();
+      responder(valor);
+    };
+    entrada.addEventListener("change", () => fim(entrada.files?.[0] ?? null));
+    entrada.addEventListener("cancel", () => fim(null));
+    document.body.append(entrada);
+    entrada.click();
+  });
+}
+
+/**
+ * **A imagem escolhida, virada num ícone que cabe**: o `icone::encolher` do
+ * desktop, pela escada dele, com o canvas no lugar do `image`. Os bytes não são
+ * os do desktop (o PNG do navegador é outro codificador), e a regra é a mesma:
+ * menos cores antes de menos pixels, a proporção mantida, nunca ampliar, e o
+ * alfa intacto. `null` quando não é imagem, ou quando nem o último degrau cabe.
+ */
+async function encolherAImagem(arquivo) {
+  const { limite_bytes: teto } = CONSTANTES_DO_DESKTOP.regras_do_icone_do_server;
+  if (arquivo.size > REGRAS_DO_ICONE.teto_da_origem) return null;
+  let imagem;
+  try {
+    imagem = await createImageBitmap(arquivo);
+  } catch {
+    return null;
+  }
+  try {
+    for (const [ladoMaximo, bits] of REGRAS_DO_ICONE.degraus) {
+      const escala = Math.min(1, ladoMaximo / Math.max(imagem.width, imagem.height));
+      const largura = Math.max(1, Math.round(imagem.width * escala));
+      const altura = Math.max(1, Math.round(imagem.height * escala));
+      const tela = document.createElement("canvas");
+      tela.width = largura;
+      tela.height = altura;
+      const contexto = tela.getContext("2d");
+      contexto.imageSmoothingQuality = "high";
+      contexto.drawImage(imagem, 0, 0, largura, altura);
+      if (bits < 8) achatarAsCores(contexto, largura, altura, bits);
+      const png = await new Promise((resolver) => tela.toBlob(resolver, "image/png"));
+      if (png && png.size <= teto) return new Uint8Array(await png.arrayBuffer());
+    }
+    return null;
+  } finally {
+    imagem.close();
+  }
+}
+
+/** Cada canal de cor em `bits` níveis, o preto preto e o branco branco: o `achatar_cores` do desktop. */
+function achatarAsCores(contexto, largura, altura, bits) {
+  const quadro = contexto.getImageData(0, 0, largura, altura);
+  const passo = 255 / Math.max(1, 2 ** bits - 1);
+  for (let i = 0; i < quadro.data.length; i += 4) {
+    for (let canal = 0; canal < 3; canal += 1) {
+      quadro.data[i + canal] = Math.min(255, Math.max(0, Math.round(Math.round(quadro.data[i + canal] / passo) * passo)));
+    }
+  }
+  contexto.putImageData(quadro, 0, 0);
+}
+
+/** Um `data:` de PNG, como o `meu_retrato` do desktop o devolve. */
+function dataUriDoPng(bytes) {
+  let binario = "";
+  for (const byte of bytes) binario += String.fromCharCode(byte);
+  return `data:image/png;base64,${btoa(binario)}`;
+}
+
+/** Os bytes de um `data:` em base64, ou `null`. */
+function bytesDoDataUri(uri) {
+  const virgula = typeof uri === "string" ? uri.indexOf(",") : -1;
+  if (virgula < 0) return null;
+  try {
+    return Uint8Array.from(atob(uri.slice(virgula + 1)), (letra) => letra.charCodeAt(0));
+  } catch {
+    return null;
+  }
 }
 
 /** O que a origem guarda, ou `null` quando ela não guarda ou não deixa ler. */
@@ -1257,6 +1363,38 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     } catch (falha) {
       console.warn("ponte: a aparência do servidor não ficou guardada:", falha);
     }
+    return null;
+  },
+  // **As imagens**: o seletor dentro do gesto, a escada do desktop, e o fio
+  // pelo `.wasm` (que confere o PNG como o `check_server_icon`).
+  preparar_icone_do_server: () =>
+    escolherUmaImagem().then(async (arquivo) => {
+      if (!arquivo) return null;
+      const png = await encolherAImagem(arquivo);
+      return png ? Array.from(png) : Promise.reject("IconNotAPicture");
+    }),
+  // O seletor abre antes de a sessão ser conferida, como no desktop.
+  escolher_icone_do_server: () =>
+    escolherUmaImagem().then(async (arquivo) => {
+      if (!arquivo) return false;
+      const png = await encolherAImagem(arquivo);
+      if (!png) return Promise.reject("IconNotAPicture");
+      await pelaSessao("aplicar_icone_do_server")({ icone: Array.from(png) });
+      return true;
+    }),
+  // Guardada nesta origem, e subida agora se há sessão; sem sessão, sobe na
+  // próxima entrada, como no desktop.
+  escolher_minha_imagem: () =>
+    escolherUmaImagem().then(async (arquivo) => {
+      if (!arquivo) return false;
+      const png = await encolherAImagem(arquivo);
+      if (!png || !gravarNaOrigem(CHAVES_DA_ORIGEM.retrato, dataUriDoPng(png))) return Promise.reject("IconNotAPicture");
+      if (sessaoDaPonte.atual) await pelaSessao("minha_imagem")({ icone: Array.from(png) });
+      return true;
+    }),
+  tirar_minha_imagem: async () => {
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.retrato, null)) return Promise.reject("IconNotAPicture");
+    if (sessaoDaPonte.atual) await pelaSessao("minha_imagem")({ icone: null });
     return null;
   },
   estado_da_sessao: () => ({

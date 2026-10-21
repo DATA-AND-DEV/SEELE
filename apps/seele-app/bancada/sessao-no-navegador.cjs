@@ -34,7 +34,10 @@
 //    colado no SERVIDORES (`ler_entrada`, `analisar_convite` e o `connect` com
 //    o endereço), a aparência guardada nos conhecidos, os aceites de MODs pelo
 //    endereço, a volta pela lista sem link (`Known`), o endereço sem link
-//    recusado com a frase, o CANCELAR de quem espera, e o esquecer.
+//    recusado com a frase, o CANCELAR de quem espera, e o esquecer;
+// 9. **as imagens**: uma foto grande escolhida no seletor desce a escada do
+//    desktop até caber no teto do ícone, o retrato fica guardado e volta do
+//    servidor como a imagem da pessoa, e sai quando é tirado.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual.
 
@@ -107,6 +110,58 @@ function subirOServidor() {
     linhas.once("line", (linha) => resolver({ processo, ...JSON.parse(linha) }));
     processo.once("exit", (codigo) => rejeitar(new Error(`o servidor da bancada saiu com ${codigo} antes de dizer o link`)));
   });
+}
+
+/**
+ * Um PNG de ruído opaco, menor que o lado do ícone: o primeiro degrau não o
+ * reduz (reduzir faria a média do ruído, e a imagem caberia sem a escada), e
+ * nenhum degrau de cor cheia cabe no teto. A escada tem de descer até achatar
+ * as cores.
+ */
+function pngDeRuido(largura, altura) {
+  const zlib = require("node:zlib");
+  const crc32 = (bytes) => {
+    let c = ~0;
+    for (const byte of bytes) {
+      c ^= byte;
+      for (let k = 0; k < 8; k += 1) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+    }
+    return ~c >>> 0;
+  };
+  const pedaco = (tipo, dados) => {
+    const comTipo = Buffer.concat([Buffer.from(tipo, "ascii"), dados]);
+    const tamanho = Buffer.alloc(4);
+    tamanho.writeUInt32BE(dados.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(comTipo));
+    return Buffer.concat([tamanho, comTipo, crc]);
+  };
+  const cabecalho = Buffer.alloc(13);
+  cabecalho.writeUInt32BE(largura, 0);
+  cabecalho.writeUInt32BE(altura, 4);
+  cabecalho.set([8, 6, 0, 0, 0], 8);
+  const linhas = Buffer.alloc((largura * 4 + 1) * altura);
+  let semente = 12345;
+  for (let i = 0; i < linhas.length; i += 1) {
+    semente = (semente * 1103515245 + 12345) >>> 0;
+    const coluna = i % (largura * 4 + 1);
+    // O filtro da linha em zero, o alfa opaco, e as cores sorteadas.
+    linhas[i] = coluna === 0 ? 0 : coluna % 4 === 0 ? 0xff : (semente >>> 16) & 0xff;
+  }
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pedaco("IHDR", cabecalho),
+    pedaco("IDAT", zlib.deflateSync(linhas)),
+    pedaco("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/** Escolhe `arquivo` no próximo seletor que a página abrir, e chama o comando. */
+async function escolherNoSeletor(aba, arquivo, comando) {
+  const seletor = aba.waitForEvent("filechooser");
+  const chamada = invocar(aba, comando, {});
+  await (await seletor).setFiles(arquivo);
+  return chamada;
 }
 
 /** Espera uma condição na página, com prazo; devolve o último valor lido. */
@@ -314,6 +369,30 @@ const invocar = (aba, comando, args) =>
     const errado = servidor.link.replace(/wh=[0-9a-f]{64}/, `wh=${"ab".repeat(32)}`).replace(/,[0-9a-f]{64}/g, "");
     const comHashErrado = await entrarPeloLink(c.aba, errado, "caio");
     confere("7", comHashErrado.entrada?.erro === "sem-rede", `a entrada com o hash errado: ${JSON.stringify(comHashErrado.entrada)}`);
+
+    // ------------------------------------------------------------ 9. as imagens
+    const imagem = path.join(os.tmpdir(), `sessao-no-navegador-${process.pid}.png`);
+    fs.writeFileSync(imagem, pngDeRuido(250, 250));
+    const icone = await escolherNoSeletor(a.aba, imagem, "preparar_icone_do_server");
+    const bytes = Buffer.from(icone.ok ?? []);
+    confere(
+      "9",
+      bytes.length > 0 && bytes.length <= 8192 && bytes.subarray(1, 4).toString() === "PNG" && bytes.readUInt32BE(16) <= 256,
+      `o ícone preparado: ${bytes.length} bytes, lado ${bytes.length > 24 ? bytes.readUInt32BE(16) : "?"}`,
+    );
+    const retratoDaA = await escolherNoSeletor(a.aba, imagem, "escolher_minha_imagem");
+    confere("9", retratoDaA.ok === true, `o escolher_minha_imagem: ${JSON.stringify(retratoDaA)}`);
+    const meu = (await invocar(a.aba, "meu_retrato", {})).ok;
+    confere("9", typeof meu === "string" && meu.startsWith("data:image/png;base64,"), `o meu_retrato: ${String(meu).slice(0, 40)}`);
+    const subiu = await esperar(a.aba, async () => {
+      const r = await window.__TAURI__.core.invoke("snapshot");
+      const imagem = await window.__TAURI__.core.invoke("imagem_da_pessoa", { person: r.me });
+      return { pronto: typeof imagem === "string" && imagem.startsWith("data:image/png"), revisao: r.person_icons_revision };
+    });
+    confere("9", subiu.pronto, `a imagem própria não voltou do servidor (revisão ${subiu.revisao})`);
+    confere("9", (await invocar(a.aba, "tirar_minha_imagem", {})).ok === null, "o tirar_minha_imagem não respondeu null");
+    confere("9", (await invocar(a.aba, "meu_retrato", {})).ok === null, "o retrato ficou guardado depois de tirado");
+    fs.rmSync(imagem, { force: true });
 
     // ------------------------------------------------------------ 8. a casca larga
     const d = await abrirUmaPagina(navegador, endereco);

@@ -928,6 +928,81 @@ fn as_regras_da_voz_da_ponte_sao_as_do_desktop() {
     );
 }
 
+/// **A escada do ícone é a do desktop.** O navegador encolhe a imagem
+/// escolhida pelo canvas, com a escada do `icone::encolher` (Tarefa 2.6 da
+/// F4): os degraus e o teto do arquivo de origem são cópias, e este guarda as
+/// prende ao `icone.rs`.
+#[test]
+fn a_escada_do_icone_da_ponte_e_a_do_desktop() {
+    let ponte = sem_comentarios(&ler("ui/ponte-web.js"));
+    let json = ponte
+        .split_once("const REGRAS_DO_ICONE = Object.freeze(")
+        .expect("a ponte declara `REGRAS_DO_ICONE`")
+        .1
+        .split_once(");")
+        .expect("`REGRAS_DO_ICONE` fecha")
+        .0;
+    let da_ponte: serde_json::Value = serde_json::from_str(json)
+        .unwrap_or_else(|erro| panic!("`REGRAS_DO_ICONE` tem de ser JSON estrito: {erro}"));
+
+    let icone = sem_comentarios(&ler("src/icone.rs"));
+    let numero_de = |nome: &str| -> u64 {
+        let depois = icone
+            .split_once(&format!("const {nome}: "))
+            .unwrap_or_else(|| panic!("o `icone.rs` declara `{nome}`"))
+            .1;
+        depois
+            .split_once('=')
+            .and_then(|(_, resto)| resto.split_once(';'))
+            .expect("a constante tem valor")
+            .0
+            .split('*')
+            .map(|fator| {
+                fator
+                    .trim()
+                    .replace('_', "")
+                    .parse::<u64>()
+                    .expect("um número")
+            })
+            .product()
+    };
+    let lado = numero_de("LADO");
+    let degraus: Vec<[u64; 2]> = icone
+        .split_once("const DEGRAUS")
+        .and_then(|(_, depois)| depois.split_once("= ["))
+        .and_then(|(_, depois)| depois.split_once("];"))
+        .expect("o `icone.rs` declara `DEGRAUS`")
+        .0
+        .split('(')
+        .skip(1)
+        .map(|par| {
+            let (maior, bits) = par
+                .split_once(')')
+                .and_then(|(dentro, _)| dentro.split_once(','))
+                .expect("um par (lado, bits)");
+            let maior = match maior.trim() {
+                "LADO" => lado,
+                outro => outro.parse().expect("um lado"),
+            };
+            [maior, bits.trim().parse().expect("os bits")]
+        })
+        .collect();
+    assert!(
+        degraus.len() >= 4,
+        "li só {degraus:?} da escada do `icone.rs`"
+    );
+    let do_desktop = serde_json::json!({
+        "degraus": degraus,
+        "teto_da_origem": numero_de("TETO_DA_ORIGEM"),
+    });
+    assert_eq!(
+        numeros_como_f64(da_ponte),
+        numeros_como_f64(do_desktop.clone()),
+        "a escada do ícone da ponte discorda do `icone.rs`. A de hoje é:\n{}",
+        serde_json::to_string_pretty(&do_desktop).expect("JSON")
+    );
+}
+
 // ------------------------------------------------- a origem do web app
 
 /// A raiz do repositório: `apps/seele-app/` fica duas pastas abaixo dela.
