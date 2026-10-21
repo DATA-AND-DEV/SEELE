@@ -419,6 +419,7 @@ jobs:
         timeout-minutes: 10
         run: >-
           python3 tools/carga-da-casca.py
+          --roteiro tools/roteiros/abertura-com-entrar.js
           --roteiro tools/roteiros/aceite-de-mods-em-corrida.js
           --roteiro tools/roteiros/aceite-de-mods-que-falha.js
           --roteiro tools/roteiros/aceite-de-mods-que-nao-abre.js

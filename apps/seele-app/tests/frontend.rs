@@ -10824,7 +10824,9 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 ///    servidor recusa por falar outra versão, a recusa vem antes do Hello e o
 ///    convite não foi gasto: o `entrarPelaRecusa` o entrega ao `abrir_versao`,
 ///    para a versão aberta entrar com ele. Ele não vai a registro nem a frase,
-///    e o roteiro `outra-linha-pelo-launcher.js` reprova se for.
+///    e o roteiro `outra-linha-pelo-launcher.js` reprova se for. O link do
+///    `--entrar`, quando outro launcher abre esta versão, segue o mesmo
+///    caminho (`cumprirAAbertura`; roteiro `abertura-com-entrar.js`).
 ///
 /// **A entrada pelo navegador segue o mesmo contrato** (Tarefa 3.4 da F4): a
 /// `identidade-web.js` guarda o token do link, e o link inteiro que o carrega,
@@ -11092,7 +11094,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "camada-servidores.js",
             "alvo, apelido || undefined, token, linkColado ?? null, ligar ? { nome } : null",
         ),
-        ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
+        (
+            "tela-boot.js",
+            "convite.alvo, null, convite.token ?? null, pedido.entrar",
+        ),
         ("camada-mods.js", "alvo, null, credencial"),
         // A entrada pelo navegador (3.4): o link da página, com o token da
         // tentativa. Só quem não é conhecido o leva.
