@@ -603,7 +603,7 @@ const RECUSAS_DE_PACOTE = {
   "malformed": "o mod.json dele não é um JSON que este app lê, ou tem uma chave que ele não conhece",
   "schema-too-new": "o mod.json dele é de um formato mais novo que este app; atualize o aplicativo",
   "api-too-new": "ele é de uma API mais nova que a deste app; atualize o aplicativo",
-  "api-too-old": "ele é de uma API que roda no Servidor 0.15, e não neste app; procure a versão dele para a API 6, ou use o Servidor 0.15 pelo launcher",
+  "api-too-old": "ele é de uma API mais velha que a 6, a deste app; procure a versão dele para a API 6, ou use o Servidor 0.15 pelo launcher, que roda as APIs 3 a 5",
   "malformed-id": "o identificador dele não é «autor/nome»",
   "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",
   "tema-sem-metade-de-servidor": "ele declara a porta do tema sem a metade de servidor, que é quem pinta a aparência: o tema nunca apareceria",

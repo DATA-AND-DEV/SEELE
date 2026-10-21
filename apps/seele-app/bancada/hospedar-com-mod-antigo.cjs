@@ -78,7 +78,31 @@ const outroMod = contexto.fraseDeErro({ PacoteNaoServe: "conteudo-de-outro-mod" 
 assert.match(outroMod, /NÃO SERVE: o pacote baixado é de outro MOD/, `a recusa do pacote não diz por quê: ${outroMod}`);
 assert.match(outroMod, /continua como estava/, `a recusa do pacote não diz que nada mudou: ${outroMod}`);
 const apiVelha = contexto.fraseDeErro({ PacoteNaoServe: "api-too-old" });
-assert.match(apiVelha, /roda no Servidor 0\.15/, `um motivo do núcleo não sai pela frase dele: ${apiVelha}`);
+// **Verdadeira para toda API mais velha que a deste app** (rodada 1 do lote
+// 58-1, M4). A frase dizia que o MOD «é de uma API que roda no Servidor 0.15»,
+// e o `api-too-old` vale também para as APIs 0 a 2, que nenhum servidor roda.
+// Ela diz quais o Servidor 0.15 roda, conferidas contra `APIS_POR_LINHA`
+// (`crates/seele-proto/src/mods.rs`), a tabela de onde o app tira as dele: o
+// `frases.js` é um dicionário estático, sem ponte para lê-la.
+{
+  const proto = fs.readFileSync(path.join(__dirname, "../../../crates/seele-proto/src/mods.rs"), "utf8");
+  const tabela = /pub const APIS_POR_LINHA:[^=]*=\s*\[(.*?)\];/s.exec(proto);
+  assert.ok(tabela, "`APIS_POR_LINHA` sumiu de crates/seele-proto/src/mods.rs, ou mudou de forma, e a frase do `api-too-old` não tem com o que se conferir");
+  const porLinha = Object.fromEntries([...tabela[1].matchAll(/\("([^"]+)",\s*&\[([^\]]*)\]\)/g)]
+    .map(([, linha, apis]) => [linha, apis.split(",").map((n) => Number(n.trim())).sort((a, b) => a - b)]));
+  const legada = porLinha["0.15"];
+  const desta = porLinha["1"];
+  assert.ok(legada?.length > 0 && desta?.length === 1, `a leitura de \`APIS_POR_LINHA\` ficou cega: ${JSON.stringify(porLinha)}`);
+  const [menor, maior] = [legada[0], legada.at(-1)];
+  assert.equal(legada.length, maior - menor + 1,
+    `as APIs do Servidor 0.15 deixaram de ser seguidas (${legada}), e «as APIs ${menor} a ${maior}» não as diz`);
+  assert.doesNotMatch(apiVelha, /é de uma API que roda no Servidor 0\.15/,
+    `a frase do \`api-too-old\` diz que o MOD roda no Servidor 0.15, e uma API ${menor - 1} não roda: ${apiVelha}`);
+  assert.ok(apiVelha.includes(`que roda as APIs ${menor} a ${maior}`),
+    `a frase do \`api-too-old\` não diz que o Servidor 0.15 roda as APIs ${menor} a ${maior}: ${apiVelha}`);
+  assert.ok(apiVelha.includes(`mais velha que a ${desta[0]}`) && apiVelha.includes(`a versão dele para a API ${desta[0]}`),
+    `a frase do \`api-too-old\` não diz a API deste app, ${desta[0]}: ${apiVelha}`);
+}
 // **E aponta o Servidor 0.15 no launcher** (`compatibilidade.porque`; a
 // auditoria do `v6.json`, tabela 1): dizer onde ele roda sem dizer onde
 // abri-lo deixa quem lê sem o caminho.
