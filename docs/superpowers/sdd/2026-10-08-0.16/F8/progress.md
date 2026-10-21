@@ -87,3 +87,14 @@ O nome que a pessoa lê é «RECEBER LIGAÇÕES PELO SEU CÓDIGO» (o termo da s
 ### Itens abertos
 
 - **Uma intermitente no `aba-servidor`**, vista em 16/10 no estado de antes do ENTRAR reconciliado (o `base.js` novo e o resto como estava): 1 reprovação em 56 variantes (360, tema hostil), com a folha SENHA DA SALA aberta sobre os cartões e o ENTRAR de SILÊNCIO fora de vista. Hipótese, não medida: o toque no ENTRAR que o celular trocava a cada 500 ms. Depois do conserto o ENTRAR é o mesmo nó; uma rodada da bancada inteira passando não prova o fim de uma intermitente.
+
+### O que roda antes de cada entrega
+
+O que aprendi a rodar, e por quê. Cada linha custou um vermelho ou uma conferência que não valia.
+
+- **Os guardas:** `cargo test -p seele-app --test celular`, `--test frontend` e `--test tokens`, nunca o `--workspace` (a porta 8384 é disputada). Com Rust mexido, `cargo fmt --all -- --check` e `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`.
+- **Mexeu no `base.js` (ou em outro arquivo do desktop que as bancadas de Node leem): `cargo xtask check-runtime`.** Elas leem o `base.js` com elementos falsos, e o que o navegador dá de graça (o `dataset`, por exemplo) pode não estar lá. O `a4d75a5f` (21/10) passou nos guardas, na bancada inteira, no G3 e nos roteiros, e caiu ali, na bateria da 22ª (o `tema-sai-com-a-sessao.cjs`; a orquestradora deu o `dataset` à bancada no `f55af1ed`).
+- **A bancada do celular inteira, com o G3 nos dois motores, e os roteiros de `tools/roteiros/`** (`carga-da-casca.py --roteiro` um por um; o `--tudo` é outra coisa, todo `console.*`).
+- **Cada reversão tem de ter rodado.** Um reversor que conta «passa» pela falta de REPROVA mente quando a bancada nem começa: em 20/10 o scratchpad perdeu o ajudante, e seis reversões «passaram» sem rodar. O `reverter-sobre.py` diz NÃO RODOU quando nenhum caso aparece na saída.
+- **Carga sintética nasce com prazo** (`perl -e 'alarm N; exec …'`), avisada antes; um laço que a página pode girar sem fim se limita dentro da página, e não por um prazo de fora, que deixaria o navegador órfão.
+- **`cargo clean` no worktree ao fim de cada lote**, depois de conferir que o `target` é só dele.
