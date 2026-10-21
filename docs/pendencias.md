@@ -10159,3 +10159,32 @@ captura de mentira, a espera da bomba armar) antes de mexer na paciência: um te
 a máquina parada não prova nada numa bateria, e um prazo maior sem a medida esconde uma lentidão
 do produto. **Sem dona ainda.**
 
+
+## 67 · Fechada em 2026-10-21 · O APAGAR de um canal ficava pendurado quando o servidor recusava a pesagem
+
+**Aberta e fechada em 2026-10-21**, achada pela pergunta da F5 na revisão das frases do «NÃO DEU» e
+medida pela F1. **Fechada por `62a38a7a`** (F1).
+
+**O mecanismo, pelo código:** o APAGAR de um canal pergunta o peso antes de abrir a caixa
+(`peso_da_linha`, `camada-moderar.js`). A FFI guarda a espera em `pending_weights` e só a resolvia
+com um `ChannelWeighed` (`answer_weight`), ou a limpava no fim da sessão. O servidor responde a um
+`WeighChannel` que não deu com o `PedidoRecusado` do `nao_deu`, e nada resolvia a espera com ele.
+**Medido em 21/10** com um teste temporário: depois do `fold` da recusa, a espera seguia viva
+(`Err(Empty)`, 1 pendente), e a sala guardava o `PedidoRecusado` como aviso. O que a pessoa via: o
+APAGAR sem resposta nenhuma além da faixa, a caixa «Não consegui contar…» que nunca abria, e cada
+clique a mais empilhando outra espera, viva até a sessão acabar.
+
+**O conserto:** a recusa de uma pesagem resolve a espera mais antiga com a causa
+(`recusar_peso`), o `weigh_channel` devolve `ConnectionError::PedidoRecusado { causa }`, e a caixa
+abre com o porquê e o que fazer. A recusa respondida não vira faixa (um sinal só, onde a pessoa
+agiu); sem ninguém esperando, vira, como antes.
+
+**As outras esperas da FFI**, conferidas: só o `WeighChannel` tinha a forma. O `ImagemDeMod`
+responde pelo próprio fluxo, o `ModRequest` sempre volta com um `ModReply`, e o `PreviewAttachment`
+resolve com a caixa do download.
+
+**Provas:** `seele-ffi` `cada_recusa_de_uma_pesagem_volta_a_quem_perguntou_e_sem_faixa` (dois
+cliques) e `uma_pesagem_recusada_devolve_a_causa_a_quem_perguntou` (com prazo, para reprovar em vez
+de pendurar), e o roteiro `apagar-canal-recusado.js`. Cada um reprova pela reversão: sem o
+conserto, com a recusa respondida virando faixa também, e resolvendo a mais nova no lugar da mais
+antiga.
