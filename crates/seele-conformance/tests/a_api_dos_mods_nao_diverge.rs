@@ -100,8 +100,9 @@ fn o_indexador_e_este_build_oferecem_a_mesma_api_de_mods() {
         .filter_map(serde_json::Value::as_u64)
         .filter_map(|n| u32::try_from(n).ok())
         .collect();
-    let das_linhas: std::collections::BTreeSet<u32> =
-        seele_proto::mods::apis_de_toda_linha().into_iter().collect();
+    let das_linhas: std::collections::BTreeSet<u32> = seele_proto::mods::apis_de_toda_linha()
+        .into_iter()
+        .collect();
     assert!(
         das_linhas.is_subset(&aceitas),
         "o indexador recusaria um pacote de uma linha que o launcher oferece: faltam {:?}",
