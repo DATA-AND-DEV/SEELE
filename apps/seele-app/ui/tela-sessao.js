@@ -3614,10 +3614,9 @@ function fraseDoAviso(motivo) {
       "menos gente falando junto, ou o servidor numa internet que envie mais, resolve."
     );
   }
-  // Provisória: a causa completa a frase. Ver `CAUSAS_DE_RECUSA`.
+  // O que se pediu, por que não deu e o que fazer: ver `fraseDoPedidoRecusado`.
   if (nome === "PedidoRecusado") {
-    const causa = CAUSAS_DE_RECUSA[motivo[nome]?.causa];
-    return causa ? `${frase}: ${causa}` : frase;
+    return fraseDoPedidoRecusado(motivo[nome]?.pedido, motivo[nome]?.causa);
   }
   return frase;
 }

@@ -1159,6 +1159,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/apps-mais-novos.js \
         --roteiro tools/roteiros/atualizacao.js \
         --roteiro tools/roteiros/avatar-na-chamada.js \
+        --roteiro tools/roteiros/banco-do-futuro.js \
         --roteiro tools/roteiros/barra-mac.js \
         --roteiro tools/roteiros/botoes-da-entrada.js \
         --roteiro tools/roteiros/catalogo-de-mods.js \
@@ -1180,6 +1181,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/outra-linha.js \
         --roteiro tools/roteiros/outra-linha-pelo-launcher.js \
         --roteiro tools/roteiros/palco.js \
+        --roteiro tools/roteiros/pedido-recusado.js \
         --roteiro tools/roteiros/perfil-entrada.js \
         --roteiro tools/roteiros/perfil-salva-sessao.js \
         --roteiro tools/roteiros/perfil-salva.js \

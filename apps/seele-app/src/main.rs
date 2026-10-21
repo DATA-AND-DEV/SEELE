@@ -3192,6 +3192,17 @@ enum FalhaAoHospedar {
     PortaOcupada,
     /// Qualquer outro motivo para o servidor não subir.
     NaoSubiu,
+    /// **Os dados deste servidor são de uma versão mais nova do SEELE** (spec
+    /// da 0.16, §8): o banco está num esquema que esta versão não conhece, e o
+    /// servidor o recusou sem tocar nele (`persistence::BancoDoFuturo`). Quem
+    /// resolve é atualizar o app; os números vão ao registro e à tela, para
+    /// quem relata.
+    BancoDoFuturo {
+        /// O esquema gravado no banco.
+        gravado: i64,
+        /// O maior que esta versão conhece.
+        conhecido: i64,
+    },
     /// O nome público digitado não pode virar link, e por quê.
     ///
     /// **Recusado antes de o servidor subir**, e essa ordem é a decisão: subir
@@ -3649,6 +3660,53 @@ async fn hospedar(
 /// (`o_mod_do_guardado_continua_respondendo`, tarefa 20 da F7) precisa de uma
 /// hospedagem com MODs, e com o ponto padrão ela convocaria o ponto do projeto.
 #[cfg(test)]
+mod o_banco_de_uma_versao_mais_nova {
+    use super::{classificar, FalhaAoHospedar};
+
+    /// **Hospedar um banco de uma versão mais nova diz isso pelo nome** (spec da
+    /// 0.16, §8). O erro é o de verdade: o `Persistence::open` sobre um banco
+    /// gravado num esquema acima do deste build, embrulhado como a subida o
+    /// embrulha. Sem o nome, a tela dizia NÃO CONSEGUI SUBIR O SERVIDOR AQUI, e
+    /// a pessoa não teria como saber que atualizar resolve.
+    #[test]
+    fn o_banco_do_futuro_chega_a_tela_pelo_nome() {
+        use seele_server::persistence::{esquema_conhecido, Location, Persistence};
+        let pasta = std::env::temp_dir().join(format!("seele-futuro-app-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).expect("pasta");
+        let arquivo = pasta.join("seele.db");
+        let conexao = rusqlite::Connection::open(&arquivo).expect("criar");
+        conexao
+            .execute_batch(
+                "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL) STRICT;",
+            )
+            .expect("a tabela");
+        conexao
+            .execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (?1, 0)",
+                [esquema_conhecido() + 1],
+            )
+            .expect("a versão");
+        drop(conexao);
+
+        let Err(erro) = Persistence::open(&Location::File(arquivo)) else {
+            panic!("o servidor abriu um banco de uma versão mais nova");
+        };
+        let embrulhado = erro.context("subindo o servidor desta janela");
+        assert!(
+            matches!(
+                classificar(&embrulhado),
+                FalhaAoHospedar::BancoDoFuturo { gravado, conhecido }
+                    if gravado == esquema_conhecido() + 1 && conhecido == esquema_conhecido()
+            ),
+            "o banco de uma versão mais nova chegou à tela como outra falha: {:?}",
+            classificar(&embrulhado)
+        );
+        let _ = std::fs::remove_dir_all(&pasta);
+    }
+}
+
+#[cfg(test)]
 mod o_ponto_de_encontro_de_quem_hospeda {
     /// As duas formas, partidas para não casarem com este texto.
     const COM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar_com_o_ponto_padrao(");
@@ -4060,6 +4118,14 @@ const PORTA_PADRAO: u16 = 8383;
 /// esconde a única falha que a pessoa consegue resolver sozinha.
 fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
     for causa in erro.chain() {
+        // O banco de uma versão mais nova: a outra falha com conserto que a
+        // pessoa consegue fazer, que é atualizar.
+        if let Some(futuro) = causa.downcast_ref::<seele_server::persistence::BancoDoFuturo>() {
+            return FalhaAoHospedar::BancoDoFuturo {
+                gravado: futuro.gravado,
+                conhecido: futuro.conhecido,
+            };
+        }
         if let Some(io) = causa.downcast_ref::<std::io::Error>() {
             if io.kind() == std::io::ErrorKind::AddrInUse {
                 return FalhaAoHospedar::PortaOcupada;
