@@ -101,6 +101,28 @@ pub struct Sessao {
     /// `pending_weights` da FFI. O `ChannelWeighed` responde todos de um canal;
     /// a recusa do pedido responde o primeiro.
     pub(crate) pesos_pendentes: std::collections::VecDeque<seele_proto::ids::ChannelId>,
+    /// As pendentes que a volta repete, na ordem: a `Repeticao` da FFI.
+    pub(crate) a_repetir: std::collections::VecDeque<seele_proto::ids::ClientMessageId>,
+    /// Quantas a próxima vez da repetição manda: a rajada da volta, e depois
+    /// uma por vez.
+    pub(crate) rajada: usize,
+    /// Os `Ping` de rotina desta conexão, de um em um a partir de 1, como o
+    /// `send_ping` do desktop: o `Pong` deles diz à bateria que o enlace vive.
+    pub(crate) pings: u64,
+}
+
+/// A rajada da primeira vez da repetição e a página do buraco: os da FFI, do
+/// mesmo `seele_sessao::volta`.
+pub use seele_sessao::volta::{PAGINA_DO_BURACO, RAJADA_DA_VOLTA};
+
+/// O que a página escolheu e a volta repete ao servidor: o mudo e o isolamento
+/// (o motor do desktop os lembra; aqui a página os guarda).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Escolhas {
+    /// O microfone mudo.
+    pub mudo: bool,
+    /// O isolamento total.
+    pub isolado: bool,
 }
 
 /// O volume mais alto que se escolhe para alguém: o `VOLUME_MAXIMO` da FFI.
@@ -121,6 +143,9 @@ impl Sessao {
             entradas_pedidas: 0,
             volumes: BTreeMap::new(),
             pesos_pendentes: std::collections::VecDeque::new(),
+            a_repetir: std::collections::VecDeque::new(),
+            rajada: 0,
+            pings: 0,
         }
     }
 
@@ -357,6 +382,93 @@ impl Sessao {
             .collect();
         ganhos.sort_by_key(|(ssrc, _)| *ssrc);
         ganhos
+    }
+
+    /// **A volta**: a sessão nova por cima da sala velha, e o que o motor do
+    /// desktop restabelece (`restabelecer`, e o `readotar_na_volta` da FFI).
+    ///
+    /// O `adopt` guarda a conversa, as pendentes e o canal aberto, e o assento
+    /// que o servidor resgatou. Por cima vem o pedido: a sala em que a pessoa
+    /// estava (sem senha, com o `Ping` marcado da conexão nova, contando de
+    /// novo de 1) ou a saída; o canal aberto, com uma página do buraco do
+    /// histórico; o mudo e o isolamento escolhidos. As pendentes ficam na fila
+    /// da repetição.
+    ///
+    /// **O buraco aqui é uma página** das `PAGINA_DO_BURACO` mais novas do canal
+    /// aberto. O desktop desce até dez, com cercas (`volta::Buraco`), e o que
+    /// passou de duzentas mensagens durante a queda não volta nesta versão.
+    pub(crate) fn readotar(
+        &mut self,
+        info: &SessionInfo,
+        escolhas: Escolhas,
+    ) -> Vec<seele_proto::control::ClientMessage> {
+        use seele_proto::control::ClientMessage;
+        let desejada = self.room.current_voice_room;
+        let canal = self.room.current_channel;
+        let apelido = self.apelido.clone();
+        self.room.adopt(info, &apelido);
+        self.entradas_pedidas = 0;
+        self.pings = 0;
+        let mut saida = Vec::new();
+        if let Some(sala) = desejada {
+            saida.push(ClientMessage::EnterVoiceRoom {
+                voice_room: sala,
+                password: None,
+            });
+            self.entradas_pedidas = 1;
+            saida.push(ClientMessage::Ping {
+                timestamp: seele_sessao::assento::carimbo_da_entrada(1),
+            });
+            self.room.enter_voice_room(sala);
+        } else {
+            if self.room.current_voice_room.is_some() {
+                saida.push(ClientMessage::LeaveVoiceRoom);
+            }
+            self.room.leave_voice_room();
+        }
+        if let Some(canal) = canal {
+            saida.push(ClientMessage::JoinChannel { channel: canal });
+            saida.push(ClientMessage::FetchHistory {
+                channel: canal,
+                cursor: None,
+                limit: PAGINA_DO_BURACO,
+            });
+        }
+        if escolhas.mudo {
+            saida.push(ClientMessage::SetMuted(true));
+        }
+        if escolhas.isolado {
+            saida.push(ClientMessage::SetTotalIsolation(true));
+        }
+        self.a_repetir = self
+            .room
+            .pendentes
+            .iter()
+            .filter(|pendente| {
+                matches!(
+                    pendente.estado,
+                    seele_sessao::state::EstadoDoEnvio::SemResposta
+                        | seele_sessao::state::EstadoDoEnvio::Enviando
+                )
+            })
+            .map(|pendente| pendente.client_message_id)
+            .collect();
+        self.rajada = RAJADA_DA_VOLTA;
+        saida
+    }
+
+    /// O enlace caiu: o que estava saindo fica sem resposta (o
+    /// `envios_sem_resposta` da FFI), e a fila da repetição de uma volta
+    /// anterior é esquecida.
+    pub(crate) fn caiu(&mut self, eventos: &mut Vec<Value>) {
+        if self.room.envios_sem_resposta() {
+            self.a_conversa_mudou(eventos);
+        }
+        self.a_repetir.clear();
+        self.rajada = 0;
+        // Os pesos pedidos à conexão que caiu não vão ter resposta dela: quem
+        // os esperava fica sabendo pela página (`null`, como no fim).
+        self.pesos_pendentes.clear();
     }
 
     /// Sobe a revisão da conversa e diz à casca: o `messages_changed` da FFI.

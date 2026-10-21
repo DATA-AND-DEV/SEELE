@@ -11037,7 +11037,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "return { alvo: lido.link.alvo, token: lido.link.convite ?? null, versao: lido.link.versao ?? null, para_entrar: \"Aqui\" };",
         ),
         ("sessao-web.js", "convite = null,"),
-        ("sessao-web.js", "convite,"),
+        // O pedido da volta é o mesmo sem ele: o convite é de uso único.
+        ("sessao-web.js", "const recusa = ligacao.abrir({ ...pedido, convite });"),
     ];
     let mut pela_ponte = Vec::new();
     for arquivo in ["ponte-web.js", "sessao-web.js"] {

@@ -134,6 +134,9 @@ pub enum Passo {
     Assinar(Vec<u8>),
     /// A sessão abriu: o retrato já se lê.
     Entrou,
+    /// A sessão voltou depois de uma queda, por cima da sala velha
+    /// ([`Ligacao::retomar`]).
+    Voltou,
     /// Uma mensagem dobrada: ela em JSON, e os eventos que a casca ouve.
     Chegou {
         /// A mensagem, no JSON do `ServerMessage`.
@@ -174,6 +177,7 @@ impl Passo {
         match self {
             Self::Assinar(bytes) => json!({ "assinar": bytes }),
             Self::Entrou => json!("entrou"),
+            Self::Voltou => json!("voltou"),
             Self::Chegou { mensagem, eventos } => json!({ "chegou": mensagem, "eventos": eventos }),
             Self::Desconhecida { ordinal } => json!({ "desconhecida": ordinal }),
             Self::Recusada(motivo) => json!({ "recusada": motivo }),
@@ -198,6 +202,10 @@ pub struct Ligacao {
     entrada: Desenquadrador,
     saida: Vec<u8>,
     medida: Medida,
+    /// A sessão de uma conexão que caiu, guardada para a volta.
+    guardada: Option<Box<Sessao>>,
+    /// A volta em curso: a sessão velha e as escolhas que se repetem.
+    voltando: Option<(Box<Sessao>, crate::sessao::Escolhas)>,
 }
 
 /// O sinal desta ponta: o `Signal` do `seele-proto`, alimentado a cada volta
@@ -227,24 +235,72 @@ impl Ligacao {
             etapa: Etapa::Desafio,
             apelido: pedido.apelido.clone(),
             impressao: pedido.impressao,
-            aceito: pedido.aceito,
+            aceito: pedido.aceito.clone(),
             carimbo: VERSAO_MINIMA,
             entrada: Desenquadrador::default(),
             saida: Vec::new(),
             medida: Medida::default(),
+            guardada: None,
+            voltando: None,
         };
-        ligacao
-            .escrever(&ClientMessage::Hello {
-                faixa: FAIXA,
-                apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
-                client: quem_sou_eu(),
-                nickname: pedido.apelido,
-                public_key: pedido.chave_publica.to_vec(),
-                join_secret: pedido.convite,
-                material_e2ee: None,
-            })
-            .map_err(|_| json!("Unreachable"))?;
+        ligacao.dizer_ola(pedido)?;
         Ok(ligacao)
+    }
+
+    fn dizer_ola(&mut self, pedido: Pedido) -> Result<(), Value> {
+        self.escrever(&ClientMessage::Hello {
+            faixa: FAIXA,
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
+            client: quem_sou_eu(),
+            nickname: pedido.apelido,
+            public_key: pedido.chave_publica.to_vec(),
+            join_secret: pedido.convite,
+            material_e2ee: None,
+        })
+        .map_err(|_| json!("Unreachable"))
+    }
+
+    /// **O enlace caiu, e a página vai tentar voltar**: a sessão fica guardada
+    /// (a conversa, as pendentes, os volumes, a busca), e o que estava saindo
+    /// fica sem resposta. Os eventos dizem à casca o que mudou. Sem sessão
+    /// aberta, nada.
+    pub fn largar_para_voltar(&mut self) -> Vec<Value> {
+        let mut eventos = Vec::new();
+        if let Etapa::Dentro(mut sessao) = std::mem::replace(&mut self.etapa, Etapa::Fim) {
+            sessao.caiu(&mut eventos);
+            self.guardada = Some(sessao);
+        } else if let Some(sessao) = self.guardada.as_mut() {
+            sessao.caiu(&mut eventos);
+        }
+        eventos
+    }
+
+    /// **A volta**: um aperto de mão novo com a sessão guardada, por uma
+    /// conexão nova. O `Hello` fica esperando em [`Ligacao::para_o_fio`], e a
+    /// `Session` que vier é readotada por cima da sala velha
+    /// ([`Passo::Voltou`]).
+    ///
+    /// # Errors
+    ///
+    /// Sem sessão guardada (`"NotConnected"`), ou o `Hello` que não sai.
+    pub fn retomar(
+        &mut self,
+        pedido: Pedido,
+        escolhas: crate::sessao::Escolhas,
+    ) -> Result<(), Value> {
+        let sessao = match std::mem::replace(&mut self.etapa, Etapa::Fim) {
+            Etapa::Dentro(sessao) => sessao,
+            _ => self.guardada.take().ok_or_else(|| json!("NotConnected"))?,
+        };
+        self.etapa = Etapa::Desafio;
+        self.apelido.clone_from(&pedido.apelido);
+        self.impressao = pedido.impressao;
+        self.aceito.clone_from(&pedido.aceito);
+        self.carimbo = VERSAO_MINIMA;
+        self.entrada = Desenquadrador::default();
+        self.saida.clear();
+        self.voltando = Some((sessao, escolhas));
+        self.dizer_ola(pedido)
     }
 
     /// Os bytes que esperam para ir ao fluxo de controle, já enquadrados. Sai
@@ -253,12 +309,16 @@ impl Ligacao {
         std::mem::take(&mut self.saida)
     }
 
-    /// A sessão, depois do [`Passo::Entrou`].
+    /// A sessão, depois do [`Passo::Entrou`], e também a guardada durante a
+    /// volta: o retrato segue legível na bateria, como no desktop.
     #[must_use]
     pub fn sessao(&self) -> Option<&Sessao> {
         match &self.etapa {
             Etapa::Dentro(sessao) => Some(sessao),
-            _ => None,
+            _ => self
+                .guardada
+                .as_deref()
+                .or_else(|| self.voltando.as_ref().map(|(sessao, _)| &**sessao)),
         }
     }
 
@@ -268,6 +328,15 @@ impl Ligacao {
             Etapa::Dentro(sessao) => Some(sessao),
             _ => None,
         }
+    }
+
+    /// A sessão guardada pela queda, na bateria ou no aperto da volta: a que
+    /// os comandos atendem sem fio, como o motor do desktop sem cliente.
+    pub(crate) fn sessao_na_bateria(&mut self) -> Option<&mut Sessao> {
+        if let Some(sessao) = self.guardada.as_deref_mut() {
+            return Some(sessao);
+        }
+        self.voltando.as_mut().map(|(sessao, _)| &mut **sessao)
     }
 
     /// Uma volta da medida: o tempo de ida e volta que o transporte estimou, o
@@ -377,7 +446,9 @@ impl Ligacao {
         match self.etapa {
             Etapa::Fim => Vec::new(),
             Etapa::Dentro(_) => {
-                self.etapa = Etapa::Fim;
+                if let Etapa::Dentro(sessao) = std::mem::replace(&mut self.etapa, Etapa::Fim) {
+                    self.guardada = Some(sessao);
+                }
                 vec![Passo::Perdida("o fluxo de controle acabou".into())]
             }
             Etapa::Desafio | Etapa::Assinando | Etapa::Resposta => {
@@ -417,7 +488,10 @@ impl Ligacao {
                         self.etapa = Etapa::Dentro(sessao);
                         vec![passo]
                     }
-                    Err(motivo) => vec![Passo::Perdida(motivo)],
+                    Err(motivo) => {
+                        self.guardada = Some(sessao);
+                        vec![Passo::Perdida(motivo)]
+                    }
                 }
             }
             Etapa::Fim => Vec::new(),
@@ -495,6 +569,15 @@ impl Ligacao {
                     channels,
                     permissions,
                 };
+                if let Some((mut sessao, escolhas)) = self.voltando.take() {
+                    let restabelecer = sessao.readotar(&info, escolhas);
+                    self.etapa = Etapa::Dentro(sessao);
+                    for mensagem in &restabelecer {
+                        // O que não cabe no fio não sai, como o motor do desktop.
+                        let _ = self.escrever(mensagem);
+                    }
+                    return vec![Passo::Voltou];
+                }
                 self.etapa = Etapa::Dentro(Box::new(Sessao::adotar(&info, &self.apelido)));
                 vec![Passo::Entrou]
             }
@@ -505,16 +588,24 @@ impl Ligacao {
 
     fn recusar(&mut self, motivo: Value) -> Vec<Passo> {
         self.etapa = Etapa::Fim;
+        // Uma volta recusada devolve a sessão à guarda: a página decide se tenta
+        // de novo ou encerra.
+        if let Some((sessao, _)) = self.voltando.take() {
+            self.guardada = Some(sessao);
+        }
         vec![Passo::Recusada(motivo)]
     }
 
     fn perder(&mut self, erro: &ControlError) -> Vec<Passo> {
-        match self.etapa {
-            Etapa::Dentro(_) => {
-                self.etapa = Etapa::Fim;
+        match std::mem::replace(&mut self.etapa, Etapa::Fim) {
+            Etapa::Dentro(sessao) => {
+                self.guardada = Some(sessao);
                 vec![Passo::Perdida(format!("{erro:?}"))]
             }
-            _ => self.recusar(json!("Unreachable")),
+            outra => {
+                self.etapa = outra;
+                self.recusar(json!("Unreachable"))
+            }
         }
     }
 }

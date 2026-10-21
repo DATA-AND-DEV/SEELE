@@ -35,6 +35,13 @@
 //! | `ligacao_atender(pedido)` | 0 | `{"resposta", "eventos", "nao_saiu"}` |
 //! | | 1 | `{"erro": …}`, o erro do desktop |
 //! | | 2 | `{"nao_e_da_sessao": true}` |
+//! | `ligacao_largar()` | 0 | os eventos da queda: a sessão fica guardada para a volta |
+//! | `ligacao_retomar(pedido, escolhas)` | 0 | nada: o `Hello` da volta espera em `ligacao_para_o_fio` |
+//! | | 1 | `{"recusa": …}` ou `{"erro": …}` |
+//! | `bateria_nova()`, `bateria_pong()`, `bateria_voltou()` | — | — |
+//! | `bateria_caiu(agora_ms)`, `bateria_falhou(agora_ms)` | — | — |
+//! | `bateria_poll(agora_ms)` | 0 esperar, 1 ping, 2 voltar, 3 encerrar | — |
+//! | `bateria_enlace(agora_ms)` | 0 | o `link` do `Snapshot` |
 //! | `ligacao_fechar()` | — | — |
 //!
 //! **Os fluxos que o servidor abre** (Tarefas 2.6 e 3.9; [`crate::fluxos`]): a
@@ -126,6 +133,7 @@ thread_local! {
     static SAIDA: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static LIGACAO: RefCell<Option<Ligacao>> = const { RefCell::new(None) };
     static PAGINA: RefCell<Option<DaPagina>> = const { RefCell::new(None) };
+    static BATERIA: RefCell<Option<seele_sessao::battery::Battery>> = const { RefCell::new(None) };
     static FLUXOS: RefCell<(u32, std::collections::BTreeMap<u32, FluxoQueChega>)> =
         const { RefCell::new((0, std::collections::BTreeMap::new())) };
     static ENVIO: RefCell<Option<Envio>> = const { RefCell::new(None) };
@@ -576,6 +584,145 @@ pub extern "C" fn fluxo_acabou(alca: u32) -> u32 {
         Some(passos) => dizer_os_passos_do_fluxo(&passos),
         None => dizer(br#"{"erro":"sem-fluxo"}"#.to_vec(), 1),
     }
+}
+
+/// O enlace caiu, e a página vai tentar voltar: a sessão fica guardada.
+/// Devolve 0 com os eventos (`[…]`, o JSON do `seele_ffi::Event`).
+#[no_mangle]
+pub extern "C" fn ligacao_largar() -> u32 {
+    let eventos = LIGACAO.with(|l| {
+        l.borrow_mut()
+            .as_mut()
+            .map(Ligacao::largar_para_voltar)
+            .unwrap_or_default()
+    });
+    dizer(serde_json::json!(eventos).to_string().into_bytes(), 0)
+}
+
+/// **A volta**: o pedido de [`ligacao_abrir`] e as escolhas
+/// (`{"mudo", "isolado"}`), com a sessão guardada. Devolve 0 com o `Hello`
+/// esperando em [`ligacao_para_o_fio`], ou 1 com `{"recusa": …}` ou `{"erro":
+/// …}`.
+///
+/// # Safety
+///
+/// Os dois pares `ptr`/`len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn ligacao_retomar(
+    pedido_ptr: *const u8,
+    pedido_len: usize,
+    escolhas_ptr: *const u8,
+    escolhas_len: usize,
+) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido = unsafe { entrada(pedido_ptr, pedido_len) };
+    // SAFETY: idem.
+    let escolhas = unsafe { entrada(escolhas_ptr, escolhas_len) };
+    let pedido = match std::str::from_utf8(pedido)
+        .map_err(|e| e.to_string())
+        .and_then(Pedido::de_json)
+    {
+        Ok(pedido) => pedido,
+        Err(texto) => return erro(&ErroDaPonte::Json(texto)),
+    };
+    let escolhas: serde_json::Value = serde_json::from_slice(escolhas).unwrap_or_default();
+    let escolhas = crate::sessao::Escolhas {
+        mudo: escolhas
+            .get("mudo")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        isolado: escolhas
+            .get("isolado")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+    };
+    com_a_ligacao(|ligacao| match ligacao.retomar(pedido, escolhas) {
+        Ok(()) => dizer(Vec::new(), 0),
+        Err(recusa) => dizer(
+            serde_json::json!({ "recusa": recusa })
+                .to_string()
+                .into_bytes(),
+            1,
+        ),
+    })
+}
+
+// ----------------------------------------------------------- a bateria
+
+/// O relógio da página em `Duration`: os milissegundos do `performance.now()`.
+fn agora_da_pagina(ms: f64) -> std::time::Duration {
+    std::time::Duration::from_secs_f64((ms / 1000.0).max(0.0))
+}
+
+fn com_a_bateria<T>(fazer: impl FnOnce(&mut seele_sessao::battery::Battery) -> T) -> T {
+    BATERIA.with(|b| {
+        fazer(
+            b.borrow_mut()
+                .get_or_insert_with(seele_sessao::battery::Battery::new),
+        )
+    })
+}
+
+/// Uma bateria nova, para uma sessão nova.
+#[no_mangle]
+pub extern "C" fn bateria_nova() {
+    BATERIA.with(|b| *b.borrow_mut() = Some(seele_sessao::battery::Battery::new()));
+}
+
+/// **A bateria do desktop** (`seele_sessao::battery`), no relógio da página: o
+/// que fazer agora. 0 esperar, 1 mandar o `Ping` de rotina, 2 tentar voltar, 3
+/// encerrar (a bateria descarregou).
+#[no_mangle]
+pub extern "C" fn bateria_poll(agora_ms: f64) -> u32 {
+    use seele_sessao::battery::Action;
+    match com_a_bateria(|bateria| bateria.poll(agora_da_pagina(agora_ms))) {
+        Action::Wait => 0,
+        Action::SendPing => 1,
+        Action::Reconnect => 2,
+        Action::EndSession => 3,
+    }
+}
+
+/// Chegou o `Pong` de um `Ping` de rotina.
+#[no_mangle]
+pub extern "C" fn bateria_pong() {
+    com_a_bateria(seele_sessao::battery::Battery::on_pong);
+}
+
+/// O enlace caiu (a conexão fechou antes de a bateria perceber).
+#[no_mangle]
+pub extern "C" fn bateria_caiu(agora_ms: f64) {
+    com_a_bateria(|bateria| bateria.on_connection_lost(agora_da_pagina(agora_ms)));
+}
+
+/// A volta deu certo.
+#[no_mangle]
+pub extern "C" fn bateria_voltou() {
+    com_a_bateria(seele_sessao::battery::Battery::on_reconnected);
+}
+
+/// A tentativa de voltar falhou: a próxima espera o recuo.
+#[no_mangle]
+pub extern "C" fn bateria_falhou(agora_ms: f64) {
+    com_a_bateria(|bateria| bateria.on_reconnect_failed(agora_da_pagina(agora_ms)));
+}
+
+/// O enlace como o `Snapshot` o diz: 0 com `"Online"` ou
+/// `{"InternalBattery": {"remaining_seconds", "attempts"}}`. A bateria que
+/// descarregou é `"Online"`, como o `gravar_enlace` da FFI: o `LinkState` do
+/// desktop não tem o terceiro estado, e a sessão acaba logo em seguida.
+#[no_mangle]
+pub extern "C" fn bateria_enlace(agora_ms: f64) -> u32 {
+    use seele_sessao::battery::Link;
+    let agora = agora_da_pagina(agora_ms);
+    let enlace = com_a_bateria(|bateria| match bateria.state() {
+        Link::InternalBattery { attempts } => serde_json::json!({ "InternalBattery": {
+            "remaining_seconds": bateria.remaining(agora).map_or(0, |resta| resta.as_secs()),
+            "attempts": attempts,
+        } }),
+        Link::Online | Link::Discharged => serde_json::json!("Online"),
+    });
+    dizer(enlace.to_string().into_bytes(), 0)
 }
 
 /// Esquece a ligação desta página.
