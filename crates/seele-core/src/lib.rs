@@ -47,7 +47,9 @@ pub mod identity;
 pub mod mods;
 pub mod par;
 pub mod preferences;
-pub mod preview;
+/// O juiz das prévias mora no `seele-sessao` desde a Tarefa 2.6 da F4, como a
+/// busca: é a mesma regra no desktop e no navegador.
+pub use seele_sessao::preview;
 #[cfg(test)]
 mod rastro_de_teste;
 /// A busca no que a casca mostra mora no `seele-sessao` desde a Tarefa 2.6 da

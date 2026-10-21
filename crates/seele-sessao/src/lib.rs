@@ -31,6 +31,8 @@ use seele_proto::ids::{PersonId, SessionId, Ssrc};
 
 pub mod assento;
 pub mod despedida;
+pub mod nome_do_anexo;
+pub mod preview;
 pub mod retrato;
 pub mod search;
 pub mod state;

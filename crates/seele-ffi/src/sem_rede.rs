@@ -96,7 +96,9 @@ pub struct Ouvido {
 
 /// Os eventos que o desktop ouviria, mensagem por mensagem: a mesma entrada de
 /// [`retratos`], com um ouvinte inscrito pelo `Connection::subscribe` de
-/// verdade, e o `fold` inteiro.
+/// verdade, e o caminho inteiro de uma mensagem na sessão viva — o `receber`
+/// (que responde o peso de uma linha antes de dobrar) e as transferências
+/// drenadas depois, como o laço da conexão faz.
 #[cfg(feature = "conformidade")]
 #[must_use]
 pub fn eventos(
@@ -129,7 +131,10 @@ pub fn eventos(
     mensagens
         .iter()
         .map(|mensagem| {
-            crate::fold(&shared, mensagem);
+            crate::receber(&shared, mensagem);
+            for aviso in shared.drain_transfers() {
+                shared.notify(&crate::Event::TransferChanged { transfer: aviso });
+            }
             let eventos = anota
                 .0
                 .lock()
@@ -182,4 +187,16 @@ pub fn fora_do_ar(room: &Room) -> Vec<crate::MembroForaDoAr> {
         ligacao: None,
     };
     conexao.membros_fora_do_ar()
+}
+
+/// A prévia de um anexo que a casca do desktop recebe (o `preview_of`), para a
+/// conformidade dos dois produtores de prévia (`dois_produtores_da_previa.rs`).
+#[cfg(feature = "conformidade")]
+#[must_use]
+pub fn previa(
+    attachment: u64,
+    claimed: &str,
+    chegada: Option<seele_core::enlace::Previa>,
+) -> crate::Preview {
+    crate::preview_of(attachment, claimed, chegada)
 }

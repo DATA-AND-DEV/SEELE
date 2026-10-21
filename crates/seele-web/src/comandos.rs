@@ -126,9 +126,13 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "busca_andar",
     "busca_limpar",
     "buscar",
+    // Os três dos anexos que a ponte chama por dentro: o cabeçalho do envio,
+    // o destino (com as regras do nome) e o pedido de um anexo ao servidor.
+    "cabecalho_do_anexo",
     "criar_linha",
     "criar_voice_room",
     "descartar_mensagem",
+    "destino_do_anexo",
     "dispensar_aviso",
     "enter_voice_room",
     "escolher_apelido",
@@ -142,6 +146,7 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "mod_request",
     "mover_pessoa",
     "open_channel",
+    "pedir_anexo",
     "pedir_quadro_chave",
     "peso_da_linha",
     "reenviar_mensagem",
@@ -428,6 +433,72 @@ fn atender_na_sessao(
                 |png| format!("data:image/png;base64,{}", base64(png))
             )))
         }
+        // Pede um anexo ao servidor, que o manda num fluxo próprio; diz o que o
+        // histórico sabe dele (o nome, o tipo alegado e o tamanho), ou `null`.
+        "pedir_anexo" => {
+            let anexo = a.u64("anexo")?;
+            saida.mensagens.push(ClientMessage::FetchAttachment {
+                attachment: seele_proto::ids::AttachmentId(anexo),
+            });
+            Ok(descricao_do_anexo(&sessao.room, anexo))
+        }
+        // O `destino_de` do desktop, com a pasta que a página diz: o anexo do
+        // histórico, o nome conferido pelas regras de lá, e o nome ao lado.
+        "destino_do_anexo" => {
+            let anexo = a.u64("anexo")?;
+            let pasta = a.texto("pasta")?;
+            let Some((nome, _, _)) = crate::previa::anexo_no_historico(&sessao.room, anexo) else {
+                return Err(
+                    json!({ "reason": "AnexoDesconhecido", "claimed": "", "folder": pasta }),
+                );
+            };
+            let mostrado = seele_sessao::nome_do_anexo::para_mostrar(&nome);
+            match seele_sessao::nome_do_anexo::nome_seguro(&nome) {
+                Ok(seguro) => Ok(json!({
+                    "folder": pasta,
+                    "file_name": seguro,
+                    "beside": seele_sessao::nome_do_anexo::nome_ao_lado(seguro, 2),
+                })),
+                Err(_) => {
+                    Err(json!({ "reason": "NomeRecusado", "claimed": mostrado, "folder": pasta }))
+                }
+            }
+        }
+        // O que vai na frente dos bytes de um anexo que sobe: o tipo do fluxo e
+        // o `AttachmentHeader` enquadrado, com a chave da página (o número que o
+        // `enviar_anexo` do desktop devolve). O hash é o dos bytes, em hex.
+        "cabecalho_do_anexo" => {
+            let hash = a.texto("hash")?;
+            let Some(content_hash) = crate::ligacao::bytes_do_hex(&hash) else {
+                return Err(json!(format!(
+                    "invalid args `hash` for command `{comando}`: esperava 32 bytes em hex"
+                )));
+            };
+            let chave = pagina.chaves.tirar();
+            let cabecalho = seele_proto::attachment::AttachmentHeader {
+                channel: ChannelId(a.u32("channel")?),
+                client_message_id: chave,
+                body: a.texto("body")?,
+                replies_to: None,
+                file_name: a.texto("nome")?,
+                declared_type: a.texto("tipo")?,
+                declared_len: a.u64("tamanho")?,
+                content_hash,
+            };
+            let mut fluxo = vec![seele_proto::stream::StreamType::Attachment.byte()];
+            let enquadrado =
+                seele_proto::control::encode_em(seele_proto::version::PROTOCOL_VERSION, &cabecalho)
+                    .and_then(|quadro| seele_proto::quadro::enquadrar(&quadro));
+            match enquadrado {
+                Ok(bytes) => {
+                    fluxo.extend(bytes);
+                    Ok(json!({ "id": chave.get(), "cabecalho": fluxo }))
+                }
+                // O que o fio não leva cai como a transferência do desktop cai:
+                // a página o diz com o número, e nada sobe.
+                Err(erro) => Ok(json!({ "id": chave.get(), "recusa": format!("{erro:?}") })),
+            }
+        }
         "mod_request" => {
             saida.mensagens.push(ClientMessage::ModRequest {
                 request: a.u32("request")?,
@@ -521,9 +592,12 @@ fn atender_na_sessao(
         }
         // A resposta é o `ChannelWeighed`, e quem espera por ela é a ponte.
         "peso_da_linha" => {
-            saida.mensagens.push(ClientMessage::WeighChannel {
-                channel: ChannelId(a.u32("channel")?),
-            });
+            let channel = ChannelId(a.u32("channel")?);
+            // Guardado **antes** de sair, como o `pending_weights` do desktop.
+            sessao.pesos_pendentes.push_back(channel);
+            saida
+                .mensagens
+                .push(ClientMessage::WeighChannel { channel });
             Ok(Value::Null)
         }
         "aplicar_icone_do_server" => {
@@ -654,6 +728,14 @@ fn atender_na_sessao(
     }
 }
 
+/// O que o histórico sabe de um anexo: `{nome, tipo, tamanho}`, ou `null`.
+fn descricao_do_anexo(room: &seele_sessao::state::Room, anexo: u64) -> Value {
+    crate::previa::anexo_no_historico(room, anexo).map_or(
+        Value::Null,
+        |(nome, tipo, tamanho)| json!({ "nome": nome, "tipo": tipo, "tamanho": tamanho }),
+    )
+}
+
 /// O corpo acima do teto do fio: o `volta::grande_demais` da FFI.
 fn grande_demais(corpo: &str) -> Option<MessageRefusal> {
     (corpo.len() > MAX_BODY_LEN).then(|| MessageRefusal::TooLong {
@@ -753,31 +835,12 @@ impl Args<'_> {
     }
 }
 
-/// Base64 padrão, com o preenchimento: o `base64_de` da FFI.
+/// Base64 padrão, com o preenchimento: o codificador do produto
+/// (`seele_sessao::preview`), o mesmo alfabeto do `base64_de` da FFI.
 #[must_use]
 pub fn base64(bytes: &[u8]) -> String {
-    const ALFABETO: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let letra = |indice: u32| {
-        ALFABETO
-            .get((indice & 63) as usize)
-            .copied()
-            .map_or('=', char::from)
-    };
     let mut texto = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for bloco in bytes.chunks(3) {
-        let b0 = bloco.first().copied().map_or(0, u32::from);
-        let b1 = bloco.get(1).copied().map_or(0, u32::from);
-        let b2 = bloco.get(2).copied().map_or(0, u32::from);
-        let junto = (b0 << 16) | (b1 << 8) | b2;
-        texto.push(letra(junto >> 18));
-        texto.push(letra(junto >> 12));
-        texto.push(if bloco.len() > 1 {
-            letra(junto >> 6)
-        } else {
-            '='
-        });
-        texto.push(if bloco.len() > 2 { letra(junto) } else { '=' });
-    }
+    seele_sessao::preview::encode_base64_publico(bytes, &mut texto);
     texto
 }
 
@@ -1396,6 +1459,100 @@ mod tests {
         super::atender(None, comando, &args, pagina, 0)
             .expect("um comando da sessão")
             .map(|feito| feito.resposta)
+    }
+
+    #[test]
+    fn o_anexo_tem_destino_pelas_regras_do_nome_e_o_cabecalho_volta_lido() {
+        use seele_proto::attachment::AttachmentHeader;
+        use seele_proto::control::{AttachmentInfo, AttachmentState};
+        use seele_proto::ids::{AttachmentId, MessageId};
+        let mut ligacao = dentro();
+        let mut pagina = DaPagina::nova(SEMENTE);
+        for (id, nome) in [
+            (1_u64, "foto.png"),
+            (2, "../.zshrc"),
+            (3, "foto\u{202E}gnp.exe"),
+        ] {
+            let _ = ligacao.chegou(&do_servidor(&ServerMessage::MessageReceived {
+                channel: ChannelId(1),
+                id: MessageId(100 + id),
+                author: PersonId(8),
+                at_seconds: 1,
+                author_nickname: "ana".into(),
+                body: String::new(),
+                replies_to: None,
+                client_message_id: None,
+                attachment: Some(AttachmentInfo {
+                    id: AttachmentId(id),
+                    file_name: nome.into(),
+                    declared_type: "image/png".into(),
+                    byte_size: 10,
+                    state: AttachmentState::Available,
+                }),
+            }));
+        }
+        let destino = |ligacao: &mut Ligacao, pagina: &mut DaPagina, anexo: u64| {
+            ligacao
+                .atender(
+                    "destino_do_anexo",
+                    &json!({ "anexo": anexo, "pasta": "Downloads" }),
+                    pagina,
+                    0,
+                )
+                .unwrap()
+                .map(|feito| feito.resposta)
+        };
+        assert_eq!(
+            destino(&mut ligacao, &mut pagina, 1),
+            Ok(json!({ "folder": "Downloads", "file_name": "foto.png", "beside": "foto (2).png" }))
+        );
+        assert_eq!(
+            destino(&mut ligacao, &mut pagina, 2).unwrap_err()["reason"],
+            "NomeRecusado"
+        );
+        let invisivel = destino(&mut ligacao, &mut pagina, 3).unwrap_err();
+        assert_eq!(invisivel["reason"], "NomeRecusado");
+        assert!(
+            !invisivel["claimed"].as_str().unwrap().contains('\u{202E}'),
+            "{invisivel}"
+        );
+        assert_eq!(
+            destino(&mut ligacao, &mut pagina, 9),
+            Err(json!({ "reason": "AnexoDesconhecido", "claimed": "", "folder": "Downloads" }))
+        );
+
+        let feito = atender(
+            &mut ligacao,
+            &mut pagina,
+            "cabecalho_do_anexo",
+            json!({ "channel": 1, "body": " oi ", "nome": "a.txt", "tipo": "text/plain", "tamanho": 3, "hash": "ab".repeat(32) }),
+        );
+        let bytes: Vec<u8> = feito.resposta["cabecalho"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|byte| u8::try_from(byte.as_u64().unwrap()).unwrap())
+            .collect();
+        assert_eq!(bytes[0], seele_proto::stream::StreamType::Attachment.byte());
+        let mut leitor = Desenquadrador::default();
+        leitor.empurrar(&bytes[1..]);
+        let lido: AttachmentHeader = decode(&leitor.proximo().unwrap().unwrap()).unwrap();
+        assert_eq!(
+            lido.client_message_id.get(),
+            feito.resposta["id"].as_u64().unwrap()
+        );
+        assert_eq!(
+            (lido.body.as_str(), lido.declared_len, lido.content_hash),
+            (" oi ", 3, [0xab; 32])
+        );
+        // Um anexo vazio não sai: a recusa vem com o número, como a queda do desktop.
+        let vazio = atender(
+            &mut ligacao,
+            &mut pagina,
+            "cabecalho_do_anexo",
+            json!({ "channel": 1, "body": "", "nome": "a.txt", "tipo": "text/plain", "tamanho": 0, "hash": "ab".repeat(32) }),
+        );
+        assert!(vazio.resposta["recusa"].is_string() && vazio.resposta["id"].is_u64());
     }
 
     #[test]

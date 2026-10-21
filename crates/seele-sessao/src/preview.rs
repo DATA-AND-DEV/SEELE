@@ -181,7 +181,7 @@ pub fn data_uri(format: ImageFormat, bytes: &[u8]) -> String {
 /// A mídia de um MOD atravessa como `data:` pela mesma razão que a prévia de
 /// um anexo, e escrever um segundo codificador ali seria um segundo alfabeto
 /// para o mesmo RFC — a forma de defeito que `base64_de` já nomeia.
-pub(crate) fn encode_base64_publico(bytes: &[u8], out: &mut String) {
+pub fn encode_base64_publico(bytes: &[u8], out: &mut String) {
     encode_base64(bytes, out);
 }
 

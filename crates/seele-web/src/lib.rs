@@ -17,8 +17,10 @@
 //! `.wasm` pelo `cargo xtask web`.
 
 pub mod comandos;
+pub mod fluxos;
 pub mod fronteira;
 pub mod ligacao;
+pub mod previa;
 pub mod sessao;
 pub mod voz;
 

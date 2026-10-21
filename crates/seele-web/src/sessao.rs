@@ -97,6 +97,10 @@ pub struct Sessao {
     /// O volume que esta pessoa escolheu para cada outra, pelo apelido (o
     /// `set_volume` do desktop): sem distinguir maiúsculas, até 400%.
     pub(crate) volumes: BTreeMap<String, u16>,
+    /// Os canais cujo peso foi pedido e ainda não veio, na ordem do pedido: o
+    /// `pending_weights` da FFI. O `ChannelWeighed` responde todos de um canal;
+    /// a recusa do pedido responde o primeiro.
+    pub(crate) pesos_pendentes: std::collections::VecDeque<seele_proto::ids::ChannelId>,
 }
 
 /// O volume mais alto que se escolhe para alguém: o `VOLUME_MAXIMO` da FFI.
@@ -116,6 +120,7 @@ impl Sessao {
             contados: Contados::default(),
             entradas_pedidas: 0,
             volumes: BTreeMap::new(),
+            pesos_pendentes: std::collections::VecDeque::new(),
         }
     }
 
@@ -134,18 +139,22 @@ impl Sessao {
                 total,
                 payload,
             } => {
-                return vec![json!({ "ModReply": {
+                let mut eventos = vec![json!({ "ModReply": {
                     "request": request, "part": part, "total": total, "payload": payload,
                 } })];
+                eventos.extend(self.transferencias());
+                return eventos;
             }
             ServerMessage::ModAviso {
                 mod_id,
                 canal,
                 carga,
             } => {
-                return vec![json!({ "ModAviso": {
+                let mut eventos = vec![json!({ "ModAviso": {
                     "mod_id": mod_id, "canal": canal.map(|canal| canal.0), "carga": carga,
                 } })];
+                eventos.extend(self.transferencias());
+                return eventos;
             }
             _ => {}
         }
@@ -221,7 +230,42 @@ impl Sessao {
                 .map_or(EndReason::LinkLost, |fim| fim.reason.into());
             eventos.push(json!({ "Ended": { "reason": motivo } }));
         }
+        eventos.extend(self.transferencias());
         eventos
+    }
+
+    /// **As recusas de transferência que o servidor mandou**, drenadas do
+    /// `Room` depois de cada mensagem, como o laço da conexão do desktop faz
+    /// (`drain_transfers`): cada uma vira o `TransferChanged` que a casca ouve.
+    fn transferencias(&mut self) -> Vec<Value> {
+        use seele_sessao::state::TransferNotice;
+        self.room
+            .transfers
+            .drain(..)
+            .map(|aviso| {
+                let transfer = match aviso {
+                    TransferNotice::Refused {
+                        client_message_id,
+                        reason,
+                    } => json!({
+                        "kind": "RefusedBecause",
+                        "client_message_id": client_message_id.get(),
+                        "reason": reason,
+                    }),
+                    TransferNotice::Unavailable { attachment, reason } => json!({
+                        "kind": "Unavailable",
+                        "attachment": attachment.get(),
+                        "reason": reason,
+                    }),
+                    TransferNotice::VolumeRecusado { token, motivo } => json!({
+                        "kind": "VolumeRecusado",
+                        "token": token,
+                        "motivo": motivo,
+                    }),
+                };
+                json!({ "TransferChanged": { "transfer": transfer } })
+            })
+            .collect()
     }
 
     /// Os números que quem dobra conta.

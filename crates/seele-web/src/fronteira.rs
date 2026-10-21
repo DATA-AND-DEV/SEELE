@@ -37,6 +37,17 @@
 //! | | 2 | `{"nao_e_da_sessao": true}` |
 //! | `ligacao_fechar()` | — | — |
 //!
+//! **Os fluxos que o servidor abre** (Tarefas 2.6 e 3.9; [`crate::fluxos`]): a
+//! tela assistida e o anexo pedido, um leitor por fluxo.
+//!
+//! | função | devolve | na saída |
+//! |---|---|---|
+//! | `fluxo_novo()` | a alça | — |
+//! | `fluxo_chegou(alca, pedaco)` | 0 | `{"passos": […]}` |
+//! | | 1 | `{"erro": "sem-fluxo"}` |
+//! | `fluxo_acabou(alca)` | 0 | `{"passos": […]}`, e a alça é esquecida |
+//! | `previa_julgar(pedido, bytes)` | 0 | o `Preview` do desktop |
+//!
 //! **A voz que sai e a que chega** (Tarefa 3.3, lotes A e C; [`crate::voz`]),
 //! na instância da página, uma de cada lado:
 //!
@@ -105,6 +116,7 @@ use seele_proto::control::ControlError;
 use seele_voz::gate::GateMode;
 
 use crate::comandos::DaPagina;
+use crate::fluxos::FluxoQueChega;
 use crate::ligacao::{Ligacao, Passo, Pedido};
 use crate::voz::{Envio, Recepcao, Reproducao, TesteDoMicrofone};
 use crate::{codificar_do_cliente, decodificar_do_servidor, DoServidor, ErroDaPonte};
@@ -113,6 +125,8 @@ thread_local! {
     static SAIDA: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static LIGACAO: RefCell<Option<Ligacao>> = const { RefCell::new(None) };
     static PAGINA: RefCell<Option<DaPagina>> = const { RefCell::new(None) };
+    static FLUXOS: RefCell<(u32, std::collections::BTreeMap<u32, FluxoQueChega>)> =
+        const { RefCell::new((0, std::collections::BTreeMap::new())) };
     static ENVIO: RefCell<Option<Envio>> = const { RefCell::new(None) };
     static RECEPCAO: RefCell<Option<Recepcao>> = const { RefCell::new(None) };
     static REPRODUCAO: RefCell<Option<Reproducao>> = const { RefCell::new(None) };
@@ -445,6 +459,112 @@ pub extern "C" fn ligacao_medir(rtt_micros: u64, jitter_ms: f32, perda: f32) -> 
             u32::from(ligacao.medir(rtt_micros, jitter_ms, perda))
         })
     })
+}
+
+/// **A prévia de um anexo** ([`crate::previa`]): o pedido em JSON
+/// (`{"attachment", "claimed", "chegada": "bytes" | "nao_veio" |
+/// "grande_demais"}`) e os bytes que chegaram. Devolve 0 com o `Preview` do
+/// desktop, ou 1 com `{"erro": "json", …}`.
+///
+/// # Safety
+///
+/// Os dois pares `ptr`/`len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn previa_julgar(
+    pedido_ptr: *const u8,
+    pedido_len: usize,
+    bytes_ptr: *const u8,
+    bytes_len: usize,
+) -> u32 {
+    use crate::previa::{previa_do_anexo, Chegada};
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido = unsafe { entrada(pedido_ptr, pedido_len) };
+    // SAFETY: idem.
+    let bytes = unsafe { entrada(bytes_ptr, bytes_len) };
+    let pedido: serde_json::Value = match serde_json::from_slice(pedido) {
+        Ok(pedido) => pedido,
+        Err(e) => return erro(&ErroDaPonte::Json(e.to_string())),
+    };
+    let anexo = pedido
+        .get("attachment")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or_default();
+    let alegado = pedido
+        .get("claimed")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let chegada = match pedido.get("chegada").and_then(serde_json::Value::as_str) {
+        Some("bytes") => Chegada::Bytes(bytes),
+        Some("grande_demais") => Chegada::GrandeDemais,
+        _ => Chegada::NaoVeio,
+    };
+    dizer(
+        previa_do_anexo(anexo, alegado, chegada)
+            .to_string()
+            .into_bytes(),
+        0,
+    )
+}
+
+// ------------------------------------------- os fluxos que o servidor abre
+
+fn dizer_os_passos_do_fluxo(passos: &[crate::fluxos::Passo]) -> u32 {
+    let passos: Vec<serde_json::Value> = passos.iter().map(crate::fluxos::Passo::em_json).collect();
+    dizer(
+        serde_json::json!({ "passos": passos })
+            .to_string()
+            .into_bytes(),
+        0,
+    )
+}
+
+/// Um fluxo unidirecional que o servidor abriu: devolve a alça dele.
+#[no_mangle]
+pub extern "C" fn fluxo_novo() -> u32 {
+    FLUXOS.with(|f| {
+        let mut fluxos = f.borrow_mut();
+        fluxos.0 = fluxos.0.wrapping_add(1);
+        let alca = fluxos.0;
+        fluxos.1.insert(alca, FluxoQueChega::novo());
+        alca
+    })
+}
+
+/// Um pedaço do fluxo `alca`. Devolve 0 com `{"passos": […]}`
+/// ([`crate::fluxos::Passo::em_json`]), ou 1 com `{"erro": "sem-fluxo"}`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn fluxo_chegou(alca: u32, ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedaco = unsafe { entrada(ptr, len) };
+    let passos = FLUXOS.with(|f| {
+        f.borrow_mut()
+            .1
+            .get_mut(&alca)
+            .map(|fluxo| fluxo.chegou(pedaco))
+    });
+    match passos {
+        Some(passos) => dizer_os_passos_do_fluxo(&passos),
+        None => dizer(br#"{"erro":"sem-fluxo"}"#.to_vec(), 1),
+    }
+}
+
+/// O fluxo `alca` acabou: os últimos passos, e a alça é esquecida.
+#[no_mangle]
+pub extern "C" fn fluxo_acabou(alca: u32) -> u32 {
+    let passos = FLUXOS.with(|f| {
+        f.borrow_mut()
+            .1
+            .remove(&alca)
+            .map(|mut fluxo| fluxo.acabou())
+    });
+    match passos {
+        Some(passos) => dizer_os_passos_do_fluxo(&passos),
+        None => dizer(br#"{"erro":"sem-fluxo"}"#.to_vec(), 1),
+    }
 }
 
 /// Esquece a ligação desta página.
