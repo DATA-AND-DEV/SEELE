@@ -1180,6 +1180,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/outra-linha.js \
         --roteiro tools/roteiros/outra-linha-pelo-launcher.js \
         --roteiro tools/roteiros/palco.js \
+        --roteiro tools/roteiros/pedido-recusado.js \
         --roteiro tools/roteiros/perfil-entrada.js \
         --roteiro tools/roteiros/perfil-salva-sessao.js \
         --roteiro tools/roteiros/perfil-salva.js \

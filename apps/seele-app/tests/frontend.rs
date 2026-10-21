@@ -20798,3 +20798,90 @@ fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
         "`desenharPessoas` não desenha mais o grupo FORA DO AR"
     );
 }
+
+/// As chaves de um objeto de `frases.js` declarado como `const NOME = {`, uma
+/// por linha, como `Chave: …`.
+fn chaves_do_objeto(script: &str, nome: &str) -> Vec<String> {
+    let Some(depois) = script.split(&format!("const {nome} = {{")).nth(1) else {
+        panic!("frases.js não declara mais `{nome}`");
+    };
+    let Some(corpo) = depois.split("\n};").next() else {
+        panic!("`{nome}` não fecha");
+    };
+    corpo
+        .lines()
+        .filter_map(|linha| {
+            let linha = linha.strip_prefix("  ")?;
+            if linha.starts_with(' ') {
+                return None;
+            }
+            let (chave, _) = linha.split_once(':')?;
+            chave
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric())
+                .then(|| chave.to_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn todo_pedido_que_o_servidor_recusa_tem_a_acao_na_frase() {
+    // **O «NÃO DEU» diz o quê, por quê e o que fazer** (`fraseDoPedidoRecusado`).
+    // A frase provisória de 09/10 dizia só «NÃO DEU: O SERVIDOR FALHOU», e ninguém
+    // sabia qual pedido. Os pedidos que podem não dar são os que o servidor
+    // manda ao `nao_deu`; cada um tem a ação em `PEDIDOS_RECUSADOS`, ou a faixa
+    // diz «NÃO DEU» sem dizer o quê. Toda causa do fio tem a causa e o remédio
+    // em `CAUSAS_DE_RECUSA`. Lido das fontes, para um pedido novo reprovar na
+    // rodada em que entrar.
+    let sessao = without_comments(&read("../../crates/seele-server/src/session.rs"));
+    let mut recusaveis = std::collections::BTreeSet::new();
+    for (onde, _) in sessao.match_indices("nao_deu(") {
+        if sessao[..onde].ends_with("fn ") {
+            continue;
+        }
+        let Some(inicio) = sessao[..onde].rfind("ClientMessage::") else {
+            panic!("um `nao_deu` sem pedido antes dele em session.rs");
+        };
+        let nome: String = sessao[inicio + "ClientMessage::".len()..]
+            .chars()
+            .take_while(char::is_ascii_alphanumeric)
+            .collect();
+        recusaveis.insert(nome);
+    }
+    assert!(
+        recusaveis.len() >= 10,
+        "só {} pedidos achados no `nao_deu` de session.rs ({recusaveis:?}): o guarda mede \
+         quase nada, ou a forma da chamada mudou",
+        recusaveis.len()
+    );
+
+    let script = without_comments(&read("ui/frases.js"));
+    let acoes = chaves_do_objeto(&script, "PEDIDOS_RECUSADOS");
+    let sem_acao: Vec<&String> = recusaveis.iter().filter(|p| !acoes.contains(p)).collect();
+    assert!(
+        sem_acao.is_empty(),
+        "o servidor pode recusar estes pedidos, e a faixa diria «NÃO DEU» sem dizer o quê: \
+         {sem_acao:?}"
+    );
+    let pedidos = variants_of(
+        &read("../../crates/seele-proto/src/control.rs"),
+        "ClientMessage",
+    );
+    let velhos: Vec<&String> = acoes.iter().filter(|a| !pedidos.contains(a)).collect();
+    assert!(
+        velhos.is_empty(),
+        "`PEDIDOS_RECUSADOS` tem pedidos que o fio não tem mais: {velhos:?}"
+    );
+
+    let causas = chaves_do_objeto(&script, "CAUSAS_DE_RECUSA");
+    let do_fio = variants_of(
+        &read("../../crates/seele-proto/src/control.rs"),
+        "CausaDaRecusa",
+    );
+    assert!(!do_fio.is_empty(), "o leitor não achou `CausaDaRecusa`");
+    let sem_causa: Vec<&String> = do_fio.iter().filter(|c| !causas.contains(c)).collect();
+    assert!(
+        sem_causa.is_empty(),
+        "estas causas do fio chegam à faixa sem o porquê e sem o que fazer: {sem_causa:?}"
+    );
+}

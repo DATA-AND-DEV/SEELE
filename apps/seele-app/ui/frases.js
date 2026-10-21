@@ -113,10 +113,12 @@ const MOTIVOS = {
   ModsIndisponiveis:
     "ESTE SERVIDOR EXIGE MODS QUE ELE NÃO CONSEGUE DESCREVER.\n" +
     "Não é a sua entrada: avise quem hospeda.",
-  // A sala pessoal (spec de 23/09, «Erros e frases»). Provisórias e sem nome:
-  // a spec as escreve com o nome de quem foi chamado («ALICE NÃO ATENDEU»), e
-  // quem as reescreve com ele é a casca da ligação. «RECUSOU» e «NÃO ATENDEU»
-  // continuam distintas, que é a decisão do dono de 23/09.
+  // A sala pessoal (spec de 23/09, «Erros e frases»), **sem o nome**. Na hora
+  // de ligar, quem escreve é `fraseDaLigacao`, com o nome de quem foi chamado
+  // («ALICE NÃO ATENDEU»); estas ficam para onde o nome não chega: a tela de fim
+  // de uma ligação que já estava de pé (`tela-fim.js`), a recusa lida por
+  // `fraseDeErro` e a entrada do celular. «RECUSOU» e «NÃO ATENDEU» continuam
+  // distintas, que é a decisão do dono de 23/09.
   ChamadaEncerrada: "A LIGAÇÃO FOI ENCERRADA DO OUTRO LADO.",
   NinguemAtendeu: "NINGUÉM ATENDEU.",
   ChamadaRecusada: "A LIGAÇÃO FOI RECUSADA.",
@@ -235,20 +237,76 @@ const AVISOS = {
   // segunda faria quem lê procurar quem apagou. Não diz o número aqui porque o
   // número vem no campo — ver `desenharAviso`, que o insere.
   RetencaoApagouHistorico: "A RETENÇÃO DESTE SERVIDOR APAGOU HISTÓRICO ANTIGO",
-  // PROVISÓRIA (F1, 09/10/2026), para a casca trocar pela frase por pedido e
-  // causa. O pedido chega pelo nome (`"SetNickname"`), e a causa completa a
-  // frase em `fraseDoAviso`, por `CAUSAS_DE_RECUSA` logo abaixo. Sem ela, a
-  // faixa dizia só AVISO.
+  // O começo da frase de um pedido que o servidor não conseguiu fazer. O resto
+  // — o que se pediu, por que não deu e o que fazer — é montado por
+  // `fraseDoPedidoRecusado`, com `PEDIDOS_RECUSADOS` e `CAUSAS_DE_RECUSA` logo
+  // abaixo. Sozinha, para um pedido e uma causa que esta versão não conhece.
   PedidoRecusado: "NÃO DEU",
 };
 
-// PROVISÓRIA, com a entrada `PedidoRecusado` de `AVISOS`: o que segue o «NÃO
-// DEU:» para cada causa. As três são as que a pessoa consegue resolver.
-const CAUSAS_DE_RECUSA = {
-  NomeTomado: "O NOME JÁ É DE OUTRA PESSOA",
-  NaoExiste: "ISSO NÃO EXISTE MAIS",
-  FalhaDoServidor: "O SERVIDOR FALHOU",
+/**
+ * **O que cada pedido recusado queria fazer**, pelo nome em `ClientMessage`
+ * que a ponte entrega (`NoticeReason::PedidoRecusado`).
+ *
+ * Os que o servidor recusa por `nao_deu` (`seele-server/src/session.rs`), e o
+ * guarda `todo_pedido_que_o_servidor_recusa_tem_a_acao_na_frase` cobra cada um:
+ * um pedido novo que possa não dar entra aqui, ou a faixa diz «NÃO DEU» sem
+ * dizer o quê. No infinitivo, porque a frase é «NÃO DEU PARA …».
+ */
+const PEDIDOS_RECUSADOS = {
+  CreateVoiceRoom: "CRIAR A SALA DE VOZ",
+  CreateChannel: "CRIAR O CANAL",
+  RenameVoiceRoom: "RENOMEAR A SALA DE VOZ",
+  RenameChannel: "RENOMEAR O CANAL",
+  RenameServer: "RENOMEAR O SERVIDOR",
+  SetNickname: "TROCAR O SEU APELIDO",
+  SetPersonIcon: "TROCAR A SUA IMAGEM",
+  SetServerIcon: "TROCAR A IMAGEM DO SERVIDOR",
+  BanPerson: "BANIR",
+  RemoveMessage: "REMOVER A MENSAGEM",
+  DeleteVoiceRoom: "APAGAR A SALA DE VOZ",
+  DeleteChannel: "APAGAR O CANAL",
+  WeighChannel: "CONTAR O QUE HÁ NO CANAL",
 };
+
+/**
+ * **Por que um pedido não deu, e o que fazer**, por `CausaDaRecusa`.
+ *
+ * As três são as que a pessoa consegue resolver (o fio as escolheu assim), e
+ * cada uma diz o remédio: escolher outro nome, deixar para lá o que sumiu, ou
+ * tentar de novo e avisar quem hospeda. O detalhe da falha fica no registro do
+ * servidor, e a frase manda até ele em vez de inventar um motivo.
+ */
+const CAUSAS_DE_RECUSA = {
+  NomeTomado: {
+    causa: "ESSE NOME JÁ É DE OUTRA PESSOA",
+    fazer: "Escolha outro e tente de novo.",
+  },
+  NaoExiste: {
+    causa: "ISSO JÁ NÃO EXISTE",
+    fazer: "Alguém apagou antes de você.",
+  },
+  FalhaDoServidor: {
+    causa: "O SERVIDOR NÃO CONSEGUIU",
+    fazer: "Tente de novo. Se repetir, avise quem hospeda: o motivo está no registro do servidor.",
+  },
+};
+
+/**
+ * A frase de um pedido que o servidor não conseguiu fazer: «NÃO DEU PARA
+ * TROCAR O SEU APELIDO: ESSE NOME JÁ É DE OUTRA PESSOA.» e o que fazer.
+ *
+ * Um pedido que esta versão não sabe nomear — a ponte manda `"?"` para um
+ * ordinal desconhecido — fica sem a ação, e uma causa desconhecida fica sem o
+ * porquê: a frase diz o que sabe, e não um buraco no meio.
+ */
+function fraseDoPedidoRecusado(pedido, causa) {
+  const acao = PEDIDOS_RECUSADOS[pedido];
+  const titulo = acao ? `${AVISOS.PedidoRecusado} PARA ${acao}` : AVISOS.PedidoRecusado;
+  const porque = CAUSAS_DE_RECUSA[causa];
+  if (!porque) return `${titulo}.`;
+  return `${titulo}: ${porque.causa}.\n${porque.fazer}`;
+}
 
 /**
  * Onde uma conexão está, enquanto ela acontece.
@@ -415,8 +473,9 @@ const ENTRADA_COLADA = {
 
 const ETAPAS = {
   Parada: "LENDO O CONVITE",
-  // Provisória: a frase de uma ligação é da tarefa 7f (CHAMANDO e CANCELAR),
-  // que troca esta. Até lá nada no app disca um código.
+  // Também numa ligação por código, que a 7f disca: `fraseDaEtapaDaLigacao`
+  // só troca o `Tocando`, que leva o nome de quem é chamado, e até ali quem
+  // liga lê em que etapa a ligação está.
   Localizando: "LOCALIZANDO PELO PONTO DE ENCONTRO",
   Avisando: "AVISANDO O PONTO DE ENCONTRO",
   Tentando: "TENTANDO UM ENDEREÇO DO CONVITE",
