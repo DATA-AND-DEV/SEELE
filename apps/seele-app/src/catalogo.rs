@@ -482,7 +482,8 @@ pub(crate) async fn instalar_do_catalogo(
 /// que declarou. Ela volta como [`FalhaNoCatalogo::NaoInstalou`], com a recusa
 /// de instalar dentro, e não como uma falha do catálogo ou da rede; e fica no
 /// `seele.log` numa linha com o MOD e a versão. A pasta de passagem vai na
-/// linha só como passagem, já apagada: como `origem=`, pelo registro de
+/// linha só como passagem, com `passagem_apagada=` dizendo se ela saiu do
+/// disco, o que é conferido e não suposto: como `origem=`, pelo registro de
 /// [`crate::mods::instalar_de`], ela parecia a pasta de onde a pessoa
 /// instalou, e não dizia qual MOD do catálogo era.
 ///
@@ -504,7 +505,8 @@ pub(crate) fn instalar_os_baixados(
             .unwrap_or_default()
     ));
     let publicado = escrever_e_publicar(config, &passagem, baixados);
-    let _ = std::fs::remove_dir_all(&passagem);
+    // Conferido, e não afirmado: a linha diz se a passagem saiu do disco.
+    let apagada = std::fs::remove_dir_all(&passagem).is_ok();
     // O hash do que foi publicado volta para quem chamou: é por ele que o
     // servidor passa a exigir estes bytes, e não «o que estiver instalado».
     publicado.map(|publicado| publicado.hash).map_err(|recusa| {
@@ -513,7 +515,8 @@ pub(crate) fn instalar_os_baixados(
             ?versao,
             ?recusa,
             passagem = %crate::caminho_no_registro(&passagem.to_string_lossy()),
-            "não instalei o MOD do catálogo; a pasta de passagem já foi apagada"
+            passagem_apagada = apagada,
+            "não instalei o MOD do catálogo"
         );
         FalhaNoCatalogo::NaoInstalou(recusa)
     })
@@ -896,6 +899,32 @@ mod o_catalogo {
             !rastro.contains("origem="),
             "a pasta de passagem, apagada logo depois, aparece no `seele.log` como a origem do \
              MOD:\n{rastro}"
+        );
+        // **A passagem que a linha nomeia já não existe** (rodada 1, M1), em todo
+        // caminho de falha, e a linha diz que conferiu. A pasta vai no registro
+        // pelo `Debug`, que dobra a barra invertida do Windows.
+        let passagem = rastro
+            .split("passagem=\"")
+            .nth(1)
+            .and_then(|resto| resto.split('"').next())
+            .expect("a linha WARN não nomeia a pasta de passagem")
+            .replace(r"\\", r"\");
+        let passagem = std::path::Path::new(&passagem);
+        assert_eq!(
+            passagem.parent(),
+            Some(std::env::temp_dir().as_path()),
+            "a pasta lida da linha não é uma passagem em `temp_dir()`, e conferir que ela não \
+             existe não provaria nada: {}",
+            passagem.display()
+        );
+        assert!(
+            !passagem.exists(),
+            "a pasta de passagem ficou em `temp_dir()` depois da recusa: {}",
+            passagem.display()
+        );
+        assert!(
+            rastro.contains("passagem_apagada=true"),
+            "a linha WARN não diz que a pasta de passagem foi apagada:\n{rastro}"
         );
     }
 
