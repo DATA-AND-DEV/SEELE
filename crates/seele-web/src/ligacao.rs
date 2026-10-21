@@ -185,6 +185,16 @@ pub struct Ligacao {
     carimbo: u8,
     entrada: Desenquadrador,
     saida: Vec<u8>,
+    medida: Medida,
+}
+
+/// O sinal desta ponta: o `Signal` do `seele-proto`, alimentado a cada volta
+/// como o `medir_a_volta` da FFI o alimenta.
+#[derive(Debug, Default)]
+struct Medida {
+    sinal: seele_proto::signal::Signal,
+    rtt_micros: u64,
+    jitter_ms: f32,
 }
 
 impl Ligacao {
@@ -209,6 +219,7 @@ impl Ligacao {
             carimbo: VERSAO_MINIMA,
             entrada: Desenquadrador::default(),
             saida: Vec::new(),
+            medida: Medida::default(),
         };
         ligacao
             .escrever(&ClientMessage::Hello {
@@ -245,6 +256,51 @@ impl Ligacao {
             Etapa::Dentro(sessao) => Some(sessao),
             _ => None,
         }
+    }
+
+    /// Uma volta da medida: o tempo de ida e volta que o transporte estimou, o
+    /// jitter de chegada da voz e a pior perda que ela contou. Diz se o que a
+    /// casca mostra mudou (o `TelemetryChanged`), pela regra do
+    /// `medir_a_volta` da FFI: o sinal, o tempo de ida e volta por mais de um
+    /// milissegundo, ou o jitter.
+    pub fn medir(&mut self, rtt_micros: u64, jitter_ms: f32, perda: f32) -> bool {
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "um tempo de ida e volta em microssegundos cabe folgado no f32"
+        )]
+        let rtt_ms = rtt_micros as f32 / 1000.0;
+        let antes = self.medida.sinal.value();
+        let sinal = self.medida.sinal.update(seele_proto::signal::SyncInputs {
+            rtt_ms,
+            jitter_ms,
+            loss_fraction: perda,
+        });
+        let rtt_antes = std::mem::replace(&mut self.medida.rtt_micros, rtt_micros);
+        let jitter_antes = std::mem::replace(&mut self.medida.jitter_ms, jitter_ms);
+        sinal != antes
+            || rtt_antes.abs_diff(rtt_micros) > 1_000
+            || (jitter_antes - jitter_ms).abs() >= 0.1
+    }
+
+    /// A telemetria que esta ponta mede, com a perda que o servidor contou:
+    /// os campos do `Telemetry` do `Snapshot` que não são do áudio.
+    #[must_use]
+    pub fn telemetria(&self, perda_contada: f32) -> Value {
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "um tempo de ida e volta em microssegundos cabe folgado no f32"
+        )]
+        let rtt_ms = self.medida.rtt_micros as f32 / 1000.0;
+        let sinal = self.medida.sinal.value();
+        json!({
+            "rtt_ms": rtt_ms,
+            "jitter_ms": self.medida.jitter_ms,
+            "loss_fraction": perda_contada,
+            "signal": sinal,
+            "sync_band": seele_sessao::retrato::SignalBand::from(
+                seele_proto::signal::SignalBand::of(sinal)
+            ),
+        })
     }
 
     /// O carimbo desta sessão.

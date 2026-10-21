@@ -52,10 +52,18 @@
 // porque uma lista vazia que o guarda ainda lê é onde um comando se esconde.
 //
 // **E `AINDA_A_FAZER`**: os atendidos que ainda não têm corpo, cada um com a
-// tarefa do plano que o traz (a sessão pelo navegador é a 2.6, que espera a
-// medida 3 do dono e o Plano 3). Chamado, um deles volta com
+// tarefa do plano que o traz. Chamado, um deles volta com
 // `AindaNaoNoNavegador`, e não com um silêncio. A lista encolhe a cada lote, e
 // o pacote da página (3.6) só sai com ela vazia.
+//
+// # A sessão
+//
+// O `connect` abre a sessão pelo navegador (`sessao-web.js`, Tarefa 2.6): a
+// WebTransport para o servidor do link, e a ligação do `.wasm` no meio. Os
+// comandos da sessão vão ao `.wasm` (`seele_web::comandos`) por
+// `pelaSessao`, que faz em cada um o que o método da FFI faz; aqui ficam só o
+// que é do navegador — a voz da página, as escolhas guardadas na origem, a
+// espera do `peso_da_linha`.
 //
 // # O que volta
 //
@@ -306,11 +314,6 @@ const AINDA_A_FAZER = new Map([
   // F7): o navegador não liga pelo código na 0.16.
   ["ler_entrada", TAREFA_34],
   ["cancelar_ligacao", TAREFA_34],
-  ["apagar_linha", TAREFA_26],
-  ["apagar_voice_room", TAREFA_26],
-  ["aplicar_icone_do_server", TAREFA_26],
-  ["assistir", TAREFA_39],
-  ["banir_pessoa", TAREFA_26],
   ["busca_andar", TAREFA_26],
   ["busca_limpar", TAREFA_26],
   ["buscar", TAREFA_26],
@@ -318,64 +321,34 @@ const AINDA_A_FAZER = new Map([
   ["codigo_do_mod", TAREFA_MODS],
   ["compartilhar_tela", TAREFA_310],
   ["conhecidos", TAREFA_34],
-  ["connect", TAREFA_34],
-  ["criar_linha", TAREFA_26],
-  ["criar_voice_room", TAREFA_26],
-  ["descartar_mensagem", TAREFA_26],
   ["destino_do_anexo", TAREFA_26],
-  ["dispensar_aviso", TAREFA_26],
-  ["enter_voice_room", TAREFA_33],
   ["enviar_anexo", TAREFA_26],
   ["enviar_imagem_mod", TAREFA_MODS],
-  ["escolher_apelido", TAREFA_26],
   ["escolher_icone_do_server", TAREFA_26],
   ["escolher_minha_imagem", TAREFA_26],
   ["escolher_para_o_mod", TAREFA_MODS],
   ["esquecer", TAREFA_34],
   ["esquecer_aceite_de_mods", TAREFA_34],
-  ["estado_da_sessao", TAREFA_MODS],
   ["exclusao_do_som_da_captura", TAREFA_310],
-  ["expulsar_pessoa", TAREFA_26],
   ["fontes_de_tela", TAREFA_310],
-  ["icone_do_server", TAREFA_26],
-  ["imagem_da_pessoa", TAREFA_26],
   ["instalar_mod_do_catalogo", TAREFA_MODS],
-  ["leave_voice_room", TAREFA_33],
   ["lembrar_aparencia_do_servidor", TAREFA_26],
   ["ler_imagem_mod", TAREFA_MODS],
-  ["membros_fora_do_ar", TAREFA_26],
-  ["messages", TAREFA_26],
   ["midia_do_mod", TAREFA_MODS],
   ["midia_em_bytes", TAREFA_MODS],
-  ["mod_request", TAREFA_26],
   ["mods_instalados", TAREFA_MODS],
-  ["mover_pessoa", TAREFA_26],
-  ["open_channel", TAREFA_26],
   ["parar_de_compartilhar", TAREFA_310],
   ["pedaco_do_escolhido", TAREFA_MODS],
   ["pedir_permissao_de_tela", TAREFA_310],
-  ["pedir_quadro_chave", TAREFA_39],
   ["permissao_de_tela", TAREFA_310],
-  ["peso_da_linha", TAREFA_26],
   ["preparar_icone_do_server", TAREFA_26],
   ["prever_anexo", TAREFA_26],
   ["previa_de_link", TAREFA_26],
-  ["reenviar_mensagem", TAREFA_26],
-  ["remover_mensagem", TAREFA_26],
-  ["renomear_linha", TAREFA_26],
-  ["renomear_server", TAREFA_26],
-  ["renomear_voice_room", TAREFA_26],
   ["salvar_anexo", TAREFA_26],
-  ["send_message", TAREFA_26],
-  ["set_muted", TAREFA_33],
-  ["set_talking", TAREFA_33],
-  ["set_total_isolation", TAREFA_33],
   ["set_volume", TAREFA_33],
-  ["soltar_a_entrada", TAREFA_34],
   ["soltar_escolhido", TAREFA_MODS],
   ["som_da_tela", TAREFA_39],
   ["som_do_mod", TAREFA_MODS],
-  ["tirar_icone_do_server", TAREFA_26],
   ["tirar_minha_imagem", TAREFA_26]
 ]);
 
@@ -449,11 +422,18 @@ const CASCA_DA_PONTE = PONTE_NO_LUGAR_DO_TAURI ? cascaDaCarga() : null;
 // ------------------------------------------------------------------- a sessão
 
 /**
- * A sessão desta página. **Nenhuma, até a 2.6**: o que pede uma sessão volta
- * com `"NotConnected"`, como no desktop sem conexão. É também a costura por
- * onde a bancada põe uma sessão de mentira.
+ * A sessão desta página (`sessao-web.js`), aberta pelo `connect`. Sem ela, o
+ * que pede uma sessão volta com `"NotConnected"`, como no desktop sem conexão.
+ * É também a costura por onde a bancada põe uma sessão de mentira.
  */
 const sessaoDaPonte = { atual: null };
+
+/**
+ * A geração da sessão desta página: sobe a cada `connect`, como o `revogar`
+ * do desktop. O `mod_request` e o `soltar_a_entrada` a conferem, e os eventos
+ * de uma geração velha não chegam à casca.
+ */
+let geracaoDaPonte = 0;
 
 /** O que o desktop faz sem conexão: `session.connection()?`. */
 function comASessao(fazer) {
@@ -467,8 +447,229 @@ async function sairDaSessaoDaPonte() {
   const sessao = sessaoDaPonte.atual;
   sessaoDaPonte.atual = null;
   ALCAS_DA_PONTE.clear();
+  fecharAVozDaSessao();
   await sessao?.encerrar?.();
   return null;
+}
+
+/** Um endereço digitado não traz a chave do servidor: no navegador se entra pelo link. */
+const RECUSA_ENDERECO_SOZINHO =
+  "no navegador se entra pelo link do servidor: um endereço sozinho não traz a chave que confere quem atendeu";
+
+/**
+ * **O `connect` do navegador**: o alvo que a identidade montou
+ * (`identidade-web.js`), e a sessão pela WebTransport (`sessao-web.js`).
+ * Resolve com a `Entrada` do desktop (`{snapshot, veredito, geracao,
+ * origem_da_impressao, a_lista_guardou}`) e rejeita com o `ConnectionError`
+ * dele, nu: é o que o `desfecho` da identidade lê.
+ */
+async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret } = {}) {
+  if (!alvo || typeof alvo !== "object" || !alvo.chave) {
+    return Promise.reject({ RecusaDaPonte: { comando: "connect", frase: RECUSA_ENDERECO_SOZINHO } });
+  }
+  if (sessaoDaPonte.atual && !sessaoDaPonte.atual.acabou) return Promise.reject("AlreadyConnected");
+  geracaoDaPonte += 1;
+  const geracao = geracaoDaPonte;
+  const valeAinda = () => geracao === geracaoDaPonte;
+  let wasm;
+  try {
+    wasm = (await carregarOWasmDaPagina()).instancia.exports;
+  } catch (falha) {
+    console.warn("ponte: o .wasm da página não carregou para a sessão:", falha);
+    return Promise.reject("Unreachable");
+  }
+  const sessao = await abrirASessaoDoNavegador({
+    wasm,
+    alvo,
+    apelido: nickname ?? "",
+    convite: joinSecret ?? null,
+    aceito: aceiteDeModsGuardado(alvo.impressao),
+    emitir: (evento) => {
+      if (valeAinda()) emitirNaPonte("seele://event", evento);
+    },
+    aoAcabar: () => {
+      if (valeAinda()) fecharAVozDaSessao();
+    },
+    aoReceberOsHashes: (janelas) => {
+      identidadeDaPagina()
+        .then((identidade) => identidade.lembrarOsHashes(alvo.impressao, janelas))
+        .catch((falha) => console.warn("ponte: os hashes do servidor não ficaram guardados:", falha));
+    },
+  });
+  // Outra entrada começou enquanto esta abria: esta é solta, como a
+  // substituída do desktop.
+  if (!valeAinda()) {
+    await sessao.encerrar();
+    return Promise.reject("NotConnected");
+  }
+  sessao.geracao = geracao;
+  sessao.alvo = alvo;
+  sessao.snapshot = () => retratoDaSessao(sessao);
+  sessao.aoDobrar = () => conferirAVozDaSessao(sessao);
+  sessaoDaPonte.atual = sessao;
+  aVozDaPonte().catch((falha) => console.warn("ponte: a voz da página não carregou:", falha));
+  return {
+    snapshot: sessao.snapshot(),
+    veredito: alvo.conhecido ? "Known" : { FirstContactVerified: { fingerprint: alvo.impressao } },
+    geracao,
+    origem_da_impressao: alvo.conhecido ? "Lista" : "Link",
+    a_lista_guardou: false,
+  };
+}
+
+/**
+ * **O retrato do desktop**: o que sai do `Room` vem do `.wasm` (a sala, os
+ * contados e a telemetria que a ligação mede), e o que esta ponta mede (o
+ * enlace, a voz) vem daqui. Os campos são os do `Snapshot`, e cada um tem um
+ * lado (`MEDIDOS_POR_CADA_PONTA`, em `dois_produtores_de_snapshot.rs`).
+ */
+function retratoDaSessao(sessao) {
+  const lido = sessao.retrato();
+  if (!lido) throw "NotConnected";
+  const voz = vozDaSessao;
+  return {
+    caminho: null,
+    link: "Online",
+    // A WebTransport só abre com um dos hashes que o link trouxe: quem atendeu
+    // foi conferido.
+    link_state: "Verified",
+    ...lido.sala,
+    ...lido.contados,
+    telemetry: {
+      ...lido.telemetria,
+      bitrate_bps: voz.bitrate,
+      input_level: voz.nivel,
+      local_fault: false,
+      frames_refused: voz.recusados,
+      microfone_entrega_silencio_digital: false,
+    },
+    muted: voz.mudo,
+    total_isolation: voz.isolado,
+    speaking: voz.falando,
+    voice_mode: modoDeVozGuardado(),
+    audio_available: Boolean(navigator.mediaDevices?.getUserMedia) && typeof AudioContext === "function",
+    abertura_do_audio: voz.abertura,
+    capture: null,
+    playback: null,
+    aparelho: "funcionando",
+    trocas_de_aparelho: 0,
+  };
+}
+
+/** Um comando da sessão pelo `.wasm` (`seele_web::comandos`). */
+function pelaSessao(comando) {
+  return (args) =>
+    comASessao((sessao) => {
+      const feito = sessao.atender(comando, args);
+      if (!feito) return Promise.reject({ ComandoDesconhecido: { comando } });
+      return "erro" in feito ? Promise.reject(feito.erro) : feito.resposta;
+    });
+}
+
+// ------------------------------------------------------------ a voz na sessão
+
+/**
+ * A voz da sessão: as escolhas desta página (o mudo e o isolamento valem
+ * fora da sala, como no desktop) e o que a voz aberta mede.
+ */
+const vozDaSessao = {
+  mudo: false,
+  isolado: false,
+  tecla: false,
+  dentro: false,
+  ligando: null,
+  abertura: "fora_de_sala",
+  falando: false,
+  nivel: 0,
+  bitrate: 0,
+  recusados: 0,
+};
+
+/** O byte do modo para o `voz_modo` do `.wasm`. */
+const BYTE_DO_MODO = Object.freeze({ PushToTalk: 0, VoiceActivated: 1, Open: 2 });
+
+/**
+ * **Liga o áudio dentro do gesto** de quem pediu a sala: o `AudioContext` e o
+ * `play()` do iOS só valem ali. A voz da página já nasceu com a sessão, então
+ * nada espera antes do `ligar`.
+ */
+function ligarOAudioNoGesto() {
+  const voz = vozDaPonte.atual;
+  if (!voz || vozDaSessao.ligando) return;
+  vozDaSessao.ligando = voz
+    .ligar({ microfone: guardadoNaOrigem(CHAVES_DA_ORIGEM.microfone), saida: guardadoNaOrigem(CHAVES_DA_ORIGEM.saida) })
+    .catch((falha) => {
+      vozDaSessao.ligando = null;
+      throw falha;
+    });
+  vozDaSessao.ligando.catch(() => {});
+}
+
+/**
+ * **A voz segue a sala confirmada**, como a `PortaDaVoz` do desktop: abre
+ * quando o servidor já não pode recusar a entrada (o `Pong` do `Ping`
+ * marcado), e fecha quando a pessoa sai.
+ */
+function conferirAVozDaSessao(sessao) {
+  const lido = sessao.atender("sala_da_voz", {});
+  const sala = lido && !("erro" in lido) ? lido.resposta.sala : null;
+  const voz = vozDaPonte.atual;
+  if (sala === null) {
+    if (vozDaSessao.dentro) {
+      voz?.sair();
+      vozDaSessao.dentro = false;
+    }
+    mudarAAbertura("fora_de_sala");
+    return;
+  }
+  if (vozDaSessao.dentro) return;
+  if (!voz || !vozDaSessao.ligando) {
+    mudarAAbertura("sem_aparelho");
+    return;
+  }
+  vozDaSessao.dentro = true;
+  mudarAAbertura("abrindo");
+  const numero = lido.resposta.voz;
+  vozDaSessao.ligando.then(
+    () => {
+      if (!vozDaSessao.dentro || sessao.acabou) return;
+      voz.mudo(vozDaSessao.mudo);
+      voz.isolar(vozDaSessao.isolado);
+      voz.modo(BYTE_DO_MODO[modoDeVozGuardado()] ?? 1);
+      voz.tecla(vozDaSessao.tecla);
+      const sensibilidade = milesimosGuardados(CHAVES_DA_ORIGEM.sensibilidade);
+      voz.regua(sensibilidade === null ? 0 : Math.round(sensibilidade * 1000));
+      voz.entrar(sessao.transporteDaVoz, numero);
+      mudarAAbertura("aberto");
+    },
+    (falha) => {
+      vozDaSessao.dentro = false;
+      if (falha && falha.name === "NotAllowedError") recusaDoMicrofone.nestaPagina = true;
+      console.warn("ponte: a voz da sala não abriu:", falha);
+      mudarAAbertura("sem_aparelho");
+    },
+  );
+}
+
+function mudarAAbertura(abertura) {
+  if (vozDaSessao.abertura === abertura) return;
+  vozDaSessao.abertura = abertura;
+  emitirNaPonte("seele://event", "TelemetryChanged");
+}
+
+/** A sessão acabou: a voz da sala fecha, e o microfone é solto. */
+function fecharAVozDaSessao() {
+  const ligando = vozDaSessao.ligando;
+  Object.assign(vozDaSessao, { dentro: false, ligando: null, abertura: "fora_de_sala", falando: false });
+  if (ligando) {
+    ligando.then(() => vozDaPonte.atual?.desligar()).catch(() => {});
+  }
+}
+
+/** O modo de voz guardado nesta origem (o `modo_de_voz_escolhido`). */
+function modoDeVozGuardado() {
+  const guardado = guardadoNaOrigem(CHAVES_DA_ORIGEM.modo);
+  return MODOS_DE_VOZ.includes(guardado) ? guardado : "VoiceActivated";
 }
 
 // ------------------------------------------------------------ o arquivo por alça
@@ -832,6 +1033,101 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   volumes_locais: () => sessaoDaPonte.atual?.volumesLocais?.() ?? {},
   snapshot: () => comASessao((sessao) => sessao.snapshot()),
   disconnect: sairDaSessaoDaPonte,
+  // **A sessão pelo navegador** (2.6): o `connect` pela WebTransport, e os
+  // comandos da sessão pelo `.wasm`, que faz o que a FFI faz em cada um.
+  connect: abrirASessaoPelaPonte,
+  soltar_a_entrada: ({ geracao } = {}) => {
+    const sessao = sessaoDaPonte.atual;
+    if (!sessao || sessao.acabou || geracao == null || sessao.geracao !== geracao) return false;
+    return sairDaSessaoDaPonte().then(() => true);
+  },
+  estado_da_sessao: () => ({
+    geracao: sessaoDaPonte.atual?.geracao ?? 0,
+    eventos_descartados: 0,
+    comandos_recusados: sessaoDaPonte.atual?.contas.naoSairam ?? 0,
+    falas_descartadas: 0,
+    mods_nativos: [],
+  }),
+  messages: pelaSessao("messages"),
+  open_channel: pelaSessao("open_channel"),
+  send_message: pelaSessao("send_message"),
+  reenviar_mensagem: pelaSessao("reenviar_mensagem"),
+  descartar_mensagem: pelaSessao("descartar_mensagem"),
+  remover_mensagem: pelaSessao("remover_mensagem"),
+  dispensar_aviso: pelaSessao("dispensar_aviso"),
+  escolher_apelido: pelaSessao("escolher_apelido"),
+  membros_fora_do_ar: pelaSessao("membros_fora_do_ar"),
+  icone_do_server: pelaSessao("icone_do_server"),
+  // Sem sessão, `null`: o desktop não erra aqui.
+  imagem_da_pessoa: (args) => (sessaoDaPonte.atual ? pelaSessao("imagem_da_pessoa")(args).catch(() => null) : null),
+  // A geração que a casca guardou do `connect`: zero ou velha é a de uma
+  // sessão que acabou (`confere_geracao`).
+  mod_request: ({ geracao, ...pedido } = {}) => {
+    const sessao = sessaoDaPonte.atual;
+    if (!sessao || !geracao || sessao.geracao !== geracao) return Promise.reject("NotConnected");
+    return pelaSessao("mod_request")(pedido);
+  },
+  apagar_linha: pelaSessao("apagar_linha"),
+  apagar_voice_room: pelaSessao("apagar_voice_room"),
+  aplicar_icone_do_server: pelaSessao("aplicar_icone_do_server"),
+  banir_pessoa: pelaSessao("banir_pessoa"),
+  criar_linha: pelaSessao("criar_linha"),
+  criar_voice_room: pelaSessao("criar_voice_room"),
+  expulsar_pessoa: pelaSessao("expulsar_pessoa"),
+  mover_pessoa: pelaSessao("mover_pessoa"),
+  renomear_linha: pelaSessao("renomear_linha"),
+  renomear_server: pelaSessao("renomear_server"),
+  renomear_voice_room: pelaSessao("renomear_voice_room"),
+  tirar_icone_do_server: pelaSessao("tirar_icone_do_server"),
+  // O único que espera o servidor: o `ChannelWeighed` de volta. Uma sessão que
+  // acaba antes responde `NotConnected`, como o oneshot caído do desktop.
+  peso_da_linha: (args = {}) =>
+    comASessao(async (sessao) => {
+      const peso = sessao.esperarOPeso(args.channel);
+      await pelaSessao("peso_da_linha")(args);
+      const lido = await peso;
+      if (!lido) return Promise.reject("NotConnected");
+      return { channel: lido.channel, messages: lido.messages, authors: lido.authors, oldest_at_seconds: lido.oldest_at_seconds };
+    }),
+  assistir: pelaSessao("assistir"),
+  pedir_quadro_chave: pelaSessao("pedir_quadro_chave"),
+  // **A sala, e o áudio dentro do gesto**: o `ligar` vem antes de qualquer
+  // espera, e a voz abre quando o servidor confirma a entrada.
+  enter_voice_room: (args) =>
+    comASessao((sessao) => {
+      ligarOAudioNoGesto();
+      return Promise.resolve(pelaSessao("enter_voice_room")(args)).then((resposta) => {
+        conferirAVozDaSessao(sessao);
+        return resposta;
+      });
+    }),
+  leave_voice_room: (args) =>
+    comASessao((sessao) =>
+      Promise.resolve(pelaSessao("leave_voice_room")(args)).then((resposta) => {
+        conferirAVozDaSessao(sessao);
+        return resposta;
+      }),
+    ),
+  // O mudo e o isolamento são escolhas desta ponta (valem fora da sala), e o
+  // servidor fica sabendo.
+  set_muted: ({ on } = {}) =>
+    comASessao(() => {
+      vozDaSessao.mudo = Boolean(on);
+      vozDaPonte.atual?.mudo(vozDaSessao.mudo);
+      return pelaSessao("set_muted")({ on: vozDaSessao.mudo });
+    }),
+  set_total_isolation: ({ on } = {}) =>
+    comASessao(() => {
+      vozDaSessao.isolado = Boolean(on);
+      vozDaPonte.atual?.isolar(vozDaSessao.isolado);
+      return pelaSessao("set_total_isolation")({ on: vozDaSessao.isolado });
+    }),
+  // Nunca erra, com ou sem sessão: só a tecla da voz.
+  set_talking: ({ talking } = {}) => {
+    vozDaSessao.tecla = Boolean(talking);
+    vozDaPonte.atual?.tecla(vozDaSessao.tecla);
+    return null;
+  },
   // «Nenhum»: quem codifica é o navegador (só no PC).
   modulo_de_video_a_baixar: () => null,
   // O teste do microfone do PC (3.3, decidido em 09/10): o `getUserMedia`, com
@@ -943,13 +1239,13 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
       ? null
       : Promise.reject("NaoGravei"),
   // Sem escolha, o VOZ, que é o que funciona com a tela travada (matriz da F8).
-  modo_de_voz_escolhido: () => {
-    const guardado = guardadoNaOrigem(CHAVES_DA_ORIGEM.modo);
-    return MODOS_DE_VOZ.includes(guardado) ? guardado : "VoiceActivated";
-  },
+  modo_de_voz_escolhido: modoDeVozGuardado,
+  // Grava; numa sala, a voz aberta passa a usá-lo na hora.
   set_voice_mode: ({ mode } = {}) => {
     if (!MODOS_DE_VOZ.includes(mode)) return Promise.reject(`modo de voz desconhecido: ${String(mode)}`);
-    return gravarNaOrigem(CHAVES_DA_ORIGEM.modo, mode) ? null : Promise.reject("NaoGravei");
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.modo, mode)) return Promise.reject("NaoGravei");
+    vozDaPonte.atual?.modo(BYTE_DO_MODO[mode]);
+    return null;
   },
   // Em milésimos, como as preferências do desktop; `null` volta ao padrão.
   ajustar_sensibilidade_da_voz: ({ dbfs } = {}) => {

@@ -123,6 +123,10 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "renomear_server",
     "renomear_voice_room",
     "send_message",
+    // Uma consulta da ponte, e não um comando da casca: a sala que o servidor
+    // já não pode recusar e o número da voz desta conexão, para a voz abrir
+    // como a `PortaDaVoz` do desktop abre (só na sala confirmada).
+    "sala_da_voz",
     "set_muted",
     "set_total_isolation",
     "tirar_icone_do_server",
@@ -471,6 +475,10 @@ fn atender_na_sessao(
             saida.eventos.push(json!("RosterChanged"));
             Ok(Value::Null)
         }
+        "sala_da_voz" => Ok(json!({
+            "sala": sessao.room.sala_confirmada().map(|sala| sala.0),
+            "voz": sessao.room.ssrc.map(|ssrc| ssrc.0),
+        })),
         "set_muted" => {
             saida
                 .mensagens

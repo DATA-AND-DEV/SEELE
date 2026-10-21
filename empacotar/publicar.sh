@@ -1281,6 +1281,10 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/executor-no-navegador.cjs target/wasm32-wasip1/release/seele_motor_web.wasm
     uma_bancada node apps/seele-app/bancada/voz-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
     uma_bancada node apps/seele-app/bancada/identidade-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
+    # O servidor de verdade da bancada da sessão pelo navegador (Tarefa 2.6 da F4).
+    cargo build --quiet --package seele-server --example servidor_da_bancada ||
+        BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS servidor_da_bancada"
+    uma_bancada node apps/seele-app/bancada/sessao-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada
     uma_bancada python3 tools/bancada-do-celular.py "$TEMPORARIO/bancada-do-celular"
     if [ -n "$BANCADAS_VERMELHAS" ]; then
         printf 'bancadas que reprovaram:%s\n' "$BANCADAS_VERMELHAS"

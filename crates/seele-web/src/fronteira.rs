@@ -28,8 +28,9 @@
 //! | `ligacao_assinado(assinatura)` | 0 | `{"passos": […]}` |
 //! | `ligacao_fluxo_acabou()` | 0 | `{"passos": […]}` |
 //! | `ligacao_para_o_fio()` | 0 | os bytes enquadrados (talvez nenhum) |
-//! | `ligacao_retrato()` | 0 | `{"sala": RetratoDaSala, "contados": {…}}` |
+//! | `ligacao_retrato()` | 0 | `{"sala": RetratoDaSala, "contados": {…}, "telemetria": {…}}` |
 //! | | 1 | `{"erro": "sem-sessao"}` |
+//! | `ligacao_medir(rtt_micros, jitter_ms, perda)` | 1 se mudou, 0 se não | — |
 //! | `ligacao_semente(semente)` | — | — |
 //! | `ligacao_atender(pedido)` | 0 | `{"resposta", "eventos", "nao_saiu"}` |
 //! | | 1 | `{"erro": …}`, o erro do desktop |
@@ -354,15 +355,22 @@ pub extern "C" fn ligacao_para_o_fio() -> u32 {
 #[no_mangle]
 pub extern "C" fn ligacao_retrato() -> u32 {
     com_a_ligacao(|ligacao| match ligacao.sessao() {
-        Some(sessao) => match serde_json::to_value(sessao.retrato()) {
-            Ok(sala) => dizer(
-                serde_json::json!({ "sala": sala, "contados": sessao.contados().em_json() })
+        Some(sessao) => {
+            let (perda, sala) = sessao.foto();
+            match serde_json::to_value(sala) {
+                Ok(sala) => dizer(
+                    serde_json::json!({
+                        "sala": sala,
+                        "contados": sessao.contados().em_json(),
+                        "telemetria": ligacao.telemetria(perda),
+                    })
                     .to_string()
                     .into_bytes(),
-                0,
-            ),
-            Err(e) => erro(&ErroDaPonte::Json(e.to_string())),
-        },
+                    0,
+                ),
+                Err(e) => erro(&ErroDaPonte::Json(e.to_string())),
+            }
+        }
         None => dizer(br#"{"erro":"sem-sessao"}"#.to_vec(), 1),
     })
 }
@@ -428,6 +436,19 @@ pub unsafe extern "C" fn ligacao_atender(ptr: *const u8, len: usize) -> u32 {
         ),
         None => dizer(br#"{"nao_e_da_sessao":true}"#.to_vec(), 2),
     }
+}
+
+/// Uma volta da medida ([`Ligacao::medir`]): o tempo de ida e volta em
+/// microssegundos, o jitter de chegada em milissegundos e a pior perda da voz.
+/// Devolve 1 quando o que a casca mostra mudou, e 0 quando não (ou sem
+/// ligação).
+#[no_mangle]
+pub extern "C" fn ligacao_medir(rtt_micros: u64, jitter_ms: f32, perda: f32) -> u32 {
+    LIGACAO.with(|l| {
+        l.borrow_mut().as_mut().map_or(0, |ligacao| {
+            u32::from(ligacao.medir(rtt_micros, jitter_ms, perda))
+        })
+    })
 }
 
 /// Esquece a ligação desta página.

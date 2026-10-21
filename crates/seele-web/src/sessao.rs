@@ -259,7 +259,16 @@ impl Sessao {
     /// O retrato da sala, com os nomes de campo do `Snapshot`.
     #[must_use]
     pub fn retrato(&self) -> RetratoDaSala {
-        foto_da_sala(&self.room, self.escolha.tela(), self.pedido).retrato(|| self.apelido.clone())
+        self.foto().1
+    }
+
+    /// O retrato e a perda que o servidor contou (`UplinkLoss`), que o
+    /// `Snapshot` leva na telemetria e não no retrato da sala.
+    #[must_use]
+    pub fn foto(&self) -> (f32, RetratoDaSala) {
+        let foto = foto_da_sala(&self.room, self.escolha.tela(), self.pedido);
+        let perda = foto.loss_fraction;
+        (perda, foto.retrato(|| self.apelido.clone()))
     }
 }
 

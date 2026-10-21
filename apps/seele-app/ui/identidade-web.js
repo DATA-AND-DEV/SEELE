@@ -58,6 +58,12 @@ const BANCO_DA_IDENTIDADE = Object.freeze({ nome: "seele-identidade", versao: 1,
 /** O sim aos MODs de cada servidor, pela impressão (`aceitarOsMods`). */
 const CHAVE_DOS_ACEITES_DE_MODS = "seele.aceites-de-mods";
 
+/**
+ * A folga do relógio desta máquina ao escolher as janelas dos certificados
+ * curtos: um dia, o `ANTES` com que o servidor começa cada uma.
+ */
+const FOLGA_DO_RELOGIO_S = 86_400;
+
 /** Os erros de rede: a tentativa segue, porque o convite não foi gasto. */
 const SEM_REDE = Object.freeze(["Unreachable", "UnresolvableHost", "HandshakeTimeout", "SemResposta", "LinkLost"]);
 
@@ -246,6 +252,11 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
   let tentativa = null;
   /** Quantas vezes a tentativa mudou: quem espera confere se ainda é a vez dele. */
   let vez = 0;
+  /**
+   * As janelas que cada servidor anunciou nesta carga, pela impressão: a
+   * entrada que grava o servidor depois as leva junto (`entrar`).
+   */
+  const janelasRecebidas = new Map();
 
   function esquecer() {
     segredos.credencial = null;
@@ -315,8 +326,23 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
   /** Os hashes que valem: os guardados e ainda válidos têm precedência sobre os do link. */
   function hashesQueValem() {
     const { lido, conhecido } = tentativa;
-    if (conhecido && conhecido.ate != null && conhecido.ate * 1000 > agora()) return conhecido.hashes;
+    if (conhecido && conhecido.ate != null && conhecido.ate * 1000 > agora()) return hashesDeAgora(conhecido);
     return lido.hashes;
+  }
+
+  /**
+   * Os hashes de um servidor guardado que servem agora: das janelas que a
+   * sessão guardou (`lembrarOsHashes`), as que já começaram e ainda não
+   * acabaram, com um dia de folga para o relógio desta máquina; sem janelas,
+   * os do link.
+   */
+  function hashesDeAgora(registro) {
+    if (!Array.isArray(registro.janelas) || registro.janelas.length === 0) return registro.hashes;
+    const segundos = agora() / 1000;
+    const servem = registro.janelas
+      .filter((janela) => janela.nao_antes - FOLGA_DO_RELOGIO_S <= segundos && segundos <= janela.nao_depois + FOLGA_DO_RELOGIO_S)
+      .map((janela) => janela.hash);
+    return servem.length > 0 ? servem : registro.hashes;
   }
 
   /** O `ConnectionError` do desktop no vocabulário da tela. */
@@ -363,7 +389,16 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     // Daqui em diante a tentativa pode mudar, e a entrada lê só a dela.
     const esta = tentativa;
     const { lido } = esta;
-    const alvo = { endereco: lido.alvo, alternativos: lido.alternativos ?? [], impressao: lido.impressao, hashes: hashesQueValem(), chave: tentativa.chave };
+    const alvo = {
+      endereco: lido.alvo,
+      alternativos: lido.alternativos ?? [],
+      impressao: lido.impressao,
+      hashes: hashesQueValem(),
+      chave: tentativa.chave,
+      // O veredito do desktop: o servidor que esta origem já conhecia é o
+      // `Known`, e o do link, o primeiro contato conferido.
+      conhecido: Boolean(tentativa.conhecido),
+    };
     // Quem já é conhecido entra pela chave, e o convite não é gasto.
     const credencial = tentativa.conhecido ? null : segredos.credencial;
     let resposta;
@@ -381,14 +416,20 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     // os de validade mais longa entre o guardado e o link; o nome do servidor
     // chega depois, no primeiro retrato (`lembrarONome`). A entrada que outra
     // tentativa substituiu também fica guardada: o servidor já conhece a chave.
+    // As janelas que a sessão já anunciou (`lembrarOsHashes`) entram junto: elas
+    // chegam logo depois da entrada, e esta gravação não pode apagá-las.
     const { conhecido } = esta;
     const doLink = !conhecido || (lido.ate ?? 0) > (conhecido.ate ?? 0);
+    const janelas = janelasRecebidas.get(lido.impressao) ?? conhecido?.janelas ?? [];
+    const ateDasJanelas = janelas.length > 0 ? Math.max(...janelas.map((janela) => janela.nao_depois)) : null;
+    const ate = doLink ? lido.ate ?? null : conhecido.ate ?? null;
     await guardarOServidor({
       impressao: lido.impressao,
       endereco: lido.alvo,
       alternativos: lido.alternativos ?? [],
       hashes: doLink ? lido.hashes : conhecido.hashes,
-      ate: doLink ? lido.ate ?? null : conhecido.ate ?? null,
+      ate: ateDasJanelas === null ? ate : Math.max(ateDasJanelas, ate ?? 0),
+      janelas,
       versao: lido.versao ?? null,
       chave: esta.chave,
       nome: conhecido ? conhecido.nome ?? null : null,
@@ -489,6 +530,33 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
   }
 
   /**
+   * As janelas dos certificados curtos que o servidor anunciou depois da
+   * entrada (`HashesDoNavegador`, 2.5): guardadas com o servidor, para voltar
+   * sem link novo enquanto alguma valer. O `ate` passa a ser o fim da última.
+   */
+  async function lembrarOsHashes(impressao, janelas) {
+    const lidas = (janelas ?? [])
+      .filter((janela) => Array.isArray(janela.hash) && janela.hash.length === 32)
+      .map((janela) => ({
+        hash: janela.hash.map((byte) => byte.toString(16).padStart(2, "0")).join(""),
+        nao_antes: Number(janela.nao_antes),
+        nao_depois: Number(janela.nao_depois),
+      }));
+    if (lidas.length === 0) return false;
+    janelasRecebidas.set(impressao, lidas);
+    let registro = null;
+    try {
+      registro = (await servidorConhecido(impressao)) ?? null;
+    } catch {
+      registro = null;
+    }
+    if (!registro) return false;
+    const ate = Math.max(...lidas.map((janela) => janela.nao_depois));
+    await guardarOServidor({ ...registro, janelas: lidas, ate: Math.max(ate, registro.ate ?? 0) });
+    return true;
+  }
+
+  /**
    * Grava o sim aos MODs pela impressão do servidor e entra de novo, **com o
    * mesmo token**: o servidor recusou antes de gastar o convite (`d0b98b9c`, da
    * F1). Resolve como o `entrar`.
@@ -533,5 +601,6 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     conhecidos,
     entrarNoConhecido,
     lembrarONome,
+    lembrarOsHashes,
   };
 }

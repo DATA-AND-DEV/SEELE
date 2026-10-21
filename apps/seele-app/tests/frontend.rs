@@ -2891,7 +2891,25 @@ fn the_stage_that_gives_up_names_no_cause_it_does_not_know() {
 fn the_frontend_never_names_a_protocol_concept() {
     // `specs/06-clientes-gui.md`, in one sentence: "Se o frontend precisa saber
     // o que é um `ssrc`, algo está errado." This is that sentence as a test.
-    let script = without_comments(&scripts());
+    // **O nome da API da WebTransport fica de fora**, e só ele, e só na
+    // sessão do navegador (Tarefa 2.6 da F4): `wt.datagrams` é como o navegador
+    // chama o canal por onde a voz passa, e a sessão o entrega ao
+    // `voz-web.js` como `transporteDaVoz`, um tubo de bytes opacos. O resto da
+    // casca continua sem a palavra; e se a sessão deixar de usá-la, a exceção
+    // reprova em vez de ficar valendo para nada.
+    const DA_WEBTRANSPORT: &[&str] = &["wt.datagrams.readable", "wt.datagrams.writable"];
+    let da_sessao = without_comments(&read("ui/sessao-web.js"));
+    for nome in DA_WEBTRANSPORT {
+        assert!(
+            da_sessao.contains(nome),
+            "`sessao-web.js` não usa mais `{nome}`: tire-o da exceção deste guarda"
+        );
+    }
+    let script = DA_WEBTRANSPORT
+        .iter()
+        .fold(without_comments(&scripts()), |texto, nome| {
+            texto.replace(nome, "")
+        });
     let page = without_comments(&read("ui/index.html"));
 
     // **A transcrição de boot fica de fora, e é a única coisa que fica.**
@@ -10980,6 +10998,49 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ),
     ];
 
+    // 0. **E o caminho dela pela ponte do navegador** (Tarefa 2.6 da F4): o
+    // `connect` da ponte recebe o `joinSecret`, a sessão o chama de `convite`, e
+    // ele vai ao `.wasm`, que o põe no `Hello` — e a mais nenhum lugar. Cada
+    // linha desses dois arquivos que nomeia um dos dois está aqui.
+    const PELA_PONTE: &[(&str, &str)] = &[
+        (
+            "ponte-web.js",
+            "async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret } = {}) {",
+        ),
+        ("ponte-web.js", "convite: joinSecret ?? null,"),
+        ("sessao-web.js", "convite = null,"),
+        ("sessao-web.js", "convite,"),
+    ];
+    let mut pela_ponte = Vec::new();
+    for arquivo in ["ponte-web.js", "sessao-web.js"] {
+        let texto = without_comments(&read(&format!("ui/{arquivo}")));
+        for linha in texto.lines().map(str::trim) {
+            if ["joinSecret", "convite"]
+                .iter()
+                .any(|nome| names(linha, nome))
+            {
+                assert!(
+                    PELA_PONTE
+                        .iter()
+                        .any(|(dono, conhecida)| *dono == arquivo && *conhecida == linha),
+                    "o segredo do convite ganhou um caminho novo em `{arquivo}`:\n  {linha}\n\
+                     Ele vai da ponte ao `.wasm` e a nenhum outro lugar: confira que este \
+                     caminho não o leva ao console, ao armazenamento nem a um evento, e \
+                     acrescente a linha a este guarda."
+                );
+                pela_ponte.push((arquivo, linha.to_owned()));
+            }
+        }
+    }
+    for (arquivo, linha) in PELA_PONTE {
+        assert!(
+            pela_ponte
+                .iter()
+                .any(|(dono, vista)| dono == arquivo && vista == linha),
+            "a lista deste guarda tem uma linha que `{arquivo}` não tem mais:\n  {linha}"
+        );
+    }
+
     // 1. Cada linha que a toca.
     let mut vistas: Vec<(&str, String)> = Vec::new();
     let mut conferir = |arquivo: &'static str, linha: &str| {
@@ -12531,6 +12592,8 @@ fn no_script_calls_a_function_that_no_script_declares() {
         "AudioWorkletNode",
         "EncodedAudioChunk",
         "registerProcessor",
+        // A sessão pelo navegador (Tarefa 2.6 da F4): o transporte da página.
+        "WebTransport",
         "parseInt",
         "parseFloat",
         "isNaN",
@@ -20283,6 +20346,12 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
             "const INTERVALO = 250;",
             "o ritmo da fala de um MOD, em milissegundos (rascunho da API 6, §7.2): é \
              tempo, e não tamanho de campo",
+        ),
+        (
+            "sessao-web.js",
+            "const VOLTA_DA_MEDIDA_MS = 250;",
+            "a volta da medida do enlace do navegador, em milissegundos (o `TICK` do \
+             desktop, Tarefa 2.6 da F4): é tempo, e não tamanho de campo",
         ),
         (
             "tela-sessao.js",
