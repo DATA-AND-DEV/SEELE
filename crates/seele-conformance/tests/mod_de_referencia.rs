@@ -226,16 +226,29 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     // `retrato` e `enviar`, que a 6 tem, da lista do que tem de ser exercitado.
     let da_api = seele_proto::mods::capacidades_da_api(seele_proto::mods::MOD_API_VERSION);
     let (na_api, fora_da_api) = membros_pela_capacidade(&api_do_preludio, da_api);
+    // **Os três que a 6 tirou não existem no prelúdio**, nem presos a uma
+    // capacidade de fora: a limpeza das APIs 3 a 5 (`282c8e7c`) tirou o
+    // caminho que os montava. Este guarda cobrava os três **fora** da API, para
+    // provar que a leitura das capacidades não estava cega; sem eles no texto,
+    // ele cobrava o que não existe mais. O lado de fora da leitura agora é
+    // provado num prelúdio de amostra, no teste
+    // `a_leitura_das_capacidades_ve_os_dois_lados`, e aqui fica o que vale
+    // para o prelúdio de verdade: um vetor que
+    // chame um deles reprova pelo `exposto` logo abaixo, porque o nome não está
+    // em lugar nenhum. Desfeita a limpeza, os três voltam presos a uma
+    // capacidade de fora, e isto reprova.
     for (nome, motivo) in [
         ("regiao", "a capacidade `regiao` saiu na 6"),
         ("cartoes", "a capacidade `cartoes` saiu na 6"),
-        ("snapshot", "o `snapshot` só existe sem `retrato`"),
+        ("snapshot", "a 6 lê o `retrato`"),
     ] {
         assert!(
-            fora_da_api.contains(&nome.to_owned()),
-            "a leitura das capacidades do prelúdio não achou `{nome}` fora da API deste build \
-             ({motivo}): ela ficou cega, e o vetor poderia chamar o que a API não tem. \
-             Fora: {fora_da_api:?}; dentro: {na_api:?}"
+            !exposto(&api_do_preludio, nome)
+                && !na_api.contains(&nome.to_owned())
+                && !fora_da_api.contains(&nome.to_owned()),
+            "o prelúdio ainda monta `{nome}` ({motivo}), num caminho que a API deste build \
+             não tem: a limpeza das APIs 3 a 5 voltou atrás. Fora: {fora_da_api:?}; \
+             dentro: {na_api:?}"
         );
     }
     for nome in ["retrato", "enviar"] {
@@ -257,10 +270,8 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
         // registrar` —, e os grupos entram no objeto por abreviação
         // (`{ superficies }`), sem `superficies:` em lugar nenhum. Procurar só
         // por `nome:` reprovava o vetor por chamar uma coisa que existe.
-        let existe = api_do_preludio.contains(&format!("{metodo}:"))
-            || api_do_preludio.contains(&format!("const {metodo} = comCapacidade("));
         assert!(
-            existe,
+            exposto(&api_do_preludio, &metodo),
             "o vetor chama `{objeto}.{metodo}`, e o prelúdio do executor não o expõe"
         );
     }
@@ -361,6 +372,40 @@ fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
             "o vetor pede o token de tema «{nome}», que a API não conhece"
         );
     }
+}
+
+/// Se o prelúdio expõe `nome`: como membro (`nome:`) ou como espaço de nomes
+/// montado pela capacidade (`const nome = comCapacidade(`).
+fn exposto(preludio: &str, nome: &str) -> bool {
+    preludio.contains(&format!("{nome}:"))
+        || preludio.contains(&format!("const {nome} = comCapacidade("))
+}
+
+/// **A leitura das capacidades vê os dois lados.** Depois da limpeza das APIs
+/// 3 a 5, o prelúdio de verdade não tem membro preso a capacidade de fora da
+/// API 6, e o lado de fora da leitura não tinha mais o que achar nele. Esta
+/// amostra tem as três formas: o membro com uma capacidade da 6, o membro com
+/// uma capacidade que a 6 não tem, e o membro que só existe **sem** uma
+/// capacidade da 6 (`? {} : {`), que era a forma do `snapshot`.
+#[test]
+fn a_leitura_das_capacidades_ve_os_dois_lados() {
+    let amostra = "\
+    ...(capacidades.has('retrato') ? { retrato: () => pedir('retrato', {}) } : {}),
+    ...(capacidades.has('regiao') ? { regiao: (conteudo) => pedir('regiao', { conteudo }) } : {}),
+    ...(capacidades.has('retrato') ? {} : { snapshot: () => pedir('snapshot', {}) }),
+";
+    let da_api = seele_proto::mods::capacidades_da_api(6);
+    assert!(
+        da_api.contains(&"retrato") && !da_api.contains(&"regiao"),
+        "a amostra supõe a 6 com `retrato` e sem `regiao`: {da_api:?}"
+    );
+    let (dentro, fora) = membros_pela_capacidade(amostra, da_api);
+    assert_eq!(dentro, ["retrato"], "o lado de dentro da leitura");
+    assert_eq!(
+        fora,
+        ["regiao", "snapshot"],
+        "o lado de fora da leitura: sem ele, um membro de outra API passaria por exposto"
+    );
 }
 
 /// Os membros que o prelúdio monta pela capacidade, separados pela API deste
