@@ -273,6 +273,246 @@ pub fn check_server_icon(icon: Option<&[u8]>) -> Result<(), IconRefusal> {
     }
 }
 
+// ------------------------------------------------- a prévia de um link
+//
+// As regras da prévia de um link que não buscam nada: aonde ela não pode ir, e
+// que mídia uma página de GIF declara. Moravam no `main.rs` do app; vieram para
+// cá na Tarefa 2.6 da F4, porque o navegador as aplica igual antes do `fetch`
+// dele. Os testes delas continuam no app, junto dos casos de busca.
+
+/// Se este endereço IP é de um lugar que uma prévia **não** pode alcançar.
+///
+/// ADR 0053. A lista é do que é reservado, e não do que é «interno»: loopback,
+/// privado, link-local, `0.0.0.0/8`, compartilhado entre operadoras, multicast e
+/// o resto do que não é internet pública. Em IPv6 o mesmo, mais os endereços
+/// mapeados de IPv4 — sem eles, `http://[::ffff:127.0.0.1]/` atravessaria.
+///
+/// # Por que ela existe
+///
+/// Porque desenhar um link é buscá-lo, e quem escreve a mensagem escolhia o
+/// destino. `http://127.0.0.1:9999/private.png` numa conversa fazia esta janela
+/// bater na porta de um serviço da própria máquina de quem lê — e
+/// `http://192.168.0.1/` na do roteador da casa dele. Não demonstrei extração de
+/// conteúdo; a requisição sozinha já é o que não pode acontecer.
+pub fn e_endereco_reservado(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_multicast()
+                || v4.is_unspecified()
+                // `0.0.0.0/8`, que em várias pilhas é «esta máquina».
+                || a == 0
+                // `100.64.0.0/10`, compartilhado entre operadoras.
+                || (a == 100 && (64..128).contains(&b))
+                // `192.0.0.0/24`, atribuições de protocolo do IETF.
+                || (v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0)
+                // `198.18.0.0/15`, bancada de testes.
+                || (a == 198 && (18..20).contains(&b))
+                // `240.0.0.0/4` em diante, reservado.
+                || a >= 240
+        }
+        IpAddr::V6(v6) => {
+            // Um IPv4 mapeado é um IPv4, e tem de passar pela régua dele: sem
+            // isto, `::ffff:127.0.0.1` é um IPv6 «qualquer» e atravessa.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return e_endereco_reservado(IpAddr::V4(v4));
+            }
+            let primeiro = v6.segments()[0];
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                // `fc00::/7`, endereços locais únicos.
+                || (primeiro & 0xfe00) == 0xfc00
+                // `fe80::/10`, link-local.
+                || (primeiro & 0xffc0) == 0xfe80
+                // `2001:db8::/32`, documentação.
+                || (primeiro == 0x2001 && v6.segments()[1] == 0x0db8)
+        }
+    }
+}
+
+/// Se este host, **como está escrito**, pode ser buscado por uma prévia.
+///
+/// Duas perguntas numa função porque as duas são sobre o texto do host e não
+/// sobre a resolução dele:
+///
+///   - um endereço literal não pode ser reservado — `http://127.0.0.1/x.png` e
+///     `http://[::ffff:127.0.0.1]/x.png` são os dois casos, e o segundo é o que
+///     uma régua só de IPv4 deixa passar;
+///   - um nome não pode ser dos que por definição não são da internet pública.
+///     Conferido aqui **além** da conferência sobre os endereços resolvidos,
+///     porque um resolvedor local pode devolver um endereço público para
+///     `algo.local` e a conferência de baixo o aceitaria.
+pub fn host_de_previa(host: &str) -> bool {
+    // Um IPv6 numa URL vem entre colchetes, e `parse` não os quer.
+    let literal = host
+        .strip_prefix('[')
+        .and_then(|resto| resto.strip_suffix(']'));
+    if let Ok(ip) = literal.unwrap_or(host).parse::<std::net::IpAddr>() {
+        return !e_endereco_reservado(ip);
+    }
+    let nome = host.to_ascii_lowercase();
+    // O ponto final de um nome absoluto não muda o nome: `localhost.` é
+    // `localhost`, e sem isto ele atravessaria.
+    let nome = nome.strip_suffix('.').unwrap_or(&nome);
+    !(nome == "localhost"
+        || nome.ends_with(".localhost")
+        || nome.ends_with(".local")
+        || nome.ends_with(".internal")
+        || nome.ends_with(".home.arpa"))
+}
+
+/// O endereço da mídia que uma página declara para quem a compartilha.
+///
+/// `og:image` é o que Tenor, Giphy e Imgur escrevem para que a prévia apareça
+/// em qualquer lugar onde o link seja colado. Ler isso é usar o que a página
+/// publicou para este fim exato, e não raspar o HTML atrás de um `<img>`:
+/// aquele é o endereço que o site escolheu mostrar, e ele não muda quando o
+/// desenho da página muda.
+///
+/// `twitter:image` entra como recuo porque parte das páginas antigas do Imgur
+/// só trazem esse.
+///
+/// **Não resolve endereço relativo.** Um `og:image` relativo teria de ser
+/// juntado à base da página, e os três escrevem absoluto; devolver o relativo
+/// faria a conferência de domínio recusá-lo, que é o desfecho certo para o que
+/// este código não entende.
+pub fn midia_declarada_pela_pagina(html: &str) -> Option<String> {
+    for etiqueta in etiquetas_meta(html) {
+        let atributos = atributos_de(etiqueta);
+        let acha = |nome: &str| {
+            atributos
+                .iter()
+                .find(|(chave, _)| chave == nome)
+                .map(|(_, valor)| valor.clone())
+        };
+        let Some(qual) = acha("property").or_else(|| acha("name")) else {
+            continue;
+        };
+        if !matches!(
+            qual.trim().to_ascii_lowercase().as_str(),
+            "og:image" | "og:image:secure_url" | "twitter:image"
+        ) {
+            continue;
+        }
+        let Some(conteudo) = acha("content") else {
+            continue;
+        };
+        // `&amp;` e mais nada: um endereço de mídia carrega parâmetros de
+        // consulta, e é essa a entidade que um gerador de HTML escreve neles.
+        let conteudo = conteudo.replace("&amp;", "&");
+        let conteudo = conteudo.trim();
+        if !conteudo.is_empty() {
+            return Some(conteudo.to_owned());
+        }
+    }
+    None
+}
+
+/// Os trechos entre `<meta` e o `>` que o fecha.
+///
+/// A procura é na cópia em minúsculas e o corte é no original: `<META` e
+/// `<meta` são a mesma etiqueta, e `to_ascii_lowercase` não muda o tamanho em
+/// bytes de nada — então um deslocamento achado numa vale na outra.
+fn etiquetas_meta(html: &str) -> Vec<&str> {
+    let minusculo = html.to_ascii_lowercase();
+    minusculo
+        .match_indices("<meta")
+        .filter_map(|(inicio, _)| {
+            let resto = html.get(inicio + "<meta".len()..)?;
+            resto.get(..resto.find('>')?)
+        })
+        .collect()
+}
+
+/// Os pares `nome="valor"` de uma etiqueta, com o nome em minúsculas.
+///
+/// Escrito à mão e não com um analisador de HTML: a árvore deste app diz «nada
+/// além disto» sobre dependências, e o que se lê aqui são atributos de uma
+/// etiqueta que não aninha nada. O que ele **não** faz — entidades além de
+/// `&amp;`, atributo sem valor com significado, HTML malformado — só o faz
+/// devolver menos, e devolver menos é a página não ter prévia.
+fn atributos_de(etiqueta: &str) -> Vec<(String, String)> {
+    /// Onde o varredor está dentro da etiqueta.
+    enum Onde {
+        /// Juntando letras de um nome.
+        Nome,
+        /// O nome acabou num espaço, e o `=` ainda pode vir.
+        AntesDoIgual,
+        /// O `=` veio; o valor começa no próximo que não for espaço.
+        AntesDoValor,
+        /// Dentro do valor. `Some` são as aspas que o fecham; `None`, o espaço.
+        Valor(Option<char>),
+    }
+
+    let mut saida: Vec<(String, String)> = Vec::new();
+    let mut nome = String::new();
+    let mut valor = String::new();
+    let mut onde = Onde::Nome;
+
+    // Por caractere e não por índice: um `&str` não se fatia em qualquer byte,
+    // e um valor de atributo com acento faria o corte cair no meio de um.
+    for c in etiqueta.chars() {
+        match onde {
+            Onde::Nome => {
+                if c == '=' {
+                    onde = Onde::AntesDoValor;
+                } else if c.is_whitespace() {
+                    if !nome.is_empty() {
+                        onde = Onde::AntesDoIgual;
+                    }
+                } else if c == '/' {
+                    nome.clear();
+                } else {
+                    nome.push(c);
+                }
+            }
+            Onde::AntesDoIgual => {
+                if c == '=' {
+                    onde = Onde::AntesDoValor;
+                } else if !c.is_whitespace() {
+                    // Atributo sem valor. Nenhum dos que interessam é assim, e
+                    // o que começou aqui é o nome do próximo.
+                    nome.clear();
+                    nome.push(c);
+                    onde = Onde::Nome;
+                }
+            }
+            Onde::AntesDoValor => {
+                if c == '"' || c == '\'' {
+                    onde = Onde::Valor(Some(c));
+                } else if !c.is_whitespace() {
+                    valor.push(c);
+                    onde = Onde::Valor(None);
+                }
+            }
+            Onde::Valor(fecha) => {
+                let acabou = fecha.map_or_else(|| c.is_whitespace(), |aspa| c == aspa);
+                if acabou {
+                    saida.push((nome.to_ascii_lowercase(), std::mem::take(&mut valor)));
+                    nome.clear();
+                    onde = Onde::Nome;
+                } else {
+                    valor.push(c);
+                }
+            }
+        }
+    }
+    // Um valor sem aspas encostado no fim da etiqueta ainda é um valor. Um
+    // valor com aspas que nunca fecham é etiqueta quebrada, e cai fora.
+    if matches!(onde, Onde::Valor(None)) {
+        saida.push((nome.to_ascii_lowercase(), valor));
+    }
+    saida
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

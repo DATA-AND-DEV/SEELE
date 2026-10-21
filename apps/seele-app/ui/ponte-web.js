@@ -322,7 +322,6 @@ const AINDA_A_FAZER = new Map([
   ["pedaco_do_escolhido", TAREFA_MODS],
   ["pedir_permissao_de_tela", TAREFA_310],
   ["permissao_de_tela", TAREFA_310],
-  ["previa_de_link", TAREFA_26],
   ["soltar_escolhido", TAREFA_MODS],
   ["som_da_tela", TAREFA_39],
   ["som_do_mod", TAREFA_MODS],
@@ -996,6 +995,75 @@ async function subirOAnexo(sessao, id, cabecalho, bytes) {
   }
 }
 
+// ----------------------------------------------------- a prévia de um link
+
+/** O prazo de uma busca de prévia: o do `buscar_com_teto` do desktop. */
+const PRAZO_DA_PREVIA_MS = 15_000;
+
+/**
+ * **Os bytes de um endereço, até o teto da prévia**: o `buscar_com_teto` do
+ * desktop, pelo `fetch` do navegador — sem cookie, sem referência, e com o
+ * corpo cortado ao passar do teto. O navegador segue os redirecionamentos e
+ * resolve os nomes por conta própria (o desktop confere cada um; aqui o que
+ * protege é a regra de rede privada do navegador), e só lê o que o site libera
+ * a uma página de fora (CORS): o que ele não libera volta como `NaoRespondeu`.
+ */
+async function buscarComTeto(endereco) {
+  const teto = CONSTANTES_DO_DESKTOP.regras_de_previa.limit;
+  let resposta;
+  try {
+    resposta = await fetch(endereco, {
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+      cache: "no-store",
+      signal: AbortSignal.timeout(PRAZO_DA_PREVIA_MS),
+    });
+  } catch (falha) {
+    return Promise.reject({
+      NaoRespondeu: `o site não respondeu, ou não deixa uma página de fora ler o que ele serve (${falha && falha.name ? falha.name : falha})`,
+    });
+  }
+  if (!resposta.ok) return Promise.reject({ NaoRespondeu: `o site respondeu ${resposta.status}` });
+  const alegado = minusculasAscii((resposta.headers.get("content-type") ?? "").split(";")[0].trim());
+  const pedacos = [];
+  let lidos = 0;
+  const leitor = resposta.body.getReader();
+  for (;;) {
+    const { value, done } = await leitor.read();
+    if (done) break;
+    lidos += value.length;
+    if (lidos > teto) {
+      leitor.cancel().catch(() => {});
+      return Promise.reject("GrandeDemais");
+    }
+    pedacos.push(value);
+  }
+  const bytes = new Uint8Array(lidos);
+  let onde = 0;
+  for (const pedaco of pedacos) {
+    bytes.set(pedaco, onde);
+    onde += pedaco.length;
+  }
+  return { alegado, bytes };
+}
+
+/** O `data:` de uns bytes que o juiz do desktop desenha, ou `null`. */
+async function desenhavel({ alegado, bytes }) {
+  const { instancia } = await carregarOWasmDaPagina();
+  return fronteiraDaLigacao(instancia.exports).previa({ attachment: 0, claimed: alegado, chegada: "bytes" }, bytes).image;
+}
+
+/** Se o endereço é de um domínio de GIF desta máquina, ou de um subdomínio dele. */
+function eDeUmDominioDeGif(endereco) {
+  let host;
+  try {
+    host = minusculasAscii(new URL(endereco).hostname);
+  } catch {
+    return false;
+  }
+  return CONSTANTES_DO_DESKTOP.dominios_de_gif.some((dominio) => host === dominio || host.endsWith(`.${dominio}`));
+}
+
 // ------------------------------------------------------------- as imagens
 
 /**
@@ -1460,6 +1528,32 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
       console.warn("ponte: a aparência do servidor não ficou guardada:", falha);
     }
     return null;
+  },
+  // **A prévia de um link** (ADR 0053), com as regras do desktop: o endereço
+  // que pode sair, o destino que não é reservado, o consentimento do domínio, o
+  // juiz das imagens, e a mídia que uma página de GIF declara.
+  previa_de_link: async ({ url } = {}) => {
+    const { alvo, recusa } = enderecoQuePodeSair(String(url ?? ""));
+    if (recusa) return Promise.reject({ NaoEAberto: recusa });
+    let host;
+    try {
+      host = new URL(alvo).hostname;
+    } catch (falha) {
+      return Promise.reject({ NaoEAberto: String(falha && falha.message ? falha.message : falha) });
+    }
+    if (!(await pelaPagina("destino_de_previa")({ host }))) return Promise.reject({ DestinoPrivado: minusculasAscii(host) });
+    const dominio = minusculasAscii(host);
+    if (!previaConsentida(previasConsentidas(), dominio)) return Promise.reject({ SemConsentimento: { dominio } });
+    const primeira = await buscarComTeto(alvo);
+    const imagem = await desenhavel(primeira);
+    if (imagem) return imagem;
+    if (eDeUmDominioDeGif(alvo) && primeira.alegado.startsWith("text/html")) {
+      const midia = await pelaPagina("midia_da_pagina")({ html: new TextDecoder().decode(primeira.bytes) });
+      if (!midia || !eDeUmDominioDeGif(midia)) return Promise.reject("NaoEImagem");
+      const daMidia = await desenhavel(await buscarComTeto(midia));
+      return daMidia ?? Promise.reject("NaoEImagem");
+    }
+    return Promise.reject("NaoEImagem");
   },
   // **Os anexos**: pedidos ao servidor e lidos pelo `.wasm` (o hash
   // conferido lá), julgados pelo mesmo juiz do desktop na prévia, e salvos pelo

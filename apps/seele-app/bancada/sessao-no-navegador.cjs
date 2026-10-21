@@ -40,7 +40,11 @@
 //    servidor como a imagem da pessoa, e sai quando é tirado;
 // 10. **os anexos**: um arquivo escolhido sobe pelo fluxo próprio (`Sent`),
 //     volta na conversa, a prévia o desenha pelo juiz do desktop, e salvar o
-//     entrega ao download do navegador com os mesmos bytes.
+//     entrega ao download do navegador com os mesmos bytes;
+// 11. **a prévia de um link**, pelas regras do desktop: o endereço que não é
+//     http, o destino privado (o IP, o IPv4 dentro do IPv6 e o nome local), o
+//     domínio sem consentimento e o site que não responde. O juiz das imagens
+//     é o mesmo da prévia de anexo do caso 10.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual.
 
@@ -433,6 +437,20 @@ const invocar = (aba, comando, args) =>
     const salvo = fs.readFileSync(await baixado.path());
     confere("10", baixado.suggestedFilename() === "ruido.png" && Buffer.compare(salvo, original) === 0, `o arquivo salvo: ${baixado.suggestedFilename()}, ${salvo.length} bytes`);
     fs.rmSync(arquivo, { force: true });
+
+    // ------------------------------------------------------------ 11. a prévia de link
+    const previaDe = async (url) => (await invocar(a.aba, "previa_de_link", { url })).erro;
+    confere("11", (await previaDe("javascript:alert(1)"))?.NaoEAberto !== undefined, "um endereço que não é http saiu");
+    confere("11", (await previaDe("http://127.0.0.1:8/x.png"))?.DestinoPrivado === "127.0.0.1", "o destino privado foi buscado");
+    confere("11", (await previaDe("http://[::ffff:10.0.0.1]/x.png"))?.DestinoPrivado !== undefined, "o IPv4 mapeado em IPv6 passou");
+    confere("11", (await previaDe("https://roteador.local/x.png"))?.DestinoPrivado === "roteador.local", "o nome local foi buscado");
+    confere(
+      "11",
+      (await previaDe("https://exemplo.invalid/x.png"))?.SemConsentimento?.dominio === "exemplo.invalid",
+      "um domínio sem consentimento foi buscado",
+    );
+    await invocar(a.aba, "consentir_previa", { dominio: "exemplo.invalid" });
+    confere("11", (await previaDe("https://exemplo.invalid/x.png"))?.NaoRespondeu !== undefined, "o site que não existe não deu NaoRespondeu");
 
     // ------------------------------------------------------------ 8. a casca larga
     const d = await abrirUmaPagina(navegador, endereco);

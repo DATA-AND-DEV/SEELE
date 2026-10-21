@@ -132,6 +132,9 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "criar_linha",
     "criar_voice_room",
     "descartar_mensagem",
+    // As duas regras da prévia de um link que a ponte pergunta sem sessão:
+    // aonde a prévia não vai, e que mídia uma página de GIF declara.
+    "destino_de_previa",
     "destino_do_anexo",
     "dispensar_aviso",
     "enter_voice_room",
@@ -142,6 +145,7 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "leave_voice_room",
     "membros_fora_do_ar",
     "messages",
+    "midia_da_pagina",
     "minha_imagem",
     "mod_request",
     "mover_pessoa",
@@ -206,6 +210,21 @@ pub fn atender(
         "busca_limpar" => {
             pagina.busca = None;
             return Some(Ok(feito(Value::Null)));
+        }
+        "destino_de_previa" => {
+            let a = Args { comando, args };
+            return Some(
+                a.texto("host")
+                    .map(|host| feito(json!(seele_sessao::preview::host_de_previa(&host)))),
+            );
+        }
+        "midia_da_pagina" => {
+            let a = Args { comando, args };
+            return Some(a.texto("html").map(|html| {
+                feito(json!(seele_sessao::preview::midia_declarada_pela_pagina(
+                    &html
+                )))
+            }));
         }
         _ => {}
     }
@@ -1553,6 +1572,32 @@ mod tests {
             json!({ "channel": 1, "body": "", "nome": "a.txt", "tipo": "text/plain", "tamanho": 0, "hash": "ab".repeat(32) }),
         );
         assert!(vazio.resposta["recusa"].is_string() && vazio.resposta["id"].is_u64());
+    }
+
+    #[test]
+    fn as_regras_da_previa_de_link_respondem_sem_sessao() {
+        let mut pagina = DaPagina::nova(SEMENTE);
+        for (host, vale) in [
+            ("tenor.com", true),
+            ("127.0.0.1", false),
+            ("[::ffff:192.168.0.1]", false),
+            ("roteador.local", false),
+            ("10.0.0.8", false),
+        ] {
+            assert_eq!(
+                atender_sem_ligacao(&mut pagina, "destino_de_previa", json!({ "host": host })),
+                Ok(json!(vale)),
+                "{host}"
+            );
+        }
+        assert_eq!(
+            atender_sem_ligacao(
+                &mut pagina,
+                "midia_da_pagina",
+                json!({ "html": r#"<META property="og:image" content="https://media.tenor.com/a.gif?x=1&amp;y=2">"# })
+            ),
+            Ok(json!("https://media.tenor.com/a.gif?x=1&y=2"))
+        );
     }
 
     #[test]
