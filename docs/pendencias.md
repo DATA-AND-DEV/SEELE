@@ -8730,6 +8730,19 @@ Veio depois, da revisão do Lote F-Bateria:
     (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «O que fica com o
     dono»).
 
+    **Escrito em 21/10/2026, à espera da publicação** (D-guia-1): o guia passa
+    a ser da API 6, e o contador do exemplo também, no ramo
+    `0.16/guia-na-api-6` do `SEELE-MODS-INDEXER` (`22eccd7`, F3, sem push).
+    Fecha quando o dono o publicar pelo `gerar` assinado. O `curl` acima deixa
+    de servir de prova: o guia novo diz os conjuntos numa tabela, e não como
+    `APIS_ACEITAS = [...]`. A prova é o rótulo do topo (medido em 21/10: o
+    publicado diz «API 4», o gerado no ramo diz «API 6»). As fontes do guia
+    apontam a tag `v0.16.0` do SEELE.
+
+    ```sh
+    curl -sS https://mods.seele.app.br/guia/ | grep -o "API [0-9] · Schema 1"
+    ```
+
 25. **m2 da revisão final · Os laboratórios dos MODs publicados não conhecem
     o dono de hoje.** O `ferramentas/preview.cjs` de `SEELE-MOD-MESA`,
     `SEELE-MOD-PERFIS` e `SEELE-MOD-ESTILO`, os repositórios irmãos deste (ao

@@ -874,7 +874,24 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   - O índice dos planos aponta o spec-mestre como o pacote da 0.16, e a linha
     do Plano 6 deixa o PERFIS 3.4.0 e o «um pacote de cada API aceita (3, 4, 5
     e 6)», que a API 6 só e a D-mods-1 desfizeram.
-- **Esperam:** o guia do indexador na API 6 (pendência 51, item 24), num
-  worktree do `SEELE-MODS-INDEXER`, no ramo `0.16/guia-na-api-6`, sem push; e,
-  depois da 0.16 (decisão de 20/10), o Step 3 da tarefa 7 (o teto da `midia`:
-  o texto já diz a soma real).
+- **21/10, depois. O vermelho da 20ª, e o guia na API 6.**
+  - O único vermelho da bateria da 20ª era meu: o guarda do prelúdio
+    (`547c38a5`, P51-28) cobrava `regiao`, `cartoes` e `snapshot` presos a
+    uma capacidade de fora da 6, e a limpeza das APIs 3 a 5 (`282c8e7c`) os
+    tinha tirado; a bateria daquele commit não rodou o `mod_de_referencia`.
+    Agora os três não existem no prelúdio, e o lado de fora da leitura se
+    prova numa amostra (`4be47b8b`). Reprova com o `282c8e7c` desfeito, com a
+    leitura cega, sem a forma `? {} :`, e com o vetor chamando a região.
+  - **O guia do indexador na API 6** (D-guia-1; pendência 51, item 24): o
+    guia publicado parava na API 4, e o exemplo era um MOD da 3, que o app
+    0.16 recusa. Reescrito a partir do `docs/como-se-faz-um-mod.md`, com o
+    contador na API 6 (uma entrada na navegação, uma página, o aviso do
+    servidor), 28 capítulos e a linha do Servidor 0.15 num capítulo curto.
+    O contador foi exercitado no motor e no `Anfitriao` de verdade, num teste
+    de rascunho não commitado. No `SEELE-MODS-INDEXER`, ramo
+    `0.16/guia-na-api-6`, `22eccd7`, sem push: a publicação é do dono, pelo
+    `gerar` assinado. As fontes apontam a tag `v0.16.0` do SEELE, que tem de
+    existir no GitHub quando o guia sair.
+- **Esperam:** a publicação do guia, pelo dono; e, depois da 0.16 (decisão de
+  20/10), o Step 3 da tarefa 7 (o teto da `midia`: o texto já diz a soma
+  real).
