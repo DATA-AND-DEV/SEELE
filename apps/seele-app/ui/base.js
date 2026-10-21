@@ -3008,6 +3008,13 @@ function pintarOSeloDaPrevia() {
     document.body.append(selo);
   }
   selo.hidden = previasDoTema.size === 0;
+  // **De que superfície é cada prévia**, escrito no selo que as resume, e só
+  // quando muda. Uma prévia que passa de uma superfície a outra do mesmo MOD
+  // com os mesmos valores não muda mais nada no documento, e a casca do
+  // celular, que põe o VER NA SESSÃO no diálogo da prévia, ficava no de antes
+  // (D-estilo-1; decidido pela orquestradora em 21/10). No desktop, ninguém lê.
+  const superficies = JSON.stringify([...previasDoTema].map(([mod, { superficie }]) => [mod, superficie]).sort());
+  if (selo.dataset.superficies !== superficies) selo.dataset.superficies = superficies;
 }
 
 /** Tira a prévia de `modId`, se houver: o tema publicado volta, e o selo sai. */
