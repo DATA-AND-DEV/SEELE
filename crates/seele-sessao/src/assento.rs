@@ -86,9 +86,18 @@ struct Entrada {
     /// Se é este pedido que define o assento agora.
     ///
     /// Deixa de valer quando outra coisa muda o assento depois dele — um pedido
-    /// novo, a saída, o operador que move, a sala apagada. A recusa de um
-    /// pedido que já não vale não move ninguém: o assento de agora é de outra
-    /// decisão.
+    /// novo, a saída, o operador que move. A recusa de um pedido que já não
+    /// vale não move ninguém: o assento de agora é de outra decisão.
+    ///
+    /// **A sala apagada não o derruba.** Se é a sala dele, ele segue valendo
+    /// até a resposta, com o assento em `None` ([`Entrada::apagada`]). Se é
+    /// outra, o assento não está nela. Os pedidos de antes dele já não valiam.
+    ///
+    /// **O invariante** (desde o item 12 da pendência 58). Só o último pedido
+    /// da fila pode valer: `pedir` supera todos antes de empilhar, e `desfazer`
+    /// só devolve a validade ao último. Quando ele vale, o assento é a sala
+    /// dele **ou `None`**, se a sala dele foi apagada com ele no ar. Quem lê
+    /// `vale` não pode supor `assento == Some(sala)`.
     vale: bool,
     /// Se a recusa dele já chegou. O `Pong` que vem atrás o tira da fila.
     recusada: bool,
@@ -105,6 +114,12 @@ struct Entrada {
 
 /// As entradas pedidas que o servidor ainda não decidiu, na ordem em que foram
 /// pedidas — que é a ordem em que o servidor as decide.
+///
+/// **O assento pode ser `None` com um pedido no ar que ainda o define** (item
+/// 12 da pendência 58): a sala pedida foi apagada antes da resposta. A tela
+/// sai da sala; [`Self::confirmada`] segue dando o assento de antes do pedido,
+/// e a resposta decide — a recusa devolve a pessoa a ele, e o `Pong` sem
+/// recusa a deixa fora de sala.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EntradasPendentes {
     fila: VecDeque<Entrada>,
@@ -187,15 +202,11 @@ impl EntradasPendentes {
                 if *assento != Some(*voice_room) {
                     return false;
                 }
-                // A sala some da tela. Se quem a punha lá é o pedido no ar
-                // dela, ele segue valendo: a recusa dele devolve o de antes.
-                if !self
-                    .fila
-                    .back()
-                    .is_some_and(|entrada| entrada.vale && entrada.sala == *voice_room)
-                {
-                    self.superar();
-                }
+                // A sala some da tela, e nenhum pedido deixa de valer. Se o
+                // assento estava nela por um pedido no ar, ele é o último da
+                // fila, o único que pode valer (ver `Entrada::vale`), e segue
+                // valendo até a resposta: a recusa dele devolve o de antes.
+                // Senão, nenhum pedido valia.
                 *assento = None;
                 true
             }
