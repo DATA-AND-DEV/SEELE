@@ -196,5 +196,46 @@ assert.match(banco, /continua como estava/, `a falha do banco não diz que nada 
   }
 }
 
+// 5d. **A busca automática do que um servidor já aceito exige** (rodada 1 do
+//     lote 58-1, M2; `buscarOQueFaltaSeJaFoiAceito`, em `base.js`, recortada e
+//     rodada aqui com o `frases.js` de verdade). A falha chega do Tauri como o
+//     objeto do serde, e `String(objeto)` punha «[object Object]» na linha do
+//     MOD, depois de «reconecte para tentar de novo —». A recusa local do item
+//     9 nunca chegava a ser dita nesta rota.
+(async () => {
+  const base = fs.readFileSync(path.join(__dirname, "../ui/base.js"), "utf8");
+  const i = base.indexOf("async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes) {");
+  const j = base.indexOf("\n}\n", i);
+  assert.ok(i >= 0 && j > i, "`buscarOQueFaltaSeJaFoiAceito` mudou de forma, e o recorte não a achou");
+  const falha = { NaoInstalou: { NaoCopiei: "No space left on device (os error 28)" } };
+  const anotados = [];
+  const busca = vm.createContext({
+    console,
+    alvoDaSessao: () => "casa.exemplo:4000",
+    invoke: async (comando) => {
+      if (comando === "aceite_de_mods") return "conjunto-aceito";
+      if (comando === "instalar_mod_do_catalogo") throw falha;
+      throw new Error(`comando inesperado: ${comando}`);
+    },
+    anotarEstadoDoMod: (id, fase, detalhe = "") => anotados.push({ id, fase, detalhe }),
+  });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../ui/frases.js"), "utf8"), busca);
+  vm.runInContext(`let conjuntoJaBuscado = "";\n${base.slice(i, j + 3)}`, busca);
+  await busca.buscarOQueFaltaSeJaFoiAceito(
+    { conjunto: "conjunto-aceito" },
+    [{ id: "alguem/rpg", version: "1.0.0" }],
+  );
+  const naoObtive = anotados.find((a) => a.fase === "nao-obtive");
+  assert.ok(naoObtive, `a busca que falhou não anotou o MOD como não obtido: ${JSON.stringify(anotados)}`);
+  assert.doesNotMatch(naoObtive.detalhe, /\[object Object\]/,
+    `a linha do MOD que não veio diz «[object Object]» no lugar do motivo: ${naoObtive.detalhe}`);
+  assert.equal(naoObtive.detalhe, busca.fraseDeErro(falha),
+    `a linha do MOD que não veio não diz a frase da recusa: ${naoObtive.detalhe}`);
+  console.log("busca automática: o MOD que não veio diz a frase da recusa, e não «[object Object]».");
+})().catch((erro) => {
+  console.error(erro);
+  process.exitCode = 1;
+});
+
 console.log("hospedar com MOD antigo: a frase diz o MOD, a API e as três saídas na ordem do dono; sem o pacote, diz que ele falta, sem número; e toda recusa das saídas tem frase.");
 console.log("recusas de instalar: o «mod.json» recusado diz o motivo pela frase do código, e não o código cru; e a recusa local de um MOD do catálogo diz a de instalar, sem culpar o catálogo nem a rede; e apagar do cache tem frase para os três motivos.");
