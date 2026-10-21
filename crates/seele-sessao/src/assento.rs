@@ -227,10 +227,13 @@ impl EntradasPendentes {
                     {
                         self.fila.pop_front();
                         // Aceito, e a sala dele apagada depois: o servidor
-                        // tirou a pessoa dela, e quem partia dela parte de
-                        // fora de sala.
+                        // tirou a pessoa dela, e o pedido seguinte, se partia
+                        // dela, parte de fora de sala. Só o seguinte, como na
+                        // corrente de `recusar`: um mais adiante que parte de
+                        // uma sala de mesmo id partia de outro pedido dela, e
+                        // é a resposta daquele que o decide.
                         if fechada.apagada && !fechada.recusada {
-                            for seguinte in &mut self.fila {
+                            if let Some(seguinte) = self.fila.front_mut() {
                                 if seguinte.antes == Some(fechada.sala) {
                                     seguinte.antes = None;
                                 }
@@ -426,6 +429,7 @@ mod testes {
     const A: VoiceRoomId = VoiceRoomId(1);
     const B: VoiceRoomId = VoiceRoomId(2);
     const C: VoiceRoomId = VoiceRoomId(3);
+    const D: VoiceRoomId = VoiceRoomId(4);
 
     fn recusa(reason: AlertReason) -> ServerMessage {
         ServerMessage::Alert {
@@ -798,6 +802,48 @@ mod testes {
         assert_eq!(
             confirmada_depois_de_b, None,
             "com C no ar, o áudio abriria em B, que não existe"
+        );
+    }
+
+    /// Rodada 1 do lote 58-2 (o I1 da revisão, o cenário S25): o `Pong` de um
+    /// pedido aceito e apagado corrige só o pedido que vem logo atrás dele,
+    /// como a corrente de `recusar`.
+    ///
+    /// Em A, pedir B, C, B de novo e D, tudo dentro da volta. O servidor aceita
+    /// B, apaga B (e tira a pessoa dela), aceita C, recusa o segundo B, que não
+    /// existe, e recusa D: a pessoa fica em C. O `antes` de D é o segundo B, e
+    /// quem o conserta para C é a recusa dele, pela corrente. Limpar, no `Pong`
+    /// do primeiro B, todo `antes` que aponta para B deixava a pessoa fora de
+    /// sala na tela, com o áudio fechado, e em C no servidor.
+    #[test]
+    fn o_pong_do_pedido_aceito_e_apagado_so_corrige_o_pedido_seguinte() {
+        let (mut entradas, mut assento) = em_a();
+        let b = entradas.pedir(&mut assento, B);
+        let c = entradas.pedir(&mut assento, C);
+        let b_de_novo = entradas.pedir(&mut assento, B);
+        let d = entradas.pedir(&mut assento, D);
+        entradas.ouvir(
+            &mut assento,
+            &ServerMessage::VoiceRoomDeleted { voice_room: B },
+        );
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
+        entradas.ouvir(&mut assento, &pong_do_pedido(c));
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        entradas.ouvir(&mut assento, &pong_do_pedido(b_de_novo));
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        entradas.ouvir(&mut assento, &pong_do_pedido(d));
+
+        assert_eq!(
+            assento,
+            Some(C),
+            "o servidor aceitou C e recusou o segundo B e D, e a tela tirou a pessoa de toda sala: \
+             o `Pong` do primeiro B limpou o `antes` de D, que a recusa do segundo B consertaria \
+             para C"
+        );
+        assert_eq!(
+            entradas.confirmada(assento),
+            Some(C),
+            "o áudio fechou com a pessoa em C no servidor"
         );
     }
 
