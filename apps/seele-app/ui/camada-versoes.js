@@ -239,9 +239,22 @@ async function entrarPelaRecusa(motivo, link) {
     return false;
   }
   if (!decisao || typeof decisao !== "object") return false;
+  await entrarPelaOutraVersao(decisao, link);
+  return true;
+}
+
+/**
+ * Leva à outra versão quem chegou de fora do painel de servidores: a recusa
+ * por versão (`entrarPelaRecusa`) e a abertura com `--entrar` cujo `v=` já diz
+ * outra linha (`cumprirAAbertura`, em `tela-boot.js`).
+ *
+ * A pergunta mora no painel, fechado nas duas horas: ele reabre, e o VOLTAR o
+ * fecha e devolve o foco ao CONECTAR. `decisao` é o `versoes::ParaEntrar`, e
+ * `link` é o `seele://` inteiro, quando houve um.
+ */
+async function entrarPelaOutraVersao(decisao, link) {
   await abrirServidores($("botao-conectar"));
   entrarPelaLinha(decisao, link ?? null, fecharServidores);
-  return true;
 }
 
 /** Um tamanho em bytes, para gente: «12 MB», «840 KB». */
