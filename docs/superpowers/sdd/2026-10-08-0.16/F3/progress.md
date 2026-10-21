@@ -855,9 +855,26 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
     uma — 526 PROVADA e 25 NÃO SE APLICA, das 551. Para isso, duas provas
     que faltavam: a soma do bolso de bytes (`00a42671`) e o servidor que não
     confere contraste (`a7766d6d`). O `0.16/api-6` em `22082608`, os três
-    portes avisados do hash novo do contrato (`8dcf4aaf…`).
-- **Esperam:** do corte, o guarda da união, pronto em
-  `0.16/api-6-guarda-da-uniao` (`10d58f6a`), para entrar com o vetor copiado
-  depois do Step 6 do dono (D-api-7; o indexador ainda está na API 5); e,
-  depois da 0.16 (decisão de 20/10), o Step 3 da tarefa 7 (o teto da
-  `midia`: o texto já diz a soma real).
+    portes avisados do hash novo do contrato (`8dcf4aaf…`); e, no mesmo dia,
+    em `16ceffd2`, sem aviso aos portes, porque só trouxe prova e documento.
+- **21/10. O Step 6 feito, e o corte na 0.16.**
+  - O dono e a orquestradora, sem mexer nos ramos desta frente: o indexador na
+    API 6 (`fdb7dbf`, no `SEELE-MODS-INDEXER`: as cinco mudanças do
+    `o-indexador-na-api-6.md` e o `"tema"` abaixo da API 6 como `malformed`),
+    no ar com MESA, ESTILO e PERFIS 4.0.0 (`dab1ed3`). Na versao/0.16: o merge
+    do corte (`52dc895e`), o guarda da união (`61e0e028`, cherry-pick de
+    `10d58f6a`, e o fmt em `98d0fdf4`), o vetor copiado do `manifesto.py`
+    publicado (`34da3745`), e o `1efdbce4` da F8 (`f65b964e`).
+  - **Conferido na ponta `e33b2921`:** o guarda da união passa, e reprova com
+    o conjunto revertido (`[6]`, `[6, 5, 4]` e com a 7); o vetor de antes
+    inteiro reprova antes, no teto. E o 7:47 passa a creditar o recuo lateral
+    da F8: com o teto da coluna em 4000, o `superficies-deitado` passa, e com o
+    teto em 4000 e o `--cel-lado-*` zerado reprova (o diálogo e a folha a
+    26 px).
+  - O índice dos planos aponta o spec-mestre como o pacote da 0.16, e a linha
+    do Plano 6 deixa o PERFIS 3.4.0 e o «um pacote de cada API aceita (3, 4, 5
+    e 6)», que a API 6 só e a D-mods-1 desfizeram.
+- **Esperam:** o guia do indexador na API 6 (pendência 51, item 24), num
+  worktree do `SEELE-MODS-INDEXER`, no ramo `0.16/guia-na-api-6`, sem push; e,
+  depois da 0.16 (decisão de 20/10), o Step 3 da tarefa 7 (o teto da `midia`:
+  o texto já diz a soma real).

@@ -376,8 +376,10 @@ contagem, em 48b6a1ba» são as do dia da auditoria, e ficam como registro.
 
 **Ditos, fora da auditoria:** o «×» desligado da sala aberta fica a 1,32:1, e o
 comentário dele agora diz que é inativo, dispensado pela WCAG 1.4.3
-(`150020b6`); e as superfícies do celular não aplicam o inset lateral — deitado,
-a área segura vale pelo teto da coluna, e a F8 vai pô-lo nas superfícies.
+(`150020b6`); e as superfícies do celular não aplicavam o inset lateral — deitado,
+a área segura valia pelo teto da coluna. A F8 o pôs nas superfícies (`1efdbce4`,
+na versao/0.16 por `f65b964e`), e o 7:47 credita o recuo: com o teto em 4000, o
+`superficies-deitado` passa, e sem o recuo reprova.
 
 Os achados 1 e 2, as bancadas de navegador e a do celular no portão de
 publicação, são da F6.
