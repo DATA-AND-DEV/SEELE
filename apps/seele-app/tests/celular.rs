@@ -871,3 +871,400 @@ fn o_detalhe_da_pessoa_tem_um_dono_por_casca() {
         "o celular tem de desligar o detalhesNaLinha: lá, só a folha monta"
     );
 }
+
+// ---------------------------------------------------------------------------
+// G10. Um nome global, um script.
+//
+// Os scripts clássicos de uma página dividem um escopo global só: uma `function`
+// declarada de novo toma o lugar da outra, calada, e um `let`, `const` ou
+// `class` repetido derruba o script que chega depois. Achado pela F4 (21/10): a
+// `instalarDoCatalogo` do `camada-mods.js`, que carrega depois da
+// `ponte-web.js`, tomava o lugar da dela, e o comando respondia `false` sem
+// buscar nada. As três cascas (desktop, celular e web) carregam o mesmo
+// `index.html`, na mesma ordem (o pacote do web app copia a `ui/` como ela é);
+// o `executor-de-mod.html` é outra página, com o escopo dele.
+
+/// Os nomes que dois scripts da mesma página declaram **de propósito**, cada um
+/// com a razão. Fechada: um nome repetido fora dela reprova, e um nome dela que
+/// deixou de ser repetido também, para ela não envelhecer.
+const GLOBAIS_REPETIDOS_DE_PROPOSITO: &[(&str, &str)] = &[];
+
+#[derive(Debug, Clone, PartialEq)]
+enum Ficha {
+    Nome(String),
+    Sinal(char),
+    /// Uma cadeia, um modelo, uma expressão regular ou um número.
+    Valor,
+}
+
+#[derive(Debug)]
+struct Lida {
+    ficha: Ficha,
+    /// Quantas chaves, parênteses e colchetes estão abertos em volta dela.
+    fundura: i32,
+    /// Se uma quebra de linha veio antes dela (a inserção de `;` do JS).
+    linha_nova_antes: bool,
+}
+
+fn comeca_nome(c: char) -> bool {
+    c.is_alphabetic() || c == '_' || c == '$'
+}
+
+fn segue_nome(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '$'
+}
+
+/// Depois desta ficha, uma `/` abre uma expressão regular, e não divide.
+fn regex_depois(anterior: Option<&Lida>) -> bool {
+    match anterior.map(|l| &l.ficha) {
+        None => true,
+        Some(Ficha::Sinal(c)) => !matches!(c, ')' | ']' | '}'),
+        Some(Ficha::Nome(n)) => matches!(
+            n.as_str(),
+            "return"
+                | "typeof"
+                | "case"
+                | "in"
+                | "of"
+                | "new"
+                | "delete"
+                | "void"
+                | "throw"
+                | "else"
+                | "do"
+                | "yield"
+                | "await"
+                | "instanceof"
+        ),
+        Some(Ficha::Valor) => false,
+    }
+}
+
+fn pular_cadeia(c: &[char], mut i: usize) -> usize {
+    let aspa = c[i];
+    i += 1;
+    while i < c.len() && c[i] != aspa && c[i] != '\n' {
+        i += if c[i] == '\\' { 2 } else { 1 };
+    }
+    i + 1
+}
+
+fn pular_regex(c: &[char], mut i: usize) -> usize {
+    let mut classe = false;
+    i += 1;
+    while i < c.len() && c[i] != '\n' {
+        match c[i] {
+            '\\' => i += 1,
+            '[' => classe = true,
+            ']' => classe = false,
+            '/' if !classe => {
+                i += 1;
+                while i < c.len() && c[i].is_ascii_alphabetic() {
+                    i += 1;
+                }
+                return i;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    i
+}
+
+/// Um modelo (`` `…` ``), com as expressões `${…}` de dentro.
+fn pular_modelo(c: &[char], mut i: usize) -> usize {
+    i += 1;
+    while i < c.len() {
+        match c[i] {
+            '\\' => i += 2,
+            '`' => return i + 1,
+            '$' if c.get(i + 1) == Some(&'{') => i = ler_fichas(c, i + 2, true).1,
+            _ => i += 1,
+        }
+    }
+    i
+}
+
+/// As fichas de um trecho de JS, sem os comentários. Com `ate_o_fecho`, para no
+/// `}` que fecha uma expressão `${…}` de modelo e devolve o índice depois dele.
+fn ler_fichas(c: &[char], mut i: usize, ate_o_fecho: bool) -> (Vec<Lida>, usize) {
+    let mut saida: Vec<Lida> = Vec::new();
+    let mut fundura = 0;
+    let mut linha_nova = false;
+    while i < c.len() {
+        let ch = c[i];
+        if ch == '\n' {
+            linha_nova = true;
+            i += 1;
+            continue;
+        }
+        if ch.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if ch == '/' && c.get(i + 1) == Some(&'/') {
+            while i < c.len() && c[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if ch == '/' && c.get(i + 1) == Some(&'*') {
+            i += 2;
+            while i + 1 < c.len() && !(c[i] == '*' && c[i + 1] == '/') {
+                linha_nova |= c[i] == '\n';
+                i += 1;
+            }
+            i += 2;
+            continue;
+        }
+        let ficha = if ch == '\'' || ch == '"' {
+            i = pular_cadeia(c, i);
+            Ficha::Valor
+        } else if ch == '`' {
+            i = pular_modelo(c, i);
+            Ficha::Valor
+        } else if ch == '/' && regex_depois(saida.last()) {
+            i = pular_regex(c, i);
+            Ficha::Valor
+        } else if comeca_nome(ch) {
+            let inicio = i;
+            while i < c.len() && segue_nome(c[i]) {
+                i += 1;
+            }
+            Ficha::Nome(c[inicio..i].iter().collect())
+        } else if ch.is_ascii_digit() {
+            while i < c.len() && (segue_nome(c[i]) || c[i] == '.') {
+                i += 1;
+            }
+            Ficha::Valor
+        } else {
+            i += 1;
+            if matches!(ch, '}' | ')' | ']') {
+                if ch == '}' && fundura == 0 && ate_o_fecho {
+                    return (saida, i);
+                }
+                fundura -= 1;
+            }
+            saida.push(Lida {
+                ficha: Ficha::Sinal(ch),
+                fundura,
+                linha_nova_antes: linha_nova,
+            });
+            linha_nova = false;
+            if matches!(ch, '{' | '(' | '[') {
+                fundura += 1;
+            }
+            continue;
+        };
+        saida.push(Lida {
+            ficha,
+            fundura,
+            linha_nova_antes: linha_nova,
+        });
+        linha_nova = false;
+    }
+    (saida, i)
+}
+
+/// Uma ficha depois da qual uma quebra de linha pode terminar a instrução.
+fn fecha_expressao(ficha: &Ficha) -> bool {
+    matches!(
+        ficha,
+        Ficha::Nome(_) | Ficha::Valor | Ficha::Sinal(')' | ']' | '}')
+    )
+}
+
+/// A ficha `k` começa uma instrução do nível de cima.
+fn comeca_instrucao(f: &[Lida], k: usize) -> bool {
+    k == 0
+        || matches!(f[k - 1].ficha, Ficha::Sinal(';' | '}'))
+        || (f[k].linha_nova_antes && fecha_expressao(&f[k - 1].ficha))
+}
+
+/// Os nomes de um padrão de desestruturação (`{ a, b: c, ...d }`, `[a, b]`) que
+/// começa em `m`; devolve o índice depois dele.
+fn nomes_do_padrao(f: &[Lida], m: usize, nomes: &mut Vec<String>) -> usize {
+    let fundura = f[m].fundura;
+    let mut k = m + 1;
+    while k < f.len() && !(f[k].fundura == fundura && matches!(f[k].ficha, Ficha::Sinal('}' | ']')))
+    {
+        if let Ficha::Nome(nome) = &f[k].ficha {
+            let depois = f.get(k + 1).map(|l| &l.ficha);
+            let antes = &f[k - 1].ficha;
+            if f[k].fundura == fundura + 1
+                && matches!(depois, Some(Ficha::Sinal(',' | '}' | ']' | '=')))
+                && *antes != Ficha::Sinal('=')
+            {
+                nomes.push(nome.clone());
+            }
+        }
+        k += 1;
+    }
+    k + 1
+}
+
+/// Os declaradores de um `let`, `const` ou `var` que começam em `m`, até o fim
+/// da instrução; devolve o índice depois dela.
+fn nomes_declarados(f: &[Lida], mut m: usize, nomes: &mut Vec<String>) -> usize {
+    loop {
+        match f.get(m).map(|l| &l.ficha) {
+            Some(Ficha::Nome(nome)) => {
+                nomes.push(nome.clone());
+                m += 1;
+            }
+            Some(Ficha::Sinal('{' | '[')) => m = nomes_do_padrao(f, m, nomes),
+            _ => return m,
+        }
+        loop {
+            match f.get(m) {
+                None => return m,
+                Some(l) if l.fundura == 0 && l.ficha == Ficha::Sinal(',') => {
+                    m += 1;
+                    break;
+                }
+                Some(l) if l.fundura == 0 && l.ficha == Ficha::Sinal(';') => return m + 1,
+                Some(l)
+                    if l.fundura == 0
+                        && l.linha_nova_antes
+                        && matches!(l.ficha, Ficha::Nome(_))
+                        && fecha_expressao(&f[m - 1].ficha) =>
+                {
+                    return m;
+                }
+                _ => m += 1,
+            }
+        }
+    }
+}
+
+/// Os nomes que um script clássico declara no escopo global: `function`
+/// (também `async` e `function*`), `class`, `let`, `const` e `var` no nível de
+/// cima, no começo de uma instrução. Dentro de uma IIFE, nada é global.
+fn globais_declarados(js: &str) -> Vec<String> {
+    let c: Vec<char> = js.chars().collect();
+    let f = ler_fichas(&c, 0, false).0;
+    let mut nomes = Vec::new();
+    let mut k = 0;
+    while k < f.len() {
+        let palavra = match &f[k].ficha {
+            Ficha::Nome(n) if f[k].fundura == 0 && comeca_instrucao(&f, k) => n.as_str(),
+            _ => {
+                k += 1;
+                continue;
+            }
+        };
+        let funcao_em = match palavra {
+            "function" => Some(k),
+            "async" if matches!(f.get(k + 1).map(|l| &l.ficha), Some(Ficha::Nome(n)) if n == "function") => {
+                Some(k + 1)
+            }
+            _ => None,
+        };
+        if let Some(em) = funcao_em {
+            let mut m = em + 1;
+            if f.get(m).map(|l| &l.ficha) == Some(&Ficha::Sinal('*')) {
+                m += 1;
+            }
+            if let Some(Ficha::Nome(nome)) = f.get(m).map(|l| &l.ficha) {
+                nomes.push(nome.clone());
+            }
+            k = m + 1;
+        } else if palavra == "class" {
+            if let Some(Ficha::Nome(nome)) = f.get(k + 1).map(|l| &l.ficha) {
+                nomes.push(nome.clone());
+            }
+            k += 2;
+        } else if matches!(palavra, "let" | "const" | "var") {
+            k = nomes_declarados(&f, k + 1, &mut nomes);
+        } else {
+            k += 1;
+        }
+    }
+    nomes
+}
+
+/// Os scripts clássicos de uma página, na ordem dela: `(nome, código)`. Os de
+/// `type="module"` têm escopo próprio e ficam de fora.
+fn scripts_da_pagina(pagina: &str) -> Vec<(String, String)> {
+    let html = codigo_de(pagina, &ler(pagina));
+    let mut scripts = Vec::new();
+    let mut resto = html.as_str();
+    let mut inline = 0;
+    while let Some(abre) = resto.find("<script") {
+        let depois = &resto[abre..];
+        let fim_da_tag = depois.find('>').expect("uma <script> sem `>`");
+        let tag = &depois[..fim_da_tag];
+        let corpo_e_resto = &depois[fim_da_tag + 1..];
+        let fecha = corpo_e_resto
+            .find("</script>")
+            .expect("uma <script> sem </script>");
+        if !tag.contains("type=\"module\"") {
+            match tag.split("src=\"").nth(1).and_then(|s| s.split('"').next()) {
+                Some(src) => scripts.push((src.to_string(), ler(src))),
+                None => {
+                    inline += 1;
+                    scripts.push((
+                        format!("{pagina} (script {inline} no HTML)"),
+                        corpo_e_resto[..fecha].to_string(),
+                    ));
+                }
+            }
+        }
+        resto = &corpo_e_resto[fecha..];
+    }
+    scripts
+}
+
+#[test]
+fn nenhum_nome_global_e_declarado_por_dois_scripts_da_mesma_pagina() {
+    let mut repetidos: Vec<String> = Vec::new();
+    let mut de_proposito_vistos: Vec<&str> = Vec::new();
+    for pagina in ["index.html", "executor-de-mod.html"] {
+        let scripts = scripts_da_pagina(pagina);
+        assert!(
+            !scripts.is_empty(),
+            "{pagina} sem script nenhum: a leitura deste guarda quebrou"
+        );
+        let mut donos: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        let mut total = 0;
+        for (nome, codigo) in &scripts {
+            let mut deste = globais_declarados(codigo);
+            deste.sort();
+            deste.dedup();
+            total += deste.len();
+            for global in deste {
+                donos.entry(global).or_default().push(nome.clone());
+            }
+        }
+        if pagina == "index.html" {
+            assert!(
+                total > 100 && donos.contains_key("desenharCanais") && donos.contains_key("CASCA"),
+                "o index.html declara só {total} globais, sem o `desenharCanais` ou o `CASCA`: a leitura deste guarda quebrou"
+            );
+        }
+        for (global, scripts) in donos.into_iter().filter(|(_, s)| s.len() > 1) {
+            match GLOBAIS_REPETIDOS_DE_PROPOSITO
+                .iter()
+                .find(|(nome, _)| *nome == global)
+            {
+                Some((nome, _)) => de_proposito_vistos.push(nome),
+                None => repetidos.push(format!("{pagina}: `{global}` em {}", scripts.join(", "))),
+            }
+        }
+    }
+    assert!(
+        repetidos.is_empty(),
+        "dois scripts da mesma página declaram o mesmo nome global (o de depois toma o lugar do de antes, \
+         ou derruba o próprio script):\n{}",
+        repetidos.join("\n")
+    );
+    let velhos: Vec<&str> = GLOBAIS_REPETIDOS_DE_PROPOSITO
+        .iter()
+        .map(|(nome, _)| *nome)
+        .filter(|nome| !de_proposito_vistos.contains(nome))
+        .collect();
+    assert!(
+        velhos.is_empty(),
+        "estes nomes estão na lista dos repetidos de propósito e não se repetem mais; saem dela: {velhos:?}"
+    );
+}
