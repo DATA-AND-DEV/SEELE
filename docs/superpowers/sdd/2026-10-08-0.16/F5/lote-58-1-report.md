@@ -167,3 +167,79 @@ O único log vazio é o do `fmt`, que não escreve nada quando passa.
   reescreve o arquivo e recompila, e depois da última delas eu dei `touch` e rodei de
   novo, recompilando, antes de qualquer conclusão. Daí em diante o `reverter.py`
   restaura com `copyfile`.
+
+## Rodada 1
+
+A revisão aprovou com ressalvas: 0 Críticos, 1 Importante e 4 Menores, e os cinco
+entraram. Cada um num commit isolado, com o vermelho antes e a reversão conferida
+com `cmp`. Os fontes foram restaurados por escrita nova (`copyfile`), sem a data velha.
+
+| Achado | Commit | O que mudou | O vermelho, e a reversão |
+|---|---|---|---|
+| I1 · «DESTA PASTA» numa instalação pelo catálogo | `bcf1e8ab` | No ramo `NaoInstalou` do `fraseDeErro`, um `ManifestoRecusado` diz «ESTE SEELE RECUSOU O «mod.json» DESTE MOD: <frase do dicionário>.\nNada foi instalado.». Os outros casos seguem pela frase de instalar. O 5b da bancada exige, nesse caso, nenhuma «PASTA», o «DESTE MOD», a frase do dicionário e «Nada foi instalado»; nos outros, a igualdade de antes. | Com o `frases.js` de antes, o 5b reprova: «fala de uma pasta que ninguém escolheu». |
+| M1 · a passagem apagada, sem prova | `cfbddb57` | O `exige_a_recusa_local` lê da linha WARN a pasta em `passagem="…"` (desfazendo o `\\` do `Debug`), confere que ela é uma passagem em `temp_dir()` (a conferência não fica vazia) e exige que não exista. A linha deixa de afirmar «já foi apagada»: o resultado do `remove_dir_all` vai em `passagem_apagada=`. | Vermelho: os três testes, sem `passagem_apagada=true` na linha. Reversão: `let apagada = true;`, sem o `remove_dir_all`, e os três reprovam com «a pasta de passagem ficou em `temp_dir()`». As três passagens que essa reversão deixou foram apagadas. |
+| M3 · a forma serde de `NaoInstalou` | `879576cf` | `a_recusa_local_chega_a_janela_na_forma_que_a_frase_le`, em `o_catalogo`: o `serde_json::to_value` de `NaoCopiei`, `ManifestoRecusado`, `TemAtalho` e `SemManifesto` é a forma que a bancada monta. | Dois mutantes reprovam: `#[serde(rename = "FalhaLocal")]` na variante, e `#[serde(tag = "tipo", content = "detalhe")]` na `FalhaAoInstalarMod`. |
+| M2 · «[object Object]» na busca automática | `a905b3f1` (só o `base.js`, 1 linha) e `38adb725` (a bancada) | `buscarOQueFaltaSeJaFoiAceito` anota a falha pelo recuo do `atender-mod`: `typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha)`. O texto «reconecte para tentar de novo» do `camada-mods.js` não mudou. A prova é a 5d da `hospedar-com-mod-antigo.cjs`: ela recorta a função do `base.js` e a roda com o `frases.js` de verdade e um `invoke` que rejeita com `{NaoInstalou: {NaoCopiei: …}}`. | Com a linha de antes, a 5d reprova: «a linha do MOD que não veio diz «[object Object]»». |
+| M4 · «roda no Servidor 0.15» para uma API de 0 a 2 | `954d9a4d` | `RECUSAS_DE_PACOTE["api-too-old"]` passa a «ele é de uma API mais velha que a 6, a deste app; procure a versão dele para a API 6, ou use o Servidor 0.15 pelo launcher, que roda as APIs 3 a 5». A seção 3 da bancada lê `APIS_POR_LINHA` em `crates/seele-proto/src/mods.rs` e exige da frase as APIs da linha 0.15 (seguidas, «3 a 5») e a da linha deste build («6»). | Vermelho, e reversão: a frase de antes reprova («uma API 2 não roda»). E a tabela com a 0.15 em `[5, 4]` reprova («não diz que o Servidor 0.15 roda as APIs 4 a 5»): a bancada lê a tabela de fato. |
+
+### As frases, depois da rodada
+
+| Erro | Frase | Caracteres |
+|---|---|---|
+| `{"NaoInstalou": {"ManifestoRecusado": "api-too-new"}}` | `ESTE SEELE RECUSOU O «mod.json» DESTE MOD: ele é de uma API mais nova que a deste app; atualize o aplicativo.`<br>`Nada foi instalado.` | 129 |
+| `{"NaoInstalou": {"ManifestoRecusado": "api-too-old"}}` | `ESTE SEELE RECUSOU O «mod.json» DESTE MOD: ele é de uma API mais velha que a 6, a deste app; procure a versão dele para a API 6, ou use o Servidor 0.15 pelo launcher, que roda as APIs 3 a 5.`<br>`Nada foi instalado.` | 210 |
+| `{"ManifestoRecusado": "api-too-old"}` (de uma pasta) | a mesma, com «DESTA PASTA» | 212 |
+| `{"PacoteNaoServe": "api-too-old"}` | `A VERSÃO NOVA DESTE MOD NÃO SERVE: <a mesma frase>.`<br>`O MOD continua como estava.` | 210 |
+
+### Os guardas do `frontend.rs`, conferidos e sem mudança
+
+O `frontend.rs` não foi tocado, e nenhum guarda dele precisou mudar.
+
+- **`todo_pacote_recusado_e_dito_com_uma_frase`** cobra só as chaves do
+  `RECUSAS_DE_PACOTE` contra o `refusal_name`, e o `RECUSAS_DE_PACOTE[mod.refused]` da
+  gestão. O texto do `api-too-old` não entra nele.
+- **O `LIMITE_DE_FRASE` (180)** não mede o `RECUSAS_DE_PACOTE`, que não está nos
+  `DICIONARIOS`, nem as frases compostas a partir dele. A composta do `api-too-old`
+  passou de 199 para 210 e 212 caracteres. A revisão mediu a de 199 nos quatro lugares
+  em que ela aparece, e cabia; a de 212 eu não medi no `index.html`.
+- **`so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado` passa por
+  coincidência com a linha do M2.** Ele colhe como «fase» toda literal minúscula dentro
+  de uma chamada a `anotarEstadoDoMod(…)`, e a linha nova traz o `"function"` do
+  `typeof`. Emulei a leitura do guarda: as fases eram 10, e passam a 11, com
+  `function`. Ele passa porque o `camada-mods.js` contém `"function"` (5 vezes), e não
+  porque a fase tem frase. Não mexi no guarda (o `frontend.rs` é do lote 58-4). Para a
+  58-4: o guarda pode pular a literal que segue um `typeof … ===`.
+
+### O que a rodada achou e não consertou
+
+- **A mesma frase falsa em mais dois lugares,** fora do que o M4 pediu:
+  - `camada-mods.js` (a linha do pacote no cache): «este pacote foi feito para a API
+    ${dele}, que roda no Servidor 0.15». Um pacote da API 1 ou 2, como os do layout
+    antigo que o item 11 agora registra, lê isso, e é falso;
+  - `frases.js`, `ModsDeApiAntiga`: «${id}: feito para a API ${api}, que roda no Servidor
+    0.15.». Ele é falso para um MOD ligado num banco antigo com a API 1 ou 2.
+  Os dois têm o número da API na mão, e o conserto é dizer a frase só quando ela está
+  em `APIS_POR_LINHA`. Ficam para quem decide o texto.
+- **Os números do `api-too-old` estão escritos no `frases.js`.** Não há de onde lê-los
+  ali: o `frases.js` é um dicionário estático, e o `seele-app` vê só o `seele-ffi`, que
+  não exporta `APIS_POR_LINHA`. A ligação com a tabela é a da bancada, pelo texto do
+  `seele-proto`.
+- **Uma passagem de outro processo em `temp_dir()`** (`seele-mod-93534-…`), de antes desta
+  rodada e não minha. Não a apaguei.
+
+### Os guardas do fim da rodada
+
+Sobre `954d9a4d`, pelo mesmo `scratchpad/lote-58-1/guardas.sh`, com os logs em
+`scratchpad/lote-58-1/guardas-r1/`:
+
+- `cargo fmt -p seele-app -- --check`: limpo (o único log vazio, porque ele não escreve
+  nada quando passa);
+- `cargo --offline test -p seele-app --no-fail-fast`, com HOME falsa: **804 passaram, 0
+  falharam**, em 11 binários. São 803 mais o teste do M3. Nenhuma HOME falsa ganhou
+  `.config/seele`;
+- `cargo --offline clippy -p seele-app --all-targets -- -D warnings`: limpo;
+- `cargo --offline xtask check-runtime`: as 14 bancadas passam. A
+  `hospedar-com-mod-antigo.cjs` passa com a 5d («busca automática: o MOD que não veio
+  diz a frase da recusa…»);
+- as 20 bancadas do job `bancadas`: as 20 passam;
+- os 46 roteiros, numa chamada da `carga-da-casca.py`: «os 46 passaram».
