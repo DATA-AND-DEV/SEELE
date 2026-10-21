@@ -1070,7 +1070,11 @@ async function cumprirAAbertura() {
   if (pedido.entrar) {
     try {
       const convite = await invoke("analisar_convite", { link: pedido.entrar });
-      await conectar(convite.alvo, null, convite.token ?? null);
+      // **O link vai junto, como o colado no painel** (tarefa 13 da F6): se o
+      // servidor recusar por falar outra versão, é ele que leva o SEELE dela
+      // já ao servidor (`entrarPelaRecusa`). Sem ele, a outra versão abria na
+      // tela de entrada, e a pessoa teria de colar um link que nunca colou.
+      await conectar(convite.alvo, null, convite.token ?? null, pedido.entrar);
     } catch (falha) {
       const erro = $("boot-erro");
       erro.hidden = false;
