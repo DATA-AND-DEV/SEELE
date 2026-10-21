@@ -93,7 +93,9 @@ const ctx = {
     body: { append: (no) => { selo = no; } },
     getElementById: (id) => (id === "selo-da-previa" ? selo : null),
   },
-  elemento: (tag, classe, texto) => ({ tag, className: classe, textContent: texto, hidden: false, setAttribute() {} }),
+  // O `dataset` que todo elemento de verdade tem: desde a D-estilo-1 (F8, `a4d75a5f`)
+  // o `pintarOSeloDaPrevia` escreve nele de que superfície é cada prévia.
+  elemento: (tag, classe, texto) => ({ tag, className: classe, textContent: texto, hidden: false, dataset: {}, setAttribute() {} }),
   getComputedStyle: () => ({ getPropertyValue: (t) => raizCss[t] ?? "" }),
   contribuicoesDosMods: { escolherSubstituicao: () => ({}), revogarDoMod: () => {} },
   modsCarregados: new Map(),
