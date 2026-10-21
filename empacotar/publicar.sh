@@ -1158,6 +1158,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/apps-mais-novos.js \
         --roteiro tools/roteiros/atualizacao.js \
         --roteiro tools/roteiros/avatar-na-chamada.js \
+        --roteiro tools/roteiros/banco-do-futuro.js \
         --roteiro tools/roteiros/barra-mac.js \
         --roteiro tools/roteiros/botoes-da-entrada.js \
         --roteiro tools/roteiros/catalogo-de-mods.js \

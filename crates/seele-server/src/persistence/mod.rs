@@ -177,6 +177,54 @@ impl Durabilidade {
     }
 }
 
+/// **O banco foi gravado por uma versão mais nova do SEELE**, e esta não o abre
+/// (spec da 0.16, §8).
+///
+/// O `migrate` aplicava só as migrações acima da versão gravada, e uma versão
+/// gravada acima de todas as que este build conhece passava calada: o servidor
+/// subia sobre colunas e tabelas que não sabe que existem, e escrevia nelas como
+/// se o banco fosse do esquema dele. Quem abre a pasta de uma 0.17 com uma 0.16
+/// — um atualizador que voltou, uma cópia trazida de outra máquina — estragaria
+/// os dados da mais nova sem nenhum aviso.
+///
+/// A recusa vem **antes de qualquer escrita**, os pragmas inclusive: o banco
+/// fica como estava, para a versão que o gravou abri-lo de novo. O nome é o que
+/// a casca lê para dizer «atualize o app» (`FalhaAoHospedar::BancoDoFuturo`); o
+/// texto é para o registro e para o terminal do `seeled`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "o banco está no esquema {gravado}, e este servidor conhece até o {conhecido}: ele foi \
+     gravado por uma versão mais nova do SEELE, e esta não o abre para não estragá-lo"
+)]
+pub struct BancoDoFuturo {
+    /// O maior esquema gravado no banco.
+    pub gravado: i64,
+    /// O maior esquema que este build conhece.
+    pub conhecido: i64,
+}
+
+/// O maior esquema que este build sabe aplicar.
+#[must_use]
+pub fn esquema_conhecido() -> i64 {
+    schema::MIGRATIONS
+        .iter()
+        .map(|migration| migration.version)
+        .max()
+        .unwrap_or(0)
+}
+
+/// O maior esquema gravado num banco, ou zero quando ele não tem a tabela das
+/// versões (um banco novo). Só lê.
+fn esquema_gravado(connection: &Connection) -> i64 {
+    connection
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0)
+}
+
 impl Persistence {
     /// Opens the database and brings the schema up to date.
     ///
@@ -200,6 +248,14 @@ impl Persistence {
                 .with_context(|| format!("could not open {}", path.display()))?,
             Location::Memory => Connection::open_in_memory()?,
         };
+
+        // **Um banco do futuro é recusado aqui, antes de qualquer escrita** —
+        // os pragmas e o `migrate` inclusive. Ver [`BancoDoFuturo`].
+        let gravado = esquema_gravado(&connection);
+        let conhecido = esquema_conhecido();
+        if gravado > conhecido {
+            return Err(BancoDoFuturo { gravado, conhecido }.into());
+        }
 
         // WAL, per specs/04. Readers do not block the writer, and a crash leaves
         // a recoverable log rather than a truncated file.
@@ -257,15 +313,7 @@ impl Persistence {
     ///
     /// Fails if the version table cannot be read.
     pub fn schema_version(&self) -> Result<i64> {
-        let version: i64 = self
-            .connection
-            .query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        Ok(version)
+        Ok(esquema_gravado(&self.connection))
     }
 
     /// Applies every migration above the current version.
@@ -385,6 +433,85 @@ pub fn icones_das_pessoas(persistence: &Persistence) -> Result<Vec<(PersonId, Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Um banco num arquivo, com a tabela das versões dizendo `esquema` e uma
+    /// tabela que nenhum build desta linha conhece. Numa pasta própria.
+    fn banco_no_esquema(nome: &str, esquema: i64) -> std::path::PathBuf {
+        static VEZ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let pasta = std::env::temp_dir().join(format!(
+            "seele-esquema-{nome}-{}-{}",
+            std::process::id(),
+            VEZ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&pasta);
+        std::fs::create_dir_all(&pasta).expect("pasta");
+        let arquivo = pasta.join("seele.db");
+        let conexao = Connection::open(&arquivo).expect("criar");
+        conexao
+            .execute_batch(
+                "CREATE TABLE schema_version (
+                     version    INTEGER PRIMARY KEY,
+                     applied_at INTEGER NOT NULL
+                 ) STRICT;
+                 CREATE TABLE de_outra_versao (coisa INTEGER);",
+            )
+            .expect("as tabelas");
+        conexao
+            .execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (?1, 0)",
+                [esquema],
+            )
+            .expect("a versão");
+        arquivo
+    }
+
+    /// **Um banco do futuro é recusado pelo nome, e fica como estava** (spec da
+    /// 0.16, §8). Gravado por uma versão que conhece um esquema a mais que este
+    /// build: abrir devolve [`BancoDoFuturo`], o arquivo tem os mesmos bytes de
+    /// antes, e nenhuma tabela deste build entrou nele.
+    #[test]
+    fn um_banco_do_futuro_e_recusado_sem_ser_tocado() {
+        let conhecido = esquema_conhecido();
+        let arquivo = banco_no_esquema("futuro", conhecido + 1);
+        let antes = std::fs::read(&arquivo).expect("ler");
+
+        let Err(erro) = Persistence::open(&Location::File(arquivo.clone())) else {
+            panic!("abriu um banco gravado por uma versão mais nova, e escreveria nele");
+        };
+        assert_eq!(
+            erro.downcast_ref::<BancoDoFuturo>(),
+            Some(&BancoDoFuturo {
+                gravado: conhecido + 1,
+                conhecido,
+            }),
+            "a recusa não tem o nome que a casca lê: {erro:#}"
+        );
+        assert_eq!(
+            std::fs::read(&arquivo).expect("ler de novo"),
+            antes,
+            "o banco recusado foi tocado"
+        );
+        let tabelas: i64 = Connection::open(&arquivo)
+            .expect("abrir para olhar")
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name = 'mods'",
+                [],
+                |linha| linha.get(0),
+            )
+            .expect("contar");
+        assert_eq!(
+            tabelas, 0,
+            "uma tabela deste build entrou no banco recusado"
+        );
+    }
+
+    /// O controle da recusa: o banco no esquema que este build conhece abre. Sem
+    /// ele, um `>=` no lugar do `>` recusaria todo banco já migrado.
+    #[test]
+    fn um_banco_no_esquema_deste_build_abre() {
+        let arquivo = banco_no_esquema("deste", esquema_conhecido());
+        Persistence::open(&Location::File(arquivo)).expect("o banco deste build não abriu");
+    }
 
     fn memory() -> Persistence {
         Persistence::open(&Location::Memory).expect("in-memory database")

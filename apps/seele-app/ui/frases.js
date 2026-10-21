@@ -747,6 +747,18 @@ function fraseDeErro(erro, apelido, deOnde) {
     // ADR 0046: esta versão foi revogada. A frase diz o defeito e o conserto,
     // como a lista assinada os escreve — nunca uma recusa genérica. Serve a
     // `FalhaAoHospedar` e a `conferir_esta_versao`, que usam o mesmo nome.
+    // **Os dados deste servidor são de uma versão mais nova do SEELE** (spec da
+    // 0.16, §8). O servidor recusou o banco sem tocar nele, e o remédio é um só:
+    // atualizar. Os números do esquema vão ao fim, para quem relata, e não no
+    // título — quem lê precisa saber que é a versão e o que fazer.
+    if (erro.BancoDoFuturo) {
+      const { gravado, conhecido } = erro.BancoDoFuturo;
+      return (
+        "OS DADOS DESTE SERVIDOR SÃO DE UMA VERSÃO MAIS NOVA DO SEELE.\n" +
+        "Esta versão não os abre, para não estragá-los: atualize o app e hospede de novo.\n" +
+        `(esquema ${gravado}; esta versão conhece até o ${conhecido})`
+      );
+    }
     if (erro.EstaVersaoRevogada) {
       const { defeito, corrigida_em: corrigida } = erro.EstaVersaoRevogada;
       return (
