@@ -10525,3 +10525,29 @@ cliques) e `uma_pesagem_recusada_devolve_a_causa_a_quem_perguntou` (com prazo, p
 de pendurar), e o roteiro `apagar-canal-recusado.js`. Cada um reprova pela reversão: sem o
 conserto, com a recusa respondida virando faixa também, e resolvendo a mais nova no lugar da mais
 antiga.
+
+## 68 · Fechada em 2026-10-21 · O servidor reusava o id de uma sala de voz ou de um canal apagado
+
+**Aberta e fechada em 2026-10-21**, achada pela revisão do lote 58-2 da F5 (O2) e conferida pela F1.
+**Fechada por `3a90f5b1`** (F1).
+
+**O mecanismo, pelo código:** `voice_rooms` e `channels` nasceram com `id INTEGER PRIMARY KEY`, sem
+`AUTOINCREMENT`, e `Channels::create_voice_room` e `create_channel` gravavam sem id: o SQLite dava à
+linha nova o maior que existe mais um. As duas são apagadas de verdade (`DELETE`). **Medido em 21/10**:
+apagar a sala mais nova e criar outra dava à nova o id da apagada (o 2 voltava), e o mesmo nos canais. O
+cliente não distinguia o que sumiu do que nasceu — o lugar guardado, uma contribuição de MOD, a sala aberta
+na tela —, e só o servidor conserta isso.
+
+**O conserto:** a migração 17 guarda o maior id já usado de cada tabela (`maiores_ids`), começando no maior
+que existe, e dois gatilhos o sobem a cada inserção, com id explícito também; as duas criações gravam com o
+id seguinte à marca. **Não o `AUTOINCREMENT`**: refazer `channels` com as chaves estrangeiras ligadas
+apagaria em cascata as mensagens, desligá-las não vale dentro da transação de cada migração, e o guarda
+`no_migration_contains_a_down_step` recusa o `DROP TABLE`.
+
+**O limite, que nenhuma migração desfaz:** um id apagado antes da migração 17, acima do maior que sobrou,
+não deixou rastro, e pode voltar uma vez.
+
+**Provas:** `seele-server` `apagar_a_sala_mais_nova_nao_devolve_o_id_dela_a_proxima`,
+`apagar_o_canal_mais_novo_nao_devolve_o_id_dele_ao_proximo` (reprovam no código de antes) e
+`um_banco_de_antes_comeca_no_maior_id_e_dai_nenhum_volta` (o banco da v0.15.1 publicada, migrado), cada um
+reprovando pela reversão. O banco do futuro (`c1808f89`) continua recusado.
