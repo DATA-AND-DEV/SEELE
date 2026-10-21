@@ -21,6 +21,10 @@ citados aqui ainda não estão no `main` (ver «O destino do branch `mobile/ios`
 > `seele-web` e `seele-motor-web`, têm `unsafe` num arquivo nomeado cada, no
 > molde do 0041 e do 0043.
 
+> **Emendado em 11/10/2026** (ver «Emenda de 11/10/2026»): **o web app também
+> serve no computador** (D-web-3), com a casca de desktop adaptada ao navegador
+> e sem o que é de quem hospeda. No computador, ele modera e compartilha a tela.
+
 > **Emenda os ADRs 0003, 0006, 0007, 0010, 0017, 0018, 0019 e 0039, e abre
 > exceção nomeada, só no navegador, ao 0026 e ao 0046.** No 0006, revoga para o
 > navegador a recusa de `0006:43`. A tabela está em «O que acontece com os ADRs
@@ -833,7 +837,86 @@ pelo navegador nesta versão, por duas razões:
 A tela do celular não oferece «ligar pelo código», e as notas da 0.16 dizem
 isso.
 
-## O que acontece com os ADRs que já existem
+## Emenda de 11/10/2026
+
+### O web app também serve no computador (D-web-3)
+
+Decidido pelo dono em 09/10 e registrado pela orquestradora como D-web-3. O
+desenho é da F8 (`docs/superpowers/specs/2026-10-09-0.16-celular-design.md`,
+§2.8 e §9.2); a ponte e o compartilhar são da F4 (Tarefas 3.1 e 3.10 do plano
+dela). Este ADR dizia «no celular» e pensava só nele. A decisão de plataforma
+não muda: o computador continua com o app do SEELE, e quem quer hospedar
+continua precisando dele.
+
+**Quem é:** quem quer entrar no servidor de alguém pelo computador, sem instalar
+nada, e não vai hospedar.
+
+**A mesma página, a mesma casca, duas marcas.** A `ponte-web.js` põe a marca no
+primeiro script do `<head>`, de forma síncrona:
+- `data-casca="celular"`: com ponteiro grosso, ou com menos de 900 px de
+  largura na carga;
+- `data-casca="larga"`, no resto: **a casca de desktop de hoje**, adaptada ao
+  navegador, e não redesenhada;
+- a pessoa pode trocar à mão, e a escolha fica no aparelho
+  (`localStorage["seele.casca"]`).
+
+A casca continua uma só (ADR 0039). O que a casca do Tauri tem e o navegador
+não tem sai ou se adapta: a barra da janela e os controles dela, o relógio, o
+atualizador (que vira «uma versão nova chega ao abrir a página de novo») e as
+versões do launcher.
+
+**No computador, o escopo é o do desktop, menos o que é de quem hospeda:**
+- **entra:**
+  - moderar, para quem tem o papel;
+  - salas e canais, e o nome e a imagem do servidor;
+  - **compartilhar a tela**, pelo `getDisplayMedia`. A medida vem antes do
+    código: que perfil o `VideoEncoder` de cada navegador produz, e se o
+    OpenH264 do desktop o lê (Tarefa 3.10 da F4; medido no Chromium e no Safari
+    do Mac, e falta o Chrome, o Edge e o Firefox de verdade);
+  - testar o microfone fora de sala e escolher a saída de som;
+- **fica de fora:**
+  - hospedar, e o que só existe para quem hospeda: a portaria do próprio
+    servidor, e instalar, ligar e aplicar MODs no servidor;
+  - ligar pelo código e o caminho entre pares, pelas razões de «O celular não
+    liga pelo código na 0.16»: o navegador não abre UDP nem aceita conexão de
+    entrada, e o certificado da sala não serve ao hash;
+  - as versões lado a lado e a linha legada.
+
+HOSPEDAR AQUI não some: vira a frase «Hospedar um servidor é pelo app do
+SEELE.», com o caminho para baixar o app.
+
+**O celular segue com o escopo de consumo**, e o que ele não faz se divide em
+dois grupos (a lista canônica é a matriz da F8):
+- SÓ NO APP DO SEELE, com a frase «pelo app do SEELE»;
+- NO COMPUTADOR — moderar, salas e canais, o nome e a imagem do servidor,
+  compartilhar a tela, testar o microfone fora de sala e escolher a saída de
+  som —, com a frase «pelo SEELE no computador», que vale também pelo
+  navegador.
+
+Assistir à tela compartilhada, com som, vale nas duas cascas (D-celular-2).
+
+**O que muda neste ADR:**
+- «O escopo é de consumo», em «O que isto custa», passa a valer só para o
+  celular;
+- a identidade, o link, o convite, os hashes, a origem e o transporte valem
+  igual no computador: é a mesma página, na mesma origem;
+- **a tecla de falar só vale com a página em foco**, porque o navegador não tem
+  atalho global, e a tela diz isso ao lado do botão;
+- **recarregar derruba a sessão**, como no celular. Com a sessão aberta, a
+  página pergunta antes de sair.
+
+**Em aberto: o `numa-aba` no Safari do Mac.** O `numa-aba` é o estado da
+«ENTRAR EM» que pede para instalar antes de a chave nascer, porque a chave
+guardada numa aba não chega ao app instalado. Hoje ele vale só na casca do
+celular (`identidade-web.js`), com a premissa de que, no computador, a aba e o
+app instalado dividem o armazenamento. Isso vale no Chrome e no Edge. O desenho
+da F8 (§2.8) diz que **o Safari do Mac guarda a aba e o app do Dock em
+separado**, como o do iPhone. Se for assim, quem entra por uma aba do Safari do
+Mac e instala depois não leva a identidade junto; e a aba pode estar sujeita à
+limpeza de sete dias que o Safari faz no armazenamento de um site sem visita.
+Nada disso foi medido: é a medição 7 de «O que fica pendente», e a regra muda
+com ela.
+
 
 **Nenhum é substituído.**
 
@@ -939,7 +1022,8 @@ isso.
   - Sem o ADR 0042, que é proposto (`docs/adr/README.md:76`), entrar pelo
     celular com o apelido do desktop dá `NicknameTaken`, e isso acontece depois
     de o convite ser gasto.
-- **O escopo é de consumo** (`specs/06-clientes-gui.md:113`):
+- **No celular, o escopo é de consumo** (`specs/06-clientes-gui.md:113`; no
+  computador, ver a emenda de 11/10/2026):
   - não hospeda;
   - não compartilha tela: o Safari do iOS não tem `getDisplayMedia`
     (`docs/ios-sem-assinatura-2026-10-07.md:37`, fonte [C24] em `:257`). No
@@ -1041,16 +1125,30 @@ o código do `8632668`.
    no Simulador; falta o iPhone (emenda de 09/10/2026);
 2. ~~`cargo check -p seele-proto --target wasm32-unknown-unknown`~~ — passa, e o
    codec roda no `.wasm` (emenda de 09/10/2026);
-3. repetir `spikes/alpn-no-mesmo-socket/` num iPhone: o despacho por ALPN
+3. ~~repetir `spikes/alpn-no-mesmo-socket/` num iPhone: o despacho por ALPN
    com o `wtransport` adotado, os temporizadores do `seeled` com a página
    oculta, um certificado curto com a mesma chave do longo, uma lista longa de
-   hashes e o tempo de um servidor fora do ar contra o da recusa;
+   hashes e o tempo de um servidor fora do ar contra o da recusa~~ — feita pelo
+   dono em 18 e 20/10/2026, numa aba do Safari do iOS 27.0.1
+   (`docs/evidencias/medicao-3-iphone/LEIA.md`):
+   - o curto com a chave do longo abre, e só o longo é recusado;
+   - 500 hashes abrem como 1;
+   - a recusa e a porta fechada falham em menos de 50 ms, e o mudo e o IP vazio
+     em 30 s;
+   - sem áudio, a sessão cai uns 25 s depois de bloquear a tela, e a reconexão
+     ao voltar é o caminho normal; com o áudio do produto, ela segura
+     (3 min 14 s);
+   - o `max_datagram` é de 1295 bytes;
 4. o spike num web app instalado no iPhone, com a página vinda de uma origem
    pública: 30 minutos bloqueado, em 4G, com a bateria anotada; que URL o iOS
    grava no ícone; e a `CryptoKey` sobrevivendo a fechar o web app e a
    reiniciar o aparelho;
 5. o spike no Chrome do Android;
-6. uma página de origem pública discando para a LAN.
+6. uma página de origem pública discando para a LAN;
+7. no Safari do Mac (emenda de 11/10/2026): se a chave nascida numa aba chega
+   ao web app adicionado ao Dock; e se uma aba, com o `persist()` concedido ou
+   negado, perde a chave depois de sete dias sem visita. Decide se o
+   `numa-aba` vale também na casca larga do Safari do Mac.
 
 **Notas de cabeçalho nos ADRs emendados**, no molde de `0022:3` e `0026:3`: 0003,
 0006, 0007, 0010, 0017, 0018, 0019, 0026, 0039 e 0046. A linha de cada um no
@@ -1096,7 +1194,9 @@ branch `conserto/l2-textos-publicos`, reprova «nunca vê áudio em claro» em
 
 ## O que este ADR não decide
 
-- o domínio da origem e o caminho do link;
+- ~~o domínio da origem e o caminho do link~~ (o domínio decidido pelo dono em
+  15/10/2026, D-web-2: `https://web.seele.app.br`; o caminho, a raiz, pela
+  orquestradora em 16/10/2026, D-web-4: o corpo vai no fragmento);
 - a primeira visita sem `v=`;
 - se o `seeled` confere o `Origin`;
 - o canal de diagnóstico;
