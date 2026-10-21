@@ -928,6 +928,40 @@ mod o_catalogo {
         );
     }
 
+    /// **A recusa local chega à janela na forma que o `frases.js` lê** (rodada
+    /// 1, M3). A bancada `hospedar-com-mod-antigo.cjs` monta as quatro à mão,
+    /// «como o serde as manda»: um `#[serde(rename)]` ou um `tag` posto na enum
+    /// deixaria a bancada verde e a tela em «ALGO FALHOU».
+    #[test]
+    fn a_recusa_local_chega_a_janela_na_forma_que_a_frase_le() {
+        use serde_json::json;
+        let forma = |recusa| serde_json::to_value(FalhaNoCatalogo::NaoInstalou(recusa)).unwrap();
+        for (recusa, esperada) in [
+            (
+                FalhaAoInstalarMod::NaoCopiei("x".to_owned()),
+                json!({"NaoInstalou": {"NaoCopiei": "x"}}),
+            ),
+            (
+                FalhaAoInstalarMod::ManifestoRecusado("api-too-new".to_owned()),
+                json!({"NaoInstalou": {"ManifestoRecusado": "api-too-new"}}),
+            ),
+            (
+                FalhaAoInstalarMod::TemAtalho("/x".to_owned()),
+                json!({"NaoInstalou": {"TemAtalho": "/x"}}),
+            ),
+            (
+                FalhaAoInstalarMod::SemManifesto,
+                json!({"NaoInstalou": "SemManifesto"}),
+            ),
+        ] {
+            assert_eq!(
+                forma(recusa),
+                esperada,
+                "a recusa local chega à janela numa forma que o `fraseDeErro` não lê"
+            );
+        }
+    }
+
     /// **A recusa local de um MOD do catálogo é dita como a recusa de instalar,
     /// e fica no `seele.log` com o MOD e a versão** (pendência 58, item 9).
     ///
