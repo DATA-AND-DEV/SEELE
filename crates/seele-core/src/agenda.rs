@@ -25,7 +25,7 @@
 //! bloqueio. Texto, porque alguém vai querer editar à mão. Colunas novas vão
 //! sempre no fim.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use seele_proto::codigo::Codigo;
@@ -99,9 +99,7 @@ impl Agenda {
             std::fs::create_dir_all(pai)
                 .with_context(|| format!("não consegui criar {}", pai.display()))?;
         }
-        let contatos = std::fs::read_to_string(&caminho)
-            .map(|texto| texto.lines().filter_map(ler_linha).collect())
-            .unwrap_or_default();
+        let contatos = ler(&caminho).unwrap_or_default();
         Ok(Self { caminho, contatos })
     }
 
@@ -169,8 +167,18 @@ impl Agenda {
     }
 
     /// Muda a linha deste código, criada vazia se não havia, e grava.
+    ///
+    /// **Sobre o arquivo como ele está, e não sobre o que esta agenda leu ao
+    /// abrir.** Quem anota abre a agenda na hora — o toque que termina, o nome
+    /// dado, a ligação feita —, e duas abertas antes de qualquer uma gravar
+    /// perdiam uma das escritas: a segunda regravava o arquivo com a lista
+    /// velha dela. Agora ler, mudar e gravar acontecem sob a [`travar`], e a
+    /// gravação é trocada inteira pelo `rename` ([`gravar`]).
     fn mudar(&mut self, codigo: Codigo, mudanca: impl FnOnce(&mut Contato)) -> Result<()> {
-        match self.contatos.iter_mut().find(|c| c.codigo == codigo) {
+        let _trava = travar(&self.caminho)?;
+        let mut contatos = ler(&self.caminho)
+            .with_context(|| format!("não consegui ler {}", self.caminho.display()))?;
+        match contatos.iter_mut().find(|c| c.codigo == codigo) {
             Some(contato) => mudanca(contato),
             None => {
                 let mut novo = Contato {
@@ -182,31 +190,93 @@ impl Agenda {
                     bloqueado: false,
                 };
                 mudanca(&mut novo);
-                self.contatos.push(novo);
+                contatos.push(novo);
             }
         }
-        self.gravar()
+        gravar(&self.caminho, &contatos)?;
+        self.contatos = contatos;
+        Ok(())
     }
+}
 
-    fn gravar(&self) -> Result<()> {
-        let texto: String = self
-            .contatos
-            .iter()
-            .map(|c| {
-                format!(
-                    "{}\t{}\t{}\t{}\t{}\t{}\n",
-                    c.codigo,
-                    c.nome.as_deref().unwrap_or(""),
-                    c.apelido.as_deref().unwrap_or(""),
-                    c.visto_em.map_or_else(String::new, |v| v.to_string()),
-                    c.direcao.map_or("", Direcao::texto),
-                    u8::from(c.bloqueado),
-                )
-            })
-            .collect();
-        crate::conhecidos::escrever_privado(&self.caminho, texto.as_bytes())
-            .with_context(|| format!("não consegui gravar {}", self.caminho.display()))
+/// Os contatos do arquivo. Um arquivo que ainda não existe é uma agenda vazia,
+/// e uma linha ilegível é pulada — inclusive a que não é UTF-8, sem levar as
+/// outras junto.
+fn ler(caminho: &Path) -> std::io::Result<Vec<Contato>> {
+    match std::fs::read(caminho) {
+        Ok(bytes) => Ok(String::from_utf8_lossy(&bytes)
+            .lines()
+            .filter_map(ler_linha)
+            .collect()),
+        Err(erro) if erro.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(erro) => Err(erro),
     }
+}
+
+/// O arquivo ao lado da agenda com este sufixo: `agenda.trava`, `agenda.nova`.
+fn ao_lado(caminho: &Path, sufixo: &str) -> PathBuf {
+    let mut nome = caminho.file_name().unwrap_or_default().to_os_string();
+    nome.push(".");
+    nome.push(sufixo);
+    caminho.with_file_name(nome)
+}
+
+/// **A trava das gravações**, num arquivo ao lado que nunca é trocado: a
+/// agenda é trocada a cada gravação, e uma trava nela ficaria presa no arquivo
+/// velho.
+///
+/// `File::lock` é o `flock` no Unix e o `LockFileEx` no Windows: vale entre
+/// dois processos e entre duas aberturas no mesmo processo, e sai quando o
+/// arquivo fecha. Num sistema sem trava de arquivo a gravação segue sem ela, e
+/// o `seele.log` diz.
+fn travar(caminho: &Path) -> Result<Option<std::fs::File>> {
+    let trava = ao_lado(caminho, "trava");
+    let mut opcoes = std::fs::OpenOptions::new();
+    opcoes.create(true).write(true).truncate(false);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opcoes, 0o600);
+    let arquivo = opcoes
+        .open(&trava)
+        .with_context(|| format!("não consegui abrir {}", trava.display()))?;
+    match arquivo.lock() {
+        Ok(()) => Ok(Some(arquivo)),
+        Err(erro) if erro.kind() == std::io::ErrorKind::Unsupported => {
+            tracing::warn!(
+                %erro,
+                "este sistema não trava arquivos: duas gravações da agenda ao mesmo tempo \
+                 podem perder uma delas"
+            );
+            Ok(None)
+        }
+        Err(erro) => Err(erro).with_context(|| format!("não consegui travar {}", trava.display())),
+    }
+}
+
+/// Grava a agenda **inteira de uma vez**: num arquivo ao lado, trocado pelo
+/// `rename`. Quem lê no meio vê a agenda de antes ou a de depois, e nunca uma
+/// pela metade. A sala que sobe lê os [`Agenda::bloqueados`] uma vez e os
+/// leva à campainha: lidos pela metade, quem está bloqueado tocaria enquanto
+/// ela estivesse no ar.
+fn gravar(caminho: &Path, contatos: &[Contato]) -> Result<()> {
+    let texto: String = contatos
+        .iter()
+        .map(|c| {
+            format!(
+                "{}\t{}\t{}\t{}\t{}\t{}\n",
+                c.codigo,
+                c.nome.as_deref().unwrap_or(""),
+                c.apelido.as_deref().unwrap_or(""),
+                c.visto_em.map_or_else(String::new, |v| v.to_string()),
+                c.direcao.map_or("", Direcao::texto),
+                u8::from(c.bloqueado),
+            )
+        })
+        .collect();
+    let nova = ao_lado(caminho, "nova");
+    crate::conhecidos::escrever_privado(&nova, texto.as_bytes())
+        .with_context(|| format!("não consegui gravar {}", nova.display()))?;
+    std::fs::rename(&nova, caminho)
+        .with_context(|| format!("não consegui trocar {} pela nova", caminho.display()))
 }
 
 /// Uma linha do arquivo, ou nada se ela não se lê.
@@ -383,6 +453,142 @@ mod tests {
         assert_eq!(
             modo, 0o600,
             "a agenda ficou legível para outras contas desta máquina"
+        );
+    }
+
+    /// **Duas agendas abertas antes de qualquer uma gravar** (`F7/progress.md`,
+    /// «a agenda é um arquivo regravado inteiro»). Quem anota abre a agenda na
+    /// hora — o toque que termina, o nome dado, a ligação feita —, e a segunda
+    /// a gravar regravava o arquivo com a lista que leu ao abrir: o que a
+    /// primeira tinha escrito sumia.
+    #[test]
+    fn duas_agendas_abertas_antes_de_gravar_nao_perdem_nenhuma_escrita() {
+        let caminho = nova("duas-abertas");
+        let mut do_toque = Agenda::abrir(caminho.clone()).unwrap();
+        let mut do_nome = Agenda::abrir(caminho.clone()).unwrap();
+
+        do_toque
+            .anotar_ligacao(codigo(1), "ana", Direcao::Perdida, 1_738_000_000)
+            .unwrap();
+        do_toque
+            .anotar_ligacao(codigo(3), "caio", Direcao::Recebi, 1_738_000_001)
+            .unwrap();
+        // Um nome dado à mesma pessoa no instante em que o toque dela termina,
+        // e um contato novo, acrescentado quase junto.
+        do_nome.dar_nome(codigo(1), "Ana").unwrap();
+        do_nome.dar_nome(codigo(2), "Bia").unwrap();
+
+        let de_volta = Agenda::abrir(caminho).unwrap();
+        let ana = de_volta
+            .buscar(&codigo(1))
+            .expect("a pessoa que tocou sumiu da agenda");
+        assert_eq!(
+            (ana.nome.as_deref(), ana.visto_em, ana.direcao),
+            (Some("Ana"), Some(1_738_000_000), Some(Direcao::Perdida)),
+            "o nome e o toque da mesma pessoa não ficaram os dois"
+        );
+        assert!(
+            de_volta.buscar(&codigo(3)).is_some(),
+            "o contato que o toque acrescentou se perdeu quando o nome foi gravado"
+        );
+        assert_eq!(
+            de_volta.buscar(&codigo(2)).and_then(|c| c.nome.as_deref()),
+            Some("Bia")
+        );
+        assert_eq!(
+            do_nome.listar().len(),
+            3,
+            "a agenda que gravou o nome não ficou com o que está no arquivo"
+        );
+    }
+
+    /// **Muitas escritas ao mesmo tempo, cada uma pela sua agenda.** Cada
+    /// linha abre a agenda, espera as outras abrirem, e acrescenta os seus
+    /// contatos, um por gravação: nenhum pode faltar no fim.
+    ///
+    /// Várias gravações por linha, e não uma: a trava posta na própria agenda,
+    /// que o `rename` troca, só deixa duas gravações entrarem juntas quando
+    /// três se cruzam, e com uma gravação por linha isso quase não acontecia.
+    #[test]
+    fn escritas_ao_mesmo_tempo_nao_perdem_nenhum_contato() {
+        const LINHAS: u8 = 16;
+        const POR_LINHA: u8 = 8;
+        let caminho = nova("ao-mesmo-tempo");
+        let largada = std::sync::Arc::new(std::sync::Barrier::new(usize::from(LINHAS)));
+        let linhas: Vec<_> = (0..LINHAS)
+            .map(|linha| {
+                let caminho = caminho.clone();
+                let largada = std::sync::Arc::clone(&largada);
+                std::thread::spawn(move || {
+                    let mut agenda = Agenda::abrir(caminho).unwrap();
+                    largada.wait();
+                    for n in linha * POR_LINHA..(linha + 1) * POR_LINHA {
+                        agenda.dar_nome(codigo(n), &format!("pessoa {n}")).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for linha in linhas {
+            linha.join().expect("uma escrita caiu");
+        }
+
+        let de_volta = Agenda::abrir(caminho).unwrap();
+        let faltam: Vec<u8> = (0..LINHAS * POR_LINHA)
+            .filter(|n| de_volta.buscar(&codigo(*n)).is_none())
+            .collect();
+        assert!(
+            faltam.is_empty(),
+            "escritas ao mesmo tempo perderam {} de {} contatos: {faltam:?}",
+            faltam.len(),
+            LINHAS * POR_LINHA
+        );
+    }
+
+    /// **Quem lê no meio de uma gravação vê a agenda inteira**, a de antes ou
+    /// a de depois. A sala que sobe lê os `bloqueados` uma vez e os leva à
+    /// campainha: uma agenda lida pela metade deixaria tocar quem está
+    /// bloqueado enquanto a sala estivesse no ar.
+    #[test]
+    fn quem_le_no_meio_de_uma_gravacao_ve_a_agenda_inteira() {
+        const ANTES: u8 = 120;
+        const GRAVACOES: u8 = 120;
+        let caminho = nova("no-meio");
+        let mut agenda = Agenda::abrir(caminho.clone()).unwrap();
+        for n in 0..ANTES {
+            agenda.bloquear(codigo(n), true).unwrap();
+        }
+
+        let parar = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let leitora = {
+            let caminho = caminho.clone();
+            let parar = std::sync::Arc::clone(&parar);
+            std::thread::spawn(move || {
+                let mut menor = usize::MAX;
+                let mut leituras = 0_u32;
+                while !parar.load(std::sync::atomic::Ordering::Relaxed) {
+                    let vistos = Agenda::abrir(caminho.clone()).unwrap().bloqueados().len();
+                    menor = menor.min(vistos);
+                    leituras += 1;
+                }
+                (menor, leituras)
+            })
+        };
+        for n in 0..GRAVACOES {
+            // Um nome a cada gravação: o arquivo é regravado inteiro, cada vez
+            // um pouco maior.
+            agenda
+                .dar_nome(codigo(n), &format!("pessoa número {n}"))
+                .unwrap();
+        }
+        parar.store(true, std::sync::atomic::Ordering::Relaxed);
+        let (menor, leituras) = leitora.join().expect("a leitora caiu");
+
+        assert!(leituras > 0, "a leitora não leu nenhuma vez");
+        assert_eq!(
+            menor,
+            usize::from(ANTES),
+            "uma leitura no meio da gravação viu {menor} de {ANTES} bloqueados, em {leituras} \
+             leituras: a sala que subisse ali deixaria tocar quem está bloqueado"
         );
     }
 }
