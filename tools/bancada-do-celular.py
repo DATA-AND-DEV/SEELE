@@ -1883,6 +1883,38 @@ def lados_das_superficies(pg: Page) -> list[str]:
     return falhas
 
 
+VER_POR_SUPERFICIE = """() => Object.fromEntries([...document.querySelectorAll('.dialogo-de-mod')].map((d) =>
+  [d.dataset.superficie, !!d.querySelector('.cel-ver-na-sessao')?.checkVisibility()]))"""
+
+
+def previa_muda_de_superficie(pg: Page) -> list[str]:
+    """D-estilo-1, o caso de borda (decidido pela orquestradora em 21/10): um
+    MOD com dois diálogos passa a prévia de um ao outro com os mesmos valores.
+    Nada no tema muda, e o VER NA SESSÃO vai junto: sai do primeiro e aparece
+    no segundo. Medido antes (15/10): ele ficava no primeiro, com zero
+    mutações no estilo da sessão."""
+    falhas = []
+    pg.evaluate(MOD_DE_PE)
+    tema = TEMAS["papel"]
+    pg.evaluate(DIALOGO_COM_PREVIA, tema)
+    pg.wait_for_timeout(300)
+    pg.evaluate("__pedirAoProduto({ tipo: 'superficie-criar', descricao: { id: 'outro', tipo: 'dialogo', titulo: 'OUTRO' } })")
+    pg.wait_for_timeout(300)
+    antes = pg.evaluate(VER_POR_SUPERFICIE)
+    if antes != {"estilo": True, "outro": False}:
+        falhas.append(f"antes de a prévia mudar de superfície, o VER NA SESSÃO não está só no diálogo dela: a conferência não vale: {antes}")
+        return falhas
+    pg.evaluate("(t) => __pedirAoProduto({ tipo: 'tema', valores: t, previa: true, superficie: 'outro' })", tema)
+    pg.wait_for_timeout(300)
+    if pg.evaluate("previasDoTema.get('teste/bancada')?.superficie") != "outro":
+        falhas.append("a prévia não passou para o outro diálogo: a conferência não vale")
+        return falhas
+    depois = pg.evaluate(VER_POR_SUPERFICIE)
+    if depois != {"estilo": False, "outro": True}:
+        falhas.append(f"a prévia passou para o outro diálogo com os mesmos valores, e o VER NA SESSÃO não foi junto: {depois}")
+    return falhas
+
+
 def esperar_quadro(pg: Page) -> None:
     """A casca relê o `snapshot` a cada 500 ms; uma mudança no quadro do duble
     aparece no redesenho seguinte."""
@@ -3839,6 +3871,7 @@ CASOS: dict[str, Caso] = {
     # O gancho da pilha de inércia para a prévia do tema (D-estilo-1).
     "previa-recolhida": Caso(levar=previa_recolhida, aparelhos=("390",), medir=False),
     "previa-do-tema": Caso(levar=previa_do_tema, medir=False),
+    "previa-muda-de-superficie": Caso(levar=previa_muda_de_superficie, medir=False),
     # As camadas sobre a sessão e a confirmação (Tarefa 11).
     "queda": Caso(levar=queda, medir=False),
     "alerta": Caso(levar=alerta, medir=False),

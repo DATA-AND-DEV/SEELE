@@ -450,7 +450,9 @@
   const vigiarOSeloDoDesktop = () => {
     const doDesktop = document.getElementById("selo-da-previa");
     if (!doDesktop) return false;
-    vigia.observe(doDesktop, { attributes: true, attributeFilter: ["hidden"] });
+    // O `hidden` diz se há prévia; o `data-superficies`, de que superfície ela
+    // é, e muda sozinho quando a prévia passa a outra com os mesmos valores.
+    vigia.observe(doDesktop, { attributes: true, attributeFilter: ["hidden", "data-superficies"] });
     return true;
   };
   if (!vigiarOSeloDoDesktop()) {
