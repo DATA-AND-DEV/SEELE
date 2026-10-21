@@ -183,19 +183,36 @@ const servidorConhecido = (impressao) => noBanco("readonly", (servidores) => ser
 
 const guardarOServidor = (registro) => noBanco("readwrite", (servidores) => servidores.put(registro));
 
-/** O conjunto de MODs que esta origem aceitou para o servidor desta impressão. */
-function aceiteDeModsGuardado(impressao) {
+/**
+ * Os aceites de MODs desta origem, pela impressão: `{conjunto, quando}`, com
+ * `quando` em segundos, como o `Aceite` do desktop. Um aceite guardado antes da
+ * data (só o conjunto) vale, sem data.
+ */
+function aceitesDeModsGuardados() {
+  let todos = {};
   try {
-    return JSON.parse(localStorage.getItem(CHAVE_DOS_ACEITES_DE_MODS) ?? "{}")[impressao] ?? null;
+    todos = JSON.parse(localStorage.getItem(CHAVE_DOS_ACEITES_DE_MODS) ?? "{}") ?? {};
   } catch {
-    return null;
+    todos = {};
   }
+  return Object.entries(todos)
+    .map(([impressao, aceite]) =>
+      typeof aceite === "string" ? { impressao, conjunto: aceite, quando: 0 } : { impressao, conjunto: aceite?.conjunto, quando: aceite?.quando ?? 0 },
+    )
+    .filter((aceite) => typeof aceite.conjunto === "string");
 }
 
+/** O conjunto de MODs que esta origem aceitou para o servidor desta impressão. */
+function aceiteDeModsGuardado(impressao) {
+  return aceitesDeModsGuardados().find((aceite) => aceite.impressao === impressao)?.conjunto ?? null;
+}
+
+/** Grava (ou, com `null`, esquece) o aceite de um servidor; diz se gravou. */
 function guardarOAceiteDeMods(impressao, conjunto) {
   try {
-    const todos = JSON.parse(localStorage.getItem(CHAVE_DOS_ACEITES_DE_MODS) ?? "{}");
-    todos[impressao] = conjunto;
+    const todos = JSON.parse(localStorage.getItem(CHAVE_DOS_ACEITES_DE_MODS) ?? "{}") ?? {};
+    if (conjunto === null) delete todos[impressao];
+    else todos[impressao] = { conjunto, quando: Math.floor(Date.now() / 1000) };
     localStorage.setItem(CHAVE_DOS_ACEITES_DE_MODS, JSON.stringify(todos));
     return true;
   } catch {
@@ -409,7 +426,9 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       const { segue, ...resultado } = desfecho(erro);
       if (!segue) encerrar();
       else if (resultado.erro === "mods-a-aceitar") tentativa.aguardaMods = true;
-      return resultado;
+      // O `ConnectionError` do desktop vai junto: a casca larga do PC entra pelo
+      // `connect` da ponte (D-web-3), e é ele que a tela do desktop lê.
+      return { ...resultado, motivo: erro };
     }
     // O servidor fica guardado a cada entrada que dá certo, com o relógio dela
     // (`visto`, a ordem dos SERVIDORES DESTE APARELHO). Os hashes guardados são
@@ -433,6 +452,8 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       versao: lido.versao ?? null,
       chave: esta.chave,
       nome: conhecido ? conhecido.nome ?? null : null,
+      icone: conhecido ? conhecido.icone ?? null : null,
+      apelido: esta.apelido ?? null,
       visto: agora(),
     });
     if (substituida()) {
@@ -471,6 +492,8 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
         impressao: registro.impressao,
         endereco: registro.endereco,
         nome: registro.nome ?? null,
+        icone: registro.icone ?? null,
+        apelido: registro.apelido ?? null,
         versaoDoServidor: registro.versao ?? null,
         visto: registro.visto ?? null,
         podeEntrar: hashesValem(registro),
@@ -518,6 +541,15 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
 
   /** O nome do servidor, que chega no primeiro retrato depois de entrar. */
   async function lembrarONome(impressao, nome) {
+    return lembrarAAparencia(impressao, { nome });
+  }
+
+  /**
+   * O nome e o ícone do servidor, como o `lembrar_aparencia_do_servidor` do
+   * desktop os anota nos conhecidos: só num servidor que este aparelho já
+   * guarda. O ícone são os bytes do PNG que o servidor mandou.
+   */
+  async function lembrarAAparencia(impressao, aparencia) {
     let registro = null;
     try {
       registro = (await servidorConhecido(impressao)) ?? null;
@@ -525,8 +557,23 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       registro = null;
     }
     if (!registro) return false;
-    await guardarOServidor({ ...registro, nome });
+    await guardarOServidor({ ...registro, ...aparencia });
     return true;
+  }
+
+  /**
+   * Esquece um servidor deste aparelho, e com ele a chave que esta origem tinha
+   * para ele: voltar pede um link novo, e o servidor vê uma chave nova.
+   */
+  async function esquecerOServidor(impressao) {
+    if (tentativa && tentativa.lido && tentativa.lido.impressao === impressao) encerrar();
+    janelasRecebidas.delete(impressao);
+    try {
+      await noBanco("readwrite", (servidores) => servidores.delete(impressao));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -601,6 +648,8 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     conhecidos,
     entrarNoConhecido,
     lembrarONome,
+    lembrarAAparencia,
     lembrarOsHashes,
+    esquecerOServidor,
   };
 }

@@ -11002,14 +11002,38 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
 
     // 0. **E o caminho dela pela ponte do navegador** (Tarefa 2.6 da F4): o
     // `connect` da ponte recebe o `joinSecret`, a sessão o chama de `convite`, e
-    // ele vai ao `.wasm`, que o põe no `Hello` — e a mais nenhum lugar. Cada
-    // linha desses dois arquivos que nomeia um dos dois está aqui.
+    // ele vai ao `.wasm`, que o põe no `Hello` — e a mais nenhum lugar. Na casca
+    // larga do PC (D-web-3), o link colado no SERVIDORES espera em
+    // `linkColadoDaPonte`, só na memória, até o `connect` o entregar à
+    // identidade. Cada linha desses dois arquivos que nomeia um dos três está
+    // aqui (a chave `"convite-vencido"` é a frase de um desfecho, e entra porque
+    // o guarda lê o nome, e não o sentido).
     const PELA_PONTE: &[(&str, &str)] = &[
+        ("ponte-web.js", "let linkColadoDaPonte = null;"),
         (
             "ponte-web.js",
-            "async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret } = {}) {",
+            "\"convite-vencido\": \"este link venceu: peça a quem hospeda um link novo\",",
+        ),
+        ("ponte-web.js", "if (linkColadoDaPonte?.alvo === server) {"),
+        ("ponte-web.js", "const { texto } = linkColadoDaPonte;"),
+        ("ponte-web.js", "linkColadoDaPonte = null;"),
+        (
+            "ponte-web.js",
+            "if (linkColadoDaPonte?.alvo === alvo) return linkColadoDaPonte.impressao;",
+        ),
+        (
+            "ponte-web.js",
+            "async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}) {",
         ),
         ("ponte-web.js", "convite: joinSecret ?? null,"),
+        (
+            "ponte-web.js",
+            "linkColadoDaPonte = { texto, alvo: lido.link.alvo, impressao: lido.link.impressao };",
+        ),
+        (
+            "ponte-web.js",
+            "return { alvo: lido.link.alvo, token: lido.link.convite ?? null, versao: lido.link.versao ?? null, para_entrar: \"Aqui\" };",
+        ),
         ("sessao-web.js", "convite = null,"),
         ("sessao-web.js", "convite,"),
     ];
@@ -11017,7 +11041,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     for arquivo in ["ponte-web.js", "sessao-web.js"] {
         let texto = without_comments(&read(&format!("ui/{arquivo}")));
         for linha in texto.lines().map(str::trim) {
-            if ["joinSecret", "convite"]
+            if ["joinSecret", "convite", "linkColadoDaPonte"]
                 .iter()
                 .any(|nome| names(linha, nome))
             {

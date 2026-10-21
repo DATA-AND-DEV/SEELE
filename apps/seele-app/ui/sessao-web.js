@@ -116,13 +116,17 @@ function comPrazo(promessa, ms, motivo) {
  * - `emitir(evento)`: cada `seele_ffi::Event` para a casca;
  * - `aoAcabar(motivo)`: a sessão acabou depois de aberta;
  * - `aoReceberOsHashes(janelas)`: o `HashesDoNavegador` do servidor;
- * - `transporte(endereco, hashes)`: a WebTransport, trocada na bancada.
+ * - `transporte(endereco, hashes)`: a WebTransport, trocada na bancada;
+ * - `cancelamento`: `{ cancelada, aoCancelar }`, o CANCELAR de quem espera
+ *   (`cancelar_ligacao`): a entrada desiste com `"Cancelada"`, como a do
+ *   desktop.
  *
  * Rejeita com o `ConnectionError` do desktop.
  */
 async function abrirASessaoDoNavegador({
   wasm,
   alvo,
+  cancelamento = { cancelada: false, aoCancelar: null },
   apelido,
   convite = null,
   aceito = null,
@@ -147,17 +151,29 @@ async function abrirASessaoDoNavegador({
   const etapa = (stage) => emitir({ ConnectStageChanged: { stage } });
   etapa({ Parada: { candidatos: candidatos.length, com_bilhete_e_impressao: false } });
 
+  /** A desistência pelo CANCELAR: a etapa da casca, e a recusa do desktop. */
+  const cancelada = () => {
+    etapa("Cancelada");
+    return "Cancelada";
+  };
+
   let wt = null;
   for (const [candidato, onde] of candidatos.entries()) {
+    if (cancelamento.cancelada) break;
     etapa({ Tentando: { candidato, de: candidatos.length, onde, avisou: false } });
     try {
       const tentativa = transporte(onde, alvo.hashes);
+      cancelamento.aoCancelar = () => tentativa.close();
       await comPrazo(tentativa.ready, PRAZO_DO_APERTO_MS, "HandshakeTimeout");
       wt = tentativa;
       break;
     } catch (falha) {
-      console.warn(`sessão: ${onde} não abriu a WebTransport:`, falha);
+      if (!cancelamento.cancelada) console.warn(`sessão: ${onde} não abriu a WebTransport:`, falha);
     }
+  }
+  if (cancelamento.cancelada) {
+    ligacao.fechar();
+    throw cancelada();
   }
   if (!wt) {
     ligacao.fechar();
@@ -166,13 +182,18 @@ async function abrirASessaoDoNavegador({
   }
 
   const sessao = criarASessaoAberta({ ligacao, wt, alvo, emitir, aoAcabar, aoReceberOsHashes });
+  const desistiu = new Promise((_, rejeitar) => {
+    cancelamento.aoCancelar = () => rejeitar("Cancelada");
+  });
   try {
-    await comPrazo(sessao.aperto, PRAZO_DO_APERTO_MS, "HandshakeTimeout");
+    await comPrazo(Promise.race([sessao.aperto, desistiu]), PRAZO_DO_APERTO_MS, "HandshakeTimeout");
   } catch (motivo) {
+    await sessao.encerrar();
+    if (motivo === "Cancelada") throw cancelada();
     etapa({ Desistiu: { motivo } });
-    await sessao.encerrar({ calado: true });
     throw motivo;
   }
+  cancelamento.aoCancelar = null;
   etapa("Dentro");
   sessao.comecarAMedir();
   return sessao;
@@ -385,10 +406,10 @@ function criarASessaoAberta({ ligacao, wt, alvo, emitir, aoAcabar, aoReceberOsHa
       });
     },
     /**
-     * Fecha a sessão. `calado` é a que nunca abriu (a recusa, o prazo do
-     * aperto): sem `Ended`, porque a casca nunca a viu.
+     * Fecha a sessão, sem `Ended`: quem fecha é esta ponta (o `disconnect`, a
+     * recusa, o prazo do aperto, o CANCELAR), e a casca já sabe.
      */
-    async encerrar({ calado = false } = {}) {
+    async encerrar() {
       if (!acabou && escritor) {
         await escreverOQueEspera();
         try {
@@ -397,7 +418,7 @@ function criarASessaoAberta({ ligacao, wt, alvo, emitir, aoAcabar, aoReceberOsHa
           // A recusa que não chegou no prazo: largamos mesmo assim.
         }
       }
-      acabar(calado ? null : null);
+      acabar(null);
     },
   };
   return sessao;

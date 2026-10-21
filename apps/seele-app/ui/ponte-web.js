@@ -304,32 +304,20 @@ const TAREFA_MODS = "2.6 e 3.4 (os MODs da sessão)";
 
 /** Atendidos que ainda não têm corpo, com a tarefa do plano que os traz. */
 const AINDA_A_FAZER = new Map([
-  ["aceitar_mods", TAREFA_34],
-  ["aceite_de_mods", TAREFA_34],
-  ["aceites_de_mods", TAREFA_34],
   ["ajustar_limites_da_tela", TAREFA_310],
   ["ajustar_volume_da_tela", TAREFA_39],
-  ["analisar_convite", TAREFA_34],
-  // O texto colado em CONECTAR e o CANCELAR de quem liga (tarefas 30 e 28 da
-  // F7): o navegador não liga pelo código na 0.16.
-  ["ler_entrada", TAREFA_34],
-  ["cancelar_ligacao", TAREFA_34],
   ["calar_a_tela", TAREFA_39],
   ["codigo_do_mod", TAREFA_MODS],
   ["compartilhar_tela", TAREFA_310],
-  ["conhecidos", TAREFA_34],
   ["destino_do_anexo", TAREFA_26],
   ["enviar_anexo", TAREFA_26],
   ["enviar_imagem_mod", TAREFA_MODS],
   ["escolher_icone_do_server", TAREFA_26],
   ["escolher_minha_imagem", TAREFA_26],
   ["escolher_para_o_mod", TAREFA_MODS],
-  ["esquecer", TAREFA_34],
-  ["esquecer_aceite_de_mods", TAREFA_34],
   ["exclusao_do_som_da_captura", TAREFA_310],
   ["fontes_de_tela", TAREFA_310],
   ["instalar_mod_do_catalogo", TAREFA_MODS],
-  ["lembrar_aparencia_do_servidor", TAREFA_26],
   ["ler_imagem_mod", TAREFA_MODS],
   ["midia_do_mod", TAREFA_MODS],
   ["midia_em_bytes", TAREFA_MODS],
@@ -448,6 +436,91 @@ async function sairDaSessaoDaPonte() {
   return null;
 }
 
+// ------------------------------------------- a entrada pela casca larga
+
+/**
+ * **O link colado no SERVIDORES** (`analisar_convite`), só na memória e só até
+ * o `connect` que o usa: é o caminho do segredo do convite na casca larga do PC
+ * (D-web-3), como a tentativa da identidade o é no celular. O `connect` o
+ * entrega à identidade, que o abre e entra; ninguém mais o lê.
+ */
+let linkColadoDaPonte = null;
+
+/** A entrada em curso, para o `cancelar_ligacao`. */
+const entradaEmCurso = { cancelar: null };
+
+/** As frases dos links que o navegador não abre, pelo erro do `analisar_link`. */
+const FRASES_DO_LINK = Object.freeze({
+  OutraOrigem: "este não é um link do navegador para o SEELE: peça a quem hospeda o link do navegador",
+  SemHashesDoNavegador:
+    "este link é de um servidor que não recebe o navegador (um Servidor 0.15, ou o link do app): peça a quem hospeda o link do navegador",
+  SemFragmento: "o link chegou sem o servidor: copie-o de novo, inteiro",
+  ConsultaForaDoFragmento: "o link chegou partido: copie-o de novo, inteiro",
+  SemImpressaoDigital: "o link chegou sem a impressão do servidor: copie-o de novo, inteiro",
+  Convite: "o link chegou incompleto ou alterado: copie-o de novo, inteiro",
+});
+
+/** As entradas pela identidade que acabam antes do servidor, com a frase. */
+const FRASES_DA_IDENTIDADE = Object.freeze({
+  "link-vencido": "o link deste servidor venceu, e ele não trouxe um novo: peça a quem hospeda um link novo",
+  "convite-vencido": "este link venceu: peça a quem hospeda um link novo",
+  "sem-tentativa": "outra entrada começou no meio desta",
+});
+
+/** O link lido pelo `.wasm` da página, com as regras do produto. */
+async function lerOLink(texto) {
+  const { instancia } = await carregarOWasmDaPagina();
+  return analisadorDoWasm(instancia.exports)(texto);
+}
+
+/**
+ * **O `connect` da casca larga**: um endereço em texto, como o desktop o
+ * recebe. A chave e os hashes estão com a identidade: o link colado que ainda
+ * espera, a tentativa que ela tem aberta (a volta depois do aceite de MODs), ou
+ * um servidor deste aparelho. Um endereço que ela não conhece não traz a chave
+ * que confere quem atendeu, e é recusado com a frase.
+ */
+async function entrarPeloEndereco({ server, nickname } = {}) {
+  const identidade = await identidadeDaPagina();
+  const apelido = (nickname ?? "").trim() || guardadoNaOrigem(CHAVES_DA_ORIGEM.apelido) || "pessoa";
+  let resultado;
+  if (linkColadoDaPonte?.alvo === server) {
+    const { texto } = linkColadoDaPonte;
+    linkColadoDaPonte = null;
+    await identidade.abrir(texto);
+    resultado = await identidade.entrar(apelido);
+  } else if (identidade.ler()?.endereco === server) {
+    resultado = await identidade.entrar(apelido);
+  } else {
+    const conhecido = (await identidade.conhecidos()).find((servidor) => servidor.endereco === server);
+    if (!conhecido) {
+      return Promise.reject({ RecusaDaPonte: { comando: "connect", frase: RECUSA_ENDERECO_SOZINHO } });
+    }
+    resultado = await identidade.entrarNoConhecido(conhecido.impressao, apelido);
+  }
+  if (resultado.ok) return resultado.resposta;
+  if (resultado.motivo !== undefined) return Promise.reject(resultado.motivo);
+  const frase = FRASES_DA_IDENTIDADE[resultado.erro] ?? resultado.razao ?? resultado.erro;
+  return Promise.reject({ RecusaDaPonte: { comando: "connect", frase } });
+}
+
+/**
+ * A impressão do servidor de um endereço: o da sessão aberta, o do link colado,
+ * ou um deste aparelho. Os aceites de MODs são guardados por ela, e a casca do
+ * desktop pergunta pelo endereço.
+ */
+async function impressaoDoEndereco(alvo) {
+  const sessao = sessaoDaPonte.atual;
+  if (sessao?.alvo?.endereco === alvo) return sessao.alvo.impressao;
+  if (linkColadoDaPonte?.alvo === alvo) return linkColadoDaPonte.impressao;
+  try {
+    const identidade = await identidadeDaPagina();
+    return (await identidade.conhecidos()).find((servidor) => servidor.endereco === alvo)?.impressao ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Um endereço digitado não traz a chave do servidor: no navegador se entra pelo link. */
 const RECUSA_ENDERECO_SOZINHO =
   "no navegador se entra pelo link do servidor: um endereço sozinho não traz a chave que confere quem atendeu";
@@ -459,8 +532,9 @@ const RECUSA_ENDERECO_SOZINHO =
  * origem_da_impressao, a_lista_guardou}`) e rejeita com o `ConnectionError`
  * dele, nu: é o que o `desfecho` da identidade lê.
  */
-async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret } = {}) {
+async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}) {
   if (!alvo || typeof alvo !== "object" || !alvo.chave) {
+    if (typeof server === "string") return entrarPeloEndereco({ server, nickname });
     return Promise.reject({ RecusaDaPonte: { comando: "connect", frase: RECUSA_ENDERECO_SOZINHO } });
   }
   if (sessaoDaPonte.atual && !sessaoDaPonte.atual.acabou) return Promise.reject("AlreadyConnected");
@@ -474,24 +548,35 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret } = {}) {
     console.warn("ponte: o .wasm da página não carregou para a sessão:", falha);
     return Promise.reject("Unreachable");
   }
-  const sessao = await abrirASessaoDoNavegador({
-    wasm,
-    alvo,
-    apelido: nickname ?? "",
-    convite: joinSecret ?? null,
-    aceito: aceiteDeModsGuardado(alvo.impressao),
-    emitir: (evento) => {
-      if (valeAinda()) emitirNaPonte("seele://event", evento);
-    },
-    aoAcabar: () => {
-      if (valeAinda()) fecharAVozDaSessao();
-    },
-    aoReceberOsHashes: (janelas) => {
-      identidadeDaPagina()
-        .then((identidade) => identidade.lembrarOsHashes(alvo.impressao, janelas))
-        .catch((falha) => console.warn("ponte: os hashes do servidor não ficaram guardados:", falha));
-    },
-  });
+  const cancelamento = { cancelada: false, aoCancelar: null };
+  entradaEmCurso.cancelar = () => {
+    cancelamento.cancelada = true;
+    cancelamento.aoCancelar?.();
+  };
+  let sessao;
+  try {
+    sessao = await abrirASessaoDoNavegador({
+      wasm,
+      alvo,
+      cancelamento,
+      apelido: nickname ?? "",
+      convite: joinSecret ?? null,
+      aceito: aceiteDeModsGuardado(alvo.impressao),
+      emitir: (evento) => {
+        if (valeAinda()) emitirNaPonte("seele://event", evento);
+      },
+      aoAcabar: () => {
+        if (valeAinda()) fecharAVozDaSessao();
+      },
+      aoReceberOsHashes: (janelas) => {
+        identidadeDaPagina()
+          .then((identidade) => identidade.lembrarOsHashes(alvo.impressao, janelas))
+          .catch((falha) => console.warn("ponte: os hashes do servidor não ficaram guardados:", falha));
+      },
+    });
+  } finally {
+    entradaEmCurso.cancelar = null;
+  }
   // Outra entrada começou enquanto esta abria: esta é solta, como a
   // substituída do desktop.
   if (!valeAinda()) {
@@ -565,10 +650,13 @@ function pelaPagina(comando) {
   };
 }
 
-/** Um comando da sessão pelo `.wasm` (`seele_web::comandos`). */
+/**
+ * Um comando da sessão pelo `.wasm` (`seele_web::comandos`), sempre numa
+ * promessa: o `.wasm` responde na hora, e quem chama encadeia como no `invoke`.
+ */
 function pelaSessao(comando) {
   return (args) =>
-    comASessao((sessao) => {
+    comASessao(async (sessao) => {
       const feito = sessao.atender(comando, args);
       if (!feito) return Promise.reject({ ComandoDesconhecido: { comando } });
       return "erro" in feito ? Promise.reject(feito.erro) : feito.resposta;
@@ -1073,6 +1161,103 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     const sessao = sessaoDaPonte.atual;
     if (!sessao || sessao.acabou || geracao == null || sessao.geracao !== geracao) return false;
     return sairDaSessaoDaPonte().then(() => true);
+  },
+  // **A entrada pela casca larga** (D-web-3): o SERVIDORES e o link colado.
+  // Um link do produto é convite; o resto, endereço, que o `connect` só aceita
+  // de um servidor deste aparelho.
+  ler_entrada: async ({ texto } = {}) => {
+    const escrito = String(texto ?? "").trim();
+    const lido = await lerOLink(escrito);
+    return lido.erro === "OutraOrigem" ? { Endereco: escrito } : { Convite: escrito };
+  },
+  analisar_convite: async ({ link } = {}) => {
+    const texto = String(link ?? "").trim();
+    const lido = await lerOLink(texto);
+    if (lido.erro) {
+      const frase = FRASES_DO_LINK[lido.erro] ?? FRASES_DO_LINK.Convite;
+      return Promise.reject({ RecusaDaPonte: { comando: "analisar_convite", frase } });
+    }
+    linkColadoDaPonte = { texto, alvo: lido.link.alvo, impressao: lido.link.impressao };
+    // A página fala só a linha dela: o link do navegador entra aqui mesmo.
+    return { alvo: lido.link.alvo, token: lido.link.convite ?? null, versao: lido.link.versao ?? null, para_entrar: "Aqui" };
+  },
+  cancelar_ligacao: () => {
+    const cancelar = entradaEmCurso.cancelar;
+    if (!cancelar) return false;
+    cancelar();
+    return true;
+  },
+  // Os SERVIDORES DESTE APARELHO da identidade, na forma do `Conhecido` do
+  // desktop. Sem identidade, a lista vazia, como o desktop sem o arquivo.
+  conhecidos: async () => {
+    try {
+      const identidade = await identidadeDaPagina();
+      return (await identidade.conhecidos()).map((servidor) => ({
+        alvo: servidor.endereco,
+        apelido: servidor.apelido ?? "",
+        voice_room: null,
+        visto_em: servidor.visto ? Math.floor(servidor.visto / 1000) : 0,
+        nome: servidor.nome ?? null,
+        ...(servidor.icone ? { icone: servidor.icone } : {}),
+        caminhos: [],
+        bilhete: null,
+        impressao: servidor.impressao,
+        caminho_bps: null,
+      }));
+    } catch (falha) {
+      console.warn("ponte: os servidores deste aparelho não abriram:", falha);
+      return [];
+    }
+  },
+  esquecer: async ({ alvo } = {}) => {
+    const identidade = await identidadeDaPagina();
+    for (const servidor of await identidade.conhecidos()) {
+      if (servidor.endereco === alvo) await identidade.esquecerOServidor(servidor.impressao);
+    }
+    return null;
+  },
+  // Os aceites de MODs são guardados pela impressão do servidor (a chave da
+  // identidade); a casca do desktop pergunta pelo endereço.
+  aceite_de_mods: async ({ alvo } = {}) => {
+    const impressao = await impressaoDoEndereco(alvo);
+    return impressao ? aceiteDeModsGuardado(impressao) : null;
+  },
+  aceitar_mods: async ({ alvo, conjunto } = {}) => {
+    const impressao = await impressaoDoEndereco(alvo);
+    if (!impressao) return Promise.reject({ Recusado: { motivo: "EnderecoInvalido" } });
+    return guardarOAceiteDeMods(impressao, String(conjunto ?? "")) ? null : Promise.reject({ Recusado: { motivo: "NaoDeuParaGravar" } });
+  },
+  esquecer_aceite_de_mods: async ({ alvo } = {}) => {
+    const impressao = await impressaoDoEndereco(alvo);
+    if (!impressao) return Promise.reject({ Recusado: { motivo: "EnderecoInvalido" } });
+    return guardarOAceiteDeMods(impressao, null) ? null : Promise.reject({ Recusado: { motivo: "NaoDeuParaGravar" } });
+  },
+  aceites_de_mods: async () => {
+    let servidores = [];
+    try {
+      servidores = await (await identidadeDaPagina()).conhecidos();
+    } catch {
+      servidores = [];
+    }
+    return aceitesDeModsGuardados().map((aceite) => ({
+      alvo: servidores.find((servidor) => servidor.impressao === aceite.impressao)?.endereco ?? aceite.impressao,
+      conjunto: aceite.conjunto,
+      quando: aceite.quando,
+    }));
+  },
+  // O nome e o ícone do servidor, anotados com ele neste aparelho; calado em
+  // toda falha, como no desktop.
+  lembrar_aparencia_do_servidor: async () => {
+    const sessao = sessaoDaPonte.atual;
+    if (!sessao || sessao.acabou) return null;
+    try {
+      const nome = sessao.snapshot().server;
+      const icone = sessao.atender("icone_do_server", {})?.resposta ?? null;
+      await (await identidadeDaPagina()).lembrarAAparencia(sessao.alvo.impressao, { nome, icone });
+    } catch (falha) {
+      console.warn("ponte: a aparência do servidor não ficou guardada:", falha);
+    }
+    return null;
   },
   estado_da_sessao: () => ({
     geracao: sessaoDaPonte.atual?.geracao ?? 0,

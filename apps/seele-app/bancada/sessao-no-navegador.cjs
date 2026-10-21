@@ -29,7 +29,12 @@
 //    identidade, que guarda as janelas com o servidor;
 // 6. **o fim**: o `disconnect` fecha, e o `snapshot` volta `NotConnected`;
 // 7. **um hash que não é do servidor não entra**: a entrada desiste com
-//    `sem-rede`, e nada fica pendurado.
+//    `sem-rede`, e nada fica pendurado;
+// 8. **a casca larga do PC** (D-web-3), pelos comandos do desktop: o link
+//    colado no SERVIDORES (`ler_entrada`, `analisar_convite` e o `connect` com
+//    o endereço), a aparência guardada nos conhecidos, os aceites de MODs pelo
+//    endereço, a volta pela lista sem link (`Known`), o endereço sem link
+//    recusado com a frase, o CANCELAR de quem espera, e o esquecer.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual.
 
@@ -310,7 +315,74 @@ const invocar = (aba, comando, args) =>
     const comHashErrado = await entrarPeloLink(c.aba, errado, "caio");
     confere("7", comHashErrado.entrada?.erro === "sem-rede", `a entrada com o hash errado: ${JSON.stringify(comHashErrado.entrada)}`);
 
-    for (const [nome, { doConsole }] of [["a", a], ["b", b], ["c", c]]) {
+    // ------------------------------------------------------------ 8. a casca larga
+    const d = await abrirUmaPagina(navegador, endereco);
+    paginas.push(d);
+    const comoLink = (await invocar(d.aba, "ler_entrada", { texto: servidor.link })).ok;
+    confere("8", comoLink?.Convite === servidor.link, `o link colado não foi lido como convite: ${JSON.stringify(comoLink)}`);
+    const comoEndereco = (await invocar(d.aba, "ler_entrada", { texto: "  10.9.9.9:8383 " })).ok;
+    confere("8", comoEndereco?.Endereco === "10.9.9.9:8383", `o endereço colado: ${JSON.stringify(comoEndereco)}`);
+    const convite = (await invocar(d.aba, "analisar_convite", { link: servidor.link })).ok;
+    confere("8", convite?.alvo === servidor.endereco && convite?.para_entrar === "Aqui", `o convite lido: ${JSON.stringify(convite)}`);
+    const pelaCasca = await invocar(d.aba, "connect", { server: convite?.alvo, nickname: "dani", audio: true, joinSecret: convite?.token ?? null, tentativa: 1 });
+    confere("8", pelaCasca.ok?.snapshot?.server === "Bancada", `o connect da casca larga pelo link colado: ${JSON.stringify(pelaCasca)}`);
+    confere("8", (await invocar(d.aba, "lembrar_aparencia_do_servidor", {})).ok === null, "o lembrar_aparencia_do_servidor não respondeu null");
+    const daLista = await esperar(d.aba, async (alvo) => {
+      const lista = await window.__TAURI__.core.invoke("conhecidos");
+      const este = lista.find((servidor) => servidor.alvo === alvo);
+      return { pronto: este && este.apelido === "dani" && este.nome === "Bancada", este };
+    }, servidor.endereco);
+    confere("8", daLista.pronto, `o servidor não ficou nos conhecidos com o apelido e o nome: ${JSON.stringify(daLista.este)}`);
+    // Os aceites de MODs, pelo endereço que a casca do desktop usa.
+    const conjunto = "ab".repeat(32);
+    confere("8", (await invocar(d.aba, "aceite_de_mods", { alvo: servidor.endereco })).ok === null, "havia aceite antes de aceitar");
+    confere("8", (await invocar(d.aba, "aceitar_mods", { alvo: servidor.endereco, conjunto })).ok === null, "o aceitar_mods não respondeu null");
+    confere("8", (await invocar(d.aba, "aceite_de_mods", { alvo: servidor.endereco })).ok === conjunto, "o aceite não ficou guardado");
+    const aceites = (await invocar(d.aba, "aceites_de_mods", {})).ok;
+    confere(
+      "8",
+      Array.isArray(aceites) && aceites.length === 1 && aceites[0].alvo === servidor.endereco && aceites[0].quando > 0,
+      `a lista dos aceites: ${JSON.stringify(aceites)}`,
+    );
+    confere("8", (await invocar(d.aba, "esquecer_aceite_de_mods", { alvo: servidor.endereco })).ok === null, "o esquecer_aceite_de_mods não respondeu null");
+    confere("8", (await invocar(d.aba, "aceite_de_mods", { alvo: servidor.endereco })).ok === null, "o aceite esquecido voltou");
+    // De volta pela lista, sem link: o servidor deste aparelho, pela chave.
+    await invocar(d.aba, "disconnect", {});
+    const pelaLista = await invocar(d.aba, "connect", { server: servidor.endereco, nickname: "dani", audio: true, joinSecret: null, tentativa: 2 });
+    confere("8", pelaLista.ok?.veredito === "Known", `a volta pela lista: ${JSON.stringify(pelaLista.ok?.veredito ?? pelaLista)}`);
+    await invocar(d.aba, "disconnect", {});
+    const sozinho = await invocar(d.aba, "connect", { server: "10.9.9.9:8383", nickname: "dani", audio: true, joinSecret: null, tentativa: 3 });
+    confere("8", typeof sozinho.erro?.RecusaDaPonte?.frase === "string", `um endereço sem link: ${JSON.stringify(sozinho)}`);
+    // O CANCELAR de quem espera: um link para um endereço que não responde.
+    const mudo = servidor.link.replace(servidor.endereco, "10.255.255.1:8383");
+    const conviteMudo = (await invocar(d.aba, "analisar_convite", { link: mudo })).ok;
+    const cancelada = await d.aba.evaluate(async (alvo) => {
+      const esperando = window.__TAURI__.core.invoke("connect", { server: alvo, nickname: "dani", audio: true, joinSecret: null, tentativa: 4 });
+      await new Promise((r) => setTimeout(r, 300));
+      const cancelou = await window.__TAURI__.core.invoke("cancelar_ligacao");
+      const inicio = Date.now();
+      try {
+        await esperando;
+        return { cancelou, desfecho: "entrou" };
+      } catch (erro) {
+        return { cancelou, desfecho: erro, ms: Date.now() - inicio };
+      }
+    }, conviteMudo?.alvo);
+    confere("8", cancelada.cancelou === true && cancelada.desfecho === "Cancelada" && cancelada.ms < 2000, `o CANCELAR: ${JSON.stringify(cancelada)}`);
+    confere("8", (await invocar(d.aba, "cancelar_ligacao", {})).ok === false, "o CANCELAR sem entrada em curso não respondeu false");
+    // Uma entrada que falha na hora (a porta que o navegador nem tenta): a
+    // recusa chega à casca, e nada fica sem dono no console.
+    const recusado = servidor.link.replace(servidor.endereco, "127.0.0.1:9");
+    const conviteRecusado = (await invocar(d.aba, "analisar_convite", { link: recusado })).ok;
+    const naHora = await invocar(d.aba, "connect", { server: conviteRecusado?.alvo, nickname: "dani", audio: true, joinSecret: null, tentativa: 5 });
+    confere("8", naHora.erro === "Unreachable", `a entrada que falha na hora: ${JSON.stringify(naHora)}`);
+    await new Promise((r) => setTimeout(r, 500));
+    // E esquecer tira o servidor da lista.
+    confere("8", (await invocar(d.aba, "esquecer", { alvo: servidor.endereco })).ok === null, "o esquecer não respondeu null");
+    const depoisDeEsquecer = (await invocar(d.aba, "conhecidos", {})).ok;
+    confere("8", !depoisDeEsquecer.some((servidor2) => servidor2.alvo === servidor.endereco), `o servidor esquecido ficou: ${JSON.stringify(depoisDeEsquecer)}`);
+
+    for (const [nome, { doConsole }] of [["a", a], ["b", b], ["c", c], ["d", d]]) {
       const erros = doConsole.filter((linha) => linha.startsWith("pageerror") || /CSP|Content Security Policy/i.test(linha));
       confere("console", erros.length === 0, `a página ${nome} teve erros: ${erros.join(" | ")}`);
     }

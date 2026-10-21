@@ -1109,6 +1109,12 @@ function fraseDeErro(erro, apelido, deOnde) {
       return MOTIVOS[erro.Refused.reason] ?? "SESSÃO RECUSADA";
     }
   }
+  // **O que a página do navegador não faz**, com a frase que a ponte já manda
+  // (`ponte-web.js`): sem isto, a recusa com o porquê virava «ALGO FALHOU».
+  if (erro && typeof erro === "object" && typeof erro.RecusaDaPonte?.frase === "string") {
+    const frase = erro.RecusaDaPonte.frase;
+    return `${frase.charAt(0).toUpperCase()}${frase.slice(1)}.`;
+  }
   return FRASES[erro] ?? desconhecida(erro);
 }
 
