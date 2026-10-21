@@ -243,3 +243,61 @@ Sobre `954d9a4d`, pelo mesmo `scratchpad/lote-58-1/guardas.sh`, com os logs em
   diz a frase da recusa…»);
 - as 20 bancadas do job `bancadas`: as 20 passam;
 - os 46 roteiros, numa chamada da `carga-da-casca.py`: «os 46 passaram».
+
+## Rodada 2
+
+A ressalva da rodada 1 sobre a mesma frase falsa em mais dois lugares entrou, como o
+mesmo achado do M4. Os 212 caracteres foram aceitos: a revisão mediu que a frase quebra
+e nunca é cortada. O guarda do `frontend.rs` que passa por coincidência fica para depois
+dos merges, e não foi tocado.
+
+**Commit `9faeee5b`**, um só, porque a constante é comum aos dois arquivos:
+
+- **`APIS_DO_SERVIDOR_0_15 = [3, 4, 5]`, no `frases.js`,** com `APIS_DO_SERVIDOR_0_15_DITAS`
+  («3 a 5»). É o único lugar do JS com esses números. O `api-too-old` do
+  `RECUSAS_DE_PACOTE` passa a lê-la. O `camada-mods.js` também a lê, porque carrega
+  depois do `frases.js` no `index.html`.
+- **`ModsDeApiAntiga`:** para cada MOD, «feito para a API N, que roda no Servidor 0.15»
+  quando N está na constante, e «feito para a API N, que nenhum servidor de hoje roda»
+  quando não está. A saída «ou hospede pelo Servidor 0.15, no launcher» só aparece
+  quando algum MOD da lista é de uma API que ele roda. Com um MOD da API 4, as três
+  saídas do dono seguem na ordem de sempre. Com um só da API 2, ficam duas: atualizar
+  para a API 6, ou desligar.
+- **A linha do pacote no cache (`camada-mods.js`):** o ramo de 3 a 5 não mudou. O de
+  uma API mais velha diz «este pacote foi feito para a API 2, que nenhum servidor de hoje
+  roda: este SEELE roda a 6, e o Servidor 0.15, as 3 a 5. Procure a versão dele para a
+  API 6 no catálogo do servidor.», sem o launcher. Os pacotes do layout antigo do item 11
+  caem aqui.
+
+**A prova**, na `hospedar-com-mod-antigo.cjs`:
+
+- a leitura de `APIS_POR_LINHA` subiu para o topo, e vale para as seções 1, 3 e 4;
+- ela fixa N = 4 (dentro) e N = 2 (fora), e confere que a tabela ainda os separa assim;
+- a seção 3 exige que a constante do `frases.js` seja a linha 0.15 da tabela;
+- a seção 4 carrega o `frases.js` antes do recorte, como o `index.html`.
+
+| Passo | Resultado |
+|---|---|
+| Vermelho, antes de tudo | 1b: «um MOD da API 2 diz que roda no Servidor 0.15». O N = 4 logo acima já passava. |
+| Vermelho, com o `frases.js` novo e o `camada-mods.js` de antes | 4b: «a linha do pacote da API 2 diz que ele roda no Servidor 0.15». O N = 4 da seção 4 já passava. |
+| Reversão: a frase por MOD | 1b reprova («diz que roda no Servidor 0.15») |
+| Reversão: a saída do 0.15 sempre oferecida | 1b reprova («oferece o Servidor 0.15 a um MOD da API 2») |
+| Reversão: o ramo do cache | 4b reprova |
+| Reversão: a constante em `[3, 4]` | a seção 3 reprova («não diz que o Servidor 0.15 roda as APIs 3 a 5») |
+
+As quatro restauraram idênticas (`cmp`), por escrita nova. Os 306 testes do `frontend.rs`
+passam com a constante e com o valor em *template literal* no `RECUSAS_DE_PACOTE`. O
+guarda das chaves lê a chave antes dos dois-pontos, e não o valor.
+
+### Os guardas do fim da rodada 2
+
+Sobre `9faeee5b`, pelo `scratchpad/lote-58-1/guardas.sh`, com os logs em
+`scratchpad/lote-58-1/guardas-r2/`. Os 26 passos saíram com 0:
+
+- o `fmt` limpo (o único log vazio);
+- `cargo --offline test -p seele-app --no-fail-fast`, com HOME falsa: **804 passaram, 0
+  falharam**, em 11 binários. Nenhuma HOME falsa ganhou `.config/seele`;
+- o `clippy -D warnings` limpo;
+- o `check-runtime` com as 14 bancadas;
+- as 20 bancadas do job `bancadas`, mais a `hospedar-com-mod-antigo.cjs` à parte;
+- os 46 roteiros numa chamada: «os 46 passaram».
