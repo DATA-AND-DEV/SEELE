@@ -48,7 +48,13 @@
 // 12. **a tela**: a primeira página compartilha a tela (a captura falsa do
 //     Chromium, com som), uma página nova entra na sala, assiste, recebe a
 //     abertura, os quadros (com chave) e o som da tela na mistura, quem
-//     compartilha se vê pelo espelho, e parar fecha a tela de quem assistia.
+//     compartilha se vê pelo espelho, e parar fecha a tela de quem assistia;
+// 13. **a volta**: o transporte da primeira página cai por baixo da sessão; o
+//     retrato diz a bateria (`InternalBattery`) e a conversa segue legível, a
+//     mensagem mandada na bateria fica pendente, a sessão volta sozinha por
+//     outro transporte (`Online`, a mesma conversa), a pendente sai de novo e
+//     volta confirmada, a voz entra de novo e chega à outra página, e quem
+//     assistia vê a primeira na sala.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual.
 
@@ -566,6 +572,77 @@ const invocar = (aba, comando, args) =>
     }, antesDeCompartilhar);
     confere("12", fechou.pronto, "a tela não fechou para quem assistia");
 
+    // ------------------------------------------------------------ 13. a volta
+    const naBateria = await a.aba.evaluate(async (canal) => {
+      const invoke = window.__TAURI__.core.invoke;
+      const antes = window.eventosDaBancada.length;
+      sessaoDaPonte.atual.simularAQueda();
+      // A bateria acende antes da primeira tentativa terminar: o retrato e a
+      // conversa são lidos ali, e a mensagem sai para a fila da volta.
+      const fim = Date.now() + 5000;
+      let retrato = await invoke("snapshot");
+      while (retrato.link === "Online" && Date.now() < fim) {
+        await new Promise((r) => setTimeout(r, 5));
+        retrato = await invoke("snapshot");
+      }
+      const conversa = await invoke("messages");
+      const chave = await invoke("send_message", { channel: canal, body: "mandada na bateria" });
+      const pendente = (await invoke("messages")).find((m) => m.client_message_id === chave);
+      return {
+        link: retrato.link,
+        conversa: conversa.length,
+        chave,
+        pendente: pendente?.estado,
+        avisou: window.eventosDaBancada.slice(antes).includes("TelemetryChanged"),
+      };
+    }, canal);
+    confere(
+      "13",
+      typeof naBateria.link?.InternalBattery?.remaining_seconds === "number" && naBateria.link.InternalBattery.remaining_seconds <= 300,
+      `o retrato na queda não diz a bateria: ${JSON.stringify(naBateria.link)}`,
+    );
+    confere("13", naBateria.avisou, "a casca não ouviu o TelemetryChanged da queda");
+    confere("13", naBateria.conversa >= 1, `a conversa não seguiu legível na bateria: ${naBateria.conversa} mensagens`);
+    confere("13", typeof naBateria.chave === "string" && naBateria.pendente && naBateria.pendente !== "Confirmada", `a mensagem da bateria: ${JSON.stringify(naBateria)}`);
+    const voltou = await esperar(a.aba, async (chave) => {
+      const r = await window.__TAURI__.core.invoke("snapshot");
+      const minha = (await window.__TAURI__.core.invoke("messages")).find((m) => m.client_message_id === chave);
+      return {
+        pronto: r.link === "Online" && minha?.estado === "Confirmada" && r.abertura_do_audio === "aberto",
+        link: r.link,
+        estado: minha?.estado,
+        abertura: r.abertura_do_audio,
+        voltas: sessaoDaPonte.atual.contas.voltas,
+      };
+    }, naBateria.chave, 20_000);
+    confere(
+      "13",
+      voltou.pronto && voltou.voltas === 1,
+      `a sessão não voltou inteira: enlace ${JSON.stringify(voltou.link)}, a pendente ${voltou.estado}, o áudio ${voltou.abertura}, ${voltou.voltas} volta(s)`,
+    );
+    // Contados depois da volta: só a voz que voltou faz o número subir.
+    const daEAntes = await e.aba.evaluate(async () => (await vozDaPonte.atual.contas()).pagina.decodificados);
+    const vozDeNovo = await esperar(e.aba, async (antes) => {
+      const r = await window.__TAURI__.core.invoke("snapshot");
+      const decodificados = (await vozDaPonte.atual.contas()).pagina.decodificados;
+      return { pronto: r.presentes.some((p) => p.nickname === "ana") && decodificados > antes + 25, decodificados };
+    }, daEAntes, 20_000);
+    confere("13", vozDeNovo.pronto, `a voz da primeira não voltou à outra página: ${daEAntes} → ${vozDeNovo.decodificados} decodificados`);
+    // **O enlace que responde fica de pé**: três `Ping` de rotina sem `Pong`
+    // (o `KEEPALIVE` de 5 s, três vezes) poriam a sessão na bateria sozinha, e
+    // a bancada inteira roda em menos que isso. A espera passa da conta, e
+    // nenhuma tentativa nova pode ter havido.
+    await new Promise((r) => setTimeout(r, 16_000));
+    const deDepois = await a.aba.evaluate(async () => ({
+      link: (await window.__TAURI__.core.invoke("snapshot")).link,
+      tentativas: sessaoDaPonte.atual.contas.tentativasDeVolta,
+    }));
+    confere(
+      "13",
+      deDepois.link === "Online" && deDepois.tentativas === 1,
+      `o enlace que responde não ficou de pé: ${JSON.stringify(deDepois.link)}, ${deDepois.tentativas} tentativa(s) de volta`,
+    );
+
     for (const [nome, { doConsole }] of [["a", a], ["b", b], ["c", c], ["d", d], ["e", e]]) {
       const erros = doConsole.filter((linha) => linha.startsWith("pageerror") || /CSP|Content Security Policy/i.test(linha));
       confere("console", erros.length === 0, `a página ${nome} teve erros: ${erros.join(" | ")}`);
@@ -588,6 +665,6 @@ const invocar = (aba, comando, args) =>
     process.exit(1);
   }
   console.log(
-    "sessao-no-navegador: a página entra num servidor de verdade pela WebTransport, conversa, vê a outra pessoa, a voz atravessa, os hashes ficam guardados, sai, e um hash errado não entra.",
+    "sessao-no-navegador: a página entra num servidor de verdade pela WebTransport, conversa, vê a outra pessoa, a voz atravessa, os hashes ficam guardados, sai, um hash errado não entra, e a sessão que cai volta sozinha.",
   );
 })();

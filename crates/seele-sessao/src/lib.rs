@@ -30,12 +30,14 @@
 use seele_proto::ids::{PersonId, SessionId, Ssrc};
 
 pub mod assento;
+pub mod battery;
 pub mod despedida;
 pub mod nome_do_anexo;
 pub mod preview;
 pub mod retrato;
 pub mod search;
 pub mod state;
+pub mod volta;
 
 /// Everything the server told us on the way in.
 #[derive(Debug, Clone)]

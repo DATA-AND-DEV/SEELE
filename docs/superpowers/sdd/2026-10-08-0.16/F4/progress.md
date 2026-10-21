@@ -1116,3 +1116,44 @@ vão precisar de um lugar comum, como as da prévia foram.
 
 **E a volta da conexão** (o caminho normal do celular) ainda não existe: uma
 queda vira `Ended { LinkLost }`.
+
+## 21/10, noite — a volta da conexão no navegador
+
+Da `versao/0.16` em `9f2aa376`. Uma queda deixa de ser `Ended { LinkLost }`:
+a sessão vai para a bateria do desktop e volta sozinha.
+
+- **A bateria é a mesma conta**: a `seele_core::battery` passa a morar no
+  `seele-sessao` (o `seele-core` a reexporta), e o navegador a roda pelo
+  `.wasm` com o relógio da página (`bateria_poll`, `_pong`, `_caiu`,
+  `_voltou`, `_falhou`, `_enlace`). O `Ping` de rotina sai a cada 5 s e o
+  `Pong` dele a segura; três sem resposta, ou o transporte que fecha, põem a
+  sessão na bateria. O `link` do `Snapshot` vem dela (`InternalBattery`, com
+  os segundos e as tentativas; a descarregada é `Online`, como no
+  `gravar_enlace` da FFI).
+- **Na bateria, os comandos atendem pela sessão guardada**, como o motor do
+  desktop sem cliente: a conversa segue legível, a mensagem nova fica
+  pendente, a sala e o mudo ficam lembrados, e nada vai ao fio.
+- **A volta** abre outro transporte para o endereço que atendeu, com os hashes
+  do link e os das janelas anunciadas que valem agora, e refaz o aperto com a
+  mesma chave e sem o convite. A `Session` nova é readotada por cima da sala
+  velha (`Room::adopt`), e sai o que o motor do desktop restabelece: a entrada
+  na sala com o `Ping` marcado, o canal com uma página do buraco, o mudo e o
+  isolamento. Depois, as pendentes saem de novo com as mesmas chaves, na
+  rajada e no passo da FFI. A rajada, o passo e a página do buraco passam a
+  morar no `seele_sessao::volta`, de onde as duas pontas os leem.
+- **A voz fica de pé na bateria**, como no desktop, e segue no transporte
+  novo; um número de voz novo a faz sair e entrar com ele. A tela no ar fecha
+  com o transporte, como o `soltar_a_conexao` do núcleo. Uma recusa do
+  servidor na volta encerra com o motivo dela.
+- **A bancada** ganha o caso 13: o transporte cai por baixo da sessão, o
+  retrato diz a bateria (299 s, 0 tentativas), a conversa segue legível, a
+  mensagem mandada na bateria fica «Enviando» e volta «Confirmada», a voz
+  chega de novo à outra página, e 16 s depois (três `KEEPALIVE`) a sessão não
+  caiu sozinha. Provados pela reversão: sem a repetição (a pendente fica
+  «Enviando»), sem o `Pong` de rotina (2 tentativas de volta), e com a bateria
+  respondendo `NotConnected` (a bancada para lendo a conversa). O teste
+  `na_bateria_os_comandos_atendem_pela_sessao_guardada_e_nada_vai_ao_fio`
+  reprova pela mesma reversão.
+- **O que a bancada não alcança:** o servidor resgata o assento (o mesmo
+  número de voz, medido), então o ramo do número novo só tem a leitura; e a
+  página do buraco é uma só, de 200 (o desktop pede até 10, com as cercas).

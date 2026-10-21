@@ -159,7 +159,11 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "pedir_anexo",
     "pedir_quadro_chave",
     "peso_da_linha",
+    // Os dois da volta, que a ponte chama por dentro: o `Ping` de rotina da
+    // bateria e a repetição das pendentes.
+    "ping_de_rotina",
     "reenviar_mensagem",
+    "repetir_pendentes",
     "remover_mensagem",
     "renomear_linha",
     "renomear_server",
@@ -281,10 +285,26 @@ impl Ligacao {
         if !COMANDOS_DA_SESSAO.contains(&comando) {
             return None;
         }
-        let Some(sessao) = self.sessao_mut() else {
-            return Some(Err(json!("NotConnected")));
-        };
         let mut saida = Saida::default();
+        if self.sessao_mut().is_none() {
+            // **Na bateria**, como o motor do desktop sem cliente: o comando
+            // atende pela sessão guardada (a conversa segue legível, a pendente
+            // fica para a repetição, a sala e o mudo ficam lembrados para a
+            // volta), e o que iria ao fio é largado.
+            let Some(sessao) = self.sessao_na_bateria() else {
+                return Some(Err(json!("NotConnected")));
+            };
+            return Some(
+                atender_na_sessao(sessao, comando, args, pagina, agora_s, &mut saida).map(
+                    |resposta| Feito {
+                        resposta,
+                        eventos: saida.eventos,
+                        nao_saiu: None,
+                    },
+                ),
+            );
+        }
+        let sessao = self.sessao_mut()?;
         let resposta = match atender_na_sessao(sessao, comando, args, pagina, agora_s, &mut saida) {
             Ok(resposta) => resposta,
             Err(erro) => return Some(Err(erro)),
@@ -783,6 +803,61 @@ fn atender_na_sessao(
             )
             .map(|bytes| json!(bytes))
             .map_err(|motivo| json!(format!("a abertura da tela: {motivo}")))
+        }
+        // O `Ping` de rotina: o `Pong` dele é o que a bateria conta.
+        "ping_de_rotina" => {
+            sessao.pings += 1;
+            saida.mensagens.push(ClientMessage::Ping {
+                timestamp: sessao.pings,
+            });
+            Ok(Value::Null)
+        }
+        // **A repetição da volta** (a `Repeticao` e o `repetir` da FFI): a
+        // rajada na primeira vez, e uma por vez depois; cada pendente que ainda
+        // espera sai de novo com a mesma chave, e a grande demais fica recusada.
+        "repetir_pendentes" => {
+            let quantas = sessao.rajada.max(1).min(sessao.a_repetir.len());
+            sessao.rajada = 0;
+            let chaves: Vec<ClientMessageId> = sessao.a_repetir.drain(..quantas).collect();
+            for chave in chaves {
+                let Some((canal, corpo)) = sessao
+                    .room
+                    .pendentes
+                    .iter()
+                    .find(|pendente| {
+                        pendente.client_message_id == chave
+                            && matches!(
+                                pendente.estado,
+                                seele_sessao::state::EstadoDoEnvio::SemResposta
+                                    | seele_sessao::state::EstadoDoEnvio::Enviando
+                            )
+                    })
+                    .map(|pendente| (pendente.channel, pendente.body.clone()))
+                else {
+                    continue;
+                };
+                if let Some(recusa) = grande_demais(&corpo) {
+                    if sessao.room.recusar_envio(chave, recusa) {
+                        sessao.a_conversa_mudou(&mut saida.eventos);
+                    }
+                    continue;
+                }
+                sessao
+                    .room
+                    .anotar_envio(canal, chave, corpo.clone(), agora_s);
+                sessao.a_conversa_mudou(&mut saida.eventos);
+                saida.mensagens.push(ClientMessage::SendMessage {
+                    channel: canal,
+                    body: corpo,
+                    replies_to: None,
+                    client_message_id: chave,
+                });
+            }
+            // O passo até a próxima é o da FFI: a página só o espera.
+            Ok(json!({
+                "faltam": sessao.a_repetir.len(),
+                "passo_ms": seele_sessao::volta::INTERVALO_DA_REPETICAO.as_millis(),
+            }))
         }
         "pedir_quadro_chave" => {
             saida.mensagens.push(ClientMessage::RequestKeyFrame {
@@ -1651,6 +1726,181 @@ mod tests {
                 json!({ "html": r#"<META property="og:image" content="https://media.tenor.com/a.gif?x=1&amp;y=2">"# })
             ),
             Ok(json!("https://media.tenor.com/a.gif?x=1&y=2"))
+        );
+    }
+
+    /// A volta pelo aperto inteiro: o `Hello` sem convite, o desafio assinado e
+    /// a `Session` nova.
+    fn voltar(
+        ligacao: &mut Ligacao,
+        escolhas: crate::sessao::Escolhas,
+    ) -> Vec<crate::ligacao::Passo> {
+        let pedido = crate::ligacao::Pedido {
+            apelido: "marcela".into(),
+            chave_publica: [5; 32],
+            impressao: [7; 32],
+            convite: None,
+            aceito: None,
+        };
+        ligacao.retomar(pedido, escolhas).unwrap();
+        assert!(matches!(
+            &escritos(ligacao)[..],
+            [ClientMessage::Hello {
+                join_secret: None,
+                ..
+            }]
+        ));
+        let _ = ligacao.chegou(&do_servidor(&ServerMessage::Challenge {
+            nonce: vec![4; 32],
+        }));
+        let _ = ligacao.assinado(&[9; 64]);
+        let _ = escritos(ligacao);
+        ligacao.chegou(&do_servidor(&ServerMessage::Session {
+            id: SessionId(42),
+            person: PersonId(7),
+            ssrc: Ssrc(701),
+            server: "Casa".into(),
+            voice_rooms: Vec::new(),
+            channels: vec![ChannelInfo {
+                id: ChannelId(1),
+                name: "geral".into(),
+            }],
+            roles: Vec::new(),
+            permissions: vec![Permission::Speak],
+        }))
+    }
+
+    #[test]
+    fn na_bateria_os_comandos_atendem_pela_sessao_guardada_e_nada_vai_ao_fio() {
+        use crate::ligacao::Passo;
+        use crate::sessao::Escolhas;
+        let mut ligacao = dentro();
+        let mut pagina = DaPagina::nova(SEMENTE);
+        let _ = atender(
+            &mut ligacao,
+            &mut pagina,
+            "open_channel",
+            json!({ "channel": 1 }),
+        );
+        let _ = escritos(&mut ligacao);
+        let _ = ligacao.largar_para_voltar();
+
+        // A conversa segue legível, e a mensagem nova fica pendente, como no
+        // motor do desktop sem cliente: nada sai, e nada é recusado.
+        let chave = atender(
+            &mut ligacao,
+            &mut pagina,
+            "send_message",
+            json!({ "channel": 1, "body": "na bateria" }),
+        );
+        assert!(chave.nao_saiu.is_none());
+        let conversa = atender(&mut ligacao, &mut pagina, "messages", json!({})).resposta;
+        assert_eq!(conversa[0]["body"], "na bateria");
+        assert_eq!(escritos(&mut ligacao), Vec::<ClientMessage>::new());
+
+        // A volta a repete, com a chave que o comando devolveu.
+        assert_eq!(
+            voltar(&mut ligacao, Escolhas::default()),
+            vec![Passo::Voltou]
+        );
+        let _ = escritos(&mut ligacao);
+        let _ = atender(&mut ligacao, &mut pagina, "repetir_pendentes", json!({}));
+        let [ClientMessage::SendMessage {
+            client_message_id, ..
+        }] = &escritos(&mut ligacao)[..]
+        else {
+            panic!("a mensagem da bateria não saiu na volta");
+        };
+        assert_eq!(
+            client_message_id.get().to_string(),
+            chave.resposta.as_str().unwrap()
+        );
+    }
+
+    #[test]
+    fn a_volta_readota_restabelece_e_repete_as_pendentes() {
+        use crate::ligacao::Passo;
+        use crate::sessao::{Escolhas, PAGINA_DO_BURACO};
+        let mut ligacao = dentro();
+        let mut pagina = DaPagina::nova(SEMENTE);
+        let _ = atender(
+            &mut ligacao,
+            &mut pagina,
+            "open_channel",
+            json!({ "channel": 1 }),
+        );
+        let _ = atender(
+            &mut ligacao,
+            &mut pagina,
+            "enter_voice_room",
+            json!({ "voiceRoom": 2 }),
+        );
+        let chave = atender(
+            &mut ligacao,
+            &mut pagina,
+            "send_message",
+            json!({ "channel": 1, "body": "durante" }),
+        )
+        .resposta;
+        let _ = escritos(&mut ligacao);
+
+        // Caiu: o que saía fica sem resposta, e a sessão fica guardada.
+        let eventos = ligacao.largar_para_voltar();
+        assert_eq!(eventos, vec![json!("MessagesChanged")]);
+        let conversa = conversa_de(&ligacao.sessao().unwrap().room);
+        assert_eq!(conversa[0]["estado"], "SemResposta");
+
+        assert_eq!(
+            voltar(
+                &mut ligacao,
+                Escolhas {
+                    mudo: true,
+                    isolado: false
+                }
+            ),
+            vec![Passo::Voltou]
+        );
+        assert_eq!(
+            escritos(&mut ligacao),
+            vec![
+                ClientMessage::EnterVoiceRoom {
+                    voice_room: VoiceRoomId(2),
+                    password: None
+                },
+                ClientMessage::Ping {
+                    timestamp: carimbo_da_entrada(1)
+                },
+                ClientMessage::JoinChannel {
+                    channel: ChannelId(1)
+                },
+                ClientMessage::FetchHistory {
+                    channel: ChannelId(1),
+                    cursor: None,
+                    limit: PAGINA_DO_BURACO
+                },
+                ClientMessage::SetMuted(true),
+            ]
+        );
+        // A conversa ficou, e a pendente sai de novo com a mesma chave.
+        let repetida = atender(&mut ligacao, &mut pagina, "repetir_pendentes", json!({}));
+        assert_eq!(repetida.resposta, json!({ "faltam": 0, "passo_ms": 125 }));
+        let [ClientMessage::SendMessage {
+            client_message_id,
+            body,
+            ..
+        }] = &escritos(&mut ligacao)[..]
+        else {
+            panic!("a pendente não saiu de novo");
+        };
+        assert_eq!(
+            (client_message_id.get().to_string(), body.as_str()),
+            (chave.as_str().unwrap().to_owned(), "durante")
+        );
+        // E o ping de rotina recomeça de 1 na conexão nova.
+        let _ = atender(&mut ligacao, &mut pagina, "ping_de_rotina", json!({}));
+        assert_eq!(
+            escritos(&mut ligacao),
+            vec![ClientMessage::Ping { timestamp: 1 }]
         );
     }
 

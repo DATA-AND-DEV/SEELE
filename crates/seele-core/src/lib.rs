@@ -28,10 +28,15 @@ pub mod aceites;
 pub mod agenda;
 pub mod anexo_no_disco;
 pub use seele_sessao::assento;
+/// A bateria interna mora no `seele-sessao` desde a Tarefa 2.6 da F4: o
+/// navegador volta da queda pela mesma conta (o tempo entra como parâmetro).
+pub use seele_sessao::battery;
 /// O retrato da sala: os tipos de vista do `Snapshot` e a projeção que os
 /// monta a partir do `Room`, para o desktop e o navegador (Tarefa 2.2 da F4).
 pub use seele_sessao::retrato;
-pub mod battery;
+/// Os compassos da volta (a página do buraco, a rajada e o passo da
+/// repetição), de onde o desktop e o navegador os leem.
+pub use seele_sessao::volta;
 pub mod bomba;
 pub mod caminho;
 pub mod chegada;

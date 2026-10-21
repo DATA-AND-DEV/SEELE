@@ -591,6 +591,13 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
     sessao.transmissao.aoDobrar(mensagem);
   };
   sessao.aCadaVolta = () => seguirOsVolumes();
+  // **A queda e a volta**, como no desktop: a voz fica de pé na bateria (os
+  // datagramas não saem, e ela segue no transporte novo), a tela que estava no
+  // ar fecha com o transporte, e a volta repete o mudo e o isolamento. A sala
+  // que o servidor não resgatou fecha e abre de novo pelo `aoDobrar`, e um
+  // número de voz novo faz a voz entrar com ele (`conferirAVozDaSessao`).
+  sessao.escolhas = () => ({ mudo: vozDaSessao.mudo, isolado: vozDaSessao.isolado });
+  sessao.aoCair = () => sessao.transmissao.fechar();
   // O som da tela vai à mistura; a tela que fecha leva o dela.
   sessao.aoSomDaTela = (tela, opus) => {
     if (vozDaSessao.dentro) vozDaPonte.atual?.somDaTela(tela, Uint8Array.from(opus));
@@ -621,7 +628,7 @@ function retratoDaSessao(sessao) {
   const voz = vozDaSessao;
   return {
     caminho: null,
-    link: "Online",
+    link: sessao.enlace(),
     // A WebTransport só abre com um dos hashes que o link trouxe: quem atendeu
     // foi conferido.
     link_state: "Verified",
@@ -684,6 +691,8 @@ const vozDaSessao = {
   isolado: false,
   tecla: false,
   dentro: false,
+  /** O número da voz com que ela entrou: a volta traz outro. */
+  numero: null,
   ligando: null,
   abertura: "fora_de_sala",
   falando: false,
@@ -725,13 +734,11 @@ function conferirAVozDaSessao(sessao) {
   const sala = lido && !("erro" in lido) ? lido.resposta.sala : null;
   const voz = vozDaPonte.atual;
   if (sala === null) {
-    if (vozDaSessao.dentro) {
-      voz?.sair();
-      vozDaSessao.dentro = false;
-    }
-    mudarAAbertura("fora_de_sala");
+    sairDaVozDaSessao();
     return;
   }
+  // A conexão nova da volta tem outro número de voz: a voz sai e entra com ele.
+  if (vozDaSessao.dentro && vozDaSessao.numero !== lido.resposta.voz) sairDaVozDaSessao();
   if (vozDaSessao.dentro) return;
   if (!voz || !vozDaSessao.ligando) {
     mudarAAbertura("sem_aparelho");
@@ -740,6 +747,7 @@ function conferirAVozDaSessao(sessao) {
   vozDaSessao.dentro = true;
   mudarAAbertura("abrindo");
   const numero = lido.resposta.voz;
+  vozDaSessao.numero = numero;
   vozDaSessao.ligando.then(
     () => {
       if (!vozDaSessao.dentro || sessao.acabou) return;
@@ -765,6 +773,16 @@ function conferirAVozDaSessao(sessao) {
   );
 }
 
+/** A voz sai da sala (o microfone fica): a sala que acabou, ou o número que mudou. */
+function sairDaVozDaSessao() {
+  if (vozDaSessao.dentro) {
+    vozDaPonte.atual?.sair();
+    vozDaSessao.dentro = false;
+    vozDaSessao.numero = null;
+  }
+  mudarAAbertura("fora_de_sala");
+}
+
 function mudarAAbertura(abertura) {
   if (vozDaSessao.abertura === abertura) return;
   vozDaSessao.abertura = abertura;
@@ -774,7 +792,7 @@ function mudarAAbertura(abertura) {
 /** A sessão acabou: a voz da sala fecha, e o microfone é solto. */
 function fecharAVozDaSessao() {
   const ligando = vozDaSessao.ligando;
-  Object.assign(vozDaSessao, { dentro: false, ligando: null, abertura: "fora_de_sala", falando: false });
+  Object.assign(vozDaSessao, { dentro: false, numero: null, ligando: null, abertura: "fora_de_sala", falando: false });
   if (ligando) {
     ligando.then(() => vozDaPonte.atual?.desligar()).catch(() => {});
   }
