@@ -25,10 +25,20 @@ fn pacote(versao: &str, api: u32, cliente: &[u8]) -> Vec<(String, Vec<u8>)> {
 }
 
 /// Guarda os pacotes como o desktop: `mod-packages/<lugar>/…`.
+///
+/// **Uma pasta por chamada, por construção.** Os testes deste arquivo rodam em
+/// paralelo no mesmo processo, e dois deles guardam o mesmo pacote. Com só o
+/// processo e o relógio no nome, duas chamadas no mesmo microssegundo (a
+/// resolução do relógio no macOS) davam a mesma pasta, e o `remove_dir_all` de
+/// um apagava o que o outro lia: na 24ª integração, o
+/// `os_mesmos_pacotes_dao_a_mesma_lista_nas_duas_pontas` reprovou uma vez e
+/// passou nas 40 seguintes. O contador tira a sorte do nome.
 fn no_disco(guardados: &[seele_web::mods::Guardado]) -> std::path::PathBuf {
+    static CHAMADAS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let pasta = std::env::temp_dir().join(format!(
-        "dois-produtores-dos-mods-{}-{}",
+        "dois-produtores-dos-mods-{}-{}-{}",
         std::process::id(),
+        CHAMADAS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
