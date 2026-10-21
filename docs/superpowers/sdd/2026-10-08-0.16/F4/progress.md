@@ -994,3 +994,48 @@ começar.
 - **Para a F8:** a D-web-2 está pronta na casca; ESTE APARELHO e a chave curta
   ainda não existem. Há proposta para os dois (`esteAparelho()` e
   `chaveDe(impressao)`), e o quando é da orquestradora.
+
+## 21/10: o web app de ponta a ponta, o lado do servidor — PRONTO PARA INTEGRAR em `ab7e302e`
+
+O pedido da orquestradora (21/10): o web app funcionando de ponta a ponta na
+0.16. A ordem que segui, e por quê: o servidor antes da página. A página não
+tem com quem falar sem o `h3`, e sem os curtos guardados todo link morre na
+próxima abertura do `seeled`.
+
+**O que entra** (desde a 18ª, que não levou nenhum commit deste ramo):
+- `e1bee43c`: a `versao/0.16` em `e33b2921`, sem conflito;
+- `37ef7774`: a emenda D-web-3 ao ADR 0057 (antes fora de commit), com a
+  medição 3 registrada;
+- os de antes, ainda não integrados: `0975f08a` (o item 52 da 58),
+  `7e19c02d` e `78a7b23a` (a origem e os cabeçalhos num lugar só),
+  `75bc4291` (a D-web-4), `fa6a54de` e `6dd46520` (o pacote, 3.6),
+  `abfa436e` (2.4, `seele/1` e `h3` no mesmo socket);
+- `53a74029`: **2.6, o servidor** — o `h3` vira uma sessão WebTransport,
+  servida pelo mesmo `session::serve` do nativo (`transporte::Conexao`), e a
+  voz atravessa os dois transportes. O `wtransport` 0.7.2 entra com quatro
+  pacotes do disco, e o lock só os acrescenta;
+- `016b7fa3`: **2.5** — os curtos no banco e herdados da máquina: reabrir o
+  `seeled` mantém os hashes que os links levaram;
+- `ab7e302e`: **2.5** — o `HashesDoNavegador` depois do `Session`, nos dois
+  transportes.
+
+**A conferência, na ponta `ab7e302e`:**
+- fmt; clippy com `-D warnings` em `seele-server`, `seele-app`, `seele-core`,
+  `seele-proto`, `seele-web` e `xtask`;
+- `seele-server` 721 testes (entre eles `alpn` 6, `sessao_por_h3` 4 e
+  `tls::os_curtos_*` 10), `seele-core` 478, `seele-web` 22, `xtask` 243;
+- os guardas do app (334) e 37 testes do binário (servidores, entradas
+  velhas, ligação, etapa); a conformidade compila;
+- `cargo deny --offline` (licenças, proibições, avisos);
+- as reversões: 7 da 2.4, 5 da 2.6, 4 dos curtos no banco, 1 do
+  `HashesDoNavegador`, cada uma reprovando o teste dela.
+
+**Não rodei:** a conformidade nem a bateria inteira (a 8384 é da orquestradora).
+
+**Decisão em aberto, registrada no ADR e no código:** conferir a `Origin` do
+pedido WebTransport. Hoje o `seeled` aceita qualquer uma e a registra.
+
+**A seguir:** o lado do navegador — a `Sessao` pela fronteira do `.wasm` (com
+os eventos e os contadores da FFI, provados contra ela), a prova do aperto de
+mão, a sessão pela WebTransport na página, os comandos da `ponte-web.js`, a
+voz pelos datagramas, ESTE APARELHO e a chave curta, e o pacote saindo.
