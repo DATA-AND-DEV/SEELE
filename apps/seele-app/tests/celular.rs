@@ -987,9 +987,12 @@ fn pular_modelo(c: &[char], mut i: usize) -> usize {
 
 /// As fichas de um trecho de JS, sem os comentários. Com `ate_o_fecho`, para no
 /// `}` que fecha uma expressão `${…}` de modelo e devolve o índice depois dele.
-fn ler_fichas(c: &[char], mut i: usize, ate_o_fecho: bool) -> (Vec<Lida>, usize) {
+/// Devolve também a menor fundura vista e a do fim: um leitor que entendeu o
+/// trecho termina em zero e nunca desce abaixo dele.
+fn ler_fichas(c: &[char], mut i: usize, ate_o_fecho: bool) -> (Vec<Lida>, usize, (i32, i32)) {
     let mut saida: Vec<Lida> = Vec::new();
     let mut fundura = 0;
+    let mut menor = 0;
     let mut linha_nova = false;
     while i < c.len() {
         let ch = c[i];
@@ -1041,9 +1044,10 @@ fn ler_fichas(c: &[char], mut i: usize, ate_o_fecho: bool) -> (Vec<Lida>, usize)
             i += 1;
             if matches!(ch, '}' | ')' | ']') {
                 if ch == '}' && fundura == 0 && ate_o_fecho {
-                    return (saida, i);
+                    return (saida, i, (menor, fundura));
                 }
                 fundura -= 1;
+                menor = menor.min(fundura);
             }
             saida.push(Lida {
                 ficha: Ficha::Sinal(ch),
@@ -1063,7 +1067,7 @@ fn ler_fichas(c: &[char], mut i: usize, ate_o_fecho: bool) -> (Vec<Lida>, usize)
         });
         linha_nova = false;
     }
-    (saida, i)
+    (saida, i, (menor, fundura))
 }
 
 /// Uma ficha depois da qual uma quebra de linha pode terminar a instrução.
@@ -1140,9 +1144,18 @@ fn nomes_declarados(f: &[Lida], mut m: usize, nomes: &mut Vec<String>) -> usize 
 /// Os nomes que um script clássico declara no escopo global: `function`
 /// (também `async` e `function*`), `class`, `let`, `const` e `var` no nível de
 /// cima, no começo de uma instrução. Dentro de uma IIFE, nada é global.
-fn globais_declarados(js: &str) -> Vec<String> {
+fn globais_declarados(js: &str) -> Result<Vec<String>, String> {
     let c: Vec<char> = js.chars().collect();
-    let f = ler_fichas(&c, 0, false).0;
+    let (f, _, (menor, fim)) = ler_fichas(&c, 0, false);
+    // **A conta das chaves é a prova de que o leitor entendeu o arquivo.** Uma
+    // expressão regular lida como divisão, ou uma cadeia mal fechada, a
+    // desequilibra, e daí em diante ele perderia as declarações do nível de
+    // cima sem reprovar nada.
+    if menor < 0 || fim != 0 {
+        return Err(format!(
+            "a conta das chaves não fecha (a menor fundura é {menor}, e a do fim, {fim})"
+        ));
+    }
     let mut nomes = Vec::new();
     let mut k = 0;
     while k < f.len() {
@@ -1180,7 +1193,7 @@ fn globais_declarados(js: &str) -> Vec<String> {
             k += 1;
         }
     }
-    nomes
+    Ok(nomes)
 }
 
 /// Os scripts clássicos de uma página, na ordem dela: `(nome, código)`. Os de
@@ -1228,7 +1241,9 @@ fn nenhum_nome_global_e_declarado_por_dois_scripts_da_mesma_pagina() {
         let mut donos: std::collections::BTreeMap<String, Vec<String>> = Default::default();
         let mut total = 0;
         for (nome, codigo) in &scripts {
-            let mut deste = globais_declarados(codigo);
+            let mut deste = globais_declarados(codigo).unwrap_or_else(|erro| {
+                panic!("o leitor do G10 não entendeu o {nome}: {erro}; consertar o leitor, e não o script")
+            });
             deste.sort();
             deste.dedup();
             total += deste.len();
