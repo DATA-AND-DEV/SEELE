@@ -647,7 +647,8 @@ orquestradora, não rodo conformidade.
   relógio; a lógica do alarme tem;
 - a agenda é um arquivo regravado inteiro. Um nome dado no instante em que um
   toque termina pode perder uma das duas escritas. Raro, e da conveniência e não
-  da segurança;
+  da segurança; *consertado em 21/10 (`74796332`), e medido: não era raro. Ver
+  «A agenda que não perde escrita» abaixo;*
 - **depois do encontro com o lote X da F5:** o teste da sala com
   `codigo_esperado` provando `onde_estou_na == Pessoal` pela chave.
 
@@ -1328,3 +1329,38 @@ ligação fica só na agenda, com a direção e a hora.
 
 **Como está a ponta** (`d85f55f4`): app, 769 de 769; FFI, 217; clippy limpo;
 a conformidade inteira, 314 de 314 (a 314ª é a sala pelo endereço).
+
+## A agenda que não perde escrita (21/10)
+
+`74796332`, isolado, só em `seele-core/src/agenda.rs`, a pedido da
+orquestradora. Antes, a `versao/0.16` (`e33b2921`) entrou por fast-forward.
+
+- **Medido antes de consertar, não era raro.** Eram três jeitos de perder:
+  - duas agendas abertas antes de qualquer uma gravar: a segunda regravava a
+    lista velha dela, e o nome dado apagava o toque da mesma pessoa;
+  - escritas ao mesmo tempo: 16 linhas, 8 contatos cada, perdiam 120 de 128;
+  - uma leitura no meio de uma gravação viu 0 de 120 bloqueados. A sala que
+    sobe lê os bloqueados uma vez, e quem está bloqueado tocaria enquanto ela
+    estivesse no ar.
+- **O conserto:**
+  - ler, mudar e gravar sob uma trava (`File::lock`), num `agenda.trava` ao
+    lado, que nunca é trocado;
+  - a mudança sobre o arquivo relido sob a trava, e não sobre o que a agenda
+    leu ao abrir;
+  - a gravação em `agenda.nova`, trocada pelo `rename`;
+  - uma linha que não é UTF-8 é pulada sem levar as outras.
+- **As provas:**
+  - os três testes reprovam no código de antes (3 de 3) e passam com o
+    conserto (10 de 10);
+  - cada peça tirada reprova pela sua frase (5 de 5): sem reler, sem a
+    trava, a trava na própria agenda, sem o `rename`;
+  - a trava na própria agenda só reprovava 1 em 5 com uma gravação por
+    linha, e por isso são oito.
+- **O mesmo defeito na lista de visitados, que fica:** `conhecidos.rs` também
+  regrava o arquivo inteiro, a partir do que leu ao abrir, e no lugar. O
+  `connect` abre a lista em mais de um ponto. Não foi pedido, e vai dito à
+  orquestradora.
+
+**Como está a ponta** (`74796332`): núcleo, 481; FFI, 218; app, 796; clippy e
+fmt limpos; `ligar_pela_ponte`, 2 de 2. A agenda não entra em nenhuma outra
+prova da conformidade.
