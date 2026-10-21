@@ -410,6 +410,7 @@ pub fn refusal_name(why: &Refused) -> &'static str {
         Refused::ApiTooOld { .. } => "api-too-old",
         Refused::MalformedId => "malformed-id",
         Refused::Empty => "empty",
+        Refused::TemaSemMetadeDeServidor => "tema-sem-metade-de-servidor",
         Refused::ArquivoInvalido { .. } => "arquivo-invalido",
         Refused::ArquivosDemais { .. } => "arquivos-demais",
     }

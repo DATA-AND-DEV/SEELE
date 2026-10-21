@@ -765,6 +765,10 @@ async function hospedar() {
   const erro = $("boot-erro");
   botao.disabled = true;
   erro.hidden = true;
+  esconderSaidasDeQuemHospeda();
+  // O servidor desta tentativa, para as saídas de um MOD de API antiga: elas
+  // mexem no servidor que recusou, e não no que estiver escolhido depois.
+  const servidor = servidorEscolhido;
 
   try {
     // O campo é opcional; vazio vira `null`, que é como o Rust escreve «sem
@@ -807,9 +811,162 @@ async function hospedar() {
   } catch (falha) {
     erro.hidden = false;
     erro.textContent = fraseDeErro(falha);
+    if (falha?.ModsDeApiAntiga) {
+      desenharSaidasDeQuemHospeda(falha.ModsDeApiAntiga.mods ?? [], servidor).catch((f) =>
+        console.warn("saídas de quem hospeda:", f),
+      );
+    }
   } finally {
     botao.disabled = false;
   }
+}
+
+/** Qual desenho das saídas vale: um mais novo, ou o esconder, o invalida. */
+let geracaoDasSaidas = 0;
+
+function esconderSaidasDeQuemHospeda() {
+  geracaoDasSaidas += 1;
+  const bloco = $("boot-saidas");
+  bloco.hidden = true;
+  bloco.replaceChildren();
+}
+
+/**
+ * **As saídas de quem hospeda com um MOD de API antiga, como botões** (o corte
+ * da API 6; tarefa 13 do plano da F3, Step 5b; as decisões (i), (ii) e (iii)
+ * da orquestradora, 15/10). A frase de cima diz o MOD, a API e as saídas;
+ * aqui, cada MOD tem as dele, na ordem do dono (08/10):
+ *
+ * 1. **ATUALIZAR**, só quando o catálogo tem a versão para a API deste app
+ *    (`versaoParaEsteApp`); sem ela, a frase diz que ainda não há; com o
+ *    catálogo fora do ar, diz a falha dele, e não que não há versão — seria
+ *    afirmar o que não se sabe. Baixa pelo uso «obter», que não mexe em
+ *    servidor nenhum, e liga os bytes no servidor parado
+ *    (`resolver_mod_de_api_antiga`, que confere o resto);
+ * 2. **HOSPEDAR PELO SERVIDOR 0.15**, quando uma versão do servidor nesta
+ *    máquina roda a API do MOD: abre a tela das versões com ela escolhida, e a
+ *    frase diz que quem hospeda é a janela dela. Sem a API (o pacote não está
+ *    aqui), não é oferecida: nada diz que a 0.15 o roda;
+ * 3. **DESLIGAR**: os dados dele ficam (ADR 0045).
+ *
+ * Depois de ATUALIZAR ou DESLIGAR, hospeda de novo o mesmo servidor: se ainda
+ * houver MOD de API antiga, a recusa volta com os que faltam. Uma saída
+ * recusada é dita aqui, e as outras continuam.
+ */
+async function desenharSaidasDeQuemHospeda(mods, servidor) {
+  const geracao = ++geracaoDasSaidas;
+  const bloco = $("boot-saidas");
+  const esperando = elemento("p", "nota", "consultando o catálogo de MODs…");
+  esperando.dataset.esperando = "";
+  bloco.replaceChildren(esperando);
+  bloco.hidden = false;
+
+  // As duas ao mesmo tempo. A do catálogo pode falhar, e a falha é guardada
+  // para ser dita, e não lançada.
+  const linhasPedidas = invoke("linhas_para_hospedar").catch(() => []);
+  let catalogo;
+  try {
+    catalogo = { lido: await invoke("catalogo_de_mods") };
+  } catch (falha) {
+    catalogo = { falha };
+  }
+  const linhas = await linhasPedidas;
+  if (geracao !== geracaoDasSaidas) return;
+
+  const estado = elemento("p", "erro");
+  estado.setAttribute("role", "alert");
+  estado.hidden = true;
+
+  /** Uma saída: tudo desligado enquanto anda, e a recusa dita aqui. */
+  const saida = (nome, rotulo, passos) => {
+    const botao = elemento("button", "botao-fantasma", rotulo);
+    botao.type = "button";
+    botao.dataset.saida = nome;
+    botao.addEventListener("click", async () => {
+      const botoes = [...bloco.querySelectorAll("button")];
+      for (const b of botoes) b.disabled = true;
+      estado.hidden = true;
+      try {
+        await passos();
+      } catch (falha) {
+        estado.textContent = fraseDaVersao(falha);
+        estado.hidden = false;
+        for (const b of botoes) b.disabled = false;
+      }
+    });
+    return botao;
+  };
+  /** Mexe no servidor que recusou, e hospeda de novo o mesmo. */
+  const resolverEHospedar = async (id, comoResolver) => {
+    await invoke("resolver_mod_de_api_antiga", { servidor, id, saida: comoResolver });
+    servidorEscolhido = servidor;
+    await hospedar();
+  };
+
+  const filhos = [];
+  if (catalogo.falha) {
+    filhos.push(
+      elemento(
+        "p",
+        "nota",
+        `Sem o catálogo de MODs agora, não dá para atualizar: ${fraseDeErro(catalogo.falha)}`,
+      ),
+    );
+  }
+  const lista = elemento("ul", "server-dispositivos");
+  for (const [id, api] of mods) {
+    const item = elemento("li");
+    item.dataset.mod = id;
+    const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
+    const texto = elemento("span", "server-dispositivo-nome");
+    texto.append(elemento("span", "mods-id", id));
+    texto.append(
+      elemento(
+        "span",
+        "mods-versao",
+        api ? `feito para a API ${api}` : "o pacote deste MOD não está nesta máquina",
+      ),
+    );
+    caixa.append(texto);
+
+    if (!catalogo.falha) {
+      const nova = versaoParaEsteApp(catalogo.lido?.mods?.find((m) => m.id === id)?.versoes);
+      if (nova) {
+        caixa.append(
+          saida("atualizar", `ATUALIZAR PARA ${nova.versao} E HOSPEDAR`, async () => {
+            await invoke("instalar_mod_do_catalogo", { id, versao: nova.versao, uso: "obter" });
+            await resolverEHospedar(id, { atualizar: { hash: nova.hash } });
+          }),
+        );
+      } else {
+        texto.append(
+          elemento(
+            "span",
+            "mods-versao",
+            `ainda não há versão dele para a API ${API_DESTE_APLICATIVO}`,
+          ),
+        );
+      }
+    }
+
+    const onde = api
+      ? linhas.find((l) => !l.esta && l.apis.includes(api) && (l.instalada || l.tem_pacote))
+      : undefined;
+    if (onde) {
+      caixa.append(
+        saida(`servidor-${onde.servidor}`, `HOSPEDAR PELO SERVIDOR ${onde.servidor}`, async () => {
+          await abrirPreparar();
+          escolherVersaoParaHospedar(onde, `${id} roda no Servidor ${onde.servidor}. `);
+        }),
+      );
+    }
+
+    caixa.append(saida("desligar", "DESLIGAR E HOSPEDAR", () => resolverEHospedar(id, "desligar")));
+    item.append(caixa);
+    lista.append(item);
+  }
+  filhos.push(lista, estado);
+  bloco.replaceChildren(...filhos);
 }
 
 /**
@@ -1301,32 +1458,42 @@ async function desenharVersoesParaHospedar() {
       const escolhida = l.esta ? linhaEscolhida === null : linhaEscolhida?.linha === l.linha;
       botao.textContent = escolhida ? "ESCOLHIDA" : "USAR ESTA";
       botao.disabled = escolhida || (!l.esta && !l.instalada && !l.tem_pacote);
-      botao.addEventListener("click", () => {
-        linhaEscolhida = l.esta ? null : l;
-        // **A frase existe porque o nome, a imagem e as conversas não
-        // atravessam.** Quem hospeda passa a ser a outra janela, com as
-        // conversas daquela versão do servidor, e o protocolo só aceita
-        // `rename_server` de dentro dela.
-        const aviso = $("preparar-versao-aviso");
-        aviso.hidden = linhaEscolhida === null;
-        if (linhaEscolhida !== null) {
-          aviso.textContent =
-            `Quem hospeda é outra janela do SEELE, com as conversas do Servidor ` +
-            `${l.servidor}: o que você escreveu aqui não aparece lá. O nome e a ` +
-            "imagem você define lá." +
-            (l.perde_conversas ? " Nesta máquina ele ainda não tem conversa nenhuma." : "");
-        }
-        $("preparar-confirmar").textContent =
-          linhaEscolhida === null
-            ? "HOSPEDAR"
-            : `${l.instalada ? "ABRIR" : "BAIXAR E ABRIR"} O SERVIDOR ${l.servidor} PARA HOSPEDAR`;
-        desenharVersoesParaHospedar().catch((f) => console.warn("versoes:", f));
-      });
+      botao.addEventListener("click", () => escolherVersaoParaHospedar(l));
       caixa.append(botao);
       item.append(caixa);
       return item;
     }),
   );
+}
+
+/**
+ * Escolhe a versão do servidor em que hospedar, e diz o que isso muda.
+ *
+ * `porque` abre a frase quando quem escolheu foi uma saída, e não a pessoa: a
+ * de um MOD de API antiga (o corte da API 6; tarefa 13 do plano da F3, Step
+ * 5b) diz qual MOD leva àquela versão.
+ */
+function escolherVersaoParaHospedar(l, porque = "") {
+  linhaEscolhida = l.esta ? null : l;
+  // **A frase existe porque o nome, a imagem e as conversas não
+  // atravessam.** Quem hospeda passa a ser a outra janela, com as
+  // conversas daquela versão do servidor, e o protocolo só aceita
+  // `rename_server` de dentro dela.
+  const aviso = $("preparar-versao-aviso");
+  aviso.hidden = linhaEscolhida === null;
+  if (linhaEscolhida !== null) {
+    aviso.textContent =
+      porque +
+      `Quem hospeda é outra janela do SEELE, com as conversas do Servidor ` +
+      `${l.servidor}: o que você escreveu aqui não aparece lá. O nome e a ` +
+      "imagem você define lá." +
+      (l.perde_conversas ? " Nesta máquina ele ainda não tem conversa nenhuma." : "");
+  }
+  $("preparar-confirmar").textContent =
+    linhaEscolhida === null
+      ? "HOSPEDAR"
+      : `${l.instalada ? "ABRIR" : "BAIXAR E ABRIR"} O SERVIDOR ${l.servidor} PARA HOSPEDAR`;
+  desenharVersoesParaHospedar().catch((f) => console.warn("versoes:", f));
 }
 
 $("preparar-voltar").addEventListener("click", fecharPreparar);

@@ -47,7 +47,7 @@ mudam o texto abaixo, e cada seção já as segue.
 | pergunta | resposta |
 |---|---|
 | dois MODs com a porta do tema (§9) | **um tema por servidor**, o escolhido por quem administra (D-api-5) |
-| o teto de contribuições (§12) | **o modelo está decidido** (os pontos por alvo fora do agregado); **os números** (256 alvos por ponto, 128 no agregado) **saem da M3** |
+| o teto de contribuições (§12) | **o modelo está decidido** (os pontos por alvo fora do agregado), **e os números também** (11/10): 256 alvos por ponto e 128 sem alvo, pela bancada, porque no app a lista de 251 não se mede pela acessibilidade (§12, «A lista de 251») |
 | o que não entrar na 6 | **é candidato da API 7** (Servidor 1.1), e fica escrito no ADR 0056 |
 
 ---
@@ -753,9 +753,11 @@ Mudam, na 6:
   `estado` é o `'falhou'` que o avatar já mandava, e o `alvo` vai como texto,
   como os alvos das contribuições] E o retrato que não decodifica manda
   `midia`/`falhou` (nota do K2 da F5).
-- **`traco`** ganha a fase `cancelou`. Hoje `pointercancel` chega como
-  `terminou` (`mods-regiao.js:1898` [c]) e um gesto cancelado move a peça
-  (MESA M14). No celular é comum.
+- **`traco`** ganha a fase `cancelou`. Até a 0.16, `pointercancel` chegava como
+  `terminou` e um gesto cancelado movia a peça (MESA M14). No celular é comum.
+  [c, `c41d04eb`, em 15/10: prometido no `v6.json` e não entregue até a sessão de
+  porte da MESA o achar; `cancelou` leva a peça pega, como as outras fases, e
+  nenhum movimento sai depois]
 - **`contribuicao`** ganha o motivo `regiao-ausente` (§11), e o motivo
   **`orcamento`**: uma declaração que passa do teto do ponto é montada até o
   teto, e o MOD recebe `{ nome: 'contribuicao', ponto, destino, recusados,
@@ -1505,9 +1507,14 @@ furo — a área dela começa à direita da barra, e o que não couber rola dent
 dela. No resto, o modal continua modal: o Tab preso no diálogo, o Esc o
 fechando, e a sessão inerte e coberta [c, tarefa 9, Step 4b;
 `mods-superficies.js`, `foraDoModal` e `recortarOVeu`; `bancada/nucleo.cjs`,
-seção 3]. Agora
-para o que existe (a portaria, `#portaria-batendo`, `index.html:192` [c]); o
-item «a ligação» (`#toque`) fecha depois da 7d da sala pessoal. **É isso que
+seção 3]. **E a ligação** (`#toque`, a faixa de quem liga, da 7d; tarefa 9,
+Step 5, 11/10): medido antes, com um diálogo modal de MOD aberto, o ATENDER e
+o RECUSAR ficavam inertes, e o diálogo largo cruzava a faixa — uma ligação
+que chegasse não era atendida nem recusada. A mesma regra: ela fica acordada
+e no furo do véu, e a caixa do diálogo começa abaixo dela, com a ligação
+chegando antes ou depois do modal [c, `foraDoModal` e `--recorte-cima`;
+`bancada/nucleo.cjs`, seções 2 e 3]. Agora para o que existe (a portaria,
+`#portaria-batendo`, `index.html:192` [c], e a ligação). **É isso que
 põe o congelamento no fim do pacote** (spec-mestre, F7).
 
 ## 11. O celular
@@ -1626,8 +1633,9 @@ pontos de CPU e +374 MiB, e as capas são quase metade disso. Para comparar, a
 MESA arrastando (API 5) sobe o jitter em +1,1 ms, mais que todos os pontos da 6
 juntos. **O que a campanha não mediu**: Windows e iPhone; o `carga-regioes+voz`
 mediu cinco regiões, e não oito, porque, com quem usa na sala, a chamada
-esconde a vista da conversa; e a lista de pessoas com 250 cartões, de que o teto
-de contribuições abaixo depende.
+esconde a vista da conversa; e a lista de pessoas com 250 cartões, que no app
+não se mede pela acessibilidade (abaixo, «A lista de 251»): o teto de
+contribuições saiu da bancada.
 
 **O teto de contribuições muda de modelo antes do congelamento** (o bloqueio C
 do PERFIS, 09/10). Com cartão, avatar e capa por pessoa, 128 por MOD dão **42
@@ -1639,14 +1647,55 @@ pessoas**, e uma sala vai até 250 (`control.rs:77` [c]). O modelo da 6:
   contribuição por alvo, por MOD e por modo** (registrar de novo para o mesmo
   alvo é `atualizar`, e não uma segunda; o mesmo MOD pode substituir o cartão
   de uma pessoa e acrescentar à linha dela, que são duas coisas), e até um teto
-  de alvos por ponto, maior que a sala (partida: 256) [c, tarefa 5, Step 7];
+  de alvos por ponto, maior que a sala (256) [c, tarefa 5, Step 7];
 - **o teto agregado** (128 por MOD) fica para os pontos sem alvo: as regiões,
   as entradas de navegação, as ferramentas do compositor;
-- **o modelo está decidido** (dono, 09/10/2026); os números (256 alvos, 128
-  sem alvo) **esperam a M3 com a API 6**, que mede a lista de pessoas com 250
-  cartões de MOD (tarefa 11). Até lá, o laboratório de cada MOD os tem como
-  opções, e não como constantes (o J do PERFIS): os mesmos números valem para
-  o aviso do servidor (1 KiB, 4 por segundo) e para as capas animadas.
+- **o modelo está decidido** (dono, 09/10/2026), **e os números também**
+  (orquestradora, 11/10): **256 alvos por ponto e 128 sem alvo**, pela bancada,
+  e não pelo app (abaixo, «A lista de 251»). O laboratório de cada MOD, que os
+  tinha como opções (o J do PERFIS), passa a tê-los como os do contrato, como
+  já tinha o aviso do servidor (1 KiB, 4 por segundo) e as capas animadas.
+
+**A lista de 251, e contra o que ela se lê** (10/10 e 11/10). A primeira
+`carga-cartoes` não chegou a medir: a página travou — o WebContent acima de
+100% de CPU por 4,5 min, a memória subindo, nenhum cartão à vista —, e a causa
+era do produto, e não do MOD (pendência 63). Cada pessoa manda um `PersonState`
+por segundo a todas as conexões, e a janela respondia a cada um com o retrato
+inteiro e a lista inteira: N redesenhos por segundo, cada um do tamanho de N.
+Na bancada (`tools/lista-grande.cjs`, no Chromium, com a ponte simulada), só os
+cartões já deixavam fila a partir de 200 pessoas, **abaixo do teto de 256
+alvos**. O conserto (`6717dc2c`: no máximo um `atualizar()` por quadro, na
+janela; guarda `apps/seele-app/bancada/um-redesenho-por-quadro.cjs`) acabou com
+a fila, e não com o custo de refazer a lista a cada quadro: sem MOD nenhum, 251
+pessoas deixam a página a 98% na mesma bancada, e redesenhar só a linha que
+mudou ficou para depois. **Por isso a `carga-cartoes` se lê contra a
+`lista-251`** — os mesmos 251, no mesmo ritmo, sem MOD (decisão da
+orquestradora, 11/10) —, e não contra o `sem-mod` de uma pessoa, contra o qual
+a lista entraria na conta do MOD; a `lista-251` contra o `sem-mod` diz, à
+parte, o custo da lista.
+
+**No app, a lista de 251 não se mede pela acessibilidade** (a orquestradora,
+11/10, na build da campanha remendada com o conserto, `6e845e0d+6717dc2c`,
+por `docs/evidencias/m3-custo-dos-mods/preparar-conserto-63.sh`). A
+`lista-251` reprovou antes de medir, com «a lista tem 1 pessoas, e não 251»:
+com 249 calados e sem MOD, o WebContent a 107%, o cabeçalho «PESSOAS 1 EM
+SALAS · 251 NO SERVIDOR» sempre na árvore de acessibilidade, e os nomes da
+lista nunca; o ENTRAR NA SALA saía da árvore, e o aperto, quando ele foi
+achado, não pegou. Cada consulta voltava em 3 a 4 s: não é prazo. A leitura:
+com a lista refeita inteira a cada quadro, os nós são trocados a cada quadro,
+e a árvore não assenta — **quem usa leitor de tela não usa a lista nem o
+ENTRAR NA SALA com umas 250 pessoas**. É a (b) da pendência 63, que passa a
+defeito de acessibilidade. Com isso, os números de 251 não se dirigem no app,
+e a `carga-cartoes` não foi medida nele.
+
+**Os números congelam pela bancada** (decisão da orquestradora, 11/10): **256
+alvos por ponto e 128 contribuições sem alvo**. Com o conserto, pelo ouvinte de
+verdade (`tools/lista-grande.cjs`, modo `evento`, no Chromium, com a ponte
+simulada), 251 pessoas deixam a página a 98% sem MOD e a 99% com um cartão de
+32 linhas em cada uma e as 128 sem alvo: **quem satura a página com 251 é a
+lista, e não o MOD**. E o servidor é dimensionado em 50 pessoas
+(`specs/04-servidor-seele.md`), abaixo de onde esses custos aparecem. Fica sem
+medida: o app (WebKit) com 251, o WebView2 e o iPhone.
 
 **A montagem por partes** (MESA item 1, PERFIS R8; decidido aqui em 09/10, a
 pedido da MESA, porque muda o desenho da ficha): uma superfície montada ganha
@@ -1794,8 +1843,9 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
 - o teto de 12 KiB por mensagem, conferido antes de postar, igual
   (`executor.rs:1504-1516` [c]), enquanto o §12 não mudar;
 - nenhum armazenamento que sobreviva à sessão, nenhuma rede, nenhum acesso à
-  origem da página (os critérios do spike, que o AB passou no Chromium 151 e
-  no Safari do Simulador).
+  origem da página — `https://web.seele.app.br`, onde moram as identidades do
+  celular e do navegador (D-web-2, do dono, 15/10) — (os critérios do spike,
+  que o AB passou no Chromium 151 e no Safari do Simulador).
 
 **A MESA não usa armazenamento nem rede** e roda igual nas duas candidatas
 (MESA, item 18). O PERFIS e o ESTILO também não, pela leitura das revisões

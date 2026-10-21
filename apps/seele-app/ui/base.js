@@ -172,6 +172,10 @@ async function passaDoTeto(campo, texto) {
 //     o `li` e veste a mesma sala sempre do mesmo jeito: a reconciliação casa
 //     os filhos pela etiqueta e pela primeira classe, e um feitio que mudasse a
 //     cada quadro trocaria os nós. Uma chamada só, e no desktop não faz nada.
+//   - `detalhesNaLinha`: se a linha de uma pessoa acrescenta o `pessoa.detalhes`
+//     dela, no «⋯». O celular o tira da linha, e a folha da pessoa é o único
+//     lugar dele lá: um nó por pessoa, num lugar só (decisão da orquestradora,
+//     16/10; a linha o pede em `detalhesDaPessoaNaLinha`, no tela-sessao.js).
 //
 // Selado, e não congelado: a casca troca os valores, e ninguém acrescenta
 // campo. Um campo novo é um ponto novo, e entra aqui com o nome dele.
@@ -183,6 +187,7 @@ const CASCA = Object.seal({
   fraseDoModo: (_modo, doDesktop) => doDesktop,
   entradaDireta: (_veredito, _deOnde) => null,
   vestirASala: (_item, _sala, _snapshot) => {},
+  detalhesNaLinha: true,
 });
 
 // --------------------------------------------------------------- o snapshot
@@ -771,7 +776,7 @@ let filaDePedidosDeMod = Promise.resolve();
 let pedidosDeModNaFila = 0;
 
 async function aguardarVezDePedidoDeMod(geracao) {
-  if (pedidosDeModNaFila >= 128) throw new Error("too-many-requests");
+  if (pedidosDeModNaFila >= 128) throw recusaAoMod("too-many-requests");
   pedidosDeModNaFila += 1;
   const vez = filaDePedidosDeMod.then(async () => {
     if (!daGeracaoDePe(geracao)) throw new Error("disconnected");
@@ -813,13 +818,15 @@ async function pedirAoServidor(id, canal, valor) {
   }
   if (pedidosDeMod.size >= 8) {
     dizerRecusaDoPedido(id, "oito pedidos em voo, este não cabe");
-    throw new Error("too-many-requests");
+    throw recusaAoMod("too-many-requests");
   }
   const request = ++proximoPedidoDeMod;
   const payload = JSON.stringify(valor);
-  if (new TextEncoder().encode(payload).length > 12 * 1024) {
+  const tamanho = new TextEncoder().encode(payload).length;
+  if (tamanho > 12 * 1024) {
     dizerRecusaDoPedido(id, `carga de ${payload.length} caracteres não cabe`);
-    throw new Error("request-too-large");
+    // O mesmo nome e os mesmos campos da recusa do prelúdio.
+    throw recusaAoMod("mensagem-grande", "request-too-large", { tamanho, teto: 12 * 1024 });
   }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -934,76 +941,6 @@ async function montarOMod(mod) {
 }
 
 /**
- * A região de um MOD: onde ele desenha, e o único lugar onde ele desenha.
- *
- * ADR 0049. O MOD **declara** o que quer ver e o produto monta — com
- * `textContent` e `createElement`, nunca com HTML de texto: o conteúdo vem de
- * código de terceiro, e montá-lo como marcação seria dar a ele a página
- * inteira por outro caminho.
- *
- * A gramática é pequena de propósito. Cada forma nova é uma decisão de API, em
- * vez de um MOD descobrir que consegue.
- */
-/**
- * As regiões de pé, por instância.
- *
- * **Por instância, e não por `id`.** Um MOD recarregado dentro da mesma sessão
- * é outra instância, e o que a região anterior segurava — mídia carregando,
- * ouvintes, quadros pendentes — não é dela. Guardar por `id` faria o
- * recarregamento herdar recursos de quem já saiu.
- */
-const regioesDosMods = new Map();
-
-/**
- * Desenha o que um MOD declarou, reaproveitando o que já está na tela.
- *
- * O trabalho mora em `RegiaoDeMod`, em `mods-regiao.js`. Esta função é a
- * amarração: onde a região vive, quem é o dono dela, e como ela fala de volta.
- */
-/**
- * A região desta instância, criada na primeira vez que alguém precisa dela.
- *
- * **Os dois caminhos passam por aqui**, e não só o desenho. Um MOD que dá
- * cartão antes de desenhar a própria região é um MOD comum — o PERFIS consulta
- * os perfis e monta os cartões no mesmo ciclo em que pinta o painel, e a ordem
- * entre as duas coisas é dele. Exigir que a região exista primeiro era uma
- * armadilha de ordem que não aparece em lugar nenhum da API: o MOD recebia «não
- * tem região de pé» e não tinha como saber que bastava inverter duas linhas.
- *
- * Encontrado na corrida nativa, e não em teste: o vetor de referência pede
- * cartão antes de desenhar, e o quintal dele registrou a recusa.
- */
-function regiaoDoMod(mod, instancia) {
-  const palco = $("regioes-dos-mods");
-  if (!palco) return null;
-  let regiao = regioesDosMods.get(instancia);
-  if (!regiao) {
-    const raiz = elemento("section", "regiao-de-mod");
-    raiz.dataset.mod = mod.id;
-    palco.append(raiz);
-    regiao = new RegiaoDeMod(mod.id, donoDaRegiao(mod, instancia), raiz);
-    regioesDosMods.set(instancia, regiao);
-    // Registrada **na criação**, e não depois de o MOD desenhar: uma região
-    // criada e não registrada é uma região que a saída não encontra.
-    instancia.registrar(`${mod.id}: a região`, () => limparARegiaoDoMod(mod.id, instancia));
-  }
-  return regiao;
-}
-
-function desenharARegiaoDoMod(mod, instancia, conteudo) {
-  const regiao = regiaoDoMod(mod, instancia);
-  if (!regiao) return;
-  const palco = $("regioes-dos-mods");
-  palco.hidden = false;
-  const recusados = regiao.aplicar(conteudo);
-  // **Recusar em silêncio é o defeito que este repositório mais paga.** Um MOD
-  // cuja árvore não coube precisa saber disso onde ele a escreveu.
-  if (recusados > 0) {
-    throw new Error(`${recusados} nó(s) não couberam nos limites da região`);
-  }
-}
-
-/**
  * A mídia de alguma montagem de MOD mudou de estado.
  *
  * Um evento na janela, e não uma chamada: quem escuta é a gestão de MODs
@@ -1043,7 +980,9 @@ function donoDaRegiao(mod, instancia) {
     // 6, o `painel` até a 5 (rascunho da API 6, §5; tarefa 7, Step 4).
     api: Number(mod.api) || 0,
     // A imagem que uma pessoa já tem, para a citação `daPessoa` (Step 4b).
-    imagemDaPessoa: (qual, pessoaId) => imagemCitada(qual, pessoaId),
+    imagemDaPessoa: (qual, pessoaId, opcoes) => imagemCitada(qual, pessoaId, opcoes),
+    // A pessoa que uma citação nomeia (`pessoa`) está na sessão? (D-api-9)
+    estaNaSessao: (pessoaId) => pessoaEstaNaSessao(pessoaId),
     /**
      * Um evento da janela para o MOD.
      *
@@ -1267,118 +1206,12 @@ function donoDaRegiao(mod, instancia) {
   };
 }
 
-/**
- * O cartão que cada MOD dá a cada pessoa, desenhado na lista do produto.
- *
- * # Por que existe uma superfície além da região
- *
- * A região é o lugar onde um MOD desenha, e continua sendo. Mas a lista de
- * pessoas é uma superfície onde uma informação de MOD tem lugar **natural**: o
- * retrato e o nome que alguém escolheu num MOD de perfis são sobre aquela
- * pessoa, e mostrá-los só dentro de um painel ao lado é mostrá-los longe de
- * onde significam alguma coisa.
- *
- * # O que impede isto de devolver a janela ao MOD
- *
- * **O renderer é o mesmo.** O que chega é a declaração da região — as mesmas
- * formas, `planejar`, `reconciliar`, `elemento`, `createElement` e
- * `textContent`. Nada de HTML de texto, nada de nó alcançável de fora, nada de
- * estilo escrito por terceiro. O MOD não escolhe onde o cartão entra na linha,
- * e nenhum evento de dentro dele volta para ele.
- *
- * **A gramática é menor.** Um cartão não aceita `botao`, `campo`, `escolha`,
- * `arquivo` nem `tela`: ver `FORMAS_DO_CARTAO` em `mods-regiao.js`. A linha do
- * roster já tem um botão do produto, e dividir foco e área de toque com um
- * terceiro é o tipo de coisa que ninguém consegue depurar depois.
- *
- * **O dono é a região.** O cartão nasce dentro da `RegiaoDeMod` daquela
- * instância, e sai com ela: é a mesma `soltar` que tira o som e os bytes.
- */
-
-/** Os cartões declarados por MOD, por `id`. */
-const cartoesDosMods = new Map();
-
-/**
- * Guarda o que um MOD declarou para a lista, e manda repintá-la.
- *
- * A montagem acontece **agora**, e não na hora de desenhar a linha: é aqui que
- * o teto é conferido e a recusa vira erro na mão de quem pediu. Um cartão
- * montado tarde recusaria calado, no meio de um retrato.
- */
-function darCartoesDoMod(mod, instancia, cartoes) {
-  // A região é criada aqui se ainda não existe: ela é a dona do cartão — dela
-  // vêm o descarte, a geração e o caminho até a mídia — e exigir que o MOD
-  // desenhe antes seria uma ordem que a API não conta a ninguém.
-  //
-  // Criá-la **não a mostra**: o palco só deixa de estar escondido quando algo
-  // é desenhado nela. Um MOD que só dá cartão não abre uma faixa vazia.
-  const regiao = regiaoDoMod(mod, instancia);
-  if (!regiao) throw new Error("a tela da sessão não está montada");
-  const recusados = regiao.declararCartoes(cartoes);
-  // **Dito a quem hospeda, além de devolvido ao MOD.** O número volta como o
-  // valor do pedido, e um MOD que não o confere não fica sabendo; o
-  // `seele.log` fica, com o id em campo próprio.
-  if (recusados > 0) {
-    registrarNoAnfitriao(
-      "recusa-de-mod",
-      `${mod.id}: ${recusados} nó(s) dos cartões não couberam nos limites do cartão`,
-      "aviso",
-      mod.id,
-    );
-  }
-  cartoesDosMods.set(mod.id, regiao);
-  if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
-  return recusados;
-}
-
-/**
- * Os MODs cujos cartões da API 3 (`SeeleUI.cartoes`) entram na lista, pela
- * escolha de apresentação de `pessoa.cartao`.
- *
- * **A regra, num lugar só.** A validação nativa de 20/09/2026: «usar
- * apresentação do SEELE» devolvia o nome e o diagnóstico nativos **e mantinha
- * o cartão do MOD logo abaixo**. A preferência alcançava a substituição —
- * `escolherSubstituicao` — e não alcançava `SeeleUI.cartoes`, que é o outro
- * caminho do mesmo provedor para o mesmo ponto. Preservar a compatibilidade da
- * API 3 é executar o caminho antigo, não ignorar o que a pessoa escolheu:
- *
- * - nativo explícito: nenhum cartão de MOD entra;
- * - um provedor escolhido: só os dele;
- * - automático: todos, na ordem em que declararam.
- *
- * `cartoesDaPessoa` desenha por ela, e «quem pinta cada lugar» a lê: duas
- * cópias de uma regra de disputa são duas respostas no dia em que uma mudar.
- */
-function modsDeCartaoQueValem() {
-  const escolha = typeof modPreferidoPara === "function"
-    ? modPreferidoPara("pessoa.cartao")
-    : "";
-  if (escolha === NATIVO) return [];
-  return [...cartoesDosMods.keys()].filter((quem) => !escolha || quem === escolha);
-}
-
-/**
- * Os cartões desta pessoa, na ordem em que os MODs os declararam.
- *
- * Devolve os **nós de verdade**, e não cópias: mover um nó já montado preserva
- * o que ele segura — um som recriado a cada retrato recomeçaria, e um `<img>`
- * recriado piscaria a cada quatro segundos.
- */
-function cartoesDaPessoa(id) {
-  const achados = [];
-  for (const quem of modsDeCartaoQueValem()) {
-    const cartao = cartoesDosMods.get(quem)?.cartaoDe(id);
-    if (cartao) achados.push(cartao);
-  }
-  return achados;
-}
-
 // ------------------------------------------ as superfícies e as contribuições
 
 /**
  * As superfícies de cada instância de MOD — ADR 0052.
  *
- * Por instância e não por `id`, pela mesma razão que a região: um MOD
+ * Por instância e não por `id`: um MOD
  * recarregado dentro da mesma sessão não herda as janelas da instância
  * anterior. Uma página aberta pela instância de antes, montada de novo pela de
  * agora, seria a instância nova recebendo eventos de uma janela que ela não
@@ -1405,8 +1238,8 @@ function superficiesDoMod(mod, instancia) {
   if (!conjunto) {
     conjunto = new SuperficiesDoMod(mod.id, donoDaRegiao(mod, instancia), palcosDeSuperficie());
     superficiesDosMods.set(instancia, conjunto);
-    // Registrado **na criação**, como a região: um conjunto criado e não
-    // registrado é um modal que a saída não fecha.
+    // Registrado **na criação**: um conjunto criado e não registrado é um
+    // modal que a saída não fecha.
     instancia.registrar(`${mod.id}: as superfícies`, () => {
       superficiesDosMods.delete(instancia);
       conjunto.soltarTudo();
@@ -1541,7 +1374,7 @@ function quadroEstatico(imagem) {
  *
  * @returns {Promise<{ papel: string, bytes: number, uri: string } | null>}
  */
-function imagemCitada(qual, pessoaId) {
+function imagemCitada(qual, pessoaId, opcoes = {}) {
   const ponto = qual === "capa" ? "pessoa.capa" : qual === "avatar" ? "pessoa.avatar" : "";
   if (!ponto || pessoaId === "" || pessoaId == null) return Promise.resolve(null);
   // A primeira consulta começa a carga, quando há contribuição; a segunda
@@ -1549,8 +1382,10 @@ function imagemCitada(qual, pessoaId) {
   const estado = imagemContribuida(ponto, pessoaId) ?? imagemContribuida(ponto, pessoaId);
   if (!estado) return Promise.resolve(null);
   const comoMidia = () => {
-    const parada = ponto === "pessoa.capa" && typeof matchMedia === "function"
-      && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // A capa parada: com o movimento reduzido, e onde quem cita pede (a lista;
+    // `capa.onde.lista`). O avatar não tem quadro parado.
+    const parada = ponto === "pessoa.capa" && (opcoes.parada === true || (typeof matchMedia === "function"
+      && matchMedia("(prefers-reduced-motion: reduce)").matches));
     const uri = parada ? estado.estatico : estado.uri;
     return uri ? { papel: "imagem", bytes: 0, uri } : null;
   };
@@ -1703,6 +1538,12 @@ function imagemContribuida(ponto, pessoaId) {
         }
         contribuicao.retrato = nova;
         contribuicao.retratoPendente = null;
+        // **E a quem cita** (`daPessoa`): o cartão que cita esta foto ou esta
+        // capa a troca também, sem remontar (o achado do PERFIS, 15/10). O
+        // redesenho de baixo só alcança o nativo.
+        globalThis.dispatchEvent?.(new CustomEvent("seele-mods-citacao", {
+          detail: { ponto, pessoa: String(pessoaId) },
+        }));
       },
       aoFalhar: () => {
         if (contribuicao.retratoPendente === nova) contribuicao.retratoPendente = null;
@@ -1721,14 +1562,25 @@ function imagemContribuida(ponto, pessoaId) {
  */
 function aplicarAContribuicao(contribuicao, chave, renderer, orcamento, mod, instancia) {
   try {
-    const recusados = renderer.aplicar(contribuicao.conteudo);
+    const daArvore = renderer.aplicar(contribuicao.conteudo);
+    // **O `classes` numa contribuição não pinta nada**: as classes são de
+    // superfície (D-api-8, a decisão (b)). Contado, e dito no evento, em vez de
+    // ignorado calado.
+    const classesFora = contribuicao.classes !== null && contribuicao.classes !== undefined;
+    if (classesFora) renderer.anotarRecusado?.("classes-fora-da-superficie");
+    const recusados = daArvore + (classesFora ? 1 : 0);
     if (recusados > 0) {
       // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
       // não coube onde ele a pôs. E dito a quem hospeda, que é quem investiga.
       //
       // **Com o perfil, o teto e o tamanho**, quando foi o teto: «8 recusados»
       // não diz a quem escreveu quanto a declaração tem nem quanto cabe ali.
-      const aviso = { nome: "contribuicao", ponto: contribuicao.ponto, destino: chave, recusados };
+      const aviso = {
+        nome: "contribuicao", ponto: contribuicao.ponto, destino: chave, recusados,
+        amostra: Array.isArray(renderer.amostraDeRecusados)
+          ? renderer.amostraDeRecusados.map((recusa) => ({ ...recusa }))
+          : [],
+      };
       if (renderer.foraDoTeto > 0) {
         Object.assign(aviso, {
           motivo: "orcamento",
@@ -1849,6 +1701,9 @@ function montarContribuicao(contribuicao, destino = "") {
   // De quem é este destino, quando ele é uma pessoa: é o que a citação
   // `daPessoa` cita (Step 4b). Num canal, nada.
   renderer.pessoaDoDestino = contribuicao.ponto.startsWith("pessoa.") ? chave : "";
+  // **Na lista, a capa citada fica parada** (`capa.onde.lista`; a auditoria do
+  // `v6.json`, B8): o cartão é onde ela aparece vinte vezes de uma vez.
+  renderer.citacaoParada = contribuicao.ponto === "pessoa.cartao";
   // **Os sons da contribuição moram num destino só.** Cada destino tem o seu
   // renderer, e cada renderer pedia os bytes, decodificava e segurava a sua
   // cópia de cada som — e tocava, todos juntos. A marca de quem tomou os sons
@@ -1922,21 +1777,17 @@ function conteudoDasContribuicoes(ponto, alvo = "") {
  * Em que pé está a mídia de quem pinta um ponto agora — só leitura.
  *
  * Para «quem pinta cada lugar», na gestão de MODs: soma o que cada renderer de
- * contribuição anotou (`midiasAnotadas`, em `mods-regiao.js`), o retrato de
- * avatar, que carrega por conta própria (`avatarContribuido`), e — em
- * `pessoa.cartao` — os cartões da API 3, que moram na região do MOD.
+ * contribuição anotou (`midiasAnotadas`, em `mods-regiao.js`) e o retrato de
+ * avatar, que carrega por conta própria (`avatarContribuido`).
  *
  * **Só de quem pinta.** Perder a disputa não desmonta nada: o retrato que
- * chegou antes de a preferência mudar fica no cache da contribuição, o cartão
- * de um MOD que já valeu fica montado para voltar sem piscar, e os cartões da
- * API 3 montam na declaração. Contada, essa mídia sairia na gestão ao lado de
- * «o SEELE desenha». (O som de quem perdeu não segue tocando: ele é pausado
- * por `calarOsSonsQueSairamDaTela`, pela mesma regra.) Por isso cada uma conta
- * pela regra que a tela usa para desenhá-la:
- *
- * - uma contribuição conta onde `aContribuicaoPinta` diz que ela desenha: uma
- *   substituição, no destino em que é escolhida; um acréscimo, sempre;
- * - um cartão da API 3 conta quando o MOD está em `modsDeCartaoQueValem`.
+ * chegou antes de a preferência mudar fica no cache da contribuição, e o
+ * cartão de um MOD que já valeu fica montado para voltar sem piscar. Contada,
+ * essa mídia sairia na gestão ao lado de «o SEELE desenha». (O som de quem
+ * perdeu não segue tocando: ele é pausado por `calarOsSonsQueSairamDaTela`,
+ * pela mesma regra.) Por isso uma contribuição conta pela regra que a tela usa
+ * para desenhá-la — onde `aContribuicaoPinta` diz que ela desenha: uma
+ * substituição, no destino em que é escolhida; um acréscimo, sempre.
  *
  * @param {string} ponto Um dos `PONTOS_DE_CONTRIBUICAO`.
  * @returns {{ carregando: number, pronta: number, recusada: number, motivos: string[] }}
@@ -1953,13 +1804,6 @@ function midiasDoPonto(ponto) {
     for (const [destino, montagem] of contribuicao.montadas ?? []) {
       if (!aContribuicaoPinta(contribuicao, destino)) continue;
       for (const anotada of montagem.renderer.midiasAnotadas()) contar(contribuicao.mod, anotada);
-    }
-  }
-  if (ponto === "pessoa.cartao") {
-    for (const mod of modsDeCartaoQueValem()) {
-      for (const anotada of cartoesDosMods.get(mod)?.midiasAnotadas() ?? []) {
-        if (anotada.cartao) contar(mod, anotada);
-      }
     }
   }
   return soma;
@@ -1996,7 +1840,7 @@ const vagasDosTetos = new WeakMap();
 /**
  * Soma uma anotação de mídia — a regra das duas contas da aba DIAGNÓSTICO.
  *
- * `midiasDoPonto` e `midiasDaRegiaoEDasPaginas` contam pela mesma: as três
+ * `midiasDoPonto` e `midiasDasPaginas` contam pela mesma: as três
  * situações, e até três motivos, sem repetir. **O motivo é cortado aqui, num
  * lugar só**, e por ponto de código, como `anotarMidia` corta os da região: o
  * do retrato de avatar vem do Rust ou de uma exceção, sem teto, e um corte por
@@ -2050,39 +1894,28 @@ function contarAMidia(soma, anotada, mod = "") {
 }
 
 /**
- * Em que pé está a mídia da região e das páginas de cada MOD — só leitura.
+ * Em que pé está a mídia das páginas de cada MOD — só leitura.
  *
  * A pendência 49, item 5 (m-2 da revisão ampla do Plano 1D). A aba DIAGNÓSTICO
- * contava só a mídia dos onze pontos de contribuição (`midiasDoPonto`), e a
- * faixa de cada MOD e as superfícies dele — páginas, painéis e diálogos —
- * anotavam e ninguém lia. É ali que o som costuma morar: o do MOD de
- * referência está na faixa, e a trilha da MESA numa página. Uma trilha
- * recusada chegava ao `seele.log` e ao evento do MOD, e não à aba.
+ * contava só a mídia dos onze pontos de contribuição (`midiasDoPonto`), e as
+ * superfícies de cada MOD — páginas, painéis e diálogos — anotavam e ninguém
+ * lia. É ali que o som costuma morar: a trilha da MESA está numa página. Uma
+ * trilha recusada chegava ao `seele.log` e ao evento do MOD, e não à aba. (A
+ * faixa da API 3, a região, somava aqui também, e saiu com ela.)
  *
- * **Sem filtro de cartão.** A região de um MOD também monta os cartões que ele
- * dá à lista de pessoas, e a mídia deles já aparece em `pessoa.cartao`: são
- * duas vistas da mesma mídia, e a aba não soma os dois blocos. Um filtro aqui
- * só valeria enquanto os cartões morassem na região.
+ * Pura: recebe o mapa em vez de lê-lo, e a bancada a mede sem página.
  *
- * Pura: recebe os dois mapas em vez de lê-los, e a bancada a mede sem página.
- *
- * @param {Map<object, RegiaoDeMod>} regioes `regioesDosMods`: por instância, com
- *   o id do MOD em `regiao.id`.
  * @param {Map<object, SuperficiesDoMod>} superficies `superficiesDosMods`: por
  *   instância, cada superfície em `porChave` com o seu `renderer`.
  * @returns {Map<string, { carregando: number, pronta: number, recusada: number, motivos: string[] }>}
  *   Por id de MOD, na ordem em que aparecem; `motivos` traz até três, sem repetir.
  */
-function midiasDaRegiaoEDasPaginas(regioes, superficies) {
+function midiasDasPaginas(superficies) {
   const porMod = new Map();
   const somaDe = (id) => {
     if (!porMod.has(id)) porMod.set(id, { carregando: 0, pronta: 0, recusada: 0, motivos: [] });
     return porMod.get(id);
   };
-  for (const regiao of regioes.values()) {
-    const soma = somaDe(regiao.id);
-    for (const anotada of regiao.midiasAnotadas()) contarAMidia(soma, anotada);
-  }
   for (const conjunto of superficies.values()) {
     const soma = somaDe(conjunto.id);
     for (const superficie of conjunto.porChave.values()) {
@@ -2110,15 +1943,12 @@ function midiasDaRegiaoEDasPaginas(regioes, superficies) {
  * página fechada cala o som dela em `SuperficieDeMod#fechar`.
  *
  * Ela alcança o que a revisão ampla do Plano 1D mediu tocando fora da tela
- * (I-1):
- * - a região de cada MOD, com os cartões da API 3 de quem está fora de
- *   `modsDeCartaoQueValem`: com «o SEELE desenha» o cartão, o som do cartão
- *   para, e o da região não;
- * - cada destino de cada contribuição, pela regra de `aContribuicaoPinta`: o
- *   de quem perdeu a disputa para, e o de quem saiu da sala — que continua em
- *   `montadas`, fora do documento — também. Assim o som de uma contribuição
- *   sem alvo, que mora só no destino que o tomou (`montarSom`), não fica
- *   soando quando esse destino deixa de desenhar (o N1 da Task 8).
+ * (I-1) — a região e os cartões da API 3 também, até saírem com ela: cada
+ * destino de cada contribuição, pela regra de `aContribuicaoPinta`. O de quem
+ * perdeu a disputa para, e o de quem saiu da sala — que continua em
+ * `montadas`, fora do documento — também. Assim o som de uma contribuição sem
+ * alvo, que mora só no destino que o tomou (`montarSom`), não fica soando
+ * quando esse destino deixa de desenhar (o N1 da Task 8).
  *
  * **E o som de uma contribuição muda de destino, na mesma varredura** (P49-8).
  * O destino que segurava os sons dela e saiu do documento os devolve, na
@@ -2135,10 +1965,6 @@ function midiasDaRegiaoEDasPaginas(regioes, superficies) {
  * estava.
  */
 function calarOsSonsQueSairamDaTela() {
-  const valem = new Set(modsDeCartaoQueValem());
-  for (const regiao of regioesDosMods.values()) {
-    regiao.calarSonsForaDaTela(valem.has(regiao.id));
-  }
   for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
     for (const [destino, montagem] of contribuicao.montadas ?? []) {
       montagem.renderer.calarSonsForaDaTela(aContribuicaoPinta(contribuicao, destino));
@@ -2210,39 +2036,6 @@ function ligarAcoesDeApresentacao(lista) {
   });
 }
 
-/** Tira a região de uma instância da tela, inteira — e o tema junto. */
-function limparARegiaoDoMod(id, instancia) {
-  const regiao = regioesDosMods.get(instancia);
-  if (regiao) {
-    regioesDosMods.delete(instancia);
-    regiao.soltar();
-  }
-  const palco = $("regioes-dos-mods");
-  // A faixa não existe vazia: uma régua de 1px em cima de nada é uma borda que
-  // aparece sem ter o que separar.
-  if (palco) palco.hidden = palco.childElementCount === 0;
-  // O tema é por `id` de propósito: ele é sobre o nome que reservou o token, e
-  // um MOD recarregado continua sendo o mesmo nome. As marcas também.
-  if (temaDosMods.delete(id)) escreverOTemaDaSessao();
-  // Os cartões saem com a região, porque nascem dentro dela: `soltar` já
-  // tirou as raízes da lista e soltou o que elas seguravam. O que resta aqui é
-  // esquecer o MOD e mandar a lista se redesenhar sem ele.
-  if (cartoesDosMods.delete(id) && typeof redesenharAsPessoas === "function") {
-    redesenharAsPessoas();
-  }
-  // **E as superfícies e as contribuições.** Elas não moram sob a raiz da
-  // região — uma página ocupa a área da sessão, um cartão substituído mora na
-  // linha do roster —, então `soltar` não as alcança. Sem estas duas linhas,
-  // um modal de um MOD descarregado continuaria aberto sobre a conversa, e a
-  // apresentação que ele substituiu não voltaria ao padrão.
-  const superficies = superficiesDosMods.get(instancia);
-  if (superficies) {
-    superficiesDosMods.delete(instancia);
-    superficies.soltarTudo();
-  }
-  contribuicoesDosMods.revogarDoMod(id);
-}
-
 // ------------------------------------------------------------ o tema de um MOD
 
 /**
@@ -2261,36 +2054,6 @@ const temaDosMods = new Map();
  * fecha, com `SeeleUI.tema(null, { previa: true })`, ou com a sessão.
  */
 const previasDoTema = new Map();
-
-/**
- * Qual instância de MOD é dona do tema de cada id.
- *
- * **O tema não tinha dono, e sobrevivia à sessão.** A única limpeza dele morava
- * em `limparARegiaoDoMod`, registrada só quando o MOD cria uma região. O ESTILO
- * 3.1.0 é de API 4 e não cria região quando há superfícies: o tema dele ficava
- * em `temaDosMods` e escrito em `#tela-sessao` — o mesmo elemento em toda
- * sessão — depois de sair. Entrar no servidor seguinte, sem MOD nenhum, mostrava
- * as cores do anterior. Relato de 05/10/2026: um Mac entrou no servidor de um
- * iPhone com a personalização de outro servidor. A personalização é da sessão
- * e sai com ela (`specs/07-estetica.md`); isto não pode acontecer.
- */
-const donoDoTema = new Map();
-
-/**
- * Registra, uma vez por instância, a limpeza do tema que ela pediu.
- *
- * Só apaga se o tema ainda for desta instância: uma sessão velha que termina de
- * encerrar depois de a nova começar não pode apagar o tema de quem chegou.
- */
-function darDonoAoTema(id, instancia) {
-  if (donoDoTema.get(id) === instancia) return;
-  donoDoTema.set(id, instancia);
-  instancia.registrar(`${id}: o tema`, () => {
-    if (donoDoTema.get(id) !== instancia) return;
-    donoDoTema.delete(id);
-    if (temaDosMods.delete(id)) escreverOTemaDaSessao();
-  });
-}
 
 /** Os quatro que a API conhece, e o nome do token que cada um redefine. */
 const TEMA_DA_API = Object.freeze({
@@ -2446,6 +2209,19 @@ function porPontoDeCodigo(a, b) {
  * nome e os campos para o MOD da 6 (`recusa`, `camposDaRecusa`), e a frase diz
  * a chave e a região.
  */
+/**
+ * Uma recusa do tema com o nome e a chave, os do vetor
+ * (`crates/seele-proto/tests/vetores/chaves-do-tema.json`) e os que o
+ * servidor dá: `chave-desconhecida` ou `valor-invalido`. A frase fica para o
+ * registro; o MOD da 6 recebe o nome (a auditoria do `v6.json`, B5).
+ */
+function recusaDoTema(nome, frase, chave) {
+  const erro = new Error(frase);
+  erro.recusa = nome;
+  erro.camposDaRecusa = { chave };
+  return erro;
+}
+
 function recusaDasRegioes(valor) {
   const recusa = (nome, frase, chave, regiao) => {
     const erro = new Error(frase);
@@ -2560,7 +2336,7 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
     )
     : null;
   // Só quando alguém registrou o ponto: sem registro nenhum, o caminho é o de
-  // sempre — a posse de token —, e um MOD de API 3 continua aplicando tema.
+  // sempre — a posse de token.
   // **A prévia não passa por aqui** (17g): ela é de quem edita, nesta
   // máquina, e não disputa a aparência com ninguém.
   if (!previa && (escolha?.escolhida || escolha?.nativa)) {
@@ -2603,7 +2379,7 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
     if (daTabela(MEDIDAS_DA_API, nome)) {
       if (typeof valor !== "string" || !daTabela(MEDIDAS_DA_API[nome], valor)) {
         const conhecidas = Object.keys(MEDIDAS_DA_API[nome]).join(", ");
-        throw new Error(`«${nome}» só aceita ${conhecidas}, e veio «${valor}»`);
+        throw recusaDoTema("valor-invalido", `«${nome}» só aceita ${conhecidas}, e veio «${valor}»`, nome);
       }
       // O modo concorda com o fundo, na vez dele: um fundo errado já foi
       // recusado, porque vem antes na ordem alfabética.
@@ -2611,9 +2387,11 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
         const fundo = Object.hasOwn(valores, "fundo") ? valores.fundo : undefined;
         const pede = modoDoFundo(fundo);
         if (valor !== pede) {
-          throw new Error(
+          throw recusaDoTema(
+            "valor-invalido",
             `«modo» tem de ser «${pede}» para ${fundo === undefined ? "o fundo do produto" : `o fundo ${fundo}`}, `
-            + `e veio «${valor}»`,
+              + `e veio «${valor}»`,
+            "modo",
           );
         }
       }
@@ -2626,8 +2404,10 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
     if (daTabela(NUMEROS_DA_API, nome)) {
       const regra = NUMEROS_DA_API[nome];
       if (!Number.isInteger(valor) || valor < regra.minimo || valor > regra.maximo) {
-        throw new Error(
+        throw recusaDoTema(
+          "valor-invalido",
           `«${nome}» é um inteiro de ${regra.minimo} a ${regra.maximo}, e veio «${valor}»`,
+          nome,
         );
       }
       pedido.set(nome, valor);
@@ -2638,16 +2418,16 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
     // que `"false"` quer dizer.
     if (daTabela(BANDEIRAS_DA_API, nome)) {
       if (typeof valor !== "boolean") {
-        throw new Error(`«${nome}» é sim ou não, e veio «${valor}»`);
+        throw recusaDoTema("valor-invalido", `«${nome}» é sim ou não, e veio «${valor}»`, nome);
       }
       pedido.set(nome, valor);
       continue;
     }
     if (!daTabela(TEMA_DA_API, nome)) {
-      throw new Error(`a API de tema não conhece «${nome}»`);
+      throw recusaDoTema("chave-desconhecida", `a API de tema não conhece «${nome}»`, nome);
     }
     if (typeof valor !== "string" || !COR_DO_TEMA.test(valor)) {
-      throw new Error(`«${nome}» precisa ser uma cor #rrggbb, e veio «${valor}»`);
+      throw recusaDoTema("valor-invalido", `«${nome}» precisa ser uma cor #rrggbb, e veio «${valor}»`, nome);
     }
     for (const [outro, seus] of previa ? [] : temaDosMods) {
       if (outro !== id && nome in seus) {
@@ -3002,11 +2782,13 @@ function tonsDoTema(emVigor, daRaiz) {
   }
   // **O segundo apagado do produto** (`--seele-osso-apagado`), que nenhum tema
   // escreve: no piso dos apagados, 3:1 sobre o fundo e o painel.
+  // Recusado, o par leva o nome que o `v6.json` dá ao derivado
+  // (`apagadoSecundario`, em `tema.derivados-pelo-produto.nomes`).
   const apagado = raiz("--seele-osso-apagado");
   if (superficies && medida(apagado)) {
     const segundo = corDeEstadoPara(apagado, c.fundo, c.painel, 3);
     if (segundo) tons["--seele-osso-apagado"] = segundo;
-    else pares.push({ frente: "apagado-secundario", fundo: "painel", razao: Number(contrasteEntre(apagado, c.painel).toFixed(2)), piso: 3 });
+    else pares.push({ frente: "apagadoSecundario", fundo: "painel", razao: Number(contrasteEntre(apagado, c.painel).toFixed(2)), piso: 3 });
   }
   return { tons, pares };
 }
@@ -3288,19 +3070,14 @@ const CAPACIDADES_POR_API = Object.freeze({
     "superficies", "contribuicoes", "estilos", "classes", "volume",
     "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor",
   ]),
-  5: Object.freeze(["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes", "volume"]),
-  4: Object.freeze([
-    "regiao", "tema", "cartoes", "arquivo",
-    "superficies", "contribuicoes", "estilos", "classes",
-  ]),
-  3: Object.freeze(["regiao", "tema", "cartoes", "arquivo"]),
+  // As 3, 4 e 5 saíram no corte (tarefa 13 do plano da F3), como os braços
+  // delas em `capacidades_da_api`: este app não as executa, e quem as roda é a
+  // linha do Servidor 0.15. Um pacote delas é recusado ao carregar.
 });
 
 /** Que capacidade cada mensagem exige. Ausente quer dizer «toda versão». */
 const CAPACIDADE_DA_MENSAGEM = Object.freeze({
-  regiao: "regiao",
   tema: "tema",
-  cartoes: "cartoes",
   pedaco: "arquivo",
   "enviar-imagem": "volume",
   "soltar-arquivo": "arquivo",
@@ -3322,30 +3099,19 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
 });
 
 /**
- * As mensagens que uma capacidade **substituiu**: quem a tem não as alcança.
- *
- * O `snapshot` inteiro é da API 5 para baixo; a 6 lê o retrato projetado
- * (rascunho da API 6, §6). O prelúdio da 6 não monta `SeeleMods.snapshot`, e
- * isto é a fronteira, pela razão de sempre: `seele.postar` continua lá, e um
- * pacote da 6 que emitisse `snapshot` direto leria o `Snapshot` inteiro.
- */
-const SUBSTITUIDA_PELA_CAPACIDADE = Object.freeze({
-  snapshot: "retrato",
-});
-
-/**
  * Este pacote pode pedir isto?
  *
  * `api` vem de `mods_instalados`, que o lê do manifesto do pacote cujo hash
- * esta janela conferiu. Um número que não está na tabela não tem capacidade
- * nenhuma — é o caso de um manifesto que não pôde ser lido.
+ * esta janela conferiu. **Um número que não está na tabela não pede nada** —
+ * nem o que não exige capacidade. É o caso de um manifesto que não pôde ser
+ * lido, e, desde o corte da API 6 (tarefa 13 do plano da F3), o das APIs 3, 4
+ * e 5: medido, um pacote da 5 que emitisse `snapshot` direto lia o `Snapshot`
+ * inteiro, porque o `snapshot` não exige capacidade e a tabela vazia não o
+ * barrava. O manifesto dele já é recusado ao carregar; esta é a segunda porta.
  */
 function podePedir(mod, tipo) {
-  const tem = CAPACIDADES_POR_API[Number(mod?.api)] ?? [];
-  // Antes da exigida: o `snapshot` não exige capacidade nenhuma, e é por isso
-  // mesmo que a substituição tem de ser perguntada primeiro.
-  const substituta = SUBSTITUIDA_PELA_CAPACIDADE[tipo];
-  if (substituta && tem.includes(substituta)) return false;
+  const tem = CAPACIDADES_POR_API[Number(mod?.api)];
+  if (!tem) return false;
   const exigida = CAPACIDADE_DA_MENSAGEM[tipo];
   if (!exigida) return true;
   return tem.includes(exigida);
@@ -3578,6 +3344,16 @@ function entregarOAvisoDoMod(aviso) {
 /** O retrato da última vez que os MODs souberam da tela, e de que sessão. */
 let retratoDosEventos = null;
 let geracaoDosEventos = 0;
+
+/**
+ * **Alguém na sessão**, pelo retrato que os MODs leem (D-api-9): a citação
+ * `daPessoa` com `pessoa` só cita quem o MOD vê presente. O retrato é o desta
+ * sessão (`avisarOsModsDaTela` o guarda a cada desenho); de outra, ninguém.
+ */
+function pessoaEstaNaSessao(pessoaId) {
+  if (geracaoDosEventos !== geracaoDaSessao || !retratoDosEventos) return false;
+  return retratoDosEventos.pessoas.some((p) => String(p.id) === String(pessoaId));
+}
 let ritmoDaFala = null;
 
 /** Cada MOD de pé cuja API tem os eventos da tela, com o dono dele. */
@@ -3599,6 +3375,9 @@ function modsQueOuvemATela() {
  * retrato quando sobe.
  */
 function avisarOsModsDaTela(snapshot) {
+  // O tamanho das regiões, num quadro, depois do desenho: um MOD que acabou de
+  // contribuir numa região sabe quanto cabe nela (`dizerOTamanhoDasRegioes`).
+  agendarOTamanhoDasRegioes();
   const agora = projetarORetrato(snapshot, cascaDoRetrato());
   const antes = geracaoDosEventos === geracaoDaSessao ? retratoDosEventos : null;
   retratoDosEventos = agora;
@@ -3635,6 +3414,80 @@ function avisarOsModsDaTela(snapshot) {
 }
 
 /**
+ * **O tamanho de cada região, dito a quem contribui nela**
+ * (`eventos-da-tela.lugar`: «a região ou camada do MOD mudou de tamanho»; a
+ * auditoria do `v6.json`, B9). Só o `chamada.palco` mandava `lugar` com
+ * `regiao` (`dizerOTamanhoDoPalco`, em `tela-chamada.js`), e um MOD na barra
+ * de baixo não sabia quanto cabia nela.
+ *
+ * As regiões de um lugar só: o contêiner onde a casca monta o ponto da região
+ * (`CONTEINERES_DOS_PONTOS`, em `camada-mods.js`, aponta para os mesmos). A
+ * `conversa.mensagem` fica de fora: ela se repete por mensagem, e não tem um
+ * tamanho.
+ *
+ * Ao chegar e a cada mudança, como o palco: o que já foi dito, por MOD e
+ * região, não se repete.
+ */
+const CONTEINERES_DAS_REGIOES = Object.freeze({
+  "servidor.navegacao": "lista-mods-navegacao",
+  "canal.cabecalho": "canal-cabecalho-mods",
+  "compositor": "compositor-mods",
+  "pessoas.lista": "roster-mods",
+  "status.barra": "telemetria-mods",
+  "operador.barra": "operador-mods",
+  "redes": "trilha-mods",
+});
+const tamanhoDaRegiaoDito = new Map();
+
+function dizerOTamanhoDasRegioes() {
+  if (typeof contribuicoesDosMods !== "object") return;
+  const casca = cascaDoRetrato();
+  const vistos = new Set();
+  for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
+    const regiao = contribuicao.ponto;
+    const id = CONTEINERES_DAS_REGIOES[regiao];
+    const instancia = contribuicao.instancia;
+    if (!id || !instancia?.admite?.(geracaoDaSessao)) continue;
+    if (!(CAPACIDADES_POR_API[Number(instancia.api)] ?? []).includes("eventos-da-tela")) continue;
+    const chave = `${contribuicao.mod}|${regiao}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    const caixa = $(id);
+    const largura = Math.round(caixa?.clientWidth ?? 0);
+    const altura = Math.round(caixa?.clientHeight ?? 0);
+    const medida = `${largura}×${altura}`;
+    if (tamanhoDaRegiaoDito.get(chave) === medida) continue;
+    tamanhoDaRegiaoDito.set(chave, medida);
+    donoDaRegiao({ id: contribuicao.mod, hash: instancia.hash }, instancia).falar({
+      nome: "lugar", onde: casca.onde, regioes: casca.regioes, largura, altura, regiao,
+    });
+  }
+  // Quem saiu da região esquece o que foi dito: voltando, sabe de novo.
+  for (const chave of [...tamanhoDaRegiaoDito.keys()]) {
+    if (!vistos.has(chave)) tamanhoDaRegiaoDito.delete(chave);
+  }
+}
+
+let tamanhoDasRegioesAgendado = false;
+function agendarOTamanhoDasRegioes() {
+  if (tamanhoDasRegioesAgendado || typeof requestAnimationFrame !== "function") return;
+  tamanhoDasRegioesAgendado = true;
+  requestAnimationFrame(() => {
+    tamanhoDasRegioesAgendado = false;
+    dizerOTamanhoDasRegioes();
+  });
+}
+
+// O tamanho muda sem retrato novo: a janela, a coluna, o conteúdo da região.
+if (typeof ResizeObserver === "function" && typeof document === "object") {
+  const observador = new ResizeObserver(() => dizerOTamanhoDasRegioes());
+  for (const id of Object.values(CONTEINERES_DAS_REGIOES)) {
+    const caixa = document.getElementById(id);
+    if (caixa) observador.observe(caixa);
+  }
+}
+
+/**
  * **A recusa como o MOD a recebe**, ou `null` até a API 5.
  *
  * Na API 6, um nome de lista fechada, com os campos da recusa (rascunho da API
@@ -3652,6 +3505,108 @@ function avisarOsModsDaTela(snapshot) {
  *   superfícies leva `tipoPedido` e `tipos`);
  * - o resto é `falhou`, e o motivo vai ao registro, que quem chama já escreve.
  */
+/**
+ * **A lista fechada das recusas que um MOD da 6 recebe da janela** (o
+ * `recusas` do `api/v6.json`, K1-m3; a auditoria do `v6.json`, B2).
+ *
+ * Conferida na fronteira, o `responder` de `atenderOMod`, por onde passa toda
+ * resposta ao MOD. Um nome fora dela chega como `falhou`, sem os campos que
+ * vieram junto, e o que veio vai ao `seele.log`. Antes, chegava como veio: o
+ * prazo do enlace e o tipo que a API não conhece eram frases inteiras em
+ * `e.erro`, e o MOD não tinha como reagir a uma frase. Um nome novo que alguém
+ * esqueça de pôr aqui degrada para `falhou`, e é dito, em vez de virar uma
+ * promessa que o `v6.json` não faz.
+ */
+const RECUSAS_AO_MOD = Object.freeze([
+  // O genérico, e o que é da ponte: o prelúdio recusa os três primeiros cedo,
+  // e a janela de novo.
+  "falhou",
+  "too-many-requests",
+  "fila-cheia",
+  "mensagem-grande",
+  "tipo-desconhecido",
+  "sessao-encerrada",
+  // O volume e os arquivos (`recusas.volume`).
+  "sem-espera",
+  "tipo-recusado",
+  "formato-desconhecido",
+  "arquivo-grande-demais",
+  "nao-gravei",
+  "incompleto",
+  "banco-indisponivel",
+  "arquivo-nao-esta-de-pe",
+  "arquivo-de-outro-mod",
+  "arquivo-ilegivel",
+  "caminho-invalido",
+  "papel-nao-serve",
+  "arquivos-demais-de-pe",
+  // As superfícies e a prévia do tema (`recusas.superficies`,
+  // `recusas.tema-pela-janela`).
+  "chave-desconhecida",
+  "valor-invalido",
+  "regiao-desconhecida",
+  "forma-desconhecida",
+  "nos-recusados",
+  "orcamento",
+  "superficie-desconhecida",
+  "sem-previa",
+  "contraste",
+  "teto-de-folhas",
+  "teto-de-superficies",
+  // As contribuições (`recusas.contribuicoes`, `RECUSAS_DAS_CONTRIBUICOES`).
+  "ponto-desconhecido",
+  "modo-recusado",
+  "sem-alvo",
+  "conteudo-invalido",
+  "teto-de-contribuicoes",
+  "teto-de-alvos",
+  "contribuicao-ja-existe",
+  "contribuicao-de-outro-mod",
+]);
+
+/**
+ * Um `Error` da janela que chega ao MOD da 6 pelo nome: o `recusaParaOMod` lê o
+ * `recusa` e os `camposDaRecusa`. A frase fica para o registro. Um nome fora da
+ * lista fechada é defeito de quem escreveu, e lança na hora.
+ */
+/**
+ * **A recusa de uma montagem que não coube inteira** (`nos-recusados`;
+ * D-api-8): quantos, e a amostra do que foi — o motivo, e a `chave`, a forma,
+ * a propriedade, o tipo ou a classe —, com a frase que vai ao `seele.log`.
+ */
+function recusaDosNos(superficie, recusados, frase) {
+  const amostra = Array.isArray(superficie?.renderer?.amostraDeRecusados)
+    ? superficie.renderer.amostraDeRecusados.map((recusa) => ({ ...recusa }))
+    : [];
+  return recusaAoMod("nos-recusados", `${recusados} ${frase}`, { recusados, amostra });
+}
+
+function recusaAoMod(nome, frase = nome, campos = undefined) {
+  if (!RECUSAS_AO_MOD.includes(nome)) {
+    throw new TypeError(`«${nome}» não está na lista fechada das recusas ao MOD`);
+  }
+  const erro = new Error(frase);
+  erro.recusa = nome;
+  if (campos) erro.camposDaRecusa = campos;
+  return erro;
+}
+
+/**
+ * A recusa que vai ao MOD da 6, conferida contra a lista fechada: fora dela, é
+ * `falhou`, e o que veio vai ao registro.
+ */
+function recusaDaListaFechada(mod, tipo, carga) {
+  const nome = String(carga?.erro ?? "");
+  if (RECUSAS_AO_MOD.includes(nome)) return carga;
+  registrarNoAnfitriao(
+    "atender-mod",
+    `${mod.id}: a recusa de «${tipo}» não está na lista fechada, e o MOD a recebe como falhou — ${nome}`,
+    "aviso",
+    mod.id,
+  );
+  return { erro: "falhou" };
+}
+
 function recusaParaOMod(mod, falha) {
   if (Number(mod?.api) < 6) return null;
   const SUFIXOS = { "tipo-recusado": "detectado", "papel-nao-serve": "papel" };
@@ -3746,6 +3701,9 @@ async function atenderOMod(mod, instancia, m) {
   const meu = () => minhaInstancia() && instancia.admite(geracaoDaSessao);
 
   const responder = (ok, carga) => {
+    // **Só um nome da lista fechada chega ao MOD da 6** (a auditoria do
+    // `v6.json`, B2): ver `RECUSAS_AO_MOD`.
+    if (!ok && Number(mod?.api) >= 6) carga = recusaDaListaFechada(mod, m.tipo, carga);
     // Perguntada **de novo** aqui, e não herdada de cima: entre a conferência
     // de entrada e esta linha há `await`s, e a sessão pode ter acabado no meio
     // deles. Mandar o **valor** para uma instância encerrada é falar com quem
@@ -3813,7 +3771,8 @@ async function atenderOMod(mod, instancia, m) {
       "aviso",
       mod.id,
     );
-    responder(false, {
+    // Na 6, pelo nome, como o tipo de superfície que não é da API do pacote.
+    responder(false, Number(mod?.api) >= 6 ? { erro: "tipo-desconhecido", tipoPedido: m.tipo } : {
       erro: `«${m.tipo}» não existe na API ${mod?.api ?? "?"}, que é a que este `
         + "pacote declara",
     });
@@ -3825,39 +3784,22 @@ async function atenderOMod(mod, instancia, m) {
         responder(true, { valor: await pedirAoServidor(mod.id, m.canal, m.valor) });
         break;
       case "retrato": {
-        // O mesmo cuidado do `snapshot`, logo abaixo: depois do `await`, quem
-        // responde é `responder`, que recusa se a sessão já acabou.
+        // Depois do `await`: a sessão pode ter acabado enquanto o estado vinha,
+        // e entregá-lo daria ao MOD o de uma sessão que já não é a dele. Quem
+        // responde é `responder`, que recusa nesse caso — **e recusar é
+        // obrigatório**: um `return` calado aqui prendia o MOD para sempre (era
+        // o caso do `snapshot`, que saiu com as APIs 3 a 5).
         const valor = projetarORetrato(await invoke("snapshot"), cascaDoRetrato());
         responder(true, { valor });
         break;
       }
-      case "snapshot": {
-        const valor = await invoke("snapshot");
-        // Depois do `await`: a sessão pode ter acabado enquanto o retrato
-        // vinha, e entregá-lo daria ao MOD o estado de uma sessão que já não é
-        // a dele. `responder` recusa nesse caso — **e recusa é obrigatório**:
-        // era este `return` calado que prendia o MOD para sempre.
-        responder(true, { valor });
-        break;
-      }
-      case "regiao":
-        desenharARegiaoDoMod(mod, instancia, m.conteudo);
-        responder(true, { valor: null });
-        break;
       case "tema":
-        // **Na 6, a janela só faz prévia** (rascunho §9, B4; tarefa 17g): o
-        // tema publicado é o que a metade de servidor declara (`mundo.tema`).
-        if (Number(mod.api) >= 6) {
-          aplicarAPreviaDoTema(mod, instancia, m);
-          responder(true, { valor: null });
-          break;
-        }
-        aplicarOTemaDoMod(mod.id, m.valores);
-        darDonoAoTema(mod.id, instancia);
+        // **A janela só faz prévia** (rascunho §9, B4; tarefa 17g): o tema
+        // publicado é o que a metade de servidor declara (`mundo.tema`). O tema
+        // que a janela aplicava para um MOD das APIs 3 a 5 saiu com o corte:
+        // só um pacote da 6 chega aqui (`podePedir`).
+        aplicarAPreviaDoTema(mod, instancia, m);
         responder(true, { valor: null });
-        break;
-      case "cartoes":
-        responder(true, { valor: darCartoesDoMod(mod, instancia, m.cartoes) });
         break;
       case "enviar-imagem":
         await invoke("enviar_imagem_mod", { geracao: geracaoDaSessao, id: mod.id, arquivo: m.arquivo, token: m.token });
@@ -3888,13 +3830,14 @@ async function atenderOMod(mod, instancia, m) {
         });
         break;
       case "superficie-montar": {
-        const recusados = superficieDoMod(mod, instancia, m.superficie).montar(m.arvore);
+        const superficie = superficieDoMod(mod, instancia, m.superficie);
+        const recusados = superficie.montar(m.arvore);
         // **Recusar em silêncio é o defeito que este repositório mais paga.**
         // A mesma regra da região, e pelo mesmo motivo: um MOD cuja árvore não
-        // coube precisa saber disso onde ele a escreveu.
-        if (recusados > 0) {
-          throw new Error(`${recusados} nó(s) não couberam nos limites da superfície`);
-        }
+        // coube precisa saber disso onde ele a escreveu. **E saber o quê**
+        // (`nos-recusados`; D-api-8): a conta e a amostra, e não um `falhou`
+        // com o porquê só no `seele.log`. O que coube fica montado.
+        if (recusados > 0) throw recusaDosNos(superficie, recusados, "nó(s) não couberam nos limites da superfície");
         responder(true, { valor: null });
         break;
       }
@@ -3903,10 +3846,9 @@ async function atenderOMod(mod, instancia, m) {
         // 5c). A chave que não existe e a parte que passa do orçamento são
         // recusadas pelo nome, antes de mexer na tela; o que não coube por
         // forma é dito como no `montar`.
-        const recusados = superficieDoMod(mod, instancia, m.superficie).atualizar(m.chave, m.arvore);
-        if (recusados > 0) {
-          throw new Error(`${recusados} nó(s) não couberam nos limites da superfície`);
-        }
+        const superficie = superficieDoMod(mod, instancia, m.superficie);
+        const recusados = superficie.atualizar(m.chave, m.arvore);
+        if (recusados > 0) throw recusaDosNos(superficie, recusados, "nó(s) não couberam nos limites da superfície");
         responder(true, { valor: null });
         break;
       }
@@ -3918,11 +3860,9 @@ async function atenderOMod(mod, instancia, m) {
         responder(true, { valor: null });
         break;
       case "superficie-classes": {
-        const recusados = superficieDoMod(mod, instancia, m.superficie)
-          .declararClasses(m.classes);
-        if (recusados > 0) {
-          throw new Error(`${recusados} propriedade(s) de estilo não foram reconhecidas`);
-        }
+        const superficie = superficieDoMod(mod, instancia, m.superficie);
+        const recusados = superficie.declararClasses(m.classes);
+        if (recusados > 0) throw recusaDosNos(superficie, recusados, "propriedade(s) de estilo não foram reconhecidas");
         responder(true, { valor: null });
         break;
       }
@@ -3988,7 +3928,9 @@ async function atenderOMod(mod, instancia, m) {
           "aviso",
           mod.id,
         );
-        responder(false, { erro: `a API de MODs não conhece «${m.tipo}»` });
+        responder(false, Number(mod?.api) >= 6
+          ? { erro: "tipo-desconhecido", tipoPedido: m.tipo }
+          : { erro: `a API de MODs não conhece «${m.tipo}»` });
     }
   } catch (falha) {
     // **O registro leva o motivo; a frase de tela fica com o MOD.**
@@ -4258,10 +4200,9 @@ function encerrarOAmbienteDosMods() {
   // **O tema sai com a sessão, agora.** Ele é desta sessão e de mais nenhuma:
   // sai antes de qualquer espera, e não quando o executor de cada MOD confirmar
   // que parou — até lá, a cor do servidor que acabou pintava o que viesse
-  // depois. A limpeza registrada por `darDonoAoTema` continua lá para o caso de
-  // um MOD sair sozinho no meio da sessão.
+  // depois. (Relato de 05/10/2026: um Mac entrou no servidor de um iPhone com
+  // a personalização de outro servidor.)
   temaDosMods.clear();
-  donoDoTema.clear();
   // E o do servidor, que o próximo retrato de outra sessão traz de novo, e as
   // prévias, que são desta sessão.
   temaDoServidorEmVigor = null;

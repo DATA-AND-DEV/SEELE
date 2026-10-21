@@ -256,6 +256,59 @@ const TEMA_CLARO = {
           `${lugar.fundo}): a cor foi resolvida acima de #tela-sessao, onde o tema não chega`,
       );
     }
+    // **A sala aberta** (`tema.conferencia`, «contraste em todos os pares que o
+    // produto desenha»; a auditoria do v6, tabela 8, 8:78): a ocupação e os
+    // nomes de quem está dentro saíam no `--seele-osso-apagado`, que não muda
+    // com o tema, sobre o preenchimento da sala, derivado do acento — 2,85:1
+    // sob o papel, que passa nos pares. Achado por uma varredura do contraste
+    // computado de todo texto à vista; decidido pela orquestradora (D-api-10):
+    // um token que acompanha o tema e alcança o preenchimento. Sob os três
+    // temas que passam nos pares, e sem tema, os dois acima de 3:1 (o piso do
+    // apagado) sobre o fundo de verdade, e com a cor mudando com o tema.
+    const TEMAS_DA_SALA = {
+      claro: TEMA_CLARO,
+      papel: { fundo: "#12100e", painel: "#1b1815", texto: "#f2ece0", apagado: "#a2988a", acento: "#c9a227", borda: "#4a423a" },
+      profundo: { fundo: "#03060b", painel: "#081019", texto: "#dbe7f2", apagado: "#7e94ab", acento: "#38bdf8", borda: "#1f3347" },
+    };
+    const daSala = await page.evaluate(async (temas) => {
+      const rgba = (c) => { const n = (c.match(/[\d.]+/g) || []).map(Number); return c.startsWith("color(srgb") ? n.map((v, i) => (i < 3 ? v * 255 : v)) : n; };
+      const lum = ([a, b, c]) => [a, b, c].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; })
+        .reduce((t, v, i) => t + v * [0.2126, 0.7152, 0.0722][i], 0);
+      const fundoDe = (e) => { for (let n = e; n; n = n.parentElement) { const c = rgba(getComputedStyle(n).backgroundColor); if (c.length >= 3 && (c.length < 4 || c[3] >= 0.99)) return c; } return [0, 0, 0]; };
+      const medir = () => {
+        const sala = document.querySelector("#lista-voice_rooms .voice_room.aberto");
+        if (!sala) return null;
+        return [".voice_room-ocupacao", ".voice_room-pessoa-nome"].map((seletor) => {
+          const el = sala.querySelector(seletor);
+          if (!el) return { seletor, razao: null };
+          const cor = rgba(getComputedStyle(el).color);
+          const [x, y] = [lum(cor), lum(fundoDe(el))].sort((m, n) => n - m);
+          return { seletor, razao: Number(((x + 0.05) / (y + 0.05)).toFixed(2)), cor: getComputedStyle(el).color };
+        });
+      };
+      const medidas = { sem: medir() };
+      for (const [nome, tema] of Object.entries(temas)) {
+        temaDosMods.set("sala", tema);
+        escreverOTemaDaSessao();
+        await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+        medidas[nome] = { pares: paresDoTemaAbaixoDoPiso(), lugares: medir() };
+        temaDosMods.delete("sala");
+        escreverOTemaDaSessao();
+      }
+      return medidas;
+    }, TEMAS_DA_SALA);
+    assert.ok(daSala.sem && daSala.sem.every((m) => m.razao !== null), `a sala aberta não está desenhada: ${JSON.stringify(daSala)}`);
+    for (const m of daSala.sem) assert.ok(m.razao >= 3, `sem tema, ${m.seletor} da sala aberta sai a ${m.razao}:1`);
+    for (const nome of Object.keys(TEMAS_DA_SALA)) {
+      const { pares, lugares } = daSala[nome];
+      assert.deepEqual(pares, [], `o tema ${nome} não passa nos pares, e o caso não mede o que diz: ${JSON.stringify(pares)}`);
+      for (const m of lugares) {
+        assert.ok(m.razao >= 3, `sob o tema ${nome}, ${m.seletor} da sala aberta sai a ${m.razao}:1 (${m.cor}), abaixo do piso de 3:1`);
+      }
+    }
+    assert.notEqual(daSala.papel.lugares[1].cor, daSala.profundo.lugares[1].cor,
+      `os nomes da sala aberta têm a mesma cor sob o papel e o profundo (${daSala.papel.lugares[1].cor}): não acompanham o tema`);
+
     console.log(
       "tema claro legível:",
       medido.lugares.map((l) => `${l.seletor} ${l.razao}:1`).join(" · "),

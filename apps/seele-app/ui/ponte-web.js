@@ -140,6 +140,10 @@ const RECUSAS_NOMEADAS = new Map([
   ["receber_ligacoes", RECUSA_SALA],
   ["recusar", RECUSA_SALA],
   ["remover_versao", RECUSA_VERSOES],
+  // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
+  // tarefa 13 do plano da F3, Step 5b): mexem no banco de um servidor guardado
+  // desta máquina, e o navegador não guarda servidor.
+  ["resolver_mod_de_api_antiga", RECUSA_HOSPEDAR],
   ["revogar_admissao", RECUSA_PORTARIA],
   ["servidor_hospedado", RECUSA_HOSPEDAR],
   ["servidores_guardados", RECUSA_HOSPEDAR]
@@ -376,6 +380,24 @@ const AINDA_A_FAZER = new Map([
 ]);
 
 /**
+ * **As capacidades que esta plataforma tem** (`compatibilidade.por-plataforma`;
+ * a auditoria do `v6.json`, B10): o executor do navegador omite, como já omite
+ * por versão, a capacidade cujos comandos a ponte não faz — recusados ou ainda
+ * por fazer. Um MOD que subisse aqui via o `SeeleUI.enviar` (a capacidade
+ * `volume`) e o seletor (`arquivo`), e só recebia recusa.
+ */
+const COMANDOS_DE_CADA_CAPACIDADE = Object.freeze({
+  volume: Object.freeze(["enviar_imagem_mod", "ler_imagem_mod"]),
+  arquivo: Object.freeze(["escolher_arquivo", "pedaco_do_escolhido"]),
+});
+
+function capacidadesDaPlataforma(capacidades) {
+  const faz = (comando) => !AINDA_A_FAZER.has(comando) && !RECUSAS_NOMEADAS.has(comando);
+  return (capacidades ?? []).filter((capacidade) =>
+    (COMANDOS_DE_CADA_CAPACIDADE[capacidade] ?? []).every(faz));
+}
+
+/**
  * O que o desktop responde sem perguntar a ninguém. **JSON estrito**:
  * `tests/web.rs` o lê e confere cada valor contra o Rust (`main.rs`,
  * `seele_ffi`). O `controles_da_voz` é o do desktop sem sessão e sem ajuste
@@ -392,7 +414,7 @@ const CONSTANTES_DO_DESKTOP = Object.freeze({
   },
   "regras_de_previa": { "limit": 4194304, "types": ["image/png", "image/jpeg", "image/gif", "image/webp"] },
   "regras_do_icone_do_server": { "limite_bytes": 8192, "lado": 256 },
-  "apis_de_mod_aceitas": [5, 4, 3],
+  "apis_de_mod_aceitas": [6],
   "dominios_de_gif": ["tenor.com", "giphy.com", "imgur.com"],
   "controles_da_voz": {
     "supressao": 1,

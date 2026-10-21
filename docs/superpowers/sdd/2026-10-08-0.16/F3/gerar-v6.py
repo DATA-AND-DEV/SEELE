@@ -110,6 +110,15 @@ contribuicoes["teto-o-que-e"] = (
     "contribuição por alvo, por MOD e por modo, até alvos-por-ponto alvos em cada ponto; "
     "o teto é o das contribuições sem alvo de pé, por MOD"
 )
+# Os dois números saíram da bancada, e não do app (decisão da orquestradora,
+# 11/10; rascunho §12, «A lista de 251»).
+contribuicoes["medido"] = (
+    "numa bancada (tools/lista-grande.cjs, no Chromium, com a ponte simulada), depois do "
+    "redesenho da lista juntado em um por quadro: 251 pessoas deixam a página a 98% sem MOD e "
+    "a 99% com um cartão de 32 linhas em cada uma e as 128 sem alvo — quem satura a página é a "
+    "lista, e não o MOD; no app, a lista de 251 não se mede pela acessibilidade, e o servidor "
+    "é dimensionado em 50 pessoas"
+)
 v6["contribuicoes"] = contribuicoes
 
 capa = O(r["capa"])

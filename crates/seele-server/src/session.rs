@@ -684,6 +684,8 @@ struct Provado {
     client: String,
     nickname: String,
     public_key: Vec<u8>,
+    /// As APIs de MOD que o app declarou rodar. Ver [`admitir`].
+    apis_de_mod: Vec<u32>,
     passe: Option<crate::admissao::Passe>,
     recusa_adiada: Option<String>,
     chegada: (crate::portaria::Segredo, String),
@@ -737,6 +739,7 @@ async fn handshake(
         join_secret,
         nickname,
         public_key,
+        apis_de_mod,
         ..
     } = hello
     else {
@@ -886,6 +889,7 @@ async fn handshake(
         client,
         nickname,
         public_key,
+        apis_de_mod,
         passe,
         recusa_adiada,
         chegada,
@@ -906,10 +910,51 @@ async fn admitir(
         client,
         nickname,
         public_key,
+        apis_de_mod,
         passe,
         recusa_adiada,
         chegada,
     } = provado;
+
+    // **As APIs de MOD, antes da portaria e do convite** (a P7c do plano F1b).
+    //
+    // O `Hello` diz que APIs de MOD o app roda, e um MOD exigido de uma API
+    // que ele não roda é uma porta que ele não atravessa: aceitar o anúncio
+    // não o faria rodar. Recusado aqui, com a máscara do que falta, a tela diz
+    // «atualize o app» — e antes da portaria e do convite, para quem não vai
+    // entrar não deixar pedido na fila nem gastar um convite de uso único.
+    //
+    // A API 0 é «não preenchida» (uma linha de antes da migração 14), e não
+    // recusa ninguém. Com o portão dos MODs dormente, nada é exigido. Um banco
+    // que não responde não recusa aqui: o portão dos MODs, adiante, decide.
+    if crate::mods::anuncio::o_anuncio_alcanca_alguem(server.versao_do_anuncio) {
+        let ligados = {
+            let guard = server.persistence.lock().await;
+            crate::persistence::mods::enabled(&guard)
+        };
+        match ligados {
+            Ok(ligados) => {
+                let faltam: Vec<u32> = ligados
+                    .iter()
+                    .map(|ligado| ligado.api)
+                    .filter(|api| *api != 0 && !apis_de_mod.contains(api))
+                    .collect();
+                if !faltam.is_empty() {
+                    return Err(recusa_de_mod(
+                        version,
+                        server.versao_do_anuncio,
+                        DisconnectReason::ModsDeOutraApi {
+                            apis: seele_proto::control::mascara_de_apis(&faltam),
+                        },
+                        format!("o app roda as APIs de MOD {apis_de_mod:?}, e faltam {faltam:?}"),
+                    ));
+                }
+            }
+            Err(erro) => {
+                tracing::warn!(%erro, "não deu para ler as APIs dos MODs antes da portaria");
+            }
+        }
+    }
 
     // A portaria — ADR 0030. A terceira camada, e a única que decide sobre
     // gente em vez de sobre um segredo.
@@ -6058,6 +6103,7 @@ mod o_aceite_dos_mods {
             reach: vec!["ler".to_owned()],
             server_half: no_servidor,
             api: 6,
+            tema: false,
         }
     }
 

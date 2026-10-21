@@ -405,6 +405,282 @@ const REGIOES = [
       if (!linha.foraDoMiolo) falhas.push("pessoa.cartao: o apelido verificado está dentro da raiz do MOD");
     }
 
+    // ------------------------------------- cada ponto, o nó do MOD no lugar dele
+    //
+    // `contribuicoes.pontos.*` e `regioes.*.pontos` (a auditoria do v6, tabelas
+    // 5 e 6): o diagnóstico contava o contêiner, e a montagem acontecia anexada
+    // ou não — tirar o `append` de cada ponto passava. Aqui cada um recebe uma
+    // contribuição marcada, como um MOD a faria, e a marca é procurada **no
+    // lugar que o ponto promete**, uma vez, e em nenhum outro.
+    const pontos = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const salaDeLia = r.voice_rooms.find((sala) => sala.people.includes(lia));
+      const aberto = r.channels.find((c) => c.open);
+      const outroCanal = r.channels.find((c) => !c.open) ?? aberto;
+      const linhaDe = (no) => no.closest("li.pessoa")?.querySelector(".pessoa-nome")?.textContent.trim();
+      const casos = [
+        { ponto: "pessoa.identidade", alvo: lia.id, lugar: (no) => !!no.closest(".pessoa-identidade") && linhaDe(no) === lia.nickname },
+        // Nas duas linhas: a nativa ganhou o «⋯» dela (decisão da orquestradora,
+        // 16/10), e a apresentada o tinha.
+        { ponto: "pessoa.detalhes", alvo: lia.id,
+          lugar: (no) => !!no.closest("li.pessoa:not(.pessoa-apresentada) > details.pessoa-nativo .contribuicao-de-mod-caixa") && linhaDe(no) === lia.nickname },
+        { ponto: "pessoa.detalhes", alvo: lia.id, comCartao: true,
+          lugar: (no) => !!no.closest("li.pessoa-apresentada details.pessoa-nativo") && linhaDe(no) === lia.nickname },
+        { ponto: "pessoa.acoes", alvo: lia.id, acao: true, lugar: (no) => !!no.closest(".pessoa-rodape") && linhaDe(no) === lia.nickname },
+        { ponto: "canal.item", alvo: outroCanal.id, lugar: (no) => !!no.closest(`#lista-linhas button[data-linha="${outroCanal.id}"]`) },
+        { ponto: "canal.cabecalho", alvo: aberto.id, lugar: (no) => !!no.closest("#canal-cabecalho-mods") },
+        { ponto: "canal.cabecalho", alvo: aberto.id, acao: true, lugar: (no) => !!no.closest("#canal-cabecalho-mods") },
+        { ponto: "compositor.ferramentas", acao: true, lugar: (no) => !!no.closest("#form-mensagem #compositor-ferramentas") },
+        { ponto: "sala.acoes", alvo: salaDeLia.id, lugar: (no) => no.closest("li.roster-grupo")?.querySelector(":scope > .roster-sala .roster-sala-nome")?.textContent === salaDeLia.name && !!no.closest(".roster-sala") },
+        { ponto: "sala.acoes", alvo: salaDeLia.id, acao: true, lugar: (no) => no.closest("li.roster-grupo")?.querySelector(":scope > .roster-sala .roster-sala-nome")?.textContent === salaDeLia.name && !!no.closest(".roster-sala") },
+      ];
+      const instancia = new InstanciaDeMod("mod/pontos", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/pontos", instancia);
+      const medidos = [];
+      for (const caso of casos) {
+        const marca = `marca de ${caso.ponto}${caso.acao ? " (ação)" : ""}`;
+        const pedido = { ponto: caso.ponto, modo: "adicionar", ...(caso.alvo !== undefined ? { alvo: String(caso.alvo) } : {}) };
+        const cartao = caso.comCartao ? contribuicoesDosMods.registrar({ id: "mod/pontos" }, instancia, {
+          ponto: "pessoa.cartao", modo: "substituir", alvo: String(caso.alvo),
+          conteudo: [{ forma: "texto", chave: "c", dentro: "cartão" }],
+        }).handle : null;
+        const { handle } = contribuicoesDosMods.registrar({ id: "mod/pontos" }, instancia, caso.acao
+          ? { ...pedido, rotulo: marca, acaoPrincipal: "tocar" }
+          : { ...pedido, conteudo: [{ forma: "texto", chave: "marca", dentro: marca }] });
+        desenhar(r);
+        await quadro();
+        const achados = [...document.querySelectorAll("body *")]
+          .filter((no) => no.children.length === 0 && no.textContent.trim() === marca);
+        medidos.push({ marca, achados: achados.length, noLugar: achados.filter(caso.lugar).length });
+        contribuicoesDosMods.revogar(handle, { id: "mod/pontos", instancia });
+        if (cartao) contribuicoesDosMods.revogar(cartao, { id: "mod/pontos", instancia });
+      }
+      modsCarregados.delete("mod/pontos");
+      desenhar(r);
+      await quadro();
+      return medidos;
+    }).catch((erro) => [{ erro: erro.message.split("\n")[0] }]);
+    for (const medido of pontos) {
+      if (medido.erro) falhas.push(`cada ponto no lugar: ${medido.erro}`);
+      else if (medido.achados !== 1 || medido.noLugar !== 1) {
+        falhas.push(`cada ponto no lugar: «${medido.marca}» aparece ${medido.achados} vez(es), ${medido.noLugar} no lugar que o ponto promete`);
+      }
+    }
+
+    // ------------------------------------- o pessoa.detalhes, com dono
+    //
+    // Na linha nativa (decisão da orquestradora, 16/10): o «⋯» só nasce com uma
+    // contribuição, e a linha sem ela é a de sempre; cada seção leva o nome do
+    // MOD por cima, do produto, nas cores do núcleo, e o MOD não o cobre —
+    // nem com `mover` nem com `escalar`; e com `CASCA.detalhesNaLinha` falso
+    // (o celular, que o põe na folha) a linha não o monta.
+    const comDono = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const linhaDeLia = () => [...$("lista-roster").querySelectorAll("li.pessoa")]
+        .find((li) => li.querySelector(".pessoa-nome")?.textContent.trim() === lia.nickname);
+      const semNada = linhaDeLia()?.outerHTML;
+      const instancia = new InstanciaDeMod("mod/detalhes", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/detalhes", instancia);
+      const { handle } = contribuicoesDosMods.registrar({ id: "mod/detalhes" }, instancia, {
+        ponto: "pessoa.detalhes", modo: "adicionar", alvo: String(lia.id),
+        conteudo: [
+          { forma: "texto", chave: "t", dentro: "seção do MOD" },
+          { forma: "texto", chave: "cobre", dentro: "█".repeat(16), estilo: { mover: { x: 0, y: -60 }, escalar: 4 } },
+        ],
+      });
+      desenhar(r);
+      await quadro();
+      const li = linhaDeLia();
+      const detalhes = li?.querySelector(":scope > details.pessoa-nativo");
+      if (detalhes) detalhes.open = true;
+      await quadro();
+      const origem = detalhes?.querySelector(":scope > .contribuicao-de-mod-origem");
+      const caixa = origem?.nextElementSibling;
+      const centro = origem?.getBoundingClientRect();
+      const noCentro = centro ? document.elementFromPoint(centro.left + Math.min(centro.width, 40) / 2, centro.top + centro.height / 2) : null;
+      const cores = () => (origem ? [getComputedStyle(origem).color, getComputedStyle(origem).backgroundColor].join(" / ") : null);
+      const coresSemTema = cores();
+      temaDosMods.set("bancada", { fundo: "#f2ece0", painel: "#e6dfcf", texto: "#12100e", apagado: "#574e43", acento: "#a83a10", borda: "#b8ad9a" });
+      escreverOTemaDaSessao();
+      const coresComTema = cores();
+      temaDosMods.delete("bancada");
+      escreverOTemaDaSessao();
+      const medido = {
+        nativa: Boolean(li && !li.classList.contains("pessoa-apresentada")),
+        origem: origem?.textContent ?? null,
+        naCaixa: Boolean(caixa?.classList.contains("contribuicao-de-mod-caixa") && caixa.textContent.includes("seção do MOD")),
+        descoberta: Boolean(origem && noCentro && origem.contains(noCentro)),
+        temaNaoAlcanca: coresSemTema !== null && coresSemTema === coresComTema,
+        idNaLinha: li?.dataset.pessoaId === String(lia.id),
+      };
+      // Com a linha sem o ponto (o celular), nada dele na lista.
+      CASCA.detalhesNaLinha = false;
+      desenhar(r);
+      await quadro();
+      medido.semALinha = !$("lista-roster").textContent.includes("seção do MOD") && !linhaDeLia()?.querySelector("details.pessoa-nativo");
+      CASCA.detalhesNaLinha = true;
+      contribuicoesDosMods.revogar(handle, { id: "mod/detalhes", instancia });
+      modsCarregados.delete("mod/detalhes");
+      desenhar(r);
+      await quadro();
+      medido.voltou = linhaDeLia()?.outerHTML === semNada;
+      medido.semNadaSemDetalhes = Boolean(semNada) && !semNada.includes("pessoa-nativo") && !semNada.includes("pessoa-com-detalhes");
+      return medido;
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (comDono.erro) falhas.push(`pessoa.detalhes com dono: ${comDono.erro}`);
+    else {
+      const esperado = { nativa: true, origem: "mod/detalhes", naCaixa: true, descoberta: true, temaNaoAlcanca: true, idNaLinha: true,
+        semALinha: true, voltou: true, semNadaSemDetalhes: true };
+      if (JSON.stringify(comDono) !== JSON.stringify(esperado)) {
+        falhas.push(`pessoa.detalhes com dono: ${JSON.stringify(comDono)}, e o esperado é ${JSON.stringify(esperado)}`);
+      }
+    }
+
+    // E **pelo teclado** (decisão da orquestradora, 16/10): o «⋯» da linha
+    // nativa recebe o foco, abre com o Enter, e diz de quem são os detalhes.
+    const deLia = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const instancia = new InstanciaDeMod("mod/teclado", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/teclado", instancia);
+      window.__teclado = contribuicoesDosMods.registrar({ id: "mod/teclado" }, instancia, {
+        ponto: "pessoa.detalhes", modo: "adicionar", alvo: String(lia.id),
+        conteudo: [{ forma: "texto", chave: "t", dentro: "pelo teclado" }],
+      }).handle;
+      desenhar(r);
+      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      return { id: String(lia.id), apelido: lia.nickname };
+    });
+    const resumo = `#lista-roster li.pessoa[data-pessoa-id="${deLia.id}"] > details.pessoa-nativo > summary`;
+    await page.focus(resumo);
+    await page.keyboard.press("Enter");
+    const pelaTecla = await page.evaluate((resumo) => {
+      const el = document.querySelector(resumo);
+      return { focado: document.activeElement === el, aberto: Boolean(el?.parentElement.open), nome: el?.getAttribute("aria-label") ?? "" };
+    }, resumo);
+    await page.evaluate(async () => {
+      contribuicoesDosMods.revogar(window.__teclado, { id: "mod/teclado", instancia: modsCarregados.get("mod/teclado") });
+      modsCarregados.delete("mod/teclado");
+      desenhar(window.testTable.snapshot);
+      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+    });
+    if (!pelaTecla.focado || !pelaTecla.aberto || !pelaTecla.nome.includes(deLia.apelido)) {
+      falhas.push(`pessoa.detalhes pelo teclado: ${JSON.stringify(pelaTecla)} (o nome deve dizer ${deLia.apelido})`);
+    }
+
+    // ------------------------------------- o movimento reduzido, em todo lugar
+    //
+    // `estilos.movimento-reduzido` (a auditoria do v6, tabela 8): «vale em
+    // toda região e camada onde contribuição de MOD aparece, e não só em
+    // .superficie-de-mod e .pessoa-cartao». Um nó que pulsa em cada região que
+    // monta nós, num cartão e num diálogo: com o movimento reduzido, nenhum
+    // anima; sem ele, todos — o caso mede a animação que existe. **Duas regras
+    // o entregam**: a global de `acessibilidade.css` e a de
+    // `.contribuicao-de-mod *` em `mods-superficies.css`. Tirar uma só passa;
+    // tirar as duas reprova (medido em 16/10).
+    const animados = async () => page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const mod = { id: "mod/pulso", hash: "h", api: 6 };
+      const instancia = new InstanciaDeMod(mod.id, mod.hash, geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set(mod.id, instancia);
+      const no = (chave) => [{ forma: "texto", chave, dentro: `pulso ${chave}`, estilo: { animacao: "pulso" } }];
+      const handles = [
+        ["operador.barra", undefined], ["status.barra", undefined], ["redes", undefined],
+        ["compositor", undefined], ["pessoas.lista", undefined], ["pessoa.cartao", String(lia.id)],
+      ].map(([ponto, alvo]) => contribuicoesDosMods.registrar(mod, instancia, { ponto, modo: "adicionar", ...(alvo ? { alvo } : {}), conteudo: no(ponto) }).handle);
+      await atenderOMod(mod, instancia, { tipo: "superficie-criar", n: 1, descricao: { id: "pulso", tipo: "dialogo", modal: false, titulo: "Pulso" } });
+      await atenderOMod(mod, instancia, { tipo: "superficie-montar", n: 2, superficie: "pulso", arvore: no("dialogo") });
+      desenhar(r);
+      await quadro();
+      const nomes = {};
+      for (const el of document.querySelectorAll("*")) {
+        if (el.children.length === 0 && /^pulso /.test(el.textContent.trim())) {
+          nomes[el.textContent.trim()] = getComputedStyle(el.closest("[style*='animation']") ?? el).animationName;
+        }
+      }
+      for (const handle of handles) contribuicoesDosMods.revogar(handle, { id: mod.id, instancia });
+      superficiesDoMod(mod, instancia).soltarTudo();
+      modsCarregados.delete(mod.id);
+      desenhar(r);
+      await quadro();
+      return nomes;
+    });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const reduzido = await animados();
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    const livre = await animados();
+    if (Object.keys(reduzido).length < 7 || Object.values(livre).some((n) => n !== "seele-mod-pulso")) {
+      falhas.push(`movimento reduzido: o caso não montou os sete nós que pulsam: ${JSON.stringify({ reduzido, livre })}`);
+    } else if (Object.values(reduzido).some((n) => n !== "none")) {
+      falhas.push(`movimento reduzido: um nó de MOD anima assim mesmo: ${JSON.stringify(reduzido)}`);
+    }
+
+    // ------------------------------------- revogar recalcula do estado de agora
+    //
+    // `contribuicoes.garantias-do-produto[4]` («ao revogar, o nativo é
+    // recalculado do estado atual»; a auditoria do v6, tabela 6): todo caso
+    // revogava com o mesmo retrato de antes, e devolver a linha guardada na
+    // hora da substituição passaria igual. Aqui Lia troca de apelido com o
+    // cartão substituído, e a revogação, **sem retrato novo**, desenha a linha
+    // nativa com o apelido de agora — quem redesenha é o próprio registro.
+    const recalculo = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const deAntes = lia.nickname;
+      const instancia = new InstanciaDeMod("mod/recalculo", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/recalculo", instancia);
+      const { handle } = contribuicoesDosMods.registrar({ id: "mod/recalculo" }, instancia, {
+        ponto: "pessoa.cartao", modo: "substituir", alvo: String(lia.id),
+        conteudo: [{ forma: "texto", chave: "c", dentro: "CARTÃO DO MOD" }],
+      });
+      desenhar(r);
+      await quadro();
+      const apresentada = () => Boolean(document.querySelector('li.pessoa-apresentada[data-apresentada-por="mod/recalculo"]'));
+      const substituida = apresentada();
+      lia.nickname = "lia-de-agora";
+      desenhar(r);
+      await quadro();
+      contribuicoesDosMods.revogar(handle, { id: "mod/recalculo", instancia });
+      modsCarregados.delete("mod/recalculo");
+      await quadro();
+      const nomes = [...$("lista-roster").querySelectorAll("li.pessoa .pessoa-nome")].map((e) => e.textContent.trim());
+      const medido = { substituida, depois: apresentada(), nomes, deAntes };
+      lia.nickname = deAntes;
+      desenhar(r);
+      await quadro();
+      return medido;
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (recalculo.erro) falhas.push(`revogar recalcula: ${recalculo.erro}`);
+    else {
+      if (!recalculo.substituida) falhas.push("revogar recalcula: a linha de Lia não foi apresentada pelo MOD, e o caso não mede nada");
+      if (recalculo.depois) falhas.push("revogar recalcula: revogado, e a linha continua a do MOD até um retrato novo");
+      else if (!recalculo.nomes.includes("lia-de-agora") || recalculo.nomes.includes(recalculo.deAntes)) {
+        falhas.push(`revogar recalcula: a linha nativa voltou com ${JSON.stringify(recalculo.nomes)}, e não com o apelido de agora`);
+      }
+    }
+
     // ------------------------------------- a lista de pessoas, substituída
     //
     // `pessoas.lista` substituída (rascunho §3; decisão (a) da orquestradora,
@@ -421,6 +697,11 @@ const REGIOES = [
           li.classList.contains("roster-subgrupo") ? `[${li.textContent}]` : (li.querySelector(".pessoa-nome")?.textContent ?? "?")),
       }));
       const antes = $("lista-roster").innerHTML;
+      // **O menu de moderação continua do produto** (`regioes.pessoas.lista.
+      // produto[0]`; a auditoria do v6, tabela 5): a porta de cada nome,
+      // contada sem e com a substituição.
+      const portas = () => $("lista-roster").querySelectorAll("button[data-moderar-pessoa]").length;
+      const portasAntes = portas();
       const instancia = new InstanciaDeMod("mod/lista", "h", geracaoDaSessao, {
         pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
       });
@@ -441,6 +722,7 @@ const REGIOES = [
       desenhar(r);
       await quadro();
       const com = secoes();
+      const portasCom = portas();
       // A aba DIAGNÓSTICO conta o identificador que ninguém usa (o 99).
       const diagnostico = () => frasesDeQuemPinta(quemPintaCadaPonto().find((l) => l.ponto === "pessoas.lista"));
       const diag = diagnostico();
@@ -449,7 +731,7 @@ const REGIOES = [
       desenhar(r);
       await quadro();
       const ignoradosDepois = quemPintaCadaPonto().find((l) => l.ponto === "pessoas.lista").ignorados;
-      return { recusa, com, voltou: $("lista-roster").innerHTML === antes, diag, ignoradosDepois };
+      return { recusa, com, voltou: $("lista-roster").innerHTML === antes, diag, ignoradosDepois, portasAntes, portasCom };
     }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
     if (lista.erro) falhas.push(`pessoas.lista: ${lista.erro}`);
     else {
@@ -464,6 +746,10 @@ const REGIOES = [
         falhas.push(`pessoas.lista: as seções saíram ${JSON.stringify(lista.com)}, e o esperado é ${JSON.stringify(esperado)}`);
       }
       if (!lista.voltou) falhas.push("pessoas.lista: revogada, e a lista não voltou ao que era");
+      if (lista.portasAntes < 1) falhas.push("pessoas.lista: o retrato não tem quem moderar, e o caso não mede a porta");
+      else if (lista.portasCom !== lista.portasAntes) {
+        falhas.push(`pessoas.lista: com a lista substituída, as portas de moderação foram de ${lista.portasAntes} a ${lista.portasCom}`);
+      }
       if (!lista.diag.some((f) => /cita 1 identificador de quem não está aqui, ou repetido: ignorado$/.test(f))) {
         falhas.push(`pessoas.lista: o DIAGNÓSTICO não conta o identificador ignorado — diz ${JSON.stringify(lista.diag)}`);
       }
@@ -707,6 +993,79 @@ const REGIOES = [
       }
     }
 
+    // ------------------------------------- o lugar de cada região
+    //
+    // **Quem contribui numa região sabe o tamanho dela** (`eventos-da-tela.
+    // lugar`: «a região ou camada do MOD mudou de tamanho»; a auditoria do
+    // `v6.json`, B9). Só o `chamada.palco` mandava `lugar` com `regiao`: um MOD
+    // na barra de baixo não sabia quanto cabia nela. Ao chegar, e quando ela
+    // muda de tamanho. **O MOD medido chega numa barra que já está à vista e
+    // com o tamanho dela** — outro MOD a abriu, e ela está fixa em 320 × 140:
+    // a chegada não a redimensiona, e quem diz o tamanho é o desenho, e não o
+    // observador. Medido: com a barra escondida até a primeira contribuição,
+    // o observador dizia a chegada sozinho, e o caso passava sem o desenho.
+    const lugar = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const entregues = [];
+      const instancia = new InstanciaDeMod("mod/lugar", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; },
+        entregar(mensagem) { entregues.push(mensagem); },
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      instancia.api = 6;
+      modsCarregados.set("mod/lugar", instancia);
+      const dono = { id: "mod/lugar", instancia };
+      const primeira = new InstanciaDeMod("mod/primeiro", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      primeira.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/primeiro", primeira);
+      const donoPrimeiro = { id: "mod/primeiro", instancia: primeira };
+      const abriu = contribuicoesDosMods.registrar(donoPrimeiro, primeira, {
+        ponto: "status.barra", modo: "adicionar", conteudo: [{ forma: "texto", chave: "p", dentro: "o primeiro" }],
+      }).handle;
+      $("telemetria-mods").style.minHeight = "140px";
+      $("telemetria-mods").style.width = "320px";
+      desenhar(r);
+      await quadro();
+      await quadro();
+      const { handle } = contribuicoesDosMods.registrar(dono, instancia, {
+        ponto: "status.barra", modo: "adicionar", conteudo: [{ forma: "texto", chave: "t", dentro: "na barra" }],
+      });
+      desenhar(r);
+      await quadro();
+      desenhar(r);
+      await quadro();
+      const daBarra = () => entregues.filter((m) => m.nome === "lugar" && m.regiao === "status.barra");
+      const aoChegar = daBarra().at(-1) ?? null;
+      $("telemetria-mods").style.minHeight = "200px";
+      await quadro();
+      await quadro();
+      const depois = daBarra().at(-1) ?? null;
+      $("telemetria-mods").style.minHeight = "";
+      $("telemetria-mods").style.width = "";
+      contribuicoesDosMods.revogar(handle, dono);
+      contribuicoesDosMods.revogar(abriu, donoPrimeiro);
+      modsCarregados.delete("mod/lugar");
+      modsCarregados.delete("mod/primeiro");
+      desenhar(r);
+      await quadro();
+      return { aoChegar, depois, vezes: daBarra().length };
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (lugar.erro) falhas.push(`lugar: ${lugar.erro}`);
+    else {
+      if (!lugar.aoChegar || lugar.aoChegar.altura < 140) {
+        falhas.push(`lugar: o MOD que contribui na barra de baixo não soube o tamanho dela ao chegar: ${JSON.stringify(lugar.aoChegar)}`);
+      }
+      else if (!Array.isArray(lugar.aoChegar.regioes) || typeof lugar.aoChegar.onde !== "string") {
+        falhas.push(`lugar: o lugar da região não diz onde e quais regiões: ${JSON.stringify(lugar.aoChegar)}`);
+      }
+      if (!lugar.depois || lugar.depois.altura < 200) {
+        falhas.push(`lugar: a barra cresceu, e o MOD não soube do tamanho novo: ${JSON.stringify(lugar)}`);
+      }
+    }
+
     // ------------------------------------- a navegação, substituída
     //
     // `servidor.navegacao` substituído (rascunho §3, a regra aprovada em 09/10):
@@ -721,6 +1080,15 @@ const REGIOES = [
       const textos = (id) => [...$(id).children].map((li) =>
         (li.querySelector(".linha-rotulo, .voice_room-nome") ?? li).textContent.trim());
       const antes = { salas: $("lista-voice_rooms").innerHTML, canais: $("lista-linhas").innerHTML };
+      // **O que é do produto em cada linha** (`regioes.servidor.navegacao.produto`;
+      // a auditoria do v6, tabela 5): o ENTRAR NA SALA e a moderação de salas e
+      // canais — renomear, apagar —, contados antes e com a substituição.
+      const doProduto = () => ({
+        entrar: $("lista-voice_rooms").querySelectorAll(".voice_room-entrar").length,
+        botoesDasSalas: $("lista-voice_rooms").querySelectorAll("li.voice_room button").length,
+        controlesDosCanais: $("lista-linhas").querySelectorAll(".linha-controles button").length,
+      });
+      const nativo = doProduto();
       const instancia = new InstanciaDeMod("mod/navegacao", "h", geracaoDaSessao, {
         pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
       });
@@ -742,9 +1110,19 @@ const REGIOES = [
           canais: { grupos: [{ titulo: "MESA 1", ids: [2, 2, 99] }, { titulo: "VAZIO", ids: [98] }] },
         },
       });
+      // E um `canal.item` no canal agrupado: com a navegação substituída, ele
+      // continua na linha do canal (`regioes.servidor.navegacao.pontos[0]`).
+      const item = contribuicoesDosMods.registrar({ id: "mod/navegacao" }, instancia, {
+        ponto: "canal.item", modo: "adicionar", alvo: "2",
+        conteudo: [{ forma: "texto", chave: "i", dentro: "marca do canal agrupado" }],
+      }).handle;
       desenhar(r);
       await quadro();
+      const marcas = [...document.querySelectorAll("body *")]
+        .filter((no) => no.children.length === 0 && no.textContent.trim() === "marca do canal agrupado");
       const com = {
+        produto: doProduto(),
+        itemNaLinha: marcas.length === 1 && Boolean(marcas[0].closest('#lista-linhas button[data-linha="2"]')),
         diag: frasesDeQuemPinta(quemPintaCadaPonto().find((l) => l.ponto === "servidor.navegacao")),
         salas: textos("lista-voice_rooms"),
         canais: textos("lista-linhas"),
@@ -752,12 +1130,13 @@ const REGIOES = [
         entrar: $("lista-voice_rooms").querySelectorAll("li.voice_room").length,
         entradasDeMod: !$("lista-mods-navegacao").hidden,
       };
+      contribuicoesDosMods.revogar(item, { id: "mod/navegacao", instancia });
       contribuicoesDosMods.revogar(handle, { id: "mod/navegacao", instancia });
       modsCarregados.delete("mod/navegacao");
       desenhar(r);
       await quadro();
       const depois = { salas: $("lista-voice_rooms").innerHTML, canais: $("lista-linhas").innerHTML };
-      return { recusa, com, voltou: depois.salas === antes.salas && depois.canais === antes.canais, canais: r.channels.length };
+      return { recusa, com, nativo, voltou: depois.salas === antes.salas && depois.canais === antes.canais, canais: r.channels.length };
     }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
     if (navegacao.erro) {
       falhas.push(`servidor.navegacao: ${navegacao.erro}`);
@@ -776,6 +1155,12 @@ const REGIOES = [
         falhas.push(`servidor.navegacao: ${navegacao.com.canaisNaTela} de ${navegacao.canais} canais na tela — alguém sumiu`);
       }
       if (navegacao.com.entrar !== 1) falhas.push("servidor.navegacao: a sala perdeu a linha do produto");
+      if (navegacao.nativo.entrar < 1 || navegacao.nativo.botoesDasSalas <= navegacao.nativo.entrar || navegacao.nativo.controlesDosCanais < 1) {
+        falhas.push(`servidor.navegacao: o retrato não tem ENTRAR e moderação para o caso medir: ${JSON.stringify(navegacao.nativo)}`);
+      } else if (JSON.stringify(navegacao.com.produto) !== JSON.stringify(navegacao.nativo)) {
+        falhas.push(`servidor.navegacao: com a substituição, o que é do produto nas linhas mudou: ${JSON.stringify(navegacao.nativo)} → ${JSON.stringify(navegacao.com.produto)}`);
+      }
+      if (!navegacao.com.itemNaLinha) falhas.push("servidor.navegacao: com a substituição, o canal.item não ficou na linha do canal");
       if (navegacao.com.entradasDeMod) falhas.push("servidor.navegacao: a substituição apareceu como entrada «DOS MODS»");
       if (!navegacao.voltou) falhas.push("servidor.navegacao: revogada, e as listas não voltaram ao que eram");
       // O 2 repetido, o 99 e o 98: três, somadas as duas listas.
@@ -832,6 +1217,43 @@ const REGIOES = [
     if (orcamento.nosDetalhes !== 40 || orcamento.avisoDosDetalhes !== null) {
       falhas.push(`orçamento: pessoa.detalhes (perfil «superficie», 4096 nós) montou ${orcamento.nosDetalhes} `
         + `de 40 linhas, com o aviso ${JSON.stringify(orcamento.avisoDosDetalhes)}`);
+    }
+
+    // ------------------------------------------- o que a contribuição recusou
+    //
+    // (`nos-recusados`, D-api-8; o achado 5 da auditoria.) Uma forma que a API
+    // não tem sumia calada numa contribuição, e o `classes` (que é de
+    // superfície) era guardado e não pintava nada. Agora os dois contam, e o
+    // evento `contribuicao` diz o que foi, na amostra.
+    const recusadoNaContribuicao = await page.evaluate(() => {
+      const entregues = [];
+      const instancia = new InstanciaDeMod("mod/recusas", "h", geracaoDaSessao, {
+        pedirEncerramento() {},
+        async encerrou() { return true; },
+        entregar(mensagem) { entregues.push(mensagem); },
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/recusas", instancia);
+      // O `pessoa.detalhes` monta com o perfil «superficie», que não tem lista
+      // de formas: é onde a forma desconhecida sumia (o cartão já a contava).
+      const { handle } = contribuicoesDosMods.registrar({ id: "mod/recusas" }, instancia, {
+        ponto: "pessoa.detalhes", modo: "adicionar", alvo: "12",
+        classes: { destaque: { base: { cor: "#ff8800" } } },
+        conteudo: [{ forma: "texto", chave: "ok", dentro: "fica" }, { forma: "estrela", chave: "x" }],
+      });
+      const no = montarContribuicao(contribuicoesDosMods.porHandle.get(handle), "12");
+      const ficou = no ? [...no.querySelectorAll("*")].some((n) => n.textContent === "fica") : false;
+      contribuicoesDosMods.revogar(handle, { id: "mod/recusas", instancia });
+      modsCarregados.delete("mod/recusas");
+      const aviso = entregues.find((m) => m.nome === "contribuicao") ?? null;
+      return { ficou, recusados: aviso?.recusados ?? null, amostra: aviso?.amostra ?? null };
+    });
+    if (!recusadoNaContribuicao.ficou || recusadoNaContribuicao.recusados !== 2
+      || JSON.stringify(recusadoNaContribuicao.amostra) !== JSON.stringify([
+        { motivo: "forma-desconhecida", forma: "estrela", chave: "x" },
+        { motivo: "classes-fora-da-superficie" },
+      ])) {
+      falhas.push(`o que a contribuição recusou: a forma desconhecida e o classes não foram ditos no evento, ou o que coube não ficou: ${JSON.stringify(recusadoNaContribuicao)}`);
     }
 
     // ------------------------------------------- as contagens saem com a sessão

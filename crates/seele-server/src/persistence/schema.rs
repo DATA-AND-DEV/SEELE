@@ -638,6 +638,25 @@ pub const MIGRATIONS: &[Migration] = &[
                 ON temas_dos_mods (escolhido) WHERE escolhido = 1;
         "#,
     },
+    Migration {
+        version: 16,
+        description: "se cada MOD habilitado declara o tema, para a tela de aceite dizer antes de aceitar",
+        sql: r#"
+            -- D-api-8 (spec-mestre da 0.16): o anúncio diz se um MOD pode pintar
+            -- a aparência do servidor inteiro, porque quem aceita tem de saber
+            -- antes de aceitar.
+            --
+            -- Coluna, pela razão da migração 14: o anúncio lê só o banco, e o
+            -- aperto de mão é o pior lugar para ir ao disco.
+            --
+            -- **Nula é «não preenchida»**: um booleano não tem um zero que diga
+            -- «não sei», como a `api` tem. Quem a preenche é a subida do
+            -- servidor, na mesma passada e na mesma leitura do `mod.json` que
+            -- preenchem a `api`; quem a regrava é habilitar o MOD. Até lá, o
+            -- anúncio a diz falsa, e a subida nomeia a linha no registro.
+            ALTER TABLE mods ADD COLUMN tema INTEGER;
+        "#,
+    },
 ];
 
 #[cfg(test)]

@@ -510,6 +510,12 @@
     <!-- O CANCELAR de quem está chamando alguém (tarefa 28 da F7). -->
     <button id="boot-cancelar-ligacao" type="button" class="botao" hidden>CANCELAR</button>
     <p id="boot-erro" class="erro" role="alert" hidden></p>
+    <!--
+      As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
+      tarefa 13 do plano da F3, Step 5b): debaixo da frase que as diz, um
+      botão por saída, na ordem do dono. Desenhadas por `tela-boot.js`.
+    -->
+    <div id="boot-saidas" hidden></div>
   </div>
 </section>
 
@@ -1890,26 +1896,6 @@
     viraria a tela dele.
   -->
   <div id="avisos-de-mod" class="avisos-de-mod" hidden></div>
-
-  <!--
-    As regiões dos MODs — ADR 0049.
-
-    Uma faixa, e não uma coluna: um MOD desenha **aqui dentro** e em nenhum
-    outro lugar da página, e este é o lugar que não desloca nada quando não há
-    MOD nenhum de pé. A faixa fica escondida enquanto está vazia, e quem a
-    mostra e a esconde é `desenharARegiaoDoMod` / `limparARegiaoDoMod`, em
-    `base.js` — não há aqui marcação de exemplo, porque tudo o que entra vem de
-    uma mensagem de um MOD e é montado com `createElement`.
-
-    **Fora de `<main>` de propósito.** `.paineis` é uma grade de quatro colunas
-    declaradas uma a uma; um quinto filho cairia numa segunda linha e
-    redesenharia a operação inteira no dia em que alguém ligasse um MOD.
-
-    Dentro de `#tela-sessao` porque a região é da sessão: sair do servidor tira
-    a faixa junto, que é o que «some quando você sai» quer dizer.
-  -->
-  <aside id="regioes-dos-mods" class="regioes-dos-mods"
-         aria-label="O que os MODs deste servidor desenham" hidden></aside>
 
   <!--
     Permanente, não escondida em menu. `specs/06-clientes-gui.md` chama isso de

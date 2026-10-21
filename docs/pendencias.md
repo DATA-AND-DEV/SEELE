@@ -9948,8 +9948,8 @@ Chromium): o tique de 500 ms refazia, sem mudança nenhuma, cinco regiões da se
   `style` escrito por `setAttribute`, medido nos dois motores —, para o avatar da conversa ganhar o retrato num nó
   reaproveitado;
 - `98f4e6cd`: a conversa reconciliada pelo id da mensagem (`mensagem:<id>`, ou `pendente:<client_message_id>`
-  numa pendente), com o divisor pela chave do dia, contada, e os nós de `conversa.mensagem` pelo marcador. A
-  rolagem segue como antes.
+  numa pendente — desde o lote ECO, `envio:<client_message_id>` em toda mensagem que tem a chave; ver abaixo), com
+  o divisor pela chave do dia, contada, e os nós de `conversa.mensagem` pelo marcador. A rolagem segue como antes.
 
 **Os guardas:** os casos 12, 13 e 14 da `linhas-pelo-id.cjs` (`644efc18`, `557ebae0`, `1c0760bd`, e na rodada 1 da
 revisão `a3382f33`: a mesma ação contribuída duas vezes, duas pendentes com a primeira gravada, e dois divisores do
@@ -9972,20 +9972,60 @@ relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-r63-report.md`.
   lote R63: o comentário de `celular-conversa.js:62-63` («a lista é refeita quando chega mensagem») ficou falso; o
   código está certo com a conversa reconciliada, porque o ouvinte é delegado e lê o `data-mensagem` na hora do
   toque. A troca do comentário é dela;
-- **a própria mensagem gravada perde o nó — limite conhecido do lote R63.** Na conversa, a pendente tem a chave da
-  máquina (`pendente:<client_message_id>`) e a confirmada a do servidor (`mensagem:<id>`), e as duas não casam:
-  quando a mensagem que a própria pessoa mandou é gravada, a `li` é outra, e vão com ela o link, o REMOVER, a seleção
-  e o nó do leitor de tela — em toda mensagem que a pessoa manda. O fio já leva o eco (`client_message_id` no
-  `MessageReceived`, `crates/seele-proto/src/control.rs:1934-1936`: «so a client can match its own pending send»);
-  quem o perde é o cliente — a `Message` da sala (`crates/seele-sessao/src/state.rs`) não o guarda, e a FFI monta
-  `client_message_id: None` nas confirmadas (`crates/seele-ffi/src/lib.rs:3646`). **O caminho:** a F1 guarda o eco
-  e o leva pela FFI nas confirmadas próprias (a orquestradora já o pediu a ela); depois que a ponta dela chegar, a
-  F5 faz a pendente e a confirmada própria casarem pela mesma chave na conversa, com um caso na
-  `linhas-pelo-id.cjs` que começa vermelho: a própria mensagem gravada mantém o nó, a seleção e o REMOVER;
-- **o grupo FORA DO AR** (`grupoForaDoAr`), que só existe no `0.16/sala-viva`: as linhas dele não têm chave e casam
-  pela posição, e um leitor de tela parado em «Bruno» passa a ler «Carla» no mesmo nó quando alguém do meio se
-  conecta. Medido em 16/10 no `531b9cba`: com a chave `membro:<id>` na linha, as que ficam são os mesmos nós e
-  nenhum texto é reescrito. Fica para quando o `0.16/sala-viva` entrar;
+- **a própria mensagem gravada perde o nó — consertada na casca no lote ECO, e só vale no app com o eco da F1.**
+  Até o lote, na conversa, a pendente tinha a chave da máquina (`pendente:<client_message_id>`) e a confirmada a do
+  servidor (`mensagem:<id>`), e as duas não casavam: quando a mensagem que a própria pessoa mandou era gravada, a
+  `li` era outra, e iam com ela o link, o REMOVER, a seleção e o nó do leitor de tela — em toda mensagem que a pessoa
+  manda. O fio já levava o eco (`client_message_id` no `MessageReceived`, `crates/seele-proto/src/control.rs:1934-1936`:
+  «so a client can match its own pending send»); quem o perdia era o cliente — a `Message` da sala
+  (`crates/seele-sessao/src/state.rs`) não o guardava, e a FFI montava `client_message_id: None` nas confirmadas.
+  **A F1 guarda o eco** (ramo `0.16/protocolo-eco`, `fe42c231`, teste `seele-ffi`
+  `a_confirmada_propria_chega_com_a_chave_da_pendente`): a confirmada própria chega com a chave da pendente, na mesma
+  revisão em que a pendente sai; a de outra pessoa, com `null`; a própria relida do histórico, com a chave gravada.
+  **A casca foi consertada** (16/10, lote ECO da F5, no ramo `0.16/lotes-eco`, aberto no `e37509f4`), só no
+  `tela-sessao.js`: a chave é `envio:<client_message_id>` quando a mensagem tem uma, e `mensagem:<id>` quando não
+  tem; no mesmo nó, a reconciliação dos filhos tira o selo do envio, e o `vestirComo` reescreve o `data-mensagem` e
+  o id do REMOVER. Os commits: `e91da621` (o caso 14 (j) da `linhas-pelo-id.cjs`, vermelho no `e37509f4` com «a
+  própria mensagem foi gravada e a linha dela trocou de nó: o foco está em BODY, o REMOVER não é o mesmo, e a seleção
+  foi de "minha mensagem, recém-escrita" a ""»), `3944d2c8` (o conserto; com a chave antiga de volta, o caso reprova
+  com a mesma frase, e o arquivo voltou idêntico pelo `cmp`) e `2466426d` (os documentos).
+  **A exceção da posição, e o conserto dela** (rodada 1 do lote, M1 da revisão). Com só a chave, o nó era o mesmo,
+  mas, quando a gravada tinha de ir para **antes** de uma mensagem que já estava na tela, ele era **movido** — tirado
+  e posto —, e o foco no link e a seleção no corpo caíam (medido pela revisão no Chromium e no WebKit). Ao vivo isso
+  não acontece, porque o servidor anuncia na ordem do id; acontece com a pendente sem resposta, quando outra pessoa
+  fala enquanto o enlace está caído e a repetição da chave devolve a linha que o servidor já tinha gravado, com o id
+  de antes, e no preenchimento da lacuna depois de uma queda. O conserto é no reconciliador comum
+  (`reconciliarOsFilhos`, `82be2db2`, só no `tela-sessao.js`): fica no lugar o nó que tem o foco do teclado, ou, sem
+  foco, o começo da seleção, e os outros se movem em volta dele. O caminho rápido, quando nada muda de lugar, não muda.
+  O vermelho é o `ad19f06d`: o 14 (k), com o foco e a seleção e depois só com a seleção, e no caso 8 dois vizinhos
+  trocando de lugar com o foco no que se movia, os dois reprovando no `2466426d`. Sem a preferência, o caso 8 e o 14
+  (k) reprovam; sem a âncora da seleção, o 14 (k) só com a seleção. **O preço**, medido: quando quem tem o foco é
+  justo quem mudou de lugar (a última da sala vai para a frente), ficam no lugar ele e mais ninguém, e as outras 18
+  linhas do grupo se movem — antes, movia-se uma, e o foco caía. E dois controles a mais, só na bancada (`53a447a6`):
+  a chave da relida com o número do id de outra mensagem, e duas próprias gravadas sem chave, que fazem reprovar os
+  mutantes sem os prefixos e `own ? envio:…`.
+  **Para valer no app, depende do eco da F1**, que ainda não está neste ramo: sem ele, a confirmada chega sem a chave
+  e cai em `mensagem:<id>`, como antes — nada quebra, e nada melhora (a revisão mediu isso). A bancada simula a ponte
+  com a forma da F1; o app com os dois juntos é da integração e da conferência da orquestradora. O relatório é o
+  `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-eco-report.md`;
+- **o grupo FORA DO AR** (`grupoForaDoAr`) — **consertado** (20/10, lote FORA da F5, no ramo `0.16/lotes-fora`,
+  aberto no `bec085df`, que já tem o `0.16/sala-viva`). As linhas dele não tinham chave e casavam pela posição:
+  quando alguém se conectava, os nomes escorregavam pelos nós, e o leitor de tela parado em «Bruno» passava a ler
+  «Carla» no mesmo nó. Medido em 16/10 no `531b9cba` e de novo no `bec085df`, com `[A, B, C] → [B, C]` (o A se
+  conectou): os nós de B e de C não ficavam, 2 linhas que ficaram tinham o texto reescrito, **saía o nó do C, e não o
+  do A**, e a seleção no nome ia a «»; com `[A, C] → [A, B, C]`, o nó do C passava a dizer «Bruno». **O conserto** é
+  uma linha, só no `tela-sessao.js` (`5591aab3`): ``chaveNaLista.set(li, `membro:${membro.id}`)``. O
+  `MembroForaDoAr` já trazia o `id`, e o prefixo `membro:` é um espaço só dele (não colide com `pessoa:<id>`, a mesma
+  conta conectada, nem com `sala:`, `grupo:` e os outros). Agora os nós de B e de C são os mesmos, nenhum texto é
+  reescrito, sai o nó do A, e a seleção fica. **O guarda** é o caso 15 da `linhas-pelo-id.cjs` (`b0df8fda`, no CI), no
+  Chromium e no WebKit, com um controle de que a chave do membro não toma o nó da linha de pessoa de mesmo id.
+  Vermelho no `bec085df` («caso 15, o A se conectou: o nó de Bruno não é o mesmo (no documento: true, e o nó de antes
+  diz agora "Carla")»); sem a linha do conserto reprova com a mesma frase e o arquivo voltou idêntico pelo `cmp`; com
+  o prefixo `pessoa:` no lugar de `membro:` reprova o controle. O guarda estático
+  `o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario` passou a aceitar o `id` do membro, só dentro da chave
+  (`8483ed28`). **O celular não tem o que adaptar aqui:** o `celular-pessoas.js` só lê `li.pessoa`, e as linhas do
+  FORA DO AR são `li.membro-fora-do-ar`. O relatório é o
+  `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-fora-report.md`;
 - **a lista de canais** perde o foco do teclado a cada tique: é a pendência 64 — fechada em 16/10, no lote C64,
   que achou também uma regressão do AX na coluna de salas (um id de sala repetido no arranjo de
   `servidor.navegacao` duplicava a fileira) e a consertou (`627666f8`, guardado pelo caso 11 da

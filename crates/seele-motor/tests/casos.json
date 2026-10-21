@@ -1,6 +1,6 @@
 {
   "sobre": "A volta de um MOD, caso a caso, com o que ela diz. O nativo roda esta tabela em crates/seele-motor/tests/casos.rs (o Motor como o desktop o embrulha), e o cargo xtask web a roda dentro do .wasm (xtask/web/motor.mjs, o Motor como o celular o embrulha). As duas pontas leem este arquivo: é a prova de que os dois rodam a mesma volta. Cada caso sobe o motor com as capacidades e a fonte, faz os passos e para. As falas são as de ParaOFora::em_json, em ordem; quem roda devolve o crédito da fila ao ler cada uma, salvo com sem_ler. Num esperado, corpo e texto são exatos, corpo_comeca e texto_contem são parciais, e vezes repete o item. Na sonda, globais_so_do_nativo é a diferença medida entre os dois alvos, e as duas pontas a cobram: o nativo tem de ter cada uma (e ela sai do corpo antes de comparar), o .wasm não pode ter nenhuma. Hoje a lista é vazia: o Atomics do QuickJS só existia no nativo (o quickjs-ng o compila sem threads no wasm32-wasip1, e sem threads ele não serve para nada nos dois; medido em 09/10/2026), e a F3 decidiu tirá-lo também do desktop na API 6 (rascunho da API 6, §16, item 5): o prelúdio o apaga. Uma diferença nova entre os alvos entra aqui, declarada, ou a sonda reprova.",
-  "capacidades_padrao": ["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes", "volume"],
+  "capacidades_padrao": ["superficies", "contribuicoes", "estilos", "classes", "volume", "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor"],
   "casos": [
     {
       "de": "a sonda: as globais do contexto do MOD são as mesmas nos dois alvos, fora as declaradas",
@@ -25,6 +25,15 @@
       "fonte": "const p = Promise.reject(new Error('x')); p.catch(() => seele.postar('\"pegou\"'));",
       "esperado": [
         { "tipo": "mensagem", "corpo": "\"pegou\"" },
+        { "tipo": "parou" }
+      ]
+    },
+    {
+      "de": "o ouvinte de aoEvento recebe o evento como a janela o manda: o nome e os campos dele (handlers[2]; a auditoria do v6.json, tabela 1)",
+      "fonte": "SeeleUI.aoEvento((ev) => seele.postar(JSON.stringify([ev.tipo, ev.nome, ev.valor])));",
+      "passos": [{ "responder": "{\"tipo\":\"evento\",\"nome\":\"ping\",\"valor\":7}" }],
+      "esperado": [
+        { "tipo": "mensagem", "corpo": "[\"evento\",\"ping\",7]" },
         { "tipo": "parou" }
       ]
     },
@@ -96,10 +105,10 @@
     },
     {
       "de": "as capacidades dadas são as que o MOD vê",
-      "capacidades": ["regiao"],
+      "capacidades": ["retrato"],
       "fonte": "seele.postar(JSON.stringify(SeeleUI.capacidades()));",
       "esperado": [
-        { "tipo": "mensagem", "corpo": "[\"regiao\"]" },
+        { "tipo": "mensagem", "corpo": "[\"retrato\"]" },
         { "tipo": "parou" }
       ]
     },
@@ -118,6 +127,41 @@
       "fonte": "const a = []; let n = 0; try { for (; n < 64; n++) a.push(new Array(262144).fill(n)); } catch (e) {} a.length = 0; seele.postar(JSON.stringify(n < 4 ? 'parou no teto' : 'passou do teto com ' + n));",
       "esperado": [
         { "tipo": "mensagem", "corpo": "\"parou no teto\"" },
+        { "tipo": "parou" }
+      ]
+    },
+    {
+      "de": "sem a capacidade arquivo (o navegador), pedaco e soltar faltam, como enviar falta sem volume: ausentes, e não recusados em tempo de execução (compatibilidade.por-plataforma)",
+      "capacidades": ["tema", "superficies", "contribuicoes", "estilos", "classes", "retrato", "eventos-da-tela", "aviso-do-servidor"],
+      "fonte": "seele.postar(JSON.stringify([typeof SeeleUI.pedaco, typeof SeeleUI.soltar, typeof SeeleUI.enviar]));",
+      "esperado": [
+        { "tipo": "mensagem", "corpo": "[\"undefined\",\"undefined\",\"undefined\"]" },
+        { "tipo": "parou" }
+      ]
+    },
+    {
+      "de": "com a capacidade arquivo, pedaco e soltar existem",
+      "fonte": "seele.postar(JSON.stringify([typeof SeeleUI.pedaco, typeof SeeleUI.soltar]));",
+      "esperado": [
+        { "tipo": "mensagem", "corpo": "[\"function\",\"function\"]" },
+        { "tipo": "parou" }
+      ]
+    },
+    {
+      "de": "a API 6 sem o retrato não ganha o snapshot: o snapshot saiu do prelúdio (o corte da API 6; a máquina das APIs 3 a 5)",
+      "capacidades": ["tema"],
+      "fonte": "seele.postar(JSON.stringify([typeof SeeleMods.snapshot, typeof SeeleMods.request]));",
+      "esperado": [
+        { "tipo": "mensagem", "corpo": "[\"undefined\",\"function\"]" },
+        { "tipo": "parou" }
+      ]
+    },
+    {
+      "de": "a região e os cartões não nascem nem com o nome na lista: saíram do prelúdio",
+      "capacidades": ["regiao", "cartoes"],
+      "fonte": "seele.postar(JSON.stringify([typeof SeeleUI.regiao, typeof SeeleUI.cartoes]));",
+      "esperado": [
+        { "tipo": "mensagem", "corpo": "[\"undefined\",\"undefined\"]" },
         { "tipo": "parou" }
       ]
     }

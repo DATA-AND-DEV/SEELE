@@ -100,7 +100,7 @@ use std::process::ExitCode;
 /// As bancadas, por nome e não por um laço sobre a pasta: um rascunho guardado
 /// em `bancada/` não pode passar a reprovar os três lugares que a chamam, e as
 /// de navegador moram na mesma pasta.
-const BANCADAS: [&str; 12] = [
+const BANCADAS: [&str; 14] = [
     "ciclo-do-executor.cjs",
     "ponte-web.cjs",
     "regiao-do-mod.cjs",
@@ -113,6 +113,8 @@ const BANCADAS: [&str; 12] = [
     "eventos-da-tela.cjs",
     "tons-do-tema.cjs",
     "chaves-do-tema.cjs",
+    "hospedar-com-mod-antigo.cjs",
+    "aceite-dos-mods.cjs",
 ];
 
 fn raiz() -> PathBuf {

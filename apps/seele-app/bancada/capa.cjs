@@ -169,6 +169,30 @@ const { chromium } = require('./playwright.cjs');
       return camada && getComputedStyle(camada).backgroundImage.includes(window.daCapa);
     }, cartao, { timeout: 5000 });
 
+    // 1b. **«O SEELE desenha» não recebe capa** (`capa.preferencia`; a
+    //     auditoria do `v6.json`, tabela 6): pela escolha da própria capa, e
+    //     pela do cartão, que ela herda. De volta ao automático, ela volta.
+    const porEscolha = await page.evaluate(async (seletor) => {
+      const pintada = () => {
+        const camada = document.querySelector(seletor)?.querySelector(':scope > .capa-camada');
+        return Boolean(camada && getComputedStyle(camada).backgroundImage.includes(window.daCapa));
+      };
+      const assentar = () => new Promise(ok => setTimeout(ok, 200));
+      const com = async (ponto) => {
+        escolherApresentacao(ponto, APRESENTACAO_NATIVA);
+        desenharChamada(testTable.snapshot);
+        await assentar();
+        const r = pintada();
+        escolherApresentacao(ponto, '');
+        desenharChamada(testTable.snapshot);
+        await assentar();
+        return r;
+      };
+      return { propria: await com('pessoa.capa'), herdada: await com('pessoa.cartao'), deVolta: pintada() };
+    }, cartao);
+    assert.deepEqual(porEscolha, { propria: false, herdada: false, deVolta: true },
+      `com «o SEELE desenha», a capa do MOD foi pintada, ou não voltou no automático: ${JSON.stringify(porEscolha)}`);
+
     // A legibilidade, com as três capas de prova, calado e falando.
     const pioras = [];
     for (const [nomeDaCapa, cor] of CAPAS_DE_PROVA) {
@@ -260,6 +284,38 @@ const { chromium } = require('./playwright.cjs');
     }, cartao);
     assert.deepEqual(porCima, [], 'a capa ficou por cima do que o produto escreve no cartão');
 
+    // 2b. **Quem fala ganha o véu de carga e o halo por cima da capa**
+    //     (`capa.quem-fala`; a auditoria do v6, tabela 6): os dois moram no
+    //     `::after` da camada da capa, que nenhuma medida lia. O mesmo cartão,
+    //     calado e falando.
+    const veu = await page.evaluate(async (seletor) => {
+      const quadro = () => new Promise(ok => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const ler = () => {
+        const camada = document.querySelector(seletor)?.querySelector(':scope > .capa-camada');
+        if (!camada) return null;
+        const s = getComputedStyle(camada, '::after');
+        return { fundo: s.backgroundColor, halo: s.boxShadow, fala: document.querySelector(seletor).dataset.fala ?? null };
+      };
+      const id = document.querySelector(seletor).dataset.pessoaDaCapa;
+      const pessoa = testTable.snapshot.voice_rooms.flatMap(sala => sala.people).find(p => String(p.id) === id);
+      const antes = pessoa.speaking;
+      pessoa.speaking = false;
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      const calado = ler();
+      pessoa.speaking = true;
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      const falando = ler();
+      pessoa.speaking = antes;
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      return { calado, falando };
+    }, cartao);
+    assert.ok(veu.calado && veu.falando && veu.falando.fala === 'sim', `o caso não mediu o véu de quem fala: ${JSON.stringify(veu)}`);
+    assert.ok(veu.falando.halo !== 'none' && veu.calado.halo === 'none', `quem fala não ganhou o halo por cima da capa: ${JSON.stringify(veu)}`);
+    assert.notEqual(veu.falando.fundo, veu.calado.fundo, `quem fala não ganhou o véu de carga: ${JSON.stringify(veu)}`);
+
     // 3. Com movimento reduzido, o quadro estático.
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.evaluate(() => redesenharCapas());
@@ -271,6 +327,56 @@ const { chromium } = require('./playwright.cjs');
     assert.ok(comMovimentoReduzido.temImagem && !comMovimentoReduzido.eAOriginal,
       `com movimento reduzido, o cartão não usou o quadro estático: ${JSON.stringify(comMovimentoReduzido)}`);
     await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+    // 3a. **Carregando, liso** (`capa.estados`; a auditoria do v6, tabela 6):
+    //     enquanto a imagem não chegou, o cartão não tem capa nem marca dela.
+    const carregando = await page.evaluate(async (alvo) => {
+      const quadro = () => new Promise(ok => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      contribuicoesDosMods.revogar(handleCapa);
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      let soltar;
+      testTable.ler_imagem_mod = new Promise((ok) => { soltar = () => ok({ papel: 'imagem', bytes: 256, uri: daCapa }); });
+      window.handleCapa = registrarCapa(alvo, 'volume:demora');
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      const cartao = document.querySelector(`.chamada-cartao[data-pessoa-da-capa="${alvo}"]`);
+      const camada = cartao?.querySelector(':scope > .capa-camada');
+      const enquanto = { comCapa: cartao?.dataset.comCapa ?? null, fundo: camada ? getComputedStyle(camada).backgroundImage : 'none' };
+      soltar();
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      await new Promise(ok => setTimeout(ok, 300));
+      desenharChamada(testTable.snapshot);
+      await quadro();
+      const depois = document.querySelector(`.chamada-cartao[data-pessoa-da-capa="${alvo}"]`)?.dataset.comCapa ?? null;
+      return { enquanto, depois };
+    }, alvo);
+    assert.deepEqual(carregando.enquanto, { comCapa: null, fundo: 'none' }, `carregando, o cartão não ficou liso: ${JSON.stringify(carregando)}`);
+    assert.ok(carregando.depois, `a capa que chegou depois não vestiu o cartão: ${JSON.stringify(carregando)}`);
+
+    // 3b. **Com a janela oculta, o quadro estático** (`capa.movimento-reduzido`;
+    //     a auditoria do `v6.json`, B8), e a original de volta quando ela
+    //     volta. Nada lia `document.hidden`.
+    const comAJanelaOculta = await page.evaluate(seletor => {
+      const fundo = () => {
+        const camada = document.querySelector(seletor)?.querySelector(':scope > .capa-camada');
+        return camada ? getComputedStyle(camada).backgroundImage : '';
+      };
+      redesenharCapas();
+      const antes = fundo().includes(window.daCapa);
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      const oculta = { temImagem: fundo().startsWith('url('), eAOriginal: fundo().includes(window.daCapa) };
+      delete document.hidden;
+      delete document.visibilityState;
+      document.dispatchEvent(new Event('visibilitychange'));
+      return { antes, oculta, deVolta: fundo().includes(window.daCapa) };
+    }, cartao);
+    assert.ok(comAJanelaOculta.antes, `o cartão não animava antes de a janela ficar oculta: ${JSON.stringify(comAJanelaOculta)}`);
+    assert.ok(comAJanelaOculta.oculta.temImagem && !comAJanelaOculta.oculta.eAOriginal,
+      `com a janela oculta, o cartão não usou o quadro estático: ${JSON.stringify(comAJanelaOculta)}`);
+    assert.ok(comAJanelaOculta.deVolta, `com a janela de volta, o cartão não voltou à original: ${JSON.stringify(comAJanelaOculta)}`);
 
     // 4. A capa recusada: fundo liso, e o MOD sabe, com o ponto e o alvo.
     await page.evaluate(alvo => {
@@ -342,8 +448,8 @@ const { chromium } = require('./playwright.cjs');
 
     // 7. **No máximo seis capas animadas ao mesmo tempo** (rascunho §4; tarefa
     //    6, Step 5c): escolhidas pela vista — as visíveis, e entre elas quem
-    //    falou por último. As outras mostram o quadro parado. Oito pessoas na
-    //    sala e a capa de quem usa: nove capas; a última da grade é quem falou.
+    //    falou por último. As outras mostram o quadro parado. Dezoito pessoas
+    //    na sala e a capa de quem usa; a última da grade é quem falou.
     const animadas = await page.evaluate(async () => {
       window.recusarCapa = false;
       testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
@@ -351,7 +457,9 @@ const { chromium } = require('./playwright.cjs');
       const sala = r.voice_rooms[0];
       const modelo = sala.people.find(p => !p.is_self);
       const deAntes = sala.people.slice();
-      for (let id = 10; id < 17; id += 1) sala.people.push({ ...modelo, id, nickname: `p${id}`, speaking: false });
+      // Dezessete a mais: a grade passa da janela por mais de uma fileira, e
+      // rolada até o fim, a primeira sai da vista inteira.
+      for (let id = 10; id < 27; id += 1) sala.people.push({ ...modelo, id, nickname: `p${id}`, speaking: false });
       const ids = sala.people.map(p => String(p.id));
       // A de quem usa já está de pé (a seção do núcleo a registrou), e uma
       // segunda seria `contribuicao-ja-existe`.
@@ -359,11 +467,17 @@ const { chromium } = require('./playwright.cjs');
       desenhar(r);
       desenharChamada(r);
       await new Promise(ok => setTimeout(ok, 600));
-      // Quem fala agora é a última da grade.
-      sala.people.at(-1).speaking = true;
+      // Quem fala agora é a última da grade **à vista**: depois das seis
+      // primeiras na ordem, e só a fala a põe entre as que animam.
+      const aVista = [...document.querySelectorAll('.chamada-cartao[data-com-capa]')].filter(e => {
+        const c = e.getBoundingClientRect();
+        return c.width > 0 && c.height > 0 && c.bottom > 0 && c.top < innerHeight;
+      });
+      const quemFala = sala.people.find(p => String(p.id) === aVista.at(-1)?.dataset.pessoaDaCapa);
+      quemFala.speaking = true;
       desenharChamada(r);
       await new Promise(ok => setTimeout(ok, 300));
-      sala.people.at(-1).speaking = false;
+      quemFala.speaking = false;
       desenharChamada(r);
       await new Promise(ok => setTimeout(ok, 300));
       const capas = [...document.querySelectorAll('[data-com-capa]')];
@@ -372,7 +486,7 @@ const { chromium } = require('./playwright.cjs');
         return c.width > 0 && c.height > 0 && c.bottom > 0 && c.top < innerHeight;
       });
       const usaOriginal = e => e.querySelector(':scope > .capa-camada')?.style.backgroundImage.includes(daCapa);
-      const ultima = document.querySelector(`.chamada-cartao[data-pessoa-da-capa="${ids.at(-1)}"]`);
+      const ultima = document.querySelector(`.chamada-cartao[data-pessoa-da-capa="${quemFala.id}"]`);
       const resultado = {
         capas: capas.length,
         visiveis: visiveis.length,
@@ -380,6 +494,27 @@ const { chromium } = require('./playwright.cjs');
         animadasFora: capas.filter(e => !visiveis.includes(e) && usaOriginal(e)).length,
         quemFalouAnima: Boolean(ultima && usaOriginal(ultima)),
       };
+      // **E com a grade rolada até o fim** (`capa.movimento-reduzido`, fora da
+      // vista; a auditoria do v6, tabela 6): sem rolar, as de fora ficavam no
+      // fim da ordem, e o caso passava sem o filtro da caixa. Rolada, as
+      // primeiras saem da vista — e continuam paradas.
+      const rolante = (() => {
+        for (let n = document.querySelector('.chamada-cartao')?.parentElement; n; n = n.parentElement) {
+          if (/(auto|scroll)/.test(getComputedStyle(n).overflowY) && n.scrollHeight > n.clientHeight) return n;
+        }
+        return null;
+      })();
+      if (rolante) {
+        rolante.scrollTop = rolante.scrollHeight;
+        redesenharCapas();
+        await new Promise(ok => setTimeout(ok, 300));
+        const vista = capas.filter(e => { const c = e.getBoundingClientRect(); return c.width > 0 && c.height > 0 && c.bottom > 0 && c.top < innerHeight; });
+        resultado.rolada = {
+          primeiraFora: !vista.includes(capas.find(e => e.classList.contains('chamada-cartao'))),
+          animadasFora: capas.filter(e => !vista.includes(e) && usaOriginal(e)).length,
+        };
+        rolante.scrollTop = 0;
+      }
       for (const h of handles) contribuicoesDosMods.revogar(h);
       sala.people.splice(0, sala.people.length, ...deAntes);
       desenhar(r);
@@ -387,8 +522,13 @@ const { chromium } = require('./playwright.cjs');
       return resultado;
     });
     assert.ok(animadas.capas >= 9, `só ${animadas.capas} capas na tela: o cenário não se montou`);
+    // Mais de seis à vista, ou o teto não se mede: com seis ou menos, trocar o
+    // TETO_DE_CAPAS_ANIMADAS para nove passava (a auditoria do v6, tabela 9).
+    assert.ok(animadas.visiveis > 6, `só ${animadas.visiveis} capas à vista, e o teto de seis não se mede: ${JSON.stringify(animadas)}`);
     assert.equal(animadas.animadas, Math.min(6, animadas.visiveis), `animam ${JSON.stringify(animadas)}`);
     assert.equal(animadas.animadasFora, 0, `uma capa fora da vista anima: ${JSON.stringify(animadas)}`);
+    assert.ok(animadas.rolada?.primeiraFora, `a grade não rolou a ponto de tirar a primeira capa da vista, e o caso não mede o filtro: ${JSON.stringify(animadas)}`);
+    assert.equal(animadas.rolada.animadasFora, 0, `com a grade rolada, uma capa fora da vista anima: ${JSON.stringify(animadas)}`);
     assert.ok(animadas.quemFalouAnima, `quem falou por último não anima: ${JSON.stringify(animadas)}`);
 
     // 5. **A citação `daPessoa`** (rascunho §4; tarefa 6, Step 4b; o bloqueio A
@@ -417,7 +557,11 @@ const { chromium } = require('./playwright.cjs');
       await new Promise(ok => setTimeout(ok, 400));
       registrarNoAnfitriao = registrarDeAntes;
       const linha = document.querySelector('li.pessoa-apresentada[data-apresentada-por="teste/perfis"]');
-      const comFundo = [...(linha?.querySelectorAll('.pessoa-miolo *') ?? [])].some(e => e.style.backgroundImage.includes(window.daCapa));
+      // **Na lista, parada** (`capa.onde.lista`): o quadro estático, que sai em
+      // PNG, e não a original, que é JPEG.
+      const fundosDoCartao = [...(linha?.querySelectorAll('.pessoa-miolo *') ?? [])].map(e => e.style.backgroundImage);
+      const comFundo = fundosDoCartao.some(b => b.includes('data:image/png'));
+      const parada = !fundosDoCartao.some(b => b.includes(window.daCapa));
       const retrato = linha?.querySelector('.pessoa-miolo [data-estado-do-retrato]');
       const montagem = contribuicoesDosMods.porHandle.get(cartao)?.montadas?.get(alvo);
       const bytesNoCartao = montagem
@@ -426,20 +570,272 @@ const { chromium } = require('./playwright.cjs');
       contribuicoesDosMods.revogar(cartao);
       return {
         comFundo,
+        parada,
         pedidosNovos: testCalls.filter(c => c.cmd === 'ler_imagem_mod').length - pedidosAntes,
         bytesNoCartao,
         retrato: retrato?.dataset.estadoDoRetrato ?? null,
         recusas: ditos.filter(d => /retrato|fundo/.test(d)),
       };
     }, alvo);
-    assert.ok(citacao.comFundo, `o cartão que cita a capa não a mostrou: ${JSON.stringify(citacao)}`);
+    assert.ok(citacao.comFundo, `o cartão que cita a capa não a mostrou parada: ${JSON.stringify(citacao)}`);
+    assert.ok(citacao.parada, `na lista, a capa citada no cartão anima: ${JSON.stringify(citacao)}`);
     assert.equal(citacao.pedidosNovos, 0, `citar a capa abriu ${citacao.pedidosNovos} pedido(s) de mídia novo(s)`);
     assert.equal(citacao.bytesNoCartao, 0, `a capa citada contou ${citacao.bytesNoCartao} bytes de novo no cartão`);
     assert.equal(citacao.retrato, 'inicial', `o retrato que cita um avatar que não existe saiu ${citacao.retrato}`);
     assert.deepEqual(citacao.recusas, [], 'citar uma imagem que a pessoa não tem virou recusa');
 
+    // 5a. **O avatar que existe, citado** (`capa.citacao` e
+    //     `regioes.pessoas.lista.pontos[4]`; a auditoria do v6, tabelas 5 e
+    //     6): o caso de cima cita um avatar que a pessoa não tem. Com um
+    //     `pessoa.avatar` registrado, o retrato do cartão mostra a imagem
+    //     dele — sem pedido de mídia novo —, e não a inicial.
+    const avatarCitado = await page.evaluate(async (alvo) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 32; canvas.height = 32;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#3250e6'; ctx.fillRect(0, 0, 32, 32);
+      const foto = canvas.toDataURL('image/png');
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: foto };
+      const avatar = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.avatar', modo: 'substituir', alvo,
+        conteudo: { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:avatar-citado' } } },
+      }).handle;
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      const pedidosAntes = testCalls.filter(c => c.cmd === 'ler_imagem_mod').length;
+      const cartao = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.cartao', modo: 'substituir', alvo,
+        conteudo: [{ forma: 'retrato', chave: 'r', daPessoa: 'avatar' }],
+      }).handle;
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      const linha = document.querySelector('li.pessoa-apresentada[data-apresentada-por="teste/perfis"]');
+      const retrato = linha?.querySelector('.pessoa-miolo [data-estado-do-retrato]');
+      const medido = {
+        estado: retrato?.dataset.estadoDoRetrato ?? null,
+        src: retrato?.querySelector('.regiao-de-mod-retrato-imagem')?.getAttribute('src') === foto,
+        pedidosNovos: testCalls.filter(c => c.cmd === 'ler_imagem_mod').length - pedidosAntes,
+      };
+      contribuicoesDosMods.revogar(cartao);
+      contribuicoesDosMods.revogar(avatar);
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      desenhar(testTable.snapshot);
+      return medido;
+    }, alvo);
+    assert.deepEqual(avatarCitado, { estado: 'imagem', src: true, pedidosNovos: 0 },
+      `o retrato que cita o avatar que a pessoa tem não o mostrou: ${JSON.stringify(avatarCitado)}`);
+
+    // 5b. **A citação acompanha a troca** (o achado do PERFIS, 15/10; rascunho
+    //     §4). A pessoa troca a capa pelo servidor: o MOD faz `atualizar` na
+    //     contribuição da capa, e o cartão que a cita — no fundo e num retrato
+    //     — passa a mostrar a nova, sem o conteúdo do cartão mudar. Ficava com
+    //     a velha até a sessão remontar: o redesenho da troca só alcançava a
+    //     capa nativa, e o renderer não tinha o que reconciliar.
+    const troca = await page.evaluate(async (alvo) => {
+      const fotoDe = (cor) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 96; canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = cor; ctx.fillRect(0, 0, 96, 32);
+        return canvas.toDataURL('image/jpeg');
+      };
+      window.recusarCapa = false;
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      contribuicoesDosMods.revogar(handleCapa);
+      window.handleCapa = registrarCapa(alvo, 'volume:antes');
+      desenharChamada(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      const cartao = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.cartao', modo: 'substituir', alvo,
+        conteudo: [{
+          forma: 'caixa', chave: 'faixa', fundoDeMidia: { daPessoa: 'capa' },
+          dentro: [{ forma: 'texto', chave: 't', dentro: 'cartão' }, { forma: 'retrato', chave: 'r', daPessoa: 'capa' }],
+        }],
+      }).handle;
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      const linha = () => document.querySelector('li.pessoa-apresentada[data-apresentada-por="teste/perfis"]');
+      const fundo = () => [...(linha()?.querySelectorAll('.pessoa-miolo *') ?? [])]
+        .map(e => e.style.backgroundImage).find(b => b.includes('url(')) ?? '';
+      const retrato = () => linha()?.querySelector('.pessoa-miolo .regiao-de-mod-retrato-imagem')?.getAttribute('src') ?? '';
+      const parado = (uri) => uri.includes('data:image/png');
+      const antes = { fundo: fundo(), retrato: retrato() };
+
+      const nova = fotoDe('#e63232');
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: nova };
+      contribuicoesDosMods.atualizar(handleCapa, { id: 'teste/perfis', instancia: instanciaTeste }, {
+        doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:depois' } },
+      });
+      await new Promise(ok => setTimeout(ok, 600));
+      const depois = { fundo: fundo(), retrato: retrato() };
+      contribuicoesDosMods.revogar(cartao);
+      return {
+        antes: { fundo: parado(antes.fundo), retrato: parado(antes.retrato) },
+        depois: {
+          fundo: parado(depois.fundo) && depois.fundo !== antes.fundo,
+          retrato: parado(depois.retrato) && depois.retrato !== antes.retrato,
+        },
+      };
+    }, alvo);
+    assert.deepEqual(troca.antes, { fundo: true, retrato: true }, `o cartão não citava a capa, parada, antes da troca: ${JSON.stringify(troca)}`);
+    assert.deepEqual(troca.depois, { fundo: true, retrato: true },
+      `a citação não acompanhou a troca da capa: o cartão ficou com a velha (${JSON.stringify(troca)})`);
+
+    // 5c. **A citação com `pessoa`, numa superfície** (D-api-9; `capa.onde.perfil`).
+    //     A folha do PERFIS cita a capa de quem ela mostra pelo id, e a imagem
+    //     é a da contribuição: nenhum pedido novo, e animada, porque a folha
+    //     não é a lista. Com o movimento reduzido, o quadro parado. O id de
+    //     quem não está na sessão deixa o fundo liso, sem recusa. E a troca da
+    //     capa alcança a folha, como alcança o cartão.
+    await page.evaluate(async (alvo) => {
+      window.recusarCapa = false;
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      contribuicoesDosMods.revogar(handleCapa);
+      window.handleCapa = registrarCapa(alvo, 'volume:na-folha');
+      desenharChamada(testTable.snapshot);
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      let n = 5000;
+      window.pedirComoOPerfis = (m) => atenderOMod({ id: 'teste/perfis', api: 6 }, instanciaTeste, { ...m, n: ++n });
+      await pedirComoOPerfis({ tipo: 'superficie-criar', descricao: { id: 'perfil', tipo: 'folha', titulo: 'Perfil' } });
+      await pedirComoOPerfis({ tipo: 'superficie-mostrar', superficie: 'perfil' });
+      window.montarCitando = (sufixo, pessoa) => pedirComoOPerfis({ tipo: 'superficie-montar', superficie: 'perfil', arvore: [
+        { forma: 'caixa', chave: `cabeca-${sufixo}`, fundoDeMidia: { daPessoa: 'capa', pessoa }, dentro: [{ forma: 'texto', chave: 't', dentro: 'Lia' }] },
+        { forma: 'retrato', chave: `foto-${sufixo}`, daPessoa: 'capa', pessoa, inicial: 'L' },
+      ] });
+      window.naFolha = (sufixo) => {
+        const folha = document.querySelector('[data-superficie="perfil"]');
+        const cabeca = folha?.querySelector(`[data-chave-do-mod="cabeca-${sufixo}"]`);
+        const foto = folha?.querySelector(`[data-chave-do-mod="foto-${sufixo}"]`);
+        return {
+          fundo: cabeca?.style.backgroundImage ?? null,
+          retrato: foto?.querySelector('.regiao-de-mod-retrato-imagem')?.getAttribute('src') ?? '',
+          estadoDoRetrato: foto?.dataset.estadoDoRetrato ?? null,
+        };
+      };
+      window.pedidosDeMidia = () => testCalls.filter(c => c.cmd === 'ler_imagem_mod').length;
+    }, alvo);
+    const esperar = (ms) => page.evaluate(ms => new Promise(ok => setTimeout(ok, ms)), ms);
+
+    const pedidosAntesDaFolha = await page.evaluate(() => pedidosDeMidia());
+    await page.evaluate(alvo => montarCitando('viva', Number(alvo)), alvo);
+    await esperar(400);
+    const viva = await page.evaluate(() => naFolha('viva'));
+    assert.ok(viva.fundo?.includes(await page.evaluate(() => daCapa)),
+      `a folha que cita a capa pelo id não a mostrou, animada: ${JSON.stringify(viva)}`);
+    assert.ok(viva.retrato.startsWith('data:image/jpeg'), `o retrato da folha que cita pelo id não a mostrou: ${JSON.stringify(viva)}`);
+    assert.equal(await page.evaluate(() => pedidosDeMidia()) - pedidosAntesDaFolha, 0, 'citar a capa na folha abriu pedido de mídia novo');
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.evaluate(alvo => montarCitando('reduzida', Number(alvo)), alvo);
+    await esperar(400);
+    const reduzida = await page.evaluate(() => naFolha('reduzida'));
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    assert.ok(reduzida.fundo?.includes('data:image/png'),
+      `com o movimento reduzido, a capa citada na folha não é o quadro parado: ${JSON.stringify(reduzida)}`);
+
+    // A 99 não está na sessão, mas tem capa: a de quem saiu, que o MOD não
+    // revogou. É a presença, e não a falta de contribuição, que a deixa lisa.
+    await page.evaluate(() => { window.handleCapaDeQuemSaiu = registrarCapa('99', 'volume:quem-saiu'); });
+    await esperar(400);
+    const recusasAntes = await page.evaluate(() => entregues.filter(m => m.tipo === 'evento' && m.nome === 'midia').length);
+    const pedidosAntesDaAusente = await page.evaluate(() => pedidosDeMidia());
+    await page.evaluate(() => montarCitando('ausente', 99));
+    await esperar(400);
+    const ausente = await page.evaluate(() => naFolha('ausente'));
+    assert.equal(await page.evaluate(() => pedidosDeMidia()) - pedidosAntesDaAusente, 0,
+      'citar quem não está na sessão carregou a capa dele');
+    await page.evaluate(() => contribuicoesDosMods.revogar(handleCapaDeQuemSaiu));
+    assert.equal(ausente.fundo, '', `a citação de quem não está na sessão pintou o fundo: ${JSON.stringify(ausente)}`);
+    assert.equal(ausente.estadoDoRetrato, 'inicial', `a citação de quem não está na sessão saiu ${JSON.stringify(ausente)}`);
+    assert.equal(await page.evaluate(() => entregues.filter(m => m.tipo === 'evento' && m.nome === 'midia').length), recusasAntes,
+      'citar quem não está na sessão virou evento de mídia: devia ficar liso, sem recusa');
+
+    await page.evaluate(alvo => montarCitando('troca', Number(alvo)), alvo);
+    await esperar(400);
+    const antesDaTroca = await page.evaluate(() => naFolha('troca'));
+    await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 96; canvas.height = 32;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#e63232'; ctx.fillRect(0, 0, 96, 32);
+      window.capaNova = canvas.toDataURL('image/jpeg');
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: capaNova };
+      contribuicoesDosMods.atualizar(handleCapa, { id: 'teste/perfis', instancia: instanciaTeste }, {
+        doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:na-folha-depois' } },
+      });
+    });
+    await esperar(600);
+    const depoisDaTroca = await page.evaluate(() => naFolha('troca'));
+    assert.ok(depoisDaTroca.fundo !== antesDaTroca.fundo && depoisDaTroca.fundo.includes(await page.evaluate(() => capaNova)),
+      `a citação pelo id não acompanhou a troca da capa na folha: ${JSON.stringify({ antesDaTroca, depoisDaTroca })}`);
+    await page.evaluate(() => pedirComoOPerfis({ tipo: 'superficie-descartar', superficie: 'perfil' }));
+
+    // 6. **O clique numa ação de contribuição chega ao MOD com o alvo** (o
+    //    cruzamento dos portes). O cartão da pessoa (`pessoa.cartao` em
+    //    substituir, com `acaoPrincipal`) diz `pessoa`, que o PERFIS usa para
+    //    abrir o perfil. A ação de uma sala (`sala.acoes`) diz `canal`, que a
+    //    MESA usa para abrir a mesa da sala. Os dois levam o id que o produto
+    //    escreveu, em texto, e não algo que o MOD desenhou.
+    const acoes = await page.evaluate(async (alvo) => {
+      const sala = String(testTable.snapshot.voice_rooms[0].id);
+      const cartao = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.cartao', modo: 'substituir', alvo, acaoPrincipal: 'abrir-perfil', nomeAcessivel: 'perfil',
+        conteudo: [{ forma: 'texto', chave: 't', dentro: 'cartão' }],
+      }).handle;
+      const daSala = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'sala.acoes', modo: 'adicionar', alvo: sala, acaoPrincipal: 'mesa-da-sala', rotulo: 'MESA',
+      }).handle;
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 300));
+      const antes = entregues.length;
+      const linha = document.querySelector('li.pessoa-apresentada[data-apresentada-por="teste/perfis"]');
+      const doCartao = linha?.matches('[data-acao-de-mod]') ? linha : linha?.querySelector('[data-acao-de-mod]');
+      doCartao?.click();
+      document.querySelector('[data-acao-de-mod="mesa-da-sala"]')?.click();
+      await new Promise(ok => setTimeout(ok, 50));
+      const ditas = entregues.slice(antes).filter(m => m.tipo === 'evento' && m.nome === 'acao')
+        .map(({ acao, pessoa, canal }) => ({ acao, pessoa, canal }));
+      contribuicoesDosMods.revogar(cartao);
+      contribuicoesDosMods.revogar(daSala);
+      desenhar(testTable.snapshot);
+      return { achouOCartao: Boolean(doCartao), ditas, sala };
+    }, alvo);
+    assert.ok(acoes.achouOCartao, 'o cartão com acaoPrincipal não ganhou o alvo do clique');
+    assert.deepEqual(acoes.ditas, [
+      { acao: 'abrir-perfil', pessoa: alvo, canal: '' },
+      { acao: 'mesa-da-sala', pessoa: '', canal: acoes.sala },
+    ], `o clique nas ações não chegou ao MOD com o alvo: ${JSON.stringify(acoes)}`);
+
+    // 8. **O endereço abre fora da janela, e só http e https**
+    //    (`actions.abrir-endereco`, `eventos[12]`; a auditoria do `v6.json`,
+    //    tabelas 2 e 3). O dono de verdade: o `https` vai ao navegador do
+    //    sistema por `abrir_no_navegador`, e o MOD ouve `link` aberto; um
+    //    `javascript:` e um `file:` não vão a lugar nenhum, e o MOD ouve o porquê.
+    const links = await page.evaluate(async () => {
+      const dono = donoDaRegiao({ id: 'teste/perfis', hash: 'hash' }, instanciaTeste);
+      const antes = entregues.length;
+      const chamadasAntes = testCalls.length;
+      dono.abrirEndereco('https://exemplo.org/regras', 'site');
+      dono.abrirEndereco('javascript:alert(1)', 'mau');
+      dono.abrirEndereco('file:///etc/hosts', 'arquivo');
+      await new Promise(ok => setTimeout(ok, 50));
+      const ditos = entregues.slice(antes).filter(m => m.tipo === 'evento' && m.nome === 'link')
+        .map(({ chave, aberto, porque }) => ({ chave, aberto, porque: porque ?? null }))
+        .sort((a, b) => a.chave.localeCompare(b.chave));
+      const abertos = testCalls.slice(chamadasAntes).filter(c => c.cmd === 'abrir_no_navegador').map(c => c.args?.url);
+      return { ditos, abertos };
+    });
+    assert.deepEqual(links.abertos, ['https://exemplo.org/regras'],
+      `o que o MOD nomeou não foi ao navegador do sistema, ou um esquema que não serve foi: ${JSON.stringify(links)}`);
+    assert.deepEqual(links.ditos, [
+      { chave: 'arquivo', aberto: false, porque: 'endereco-nao-serve' },
+      { chave: 'mau', aberto: false, porque: 'endereco-nao-serve' },
+      { chave: 'site', aberto: true, porque: null },
+    ], `o MOD não ouviu o \`link\` de cada endereço como foi: ${JSON.stringify(links)}`);
+
     assert.deepEqual(errors, []);
-    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo.');
+    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo, que acompanha a troca da capa, e que pelo id resolve numa folha.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

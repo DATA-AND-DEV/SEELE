@@ -22,8 +22,8 @@ SeeleUI.aoEvento((ev) => {
   }
 });
 (async () => {
-  const snap = await SeeleMods.snapshot();
-  await SeeleUI.regiao({ tipo: "texto", texto: "oi de " + snap.servidor });
+  // O retrato, e não o `snapshot` nem a `regiao`, que saíram com as APIs 3 a 5.
+  const retrato = await SeeleUI.retrato();
   const capacidades = SeeleUI.capacidades();
   await new Promise((ok) => setTimeout(ok, 30));
   let n = 0;
@@ -32,18 +32,23 @@ SeeleUI.aoEvento((ev) => {
   });
   const erro = await SeeleMods.request("nao-existe", "x", 1).then(() => "resolveu", (e) => "rejeitou: " + e.message);
   let grande;
+  let grandeCampos = null;
   try {
     await SeeleMods.request("eco", "grande", "é".repeat(7000));
     grande = "passou";
   } catch (e) {
     grande = e.message.slice(0, 40);
+    // A forma de toda recusa (a auditoria do v6, B2): o nome em `erro`, e os
+    // números em campos.
+    grandeCampos = { erro: e.erro, tipoPedido: e.tipoPedido, tamanho: e.tamanho, teto: e.teto };
   }
   await SeeleMods.request("eco", "pronto", {
-    snap,
+    retrato,
     capacidades,
     intervalos: n,
     erro,
     grande,
+    grandeCampos,
     superficies: typeof SeeleUI.superficies,
     console: typeof console.log,
   });

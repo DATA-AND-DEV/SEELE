@@ -153,7 +153,7 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
             material_e2ee: None,
-            apis_de_mod: Vec::new(),
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
         },
     )
     .await?;

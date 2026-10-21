@@ -2436,6 +2436,12 @@ fn every_refusal_the_bridge_writes_itself_has_a_sentence_in_the_page() {
         ("src/main.rs", "FalhaAoEscolher"),
         ("src/main.rs", "FalhaNaPortaria"),
         ("src/mods.rs", "FalhaAoInstalarMod"),
+        // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
+        // tarefa 13 do plano da F3, Step 5b). O nome sozinho não basta para a
+        // `BancoNaoRespondeu(String)`, que divide o nome com a de unidade da
+        // `FalhaNoMod`: a bancada `hospedar-com-mod-antigo.cjs` monta cada
+        // variante pelo `fraseDeErro` e confere a frase.
+        ("src/mods.rs", "FalhaAoResolverModAntigo"),
     ] {
         for variant in variants_of(&read(file), enumeration) {
             if !names(&script, &variant) {
@@ -4230,19 +4236,24 @@ fn a_api_da_casca_bate_com_a_do_nucleo() {
          mandaria alguém atualizar o que já está atualizado"
     );
 
-    // E o conjunto aceito, na mesma ordem em que o Rust o escreve.
-    let aceitas = rust
-        .split_once("pub const APIS_ACEITAS: &[u32] = &[")
+    // E o conjunto aceito, na mesma ordem: **o valor compilado**, e não o
+    // texto. Desde o corte da API 6 o `APIS_ACEITAS` sai de `APIS_POR_LINHA`
+    // (`c4eb6d03`), e a leitura do texto, que procurava a lista escrita,
+    // reprovava com «sumiu» — o guarda dependia da forma, e não do número.
+    let da_casca: Vec<u32> = casca
+        .split_once("const APIS_QUE_ESTE_APLICATIVO_ACEITA = [")
         .and_then(|(_, resto)| resto.split_once(']'))
-        .map(|(lista, _)| lista.replace(char::is_whitespace, ""))
-        .expect("`APIS_ACEITAS` sumiu de seele-proto");
-    let esperado = format!(
-        "const APIS_QUE_ESTE_APLICATIVO_ACEITA = [{}];",
-        aceitas.trim_end_matches(',')
-    );
-    assert!(
-        casca.contains(&esperado),
-        "a casca lista outras APIs aceitas que o núcleo: esperava `{esperado}`"
+        .map(|(lista, _)| {
+            lista
+                .split(',')
+                .filter_map(|n| n.trim().parse().ok())
+                .collect()
+        })
+        .expect("`APIS_QUE_ESTE_APLICATIVO_ACEITA` sumiu de camada-mods.js");
+    assert_eq!(
+        da_casca,
+        seele_ffi::mods::APIS_ACEITAS,
+        "a casca lista outras APIs aceitas que o núcleo"
     );
 }
 
@@ -14145,12 +14156,17 @@ fn o_que_um_mod_declara_e_montado_e_nunca_interpretado() {
         "uma forma desconhecida deixou de ser recusada; a gramática passa a \
          crescer sem ninguém decidir: {planejar}"
     );
-    // E num cartão, a recusa é **contada**: uma forma que a região conhece e o
-    // cartão não é um `botao` que o MOD pôs e não vai aparecer, e ele precisa
-    // saber disso em vez de ver o nó sumir.
+    // E a recusa é **contada**, num cartão e fora dele: uma forma que a região
+    // conhece e o cartão não é um `botao` que o MOD pôs e não vai aparecer, e
+    // uma que a API não tem sumia calada fora do cartão (o achado 5 da
+    // auditoria do `v6.json`). O comportamento é medido em `regiao-do-mod.cjs`
+    // («a recusa diz o que recusou») e em `regioes-do-produto.cjs` («o que a
+    // contribuição recusou»); isto só impede o texto de voltar ao de antes.
     assert!(
-        planejar.contains("if (permitidas) this.recusados += 1;"),
-        "a forma recusada num cartão voltou a sumir calada: {planejar}"
+        planejar.contains(
+            "this.anotarRecusado(conhecida ? \"forma-fora-do-lugar\" : \"forma-desconhecida\""
+        ) && !planejar.contains("if (permitidas) this.anotarRecusado("),
+        "a forma recusada voltou a sumir calada, num cartão ou fora dele: {planejar}"
     );
 
     // E há teto de fundura: sem ele, uma árvore que o MOD manda estoura a pilha
@@ -14232,10 +14248,10 @@ fn um_pedido_de_mod_nunca_fica_sem_resposta() {
          calar deixa o MOD preso: {recusa}"
     );
 
-    // O retrato é o caso que custou a medição: depois do `await`, ele não pode
-    // sair sem resposta nenhuma.
+    // O retrato é o caso que custou a medição (no `snapshot` das APIs 3 a 5,
+    // que saiu): depois do `await`, ele não pode sair sem resposta nenhuma.
     let depois = atender
-        .split_once("case \"snapshot\"")
+        .split_once("case \"retrato\"")
         .expect("o caso do retrato")
         .1
         .split_once("break;")
@@ -14455,12 +14471,13 @@ fn a_excecao_do_tema_de_servidor_esta_escrita_na_estetica() {
     );
 }
 
-/// **O cartão de um MOD é desenhado pelo renderer do produto, e sai com ele.**
+/// **O cartão de um MOD é desenhado pelo renderer do produto.**
 ///
-/// Esta é a única superfície de um MOD fora da região dele. O que a mantém
-/// sendo do produto não é uma promessa: é o renderer ser o mesmo —
+/// Na 6, o cartão é o destino de uma contribuição em `pessoa.cartao`. O que o
+/// mantém sendo do produto não é uma promessa: é o renderer ser o mesmo —
 /// `planejar`, `reconciliar`, `elemento`, `createElement`, `textContent` — com
-/// uma gramática menor e tetos próprios.
+/// o perfil do cartão, de gramática menor e tetos próprios. (Os cartões da API
+/// 3, `SeeleUI.cartoes` e `declararCartoes`, saíram com ela.)
 ///
 /// Os limites, a recusa e o descarte rodam em `bancada/regiao-do-mod.cjs`, no
 /// DOM de mentira, contra este mesmo arquivo. O que este guarda prova é o que
@@ -14471,22 +14488,45 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
     let regiao = without_comments(&read("ui/mods-regiao.js"));
     let base = without_comments(&read("ui/base.js"));
     let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let contribuicoes = without_comments(&read("ui/mods-contribuicoes.js"));
 
-    // **O mesmo renderer.** Se `declararCartoes` parar de chamar `planejar` e
-    // `reconciliar`, o cartão passou a ser montado por outra coisa — e essa
-    // outra coisa é a que ninguém revisou.
-    let declarar = js_function(&regiao, "\n  declararCartoes(cartoes)");
+    // **O mesmo renderer, com o orçamento do ponto.** `montarContribuicao`
+    // monta cada destino por `RegiaoDeMod`, com o perfil que a tabela de pontos
+    // dá — o do cartão, em `pessoa.cartao`. Se ela passar a montar por outra
+    // coisa, essa outra coisa é a que ninguém revisou.
+    let montar = js_function(&base, "function montarContribuicao(");
     assert!(
-        declarar
-            .contains("this.planejar(declaracao, 0, orcamento, PERFIS_DE_RENDER.cartao.formas)")
-            && declarar.contains("this.reconciliar(raiz, planos, 0, orcamento)"),
-        "o cartão deixou de passar pelo renderer da região: {declarar}"
+        montar.contains("new RegiaoDeMod(")
+            && montar.contains("PERFIS_DE_RENDER[perfil]")
+            && montar.contains("elemento(\"div\", \"contribuicao-de-mod\")"),
+        "o cartão deixou de ser montado pelo renderer do produto, com o orçamento do ponto e a \
+         raiz por `elemento`: {montar}"
     );
     assert!(
-        declarar.contains("elemento(\"div\", \"pessoa-cartao\")"),
-        "a raiz do cartão deixou de nascer por `elemento`, que é o construtor \
-         desta casa e o que o guarda de CSS enxerga: {declarar}"
+        contribuicoes.contains(
+            "\"pessoa.cartao\": { modos: [\"substituir\", \"adicionar\"], perfil: \"cartao\""
+        ),
+        "`pessoa.cartao` deixou de ter o perfil do cartão na tabela de pontos"
     );
+    // **E os cartões da API 3 não voltam por baixo.** Eles eram um segundo
+    // caminho para o mesmo ponto, com regra própria de disputa; o corte da 6
+    // os tirou, e um caminho paralelo que volta é a regra que discorda.
+    for saiu in ["declararCartoes", "raizesDeCartao"] {
+        assert!(!regiao.contains(saiu), "`{saiu}` voltou ao renderer");
+    }
+    //
+    // O primeiro vai partido, e não por capricho: `api/v3.json` a `v5.json`
+    // apontam para a função que dava os cartões, e o `check-api` procura o
+    // nome dela no texto de todo `.rs` — escrito inteiro aqui, nem que fosse
+    // num comentário, ele resolveria o apontador por acidente (ver
+    // `APOSENTADOS_PELO_CORTE`, em `xtask/src/check_api.rs`).
+    for saiu in [
+        concat!("darCartoes", "DoMod"),
+        "cartoesDosMods",
+        "modsDeCartaoQueValem",
+    ] {
+        assert!(!base.contains(saiu), "`{saiu}` voltou a `base.js`");
+    }
 
     // **A gramática é menor, e o que fica de fora é tudo que recebe foco.**
     //
@@ -14549,70 +14589,24 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
 
     // Tetos próprios, e menores que os da região: um cartão é por pessoa.
     let limites = bloco_congelado(&regiao, "const LIMITES_DO_CARTAO = Object.freeze({");
-    for teto in ["cartoes:", "nos:", "fundura:", "midias:", "bytesDeMidia:"] {
+    for teto in ["nos:", "fundura:", "midias:", "bytesDeMidia:"] {
         assert!(
             limites.contains(teto),
             "o teto `{teto}` sumiu dos limites do cartão: {limites}"
         );
     }
 
-    // **A montagem acontece ao declarar, e não ao desenhar a linha.** É aqui
-    // que o teto vira erro na mão de quem pediu; montar tarde recusaria
-    // calado, no meio de um retrato, e o MOD nunca saberia.
-    let dar = js_function(&base, "function darCartoesDoMod(");
-    assert!(
-        dar.contains("regiao.declararCartoes(cartoes)"),
-        "`darCartoesDoMod` deixou de montar no momento da declaração: {dar}"
-    );
-    assert!(
-        dar.contains("redesenharAsPessoas()"),
-        "declarar um cartão deixou de repintar a lista, e ele só apareceria no \
-         próximo retrato: {dar}"
-    );
-    // **A região é criada aqui se ainda não existe, e não exigida.**
-    //
-    // Exigir que o MOD desenhasse antes era uma armadilha de ordem que a API
-    // não conta a ninguém: um MOD que monta os cartões no mesmo ciclo em que
-    // pinta o painel — que é o caso do PERFIS — recebia «não tem região de pé»
-    // e não tinha como saber que bastava inverter duas linhas. Foi a corrida
-    // nativa que pegou, e não um teste.
-    assert!(
-        dar.contains("regiaoDoMod(mod, instancia)"),
-        "dar cartão voltou a exigir uma região que já exista: {dar}"
-    );
-    let desenhar = js_function(&base, "function desenharARegiaoDoMod(");
-    assert!(
-        desenhar.contains("regiaoDoMod(mod, instancia)"),
-        "os dois caminhos deixaram de criar a região pelo mesmo lugar, e um \
-         deles vai esquecer de registrá-la para a saída: {desenhar}"
-    );
-    // E criar a região para um cartão **não abre uma faixa vazia**: quem tira
-    // o palco de escondido é quem desenha.
-    let criar_regiao = js_function(&base, "function regiaoDoMod(mod, instancia)");
-    assert!(
-        !criar_regiao.contains("hidden = false"),
-        "criar a região passou a mostrar o palco, e um MOD que só dá cartão \
-         abre uma faixa vazia na tela: {criar_regiao}"
-    );
-
-    // **O descarte é o da região**, e alcança o que não está sob a raiz dela.
-    let soltar = js_function(&regiao, "\n  soltar()");
-    assert!(
-        soltar.contains("this.soltarCartao(pessoa, raiz)"),
-        "soltar a região deixou de tirar os cartões da lista do produto: {soltar}"
-    );
-    let limpar = js_function(&base, "function limparARegiaoDoMod(");
-    assert!(
-        limpar.contains("cartoesDosMods.delete(id)"),
-        "o MOD saiu e a lista continuou achando que ele tem cartões: {limpar}"
-    );
-
     // **Quem desenha a linha é o produto.** O nó chega montado e é anexado; o
-    // MOD não escolhe posição, e nada de fora escreve estilo nele.
-    let linha = js_function(&sessao, "function linhaNativaDoRoster(");
+    // MOD não escolhe posição, e nada de fora escreve estilo nele. Na 6, o
+    // cartão que acrescenta é o `pessoa.cartao` da contribuição, anexado
+    // depois da linha (os cartões da API 3, `pessoa.cartoes`, saíram com ela).
+    let linha = js_function(&sessao, "function linhaDoRoster(");
     assert!(
-        linha.contains("for (const cartao of pessoa.cartoes ?? []) item.append(cartao);"),
-        "a linha deixou de anexar o cartão montado: {linha}"
+        linha.contains(
+            "item.append(...nosDeMod(conteudoDasContribuicoes(\"pessoa.cartao\", String(pessoa.id))));"
+        ) && !sessao.contains("pessoa.cartoes"),
+        "a linha deixou de anexar o cartão montado pela contribuição, ou voltou a anexar os \
+         cartões da API 3: {linha}"
     );
 
     // **E a substituição não desfaz nenhuma das três garantias.**
@@ -14667,13 +14661,13 @@ fn o_cartao_de_um_mod_e_declarado_e_quem_desenha_e_o_produto() {
         );
     }
 
-    // E o tamanho do cartão é da folha do produto, e não do MOD.
-    let css = read("ui/tela-sessao.css");
-    assert!(
-        css.contains(".pessoa-cartao") && css.contains("max-height"),
-        "o cartão perdeu o teto de altura, e uma lista de vinte pessoas deixa \
-         de ser uma lista de pessoas"
-    );
+    // **O tamanho.** O cartão da API 3 tinha teto de altura na folha
+    // (`.pessoa-cartao`, 96 px), e era isso que este guarda conferia. O da 6
+    // é uma contribuição (`.contribuicao-de-mod`, `display: contents`): o que
+    // o contém é o teto de nós e de fundura do perfil, acima, e o
+    // `linhasMaximas` que o MOD declara — a folha não o corta no meio
+    // (`.pessoa-apresentada-porta`, em `mods-controles.css`). As regras do
+    // `.pessoa-cartao` saíram da folha com ele.
 }
 
 /// **O que a região cria nasce com dono, teto e descarte.**/// **O que a região cria nasce com dono, teto e descarte.**
@@ -15178,28 +15172,6 @@ fn as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor() {
     );
 }
 
-/// E a faixa não fica de pé vazia, nem some com região de outro MOD dentro.
-#[test]
-fn a_faixa_das_regioes_aparece_com_a_primeira_e_sai_com_a_ultima() {
-    let base = without_comments(&read("ui/base.js"));
-    let desenhar = js_function(&base, "function desenharARegiaoDoMod(");
-    let limpar = js_function(&base, "function limparARegiaoDoMod(");
-
-    assert!(
-        desenhar.contains("palco.hidden = false"),
-        "a faixa não é revelada quando a primeira região entra: {desenhar}"
-    );
-    assert!(
-        limpar.contains("palco.childElementCount === 0"),
-        "a faixa some sem olhar se ainda há região de outro MOD dentro, ou \
-         fica de pé vazia — uma régua de 1px em cima de nada: {limpar}"
-    );
-    assert!(
-        limpar.contains("temaDosMods.delete(id)"),
-        "descarregar um MOD deixa o tema dele de pé: {limpar}"
-    );
-}
-
 /// **A janela não tem mais um `SeeleMods` global, e ninguém o lê.**
 ///
 /// ADR 0049. `globalThis.SeeleMods` era a API que um MOD via por rodar na
@@ -15359,6 +15331,7 @@ fn o_conjunto_ja_aceito_volta_ao_disco_e_nenhum_outro() {
 fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
     let camada = read("ui/camada-mods.js");
     let base = read("ui/base.js");
+    let boot = read("ui/tela-boot.js");
     let chamadas = [
         (
             js_function(&camada, "async function obterOConjunto("),
@@ -15374,6 +15347,15 @@ fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
             js_function(&camada, "async function instalarDoCatalogo("),
             "atualizar",
             "a atualização pela gestão (QA-01)",
+        ),
+        // A saída 1 de quem hospeda com um MOD de API antiga (o corte da API 6;
+        // tarefa 13 do plano da F3, Step 5b): só baixa. Quem grava a
+        // exigência é `resolver_mod_de_api_antiga`, no servidor parado que
+        // recusou subir, e não o servidor hospedado aqui.
+        (
+            js_function(&boot, "async function desenharSaidasDeQuemHospeda("),
+            "obter",
+            "a saída ATUALIZAR de quem hospeda com um MOD de API antiga",
         ),
     ];
     for (corpo, uso, quem) in &chamadas {
@@ -15399,8 +15381,8 @@ fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
         })
         .collect();
     assert_eq!(
-        usos, [true; 3],
-        "a janela chama `instalar_mod_do_catalogo` fora das três chamadas deste guarda, ou \
+        usos, [true; 4],
+        "a janela chama `instalar_mod_do_catalogo` fora das quatro chamadas deste guarda, ou \
          sem dizer o uso: a chamada sem uso é recusada antes de baixar, e uma nova pode \
          reaplicar no servidor hospedado aqui sem ninguém ter decidido"
     );
@@ -17124,13 +17106,11 @@ fn sair_do_servidor_encerra_o_ambiente_dos_mods_antes_de_trocar_de_tela() {
     // executor nem a limpar recurso por conta própria: quem sabe o que uma
     // instância criou é ela, e uma limpeza escrita aqui é uma lista que
     // envelhece sozinha a cada recurso novo. Ver `InstanciaDeMod.encerrar`.
-    for proibido in ["terminate()", "limparARegiaoDoMod("] {
-        assert!(
-            !encerrar.contains(proibido),
-            "o encerramento voltou a fazer `{proibido}` na mão, por fora do \
-             ciclo da instância: {encerrar}"
-        );
-    }
+    assert!(
+        !encerrar.contains("terminate()"),
+        "o encerramento voltou a fazer `terminate()` na mão, por fora do ciclo da \
+         instância: {encerrar}"
+    );
     assert!(
         !encerrar.contains("seele-mod-unload"),
         "o encerramento voltou a **pedir** que o MOD se desmonte; um MOD que \
@@ -19461,7 +19441,9 @@ fn nenhuma_tabela_constante_da_ui_repete_uma_chave() {
     // lidas, e as duas maiores com um número de chaves que só a leitura inteira
     // alcança. E uma congelada, para a forma `Object.freeze({` não sumir calada.
     for (dono, nome, minimo) in [
-        ("base.js", "CAPACIDADES_POR_API", 4),
+        // Uma chave só desde o corte da API 6 (tarefa 13 do plano da F3): as 3,
+        // 4 e 5 saíram com os braços delas em `capacidades_da_api`.
+        ("base.js", "CAPACIDADES_POR_API", 1),
         ("glifos.js", "GLIFOS", 20),
         ("frases.js", "MOTIVOS", 5),
         ("frases.js", "AVISOS", 3),
@@ -20394,13 +20376,346 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
     }
 }
 
+/// **Todo pacote recusado é dito com uma frase, e não com um código** (tarefa
+/// 13 do plano da F3, Step 6b).
+///
+/// A gestão escrevia `não serve: ${mod.refused}`, e o que aparecia era o nome
+/// de `refusal_name` cru — «não serve: empty», «não serve: api-too-old».
+/// Quem lê não sabe o que fazer com um código. A lista de nomes sai do próprio
+/// `refusal_name`, em `crates/seele-core/src/mods.rs`, e não é escrita aqui:
+/// uma variante nova de `Refused` sem frase reprova nesta rodada, em vez de
+/// aparecer como código na tela de alguém.
+#[test]
+fn todo_pacote_recusado_e_dito_com_uma_frase() {
+    let nucleo = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/seele-core/src/mods.rs"),
+    )
+    .expect("crates/seele-core/src/mods.rs");
+    let corpo = nucleo
+        .split_once("pub fn refusal_name(")
+        .expect("`refusal_name` sumiu do núcleo")
+        .1
+        .split_once("\n}\n")
+        .expect("o fim de `refusal_name`")
+        .0;
+    let nomes: Vec<String> = corpo
+        .split("=> \"")
+        .skip(1)
+        .filter_map(|resto| resto.split_once('"').map(|(nome, _)| nome.to_owned()))
+        .collect();
+    assert!(
+        nomes.len() >= 8 && nomes.contains(&"tema-sem-metade-de-servidor".to_owned()),
+        "a leitura de `refusal_name` achou {nomes:?}: ela ficou cega, e o laço abaixo \
+         confere quase nada"
+    );
+
+    // As chaves têm hífen («api-too-old»), e por isso vão entre aspas: o
+    // `sentences_of` lê só as chaves sem aspas, e esta tabela é lida aqui.
+    let frases = without_comments(&read("ui/frases.js"));
+    let bloco = frases
+        .split_once("const RECUSAS_DE_PACOTE = {")
+        .expect("`RECUSAS_DE_PACOTE` sumiu de ui/frases.js")
+        .1
+        .split_once("\n};")
+        .expect("`RECUSAS_DE_PACOTE` nunca fecha")
+        .0;
+    let escritas: BTreeSet<String> = bloco
+        .lines()
+        .filter_map(|linha| {
+            let resto = linha.trim().strip_prefix('"')?;
+            let (nome, depois) = resto.split_once('"')?;
+            depois
+                .trim_start()
+                .starts_with(':')
+                .then(|| nome.to_owned())
+        })
+        .collect();
+    for nome in &nomes {
+        assert!(
+            escritas.contains(nome),
+            "o pacote recusado por «{nome}» não tem frase em `RECUSAS_DE_PACOTE` \
+             (ui/frases.js): a gestão o diria como código"
+        );
+    }
+
+    // E a gestão a usa: sem isto, a tabela existiria e a tela continuaria
+    // dizendo o código.
+    let gestao = without_comments(&read("ui/camada-mods.js"));
+    assert!(
+        gestao.contains("RECUSAS_DE_PACOTE[mod.refused]"),
+        "a gestão de MODs não diz o pacote recusado pela frase de `RECUSAS_DE_PACOTE`"
+    );
+}
+
+/// **A lista fechada das recusas é a do `api/v6.json`, nos dois sentidos** (a
+/// auditoria do `v6.json`, B2; a emenda da D-api-8).
+///
+/// `RECUSAS_AO_MOD`, em `ui/base.js`, é o que a janela deixa chegar ao MOD da
+/// 6; o resto vira `falhou`. O `recusas` do `api/v6.json` é o que o contrato
+/// promete. Antes desta amarra, os dois discordavam calados: a janela entregava
+/// onze nomes que o contrato não listava, e o contrato não dizia que o
+/// genérico é `falhou`.
+///
+/// - todo nome que a janela entrega está no contrato;
+/// - todo nome do contrato está na janela, menos os da lista `tema`, que são
+///   do `mundo.tema` da metade de servidor e não passam pela janela;
+/// - as recusas das contribuições e as das superfícies, que têm lista ou
+///   chamada própria, estão na lista da janela.
+#[test]
+fn a_lista_fechada_das_recusas_e_a_do_v6() {
+    use std::collections::BTreeSet;
+
+    let base = without_comments(&read("ui/base.js"));
+    let janela: BTreeSet<String> = base
+        .split_once("const RECUSAS_AO_MOD = Object.freeze([")
+        .and_then(|(_, resto)| resto.split_once("]);"))
+        .map(|(lista, _)| {
+            lista
+                .split('"')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_owned)
+                .collect()
+        })
+        .expect("`RECUSAS_AO_MOD` sumiu de base.js");
+    assert!(
+        janela.len() > 30,
+        "a leitura de `RECUSAS_AO_MOD` quebrou: {janela:?}"
+    );
+
+    let v6: serde_json::Value =
+        serde_json::from_str(&read("../../api/v6.json")).expect("api/v6.json é JSON");
+    let recusas = v6
+        .get("recusas")
+        .and_then(serde_json::Value::as_object)
+        .expect("api/v6.json sem `recusas`");
+    let nome = |entrada: &str| {
+        entrada
+            .split([' ', '('])
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let mut contrato = BTreeSet::new();
+    let mut do_servidor = BTreeSet::new();
+    for (lista, entradas) in recusas {
+        let Some(entradas) = entradas.as_array() else {
+            continue;
+        };
+        for entrada in entradas.iter().filter_map(serde_json::Value::as_str) {
+            if lista == "tema" {
+                do_servidor.insert(nome(entrada));
+            } else {
+                contrato.insert(nome(entrada));
+            }
+        }
+    }
+
+    let fora_do_contrato: Vec<_> = janela
+        .iter()
+        .filter(|n| !contrato.contains(*n) && !do_servidor.contains(*n))
+        .collect();
+    assert!(
+        fora_do_contrato.is_empty(),
+        "a janela entrega ao MOD nomes que o `recusas` do api/v6.json não lista: \
+         {fora_do_contrato:?}"
+    );
+    let fora_da_janela: Vec<_> = contrato.difference(&janela).collect();
+    assert!(
+        fora_da_janela.is_empty(),
+        "o api/v6.json promete recusas que a janela não deixa chegar ao MOD (viram \
+         `falhou`): {fora_da_janela:?}"
+    );
+
+    let contribuicoes = without_comments(&read("ui/mods-contribuicoes.js"));
+    let das_contribuicoes: Vec<String> = contribuicoes
+        .split_once("const RECUSAS_DAS_CONTRIBUICOES = Object.freeze([")
+        .and_then(|(_, resto)| resto.split_once("]);"))
+        .map(|(lista, _)| {
+            lista
+                .split('"')
+                .skip(1)
+                .step_by(2)
+                .map(str::to_owned)
+                .collect()
+        })
+        .expect("`RECUSAS_DAS_CONTRIBUICOES` sumiu de mods-contribuicoes.js");
+    let superficies = without_comments(&read("ui/mods-superficies.js"));
+    let das_superficies: Vec<String> = superficies
+        .split("recusaDaSuperficie(\"")
+        .skip(1)
+        .filter_map(|resto| resto.split_once('"').map(|(n, _)| n.to_owned()))
+        .collect();
+    assert!(
+        !das_superficies.is_empty(),
+        "a leitura das recusas das superfícies quebrou"
+    );
+    let sem_lugar: Vec<_> = das_contribuicoes
+        .iter()
+        .chain(&das_superficies)
+        .filter(|n| !janela.contains(*n))
+        .collect();
+    assert!(
+        sem_lugar.is_empty(),
+        "recusas das contribuições ou das superfícies fora de `RECUSAS_AO_MOD`: chegam \
+         ao MOD como `falhou`: {sem_lugar:?}"
+    );
+}
+
+/// **O aviso do servidor do MOD chega à janela pelos nomes que o Rust
+/// serializa** (o cruzamento dos portes; D-api-8 passo 5). A janela escuta
+/// `seele://event` e lê `payload?.ModAviso` com `mod_id`, `canal` e `carga`
+/// (`base.js`, `ouvirAvisoDeMod` e `entregarOAvisoDoMod`). O lado do Rust é
+/// `seele_ffi::types::Event::ModAviso`, serializado pelo serde. Trocar um nome
+/// de um lado só calava o aviso: o `if (payload?.ModAviso)` não acharia nada,
+/// e nada reclamaria. O PERFIS e a MESA desligam o laço de consulta pelo aviso.
+#[test]
+fn o_aviso_do_mod_chega_a_janela_pelos_nomes_que_o_rust_serializa() {
+    let evento = seele_ffi::types::Event::ModAviso {
+        mod_id: "autor/mod".to_owned(),
+        canal: Some(3),
+        carga: "{}".to_owned(),
+    };
+    let valor = serde_json::to_value(&evento).expect("o Event serializa");
+    let (variante, campos) = valor
+        .as_object()
+        .and_then(|objeto| objeto.iter().next())
+        .expect("o Event sai como { Variante: { campos } }");
+    let base = without_comments(&read("ui/base.js"));
+    assert!(
+        base.contains(&format!("payload?.{variante})"))
+            && base.contains(&format!("payload.{variante}")),
+        "a janela não escuta o aviso pela variante que o Rust serializa («{variante}»)"
+    );
+    let entrega = base
+        .split_once("function entregarOAvisoDoMod(aviso) {")
+        .and_then(|(_, resto)| resto.split_once("\n}\n"))
+        .map(|(corpo, _)| corpo.to_owned())
+        .expect("`entregarOAvisoDoMod` sumiu de base.js");
+    let campos = campos
+        .as_object()
+        .expect("os campos do ModAviso são um objeto");
+    for campo in campos.keys() {
+        assert!(
+            entrega.contains(&format!("aviso.{campo}"))
+                || entrega.contains(&format!("aviso?.{campo}")),
+            "o Rust manda `{campo}` no ModAviso, e `entregarOAvisoDoMod` não o lê"
+        );
+    }
+    for lido in ["mod_id", "canal", "carga"] {
+        assert!(
+            campos.contains_key(lido),
+            "`entregarOAvisoDoMod` lê `aviso.{lido}`, e o Rust não o manda: {campos:?}"
+        );
+    }
+}
+
+/// **O prelúdio e o roteador falam os mesmos tipos de mensagem, e cada um pela
+/// mesma capacidade** (a auditoria do `v6.json`, o achado 4). O prelúdio
+/// (`crates/seele-motor/src/preludio.rs`) monta o `SeeleUI` e o `SeeleMods` de
+/// um MOD e pede ao anfitrião por `pedir('<tipo>', …)`; o roteador da janela
+/// (`atenderOMod`, em `base.js`) atende pelo `case "<tipo>"`, e a
+/// `CAPACIDADE_DA_MENSAGEM` diz qual capacidade cada tipo exige. Só cinco dos
+/// tipos eram conferidos rodando o prelúdio, e trocar a string de um lado só
+/// não reprovava os outros. E a capacidade: o prelúdio montava `pedaco` e
+/// `soltar` sem a `arquivo`, que o roteador exige, e no navegador as duas
+/// existiam e sempre falhavam.
+#[test]
+fn o_preludio_e_o_roteador_falam_os_mesmos_tipos_pela_mesma_capacidade() {
+    let preludio = read("../../crates/seele-motor/src/preludio.rs");
+    let base = without_comments(&read("ui/base.js"));
+
+    let do_preludio: BTreeSet<String> = preludio
+        .split("pedir('")
+        .skip(1)
+        .filter_map(|resto| resto.split_once('\'').map(|(tipo, _)| tipo.to_owned()))
+        .collect();
+    let roteador = base
+        .split_once("async function atenderOMod(")
+        .and_then(|(_, resto)| resto.split_once("\n}\n"))
+        .map(|(corpo, _)| corpo)
+        .expect("`atenderOMod` sumiu de base.js");
+    let do_roteador: BTreeSet<String> = roteador
+        .split("case \"")
+        .skip(1)
+        .filter_map(|resto| resto.split_once("\":").map(|(tipo, _)| tipo.to_owned()))
+        .collect();
+    assert!(
+        do_preludio.len() > 15,
+        "a leitura dos tipos do prelúdio quebrou: {do_preludio:?}"
+    );
+    assert_eq!(
+        do_preludio,
+        do_roteador,
+        "o prelúdio pede tipos que o roteador não atende, ou o contrário: só no prelúdio {:?}, só no roteador {:?}",
+        do_preludio.difference(&do_roteador).collect::<Vec<_>>(),
+        do_roteador.difference(&do_preludio).collect::<Vec<_>>()
+    );
+
+    let tabela = base
+        .split_once("const CAPACIDADE_DA_MENSAGEM = Object.freeze({")
+        .and_then(|(_, resto)| resto.split_once("});"))
+        .map(|(tabela, _)| tabela)
+        .expect("`CAPACIDADE_DA_MENSAGEM` sumiu de base.js");
+    let exigidas: Vec<(String, String)> = tabela
+        .lines()
+        .filter_map(|linha| {
+            let (tipo, capacidade) = linha.trim().trim_end_matches(',').split_once(':')?;
+            Some((
+                tipo.trim().trim_matches('"').to_owned(),
+                capacidade.trim().trim_matches('"').to_owned(),
+            ))
+        })
+        .collect();
+    assert!(
+        exigidas.len() > 15,
+        "a leitura da `CAPACIDADE_DA_MENSAGEM` quebrou: {exigidas:?}"
+    );
+    // **E no sentido inverso** (a revisão das abertas da auditoria): tirar uma
+    // linha da tabela não reprovava nada, e o tipo passava a ser pedido sem
+    // capacidade nenhuma. Todo tipo do prelúdio está na tabela, menos o
+    // `pedido`, que toda API tem.
+    let nomes_da_tabela: BTreeSet<&str> = exigidas.iter().map(|(tipo, _)| tipo.as_str()).collect();
+    for tipo in do_preludio.iter().filter(|tipo| tipo.as_str() != "pedido") {
+        assert!(
+            nomes_da_tabela.contains(tipo.as_str()),
+            "o prelúdio pede «{tipo}», e a `CAPACIDADE_DA_MENSAGEM` não o confere: o roteador o \
+             atenderia sem capacidade nenhuma"
+        );
+    }
+    for (tipo, capacidade) in &exigidas {
+        assert!(
+            do_preludio.contains(tipo),
+            "a `CAPACIDADE_DA_MENSAGEM` confere «{tipo}», que o prelúdio não pede"
+        );
+        // A capacidade que monta o membro: a da guarda mais próxima antes do
+        // primeiro `pedir` do tipo, por `capacidades.has` ou `comCapacidade`.
+        let onde = preludio
+            .find(&format!("pedir('{tipo}'"))
+            .expect("o tipo está no prelúdio");
+        let antes = &preludio[..onde];
+        let guarda = ["capacidades.has('", "comCapacidade('"]
+            .iter()
+            .filter_map(|abre| antes.rfind(abre).map(|i| i + abre.len()))
+            .max()
+            .and_then(|i| antes[i..].split_once('\'').map(|(nome, _)| nome.to_owned()));
+        assert_eq!(
+            guarda.as_deref(),
+            Some(capacidade.as_str()),
+            "o roteador exige «{capacidade}» para «{tipo}», e o prelúdio monta quem o pede sob outra guarda: \
+             sem a capacidade, o membro existiria e sempre falharia"
+        );
+    }
+}
+
 #[test]
 fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
     // **D-fio-4: «todos veem, sem papéis e sem horário».** O grupo FORA DO AR
     // (P6) lista os membros deste servidor que não estão conectados, e um
     // «visto por último» ali diria a todo membro quando cada outro sai — é o
     // que a decisão recusou. As duas metades: o tipo que atravessa a ponte só
-    // tem id e apelido, e a linha da casca só lê o apelido.
+    // tem id e apelido, e a linha da casca só mostra o apelido (o id é a chave).
     //
     // E a linha não passa pelo caminho das linhas de quem está aqui: aquelas
     // um MOD apresenta (`pessoa.cartao`, `pessoa.identidade`), e nenhum MOD
@@ -20441,10 +20756,22 @@ fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
                 .next()
         })
         .collect();
+    // O apelido é o que a linha mostra, e o `id` é a conta: entra só na chave da
+    // linha (`membro:<id>`, lote FORA), que é o que faz o nó ser do membro e não
+    // da posição, e nunca no texto dela. Papel, horário e o resto não chegam.
+    assert!(
+        lidos.contains("nickname"),
+        "a linha do FORA DO AR não lê mais o apelido do membro:\n{linha}"
+    );
+    assert!(
+        lidos.iter().all(|campo| ["id", "nickname"].contains(campo)),
+        "a linha do FORA DO AR lê do membro mais que o apelido e o id: {lidos:?}\n{linha}"
+    );
     assert_eq!(
-        lidos.into_iter().collect::<Vec<_>>(),
-        ["nickname"],
-        "a linha do FORA DO AR lê do membro mais que o apelido:\n{linha}"
+        linha.matches("membro.id").count(),
+        linha.matches("`membro:${membro.id}`").count(),
+        "a linha do FORA DO AR lê o `id` do membro fora da chave `membro:<id>`: o id é a conta, e \
+         não vai para o texto da linha:\n{linha}"
     );
     for proibido in [
         "Date",

@@ -190,6 +190,7 @@ mod tests {
                 reach: Vec::new(),
                 server_half: true,
                 api: 6,
+                tema: false,
             },
         )
         .expect("habilitar");

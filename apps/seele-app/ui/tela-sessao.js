@@ -1936,8 +1936,9 @@ function seloDoEnvio(mensagem) {
  * (`sincronizarRetratos`), sem nada mudar na conversa: o foco no link ou no
  * REMOVER caía no `<body>`, a seleção se desfazia, e o leitor de tela perdia o
  * nó (433 de 434 ids AX trocados, medido em 16/10). Agora é o caminho da lista
- * de pessoas (`reconciliarALista`): cada mensagem tem a chave do id que o
- * servidor deu — ou, numa pendente, a da máquina —, e cada divisor a do dia; a
+ * de pessoas (`reconciliarALista`): cada mensagem tem a chave do envio
+ * quando a traz — as próprias, a mesma na pendente e na gravada (lote ECO) —,
+ * e senão a do id que o servidor deu; e cada divisor a do dia; a
  * mensagem que chega entra, a que sai sai, e as outras ficam com o mesmo nó,
  * só com o que mudou nelas. O REMOVER e o link continuam agindo com o dado de
  * agora: os ouvintes são delegados na lista e leem o `data-*` que o
@@ -2004,11 +2005,18 @@ function desenharMensagens() {
       Boolean(mensagem.at_seconds) &&
       mensagem.at_seconds - anterior.at_seconds <= JUNTA_ATE_SEGUNDOS;
     const item = itemDeMensagem(mensagem, indice, segue);
-    // O id do servidor, ou — numa pendente, que tem id zero — a chave desta
-    // máquina. A pendente que é gravada troca de chave, e só ela ganha nó novo.
-    const chave = mensagem.id
-      ? `mensagem:${mensagem.id}`
-      : mensagem.client_message_id ? `pendente:${mensagem.client_message_id}` : null;
+    // A chave do envio, quando há uma, e o id do servidor quando não há (lote
+    // ECO). A ponte só manda a `client_message_id` nas próprias: na pendente,
+    // que tem id zero, na confirmada que a substitui — a mesma, na mesma
+    // revisão em que a pendente sai — e na relida do histórico, com a que o
+    // servidor gravou. É a única coisa que a pendente e a gravada dividem, e
+    // por isso vem antes do id: com o id na frente, a gravada caía noutra
+    // chave, e quem a escreveu perdia o link, o REMOVER, a seleção e o nó do
+    // leitor de tela. O resto é no nó: a reconciliação dos filhos tira o selo
+    // do envio, e o `vestirComo` reescreve o id e os `data-*`.
+    const chave = mensagem.client_message_id
+      ? `envio:${mensagem.client_message_id}`
+      : mensagem.id ? `mensagem:${mensagem.id}` : null;
     if (chave !== null) chaveNaLista.set(item, chave);
     itens.push(item);
     anterior = mensagem;
@@ -2350,8 +2358,9 @@ function redesenharAsPessoas() {
 
 /**
  * A chave de um nó da lista de pessoas: `pessoa:<id>` numa linha, `sala:<id>`
- * ou `grupo:<nome>` num grupo; na coluna de canais, `canal:<id>`. Num mapa, e
- * não num atributo: ela é de quem reconcilia, e não da página.
+ * ou `grupo:<nome>` num grupo, `membro:<id>` numa linha do FORA DO AR; na coluna
+ * de canais, `canal:<id>`. Num mapa, e não num atributo: ela é de quem
+ * reconcilia, e não da página.
  */
 let chaveNaLista = new WeakMap();
 
@@ -2372,7 +2381,7 @@ let abertoPedido = new WeakMap();
  * **O lugar de um nó de MOD na linha que se monta**, e não o nó.
  *
  * Os cartões e as contribuições chegam montados, e são o mesmo nó entre um
- * retrato e o seguinte (`cartoesDaPessoa`, `montarContribuicao`). Anexá-los à
+ * retrato e o seguinte (`montarContribuicao`). Anexá-los à
  * linha nova os tiraria da lista para que a reconciliação os devolvesse: um nó
  * que sai do documento e volta é, para a árvore de acessibilidade, outro nó, e
  * o som e a imagem dele recomeçam. O marcador fica no lugar dele na linha
@@ -2388,6 +2397,25 @@ function noDeMod(no) {
 
 function nosDeMod(nos) {
   return nos.map(noDeMod);
+}
+
+/**
+ * **O `pessoa.detalhes` de uma pessoa, para a linha dela** — o único lugar que
+ * o acrescenta, para as duas linhas, a nativa e a apresentada (decisão da
+ * orquestradora, 16/10). Com `CASCA.detalhesNaLinha` falso, nada: o celular o
+ * monta só na folha da pessoa, e um nó por pessoa fica num lugar só.
+ *
+ * Cada seção leva **o nome do MOD por cima**, escrito pelo produto e fora do
+ * nó dele, e o nó numa caixa que recorta o que ele desenha: sem dono, uma
+ * seção ao lado do MODERAR podia ser um MODERAR falso.
+ */
+function detalhesDaPessoaNaLinha(pessoa) {
+  if (!CASCA.detalhesNaLinha || pessoa.id === undefined || pessoa.id === null) return [];
+  return conteudoDasContribuicoes("pessoa.detalhes", String(pessoa.id)).flatMap((no) => {
+    const caixa = elemento("div", "contribuicao-de-mod-caixa");
+    caixa.append(noDeMod(no));
+    return [elemento("p", "contribuicao-de-mod-origem", no.dataset.mod ?? ""), caixa];
+  });
 }
 
 /**
@@ -2515,8 +2543,25 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
   }
   if (!emOrdem) {
     const posicao = new Map(Array.from(alvo.childNodes, (filho, i) => [filho, i]));
-    const ficam = new Set(maiorSequenciaCrescente(desejados.map((no) => posicao.get(no) ?? -1))
-      .map((i) => desejados[i]));
+    const valores = desejados.map((no) => posicao.get(no) ?? -1);
+    // **Quem tem o foco fica, e os outros se movem em volta dele** (lote ECO,
+    // rodada 1, M1). Mover é tirar e pôr, e o nó tirado perde o foco e a
+    // seleção, mesmo voltando. Numa troca, qualquer um dos dois pode ser o que
+    // se move, e o desempate da subsequência escolhia sem olhar: a própria
+    // mensagem gravada com um id de antes ia para antes da outra, e caíam o
+    // foco no link e a seleção no corpo. Os nós fora de ordem em relação ao
+    // que tem o foco saem da conta; o que sobra é compatível com ele, e a maior
+    // sequência do que sobra passa por ele. Custa mover mais quando é ele
+    // quem mudou de lugar. O que nenhuma ordem evita é o nó que muda de pai
+    // (a pessoa que entra numa sala): esse vem de fora, e é posto.
+    const preferido = indiceDoQueGuardaOFoco(desejados, valores);
+    if (preferido >= 0) {
+      const ali = valores[preferido];
+      for (let i = 0; i < valores.length; i += 1) {
+        if (i < preferido ? valores[i] > ali : valores[i] < ali) valores[i] = -1;
+      }
+    }
+    const ficam = new Set(maiorSequenciaCrescente(valores).map((i) => desejados[i]));
     for (let i = desejados.length - 1; i >= 0; i -= 1) {
       if (!ficam.has(desejados[i])) alvo.insertBefore(desejados[i], desejados[i + 1] ?? null);
     }
@@ -2532,6 +2577,21 @@ function reconciliarOsFilhos(alvo, novos, contexto) {
     else if (no.localName === "details") abertoPedido.set(no, no.open);
     if (novo.nodeType === Node.ELEMENT_NODE) reconciliarOsFilhos(no, Array.from(novo.childNodes), contexto);
   }
+}
+
+/**
+ * O índice, em `desejados`, do nó que já está ali (`valores[i] >= 0`) e tem
+ * dentro dele o foco do teclado; sem o foco em nenhum deles, o que tem o
+ * começo da seleção. `-1` quando não há. Ver `reconciliarOsFilhos`.
+ */
+function indiceDoQueGuardaOFoco(desejados, valores) {
+  const foco = document.activeElement;
+  for (const dentro of [foco === document.body ? null : foco, document.getSelection()?.anchorNode]) {
+    if (!dentro) continue;
+    const i = desejados.findIndex((no, j) => valores[j] >= 0 && no.contains(dentro));
+    if (i >= 0) return i;
+  }
+  return -1;
 }
 
 /**
@@ -2660,10 +2720,6 @@ function desenharPessoas(snapshot) {
               // sai a diferença entre «o microfone está aberto» e «a voz está
               // indo para alguém». Ver `estado` em `linhaNativaDoRoster`.
               emSala: true,
-              // Os cartões que os MODs de pé deram a esta pessoa. Eles
-              // declaram; quem monta é o renderer da região, e quem decide
-              // onde o cartão entra na linha é esta função.
-              cartoes: nosDeMod(cartoesDaPessoa(pessoa.id)),
               ratio: pessoa.signal,
               faixa: pessoa.sync_band,
               falando: pessoa.speaking,
@@ -2698,16 +2754,16 @@ function desenharPessoas(snapshot) {
             // Fora de sala: o microfone pode estar captando, e não há para
             // onde transmitir.
             emSala: false,
-            // **E o cartão, aqui também.** Esta ramificação e a do saguão eram
-            // as duas que não passavam `cartoes` ao renderer: um MOD que
-            // escrevesse o nome de perfil de alguém via aquele nome sumir no
-            // instante em que a pessoa saía da sala de voz — inclusive o dela
+            // **E o cartão, aqui também** (o `pessoa.cartao`, que a linha
+            // monta pela contribuição): esta ramificação e a do saguão eram as
+            // duas que não o levavam, e um MOD que escrevesse o nome de perfil
+            // de alguém via aquele nome sumir no instante em que a pessoa saía
+            // da sala de voz — inclusive o dela
             // mesma. A auditoria de 20/09/2026 observou exatamente isso: o nome
             // `PERFIL QA` aparecia dentro da sala e desaparecia ao sair.
             //
             // Um cartão é sobre **a pessoa**, e não sobre onde ela está
             // sentada. As três ramificações usam o mesmo modelo de apresentação.
-            cartoes: nosDeMod(cartoesDaPessoa(snapshot.me)),
             ratio: snapshot.telemetry.signal,
             faixa: snapshot.telemetry.sync_band,
             falando: snapshot.speaking,
@@ -2752,10 +2808,6 @@ function desenharPessoas(snapshot) {
               id: pessoa.id,
               nome: pessoa.nickname,
               emSala: false,
-              // O mesmo cartão da sala: quem está no saguão continua sendo a
-              // mesma pessoa, e o MOD que a apresenta não muda de opinião
-              // porque ela não sentou em sala nenhuma.
-              cartoes: nosDeMod(cartoesDaPessoa(pessoa.id)),
               // Sem medida: o sinal de quem não está numa sala não é medido por
               // ninguém — não há voz atravessando para medir. Travessão é o que
               // este produto escreve onde não mediu, e inventar zero aqui seria
@@ -2782,7 +2834,7 @@ function desenharPessoas(snapshot) {
   // **Reconciliada pelo id, e não repovoada** (pendência 63, (b)): ver
   // `reconciliarALista`. A lista refeita a cada retrato sumia e voltava na
   // árvore de acessibilidade. O grupo FORA DO AR tem a chave do nome
-  // (`grupoDeSala`), e as linhas dele, sem chave, casam pela posição.
+  // (`grupoDeSala`), e cada linha dele a do membro (`grupoForaDoAr`).
   reconciliarALista($("lista-roster"), grupos);
   // Uma vez, e na lista: ver `ligarAcoesDeApresentacao` em `base.js`.
   ligarAcoesDeApresentacao($("lista-roster"));
@@ -2825,9 +2877,23 @@ function pintarVolumesDoRoster() {
  * ao toque (`celular-pessoas.js`), e ela carrega sinal e volume. Nada disso
  * cabe a quem está fora: nenhuma medida existe, nenhuma ação o alcança, e
  * nenhum MOD ganhou a lista de membros.
+ *
+ * **Cada linha é o membro** (`membro:<id>`; lote FORA, pendência 63). Sem chave,
+ * as linhas casavam pela posição em `reconciliarALista`, e quando alguém do
+ * meio se conectava os nomes escorregavam pelos nós: o leitor de tela parado em
+ * «Carla» passava a ler «Bruno» no mesmo nó, e quem saía do documento era o nó
+ * do último, e não o de quem se conectou. O prefixo é um espaço só dele: a
+ * mesma conta é `pessoa:<id>` quando está conectada, e por um instante é as duas
+ * — o retrato chega antes de a lista de membros ser buscada —, sem uma tomar o
+ * nó da outra. O `id` é a conta, e fica na chave: o texto da linha segue sendo
+ * só o apelido.
  */
 function grupoForaDoAr(membros) {
-  const linhas = membros.map((membro) => elemento("li", "membro-fora-do-ar", membro.nickname));
+  const linhas = membros.map((membro) => {
+    const li = elemento("li", "membro-fora-do-ar", membro.nickname);
+    chaveNaLista.set(li, `membro:${membro.id}`);
+    return li;
+  });
   const grupo = grupoDeSala("FORA DO AR", `${membros.length}`, false, linhas);
   grupo.dataset.foraDoAr = "sim";
   return grupo;
@@ -2966,8 +3032,30 @@ function linhaDoRoster(pessoa, temAudio) {
     ? linhaSubstituida(pessoa, temAudio, substituicao, noDeMod(cartao))
     : linhaNativaDoRoster(pessoa, temAudio);
   // A chave da linha é a pessoa, e não o lugar dela na lista: ver
-  // `reconciliarALista`.
-  if (pessoa.id !== undefined && pessoa.id !== null) chaveNaLista.set(item, `pessoa:${pessoa.id}`);
+  // `reconciliarALista`. E o id escrito na linha, da mesma fonte da chave: a
+  // folha da pessoa do celular o lê para pedir o `pessoa.detalhes` dela.
+  if (pessoa.id !== undefined && pessoa.id !== null) {
+    chaveNaLista.set(item, `pessoa:${pessoa.id}`);
+    item.dataset.pessoaId = String(pessoa.id);
+  }
+
+  // **`pessoa.detalhes` na linha nativa** (achado do passo 7 da auditoria do
+  // v6; decisão da orquestradora, 16/10): ele só tinha lugar na linha
+  // apresentada por um MOD, e numa nativa a contribuição era aceita e não
+  // aparecia. Aqui, um «⋯» como o da apresentada — só quando há o que pôr nele:
+  // sem contribuição, a linha é a de sempre.
+  if (!cartao) {
+    const deMods = detalhesDaPessoaNaLinha(pessoa);
+    if (deMods.length) {
+      const detalhes = elemento("details", "pessoa-nativo");
+      const resumo = elemento("summary", "pessoa-nativo-resumo", "⋯");
+      resumo.setAttribute("aria-label", `Detalhes de ${pessoa.nome}`);
+      resumo.title = `Detalhes de ${pessoa.nome}`;
+      detalhes.append(resumo, ...deMods);
+      item.classList.add("pessoa-com-detalhes");
+      item.append(detalhes);
+    }
+  }
 
   // **Mas o acesso ao MOD não some junto.** Quem não tem perfil é exatamente
   // quem precisa alcançar o editor. A ação principal do provedor vira um botão
@@ -3080,7 +3168,7 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   // **`pessoa.detalhes`** — seções que o MOD acrescenta ao perfil detalhado.
   // Dentro do mesmo `<details>` da identidade verificável: quem abre para ver
   // quem a pessoa é encontra as duas coisas no mesmo gesto.
-  detalhes.append(...nosDeMod(conteudoDasContribuicoes("pessoa.detalhes", String(pessoa.id))));
+  detalhes.append(...detalhesDaPessoaNaLinha(pessoa));
   item.append(detalhes);
   return item;
 }
@@ -3088,30 +3176,19 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
 /**
  * O conteúdo que um MOD declarou para esta pessoa, já montado.
  *
- * **Dois caminhos, e o genérico vem primeiro.**
+ * **Um caminho só: o da contribuição.**
  *
  * O `conteudo` da própria contribuição é o contrato que o guia ensina: quem
  * registra `pessoa.cartao/substituir` com uma declaração espera que ela seja
- * desenhada, e nada mais. Esta função procurava **só** `SeeleUI.cartoes` — a
- * chamada separada, da API 3 —, então um MOD que seguisse o contrato genérico
- * via a linha nativa continuar no lugar, sem recusa e sem explicação. O MOD
- * oficial usava o legado, e por isso o caminho funcionava sem revelar a falha.
- * É o que a revisão de 26ad0c2 encontrou.
- *
- * `SeeleUI.cartoes` continua valendo, e não por gentileza: ele é o caminho de
- * um pacote de API 3, que esta versão executa. Ele é a alternativa, e não a
- * primeira escolha — um MOD que mande os dois está dizendo a mesma coisa duas
- * vezes, e o que vale é o que ele declarou na contribuição.
+ * desenhada, e nada mais. O caminho de antes, o `SeeleUI.cartoes` das APIs 3 a
+ * 5, saiu com elas: este build só executa a 6.
  *
  * O destino atravessa porque a montagem é por destino: uma contribuição sem
  * `alvo` vale para todo mundo, e um nó só percorreria a lista movendo-se de
  * uma linha para a seguinte.
  */
 function cartaoDeContribuicao(contribuicao, id) {
-  const generico = montarContribuicao(contribuicao, String(id));
-  if (generico) return generico;
-  const regiao = cartoesDosMods.get(contribuicao.mod);
-  return regiao ? regiao.cartaoDe(id) : null;
+  return montarContribuicao(contribuicao, String(id));
 }
 
 /**
@@ -3266,21 +3343,6 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   diagnostico.append(resumo, numero, barra, rodape);
 
   item.append(cabeca, diagnostico);
-
-  // **Os cartões dos MODs, depois do que o produto diz sobre esta pessoa.**
-  //
-  // Depois, e não no meio: o sinal, a barra e a pastilha são o que esta tela
-  // existe para dizer, e um cartão de terceiro entre eles empurraria a
-  // informação do produto para baixo da dobra numa lista cheia.
-  //
-  // O nó vem montado — é o mesmo elemento entre um retrato e o seguinte, e
-  // movê-lo preserva o que ele segura. Recriá-lo faria uma imagem piscar e um
-  // som recomeçar a cada quatro segundos.
-  // Não dentro do detalhe recolhido: o cartão já foi desenhado por cima, e o
-  // mesmo nó não pode estar em dois lugares — movê-lo para cá o tiraria de lá.
-  if (!comoDetalhe) {
-    for (const cartao of pessoa.cartoes ?? []) item.append(cartao);
-  }
 
   // Volume por pessoa (`specs/03-audio.md`).
   if (pessoa.volume !== null && temAudio) {
@@ -5740,7 +5802,9 @@ function anotarQuemFala(pessoaId) {
  */
 function escolherAsCapasAnimadas() {
   const quadros = [...document.querySelectorAll("[data-pessoa-da-capa]")];
-  const naVista = quadros.filter((quadro) => {
+  // **Com a janela oculta, nenhuma anima** (`capa.movimento-reduzido`; a
+  // auditoria do `v6.json`, B8): o quadro parado, até ela voltar.
+  const naVista = document.hidden ? [] : quadros.filter((quadro) => {
     const caixa = quadro.getBoundingClientRect();
     return caixa.width > 0 && caixa.height > 0 && caixa.bottom > 0 && caixa.top < innerHeight
       && caixa.right > 0 && caixa.left < innerWidth
@@ -5768,6 +5832,10 @@ function redesenharCapas() {
   escolherAsCapasAnimadas();
   document.querySelectorAll("[data-pessoa-da-capa]").forEach(aplicarCapa);
 }
+
+// A janela que some e volta troca as capas na hora, e não pelo
+// `agendarAsCapas`: o `requestAnimationFrame` para com a janela oculta.
+document.addEventListener("visibilitychange", () => redesenharCapas());
 
 /**
  * Põe ou tira a camada da capa. **Com o movimento reduzido, o quadro parado**:

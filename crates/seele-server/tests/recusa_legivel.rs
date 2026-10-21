@@ -208,7 +208,7 @@ async fn quem_fala_o_9_entra_e_todo_quadro_volta_carimbado_9() -> Result<()> {
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
             material_e2ee: None,
-            apis_de_mod: Vec::new(),
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
         },
     )?;
     escrever_cru(&mut par.envio, &hello).await?;

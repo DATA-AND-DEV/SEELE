@@ -41,10 +41,10 @@
      `--nucleo-*` herdado ali continua sendo a cor do produto. É isso que
      garante o MUDO, o SURDO e o SAIR qualquer que seja o tema (spec, §6). O
      tema não escreve `--nucleo-*` nenhum: as tabelas dele são fechadas, e o G7
-     confere. O fundo, o painel, o texto, o acento e a borda o desktop declara
-     com os mesmos nomes e valores (`tela-sessao.css`, `e26e9edc`); aqui ficam
-     só os que a casca lê e ele não. */
-  --nucleo-rotulo: var(--seele-rotulo-claro);
+     confere. O fundo, o painel, o texto, o acento, a borda e o rótulo o desktop
+     declara com os mesmos nomes e valores (`tela-sessao.css`, `e26e9edc`; o
+     rótulo desde `4e2e1497`, da F3, que a linha de dono do `pessoa.detalhes`
+     lê nos dois lados); aqui ficam só os que a casca lê e ele não. */
   --nucleo-seguro: var(--seele-padrao-azul);
   --nucleo-alerta: var(--seele-vermelho-alerta);
   --nucleo-alerta-fundo: var(--seele-vermelho-fraco);
@@ -96,10 +96,21 @@
   letter-spacing: 0.2em;
 }
 
-/* Todo controle tem 44 de alvo. */
+/* Todo controle tem 44 de alvo, e nenhum estilo de MOD o desce
+   (`estilos.celular`; a auditoria do `v6.json`, B7). O estilo do MOD é inline,
+   e esta regra, sem `!important`, perdia para ele: um botão com altura e
+   largura de 20 media 20. */
 :root[data-casca="celular"] :is(button, .botao, .botao-fantasma, select, summary) {
-  min-height: var(--cel-alvo);
-  min-width: var(--cel-alvo);
+  min-height: var(--cel-alvo) !important;
+  min-width: var(--cel-alvo) !important;
+}
+
+/* E o `escalar` do MOD não encolhe o alvo nem a letra de um campo depois do
+   layout: nem no controle, nem no nó com estilo de MOD que contém um controle
+   ou um campo. Com `escalar: 0.2`, o botão media 9 × 9. */
+:root[data-casca="celular"] :is(button, .botao, .botao-fantasma, select, summary),
+:root[data-casca="celular"] [data-estilo-de-mod]:has(:is(button, select, summary, input, textarea)) {
+  scale: none !important;
 }
 
 /* A letra de campo de 16: abaixo disso o Safari do iOS amplia a página inteira ao
