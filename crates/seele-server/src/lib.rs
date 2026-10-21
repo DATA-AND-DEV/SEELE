@@ -504,9 +504,6 @@ pub struct Daemon {
     /// O mesmo socket do endpoint, para escrever. Ver [`Daemon::espelho`].
     espelho: Option<Arc<std::net::UdpSocket>>,
     fingerprint: String,
-    /// As janelas dos certificados curtos do `h3` (ADR 0057), da vigente em
-    /// diante. Vazias na sala pessoal. Ver [`Daemon::janelas_do_navegador`].
-    janelas: Vec<seele_proto::control::JanelaDoNavegador>,
     /// Quantos apertos de mão do `h3` acabaram com o navegador recusando o
     /// certificado. Ver [`Daemon::recusas_do_navegador`].
     recusas_do_navegador: Arc<std::sync::atomic::AtomicU64>,
@@ -755,6 +752,7 @@ impl Daemon {
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao,
+            janelas_do_navegador: janelas,
             recepcao,
         });
 
@@ -836,7 +834,6 @@ impl Daemon {
             pilha,
             espelho,
             fingerprint,
-            janelas,
             recusas_do_navegador: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             registry: Arc::new(session::Registry::new()),
             server,
@@ -866,7 +863,7 @@ impl Daemon {
     /// sala pessoal).
     #[must_use]
     pub fn janelas_do_navegador(&self) -> &[seele_proto::control::JanelaDoNavegador] {
-        &self.janelas
+        &self.server.janelas_do_navegador
     }
 
     /// Quantas vezes um navegador recusou o certificado curto no aperto de mão

@@ -330,3 +330,52 @@ async fn um_hash_que_nao_e_do_servidor_e_recusado_e_contado() -> Result<()> {
     );
     Ok(())
 }
+
+/// O que chega até o `HashesDoNavegador`, ou nada em 5 s.
+async fn janelas_recebidas(
+    recebe: &mut quinn::RecvStream,
+) -> Option<Vec<seele_proto::control::JanelaDoNavegador>> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match frame::read::<ServerMessage>(recebe).await {
+                Ok(ServerMessage::HashesDoNavegador { janelas }) => return Some(janelas),
+                Ok(_) => {}
+                Err(_) => return None,
+            }
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// **As janelas chegam logo depois do `Session`, nos dois transportes**
+/// (Tarefa 2.5): o navegador as guarda para voltar sem link novo, e o desktop
+/// as usa para montar o link do navegador.
+#[tokio::test(flavor = "multi_thread")]
+async fn as_janelas_chegam_depois_do_session_nos_dois_transportes() -> Result<()> {
+    let (endereco, daemon) = servidor().await?;
+    let impressao = impressao_do_longo(&daemon);
+    let anunciadas = daemon.janelas_do_navegador().to_vec();
+    assert!(!anunciadas.is_empty());
+
+    let (_pn, nativo) = nativo(endereco).await?;
+    let (mut n_envio, mut n_recebe) = nativo.open_bi().await?;
+    apertar(&mut n_envio, &mut n_recebe, 3, impressao).await?;
+    assert_eq!(
+        janelas_recebidas(&mut n_recebe).await.as_deref(),
+        Some(anunciadas.as_slice()),
+        "o nativo não recebeu as janelas"
+    );
+
+    let (_pw, web) = navegador(endereco, hashes(&daemon)).await?;
+    let (mut w_envio, mut w_recebe) = web.open_bi().await?.await?;
+    let (w_envio, w_recebe) = (w_envio.quic_stream_mut(), w_recebe.quic_stream_mut());
+    apertar(w_envio, w_recebe, 4, impressao).await?;
+    assert_eq!(
+        janelas_recebidas(w_recebe).await.as_deref(),
+        Some(anunciadas.as_slice()),
+        "o navegador não recebeu as janelas"
+    );
+    Ok(())
+}

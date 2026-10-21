@@ -1370,6 +1370,23 @@ async fn admitir(
         }
     }
 
+    // **Os hashes dos certificados curtos do `h3`** (ADR 0057; Tarefa 2.5 da
+    // F4), uma vez, logo depois do tema, **nos dois transportes**: o navegador
+    // os guarda pela impressão para voltar sem link novo, e o desktop os usa
+    // para montar o link do navegador (`Convite::link_do_navegador`). O nativo
+    // que não os usa os ignora. Só quando há janelas: a sala pessoal não serve
+    // ao navegador.
+    if !server.janelas_do_navegador.is_empty() {
+        let quadro_das_janelas = ServerMessage::HashesDoNavegador {
+            janelas: server.janelas_do_navegador.clone(),
+        };
+        if entende_a_mensagem(&quadro_das_janelas, version) {
+            if let Err(error) = frame::write_em(send, version, &quadro_das_janelas).await {
+                tracing::warn!(%error, "não deu para mandar os hashes do navegador a quem entra");
+            }
+        }
+    }
+
     // Logo depois do `Session`, e num quadro próprio: o `Session` já carrega os
     // salas de voz, as Linhas, os papéis e as permissões dentro dos 16 KiB do
     // `MAX_FRAME_LEN`, e uma imagem disputando esse orçamento faria um servidor
@@ -6500,6 +6517,7 @@ mod fim_de_tela_por_sessao {
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao: [0; 32],
+            janelas_do_navegador: Vec::new(),
             recepcao: None,
             persistence,
             events,
