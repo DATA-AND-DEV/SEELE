@@ -304,26 +304,16 @@ const TAREFA_MODS = "2.6 e 3.4 (os MODs da sessão)";
 
 /** Atendidos que ainda não têm corpo, com a tarefa do plano que os traz. */
 const AINDA_A_FAZER = new Map([
-  ["ajustar_limites_da_tela", TAREFA_310],
-  ["ajustar_volume_da_tela", TAREFA_39],
-  ["calar_a_tela", TAREFA_39],
   ["codigo_do_mod", TAREFA_MODS],
-  ["compartilhar_tela", TAREFA_310],
   ["enviar_imagem_mod", TAREFA_MODS],
   ["escolher_para_o_mod", TAREFA_MODS],
-  ["exclusao_do_som_da_captura", TAREFA_310],
-  ["fontes_de_tela", TAREFA_310],
   ["instalar_mod_do_catalogo", TAREFA_MODS],
   ["ler_imagem_mod", TAREFA_MODS],
   ["midia_do_mod", TAREFA_MODS],
   ["midia_em_bytes", TAREFA_MODS],
   ["mods_instalados", TAREFA_MODS],
-  ["parar_de_compartilhar", TAREFA_310],
   ["pedaco_do_escolhido", TAREFA_MODS],
-  ["pedir_permissao_de_tela", TAREFA_310],
-  ["permissao_de_tela", TAREFA_310],
   ["soltar_escolhido", TAREFA_MODS],
-  ["som_da_tela", TAREFA_39],
   ["som_do_mod", TAREFA_MODS],
 ]);
 
@@ -423,6 +413,7 @@ async function sairDaSessaoDaPonte() {
   sessaoDaPonte.atual = null;
   ALCAS_DA_PONTE.clear();
   fecharAVozDaSessao();
+  sessao?.transmissao?.fechar();
   await sessao?.encerrar?.();
   return null;
 }
@@ -512,6 +503,12 @@ async function impressaoDoEndereco(alvo) {
   }
 }
 
+/** A fonte da tela no navegador: quem escolhe é o seletor dele. */
+const FONTE_DO_NAVEGADOR = "a tela ou a janela que o navegador oferecer";
+
+/** A captura que o navegador não deu (a pessoa fechou o seletor, ou a permissão está negada). */
+const RECUSA_DA_CAPTURA = "o navegador não deu a tela a esta página: escolha a tela ou a janela no seletor dele";
+
 /** Um endereço digitado não traz a chave do servidor: no navegador se entra pelo link. */
 const RECUSA_ENDERECO_SOZINHO =
   "no navegador se entra pelo link do servidor: um endereço sozinho não traz a chave que confere quem atendeu";
@@ -554,10 +551,14 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
       convite: joinSecret ?? null,
       aceito: aceiteDeModsGuardado(alvo.impressao),
       emitir: (evento) => {
-        if (valeAinda()) emitirNaPonte("seele://event", evento);
+        if (!valeAinda()) return;
+        if (evento && evento.ScreenClosed) vozDaPonte.atual?.esquecerOSomDaTela(evento.ScreenClosed.screen);
+        emitirNaPonte("seele://event", evento);
       },
       aoAcabar: () => {
-        if (valeAinda()) fecharAVozDaSessao();
+        if (!valeAinda()) return;
+        fecharAVozDaSessao();
+        sessaoDaPonte.atual?.transmissao?.fechar();
       },
       aoReceberOsHashes: (janelas) => {
         identidadeDaPagina()
@@ -577,8 +578,23 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
   sessao.geracao = geracao;
   sessao.alvo = alvo;
   sessao.snapshot = () => retratoDaSessao(sessao);
-  sessao.aoDobrar = () => conferirAVozDaSessao(sessao);
+  sessao.transmissao = criarATransmissaoDoNavegador({
+    sessao,
+    wasm,
+    eu: () => sessao.retrato()?.sala?.me ?? null,
+    emitir: (evento) => {
+      if (valeAinda()) emitirNaPonte("seele://event", evento);
+    },
+  });
+  sessao.aoDobrar = (mensagem) => {
+    conferirAVozDaSessao(sessao);
+    sessao.transmissao.aoDobrar(mensagem);
+  };
   sessao.aCadaVolta = () => seguirOsVolumes();
+  // O som da tela vai à mistura; a tela que fecha leva o dela.
+  sessao.aoSomDaTela = (tela, opus) => {
+    if (vozDaSessao.dentro) vozDaPonte.atual?.somDaTela(tela, Uint8Array.from(opus));
+  };
   sessaoDaPonte.atual = sessao;
   // O retrato guardado sobe com a entrada, como no `connect` do desktop.
   const retrato = bytesDoDataUri(guardadoNaOrigem(CHAVES_DA_ORIGEM.retrato));
@@ -671,6 +687,9 @@ const vozDaSessao = {
   ligando: null,
   abertura: "fora_de_sala",
   falando: false,
+  /** O volume (0 a 4) e o mudo do som da tela, como o desktop os guarda. */
+  volumeDaTela: 1,
+  telaCalada: false,
   nivel: 0,
   bitrate: 0,
   recusados: 0,
@@ -730,6 +749,8 @@ function conferirAVozDaSessao(sessao) {
       voz.tecla(vozDaSessao.tecla);
       const sensibilidade = milesimosGuardados(CHAVES_DA_ORIGEM.sensibilidade);
       voz.regua(sensibilidade === null ? 0 : Math.round(sensibilidade * 1000));
+      voz.volumeDaTela(vozDaSessao.volumeDaTela);
+      voz.calarATela(vozDaSessao.telaCalada);
       voz.entrar(sessao.transporteDaVoz, numero);
       // A recepção recomeça as alças: os ganhos se aplicam de novo.
       ganhosAplicados.clear();
@@ -1742,6 +1763,79 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   buscar: pelaSessao("buscar"),
   busca_andar: pelaPagina("busca_andar"),
   busca_limpar: pelaPagina("busca_limpar"),
+  // **O som da tela que se assiste** (R17): o volume e o mudo são escolhas
+  // desta ponta, que valem antes de a tela tocar; sem áudio na página, o
+  // desktop responde `null` e recusa os dois ajustes.
+  som_da_tela: () => comASessao(async () => (audioDisponivel() ? { volume: vozDaSessao.volumeDaTela, calada: vozDaSessao.telaCalada } : null)),
+  ajustar_volume_da_tela: ({ volume } = {}) =>
+    comASessao(async () => {
+      if (!audioDisponivel()) return Promise.reject("NotConnected");
+      vozDaSessao.volumeDaTela = Math.min(4, Math.max(0, Number(volume) || 0));
+      vozDaPonte.atual?.volumeDaTela(vozDaSessao.volumeDaTela);
+      return null;
+    }),
+  calar_a_tela: ({ calada } = {}) =>
+    comASessao(async () => {
+      if (!audioDisponivel()) return Promise.reject("NotConnected");
+      vozDaSessao.telaCalada = Boolean(calada);
+      vozDaPonte.atual?.calarATela(vozDaSessao.telaCalada);
+      return null;
+    }),
+  // **Compartilhar a tela pelo PC** (3.10; no celular, recusado com a frase):
+  // o seletor é o do navegador, chamado dentro do gesto, e a transmissão é a
+  // de `compartilhar-web.js`. Sem codificador que tire um quadro de verdade,
+  // o controle some (`NaoSeSabe`), como no desktop sem captura.
+  fontes_de_tela: () =>
+    comASessao(async () => {
+      if (!(await sondarATela(await pelaPagina("codec_da_tela")({})))) return Promise.reject("ScreenShareUnavailable");
+      return [{ id: 1, nome: FONTE_DO_NAVEGADOR, monitor: true, largura: Math.round(screen.width * devicePixelRatio), altura: Math.round(screen.height * devicePixelRatio) }];
+    }),
+  permissao_de_tela: () => comASessao(async () => ((await sondarATela(await pelaPagina("codec_da_tela")({}))) ? "Concedida" : "NaoSeSabe")),
+  pedir_permissao_de_tela: () =>
+    comASessao(async () => ((await sondarATela(await pelaPagina("codec_da_tela")({}))) ? "Concedida" : "NaoSeSabe")),
+  // O som desta página fora da captura: o `suppressLocalAudioPlayback` do
+  // navegador, quando ele o tem.
+  exclusao_do_som_da_captura: () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) return "SemCaptura";
+    return navigator.mediaDevices.getSupportedConstraints?.().suppressLocalAudioPlayback ? "Excluido" : "NaoExcluido";
+  },
+  compartilhar_tela: ({ limites } = {}) =>
+    comASessao((sessao) => {
+      if (!navigator.mediaDevices?.getDisplayMedia || !sessao.transmissao) return Promise.reject("ScreenShareUnavailable");
+      const comSom = limites?.com_som !== false;
+      // Dentro do gesto: nada espera antes do seletor.
+      return navigator.mediaDevices
+        .getDisplayMedia({
+          video: { frameRate: { ideal: limites?.quadros_maximos ?? 30 }, height: { ideal: limites?.altura_maxima ?? 720 } },
+          audio: comSom ? { suppressLocalAudioPlayback: true } : false,
+          systemAudio: comSom ? "include" : "exclude",
+          selfBrowserSurface: "exclude",
+        })
+        .then(
+          (midia) => {
+            sessao.transmissao.comecar(midia, limites);
+            return null;
+          },
+          (falha) =>
+            Promise.reject(
+              falha && falha.name === "NotAllowedError"
+                ? { RecusaDaPonte: { comando: "compartilhar_tela", frase: RECUSA_DA_CAPTURA } }
+                : "ScreenShareUnavailable",
+            ),
+        );
+    }),
+  parar_de_compartilhar: () =>
+    comASessao(async (sessao) => {
+      if (sessao.transmissao?.noAr) sessao.transmissao.parar();
+      else await pelaSessao("parar_de_compartilhar")({});
+      return null;
+    }),
+  ajustar_limites_da_tela: ({ limites } = {}) =>
+    comASessao(async (sessao) => {
+      if (sessao.transmissao?.noAr) sessao.transmissao.ajustar(limites);
+      else await pelaSessao("ajustar_limites_da_tela")({ limites });
+      return null;
+    }),
   // Nunca erra, com ou sem sessão: só a tecla da voz.
   set_talking: ({ talking } = {}) => {
     vozDaSessao.tecla = Boolean(talking);

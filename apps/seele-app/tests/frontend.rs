@@ -12628,6 +12628,9 @@ fn no_script_calls_a_function_that_no_script_declares() {
         // E a imagem escolhida, decodificada pelo navegador para o canvas que
         // a encolhe (o ícone e o retrato).
         "createImageBitmap",
+        // E a captura da tela que o PC compartilha (Tarefa 3.10), quadro a
+        // quadro, para o codificador.
+        "MediaStreamTrackProcessor",
         "parseInt",
         "parseFloat",
         "isNaN",

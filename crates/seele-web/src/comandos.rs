@@ -121,11 +121,16 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "apagar_linha",
     "apagar_voice_room",
     "aplicar_icone_do_server",
+    "abertura_da_tela",
+    "ajustar_limites_da_tela",
     "assistir",
     "banir_pessoa",
     "busca_andar",
     "busca_limpar",
     "buscar",
+    "codec_da_tela",
+    "codificacao_da_tela",
+    "compartilhar_tela",
     // Os três dos anexos que a ponte chama por dentro: o cabeçalho do envio,
     // o destino (com as regras do nome) e o pedido de um anexo ao servidor.
     "cabecalho_do_anexo",
@@ -150,6 +155,7 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "mod_request",
     "mover_pessoa",
     "open_channel",
+    "parar_de_compartilhar",
     "pedir_anexo",
     "pedir_quadro_chave",
     "peso_da_linha",
@@ -211,6 +217,8 @@ pub fn atender(
             pagina.busca = None;
             return Some(Ok(feito(Value::Null)));
         }
+        // O codec que o navegador codifica, para a sonda de antes da sessão.
+        "codec_da_tela" => return Some(Ok(feito(json!(crate::tela::CODEC_DO_NAVEGADOR)))),
         "destino_de_previa" => {
             let a = Args { comando, args };
             return Some(
@@ -737,6 +745,45 @@ fn atender_na_sessao(
             });
             Ok(Value::Null)
         }
+        // **A tela que esta ponta compartilha** (3.10): o pedido fica guardado
+        // (o `minha_transmissao.pedido` do retrato), e o servidor responde com o
+        // `ScreenShareStarted` que abre o fluxo. Quem captura é a página.
+        "compartilhar_tela" => {
+            let limites = a.limites("limites")?;
+            sessao.pedir(Some(limites));
+            saida.mensagens.push(ClientMessage::StartScreenShare);
+            Ok(Value::Null)
+        }
+        // Idempotente: o pedido sai, e o servidor fica sabendo.
+        "parar_de_compartilhar" => {
+            sessao.pedir(None);
+            saida.mensagens.push(ClientMessage::StopScreenShare);
+            Ok(Value::Null)
+        }
+        // Só com a transmissão no ar, e nada no fio: o teto é desta ponta.
+        "ajustar_limites_da_tela" => {
+            let limites = a.limites("limites")?;
+            if seele_sessao::retrato::minha_tela_de(&sessao.room, None).is_some() {
+                sessao.pedir(Some(limites));
+            }
+            Ok(Value::Null)
+        }
+        "codificacao_da_tela" => Ok(crate::tela::codificacao(
+            &a.limites("limites")?,
+            a.u32("largura")?,
+            a.u32("altura")?,
+        )),
+        "abertura_da_tela" => {
+            let lado = |nome: &str| -> Result<u16, Value> { a.u16(nome) };
+            crate::tela::abertura(
+                a.u32("tela")?,
+                a.booleano("monitor")?,
+                lado("largura")?,
+                lado("altura")?,
+            )
+            .map(|bytes| json!(bytes))
+            .map_err(|motivo| json!(format!("a abertura da tela: {motivo}")))
+        }
         "pedir_quadro_chave" => {
             saida.mensagens.push(ClientMessage::RequestKeyFrame {
                 screen: ScreenId(a.u32("tela")?),
@@ -847,6 +894,13 @@ impl Args<'_> {
                     .ok_or_else(|| self.invalido(nome, "uma lista de bytes"))
             })
             .collect()
+    }
+
+    fn limites(&self, nome: &str) -> Result<seele_sessao::retrato::LimitesDeTela, Value> {
+        self.campo(nome)
+            .cloned()
+            .and_then(|valor| serde_json::from_value(valor).ok())
+            .ok_or_else(|| self.invalido(nome, "os limites da tela"))
     }
 
     fn bytes_opcional(&self, nome: &str) -> Result<Option<Vec<u8>>, Value> {

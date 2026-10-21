@@ -47,6 +47,7 @@
 //! | | 1 | `{"erro": "sem-fluxo"}` |
 //! | `fluxo_acabou(alca)` | 0 | `{"passos": […]}`, e a alça é esquecida |
 //! | `previa_julgar(pedido, bytes)` | 0 | o `Preview` do desktop |
+//! | `tela_quadro(tipo, tamanho)` | 0 | os cinco bytes do cabeçalho de um quadro que sobe (3.10) |
 //!
 //! **A voz que sai e a que chega** (Tarefa 3.3, lotes A e C; [`crate::voz`]),
 //! na instância da página, uma de cada lado:
@@ -504,6 +505,16 @@ pub unsafe extern "C" fn previa_julgar(
             .into_bytes(),
         0,
     )
+}
+
+/// O cabeçalho de um quadro da tela que sobe ([`crate::tela::cabecalho`]):
+/// devolve 0 com os cinco bytes na saída, ou 1 para um tipo que não existe.
+#[no_mangle]
+pub extern "C" fn tela_quadro(tipo: u32, tamanho: u32) -> u32 {
+    match crate::tela::cabecalho(tipo, tamanho) {
+        Some(cabecalho) => dizer(cabecalho.to_vec(), 0),
+        None => dizer(br#"{"erro":"tipo"}"#.to_vec(), 1),
+    }
 }
 
 // ------------------------------------------- os fluxos que o servidor abre

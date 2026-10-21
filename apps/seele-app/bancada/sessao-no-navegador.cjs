@@ -44,7 +44,11 @@
 // 11. **a prévia de um link**, pelas regras do desktop: o endereço que não é
 //     http, o destino privado (o IP, o IPv4 dentro do IPv6 e o nome local), o
 //     domínio sem consentimento e o site que não responde. O juiz das imagens
-//     é o mesmo da prévia de anexo do caso 10.
+//     é o mesmo da prévia de anexo do caso 10;
+// 12. **a tela**: a primeira página compartilha a tela (a captura falsa do
+//     Chromium, com som), uma página nova entra na sala, assiste, recebe a
+//     abertura, os quadros (com chave) e o som da tela na mistura, quem
+//     compartilha se vê pelo espelho, e parar fecha a tela de quem assistia.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual.
 
@@ -519,7 +523,50 @@ const invocar = (aba, comando, args) =>
     const depoisDeEsquecer = (await invocar(d.aba, "conhecidos", {})).ok;
     confere("8", !depoisDeEsquecer.some((servidor2) => servidor2.alvo === servidor.endereco), `o servidor esquecido ficou: ${JSON.stringify(depoisDeEsquecer)}`);
 
-    for (const [nome, { doConsole }] of [["a", a], ["b", b], ["c", c], ["d", d]]) {
+    // ------------------------------------------------------------ 12. a tela
+    const e = await abrirUmaPagina(navegador, endereco);
+    paginas.push(e);
+    confere("12", (await entrarPeloLink(e.aba, servidor.link, "eva")).entrada?.ok === true, "a página que assiste não entrou");
+    await invocar(e.aba, "enter_voice_room", { voiceRoom: sala, senha: null });
+    const podeCompartilhar = (await invocar(a.aba, "permissao_de_tela", {})).ok;
+    confere("12", podeCompartilhar === "Concedida", `a permissão da tela: ${JSON.stringify(podeCompartilhar)}`);
+    const limites = { banda_bps: null, altura_maxima: 720, quadros_maximos: 15, prioridade: "nitidez", com_som: true };
+    // Contados desde antes de compartilhar: quem está na sala e ainda não
+    // escolheu recebe a tela sem pedir, e a abertura pode chegar antes do
+    // `assistir`.
+    const antesDeCompartilhar = await e.aba.evaluate(() => window.eventosDaBancada.length);
+    const compartilhou = await invocar(a.aba, "compartilhar_tela", { fonte: 1, limites });
+    confere("12", compartilhou.ok === null, `o compartilhar_tela: ${JSON.stringify(compartilhou)}`);
+    const transmitindo = await esperar(e.aba, async () => {
+      const r = await window.__TAURI__.core.invoke("snapshot");
+      return { pronto: r.transmissoes.length === 1, transmissoes: r.transmissoes };
+    }, undefined, 15_000);
+    confere("12", transmitindo.pronto, `a página que assiste não viu a transmissão: ${JSON.stringify(transmitindo.transmissoes)}`);
+    const tela = transmitindo.transmissoes?.[0]?.tela ?? transmitindo.transmissoes?.[0]?.screen;
+    confere("12", (await invocar(e.aba, "assistir", { tela, quero: true })).ok === null, "o assistir não respondeu null");
+    const assistindo = await esperar(e.aba, async (antes) => {
+      const eventos = window.eventosDaBancada.slice(antes);
+      const abriu = eventos.find((evento) => evento && evento.ScreenOpened);
+      const chaves = eventos.filter((evento) => evento && evento.ScreenFrame && evento.ScreenFrame.key).length;
+      const quadros = eventos.filter((evento) => evento && evento.ScreenFrame).length;
+      const som = vozDaPonte.atual ? vozDaPonte.atual.estadoDoSomDaTela().quadros : 0;
+      return { pronto: Boolean(abriu) && chaves >= 1 && quadros >= 5 && som > 0, abriu: abriu?.ScreenOpened, chaves, quadros, som };
+    }, antesDeCompartilhar, 20_000);
+    confere(
+      "12",
+      assistindo.pronto,
+      `a tela não chegou a quem assiste: aberta ${JSON.stringify(assistindo.abriu)}, ${assistindo.quadros} quadros (${assistindo.chaves} chaves), ${assistindo.som} quadros de som`,
+    );
+    const espelho = await a.aba.evaluate(() => window.eventosDaBancada.some((evento) => evento && evento.ScreenOpened));
+    confere("12", espelho, "quem compartilha não viu a própria tela (o espelho)");
+    confere("12", (await invocar(a.aba, "parar_de_compartilhar", {})).ok === null, "o parar_de_compartilhar não respondeu null");
+    const fechou = await esperar(e.aba, async (antes) => {
+      const eventos = window.eventosDaBancada.slice(antes);
+      return { pronto: eventos.some((evento) => evento && evento.ScreenClosed) };
+    }, antesDeCompartilhar);
+    confere("12", fechou.pronto, "a tela não fechou para quem assistia");
+
+    for (const [nome, { doConsole }] of [["a", a], ["b", b], ["c", c], ["d", d], ["e", e]]) {
       const erros = doConsole.filter((linha) => linha.startsWith("pageerror") || /CSP|Content Security Policy/i.test(linha));
       confere("console", erros.length === 0, `a página ${nome} teve erros: ${erros.join(" | ")}`);
     }

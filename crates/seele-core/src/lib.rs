@@ -116,6 +116,11 @@ pub use seele_audio::gate::{
 };
 /// O volume padrão do toque: audível, e longe do teto da escala.
 pub use seele_audio::toque::VOLUME as VOLUME_DO_TOQUE;
+/// As medidas de um degrau na proporção da fonte e o teto de banda da prova:
+/// o navegador compartilha a tela com cópias deles (`seele_web::tela`, Tarefa
+/// 3.10 da F4), e a conformidade as confere por aqui, que é por onde a regra de
+/// dependências deixa um teste ver o `seele-video`.
+pub use seele_video::codec::{medidas_para, TETO_DA_PROVA_BPS};
 /// O módulo do Cisco e os degraus que a pessoa escolhe.
 ///
 /// Reexportados porque [`PedidoDeTela`] pede os três e o ADR 0002 não deixa uma
