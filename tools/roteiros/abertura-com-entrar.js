@@ -63,3 +63,37 @@ exigir(estado.includes("já indo para lá"),
 const nasFrases = ["boot-erro", "servidores-erro", "versoes-confirmar-frase", "versoes-confirmar-estado"]
   .filter((id) => texto(id).includes(CONVITE));
 exigir(nasFrases.length === 0, `o convite do link apareceu em ${nasFrases.join(", ")}`);
+
+// ---- 2. Um `--entrar` cujo `v=` já diz outra linha.
+// O `analisar_convite` responde que o servidor é do Servidor 0.15 antes de
+// discar (`para_entrar`), e a abertura segue pelo launcher, como o link colado
+// no painel faz: pergunta, e **não disca aqui**, porque este app nem fala o
+// protocolo daquele servidor. Antes, o `cumprirAAbertura` ignorava a decisão e
+// discava, e a pergunta só vinha, se viesse, depois da recusa.
+const LINK_DA_0_15 = "seele://casa.exemplo:8383/?fp=" + "c".repeat(64) + "&v=0.15.1";
+if (visivel("servidores") === "VISIVEL") document.getElementById("servidores-fechar").click();
+SEELE_RESPOSTAS.abertura = { entrar: LINK_DA_0_15, hospedar: false, nome_publico: null };
+SEELE_RESPOSTAS.analisar_convite = {
+  alvo: "casa.exemplo:8383",
+  token: null,
+  versao: "0.15.1",
+  para_entrar: {
+    Abrir: { linha: "0.15", servidor: "0.15", versao: "0.15.2", perde_conversas: false },
+  },
+};
+window.__SEELE_CHAMADAS.length = 0;
+delete window.__SEELE_ARGS.abrir_versao;
+await cumprirAAbertura();
+await ate(() => document.getElementById("versoes-confirmar")?.hidden === false
+  && document.getElementById("servidores")?.hidden === false, 1500);
+relatar(`v= de outra linha: discou ${chamou("connect")} · pergunta ${visivel("versoes-confirmar")} · painel ${visivel("servidores")}`);
+exigir(!chamou("connect"),
+  "um --entrar com v= de outra linha discou aqui, num servidor cujo protocolo este app não fala");
+exigir(visivel("versoes-confirmar") === "VISIVEL" && visivel("servidores") === "VISIVEL",
+  "um --entrar com v= de outra linha não perguntou pela outra versão");
+document.getElementById("versoes-confirmar-sim").click();
+await ate(() => chamou("abrir_versao"), 1000);
+const pelaVersao = window.__SEELE_ARGS.abrir_versao ?? {};
+relatar(`v= de outra linha: abriu ${chamou("abrir_versao")} · linha ${pelaVersao.linha} · o link ${pelaVersao.link === LINK_DA_0_15}`);
+exigir(pelaVersao.linha === "0.15" && pelaVersao.link === LINK_DA_0_15,
+  `o ABRIR não levou o --entrar ao Servidor 0.15: ${JSON.stringify(pelaVersao)}`);
