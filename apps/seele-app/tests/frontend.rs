@@ -16470,9 +16470,18 @@ fn o_carregador_de_mods_diz_na_tela_e_monta_a_url_pelo_tauri() {
         let chamada = resto.get(..fim).unwrap_or("");
         // Toda string literal da chamada que tem cara de identificador de fase:
         // minúsculas e hífen. O detalhe é frase, e frase tem espaço ou acento.
-        for pedaco in chamada.split('"').skip(1).step_by(2) {
+        let partes: Vec<&str> = chamada.split('"').collect();
+        for (i, pedaco) in partes.iter().enumerate().skip(1).step_by(2) {
+            // A literal que vem logo depois de `===` ou de `!==` (também a de
+            // `typeof x === "function"`) é o lado de uma comparação, e não um
+            // argumento de fase: sem esta exceção o guarda lia `"function"` como
+            // fase e só passava porque o painel cita `"function"` por acaso.
+            let antes = partes.get(i - 1).map_or("", |p| p.trim_end());
+            if antes.ends_with("===") || antes.ends_with("!==") {
+                continue;
+            }
             if !pedaco.is_empty() && pedaco.chars().all(|c| c.is_ascii_lowercase() || c == '-') {
-                fases.insert(pedaco.to_owned());
+                fases.insert((*pedaco).to_owned());
             }
         }
     }
