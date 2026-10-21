@@ -589,6 +589,28 @@ const MOTIVOS_DE_REVOGACAO = {
   "migracao-que-corrompe": "uma migração dele corrompia os dados guardados",
 };
 
+/**
+ * Por que um pacote instalado não serve, depois do «não serve:» da gestão de
+ * MODs (tarefa 13 do plano da F3, Step 6b).
+ *
+ * As chaves são os nomes de `refusal_name` (`crates/seele-core/src/mods.rs`),
+ * e o guarda `todo_pacote_recusado_e_dito_com_uma_frase` cobra uma frase para
+ * cada um. Antes, a gestão dizia o nome cru — «não serve: empty» —, e um
+ * código não diz a ninguém o que fazer. Um nome que chegue sem frase continua
+ * aparecendo cru, como em `MOTIVOS_DE_REVOGACAO`: feio, e honesto.
+ */
+const RECUSAS_DE_PACOTE = {
+  "malformed": "o mod.json dele não é um JSON que este app lê, ou tem uma chave que ele não conhece",
+  "schema-too-new": "o mod.json dele é de um formato mais novo que este app; atualize o aplicativo",
+  "api-too-new": "ele é de uma API mais nova que a deste app; atualize o aplicativo",
+  "api-too-old": "ele é de uma API que roda no Servidor 0.15, e não neste app; procure a versão dele para a API 6, ou use o Servidor 0.15 pelo launcher",
+  "malformed-id": "o identificador dele não é «autor/nome»",
+  "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",
+  "tema-sem-metade-de-servidor": "ele declara a porta do tema sem a metade de servidor, que é quem pinta a aparência: o tema nunca apareceria",
+  "arquivo-invalido": "ele declara um arquivo fora da pasta do pacote",
+  "arquivos-demais": "ele declara mais arquivos do que o app carrega",
+};
+
 const NOMES_RECUSADOS = {
   Vazio: "ESTE NOME É SÓ ESPAÇO.\nDeixe o campo em branco para usar o endereço numérico de sempre.",
   ComEspaco:
@@ -679,6 +701,48 @@ function fraseDeErro(erro, apelido, deOnde) {
         "mod-desligado": "Este MOD não está ligado neste servidor: ligue-o e salve antes de escolhê-lo.",
         "sem-porta-de-tema": "Este MOD não declara a porta do tema, e não pode pintar a aparência do servidor.",
       }[motivo] ?? motivo;
+    }
+    // **Um MOD ligado que este app não roda** (o corte da API 6; tarefa 13 do
+    // plano da F3, Step 5b): o servidor não sobe calado. Cada MOD com o nome e
+    // a API que o pacote declara; o que não tem o pacote nesta máquina sai sem
+    // número — «API 0» seria «não sei» escrito como um fato. As três saídas são
+    // as do dono (08/10), nesta ordem.
+    if (erro.ModsDeApiAntiga) {
+      const mods = erro.ModsDeApiAntiga.mods ?? [];
+      // Zero também é «não sei»: o Rust manda `None`, e um zero que chegasse
+      // por outro caminho não vira número escrito.
+      const ditos = mods.map(([id, api]) => (!api
+        ? `${id}: o pacote deste MOD não está nesta máquina — baixe-o de novo, ou desligue o MOD.`
+        : `${id}: feito para a API ${api}, que roda no Servidor 0.15.`));
+      const algumComApi = mods.some(([, api]) => Boolean(api));
+      return (
+        "ESTE SERVIDOR TEM MOD QUE ESTE APP NÃO RODA.\n" +
+        ditos.join("\n") +
+        (algumComApi
+          ? "\nAtualize o MOD para a versão da API 6; ou hospede pelo Servidor 0.15, no launcher; " +
+            "ou desligue o MOD e hospede sem ele — os dados dele ficam."
+          : "")
+      );
+    }
+    // **As saídas de quem hospeda com um MOD de API antiga**, as recusas com
+    // campo (`FalhaAoResolverModAntigo`, em `mods.rs`; as sem campo estão no
+    // `FRASES`). O motivo de um pacote que não serve é um nome: os do núcleo
+    // têm frase em `RECUSAS_DE_PACOTE`, e dois vêm da leitura por hash.
+    if (erro.PacoteNaoServe) {
+      const motivo = erro.PacoteNaoServe;
+      const porque = {
+        "conteudo-de-outro-mod": "o pacote baixado é de outro MOD",
+        "conteudo-nao-bate": "o conteúdo do pacote não é o que o catálogo publicou",
+      }[motivo] ?? RECUSAS_DE_PACOTE[motivo] ?? motivo;
+      return `A VERSÃO NOVA DESTE MOD NÃO SERVE: ${porque}.\nO MOD continua como estava.`;
+    }
+    // A de unidade com o mesmo nome é da `FalhaNoMod`, e chega como texto: esta
+    // chega como objeto, com o que o banco disse.
+    if (typeof erro.BancoNaoRespondeu === "string") {
+      return (
+        `O BANCO DESTE SERVIDOR NÃO RESPONDEU: ${erro.BancoNaoRespondeu}.\n` +
+        "O MOD continua como estava."
+      );
     }
     // ADR 0046: esta versão foi revogada. A frase diz o defeito e o conserto,
     // como a lista assinada os escreve — nunca uma recusa genérica. Serve a
@@ -834,6 +898,9 @@ function fraseDeErro(erro, apelido, deOnde) {
             linhas.push(
               "  roda na máquina de quem hospeda: rede de saída, relógio e registro",
             );
+          }
+          if (mod.tema) {
+            linhas.push("  pode mudar a aparência deste servidor para todos que entram");
           }
           return linhas.join("\n");
         })
@@ -1149,6 +1216,17 @@ const FRASES = {
       "O CATÁLOGO NÃO É O NOSSO.\n" +
       "A assinatura não confere com a chave deste SEELE. Não tente de novo: " +
       "avise quem publica.",
+
+    // As saídas de quem hospeda com um MOD de API antiga, com o servidor parado
+    // (`FalhaAoResolverModAntigo`, em `mods.rs`; tarefa 13 do plano da F3,
+    // Step 5b). As que trazem o motivo são montadas em `fraseDeErro`.
+    ServidorNoAr:
+      "PARE A HOSPEDAGEM PRIMEIRO.\n" +
+      "Com um servidor no ar nesta janela, o SEELE não atualiza nem desliga MOD de servidor guardado.",
+    ServidorDesconhecido:
+      "ESTE SERVIDOR NÃO ESTÁ ENTRE OS GUARDADOS DESTA MÁQUINA.\nNada foi mudado.",
+    NaoEDeApiAntiga:
+      "ESTE MOD JÁ NÃO IMPEDE DE HOSPEDAR.\nNada foi mudado: tente hospedar de novo.",
 
     // Instalar um MOD de uma pasta (`FalhaAoInstalarMod`, em `mods.rs`). A
     // única recusa sem campo; as outras três, que trazem o motivo ou o caminho,

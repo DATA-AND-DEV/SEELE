@@ -284,6 +284,62 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex as Trava};
 
+    /// **Dezesseis canais por chamada, e o seguinte é `avisos-demais`**
+    /// (`sentido.mundo.avisar`; a auditoria do `v6.json`, tabela 2: nada citava
+    /// o teto nem o nome, e tirar a conferência de [`juntar`] passava). O número
+    /// é o que o texto diz, lido dele. O mesmo canal de novo não conta: troca o
+    /// aviso de antes, e o mais novo fica.
+    #[test]
+    fn uma_chamada_avisa_ate_o_teto_de_canais_e_o_seguinte_e_avisos_demais() {
+        let v6: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../api/v6.json")).expect("o v6.json");
+        let texto = v6["sentido"]["mundo.avisar"]
+            .as_str()
+            .expect("o texto do avisar");
+        assert!(
+            texto.contains(&format!("{TETO_DE_AVISOS_POR_CHAMADA} canais por chamada"))
+                && texto.contains("avisos-demais"),
+            "o teto de {TETO_DE_AVISOS_POR_CHAMADA} canais por chamada, ou o nome da recusa, não é o \
+             que o v6.json diz: {texto}"
+        );
+        let aviso = |canal: u32, carga: &str| AvisoDeclarado {
+            canal: Some(ChannelId(canal)),
+            carga: carga.to_owned(),
+        };
+        let teto = u32::try_from(TETO_DE_AVISOS_POR_CHAMADA).expect("o teto cabe");
+        let mut lista = Vec::new();
+        for canal in 1..=teto {
+            assert_eq!(
+                juntar(&mut lista, aviso(canal, "1")),
+                Ok(()),
+                "o canal {canal} cabia"
+            );
+        }
+        assert_eq!(
+            juntar(&mut lista, aviso(3, "2")),
+            Ok(()),
+            "o mesmo canal de novo foi contado como um canal a mais"
+        );
+        assert_eq!(
+            lista
+                .iter()
+                .find(|a| a.canal == Some(ChannelId(3)))
+                .map(|a| a.carga.as_str()),
+            Some("2"),
+            "o mesmo canal de novo não ficou com o mais novo: {lista:?}"
+        );
+        assert_eq!(
+            juntar(&mut lista, aviso(teto + 1, "1")),
+            Err("avisos-demais"),
+            "o canal além do teto não foi recusado pelo nome"
+        );
+        assert_eq!(
+            lista.len(),
+            TETO_DE_AVISOS_POR_CHAMADA,
+            "o recusado entrou na lista"
+        );
+    }
+
     /// Um avisador e o que ele já soltou, na ordem.
     fn avisador() -> (Arc<Avisador>, Arc<Trava<Vec<AvisoQueSai>>>) {
         (

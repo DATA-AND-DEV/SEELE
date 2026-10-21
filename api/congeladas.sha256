@@ -40,9 +40,43 @@
 # um nome que um MOD escreve; por isso o `check-api` não tinha o que ver. O que
 # este guarda muda é que a próxima edição assim não passa em silêncio: ela vira
 # a versão seguinte.
+#
+# ## v6 foi emendada quatro vezes, depois do corte e antes da publicação
+#
+# Congelada no corte da API 6 (15/10/2026) com SHA-256
+# 3e24f61b0d6e312d93c003a45dc9dc8f88d31a329018ce541f99de3305644fb4. A
+# auditoria do `v6.json` contra o produto achou promessas sem entrega, e a
+# D-api-8 autoriza emendas antes de a v6 sair, cada uma num commit só, com
+# esta linha refeita nele e a razão escrita, e só do que já foi entregue.
+#
+# - A primeira (44025ab5, SHA-256
+#   9789081befca36e53e99832941ff7e8e2858c65031f2dd7ad18abef71c5e1ca1) corrigiu
+#   textos, tirou o que a 0.16 não entrega e escreveu a lista fechada das
+#   recusas.
+# - A segunda (16/10/2026) escreveu a `pessoa` da citação (D-api-9), a errata
+#   do `sujo` (o inicial é o da primeira montagem do campo), o diálogo não
+#   modal no celular, os nomes que vão no par de uma recusa do tema e o `teto`
+#   do `teto-de-alvos` (563ecf8f, SHA-256
+#   58576e950a7fbbc928610474aa13018e7ab949688b54ea8b78f8328cb16868b8).
+# - A terceira (16/10/2026) escreveu a recusa `nos-recusados`, com a conta e a
+#   amostra do que uma montagem recusou, e a amostra no evento `contribuicao`,
+#   no mesmo commit da entrega: o guarda da lista fechada das recusas amarra a
+#   janela ao contrato, e um nome entregue num commit e escrito no seguinte
+#   deixaria o do meio vermelho (5b7ff153, SHA-256
+#   ddbd76f48362d5bb2bf5d7a9d31da222f7609f4df4eb394417fdbc9d659d237f).
+# - A quarta e última (20/10/2026; D-api-10), no fim do passo 7 da auditoria,
+#   escreveu o texto do que o passo 7 achou: o `listarNaBarra` vale na aba
+#   SERVIDOR do celular (o texto ainda dizia a gaveta SALAS), o
+#   `ponto-desconhecido` leva `pontoPedido` e `pontos` (entregues em
+#   021876f8), e `estilos` e `classes` são rótulos sem efeito (`rotulos`, em
+#   `compatibilidade`): nenhum manifesto declara capacidade, e nada pergunta
+#   por elas. Depois desta, a v6 só muda na API 7.
+#
+# Ver `api/README.md`, «A API 6». Nenhum build publicado leu a v6 de antes.
+# Depois que a 0.16 for publicada, a v6 não muda mais: a mudança vai para a v7.
 298fcbc3f386bf62c5aa4484bbc32f4ebb7a9d5523891eceec4bc1cc7738d3d6  v1.json
 f28d33eef08841daee7da58075d3513c0a7f3719bcf51fec784bc16b70e3505b  v2.json
 519b5e0d1c47138e009d63fffe1c7cfa0a528808293d0b34c71a08c7140a71e2  v3.json
 e31dda28805d2c4213889ea9437bfb7d7f49b14b041b127f47bb97676c50b973  v4.json
 7ff2570751fa4acbe52cf2d3cf7cec015453c12fae62ab5a469b74959aec046b  v5.json
-f0c792a4852486dd6a39cd9aa7ca3f3adef2c35f24388ff0d60e1df5c3bb4999  v6.json
+8dcf4aaf13f73b957e52b99f462bfdff656a232dd337bccebdad97edaae6f514  v6.json

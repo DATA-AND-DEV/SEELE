@@ -120,7 +120,18 @@ function inertarMenos(no, acordados, mudados) {
  * - No desktop (tarefa 9, Step 4b; decisão da orquestradora, 09/10: o
  *   recorte), o MUDO, o fone e o SAIR da barra do operador ficam acordados, e
  *   o véu ganha um furo no retângulo da barra; abaixo de 900 px a barra mora
- *   na gaveta, e a porta dela entra nos dois.
+ *   na gaveta, e a porta dela entra nos dois. **E a faixa de quem liga**
+ *   (`#toque`, a 7d; tarefa 9, Step 5): uma ligação que chega com um modal de
+ *   MOD aberto é atendida ou recusada ali, e não depois do Esc. Medido em
+ *   11/10: sem isto, o ATENDER e o RECUSAR ficavam inertes, e o diálogo largo
+ *   cruzava a faixa. Ela fica nos dois mesmo escondida: quando acende, o
+ *   `ResizeObserver` do recorte refaz o furo. **E a portaria**
+ *   (`#portaria-batendo`; achado do passo 7 da auditoria do v6, decisão da
+ *   orquestradora, 16/10): a camada de um diálogo de MOD (60) passava por cima
+ *   dela (19), e o VER QUEM É e o DEPOIS ficavam cobertos e inertes — quem
+ *   hospeda não via quem batia. Pelo recorte, e não subindo o z dela: acima
+ *   de 60, ela cobriria as camadas do produto entre 20 e 40, a da própria
+ *   portaria entre elas.
  *
  * `acordados` são os nós que a pilha de inércia deixa acordados; `recortes`,
  * os retângulos que o véu não cobre. Perguntado a cada recálculo, porque a
@@ -135,9 +146,11 @@ function foraDoModal() {
   }
   const achar = (seletor) => document.querySelector?.(seletor) ?? null;
   const porta = achar("#tela-sessao .linha-canais");
+  const toque = achar("#toque");
+  const portaria = achar("#portaria-batendo");
   return {
-    acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), porta].filter(deVerdade),
-    recortes: [achar("#tela-sessao .operador"), porta].filter(deVerdade),
+    acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), porta, toque, portaria].filter(deVerdade),
+    recortes: [achar("#tela-sessao .operador"), porta, toque, portaria].filter(deVerdade),
   };
 }
 
@@ -326,6 +339,27 @@ function tiposDaApi(api) {
 }
 
 /**
+ * **A primeira forma que a API não tem, numa árvore declarada**, ou `null`
+ * (D-api-8; o achado 5 da auditoria do `v6.json`). Ela sumia calada: o
+ * renderer não a contava fora do cartão, e o `superficie-montar` respondia
+ * `ok`. Com ela, a superfície recusa pelo nome antes de mexer na tela. O
+ * percurso é o de `nosDaDeclaracao`: os filhos moram em `dentro`, e um texto
+ * solto é uma string.
+ */
+function formaDesconhecida(no) {
+  if (Array.isArray(no)) {
+    for (const um of no) {
+      const achada = formaDesconhecida(um);
+      if (achada !== null) return achada;
+    }
+    return null;
+  }
+  if (no === null || typeof no !== "object") return null;
+  if (typeof no.forma === "string" && !Object.hasOwn(FORMAS_DA_REGIAO, no.forma)) return no.forma;
+  return formaDesconhecida(no.dentro);
+}
+
+/**
  * Uma recusa das superfícies, com o nome de lista fechada (rascunho §7.1) e
  * os campos que a 6 recebe. Até a 5, `recusaParaOMod` devolve `null`, e o MOD
  * recebe a frase.
@@ -345,13 +379,12 @@ function recusaDaSuperficie(nome, frase, campos) {
  * `janela` via um diálogo e não tinha como saber por quê. Na 6, ele é recusado
  * pelo nome — `tipo-desconhecido`, com o tipo pedido (`tipoPedido`) e os que
  * existem (`tipos`) —, e o
- * roteador põe a linha no `seele.log`. Até a 5, que é o que os MODs publicados
- * recebem, a superfície abre como `dialogo`, como abria, e a linha vai ao
- * `seele.log` pelo dono. Sem tipo, `dialogo`, nas duas.
+ * roteador põe a linha no `seele.log`. Sem tipo, `dialogo`. (Até a 5 a
+ * superfície abria como `dialogo`; depois do corte da API 6, tarefa 13 do
+ * plano da F3, só a 6 chega aqui.)
  *
  * Os tipos são os da API do pacote (`tiposDaApi`), que vem do dono: o
- * `painel` na 6 é um tipo que ela não tem, e a frase diz «use folha»; a
- * `folha` até a 5 também, e abre como `dialogo`.
+ * `painel` é um tipo que a 6 não tem, e a frase diz «use folha».
  */
 function tipoDaSuperficie(descricao, dono) {
   const api = Number(dono?.api) || 0;
@@ -360,16 +393,14 @@ function tipoDaSuperficie(descricao, dono) {
   if (pedido === undefined || pedido === null) return "dialogo";
   if (tipos.includes(pedido)) return pedido;
   const tipo = String(pedido).slice(0, 64);
-  const troca = api >= 6 && tipo === "painel" ? "; o painel saiu na API 6: use folha" : "";
+  const troca = tipo === "painel" ? "; o painel saiu na API 6: use folha" : "";
   // `tipoPedido`, e não `tipo`: `tipo` é o da mensagem da ponte («resposta»).
   const recusa = recusaDaSuperficie(
     "tipo-desconhecido",
     `o tipo de superfície «${tipo}» não existe; os tipos são ${tipos.join(", ")}${troca}`,
     { tipoPedido: tipo, tipos },
   );
-  if (api >= 6) throw recusa;
-  dono?.anotarRecusa?.(`${recusa.message}; até a API 5, ela abre como dialogo`);
-  return "dialogo";
+  throw recusa;
 }
 
 /**
@@ -435,9 +466,6 @@ class SuperficieDeMod {
     this.contexto = descricao?.contexto ?? null;
     this.lado = descricao?.lado === "esquerda" ? "esquerda" : "direita";
     this.focoInicial = String(descricao?.focoInicial ?? "").slice(0, 120);
-    this.aoFecharComAlteracoes = descricao?.fecharComAlteracoes === "confirmar"
-      ? "confirmar"
-      : "fechar";
     this.suja = false;
     this.visivel = descricao?.visivel !== false;
     this.solta = false;
@@ -579,6 +607,9 @@ class SuperficieDeMod {
 
     if ((this.tipo === "dialogo" && this.modal) || this.imersiva) this.prenderFoco();
     else if (this.tipo === "pagina") this.focarPrimeiro();
+    // O não modal também respeita o recorte: sem véu, a caixa dele termina
+    // antes do que o recorte guarda — a portaria, embaixo, onde ele mora.
+    if (this.tipo === "dialogo" && !this.modal) this.vigiarORecorte();
   }
 
   /**
@@ -641,12 +672,13 @@ class SuperficieDeMod {
    * **O furo do véu** (rascunho da API 6, §10; tarefa 9, Step 4b): num modal,
    * o véu não pinta nem recebe clique no retângulo do que `foraDoModal`
    * recorta, e a caixa do diálogo nunca o cruza — a área dela começa à
-   * direita do que fica à esquerda, e acaba acima do que fica embaixo. O
+   * direita do que fica à esquerda, abaixo do que fica em cima (a faixa de
+   * quem liga, Step 5) e acaba acima do que fica embaixo. O
    * recorte segue a janela e a gaveta: um `ResizeObserver` nos recortados e o
    * `resize` da janela o refazem.
    */
   vigiarORecorte() {
-    if (this.tipo !== "dialogo" || !this.modal || !this.camada || this.pararORecorte) return;
+    if (this.tipo !== "dialogo" || !this.camada || this.pararORecorte) return;
     const refazer = () => this.recortarOVeu();
     const recortados = foraDoModal().recortes;
     const observador = typeof ResizeObserver === "function" ? new ResizeObserver(refazer) : null;
@@ -673,6 +705,7 @@ class SuperficieDeMod {
     if (!furos.length) {
       camada.style.removeProperty("clip-path");
       camada.style.removeProperty("--recorte-esquerda");
+      camada.style.removeProperty("--recorte-cima");
       camada.style.removeProperty("--recorte-baixo");
       return;
     }
@@ -683,14 +716,18 @@ class SuperficieDeMod {
       const [x1, y1, x2, y2] = [r.left - caixa.left, r.top - caixa.top, r.right - caixa.left, r.bottom - caixa.top].map(px);
       caminho.push(`${x1} ${y1}`, `${x1} ${y2}`, `${x2} ${y2}`, `${x2} ${y1}`, `${x1} ${y1}`, "0 0");
     }
-    camada.style.clipPath = `polygon(evenodd, ${caminho.join(", ")})`;
-    // A área do diálogo: à direita dos furos da metade esquerda, e acima dos
-    // da metade de baixo que não estão à esquerda.
+    // Só o modal tem véu para furar; o não modal só ganha a área do diálogo.
+    if (this.modal) camada.style.clipPath = `polygon(evenodd, ${caminho.join(", ")})`;
+    // A área do diálogo: à direita dos furos da metade esquerda, abaixo dos da
+    // metade de cima que não estão à esquerda, e acima dos da metade de baixo
+    // que não estão à esquerda.
     const meioX = caixa.left + caixa.width / 2;
     const meioY = caixa.top + caixa.height / 2;
     const aEsquerda = furos.filter((r) => r.right <= meioX);
+    const emCima = furos.filter((r) => r.right > meioX && r.bottom <= meioY);
     const embaixo = furos.filter((r) => r.right > meioX && r.top >= meioY);
     camada.style.setProperty("--recorte-esquerda", px(Math.max(0, ...aEsquerda.map((r) => r.right - caixa.left))));
+    camada.style.setProperty("--recorte-cima", px(Math.max(0, ...emCima.map((r) => r.bottom - caixa.top))));
     camada.style.setProperty("--recorte-baixo", px(Math.max(0, ...embaixo.map((r) => caixa.bottom - r.top))));
   }
 
@@ -727,6 +764,7 @@ class SuperficieDeMod {
   /** O que o MOD declarou, montado aqui dentro. */
   montar(conteudo) {
     if (this.solta) return 0;
+    this.recusarFormaDesconhecida(conteudo);
     // A declaração inteira, para a montagem por partes trocar um nó dela.
     this.declaracao = conteudo;
     const tinhaFoco = this.raiz.contains?.(document.activeElement);
@@ -758,6 +796,7 @@ class SuperficieDeMod {
       throw recusaDaSuperficie("chave-desconhecida",
         `a superfície «${this.chave}» não tem um nó com a chave «${alvo}»`, { chave: alvo });
     }
+    this.recusarFormaDesconhecida(subarvore);
     const perfil = this.renderer.perfil;
     const tamanho = nosDaDeclaracao(this.declaracao)
       - nosDaDeclaracao(lugar.pai[lugar.campo]) + nosDaDeclaracao(subarvore);
@@ -768,6 +807,15 @@ class SuperficieDeMod {
     }
     lugar.pai[lugar.campo] = subarvore;
     return this.montar(raiz.declaracao);
+  }
+
+  /** Recusa, pelo nome e com a forma, a árvore com uma forma que a API não tem. */
+  recusarFormaDesconhecida(arvore) {
+    const forma = formaDesconhecida(arvore);
+    if (forma !== null) {
+      throw recusaDaSuperficie("forma-desconhecida",
+        `a superfície «${this.chave}» declara a forma «${forma}», que a API não tem`, { forma });
+    }
   }
 
   /**
@@ -861,10 +909,14 @@ class SuperficieDeMod {
    * §3: «Se há alterações não salvas, o host apresenta a decisão de
    * salvar/descartar; o MOD não pode vetar indefinidamente a saída da sessão.»
    *
-   * A regra concreta: com `fecharComAlteracoes: 'confirmar'` e estado sujo, o
-   * primeiro pedido vira um evento e uma confirmação do **produto**; o segundo
-   * fecha. Sem estado sujo, fecha na hora. A saída da sessão não passa por
-   * aqui — ela chama `descartar`, que não pergunta nada.
+   * A regra concreta: com estado sujo, **sempre**, o primeiro pedido vira um
+   * evento e uma confirmação do **produto**; o sim fecha com `descartou`. Era
+   * só com `fecharComAlteracoes: 'confirmar'`, que nenhum vN.json declara, e
+   * por padrão um rascunho sumia sem pergunta (D-api-8; a auditoria do
+   * `v6.json`, `garantias-do-produto[5]`). O MOD que fecha a dele sem
+   * perguntar pede com o motivo `descartar`. Sem estado sujo, fecha na hora. A
+   * saída da sessão não passa por aqui — ela chama `descartar`, que não
+   * pergunta nada.
    */
   pedirFechamento(porque) {
     if (this.solta) return;
@@ -872,7 +924,7 @@ class SuperficieDeMod {
     // 6, §5; Step 6c): um campo que difere do inicial suja a superfície sem o
     // MOD chamar `suja`, e voltar ao gravado a limpa.
     const suja = this.suja || this.renderer.temAlteracoes?.() === true;
-    if (suja && this.aoFecharComAlteracoes === "confirmar" && porque !== "confirmado") {
+    if (suja && porque !== "confirmado") {
       this.dono.falar({
         nome: "fechar-pedido",
         superficie: this.chave,

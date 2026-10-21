@@ -75,6 +75,8 @@ class No {
     this.hidden = false;
     this.dataset = {};
     this.ouvintes = 0;
+    // As variáveis do recorte (`--recorte-*`) que o diálogo escreve na camada.
+    this.style = { setProperty() {}, removeProperty() {}, getPropertyValue() { return ""; } };
   }
   get children() {
     return this.filhos;
@@ -102,6 +104,10 @@ class No {
   addEventListener() { this.ouvintes += 1; }
   removeEventListener() { this.ouvintes -= 1; }
   focus() { documento.activeElement = this; }
+  // Sem layout: uma caixa vazia. O diálogo não modal pede o recorte ao abrir
+  // (a portaria, passo 7 da auditoria do v6), e o recorte mede caixas.
+  getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }; }
+  getClientRects() { return []; }
 }
 
 /**
@@ -201,6 +207,8 @@ const contexto = vm.createContext({
   setTimeout: () => 1,
   clearTimeout: () => {},
   requestAnimationFrame: (f) => f(),
+  // A janela só para o ouvinte de redimensionar do recorte.
+  window: { addEventListener() {}, removeEventListener() {} },
   document: documento,
   geracaoDaSessao: 7,
   modsCarregados: new Map(),
@@ -758,10 +766,12 @@ let soltouRenderer = 0;
 /** Os renderers que a montagem criou, na ordem: o que cada um recebeu é o que se confere. */
 const renderersMontados = [];
 contexto.RegiaoDeMod = class {
-  constructor(id, dono, raiz) {
+  constructor(id, dono, raiz, perfil) {
     this.id = id;
     this.dono = dono;
     this.raiz = raiz;
+    // O orçamento com que foi montado: o perfil do ponto (`PERFIS_DE_RENDER`).
+    this.perfil = perfil;
     renderersMontados.push(this);
   }
   aplicar() { return 0; }
@@ -772,7 +782,6 @@ contexto.PERFIS_DE_RENDER = { cartao: {}, superficie: {} };
 contexto.elemento = (tag) => new No(tag, "");
 // O `mod` vai junto: é com o hash dele que o dono de verdade pede a mídia.
 contexto.donoDaRegiao = (mod, instancia) => ({ instancia, mod, falar() {} });
-contexto.cartoesDosMods = new Map();
 
 {
   const base = ler("base.js");
@@ -877,8 +886,8 @@ contexto.cartoesDosMods = new Map();
   // cada um é medido em `regiao-do-mod.cjs`.
   //
   // A regra é a de `midiasDoPonto`: uma substituição desenha onde
-  // `escolherSubstituicao` a escolhe, um acréscimo desenha sempre, e um
-  // cartão da API 3 desenha quando o MOD está em `modsDeCartaoQueValem`.
+  // `escolherSubstituicao` a escolhe, e um acréscimo desenha sempre. (A
+  // região da API 3 e os cartões dela saíram com ela.)
   const ouvidos = new Map();
   const renderer = (nome) => ({
     calarSonsForaDaTela(cartoesPintam = true) { ouvidos.set(nome, cartoesPintam); },
@@ -891,11 +900,6 @@ contexto.cartoesDosMods = new Map();
   };
   const [a, b, c] = ["mod/a", "mod/b", "mod/c"].map(instancia);
   contexto.contribuicoesDosMods = registro;
-  contexto.regioesDosMods = new Map([
-    [a, { id: "mod/a", ...renderer("a região de mod/a, cujos cartões valem") }],
-    [b, { id: "mod/b", ...renderer("a região de mod/b, cujos cartões não valem") }],
-  ]);
-  contexto.modsDeCartaoQueValem = () => ["mod/a"];
   contexto.preferenciaConsultadaPara = () => "";
   const montada = (mod, dono, pedido, nome) => {
     const { handle } = registro.registrar({ id: mod }, dono, pedido);
@@ -915,8 +919,6 @@ contexto.cartoesDosMods = new Map();
   );
   varrer();
   const esperado = {
-    "a região de mod/a, cujos cartões valem": true,
-    "a região de mod/b, cujos cartões não valem": false,
     "a substituição que perdeu": false,
     "a substituição que venceu": true,
     "o acréscimo": true,
@@ -988,7 +990,6 @@ contexto.cartoesDosMods = new Map();
   const anotadas = [];
   const registrarDeAntes = contexto.registrarNoAnfitriao;
   const rendererDeAntes = contexto.RegiaoDeMod;
-  const regiaoDeAntes = contexto.regiaoDoMod;
   contexto.registrarNoAnfitriao = (...argumentos) => anotadas.push(argumentos);
   const dita = (idDoMod, ...pedacos) => anotadas.some(([onde, texto, nivel, modId]) =>
     onde === "recusa-de-mod" && nivel === "aviso" && modId === idDoMod
@@ -1032,22 +1033,36 @@ contexto.cartoesDosMods = new Map();
     "a recusa do descarte escreveu o ponto sem «», ao contrário das outras recusas de contribuição: "
       + `${JSON.stringify(anotadas.filter(([, texto]) => String(texto).includes("não saiu")))}`);
 
-  // Cartões recusados, pelo `darCartoesDoMod` de verdade.
-  const base = ler("base.js");
-  const inicio = base.indexOf("function darCartoesDoMod(");
-  const fim = base.indexOf("\n}\n", inicio) + 3;
-  confere("R4d · o recorte", inicio >= 0, "`darCartoesDoMod` mudou de forma e o recorte não a achou");
-  vm.runInContext(base.slice(inicio, fim), contexto);
-  contexto.regiaoDoMod = () => ({ declararCartoes: () => 2 });
-  const devolvidos = contexto.darCartoesDoMod({ id: "mod/c" }, {}, { 7: [] });
-  confere("R4d · cartões", devolvidos === 2, `o MOD deixou de receber o número de recusas: ${devolvidos}`);
-  confere("R4d · cartões", dita("mod/c", "2 nó(s)", "cartões"),
-    `os cartões que não couberam não chegaram ao registro: ${JSON.stringify(anotadas)}`);
-
-  contexto.regiaoDoMod = regiaoDeAntes;
   contexto.RegiaoDeMod = rendererDeAntes;
   contexto.registrarNoAnfitriao = registrarDeAntes;
-  contexto.cartoesDosMods.clear();
+}
+
+// ------------- o palco da chamada monta com o perfil da superfície
+
+{
+  // **`camadas.chamada.palco.perfil`** (a auditoria do `v6.json`, tabela 7): o
+  // palco é uma camada sobre a chamada, com o orçamento de uma superfície, e
+  // não o de um cartão. A `tela` do palco montava igual no perfil errado, e
+  // trocar o perfil da tabela passava. O perfil do texto, o da tabela de
+  // pontos, e o com que a montagem de verdade constrói o renderer.
+  const v6 = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../api/v6.json"), "utf8"));
+  const doTexto = v6.camadas["chamada.palco"].perfil;
+  const daTabela = vm.runInContext('PONTOS_DE_CONTRIBUICAO["chamada.palco"].perfil', contexto);
+  confere("o palco · o perfil", doTexto === "superficie" && daTabela === doTexto,
+    `o v6.json diz «${doTexto}», e a tabela de pontos diz «${daTabela}»`);
+  const registro = new R();
+  const dono = new I("mod/p", "p", 7, {});
+  dono.estado = contexto.ESTADOS_DE_MOD.ativa;
+  const { handle } = registro.registrar({ id: "mod/p" }, dono, {
+    ponto: "chamada.palco", modo: "substituir",
+    conteudo: [{ forma: "tela", chave: "mesa", largura: 10, altura: 10 }],
+  });
+  const antes = renderersMontados.length;
+  contexto.montarContribuicao(registro.porHandle.get(handle), "");
+  const montado = renderersMontados.slice(antes).at(-1);
+  confere("o palco · o perfil", montado?.perfil === contexto.PERFIS_DE_RENDER.superficie,
+    "a contribuição do palco não foi montada com o orçamento da superfície");
+  registro.revogar(handle, { id: "mod/p", instancia: dono });
 }
 
 // ------------- R3b · a substituição desenha o conteúdo da própria contribuição
@@ -1059,9 +1074,6 @@ contexto.cartoesDosMods = new Map();
 
   // **Sem `SeeleUI.cartoes`.** É o ponto: um autor que siga o contrato
   // genérico registra `pessoa.cartao/substituir` com `conteudo` e mais nada.
-  // `cartoesDosMods` fica vazio de propósito — era ele, e só ele, que o
-  // caminho antigo consultava.
-  contexto.cartoesDosMods.clear();
   const { handle } = registro.registrar({ id: "mod/a" }, dono, {
     ponto: "pessoa.cartao", modo: "substituir",
     conteudo: [{ forma: "texto", chave: "c", dentro: "cartão do MOD" }],
@@ -1103,68 +1115,15 @@ contexto.cartoesDosMods = new Map();
   );
   confere("R3b · a volta", dono.recursos.length === 0, "revogar deixou montagem retida na instância");
 
-  // **O legado continua valendo**, porque um pacote de API 3 é executado.
-  const legado = new No("div", "");
-  contexto.cartoesDosMods.set("mod/a", { cartaoDe: (id) => (String(id) === "12" ? legado : null) });
+  // **O legado saiu** (a limpeza das APIs 3 a 5): este build só executa a 6,
+  // e uma contribuição sem conteúdo não cai mais num cartão de
+  // `SeeleUI.cartoes`: a linha fica com o que o produto desenha.
   const semConteudo = { mod: "mod/a", instancia: dono, ponto: "pessoa.cartao", conteudo: null };
   confere(
-    "R3b · o legado",
-    contexto.cartaoDeContribuicao(semConteudo, 12) === legado,
-    "uma contribuição sem conteúdo deixou de cair em `SeeleUI.cartoes`, que é o caminho da API 3",
+    "R3b · sem o legado",
+    !contexto.cartaoDeContribuicao(semConteudo, 12),
+    "uma contribuição sem conteúdo caiu num cartão de `SeeleUI.cartoes`, que saiu com as APIs 3 a 5",
   );
-  contexto.cartoesDosMods.clear();
-}
-
-// ------------- N4 · a escolha de apresentação alcança o caminho legado
-
-{
-  // `SeeleUI.cartoes` é o caminho da API 3 para o mesmo ponto que
-  // `pessoa.cartao/substituir`. A preferência alcançava só a substituição:
-  // escolher «usar apresentação do SEELE» devolvia o nome nativo **e deixava o
-  // cartão do MOD logo abaixo**. A validação nativa de 20/09/2026 observou.
-  const base = ler("base.js");
-  // **As duas funções, e não uma.** Desde a fase M1 a regra mora em
-  // `modsDeCartaoQueValem`, que «quem pinta cada lugar» também lê, e
-  // `cartoesDaPessoa` só desenha por ela. Recortar só a segunda mediria uma
-  // função que chama o que não está no recorte.
-  const inicio = base.indexOf("function modsDeCartaoQueValem(");
-  const desenha = base.indexOf("function cartoesDaPessoa(", inicio);
-  const fim = base.indexOf("\n}", desenha) + 2;
-  confere(
-    "N4 · o recorte",
-    inicio >= 0 && desenha > inicio,
-    "`modsDeCartaoQueValem` e `cartoesDaPessoa` deixaram de ser vizinhas, e o recorte não as achou",
-  );
-  vm.runInContext(base.slice(inicio, fim), contexto);
-
-  const doA = new No("div", "");
-  const doB = new No("div", "");
-  contexto.cartoesDosMods.clear();
-  contexto.cartoesDosMods.set("mod/a", { cartaoDe: () => doA });
-  contexto.cartoesDosMods.set("mod/b", { cartaoDe: () => doB });
-
-  let escolhido = "";
-  contexto.modPreferidoPara = () => escolhido;
-
-  confere(
-    "N4 · automático",
-    contexto.cartoesDaPessoa(12).length === 2,
-    "sem escolha, os cartões dos dois MODs deixaram de aparecer",
-  );
-
-  escolhido = contexto.NATIVO;
-  confere(
-    "N4 · nativo",
-    contexto.cartoesDaPessoa(12).length === 0,
-    "«usar apresentação do SEELE» deixou o cartão do MOD pendurado abaixo do nativo",
-  );
-
-  escolhido = "mod/b";
-  const so = contexto.cartoesDaPessoa(12);
-  confere("N4 · provedor", so.length === 1 && so[0] === doB, "escolher um provedor não tirou o cartão do outro");
-
-  escolhido = "";
-  contexto.cartoesDosMods.clear();
 }
 
 // ----------------------------- M1 · a aba DIAGNÓSTICO, no portão (m-6)
@@ -1180,8 +1139,8 @@ contexto.cartoesDosMods = new Map();
  * - `midiasDoPonto` e a regra dela, `aContribuicaoPinta` (`base.js`), sobre um
  *   registro de verdade e renderers de mentira que só anotam;
  * - `frasesDeQuemPinta` (`camada-mods.js`), sobre as linhas que
- *   `quemPintaCadaPonto` monta — com `fraseDaMidia`, `fraseDaPreferencia`,
- *   `modsDoCaminhoAntigo` e `preferenciaConsultadaPara`, os vizinhos que ela lê.
+ *   `quemPintaCadaPonto` monta — com `fraseDaMidia`, `fraseDaPreferencia` e
+ *   `preferenciaConsultadaPara`, os vizinhos que ela lê.
  *
  * E a vizinha da gestão, logo acima da aba na mesma tela: `oQueAGestaoDiz`
  * (`camada-mods.js`), o estado e os botões de cada linha de QUEM DESENHA O QUE,
@@ -1205,7 +1164,6 @@ function abaDoDiagnostico() {
   const camada = ler("camada-mods.js");
   const recortes = [
     [base, "function midiasDoPonto(", "/**\n * Cala o som de MOD que um desenho tirou da tela."],
-    [base, "function modsDeCartaoQueValem(", "/**\n * Os cartões desta pessoa"],
     [camada, "function preferenciaConsultadaPara(", "/**\n * Escolhe quem apresenta um ponto"],
     [camada, "function oQueAGestaoDiz(", "/**\n * O valor que quer dizer «o SEELE desenha, e nenhum MOD»."],
     [camada, "const APRESENTACAO_NATIVA = ", "/** Uma linha: o nome em palavra"],
@@ -1220,14 +1178,10 @@ function abaDoDiagnostico() {
     );
     if (inicio >= 0 && fim > inicio) vm.runInContext(fonte.slice(inicio, fim), aba);
   }
-  // O que a aba lê da página e dos MODs de pé: a preferência desta máquina,
-  // os cartões e o tema do caminho antigo (`modsDoCaminhoAntigo`), e a região
-  // e as superfícies de cada instância. O registro é de verdade.
+  // O que a aba lê da página e dos MODs de pé: a preferência desta máquina e
+  // as superfícies de cada instância. O registro é de verdade.
   aba.preferencias = new Map();
   aba.modPreferidoPara = (ponto) => aba.preferencias.get(ponto) ?? "";
-  aba.cartoesDosMods = new Map();
-  aba.temaDosMods = new Map();
-  aba.regioesDosMods = new Map();
   aba.superficiesDosMods = new Map();
   aba.contribuicoesDosMods = vm.runInContext("new RegistroDeContribuicoes()", aba);
   return aba;
@@ -1288,21 +1242,6 @@ function anotando(...anotadas) {
     `o motivo do retrato não saiu cortado em 200 pontos de código inteiros: ${JSON.stringify(doAvatar.motivos[0]?.slice(-4))}`,
   );
 
-  // **Os cartões da API 3**: só os de quem vale, e só as anotações de cartão —
-  // a região do mesmo MOD mora no mesmo renderer, e não é de `pessoa.cartao`.
-  aba.cartoesDosMods.set("mod/c", anotando({ situacao: "pronta", cartao: true }, { situacao: "carregando", cartao: false }));
-  aba.cartoesDosMods.set("mod/d", anotando({ situacao: "carregando", cartao: true }));
-  aba.preferencias.set("pessoa.cartao", "mod/c");
-  const dosCartoes = aba.midiasDoPonto("pessoa.cartao");
-  confere(
-    "M1 · a aba · os cartões da API 3",
-    dosCartoes.pronta === 1 && dosCartoes.carregando === 0,
-    "com mod/c escolhido, a mídia do cartão da API 3 dele não foi contada, ou a da região dele e a dos cartões de "
-      + `mod/d, que não valem, foram contadas junto: ${JSON.stringify(dosCartoes)}`,
-  );
-  aba.preferencias.clear();
-  aba.cartoesDosMods.clear();
-
   // **A preferência que o avatar consulta**: a dele, e na falta dela a do cartão.
   aba.preferencias.set("pessoa.cartao", "mod/a");
   confere(
@@ -1315,6 +1254,18 @@ function anotando(...anotadas) {
     "M1 · a aba · a herança",
     aba.preferenciaConsultadaPara("pessoa.avatar") === ":nativo",
     `com escolha própria, o avatar seguiu a do cartão: «${aba.preferenciaConsultadaPara("pessoa.avatar")}»`,
+  );
+  // **E a capa, a mesma herança** (`capa.preferencia`).
+  confere(
+    "M1 · a aba · a herança",
+    aba.preferenciaConsultadaPara("pessoa.capa") === "mod/a",
+    `sem escolha própria, a capa não herdou a escolha do cartão: «${aba.preferenciaConsultadaPara("pessoa.capa")}»`,
+  );
+  aba.preferencias.set("pessoa.capa", vm.runInContext("NATIVO", aba));
+  confere(
+    "M1 · a aba · a herança",
+    aba.preferenciaConsultadaPara("pessoa.capa") === ":nativo",
+    `com escolha própria, a capa seguiu a do cartão: «${aba.preferenciaConsultadaPara("pessoa.capa")}»`,
   );
   aba.preferencias.clear();
 
@@ -1349,53 +1300,52 @@ function anotando(...anotadas) {
   aba.preferencias.clear();
 }
 
-// **A região e as páginas de cada MOD** (pendência 49, item 5; m-2 da revisão
-// ampla do Plano 1D). A aba contava só a mídia dos onze lugares, e a faixa de
-// cada MOD e as superfícies dele anotavam e ninguém lia: uma trilha recusada
-// numa página chegava ao `seele.log` e ao MOD, e não à aba. A soma não filtra
-// cartão: a mídia de um cartão aparece aqui e em `pessoa.cartao`, duas vistas
-// da mesma mídia.
+// **As páginas de cada MOD** (pendência 49, item 5; m-2 da revisão ampla do
+// Plano 1D). A aba contava só a mídia dos onze lugares, e as superfícies de
+// cada MOD anotavam e ninguém lia: uma trilha recusada numa página chegava ao
+// `seele.log` e ao MOD, e não à aba. (A faixa da API 3, a região, somava aqui
+// também, e saiu com ela.)
 {
-  const caso = "M1 · a aba · a região e as páginas";
+  const caso = "M1 · a aba · as páginas";
   const aba = abaDoDiagnostico();
-  const somar = typeof aba.midiasDaRegiaoEDasPaginas === "function" ? aba.midiasDaRegiaoEDasPaginas : null;
+  const somar = typeof aba.midiasDasPaginas === "function" ? aba.midiasDasPaginas : null;
   confere(
     caso,
     somar !== null && typeof aba.frasesDaMidiaDosMods === "function",
-    "`midiasDaRegiaoEDasPaginas` (`base.js`) ou `frasesDaMidiaDosMods` (`camada-mods.js`) não estão nos recortes "
-      + "da aba: ela continua sem ler a mídia da região e das páginas",
+    "`midiasDasPaginas` (`base.js`) ou `frasesDaMidiaDosMods` (`camada-mods.js`) não estão nos recortes "
+      + "da aba: ela continua sem ler a mídia das páginas",
   );
   if (somar) {
     confere(
       caso,
-      JSON.stringify(aba.frasesDaMidiaDosMods()) === JSON.stringify(["nenhum MOD tem região nem página de pé agora"]),
+      JSON.stringify(aba.frasesDaMidiaDosMods()) === JSON.stringify(["nenhum MOD tem página de pé agora"]),
       `sem MOD de pé, o bloco não disse que não há nada: ${JSON.stringify(aba.frasesDaMidiaDosMods())}`,
     );
-    // Uma região com um som recusado e um retrato de cartão recusado, e uma
-    // página com um fundo recusado — de duas instâncias, como no produto: a
-    // região e as superfícies são guardadas por instância, e a soma é por id.
-    aba.regioesDosMods.set({}, {
+    // Duas instâncias de mod/x, como no produto — as superfícies são
+    // guardadas por instância, e a soma é por id —, uma com um som e um
+    // retrato recusados, a outra com um fundo recusado; e mod/y sem mídia.
+    aba.superficiesDosMods.set({}, {
       id: "mod/x",
-      ...anotando(
+      porChave: new Map([["painel", { renderer: anotando(
         { situacao: "recusada", motivo: "o som não decodificou" },
-        { situacao: "recusada", motivo: "o retrato passou do teto do cartão", cartao: true },
-      ),
+        { situacao: "recusada", motivo: "o retrato passou do teto" },
+      ) }]]),
     });
     aba.superficiesDosMods.set({}, {
       id: "mod/x",
       porChave: new Map([["mesa", { renderer: anotando({ situacao: "recusada", motivo: "o fundo não é imagem" }) }]]),
     });
-    aba.regioesDosMods.set({}, { id: "mod/y", ...anotando() });
-    const porMod = somar(aba.regioesDosMods, aba.superficiesDosMods);
+    aba.superficiesDosMods.set({}, { id: "mod/y", porChave: new Map([["capa", { renderer: anotando() }]]) });
+    const porMod = somar(aba.superficiesDosMods);
     const deX = porMod.get("mod/x");
     confere(
       caso,
       deX?.recusada === 3 && deX.carregando === 0 && deX.pronta === 0
         && JSON.stringify(deX.motivos) === JSON.stringify([
-          "o som não decodificou", "o retrato passou do teto do cartão", "o fundo não é imagem",
+          "o som não decodificou", "o retrato passou do teto", "o fundo não é imagem",
         ]),
-      "a região e a página de mod/x não somaram as três recusas com os três motivos — a da página, a do cartão "
-        + `ou a da região ficou de fora: ${JSON.stringify(deX)}`,
+      "as duas instâncias de mod/x não somaram as três recusas com os três motivos — uma das páginas ficou de "
+        + `fora: ${JSON.stringify(deX)}`,
     );
     confere(
       caso,
@@ -1406,9 +1356,8 @@ function anotando(...anotadas) {
     confere(
       caso,
       JSON.stringify(frases) === JSON.stringify([
-        "a região e as páginas de mod/x: 3 recusadas — o som não decodificou; o retrato passou do teto do cartão; "
-          + "o fundo não é imagem",
-        "a região e as páginas de mod/y: nenhuma mídia montada",
+        "as páginas de mod/x: 3 recusadas — o som não decodificou; o retrato passou do teto; o fundo não é imagem",
+        "as páginas de mod/y: nenhuma mídia montada",
       ]),
       `o bloco não disse a mídia de cada MOD com os motivos: ${JSON.stringify(frases)}`,
     );
@@ -1563,16 +1512,16 @@ function anotando(...anotadas) {
 // de todos, e a disputa do alvo vazio sai antes de olhar a escolha. A linha da
 // gestão era só a dessa disputa: dizia «4 contribuição(ões)» com qualquer
 // escolha, e oferecia de novo o que já vale — «USAR mod/b» com mod/b escolhido,
-// «USAR APRESENTAÇÃO DO SEELE» com o SEELE escolhido, «USAR mod/d» com o mod/d
-// da API 3 escolhido. A escolha dita e os botões que somem vêm da escolha
-// gravada do ponto; a disputa e quem pinta não mudam.
+// «USAR APRESENTAÇÃO DO SEELE» com o SEELE escolhido. A escolha dita e os
+// botões que somem vêm da escolha gravada do ponto; a disputa e quem pinta não
+// mudam.
 {
   const caso = "M1 · a gestão · a escolha desta máquina";
   /** Um registro novo; devolve, para cada escolha, a linha de `resumo`, o que a gestão diz e a linha da aba. */
   const montar = (registrar) => {
     const aba = abaDoDiagnostico();
     for (const id of ["mod/b", "mod/c", "mod/d", "mod/e"]) aba.modsCarregados.set(id, {});
-    registrar(aba.contribuicoesDosMods, aba.cartoesDosMods);
+    registrar(aba.contribuicoesDosMods);
     return (escolha) => {
       const linha = aba.contribuicoesDosMods
         .resumo(new Map([["pessoa.cartao", escolha]]), (id) => aba.modsCarregados.has(id))
@@ -1586,22 +1535,24 @@ function anotando(...anotadas) {
   };
   const cartao = (alvo, modo) => ({ ponto: "pessoa.cartao", modo, alvo });
   // mod/b substitui o cartão da pessoa 2 e mod/e o da 3; mod/c acrescenta ao
-  // da 2; mod/d acrescenta ao da 3 e dá cartões pela API 3.
-  const naGestao = montar((registro, cartoesDosMods) => {
+  // da 2, e mod/d ao da 3.
+  const naGestao = montar((registro) => {
     registro.registrar({ id: "mod/b" }, null, cartao("2", "substituir"));
     registro.registrar({ id: "mod/c" }, null, cartao("2", "adicionar"));
     registro.registrar({ id: "mod/e" }, null, cartao("3", "substituir"));
     registro.registrar({ id: "mod/d" }, null, cartao("3", "adicionar"));
-    cartoesDosMods.set("mod/d", anotando());
   });
 
   // Sem escolha gravada, nada muda: a contagem, «usar» para quem desenha o
   // cartão, e o SEELE; voltar ao automático não, porque já se está nele.
+  // **Quem só acrescenta não ganha «usar»**: mod/c e mod/d não desenham o
+  // cartão, e escolhê-los faria o SEELE desenhar. (Na API 3, o mod/d que dava
+  // cartões por `SeeleUI.cartoes` ganhava; o caminho saiu com ela.)
   const automatico = naGestao("");
   confere(
     caso,
     automatico.estado === "4 contribuição(ões) de mod/b, mod/c, mod/e, mod/d"
-      && automatico.botoes.join() === "USAR mod/b,USAR mod/e,USAR mod/d,USAR APRESENTAÇÃO DO SEELE",
+      && automatico.botoes.join() === "USAR mod/b,USAR mod/e,USAR APRESENTAÇÃO DO SEELE",
     `sem escolha nesta máquina, a linha da gestão mudou: «${automatico.estado}», ${automatico.botoes.join(", ")}`,
   );
 
@@ -1645,8 +1596,8 @@ function anotando(...anotadas) {
       + `oferecer as outras escolhas: ${doSeele.botoes.join(", ")}`,
   );
 
-  // O mod/d da API 3 escolhido: os cartões dele valem sozinhos, e o «usar»
-  // dele some.
+  // mod/d escolhido, que só acrescenta: o SEELE desenha, e a gestão oferece o
+  // SEELE e o automático — e nenhum «usar» para ele.
   const doD = naGestao("mod/d");
   confere(
     caso,
@@ -1658,7 +1609,7 @@ function anotando(...anotadas) {
     !doD.botoes.includes("USAR mod/d")
       && doD.botoes.includes("USAR APRESENTAÇÃO DO SEELE")
       && doD.botoes.includes("DECIDIR AUTOMATICAMENTE"),
-    "com o mod/d da API 3 escolhido, a gestão ofereceu de novo «USAR mod/d», que já vale, ou deixou de oferecer "
+    "com mod/d escolhido, a gestão ofereceu «USAR mod/d», que só acrescenta, ou deixou de oferecer "
       + `as outras escolhas: ${doD.botoes.join(", ")}`,
   );
 
@@ -1807,44 +1758,10 @@ function anotando(...anotadas) {
   );
 }
 
-// **O tema da API 3 pinta a sessão, e a aba diz** (I-7 e m-3 da revisão ampla
-// do Plano 1D). O ESTILO, oficial, pinta pela `SeeleUI.tema` sem registrar
-// ponto nenhum. Sem a leitura de `temaDosMods`, a aba dizia «nenhum MOD usa
-// este lugar» da sessão inteira pintada; com ela, mas sem dizer o tema junto,
-// «o SEELE desenha» — e com o SEELE escolhido nesta máquina, a cor do ESTILO
-// continua: a escolha não desliga o tema da API 3 (`escreverOTemaDaSessao`
-// não a consulta).
-{
-  const caso = "M1 · a aba · o tema da API 3";
-  const aba = abaDoDiagnostico();
-  aba.temaDosMods.set("mod/estilo", { acento: "#ff8800" });
-  const aparencia = () => aba.frasesDeQuemPinta(aba.quemPintaCadaPonto().find((l) => l.ponto === "servidor.aparencia"));
-  const automatico = aparencia();
-  confere(
-    caso,
-    automatico[0] === "o SEELE desenha, com o tema de mod/estilo em vigor (API 3)"
-      && automatico.includes("tema pedido por: mod/estilo")
-      && !automatico.includes("a escolha desta máquina não desliga o tema da API 3"),
-    "com o tema de mod/estilo em vigor, a aparência não disse que o SEELE desenha com ele, ou quem o pediu — ou, "
-      + `sem escolha nenhuma, falou da escolha desta máquina: ${automatico.join(" | ")}`,
-  );
-  aba.preferencias.set("servidor.aparencia", vm.runInContext("NATIVO", aba));
-  const nativo = aparencia();
-  confere(
-    caso,
-    nativo[0] === "o SEELE desenha, com o tema de mod/estilo em vigor (API 3)"
-      && nativo[1] === "a escolha desta máquina não desliga o tema da API 3",
-    "com o SEELE escolhido e o tema de mod/estilo em vigor, a aparência não disse que a escolha desta máquina não "
-      + `desliga o tema da API 3: ${nativo.join(" | ")}`,
-  );
-  // Sem tema, nada disso: um lugar vazio continua dito como vazio.
-  aba.temaDosMods.clear();
-  confere(
-    caso,
-    aparencia()[0] === "nenhum MOD usa este lugar agora",
-    `sem tema nenhum, a aparência falou de um tema: ${aparencia().join(" | ")}`,
-  );
-}
+// (O tema da API 3 que pintava a sessão, dito na aba como «em vigor (API 3)» —
+// I-7 e m-3 da revisão ampla do Plano 1D —, saiu com o corte: na 6, a janela
+// só faz prévia, e quem pinta a aparência é o tema do servidor, medido em
+// `tema-do-servidor.cjs`.)
 
 // ------------------------------------- R3 · os pontos aceitam o que aplicam
 
@@ -1998,6 +1915,23 @@ function anotando(...anotadas) {
     const visto = nomeDa(fazer);
     confere("Step 7b · o nome", visto === nome, `esperava «${nome}», e veio ${visto}`);
   }
+  // **A capa tem a forma do avatar** (`capa.forma`): substituir, por alvo,
+  // com `conteudo.doServidor`. Num registro à parte, para uma capa aceita
+  // por engano não ocupar o que as conferências de baixo contam.
+  {
+    const daCapa = new R();
+    const capa = (pedido) => () => daCapa.registrar({ id: "mod/capa" }, new I("mod/capa", "c", 7, {}), { ponto: "pessoa.capa", ...pedido });
+    for (const [nome, fazer] of [
+      ["sem-alvo", capa({ modo: "substituir", conteudo: { doServidor: { canal: 1 } } })],
+      ["conteudo-invalido", capa({ modo: "substituir", alvo: "1", conteudo: {} })],
+      ["conteudo-invalido", capa({ modo: "substituir", alvo: "1", conteudo: [{ forma: "texto" }] })],
+      ["modo-recusado", capa({ modo: "adicionar", alvo: "1", conteudo: { doServidor: { canal: 1 } } })],
+      ["(aceita)", capa({ modo: "substituir", alvo: "1", conteudo: { doServidor: { canal: 1 } } })],
+    ]) {
+      const visto = nomeDa(fazer);
+      confere("Step 7b · a capa", visto === nome, `esperava «${nome}», e veio ${visto}`);
+    }
+  }
   const { handle } = registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "1" });
   confere("Step 7b · contribuicao-ja-existe",
     nomeDa(() => registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "1" })) === "contribuicao-ja-existe",
@@ -2010,6 +1944,18 @@ function anotando(...anotadas) {
   confere("Step 7b · teto-de-alvos",
     nomeDa(() => registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "257" })) === "teto-de-alvos",
     "o teto de alvos não veio com o nome");
+  // **E com o número** (o PERFIS lê `erro.teto` para contar os de fora): o
+  // produto sabe o teto, e o `teto-de-superficies` já o leva.
+  const camposDoTetoDeAlvos = (() => {
+    try {
+      registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "257" });
+      return "(aceita)";
+    } catch (falha) {
+      return falha.camposDaRecusa ?? null;
+    }
+  })();
+  confere("Step 7b · teto-de-alvos leva o teto", camposDoTetoDeAlvos?.teto === 256,
+    `a recusa do teto de alvos não diz o teto: ${JSON.stringify(camposDoTetoDeAlvos)}`);
   for (let i = 0; i < 128; i += 1) registrar({ ponto: "servidor.navegacao", rotulo: `e${i}` });
   confere("Step 7b · teto-de-contribuicoes",
     nomeDa(() => registrar({ ponto: "servidor.navegacao", rotulo: "e128" })) === "teto-de-contribuicoes",
@@ -2115,7 +2061,7 @@ function anotando(...anotadas) {
     confere(
       "o elo · a api",
       elo.donoDaRegiao({ id: "mod/x", hash: "h", api: 6 }, instancia).api === 6
-        && elo.donoDaRegiao({ id: "mod/x", hash: "h", api: "5" }, instancia).api === 5,
+        && elo.donoDaRegiao({ id: "mod/x", hash: "h", api: "6" }, instancia).api === 6,
       "o dono de `base.js` não diz a API do pacote, e `tipoDaSuperficie` a lê para saber se há folha ou painel",
     );
 
@@ -2245,11 +2191,31 @@ function anotando(...anotadas) {
   (async () => {
     // **B não revoga o que A registrou.** Os punhos são sequenciais: adivinhar
     // o do vizinho não exige nada.
-    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
       tipo: "revogar-contribuicao", n: 1, handle,
     });
     confere("R2 · o dono", registro.porHandle.has(handle), "mod/b removeu a contribuição de mod/a");
     confere("R2 · o dono", respostas.at(-1)?.ok === false, "o roteador respondeu sucesso a uma revogação de outro MOD");
+
+    // **O pedido ao servidor sai pelo braço `pedido`** (`actions.pedir`; a
+    // auditoria do v6, tabela 2): o fio, o núcleo e o servidor eram provados,
+    // e o braço do roteador não era exercitado por bancada nenhuma. Ele chama
+    // `pedirAoServidor` com o id **do MOD do roteador** — e não um que a
+    // mensagem traga —, o canal e o valor, e o que volta chega ao MOD como o
+    // valor da resposta. (O comando Tauri é uma volta fina sobre o
+    // `Client::mod_request` que a `ponte_de_pedidos.rs` exercita, e os nomes
+    // dos argumentos o `frontend.rs` confere.)
+    {
+      const pedidos = [];
+      contexto.pedirAoServidor = async (id, canal, valor) => { pedidos.push({ id, canal, valor }); return { eco: valor }; };
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "pedido", n: 41, canal: 3, valor: { abrir: "mesa" }, id: "outro/mod" });
+      const resposta = respostas.at(-1);
+      confere("R2 · o pedido", JSON.stringify(pedidos) === JSON.stringify([{ id: "mod/b", canal: 3, valor: { abrir: "mesa" } }]),
+        `o braço pedido chamou ${JSON.stringify(pedidos)}`);
+      confere("R2 · o pedido", resposta?.n === 41 && resposta?.ok === true && JSON.stringify(resposta?.valor) === JSON.stringify({ eco: { abrir: "mesa" } }),
+        `a resposta ao MOD saiu ${JSON.stringify(resposta)}`);
+      delete contexto.pedirAoServidor;
+    }
 
     // **As recusas do roteador chegam ao registro com o id do MOD em campo
     // próprio.** Elas sempre foram ditas ao MOD; o registro é de quem hospeda,
@@ -2269,42 +2235,43 @@ function anotando(...anotadas) {
       onde === "atender-mod" && nivel === "aviso" && modId === "mod/b"
       && pedacos.every((pedaco) => String(texto).includes(pedaco)));
 
-    // **E um pacote de API 3 não alcança uma mensagem da API 4.** O prelúdio
-    // omite o método; `seele.postar` emite a mensagem do mesmo jeito, e é por
-    // isso que a conferência é do anfitrião.
-    await contexto.atenderOMod({ id: "mod/b", api: 3 }, b, {
+    // **E um pacote de API 5 não alcança nada: o corte da API 6** (tarefa 13
+    // do plano da F3). O manifesto dele já é recusado ao carregar; esta é a
+    // segunda porta, a do anfitrião, porque `seele.postar` emite a mensagem do
+    // mesmo jeito.
+    await contexto.atenderOMod({ id: "mod/b", api: 5 }, b, {
       tipo: "contribuir", n: 2,
-      pedido: { ponto: "servidor.navegacao", rotulo: "API 3" },
+      pedido: { ponto: "servidor.navegacao", rotulo: "API 5" },
     });
-    confere("R2 · a versão", respostas.at(-1)?.ok === false, "um pacote de API 3 contribuiu pela mensagem direta");
+    confere("R2 · a versão", respostas.at(-1)?.ok === false, "um pacote de API 5 contribuiu pela mensagem direta");
     confere(
       "R2 · a versão",
-      String(respostas.at(-1)?.erro ?? "").includes("API 3"),
+      String(respostas.at(-1)?.erro ?? "").includes("API 5"),
       `a recusa não disse que a API do pacote é a razão: ${respostas.at(-1)?.erro}`,
     );
     confere(
       "R2 · a versão no registro",
-      dita("«contribuir»", "não existe na API 3"),
+      dita("«contribuir»", "não existe na API 5"),
       "a recusa por versão foi dita só ao MOD, e quem hospeda não acha no seele.log por que o "
         + `pedido dele voltou recusado: ${JSON.stringify(anotadasDoRoteador)}`,
     );
 
-    // E o mesmo pacote declarando API 4 é aceito: a conferência é por versão,
+    // E o mesmo pacote declarando API 6 é aceito: a conferência é por versão,
     // e não uma porta fechada.
-    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
       tipo: "contribuir", n: 3,
-      pedido: { ponto: "servidor.navegacao", rotulo: "API 4" },
+      pedido: { ponto: "servidor.navegacao", rotulo: "API 6" },
     });
-    confere("R2 · a versão", respostas.at(-1)?.ok === true, `a API 4 foi recusada: ${respostas.at(-1)?.erro}`);
+    confere("R2 · a versão", respostas.at(-1)?.ok === true, `a API 6 foi recusada: ${respostas.at(-1)?.erro}`);
 
     // **`atualizar`, pelo roteador** (R7 do PERFIS; tarefa 5, Step 6): B não
     // troca o conteúdo do que é de A, e A troca o dele — com o dono vindo do
     // roteador, e não do corpo da mensagem, como no `revogar`.
-    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
       tipo: "atualizar-contribuicao", n: 31, handle, conteudo: [{ forma: "texto", dentro: "de B" }],
     });
     confere("R2 · atualizar, o dono", respostas.at(-1)?.ok === false, "mod/b atualizou a contribuição de mod/a");
-    await contexto.atenderOMod({ id: "mod/a", api: 4 }, a, {
+    await contexto.atenderOMod({ id: "mod/a", api: 6 }, a, {
       tipo: "atualizar-contribuicao", n: 32, handle, conteudo: [{ forma: "texto", dentro: "de A, de novo" }],
     });
     confere(
@@ -2317,10 +2284,25 @@ function anotando(...anotadas) {
       registro.porHandle.get(handle)?.conteudo?.[0]?.dentro === "de A, de novo",
       "o roteador respondeu, e o conteúdo da contribuição não mudou",
     );
+    // **Atualizar o que já saiu diz que não havia o que trocar** (o PERFIS
+    // registra de novo quando o `atualizar` devolve `false`; o cruzamento dos
+    // portes): sem recusa, com `false`, e sem a contribuição voltar.
+    {
+      const { handle: saiu } = registro.registrar({ id: "mod/a" }, a, { ponto: "servidor.navegacao", rotulo: "vai sair" });
+      await contexto.atenderOMod({ id: "mod/a", api: 6 }, a, { tipo: "revogar-contribuicao", n: 33, handle: saiu });
+      await contexto.atenderOMod({ id: "mod/a", api: 6 }, a, {
+        tipo: "atualizar-contribuicao", n: 34, handle: saiu, conteudo: { rotulo: "voltou?" },
+      });
+      confere(
+        "R2 · atualizar o que saiu",
+        respostas.at(-1)?.ok === true && respostas.at(-1)?.valor === false && !registro.porHandle.has(saiu),
+        `atualizar uma contribuição revogada respondeu ${JSON.stringify(respostas.at(-1))}`,
+      );
+    }
 
-    // **A recusa chega ao MOD da 6 com o nome** (Step 7b; rascunho §7.1), e ao
-    // da API 4 com a frase, como os publicados recebem. O teto agregado, pelo
-    // roteador de verdade: 128 entradas, e a 129ª.
+    // **A recusa chega ao MOD da 6 com o nome** (Step 7b; rascunho §7.1). O
+    // teto agregado, pelo roteador de verdade: 128 entradas, e a 129ª. A API 4,
+    // que recebia a frase, não roda mais (o corte): ela nem chega ao teto.
     {
       const c = { geracao: 7, admite: () => true, registrar() { return () => {}; }, executor: escuta };
       contexto.modsCarregados.set("mod/c", c);
@@ -2333,8 +2315,9 @@ function anotando(...anotadas) {
       await contexto.atenderOMod({ id: "mod/c", api: 4 }, c, {
         tipo: "contribuir", n: 42, pedido: { ponto: "servidor.navegacao", rotulo: "a 129ª" },
       });
-      confere("Step 7b · a frase segue na 4", String(respostas.at(-1)?.erro ?? "").includes("128"),
-        `o MOD da API 4 deixou de receber a frase: ${JSON.stringify(respostas.at(-1))}`);
+      confere("Step 7b · a 4 não chega ao teto: é recusada pela versão",
+        respostas.at(-1)?.ok === false && String(respostas.at(-1)?.erro ?? "").includes("não existe na API 4"),
+        `o MOD da API 4 passou da conferência de versão: ${JSON.stringify(respostas.at(-1))}`);
       contexto.modsCarregados.delete("mod/c");
     }
 
@@ -2414,29 +2397,20 @@ function anotando(...anotadas) {
           return { recusa: falha?.recusa ?? String(falha) };
         }
       };
-      for (const api of [4, 6]) {
-        confere(`Step 1 · sem tipo, dialogo (API ${api})`, decide(api, { id: "s" }) === "dialogo"
-          && decide(api, { id: "s", tipo: null }) === "dialogo", "uma descrição sem tipo deixou de abrir um dialogo");
-        confere(`Step 1 · um tipo que existe (API ${api})`, decide(api, { id: "p", tipo: "pagina" }) === "pagina",
-          "um tipo que existe deixou de ser o pedido");
-      }
-      confere("Step 1 · o tipo desconhecido, na 6", decide(6, { id: "x", tipo: "janela" })?.recusa === "tipo-desconhecido",
-        "`tipoDaSuperficie` não recusou o tipo desconhecido na 6");
-      anotadasDoDono.length = 0;
-      confere("Step 1 · até a 5, o de antes", decide(4, { id: "antiga", tipo: "janela" }) === "dialogo",
-        "um pacote de API 4 com um tipo desconhecido deixou de abrir o dialogo");
-      confere(
-        "Step 1 · até a 5, dito",
-        anotadasDoDono.length === 1 && anotadasDoDono[0].startsWith("mod/b: ")
-          && anotadasDoDono[0].includes("janela") && anotadasDoDono[0].includes("dialogo"),
-        `o dialogo de um tipo desconhecido, até a 5, não foi ao seele.log: ${JSON.stringify(anotadasDoDono)}`,
-      );
+      confere("Step 1 · sem tipo, dialogo", decide(6, { id: "s" }) === "dialogo"
+        && decide(6, { id: "s", tipo: null }) === "dialogo", "uma descrição sem tipo deixou de abrir um dialogo");
+      confere("Step 1 · um tipo que existe", decide(6, { id: "p", tipo: "pagina" }) === "pagina",
+        "um tipo que existe deixou de ser o pedido");
+      confere("Step 1 · o tipo desconhecido", decide(6, { id: "x", tipo: "janela" })?.recusa === "tipo-desconhecido",
+        "`tipoDaSuperficie` não recusou o tipo desconhecido");
+      // O recuo da 5 — abrir um tipo desconhecido como `dialogo` e dizê-lo ao
+      // seele.log — saiu com o corte da API 6 (tarefa 13): só a 6 chega aqui.
     }
 
     // **E A revoga o que é de A.** Sem esta metade, a correção seria uma porta
     // fechada para todo mundo — e uma porta fechada passa no teste de
     // isolamento sem oferecer a capacidade.
-    await contexto.atenderOMod({ id: "mod/a", api: 4 }, a, {
+    await contexto.atenderOMod({ id: "mod/a", api: 6 }, a, {
       tipo: "revogar-contribuicao", n: 4, handle,
     });
     confere("R2 · o dono", respostas.at(-1)?.ok === true, `mod/a não conseguiu revogar a própria contribuição: ${respostas.at(-1)?.erro}`);
@@ -2444,36 +2418,37 @@ function anotando(...anotadas) {
     confere("R2 · o dono", registro.porHandle.has(handle) === false, "a revogação do dono não tirou a contribuição");
     confere("R2 · o dono", a.recursos.length === 0, "a revogação do dono deixou o descartador retido na instância");
 
-    // **O `catch` de `atenderOMod`**, por duas portas: a contribuição recusada
-    // e a região com nós demais, esta pelo `desenharARegiaoDoMod` de verdade.
+    // **O `catch` de `atenderOMod`**: a contribuição recusada, e a mensagem
+    // `regiao`, que a 6 não tem. (A região com nós demais, pelo
+    // `desenharARegiaoDoMod` de verdade, saiu com a API 3.)
     {
-      const regiaoDeAntes = contexto.regiaoDoMod;
-      const inicioDaRegiao = base.indexOf("function desenharARegiaoDoMod(");
-      const fimDaRegiao = base.indexOf("\n}\n", inicioDaRegiao) + 3;
-      confere("R2 · o recorte da região", inicioDaRegiao >= 0,
-        "`desenharARegiaoDoMod` mudou de forma e o recorte não a achou");
-      vm.runInContext(base.slice(inicioDaRegiao, fimDaRegiao), contexto);
-      // Uma região que recusa três nós: é o que o renderer devolve quando a
-      // árvore passa do teto, e é o número que `desenharARegiaoDoMod` lança.
-      contexto.regiaoDoMod = () => ({ aplicar: () => 3 });
       let contribuicaoRespondida;
       let regiaoRespondida;
-      try {
-        await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+      {
+        await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
           tipo: "contribuir", n: 5,
           pedido: { ponto: "nao.existe", rotulo: "x" },
         });
         contribuicaoRespondida = respostas.at(-1);
-        await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+        await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
           tipo: "regiao", n: 6,
           conteudo: [{ forma: "texto", chave: "t", dentro: "x" }],
         });
         regiaoRespondida = respostas.at(-1);
-      } finally {
-        contexto.regiaoDoMod = regiaoDeAntes;
       }
-      confere("R2 · a recusa no registro", contribuicaoRespondida?.ok === false,
-        "um ponto que não existe foi aceito");
+      confere("R2 · a recusa no registro", contribuicaoRespondida?.ok === false
+        && contribuicaoRespondida.erro === "ponto-desconhecido",
+        `um ponto que não existe foi aceito, ou recusado sem o nome: ${JSON.stringify(contribuicaoRespondida)}`);
+      // **E a lista do que existe vai ao MOD**, no molde do `tipo-desconhecido`
+      // (`contribuicoes.fora[1]`; a orquestradora, 16/10): o ponto pedido em
+      // `pontoPedido`, e os que a API tem em `pontos`. Antes ela ia só ao
+      // registro.
+      confere("R2 · a lista ao MOD", contribuicaoRespondida?.pontoPedido === "nao.existe"
+        && Array.isArray(contribuicaoRespondida.pontos)
+        && contribuicaoRespondida.pontos.includes("pessoa.cartao")
+        && contribuicaoRespondida.pontos.includes("canal.item")
+        && !contribuicaoRespondida.pontos.includes("nao.existe"),
+        `o MOD não recebeu o ponto pedido e os que existem: ${JSON.stringify(contribuicaoRespondida)}`);
       confere(
         "R2 · a recusa no registro",
         dita("nao.existe"),
@@ -2490,12 +2465,25 @@ function anotando(...anotadas) {
         "a linha da contribuição recusada levou ao seele.log a frase de tela de `fraseDeErro`, "
           + `e não só o motivo: ${JSON.stringify(linhaDaRecusada)}`,
       );
-      confere("R2 · a região no registro", regiaoRespondida?.ok === false,
-        "uma região com nós demais foi respondida como aceita");
+      // **Com a lista do que existe** (`contribuicoes.fora[1]`): a linha diz
+      // os pontos que a API tem, e não só o que veio.
       confere(
-        "R2 · a região no registro",
-        dita("«regiao»", "3 nó(s)"),
-        `a região com nós demais não chegou ao registro com o nível e o id: ${JSON.stringify(anotadasDoRoteador)}`,
+        "R2 · a recusa no registro",
+        /os que existem são .*pessoa\.cartao.*canal\.item/.test(String(linhaDaRecusada?.[1] ?? "")),
+        `a linha da contribuição recusada não disse os pontos que existem: ${JSON.stringify(linhaDaRecusada)}`,
+      );
+      // **A 6 não tem `regiao`** (o corte; rascunho §2): a mensagem é recusada
+      // pela versão antes do renderer, e a recusa chega ao registro. A região
+      // com nós demais, na 6, é a contribuição num ponto de região, coberta
+      // pela recusa acima.
+      confere("R2 · a região saiu da 6", regiaoRespondida?.ok === false,
+        "um pacote da API 6 desenhou pela mensagem `regiao`");
+      confere(
+        "R2 · a região saiu da 6, no registro",
+        // Sem `case` desde a limpeza da máquina das APIs 3 a 5: a mensagem cai
+        // no `default`, que diz que a API não a conhece.
+        dita("«regiao»", "não conhece"),
+        `a recusa da região da 6 não chegou ao registro com o nível e o id: ${JSON.stringify(anotadasDoRoteador)}`,
       );
     }
 
@@ -2504,7 +2492,7 @@ function anotando(...anotadas) {
     // `CAPACIDADE_DA_MENSAGEM`, e é aqui que ele é recusado. Pelo tipo, e não
     // só por «não conhece»: a recusa do ponto «nao.existe», acima, também diz
     // isso.
-    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, { tipo: "inexistente", n: 7 });
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "inexistente", n: 7 });
     confere("R2 · o tipo desconhecido", respostas.at(-1)?.ok === false,
       "uma mensagem que a API não conhece foi respondida como aceita");
     confere(
@@ -2516,11 +2504,11 @@ function anotando(...anotadas) {
 
     // **Uma variante de struct da FFI**, que `motivoDaFalha` não sabe ler: ela
     // a escreveria «[object Object]», e o registro a leva inteira em JSON. O
-    // `snapshot` é o caso por onde ela entraria — o `invoke` que rejeita —, e
-    // `Refused` é uma variante assim do `ConnectionError`.
+    // `retrato` é o caso por onde ela entraria na 6 — o `invoke` do snapshot
+    // que rejeita —, e `Refused` é uma variante assim do `ConnectionError`.
     contexto.invoke = () => Promise.reject({ Refused: { reason: "Teste" } });
     try {
-      await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, { tipo: "snapshot", n: 8 });
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "retrato", n: 8 });
     } finally {
       delete contexto.invoke;
     }
@@ -2528,7 +2516,7 @@ function anotando(...anotadas) {
       "um retrato cujo `invoke` rejeitou foi respondido como aceito");
     confere(
       "R2 · a variante da FFI",
-      dita("«snapshot»", '{"Refused":{"reason":"Teste"}}')
+      dita("«retrato»", '{"Refused":{"reason":"Teste"}}')
         && !anotadasDoRoteador.some(([, texto]) => String(texto).includes("[object Object]")),
       "a falha que chega como variante de struct da FFI não foi ao registro inteira: "
         + `${JSON.stringify(anotadasDoRoteador)}`,
@@ -2562,12 +2550,73 @@ function anotando(...anotadas) {
       confere("recusa · a falha sem nome no registro", dita("«enviar-imagem»", "o disco sumiu"),
         `o motivo da falha sem nome não foi ao registro: ${JSON.stringify(anotadasDoRoteador)}`);
 
+      // **A lista fechada vale na fronteira** (a auditoria do `v6.json`, B2;
+      // `recusas.o-que-e`). Um nome que o Rust manda e que a lista não tem —
+      // o prazo do enlace era uma frase, que chegava inteira em `e.erro` —
+      // chega como `falhou`, sem os campos que vieram com ele, e o que veio
+      // vai ao registro.
+      const prazo = "Prazo da transferência esgotado. Confira a conexão e a versão do servidor.";
+      recusarComo({ Recusado: { motivo: prazo } });
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "enviar-imagem", n: 34, arquivo: 1, token: "t" });
+      const fora = respostas.at(-1);
+      confere("lista fechada · um nome fora dela", fora?.ok === false && fora?.erro === "falhou"
+        && Object.keys(fora).every((campo) => ["tipo", "n", "ok", "erro"].includes(campo)),
+      `uma recusa fora da lista fechada chegou ao MOD como veio: ${JSON.stringify(fora)}`);
+      confere("lista fechada · um nome fora dela, no registro", dita("Prazo da transferência esgotado"),
+        `a recusa fora da lista não foi ao registro: ${JSON.stringify(anotadasDoRoteador)}`);
+    } finally {
+      delete contexto.invoke;
+    }
+
+    // **O tipo que o pacote não pode pedir chega pelo nome**: o que a API não
+    // conhece e o que saiu dela na 6 são `tipo-desconhecido`, com o
+    // `tipoPedido`, como o tipo de superfície que não é da API. Eram frases.
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "inexistente", n: 35 });
+    const desconhecido = respostas.at(-1);
+    confere("lista fechada · o tipo que a API não conhece", desconhecido?.erro === "tipo-desconhecido"
+      && desconhecido?.tipoPedido === "inexistente",
+    `o tipo que a API não conhece não chegou pelo nome: ${JSON.stringify(desconhecido)}`);
+    await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "snapshot", n: 36 });
+    const saiu = respostas.at(-1);
+    confere("lista fechada · o tipo que saiu da 6", saiu?.erro === "tipo-desconhecido"
+      && saiu?.tipoPedido === "snapshot",
+    `o tipo que saiu da 6 não chegou pelo nome: ${JSON.stringify(saiu)}`);
+
+    // **E o pedido que não cabe na mensagem é `mensagem-grande`**, como o
+    // prelúdio o chama: a janela recusava de novo com `request-too-large`,
+    // que não tinha nome para o MOD e chegava como `falhou`.
+    // O `pedirAoServidor` fica antes do recorte do roteador: recortado aqui,
+    // da fila de pedidos ao fim dele, com o que ele lê de fora em dublê — o
+    // mapa dos pedidos, o contador, a escuta e a geração de pé.
+    const deFila = base.indexOf("let filaDePedidosDeMod = Promise.resolve();");
+    const dePedir = base.indexOf("async function pedirAoServidor(", deFila);
+    const fimDePedir = base.indexOf("\n}\n", dePedir) + 3;
+    confere("lista fechada · o recorte do pedido", deFila >= 0 && dePedir > deFila,
+      "a fila de pedidos e `pedirAoServidor` deixaram de ser vizinhas, e o recorte não as achou");
+    vm.runInContext("const pedidosDeMod = new Map(); let proximoPedidoDeMod = 0;", contexto);
+    contexto.ouvirMod = Promise.resolve();
+    contexto.daGeracaoDePe = () => true;
+    vm.runInContext(base.slice(deFila, fimDePedir), contexto);
+    // A vez na fila espera 125 ms por um `setTimeout`, que nesta bancada não
+    // dispara: o caso mede o nome da recusa de tamanho, e não a fila.
+    contexto.aguardarVezDePedidoDeMod = async () => {};
+    contexto.TextEncoder = TextEncoder;
+    try {
+      contexto.invoke = () => Promise.reject(new Error("o pedido grande não podia chegar ao Rust"));
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
+        tipo: "pedido", n: 37, canal: 0, valor: { texto: "x".repeat(13 * 1024) },
+      });
+      const grande = respostas.at(-1);
+      confere("lista fechada · o pedido grande", grande?.erro === "mensagem-grande",
+        `o pedido grande demais não chegou como mensagem-grande: ${JSON.stringify(grande)}; `
+          + `o registro: ${JSON.stringify(anotadasDoRoteador.at(-1))}`);
+
       recusarComo({ Recusado: { motivo: "tipo-recusado:heic" } });
       await contexto.atenderOMod({ id: "mod/b", api: 5 }, b, { tipo: "enviar-imagem", n: 33, arquivo: 1, token: "t" });
       const cinco = respostas.at(-1);
-      confere("recusa · a 5 continua com a frase", cinco?.ok === false
-        && cinco?.erro !== "tipo-recusado" && !("detectado" in cinco),
-      `o MOD da API 5 passou a receber o nome, e não a frase: ${JSON.stringify(cinco)}`);
+      confere("recusa · a 5 é recusada pela versão", cinco?.ok === false
+        && String(cinco?.erro ?? "").includes("não existe na API 5"),
+      `o MOD da API 5 passou da conferência de versão: ${JSON.stringify(cinco)}`);
     } finally {
       delete contexto.invoke;
     }
@@ -2602,13 +2651,30 @@ function anotando(...anotadas) {
       await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "snapshot", n: 22 });
       confere("retrato · o snapshot saiu da 6", respostas.at(-1)?.ok === false,
         `um pacote da API 6 leu o Snapshot inteiro pela mensagem direta: ${JSON.stringify(respostas.at(-1))}`);
-      confere("retrato · o snapshot saiu da 6, no registro", dita("«snapshot»", "não existe na API 6"),
+      confere("retrato · o snapshot saiu da 6, no registro", dita("«snapshot»", "não conhece"),
         `a recusa do snapshot da 6 foi dita só ao MOD: ${JSON.stringify(anotadasDoRoteador)}`);
 
+      // **E os `cartoes` também saíram da 6** (`compatibilidade.saem.cartoes`):
+      // o cartão é o `pessoa.cartao` com alvo. A mensagem cai no `default`, com
+      // o tipo pedido, e a recusa chega ao registro.
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
+        tipo: "cartoes", n: 24, cartoes: { 3: [{ forma: "texto", dentro: "x" }] },
+      });
+      const cartoes = respostas.at(-1);
+      confere("retrato · os cartoes saíram da 6", cartoes?.ok === false
+        && cartoes.erro === "tipo-desconhecido" && cartoes.tipoPedido === "cartoes",
+      `um pacote da API 6 deu cartões pela mensagem da API 3: ${JSON.stringify(cartoes)}`);
+      confere("retrato · os cartoes saíram da 6, no registro", dita("«cartoes»", "não conhece"),
+        `a recusa dos cartões da 6 foi dita só ao MOD: ${JSON.stringify(anotadasDoRoteador)}`);
+
+      // **E a 5 não alcança nem o `snapshot`** (o corte): uma API que este app
+      // não roda não tem capacidade nenhuma, e a mensagem que não exige
+      // capacidade também é recusada. Antes do corte, o `snapshot` inteiro
+      // passava para qualquer API fora da tabela.
       await contexto.atenderOMod({ id: "mod/b", api: 5 }, b, { tipo: "snapshot", n: 23 });
-      confere("retrato · a 5 continua com o snapshot", respostas.at(-1)?.ok === true
-        && respostas.at(-1)?.valor?.link_state === "ConexaoSegura",
-      `a API 5 perdeu o snapshot inteiro que ela tem: ${JSON.stringify(respostas.at(-1))}`);
+      confere("retrato · a 5 não alcança nem o snapshot", respostas.at(-1)?.ok === false
+        && !JSON.stringify(respostas.at(-1)).includes("ConexaoSegura"),
+      `um pacote da API 5 leu o Snapshot inteiro: ${JSON.stringify(respostas.at(-1))}`);
     } finally {
       delete contexto.invoke;
     }
@@ -2960,6 +3026,69 @@ function anotando(...anotadas) {
           contexto.avisarQueAMidiaMudou = avisarDeAntes;
           delete contexto.redesenharAvatares;
         }
+      }
+    }
+
+
+    // ------------- R4e · a saída da instância leva as superfícies, sem pergunta
+    //
+    // `superficies.descarte` (a auditoria do v6, tabela 7): «sai com a
+    // instância; a saída da sessão descarta sem perguntar». R4c descarta à mão;
+    // aqui quem descarta é o `encerrar` da instância, com um diálogo **sujo**
+    // aberto — que, fechado pela pessoa, perguntaria —, por cada um dos dois
+    // registros: o do conjunto (`superficiesDoMod`, de base.js, de verdade) e
+    // o de cada superfície. Tirar qualquer um passava.
+    {
+      const base = ler("base.js");
+      const inicio = base.indexOf("function superficiesDoMod(");
+      const fim = base.indexOf("\n}\n", inicio) + 3;
+      confere("R4e · o recorte", inicio >= 0 && base.slice(inicio, fim).includes("instancia.registrar("),
+        "`superficiesDoMod` mudou de forma e o recorte não a achou");
+      contexto.superficiesDosMods = new Map();
+      contexto.palcosDeSuperficie = () => ({});
+      vm.runInContext(base.slice(inicio, fim), contexto);
+      const cascaReal = S.prototype.montarCasca;
+      S.prototype.montarCasca = function montarCascaDeTeste() {
+        this.raiz = new No("div", "");
+        this.corpo = new No("div", "");
+        // O diálogo sai pela camada dele, e não pela raiz.
+        this.camada = new No("div", "");
+      };
+      const perguntas = [];
+      contexto.abrirConfirmacao = (titulo) => perguntas.push(titulo);
+      const deSaida = () => {
+        const instancia = new I("mod/s", "s", 7, { pedirEncerramento() {}, async encerrou() { return true; } });
+        instancia.estado = contexto.ESTADOS_DE_MOD.ativa;
+        return instancia;
+      };
+      try {
+        // Pelo conjunto, como o roteador cria. A superfície entra nele sem se
+        // registrar na instância: só o registro do conjunto a tira.
+        const doConjunto = deSaida();
+        const conjunto = contexto.superficiesDoMod({ id: "mod/s" }, doConjunto);
+        const noConjunto = new S("mod/s", { instancia: null, falar() {} }, { id: "d", tipo: "dialogo" }, {});
+        noConjunto.marcarSuja(true);
+        conjunto.porChave.set("d", noConjunto);
+        await doConjunto.encerrar();
+        confere("R4e", noConjunto.solta && conjunto.porChave.size === 0 && !contexto.superficiesDosMods.has(doConjunto),
+          `a saída da instância não levou o conjunto: solta ${noConjunto.solta}, `
+            + `${conjunto.porChave.size} de pé, no mapa ${contexto.superficiesDosMods.has(doConjunto)}`);
+        // Pela própria superfície, registrada na instância, sem conjunto.
+        const daSuperficie = deSaida();
+        const sozinha = new S("mod/s", { instancia: daSuperficie, falar() {} }, { id: "e", tipo: "dialogo" }, {});
+        sozinha.marcarSuja(true);
+        await daSuperficie.encerrar();
+        confere("R4e", sozinha.solta, "a saída da instância não levou a superfície registrada nela");
+        confere("R4e", perguntas.length === 0,
+          `a saída da instância perguntou antes de descartar: ${JSON.stringify(perguntas)}`);
+        confere("R4e", doConjunto.recursos.length === 0 && daSuperficie.recursos.length === 0
+          && doConjunto.naoSairam.length === 0 && daSuperficie.naoSairam.length === 0,
+        "a saída deixou recurso de pé, ou um que não saiu");
+      } finally {
+        S.prototype.montarCasca = cascaReal;
+        delete contexto.abrirConfirmacao;
+        delete contexto.superficiesDosMods;
+        delete contexto.palcosDeSuperficie;
       }
     }
 

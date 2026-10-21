@@ -15,6 +15,7 @@
     { "nome": "o modo escuro, sem fundo: o do produto é escuro", "tema": { "modo": "escuro" }, "recusa": null },
     { "nome": "o modo claro sobre um fundo claro", "tema": { "fundo": "#f2ece0", "modo": "claro" }, "recusa": null },
     { "nome": "o modo escuro sobre um fundo escuro", "tema": { "fundo": "#050403", "modo": "escuro" }, "recusa": null },
+    { "nome": "acento igual ao fundo e texto quase igual: a forma vale, e o contraste não é do servidor (tema.conferencia; decidido em 10/10)", "tema": { "fundo": "#050403", "texto": "#060504", "acento": "#050403" }, "recusa": null },
     { "nome": "o modo claro logo acima da luminância 0,18 (0,1811)", "tema": { "fundo": "#767676", "modo": "claro" }, "recusa": null },
     { "nome": "as oito regiões, cada uma com as cinco cores", "tema": { "regioes": {
       "redes": { "fundo": "#050403", "texto": "#eae3cf", "apagado": "#7a7061", "acento": "#f2521f", "borda": "#241f19" },

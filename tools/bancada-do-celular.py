@@ -12,8 +12,9 @@ promessas que mais importam só se veem desenhadas:
   substituto do WKWebView do Mac e do WebKitGTK do Linux), cada motor contra
   ele mesmo;
 - **o celular cabe no aparelho**: a 390 × 844 e a 360 × 800, nada rola de lado
-  fora de um trilho marcado, todo controle tem 44 de alvo, nada fica na ilha nem
-  na barra de gestos, nenhum texto passa da caixa, todo texto tem contraste, e o
+  fora de um trilho marcado, todo controle tem 44 de alvo, todo campo tem letra
+  de 16, o toque duplo não amplia e a pinça continua, nada fica na ilha nem na
+  barra de gestos, nenhum texto passa da caixa, todo texto tem contraste, e o
   núcleo (MUDO, SURDO, SAIR…) tem a mesma cor com e sem o tema do servidor.
 
 As medidas são as do protótipo (`spikes/casca-do-celular/fotos.py`), portadas
@@ -140,6 +141,16 @@ TEMAS = {
               "arredondamento": 4, "brilho": False},
 }
 
+# **E os acentos que o texto nomeia** (`tema.nucleo` do `v6.json`: «um guarda
+# prova que acento #331704, #050403 e #0a0806 não mudam o #veredito, o
+# #botao-mudo apertado, o #voz-mudo e o #voz-sair»; a auditoria, tabela 8). Os
+# temas de cima não usavam dois deles. Lidos do texto, cada um sobre o hostil.
+ACENTOS_DO_TEXTO = [a.lower() for a in re.findall(r"#[0-9a-fA-F]{6}", json.loads((RAIZ / "api" / "v6.json").read_text())["tema"]["nucleo"])]
+if len(ACENTOS_DO_TEXTO) != 3:
+    raise SystemExit(f"o tema.nucleo do v6.json não nomeia mais três acentos: {ACENTOS_DO_TEXTO}")
+for _acento in ACENTOS_DO_TEXTO:
+    TEMAS[f"acento-{_acento[1:]}"] = {**TEMAS["hostil"], "acento": _acento}
+
 
 def montar(destino: pathlib.Path, *, celular: bool, marca: str | None) -> pathlib.Path:
     """Uma cópia da `ui/` com o duble, e com ou sem os arquivos das cascas do navegador.
@@ -257,6 +268,10 @@ MEDIR = r"""
       if (y < 0 || y > H) return false; const alvo = document.elementFromPoint(x, y); return alvo && (e === alvo || e.contains(alvo)); };
   const controles = todos.filter((e) => e.matches("button, a[href], input:not([type=hidden]), select, textarea, summary, [role=button]")).filter(tocavel);
   const pequenos = controles.filter((e) => { const r = e.getBoundingClientRect(); return (r.width < 44 || r.height < 44) && !e.matches("input[type=range]"); });
+  // A letra de um campo (regioes.compositor.celular.forma, «campos de 16 px»):
+  // abaixo de 16 o Safari do iOS amplia a página inteira ao focar o campo.
+  const letraMiuda = todos.filter((e) => e.matches("input:not([type=hidden], [type=range], [type=checkbox], [type=radio]), textarea, select")
+      && parseFloat(getComputedStyle(e).fontSize) < 16);
   const temTexto = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
   const naIlha = todos.filter((e) => (controles.includes(e) || temTexto(e)) && e.getBoundingClientRect().top < topo - 1 && e.getBoundingClientRect().bottom > 0 && !rolaY(e))
     .map((e) => nome(e) + " y=" + Math.round(e.getBoundingClientRect().top));
@@ -289,6 +304,13 @@ MEDIR = r"""
     contraste: [...new Set(baixo)].slice(0, 8),
     transborda: transborda.slice(0, 6),
     vaza: vaza.slice(0, 6).map((e) => nome(e) + " r=" + Math.round(e.getBoundingClientRect().right)),
+    letraMiuda: letraMiuda.slice(0, 6).map((e) => nome(e) + " " + getComputedStyle(e).fontSize),
+    // O zoom e os gestos (nucleo-de-confianca.celular[5]): o toque duplo não
+    // amplia (touch-action da raiz), e a pinça continua (o viewport não a trava).
+    gestos: (() => { const toque = getComputedStyle(document.documentElement).touchAction;
+      const vista = document.querySelector("meta[name=viewport]")?.content ?? "";
+      return toque === "manipulation" && !/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(\.0*)?(\s|,|$)/.test(vista)
+        ? null : `touch-action ${toque}, viewport «${vista}»`; })(),
     pequenos: pequenos.slice(0, 8).map((e) => { const r = e.getBoundingClientRect(); return nome(e) + ` ${Math.round(r.width)}x${Math.round(r.height)}`; }),
     naIlha: naIlha.slice(0, 6), naBarra: naBarra.slice(0, 6),
     larguraDoDocumento: document.documentElement.scrollWidth,
@@ -333,6 +355,10 @@ def reprovacoes(m: dict, aparelho: dict, *, so_nucleo: bool) -> list[str]:
             motivos.append(f"texto passa da caixa: {m['transborda']}")
         if m["pequenos"]:
             motivos.append(f"alvos abaixo de 44: {m['pequenos']}")
+        if m["letraMiuda"]:
+            motivos.append(f"campos com a letra abaixo de 16: {m['letraMiuda']}")
+        if m["gestos"]:
+            motivos.append(f"o zoom e os gestos não são os do celular: {m['gestos']}")
         if m["naIlha"]:
             motivos.append(f"na ilha: {m['naIlha']}")
         if m["naBarra"]:
@@ -2842,7 +2868,10 @@ def operador_barra(pg: Page) -> list[str]:
     pg.wait_for_timeout(300)
     visto = pg.evaluate("""() => { const o = document.getElementById('operador-mods'); const g = document.getElementById('secao-mods'); const b = g.getBoundingClientRect();
         const noCentro = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
-        return { altura: Math.round(o.getBoundingClientRect().height), rola: o.scrollHeight > o.clientHeight,
+        // Rolar é o scrollTop andar: com overflow-y: visible o scrollHeight
+        // passa do clientHeight igual, e o conteúdo vaza por cima da gestão.
+        o.scrollTop = o.scrollHeight; const rola = o.scrollTop > 0; o.scrollTop = 0;
+        return { altura: Math.round(o.getBoundingClientRect().height), rola,
                  gestao: [Math.round(b.left), Math.round(b.top), Math.round(b.right), Math.round(b.bottom)],
                  inteira: b.top >= 0 && b.left >= 0 && b.bottom <= innerHeight && b.right <= innerWidth,
                  acima: b.bottom <= document.querySelector('.voz-celular').getBoundingClientRect().top,
@@ -2925,6 +2954,126 @@ def regioes_do_celular(pg: Page) -> list[str]:
     regioes = pg.evaluate("cascaDoRetrato().regioes")
     if "status.barra" in regioes or any(r not in regioes for r, *_ in REGIOES_DO_CELULAR):
         falhas.append(f"o retrato diz as regiões {regioes}")
+    return falhas
+
+
+def status_barra_na_larga(pg: Page) -> list[str]:
+    """O `status.barra` na casca larga (`regioes.status.barra.celular.forma`:
+    «No PC no navegador, existe como no desktop»). O celular tira o rodapé da
+    telemetria, e a casca larga, que é o desktop no navegador de um computador,
+    não: uma contribuição nele fica à vista no rodapé, sem `regiao-ausente`, e
+    o retrato lista a região. O par do fim de `regioes-do-celular`."""
+    falhas = []
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("__pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'status.barra', modo: 'adicionar', conteudo: [{ forma: 'texto', chave: 's', dentro: 'SONDA STATUS.BARRA' }] } })")
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    visto = pg.evaluate("""() => {
+        const d = [...document.querySelectorAll('#telemetria-mods *')].find((e) => e.children.length === 0 && e.textContent.trim() === 'SONDA STATUS.BARRA');
+        if (!d) return 'o texto da contribuição não está no rodapé';
+        if (!d.checkVisibility()) return 'escondido';
+        const b = d.getBoundingClientRect();
+        if (b.height === 0 || b.top < 0 || b.bottom > innerHeight) return `fora da janela, em ${Math.round(b.top)}`;
+        const noCentro = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return d.contains(noCentro) || noCentro?.contains(d) ? 'à vista' : 'coberto por ' + (noCentro?.id || noCentro?.className);
+    }""")
+    if visto != "à vista":
+        falhas.append(f"na casca larga, uma contribuição no status.barra não fica no rodapé: {visto}")
+    if pg.evaluate("(window.__entregues ?? []).some((m) => m.motivo === 'regiao-ausente')"):
+        falhas.append("na casca larga, uma contribuição no status.barra recebeu regiao-ausente")
+    if "status.barra" not in pg.evaluate("cascaDoRetrato().regioes"):
+        falhas.append("na casca larga, o retrato não lista o status.barra")
+    return falhas
+
+
+def listar_na_barra(pg: Page) -> list[str]:
+    """As entradas DOS MODS na aba SERVIDOR (`contribuicoes.listarNaBarra` no
+    celular, e `regioes.servidor.navegacao.celular.forma`, «célula inteira»;
+    a auditoria do v6, tabela 5 e 6): uma entrada com `listarNaBarra: false` não
+    aparece na lista, sem mudar permissão, e a que aparece é um alvo da largura
+    da lista inteira, e não só do rótulo."""
+    falhas = []
+    if not ir_para_aba(pg, "servidor", falhas):
+        return falhas
+    pg.evaluate(MOD_DE_PE)
+    for rotulo, listar in (("ENTRADA À VISTA", True), ("ENTRADA OCULTA", False)):
+        pg.evaluate(f"__pedirAoProduto({{ tipo: 'contribuir', pedido: {{ ponto: 'servidor.navegacao', rotulo: '{rotulo}', listarNaBarra: {'true' if listar else 'false'} }} }})")
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    visto = pg.evaluate("""() => {
+        const lista = document.getElementById('lista-mods-navegacao');
+        const botoes = [...(lista?.querySelectorAll('button.entrada-de-mod') ?? [])].filter((b) => b.checkVisibility());
+        const aVista = botoes.find((b) => b.textContent.includes('ENTRADA À VISTA'));
+        aVista?.scrollIntoView({ block: 'center' });
+        const b = aVista?.getBoundingClientRect(), l = lista?.getBoundingClientRect();
+        return { textos: botoes.map((b) => b.textContent.trim()), oculta: botoes.some((b) => b.textContent.includes('ENTRADA OCULTA')),
+                 larguraDoAlvo: b ? Math.round(b.width) : null, larguraDaLista: l ? Math.round(l.width) : null,
+                 altura: b ? Math.round(b.height) : null };
+    }""")
+    if not any("ENTRADA À VISTA" in t for t in visto["textos"]):
+        falhas.append(f"a entrada listada não aparece na aba SERVIDOR: {visto}")
+    if visto["oculta"]:
+        falhas.append(f"a entrada com listarNaBarra falso aparece na aba SERVIDOR: {visto}")
+    if visto["larguraDoAlvo"] is None or visto["larguraDoAlvo"] < visto["larguraDaLista"] - 2 or visto["altura"] < 44:
+        falhas.append(f"a entrada não é a célula inteira, com 44 de altura: {visto}")
+    return falhas
+
+
+def superficies_nas_areas(pg: Page) -> list[str]:
+    """Nenhuma superfície de MOD desenha sob as áreas seguras do aparelho
+    (`superficies.garantias-do-produto[6]` e `nucleo-de-confianca.celular[3]`;
+    a auditoria do v6, tabelas 7 e 9): o `superficies-de-mod` mede a casca em
+    volta delas, e não elas. Cada uma aberta, medida pelo MEDIR com a raiz
+    nela: nada dela na ilha nem na barra de gestos."""
+    falhas = []
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate(MOD_DE_PE)
+    topo, pe = pg.evaluate("[parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cel-seguro-topo')) || 0,"
+                           " parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cel-seguro-pe')) || 0]")
+    for nome, descricao, seletor in SUPERFICIES_DE_MOD:
+        pg.evaluate("(d) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: d })"
+                    ".then(() => __pedirAoProduto({ tipo: 'superficie-montar', superficie: d.id, arvore: [{ forma: 'texto', chave: 't', dentro: 'um texto de MOD' }, { forma: 'botao', chave: 'b', dentro: 'UM BOTÃO' }] }))",
+                    descricao)
+        esperar_quadro(pg)
+        pg.wait_for_timeout(250)
+        m = pg.evaluate(MEDIR, [topo, pe, seletor])
+        if m["naIlha"]:
+            falhas.append(f"{nome} desenha na ilha: {m['naIlha']}")
+        if m["naBarra"]:
+            falhas.append(f"{nome} desenha na barra de gestos: {m['naBarra']}")
+        pg.evaluate("() => superficiesDoMod({ id: 'teste/bancada' }, modsCarregados.get('teste/bancada')).soltarTudo()")
+        esperar_quadro(pg)
+    return falhas
+
+
+def superficies_deitado(pg: Page) -> list[str]:
+    """As áreas seguras **laterais** (`superficies.garantias-do-produto[6]`; a
+    auditoria do v6, tabela 7): deitado, a ilha do iPhone vai para um lado, e
+    o aparelho declara 47 px de cada lado. Nenhum texto nem controle de uma
+    superfície de MOD fica dentro deles."""
+    falhas = []
+    pg.evaluate("""() => { document.documentElement.style.setProperty('--cel-seguro-esq', '47px');
+                           document.documentElement.style.setProperty('--cel-seguro-dir', '47px'); }""")
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate(MOD_DE_PE)
+    for nome, descricao, seletor in SUPERFICIES_DE_MOD:
+        pg.evaluate("(d) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: d })"
+                    ".then(() => __pedirAoProduto({ tipo: 'superficie-montar', superficie: d.id, arvore: [{ forma: 'texto', chave: 't', dentro: 'um texto de MOD' }, { forma: 'botao', chave: 'b', dentro: 'UM BOTÃO' }] }))",
+                    descricao)
+        esperar_quadro(pg)
+        pg.wait_for_timeout(250)
+        fora = pg.evaluate("""(seletor) => {
+            const W = innerWidth, lado = 47;
+            const temTexto = (e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+            return [...document.querySelectorAll(seletor)].flatMap((r) => [r, ...r.querySelectorAll('*')])
+              .filter((e) => e.checkVisibility() && (temTexto(e) || e.matches('button, input, select, textarea')))
+              .filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.left < lado - 1 || b.right > W - lado + 1); })
+              .slice(0, 4).map((e) => `${e.tagName.toLowerCase()}.${String(e.className).split(' ')[0]} [${Math.round(e.getBoundingClientRect().left)}, ${Math.round(e.getBoundingClientRect().right)}]`);
+        }""", seletor)
+        if fora:
+            falhas.append(f"deitado, {nome} desenha na área segura lateral: {fora}")
+        pg.evaluate("() => superficiesDoMod({ id: 'teste/bancada' }, modsCarregados.get('teste/bancada')).soltarTudo()")
+        esperar_quadro(pg)
     return falhas
 
 
@@ -3439,7 +3588,7 @@ def escolha_sem_armazenamento(pg: Page) -> list[str]:
 
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
-    "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
+    "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil", *(f"acento-{a[1:]}" for a in ACENTOS_DO_TEXTO)),
                          raiz="#voz, .cel-abas, #aviso-fone, #aviso-audio"),
     "segurar": Caso(levar=segurar, raiz="#voz, .cel-abas"),
     # O claro voltou com a Tarefa 13: o azul da sala ocupada e o fósforo de quem
@@ -3479,6 +3628,14 @@ CASOS: dict[str, Caso] = {
     "superficies-de-mod": Caso(levar=superficies_de_mod, raiz=".cel-topo, #voz, .cel-abas, #avisos-de-mod"),
     # As regiões de MOD que o celular declara, e a que ele não tem.
     "regioes-do-celular": Caso(levar=regioes_do_celular, aparelhos=("390",), medir=False),
+    # As entradas DOS MODS: o listarNaBarra e a célula inteira.
+    "listar-na-barra": Caso(levar=listar_na_barra, medir=False),
+    # Cada superfície de MOD fora das áreas seguras.
+    "superficies-nas-areas": Caso(levar=superficies_nas_areas, medir=False),
+    # E as laterais, deitado.
+    "superficies-deitado": Caso(levar=superficies_deitado, aparelhos=("deitado",), medir=False),
+    # E a que ele não tem, na casca larga, onde ela existe como no desktop.
+    "status-barra-na-larga": Caso(levar=status_barra_na_larga, marca="larga", aparelhos=("1440",), medir=False),
     # A região operador.barra no alto de AJUSTES (F3, passo 8b).
     "operador-barra": Caso(levar=operador_barra, medir=False),
     # O tema de região do operador.barra nos contêineres que a casca declara.
@@ -3594,7 +3751,7 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
                 m = pg.evaluate(MEDIR, [aparelho["topo"], aparelho["pe"], caso.raiz])
                 m["nucleo"] = pg.evaluate(NUCLEO)
                 (saida / f"{rotulo}.json").write_text(json.dumps(m, ensure_ascii=False, indent=2))
-                motivos += reprovacoes(m, aparelho, so_nucleo=tema == "hostil")
+                motivos += reprovacoes(m, aparelho, so_nucleo=tema == "hostil" or str(tema).startswith("acento-"))
                 if tema is None:
                     nucleo_nativo = m["nucleo"]
                 else:

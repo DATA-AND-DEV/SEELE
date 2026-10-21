@@ -5287,6 +5287,7 @@ mod os_mods_no_fio {
             reach: vec!["dom".to_owned()],
             no_servidor: false,
             api: 0,
+            tema: false,
         }
     }
 
@@ -5413,6 +5414,7 @@ mod os_mods_no_fio {
                 reach: vec!["a".repeat(MAX_REACH_LEN); MAX_REACH_ITENS],
                 no_servidor: true,
                 api: 0,
+                tema: false,
             })
             .collect();
         let quadro = encode(&anuncio(cheio)).expect("um anúncio no teto serializa");
@@ -5614,6 +5616,7 @@ mod a_api_de_mod_no_fio {
             reach: vec![],
             no_servidor: false,
             api: 6,
+            tema: false,
         }];
         let conjunto = crate::mods::hex(&crate::mods::identidade_do_conjunto(&mut mods));
         let anuncio = ServerMessage::ModsExigidos { mods, conjunto };

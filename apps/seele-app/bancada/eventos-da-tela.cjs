@@ -182,11 +182,24 @@ const retrato = (extra = {}) => ({
     CAPACIDADES_POR_API: { 6: ["eventos-da-tela"], 5: ["regiao"] },
     modsCarregados: new Map([["seele/mesa", { api: 6 }], ["seele/velho", { api: 5 }]]),
     donoDaRegiao: (mod) => ({ falar: (dados) => falados.push({ mod: mod.id, dados }) }),
+    // O contêiner da sessão, com a medida que o `lugar` leva.
+    $: (id) => (id === "tela-sessao" ? { clientWidth: 390, clientHeight: 844 } : null),
   };
   vm.createContext(cola);
+  // As tabelas de verdade de que a casca do retrato tira as regiões: os pontos
+  // de contribuição e os tipos de superfície.
+  const tabela = (arquivo, comeco) => {
+    const fonte = fs.readFileSync(`${repo}/apps/seele-app/ui/${arquivo}`, "utf8");
+    const i = fonte.indexOf(comeco);
+    if (i < 0) throw new Error(`não achei ${comeco} em ui/${arquivo}`);
+    return fonte.slice(i, fonte.indexOf("\n});\n", i) + 5);
+  };
   vm.runInContext(
     [
       "var geracaoDaSessao = 1;",
+      tabela("mods-contribuicoes.js", "const PONTOS_DE_CONTRIBUICAO = Object.freeze({"),
+      tabela("mods-superficies.js", "const TIPOS_DE_SUPERFICIE = Object.freeze({"),
+      trecho("function aCascaTemARegiao("),
       trecho("function projetarORetrato("),
       doBloco("const REGIOES_E_CAMADAS_DA_API", "/**\n * O que o retrato diz da casca"),
       trecho("function cascaDoRetrato("),
@@ -227,6 +240,109 @@ const retrato = (extra = {}) => ({
   }
   confere("cola · só a API 6", !falados.some((f) => f.mod === "seele/velho"),
     "um MOD da API 5 recebeu evento da tela");
+  // **E quem sai sai pelo mesmo evento, com o id** (o PERFIS revoga as
+  // contribuições de quem saiu por ele; o cruzamento dos portes). O diff já
+  // dizia `sairam`, e nada provava que a cola o fala ao MOD.
+  const antesDaSaida = falados.length;
+  cola.__avisar(snapshot({
+    presentes: [{ id: 1, nickname: "ana", speaking: true, muted: false }],
+    voice_rooms: [{ id: 3, name: "Mesa", limit: 0, occupied_by_us: true, people: [{ id: 1 }] }],
+    channels: [{ id: 6, name: "geral", open: false }, { id: 7, name: "mesa", open: true }],
+  }));
+  const naSaida = falados.slice(antesDaSaida).filter((f) => f.mod === "seele/mesa").map((f) => JSON.stringify(f.dados));
+  confere("cola · quem sai", JSON.stringify(naSaida) === JSON.stringify(['{"nome":"pessoas","saiu":2}']),
+    `a saída da pessoa 2 não foi falada sozinha, com o id: ${JSON.stringify(naSaida)}`);
+
+  // **O `lugar` da sessão, quando a casca muda de forma** (`eventos-da-tela.
+  // lugar` (b); a auditoria do `v6.json`, tabela 3): sem `regiao`, os quatro
+  // campos — onde, as regiões que a casca tem agora, e a largura e a altura da
+  // sessão. A casca vira a do celular, que declara as regiões dela.
+  const antesDoLugar = falados.length;
+  const mesmoRetrato = {
+    presentes: [{ id: 1, nickname: "ana", speaking: true, muted: false }],
+    voice_rooms: [{ id: 3, name: "Mesa", limit: 0, occupied_by_us: true, people: [{ id: 1 }] }],
+    channels: [{ id: 6, name: "geral", open: false }, { id: 7, name: "mesa", open: true }],
+  };
+  // A do celular declara as regiões dela, sem o `status.barra` (a F8, 09/10).
+  vm.runInContext('var CELULAR = { regioes: new Set(["redes", "servidor.navegacao", "operador.barra", '
+    + '"canal.cabecalho", "conversa.mensagem", "compositor", "pessoas.lista"]) };', cola);
+  cola.__avisar(snapshot(mesmoRetrato));
+  const noLugar = falados.slice(antesDoLugar).filter((f) => f.mod === "seele/mesa").map((f) => f.dados);
+  const lugar = noLugar.find((d) => d.nome === "lugar");
+  confere("cola · o lugar da sessão", noLugar.length === 1 && lugar?.onde === "celular"
+    && Array.isArray(lugar.regioes) && lugar.regioes.includes("pessoas.lista") && lugar.regioes.includes("pagina")
+    && !lugar.regioes.includes("status.barra")
+    && lugar.largura === 390 && lugar.altura === 844 && !("regiao" in lugar),
+    `a casca virou a do celular, e o MOD ouviu ${JSON.stringify(noLugar)}`);
+  vm.runInContext("CELULAR = undefined;", cola);
+
+  // **Nada da ligação, nunca** (`eventos-da-tela.nunca`): um retrato que traz o
+  // toque, a chamada, o código e a agenda não os deixa passar a evento nenhum
+  // — em campo nenhum, em fundura nenhuma. O guarda de `frontend.rs` lê os
+  // literais; este mede o que chega.
+  const antesDaLigacao = falados.length;
+  const daLigacao = {
+    toque: { quem: "aa11bb22", codigo: "K9P2-CSM7-NBFR-AYQ3", apelido: "rafa" },
+    chamada: { com: "aa11bb22", desde: 1 },
+    codigo: "K9P2-CSM7-NBFR-AYQ3",
+    agenda: [{ codigo: "K9P2-CSM7-NBFR-AYQ3", nome: "Rafa" }],
+  };
+  cola.__avisar(snapshot({ ...daLigacao, presentes: [{ id: 1, nickname: "ana", speaking: false, muted: false, toque: true }] }));
+  cola.__avisar(snapshot({ ...daLigacao, presentes: [
+    { id: 1, nickname: "ana", speaking: true, muted: false, codigo: "K9P2-CSM7-NBFR-AYQ3" },
+    { id: 4, nickname: "rafa", speaking: false, muted: false, agenda: "Rafa" },
+  ] }));
+  const desta = falados.slice(antesDaLigacao);
+  const vazou = (valor, caminho = "") => {
+    if (valor && typeof valor === "object") {
+      return Object.entries(valor).flatMap(([chave, dentro]) =>
+        (["toque", "chamada", "codigo", "agenda"].includes(chave) ? [`${caminho}.${chave}`] : []).concat(vazou(dentro, `${caminho}.${chave}`)));
+    }
+    return typeof valor === "string" && /K9P2|aa11bb22|Rafa/.test(valor) ? [caminho] : [];
+  };
+  const vazados = desta.flatMap((f) => vazou(f.dados, f.dados?.nome ?? "?"));
+  confere("cola · nada da ligação", desta.length >= 2 && vazados.length === 0,
+    `${desta.length} evento(s), e passaram campos da ligação: ${JSON.stringify(vazados)}`);
+}
+
+// ------------------------------------------------- as duas colas de fora
+
+// **O desenho chama a cola** (a auditoria do `v6.json`, tabela 3: `canal`,
+// `sala`, `pessoas`, `fala` e o `lugar` da sessão nascem todos aqui). Sem a
+// chamada em `desenhar`, os cinco calavam e nenhuma prova via: esta bancada
+// chama `avisarOsModsDaTela` ela mesma. Textual, porque `desenhar` é a tela
+// inteira; a cola que ela chama é medida acima.
+{
+  const sessao = fs.readFileSync(`${repo}/apps/seele-app/ui/tela-sessao.js`, "utf8");
+  const i = sessao.indexOf("function desenhar(snapshot) {");
+  const corpo = i >= 0 ? sessao.slice(i, sessao.indexOf("\n}\n", i)) : "";
+  const semComentarios = corpo.replace(/\/\/.*$/gm, "");
+  confere("o desenho chama a cola", /\n\s*avisarOsModsDaTela\(snapshot\);/.test(semComentarios),
+    "`desenhar`, em `tela-sessao.js`, deixou de chamar `avisarOsModsDaTela(snapshot)`: os eventos da tela calam");
+}
+
+// **O aviso do servidor chega pelo `listen`** (`eventos-da-tela.servidor`): a
+// cola de `base.js` que liga o `ModAviso` do canal de eventos a
+// `entregarOAvisoDoMod`, rodada de verdade com um `listen` de mentira. A
+// entrega é medida acima; sem a cola, ela não seria chamada nunca.
+{
+  const i = base.indexOf("const ouvirAvisoDeMod = listen(");
+  const j = base.indexOf("\n});\n", i);
+  const ouvintes = [];
+  const entregues = [];
+  const ligacao = vm.createContext({
+    listen: (canal, fn) => { ouvintes.push({ canal, fn }); return Promise.resolve(() => {}); },
+    entregarOAvisoDoMod: (aviso) => entregues.push(aviso),
+  });
+  if (i >= 0 && j > i) vm.runInContext(base.slice(i, j + 5), ligacao);
+  const aviso = { mod_id: "seele/mesa", canal: 7, carga: "{}" };
+  for (const { canal, fn } of ouvintes) {
+    if (canal !== "seele://event") continue;
+    fn({ payload: { ModReply: { request: 1 } } });
+    fn({ payload: { ModAviso: aviso } });
+  }
+  confere("o aviso do servidor chega pelo listen", i >= 0 && entregues.length === 1 && entregues[0] === aviso,
+    `o \`ModAviso\` do canal de eventos não chegou a \`entregarOAvisoDoMod\`, ou outro evento chegou: ${JSON.stringify(entregues)}`);
 }
 
 if (falhas.length) {

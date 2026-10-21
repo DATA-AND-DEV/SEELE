@@ -1,36 +1,41 @@
-// A metade de janela do MOD de referência — ADR 0049.
+// A metade de janela do MOD de referência — ADR 0049, na API 6.
 //
 // Este arquivo é um **vetor do repositório**, e não um exemplo de documentação:
 // a bateria o carrega e cobra que cada coisa que ele chama exista do lado do
-// produto. Se a API mudar sem que este arquivo mude junto, a bateria reprova
-// aqui antes de alguém publicar um guia que promete o que sumiu.
+// produto **na API que ele declara**, e que cada coisa que essa API oferece
+// seja chamada aqui. Se a API mudar sem que este arquivo mude junto, a bateria
+// reprova aqui antes de alguém publicar um guia que promete o que sumiu.
 //
-// Ele exercita **tudo** o que a API oferece, e nada além:
+// Ele exercita **tudo** o que a API 6 oferece, e nada além:
 //
 //   SeeleMods.request(id, canal, valor)  — perguntar à metade de servidor
 //                                          (canal é um identificador; zero
 //                                           quer dizer «nenhum canal»)
-//   SeeleMods.snapshot()                 — o estado que a janela já tem
-//   SeeleUI.regiao(conteudo)             — desenhar, declarando
-//   SeeleUI.tema(valores)                — pedir cor, dentro da sessão
-//   SeeleUI.cartoes(cartoes)             — dar cartão a pessoas na lista
-//   SeeleUI.aoEvento(fn)                 — receber o que a pessoa faz
+//   SeeleUI.retrato()                    — o que a janela sabe, por lista
+//                                          branca (no lugar do `snapshot`)
+//   SeeleUI.tema(valores, { previa })    — a prévia de cor, numa superfície
+//   SeeleUI.aoEvento(fn)                 — o que a pessoa faz, a tela que
+//                                          muda e o aviso do servidor
 //   SeeleUI.pedaco(arquivo, inicio)      — ler um arquivo que alguém escolheu
+//   SeeleUI.enviar(arquivo, token)       — mandá-lo ao volume da metade de
+//                                          servidor
 //   SeeleUI.soltar(arquivo)              — devolver esse arquivo agora
 //   SeeleUI.capacidades()                — o que **esta** API oferece
-//
-// E o que a API 4 acrescentou, atrás da capacidade que a declara:
-//
-//   SeeleUI.superficies.criar(descricao) — uma janela, página, painel ou aviso
+//   SeeleUI.superficies.criar(descricao) — uma janela, folha, página ou aviso
 //   punho.titulo / classes / montar      — o nome, a folha e o conteúdo dela
 //   punho.atualizar(chave, arvore)       — uma parte dela, numa mensagem própria
 //   punho.formulario.erros(mapa)         — a recusa do servidor de volta ao campo
 //   punho.mostrar / ocultar / suja       — visibilidade e alterações não gravadas
 //   punho.fechar / descartar             — tirar do palco, e acabar com ela
 //   SeeleUI.superficies.avisar(texto)    — a superfície de vida curta
-//   SeeleUI.contribuicoes.registrar(p)   — entrar num ponto da interface do SEELE
+//   SeeleUI.contribuicoes.registrar(p)   — entrar num ponto ou numa região
 //   SeeleUI.contribuicoes.revogar(h)     — e sair dele
 //   SeeleUI.contribuicoes.atualizar(h, c) — trocar o conteúdo sem sair
+//
+// **O que a 6 tirou não aparece aqui** (rascunho da API 6, §2; decisão do dono
+// de 08/10): `regiao`, `cartoes` e o `snapshot` inteiro. O desenho principal
+// mora numa superfície que não prende a sessão, o cartão de uma pessoa é o
+// ponto `pessoa.cartao`, e a região é um ponto como os outros.
 //
 // Não há `document`, `window` nem o global do Tauri aqui dentro: um worker não
 // os tem, e é isso que faz `terminate()` ser garantia em vez de pedido.
@@ -41,7 +46,7 @@
 // parte difícil — que é como elas convivem:
 //
 //   **campo + gravação**   o que se digita vai ao servidor, que decide se pode
-//   **atualização**        a região é redesenhada a cada tecla, e o foco fica
+//   **atualização**        o painel é redesenhado a cada tecla, e o foco fica
 //   **arraste**            o traço nasce de pontos e volta declarado
 //   **mídia**              o som é do produto: ele monta, toca e solta
 
@@ -53,6 +58,9 @@ const EU = "seele/referencia";
 // entrega `channel: null` à metade de servidor, sem exigir que haja um canal
 // de texto aberto na janela.
 const SEM_CANAL = 0;
+
+/** O identificador do painel deste MOD: a superfície onde ele desenha. */
+const PAINEL = "referencia-painel";
 
 /** O que este MOD sabe agora. Redesenhar é uma função disto, e de nada mais. */
 const estado = {
@@ -71,10 +79,14 @@ const estado = {
   // sobre ele, e quanto já foi lido. Os bytes nunca estão aqui inteiros.
   escolhido: null,
   lidos: 0,
-  // O que a API 4 abriu, e que na API 3 fica vazio: o punho da janela deste
-  // MOD e os punhos das contribuições que ele registrou.
+  // O painel onde este MOD desenha, a janela de prova do ciclo de vida, e os
+  // punhos das contribuições que ele registrou.
+  painel: null,
   janela: null,
   contribuicoes: [],
+  // O que a tela disse por último: o canal aberto, a sala, e o aviso do
+  // servidor. Um MOD da 6 ouve isso por evento, e não relendo o retrato.
+  tela: "",
 };
 
 /** Pede ao servidor, e devolve o erro como texto em vez de deixá-lo subir. */
@@ -89,20 +101,23 @@ async function aoServidor(pedido) {
 }
 
 /**
- * O que a pessoa vê, declarado inteiro a cada vez.
+ * O que a pessoa vê, declarado inteiro a cada vez, no painel deste MOD.
  *
  * **Inteiro, e não em pedaços.** O produto reconcilia por chave: o que não
  * mudou não é tocado, e quem está digitando não perde o foco. Um MOD que
  * tentasse mandar só a diferença estaria refazendo esse trabalho pior.
  */
 async function desenhar() {
-  await SeeleUI.regiao([
+  const painel = estado.painel;
+  if (!painel) return;
+  await painel.montar([
     { forma: "titulo", chave: "t", dentro: "REFERÊNCIA" },
     {
       forma: "texto",
       chave: "s",
       dentro: `sessão: ${estado.sessao ? "de pé" : "fora"} · vezes: ${estado.vezes}`,
     },
+    estado.tela ? { forma: "texto", chave: "tela", dentro: estado.tela } : null,
     {
       forma: "campo",
       chave: "nome",
@@ -111,6 +126,11 @@ async function desenhar() {
       // diz o que existe. O produto não o aplica enquanto a caixa tem foco, e
       // por isso os dois podem divergir sem atrapalhar ninguém.
       valor: estado.gravado,
+      // **E o inicial também é o gravado.** Sem ele, o inicial é o valor da
+      // primeira montagem do campo, e não muda quando este MOD regrava o
+      // valor: depois da primeira gravação o painel ficaria sujo para sempre,
+      // e fechar perguntaria «sem gravar?» de algo gravado (a MESA, 15/10).
+      inicial: estado.gravado,
     },
     { forma: "botao", chave: "gravar", dentro: "GRAVAR" },
     estado.aviso ? { forma: "texto", chave: "aviso", dentro: estado.aviso } : null,
@@ -141,7 +161,10 @@ async function desenhar() {
         }
       : null,
     estado.escolhido
-      ? { forma: "botao", chave: "soltar", dentro: "SOLTAR ARQUIVO" }
+      ? { forma: "acoes", chave: "do-arquivo", dentro: [
+          { forma: "botao", chave: "enviar", dentro: "ENVIAR AO SERVIDOR" },
+          { forma: "botao", chave: "soltar", dentro: "SOLTAR ARQUIVO" },
+        ] }
       : null,
   ]);
 }
@@ -187,6 +210,7 @@ SeeleUI.aoEvento((evento) => {
         estado.tocando = !estado.tocando;
         desenhar();
       }
+      if (evento.chave === "enviar") enviarOArquivo();
       if (evento.chave === "soltar") soltarOArquivo();
       break;
     case "traco":
@@ -243,7 +267,33 @@ SeeleUI.aoEvento((evento) => {
       }
       desenhar();
       break;
+    // ---- a tela, que a 6 conta por evento (rascunho §7.2) ----
+    case "canal":
+      estado.tela = `canal aberto: ${evento.canal ?? "nenhum"}`;
+      desenhar();
+      break;
+    case "sala":
+      estado.tela = evento.sala == null ? "fora de sala" : `na sala ${evento.sala}`;
+      desenhar();
+      break;
+    case "pessoas":
+      estado.tela = evento.entrou != null ? `entrou: ${evento.entrou}` : `saiu: ${evento.saiu}`;
+      desenhar();
+      break;
+    case "tema":
+      // A prévia e o tema do servidor dizem o que a casca fez com eles: um
+      // tema recusado por contraste é dito, e não engolido.
+      estado.aviso = `tema: ${evento.estado}${evento.previa ? " (prévia)" : ""}`;
+      desenhar();
+      break;
+    // ---- o aviso da metade de servidor (rascunho §7.3) ----
+    case "servidor":
+      estado.tela = `o servidor avisou: ${JSON.stringify(evento.carga ?? null)}`;
+      desenhar();
+      break;
     default:
+      // `fala` e `lugar` chegam muitas vezes por segundo, e este vetor não
+      // desenha nada a partir deles: ouvir não obriga a redesenhar.
       break;
   }
 });
@@ -285,6 +335,29 @@ async function lerUmPedaco() {
   await desenhar();
 }
 
+/**
+ * Manda o arquivo inteiro ao volume da metade de servidor, sem passar pela
+ * mensagem (rascunho, §8; ADR 0048).
+ *
+ * **Quem abre a porta é o servidor.** A metade de servidor espera um token
+ * (`volume.esperar`), com o caminho, os tipos e o prazo; a janela só manda o
+ * arquivo que a pessoa escolheu, com aquele token. Um token que o servidor não
+ * pediu não abre nada.
+ */
+async function enviarOArquivo() {
+  const escolhido = estado.escolhido;
+  if (!escolhido) return;
+  const porta = await aoServidor({ op: "esperar-envio" });
+  if (porta.erro || !porta.token) {
+    estado.aviso = `enviar: ${porta.erro ?? "o servidor não abriu a porta"}`;
+    await desenhar();
+    return;
+  }
+  const enviado = await tentar("enviar o arquivo", () => SeeleUI.enviar(escolhido.id, porta.token), false);
+  if (enviado !== false) estado.aviso = "arquivo no volume do servidor";
+  await desenhar();
+}
+
 /** Devolve o arquivo agora, sem esperar a saída da sessão. */
 async function soltarOArquivo() {
   const escolhido = estado.escolhido;
@@ -296,11 +369,11 @@ async function soltarOArquivo() {
   await desenhar();
 }
 
-// ------------------------------------------------- o que a API 4 acrescentou
+// ------------------------------------------- os pontos, as regiões e as camadas
 
 /**
- * Os dez pontos onde um MOD entra na interface do **SEELE**, com o modo de
- * cada um.
+ * Os pontos onde um MOD entra na interface do **SEELE**, com o modo de cada
+ * um, e uma região.
  *
  * A lista está aqui inteira de propósito. A revisão de 20/09/2026 encontrou
  * oito pontos que aceitavam registro e não produziam efeito nenhum, e o que
@@ -310,6 +383,8 @@ async function soltarOArquivo() {
  *
  * `alvo` é preenchido na hora, com um ID de verdade do retrato — um ponto por
  * alvo sem alvo nenhum vale para todos, e «todos» não é o que se quer provar.
+ * **O cartão de uma pessoa é um ponto**, e não mais a chamada `cartoes` que a
+ * API 5 tinha; e **a região é um ponto**, e não mais a chamada `regiao`.
  */
 const PONTOS_DO_VETOR = [
   { ponto: "pessoa.identidade", modo: "adicionar", porPessoa: true, rotulo: "" },
@@ -322,7 +397,25 @@ const PONTOS_DO_VETOR = [
   { ponto: "sala.acoes", modo: "adicionar", porSala: true, rotulo: "MESA" },
   { ponto: "servidor.navegacao", modo: "adicionar", rotulo: "REFERÊNCIA" },
   { ponto: "servidor.aparencia", modo: "substituir", rotulo: "" },
+  { ponto: "status.barra", modo: "adicionar", rotulo: "" },
 ];
+
+/**
+ * O painel onde este MOD desenha: um diálogo **que não prende a sessão**.
+ *
+ * Na 5 o desenho morava na região do MOD; na 6 a região é um ponto, e o que
+ * tem campo, tela e mídia mora numa superfície. Não modal, porque um MOD de
+ * referência aberto a sessão inteira não pode adormecer o resto dela.
+ */
+async function abrirOPainel() {
+  const painel = await tentar("criar o painel", () => SeeleUI.superficies.criar({
+    id: PAINEL,
+    tipo: "dialogo",
+    modal: false,
+    titulo: "Referência",
+  }), null);
+  estado.painel = painel;
+}
 
 /**
  * Uma janela do produto, com o ciclo de vida inteiro exercitado.
@@ -330,7 +423,7 @@ const PONTOS_DO_VETOR = [
  * **O produto monta a casca.** O cabeçalho com o título, a origem — o `id`
  * deste MOD, escrito pelo SEELE —, o botão de sair, o foco contido e o retorno
  * dele ao acionador são do produto. O que este arquivo declara é só o miolo,
- * pela mesma gramática da região.
+ * pela mesma gramática dos pontos.
  */
 async function exercitarASuperficie() {
   const janela = await tentar("criar a janela", () => SeeleUI.superficies.criar({
@@ -338,9 +431,9 @@ async function exercitarASuperficie() {
     tipo: "dialogo",
     titulo: "Referência",
     tamanho: { largura: 480 },
-    // Com alterações não gravadas, fechar vira uma pergunta **do produto** —
-    // e a resposta da pessoa vence. Um MOD não veta a saída da sessão.
-    fecharComAlteracoes: "confirmar",
+    // Com alterações não gravadas, fechar vira uma pergunta **do produto**,
+    // sempre, sem opção a declarar — e a resposta da pessoa vence. Um MOD não
+    // veta a saída da sessão, que descarta sem perguntar.
     focoInicial: "nota",
   }), null);
   if (!janela) return;
@@ -382,10 +475,14 @@ async function exercitarASuperficie() {
     { forma: "texto", chave: "nota", classe: "aviso", dentro: "a casca é do produto; o miolo é do MOD, por partes" }), null);
 
   // **A recusa do servidor volta ao campo que a causou** (rascunho da API 6,
-  // §5): o campo ganha a frase, e `{}` limpa. Um vetor da API 5 a vê também,
-  // porque é API somada na capacidade `superficies`.
+  // §5): o campo ganha a frase, e `{}` limpa.
   await tentar("erros do formulário", () => janela.formulario.erros({ rascunho: "o servidor recusou a anotação" }), null);
   await tentar("limpar os erros", () => janela.formulario.erros({}), null);
+
+  // **A prévia de cor é da superfície** (rascunho §9, B4): na 6 a janela só
+  // pinta a prévia, dentro da superfície pedida; o tema do servidor é da
+  // metade de servidor (`mundo.tema`). Sair da superfície tira a prévia.
+  await tentar("prévia de tema", () => SeeleUI.tema({ acento: "#6BFFB6" }, { previa: true, superficie: "referencia-janela" }), null);
 
   // Mostrar e ocultar são o par que a revisão encontrou quebrado: `ocultar`
   // mantém a janela montada, e `mostrar` a traz de volta ao documento mesmo
@@ -401,9 +498,11 @@ async function exercitarASuperficie() {
 
 /** Registra o vetor em todos os pontos, e solta um deles para provar a volta. */
 async function exercitarAsContribuicoes(retrato) {
-  const pessoa = retrato?.presentes?.[0]?.id ?? retrato?.me ?? null;
-  const canal = retrato?.open_channel ?? retrato?.channels?.[0]?.id ?? null;
-  const sala = retrato?.voice_rooms?.[0]?.id ?? null;
+  // **O retrato é por lista branca** (rascunho §6): `eu`, `pessoas`, `salas`
+  // e `canais`, e nada que a lista não nomeie.
+  const pessoa = retrato?.pessoas?.[0]?.id ?? retrato?.eu ?? null;
+  const canal = retrato?.canais?.find((c) => c.aberto)?.id ?? retrato?.canais?.[0]?.id ?? null;
+  const sala = retrato?.salas?.[0]?.id ?? null;
 
   for (const alvo of PONTOS_DO_VETOR) {
     const destino = alvo.porPessoa ? pessoa : alvo.porCanal ? canal : alvo.porSala ? sala : null;
@@ -451,56 +550,28 @@ async function encerrarASuperficie() {
 }
 
 async function comecar() {
-  // O tema é pedido uma vez, e o produto o tira sozinho quando este MOD sai.
-  await tentar("tema", () => SeeleUI.tema({ acento: "#6BFFB6" }), null);
-  const retrato = await tentar("sessão", () => SeeleMods.snapshot(), null);
+  const retrato = await tentar("sessão", () => SeeleUI.retrato(), null);
   estado.sessao = Boolean(retrato);
 
-  // **O cartão é declaração, e quem desenha é o renderer do produto.** Este
-  // vetor dá cartão à primeira pessoa do retrato para exercitar a única
-  // superfície que um MOD alcança fora da região dele. Sem ninguém no retrato,
-  // ele manda o conjunto vazio — que é também como se tira um cartão.
-  // Alguém numa sala de voz, ou a própria pessoa quando não há sala nenhuma.
-  //
-  // O `me` existe desde que a sessão existe, e as salas não: sem ele, uma
-  // homologação com uma pessoa só provaria apenas o conjunto vazio — que é o
-  // caso em que a API não desenha nada, e portanto o caso que menos prova.
-  const alguem =
-    retrato?.voice_rooms?.flatMap((sala) => sala.people ?? [])?.[0] ??
-    (retrato?.me == null ? null : { id: retrato.me });
-  let marcou;
-  try {
-    const recusados = await SeeleUI.cartoes(
-      alguem
-        ? {
-            [alguem.id]: [
-              { forma: "titulo", dentro: "REFERÊNCIA" },
-              { forma: "texto", chave: "nota", dentro: "cartão do vetor" },
-            ],
-          }
-        : {},
-    );
-    marcou = alguem ? `ok pessoa=${alguem.id} recusados=${recusados}` : "ok vazio";
-  } catch (falha) {
-    marcou = `recusou: ${String(falha?.message ?? falha)}`;
-    estado.aviso = `cartoes: ${marcou}`;
-  }
-  // **O que a janela viu vai para o quintal**, que é lido de fora sem
-  // automação de acessibilidade. É o que separa «a mensagem saiu» de «a marca
-  // foi aceita» numa homologação nativa.
-  await tentar("anotar cartoes", () => aoServidor({ op: "anotar", chave: "cartoes", valor: marcou }), null);
-
-  // **O que esta API oferece, perguntado em vez de presumido.** Um pacote que
-  // declare 3 não tem `SeeleUI.superficies` — ele é `undefined`, e chamá-lo é
-  // um `TypeError` na primeira linha. Perguntar é o que faz o mesmo arquivo
-  // rodar nas duas versões.
+  // **O que esta API oferece, perguntado em vez de presumido.** Na 6, as
+  // superfícies e as contribuições estão sempre lá; perguntar continua sendo
+  // o que deixa o mesmo arquivo dizer, no quintal, o que ele achou.
   const tem = new Set(SeeleUI.capacidades());
+  if (tem.has("superficies")) await abrirOPainel();
   if (tem.has("superficies")) await exercitarASuperficie();
   if (tem.has("contribuicoes")) await exercitarAsContribuicoes(retrato);
   if (tem.has("superficies")) await encerrarASuperficie();
+  // **O que a janela viu vai para o quintal**, que é lido de fora sem
+  // automação de acessibilidade. É o que separa «a mensagem saiu» de «a marca
+  // foi aceita» numa homologação nativa.
   await tentar(
     "anotar capacidades",
     () => aoServidor({ op: "anotar", chave: "capacidades", valor: [...tem].join(",") }),
+    null,
+  );
+  await tentar(
+    "anotar contribuicoes",
+    () => aoServidor({ op: "anotar", chave: "contribuicoes", valor: estado.contribuicoes.map((c) => c.ponto).join(",") }),
     null,
   );
 
@@ -508,6 +579,8 @@ async function comecar() {
   estado.vezes = Number(inicial.vezes ?? 0);
   estado.gravado = String(inicial.apelido ?? "");
   digitado = estado.gravado;
+  // E um aviso da metade de servidor, que volta por `aoEvento` como `servidor`.
+  await aoServidor({ op: "avisar" });
   await desenhar();
 }
 

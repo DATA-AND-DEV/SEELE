@@ -217,6 +217,25 @@ async function desfecho(promessa) {
 
 // ---------------------------------------------------------------------------
 
+/// **As capacidades que a plataforma tem** (`compatibilidade.por-plataforma`;
+/// a auditoria do `v6.json`, B10): no navegador, o `enviar` (a capacidade
+/// `volume`) e o `arquivo` somem enquanto a ponte não faz o envio, a leitura de
+/// imagem e o pedaço do arquivo escolhido — hoje, `AINDA_A_FAZER`. Um MOD que
+/// subisse aqui via o `SeeleUI.enviar` e só recebia recusa.
+async function asCapacidadesDaPlataforma() {
+  const caso = "as capacidades da plataforma";
+  const navegador = pagina();
+  const todas = ["superficies", "contribuicoes", "volume", "arquivo", "tema", "retrato", "eventos-da-tela"];
+  const ficaram = navegador.ler(`capacidadesDaPlataforma(${JSON.stringify(todas)})`);
+  confere(caso, Array.isArray(ficaram) && !ficaram.includes("volume") && !ficaram.includes("arquivo"),
+    `no navegador, sem o envio nem o seletor, o MOD ainda recebe volume ou arquivo: ${JSON.stringify(ficaram)}`);
+  confere(caso, ["superficies", "contribuicoes", "tema", "retrato", "eventos-da-tela"].every((c) => ficaram?.includes(c)),
+    `o filtro tirou o que a plataforma tem: ${JSON.stringify(ficaram)}`);
+  const executor = fs.readFileSync(path.join(__dirname, "../ui/mods-no-navegador.js"), "utf8");
+  confere(caso, /capacidadesDaPlataforma\(/.test(executor),
+    "o executor do navegador não passa as capacidades pelo filtro da plataforma");
+}
+
 /// **O lugar.** No Tauri e sob um duble de bancada, a ponte não faz nada: nem
 /// marca, nem `__TAURI__`. Só no navegador ela se põe no lugar.
 async function oLugar() {
@@ -757,6 +776,7 @@ async function aPermissaoDoMicrofone() {
 (async () => {
   const provas = [
     oLugar,
+    asCapacidadesDaPlataforma,
     aMarca,
     asListasEOsCorpos,
     asRecusas,

@@ -49,13 +49,16 @@ const confere = (caso, condicao, detalhe) => {
 // **Uma cópia**, e não a `ui/`: um arquivo de bancada esquecido lá iria para o
 // instalador (`tools/carga-da-casca.py` diz o mesmo).
 const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "executor-no-navegador-"));
-for (const nome of ["mods-runtime.js", "mods-no-navegador.js", "executor-de-mod.html"]) {
+// **E a ponte, primeiro, como no `index.html`**: o executor pergunta a ela o
+// que esta plataforma tem (`capacidadesDaPlataforma`; a auditoria do v6, B10).
+for (const nome of ["ponte-web.js", "mods-runtime.js", "mods-no-navegador.js", "executor-de-mod.html"]) {
   fs.copyFileSync(daUi(nome), path.join(pasta, nome));
 }
 fs.copyFileSync(caminhoDoMotor, path.join(pasta, "seele_motor_web.wasm"));
 fs.writeFileSync(
   path.join(pasta, "index.html"),
   '<!doctype html><meta charset="utf-8"><title>bancada</title>\n' +
+    '<script src="ponte-web.js"></script>\n' +
     '<script src="mods-runtime.js"></script>\n<script src="mods-no-navegador.js"></script>\n',
 );
 
@@ -147,16 +150,15 @@ const MOD_COMUM = fs.readFileSync(path.resolve(raiz, "../../crates/seele-motor-w
 /** Sobe um MOD com o executor e uma janela de mentira que responde como a casca. */
 const NA_PAGINA = `
 window.bancada = {
-  async subir(fonte, { capacidades = ["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes", "volume"], lento = 0, mudo = false } = {}) {
+  async subir(fonte, { capacidades = ["superficies", "contribuicoes", "estilos", "classes", "volume", "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor"], lento = 0, mudo = false } = {}) {
     const falas = [], falhas = [];
     const executor = executorNoNavegador("bancada", 1, "h");
     const instancia = new InstanciaDeMod("bancada", "h", 1, executor);
     instancia.estado = ESTADOS_DE_MOD.ativa;
     const responder = (m) => {
       if (mudo || typeof m.n !== "number") return;
-      const r = m.tipo === "snapshot" ? { ok: true, valor: { servidor: "bancada" } }
+      const r = m.tipo === "retrato" ? { ok: true, valor: { servidor: { nome: "bancada" } } }
         : m.tipo === "pedido" && m.id === "eco" ? { ok: true, valor: m.valor }
-        : m.tipo === "regiao" ? { ok: true, valor: null }
         : { ok: false, erro: "desconhecido" };
       executor.entregar({ tipo: "resposta", n: m.n, ...r }).catch((e) => falhas.push("entregar: " + e.message));
     };
@@ -218,10 +220,13 @@ async function caso(pagina, nome, corpo) {
       }, MOD_COMUM);
       confere("MOD comum", r.pronto, `não chegou ao pronto (falhas: ${JSON.stringify(r.falhas)}; erros da página: ${erros})`);
       if (r.pronto) {
-        confere("MOD comum", r.pronto.snap?.servidor === "bancada", `snapshot ${JSON.stringify(r.pronto.snap)}`);
+        confere("MOD comum", r.pronto.retrato?.servidor?.nome === "bancada", `retrato ${JSON.stringify(r.pronto.retrato)}`);
         confere("MOD comum", r.pronto.intervalos === 3, `intervalos ${r.pronto.intervalos}`);
         confere("MOD comum", r.pronto.erro === "rejeitou: desconhecido", `erro ${r.pronto.erro}`);
-        confere("MOD comum", String(r.pronto.grande).startsWith("mensagem-grande"), `grande ${r.pronto.grande}`);
+        confere("MOD comum", r.pronto.grande === "mensagem-grande"
+          && JSON.stringify(r.pronto.grandeCampos)
+            === JSON.stringify({ erro: "mensagem-grande", tipoPedido: "pedido", tamanho: 14062, teto: 12288 }),
+        `grande ${r.pronto.grande} ${JSON.stringify(r.pronto.grandeCampos)}`);
         confere("MOD comum", r.pronto.superficies === "object", `superficies ${r.pronto.superficies}`);
       }
       console.log(`  MOD comum: ${r.pronto ? "pronto" : "NÃO"} em ${Math.round(r.subida_ms)} ms de subida`);

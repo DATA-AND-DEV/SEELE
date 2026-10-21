@@ -118,8 +118,20 @@ pub const PRELUDIO: &str = r#"
     return bytes;
   };
 
+  // **Uma recusa do próprio prelúdio tem a forma de toda recusa** (rascunho
+  // da API 6, §7.1; a auditoria do `v6.json`, B2): o nome em `message` e em
+  // `erro`, e o resto em campos. Estas três saíam com o nome só em `message`,
+  // e a de tamanho com uma frase no lugar do nome: o MOD que lesse `e.erro`,
+  // como lê toda outra recusa, recebia `undefined`.
+  const recusaDoPreludio = (nome, campos) => {
+    const recusa = new Error(nome);
+    if (campos) Object.assign(recusa, campos);
+    recusa.erro = nome;
+    return recusa;
+  };
+
   const pedir = (tipo, carga) => new Promise((resolve, reject) => {
-    if (pendentes.size >= 8) { reject(new Error('too-many-requests')); return; }
+    if (pendentes.size >= 8) { reject(recusaDoPreludio('too-many-requests', { teto: 8 })); return; }
     const texto = JSON.stringify({ tipo, n: proximo + 1, ...carga });
     // **«Não coube» é diferente de «a fila encheu».** As duas faziam `postar`
     // devolver `false`, e a única frase que existia era `fila-cheia`: um MOD
@@ -128,16 +140,18 @@ pub const PRELUDIO: &str = r#"
     // leva a quem escreveu direto ao que ele precisa dividir.
     const bytes = tamanhoEmBytes(texto);
     if (bytes > tetoDaMensagem) {
-      reject(new Error('mensagem-grande: ' + tipo + ' tem ' + bytes
+      // A frase vai ao registro de quem hospeda; ao MOD, o nome e os números.
+      dizerOAviso('mensagem-grande: ' + tipo + ' tem ' + bytes
         + ' bytes e o teto por mensagem é ' + tetoDaMensagem
-        + '; mande menos de uma vez, ou monte só a parte que aparece'));
+        + '; mande menos de uma vez, ou monte só a parte que aparece');
+      reject(recusaDoPreludio('mensagem-grande', { tipoPedido: tipo, tamanho: bytes, teto: tetoDaMensagem }));
       return;
     }
     const n = ++proximo;
     pendentes.set(n, { resolve, reject });
     if (!seele.postar(texto)) {
       pendentes.delete(n);
-      reject(new Error('fila-cheia'));
+      reject(recusaDoPreludio('fila-cheia'));
     }
   });
 
@@ -268,6 +282,7 @@ pub const PRELUDIO: &str = r#"
   // linha de console — com o id do MOD, o escape, o corte e o balde, que é o
   // que segura um `setInterval` de 4 ms que lança a cada batida.
   const dizerOErro = escrever('error');
+  const dizerOAviso = escrever('warn');
   globalThis.console = {
     log: escrever('log'),
     info: escrever('info'),
@@ -309,13 +324,13 @@ pub const PRELUDIO: &str = r#"
     : []);
   delete globalThis.__seeleCapacidades;
 
-  // **O `snapshot` inteiro é da API 5 para baixo.** A 6 lê
-  // `SeeleUI.retrato()`, projetado por lista branca (rascunho da API 6, §6), e
-  // o `snapshot` falta do `SeeleMods` dela como qualquer coisa que a API não
-  // tem. Montado aqui, depois das capacidades, porque é delas que depende.
+  // **Sem `snapshot`.** O `Snapshot` inteiro era das APIs 3 a 5, que este
+  // build não executa (`APIS_ACEITAS = [6]`); a 6 lê `SeeleUI.retrato()`,
+  // projetado por lista branca (rascunho da API 6, §6). Ele saía pela falta da
+  // capacidade `retrato`, e um pacote sem ela ainda o ganhava: agora não há
+  // caminho que o monte (a limpeza da máquina das APIs 3 a 5, depois do corte).
   globalThis.SeeleMods = Object.freeze({
     request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
-    ...(capacidades.has('retrato') ? {} : { snapshot: () => pedir('snapshot', {}) }),
   });
 
   /**
@@ -373,18 +388,19 @@ pub const PRELUDIO: &str = r#"
   }));
 
   globalThis.SeeleUI = Object.freeze({
-    // **Pela capacidade, como o resto.** A API 6 não tem `regiao` nem
-    // `cartoes` (decisão do dono de 08/10), e eles faltam do `SeeleUI` dela
-    // como `superficies` falta do da 3: ausentes, e não montados para a
-    // janela recusar depois. As APIs 3 a 5 têm os dois.
-    ...(capacidades.has('regiao') ? { regiao: (conteudo) => pedir('regiao', { conteudo }) } : {}),
+    // **Sem `regiao` e sem `cartoes`** (decisão do dono de 08/10): a região é
+    // um ponto de contribuição, e o cartão de uma pessoa é o `pessoa.cartao`.
+    // Os dois eram das APIs 3 a 5, que este build não executa, e saíram do
+    // prelúdio com a máquina delas na janela.
     // Na 6, a janela só faz prévia (rascunho §9, B4): `{ previa: true,
     // superficie }`. Até a 5, o tema vai como sempre, e a janela ignora os dois.
-    tema: (valores, opcoes) => pedir('tema', {
-      valores,
-      previa: Boolean(opcoes && opcoes.previa === true),
-      superficie: opcoes && opcoes.superficie,
-    }),
+    ...(capacidades.has('tema') ? {
+      tema: (valores, opcoes) => pedir('tema', {
+        valores,
+        previa: Boolean(opcoes && opcoes.previa === true),
+        superficie: opcoes && opcoes.superficie,
+      }),
+    } : {}),
     ...(capacidades.has('retrato') ? { retrato: () => pedir('retrato', {}) } : {}),
     ...(superficies ? { superficies } : {}),
     ...(contribuicoes ? { contribuicoes } : {}),
@@ -393,11 +409,6 @@ pub const PRELUDIO: &str = r#"
     // já é a resposta — mas um nome explícito evita o truque.
     capacidades: () => [...capacidades],
 
-    // **Um cartão por pessoa na lista do produto.** A declaração é a mesma da
-    // região, montada pelo mesmo renderer, com uma gramática menor: nada que
-    // receba foco ou clique, porque a linha do roster já tem um botão do
-    // produto. É a única superfície fora da região, e ela sai com ela.
-    ...(capacidades.has('cartoes') ? { cartoes: (cartoes) => pedir('cartoes', { cartoes }) } : {}),
     // ---- os eventos ----
     //
     // **A janela fala com o MOD sem que ele tenha perguntado.** Um pedido tem
@@ -419,8 +430,14 @@ pub const PRELUDIO: &str = r#"
     // Com acesso ao disco, ele teria o caminho errado — e nenhum cliente do
     // SEELE abre arquivo por conta de terceiro.
     ...(capacidades.has('volume') ? { enviar: (arquivo, token) => pedir('enviar-imagem', { arquivo, token }) } : {}),
-    pedaco: (arquivo, inicio) => pedir('pedaco', { arquivo, inicio: Number(inicio) || 0 }),
-    soltar: (arquivo) => pedir('soltar-arquivo', { arquivo }),
+    //
+    // **Pela capacidade `arquivo`, como o anfitrião confere** (a auditoria do
+    // `v6.json`, o espelho do prelúdio com o roteador): no navegador a
+    // plataforma não tem o seletor, e as duas existiam e sempre falhavam.
+    ...(capacidades.has('arquivo') ? {
+      pedaco: (arquivo, inicio) => pedir('pedaco', { arquivo, inicio: Number(inicio) || 0 }),
+      soltar: (arquivo) => pedir('soltar-arquivo', { arquivo }),
+    } : {}),
   });
 
   // ---- tempo ----

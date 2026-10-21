@@ -227,28 +227,6 @@ async function abrir(browser, url, r) {
         for (const c of contribuicoes) contribuicoesDosMods.registrar({ id }, instancia, c);
         return instancia;
       };
-      // Os cartões de uma região da API 3 (`SeeleUI.cartoes`, o caminho do
-      // PERFIS), simulada: um nó por pessoa, montado uma vez e devolvido igual,
-      // como `RegiaoDeMod#cartaoDe`.
-      window.regiaoDeCartoes = (id) => {
-        const raizes = new Map();
-        cartoesDosMods.set(id, {
-          id,
-          cartaoDe(pessoa) {
-            const chave = String(pessoa);
-            if (!raizes.has(chave)) {
-              const raiz = document.createElement("div");
-              raiz.className = "pessoa-cartao";
-              raiz.dataset.mod = id;
-              raiz.textContent = `cartão da região para ${chave}`;
-              raizes.set(chave, raiz);
-            }
-            return raizes.get(chave);
-          },
-          midiasAnotadas: () => [],
-        });
-        redesenharAsPessoas();
-      };
       // A ordem das linhas que o retrato pede: FORA DE SALA, as salas com
       // gente, e quem está no servidor fora delas.
       window.ordemDoRetrato = (r) => {
@@ -623,8 +601,6 @@ async function abrir(browser, url, r) {
     })();
     const PONTOS = [
       { tipo: "substituir", nome: "pessoa.cartao substituir, com conteúdo", seletor: '.contribuicao-de-mod[data-ponto="pessoa.cartao"]' },
-      { tipo: "perfis", nome: "pessoa.cartao substituir sem conteúdo, o cartão da região (o PERFIS)", seletor: '.pessoa-cartao[data-mod="bancada/perfis"]' },
-      { tipo: "api3", nome: "os cartões da API 3 na linha nativa", seletor: '.pessoa-cartao[data-mod="bancada/api3"]' },
       { tipo: "adicionar", nome: "pessoa.cartao adicionar", seletor: '.contribuicao-de-mod[data-ponto="pessoa.cartao"]' },
       { tipo: "identidade", nome: "pessoa.identidade", seletor: '.contribuicao-de-mod[data-ponto="pessoa.identidade"]' },
       { tipo: "detalhes", nome: "pessoa.detalhes", seletor: '.contribuicao-de-mod[data-ponto="pessoa.detalhes"]' },
@@ -643,16 +619,11 @@ async function abrir(browser, url, r) {
       const aberta = await abrir(browser, url, RETRATO_MOD);
       const r = await aberta.page.evaluate(async ({ tipo, seletor, grupos, alvo, campo }) => {
         const conteudo = (texto) => [{ forma: "texto", chave: "c", dentro: texto }];
-        const porPessoa = (ponto, modo, comConteudo = true) => testTable.snapshot.presentes.map((p) => ({
+        const porPessoa = (ponto, modo) => testTable.snapshot.presentes.map((p) => ({
           ponto, modo, alvo: String(p.id), prioridade: 0,
-          ...(comConteudo ? { conteudo: conteudo(`${ponto} de ${p.nickname}`) } : {}),
+          conteudo: conteudo(`${ponto} de ${p.nickname}`),
         }));
         if (tipo === "substituir") registrarMod("bancada/substituir", porPessoa("pessoa.cartao", "substituir"));
-        if (tipo === "perfis") {
-          registrarMod("bancada/perfis", porPessoa("pessoa.cartao", "substituir", false));
-          regiaoDeCartoes("bancada/perfis");
-        }
-        if (tipo === "api3") regiaoDeCartoes("bancada/api3");
         if (tipo === "adicionar") registrarMod("bancada/adicionar", porPessoa("pessoa.cartao", "adicionar"));
         if (tipo === "identidade") registrarMod("bancada/identidade", porPessoa("pessoa.identidade", "adicionar"));
         if (tipo === "identidade-apresentada") {

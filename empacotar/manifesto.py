@@ -121,6 +121,32 @@ def _exigir(padrao: str, texto: str, nome: str, onde: pathlib.Path) -> str:
     return achado.group(1)
 
 
+def apis_aceitas_do_codigo(texto_mods: str, onde: pathlib.Path) -> list[int]:
+    """`APIS_ACEITAS` lida do código, nas duas formas que ele já teve.
+
+    Até a 0.15, a lista escrita (`= &[5, 4, 3];`). Desde o corte da API 6
+    (`c4eb6d03`), o conjunto desta linha sai da tabela das linhas
+    (`= APIS_POR_LINHA[0].1;`), para não ficar escrito em dois lugares. Este
+    script empacota as duas — o app novo e os legados —, e lê as duas. Uma
+    terceira forma falha alto, como antes: um manifesto que adivinha não prova.
+    """
+    literal = re.search(r"pub const APIS_ACEITAS: &\[u32\] = &\[([^\]]*)\];", texto_mods)
+    if literal:
+        return [int(n) for n in re.findall(r"\d+", literal.group(1))]
+    derivada = re.search(r"pub const APIS_ACEITAS: &\[u32\] = APIS_POR_LINHA\[(\d+)\]\.1;", texto_mods)
+    tabela = re.search(
+        r"pub const APIS_POR_LINHA: \[\(&str, &\[u32\]\); \d+\] =\s*\[(.*?)\];", texto_mods, re.S
+    )
+    if derivada and tabela:
+        linhas = re.findall(r'\(\s*"[^"]*"\s*,\s*&\[([^\]]*)\]\s*\)', tabela.group(1))
+        indice = int(derivada.group(1))
+        if indice < len(linhas):
+            return [int(n) for n in re.findall(r"\d+", linhas[indice])]
+    raise Falha(
+        f"não achei APIS_ACEITAS em {onde}. O manifesto precisa dele para dizer o que este app fala."
+    )
+
+
 def servidor_legado(versao: str) -> str | None:
     """A versão do servidor de um app de antes das duas numerações: 0.15.2 → 0.15."""
     partes = re.split(r"[.-]", versao)
@@ -151,8 +177,7 @@ def ler_unidade(raiz: pathlib.Path, versao: str) -> dict:
         _exigir(r"pub const PROTOCOL_VERSION: u8 = (\d+);", texto_version, "PROTOCOL_VERSION", version_rs)
     )
     api = int(_exigir(r"pub const MOD_API_VERSION: u32 = (\d+);", texto_mods, "MOD_API_VERSION", mods_rs))
-    lista = _exigir(r"pub const APIS_ACEITAS: &\[u32\] = &\[([^\]]*)\];", texto_mods, "APIS_ACEITAS", mods_rs)
-    apis = sorted(int(n) for n in re.findall(r"\d+", lista))
+    apis = sorted(apis_aceitas_do_codigo(texto_mods, mods_rs))
     achado = re.search(r'pub const VERSAO_DO_SERVIDOR: &str = "(\d+\.\d+)";', texto_version)
     servidor = achado.group(1) if achado else servidor_legado(versao)
     if servidor is None:

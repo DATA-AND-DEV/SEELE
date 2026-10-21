@@ -109,6 +109,7 @@ fn um_mod(id: &str, hash_de: u8) -> EnabledMod {
         reach: vec!["ler".to_owned()],
         server_half: true,
         api: 6,
+        tema: false,
     }
 }
 
@@ -196,6 +197,42 @@ async fn um_servidor_com_mod_devolve_a_lista_a_quem_nao_aceitou() -> Result<()> 
         mods[0].no_servidor,
         "a tela não teria como dizer que este MOD roda na máquina de quem hospeda"
     );
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **O tema chega à pergunta** (D-api-8): um MOD cujo manifesto declara
+/// `"tema": true` pode pintar a aparência do servidor inteiro, e quem aceita tem
+/// de saber disso antes de aceitar. Do banco do servidor ao anúncio no fio, e
+/// dele à exigência que a FFI entrega à tela de aceite (`ModExigido`). Sem a
+/// porta, falso, pelo mesmo caminho.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_tema_de_um_mod_chega_a_pergunta_da_tela_de_aceite() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, daemon) = servidor().await?;
+    let mut estilo = um_mod("seele/estilo", 0xa1);
+    estilo.tema = true;
+    habilitar(&daemon, &estilo).await;
+    habilitar(&daemon, &um_mod("seele/bot", 0xb2)).await;
+
+    let Err(erro) = entrar(endereco, 2).await else {
+        panic!("entrou num servidor com MOD habilitado sem aceitar nada");
+    };
+    let ConnectError::ModsNaoAceitos { mods, .. } = erro else {
+        panic!("a casca não recebeu a pergunta, recebeu {erro:?}");
+    };
+    let exigidos: Vec<seele_ffi::types::ModExigido> = mods
+        .into_iter()
+        .map(seele_ffi::types::ModExigido::from)
+        .collect();
+    let tema_de = |id: &str| exigidos.iter().find(|m| m.id == id).map(|m| m.tema);
+    assert_eq!(
+        tema_de("seele/estilo"),
+        Some(true),
+        "a tela de aceite não teria como dizer que este MOD pinta a aparência do servidor"
+    );
+    assert_eq!(tema_de("seele/bot"), Some(false), "sem a porta, falso");
 
     daemon.shutdown();
     Ok(())
@@ -631,7 +668,7 @@ async fn abrir_falando(endereco: SocketAddr, semente: u8, faixa: Faixa) -> Resul
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
             material_e2ee: None,
-            apis_de_mod: Vec::new(),
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
         },
     )
     .await?;
@@ -798,6 +835,7 @@ fn anunciado(id: &str, hash_de: u8) -> seele_proto::mods::ModAnunciado {
         reach: vec!["ler".to_owned()],
         no_servidor: true,
         api: 0,
+        tema: false,
     }
 }
 
@@ -1031,6 +1069,182 @@ async fn um_par_dentro_da_janela_recebe_o_anuncio_antes_de_entrar() -> Result<()
 
     daemon.shutdown();
     Ok(())
+}
+
+/// Bate com um convite e as APIs de MOD que se quiser, e devolve o quadro que
+/// veio depois da prova: o anúncio, o `Session` ou a recusa.
+async fn bater_com_apis(
+    endereco: SocketAddr,
+    semente: u8,
+    apis_de_mod: Vec<u32>,
+    convite: &str,
+) -> Result<ServerMessage> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut tls = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
+        .with_no_client_auth();
+    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
+    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
+    )));
+    let conexao = ponta.connect(endereco, "localhost")?.await?;
+    let (mut envio, mut recebe) = conexao.open_bi().await?;
+    let chave = SigningKey::from_bytes(&[semente; 32]);
+    frame::write(
+        &mut envio,
+        &ClientMessage::Hello {
+            faixa: seele_proto::FAIXA,
+            client: "par-cru".into(),
+            nickname: format!("pessoa{semente:03}"),
+            public_key: chave.verifying_key().to_bytes().to_vec(),
+            join_secret: Some(convite.to_owned()),
+            material_e2ee: None,
+            apis_de_mod,
+        },
+    )
+    .await?;
+    let ServerMessage::Challenge { nonce } = frame::read::<ServerMessage>(&mut recebe).await?
+    else {
+        anyhow::bail!("o servidor não mandou Challenge");
+    };
+    frame::write(
+        &mut envio,
+        &ClientMessage::Response {
+            proof: chave
+                .sign(&prova_amarrada(&conexao, &nonce))
+                .to_bytes()
+                .to_vec(),
+        },
+    )
+    .await?;
+    let depois = frame::read::<ServerMessage>(&mut recebe).await?;
+    drop(ponta);
+    Ok(depois)
+}
+
+/// **O servidor recusa com `ModsDeOutraApi` antes da portaria e do convite.**
+///
+/// A P7c do plano F1b. O `Hello` leva as APIs de MOD que o app roda
+/// (`apis_de_mod`), e até aqui ninguém as lia: um app que não roda a API de um
+/// MOD exigido aceitava o anúncio e só descobria depois, com o convite de uso
+/// único já gasto. Agora as APIs exigidas que faltam voltam numa máscara, e a
+/// tela diz «atualize o app» em vez de deixar a pessoa presa na porta.
+///
+/// Com um MOD da API 7 e um app que só roda a 6, a recusa traz o bit 7, e o
+/// convite fica intacto: o mesmo convite, com a 6 e a 7, chega ao anúncio de
+/// sempre.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_app_sem_a_api_do_mod_e_recusado_antes_do_convite() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, daemon) = servidor().await?;
+    let mut da_api_7 = um_mod("fulano/da-api-7", 0x77);
+    da_api_7.api = 7;
+    habilitar(&daemon, &da_api_7).await;
+    let convite = {
+        let mut banco = daemon.server().persistence.lock().await;
+        seele_server::admissao::criar_convite(&mut banco, "para quem roda a 6")?
+    };
+
+    let recusa = bater_com_apis(endereco, 71, vec![6], &convite).await?;
+    assert_eq!(
+        recusa,
+        ServerMessage::Disconnecting {
+            reason: DisconnectReason::ModsDeOutraApi {
+                apis: seele_proto::control::mascara_de_apis(&[7]),
+            }
+        }
+    );
+
+    let anuncio = bater_com_apis(endereco, 71, vec![6, 7], &convite).await?;
+    assert!(
+        matches!(anuncio, ServerMessage::ModsExigidos { .. }),
+        "o mesmo convite, com a API 7, não chegou ao anúncio: {anuncio:?}"
+    );
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// Uma API 0 é «não preenchida» — uma linha de antes da migração 14 cujo pacote
+/// a subida não conseguiu ler — e não recusa ninguém.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_api_nao_preenchida_nao_recusa_ninguem() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, daemon) = servidor().await?;
+    let mut sem_api = um_mod("fulano/sem-api", 0x70);
+    sem_api.api = 0;
+    habilitar(&daemon, &sem_api).await;
+    let convite = {
+        let mut banco = daemon.server().persistence.lock().await;
+        seele_server::admissao::criar_convite(&mut banco, "para quem roda a 6")?
+    };
+
+    let anuncio = bater_com_apis(endereco, 72, vec![6], &convite).await?;
+    assert!(
+        matches!(anuncio, ServerMessage::ModsExigidos { .. }),
+        "uma API não preenchida recusou alguém: {anuncio:?}"
+    );
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **E antes da portaria:** quem não roda a API de um MOD exigido não deixa
+/// pedido na fila de quem hospeda.
+///
+/// Com a portaria ligada, toda chave nova vira um pedido pendente, com ou sem
+/// convite. O pedido de quem não vai poder entrar de qualquer jeito é um cartão
+/// que quem hospeda aprova à toa: a pessoa volta admitida e esbarra na API do
+/// mesmo jeito. O controle é o mesmo convite num app que roda a 7: ele chega à
+/// portaria e fica na fila, e é isso que prova que ela estava ligada.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_app_sem_a_api_do_mod_nao_deixa_pedido_na_portaria() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, daemon) = servidor().await?;
+    let mut da_api_7 = um_mod("fulano/da-api-7", 0x77);
+    da_api_7.api = 7;
+    habilitar(&daemon, &da_api_7).await;
+    let convite = {
+        let mut banco = daemon.server().persistence.lock().await;
+        seele_server::portaria::ligar(&mut banco, true)?;
+        seele_server::admissao::criar_convite(&mut banco, "para quem roda a 6")?
+    };
+
+    let recusa = bater_com_apis(endereco, 73, vec![6], &convite).await?;
+    assert_eq!(
+        recusa,
+        ServerMessage::Disconnecting {
+            reason: DisconnectReason::ModsDeOutraApi {
+                apis: seele_proto::control::mascara_de_apis(&[7]),
+            }
+        }
+    );
+    assert_eq!(
+        pedidos_pendentes(&daemon).await?,
+        0,
+        "quem não roda a API do MOD deixou pedido na fila da portaria"
+    );
+
+    let espera = bater_com_apis(endereco, 74, vec![6, 7], &convite).await?;
+    assert_eq!(
+        espera,
+        ServerMessage::Disconnecting {
+            reason: DisconnectReason::AdmissionPending,
+        },
+        "o controle não chegou à portaria, e o teste mediu outra coisa"
+    );
+    assert_eq!(pedidos_pendentes(&daemon).await?, 1);
+
+    daemon.shutdown();
+    Ok(())
+}
+
+async fn pedidos_pendentes(daemon: &Daemon) -> Result<i64> {
+    let banco = daemon.server().persistence.lock().await;
+    seele_server::portaria::pendentes(&banco)
 }
 
 /// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS

@@ -30,6 +30,18 @@
  * Números e não sensibilidades: cada um deles é o ponto em que um MOD deixa de
  * estar usando a API e passa a estar usando a memória de quem está na conversa.
  */
+/**
+ * **Quantas recusas a amostra guarda** (`nos-recusados`; D-api-8): o bastante
+ * para o MOD achar onde escreveu errado, e pouco para a resposta caber. A
+ * conta segue inteira à parte.
+ */
+const TETO_DA_AMOSTRA = 8;
+
+/** A `chave` que o MOD deu a um nó, para a amostra dizer qual foi, ou nada. */
+function chaveDoNo(no) {
+  return typeof no?.chave === "string" && no.chave ? { chave: no.chave.slice(0, 64) } : {};
+}
+
 const LIMITES_DA_REGIAO = Object.freeze({
   /** Nós na árvore inteira, somando todos os níveis. */
   nos: 512,
@@ -121,8 +133,6 @@ const LIMITES_DA_REGIAO = Object.freeze({
  * já existe.
  */
 const LIMITES_DO_CARTAO = Object.freeze({
-  /** Pessoas com cartão, por MOD. */
-  cartoes: 64,
   /**
    * Nós num cartão, somando todos os níveis.
    *
@@ -146,17 +156,15 @@ const LIMITES_DO_CARTAO = Object.freeze({
   fundura: 6,
   /**
    * Mídias no bolso de cartão de um renderer. O bolso é o mesmo de
-   * `bytesDeMidia`, abaixo: de todos os cartões deste MOD nos de
-   * `SeeleUI.cartoes`, e de cada destino numa contribuição.
+   * `bytesDeMidia`, abaixo: o de cada destino numa contribuição.
    */
   midias: 64,
   /**
    * Bytes de mídia no bolso de cartão de um renderer — os do arquivo, como
    * chegaram, como em `LIMITES_DA_REGIAO.bytesDeMidia`.
    *
-   * **De quem é o bolso.** Nos cartões de `SeeleUI.cartoes`, de todos os
-   * cartões deste MOD: eles moram no renderer da região, e o bolso é um só.
-   * Numa contribuição, **de cada destino**: ela monta um renderer por destino
+   * **De quem é o bolso.** Numa contribuição, **de cada destino**: ela monta
+   * um renderer por destino
    * (`montarContribuicao`, em `base.js`), e cada um conta a mídia que monta —
    * um `pessoa.cartao` sem alvo numa sala de 64 pessoas tem 64 bolsos destes.
    * O som decodificado não segue esta conta: o bolso dele numa contribuição é
@@ -170,9 +178,8 @@ const LIMITES_DO_CARTAO = Object.freeze({
    * O mesmo da região, e não o dobro como nos bytes: o bolso dos cartões é
    * maior pelos retratos de muitas pessoas, e retrato não é som.
    *
-   * **De quem é o bolso.** Nos cartões da API 3, de todos os cartões deste
-   * MOD: eles moram no renderer da região. Numa contribuição, **de cada
-   * contribuição**: ela monta um renderer por destino, e os sons dela moram
+   * **De quem é o bolso.** Numa contribuição, **de cada contribuição**: ela
+   * monta um renderer por destino, e os sons dela moram
    * num destino só (ver `montarSom`) — sem isso, o teto valia por destino, e
    * um `pessoa.cartao` sem alvo numa sala de 64 pessoas segurava até 64 vezes
    * este número. O teto **não** soma as contribuições de um MOD entre si: cada
@@ -196,9 +203,10 @@ const LIMITES_DO_CARTAO = Object.freeze({
  *
  * Três lugares, três orçamentos, e a diferença entre eles não é organização:
  *
- * - a **região** é a faixa da API 3, e continua existindo para os pacotes que
- *   já estão publicados. Ela não cresceu: crescer a faixa era exatamente o que
- *   o §15 do plano diz não confundir com uma API de aplicações;
+ * - a **região** era a faixa da API 3, e saiu com ela: nenhum lugar do produto
+ *   a monta mais. O perfil fica como o padrão do renderer, que é o das provas
+ *   da bancada. Ela não cresceu: crescer a faixa era exatamente o que o §15 do
+ *   plano diz não confundir com uma API de aplicações;
  * - o **cartão** é desenhado ao lado do nome de uma pessoa, e há um por pessoa.
  *   Ele cresceu de 24 para 64 nós porque U27 pediu que ele pudesse
  *   **substituir** a identidade — faixa, retrato sobreposto, nome, pronomes,
@@ -263,6 +271,28 @@ function fraseDaRegraViolada(regras, caixa) {
  * o orçamento acaba — uma forma recusada leva os filhos junto sem contá-los —,
  * e «recusados: 8» não diz a quem escreveu quanto a declaração tem.
  */
+/**
+ * **O estado `escolhido` de uma classe de MOD** (`estilos.estados`; a auditoria
+ * do `v6.json`, B6): a marca e o interruptor ligados, e a aba ativa. O seletor
+ * `[data-escolhido="sim"]` (`ESTADOS_DA_CLASSE`, em `mods-estilos.js`) existia,
+ * e nada o escrevia.
+ */
+function marcarEscolhido(elem, escolhido) {
+  if (escolhido) {
+    if (elem.dataset.escolhido !== "sim") elem.dataset.escolhido = "sim";
+  } else {
+    delete elem.dataset.escolhido;
+  }
+}
+
+/**
+ * O valor de um campo como o sujo o compara: o `checked` numa marca e num
+ * interruptor (o `value` deles é sempre «on»), e o `value` nos outros.
+ */
+function valorDoCampo(caixa) {
+  return caixa.type === "checkbox" ? String(caixa.checked) : caixa.value;
+}
+
 function nosDaDeclaracao(no) {
   if (Array.isArray(no)) return no.reduce((soma, um) => soma + nosDaDeclaracao(um), 0);
   if (typeof no === "string") return 1;
@@ -445,9 +475,27 @@ const FORMAS_DE_CAIXA = Object.freeze(
 
 /** A fonte identifica o recurso; repintar texto não deve reiniciar uma imagem. */
 function fonteDaMidia(plano) {
+  // No retrato, a citação também é fonte: o mesmo nó que passa a citar outra
+  // pessoa (`pessoa`, D-api-9), ou a capa em vez do avatar, troca de imagem.
   return plano.forma === "midia" || plano.forma === "retrato"
-    ? JSON.stringify([plano.no.fonte ?? null, plano.no.doServidor ?? null])
+    ? JSON.stringify([plano.no.fonte ?? null, plano.no.doServidor ?? null, plano.no.daPessoa ?? null, plano.no.pessoa ?? null])
     : plano.no.fundoDeMidia ? JSON.stringify(plano.no.fundoDeMidia) : undefined;
+}
+
+/**
+ * **A pessoa que uma citação nomeia** (`pessoa`; D-api-9): um id inteiro, ou o
+ * texto dele. `undefined` quando a citação não nomeia ninguém, e vale a pessoa
+ * do destino; `null` quando nomeia mal, e a citação fica sem imagem.
+ *
+ * @param {object} fonte O `fundoDeMidia`, ou o nó do `retrato`.
+ * @returns {string | null | undefined}
+ */
+function pessoaNomeada(fonte) {
+  if (!fonte || !Object.hasOwn(fonte, "pessoa")) return undefined;
+  const pessoa = fonte.pessoa;
+  if (typeof pessoa === "number" && Number.isSafeInteger(pessoa) && pessoa >= 0) return String(pessoa);
+  if (typeof pessoa === "string" && /^\d{1,20}$/.test(pessoa)) return pessoa;
+  return null;
 }
 
 /**
@@ -670,6 +718,9 @@ class RegiaoDeMod {
    *   (`'avatar'` ou `'capa'`), para a citação `daPessoa` (rascunho da API 6,
    *   §4; tarefa 6, Step 4b) — uma promessa de `{ papel, bytes: 0, uri }`, ou de
    *   `null`. Sem ela, a citação fica sem imagem, sem erro.
+   * - `estaNaSessao(pessoaId)`: se a pessoa que uma citação nomeia (`pessoa`,
+   *   D-api-9) está na sessão, pelo retrato. Sem ela, a citação com `pessoa`
+   *   fica sem imagem.
    *
    * O do produto também leva `geracao`, que a região não lê: quem confere a
    * geração é `podeFalar`.
@@ -695,6 +746,24 @@ class RegiaoDeMod {
      */
     this.escopo = `mod-${(RegiaoDeMod.serieDeEscopo += 1)}`;
     if (raiz) raiz.dataset.escopoDeMod = this.escopo;
+    /**
+     * **Os nós que citam uma imagem da pessoa do destino** (`daPessoa`), por
+     * elemento: o ponto citado e como reaplicar. A troca da foto ou da capa
+     * (o `atualizar` da contribuição, R7 do PERFIS) os alcança pelo evento
+     * `seele-mods-citacao`; sem isto o cartão ficava com a imagem velha até a
+     * sessão remontar (o achado do PERFIS, 15/10). O ouvinte só existe
+     * enquanto há citação: a região que não cita não paga nada.
+     */
+    this.citados = new Map();
+    this.aoTrocarACitacao = (evento) => {
+      const { ponto, pessoa } = evento?.detail ?? {};
+      if (this.solta) return;
+      // A pessoa de cada nó: a que ele nomeia (D-api-9), ou a do destino.
+      for (const citado of Array.from(this.citados.values())) {
+        const de = citado.pessoa ?? this.pessoaDoDestino ?? "";
+        if (citado.ponto === ponto && String(de) === String(pessoa ?? "")) citado.reaplicar();
+      }
+    };
     /** A folha de classes desta raiz, montada sob demanda. */
     this.folha = null;
     this.textoDaFolha = "";
@@ -738,10 +807,14 @@ class RegiaoDeMod {
      */
     this.bytesDeSomDecodificado = 0;
     this.bytesDeSomDeCartao = 0;
-    /** A raiz do cartão de cada pessoa, por `id` em texto. */
-    this.raizesDeCartao = new Map();
     /** Quantos nós a última montagem recusou, por teto. */
     this.recusados = 0;
+    /**
+     * **O que ela recusou**, até `TETO_DA_AMOSTRA` (`nos-recusados`;
+     * D-api-8): `{ motivo, chave?, forma?, propriedade?, tipo? }`. A conta
+     * dizia quantos e o `seele.log` dizia por quê; o MOD recebia só a conta.
+     */
+    this.amostraDeRecusados = [];
     /** Onde cada figura ficou em cada tela, para o toque saber o que pegou. */
     this.acertoDaTela = new Map();
     /**
@@ -820,9 +893,21 @@ class RegiaoDeMod {
    * @param {*} conteudo O que o MOD declarou.
    * @returns {number} Quantos nós foram recusados por teto.
    */
+  /**
+   * Conta uma recusa, e a guarda na amostra enquanto ela tem lugar. `quantos`
+   * conta várias de uma vez, com a mesma descrição.
+   */
+  anotarRecusado(motivo, campos = {}, quantos = 1) {
+    this.recusados += quantos;
+    for (let i = 0; i < quantos && this.amostraDeRecusados.length < TETO_DA_AMOSTRA; i += 1) {
+      this.amostraDeRecusados.push({ motivo, ...campos });
+    }
+  }
+
   aplicar(conteudo) {
     if (this.solta) return 0;
     this.recusados = 0;
+    this.amostraDeRecusados = [];
     // Os recusados **por teto**, à parte dos recusados por forma: é o que
     // separa «não coube» de «não entra aqui» no aviso ao MOD.
     this.foraDoTeto = 0;
@@ -894,8 +979,10 @@ class RegiaoDeMod {
    */
   declararClasses(classes) {
     if (this.solta || !this.raiz) return 0;
-    const conta = { recusados: 0 };
+    const conta = { recusados: 0, amostra: [] };
     const texto = folhaDeClassesDeMod(this.escopo, classes, conta);
+    // A amostra das classes é a desta declaração (`nos-recusados`).
+    this.amostraDeRecusados = conta.amostra.map(({ motivo, campos }) => ({ motivo, ...campos }));
     if (texto === this.textoDaFolha) return conta.recusados;
     this.textoDaFolha = texto;
     if (!texto) {
@@ -941,14 +1028,26 @@ class RegiaoDeMod {
    */
   planejar(no, fundura, orcamento, permitidas = null, posicao = "0") {
     const teto = this.perfil.fundura;
-    if (fundura > teto || no === null || no === undefined) return [];
+    if (no === null || no === undefined) return [];
+    // **O que passa da fundura é recusado, e dito** (`nos-recusados`: «um
+    // teto»). Devolver `[]` calado cortava os galhos de baixo de uma árvore
+    // funda demais sem que o MOD ouvisse nada — a auditoria do `v6.json`,
+    // passo 7. Uma recusa por galho cortado, com a chave dele na amostra; e
+    // fora do `foraDoTeto`, que é a conta do orçamento de nós.
+    if (fundura > teto) {
+      for (const galho of Array.isArray(no) ? no : [no]) {
+        if (galho === null || galho === undefined) continue;
+        this.anotarRecusado("teto-de-fundura", typeof galho === "object" ? chaveDoNo(galho) : {});
+      }
+      return [];
+    }
     if (Array.isArray(no)) {
       return no.flatMap((um, indice) => this.planejar(
         um, fundura, orcamento, permitidas, `${posicao}.${indice}`,
       ));
     }
     if (typeof no === "string") {
-      if (orcamento.nos <= 0) { this.recusados += 1; this.foraDoTeto += 1; return []; }
+      if (orcamento.nos <= 0) { this.anotarRecusado("teto-de-nos"); this.foraDoTeto += 1; return []; }
       orcamento.nos -= 1;
       return [{ texto: no.slice(0, LIMITES_DA_REGIAO.texto) }];
     }
@@ -961,12 +1060,19 @@ class RegiaoDeMod {
     // E num cartão, uma forma que a **região** conhece mas o cartão não é
     // recusada do mesmo jeito, e contada: o MOD precisa saber que pôs um botão
     // onde botão não entra, em vez de vê-lo sumir.
+    //
+    // **E numa região também** (o achado 5 da auditoria): a forma que a API
+    // não tem sumia calada fora do cartão, e uma contribuição com ela não
+    // dizia nada ao MOD. Uma superfície a recusa antes, pelo nome
+    // (`forma-desconhecida`); aqui ela conta, e a amostra diz qual.
+    const conhecida = Boolean(forma);
     if (forma && permitidas && !permitidas.has(forma)) forma = "";
     if (!forma) {
-      if (permitidas) this.recusados += 1;
+      this.anotarRecusado(conhecida ? "forma-fora-do-lugar" : "forma-desconhecida",
+        { forma: String(no.forma ?? "").slice(0, 64), ...chaveDoNo(no) });
       return [];
     }
-    if (orcamento.nos <= 0) { this.recusados += 1; this.foraDoTeto += 1; return []; }
+    if (orcamento.nos <= 0) { this.anotarRecusado("teto-de-nos", chaveDoNo(no)); this.foraDoTeto += 1; return []; }
     orcamento.nos -= 1;
 
     // A chave é o que faz a atualização ser incremental. Sem uma, a posição
@@ -1032,7 +1138,7 @@ class RegiaoDeMod {
             velho.remove();
           }
           no = this.criar(plano);
-          if (!no) { this.recusados += 1; continue; }
+          if (!no) { this.anotarRecusado("teto", { forma: plano.forma, ...chaveDoNo(plano.no) }); continue; }
         }
         if (FORMAS_COM_FILHOS.has(plano.forma)) {
           this.reconciliar(no, plano.dentro, fundura + 1, orcamento);
@@ -1124,9 +1230,10 @@ class RegiaoDeMod {
     // sempre: um MOD que escreveu `corDeFundo` em vez de `fundo` descobre onde
     // escreveu, em vez de ver a cor não aparecer e não saber por quê.
     if (plano.no.estilo) {
-      const conta = { recusados: 0 };
+      const conta = { recusados: 0, amostra: [] };
       aplicarEstiloDeMod(elem, plano.no.estilo, conta);
-      this.recusados += conta.recusados;
+      for (const recusa of conta.amostra) this.anotarRecusado(recusa.motivo, { ...chaveDoNo(plano.no), ...recusa.campos });
+      this.recusados += conta.recusados - conta.amostra.length;
     } else if (elem.dataset.estiloDeMod) {
       // O estilo saiu da declaração: o que ele escreveu sai da tela junto.
       aplicarEstiloDeMod(elem, null);
@@ -1603,6 +1710,7 @@ class RegiaoDeMod {
     elem.append(rotulo, caixa, lido);
     const aoMexer = () => {
       lido.textContent = caixa.value;
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "numero",
         chave: plano.no.chave ?? "",
@@ -1631,6 +1739,10 @@ class RegiaoDeMod {
       if (caixa.value !== valor) caixa.value = valor;
     }
     if (lido && lido.textContent !== caixa.value) lido.textContent = caixa.value;
+    // **Um campo como os outros** (`formularios.erro`: «em toda forma de
+    // entrada»; a auditoria do `v6.json`, B4): o erro declarado, o sujo e o
+    // `formulario.erros` pela chave.
+    this.marcarValidade(elem, caixa, plano);
   }
 
   /** Uma marca — caixa de seleção ou interruptor, na mesma mecânica. */
@@ -1640,6 +1752,8 @@ class RegiaoDeMod {
     const rotulo = elemento("span", "regiao-de-mod-rotulo");
     elem.append(caixa, rotulo);
     const aoTrocar = () => {
+      this.aoMexerNoCampo(elem, caixa);
+      marcarEscolhido(elem, caixa.checked);
       this.dono.falar({
         nome: "marca",
         chave: plano.no.chave ?? "",
@@ -1664,9 +1778,15 @@ class RegiaoDeMod {
     // são o mesmo controle com leituras diferentes para quem usa leitor de tela.
     if (plano.forma === "interruptor") caixa.setAttribute("role", "switch");
     else caixa.removeAttribute("role");
-    if (document.activeElement === caixa) return;
+    // Um campo como os outros, pela mesma razão do deslizante (B4).
+    this.marcarValidade(elem, caixa, plano);
+    if (document.activeElement === caixa) {
+      marcarEscolhido(elem, caixa.checked);
+      return;
+    }
     const ligado = plano.no.valor === true;
     if (caixa.checked !== ligado) caixa.checked = ligado;
+    marcarEscolhido(elem, caixa.checked);
   }
 
   /**
@@ -1828,12 +1948,13 @@ class RegiaoDeMod {
     const bolso = plano.cartao
       ? { conta: "bytesDeCartao", quantas: "midiasDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia, limite: LIMITES_DO_CARTAO.midias }
       : { conta: "bytesDeMidia", quantas: "midias", teto: this.perfil.bytesDeMidia, limite: this.perfil.midias };
-    if (this.contagem[bolso.quantas] >= bolso.limite) { this.recusados += 1; return; }
+    if (this.contagem[bolso.quantas] >= bolso.limite) { this.anotarRecusado("teto-de-midias", chaveDoNo(plano.no)); return; }
     this.contagem[bolso.quantas] += 1;
     let cancelado = false, bytes = 0;
     this.guardar(elem, `fundo ${plano.chave}`, () => {
       cancelado = true; this[bolso.conta] -= bytes; this.contagem[bolso.quantas] -= 1;
       elem.style.backgroundImage = "";
+      this.esquecerCitacao(elem);
       this.esquecerMidia(elem);
     });
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
@@ -1842,7 +1963,7 @@ class RegiaoDeMod {
     // era (`soImagem`). **A citação `daPessoa`** (Step 4b) usa a imagem que a
     // pessoa do destino já tem, sem pedido novo; sem ela, nada.
     const vindo = soImagem(fonte.daPessoa
-      ? this.imagemCitada(fonte.daPessoa)
+      ? this.imagemCitada(fonte.daPessoa, pessoaNomeada(fonte))
       : fonte.doServidor
         ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
         : this.dono.carregarMidia(fonte.fonte));
@@ -1867,6 +1988,15 @@ class RegiaoDeMod {
       this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
       this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo: ${porque}`);
     };
+    // A imagem citada que troca (o `atualizar` da contribuição) chega aqui de
+    // novo: já decodificada pela contribuição, e sem bytes neste bolso.
+    if (fonte.daPessoa) {
+      this.lembrarCitacao(elem, fonte.daPessoa, pessoaNomeada(fonte), () => {
+        soImagem(this.imagemCitada(fonte.daPessoa, pessoaNomeada(fonte)))
+          .then(aplicar)
+          .catch((falha) => this.dizerTropecoDaMidia("o fundo citado", plano.no.chave, falha));
+      });
+    }
     vindo.then(midia => {
       if (cancelado || this.solta || !this.dono.podeFalar()) return;
       // A citação de uma imagem que a pessoa não tem: o fundo fica liso, e
@@ -1876,8 +2006,13 @@ class RegiaoDeMod {
       // do `seele.log` é de quem investiga; a anotação é o que «quem pinta
       // cada lugar» soma — sem ela, o fundo que não veio seria só uma caixa
       // lisa na gestão também.
+      // **E as duas recusas são ditas ao MOD**, como as da `midia`: «são
+      // recusados», diz o `v6.json`, e o MOD não ouvia nada (a auditoria,
+      // passo 7). Uma só por caso: o `falhou` do K2 é do `recusar`, abaixo.
       if (midia.papel !== "imagem") {
-        this.anotarMidia(elem, "recusada", `o fundo precisa ser imagem, e os bytes são ${midia.papel}`);
+        const porque = `o fundo precisa ser imagem, e os bytes são ${midia.papel}`;
+        this.anotarMidia(elem, "recusada", porque);
+        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada", porque });
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: o arquivo é ${midia.papel}, e fundo só mostra imagem`);
         return;
       }
@@ -1887,6 +2022,7 @@ class RegiaoDeMod {
         // demais ou se o lugar já estava cheio.
         const porque = `${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`;
         this.anotarMidia(elem, "recusada", `${porque} bytes de mídia deste lugar`, undefined, `bytes de mídia:${bolso.teto}`);
+        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada", porque });
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: ${porque}`);
         return;
       }
@@ -1922,19 +2058,22 @@ class RegiaoDeMod {
     };
     this.guardar(elem, `retrato ${plano.chave}`, () => {
       estado.cancelado = true;
+      this.esquecerCitacao(elem);
       tirarAImagem();
       this.contagem[plano.cartao ? "midiasDeCartao" : "midias"] -= 1;
       this.esquecerMidia(elem);
     });
     // Falhar num retrato **não** é um erro que a pessoa precise ler: a inicial
     // continua lá e responde a mesma pergunta. Quem escreveu o MOD precisa — e
-    // é para ele que a linha vai ao registro e o diagnóstico anota. **Sem
-    // evento ao MOD**: o retrato nunca falou com ele, e passar a falar seria
-    // promessa nova da API.
+    // é para ele que a linha vai ao registro, o diagnóstico anota, **e o
+    // evento vai**: `midia`/`falhou` com a chave e o motivo, como o fundo. O
+    // `v6.json` o promete (`eventos-mudam.midia`, o K2 da F5), e o retrato
+    // calava (a auditoria do `v6.json`, B3).
     const recusar = (porque, oQue) => {
       tirarAImagem();
       elem.dataset.estadoDoRetrato = "inicial";
       this.anotarMidia(elem, "recusada", porque);
+      this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
       this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no retrato: ${oQue}`);
     };
     // **Aplicar fica fora da recusa** (`.then(aplicar, …)`): só a busca e o
@@ -1965,7 +2104,7 @@ class RegiaoDeMod {
     // O retrato só mostra imagem: o som recusado pelo teto chega como o som
     // que era (`soImagem`).
     const vindo = soImagem(plano.no.daPessoa
-      ? this.imagemCitada(plano.no.daPessoa)
+      ? this.imagemCitada(plano.no.daPessoa, pessoaNomeada(plano.no))
       : doServidor
         ? this.dono.carregarMidiaDoServidor(
             Number(doServidor.canal) || 0,
@@ -1977,14 +2116,32 @@ class RegiaoDeMod {
           : null);
     // Sem origem não há mídia: a inicial é o estado natural, e não uma recusa.
     if (!vindo) return;
+    // A imagem citada que troca chega aqui de novo, e troca o `<img>`: já
+    // decodificada pela contribuição, e sem bytes neste bolso.
+    if (plano.no.daPessoa) {
+      this.lembrarCitacao(elem, plano.no.daPessoa, pessoaNomeada(plano.no), () => {
+        soImagem(this.imagemCitada(plano.no.daPessoa, pessoaNomeada(plano.no)))
+          .then((midia) => {
+            if (!midia || estado.cancelado || this.solta) return;
+            tirarAImagem();
+            aplicar(midia);
+          })
+          .catch((falha) => this.dizerTropecoDaMidia("o retrato citado", plano.no.chave, falha));
+      });
+    }
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     vindo.then((midia) => {
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
       // A citação de uma imagem que a pessoa não tem: a inicial fica, e isso
       // não é recusa.
       if (!midia) { this.esquecerMidia(elem); return; }
+      // **E as duas recusas são ditas ao MOD**, como as da `midia` (ver
+      // `montarFundoDeMidia`). Uma só por caso: o `falhou` do K2 é do
+      // `recusar`, acima.
       if (midia.papel !== "imagem") {
-        this.anotarMidia(elem, "recusada", `o retrato precisa ser imagem, e os bytes são ${midia.papel}`);
+        const porque = `o retrato precisa ser imagem, e os bytes são ${midia.papel}`;
+        this.anotarMidia(elem, "recusada", porque);
+        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada", porque });
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: o arquivo é ${midia.papel}, e retrato só mostra imagem`);
         return;
       }
@@ -1993,6 +2150,7 @@ class RegiaoDeMod {
         elem.dataset.estadoDoRetrato = "cheia";
         const porque = `${midia.bytes} bytes somados aos ${this[conta]} já montados passam do teto de ${teto}`;
         this.anotarMidia(elem, "recusada", `${porque} bytes de mídia deste lugar`, undefined, `bytes de mídia:${teto}`);
+        this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada", porque });
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: ${porque}`);
         return;
       }
@@ -2010,16 +2168,42 @@ class RegiaoDeMod {
   }
 
   /**
-   * **A imagem que a pessoa deste destino já tem** (`daPessoa`; rascunho da API
-   * 6, §4; tarefa 6, Step 4b): `'avatar'` ou `'capa'`. Só num destino que é uma
-   * pessoa (`pessoaDoDestino`, que a montagem de uma contribuição de pessoa
-   * põe): num canal, «a pessoa 3» seria outra pessoa. Uma promessa de `null`
-   * quando não há o que citar.
+   * **A imagem que uma pessoa já tem** (`daPessoa`; rascunho da API 6, §4;
+   * tarefa 6, Step 4b): `'avatar'` ou `'capa'`. Uma promessa de `null` quando
+   * não há o que citar.
+   *
+   * De quem: da pessoa que a citação nomeia (`pessoa`, D-api-9), em qualquer
+   * destino, e só se ela estiver na sessão (`estaNaSessao`, pelo retrato); sem
+   * como conferir, ninguém. Sem `pessoa`, da pessoa do destino
+   * (`pessoaDoDestino`, que a montagem de uma contribuição de pessoa põe): num
+   * canal, ou numa superfície, ninguém.
+   *
+   * @param {string} qual `'avatar'` ou `'capa'`.
+   * @param {string | null | undefined} nomeada O que `pessoaNomeada` leu do nó.
    */
-  imagemCitada(qual) {
-    const pessoa = this.pessoaDoDestino ?? "";
+  imagemCitada(qual, nomeada) {
+    if (nomeada === null) return Promise.resolve(null);
+    if (nomeada !== undefined && this.dono.estaNaSessao?.(nomeada) !== true) return Promise.resolve(null);
+    const pessoa = nomeada ?? this.pessoaDoDestino ?? "";
     if (!pessoa || typeof this.dono.imagemDaPessoa !== "function") return Promise.resolve(null);
-    return this.dono.imagemDaPessoa(String(qual), pessoa);
+    return this.dono.imagemDaPessoa(String(qual), pessoa, { parada: this.citacaoParada === true });
+  }
+
+  /**
+   * Lembra um nó que cita, para a troca da imagem citada o alcançar: a da
+   * pessoa que ele nomeia, ou, sem nome, a do destino.
+   */
+  lembrarCitacao(elem, qual, nomeada, reaplicar) {
+    const ponto = qual === "capa" ? "pessoa.capa" : qual === "avatar" ? "pessoa.avatar" : "";
+    if (!ponto || nomeada === null) return;
+    if (this.citados.size === 0) globalThis.addEventListener?.("seele-mods-citacao", this.aoTrocarACitacao);
+    this.citados.set(elem, { ponto, pessoa: nomeada, reaplicar });
+  }
+
+  /** Esquece o nó que citava, e o ouvinte com o último. */
+  esquecerCitacao(elem) {
+    if (!this.citados.delete(elem) || this.citados.size > 0) return;
+    globalThis.removeEventListener?.("seele-mods-citacao", this.aoTrocarACitacao);
   }
 
   atualizarRetrato(elem, plano) {
@@ -2225,7 +2409,7 @@ class RegiaoDeMod {
     for (const parte of this.raiz?.querySelectorAll("[data-chave-do-mod]") ?? []) {
       if (!this.iniciais.has(parte)) continue;
       const caixa = this.caixasDoCampo.get(parte);
-      if (caixa && caixa.value !== this.iniciais.get(parte)) return true;
+      if (caixa && valorDoCampo(caixa) !== this.iniciais.get(parte)) return true;
     }
     return false;
   }
@@ -2295,7 +2479,11 @@ class RegiaoDeMod {
     // **O inicial, para o sujo derivado** (rascunho da API 6, §5; Step 6c): o
     // MOD que declara `inicial` (o gravado) ao lado de `valor` (o rascunho)
     // tem um campo que nasce sujo; sem `inicial`, vale o valor da montagem.
-    const comoTexto = (valor) => (valor === null || valor === undefined ? "" : String(valor));
+    // Numa marca, o inicial é o ligado («true»/«false»): o `value` dela é
+    // sempre «on», e o sujo nunca a veria (`valorDoCampo`).
+    const comoTexto = caixa?.type === "checkbox"
+      ? (valor) => String(valor === true)
+      : (valor) => (valor === null || valor === undefined ? "" : String(valor));
     if (Object.hasOwn(plano.no, "inicial")) this.iniciais.set(elem, comoTexto(plano.no.inicial));
     else if (!this.iniciais.has(elem)) this.iniciais.set(elem, comoTexto(plano.no.valor));
     this.errosDoMod.set(elem, typeof plano.no.erro === "string" ? plano.no.erro.slice(0, 200) : "");
@@ -2417,6 +2605,8 @@ class RegiaoDeMod {
   }
 
   atualizarAba(elem, plano) {
+    // Só a aba ativa é montada (`montarAbas`): a que está aqui é a escolhida.
+    marcarEscolhido(elem, true);
     elem.setAttribute("role", "tabpanel");
     elem.tabIndex = 0;
     const rotulo = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
@@ -2520,22 +2710,43 @@ class RegiaoDeMod {
       pendente = evento;
       if (!quadro) quadro = requestAnimationFrame(escoar);
     };
-    const aoSubir = (evento) => {
+    // **O fim do gesto tem dois desfechos** (MESA M14; rascunho da API 6,
+    // §7.1). Soltar é `terminou`, com o ponto onde o dedo saiu. O gesto que o
+    // sistema toma — uma ligação, a notificação, o gesto de voltar, o que no
+    // celular é comum — é `cancelou`: chegava como `terminou`, e um jogo
+    // movia a peça para onde ninguém a soltou. O movimento que esperava o
+    // quadro não sai depois de nenhum dos dois.
+    const aoAcabar = (fase) => (evento) => {
       if (!arrastando) return;
       arrastando = false;
       pendente = null;
-      mandar("terminou", evento);
+      mandar(fase, evento);
       pego = null;
     };
+    const aoSubir = aoAcabar("terminou");
+    const aoCancelar = aoAcabar("cancelou");
+    // **No toque, só o que se arrasta prende o dedo** (D-api-8, item 6;
+    // `celular.toque-na-tela`). A folha deixa a página rolar (`touch-action:
+    // pan-x pan-y`), e é aqui, no dedo que desce, que o produto decide: sobre
+    // uma figura com chave, o gesto é do desenho, e a rolagem é impedida; no
+    // vazio, a página rola, e o arraste que tinha começado chega ao MOD como
+    // `cancelou`. Era `touch-action: none` no canvas inteiro, e um tabuleiro
+    // no celular prendia a página.
+    const aoTocar = (evento) => {
+      const toque = evento.touches?.[0];
+      if (toque && sob(ponto(toque)) !== null) evento.preventDefault();
+    };
+    elem.addEventListener("touchstart", aoTocar, { passive: false });
     elem.addEventListener("pointerdown", aoDescer);
     elem.addEventListener("pointermove", aoMover);
     elem.addEventListener("pointerup", aoSubir);
-    elem.addEventListener("pointercancel", aoSubir);
+    elem.addEventListener("pointercancel", aoCancelar);
     this.guardar(elem, `tela ${plano.chave}`, () => {
       elem.removeEventListener("pointerdown", aoDescer);
       elem.removeEventListener("pointermove", aoMover);
       elem.removeEventListener("pointerup", aoSubir);
-      elem.removeEventListener("pointercancel", aoSubir);
+      elem.removeEventListener("pointercancel", aoCancelar);
+      elem.removeEventListener("touchstart", aoTocar);
       // **O quadro pendente também é recurso.** Um `requestAnimationFrame` que
       // sobrevive à saída roda uma vez depois de a sessão ter acabado, e o que
       // ele faz é falar com um executor que não existe mais.
@@ -2703,7 +2914,7 @@ class RegiaoDeMod {
       });
       pincel.stroke();
     }
-    if (tracos.length > LIMITES_DA_REGIAO.tracos) this.recusados += 1;
+    if (tracos.length > LIMITES_DA_REGIAO.tracos) this.anotarRecusado("teto-de-tracos", chaveDoNo(plano.no));
   }
 
   /**
@@ -2725,7 +2936,7 @@ class RegiaoDeMod {
   pintarFiguras(pincel, elem, plano) {
     const declaradas = Array.isArray(plano.no.figuras) ? plano.no.figuras : [];
     const figuras = declaradas.slice(0, LIMITES_DA_REGIAO.figuras);
-    if (declaradas.length > figuras.length) this.recusados += 1;
+    if (declaradas.length > figuras.length) this.anotarRecusado("teto-de-figuras", chaveDoNo(plano.no));
     // A lista de acerto é refeita a cada pintura: ela **é** o que está na tela,
     // e uma lista velha faria o arraste pegar uma peça que já saiu.
     const acerto = [];
@@ -2787,7 +2998,7 @@ class RegiaoDeMod {
         }
         default:
           // Um tipo que a API não conhece não vira retângulo por conveniência.
-          this.recusados += 1;
+          this.anotarRecusado("figura-desconhecida", { ...chaveDoNo(plano.no), tipo: String(figura?.tipo ?? "").slice(0, 32) });
           break;
       }
       pincel.restore();
@@ -3532,13 +3743,13 @@ class RegiaoDeMod {
    * não ao documento. O descarte já cala o som (`montarMidia`), mas o produto
    * também tira nós da tela **sem** descartá-los: a página fechada pelo VOLTAR
    * ou, quando é imersiva, pelo Escape, a contribuição que perde a disputa, o
-   * cartão da API 3 sob «o SEELE desenha», o destino de quem saiu da sala. Nos
-   * cinco caminhos que a revisão ampla do Plano 1D mediu (I-1), o som seguia
-   * até o fim, sem controle à vista e sem `pausada` ao MOD.
+   * destino de quem saiu da sala (e o cartão da API 3 sob «o SEELE desenha»,
+   * até sair com ela). Nos cinco caminhos que a revisão ampla do Plano 1D mediu
+   * (I-1), o som seguia até o fim, sem controle à vista e sem `pausada` ao MOD.
    *
    * Um som está fora da tela quando o nó dele saiu do documento, ou quando ele
-   * mora num cartão — um da API 3, ou um destino de contribuição — e
-   * `cartoesPintam` diz que aquela montagem não desenha agora.
+   * mora num cartão — um destino de contribuição — e `cartoesPintam` diz que
+   * aquela montagem não desenha agora.
    *
    * O som fora da tela é pausado: o MOD recebe `pausada`, e a anotação
    * acompanha. Um `tocar` que ainda esperava o áudio da janela é cancelado, e
@@ -3558,8 +3769,7 @@ class RegiaoDeMod {
    *
    * @param {boolean} [cartoesPintam] Se as mídias de cartão deste renderer
    *   desenham agora — falso para o destino de uma contribuição que não
-   *   desenha (`aContribuicaoPinta`, em `base.js`) e para os cartões da API 3
-   *   de um MOD fora de `modsDeCartaoQueValem`.
+   *   desenha (`aContribuicaoPinta`, em `base.js`).
    */
   calarSonsForaDaTela(cartoesPintam = true) {
     if (this.solta) return;
@@ -3815,13 +4025,9 @@ class RegiaoDeMod {
    * **Quem lê as anotações.** As duas somas da aba, em `base.js`:
    * - `midiasDoPonto`, por ponto de contribuição: as dos renderers de
    *   contribuição (`montarContribuicao`), no destino em que a contribuição
-   *   desenha (`aContribuicaoPinta`), e as de cartão (`cartao: true`) da região
-   *   de um MOD cujos cartões valem (`modsDeCartaoQueValem`), em
-   *   `pessoa.cartao`;
-   * - `midiasDaRegiaoEDasPaginas`, por MOD: todas as da região dele e as das
-   *   superfícies (páginas, painéis e diálogos), sem filtro — é onde o som
-   *   costuma morar. A mídia de um cartão entra nas duas: são duas vistas da
-   *   mesma mídia, e a aba não soma os dois blocos.
+   *   desenha (`aContribuicaoPinta`);
+   * - `midiasDasPaginas`, por MOD: as das superfícies dele (páginas, painéis
+   *   e diálogos), sem filtro — é onde o som costuma morar.
    *
    * @param {Element} elem O nó da mídia.
    * @param {"carregando"|"pronta"|"recusada"} situacao
@@ -3857,87 +4063,6 @@ class RegiaoDeMod {
   /** O estado de cada mídia de pé, em cópia: quem lê não escreve aqui. */
   midiasAnotadas() {
     return [...this.estadosDeMidia.values()].map((anotada) => ({ ...anotada }));
-  }
-
-  // -------------------------------------------------------- os cartões
-
-  /**
-   * Os cartões que este MOD declara para a lista de pessoas do produto.
-   *
-   * # Por que isto não é o MOD desenhando na janela
-   *
-   * O ADR 0049 tirou o MOD da janela, e nada aqui o traz de volta. O que chega
-   * é **a mesma declaração da região** — as mesmas formas, o mesmo
-   * `planejar`, o mesmo `reconciliar`, o mesmo `elemento` — montada pelo mesmo
-   * renderer, com `createElement` e `textContent` e nunca com HTML de texto.
-   * O MOD não alcança nó nenhum, não escolhe onde o cartão entra na linha, e
-   * não recebe evento de dentro dele.
-   *
-   * O que muda em relação à região é o que ele **pode** declarar (ver
-   * `FORMAS_DO_CARTAO`) e quanto (ver `LIMITES_DO_CARTAO`). Um cartão é
-   * desenhado ao lado do nome de uma pessoa, numa lista que o produto usa para
-   * dizer quem está falando: um teto de região ali seria a lateral inteira.
-   *
-   * # O descarte
-   *
-   * A raiz de cada cartão é guardada aqui, e não só no documento. Quando um
-   * MOD para de declarar uma pessoa, a raiz dela sai e solta o que segurava —
-   * e quando a região inteira sai, `soltar` percorre estas raízes também.
-   * Sem isso, o retrato de um MOD que não está mais de pé continuaria na lista
-   * até alguém trocar de servidor.
-   *
-   * @param {object} cartoes `{ [id da pessoa]: declaração }`.
-   * @returns {number} quantos nós foram recusados por teto ou por forma.
-   */
-  declararCartoes(cartoes) {
-    if (this.solta) return 0;
-    this.recusados = 0;
-    const pedidos = Object.entries(cartoes ?? {});
-    if (pedidos.length > LIMITES_DO_CARTAO.cartoes) {
-      throw new Error(
-        `um MOD dá cartão a até ${LIMITES_DO_CARTAO.cartoes} pessoas, e vieram ${pedidos.length}`,
-      );
-    }
-
-    const vivos = new Set();
-    for (const [quem, declaracao] of pedidos) {
-      const pessoa = String(quem);
-      // Um cartão sem nada dentro não é um cartão: seria uma moldura vazia ao
-      // lado de um nome, que é o produto anunciando uma ausência que ninguém
-      // pediu para anunciar.
-      const orcamento = { nos: LIMITES_DO_CARTAO.nos };
-      const planos = this.planejar(declaracao, 0, orcamento, PERFIS_DE_RENDER.cartao.formas);
-      if (planos.length === 0) continue;
-      vivos.add(pessoa);
-
-      let raiz = this.raizesDeCartao.get(pessoa);
-      if (!raiz) {
-        raiz = elemento("div", "pessoa-cartao");
-        raiz.dataset.mod = this.id;
-        this.raizesDeCartao.set(pessoa, raiz);
-      }
-      this.reconciliar(raiz, planos, 0, orcamento);
-    }
-
-    for (const [pessoa, raiz] of Array.from(this.raizesDeCartao)) {
-      if (vivos.has(pessoa)) continue;
-      this.soltarCartao(pessoa, raiz);
-    }
-    return this.recusados;
-  }
-
-  /** Tira o cartão de uma pessoa e solta o que ele segurava. */
-  soltarCartao(pessoa, raiz) {
-    this.raizesDeCartao.delete(pessoa);
-    this.soltarSubarvore(raiz);
-    for (const filho of Array.from(raiz.children)) this.soltarSubarvore(filho);
-    raiz.remove();
-  }
-
-  /** A raiz do cartão desta pessoa, ou nada quando este MOD não deu um. */
-  cartaoDe(pessoa) {
-    if (this.solta) return null;
-    return this.raizesDeCartao.get(String(pessoa)) ?? null;
   }
 
   // ------------------------------------------------------- os recursos
@@ -3991,12 +4116,6 @@ class RegiaoDeMod {
       }
       this.rodape.hidden = true;
     }
-    // **E os cartões**, que moram na lista do produto e não sob esta raiz. Um
-    // retrato de um MOD que saiu continuaria ao lado do nome de alguém até a
-    // próxima troca de servidor — e ninguém teria como tirá-lo.
-    for (const [pessoa, raiz] of Array.from(this.raizesDeCartao)) {
-      this.soltarCartao(pessoa, raiz);
-    }
     // O que não estava mais na árvore — porque o nó saiu antes — já foi solto
     // pelo mesmo caminho; o que restar aqui é o que a árvore não alcançava.
     for (const [, recurso] of this.recursos) {
@@ -4012,6 +4131,8 @@ class RegiaoDeMod {
     this.soltarAFolha();
     this.estadosDeMidia.clear();
     this.somDaMidia.clear();
+    if (this.citados.size > 0) globalThis.removeEventListener?.("seele-mods-citacao", this.aoTrocarACitacao);
+    this.citados.clear();
     this.raiz.remove();
   }
 }

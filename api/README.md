@@ -18,6 +18,10 @@ das APIs 3, 4 e 5 carrega como carregava (`APIS_ACEITAS = [5, 4, 3]`, em
 depois da 0.15.0, é o executor da metade de janela e o som, e quem escreve MOD
 precisa saber disso para o MOD rodar igual nas duas.
 
+> **Emendado em 15/10/2026 — o corte da API 6 (0.16).** Isto vale para a linha
+> 0.15. No app 0.16, `APIS_ACEITAS = [6]`: um MOD das APIs 3, 4 e 5 é recusado
+> pelo nome, e roda no Servidor 0.15, pelo launcher.
+
 - **Na metade de janela, `console` existe, em qualquer API.** `console.log`,
   `info`, `warn`, `error` e `debug` — e `dir`, `table`, `trace` e o `assert`
   que falha — viram uma linha no `seele.log` da máquina que roda o MOD, com o
@@ -124,12 +128,70 @@ fecha.
 adivinhação: a superfície cresce enquanto ninguém depende dela, e fecha antes de
 publicar em vez de antes de existir.
 
-## A API 6, em construção
+## A API 6
 
-`api/v6.json` existe e está em construção: `MOD_API_VERSION` ainda é 5, e a
-linha dela em `congeladas.sha256` acompanha cada edição até o corte, quando
-`MOD_API_VERSION` e `APIS_ACEITAS` sobem para 6 e ela congela. O que muda na
-forma do arquivo:
+`api/v6.json` **congelou no corte** (15/10/2026; tarefa 13 do plano da F3):
+`MOD_API_VERSION = 6` e `APIS_ACEITAS = [6]`, e a linha dela em
+`congeladas.sha256` só muda por uma emenda da D-api-8, antes da publicação.
+Depois que a 0.16 sair, o que vier vai para a v7. Até o corte ela esteve em
+construção, com a linha acompanhando cada edição.
+
+> **Emendado em 15/10/2026 — a primeira emenda depois do congelamento (D-api-8),
+> antes da publicação.** A auditoria do `v6.json` contra o produto
+> (`docs/superpowers/sdd/2026-10-08-0.16/F3/auditoria-do-v6/`) achou promessas
+> que o produto não entregava, e a regra da D-api-8 é uma só: o `v6.json` diz
+> o que o produto entrega, e nada além. A emenda corrigiu dez textos que
+> descreviam outra coisa que o código faz, tirou o que não se entrega na 0.16
+> (o `MessageEdited`, a folha expansível, a tira do palco e o «DE ONDE?» no
+> celular, a pinça, a área mínima e o toque longo na tela), disse o teto real
+> das mídias de uma superfície e o alcance da redução de mídia, e escreveu a
+> lista fechada das recusas inteira, com a fronteira que a faz valer (o
+> genérico `falhou`, as da ponte, as do `arquivo`, e a `forma-desconhecida`).
+> A linha do v6 em `congeladas.sha256` foi refeita no mesmo commit.
+
+> **Emendado em 16/10/2026 — a segunda emenda (D-api-8), antes da publicação.**
+> Cada emenda é um commit só, e só escreve o que já foi entregue. Esta escreveu:
+> - a `pessoa` da citação (D-api-9): `fundoDeMidia: { daPessoa, pessoa }` e
+>   `retrato({ daPessoa, pessoa })` citam quem o MOD nomeia, numa superfície
+>   também, se a pessoa estiver na sessão;
+> - a errata do `sujo`: sem `inicial`, o inicial é o valor da **primeira**
+>   montagem do campo, e um controle que o MOD regrava declara `inicial`. O
+>   texto de antes induzia o defeito que a MESA teve;
+> - o diálogo no celular: o modal na sessão acima do pé, com a faixa de voz e
+>   as abas à vista, e o não modal embaixo, até 85% dela. O texto de antes
+>   prometia as abas do MOD cabendo em 390 px, que é conteúdo do ESTILO, e não
+>   entrega do produto (medido pela F8);
+> - os nomes que vão na frente do par de uma recusa do tema: as cores de estado
+>   (`fosforo`, `azul`, `vermelho`) e o segundo apagado (`apagadoSecundario`,
+>   que saía como `apagado-secundario`; o achado do ESTILO);
+> - o `teto` que a recusa `teto-de-alvos` passou a levar.
+>
+> A linha do v6 em `congeladas.sha256` foi refeita no mesmo commit.
+
+> **Emendado em 16/10/2026 — a terceira emenda (D-api-8), antes da publicação,
+> no mesmo commit da entrega.** Uma montagem com o que não coube ou não serve
+> rejeitava com o genérico `falhou`, e quantos e por quê iam só ao `seele.log`.
+> A emenda escreveu a recusa `nos-recusados`, que leva `recusados` (a conta) e
+> `amostra` (até oito: o motivo, e a `chave`, a forma, a propriedade, o tipo ou
+> a classe), no `montar`, no `atualizar` e no `classes` de uma superfície. E o
+> evento `contribuicao` passou a levar a mesma amostra: uma forma que a API não
+> tem conta em todo ponto (sumia calada fora do cartão), e o `classes`, que é de
+> superfície, conta numa contribuição. A entrega e o texto vão juntos porque o
+> guarda da lista fechada amarra a janela ao contrato nos dois sentidos.
+
+> **Emendado em 20/10/2026 — a quarta e última emenda (D-api-10), no fim do
+> passo 7 da auditoria.** Cada prova do passo 7 foi revertida contra o produto,
+> e o que ele achou foi consertado no produto sempre que deu; esta emenda
+> escreve só o que pedia texto. O `listarNaBarra` vale na aba SERVIDOR do
+> celular (o texto ainda dizia a gaveta SALAS, de antes do rascunho §11). O
+> `ponto-desconhecido` leva `pontoPedido` (o que veio, cortado em 64) e
+> `pontos` (os que a API tem), entregues em `021876f8`. E `estilos` e `classes`,
+> na lista da 6, são rótulos sem efeito (`compatibilidade.rotulos`): nenhum
+> manifesto declara capacidade — ela vem com a `api` —, e nada pergunta por
+> eles; o estilo vale onde a forma monta, e o `superficie-classes` pede
+> `superficies`. Depois desta, a v6 só muda na API 7.
+
+O que muda na forma do arquivo:
 
 - **a v6 é escrita por inteiro**, sem `extends`: só a API 6 roda no app 0.16,
   e herdar traria de volta o que as versões 1 a 5 prometeram e não entregaram;
@@ -156,8 +218,10 @@ pelo evento `tema`: `aplicado`, ou `recusado` com os pares e a região.
   acha o mesmo nome no protocolo, sem intermediário. **Da v1 à v5, só 5 dos 21
   momentos são entregues.** A v1 lista 21, a v2 à v5 os herdam pelo `extends`,
   e `momento_de` (`crates/seele-server/src/mods/despacho.rs`), o único
-  despachante de momentos do servidor, entrega só `PersonJoined`, `PersonLeft`,
-  `MessageReceived`, `MessageEdited` e `MessageRemoved`. Os outros 16 nunca
+  despachante de momentos do servidor, tem braço só para `PersonJoined`,
+  `PersonLeft`, `MessageReceived`, `MessageEdited` e `MessageRemoved` — e o
+  `MessageEdited` nem esse entrega, porque nada o emite: o produto não edita
+  mensagem, e a v6 não o lista (a emenda de 15/10). Os outros 16 nunca
   foram entregues: um MOD que espera por `ChannelCreated` espera para sempre,
   sem erro. A v1 não se edita, e por isso a v6 lista só o que é entregue: da
   API 6 em diante, `moments` e `eventos` são escritos por inteiro em cada versão
