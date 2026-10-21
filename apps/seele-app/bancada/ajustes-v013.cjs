@@ -1853,13 +1853,14 @@ async function aLinhaDeEtapaEDaMaisNova(browser, porta) {
   const daNovaDita2 = (await etapasDe(NOVA))[0];
   assert.equal(daNovaDita2.linha, daNovaDita2.frase,
     `a etapa da tentativa a ${NOVA}, dita depois do connect dela, não chegou à linha: ${JSON.stringify(daNovaDita2)} — ` +
-    'calar as etapas antes do connect calou também as de depois');
+    'o filtro da tentativa descartou também a etapa da tentativa mais nova');
   await aNovaTermina('a etapa da velha antes do connect da nova');
 
   // ---- 3. O mesmo trecho, com a velha ainda antes do `connect` dela quando a
   // nova começa: a velha sai do `conferir_esta_versao` aos 400 ms, chega ao
   // `connect` e diz uma etapa aos 50 ms dele; a nova espera 800 ms no dela. A
-  // velha não reabre a linha que a nova calou.
+  // etapa da velha volta com a tentativa dela, que já não é a mais nova, e não
+  // chega à linha.
   const daVelha3 = tentandoEm(VELHA, 0, 1);
   await correr({
     atrasos: { [VELHA]: 1000, [NOVA]: 1000 },
@@ -1874,7 +1875,7 @@ async function aLinhaDeEtapaEDaMaisNova(browser, porta) {
     `a etapa da velha não chegou entre o começo da nova e o connect dela, e este caso não mede o trecho: ${JSON.stringify({ ditas3, noTrecho3 })}`);
   assert.equal(ditas3[0].linha, null,
     `a tentativa a ${VELHA} saiu do conferir_esta_versao depois de a de ${NOVA} começar, e a etapa dela foi escrita na ` +
-    `linha de etapa da nova: «${ditas3[0].linha}» — foi a velha que reabriu a linha que a nova tinha calado`);
+    `linha de etapa da nova: «${ditas3[0].linha}» — ela voltou com a tentativa da velha, que já não era a mais nova, e o ouvinte não a descartou`);
   await aNovaTermina('a velha que sai do conferir_esta_versao depois');
 
   assert.deepEqual(erros, [], 'a cena da linha de etapa do lote 58-3 lançou erro na página');
