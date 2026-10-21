@@ -158,8 +158,19 @@ assert.match(banco, /continua como estava/, `a falha do banco não diz que nada 
     const dita = contexto.fraseDeErro({ NaoInstalou: recusa });
     assert.doesNotMatch(dita, /CATÁLOGO|Avise quem publica|sua rede|ALGO FALHOU|NaoInstalou/,
       `a recusa local de um MOD do catálogo culpa o catálogo ou a rede, ou caiu no recuo: ${dita}`);
-    assert.equal(dita, contexto.fraseDeErro(recusa),
-      `a recusa local de um MOD do catálogo não diz a frase de instalar: ${dita}`);
+    if (recusa.ManifestoRecusado) {
+      // **Um MOD do catálogo não vem de pasta nenhuma** (rodada 1, I1): a de
+      // passagem é do app e já foi apagada, e «DESTA PASTA» apontava para lugar
+      // nenhum. O motivo é o mesmo do dicionário, e nada foi instalado.
+      assert.doesNotMatch(dita, /PASTA/, `a recusa de um MOD do catálogo fala de uma pasta que ninguém escolheu: ${dita}`);
+      assert.match(dita, /DESTE MOD/, `a recusa do «mod.json» de um MOD do catálogo não diz de quem é: ${dita}`);
+      assert.ok(dita.includes(recusasDePacote[recusa.ManifestoRecusado]),
+        `a recusa do «mod.json» de um MOD do catálogo não sai pela frase de \`RECUSAS_DE_PACOTE\`: ${dita}`);
+      assert.match(dita, /Nada foi instalado/, `a recusa do «mod.json» de um MOD do catálogo não diz que nada foi instalado: ${dita}`);
+    } else {
+      assert.equal(dita, contexto.fraseDeErro(recusa),
+        `a recusa local de um MOD do catálogo não diz a frase de instalar: ${dita}`);
+    }
   }
   const semManifesto = contexto.fraseDeErro({ NaoInstalou: "SemManifesto" });
   assert.equal(semManifesto, contexto.fraseDeErro("SemManifesto"),

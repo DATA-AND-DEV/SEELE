@@ -922,7 +922,18 @@ function fraseDeErro(erro, apelido, deOnde) {
     // As recusas do catálogo que carregam detalhe dentro.
     // A de um MOD que o catálogo entregou certo e esta máquina não instalou
     // (pendência 58, item 9) é a recusa de instalar: nem o catálogo nem a rede.
-    if (erro.NaoInstalou) return fraseDeErro(erro.NaoInstalou, apelido, deOnde);
+    if (erro.NaoInstalou) {
+      const dentro = erro.NaoInstalou;
+      // Um MOD do catálogo não vem de pasta que alguém escolheu: a de passagem
+      // já foi apagada, e «desta pasta» apontaria para lugar nenhum.
+      if (dentro.ManifestoRecusado) {
+        return (
+          `ESTE SEELE RECUSOU O «mod.json» DESTE MOD: ${RECUSAS_DE_PACOTE[dentro.ManifestoRecusado] ?? dentro.ManifestoRecusado}.\n` +
+          "Nada foi instalado."
+        );
+      }
+      return fraseDeErro(dentro, apelido, deOnde);
+    }
     if (erro.NaoRespondeu) {
       return (
         "O CATÁLOGO NÃO RESPONDEU.\n" +
