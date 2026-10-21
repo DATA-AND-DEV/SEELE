@@ -213,6 +213,9 @@ O passo 5 da tarefa 13, no ramo `0.16/launcher-recusa`, a partir da P8 da F1
 - **Prova** (`e0ea9d1f`): o roteiro `outra-linha-pelo-launcher.js`, com cinco
   casos, e o guarda da credencial com o `linkColado`. Oito reversões, cada
   uma reprovando no seu caso, e uma do Rust.
-- **Fica de fora:** o `cumprirAAbertura`, quando a 0.16 é aberta com
-  `--entrar` por outro launcher, chama o `conectar` sem o link. Ligar isso
-  pede um teste próprio.
+- **Ficou de fora, e fechou em 21/10:** o `cumprirAAbertura`, quando a 0.16
+  é aberta com `--entrar` por outro launcher, chamava o `conectar` sem o
+  link. Agora ele vai como o link colado (`daf06e5f`, o `tela-boot.js`
+  isolado), com o roteiro `abertura-com-entrar.js` e o guarda da credencial
+  (`30a90a1b`). Um roteiro próprio, porque o caso a mais passava do orçamento
+  de 5 s de tempo virtual da carga no `outra-linha-pelo-launcher.js`.
