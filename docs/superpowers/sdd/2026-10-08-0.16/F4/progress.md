@@ -918,3 +918,169 @@ começar.
   `REPROVADO` esconde a reprovação, e o aparelho diz «carga limpa» com saída 0
   (medido com um roteiro de duas linhas). Hoje não esconde nada: lidos até o
   `", source:`, os 36 dão o mesmo resultado.
+
+## 11/10: a pausa da M3, a emenda D-web-3 e o item 52 da pendência 58
+
+- **Na pausa, só escrita:**
+  - a 17ª trazida, por avanço rápido;
+  - a «Emenda de 11/10/2026» ao ADR 0057 (D-web-3: o web app também no
+    computador), fora de commit até a orquestradora ler. Os guardas dos ADRs
+    passam com ela;
+  - o plano com a D-web-1 e a 3.2b marcadas.
+- **Em aberto, o `numa-aba` no Safari do Mac.** O desenho da F8 diz que a aba e
+  o app do Dock guardam a identidade em separado; a minha identidade supõe que
+  no computador eles dividem. Entrou como medição 7 no ADR.
+- **O item 52 da pendência 58** (`0975f08a`): a linha de etapa é da tentativa
+  mais nova.
+  - O roteiro novo mediu antes as duas metades no duble.
+  - A janela passa a tentativa ao `connect`, a `Bridge` a devolve em cada
+    etapa, e o ouvinte e o `finally` só valem para a mais nova.
+  - Quatro reversões reprovam. Os 41 roteiros passam, e o roteiro novo entrou no
+    `ci.yml` e no `publicar.sh`.
+- **O aparelho dos roteiros já não esconde reprovação atrás de aspas:** a 17ª
+  passou a mandar o relato em JSON codificado.
+
+## 15/10: a D-web-2, a origem do web app
+
+- **O dono decidiu a origem** (`403443a8`): `https://web.seele.app.br`,
+  permanente. A `versao/0.16` foi trazida (`7497efd7`).
+- **A origem num lugar só** (`7e19c02d`): a `ORIGEM_DO_NAVEGADOR` do
+  `seele-proto`, que era vazia. A página e o desktop passam a ler o link do
+  navegador dela. Dois guardas novos em `tests/web.rs`: o nome só no
+  `uri.rs`, e a página sem endereço fora de uma lista nomeada. O `links.mjs`
+  prova, dentro do `.wasm`, que a página aceita o link da origem e recusa o de
+  outra. Três reversões.
+- **Os cabeçalhos num arquivo só** (`78a7b23a`): `apps/seele-app/web/_headers`.
+  - As bancadas da identidade, da voz e dos executores os leem, no lugar da
+    CSP escrita à mão em cada uma.
+  - A `ponte-sem-gesto` mede a página inteira debaixo deles: a carga, nas duas
+    cascas e com o `.wasm`, sem violação.
+  - O guarda tem cinco reversões.
+  - Os passos do dono: `F4/origem-para-o-dono.md`.
+- **O que não se mediu:** a sessão debaixo da CSP (as imagens `data:` e o
+  `connect-src https:`), porque a sessão pelo navegador é a 2.6.
+- **Em aberto:** o caminho do link (recomendo a raiz) e o pacote (3.6).
+
+## 16/10: a D-web-4, o pacote (3.6), e a ponta para a parte B da 18ª
+
+- **O `target/` deste worktree tinha sido apagado** pela orquestradora (o
+  disco). O wasi-sdk veio com `cp -c` do `target/` do checkout principal, com
+  o SHA-256 conferido contra o fixado antes de usar. Nada foi baixado.
+- **A D-web-4** (`75bc4291`): o link do navegador na raiz.
+  - `CAMINHO_DO_NAVEGADOR = "/"` e `Convite::link_do_navegador`.
+  - O teste `o_link_do_produto_leva_o_corpo_so_no_fragmento`: antes do `#`
+    vai só `https://<origem>/`.
+  - Duas reversões.
+- **A 3.6, steps 1 a 3** (`fa6a54de`): `cargo xtask pacote-web`.
+  - Monta a `ui/`, o `.wasm` sem a `prova`, o motor e o `_headers`, sem baixar
+    nada.
+  - A conferência tem cinco regras: os tokens da cópia, a CSP, o script de
+    fora, a ponte sem nada a fazer e o `.wasm` sem a `prova`.
+  - Hoje o pacote não sai, pelos 76 comandos da ponte a fazer.
+  - O `.wasm` do pacote tem 637 KB, contra 985 KB com a `prova`.
+  - Cada regra, tirada sozinha, reprova.
+- **O guarda da origem pegou a mim mesmo** (`6dd46520`): dois comentários do
+  pacote escreviam o nome da origem. Ele foi escrito para isso.
+- **A `versao/0.16` trazida** (`c95a066a`), e a conferência na ponta
+  `6dd46520`:
+  - fmt e clippy dos cinco alvos tocados;
+  - os testes: `seele-proto` 406, `seele-web` 22, `xtask` 240, `seele-app` 344
+    e os 6 do binário;
+  - `check-deps`, `xtask web` e `check-runtime`;
+  - as quatro bancadas de navegador;
+  - os 41 roteiros;
+  - a bancada do celular: 121 casos, e o desktop igual pixel a pixel no
+    Chromium e no WebKit.
+- **Para a F8:** a D-web-2 está pronta na casca; ESTE APARELHO e a chave curta
+  ainda não existem. Há proposta para os dois (`esteAparelho()` e
+  `chaveDe(impressao)`), e o quando é da orquestradora.
+
+## 21/10: o web app de ponta a ponta, o lado do servidor — PRONTO PARA INTEGRAR em `ab7e302e`
+
+O pedido da orquestradora (21/10): o web app funcionando de ponta a ponta na
+0.16. A ordem que segui, e por quê: o servidor antes da página. A página não
+tem com quem falar sem o `h3`, e sem os curtos guardados todo link morre na
+próxima abertura do `seeled`.
+
+**O que entra** (desde a 18ª, que não levou nenhum commit deste ramo):
+- `e1bee43c`: a `versao/0.16` em `e33b2921`, sem conflito;
+- `37ef7774`: a emenda D-web-3 ao ADR 0057 (antes fora de commit), com a
+  medição 3 registrada;
+- os de antes, ainda não integrados: `0975f08a` (o item 52 da 58),
+  `7e19c02d` e `78a7b23a` (a origem e os cabeçalhos num lugar só),
+  `75bc4291` (a D-web-4), `fa6a54de` e `6dd46520` (o pacote, 3.6),
+  `abfa436e` (2.4, `seele/1` e `h3` no mesmo socket);
+- `53a74029`: **2.6, o servidor** — o `h3` vira uma sessão WebTransport,
+  servida pelo mesmo `session::serve` do nativo (`transporte::Conexao`), e a
+  voz atravessa os dois transportes. O `wtransport` 0.7.2 entra com quatro
+  pacotes do disco, e o lock só os acrescenta;
+- `016b7fa3`: **2.5** — os curtos no banco e herdados da máquina: reabrir o
+  `seeled` mantém os hashes que os links levaram;
+- `ab7e302e`: **2.5** — o `HashesDoNavegador` depois do `Session`, nos dois
+  transportes.
+
+**A conferência, na ponta `ab7e302e`:**
+- fmt; clippy com `-D warnings` em `seele-server`, `seele-app`, `seele-core`,
+  `seele-proto`, `seele-web` e `xtask`;
+- `seele-server` 721 testes (entre eles `alpn` 6, `sessao_por_h3` 4 e
+  `tls::os_curtos_*` 10), `seele-core` 478, `seele-web` 22, `xtask` 243;
+- os guardas do app (334) e 37 testes do binário (servidores, entradas
+  velhas, ligação, etapa); a conformidade compila;
+- `cargo deny --offline` (licenças, proibições, avisos);
+- as reversões: 7 da 2.4, 5 da 2.6, 4 dos curtos no banco, 1 do
+  `HashesDoNavegador`, cada uma reprovando o teste dela.
+
+**Não rodei:** a conformidade nem a bateria inteira (a 8384 é da orquestradora).
+
+**Decisão em aberto, registrada no ADR e no código:** conferir a `Origin` do
+pedido WebTransport. Hoje o `seeled` aceita qualquer uma e a registra.
+
+**A seguir:** o lado do navegador — a `Sessao` pela fronteira do `.wasm` (com
+os eventos e os contadores da FFI, provados contra ela), a prova do aperto de
+mão, a sessão pela WebTransport na página, os comandos da `ponte-web.js`, a
+voz pelos datagramas, ESTE APARELHO e a chave curta, e o pacote saindo.
+
+## 21/10, noite — a sessão pelo navegador funciona de ponta a ponta (2.6)
+
+Uma página no Chromium entra num servidor de verdade pela WebTransport,
+conversa, vê a outra pessoa, e **a voz de uma página chega decodificada à
+outra**. A bancada `sessao-no-navegador.cjs` prova isso a cada rodada, com o
+`Daemon` do `seeled` (exemplo `servidor_da_bancada`, que dá o link que o
+desktop daria).
+
+**Os commits, nesta ordem, todos na `0.16/web`:**
+- `5ed6c541`: os eventos do navegador são os do desktop — o
+  `Sessao::dobrar_com_eventos` e os quatro números que quem dobra conta,
+  conferidos contra o `fold` da FFI (`dois_produtores_de_eventos.rs`; oito
+  reversões, oito reprovações);
+- `caf92307`: a ligação no `.wasm` — o aperto de mão do desktop (o carimbo
+  antes do decode, a prova sobre a impressão do longo, os MODs aceitos ou
+  recusados com nome, a sessão), com a página só carregando bytes e
+  assinando; a recusa no JSON do `ConnectionError`, conferida contra o
+  `classify_connect_failure` (`dois_produtores_de_recusa.rs`; sete
+  reversões);
+- `e3c3864f`: os comandos da sessão no `.wasm` (32), cada um como o método da
+  FFI, e a conversa e o FORA DO AR pela mesma projeção do desktop
+  (`dois_produtores_da_conversa.rs`; dez reversões nos comandos e sete na
+  projeção);
+- `d6c6277c`: a sessão na página — `sessao-web.js`, o `connect` da ponte, 35
+  comandos fora do `AINDA_A_FAZER`, a voz pela sala confirmada, as janelas de
+  hashes guardadas na identidade; a bancada de ponta a ponta (seis
+  reversões), na CI e na bateria, com o guarda da ordem.
+
+**A conferência, na ponta `d6c6277c`:**
+- fmt; clippy `-D warnings` em `seele-web` (nativo e `wasm32`), `seele-ffi`
+  (com `conformidade`), `seele-conformance`, `seele-server` e `xtask`;
+- `seele-web` 30; a conformidade dos quatro produtores (snapshot 2, eventos 2,
+  recusa 5, conversa 1); os guardas do app (`frontend` 306, `web` 15);
+  `xtask` inteiro;
+- as bancadas `ponte-web` (21), `ponte-sem-gesto` (as duas cascas, com a CSP),
+  `identidade-no-navegador` e `sessao-no-navegador`, num Chromium.
+
+**Ainda no `AINDA_A_FAZER` (44):** 9 da 3.4 (os aceites de MODs, os
+conhecidos e a leitura de entrada), 7 da 3.10, 3 da 3.9, 13 da 2.6 (a busca,
+os anexos, os ícones escolhidos e a prévia de link), 11 dos MODs e o
+`set_volume`. O `cargo xtask pacote-web` ainda não sai por eles.
+
+**Volta da conexão** (o caminho normal do celular) ainda não existe: uma
+queda vira `Ended { LinkLost }`.

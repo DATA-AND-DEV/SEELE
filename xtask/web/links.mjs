@@ -7,8 +7,8 @@
 // nativo: um caso por asserção do módulo `a_forma_do_navegador` do `uri.rs`.
 // Os casos têm origem própria (`origem.invalid`), e passam por
 // `analisar_link_em`, da feature `prova`. A função da página, `analisar_link`,
-// não recebe origem: usa a `ORIGEM_DO_NAVEGADOR` do produto, vazia até o
-// D-web-2, e por isso recusa até o link certo. Isso também é conferido aqui:
+// não recebe origem: usa a `ORIGEM_DO_NAVEGADOR` do produto (a D-web-2), e por
+// isso recusa o link certo de `origem.invalid`. Isso também é conferido aqui:
 // a página não escolhe contra que origem um link é lido.
 import { readFileSync } from "node:fs";
 
@@ -42,12 +42,27 @@ for (const caso of casos) {
   }
 }
 
-// A função da página, com o primeiro caso bom da tabela: a origem do produto é
-// vazia até o D-web-2, e nenhum link passa.
+// A função da página, com o primeiro caso bom da tabela: ele é de
+// `origem.invalid`, e a página o recusa.
 const bom = casos.find((c) => "link" in c.esperado);
 const codigo = comTexto(bom.texto, (p, n) => e.analisar_link(p, n));
 if (codigo !== 1 || saida().erro !== "OutraOrigem") {
   falhas.push(`analisar_link aceitou um link de ${bom.origem}: a página escolheria a origem (${JSON.stringify(saida())})`);
+}
+
+// E o mesmo caso na origem do produto (a D-web-2), que a página aceita. A
+// origem é lida do Rust, e não escrita aqui: o guarda
+// `a_origem_do_web_app_e_escrita_num_lugar_so` reprova uma cópia.
+const doRust = /pub const ORIGEM_DO_NAVEGADOR: &str = "([^"]+)";/.exec(readFileSync("crates/seele-proto/src/uri.rs", "utf8"));
+if (!doRust) {
+  falhas.push("não achei a ORIGEM_DO_NAVEGADOR no crates/seele-proto/src/uri.rs, ou ela está vazia");
+} else {
+  const naOrigem = bom.texto.replace(`https://${bom.origem}`, `https://${doRust[1]}`);
+  const aceito = comTexto(naOrigem, (p, n) => e.analisar_link(p, n));
+  const lido = saida();
+  if (naOrigem === bom.texto || aceito !== 0 || !igual(lido.link?.alvo, bom.esperado.link.alvo)) {
+    falhas.push(`analisar_link não leu o link da origem do produto (${doRust[1]}): ${JSON.stringify(lido)}`);
+  }
 }
 
 if (casos.length < 16) falhas.push(`a tabela encolheu para ${casos.length} casos; este guarda ficou cego`);
@@ -55,4 +70,4 @@ if (falhas.length) {
   console.error(`links da F1 no .wasm: ${falhas.length} falha(s)\n  ${falhas.join("\n  ")}`);
   process.exit(1);
 }
-console.log(`links da F1 no .wasm: os ${casos.length} casos pela fronteira; e a função da página usa a origem do produto, vazia até o D-web-2.`);
+console.log(`links da F1 no .wasm: os ${casos.length} casos pela fronteira; e a função da página lê só a origem do produto.`);

@@ -839,7 +839,10 @@ pub enum FimDaTela {
 /// O `write_all` é onde a contrapressão mora: um espectador lento faz esta
 /// tarefa parar, a fila dele encher, e o [`crate::voice_room::VoiceRoom`] cortá-lo. Nunca
 /// faz o servidor esperar e nunca faz os outros esperarem.
-pub async fn bombear(conexao: quinn::Connection, mut aberturas: mpsc::Receiver<AberturaDeTela>) {
+pub async fn bombear(
+    conexao: crate::transporte::Conexao,
+    mut aberturas: mpsc::Receiver<AberturaDeTela>,
+) {
     while let Some(mut convite) = aberturas.recv().await {
         let Ok(mut fluxo) = conexao.open_uni().await else {
             return;

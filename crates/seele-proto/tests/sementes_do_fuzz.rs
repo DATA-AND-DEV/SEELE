@@ -58,8 +58,8 @@ use seele_proto::{
     oldest_supported_version, MediaHeader, MAX_PAYLOAD_LEN, MEDIA_HEADER_VERSION, PROTOCOL_VERSION,
 };
 
-/// A origem do navegador nos testes e no fuzz, até o D-web-2 escolher a de
-/// verdade. A mesma de `fuzz/fuzz_targets/uri.rs`.
+/// A origem do navegador nos testes e no fuzz: de mentira, e não a do produto
+/// (`ORIGEM_DO_NAVEGADOR`). A mesma de `fuzz/fuzz_targets/uri.rs`.
 const ORIGEM_DOS_TESTES: &str = "origem.invalid";
 
 /// Uma impressão digital qualquer, no formato de verdade: 64 hexadecimais.

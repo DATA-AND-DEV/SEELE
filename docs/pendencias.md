@@ -9491,6 +9491,18 @@ pendência. A revisão dele deixou:
     etapa. *Fonte:* relatório do W2 (`lote-w2-report.md`), a rodada da
     revisão.
 
+    **Consertado em 11/10/2026 pela F4** (`0975f08a`), pela identidade da
+    tentativa, a pedido da orquestradora:
+    - a janela passa ao `connect` a tentativa dela, e a `Bridge` a devolve em
+      cada `ConnectStageChanged` (`carga_do_evento`, no `main.rs`);
+    - o ouvinte de etapas mostra só as da tentativa mais nova;
+    - só a mais nova apaga a linha no `finally`.
+
+    Antes do conserto, o roteiro `tools/roteiros/etapa-da-tentativa.js` mediu as
+    duas metades no duble: a etapa da velha aparecia com a nova antes do
+    `connect`, e a velha apagava a da nova ao terminar. Quatro reversões
+    reprovam, cada uma na metade dela.
+
 53. **W2 · O roteiro `tools/roteiros/aceite-de-mods.js` não prova o aceite.**
     Na base e no W2, ele relata `gravou o sim: alvo=undefined conjunto=undefined`,
     `tentou entrar de novo: false` e `diálogo depois: VISIVEL`, e nunca reprova,

@@ -94,6 +94,32 @@ pub(crate) fn caminho() -> Result<PathBuf, String> {
         })
 }
 
+/// A pasta do wasi-sdk **já conferido**, sem baixar nunca: sem ele no
+/// `target/`, para e diz o que fazer. É a do `cargo xtask pacote-web`, que
+/// monta o que vai para a origem e não pode trazer nada de fora sem aprovação.
+///
+/// # Errors
+///
+/// A plataforma sem pacote ou sem hash fixado, e o SDK que não está aqui ou
+/// não confere.
+pub(crate) fn caminho_sem_baixar() -> Result<PathBuf, String> {
+    let sufixo = sufixo_desta_maquina()
+        .ok_or_else(|| "o wasi-sdk não tem pacote para esta plataforma".to_owned())?;
+    let esperado = FIXADOS
+        .iter()
+        .find(|(s, _)| *s == sufixo)
+        .map(|(_, h)| *h)
+        .ok_or_else(|| format!("nenhum SHA-256 fixado para {sufixo}"))?;
+    preparar_com(&destino(), sufixo, esperado, &|_| {
+        Err(format!(
+            "o wasi-sdk conferido não está em {} (ou não confere), e este passo não baixa: \
+             copie o conferido de outro `target/` (`cp -c -R`) ou rode `cargo xtask wasi-sdk` \
+             com a descarga aprovada",
+            destino().display()
+        ))
+    })
+}
+
 /// `target/wasi-sdk`, ou o mesmo sob `CARGO_TARGET_DIR`.
 fn destino() -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR")

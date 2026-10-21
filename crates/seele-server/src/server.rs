@@ -1592,6 +1592,11 @@ pub struct Server {
     /// `seele_proto::assinatura::prova_de_cliente`): uma prova feita para
     /// outro servidor carrega a impressão dele, e não confere aqui.
     pub impressao: [u8; 32],
+    /// **As janelas dos certificados curtos do `h3`** (ADR 0057; Tarefa 2.5 da
+    /// F4): o hash e a validade de cada uma, da vigente em diante. O
+    /// `HashesDoNavegador` as leva a quem entra, nos dois transportes. Vazias
+    /// na sala pessoal.
+    pub janelas_do_navegador: Vec<seele_proto::control::JanelaDoNavegador>,
     /// A recepção da sala pessoal, quando este servidor é uma.
     ///
     /// `None` em todo servidor de sempre. Com ela, o aperto de mão segura quem

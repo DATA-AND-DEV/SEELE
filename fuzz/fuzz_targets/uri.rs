@@ -19,8 +19,8 @@ use seele_proto::uri::{
     LIMITE_DE_HASHES_DO_NAVEGADOR,
 };
 
-/// A origem dos testes, até o D-web-2 escolher a de verdade. Precisa ser a
-/// mesma de `fuzz/sementes/uri/navegador`.
+/// A origem dos testes, de mentira, e não a do produto
+/// (`ORIGEM_DO_NAVEGADOR`). Precisa ser a mesma de `fuzz/sementes/uri/navegador`.
 const ORIGEM: &str = "origem.invalid";
 
 fuzz_target!(|dados: &[u8]| {

@@ -898,6 +898,31 @@ struct Bridge<R: tauri::Runtime = tauri::Wry> {
     de_pe: Arc<std::sync::atomic::AtomicU64>,
     /// Onde contar o que foi descartado, compartilhado com a `Session`.
     descartados: Arc<std::sync::atomic::AtomicU64>,
+    /// A tentativa da janela que pediu esta entrada, quando ela disse qual.
+    /// Vai em cada etapa da chegada ([`carga_do_evento`]).
+    tentativa: Option<u64>,
+}
+
+/// **O evento como ele vai à janela**, com a tentativa dela nas etapas da
+/// chegada (item 52 da pendência 58).
+///
+/// A geração separa os eventos de duas entradas só a partir do `connect` da
+/// mais nova. Antes dele, a janela já começou a nova (o apelido, a pergunta do
+/// nome, o `conferir_esta_versao`), e as etapas da velha ainda passam pela
+/// [`Bridge`] dela. Com a tentativa dentro, o ouvinte de etapas da janela
+/// (`tela-boot.js`) mostra só as da mais nova. Os outros eventos vão como
+/// sempre: a geração basta a eles, porque nenhum chega antes do `connect`.
+fn carga_do_evento(event: &Event, tentativa: Option<u64>) -> serde_json::Value {
+    let mut carga = serde_json::to_value(event).unwrap_or(serde_json::Value::Null);
+    if let (Some(tentativa), Some(etapa)) = (
+        tentativa,
+        carga
+            .get_mut("ConnectStageChanged")
+            .and_then(serde_json::Value::as_object_mut),
+    ) {
+        etapa.insert("tentativa".to_owned(), tentativa.into());
+    }
+    carga
 }
 
 impl<R: tauri::Runtime> EventListener for Bridge<R> {
@@ -925,7 +950,9 @@ impl<R: tauri::Runtime> EventListener for Bridge<R> {
         let acabou = matches!(event, Event::Ended { .. });
         // A failed emit means the window is gone, which is not worth a log channel
         // per event during shutdown.
-        let _ = self.app.emit(EVENT_CHANNEL, &event);
+        let _ = self
+            .app
+            .emit(EVENT_CHANNEL, carga_do_evento(&event, self.tentativa));
         if acabou {
             let morta = self.de_pe.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             // E os executores nativos daquela geração param junto, pela mesma
@@ -937,6 +964,53 @@ impl<R: tauri::Runtime> EventListener for Bridge<R> {
                 }
             }
             tracing::debug!(geracao = morta, "sessão revogada pelo fim que chegou");
+        }
+    }
+}
+
+#[cfg(test)]
+mod a_etapa_leva_a_tentativa {
+    use super::carga_do_evento;
+    use seele_ffi::{ConnectStage, Event};
+
+    fn etapa() -> Event {
+        Event::ConnectStageChanged {
+            stage: ConnectStage::Parada {
+                candidatos: 2,
+                com_bilhete_e_impressao: false,
+            },
+        }
+    }
+
+    /// **A etapa leva a tentativa da janela, e o resto vai como sempre** (item
+    /// 52 da pendência 58). A etapa continua com o `stage` de antes, e ganha a
+    /// `tentativa` ao lado dele; sem tentativa, ela sai igual ao evento; e um
+    /// evento que não é etapa não ganha nada, com tentativa ou sem.
+    #[test]
+    fn so_a_etapa_ganha_a_tentativa_e_sem_ela_nada_muda() {
+        let com = carga_do_evento(&etapa(), Some(7));
+        assert_eq!(
+            com.pointer("/ConnectStageChanged/tentativa"),
+            Some(&serde_json::Value::from(7)),
+            "a etapa não levou a tentativa: {com}"
+        );
+        assert_eq!(
+            com.pointer("/ConnectStageChanged/stage"),
+            serde_json::to_value(etapa())
+                .unwrap()
+                .pointer("/ConnectStageChanged/stage"),
+            "a etapa com a tentativa mudou o `stage`: {com}"
+        );
+        assert_eq!(
+            carga_do_evento(&etapa(), None),
+            serde_json::to_value(etapa()).unwrap()
+        );
+        for outro in [Event::RosterChanged, Event::MessagesChanged] {
+            assert_eq!(
+                carga_do_evento(&outro, Some(7)),
+                serde_json::to_value(&outro).unwrap(),
+                "um evento que não é etapa ganhou a tentativa"
+            );
         }
     }
 }
@@ -1115,6 +1189,7 @@ async fn connect<R: tauri::Runtime>(
     nickname: String,
     audio: bool,
     join_secret: Option<String>,
+    tentativa: Option<u64>,
 ) -> Result<Entrada, FalhaDaEntrada> {
     // **Conferir que não há sessão e revogar, com o slot na mão** (M1 da
     // revisão do lote E54). Eram duas linhas soltas — `connection().is_ok()`
@@ -1371,6 +1446,7 @@ async fn connect<R: tauri::Runtime>(
         geracao,
         de_pe: Arc::clone(&session.geracao),
         descartados: Arc::clone(&session.eventos_de_geracao_morta),
+        tentativa,
     }) as Arc<dyn EventListener>;
     let atento = Arc::clone(&ponte);
     // **O CANCELAR desta tentativa** (tarefa 28 da F7): a vaga fica na sessão
@@ -1888,6 +1964,7 @@ mod a_entrada_velha_que_chega_tarde {
                 apelido,
                 false,
                 None,
+                None,
             ))
         })
     }
@@ -1958,6 +2035,7 @@ mod a_entrada_velha_que_chega_tarde {
             "velha".to_owned(),
             false,
             None,
+            None,
         ));
         let comeco = tokio::time::Instant::now();
         while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
@@ -1979,6 +2057,7 @@ mod a_entrada_velha_que_chega_tarde {
                 novo.to_string(),
                 "nova".to_owned(),
                 false,
+                None,
                 None,
             ),
         )
@@ -2160,6 +2239,7 @@ mod a_entrada_velha_que_chega_tarde {
                 "velha".to_owned(),
                 false,
                 None,
+                None,
             ),
         )
         .await
@@ -2215,6 +2295,7 @@ mod a_entrada_velha_que_chega_tarde {
                 novo.to_string(),
                 "nova".to_owned(),
                 false,
+                None,
                 None,
             ),
         )
@@ -2667,6 +2748,7 @@ mod o_apelido_grande_demais_no_hello {
                     grande.clone(),
                     false,
                     None,
+                    None,
                 ),
             )
             .await
@@ -2717,6 +2799,7 @@ mod o_apelido_grande_demais_no_hello {
                     endereco.to_string(),
                     certo.clone(),
                     false,
+                    None,
                     None,
                 ),
             )
@@ -4362,6 +4445,7 @@ mod o_mod_do_guardado_continua_respondendo {
                     alvo.to_owned(),
                     "dona".to_owned(),
                     false,
+                    None,
                     None,
                 ),
             )

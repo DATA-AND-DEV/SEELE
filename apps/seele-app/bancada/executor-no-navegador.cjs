@@ -24,6 +24,7 @@ const path = require("node:path");
 
 const raiz = path.resolve(__dirname, "..");
 const { chromium } = require("./playwright.cjs");
+const { cabecalhosDaOrigem } = require("./cabecalhos-da-origem.cjs");
 const daUi = (nome) => path.join(raiz, "ui", nome);
 const [caminhoDoMotor] = process.argv.slice(2);
 if (!caminhoDoMotor || !fs.existsSync(caminhoDoMotor)) {
@@ -100,7 +101,6 @@ onmessage = async (e) => {
 // ---------------------------------------------------------------- o servidor
 
 const canarias = [];
-const CSP_DA_PAGINA = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; frame-ancestors 'none'";
 const TIPOS = { ".html": "text/html", ".js": "text/javascript", ".wasm": "application/wasm" };
 let iframeDaVez = null;
 
@@ -132,11 +132,13 @@ const servidor = http.createServer((pedido, resposta) => {
     resposta.end();
     return;
   }
-  const cabecalhos = { "content-type": TIPOS[path.extname(nome)] ?? "application/octet-stream", "cache-control": "no-store" };
-  // A CSP do pacote (Tarefa 3.6) na página. O `iframe` traz a dele no
-  // `<meta>`, e só pede para poder ser emoldurado pela página.
-  if (nome === "index.html") cabecalhos["content-security-policy"] = CSP_DA_PAGINA;
-  if (nome === "executor-de-mod.html") cabecalhos["content-security-policy"] = "frame-ancestors 'self'";
+  // Os cabeçalhos da origem (`web/_headers`): a CSP da página nela, e o
+  // `iframe` com a dele no `<meta>`, pedindo só para ser emoldurado pela página.
+  const cabecalhos = {
+    ...cabecalhosDaOrigem(`/${nome}`),
+    "content-type": TIPOS[path.extname(nome)] ?? "application/octet-stream",
+    "cache-control": "no-store",
+  };
   let corpo = fs.readFileSync(arquivo);
   if (nome === "executor-de-mod.html" && iframeDaVez !== null) corpo = iframeDaVez;
   resposta.writeHead(200, cabecalhos);

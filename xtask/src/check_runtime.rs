@@ -281,10 +281,12 @@ mod tests {
         (chamada, passo.copied().collect::<Vec<_>>().join("\n"))
     }
 
-    /// Os arquivos de `bancada/` que não são bancada: o carregador do
-    /// Playwright e o `telas.cjs`, que é o servidor que as de navegador usam e,
-    /// rodado sozinho, uma ferramenta de retrato que não julga o que vê.
-    const NAO_SAO_BANCADA: [&str; 2] = ["playwright.cjs", "telas.cjs"];
+    /// Os arquivos de `bancada/` que não são bancada: o leitor dos cabeçalhos
+    /// da origem (`web/_headers`), que as de navegador usam para servir a
+    /// página como a origem a serve; o carregador do Playwright; e o
+    /// `telas.cjs`, que é o servidor que as de navegador usam e, rodado
+    /// sozinho, uma ferramenta de retrato que não julga o que vê.
+    const NAO_SAO_BANCADA: [&str; 3] = ["cabecalhos-da-origem.cjs", "playwright.cjs", "telas.cjs"];
 
     /// As bancadas que não rodam em lugar nenhum, **de propósito e por nome**.
     ///
@@ -508,6 +510,42 @@ mod tests {
                 "o `cargo xtask web` deixou de compilar {wasm}, e a bancada do CI lê esse caminho"
             );
         }
+    }
+
+    /// **A bancada da sessão pelo navegador lê o `.wasm` e o servidor que o job
+    /// acabou de compilar** (Tarefa 2.6 da F4): depois do `cargo xtask web`, e
+    /// depois do build do exemplo `servidor_da_bancada`, com os dois caminhos.
+    /// Antes de qualquer um, ela entraria num servidor ou numa página do cache.
+    #[test]
+    fn a_bancada_da_sessao_roda_depois_do_wasm_e_do_servidor_compilados() {
+        let passos = passos_do_job("bancadas-de-mod");
+        let posicao_do_run = |run: &str| {
+            passos
+                .iter()
+                .position(|passo| chave_do_passo(passo, "run") == Some(run))
+                .unwrap_or_else(|| panic!("o job `bancadas-de-mod` roda «{run}»"))
+        };
+        let wasm = posicao_do_run("cargo xtask web");
+        let servidor = posicao_do_run(
+            "cargo build --quiet --package seele-server --example servidor_da_bancada",
+        );
+        let roda = posicao_do_run(
+            "node apps/seele-app/bancada/sessao-no-navegador.cjs \
+             target/wasm32-unknown-unknown/release/seele_web.wasm \
+             target/debug/examples/servidor_da_bancada",
+        );
+        assert!(
+            wasm < roda && servidor < roda,
+            "ci.yml: a `sessao-no-navegador.cjs` roda antes do `.wasm` ou do servidor que ela lê"
+        );
+        assert!(
+            ler("empacotar/publicar.sh").contains(
+                "uma_bancada node apps/seele-app/bancada/sessao-no-navegador.cjs \
+                 target/wasm32-unknown-unknown/release/seele_web.wasm \
+                 target/debug/examples/servidor_da_bancada"
+            ),
+            "a bateria do `publicar.sh` não roda a `sessao-no-navegador.cjs` com os dois caminhos"
+        );
     }
 
     /// O comando que roda os roteiros da casca, nos dois lugares que os rodam:

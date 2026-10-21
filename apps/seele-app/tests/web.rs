@@ -927,3 +927,343 @@ fn as_regras_da_voz_da_ponte_sao_as_do_desktop() {
         serde_json::to_string_pretty(&do_desktop).expect("JSON")
     );
 }
+
+// ------------------------------------------------- a origem do web app
+
+/// A raiz do repositório: `apps/seele-app/` fica duas pastas abaixo dela.
+fn raiz_do_repositorio() -> PathBuf {
+    app_dir()
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("apps/seele-app/ fica dentro do repositório")
+        .to_path_buf()
+}
+
+/// O lugar único da origem do web app.
+const LUGAR_DA_ORIGEM: &str = "crates/seele-proto/src/uri.rs";
+
+/// A origem do web app (a D-web-2), lida do lugar dela, e não copiada para
+/// cá: copiá-la seria o defeito que este guarda procura.
+fn origem_do_web_app() -> String {
+    let uri = std::fs::read_to_string(raiz_do_repositorio().join(LUGAR_DA_ORIGEM))
+        .unwrap_or_else(|erro| panic!("{LUGAR_DA_ORIGEM}: {erro}"));
+    let marca = "pub const ORIGEM_DO_NAVEGADOR: &str = \"";
+    let Some(inicio) = uri.find(marca).map(|n| n + marca.len()) else {
+        panic!("não achei a `ORIGEM_DO_NAVEGADOR` em {LUGAR_DA_ORIGEM}; este guarda ficou cego");
+    };
+    let origem = uri[inicio..]
+        .split('"')
+        .next()
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        !origem.is_empty(),
+        "a `ORIGEM_DO_NAVEGADOR` voltou a ser vazia, e a D-web-2 decidiu uma (15/10/2026)"
+    );
+    origem
+}
+
+/// **A origem do web app é escrita num lugar só** (D-web-2, 15/10/2026).
+///
+/// Ela é permanente: as identidades do navegador moram nela. Uma cópia escrita
+/// à mão — numa bancada, num script da página, numa configuração — é uma
+/// segunda verdade que ninguém confere, e o pedido da orquestradora foi um
+/// lugar só para cada coisa que precisa do nome. O lugar é a
+/// `ORIGEM_DO_NAVEGADOR` do `seele-proto`; quem precisa dela a lê de lá (o
+/// `seele-web` pela constante, o `xtask/web/links.mjs` pelo texto do Rust).
+///
+/// Lê todo arquivo versionado (`git ls-files`), menos os documentos — o spec,
+/// o ADR e os passos do dono a nomeiam, e é para isso que existem — e os
+/// `spikes/`, que são descartáveis.
+#[test]
+fn a_origem_do_web_app_e_escrita_num_lugar_so() {
+    let origem = origem_do_web_app();
+    let raiz = raiz_do_repositorio();
+    let listados = std::process::Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(&raiz)
+        .output()
+        .expect("o git lista os arquivos versionados; sem ele este guarda não vê nada");
+    assert!(listados.status.success(), "o `git ls-files` falhou");
+    let mut copias = Vec::new();
+    let mut lidos = 0_usize;
+    for caminho in listados.stdout.split(|byte| *byte == 0) {
+        let caminho = String::from_utf8_lossy(caminho);
+        if caminho.is_empty()
+            || caminho == LUGAR_DA_ORIGEM
+            || caminho.starts_with("docs/")
+            || caminho.starts_with("spikes/")
+            || caminho.ends_with(".md")
+        {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(raiz.join(caminho.as_ref())) else {
+            continue;
+        };
+        lidos += 1;
+        if bytes
+            .windows(origem.len())
+            .any(|janela| janela == origem.as_bytes())
+        {
+            copias.push(caminho.into_owned());
+        }
+    }
+    assert!(
+        lidos > 500,
+        "o guarda leu só {lidos} arquivos: o `git ls-files` não listou o repositório, e ele ficou cego"
+    );
+    assert!(
+        copias.is_empty(),
+        "a origem do web app (`{origem}`) está escrita à mão fora de `{LUGAR_DA_ORIGEM}`:\n  {}\n\
+         Leia a `seele_proto::uri::ORIGEM_DO_NAVEGADOR` (ou o texto dela, como faz o \
+         `xtask/web/links.mjs`), em vez de copiar o nome.",
+        copias.join("\n  ")
+    );
+}
+
+/// Os endereços que a página pode escrever, e por quê. Um endereço que não está
+/// aqui é uma origem escrita à mão no código que o navegador roda.
+const ENDERECOS_DA_PAGINA: &[(&str, &str, &str)] = &[
+    (
+        "ui/frases.js",
+        "https://seele.app.br",
+        "a `PAGINA_DO_APP`, BAIXAR O APP DO SEELE",
+    ),
+    ("ui/glifos.js", "http://www.w3.org", "o namespace do SVG"),
+];
+
+/// **A página não escreve outra origem** (D-web-2): o código que o navegador
+/// roda não nomeia endereço nenhum além dos de [`ENDERECOS_DA_PAGINA`], cada um
+/// no arquivo dele. Os de exemplo de uma frase (`exemplo.br`, `.exemplo`) não
+/// são endereço de ninguém. A página fala com a origem dela pelo caminho
+/// relativo, e com os servidores pelo que o link traz.
+#[test]
+fn a_pagina_nao_escreve_outra_origem() {
+    let ui = app_dir().join("ui");
+    let mut entradas: Vec<_> = std::fs::read_dir(&ui)
+        .expect("ui/")
+        .filter_map(Result::ok)
+        .map(|entrada| entrada.file_name().to_string_lossy().into_owned())
+        .filter(|nome| {
+            [".js", ".html", ".css", ".json", ".webmanifest"]
+                .iter()
+                .any(|fim| nome.ends_with(fim))
+        })
+        .collect();
+    entradas.sort();
+    assert!(
+        entradas.len() > 20,
+        "a `ui/` tem só {} arquivos de texto: o guarda ficou cego",
+        entradas.len()
+    );
+    let mut estranhos = Vec::new();
+    let mut vistos = BTreeSet::new();
+    for nome in &entradas {
+        let relativo = format!("ui/{nome}");
+        let texto = sem_comentarios(&ler(&relativo));
+        for esquema in ["https://", "http://"] {
+            for (em, _) in texto.match_indices(esquema) {
+                let host: String = texto[em + esquema.len()..]
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+                    .collect();
+                let host = host.trim_end_matches('.');
+                if host.is_empty() || host.ends_with(".exemplo") || host.ends_with("exemplo.br") {
+                    continue;
+                }
+                let endereco = format!("{esquema}{host}");
+                if ENDERECOS_DA_PAGINA
+                    .iter()
+                    .any(|(dono, conhecido, _)| *dono == relativo && *conhecido == endereco)
+                {
+                    vistos.insert((relativo.clone(), endereco));
+                } else {
+                    estranhos.push(format!("{relativo}: {endereco}"));
+                }
+            }
+        }
+    }
+    assert!(
+        estranhos.is_empty(),
+        "a página escreve um endereço que não é dela:\n  {}\n\
+         O código que o navegador roda não nomeia origem nenhuma: a dele é a da página \
+         (caminho relativo), e a dos servidores vem do link. Se este é um endereço \
+         que a página precisa mesmo escrever, ele entra em `ENDERECOS_DA_PAGINA`, com o porquê.",
+        estranhos.join("\n  ")
+    );
+    for (dono, conhecido, porque) in ENDERECOS_DA_PAGINA {
+        assert!(
+            vistos.contains(&((*dono).to_owned(), (*conhecido).to_owned())),
+            "`ENDERECOS_DA_PAGINA` tem `{conhecido}` em `{dono}` ({porque}), e a página não o \
+             escreve mais: tire-o da lista"
+        );
+    }
+}
+
+/// As regras de `web/_headers`, na ordem: o caminho e os cabeçalhos dele, com
+/// o nome em minúsculas.
+fn regras_dos_cabecalhos(texto: &str) -> Vec<(String, Vec<(String, String)>)> {
+    let mut regras: Vec<(String, Vec<(String, String)>)> = Vec::new();
+    for linha in texto.lines() {
+        if linha.trim().is_empty() || linha.trim_start().starts_with('#') {
+            continue;
+        }
+        if !linha.starts_with([' ', '\t']) {
+            regras.push((linha.trim().to_owned(), Vec::new()));
+            continue;
+        }
+        let (nome, valor) = linha
+            .split_once(':')
+            .unwrap_or_else(|| panic!("web/_headers: linha sem «:»: {linha}"));
+        regras
+            .last_mut()
+            .unwrap_or_else(|| panic!("web/_headers: cabeçalho antes de caminho: {linha}"))
+            .1
+            .push((nome.trim().to_ascii_lowercase(), valor.trim().to_owned()));
+    }
+    regras
+}
+
+/// O valor de um cabeçalho numa regra, se ela o tem.
+fn cabecalho<'a>(
+    regras: &'a [(String, Vec<(String, String)>)],
+    caminho: &str,
+    nome: &str,
+) -> Option<&'a str> {
+    regras
+        .iter()
+        .filter(|(dela, _)| dela == caminho)
+        .flat_map(|(_, cabecalhos)| cabecalhos)
+        .find(|(dele, _)| dele == nome)
+        .map(|(_, valor)| valor.as_str())
+}
+
+/// Uma CSP, diretiva a diretiva.
+fn diretivas(csp: &str) -> BTreeMap<String, BTreeSet<String>> {
+    csp.split(';')
+        .filter_map(|diretiva| {
+            let mut partes = diretiva.split_whitespace();
+            let nome = partes.next()?.to_owned();
+            Some((nome, partes.map(str::to_owned).collect()))
+        })
+        .collect()
+}
+
+/// **Os cabeçalhos da origem do web app são um só** (D-web-2): o
+/// `web/_headers`, que o host lê, as bancadas servem
+/// (`bancada/cabecalhos-da-origem.cjs`) e os passos do dono copiam
+/// (`F4/origem-para-o-dono.md`).
+///
+/// 1. **A CSP da página** é a mesma em `/` e em `/index.html`, só com fontes da
+///    origem, `data:` e `https:` — nenhum host de terceiro, nenhum
+///    `unsafe-inline` nem `unsafe-eval` —, e fecha o `frame-ancestors`, o
+///    `object-src` e o `base-uri`. O `script-src` é `'self'` e a compilação do
+///    `.wasm`, e nada mais.
+/// 2. **A regra de `/*` não leva CSP**: as regras se somam, e a da página
+///    impediria a página de emoldurar o `iframe` dos executores, que traz a dele
+///    no `<meta>` e aqui só pede `frame-ancestors 'self'`.
+/// 3. **O HSTS** vale por um ano, pelo menos.
+/// 4. **Os passos do dono** trazem o arquivo inteiro.
+/// 5. **Nenhuma bancada escreve uma CSP à mão**: elas leem esta. O `telas.cjs`
+///    serve a política do desktop (`tauri.conf.json`), que é outra.
+#[test]
+fn os_cabecalhos_da_origem_sao_um_so() {
+    let texto = ler("web/_headers");
+    let regras = regras_dos_cabecalhos(&texto);
+
+    // 1.
+    let csp =
+        cabecalho(&regras, "/", "content-security-policy").expect("o `/` não leva a CSP da página");
+    assert_eq!(
+        cabecalho(&regras, "/index.html", "content-security-policy"),
+        Some(csp),
+        "a CSP de `/index.html` não é a de `/`: a página teria duas políticas, pelo caminho"
+    );
+    let csp = diretivas(csp);
+    for (nome, fontes) in &csp {
+        for fonte in fontes {
+            assert!(
+                matches!(
+                    fonte.as_str(),
+                    "'self'" | "'none'" | "'wasm-unsafe-eval'" | "data:" | "https:"
+                ),
+                "a CSP da página tem `{fonte}` em `{nome}`: só a origem, `data:` e `https:`, \
+                 sem host de terceiro nem `unsafe-*`"
+            );
+        }
+    }
+    let so = |nome: &str, fontes: &[&str]| {
+        assert_eq!(
+            csp.get(nome),
+            Some(
+                &fontes
+                    .iter()
+                    .map(|&f| f.to_owned())
+                    .collect::<BTreeSet<_>>()
+            ),
+            "a CSP da página: `{nome}` devia ser {fontes:?}"
+        );
+    };
+    so("script-src", &["'self'", "'wasm-unsafe-eval'"]);
+    so("default-src", &["'self'"]);
+    so("frame-ancestors", &["'none'"]);
+    so("object-src", &["'none'"]);
+    so("base-uri", &["'none'"]);
+
+    // 2.
+    assert_eq!(
+        cabecalho(&regras, "/*", "content-security-policy"),
+        None,
+        "a regra de `/*` leva CSP, e ela se soma à do `iframe` dos executores"
+    );
+    assert_eq!(
+        cabecalho(&regras, "/executor-de-mod.html", "content-security-policy"),
+        Some("frame-ancestors 'self'"),
+        "o `iframe` dos executores pede só para ser emoldurado pela página: a política dele \
+         está no `<meta>`"
+    );
+
+    // 3.
+    let hsts = cabecalho(&regras, "/*", "strict-transport-security").expect("sem HSTS");
+    let ano = hsts
+        .split(';')
+        .find_map(|parte| parte.trim().strip_prefix("max-age="))
+        .and_then(|segundos| segundos.parse::<u64>().ok())
+        .unwrap_or(0);
+    assert!(ano >= 31_536_000, "o HSTS vale menos de um ano: {hsts}");
+
+    // 4.
+    let passos = std::fs::read_to_string(
+        raiz_do_repositorio().join("docs/superpowers/sdd/2026-10-08-0.16/F4/origem-para-o-dono.md"),
+    )
+    .expect("os passos do dono");
+    assert!(
+        passos.contains(&texto),
+        "os passos do dono (`F4/origem-para-o-dono.md`) não trazem o `web/_headers` de hoje, \
+         inteiro: o dono configuraria outros cabeçalhos"
+    );
+
+    // 5.
+    let bancada = app_dir().join("bancada");
+    let mut a_mao = Vec::new();
+    for entrada in std::fs::read_dir(&bancada)
+        .expect("bancada/")
+        .filter_map(Result::ok)
+    {
+        let nome = entrada.file_name().to_string_lossy().into_owned();
+        if !nome.ends_with(".cjs") || nome == "telas.cjs" {
+            continue;
+        }
+        // Sem os comentários: a prosa de uma bancada cita a política do
+        // desktop, e citar não é servir.
+        let corpo = sem_comentarios(&std::fs::read_to_string(entrada.path()).expect("bancada"));
+        if corpo.contains("default-src") || corpo.contains("frame-ancestors") {
+            a_mao.push(nome);
+        }
+    }
+    assert!(
+        a_mao.is_empty(),
+        "estas bancadas escrevem uma CSP à mão, em vez de ler `web/_headers` por \
+         `cabecalhos-da-origem.cjs`: {a_mao:?}"
+    );
+}

@@ -398,6 +398,10 @@ async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = 
       // identidade do mesmo link não passa por aqui: ela ficou no Rust, que é
       // quem confere.
       joinSecret: credencial ?? null,
+      // Qual tentativa desta janela é esta. O Rust a devolve em cada etapa da
+      // chegada (`ConnectStageChanged.tentativa`), e o ouvinte de baixo mostra
+      // só as da mais nova (item 52 da pendência 58).
+      tentativa: esta,
     });
     // **A tentativa que outra substituiu não entra na tela** (pendência 58,
     // item 54; lote E54 da F5), nem a batida de uma espera que a pessoa largou
@@ -554,15 +558,11 @@ async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = 
     // A travessia acabou, de um jeito ou de outro. O que sobra na tela é o
     // veredito ou o erro, e não o último candidato tentado.
     //
-    // **Esta linha ainda é de qualquer tentativa**, e a da velha apaga a etapa
-    // da nova enquanto ela anda (lido no código; a bancada não emite etapas).
-    // Ficou fora do lote W2. Os eventos `ConnectStageChanged` não dizem de qual
-    // tentativa são; quem os separa é a geração, no Rust (`Bridge`, no
-    // `main.rs`), que descarta os da velha a partir do `connect` da nova. Antes
-    // dele — o apelido, a pergunta do nome, o `conferir_esta_versao` — as
-    // etapas da velha ainda chegam, e calar a velha aqui deixaria a última
-    // delas na tela até a nova dizer a primeira. Ver o relatório do lote W2.
-    mostrarEtapa(null);
+    // **E só a mais nova apaga a linha** (item 52 da pendência 58): a da velha
+    // apagava a etapa da nova enquanto ela andava. Calar a velha aqui não deixa
+    // etapa dela na tela, porque o ouvinte de baixo já não a mostra depois de a
+    // nova começar. Provado por `tools/roteiros/etapa-da-tentativa.js`.
+    if (esta === tentativas) mostrarEtapa(null);
   }
 }
 
@@ -598,6 +598,14 @@ listen("seele://event", (evento) => {
   // Só com a tela de entrada na frente. Uma reconexão futura que publicasse
   // etapas escreveria numa tela escondida atrás da sessão.
   if ($("tela-boot").hidden) return;
+  // **Só as da tentativa mais nova** (item 52 da pendência 58). A geração, no
+  // Rust, descarta as da velha só a partir do `connect` da nova; antes dele —
+  // o apelido, a pergunta do nome, o `conferir_esta_versao` — elas ainda
+  // chegavam, e a tela as dizia como se fossem da nova. A etapa traz a
+  // tentativa que o `connect` recebeu; a que vem sem ela é de quem não passou
+  // por `conectar`, e aparece como antes.
+  const { tentativa } = payload.ConnectStageChanged;
+  if (tentativa != null && tentativa !== tentativas) return;
   // Numa ligação, o `Tocando` diz quem está sendo chamado (tarefa 28 da F7).
   mostrarEtapa(
     (ligacaoEmCurso

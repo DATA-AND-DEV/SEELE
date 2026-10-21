@@ -16,6 +16,27 @@
 //! | `decodificar(quadro)` | 0 | `{"mensagem": …}` ou `{"desconhecida": N}` |
 //! | | 1 | `{"erro": …, "texto": …, "versao": N}`, com `versao` quando o carimbo é de outra versão |
 //!
+//! **A ligação** (Tarefa 2.6; [`crate::ligacao`]): o aperto de mão e a sessão,
+//! uma por página. A página carrega os bytes do fluxo de controle, e assina.
+//!
+//! | função | devolve | na saída |
+//! |---|---|---|
+//! | `ligacao_abrir(pedido)` | 0 | nada: o `Hello` espera em `ligacao_para_o_fio` |
+//! | | 1 | `{"recusa": ConnectionError}` ou `{"erro": "json", "texto": …}` |
+//! | `ligacao_chegou(bytes)` | 0 | `{"passos": […]}` |
+//! | | 1 | `{"erro": "sem-ligacao"}` |
+//! | `ligacao_assinado(assinatura)` | 0 | `{"passos": […]}` |
+//! | `ligacao_fluxo_acabou()` | 0 | `{"passos": […]}` |
+//! | `ligacao_para_o_fio()` | 0 | os bytes enquadrados (talvez nenhum) |
+//! | `ligacao_retrato()` | 0 | `{"sala": RetratoDaSala, "contados": {…}, "telemetria": {…}}` |
+//! | | 1 | `{"erro": "sem-sessao"}` |
+//! | `ligacao_medir(rtt_micros, jitter_ms, perda)` | 1 se mudou, 0 se não | — |
+//! | `ligacao_semente(semente)` | — | — |
+//! | `ligacao_atender(pedido)` | 0 | `{"resposta", "eventos", "nao_saiu"}` |
+//! | | 1 | `{"erro": …}`, o erro do desktop |
+//! | | 2 | `{"nao_e_da_sessao": true}` |
+//! | `ligacao_fechar()` | — | — |
+//!
 //! **A voz que sai e a que chega** (Tarefa 3.3, lotes A e C; [`crate::voz`]),
 //! na instância da página, uma de cada lado:
 //!
@@ -82,11 +103,15 @@ use std::cell::RefCell;
 use seele_proto::control::ControlError;
 use seele_voz::gate::GateMode;
 
+use crate::comandos::Chaves;
+use crate::ligacao::{Ligacao, Passo, Pedido};
 use crate::voz::{Envio, Recepcao, Reproducao, TesteDoMicrofone};
 use crate::{codificar_do_cliente, decodificar_do_servidor, DoServidor, ErroDaPonte};
 
 thread_local! {
     static SAIDA: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static LIGACAO: RefCell<Option<Ligacao>> = const { RefCell::new(None) };
+    static CHAVES: RefCell<Option<Chaves>> = const { RefCell::new(None) };
     static ENVIO: RefCell<Option<Envio>> = const { RefCell::new(None) };
     static RECEPCAO: RefCell<Option<Recepcao>> = const { RefCell::new(None) };
     static REPRODUCAO: RefCell<Option<Reproducao>> = const { RefCell::new(None) };
@@ -207,7 +232,7 @@ fn dizer_o_link(lido: &serde_json::Value) -> u32 {
 }
 
 /// Um link do navegador, lido contra a origem do produto
-/// (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`, vazia até o D-web-2). Devolve 0
+/// (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`, a D-web-2). Devolve 0
 /// com `{"link": …}` na saída, ou 1 com `{"erro": …}`.
 ///
 /// **Sem parâmetro de origem, de propósito**: a página não escolhe contra que
@@ -225,6 +250,211 @@ pub unsafe extern "C" fn analisar_link(ptr: *const u8, len: usize) -> u32 {
         texto,
         seele_proto::uri::ORIGEM_DO_NAVEGADOR,
     ))
+}
+
+// ------------------------------------------------------------- a ligação
+
+fn dizer_os_passos(passos: &[Passo]) -> u32 {
+    let passos: Vec<serde_json::Value> = passos.iter().map(Passo::em_json).collect();
+    dizer(
+        serde_json::json!({ "passos": passos })
+            .to_string()
+            .into_bytes(),
+        0,
+    )
+}
+
+fn sem_ligacao() -> u32 {
+    dizer(br#"{"erro":"sem-ligacao"}"#.to_vec(), 1)
+}
+
+/// O que fazer com a ligação desta página, se houver uma.
+fn com_a_ligacao(fazer: impl FnOnce(&mut Ligacao) -> u32) -> u32 {
+    LIGACAO.with(|l| match l.borrow_mut().as_mut() {
+        Some(ligacao) => fazer(ligacao),
+        None => sem_ligacao(),
+    })
+}
+
+/// Abre a ligação desta página, no lugar de qualquer outra: o pedido em JSON
+/// ([`Pedido::de_json`]). Devolve 0 com o `Hello` esperando em
+/// [`ligacao_para_o_fio`], ou 1 com `{"recusa": ConnectionError}` (o apelido
+/// grande demais, antes de discar) ou `{"erro": "json", "texto": …}`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn ligacao_abrir(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    LIGACAO.with(|l| *l.borrow_mut() = None);
+    let pedido = std::str::from_utf8(bytes)
+        .map_err(|e| e.to_string())
+        .and_then(Pedido::de_json);
+    let pedido = match pedido {
+        Ok(pedido) => pedido,
+        Err(texto) => return erro(&ErroDaPonte::Json(texto)),
+    };
+    match Ligacao::abrir(pedido) {
+        Ok(ligacao) => {
+            LIGACAO.with(|l| *l.borrow_mut() = Some(ligacao));
+            dizer(Vec::new(), 0)
+        }
+        Err(recusa) => dizer(
+            serde_json::json!({ "recusa": recusa })
+                .to_string()
+                .into_bytes(),
+            1,
+        ),
+    }
+}
+
+/// Bytes do fluxo de controle. Devolve 0 com `{"passos": […]}`
+/// ([`Passo::em_json`]), ou 1 com `{"erro": "sem-ligacao"}`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn ligacao_chegou(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    com_a_ligacao(|ligacao| dizer_os_passos(&ligacao.chegou(bytes)))
+}
+
+/// A assinatura da página sobre o [`Passo::Assinar`]. Como
+/// [`ligacao_chegou`].
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn ligacao_assinado(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let assinatura = unsafe { entrada(ptr, len) };
+    com_a_ligacao(|ligacao| dizer_os_passos(&ligacao.assinado(assinatura)))
+}
+
+/// O fluxo de controle acabou. Como [`ligacao_chegou`].
+#[no_mangle]
+pub extern "C" fn ligacao_fluxo_acabou() -> u32 {
+    com_a_ligacao(|ligacao| dizer_os_passos(&ligacao.fluxo_acabou()))
+}
+
+/// Os bytes que esperam para ir ao fluxo de controle (0, e os bytes na saída;
+/// vazia quando não há nada), ou 1 sem ligação.
+#[no_mangle]
+pub extern "C" fn ligacao_para_o_fio() -> u32 {
+    com_a_ligacao(|ligacao| dizer(ligacao.para_o_fio(), 0))
+}
+
+/// O que sai do `Room` para o retrato: 0 com `{"sala": RetratoDaSala,
+/// "contados": {…}}`, ou 1 com `{"erro": "sem-sessao"}` antes da entrada (e
+/// `"sem-ligacao"` sem ligação).
+#[no_mangle]
+pub extern "C" fn ligacao_retrato() -> u32 {
+    com_a_ligacao(|ligacao| match ligacao.sessao() {
+        Some(sessao) => {
+            let (perda, sala) = sessao.foto();
+            match serde_json::to_value(sala) {
+                Ok(sala) => dizer(
+                    serde_json::json!({
+                        "sala": sala,
+                        "contados": sessao.contados().em_json(),
+                        "telemetria": ligacao.telemetria(perda),
+                    })
+                    .to_string()
+                    .into_bytes(),
+                    0,
+                ),
+                Err(e) => erro(&ErroDaPonte::Json(e.to_string())),
+            }
+        }
+        None => dizer(br#"{"erro":"sem-sessao"}"#.to_vec(), 1),
+    })
+}
+
+/// A semente das chaves das mensagens desta página: só a primeira vale, e a
+/// contagem segue pelas ligações seguintes (ver [`Chaves`]).
+#[no_mangle]
+pub extern "C" fn ligacao_semente(semente: u32) {
+    CHAVES.with(|c| {
+        c.borrow_mut()
+            .get_or_insert_with(|| Chaves::com_semente(semente));
+    });
+}
+
+/// Um comando da casca: `{"comando", "args", "agora_s"}`. Devolve 0 com
+/// `{"resposta", "eventos", "nao_saiu"}`, 1 com `{"erro": …}` (o JSON do erro
+/// do desktop), ou 2 quando o comando não é da sessão (a ponte o atende).
+/// Sem semente, as chaves começam do zero alto: a página chama
+/// [`ligacao_semente`] antes.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn ligacao_atender(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let pedido: serde_json::Value = match serde_json::from_slice(bytes) {
+        Ok(pedido) => pedido,
+        Err(e) => return erro(&ErroDaPonte::Json(e.to_string())),
+    };
+    let comando = pedido
+        .get("comando")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let args = pedido
+        .get("args")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let agora_s = pedido
+        .get("agora_s")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or_default();
+    let atendido = LIGACAO.with(|l| {
+        CHAVES.with(|c| {
+            let mut chaves = c.borrow_mut();
+            let chaves = chaves.get_or_insert_with(|| Chaves::com_semente(0));
+            match l.borrow_mut().as_mut() {
+                Some(ligacao) => ligacao.atender(comando, &args, chaves, agora_s),
+                None => crate::comandos::COMANDOS_DA_SESSAO
+                    .contains(&comando)
+                    .then(|| Err(serde_json::json!("NotConnected"))),
+            }
+        })
+    });
+    match atendido {
+        Some(Ok(feito)) => dizer(feito.em_json().to_string().into_bytes(), 0),
+        Some(Err(motivo)) => dizer(
+            serde_json::json!({ "erro": motivo })
+                .to_string()
+                .into_bytes(),
+            1,
+        ),
+        None => dizer(br#"{"nao_e_da_sessao":true}"#.to_vec(), 2),
+    }
+}
+
+/// Uma volta da medida ([`Ligacao::medir`]): o tempo de ida e volta em
+/// microssegundos, o jitter de chegada em milissegundos e a pior perda da voz.
+/// Devolve 1 quando o que a casca mostra mudou, e 0 quando não (ou sem
+/// ligação).
+#[no_mangle]
+pub extern "C" fn ligacao_medir(rtt_micros: u64, jitter_ms: f32, perda: f32) -> u32 {
+    LIGACAO.with(|l| {
+        l.borrow_mut().as_mut().map_or(0, |ligacao| {
+            u32::from(ligacao.medir(rtt_micros, jitter_ms, perda))
+        })
+    })
+}
+
+/// Esquece a ligação desta página.
+#[no_mangle]
+pub extern "C" fn ligacao_fechar() {
+    LIGACAO.with(|l| *l.borrow_mut() = None);
 }
 
 // ------------------------------------------------------------------- a voz
@@ -672,7 +902,7 @@ pub mod prova {
     }
 
     /// [`analisar_link`](super::analisar_link) com a origem dada: os casos da
-    /// F1 usam `origem.invalid`, e a do produto é vazia até o D-web-2.
+    /// F1 usam `origem.invalid`, e a do produto é a `ORIGEM_DO_NAVEGADOR`.
     ///
     /// # Safety
     ///

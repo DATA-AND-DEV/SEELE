@@ -1,0 +1,27 @@
+# Os cabeçalhos da origem do web app (D-web-2), no formato `_headers` que o
+# Cloudflare Pages e o Netlify leem. É o único lugar deles: as bancadas os leem
+# daqui (`bancada/cabecalhos-da-origem.cjs`), e os passos do dono
+# (`docs/superpowers/sdd/2026-10-08-0.16/F4/origem-para-o-dono.md`) os copiam
+# inteiros, conferidos pelo guarda `os_cabecalhos_da_origem_sao_um_so`.
+#
+# A CSP da página vai só no documento, e não em `/*`: as regras que casam com o
+# mesmo caminho se somam, e o `frame-ancestors 'none'` dela impediria a página
+# de emoldurar o `iframe` dos executores, que traz a CSP dele.
+
+/*
+  Strict-Transport-Security: max-age=31536000
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: microphone=(self), display-capture=(self), fullscreen=(self), camera=(), geolocation=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Cache-Control: no-cache
+
+/
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+
+/index.html
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+
+/executor-de-mod.html
+  Content-Security-Policy: frame-ancestors 'self'

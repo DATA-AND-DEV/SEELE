@@ -51,6 +51,7 @@ pub mod taxa;
 pub mod tela;
 pub mod tls;
 pub mod transfer;
+pub mod transporte;
 pub mod voice_room;
 
 /// O vocabulário de fio de um ponto de encontro, e **só** ele.
@@ -503,9 +504,76 @@ pub struct Daemon {
     /// O mesmo socket do endpoint, para escrever. Ver [`Daemon::espelho`].
     espelho: Option<Arc<std::net::UdpSocket>>,
     fingerprint: String,
+    /// Quantos apertos de mão do `h3` acabaram com o navegador recusando o
+    /// certificado. Ver [`Daemon::recusas_do_navegador`].
+    recusas_do_navegador: Arc<std::sync::atomic::AtomicU64>,
     registry: Arc<session::Registry>,
     server: Arc<server::Server>,
     voice_rooms: Arc<voice_room::VoiceRooms>,
+}
+
+/// Se um aperto de mão acabou porque o cliente recusou o certificado, o alerta
+/// de TLS com que ele recusou: do 42 ao 46 (o certificado ruim, sem suporte,
+/// revogado, vencido ou desconhecido) e o 48 (a autoridade desconhecida). O
+/// Safari do iPhone recusa com o 46 (a medição 3).
+///
+/// **Pelo texto do erro**, e não pelo código: o `wtransport` embrulha o
+/// fechamento do `quinn` sem expor o código, e o texto que o `quinn-proto`
+/// escreve para um alerta de TLS é fixo (`the cryptographic handshake failed:
+/// error N`, em `TransportErrorCode`). Uma versão que o mude reprova
+/// `o_navegador_que_recusa_o_certificado_e_contado`, em `tests/alpn.rs`.
+fn alerta_de_certificado(erro: &str) -> Option<u8> {
+    let depois = erro
+        .split("the cryptographic handshake failed: error ")
+        .nth(1)?;
+    let numero: String = depois.chars().take_while(char::is_ascii_digit).collect();
+    let alerta = numero.parse::<u8>().ok()?;
+    [42_u8, 43, 44, 45, 46, 48]
+        .contains(&alerta)
+        .then_some(alerta)
+}
+
+/// **A sessão do navegador**: o `wtransport` adota a conexão `h3` que este
+/// endpoint aceitou e lê o pedido da WebTransport, e a sessão segue pelo mesmo
+/// `session::serve` do nativo (Tarefa 2.6 da F4).
+///
+/// O caminho e a `Origin` do pedido vão ao registro. **Conferir a `Origin` está
+/// em aberto no ADR 0057** («O que este ADR não decide»): até o dono decidir, o
+/// pedido é aceito com qualquer uma, e o registro diz qual veio.
+async fn aceitar_o_navegador(
+    conectando: quinn::Connecting,
+    recusas_do_navegador: &std::sync::atomic::AtomicU64,
+) -> Option<transporte::Conexao> {
+    let pedido = match wtransport::endpoint::IncomingSessionFuture::with_quic_connecting(conectando)
+        .await
+    {
+        Ok(pedido) => pedido,
+        Err(erro) if alerta_de_certificado(&erro.to_string()).is_some() => {
+            recusas_do_navegador.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tracing::warn!(
+                %erro,
+                "um navegador recusou o certificado: link velho, ou link de outro \
+                 servidor que atende neste endereço noutra rede"
+            );
+            return None;
+        }
+        Err(erro) => {
+            tracing::warn!(%erro, "a sessão do navegador não abriu: a conexão caiu antes do pedido");
+            return None;
+        }
+    };
+    tracing::info!(
+        caminho = pedido.path(),
+        origem = pedido.origin().unwrap_or("(nenhuma)"),
+        "um navegador pediu a sessão pelo `h3`"
+    );
+    match pedido.accept().await {
+        Ok(conexao) => Some(transporte::Conexao::Web(conexao)),
+        Err(erro) => {
+            tracing::warn!(%erro, "a sessão do navegador caiu ao ser aceita");
+            None
+        }
+    }
 }
 
 impl Daemon {
@@ -552,7 +620,15 @@ impl Daemon {
         };
         let fingerprint = identity.fingerprint();
         let impressao = identity.digest();
-        let server_config = tls::server_config(identity)?;
+        // Os curtos do `h3`: a janela vigente e as anunciadas depois dela, com
+        // a chave do longo (a medição 3). A sala pessoal não tem: a chave dela é
+        // Ed25519, e o navegador não a aceita pelo hash.
+        let agora = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let curtos = tls::curtos_do_banco(&persistence, &identity, agora)?;
+        let janelas = curtos.iter().map(tls::Curto::janela).collect();
+        let server_config = tls::server_config_do_seeled(identity, &curtos)?;
 
         // Não é `Endpoint::server`: aquele faz um `UdpSocket::bind` cru e herda
         // o padrão do sistema para `IPV6_V6ONLY`, que difere entre Linux, macOS
@@ -676,6 +752,7 @@ impl Daemon {
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao,
+            janelas_do_navegador: janelas,
             recepcao,
         });
 
@@ -757,6 +834,7 @@ impl Daemon {
             pilha,
             espelho,
             fingerprint,
+            recusas_do_navegador: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             registry: Arc::new(session::Registry::new()),
             server,
             voice_rooms,
@@ -776,6 +854,26 @@ impl Daemon {
     #[must_use]
     pub fn fingerprint(&self) -> &str {
         &self.fingerprint
+    }
+
+    /// **As janelas dos certificados curtos do `h3`** (ADR 0057): o hash e a
+    /// validade de cada um, da vigente em diante, como o
+    /// `ServerMessage::HashesDoNavegador` as leva. É o que o link do navegador
+    /// escreve no `wh=`. Vazias quando o servidor não serve ao navegador (a
+    /// sala pessoal).
+    #[must_use]
+    pub fn janelas_do_navegador(&self) -> &[seele_proto::control::JanelaDoNavegador] {
+        &self.server.janelas_do_navegador
+    }
+
+    /// Quantas vezes um navegador recusou o certificado curto no aperto de mão
+    /// do `h3`: um link velho, ou de outro servidor que atende neste endereço
+    /// noutra rede. Cada uma vai ao registro com essa frase; a conta é para
+    /// quem investiga, e para o teste que a prova.
+    #[must_use]
+    pub fn recusas_do_navegador(&self) -> u64 {
+        self.recusas_do_navegador
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// O socket em que o servidor atende, para **escrever**. Degrau 4 do ADR 0022.
@@ -845,20 +943,50 @@ impl Daemon {
             let registry = Arc::clone(&self.registry);
             let server = Arc::clone(&self.server);
             let voice_rooms = Arc::clone(&self.voice_rooms);
+            let recusas_do_navegador = Arc::clone(&self.recusas_do_navegador);
 
             tokio::spawn(async move {
-                let connection = match incoming.await {
-                    Ok(connection) => connection,
+                let mut conectando = match incoming.accept() {
+                    Ok(conectando) => conectando,
                     Err(error) => {
                         tracing::warn!(%error, "connection failed before the handshake");
                         return;
                     }
                 };
-                let peer = connection.remote_address();
-                tracing::info!(%peer, "link unverified");
+                // O ALPN que o aperto de mão escolheu: `seele/1` do nativo, ou o
+                // `h3` do navegador (ADR 0057). Ele sai antes de o aperto acabar,
+                // e é o que separa a recusa de um navegador da de um nativo.
+                let alpn = conectando
+                    .handshake_data()
+                    .await
+                    .ok()
+                    .and_then(|dados| {
+                        dados
+                            .downcast::<quinn::crypto::rustls::HandshakeData>()
+                            .ok()
+                    })
+                    .and_then(|dados| dados.protocol);
+                let do_navegador =
+                    alpn.as_deref() == Some(seele_proto::transport::ALPN_DO_NAVEGADOR);
+                let conexao = if do_navegador {
+                    match aceitar_o_navegador(conectando, &recusas_do_navegador).await {
+                        Some(conexao) => conexao,
+                        None => return,
+                    }
+                } else {
+                    match conectando.await {
+                        Ok(connection) => transporte::Conexao::Quic(connection),
+                        Err(error) => {
+                            tracing::warn!(%error, "connection failed before the handshake");
+                            return;
+                        }
+                    }
+                };
+                let peer = conexao.remote_address();
+                tracing::info!(%peer, navegador = conexao.do_navegador(), "link unverified");
 
                 if let Err(error) =
-                    session::serve(connection, config, registry, server, voice_rooms).await
+                    session::serve(conexao, config, registry, server, voice_rooms).await
                 {
                     tracing::info!(%peer, %error, "session closed");
                 }

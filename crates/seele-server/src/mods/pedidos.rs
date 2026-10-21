@@ -567,6 +567,7 @@ mod tests {
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao: [0; 32],
+            janelas_do_navegador: Vec::new(),
             recepcao: None,
             persistence,
             events,
