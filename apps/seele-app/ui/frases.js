@@ -916,6 +916,9 @@ function fraseDeErro(erro, apelido, deOnde) {
     // alguém que acabou de configurar um DNS: a chance de errar por um detalhe
     // é alta, e o detalhe é sempre um só.
     // As recusas do catálogo que carregam detalhe dentro.
+    // A de um MOD que o catálogo entregou certo e esta máquina não instalou
+    // (pendência 58, item 9) é a recusa de instalar: nem o catálogo nem a rede.
+    if (erro.NaoInstalou) return fraseDeErro(erro.NaoInstalou, apelido, deOnde);
     if (erro.NaoRespondeu) {
       return (
         "O CATÁLOGO NÃO RESPONDEU.\n" +

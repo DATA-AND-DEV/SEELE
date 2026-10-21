@@ -435,9 +435,15 @@ pub(crate) fn instalar_de(
 }
 
 /// O trabalho de [`instalar_de`], sem o registro: toda saída `Err` daqui é uma
-/// recusa, e é lá, num lugar só, que ela vira linha no `seele.log`. A outra
-/// saída antecipada, a do pacote que já está no cache, é `Ok`.
-fn publicar_de(config_dir: &Path, origem: &Path) -> Result<Publicado, FalhaAoInstalarMod> {
+/// recusa, e quem chama é que a escreve no `seele.log`. São dois: o
+/// [`instalar_de`], com a pasta de onde se instalou, e o catálogo
+/// (`catalogo::instalar_os_baixados`), com o MOD e a versão, porque a pasta
+/// dele é uma passagem que ninguém escolheu. A outra saída antecipada, a do
+/// pacote que já está no cache, é `Ok`.
+pub(crate) fn publicar_de(
+    config_dir: &Path,
+    origem: &Path,
+) -> Result<Publicado, FalhaAoInstalarMod> {
     if !origem.join("mod.json").is_file() {
         return Err(FalhaAoInstalarMod::SemManifesto);
     }

@@ -143,7 +143,28 @@ assert.match(banco, /continua como estava/, `a falha do banco não diz que nada 
   // no resto das frases: feio, e honesto.
   const novo = contexto.fraseDeErro({ ManifestoRecusado: "um-codigo-novo" });
   assert.match(novo, /DESTA PASTA: um-codigo-novo\./, `um código sem frase sumiu da recusa: ${novo}`);
+
+  // 5b. **A recusa local de um MOD do catálogo diz a recusa de instalar**
+  //     (item 9; `FalhaNoCatalogo::NaoInstalou`, em `src/catalogo.rs`), e não
+  //     culpa o catálogo nem a rede. O catálogo entregou os bytes certos: um
+  //     disco cheio dizia «O CATÁLOGO VEIO QUEBRADO… Avise quem publica».
+  //     Montadas como o serde as manda: a de instalar com campo, como objeto
+  //     dentro do objeto.
+  for (const recusa of [
+    { NaoCopiei: "No space left on device (os error 28)" },
+    { ManifestoRecusado: "api-too-new" },
+    { TemAtalho: "/tmp/x/atalho" },
+  ]) {
+    const dita = contexto.fraseDeErro({ NaoInstalou: recusa });
+    assert.doesNotMatch(dita, /CATÁLOGO|Avise quem publica|sua rede|ALGO FALHOU|NaoInstalou/,
+      `a recusa local de um MOD do catálogo culpa o catálogo ou a rede, ou caiu no recuo: ${dita}`);
+    assert.equal(dita, contexto.fraseDeErro(recusa),
+      `a recusa local de um MOD do catálogo não diz a frase de instalar: ${dita}`);
+  }
+  const semManifesto = contexto.fraseDeErro({ NaoInstalou: "SemManifesto" });
+  assert.equal(semManifesto, contexto.fraseDeErro("SemManifesto"),
+    `a recusa de unidade dentro de \`NaoInstalou\` não diz a frase dela: ${semManifesto}`);
 }
 
 console.log("hospedar com MOD antigo: a frase diz o MOD, a API e as três saídas na ordem do dono; sem o pacote, diz que ele falta, sem número; e toda recusa das saídas tem frase.");
-console.log("recusas de instalar: o «mod.json» recusado diz o motivo pela frase do código, e não o código cru.");
+console.log("recusas de instalar: o «mod.json» recusado diz o motivo pela frase do código, e não o código cru; e a recusa local de um MOD do catálogo diz a de instalar, sem culpar o catálogo nem a rede.");
