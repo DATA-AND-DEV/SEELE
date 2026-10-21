@@ -7840,7 +7840,8 @@ Os três primeiros são do lote F, integrado em `198b03d9`.
   cliente tratar `ServerShuttingDown` como fim. **A metade casca vai com o
   Plano 2** (o G-casca): a saída do app chamar a `Hospedagem::despedir`. Até
   lá, fechar o app hospedando continua sem aviso, porque o `Drop` de
-  `Hospedagem` só faz o `shutdown()` cru.
+  `Hospedagem` só faz o `shutdown()` cru. **Feita em 10/10/2026 pela tarefa 21
+  da F7, e não pelo Plano 2:** ver «Em 21/10/2026», abaixo.
 
 **A medida.** A sonda `medida_do_disconnect.rs`, que o plano antigo citava,
 nunca foi commitada e não está em lugar nenhum. A medida é o teste novo,
@@ -7879,6 +7880,25 @@ abortadas de `largar_tudo_e_esperar`.
 **Em 09/10/2026.** Fechada pelo P50-1, o P50-2 e o P50-3, com o teste que
 mede. A metade casca do P50-4 é dívida do Plano 2, e a conferência à mão do
 fechar hospedando, no Mac e no Windows, vai com ela.
+
+**Em 21/10/2026: a metade casca do P50-4 está feita**, pela tarefa 21 da F7, e
+não pelo Plano 2:
+- `2205fc46`: o `ExitRequested { code: None }` segura a saída e chama
+  `despedir_das_hospedagens`, a `Hospedagem::despedir` das duas, com teto de
+  1 s;
+- `76af8287`: o motivo certo por hospedagem, `ChamadaEncerrada` na sala e
+  `ServerShuttingDown` no servidor guardado;
+- `ef364aa9` e `f835b52d`: as saídas do macOS que pulavam o `ExitRequested` (o
+  Sair do Dock, o logout, um `quit` de fora, e o Cmd+Q);
+- `ba9772c9`, que a lista da tarefa não citava: a capacidade da janela ganha o
+  `destroy`. Sem ele, o botão vermelho deixava o app vivo, sem janela à vista e
+  dentro do servidor.
+
+A orquestradora mediu no app, no Mac, em 10/10 (`F7/progress.md`, «A 21 medida
+no app»): o servidor vê a saída na hora, e quem estava no guardado lê «O
+SERVIDOR ESTÁ ENCERRANDO». **Fica, e é do dono:** a conferência à mão do fechar
+hospedando no Windows, que esta entrada amarra à metade casca, e que o
+`F7/progress.md` não registra.
 
 ## 51 · O que o Plano 1 da 1.0 deixou para depois, fora das pendências 49 e 50
 
@@ -8912,7 +8932,7 @@ plano da F5 aceitava também a linha sem nome
 pelo padrão do sistema, e o nome que aparece duas vezes com um aparelho
 escolhido, ficam para o dono conferir em tela. O resto está na pendência 58.
 
-## 55 · Na volta pela lista, o `LEVE` resolve de novo um ponto que acabou de não resolver
+## 55 · Fechada em 2026-10-10 · Na volta pela lista, o `LEVE` resolve de novo um ponto que acabou de não resolver
 
 **Aberta em 2026-10-08**, na medida de campo do G1 (`docs/m1-medicoes.md`,
 «G1»). Com o DNS do cliente mudo, a consulta ao quarto acaba no prazo dela
@@ -8940,9 +8960,32 @@ achado da conferência de 08/10 do plano da F5 da 0.16
 (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «Achados da conferência
 de 08/10»). O resto vale.
 
-**Continua aberta, com o Plano 5** (`lotes.md`, «Vão para outros planos»). Se
-o conserto for entregar ao `LEVE` o endereço já resolvido, ele parte da lista
-ordenada que o lote M1 deixou em `resolver_ponto` (`09accad`).
+**Fechada em 2026-10-10, pela 14b da F7, e escrita aqui em 21/10/2026.** Em
+09/10 ela continuava aberta, com o Plano 5 (`lotes.md`, «Vão para outros
+planos»), e o conserto barato partiria da lista ordenada que o lote M1 deixou
+em `resolver_ponto` (`09accad`). O conserto foi outro: o quarto passou a correr
+junto com a corrida. A metade do núcleo é `2b2bf744`, e a ligação na produção,
+a 14b inteira, é `80ac45d2`:
+- o `connect` do app não pergunta mais ao quarto, e o guarda é
+  `o_quarto_e_da_ponte_e_nada_do_que_ele_da_volta_ao_connect`;
+- a FFI liga o quarto à `Chegada` (`Chegada::com_o_quarto`), que corre
+  `onde_mora_hoje` em paralelo com `Enlace::conectar_entre_com_o_quarto`;
+- a conformidade `quarto_em_paralelo.rs` prova que quem está na mesma casa
+  entra antes do prazo de um quarto mudo.
+
+Pela leitura do código, o custo que esta entrada media sai do caminho. A
+primeira tentativa saía a 2,1 s, a soma de 1,5 s do quarto e 0,6 s do `LEVE`.
+Agora ela espera só a `Batida::preparar`, até 600 ms com o DNS mudo, e quem
+precisa de furo espera o quarto, até 1,5 s, com o `LEVE` já resolvido em
+paralelo. É o teto de 1,5 s que a entrada pedia.
+
+**Uma observação, que não é resto da 55:** pela leitura, o ponto ainda é
+resolvido duas vezes, agora ao mesmo tempo, e com o DNS mudo o candidato de
+casa ainda espera os 600 ms da `Batida`. O teste
+`quem_esta_na_mesma_casa_comeca_sem_esperar_o_quarto` usa um ponto `127.0.0.1`,
+e não exercita um DNS mudo para a `Batida`. Por isso a frase «um endereço da
+rede de casa começa na hora», do doc de `conectar_entre_com_o_quarto`, só vale
+com o ponto resolvendo.
 
 ```sh
 grep -n "impl Batida" -A 20 crates/seele-core/src/encontro.rs | grep -n "async fn preparar"
@@ -9072,9 +9115,27 @@ com o lote, o arquivo, o que falta e a fonte. A fonte é o relatório do lote
 (`F5/lote-<id>-report.md`), o andamento da frente (`F5/progress.md`) ou,
 quando o achado só está no ledger, o próprio texto deste item.
 
-**Nada aqui foi consertado, e nenhum item segura release.** São menores para a
-revisão final da 0.16 decidir. Os números das linhas mudam com qualquer
-commit, e por isso cada item diz o nome da função, do teste ou da constante.
+**Em 09/10, nada aqui tinha sido consertado, e nenhum item segurava release:**
+eram menores para a revisão final da 0.16 decidir. Os números das linhas mudam
+com qualquer commit, e por isso cada item diz o nome da função, do teste ou da
+constante.
+
+**Decidida em 21/10/2026**, item por item, sobre uma triagem no código do
+`0.16/lotes` (`7ad62925`). A regra:
+- **consertado** o que a pessoa vê ou sente;
+- **depois da 0.16** o que é estética, guarda sem defeito presente, ou
+  comportamento que não chega à pessoa;
+- **cada item termina com o hash que o fecha, ou com a razão de ficar**, numa
+  linha que começa com o desfecho em negrito. Nenhum é dado como fechado sem o
+  hash.
+
+**A contagem:** 7 consertados (8, 9, 10, 11, 12, 51 e 52), nos lotes 58-1 a
+58-4, integrados no `0.16/lotes`; 5 já fechados antes, por lotes da F5 (46, 48,
+53, 54 e 55); 42 depois da 0.16 (1 a 7, 13 a 44, 47, 49 e 50); e 1 do dono
+(45). Dos 42, dez são comportamento real que hoje não chega à pessoa (1, 3, 4,
+5, 7, 13, 14, 15, 47 e 49), dezenove são guardas ou testes sem defeito
+presente, e treze são estética, custo de CI ou de DOM, ou só nota. A 58 segue
+aberta pelos 42 e pelo do dono.
 
 ### O registro e a tela
 
@@ -9092,6 +9153,11 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
    grep -n "^fn pedido_a_caminho_dito\|^fn pedido_recusado_na_saida_dito\|^fn mod_nativo_colher\|^fn mod_nativo_entregar" apps/seele-app/src/main.rs
    ```
 
+   **DEPOIS DA 0.16.** Não chega à pessoa: as duas DEBUG o filtro padrão não
+   escreve, e as duas WARN só saem numa recusa de saída ou com a fila do
+   executor cheia. Falta decidir a classe. Custo: ~20 linhas quando decidir,
+   `Aviso` para as WARN e `Depuracao` para as DEBUG.
+
 2. **C · As linhas que a conta do id ilegível conta não levam o rótulo dela.**
    Em `main.rs`, `recusa_de_midia_dita` e a porta da janela com um id feito só
    de espaço escrevem `mod_id=` em branco, enquanto a conta do balde
@@ -9099,22 +9165,38 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
    lote. **Falta** o mesmo rótulo nessas linhas. *Fonte:* o ledger (C, menor
    adiado).
 
+   **DEPOIS DA 0.16.** É rótulo de diagnóstico: nenhum manifesto válido tem um
+   id feito só de espaço, nem um que o filtro esvazie. Custo: ~10 linhas,
+   `IdDoPedido::de` nas duas.
+
 3. **C · Os baldes de `Depuracao` ocupam os lugares próprios.** Em `main.rs`
    (`BALDES_NO_REGISTRO`), os 61 lugares próprios do mapa valem para as três
    classes. Muitos ids escrevendo em DEBUG os ocupam e empurram os avisos de
    MODs novos para o transbordo de avisos. Ninguém perde ficha por isso, mas o
    aviso do MOD novo passa a dividir o balde. *Fonte:* o ledger (C).
 
+   **DEPOIS DA 0.16.** Não chega à pessoa: só morde com mais de 61 pares
+   (classe, id) numa sessão, e a conta sai com `transbordo=true`. Custo: ~10
+   linhas, lugares reservados por classe.
+
 4. **E · A linha DEBUG de `confere_geracao` não diz o comando nem passa pelo
    teto.** Em `main.rs`, `Session::recusar_se_morta` não recebe o nome do
    comando nem o id do MOD, e a linha da ativação recusada também não passa
    pelo teto. *Fonte:* relatório do E, «Fica de fora, como nota».
+
+   **DEPOIS DA 0.16.** Não chega à pessoa: a linha é DEBUG, que o filtro padrão
+   não escreve, e `comandos_de_geracao_morta` já conta. Custo: ~15 linhas, o
+   nome do comando como argumento.
 
 5. **E · A segunda conferência de `enviar_imagem_mod` vem depois do upload.**
    Em `main.rs`, com a geração morta durante o `await`, os bytes já foram ao
    servidor quando a conferência recusa. A recusa conta e é dita, mas o efeito
    no servidor já aconteceu. *Fonte:* relatório do E, «Fica de fora, como
    nota».
+
+   **DEPOIS DA 0.16.** Não chega à pessoa, e é inerente: os bytes saíram antes
+   de a sessão morrer, e não há como desfazer o envio. A recusa vai a um MOD de
+   uma sessão que acabou, e ninguém a vê. Só nota.
 
 6. **K2 · O tropeço de aplicar uma imagem divide o `onde` com as recusas.** Em
    `apps/seele-app/ui/mods-regiao.js` (`dizerTropecoDaMidia`), o tropeço vai
@@ -9123,11 +9205,18 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
    hoje; um que contasse contaria os tropeços. *Fonte:* relatório do K2,
    «Preocupações da rodada».
 
+   **DEPOIS DA 0.16.** Nenhum consumidor de produção conta por `onde`, só
+   bancadas. Custo: ~5 linhas, mais as bancadas que esperam o `onde`.
+
 7. **K5 · O `data:` do som do servidor que não toca fica no destino.** Em
    `mods-regiao.js`, para um som do servidor declarado com `tocando: false`, o
    `data:` fica pela vida da contribuição no destino que tomou o som, cerca de
    1,33 vez o arquivo. Zero exigiria guardar só o plano também nele. *Fonte:*
    o ledger (K5, para a v6 ou para cá).
+
+   **DEPOIS DA 0.16.** Não chega à pessoa: nada é visível, e o custo de memória
+   tem teto, 1,33 vez um arquivo, num destino só. Custo: ~15 linhas, só o plano
+   também ali.
 
 8. **P53 · A frase de `ManifestoRecusado` mostra o código cru.** Em
    `apps/seele-app/ui/frases.js`, a frase diz `api-too-old`, `malformed` ou
@@ -9137,12 +9226,28 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
    (`crates/seele-core/src/mods.rs`), cada um com a frase dele. *Fonte:*
    relatório do P53, «Pendências para o lote Z», 1.
 
+   **CONSERTADO.** No lote 58-1, `676d56c1`: a frase vem do
+   `RECUSAS_DE_PACOTE`, e não do código cru. Depois, na rodada da revisão,
+   «DESTE MOD» numa recusa pelo catálogo, em `bcf1e8ab`, e a frase da API
+   verdadeira para todo N, em `954d9a4d` e `9faeee5b`. Merge `4d0a9091`.
+
 9. **P53 · A recusa pelo catálogo nomeia uma pasta que já não existe.**
    `instalar_do_catalogo` (`apps/seele-app/src/catalogo.rs`) chama
    `instalar_de` sobre uma pasta de passagem em `temp_dir()`. A linha WARN da
    recusa aponta `origem=` para essa pasta, que é apagada logo depois, e não
    diz qual MOD do catálogo era. *Fonte:* relatório do P53, «Pendências para o
    lote Z», 2.
+
+   **CONSERTADO.** No lote 58-1: `630ef5be` (a `FalhaNoCatalogo::NaoInstalou`:
+   a recusa local é dita como a de instalar, sem culpar o catálogo nem a rede,
+   e a WARN sai com `mod_id=` e `versao=`), `bcf1e8ab` («DESTE MOD», e não a
+   pasta que ninguém escolheu), `cfbddb57` (a passagem apagada e conferida, com
+   `passagem_apagada=` na linha) e `879576cf` (a forma serde de `NaoInstalou`,
+   presa contra a que o `frases.js` lê). Merge `4d0a9091`. De passagem, o lote
+   consertou a busca automática de MOD, que escrevia «[object Object]»
+   (`a905b3f1`, com a bancada em `38adb725`). O `"function"` que essa linha
+   trouxe fazia um guarda do `frontend.rs` passar por coincidência, e o lote
+   58-5 o consertou (`cc9944b6`, merge `ad9fb6f1`).
 
 10. **P53 · `FalhaAoApagarPacote` não tem frase.** Em
     `apps/seele-app/src/mods.rs`, `HashTorto` e `NaoEstaAqui` saem como o nome
@@ -9151,12 +9256,23 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     recusas não a inclui, e incluí-la o reprova até alguém escrever as três
     frases. *Fonte:* relatório do P53, «Pendências para o lote Z», 3.
 
+    **CONSERTADO.** No lote 58-1, `d359f0ea`: os três motivos têm frase, e o
+    erro do disco de `NaoApaguei` fica no `seele.log`, numa WARN com o hash,
+    escrita no `mods.rs`. Merge `4d0a9091`.
+
 11. **P53 · Duas recusas vizinhas não deixam linha no registro.** Em
     `instalar_mod` (`main.rs`), um `escolha.into_path()` que falha devolve
     `SemManifesto` sem passar por `instalar_de`; na prática, o diálogo de
     pasta do sistema sempre devolve caminho. E `levar_pacotes_antigos_para_o_cache`
     (`mods.rs`) pula calado um pacote do layout antigo cuja cópia falha, o
     atalho incluído. *Fonte:* relatório do P53, «Pendências para o lote Z», 4.
+
+    **CONSERTADO.** No lote 58-1, `c041a256`: os três `continue` calados de
+    `levar_pacotes_antigos_para_o_cache` (o `mod.json` recusado, a cópia que
+    falha, o atalho incluído, e a pasta do cache que não se cria) deixam WARN
+    com `mod_id=` e a recusa. Merge `4d0a9091`. **Fica** a metade de
+    `into_path`, em `instalar_mod`: o diálogo de pasta do sistema sempre
+    devolve caminho.
 
 12. **I-a · Duas salas apagadas dentro de uma volta de rede.** Em
     `crates/seele-core/src/assento.rs` (`EntradasPendentes::ouvir`), dois casos
@@ -9174,6 +9290,21 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     foi apagada, e decidir na resposta dele. *Fonte:* relatório do I-a, rodada
     2, «Dois casos da mesma família que ficam».
 
+    **CONSERTADO.** No lote 58-2, em `crates/seele-sessao/src/assento.rs` (o
+    arquivo é hoje do `seele-sessao`, e não do `seele-core`): `1a6d3086` (o
+    pedido no ar da sala apagada fica marcado e se decide na resposta dele; os
+    dois casos do item são testes de unidade), `40e351bc` (o `Pong` corrige só
+    o pedido seguinte: o S25, achado pela revisão, cujo modelo de servidor, com
+    400 mil intercalações sem reúso de id, dá zero regressões contra a base) e
+    `cd37cd27` (o ramo morto e o doc do `vale`). Merge `40ceb429`. **Fica para
+    depois:** o servidor reusa o `VoiceRoomId`, e com o reúso o cliente não
+    distingue a sala velha da nova. Isso só se conserta no servidor (a O2 da
+    revisão: `voice_rooms.id` sem `AUTOINCREMENT`). Ficam também, sem ser
+    regressão, os dois vizinhos da ressalva 2 do relatório (um pedido novo na
+    espera, e o `desfazer` do motor, que no app não chega) e a O1 da revisão (o
+    `MovedToVoiceRoom` que chega depois de uma ação local), que a revisão
+    sugere como pendência própria. *Fonte:* `F5/lote-58-2-report.md`.
+
 13. **I-a · O resíduo do N2, com o limitador cortando.** Em `seele_core::assento`,
     depois de um `Ping` marcado que o limitador do servidor descartou, uma
     recusa que chegue antes do próximo `Pong` marcado é tomada pelo pedido
@@ -9182,6 +9313,10 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     depois mais de 20 por segundo, e o aviso do limitador não chega à regra.
     *Fonte:* relatório do I-a, rodada 2, N2.
 
+    **DEPOIS DA 0.16.** Só chega à pessoa acima do limitador do servidor: 60
+    quadros de rajada, e depois 20 por segundo. E o conserto pede o fio, da F1:
+    a recusa dizer de qual entrada é, ou o aviso do limitador chegar à regra.
+
 14. **I-a · Uma abertura presa no driver segura as seguintes.** Em
     `crates/seele-ffi/src/lib.rs`, `VozDaSala::vez_do_driver` deixa uma
     abertura por vez no driver (o M-c da revisão). Com o driver preso, cada
@@ -9189,11 +9324,19 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     seguintes acabam em `NaoAbriuNoPrazo`. *Fonte:* relatório do I-a, rodada 1,
     M-c.
 
+    **DEPOIS DA 0.16.** O que chega à pessoa é verdade: o desfecho dito,
+    `NaoAbriuNoPrazo`, é o do driver preso. O custo é uma thread parada por
+    entrada, e duas aberturas simultâneas no CoreAudio nunca foram medidas.
+
 15. **K3 · Com um MOD escolhido, a gestão não cita os outros que perderam.** Em
     `apps/seele-app/ui/camada-mods.js` (`oQueAGestaoDiz`), com mod/a
     escolhido no cartão, a gestão não diz que mod/b e mod/e também pediram o
     lugar. É anterior ao K3, e ficou fora do que o plano da F5 pediu a ele.
     *Fonte:* `F5/progress.md` (K3); o ledger.
+
+    **DEPOIS DA 0.16.** O que a pessoa lê não mente: ela escolheu mod/a, e os
+    USAR de mod/b e de mod/e estão na mesma linha. Falta só a nota. Custo: ~10
+    linhas em `mods-contribuicoes.js` (`resumo`).
 
 ### Guardas e testes que provam menos do que parecem
 
@@ -9202,6 +9345,9 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     `a_volta_recusada_so_diz_o_que_vale_para_toda_origem_e_todo_motivo`
     proíbe «nenhum» com borda de palavra, e «nenhuma» passaria. *Fonte:* o
     ledger (H).
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: a frase de hoje de
+    `ServidorTrocouNaVolta` não tem «nenhuma». Custo: 1 linha.
 
 17. **H · O guarda de `drive → fim_da_sessao` é de texto.** Em
     `crates/seele-ffi/src/lib.rs`,
@@ -9212,6 +9358,10 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     cuja volta o servidor recuse, e nenhum teste do crate abre uma. *Fonte:*
     relatório do H, rodada 1, Menor 5, «O limite dele»; o ledger.
 
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: hoje o braço diz
+    `reason: fim_da_sessao(&motivo)`. Custo: 1 linha, a agulha inteira; um
+    teste de comportamento pede uma sessão viva, dezenas de linhas.
+
 18. **H · Um comentário diz mais do que o teste prova.** Em
     `crates/seele-ffi/src/lib.rs`, o comentário de
     `fim_da_recusa_diz_o_motivo_de_verdade_e_nao_credencial_recusada` diz que
@@ -9219,12 +9369,18 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     O teste não prova a fiação de `drive`: quem a prende é o guarda de texto do
     item 17. *Fonte:* o ledger (H).
 
+    **DEPOIS DA 0.16.** É comentário. Custo: 1 a 2 linhas.
+
 19. **E · O guarda (b) não vê `if … else`, `match` nem receptor com caminho.**
     Em `main.rs`, `nenhuma_geracao_morta_e_recusada_por_fora_de_recusar_se_morta`
     procura `!<identificador>.geracao_vale(`. Escapam
     `if session.geracao_vale(g) {} else { return … }`, um `match` e
     `!self.inner.geracao_vale(`. *Fonte:* relatório do E, «Fica de fora, como
     nota».
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: hoje não há conferência
+    crua fora de `impl Session`, e as que aparecem são de teste ou fechos que
+    contam. Custo: ~15 linhas.
 
 20. **D · A tentativa lenta refeita não deixa rastro.** Em
     `apps/seele-app/src/executor.rs`,
@@ -9236,16 +9392,28 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     de `crates/seele-conformance/tests/vaga/mod.rs`. *Fonte:* relatório do D,
     rodada 3, Preocupação 1.
 
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: é só a observação do
+    teste, e o `executor.rs` é da F4 até a extração. Custo: ~6 linhas, o stderr
+    direto, como o `em_voz_alta`.
+
 21. **ferramentas · `changelog_dos_commits` cala a falha do git.** Em
     `empacotar/publicar.sh`, a contagem termina em `|| true` e o `git log` da
     lista não tem o status conferido: um git que falha dá uma lista vazia, sem
     aviso. A rodada de conserto do lote tirou o mesmo padrão de
     `conferir_notas`. *Fonte:* `F5/progress.md` (ferramentas); o ledger.
 
+    **DEPOIS DA 0.16.** O `git log` da mesma faixa, logo acima (o resumo), já
+    avisa quem publica quando o git falha; só uma segunda falha, isolada, fica
+    calada. Custo: ~5 linhas.
+
 22. **ferramentas · A conferência dos alvos do fuzz lê o `ci.yml` inteiro.** Em
     `xtask/tests/empacotamento.rs`, `o_ci_roda_deny_e_fuzz` acha os alvos em
     qualquer job: um alvo movido para o job `deny` passa. *Fonte:*
     `F5/progress.md` (ferramentas); o ledger.
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: no `ci.yml` de hoje, os
+    cinco alvos estão no `fuzz-curto`. Custo: ~5 linhas,
+    `passos_do_job_do_ci("fuzz-curto")`.
 
 23. **ferramentas · O guarda do passo `--locked` não olha `continue-on-error`
     nem `if:`.** Em `xtask/tests/empacotamento.rs`, `o_ci_roda_deny_e_fuzz`
@@ -9253,15 +9421,24 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     `continue-on-error` nem o `if:` dele: um passo `--locked` que não reprova o
     job passaria. *Fonte:* `F5/progress.md` (ferramentas); o ledger.
 
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: o passo `--locked` de hoje
+    não tem `continue-on-error` nem `if:`. Custo: ~6 linhas.
+
 24. **ferramentas · O teste do `git tag` na hora de montar só confere o
     aviso.** Em `xtask/tests/empacotamento.rs`,
     `o_corpo_do_release_avisa_quando_o_git_nao_lista_as_tags_na_hora_de_montar`
     não confere o corpo. *Fonte:* o ledger (ferramentas).
 
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: o que falta é só no teste.
+    Custo: ~5 linhas.
+
 25. **K2 · O `try/catch` em volta de `dono.anotarRecusa` no avatar não tem
     prova.** Em `apps/seele-app/ui/base.js`, no `.catch` do avatar
     contribuído. Com o dono de verdade, o caminho é inalcançável. *Fonte:* o
     ledger (K2).
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: com o dono de verdade, o
+    caminho não se alcança. Custo: ~20 linhas de bancada.
 
 26. **K2 · O `recusar` do retrato pelo evento `error` não tem rede.** Em
     `mods-regiao.js` (`montarRetrato`), a recusa chamada por `estado.naoAbriu`
@@ -9269,11 +9446,18 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     lance dentro dela não cai no `.catch` que os outros caminhos de recusa
     têm. Ficou fora do lote K2. *Fonte:* o ledger (K2).
 
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: o retrato volta à inicial
+    antes de chamar o dono (`tirarAImagem` primeiro), e um dono que lance só
+    deixa um erro no console. Custo: ~5 linhas.
+
 27. **K3 · A chave do teto do som não tem prova.** Em `mods-regiao.js`
     (`recusarPeloTetoDoSom`), a anotação leva a chave do teto, que a aba
     DIAGNÓSTICO junta numa vaga só. Perdê-la só devolve aquele caminho ao
     comportamento de antes, e nenhum número sai errado. *Fonte:*
     `F5/progress.md` (K3); o ledger.
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: perder a chave não deixa
+    número errado. Custo: ~15 linhas de bancada.
 
 28. **M1 · A margem de detecção do T6f caiu.** Em
     `crates/seele-core/src/encontro.rs`,
@@ -9281,24 +9465,42 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     uns 50 ms de margem. Isso só enfraquece a reversão: o teste não reprova à
     toa. *Fonte:* o ledger (M1).
 
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: a margem menor só
+    enfraquece a reversão.
+
 29. **P53 · Nenhum guarda mede o tamanho da frase de `TemAtalho`.** Em
     `apps/seele-app/tests/frontend.rs`: a frase de `NomeRecusado` tem guarda de
     tamanho, e a de `TemAtalho`, que não tem dicionário, não tem. *Fonte:*
     `F5/progress.md` (P53); o ledger.
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: nenhum defeito visto na
+    frase de `TemAtalho`. Custo: ~10 linhas.
 
 30. **P53 · O teste do atalho compara duas formas que divergem.** Em
     `apps/seele-app/src/mods.rs`, `a_recusa_do_atalho_fica_no_registro_com_o_caminho`
     compara com `display()`, e o `recusa=` sai por `Debug`: as duas divergem
     com `\` ou `"` no caminho. *Fonte:* o ledger (P53).
 
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: o teste é `#[cfg(unix)]`,
+    e o caminho temporário não tem `\` nem `"`. Custo: 2 linhas, comparar pela
+    `caminho_no_registro`.
+
 31. **P54 · Faltam duas cenas.** Em `apps/seele-app/bancada/qualidade-da-voz.cjs`:
     o escolhido que é o próprio padrão, e o escolhido que sumiu da lista.
     *Fonte:* relatório do P54, Preocupação 2; `F5/progress.md` (P54).
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente, lido em `marcarUmaLista`:
+    nas duas cenas, nada mente. Com o escolhido sendo o padrão, a linha do
+    padrão nomeia o próprio aparelho, e a dele diz EM USO; com o escolhido
+    sumido, nenhuma linha diz ESCOLHIDO, e a do padrão nomeia o padrão do
+    sistema. Custo: ~40 linhas de bancada.
 
 32. **P54 · Uma asserção redundante e um acesso sem mensagem.** Na mesma
     bancada, `!da(2).nome.includes(...)` repete o que outra asserção já
     confere, e `da(i)` lança `TypeError` sem mensagem se a linha `""` faltar.
     *Fonte:* `F5/progress.md` (P54), que o resume; o ledger.
+
+    **DEPOIS DA 0.16.** Estética da bancada. Custo: 2 linhas.
 
 33. **J · A frase do guarda de ordem culpa a faixa.** Em
     `apps/seele-app/tests/frontend.rs`, a mensagem «`abrirServer` mostra a
@@ -9308,16 +9510,25 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     tropeçar no guarda lê a explicação errada uma vez. *Fonte:*
     `F5/progress.md` (J); o ledger, da re-revisão da rodada 3.
 
+    **DEPOIS DA 0.16.** É mensagem de teste. Custo: 2 linhas.
+
 34. **J · `without_comments` conta um `// nome` depois de uma string.** Em
     `frontend.rs`, `fn without_comments` não tira o comentário que vem depois
     de uma string na mesma linha. É falso positivo, do lado seguro. *Fonte:*
     `F5/progress.md` (J); o ledger.
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: é falso positivo, do lado
+    seguro.
 
 35. **J · A bancada da faixa cobre uma cena só.** Em
     `apps/seele-app/bancada/ajustes-v013.cjs`, a faixa no primeiro quadro é
     medida só na cena de reabrir com o microfone mudo; e um erro lançado por
     `setTimeout` depois da abertura por link não chega a `errosDoLink`.
     *Fonte:* `F5/progress.md` (J); o ledger.
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: não foi medido, porque é
+    bancada de navegador, e nada no código aponta defeito presente. Custo: ~30
+    linhas.
 
 36. **J · A troca de modo sem medida do atraso, e a faixa regravada.** Na
     mesma bancada, a cena da troca de modo espera até 3 s pela faixa e não
@@ -9326,12 +9537,18 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     custo de DOM, e não defeito dito a quem usa. *Fonte:* relatório do J,
     rodada 3; o ledger.
 
+    **DEPOIS DA 0.16.** Custo de DOM, e não defeito: `#server-contexto` não tem
+    `aria-live`, e regravar o mesmo texto não é anunciado de novo. Custo: ~3
+    linhas.
+
 37. **K4 · Moldes da bancada ainda dão `uri` ao som do pacote.** Em
     `apps/seele-app/bancada/regiao-do-mod.cjs`, uns vinte moldes além dos dez
     tirados, por exemplo perto das linhas 1744, 1852, 3083, 3433 e 4958 em
     09/10. O Rust não manda mais esse `uri`, e a janela não o lê: é
     inofensivo, mas o molde deixou de ser o que o Rust manda. *Fonte:*
     relatório do K4, rodada 1, «Preocupações da rodada», 1.
+
+    **DEPOIS DA 0.16.** Os moldes com `uri` seguem lá, e são inofensivos.
 
 38. **G-servidor · O guarda do ponto de produção só olha o texto.** Em
     `crates/seele-server/src/alcance/encontro.rs`, `recusar_a_producao`
@@ -9340,10 +9557,15 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     `$SEELE_ENCONTRO` não há ponto, e só chega a esse caso quem aponta um nome
     de propósito. *Fonte:* relatório do G-servidor, Preocupação 3.
 
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: `recusar_a_producao` só
+    existe sob `cfg(test)` ou com a feature de teste, e em produção é vazio.
+
 39. **G-servidor · Três guardas de ambiente no `seele-conformance`.**
     `crates/seele-conformance/tests/ambiente/mod.rs` repete a forma do
     `AmbienteDoEncontro` de `quarto_pelo_link.rs`, que o lote não tocou por
     causa da 8384. *Fonte:* relatório do G-servidor, Preocupação 4.
+
+    **DEPOIS DA 0.16.** Duplicação de teste.
 
 40. **G-servidor · O custo da trava sem UPnP.** Os testes de hospedagem de
     `crates/seele-server/src/hospedagem.rs` andam em fila pela trava do
@@ -9353,6 +9575,9 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     passar de 20 s. É estimativa: **falta** medir na CI. *Fonte:* relatório do
     G-servidor, Preocupação 2.
 
+    **DEPOIS DA 0.16.** É estimativa de tempo de CI, e não do produto; falta
+    medir na CI.
+
 41. **Z1 · A prova do app ainda roda num processo só.** Em
     `apps/seele-app/src/main.rs`,
     `uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada` roda a ordem
@@ -9360,6 +9585,9 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     o guarda de texto `xtask/tests/log_com_segundo_despachante.rs`. O detalhe
     está na pendência 56. *Fonte:* relatório do Z1, «Preocupações da rodada
     1», 2.
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: a ordem forçada é coberta
+    por `xtask/tests/log_com_segundo_despachante.rs`, que existe.
 
 42. **M1 · O `Espiao` do `seele-ffi` ainda duplica o assinante de teste.** Em
     `crates/seele-ffi/src/lib.rs`, `mod trilha_no_log`, o `Espiao` é um
@@ -9369,6 +9597,9 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     plano da F5 deixou como opcional. *Fonte:*
     `docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, lote M1, «4. P51-19»;
     o relatório do M1.
+
+    **DEPOIS DA 0.16.** Só nota: o `Espiao` segue em `mod trilha_no_log`, e o
+    plano da F5 o deixou como opcional.
 
 ### Texto
 
@@ -9381,12 +9612,17 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     git grep -n "guardou a impressão de um link" -- crates
     ```
 
+    **DEPOIS DA 0.16.** O comentário segue lá, num teste. Custo: 1 linha.
+
 44. **P54 · O cabeçalho da tabela e o primeiro comentário de
     `marcarUmaLista`.** Em `qualidade-da-voz.cjs`, o cabeçalho novo da tabela
     ficou confuso. Em `apps/seele-app/ui/tela-server.js`, o primeiro
     comentário de `marcarUmaLista` diz «A linha do padrão diz no que ela deu»
     sem a condição: só quando o padrão é a escolha. *Fonte:* `F5/progress.md`
     (P54), que o resume; o ledger.
+
+    **DEPOIS DA 0.16.** É texto: o comentário de `marcarUmaLista` segue lá, e o
+    cabeçalho da tabela é da bancada. Custo: 2 linhas.
 
 ### Para o dono conferir em tela
 
@@ -9398,6 +9634,9 @@ commit, e por isso cada item diz o nome da função, do teste ou da constante.
     (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, lote P54); a outra é a
     linha sem nome, e a troca é de uma linha.
     *Fonte:* relatório do P54, Preocupações 1 e 4.
+
+    **DO DONO.** O plano aceitava as duas saídas, e qual delas fica é decisão
+    de tela. A troca é de uma linha.
 
 ### O que a revisão do lote R deixou
 
@@ -9417,6 +9656,11 @@ pendência. A revisão dele deixou:
     instalado). A revisão do R o marcou com prioridade alta, pelo ADR 0045.
     *Fonte:* relatório do R, «Observações» (o M3 da revisão).
 
+    **JÁ FECHADO.** Pelo lote W da F5, em `645819a2`. Conferido em
+    `aceitarOsMods`: `obterOConjunto` vem antes de `aceitar_mods`, a pergunta é
+    conferida antes e depois, e quem desiste no meio passa por
+    `esquecer_aceite_de_mods`.
+
 47. **R · O segredo vive no Rust mais que a tentativa.** `Destino.segredo`
     (`crates/seele-core/src/enlace.rs`) fica pela sessão inteira, e a
     reconexão automática do núcleo o reenvia. `Session.abertura.entrar`
@@ -9424,11 +9668,25 @@ pendência. A revisão dele deixou:
     vida do processo, e `Session.convite` guarda o convite lido, com o token.
     *Fonte:* relatório do R, «Observações» (o M4 da revisão).
 
+    **DEPOIS DA 0.16.** Não chega à pessoa: nenhum caminho de hoje leva o
+    segredo a um log ou à tela. Lido em todo `?campo` dos `tracing` do núcleo,
+    da FFI, do app, do `seele-proto`, do `seele-sessao` e do `session.rs` do
+    servidor, e em todo `format!` com o convite, o token ou o segredo; a
+    entrada da janela registra o `alvo`, e o token vai à parte. O
+    `--entrar <link>` do lançador vai na linha de comando do processo filho,
+    que quem lê a lista de processos da própria máquina vê, e nenhuma linha do
+    `seele.log` o escreve. Encurtar a vida do segredo é escolher entre a
+    reconexão automática e o segredo na memória.
+
 48. **R · O token é esquecido depois de `NicknameTaken`.** Em
     `apps/seele-app/ui/tela-boot.js`, a credencial da tentativa só vive na
     chamada de `conectar` e segue apenas para a pergunta dos MODs. Com o apelido
     tomado, ela é esquecida, e a pessoa tem de colar o link de novo, embora o
     convite siga válido. *Fonte:* relatório do R, «Observações»; o ledger.
+
+    **JÁ FECHADO.** Pelo lote W da F5, em `8f5d54d5`: depois de um
+    `NicknameTaken`, a tentativa seguinte ao mesmo servidor leva a credencial
+    que a recusa não gastou (`recusaDoApelido`, em `tela-boot.js`).
 
 49. **R · Outros tipos com `derive(Debug)` carregam o segredo.**
     `ConviteLido.token` e `Abertura.entrar` (`apps/seele-app/src/main.rs`) e
@@ -9440,6 +9698,12 @@ pendência. A revisão dele deixou:
     (`crates/seele-proto/src/control.rs`) também carrega o segredo num
     `derive(Debug)`, e é arquivo da F1. *Fonte:* o ledger (re-revisão do R).
 
+    **DEPOIS DA 0.16.** Não chega à pessoa: nenhum caminho de hoje leva o
+    segredo a um log ou à tela, e nenhum dos três é logado (a mesma leitura do
+    item 47). É endurecimento. Custo: ~40 linhas, um `Debug` à mão como o de
+    `a910b2e2`, em `ConviteLido` e `Abertura` (`main.rs`) e em `Convite`
+    (`seele-proto`, arquivo da F1).
+
 50. **Achado pelo R · Um guarda anterior casa com `reconectar(`.** Em
     `apps/seele-app/tests/frontend.rs`,
     `entering_another_server_leaves_this_one_and_says_so_with_both_names`
@@ -9447,6 +9711,10 @@ pendência. A revisão dele deixou:
     `desconectar(`. É o mesmo tipo do M5 da revisão do R, que o R consertou no
     guarda dele (`8097d310`). *Fonte:* relatório do R, «Rodada 1 de conserto»,
     M5.
+
+    **DEPOIS DA 0.16.** Guarda sem defeito presente: hoje `trocarDeServidor`
+    faz `await ejetar()` antes de `await conectar(`. Custo: 2 linhas, no molde
+    de `8097d310`.
 
 51. **R · Duas metades do guarda da credencial ficam sem reversão.** Em
     `apps/seele-app/tests/frontend.rs`,
@@ -9457,6 +9725,13 @@ pendência. A revisão dele deixou:
     cegueira delas é coberta só pelas contagens (duas linhas exatas de
     `join_secret`, e pelo menos 30 campos do `Snapshot` lidos). É um guarda que
     prova menos do que parece. *Fonte:* relatório do R, «3. O guarda».
+
+    **CONSERTADO.** No lote 58-4, `085524dd`. As duas metades que o item cita
+    já reprovavam: a terceira linha com `join_secret` e o fechar da janela, no
+    `main.rs`. A reversão achou quatro que passavam caladas, e o guarda
+    apertado agora as pega: um campo a menos no `Snapshot` (a contagem passa a
+    exata), um campo `pub(crate)`, os nomes em inglês, e o `prevent_close` ou o
+    `prevent_exit` fora do `main.rs`. Merge `3f81347f`.
 
 52. **W2 · A tentativa substituída ainda apaga a linha de etapa da nova.** Em
     `apps/seele-app/ui/tela-boot.js`, o `finally` de `conectar` chama
@@ -9477,6 +9752,17 @@ pendência. A revisão dele deixou:
     O que falta, em qualquer forma, é a identidade da tentativa nos eventos de
     etapa. *Fonte:* relatório do W2 (`lote-w2-report.md`), a rodada da
     revisão.
+
+    **CONSERTADO.** No lote 58-3, `bb5d9bdf`: o `finally` de `conectar` só
+    apaga a etapa na tentativa mais nova, e as etapas que chegam entre o começo
+    da nova e o `connect` dela não vão à linha. A prova são três casos na
+    `ajustes-v013.cjs`, com o duble emitindo `ConnectStageChanged` e revogando
+    a geração como o `main.rs`, os três vermelhos na base. Merge `eea746ae`.
+    **Fica** uma janela pequena, não medida: quando a janela não tem apelido
+    lembrado, a etapa de uma tentativa velha que termina enquanto a nova está
+    no `apelido_local` ou na pergunta do nome fica na linha até o
+    `mostrarEtapa(null)` da nova. *Fonte:* a ressalva 3 de
+    `F5/lote-58-3-report.md`.
 
 53. **W2 · O roteiro `tools/roteiros/aceite-de-mods.js` não prova o aceite.**
     Na base e no W2, ele relata `gravou o sim: alvo=undefined conjunto=undefined`,
@@ -9504,6 +9790,10 @@ pendência. A revisão dele deixou:
     **O que fica:** nenhum roteiro roda no CI nem no `publicar.sh`. Isso vai
     para o lote RT. *Fonte:* `F5/lote-w3-report.md`.
 
+    **JÁ FECHADO.** O roteiro foi consertado no W3 (`353859c2`), e o que
+    ficava, o roteiro fora do CI, o RT fechou (`adf72932`): o
+    `aceite-de-mods.js` roda no `ci.yml` e no `publicar.sh`, com `exigir`.
+
 54. **W2 · Uma tentativa de entrada velha que entra depois da nova toma a tela
     dela, e talvez a conexão.** Isso é anterior ao W2: a base é igual.
     - **Na janela.** No caminho de sucesso de `conectar` (`tela-boot.js`), o
@@ -9526,6 +9816,12 @@ pendência. A revisão dele deixou:
       a conexão quando a geração dele já não está de pé.
     *Fonte:* o relatório do W2 (`F5/lote-w2-report.md`), que o registra como
     pendência 58, e a revisão da rodada 2 do W2 (R2-M2, no ledger).
+
+    **JÁ FECHADO.** Pelo lote E54 da F5, merge `e05e1681`, e não marcado aqui
+    até 21/10/2026. Cada «Falta»: o lado do Rust foi medido com dois `Daemon`
+    (`05f0326c`); a entrada que volta substituída não entra na tela e vai ao
+    registro (`largarAEntrada`, em `tela-boot.js`); e o `connect` velho larga a
+    conexão (`largar_a_substituida`, no `main.rs`).
 
 55. **P61 · A recusa local de um campo grande demais não chega à janela.
     Consertada em 11/10/2026 pelo lote C55, com o apelido já gravado, e a sala
@@ -9679,6 +9975,11 @@ pendência. A revisão dele deixou:
         «expected Session» no `seele.log` de quem liga, e a FFI devolve
         `Refused { reason: Incompatible }`. É a tarefa 6e (Task 16 do plano da
         F7, à espera da F1). O S64 só anota.
+
+    **JÁ FECHADO**, como o título do item diz: o C55 (merge `17f641d9`) e o S64
+    (`b4d1e8f8`, merge `3c997058`). O que sobra é de outras frentes: da F4, o
+    `connect` da ponte, ainda em `AINDA_A_FAZER` no `ponte-web.js` (a tarefa
+    34); da F7, a tarefa 6e.
 
 ### Fora da F5, só como referência
 
@@ -9959,7 +10260,13 @@ relatório é o `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-r63-report.md`.
   que ele pôs para ele pôr de novo. A (b) **não** está resolvida no celular. Dona: a F8. E, para a F8, desde o
   lote R63: o comentário de `celular-conversa.js:62-63` («a lista é refeita quando chega mensagem») ficou falso; o
   código está certo com a conversa reconciliada, porque o ouvinte é delegado e lê o `data-mensagem` na hora do
-  toque. A troca do comentário é dela;
+  toque. A troca do comentário é dela. **O ENTRAR e o ENTRAR MUDO, consertados em 16/10/2026 pela F8** (escrito aqui
+  em 21/10): `0c7fbfe0` (o `CASCA.vestirASala`, o ponto da casca na linha montada de cada sala), `a0c44ec0` (o
+  `desenharCanais` o chama antes de reconciliar a coluna de salas) e `8094a23a` (o `celular-servidor.js` veste a linha
+  montada, e o ENTRAR e o ENTRAR MUDO são reconciliados pelo id). A prova é o caso `salas-pelo-id` da
+  `tools/bancada-do-celular.py` e o G8 de `apps/seele-app/tests/celular.rs`. **Fica, da F8:** o comentário de
+  `celular-conversa.js` (linha 63) ainda diz «a lista é refeita quando chega mensagem»; o `8094a23a` trocou os
+  «refeita» do `celular-servidor.js` e do `celular-pessoas.js`, e não o deste. É uma linha;
 - **a própria mensagem gravada perde o nó — consertada na casca no lote ECO, e só vale no app com o eco da F1.**
   Até o lote, na conversa, a pendente tinha a chave da máquina (`pendente:<client_message_id>`) e a confirmada a do
   servidor (`mensagem:<id>`), e as duas não casavam: quando a mensagem que a própria pessoa mandou era gravada, a
