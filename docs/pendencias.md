@@ -9778,21 +9778,29 @@ pendência. A revisão dele deixou:
     `connect`, e a velha apagava a da nova ao terminar. Quatro reversões
     reprovam, cada uma na metade dela.
 
-    **CONSERTADO.** No lote 58-3, `bb5d9bdf`: o `finally` de `conectar` só
-    apaga a etapa na tentativa mais nova, e as etapas que chegam entre o começo
-    da nova e o `connect` dela não vão à linha. A prova são três casos na
-    `ajustes-v013.cjs`, com o duble emitindo `ConnectStageChanged` e revogando
-    a geração como o `main.rs`, os três vermelhos na base. Merge `eea746ae`.
+    **CONSERTADO, com um mecanismo só: o do `0975f08a`.** O lote 58-3 da F5
+    (`bb5d9bdf`, merge `eea746ae`) consertou o item de novo sem ver o
+    `0975f08a`, porque a F5 partiu de antes da web: uma bandeira,
+    `etapasCaladas`, posta no `++tentativas` e tirada antes do `connect`, e o
+    merge deixou os dois filtros no ouvinte de etapas (22ª integração, 21/10).
+    O lote 52b tirou a bandeira (`a45f3dc7`). Fica a tentativa na etapa, que
+    filtra pela identidade da tentativa e não pelo tempo, e não cala a etapa de
+    quem não passou por `conectar`; e fica o `esta === tentativas` do
+    `finally`, que era dos dois. As duas provas ficam, e cada uma reprova pela
+    reversão do mecanismo que ficou:
+    - `tools/roteiros/etapa-da-tentativa.js`: sem o filtro da tentativa
+      reprova a metade A, e sem o `esta === tentativas` do `finally`, a B;
+    - os três casos de `aLinhaDeEtapaEDaMaisNova`, na `ajustes-v013.cjs`: sem
+      o filtro da tentativa reprovam o 2 e o 3, e sem o `esta === tentativas`,
+      o 1. O duble deles passou a devolver a tentativa do `connect` em cada
+      etapa, como a `carga_do_evento` (`fd10230c`): antes, o 2 e o 3 só
+      passavam pela bandeira.
+
     **Fica** uma janela pequena, não medida: quando a janela não tem apelido
     lembrado, a etapa de uma tentativa velha que termina enquanto a nova está
     no `apelido_local` ou na pergunta do nome fica na linha até o
     `mostrarEtapa(null)` da nova. *Fonte:* a ressalva 3 de
     `F5/lote-58-3-report.md`.
-
-    **Consertado duas vezes** (registrado na 22ª integração, 21/10): a F5 partiu
-    de antes da web e não viu o `0975f08a`. Os dois filtros ficam juntos no
-    ouvinte de etapas, e a escolha de um só, com as provas dos dois, está com a
-    F5.
 
 53. **W2 · O roteiro `tools/roteiros/aceite-de-mods.js` não prova o aceite.**
     Na base e no W2, ele relata `gravou o sim: alvo=undefined conjunto=undefined`,

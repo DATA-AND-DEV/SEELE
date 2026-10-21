@@ -168,3 +168,13 @@ tabela. Cada uma foi devolvida idêntica, conferida com `cmp`.
    `/Users/dev-alexandre/SEELE/target` (`debug/{deps,build,.fingerprint}`).
    Nada foi movido. O `wasi-sdk` não foi clonado, porque o lote não pede o
    `xtask web`: não mudou nada de Rust nem de WASM.
+
+## Depois: a bandeira saiu no lote 52b
+
+A `etapasCaladas` saiu de `tela-boot.js` no lote 52b (`a45f3dc7`). O
+mecanismo que ficou é o da F4 (`0975f08a`): o `connect` leva a tentativa da
+janela, a `Bridge` a devolve em cada `ConnectStageChanged`, e o ouvinte mostra
+só as da mais nova. O `esta === tentativas` do `finally` fica. Os três casos
+desta cena ficam também: o duble passou a devolver a tentativa do `connect`
+na etapa (`fd10230c`), e sem o filtro da tentativa reprovam o 2 e o 3. As
+ressalvas 1 e 2 acima falam da bandeira e valem só para ela.
