@@ -262,20 +262,28 @@ const PEDIDOS_RECUSADOS = {
   SetNickname: "TROCAR O SEU APELIDO",
   SetPersonIcon: "TROCAR A SUA IMAGEM",
   SetServerIcon: "TROCAR A IMAGEM DO SERVIDOR",
-  BanPerson: "BANIR",
+  // «Essa»: o fio leva só o ordinal do pedido, e não quem; aponta para quem
+  // a pessoa acabou de tentar banir.
+  BanPerson: "BANIR ESSA PESSOA",
   RemoveMessage: "REMOVER A MENSAGEM",
   DeleteVoiceRoom: "APAGAR A SALA DE VOZ",
   DeleteChannel: "APAGAR O CANAL",
-  WeighChannel: "CONTAR O QUE HÁ NO CANAL",
+  // O único chamador é o APAGAR (`peso_da_linha`): o verbo é o da caixa dele.
+  WeighChannel: "CONTAR O QUE HÁ NO CANAL ANTES DE APAGAR",
 };
 
 /**
  * **Por que um pedido não deu, e o que fazer**, por `CausaDaRecusa`.
  *
  * As três são as que a pessoa consegue resolver (o fio as escolheu assim), e
- * cada uma diz o remédio: escolher outro nome, deixar para lá o que sumiu, ou
- * tentar de novo e avisar quem hospeda. O detalhe da falha fica no registro do
- * servidor, e a frase manda até ele em vez de inventar um motivo.
+ * cada uma diz o remédio: escolher outro nome, saber que o que sumiu não volta,
+ * ou tentar de novo. O detalhe da falha fica no registro do servidor, e a frase
+ * diz onde ele está em vez de inventar um motivo.
+ *
+ * **Nenhuma diz quem.** O `NaoExiste` sai também quando a retenção levou a
+ * mensagem (`RetencaoApagouHistorico`), e aí ninguém apagou; o
+ * `FalhaDoServidor` vale para quem hospeda a própria sala pessoal, a quem
+ * «avise quem hospeda» mandaria avisar a si mesmo (revisão da F5, 21/10).
  */
 const CAUSAS_DE_RECUSA = {
   NomeTomado: {
@@ -284,11 +292,11 @@ const CAUSAS_DE_RECUSA = {
   },
   NaoExiste: {
     causa: "ISSO JÁ NÃO EXISTE",
-    fazer: "Alguém apagou antes de você.",
+    fazer: "Sumiu antes de o seu pedido chegar; não há o que refazer.",
   },
   FalhaDoServidor: {
     causa: "O SERVIDOR NÃO CONSEGUIU",
-    fazer: "Tente de novo. Se repetir, avise quem hospeda: o motivo está no registro do servidor.",
+    fazer: "Tente de novo. Se repetir, quem hospeda acha o motivo no registro do servidor.",
   },
 };
 

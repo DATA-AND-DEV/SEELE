@@ -11,10 +11,12 @@ for (const [pedido, causa, esperada] of [
   ["SetNickname", "NomeTomado",
     "NÃO DEU PARA TROCAR O SEU APELIDO: ESSE NOME JÁ É DE OUTRA PESSOA.\nEscolha outro e tente de novo."],
   ["DeleteChannel", "NaoExiste",
-    "NÃO DEU PARA APAGAR O CANAL: ISSO JÁ NÃO EXISTE.\nAlguém apagou antes de você."],
+    "NÃO DEU PARA APAGAR O CANAL: ISSO JÁ NÃO EXISTE.\nSumiu antes de o seu pedido chegar; não há o que refazer."],
+  ["BanPerson", "FalhaDoServidor",
+    "NÃO DEU PARA BANIR ESSA PESSOA: O SERVIDOR NÃO CONSEGUIU.\nTente de novo. Se repetir, quem hospeda acha o motivo no registro do servidor."],
   // A ponte manda «?» para um ordinal que esta versão não conhece.
   ["?", "FalhaDoServidor",
-    "NÃO DEU: O SERVIDOR NÃO CONSEGUIU.\nTente de novo. Se repetir, avise quem hospeda: o motivo está no registro do servidor."],
+    "NÃO DEU: O SERVIDOR NÃO CONSEGUIU.\nTente de novo. Se repetir, quem hospeda acha o motivo no registro do servidor."],
 ]) {
   SEELE_QUADRO.notice = { severity: "Warning", reason: { PedidoRecusado: { pedido, causa } }, operator_text: null };
   window.__SEELE_EMITIR("RosterChanged");
