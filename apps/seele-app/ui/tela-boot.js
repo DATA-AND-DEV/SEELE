@@ -1070,6 +1070,15 @@ async function cumprirAAbertura() {
   if (pedido.entrar) {
     try {
       const convite = await invoke("analisar_convite", { link: pedido.entrar });
+      // **O `v=` do link já diz outra linha**: o Rust decidiu antes de discar
+      // (`versoes::para_entrar`), e a abertura segue pelo launcher, como o
+      // link colado no painel faz, sem discar num servidor cujo protocolo este
+      // app não fala.
+      const ir = convite.para_entrar;
+      if (ir && typeof ir === "object") {
+        await entrarPelaOutraVersao(ir, pedido.entrar);
+        return;
+      }
       // **O link vai junto, como o colado no painel** (tarefa 13 da F6): se o
       // servidor recusar por falar outra versão, é ele que leva o SEELE dela
       // já ao servidor (`entrarPelaRecusa`). Sem ele, a outra versão abria na
