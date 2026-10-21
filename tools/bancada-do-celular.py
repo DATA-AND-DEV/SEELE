@@ -682,7 +682,13 @@ def entrada_desfechos(pg: Page) -> list[str]:
         depois = pg.evaluate("""() => ({ tokens: window.__conexoes.map((c) => c.credencial),
             aceite: JSON.parse(localStorage.getItem("seele.aceites-de-mods") ?? "{}")["3cbcfb02".repeat(8)] ?? null,
             aberto: !document.getElementById("mods-aceite").hidden })""")
-        if depois != {"tokens": ["7K4MNPQRSTVWXYZ23456", "7K4MNPQRSTVWXYZ23456"], "aceite": "c1", "aberto": False}:
+        # O aceite guardado é `{conjunto, quando}`, com `quando` em segundos, como o
+        # `Aceite` do desktop (F4, `a1911c79`); antes era só o conjunto.
+        aceite = depois.get("aceite") or {}
+        if (depois.get("tokens") != ["7K4MNPQRSTVWXYZ23456", "7K4MNPQRSTVWXYZ23456"]
+                or not isinstance(aceite, dict) or aceite.get("conjunto") != "c1"
+                or not isinstance(aceite.get("quando"), int) or aceite.get("quando") <= 0
+                or depois.get("aberto") is not False):
             falhas.append(f"o ACEITAR não entrou de novo com o mesmo token e o sim gravado: {depois}")
     # O RECUSAR encerra a tentativa e volta à tela de início.
     usar_a_entrada(pg, link="https://pagina.invalid/#vencido")
