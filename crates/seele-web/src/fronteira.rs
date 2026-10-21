@@ -56,6 +56,25 @@
 //! | `previa_julgar(pedido, bytes)` | 0 | o `Preview` do desktop |
 //! | `tela_quadro(tipo, tamanho)` | 0 | os cinco bytes do cabeçalho de um quadro que sobe (3.10) |
 //!
+//! **Os MODs da sessão** (Tarefa 2.6; [`crate::mods`]): a página entrega os
+//! pacotes que guardou (ou os bytes que baixou), um arquivo por vez, e o
+//! comando lê o último entregue (ou todos, a lista) e os esquece.
+//!
+//! | função | devolve | na saída |
+//! |---|---|---|
+//! | `pacotes_limpar()` | — | — |
+//! | `pacote_novo(lugar)`, `pacote_arquivo(caminho, bytes)` | — | — |
+//! | `mods_na_tela()` | 0 | a lista do `mods_instalados` do desktop |
+//! | `mod_codigo(pedido)` | 0 | `{"fonte", "capacidades"}` |
+//! | | 1 | `{"Recusado": {"motivo"}}` |
+//! | `catalogo_endereco()` | 0 | o endereço do catálogo |
+//! | `catalogo_ler(catalogo, assinatura)` | 0 | nada: conferido e lido |
+//! | | 1 | a `FalhaNoCatalogo` do desktop |
+//! | `catalogo_planejar(catalogo, assinatura, revogacoes, assinatura, pedido)` | 0 | `{"arquivos": [[caminho, url], …], "hash"}` |
+//! | | 1 | a `FalhaNoCatalogo` do desktop |
+//! | `catalogo_conferir(hash)` | 0 | `{"id", "hash"}` |
+//! | | 1 | a `FalhaNoCatalogo` do desktop |
+//!
 //! **A voz que sai e a que chega** (Tarefa 3.3, lotes A e C; [`crate::voz`]),
 //! na instância da página, uma de cada lado:
 //!
@@ -134,6 +153,8 @@ thread_local! {
     static LIGACAO: RefCell<Option<Ligacao>> = const { RefCell::new(None) };
     static PAGINA: RefCell<Option<DaPagina>> = const { RefCell::new(None) };
     static BATERIA: RefCell<Option<seele_sessao::battery::Battery>> = const { RefCell::new(None) };
+    static PACOTES: RefCell<Vec<crate::mods::Guardado>> = const { RefCell::new(Vec::new()) };
+    static CHAVE_DO_CATALOGO: RefCell<Option<String>> = const { RefCell::new(None) };
     static FLUXOS: RefCell<(u32, std::collections::BTreeMap<u32, FluxoQueChega>)> =
         const { RefCell::new((0, std::collections::BTreeMap::new())) };
     static ENVIO: RefCell<Option<Envio>> = const { RefCell::new(None) };
@@ -647,6 +668,220 @@ pub unsafe extern "C" fn ligacao_retomar(
     })
 }
 
+// ------------------------------------------------------ os MODs da sessão
+
+/// O texto de uma entrada, ou vazio quando ele não é UTF-8.
+fn texto_de(bytes: &[u8]) -> &str {
+    std::str::from_utf8(bytes).unwrap_or_default()
+}
+
+/// A recusa de um comando de MOD, no `FalhaNoMod` do desktop.
+fn recusa_de_mod(motivo: &str) -> u32 {
+    dizer(
+        serde_json::json!({ "Recusado": { "motivo": motivo } })
+            .to_string()
+            .into_bytes(),
+        1,
+    )
+}
+
+/// Esquece os pacotes que a página entregou.
+#[no_mangle]
+pub extern "C" fn pacotes_limpar() {
+    PACOTES.with(|p| p.borrow_mut().clear());
+}
+
+/// Começa um pacote guardado, sob o lugar (o hash) em que a página o guardou.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn pacote_novo(ptr: *const u8, len: usize) {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let lugar = texto_de(unsafe { entrada(ptr, len) }).to_owned();
+    PACOTES.with(|p| p.borrow_mut().push((lugar, Vec::new())));
+}
+
+/// Um arquivo do último pacote começado: o caminho de dentro, e os bytes.
+///
+/// # Safety
+///
+/// Os dois pares `ptr`/`len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn pacote_arquivo(
+    caminho_ptr: *const u8,
+    caminho_len: usize,
+    bytes_ptr: *const u8,
+    bytes_len: usize,
+) {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let caminho = texto_de(unsafe { entrada(caminho_ptr, caminho_len) }).to_owned();
+    // SAFETY: idem.
+    let bytes = unsafe { entrada(bytes_ptr, bytes_len) }.to_vec();
+    PACOTES.with(|p| {
+        if let Some((_, arquivos)) = p.borrow_mut().last_mut() {
+            arquivos.push((caminho, bytes));
+        }
+    });
+}
+
+/// **O `mods_instalados`** ([`crate::mods::na_tela`]): os pacotes entregues,
+/// como a janela os desenha. Devolve 0 com a lista, e esquece os pacotes.
+#[no_mangle]
+pub extern "C" fn mods_na_tela() -> u32 {
+    let guardados = PACOTES.with(|p| std::mem::take(&mut *p.borrow_mut()));
+    dizer(crate::mods::na_tela(guardados).to_string().into_bytes(), 0)
+}
+
+/// O último pacote entregue, para um comando que lê um só.
+fn o_pacote() -> Vec<(String, Vec<u8>)> {
+    PACOTES.with(|p| {
+        std::mem::take(&mut *p.borrow_mut())
+            .pop()
+            .map(|(_, arquivos)| arquivos)
+            .unwrap_or_default()
+    })
+}
+
+/// **O `codigo_do_mod`** ([`crate::mods::codigo`]): `{"id", "hash"}` sobre o
+/// último pacote entregue. Devolve 0 com `{"fonte", "capacidades"}`, ou 1 com
+/// `{"Recusado": {"motivo"}}`; e esquece os pacotes.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn mod_codigo(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido: serde_json::Value =
+        serde_json::from_slice(unsafe { entrada(ptr, len) }).unwrap_or_default();
+    let texto = |campo: &str| {
+        pedido
+            .get(campo)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    match crate::mods::codigo(&mut o_pacote(), &texto("id"), &texto("hash")) {
+        Ok(codigo) => dizer(codigo.to_string().into_bytes(), 0),
+        Err(motivo) => recusa_de_mod(&motivo),
+    }
+}
+
+/// A chave do catálogo que esta página confere: a embutida, ou a da prova.
+fn chave_do_catalogo() -> String {
+    CHAVE_DO_CATALOGO.with(|c| {
+        c.borrow()
+            .clone()
+            .unwrap_or_else(|| crate::mods::CHAVE_DO_CATALOGO.to_owned())
+    })
+}
+
+/// Onde o catálogo mora (`seele_sessao::catalogo::ENDERECO`). Devolve 0 com o
+/// endereço, sem a barra do fim.
+#[no_mangle]
+pub extern "C" fn catalogo_endereco() -> u32 {
+    dizer(seele_sessao::catalogo::ENDERECO.as_bytes().to_vec(), 0)
+}
+
+/// **O catálogo, antes de tudo**: conferido contra a chave e lido, como o
+/// `buscar_catalogo` do desktop faz antes de buscar as revogações. Devolve 0
+/// sem nada, ou 1 com a `FalhaNoCatalogo`.
+///
+/// # Safety
+///
+/// Os dois pares `ptr`/`len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn catalogo_ler(
+    catalogo_ptr: *const u8,
+    catalogo_len: usize,
+    assinatura_ptr: *const u8,
+    assinatura_len: usize,
+) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let catalogo = unsafe { entrada(catalogo_ptr, catalogo_len) };
+    // SAFETY: idem.
+    let assinatura = texto_de(unsafe { entrada(assinatura_ptr, assinatura_len) });
+    match seele_sessao::catalogo::ler_catalogo(catalogo, assinatura, &chave_do_catalogo()) {
+        Ok(_) => dizer(Vec::new(), 0),
+        Err(falha) => dizer(serde_json::json!(falha).to_string().into_bytes(), 1),
+    }
+}
+
+/// **O plano do `instalar_mod_do_catalogo`** ([`crate::mods::planejar`]): o
+/// catálogo, as revogações e as duas assinaturas como a página as baixou, e
+/// `{"id", "versao"}`. Devolve 0 com `{"arquivos": [[caminho, url], …],
+/// "hash"}`, ou 1 com a `FalhaNoCatalogo` do desktop.
+///
+/// # Safety
+///
+/// Os cinco pares `ptr`/`len` como em [`entrada`].
+#[no_mangle]
+#[allow(clippy::too_many_arguments, reason = "cinco blocos, um par cada")]
+pub unsafe extern "C" fn catalogo_planejar(
+    catalogo_ptr: *const u8,
+    catalogo_len: usize,
+    assinatura_ptr: *const u8,
+    assinatura_len: usize,
+    revogacoes_ptr: *const u8,
+    revogacoes_len: usize,
+    assinatura_das_revogacoes_ptr: *const u8,
+    assinatura_das_revogacoes_len: usize,
+    pedido_ptr: *const u8,
+    pedido_len: usize,
+) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`, para cada par.
+    let baixado = unsafe {
+        crate::mods::Baixado {
+            catalogo: entrada(catalogo_ptr, catalogo_len),
+            assinatura: texto_de(entrada(assinatura_ptr, assinatura_len)),
+            revogacoes: entrada(revogacoes_ptr, revogacoes_len),
+            assinatura_das_revogacoes: texto_de(entrada(
+                assinatura_das_revogacoes_ptr,
+                assinatura_das_revogacoes_len,
+            )),
+        }
+    };
+    // SAFETY: idem.
+    let pedido: serde_json::Value =
+        serde_json::from_slice(unsafe { entrada(pedido_ptr, pedido_len) }).unwrap_or_default();
+    let texto = |campo: &str| {
+        pedido
+            .get(campo)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    match crate::mods::planejar(
+        &baixado,
+        &chave_do_catalogo(),
+        &texto("id"),
+        &texto("versao"),
+    ) {
+        Ok(plano) => dizer(plano.to_string().into_bytes(), 0),
+        Err(falha) => dizer(serde_json::json!(falha).to_string().into_bytes(), 1),
+    }
+}
+
+/// **Os bytes que o plano trouxe** ([`crate::mods::conferir_baixados`]),
+/// entregues como o último pacote, contra o hash que o plano disse. Devolve 0
+/// com `{"id", "hash"}` (o lugar em que a página o guarda), ou 1 com a
+/// `FalhaNoCatalogo`; e esquece os pacotes.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn catalogo_conferir(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let esperado = texto_de(unsafe { entrada(ptr, len) }).to_owned();
+    match crate::mods::conferir_baixados(&mut o_pacote(), &esperado) {
+        Ok(guardar) => dizer(guardar.to_string().into_bytes(), 0),
+        Err(falha) => dizer(serde_json::json!(falha).to_string().into_bytes(), 1),
+    }
+}
+
 // ----------------------------------------------------------- a bateria
 
 /// O relógio da página em `Duration`: os milissegundos do `performance.now()`.
@@ -1137,9 +1372,24 @@ pub extern "C" fn voz_tocar_contas() -> u32 {
 pub mod prova {
     use seele_proto::control::{decode, encode_em, ClientMessage, ServerMessage};
 
-    use super::{dizer, dizer_o_link, entrada, erro, ENVIO};
+    use super::{dizer, dizer_o_link, entrada, erro, texto_de, CHAVE_DO_CATALOGO, ENVIO};
     use crate::voz::Envio;
     use crate::ErroDaPonte;
+
+    /// **Só para a bancada**: a chave do catálogo que esta página confere, no
+    /// formato do `.pub` do minisign. A bancada dos MODs serve um catálogo de
+    /// teste assinado por ela; o `.wasm` da página não tem esta porta, e só
+    /// confere a chave embutida (a regra 5 do `cargo xtask pacote-web`).
+    ///
+    /// # Safety
+    ///
+    /// `ptr` e `len` como em [`entrada`].
+    #[no_mangle]
+    pub unsafe extern "C" fn prova_chave_do_catalogo(ptr: *const u8, len: usize) {
+        // SAFETY: repassa o contrato desta função ao de `entrada`.
+        let chave = texto_de(unsafe { entrada(ptr, len) }).to_owned();
+        CHAVE_DO_CATALOGO.with(|c| *c.borrow_mut() = Some(chave));
+    }
 
     /// Um quadro de 20 ms passou: o carimbo de agora (0 sem envio).
     ///

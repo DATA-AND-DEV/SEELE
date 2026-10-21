@@ -49,42 +49,18 @@ fn manifesto_de_teste(id: &str) -> String {
 /// answers questions about the disk of whoever is running it.
 #[must_use]
 pub(crate) fn serve(config_dir: &Path, url_path: &str, hash: &str) -> Option<Vec<u8>> {
-    let mut parts = url_path.trim_start_matches('/').split('/');
-    let author = parts.next()?;
-    let name = parts.next()?;
-    let inside: Vec<&str> = parts.collect();
-    if inside.is_empty() || author.is_empty() || name.is_empty() {
-        return None;
-    }
-
-    let relative = seele_ffi::mods::caminho_interno(&inside)?;
-
     // **O mesmo pacote que a conferência acima aprovou**, achado pelo mesmo
     // hash. Achá-lo de outro jeito aqui seria conferir uma coisa e ler outra —
     // a forma clássica de uma checagem valer para um arquivo e a leitura
     // acontecer sobre outro.
-    let id = format!("{author}/{name}");
     let pacote = seele_ffi::mods::ler_por_hash(&config_dir.to_string_lossy(), hash).ok()?;
-    if pacote.id != id {
-        return None;
-    }
-    // Only what the manifest declares. That is the client script **and** the
-    // files the manifest lists under `arquivos` — a MOD may ship more than one
-    // file now, so the list grew and this guard did not change shape.
-    let declarados = pacote
-        .client
-        .iter()
-        .chain(pacote.arquivos.iter())
-        .any(|declarado| Path::new(declarado) == relative.as_path());
-    if !declarados {
-        return None;
-    }
-
+    // A regra do que um MOD serve é a do navegador também (Tarefa 2.6 da F4).
+    let relativo = seele_ffi::mods::caminho_declarado(&pacote, url_path)?;
     std::fs::read(
         config_dir
             .join(seele_ffi::mods::PACOTES)
             .join(hash)
-            .join(&relative),
+            .join(&relativo),
     )
     .ok()
 }
@@ -207,38 +183,9 @@ mod tests {
     }
 }
 
-/// Por que um pacote não pôde ser instalado.
-///
-/// Uma variante por recusa, com o motivo dentro — a mesma regra do resto desta
-/// ponte: a frase mora no `FRASES` do JavaScript, e ela precisa saber **qual**
-/// recusa foi para dizer o conserto.
-#[derive(Debug, Clone, serde::Serialize)]
-pub(crate) enum FalhaAoInstalarMod {
-    /// A pasta escolhida não tem `mod.json`.
-    ///
-    /// O engano mais provável de todos: apontar para a pasta que **contém** o
-    /// MOD em vez da pasta do MOD.
-    SemManifesto,
-    /// O `mod.json` existe e não vale, com o nome da recusa do `seele-core`.
-    ManifestoRecusado(String),
-    /// Há um atalho (link simbólico) dentro da pasta, com o caminho dele.
-    ///
-    /// **A recusa está certa, e a variante própria é para dizê-la.** Ver
-    /// [`copiar_arvore`] para o porquê de atalho não passar. O caso que a
-    /// separou de [`FalhaAoInstalarMod::NaoCopiei`] é a pasta de quem
-    /// desenvolve o MOD, com `node_modules/.bin/` cheia de atalhos: misturada
-    /// às falhas do disco, a tela não tinha como dizer qual era o atalho nem o
-    /// que fazer (pendência 53).
-    TemAtalho(String),
-    /// O disco recusou, e o que ele disse.
-    ///
-    /// **Aqui havia um `JaInstalado`**, e ele saiu com o endereçamento por
-    /// conteúdo. A recusa existia porque havia um lugar por identificador, e
-    /// escrever por cima de uma instalação boa podia quebrá-la. Pastas
-    /// endereçadas pelo conteúdo não se sobrescrevem: bytes iguais são a mesma
-    /// pasta, e bytes diferentes são outra.
-    NaoCopiei(String),
-}
+/// Por que um pacote não pôde ser instalado: o do `seele-sessao`, que o
+/// navegador usa também (Tarefa 2.6 da F4).
+pub(crate) use seele_ffi::catalogo::FalhaAoInstalarMod;
 
 /// Tira um pacote do cache local, e **só** o pacote.
 ///

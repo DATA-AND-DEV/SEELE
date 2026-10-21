@@ -4,7 +4,8 @@
 //
 //     node apps/seele-app/bancada/sessao-no-navegador.cjs \
 //       target/wasm32-unknown-unknown/release/seele_web.wasm \
-//       target/debug/examples/servidor_da_bancada
+//       target/debug/examples/servidor_da_bancada \
+//       target/wasm32-wasip1/release/seele_motor_web.wasm
 //
 // O servidor é o `Daemon` do `seeled` (`crates/seele-server/examples/
 // servidor_da_bancada.rs`), num endereço local; ele dá o link do navegador
@@ -54,11 +55,20 @@
 //     mensagem mandada na bateria fica pendente, a sessão volta sozinha por
 //     outro transporte (`Online`, a mesma conversa), a pendente sai de novo e
 //     volta confirmada, a voz entra de novo e chega à outra página, e quem
-//     assistia vê a primeira na sala.
+//     assistia vê a primeira na sala;
+// 14. **os MODs da sessão**: um segundo servidor exige o MOD de referência
+//     (`testes/mod-de-referencia`); a página entra pela identidade, aceita os
+//     MODs e chega à sessão pelo passo da tela (`depoisDeConectar`). O laço
+//     dos MODs da casca acha o pacote ausente e o obtém do catálogo — um
+//     catálogo de teste, assinado pela bancada no formato do minisign e
+//     servido no endereço do catálogo, conferido pela chave que a `prova`
+//     troca —, o pacote fica no armazém da página, conferido pelo hash, e o
+//     MOD sobe no executor do navegador e fala com a metade de servidor dele.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual.
 
 const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
@@ -68,15 +78,21 @@ const readline = require("node:readline");
 const raiz = path.resolve(__dirname, "..");
 const { chromium } = require("./playwright.cjs");
 const { cabecalhosDaOrigem } = require("./cabecalhos-da-origem.cjs");
-const [caminhoDoWasm, caminhoDoServidor] = process.argv.slice(2);
-if (!caminhoDoWasm || !fs.existsSync(caminhoDoWasm) || !caminhoDoServidor || !fs.existsSync(caminhoDoServidor)) {
+const [caminhoDoWasm, caminhoDoServidor, caminhoDoMotor] = process.argv.slice(2);
+if (![caminhoDoWasm, caminhoDoServidor, caminhoDoMotor].every((caminho) => caminho && fs.existsSync(caminho))) {
   console.error(
-    "uso: node apps/seele-app/bancada/sessao-no-navegador.cjs <seele_web.wasm> <servidor_da_bancada>\n" +
-      "  (cargo build -p seele-web --target wasm32-unknown-unknown --release;\n" +
+    "uso: node apps/seele-app/bancada/sessao-no-navegador.cjs <seele_web.wasm> <servidor_da_bancada> <seele_motor_web.wasm>\n" +
+      "  (cargo xtask web, que compila os dois .wasm;\n" +
       "   cargo build -p seele-server --example servidor_da_bancada)",
   );
   process.exit(2);
 }
+
+/** O MOD que o segundo servidor exige: o de referência do repositório. */
+const PASTA_DO_MOD = path.join(raiz, "testes", "mod-de-referencia");
+
+/** Onde o catálogo mora: o `ENDERECO` do `seele_sessao::catalogo`. */
+const ENDERECO_DO_CATALOGO = "https://mods.seele.app.br";
 
 let terminou = false;
 process.on("beforeExit", () => {
@@ -107,6 +123,7 @@ function servirAPagina() {
   const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "sessao-no-navegador-"));
   fs.cpSync(path.join(raiz, "ui"), pasta, { recursive: true });
   fs.copyFileSync(caminhoDoWasm, path.join(pasta, "seele_web.wasm"));
+  fs.copyFileSync(caminhoDoMotor, path.join(pasta, "seele_motor_web.wasm"));
   return http.createServer((pedido, resposta) => {
     const nome = decodeURIComponent(new URL(pedido.url, "http://x").pathname).replace(/^\/+/, "") || "index.html";
     const arquivo = path.join(pasta, nome);
@@ -120,13 +137,89 @@ function servirAPagina() {
 }
 
 /** O servidor de verdade, e a primeira linha que ele diz. */
-function subirOServidor() {
-  const processo = spawn(caminhoDoServidor, [], { stdio: ["pipe", "pipe", "inherit"] });
+function subirOServidor(argumentos = []) {
+  const processo = spawn(caminhoDoServidor, argumentos, { stdio: ["pipe", "pipe", "inherit"] });
   return new Promise((resolver, rejeitar) => {
     const linhas = readline.createInterface({ input: processo.stdout });
     linhas.once("line", (linha) => resolver({ processo, ...JSON.parse(linha) }));
     processo.once("exit", (codigo) => rejeitar(new Error(`o servidor da bancada saiu com ${codigo} antes de dizer o link`)));
   });
+}
+
+/**
+ * **Uma chave do minisign para a bancada**: o `.pub` e quem assina, no formato
+ * que o indexador publica (o modo legado, `Ed`, que assina os bytes crus), com
+ * o comentário confiável assinado junto, como o `minisign-verify` confere.
+ */
+function chaveDoMinisign() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const publica = Buffer.from(publicKey.export({ format: "jwk" }).x, "base64url");
+  const numero = crypto.randomBytes(8);
+  const pub = `untrusted comment: chave da bancada\n${Buffer.concat([Buffer.from("Ed"), numero, publica]).toString("base64")}\n`;
+  const assinar = (dados) => {
+    const assinatura = crypto.sign(null, dados, privateKey);
+    const comentario = "assinado pela bancada";
+    const global = crypto.sign(null, Buffer.concat([assinatura, Buffer.from(comentario)]), privateKey);
+    return (
+      `untrusted comment: assinatura da bancada\n${Buffer.concat([Buffer.from("Ed"), numero, assinatura]).toString("base64")}\n` +
+      `trusted comment: ${comentario}\n${global.toString("base64")}\n`
+    );
+  };
+  return { pub, assinar };
+}
+
+/** Os arquivos de um pacote, pelo caminho de dentro com `/`, como o instalador os junta. */
+function arquivosDoPacote(pasta, dentro = "") {
+  const arquivos = [];
+  for (const entrada of fs.readdirSync(path.join(pasta, dentro), { withFileTypes: true })) {
+    const relativo = dentro ? `${dentro}/${entrada.name}` : entrada.name;
+    if (!dentro && entrada.name === "dados") continue;
+    if (entrada.isDirectory()) arquivos.push(...arquivosDoPacote(pasta, relativo));
+    else if (entrada.isFile()) arquivos.push(relativo);
+  }
+  return arquivos;
+}
+
+/**
+ * **O catálogo de teste**, servido no endereço do catálogo para uma página:
+ * o MOD exigido, na versão e com o hash que o servidor disse, os arquivos da
+ * pasta, e as revogações vazias, tudo assinado pela chave da bancada.
+ * Devolve o que a página pediu, o catálogo, e como trocar um caminho por outro
+ * corpo (e desfazer), para as recusas.
+ */
+async function servirOCatalogo(contexto, chave, exigido) {
+  const arquivos = arquivosDoPacote(PASTA_DO_MOD);
+  const catalogo = Buffer.from(JSON.stringify({
+    esquema: 1,
+    gerado_em: Math.floor(Date.now() / 1000),
+    mods: [{ id: exigido.id, titulo: "Referência", versoes: [{ versao: exigido.version, api: 6, hash: exigido.hash, arquivos }] }],
+  }));
+  const revogacoes = Buffer.from(JSON.stringify({ esquema: 1, mods: [] }));
+  const servidos = new Map([
+    ["/catalogo.json", catalogo],
+    ["/catalogo.json.minisig", Buffer.from(chave.assinar(catalogo))],
+    ["/revogacoes.json", revogacoes],
+    ["/revogacoes.json.minisig", Buffer.from(chave.assinar(revogacoes))],
+  ]);
+  for (const relativo of arquivos) {
+    servidos.set(`/mods/${exigido.id}/${exigido.version}/${relativo}`, fs.readFileSync(path.join(PASTA_DO_MOD, relativo)));
+  }
+  const pedidos = [];
+  const trocados = new Map();
+  await contexto.route(`${ENDERECO_DO_CATALOGO}/**`, (rota) => {
+    const caminho = new URL(rota.request().url()).pathname;
+    pedidos.push(caminho);
+    const corpo = trocados.get(caminho) ?? servidos.get(caminho);
+    return corpo
+      ? rota.fulfill({ status: 200, body: corpo, headers: { "access-control-allow-origin": "*" } })
+      : rota.fulfill({ status: 404, body: "" });
+  });
+  return {
+    pedidos,
+    catalogo,
+    trocar: (caminho, corpo) => trocados.set(caminho, Buffer.from(corpo)),
+    restaurar: () => trocados.clear(),
+  };
 }
 
 /**
@@ -244,6 +337,8 @@ const invocar = (aba, comando, args) =>
     args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"],
   });
   const paginas = [];
+  /** Os servidores além do primeiro, encerrados no fim. */
+  const servidoresDaBancada = [];
   try {
     // ------------------------------------------------------------ 1. a entrada
     const a = await abrirUmaPagina(navegador, endereco);
@@ -643,7 +738,114 @@ const invocar = (aba, comando, args) =>
       `o enlace que responde não ficou de pé: ${JSON.stringify(deDepois.link)}, ${deDepois.tentativas} tentativa(s) de volta`,
     );
 
-    for (const [nome, { doConsole }] of [["a", a], ["b", b], ["c", c], ["d", d], ["e", e]]) {
+    // ------------------------------------------------------------ 14. os MODs da sessão
+    const servidorComMod = await subirOServidor([PASTA_DO_MOD]);
+    servidoresDaBancada.push(servidorComMod);
+    const exigido = servidorComMod.mod;
+    confere("14", exigido && exigido.id === "seele/referencia" && /^[0-9a-f]{64}$/.test(exigido.hash), `o servidor não exige o MOD: ${JSON.stringify(exigido)}`);
+    const f = await abrirUmaPagina(navegador, endereco);
+    paginas.push(f);
+    const chaveDaBancada = chaveDoMinisign();
+    const catalogoDaBancada = await servirOCatalogo(f.contexto, chaveDaBancada, exigido);
+    const doCatalogo = catalogoDaBancada.pedidos;
+    // A `prova` troca a chave que a página confere pela da bancada.
+    await f.aba.evaluate(async (pub) => {
+      const w = (await carregarOWasmDaPagina()).instancia.exports;
+      const bytes = new TextEncoder().encode(pub);
+      const p = w.alocar(bytes.length);
+      new Uint8Array(w.memory.buffer).set(bytes, p);
+      w.prova_chave_do_catalogo(p, bytes.length);
+      w.liberar(p, bytes.length);
+    }, chaveDaBancada.pub);
+    // **As recusas, antes de entrar** (o catálogo não pede sessão): um arquivo
+    // trocado no caminho muda o conjunto, e um catálogo assinado por outra
+    // chave não é lido; nos dois, nada fica guardado.
+    const pedido = { id: exigido.id, versao: exigido.version, uso: "obter" };
+    catalogoDaBancada.trocar(`/mods/${exigido.id}/${exigido.version}/cliente/main.js`, "// trocado no caminho");
+    const divergente = await invocar(f.aba, "instalar_mod_do_catalogo", pedido);
+    catalogoDaBancada.restaurar();
+    confere(
+      "14",
+      divergente.erro?.ConteudoDivergente?.esperado === exigido.hash,
+      `o arquivo trocado no caminho: ${JSON.stringify(divergente)}`,
+    );
+    catalogoDaBancada.trocar("/catalogo.json.minisig", chaveDoMinisign().assinar(catalogoDaBancada.catalogo));
+    const deOutraChave = await invocar(f.aba, "instalar_mod_do_catalogo", pedido);
+    catalogoDaBancada.restaurar();
+    confere("14", deOutraChave.erro === "AssinaturaDoCatalogoRecusada", `o catálogo de outra chave: ${JSON.stringify(deOutraChave)}`);
+    const nadaGuardado = (await invocar(f.aba, "mods_instalados", {})).ok;
+    confere("14", Array.isArray(nadaGuardado) && nadaGuardado.length === 0, `a recusa deixou pacote guardado: ${JSON.stringify(nadaGuardado)}`);
+    const comMod = await f.aba.evaluate(async ({ link, alvo }) => {
+      const identidade = await identidadeDaPagina();
+      await identidade.abrir(link);
+      const primeira = await identidade.entrar("fê");
+      if (primeira.erro !== "mods-a-aceitar") return { primeira };
+      const aceita = await identidade.aceitarOsMods(primeira.conjunto);
+      if (aceita.ok) depoisDeConectar(aceita.resposta, alvo);
+      return { primeira: { erro: primeira.erro, mods: primeira.mods.map((m) => m.id) }, aceita: { ok: aceita.ok, erro: aceita.erro } };
+    }, { link: servidorComMod.link, alvo: servidorComMod.endereco });
+    confere(
+      "14",
+      comMod.primeira?.erro === "mods-a-aceitar" && comMod.primeira.mods.includes(exigido.id) && comMod.aceita?.ok === true,
+      `a entrada com o MOD exigido: ${JSON.stringify(comMod)}`,
+    );
+    const oModSubiu = await esperar(f.aba, async (id) => {
+      const instancia = modsCarregados.get(id);
+      const instalados = await window.__TAURI__.core.invoke("mods_instalados");
+      return {
+        pronto: Boolean(instancia) && instancia.estado === ESTADOS_DE_MOD.ativa && instancia.executor?.nome === "navegador",
+        estado: instancia?.estado ?? null,
+        executor: instancia?.executor?.nome ?? null,
+        fase: estadoDosMods.get(id) ?? null,
+        instalados: instalados.map((m) => ({ id: m.id, hash: m.hash, refused: m.refused })),
+      };
+    }, exigido.id, 20_000);
+    confere(
+      "14",
+      oModSubiu.pronto,
+      `o MOD não subiu na página: ${JSON.stringify({ estado: oModSubiu.estado, executor: oModSubiu.executor, fase: oModSubiu.fase, instalados: oModSubiu.instalados, catalogo: doCatalogo })}`,
+    );
+    confere(
+      "14",
+      oModSubiu.instalados?.some((m) => m.id === exigido.id && m.hash === exigido.hash && m.refused === null),
+      `o pacote não ficou no armazém com o hash exigido: ${JSON.stringify(oModSubiu.instalados)}`,
+    );
+    confere(
+      "14",
+      ["/catalogo.json", "/catalogo.json.minisig", "/revogacoes.json", "/revogacoes.json.minisig"].every((caminho) => doCatalogo.includes(caminho)) &&
+        doCatalogo.some((caminho) => caminho.startsWith(`/mods/${exigido.id}/`)),
+      `a página não buscou o catálogo inteiro: ${JSON.stringify(doCatalogo)}`,
+    );
+    // **E ele fala com a metade de servidor dele**: o painel que o MOD monta
+    // diz as `vezes` que o `contar` do servidor devolveu, e só monta depois
+    // da resposta; sem ela, as vezes ficam em zero.
+    const falou = await esperar(f.aba, (id) => {
+      const textos = [...document.querySelectorAll(`[data-mod="${id}"]`)].map((no) => no.textContent);
+      const vezes = textos.join(" ").match(/vezes: (\d+)/);
+      return { pronto: Boolean(vezes) && Number(vezes[1]) >= 1, textos: textos.map((texto) => texto.slice(0, 120)) };
+    }, exigido.id, 15_000);
+    confere("14", falou.pronto, `o painel do MOD não diz a resposta da metade de servidor: ${JSON.stringify(falou.textos)}`);
+    // O código que o executor recebeu é o do pacote, com as capacidades da
+    // API 6, e a geração morta é recusada.
+    const codigo = await f.aba.evaluate(async ({ id, hash }) => {
+      const invoke = window.__TAURI__.core.invoke;
+      const vivo = await invoke("codigo_do_mod", { geracao: geracaoDaSessao, id, hash });
+      let morta;
+      try {
+        await invoke("codigo_do_mod", { geracao: geracaoDaSessao + 1, id, hash });
+      } catch (erro) {
+        morta = erro;
+      }
+      return { tamanho: vivo.fonte.length, capacidades: vivo.capacidades, morta };
+    }, exigido);
+    confere(
+      "14",
+      codigo.tamanho === fs.readFileSync(path.join(PASTA_DO_MOD, "cliente", "main.js"), "utf8").length && codigo.capacidades.includes("superficies"),
+      `o código do MOD: ${JSON.stringify({ tamanho: codigo.tamanho, capacidades: codigo.capacidades })}`,
+    );
+    confere("14", codigo.morta?.Recusado?.motivo === "sessao-encerrada", `a geração morta: ${JSON.stringify(codigo.morta)}`);
+
+    for (const [nome, { doConsole }] of [["a", a], ["b", b], ["c", c], ["d", d], ["e", e], ["f", f]]) {
       const erros = doConsole.filter((linha) => linha.startsWith("pageerror") || /CSP|Content Security Policy/i.test(linha));
       confere("console", erros.length === 0, `a página ${nome} teve erros: ${erros.join(" | ")}`);
     }
@@ -658,6 +860,7 @@ const invocar = (aba, comando, args) =>
     await navegador.close();
     servidorDaPagina.close();
     servidor.processo.stdin.end();
+    for (const outro of servidoresDaBancada) outro.processo.stdin.end();
     terminou = true;
   }
   if (falhas.length) {
@@ -665,6 +868,6 @@ const invocar = (aba, comando, args) =>
     process.exit(1);
   }
   console.log(
-    "sessao-no-navegador: a página entra num servidor de verdade pela WebTransport, conversa, vê a outra pessoa, a voz atravessa, os hashes ficam guardados, sai, um hash errado não entra, e a sessão que cai volta sozinha.",
+    "sessao-no-navegador: a página entra num servidor de verdade pela WebTransport, conversa, vê a outra pessoa, a voz atravessa, os hashes ficam guardados, sai, um hash errado não entra, a sessão que cai volta sozinha, e o MOD que o servidor exige vem do catálogo e sobe.",
   );
 })();

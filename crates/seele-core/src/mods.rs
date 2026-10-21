@@ -319,116 +319,13 @@ fn identifier_of(root: &Path, dir: &Path) -> Option<String> {
     Some(format!("{author}/{name}"))
 }
 
-/// Um arquivo de mídia de um MOD, lido e pronto para uma janela montar.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MidiaDeMod {
-    /// O `data:` inteiro, com o tipo que os bytes provaram ser.
-    pub uri: String,
-    /// `som` ou `imagem`, de uma lista fechada.
-    pub papel: &'static str,
-    /// Quantos bytes o arquivo tem.
-    pub bytes: usize,
-}
-
-/// **O teto por arquivo de mídia de um MOD.**
-pub use seele_proto::midia_de_mod::TETO_DE_ARQUIVO as TETO_DE_MIDIA;
-
-/// Um formato que o produto reconhece e não aceita (o HEIC), para a recusa
-/// dizer o nome dele — ver [`seele_proto::imagem::reconhecido_e_nao_aceito`].
-pub use seele_proto::imagem::reconhecido_e_nao_aceito;
-
-/// O que estes bytes são, **sem montar um `data:` deles**.
-///
-/// [`ler_midia`] serve para o que vai virar um elemento na hora: ela devolve o
-/// `data:` inteiro, e para isso codifica tudo em base64. Um arquivo que uma
-/// pessoa acabou de escolher pode ter dez megabytes e vai sair em pedaços —
-/// codificá-lo inteiro para descobrir que ele é um PNG seria pagar treze
-/// megabytes de texto por uma pergunta de oito bytes.
-///
-/// O teto não é conferido aqui: quem escolhe o arquivo tem o próprio, e ele é
-/// maior que o da mídia de pacote.
-#[must_use]
-pub fn ler_tipo(bytes: &[u8]) -> Option<TipoLido> {
-    let tipo = seele_proto::midia_de_mod::sniff(bytes)?;
-    Some(TipoLido {
-        media_type: tipo.media_type(),
-        papel: tipo.papel(),
-    })
-}
-
-/// O que os bytes provaram ser.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TipoLido {
-    /// `image/png`, `audio/wav`, e assim por diante.
-    pub media_type: &'static str,
-    /// `som` ou `imagem`.
-    pub papel: &'static str,
-}
-
-/// Lê um arquivo de mídia de MOD, ou diz que não.
-///
-/// **Aqui, e não na casca.** A composição do `data:` é a mesma decisão do ADR
-/// 0027 para anexos: uma casca que junta um tipo a bytes é uma casca que pode
-/// juntar a alegação de quem mandou a eles. O manifesto de um MOD é
-/// exatamente essa alegação, e por isso o tipo sai dos bytes e o `data:` sai
-/// daqui inteiro.
-///
-/// Nada para o que passa do teto e para o que não é um formato conhecido: são
-/// recusas diferentes para quem está escrevendo o MOD, e quem as separa é a
-/// casca, que já conhece o tamanho.
-#[must_use]
-pub fn ler_midia(bytes: &[u8]) -> Option<MidiaDeMod> {
-    if bytes.len() > TETO_DE_MIDIA {
-        return None;
-    }
-    let tipo = seele_proto::midia_de_mod::sniff(bytes)?;
-    // O mesmo codificador do `data:` de um anexo. Um segundo aqui seria um
-    // segundo alfabeto para o mesmo RFC.
-    let mut uri = String::with_capacity(bytes.len().div_ceil(3) * 4 + 32);
-    uri.push_str("data:");
-    uri.push_str(tipo.media_type());
-    uri.push_str(";base64,");
-    crate::preview::encode_base64_publico(bytes, &mut uri);
-    Some(MidiaDeMod {
-        uri,
-        papel: tipo.papel(),
-        bytes: bytes.len(),
-    })
-}
-
-/// The name of a refusal, from a closed list.
-///
-/// Exists here and not in the shell for the reason above: the shell cannot name
-/// `Refused`'s variants. ADR 0012 keeps the wording in the shell — this is an
-/// identifier, not a sentence, and `ui/frases.js` turns it into one.
-#[must_use]
-pub fn refusal_name(why: &Refused) -> &'static str {
-    match why {
-        Refused::Malformed { .. } => "malformed",
-        Refused::SchemaTooNew { .. } => "schema-too-new",
-        Refused::ApiTooNew { .. } => "api-too-new",
-        Refused::ApiTooOld { .. } => "api-too-old",
-        Refused::MalformedId => "malformed-id",
-        Refused::Empty => "empty",
-        Refused::TemaSemMetadeDeServidor => "tema-sem-metade-de-servidor",
-        Refused::ArquivoInvalido { .. } => "arquivo-invalido",
-        Refused::ArquivosDemais { .. } => "arquivos-demais",
-    }
-}
-
-/// Lowercase hex of a content hash.
-///
-/// Here rather than in the shell because it is what a person compares by eye
-/// against what the indexer publishes, and two spellings of the same hash would
-/// make that comparison fail for no reason.
-#[must_use]
-pub fn hex(hash: &[u8; 32]) -> String {
-    use std::fmt::Write as _;
-    hash.iter().fold(String::new(), |mut text, byte| {
-        let _ = write!(text, "{byte:02x}");
-        text
-    })
-}
+/// O pacote pelos bytes, a mídia pelos bytes e o nome da recusa moram no
+/// `seele-sessao` desde a Tarefa 2.6 da F4: o navegador lê os pacotes que
+/// guarda pelas mesmas regras. Reexportados, e quem os usava não mudou.
+pub use seele_sessao::mods::{
+    caminho_declarado, hash_do_conjunto, hex, ler_midia, ler_tipo, pelo_hash,
+    reconhecido_e_nao_aceito, refusal_name, MidiaDeMod, ModInstalado, TipoLido, TETO_DE_MIDIA,
+};
 
 /// The identifier of an entry, however it turned out.
 fn name_of(found: &Found) -> &str {
