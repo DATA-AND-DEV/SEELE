@@ -1684,6 +1684,200 @@ async function aEntradaVelhaNaoTomaATela(browser, porta) {
   await page.close();
 }
 
+// --------------------------------------------------------------------------
+// Lote 58-3 da F5: a linha de etapa é da tentativa mais nova
+// --------------------------------------------------------------------------
+//
+// **O caso** (pendência 58, item 52; levantado no relatório do W2). A linha de
+// etapa (`#boot-etapa`) diz onde a chegada está. Com duas tentativas cruzadas —
+// a velha lenta e a nova que a pessoa começou pela lista —, a linha é da nova:
+//
+// - o `finally` da velha a apagava ao terminar, com a nova ainda andando: a
+//   nova dizia uma etapa, a velha voltava, e a linha sumia até a etapa
+//   seguinte da nova;
+// - entre o começo da nova (`++tentativas`) e o `connect` dela, a geração de pé
+//   no Rust ainda é a da velha, e as etapas da velha chegavam e eram escritas
+//   na linha da nova, com o endereço de um servidor que a pessoa deixou.
+//
+// **O duble emite etapas**, o que nenhuma cena fazia (o `listen` delas é
+// vazio), e modela a geração como o `main.rs`: cada `connect` revoga a anterior
+// ao começar, e a `Bridge` de uma geração revogada descarta as etapas dela.
+// Cada emissão guarda o que a linha diz logo depois dela: o ouvinte escreve na
+// mesma volta, então a leitura não depende de amostrar no tempo certo.
+
+/** Uma etapa `Tentando`, com o endereço: a frase dela diz de qual servidor é. */
+const tentandoEm = (onde, candidato, de) => ({ Tentando: { candidato, de, onde, avisou: false } });
+
+async function aLinhaDeEtapaEDaMaisNova(browser, porta) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  const erros = []; page.on('pageerror', e => erros.push(e.message));
+  await page.addInitScript(({ table }) => {
+    window.testTable = table; window.testCalls = [];
+    // Por alvo: quanto o `connect` leva, e as etapas que ele diz, em
+    // `[ms desde o começo dele, etapa]`.
+    window.testAtrasoPorAlvo = {};
+    window.testEtapasPorAlvo = {};
+    // Por comando, em fila: o atraso de cada chamada, na ordem em que chegam.
+    window.testAtrasosPorComando = {};
+    // A geração de pé no Rust, e cada etapa que um `connect` disse: se a
+    // `Bridge` a emitiu, e o que a linha dizia logo depois.
+    window.testGeracao = 0;
+    window.testEtapas = [];
+    const ouvintes = [];
+    const linha = () => {
+      const p = document.getElementById('boot-etapa');
+      return p.hidden ? null : p.textContent;
+    };
+    window.__TAURI__ = {
+      core: { invoke: async (cmd, args) => {
+        const chamada = { cmd, args };
+        window.testCalls.push(chamada);
+        // O texto colado vai antes ao `ler_entrada` (tarefa 30 da F7); sem a
+        // leitura do código aqui, `seele://` é convite e o resto é endereço.
+        if (cmd === 'ler_entrada') {
+          const texto = String(args?.texto ?? '').trim();
+          return texto.startsWith('seele://') ? { Convite: texto } : { Endereco: texto };
+        }
+        const espera = window.testAtrasosPorComando[cmd]?.shift();
+        if (espera) await new Promise(ok => setTimeout(ok, espera));
+        if (cmd === 'connect') {
+          // O começo do `connect` no `main.rs`: a geração anterior é revogada.
+          const geracao = ++window.testGeracao;
+          for (const [ms, etapa] of window.testEtapasPorAlvo[args.server] ?? []) {
+            setTimeout(() => {
+              const emitida = geracao === window.testGeracao;
+              if (emitida) for (const f of ouvintes) f({ payload: { ConnectStageChanged: { stage: etapa } } });
+              window.testEtapas.push({ alvo: args.server, frase: fraseDeEtapa(etapa), emitida, linha: linha() });
+            }, ms);
+          }
+          const atraso = window.testAtrasoPorAlvo[args.server];
+          if (atraso) await new Promise(ok => setTimeout(ok, atraso));
+          chamada.respondida = true;
+          // Nenhuma das duas entra: a cena fica na tela de entrada, onde a linha
+          // mora. A revogada volta como substituída; a de pé, recusada.
+          throw geracao === window.testGeracao
+            ? { error: { Refused: { reason: 'CredentialRejected' } }, trail: [] }
+            : { error: 'NotConnected', trail: [] };
+        }
+        return window.testTable[cmd] ?? null;
+      } },
+      event: { listen: async (canal, f) => { if (canal === 'seele://event') ouvintes.push(f); return () => {}; } },
+      window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+    };
+  }, {
+    table: respostas({ apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [] }),
+  });
+  await page.goto(`http://127.0.0.1:${porta}`);
+  await page.waitForTimeout(500);
+
+  const VELHA = ALVO_W;
+  const NOVA = OUTRO_ALVO_W;
+  /** A linha de etapa agora: `null` escondida. */
+  const aLinha = () => page.evaluate(() => ($('boot-etapa').hidden ? null : $('boot-etapa').textContent));
+  /** As etapas que o `connect` a `alvo` disse neste caso. */
+  const etapasDe = (alvo) => page.evaluate((alvo) => testEtapas.slice(testEtapasAntes).filter(e => e.alvo === alvo), alvo);
+  const respondida = (alvo) => page.waitForFunction(
+    (alvo) => testCalls.slice(testAntes).some(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida),
+    alvo, { timeout: 5000 },
+  ).catch(() => assert.fail(`a tentativa a ${alvo} não voltou, e este caso não mede nada`));
+  /**
+   * A velha começa pela lista, e aos 100 ms a nova, pela lista também. O
+   * resto é o que o caso diz: os atrasos do `connect` por alvo, as etapas, e a
+   * fila de atrasos por comando.
+   */
+  async function correr({ atrasos, etapas, porComando = {} }) {
+    await page.evaluate(([velha, nova, atrasos, etapas, porComando]) => {
+      window.testAtrasoPorAlvo = atrasos;
+      window.testEtapasPorAlvo = etapas;
+      window.testAtrasosPorComando = porComando;
+      for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+      $('tela-boot').hidden = false;
+      window.testAntes = testCalls.length;
+      window.testEtapasAntes = testEtapas.length;
+      irParaOServidor(velha, null, null);
+      setTimeout(() => irParaOServidor(nova, null, null), 100);
+    }, [VELHA, NOVA, atrasos, etapas, porComando]);
+  }
+  /** O fim do caso: a nova volta recusada, e o `finally` dela apaga a linha. */
+  async function aNovaTermina(caso) {
+    await respondida(NOVA);
+    await page.waitForTimeout(100);
+    assert.equal(await aLinha(), null,
+      `${caso}: a tentativa mais nova terminou e a linha de etapa ficou na tela, descrevendo uma travessia que já acabou`);
+  }
+
+  // ---- 1. A velha volta enquanto a nova anda, depois de a nova dizer uma
+  // etapa. A velha leva 1,2 s; a nova começa aos 100 ms, chega ao `connect`
+  // logo, diz a etapa dela aos 50 ms do `connect` e leva 2 s.
+  const daNova1 = tentandoEm(NOVA, 0, 2);
+  await correr({ atrasos: { [VELHA]: 1200, [NOVA]: 2000 }, etapas: { [NOVA]: [[50, daNova1]] } });
+  await respondida(VELHA);
+  await page.waitForTimeout(200);
+  const ditas1 = await etapasDe(NOVA);
+  assert.deepEqual(ditas1.map(e => [e.emitida, e.linha === e.frase]), [[true, true]],
+    `a etapa da tentativa a ${NOVA} não chegou à linha antes de a velha voltar, e este caso não mede nada: ${JSON.stringify(ditas1)}`);
+  const depoisDaVelha = await aLinha();
+  assert.equal(depoisDaVelha, ditas1[0].frase,
+    `a tentativa a ${VELHA}, que a de ${NOVA} já tinha substituído, terminou e apagou a linha de etapa da nova enquanto ` +
+    `ela andava: a linha diz ${JSON.stringify(depoisDaVelha)}, e não «${ditas1[0].frase}» até a etapa seguinte da nova`);
+  await aNovaTermina('a velha que volta');
+
+  // ---- 2. A etapa da velha chega entre o começo da nova e o `connect` dela.
+  // A velha chega ao `connect` logo e diz duas etapas, aos 20 e aos 400 ms; a
+  // nova começa aos 100 ms e espera 600 ms no `conferir_esta_versao` (a
+  // segunda chamada da fila), então a segunda etapa da velha chega com a
+  // geração dela ainda de pé no Rust, e a nova ainda antes do `connect`.
+  const daVelha2 = tentandoEm(VELHA, 1, 2);
+  const daNova2 = tentandoEm(NOVA, 0, 1);
+  await correr({
+    atrasos: { [VELHA]: 1500, [NOVA]: 1000 },
+    etapas: { [VELHA]: [[20, tentandoEm(VELHA, 0, 2)], [400, daVelha2]], [NOVA]: [[50, daNova2]] },
+    porComando: { conferir_esta_versao: [0, 600] },
+  });
+  await page.waitForFunction(() => testEtapas.slice(testEtapasAntes).length >= 2, null, { timeout: 3000 })
+    .catch(() => assert.fail('a velha não disse as duas etapas, e este caso não mede nada'));
+  const noTrecho = await page.evaluate((nova) => testCalls.slice(testAntes).some(c => c.cmd === 'connect' && c.args.server === nova), NOVA);
+  assert.equal(noTrecho, false, `a tentativa a ${NOVA} chegou ao connect antes da segunda etapa da velha, e este caso não mede o trecho`);
+  const ditas2 = await etapasDe(VELHA);
+  assert.deepEqual(ditas2.map(e => e.emitida), [true, true],
+    `a geração da velha já estava revogada quando ela disse as etapas, e este caso não mede nada: ${JSON.stringify(ditas2)}`);
+  assert.equal(ditas2[1].linha, null,
+    `entre o começo da tentativa a ${NOVA} e o connect dela, a etapa da tentativa a ${VELHA}, que ela substituiu, foi ` +
+    `escrita na linha de etapa: «${ditas2[1].linha}», sobre um servidor que a pessoa deixou`);
+  // A partir do `connect` da nova, a linha volta a ser dela.
+  await page.waitForFunction((nova) => testEtapas.slice(testEtapasAntes).some(e => e.alvo === nova), NOVA, { timeout: 3000 })
+    .catch(() => assert.fail(`a tentativa a ${NOVA} não disse a etapa dela`));
+  const daNovaDita2 = (await etapasDe(NOVA))[0];
+  assert.equal(daNovaDita2.linha, daNovaDita2.frase,
+    `a etapa da tentativa a ${NOVA}, dita depois do connect dela, não chegou à linha: ${JSON.stringify(daNovaDita2)} — ` +
+    'calar as etapas antes do connect calou também as de depois');
+  await aNovaTermina('a etapa da velha antes do connect da nova');
+
+  // ---- 3. O mesmo trecho, com a velha ainda antes do `connect` dela quando a
+  // nova começa: a velha sai do `conferir_esta_versao` aos 400 ms, chega ao
+  // `connect` e diz uma etapa aos 50 ms dele; a nova espera 800 ms no dela. A
+  // velha não reabre a linha que a nova calou.
+  const daVelha3 = tentandoEm(VELHA, 0, 1);
+  await correr({
+    atrasos: { [VELHA]: 1000, [NOVA]: 1000 },
+    etapas: { [VELHA]: [[50, daVelha3]], [NOVA]: [[50, tentandoEm(NOVA, 0, 1)]] },
+    porComando: { conferir_esta_versao: [400, 800] },
+  });
+  await page.waitForFunction((velha) => testEtapas.slice(testEtapasAntes).some(e => e.alvo === velha), VELHA, { timeout: 3000 })
+    .catch(() => assert.fail('a velha não disse a etapa, e este caso não mede nada'));
+  const ditas3 = await etapasDe(VELHA);
+  const noTrecho3 = await page.evaluate((nova) => testCalls.slice(testAntes).some(c => c.cmd === 'connect' && c.args.server === nova), NOVA);
+  assert.deepEqual([ditas3[0].emitida, noTrecho3], [true, false],
+    `a etapa da velha não chegou entre o começo da nova e o connect dela, e este caso não mede o trecho: ${JSON.stringify({ ditas3, noTrecho3 })}`);
+  assert.equal(ditas3[0].linha, null,
+    `a tentativa a ${VELHA} saiu do conferir_esta_versao depois de a de ${NOVA} começar, e a etapa dela foi escrita na ` +
+    `linha de etapa da nova: «${ditas3[0].linha}» — foi a velha que reabriu a linha que a nova tinha calado`);
+  await aNovaTermina('a velha que sai do conferir_esta_versao depois');
+
+  assert.deepEqual(erros, [], 'a cena da linha de etapa do lote 58-3 lançou erro na página');
+  await page.close();
+}
+
 (async () => {
   const server = servir();
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
@@ -1923,6 +2117,7 @@ async function aEntradaVelhaNaoTomaATela(browser, porta) {
     await oConectarTemDono(browser, server.address().port);
     await aBatidaDaEsperaSoCalaASiMesma(browser, server.address().port);
     await aEntradaVelhaNaoTomaATela(browser, server.address().port);
+    await aLinhaDeEtapaEDaMaisNova(browser, server.address().port);
 
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');
     console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
@@ -1939,5 +2134,6 @@ async function aEntradaVelhaNaoTomaATela(browser, porta) {
     console.log('lote W2: a batida da espera só cala a si mesma, e conta ao seele.log; a falha de outra tentativa fala na linha vermelha');
     console.log('lote E54: a tentativa que outra substituiu e entra depois não toca na tela, vai ao seele.log, e a sessão dela é solta pela geração dela');
     console.log('lote E54: a batida de uma espera que a pessoa largou, admitida depois, também não toca na tela, e é solta');
+    console.log('lote 58-3: a tentativa substituída não apaga a linha de etapa da nova, e as etapas dela não chegam à linha entre o começo da nova e o connect dela');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
