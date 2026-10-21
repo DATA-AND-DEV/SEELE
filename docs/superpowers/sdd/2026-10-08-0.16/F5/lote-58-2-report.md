@@ -135,3 +135,113 @@ verdes em todas as rodadas.
    rodada nova resolveram. As três reversões não foram afetadas: cada uma
    escreveu o arquivo com data nova, e cada uma reprovou o seu teste. **Para
    devolver um fonte, use `cp` sem `-p`, ou um `touch` depois.**
+
+## Rodada 1
+
+A revisão (`.superpowers/sdd/lotes/review-58-2-report.md`) aprovou com
+ressalvas: 0 Críticos, 1 Importante (I1) e 1 Menor (M1). O pedido da rodada
+está em `.superpowers/sdd/lotes/lote-58-2-rodada1.md`.
+
+| commit | o que entra |
+|---|---|
+| `40e351bc` | I1: o `Pong` de um pedido aceito e apagado corrige só o pedido seguinte, e o teste do S25 |
+| `cd37cd27` | M1: sai o `superar()` guardado, e o doc do `vale` diz o invariante novo |
+| este | esta seção |
+
+### I1: só o pedido seguinte perde o `antes`
+
+**O caso (S25).** Em A, pedir B (#2), C (#3), B de novo (#4) e D (#5). O
+servidor aceita B, apaga B, aceita C, recusa o segundo B e recusa D: a pessoa
+fica em C. O `Pong(2)` limpava o `antes` de todo pedido que partia de B, o #3
+**e** o #5. O `antes` do #5 era o do segundo B, que a recusa dele consertaria
+para C. A tela acabava fora de sala, com o áudio fechado.
+
+**O vermelho.** `o_pong_do_pedido_aceito_e_apagado_so_corrige_o_pedido_seguinte`:
+
+- contra `1a6d3086`, reprovou com `left: None, right: Some(VoiceRoomId(3))`;
+- com o produto de `bfad7594` e os testes do ramo, ele passou. Ali, só os dois
+  testes do item 12 reprovaram, como antes.
+
+**O conserto.** No braço do `Pong`, `self.fila.front_mut()` no lugar do laço
+sobre a fila inteira, como o `get_mut(1)` de `recusar`. É o esboço da triagem ao
+pé da letra.
+
+**As reversões**, cada uma voltada com `cp` sem `-p` e com o `cmp` idêntico:
+
+| reversão | reprovou |
+|---|---|
+| o laço sobre a fila inteira | só o S25 (`left: None, right: Some(VoiceRoomId(3))`) |
+| o `Pong` sem correção nenhuma | só o segundo caso do item 12 (`left: Some(VoiceRoomId(2))`) |
+
+**O modelo da revisão.** O `modelo_atomico.rs` ainda estava em
+`scratchpad/rev582-aux/`. Rodei-o com `--release`, 400 mil sementes por
+variante, sobre o código final (`cd37cd27`) e sobre a base, que rodei de novo
+eu mesmo.
+
+| | sem reúso de id | com reúso de id |
+|---|---|---|
+| a base, contra a lista do revisor | idêntica (28.688) | idêntica (25.109) |
+| o final, contra o estreito do revisor | idêntico (3.234) | idêntico (3.238) |
+| o final piora contra a base | **0** | 41 |
+| o final ganha da base | 25.454 | 21.912 |
+| o final piora contra o conserto entregue | 0 | 0 |
+| o final ganha do conserto entregue | 31 | 25 |
+
+**Os 41 com reúso** são os mesmos 41 do estreito do revisor. Todos têm a sala
+apagada e criada de novo com o mesmo id (`apaga4` … `cria4`). É a O2: o cliente
+não distingue a sala velha da nova, e nenhuma regra por id resolve isso.
+
+### M1: o ramo morto e o doc do `vale`
+
+- **O ramo.** Sai o
+  `if !self.fila.back().is_some_and(|e| e.vale && e.sala == X) { self.superar(); }`.
+  O braço da sala apagada já não toca no `vale` de pedido nenhum.
+- **A prova.** Ela não tem vermelho, porque a conduta não muda:
+  - os 84 testes da `lib` passam;
+  - o modelo dá o mesmo resultado que o estreito do revisor, que ainda tinha o
+    ramo;
+  - a reversão para o `superar()` sem guarda, que era a da rodada 0, reprova o
+    primeiro caso do item 12 (`left: None, right: Some(VoiceRoomId(1))`). O
+    que ficou no braço é o que o segura.
+- **O doc do `vale`.** Ele deixa de dizer que a sala apagada o derruba.
+  - O pedido escrevia «a sala apagada derruba os **outros** pedidos, e não o da
+    própria sala». Escrevi que ela **não derruba nenhum**, porque é o que o
+    código faz agora. Se é a sala do pedido que vale, ele segue valendo, com o
+    assento em `None`. Se é outra, o assento não está nela, e os pedidos de
+    antes do último já não valiam.
+  - Com o ramo fora, «derruba os outros» descreveria uma linha que não existe.
+- **O invariante, para a F4.** Ele está escrito em dois lugares:
+  - **no doc do campo `vale`:** só o último pedido da fila pode valer. Quando
+    ele vale, o assento é a sala dele, **ou `None`**, se a sala foi apagada com
+    ele no ar. Quem lê `vale` não pode supor `assento == Some(sala)`;
+  - **na doc pública de `EntradasPendentes`:** o assento pode ser `None` com um
+    pedido no ar que ainda o define. A `confirmada` segue dando o assento de
+    antes dele até a resposta.
+
+### Para depois: as observações O1 e O2 da revisão
+
+Ficam fora do lote, como o pedido da rodada manda. São pontos para a F5 ou para
+quem fechar a 58:
+
+- **O1, o `MovedToVoiceRoom` depois de uma ação local.** O operador move, o
+  cliente sai ou pede outra sala, e o `Moved` chega depois, embora o servidor o
+  tenha aplicado antes. O cliente fica na sala do operador, e o servidor fora
+  ou noutra sala. O lote não cria essa dessincronia, só deixa de apagá-la por
+  acaso (234 intercalações no modelo com o move sem atomicidade). A revisão
+  sugere uma pendência própria.
+- **O2, o servidor reusa o `VoiceRoomId`.** `voice_rooms.id` é
+  `INTEGER PRIMARY KEY` sem `AUTOINCREMENT`
+  (`crates/seele-server/src/persistence/channels.rs`). Apagar a sala mais nova
+  e criar outra devolve o mesmo id. Os 41 casos de cima são esses, e só o
+  `AUTOINCREMENT` no servidor os fecharia. É de outra frente.
+
+### Os guardas da rodada
+
+- `cargo --offline test -p seele-sessao`: 84 passaram na `lib`, e mais 1 em
+  `tests/sem_hash_nos_ids_do_servidor.rs`.
+- `cargo --offline test -p seele-ffi --lib`: 218 passaram, 1 ignorado, que já
+  era ignorado antes.
+- O clippy com `-D warnings` e o `fmt --check` do `seele-sessao`: limpos.
+- `cargo --offline xtask web`: as 11 etapas «ok», o `seele-sessao` para
+  `wasm32-unknown-unknown` entre elas. Rodou com o SDK clonado e o `curl` de
+  mentira no começo do `PATH`, e o log não tem «curl bloqueado».
