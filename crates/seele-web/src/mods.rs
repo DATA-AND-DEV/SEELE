@@ -256,11 +256,17 @@ mod tests {
 
     use super::*;
 
-    const MANIFESTO: &str = r#"{"schema":1,"id":"ana/mesa","version":"1.0.0","api":6,"repo":"https://exemplo.org/mesa","client":"cliente/main.js","arquivos":["som/toque.wav"]}"#;
+    /// O manifesto dos testes, na API deste build, lida e não escrita.
+    fn manifesto() -> String {
+        format!(
+            r#"{{"schema":1,"id":"ana/mesa","version":"1.0.0","api":{},"repo":"https://exemplo.org/mesa","client":"cliente/main.js","arquivos":["som/toque.wav"]}}"#,
+            seele_proto::mods::MOD_API_VERSION
+        )
+    }
 
     fn arquivos() -> Vec<(String, Vec<u8>)> {
         vec![
-            ("mod.json".to_owned(), MANIFESTO.as_bytes().to_vec()),
+            ("mod.json".to_owned(), manifesto().into_bytes()),
             ("cliente/main.js".to_owned(), b"SeeleUI.pronto();".to_vec()),
             ("som/toque.wav".to_owned(), b"RIFF".to_vec()),
             ("leia.txt".to_owned(), b"nao declarado".to_vec()),
@@ -286,7 +292,7 @@ mod tests {
             Err("conteudo-nao-bate".to_owned())
         );
         let mut sem_cliente = arquivos();
-        sem_cliente[0].1 = MANIFESTO
+        sem_cliente[0].1 = manifesto()
             .replace(r#""client":"cliente/main.js","#, r#""server":"s.js","#)
             .into_bytes();
         let hash_sem = pacote::hash_do_conjunto(&mut sem_cliente);

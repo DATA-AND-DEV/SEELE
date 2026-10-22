@@ -10,6 +10,7 @@
 //! presa à do servidor.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
+use seele_proto::mods::{MOD_API_MINIMA, MOD_API_VERSION};
 use serde_json::Value;
 
 /// Um pacote: os caminhos de dentro e os bytes.
@@ -59,10 +60,10 @@ fn no_disco(guardados: &[seele_web::mods::Guardado]) -> std::path::PathBuf {
 
 #[test]
 fn os_mesmos_pacotes_dao_a_mesma_lista_nas_duas_pontas() {
-    let bom = pacote("1.0.0", 6, b"SeeleUI.pronto();");
+    let bom = pacote("1.0.0", MOD_API_VERSION, b"SeeleUI.pronto();");
     let lugar_do_bom = seele_ffi::mods::hash_do_conjunto(&mut bom.clone());
     // Mexido depois de guardado: o conteúdo não é o que o lugar promete.
-    let mexido = pacote("2.0.0", 6, b"SeeleUI.outro();");
+    let mexido = pacote("2.0.0", MOD_API_VERSION, b"SeeleUI.outro();");
     // Só o prefixo muda, e para um que o bom não tem.
     let prefixo = if lugar_do_bom.starts_with("ff") {
         "00"
@@ -71,7 +72,7 @@ fn os_mesmos_pacotes_dao_a_mesma_lista_nas_duas_pontas() {
     };
     let lugar_do_mexido = format!("{prefixo}{}", &lugar_do_bom[2..]);
     // Uma API que este build não roda: recusado, e descrito pelo que diz ser.
-    let velho = pacote("0.9.0", 2, b"antigo");
+    let velho = pacote("0.9.0", MOD_API_MINIMA - 1, b"antigo");
     let lugar_do_velho = seele_ffi::mods::hash_do_conjunto(&mut velho.clone());
     let guardados = vec![
         (lugar_do_bom, bom),
@@ -135,7 +136,7 @@ fn a_exigencia_na_rede_do_navegador_e_a_do_servidor() {
 
 #[test]
 fn o_arquivo_servido_e_o_mesmo_nas_duas_pontas() {
-    let mut arquivos = pacote("1.0.0", 6, b"SeeleUI.pronto();");
+    let mut arquivos = pacote("1.0.0", MOD_API_VERSION, b"SeeleUI.pronto();");
     let lugar = seele_ffi::mods::hash_do_conjunto(&mut arquivos.clone());
     let pasta = no_disco(&[(lugar.clone(), arquivos.clone())]);
     // O desktop lê o pacote da pasta; o navegador, dos bytes guardados.

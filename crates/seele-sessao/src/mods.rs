@@ -361,18 +361,27 @@ mod tests {
         ]
     }
 
-    const BOM: &str = r#"{"schema":1,"id":"ana/mesa","version":"1.0.0","api":6,"repo":"https://exemplo.org/mesa","client":"cliente.js"}"#;
+    use seele_proto::mods::{MOD_API_MINIMA, MOD_API_VERSION};
+
+    /// O manifesto de um pacote, na `api` dada: a deste build lida de
+    /// `MOD_API_VERSION`, e nunca escrita (o guarda
+    /// `nenhum_manifesto_de_teste_crava_a_versao_da_api`).
+    fn manifesto(api: u32) -> String {
+        format!(
+            r#"{{"schema":1,"id":"ana/mesa","version":"1.0.0","api":{api},"repo":"https://exemplo.org/mesa","client":"cliente.js"}}"#
+        )
+    }
 
     #[test]
     fn o_pacote_guardado_no_lugar_do_proprio_hash_le_limpo_e_o_mexido_e_recusado() {
-        let lugar = hash_do_conjunto(&mut pacote(BOM));
-        let lido = guardado_em(pacote(BOM), &lugar);
+        let lugar = hash_do_conjunto(&mut pacote(&manifesto(MOD_API_VERSION)));
+        let lido = guardado_em(pacote(&manifesto(MOD_API_VERSION)), &lugar);
         assert_eq!(
             (lido.id.as_str(), lido.refused, lido.hash.as_str()),
             ("ana/mesa", None, lugar.as_str())
         );
 
-        let mut mexido = pacote(BOM);
+        let mut mexido = pacote(&manifesto(MOD_API_VERSION));
         mexido[1].1.push(b' ');
         let recusado = guardado_em(mexido, &lugar);
         assert_eq!(recusado.refused.as_deref(), Some("malformed-id"));
@@ -391,16 +400,22 @@ mod tests {
             ("abc", Some("malformed"))
         );
 
-        let lugar = hash_do_conjunto(&mut pacote(BOM));
+        let lugar = hash_do_conjunto(&mut pacote(&manifesto(MOD_API_VERSION)));
         assert_eq!(
-            pelo_hash(ler_pacote(&mut pacote(BOM)), &lugar).unwrap().id,
+            pelo_hash(ler_pacote(&mut pacote(&manifesto(MOD_API_VERSION))), &lugar)
+                .unwrap()
+                .id,
             "ana/mesa"
         );
         assert_eq!(
-            pelo_hash(ler_pacote(&mut pacote(BOM)), "outro"),
+            pelo_hash(
+                ler_pacote(&mut pacote(&manifesto(MOD_API_VERSION))),
+                "outro"
+            ),
             Err("conteudo-nao-bate".to_owned())
         );
-        let velho = BOM.replace("\"api\":6", "\"api\":2");
+        // A API logo abaixo da mínima que este build aceita.
+        let velho = manifesto(MOD_API_MINIMA - 1);
         assert_eq!(
             pelo_hash(ler_pacote(&mut pacote(&velho)), &lugar),
             Err("api-too-old".to_owned())

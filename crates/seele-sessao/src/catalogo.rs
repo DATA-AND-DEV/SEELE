@@ -410,9 +410,14 @@ mod tests {
             pacote_que_serve(&mut sem),
             Err(FalhaAoInstalarMod::SemManifesto)
         );
+        // A API logo abaixo da mínima que este build aceita, lida e não escrita.
+        let api = seele_proto::mods::MOD_API_MINIMA - 1;
         let mut velho = vec![(
             "mod.json".to_owned(),
-            br#"{"schema":1,"id":"a/b","version":"1","api":2,"repo":"r","client":"c.js"}"#.to_vec(),
+            format!(
+                r#"{{"schema":1,"id":"a/b","version":"1","api":{api},"repo":"r","client":"c.js"}}"#
+            )
+            .into_bytes(),
         )];
         assert_eq!(
             pacote_que_serve(&mut velho),
