@@ -102,6 +102,8 @@ function fronteiraDaLigacao(w) {
         w.liberar(p, texto.length);
       }
     },
+    /** A vez do relógio: a página do buraco, a cerca vencida e as pendentes da rajada. */
+    vez: (ms, segundos) => (w.ligacao_vez(ms, segundos), saidaEmJson()),
     bateriaNova: () => w.bateria_nova(),
     bateriaPoll: (ms) => w.bateria_poll(ms),
     bateriaPong: () => w.bateria_pong(),
@@ -297,6 +299,8 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
   });
   /** A volta em curso: quem espera o `Voltou`, ou a recusa. */
   let volta = null;
+  /** As tentativas de volta falham enquanto isto vale (a bancada o liga). */
+  let voltaSegura = false;
   /** Quem espera o peso de cada canal (`peso_da_linha`): `{ resolver, rejeitar }`. */
   const pesos = new Map();
   /** Quem espera cada anexo pedido, pela id: `{ abriu, pedaco, chegou }`. */
@@ -343,6 +347,11 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
       } else if (passo.perdida !== undefined) {
         console.warn("sessão: o fluxo de controle se perdeu:", passo.perdida);
         if (dentro) comecarAVoltar();
+      } else if (passo.buraco) {
+        // O que o `seguir` do desktop diz no `seele.log`: o buraco que fechou,
+        // ou o pedaço que ficou de fora.
+        const { alerta, ...buraco } = passo.buraco;
+        (alerta ? console.warn : console.info)("sessão: o buraco do histórico:", buraco);
       } else if (passo.peso_recusado) {
         // O primeiro pedido daquele canal: a recusa do desktop, com o motivo.
         const { channel, causa } = passo.peso_recusado;
@@ -478,6 +487,7 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
     contas.tentativasDeVolta += 1;
     let novo = null;
     try {
+      if (voltaSegura) throw "Unreachable";
       novo = reabrir();
       await comPrazo(novo.ready, PRAZO_DO_APERTO_MS, "HandshakeTimeout");
       if (acabou) return;
@@ -494,7 +504,6 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
       ligacao.bateriaVoltou();
       emitir("TelemetryChanged");
       sessao.aoVoltar?.();
-      repetirAsPendentes();
     } catch (motivo) {
       volta = null;
       geracao += 1;
@@ -516,16 +525,6 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
     } finally {
       tentando = false;
     }
-  }
-
-  /**
-   * As pendentes que a volta repete: a rajada, e depois uma a cada passo, que
-   * o `.wasm` diz (o `INTERVALO_DA_REPETICAO` do `seele_sessao::volta`).
-   */
-  function repetirAsPendentes() {
-    if (acabou || voltando) return;
-    const feito = sessao.atender("repetir_pendentes", {});
-    if (feito?.resposta?.faltam > 0) setTimeout(repetirAsPendentes, feito.resposta.passo_ms);
   }
 
   async function lerUmFluxo(fluxo) {
@@ -629,6 +628,13 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
       }
       return;
     }
+    // A vez do relógio: a busca do buraco e a repetição das pendentes, no
+    // compasso do desktop.
+    if (dentro) {
+      const vez = ligacao.vez(agora, Date.now() / 1000);
+      for (const evento of vez.eventos) emitir(evento);
+      await seguirOsPassos(vez.passos);
+    }
     const { jitterMs, perda } = sessao.medidas();
     if (ligacao.medir(await idaEVolta(), jitterMs, perda)) emitir("TelemetryChanged");
     sessao.aCadaVolta?.();
@@ -665,6 +671,14 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
      * bancada o usa, e a queda segue pelo caminho de verdade (o `closed`).
      */
     simularAQueda: () => wt?.close(),
+    /**
+     * Faz as tentativas de volta falharem enquanto `segura` (a bancada o usa
+     * para a página ficar fora do ar enquanto outra fala): cada uma conta na
+     * bateria, como o transporte que não abre.
+     */
+    segurarAVolta: (segura) => {
+      voltaSegura = Boolean(segura);
+    },
     /** O ganho de cada voz com volume escolhido, pela alça da mistura. */
     ganhosDaVoz: () => (acabou || voltando ? [] : ligacao.ganhosDaVoz()),
     /** O retrato do `.wasm`: a sala, os contados e a telemetria. */

@@ -35,6 +35,7 @@
 //! | `ligacao_atender(pedido)` | 0 | `{"resposta", "eventos", "nao_saiu"}` |
 //! | | 1 | `{"erro": …}`, o erro do desktop |
 //! | | 2 | `{"nao_e_da_sessao": true}` |
+//! | `ligacao_vez(agora_ms, agora_s)` | 0 | `{"eventos", "passos"}`: a vez do buraco e da repetição |
 //! | `ligacao_largar()` | 0 | os eventos da queda: a sessão fica guardada para a volta |
 //! | `ligacao_retomar(pedido, escolhas)` | 0 | nada: o `Hello` da volta espera em `ligacao_para_o_fio` |
 //! | | 1 | `{"recusa": …}` ou `{"erro": …}` |
@@ -503,6 +504,32 @@ pub unsafe extern "C" fn ligacao_atender(ptr: *const u8, len: usize) -> u32 {
         ),
         None => dizer(br#"{"nao_e_da_sessao":true}"#.to_vec(), 2),
     }
+}
+
+/// **A vez do relógio da página** ([`Ligacao::vez`]), a cada volta da medida:
+/// `agora_ms` é o `performance.now()`, e `agora_s` os segundos desde 1970 (a
+/// hora de uma pendente repetida). O que sai fica em [`ligacao_para_o_fio`].
+/// Devolve 0 com `{"eventos": […], "passos": […]}` (os avisos do buraco).
+#[no_mangle]
+pub extern "C" fn ligacao_vez(agora_ms: f64, agora_s: f64) -> u32 {
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "segundos desde 1970 cabem folgados num i64"
+    )]
+    let segundos = agora_s as i64;
+    let (eventos, passos) = LIGACAO.with(|l| {
+        l.borrow_mut()
+            .as_mut()
+            .map(|ligacao| ligacao.vez(agora_da_pagina(agora_ms), segundos))
+            .unwrap_or_default()
+    });
+    let passos: Vec<serde_json::Value> = passos.iter().map(Passo::em_json).collect();
+    dizer(
+        serde_json::json!({ "eventos": eventos, "passos": passos })
+            .to_string()
+            .into_bytes(),
+        0,
+    )
 }
 
 /// Uma volta da medida ([`Ligacao::medir`]): o tempo de ida e volta em

@@ -22,8 +22,7 @@
 //! console.
 
 use seele_proto::control::{
-    check_server_icon, AlertReason, AlertSeverity, ClientMessage, ControlError, MessageRefusal,
-    MAX_BODY_LEN, MAX_NICKNAME_LEN,
+    check_server_icon, AlertReason, AlertSeverity, ClientMessage, ControlError, MAX_NICKNAME_LEN,
 };
 use seele_proto::ids::{ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId};
 use seele_sessao::assento::carimbo_da_entrada;
@@ -163,7 +162,6 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     // bateria e a repetição das pendentes.
     "ping_de_rotina",
     "reenviar_mensagem",
-    "repetir_pendentes",
     "remover_mensagem",
     "renomear_linha",
     "renomear_server",
@@ -812,53 +810,6 @@ fn atender_na_sessao(
             });
             Ok(Value::Null)
         }
-        // **A repetição da volta** (a `Repeticao` e o `repetir` da FFI): a
-        // rajada na primeira vez, e uma por vez depois; cada pendente que ainda
-        // espera sai de novo com a mesma chave, e a grande demais fica recusada.
-        "repetir_pendentes" => {
-            let quantas = sessao.rajada.max(1).min(sessao.a_repetir.len());
-            sessao.rajada = 0;
-            let chaves: Vec<ClientMessageId> = sessao.a_repetir.drain(..quantas).collect();
-            for chave in chaves {
-                let Some((canal, corpo)) = sessao
-                    .room
-                    .pendentes
-                    .iter()
-                    .find(|pendente| {
-                        pendente.client_message_id == chave
-                            && matches!(
-                                pendente.estado,
-                                seele_sessao::state::EstadoDoEnvio::SemResposta
-                                    | seele_sessao::state::EstadoDoEnvio::Enviando
-                            )
-                    })
-                    .map(|pendente| (pendente.channel, pendente.body.clone()))
-                else {
-                    continue;
-                };
-                if let Some(recusa) = grande_demais(&corpo) {
-                    if sessao.room.recusar_envio(chave, recusa) {
-                        sessao.a_conversa_mudou(&mut saida.eventos);
-                    }
-                    continue;
-                }
-                sessao
-                    .room
-                    .anotar_envio(canal, chave, corpo.clone(), agora_s);
-                sessao.a_conversa_mudou(&mut saida.eventos);
-                saida.mensagens.push(ClientMessage::SendMessage {
-                    channel: canal,
-                    body: corpo,
-                    replies_to: None,
-                    client_message_id: chave,
-                });
-            }
-            // O passo até a próxima é o da FFI: a página só o espera.
-            Ok(json!({
-                "faltam": sessao.a_repetir.len(),
-                "passo_ms": seele_sessao::volta::INTERVALO_DA_REPETICAO.as_millis(),
-            }))
-        }
         "pedir_quadro_chave" => {
             saida.mensagens.push(ClientMessage::RequestKeyFrame {
                 screen: ScreenId(a.u32("tela")?),
@@ -877,12 +828,8 @@ fn descricao_do_anexo(room: &seele_sessao::state::Room, anexo: u64) -> Value {
     )
 }
 
-/// O corpo acima do teto do fio: o `volta::grande_demais` da FFI.
-fn grande_demais(corpo: &str) -> Option<MessageRefusal> {
-    (corpo.len() > MAX_BODY_LEN).then(|| MessageRefusal::TooLong {
-        limit: u32::try_from(MAX_BODY_LEN).unwrap_or(u32::MAX),
-    })
-}
+/// O corpo acima do teto do fio: o do desktop, do `seele_sessao::volta`.
+use seele_sessao::volta::grande_demais;
 
 /// O `check_server_icon` com os erros da FFI: o grande demais com o teto, e
 /// todo o resto como «não é uma imagem».
@@ -998,6 +945,7 @@ mod tests {
 
     use super::*;
     use crate::ligacao::{Passo, Pedido};
+    use seele_proto::control::MAX_BODY_LEN;
     use seele_proto::control::{decode, encode_em, ChannelInfo, Permission, ServerMessage};
     use seele_proto::ids::{SessionId, Ssrc};
     use seele_proto::quadro::{enquadrar, Desenquadrador};
@@ -1804,7 +1752,8 @@ mod tests {
             vec![Passo::Voltou]
         );
         let _ = escritos(&mut ligacao);
-        let _ = atender(&mut ligacao, &mut pagina, "repetir_pendentes", json!({}));
+        // A vez do relógio da página solta a rajada da repetição.
+        let _ = ligacao.vez(std::time::Duration::ZERO, 1_790_000_000);
         let [ClientMessage::SendMessage {
             client_message_id, ..
         }] = &escritos(&mut ligacao)[..]
@@ -1817,10 +1766,50 @@ mod tests {
         );
     }
 
+    /// **A busca do buraco anda pela mensagem e pelo relógio**: a cerca de
+    /// uma página vazia agenda a mesma de novo, a vez do relógio a pede, e a
+    /// segunda vazia é o começo do canal, dito com o alerta.
+    #[test]
+    fn o_buraco_anda_pela_cerca_e_pela_vez_do_relogio() {
+        use crate::ligacao::Passo;
+        use seele_sessao::volta::MARCA_DO_PING_DO_BURACO;
+        let mut ligacao = dentro();
+        let mut pagina = DaPagina::nova(SEMENTE);
+        let _ = atender(
+            &mut ligacao,
+            &mut pagina,
+            "open_channel",
+            json!({ "channel": 1 }),
+        );
+        let _ = escritos(&mut ligacao);
+        let _ = ligacao.largar_para_voltar();
+        let _ = voltar(&mut ligacao, crate::sessao::Escolhas::default());
+        let _ = escritos(&mut ligacao);
+
+        let pong = |carimbo| do_servidor(&ServerMessage::Pong { timestamp: carimbo });
+        let passos = ligacao.chegou(&pong(MARCA_DO_PING_DO_BURACO | 1));
+        assert_eq!(passos.len(), 1, "a página vazia não espera: {passos:?}");
+        // Um segundo depois, a mesma página de novo.
+        let (_, avisos) = ligacao.vez(std::time::Duration::from_secs(1), 1_790_000_000);
+        assert!(matches!(&avisos[..], [Passo::Buraco(aviso)] if aviso["buraco"] == "de-novo"));
+        assert!(matches!(
+            &escritos(&mut ligacao)[..],
+            [ClientMessage::FetchHistory { .. }, ClientMessage::Ping { timestamp }]
+                if *timestamp == MARCA_DO_PING_DO_BURACO | 2
+        ));
+        let passos = ligacao.chegou(&pong(MARCA_DO_PING_DO_BURACO | 2));
+        assert!(matches!(
+            &passos[..],
+            [Passo::Chegou { .. }, Passo::Buraco(aviso)]
+                if aviso["buraco"] == "Comeco" && aviso["alerta"] == true
+        ));
+    }
+
     #[test]
     fn a_volta_readota_restabelece_e_repete_as_pendentes() {
         use crate::ligacao::Passo;
-        use crate::sessao::{Escolhas, PAGINA_DO_BURACO};
+        use crate::sessao::Escolhas;
+        use seele_sessao::volta::{MARCA_DO_PING_DO_BURACO, PAGINA_DO_BURACO};
         let mut ligacao = dentro();
         let mut pagina = DaPagina::nova(SEMENTE);
         let _ = atender(
@@ -1873,17 +1862,22 @@ mod tests {
                 ClientMessage::JoinChannel {
                     channel: ChannelId(1)
                 },
+                // A primeira página da busca do buraco, e a cerca dela.
                 ClientMessage::FetchHistory {
                     channel: ChannelId(1),
                     cursor: None,
                     limit: PAGINA_DO_BURACO
                 },
+                ClientMessage::Ping {
+                    timestamp: MARCA_DO_PING_DO_BURACO | 1
+                },
                 ClientMessage::SetMuted(true),
             ]
         );
-        // A conversa ficou, e a pendente sai de novo com a mesma chave.
-        let repetida = atender(&mut ligacao, &mut pagina, "repetir_pendentes", json!({}));
-        assert_eq!(repetida.resposta, json!({ "faltam": 0, "passo_ms": 125 }));
+        // A conversa ficou, e a pendente sai de novo com a mesma chave, na vez
+        // do relógio da página.
+        let (eventos, _) = ligacao.vez(std::time::Duration::ZERO, 1_790_000_000);
+        assert_eq!(eventos, vec![json!("MessagesChanged")]);
         let [ClientMessage::SendMessage {
             client_message_id,
             body,

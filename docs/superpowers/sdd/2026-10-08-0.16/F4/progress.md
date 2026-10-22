@@ -1298,3 +1298,32 @@ no `target/` dela); a `prova` e o desktop não mudam.
 - **O que o perfil custa, medido antes da decisão:** as bancadas da voz e da
   sessão rodaram com o `.wasm` deste perfil (com a `prova`) sem diferença; os
   rastros de pilha perdem os nomes das funções.
+
+## 21/10, noite — o buraco do histórico como o do desktop
+
+A orquestradora: «o navegador pede uma página de 200 e o desktop até 10.
+Iguale ao desktop, lendo o teto do mesmo `seele_sessao::volta`.»
+
+- **A busca e a repetição moram no `seele_sessao::volta`**, genéricas no
+  relógio (`Relogio`: o `Instant` do desktop, a duração da página no
+  navegador): a `Buraco` (as páginas com cerca, o teto de 10, o prazo da
+  cerca, a página vazia pedida de novo), a `Repeticao` (a rajada e o passo),
+  o `repetir` e o `grande_demais`. Os 17 testes do módulo foram junto (15 no
+  `seele-sessao`, e os 2 que sobem uma conexão da FFI ficaram nela). A FFI
+  segue com o laço dela (`seguir`) e apelidos para o `Instant`.
+- **No navegador**, a `Sessao` guarda as duas. A volta abre a busca (a
+  primeira página e a cerca), cada mensagem dobrada passa por ela, e a vez do
+  relógio (`ligacao_vez`, na volta de 250 ms da página) pede a página que
+  esperava, trata a cerca vencida e solta as pendentes no compasso do
+  desktop. O comando `repetir_pendentes` e o laço próprio do JS saíram, e o
+  `grande_demais` do `seele-web` virou o comum. A parada do buraco vai ao
+  console da página, com o alerta nas que deixam um pedaço de fora (o que o
+  desktop diz no `seele.log`).
+- **A bancada** (caso 13): a primeira página fica fora do ar enquanto outra
+  manda 210 mensagens, e na volta tem as 210. O `setOffline` do Playwright não
+  segura uma WebTransport (medido: a página voltou na hora, e as 210 chegaram
+  ao vivo), e a sessão ganhou uma costura de bancada, `segurarAVolta`, como o
+  `simularAQueda`. Provado pela reversão: só com a primeira página chegam 200
+  de 210, e o console diz `SemResposta`. A primeira reversão (largar só o
+  pedido que a mensagem faz) passou, e a razão é boa: a cerca da página
+  largada venceu, e a vez do relógio a pediu de novo.

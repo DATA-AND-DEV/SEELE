@@ -756,6 +756,51 @@ const invocar = (aba, comando, args) =>
       `o enlace que responde não ficou de pé: ${JSON.stringify(deDepois.link)}, ${deDepois.tentativas} tentativa(s) de volta`,
     );
 
+    // **O buraco do histórico, como no desktop**: a primeira página fica fora
+    // do ar (as tentativas de volta falham, pela costura da sessão: o
+    // `setOffline` do Playwright não segura uma WebTransport, medido) enquanto
+    // a outra manda mais mensagens do que cabem numa página do buraco (200).
+    // Na volta, a busca desce página por página e traz todas; uma página só
+    // deixaria as mais antigas de fora.
+    const NO_BURACO = 210;
+    await a.aba.evaluate(() => {
+      sessaoDaPonte.atual.segurarAVolta(true);
+      sessaoDaPonte.atual.simularAQueda();
+    });
+    const foraDoAr = await esperar(a.aba, async () => {
+      const link = (await window.__TAURI__.core.invoke("snapshot")).link;
+      return { pronto: (link?.InternalBattery?.attempts ?? 0) >= 1, link };
+    }, undefined, 10_000);
+    confere("13", foraDoAr.pronto, `a página fora do ar não ficou na bateria tentando: ${JSON.stringify(foraDoAr.link)}`);
+    const mandadas = await e.aba.evaluate(async ({ canal, quantas }) => {
+      const invoke = window.__TAURI__.core.invoke;
+      await invoke("open_channel", { channel: canal });
+      // No compasso que o balde do servidor deixa (20 por segundo, com folga).
+      for (let i = 1; i <= quantas; i++) {
+        await invoke("send_message", { channel: canal, body: `no buraco ${i}` });
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      const fim = Date.now() + 15_000;
+      for (;;) {
+        const confirmadas = (await invoke("messages")).filter((m) => m.body.startsWith("no buraco ") && m.estado === "Confirmada").length;
+        if (confirmadas === quantas || Date.now() > fim) return confirmadas;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }, { canal, quantas: NO_BURACO });
+    confere("13", mandadas === NO_BURACO, `a outra página não gravou as ${NO_BURACO} mensagens: ${mandadas}`);
+    await a.aba.evaluate(() => sessaoDaPonte.atual.segurarAVolta(false));
+    const buracoFechou = await esperar(a.aba, async (quantas) => {
+      const invoke = window.__TAURI__.core.invoke;
+      const link = (await invoke("snapshot")).link;
+      const chegaram = (await invoke("messages")).filter((m) => m.body.startsWith("no buraco ")).length;
+      return { pronto: link === "Online" && chegaram === quantas, link, chegaram };
+    }, NO_BURACO, 45_000);
+    confere(
+      "13",
+      buracoFechou.pronto,
+      `o buraco não fechou na volta: ${buracoFechou.chegaram} de ${NO_BURACO} mensagens, enlace ${JSON.stringify(buracoFechou.link)}`,
+    );
+
     // ------------------------------------------------------------ 14. os MODs da sessão
     const servidorComMod = await subirOServidor([PASTA_DO_MOD]);
     servidoresDaBancada.push(servidorComMod);
