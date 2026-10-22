@@ -307,11 +307,8 @@ const AINDA_A_FAZER = new Map([
   ["enviar_imagem_mod", TAREFA_MODS],
   ["escolher_para_o_mod", TAREFA_MODS],
   ["ler_imagem_mod", TAREFA_MODS],
-  ["midia_do_mod", TAREFA_MODS],
-  ["midia_em_bytes", TAREFA_MODS],
   ["pedaco_do_escolhido", TAREFA_MODS],
   ["soltar_escolhido", TAREFA_MODS],
-  ["som_do_mod", TAREFA_MODS],
 ]);
 
 /**
@@ -1500,16 +1497,25 @@ function fronteiraDosMods(w) {
     }
   }
   const lido = (codigo) => (codigo === 0 ? { ok: JSON.parse(saida() || "null") } : { falha: JSON.parse(saida()) });
+  const pedir = (exportada, pacote, pedido) => {
+    entregar(pacote ? [pacote] : []);
+    return comBlocos([texto(JSON.stringify(pedido))], (p, n) => exportada(p, n));
+  };
   return {
     naTela(pacotes) {
       entregar(pacotes);
       w.mods_na_tela();
       return JSON.parse(saida());
     },
-    codigo(pacote, pedido) {
-      entregar(pacote ? [pacote] : []);
-      return lido(comBlocos([texto(JSON.stringify(pedido))], (p, n) => w.mod_codigo(p, n)));
+    codigo: (pacote, pedido) => lido(pedir(w.mod_codigo, pacote, pedido)),
+    midia: (pacote, pedido) => lido(pedir(w.mod_midia, pacote, pedido)),
+    /** Os bytes crus do som, como o `tauri::ipc::Response` do desktop. */
+    som(pacote, pedido) {
+      if (pedir(w.mod_som, pacote, pedido) !== 0) return { falha: JSON.parse(saida()) };
+      return { ok: memoria().slice(w.saida_ptr(), w.saida_ptr() + w.saida_len()) };
     },
+    midiaDoServidor: (base64, uso) =>
+      lido(comBlocos([texto(base64), texto(uso)], (tp, tn, up, un) => w.mod_midia_do_servidor(tp, tn, up, un))),
     endereco: () => (w.catalogo_endereco(), saida()),
     lerOCatalogo: (catalogo) => lido(comBlocos([catalogo.bytes, texto(catalogo.assinatura)], (...pares) => w.catalogo_ler(...pares))),
     planejar(catalogo, revogacoes, pedido) {
@@ -1521,6 +1527,16 @@ function fronteiraDosMods(w) {
       return lido(comBlocos([texto(hash)], (p, n) => w.catalogo_conferir(p, n)));
     },
   };
+}
+
+/** O pacote guardado sob `hash`, ou `null` (dito no console) sem armazém. */
+async function pacoteDoArmazem(hash) {
+  try {
+    return await pacoteGuardado(hash);
+  } catch (falha) {
+    console.warn("ponte: o armazém dos MODs não abriu:", falha);
+    return null;
+  }
 }
 
 /** Os MODs no `.wasm` desta página. */
@@ -1887,11 +1903,28 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   },
   codigo_do_mod: async ({ geracao, id, hash } = {}) => {
     recusarSeMorta(geracao);
-    const pacote = await pacoteGuardado(hash).catch((falha) => {
-      console.warn("ponte: o armazém dos MODs não abriu:", falha);
-      return null;
-    });
-    const lido = (await osModsDaPagina()).codigo(pacote, { id, hash });
+    const lido = (await osModsDaPagina()).codigo(await pacoteDoArmazem(hash), { id, hash });
+    if (lido.falha) throw lido.falha;
+    return lido.ok;
+  },
+  // A mídia declarada do pacote: o som volta sem `data:`, e os bytes dele
+  // pelo `som_do_mod`.
+  midia_do_mod: async ({ geracao, id, hash, caminho } = {}) => {
+    recusarSeMorta(geracao);
+    const lido = (await osModsDaPagina()).midia(await pacoteDoArmazem(hash), { id, hash, caminho });
+    if (lido.falha) throw lido.falha;
+    return lido.ok;
+  },
+  som_do_mod: async ({ geracao, id, hash, caminho } = {}) => {
+    recusarSeMorta(geracao);
+    const lido = (await osModsDaPagina()).som(await pacoteDoArmazem(hash), { id, hash, caminho });
+    if (lido.falha) throw lido.falha;
+    return lido.ok;
+  },
+  // A mídia que o MOD recebeu do servidor, reduzida ao uso que a janela nomeia.
+  midia_em_bytes: async ({ geracao, base64, uso } = {}) => {
+    recusarSeMorta(geracao);
+    const lido = (await osModsDaPagina()).midiaDoServidor(String(base64 ?? ""), String(uso ?? ""));
     if (lido.falha) throw lido.falha;
     return lido.ok;
   },

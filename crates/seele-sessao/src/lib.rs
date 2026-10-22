@@ -30,14 +30,20 @@
 use seele_proto::ids::{PersonId, SessionId, Ssrc};
 
 pub mod assento;
+pub mod base64;
 pub mod battery;
 pub mod catalogo;
 pub mod despedida;
+#[cfg(feature = "reducao")]
+pub mod midia_de_mod;
 pub mod mods;
 pub mod nome_do_anexo;
 pub mod preview;
+#[cfg(feature = "reducao")]
+pub mod reducao;
 pub mod retrato;
 pub mod search;
+pub mod som;
 pub mod state;
 pub mod volta;
 

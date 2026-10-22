@@ -1210,3 +1210,32 @@ página: `mods_instalados`, `instalar_mod_do_catalogo` e `codigo_do_mod`.
 
 **Faltam 8 dos MODs** (as mídias, as imagens pelo volume e o seletor), e
 depois o buraco igual ao do desktop.
+
+## 21/10, noite — as mídias dos MODs (6 dos 11)
+
+Da `versao/0.16` em `aa5abbce`: `midia_do_mod`, `som_do_mod` e
+`midia_em_bytes`.
+
+- **Mais quatro peças num lugar só**, no `seele-sessao`, reexportadas pelo
+  `seele-core` e pelo `seele-ffi`:
+  - `som`: o piso do som decodificado (o cabeçalho de WAV, Ogg e MP3 lido à
+    mão), que saiu do `main.rs`;
+  - `base64`: o par de ida e de volta, que saiu do `seele-ffi` junto, como a
+    regra dele pede. Ao sair, a documentação do `pastas_do_modulo`, que estava
+    grudada no `base64_de`, voltou para a função dela;
+  - `reducao`: a redução de imagem ao uso, que saiu do app, atrás de uma
+    feature `reducao` (traz o `image`). O `seele-ffi` e o `seele-web` a ligam;
+  - `midia_de_mod`: o caminho da mídia que vem do servidor (o piso do som, a
+    redução, o `data:`), que o `midia_em_bytes` e o `ler_imagem_mod` do desktop
+    passaram a usar.
+- **No navegador**, a mídia declarada do pacote segue a ordem do desktop (o
+  pacote pelo hash, o dono, o arquivo declarado, o teto, o tipo); o som volta
+  sem `data:` e os bytes dele saem crus.
+- **A bancada** (caso 14): a casca pede a mídia do painel do MOD e lê os bytes
+  do som, e a figura fica `pronta` (sem os bytes ela fica `falhou`, medido
+  pela reversão; o botão vira PARAR pelo próprio MOD, com som ou sem, e por
+  isso não serve de prova); e uma capa de 1200 × 400 vinda do servidor volta
+  reduzida a 960 × 320 (sem o uso, não reduz: reversão).
+- **O custo medido:** o `.wasm` da página, como o `cargo xtask pacote-web` o
+  compila, foi de 1,43 MB para 2,48 MB com a redução de imagem (o `image`,
+  com PNG, JPEG, WebP e GIF). Levado à orquestradora.

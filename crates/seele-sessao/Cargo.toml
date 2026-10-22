@@ -21,6 +21,14 @@ thiserror = "2.0.19"
 # `seele-lancador`, na mesma versão. Os dois compilam para o navegador.
 serde_json = "1.0.151"
 minisign-verify = "0.2.5"
+# A redução de uma imagem de MOD ao uso (`reducao`), só com a feature: o
+# desktop e o navegador a ligam, e o resto do grafo não compila o `image`. A
+# mesma versão e as mesmas features do `seele-app`.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"], optional = true }
+
+[features]
+# A redução de imagem (`reducao`), com o `image`.
+reducao = ["dep:image"]
 
 [lints]
 workspace = true

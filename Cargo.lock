@@ -5201,6 +5201,7 @@ dependencies = [
 name = "seele-sessao"
 version = "0.0.0"
 dependencies = [
+ "image",
  "minisign-verify",
  "seele-proto",
  "serde",

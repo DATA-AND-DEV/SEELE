@@ -111,6 +111,95 @@ pub fn codigo(arquivos: &mut [(String, Vec<u8>)], id: &str, hash: &str) -> Resul
     }))
 }
 
+/// **Os bytes de um arquivo declarado do pacote** (`bytes_declarados_do_mod`
+/// do desktop): o pacote pelo hash e do dono, o arquivo que o manifesto
+/// declara, e o teto da mídia, separado do formato.
+///
+/// # Errors
+///
+/// Os de [`do_mod`], `arquivo-nao-declarado` e `arquivo-grande-demais`.
+pub fn bytes_declarados(
+    arquivos: &mut [(String, Vec<u8>)],
+    id: &str,
+    hash: &str,
+    caminho: &str,
+) -> Result<Vec<u8>, String> {
+    let instalado = do_mod(arquivos, id, hash)?;
+    let bytes = servir(arquivos, &instalado, &format!("/{id}/{caminho}"))
+        .ok_or_else(|| "arquivo-nao-declarado".to_owned())?;
+    if bytes.len() > pacote::TETO_DE_MIDIA {
+        return Err("arquivo-grande-demais".to_owned());
+    }
+    Ok(bytes.to_vec())
+}
+
+/// **O `midia_do_mod`**: o tipo sai dos bytes antes do `data:` — o som volta
+/// só com o papel e o tamanho (a janela o lê cru, pelo `som_do_mod`), e só a
+/// imagem ganha o `data:`.
+///
+/// # Errors
+///
+/// Os de [`bytes_declarados`], e `formato-desconhecido`.
+pub fn midia(
+    arquivos: &mut [(String, Vec<u8>)],
+    id: &str,
+    hash: &str,
+    caminho: &str,
+) -> Result<Value, String> {
+    let bytes = bytes_declarados(arquivos, id, hash, caminho)?;
+    let tipo = pacote::ler_tipo(&bytes).ok_or_else(|| "formato-desconhecido".to_owned())?;
+    if tipo.papel == "som" {
+        return Ok(json!({ "papel": tipo.papel, "bytes": bytes.len() }));
+    }
+    let lida = pacote::ler_midia(&bytes).ok_or_else(|| "formato-desconhecido".to_owned())?;
+    Ok(json!({ "uri": lida.uri, "papel": lida.papel, "bytes": lida.bytes }))
+}
+
+/// **O `som_do_mod`**: os bytes crus do som declarado, recusado antes se,
+/// decodificado, ele não cabe no teto do som.
+///
+/// # Errors
+///
+/// Os de [`bytes_declarados`], `nao-e-som`, `formato-desconhecido` e
+/// `som-grande-demais-decodificado: …`.
+pub fn som(
+    arquivos: &mut [(String, Vec<u8>)],
+    id: &str,
+    hash: &str,
+    caminho: &str,
+) -> Result<Vec<u8>, String> {
+    let bytes = bytes_declarados(arquivos, id, hash, caminho)?;
+    match pacote::ler_tipo(&bytes) {
+        Some(tipo) if tipo.papel == "som" => {
+            seele_sessao::som::som_cabe_decodificado(&bytes).map(|()| bytes)
+        }
+        Some(_) => Err("nao-e-som".to_owned()),
+        None => Err("formato-desconhecido".to_owned()),
+    }
+}
+
+/// Uma mídia pronta, no JSON do `MidiaDoMod` do desktop.
+#[must_use]
+pub fn em_json(pronta: seele_sessao::midia_de_mod::MidiaPronta) -> Value {
+    let mut midia = json!({ "uri": pronta.uri, "papel": pronta.papel, "bytes": pronta.bytes });
+    if let (Some(decodificados), Value::Object(campos)) = (pronta.decodificados, &mut midia) {
+        campos.insert("decodificados".into(), json!(decodificados));
+    }
+    midia
+}
+
+/// **O `midia_em_bytes`**: o texto que um MOD recebeu do servidor, desfeito e
+/// pronto pelo caminho comum (`seele_sessao::midia_de_mod`), reduzido ao
+/// `uso` quando a janela nomeia um que este produto conhece.
+///
+/// # Errors
+///
+/// O motivo do desktop.
+pub fn midia_do_servidor(texto: &str, uso: Option<&str>) -> Result<Value, String> {
+    let teto = uso.and_then(seele_sessao::reducao::teto_do_uso);
+    seele_sessao::midia_de_mod::do_texto(texto, teto.as_ref()).map(em_json)
+}
+
 /// O que a página baixou do catálogo, com as assinaturas.
 pub struct Baixado<'a> {
     /// O `catalogo.json`, cru.
@@ -211,6 +300,49 @@ mod tests {
         assert_eq!(
             codigo(&mut torto, "ana/mesa", &hash_torto),
             Err("cliente-nao-e-utf8".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_midia_do_pacote_recusa_na_ordem_do_desktop() {
+        // Um WAV de verdade (o cabeçalho que o `sniff` lê) no lugar do declarado.
+        let mut wav = b"RIFF\x24\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x80\xbb\0\0\0\x77\x01\0\x02\0\x10\0data\0\0\0\0".to_vec();
+        wav.truncate(44);
+        let mut com_som = arquivos();
+        com_som[2].1 = wav;
+        let hash = pacote::hash_do_conjunto(&mut com_som.clone());
+        // O som volta sem `data:`, e os bytes dele vêm crus.
+        let lida = midia(&mut com_som.clone(), "ana/mesa", &hash, "som/toque.wav").unwrap();
+        assert_eq!(
+            (lida["papel"].as_str(), lida.get("uri")),
+            (Some("som"), None)
+        );
+        assert_eq!(
+            som(&mut com_som.clone(), "ana/mesa", &hash, "som/toque.wav")
+                .unwrap()
+                .len(),
+            44
+        );
+        // O script do cliente é declarado, e não é som nem imagem.
+        assert_eq!(
+            som(&mut com_som.clone(), "ana/mesa", &hash, "cliente/main.js"),
+            Err("formato-desconhecido".to_owned())
+        );
+        assert_eq!(
+            midia(&mut com_som.clone(), "ana/mesa", &hash, "leia.txt"),
+            Err("arquivo-nao-declarado".to_owned())
+        );
+        assert_eq!(
+            midia(&mut com_som.clone(), "ana/outro", &hash, "som/toque.wav"),
+            Err("conteudo-de-outro-mod".to_owned())
+        );
+        assert_eq!(
+            midia_do_servidor("isto não é base64", None),
+            Err("nao-e-base64".to_owned())
+        );
+        assert_eq!(
+            midia_do_servidor("data:image/png,AAAA", None),
+            Err("nao-e-base64".to_owned())
         );
     }
 
