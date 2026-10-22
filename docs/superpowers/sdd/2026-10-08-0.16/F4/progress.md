@@ -1278,3 +1278,23 @@ da ponte ficou vazio.
   navegador, e o filtro e o «ainda a fazer» continuam provados com uma entrada
   posta na hora. A lista do `arquivo` corrigida na leva anterior foi a que
   passou a valer aqui.
+
+## 21/10, noite — a D-web-5: o `.wasm` da página menor
+
+A decisão da orquestradora (`e6a73dd5`), pelas medidas que mandei: o
+`.wasm` do `pacote-web` sai com `opt-level = "z"`, LTO e `strip =
+"symbols"`, só nessa compilação (`PERFIL_DA_PAGINA`, passado por `--config`
+no `target/` dela); a `prova` e o desktop não mudam.
+
+- **Medido no pacote, com o código de hoje:** 1 714 052 bytes, sem a seção
+  `name`; 542 KB em gzip 9 e 405 KB em brotli 11 (eram 2,5 MB, 726 KB e 526
+  KB com o perfil de antes).
+- **A regra 6 do `pacote-web`**: o `.wasm` da página não leva a seção `name`
+  (lida do formato, seção por seção) e fica abaixo de
+  `TETO_DO_WASM_DA_PAGINA`, 1 900 000 bytes (uns 10% sobre hoje). Os `.wasm`
+  de mentira dos testes passaram a ser bem formados, e cada estrago novo (a
+  seção `name`, o grande) reprova sozinho. Provada pela reversão de ponta a
+  ponta: o `pacote-web` sem o perfil reprova pelos dois motivos.
+- **O que o perfil custa, medido antes da decisão:** as bancadas da voz e da
+  sessão rodaram com o `.wasm` deste perfil (com a `prova`) sem diferença; os
+  rastros de pilha perdem os nomes das funções.

@@ -23,7 +23,9 @@
 //! 4. **nenhum comando da ponte em `AINDA_A_FAZER`**: um atendido sem corpo é um
 //!    botão que responde «ainda não» a quem usa;
 //! 5. **o `.wasm` da página sem as exportações da `prova`**, lidas do
-//!    `fronteira.rs` do `seele-web`, e o motor com cara de `.wasm`.
+//!    `fronteira.rs` do `seele-web`, e o motor com cara de `.wasm`;
+//! 6. **o `.wasm` da página com o perfil dela** (D-web-5, [`PERFIL_DA_PAGINA`]):
+//!    sem a seção `name`, e abaixo de [`TETO_DO_WASM_DA_PAGINA`].
 //!
 //! Sai com 1 se o pacote não sai, e diz por quê. Desde a Tarefa 2.6 a ponte
 //! atende todos os comandos, e ele sai. Nada aqui publica: quem leva o pacote
@@ -287,6 +289,25 @@ pub(crate) fn conferir(pasta: &Path, congelados: &str, da_prova: &[String]) -> V
                 .to_owned(),
         );
     }
+    // 6.
+    if let Ok(bytes) = std::fs::read(pasta.join("seele_web.wasm")) {
+        match secoes_proprias(&bytes) {
+            Err(motivo) => motivos.push(format!("o `seele_web.wasm` não se lê: {motivo}")),
+            Ok(nomes) if nomes.iter().any(|nome| nome == "name") => motivos.push(
+                "o `seele_web.wasm` leva a seção `name` (os nomes das funções): ele não saiu com \
+                 o perfil da página (D-web-5)"
+                    .to_owned(),
+            ),
+            Ok(_) => {}
+        }
+        if bytes.len() > TETO_DO_WASM_DA_PAGINA {
+            motivos.push(format!(
+                "o `seele_web.wasm` tem {} bytes, acima do teto de {TETO_DO_WASM_DA_PAGINA} \
+                 (D-web-5): meça de novo o que chega ao celular antes de subir o teto",
+                bytes.len()
+            ));
+        }
+    }
     match std::fs::read(pasta.join("seele_motor_web.wasm")) {
         Ok(bytes) if bytes.starts_with(b"\0asm") => {}
         Ok(_) => motivos.push("o `seele_motor_web.wasm` não é um `.wasm`".to_owned()),
@@ -315,6 +336,64 @@ pub(crate) fn run() -> ExitCode {
     }
 }
 
+/// **O perfil do `.wasm` da página** (D-web-5): o menor que o celular baixa.
+/// Só nesta compilação, que tem o `target/` dela: o `.wasm` da `prova` e o
+/// desktop não mudam. O custo fica escrito na decisão: sem a seção `name`, os
+/// rastros de pilha perdem os nomes das funções, e a mensagem do pânico fica.
+pub(crate) const PERFIL_DA_PAGINA: [&str; 3] = [
+    "profile.release.opt-level=\"z\"",
+    "profile.release.lto=true",
+    "profile.release.strip=\"symbols\"",
+];
+
+/// **O teto do `.wasm` da página**, em bytes, pelos números de 21/10/2026: o
+/// do pacote com o [`PERFIL_DA_PAGINA`] tinha 1 714 052 (542 KB em gzip, 405
+/// KB em brotli 11), e o teto deixa uns 10% de folga. Passar dele é a hora de
+/// medir de novo o que chega ao celular, e não de subir o número calado.
+pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 1_900_000;
+
+/// Os nomes das seções próprias (`custom`) de um `.wasm`, lidas do formato:
+/// o cabeçalho, e cada seção com o id e o tamanho em LEB128.
+fn secoes_proprias(bytes: &[u8]) -> Result<Vec<String>, String> {
+    let leb = |em: &mut usize| -> Result<usize, String> {
+        let mut valor = 0_usize;
+        for deslocamento in (0..35).step_by(7) {
+            let byte = *bytes.get(*em).ok_or("um tamanho cortado")?;
+            *em += 1;
+            valor |= usize::from(byte & 0x7f) << deslocamento;
+            if byte & 0x80 == 0 {
+                return Ok(valor);
+            }
+        }
+        Err("um tamanho longo demais".to_owned())
+    };
+    if bytes.get(..8) != Some(b"\0asm\x01\0\0\0".as_slice()) {
+        return Err("o cabeçalho não é o de um `.wasm`".to_owned());
+    }
+    let mut nomes = Vec::new();
+    let mut em = 8;
+    while em < bytes.len() {
+        let id = *bytes.get(em).ok_or("uma seção cortada")?;
+        em += 1;
+        let tamanho = leb(&mut em)?;
+        let fim = em
+            .checked_add(tamanho)
+            .filter(|fim| *fim <= bytes.len())
+            .ok_or("uma seção passa do fim")?;
+        if id == 0 {
+            let mut dentro = em;
+            let comprimento = leb(&mut dentro)?;
+            let nome = bytes
+                .get(dentro..dentro + comprimento)
+                .filter(|_| dentro + comprimento <= fim)
+                .ok_or("o nome de uma seção passa dela")?;
+            nomes.push(String::from_utf8_lossy(nome).into_owned());
+        }
+        em = fim;
+    }
+    Ok(nomes)
+}
+
 fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
     let raiz = raiz();
     let sdk = crate::wasi_sdk::caminho_sem_baixar()?;
@@ -329,6 +408,11 @@ fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
                 "--target",
                 "wasm32-unknown-unknown",
             ])
+            .args(
+                PERFIL_DA_PAGINA
+                    .iter()
+                    .flat_map(|valor| ["--config", valor]),
+            )
             .arg("--target-dir")
             .arg(&construcao),
     )
@@ -391,6 +475,29 @@ mod tests {
     }
 
     const CONGELADOS: &str = ":root { --cor: #000; }\n";
+
+    /// Um `.wasm` bem formado, com uma seção própria `nome` levando `conteudo`.
+    fn wasm_com(nome: &str, conteudo: &[u8]) -> Vec<u8> {
+        fn leb(mut valor: usize, saida: &mut Vec<u8>) {
+            loop {
+                let byte = u8::try_from(valor & 0x7f).unwrap();
+                valor >>= 7;
+                if valor == 0 {
+                    saida.push(byte);
+                    return;
+                }
+                saida.push(byte | 0x80);
+            }
+        }
+        let mut corpo = Vec::new();
+        leb(nome.len(), &mut corpo);
+        corpo.extend_from_slice(nome.as_bytes());
+        corpo.extend_from_slice(conteudo);
+        let mut wasm = b"\0asm\x01\0\0\0\0".to_vec();
+        leb(corpo.len(), &mut wasm);
+        wasm.extend(corpo);
+        wasm
+    }
     const DA_PROVA: &[&str] = &["analisar_link_em", "json_do_cliente"];
 
     fn da_prova() -> Vec<String> {
@@ -418,7 +525,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             pasta.join("seele_web.wasm"),
-            b"\0asm\x01\0\0\0analisar_link",
+            wasm_com("nada", b"analisar_link"),
         )
         .unwrap();
         std::fs::write(pasta.join("seele_motor_web.wasm"), b"\0asm\x01\0\0\0").unwrap();
@@ -441,7 +548,7 @@ mod tests {
     /// Cada regra, estragada sozinha, reprova com a frase dela.
     #[test]
     fn cada_regra_reprova_o_que_ela_guarda() {
-        let casos: [Estrago<'_>; 6] = [
+        let casos: [Estrago<'_>; 8] = [
             (
                 "tokens",
                 &|p| std::fs::write(p.join("tokens.css"), ":root { --cor: #fff; }\n").unwrap(),
@@ -479,10 +586,26 @@ mod tests {
             (
                 "prova",
                 &|p| {
-                    std::fs::write(p.join("seele_web.wasm"), b"\0asm\x01\0\0\0analisar_link_em")
-                        .unwrap()
+                    std::fs::write(
+                        p.join("seele_web.wasm"),
+                        wasm_com("nada", b"analisar_link_em"),
+                    )
+                    .unwrap()
                 },
                 "`analisar_link_em`, da `prova`",
+            ),
+            (
+                "nomes",
+                &|p| std::fs::write(p.join("seele_web.wasm"), wasm_com("name", b"\0")).unwrap(),
+                "seção `name`",
+            ),
+            (
+                "grande",
+                &|p| {
+                    let grande = vec![0_u8; TETO_DO_WASM_DA_PAGINA];
+                    std::fs::write(p.join("seele_web.wasm"), wasm_com("nada", &grande)).unwrap()
+                },
+                "acima do teto",
             ),
             (
                 "sem-motor",
