@@ -200,6 +200,41 @@ pub fn midia_do_servidor(texto: &str, uso: Option<&str>) -> Result<Value, String
     seele_sessao::midia_de_mod::do_texto(texto, teto.as_ref()).map(em_json)
 }
 
+/// **As regras do seletor do `escolher_para_o_mod`**: o título, as extensões
+/// que o filtro oferece e o teto deste pedido, todos pelas regras do desktop
+/// (`seele_sessao::escolhidos`). A página não tem título no seletor dela, e
+/// filtra pelo `accept`.
+#[must_use]
+pub fn regras_do_seletor(
+    finalidade: Option<&str>,
+    extensoes: Option<&[String]>,
+    limite_de_bytes: Option<usize>,
+) -> Value {
+    use seele_sessao::escolhidos::{extensoes_do_seletor, teto_do_escolhido, titulo_do_seletor};
+    json!({
+        "titulo": titulo_do_seletor(finalidade),
+        "extensoes": extensoes_do_seletor(extensoes),
+        "teto": teto_do_escolhido(limite_de_bytes),
+    })
+}
+
+/// O que um arquivo escolhido é, provado pelo começo dele, contra os papéis
+/// que o MOD pediu — o `tipo_do_escolhido` e o `o_papel_serve` do desktop, na
+/// ordem dele.
+///
+/// # Errors
+///
+/// `tipo-recusado:<formato>`, `formato-desconhecido` e
+/// `papel-nao-serve:<papel>`.
+pub fn o_escolhido_serve(
+    comeco: &[u8],
+    papeis: Option<&[String]>,
+) -> Result<pacote::TipoLido, String> {
+    let tipo = seele_sessao::escolhidos::tipo_do_escolhido(comeco)?;
+    seele_sessao::escolhidos::o_papel_serve(papeis, tipo.papel)?;
+    Ok(tipo)
+}
+
 /// O que a página baixou do catálogo, com as assinaturas.
 pub struct Baixado<'a> {
     /// O `catalogo.json`, cru.

@@ -709,6 +709,13 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
     },
     /** Um fluxo unidirecional para o servidor: o envio de um anexo. */
     abrirUmFluxo: () => wt.createUnidirectionalStream(),
+    /**
+     * Um fluxo bidirecional para o servidor: uma imagem de MOD pelo volume.
+     * Sem enlace (a bateria, ou o fim), `sessao-encerrada`, como o motor do
+     * desktop sem cliente.
+     */
+    abrirUmFluxoDeImagem: () =>
+      acabou || voltando || !wt ? Promise.reject("sessao-encerrada") : wt.createBidirectionalStream(),
     /** O `Preview` do desktop, pelo juiz do `.wasm`. */
     previa: (pedidoDaPrevia, bytes) => ligacao.previa(pedidoDaPrevia, bytes),
     /**

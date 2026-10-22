@@ -34,6 +34,7 @@ pub mod base64;
 pub mod battery;
 pub mod catalogo;
 pub mod despedida;
+pub mod escolhidos;
 #[cfg(feature = "reducao")]
 pub mod midia_de_mod;
 pub mod mods;
@@ -45,6 +46,7 @@ pub mod retrato;
 pub mod search;
 pub mod som;
 pub mod state;
+pub mod transferencia;
 pub mod volta;
 
 /// Everything the server told us on the way in.

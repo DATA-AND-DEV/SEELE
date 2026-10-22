@@ -24,6 +24,7 @@ pub mod mods;
 pub mod previa;
 pub mod sessao;
 pub mod tela;
+pub mod volume;
 pub mod voz;
 
 use seele_proto::control::{

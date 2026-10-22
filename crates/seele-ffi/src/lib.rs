@@ -97,7 +97,7 @@ pub use types::{
 /// anexo, e uma segunda cópia dela seria duas regras para discordarem no dia
 /// em que uma mudasse.
 pub use seele_core::{
-    catalogo, conhecidos, midia_de_mod, preferences, preview, reducao, search, som, uri,
+    catalogo, conhecidos, escolhidos, midia_de_mod, preferences, preview, reducao, search, som, uri,
 };
 
 /// A agenda, a leitura de um texto colado e o código de uma pessoa, para a sala

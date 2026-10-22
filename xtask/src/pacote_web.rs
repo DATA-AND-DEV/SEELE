@@ -25,9 +25,9 @@
 //! 5. **o `.wasm` da página sem as exportações da `prova`**, lidas do
 //!    `fronteira.rs` do `seele-web`, e o motor com cara de `.wasm`.
 //!
-//! Sai com 1 se o pacote não sai, e diz por quê. **Hoje ele não sai**: a ponte
-//! ainda tem os comandos da sessão pelo navegador (2.6) a fazer. Nada aqui
-//! publica: quem leva o pacote à origem é o dono
+//! Sai com 1 se o pacote não sai, e diz por quê. Desde a Tarefa 2.6 a ponte
+//! atende todos os comandos, e ele sai. Nada aqui publica: quem leva o pacote
+//! à origem é o dono
 //! (`docs/superpowers/sdd/2026-10-08-0.16/F4/origem-para-o-dono.md`).
 
 use std::path::{Path, PathBuf};
@@ -525,10 +525,11 @@ mod tests {
     }
 
     /// **O pacote de hoje, com a `ui/`, o `_headers` e os tokens de verdade**
-    /// (e `.wasm` de mentira, que não se compilam num teste): só a ponte o
-    /// segura, e com os comandos da sessão pelo navegador.
+    /// (e `.wasm` de mentira, que não se compilam num teste): ele sai. Até a
+    /// Tarefa 2.6, só a ponte o segurava, com os comandos da sessão pelo
+    /// navegador a fazer; hoje a ponte atende todos.
     #[test]
-    fn hoje_so_a_ponte_segura_o_pacote() {
+    fn hoje_o_pacote_sai() {
         let raiz = raiz();
         let pasta = pasta_nova("hoje");
         copiar_pasta(&raiz.join("apps/seele-app/ui"), &pasta).unwrap();
@@ -544,11 +545,8 @@ mod tests {
             std::fs::read_to_string(raiz.join("crates/seele-web/src/fronteira.rs")).unwrap();
         let motivos = conferir(&pasta, &congelados, &exportacoes_da_prova(&fronteira));
         assert!(
-            motivos.len() == 1
-                && motivos
-                    .iter()
-                    .all(|m| m.contains("comandos a fazer") && m.contains("2.6")),
-            "o pacote de hoje devia ser segurado só pelos comandos da ponte a fazer: {motivos:?}"
+            motivos.is_empty(),
+            "o pacote de hoje devia sair, e não sai: {motivos:?}"
         );
     }
 }

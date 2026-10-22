@@ -1239,3 +1239,42 @@ Da `versao/0.16` em `aa5abbce`: `midia_do_mod`, `som_do_mod` e
 - **O custo medido:** o `.wasm` da página, como o `cargo xtask pacote-web` o
   compila, foi de 1,43 MB para 2,48 MB com a redução de imagem (o `image`,
   com PNG, JPEG, WebP e GIF). Levado à orquestradora.
+
+## 21/10, noite — o seletor do MOD e as imagens pelo volume: os 79 atendidos
+
+Da `versao/0.16` em `331b7f02`: `escolher_para_o_mod`, `pedaco_do_escolhido`,
+`soltar_escolhido`, `enviar_imagem_mod` e `ler_imagem_mod`. O `AINDA_A_FAZER`
+da ponte ficou vazio.
+
+- **O guarda dos escolhidos mora no `seele-sessao`** (`escolhidos`), genérico
+  no que segura: o desktop guarda os bytes nele (`Escolhidos<Vec<u8>>`), e o
+  navegador guarda só as regras no `.wasm` e os bytes na página — a memória do
+  `.wasm` não encolhe, e quatro arquivos de dez megabytes ficariam lá. Junto
+  foram as regras do seletor (o título, as extensões na ordem que o MOD pediu,
+  o teto, o tipo pelos bytes com o HEIC nomeado, o papel). O desktop passou a
+  usá-los, e os testes dele que liam os campos de dentro do guarda antigo
+  mudaram para a API dele.
+- **As imagens pelo volume** vão por um fluxo bidirecional próprio, como o
+  `imagem_de_mod` do núcleo: o pedido enquadrado com o carimbo da build, os
+  bytes, e a resposta lida por um leitor próprio no `.wasm` (`volume.rs`). O
+  prazo de 60 s e a frase dele saíram de dentro do enlace do núcleo para o
+  `seele_sessao::transferencia`, de onde os dois os leem. A geração é
+  conferida de novo depois de a transferência dar certo, como no desktop.
+- **Medido na bancada:** o servidor que recusa uma leitura responde e para de
+  ler o que chega (`STOP_SENDING`), e o `close()` da página rejeitava antes de
+  a recusa ser lida; o MOD recebia «Received STOP_SENDING.». O desktop fecha a
+  ida sem esperar. A página agora lê a resposta mesmo quando a ida falha, e o
+  erro da ida só vale quando a resposta não vem.
+- **A bancada** (caso 14) usa uma cópia do MOD de referência, feita na hora,
+  com uma operação a mais na metade de servidor (`ler-anexo`); o vetor do
+  repositório não muda. A pessoa escolhe pelo botão do painel, o MOD lê o
+  primeiro pedaço, manda o arquivo ao volume (a metade de servidor abre a
+  porta), e a imagem volta pelo volume com os mesmos bytes; a leitura que o MOD
+  não autoriza é recusada por ele; e a saída da sessão solta o escolhido que
+  não foi mandado. Provados pela reversão: o leitor sem a recusa do servidor
+  (`formato-desconhecido`), e a saída sem soltar (a primeira reversão passou,
+  porque havia dois caminhos para soltar; ficou um só, o do fim da sessão).
+- **A `ponte-web.cjs`**: as capacidades `volume` e `arquivo` passam a ficar no
+  navegador, e o filtro e o «ainda a fazer» continuam provados com uma entrada
+  posta na hora. A lista do `arquivo` corrigida na leva anterior foi a que
+  passou a valer aqui.
