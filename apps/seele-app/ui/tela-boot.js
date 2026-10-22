@@ -127,26 +127,6 @@ function esquecerARecusaDoApelido() {
 let tentativas = 0;
 
 /**
- * **As etapas caladas entre o começo de uma tentativa e o `connect` dela**
- * (pendência 58, item 52; lote 58-3 da F5).
- *
- * Os `ConnectStageChanged` não dizem de qual tentativa são. Quem os separa é a
- * geração, no Rust: o `connect` revoga a anterior ao começar, e a `Bridge`
- * descarta os eventos de uma geração revogada (`main.rs`). Antes do `connect`
- * da nova — o apelido, a pergunta do nome, o `conferir_esta_versao` —, a
- * geração de pé ainda é a da velha, e as etapas dela eram escritas na linha da
- * nova, com o endereço de um servidor que a pessoa deixou.
- *
- * Posta no `++tentativas`, e tirada logo antes do `connect` **só pela mais
- * nova**: a velha que sai do `conferir_esta_versao` depois de a nova começar
- * não a reabre. Enquanto está posta, o ouvinte de etapas descarta o que chega.
- * A mais nova que termina antes do `connect` — a versão recusada — a deixa
- * posta de propósito: o que chega depois é de uma velha, e a tentativa
- * seguinte a tira no `connect` dela.
- */
-let etapasCaladas = false;
-
-/**
  * Se a entrada já perguntou o nome nesta execução.
  *
  * Por execução, e não por servidor: a pergunta é sobre esta máquina não ter
@@ -276,7 +256,6 @@ async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = 
   if (recusaDoApelido?.alvo === alvo) credencial ??= recusaDoApelido.credencial;
   recusaDoApelido = null;
   const esta = ++tentativas;
-  etapasCaladas = true;
   ligacaoEmCurso = ligacao;
   mostrarCancelar();
   // **O apelido desta máquina, quando esta chamada não trouxe um.**
@@ -403,8 +382,6 @@ async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = 
     // também. À parte porque o erro do `connect` é o da FFI; a recusa cai no
     // mesmo `catch` de baixo, com a frase dela.
     await invoke("conferir_esta_versao");
-    // Daqui em diante as etapas são desta tentativa: ver `etapasCaladas`.
-    if (esta === tentativas) etapasCaladas = false;
     // A entrada traz duas coisas: a tela, e o que a chave deste servidor acabou
     // de ser. A segunda vem do mesmo `connect` porque é lá que ela é decidida —
     // um ouvinte inscrito depois chegaria sempre tarde.
@@ -582,11 +559,11 @@ async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = 
     // veredito ou o erro, e não o último candidato tentado.
     //
     // **E só a mais nova apaga a linha** (item 52 da pendência 58): a da velha
-    // apagava a etapa da nova enquanto ela andava. Consertado duas vezes, sem
-    // uma frente ver a outra: pela F4 (`0975f08a`, a tentativa dentro da etapa,
-    // provada por `tools/roteiros/etapa-da-tentativa.js`) e pela F5 (`bb5d9bdf`,
-    // o `etapasCaladas`, provado por três casos da `ajustes-v013.cjs`). Os dois
-    // filtros do ouvinte de baixo valem juntos, e esta linha é a mesma dos dois.
+    // apagava a etapa da nova enquanto ela andava. Um mecanismo só, pela
+    // identidade da tentativa (`0975f08a`): esta linha, e o filtro do ouvinte
+    // de baixo, que mostra só as etapas que voltam com a tentativa mais nova.
+    // Provas: `tools/roteiros/etapa-da-tentativa.js` e os três casos de
+    // `aLinhaDeEtapaEDaMaisNova`, na `ajustes-v013.cjs`.
     if (esta === tentativas) mostrarEtapa(null);
   }
 }
@@ -620,8 +597,6 @@ function mostrarEtapa(frase) {
 listen("seele://event", (evento) => {
   const payload = evento.payload;
   if (!payload || typeof payload !== "object" || !payload.ConnectStageChanged) return;
-  // De uma tentativa que outra já substituiu: ver `etapasCaladas`.
-  if (etapasCaladas) return;
   // Só com a tela de entrada na frente. Uma reconexão futura que publicasse
   // etapas escreveria numa tela escondida atrás da sessão.
   if ($("tela-boot").hidden) return;
@@ -630,7 +605,8 @@ listen("seele://event", (evento) => {
   // o apelido, a pergunta do nome, o `conferir_esta_versao` — elas ainda
   // chegavam, e a tela as dizia como se fossem da nova. A etapa traz a
   // tentativa que o `connect` recebeu; a que vem sem ela é de quem não passou
-  // por `conectar`, e aparece como antes.
+  // por `conectar`, e aparece como antes. A velha que só chega ao `connect`
+  // depois de a nova começar leva a ele a tentativa dela, e cai aqui também.
   const { tentativa } = payload.ConnectStageChanged;
   if (tentativa != null && tentativa !== tentativas) return;
   // Numa ligação, o `Tocando` diz quem está sendo chamado (tarefa 28 da F7).
