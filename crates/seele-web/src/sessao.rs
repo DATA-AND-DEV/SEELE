@@ -101,19 +101,24 @@ pub struct Sessao {
     /// `pending_weights` da FFI. O `ChannelWeighed` responde todos de um canal;
     /// a recusa do pedido responde o primeiro.
     pub(crate) pesos_pendentes: std::collections::VecDeque<seele_proto::ids::ChannelId>,
-    /// As pendentes que a volta repete, na ordem: a `Repeticao` da FFI.
-    pub(crate) a_repetir: std::collections::VecDeque<seele_proto::ids::ClientMessageId>,
-    /// Quantas a próxima vez da repetição manda: a rajada da volta, e depois
-    /// uma por vez.
-    pub(crate) rajada: usize,
+    /// As pendentes que a volta repete, na ordem e no compasso do desktop: a
+    /// `Repeticao` do `seele_sessao::volta`, no relógio da página.
+    pub(crate) repeticao: Repeticao<Duration>,
+    /// A busca do buraco do histórico do canal aberto, enquanto ela anda: a
+    /// `Buraco` do desktop, página por página, com as cercas.
+    pub(crate) buraco: Option<Buraco<Duration>>,
+    /// De onde os carimbos da próxima busca contam, levado de uma busca para a
+    /// outra: um `Pong` velho não fecha uma página nova.
+    pub(crate) carimbos_do_buraco: u64,
     /// Os `Ping` de rotina desta conexão, de um em um a partir de 1, como o
     /// `send_ping` do desktop: o `Pong` deles diz à bateria que o enlace vive.
     pub(crate) pings: u64,
 }
 
-/// A rajada da primeira vez da repetição e a página do buraco: os da FFI, do
-/// mesmo `seele_sessao::volta`.
-pub use seele_sessao::volta::{PAGINA_DO_BURACO, RAJADA_DA_VOLTA};
+use std::time::Duration;
+
+use seele_proto::control::ClientMessage;
+use seele_sessao::volta::{Buraco, Parada, Passo as PassoDoBuraco, Repeticao, Repetir};
 
 /// O que a página escolheu e a volta repete ao servidor: o mudo e o isolamento
 /// (o motor do desktop os lembra; aqui a página os guarda).
@@ -143,8 +148,10 @@ impl Sessao {
             entradas_pedidas: 0,
             volumes: BTreeMap::new(),
             pesos_pendentes: std::collections::VecDeque::new(),
-            a_repetir: std::collections::VecDeque::new(),
-            rajada: 0,
+            repeticao: Repeticao::default(),
+            buraco: None,
+            // O mesmo começo do laço da FFI.
+            carimbos_do_buraco: 1,
             pings: 0,
         }
     }
@@ -390,19 +397,16 @@ impl Sessao {
     /// O `adopt` guarda a conversa, as pendentes e o canal aberto, e o assento
     /// que o servidor resgatou. Por cima vem o pedido: a sala em que a pessoa
     /// estava (sem senha, com o `Ping` marcado da conexão nova, contando de
-    /// novo de 1) ou a saída; o canal aberto, com uma página do buraco do
-    /// histórico; o mudo e o isolamento escolhidos. As pendentes ficam na fila
-    /// da repetição.
-    ///
-    /// **O buraco aqui é uma página** das `PAGINA_DO_BURACO` mais novas do canal
-    /// aberto. O desktop desce até dez, com cercas (`volta::Buraco`), e o que
-    /// passou de duzentas mensagens durante a queda não volta nesta versão.
+    /// novo de 1) ou a saída; o canal aberto, e a primeira página da busca do
+    /// buraco (a `Buraco` do desktop, com a cerca); o mudo e o isolamento
+    /// escolhidos. As pendentes entram na fila da repetição, no relógio `agora`
+    /// da página.
     pub(crate) fn readotar(
         &mut self,
         info: &SessionInfo,
         escolhas: Escolhas,
-    ) -> Vec<seele_proto::control::ClientMessage> {
-        use seele_proto::control::ClientMessage;
+        agora: Duration,
+    ) -> Vec<ClientMessage> {
         let desejada = self.room.current_voice_room;
         let canal = self.room.current_channel;
         let apelido = self.apelido.clone();
@@ -428,11 +432,13 @@ impl Sessao {
         }
         if let Some(canal) = canal {
             saida.push(ClientMessage::JoinChannel { channel: canal });
-            saida.push(ClientMessage::FetchHistory {
-                channel: canal,
-                cursor: None,
-                limit: PAGINA_DO_BURACO,
-            });
+        }
+        if let Some(velho) = self.buraco.take() {
+            self.carimbos_do_buraco = velho.sequencia();
+        }
+        if let Some((buraco, pagina)) = Buraco::abrir(&self.room, self.carimbos_do_buraco, agora) {
+            self.buraco = Some(buraco);
+            saida.extend(pagina_do_buraco(&pagina));
         }
         if escolhas.mudo {
             saida.push(ClientMessage::SetMuted(true));
@@ -440,35 +446,116 @@ impl Sessao {
         if escolhas.isolado {
             saida.push(ClientMessage::SetTotalIsolation(true));
         }
-        self.a_repetir = self
-            .room
-            .pendentes
-            .iter()
-            .filter(|pendente| {
-                matches!(
-                    pendente.estado,
-                    seele_sessao::state::EstadoDoEnvio::SemResposta
-                        | seele_sessao::state::EstadoDoEnvio::Enviando
-                )
-            })
-            .map(|pendente| pendente.client_message_id)
-            .collect();
-        self.rajada = RAJADA_DA_VOLTA;
+        self.repeticao.na_volta(&self.room, agora);
         saida
     }
 
     /// O enlace caiu: o que estava saindo fica sem resposta (o
-    /// `envios_sem_resposta` da FFI), e a fila da repetição de uma volta
-    /// anterior é esquecida.
+    /// `envios_sem_resposta` da FFI), a fila da repetição de uma volta
+    /// anterior é esquecida, e a busca do buraco para (a próxima volta abre
+    /// outra, contando os carimbos de onde esta parou).
     pub(crate) fn caiu(&mut self, eventos: &mut Vec<Value>) {
         if self.room.envios_sem_resposta() {
             self.a_conversa_mudou(eventos);
         }
-        self.a_repetir.clear();
-        self.rajada = 0;
+        self.repeticao.esquecer();
+        if let Some(velho) = self.buraco.take() {
+            self.carimbos_do_buraco = velho.sequencia();
+        }
         // Os pesos pedidos à conexão que caiu não vão ter resposta dela: quem
         // os esperava fica sabendo pela página (`null`, como no fim).
         self.pesos_pendentes.clear();
+    }
+
+    /// **Uma mensagem do servidor, para a busca do buraco**: a página que ela
+    /// fecha pede a seguinte, ou a busca para. O que sai ao fio, e o aviso da
+    /// parada (para o console da página, como o `seele.log` do desktop).
+    pub(crate) fn buraco_ouviu(
+        &mut self,
+        mensagem: &ServerMessage,
+        agora: Duration,
+    ) -> (Vec<ClientMessage>, Option<Value>) {
+        match self
+            .buraco
+            .as_mut()
+            .and_then(|buraco| buraco.ouvir(mensagem, agora))
+        {
+            Some(passo) => self.seguir_o_buraco(passo),
+            None => (Vec::new(), None),
+        }
+    }
+
+    /// **A vez do relógio**, a cada volta da página: a página do buraco que
+    /// esperava, ou a cerca que não voltou; e as pendentes que a repetição
+    /// solta agora, com a mesma chave, recusando a grande demais (o `repetir`
+    /// do desktop). `agora_s` é a hora de uma pendente, em segundos desde 1970.
+    pub(crate) fn vez(
+        &mut self,
+        agora: Duration,
+        agora_s: i64,
+        eventos: &mut Vec<Value>,
+    ) -> (Vec<ClientMessage>, Option<Value>) {
+        let (mut saida, aviso) = match self.buraco.as_mut().and_then(|buraco| buraco.vez(agora)) {
+            Some(passo) => self.seguir_o_buraco(passo),
+            None => (Vec::new(), None),
+        };
+        let mut mudou = false;
+        for chave in self.repeticao.vez(agora) {
+            match seele_sessao::volta::repetir(&mut self.room, chave, agora_s) {
+                Repetir::Mandar {
+                    canal,
+                    corpo,
+                    chave,
+                } => {
+                    mudou = true;
+                    saida.push(ClientMessage::SendMessage {
+                        channel: canal,
+                        body: corpo,
+                        replies_to: None,
+                        client_message_id: chave,
+                    });
+                }
+                Repetir::Recusada => mudou = true,
+                Repetir::Nada => {}
+            }
+        }
+        if mudou {
+            self.a_conversa_mudou(eventos);
+        }
+        (saida, aviso)
+    }
+
+    /// O que a busca mandou: a página, ou a parada, dita.
+    fn seguir_o_buraco(&mut self, passo: PassoDoBuraco) -> (Vec<ClientMessage>, Option<Value>) {
+        match passo {
+            PassoDoBuraco::Pedir(pagina) => {
+                let aviso = pagina.de_novo.map(|por_que| {
+                    json!({
+                        "buraco": "de-novo",
+                        "por_que": format!("{por_que:?}"),
+                        "canal": pagina.canal.0,
+                        "cursor": pagina.cursor.map(|cursor| cursor.0),
+                    })
+                });
+                (pagina_do_buraco(&pagina).to_vec(), aviso)
+            }
+            PassoDoBuraco::Parou(parada) => {
+                let Some(parado) = self.buraco.take() else {
+                    return (Vec::new(), None);
+                };
+                self.carimbos_do_buraco = parado.sequencia();
+                let aviso = json!({
+                    "buraco": format!("{parada:?}"),
+                    // As três que deixam um pedaço de fora, como os `warn` do
+                    // `seguir` da FFI; as outras são o buraco que fechou.
+                    "alerta": matches!(parada, Parada::Teto | Parada::SemResposta | Parada::Comeco),
+                    "canal": parado.canal().0,
+                    "paginas": parado.paginas(),
+                    "cursor": parado.cursor().map(|cursor| cursor.0),
+                });
+                (Vec::new(), Some(aviso))
+            }
+        }
     }
 
     /// Sobe a revisão da conversa e diz à casca: o `messages_changed` da FFI.
@@ -496,6 +583,21 @@ impl Sessao {
         let perda = foto.loss_fraction;
         (perda, foto.retrato(|| self.apelido.clone()))
     }
+}
+
+/// Uma página do buraco no fio: o `historico_com_cerca` do enlace do desktop
+/// — o `FetchHistory`, e logo atrás o `Ping` com o carimbo que a fecha.
+fn pagina_do_buraco(pagina: &seele_sessao::volta::Pagina) -> [ClientMessage; 2] {
+    [
+        ClientMessage::FetchHistory {
+            channel: pagina.canal,
+            cursor: pagina.cursor,
+            limit: pagina.limite,
+        },
+        ClientMessage::Ping {
+            timestamp: pagina.carimbo,
+        },
+    ]
 }
 
 /// **A conversa do canal aberto, como a casca a lê**: o `messages_of` da FFI,

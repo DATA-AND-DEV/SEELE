@@ -166,6 +166,10 @@ pub enum Passo {
         /// O motivo, no JSON do `CausaDaRecusa`.
         causa: Value,
     },
+    /// A busca do buraco do histórico parou, ou pediu uma página de novo: o
+    /// que o `seguir` do desktop diz no `seele.log`, para o console da página
+    /// (`alerta` quando um pedaço ficou de fora).
+    Buraco(Value),
 }
 
 impl Passo {
@@ -185,6 +189,7 @@ impl Passo {
             Self::PesoRecusado { canal, causa } => {
                 json!({ "peso_recusado": { "channel": canal, "causa": causa } })
             }
+            Self::Buraco(aviso) => json!({ "buraco": aviso }),
         }
     }
 }
@@ -204,6 +209,9 @@ pub struct Ligacao {
     medida: Medida,
     /// A sessão de uma conexão que caiu, guardada para a volta.
     guardada: Option<Box<Sessao>>,
+    /// O relógio da página na última volta ([`Ligacao::vez`]): a busca do
+    /// buraco e a repetição medem os prazos por ele.
+    relogio: std::time::Duration,
     /// A volta em curso: a sessão velha e as escolhas que se repetem.
     voltando: Option<(Box<Sessao>, crate::sessao::Escolhas)>,
 }
@@ -242,6 +250,7 @@ impl Ligacao {
             medida: Medida::default(),
             guardada: None,
             voltando: None,
+            relogio: std::time::Duration::ZERO,
         };
         ligacao.dizer_ola(pedido)?;
         Ok(ligacao)
@@ -457,6 +466,25 @@ impl Ligacao {
         }
     }
 
+    /// **A vez do relógio da página** (a cada volta da medida): a página do
+    /// buraco que esperava, a cerca que não voltou, e as pendentes que a
+    /// repetição solta agora, escritas para [`Ligacao::para_o_fio`]. Devolve os
+    /// eventos da casca e os avisos do buraco. Fora de uma sessão, só guarda o
+    /// relógio, que a volta lê ao readotar.
+    pub fn vez(&mut self, agora: std::time::Duration, agora_s: i64) -> (Vec<Value>, Vec<Passo>) {
+        self.relogio = agora;
+        let Etapa::Dentro(sessao) = &mut self.etapa else {
+            return (Vec::new(), Vec::new());
+        };
+        let mut eventos = Vec::new();
+        let (saem, aviso) = sessao.vez(agora, agora_s, &mut eventos);
+        for mensagem in &saem {
+            // O que não cabe no fio não sai, como o motor do desktop.
+            let _ = self.escrever(mensagem);
+        }
+        (eventos, aviso.map(Passo::Buraco).into_iter().collect())
+    }
+
     fn um_quadro(&mut self, quadro: &[u8]) -> Vec<Passo> {
         match std::mem::replace(&mut self.etapa, Etapa::Fim) {
             Etapa::Desafio => self.desafio(quadro),
@@ -469,6 +497,7 @@ impl Ligacao {
                 Err(_) => self.recusar(json!("Unreachable")),
             },
             Etapa::Dentro(mut sessao) => {
+                let mut buraco = None;
                 let passo = match decode_da_lista::<ServerMessage>(quadro) {
                     Ok(Lido::Mensagem(mensagem)) => {
                         if let Some(recusa) = peso_recusado(&mut sessao, &mensagem) {
@@ -476,6 +505,15 @@ impl Ligacao {
                             return vec![recusa];
                         }
                         let eventos = sessao.dobrar_com_eventos(&mensagem);
+                        // A busca do buraco ouve a mesma mensagem: a página
+                        // que ela fecha pede a seguinte.
+                        let (saem, aviso) = sessao.buraco_ouviu(&mensagem, self.relogio);
+                        for pedido in &saem {
+                            let _ = self.escrever(pedido);
+                        }
+                        if let Some(aviso) = aviso {
+                            buraco = Some(Passo::Buraco(aviso));
+                        }
                         serde_json::to_value(&mensagem)
                             .map(|mensagem| Passo::Chegou { mensagem, eventos })
                             .map_err(|erro| erro.to_string())
@@ -486,7 +524,9 @@ impl Ligacao {
                 match passo {
                     Ok(passo) => {
                         self.etapa = Etapa::Dentro(sessao);
-                        vec![passo]
+                        let mut passos = vec![passo];
+                        passos.extend(buraco);
+                        passos
                     }
                     Err(motivo) => {
                         self.guardada = Some(sessao);
@@ -570,7 +610,7 @@ impl Ligacao {
                     permissions,
                 };
                 if let Some((mut sessao, escolhas)) = self.voltando.take() {
-                    let restabelecer = sessao.readotar(&info, escolhas);
+                    let restabelecer = sessao.readotar(&info, escolhas, self.relogio);
                     self.etapa = Etapa::Dentro(sessao);
                     for mensagem in &restabelecer {
                         // O que não cabe no fio não sai, como o motor do desktop.

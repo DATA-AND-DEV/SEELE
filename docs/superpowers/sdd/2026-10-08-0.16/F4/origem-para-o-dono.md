@@ -118,23 +118,70 @@ A razão é uma só. Um script injetado é recusado pela CSP e enche o console d
 recusas; o que passasse seria código de terceiro rodando ao lado da chave da
 pessoa. As regras de cache não podem ignorar o `no-cache`.
 
-## 6. O que não precisa de nada
+## 6. O que a página busca fora da origem
 
-- **CORS:** hoje a página só busca arquivos da própria origem (o `.wasm`, o motor
-  dos MODs, o símbolo da marca). Se um dia ela buscar o catálogo de MODs, o
-  `mods.seele.app.br` passa a precisar de
-  `Access-Control-Allow-Origin: https://web.seele.app.br`.
+- **O catálogo de MODs** (`https://mods.seele.app.br`): o `catalogo.json`, as
+  revogações e os arquivos de um MOD que o servidor exige, com as assinaturas.
+  Ele já responde `Access-Control-Allow-Origin: *` (conferido em 21/10), e
+  isso basta. Se um dia ele passar a nomear origens, a desta página é
+  `https://web.seele.app.br`.
+- **A prévia de um link** colado na conversa: a página busca a imagem pelo
+  `fetch`, e ela só aparece quando o site dela libera CORS. A que não libera
+  não tem prévia, e a conversa segue.
+- **A sessão e a voz**: WebTransport direto ao `seeled` de cada servidor, pelo
+  endereço e pelos hashes do link.
 - **`#baixar`:** o link BAIXAR O APP DO SEELE da página leva a
   `https://seele.app.br/#baixar`. A página do site precisa da âncora `baixar`.
 
-## 7. O que vai para lá, e quando
+## 7. O pacote
 
-O pacote é:
+    cargo xtask pacote-web
+
+monta e confere o pacote em **`target/pacote-web/`**, e diz «o pacote sai»
+quando as seis regras passam (o doc do `xtask/src/pacote_web.rs`). É essa
+pasta, inteira, que vai à raiz do projeto `seele-web` no Cloudflare Pages:
+
 - os arquivos de `apps/seele-app/ui/`;
-- o `seele_web.wasm` e o `seele_motor_web.wasm` (`cargo xtask web`);
+- o `seele_web.wasm`, compilado com o perfil da página (D-web-5:
+  `opt-level = "z"`, LTO e `strip = "symbols"`): em 21/10, 1 714 052 bytes,
+  542 KB em gzip e 405 KB em brotli;
+- o `seele_motor_web.wasm`, o motor dos MODs (o wasi-sdk já conferido pelo
+  `cargo xtask wasi-sdk`; o passo nunca o baixa);
 - o `_headers`.
 
-O passo que o monta e o entrega é a Tarefa 3.6 do plano da F4, e ainda não
-existe. **O DNS e o host podem ser configurados já.** Publicar a página não
-adianta antes da sessão pelo navegador (as Tarefas 2.4 a 2.6): sem ela, a página
-abre e não conecta.
+O envio é do dono: pelo upload direto do Pages, ou pelo `wrangler pages deploy
+target/pacote-web --project-name seele-web` com o token dele.
+
+## 8. A conferência no ar, depois do envio
+
+Nenhuma bancada roda o `.wasm` exato do pacote (elas precisam da `prova`, e o
+pacote sai sem ela). Esta conferência é a que fecha isso.
+
+**1. Os arquivos, como a origem os serve.**
+- `https://web.seele.app.br/` e `/index.html`: os cabeçalhos da seção 3, e o
+  corpo **igual ao do pacote** (o mesmo `sha256` do `target/pacote-web/index.html`:
+  nada injetado);
+- `/seele_web.wasm`: `200`, `content-type: application/wasm`, comprimido
+  (`content-encoding: br` ou `gzip`), com o tamanho perto do da seção 7;
+- `/seele_motor_web.wasm` e `/executor-de-mod.html`: `200`, e o
+  `executor-de-mod.html` com a CSP do `<meta>` dele intacta.
+
+**2. Uma entrada de verdade, pela página publicada, num servidor de teste.**
+Num Chromium de PC, com o console aberto:
+- colar o link do navegador do servidor de teste na ENTRAR EM, entrar, e ver o
+  nome do servidor e os canais;
+- mandar uma mensagem e vê-la confirmada;
+- com uma segunda aba (ou outro aparelho), entrar na mesma sala de voz e ouvir
+  uma à outra;
+- compartilhar a tela numa aba e assistir na outra;
+- mandar um anexo e abri-lo na outra;
+- derrubar a rede do aparelho por uns segundos: a faixa da bateria aparece, a
+  sessão volta sozinha, e uma mensagem escrita no meio sai e fica confirmada;
+- num servidor que exige um MOD do catálogo de verdade: aceitar, e o MOD
+  sobe. É a única prova da chave do catálogo embutida no pacote (a bancada usa
+  uma chave de teste);
+- o console sem recusa de CSP e sem erro de página.
+
+**O que ainda falta para o passo 2:** o link do navegador de um servidor de
+verdade. Hoje só o `servidor_da_bancada` (um exemplo, preso a `127.0.0.1`) o
+escreve; o app de quem hospeda ainda não mostra o link do navegador.
