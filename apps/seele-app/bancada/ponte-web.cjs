@@ -220,17 +220,22 @@ async function desfecho(promessa) {
 /// **As capacidades que a plataforma tem** (`compatibilidade.por-plataforma`;
 /// a auditoria do `v6.json`, B10): no navegador, o `enviar` (a capacidade
 /// `volume`) e o `arquivo` somem enquanto a ponte não faz o envio, a leitura de
-/// imagem e o pedaço do arquivo escolhido — hoje, `AINDA_A_FAZER`. Um MOD que
-/// subisse aqui via o `SeeleUI.enviar` e só recebia recusa.
+/// imagem e o seletor do MOD. Desde a Tarefa 2.6 a ponte faz os cinco, e as
+/// duas ficam; o filtro continua provado com um comando de cada posto na
+/// lista do «ainda a fazer» na hora.
 async function asCapacidadesDaPlataforma() {
   const caso = "as capacidades da plataforma";
   const navegador = pagina();
   const todas = ["superficies", "contribuicoes", "volume", "arquivo", "tema", "retrato", "eventos-da-tela"];
   const ficaram = navegador.ler(`capacidadesDaPlataforma(${JSON.stringify(todas)})`);
-  confere(caso, Array.isArray(ficaram) && !ficaram.includes("volume") && !ficaram.includes("arquivo"),
-    `no navegador, sem o envio nem o seletor, o MOD ainda recebe volume ou arquivo: ${JSON.stringify(ficaram)}`);
-  confere(caso, ["superficies", "contribuicoes", "tema", "retrato", "eventos-da-tela"].every((c) => ficaram?.includes(c)),
-    `o filtro tirou o que a plataforma tem: ${JSON.stringify(ficaram)}`);
+  confere(caso, igual(ficaram, todas),
+    `no navegador, com o envio e o seletor feitos, o filtro tirou o que a plataforma tem: ${JSON.stringify(ficaram)}`);
+  for (const [capacidade, comando] of [["volume", "ler_imagem_mod"], ["arquivo", "escolher_para_o_mod"]]) {
+    const outra = pagina();
+    const semEla = outra.ler(`AINDA_A_FAZER.set(${JSON.stringify(comando)}, "2.6 (prova)"), capacidadesDaPlataforma(${JSON.stringify(todas)})`);
+    confere(caso, Array.isArray(semEla) && !semEla.includes(capacidade) && semEla.length === todas.length - 1,
+      `com \`${comando}\` a fazer, o MOD ainda recebe \`${capacidade}\`: ${JSON.stringify(semEla)}`);
+  }
   const executor = fs.readFileSync(path.join(__dirname, "../ui/mods-no-navegador.js"), "utf8");
   confere(caso, /capacidadesDaPlataforma\(/.test(executor),
     "o executor do navegador não passa as capacidades pelo filtro da plataforma");
@@ -350,8 +355,11 @@ async function asRecusas() {
     confere(caso, p.ler("CONTAS_DA_PONTE").get(comando)?.recusas === 2, "a segunda recusa não foi contada");
     confere(caso, p.avisos.length === avisosAntes, "a segunda recusa do mesmo comando foi dita de novo");
   }
+  // A lista está vazia desde a Tarefa 2.6; o caminho do «ainda a fazer»
+  // continua provado com uma entrada posta na hora.
   const p = pagina();
-  const [[comando, tarefa]] = p.ler("AINDA_A_FAZER");
+  const [comando, tarefa] = ["mods_instalados", "2.6 (prova)"];
+  p.ler(`AINDA_A_FAZER.set(${JSON.stringify(comando)}, ${JSON.stringify(tarefa)})`);
   const r = await desfecho(p.invoke(comando));
   confere(caso, igual(r.erro, { AindaNaoNoNavegador: { comando, tarefa } }),
     `\`${comando}\`, a fazer, voltou ${util.inspect(r)}`);

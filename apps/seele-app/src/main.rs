@@ -382,7 +382,7 @@ impl Session {
         // guardá-los seria exatamente o que a sonda E1 mediu no Worker: uma
         // coisa de uma sessão sobrevivendo à sessão.
         if let Ok(mut guardados) = self.arquivos_escolhidos.lock() {
-            let soltos = guardados.soltar_geracao(nova.saturating_sub(1));
+            let soltos = guardados.soltar_geracao(nova.saturating_sub(1)).len();
             if soltos > 0 {
                 tracing::info!(soltos, "arquivos escolhidos soltos com a sessão");
             }
@@ -5013,135 +5013,49 @@ fn snapshot(session: State<'_, Session>) -> Result<Snapshot, ConnectionError> {
     Ok(retrato)
 }
 
-/// **Quantos arquivos escolhidos uma sessão segura ao mesmo tempo.**
-///
-/// Quatro. Um MOD que abre o seletor num laço não pode encher a memória de quem
-/// está numa conversa, e quatro é mais do que qualquer fluxo real precisa: um
-/// retrato, uma faixa, uma cena e uma folga.
-const ARQUIVOS_DE_PE: usize = 4;
+/// **Os arquivos que uma pessoa escolheu para um MOD** moram no `seele-sessao`
+/// (`escolhidos`) desde a Tarefa 2.6 da F4: as regras do seletor e o guarda,
+/// que o navegador usa também. Aqui ficam os bytes, guardados nele, e os
+/// invólucros que põem o motivo no [`FalhaNoMod`].
+use seele_ffi::escolhidos::{Escolhido, Escolhidos};
+#[cfg(test)]
+use seele_ffi::escolhidos::{ARQUIVOS_DE_PE, PEDACO_DO_ESCOLHIDO, TETO_DO_ESCOLHIDO};
 
-/// **O maior arquivo que uma pessoa pode escolher para um MOD.**
-///
-/// Dez megabytes, que é o teto que os MODs oficiais já praticavam do lado do
-/// servidor. Ele não atravessa inteiro: sai em pedaços que o MOD pede.
-const TETO_DO_ESCOLHIDO: usize = 10 * 1024 * 1024;
+/// Os arquivos escolhidos desta janela, com os bytes.
+type ArquivosEscolhidos = Escolhidos<Vec<u8>>;
 
-/// O teto deste pedido de escolha: o do produto, que vale sempre, apertado
-/// pelo que o MOD declarou. Um MOD não amplia o que esta máquina aceita ler, e
-/// zero é «não declarou».
+/// A recusa de uma regra dos escolhidos, no [`FalhaNoMod`].
+fn recusado(motivo: String) -> FalhaNoMod {
+    FalhaNoMod::Recusado { motivo }
+}
+
+/// O teto deste pedido de escolha — ver
+/// [`seele_ffi::escolhidos::teto_do_escolhido`].
 fn teto_do_escolhido(limite_de_bytes: Option<usize>) -> usize {
-    limite_de_bytes
-        .filter(|n| *n > 0)
-        .map_or(TETO_DO_ESCOLHIDO, |n| n.min(TETO_DO_ESCOLHIDO))
+    seele_ffi::escolhidos::teto_do_escolhido(limite_de_bytes)
 }
 
-/// O papel provado dos bytes contra os que o MOD pediu. Nenhum pedido (ou a
-/// lista vazia) aceita os dois; um papel fora da lista é
-/// `papel-nao-serve:<papel>`, com o nome, para a região dizê-lo.
+/// O papel provado contra os pedidos — ver
+/// [`seele_ffi::escolhidos::o_papel_serve`].
 fn o_papel_serve(papeis: Option<&[String]>, papel: &str) -> Result<(), FalhaNoMod> {
-    match papeis.filter(|p| !p.is_empty()) {
-        Some(pedidos) if !pedidos.iter().any(|p| p == papel) => Err(FalhaNoMod::Recusado {
-            motivo: format!("papel-nao-serve:{papel}"),
-        }),
-        _ => Ok(()),
-    }
+    seele_ffi::escolhidos::o_papel_serve(papeis, papel).map_err(recusado)
 }
 
-/// Quanto de um arquivo escolhido sai por pedido.
-///
-/// **Múltiplo de três**, e é o que importa aqui. O base64 codifica três bytes
-/// em quatro caracteres; uma janela que não fecha um grupo de três sai com
-/// `=` no meio, e dois pedaços consecutivos concatenados deixam de ser o
-/// arquivo. `65536` não é múltiplo de três — `65535` é —, e a diferença entre
-/// os dois é uma imagem que chega corrompida sem nada acusar.
-///
-/// Sessenta e quatro kibibytes viram oitenta e sete mil caracteres: bem abaixo
-/// do teto de mensagem, e grande o bastante para dez megabytes saírem em cento
-/// e sessenta idas em vez de milhares.
-const PEDACO_DO_ESCOLHIDO: usize = 65535;
-
-/// Um arquivo que uma pessoa escolheu, guardado pelo produto.
-struct ArquivoEscolhidoDeMod {
-    /// De quem é. Um MOD não lê o arquivo que outro pediu.
-    de_quem: String,
-    /// Em que sessão foi escolhido: a saída leva todos os dela.
+/// Um pedaço de um arquivo escolhido, em base64, para quem o escolheu.
+fn pedaco_em_base64(
+    guardados: &ArquivosEscolhidos,
     geracao: u64,
-    /// O que os bytes provaram ser. Dito à janela na escolha, e guardado para
-    /// o diagnóstico saber o que está de pé sem abrir os bytes.
-    #[allow(dead_code, reason = "lido pelo diagnóstico da sessão")]
-    tipo: &'static str,
-    /// Os bytes. Saem em pedaços, e nunca de uma vez.
-    bytes: Vec<u8>,
-}
-
-/// Os arquivos escolhidos desta janela, por identificador.
-#[derive(Default)]
-struct ArquivosEscolhidos {
-    /// O próximo identificador. Monotônico: um número nunca se repete, e por
-    /// isso um pedido atrasado nunca lê o arquivo que ocupou o lugar do dele.
-    proximo: u64,
-    guardados: std::collections::HashMap<u64, ArquivoEscolhidoDeMod>,
-}
-
-impl ArquivosEscolhidos {
-    /// Guarda um arquivo e devolve o número dele, ou nada se não couber.
-    fn guardar(&mut self, arquivo: ArquivoEscolhidoDeMod) -> Option<u64> {
-        if self.guardados.len() >= ARQUIVOS_DE_PE {
-            return None;
-        }
-        self.proximo = self.proximo.saturating_add(1);
-        let numero = self.proximo;
-        self.guardados.insert(numero, arquivo);
-        Some(numero)
-    }
-
-    /// Solta tudo o que era de uma geração — é o que a saída chama.
-    fn soltar_geracao(&mut self, geracao: u64) -> usize {
-        let antes = self.guardados.len();
-        self.guardados.retain(|_, a| a.geracao != geracao);
-        antes - self.guardados.len()
-    }
-
-    /// Um pedaço do arquivo `arquivo`, em base64, para `id` na `geracao` —
-    /// o corpo de [`pedaco_do_escolhido`].
-    fn pedaco(
-        &self,
-        geracao: u64,
-        id: &str,
-        arquivo: u64,
-        inicio: usize,
-    ) -> Result<String, FalhaNoMod> {
-        let guardado = self.guardados.get(&arquivo).ok_or(FalhaNoMod::Recusado {
-            motivo: "arquivo-nao-esta-de-pe".to_owned(),
-        })?;
-        // **De quem pediu, e não de quem souber o número.** Sem esta linha, um
-        // MOD que adivinhasse um número leria o arquivo que outro pediu — e o
-        // número é pequeno e sequencial.
-        if guardado.de_quem != id || guardado.geracao != geracao {
-            return Err(FalhaNoMod::Recusado {
-                motivo: "arquivo-de-outro-mod".to_owned(),
-            });
-        }
-        let fim = inicio
-            .saturating_add(PEDACO_DO_ESCOLHIDO)
-            .min(guardado.bytes.len());
-        let fatia = guardado.bytes.get(inicio..fim).unwrap_or_default();
-        Ok(seele_ffi::base64_de(fatia))
-    }
-
-    /// Solta o arquivo `arquivo`, se ele é de `id` na `geracao` — o corpo de
-    /// [`soltar_escolhido`]. Soltar o que já não é de ninguém não é erro: a
-    /// saída pode ter passado na frente, e quem chama não tem como saber disso
-    /// sem uma corrida.
-    fn soltar(&mut self, geracao: u64, id: &str, arquivo: u64) {
-        if self
-            .guardados
-            .get(&arquivo)
-            .is_some_and(|a| a.de_quem == id && a.geracao == geracao)
-        {
-            self.guardados.remove(&arquivo);
-        }
-    }
+    id: &str,
+    arquivo: u64,
+    inicio: usize,
+) -> Result<String, FalhaNoMod> {
+    let faixa = guardados
+        .pedaco(geracao, id, arquivo, inicio)
+        .map_err(recusado)?;
+    let guardado = guardados.de(geracao, id, arquivo).map_err(recusado)?;
+    Ok(seele_ffi::base64_de(
+        guardado.conteudo.get(faixa).unwrap_or_default(),
+    ))
 }
 
 /// O que a bancada precisa saber sobre a sessão de agora — etapa E2.
@@ -8776,18 +8690,11 @@ async fn enviar_imagem_mod(
             .arquivos_escolhidos
             .lock()
             .map_err(|_| recusa("banco-indisponivel"))?;
-        let escolhido = guardados
-            .guardados
-            .get(&arquivo)
-            .ok_or_else(|| recusa("arquivo-nao-esta-de-pe"))?;
-        if escolhido.de_quem != id || escolhido.geracao != geracao {
-            return Err(recusa("arquivo-de-outro-mod"));
-        }
+        // Consumido antes do envio, dê o envio certo ou não.
         guardados
-            .guardados
-            .remove(&arquivo)
-            .ok_or_else(|| recusa("arquivo-nao-esta-de-pe"))?
-            .bytes
+            .tirar(geracao, &id, arquivo)
+            .map_err(recusado)?
+            .conteudo
     };
     let conexao = session
         .connection()
@@ -8904,12 +8811,7 @@ fn imagem_lida_dita(
 /// `papel-nao-serve:<papel>`; o resto que não é um dos formatos é
 /// `formato-desconhecido`.
 fn tipo_do_escolhido(bytes: &[u8]) -> Result<seele_ffi::mods::TipoLido, FalhaNoMod> {
-    seele_ffi::mods::ler_tipo(bytes).ok_or_else(|| FalhaNoMod::Recusado {
-        motivo: seele_ffi::mods::reconhecido_e_nao_aceito(bytes).map_or_else(
-            || "formato-desconhecido".to_owned(),
-            |formato| format!("tipo-recusado:{formato}"),
-        ),
-    })
+    seele_ffi::escolhidos::tipo_do_escolhido(bytes).map_err(recusado)
 }
 
 /// O que a janela recebe quando uma pessoa escolhe um arquivo para um MOD.
@@ -8965,36 +8867,15 @@ async fn escolher_para_o_mod(
     //
     // O texto vem do MOD, então ele é cortado e limpo de quebras de linha: um
     // título de diálogo do sistema não é onde se escreve um parágrafo.
-    let proposito: String = finalidade
-        .unwrap_or_default()
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(120)
-        .collect();
-    let titulo = if proposito.trim().is_empty() {
-        "Escolha um arquivo para este MOD".to_owned()
-    } else {
-        proposito.trim().to_owned()
-    };
+    let titulo = seele_ffi::escolhidos::titulo_do_seletor(finalidade.as_deref());
 
     // **O filtro é orientação, e não a fronteira.** A prova do tipo continua
     // saindo dos bytes, mais abaixo; o que ele evita é oferecer quarenta JSONs
     // a quem foi buscar um retrato. Extensões que o produto não conhece são
     // descartadas: um MOD não escolhe o que o seletor da máquina de outra
-    // pessoa aceita.
-    const EXTENSOES_CONHECIDAS: &[&str] = &[
-        "png", "jpg", "jpeg", "webp", "gif", "wav", "mp3", "ogg", "flac", "m4a",
-    ];
-    let aceitas: Vec<&str> = extensoes
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|e| {
-            EXTENSOES_CONHECIDAS
-                .iter()
-                .find(|c| c.eq_ignore_ascii_case(e))
-                .copied()
-        })
-        .collect();
+    // pessoa aceita (`seele_ffi::escolhidos::extensoes_do_seletor`, a regra
+    // que o navegador usa também).
+    let aceitas = seele_ffi::escolhidos::extensoes_do_seletor(extensoes.as_deref());
 
     let (envia, mut recebe) = tauri::async_runtime::channel(1);
     let mut dialogo = app.dialog().file().set_title(&titulo);
@@ -9049,15 +8930,14 @@ async fn escolher_para_o_mod(
         .lock()
         .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
     let numero = guardados
-        .guardar(ArquivoEscolhidoDeMod {
+        .guardar(Escolhido {
             de_quem: id.clone(),
             geracao,
             tipo: lida.media_type,
-            bytes,
+            tamanho,
+            conteudo: bytes,
         })
-        .ok_or(FalhaNoMod::Recusado {
-            motivo: "arquivos-demais-de-pe".to_owned(),
-        })?;
+        .map_err(recusado)?;
     tracing::info!(mod_id = %id_no_registro(&id), geracao, arquivo = numero, tipo = lida.media_type, bytes = tamanho, "arquivo escolhido para um MOD");
     Ok(Some(EscolhidoParaOMod {
         id: numero,
@@ -9086,11 +8966,11 @@ fn pedaco_do_escolhido(
     inicio: usize,
 ) -> Result<String, FalhaNoMod> {
     session.recusar_se_morta(geracao)?;
-    session
+    let guardados = session
         .arquivos_escolhidos
         .lock()
-        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
-        .pedaco(geracao, &id, arquivo, inicio)
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+    pedaco_em_base64(&guardados, geracao, &id, arquivo, inicio)
 }
 
 /// **Solta um arquivo escolhido**, agora, a pedido de quem o pediu.
@@ -14942,21 +14822,22 @@ mod a_supervisao_dos_mods_nativos {
     #[test]
     fn a_saida_solta_os_arquivos_escolhidos_daquela_geracao() {
         let mut guardados = super::ArquivosEscolhidos::default();
-        let de = |geracao: u64| super::ArquivoEscolhidoDeMod {
+        let de = |geracao: u64| super::Escolhido {
             de_quem: "prova/mod".to_owned(),
             geracao,
             tipo: "image/png",
-            bytes: vec![0; 16],
+            tamanho: 16,
+            conteudo: vec![0; 16],
         };
-        assert!(guardados.guardar(de(7)).is_some());
-        assert!(guardados.guardar(de(7)).is_some());
-        assert!(guardados.guardar(de(8)).is_some());
+        assert!(guardados.guardar(de(7)).is_ok());
+        assert!(guardados.guardar(de(7)).is_ok());
+        let da_seguinte = guardados.guardar(de(8)).expect("guardou");
 
-        assert_eq!(guardados.soltar_geracao(7), 2);
+        assert_eq!(guardados.soltar_geracao(7).len(), 2);
         // E o da geração seguinte fica: soltar o que não é dela seria derrubar
         // a sessão que acabou de começar.
-        assert_eq!(guardados.guardados.len(), 1);
-        assert!(guardados.guardados.values().all(|a| a.geracao == 8));
+        assert_eq!(guardados.len(), 1);
+        assert!(guardados.de(8, "prova/mod", da_seguinte).is_ok());
     }
 
     /// **O pedaço só sai para quem escolheu, e o `soltar` devolve agora**
@@ -14969,35 +14850,39 @@ mod a_supervisao_dos_mods_nativos {
         let mut guardados = super::ArquivosEscolhidos::default();
         let bytes: Vec<u8> = (0..=255).collect();
         let numero = guardados
-            .guardar(super::ArquivoEscolhidoDeMod {
+            .guardar(super::Escolhido {
                 de_quem: "prova/mod".to_owned(),
                 geracao: 7,
                 tipo: "image/png",
-                bytes: bytes.clone(),
+                tamanho: bytes.len(),
+                conteudo: bytes.clone(),
             })
             .expect("guardou");
+        let pedaco = |guardados: &super::ArquivosEscolhidos, geracao, id: &str, inicio| {
+            super::pedaco_em_base64(guardados, geracao, id, numero, inicio)
+        };
         let motivo = |r: Result<String, super::FalhaNoMod>| match r {
             Ok(_) => "(saiu)".to_owned(),
             Err(falha) => super::motivo_de(&falha).to_owned(),
         };
 
         assert_eq!(
-            guardados.pedaco(7, "prova/mod", numero, 0).ok(),
+            pedaco(&guardados, 7, "prova/mod", 0).ok(),
             Some(seele_ffi::base64_de(&bytes)),
             "quem escolheu não recebeu o arquivo"
         );
         assert_eq!(
-            guardados.pedaco(7, "prova/mod", numero, 250).ok(),
+            pedaco(&guardados, 7, "prova/mod", 250).ok(),
             Some(seele_ffi::base64_de(bytes.get(250..).unwrap_or_default())),
             "o pedaço do meio não começou onde o MOD pediu"
         );
         assert_eq!(
-            motivo(guardados.pedaco(7, "outro/mod", numero, 0)),
+            motivo(pedaco(&guardados, 7, "outro/mod", 0)),
             "arquivo-de-outro-mod",
             "um MOD que sabe o número leu o arquivo que outro escolheu"
         );
         assert_eq!(
-            motivo(guardados.pedaco(8, "prova/mod", numero, 0)),
+            motivo(pedaco(&guardados, 8, "prova/mod", 0)),
             "arquivo-de-outro-mod",
             "a sessão seguinte leu o arquivo da anterior"
         );
@@ -15005,12 +14890,12 @@ mod a_supervisao_dos_mods_nativos {
         // O `soltar` de quem não é o dono não solta; o do dono solta agora.
         guardados.soltar(7, "outro/mod", numero);
         assert!(
-            guardados.guardados.contains_key(&numero),
+            guardados.de(7, "prova/mod", numero).is_ok(),
             "outro MOD soltou o arquivo que não era dele"
         );
         guardados.soltar(7, "prova/mod", numero);
         assert_eq!(
-            motivo(guardados.pedaco(7, "prova/mod", numero, 0)),
+            motivo(pedaco(&guardados, 7, "prova/mod", 0)),
             "arquivo-nao-esta-de-pe",
             "o arquivo solto continuou de pé"
         );
@@ -15173,26 +15058,29 @@ mod a_supervisao_dos_mods_nativos {
     #[test]
     fn os_arquivos_de_pe_tem_teto_e_o_numero_nunca_se_repete() {
         let mut guardados = super::ArquivosEscolhidos::default();
-        let de = || super::ArquivoEscolhidoDeMod {
+        let de = || super::Escolhido {
             de_quem: "prova/mod".to_owned(),
             geracao: 1,
             tipo: "image/png",
-            bytes: Vec::new(),
+            tamanho: 0,
+            conteudo: Vec::new(),
         };
         let numeros: Vec<u64> = (0..super::ARQUIVOS_DE_PE)
             .map(|_| guardados.guardar(de()).expect("cabe"))
             .collect();
         assert!(
-            guardados.guardar(de()).is_none(),
+            guardados.guardar(de()).is_err(),
             "o teto de arquivos de pé não segurou"
         );
 
         // **Monotônico.** Soltar um e guardar outro não reaproveita o número:
         // um pedido atrasado com o número velho leria o arquivo que ocupou o
         // lugar dele, e seria o arquivo errado sem nada dizer.
-        guardados
-            .guardados
-            .remove(numeros.first().expect("o primeiro guardado"));
+        assert!(guardados.soltar(
+            1,
+            "prova/mod",
+            *numeros.first().expect("o primeiro guardado")
+        ));
         let novo = guardados.guardar(de()).expect("cabe depois de soltar");
         assert!(
             !numeros.contains(&novo),

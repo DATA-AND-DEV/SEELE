@@ -88,8 +88,26 @@ if (![caminhoDoWasm, caminhoDoServidor, caminhoDoMotor].every((caminho) => camin
   process.exit(2);
 }
 
-/** O MOD que o segundo servidor exige: o de referência do repositório. */
-const PASTA_DO_MOD = path.join(raiz, "testes", "mod-de-referencia");
+/**
+ * **O MOD que o segundo servidor exige**: o de referência do repositório,
+ * numa cópia feita na hora com uma operação a mais na metade de servidor —
+ * `ler-anexo`, que autoriza ler pelo volume o anexo que a janela mandou. O de
+ * referência não lê imagem pelo volume, e sem ela a leitura só se provaria
+ * recusada. O vetor do repositório não muda.
+ */
+const PASTA_DO_MOD = (() => {
+  const copia = fs.mkdtempSync(path.join(os.tmpdir(), "mod-da-bancada-"));
+  fs.cpSync(path.join(raiz, "testes", "mod-de-referencia"), copia, { recursive: true });
+  const servidor = path.join(copia, "servidor", "main.js");
+  const fonte = fs.readFileSync(servidor, "utf8");
+  const ancora = '  if (o_que.op !== "contar" && o_que.op !== "gravar") {';
+  if (!fonte.includes(ancora)) throw new Error("a metade de servidor do MOD de referência mudou: a âncora da bancada sumiu");
+  fs.writeFileSync(
+    servidor,
+    fonte.replace(ancora, `  if (o_que.op === "ler-anexo") return JSON.stringify({ ok: true, volume: "referencia/anexo" });\n${ancora}`),
+  );
+  return copia;
+})();
 
 /** Onde o catálogo mora: o `ENDERECO` do `seele_sessao::catalogo`. */
 const ENDERECO_DO_CATALOGO = "https://mods.seele.app.br";
@@ -876,6 +894,68 @@ const invocar = (aba, comando, args) =>
       `a capa do servidor não voltou reduzida: ${JSON.stringify(doServidor)}`,
     );
     confere("14", doServidor.torta?.Recusado?.motivo === "nao-e-base64", `o texto que não é base64: ${JSON.stringify(doServidor.torta)}`);
+    // **O seletor do MOD, o pedaço, o envio e a leitura pelo volume**: a
+    // pessoa escolhe pelo botão do painel, o MOD lê o primeiro pedaço, manda o
+    // arquivo ao volume da metade de servidor dele (que abre a porta), e a
+    // imagem volta pelo volume, os mesmos bytes; a leitura que o MOD não
+    // autoriza é recusada por ele.
+    const imagemDoMod = path.join(os.tmpdir(), `sessao-no-navegador-mod-${process.pid}.png`);
+    const bytesDaImagem = pngDeRuido(250, 250);
+    fs.writeFileSync(imagemDoMod, bytesDaImagem);
+    const apertar = (rotulo) =>
+      f.aba.evaluate(({ id, rotulo }) => {
+        const botao = [...document.querySelectorAll(`[data-mod="${id}"] button`)].find((b) => b.textContent.trim() === rotulo);
+        botao?.click();
+        return Boolean(botao);
+      }, { id: exigido.id, rotulo });
+    const seletorDoMod = f.aba.waitForEvent("filechooser");
+    confere("14", await apertar("ESCOLHER ARQUIVO"), "o painel do MOD não tem o ESCOLHER ARQUIVO");
+    await (await seletorDoMod).setFiles(imagemDoMod);
+    const leuOPedaco = await esperar(f.aba, async (id) => {
+      const texto = [...document.querySelectorAll(`[data-mod="${id}"]`)].map((no) => no.textContent).join(" ");
+      const lido = texto.match(/escolhido: (\S+) · (\d+) bytes · lidos (\d+)/);
+      return { pronto: Boolean(lido) && Number(lido[3]) > 0, lido: lido?.slice(1) ?? null };
+    }, exigido.id);
+    confere(
+      "14",
+      // O MOD conta os bytes pelo base64 com o enchimento (`lidos`), e
+      // passa do pedaço em até dois.
+      leuOPedaco.pronto && leuOPedaco.lido[0] === "image/png" && Number(leuOPedaco.lido[1]) === bytesDaImagem.length &&
+        Number(leuOPedaco.lido[2]) - Math.min(65535, bytesDaImagem.length) >= 0 &&
+        Number(leuOPedaco.lido[2]) - Math.min(65535, bytesDaImagem.length) <= 2,
+      `o MOD não leu o primeiro pedaço do que foi escolhido: ${JSON.stringify(leuOPedaco.lido)}`,
+    );
+    confere("14", await apertar("ENVIAR AO SERVIDOR"), "o painel do MOD não tem o ENVIAR AO SERVIDOR");
+    const enviou = await esperar(f.aba, async (id) => {
+      const texto = [...document.querySelectorAll(`[data-mod="${id}"]`)].map((no) => no.textContent).join(" ");
+      return { pronto: texto.includes("arquivo no volume do servidor") || /enviar:|não conseguiu/.test(texto), texto: texto.slice(0, 300), guardados: BYTES_DOS_ESCOLHIDOS.size };
+    }, exigido.id, 15_000);
+    confere(
+      "14",
+      enviou.texto.includes("arquivo no volume do servidor") && enviou.guardados === 0,
+      `o arquivo não chegou ao volume do servidor (ou não foi consumido): ${JSON.stringify(enviou)}`,
+    );
+    const peloVolume = await f.aba.evaluate(async (id) => {
+      const invoke = window.__TAURI__.core.invoke;
+      const lida = await invoke("ler_imagem_mod", { geracao: geracaoDaSessao, id, channel: 0, payload: JSON.stringify({ op: "ler-anexo" }), uso: "capa" });
+      let recusada;
+      try {
+        await invoke("ler_imagem_mod", { geracao: geracaoDaSessao, id, channel: 0, payload: JSON.stringify({ op: "contar" }), uso: null });
+      } catch (erro) {
+        recusada = erro;
+      }
+      return { uri: lida.uri, papel: lida.papel, decodificados: lida.decodificados, recusada };
+    }, exigido.id);
+    confere(
+      "14",
+      peloVolume.uri === `data:image/png;base64,${bytesDaImagem.toString("base64")}` && peloVolume.decodificados === 250 * 250 * 4,
+      `a imagem não voltou pelo volume com os mesmos bytes: ${JSON.stringify({ papel: peloVolume.papel, decodificados: peloVolume.decodificados, inicio: peloVolume.uri?.slice(0, 40) })}`,
+    );
+    confere(
+      "14",
+      peloVolume.recusada?.Recusado?.motivo === "leitura recusada pelo MOD",
+      `a leitura que o MOD não autoriza: ${JSON.stringify(peloVolume.recusada)}`,
+    );
     // O código que o executor recebeu é o do pacote, com as capacidades da
     // API 6, e a geração morta é recusada.
     const codigo = await f.aba.evaluate(async ({ id, hash }) => {
@@ -895,6 +975,16 @@ const invocar = (aba, comando, args) =>
       `o código do MOD: ${JSON.stringify({ tamanho: codigo.tamanho, capacidades: codigo.capacidades })}`,
     );
     confere("14", codigo.morta?.Recusado?.motivo === "sessao-encerrada", `a geração morta: ${JSON.stringify(codigo.morta)}`);
+    // **A saída solta os escolhidos**: um arquivo escolhido e não mandado sai
+    // da página com a sessão, como no desktop.
+    const outroSeletor = f.aba.waitForEvent("filechooser");
+    await apertar("ESCOLHER ARQUIVO");
+    await (await outroSeletor).setFiles(imagemDoMod);
+    const deNovo = await esperar(f.aba, () => ({ pronto: BYTES_DOS_ESCOLHIDOS.size === 1, guardados: BYTES_DOS_ESCOLHIDOS.size }));
+    confere("14", deNovo.pronto, `o segundo arquivo escolhido não ficou guardado: ${deNovo.guardados}`);
+    confere("14", (await invocar(f.aba, "disconnect", {})).ok === null, "o disconnect da página com o MOD não respondeu null");
+    const soltos = await f.aba.evaluate(() => BYTES_DOS_ESCOLHIDOS.size);
+    confere("14", soltos === 0, `a saída deixou ${soltos} arquivo(s) escolhido(s) na página`);
 
     for (const [nome, { doConsole }] of [["a", a], ["b", b], ["c", c], ["d", d], ["e", e], ["f", f]]) {
       const erros = doConsole.filter((linha) => linha.startsWith("pageerror") || /CSP|Content Security Policy/i.test(linha));

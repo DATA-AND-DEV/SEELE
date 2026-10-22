@@ -73,6 +73,23 @@
 //! | | 1 | `{"Recusado": {"motivo"}}` |
 //! | `mod_midia_do_servidor(texto, uso)` | 0 | o `MidiaDoMod` do desktop |
 //! | | 1 | `{"Recusado": {"motivo"}}` |
+//! | `escolha_regras(pedido)` | 0 | `{"titulo", "extensoes", "teto"}` |
+//! | `escolha_guardar(pedido, comeco)` | 0 | `{"id", "tipo", "papel", "bytes"}` |
+//! | | 1 | `{"Recusado": {"motivo"}}` |
+//! | `escolha_pedaco(pedido)` | 0 | `{"inicio", "fim"}` |
+//! | | 1 | `{"Recusado": {"motivo"}}` |
+//! | `escolha_soltar(pedido)` | 0 | `{"soltou"}` |
+//! | `escolha_tirar(pedido)` | 0 | `{"tamanho"}` |
+//! | | 1 | `{"Recusado": {"motivo"}}` |
+//! | `escolhas_soltar_geracao(pedido)` | 0 | os números soltos |
+//! | `base64_de(bytes)` | 0 | o texto em base64 |
+//! | `volume_pedido(pedido)` | 0 | o começo do fluxo de imagem |
+//! | | 1 | `{"Recusado": {"motivo"}}` |
+//! | `volume_prazo()` | 0 | `{"ms", "motivo"}` |
+//! | `volume_resposta_nova()` | a alça | — |
+//! | `volume_resposta_chegou(alca, pedaco)` | — | — |
+//! | `volume_resposta_acabou(alca, imagem, viva, uso)` | 0 | o `MidiaDoMod` (`imagem` 1) ou nada |
+//! | | 1 | `{"Recusado": {"motivo"}}` |
 //! | `catalogo_endereco()` | 0 | o endereço do catálogo |
 //! | `catalogo_ler(catalogo, assinatura)` | 0 | nada: conferido e lido |
 //! | | 1 | a `FalhaNoCatalogo` do desktop |
@@ -161,6 +178,10 @@ thread_local! {
     static BATERIA: RefCell<Option<seele_sessao::battery::Battery>> = const { RefCell::new(None) };
     static PACOTES: RefCell<Vec<crate::mods::Guardado>> = const { RefCell::new(Vec::new()) };
     static CHAVE_DO_CATALOGO: RefCell<Option<String>> = const { RefCell::new(None) };
+    static ESCOLHIDOS: RefCell<Option<seele_sessao::escolhidos::Escolhidos<()>>> =
+        const { RefCell::new(None) };
+    static RESPOSTAS: RefCell<(u32, std::collections::BTreeMap<u32, crate::volume::Resposta>)> =
+        const { RefCell::new((0, std::collections::BTreeMap::new())) };
     static FLUXOS: RefCell<(u32, std::collections::BTreeMap<u32, FluxoQueChega>)> =
         const { RefCell::new((0, std::collections::BTreeMap::new())) };
     static ENVIO: RefCell<Option<Envio>> = const { RefCell::new(None) };
@@ -843,6 +864,353 @@ pub unsafe extern "C" fn mod_midia_do_servidor(
     let uso = texto_de(unsafe { entrada(uso_ptr, uso_len) });
     match crate::mods::midia_do_servidor(texto, (!uso.is_empty()).then_some(uso)) {
         Ok(midia) => dizer(midia.to_string().into_bytes(), 0),
+        Err(motivo) => recusa_de_mod(&motivo),
+    }
+}
+
+// ------------------------------------------- o seletor e as imagens pelo volume
+
+/// O pedido em JSON, para os campos que não são texto.
+fn pedido_em_json(bytes: &[u8]) -> serde_json::Value {
+    serde_json::from_slice(bytes).unwrap_or_default()
+}
+
+/// Um número do pedido (`u64`), zero quando falta.
+fn numero_do_pedido(pedido: &serde_json::Value, campo: &str) -> u64 {
+    pedido
+        .get(campo)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or_default()
+}
+
+/// Uma lista de textos do pedido, `None` quando falta.
+fn lista_do_pedido(pedido: &serde_json::Value, campo: &str) -> Option<Vec<String>> {
+    pedido
+        .get(campo)
+        .and_then(serde_json::Value::as_array)
+        .map(|lista| {
+            lista
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect()
+        })
+}
+
+fn com_os_escolhidos<T>(
+    fazer: impl FnOnce(&mut seele_sessao::escolhidos::Escolhidos<()>) -> T,
+) -> T {
+    ESCOLHIDOS.with(|e| fazer(e.borrow_mut().get_or_insert_with(Default::default)))
+}
+
+/// **As regras do seletor** ([`crate::mods::regras_do_seletor`]):
+/// `{"finalidade", "extensoes", "limiteDeBytes"}`. Devolve 0 com `{"titulo",
+/// "extensoes", "teto"}`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn escolha_regras(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido = pedido_em_json(unsafe { entrada(ptr, len) });
+    let limite = pedido
+        .get("limiteDeBytes")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|n| usize::try_from(n).ok());
+    let regras = crate::mods::regras_do_seletor(
+        pedido.get("finalidade").and_then(serde_json::Value::as_str),
+        lista_do_pedido(&pedido, "extensoes").as_deref(),
+        limite,
+    );
+    dizer(regras.to_string().into_bytes(), 0)
+}
+
+/// **Guarda um arquivo escolhido**: `{"id", "geracao", "papeis", "tamanho",
+/// "viva"}` e o começo dos bytes. Na ordem do desktop: o tipo pelos bytes, o
+/// papel, a geração ainda de pé (`viva`, que a página confere logo antes), e o
+/// teto dos que ficam de pé. Devolve 0 com o `EscolhidoParaOMod` do desktop
+/// (`{"id", "tipo", "papel", "bytes"}`), ou 1 com `{"Recusado": {"motivo"}}`.
+///
+/// # Safety
+///
+/// Os dois pares `ptr`/`len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn escolha_guardar(
+    pedido_ptr: *const u8,
+    pedido_len: usize,
+    comeco_ptr: *const u8,
+    comeco_len: usize,
+) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido = pedido_em_json(unsafe { entrada(pedido_ptr, pedido_len) });
+    // SAFETY: idem.
+    let comeco = unsafe { entrada(comeco_ptr, comeco_len) };
+    let tipo =
+        match crate::mods::o_escolhido_serve(comeco, lista_do_pedido(&pedido, "papeis").as_deref())
+        {
+            Ok(tipo) => tipo,
+            Err(motivo) => return recusa_de_mod(&motivo),
+        };
+    if pedido.get("viva").and_then(serde_json::Value::as_bool) != Some(true) {
+        return recusa_de_mod("sessao-encerrada");
+    }
+    let tamanho = usize::try_from(numero_do_pedido(&pedido, "tamanho")).unwrap_or(usize::MAX);
+    let guardado = com_os_escolhidos(|escolhidos| {
+        escolhidos.guardar(seele_sessao::escolhidos::Escolhido {
+            de_quem: pedido
+                .get("id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            geracao: numero_do_pedido(&pedido, "geracao"),
+            tipo: tipo.media_type,
+            tamanho,
+            conteudo: (),
+        })
+    });
+    match guardado {
+        Ok(numero) => dizer(
+            serde_json::json!({
+                "id": numero,
+                "tipo": tipo.media_type,
+                "papel": tipo.papel,
+                "bytes": tamanho,
+            })
+            .to_string()
+            .into_bytes(),
+            0,
+        ),
+        Err(motivo) => recusa_de_mod(&motivo),
+    }
+}
+
+/// O dono de um escolhido: `{"geracao", "id", "arquivo"}`.
+fn dono_do_escolhido(pedido: &serde_json::Value) -> (u64, String, u64) {
+    (
+        numero_do_pedido(pedido, "geracao"),
+        pedido
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        numero_do_pedido(pedido, "arquivo"),
+    )
+}
+
+/// **Onde começa e acaba um pedaço** de um escolhido, para quem o escolheu:
+/// `{"geracao", "id", "arquivo", "inicio"}`. Devolve 0 com `{"inicio",
+/// "fim"}` (a página corta os bytes dela), ou 1 com `{"Recusado": {"motivo"}}`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn escolha_pedaco(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido = pedido_em_json(unsafe { entrada(ptr, len) });
+    let (geracao, id, arquivo) = dono_do_escolhido(&pedido);
+    let inicio = usize::try_from(numero_do_pedido(&pedido, "inicio")).unwrap_or(usize::MAX);
+    match com_os_escolhidos(|escolhidos| escolhidos.pedaco(geracao, &id, arquivo, inicio)) {
+        Ok(faixa) => dizer(
+            serde_json::json!({ "inicio": faixa.start, "fim": faixa.end })
+                .to_string()
+                .into_bytes(),
+            0,
+        ),
+        Err(motivo) => recusa_de_mod(&motivo),
+    }
+}
+
+/// **Solta um escolhido**, se é de quem pede: devolve 0 com
+/// `{"soltou": bool}` (o desktop não diz nada a quem não é o dono).
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn escolha_soltar(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido = pedido_em_json(unsafe { entrada(ptr, len) });
+    let (geracao, id, arquivo) = dono_do_escolhido(&pedido);
+    let soltou = com_os_escolhidos(|escolhidos| escolhidos.soltar(geracao, &id, arquivo));
+    dizer(
+        serde_json::json!({ "soltou": soltou })
+            .to_string()
+            .into_bytes(),
+        0,
+    )
+}
+
+/// **Tira um escolhido para mandá-lo** ao volume: consumido antes do envio.
+/// Devolve 0 com `{"tamanho"}`, ou 1 com `{"Recusado": {"motivo"}}`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn escolha_tirar(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido = pedido_em_json(unsafe { entrada(ptr, len) });
+    let (geracao, id, arquivo) = dono_do_escolhido(&pedido);
+    match com_os_escolhidos(|escolhidos| escolhidos.tirar(geracao, &id, arquivo)) {
+        Ok(tirado) => dizer(
+            serde_json::json!({ "tamanho": tirado.tamanho })
+                .to_string()
+                .into_bytes(),
+            0,
+        ),
+        Err(motivo) => recusa_de_mod(&motivo),
+    }
+}
+
+/// **A sessão acabou**: os escolhidos dela saem. `{"geracao"}`; devolve 0 com
+/// os números soltos, para a página soltar os bytes deles.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn escolhas_soltar_geracao(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido = pedido_em_json(unsafe { entrada(ptr, len) });
+    let geracao = numero_do_pedido(&pedido, "geracao");
+    let soltos = com_os_escolhidos(|escolhidos| escolhidos.soltar_geracao(geracao));
+    dizer(serde_json::json!(soltos).to_string().into_bytes(), 0)
+}
+
+/// Os bytes em base64 padrão (`seele_sessao::base64`): o pedaço de um
+/// escolhido, como o desktop o manda ao MOD. Devolve 0 com o texto.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn base64_de(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    dizer(seele_sessao::base64::base64_de(bytes).into_bytes(), 0)
+}
+
+/// **O começo de um fluxo de imagem** ([`crate::volume`]): `{"ler": {"id",
+/// "channel", "payload"}}` ou `{"enviar": {"id", "token", "bytes"}}`. Devolve 0
+/// com o pedido enquadrado, ou 1 com `{"Recusado": {"motivo"}}` (o texto da
+/// recusa do protocolo).
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn volume_pedido(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedido = pedido_em_json(unsafe { entrada(ptr, len) });
+    let texto = |de: &serde_json::Value, campo: &str| {
+        de.get(campo)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let feito = if let Some(ler) = pedido.get("ler") {
+        crate::volume::pedido_de_ler(
+            &texto(ler, "id"),
+            u32::try_from(numero_do_pedido(ler, "channel")).unwrap_or(u32::MAX),
+            &texto(ler, "payload"),
+        )
+    } else if let Some(enviar) = pedido.get("enviar") {
+        crate::volume::pedido_de_enviar(
+            &texto(enviar, "id"),
+            &texto(enviar, "token"),
+            numero_do_pedido(enviar, "bytes"),
+        )
+    } else {
+        Err("pedido-de-imagem-sem-forma".to_owned())
+    };
+    match feito {
+        Ok(bytes) => dizer(bytes, 0),
+        Err(motivo) => recusa_de_mod(&motivo),
+    }
+}
+
+/// O prazo de uma transferência de imagem, em milissegundos, e o motivo que
+/// o MOD lê quando ele acaba (`seele_sessao::transferencia`). Devolve 0 com
+/// `{"ms", "motivo"}`.
+#[no_mangle]
+pub extern "C" fn volume_prazo() -> u32 {
+    use seele_sessao::transferencia::{PRAZO_DA_IMAGEM_DE_MOD_S, PRAZO_ESGOTADO};
+    dizer(
+        serde_json::json!({ "ms": PRAZO_DA_IMAGEM_DE_MOD_S * 1000, "motivo": PRAZO_ESGOTADO })
+            .to_string()
+            .into_bytes(),
+        0,
+    )
+}
+
+/// Uma resposta de imagem nova; devolve a alça dela.
+#[no_mangle]
+pub extern "C" fn volume_resposta_nova() -> u32 {
+    RESPOSTAS.with(|r| {
+        let (proxima, respostas) = &mut *r.borrow_mut();
+        *proxima = proxima.wrapping_add(1);
+        respostas.insert(*proxima, crate::volume::Resposta::nova());
+        *proxima
+    })
+}
+
+/// Mais um pedaço da resposta `alca`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn volume_resposta_chegou(alca: u32, ptr: *const u8, len: usize) {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let pedaco = unsafe { entrada(ptr, len) };
+    RESPOSTAS.with(|r| {
+        if let Some(resposta) = r.borrow_mut().1.get_mut(&alca) {
+            resposta.chegou(pedaco);
+        }
+    });
+}
+
+/// **A resposta `alca` acabou**, e é esquecida. `viva` 0 é a geração que
+/// acabou durante a transferência (`sessao-encerrada`, conferida depois da
+/// resposta, como no desktop). Com `uso` (vazio para nenhum) e `imagem` 1, é a
+/// imagem lida: devolve 0 com o `MidiaDoMod` do desktop,
+/// pronto pelo caminho comum; com `imagem` 0, é a confirmação de um envio:
+/// devolve 0 sem nada. 1 com `{"Recusado": {"motivo"}}`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn volume_resposta_acabou(
+    alca: u32,
+    imagem: u32,
+    viva: u32,
+    uso_ptr: *const u8,
+    uso_len: usize,
+) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let uso = texto_de(unsafe { entrada(uso_ptr, uso_len) });
+    let Some(resposta) = RESPOSTAS.with(|r| r.borrow_mut().1.remove(&alca)) else {
+        return recusa_de_mod("incompleto");
+    };
+    let bytes = match resposta.acabou() {
+        Ok(bytes) => bytes,
+        Err(motivo) => return recusa_de_mod(&motivo),
+    };
+    // A geração conferida de novo **depois** de a transferência dar certo,
+    // como o desktop: a recusa do servidor chega como ela é.
+    if viva == 0 {
+        return recusa_de_mod("sessao-encerrada");
+    }
+    if imagem == 0 {
+        return dizer(Vec::new(), 0);
+    }
+    let teto = (!uso.is_empty())
+        .then(|| seele_sessao::reducao::teto_do_uso(uso))
+        .flatten();
+    match seele_sessao::midia_de_mod::pronta(bytes, teto.as_ref()) {
+        Ok(pronta) => dizer(crate::mods::em_json(pronta).to_string().into_bytes(), 0),
         Err(motivo) => recusa_de_mod(&motivo),
     }
 }

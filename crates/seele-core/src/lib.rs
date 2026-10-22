@@ -36,6 +36,9 @@ pub use seele_sessao::battery;
 /// O catálogo de MODs sem a rede: a assinatura, a leitura, o plano e o
 /// conjunto, de onde o desktop e o navegador os leem (Tarefa 2.6 da F4).
 pub use seele_sessao::catalogo;
+/// Os arquivos que uma pessoa escolheu para um MOD: as regras do seletor e o
+/// guarda, de onde o desktop e o navegador os leem.
+pub use seele_sessao::escolhidos;
 /// A mídia que um MOD recebe do servidor, pronta, com a feature `reducao`.
 #[cfg(feature = "reducao")]
 pub use seele_sessao::midia_de_mod;

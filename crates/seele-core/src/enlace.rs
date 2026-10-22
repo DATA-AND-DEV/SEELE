@@ -3730,14 +3730,18 @@ impl Motor {
             } => {
                 let transferencias = cliente.transfers();
                 tokio::spawn(async move {
+                    // O prazo e o texto moram no `seele-sessao`
+                    // (`transferencia`): a página do navegador espera o mesmo.
                     let resultado = tokio::time::timeout(
-                        std::time::Duration::from_secs(60),
+                        std::time::Duration::from_secs(
+                            seele_sessao::transferencia::PRAZO_DA_IMAGEM_DE_MOD_S,
+                        ),
                         transferencias.imagem_de_mod(pedido, &bytes),
                     )
                     .await;
                     let resultado = match resultado {
                         Ok(r) => r.map_err(|e| e.to_string()),
-                        Err(_) => Err("Prazo da transferência esgotado. Confira a conexão e a versão do servidor.".to_owned()),
+                        Err(_) => Err(seele_sessao::transferencia::PRAZO_ESGOTADO.to_owned()),
                     };
                     let _ = resposta.send(resultado);
                 });

@@ -295,20 +295,12 @@ const NEUTROS_DE_QUEM_NAO_HOSPEDA = new Map([
   ],
 ]);
 
-const TAREFA_26 = "2.6 (a sessão pelo navegador)";
-const TAREFA_33 = "3.3 (a voz, e o teste do microfone fora da sala, que usa o mesmo portão)";
-const TAREFA_34 = "3.4 (a identidade e a entrada)";
-const TAREFA_39 = "3.9 (assistir à tela)";
-const TAREFA_310 = "3.10 (compartilhar a tela pelo PC)";
-const TAREFA_MODS = "2.6 e 3.4 (os MODs da sessão)";
-
-/** Atendidos que ainda não têm corpo, com a tarefa do plano que os traz. */
+/**
+ * Atendidos que ainda não têm corpo, com a tarefa do plano que os traz (o
+ * texto dela, numa constante de uma linha: o `cargo xtask pacote-web` lê as
+ * duas). Vazia desde a Tarefa 2.6: a ponte atende todos.
+ */
 const AINDA_A_FAZER = new Map([
-  ["enviar_imagem_mod", TAREFA_MODS],
-  ["escolher_para_o_mod", TAREFA_MODS],
-  ["ler_imagem_mod", TAREFA_MODS],
-  ["pedaco_do_escolhido", TAREFA_MODS],
-  ["soltar_escolhido", TAREFA_MODS],
 ]);
 
 /**
@@ -550,6 +542,9 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
         emitirNaPonte("seele://event", evento);
       },
       aoAcabar: () => {
+        // Os arquivos escolhidos para os MODs saem com a sessão, como no
+        // desktop, acabe ela por quem acabar.
+        soltarOsEscolhidosDa(geracao).catch(() => {});
         if (!valeAinda()) return;
         fecharAVozDaSessao();
         sessaoDaPonte.atual?.transmissao?.fechar();
@@ -1116,25 +1111,9 @@ const REGRAS_DO_ICONE = Object.freeze({
  * `click()`, como o `escolher_arquivo`. Desistir resolve `null`.
  */
 function escolherUmaImagem() {
-  return new Promise((responder) => {
-    const entrada = document.createElement("input");
-    entrada.type = "file";
-    // Os formatos que o `image` do desktop lê (PNG, JPEG, WebP e GIF): o iOS
-    // converte a foto HEIC para um deles ao entregar.
-    entrada.accept = "image/png,image/jpeg,image/webp,image/gif";
-    entrada.hidden = true;
-    let respondido = false;
-    const fim = (valor) => {
-      if (respondido) return;
-      respondido = true;
-      entrada.remove();
-      responder(valor);
-    };
-    entrada.addEventListener("change", () => fim(entrada.files?.[0] ?? null));
-    entrada.addEventListener("cancel", () => fim(null));
-    document.body.append(entrada);
-    entrada.click();
-  });
+  // Os formatos que o `image` do desktop lê (PNG, JPEG, WebP e GIF): o iOS
+  // converte a foto HEIC para um deles ao entregar.
+  return abrirOSeletor("image/png,image/jpeg,image/webp,image/gif");
 }
 
 /**
@@ -1526,8 +1505,121 @@ function fronteiraDosMods(w) {
       entregar([{ hash: "", arquivos }]);
       return lido(comBlocos([texto(hash)], (p, n) => w.catalogo_conferir(p, n)));
     },
+    // O seletor do MOD e os escolhidos: as regras e o guarda moram no `.wasm`
+    // (`seele_sessao::escolhidos`), e os bytes, na página.
+    regrasDoSeletor: (pedido) => lido(comBlocos([texto(JSON.stringify(pedido))], (p, n) => w.escolha_regras(p, n))).ok,
+    guardarOEscolhido: (pedido, comeco) =>
+      lido(comBlocos([texto(JSON.stringify(pedido)), comeco], (pp, pn, cp, cn) => w.escolha_guardar(pp, pn, cp, cn))),
+    pedacoDoEscolhido: (pedido) => lido(comBlocos([texto(JSON.stringify(pedido))], (p, n) => w.escolha_pedaco(p, n))),
+    soltarOEscolhido: (pedido) => lido(comBlocos([texto(JSON.stringify(pedido))], (p, n) => w.escolha_soltar(p, n))).ok,
+    tirarOEscolhido: (pedido) => lido(comBlocos([texto(JSON.stringify(pedido))], (p, n) => w.escolha_tirar(p, n))),
+    soltarAGeracao: (geracao) =>
+      lido(comBlocos([texto(JSON.stringify({ geracao }))], (p, n) => w.escolhas_soltar_geracao(p, n))).ok,
+    base64De: (bytes) => (comBlocos([bytes], (p, n) => w.base64_de(p, n)), saida()),
+    // As imagens pelo volume: o pedido, a resposta aos pedaços, e o prazo.
+    pedidoDeImagem(pedido) {
+      if (comBlocos([texto(JSON.stringify(pedido))], (p, n) => w.volume_pedido(p, n)) !== 0) return { falha: JSON.parse(saida()) };
+      return { ok: memoria().slice(w.saida_ptr(), w.saida_ptr() + w.saida_len()) };
+    },
+    prazoDaImagem: () => (w.volume_prazo(), JSON.parse(saida())),
+    respostaNova: () => w.volume_resposta_nova(),
+    respostaChegou: (alca, pedaco) => comBlocos([pedaco], (p, n) => w.volume_resposta_chegou(alca, p, n)),
+    respostaAcabou: (alca, { imagem, viva, uso }) =>
+      lido(comBlocos([texto(uso ?? "")], (p, n) => w.volume_resposta_acabou(alca, imagem ? 1 : 0, viva ? 1 : 0, p, n))),
   };
 }
+
+/** Os bytes dos arquivos escolhidos para os MODs, pelo número que o `.wasm` deu. */
+const BYTES_DOS_ESCOLHIDOS = new Map();
+
+/** A sessão `geracao` acabou: os escolhidos dela saem, e os bytes com eles. */
+async function soltarOsEscolhidosDa(geracao) {
+  for (const numero of (await osModsDaPagina()).soltarAGeracao(geracao) ?? []) BYTES_DOS_ESCOLHIDOS.delete(numero);
+}
+
+/** A geração `geracao` é a da sessão de pé (o `recusar_se_morta`, sem lançar)? */
+function geracaoViva(geracao) {
+  const sessao = sessaoDaPonte.atual;
+  return Boolean(sessao && !sessao.acabou && geracao && sessao.geracao === geracao);
+}
+
+/** O bloco em que os bytes de uma imagem sobem: o `BLOCK_LEN` dos anexos. */
+const BLOCO_DA_IMAGEM = 64 * 1024;
+
+/**
+ * **Uma imagem de MOD pelo volume**: o fluxo bidirecional próprio, como o
+ * `imagem_de_mod` do núcleo. Sobe o pedido (e os bytes, num envio), fecha a
+ * ida, lê a resposta inteira pelo `.wasm`, e a entrega a `acabar`, que diz o
+ * que ela é. No prazo do desktop; a falha do transporte vem em texto, como o
+ * desktop diz o erro dele ao MOD.
+ *
+ * **A resposta é lida mesmo quando a ida falha.** O servidor que recusa
+ * responde e para de ler o que chega (`STOP_SENDING`), e o `close()` da página
+ * rejeita por isso; o desktop fecha a ida sem esperar e lê a recusa. Aqui, o
+ * erro da ida só vale quando a resposta não vem.
+ */
+async function transferirAImagem(sessao, mods, pedido, corpo, acabar) {
+  const prazo = mods.prazoDaImagem();
+  const alca = mods.respostaNova();
+  const comoTexto = (falha) => (typeof falha === "string" ? falha : String(falha?.message ?? falha));
+  let daIda = null;
+  const transferir = async () => {
+    const fluxo = await sessao.abrirUmFluxoDeImagem();
+    const escritor = fluxo.writable.getWriter();
+    try {
+      await escritor.write(pedido);
+      for (let inicio = 0; corpo && inicio < corpo.length; inicio += BLOCO_DA_IMAGEM) {
+        await escritor.write(corpo.subarray(inicio, inicio + BLOCO_DA_IMAGEM));
+      }
+      await escritor.close();
+    } catch (falha) {
+      daIda = comoTexto(falha);
+    }
+    const leitor = fluxo.readable.getReader();
+    for (;;) {
+      const { value, done } = await leitor.read();
+      if (done) break;
+      mods.respostaChegou(alca, value);
+    }
+  };
+  try {
+    await comPrazo(transferir(), prazo.ms, prazo.motivo);
+  } catch (falha) {
+    // A resposta que não acabou é esquecida pelo `.wasm` do mesmo jeito.
+    mods.respostaAcabou(alca, { imagem: false, viva: false });
+    throw { Recusado: { motivo: daIda ?? comoTexto(falha) } };
+  }
+  const feito = acabar(alca);
+  if (daIda && feito.falha?.Recusado?.motivo === "incompleto") return { falha: { Recusado: { motivo: daIda } } };
+  return feito;
+}
+
+/**
+ * **O seletor do navegador**, com o filtro `accept`: o arquivo, ou `null`
+ * quando a pessoa desiste. Um por chamada, e tirado da página ao responder.
+ */
+function abrirOSeletor(accept = "") {
+  return new Promise((responder) => {
+    const entrada = document.createElement("input");
+    entrada.type = "file";
+    if (accept) entrada.accept = accept;
+    entrada.hidden = true;
+    let respondido = false;
+    const fim = (valor) => {
+      if (respondido) return;
+      respondido = true;
+      entrada.remove();
+      responder(valor);
+    };
+    entrada.addEventListener("change", () => fim(entrada.files?.[0] ?? null));
+    entrada.addEventListener("cancel", () => fim(null));
+    document.body.append(entrada);
+    entrada.click();
+  });
+}
+
+/** Quanto do começo de um arquivo escolhido prova o tipo dele (os formatos abrem nos primeiros bytes). */
+const COMECO_DO_ESCOLHIDO = 4096;
 
 /** O pacote guardado sob `hash`, ou `null` (dito no console) sem armazém. */
 async function pacoteDoArmazem(hash) {
@@ -1921,6 +2013,76 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     if (lido.falha) throw lido.falha;
     return lido.ok;
   },
+  // **O seletor do MOD**: a pessoa escolhe, e o MOD recebe um número e lê os
+  // bytes em pedaços. As regras e o guarda moram no `.wasm`; os bytes, aqui.
+  escolher_para_o_mod: async ({ geracao, id, finalidade, papeis, extensoes, limiteDeBytes } = {}) => {
+    recusarSeMorta(geracao);
+    const mods = await osModsDaPagina();
+    const regras = mods.regrasDoSeletor({ finalidade, extensoes, limiteDeBytes });
+    const arquivo = await abrirOSeletor(regras.extensoes.map((extensao) => `.${extensao}`).join(","));
+    if (!arquivo) return null;
+    if (arquivo.size > regras.teto) throw { Recusado: { motivo: "arquivo-grande-demais" } };
+    let bytes;
+    try {
+      bytes = new Uint8Array(await arquivo.arrayBuffer());
+    } catch {
+      throw { Recusado: { motivo: "arquivo-ilegivel" } };
+    }
+    const guardado = mods.guardarOEscolhido(
+      { id, geracao, papeis, tamanho: bytes.length, viva: geracaoViva(geracao) },
+      bytes.subarray(0, COMECO_DO_ESCOLHIDO),
+    );
+    if (guardado.falha) throw guardado.falha;
+    BYTES_DOS_ESCOLHIDOS.set(guardado.ok.id, bytes);
+    return guardado.ok;
+  },
+  pedaco_do_escolhido: async ({ geracao, id, arquivo, inicio } = {}) => {
+    recusarSeMorta(geracao);
+    const mods = await osModsDaPagina();
+    const faixa = mods.pedacoDoEscolhido({ geracao, id, arquivo, inicio });
+    if (faixa.falha) throw faixa.falha;
+    return mods.base64De(BYTES_DOS_ESCOLHIDOS.get(arquivo).subarray(faixa.ok.inicio, faixa.ok.fim));
+  },
+  // Sem conferir a geração, como o desktop: soltar o que não é de quem pede
+  // não faz nada, e não é erro.
+  soltar_escolhido: async ({ geracao, id, arquivo } = {}) => {
+    if ((await osModsDaPagina()).soltarOEscolhido({ geracao, id, arquivo })?.soltou) BYTES_DOS_ESCOLHIDOS.delete(arquivo);
+    return null;
+  },
+  // O escolhido sobe ao volume do MOD, e é consumido antes, dê o envio certo
+  // ou não.
+  enviar_imagem_mod: async ({ geracao, id, arquivo, token } = {}) => {
+    recusarSeMorta(geracao);
+    const mods = await osModsDaPagina();
+    const tirado = mods.tirarOEscolhido({ geracao, id, arquivo });
+    if (tirado.falha) throw tirado.falha;
+    const bytes = BYTES_DOS_ESCOLHIDOS.get(arquivo);
+    BYTES_DOS_ESCOLHIDOS.delete(arquivo);
+    const sessao = sessaoDaPonte.atual;
+    if (!sessao || !bytes) throw { Recusado: { motivo: "sessao-encerrada" } };
+    const pedido = mods.pedidoDeImagem({ enviar: { id, token, bytes: bytes.length } });
+    if (pedido.falha) throw pedido.falha;
+    const feito = await transferirAImagem(sessao, mods, pedido.ok, bytes, (alca) =>
+      mods.respostaAcabou(alca, { imagem: false, viva: geracaoViva(geracao) }),
+    );
+    if (feito.falha) throw feito.falha;
+    return null;
+  },
+  // A imagem que o MOD guardou no servidor, lida pelo volume depois de ele
+  // autorizar, e pronta pelo caminho comum (reduzida ao uso).
+  ler_imagem_mod: async ({ geracao, id, channel, payload, uso } = {}) => {
+    recusarSeMorta(geracao);
+    const sessao = sessaoDaPonte.atual;
+    if (!sessao) throw { Recusado: { motivo: "sessao-encerrada" } };
+    const mods = await osModsDaPagina();
+    const pedido = mods.pedidoDeImagem({ ler: { id, channel, payload: String(payload ?? "") } });
+    if (pedido.falha) throw pedido.falha;
+    const lida = await transferirAImagem(sessao, mods, pedido.ok, null, (alca) =>
+      mods.respostaAcabou(alca, { imagem: true, viva: geracaoViva(geracao), uso: String(uso ?? "") }),
+    );
+    if (lida.falha) throw lida.falha;
+    return lida.ok;
+  },
   // A mídia que o MOD recebeu do servidor, reduzida ao uso que a janela nomeia.
   midia_em_bytes: async ({ geracao, base64, uso } = {}) => {
     recusarSeMorta(geracao);
@@ -2145,26 +2307,10 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // navegador só abre o seletor na ativação de quem clicou, e o executor da
   // promessa roda na hora. Desistir é o `cancel`, e devolve `null`, como no
   // desktop, sem deixar a promessa pendurada.
-  escolher_arquivo: () =>
-    new Promise((responder) => {
-      const entrada = document.createElement("input");
-      entrada.type = "file";
-      entrada.hidden = true;
-      let respondido = false;
-      const fim = (valor) => {
-        if (respondido) return;
-        respondido = true;
-        entrada.remove();
-        responder(valor);
-      };
-      entrada.addEventListener("change", () => {
-        const arquivo = entrada.files?.[0];
-        fim(arquivo ? descreverAlca(guardarSobAlca(arquivo, arquivo.name)) : null);
-      });
-      entrada.addEventListener("cancel", () => fim(null));
-      document.body.append(entrada);
-      entrada.click();
-    }),
+  escolher_arquivo: async () => {
+    const arquivo = await abrirOSeletor();
+    return arquivo ? descreverAlca(guardarSobAlca(arquivo, arquivo.name)) : null;
+  },
   // As regras e as recusas do `guardar_colado` do desktop; o `Blob` fica na
   // memória, sob uma alça, e não num arquivo temporário.
   guardar_colado: ({ tipo, base64 } = {}) => {
