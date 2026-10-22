@@ -63,7 +63,13 @@ fn os_mesmos_pacotes_dao_a_mesma_lista_nas_duas_pontas() {
     let lugar_do_bom = seele_ffi::mods::hash_do_conjunto(&mut bom.clone());
     // Mexido depois de guardado: o conteúdo não é o que o lugar promete.
     let mexido = pacote("2.0.0", 6, b"SeeleUI.outro();");
-    let lugar_do_mexido = lugar_do_bom.replace(&lugar_do_bom[..2], "ff");
+    // Só o prefixo muda, e para um que o bom não tem.
+    let prefixo = if lugar_do_bom.starts_with("ff") {
+        "00"
+    } else {
+        "ff"
+    };
+    let lugar_do_mexido = format!("{prefixo}{}", &lugar_do_bom[2..]);
     // Uma API que este build não roda: recusado, e descrito pelo que diz ser.
     let velho = pacote("0.9.0", 2, b"antigo");
     let lugar_do_velho = seele_ffi::mods::hash_do_conjunto(&mut velho.clone());

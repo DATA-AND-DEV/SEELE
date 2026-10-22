@@ -75,6 +75,9 @@ if-addrs = "0.15"
 # dependência de teste não se une ao build normal, e um `compile_error!` no
 # `encontro.rs` recusa um build otimizado com ela.
 recusar-encontro-de-producao = []
+# A redução de imagem do `seele-sessao` (`seele_core::reducao`), para o
+# `seele-ffi` a reexportar à casca do desktop.
+reducao = ["seele-sessao/reducao"]
 
 [dev-dependencies]
 # O relógio virtual do tokio, e nada além dele.

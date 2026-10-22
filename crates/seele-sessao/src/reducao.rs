@@ -21,6 +21,10 @@
 //! O lado, os quadros e a duração são a proposta do rascunho (§4), e a medida
 //! que os fixa é a M3 (tarefa 11 do plano da F3). Até lá eles ficam aqui, num
 //! lugar só.
+//!
+//! **Mora no `seele-sessao`** desde a Tarefa 2.6 da F4, atrás da feature
+//! `reducao` (que traz o `image`): o navegador reduz a capa pelos mesmos
+//! números e pelo mesmo código, e o desktop a lê pelo `seele-ffi`.
 
 use std::io::Cursor;
 
@@ -31,21 +35,21 @@ use image::{AnimationDecoder, Frame, ImageFormat};
 
 /// O que uma imagem pode ser no máximo, para um uso.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Teto {
+pub struct Teto {
     /// A largura do maior lugar em que ela aparece, em pixels.
-    pub(crate) largura: u32,
+    pub largura: u32,
     /// A altura do maior lugar em que ela aparece, em pixels.
-    pub(crate) altura: u32,
+    pub altura: u32,
     /// Quantos quadros uma imagem animada mantém.
-    pub(crate) quadros: usize,
+    pub quadros: usize,
     /// Quanto tempo uma imagem animada dura, somados os quadros mantidos.
-    pub(crate) milissegundos: u32,
+    pub milissegundos: u32,
 }
 
 /// **A capa de uma pessoa** (`pessoa.capa`): o maior lugar em que ela aparece é
 /// o cartão da chamada, e 960 × 320 é a conta do PERFIS; 60 quadros e 10 s, a
 /// proposta do rascunho §4. A M3 mede.
-pub(crate) const TETO_DA_CAPA: Teto = Teto {
+pub const TETO_DA_CAPA: Teto = Teto {
     largura: 960,
     altura: 320,
     quadros: 60,
@@ -54,7 +58,7 @@ pub(crate) const TETO_DA_CAPA: Teto = Teto {
 
 /// O teto de um uso, pelo nome que a janela manda. `None` para um nome que
 /// este produto não conhece: nada é reduzido, e a imagem segue como veio.
-pub(crate) fn teto_do_uso(uso: &str) -> Option<Teto> {
+pub fn teto_do_uso(uso: &str) -> Option<Teto> {
     match uso {
         "capa" => Some(TETO_DA_CAPA),
         _ => None,
@@ -63,13 +67,13 @@ pub(crate) fn teto_do_uso(uso: &str) -> Option<Teto> {
 
 /// Uma imagem reduzida, e quanto ela pesa decodificada.
 #[derive(Debug)]
-pub(crate) struct Reduzida {
+pub struct Reduzida {
     /// Os bytes que atravessam a ponte. Os de entrada, intactos, quando a
     /// imagem já cabia no teto.
-    pub(crate) bytes: Vec<u8>,
+    pub bytes: Vec<u8>,
     /// Largura × altura × 4 × quadros: o que a janela vai decodificar. É o que
     /// o bolso da capa conta (rascunho §4), e não o tamanho do arquivo.
-    pub(crate) decodificados: u64,
+    pub decodificados: u64,
 }
 
 /// **Reduz `bytes` ao teto**: as dimensões, cabendo no retângulo do teto com a
@@ -82,7 +86,7 @@ pub(crate) struct Reduzida {
 ///
 /// `formato-desconhecido`, quando os bytes não são uma imagem que este produto
 /// decodifica; é o nome que a janela já conhece (rascunho §7.1).
-pub(crate) fn reduzir(bytes: &[u8], teto: &Teto) -> Result<Reduzida, String> {
+pub fn reduzir(bytes: &[u8], teto: &Teto) -> Result<Reduzida, String> {
     let formato = image::guess_format(bytes).map_err(|_| desconhecido())?;
     if let Some(quadros) = quadros_dentro_do_teto(bytes, formato, teto)? {
         return reduzir_animacao(quadros, teto);

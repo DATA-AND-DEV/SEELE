@@ -67,6 +67,12 @@
 //! | `mods_na_tela()` | 0 | a lista do `mods_instalados` do desktop |
 //! | `mod_codigo(pedido)` | 0 | `{"fonte", "capacidades"}` |
 //! | | 1 | `{"Recusado": {"motivo"}}` |
+//! | `mod_midia(pedido)` | 0 | o `MidiaDoMod` do desktop |
+//! | | 1 | `{"Recusado": {"motivo"}}` |
+//! | `mod_som(pedido)` | 0 | os bytes crus do som |
+//! | | 1 | `{"Recusado": {"motivo"}}` |
+//! | `mod_midia_do_servidor(texto, uso)` | 0 | o `MidiaDoMod` do desktop |
+//! | | 1 | `{"Recusado": {"motivo"}}` |
 //! | `catalogo_endereco()` | 0 | o endereço do catálogo |
 //! | `catalogo_ler(catalogo, assinatura)` | 0 | nada: conferido e lido |
 //! | | 1 | a `FalhaNoCatalogo` do desktop |
@@ -765,6 +771,78 @@ pub unsafe extern "C" fn mod_codigo(ptr: *const u8, len: usize) -> u32 {
     };
     match crate::mods::codigo(&mut o_pacote(), &texto("id"), &texto("hash")) {
         Ok(codigo) => dizer(codigo.to_string().into_bytes(), 0),
+        Err(motivo) => recusa_de_mod(&motivo),
+    }
+}
+
+/// Os campos de texto de um pedido em JSON (`{"id", "hash", "caminho"}`), vazios
+/// quando faltam.
+fn campos_do_pedido<const N: usize>(bytes: &[u8], nomes: [&str; N]) -> [String; N] {
+    let pedido: serde_json::Value = serde_json::from_slice(bytes).unwrap_or_default();
+    nomes.map(|nome| {
+        pedido
+            .get(nome)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    })
+}
+
+/// **O `midia_do_mod`** ([`crate::mods::midia`]): `{"id", "hash", "caminho"}`
+/// sobre o último pacote entregue. Devolve 0 com o `MidiaDoMod` do desktop
+/// (sem `uri` para o som), ou 1 com `{"Recusado": {"motivo"}}`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn mod_midia(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let [id, hash, caminho] =
+        campos_do_pedido(unsafe { entrada(ptr, len) }, ["id", "hash", "caminho"]);
+    match crate::mods::midia(&mut o_pacote(), &id, &hash, &caminho) {
+        Ok(midia) => dizer(midia.to_string().into_bytes(), 0),
+        Err(motivo) => recusa_de_mod(&motivo),
+    }
+}
+
+/// **O `som_do_mod`** ([`crate::mods::som`]): devolve 0 com os bytes crus do
+/// som, ou 1 com `{"Recusado": {"motivo"}}`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn mod_som(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let [id, hash, caminho] =
+        campos_do_pedido(unsafe { entrada(ptr, len) }, ["id", "hash", "caminho"]);
+    match crate::mods::som(&mut o_pacote(), &id, &hash, &caminho) {
+        Ok(bytes) => dizer(bytes, 0),
+        Err(motivo) => recusa_de_mod(&motivo),
+    }
+}
+
+/// **O `midia_em_bytes`** ([`crate::mods::midia_do_servidor`]): o texto como o
+/// servidor o deu (base64, ou um `data:`), e o uso (vazio para nenhum).
+/// Devolve 0 com o `MidiaDoMod` do desktop, ou 1 com `{"Recusado": {"motivo"}}`.
+///
+/// # Safety
+///
+/// Os dois pares `ptr`/`len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn mod_midia_do_servidor(
+    texto_ptr: *const u8,
+    texto_len: usize,
+    uso_ptr: *const u8,
+    uso_len: usize,
+) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let texto = texto_de(unsafe { entrada(texto_ptr, texto_len) });
+    // SAFETY: idem.
+    let uso = texto_de(unsafe { entrada(uso_ptr, uso_len) });
+    match crate::mods::midia_do_servidor(texto, (!uso.is_empty()).then_some(uso)) {
+        Ok(midia) => dizer(midia.to_string().into_bytes(), 0),
         Err(motivo) => recusa_de_mod(&motivo),
     }
 }

@@ -28,15 +28,26 @@ pub mod aceites;
 pub mod agenda;
 pub mod anexo_no_disco;
 pub use seele_sessao::assento;
+/// O base64 de ida e de volta, de onde o desktop e o navegador o leem.
+pub use seele_sessao::base64;
 /// A bateria interna mora no `seele-sessao` desde a Tarefa 2.6 da F4: o
 /// navegador volta da queda pela mesma conta (o tempo entra como parâmetro).
 pub use seele_sessao::battery;
 /// O catálogo de MODs sem a rede: a assinatura, a leitura, o plano e o
 /// conjunto, de onde o desktop e o navegador os leem (Tarefa 2.6 da F4).
 pub use seele_sessao::catalogo;
+/// A mídia que um MOD recebe do servidor, pronta, com a feature `reducao`.
+#[cfg(feature = "reducao")]
+pub use seele_sessao::midia_de_mod;
+/// A redução de uma imagem de MOD ao uso, com a feature `reducao`.
+#[cfg(feature = "reducao")]
+pub use seele_sessao::reducao;
 /// O retrato da sala: os tipos de vista do `Snapshot` e a projeção que os
 /// monta a partir do `Room`, para o desktop e o navegador (Tarefa 2.2 da F4).
 pub use seele_sessao::retrato;
+/// O piso do que um som de MOD ocupa decodificado, de onde o desktop e o
+/// navegador o leem (Tarefa 2.6 da F4).
+pub use seele_sessao::som;
 /// Os compassos da volta (a página do buraco, a rajada e o passo da
 /// repetição), de onde o desktop e o navegador os leem.
 pub use seele_sessao::volta;

@@ -16,7 +16,7 @@ seele-proto = { path = "../seele-proto" }
 seele-voz = { path = "../seele-voz" }
 # O `Room` e o retrato do desktop (Tarefa 2.2, fase 2): o navegador dobra as
 # mesmas mensagens e monta o retrato com a mesma projeção.
-seele-sessao = { path = "../seele-sessao" }
+seele-sessao = { path = "../seele-sessao", features = ["reducao"] }
 # A fronteira com a casca. A mesma versão do `seele-proto`, que já o usa para
 # o manifesto de MOD.
 serde_json = "1.0.151"

@@ -825,6 +825,57 @@ const invocar = (aba, comando, args) =>
       return { pronto: Boolean(vezes) && Number(vezes[1]) >= 1, textos: textos.map((texto) => texto.slice(0, 120)) };
     }, exigido.id, 15_000);
     confere("14", falou.pronto, `o painel do MOD não diz a resposta da metade de servidor: ${JSON.stringify(falou.textos)}`);
+    // **A mídia do pacote**: o painel declara o som do MOD, a casca o pede
+    // (`midia_do_mod`) e lê os bytes (`som_do_mod`) para decodificar. O botão
+    // vira PARAR pelo próprio MOD, com som ou sem: quem diz que o som
+    // carregou é a figura da mídia, `pronta` (ou `tocando`), e `falhou` sem os
+    // bytes (medido pela reversão).
+    const tocou = await f.aba.evaluate(async (id) => {
+      const botao = [...document.querySelectorAll(`[data-mod="${id}"] button`)].find((b) => b.textContent.trim() === "TOCAR");
+      if (!botao) return { semBotao: true };
+      botao.click();
+      const fim = Date.now() + 10_000;
+      for (;;) {
+        const texto = [...document.querySelectorAll(`[data-mod="${id}"]`)].map((no) => no.textContent).join(" ");
+        if (/PARAR/.test(texto) || /som: (recusada|falhou)/.test(texto) || Date.now() > fim) {
+          return {
+            parar: /PARAR/.test(texto),
+            aviso: (texto.match(/som: \w+/) ?? [null])[0],
+            midia: CHAMADAS_DA_PONTE.get("midia_do_mod") ?? 0,
+            som: CHAMADAS_DA_PONTE.get("som_do_mod") ?? 0,
+            aFazer: [...CONTAS_DA_PONTE].filter(([, contas]) => contas.aFazer > 0).map(([comando]) => comando),
+            estados: [...document.querySelectorAll(`[data-mod="${id}"] [data-estado]`)].map((no) => `${no.tagName}:${no.dataset.estado}`),
+          };
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }, exigido.id);
+    confere(
+      "14",
+      tocou.parar && tocou.midia >= 1 && tocou.som >= 1 && tocou.aFazer.length === 0 &&
+        tocou.estados.length === 1 && /^FIGURE:(pronta|tocando)$/.test(tocou.estados[0]),
+      `o som do pacote não tocou: ${JSON.stringify(tocou)}`,
+    );
+    // **A mídia do servidor**, reduzida ao uso: uma capa maior que o teto
+    // volta no teto (960 × 320), e um texto que não é base64 é recusado.
+    const capa = pngDeRuido(1200, 400).toString("base64");
+    const doServidor = await f.aba.evaluate(async ({ id, capa }) => {
+      const invoke = window.__TAURI__.core.invoke;
+      const reduzida = await invoke("midia_em_bytes", { geracao: geracaoDaSessao, id, base64: capa, uso: "capa" });
+      let torta;
+      try {
+        await invoke("midia_em_bytes", { geracao: geracaoDaSessao, id, base64: "isto não é base64", uso: null });
+      } catch (erro) {
+        torta = erro;
+      }
+      return { papel: reduzida.papel, decodificados: reduzida.decodificados, png: reduzida.uri.startsWith("data:image/png;base64,"), torta };
+    }, { id: exigido.id, capa });
+    confere(
+      "14",
+      doServidor.papel === "imagem" && doServidor.png && doServidor.decodificados === 960 * 320 * 4,
+      `a capa do servidor não voltou reduzida: ${JSON.stringify(doServidor)}`,
+    );
+    confere("14", doServidor.torta?.Recusado?.motivo === "nao-e-base64", `o texto que não é base64: ${JSON.stringify(doServidor.torta)}`);
     // O código que o executor recebeu é o do pacote, com as capacidades da
     // API 6, e a geração morta é recusada.
     const codigo = await f.aba.evaluate(async ({ id, hash }) => {
