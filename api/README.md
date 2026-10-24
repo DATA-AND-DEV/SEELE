@@ -75,9 +75,13 @@ precisa saber disso para o MOD rodar igual nas duas.
 - **O som decodificado tem teto.** O WebAudio guarda o som inteiro em
   `float32`, e por isso há um teto além do de bytes: 64 MiB de som de pé por
   região, por superfície, por contribuição e nos cartões de um MOD — pouco
-  menos de três minutos de som estéreo a 48 kHz, ou o dobro em mono. Acima
-  dele, o som chega ao MOD como `recusada`, com os números no `porque`, como a
-  mídia acima do teto de bytes.
+  menos de três minutos de som estéreo a 48 kHz, ou o dobro em mono. **E o MOD
+  inteiro tem um teto, somando todos esses lugares: 128 MiB de som
+  decodificado de pé** — pouco menos de seis minutos em estéreo, ou doze em
+  mono. Acima de qualquer um dos dois, o som chega ao MOD como `recusada`, com
+  os números no `porque`, como a mídia acima do teto de bytes, e o `seele.log`
+  registra a recusa com o id do MOD. O que um lugar solta — a página que
+  fecha, o som que sai da declaração — volta para a conta do MOD.
 
 ## Publicar a versão seguinte
 
