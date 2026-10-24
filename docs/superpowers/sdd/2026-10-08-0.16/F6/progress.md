@@ -220,7 +220,18 @@ O passo 5 da tarefa 13, no ramo `0.16/launcher-recusa`, a partir da P8 da F1
   (`30a90a1b`). Um roteiro próprio, porque o caso a mais passava do orçamento
   de 5 s de tempo virtual da carga no `outra-linha-pelo-launcher.js`.
 
-## Pendência para a 0.16.1: o ABRIR pelo `--entrar` que não lançou nada (23/10)
+## ~~Pendência para a 0.16.1~~: o ABRIR pelo `--entrar` que não lançou nada (23/10) — fechada
+
+**Fechada em 23/10: não havia defeito** (`2913f584`, a evidência da
+orquestradora). Foi a hipótese 1. Aberta em segundo plano, a janela da 0.16
+ficava desenhada torta, presa na animação de abertura. O clique da medida caiu
+no véu, fora da caixa, e fechou o painel. Com a janela ativada e o clique no
+botão de verdade, o ABRIR lançou a v0.15.2 guardada. A instrumentação fica: o
+`seele.log` passa a dizer se o `abrir_versao` abriu ou não e por quê, para a
+próxima vez que algo não abrir.
+
+O registro de antes do fechamento, como foi escrito:
+
 
 Na medida com tela no Mac, a 0.16 aberta com `--entrar` e um link `v=0.15.1`
 mostrou a pergunta, mas o ABRIR fechou o painel e nenhum processo nasceu, sem
