@@ -39,9 +39,14 @@ Feitos na mesma pasta, com a 0.16 aberta de novo.
 - **A sala pessoal** se registrou no ponto de encontro de produção pelo ENC/2 («a sala está registrada no ponto (ENC/2)»).
 - **A rede desta casa:** sem IPv6 próprio, e o roteador sem endereço na internet (192.168.0.2, CGNAT ou roteador duplo). A escada subiu no degrau 4, o furo pelo ponto de encontro.
 
-## Um defeito achado, fora do roteiro
+## O ABRIR pelo `--entrar`: não era defeito, era a medida
 
-A 0.16 aberta com `--entrar <link de um servidor 0.15>` mostra a mesma pergunta, mas o ABRIR **não lança** a v0.15.2: nenhum processo nasce, e nada vai ao `seele.log`. A mesma v0.15.2, lançada à mão com o ambiente do launcher, abre e entra («sessao=2»). Hoje esse caminho não acontece na prática: só um launcher que já escolheu a 0.16 a abre com `--entrar`. O defeito foi para a F6.
+A 0.16 aberta com `--entrar <link de um servidor 0.15>` mostrou a mesma pergunta, e o primeiro ABRIR não lançou nada. A causa foi o próprio clique da medida.
+
+- Aberta em segundo plano, a janela ficou desenhada torta, presa na animação de abertura.
+- O clique foi dado onde o botão aparecia na imagem, caiu fora da caixa, e o clique no véu fecha o painel. É a hipótese 1 da F6.
+- Com a janela ativada (`frontmost` pelo pid) e o clique no botão de verdade, o ABRIR lançou a v0.15.2 guardada (pid 66755), que foi tentar o endereço do link.
+- A instrumentação que a F6 fez por causa disso (`8b95083d`) fica: o `abrir_versao` diz no `seele.log` se abriu, e uma falha dele vai também à tela de entrada.
 
 ## Uma nota sobre as somas
 
