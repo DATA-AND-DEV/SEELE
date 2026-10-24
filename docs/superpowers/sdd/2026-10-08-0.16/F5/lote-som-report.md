@@ -95,14 +95,32 @@ scratchpad da sessão.
 
 ## O que baixou
 
-Uma linha no registro do curl (`scratchpad/som/curl-registro.tsv`), no build
-frio do `shiguredo_opus` sob a HOME falsa:
+Vinte linhas no registro do curl (`scratchpad/som/curl-registro.tsv`). **Da
+rede, só duas, as duas o mesmo arquivo fixado por hash:** o
+`opus-1.6.1.tar.gz` de `https://oss-mirrors.shiguredo.jp`, no build frio do
+`shiguredo_opus` sob a HOME falsa (22:38, e 22:41 para o segundo diretório de
+build do mesmo crate). O CMake veio do `~/.cache/shiguredo_cmake` clonado. As
+outras dezoito são os testes do instalador no `cargo test -p xtask`: `file://`
+de pastas temporárias e `http://127.0.0.1:9`, que não sai da máquina.
 
-```
-2026-10-23T22:38:09  -fsSL -o …/target/debug/build/shiguredo_opus-ded9d4b1bfadc216/out/build/opus-1.6.1.tar.gz https://oss-mirrors.shiguredo.jp/opus-1.6.1.tar.gz
-```
+## Na ponta, depois do merge da `versao/0.16` em `990582cf`
 
-O CMake veio do `~/.cache/shiguredo_cmake` clonado. Nada mais.
+O merge (`2a402e6a`) teve um conflito, na spec: a D-dono-1 com os 128 MiB e a
+D-dono-2 que chegou, as duas mantidas. Com a HOME falsa e o curl que registra:
+
+- `cargo --offline xtask check-api`, `check-runtime` (14 bancadas, a
+  `regiao-do-mod.cjs` entre elas: 60 provas), a conformidade
+  `a_api_dos_mods_nao_diverge` (3) e `cargo test -p xtask` (244): verdes;
+- `cargo --offline test -p seele-app --test frontend`: 307 verdes (e, antes do
+  merge, o `seele-app` inteiro: 805);
+- a bancada do celular inteira: passa, com o G3 IGUAL pixel a pixel no
+  Chromium e no WebKit;
+- as bancadas de MOD que tocam som: `regiao-do-mod.cjs`,
+  `contribuicoes-e-camadas.cjs`, `palco-da-chamada.cjs` e
+  `diagnostico-de-mods.cjs` (esta com o Playwright da MESA local), verdes. A
+  `diagnostico-de-mods.cjs` reprovou uma vez em `quemPintaCadaLugar` («a aba
+  não se redesenhou») rodando junto com a bancada do celular, e passou duas
+  vezes seguidas com a máquina parada.
 
 ## Ressalvas
 
