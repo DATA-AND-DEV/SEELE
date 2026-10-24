@@ -203,7 +203,22 @@ async function entrarPelaLinha(decisao, link, aoVoltar) {
   } catch (falha) {
     estado.textContent = "";
     sim.disabled = false;
-    recusarServidor(fraseDaVersao(falha));
+    const frase = fraseDaVersao(falha);
+    // **Uma falha daqui não volta calada** (medida com tela no Mac, 23/10):
+    // ela vai ao `seele.log`, com o motivo e sem o link, que pode levar um
+    // convite de uso único; e a frase fica à vista mesmo quando o painel
+    // fechou no meio do ABRIR, na linha vermelha da tela de entrada.
+    registrarNoAnfitriao(
+      "versoes",
+      `não abri o SEELE do Servidor ${dados.servidor}: ${JSON.stringify(falha)}`,
+      "aviso",
+    );
+    recusarServidor(frase);
+    if ($("servidores").hidden) {
+      const erro = $("boot-erro");
+      erro.hidden = false;
+      erro.textContent = frase;
+    }
   }
 }
 

@@ -219,3 +219,30 @@ O passo 5 da tarefa 13, no ramo `0.16/launcher-recusa`, a partir da P8 da F1
   isolado), com o roteiro `abertura-com-entrar.js` e o guarda da credencial
   (`30a90a1b`). Um roteiro próprio, porque o caso a mais passava do orçamento
   de 5 s de tempo virtual da carga no `outra-linha-pelo-launcher.js`.
+
+## Pendência para a 0.16.1: o ABRIR pelo `--entrar` que não lançou nada (23/10)
+
+Na medida com tela no Mac, a 0.16 aberta com `--entrar` e um link `v=0.15.1`
+mostrou a pergunta, mas o ABRIR fechou o painel e nenhum processo nasceu, sem
+uma linha no `seele.log`. Pelo CONECTAR, o mesmo link funcionou.
+
+**A causa não foi achada.**
+- O dublê, com a abertura armada antes do `DOMContentLoaded` (uma cópia da
+  casca com as respostas no fim do `index.html`, para pegar o tempo de verdade
+  do arranque), faz tudo certo: a pergunta fica, e o ABRIR chama o
+  `abrir_versao` com a linha e o link.
+- O `abrir_versao` do Rust recebe o mesmo nos dois caminhos.
+- Reproduzir no app de verdade pedia o controle de tela, que foi recusado.
+
+**O que ficou em pé** (`572ace7d`, `9c9b59fd`, `bc6de30a`, no ramo
+`0.16/abrir-versao-calado`): o `abrir_versao` registra no `seele.log` o
+resultado (abri, ou não abri e a variante, sem o link). A casca registra a
+falha e a mostra na tela de entrada quando o painel fechou. Na próxima medida,
+o `seele.log` diz se o ABRIR chegou ao Rust e o que voltou.
+
+**As hipóteses para a medida:**
+1. o painel fecha por um clique no véu, fora da caixa;
+2. o `abrir_versao` não é chamado;
+3. ele volta com uma falha que, até aqui, morria no painel fechado.
+
+O registro novo separa as três.

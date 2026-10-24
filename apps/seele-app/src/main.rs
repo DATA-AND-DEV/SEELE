@@ -3452,6 +3452,31 @@ async fn abrir_versao(
     nome_publico: Option<String>,
     link: Option<String>,
 ) -> Result<(), versoes::FalhaAoAbrirVersao> {
+    // **O resultado vai ao `seele.log`, nos dois sentidos** (medida com tela no
+    // Mac, 23/10): um ABRIR que não lançou nada não deixava rastro nenhum. Sem
+    // o link, que pode levar um convite de uso único: só se havia um.
+    let com_link = link.as_deref().is_some_and(|l| !l.trim().is_empty());
+    let pedido = format!("{versao:?} / {linha:?}");
+    let resultado =
+        abrir_versao_por_dentro(&app, versao, linha, hospedar, nome_publico, link).await;
+    match &resultado {
+        Ok(()) => tracing::info!(%pedido, hospedar, com_link, "abri outra versão pelo launcher"),
+        Err(falha) => {
+            tracing::warn!(%pedido, hospedar, com_link, ?falha, "não abri outra versão pelo launcher");
+        }
+    }
+    resultado
+}
+
+/// O corpo do `abrir_versao`, sem o registro.
+async fn abrir_versao_por_dentro(
+    app: &AppHandle,
+    versao: Option<String>,
+    linha: Option<String>,
+    hospedar: bool,
+    nome_publico: Option<String>,
+    link: Option<String>,
+) -> Result<(), versoes::FalhaAoAbrirVersao> {
     // O nome público é conferido **aqui também**, e não só no `hospedar`: ele
     // vai virar argumento de linha de comando de outro processo, e um nome com
     // espaço ou com barra chegaria lá partido ou apontando para outro lugar.
@@ -3495,8 +3520,8 @@ async fn abrir_versao(
         link,
     };
     versoes::abrir(
-        &config_dir(&app),
-        versoes::atualizador_do_app(&app).as_ref(),
+        &config_dir(app),
+        versoes::atualizador_do_app(app).as_ref(),
         &pedido,
         ato,
         &intencao,
