@@ -2128,6 +2128,174 @@ fn a_rodada_longa_nao_se_perde_no_sono_do_mac() {
     );
 }
 
+/// Um arquivo novo na bancada, com commit, e a cabeça nova, que o Windows de
+/// mentira precisa conhecer.
+fn com_arquivo(bancada: &Bancada, caminho: &str, texto: &str) -> String {
+    escrever(&bancada.repo.join(caminho), texto, false);
+    bancada.git(&["add", caminho]);
+    bancada.git(&["commit", "-q", "-m", &format!("muda {caminho}")]);
+    bancada.git(&["rev-parse", "HEAD"])
+}
+
+#[test]
+fn o_validado_pula_a_bateria_e_o_corpo_diz_onde_ela_passou() {
+    // A terceira rodada da 0.16 (24/10) perdeu a bateria inteira no fim por um
+    // defeito do script, com o código já provado nas duas máquinas. O
+    // `--validado` não roda de novo o que já passou — e, ao contrário do
+    // `--sem-bateria`, a página diz que a versão foi testada, **e em que
+    // commit**, para que a afirmação seja conferível.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let validado = bancada.commit.clone();
+    let cabeca = com_arquivo(&bancada, "docs/leia.md", "uma nota\n");
+    let saida = bancada.rodar(
+        &["1.2.3", "--validado", &validado],
+        &[("FALSO_SSH_HEAD", &cabeca)],
+    );
+
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada validada tinha que passar:\n{}",
+        saida.texto
+    );
+    for etapa in ["cargo fmt", "cargo clippy", "cargo test"] {
+        assert!(
+            !saida.diario.contains(etapa),
+            "o --validado rodou a bateria mesmo assim («{etapa}»):\n{}",
+            saida.diario
+        );
+    }
+    assert!(
+        saida.corpos.contains(&format!("sobre o commit `{validado}`"))
+            && saida.corpos.contains("`docs/leia.md`"),
+        "o corpo do release não diz em que commit a bateria passou, nem o que mudou \
+         desde então:\n{}",
+        saida.corpos
+    );
+    assert!(
+        !saida.corpos.contains("saiu com --sem-bateria"),
+        "uma versão validada saiu dizendo que não foi testada:\n{}",
+        saida.corpos
+    );
+}
+
+#[test]
+fn o_validado_recusa_quando_o_produto_mudou_depois_da_bateria() {
+    // Uma linha do produto depois da bateria, e a validação não vale mais. A
+    // recusa vem antes de qualquer pergunta com efeito: o diário sem `ssh` é a
+    // prova de que o Windows não foi levado a outro commit.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let validado = bancada.commit.clone();
+    let cabeca = com_arquivo(&bancada, "apps/seele-app/src/novo.rs", "fn novo() {}\n");
+    let saida = bancada.rodar(
+        &["1.2.3", "--validado", &validado],
+        &[("FALSO_SSH_HEAD", &cabeca)],
+    );
+
+    assert_ne!(
+        saida.estado, 0,
+        "o produto mudou depois da bateria e a validação passou:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("apps/seele-app/src/novo.rs"),
+        "a recusa não diz qual arquivo a bateria não cobre:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.diario.contains("ssh") && saida.nada_foi_empacotado(),
+        "a recusa veio depois de uma pergunta com efeito:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn o_validado_roda_de_novo_os_testes_do_xtask_que_mudaram() {
+    // O `publicar.sh` e os testes do `xtask` não entram nos pacotes, mas teste
+    // que não rodou não é teste: se mudaram, rodam aqui — e só eles.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let validado = bancada.commit.clone();
+    let cabeca = com_arquivo(&bancada, "xtask/tests/novo.rs", "#[test]\nfn novo() {}\n");
+    let saida = bancada.rodar(
+        &["1.2.3", "--validado", &validado],
+        &[("FALSO_SSH_HEAD", &cabeca)],
+    );
+
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada validada tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.diario.contains("cargo test -p xtask"),
+        "os testes do xtask mudaram depois da bateria e não rodaram de novo:\n{}",
+        saida.diario
+    );
+    assert!(
+        !saida.diario.contains("cargo test --workspace"),
+        "o --validado rodou a bateria inteira:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida.corpos.contains("rodaram de novo aqui"),
+        "o corpo não diz que os testes do xtask rodaram de novo:\n{}",
+        saida.corpos
+    );
+}
+
+#[test]
+fn o_validado_recusa_um_commit_fora_da_historia() {
+    // A bateria de um commit que não está na história do que sai não diz nada
+    // sobre ele.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    com_arquivo(&bancada, "docs/solto.md", "um ramo que não ficou\n");
+    let solto = bancada.git(&["rev-parse", "HEAD"]);
+    bancada.git(&["reset", "-q", "--hard", "HEAD~1"]);
+    let saida = bancada.rodar(&["1.2.3", "--conferir", "--validado", &solto], &[]);
+
+    assert_ne!(
+        saida.estado, 0,
+        "um commit fora da história validou a publicação:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("não está na história"),
+        "a recusa não diz por quê:\n{}",
+        saida.texto
+    );
+}
+
+#[test]
+fn o_validado_e_o_sem_bateria_nao_andam_juntos() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let validado = bancada.commit.clone();
+    let saida = bancada.rodar(
+        &["1.2.3", "--conferir", "--sem-bateria", "--validado", &validado],
+        &[],
+    );
+
+    assert_ne!(
+        saida.estado, 0,
+        "o --validado e o --sem-bateria passaram juntos, e o corpo diria uma das duas \
+         coisas sem razão:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("dizem o oposto"),
+        "a recusa não diz por quê:\n{}",
+        saida.texto
+    );
+}
+
 #[test]
 fn o_release_sai_rascunho_e_confessa_a_falta_de_procedencia() {
     // As duas coisas que este release **não** é, ditas onde quem baixa vai ler.

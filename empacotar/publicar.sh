@@ -171,6 +171,12 @@ REPO_WINDOWS="${SEELE_WINDOWS_REPO:-C:\\SEELE}"
 TOKEN="${SEELE_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
 PULAR=""
 SEM_BATERIA=nao
+# O commit em que a bateria já passou, pelo `--validado`; e, conferido, o que
+# mudou dele até o que sai (ver `conferir_validacao`).
+VALIDADO=""
+VALIDADO_COMMIT=""
+VALIDADO_MUDOU=""
+VALIDADO_TESTES=nao
 SEM_PONTO=nao
 # O ponto de encontro que o portão do ENC/2 confere. O padrão é o de produção,
 # o mesmo `PONTO_PADRAO` que o app usa; a variável existe para conferir uma VPS
@@ -238,6 +244,9 @@ uso() {
 "  --repo <dono/repositório>    onde publicar; repita separando por espaço" \
 "  --pular <lista>              macos,windows,linux — separados por vírgula" \
 "  --sem-bateria                publica sem rodar os testes; para a emergência" \
+"  --validado <commit>          a bateria já passou nesse commit (Mac e Windows)," \
+"                               e não roda de novo; recusa se dele até aqui mudou" \
+"                               o que entra nos pacotes; o corpo do release diz" \
 "  --sem-ponto                  publica sem conferir que o ponto de encontro em" \
 "                               produção fala o ENC/2; o corpo do release diz" \
 "  --parcial                    sobe o rascunho mesmo faltando sistema" \
@@ -731,19 +740,33 @@ $ndm_escopo
 # roda lá — e lá ela roda os testes, e não o resto.
 #
 #   ./empacotar/publicar.sh --linha-da-bateria "macos windows linux" [--sem-bateria]
+#
+# Com o `--validado`, mais três: o commit em que ela passou, o que mudou dele até
+# o que sai, e `sim` quando os testes do `xtask` rodaram de novo aqui. A página
+# diz o commit, e não só «foi testada», para que a afirmação seja conferível por
+# quem lê.
 linha_da_bateria() {
     if [ "$1" = sim ]; then
         printf '%s\n' "**Esta versão saiu com --sem-bateria: não foi testada antes de publicar.**"
         return 0
     fi
+    lb_onde="aqui (fmt, clippy, testes, cargo deny, roteiros da casca)"
     case " $2 " in
-        *" windows "*)
-            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros da casca) e no Windows (testes)."
-            ;;
-        *)
-            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros da casca)."
-            ;;
+        *" windows "*) lb_onde="$lb_onde e no Windows (testes)" ;;
     esac
+    if [ -n "${3:-}" ]; then
+        lb_xtask=""
+        if [ "${5:-nao}" = sim ]; then
+            lb_xtask=" Os testes do \`xtask\`, que estão entre o que mudou, rodaram de novo aqui."
+        fi
+        if [ -z "${4:-}" ]; then
+            printf '%s\n' "Bateria: rodou $lb_onde sobre este mesmo commit (\`$3\`), numa rodada anterior desta publicação."
+            return 0
+        fi
+        printf '%s\n' "Bateria: rodou $lb_onde sobre o commit \`$3\`, numa rodada anterior desta publicação. Dele até o commit publicado só mudou o que não entra nos pacotes: $4.$lb_xtask"
+        return 0
+    fi
+    printf '%s\n' "Bateria: rodou $lb_onde."
 }
 
 # A linha do corpo do release que diz se o ponto de encontro foi conferido, e
@@ -887,6 +910,13 @@ while [ "$#" -gt 0 ]; do
             ;;
         --parcial) PARCIAL=sim; shift ;;
         --sem-bateria) SEM_BATERIA=sim; shift ;;
+        --validado)
+            if [ "$#" -lt 2 ]; then
+                morrer "--validado quer o commit em que a bateria passou, como f9c03fdf"
+            fi
+            VALIDADO="$2"
+            shift 2
+            ;;
         --sem-ponto) SEM_PONTO=sim; shift ;;
         --sem-assinatura) SEM_ASSINATURA=sim; shift ;;
         --conferir) SO_CONFERIR=sim; shift ;;
@@ -1337,6 +1367,16 @@ bateria() {
         aviso "bateria pulada por --sem-bateria: este pacote não foi testado."
         return 0
     fi
+    if [ -n "$VALIDADO_COMMIT" ]; then
+        if [ "$VALIDADO_TESTES" = sim ]; then
+            passo "bateria: os testes do xtask, que mudaram depois de $VALIDADO_COMMIT"
+            etapa_da_bateria "os testes do xtask reprovaram." \
+                "Rode «cargo test -p xtask» e leia." \
+                cargo test -p xtask
+        fi
+        passo "bateria: validada em $VALIDADO_COMMIT, e não roda de novo"
+        return 0
+    fi
 
     passo "bateria, aqui"
 
@@ -1607,6 +1647,85 @@ conferir_arvore() {
         morrer "não consegui ler o commit de HEAD."
     fi
     passo "o que o empacotamento escreve está limpo, em $COMMIT"
+}
+
+# **`--validado`: a bateria já passou neste código, numa rodada anterior.**
+#
+# Ela leva de uma a duas horas, e a terceira rodada da 0.16 (24/10) a perdeu no
+# fim por um defeito do próprio script (ver `ssh_windows`), com o código já
+# provado nas duas máquinas. Rodar tudo de novo para provar o que já foi
+# provado é o caminho que empurra quem publica para o `--sem-bateria` — que diz,
+# com razão, que a versão não foi testada.
+#
+# O que separa isto do `--sem-bateria` é que **a afirmação é conferida**, e não
+# só declarada: o commit validado tem de estar na história do que sai, e de um
+# ao outro só pode ter mudado o que não entra nos pacotes. Uma linha do produto
+# depois da bateria, e a validação não vale mais. O que o script não tem como
+# conferir é a bateria ter passado lá: essa é a palavra de quem publica, e o
+# corpo do release diz o commit, para que ela possa ser verificada.
+#
+# O `publicar.sh` e os testes do `xtask` não entram nos pacotes, mas os testes
+# são testes: se algum dos dois mudou, o `cargo test -p xtask` roda aqui, porque
+# teste que não rodou não é teste.
+fora_dos_pacotes() {
+    case "$1" in
+        docs/* | empacotar/notas/* | empacotar/publicar.sh | xtask/tests/*) return 0 ;;
+        */*) return 1 ;;
+        *.md) return 0 ;;
+    esac
+    return 1
+}
+
+conferir_validacao() {
+    if [ -z "$VALIDADO" ]; then
+        return 0
+    fi
+    if [ "$SEM_BATERIA" = sim ]; then
+        morrer "--validado e --sem-bateria dizem o oposto sobre a mesma bateria." \
+            "Um diz que ela passou; o outro, que ela não rodou. Escolha um."
+    fi
+    VALIDADO_COMMIT=$(git -C "$RAIZ" rev-parse --verify -q "${VALIDADO}^{commit}" 2>/dev/null)
+    if [ -z "$VALIDADO_COMMIT" ]; then
+        morrer "não achei o commit «${VALIDADO}» do --validado neste repositório."
+    fi
+    if ! git -C "$RAIZ" merge-base --is-ancestor "$VALIDADO_COMMIT" "$COMMIT" 2>/dev/null; then
+        morrer "o commit validado ($VALIDADO_COMMIT) não está na história de $COMMIT." \
+            "A bateria que passou lá não diz nada sobre este código." \
+            "Rode a bateria: o mesmo comando, sem o --validado."
+    fi
+    if ! cv_mudou=$(git -C "$RAIZ" diff --name-only "$VALIDADO_COMMIT" "$COMMIT" 2>/dev/null); then
+        morrer "não consegui comparar $VALIDADO_COMMIT com $COMMIT (o git diff falhou)." \
+            "Sem a comparação, «validado» seria só a palavra de quem publica."
+    fi
+    cv_fora=""
+    cv_lista=""
+    while IFS= read -r cv_um; do
+        [ -n "$cv_um" ] || continue
+        if ! fora_dos_pacotes "$cv_um"; then
+            cv_fora="$cv_fora  $cv_um
+"
+        fi
+        case "$cv_um" in
+            empacotar/publicar.sh | xtask/tests/*) VALIDADO_TESTES=sim ;;
+        esac
+        cv_lista="${cv_lista:+$cv_lista, }\`$cv_um\`"
+    done <<EOF
+$cv_mudou
+EOF
+    if [ -n "$cv_fora" ]; then
+        morrer "de $VALIDADO_COMMIT até $COMMIT mudou o que entra nos pacotes ou o que a" \
+            "bateria prova:" \
+            "${cv_fora%?}" \
+            "" \
+            "A bateria daquele commit não cobre isto. Rode-a: o mesmo comando, sem o" \
+            "--validado."
+    fi
+    VALIDADO_MUDOU="$cv_lista"
+    if [ -z "$cv_lista" ]; then
+        passo "validado: a bateria passou em $VALIDADO_COMMIT, que é este mesmo commit"
+    else
+        passo "validado: a bateria passou em $VALIDADO_COMMIT; dele até aqui só mudou o que não entra nos pacotes"
+    fi
 }
 
 conferir_config_tauri() {
@@ -2227,6 +2346,7 @@ conferir_versao
 conferir_ferramentas
 conferir_condicoes_das_notas
 conferir_arvore
+conferir_validacao
 conferir_config_tauri
 conferir_ponto_de_encontro
 limpar_entrega
@@ -2547,7 +2667,7 @@ fi
 "máquinas de quem publica — macOS e Linux num Mac, Windows numa máquina Windows" \
 "alcançada por SSH — a partir do commit \`$COMMIT\`." \
 "" \
-"$(linha_da_bateria "$SEM_BATERIA" "$PEDIDOS")" \
+"$(linha_da_bateria "$SEM_BATERIA" "$PEDIDOS" "$VALIDADO_COMMIT" "$VALIDADO_MUDOU" "$VALIDADO_TESTES")" \
 "" \
 "$(linha_do_ponto "$SEM_PONTO" "$LINHA_LEGADA")" \
 "" \
