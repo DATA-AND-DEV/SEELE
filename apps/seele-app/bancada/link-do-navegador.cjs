@@ -28,7 +28,14 @@ const { servir, respostas } = require('./telas.cjs');
 const { chromium } = require('./playwright.cjs');
 
 const CONVITE = 'seele://203.0.113.7:8383?fp=' + 'ab'.repeat(32) + '&v=1.0';
-const LINK = 'https://web.seele.app.br/#203.0.113.7:8383?fp=' + 'ab'.repeat(32) + '&v=1.0&wh=' + 'cd'.repeat(32) + '&ate=1794700800';
+// A origem vem do produto (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`, a D-web-2),
+// lida do `uri.rs` como o `xtask/web/links.mjs` faz: escrita aqui, ela seria a
+// segunda cópia que o guarda `a_origem_do_web_app_e_escrita_num_lugar_so` recusa.
+const ORIGEM = /pub const ORIGEM_DO_NAVEGADOR: &str = "([^"]+)";/.exec(
+  require('node:fs').readFileSync(require('node:path').join(__dirname, '../../../crates/seele-proto/src/uri.rs'), 'utf8'),
+)?.[1];
+assert.ok(ORIGEM, 'a ORIGEM_DO_NAVEGADOR não foi achada no uri.rs: a leitura desta bancada quebrou');
+const LINK = 'https://' + ORIGEM + '/#203.0.113.7:8383?fp=' + 'ab'.repeat(32) + '&v=1.0&wh=' + 'cd'.repeat(32) + '&ate=1794700800';
 
 (async () => {
   const server = servir();
