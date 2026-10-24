@@ -349,6 +349,26 @@ em_base64() {
 sys.stdout.write(base64.b64encode(sys.stdin.buffer.read()).decode())'
 }
 
+# O `ssh` até o Windows, com as opções de toda conversa com ele, num lugar só.
+#
+# **O sinal de vida é o que separa uma conexão caída de uma espera eterna.** A
+# bateria do Windows passa meia hora calada — o veredito só sai no fim —, e na
+# terceira rodada da 0.16 (24/10) o Mac dormiu na bateria no meio dela. O
+# Windows terminou, não conseguiu entregar a resposta a um Mac dormindo e
+# encerrou a sessão; o Mac acordou com a conexão aberta do lado dele, sem nada
+# que perguntasse ao outro lado se ela ainda existia, e esperou duas horas por
+# um veredito que já tinha se perdido. Com `ServerAliveInterval` ele pergunta a
+# cada 30 s; seis perguntas sem resposta, três minutos, e o `ssh` sai com erro —
+# que chega a quem publica como «não respondeu com um veredito», com o motivo
+# junto.
+#
+# As três conversas passavam as opções cada uma por si, e a do build já tinha
+# ficado sem o `ConnectTimeout`. Num lugar só, nenhuma esquece.
+ssh_windows() {
+    ssh -o BatchMode=yes -o ConnectTimeout="${SEELE_SSH_TIMEOUT:-15}" \
+        -o ServerAliveInterval=30 -o ServerAliveCountMax=6 "$WINDOWS" "$@"
+}
+
 # Roda um trecho de PowerShell no Windows e devolve a saída como texto, sem
 # `\r`. A saída de erro entra junto de propósito: aqui ela é mensagem para uma
 # pessoa ler, e não dado a processar.
@@ -357,7 +377,7 @@ no_windows() {
     if [ -z "$nw_codificado" ]; then
         return 1
     fi
-    ssh -o BatchMode=yes -o ConnectTimeout="${SEELE_SSH_TIMEOUT:-15}" "$WINDOWS" \
+    ssh_windows \
         powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass \
         -EncodedCommand "$nw_codificado" </dev/null 2>&1 | LC_ALL=C tr -d '\r'
 }
@@ -371,7 +391,7 @@ no_windows_dado() {
     if [ -z "$nwd_codificado" ]; then
         return 1
     fi
-    ssh -o BatchMode=yes -o ConnectTimeout="${SEELE_SSH_TIMEOUT:-15}" "$WINDOWS" \
+    ssh_windows \
         powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass \
         -EncodedCommand "$nwd_codificado" </dev/null
 }
@@ -2235,6 +2255,18 @@ fi
 # compila o workspace inteiro e o `--conferir` existe para responder em segundos;
 # antes porque descobrir que ela reprovou custa minutos aqui e uma hora e meia
 # depois do Linux.
+#
+# **E o Mac não dorme daqui em diante.** Na terceira rodada da 0.16 (24/10), na
+# bateria, ele dormiu por inatividade quatro vezes em duas horas — o
+# `pmset -g log` mostra cada uma —, e a que caiu no fim da bateria do Windows
+# levou o veredito junto (ver `ssh_windows`). O `caffeinate -i` segura o sono por
+# inatividade, na bateria também, e o `-w` o amarra a este processo: quando o
+# script sai, por onde sair, ele sai junto, sem faxina. Fechar a tampa na
+# bateria ainda faz dormir, e isso nenhuma asserção impede.
+if command -v caffeinate >/dev/null 2>&1; then
+    caffeinate -i -w "$$" >/dev/null 2>&1 &
+    passo "o Mac fica acordado até o fim (fechar a tampa na bateria ainda o faz dormir)"
+fi
 bateria
 
 # =========================================================================
@@ -2292,7 +2324,7 @@ exit 0"
         aviso "não consegui codificar o comando para o Windows."
         return 1
     fi
-    printf '%s\n' "$ew_envelope" | ssh -o BatchMode=yes "$WINDOWS" \
+    printf '%s\n' "$ew_envelope" | ssh_windows \
         powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass \
         -EncodedCommand "$ew_codificado" || return 1
 

@@ -353,7 +353,10 @@ fn nenhum_segredo_atravessa_por_argumento() {
     let corpo = std::fs::read_to_string(publicar()).expect("legível");
 
     for (numero, linha) in sem_comentario(&corpo).lines().enumerate() {
-        let invoca_ssh = linha.contains("ssh ") || linha.contains("scp ");
+        // `ssh_windows` é o `ssh` com as opções de sempre; a linha que o chama
+        // não tem «ssh » e escaparia sem o nome dele aqui.
+        let invoca_ssh =
+            linha.contains("ssh ") || linha.contains("ssh_windows") || linha.contains("scp ");
         assert!(
             !(invoca_ssh && linha.contains("TAURI_SIGNING_PRIVATE_KEY")),
             "empacotar/publicar.sh:{} manda a chave do projeto na linha de comando do \
@@ -869,6 +872,10 @@ exit 0
             &base.join("ferramentas/ssh"),
             r#"#!/bin/sh
 printf 'ssh\n' >> "$SEELE_TESTE_DIARIO"
+case " $* " in
+    *' ServerAliveInterval='*) ;;
+    *) printf 'ssh sem sinal de vida\n' >> "$SEELE_TESTE_DIARIO" ;;
+esac
 if [ "${FALSO_SSH:-ok}" = recusa ]; then
     echo 'ssh: connect to host port 22: Operation timed out' >&2
     exit 255
@@ -922,6 +929,17 @@ printf 'cargo=%s\r\n' "${FALSO_SSH_CARGO:-presente}"
 printf 'head=%s\r\n' "${FALSO_SSH_HEAD:-nenhum}"
 printf 'sujo=%s\r\n' "${FALSO_SSH_SUJO:-nao}"
 printf 'restos=%s\r\n' "${FALSO_SSH_RESTOS:-0}"
+"#,
+            true,
+        );
+        // O dublê do `caffeinate` anota o pedido e sai. Ele existe em todo
+        // sistema, e não só no Mac, para que a pergunta «o script pede para a
+        // máquina não dormir?» tenha a mesma resposta no Windows e no Linux — e
+        // para que nenhum teste segure o sono do Mac de verdade.
+        escrever(
+            &base.join("ferramentas/caffeinate"),
+            r#"#!/bin/sh
+printf 'caffeinate %s\n' "$*" >> "$SEELE_TESTE_DIARIO"
 "#,
             true,
         );
@@ -2067,6 +2085,46 @@ fn os_tres_correm_do_mais_barato_para_o_mais_caro() {
         saida.texto.contains("ainda não está publicado"),
         "o fim tem que dizer que ninguém enxerga isto ainda:\n{}",
         saida.texto
+    );
+}
+
+#[test]
+fn a_rodada_longa_nao_se_perde_no_sono_do_mac() {
+    // A terceira rodada da 0.16 (24/10) esperou duas horas por um veredito que
+    // já tinha se perdido: o Mac, na bateria, dormiu no meio da bateria do
+    // Windows; o Windows terminou, não conseguiu entregar a resposta e encerrou
+    // a sessão; e o `ssh` daqui, sem sinal de vida, nunca soube que a conexão
+    // tinha morrido. São duas defesas, e este teste segura as duas: o Mac não
+    // dorme enquanto o script trabalha, e toda conversa com o Windows pergunta
+    // de tempos em tempos se o outro lado ainda está lá.
+    //
+    // Uma rodada inteira, para passar pelas três conversas — a sonda, o build e
+    // a volta do zip —, cada uma com o seu caminho até o `ssh`.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.diario.contains("empacotei windows") && saida.diario.contains("ssh"),
+        "a rodada não passou pelo Windows, e o teste não prova nada:\n{}",
+        saida.diario
+    );
+    assert!(
+        !saida.diario.contains("ssh sem sinal de vida"),
+        "uma conversa com o Windows saiu sem ServerAliveInterval; com o Mac \
+         dormindo no meio dela, ela espera para sempre:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida.diario.contains("caffeinate -i -w "),
+        "o script não pediu para o Mac ficar acordado durante a rodada:\n{}",
+        saida.diario
     );
 }
 
