@@ -7613,6 +7613,19 @@ som a sessão inteira (pendência 52).
      decodificado um MOD segura somando os bolsos, que muda a frase pública
      (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «O que fica com o
      dono»). Um resto do K5 está na pendência 58.
+   - **7c, o teto por MOD: fechado em 2026-10-23** (lote SOM da F5, pela
+     D-dono-1). `LIMITES_DO_MOD.bytesDeSomDecodificado`, 128 MiB, em
+     `mods-regiao.js` e só ali: a janela soma, por instância, o som
+     decodificado de pé em todos os lugares do MOD, e o que passa é recusado
+     como todo teto do som, com a chave `bytes de som do MOD:…`, os números ao
+     MOD e a linha no `seele.log` com o `mod_id`. Medido: a MESA 4.0.0, a
+     única oficial com som, segura 17 280 000 bytes com as três trilhas de pé;
+     o teto é 7,7 vezes isso. A frase mudou no `api/README.md` e nas notas.
+
+   ```sh
+   grep -n "^const LIMITES_DO_MOD" apps/seele-app/ui/mods-regiao.js
+   grep -n "oSomDecodificadoTemTetoPorModSomandoOsBolsos," apps/seele-app/bancada/regiao-do-mod.cjs
+   ```
 
 8. **S-m7 · O som de uma contribuição sem alvo pertence ao destino que o
    tomou, e não à contribuição.** Uma contribuição sem alvo é montada uma vez
@@ -7743,7 +7756,9 @@ publicação enquanto as bancadas de navegador só rodarem por ele.
 o 6 foi cumprido em `563bc37`; o 7c fechou o som adiado e deixa com o dono o
 teto por MOD; o 10 perdeu o objeto. **Continuam abertos:** o item 4, que vale
 para toda publicação enquanto o `ci.yml` só rodar por `workflow_dispatch`; o
-teto por MOD do 7c; e o macOS 11.0 a 11.2, não medido.
+teto por MOD do 7c; e o macOS 11.0 a 11.2, não medido. **Em 23/10/2026**, o
+teto por MOD do 7c fechou (lote SOM, 128 MiB), e continuam abertos o item 4 e
+o macOS 11.0 a 11.2.
 
 ## 50 · Consertada em 2026-10-08 · Quem sai pelo app continua no roster dos outros por cerca de 20 segundos
 

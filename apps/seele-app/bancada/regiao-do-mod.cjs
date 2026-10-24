@@ -779,6 +779,7 @@ function bancada(opcoes = {}) {
   // leitura de `contexto.RegiaoDeMod`, que devolveria `undefined`.
   vm.runInContext(
     `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO, FORMAS_DA_REGIAO, PERFIS_DE_RENDER,
+      LIMITES_DO_MOD: typeof LIMITES_DO_MOD === "object" ? LIMITES_DO_MOD : undefined,
       SILENCIO: typeof SILENCIO_ANTES_DE_SUSPENDER_MS === "number" ? SILENCIO_ANTES_DE_SUSPENDER_MS : undefined,
       encerrarOSomDosMods: typeof encerrarOSomDosMods === "function" ? encerrarOSomDosMods : undefined,
       tocadoresDePe: typeof tocadoresDeSomDeMod === "object" ? () => tocadoresDeSomDeMod.size : undefined };`,
@@ -793,6 +794,8 @@ function bancada(opcoes = {}) {
     RegiaoDeMod: contexto.api.RegiaoDeMod,
     LIMITES: contexto.api.LIMITES_DA_REGIAO,
     CARTAO: contexto.api.LIMITES_DO_CARTAO,
+    /** Os tetos de um MOD inteiro, somando os bolsos dele (`LIMITES_DO_MOD`). */
+    MOD: contexto.api.LIMITES_DO_MOD,
     FORMAS_DO_CARTAO: contexto.api.FORMAS_DO_CARTAO,
     /** A tabela do renderer: o espelho dela contra o `v6.json` é `cadaFormaDoV6MontaOQuePromete`. */
     FORMAS_DA_REGIAO: contexto.api.FORMAS_DA_REGIAO,
@@ -5608,6 +5611,16 @@ async function oSomDaContribuicaoMudaDeDestino() {
       "o destino que saiu da tela segurou o tocador, o som decodificado no bolso, ou a anotação: "
         + `${tocadores([tomou])} tocador(es), ${tomou.bytesDeSomDeCartao} bytes, ${JSON.stringify(tomou.midiasAnotadas())}`,
     );
+    // **E o MOD também recebe de volta** o que o destino que saiu segurava
+    // (`LIMITES_DO_MOD.bytesDeSomDecodificado`): os dois destinos dividem a
+    // conta do MOD, e ela fica só com o som de pé no outro — sem isso, cada
+    // troca de destino somava de novo o mesmo som ao teto do MOD.
+    confere(
+      caso,
+      tomou.somDoMod === outro.somDoMod && outro.somDoMod?.bytes === outro.bytesDeSomDeCartao && outro.bytesDeSomDeCartao > 0,
+      "a conta do som do MOD não devolveu o que o destino que saiu da tela segurava: "
+        + `${outro.somDoMod?.bytes} no MOD, ${outro.bytesDeSomDeCartao} de pé no outro destino`,
+    );
     // **A continuidade** (decisão da rodada 1): o som que tocava quando o
     // lugar dele saiu recomeça, do começo, no destino que tomou a marca — sem
     // um `tocando` novo do MOD, e sem recusa.
@@ -6801,6 +6814,183 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 20. O som decodificado tem teto por MOD, somando os bolsos dele (P49-7c).
+// ---------------------------------------------------------------------------
+
+/**
+ * P49-7c, o teto por MOD (D-dono-1, 23/10). O teto do som decodificado é por
+ * bolso — a região de cada superfície, o bolso de cartão de cada
+ * contribuição —, e um MOD tem muitos bolsos: até 12 superfícies e 128
+ * contribuições de pé, em tese 140 vezes 64 MiB. O teto por MOD soma o que
+ * **todos os lugares da mesma instância** seguram decodificado.
+ *
+ * Aqui, cada som ocupa nove décimos do teto de um bolso, e cada um está num
+ * lugar diferente do mesmo MOD — três regiões e um cartão, cada um com o seu
+ * dono, como `donoDaRegiao` os dá, e todos com a mesma instância. Cada som
+ * cabe no bolso dele; somados, passam do teto do MOD. O que passa é recusado
+ * pelo caminho de todo teto: figura «cheia», `recusada` ao MOD com os números
+ * no `porque`, a linha do `seele.log` (`anotarRecusa`, que leva o `mod_id`) e a
+ * anotação com a chave própria do teto do MOD, que a aba DIAGNÓSTICO junta numa
+ * vaga só. Outro MOD na mesma janela tem a conta dele; e o lugar que sai
+ * devolve ao MOD o que segurava.
+ */
+async function oSomDecodificadoTemTetoPorModSomandoOsBolsos() {
+  const caso = "o som decodificado tem teto por MOD, somando os bolsos";
+  const doBolso = bancada().LIMITES.bytesDeSomDecodificado;
+  const tetoDoMod = bancada().MOD?.bytesDeSomDecodificado;
+  confere(
+    caso,
+    Number.isFinite(tetoDoMod) && tetoDoMod >= doBolso,
+    `não há teto de som decodificado por MOD, ou ele é menor que o de um bolso (${doBolso}): ${tetoDoMod}`,
+  );
+  // O cenário não depende do teto existir: sem ele, o vermelho é o MOD que
+  // segura mais que 128 MiB sem recusa nenhuma.
+  const teto = Number.isFinite(tetoDoMod) ? tetoDoMod : 128 * 1024 * 1024;
+  const quadros = Math.floor((doBolso * 0.9) / 8);
+  const ocupa = quadros * 2 * 4;
+  const cabem = Math.floor(teto / ocupa);
+  const lugares = cabem + 2;
+  const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
+  const bs = bancada({ audio: Audio });
+  const instancia = { registrar: () => {} };
+  const doMesmoMod = () => {
+    const d = dono(bs, () => Promise.resolve({ papel: "som", bytes: 12 }));
+    d.api.instancia = instancia;
+    return d;
+  };
+  const som = (chave) => ({ forma: "midia", chave, fonte: `som/${chave}.ogg`, tocando: true });
+  const montados = [];
+  for (let i = 0; i < lugares; i += 1) {
+    const d = doMesmoMod();
+    // Um dos lugares é o bolso de cartão de uma contribuição: ele conta também.
+    const r = i === 1 ? umCartao(bs, d) : new bs.RegiaoDeMod("a/b", d.api, bs.raiz());
+    r.aplicar([som(`s${i}`)]);
+    await assentar();
+    montados.push({ r, d, chave: `s${i}` });
+  }
+  const estados = montados.map(({ r }) => r.raiz.children[0]?.dataset.estado);
+  const prontos = montados.filter((_, i) => estados[i] === "pronta");
+  const cheios = montados.filter((_, i) => estados[i] === "cheia");
+  confere(
+    caso,
+    prontos.length === cabem && cheios.length === lugares - cabem,
+    `com ${lugares} sons de ${ocupa} bytes decodificados em lugares do mesmo MOD, cada um cabendo no bolso dele, `
+      + `${cabem} deviam ficar de pé e ${lugares - cabem} ser recusados pelo teto de ${teto} do MOD: ${JSON.stringify(estados)}`,
+  );
+  confere(
+    caso,
+    (Audio.ultimo?.fontes.length ?? 0) === cabem,
+    `o som acima do teto do MOD virou tocador: ${Audio.ultimo?.fontes.length} fonte(s) para ${cabem} que cabem`,
+  );
+  for (const { r, d, chave } of cheios) {
+    const ditos = d.ditos.filter((e) => e.nome === "midia" && e.chave === chave);
+    confere(
+      caso,
+      ditos.some((e) => e.estado === "recusada" && String(e.porque ?? "").includes(String(teto)) && /do MOD/.test(e.porque ?? ""))
+        && !ditos.some((e) => e.estado === "falhou"),
+      `o MOD não ouviu \`recusada\` com o teto do MOD e os números no \`porque\`: ${JSON.stringify(ditos)}`,
+    );
+    confere(
+      caso,
+      d.anotadas.some((t) => t.includes(`«${chave}» recusada:`) && t.includes(String(teto)) && /do MOD/.test(t)),
+      `o seele.log não registra o som recusado pelo teto do MOD: ${JSON.stringify(d.anotadas)}`,
+    );
+    const anotadas = r.midiasAnotadas().filter((a) => a.situacao === "recusada");
+    confere(
+      caso,
+      anotadas.length === 1 && anotadas[0].teto === `bytes de som do MOD:${teto}`,
+      `a anotação do som recusado pelo teto do MOD não leva a chave dele: ${JSON.stringify(r.midiasAnotadas())}`,
+    );
+  }
+  // Outro MOD, na mesma janela: a conta dele é a dele.
+  const outro = dono(bs, () => Promise.resolve({ papel: "som", bytes: 12 }));
+  const rOutro = new bs.RegiaoDeMod("c/d", outro.api, bs.raiz());
+  rOutro.aplicar([som("o1")]);
+  await assentar();
+  confere(
+    caso,
+    rOutro.raiz.children[0]?.dataset.estado === "pronta",
+    `o som de outro MOD foi recusado pela conta deste: ${rOutro.raiz.children[0]?.dataset.estado}`,
+  );
+  rOutro.soltar();
+  // O lugar que sai devolve ao MOD o que segurava, e o espaço serve ao próximo.
+  if (prontos.length > 0 && cheios.length > 0) {
+    prontos[0].r.soltar();
+    const { r, chave } = cheios[0];
+    r.aplicar([]);
+    r.aplicar([som(chave)]);
+    await assentar();
+    confere(
+      caso,
+      r.raiz.children[0]?.dataset.estado === "pronta",
+      `o espaço que o lugar solto deixou não voltou ao MOD: ${r.raiz.children[0]?.dataset.estado}`,
+    );
+  }
+  for (const { r } of montados) r.soltar();
+  // Tudo solto, a conta do MOD volta a zero: o teto inteiro cabe de novo.
+  const depois = [];
+  for (let i = 0; i < cabem; i += 1) {
+    const r = new bs.RegiaoDeMod("a/b", doMesmoMod().api, bs.raiz());
+    r.aplicar([som(`d${i}`)]);
+    await assentar();
+    depois.push(r);
+  }
+  confere(
+    caso,
+    depois.every((r) => r.raiz.children[0]?.dataset.estado === "pronta"),
+    `depois de tudo solto, o MOD não teve o teto inteiro de volta: ${JSON.stringify(depois.map((r) => r.raiz.children[0]?.dataset.estado))}`,
+  );
+  for (const r of depois) r.soltar();
+}
+
+/**
+ * **Os três oficiais 4.0.0 cabem no teto por MOD**, medidos (lote SOM, 23/10).
+ *
+ * Dos três, só a MESA declara som: as três trilhas (`som/exploracao.wav`,
+ * `som/misterio.wav`, `som/combate.wav`), cada uma um WAV PCM de 16 bits, mono,
+ * a 11 025 Hz, com 661 500 bytes de dados — 30 s, que a 48 kHz são 1 440 000
+ * quadros, 5 760 000 bytes em float32 (o piso do Rust,
+ * `bytes_decodificados_minimos`, dá 5 759 996 para cada uma, um quadro a
+ * menos). O ESTILO e o PERFIS não declaram arquivo nenhum. A MESA toca uma
+ * trilha por vez na página e outra no palco, uma contribuição; aqui as três
+ * ficam de pé juntas, na página e no bolso de cartão, que é mais do que ela
+ * segura.
+ */
+async function osTresOficiaisCabemNoTetoDoSomPorMod() {
+  const caso = "os três oficiais cabem no teto do som por MOD";
+  const tetoDoMod = bancada().MOD?.bytesDeSomDecodificado;
+  const Audio = audioDeMentira({ decodificado: { duration: 30, length: 1_440_000, numberOfChannels: 1, sampleRate: 48000 } });
+  const bs = bancada({ audio: Audio });
+  const instancia = { registrar: () => {} };
+  const daMesa = () => {
+    const d = dono(bs, () => Promise.resolve({ papel: "som", bytes: 661_544 }));
+    d.api.instancia = instancia;
+    return d;
+  };
+  const trilha = (chave, fonte) => ({ forma: "midia", chave, fonte, tocando: true, repetir: true });
+  const pagina = new bs.RegiaoDeMod("seele/mesa", daMesa().api, bs.raiz(), bs.PERFIS.superficie);
+  pagina.aplicar([trilha("trilha:exploration", "som/exploracao.wav"), trilha("trilha:mystery", "som/misterio.wav")]);
+  const palco = umCartao(bs, daMesa());
+  palco.aplicar([trilha("palco:trilha:battle", "som/combate.wav")]);
+  await assentar();
+  const estados = [...pagina.raiz.children, ...palco.raiz.children].map((e) => e.dataset.estado);
+  confere(
+    caso,
+    estados.length === 3 && estados.every((e) => e === "pronta"),
+    `as três trilhas da MESA não ficaram de pé juntas: ${JSON.stringify(estados)}`,
+  );
+  const segura = pagina.bytesDeSomDecodificado + palco.bytesDeSomDeCartao;
+  confere(caso, segura === 3 * 5_760_000, `as três trilhas da MESA não ocupam o medido, 3 × 5 760 000: ${segura}`);
+  confere(
+    caso,
+    Number.isFinite(tetoDoMod) && tetoDoMod >= 7 * segura,
+    `o teto do MOD não dá à MESA a folga de sete vezes as três trilhas (${7 * segura}): ${tetoDoMod}`,
+  );
+  pagina.soltar();
+  palco.soltar();
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -6861,6 +7051,8 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     oDataDoSomDoServidorNaoFicaRetido,
     oSomGrandeDemaisDecodificadoEOTetoDoSom,
     quemSoMostraImagemOuveOQueOuviaDoSomRecusado,
+    oSomDecodificadoTemTetoPorModSomandoOsBolsos,
+    osTresOficiaisCabemNoTetoDoSomPorMod,
   ];
   for (const prova of provas) {
     try {
