@@ -2273,6 +2273,131 @@ fn o_validado_recusa_um_commit_fora_da_historia() {
 }
 
 #[test]
+fn o_validado_diz_o_windows_mesmo_quando_so_refaz_a_publicacao() {
+    // A rodada que só refaz a publicação pula os três sistemas, e nenhum é
+    // pedido. A linha da bateria tirava o Windows pelos pedidos, e uma versão
+    // validada nas duas máquinas sairia dizendo que a bateria de lá não rodou.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let validado = bancada.commit.clone();
+    escrever(
+        &bancada.repo.join("entrega/SEELE_1.2.3_aarch64.dmg"),
+        "dmg de mentira\n",
+        false,
+    );
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "macos,windows,linux", "--validado", &validado],
+        &[],
+    );
+
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada que só publica tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.corpos.contains("e no Windows (testes) sobre ")
+            && saida.corpos.contains(&format!("`{validado}`")),
+        "a versão validada nas duas máquinas saiu sem dizer o Windows:\n{}",
+        saida.corpos
+    );
+}
+
+/// A bancada com uma tag `v1.2.2` e `quantos` commits depois dela, de assuntos
+/// longos e numerados — `docs:`, para não entrarem no resumo curado e só
+/// aparecerem na lista de todos os commits. Devolve a cabeça nova.
+fn com_faixa_longa(bancada: &Bancada, quantos: usize) -> String {
+    bancada.git(&["tag", "v1.2.2"]);
+    for numero in 1..=quantos {
+        bancada.git(&[
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            &format!("docs: commit numero {numero:02} {}", "x".repeat(150)),
+        ]);
+    }
+    bancada.git(&["rev-parse", "HEAD"])
+}
+
+#[test]
+fn a_lista_de_commits_que_nao_cabe_sai_cortada_e_diz_onde_esta_o_resto() {
+    // A 0.16 tinha 1684 commits na faixa, e só a lista deles dava 285 785
+    // caracteres; o GitHub recusa o corpo acima de 125 000, e respondeu 422
+    // depois de duas horas de build. A lista sai com os mais recentes que
+    // couberem, e a última linha diz onde está o resto.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let cabeca = com_faixa_longa(&bancada, 40);
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("FALSO_SSH_HEAD", &cabeca), ("SEELE_LIMITE_DO_CORPO", "9000")],
+    );
+
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada tinha que passar com a lista cortada:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.diario.lines().any(|linha| linha.ends_with("/releases")),
+        "o release não chegou a ser criado, e as asserções abaixo não provam nada:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida.texto.contains("não coube na página do release"),
+        "a lista foi cortada calada:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.corpos.contains("commit numero 40") && !saida.corpos.contains("commit numero 01"),
+        "a lista cortada tem que guardar os mais recentes e deixar os mais antigos:\n{}",
+        saida.corpos
+    );
+    assert!(
+        saida.corpos.contains(" e mais ")
+            && saida
+                .corpos
+                .contains(&format!("https://github.com/DATA-AND-DEV/SEELE/commits/{cabeca}")),
+        "a lista cortada não diz quantos ficaram de fora nem onde está o resto:\n{}",
+        saida.corpos
+    );
+}
+
+#[test]
+fn um_corpo_que_nao_cabe_nem_sem_a_lista_para_antes_do_github() {
+    // Quando nem o resto cabe — as notas da versão grandes demais —, cortar a
+    // lista não resolve, e o 422 viria depois de tudo montado. O script para
+    // antes de criar o release, dizendo o que encurtar.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let cabeca = com_faixa_longa(&bancada, 5);
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("FALSO_SSH_HEAD", &cabeca), ("SEELE_LIMITE_DO_CORPO", "500")],
+    );
+
+    assert_ne!(
+        saida.estado, 0,
+        "o corpo não cabe nem sem a lista e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("mesmo sem a lista de commits"),
+        "a recusa não diz por quê:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.diario.lines().any(|linha| linha.ends_with("/releases")),
+        "o release foi pedido ao GitHub com um corpo que ele recusa:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
 fn o_validado_e_o_sem_bateria_nao_andam_juntos() {
     let Some(bancada) = Bancada::nova() else {
         return;

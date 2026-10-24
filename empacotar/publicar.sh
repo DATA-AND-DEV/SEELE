@@ -563,8 +563,13 @@ em_maiuscula() {
 #
 # O resumo e não o hash sozinho: um hash é um endereço, e uma lista de endereços
 # não se lê. Os dois juntos dão a frase e o caminho para o resto dela.
+#
+# **Com um orçamento em bytes, a lista para quando ele acaba**, e a última linha
+# diz quantos ficaram de fora e onde está a lista inteira (ver `LIMITE_DO_CORPO`).
+# Os mais recentes ficam, porque é por eles que quem investiga começa.
 changelog_dos_commits() {
     cdc_faixa="$1"
+    cdc_orcamento="${2:-}"
     cdc_quantos=$(git -C "$RAIZ" log --no-merges --oneline "$cdc_faixa" | grep -c "" || true)
     if [ "${cdc_quantos:-0}" -eq 0 ]; then
         return 0
@@ -575,7 +580,26 @@ changelog_dos_commits() {
 "São ${cdc_quantos}, do mais recente ao mais antigo. O resumo curado está acima; \
 esta lista é para quem precisa achar o commit que mexeu numa coisa específica."
     printf '<details>\n<summary>Abrir a lista</summary>\n\n'
-    git -C "$RAIZ" log --no-merges --format='- `%h` %s' "$cdc_faixa"
+    if [ -z "$cdc_orcamento" ]; then
+        git -C "$RAIZ" log --no-merges --format='- `%h` %s' "$cdc_faixa"
+    else
+        git -C "$RAIZ" log --no-merges --format='- `%h` %s' "$cdc_faixa" \
+            | python3 -c 'import sys
+orcamento = int(sys.argv[1])
+gasto = 0
+fora = 0
+for linha in sys.stdin.buffer:
+    if fora == 0 and gasto + len(linha) <= orcamento:
+        sys.stdout.buffer.write(linha)
+        gasto += len(linha)
+    else:
+        fora += 1
+open(sys.argv[2], "w").write(str(fora))' "$cdc_orcamento" "$TEMPORARIO/commits-fora"
+        cdc_fora=$(cat "$TEMPORARIO/commits-fora" 2>/dev/null)
+        if [ "${cdc_fora:-0}" -gt 0 ]; then
+            printf '%s\n' "- … e mais ${cdc_fora}, os mais antigos, que não cabem no limite de tamanho da página do GitHub. A lista inteira está no repositório do código, em https://github.com/$REPO_CODIGO/commits/$COMMIT — ou, num clone, \`git log --no-merges $ANTERIOR..$COMMIT\`."
+        fi
+    fi
     printf '\n</details>\n\n'
 }
 
@@ -755,6 +779,10 @@ linha_da_bateria() {
         *" windows "*) lb_onde="$lb_onde e no Windows (testes)" ;;
     esac
     if [ -n "${3:-}" ]; then
+        # O Windows entra sempre: o `--validado` afirma as duas baterias (ver
+        # `uso`), e a rodada que só refaz a publicação, com `--pular` nos três,
+        # não pede o Windows — e a linha diria que a bateria de lá não rodou.
+        lb_onde="aqui (fmt, clippy, testes, cargo deny, roteiros da casca) e no Windows (testes)"
         lb_xtask=""
         if [ "${5:-nao}" = sim ]; then
             lb_xtask=" Os testes do \`xtask\`, que estão entre o que mudou, rodaram de novo aqui."
@@ -2614,7 +2642,9 @@ if ! faixa_da_versao; then
         "Confira o rascunho antes de publicar."
 fi
 
-{
+# O corpo inteiro. O argumento é o orçamento da lista de todos os commits, em
+# bytes; vazio, ela sai inteira (ver `LIMITE_DO_CORPO`, logo depois).
+montar_corpo() {
     # **O aviso desta versão, e só dela.**
     #
     # `NOTAS-DE-RELEASE.md` é o texto que sai em toda página — onde baixar, como
@@ -2648,7 +2678,7 @@ fi
                 "Confira o rascunho antes de publicar."
         fi
         printf '\n'
-        changelog_dos_commits "$FAIXA"
+        changelog_dos_commits "$FAIXA" "${1:-}"
     else
         printf '%s\n' \
 "_Primeira versão publicada: não há uma anterior contra a qual comparar. O" \
@@ -2686,7 +2716,42 @@ fi
 "" \
 "O que ninguém consegue responder sobre esta versão é **«veio daquele código»**." \
 "Versões saídas do workflow respondem, e a seção acima explica como."
-} > "$NOTAS"
+}
+
+# **A página de um release no GitHub tem teto: 125 000 caracteres no corpo.**
+#
+# A 0.16 foi a primeira a passar dele. A faixa desde a v0.15.2 tem 1684 commits,
+# e só a lista de todos eles dava 285 785 caracteres; a página da v0.15.2 inteira
+# tinha 15 153. O GitHub respondeu 422 depois de duas horas de build, e quem
+# publica leu o limite na resposta da API, e não aqui.
+#
+# Medido em bytes, e não em caracteres: o acento conta dois, e o teto real fica
+# com folga, sem depender de como o GitHub conta. Quando a lista não cabe, ela
+# sai com os mais recentes que couberem e diz onde está o resto; quando nem o
+# resto cabe, o script para **antes** de falar com o GitHub, dizendo o que
+# encurtar.
+LIMITE_DO_CORPO="${SEELE_LIMITE_DO_CORPO:-125000}"
+montar_corpo > "$NOTAS"
+mc_tamanho=$(wc -c < "$NOTAS" | tr -d ' ')
+if [ "$mc_tamanho" -gt "$LIMITE_DO_CORPO" ]; then
+    # Os avisos do resumo já saíram na primeira volta; as outras duas são só
+    # medida e corte, e repeti-los seria ruído.
+    montar_corpo 0 > "$NOTAS" 2>/dev/null
+    mc_resto=$(wc -c < "$NOTAS" | tr -d ' ')
+    montar_corpo "$((LIMITE_DO_CORPO - mc_resto - 1000))" > "$NOTAS" 2>/dev/null
+    aviso "a lista de todos os commits não coube na página do release: o corpo teria" \
+        "$mc_tamanho bytes, e o GitHub recusa acima de $LIMITE_DO_CORPO caracteres." \
+        "Ela sai com os mais recentes que couberam e diz onde está o resto."
+    mc_tamanho=$(wc -c < "$NOTAS" | tr -d ' ')
+fi
+if [ "$mc_tamanho" -gt "$LIMITE_DO_CORPO" ]; then
+    morrer "o corpo do release tem $mc_tamanho bytes mesmo sem a lista de commits, e o" \
+        "GitHub recusa acima de $LIMITE_DO_CORPO caracteres." \
+        "O que sobra são as notas da versão (empacotar/notas/$VERSAO.md) e o texto" \
+        "fixo de .github/NOTAS-DE-RELEASE.md: encurte as notas." \
+        "" \
+        "Nada foi ao GitHub, e os arquivos continuam em entrega/."
+fi
 
 PEDIDO="$TEMPORARIO/pedido.json"
 
@@ -2855,7 +2920,7 @@ with open(destino, "w", encoding="utf-8") as saida:
             "$(rascunhos_ate_agora "$RASCUNHOS")" \
             "" \
             "Os arquivos continuam em entrega/. Para tentar só a publicação de novo:" \
-            "  $0 $VERSAO --pular $(printf '%s' "$SISTEMAS" | LC_ALL=C tr ' ' ',')"
+            "  $0 $VERSAO --pular $(printf '%s' "$SISTEMAS" | LC_ALL=C tr ' ' ',')${VALIDADO:+ --validado $VALIDADO}"
     fi
     NOVO_ID=$(python3 -c 'import json, sys
 print(json.load(open(sys.argv[1], encoding="utf-8"))["id"])' "$CORPO_API")
