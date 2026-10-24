@@ -11265,6 +11265,79 @@ async fn criar_convite_do_server(
     Ok(server.convite_com_token(&token))
 }
 
+/// O link do navegador de um convite deste servidor, para a tela de quem
+/// hospeda (D-web-6).
+#[derive(Debug, serde::Serialize)]
+struct LinkDoNavegadorNaTela {
+    /// O link na origem do navegador (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`).
+    link: String,
+    /// Até quando ele abre, em segundos Unix UTC: é o «vale até» da tela.
+    ate: u64,
+    /// Quando a tela pede outro, que dura mais, em segundos Unix UTC.
+    renova: u64,
+    /// Quem de fora entra por ele (`AlcanceDoNavegador`): `Alcanca`,
+    /// `SoPeloEncontro`, `SoNaRede` ou `NaoSeSabe`. Nome, e não frase: a frase
+    /// mora no `LINK_DO_NAVEGADOR` do JavaScript.
+    alcance: &'static str,
+    /// A porta UDP deste servidor: é a que o aviso manda abrir no roteador.
+    porta: u16,
+}
+
+/// Por que não há link do navegador para mostrar.
+///
+/// Enum e não frase, como as vizinhas: a fronteira erro→texto é do frontend.
+#[derive(Debug, serde::Serialize)]
+enum FalhaNoLinkDoNavegador {
+    /// Esta janela não está hospedando nada.
+    NaoEstaHospedando,
+    /// O texto não é um convite deste servidor.
+    ConviteInvalido,
+    /// O convite é de outro servidor.
+    OutroServidor,
+    /// O servidor não apresenta certificado ao navegador agora.
+    SemJanelas,
+}
+
+/// **O link do navegador do convite que a tela mostra** (D-web-6): o mesmo
+/// convite, para quem entra pelo web app, com os hashes dos certificados
+/// curtos que este servidor apresenta de agora em diante.
+///
+/// A conta inteira é do `Hospedagem::link_do_navegador`, e a bancada da sessão
+/// no navegador pega o link por ele também (`servidor_da_bancada`): o link que
+/// ela prova abrir é o que esta tela mostra.
+#[tauri::command]
+fn link_do_navegador(
+    session: State<'_, Session>,
+    convite: String,
+) -> Result<LinkDoNavegadorNaTela, FalhaNoLinkDoNavegador> {
+    use seele_server::hospedagem::SemLinkDoNavegador;
+
+    let agora = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |desde| desde.as_secs());
+    let hospedagens = session
+        .hospedagens
+        .lock()
+        .map_err(|_| FalhaNoLinkDoNavegador::NaoEstaHospedando)?;
+    let server = hospedagens
+        .do_guardado()
+        .ok_or(FalhaNoLinkDoNavegador::NaoEstaHospedando)?;
+    let link = server
+        .link_do_navegador(&convite, agora)
+        .map_err(|sem| match sem {
+            SemLinkDoNavegador::ConviteInvalido => FalhaNoLinkDoNavegador::ConviteInvalido,
+            SemLinkDoNavegador::OutroServidor => FalhaNoLinkDoNavegador::OutroServidor,
+            SemLinkDoNavegador::SemJanelas => FalhaNoLinkDoNavegador::SemJanelas,
+        })?;
+    Ok(LinkDoNavegadorNaTela {
+        link: link.link,
+        ate: link.ate,
+        renova: link.renova,
+        alcance: link.alcance.nome(),
+        porta: server.endereco().port(),
+    })
+}
+
 /// Liga ou desliga a portaria. ADR 0030.
 #[tauri::command]
 async fn ligar_portaria(session: State<'_, Session>, ligada: bool) -> Result<(), FalhaNaPortaria> {
@@ -12344,6 +12417,7 @@ fn main() {
             estado_do_servidor,
             definir_senha_do_server,
             criar_convite_do_server,
+            link_do_navegador,
             ligar_portaria,
             pedidos_da_portaria,
             decidir_pedido,

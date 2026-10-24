@@ -357,6 +357,12 @@ jobs:
       - run: node apps/seele-app/bancada/saidas-de-quem-hospeda.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O link do navegador na porta de quem hospeda (D-web-6), com o aviso de
+      # quem entra por ele (D-web-7, saída C): nos quatro alcances, e sem sumir
+      # quando só o ponto de encontro alcança.
+      - run: node apps/seele-app/bancada/link-do-navegador.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # O núcleo de confiança no desktop (tarefa 9 da F3): o MUDO, o fone, o
       # SAIR, o «no ar» e o veredito nas cores do produto, sob qualquer tema.
       - run: node apps/seele-app/bancada/nucleo.cjs

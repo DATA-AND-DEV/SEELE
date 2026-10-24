@@ -1327,3 +1327,33 @@ Iguale ao desktop, lendo o teto do mesmo `seele_sessao::volta`.»
   de 210, e o console diz `SemResposta`. A primeira reversão (largar só o
   pedido que a mensagem faz) passou, e a razão é boa: a cerca da página
   largada venceu, e a vez do relógio a pediu de novo.
+
+## D-web-6 e o aviso de alcance (D-web-7, saída C) — 23/10/2026
+
+O desenho da D-web-7 pelo WebRTC parou a pedido do dono, e o rumo mudou para a
+saída C. O spike do WebRTC (`b8be4aab`, com o README em `2acd8d11`) foi para o
+ramo `1.x/spike-webrtc`, fora da 0.16; o `0.16/web` voltou para antes dele e
+retomou a D-web-6 sobre a `versao/0.16` em `6952f925`.
+
+- **O link** (`Hospedagem::link_do_navegador`): o mesmo convite que a porta
+  mostra, com os hashes da janela de agora e das seguintes, sem buraco
+  (`tls::janelas_do_link`). O `ate` é quando o servidor larga a última, e não o
+  fim da validade do curto. O `alpn.rs` confere o primeiro hash contra o curto
+  que o `h3` apresenta num aperto de mão de verdade.
+- **A porta** (`link_do_navegador` na casca): a linha NAVEGADOR no diálogo e no
+  painel, «vale até», e o link seguinte a cada janela nova.
+- **O aviso de alcance**: o comando responde também quem entra pelo navegador
+  (`AlcanceDoNavegador`: alcança, só pelo encontro, só na rede, não se sabe), e
+  a frase sai ao lado do botão. Só pelo encontro, diz por quê e o que resolve,
+  com a porta. O link não se esconde em caso nenhum.
+- **Provas pela reversão:**
+  - a escolha das janelas (os dois testes da unidade e o do `alpn.rs`);
+  - a classificação (`so_o_degrau_4_tira_o_navegador_de_fora`, com três
+    reversões);
+  - a tela (`bancada/link-do-navegador.cjs`): esconder o link no «só pelo
+    encontro», calar o aviso, e o «não se sabe» prometendo alcance. Os três
+    reprovam.
+- **A bancada da sessão** pega o link pelo produto: o `servidor_da_bancada`
+  hospeda pela `Hospedagem` e chama o `link_do_navegador`. Passa nos 14 casos,
+  e reprova inteira quando o link pula a janela de agora.
+- As frases foram à F5 pela orquestradora.
