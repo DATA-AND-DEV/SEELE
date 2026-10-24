@@ -1150,6 +1150,7 @@ roteiros_da_casca() {
         "Leia o fim da saída: ele diz qual roteiro reprovou e com que frase. Sem o navegador, «npx playwright install chromium» o instala." \
         python3 tools/carga-da-casca.py \
         --roteiro tools/roteiros/abertura-com-entrar.js \
+        --roteiro tools/roteiros/abrir-versao-que-falha.js \
         --roteiro tools/roteiros/aceite-de-mods-em-corrida.js \
         --roteiro tools/roteiros/aceite-de-mods-que-falha.js \
         --roteiro tools/roteiros/aceite-de-mods-que-nao-abre.js \
