@@ -5611,6 +5611,16 @@ async function oSomDaContribuicaoMudaDeDestino() {
       "o destino que saiu da tela segurou o tocador, o som decodificado no bolso, ou a anotação: "
         + `${tocadores([tomou])} tocador(es), ${tomou.bytesDeSomDeCartao} bytes, ${JSON.stringify(tomou.midiasAnotadas())}`,
     );
+    // **E o MOD também recebe de volta** o que o destino que saiu segurava
+    // (`LIMITES_DO_MOD.bytesDeSomDecodificado`): os dois destinos dividem a
+    // conta do MOD, e ela fica só com o som de pé no outro — sem isso, cada
+    // troca de destino somava de novo o mesmo som ao teto do MOD.
+    confere(
+      caso,
+      tomou.somDoMod === outro.somDoMod && outro.somDoMod?.bytes === outro.bytesDeSomDeCartao && outro.bytesDeSomDeCartao > 0,
+      "a conta do som do MOD não devolveu o que o destino que saiu da tela segurava: "
+        + `${outro.somDoMod?.bytes} no MOD, ${outro.bytesDeSomDeCartao} de pé no outro destino`,
+    );
     // **A continuidade** (decisão da rodada 1): o som que tocava quando o
     // lugar dele saiu recomeça, do começo, no destino que tomou a marca — sem
     // um `tocando` novo do MOD, e sem recusa.
