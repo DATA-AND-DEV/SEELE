@@ -29,10 +29,10 @@ export NOVA="<checkout>/target/release/bundle/macos/SEELE.app/Contents/MacOS/see
    pasta fica). `SEELE_HOME="$T" "$NOVA"`
    - **Na tela:** a nota, uma vez, de que as conversas da 0.15 ficaram guardadas
      para o Servidor 0.15.
-   - `ls "$T/dados/servidor-0.15/PRONTA"` existe;
-     `ls "$T/dados/servidor-0.15/identity.key"` **não** existe (D-id-1);
+   - `ls "$T/lancador/dados/servidor-0.15/PRONTA"` existe;
+     `ls "$T/lancador/dados/servidor-0.15/identity.key"` **não** existe (D-id-1);
      `shasum "$T/identity.key"` **igual** ao do passo 1 (**L56**);
-     os bancos copiados para `dados/servidor-0.15/` com as somas do passo 1.
+     os bancos copiados para `lancador/dados/servidor-0.15/` com as somas do passo 1.
    - Em uns 30 s: `cat "$T"/lancador/versoes/0.15.2/INSTALADA` com 4 linhas (a
      v0.15.2 baixada sozinha do release publicado).
 3. **Hospedar no Servidor 0.15:** na 0.16, HOSPEDAR AQUI → Servidor 0.15 →
