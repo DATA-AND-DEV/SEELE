@@ -473,17 +473,6 @@
          Preenchido por camada-versoes.js. -->
     <p id="boot-linha-legada" class="nota" role="status" hidden></p>
 
-    <details id="boot-versoes" class="boot-nome-publico" hidden>
-      <summary>Hospedar com outra versão do SEELE</summary>
-      <div class="server-campo">
-        <ul id="lista-versoes" class="server-dispositivos"></ul>
-        <p class="nota">
-          Cada versão guarda as conversas dela em separado. Abrir outra versão
-          não leva o que foi escrito nesta — e não apaga nada.
-        </p>
-      </div>
-    </details>
-
     <div class="boot-rodape">
       <button id="boot-perfil" class="boot-perfil" type="button"
               aria-label="Personalizar seu perfil" title="o nome com que você entra">
@@ -581,6 +570,10 @@
          data-anuncio="Preparar este servidor: nome, imagem e versão.">
   <div class="boot-caixa">
     <h1 id="preparar-titulo" class="boot-titulo">PREPARAR ESTE SERVIDOR</h1>
+    <!-- O que é só de um servidor novo. O HOSPEDAR do servidor que já estava
+         aqui passa por esta tela só pela VERSÃO QUE VAI HOSPEDAR, e isto some
+         (tela-boot.js, `abrirPreparar`). -->
+    <div id="preparar-do-novo">
     <p class="nota">
       O nome e a imagem são o que as pessoas veem ao entrar. Os dois são
       opcionais e mudam depois, em CONFIGURAÇÕES.
@@ -609,6 +602,8 @@
         <button id="preparar-icone-escolher" class="botao-fantasma" type="button">ESCOLHER IMAGEM</button>
         <button id="preparar-icone-tirar" class="botao-fantasma" type="button" hidden>TIRAR</button>
       </div>
+    </div>
+
     </div>
 
     <div id="preparar-versoes" class="server-campo" hidden>
