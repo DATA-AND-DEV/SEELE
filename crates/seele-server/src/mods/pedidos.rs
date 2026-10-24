@@ -1055,11 +1055,15 @@ mod tests {
         let mut achados = Vec::new();
         for fonte in &fontes {
             let texto = std::fs::read_to_string(fonte).expect("a fonte");
+            // Com `/` em todo sistema: no Windows o `display()` vem com `\`, e
+            // o `ends_with` de texto abaixo não casava com as duas menções
+            // permitidas (reprovou no PC Windows, em `51900612`).
             let relativo = fonte
                 .strip_prefix(&raiz)
                 .unwrap_or(fonte)
                 .display()
-                .to_string();
+                .to_string()
+                .replace('\\', "/");
             for (n, linha) in antes_dos_testes(&texto).iter().enumerate() {
                 let limpa = linha.trim_start();
                 if limpa.starts_with("//")

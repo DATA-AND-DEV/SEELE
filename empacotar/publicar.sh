@@ -1150,6 +1150,7 @@ roteiros_da_casca() {
         "Leia o fim da saída: ele diz qual roteiro reprovou e com que frase. Sem o navegador, «npx playwright install chromium» o instala." \
         python3 tools/carga-da-casca.py \
         --roteiro tools/roteiros/abertura-com-entrar.js \
+        --roteiro tools/roteiros/abrir-versao-que-falha.js \
         --roteiro tools/roteiros/aceite-de-mods-em-corrida.js \
         --roteiro tools/roteiros/aceite-de-mods-que-falha.js \
         --roteiro tools/roteiros/aceite-de-mods-que-nao-abre.js \
@@ -1199,6 +1200,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/tetos-dos-campos.js \
         --roteiro tools/roteiros/toque.js \
         --roteiro tools/roteiros/trocar-de-janela.js \
+        --roteiro tools/roteiros/versao-ao-hospedar.js \
         --roteiro tools/roteiros/versao-do-servidor.js
 }
 
@@ -1276,6 +1278,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/capa.cjs
     uma_bancada node apps/seele-app/bancada/camadas.cjs
     uma_bancada node apps/seele-app/bancada/saidas-de-quem-hospeda.cjs
+    uma_bancada node apps/seele-app/bancada/link-do-navegador.cjs
     uma_bancada node apps/seele-app/bancada/nucleo.cjs
     uma_bancada node apps/seele-app/bancada/tema-do-servidor.cjs
     uma_bancada node apps/seele-app/bancada/gestao-do-tema.cjs

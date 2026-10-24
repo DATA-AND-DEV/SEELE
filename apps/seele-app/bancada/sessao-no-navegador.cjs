@@ -7,16 +7,19 @@
 //       target/debug/examples/servidor_da_bancada \
 //       target/wasm32-wasip1/release/seele_motor_web.wasm
 //
-// O servidor é o `Daemon` do `seeled` (`crates/seele-server/examples/
-// servidor_da_bancada.rs`), num endereço local; ele dá o link do navegador
-// que o desktop daria, com os hashes dos certificados curtos. A página entra
-// por ele como entra pelo COLAR UM LINK: `identidadeDaPagina()`, `abrir(link)`,
-// `entrar(apelido)`. Daí em diante, só o `invoke` e o `listen` da casca.
+// O servidor é hospedado como o app hospeda (`crates/seele-server/examples/
+// servidor_da_bancada.rs`, pelo `Hospedagem`), e **o link é o que a tela de
+// quem hospeda mostra** (D-web-6): o do `Hospedagem::link_do_navegador`, que o
+// comando `link_do_navegador` da casca chama, com o convite que o HOSPEDAR
+// devolve. A página entra por ele como entra pelo COLAR UM LINK:
+// `identidadeDaPagina()`, `abrir(link)`, `entrar(apelido)`. Daí em diante, só
+// o `invoke` e o `listen` da casca.
 //
 // O que se prova:
 // 1. **a entrada**: o `entrar` resolve `{ ok: true }` com a `Entrada` do
 //    desktop (o retrato com o nome do servidor, o veredito do primeiro contato
-//    conferido e a geração), e as etapas da chegada chegam à casca;
+//    conferido e a geração), e as etapas da chegada chegam à casca; e a página
+//    lê do link o mesmo «vale até» que a tela de quem hospeda escreve;
 // 2. **a conversa**: abrir o canal, mandar, e a mensagem volta confirmada
 //    pelo servidor (`estado: "Confirmada"`, com a chave do eco), depois de um
 //    `MessagesChanged`; e a busca a acha;
@@ -292,6 +295,15 @@ async function escolherNoSeletor(aba, arquivo, comando) {
   return chamada;
 }
 
+/**
+ * O link com outro alvo, **e sem os alternativos**: o link é o da tela de quem
+ * hospeda, e leva os outros endereços que a escada achou (`alt=`); um link para
+ * um endereço que não responde chegaria ao servidor por um deles.
+ */
+function comOutroAlvo(link, alvo, endereco) {
+  return link.replace(endereco, alvo).replace(/&alt=[^&]*/, "").replace(/\?alt=[^&]*&/, "?");
+}
+
 /** Espera uma condição na página, com prazo; devolve o último valor lido. */
 async function esperar(aba, funcao, arg, prazoMs = 10_000) {
   const fim = Date.now() + prazoMs;
@@ -363,6 +375,7 @@ const invocar = (aba, comando, args) =>
     paginas.push(a);
     const { lido, entrada } = await entrarPeloLink(a.aba, servidor.link, "ana");
     confere("1", lido && lido.estado === "pronto", `o link não ficou pronto: ${JSON.stringify(lido)}`);
+    confere("1", typeof servidor.ate === "number" && lido?.valeAte === servidor.ate, `o «vale até» lido não é o da casca: ${lido?.valeAte} e ${servidor.ate}`);
     confere("1", entrada && entrada.ok === true, `a entrada não deu certo: ${JSON.stringify(entrada)}`);
     const resposta = entrada?.resposta ?? {};
     confere("1", resposta.snapshot?.server === "Bancada", `o retrato não traz o nome do servidor: ${JSON.stringify(resposta.snapshot?.server)}`);
@@ -614,7 +627,7 @@ const invocar = (aba, comando, args) =>
     const sozinho = await invocar(d.aba, "connect", { server: "10.9.9.9:8383", nickname: "dani", audio: true, joinSecret: null, tentativa: 3 });
     confere("8", typeof sozinho.erro?.RecusaDaPonte?.frase === "string", `um endereço sem link: ${JSON.stringify(sozinho)}`);
     // O CANCELAR de quem espera: um link para um endereço que não responde.
-    const mudo = servidor.link.replace(servidor.endereco, "10.255.255.1:8383");
+    const mudo = comOutroAlvo(servidor.link, "10.255.255.1:8383", servidor.endereco);
     const conviteMudo = (await invocar(d.aba, "analisar_convite", { link: mudo })).ok;
     const cancelada = await d.aba.evaluate(async (alvo) => {
       const esperando = window.__TAURI__.core.invoke("connect", { server: alvo, nickname: "dani", audio: true, joinSecret: null, tentativa: 4 });
@@ -632,7 +645,7 @@ const invocar = (aba, comando, args) =>
     confere("8", (await invocar(d.aba, "cancelar_ligacao", {})).ok === false, "o CANCELAR sem entrada em curso não respondeu false");
     // Uma entrada que falha na hora (a porta que o navegador nem tenta): a
     // recusa chega à casca, e nada fica sem dono no console.
-    const recusado = servidor.link.replace(servidor.endereco, "127.0.0.1:9");
+    const recusado = comOutroAlvo(servidor.link, "127.0.0.1:9", servidor.endereco);
     const conviteRecusado = (await invocar(d.aba, "analisar_convite", { link: recusado })).ok;
     const naHora = await invocar(d.aba, "connect", { server: conviteRecusado?.alvo, nickname: "dani", audio: true, joinSecret: null, tentativa: 5 });
     confere("8", naHora.erro === "Unreachable", `a entrada que falha na hora: ${JSON.stringify(naHora)}`);

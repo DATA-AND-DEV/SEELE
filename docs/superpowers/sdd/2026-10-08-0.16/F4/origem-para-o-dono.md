@@ -182,6 +182,12 @@ Num Chromium de PC, com o console aberto:
   uma chave de teste);
 - o console sem recusa de CSP e sem erro de página.
 
-**O que ainda falta para o passo 2:** o link do navegador de um servidor de
-verdade. Hoje só o `servidor_da_bancada` (um exemplo, preso a `127.0.0.1`) o
-escreve; o app de quem hospeda ainda não mostra o link do navegador.
+**De onde vem o link do passo 2** (D-web-6): do app de quem hospeda. Depois
+de HOSPEDAR, o diálogo A PORTA (e depois CONFIGURAÇÕES · A PORTA) tem, embaixo
+do CONVITE, a linha NAVEGADOR com o botão «copiar link do navegador», até
+quando ele vale, e o aviso de quem entra por ele (D-web-7, saída C):
+- «QUEM TIVER ESTE LINK ENTRA PELO NAVEGADOR DE QUALQUER REDE»: serve para o
+  teste de fora da rede;
+- «PELO NAVEGADOR, SÓ QUEM ESTÁ NA SUA REDE ENTRA»: o servidor só é alcançado
+  pelo ponto de encontro, que o navegador não usa. O teste então é da mesma
+  rede, ou depois de abrir a porta UDP que o aviso nomeia no roteador.

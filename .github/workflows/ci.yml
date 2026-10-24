@@ -357,6 +357,12 @@ jobs:
       - run: node apps/seele-app/bancada/saidas-de-quem-hospeda.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O link do navegador na porta de quem hospeda (D-web-6), com o aviso de
+      # quem entra por ele (D-web-7, saída C): nos quatro alcances, e sem sumir
+      # quando só o ponto de encontro alcança.
+      - run: node apps/seele-app/bancada/link-do-navegador.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # O núcleo de confiança no desktop (tarefa 9 da F3): o MUDO, o fone, o
       # SAIR, o «no ar» e o veredito nas cores do produto, sob qualquer tema.
       - run: node apps/seele-app/bancada/nucleo.cjs
@@ -420,6 +426,7 @@ jobs:
         run: >-
           python3 tools/carga-da-casca.py
           --roteiro tools/roteiros/abertura-com-entrar.js
+          --roteiro tools/roteiros/abrir-versao-que-falha.js
           --roteiro tools/roteiros/aceite-de-mods-em-corrida.js
           --roteiro tools/roteiros/aceite-de-mods-que-falha.js
           --roteiro tools/roteiros/aceite-de-mods-que-nao-abre.js
@@ -469,6 +476,7 @@ jobs:
           --roteiro tools/roteiros/tetos-dos-campos.js
           --roteiro tools/roteiros/toque.js
           --roteiro tools/roteiros/trocar-de-janela.js
+          --roteiro tools/roteiros/versao-ao-hospedar.js
           --roteiro tools/roteiros/versao-do-servidor.js
       # A bancada do celular (F8; D-api-8): a casca desenhada no Chromium e no
       # WebKit, a 390 × 844 e a 360 × 800, e o desktop igual pixel a pixel sem a

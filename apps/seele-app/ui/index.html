@@ -473,17 +473,6 @@
          Preenchido por camada-versoes.js. -->
     <p id="boot-linha-legada" class="nota" role="status" hidden></p>
 
-    <details id="boot-versoes" class="boot-nome-publico" hidden>
-      <summary>Hospedar com outra versão do SEELE</summary>
-      <div class="server-campo">
-        <ul id="lista-versoes" class="server-dispositivos"></ul>
-        <p class="nota">
-          Cada versão guarda as conversas dela em separado. Abrir outra versão
-          não leva o que foi escrito nesta — e não apaga nada.
-        </p>
-      </div>
-    </details>
-
     <div class="boot-rodape">
       <button id="boot-perfil" class="boot-perfil" type="button"
               aria-label="Personalizar seu perfil" title="o nome com que você entra">
@@ -581,6 +570,10 @@
          data-anuncio="Preparar este servidor: nome, imagem e versão.">
   <div class="boot-caixa">
     <h1 id="preparar-titulo" class="boot-titulo">PREPARAR ESTE SERVIDOR</h1>
+    <!-- O que é só de um servidor novo. O HOSPEDAR do servidor que já estava
+         aqui passa por esta tela só pela VERSÃO QUE VAI HOSPEDAR, e isto some
+         (tela-boot.js, `abrirPreparar`). -->
+    <div id="preparar-do-novo">
     <p class="nota">
       O nome e a imagem são o que as pessoas veem ao entrar. Os dois são
       opcionais e mudam depois, em CONFIGURAÇÕES.
@@ -609,6 +602,8 @@
         <button id="preparar-icone-escolher" class="botao-fantasma" type="button">ESCOLHER IMAGEM</button>
         <button id="preparar-icone-tirar" class="botao-fantasma" type="button" hidden>TIRAR</button>
       </div>
+    </div>
+
     </div>
 
     <div id="preparar-versoes" class="server-campo" hidden>
@@ -2611,6 +2606,14 @@
             <input id="porta-link-config" class="convite-link" readonly spellcheck="false">
             <button id="porta-copiar-config" class="botao-fantasma" type="button">copiar</button>
           </div>
+          <!-- O link do navegador mora aqui também, como o convite (D-web-6). -->
+          <div id="porta-navegador-config" class="porta-linha" hidden>
+            <span class="rotulo">NAVEGADOR</span>
+            <input id="porta-link-navegador-config" class="convite-link" readonly spellcheck="false">
+            <button id="porta-copiar-navegador-config" class="botao-fantasma" type="button">copiar link do navegador</button>
+          </div>
+          <p id="porta-navegador-aviso-config" class="convite-alcance" hidden></p>
+          <p id="porta-navegador-nota-config" class="nota" hidden></p>
           <!--
             **O alcance do link, e ele veio da faixa que saiu.**
 
@@ -3942,6 +3945,23 @@
         <input id="porta-link" class="convite-link" readonly spellcheck="false">
         <button id="porta-copiar" class="botao-fantasma" type="button">copiar</button>
       </div>
+      <!--
+        **O link do navegador, junto do convite** (D-web-6): o mesmo convite,
+        na forma que o web app abre. Sem ele, quem entra pelo celular não tinha
+        por onde entrar num servidor de verdade.
+
+        Nasce escondido, e o rótulo e a nota dizem que é do navegador: os dois
+        links levam ao mesmo servidor, e quem tem o app usa o de cima. A nota diz
+        até quando ele vale, porque os certificados que ele nomeia vencem; antes
+        disso, `escreverOLinkDoNavegador` já põe aqui o seguinte.
+      -->
+      <div id="porta-navegador" class="porta-linha" hidden>
+        <span class="rotulo">NAVEGADOR</span>
+        <input id="porta-link-navegador" class="convite-link" readonly spellcheck="false">
+        <button id="porta-copiar-navegador" class="botao-fantasma" type="button">copiar link do navegador</button>
+      </div>
+      <p id="porta-navegador-aviso" class="convite-alcance" hidden></p>
+      <p id="porta-navegador-nota" class="nota" hidden></p>
       <!--
         O alcance sai do mesmo lugar que já o escrevia na tela de entrada: o
         `hospedar` responde em que degrau parou. Nasce escondido porque, antes

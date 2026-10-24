@@ -1558,18 +1558,22 @@ mod o_launcher_ligado_ao_produto {
     /// configuração dele —, sempre absoluta.
     #[test]
     fn a_identidade_deste_processo_e_a_variavel_ou_a_pasta_do_app() {
+        // A esperada passa pelo mesmo `absolute` do produto (ADR 0061: a pasta
+        // sai sempre absoluta). No Windows, `/a/maquina` vira `C:\a\maquina`, e o
+        // texto do Unix reprovava ali com o produto certo.
+        let absoluta = |caminho: &str| std::path::absolute(caminho).unwrap();
         assert_eq!(
             super::pasta_da_identidade_deste_processo("/a/config", Some("/a/maquina")),
-            std::path::PathBuf::from("/a/maquina")
+            absoluta("/a/maquina")
         );
         assert_eq!(
             super::pasta_da_identidade_deste_processo("/a/config", Some("")),
-            std::path::PathBuf::from("/a/config"),
+            absoluta("/a/config"),
             "vazia vale como ausente"
         );
         assert_eq!(
             super::pasta_da_identidade_deste_processo("/a/config", None),
-            std::path::PathBuf::from("/a/config")
+            absoluta("/a/config")
         );
         assert!(
             super::pasta_da_identidade_deste_processo("relativa", None).is_absolute(),

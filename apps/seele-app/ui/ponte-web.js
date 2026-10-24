@@ -132,6 +132,9 @@ const RECUSAS_NOMEADAS = new Map([
   ["instalar_mod", RECUSA_MODS],
   ["ligar_portaria", RECUSA_PORTARIA],
   ["linhas_para_hospedar", RECUSA_HOSPEDAR],
+  // O link do navegador é do servidor que esta máquina hospeda (D-web-6), e o
+  // navegador não hospeda.
+  ["link_do_navegador", RECUSA_HOSPEDAR],
   ["meu_codigo", RECUSA_AGENDA],
   ["mod_nativo_ativar", RECUSA_NATIVO],
   ["mod_nativo_colher", RECUSA_NATIVO],
