@@ -5,7 +5,15 @@
 //! Spec 0.16, §1, «O manifesto». Um teste que lesse o arquivo com um analisador
 //! nosso provaria só que concordamos conosco. O `RemoteRelease` é o código que
 //! roda na máquina de quem ainda está na 0.15.1.
-
+//!
+//! **Fora do Windows, de propósito.** Todo teste daqui roda o
+//! `empacotar/manifesto.py`, e quem o roda é o `publicar.sh`, no Mac de quem
+//! publica: o PC Windows da bateria não tem Python (o `python3` de lá é o atalho
+//! da Microsoft Store), e reprovava os onze sem provar nada do produto. Nenhum
+//! deles mede algo que o Windows faça: o arquivo é escrito no Mac, e os dois
+//! leitores (o `RemoteRelease` e o `Manifesto`) são o mesmo código nos três
+//! sistemas. Rodam no Mac e no Linux.
+#![cfg(not(windows))]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
