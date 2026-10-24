@@ -73,6 +73,82 @@ pub struct EstadoDoServidor {
     pub sessoes_com_desconhecidas: u64,
 }
 
+/// O link do navegador de um convite, e até quando ele abre
+/// ([`Hospedagem::link_do_navegador`], D-web-6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkDoNavegador {
+    /// O link na origem do navegador (`ORIGEM_DO_NAVEGADOR`), com o `wh=` e o `ate=`.
+    pub link: String,
+    /// Até quando ele abre, em segundos Unix UTC: o `ate=` que vai nele.
+    pub ate: u64,
+    /// Quando um link feito de novo passa a durar mais, em segundos Unix UTC: é
+    /// quando a casca pede outro.
+    pub renova: u64,
+    /// Quem de fora entra por ele ([`alcance_do_navegador`]).
+    pub alcance: AlcanceDoNavegador,
+}
+
+/// **Quem de fora da rede de casa entra pelo link do navegador** (D-web-7,
+/// saída C): a pergunta que o botão responde ao lado do link.
+///
+/// O navegador não abre socket UDP, e por isso perde o degrau 4 do ADR 0022 (o
+/// furo pelo ponto de encontro; ADR 0057, «O que isto custa»). O link do app e
+/// o do navegador são o mesmo convite, e alcançam a mesma gente em todo degrau
+/// **menos** nesse. Sem este aviso, quem hospeda atrás de um roteador sem UPnP
+/// mandava o link do navegador achando que mandou o do app, e o amigo
+/// descobria do outro lado, como «não conecta».
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlcanceDoNavegador {
+    /// Endereço próprio, ou porta aberta no roteador: entra de qualquer rede,
+    /// como pelo app.
+    Alcanca,
+    /// Só o ponto de encontro abriu o caminho: pelo app, quem tem o link entra
+    /// de fora; pelo navegador, só quem está na mesma rede.
+    SoPeloEncontro,
+    /// Nem o app passa da rede de casa (ou da VPN): os dois links são locais.
+    SoNaRede,
+    /// Não se sabe: o IPv6 direto, que o firewall do roteador pode barrar sem
+    /// ninguém daqui ver, ou a escada sem resposta.
+    NaoSeSabe,
+}
+
+impl AlcanceDoNavegador {
+    /// O nome estável que atravessa para a casca, onde mora a frase.
+    #[must_use]
+    pub fn nome(self) -> &'static str {
+        match self {
+            Self::Alcanca => "Alcanca",
+            Self::SoPeloEncontro => "SoPeloEncontro",
+            Self::SoNaRede => "SoNaRede",
+            Self::NaoSeSabe => "NaoSeSabe",
+        }
+    }
+}
+
+/// O degrau em que a escada parou, dito para o navegador.
+#[must_use]
+pub fn alcance_do_navegador(degrau: Option<crate::alcance::Degrau>) -> AlcanceDoNavegador {
+    use crate::alcance::Degrau;
+    match degrau {
+        Some(Degrau::EnderecoDireto | Degrau::PortaNoRoteador) => AlcanceDoNavegador::Alcanca,
+        Some(Degrau::FuroDeNat) => AlcanceDoNavegador::SoPeloEncontro,
+        Some(Degrau::RedeLocalOuVpn | Degrau::SoRedeLocal) => AlcanceDoNavegador::SoNaRede,
+        Some(Degrau::Ipv6Direto) | None => AlcanceDoNavegador::NaoSeSabe,
+    }
+}
+
+/// Por que um convite não deu link do navegador.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemLinkDoNavegador {
+    /// O texto não é um convite, ou não tem a forma que o navegador lê.
+    ConviteInvalido,
+    /// O convite leva a impressão de outro servidor.
+    OutroServidor,
+    /// O servidor não apresenta certificado curto agora: a sala pessoal, ou um
+    /// servidor no ar há mais tempo que as janelas que ele gerou ao subir.
+    SemJanelas,
+}
+
 /// Um servidor rodando dentro deste processo.
 ///
 /// Descartar isto encerra o servidor e derruba quem estiver conectado. É o
@@ -546,6 +622,51 @@ impl Hospedagem {
         }
     }
 
+    /// **O link do navegador de um convite deste servidor** (D-web-6): o mesmo
+    /// convite, na forma que o web app abre (`Convite::link_do_navegador`), com
+    /// os hashes dos certificados curtos que este servidor apresenta de agora em
+    /// diante ([`crate::tls::janelas_do_link`]).
+    ///
+    /// Recebe o convite que a casca mostra, e não monta outro: com um convite
+    /// de uso único, o link do navegador leva **o mesmo** token, e com um nome
+    /// público, o mesmo nome. Duas construções do mesmo convite é uma que vai
+    /// ficar para trás, como o comentário de [`Self::convite`] já dizia.
+    ///
+    /// `agora` em segundos Unix UTC. É argumento, e não o relógio daqui, para a
+    /// casca e a bancada pedirem o mesmo link pelo mesmo caminho.
+    ///
+    /// # Errors
+    ///
+    /// [`SemLinkDoNavegador`]: um convite que não se lê, um de outro servidor
+    /// (os hashes daqui num convite de lá não abririam nada), e um servidor sem
+    /// a janela de agora.
+    pub fn link_do_navegador(
+        &self,
+        convite: &str,
+        agora: u64,
+    ) -> Result<LinkDoNavegador, SemLinkDoNavegador> {
+        let convite =
+            seele_proto::uri::analisar(convite).map_err(|_| SemLinkDoNavegador::ConviteInvalido)?;
+        let deste = convite
+            .impressao_digital
+            .as_deref()
+            .is_some_and(|impressao| impressao.eq_ignore_ascii_case(self.impressao_digital()));
+        if !deste {
+            return Err(SemLinkDoNavegador::OutroServidor);
+        }
+        let janelas = crate::tls::janelas_do_link(self.server.janelas_do_navegador(), agora)
+            .ok_or(SemLinkDoNavegador::SemJanelas)?;
+        let link = convite
+            .link_do_navegador(&janelas.hashes, Some(janelas.ate))
+            .map_err(|_| SemLinkDoNavegador::ConviteInvalido)?;
+        Ok(LinkDoNavegador {
+            link,
+            ate: janelas.ate,
+            renova: janelas.renova,
+            alcance: alcance_do_navegador(self.alcance().map(crate::alcance::Alcance::degrau)),
+        })
+    }
+
     /// Numa sala, a linha de resumo da campainha no log: quantos tocaram e
     /// como acabaram (tarefa 31 da F7). Num servidor guardado não há campainha,
     /// e nada a dizer.
@@ -706,6 +827,31 @@ impl Drop for Hospedagem {
 #[must_use]
 pub fn endereco_de_rede() -> Option<std::net::IpAddr> {
     crate::alcance::endereco_de_rede_local()
+}
+
+#[cfg(test)]
+mod o_alcance_do_navegador {
+    use super::{alcance_do_navegador, AlcanceDoNavegador};
+    use crate::alcance::Degrau;
+
+    /// **O degrau 4 é o que o navegador perde, e só ele** (D-web-7, saída C):
+    /// pelo furo, o link do navegador alcança só a rede de casa, e a casca diz
+    /// isso ao lado do botão; nos degraus 1 e 3, alcança como o do app; no 2,
+    /// e sem escada, não se sabe.
+    #[test]
+    fn so_o_degrau_4_tira_o_navegador_de_fora() {
+        for (degrau, esperado) in [
+            (Some(Degrau::EnderecoDireto), AlcanceDoNavegador::Alcanca),
+            (Some(Degrau::PortaNoRoteador), AlcanceDoNavegador::Alcanca),
+            (Some(Degrau::FuroDeNat), AlcanceDoNavegador::SoPeloEncontro),
+            (Some(Degrau::Ipv6Direto), AlcanceDoNavegador::NaoSeSabe),
+            (Some(Degrau::RedeLocalOuVpn), AlcanceDoNavegador::SoNaRede),
+            (Some(Degrau::SoRedeLocal), AlcanceDoNavegador::SoNaRede),
+            (None, AlcanceDoNavegador::NaoSeSabe),
+        ] {
+            assert_eq!(alcance_do_navegador(degrau), esperado, "{degrau:?}");
+        }
+    }
 }
 
 #[cfg(test)]

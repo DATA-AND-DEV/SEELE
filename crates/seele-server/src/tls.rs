@@ -538,6 +538,69 @@ fn indice_vigente<'a>(curtos: impl Iterator<Item = &'a Curto>, agora: u64) -> Op
         .map(|(posicao, _)| posicao)
 }
 
+/// O que um link do navegador feito agora leva (D-web-6): os hashes, até
+/// quando ele abre, e quando um feito de novo passa a durar mais.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JanelasDoLink {
+    /// Os hashes, em hexadecimal minúsculo, da janela de agora em diante.
+    pub hashes: Vec<String>,
+    /// Quando o servidor deixa de apresentar todos eles, em segundos Unix UTC.
+    pub ate: u64,
+    /// O começo da janela seguinte à de agora: a partir dele, um link feito de
+    /// novo leva uma janela a mais, e é esse que a casca passa a mostrar.
+    pub renova: u64,
+}
+
+/// **As janelas que um link do navegador feito `agora` leva** (D-web-6): a de
+/// agora e as seguintes, em sequência, até
+/// [`seele_proto::uri::LIMITE_DE_HASHES_DO_NAVEGADOR`].
+///
+/// **A de agora primeiro, e sem buraco**, porque o servidor apresenta só o
+/// curto da janela de agora ([`PorAlpn::vigente`]): um link sem ela não abre
+/// hoje, e um com um buraco no meio deixa de abrir no buraco. Por isso não
+/// servem «as que valem agora», que era a conta do `servidor_da_bancada`: no
+/// último dia de uma janela a seguinte já vale pelo `not_before`, e a anterior
+/// ainda vale por seis dias depois de o servidor tê-la largado.
+///
+/// **O `ate` é quando o servidor larga a última delas** — o começo da janela
+/// seguinte —, e não o fim da validade do curto, que vem um
+/// [`seele_proto::transport::PASSO_DA_JANELA`] depois. Nesse intervalo o
+/// certificado ainda vale, mas o servidor já apresenta outro: com o fim da
+/// validade, a página diria que o link vale, e a conexão seria recusada sem
+/// frase nenhuma.
+///
+/// `None` sem a janela de agora: a sala pessoal, que não tem curtos, ou um
+/// servidor no ar há mais que as
+/// [`seele_proto::transport::JANELAS_ANUNCIADAS`] que ele gerou ao subir.
+#[must_use]
+pub fn janelas_do_link(
+    janelas: &[seele_proto::control::JanelaDoNavegador],
+    agora: u64,
+) -> Option<JanelasDoLink> {
+    let antes = seele_proto::transport::ANTES_DA_JANELA.as_secs();
+    let passo = seele_proto::transport::PASSO_DA_JANELA.as_secs();
+    let comeco = |indice: u64| EPOCA_DAS_JANELAS.saturating_add(indice.saturating_mul(passo));
+    let de_agora = janela_de(agora);
+    let quantas = u64::try_from(seele_proto::uri::LIMITE_DE_HASHES_DO_NAVEGADOR).unwrap_or(1);
+    let mut hashes = Vec::new();
+    let mut ate = None;
+    for indice in de_agora..de_agora.saturating_add(quantas) {
+        let Some(janela) = janelas.iter().find(|janela| {
+            janela_de(janela.nao_antes.saturating_add(antes)) == indice && agora < janela.nao_depois
+        }) else {
+            break;
+        };
+        hashes.push(hex(&janela.hash));
+        ate = Some(comeco(indice.saturating_add(1)).min(janela.nao_depois));
+    }
+    let ate = ate?;
+    Some(JanelasDoLink {
+        hashes,
+        ate,
+        renova: comeco(de_agora.saturating_add(1)).min(ate),
+    })
+}
+
 impl rustls::server::ResolvesServerCert for PorAlpn {
     fn resolve(
         &self,
@@ -833,7 +896,11 @@ mod uma_chave_por_maquina {
     reason = "num teste, o pânico é o relatório"
 )]
 mod os_curtos_do_h3 {
-    use super::{curtos_de, dia_civil, indice_vigente, janela_de, Identity, EPOCA_DAS_JANELAS};
+    use super::{
+        curtos_de, dia_civil, indice_vigente, janela_de, janelas_do_link, Identity,
+        EPOCA_DAS_JANELAS,
+    };
+    use seele_proto::control::JanelaDoNavegador;
     use seele_proto::transport::{ANTES_DA_JANELA, PASSO_DA_JANELA, VALIDADE_DO_CURTO};
 
     const DIA: u64 = 86_400;
@@ -901,6 +968,64 @@ mod os_curtos_do_h3 {
         );
         // Antes da primeira gerada, nenhuma é a de agora.
         assert_eq!(indice_vigente(curtos.iter(), inicio_da_3 - 1), None);
+    }
+
+    /// As janelas de índice `indices`, como o servidor as anuncia, com o hash
+    /// feito do próprio índice.
+    fn anunciadas(indices: impl IntoIterator<Item = u64>) -> Vec<JanelaDoNavegador> {
+        indices
+            .into_iter()
+            .map(|k| {
+                let nao_antes =
+                    EPOCA_DAS_JANELAS + k * PASSO_DA_JANELA.as_secs() - ANTES_DA_JANELA.as_secs();
+                JanelaDoNavegador {
+                    hash: [u8::try_from(k).unwrap(); 32],
+                    nao_antes,
+                    nao_depois: nao_antes + VALIDADE_DO_CURTO.as_secs(),
+                }
+            })
+            .collect()
+    }
+
+    fn comeco(k: u64) -> u64 {
+        EPOCA_DAS_JANELAS + k * PASSO_DA_JANELA.as_secs()
+    }
+
+    /// **O link leva a janela de agora e as três seguintes, e vale até o
+    /// servidor largar a última** (D-web-6) — no último dia da janela também,
+    /// com a seguinte já valendo e a anterior ainda válida.
+    #[test]
+    fn o_link_leva_a_de_agora_e_as_seguintes_ate_o_servidor_largar_a_ultima() {
+        let janelas = anunciadas(3..12);
+        let hex = |k: u8| format!("{k:02x}").repeat(32);
+        for agora in [comeco(5) + DIA, comeco(6) - DIA / 2] {
+            let link = janelas_do_link(&janelas, agora).unwrap();
+            assert_eq!(link.hashes, [hex(5), hex(6), hex(7), hex(8)], "{agora}");
+            assert_eq!(link.ate, comeco(9));
+            assert_eq!(link.renova, comeco(6));
+        }
+        // A janela da vez decide, e não a ordem em que vieram.
+        let mut fora_de_ordem = janelas.clone();
+        fora_de_ordem.reverse();
+        assert_eq!(
+            janelas_do_link(&fora_de_ordem, comeco(5) + DIA),
+            janelas_do_link(&janelas, comeco(5) + DIA)
+        );
+    }
+
+    /// Sem a de agora não há link, e um buraco ou o fim das geradas encurtam o
+    /// link até elas.
+    #[test]
+    fn sem_a_de_agora_nao_ha_link_e_o_buraco_encurta_o_link() {
+        assert_eq!(janelas_do_link(&anunciadas(6..12), comeco(5) + DIA), None);
+        assert_eq!(janelas_do_link(&[], comeco(5) + DIA), None);
+        let com_buraco = anunciadas([5, 6, 8, 9]);
+        let link = janelas_do_link(&com_buraco, comeco(5) + DIA).unwrap();
+        assert_eq!(link.hashes.len(), 2);
+        assert_eq!(link.ate, comeco(7));
+        let no_fim = janelas_do_link(&anunciadas(3..6), comeco(5) + DIA).unwrap();
+        assert_eq!(no_fim.hashes.len(), 1);
+        assert_eq!((no_fim.ate, no_fim.renova), (comeco(6), comeco(6)));
     }
 }
 

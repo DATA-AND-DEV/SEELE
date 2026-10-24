@@ -1929,6 +1929,62 @@ function fraseDaSala(estado) {
   }
 }
 
+/**
+ * **O link do navegador na porta de quem hospeda** (D-web-6), ao lado do
+ * convite. O rótulo e o botão estão no `index.html`, como os do convite; aqui
+ * fica o que muda com o link.
+ *
+ * A nota diz três coisas, e cada uma tem motivo: **para quem** é (quem entra
+ * sem o app, e no celular é este), porque os dois links levam ao mesmo
+ * servidor e quem tem o app usa o de cima; **que é o mesmo convite**, porque um
+ * convite de uso único dá uma entrada só, por qualquer dos dois; e **até
+ * quando vale**, porque os certificados que ele nomeia vencem, e antes disso
+ * o campo já traz o seguinte.
+ */
+const LINK_DO_NAVEGADOR = Object.freeze({
+  // `data` em dd/mm e `hora` em hh:mm, no relógio desta máquina.
+  nota: (data, hora) =>
+    "Para quem entra pelo navegador, sem o app — no celular, é este. É o mesmo convite de cima. " +
+    `Vale até ${data}, às ${hora}; antes de vencer, este campo já mostra o próximo.`,
+  // `SemJanelas`: o servidor está no ar há mais tempo que os certificados que
+  // ele gerou ao subir (cerca de um ano).
+  SemJanelas:
+    "Sem link do navegador: os certificados deste servidor que o navegador aceita venceram. " +
+    "O convite de cima continua valendo. Pare de hospedar e hospede de novo, e o SEELE gera outros.",
+  // **Quem de fora entra pelo navegador** (D-web-7, saída C): o nome vem do
+  // `AlcanceDoNavegador` do servidor, e a frase fica ao lado do botão. O
+  // navegador não abre UDP e perde só o furo pelo ponto de encontro (o degrau
+  // 4); nos outros degraus, alcança quem o convite alcança. O link nunca se
+  // esconde: quem está na mesma rede entra por ele em todos os casos.
+  alcance: Object.freeze({
+    Alcanca: () => "QUEM TIVER ESTE LINK ENTRA PELO NAVEGADOR DE QUALQUER REDE, como pelo convite.",
+    // A única que diz o que fazer, porque é a única que tem conserto de quem
+    // hospeda e que o convite de cima não acusa: ele entra pelo ponto de
+    // encontro, e o navegador não.
+    SoPeloEncontro: (porta) =>
+      "PELO NAVEGADOR, SÓ QUEM ESTÁ NA SUA REDE ENTRA.\n" +
+      "O convite de cima chega de fora pelo ponto de encontro; o navegador não usa o encontro. " +
+      `Para quem está fora entrar pelo navegador, abra a porta UDP ${porta} no roteador, ` +
+      "ou ligue o IPv6 nele, se o seu provedor oferecer.",
+    SoNaRede: () => "COMO O CONVITE, ESTE LINK SÓ FUNCIONA NA SUA REDE.",
+    NaoSeSabe: () =>
+      "ESTE LINK PODE NÃO ABRIR DE FORA DA SUA REDE.\n" +
+      "O roteador pode bloquear a entrada. Teste com alguém de fora da sua rede antes de contar com ele.",
+  }),
+});
+
+/**
+ * O que a porta escreve junto do link do navegador: o aviso de quem entra por
+ * ele e a nota de até quando vale. `link` é a resposta do `link_do_navegador`
+ * (`{ alcance, porta, ate }`), e `data`/`hora` a validade já escrita no relógio
+ * desta máquina. Um alcance que esta casca não conhece cai no «não se sabe»,
+ * que é o que ele é: a casca não sabe.
+ */
+function fraseDoLinkDoNavegador(link, data, hora) {
+  const aviso = LINK_DO_NAVEGADOR.alcance[link.alcance] ?? LINK_DO_NAVEGADOR.alcance.NaoSeSabe;
+  return { aviso: aviso(link.porta), nota: LINK_DO_NAVEGADOR.nota(data, hora) };
+}
+
 // ---------------------------------------------- as cascas do navegador (P10)
 //
 // As frases da casca do celular e da casca larga (F8; o spec da F8, §13, e a
@@ -2112,7 +2168,7 @@ const FRASES_DO_CELULAR = Object.freeze({
       soEndereco: Object.freeze(["UM ENDEREÇO SOZINHO NÃO ABRE CONEXÃO NO NAVEGADOR",
         "O link traz a chave do servidor, e sem ela o navegador não conecta. Peça o link a quem hospeda."]),
       doApp: Object.freeze(["ESTE LINK É PARA O APP DO SEELE",
-        "No navegador ele não traz o que confere o servidor. Peça a quem hospeda o link para o celular."]),
+        "No navegador ele não traz o que confere o servidor. Peça a quem hospeda o link do navegador."]),
     }),
     entrarEm: Object.freeze({
       titulo: "ENTRAR EM",

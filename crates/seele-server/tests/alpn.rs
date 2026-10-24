@@ -312,3 +312,84 @@ async fn reabrir_o_servidor_mantem_os_hashes_das_janelas() {
         "reabrir o servidor trocou os hashes, e os links já mandados deixariam de abrir"
     );
 }
+
+/// **O link do navegador de quem hospeda abre** (D-web-6): o primeiro hash dele
+/// é o do curto que o `h3` apresenta agora, num aperto de mão de verdade, e o
+/// resto do link é o convite que a casca mostra — o mesmo endereço, a mesma
+/// impressão e o mesmo token de uso único.
+#[tokio::test]
+async fn o_link_do_navegador_de_quem_hospeda_nomeia_o_curto_apresentado() {
+    use seele_proto::uri::{
+        analisar, analisar_no_navegador, LIMITE_DE_HASHES_DO_NAVEGADOR, ORIGEM_DO_NAVEGADOR,
+    };
+    use seele_server::hospedagem::{Hospedagem, SemLinkDoNavegador};
+
+    let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
+        .await
+        .unwrap();
+    let agora = agora();
+    // O token de verdade, como o `criar_convite_do_server` da casca o cria.
+    let token = {
+        let banco = hospedagem.persistence();
+        let mut persistence = banco.lock().await;
+        seele_server::admissao::criar_convite(&mut persistence, "para o navegador").unwrap()
+    };
+    let convite = hospedagem.convite_com_token(&token);
+    let link = hospedagem.link_do_navegador(&convite, agora).unwrap();
+    let lido = analisar_no_navegador(&link.link, ORIGEM_DO_NAVEGADOR).unwrap();
+    let original = analisar(&convite).unwrap();
+    assert_eq!(lido.convite.alvo, original.alvo);
+    assert_eq!(lido.convite.alternativos, original.alternativos);
+    assert_eq!(lido.convite.impressao_digital, original.impressao_digital);
+    assert_eq!(lido.convite.token, Some(token));
+    assert_eq!(lido.hashes.len(), LIMITE_DE_HASHES_DO_NAVEGADOR);
+    assert_eq!(lido.ate, Some(link.ate));
+    assert!(agora < link.renova && link.renova < link.ate, "{link:?}");
+
+    let porta = hospedagem.endereco().port();
+    let (curto, conexao, _ponta) = apertar(
+        SocketAddr::from(([127, 0, 0, 1], porta)),
+        ALPN_DO_NAVEGADOR,
+        false,
+    )
+    .await;
+    assert!(conexao.is_some(), "o aperto de mão do `h3` não acabou");
+    let apresentado: String = certificate_digest(curto.unwrap().as_ref())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(
+        lido.hashes[0], apresentado,
+        "o link não nomeia, primeiro, o curto que o servidor apresenta agora"
+    );
+
+    let de_outro = convite.replace(
+        original.impressao_digital.as_deref().unwrap(),
+        &"ab".repeat(32),
+    );
+    assert_eq!(
+        hospedagem.link_do_navegador(&de_outro, agora),
+        Err(SemLinkDoNavegador::OutroServidor)
+    );
+    assert_eq!(
+        hospedagem.link_do_navegador("um texto qualquer", agora),
+        Err(SemLinkDoNavegador::ConviteInvalido)
+    );
+    hospedagem.encerrar().await;
+}
+
+/// A sala pessoal não serve ao navegador (a chave Ed25519), e diz isso em vez
+/// de dar um link que não abre.
+#[tokio::test]
+async fn a_sala_pessoal_nao_da_link_do_navegador() {
+    use seele_server::hospedagem::{Hospedagem, SemLinkDoNavegador};
+
+    let sala = Hospedagem::iniciar_sala(0, &[7; 32], "dona", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        sala.link_do_navegador(&sala.convite(), agora()),
+        Err(SemLinkDoNavegador::SemJanelas)
+    );
+    sala.encerrar().await;
+}

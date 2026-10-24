@@ -662,6 +662,100 @@ function guardarOLinkDaPorta(link) {
     if (onde) onde.value = link;
   }
   $("secao-porta-item").hidden = false;
+  escreverOLinkDoNavegador(link);
+}
+
+/**
+ * Os dois lugares do link do navegador, como os do convite: o diálogo que sobe
+ * com a rede e o painel `A PORTA` da configuração.
+ */
+const LUGARES_DO_LINK_DO_NAVEGADOR = Object.freeze([
+  Object.freeze({ linha: "porta-navegador", campo: "porta-link-navegador", botao: "porta-copiar-navegador", aviso: "porta-navegador-aviso", nota: "porta-navegador-nota" }),
+  Object.freeze({ linha: "porta-navegador-config", campo: "porta-link-navegador-config", botao: "porta-copiar-navegador-config", aviso: "porta-navegador-aviso-config", nota: "porta-navegador-nota-config" }),
+]);
+
+/** Qual pedido do link do navegador vale: um convite mais novo invalida os de antes. */
+let vezDoLinkDoNavegador = 0;
+/** O pedido do link seguinte, marcado para quando um novo durar mais. */
+let renovacaoDoLinkDoNavegador = null;
+
+/**
+ * O teto de um `setTimeout`: além dele, o navegador dispara na hora. O link
+ * renova a cada seis dias, abaixo disso; o teto é para um relógio torto não
+ * virar um laço.
+ */
+const TETO_DA_ESPERA_MS = 2 ** 31 - 1;
+
+/** `dd/mm` e `hh:mm` de um instante Unix, no relógio desta máquina. */
+function diaEHora(segundos) {
+  const quando = new Date(segundos * 1000);
+  const dois = (n) => String(n).padStart(2, "0");
+  return [
+    `${dois(quando.getDate())}/${dois(quando.getMonth() + 1)}`,
+    `${dois(quando.getHours())}:${dois(quando.getMinutes())}`,
+  ];
+}
+
+/**
+ * **O link do navegador do convite que a porta mostra** (D-web-6).
+ *
+ * O link é do `link_do_navegador`, que o monta do mesmo convite — com o mesmo
+ * token de uso único, quando há um —, e a bancada da sessão no navegador o
+ * pede pelo mesmo caminho. Aqui se escreve, e se marca a renovação: os
+ * certificados que o link nomeia vencem, e a cada janela nova (seis dias) um
+ * link feito de novo dura mais. O campo troca sozinho, e quem copiar depois
+ * leva o que dura mais.
+ *
+ * Sem convite (`null`), esconde e esquece. Sem link, esconde também, e diz
+ * por quê quando o motivo é de quem hospeda resolver (`SemJanelas`); os outros
+ * são de um convite que já saiu da tela, e vão ao console.
+ */
+async function escreverOLinkDoNavegador(convite) {
+  const vez = ++vezDoLinkDoNavegador;
+  clearTimeout(renovacaoDoLinkDoNavegador);
+  renovacaoDoLinkDoNavegador = null;
+  let link = null;
+  let falha = null;
+  if (convite) {
+    try {
+      link = await invoke("link_do_navegador", { convite });
+    } catch (motivo) {
+      falha = motivo;
+      console.warn("link do navegador:", motivo);
+    }
+  }
+  if (vez !== vezDoLinkDoNavegador) return;
+
+  // O aviso de quem entra pelo navegador (D-web-7, saída C) vem com o link,
+  // do mesmo servidor e no mesmo instante: um link que não serve a quem está
+  // fora não sai calado, e também não some, porque quem está na mesma rede
+  // ainda entra por ele.
+  const [data, hora] = link ? diaEHora(link.ate) : [];
+  const { aviso, nota } = link
+    ? fraseDoLinkDoNavegador(link, data, hora)
+    : { aviso: "", nota: falha === "SemJanelas" ? LINK_DO_NAVEGADOR.SemJanelas : "" };
+  const alcancaDeFora = link?.alcance === "Alcanca";
+  for (const lugar of LUGARES_DO_LINK_DO_NAVEGADOR) {
+    const linha = $(lugar.linha);
+    if (!linha) continue;
+    $(lugar.campo).value = link ? link.link : "";
+    const botao = $(lugar.botao);
+    botao.dataset.rotulo ??= botao.textContent;
+    botao.textContent = botao.dataset.rotulo;
+    linha.hidden = !link;
+    const oAviso = $(lugar.aviso);
+    oAviso.textContent = aviso;
+    oAviso.hidden = aviso === "";
+    oAviso.classList.toggle("convite-alcance-curto", !alcancaDeFora);
+    oAviso.classList.toggle("convite-alcance-longe", alcancaDeFora);
+    $(lugar.nota).textContent = nota;
+    $(lugar.nota).hidden = nota === "";
+  }
+
+  if (link) {
+    const espera = Math.min(Math.max(link.renova * 1000 - Date.now(), 0) + 1000, TETO_DA_ESPERA_MS);
+    renovacaoDoLinkDoNavegador = setTimeout(() => escreverOLinkDoNavegador(convite), espera);
+  }
 }
 
 /**
@@ -687,6 +781,7 @@ function esquecerOLinkDaPorta() {
   alcance.textContent = "";
   alcance.hidden = true;
   $("secao-porta-item").hidden = true;
+  escreverOLinkDoNavegador(null);
 }
 
 /** Para onde o teclado volta quando o diálogo da porta fecha. */
@@ -795,6 +890,12 @@ $("porta-configuracoes").addEventListener("click", async () => {
 $("porta-copiar-config").addEventListener("click", () => {
   copiarLink($("porta-link-config"), $("porta-copiar-config"));
 });
+
+for (const lugar of LUGARES_DO_LINK_DO_NAVEGADOR) {
+  $(lugar.botao).addEventListener("click", () => {
+    copiarLink($(lugar.campo), $(lugar.botao));
+  });
+}
 
 // `Escape` fecha, em fase de captura: com ele aberto, é a coisa mais de cima.
 window.addEventListener(
