@@ -84,7 +84,8 @@ const LIMITES_DA_REGIAO = Object.freeze({
    * superfície), e este teto vale para cada uma: um MOD com as doze
    * superfícies que pode manter de pé (`TETO_DE_SUPERFICIES`) tem doze bolsos
    * destes, além do da faixa. Os cartões e as contribuições têm o deles — ver
-   * `LIMITES_DO_CARTAO.bytesDeSomDecodificado`.
+   * `LIMITES_DO_CARTAO.bytesDeSomDecodificado`. **Somados, os bolsos de um MOD
+   * têm o teto dele**, `LIMITES_DO_MOD.bytesDeSomDecodificado`.
    *
    * `decodeAudioData` devolve o som inteiro em float32, por canal, já na taxa
    * do contexto que decodifica — de uma vez, antes de o som tocar: na
@@ -184,7 +185,9 @@ const LIMITES_DO_CARTAO = Object.freeze({
    * um `pessoa.cartao` sem alvo numa sala de 64 pessoas segurava até 64 vezes
    * este número. O teto **não** soma as contribuições de um MOD entre si: cada
    * uma tem o seu, e um MOD mantém até `TETO_DE_CONTRIBUICOES` (128, em
-   * `mods-contribuicoes.js`) de pé — em tese, 128 vezes este número por MOD.
+   * `mods-contribuicoes.js`) de pé — em tese, 128 vezes este número por MOD, se
+   * não houvesse o teto do MOD inteiro, que soma todos os bolsos dele
+   * (`LIMITES_DO_MOD.bytesDeSomDecodificado`).
    *
    * **Numa contribuição, o som só é decodificado quando o MOD o manda tocar**
    * (`tocando: true`). Ela não tem botão, e um som declarado parado não tinha
@@ -197,6 +200,62 @@ const LIMITES_DO_CARTAO = Object.freeze({
    */
   bytesDeSomDecodificado: 64 * 1024 * 1024,
 });
+
+/**
+ * Os tetos de um MOD inteiro, **somando os bolsos dele** — os de cima valem por
+ * lugar, e estes, pela instância.
+ */
+const LIMITES_DO_MOD = Object.freeze({
+  /**
+   * Bytes de som decodificado que um MOD segura de pé, **somando todos os
+   * lugares dele** (P49-7c; D-dono-1, 23/10): a região de cada superfície e o
+   * bolso de cartão de cada contribuição. Os 64 MiB de
+   * `LIMITES_DA_REGIAO.bytesDeSomDecodificado` e de
+   * `LIMITES_DO_CARTAO.bytesDeSomDecodificado` valem por bolso, e um MOD
+   * mantém até 12 superfícies e 128 contribuições de pé: sem este teto, em
+   * tese 140 vezes 64 MiB, uns 8,75 GiB.
+   *
+   * **O número saiu de uma medida** (lote SOM da F5, 23/10). Dos três MODs
+   * oficiais 4.0.0, só a MESA declara som: três trilhas de 30 s, WAV mono a
+   * 11 025 Hz, 5 760 000 bytes cada uma decodificada a 48 kHz — 17 280 000 as
+   * três juntas, mais do que ela segura (uma na página e outra no palco). 128
+   * MiB são 7,7 vezes as três trilhas da MESA, e o dobro de um bolso: o maior
+   * som que um lugar aceita cabe sempre, com outro do mesmo tamanho ao lado.
+   * Custa, no teto, 128 MiB de float32 por MOD que o WebAudio segura — perto
+   * de doze minutos de som mono a 48 kHz, ou seis em estéreo.
+   *
+   * **A conta é da instância** (`contaDoSomDoMod`), e não do `id`: o MOD
+   * recarregado é outra instância, e o que a de antes segurava sai com ela. A
+   * recusa é a de todo teto do som (`recusarPeloTetoDoSom`), com a chave
+   * própria `bytes de som do MOD:…`, os números no `porque` e a linha no
+   * `seele.log` com o `mod_id`.
+   *
+   * **Só a janela o conta**, e por isso ele mora só aqui: o Rust corta antes
+   * o som que sozinho passa de um bolso (`TETO_DO_SOM_DECODIFICADO`), e não
+   * sabe o que está de pé em cada lugar.
+   */
+  bytesDeSomDecodificado: 128 * 1024 * 1024,
+});
+
+/**
+ * **O som decodificado de pé de cada MOD**, somando os lugares dele, por
+ * instância (`LIMITES_DO_MOD.bytesDeSomDecodificado`).
+ *
+ * Cada lugar do produto ganha o seu dono de `donoDaRegiao`, em `base.js`, e
+ * todos os de um MOD levam a mesma `instancia`: é ela a chave. Um dono sem
+ * `instancia` — o de um laboratório — conta por ele mesmo.
+ */
+const somDecodificadoDosMods = new WeakMap();
+function contaDoSomDoMod(dono) {
+  const chave = dono?.instancia !== null && typeof dono?.instancia === "object" ? dono.instancia : dono;
+  if (chave === null || (typeof chave !== "object" && typeof chave !== "function")) return { bytes: 0 };
+  let conta = somDecodificadoDosMods.get(chave);
+  if (!conta) {
+    conta = { bytes: 0 };
+    somDecodificadoDosMods.set(chave, conta);
+  }
+  return conta;
+}
 
 /**
  * Os perfis de renderização: quem desenha onde, com que teto e que formas.
@@ -807,6 +866,11 @@ class RegiaoDeMod {
      */
     this.bytesDeSomDecodificado = 0;
     this.bytesDeSomDeCartao = 0;
+    /**
+     * A conta do MOD inteiro, que esta região divide com os outros lugares da
+     * mesma instância. Ver `LIMITES_DO_MOD.bytesDeSomDecodificado`.
+     */
+    this.somDoMod = contaDoSomDoMod(dono);
     /** Quantos nós a última montagem recusou, por teto. */
     this.recusados = 0;
     /**
@@ -3071,6 +3135,8 @@ class RegiaoDeMod {
       tocador?.removeAttribute("src");
       this[bolso.conta] -= estado.bytes;
       this[bolso.contaDoSom] -= estado.bytesDoSom;
+      this.somDoMod.bytes -= estado.bytesDoSom;
+      estado.bytesDoSom = 0;
       this.contagem[bolso.quantas] -= 1;
       this.esquecerMidia(elem);
     });
@@ -3493,8 +3559,23 @@ class RegiaoDeMod {
       );
       return;
     }
+    // **E o teto do MOD inteiro**, somando os lugares dele
+    // (`LIMITES_DO_MOD.bytesDeSomDecodificado`): cada bolso cabe no dele, e
+    // um MOD tem muitos.
+    const tetoDoMod = LIMITES_DO_MOD.bytesDeSomDecodificado;
+    if (this.somDoMod.bytes + ocupa > tetoDoMod) {
+      this.recusarPeloTetoDoSom(
+        elem,
+        plano,
+        estado,
+        `o som decodificado ocupa ${ocupa} bytes, e com os ${this.somDoMod.bytes} que o MOD já segura de pé, somando os lugares dele, passa do teto de ${tetoDoMod} bytes de som do MOD`,
+        `bytes de som do MOD:${tetoDoMod}`,
+      );
+      return;
+    }
     estado.bytesDoSom = ocupa;
     this[contaDoSom] += ocupa;
+    this.somDoMod.bytes += ocupa;
 
     let pintar = () => {};
     const entrada = this.somDaMidia.get(elem) ?? {};
@@ -3607,11 +3688,15 @@ class RegiaoDeMod {
    * A recusa fica guardada no som (`recusa`), e o destino que herda o som de
    * uma contribuição a herda também (`herdarOSom`).
    *
+   * **E a do teto do MOD** (`LIMITES_DO_MOD.bytesDeSomDecodificado`), quando o
+   * som cabe no lugar e não cabe no que o MOD já segura somando os lugares
+   * dele: a mesma recusa, com a chave do teto do MOD em `chaveDoTeto`.
+   *
    * Quem chama confere antes se o som ainda é de alguém.
    */
-  recusarPeloTetoDoSom(elem, plano, estado, porque) {
+  recusarPeloTetoDoSom(elem, plano, estado, porque, chaveDoTeto = `bytes de som:${estado.bolso.tetoDoSom}`) {
     const chave = plano.no.chave ?? "";
-    const teto = `bytes de som:${estado.bolso.tetoDoSom}`;
+    const teto = chaveDoTeto;
     const som = this.somDaMidia.get(elem);
     if (som) som.recusa = { figura: "cheia", motivo: porque, teto };
     elem.dataset.estado = "cheia";
@@ -3861,6 +3946,7 @@ class RegiaoDeMod {
       estado.som?.soltar();
       estado.som = null;
       this[estado.bolso.contaDoSom] -= estado.bytesDoSom;
+      this.somDoMod.bytes -= estado.bytesDoSom;
       estado.bytesDoSom = 0;
       estado.recusaDita = null;
       som.tocador = null;
