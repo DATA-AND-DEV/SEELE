@@ -25,3 +25,11 @@
 
 /executor-de-mod.html
   Content-Security-Policy: frame-ancestors 'self'
+
+# A mesma regra sem o `.html`. O Cloudflare Pages responde ao `.html` com um 308
+# para o nome sem ele, e a página chega por esse segundo caminho: com a regra só
+# no primeiro, o `frame-ancestors` ia no redirecionamento e não na página, e o
+# executor podia ser emoldurado por qualquer origem (medido na origem publicada,
+# em 24/10/2026, na primeira publicação da 0.16).
+/executor-de-mod
+  Content-Security-Policy: frame-ancestors 'self'

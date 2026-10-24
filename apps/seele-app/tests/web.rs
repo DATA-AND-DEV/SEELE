@@ -1236,7 +1236,8 @@ fn diretivas(csp: &str) -> BTreeMap<String, BTreeSet<String>> {
 ///    `.wasm`, e nada mais.
 /// 2. **A regra de `/*` não leva CSP**: as regras se somam, e a da página
 ///    impediria a página de emoldurar o `iframe` dos executores, que traz a dele
-///    no `<meta>` e aqui só pede `frame-ancestors 'self'`.
+///    no `<meta>` e aqui só pede `frame-ancestors 'self'`. E toda regra de um
+///    `.html` tem a gêmea sem ele: o Pages responde ao `.html` com um 308.
 /// 3. **O HSTS** vale por um ano, pelo menos.
 /// 4. **Os passos do dono** trazem o arquivo inteiro.
 /// 5. **Nenhuma bancada escreve uma CSP à mão**: elas leem esta. O `telas.cjs`
@@ -1297,6 +1298,23 @@ fn os_cabecalhos_da_origem_sao_um_so() {
         "o `iframe` dos executores pede só para ser emoldurado pela página: a política dele \
          está no `<meta>`"
     );
+    // E toda regra de um `.html` tem a gêmea sem ele, com os mesmos cabeçalhos:
+    // o Pages redireciona `x.html` para `x` com um 308, e a página chega pelo
+    // segundo caminho. O `/index.html` vai para `/`, conferido no 1.
+    for (caminho, cabecalhos) in &regras {
+        let Some(sem) = caminho.strip_suffix(".html") else {
+            continue;
+        };
+        let gemea = if caminho == "/index.html" { "/" } else { sem };
+        for (nome, valor) in cabecalhos {
+            assert_eq!(
+                cabecalho(&regras, gemea, nome),
+                Some(valor.as_str()),
+                "`{caminho}` leva `{nome}` e `{gemea}` não: o Cloudflare Pages redireciona o \
+                 `.html` para o nome sem ele, e a página chegaria sem o cabeçalho"
+            );
+        }
+    }
 
     // 3.
     let hsts = cabecalho(&regras, "/*", "strict-transport-security").expect("sem HSTS");
