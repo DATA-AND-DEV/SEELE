@@ -278,7 +278,11 @@ async fn o_aviso_de_um_canal_chega_so_a_quem_o_le() -> Result<()> {
     );
 
     daemon.shutdown();
-    std::fs::remove_dir_all(raiz)?;
+    // A limpeza não reprova o teste: no Windows, o servidor que acabou de
+    // parar ainda segura o banco por um instante, e apagar um arquivo aberto
+    // dá «os error 32». Achado pela bateria do Windows no publicar.sh da
+    // 0.16 (24/10); a pasta é temporária, e o que o teste prova já passou.
+    let _ = std::fs::remove_dir_all(raiz);
     Ok(())
 }
 
@@ -306,7 +310,7 @@ async fn um_aviso_de_um_pedido_que_nao_gravou_nao_sai() -> Result<()> {
     );
 
     daemon.shutdown();
-    std::fs::remove_dir_all(raiz)?;
+    let _ = std::fs::remove_dir_all(raiz);
     Ok(())
 }
 
@@ -350,6 +354,6 @@ async fn a_sala_do_contexto_e_a_da_presenca() -> Result<()> {
     }
 
     daemon.shutdown();
-    std::fs::remove_dir_all(raiz)?;
+    let _ = std::fs::remove_dir_all(raiz);
     Ok(())
 }

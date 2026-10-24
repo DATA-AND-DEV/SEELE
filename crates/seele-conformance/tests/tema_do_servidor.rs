@@ -334,7 +334,11 @@ async fn o_tema_declarado_chega_a_todos_e_sobrevive_ao_reinicio() -> Result<()> 
     );
 
     derrubar(daemon, tarefa).await;
-    std::fs::remove_dir_all(raiz)?;
+    // A limpeza não reprova o teste: no Windows, o servidor que acabou de
+    // parar ainda segura o banco por um instante, e apagar um arquivo aberto
+    // dá «os error 32». Achado pela bateria do Windows no publicar.sh da
+    // 0.16 (24/10); a pasta é temporária, e o que o teste prova já passou.
+    let _ = std::fs::remove_dir_all(raiz);
     Ok(())
 }
 
@@ -388,7 +392,7 @@ async fn desligar_o_mod_tira_o_tema_e_religar_devolve_o_guardado() -> Result<()>
     );
 
     derrubar(daemon, tarefa).await;
-    std::fs::remove_dir_all(raiz)?;
+    let _ = std::fs::remove_dir_all(raiz);
     Ok(())
 }
 
@@ -454,7 +458,7 @@ async fn so_o_escolhido_pinta_e_quem_nao_tem_a_porta_e_recusado() -> Result<()> 
     );
 
     derrubar(daemon, tarefa).await;
-    std::fs::remove_dir_all(raiz)?;
+    let _ = std::fs::remove_dir_all(raiz);
     Ok(())
 }
 
@@ -506,6 +510,6 @@ async fn o_tema_de_um_pedido_que_nao_gravou_nao_sai_e_qualquer_pessoa_pede() -> 
     );
 
     derrubar(daemon, tarefa).await;
-    std::fs::remove_dir_all(raiz)?;
+    let _ = std::fs::remove_dir_all(raiz);
     Ok(())
 }

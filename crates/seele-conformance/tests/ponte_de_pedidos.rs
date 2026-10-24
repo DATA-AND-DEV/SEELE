@@ -253,7 +253,11 @@ async fn a_ponte_entrega_a_identidade_da_sessao_e_ignora_a_que_o_pedido_afirma()
     );
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    // A limpeza não reprova o teste: no Windows, o servidor que acabou de
+    // parar ainda segura o banco por um instante, e apagar um arquivo aberto
+    // dá «os error 32». Achado pela bateria do Windows no publicar.sh da
+    // 0.16 (24/10); a pasta é temporária, e o que o teste prova já passou.
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -373,7 +377,7 @@ async fn a_resposta_volta_so_para_quem_pediu_e_sobrevive_a_reconexao() -> Result
     );
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -450,7 +454,7 @@ async fn a_resposta_grande_chega_inteira_em_partes_numeradas() -> Result<()> {
     );
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -561,7 +565,7 @@ async fn um_mod_de_escopo_de_servidor_le_sem_canal_aberto() -> Result<()> {
     );
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -654,7 +658,7 @@ async fn o_catalogo_diz_qual_conjunto_ele_descreve() -> Result<()> {
     );
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -757,7 +761,7 @@ async fn uma_espera_de_volume_sobrevive_ao_pedido_que_a_emitiu() -> Result<()> {
     );
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -909,7 +913,7 @@ async fn os_bytes_de_um_volume_chegam_ao_disco_pelo_fluxo() -> Result<()> {
     );
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -954,7 +958,7 @@ async fn um_token_que_ninguem_autorizou_nao_escreve_nada() -> Result<()> {
     assert_eq!(recusa.1, seele_proto::volume::VolumeRefusal::SemEspera);
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -1053,7 +1057,7 @@ async fn a_recusa_de_um_fluxo_de_imagem_chega_a_janela_pelo_nome() -> Result<()>
     );
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -1127,7 +1131,7 @@ async fn uma_imagem_de_mod_vai_e_volta_inteira_pelo_cliente_de_verdade() -> Resu
     );
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
 
@@ -1186,6 +1190,6 @@ async fn um_tipo_que_o_mod_nao_autorizou_nao_fica_no_disco() -> Result<()> {
     );
 
     serving.abort();
-    std::fs::remove_dir_all(root)?;
+    let _ = std::fs::remove_dir_all(root);
     Ok(())
 }
