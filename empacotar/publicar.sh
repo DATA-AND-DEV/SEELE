@@ -1200,6 +1200,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/tetos-dos-campos.js \
         --roteiro tools/roteiros/toque.js \
         --roteiro tools/roteiros/trocar-de-janela.js \
+        --roteiro tools/roteiros/versao-ao-hospedar.js \
         --roteiro tools/roteiros/versao-do-servidor.js
 }
 

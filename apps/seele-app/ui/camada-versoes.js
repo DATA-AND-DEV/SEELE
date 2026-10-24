@@ -406,8 +406,6 @@ async function baixarAMaisNova() {
     botao.disabled = false;
   }
   await desenharPainelDeVersoes();
-  // O bloco da tela de entrada lê a mesma lista, e ela acabou de mudar.
-  desenharVersoes().catch((falha) => console.warn("versões da entrada:", falha));
 }
 
 /**

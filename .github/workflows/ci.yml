@@ -476,6 +476,7 @@ jobs:
           --roteiro tools/roteiros/tetos-dos-campos.js
           --roteiro tools/roteiros/toque.js
           --roteiro tools/roteiros/trocar-de-janela.js
+          --roteiro tools/roteiros/versao-ao-hospedar.js
           --roteiro tools/roteiros/versao-do-servidor.js
       # A bancada do celular (F8; D-api-8): a casca desenhada no Chromium e no
       # WebKit, a 390 × 844 e a 360 × 800, e o desktop igual pixel a pixel sem a

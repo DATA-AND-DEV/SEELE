@@ -3577,14 +3577,14 @@ def casca_larga(pg: Page) -> list[str]:
         const v = new Function('s', 'return (' + visivel + ')(s)');
         const link = document.querySelector('.larga-hospedar a');
         return { barra: v('#barra-janela'), hospedar: v('#botao-hospedar'), nomePublico: v('#boot-nome-publico'),
-                 versoes: v('#boot-versoes'), frase: document.querySelector('.larga-hospedar')?.textContent ?? null,
+                 frase: document.querySelector('.larga-hospedar')?.textContent ?? null,
                  link: link?.getAttribute('href') ?? null,
                  proposito: document.querySelector('#tela-boot .boot-proposito').textContent,
                  topo: Math.round(document.getElementById('tela-boot').getBoundingClientRect().top) };
     }""", visivel)
     if entrada["barra"]:
         falhas.append("a barra da janela continua à vista: no navegador, quem desenha a janela é ele")
-    if entrada["hospedar"] or entrada["nomePublico"] or entrada["versoes"]:
+    if entrada["hospedar"] or entrada["nomePublico"]:
         falhas.append(f"a entrada ainda oferece o que é de quem hospeda: {entrada}")
     if not entrada["frase"] or "app do SEELE" not in entrada["frase"] or entrada["link"] != "https://seele.app.br/#baixar":
         falhas.append(f"no lugar do HOSPEDAR AQUI não há a frase do app e o link: {entrada['frase']!r} {entrada['link']!r}")
