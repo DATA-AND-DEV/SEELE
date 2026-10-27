@@ -7,12 +7,15 @@
 //!
 //! O caminho é este. A sessão escreve para o par de dentro do mesmo `select!`
 //! em que lê o barramento de eventos. Quando o par para de ler, a janela de
-//! controle de fluxo do QUIC fecha, a escrita bloqueia, e enquanto ela está
+//! controle de fluxo fecha, a escrita bloqueia, e enquanto ela está
 //! bloqueada **ninguém tira evento do barramento**. O barramento é um
 //! `broadcast` de capacidade fixa: passado o tamanho do anel, ele descarta o
 //! mais antigo e devolve `Lagged` na próxima leitura. Um `let Ok(event) = event
 //! else { continue }` transformava isso em nada — a sessão seguia, calada, com
 //! um buraco permanente no que aquela pessoa vê.
+//!
+//! A janela era a do QUIC. Na 0.17 é o crédito `0x04` do enlace (Δ8 do A),
+//! que segura a escrita do servidor do mesmo jeito.
 //!
 //! É por isso que a pendência é a número 1: a mensagem foi gravada em PERSISTENCE,
 //! quem escreveu viu a sua aparecer, e o outro lado nunca soube que faltou.
@@ -46,6 +49,8 @@ use seele_server::persistence::Location;
 use seele_server::server::Event;
 use seele_server::{frame, Daemon, ServerConfig};
 
+mod comum;
+
 const LINE: u32 = 1;
 
 /// O tamanho da pendência: grande o bastante para não caber num pacote.
@@ -61,59 +66,6 @@ const FALANTES: usize = 20;
 
 /// Quantas mensagens cada um manda, dentro da rajada que o Vigia permite.
 const CADA: usize = 58;
-
-/// Um verificador que aceita qualquer certificado.
-///
-/// O que está sob teste é a entrega, não o TOFU — que tem os testes dele em
-/// `seele-core/src/tofu.rs`. Aqui o certificado é o que o próprio servidor acabou
-/// de gerar nesta função de teste.
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
 
 /// Um servidor em memória, já atendendo.
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
@@ -135,9 +87,9 @@ async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
 /// Um par cru: conexão QUIC e o fluxo de controle, sem nenhuma tarefa leitora.
 struct Par {
     /// Segura a conexão viva enquanto o teste corre.
-    _conexao: quinn::Connection,
-    envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
+    _conexao: seele_enlace::Conexao,
+    envio: seele_enlace::Envio,
+    recebe: seele_enlace::Recebe,
     /// Quem o servidor disse, no `Session`, que este par é.
     pessoa: PersonId,
 }
@@ -148,31 +100,19 @@ struct Par {
 /// valor pequeno não cria o defeito: só encurta o tempo até o par parar de
 /// aceitar bytes, que é a condição do cenário. Qualquer par pode escolher a
 /// dele, e um cliente de aparelho pequeno escolhe pequena.
-async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-
-    let mut config = quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    ));
-    let mut transporte = quinn::TransportConfig::default();
-    transporte.stream_receive_window(janela.into());
-    config.transport_config(Arc::new(transporte));
-
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(config);
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
+async fn abrir(endereco: SocketAddr, semente: u8, _janela: u32) -> Result<Par> {
+    // Na 0.17 a janela é o crédito `0x04` do enlace, 1 MiB por canal e
+    // anunciado por quem lê. Não se escolhe por par, e o parâmetro fica só
+    // pela forma dos chamadores.
+    let comum::Ligado {
+        ponta,
+        conexao,
+        mut envio,
+        mut recebe,
+    } = comum::ligar(endereco).await?;
     // A ponta é dona do socket; sem isto ela cai no fim desta função e leva a
     // conexão junto.
     std::mem::forget(ponta);
-
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
     let chave = SigningKey::from_bytes(&[semente; 32]);
     frame::write(
         &mut envio,
@@ -196,7 +136,7 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
         &mut envio,
         &ClientMessage::Response {
             proof: chave
-                .sign(&prova_amarrada(&conexao, &nonce))
+                .sign(&comum::prova_amarrada(&conexao, &nonce))
                 .to_bytes()
                 .to_vec(),
         },
@@ -582,15 +522,52 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     // esse nome, que ficou faltando. O que ninguém pode aceitar é o par voltar
     // a ler, seguir conectado, e faltar conversa no meio sem uma palavra de
     // nenhum dos dois lados.
-    assert!(
-        chegaram == somadas || desligado == Some(DisconnectReason::FellBehind),
-        "pendência nº 1: {chegaram} de {somadas} chegaram e o servidor não disse nada — \
-         {perdidos} eventos morreram no barramento (a leitura acabou em {fim:?})"
+    //
+    // **O crédito `0x04` do enlace (0.17, Δ8 do A)** devolveu ao servidor a
+    // contrapressão que o QUIC dava. Quem para de ler deixa de anunciar
+    // crédito, a escrita da sessão fica pendente, e é aí que o servidor vê o
+    // atraso e manda `FellBehind`. Por isso, desde o crédito, o corte do
+    // próprio enlace (`cortes_por_fila`, código 2) **reprova**: ele é a
+    // violação do contrato, e com o contrato cumprido nunca acontece. O corte
+    // não diz à pessoa o que faltou: ela vê uma queda genérica, e o servidor
+    // nem soube. Entre o ouvinte e o servidor, nenhum dos dois lados pode ter
+    // cortado por fila.
+    let cortes_no_ouvinte = ouvinte._conexao.contadores().cortes_por_fila;
+    assert_eq!(
+        cortes_no_ouvinte, 0,
+        "o enlace do ouvinte cortou {cortes_no_ouvinte} vez(es) por fila: o servidor escreveu sem \
+         crédito, e quem parou de ler caiu sem saber o que faltou (a leitura acabou em {fim:?})"
     );
+    // O FellBehind tem duas formas legíveis, e só estas duas: o quadro, ou o
+    // código tipado do fechamento (`CODIGO_FICOU_PARA_TRAS`), que chega mesmo
+    // quando o quadro não tem crédito para sair. Qualquer outro fechamento não
+    // conta.
+    let fechou_ficando_para_tras = ouvinte._conexao.acabou()
+        == Some(seele_enlace::Motivo::Fechada {
+            codigo: seele_proto::transport::CODIGO_FICOU_PARA_TRAS,
+        });
+    assert!(
+        chegaram == somadas
+            || desligado == Some(DisconnectReason::FellBehind)
+            || fechou_ficando_para_tras,
+        "pendência nº 1: {chegaram} de {somadas} chegaram e o servidor não disse nada — \
+         {perdidos} eventos morreram no barramento (a leitura acabou em {fim:?}, \
+         a conexão do ouvinte: {:?})",
+        ouvinte._conexao.acabou()
+    );
+    // E a conexão de quem só parou de ler continua de pé quando chegou tudo:
+    // a contrapressão segura, e não derruba.
+    if chegaram == somadas {
+        assert_eq!(
+            ouvinte._conexao.acabou(),
+            None,
+            "chegou tudo, e mesmo assim a conexão do ouvinte acabou"
+        );
+    }
 
     // E o que houve ficou contado. Desligamento sem número por trás seria a
     // mesma cegueira com outra roupa: ninguém sabe se aconteceu uma vez ou mil.
-    if desligado.is_some() || desligados > 0 {
+    if desligado.is_some() || desligados > 0 || fechou_ficando_para_tras {
         assert!(
             perdidos > 0,
             "a sessão foi encerrada por ter ficado para trás e o contador marcou zero"
@@ -600,26 +577,4 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
 
     servidor.shutdown();
     Ok(())
-}
-
-/// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
-/// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
-/// Desde o Servidor 1.0, o nonce cru não entra mais.
-fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS sempre entrega a cadeia do servidor");
-    let impressao = seele_proto::transport::certificate_digest(
-        cadeia
-            .first()
-            .expect("a cadeia tem um certificado")
-            .as_ref(),
-    );
-    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
-    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

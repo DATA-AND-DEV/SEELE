@@ -80,8 +80,12 @@ não bater. Do outro lado, no app, **CONECTAR** e cole o link.
 
 ### Firewall
 
-A porta 8383 é **UDP** (QUIC), não TCP. É o erro de configuração mais provável
+A porta 8383 é **UDP**, não TCP: desde a 0.17 é o WebRTC (STUN, DTLS e o ENC/3
+no mesmo socket), e até a 0.16 era o QUIC. É o erro de configuração mais provável
 aqui, porque a maioria das regras que as pessoas escrevem de cabeça é TCP.
+
+As duas máquinas precisam da mesma linha: duas 0.17, ou duas 0.16. Uma 0.17 e uma
+0.16 não conversam (ADR 0063).
 
 - **macOS:** na primeira execução o sistema pergunta. Aceite.
 - **Linux:** `sudo ufw allow 8383/udp`, ou o equivalente do seu firewall.

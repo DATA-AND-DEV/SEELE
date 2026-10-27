@@ -25,7 +25,6 @@
   --cel-topo: 56px;
   --cel-faixa: 64px;
   --cel-abas: 56px;
-  --cel-coluna: 480px;       /* o teto da coluna numa tela grande */
   --cel-escala: 1;           /* o texto dinâmico do sistema (Tarefa 12) */
   /* A letra de um campo: nunca abaixo de 16, e com o texto do sistema maior ela
      cresce com o corpo. Escrever a 16 ao lado de mensagens no dobro era ler uma

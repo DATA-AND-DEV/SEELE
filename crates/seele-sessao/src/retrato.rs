@@ -838,8 +838,10 @@ pub struct FotoDaSala {
     pub presentes: Vec<Person>,
     /// As linhas de texto.
     pub channels: Vec<Channel>,
-    /// A perda que o servidor contou, de zero a um.
-    pub loss_fraction: f32,
+    /// A perda que o servidor contou, de zero a um. **`None` quando ele não
+    /// mediu** (desde a 0.17, o anfitrião ICE-lite nem sempre conta a perda):
+    /// não medido não é zero, e nenhum zero sintético entra no lugar.
+    pub loss_fraction: Option<f32>,
     /// O aviso em curso.
     pub notice: Option<Notice>,
     /// O que esta pessoa pode fazer.
@@ -854,6 +856,8 @@ pub struct FotoDaSala {
     pub ended: Option<EndReason>,
     /// O tema do servidor, se ele declarou um.
     pub tema: Option<TemaDaSessao>,
+    /// A marca dos cargos desta sessão (`Room::cargos`, ADR 0064).
+    pub cargos_revision: u64,
 }
 
 /// A parte do `Snapshot` que sai do `Room`, **com os nomes de campo dele**.
@@ -904,6 +908,12 @@ pub struct RetratoDaSala {
     pub ended: Option<EndReason>,
     /// O tema do servidor.
     pub tema_do_servidor: Option<TemaDaSessao>,
+    /// **A marca dos cargos desta sessão** (ADR 0064): sobe a cada
+    /// `QuadroDeCargos`, `SuasPermissoes` ou `CargoRecusado` dobrado no `Room`.
+    /// Da SALA, e não contada por quem dobra: mora em `Room::cargos`, que é o
+    /// mesmo nos dois produtores (desktop e navegador), e por isso sai igual
+    /// dos dois pela mesma conta. A casca relê os cargos quando ela anda.
+    pub cargos_revision: u64,
 }
 
 impl FotoDaSala {
@@ -942,6 +952,7 @@ impl FotoDaSala {
             transmissoes: self.transmissoes,
             ended: self.ended,
             tema_do_servidor: self.tema,
+            cargos_revision: self.cargos_revision,
         }
     }
 }
@@ -986,7 +997,7 @@ pub fn foto_da_sala(
         voice_rooms: voice_rooms_of(room),
         presentes: presentes_de(room),
         channels: lines_of(room),
-        loss_fraction: room.telemetry.as_ref().map_or(0.0, |t| t.loss_fraction),
+        loss_fraction: room.telemetry.as_ref().and_then(|t| t.loss_fraction),
         notice: room.notice.as_ref().map(aviso_de),
         permissions: room.permissions.clone(),
         tela: escolhida.and_then(|tela| tela_por_id(room, tela, pedido)),
@@ -994,5 +1005,148 @@ pub fn foto_da_sala(
         transmissoes: transmissoes_de(room, escolhida),
         ended: room.ended.map(|end| end.reason.into()),
         tema: room.tema.as_ref().map(tema_de),
+        cargos_revision: room.cargos.marca(),
+    }
+}
+
+/// A transmissão alheia que o **servidor** ligou sozinho, à parte da escolha.
+///
+/// O servidor liga todo mundo na primeira transmissão da sala. A imagem chega
+/// (a leitura do fluxo vira `ScreenOpened`), mas a escolha da pessoa continua
+/// sendo nenhuma — e o retrato, que lia só a escolha, dizia «ninguém está
+/// compartilhando» por cima da imagem, com `assistida` falso. Os dois
+/// produtores (o `seele-ffi` e o `seele-web`) guardam esta ao lado da escolha e
+/// leem a assistida por [`assistida_no_retrato`].
+///
+/// # Por que ela não é uma escolha
+///
+/// Gravá-la como «escolheu esta» mudaria o sentido da recusa: recusar a que se
+/// escolheu e recusar a que o servidor empurrou são decisões diferentes, e o
+/// fim da escolhida devolveria uma escolha que ninguém fez.
+///
+/// # A identidade é a da leitura, e não a da tela
+///
+/// Cada abertura traz o número da leitura (`Aviso::TelaAbriu::leitura` no
+/// desktop, a alça do fluxo no navegador), e o fim traz o mesmo. A abertura
+/// nova **substitui** a guardada, sem somar; o fim só apaga a leitura que ele
+/// de fato fecha. Contar por `ScreenId` deixava um fantasma: a troca de par
+/// aborta a leitura da mesma tela, e a reabertura somava à que não ia fechar.
+///
+/// A geração é a volta do enlace em que a abertura chegou, e o fim da geração
+/// ([`Self::nova_geracao`]) esquece a guardada.
+///
+/// # O fim vigente
+///
+/// [`Self::fechou`] também responde se o fim é o da leitura vigente daquela
+/// tela — de qualquer tela, a própria inclusive. O de uma leitura já
+/// substituída não deve apagar o palco nem a fila de som da que a substituiu.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TelaLigada {
+    ligada: Option<Ligada>,
+    /// A leitura vigente de cada tela aberta, a própria inclusive.
+    vigentes: std::collections::BTreeMap<ScreenId, u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Ligada {
+    tela: ScreenId,
+    geracao: u64,
+    leitura: u64,
+}
+
+impl TelaLigada {
+    /// A leitura `leitura` da tela `tela` abriu, na volta `geracao` do enlace.
+    ///
+    /// Ela passa a ser a vigente da tela. A própria transmissão não vira tela
+    /// ligada: o espelho de quem compartilha também chega como abertura, e ele
+    /// não é nada que o servidor tenha ligado.
+    pub fn abriu(&mut self, room: &Room, tela: ScreenId, geracao: u64, leitura: u64) {
+        self.vigentes.insert(tela, leitura);
+        let e_minha = room
+            .telas
+            .get(&tela)
+            .is_some_and(|anunciada| room.me == Some(anunciada.person));
+        if e_minha {
+            return;
+        }
+        self.ligada = Some(Ligada {
+            tela,
+            geracao,
+            leitura,
+        });
+    }
+
+    /// A leitura `leitura` da tela `tela` acabou. Devolve se ela era a vigente
+    /// daquela tela; a de uma leitura substituída não apaga nada.
+    pub fn fechou(&mut self, tela: ScreenId, leitura: u64) -> bool {
+        if self
+            .ligada
+            .is_some_and(|guardada| guardada.tela == tela && guardada.leitura == leitura)
+        {
+            self.ligada = None;
+        }
+        if self.vigentes.get(&tela) == Some(&leitura) {
+            self.vigentes.remove(&tela);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Se `leitura` é a leitura vigente de `tela`: só os quadros dela vão ao
+    /// decodificador da casca, que conhece a tela e não a leitura.
+    #[must_use]
+    pub fn e_vigente(&self, tela: ScreenId, leitura: u64) -> bool {
+        self.vigentes.get(&tela) == Some(&leitura)
+    }
+
+    /// Uma volta nova do enlace: a tela ligada da anterior é esquecida. As
+    /// vigentes ficam, para que o fim atrasado de uma leitura de antes da queda
+    /// ainda apague o palco dela — e só o dela.
+    pub fn nova_geracao(&mut self) {
+        self.ligada = None;
+    }
+
+    /// Esquece a tela, se for a guardada: quem a devolveu (`assistir` com
+    /// `quero: false`) deixou de recebê-la.
+    pub fn esquecer(&mut self, tela: ScreenId) {
+        if self.ligada.is_some_and(|guardada| guardada.tela == tela) {
+            self.ligada = None;
+        }
+    }
+
+    /// Esquece a guardada se ela saiu da sala.
+    pub fn esquecer_se_saiu(&mut self, room: &Room) {
+        if let Some(guardada) = self.ligada {
+            if !room.telas.contains_key(&guardada.tela) {
+                self.ligada = None;
+            }
+        }
+    }
+
+    /// A tela ligada, se ela é da volta `geracao` do enlace.
+    #[must_use]
+    pub fn agora(&self, geracao: u64) -> Option<ScreenId> {
+        self.ligada
+            .filter(|ligada| ligada.geracao == geracao)
+            .map(|ligada| ligada.tela)
+    }
+}
+
+/// A transmissão que esta sessão está assistindo, para o retrato.
+///
+/// `escolhida` é a escolha explícita: `Some(Some(tela))` escolheu esta,
+/// `Some(None)` escolheu **não** ver, e `None` é ninguém ter escolhido. A
+/// escolha explícita vence — a recusa vale contra o religar do servidor, e o
+/// retrato não pode dizer que assiste quem recusou. Só sem escolha vale a que o
+/// servidor ligou.
+#[must_use]
+pub fn assistida_no_retrato(
+    escolhida: Option<Option<ScreenId>>,
+    ligada: Option<ScreenId>,
+) -> Option<ScreenId> {
+    match escolhida {
+        Some(escolha) => escolha,
+        None => ligada,
     }
 }

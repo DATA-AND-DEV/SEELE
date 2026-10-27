@@ -89,6 +89,55 @@ impl RelogioDeMidia {
     }
 }
 
+/// **De onde um caminho de voz novo começa a contar**: a sequência em zero e o
+/// carimbo no relógio da máquina, `desde_a_epoca` em quadros de 20 ms, módulo
+/// 2³². Um caminho que **substitui** outro na mesma conexão continua dele
+/// ([`RelogioDeMidia::salto`]); este é o de uma voz que nasce sem anterior.
+///
+/// # Por que não do zero (o CUA de 25/10, 03:39)
+///
+/// Quem ouve guarda, por `ssrc`, até que carimbo já tocou, e descarta como
+/// atrasado tudo o que vier antes dele. O `ssrc` sobrevive à conexão: quem sai
+/// do servidor sentado e volta em cinco minutos recebe o mesmo, da reserva da
+/// graça (`seele_server::server::Slots::reclaim`, e o resgate do assento em
+/// `seele-sessao` exige o mesmo `ssrc`). A voz da conexão nova contava do zero,
+/// e quem ficou a descartava por tanto tempo quanto a voz velha tinha vivido:
+/// medido, 76 s de voz e ~77 s de mudo, com a tela dizendo NO AR.
+///
+/// Do relógio da máquina, o carimbo novo fica à frente do velho pelo tempo que
+/// a pessoa passou fora, e quem ouve lê o vão como a pausa que já tocou. Não é
+/// uma heurística de quem recebe: o buffer não tem como separar «a fonte
+/// recomeçou» de «chegou a cauda velha atrasada», e quem manda tem.
+///
+/// # Os limites, declarados
+///
+/// - **A volta dos 32 bits** (24,8 h) não importa: quem ouve compara pela
+///   diferença circular (`jitter::ts_delta`), e a diferença é o tempo fora.
+/// - **O cristal do aparelho**: o carimbo da voz velha andou no ritmo da placa
+///   de som, e não do relógio da máquina. Uma placa adiantada `p` ppm por uma
+///   voz de `t` segundos deixa o carimbo velho `t·p` à frente; o novo só fica
+///   atrás se a pessoa voltou em menos que isso (100 ppm por 3 h: 1 s), e então
+///   fica mudo por essa diferença, e não pela vida da voz.
+/// - **O relógio de parede que recua** (NTP): quem chama ancora o relógio de
+///   parede uma vez por processo e soma o tempo monotônico que passou
+///   (`seele-core`, `partida_desta_maquina`; na página, `performance`). Dentro
+///   do processo a partida nunca recua. **Entre processos** (o app reaberto) e
+///   entre máquinas com a mesma identidade, um recuo ainda deixa a voz nova
+///   atrás pelo tamanho dele, e muda por esse tempo.
+/// - **A sequência** fica em zero: quem recebe conta a perda pela sequência, e
+///   uma sequência que pulasse junto com o relógio leria o tempo fora como
+///   perda.
+/// - **Quem manda de uma versão que conta do zero** (a 0.16) continua com o
+///   defeito do lado dela; quem ouve não muda. O navegador da 0.17 parte pela
+///   hora da página (`Envio::partindo_de`, no `seele-web`).
+#[must_use]
+pub fn partida(desde_a_epoca: std::time::Duration) -> (u16, u32) {
+    let quadros = desde_a_epoca.as_millis() / u128::from(FRAME_MS);
+    let amostras = quadros.wrapping_mul(FRAME_SAMPLES as u128);
+    // Módulo 2³²: o carimbo é um contador que dá a volta.
+    (0, (amostras & u128::from(u32::MAX)) as u32)
+}
+
 /// O carimbo de tempo de um quadro numa entrega de vários. F01.
 ///
 /// `carimbo` é o do quadro de **agora**, `quantos` é o tamanho da entrega e
@@ -114,4 +163,48 @@ pub fn carimbo_do_quadro(carimbo: u32, quantos: usize, indice: usize) -> u32 {
     let atras = quantos.saturating_sub(indice + 1);
     let amostras = u32::try_from(atras.saturating_mul(FRAME_SAMPLES)).unwrap_or(0);
     carimbo.wrapping_sub(amostras)
+}
+
+#[cfg(test)]
+mod a_partida {
+    use super::partida;
+    use crate::jitter::ts_delta;
+    use std::time::Duration;
+
+    /// Duas vozes da mesma máquina, a segunda 22 s depois de a primeira ter
+    /// vivido 76 s: a segunda parte à frente do fim da primeira pelo tempo
+    /// fora, e não atrás dela pela vida inteira (o CUA de 25/10).
+    #[test]
+    fn a_voz_nova_parte_a_frente_da_velha_pelo_tempo_fora() {
+        let agora = Duration::from_secs(1_792_900_000);
+        let (seq, velha) = partida(agora);
+        assert_eq!(seq, 0, "a sequência parte do zero: o vão não é perda");
+        let fim_da_velha = velha.wrapping_add(76 * 48_000);
+        let (_, nova) = partida(agora + Duration::from_secs(76 + 22));
+        assert_eq!(ts_delta(nova, fim_da_velha), 22 * 48_000);
+    }
+
+    /// Através da volta dos 32 bits do carimbo (a cada 24,8 h de relógio), a
+    /// diferença circular continua sendo o tempo que passou.
+    #[test]
+    fn a_volta_dos_32_bits_nao_muda_a_conta() {
+        let quadro_ms = 20_u64;
+        let volta_ms = (1_u64 << 32) / 960 * quadro_ms;
+        let antes = Duration::from_millis(volta_ms - 1_000);
+        let depois = Duration::from_millis(volta_ms + 1_000);
+        let (_, a) = partida(antes);
+        let (_, b) = partida(depois);
+        assert!(b < a, "o carimbo não deu a volta entre os dois");
+        assert_eq!(ts_delta(b, a), 2 * 48_000);
+    }
+
+    /// O carimbo anda em quadros inteiros de 20 ms do relógio.
+    #[test]
+    fn a_partida_anda_em_quadros() {
+        let (_, a) = partida(Duration::from_millis(1_000_000));
+        let (_, b) = partida(Duration::from_millis(1_000_019));
+        let (_, c) = partida(Duration::from_millis(1_000_020));
+        assert_eq!(a, b);
+        assert_eq!(c.wrapping_sub(a), 960);
+    }
 }

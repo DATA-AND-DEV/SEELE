@@ -2704,7 +2704,7 @@ def aba_ajustes(pg: Page) -> list[str]:
             link: g.querySelector('a.cel-baixar')?.href ?? null })))()""")
         if [g["grupo"] for g in fora] != ["SÓ NO APP DO SEELE", "NO COMPUTADOR"] or [g["itens"] for g in fora] != [8, 6]:
             falhas.append(f"O QUE O CELULAR NÃO FAZ mostra {fora}")
-        elif fora[0]["link"] != "https://seele.app.br/#baixar":
+        elif fora[0]["link"] != "https://get.seele.sh/#baixar":
             falhas.append(f"HOSPEDAR UM SERVIDOR não leva a quem baixa o app: {fora[0]['link']}")
         voltar()
 
@@ -3586,7 +3586,7 @@ def casca_larga(pg: Page) -> list[str]:
         falhas.append("a barra da janela continua à vista: no navegador, quem desenha a janela é ele")
     if entrada["hospedar"] or entrada["nomePublico"]:
         falhas.append(f"a entrada ainda oferece o que é de quem hospeda: {entrada}")
-    if not entrada["frase"] or "app do SEELE" not in entrada["frase"] or entrada["link"] != "https://seele.app.br/#baixar":
+    if not entrada["frase"] or "app do SEELE" not in entrada["frase"] or entrada["link"] != "https://get.seele.sh/#baixar":
         falhas.append(f"no lugar do HOSPEDAR AQUI não há a frase do app e o link: {entrada['frase']!r} {entrada['link']!r}")
     if "pela" in entrada["proposito"] and "no ar a partir desta máquina" in entrada["proposito"] or "link" not in entrada["proposito"]:
         falhas.append(f"o propósito ainda fala em pôr um servidor no ar: {entrada['proposito']!r}")
@@ -3653,7 +3653,7 @@ def casca_larga(pg: Page) -> list[str]:
         fora = pg.evaluate("""(() => { const p = document.getElementById('larga-painel-fora');
             return { grupos: [...p.querySelectorAll('.rotulo')].map((r) => r.textContent), itens: p.querySelectorAll('li').length,
                      link: p.querySelector('a')?.getAttribute('href') ?? null }; })()""")
-        if fora["grupos"] != ["SÓ NO APP DO SEELE"] or fora["itens"] != 8 or fora["link"] != "https://seele.app.br/#baixar":
+        if fora["grupos"] != ["SÓ NO APP DO SEELE"] or fora["itens"] != 8 or fora["link"] != "https://get.seele.sh/#baixar":
             falhas.append(f"O QUE O NAVEGADOR NÃO FAZ mostra {fora}")
     return falhas
 

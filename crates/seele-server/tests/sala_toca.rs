@@ -33,56 +33,10 @@ use seele_server::frame;
 use seele_server::recepcao::{Aviso, Sala};
 use seele_server::{Daemon, ServerConfig};
 
+mod comum;
+
 /// A semente de quem recebe.
 const DONO: u8 = 1;
-
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
 
 fn chave(semente: u8) -> SigningKey {
     SigningKey::from_bytes(&[semente; 32])
@@ -113,11 +67,11 @@ async fn sala(prazo: Duration) -> Arc<Daemon> {
 /// Uma ponta de quem liga, até a prova: o que vier depois do `Response` é o
 /// assunto de cada teste.
 struct Ligacao {
-    conexao: quinn::Connection,
-    envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
+    conexao: seele_enlace::Conexao,
+    envio: seele_enlace::Envio,
+    recebe: seele_enlace::Recebe,
     /// A ponta é dona do socket, e sem ela viva a conexão cai.
-    _ponta: quinn::Endpoint,
+    _ponta: (seele_enlace::Ponta, seele_enlace::Conexao),
 }
 
 impl Ligacao {
@@ -127,21 +81,12 @@ impl Ligacao {
 }
 
 async fn ligar(endereco: SocketAddr, semente: u8) -> Result<Ligacao> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls)?,
-    )));
-    let conexao = ponta
-        .connect(endereco, seele_proto::transport::NOME_DA_SALA)?
-        .await?;
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
+    let comum::Ligado {
+        ponta,
+        conexao,
+        mut envio,
+        mut recebe,
+    } = comum::ligar(endereco).await?;
     let pessoa = chave(semente);
     frame::write(
         &mut envio,
@@ -160,33 +105,28 @@ async fn ligar(endereco: SocketAddr, semente: u8) -> Result<Ligacao> {
     else {
         anyhow::bail!("a sala não mandou Challenge");
     };
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS entrega a cadeia");
-    let impressao = seele_proto::transport::certificate_digest(cadeia.first().unwrap().as_ref());
-    let nonce: [u8; 32] = nonce.as_slice().try_into()?;
+    // Na sala, a impressão que a prova amarra é a da chave dela (D5), a que
+    // a apresentação `0x03` traz nos 32 primeiros bytes.
+    // Um servidor que não é sala se apresenta vazio, e a impressão é a do DTLS.
+    let impressao = match conexao.apresentacao().get(..32) {
+        Some(chave_da_sala) => seele_proto::transport::certificate_digest(chave_da_sala),
+        None => conexao.impressao_dtls_do_par(),
+    };
     frame::write(
         &mut envio,
         &ClientMessage::Response {
             proof: pessoa
-                .sign(&seele_proto::assinatura::prova_de_cliente(
-                    &impressao, &nonce,
-                ))
+                .sign(&comum::prova_para(&impressao, &conexao, &nonce))
                 .to_bytes()
                 .to_vec(),
         },
     )
     .await?;
     Ok(Ligacao {
-        conexao,
+        conexao: conexao.clone(),
         envio,
         recebe,
-        _ponta: ponta,
+        _ponta: (ponta, conexao),
     })
 }
 
@@ -293,7 +233,7 @@ async fn fechar_a_conexao_enquanto_toca_para_o_toque_no_app() {
         ServerMessage::Tocando { .. }
     ));
     let toque = tocou(&mut avisos, 2).await;
-    ligacao.conexao.close(0_u32.into(), b"desisti");
+    ligacao.conexao.close(0_u32, b"desisti");
 
     loop {
         let aviso = tokio::time::timeout(Duration::from_secs(5), avisos.recv())
@@ -401,7 +341,7 @@ async fn quando_quem_recebe_sai_quem_esta_dentro_recebe_chamada_encerrada() {
     ));
 
     let _ = dono.envio.finish();
-    dono.conexao.close(0_u32.into(), b"desliguei");
+    dono.conexao.close(0_u32, b"desliguei");
 
     let fim = tokio::time::timeout(Duration::from_secs(5), async {
         loop {

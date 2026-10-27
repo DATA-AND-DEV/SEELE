@@ -7,6 +7,24 @@ O resumo honesto: **em algumas casas o SEELE resolve isso sozinho, e em outras
 ele não tem como.** As duas situações são normais, e a segunda não é defeito do
 seu computador nem do seu amigo. O ADR 0022 registra a decisão por trás disto.
 
+## Desde a 0.17: a mesma escada, por WebRTC, e o navegador também sobe por ela
+
+A 0.17 troca a conexão por WebRTC (ADR 0063). A escada abaixo continua a mesma, com três diferenças:
+
+- **O navegador também usa o degrau 4.**
+  - Até a 0.16, a página só alcançava um servidor direto.
+  - Desde a 0.17, ela pede ao ponto de encontro, por HTTPS (`POST /sinal/1`), que o anfitrião fure o NAT na direção dela. O app pede o mesmo pelo UDP (ENC/3).
+  - Na rede de casa e no endereço direto, nada passa pelo ponto: o endereço do link basta.
+  - **Limite da validação final:** a travessia entre duas casas pelo ponto de produção ainda não foi medida nesta build. O smoke externo de `rendzvous.seele.sh` permanece gate de ativação; não há PASS externo final.
+  - Para a rodada final de celular, o dono escolheu o Safari/PWA no simulador iOS via Xcode em vez de novo teste físico. Foram medidos recepção de voz sintética na LAN, retomada, ajustes e liberação da captura. Numa build anterior, o dono confirmou voz nos dois sentidos no iPhone pelo 5G, mas a tela congelou: esse relato não valida a tela nem a build final física.
+- **O STUN do ponto.** Quem liga descobre o próprio endereço público perguntando ao ponto de encontro do link (STUN, na mesma porta dele). Nenhum STUN de terceiro vem configurado.
+- **Sem relay** (decisão do dono, 26/10/2026: o SEELE é código na máquina de cada um, e o ponto de encontro só apresenta os dois lados):
+  - a conversa vai direto entre as duas máquinas, e nenhum servidor no meio repassa o tráfego (não há TURN);
+  - o anfitrião checa os candidatos de quem liga (ICE completo), e quem liga aprende dessas checagens a porta certa do anfitrião: um NAT de casa que muda a porta conforme o destino é atravessado assim;
+  - o que o caminho direto não atravessa (por exemplo, NAT simétrico dos dois lados, ou uma rede que só sai por um proxy sem UDP direto) fica sem caminho, e a tela diz isso, e não promete conexão.
+
+O que o ponto de encontro fica sabendo cresce em uma coisa: no `CHAMA`, ele vê também o candidato de quem liga e a credencial ICE dessa tentativa. Essa credencial não é segredo: quem garante a conversa é o DTLS, com a impressão do link.
+
 ## O que o SEELE tenta sozinho
 
 Quando você aperta **HOSPEDAR AQUI**, o SEELE sobe uma escada e para no degrau
@@ -66,8 +84,8 @@ escreva o nome. Em branco é o comportamento de sempre, e continua sendo o padr�
    da sua casa. Se você tem IPv6 e quer que ele também sirva, crie um `AAAA`
    junto, com o endereço v6.
 2. **Não crie `CNAME`** para a raiz de um domínio; e não aponte para um serviço
-   que faz proxy do tráfego — o SEELE fala QUIC sobre UDP, e um proxy de HTTP
-   não o carrega.
+   que faz proxy do tráfego — o SEELE fala WebRTC sobre UDP (até a 0.16, QUIC
+   sobre UDP), e um proxy de HTTP não o carrega.
 3. **A porta não vai no DNS.** Ela vai no link, e o SEELE a põe lá sozinho: o
    que sai é `seele://casa.exemplo.br:8383/?fp=…`. O DNS só responde «que
    endereço é este nome».

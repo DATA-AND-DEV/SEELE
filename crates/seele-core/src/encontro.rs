@@ -39,8 +39,7 @@
 //! de quem chega. Ela só vale no IP do servidor que a mesma resposta deu
 //! ([`OndeMora::escuta_do_anfitriao`], [`bilhete_desta_volta`]).
 
-use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use seele_proto::encontro::{self};
@@ -101,209 +100,252 @@ fn recusar_a_producao(ponto: &str, onde: &str) {
 #[cfg(not(any(test, feature = "recusar-encontro-de-producao")))]
 fn recusar_a_producao(_ponto: &str, _onde: &str) {}
 
-/// Quanto tempo se gasta batendo antes de desistir e conectar assim mesmo.
-///
-/// Curto porque **não há o que esperar**: o aviso é de mão única, não há
-/// resposta a aguardar, e a única coisa que este prazo cobre é a resolução do
-/// nome do ponto de encontro. Um ponto de encontro fora do ar não pode atrasar
-/// uma conexão que talvez nem precisasse dele — o primeiro endereço do convite é
-/// o da rede de casa, e quem está na sala ao lado entra por ele.
+/// Quanto tempo se gasta resolvendo o ponto antes de desistir e conectar
+/// assim mesmo: um ponto fora do ar não atrasa uma conexão que talvez nem
+/// precisasse dele.
 const PRAZO: Duration = Duration::from_millis(600);
 
-/// O aviso ao ponto de encontro, e o socket por onde ele saiu.
+/// Quanto se espera a resposta do ponto a um `CHAMA`.
 ///
-/// Antes disto havia uma função só, `bater`, que abria o socket, resolvia o nome
-/// e mandava dois avisos, tudo antes do laço de candidatos. O furo abria por
-/// 600 ms e o aperto de mão chegava até doze segundos depois — o defeito que
-/// este ciclo existe para consertar.
+/// O ponto espera o `ATENDE` do anfitrião por 3 s (`enc3.md`) e responde
+/// `CALADO` depois disso; um segundo a mais cobre as duas pernas até ele.
+pub const PRAZO_DA_CHAMADA: Duration = Duration::from_secs(4);
+
+/// De quanto em quanto o `CHAMA` se repete enquanto o ponto não responde.
 ///
-/// A separação é o conserto: **preparar uma vez, avisar por candidato**. O
-/// socket tem de ser um só porque o NAT mapeia por porta interna, e um aviso que
-/// saísse de outra porta faria o anfitrião furar o caminho errado.
+/// UDP perde pacote, e um `CHAMA` perdido custava a chamada inteira em
+/// silêncio. Cada repetição vira um `CHAMADO` novo e um furo novo do anfitrião,
+/// que tem teto próprio de furos por minuto (R2): três envios cabem nele.
+const INTERVALO_DA_CHAMADA: Duration = Duration::from_millis(800);
+
+/// Quantos `CHAMA` saem no máximo.
+const CHAMADAS: u32 = 3;
+
+/// O degrau 4 da 0.17, do lado de quem liga: o `CHAMA` do ENC/3 (D7).
 ///
-/// O socket vive num `Arc` porque a Tarefa 7 clona a `Batida` inteira para
-/// repetir o aviso numa tarefa de fundo enquanto o laço de candidatos corre em
-/// primeiro plano — as duas metades precisam do mesmo socket, não de uma cópia
-/// dele.
+/// Substitui a `Batida` do ENC/1 e do ENC/2. Lá o aviso era de mão única: o
+/// `LEVE` saía, o anfitrião furava, e quem ligava discava às cegas. Aqui é uma
+/// pergunta com resposta: o `CHAMA` leva a credencial ICE (o `U`) desta
+/// tentativa, o ponto o repassa à escuta do anfitrião, o anfitrião fura com
+/// Binding Indications **do socket do servidor** para o endereço de quem liga
+/// (o que o ponto viu) e responde `ATENDE` com o endereço público dele. O
+/// ponto devolve `AQUI` com esse endereço e as dicas de rede local, e é para
+/// eles que a discagem vai, com o mesmo `U`.
+///
+/// # Por que o socket importa
+///
+/// O NAT mapeia por porta interna. O `CHAMA` sai **da ponta da sessão**
+/// ([`crate::transporte::PontaDaSessao`]), a mesma que vai discar: é o endereço
+/// dessa porta que o ponto vê e que o anfitrião fura. Um `CHAMA` de outro
+/// socket abriria o caminho para a porta errada.
+///
+/// # O que ela não autentica
+///
+/// O ponto pode mentir no `AQUI`. O que impede isso de virar conexão com um
+/// impostor é a impressão do DTLS, conferida antes do `Hello`
+/// (`client::conferir_quem_atendeu`). O pior que um ponto hostil faz é não
+/// entregar.
 #[derive(Clone)]
-pub(crate) struct Batida {
-    socket: Arc<tokio::net::UdpSocket>,
-    /// O ponto de encontro, **como `resolver` devolveu** — sem passar por
-    /// `mapear`. É a forma que um operador reconhece num log; a forma mapeada
-    /// (`::ffff:a.b.c.d` num socket de pilha dupla) só faz sentido para o
-    /// kernel, na hora de mandar. `avisar` mapeia de novo, a cada chamada,
-    /// bem em cima do envio — ver o comentário lá.
+pub(crate) struct Chamada {
+    /// O ponto, já resolvido.
     ponto: SocketAddr,
-    /// Para onde o anfitrião deve furar o caminho, só para diagnóstico: é o
-    /// mesmo valor que já foi para dentro do `LEVE`, em `datagrama`, mas
-    /// reencontrá-lo ali exigiria decodificar o próprio pacote.
-    aviso: SocketAddr,
-    datagrama: Vec<u8>,
-    /// A marca que vai no `LEVE`, guardada para [`Batida::com_aviso`] refazer o
-    /// datagrama com outro aviso.
-    marca: Marca,
+    /// O texto do ponto, para o log.
+    ponto_escrito: String,
+    /// As marcas do anfitrião: o servidor e a escuta.
+    marcas: Marcas,
 }
 
-impl Batida {
-    /// Abre o socket e resolve o ponto de encontro. **Não manda nada.**
+impl std::fmt::Debug for Chamada {
+    /// Sem as marcas: numa sala, elas são o código de quem se procura.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Chamada")
+            .field("ponto", &self.ponto)
+            .finish_non_exhaustive()
+    }
+}
+
+/// O que o ponto respondeu a um `CHAMA` atendido.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Atendida {
+    /// O endereço público do servidor, como o anfitrião o disse no `ATENDE`.
+    pub(crate) endereco: SocketAddr,
+    /// As dicas de rede local do anfitrião.
+    pub(crate) dicas: Vec<SocketAddr>,
+    /// O `U` que foi no `CHAMA`, e com que a discagem tem de sair: é por ele
+    /// que o anfitrião reconhece quem furou.
+    pub(crate) credencial: String,
+}
+
+/// Por que um `CHAMA` não deu em endereço.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FalhaDaChamada {
+    /// O ponto disse `NINGUEM`: o anfitrião não está registrado lá (fora do ar,
+    /// ou uma versão que não registra o ENC/3).
+    Ninguem,
+    /// O ponto disse `CALADO`: achou o anfitrião e ele não respondeu ao
+    /// `CHAMADO` a tempo.
+    Calado,
+    /// O ponto recusou (taxa, relógio, cheio).
+    Recusa,
+    /// O ponto não respondeu nada no prazo, ou o `CHAMA` nem saiu.
+    Mudo,
+}
+
+impl Chamada {
+    /// Resolve o ponto. **Não manda nada.**
     ///
-    /// `None` quando não dá para bater — nome que não resolve, destino sem
-    /// marca, máquina sem rota. Nesse caso quem chama conecta como sempre
-    /// conectou: nenhum endereço do convite depende disto, e o degrau 4 é o
-    /// único que se perde.
-    ///
-    /// # Por que a marca é obrigatória aqui
-    ///
-    /// É ela que diz a quem atende que o aviso é para ele: a do aviso de um
-    /// servidor sai da impressão digital do link, e a de uma sala sai do código
-    /// (`crate::enlace::Destino::marca_do_aviso`, que é quem escolhe). Sem
-    /// marca o aviso chegaria com uma etiqueta que ninguém reconhece, e seria
-    /// ignorado — mandar o pacote assim mesmo seria gastar rede para produzir
-    /// silêncio.
-    pub(crate) async fn preparar(bilhete: &Bilhete, marca: Option<Marca>) -> Option<Self> {
-        let marca = marca?;
-        let aviso = bilhete.aviso().ok()?;
+    /// `None` quando não dá para chamar: nome que não resolve no prazo, ou
+    /// destino sem marcas. Nesse caso quem liga disca como sempre discou:
+    /// nenhum endereço do convite depende disto, e o degrau 4 é o único que se
+    /// perde.
+    pub(crate) async fn preparar(bilhete: &Bilhete, marcas: Option<Marcas>) -> Option<Self> {
+        let marcas = marcas?;
         let ponto = tokio::time::timeout(PRAZO, resolver(bilhete))
             .await
             .ok()??;
-
-        let socket = abrir_socket_local()?;
-        let socket = tokio::net::UdpSocket::from_std(socket).ok()?;
-
-        let datagrama = encontro::leve(aviso, &marca);
-
         Some(Self {
-            socket: Arc::new(socket),
             ponto,
-            aviso,
-            datagrama,
-            marca,
+            ponto_escrito: bilhete.ponto.clone(),
+            marcas,
         })
     }
 
-    /// A mesma batida, avisando outro endereço: o mesmo socket, o mesmo ponto e
-    /// a mesma marca, e o `LEVE` com `aviso`.
-    ///
-    /// É o que quem volta a um servidor guardado usa quando o quarto dá a escuta
-    /// de hoje ([`bilhete_desta_volta`]). A batida não é preparada de novo
-    /// porque o furo tem de abrir para a porta de onde saem os apertos de mão, e
-    /// essa porta é a do socket desta.
-    pub(crate) fn com_aviso(&self, aviso: SocketAddr) -> Self {
-        Self {
-            socket: Arc::clone(&self.socket),
-            ponto: self.ponto,
-            aviso,
-            datagrama: encontro::leve(aviso, &self.marca),
-            marca: self.marca.clone(),
-        }
-    }
-
-    /// Manda **um** datagrama de 96 bytes ao ponto de encontro.
-    ///
-    /// `async`, mas não por causa de ida e volta de rede: não há resposta
-    /// nenhuma a aguardar, e quem chama continua com um aperto de mão para
-    /// começar assim que `avisar` retorna. O `.await` aqui é só o tempo de o
-    /// socket aceitar escrita — o `send_to` do tokio cuida disso por dentro.
-    ///
-    /// A versão anterior usava `try_send_to`, não-bloqueante, para evitar
-    /// exatamente essa espera. Era a coisa errada a evitar: no caminho de
-    /// produção, quando o primeiro candidato do convite já é o refletido (uma
-    /// casa atrás de CGNAT, sem IPv6 e sem UPnP — o caso que o degrau 4 existe
-    /// para servir), `avisar` é chamado logo depois de `preparar`, sem nenhum
-    /// `.await` entre os dois. O socket, recém-registrado no reator, ainda não
-    /// tinha passado por um ciclo dele, e `try_send_to` podia devolver
-    /// `WouldBlock` à toa — não por a rede estar ocupada, mas por o reator
-    /// ainda não ter marcado o socket como pronto. O aviso não saía, o
-    /// anfitrião nunca furava, e o candidato queimava o prazo inteiro
-    /// esperando uma resposta que nunca viria por um caminho que nunca abriu:
-    /// um sucesso mentiroso, silencioso, com o erro final apontando para outro
-    /// endereço. Esperar os poucos microssegundos de `.await` é sempre mais
-    /// barato que essa mentira.
-    ///
-    /// # Quem decide o que fazer com o erro não é esta função
-    ///
-    /// `avisar` devolve o `Result` em vez de engolir o erro — ela mesma já
-    /// engoliu um `WouldBlock` de mais numa rodada anterior deste ciclo, e a
-    /// correção foi trocar o `try_send_to` pelo `send_to` que espera, não
-    /// decidir por quem chama que qualquer falha é inofensiva. Um
-    /// `ENETUNREACH`, um destino de família errada, um socket fechado — nada
-    /// disso é `WouldBlock`, e fingir que é viraria o mesmo sucesso mentiroso
-    /// de antes, um nível acima.
-    ///
-    /// O peso do erro muda com quem chama, e é por isso que a decisão fica de
-    /// fora. O invólucro `bater` que existia aqui até a Tarefa 7 cancelava a
-    /// conexão inteira ao primeiro envio recusado — ele mandava um aviso só,
-    /// antes do laço, e sem ele não havia degrau 4 nenhum. Quem chama hoje é o
-    /// laço de candidatos de [`crate::enlace`], uma vez por candidato que
-    /// precisa de furo, e ali a mesma falha não pode ter esse peso: um aviso
-    /// que não sai para o candidato 2 não tem nada a ver com o candidato 3, e
-    /// derrubar a conexão por causa dele trocaria um defeito por outro. Lá o
-    /// erro é registrado e o laço segue. `avisar` só manda e informa.
-    pub(crate) async fn avisar(&self) -> std::io::Result<()> {
-        // Mapeado aqui, a cada envio, e não uma vez só em `preparar`: é isto
-        // que deixa `self.ponto` guardado na forma crua (ver o campo `ponto`,
-        // na struct) — a única forma que um log consegue mostrar de um jeito
-        // que um operador reconhece.
-        let destino = mapear(self.ponto, &self.socket);
-        self.socket.send_to(&self.datagrama, destino).await?;
-        Ok(())
-    }
-
-    /// O socket por onde o aviso saiu.
-    ///
-    /// Quem conecta em seguida tem de conectar por ele: o anfitrião abriu
-    /// caminho para **esta** porta, e um aperto de mão saindo de outra
-    /// continuaria batendo numa porta fechada.
-    ///
-    /// Devolve o `Arc`, não uma referência ao socket por dentro dele: é assim
-    /// que a tarefa de fundo que repete o aviso fica dona do mesmo socket sem
-    /// precisar de um `try_clone` que o `tokio::net::UdpSocket` nem oferece.
-    ///
-    /// Quem conecta não usa isto e sim [`Batida::emprestar_socket`]: o quinn
-    /// adota um socket da `std`, não um do tokio.
-    ///
-    /// Por isso o método **só existe sob `cfg(test)`**. O laço de candidatos
-    /// empresta o descritor e nunca precisa do `Arc` em si; fora de teste isto
-    /// é código morto, e um `expect(dead_code)` renovado a cada rodada seria
-    /// só uma forma educada de manter código morto no lugar.
-    #[cfg(test)]
-    pub(crate) fn socket(&self) -> &Arc<tokio::net::UdpSocket> {
-        &self.socket
-    }
-
-    /// Um segundo descritor para a **mesma** porta, na forma que o quinn adota.
-    ///
-    /// É o `try_clone` de sempre, e o motivo dele também: um `quinn::Endpoint`
-    /// fecha o socket que adotou quando é recolhido, e cada candidato do
-    /// convite monta um `Endpoint` novo. Sem uma cópia por tentativa, a porta
-    /// que o anfitrião acabou de furar voltaria para o sistema no meio do laço
-    /// — e a tentativa seguinte sairia de outra porta, para a qual ninguém
-    /// furou nada.
-    ///
-    /// A cópia é feita do descritor emprestado (`SockRef`), e não do
-    /// `tokio::net::UdpSocket`, porque o tokio não oferece `try_clone` e
-    /// desembrulhar o `Arc` mataria o original — que precisa continuar vivo
-    /// até o fim do laço, ou o sistema devolveria a porta furada assim que a
-    /// última tentativa terminasse.
-    ///
-    /// `None` quando o sistema recusa a cópia. Aí a tentativa sai de um socket
-    /// novo, como quem não bateu em ponto de encontro nenhum: pior, mas não
-    /// pior do que não tentar.
-    pub(crate) fn emprestar_socket(&self) -> Option<std::net::UdpSocket> {
-        let copia = socket2::SockRef::from(self.socket.as_ref())
-            .try_clone()
-            .ok()?;
-        Some(copia.into())
-    }
-
-    /// Onde o aviso foi mandado, para o log de quem chama.
+    /// Onde o `CHAMA` vai, para o log de quem chama.
     pub(crate) fn ponto(&self) -> SocketAddr {
         self.ponto
     }
 
-    /// Para onde o anfitrião foi convidado a furar, para o log de quem chama.
-    pub(crate) fn aviso(&self) -> SocketAddr {
-        self.aviso
+    /// Chama o anfitrião pelo ponto, da ponta desta sessão, e espera o `AQUI`.
+    ///
+    /// Repete o `CHAMA` a cada [`INTERVALO_DA_CHAMADA`], até [`CHAMADAS`]
+    /// vezes, enquanto o ponto não responde, e desiste em `prazo`. Lê as
+    /// respostas pelos datagramas ENC da ponta (`Ponta::mensagens_enc`), que
+    /// a ponta entrega **uma vez**: uma chamada por ponta.
+    ///
+    /// # Errors
+    ///
+    /// [`FalhaDaChamada`], com o que o ponto disse ou calou. Cada uma vai ao
+    /// log em `info`, com o ponto.
+    pub(crate) async fn chamar(
+        &self,
+        ponta: &seele_enlace::Ponta,
+        prazo: Duration,
+    ) -> Result<Atendida, FalhaDaChamada> {
+        let Some(mut chegadas) = ponta.mensagens_enc() else {
+            tracing::warn!(
+                ponto = %self.ponto_escrito,
+                "os datagramas do ponto desta ponta já foram tomados: o CHAMA não sai"
+            );
+            return Err(FalhaDaChamada::Mudo);
+        };
+        let credencial = seele_enlace::sortear_credencial();
+        let Some(u) = encontro::Credencial::nova(&credencial) else {
+            tracing::error!("a credencial sorteada pelo enlace não serve ao ENC/3");
+            return Err(FalhaDaChamada::Mudo);
+        };
+        let pedido = encontro::chama(&encontro::Chama {
+            servidor: self.marcas.servidor().clone(),
+            escuta: self.marcas.escuta().clone(),
+            credencial: u,
+            // O ponto junta o endereço que ele viu, que é o que serve: o desta
+            // porta, depois do NAT. Sem STUN próprio, não há o que somar.
+            candidatos: Vec::new(),
+        });
+        let ate = tokio::time::Instant::now() + prazo;
+        let mut enviados = 0_u32;
+        let mut proximo = tokio::time::Instant::now();
+        loop {
+            if enviados < CHAMADAS && tokio::time::Instant::now() >= proximo {
+                match ponta.enviar_bruto(self.ponto, &pedido) {
+                    Ok(()) => {
+                        enviados += 1;
+                        tracing::info!(
+                            ponto = %self.ponto_escrito,
+                            vez = enviados,
+                            "degrau 4: chamamos o anfitrião pelo ponto de encontro (ENC/3)"
+                        );
+                    }
+                    Err(erro) => {
+                        tracing::info!(%erro, ponto = %self.ponto_escrito, "o CHAMA não saiu");
+                        if enviados == 0 {
+                            return Err(FalhaDaChamada::Mudo);
+                        }
+                    }
+                }
+                proximo = tokio::time::Instant::now() + INTERVALO_DA_CHAMADA;
+            }
+            let espera = if enviados < CHAMADAS {
+                proximo.min(ate)
+            } else {
+                ate
+            };
+            let chegou = match tokio::time::timeout_at(espera, chegadas.recv()).await {
+                Ok(Some(chegou)) => chegou,
+                Ok(None) => return Err(FalhaDaChamada::Mudo),
+                Err(_) if tokio::time::Instant::now() >= ate => {
+                    tracing::info!(
+                        ponto = %self.ponto_escrito,
+                        enviados,
+                        ?prazo,
+                        "o ponto de encontro não respondeu ao CHAMA no prazo"
+                    );
+                    return Err(FalhaDaChamada::Mudo);
+                }
+                Err(_) => continue,
+            };
+            let (de, bytes) = chegou;
+            // Só o que veio do ponto: um datagrama de outro endereço que chegue
+            // a esta porta não fala por ele.
+            if de.ip().to_canonical() != self.ponto.ip().to_canonical()
+                || de.port() != self.ponto.port()
+            {
+                continue;
+            }
+            let Some(resposta) = encontro::ler_resposta3(&bytes) else {
+                continue;
+            };
+            match resposta {
+                encontro::Resposta3::Aqui {
+                    marca,
+                    endereco,
+                    dicas,
+                } if marca == *self.marcas.servidor() => {
+                    tracing::info!(
+                        ponto = %self.ponto_escrito,
+                        %endereco,
+                        dicas = dicas.len(),
+                        "o anfitrião atendeu o CHAMA: discando para o endereço que ele deu"
+                    );
+                    return Ok(Atendida {
+                        endereco,
+                        dicas,
+                        credencial,
+                    });
+                }
+                encontro::Resposta3::Ninguem { marca } if marca == *self.marcas.servidor() => {
+                    tracing::info!(ponto = %self.ponto_escrito, "o ponto disse NINGUEM ao CHAMA");
+                    return Err(FalhaDaChamada::Ninguem);
+                }
+                encontro::Resposta3::Calado { marca } if marca == *self.marcas.servidor() => {
+                    tracing::info!(
+                        ponto = %self.ponto_escrito,
+                        "o ponto achou o anfitrião e ele não atendeu o CHAMA (CALADO)"
+                    );
+                    return Err(FalhaDaChamada::Calado);
+                }
+                encontro::Resposta3::Recusa { marca, motivo, .. }
+                    if marca == *self.marcas.servidor() =>
+                {
+                    tracing::info!(
+                        ponto = %self.ponto_escrito,
+                        motivo = motivo.texto(),
+                        "o ponto recusou o CHAMA"
+                    );
+                    return Err(FalhaDaChamada::Recusa);
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -343,77 +385,6 @@ fn escolher_ponto(achados: &[SocketAddr], aviso: SocketAddr) -> Option<SocketAdd
         .find(mesma_familia)
         .or_else(|| achados.first())
         .copied()
-}
-
-/// Um socket local que alcança as duas famílias, como o do QUIC.
-///
-/// Mesmo raciocínio de `local_endpoint` em [`crate::client`], e pelo mesmo
-/// motivo: um socket IPv4 não manda para destino IPv6 de jeito nenhum, e um
-/// socket IPv6 só manda para IPv4 com o `IPV6_V6ONLY` desligado — cujo padrão
-/// muda de sistema para sistema (o degrau 2 do ADR 0022 mediu isso e apanhou).
-///
-/// A diferença é que aqui a pilha dupla é condição, e não tentativa: sem ela, o
-/// aviso a um ponto IPv4 não sai. Uma máquina sem IPv6 cai para IPv4, e
-/// continua exatamente como estava.
-///
-/// **E a porta é a mesma conferida do QUIC** ([`crate::client::socket_de_quem_conecta`]):
-/// este socket é emprestado ao aperto de mão depois do furo, e uma porta que um
-/// socket IPv4 da máquina segura entregaria a ele a resposta do servidor.
-///
-/// **Quando cai para o só IPv4, diz por quê**, como `local_endpoint` diz: o
-/// socket de pilha dupla que não abriu — sem IPv6, ou as propostas de porta
-/// todas recusadas — mudava em silêncio o socket por onde o aviso sai.
-fn abrir_socket_local() -> Option<std::net::UdpSocket> {
-    let seis = || -> Option<std::net::UdpSocket> {
-        let socket = match crate::client::socket_de_quem_conecta() {
-            Ok(socket) => socket,
-            Err(erro) => {
-                tracing::warn!(
-                    %erro,
-                    "a batida não abriu o socket de pilha dupla conferido; o aviso sai \
-                     só por IPv4"
-                );
-                return None;
-            }
-        };
-        match socket2::SockRef::from(&socket).only_v6() {
-            Ok(false) => Some(socket),
-            Ok(true) => {
-                tracing::warn!(
-                    "o socket da batida ficou só IPv6, sem pilha dupla; o aviso sai só por IPv4"
-                );
-                None
-            }
-            Err(erro) => {
-                tracing::warn!(
-                    %erro,
-                    "não deu para ler se o socket da batida é de pilha dupla; o aviso sai \
-                     só por IPv4"
-                );
-                None
-            }
-        }
-    };
-    let quatro = || std::net::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).ok();
-
-    let socket = seis().or_else(quatro)?;
-    socket.set_nonblocking(true).ok()?;
-    Some(socket)
-}
-
-/// Um destino IPv4 escrito como o socket local o entende.
-///
-/// Num socket IPv6 de pilha dupla, um endereço IPv4 precisa ir na forma mapeada
-/// (`::ffff:a.b.c.d`) — é o que o quinn faz por dentro, e aqui é à mão porque o
-/// socket é nosso.
-fn mapear(destino: SocketAddr, socket: &tokio::net::UdpSocket) -> SocketAddr {
-    let local_e_seis = socket.local_addr().is_ok_and(|local| local.is_ipv6());
-    match (local_e_seis, destino.ip()) {
-        (true, IpAddr::V4(quatro)) => {
-            SocketAddr::new(quatro.to_ipv6_mapped().into(), destino.port())
-        }
-        _ => destino,
-    }
 }
 
 /// Onde o ponto de encontro atende, a partir do texto que o link carrega.
@@ -575,6 +546,10 @@ pub enum OndeMora {
     PontoMudo,
     /// O texto do ponto não é um endereço, ou o nome não resolveu no prazo.
     PontoNaoResolve,
+    /// O ponto recusou por excesso de pedidos desta rede
+    /// ([`Localizacao::PontoRecusou`]). Só a consulta pelo ENC/3 o distingue
+    /// (`seele_ffi::onde_mora_hoje`); ele está no ar, e não está mudo.
+    PontoRecusou,
     /// Quem chamou não tinha como formar as marcas, e nenhuma pergunta saiu.
     ///
     /// [`onde_mora_hoje`] nunca devolve isto, porque recebe as marcas prontas.
@@ -589,7 +564,11 @@ impl OndeMora {
     pub fn servidor(&self) -> Option<SocketAddr> {
         match self {
             Self::Achado { servidor, .. } => *servidor,
-            Self::NinguemMora | Self::PontoMudo | Self::PontoNaoResolve | Self::SemMarca => None,
+            Self::NinguemMora
+            | Self::PontoMudo
+            | Self::PontoNaoResolve
+            | Self::PontoRecusou
+            | Self::SemMarca => None,
         }
     }
 
@@ -603,7 +582,11 @@ impl OndeMora {
     pub fn escuta(&self) -> Option<SocketAddr> {
         match self {
             Self::Achado { escuta, .. } => *escuta,
-            Self::NinguemMora | Self::PontoMudo | Self::PontoNaoResolve | Self::SemMarca => None,
+            Self::NinguemMora
+            | Self::PontoMudo
+            | Self::PontoNaoResolve
+            | Self::PontoRecusou
+            | Self::SemMarca => None,
         }
     }
 
@@ -819,6 +802,13 @@ pub fn bilhete_desta_volta(guardado: &Bilhete, no_quarto: &OndeMora) -> Bilhete 
 /// acaba sem resposta deixa também a sua causa, em `info` (o único nível que o
 /// `seele.log` grava): o prazo que venceu, o envio que o sistema recusou, a
 /// leitura que falhou, o endereço que a consulta deixou pelo seguinte.
+///
+/// # É a pergunta do ENC/1
+///
+/// Um anfitrião 0.17 só se registra pelo `MORA3`, e esta pergunta (o `QUEM`) não
+/// o acha. Ela fica pelo que o ponto ainda serve à linha anterior, e pelos
+/// testes do ponto. Para achar um anfitrião 0.17, a pergunta é [`localizar3`]:
+/// é a que a `Chegada` e `seele_ffi::onde_mora_hoje` fazem.
 pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> OndeMora {
     consultar_o_ponto(
         ponto,
@@ -923,6 +913,10 @@ pub enum FalhaAoLocalizar {
     /// O ponto deu só a escuta: a resposta sobre o servidor não voltou a
     /// tempo, e sem ela não há endereço a que conectar.
     SoAEscuta,
+    /// O ponto achou o anfitrião e repassou o `CHAMA`, e o anfitrião não
+    /// respondeu a tempo (`CALADO`, ENC/3): a escuta dele não está recebendo,
+    /// ou o teto de chamadas dele estourou.
+    AnfitriaoCalado,
 }
 
 /// O que as duas consultas ao quarto têm em comum: resolver o ponto dentro do
@@ -1318,6 +1312,205 @@ impl Consulta for PeloQuem2<'_> {
     }
 }
 
+/// A consulta do ENC/3 (a 0.17): `QUEM3` pelas duas marcas, e o `ONDE` da
+/// versão 1 como sonda, no mesmo molde de [`PeloQuem2`].
+///
+/// O anfitrião 0.17 registra as duas marcas pelo `MORA3` (servidor guardado) ou
+/// pelo `MORO3` assinado (sala pessoal), e não publica nada do ENC/1 nem do
+/// ENC/2. Por isso quem procura um anfitrião 0.17 pergunta isto; e quem só acha
+/// pelo `QUEM2` achou uma 0.16 ([`localizar_com_a_linha`]).
+struct PeloQuem3<'m> {
+    marcas: &'m Marcas,
+    servidor: Option<encontro::Resposta3>,
+    escuta: Option<encontro::Resposta3>,
+}
+
+impl<'m> PeloQuem3<'m> {
+    fn nova(marcas: &'m Marcas) -> Self {
+        Self {
+            marcas,
+            servidor: None,
+            escuta: None,
+        }
+    }
+}
+
+/// Só o tipo do que o ponto respondeu, sem a marca nem o endereço.
+impl std::fmt::Debug for PeloQuem3<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn sem_marca(resposta: Option<&encontro::Resposta3>) -> &'static str {
+            match resposta {
+                None => "nada",
+                Some(encontro::Resposta3::Aqui { .. }) => "AQUI",
+                Some(encontro::Resposta3::Ninguem { .. }) => "NINGUEM",
+                Some(encontro::Resposta3::Recusa { .. }) => "RECUSA",
+                Some(encontro::Resposta3::Calado { .. }) => "CALADO",
+                Some(_) => "outra",
+            }
+        }
+        f.debug_struct("PeloQuem3")
+            .field("servidor", &sem_marca(self.servidor.as_ref()))
+            .field("escuta", &sem_marca(self.escuta.as_ref()))
+            .finish()
+    }
+}
+
+/// A marca de uma resposta do ENC/3, quando ela tem uma das que se perguntam.
+fn marca_da_resposta3(resposta: &encontro::Resposta3) -> Option<&Marca> {
+    match resposta {
+        encontro::Resposta3::Aqui { marca, .. }
+        | encontro::Resposta3::Ninguem { marca }
+        | encontro::Resposta3::Recusa { marca, .. }
+        | encontro::Resposta3::Calado { marca }
+        | encontro::Resposta3::Morou { marca, .. }
+        | encontro::Resposta3::Desafio { marca, .. } => Some(marca),
+        encontro::Resposta3::Chamado(_) => None,
+    }
+}
+
+impl Consulta for PeloQuem3<'_> {
+    type Resposta = Localizacao;
+
+    fn pedidos(&self, sonda: &Marca) -> [Vec<u8>; 3] {
+        [
+            encontro::quem3(self.marcas.servidor()),
+            encontro::quem3(self.marcas.escuta()),
+            encontro::onde(sonda),
+        ]
+    }
+
+    fn ler(&mut self, datagrama: &[u8], sonda: &Marca) -> Option<Lido> {
+        if let Some((marca, _)) = encontro::ler_aqui(datagrama) {
+            return Some(if marca == *sonda {
+                Lido::Sonda
+            } else {
+                Lido::Outra
+            });
+        }
+        let resposta = encontro::ler_resposta3(datagrama)?;
+        let marca = marca_da_resposta3(&resposta).cloned();
+        if marca.as_ref() == Some(self.marcas.servidor()) {
+            self.servidor = Some(resposta);
+        } else if marca.as_ref() == Some(self.marcas.escuta()) {
+            self.escuta = Some(resposta);
+        }
+        Some(Lido::Outra)
+    }
+
+    fn completa(&self) -> bool {
+        self.servidor.is_some() && self.escuta.is_some()
+    }
+
+    fn espera_mais(&self) -> bool {
+        self.servidor.is_none() && self.escuta.is_none()
+    }
+
+    fn concluir(self, no_ar: bool) -> Localizacao {
+        let endereco = |resposta: &Option<encontro::Resposta3>| match resposta {
+            Some(encontro::Resposta3::Aqui { endereco, .. }) => Some(*endereco),
+            _ => None,
+        };
+        let (servidor, escuta) = (endereco(&self.servidor), endereco(&self.escuta));
+        if servidor.is_some() || escuta.is_some() {
+            let dicas = match self.servidor {
+                Some(encontro::Resposta3::Aqui { dicas, .. }) => dicas
+                    .into_iter()
+                    .filter(|dica| encontro::serve_de_dica(*dica))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            return Localizacao::Achada {
+                servidor,
+                escuta,
+                dicas,
+            };
+        }
+        let respostas = [self.servidor, self.escuta];
+        if respostas
+            .iter()
+            .flatten()
+            .any(|resposta| matches!(resposta, encontro::Resposta3::Recusa { .. }))
+        {
+            Localizacao::PontoRecusou
+        } else if respostas.iter().flatten().next().is_some() {
+            Localizacao::NinguemMora
+        } else if no_ar {
+            Localizacao::Enc2Calado
+        } else {
+            Localizacao::PontoMudo
+        }
+    }
+
+    fn mudo() -> Localizacao {
+        Localizacao::PontoMudo
+    }
+
+    fn nao_resolve() -> Localizacao {
+        Localizacao::PontoNaoResolve
+    }
+}
+
+/// Onde um anfitrião 0.17 mora agora, pelo ENC/3 (`QUEM3`).
+///
+/// Serve à sala pessoal (marcas de `Marcas::da_sala`) e ao servidor guardado
+/// (marcas de `Marcas::do_servidor`). Custa o que [`localizar`] custa, pelo
+/// mesmo laço. [`Localizacao::Enc2Calado`] aqui quer dizer «o ponto responde
+/// ao `ONDE` e cala o `QUEM3`»: um ponto anterior ao ENC/3.
+pub async fn localizar3(ponto: &str, marcas: &Marcas, prazo: Duration) -> Localizacao {
+    consultar_o_ponto(
+        ponto,
+        || PeloQuem3::nova(marcas),
+        prazo,
+        "quarto: onde o anfitrião mora hoje (ENC/3)",
+    )
+    .await
+}
+
+/// O que se achou sabendo **de que linha** é quem atende (R6 da revisão).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalizacaoComLinha {
+    /// Achado pelo ENC/3: um anfitrião da linha 2 (0.17 em diante).
+    Achada(Localizacao),
+    /// O ENC/3 não achou, e o ENC/2 achou: **a pessoa está num Servidor 1**
+    /// (a 0.16 ou anterior). A 0.17 não conversa com ela; quem abre essa
+    /// linha é o launcher.
+    NaLinhaUm,
+    /// Nenhum dos dois achou: o motivo é o do ENC/3.
+    NaoAchou(Localizacao),
+}
+
+/// Pergunta `QUEM3` e `QUEM2` **em paralelo** (R6 da revisão do coordenador).
+///
+/// A 0.17 só conversa com quem registrou pelo ENC/3. Uma pessoa que continua
+/// na 0.16 registra a sala pelo `MORO2`: perguntar só o `QUEM3` daria
+/// «ninguém mora», e a tela mandaria esperar alguém que está no ar, na outra
+/// linha. Com o `QUEM2` junto, esse caso tem nome: [`LocalizacaoComLinha::NaLinhaUm`].
+///
+/// O ENC/2 só é olhado quando o ENC/3 não achou: um anfitrião que registra nas
+/// duas (não há, hoje) vale como da linha 2.
+pub async fn localizar_com_a_linha(
+    ponto: &str,
+    marcas: &Marcas,
+    prazo: Duration,
+) -> LocalizacaoComLinha {
+    let (tres, dois) = tokio::join!(
+        localizar3(ponto, marcas, prazo),
+        localizar(ponto, marcas, prazo)
+    );
+    match (tres, dois) {
+        (achada @ Localizacao::Achada { .. }, _) => LocalizacaoComLinha::Achada(achada),
+        (_, Localizacao::Achada { .. }) => {
+            tracing::info!(
+                ponto,
+                "quarto: o ENC/3 não achou, e o ENC/2 achou: quem se procura está num \
+                 Servidor 1 (0.16 ou anterior), que a 0.17 não alcança"
+            );
+            LocalizacaoComLinha::NaLinhaUm
+        }
+        (falha, _) => LocalizacaoComLinha::NaoAchou(falha),
+    }
+}
+
 /// A consulta do ENC/1 por um endereço, num socket já aberto: [`consultar_com`]
 /// com [`PeloQuem`], o mesmo caminho de [`onde_mora_hoje`]. Os testes do laço a
 /// chamam pelo nome de antes do ENC/2.
@@ -1576,6 +1769,7 @@ fn aceita_origem(origem: SocketAddr, destino: SocketAddr) -> bool {
 #[cfg(test)]
 mod testes {
     use super::*;
+    use std::sync::Arc;
 
     /// O ponto de encontro é escolhido pela família do anfitrião, não pela ordem
     /// do DNS.
@@ -1742,69 +1936,6 @@ mod testes {
         );
     }
 
-    /// O gêmeo de `client::testes_do_socket::o_socket_de_quem_conecta_nao_divide_a_porta_com_um_socket_ipv4`:
-    /// o socket da batida é emprestado ao aperto de mão do QUIC depois do furo,
-    /// e uma porta que um socket IPv4 da máquina segura entregaria a ele a
-    /// resposta do servidor.
-    ///
-    /// Nos três sistemas, como o gêmeo: encena a colisão onde o sistema a
-    /// deixa acontecer, e onde recusa abre o socket com as portas presas de pé.
-    #[test]
-    fn o_socket_da_batida_nao_divide_a_porta_com_um_socket_ipv4() {
-        use crate::client::testes_do_socket::{a_resposta_chega, encenar_a_colisao, Encenacao};
-
-        let (ladroes, encenada) = match encenar_a_colisao() {
-            Encenacao::Colisao { ladrao, proposta } => {
-                crate::client::PROPOSTA_DE_TESTE
-                    .with(|vaga| *vaga.borrow_mut() = Some(Ok(proposta)));
-                (vec![ladrao], true)
-            }
-            Encenacao::Recusa { ladroes, .. } => (ladroes, false),
-        };
-
-        let Some(socket) = abrir_socket_local() else {
-            panic!("não abriu o socket local da batida");
-        };
-        if encenada {
-            assert!(
-                crate::client::PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow().is_none()),
-                "o socket da batida não passou pela proposta guardada, e o teste não encenou \
-                 a colisão"
-            );
-        }
-        a_resposta_chega(&socket, &ladroes.iter().collect::<Vec<_>>());
-    }
-
-    /// O socket conferido que não abre — sem IPv6, ou as 16 propostas
-    /// recusadas — cai para o só IPv4 dizendo no registro por quê.
-    ///
-    /// O `.ok()?` de antes caía calado, e quem lesse o `seele.log` de uma
-    /// batida que não furou não teria como saber que o socket já era outro.
-    /// `#[test]` comum: `abrir_socket_local` roda inteiro nesta thread, onde
-    /// estão o rastro e a proposta guardada.
-    #[test]
-    fn a_batida_diz_no_registro_quando_o_socket_conferido_nao_abre() {
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-        crate::client::PROPOSTA_DE_TESTE.with(|vaga| {
-            *vaga.borrow_mut() = Some(Err(std::io::Error::other("proposta recusada de propósito")));
-        });
-
-        let socket = abrir_socket_local();
-
-        assert!(
-            socket.is_some(),
-            "a batida não caiu para o socket só IPv4 quando o de pilha dupla não abriu"
-        );
-        let linhas = rastro.linhas();
-        assert!(
-            linhas.iter().any(|linha| linha.starts_with("WARN")
-                && linha.contains("proposta recusada de propósito")),
-            "o socket conferido da batida não abriu e o registro não disse nada, nem por quê. \
-             Linhas: {linhas:?}"
-        );
-    }
-
     #[tokio::test]
     async fn um_aqui_de_outro_ip_nao_entra_na_resposta_da_consulta() {
         // O m1 da revisão final do Plano 1. O predicado tem teste (logo acima),
@@ -1816,11 +1947,9 @@ mod testes {
         // do servidor antes de o ponto responder. O ponto está em `::1`, e o
         // terceiro em `127.0.0.1`: é o outro IP desta máquina (o macOS recusa o
         // `127.0.0.2`). A consulta corre num socket de pilha dupla, o mesmo que
-        // `abrir_socket_local` abre para a batida, e é por ele que o pacote do
-        // IPv4 chega.
-        let Some(dupla) = abrir_socket_local() else {
-            panic!("não abriu o socket local da consulta");
-        };
+        // a ponta da sessão usa, e é por ele que o pacote do IPv4 chega.
+        let dupla = crate::client::socket_de_quem_conecta().expect("o socket de pilha dupla");
+        dupla.set_nonblocking(true).unwrap();
         let consulta = tokio::net::UdpSocket::from_std(dupla).unwrap();
         assert!(
             consulta.local_addr().unwrap().is_ipv6(),
@@ -2683,65 +2812,29 @@ mod testes {
         Bilhete::novo(ponto, "45.33.32.156:41234").expect("bilhete de teste")
     }
 
-    /// Um `Bilhete` cujo ponto de encontro é `onde`, e cujo aviso é qualquer
-    /// endereço global — `preparar` nunca lê `aviso`, só `ponto`.
-    fn bilhete_de_teste(onde: SocketAddr) -> Bilhete {
-        bilhete(&onde.to_string())
+    #[tokio::test]
+    async fn sem_marcas_nao_se_chama_ponto_nenhum() {
+        // Sem marcas o `CHAMA` chegaria com uma etiqueta que ninguém
+        // registrou: rede gasta para produzir `NINGUEM`.
+        assert!(Chamada::preparar(&bilhete("192.0.2.1:8384"), None)
+            .await
+            .is_none());
     }
 
-    /// Um destino que **esta** máquina recusa, descoberto e não suposto.
-    ///
-    /// # Por que descoberto
-    ///
-    /// Porque três hipóteses sobre «o que todo sistema recusa» já foram escritas
-    /// aqui, e as três estavam erradas. Sem broadcast o envio devolveria permissão
-    /// negada em todo sistema — no Windows passa. A porta zero seria recusada em
-    /// todo sistema — no Windows passa. Um socket desligado recusaria em todo
-    /// sistema — no macOS passa. Todas afirmavam «todo sistema» tendo consultado
-    /// um só.
-    ///
-    /// Medido, com o socket de pilha dupla que o produto abre e o mapeamento que
-    /// ele aplica:
-    ///
-    /// | destino              | macOS  | Windows |
-    /// |----------------------|--------|---------|
-    /// | `255.255.255.255:0`  | recusa | passa   |
-    /// | `127.0.0.1:0`        | recusa | passa   |
-    /// | `[::1]:0`            | recusa | passa   |
-    /// | socket desligado     | passa  | recusa  |
-    /// | `0.0.0.0:0`          | recusa | recusa  |
-    /// | `[::]:0`             | recusa | recusa  |
-    ///
-    /// O Linux não foi medido — o Docker desta máquina estava parado — e é
-    /// exatamente esse buraco que as três hipóteses anteriores preencheram com
-    /// palpite. Então em vez de escolher, o teste **experimenta**: manda um
-    /// datagrama de sonda para cada candidato num socket igual ao do produto, e
-    /// devolve o primeiro que a máquina recusar de fato. Onde nenhum for
-    /// recusado, quem falha é o teste, dizendo isso — e não `avisar`, acusado de
-    /// engolir um erro que nunca houve.
-    ///
-    /// Os dois candidatos são endereços **não especificados**: nenhum pacote sai
-    /// para a rede se a máquina os aceitar, ao contrário do broadcast.
-    ///
-    /// Devolve o endereço **cru**: quem mapeia é `avisar`.
-    fn destino_recusado() -> Option<SocketAddr> {
-        let socket = abrir_socket_local()?;
-        let local_e_seis = socket.local_addr().ok()?.is_ipv6();
-        for cru in ["0.0.0.0:0", "[::]:0"] {
-            let Ok(destino) = cru.parse::<SocketAddr>() else {
-                continue;
-            };
-            let alvo = match (local_e_seis, destino.ip()) {
-                (true, IpAddr::V4(quatro)) => {
-                    SocketAddr::new(quatro.to_ipv6_mapped().into(), destino.port())
-                }
-                _ => destino,
-            };
-            if socket.send_to(&[0_u8; 96], alvo).is_err() {
-                return Some(destino);
-            }
-        }
-        None
+    #[tokio::test]
+    async fn um_ponto_que_nao_resolve_nao_segura_a_conexao() {
+        let comecou = std::time::Instant::now();
+        let chamada = Chamada::preparar(
+            &bilhete("nao-existe-mesmo.invalid:8384"),
+            Marcas::do_servidor(FP),
+        )
+        .await;
+        assert!(chamada.is_none(), "um ponto que não resolve virou chamada");
+        assert!(
+            comecou.elapsed() <= PRAZO + Duration::from_millis(400),
+            "resolver o ponto segurou a conexão além do prazo: {:?}",
+            comecou.elapsed()
+        );
     }
 
     /// Uma impressão digital de teste, com pelo menos 16 caracteres — é dela
@@ -2749,319 +2842,6 @@ mod testes {
     const IMPRESSAO_DE_TESTE: &str =
         "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
     const FP: &str = IMPRESSAO_DE_TESTE;
-
-    /// A marca do aviso de um servidor com esta impressão, como
-    /// `crate::enlace::Destino::marca_do_aviso` a tira.
-    fn marca(impressao: &str) -> Option<Marca> {
-        Marcas::do_servidor(impressao).map(|marcas| marcas.aviso().clone())
-    }
-
-    #[tokio::test]
-    async fn sem_marca_nao_se_bate_em_ponto_nenhum() {
-        // Sem marca o aviso chegaria com uma etiqueta que ninguém reconhece —
-        // rede gasta para produzir silêncio. E é a asserção que garante que
-        // nenhum pacote sai daqui por um link que não prometeu identidade
-        // nenhuma. A impressão curta demais para dar marca é de
-        // `a_marca_do_aviso_sai_do_que_se_espera`, em `enlace.rs`, onde a marca
-        // é escolhida.
-        assert!(Batida::preparar(&bilhete("192.0.2.1:8384"), None)
-            .await
-            .is_none());
-    }
-
-    #[tokio::test]
-    async fn a_batida_da_sala_leva_a_marca_do_aviso_dela_para_a_escuta() {
-        // Quem liga pelo código avisa a escuta que o quarto deu, com a marca do
-        // aviso da sala (ADR 0062): é a única que a sala reconhece. A marca de
-        // um servidor, tirada de uma impressão, chegaria a uma sala que não a
-        // conhece, e o furo não abriria.
-        let Ok(fingido) = std::net::UdpSocket::bind("127.0.0.1:0") else {
-            panic!("o loopback não abriu");
-        };
-        let Ok(ponto) = fingido.local_addr() else {
-            panic!("o ponto de encontro de teste não tem endereço local");
-        };
-        let codigo = seele_proto::codigo::Codigo::da_chave(&[3; 32]);
-        let escuta: SocketAddr = "198.51.100.4:41000".parse().expect("endereço");
-        let Ok(bilhete) = Bilhete::novo(ponto.to_string(), escuta.to_string()) else {
-            panic!("o bilhete da sala não se monta");
-        };
-
-        let Some(batida) =
-            Batida::preparar(&bilhete, Some(Marcas::da_sala(&codigo).aviso().clone())).await
-        else {
-            panic!("preparar tem de dar certo com um ponto de encontro que existe");
-        };
-        let saiu = batida.avisar().await;
-        assert!(saiu.is_ok(), "o aviso não saiu: {saiu:?}");
-
-        let prazo = fingido.set_read_timeout(Some(Duration::from_secs(2)));
-        assert!(prazo.is_ok(), "o prazo de leitura não pegou");
-        let mut balde = [0_u8; 1500];
-        let Ok((tamanho, _)) = fingido.recv_from(&mut balde) else {
-            panic!("nada chegou ao ponto de encontro");
-        };
-        assert_eq!(
-            balde.get(..tamanho).and_then(encontro::analisar),
-            Some(encontro::Pedido::Leve {
-                destino: escuta,
-                marca: Marcas::da_sala(&codigo).aviso().clone(),
-            }),
-            "o LEVE não foi para a escuta com a marca do aviso da sala"
-        );
-    }
-
-    #[tokio::test]
-    async fn um_ponto_de_encontro_que_nao_resolve_nao_segura_a_conexao() {
-        // O requisito do ADR 0022 deste lado: o degrau 4 não pode virar ponto
-        // único de falha. Um nome que não existe custa o que a resolução custa,
-        // e nunca mais que o prazo.
-        let comeco = std::time::Instant::now();
-        let batida = Batida::preparar(&bilhete("nao-existe-mesmo.invalid:8384"), marca(FP)).await;
-        assert!(batida.is_none(), "um nome inexistente virou uma batida");
-        assert!(
-            comeco.elapsed() < PRAZO * 2,
-            "a conexão ficou presa {:?} num ponto de encontro que não existe",
-            comeco.elapsed()
-        );
-    }
-
-    #[tokio::test]
-    async fn o_socket_emprestado_e_a_mesma_porta_de_onde_o_aviso_saiu() {
-        // A propriedade que faz o furo funcionar: quem conecta em seguida tem de
-        // conectar **por esta porta**, ou o anfitrião fura o caminho para a
-        // porta errada. O ponto de encontro aqui é um socket qualquer no
-        // loopback: nada precisa responder, porque este lado não lê resposta.
-        //
-        // Isto é a metade de baixo da propriedade — que o descritor emprestado
-        // é o mesmo socket. A metade de cima, que o laço de candidatos
-        // realmente conecta por ele, é
-        // `o_aperto_de_mao_sai_da_mesma_porta_que_bateu_no_ponto_de_encontro`,
-        // em `enlace.rs`: um `emprestar_socket` correto que ninguém chamasse
-        // deixaria este teste verde e o furo quebrado do mesmo jeito.
-        let Ok(fingido) = std::net::UdpSocket::bind("127.0.0.1:0") else {
-            panic!("o loopback não abriu");
-        };
-        let Ok(onde) = fingido.local_addr() else {
-            panic!("o ponto de encontro de teste não tem endereço local");
-        };
-
-        let batida = Batida::preparar(&bilhete(&onde.to_string()), marca(FP)).await;
-        let Some(batida) = batida else {
-            panic!("preparar tem de dar certo com um ponto de encontro que existe");
-        };
-        let saiu = batida.avisar().await;
-        assert!(saiu.is_ok(), "o aviso não saiu: {saiu:?}");
-        let Some(socket) = batida.emprestar_socket() else {
-            panic!("o sistema recusou emprestar um segundo descritor da porta");
-        };
-        let Ok(local) = socket.local_addr() else {
-            panic!("o socket emprestado não diz onde ligou");
-        };
-        assert_ne!(
-            local.port(),
-            0,
-            "o socket não ficou ligado em porta nenhuma"
-        );
-
-        // E o que chegou lá é um `LEVE` com a marca do convite, apontando para o
-        // endereço de avisos do anfitrião.
-        let prazo = fingido.set_read_timeout(Some(Duration::from_secs(2)));
-        assert!(prazo.is_ok(), "o prazo de leitura não pegou");
-        let mut balde = [0_u8; encontro::TAMANHO];
-        let Ok((lidos, de)) = fingido.recv_from(&mut balde) else {
-            panic!("nada chegou ao ponto de encontro");
-        };
-        assert_eq!(
-            de.port(),
-            local.port(),
-            "o aviso saiu de outro socket que não o que vai conectar"
-        );
-        let Some(seele_proto::encontro::Pedido::Leve { destino, marca }) =
-            balde.get(..lidos).and_then(seele_proto::encontro::analisar)
-        else {
-            panic!("chegou outra coisa ao ponto de encontro");
-        };
-        assert_eq!(destino.to_string(), "45.33.32.156:41234");
-        assert_eq!(marca.texto(), &FP[..16]);
-    }
-
-    #[tokio::test]
-    async fn preparar_abre_o_socket_e_nao_manda_pacote_nenhum() {
-        // A separação existe para o aviso poder sair colado em cada candidato. Se
-        // `preparar` mandasse um aviso, o primeiro candidato — que é o da rede de
-        // casa e nunca precisou de furo — pagaria metadado e um furo da janela do
-        // anfitrião por nada.
-        //
-        // O ponto de encontro deste teste é um socket nosso que nunca lê: o que se
-        // afirma é que nada chegou nele.
-        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0").await.ok();
-        let Some(ponto) = ponto else { return };
-        let Ok(onde) = ponto.local_addr() else { return };
-
-        let bilhete = bilhete_de_teste(onde);
-        let batida = Batida::preparar(&bilhete, marca(IMPRESSAO_DE_TESTE)).await;
-        let Some(batida) = batida else {
-            panic!("preparar tem de dar certo com um ponto de encontro que existe");
-        };
-
-        let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
-        let nada = tokio::time::timeout(
-            std::time::Duration::from_millis(120),
-            ponto.recv_from(&mut balde),
-        )
-        .await;
-        assert!(nada.is_err(), "preparar não manda pacote nenhum");
-
-        // E `avisar` manda exatamente um, do tamanho fixo do protocolo, e
-        // devolve sucesso.
-        let enviado = batida.avisar().await;
-        assert!(enviado.is_ok(), "avisar não devia falhar aqui: {enviado:?}");
-        let chegou = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            ponto.recv_from(&mut balde),
-        )
-        .await;
-        let Ok(Ok((lidos, _))) = chegou else {
-            panic!("avisar tem de mandar um datagrama");
-        };
-        assert_eq!(lidos, seele_proto::encontro::TAMANHO);
-    }
-
-    #[tokio::test]
-    async fn a_batida_clonada_avisa_pelo_mesmo_socket() {
-        // A Tarefa 7 clona a `Batida` para repetir o aviso numa tarefa de fundo
-        // enquanto o laço de candidatos corre em primeiro plano. As duas cópias
-        // têm de compartilhar o mesmo socket — é o `Arc` que garante isso, não
-        // uma cópia independente que o NAT não reconheceria.
-        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0").await.ok();
-        let Some(ponto) = ponto else { return };
-        let Ok(onde) = ponto.local_addr() else { return };
-
-        let bilhete = bilhete_de_teste(onde);
-        let batida = Batida::preparar(&bilhete, marca(IMPRESSAO_DE_TESTE)).await;
-        let Some(batida) = batida else {
-            panic!("preparar tem de dar certo com um ponto de encontro que existe");
-        };
-        let copia = batida.clone();
-
-        assert!(
-            Arc::ptr_eq(batida.socket(), copia.socket()),
-            "a cópia da batida tem de apontar para o mesmo socket"
-        );
-    }
-
-    #[tokio::test]
-    async fn um_aviso_logo_depois_de_preparar_nao_se_perde() {
-        // O caminho que mordeu de verdade: um convite cujo primeiro candidato já
-        // é o refletido — casa atrás de CGNAT, sem IPv6, sem UPnP — chama
-        // `avisar` logo depois de `preparar`, sem nenhum `.await` no meio. É
-        // exatamente como a Tarefa 7 chama isto:
-        //
-        // ```
-        // if let Some(batida) = batida { let _ = batida.avisar().await; }
-        // tokio::time::sleep(ESPERA_DO_FURO).await;
-        // ```
-        //
-        // Um `try_send_to` não-bloqueante logo ali devolvia `WouldBlock` à toa —
-        // o socket, recém-registrado, ainda não tinha passado por um ciclo do
-        // reator — e o aviso simplesmente não saía, sem que nada no chamador
-        // percebesse. Este teste reprova sozinho se `avisar` voltar a ser
-        // não-bloqueante: nesta plataforma (macOS/kqueue), sem o `.await`
-        // interno de `send_to`, a asserção de baixo falhou nas 5 rodadas em
-        // que foi medida — determinístico aqui, não uma flakiness ocasional.
-        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0").await.ok();
-        let Some(ponto) = ponto else { return };
-        let Ok(onde) = ponto.local_addr() else { return };
-
-        let bilhete = bilhete_de_teste(onde);
-        let batida = Batida::preparar(&bilhete, marca(IMPRESSAO_DE_TESTE)).await;
-        let Some(batida) = batida else {
-            panic!("preparar tem de dar certo com um ponto de encontro que existe");
-        };
-
-        // Nenhum `.await` entre `preparar` e `avisar` além do que `avisar` já
-        // faz por dentro — é essa ausência que reproduz a corrida.
-        let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
-        let enviado = batida.avisar().await;
-        assert!(enviado.is_ok(), "avisar não devia falhar aqui: {enviado:?}");
-        let chegou = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            ponto.recv_from(&mut balde),
-        )
-        .await;
-        let Ok(Ok((lidos, _))) = chegou else {
-            panic!("o aviso mandado logo depois de preparar se perdeu");
-        };
-        assert_eq!(lidos, seele_proto::encontro::TAMANHO);
-    }
-
-    #[tokio::test]
-    async fn avisar_devolve_o_erro_em_vez_de_engoli_lo() {
-        // Regressão da rodada 2: `avisar` chegou a engolir **todo** erro num
-        // `tracing::debug!`, não só o `WouldBlock` que a rodada 1 tinha em
-        // mira — e quem chama nunca saberia que o aviso não saiu.
-        //
-        // # Duas tentativas de provocar a recusa por endereço, e as duas erradas
-        //
-        // Primeiro foi `255.255.255.255:9`, com o raciocínio de que sem
-        // `SO_BROADCAST` o envio volta com permissão negada em todo sistema.
-        // Depois foi `255.255.255.255:0`, com o raciocínio de que a porta zero é
-        // recusada em todo sistema. Ambos afirmavam «em todo sistema» sem que
-        // nenhum sistema além deste tivesse sido consultado, e o Windows
-        // desmentiu os dois: lá, no socket de pilha dupla que o produto abre, o
-        // envio **passa**.
-        //
-        // O que o teste quer não tem nada a ver com endereço: ele quer um envio
-        // que falhe, para ver se o erro chega a quem chama. Então o destino é
-        // **descoberto** — ver `destino_recusado`, que também guarda o que já foi
-        // medido e o que ainda não foi.
-        let Some(ponto) = destino_recusado() else {
-            panic!(
-                "nenhum destino candidato é recusado nesta máquina, e sem uma \
-                 recusa este teste não tem um envio falho para observar. Não é \
-                 `avisar` que está errado: é o mecanismo daqui que não vale neste \
-                 sistema — acrescente um candidato em `destino_recusado`"
-            );
-        };
-        let bilhete = bilhete(&ponto.to_string());
-        let batida = Batida::preparar(&bilhete, marca(IMPRESSAO_DE_TESTE)).await;
-        let Some(batida) = batida else {
-            panic!(
-                "preparar tem de dar certo mesmo com um ponto de encontro que só \
-                 recusa no envio — é `avisar` que não vai conseguir"
-            );
-        };
-
-        let erro = batida.avisar().await;
-        assert!(
-            erro.is_err(),
-            "avisar engoliu o erro de um envio que o socket recusou: {erro:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn preparar_da_certo_no_mesmo_bilhete_em_que_avisar_falha() {
-        // O guarda do teste de cima. `avisar_devolve_o_erro_em_vez_de_engoli_lo`
-        // afirma que um envio recusado pelo kernel chega a quem chama; se
-        // `preparar` deixasse de dar certo para este bilhete, aquele teste
-        // pararia de rodar `avisar` de verdade e passaria por outro caminho.
-        //
-        // Quem consome esse erro é o laço de candidatos de `enlace.rs`, e o que
-        // ele faz com ele — registrar e ir ao candidato seguinte, sem derrubar
-        // a conexão — está em `um_aviso_recusado_pelo_kernel_nao_derruba_o_laco`,
-        // em `crates/seele-conformance/tests/furo.rs`.
-        let Some(ponto) = destino_recusado() else {
-            panic!("nenhum destino candidato é recusado nesta máquina");
-        };
-        assert!(
-            Batida::preparar(&bilhete(&ponto.to_string()), marca(FP))
-                .await
-                .is_some(),
-            "preparar tem de dar certo para este bilhete — quem falha lá em cima \
-             é o envio"
-        );
-    }
 
     /// Um ponto de teste da versão 2: responde ao `ONDE` (se `fala_v1`) e a
     /// cada `QUEM2` com o que `responder` disser, ou cala.
@@ -3364,6 +3144,265 @@ mod testes {
         let _ = resolver(&bilhete).await;
     }
 
+    // -------------------------------------------------------------- ENC/3
+
+    /// Um ponto do ENC/3 de mentira: a cada `CHAMA` responde o que `responder`
+    /// disser (ou cala), e conta quantos chegaram e de onde.
+    async fn ponto_do_chama(
+        responder: impl Fn(&encontro::Chama, SocketAddr) -> Option<encontro::Resposta3> + Send + 'static,
+    ) -> (
+        SocketAddr,
+        std::sync::Arc<std::sync::Mutex<Vec<(SocketAddr, encontro::Chama)>>>,
+    ) {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let onde = socket.local_addr().unwrap();
+        let vistos = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let anotados = std::sync::Arc::clone(&vistos);
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO3 + 1];
+            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+                let Some(encontro::Pedido3::Chama(chama)) =
+                    encontro::analisar3(balde.get(..lidos).unwrap_or_default())
+                else {
+                    continue;
+                };
+                anotados.lock().unwrap().push((de, chama.clone()));
+                if let Some(resposta) = responder(&chama, de) {
+                    let _ = socket.send_to(&encontro::resposta3(&resposta), de).await;
+                }
+            }
+        });
+        (onde, vistos)
+    }
+
+    /// A ponta de uma sessão em `127.0.0.1`, para o `CHAMA` sair dela.
+    fn ponta_local() -> crate::transporte::PontaDaSessao {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        crate::transporte::abrir_ponta(Some(socket)).unwrap()
+    }
+
+    fn chamada_para(ponto: SocketAddr) -> Chamada {
+        Chamada {
+            ponto,
+            ponto_escrito: ponto.to_string(),
+            marcas: Marcas::do_servidor(FP).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn o_chama_atendido_da_o_endereco_e_a_credencial_que_foi_no_pedido() {
+        // O furo é pela credencial: o anfitrião reconhece quem furou pelo `U`
+        // que veio no `CHAMA`, e a discagem tem de sair com ele.
+        let publico: SocketAddr = "203.0.113.9:8383".parse().unwrap();
+        let (ponto, vistos) = ponto_do_chama(move |chama, _| {
+            Some(encontro::Resposta3::Aqui {
+                marca: chama.servidor.clone(),
+                endereco: publico,
+                dicas: vec!["192.168.0.9:8383".parse().unwrap()],
+            })
+        })
+        .await;
+        let ponta = ponta_local();
+        let atendida = chamada_para(ponto)
+            .chamar(ponta.ponta(), Duration::from_secs(2))
+            .await
+            .expect("o CHAMA atendido não deu endereço");
+        assert_eq!(atendida.endereco, publico);
+        assert_eq!(
+            atendida.dicas,
+            ["192.168.0.9:8383".parse::<SocketAddr>().unwrap()]
+        );
+        let vistos = vistos.lock().unwrap();
+        let (de, chama) = vistos.first().expect("o ponto não viu CHAMA nenhum");
+        assert_eq!(
+            chama.credencial.texto(),
+            atendida.credencial,
+            "a discagem sairia com um U que o anfitrião não conhece"
+        );
+        assert_eq!(
+            de.port(),
+            ponta.ponta().local_addr().port(),
+            "o CHAMA saiu de outra porta que a da sessão: o anfitrião furaria a porta errada"
+        );
+        assert_eq!(chama.servidor, *Marcas::do_servidor(FP).unwrap().servidor());
+        assert_eq!(chama.escuta, *Marcas::do_servidor(FP).unwrap().escuta());
+    }
+
+    #[tokio::test]
+    async fn ninguem_e_calado_tem_nome_proprio() {
+        for (resposta, esperada) in [
+            ("ninguem", FalhaDaChamada::Ninguem),
+            ("calado", FalhaDaChamada::Calado),
+        ] {
+            let (ponto, _) = ponto_do_chama(move |chama, _| {
+                Some(if resposta == "ninguem" {
+                    encontro::Resposta3::Ninguem {
+                        marca: chama.servidor.clone(),
+                    }
+                } else {
+                    encontro::Resposta3::Calado {
+                        marca: chama.servidor.clone(),
+                    }
+                })
+            })
+            .await;
+            let ponta = ponta_local();
+            assert_eq!(
+                chamada_para(ponto)
+                    .chamar(ponta.ponta(), Duration::from_secs(2))
+                    .await,
+                Err(esperada)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn um_ponto_mudo_recebe_o_chama_repetido_e_a_chamada_diz_que_ele_calou() {
+        // UDP perde pacote: um CHAMA perdido custava a chamada inteira em
+        // silêncio. Três saem, espaçados, e o fim tem nome.
+        let (ponto, vistos) = ponto_do_chama(|_, _| None).await;
+        let ponta = ponta_local();
+        let comecou = std::time::Instant::now();
+        let falha = chamada_para(ponto)
+            .chamar(ponta.ponta(), Duration::from_secs(2))
+            .await;
+        assert_eq!(falha, Err(FalhaDaChamada::Mudo));
+        assert!(
+            comecou.elapsed() >= Duration::from_secs(2),
+            "desistiu antes do prazo"
+        );
+        assert!(
+            comecou.elapsed() < Duration::from_secs(4),
+            "passou do prazo"
+        );
+        assert_eq!(
+            vistos.lock().unwrap().len(),
+            CHAMADAS as usize,
+            "o CHAMA não se repetiu enquanto o ponto calava"
+        );
+    }
+
+    #[tokio::test]
+    async fn um_aqui_que_nao_veio_do_ponto_nao_vale() {
+        // Um terceiro que mande um `AQUI` à porta da sessão não escolhe para
+        // onde ela disca.
+        let (ponto, _) = ponto_do_chama(|_, _| None).await;
+        let ponta = ponta_local();
+        let alvo = ponta.ponta().local_addr();
+        let terceiro = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let forjado = encontro::resposta3(&encontro::Resposta3::Aqui {
+            marca: Marcas::do_servidor(FP).unwrap().servidor().clone(),
+            endereco: "198.51.100.66:8383".parse().unwrap(),
+            dicas: Vec::new(),
+        });
+        let mandando = tokio::spawn(async move {
+            for _ in 0..10 {
+                let _ = terceiro.send_to(&forjado, alvo).await;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+        let falha = chamada_para(ponto)
+            .chamar(ponta.ponta(), Duration::from_millis(1200))
+            .await;
+        mandando.abort();
+        assert_eq!(
+            falha,
+            Err(FalhaDaChamada::Mudo),
+            "um AQUI de quem não é o ponto virou destino da discagem"
+        );
+    }
+
+    /// Um ponto que responde o `ONDE` da versão 1 e, para cada marca, o que
+    /// `v3` e `v2` disserem.
+    async fn ponto_de_duas_linhas(
+        v3: impl Fn(&Marca) -> Option<encontro::Resposta3> + Send + 'static,
+        v2: impl Fn(&Marca) -> Option<encontro::Resposta2> + Send + 'static,
+    ) -> SocketAddr {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let onde = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO3 + 1];
+            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+                let dados = balde.get(..lidos).unwrap_or_default();
+                let resposta = if let Some(encontro::Pedido::Onde { marca }) =
+                    encontro::analisar(dados)
+                {
+                    Some(encontro::aqui(&marca, de))
+                } else if let Some(encontro::Pedido3::Quem3 { marca }) = encontro::analisar3(dados)
+                {
+                    v3(&marca).map(|resposta| encontro::resposta3(&resposta))
+                } else if let Some(encontro::Pedido2::Quem2 { marca }) = encontro::analisar2(dados)
+                {
+                    v2(&marca).map(|resposta| encontro::resposta2(&resposta))
+                } else {
+                    None
+                };
+                if let Some(resposta) = resposta {
+                    let _ = socket.send_to(&resposta, de).await;
+                }
+            }
+        });
+        onde
+    }
+
+    #[tokio::test]
+    async fn quem_so_e_achado_pelo_enc2_esta_na_linha_um() {
+        // R6: uma pessoa que ficou na 0.16 registra pelo MORO2. Só o QUEM3
+        // diria «ninguém mora», e a tela mandaria esperar quem está no ar na
+        // outra linha.
+        let marcas = Marcas::do_servidor(FP).unwrap();
+        let ponto = ponto_de_duas_linhas(
+            |marca| {
+                Some(encontro::Resposta3::Ninguem {
+                    marca: marca.clone(),
+                })
+            },
+            |marca| {
+                Some(encontro::Resposta2::Aqui2 {
+                    marca: marca.clone(),
+                    endereco: "203.0.113.5:8383".parse().unwrap(),
+                    dicas: Vec::new(),
+                })
+            },
+        )
+        .await;
+        assert_eq!(
+            localizar_com_a_linha(&ponto.to_string(), &marcas, Duration::from_millis(1500)).await,
+            LocalizacaoComLinha::NaLinhaUm
+        );
+    }
+
+    #[tokio::test]
+    async fn quem_e_achado_pelo_enc3_e_da_linha_dois_mesmo_com_o_enc2_respondendo() {
+        let marcas = Marcas::do_servidor(FP).unwrap();
+        let servidor: SocketAddr = "203.0.113.7:8383".parse().unwrap();
+        let ponto = ponto_de_duas_linhas(
+            move |marca| {
+                Some(encontro::Resposta3::Aqui {
+                    marca: marca.clone(),
+                    endereco: servidor,
+                    dicas: Vec::new(),
+                })
+            },
+            |marca| {
+                Some(encontro::Resposta2::Ninguem {
+                    marca: marca.clone(),
+                })
+            },
+        )
+        .await;
+        let achado =
+            localizar_com_a_linha(&ponto.to_string(), &marcas, Duration::from_millis(1500)).await;
+        let LocalizacaoComLinha::Achada(Localizacao::Achada {
+            servidor: Some(achado),
+            ..
+        }) = achado
+        else {
+            panic!("o anfitrião da linha 2 não foi achado: {achado:?}");
+        };
+        assert_eq!(achado, servidor);
+    }
+
     #[test]
     fn quem_liga_por_codigo_usa_o_ponto_padrao_sem_a_variavel() {
         // O caminho de produção de quem liga, como o `com_o_ponto_padrao` de
@@ -3371,7 +3410,7 @@ mod testes {
         // única do `seele-proto`.
         assert_eq!(
             encontro::ponto_escolhido(None, Some(PONTO_PADRAO)).as_deref(),
-            Some("encontro.seele.app.br")
+            Some("rendzvous.seele.sh")
         );
     }
 }

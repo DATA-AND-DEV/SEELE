@@ -921,7 +921,7 @@ impl Voice {
         // microphone" is a return value the interface can show, instead of a
         // thread that quietly dies.
         let io = device::open(chosen.wanted(), RING_MS)?;
-        Self::around(io, chosen.clone(), media, ssrc, (0, 0))
+        Self::around(io, chosen.clone(), media, ssrc, partida_desta_maquina())
     }
 
     /// Opens the chosen devices, giving up one preference at a time.
@@ -951,13 +951,14 @@ impl Voice {
         ssrc: Ssrc,
     ) -> Result<Self> {
         let io = open_preferring(chosen)?;
-        Self::around(io, chosen.clone(), media, ssrc, (0, 0))
+        Self::around(io, chosen.clone(), media, ssrc, partida_desta_maquina())
     }
 
     /// Wraps devices that are already open in a running pipeline.
     ///
-    /// `relogio` é a sequência e o carimbo de onde o caminho começa: zero num
-    /// caminho novo, e a continuação do anterior numa troca de aparelho (ver
+    /// `relogio` é a sequência e o carimbo de onde o caminho começa: o relógio
+    /// da máquina num caminho novo ([`partida_desta_maquina`]), e a
+    /// continuação do anterior numa troca de aparelho (ver
     /// [`Voice::relogio_seguinte`]). Gravado **antes** de a thread nascer: ela o
     /// lê na primeira volta, e gravá-lo depois, como era, era uma corrida que
     /// a thread podia ganhar e começar do zero.
@@ -991,6 +992,11 @@ impl Voice {
         // quer o padrão de agora; quem pediu um aparelho por id quer aquele de
         // volta assim que ele aparecer.
         let thread_escolha = chosen.clone();
+        // **Conta como viva desde já** (E3 da 0.17): o aparelho já está aberto
+        // dentro de `io`, e só fecha quando ele cair. O guarda solta o `io`
+        // **antes** de descontar, em todo caminho: o runtime que não sobe, a
+        // thread que não nasce, e o fim normal. Ver [`esperar_nenhuma_voz_viva`].
+        let mut aparelho = AparelhoContado::novo(io);
         std::thread::Builder::new()
             .name("seele-voice".into())
             .spawn(move || {
@@ -999,7 +1005,12 @@ impl Voice {
                     .build()
                 {
                     Ok(runtime) => runtime,
+                    // `aparelho` cai aqui com o `io` dentro: o guarda o solta e
+                    // só então desconta.
                     Err(_) => return,
+                };
+                let Some(io) = aparelho.tirar() else {
+                    return;
                 };
                 runtime.block_on(pipeline(
                     io,
@@ -1010,6 +1021,9 @@ impl Voice {
                     thread_aparelhos,
                     thread_escolha,
                 ));
+                // O `io` caiu com o `pipeline`, dentro do `block_on`; o guarda
+                // vazio cai depois, no fim desta closure, e desconta.
+                drop(aparelho);
             })?;
 
         Ok(Self {
@@ -1490,6 +1504,115 @@ impl Drop for Voice {
     }
 }
 
+/// **Quantas vozes desta máquina estão com o aparelho aberto agora** (E3 da
+/// 0.17), e o sinal de quando a conta muda.
+///
+/// # Por que existe
+///
+/// Largar uma [`Voice`] só marca o `stop`: a thread `seele-voice` vê a marca na
+/// volta seguinte do laço, sai, e só então o aparelho fecha. São dezenas de
+/// milissegundos em que o microfone de uma sessão que já perdeu a voz continua
+/// aberto. Com várias sessões, a troca do foco de voz (`seele_ffi::foco`) espera
+/// esta conta chegar a zero antes de deixar a sessão nova abrir o dela.
+/// Medido: sem esta espera, a vigia da conformidade
+/// (`multi_sessao_foco_de_voz.rs`) viu dois aparelhos abertos durante a troca.
+///
+/// **A promessa não é «nunca dois aparelhos».** Reabrir o aparelho na mesma
+/// sessão, de propósito (a troca de microfone, a volta de uma queda), pode ter
+/// duas capturas por um instante, e esta conta não impede isso. A promessa do
+/// foco é a que se mede no fio: **o microfone nunca é transmitido a dois
+/// servidores** — contada pelos datagramas que cada servidor recebe.
+///
+/// **É uma conta do processo, e não estado de conexão**: o aparelho é da
+/// máquina. Ela não guarda nada de nenhuma sessão.
+static VOZES_VIVAS: (Mutex<usize>, std::sync::Condvar) = (Mutex::new(0), std::sync::Condvar::new());
+
+/// **O aparelho de uma voz, e a conta dela, na ordem certa de cair.**
+///
+/// O aparelho (o `io`) cai **antes** da conta, em todo caminho: quem o tira
+/// para o laço o solta lá, e o guarda vazio desconta depois; quem não chega a
+/// tirá-lo (o runtime que não sobe, a thread que não nasce) cai com ele dentro,
+/// e o `Drop` explícito solta o aparelho e só então desconta. Sem isto, um
+/// `_viva` local caía antes do `io` capturado pela closure, e a conta dizia
+/// «nenhuma voz» com a captura ainda aberta (revisão do coordenador).
+struct AparelhoContado<T> {
+    io: Option<T>,
+    /// Declarada depois do `io`, e ainda assim solta à mão no `Drop`: a ordem
+    /// não depende de quem ler a declaração.
+    conta: Option<VozContada>,
+}
+
+impl<T> AparelhoContado<T> {
+    fn novo(io: T) -> Self {
+        Self {
+            io: Some(io),
+            conta: Some(VozContada::contar()),
+        }
+    }
+
+    /// O aparelho, para quem vai usá-lo. A conta fica até este guarda cair.
+    fn tirar(&mut self) -> Option<T> {
+        self.io.take()
+    }
+}
+
+impl<T> Drop for AparelhoContado<T> {
+    fn drop(&mut self) {
+        drop(self.io.take());
+        drop(self.conta.take());
+    }
+}
+
+/// Uma voz com aparelho aberto, contada enquanto este valor existir.
+struct VozContada;
+
+impl VozContada {
+    fn contar() -> Self {
+        *VOZES_VIVAS
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+        VOZES_VIVAS.1.notify_all();
+        Self
+    }
+}
+
+impl Drop for VozContada {
+    fn drop(&mut self) {
+        let mut vivas = VOZES_VIVAS
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *vivas = vivas.saturating_sub(1);
+        drop(vivas);
+        VOZES_VIVAS.1.notify_all();
+    }
+}
+
+/// Quantas vozes desta máquina estão com o aparelho aberto agora.
+#[must_use]
+pub fn vozes_vivas() -> usize {
+    *VOZES_VIVAS
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Espera, até `teto`, que nenhuma voz desta máquina tenha o aparelho aberto.
+/// Devolve se chegou a zero. **Bloqueia**: não é para a thread de um driver.
+#[must_use]
+pub fn esperar_nenhuma_voz_viva(teto: std::time::Duration) -> bool {
+    let vivas = VOZES_VIVAS
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (vivas, _) = VOZES_VIVAS
+        .1
+        .wait_timeout_while(vivas, teto, |vivas| *vivas > 0)
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *vivas == 0
+}
+
 /// Um datagrama de voz que chegou: o cabeçalho e o Opus, ou `None` com a recusa
 /// contada em `recusados`.
 ///
@@ -1828,6 +1951,96 @@ impl SilencioDigital {
     }
 }
 
+/// **De onde a voz de uma conexão nova começa a contar**: o relógio desta
+/// máquina, e não o zero. Ver [`seele_audio::relogio::partida`], onde estão o
+/// porquê (o CUA de 25/10: quem saiu sentado e voltou ficava muda para os
+/// outros pela vida inteira da voz velha) e os limites.
+///
+/// **Ancorado uma vez por processo** ([`ANCORA_DO_RELOGIO`]): o relógio de
+/// parede é lido só na primeira voz, e daí em diante a hora é a da âncora mais
+/// o `Instant` que passou. Um NTP que recue o relógio de parede entre duas
+/// vozes deste processo não faz a segunda partir atrás da primeira, e ficar
+/// muda para os outros pelo tamanho do recuo.
+///
+/// O que a âncora **não** cobre, e continua nos limites de `partida`: um recuo
+/// entre **processos** diferentes (o app reaberto) ou entre máquinas diferentes
+/// com a mesma identidade, e o cristal do aparelho (`vida·ppm − tempo fora`).
+fn partida_desta_maquina() -> (u16, u32) {
+    partida_ancorada(&ANCORA_DO_RELOGIO, relogio_de_parede, Instant::now())
+}
+
+/// A âncora do relógio de mídia deste processo. Ver [`partida_desta_maquina`].
+static ANCORA_DO_RELOGIO: std::sync::OnceLock<AncoraDoRelogio> = std::sync::OnceLock::new();
+
+/// O relógio de parede e o `Instant` lidos juntos, uma vez.
+#[derive(Debug, Clone, Copy)]
+struct AncoraDoRelogio {
+    parede: Duration,
+    instante: Instant,
+}
+
+/// O relógio de parede desde 1970. Antes de 1970 dá zero, e não um pânico.
+fn relogio_de_parede() -> Duration {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+}
+
+/// A partida pela âncora: `parede` só é lido se a âncora ainda não existe, e
+/// `agora` é o `Instant` desta voz. Separado do relógio de verdade para o teste
+/// injetar um relógio de parede que recua.
+fn partida_ancorada(
+    ancora: &std::sync::OnceLock<AncoraDoRelogio>,
+    parede: impl FnOnce() -> Duration,
+    agora: Instant,
+) -> (u16, u32) {
+    let ancora = ancora.get_or_init(|| AncoraDoRelogio {
+        parede: parede(),
+        instante: agora,
+    });
+    seele_audio::relogio::partida(ancora.parede + agora.saturating_duration_since(ancora.instante))
+}
+
+/// Teto do que [`descartar_a_voz_de_antes`] joga fora: a fila de voz do enlace
+/// inteira (`seele_enlace::FILA_DE_VOZ`, 256) com folga. Só existe para o laço
+/// de descarte terminar mesmo que a voz chegasse mais rápido do que ele lê.
+const TETO_DA_VOZ_DE_ANTES: usize = 1024;
+
+/// **A voz que chegou antes de esta voz existir é velha, e sai antes do laço.**
+/// O P1 do CUA nativo de 25/10, às 20:42.
+///
+/// O servidor senta a conexão nova assim que ela entra, quando ela tem o
+/// assento da graça, e começa a encaminhar a voz da sala no mesmo instante. A
+/// voz deste lado só abre quando o foco volta para a conexão, o que no CUA levou
+/// 12 s. Nesse intervalo ninguém lê o canal de voz, e a fila do enlace (256
+/// datagramas, que guarda os mais velhos) enche com 5,12 s de voz que já passou.
+/// O laço lia tudo isso de uma vez, antes do primeiro tique. O buffer de jitter
+/// da fonte nova começava cheio no teto (256 quadros), e o buraco de `seq`
+/// entre a voz velha e a viva virava perda que se replicava a cada volta da
+/// fila: ~50% de perda por dois minutos e 5 s de atraso por três
+/// (`seele-conformance/tests/voz_de_quem_volta_e_senta_depois.rs`).
+///
+/// O mesmo vale para o foco que sai de uma conexão e volta a ela: a conexão sem
+/// a voz continua sentada e recebendo.
+///
+/// Sem esperar nada: o que está na fila agora é de antes desta voz, e o que
+/// chegar depois é do presente. `unconstrained` porque o orçamento cooperativo
+/// do `tokio` faria o `recv` responder «pendente» no meio de uma fila cheia, e
+/// metade da voz velha ficaria para o laço.
+async fn descartar_a_voz_de_antes(media: &MediaChannel) -> usize {
+    tokio::task::unconstrained(async {
+        let mut descartados = 0;
+        while descartados < TETO_DA_VOZ_DE_ANTES {
+            match tokio::time::timeout(Duration::ZERO, media.next()).await {
+                Ok(Ok(_)) => descartados += 1,
+                Ok(Err(_)) | Err(_) => break,
+            }
+        }
+        descartados
+    })
+    .await
+}
+
 /// The whole loop, on its own thread.
 #[allow(
     clippy::too_many_lines,
@@ -1918,6 +2131,17 @@ async fn pipeline(
         controls.relogio_seq.load(Ordering::Relaxed) as u16,
         controls.relogio_carimbo.load(Ordering::Relaxed),
     );
+    // A voz velha da fila sai aqui, logo antes do laço: ver
+    // `descartar_a_voz_de_antes`. Dito numa linha, porque «a voz voltou com
+    // segundos de atraso» sem ela não diria de onde vieram os segundos.
+    let velhos = descartar_a_voz_de_antes(&media).await;
+    if velhos > 0 {
+        tracing::info!(
+            datagramas = velhos,
+            "a voz abriu com voz velha na fila da conexão (chegou antes de a voz existir) e \
+             ela foi descartada, para quem ouve começar no presente"
+        );
+    }
     let started = Instant::now();
     // Não é `Instant + 20 ms` somado à mão. Este laço faz outras cinco coisas
     // entre duas conferidas do prazo, e quanto tempo isso custa é do sistema
@@ -2890,20 +3114,35 @@ mod tests {
         );
     }
 
-    /// **E o relógio de quem recebe aceita esses carimbos sem ressincronizar.**
+    /// **E o relógio de quem recebe aceita esses carimbos sem perturbação.**
     ///
     /// A conta certa é uma coisa; o efeito dela no outro lado é outra, e é o efeito
     /// que a auditoria mediu — «o jitter buffer real reproduziu os pacotes, porém
     /// precisou de **duas ressincronizações**». Este teste passa os três carimbos
-    /// pelo buffer de verdade e exige zero.
+    /// pelo buffer de verdade e exige que os três toquem, em ordem, sem
+    /// ressincronizar e sem descartar nada.
     ///
     /// O segundo caso é o controle negativo, e ele é o defeito: com carimbos iguais
-    /// o `plan_gap` do buffer cai no ramo «total == 0» e ressincroniza. Sem ele, um
-    /// dia em que `carimbo_do_quadro` voltasse a devolver o mesmo número para todos
-    /// teria um teste verde por baixo.
+    /// o buffer não consegue tocar os três como quadros seguidos. Como ele reage
+    /// mudou com o tempo — antes o `plan_gap` caía no ramo «total == 0» e
+    /// ressincronizava; desde o descarte do passado (o ponteiro nunca recua), os
+    /// quadros com o carimbo já tocado são descartados. O controle não exige uma
+    /// reação em particular: exige que o defeito apareça, como menos quadros
+    /// tocados e alguma perturbação medida. Sem ele, um dia em que
+    /// `carimbo_do_quadro` voltasse a devolver o mesmo número para todos teria um
+    /// teste verde por baixo.
     #[test]
     fn o_relogio_de_quem_recebe_aceita_os_quadros_retidos() {
-        fn atravessa(carimbos: &[u32]) -> (usize, u64) {
+        /// O que o buffer de verdade fez com os carimbos: os índices tocados, em
+        /// ordem, e as perturbações medidas.
+        struct Travessia {
+            tocados: Vec<usize>,
+            resyncs: u64,
+            descartes: u64,
+            buraco_pulado: u64,
+        }
+
+        fn atravessa(carimbos: &[u32]) -> Travessia {
             use seele_audio::jitter::{Decision, JitterBuffer, JitterConfig};
             let mut buffer: JitterBuffer<usize> = JitterBuffer::new(JitterConfig::default());
             for (indice, carimbo) in carimbos.iter().enumerate() {
@@ -2913,35 +3152,60 @@ mod tests {
                 let chegada = indice as f64 * 20.0;
                 buffer.push(seq, *carimbo, chegada, indice);
             }
-            let mut tocados = 0;
+            let mut tocados = Vec::new();
             for _ in 0..(carimbos.len() * 4) {
-                if matches!(buffer.tick(), Decision::Play(_)) {
-                    tocados += 1;
+                if let Decision::Play(indice) = buffer.tick() {
+                    tocados.push(indice);
                 }
             }
-            (tocados, buffer.metrics().resyncs)
+            let metricas = buffer.metrics();
+            Travessia {
+                tocados,
+                resyncs: metricas.resyncs,
+                descartes: metricas.descartes_por_rajada,
+                buraco_pulado: metricas.buraco_pulado,
+            }
         }
 
         let agora = 96_000;
         let quadro = FRAME_SAMPLES as u32;
-        let (tocados, ressincronizacoes) = atravessa(&[
+        let certos = atravessa(&[
             carimbo_do_quadro(agora, 3, 0),
             carimbo_do_quadro(agora, 3, 1),
             carimbo_do_quadro(agora, 3, 2),
         ]);
         assert_eq!(
-            ressincronizacoes, 0,
+            certos.tocados,
+            vec![0, 1, 2],
+            "os três quadros da abertura não tocaram todos, em ordem"
+        );
+        assert_eq!(
+            certos.resyncs, 0,
             "o relógio de quem recebe ressincronizou na abertura de uma fala, que é \
              onde ela mais se ouve"
         );
-        assert_eq!(tocados, 3, "os três quadros da abertura não tocaram");
+        assert_eq!(
+            (certos.descartes, certos.buraco_pulado),
+            (0, 0),
+            "a abertura de uma fala perdeu quadros ou pulou lugares no buffer"
+        );
 
-        // O controle negativo: é o que a auditoria mediu.
-        let (_, com_carimbos_iguais) = atravessa(&[agora, agora, agora]);
+        // O controle negativo: é o que a auditoria mediu. Carimbos iguais não
+        // tocam como três quadros seguidos, e o buffer mede a perturbação (o
+        // resync, na reação antiga; o descarte do passado, na de hoje).
+        let iguais = atravessa(&[agora, agora, agora]);
         assert!(
-            com_carimbos_iguais > 0,
-            "carimbos iguais passaram pelo buffer sem ressincronizar: então este \
-             teste não está medindo o defeito que ele diz medir"
+            iguais.tocados.len() < 3 || iguais.resyncs > 0,
+            "carimbos iguais tocaram os três quadros sem ressincronizar: então este \
+             teste não está medindo o defeito que ele diz medir (tocados: {:?})",
+            iguais.tocados
+        );
+        assert!(
+            iguais.resyncs + iguais.descartes > 0,
+            "carimbos iguais passaram sem nenhuma perturbação medida (resyncs: {}, \
+             descartes: {})",
+            iguais.resyncs,
+            iguais.descartes
         );
         // E os carimbos de verdade são espaçados por um quadro de amostras.
         assert_eq!(
@@ -3926,6 +4190,124 @@ mod cabecalhos_recusados {
         assert!(
             !laco.contains(concat!("MediaHeader::", "decode(")),
             "o laço voltou a ler o cabeçalho por conta própria, e a recusa volta a ser calada"
+        );
+    }
+}
+
+#[cfg(test)]
+mod a_conta_cai_depois_do_aparelho {
+    //! A conta das vozes vivas só cai **depois** de o aparelho ser solto, nos
+    //! três caminhos do `around`: o laço que usa o aparelho e termina, o runtime
+    //! que não sobe (o guarda cai com o aparelho dentro) e a thread que não nasce
+    //! (a closure cai com o guarda dentro). O aparelho de mentira daqui anota, no
+    //! instante em que cai, quantas vozes a conta ainda dizia.
+
+    use super::{vozes_vivas, AparelhoContado};
+    use std::sync::{Arc, Mutex};
+
+    /// A conta é do processo: um teste por vez, e cada um mede contra a base
+    /// que leu com a vez na mão. Em paralelo, a conta de um teste seguraria a
+    /// do outro, e o guarda passaria com a ordem invertida.
+    fn vez() -> std::sync::MutexGuard<'static, ()> {
+        static VEZ: Mutex<()> = Mutex::new(());
+        VEZ.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Um aparelho que anota a conta no instante em que é solto.
+    struct Aparelho(Arc<Mutex<Option<usize>>>);
+
+    impl Drop for Aparelho {
+        fn drop(&mut self) {
+            *self.0.lock().expect("a anotação") = Some(vozes_vivas());
+        }
+    }
+
+    fn aparelho() -> (Aparelho, Arc<Mutex<Option<usize>>>) {
+        let visto = Arc::new(Mutex::new(None));
+        (Aparelho(Arc::clone(&visto)), visto)
+    }
+
+    fn conta_quando_caiu(visto: &Arc<Mutex<Option<usize>>>) -> usize {
+        visto
+            .lock()
+            .expect("a anotação")
+            .expect("o aparelho não caiu")
+    }
+
+    /// O runtime que não sobe: o guarda cai com o aparelho dentro.
+    #[test]
+    fn com_o_aparelho_dentro_a_conta_cai_depois_dele() {
+        let _vez = vez();
+        let base = vozes_vivas();
+        let (io, visto) = aparelho();
+        let guarda = AparelhoContado::novo(io);
+        drop(guarda);
+        assert_eq!(
+            conta_quando_caiu(&visto),
+            base + 1,
+            "a conta já dizia que não havia voz quando o aparelho ainda estava aberto"
+        );
+        assert_eq!(vozes_vivas(), base, "o guarda caiu e a conta não desceu");
+    }
+
+    /// O fim normal: o laço tira o aparelho, solta-o, e o guarda vazio
+    /// desconta depois.
+    #[test]
+    fn com_o_aparelho_tirado_a_conta_espera_o_guarda() {
+        let _vez = vez();
+        let base = vozes_vivas();
+        let (io, visto) = aparelho();
+        let mut guarda = AparelhoContado::novo(io);
+        let tirado = guarda.tirar().expect("o aparelho");
+        drop(tirado);
+        assert_eq!(conta_quando_caiu(&visto), base + 1);
+        drop(guarda);
+        assert_eq!(vozes_vivas(), base);
+    }
+
+    /// A thread que não nasce: a closure, com o guarda dentro, cai sem rodar.
+    #[test]
+    fn na_closure_que_nunca_roda_a_conta_cai_depois_do_aparelho() {
+        let _vez = vez();
+        let base = vozes_vivas();
+        let (io, visto) = aparelho();
+        let guarda = AparelhoContado::novo(io);
+        let closure = move || {
+            let _ = &guarda;
+        };
+        drop(closure);
+        assert_eq!(conta_quando_caiu(&visto), base + 1);
+        assert_eq!(vozes_vivas(), base);
+    }
+}
+
+#[cfg(test)]
+mod a_ancora_do_relogio {
+    use super::{partida_ancorada, AncoraDoRelogio};
+    use seele_audio::jitter::ts_delta;
+    use std::sync::OnceLock;
+    use std::time::{Duration, Instant};
+
+    /// **Um relógio de parede que recua uma hora entre duas vozes do mesmo
+    /// processo não faz a segunda partir atrás da primeira**: ela parte à
+    /// frente pelo `Instant` que passou, e não pela parede.
+    #[test]
+    fn um_relogio_de_parede_que_recua_nao_faz_a_voz_nova_partir_atras() {
+        let ancora: OnceLock<AncoraDoRelogio> = OnceLock::new();
+        let comeco = Instant::now();
+        let parede = Duration::from_secs(1_792_910_000);
+        let (_, primeira) = partida_ancorada(&ancora, || parede, comeco);
+        // 80 s depois, o NTP recuou a parede uma hora.
+        let (_, segunda) = partida_ancorada(
+            &ancora,
+            || parede + Duration::from_secs(80) - Duration::from_secs(3_600),
+            comeco + Duration::from_secs(80),
+        );
+        assert_eq!(
+            ts_delta(segunda, primeira),
+            80 * 48_000,
+            "a segunda voz não partiu 80 s à frente da primeira"
         );
     }
 }

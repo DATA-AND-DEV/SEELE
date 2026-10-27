@@ -623,7 +623,7 @@ pub(crate) fn linha_do_pacote(
 /// A saída que quem hospeda escolheu para um MOD de API antiga (decisão do
 /// dono de 08/10). A saída 2, hospedar pelo Servidor 0.15, não mexe neste
 /// banco: é o painel de versões.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SaidaDoModAntigo {
     /// A saída 1: liga os bytes deste hash, a versão do MOD feita para a API
@@ -633,7 +633,7 @@ pub(crate) enum SaidaDoModAntigo {
     Desligar,
 }
 
-/// Por que uma saída de quem hospeda não mexeu no banco. A frase mora em
+/// Por que uma saída de quem hospeda não foi aceita. A frase mora em
 /// `frases.js`, pela mesma razão de [`FalhaAoInstalarMod`].
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) enum FalhaAoResolverModAntigo {
@@ -649,25 +649,28 @@ pub(crate) enum FalhaAoResolverModAntigo {
     /// Os bytes da versão nova não servem, com o nome da recusa
     /// ([`linha_do_pacote`]).
     PacoteNaoServe(String),
-    /// O banco não abriu, não migrou ou não gravou, com o que ele disse.
-    BancoNaoRespondeu(String),
+    /// A escolha não pôde ser guardada (o disco), com o motivo. O banco não
+    /// foi tocado.
+    NaoGuardou(String),
 }
 
 /// **As saídas 1 e 3 de quem hospeda com um MOD de API antiga, com o servidor
-/// parado** (tarefa 13 do plano da F3, Step 5b; aprovado pela orquestradora em
-/// 15/10, com os limites que esta função confere, nesta ordem):
+/// parado: ESTAGIADAS, sem tocar no banco** (P1 da 0.17; ver
+/// [`crate::escolhas_de_mods`]). Confere, nesta ordem e só lendo:
 ///
-/// 1. **só com o servidor parado** — `no_ar` vem da janela, e com ele de pé
-///    nada é aberto;
+/// 1. **só com o servidor parado** — `no_ar` vem da janela;
 /// 2. **só os servidores guardados desta máquina** — um id fora da lista é
-///    recusado, e não cai no banco de sempre como `servidores::banco` cai;
+///    recusado, e não cai no banco de sempre;
 /// 3. **só um MOD que hospedar recusaria** — pela mesma conferência do
-///    `hospedar` ([`mods_de_api_antiga`]);
-/// 4. **o mesmo banco e a mesma migração da subida** —
-///    [`crate::servidores::banco_de_hospedar`] e `Persistence::open`;
-/// 5. **os dados do MOD ficam** — `enable` e `disable` não tocam `mod_data`
-///    (ADR 0045), e a versão nova lê o quintal que a antiga gravou;
-/// 6. **o `seele.log` diz o que mudou e em qual servidor.**
+///    `hospedar` ([`mods_de_api_antiga`]), sobre o caminho do banco sem criar
+///    nada ([`crate::servidores::caminho_do_banco`]);
+/// 4. **os bytes da versão nova servem** ([`linha_do_pacote`]).
+///
+/// E guarda a escolha **deste servidor só**. Nada é aberto para escrita,
+/// convertido nem ligado: quem aplica é o `hospedar`, depois da cópia nova e
+/// verificada e da conversão, antes da primeira conexão. Os dados do MOD ficam
+/// (`enable` e `disable` não tocam `mod_data`, ADR 0045), e o `seele.log` diz
+/// o que foi escolhido e para qual servidor.
 pub(crate) fn resolver_mod_de_api_antiga(
     config: &str,
     servidor: Option<&str>,
@@ -678,15 +681,8 @@ pub(crate) fn resolver_mod_de_api_antiga(
     if no_ar {
         return Err(FalhaAoResolverModAntigo::ServidorNoAr);
     }
-    if let Some(guardado) = servidor {
-        if !crate::servidores::listar(config)
-            .iter()
-            .any(|s| s.id == guardado)
-        {
-            return Err(FalhaAoResolverModAntigo::ServidorDesconhecido);
-        }
-    }
-    let banco = crate::servidores::banco_de_hospedar(config, servidor);
+    servidor_guardado(config, servidor)?;
+    let banco = crate::servidores::caminho_do_banco(config, servidor);
     let raizes = crate::servidores::raizes_dos_mods(config, servidor);
     let Some(antigo) = mods_de_api_antiga(&banco, &raizes)
         .into_iter()
@@ -694,23 +690,21 @@ pub(crate) fn resolver_mod_de_api_antiga(
     else {
         return Err(FalhaAoResolverModAntigo::NaoEDeApiAntiga);
     };
-    // Os bytes novos conferidos **antes** de abrir o banco: abrir migra, e uma
-    // recusa não deixa um banco migrado para trás.
     let nova = match saida {
         SaidaDoModAntigo::Atualizar { hash } => Some(
             linha_do_pacote(config, id, hash).map_err(FalhaAoResolverModAntigo::PacoteNaoServe)?,
         ),
         SaidaDoModAntigo::Desligar => None,
     };
-    let banco_aberto = seele_server::persistence::Persistence::open(
-        &seele_server::persistence::Location::File(banco),
+    crate::escolhas_de_mods::estagiar(
+        Path::new(config),
+        servidor,
+        crate::escolhas_de_mods::Escolha {
+            id: id.to_owned(),
+            saida: saida.clone(),
+        },
     )
-    .map_err(|erro| FalhaAoResolverModAntigo::BancoNaoRespondeu(format!("{erro:#}")))?;
-    let gravado = match &nova {
-        Some(linha) => seele_server::persistence::mods::enable(&banco_aberto, linha),
-        None => seele_server::persistence::mods::disable(&banco_aberto, id),
-    };
-    gravado.map_err(|erro| FalhaAoResolverModAntigo::BancoNaoRespondeu(format!("{erro:#}")))?;
+    .map_err(FalhaAoResolverModAntigo::NaoGuardou)?;
 
     let qual = servidor.unwrap_or("o de sempre");
     let api = antigo
@@ -723,16 +717,84 @@ pub(crate) fn resolver_mod_de_api_antiga(
             api_antiga = %api,
             versao = %linha.version,
             api = linha.api,
-            "MOD de API antiga atualizado com o servidor parado"
+            "MOD de API antiga: ATUALIZAR escolhido; o banco não foi tocado, e a escolha vale no hospedar"
         ),
         None => tracing::info!(
             servidor = qual,
             mod_id = id,
             api_antiga = %api,
-            "MOD de API antiga desligado com o servidor parado; os dados dele ficam"
+            "MOD de API antiga: DESLIGAR escolhido; o banco não foi tocado, e a escolha vale no hospedar"
         ),
     }
     Ok(())
+}
+
+/// **Só os servidores guardados desta máquina** (o mesmo id que o registro
+/// tem), ou `None`, o de sempre. A regra das saídas e do DESFAZER: um id que a
+/// lista não tem é recusado, e nunca vira caminho de arquivo.
+///
+/// # Errors
+///
+/// [`FalhaAoResolverModAntigo::ServidorDesconhecido`].
+pub(crate) fn servidor_guardado(
+    config: &str,
+    servidor: Option<&str>,
+) -> Result<(), FalhaAoResolverModAntigo> {
+    match servidor {
+        None => Ok(()),
+        Some(guardado)
+            if crate::servidores::listar(config)
+                .iter()
+                .any(|s| s.id == guardado) =>
+        {
+            Ok(())
+        }
+        Some(_) => Err(FalhaAoResolverModAntigo::ServidorDesconhecido),
+    }
+}
+
+/// **O que o `hospedar` recusaria**: os MODs de API antiga deste banco, menos
+/// os que já têm uma escolha estagiada para este servidor (que o `hospedar`
+/// aplica depois da cópia e da conversão).
+pub(crate) fn recusas_de_hospedar(
+    config: &str,
+    servidor: Option<&str>,
+    banco: &Path,
+) -> Vec<ModDeApiAntiga> {
+    let escolhidos: Vec<String> = crate::escolhas_de_mods::pendentes(Path::new(config), servidor)
+        .into_iter()
+        .map(|escolha| escolha.id)
+        .collect();
+    mods_de_api_antiga(banco, &crate::servidores::raizes_dos_mods(config, servidor))
+        .into_iter()
+        .filter(|antigo| !escolhidos.contains(&antigo.id))
+        .collect()
+}
+
+/// Se uma linha **ligada** deste banco usa estes bytes, lido **só para
+/// leitura** (P1 da 0.17: nada de `Persistence::open`, que migra). Um banco
+/// sem a tabela `mods` não usa pacote nenhum.
+///
+/// # Errors
+///
+/// O banco não abre ou não responde.
+pub(crate) fn hash_ligado_no_banco(banco: &Path, hash: &str) -> rusqlite::Result<bool> {
+    let conexao =
+        rusqlite::Connection::open_with_flags(banco, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let tem_a_tabela: i64 = conexao.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'mods'",
+        [],
+        |linha| linha.get(0),
+    )?;
+    if tem_a_tabela == 0 {
+        return Ok(false);
+    }
+    let usam: i64 = conexao.query_row(
+        "SELECT count(*) FROM mods WHERE enabled = 1 AND hash = ?1",
+        [hash],
+        |linha| linha.get(0),
+    )?;
+    Ok(usam > 0)
 }
 
 #[cfg(test)]
@@ -842,8 +904,8 @@ mod mods_de_api_antiga {
 #[cfg(test)]
 mod saidas_do_mod_antigo {
     use super::{
-        instalar_de, mods_de_api_antiga, resolver_mod_de_api_antiga, FalhaAoResolverModAntigo,
-        SaidaDoModAntigo,
+        instalar_de, mods_de_api_antiga, recusas_de_hospedar, resolver_mod_de_api_antiga,
+        FalhaAoResolverModAntigo, SaidaDoModAntigo,
     };
     use std::path::Path;
 
@@ -952,18 +1014,37 @@ mod saidas_do_mod_antigo {
         instalar_de(Path::new(config), origem.path()).unwrap().hash
     }
 
-    /// **A saída 3: desligar, com o servidor parado.** A linha fica e passa a
-    /// desligada, o quintal fica byte a byte (ADR 0045), o banco migra pelo
-    /// mesmo `Persistence::open` da subida, e o `seele.log` diz o que mudou e
-    /// em qual servidor.
+    /// Os bytes do banco e dos arquivos ao lado dele (`-wal`, `-shm`): o que
+    /// «nada mudou» quer dizer, sem confiar em esquema nem em linha.
+    /// O SHA-256 de cada um, em hexadecimal: o mesmo que comparar os bytes, e
+    /// uma falha legível.
+    fn bytes_do_banco(banco: &Path) -> Vec<(String, Option<String>)> {
+        use sha2::Digest as _;
+        ["", "-wal", "-shm", "-journal"]
+            .into_iter()
+            .map(|sufixo| {
+                let caminho = format!("{}{sufixo}", banco.display());
+                let resumo = std::fs::read(&caminho).ok().map(|bytes| {
+                    sha2::Sha256::digest(&bytes)
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>()
+                });
+                (sufixo.to_owned(), resumo)
+            })
+            .collect()
+    }
+
+    /// **A saída 3: DESLIGAR, com o servidor parado, NÃO migra nem toca no
+    /// banco** (P1 da 0.17): os bytes ficam, o esquema fica no 13, a linha
+    /// continua ligada; a escolha fica estagiada para este servidor, o
+    /// `hospedar` não recusa mais por este MOD, e o `seele.log` diz o que foi
+    /// escolhido e em qual servidor.
     #[test]
-    fn desligar_com_o_servidor_parado_desliga_e_o_quintal_fica() {
+    fn desligar_com_o_servidor_parado_so_estagia_e_o_banco_fica_igual() {
         let (dir, config) = pasta_da_0_15_1();
-        let quintal = quintal_do_estilo(&banco(&dir));
-        assert!(
-            !quintal.is_empty(),
-            "a pasta da 0.15.1 não tem quintal do estilo"
-        );
+        let antes = bytes_do_banco(&banco(&dir));
+        let linha = linha_do_estilo(&banco(&dir));
 
         let (feito, rastro) = crate::rastro_de_teste::capturar(|| {
             resolver_mod_de_api_antiga(
@@ -976,45 +1057,54 @@ mod saidas_do_mod_antigo {
         });
         assert_eq!(feito, Ok(()));
 
-        let (versao, _, ligado) = linha_do_estilo(&banco(&dir));
         assert_eq!(
-            (versao.as_str(), ligado),
-            ("3.1.0", 0),
-            "a linha não ficou, desligada"
+            bytes_do_banco(&banco(&dir)),
+            antes,
+            "DESLIGAR mexeu no banco"
+        );
+        assert_eq!(esquema(&banco(&dir)), 13, "DESLIGAR migrou o banco");
+        assert_eq!(
+            linha_do_estilo(&banco(&dir)),
+            linha,
+            "DESLIGAR mudou a linha"
         );
         assert_eq!(
-            quintal_do_estilo(&banco(&dir)),
-            quintal,
-            "desligar mexeu no quintal"
-        );
-        assert_eq!(
-            esquema(&banco(&dir)),
-            esquema_deste_build(),
-            "o banco não migrou como na subida"
+            crate::escolhas_de_mods::pendentes(Path::new(&config), None),
+            vec![crate::escolhas_de_mods::Escolha {
+                id: "seele/estilo".into(),
+                saida: SaidaDoModAntigo::Desligar,
+            }],
+            "a escolha não ficou estagiada"
         );
         assert!(
-            mods_de_api_antiga(
+            !mods_de_api_antiga(
                 &banco(&dir),
                 &crate::servidores::raizes_dos_mods(&config, None)
             )
             .is_empty(),
-            "depois de desligar, hospedar ainda recusaria"
+            "o banco deixou de ter o MOD de API antiga: alguém o gravou"
+        );
+        assert!(
+            recusas_de_hospedar(&config, None, &banco(&dir)).is_empty(),
+            "com a escolha estagiada, hospedar ainda recusaria"
         );
         assert!(
             rastro.contains("seele/estilo")
-                && rastro.contains("desligado")
+                && rastro.contains("DESLIGAR")
                 && rastro.contains("o de sempre"),
-            "o seele.log não diz o que mudou e em qual servidor: {rastro}"
+            "o seele.log não diz o que foi escolhido e em qual servidor: {rastro}"
         );
     }
 
-    /// **A saída 1: atualizar, com o servidor parado.** A linha passa aos bytes
-    /// do 4.0.0, ligada, e o quintal fica: é o que a metade nova vai ler.
+    /// **A saída 1: ATUALIZAR, com o servidor parado, NÃO migra nem liga nada**
+    /// (P1 da 0.17, o caminho que o Codex mediu): os bytes, o esquema 13 e a
+    /// linha do 3.1.0 ficam; a escolha do 4.0.0 fica estagiada.
     #[test]
-    fn atualizar_com_o_servidor_parado_liga_a_versao_nova_e_o_quintal_fica() {
+    fn atualizar_com_o_servidor_parado_so_estagia_e_o_banco_fica_igual() {
         let (dir, config) = pasta_da_0_15_1();
-        let quintal = quintal_do_estilo(&banco(&dir));
         let hash = estilo_4_no_cache(&config);
+        let antes = bytes_do_banco(&banco(&dir));
+        let linha = linha_do_estilo(&banco(&dir));
 
         let (feito, rastro) = crate::rastro_de_teste::capturar(|| {
             resolver_mod_de_api_antiga(
@@ -1028,28 +1118,34 @@ mod saidas_do_mod_antigo {
         assert_eq!(feito, Ok(()));
 
         assert_eq!(
-            linha_do_estilo(&banco(&dir)),
-            ("4.0.0".to_owned(), hash, 1),
-            "a linha não passou ao 4.0.0, ligada"
+            bytes_do_banco(&banco(&dir)),
+            antes,
+            "ATUALIZAR mexeu no banco"
         );
+        assert_eq!(esquema(&banco(&dir)), 13, "ATUALIZAR migrou o banco");
         assert_eq!(
-            quintal_do_estilo(&banco(&dir)),
-            quintal,
-            "atualizar mexeu no quintal"
+            linha_do_estilo(&banco(&dir)),
+            linha,
+            "ATUALIZAR mudou a linha"
+        );
+        assert_eq!(linha.0, "3.1.0");
+        assert_eq!(
+            crate::escolhas_de_mods::pendentes(Path::new(&config), None),
+            vec![crate::escolhas_de_mods::Escolha {
+                id: "seele/estilo".into(),
+                saida: SaidaDoModAntigo::Atualizar { hash },
+            }],
+            "a escolha não ficou estagiada"
         );
         assert!(
-            mods_de_api_antiga(
-                &banco(&dir),
-                &crate::servidores::raizes_dos_mods(&config, None)
-            )
-            .is_empty(),
-            "depois de atualizar, hospedar ainda recusaria"
+            recusas_de_hospedar(&config, None, &banco(&dir)).is_empty(),
+            "com a escolha estagiada, hospedar ainda recusaria"
         );
         assert!(
             rastro.contains("seele/estilo")
                 && rastro.contains("4.0.0")
                 && rastro.contains("o de sempre"),
-            "o seele.log não diz o que mudou e em qual servidor: {rastro}"
+            "o seele.log não diz o que foi escolhido e em qual servidor: {rastro}"
         );
     }
 
@@ -1153,6 +1249,277 @@ mod saidas_do_mod_antigo {
             ))
         );
         assert_eq!(esquema(&banco(&dir)), 13, "recusado, e o banco migrou");
+    }
+
+    /// Uma pasta de dados com **dois servidores guardados legados**, A e B,
+    /// cada um com o banco da 0.15.1 (esquema 13, o `seele/estilo` 3.1.0 da API
+    /// 4 ligado, e o quintal dele), e os pacotes no cache.
+    fn dois_servidores_da_0_15_1() -> (tempfile::TempDir, String, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let sql = std::fs::read_to_string(format!("{PASTA}/seele.sql")).unwrap();
+        let mut ids = Vec::new();
+        for nome in ["Casa A", "Casa B"] {
+            let servidor = crate::servidores::criar(&config, nome, "0.15.1");
+            let caminho = crate::servidores::caminho_do_banco(&config, Some(&servidor.id));
+            std::fs::create_dir_all(caminho.parent().unwrap()).unwrap();
+            rusqlite::Connection::open(&caminho)
+                .unwrap()
+                .execute_batch(&sql)
+                .unwrap();
+            ids.push(servidor.id);
+        }
+        copiar(
+            &Path::new(PASTA).join("mod-packages"),
+            &dir.path().join("mod-packages"),
+        );
+        let b = ids.pop().unwrap();
+        let a = ids.pop().unwrap();
+        (dir, config, a, b)
+    }
+
+    /// O que «nada mudou» quer dizer num banco: os bytes (e os do `-wal`), o
+    /// esquema, a linha do MOD e o quintal dele.
+    type Retrato = (
+        Vec<(String, Option<String>)>,
+        i64,
+        (String, String, i64),
+        Vec<(String, Vec<u8>)>,
+    );
+
+    fn retrato(banco: &Path) -> Retrato {
+        (
+            bytes_do_banco(banco),
+            esquema(banco),
+            linha_do_estilo(banco),
+            quintal_do_estilo(banco),
+        )
+    }
+
+    fn copias_no_disco(config: &str) -> Vec<std::path::PathBuf> {
+        fn achar(pasta: &Path, achadas: &mut Vec<std::path::PathBuf>) {
+            for entrada in std::fs::read_dir(pasta).into_iter().flatten().flatten() {
+                if entrada.path().is_dir() {
+                    achar(&entrada.path(), achadas);
+                } else {
+                    achadas.push(entrada.path());
+                }
+            }
+        }
+        let mut achadas = Vec::new();
+        achar(
+            &Path::new(config).join(crate::antes_de_hospedar::PASTA_DAS_COPIAS),
+            &mut achadas,
+        );
+        achadas
+    }
+
+    /// **P1 inteiro, com dois servidores legados** (revisão do Codex):
+    ///
+    /// 1. ATUALIZAR o MOD para A, pelo ANTES DE HOSPEDAR, **não toca em banco
+    ///    nenhum**: A e B com os mesmos bytes, o esquema 13, a linha do 3.1.0 e
+    ///    o quintal; nenhuma cópia criada;
+    /// 2. desistir, voltar e reabrir não escondem nada: o ANTES DE HOSPEDAR de
+    ///    A continua dizendo que vai converter, com a escolha pendente; o de B,
+    ///    sem escolha nenhuma;
+    /// 3. o CTA de A, pelos mesmos passos do `hospedar`: a cópia nova e
+    ///    verificada **antes** (a cópia é do esquema 13, íntegra), a conversão
+    ///    pela subida, e então a escolha aplicada antes da primeira conexão;
+    /// 4. o sim do dono (b1): o conjunto que ele aceitou é exatamente o que o
+    ///    servidor de pé anuncia;
+    /// 5. **B, do começo ao fim, inalterado.**
+    #[test]
+    fn atualizar_para_a_ate_o_cta_de_a_deixa_b_inalterado_e_o_cta_copia_converte_e_aplica() {
+        let (_dir, config, a, b) = dois_servidores_da_0_15_1();
+        let banco_a = crate::servidores::caminho_do_banco(&config, Some(&a));
+        let banco_b = crate::servidores::caminho_do_banco(&config, Some(&b));
+        let hash = estilo_4_no_cache(&config);
+        let a_antes = retrato(&banco_a);
+        let b_antes = retrato(&banco_b);
+        assert_eq!(a_antes.1, 13);
+        assert_eq!(b_antes.1, 13);
+
+        // 1. A escolha, só para A.
+        assert_eq!(
+            resolver_mod_de_api_antiga(
+                &config,
+                Some(&a),
+                "seele/estilo",
+                &SaidaDoModAntigo::Atualizar { hash: hash.clone() },
+                false,
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            retrato(&banco_a),
+            a_antes,
+            "escolher ATUALIZAR mexeu no banco de A"
+        );
+        assert_eq!(
+            retrato(&banco_b),
+            b_antes,
+            "escolher para A mexeu no banco de B"
+        );
+        assert!(
+            copias_no_disco(&config).is_empty(),
+            "uma cópia apareceu antes do CTA"
+        );
+
+        // 2. Reabrir o ANTES DE HOSPEDAR.
+        let de_a = crate::antes_de_hospedar::conferir(Path::new(&config), Some(&a), &banco_a);
+        assert!(
+            de_a.converte && de_a.vai_copiar,
+            "reaberto, A não diz mais que vai converter"
+        );
+        assert_eq!(
+            crate::escolhas_de_mods::pendentes(Path::new(&config), Some(&a)).len(),
+            1,
+            "reaberto, a escolha de A sumiu"
+        );
+        assert!(
+            crate::escolhas_de_mods::pendentes(Path::new(&config), Some(&b)).is_empty(),
+            "a escolha de A apareceu em B"
+        );
+        assert!(
+            !recusas_de_hospedar(&config, Some(&b), &banco_b).is_empty(),
+            "B deixou de ser recusado sem escolha nenhuma"
+        );
+
+        // 3. O CTA de A, pelos passos do `hospedar`, nesta ordem.
+        assert!(recusas_de_hospedar(&config, Some(&a), &banco_a).is_empty());
+        let portao =
+            crate::antes_de_hospedar::garantir_a_copia(Path::new(&config), Some(&a), &banco_a)
+                .expect("o portão da cópia de A não abriu");
+        assert!(
+            matches!(portao, crate::antes_de_hospedar::Portao::CopiaFeita(_)),
+            "o CTA não fez a cópia: {portao:?}"
+        );
+        let copias = copias_no_disco(&config);
+        assert_eq!(copias.len(), 1, "a cópia de A não é uma só: {copias:?}");
+        let copia = copias.first().expect("a cópia de A");
+        assert_eq!(
+            esquema(copia),
+            13,
+            "a cópia não é do estado de antes da conversão"
+        );
+        assert_eq!(
+            linha_do_estilo(copia),
+            a_antes.2,
+            "a cópia não tem a linha de antes"
+        );
+        assert_eq!(
+            quintal_do_estilo(copia),
+            a_antes.3,
+            "a cópia não tem o quintal de antes"
+        );
+        assert_eq!(retrato(&banco_a), a_antes, "a cópia mexeu no banco de A");
+        crate::servidores::plantar_a_chave_depois_do_portao(&config, &banco_a);
+        let aqui = format!("127.0.0.1:{}", crate::PORTA_PADRAO);
+        assert_eq!(
+            crate::escolhas_de_mods::aplicar_depois_do_portao(&config, Some(&a), &banco_a, &aqui),
+            Ok(true),
+            "o CTA não aplicou a escolha depois da cópia"
+        );
+        assert_eq!(
+            retrato(&banco_b),
+            b_antes,
+            "aplicar a escolha de A mexeu no banco de B"
+        );
+
+        let minha = seele_ffi::impressao_desta_maquina(&config).unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (conjunto_anunciado, aceito) = runtime.block_on(async {
+            let dona = minha.clone();
+            let hospedagem = seele_server::hospedagem::Hospedagem::iniciar(
+                0,
+                seele_server::persistence::Location::File(banco_a.clone()),
+                "Casa A",
+                Some(crate::servidores::raizes_dos_mods(&config, Some(&a))),
+                move |persistence| crate::preparar_a_casa_de_quem_hospeda(persistence, &dona),
+            )
+            .await
+            .expect("A não subiu depois do CTA");
+            // 4. O dono, pela FFI, com a casa desta janela: o conjunto que o
+            // servidor anuncia é o que o sim gravado no CTA cobre.
+            let cfg = seele_ffi::ConnectConfig {
+                server: format!("127.0.0.1:{}", hospedagem.endereco().port()),
+                alternate_servers: Vec::new(),
+                nickname: "dona".to_owned(),
+                home: config.clone(),
+                audio: false,
+                join_secret: None,
+                expected_fingerprint: None,
+                codigo_esperado: None,
+                bilhete: None,
+                capture_device: None,
+                playback_device: None,
+            };
+            let entrada = tokio::task::spawn_blocking(move || seele_ffi::Connection::connect(cfg))
+                .await
+                .unwrap();
+            let anunciado = match entrada {
+                Err(seele_ffi::ConnectionError::ModsNaoAceitos { conjunto, .. }) => conjunto,
+                Ok(_) => panic!("a porta 0 do teste não tem sim nenhum, e a entrada não perguntou"),
+                Err(outro) => panic!("a entrada da dona em A falhou antes dos MODs: {outro:?}"),
+            };
+            hospedagem.encerrar().await;
+            (anunciado, seele_ffi::mods::aceite_de(&config, &aqui))
+        });
+        assert_eq!(
+            aceito.as_deref(),
+            Some(conjunto_anunciado.as_str()),
+            "o sim gravado no CTA, sob {aqui}, não é o conjunto que A anuncia"
+        );
+
+        // A convertida e com a escolha aplicada; o quintal ficou.
+        let a_depois = retrato(&banco_a);
+        assert_eq!(a_depois.1, esquema_deste_build(), "A não converteu no CTA");
+        assert_eq!(
+            a_depois.2,
+            ("4.0.0".to_owned(), hash, 1),
+            "a escolha estagiada não foi aplicada no CTA"
+        );
+        assert_eq!(a_depois.3, a_antes.3, "o CTA mexeu no quintal do MOD");
+        assert!(crate::escolhas_de_mods::pendentes(Path::new(&config), Some(&a)).is_empty());
+
+        // 5. B inalterado.
+        assert_eq!(retrato(&banco_b), b_antes, "o CTA de A mexeu no banco de B");
+    }
+
+    /// **Desistir desfaz só a escolha**: o banco nunca foi tocado, e depois de
+    /// desfazer o `hospedar` volta a recusar pelo MOD, como antes.
+    #[test]
+    fn desfazer_a_escolha_volta_a_recusa_e_o_banco_segue_igual() {
+        let (dir, config) = pasta_da_0_15_1();
+        let antes = bytes_do_banco(&banco(&dir));
+        assert_eq!(
+            resolver_mod_de_api_antiga(
+                &config,
+                None,
+                "seele/estilo",
+                &SaidaDoModAntigo::Desligar,
+                false
+            ),
+            Ok(())
+        );
+        assert!(recusas_de_hospedar(&config, None, &banco(&dir)).is_empty());
+        crate::escolhas_de_mods::descartar(Path::new(&config), None).expect("descartar");
+        assert_eq!(
+            recusas_de_hospedar(&config, None, &banco(&dir))
+                .into_iter()
+                .map(|antigo| antigo.id)
+                .collect::<Vec<_>>(),
+            vec!["seele/estilo".to_owned()],
+            "desfeita a escolha, hospedar não recusa mais"
+        );
+        assert_eq!(
+            bytes_do_banco(&banco(&dir)),
+            antes,
+            "escolher e desfazer mexeu no banco"
+        );
     }
 }
 

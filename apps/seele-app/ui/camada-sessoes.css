@@ -1,0 +1,194 @@
+/* SEELE — várias sessões (E3 da 0.17): os grupos da trilha, as marcas de cada
+   placa, a linha da voz e as conversas abertas na entrada.
+
+   **Nada é dito só pela cor** (`specs/06-clientes-gui.md`): cada marca é uma
+   palavra curta (VOZ, AQUI, NO AR) ou um número, e o nome acessível de cada
+   placa diz tudo por extenso (`FRASES_DAS_SESSOES.placa`). As cores seguem os
+   papéis de `tokens.css`: fósforo para a voz (está funcionando), azul para o
+   que é desta máquina (identidade), laranja para as não lidas (olhe aqui), e
+   vermelho só para a sessão encerrada, que é queda. Toda classe é nova aqui
+   (`no_two_screens_claim_the_same_class_name`), e sem cor literal. */
+
+/* Os títulos dos grupos: o mesmo corpo do REDES, menores, sem a régua de
+   cima, que já é a borda da última placa. */
+.trilha-grupo {
+  margin: 0;
+  padding: 6px 0 4px;
+  flex: 0 0 auto;
+  text-align: center;
+  font-family: var(--seele-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  color: var(--seele-rotulo-painel);
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+/* A placa de uma sessão: a sigla no meio, e as marcas nos cantos. */
+.trilha-sessao,
+.trilha-hospedado {
+  position: relative;
+}
+
+.trilha-marca {
+  position: absolute;
+  font-family: var(--seele-mono);
+  font-weight: 700;
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  padding: 1px 2px;
+  border: 1px solid currentColor;
+  pointer-events: none;
+}
+
+/* A voz embaixo, à esquerda: é a marca que mais importa saber de relance. */
+.trilha-marca-voz {
+  left: 3px;
+  bottom: 3px;
+  color: var(--seele-fosforo);
+  background: var(--seele-fosforo-fraco);
+}
+
+/* AQUI em cima, à esquerda: o servidor desta máquina. */
+.trilha-marca-aqui {
+  left: 3px;
+  top: 3px;
+  color: var(--seele-padrao-azul);
+  background: var(--seele-azul-fraco);
+}
+
+.trilha-marca-noar {
+  left: 50%;
+  bottom: 3px;
+  transform: translateX(-50%);
+  color: var(--seele-padrao-azul);
+  background: var(--seele-azul-fraco);
+  white-space: nowrap;
+}
+
+/* A volta (↻) e o fim (×), em cima à direita, onde as não lidas não estão. */
+.trilha-marca-enlace {
+  right: 3px;
+  top: 3px;
+  border: none;
+  font-size: 11px;
+}
+
+/* As não lidas: o número, embaixo à direita, numa caixa cheia. */
+.trilha-naolidas {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  min-width: 14px;
+  padding: 1px 3px;
+  font-family: var(--seele-mono);
+  font-weight: 700;
+  font-size: 9px;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  pointer-events: none;
+}
+
+/* Só «mudou», sem número: um ponto, que o nome acessível diz por extenso. */
+.trilha-mudou {
+  min-width: 0;
+  color: var(--seele-laranja-nerv);
+  background: none;
+}
+
+/* Voltando: a placa esmaece, como a sessão inteira esmaece na queda (`07`). */
+.trilha-sessao[data-enlace="reconectando"] {
+  opacity: 0.7;
+}
+
+.trilha-sessao[data-enlace="reconectando"] .trilha-marca-enlace {
+  color: var(--seele-laranja-nerv);
+}
+
+/* Encerrada: a queda, e só aqui o vermelho. */
+.trilha-sessao[data-enlace="encerrada"] {
+  border-left-color: var(--seele-vermelho-alerta);
+  color: var(--seele-vermelho-alerta);
+}
+
+.trilha-sessao[data-enlace="encerrada"] .trilha-marca-enlace {
+  color: var(--seele-vermelho-alerta);
+}
+
+/* ------------------------------------------------------- a linha da voz */
+
+.voz-foco {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--seele-linha-forte);
+  background: var(--seele-negro-absoluto);
+}
+
+.voz-foco[data-voz="aqui"] { border-left-color: var(--seele-fosforo); }
+.voz-foco[data-voz="noutro"] { border-left-color: var(--seele-laranja-nerv); }
+
+.voz-foco-frase {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--seele-osso);
+}
+
+.voz-foco[data-voz="aqui"] .voz-foco-frase { color: var(--seele-fosforo); }
+
+.voz-foco-trazer {
+  margin: 6px 0 0;
+  width: 100%;
+  min-height: 32px;
+  color: var(--seele-laranja-nerv);
+}
+
+/* -------------------------------------------- as abertas, na entrada */
+
+.boot-sessoes {
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--seele-linha);
+  border-left: 2px solid var(--seele-padrao-azul);
+  background: var(--seele-negro-absoluto);
+}
+
+.boot-sessoes .server-dispositivos { margin-top: 10px; }
+
+.boot-sessao {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--seele-negro-painel);
+}
+
+.boot-sessao-texto {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--seele-t-dado);
+  overflow-wrap: anywhere;
+}
+
+.boot-sessao-nome {
+  color: var(--seele-osso);
+  font-weight: 700;
+}
+
+.boot-sessao-sub {
+  font-size: 11px;
+  color: var(--seele-rotulo-claro);
+}
+
+/* O COMPARTILHAR sem captura neste navegador (caso 12): à vista e apagado, com
+   o porquê no `title` e no nome acessível; o clique abre a caixa que o diz. */
+#operador-vista[aria-disabled="true"] {
+  opacity: 0.55;
+  border-style: dashed;
+}
+

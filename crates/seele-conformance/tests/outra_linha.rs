@@ -16,6 +16,16 @@
 //! (o `decode` dela recusa o carimbo e ela despede com `ProtocolViolation` no
 //! número dela, pelo código de `54f542f`); `[30, 11, 0]` é uma build de um
 //! número muito à frente recusando por versão.
+//!
+//! # Desde a 0.17 (ADR 0063)
+//!
+//! O servidor cru fala pelo enlace WebRTC, como todo servidor da linha 2. Uma
+//! 0.15 ou uma 0.16 de verdade **não chegam** a mandar estes bytes a uma 0.17:
+//! elas falam QUIC, e não há transporte em comum. O que se prova aqui continua
+//! valendo assim mesmo: o cliente lê o byte 0 antes de qualquer outra coisa, e
+//! um número de outra linha vira `OutraLinha`, inclusive o 9 da linha 1. É o
+//! que vale no dia em que duas linhas dividirem o transporte de novo, e é o
+//! que garante a frase da recusa dentro da linha 2.
 
 #![allow(
     clippy::expect_used,
@@ -30,12 +40,13 @@ use std::time::Duration;
 
 use anyhow::Result;
 use ed25519_dalek::SigningKey;
-use seele_core::{frame, Client, ConnectError, MemoryPinStore};
-use seele_proto::control::ServerMessage;
+use seele_core::{Client, ConnectError, MemoryPinStore};
+use seele_proto::control::{encode, ServerMessage};
 use seele_proto::version::{PROTOCOL_VERSION, VERSAO_MINIMA};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod par_cru;
 mod vaga;
 
 /// Um servidor que lê o primeiro quadro do cliente e responde `resposta`,
@@ -44,27 +55,12 @@ mod vaga;
 async fn servidor_que_responde(
     resposta: Vec<u8>,
 ) -> Result<(SocketAddr, tokio::task::JoinHandle<Result<u8>>)> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let identidade = seele_server::tls::Identity::self_signed(vec!["localhost".to_owned()])?;
-    let ponta = quinn::Endpoint::server(
-        seele_server::tls::server_config(identidade)?,
-        SocketAddr::from(([127, 0, 0, 1], 0)),
-    )?;
-    let endereco = ponta.local_addr()?;
+    let ponta = par_cru::anfitriao().await;
+    let endereco = ponta.local_addr();
     let tarefa = tokio::spawn(async move {
-        let conexao = ponta
-            .accept()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("ninguém bateu"))?
-            .await?;
-        let (mut envia, mut recebe) = conexao.accept_bi().await?;
-        let mut prefixo = [0_u8; seele_proto::quadro::PREFIXO_LEN];
-        recebe.read_exact(&mut prefixo).await?;
-        let mut quadro = vec![0_u8; seele_proto::quadro::comprimento(prefixo)?];
-        recebe.read_exact(&mut quadro).await?;
-        envia
-            .write_all(&seele_proto::quadro::enquadrar(&resposta)?)
-            .await?;
+        let (conexao, mut envia, mut recebe) = par_cru::primeira_chegada(&ponta).await?;
+        let quadro = par_cru::ler_quadro(&mut recebe).await?;
+        par_cru::escrever(&mut envia, &seele_proto::quadro::enquadrar(&resposta)?).await?;
         let _ = envia.finish();
         // O tempo de o cliente ler antes de a ponta cair.
         let _ = tokio::time::timeout(Duration::from_secs(2), conexao.closed()).await;
@@ -115,6 +111,16 @@ async fn a_recusa_de_um_servidor_0_15_e_dita_como_outra_linha() -> Result<()> {
     Ok(())
 }
 
+/// **Um servidor da linha 1** (o 9 da 0.16), recusando por versão no número
+/// dele: a 0.17 o diz como outra linha, e não como rede fora do ar.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recusa_de_um_servidor_1_e_dita_como_outra_linha() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (erro, _) = o_cliente_diz(vec![9, 11, 0], 155).await?;
+    assert_eq!(erro, ConnectError::OutraLinha { numero: 9 });
+    Ok(())
+}
+
 /// **Um número muito à frente**, recusando por versão no número dele.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_recusa_de_um_numero_a_frente_e_dita_como_outra_linha() -> Result<()> {
@@ -155,27 +161,24 @@ async fn contra_um_servidor_desta_build_o_cliente_entra() -> Result<()> {
 /// cliente mandou: o `Hello`, a `Response` e o `Ping` da sessão.
 async fn servidor_com_uma_desconhecida(
 ) -> Result<(SocketAddr, tokio::task::JoinHandle<Result<Vec<u8>>>)> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let identidade = seele_server::tls::Identity::self_signed(vec!["localhost".to_owned()])?;
-    let ponta = quinn::Endpoint::server(
-        seele_server::tls::server_config(identidade)?,
-        SocketAddr::from(([127, 0, 0, 1], 0)),
-    )?;
-    let endereco = ponta.local_addr()?;
+    let ponta = par_cru::anfitriao().await;
+    let endereco = ponta.local_addr();
     let tarefa = tokio::spawn(async move {
-        let conexao = ponta
-            .accept()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("ninguém bateu"))?
-            .await?;
-        let (mut envia, mut recebe) = conexao.accept_bi().await?;
+        let (_conexao, mut envia, mut recebe) = par_cru::primeira_chegada(&ponta).await?;
+        let quadro = |mensagem: &ServerMessage| -> Result<Vec<u8>> {
+            Ok(seele_proto::quadro::enquadrar(&encode(mensagem)?)?)
+        };
         let mut carimbos = Vec::new();
-        carimbos.push(frame::ler_bruto(&mut recebe).await?[0]);
-        frame::write(&mut envia, &ServerMessage::Challenge { nonce: vec![7; 32] }).await?;
-        carimbos.push(frame::ler_bruto(&mut recebe).await?[0]);
-        frame::write(
+        carimbos.push(par_cru::ler_quadro(&mut recebe).await?[0]);
+        par_cru::escrever(
             &mut envia,
-            &ServerMessage::Session {
+            &quadro(&ServerMessage::Challenge { nonce: vec![7; 32] })?,
+        )
+        .await?;
+        carimbos.push(par_cru::ler_quadro(&mut recebe).await?[0]);
+        par_cru::escrever(
+            &mut envia,
+            &quadro(&ServerMessage::Session {
                 id: seele_proto::ids::SessionId(1),
                 person: seele_proto::ids::PersonId(1),
                 ssrc: seele_proto::ids::Ssrc(1),
@@ -184,14 +187,17 @@ async fn servidor_com_uma_desconhecida(
                 channels: Vec::new(),
                 roles: Vec::new(),
                 permissions: Vec::new(),
-            },
+            })?,
         )
         .await?;
-        envia
-            .write_all(&seele_proto::quadro::enquadrar(&[PROTOCOL_VERSION, 100])?)
-            .await?;
-        frame::write(&mut envia, &ServerMessage::Pong { timestamp: 42 }).await?;
-        carimbos.push(frame::ler_bruto(&mut recebe).await?[0]);
+        par_cru::escrever(
+            &mut envia,
+            &seele_proto::quadro::enquadrar(&[PROTOCOL_VERSION, 100])?,
+        )
+        .await?;
+        par_cru::escrever(&mut envia, &quadro(&ServerMessage::Pong { timestamp: 42 })?).await?;
+        carimbos.push(par_cru::ler_quadro(&mut recebe).await?[0]);
+        drop(ponta);
         Ok(carimbos)
     });
     Ok((endereco, tarefa))

@@ -41,6 +41,9 @@ const TIPOS = {
   ".svg": "image/svg+xml",
 };
 
+/** A política do desktop (`tauri.conf.json`), num lugar só para as bancadas que servem a página dele. */
+const CSP_DO_DESKTOP = "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; font-src 'self'";
+
 /** O servidor de arquivos: `ui/` como está, sem transformação nenhuma. */
 function servir() {
   return http.createServer((req, res) => {
@@ -55,10 +58,7 @@ function servir() {
     // `style-src 'self'`, e foi ela que descartou por meses as folhas que um
     // MOD declarava. Uma bancada mais permissiva que o produto aprovaria o
     // que o produto recusa.
-    res.setHeader(
-      "Content-Security-Policy",
-      "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; font-src 'self'",
-    );
+    res.setHeader("Content-Security-Policy", CSP_DO_DESKTOP);
     res.setHeader("Content-Type", TIPOS[path.extname(alvo)] ?? "application/octet-stream");
     res.end(fs.readFileSync(alvo));
   });
@@ -388,7 +388,7 @@ async function principal() {
   servidor.close();
 }
 
-module.exports = { servir, respostas, retrato };
+module.exports = { servir, respostas, retrato, CSP_DO_DESKTOP };
 
 if (require.main === module) principal().catch((erro) => {
   console.error(erro);

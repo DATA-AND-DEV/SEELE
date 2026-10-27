@@ -76,6 +76,28 @@ pub fn conferir(pedido: &Moro2) -> bool {
     chave.verify_strict(&mensagem, &assinatura).is_ok()
 }
 
+/// [`conferir`] para o `MORO3` do ENC/3: as mesmas regras, com a assinatura
+/// sobre [`seele_proto::encontro::mensagem_do_moro3`], de rótulo próprio. Um
+/// `MORO2` da 0.16 copiado no caminho não confere aqui.
+#[must_use]
+pub fn conferir3(pedido: &Moro2) -> bool {
+    let marcas = Marcas::da_sala(&Codigo::da_chave(&pedido.chave));
+    if pedido.marca != *marcas.escuta() && pedido.marca != *marcas.servidor() {
+        return false;
+    }
+    let Ok(chave) = ed25519_dalek::VerifyingKey::from_bytes(&pedido.chave) else {
+        return false;
+    };
+    let assinatura = ed25519_dalek::Signature::from_bytes(&pedido.assinatura);
+    let mensagem = seele_proto::encontro::mensagem_do_moro3(
+        &pedido.marca,
+        &pedido.chave,
+        pedido.carimbo,
+        &pedido.dicas,
+    );
+    chave.verify_strict(&mensagem, &assinatura).is_ok()
+}
+
 /// Um registro, e o que é preciso para julgar o próximo.
 #[derive(Debug)]
 struct Registro {

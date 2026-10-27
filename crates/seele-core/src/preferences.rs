@@ -120,7 +120,11 @@ pub struct Preferences {
     /// A subida é da máquina; o caminho até cada servidor é que difere. Por isso
     /// este número é um **ponto de partida**, e o da lista de conhecidos, quando
     /// existe, tem precedência.
-    caminho_da_maquina_bps: Option<u32>,
+    ///
+    /// Desde a 0.17 com data e rede ([`crate::caminho::CaminhoLembrado`]): o
+    /// número solto que a 0.16 gravava não se lê, e a medida de outra rede ou
+    /// de mais de uma semana não semeia.
+    caminho_da_maquina: Option<crate::caminho::CaminhoLembrado>,
     /// Os domínios cuja prévia automática esta pessoa liberou. ADR 0053.
     ///
     /// # Por que ela é uma lista de sim, e não de não
@@ -177,7 +181,7 @@ impl Preferences {
             nickname: None,
             pares_que_atende: None,
             assiste_por_par: None,
-            caminho_da_maquina_bps: None,
+            caminho_da_maquina: None,
             previas_consentidas: Vec::new(),
             supressao_de_ruido: None,
             abertura_da_voz_dbfs_milesimos: None,
@@ -210,8 +214,9 @@ impl Preferences {
                         settings.pares_que_atende = value.as_deref().and_then(|v| v.parse().ok())
                     }
                     CAMINHO_DA_MAQUINA => {
-                        settings.caminho_da_maquina_bps =
-                            value.as_deref().and_then(|v| v.parse().ok())
+                        settings.caminho_da_maquina = value
+                            .as_deref()
+                            .and_then(crate::caminho::CaminhoLembrado::ler)
                     }
                     // Separados por espaço, que é o que o formato de linha
                     // permite — o `\t` separa nome de valor.
@@ -382,10 +387,24 @@ impl Preferences {
         self.write()
     }
 
-    /// A maior subida já medida nesta máquina, ou `None` enquanto não houve uma.
+    /// A semente que a maior subida medida nesta máquina dá **agora, nesta
+    /// rede**, ou `None`: nada medido, outra rede, mais de uma semana, ou o
+    /// número sem data da 0.16. Grampeada em
+    /// [`crate::caminho::TETO_DA_SEMENTE_BPS`].
     #[must_use]
     pub fn caminho_da_maquina(&self) -> Option<u32> {
-        self.caminho_da_maquina_bps
+        self.caminho_da_maquina_em(
+            crate::conhecidos::agora_em_segundos(),
+            &crate::caminho::ambiente_desta_maquina(),
+        )
+    }
+
+    /// [`Self::caminho_da_maquina`] num instante e numa rede ditos.
+    #[must_use]
+    pub fn caminho_da_maquina_em(&self, agora: i64, ambiente: &str) -> Option<u32> {
+        self.caminho_da_maquina
+            .as_ref()
+            .and_then(|lembrado| lembrado.semente(agora, ambiente))
     }
 
     /// Anota uma medida nova, **se ela for maior que a guardada**.
@@ -403,14 +422,40 @@ impl Preferences {
     ///
     /// Falha se o arquivo não puder ser escrito.
     pub fn anotar_caminho_da_maquina(&mut self, bps: u32) -> Result<()> {
-        if bps == 0
-            || self
-                .caminho_da_maquina_bps
-                .is_some_and(|antes| antes >= bps)
-        {
+        self.anotar_caminho_da_maquina_em(
+            bps,
+            crate::conhecidos::agora_em_segundos(),
+            &crate::caminho::ambiente_desta_maquina(),
+        )
+    }
+
+    /// [`Self::anotar_caminho_da_maquina`] num instante e numa rede ditos.
+    ///
+    /// «A maior» vale **dentro da mesma rede e da mesma semana**: uma medida
+    /// guardada que já não semeia (outra rede, velha, da 0.16) não segura a
+    /// nova, por menor que a nova seja.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser escrito.
+    pub fn anotar_caminho_da_maquina_em(
+        &mut self,
+        bps: u32,
+        agora: i64,
+        ambiente: &str,
+    ) -> Result<()> {
+        let segura = self
+            .caminho_da_maquina
+            .as_ref()
+            .is_some_and(|antes| antes.semente(agora, ambiente).is_some() && antes.bps >= bps);
+        if bps == 0 || segura {
             return Ok(());
         }
-        self.caminho_da_maquina_bps = Some(bps);
+        self.caminho_da_maquina = Some(crate::caminho::CaminhoLembrado {
+            bps,
+            medido_em: agora,
+            ambiente: ambiente.to_owned(),
+        });
         self.write()
     }
 
@@ -593,7 +638,10 @@ impl Preferences {
         let assiste = self
             .assiste_por_par
             .map(|sim| if sim { "sim" } else { "nao" }.to_owned());
-        let caminho = self.caminho_da_maquina_bps.map(|bps| bps.to_string());
+        let caminho = self
+            .caminho_da_maquina
+            .as_ref()
+            .map(crate::caminho::CaminhoLembrado::escrever);
         let previas =
             (!self.previas_consentidas.is_empty()).then(|| self.previas_consentidas.join(" "));
         let supressao = self.supressao_de_ruido.map(|m| m.to_string());
@@ -947,31 +995,75 @@ mod tests {
     /// segundos.
     #[test]
     fn a_subida_da_maquina_guarda_a_maior_e_ignora_o_instante_ruim() {
+        // Abaixo de `TETO_DA_SEMENTE_BPS`, para o teto não esconder a regra.
         let caminho = scratch("caminho-da-maquina");
         let mut p = Preferences::open(caminho.clone()).expect("abrir");
         assert_eq!(p.caminho_da_maquina(), None, "nada medido ainda");
 
-        p.anotar_caminho_da_maquina(12_000_000).expect("primeira");
-        assert_eq!(p.caminho_da_maquina(), Some(12_000_000));
+        p.anotar_caminho_da_maquina(4_000_000).expect("primeira");
+        assert_eq!(p.caminho_da_maquina(), Some(4_000_000));
 
-        p.anotar_caminho_da_maquina(3_000_000)
+        p.anotar_caminho_da_maquina(1_000_000)
             .expect("um instante ruim");
         assert_eq!(
             p.caminho_da_maquina(),
-            Some(12_000_000),
+            Some(4_000_000),
             "uma janela ruim não encolhe o que a máquina já provou carregar"
         );
 
-        p.anotar_caminho_da_maquina(20_000_000).expect("cano maior");
-        assert_eq!(p.caminho_da_maquina(), Some(20_000_000));
+        p.anotar_caminho_da_maquina(6_000_000).expect("cano maior");
+        assert_eq!(p.caminho_da_maquina(), Some(6_000_000));
 
         assert_eq!(
             Preferences::open(caminho)
                 .expect("reabrir")
                 .caminho_da_maquina(),
-            Some(20_000_000),
+            Some(6_000_000),
             "e atravessa o fechamento da janela"
         );
+    }
+
+    /// **A subida lembrada não fala pela rede de hoje.** Decisão da 0.17: a de
+    /// outra rede, a de mais de uma semana e o número sem data da 0.16 não
+    /// semeiam, e nenhuma semeia acima de `TETO_DA_SEMENTE_BPS`. E «a maior»
+    /// só segura dentro da mesma rede: a medida de outra rede não impede a nova.
+    #[test]
+    fn a_subida_da_maquina_e_conferida_pela_rede_pela_idade_e_tem_teto() {
+        use crate::caminho::{IDADE_MAXIMA_DA_LEMBRANCA_S, TETO_DA_SEMENTE_BPS};
+        let casa = "enlace-0.17|192.168.0.10|-";
+        let trabalho = "enlace-0.17|10.20.0.33|-";
+        let agora = 1_800_000_000_i64;
+        let caminho = scratch("caminho-da-maquina-conferido");
+        let mut p = Preferences::open(caminho.clone()).expect("abrir");
+
+        p.anotar_caminho_da_maquina_em(50_000_000, agora, casa)
+            .expect("casa");
+        assert_eq!(
+            p.caminho_da_maquina_em(agora, casa),
+            Some(TETO_DA_SEMENTE_BPS),
+            "a semente passou do teto"
+        );
+        assert_eq!(p.caminho_da_maquina_em(agora, trabalho), None);
+        assert_eq!(
+            p.caminho_da_maquina_em(agora + IDADE_MAXIMA_DA_LEMBRANCA_S + 1, casa),
+            None,
+            "uma medida de mais de uma semana semeou"
+        );
+
+        // No trabalho, uma medida menor substitui a de casa: a de casa não
+        // vale lá, e não pode segurar o lugar.
+        p.anotar_caminho_da_maquina_em(3_000_000, agora + 60, trabalho)
+            .expect("trabalho");
+        assert_eq!(
+            p.caminho_da_maquina_em(agora + 60, trabalho),
+            Some(3_000_000)
+        );
+
+        // A linha da 0.16: o número solto não se lê.
+        std::fs::write(&caminho, "caminho_da_maquina_bps\t12480000\n").expect("escrever");
+        let da_016 = Preferences::open(caminho).expect("reabrir");
+        assert_eq!(da_016.caminho_da_maquina_em(agora, casa), None);
+        assert_eq!(da_016.caminho_da_maquina(), None);
     }
 
     /// «Não receber ligações», no PERFIL (tarefa 23 da F7): o padrão de quem

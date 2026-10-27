@@ -9,7 +9,9 @@
 //!   PRIMEIRO CONTATO, e um impostor que ocupasse a marca no quarto era aceito
 //!   e gravado na lista;
 //! - `Batida::preparar` não tinha de onde tirar a marca do `LEVE`, e quem estava
-//!   atrás de NAT não era alcançado na volta.
+//!   atrás de NAT não era alcançado na volta. Na 0.17 o `LEVE` deu lugar ao
+//!   `CHAMA` do ENC/3 (`seele_core::encontro::Chamada`), e as marcas dele saem
+//!   da mesma impressão esperada: a pergunta continua a mesma.
 //!
 //! # O que estes testes chamam, e o que eles não alcançam
 //!
@@ -42,8 +44,8 @@
 //! # Por que `[::ffff:127.0.0.1]`
 //!
 //! Pelo mesmo motivo de `estados.rs` e `furo.rs`. `enlace::e_publico` pergunta
-//! por loopback na forma escrita, então a forma mapeada conta como pública e o
-//! `LEVE` sai por ela, mas o pacote ainda chega a um socket desta máquina.
+//! por loopback na forma escrita, então a forma mapeada conta como pública, mas
+//! o pacote ainda chega a um socket desta máquina.
 
 #![allow(clippy::expect_used)]
 
@@ -57,7 +59,7 @@ use seele_core::{FilePinStore, PinStore};
 use seele_ffi::conhecidos::Conhecidos;
 use seele_ffi::uri::Bilhete;
 use seele_ffi::{ConnectConfig, Connection, ConnectionError, Trust};
-use seele_proto::encontro::{analisar, Marca, Marcas, Pedido, TAMANHO};
+use seele_proto::encontro::{analisar3, resposta3, Marcas, Pedido3, Resposta3};
 use seele_server::persistence::{Location, Persistence};
 use seele_server::{admissao, Daemon, ServerConfig};
 
@@ -89,16 +91,17 @@ async fn server_de_teste() -> (SocketAddr, Arc<Daemon>) {
     (endereco, servidor)
 }
 
-/// Um ponto de encontro que só conta os `LEVE` com a marca do aviso esperado.
+/// Um ponto de encontro que atende o `CHAMA` do ENC/3 **só com as marcas
+/// certas**, e conta os que atendeu.
 ///
-/// A batida não lê resposta do ponto de encontro (o cabeçalho de
-/// `seele_core::encontro` diz o que este lado lê e o que não lê), então um
-/// contador basta para provar que o `LEVE` saiu. **Com a marca**, e não
-/// qualquer datagrama: um `LEVE` com outra marca chega ao anfitrião e é
-/// ignorado, e quem está atrás de NAT não é alcançado. O contador que contava
-/// tudo deixava verde a marca trocada em `Batida::preparar` (a metade do 1B
-/// que ficou no lote M1 da F5).
-async fn ponto_que_conta(aviso: Marca) -> (SocketAddr, Arc<AtomicUsize>) {
+/// Até a 0.16 este ponto contava os `LEVE` com a marca do aviso. A linha 2
+/// chama (`seele_core::encontro::Chamada`): o `CHAMA` leva a marca do servidor
+/// e a da escuta, e é por elas que o ponto acha o anfitrião. **Com as marcas**,
+/// e não qualquer datagrama: um `CHAMA` com outras marcas é um anfitrião que o
+/// ponto não acha, e quem está atrás de NAT não é alcançado. Por isso este
+/// ponto só devolve o endereço de hoje (`AQUI`) a um `CHAMA` com as duas marcas
+/// do servidor de verdade; a qualquer outro, cala — e a volta não entra.
+async fn ponto_que_atende(marcas: Marcas, hoje: SocketAddr) -> (SocketAddr, Arc<AtomicUsize>) {
     let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
         .await
         .expect("o ponto de encontro de teste não abriu em 127.0.0.1");
@@ -108,13 +111,21 @@ async fn ponto_que_conta(aviso: Marca) -> (SocketAddr, Arc<AtomicUsize>) {
     let quantos = Arc::new(AtomicUsize::new(0));
     let contador = Arc::clone(&quantos);
     tokio::spawn(async move {
-        let mut balde = [0_u8; TAMANHO];
-        while let Ok((lidos, _)) = socket.recv_from(&mut balde).await {
-            if let Some(Pedido::Leve { marca, .. }) = balde.get(..lidos).and_then(analisar) {
-                if marca == aviso {
-                    contador.fetch_add(1, Ordering::Relaxed);
-                }
+        let mut balde = [0_u8; 1500];
+        while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+            let Some(Pedido3::Chama(chama)) = balde.get(..lidos).and_then(analisar3) else {
+                continue;
+            };
+            if chama.servidor != *marcas.servidor() || chama.escuta != *marcas.escuta() {
+                continue;
             }
+            contador.fetch_add(1, Ordering::Relaxed);
+            let aqui = resposta3(&Resposta3::Aqui {
+                marca: chama.servidor,
+                endereco: hoje,
+                dicas: Vec::new(),
+            });
+            let _ = socket.send_to(&aqui, de).await;
         }
     });
     (onde, quantos)
@@ -212,13 +223,14 @@ async fn quem_volta_pela_lista_a_um_servidor_que_mudou_de_porta_confere_e_avisa(
     let _vaga = vaga::minha();
     let (hoje, servidor) = server_de_teste().await;
     let real = servidor.fingerprint().to_owned();
-    // A marca que o `LEVE` tem de trazer: a do aviso deste servidor, pela
-    // mesma regra com que o anfitrião a confere antes de furar.
-    let aviso = Marcas::do_servidor(&real)
-        .expect("a impressão do servidor de teste forma marcas")
-        .aviso()
-        .clone();
-    let (ponto, avisos) = ponto_que_conta(aviso.clone()).await;
+    // As marcas que o `CHAMA` tem de trazer: as deste servidor, pela mesma
+    // regra com que o anfitrião se registra no ponto.
+    let marcas = Marcas::do_servidor(&real).expect("a impressão do servidor de teste forma marcas");
+    let marca_do_servidor = marcas.servidor().clone();
+    let pelo_ponto: SocketAddr = mapeado(hoje.port())
+        .parse()
+        .expect("o endereço mapeado se lê");
+    let (ponto, avisos) = ponto_que_atende(marcas, pelo_ponto).await;
     let Ok(casa) = tempfile::tempdir() else {
         panic!("sem diretório temporário não há lista nem identidade");
     };
@@ -231,13 +243,16 @@ async fn quem_volta_pela_lista_a_um_servidor_que_mudou_de_porta_confere_e_avisa(
     let ontem = mapeado(endereco_morto().port());
     let guardada = lembrar_de_ontem(casa.path(), &ontem, &[], Some(&bilhete), &real);
 
-    // O alvo é o de ontem, que é o que a pessoa clicou. O de hoje vai entre os
-    // alternativos, que é onde o `connect` do app põe a resposta do quarto. Sem
-    // link nesta sessão, só a guardada.
+    // O alvo é o de ontem, que é o que a pessoa clicou. O de hoje **só** chega
+    // pelo ponto, como resposta ao `CHAMA`: até a 0.16 ele ia entre os
+    // alternativos e o `LEVE` saía junto; na 0.17, com ele na corrida direta,
+    // a discagem direta podia ganhar antes de o `CHAMA` sair (é o desenho: o
+    // degrau 4 espera a defasagem), e o teste mediria a ordem do escalonador.
+    // Sem link nesta sessão, só a guardada.
     let configuracao = config(
         casa.path(),
         ontem,
-        vec![mapeado(hoje.port())],
+        Vec::new(),
         seele_ffi::impressao_a_conferir(None, Some(&guardada)),
         Some(bilhete),
     );
@@ -255,10 +270,8 @@ async fn quem_volta_pela_lista_a_um_servidor_que_mudou_de_porta_confere_e_avisa(
     );
     assert!(
         avisos.load(Ordering::Relaxed) >= 1,
-        "nenhum `LEVE` com a marca do aviso ({aviso}) chegou ao ponto de encontro: ou, sem \
-         impressão esperada, `Batida::preparar` não teve de onde tirar a marca, ou o `LEVE` \
-         saiu com outra, que o anfitrião ignora. Nos dois casos quem está atrás de NAT não é \
-         alcançado na volta"
+        "nenhum `CHAMA` com as marcas deste servidor ({marca_do_servidor}) chegou ao ponto de \
+         encontro, e mesmo assim a volta entrou: o teste não mediu o degrau 4"
     );
 
     connection.disconnect();

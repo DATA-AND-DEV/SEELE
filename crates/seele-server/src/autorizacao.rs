@@ -55,7 +55,6 @@ use anyhow::Result;
 use seele_proto::control::Permission;
 use seele_proto::ids::{AttachmentId, ChannelId, PersonId};
 
-use crate::permissions::Permissions;
 use crate::persistence::Persistence;
 
 /// O que se quer fazer num canal.
@@ -111,8 +110,11 @@ pub fn pode_no_canal(
         return Ok(false);
     }
 
-    let permissions = Permissions::new(persistence);
-    if !permissions.may(person, acesso.permissao())? {
+    // Uma leitura só do efetivo (ADR 0064): a permissão global e, abaixo, se
+    // administra — Gerenciar servidor, Administrador ou o proprietário.
+    let efetivas = crate::persistence::cargos::ler_estado_de(persistence.connection(), person)?
+        .efetivas(person);
+    if !efetivas.pode(acesso.permissao()) {
         return Ok(false);
     }
 
@@ -120,7 +122,7 @@ pub fn pode_no_canal(
         return Ok(true);
     };
 
-    if permissions.may(person, Permission::AdministerServer)? {
+    if efetivas.administra() {
         return Ok(true);
     }
 
@@ -221,23 +223,45 @@ fn papel_minimo(
 #[cfg(test)]
 mod testes {
     use super::*;
-    use crate::permissions::{OBSERVER_ROLE, PERSON_ROLE};
+    use crate::permissions::{Permissions, COMMANDER_ROLE, OBSERVER_ROLE, PERSON_ROLE};
 
-    /// Um banco com dois canais e **o comando já tomado**.
+    /// Um banco com dois canais e uma Comandante, `quem-hospeda`.
     ///
-    /// A primeira conta de um servidor assume o Comandante — ver
-    /// `Permissions::claim_never_held_commandership` — e um Comandante passa
-    /// por todo papel mínimo. Sem esta conta de fachada, toda pessoa criada num
-    /// teste seria Comandante e nenhum guarda daqui teria como recusar nada:
-    /// os testes passariam dizendo o contrário do que provam.
+    /// Desde a 0.17 ninguém vira Comandante por chegar (ADR 0064): o cargo é
+    /// dado à mão, pelo caminho da máquina, e as outras contas chegam Pessoa.
     fn banco() -> Persistence {
         let persistence = Persistence::open(&crate::persistence::Location::Memory).expect("abrir");
         persistence
             .connection()
             .execute_batch("INSERT INTO channels (id, name) VALUES (1, 'geral'), (2, 'fechado');")
             .expect("canais");
-        let _ = pessoa(&persistence, "quem-hospeda");
+        let comandante = pessoa(&persistence, "quem-hospeda");
+        Permissions::new(&persistence)
+            .grant_role(comandante, COMMANDER_ROLE)
+            .expect("comando");
         persistence
+    }
+
+    #[test]
+    fn o_proprietario_passa_pelo_cargo_exigido_mesmo_sem_cargo() {
+        let banco = banco();
+        crate::cargos::declarar_proprietario(
+            &banco,
+            &seele_proto::transport::key_fingerprint(b"dono"),
+        )
+        .expect("declarar");
+        let dono = pessoa(&banco, "dono");
+        Permissions::new(&banco)
+            .revoke_role(dono, PERSON_ROLE)
+            .expect("tirar");
+        banco
+            .connection()
+            .execute(
+                "UPDATE channels SET minimum_read_role = ?1 WHERE id = 2",
+                [i64::from(OBSERVER_ROLE.get())],
+            )
+            .expect("papel mínimo");
+        assert!(pode_no_canal(&banco, dono, ChannelId(2), Acesso::Leitura).expect("consulta"));
     }
 
     fn pessoa(persistence: &Persistence, apelido: &str) -> PersonId {
@@ -331,7 +355,7 @@ mod testes {
             Permissions::new(&banco)
                 .may(comandante, Permission::AdministerServer)
                 .expect("consulta"),
-            "a primeira conta deste banco assume o comando"
+            "quem-hospeda recebeu o Comandante à mão"
         );
         assert!(
             pode_no_canal(&banco, comandante, ChannelId(2), Acesso::Leitura).expect("consulta")

@@ -189,6 +189,12 @@ impl Balde {
         }
     }
 
+    /// Se há `quantas` fichas agora, sem gastar nenhuma.
+    pub fn tem(&mut self, quantas: f64, agora: Instant) -> bool {
+        self.repor(agora);
+        self.fichas >= quantas
+    }
+
     /// Devolve fichas ao balde, sem passar da capacidade.
     ///
     /// Existe por causa de uma ordem que não dá para inverter: o balde é
@@ -251,6 +257,28 @@ impl Portaria {
         let permitido = balde.tentar(agora);
         self.baldes.insert(origem, balde);
         permitido
+    }
+
+    /// Se este endereço **poderia** gastar um aperto de mão agora, sem gastar.
+    ///
+    /// É o portão que o enlace consulta antes de criar o `Rtc` de um Binding
+    /// novo (contrato D2; ligado em `Daemon::bind`). **Não gasta e não lembra**:
+    /// o Binding é um STUN, e a origem de um UDP se forja. Se o portão gastasse,
+    /// quem forja o endereço de uma vítima esvaziaria o balde dela sem nunca
+    /// receber uma resposta; a ficha é gasta em [`Self::permitir`], pela sessão,
+    /// depois do DTLS, quando a origem já provou que recebe o que se manda.
+    ///
+    /// Um endereço desconhecido passa, a menos que a tabela esteja cheia de
+    /// baldes que não se repuseram: a mesma falha do lado seguro de
+    /// [`Self::permitir`].
+    pub fn admite(&mut self, origem: IpAddr, agora: Instant) -> bool {
+        if let Some(balde) = self.baldes.get_mut(&origem) {
+            return balde.tem(1.0, agora);
+        }
+        if self.baldes.len() >= ENDERECOS_LEMBRADOS {
+            self.esquecer_cheios(agora);
+        }
+        self.baldes.len() < ENDERECOS_LEMBRADOS
     }
 
     /// Descarta os baldes que já se repuseram por inteiro.

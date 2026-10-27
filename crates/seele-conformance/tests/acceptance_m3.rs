@@ -331,23 +331,37 @@ async fn telemetry_carries_a_sync_ratio() -> Result<()> {
     let ServerMessage::Telemetry(telemetry) = event else {
         panic!("not telemetry");
     };
-    assert!(telemetry.rtt_ms.is_finite() && telemetry.rtt_ms >= 0.0);
-    assert!((0.0..=1.0).contains(&telemetry.loss_fraction));
+    // Linha 2: cada métrica é `Option`, e `None` é «não medido» (o anfitrião
+    // ICE-lite não tem RTT nem perda). O que vier medido tem de ser plausível;
+    // o que não vier, não pode chegar disfarçado de zero.
+    if let Some(rtt) = telemetry.rtt_ms {
+        assert!(rtt.is_finite() && rtt >= 0.0);
+    }
+    if let Some(perda) = telemetry.loss_fraction {
+        assert!((0.0..=1.0).contains(&perda));
+    }
     assert_eq!(
         telemetry.subsystems.len(),
         3,
         "PERMISSIONS, MEDIA, PERSISTENCE"
     );
 
-    let ratio = seele_proto::signal::raw(seele_proto::SyncInputs {
-        rtt_ms: telemetry.rtt_ms,
-        jitter_ms: telemetry.jitter_ms,
-        loss_fraction: telemetry.loss_fraction,
-    });
-    assert!(
-        ratio > 70.0,
-        "loopback should not be a degraded connection, scored {ratio}"
-    );
+    // A nota só existe com as três medidas; sem elas, não há o que pontuar.
+    if let (Some(rtt_ms), Some(jitter_ms), Some(loss_fraction)) = (
+        telemetry.rtt_ms,
+        telemetry.jitter_ms,
+        telemetry.loss_fraction,
+    ) {
+        let ratio = seele_proto::signal::raw(seele_proto::SyncInputs {
+            rtt_ms,
+            jitter_ms,
+            loss_fraction,
+        });
+        assert!(
+            ratio > 70.0,
+            "loopback should not be a degraded connection, scored {ratio}"
+        );
+    }
 
     server.shutdown();
     Ok(())

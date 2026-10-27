@@ -224,8 +224,9 @@ imprimiu. Lá dentro, aperte `?`.
 
 Duas coisas que economizam meia hora:
 
-- **A porta 8383 é UDP**, porque o transporte é QUIC. É o erro de firewall mais
-  comum aqui, porque a regra que se escreve de cabeça é sempre TCP.
+- **A porta 8383 é UDP**, porque o transporte é WebRTC desde a 0.17 (até a
+  0.16, QUIC — também UDP). É o erro de firewall mais comum aqui, porque a
+  regra que se escreve de cabeça é sempre TCP.
 - **Fones dos dois lados.** Não há cancelamento de eco, e sem fones haverá
   realimentação.
 
@@ -246,8 +247,9 @@ seele://192.168.0.7:8383?fp=782cc791…&convite=2QKPAXPP97W5459H3TPA
 ```
 
 Ele carrega a impressão digital do certificado, então quem recebe **não precisa
-conferi-la por outro canal** — o cliente compara sozinho, dentro do aperto de mão
-TLS, antes de o convite, a senha ou o apelido saírem:
+conferi-la por outro canal** — o cliente compara sozinho, no aperto de mão
+DTLS (até a 0.16, o TLS do QUIC), antes de o convite, a senha ou o apelido
+saírem:
 
 - num endereço em que esta máquina ainda não fixou chave nenhuma, **recusa** se
   não bater, e nada é fixado;
@@ -258,7 +260,7 @@ TLS, antes de o convite, a senha ou o apelido saírem:
 - num endereço de **rede local**, como o `192.168.0.7` do exemplo, ou num
   endereço que a pessoa não escolheu (o que o ponto de encontro devolveu, um
   alternativo do convite), o link que discorda da chave fixada ali é
-  **recusado**, dentro do TLS e antes do `Hello`. O `192.168.0.7` de uma casa é
+  **recusado**, no aperto de mão e antes do `Hello`. O `192.168.0.7` de uma casa é
   o de outra, e quem atende ali pode ser outro servidor (o adendo de 2026-09-29
   ao ADR 0003). A frase da recusa diz o remédio: confirmar o link com quem o
   mandou; para um servidor da lista, colar de novo o link dele, ou removê-lo da
@@ -268,6 +270,19 @@ Do outro lado, a pessoa abre o SEELE, aperta **CONECTAR** e cola o link.
 
 A senha do servidor nunca viaja no link, e isso é decisão registrada: senha vale
 para sempre, convite gasto não vale nada.
+
+### O dono do servidor
+
+Desde a 0.17, **quem entra primeiro não vira dono** (ADR 0064). O dono é
+declarado pela máquina que hospeda, pela impressão da chave dele — a mesma que
+a portaria mostra:
+
+```sh
+seeled --proprietario 3cbcfb0212da738f…   # a impressão inteira, 64 hexadecimais
+```
+
+Sem a declaração, ninguém tem a autoridade de dono, e o `seeled` diz isso ao
+subir. A sala pessoal declara a pessoa dona dela.
 
 ---
 

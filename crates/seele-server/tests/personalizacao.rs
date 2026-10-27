@@ -42,64 +42,13 @@ use seele_proto::control::{AlertReason, ClientMessage, ServerMessage, MAX_SERVER
 use seele_server::persistence::Location;
 use seele_server::{frame, Daemon, ServerConfig};
 
+mod comum;
+
 /// Quanto se espera por um quadro que tem de vir.
 ///
 /// Generoso: o que está sob teste é se ele **vem**, e uma máquina de integração
 /// contínua carregada não pode transformar isso num defeito intermitente.
 const PRAZO: Duration = Duration::from_secs(5);
-
-/// Um verificador que aceita qualquer certificado.
-///
-/// O que está sob teste não é o TOFU — que tem os testes dele em
-/// `seele-core/src/tofu.rs`. O certificado aqui é o que este servidor acabou de
-/// gerar dentro desta função.
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
 
 /// Um servidor já atendendo, no banco que se pedir.
 async fn server(banco: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
@@ -107,6 +56,11 @@ async fn server(banco: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: banco,
+        // Quem administra é a proprietária declarada, a da semente 1 (ADR
+        // 0064): a primeira conta não vira mais Comandante por chegar primeiro.
+        proprietario: Some(seele_proto::transport::key_fingerprint(
+            &SigningKey::from_bytes(&[1; 32]).verifying_key().to_bytes(),
+        )),
         ..ServerConfig::default()
     };
     let servidor = Arc::new(Daemon::bind(config).await?);
@@ -121,9 +75,9 @@ async fn server(banco: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
 /// Um par cru: a conexão e o fluxo de controle.
 struct Par {
     /// Segura a conexão viva enquanto o teste corre.
-    _conexao: quinn::Connection,
-    envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
+    _conexao: seele_enlace::Conexao,
+    envio: seele_enlace::Envio,
+    recebe: seele_enlace::Recebe,
     /// O nome que o servidor disse ter no aperto de mão.
     nome_do_server: String,
     /// O ícone que veio logo depois do `Session`, se veio algum.
@@ -138,27 +92,15 @@ struct Par {
 /// `permissions::seat_the_arrival` —, então a semente que abrir primeiro é a de
 /// quem administra.
 async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-
-    let config = quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    ));
-
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(config);
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
+    let comum::Ligado {
+        ponta,
+        conexao,
+        mut envio,
+        mut recebe,
+    } = comum::ligar(endereco).await?;
     // A ponta é dona do socket; sem isto ela cai no fim desta função e leva a
     // conexão junto.
     std::mem::forget(ponta);
-
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
     let chave = SigningKey::from_bytes(&[semente; 32]);
     frame::write(
         &mut envio,
@@ -182,7 +124,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
         &mut envio,
         &ClientMessage::Response {
             proof: chave
-                .sign(&prova_amarrada(&conexao, &nonce))
+                .sign(&comum::prova_amarrada(&conexao, &nonce))
                 .to_bytes()
                 .to_vec(),
         },
@@ -392,7 +334,7 @@ async fn quem_nao_administra_e_recusado_e_nada_muda() -> Result<()> {
     // pergunta nada, que é exatamente a casca que não existe.
     let (endereco, servidor) = server(Location::Memory).await?;
 
-    // A primeira conta vira a Comandante, então a segunda é uma Pessoa comum.
+    // A semente 1 é a proprietária, e a segunda é uma Pessoa comum.
     let anfitria = abrir(endereco, 1).await?;
     let mut visita = abrir(endereco, 2).await?;
 
@@ -485,26 +427,4 @@ async fn o_nome_e_o_icone_sobrevivem_a_um_reinicio() -> Result<()> {
 
     servidor.shutdown();
     Ok(())
-}
-
-/// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
-/// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
-/// Desde o Servidor 1.0, o nonce cru não entra mais.
-fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS sempre entrega a cadeia do servidor");
-    let impressao = seele_proto::transport::certificate_digest(
-        cadeia
-            .first()
-            .expect("a cadeia tem um certificado")
-            .as_ref(),
-    );
-    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
-    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

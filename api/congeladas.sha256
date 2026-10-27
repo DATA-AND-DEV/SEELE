@@ -74,9 +74,30 @@
 #
 # Ver `api/README.md`, «A API 6». Nenhum build publicado leu a v6 de antes.
 # Depois que a 0.16 for publicada, a v6 não muda mais: a mudança vai para a v7.
+#
+# ## v6 publicada na v0.16.0 (8faa3379b, 24/10/2026), e congelada de vez
+#
+# A linha abaixo é a do commit publicado. Desde a 0.17 o `cargo xtask
+# check-api` também confere esta lista (E8 da 0.17), e o teste
+# `a_v6_da_arvore_e_a_publicada` (`xtask/src/check_api.rs`) prende o hash da v6.
+#
+# ## v7 nasceu em 24/10/2026 (E8 da 0.17), e emenda antes da publicação
+#
+# A v7 é a v6 inteira, mais as permissões de MOD dos cargos: o `permissoes` do
+# manifesto e a ação `acao` (`ClientMessage::AcaoDeMod`). `MOD_API_VERSION` já
+# está em 7, e por isso ela conta como oferecida. Até a 0.17 sair, ela segue a
+# regra que a v6 seguiu (D-api-8): cada emenda é um commit só, escreve só o que
+# já foi entregue, e refaz esta linha com a razão escrita aqui. Depois da 0.17,
+# a v7 não muda mais, e a mudança vai para a v8.
+#
+# - Criação (24/10/2026, sem commit ainda): a v6 com `aceitas = [7, 6]`,
+#   `servidor = "2.0"`, a capacidade `acoes`, o bloco `manifesto.permissoes` e
+#   a ação `acao`. O nome com que a janela pede a ação ainda não foi entregue,
+#   e entra numa emenda.
 298fcbc3f386bf62c5aa4484bbc32f4ebb7a9d5523891eceec4bc1cc7738d3d6  v1.json
 f28d33eef08841daee7da58075d3513c0a7f3719bcf51fec784bc16b70e3505b  v2.json
 519b5e0d1c47138e009d63fffe1c7cfa0a528808293d0b34c71a08c7140a71e2  v3.json
 e31dda28805d2c4213889ea9437bfb7d7f49b14b041b127f47bb97676c50b973  v4.json
 7ff2570751fa4acbe52cf2d3cf7cec015453c12fae62ab5a469b74959aec046b  v5.json
 8dcf4aaf13f73b957e52b99f462bfdff656a232dd337bccebdad97edaae6f514  v6.json
+d7f423c1ef43ac239bd68260d8dd8fa7813ab7697cd8003c8a0a9d3bccb37474  v7.json

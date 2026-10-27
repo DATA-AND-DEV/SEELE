@@ -18,11 +18,12 @@
 //!
 //! **A prova tem duas metades.**
 //!
-//! 1. **A estrutural:** enquanto o gancho roda, um estranho tenta conectar, e
-//!    a conexão **não** se estabelece. No quinn 0.11 o aperto de mão só anda
-//!    quando o laço chama `accept`, então uma conexão estabelecida durante o
-//!    gancho é a prova de que o laço já estava no ar. Esta é a metade que
-//!    reprova com a ordem de antes.
+//! 1. **A estrutural:** enquanto o gancho roda, um estranho conecta e manda um
+//!    primeiro quadro de versão desconhecida, e a sessão **não** responde. Na
+//!    0.17 o enlace fecha ICE e DTLS sozinho, então a conexão existir não prova
+//!    nada; a recusa por versão, que sai antes de qualquer leitura do banco,
+//!    prova que o laço de sessão já estava no ar (`a_sessao_responde`). Esta é
+//!    a metade que reprova com a ordem de antes.
 //! 2. **A de quem usa:** depois, o estranho bate e fica de fora, e quem hospeda
 //!    entra e é o Comandante.
 //!
@@ -56,60 +57,12 @@ use seele_server::hospedagem::Hospedagem;
 use seele_server::permissions::Permissions;
 use seele_server::persistence::Location;
 
+mod comum;
+
 /// A semente da chave de quem hospeda.
 const DONO: u8 = 1;
 /// A semente da chave de quem chega sem ter sido chamado.
 const ESTRANHO: u8 = 7;
-
-/// Um verificador que aceita qualquer certificado: o que está sob teste não é
-/// o TOFU, e o certificado é o que este servidor acabou de gerar.
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
 
 /// O que aconteceu com uma tentativa de entrar.
 #[derive(Debug, PartialEq, Eq)]
@@ -120,47 +73,14 @@ enum Desfecho {
     Barrado(DisconnectReason),
 }
 
-/// A configuração de cliente de um par cru.
-fn cliente() -> quinn::ClientConfig {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    ))
-}
-
-/// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
-/// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
-fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS sempre entrega a cadeia do servidor");
-    let impressao = seele_proto::transport::certificate_digest(
-        cadeia
-            .first()
-            .expect("a cadeia tem um certificado")
-            .as_ref(),
-    );
-    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
-    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
-}
-
 /// Um aperto de mão inteiro, sem convite, com a chave desta semente.
 async fn tentar(endereco: SocketAddr, semente: u8) -> Result<Desfecho> {
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(cliente());
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
+    let comum::Ligado {
+        ponta: _ponta,
+        conexao,
+        mut envio,
+        mut recebe,
+    } = comum::ligar(endereco).await?;
     let chave = SigningKey::from_bytes(&[semente; 32]);
     frame::write(
         &mut envio,
@@ -183,7 +103,7 @@ async fn tentar(endereco: SocketAddr, semente: u8) -> Result<Desfecho> {
                     &mut envio,
                     &ClientMessage::Response {
                         proof: chave
-                            .sign(&prova_amarrada(&conexao, &nonce))
+                            .sign(&comum::prova_amarrada(&conexao, &nonce))
                             .to_bytes()
                             .to_vec(),
                     },
@@ -198,13 +118,28 @@ async fn tentar(endereco: SocketAddr, semente: u8) -> Result<Desfecho> {
     }
 }
 
-/// Só o aperto de mão do QUIC, sem nenhuma mensagem do SEELE. Volta quando a
-/// conexão se estabelece, o que só acontece com o laço de aceitação no ar.
-async fn so_conectar(endereco: SocketAddr) -> Result<()> {
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(cliente());
-    ponta.connect(endereco, "localhost")?.await?;
-    Ok(())
+/// **Se o laço de sessão já está no ar**, sem depender do banco.
+///
+/// No quinn, o aperto de mão do transporte só andava quando o laço chamava
+/// `accept`, e uma conexão estabelecida já era a prova. No enlace da 0.17 o
+/// ICE e o DTLS fecham na tarefa da ponta, antes de o laço pedir a conexão: a
+/// conexão existir não prova mais nada. O que prova é uma **resposta da
+/// sessão**, e a única que não toca no banco (que o gancho segura) é a recusa
+/// por versão: um primeiro quadro com o carimbo 30 recebe `[10, 11, 0]` antes
+/// de qualquer leitura do banco (`session::handshake`). Uma resposta durante o
+/// gancho é o laço de sessão rodando antes dele.
+async fn a_sessao_responde(endereco: SocketAddr) -> Result<bool> {
+    let comum::Ligado {
+        ponta: _ponta,
+        conexao: _conexao,
+        mut envio,
+        mut recebe,
+    } = comum::ligar(endereco).await?;
+    envio
+        .write_all(&seele_proto::quadro::enquadrar(&[30, 0, 1, 2, 3])?)
+        .await?;
+    let mut prefixo = [0_u8; seele_proto::quadro::PREFIXO_LEN];
+    Ok(recebe.read_exact(&mut prefixo).await.is_ok())
 }
 
 /// Desliga o degrau 4 para o binário inteiro: nenhum teste daqui fala com o
@@ -269,13 +204,16 @@ async fn a_janela_fica_fechada(banco: Location) {
                 .build()
                 .expect("um runtime para o estranho");
             tempo.block_on(async {
-                tokio::time::timeout(Duration::from_millis(1500), so_conectar(endereco)).await
+                tokio::time::timeout(Duration::from_millis(1500), a_sessao_responde(endereco)).await
             })
         });
-        let aceito = matches!(tentativa.join(), Ok(Ok(Ok(()))));
+        let aceito = matches!(tentativa.join(), Ok(Ok(Ok(true))));
         anotado.store(aceito, Ordering::SeqCst);
 
         seele_server::portaria::semear_ligada(persistence)?;
+        // Como o app faz no `hospedar` (ADR 0064): o dono é declarado pela
+        // máquina, e não sai de quem chega primeiro.
+        seele_server::cargos::declarar_proprietario(persistence, &dono)?;
         seele_server::portaria::admitir_o_dono(persistence, &dono)
     })
     .await

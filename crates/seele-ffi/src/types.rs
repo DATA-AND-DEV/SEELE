@@ -129,6 +129,9 @@ pub enum FalhaAoLocalizar {
     PontoNaoResolve,
     /// O ponto deu só a escuta da sala, e nenhum endereço a que conectar.
     SoAEscuta,
+    /// O ponto achou o anfitrião e repassou a chamada (ENC/3), e ele não
+    /// respondeu a tempo.
+    AnfitriaoCalado,
 }
 
 impl From<seele_core::encontro::FalhaAoLocalizar> for FalhaAoLocalizar {
@@ -142,6 +145,7 @@ impl From<seele_core::encontro::FalhaAoLocalizar> for FalhaAoLocalizar {
             Nucleo::PontoMudo => Self::PontoMudo,
             Nucleo::PontoNaoResolve => Self::PontoNaoResolve,
             Nucleo::SoAEscuta => Self::SoAEscuta,
+            Nucleo::AnfitriaoCalado => Self::AnfitriaoCalado,
         }
     }
 }
@@ -637,17 +641,25 @@ pub enum AberturaDoAudio {
     /// Numa sala, e o aparelho não abriu dentro do prazo. A conversa por
     /// escrito segue; sair da sala e entrar de novo tenta outra vez.
     NaoAbriuNoPrazo,
+    /// Numa sala, e **a voz desta máquina está noutra sessão** (E3 da 0.17,
+    /// `crate::foco`). Nenhum aparelho aberto aqui: nada sai e nada toca. Trazer
+    /// a voz para cá é um ato explícito da pessoa, e a outra sessão para antes
+    /// de esta abrir.
+    EmOutraSessao,
 }
 
 /// Connection quality.
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
 pub struct Telemetry {
-    /// Round trip, milliseconds.
-    pub rtt_ms: f32,
+    /// Round trip, milliseconds. **`None` enquanto nada foi medido** (nenhum
+    /// `Pong` voltou ainda): não medido não é 0 ms, e a tela diz «sem medida».
+    pub rtt_ms: Option<f32>,
     /// Arrival jitter, milliseconds.
     pub jitter_ms: f32,
-    /// Packet loss, 0.0 to 1.0.
-    pub loss_fraction: f32,
+    /// Packet loss, 0.0 to 1.0. **`None` quando o servidor não mediu** (desde a
+    /// 0.17, o anfitrião ICE-lite nem sempre conta a perda): não medido não é
+    /// zero, e a tela diz «não medido» em vez de «0,0%».
+    pub loss_fraction: Option<f32>,
     /// Encoder bitrate, bits per second. Zero when there is no audio.
     pub bitrate_bps: u32,
     /// This person's Sync Ratio, 0 to 100.
@@ -871,6 +883,11 @@ pub struct Snapshot {
     /// casca guarda o último número que desenhou e chama
     /// [`crate::Connection::membros_fora_do_ar`] quando ele muda.
     pub fora_do_ar_revision: u64,
+    /// **Os cargos desta sessão**: sobe a cada `QuadroDeCargos`,
+    /// `SuasPermissoes` ou `CargoRecusado` dobrado (ADR 0064). A casca guarda o
+    /// último que desenhou e relê [`crate::Connection::cargos_na_tela`] quando
+    /// ele muda — o mesmo contrato do [`Self::fora_do_ar_revision`].
+    pub cargos_revision: u64,
     /// Measurements.
     pub telemetry: Telemetry,
     /// The last thing worth surfacing.
@@ -1087,6 +1104,14 @@ pub enum Event {
     /// [`Snapshot::icon_revision`] and fetch it with
     /// [`crate::Connection::server_icon`] when the number moves.
     ServerChanged,
+    /// Os cargos desta sessão mudaram: chegou um `QuadroDeCargos`, um
+    /// `SuasPermissoes` ou um `CargoRecusado` (ADR 0064). A casca relê
+    /// [`crate::Connection::cargos_na_tela`] quando a `marca` anda — sem laço de
+    /// leituras e sem pedido ao servidor.
+    CargosChanged {
+        /// O [`Snapshot::cargos_revision`] depois desta mudança.
+        marca: u64,
+    },
     /// New measurements.
     TelemetryChanged,
     /// Something to surface.
@@ -1097,6 +1122,22 @@ pub enum Event {
     /// The session is over.
     Ended {
         /// Why.
+        reason: EndReason,
+    },
+    /// **A sessão caiu com motivo dito, e vai voltar.** Não é fim: a bateria
+    /// reconecta, e a volta chega com a geração nova do carimbo.
+    ///
+    /// É a despedida recuperável do servidor (`seele_core::despedida::a_sessao_acabou_aqui`
+    /// diz que não acabou): hoje, na prática, o `FellBehind`, «este enlace ficou
+    /// para trás do servidor». Ela chega pelo quadro `Disconnecting` ou, quando o
+    /// quadro não pôde sair (o `ctl` sem crédito), pelo código de fechamento
+    /// `seele_core::transporte::CODIGO_FICOU_PARA_TRAS`, e é **um** evento nos
+    /// dois casos.
+    ///
+    /// Antes dele, a casca só via a faixa genérica de reconexão, e a causa ficava
+    /// no `seele.log`. O carimbo é o da geração que caiu.
+    CaiuComMotivo {
+        /// Por quê, no vocabulário de [`Self::Ended`].
         reason: EndReason,
     },
     /// Uma chegada mudou de etapa, enquanto ela acontece.
@@ -1562,6 +1603,24 @@ pub enum LinkState {
     },
 }
 
+/// **De qual sessão, e de qual volta do enlace dela** (E3 da 0.17, multi-sessão).
+///
+/// `sessao` é o `SessaoId`: nasce na tentativa de conexão, nunca é 0 e nunca se
+/// repete no processo ([`crate::SessaoId::nova`]). `geracao` começa em 1 e sobe a
+/// cada reconexão do enlace daquela sessão.
+///
+/// Todo evento sai com ele ([`crate::EventListener::on_event_carimbado`]), e todo
+/// comando de sessão entra por [`crate::Connection::com`], que recusa um carimbo
+/// que não é o de agora: um clique feito sobre a tela de outra sessão, ou de
+/// antes de uma reconexão, nunca cai calado na conexão errada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct Carimbo {
+    /// O `SessaoId` desta conexão.
+    pub sessao: u64,
+    /// Quantas vezes o enlace desta sessão abriu: 1 na entrada, +1 por volta.
+    pub geracao: u64,
+}
+
 /// Everything that can go wrong, enumerated.
 ///
 /// `specs/02-protocolo.md` refuses generic error strings on the wire, and the
@@ -1572,6 +1631,21 @@ pub enum LinkState {
 pub enum ConnectionError {
     /// No connection, or it is already gone.
     NotConnected,
+    /// **O comando veio com o carimbo de outra sessão, ou de uma volta do
+    /// enlace que já passou** (E3 da 0.17). Ver [`Carimbo`] e
+    /// `Connection::com`.
+    ///
+    /// Recusado antes de sair qualquer coisa: nada foi enviado. A casca decide
+    /// se refaz o pedido com o carimbo novo ou se avisa; nunca há reenvio
+    /// automático para outra sessão. Os dois carimbos vêm juntos porque é a
+    /// diferença entre eles que diz o que aconteceu: sessão diferente é clique
+    /// na tela errada, geração velha é clique de antes da reconexão.
+    SessaoNaoConfere {
+        /// O carimbo desta conexão agora.
+        esperado: Carimbo,
+        /// O carimbo que o comando trouxe.
+        veio: Carimbo,
+    },
     /// O servidor exige MODs que esta máquina ainda não aceitou. ADR 0045.
     ///
     /// **Não é uma falha: é uma pergunta.** Carrega o que a tela de aceite tem
@@ -1609,7 +1683,20 @@ pub enum ConnectionError {
     /// Relatado assim: «o Mac só dá tempo esgotado na sincronização. Como isso,
     /// se os PCs estão na mesma LAN e na mesma versão?». As duas coisas que a
     /// frase mandou conferir estavam certas.
+    ///
+    /// Desde a 0.17: nenhum candidato devolveu a checagem ICE (STUN).
     SemResposta,
+    /// **O ponto de encontro levou o chamado e quem hospeda atendeu, mas o
+    /// caminho direto não abriu** (o degrau 4 da 0.17).
+    ///
+    /// Típico de dois NATs que não deixam entrar o que não saiu (NAT simétrico).
+    /// Não há o que insistir: só um relay TURN configurado por quem usa passa
+    /// por aí, e a frase não promete mais que isso.
+    NatNaoAbriu,
+    /// **O link, ou o ponto de encontro, é de um Servidor 1** (a 0.16 e
+    /// anteriores). A 0.17 fala WebRTC e não conversa com ele; a ação é abrir
+    /// a linha legada pelo launcher.
+    LinhaLegada,
     /// The server's key is not the one that was pinned.
     ///
     /// ADR 0003. The two fingerprints are carried because the whole point is

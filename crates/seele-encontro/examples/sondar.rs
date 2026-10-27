@@ -1,8 +1,8 @@
 //! Pergunta a um ponto de encontro se ele está vivo, e o que ele vê de você.
 //!
 //!     cargo run -p seele-encontro --example sondar -- 203.0.113.7:8384
-//!     cargo run -p seele-encontro --example sondar -- encontro.seele.app.br
-//!     cargo run -p seele-encontro --example sondar -- --exige-enc2 encontro.seele.app.br
+//!     cargo run -p seele-encontro --example sondar -- rendzvous.seele.sh
+//!     cargo run -p seele-encontro --example sondar -- --exige-enc2 rendzvous.seele.sh
 //!
 //! Sem porta, a do ponto de encontro (8384), como o link escreve o ponto.
 //!
@@ -59,26 +59,62 @@
 //! versão que depende dele (`docs/ponto-de-encontro.md`).
 
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::codigo::Codigo;
 use seele_proto::encontro::{
-    ler_aqui, ler_resposta2, moro, moro2, onde, quem, quem2, Marca, Marcas, Moro2, Motivo,
-    Resposta2, TAMANHO, TAMANHO2,
+    atende, chama, ler_aqui, ler_resposta2, ler_resposta3, ler_resposta_do_sinal,
+    mensagem_do_moro3, moro, moro2, moro3, onde, pedido_do_sinal, quem, quem2, quem3, Atende,
+    Chama, Credencial, Marca, Marcas, Moro2, Motivo, Resposta2, Resposta3, RespostaDoSinal,
+    TAMANHO2,
 };
 use seele_proto::uri::separar_ponto;
 
 fn main() -> std::process::ExitCode {
     let argumentos: Vec<String> = std::env::args().skip(1).collect();
-    let Some((alvo, exige_enc2)) = ler_argumentos(&argumentos) else {
+    // O sinal do navegador é HTTPS, e o TLS não é deste exemplo (sem dependência de TLS): quem
+    // fala HTTPS é o `curl` do `publicar.sh`, que confere o certificado. Daqui saem o corpo do
+    // `POST /sinal/1` e a conferência da resposta, com os tipos do protocolo, e não por texto.
+    if argumentos.first().map(String::as_str) == Some("--corpo-do-sinal") {
+        let Some(corpo) = corpo_do_sinal() else {
+            eprintln!("não deu para montar uma credencial de sondagem");
+            return std::process::ExitCode::FAILURE;
+        };
+        println!("{corpo}");
+        return std::process::ExitCode::SUCCESS;
+    }
+    if argumentos.first().map(String::as_str) == Some("--resposta-do-sinal") {
+        let mut corpo = String::new();
+        let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut corpo);
+        return match conferir_resposta_do_sinal(&corpo) {
+            Ok(()) => {
+                println!(
+                    "o sinal respondeu SEELE-SINAL/1 NINGUEM a uma marca que ninguém registrou"
+                );
+                std::process::ExitCode::SUCCESS
+            }
+            Err(motivo) => {
+                println!("o sinal NÃO respondeu o que o protocolo promete: {motivo}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
+    let Some((alvo, exige_enc2, exige_enc3)) = ler_argumentos(&argumentos) else {
         eprintln!(
-            "uso: sondar [--exige-enc2] <endereço[:porta]>   (sem porta, a do ponto de encontro)"
+            "uso: sondar [--exige-enc2] [--exige-enc3] <endereço[:porta]>   (sem porta, a do ponto de encontro)"
         );
+        eprintln!(
+            "      sondar --corpo-do-sinal          (o corpo de um POST /sinal/1, para o curl)"
+        );
+        eprintln!("      sondar --resposta-do-sinal < corpo  (confere a resposta do sinal)");
         eprintln!();
         eprintln!("exemplo: cargo run -p seele-encontro --example sondar -- 203.0.113.7:8384");
         eprintln!(
             "--exige-enc2: sai com falha se o ponto não falar o ENC/2 em toda família que responde"
+        );
+        eprintln!(
+            "--exige-enc3: também o ENC/3 e o STUN Binding (a 0.17) em toda família que responde"
         );
         return std::process::ExitCode::FAILURE;
     };
@@ -134,6 +170,25 @@ fn main() -> std::process::ExitCode {
                     ),
                     EstadoDoEnc2::Torto(motivo) => println!("          o ENC/2: torto — {motivo}"),
                 }
+                match &sondagem.enc3 {
+                    EstadoDoEnc3::Fala => println!(
+                        "          o ENC/3: fala — MORO3 morou, QUEM3 achou, e o CHAMA foi atendido pela escuta"
+                    ),
+                    EstadoDoEnc3::Mudo => println!(
+                        "          o ENC/3: mudo — é um ponto anterior à 0.17, e uma sala da 0.17 \
+                         não se registra nele"
+                    ),
+                    EstadoDoEnc3::Torto(motivo) => println!("          o ENC/3: torto — {motivo}"),
+                }
+                match &sondagem.stun {
+                    Ok(visto) => println!(
+                        "          o STUN: responde — o Binding devolveu {visto} (XOR-MAPPED-ADDRESS)"
+                    ),
+                    Err(motivo) => println!(
+                        "          o STUN: {motivo} — o navegador não aprende o próprio endereço \
+                         público por este ponto"
+                    ),
+                }
             }
             Err(motivo) => {
                 println!("  {familia}  {destino}  {motivo}");
@@ -144,16 +199,22 @@ fn main() -> std::process::ExitCode {
 
     println!();
     let alguem_respondeu = resultados.iter().any(Result::is_ok);
-    if passou_no_portao(&resultados, exige_enc2) {
+    if passou_no_portao(&resultados, exige_enc2 || exige_enc3)
+        && (!exige_enc3 || fala_a_017(&resultados))
+    {
         println!("o ponto de encontro está no ar.");
-        if exige_enc2 {
+        if exige_enc2 || exige_enc3 {
             println!("e fala o ENC/2 em toda família que respondeu.");
+        }
+        if exige_enc3 {
+            println!("e fala o ENC/3 e responde STUN Binding em toda família que respondeu.");
         }
         std::process::ExitCode::SUCCESS
     } else if alguem_respondeu {
         println!(
-            "o ponto de encontro está no ar, e NÃO fala o ENC/2 em toda família que respondeu, \
-             ou o relógio dele está a mais de {RELOGIO_DO_PORTAO} s do daqui."
+            "o ponto de encontro está no ar, e NÃO fala o ENC/2{} em toda família que \
+             respondeu, ou o relógio dele está a mais de {RELOGIO_DO_PORTAO} s do daqui.",
+            if exige_enc3 { ", o ENC/3 e o STUN" } else { "" }
         );
         println!("uma versão que depende do ENC/2 não sai com este ponto: reimplante a VPS antes");
         println!("(docs/ponto-de-encontro.md, «Subir o seu»).");
@@ -187,18 +248,32 @@ fn enderecos_do_ponto(alvo: &str) -> Result<Vec<SocketAddr>, String> {
 
 /// O alvo e a bandeira `--exige-enc2`, em qualquer ordem. `None` sem alvo, ou
 /// com uma bandeira que este exemplo não conhece.
-fn ler_argumentos(argumentos: &[String]) -> Option<(String, bool)> {
+fn ler_argumentos(argumentos: &[String]) -> Option<(String, bool, bool)> {
     let mut alvo = None;
     let mut exige_enc2 = false;
+    let mut exige_enc3 = false;
     for argumento in argumentos {
         match argumento.as_str() {
             "--exige-enc2" => exige_enc2 = true,
+            "--exige-enc3" => exige_enc3 = true,
             outro if outro.starts_with("--") => return None,
             outro if alvo.is_none() => alvo = Some(outro.to_owned()),
             _ => return None,
         }
     }
-    alvo.map(|alvo| (alvo, exige_enc2))
+    alvo.map(|alvo| (alvo, exige_enc2, exige_enc3))
+}
+
+/// O portão da 0.17, por cima do do ENC/2: toda família que respondeu ao `ONDE` fala o ENC/3 e
+/// responde STUN Binding. A sala da 0.17 se registra pelo ENC/3, e o navegador aprende o próprio
+/// endereço pelo STUN deste ponto e de nenhum outro (D8): um ponto da 0.16 passa no ENC/2 e
+/// deixa as duas coisas mortas.
+fn fala_a_017(resultados: &[Result<Sondagem, String>]) -> bool {
+    let responderam: Vec<&Sondagem> = resultados.iter().filter_map(|r| r.as_ref().ok()).collect();
+    !responderam.is_empty()
+        && responderam
+            .iter()
+            .all(|sondagem| sondagem.enc3 == EstadoDoEnc3::Fala && sondagem.stun.is_ok())
 }
 
 /// Quanto o relógio do ponto pode se afastar do daqui para o portão passar.
@@ -238,6 +313,21 @@ struct Sondagem {
     quarto: EstadoDoQuarto,
     /// Se o ponto fala o ENC/2.
     enc2: EstadoDoEnc2,
+    /// Se o ponto fala o ENC/3 (a 0.17).
+    enc3: EstadoDoEnc3,
+    /// O endereço que o STUN Binding devolveu, ou por que não.
+    stun: Result<SocketAddr, String>,
+}
+
+/// O que a sondagem do ENC/3 achou.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EstadoDoEnc3 {
+    /// O `QUEM3` de uma marca que ninguém registrou ouviu `NINGUEM` dela.
+    Fala,
+    /// Calou para o ENC/3: um binário anterior à 0.17.
+    Mudo,
+    /// Respondeu, mas não o que o ENC/3 promete.
+    Torto(String),
 }
 
 /// O que a sondagem do ENC/2 achou.
@@ -293,28 +383,34 @@ fn perguntar(destino: SocketAddr) -> Result<Sondagem, String> {
         .send_to(&onde(&marca), destino)
         .map_err(|erro| format!("não saiu daqui: {erro}"))?;
 
-    let mut buraco = [0_u8; TAMANHO];
-    let (lidos, _) = socket
-        .recv_from(&mut buraco)
-        .map_err(|_| "não respondeu em 2s".to_owned())?;
-
-    let Some((devolvida, visto)) = ler_aqui(buraco.get(..lidos).unwrap_or_default()) else {
-        return Err("respondeu algo que não é deste protocolo".to_owned());
+    // Prazo ABSOLUTO e só o que vem do ponto: lixo ou outro remetente não renovam a espera.
+    let Some(visto) = receber_ate(
+        &socket,
+        destino,
+        Instant::now() + Duration::from_secs(2),
+        |dados| {
+            ler_aqui(dados)
+                .filter(|(devolvida, _)| devolvida.texto() == marca.texto())
+                .map(|(_, visto)| visto)
+        },
+    ) else {
+        return Err("não respondeu em 2s um AQUI desta marca".to_owned());
     };
-    if devolvida.texto() != marca.texto() {
-        return Err("respondeu com outra marca".to_owned());
-    }
 
     // O `ONDE` respondeu — o degrau 3 está de pé. O quarto é um degrau
     // depois dele, e mudo aqui não é erro de sondagem: é a resposta que se
     // está medindo. O ENC/2, a mesma coisa.
     let quarto = sondar_quarto(&socket, destino, &marca);
     let enc2 = sondar_enc2(&socket, destino);
+    let enc3 = sondar_enc3(&socket, destino);
+    let stun = sondar_stun(&socket, destino);
 
     Ok(Sondagem {
         visto,
         quarto,
         enc2,
+        enc3,
+        stun,
     })
 }
 
@@ -477,34 +573,61 @@ fn pedir2(
     datagrama: &[u8],
     marca: &Marca,
 ) -> Option<Resposta2> {
-    let antes = socket.read_timeout().ok().flatten();
-    let _ = socket.set_read_timeout(Some(ESPERA_POR_TENTATIVA));
-    let mut veio = None;
-    for _ in 0..TENTATIVAS {
-        if socket.send_to(datagrama, destino).is_err() {
-            break;
-        }
-        veio = resposta2_desta_marca(socket, marca);
-        if veio.is_some() {
-            break;
-        }
-    }
-    let _ = socket.set_read_timeout(antes);
-    veio
+    pedir(socket, destino, datagrama, |dados| {
+        ler_resposta2(dados).filter(|resposta| resposta.marca() == marca)
+    })
 }
 
-/// Lê respostas do ENC/2 até a desta marca, ou `None` com o prazo vencido.
-/// Um `AQUI` atrasado da versão 1 é pulado.
-fn resposta2_desta_marca(socket: &UdpSocket, marca: &Marca) -> Option<Resposta2> {
-    let mut balde = [0_u8; TAMANHO2 + 1];
-    loop {
-        let (lidos, _) = socket.recv_from(&mut balde).ok()?;
-        if let Some(resposta) = ler_resposta2(balde.get(..lidos).unwrap_or_default()) {
-            if resposta.marca() == marca {
-                return Some(resposta);
-            }
+/// Manda e espera, até [`TENTATIVAS`] vezes, cada uma com o prazo ABSOLUTO de
+/// [`ESPERA_POR_TENTATIVA`]. `None` quando nenhuma resposta aceita veio.
+fn pedir<T>(
+    socket: &UdpSocket,
+    destino: SocketAddr,
+    datagrama: &[u8],
+    mut aceita: impl FnMut(&[u8]) -> Option<T>,
+) -> Option<T> {
+    for _ in 0..TENTATIVAS {
+        if socket.send_to(datagrama, destino).is_err() {
+            return None;
+        }
+        let prazo = Instant::now() + ESPERA_POR_TENTATIVA;
+        if let Some(veio) = receber_ate(socket, destino, prazo, &mut aceita) {
+            return Some(veio);
         }
     }
+    None
+}
+
+/// Lê até `aceita` reconhecer a resposta, ou até o `prazo` (absoluto). Só conta
+/// o que vem do `destino` (o IP e a porta do ponto): um datagrama de outro
+/// remetente, ou um que `aceita` recusa, é pulado **sem renovar o prazo** — um
+/// fluxo de lixo não segura a sondagem para sempre, e um terceiro não responde
+/// por ele.
+fn receber_ate<T>(
+    socket: &UdpSocket,
+    destino: SocketAddr,
+    prazo: Instant,
+    mut aceita: impl FnMut(&[u8]) -> Option<T>,
+) -> Option<T> {
+    let antes = socket.read_timeout().ok().flatten();
+    let mut balde = [0_u8; TAMANHO2 + 1];
+    let veio = loop {
+        let resta = prazo.saturating_duration_since(Instant::now());
+        if resta.is_zero() || socket.set_read_timeout(Some(resta)).is_err() {
+            break None;
+        }
+        let Ok((lidos, de)) = socket.recv_from(&mut balde) else {
+            break None;
+        };
+        if de.ip().to_canonical() != destino.ip().to_canonical() || de.port() != destino.port() {
+            continue;
+        }
+        if let Some(resposta) = aceita(balde.get(..lidos).unwrap_or_default()) {
+            break Some(resposta);
+        }
+    };
+    let _ = socket.set_read_timeout(antes);
+    veio
 }
 
 /// Depois do `ONDE`, pergunta se o quarto conhece esta marca: um `MORO` para
@@ -523,25 +646,335 @@ fn sondar_quarto(socket: &UdpSocket, destino: SocketAddr, marca: &Marca) -> Esta
     if socket.send_to(&moro(marca), destino).is_err() {
         return EstadoDoQuarto::Velho;
     }
-    if ler_aqui_desta_marca(socket, marca).is_none() {
+    if ler_aqui_desta_marca(socket, destino, marca).is_none() {
         return EstadoDoQuarto::Velho;
     }
 
     if socket.send_to(&quem(marca), destino).is_err() {
         return EstadoDoQuarto::Velho;
     }
-    match ler_aqui_desta_marca(socket, marca) {
+    match ler_aqui_desta_marca(socket, destino, marca) {
         Some(endereco) => EstadoDoQuarto::Vivo(endereco),
         None => EstadoDoQuarto::Velho,
     }
 }
 
 /// Lê um `AQUI` desta marca, ou `None` — prazo vencido, lixo, ou outra marca.
-fn ler_aqui_desta_marca(socket: &UdpSocket, marca: &Marca) -> Option<SocketAddr> {
-    let mut buraco = [0_u8; TAMANHO];
-    let (lidos, _) = socket.recv_from(&mut buraco).ok()?;
-    let (devolvida, visto) = ler_aqui(buraco.get(..lidos).unwrap_or_default())?;
-    (devolvida.texto() == marca.texto()).then_some(visto)
+fn ler_aqui_desta_marca(
+    socket: &UdpSocket,
+    destino: SocketAddr,
+    marca: &Marca,
+) -> Option<SocketAddr> {
+    receber_ate(
+        socket,
+        destino,
+        Instant::now() + Duration::from_secs(2),
+        |dados| {
+            ler_aqui(dados)
+                .filter(|(devolvida, _)| devolvida.texto() == marca.texto())
+                .map(|(_, visto)| visto)
+        },
+    )
+}
+
+/// Um `MORO3` assinado pela chave de sondagem, para uma das marcas da sala dela.
+fn moro3_de(chave: &SigningKey, marca: &Marca, cookie: Option<[u8; 16]>) -> Moro2 {
+    let publica = chave.verifying_key().to_bytes();
+    let carimbo = agora_unix();
+    let mensagem = mensagem_do_moro3(marca, &publica, carimbo, &[]);
+    Moro2 {
+        marca: marca.clone(),
+        chave: publica,
+        carimbo,
+        dicas: Vec::new(),
+        assinatura: chave.sign(&mensagem).to_bytes(),
+        cookie,
+    }
+}
+
+/// Uma resposta do ENC/3 que diz respeito a esta marca (a recusa também).
+fn resposta3_de(dados: &[u8], marca: &Marca) -> Option<Resposta3> {
+    let resposta = ler_resposta3(dados)?;
+    let dela = match &resposta {
+        Resposta3::Ninguem { marca: dela }
+        | Resposta3::Aqui { marca: dela, .. }
+        | Resposta3::Desafio { marca: dela, .. }
+        | Resposta3::Morou { marca: dela, .. }
+        | Resposta3::Recusa { marca: dela, .. } => dela == marca,
+        Resposta3::Calado { .. } | Resposta3::Chamado(_) => false,
+    };
+    dela.then_some(resposta)
+}
+
+/// O ENC/3 da 0.17 de ponta a ponta, como uma sala e quem liga para ela, numa
+/// sala EFÊMERA (uma chave nova a cada rodada; o registro expira sozinho no
+/// prazo do quarto):
+///
+/// 1. o anfitrião (um socket próprio) manda o `MORO3` sem cookie → `DESAFIO`.
+///    Silêncio aqui é um ponto anterior à 0.17;
+/// 2. o `MORO3` assinado com o cookie, da marca do servidor → `MOROU`, e o
+///    endereço que o ponto viu; o mesmo para a marca da escuta;
+/// 3. quem liga (o socket da sondagem) pergunta `QUEM3` → `AQUI` com o
+///    endereço registrado; e de uma marca vazia → `NINGUEM`;
+/// 4. quem liga manda o `CHAMA`; a escuta do anfitrião recebe o `CHAMADO`,
+///    responde o `ATENDE` com o `id` dele, e quem liga ouve o `AQUI` do servidor.
+///
+/// Um ponto que responde `NINGUEM` e nunca aceita um `MORO3` reprova no passo 2.
+fn sondar_enc3(chamador: &UdpSocket, destino: SocketAddr) -> EstadoDoEnc3 {
+    let local = if destino.is_ipv6() {
+        "[::]:0"
+    } else {
+        "0.0.0.0:0"
+    };
+    let Ok(anfitriao) = UdpSocket::bind(local) else {
+        return EstadoDoEnc3::Torto("o socket do anfitrião de sondagem não abriu".to_owned());
+    };
+    let chave = chave_de_sondagem(0x3C);
+    let marcas = Marcas::da_sala(&Codigo::da_chave(&chave.verifying_key().to_bytes()));
+    let (servidor, escuta) = (marcas.servidor().clone(), marcas.escuta().clone());
+
+    let cookie = match pedir(
+        &anfitriao,
+        destino,
+        &moro3(&moro3_de(&chave, &servidor, None)),
+        |d| resposta3_de(d, &servidor),
+    ) {
+        None => return EstadoDoEnc3::Mudo,
+        Some(Resposta3::Desafio { cookie, .. }) => cookie,
+        Some(outra) => {
+            return EstadoDoEnc3::Torto(format!(
+                "um MORO3 sem cookie não ouviu o DESAFIO, e sim {outra:?}"
+            ))
+        }
+    };
+    let mut registrado = None;
+    for marca in [&servidor, &escuta] {
+        match pedir(&anfitriao, destino, &moro3(&moro3_de(&chave, marca, Some(cookie))), |d| {
+            resposta3_de(d, marca)
+        }) {
+            Some(Resposta3::Morou { endereco, .. }) => {
+                if registrado.is_none() {
+                    registrado = Some(endereco);
+                }
+            }
+            outra => {
+                return EstadoDoEnc3::Torto(format!(
+                    "o MORO3 assinado, com o cookie do DESAFIO, não morou ({marca}): {outra:?} — o ponto \
+                     responde ao ENC/3 e não registra a sala da 0.17"
+                ))
+            }
+        }
+    }
+    let Some(registrado) = registrado else {
+        return EstadoDoEnc3::Torto("nenhum MOROU".to_owned());
+    };
+
+    match pedir(chamador, destino, &quem3(&servidor), |d| {
+        resposta3_de(d, &servidor)
+    }) {
+        Some(Resposta3::Aqui { endereco, .. }) if endereco == registrado => {}
+        outra => {
+            return EstadoDoEnc3::Torto(format!(
+                "o QUEM3 não devolveu o endereço que o MORO3 registrou ({registrado}): {outra:?}"
+            ))
+        }
+    }
+    let vazia = moro2_de(&chave_de_sondagem(0x3D), agora_unix(), Vec::new()).marca;
+    match pedir(chamador, destino, &quem3(&vazia), |d| {
+        resposta3_de(d, &vazia)
+    }) {
+        Some(Resposta3::Ninguem { .. }) => {}
+        outra => {
+            return EstadoDoEnc3::Torto(format!(
+                "o QUEM3 de uma marca que ninguém registrou não disse NINGUEM: {outra:?}"
+            ))
+        }
+    }
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |desde| desde.as_nanos());
+    let Some(credencial) = Credencial::nova(&format!("{nanos:032x}")) else {
+        return EstadoDoEnc3::Torto("credencial de sondagem inválida".to_owned());
+    };
+    let pedido = chama(&Chama {
+        servidor: servidor.clone(),
+        escuta: escuta.clone(),
+        credencial,
+        candidatos: Vec::new(),
+    });
+    for _ in 0..TENTATIVAS {
+        if chamador.send_to(&pedido, destino).is_err() {
+            break;
+        }
+        let Some(chamado) = receber_ate(
+            &anfitriao,
+            destino,
+            Instant::now() + ESPERA_POR_TENTATIVA,
+            |d| match ler_resposta3(d) {
+                Some(Resposta3::Chamado(chamado)) if chamado.escuta == escuta => Some(chamado),
+                _ => None,
+            },
+        ) else {
+            continue;
+        };
+        let resposta = atende(&Atende {
+            escuta: escuta.clone(),
+            id: chamado.id,
+            endereco: registrado,
+            dicas: Vec::new(),
+        });
+        if anfitriao.send_to(&resposta, destino).is_err() {
+            break;
+        }
+        let prazo = Instant::now() + seele_encontro::enc3::PRAZO_DA_CHAMADA + ESPERA_POR_TENTATIVA;
+        return match receber_ate(chamador, destino, prazo, |d| resposta3_de(d, &servidor)) {
+            Some(Resposta3::Aqui { endereco, .. }) if endereco == registrado => EstadoDoEnc3::Fala,
+            outra => EstadoDoEnc3::Torto(format!(
+                "a escuta atendeu o CHAMADO, e quem ligou não ouviu o AQUI do servidor ({registrado}): {outra:?}"
+            )),
+        };
+    }
+    EstadoDoEnc3::Torto(
+        "o CHAMA de quem liga não chegou como CHAMADO à escuta registrada, em três tentativas"
+            .to_owned(),
+    )
+}
+
+/// O cookie mágico da RFC 5389.
+const COOKIE_DO_STUN: u32 = 0x2112_A442;
+
+/// Um Binding Request (RFC 8489) com o número de transação deste processo e desta hora.
+fn binding_request() -> ([u8; 20], [u8; 12]) {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |desde| desde.as_nanos());
+    let mut transacao = [0_u8; 12];
+    for (destino, byte) in transacao.iter_mut().zip(
+        nanos
+            .to_le_bytes()
+            .into_iter()
+            .chain(std::process::id().to_le_bytes()),
+    ) {
+        *destino = byte;
+    }
+    let mut pedido = [0_u8; 20];
+    // O tipo (Binding Request), o comprimento 0, o cookie mágico e a transação, nessa ordem.
+    let campos = 1_u16
+        .to_be_bytes()
+        .into_iter()
+        .chain(0_u16.to_be_bytes())
+        .chain(COOKIE_DO_STUN.to_be_bytes())
+        .chain(transacao);
+    for (destino, byte) in pedido.iter_mut().zip(campos) {
+        *destino = byte;
+    }
+    (pedido, transacao)
+}
+
+/// O `XOR-MAPPED-ADDRESS` de um Binding Success Response a esta transação, ou por que não.
+fn ler_binding_success(resposta: &[u8], transacao: &[u8; 12]) -> Result<SocketAddr, String> {
+    let campo = |de: usize, ate: usize| resposta.get(de..ate).ok_or("resposta curta demais");
+    let tipo = u16::from_be_bytes(campo(0, 2)?.try_into().map_err(|_| "tipo")?);
+    let comprimento = usize::from(u16::from_be_bytes(
+        campo(2, 4)?.try_into().map_err(|_| "tamanho")?,
+    ));
+    if tipo != 0x0101 {
+        return Err(format!(
+            "respondeu o tipo {tipo:#06x}, e não o Binding Success (0x0101)"
+        ));
+    }
+    if campo(4, 8)? != COOKIE_DO_STUN.to_be_bytes() || campo(8, 20)? != transacao.as_slice() {
+        return Err("respondeu com outro cookie ou outra transação".to_owned());
+    }
+    let mut atributos = campo(20, 20 + comprimento)?;
+    while atributos.len() >= 4 {
+        let [n0, n1, t0, t1] = *atributos.first_chunk::<4>().ok_or("atributo curto")?;
+        let nome = u16::from_be_bytes([n0, n1]);
+        let tamanho = usize::from(u16::from_be_bytes([t0, t1]));
+        let valor = atributos.get(4..4 + tamanho).ok_or("atributo cortado")?;
+        if nome == 0x0020 {
+            let familia = *valor.get(1).ok_or("XOR-MAPPED-ADDRESS curto")?;
+            let porta =
+                u16::from_be_bytes([*valor.get(2).ok_or("curto")?, *valor.get(3).ok_or("curto")?])
+                    ^ 0x2112;
+            let mut chave = COOKIE_DO_STUN.to_be_bytes().to_vec();
+            chave.extend_from_slice(transacao);
+            let ip: std::net::IpAddr = match familia {
+                1 => {
+                    let mut bytes: [u8; 4] = valor
+                        .get(4..8)
+                        .ok_or("IPv4 curto")?
+                        .try_into()
+                        .map_err(|_| "IPv4")?;
+                    bytes.iter_mut().zip(&chave).for_each(|(b, k)| *b ^= k);
+                    bytes.into()
+                }
+                2 => {
+                    let mut bytes: [u8; 16] = valor
+                        .get(4..20)
+                        .ok_or("IPv6 curto")?
+                        .try_into()
+                        .map_err(|_| "IPv6")?;
+                    bytes.iter_mut().zip(&chave).for_each(|(b, k)| *b ^= k);
+                    bytes.into()
+                }
+                outra => return Err(format!("família {outra} no XOR-MAPPED-ADDRESS")),
+            };
+            return Ok(SocketAddr::new(ip, porta));
+        }
+        let passo = 4 + tamanho.div_ceil(4) * 4;
+        atributos = atributos.get(passo..).unwrap_or_default();
+    }
+    Err("o Binding Success veio sem XOR-MAPPED-ADDRESS".to_owned())
+}
+
+/// O STUN Binding, na mesma porta UDP do ponto, como o navegador o manda.
+fn sondar_stun(socket: &UdpSocket, destino: SocketAddr) -> Result<SocketAddr, String> {
+    let (pedido, transacao) = binding_request();
+    // Só o que parece STUN e é desta transação (um atrasado do ENC/3 é pulado).
+    pedir(socket, destino, &pedido, |dados| {
+        (dados.first().is_some_and(|primeiro| *primeiro <= 3)
+            && dados.get(8..20) == Some(transacao.as_slice()))
+        .then(|| ler_binding_success(dados, &transacao))
+    })
+    .unwrap_or_else(|| {
+        Err("mudo — o Binding Request não teve resposta em três tentativas".to_owned())
+    })
+}
+
+/// O corpo de um `POST /sinal/1` que não acha ninguém: as marcas e a credencial são novas a
+/// cada rodada, e o ponto responde `NINGUEM` sem chamar escuta nenhuma.
+fn corpo_do_sinal() -> Option<String> {
+    let servidor = moro2_de(&chave_de_sondagem(0x51), agora_unix(), Vec::new()).marca;
+    let escuta = moro2_de(&chave_de_sondagem(0x52), agora_unix(), Vec::new()).marca;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |desde| desde.as_nanos());
+    let credencial = Credencial::nova(&format!("{nanos:032x}{:08x}", std::process::id()))?;
+    Some(pedido_do_sinal(&Chama {
+        servidor,
+        escuta,
+        credencial,
+        candidatos: Vec::new(),
+    }))
+}
+
+/// A resposta do sinal a [`corpo_do_sinal`] tem de ser a linha `NINGUEM` do protocolo. Um `200`
+/// de uma página qualquer (a SPA do Pages, um proxy que não repassa) não passa daqui.
+fn conferir_resposta_do_sinal(corpo: &str) -> Result<(), String> {
+    match ler_resposta_do_sinal(corpo.trim_end_matches(['\r', '\n'])) {
+        Some(RespostaDoSinal::Ninguem) => Ok(()),
+        Some(RespostaDoSinal::Recusa { motivo, agora }) => Err(format!(
+            "o ponto recusou ({}; relógio dele {agora})",
+            motivo.texto()
+        )),
+        Some(outra) => Err(format!("a uma marca nova, respondeu {outra:?}")),
+        None => {
+            let comeco: String = corpo.chars().take(80).collect();
+            Err(format!("o corpo não é uma linha SEELE-SINAL/1: «{comeco}»"))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -553,6 +986,7 @@ mod testes {
     )]
 
     use super::*;
+    use seele_proto::encontro::TAMANHO;
 
     /// Um ponto de encontro que só fala `ONDE` — exatamente um binário
     /// anterior ao quarto, que nunca ouviu falar de `MORO` nem `QUEM`.
@@ -667,6 +1101,8 @@ mod testes {
             enc2: EstadoDoEnc2::Fala {
                 relogio_do_ponto: 0,
             },
+            enc3: EstadoDoEnc3::Fala,
+            stun: Ok("127.0.0.1:1".parse().unwrap()),
         };
         let mudo = || Sondagem {
             enc2: EstadoDoEnc2::Mudo,
@@ -757,6 +1193,8 @@ mod testes {
             enc2: EstadoDoEnc2::Fala {
                 relogio_do_ponto: segundos,
             },
+            enc3: EstadoDoEnc3::Fala,
+            stun: Ok("127.0.0.1:1".parse().unwrap()),
         };
         assert!(passou_no_portao(&[Ok(com_relogio(60))], true));
         assert!(passou_no_portao(&[Ok(com_relogio(-60))], true));
@@ -779,15 +1217,23 @@ mod testes {
         let args = |lista: &[&str]| lista.iter().map(ToString::to_string).collect::<Vec<_>>();
         assert_eq!(
             ler_argumentos(&args(&["--exige-enc2", "encontro.seele.app.br"])),
-            Some(("encontro.seele.app.br".to_owned(), true))
+            Some(("encontro.seele.app.br".to_owned(), true, false))
         );
         assert_eq!(
             ler_argumentos(&args(&["encontro.seele.app.br", "--exige-enc2"])),
-            Some(("encontro.seele.app.br".to_owned(), true))
+            Some(("encontro.seele.app.br".to_owned(), true, false))
         );
         assert_eq!(
             ler_argumentos(&args(&["203.0.113.7:8384"])),
-            Some(("203.0.113.7:8384".to_owned(), false))
+            Some(("203.0.113.7:8384".to_owned(), false, false))
+        );
+        assert_eq!(
+            ler_argumentos(&args(&[
+                "--exige-enc3",
+                "rendzvous.seele.sh",
+                "--exige-enc2"
+            ])),
+            Some(("rendzvous.seele.sh".to_owned(), true, true))
         );
         assert_eq!(ler_argumentos(&args(&["--exige-enc2"])), None);
         assert_eq!(ler_argumentos(&args(&["--outra", "x"])), None);
@@ -842,5 +1288,189 @@ mod testes {
             "um ponto de encontro que ignora MORO e QUEM foi classificado como \
              se o quarto estivesse vivo"
         );
+    }
+
+    /// Um ponto da 0.16 diante do de hoje: o ENC/1 e o ENC/2 passam, e o ENC/3 e o STUN somem
+    /// (um binário da 0.16 lê um e outro como lixo e cala). É o caso do achado P1: o portão do
+    /// ENC/2 passava com ele, e a 0.17 saía sem o navegador alcançar ninguém.
+    fn ponto_da_016() -> SocketAddr {
+        let ponto = ponto_de_hoje();
+        let meio = UdpSocket::bind("127.0.0.1:0").expect("o loopback não abriu");
+        let endereco = meio.local_addr().expect("sem endereço");
+        std::thread::spawn(move || {
+            let mut balde = [0_u8; TAMANHO2 + 1];
+            let mut quem_pediu: Option<SocketAddr> = None;
+            loop {
+                let Ok((lidos, de)) = meio.recv_from(&mut balde) else {
+                    return;
+                };
+                let dados = balde.get(..lidos).unwrap_or_default();
+                if de == ponto {
+                    if let Some(volta) = quem_pediu {
+                        let _ = meio.send_to(dados, volta);
+                    }
+                    continue;
+                }
+                quem_pediu = Some(de);
+                let e_stun = dados.first().is_some_and(|primeiro| *primeiro <= 3);
+                if e_stun || dados.starts_with(seele_proto::encontro::MAGIA3.as_bytes()) {
+                    continue;
+                }
+                let _ = meio.send_to(dados, ponto);
+            }
+        });
+        endereco
+    }
+
+    #[test]
+    fn o_ponto_de_hoje_fala_o_enc3_e_o_stun_e_passa_no_portao_da_017() {
+        let destino = ponto_de_hoje();
+        let sondagem = perguntar(destino).expect("o ONDE tinha que responder");
+        assert_eq!(sondagem.enc3, EstadoDoEnc3::Fala);
+        let visto = sondagem.stun.clone().expect("o STUN tinha que responder");
+        assert_eq!(
+            visto, sondagem.visto,
+            "o STUN e o ONDE viram endereços diferentes"
+        );
+        assert!(fala_a_017(&[Ok(sondagem)]));
+    }
+
+    #[test]
+    fn um_ponto_da_016_passa_no_enc2_e_reprova_o_portao_da_017() {
+        let sondagem = perguntar(ponto_da_016()).expect("o ONDE tinha que responder");
+        assert!(
+            matches!(sondagem.enc2, EstadoDoEnc2::Fala { .. }),
+            "o meio de teste estragou o ENC/2: {:?}",
+            sondagem.enc2
+        );
+        assert_eq!(sondagem.enc3, EstadoDoEnc3::Mudo);
+        assert!(sondagem.stun.is_err());
+        let resultados = [Ok(sondagem)];
+        assert!(
+            passou_no_portao(&resultados, true),
+            "o portão do ENC/2 mudou"
+        );
+        assert!(
+            !fala_a_017(&resultados),
+            "um ponto da 0.16 passou no portão da 0.17"
+        );
+    }
+
+    #[test]
+    fn o_portao_da_017_pede_as_duas_coisas_em_toda_familia_que_responde() {
+        let fala = || Sondagem {
+            visto: "127.0.0.1:1".parse().unwrap(),
+            quarto: EstadoDoQuarto::Velho,
+            enc2: EstadoDoEnc2::Fala {
+                relogio_do_ponto: 0,
+            },
+            enc3: EstadoDoEnc3::Fala,
+            stun: Ok("127.0.0.1:1".parse().unwrap()),
+        };
+        let sem_stun = || Sondagem {
+            stun: Err("mudo".to_owned()),
+            ..fala()
+        };
+        let sem_enc3 = || Sondagem {
+            enc3: EstadoDoEnc3::Mudo,
+            ..fala()
+        };
+        assert!(fala_a_017(&[Ok(fala()), Err("sem rota".to_owned())]));
+        assert!(!fala_a_017(&[Ok(fala()), Ok(sem_stun())]));
+        assert!(!fala_a_017(&[Ok(sem_enc3()), Ok(fala())]));
+        assert!(!fala_a_017(&[Err("sem rota".to_owned())]));
+    }
+
+    #[test]
+    fn o_binding_success_e_lido_pelo_responder_do_ponto_nas_duas_familias() {
+        for origem in ["203.0.113.9:40000", "[2001:db8::9]:40001"] {
+            let origem: SocketAddr = origem.parse().unwrap();
+            let (pedido, transacao) = binding_request();
+            let resposta = seele_encontro::stun::responder(&pedido, origem)
+                .expect("o ponto tinha que responder o Binding Request");
+            assert_eq!(ler_binding_success(&resposta, &transacao), Ok(origem));
+            let mut outra = transacao;
+            outra[0] ^= 1;
+            assert!(
+                ler_binding_success(&resposta, &outra).is_err(),
+                "aceitou outra transação"
+            );
+        }
+    }
+
+    /// Um `POST /sinal/1` em HTTP cru no loopback, como o proxy TLS o repassa. Devolve os
+    /// cabeçalhos e o corpo.
+    fn postar_sinal(sinal: SocketAddr, origem: &str, corpo: &str) -> (String, String) {
+        use std::io::{Read, Write};
+        let mut conexao = std::net::TcpStream::connect(sinal).expect("o sinal não aceitou");
+        write!(
+            conexao,
+            "POST /sinal/1 HTTP/1.1\r\nHost: rendzvous.seele.sh\r\nOrigin: {origem}\r\n\
+             Content-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{corpo}",
+            corpo.len()
+        )
+        .unwrap();
+        let mut tudo = String::new();
+        conexao.read_to_string(&mut tudo).unwrap();
+        let (cabecalhos, corpo) = tudo.split_once("\r\n\r\n").unwrap_or((&tudo, ""));
+        (cabecalhos.to_owned(), corpo.to_owned())
+    }
+
+    #[test]
+    fn o_sinal_responde_ninguem_e_o_cors_so_da_origem_do_produto() {
+        let ponto = seele_encontro::Ponto::abrir(
+            "127.0.0.1:0".parse().unwrap(),
+            seele_proto::encontro::Vizinhanca::TambemAqui,
+        )
+        .unwrap();
+        let sinal = seele_encontro::sinal::Sinal::abrir(
+            "127.0.0.1:0".parse().unwrap(),
+            ponto.quarto(),
+            seele_proto::encontro::Vizinhanca::TambemAqui,
+            vec![seele_encontro::sinal::origem_do_produto()],
+        )
+        .unwrap();
+        let escuta = sinal.endereco().unwrap();
+        std::thread::spawn(move || {
+            let _ = sinal.servir();
+        });
+        // A origem do web app, lida do lugar dela (`seele_proto::uri`), e não escrita aqui.
+        let origem = format!("https://{}", seele_proto::uri::ORIGEM_DO_NAVEGADOR);
+        assert_eq!(seele_encontro::sinal::origem_do_produto(), origem);
+
+        let (cabecalhos, corpo) = postar_sinal(escuta, &origem, &corpo_do_sinal().unwrap());
+        assert!(cabecalhos.starts_with("HTTP/1.1 200"), "{cabecalhos}");
+        let permitida = format!("Access-Control-Allow-Origin: {origem}");
+        assert!(
+            cabecalhos
+                .lines()
+                .any(|linha| linha.eq_ignore_ascii_case(&permitida)),
+            "sem o CORS da origem do produto: {cabecalhos}"
+        );
+        assert_eq!(conferir_resposta_do_sinal(&corpo), Ok(()));
+
+        let (cabecalhos, _) = postar_sinal(
+            escuta,
+            "https://exemplo.invalid",
+            &corpo_do_sinal().unwrap(),
+        );
+        assert!(
+            !cabecalhos
+                .to_ascii_lowercase()
+                .contains("access-control-allow-origin"),
+            "outra origem pôde ler a resposta: {cabecalhos}"
+        );
+    }
+
+    #[test]
+    fn uma_pagina_qualquer_com_200_nao_passa_por_resposta_do_sinal() {
+        // O Pages devolve o index.html da SPA com 200 para qualquer caminho: um proxy que não
+        // repassa o /sinal/1 parecia de pé por um código de status.
+        assert!(
+            conferir_resposta_do_sinal("<!doctype html><html><body>SEELE</body></html>").is_err()
+        );
+        assert!(conferir_resposta_do_sinal("").is_err());
+        assert!(conferir_resposta_do_sinal("SEELE-SINAL/1 CALADO").is_err());
+        assert!(conferir_resposta_do_sinal("SEELE-SINAL/1 NINGUEM\n").is_ok());
     }
 }

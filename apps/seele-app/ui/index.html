@@ -45,6 +45,7 @@
 -->
 <link rel="stylesheet" href="base.css">
 <link rel="stylesheet" href="tela-boot.css">
+<link rel="stylesheet" href="tela-antes-de-hospedar.css">
 <link rel="stylesheet" href="tela-sessao.css">
 <link rel="stylesheet" href="camada-alerta.css">
 <link rel="stylesheet" href="camada-bateria.css">
@@ -53,6 +54,9 @@
 <link rel="stylesheet" href="camada-sala.css">
 <link rel="stylesheet" href="camada-hospedagem.css">
 <link rel="stylesheet" href="camada-moderar.css">
+<!-- cargos (cargos-ui) -->
+<link rel="stylesheet" href="cargos.css">
+<link rel="stylesheet" href="camada-travessia.css">
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="camada-nomear.css">
 <link rel="stylesheet" href="camada-mods.css">
@@ -66,6 +70,7 @@
 <link rel="stylesheet" href="mods-superficies.css">
 <link rel="stylesheet" href="mods-controles.css">
 <link rel="stylesheet" href="camada-servidores.css">
+<link rel="stylesheet" href="camada-sessoes.css">
 <link rel="stylesheet" href="tela-chamada.css">
 <link rel="stylesheet" href="camada-compartilhar.css">
 <link rel="stylesheet" href="tela-server.css">
@@ -296,6 +301,7 @@
          data-foco="botao-conectar"
          data-anuncio="Entrada. Conecte a um servidor, ou hospede um aqui.">
   <div class="boot-caixa">
+    <header class="boot-topo">
     <div class="boot-marca">
       <!--
         A marca, do arquivo e não desenhada aqui.
@@ -322,8 +328,6 @@
         <span class="boot-marca-sub">voz, vídeo e texto auto-hospedados</span>
       </span>
     </div>
-
-
     <!--
       O propósito, antes de qualquer detalhe — U05.
 
@@ -341,6 +345,117 @@
       ninguém no meio. Entre no servidor de alguém, ou ponha o seu no ar a
       partir desta máquina.</p>
 
+    <div class="boot-rodape">
+      <button id="boot-perfil" class="boot-perfil" type="button"
+              aria-label="Personalizar seu perfil" title="o nome com que você entra">
+        <span id="boot-perfil-inicial" class="operador-inicial" aria-hidden="true"></span>
+        <span class="operador-quem-texto">
+          <span class="operador-rotulo">PERFIL</span>
+          <span id="boot-perfil-nome" class="operador-nome">—</span>
+        </span>
+      </button>
+      <button id="botao-server" class="botao-fantasma" type="button"
+              aria-label="Abrir configurações"
+              title="configuração local desta máquina"
+              data-glifo="engrenagem"></button>
+    </div>
+
+    </header>
+
+    <div class="boot-colunas">
+      <nav class="boot-coluna boot-esq" aria-label="Servidores e conversas">
+    <!--
+      **Os servidores, sempre à vista** (0.17, a entrada em largura total): a
+      lista de onde você já esteve, a mesma do diálogo do CONECTAR (comando
+      `conhecidos`), e cada linha entra pelo mesmo `irParaOServidor`.
+      Desenhado por `camada-servidores.js`.
+    -->
+    <section id="boot-servidores" class="boot-servidores" aria-labelledby="boot-servidores-titulo">
+      <span id="boot-servidores-titulo" class="rotulo">SERVIDORES</span>
+      <p id="boot-servidores-vazio" class="nota" hidden>Você ainda não entrou em nenhum servidor.</p>
+      <ul id="boot-servidores-lista" class="servidores-lista"></ul>
+    </section>
+    <!--
+      **As conversas que continuam abertas** (E3 da 0.17). Ir à entrada para
+      conectar a mais um servidor não fecha as sessões abertas, e quem está aqui
+      precisa do caminho de volta para cada uma. À parte do bloco de cima: o de
+      cima é onde se HOSPEDA, este é onde se CONVERSA. Desenhado por
+      `camada-sessoes.js`; escondido sem sessão aberta.
+    -->
+    <div id="boot-sessoes" class="boot-sessoes" hidden>
+      <p id="boot-sessoes-frase" class="nota" role="status"></p>
+      <ul id="boot-sessoes-lista" class="server-dispositivos"></ul>
+    </div>
+    <div class="boot-saidas">
+      <button id="botao-conectar" type="button" class="botao">CONECTAR</button>
+    </div>
+    <p class="nota boot-dica">Cole um link, um endereço ou o código de uma pessoa.</p>
+      </nav>
+      <section class="boot-coluna boot-centro" aria-label="Você e seus amigos">
+    <!--
+      **O seu código, na entrada** (0.17). Ele é seu e não depende de nenhuma
+      sessão: está aqui com o app aberto, haja ou não conversa. A frase de baixo
+      diz o que a sala pessoal faz AGORA (`fraseDoCodigo`, em `frases.js`) e não
+      promete ligação que a sala desligada ou inacessível não recebe. Escondido
+      até o `meu_codigo` responder, e no navegador, que não tem sala
+      (`data-sala-pessoal`).
+    -->
+    <section id="boot-codigo" class="boot-codigo" data-sala-pessoal
+             aria-labelledby="boot-codigo-titulo" hidden>
+      <span id="boot-codigo-titulo" class="rotulo">SEU CÓDIGO</span>
+      <div class="perfil-sala-codigo">
+        <input id="boot-codigo-valor" readonly spellcheck="false" autocomplete="off"
+               aria-labelledby="boot-codigo-titulo">
+        <button id="boot-copiar-codigo" class="botao-fantasma" type="button">COPIAR</button>
+      </div>
+      <p id="boot-codigo-estado" class="nota" role="status"></p>
+    </section>
+    <!--
+      **Os amigos** (0.17): quem a pessoa guardou para ligar sem copiar código.
+      Entra só pelo botão explícito (aqui, ou ADICIONAR AOS AMIGOS no PERFIL);
+      ligação perdida ou desconhecida nunca vira amigo sozinha. Sem online nem
+      presença: não há de onde saber. Desenhado por `camada-sala.js`; o
+      navegador não tem agenda (`data-sala-pessoal`).
+    -->
+    <section id="boot-amigos" class="boot-amigos" data-sala-pessoal
+             aria-labelledby="boot-amigos-titulo" hidden>
+      <span id="boot-amigos-titulo" class="rotulo">AMIGOS · LIGUE SEM COPIAR O CÓDIGO</span>
+      <p id="boot-amigos-vazia" class="nota" hidden></p>
+      <ul id="boot-amigos-lista" class="amigos-lista"></ul>
+      <form id="boot-amigos-form" class="boot-amigos-form" autocomplete="off">
+        <input id="boot-amigo-codigo" spellcheck="false" maxlength="64"
+               placeholder="código do amigo" aria-label="Código do amigo">
+        <input id="boot-amigo-nome" spellcheck="false" maxlength="48"
+               placeholder="nome" aria-label="Nome do amigo">
+        <button id="boot-amigo-adicionar" class="botao-fantasma" type="submit">ADICIONAR</button>
+      </form>
+      <p id="boot-amigos-erro" class="nomear-erro" role="alert" hidden></p>
+      <button id="boot-amigos-tentar" class="botao-fantasma" type="button" hidden>TENTAR DE NOVO</button>
+      <details id="boot-amigos-detalhe" class="boot-dica-detalhe" hidden>
+        <summary>O que TIRAR DOS AMIGOS faz</summary>
+        <p id="boot-amigos-nota" class="nota"></p>
+      </details>
+    </section>
+    <!--
+      A linha da sala pessoal, na entrada (tarefa 23 da F7): só aparece quando
+      há o que dizer — a porta 8385 ocupada, o código não achável, «não
+      recebendo». Um elemento próprio, com `data-sala-pessoal`: as cascas do
+      navegador, que não têm sala, o escondem inteiro.
+    -->
+    <p id="boot-sala-estado" class="nota sala-estado" role="status" data-sala-pessoal hidden></p>
+    <p id="boot-etapa" class="etapa" role="status" hidden></p>
+    <!-- O CANCELAR de quem está chamando alguém (tarefa 28 da F7). -->
+    <button id="boot-cancelar-ligacao" type="button" class="botao" hidden>CANCELAR</button>
+    <p id="boot-erro" class="erro" role="alert" hidden></p>
+    <!--
+      As saídas de quem hospeda com um MOD de API antiga moravam aqui, debaixo
+      da frase vermelha. Foram para a tela ANTES DE HOSPEDAR (E2 da 0.17), no
+      bloco dos MODs: a entrada não é lugar de decidir MOD de servidor.
+    -->
+      </section>
+      <aside class="boot-coluna boot-dir" aria-label="Hospedar">
+        <span class="rotulo boot-hospedar-titulo">HOSPEDAR</span>
+        <p class="nota boot-dica">Ponha um servidor seu no ar a partir desta máquina. Quem você convidar entra pelo link.</p>
     <!--
       O servidor que esta janela hospeda, no ar, com a sessão fora dele (tarefas
       19 e 20 da F7): sair não o derruba mais, e quem saiu precisa saber que ele
@@ -357,70 +472,8 @@
       </div>
     </div>
     <div class="boot-saidas">
-      <button id="botao-conectar" type="button" class="botao">CONECTAR</button>
       <button id="botao-hospedar" type="button" class="botao botao-secundario">HOSPEDAR AQUI</button>
     </div>
-
-    <!--
-      Os detalhes técnicos, recolhidos.
-
-      Fechado por padrão: quem veio conversar não precisa deles, e quem quer
-      conferir que o programa é o que diz ser os encontra num gesto. O
-      `<details>` é o mesmo padrão que o nome público já usa logo abaixo.
-    -->
-    <details class="boot-detalhes">
-      <summary>O que este programa é, por dentro</summary>
-      <!--
-        A leitura de boot. **Ela é verdade, e não cenário.**
-
-        Cada linha diz uma coisa que o produto de fato faz: a porta que o `seeled`
-        abre, o transporte, e a chave que fixa a identidade do servidor (ADR 0003
-        e 0004). Um terminal falso que rolasse texto inventado seria a única parte
-        desta janela que mente, e o `07-estetica.md` proíbe decoração que se
-        pareça com dado.
-
-        `aria-hidden` no cursor: ele pisca e não diz nada, e um leitor de tela
-        anunciando um quadrado a cada meio segundo é ruído.
-      -->
-      <div class="boot-leitura" role="status">
-        <span class="boot-linha">$ seeled 0.0.0.0:8383</span>
-        <!--
-          **As três linhas são as da comp, palavra por palavra**, e a do meio
-          nomeia o transporte.
-
-          `the_frontend_never_names_a_protocol_concept` recusava `quic` em
-          qualquer lugar da casca, e a regra que ele guarda é boa: a
-          `06-clientes-gui.md` não quer que alguém precise decifrar um rótulo para
-          resolver um problema. Ela foi escrita sobre **controles** — o que se lê
-          para agir.
-
-          Isto não é um controle. É a transcrição de um terminal, e o que ela faz
-          é dizer que o programa é o que diz ser: a porta que ele abriu, o
-          transporte que ele usa, a chave que fixa a identidade. Ninguém precisa
-          entender `quic/tls1.3` para apertar CONECTAR, e quem entende ganha a
-          confirmação de que não é enfeite. O guarda passou a cobrar a regra onde
-          ela vale — o texto de controle — e a abrir exceção para esta caixa, que
-          é a única transcrição da janela.
-        -->
-        <!--
-          **Era «porta udp aberta», e a tela não mede isso** — A12 da auditoria de
-          17/09. A frase aparecia sem hospedar, sem escuta e sem sonda: ela não
-          estava errada por acaso, estava afirmando um estado que nada nesta
-          janela apurou. Quem mede o alcance é `mostrarAlcance`, depois de
-          `hospedar` responder, e é lá que ele é dito.
-
-          O que sobra aqui é o que o produto **é**, que é o que esta caixa sempre
-          quis dizer: o transporte que ele usa.
-        -->
-        <span class="boot-linha">quic/tls1.3 · sobre udp</span>
-        <span class="boot-linha">ed25519 · impressão digital fixada na primeira visita</span>
-        <span class="boot-linha boot-linha-pronto">
-          <span>pronto.</span>
-          <span class="boot-cursor" aria-hidden="true"></span>
-        </span>
-      </div>
-    </details>
-
     <!--
       **Fechado por padrão, e não um campo a mais nesta tela.** Quem aperta
       HOSPEDAR AQUI quer hospedar; um nome público é coisa de quem já tem um DNS
@@ -473,38 +526,70 @@
          Preenchido por camada-versoes.js. -->
     <p id="boot-linha-legada" class="nota" role="status" hidden></p>
 
-    <div class="boot-rodape">
-      <button id="boot-perfil" class="boot-perfil" type="button"
-              aria-label="Personalizar seu perfil" title="o nome com que você entra">
-        <span id="boot-perfil-inicial" class="operador-inicial" aria-hidden="true"></span>
-        <span class="operador-quem-texto">
-          <span class="operador-rotulo">PERFIL</span>
-          <span id="boot-perfil-nome" class="operador-nome">—</span>
-        </span>
-      </button>
-      <button id="botao-server" class="botao-fantasma" type="button"
-              aria-label="Abrir configurações"
-              title="configuração local desta máquina"
-              data-glifo="engrenagem"></button>
-    </div>
+    <!--
+      Os detalhes técnicos, recolhidos.
 
-    <!--
-      A linha da sala pessoal, na entrada (tarefa 23 da F7): só aparece quando
-      há o que dizer — a porta 8385 ocupada, o código não achável, «não
-      recebendo». Um elemento próprio, com `data-sala-pessoal`: as cascas do
-      navegador, que não têm sala, o escondem inteiro.
+      Fechado por padrão: quem veio conversar não precisa deles, e quem quer
+      conferir que o programa é o que diz ser os encontra num gesto. O
+      `<details>` é o mesmo padrão que o nome público já usa logo abaixo.
     -->
-    <p id="boot-sala-estado" class="nota sala-estado" role="status" data-sala-pessoal hidden></p>
-    <p id="boot-etapa" class="etapa" role="status" hidden></p>
-    <!-- O CANCELAR de quem está chamando alguém (tarefa 28 da F7). -->
-    <button id="boot-cancelar-ligacao" type="button" class="botao" hidden>CANCELAR</button>
-    <p id="boot-erro" class="erro" role="alert" hidden></p>
-    <!--
-      As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
-      tarefa 13 do plano da F3, Step 5b): debaixo da frase que as diz, um
-      botão por saída, na ordem do dono. Desenhadas por `tela-boot.js`.
-    -->
-    <div id="boot-saidas" hidden></div>
+    <details class="boot-detalhes">
+      <summary>O que este programa é, por dentro</summary>
+      <!--
+        A leitura de boot. **Ela é verdade, e não cenário.**
+
+        Cada linha diz uma coisa que o produto de fato faz: a porta que o `seeled`
+        abre, o transporte, e a chave que fixa a identidade do servidor (ADR 0003
+        e 0004). Um terminal falso que rolasse texto inventado seria a única parte
+        desta janela que mente, e o `07-estetica.md` proíbe decoração que se
+        pareça com dado.
+
+        `aria-hidden` no cursor: ele pisca e não diz nada, e um leitor de tela
+        anunciando um quadrado a cada meio segundo é ruído.
+      -->
+      <div class="boot-leitura" role="status">
+        <span class="boot-linha">$ seeled 0.0.0.0:8383</span>
+        <!--
+          **As três linhas são as da comp, palavra por palavra**, e a do meio
+          nomeia o transporte.
+
+          `the_frontend_never_names_a_protocol_concept` recusava `quic` em
+          qualquer lugar da casca, e a regra que ele guarda é boa: a
+          `06-clientes-gui.md` não quer que alguém precise decifrar um rótulo para
+          resolver um problema. Ela foi escrita sobre **controles** — o que se lê
+          para agir.
+
+          Isto não é um controle. É a transcrição de um terminal, e o que ela faz
+          é dizer que o programa é o que diz ser: a porta que ele abriu, o
+          transporte que ele usa, a chave que fixa a identidade. Ninguém precisa
+          entender `quic/tls1.3` para apertar CONECTAR, e quem entende ganha a
+          confirmação de que não é enfeite. O guarda passou a cobrar a regra onde
+          ela vale — o texto de controle — e a abrir exceção para esta caixa, que
+          é a única transcrição da janela.
+        -->
+        <!--
+          **Era «porta udp aberta», e a tela não mede isso** — A12 da auditoria de
+          17/09. A frase aparecia sem hospedar, sem escuta e sem sonda: ela não
+          estava errada por acaso, estava afirmando um estado que nada nesta
+          janela apurou. Quem mede o alcance é `mostrarAlcance`, depois de
+          `hospedar` responder, e é lá que ele é dito.
+
+          O que sobra aqui é o que o produto **é**, que é o que esta caixa sempre
+          quis dizer: o transporte que ele usa.
+        -->
+        <!-- Na 0.17 o transporte é WebRTC: DTLS preso à impressão do
+             servidor, canais de dados SCTP, tudo sobre UDP (contrato, D1). -->
+        <span class="boot-linha">webrtc · dtls 1.2 · sobre udp</span>
+        <span class="boot-linha">ed25519 · impressão digital fixada na primeira visita</span>
+        <span class="boot-linha boot-linha-pronto">
+          <span>pronto.</span>
+          <span class="boot-cursor" aria-hidden="true"></span>
+        </span>
+      </div>
+    </details>
+
+      </aside>
+    </div>
   </div>
 </section>
 
@@ -524,21 +609,27 @@
 <section id="tela-servidores" class="tela" tabindex="-1" hidden
          data-foco="servidores-novo" aria-labelledby="hospedar-titulo"
          data-anuncio="Os servidores desta máquina.">
-  <div class="boot-caixa">
-    <h1 id="hospedar-titulo" class="boot-titulo">HOSPEDAR</h1>
-    <p class="nota">
+  <div class="boot-caixa area">
+    <header class="area-cabeca">
+      <h1 id="hospedar-titulo" class="boot-titulo">HOSPEDAR</h1>
+    </header>
+    <!-- Os servidores desta máquina numa GRADE de cartões que se redistribui com a largura; a barra de ações é outra linha. -->
+    <div class="area-conteudo">
+    <p class="nota area-leitura">
       Cada servidor guarda as próprias conversas, os próprios canais e quais
       MODs estão ligados. Levantar um não toca nos outros.
     </p>
 
-    <ul id="lista-servidores" class="server-dispositivos"></ul>
-
-    <div class="boot-saidas">
-      <button id="servidores-novo" type="button" class="botao">NOVO SERVIDOR</button>
-      <button id="servidores-voltar" type="button" class="botao botao-secundario">VOLTAR</button>
+    <ul id="lista-servidores" class="server-dispositivos servidores-grade"></ul>
     </div>
 
-    <p id="hospedar-erro" class="erro" role="alert" hidden></p>
+    <div class="area-barra">
+      <p id="hospedar-erro" class="erro" role="alert" hidden></p>
+      <div class="boot-saidas">
+        <button id="servidores-novo" type="button" class="botao">NOVO SERVIDOR</button>
+        <button id="servidores-voltar" type="button" class="botao botao-secundario">VOLTAR</button>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -568,17 +659,25 @@
 <section id="tela-preparar" class="tela" tabindex="-1" hidden
          data-foco="preparar-confirmar" aria-labelledby="preparar-titulo"
          data-anuncio="Preparar este servidor: nome, imagem e versão.">
-  <div class="boot-caixa">
-    <h1 id="preparar-titulo" class="boot-titulo">PREPARAR ESTE SERVIDOR</h1>
+  <div class="boot-caixa area">
+    <header class="area-cabeca">
+      <h1 id="preparar-titulo" class="boot-titulo">PREPARAR ESTE SERVIDOR</h1>
+    </header>
+    <!-- O conteúdo rola na PRÓPRIA linha da grade, e a barra de ações (HOSPEDAR, VOLTAR) é outra linha: nada fica debaixo dela. -->
+    <div class="area-conteudo">
+    <div class="area-grade">
     <!-- O que é só de um servidor novo. O HOSPEDAR do servidor que já estava
          aqui passa por esta tela só pela VERSÃO QUE VAI HOSPEDAR, e isto some
-         (tela-boot.js, `abrirPreparar`). -->
-    <div id="preparar-do-novo">
-    <p class="nota">
+         (tela-boot.js, `abrirPreparar`). `display: contents`: o nome e a imagem
+         são dois cartões da mesma grade da versão. -->
+    <div id="preparar-do-novo" class="preparar-do-novo">
+    <p class="nota area-larga">
       O nome e a imagem são o que as pessoas veem ao entrar. Os dois são
       opcionais e mudam depois, em CONFIGURAÇÕES.
     </p>
 
+    <!-- IDENTIDADE: o nome e a imagem juntos, num cartão só; a versão é o outro. -->
+    <div class="area-cartao preparar-identidade">
     <div class="server-campo">
       <label class="server-nome-campo">
         <span class="rotulo">NOME DESTE SERVIDOR</span>
@@ -603,10 +702,11 @@
         <button id="preparar-icone-tirar" class="botao-fantasma" type="button" hidden>TIRAR</button>
       </div>
     </div>
+    </div>
 
     </div>
 
-    <div id="preparar-versoes" class="server-campo" hidden>
+    <div id="preparar-versoes" class="server-campo area-cartao" hidden>
       <span class="rotulo">VERSÃO QUE VAI HOSPEDAR</span>
       <ul id="preparar-lista-versoes" class="server-dispositivos"></ul>
       <!-- Dito, e não escondido. O bloco sumia quando havia uma versão só, e
@@ -621,17 +721,250 @@
       <p id="preparar-versao-aviso" class="nota" hidden></p>
     </div>
 
-    <div class="boot-saidas">
-      <button id="preparar-confirmar" type="button" class="botao">HOSPEDAR</button>
-      <button id="preparar-voltar" type="button" class="botao botao-secundario">VOLTAR</button>
+    </div>
     </div>
 
-    <p id="preparar-etapa" class="etapa" role="status" hidden></p>
-    <p id="preparar-erro" class="erro" role="alert" hidden></p>
+    <!-- A barra de ações: uma linha própria da grade. -->
+    <div class="area-barra preparar-barra">
+      <p id="preparar-etapa" class="etapa" role="status" hidden></p>
+      <p id="preparar-erro" class="erro" role="alert" hidden></p>
+      <div class="boot-saidas">
+        <button id="preparar-confirmar" type="button" class="botao">HOSPEDAR</button>
+        <button id="preparar-voltar" type="button" class="botao botao-secundario">VOLTAR</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!--
+  **Antes de hospedar um servidor de outra versão** (E2 da 0.17, o caso que
+  chegou de quem atualizou para a 0.16).
+
+  Hospedar o servidor que a 0.15 deixou aqui despejava na tela de ENTRADA uma
+  parede vermelha e, embaixo dela, um botão por saída por MOD: a escolha da
+  versão do servidor aparecia repetida dentro de cada MOD, e a conversão dos
+  dados, que é o que de fato muda alguma coisa no disco, não era dita em lugar
+  nenhum. Retrato em `docs/evidencias/ui-0.17/antes/`.
+
+  São três perguntas diferentes, e esta tela as separa, uma por bloco, cada uma
+  com o seu estado escrito (nunca só cor) e as suas ações:
+
+  1. **OS DADOS** — se hospedar por esta versão converte o banco, e onde fica a
+     cópia de antes. Só informa, ou bloqueia quando os dados são de uma versão
+     mais nova (que esta não abre, para não estragá-los);
+  2. **A VERSÃO DO SERVIDOR** — quem consegue entrar: esta janela sobe o
+     servidor da versão dela, e as anteriores abrem noutra janela, pelo
+     launcher;
+  3. **OS MODS** — um por linha: ATUALIZAR para a versão que este app roda, ou
+     DESLIGAR, e os dados do MOD ficam. Nenhuma ação daqui hospeda sozinha.
+
+  Nada aqui apaga coisa nenhuma, e a tela diz isso. HOSPEDAR fica no fim, um
+  só, e só se acende quando nada mais bloqueia.
+
+  Desenhada por `tela-antes-de-hospedar.js`; o bloco dos MODs, pela
+  `desenharSaidasDeQuemHospeda` de `tela-boot.js`.
+-->
+<section id="tela-antes-de-hospedar" class="tela" tabindex="-1" hidden
+         data-foco="antes-titulo" aria-labelledby="antes-titulo"
+         data-anuncio="Antes de hospedar: os dados, a versão do servidor e os MODs.">
+  <div class="boot-caixa antes-caixa area">
+    <header class="area-cabeca">
+      <h1 id="antes-titulo" class="boot-titulo" tabindex="-1">ANTES DE HOSPEDAR</h1>
+      <p id="antes-servidor" class="antes-servidor"></p>
+    </header>
+    <!-- O conteúdo rola na PRÓPRIA linha; a barra de ações é outra linha da grade, e nada fica debaixo dela. No desktop largo, o contexto
+         (o resumo, as pendências) fica numa coluna ao lado dos passos; no celular, ele vem primeiro, e é a pendência que abre. -->
+    <div class="area-conteudo antes-corpo">
+    <div class="antes-contexto">
+    <p id="antes-resumo" class="nota antes-resumo" role="status"></p>
+    <!-- O resumo do que pede atenção, cada item um link para o bloco dele:
+         «3 MODs precisam de atenção» leva ao bloco 3 sem rolar a tela. -->
+    <ul id="antes-pendencias" class="antes-pendencias" hidden></ul>
+    <p class="nota antes-garantia">Nada nesta tela apaga conversa, canal ou dado de MOD.</p>
+    </div>
+    <div class="antes-principal">
+    <ol class="antes-passos">
+      <li id="antes-dados" class="antes-passo" aria-labelledby="antes-dados-titulo" tabindex="-1">
+        <div class="antes-passo-topo">
+          <span class="antes-passo-num" aria-hidden="true">1</span>
+          <h2 id="antes-dados-titulo" class="antes-passo-titulo">OS DADOS</h2>
+          <span id="antes-dados-estado" class="antes-estado"></span>
+        </div>
+        <p id="antes-dados-frase" class="antes-passo-frase"></p>
+        <!-- O aviso material (sem cópia de segurança do estado atual, ou ela
+             falhou): visível sempre, nunca dentro de um «mais». -->
+        <p id="antes-dados-aviso" class="antes-passo-frase antes-aviso" hidden></p>
+        <div id="antes-dados-acoes" class="antes-acoes"></div>
+        <details id="antes-dados-mais" class="antes-mais" hidden>
+          <summary>A cópia de segurança</summary>
+          <p id="antes-dados-copia" class="antes-passo-frase antes-passo-detalhe"></p>
+        </details>
+      </li>
+
+      <li id="antes-versao" class="antes-passo" aria-labelledby="antes-versao-titulo" tabindex="-1">
+        <div class="antes-passo-topo">
+          <span class="antes-passo-num" aria-hidden="true">2</span>
+          <h2 id="antes-versao-titulo" class="antes-passo-titulo">QUEM CONSEGUE ENTRAR</h2>
+          <span id="antes-versao-estado" class="antes-estado"></span>
+        </div>
+        <p id="antes-versao-frase" class="antes-passo-frase"></p>
+        <details id="antes-versao-mais" class="antes-mais" hidden>
+          <summary id="antes-versao-mais-titulo">Hospedar por uma versão anterior</summary>
+          <ul id="antes-versao-lista" class="server-dispositivos antes-lista"></ul>
+        </details>
+      </li>
+
+      <li id="antes-mods" class="antes-passo" aria-labelledby="antes-mods-titulo" tabindex="-1">
+        <div class="antes-passo-topo">
+          <span class="antes-passo-num" aria-hidden="true">3</span>
+          <h2 id="antes-mods-titulo" class="antes-passo-titulo">MODS</h2>
+          <span id="antes-mods-estado" class="antes-estado"></span>
+        </div>
+        <p id="antes-mods-frase" class="antes-passo-frase"></p>
+        <!-- O bloco das saídas de cada MOD, com o mesmo id de antes: a
+             `desenharSaidasDeQuemHospeda` desenha aqui dentro. -->
+        <div id="boot-saidas" class="antes-mods-saidas" hidden></div>
+        <details id="antes-mods-mais" class="antes-mais" hidden>
+          <summary>Por que estes MODs não rodam aqui</summary>
+          <ul id="antes-mods-apis" class="antes-mods-apis"></ul>
+        </details>
+      </li>
+    </ol>
+
+    <!-- O diagnóstico, para quem dá suporte: esquemas, a linha dos dados, as
+         cópias e o nome da recusa. Fechado por padrão; `<details>` é o que a
+         entrada já usa para «o que este programa é, por dentro», e chega pelo
+         teclado e pelo leitor de tela sem nada a mais. -->
+    <details id="antes-detalhes" class="antes-detalhes">
+      <summary id="antes-detalhes-titulo"></summary>
+      <dl id="antes-detalhes-lista" class="antes-detalhes-lista"></dl>
+    </details>
+
+    </div>
+    </div>
+
+    <!-- A barra de ações: uma linha própria da grade, e não um rodapé fixo sobre o conteúdo. A decisão fica à vista de quem lê o terceiro
+         bloco porque o conteúdo rola na linha de cima, e não porque a barra flutua. -->
+    <div class="antes-rodape area-barra">
+      <!-- O motivo do bloqueio, ao lado do botão e ligado a ele pelo
+           `aria-describedby`: um botão apagado sem porquê é um botão que
+           parece quebrado. -->
+      <p id="antes-hospedar-motivo" class="antes-motivo" hidden></p>
+      <div class="boot-saidas">
+        <button id="antes-hospedar" type="button" class="botao"
+                aria-describedby="antes-hospedar-motivo">HOSPEDAR</button>
+        <button id="antes-voltar" type="button" class="botao botao-secundario">VOLTAR</button>
+      </div>
+      <p id="antes-etapa" class="etapa" role="status" hidden></p>
+      <p id="antes-erro" class="erro" role="alert" hidden></p>
+    </div>
   </div>
 </section>
 
 <!-- Operação. -->
+<!--
+  A portaria — ADR 0030.
+
+  Camada, e não tela, pela mesma razão escrita em `#moderar`: decidir sobre
+  quem está batendo é uma decisão tomada **olhando** o servidor, e uma tela
+  apagaria a conversa no instante em que alguém decide sobre uma pessoa.
+
+  **Fora de toda tela, desde a 0.17** (E3/E7). Ela morava dentro de
+  `#tela-sessao`, pela suposição «quem hospeda pelo app está sempre numa
+  sessão». Desde a 0.16 sair não derruba o servidor, e na 0.17 a vista pode
+  estar noutro servidor ou na entrada: o VER QUEM É da faixa tirava o `hidden`
+  da camada com `#tela-sessao` escondida em volta, e nada aparecia (medido em
+  `bancada/portaria-por-identidade.cjs`). A camada é da janela e da
+  hospedagem, como a faixa, e diz de qual servidor hospedado ela é.
+
+  Abaixo de `#moderar` na pilha (`z-index`), de propósito: as confirmações
+  desta camada são armadas na caixa de moderação — `armarAto` mora lá e é uma
+  só —, e ela tem que aparecer por cima desta.
+-->
+  <div id="portaria" class="camada-portaria" role="dialog" aria-modal="true"
+       aria-labelledby="portaria-titulo" tabindex="-1" hidden>
+    <div class="portaria-caixa">
+      <div class="portaria-cabeca">
+        <span class="portaria-marca" data-glifo="chave"></span>
+        <h2 id="portaria-titulo" class="portaria-titulo">A PORTA DESTE SERVIDOR</h2>
+        <button id="portaria-fechar" class="portaria-fechar" type="button">FECHAR</button>
+      </div>
+
+      <div class="portaria-corpo">
+        <!-- De qual servidor hospedado é esta porta (E3/E7 da 0.17): com a vista
+             noutro servidor, ou na entrada, a camada diz qual hospedagem decide. -->
+        <p id="portaria-qual-servidor" class="nota" role="status"></p>
+        <!--
+          A banda de alerta. Vermelho aqui e em nenhum outro lugar desta folha:
+          `tokens.css` reserva `--seele-vermelho-alerta` para alerta e queda, e
+          uma porta escancarada para a internet é exatamente uma dessas. Ela é
+          revelada pelo script só quando as duas coisas valem ao mesmo tempo —
+          nenhuma camada de pé **e** alcance além da rede local. Aberto numa rede
+          de casa é o padrão do ADR 0021 e não é alarme nenhum.
+        -->
+        <p id="portaria-alarme" class="portaria-alarme" role="alert" hidden></p>
+
+        <!--
+          **Quem está batendo vem primeiro** — V12 da validação de 20/09/2026:
+          «a portaria prioriza a chave antes da pessoa».
+
+          Esta camada abre por duas razões, e só uma delas é frequente: alguém
+          bateu. A outra — trocar a senha, gerar um convite, ligar a portaria —
+          é administração, e acontece uma vez por servidor. Com as três camadas
+          no topo, a decisão que a pessoa veio tomar ficava em quarto lugar, e
+          numa janela baixa ela nascia abaixo da dobra.
+
+          A ordem inverteu; o conteúdo é o mesmo, e cada bloco continua dizendo
+          o estado dele em palavras.
+        -->
+        <!--
+          A fila e o histórico dividem **um** contêiner que rola, e não um cada.
+          `every_list_the_server_fills_lives_inside_something_that_scrolls`: nada
+          limita quantas pessoas batem, e uma lista que passa da borda do painel
+          é uma lista cujas últimas linhas deixam de existir.
+        -->
+        <div class="portaria-rolagem">
+          <h3 class="portaria-secao">QUEM ESTÁ BATENDO</h3>
+          <p id="portaria-fila-vazia" class="nota" hidden>Ninguém esperando.</p>
+          <ul id="portaria-fila" class="portaria-lista"></ul>
+
+          <h3 class="portaria-secao">JÁ DECIDIDOS</h3>
+          <p id="portaria-decididos-vazio" class="nota" hidden>Nada decidido ainda.</p>
+          <ul id="portaria-decididos" class="portaria-lista"></ul>
+        </div>
+
+        <!-- As três camadas, sempre as três, e sempre em palavras. -->
+        <div class="portaria-camadas">
+          <div class="portaria-camada">
+            <span class="rotulo">SENHA DO SERVIDOR</span>
+            <span id="portaria-estado-senha" class="portaria-estado">——</span>
+            <input id="portaria-senha" class="portaria-senha" type="password"
+                   autocomplete="new-password" placeholder="uma senha para o grupo">
+            <button id="portaria-por-senha" class="botao-fantasma" type="button">DEFINIR</button>
+            <button id="portaria-tirar-senha" class="botao-fantasma" type="button">TIRAR</button>
+          </div>
+
+          <div class="portaria-camada">
+            <span class="rotulo">CONVITE DE USO ÚNICO</span>
+            <span id="portaria-estado-convites" class="portaria-estado">——</span>
+            <input id="portaria-observacao" class="portaria-observacao" type="text"
+                   placeholder="para quem é este convite">
+            <button id="portaria-gerar" class="botao-fantasma" type="button">GERAR</button>
+          </div>
+
+          <div class="portaria-camada">
+            <span class="rotulo">PORTARIA</span>
+            <span id="portaria-estado-portaria" class="portaria-estado">——</span>
+            <button id="portaria-ligar" class="botao-fantasma" type="button"
+                    aria-pressed="false">LIGAR</button>
+          </div>
+        </div>
+
+        <p id="portaria-erro" class="erro" role="alert" hidden></p>
+
+      </div>
+    </div>
+  </div>
 <!--
   Sem `data-foco`, e a ausência é a escolha. Esta tela não tem **uma** ação: são
   quatro colunas, e o único controle plausível para receber o foco ao entrar é
@@ -908,104 +1241,6 @@
 
 
 
-  <!--
-    A portaria — ADR 0030.
-
-    Camada sobre a sessão, e não tela, pela mesma razão escrita em `#moderar`:
-    decidir sobre quem está batendo é uma decisão tomada **olhando** o servidor, e
-    uma tela apagaria a conversa no instante em que alguém decide sobre uma
-    pessoa. `specs/07-estetica.md` não deixa este cliente substituir a
-    conversa.
-
-    Fica dentro de `#tela-sessao` porque é para lá que HOSPEDAR AQUI leva: o
-    botão sobe o servidor e **entra nele**, então quem hospeda pelo app está sempre
-    numa sessão.
-
-    Abaixo de `#moderar` na pilha (`z-index`), de propósito: as confirmações
-    desta camada são armadas na caixa de moderação — `armarAto` mora lá e é uma
-    só —, e ela tem que aparecer por cima desta.
-  -->
-  <div id="portaria" class="camada-portaria" role="dialog" aria-modal="true"
-       aria-labelledby="portaria-titulo" tabindex="-1" hidden>
-    <div class="portaria-caixa">
-      <div class="portaria-cabeca">
-        <span class="portaria-marca" data-glifo="chave"></span>
-        <h2 id="portaria-titulo" class="portaria-titulo">A PORTA DESTE SERVIDOR</h2>
-        <button id="portaria-fechar" class="portaria-fechar" type="button">FECHAR</button>
-      </div>
-
-      <div class="portaria-corpo">
-        <!--
-          A banda de alerta. Vermelho aqui e em nenhum outro lugar desta folha:
-          `tokens.css` reserva `--seele-vermelho-alerta` para alerta e queda, e
-          uma porta escancarada para a internet é exatamente uma dessas. Ela é
-          revelada pelo script só quando as duas coisas valem ao mesmo tempo —
-          nenhuma camada de pé **e** alcance além da rede local. Aberto numa rede
-          de casa é o padrão do ADR 0021 e não é alarme nenhum.
-        -->
-        <p id="portaria-alarme" class="portaria-alarme" role="alert" hidden></p>
-
-        <!--
-          **Quem está batendo vem primeiro** — V12 da validação de 20/09/2026:
-          «a portaria prioriza a chave antes da pessoa».
-
-          Esta camada abre por duas razões, e só uma delas é frequente: alguém
-          bateu. A outra — trocar a senha, gerar um convite, ligar a portaria —
-          é administração, e acontece uma vez por servidor. Com as três camadas
-          no topo, a decisão que a pessoa veio tomar ficava em quarto lugar, e
-          numa janela baixa ela nascia abaixo da dobra.
-
-          A ordem inverteu; o conteúdo é o mesmo, e cada bloco continua dizendo
-          o estado dele em palavras.
-        -->
-        <!--
-          A fila e o histórico dividem **um** contêiner que rola, e não um cada.
-          `every_list_the_server_fills_lives_inside_something_that_scrolls`: nada
-          limita quantas pessoas batem, e uma lista que passa da borda do painel
-          é uma lista cujas últimas linhas deixam de existir.
-        -->
-        <div class="portaria-rolagem">
-          <h3 class="portaria-secao">QUEM ESTÁ BATENDO</h3>
-          <p id="portaria-fila-vazia" class="nota" hidden>Ninguém esperando.</p>
-          <ul id="portaria-fila" class="portaria-lista"></ul>
-
-          <h3 class="portaria-secao">JÁ DECIDIDOS</h3>
-          <p id="portaria-decididos-vazio" class="nota" hidden>Nada decidido ainda.</p>
-          <ul id="portaria-decididos" class="portaria-lista"></ul>
-        </div>
-
-        <!-- As três camadas, sempre as três, e sempre em palavras. -->
-        <div class="portaria-camadas">
-          <div class="portaria-camada">
-            <span class="rotulo">SENHA DO SERVIDOR</span>
-            <span id="portaria-estado-senha" class="portaria-estado">——</span>
-            <input id="portaria-senha" class="portaria-senha" type="password"
-                   autocomplete="new-password" placeholder="uma senha para o grupo">
-            <button id="portaria-por-senha" class="botao-fantasma" type="button">DEFINIR</button>
-            <button id="portaria-tirar-senha" class="botao-fantasma" type="button">TIRAR</button>
-          </div>
-
-          <div class="portaria-camada">
-            <span class="rotulo">CONVITE DE USO ÚNICO</span>
-            <span id="portaria-estado-convites" class="portaria-estado">——</span>
-            <input id="portaria-observacao" class="portaria-observacao" type="text"
-                   placeholder="para quem é este convite">
-            <button id="portaria-gerar" class="botao-fantasma" type="button">GERAR</button>
-          </div>
-
-          <div class="portaria-camada">
-            <span class="rotulo">PORTARIA</span>
-            <span id="portaria-estado-portaria" class="portaria-estado">——</span>
-            <button id="portaria-ligar" class="botao-fantasma" type="button"
-                    aria-pressed="false">LIGAR</button>
-          </div>
-        </div>
-
-        <p id="portaria-erro" class="erro" role="alert" hidden></p>
-
-      </div>
-    </div>
-  </div>
 
   <!--
     As quatro colunas do comp v3, nas larguras dele — `60px 268px minmax(0,1fr)
@@ -1046,6 +1281,28 @@
     -->
     <nav class="trilha" aria-labelledby="trilha-titulo">
       <h2 id="trilha-titulo" class="trilha-titulo">REDES</h2>
+      <!--
+        **As sessões abertas, o servidor no ar e o histórico, separados** (E3 da
+        0.17). Com várias sessões cliente ao mesmo tempo, a coluna diz três
+        coisas diferentes, cada uma sob o seu título:
+
+        - ABERTAS: onde se conversa agora. Todas conectadas; apertar uma TROCA A
+          VISTA, e nenhuma cai. Cada placa diz, em forma e em texto (no nome
+          acessível e no `title`), as não lidas, se tem a voz (VOZ), se o
+          servidor é desta máquina (AQUI), e se está voltando ou encerrada;
+        - NO AR: onde se hospeda. O servidor que esta máquina põe no ar vive à
+          parte das sessões: sair de todas não o derruba;
+        - RECENTES: o histórico, sem as que já estão abertas. Apertar um abre
+          mais uma sessão, sem fechar as outras.
+
+        Com a ponte de antes (uma sessão por vez), os três somem e a coluna é a
+        de sempre: o atual e o histórico.
+      -->
+      <p id="trilha-sessoes-titulo" class="trilha-grupo" hidden>ABERTAS</p>
+      <ul id="trilha-sessoes" class="trilha-outros" aria-labelledby="trilha-sessoes-titulo" hidden></ul>
+      <p id="trilha-hospedando-titulo" class="trilha-grupo" hidden>NO AR</p>
+      <ul id="trilha-hospedando" class="trilha-outros" aria-labelledby="trilha-hospedando-titulo" hidden></ul>
+      <p id="trilha-recentes-titulo" class="trilha-grupo" hidden>RECENTES</p>
       <button id="trilha-server" class="trilha-item trilha-atual" type="button"
               aria-current="true" disabled>—</button>
       <!--
@@ -1239,6 +1496,25 @@
         -->
         <p id="voz-estado" class="operador-frase" role="status"></p>
         <!--
+          **Onde está a voz** (E3 da 0.17; fronteiras.md §5). Com mais de uma
+          sessão aberta, o microfone desta máquina é de UMA delas, e esta linha
+          diz qual: «VOZ AQUI», ou «VOZ EM <servidor>» com TRAZER A VOZ PARA
+          CÁ. Trazer é o ato explícito: a outra sessão para de receber o
+          microfone ANTES de esta começar, e sai da sala de voz em que estava,
+          que a frase nomeia. Escondida com uma sessão só, que é o app de antes.
+        -->
+        <!--
+          «Você ficou para trás; reconectando…» (o `CaiuComMotivo` do B, carimbado
+          pela sessão e pela geração que caiu): a conexão volta sozinha, com
+          geração nova, e não há tela de fim. Discreta, de propósito: a conversa
+          continua à vista. `camada-sessoes.js`.
+        -->
+        <p id="sessao-ficou-para-tras" class="nota" role="status" hidden></p>
+        <div id="voz-foco" class="voz-foco" hidden>
+          <p id="voz-foco-frase" class="voz-foco-frase" role="status"></p>
+          <button id="voz-foco-trazer" class="botao-fantasma voz-foco-trazer" type="button" hidden>TRAZER A VOZ PARA CÁ</button>
+        </div>
+        <!--
           A linha da sala pessoal, na sessão (tarefa 23 da F7): a mesma da
           entrada, num elemento próprio ao lado da frase da voz, e não dentro
           dela. Só aparece quando há o que dizer.
@@ -1287,6 +1563,15 @@
           <button id="operador-vista" class="botao-fantasma" type="button" hidden
                   title="mostrar um monitor ou uma janela sua para quem está na sala">COMPARTILHAR</button>
           <!--
+            Só na vista da ligação pessoal (0.17), onde esta fileira vira a
+            barra da chamada: o CHAT abre a conversa num painel sobreposto, e
+            DESLIGAR sai SÓ desta sessão (não é sair da sala de voz). Escondidos
+            fora dela pelo CSS.
+          -->
+          <button id="ligacao-chat" class="botao-fantasma ligacao-chat" type="button"
+                  aria-haspopup="dialog" aria-expanded="false">CHAT</button>
+          <button id="ligacao-desligar" class="ligacao-desligar" type="button">DESLIGAR</button>
+          <!--
             **`DESCONECTAR` saiu, e a saída não sumiu com ele.**
 
             Ele esteve aqui uma versão por causa de um achado pago num teste com
@@ -1303,6 +1588,7 @@
             antes de acontecer, que é a correção de que aquele achado precisava.
           -->
         </div>
+        <p id="ligacao-barra-dica" class="nota ligacao-barra-dica"></p>
       </div>
     </section>
 
@@ -1336,6 +1622,16 @@
         O palco fica aqui, dentro desta vista, porque é onde ele já morava — a
         escolha que não inventa nada e que custa uma linha para mudar.
       -->
+      <!--
+        O cabeçalho da ligação pessoal (0.17): LIGAÇÃO PESSOAL e o nome do
+        contato (ou o código), e o estado da ligação. A vista é escolhida pelo
+        metadado da sessão, nunca pelo nome ou endereço (`camada-sessoes.js`).
+        Só rotula; não mexe no foco de voz nem nas outras sessões.
+      -->
+      <header id="ligacao-cabeca" class="ligacao-cabeca" hidden>
+        <p id="sessao-ligacao" class="sessao-ligacao" role="status"></p>
+        <span id="ligacao-cabeca-estado" class="ligacao-cabeca-estado"></span>
+      </header>
       <div id="vista-chamada" hidden>
         <div class="vista-chamada-barra">
           <span class="chamada-placa">SALA DE VOZ</span>
@@ -1559,6 +1855,21 @@
       </div>
 
 
+      <!--
+        A ligação pessoal FORA DA SALA (0.17): o que o miolo mostra quando a
+        grade fecha (SAIR DA SALA, Escape) e a conversa não existe. Nunca vazio.
+        Desenhado por `camada-sessoes.js`.
+      -->
+      <div id="vista-ligacao-fora" class="vista-ligacao-fora" hidden>
+        <p id="ligacao-fora-estado" class="nota" role="status"></p>
+        <p id="ligacao-fora-erro" class="nomear-erro" role="alert" hidden></p>
+        <div class="boot-saidas">
+          <button id="ligacao-entrar" class="botao" type="button" hidden>ENTRAR NA SALA</button>
+          <button id="ligacao-reabrir" class="botao" type="button" hidden>VOLTAR À CHAMADA</button>
+          <button id="ligacao-encerrar" class="botao-fantasma" type="button">DESLIGAR</button>
+          <button id="ligacao-voltar" class="botao-fantasma" type="button">VOLTAR</button>
+        </div>
+      </div>
       <div id="vista-conversa">
         <div class="linha-barra">
           <span class="linha-barra-cerquilha" aria-hidden="true">#</span>
@@ -1597,6 +1908,9 @@
                   aria-label="Buscar neste canal"
                   title="procurar no que já foi dito neste canal"
                   data-glifo="buscar"></button>
+          <!-- Só no painel do chat da ligação pessoal (0.17); escondido no resto. -->
+          <button id="ligacao-chat-fechar" class="botao-fantasma ligacao-chat-fechar" type="button"
+                  aria-label="Fechar o chat">FECHAR</button>
         </div>
         <!--
           A busca. `[1/3]` não é enfeite: `specs/06-clientes-gui.md` proíbe
@@ -2485,6 +2799,20 @@
             </span>
           </button>
         </li>
+<li id="secao-cargos-item" hidden>
+          <!--
+            CARGOS E PERMISSÕES (G, cargos-ui): abre a camada `#cargos` sobre a
+            sala, e não um painel daqui — por isso sem `data-painel`. Visível
+            em toda sessão: quem não gere vê a hierarquia e o porquê de si.
+          -->
+          <button id="secao-cargos" class="server-secao server-secao-camada" type="button"
+                  data-sub="Quem pode o quê neste servidor, e por quê">
+            <span class="server-secao-icone" data-glifo="chave"></span>
+            <span class="server-secao-texto">
+              <span class="server-secao-nome">CARGOS E PERMISSÕES</span>
+            </span>
+          </button>
+        </li>
       </ul>
       <p class="server-grupo" id="server-grupo-aplicativo">APLICATIVO</p>
       <ul class="server-secoes" aria-labelledby="server-grupo-aplicativo">
@@ -2555,6 +2883,11 @@
         <button id="server-fechar" class="server-voltar" type="button">
           <span data-glifo="recuar"></span>
           <span id="server-voltar-texto">VOLTAR</span>
+        </button>
+        <!-- Só no celular (< 700px), dentro de uma seção: volta ao ÍNDICE das seções. O VOLTAR de cima continua fechando a configuração. -->
+        <button id="server-ao-indice" class="server-voltar server-so-celular" type="button">
+          <span data-glifo="recuar"></span>
+          <span>SEÇÕES</span>
         </button>
         <div class="server-faixa-texto">
           <!--
@@ -3702,6 +4035,9 @@
                   <p id="atualizacao-notas" class="server-atualizacao-notas"></p>
                 </div>
 
+                <!-- A versão que muda a versão do servidor (E4 da 0.17), dita
+                     antes do botão; o aviso com as três saídas abre ao apertá-lo. -->
+                <p id="atualizacao-travessia" class="travessia-nota" role="note" hidden></p>
                 <div class="server-atualizacao-aviso">
                   <h4 class="rotulo">ANTES DE INSTALAR</h4>
                   <p>O SEELE <strong>fecha e abre de novo</strong> para instalar a atualização.
@@ -4045,7 +4381,10 @@
       <h2 id="perfil-titulo" class="nomear-titulo">SEU PERFIL</h2>
       <button id="perfil-fechar" class="botao-fantasma" type="button">FECHAR</button>
     </div>
-    <form id="perfil-forma" class="nomear-corpo" autocomplete="off">
+    <!-- O corpo rola na PRÓPRIA linha da caixa. Sem a sala pessoal (o navegador não tem), a caixa segue um diálogo simples de 480px; com ela,
+         a janela inteira, com o formulário (imagem e apelido) numa coluna e a sala pessoal em cartões ao lado. -->
+    <div class="perfil-corpo">
+    <form id="perfil-forma" class="nomear-corpo perfil-cartao-eu" autocomplete="off">
       <div id="perfil-imagem" class="perfil-imagem">
         <!--
           A prévia é `<img>` quando há imagem e a inicial do apelido quando não
@@ -4133,6 +4472,7 @@
     -->
     <section id="perfil-sala" class="perfil-sala" data-sala-pessoal
              aria-labelledby="perfil-sala-titulo" hidden>
+      <div class="area-cartao perfil-cartao-codigo">
       <span id="perfil-sala-titulo" class="rotulo">SEU CÓDIGO</span>
       <div class="perfil-sala-codigo">
         <input id="perfil-codigo" readonly spellcheck="false" autocomplete="off"
@@ -4148,11 +4488,15 @@
         <p id="perfil-sala-firewall-frase" class="nota"></p>
         <button id="perfil-sala-firewall-abrir" class="botao-fantasma" type="button">ABRIR A PORTA AGORA</button>
       </div>
+      </div>
+      <div class="area-cartao perfil-cartao-agenda">
       <span class="rotulo">AGENDA</span>
       <p id="perfil-agenda-vazia" class="nota" hidden>Ninguém ligou para o seu código ainda.</p>
       <ul id="perfil-agenda" class="perfil-agenda"></ul>
       <p id="perfil-agenda-erro" class="nomear-erro" role="alert" hidden></p>
+      </div>
     </section>
+    </div>
   </div>
 </div>
 
@@ -4494,6 +4838,39 @@
   -->
 
 
+<!--
+  **O aviso antes de atualizar para além da quebra** (E4 da 0.17; a lógica e
+  o contrato são do compat, em `procurar_atualizacao` → `fronteira`,
+  `pede_aviso`, `adiada`).
+
+  Aparece ANTES de qualquer byte ser baixado, e só quando a versão nova muda a
+  versão do servidor: uma atualização compatível segue o caminho de sempre, sem
+  diálogo (um aviso repetido é um aviso que se aprende a ignorar).
+
+  `role="alertdialog"` porque ele interrompe uma ação de propósito e pede uma
+  resposta; o foco nasce no CANCELAR, a saída que não muda nada, e o Escape e o
+  clique fora também cancelam. Três saídas, e cada uma diz o que faz:
+  CANCELAR, ADIAR (a próxima procura volta a avisar, dizendo que foi adiada) e
+  PROSSEGUIR, que nomeia a versão. Global, fora das telas, como `#moderar`: ele
+  abre de dentro da configuração, que se põe sobre a entrada ou a sessão.
+-->
+<div id="travessia" class="camada-travessia" role="alertdialog" aria-modal="true"
+     aria-labelledby="travessia-titulo" aria-describedby="travessia-resumo travessia-itens" hidden>
+  <div class="travessia-caixa">
+    <p class="travessia-marca">ATUALIZAÇÃO · <span id="travessia-de-para"></span></p>
+    <h2 id="travessia-titulo" class="travessia-titulo"></h2>
+    <p id="travessia-resumo" class="travessia-resumo"></p>
+    <ul id="travessia-itens" class="travessia-itens"></ul>
+    <p id="travessia-adiada" class="travessia-nota" hidden></p>
+    <div class="travessia-acoes">
+      <button id="travessia-cancelar" type="button" class="botao botao-secundario"></button>
+      <button id="travessia-adiar" type="button" class="botao botao-secundario"></button>
+      <button id="travessia-prosseguir" type="button" class="botao"></button>
+    </div>
+    <p id="travessia-erro" class="erro" role="alert" hidden></p>
+  </div>
+</div>
+
 <!-- Confirmações também são abertas nas configurações, sem sessão visível.
      A camada é global para não herdar hidden da conversa. -->
 <div id="moderar" class="camada-moderar" role="dialog" aria-modal="true"
@@ -4604,6 +4981,148 @@
     </div>
   </div>
 
+<!-- cargos (cargos-ui) -->
+<!--
+  CARGOS E PERMISSÕES (E6 da 0.17). Camada e não tela, como a moderação: os
+  cargos se decidem olhando a sala, e uma tela cheia apagaria a conversa. Abaixo
+  da moderação no empilhamento (75 contra 80), porque APAGAR um cargo confirma
+  pela caixa dela, que tem de aparecer por cima desta.
+
+  Tudo que aqui diz quem pode vem do servidor: os motivos de um controle
+  desligado e a regra que decidiu uma permissão. A tela só os escreve.
+-->
+<div id="cargos" class="camada-cargos" role="dialog" aria-modal="true"
+     aria-labelledby="cargos-titulo" aria-describedby="cargos-servidor" hidden>
+  <div class="cargos-caixa">
+    <div class="cargos-cabeca">
+      <h2 id="cargos-titulo" class="cargos-titulo">CARGOS E PERMISSÕES</h2>
+      <span id="cargos-servidor" class="cargos-servidor"></span>
+      <button id="cargos-fechar" class="cargos-fechar" type="button">FECHAR</button>
+    </div>
+
+    <div class="cargos-regra">
+      <p id="cargos-regra-hierarquia" class="cargos-regra-frase"></p>
+      <p id="cargos-regra-combinacao" class="cargos-regra-frase"></p>
+      <p id="cargos-regra-proprietario" class="cargos-regra-frase"></p>
+    </div>
+
+    <div class="cargos-abas" role="tablist" aria-label="cargos e permissões">
+      <button id="cargos-aba-cargos" class="cargos-aba" type="button" role="tab"
+              aria-controls="cargos-painel-cargos" aria-selected="true">CARGOS</button>
+      <button id="cargos-aba-pessoas" class="cargos-aba" type="button" role="tab"
+              aria-controls="cargos-painel-pessoas" aria-selected="false" tabindex="-1">PESSOAS</button>
+      <button id="cargos-aba-explicar" class="cargos-aba" type="button" role="tab"
+              aria-controls="cargos-painel-explicar" aria-selected="false" tabindex="-1">QUEM PODE O QUÊ</button>
+    </div>
+
+    <p id="cargos-estado" class="cargos-estado" role="status"></p>
+    <!-- Revelado antes de escrito: `role="alert"` não lê o que entrou escondido. -->
+    <p id="cargos-erro" class="erro cargos-recusa" role="alert" hidden></p>
+
+    <section id="cargos-painel-cargos" class="cargos-painel" role="tabpanel"
+             aria-labelledby="cargos-aba-cargos">
+      <div class="cargos-mestre">
+        <div class="cargos-rolo">
+          <ol id="cargos-lista" class="cargos-lista"
+              aria-label="cargos, do mais alto ao mais baixo"></ol>
+        </div>
+        <button id="cargos-novo" class="cargos-botao" type="button">NOVO CARGO</button>
+        <p id="cargos-novo-motivo" class="cargos-motivo" hidden></p>
+      </div>
+
+      <div class="cargos-detalhe">
+        <button id="cargos-voltar" class="cargos-voltar" type="button">VOLTAR AOS CARGOS</button>
+        <p id="cargos-editor-vazio" class="cargos-vazio"></p>
+        <form id="cargos-form" class="cargos-form" aria-labelledby="cargos-editor-titulo" hidden>
+          <h3 id="cargos-editor-titulo" class="cargos-editor-titulo" tabindex="-1"></h3>
+          <p id="cargos-editor-motivo" class="cargos-motivo" hidden></p>
+          <div class="cargos-campos">
+            <label class="cargos-campo">
+              <span class="rotulo">NOME DO CARGO</span>
+              <input id="cargos-nome" class="cargos-entrada" name="nome"
+                     spellcheck="false" autocomplete="off">
+            </label>
+            <label class="cargos-campo">
+              <span class="rotulo">COR</span>
+              <select id="cargos-cor" class="cargos-entrada" name="cor"></select>
+            </label>
+          </div>
+          <p id="cargos-estado-nota" class="nota cargos-estado-nota"></p>
+          <div class="cargos-rolo">
+            <div id="cargos-permissoes" class="cargos-permissoes"></div>
+          </div>
+          <p id="cargos-rascunho" class="cargos-rascunho" hidden></p>
+          <!--
+            O GANHO EFETIVO, antes de salvar: quem passa a poder e quem deixa de
+            poder o quê, calculado pelo servidor. Tirar uma restrição nunca
+            parece inofensivo aqui: ela aparece como o que devolve.
+          -->
+          <div id="cargos-previa" class="cargos-previa" aria-live="polite" hidden>
+            <h4 class="cargos-previa-titulo">O QUE MUDA PARA AS PESSOAS</h4>
+            <ul id="cargos-previa-lista" class="cargos-previa-lista"></ul>
+          </div>
+          <p id="cargos-form-erro" class="erro cargos-recusa" role="alert" hidden></p>
+          <div class="cargos-botoes">
+            <button id="cargos-apagar" class="cargos-botao cargos-botao-apagar" type="button">APAGAR O CARGO</button>
+            <button id="cargos-descartar" class="cargos-botao" type="button">DESCARTAR</button>
+            <button id="cargos-refazer" class="cargos-botao" type="button" hidden>REFAZER SOBRE O ATUAL</button>
+            <button id="cargos-salvar" class="botao cargos-salvar" type="submit">SALVAR O CARGO</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section id="cargos-painel-pessoas" class="cargos-painel" role="tabpanel"
+             aria-labelledby="cargos-aba-pessoas" hidden>
+      <div class="cargos-mestre">
+        <div class="cargos-rolo">
+          <ul id="cargos-pessoas" class="cargos-lista" aria-label="pessoas deste servidor"></ul>
+        </div>
+      </div>
+      <div class="cargos-detalhe">
+        <button id="cargos-pessoas-voltar" class="cargos-voltar" type="button">VOLTAR ÀS PESSOAS</button>
+        <p id="cargos-pessoa-vazio" class="cargos-vazio"></p>
+        <div id="cargos-pessoa" class="cargos-form" hidden>
+          <h3 id="cargos-pessoa-titulo" class="cargos-editor-titulo" tabindex="-1"></h3>
+          <p id="cargos-pessoa-motivo" class="cargos-motivo" hidden></p>
+          <div class="cargos-rolo">
+            <ul id="cargos-da-pessoa" class="cargos-atribuicoes" aria-labelledby="cargos-pessoa-titulo"></ul>
+          </div>
+          <!--
+            Dar ou tirar um cargo espera a confirmação, com o que muda escrito:
+            tirar um cargo que restringe devolve permissões, e isso se lê antes.
+          -->
+          <div id="cargos-pendente" class="cargos-previa" aria-live="polite" hidden>
+            <h4 id="cargos-pendente-titulo" class="cargos-previa-titulo"></h4>
+            <ul id="cargos-pendente-lista" class="cargos-previa-lista"></ul>
+            <div class="cargos-botoes">
+              <button id="cargos-pendente-cancelar" class="cargos-botao" type="button">CANCELAR</button>
+              <button id="cargos-pendente-confirmar" class="botao cargos-salvar" type="button">CONFIRMAR</button>
+            </div>
+          </div>
+          <p id="cargos-pessoa-erro" class="erro cargos-recusa" role="alert" hidden></p>
+          <div class="cargos-botoes">
+            <button id="cargos-pessoa-explicar" class="cargos-botao" type="button">QUEM PODE O QUÊ</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="cargos-painel-explicar" class="cargos-painel cargos-painel-unico" role="tabpanel"
+             aria-labelledby="cargos-aba-explicar" hidden>
+      <label class="cargos-campo">
+        <span class="rotulo">PESSOA</span>
+        <select id="cargos-explicar-quem" class="cargos-entrada"></select>
+      </label>
+      <p id="cargos-explicar-resumo" class="cargos-regra-frase"></p>
+      <div class="cargos-rolo">
+        <div id="cargos-explicacao" class="cargos-explicacao"></div>
+      </div>
+    </section>
+  </div>
+</div>
+<!-- /cargos (cargos-ui) -->
+
 <script src="mods-runtime.js"></script>
 <!--
   A gramática da região e os recursos que montá-la cria. Antes de base.js pela
@@ -4636,9 +5155,16 @@
 -->
 <script src="voz-web.js"></script>
 <!--
-  A sessão pelo navegador (Tarefa 2.6 da F4): a WebTransport e o fluxo de
-  controle em volta da ligação do `.wasm`. Na carga ela só declara; quem a abre
-  é o `connect` da ponte.
+  O enlace WebRTC da página (0.17, D1–D9; do browser-signaling): o
+  `RTCPeerConnection` contra o anfitrião ICE-lite, o certificado DTLS efêmero e
+  os canais. Antes da sessão, que usa o `criarEnlaceRtc` e o
+  `prepararCertificadoDtls` dele. Na carga ele só declara.
+-->
+<script src="rtc-web.js"></script>
+<!--
+  A sessão pelo navegador (Tarefa 2.6 da F4; WebRTC desde a 0.17): o enlace e o
+  fluxo de controle em volta da ligação do `.wasm`. Na carga ela só declara;
+  quem a abre é o `connect` da ponte.
 -->
 <script src="sessao-web.js"></script>
 <!--
@@ -4673,6 +5199,8 @@
   precise pensar nisso.
 -->
 <script src="camada-portaria.js"></script>
+<!-- cargos (cargos-ui): depois da moderação, porque APAGAR confirma por `abrirConfirmacao`. -->
+<script src="cargos.js"></script>
 <script src="camada-toque.js"></script>
 <script src="camada-sala.js"></script>
 <script src="camada-hospedagem.js"></script>
@@ -4680,6 +5208,7 @@
 <script src="camada-nomear.js"></script>
 <script src="camada-mods.js"></script>
 <script src="camada-versoes.js"></script>
+<script src="tela-antes-de-hospedar.js"></script>
 <script src="camada-servidores.js"></script>
 <!--
   Depois de `tela-sessao.js`, e não é gosto: a chamada usa `naoMedido`,
@@ -4689,6 +5218,7 @@
   mexer nele.
 -->
 <script src="tela-chamada.js"></script>
+<script src="camada-sessoes.js"></script>
 <!--
   Depois da chamada por arrumação e não por necessidade: os dois lados só se
   chamam de dentro de manipulador, que é sempre depois de todos os arquivos
@@ -4707,6 +5237,7 @@
 <script src="celular-conversa.js"></script>
 <script src="celular-pessoas.js"></script>
 <script src="celular-ajustes.js"></script>
+<script src="celular-cinema.js"></script>
 <script src="celular-entrada.js"></script>
 <script src="larga-casca.js"></script>
 </body>

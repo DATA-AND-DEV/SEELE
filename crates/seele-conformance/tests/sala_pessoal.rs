@@ -24,13 +24,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::SigningKey;
 use seele_core::confere_codigo::chave_do_pino;
-use seele_core::encontro::{localizar, Localizacao, PRAZO_DO_QUARTO};
+use seele_core::encontro::{localizar3, Localizacao, PRAZO_DO_QUARTO};
 use seele_core::enlace::{Destino, Enlace, Esperada};
 use seele_core::{MemoryPinStore, PinStore};
 use seele_proto::codigo::Codigo;
-use seele_proto::control::{ClientMessage, Permission, ServerMessage};
+use seele_proto::control::{Permission, ServerMessage};
 use seele_proto::encontro::{Marcas, Vizinhanca};
 use seele_server::alcance::encontro::EstadoDoRegistro;
 use seele_server::hospedagem::Hospedagem;
@@ -38,6 +38,7 @@ use seele_server::permissions::Permissions;
 use seele_server::recepcao::Aviso;
 use seele_server::tls::Identity;
 
+mod par_cru;
 mod vaga;
 
 /// A semente de quem recebe.
@@ -83,144 +84,35 @@ fn local(sala: &Hospedagem) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], sala.endereco().port()))
 }
 
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
-
 /// Um par cru até a prova: quem liga ainda não lê o `Tocando` (tarefa 6e).
-struct Par {
-    _conexao: quinn::Connection,
-    _envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
-    _ponta: quinn::Endpoint,
-}
-
-impl Par {
-    async fn proximo(&mut self) -> anyhow::Result<ServerMessage> {
-        seele_server::frame::read::<ServerMessage>(&mut self.recebe).await
-    }
-}
+///
+/// Desde a 0.17, pelo enlace (`par_cru`): a sala se apresenta com a chave dela
+/// na `0x03`, e a prova D5 amarra a impressão dessa chave e o DTLS desta ponta.
+type Par = par_cru::Par;
 
 async fn par_cru(endereco: SocketAddr, semente: u8) -> Par {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).unwrap(),
-    )));
-    let conexao = ponta
-        .connect(endereco, seele_proto::transport::NOME_DA_SALA)
-        .unwrap()
-        .await
-        .unwrap();
-    let (mut envio, mut recebe) = conexao.open_bi().await.unwrap();
-    let pessoa = chave(semente);
-    seele_server::frame::write(
-        &mut envio,
-        &ClientMessage::Hello {
-            faixa: seele_proto::FAIXA,
-            client: "par-cru".into(),
-            nickname: format!("pessoa{semente:03}"),
-            public_key: pessoa.verifying_key().to_bytes().to_vec(),
-            join_secret: None,
-            material_e2ee: None,
-            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
-        },
-    )
-    .await
-    .unwrap();
-    let ServerMessage::Challenge { nonce } =
-        seele_server::frame::read::<ServerMessage>(&mut recebe)
-            .await
-            .unwrap()
-    else {
-        panic!("a sala não mandou Challenge");
-    };
-    let cadeia = conexao
-        .peer_identity()
-        .unwrap()
-        .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-        .unwrap();
-    let impressao = seele_proto::transport::certificate_digest(cadeia.first().unwrap().as_ref());
-    let nonce: [u8; 32] = nonce.as_slice().try_into().unwrap();
-    seele_server::frame::write(
-        &mut envio,
-        &ClientMessage::Response {
-            proof: pessoa
-                .sign(&seele_proto::assinatura::prova_de_cliente(
-                    &impressao, &nonce,
-                ))
-                .to_bytes()
-                .to_vec(),
-        },
-    )
-    .await
-    .unwrap();
-    Par {
-        _conexao: conexao,
-        _envio: envio,
-        recebe,
-        _ponta: ponta,
-    }
+    par_cru::ate_a_prova(endereco, &chave(semente), &format!("pessoa{semente:03}")).await
 }
 
 #[tokio::test]
 async fn a_sala_apresenta_a_chave_da_pessoa_e_quem_recebe_entra_pelo_codigo() {
     let _vaga = vaga::minha();
     let sala = subir_a_sala(None).await;
+    // Desde a 0.17 (D3) a sala não se apresenta mais por um certificado Ed25519
+    // da semente: o DTLS dela é P-256 efêmero, e a identidade vai na
+    // apresentação `0x03`, assinada pela chave da pessoa. A impressão que quem
+    // liga por código confere é o SHA-256 dos 32 bytes dessa chave — e é ela,
+    // e não a do certificado de antes, que a sala tem de dizer.
+    let da_pessoa = chave(DONO).verifying_key().to_bytes();
     assert_eq!(
         sala.impressao_digital(),
-        Identity::da_semente(&[DONO; 32]).unwrap().fingerprint(),
+        seele_proto::transport::certificate_fingerprint(&da_pessoa),
         "a sala não apresentou a identidade da pessoa"
+    );
+    assert_ne!(
+        sala.impressao_digital(),
+        Identity::da_semente(&[DONO; 32]).unwrap().fingerprint(),
+        "a sala ainda diz a impressão do certificado Ed25519 da 0.16, que o DTLS não negocia"
     );
     assert!(sala.recepcao().is_some(), "a sala subiu sem campainha");
 
@@ -368,7 +260,9 @@ async fn a_sala_se_registra_assinada_e_quem_liga_a_acha_pelo_codigo() {
         *registro.borrow()
     );
 
-    let achado = localizar(
+    // Pelo `QUEM3`: desde a 0.17 a sala registra pelo `MORO3` (ENC/3), e o
+    // `QUEM2` de antes só acharia uma sala da linha 1.
+    let achado = localizar3(
         &ponto.to_string(),
         &Marcas::da_sala(&codigo_de(DONO)),
         PRAZO_DO_QUARTO,

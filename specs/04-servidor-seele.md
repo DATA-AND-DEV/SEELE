@@ -6,7 +6,7 @@ O daemon se chama `seeled`. Uma instância é um **Server Central**. Internament
 
 | Subsistema | Responsabilidade |
 |---|---|
-| **PERMISSIONS** | Identidade, autenticação, sessões, papéis e permissões |
+| **PERMISSIONS** | Identidade, autenticação, sessões, cargos e permissões |
 | **MEDIA** | Roteamento de mídia: assinaturas de VoiceRoom, encaminhamento de datagrams, controle de banda |
 | **PERSISTENCE** | Estado persistente: VoiceRooms, Linhas, histórico, configuração, migrações |
 
@@ -18,21 +18,54 @@ Quando um subsistema está degradado, o cliente mostra isso explicitamente. "Os 
 Server (a instância)
  ├─ VoiceRoom       — canal de voz     (id, nome, limite, senha?, papel mínimo)
  ├─ Linha      — canal de texto   (id, nome, papel mínimo de leitura/escrita)
- ├─ Pessoa     — conta de usuário (id, apelido, chave pública, papéis)
- └─ Papel      — conjunto de permissões
+ ├─ Pessoa     — conta de usuário (id, apelido, chave pública, cargos)
+ └─ Cargo      — posição, o que concede e o que restringe
 ```
 
 VoiceRooms e Linhas são independentes; uma sala de voz pode ter uma Linha associada, mas não é obrigatório.
 
-## Permissões
+## Cargos e permissões (desde a 0.17, ADR 0064)
 
-Modelo simples e enumerado, sem sistema de expressão. Cada Papel carrega um conjunto:
+O modelo mental é o do Discord, com as decisões SEELE que o ADR 0064 escreve ao lado de cada uma.
 
-`ver_voice_room`, `inserir_plug`, `falar`, `ler_linha`, `escrever_linha`, `remover_mensagem`, `mover_pessoa`, `expulsar`, `banir`, `gerenciar_voice_rooms`, `gerenciar_papeis`, `administrar_server`.
+**Permissões**, enumeradas, sem sistema de expressão:
+- do produto: ver salas de voz, entrar em sala de voz, falar, transmitir tela, ler canais, escrever em
+  canais, enviar arquivos, remover mensagens de outros, mover pessoas, expulsar, banir, gerenciar salas e
+  canais, gerenciar cargos, gerenciar servidor e **Administrador** (implica todas);
+- de MOD: uma ação só é autorizável se o MOD a declarou no `mod.json` (API 7). A chave é `{mod_id, acao}`,
+  e o servidor autoriza no despacho. Uma permissão desconhecida nunca concede.
 
-Papéis padrão: **Comandante** (tudo), **Operador** (moderação), **Pessoa** (uso normal), **Observador** (só ouvir e ler).
+**A regra:**
+- **o proprietário** pode tudo;
+- **o banido** não pode nada;
+- **para o resto**, o efetivo é a soma do que o `@everyone` e os cargos da pessoa concedem, menos o que
+  qualquer um deles restringe. A **restrição vence** qualquer concessão, inclusive a do Administrador.
 
-Regra: permissões negadas vencem concedidas. Sem herança em árvore — a complexidade não se paga na escala alvo.
+**A hierarquia**, por posição (o `@everyone` é 0):
+- gerenciar cargos só alcança cargos e pessoas abaixo do seu cargo mais alto, e só concede o que se tem;
+- toda mudança passa pelo **guarda do ganho efetivo**: ninguém dá a ninguém, nem a si, o que não tem
+  efetivamente;
+- moderar só alcança quem está abaixo, e nunca o proprietário;
+- os verbos de cargo levam a **revisão** do conjunto, e uma revisão velha é recusada.
+
+**O proprietário** é a chave **declarada pela máquina que hospeda**:
+- o app, ao hospedar;
+- a sala pessoal, pela chave dela;
+- o `seeled`, por `--proprietario <impressão>` na linha de comando (ele não lê arquivo de configuração;
+  o `ServerConfig::proprietario` é o mesmo campo para quem sobe o servidor em processo).
+
+Chegar primeiro, reconectar ou repetir um apelido nunca dá autoridade. Sem declaração, o servidor sobe sem
+dono e registra o aviso acionável.
+
+**Cargos semeados** (a migração 18 preserva o efeito exato dos quatro papéis de antes):
+- **Comandante** (tudo, com o Administrador);
+- **Operador** (moderação);
+- **Pessoa** (uso normal, e o cargo de chegada);
+- **Observador** (ouvir e ler, restringindo falar, escrever, enviar arquivos e transmitir tela);
+- **@everyone**, vazio.
+
+**Sem sobrescritas por canal na 0.17.** Fica o «cargo exigido» de leitura e escrita da Linha: a pessoa
+tem de ter aquele cargo, e quem administra passa.
 
 ## Concorrência
 
@@ -53,7 +86,7 @@ Controle de fluxo: limite por remetente de quadros por segundo (um cliente hones
 
 ## Persistência (PERSISTENCE)
 
-SQLite, arquivo único, WAL ligado. Tabelas: `pessoas`, `papeis`, `pessoas_papeis`, `voice_rooms`, `linhas`, `mensagens`, `banimentos`, `config`, `schema_version`.
+SQLite, arquivo único, WAL ligado. Tabelas: `pessoas`, `papeis` (os cargos, com `position`), `pessoas_papeis`, `voice_rooms`, `linhas`, `mensagens`, `banimentos`, `config` (o `proprietario` declarado), `mod_permissoes`, `revisao_dos_cargos`, `schema_version`.
 
 - Migrações embutidas no binário, aplicadas no boot, versionadas e irreversíveis.
 - Histórico de mensagens com retenção configurável (padrão: ilimitado).

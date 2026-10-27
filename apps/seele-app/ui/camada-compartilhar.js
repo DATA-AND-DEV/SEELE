@@ -58,6 +58,55 @@ let focoAntesDeCompartilhar = null;
 let fonteArmada = null;
 
 /**
+ * **A lista que a caixa desenha, e o único cache nativo em que `fonteArmada`
+ * significa algo.** O `id` de uma fonte é a POSIÇÃO dela na lista que
+ * `fontes_de_tela` devolveu (`seele-core/src/video.rs`: monitores e janelas com
+ * `enumerate`, as janelas na ordem z do Windows), e cada `fontes_de_tela` troca o
+ * cache nativo por índices NOVOS. Por isso a enumeração é uma coisa e o
+ * redesenho da caixa é outra:
+ *
+ * - **redesenhar** (o clique na fonte, a troca de qualidade, a de som, o evento
+ *   da tela) só repinta sobre esta lista, sem relistar: o cache nativo continua
+ *   o mesmo em que a pessoa escolheu;
+ * - **relistar** só onde é preciso (a abertura, depois de pedir a permissão,
+ *   depois de baixar o módulo), e toda relista DESARMA a escolha antes de
+ *   chamar `fontes_de_tela`. O título da janela não prova que é o mesmo alvo
+ *   (uma fecha, outra com o mesmo título aparece), então a escolha nunca é
+ *   reencontrada por nome: a pessoa escolhe de novo.
+ */
+let fontesDaAbertura = [];
+
+/** Se a última enumeração deu certo (uma lista vazia por falha não ganha frase). */
+let listouAsFontes = true;
+
+/** Quantas relistas foram pedidas e ainda não acabaram: com alguma, o COMEÇAR não sai. */
+let relistasPendentes = 0;
+
+/** Quantas vezes a escolha foi desarmada por uma relista (o COMEÇAR confere a sua). */
+let geracaoDaLista = 0;
+
+/** Se um COMEÇAR está em curso (um segundo toque não começa outro). */
+let comecando = false;
+
+/**
+ * **A fila única** de tudo o que fala com a lista nativa: a relista
+ * (`fontes_de_tela`) e o começo (`parar_de_compartilhar` + `compartilhar_tela`).
+ * Uma relista pedida no meio do começo espera ele acabar, e um começo nunca
+ * cai entre a escolha e a relista que a trocou.
+ */
+let filaDeTela = Promise.resolve();
+
+function naFilaDeTela(tarefa) {
+  const feita = filaDeTela.then(tarefa);
+  filaDeTela = feita.then(() => {}, () => {});
+  return feita;
+}
+
+/** O que a caixa diz quando uma relista desarmou a escolha de alguém. */
+const ESCOLHA_DESARMADA =
+  "A lista de telas e janelas foi lida de novo, e a sua escolha não vale mais. Escolha outra vez.";
+
+/**
  * Qual fonte está no ar agora, quando a transmissão é desta pessoa.
  *
  * **O retrato não sabe.** `TelaEmCurso` diz de quem é, que altura e que taxa
@@ -122,6 +171,23 @@ async function conferirPermissaoDeTela() {
  */
 function temControleDeTela() {
   return permissaoDeTela !== null && permissaoDeTela !== "NaoSeSabe";
+}
+
+/** A casca está no navegador, com a ponte web no lugar do Tauri. */
+function telaPeloNavegador() {
+  return typeof PONTE_NO_LUGAR_DO_TAURI !== "undefined" && PONTE_NO_LUGAR_DO_TAURI;
+}
+
+/**
+ * **Sem tela para compartilhar, dito no próprio botão** (caso 12): o
+ * COMPARTILHAR do rodapé fica à vista, marcado como indisponível
+ * (`aria-disabled`), com o porquê no nome e no `title`; o clique abre a caixa,
+ * que diz o mesmo. `null` enquanto há controle, ou enquanto não se perguntou.
+ */
+function porQueNaoHaTela() {
+  if (permissaoDeTela !== "NaoSeSabe") return null;
+  return telaPeloNavegador() ? FRASES_DA_TELA_NO_NAVEGADOR.palco
+    : "Esta versão não sabe compartilhar tela desta máquina. A de outra pessoa apareceria aqui.";
 }
 
 /**
@@ -201,20 +267,20 @@ const PERMISSAO_DE_TELA = {
  * vazia; a lista; e o snapshot, porque é ele que diz se já há transmissão nesta
  * sala e de quem ela é.
  */
-async function desenharCompartilhar() {
-  const permissao = await conferirPermissaoDeTela();
-  desenharPermissaoDeTela(permissao);
-  await desenharModuloDeTela();
-
-  let fontes = [];
-  let listou = true;
+async function desenharCompartilhar({ relistar = false } = {}) {
+  // A relista desarma a escolha e trava o COMEÇAR **antes** de qualquer espera.
+  if (relistar) comecarARelista();
+  let permissao;
   try {
-    fontes = await invoke("fontes_de_tela");
+    permissao = await conferirPermissaoDeTela();
+    desenharPermissaoDeTela(permissao);
+    await desenharModuloDeTela();
   } catch (falha) {
-    listou = false;
-    mostrarErroDeTela(falha);
+    if (relistar) relistasPendentes -= 1;
+    throw falha;
   }
-  desenharFontesDeTela(fontes, permissao, listou);
+  if (relistar) await relistarAsFontes();
+  desenharFontesDeTela(fontesDaAbertura, permissao, listouAsFontes);
   await desenharSomDaCaptura();
 
   let snapshot = null;
@@ -224,6 +290,75 @@ async function desenharCompartilhar() {
     if (falha !== "NotConnected") console.warn("snapshot:", falha);
   }
   desenharBotoesDeTela(snapshot);
+}
+
+/**
+ * Pede uma relista: a escolha sai de cena **antes** de `fontes_de_tela` ser
+ * chamado, e o COMEÇAR fica desabilitado até a lista nova chegar. Quem tinha uma
+ * escolha é avisado de que precisa de outra.
+ */
+function comecarARelista() {
+  geracaoDaLista += 1;
+  relistasPendentes += 1;
+  if (fonteArmada !== null) erroDeTela = ESCOLHA_DESARMADA;
+  fonteArmada = null;
+  // O `id` da fonte no ar era de uma lista que vai ser trocada.
+  fonteEmCurso = null;
+  $("compartilhar-comecar").disabled = true;
+}
+
+/**
+ * A enumeração, na fila: a única chamada de `fontes_de_tela` da interface. Guarda
+ * a lista que a caixa vai desenhar (a mesma do cache nativo), e destrava o
+ * COMEÇAR quando a última relista pendente acaba.
+ */
+function relistarAsFontes() {
+  return naFilaDeTela(async () => {
+    try {
+      await enumerarAsFontes();
+    } finally {
+      relistasPendentes -= 1;
+    }
+  });
+}
+
+/** A chamada a `fontes_de_tela`: ela REPÕE o cache nativo, e só ela o repõe. Sempre na fila. */
+async function enumerarAsFontes() {
+  try {
+    fontesDaAbertura = await invoke("fontes_de_tela");
+    listouAsFontes = true;
+  } catch (falha) {
+    fontesDaAbertura = [];
+    listouAsFontes = false;
+    mostrarErroDeTela(falha);
+  }
+}
+
+/**
+ * **A lista conta como consumida depois de QUALQUER tentativa de
+ * `compartilhar_tela`** (sucesso, falha ou o parar do TROCAR que falhou).
+ *
+ * `fonte_escolhida`, em `seele-ffi`, tira a fonte do cache nativo
+ * (`swap_remove`), e com o cache vazio ENUMERA sozinho, com índices novos: a
+ * lista que esta caixa guardou já não é o cache. Com uma fonte só o cache fica
+ * vazio e um segundo início cairia em qualquer janela que a reenumeração
+ * trouxesse; com várias, o `id` escolhido pode ter saído. Então, na mesma fila e
+ * antes de qualquer outro início, a escolha sai de cena e a lista é lida de novo
+ * (o que repõe o cache). O `parar_de_compartilhar` não mexe no cache.
+ *
+ * O `id` da fonte no ar também era da lista consumida, e sem reencontrá-la por
+ * título (que não prova que é o mesmo alvo) a marca «já no ar» não sobrevive.
+ */
+async function consumirAListaERelistar() {
+  geracaoDaLista += 1;
+  fonteArmada = null;
+  fonteEmCurso = null;
+  relistasPendentes += 1;
+  try {
+    await enumerarAsFontes();
+  } finally {
+    relistasPendentes -= 1;
+  }
 }
 
 /**
@@ -253,7 +388,10 @@ async function desenharModuloDeTela() {
 /** O bloco da permissão, ou nada quando não há o que dizer sobre ela. */
 function desenharPermissaoDeTela(permissao) {
   const bloco = $("compartilhar-permissao");
-  const dito = PERMISSAO_DE_TELA[permissao];
+  // No navegador, «não sabe» é do navegador, e não desta versão (caso 12).
+  const dito = permissao === "NaoSeSabe" && telaPeloNavegador()
+    ? { diz: FRASES_DA_TELA_NO_NAVEGADOR.diz, nota: FRASES_DA_TELA_NO_NAVEGADOR.nota, pedir: false }
+    : PERMISSAO_DE_TELA[permissao];
   bloco.hidden = !dito;
   $("compartilhar-pedir").hidden = !dito || !dito.pedir;
   if (!dito) return;
@@ -291,9 +429,8 @@ function desenharFontesDeTela(fontes, permissao, listou) {
   }
 
   vazio.hidden = true;
-  // A fonte armada pode ter sumido entre dois desenhos — uma janela fechada é
-  // uma escolha que deixou de existir. Desarmar aqui é o que impede o botão de
-  // mandar um identificador que ninguém mais reconhece.
+  // Rede: a lista é a mesma em que se escolheu (só uma relista a troca, e ela já
+  // desarmou), mas um `id` que não está nela nunca vai ao `compartilhar_tela`.
   if (fonteArmada !== null && !fontes.some((fonte) => fonte.id === fonteArmada)) {
     fonteArmada = null;
   }
@@ -384,7 +521,7 @@ function desenharBotoesDeTela(snapshot) {
   comecar.dataset.modo = minha ? "trocar" : "comecar";
   comecar.hidden = false;
   comecar.textContent = minha ? "TROCAR" : "COMPARTILHAR";
-  comecar.disabled = !snapshot || fonteArmada === null || mesmaFonte;
+  comecar.disabled = !snapshot || fonteArmada === null || mesmaFonte || relistasPendentes > 0;
   comecar.title = mesmaFonte
     ? "é esta que já está no ar; escolha outra para trocar"
     : fonteArmada === null
@@ -513,7 +650,7 @@ async function abrirCompartilhar() {
       $("compartilhar-quadros").value = String(pedido.quadros_maximos);
     }
   } catch (_) { /* O desenho abaixo mostra falhas da sessão. */ }
-  await desenharCompartilhar();
+  await desenharCompartilhar({ relistar: true });
   $("compartilhar").hidden = false;
   // O foco na caixa e não na lista: quem abriu ainda vai ler o que a permissão
   // diz, e um leitor de tela que começasse no meio da lista não anunciaria o
@@ -544,6 +681,7 @@ function abandonarCompartilhar() {
   $("compartilhar").hidden = true;
   focoAntesDeCompartilhar = null;
   fonteArmada = null;
+  geracaoDaLista += 1;
   erroDeTela = null;
 }
 
@@ -561,6 +699,8 @@ fecharAoClicarFora("compartilhar", fecharCompartilhar);
 $("compartilhar-fontes").addEventListener("click", (evento) => {
   const alvo = evento.target.closest("[data-fonte]");
   if (!alvo) return;
+  // Enquanto a lista é lida de novo, os botões são da lista velha: não valem.
+  if (relistasPendentes > 0) return;
   fonteArmada = Number(alvo.dataset.fonte);
   erroDeTela = null;
   desenharCompartilhar().catch((falha) => console.warn("fontes_de_tela:", falha));
@@ -580,7 +720,7 @@ $("compartilhar-pedir").addEventListener("click", async () => {
   } catch (falha) {
     mostrarErroDeTela(falha);
   }
-  await desenharCompartilhar();
+  await desenharCompartilhar({ relistar: true });
   await atualizarChamada();
 });
 
@@ -604,13 +744,19 @@ $("compartilhar-baixar").addEventListener("click", async () => {
   }
   botao.disabled = false;
   botao.textContent = antes;
-  await desenharCompartilhar();
+  await desenharCompartilhar({ relistar: true });
 });
 
 $("compartilhar-comecar").addEventListener("click", async () => {
+  // **Só sai com uma escolha feita sobre a lista vigente**: sem escolha, com a
+  // lista sendo lida de novo, ou com outro COMEÇAR em curso, não manda nada.
+  if (fonteArmada === null || relistasPendentes > 0 || comecando) return;
+  const fonte = fonteArmada;
+  const geracao = geracaoDaLista;
   const limites = limitesEscolhidos();
   erroDeTela = null;
   const trocando = $("compartilhar-comecar").dataset.modo === "trocar";
+  comecando = true;
   try {
     // **A antiga para antes de a nova começar, e a ordem é obrigatória.**
     //
@@ -621,12 +767,23 @@ $("compartilhar-comecar").addEventListener("click", async () => {
     //
     // Aguardado, e não disparado: começar antes de a parada chegar ao servidor
     // é a mesma corrida por outro caminho.
-    if (trocando) {
-      await invoke("parar_de_compartilhar");
-    }
-    await invoke("compartilhar_tela", { fonte: fonteArmada, limites });
-    fonteEmCurso = fonteArmada;
-    {
+    //
+    // **Na fila da lista**: uma relista pedida agora espera o começo acabar, e
+    // uma que já desarmou a escolha antes da vez deste começo o cancela.
+    const saiu = await naFilaDeTela(async () => {
+      if (geracao !== geracaoDaLista || fonteArmada !== fonte) return false;
+      try {
+        if (trocando) {
+          await invoke("parar_de_compartilhar");
+        }
+        await invoke("compartilhar_tela", { fonte, limites });
+        return true;
+      } finally {
+        // Deu certo ou não: a lista foi consumida, e o próximo início espera a nova.
+        await consumirAListaERelistar();
+      }
+    });
+    if (saiu) {
       // **Aqui havia um `registrarEventoDaChamada`, e ele não existe mais.**
       //
       // O registro de eventos era da tela de chamada, que a comp da 0.9.0
@@ -655,6 +812,10 @@ $("compartilhar-comecar").addEventListener("click", async () => {
     }
   } catch (falha) {
     mostrarErroDeTela(falha);
+    // A falha é dita, e a escolha que ela desarmou também.
+    if (geracao !== geracaoDaLista) erroDeTela = `${erroDeTela} ${ESCOLHA_DESARMADA}`;
+  } finally {
+    comecando = false;
   }
   await desenharCompartilhar();
   await atualizarChamada();

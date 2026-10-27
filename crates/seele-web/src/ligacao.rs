@@ -59,9 +59,13 @@ pub struct Pedido {
     pub apelido: String,
     /// A chave pública Ed25519 desta identidade.
     pub chave_publica: [u8; 32],
-    /// A impressão do certificado longo, o `fp=` do link: é a que o navegador
-    /// conferiu, pelos hashes dos curtos que o mesmo link levou.
+    /// A impressão do certificado do servidor, o `fp=` do link: é a que a
+    /// página escreveu como o `a=fingerprint` do anfitrião, e que o DTLS
+    /// conferiu (contrato da 0.17, D3).
     pub impressao: [u8; 32],
+    /// A impressão do certificado DTLS **desta** página nesta conexão (o
+    /// `RTCCertificate` efêmero que ela gerou), que a prova D5 leva.
+    pub impressao_dtls: [u8; 32],
     /// O segredo do convite, quando a entrada é por convite.
     pub convite: Option<String>,
     /// O conjunto de MODs que esta pessoa já aceitou neste servidor.
@@ -70,8 +74,8 @@ pub struct Pedido {
 
 impl Pedido {
     /// O pedido no JSON da página: `{"apelido", "chave_publica", "impressao",
-    /// "convite", "aceito"}`, com a chave e a impressão em hex (64 dígitos) e
-    /// os dois últimos podendo faltar.
+    /// "impressao_dtls", "convite", "aceito"}`, com a chave e as impressões em
+    /// hex (64 dígitos) e os dois últimos podendo faltar.
     ///
     /// # Errors
     ///
@@ -93,6 +97,7 @@ impl Pedido {
             apelido: texto_de("apelido")?.ok_or("falta `apelido`")?,
             chave_publica: trinta_e_dois("chave_publica")?,
             impressao: trinta_e_dois("impressao")?,
+            impressao_dtls: trinta_e_dois("impressao_dtls")?,
             convite: texto_de("convite")?,
             aceito: texto_de("aceito")?,
         })
@@ -200,6 +205,9 @@ pub struct Ligacao {
     etapa: Etapa,
     apelido: String,
     impressao: [u8; 32],
+    /// A impressão DTLS desta página na conexão de agora: a volta traz a da
+    /// conexão nova ([`Ligacao::retomar`]).
+    impressao_dtls: [u8; 32],
     aceito: Option<String>,
     /// O número que toda escrita leva: a mínima até a primeira resposta, e o
     /// carimbo dela depois.
@@ -214,6 +222,10 @@ pub struct Ligacao {
     relogio: std::time::Duration,
     /// A volta em curso: a sessão velha e as escolhas que se repetem.
     voltando: Option<(Box<Sessao>, crate::sessao::Escolhas)>,
+    /// O `Disconnecting { FellBehind }` desta CONEXÃO já foi dobrado (pelo
+    /// quadro, ou pelo código do fechamento): o outro não conta duas vezes.
+    /// Volta a `false` a cada conexão nova ([`Ligacao::retomar`]).
+    ficou_para_tras: bool,
 }
 
 /// O sinal desta ponta: o `Signal` do `seele-proto`, alimentado a cada volta
@@ -243,6 +255,7 @@ impl Ligacao {
             etapa: Etapa::Desafio,
             apelido: pedido.apelido.clone(),
             impressao: pedido.impressao,
+            impressao_dtls: pedido.impressao_dtls,
             aceito: pedido.aceito.clone(),
             carimbo: VERSAO_MINIMA,
             entrada: Desenquadrador::default(),
@@ -251,6 +264,7 @@ impl Ligacao {
             guardada: None,
             voltando: None,
             relogio: std::time::Duration::ZERO,
+            ficou_para_tras: false,
         };
         ligacao.dizer_ola(pedido)?;
         Ok(ligacao)
@@ -304,10 +318,13 @@ impl Ligacao {
         self.etapa = Etapa::Desafio;
         self.apelido.clone_from(&pedido.apelido);
         self.impressao = pedido.impressao;
+        self.impressao_dtls = pedido.impressao_dtls;
         self.aceito.clone_from(&pedido.aceito);
         self.carimbo = VERSAO_MINIMA;
         self.entrada = Desenquadrador::default();
         self.saida.clear();
+        // Uma conexão nova: o código da velha não contamina esta.
+        self.ficou_para_tras = false;
         self.voltando = Some((sessao, escolhas));
         self.dizer_ola(pedido)
     }
@@ -374,8 +391,11 @@ impl Ligacao {
 
     /// A telemetria que esta ponta mede, com a perda que o servidor contou:
     /// os campos do `Telemetry` do `Snapshot` que não são do áudio.
+    ///
+    /// `perda_contada` é `None` quando o servidor não mediu (linha 2: a
+    /// `Telemetry` leva `Option`), e vai à página como `null` — nunca como 0.
     #[must_use]
-    pub fn telemetria(&self, perda_contada: f32) -> Value {
+    pub fn telemetria(&self, perda_contada: Option<f32>) -> Value {
         #[allow(
             clippy::cast_precision_loss,
             reason = "um tempo de ida e volta em microssegundos cabe folgado no f32"
@@ -448,6 +468,32 @@ impl Ligacao {
         }
     }
 
+    /// **O fluxo de controle acabou, com o código do fechamento** (o `0x02
+    /// codigo` do `ctl`, a auditoria Astra item 4). Com
+    /// [`seele_proto::transport::CODIGO_FICOU_PARA_TRAS`] e sem o quadro nesta
+    /// conexão, dobra no `Room` o mesmo `Disconnecting { FellBehind }` que o
+    /// quadro dobraria — a queda com nome, que não acaba a sessão — e só então
+    /// a queda de sempre ([`Ligacao::fluxo_acabou`]). Qualquer outro código
+    /// (o 0, os cortes do enlace, as recusas do core, um desconhecido) é a
+    /// queda de sempre: nunca se infere `FellBehind` de outro corte.
+    pub fn fluxo_acabou_com(&mut self, codigo: u32) -> Vec<Passo> {
+        let mut passos = Vec::new();
+        if codigo == seele_proto::transport::CODIGO_FICOU_PARA_TRAS && !self.ficou_para_tras {
+            if let Etapa::Dentro(sessao) = &mut self.etapa {
+                let despedida = ServerMessage::Disconnecting {
+                    reason: seele_proto::control::DisconnectReason::FellBehind,
+                };
+                let eventos = sessao.dobrar_com_eventos(&despedida);
+                self.ficou_para_tras = true;
+                if let Ok(mensagem) = serde_json::to_value(&despedida) {
+                    passos.push(Passo::Chegou { mensagem, eventos });
+                }
+            }
+        }
+        passos.extend(self.fluxo_acabou());
+        passos
+    }
+
     /// O fluxo de controle acabou sem recusa nenhuma: no aperto, é o
     /// `Unreachable` do desktop («no Challenge came back»); dentro, a sessão
     /// caiu.
@@ -500,6 +546,14 @@ impl Ligacao {
                 let mut buraco = None;
                 let passo = match decode_da_lista::<ServerMessage>(quadro) {
                     Ok(Lido::Mensagem(mensagem)) => {
+                        if matches!(
+                            mensagem,
+                            ServerMessage::Disconnecting {
+                                reason: seele_proto::control::DisconnectReason::FellBehind
+                            }
+                        ) {
+                            self.ficou_para_tras = true;
+                        }
                         if let Some(recusa) = peso_recusado(&mut sessao, &mensagem) {
                             self.etapa = Etapa::Dentro(sessao);
                             return vec![recusa];
@@ -554,8 +608,13 @@ impl Ligacao {
                     return self.recusar(classificar_protocolo());
                 };
                 self.etapa = Etapa::Assinando;
-                vec![Passo::Assinar(seele_proto::assinatura::prova_de_cliente(
+                // A prova D5 (contrato da 0.17): presa à impressão do servidor
+                // e à do certificado DTLS desta conexão, que o servidor confere
+                // com o que viu. Quem repassa o desafio por outra conexão não
+                // tem o certificado desta.
+                vec![Passo::Assinar(seele_proto::assinatura::prova_de_cliente_2(
                     &self.impressao,
+                    &self.impressao_dtls,
                     &nonce,
                 ))]
             }
@@ -686,13 +745,15 @@ fn classificar_protocolo() -> Value {
     recusada(EndReason::Incompatible)
 }
 
-/// `OutraLinha`, com a versão do servidor quando ela é anterior à 1.0 e o
-/// aviso de que é mais nova: as regras do `classify_connect_failure`.
+/// `OutraLinha`, com a versão do servidor quando ela é de uma linha anterior
+/// (o Servidor 1, a 0.16, ou antes: `Linha::e_anterior`) e o aviso de que é
+/// mais nova: as regras do `classify_connect_failure`.
 fn outra_linha(numero: u8) -> Value {
     let linha = linha_de(numero);
-    let servidor = match linha {
-        Some(Linha::AntesDaUm { .. }) => linha_do_protocolo(numero),
-        _ => None,
+    let servidor = if linha.is_some_and(Linha::e_anterior) {
+        linha_do_protocolo(numero)
+    } else {
+        None
     };
     json!({ "OutraLinha": {
         "numero": numero,
@@ -735,6 +796,7 @@ mod tests {
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
+            impressao_dtls: [8; 32],
             convite: Some("segredo".into()),
             aceito: None,
         }
@@ -768,6 +830,119 @@ mod tests {
         }
     }
 
+    /// Uma ligação dentro da sessão.
+    fn dentro() -> Ligacao {
+        let mut ligacao = Ligacao::abrir(pedido()).unwrap();
+        let _ = ligacao.chegou(&do_servidor(&ServerMessage::Challenge {
+            nonce: vec![3; 32],
+        }));
+        let _ = ligacao.assinado(&[9; 64]);
+        assert_eq!(ligacao.chegou(&do_servidor(&sessao())), vec![Passo::Entrou]);
+        let _ = ligacao.para_o_fio();
+        ligacao
+    }
+
+    fn despedidas_em(passos: &[Passo]) -> usize {
+        passos
+            .iter()
+            .filter(|passo| {
+                matches!(passo, Passo::Chegou { mensagem, .. }
+                    if mensagem == &serde_json::to_value(ServerMessage::Disconnecting {
+                        reason: DisconnectReason::FellBehind,
+                    }).unwrap())
+            })
+            .count()
+    }
+
+    fn algum_fim(passos: &[Passo]) -> bool {
+        passos.iter().any(|passo| {
+            matches!(passo, Passo::Chegou { eventos, .. }
+                if eventos.iter().any(|evento| evento.get("Ended").is_some()))
+        })
+    }
+
+    #[test]
+    fn o_codigo_de_quem_ficou_para_tras_e_a_mesma_despedida_do_quadro_uma_vez_por_conexao() {
+        use seele_proto::transport::CODIGO_FICOU_PARA_TRAS;
+        // 1. O código, sem o quadro: a despedida `FellBehind` dobrada, sem fim,
+        // e depois a queda de sempre (a sessão fica guardada para a volta).
+        let mut ligacao = dentro();
+        let passos = ligacao.fluxo_acabou_com(CODIGO_FICOU_PARA_TRAS);
+        assert_eq!(despedidas_em(&passos), 1, "{passos:?}");
+        assert!(
+            !algum_fim(&passos),
+            "ficar para trás não acaba a sessão: {passos:?}"
+        );
+        assert!(
+            matches!(passos.last(), Some(Passo::Perdida(_))),
+            "{passos:?}"
+        );
+        assert!(
+            ligacao.sessao().is_some(),
+            "a sessão não ficou guardada para a volta"
+        );
+
+        // 2. O quadro e depois o código: uma despedida só.
+        let mut ligacao = dentro();
+        let pelo_quadro = ligacao.chegou(&do_servidor(&ServerMessage::Disconnecting {
+            reason: DisconnectReason::FellBehind,
+        }));
+        assert_eq!(despedidas_em(&pelo_quadro), 1);
+        let passos = ligacao.fluxo_acabou_com(CODIGO_FICOU_PARA_TRAS);
+        assert_eq!(
+            despedidas_em(&passos),
+            0,
+            "o código contou de novo a despedida do quadro: {passos:?}"
+        );
+        assert!(
+            matches!(passos.as_slice(), [Passo::Perdida(_)]),
+            "{passos:?}"
+        );
+
+        // 3. Nenhum outro código vira `FellBehind`: o fecho comum, os cortes do
+        // enlace, as recusas do core e um desconhecido.
+        for codigo in [
+            0,
+            1,
+            2,
+            3,
+            0x5345_0010,
+            0x5345_0020,
+            0x5345_0031,
+            0xDEAD_BEEF,
+        ] {
+            let mut ligacao = dentro();
+            let passos = ligacao.fluxo_acabou_com(codigo);
+            assert!(
+                matches!(passos.as_slice(), [Passo::Perdida(_)]),
+                "{codigo:#x}: {passos:?}"
+            );
+        }
+
+        // 4. Uma conexão nova é contada de novo, e a velha não a contamina.
+        let mut ligacao = dentro();
+        let _ = ligacao.fluxo_acabou_com(CODIGO_FICOU_PARA_TRAS);
+        ligacao
+            .retomar(pedido(), crate::sessao::Escolhas::default())
+            .unwrap();
+        let _ = ligacao.chegou(&do_servidor(&ServerMessage::Challenge {
+            nonce: vec![3; 32],
+        }));
+        let _ = ligacao.assinado(&[9; 64]);
+        assert_eq!(ligacao.chegou(&do_servidor(&sessao())), vec![Passo::Voltou]);
+        let passos = ligacao.fluxo_acabou_com(CODIGO_FICOU_PARA_TRAS);
+        assert_eq!(
+            despedidas_em(&passos),
+            1,
+            "a conexão nova herdou a despedida da velha: {passos:?}"
+        );
+
+        // 5. No aperto (antes da sessão), o código não inventa despedida.
+        let mut ligacao = Ligacao::abrir(pedido()).unwrap();
+        let passos = ligacao.fluxo_acabou_com(CODIGO_FICOU_PARA_TRAS);
+        assert_eq!(despedidas_em(&passos), 0, "{passos:?}");
+    }
+
     #[test]
     fn o_hello_sai_com_a_minima_e_a_prova_e_a_do_proto() {
         let mut ligacao = Ligacao::abrir(pedido()).unwrap();
@@ -794,8 +969,8 @@ mod tests {
         let passos = ligacao.chegou(resto);
         assert_eq!(
             passos,
-            vec![Passo::Assinar(seele_proto::assinatura::prova_de_cliente(
-                &[7; 32], &[3; 32]
+            vec![Passo::Assinar(seele_proto::assinatura::prova_de_cliente_2(
+                &[7; 32], &[8; 32], &[3; 32]
             ))]
         );
         assert!(ligacao.assinado(&[9; 64]).is_empty());
@@ -815,13 +990,15 @@ mod tests {
     #[test]
     fn o_pedido_da_pagina_e_lido_em_hex_e_o_torto_e_dito() {
         let lido = Pedido::de_json(&format!(
-            r#"{{"apelido":"ana","chave_publica":"{}","impressao":"{}","convite":null}}"#,
+            r#"{{"apelido":"ana","chave_publica":"{}","impressao":"{}","impressao_dtls":"{}","convite":null}}"#,
             "0A".repeat(32),
-            "ff".repeat(32)
+            "ff".repeat(32),
+            "01".repeat(32)
         ))
         .unwrap();
         assert_eq!(lido.chave_publica, [10; 32]);
         assert_eq!(lido.impressao, [255; 32]);
+        assert_eq!(lido.impressao_dtls, [1; 32]);
         assert_eq!(lido.convite, None);
         assert_eq!(lido.aceito, None);
         for torto in [

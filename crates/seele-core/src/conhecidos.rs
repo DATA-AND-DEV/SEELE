@@ -111,7 +111,16 @@ pub struct Conhecido {
     /// sonda continua medindo, e a primeira janela que doer o substitui. É essa
     /// propriedade que deixa ele morar num arquivo que se apaga sem
     /// consequência.
+    ///
+    /// **Desde a 0.17 é a semente já conferida**, e não o número do disco:
+    /// [`crate::caminho::CaminhoLembrado::semente`] contra a data e a rede de
+    /// agora, grampeada em [`crate::caminho::TETO_DA_SEMENTE_BPS`]. `None`
+    /// também quando a medida é de outra rede, passou de uma semana, ou veio da
+    /// 0.16 sem data — o que está guardado é [`Self::caminho_lembrado`].
     pub caminho_bps: Option<u32>,
+    /// A medida como está no disco, com a data e a rede em que foi tirada.
+    #[serde(skip)]
+    pub caminho_lembrado: Option<crate::caminho::CaminhoLembrado>,
 }
 
 /// A lista, em disco.
@@ -119,6 +128,9 @@ pub struct Conhecido {
 pub struct Conhecidos {
     caminho: PathBuf,
     entradas: Vec<Conhecido>,
+    /// A rede em que esta lista foi aberta: contra ela se confere cada
+    /// [`Conhecido::caminho_lembrado`], e com ela se anota a medida nova.
+    ambiente: String,
 }
 
 impl Conhecidos {
@@ -132,13 +144,27 @@ impl Conhecidos {
     ///
     /// Falha só se o diretório não puder ser criado.
     pub fn abrir(caminho: PathBuf) -> Result<Self> {
+        Self::abrir_em(caminho, crate::caminho::ambiente_desta_maquina())
+    }
+
+    /// [`Self::abrir`] numa rede dita, e não na desta máquina. É por onde os
+    /// testes mudam de rede sem mudar de máquina.
+    ///
+    /// # Errors
+    ///
+    /// Falha só se o diretório não puder ser criado.
+    pub fn abrir_em(caminho: PathBuf, ambiente: String) -> Result<Self> {
         if let Some(pai) = caminho.parent() {
             std::fs::create_dir_all(pai)
                 .with_context(|| format!("não consegui criar {}", pai.display()))?;
         }
 
-        let entradas = ler(&caminho).unwrap_or_default();
-        Ok(Self { caminho, entradas })
+        let entradas = ler(&caminho, &ambiente).unwrap_or_default();
+        Ok(Self {
+            caminho,
+            entradas,
+            ambiente,
+        })
     }
 
     /// Os servidores conhecidos, do mais recente para o mais antigo.
@@ -195,10 +221,12 @@ impl Conhecidos {
             // campo zerado a cada conexão — e uma medida que se perde a cada
             // conexão nunca chega a servir para nada, que é justamente o defeito
             // que ela existe para corrigir.
-            let caminho_bps = entradas
+            let (caminho_bps, caminho_lembrado) = entradas
                 .iter()
                 .find(|e| e.alvo == alvo)
-                .and_then(|e| e.caminho_bps);
+                .map_or((None, None), |e| {
+                    (e.caminho_bps, e.caminho_lembrado.clone())
+                });
             entradas.retain(|e| e.alvo != alvo);
             entradas.push(Conhecido {
                 alvo,
@@ -211,6 +239,7 @@ impl Conhecidos {
                 bilhete,
                 impressao,
                 caminho_bps,
+                caminho_lembrado,
             });
             true
         })
@@ -263,21 +292,37 @@ impl Conhecidos {
     /// uma sessão em que ninguém compartilhou nada devolveria zero e desfaria,
     /// na segunda visita, o que a primeira aprendeu.
     ///
+    /// Anota **quando e em que rede** (a desta lista): é o que a próxima
+    /// abertura confere antes de dar a medida como semente.
+    ///
     /// # Errors
     ///
     /// Falha se o arquivo não puder ser gravado.
     pub fn anotar_caminho_medido(&mut self, alvo: &str, bps: u32) -> Result<()> {
+        self.anotar_caminho_medido_em(alvo, bps, agora_em_segundos())
+    }
+
+    /// [`Self::anotar_caminho_medido`] num instante dito.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser gravado.
+    pub fn anotar_caminho_medido_em(&mut self, alvo: &str, bps: u32, agora: i64) -> Result<()> {
         if bps == 0 {
             return Ok(());
         }
+        let lembrado = crate::caminho::CaminhoLembrado {
+            bps,
+            medido_em: agora,
+            ambiente: self.ambiente.clone(),
+        };
+        let semente = lembrado.semente(agora, &self.ambiente);
         self.mudar(|entradas| {
             let Some(entrada) = entradas.iter_mut().find(|e| e.alvo == alvo) else {
                 return false;
             };
-            if entrada.caminho_bps == Some(bps) {
-                return false;
-            }
-            entrada.caminho_bps = Some(bps);
+            entrada.caminho_lembrado = Some(lembrado);
+            entrada.caminho_bps = semente;
             true
         })
     }
@@ -336,7 +381,7 @@ impl Conhecidos {
     /// ([`trocar_privado`]).
     fn mudar(&mut self, mudanca: impl FnOnce(&mut Vec<Conhecido>) -> bool) -> Result<()> {
         let _trava = travar(&self.caminho)?;
-        let mut entradas = ler(&self.caminho)
+        let mut entradas = ler(&self.caminho, &self.ambiente)
             .with_context(|| format!("não consegui ler {}", self.caminho.display()))?;
         if mudanca(&mut entradas) {
             gravar(&self.caminho, &entradas)?;
@@ -349,7 +394,8 @@ impl Conhecidos {
 /// As entradas do arquivo, com as imagens. Um arquivo que ainda não existe é
 /// uma lista vazia, e uma linha ilegível é pulada — inclusive a que não é
 /// UTF-8, sem levar as outras junto.
-fn ler(caminho: &Path) -> std::io::Result<Vec<Conhecido>> {
+fn ler(caminho: &Path, ambiente: &str) -> std::io::Result<Vec<Conhecido>> {
+    let agora = agora_em_segundos();
     let mut entradas: Vec<Conhecido> = match std::fs::read(caminho) {
         Ok(bytes) => String::from_utf8_lossy(&bytes)
             .lines()
@@ -366,6 +412,13 @@ fn ler(caminho: &Path) -> std::io::Result<Vec<Conhecido>> {
     // para-onde-voltar não pode deixar de abrir por causa de um enfeite.
     for entrada in &mut entradas {
         entrada.icone = std::fs::read(caminho_do_icone(caminho, &entrada.alvo)).ok();
+        // A medida só vira semente se é desta rede e desta semana. A lembrança
+        // fica guardada mesmo quando não vale agora: quem volta para casa
+        // depois de uma tarde no trabalho reencontra a medida de casa.
+        entrada.caminho_bps = entrada
+            .caminho_lembrado
+            .as_ref()
+            .and_then(|lembrado| lembrado.semente(agora, ambiente));
     }
     Ok(entradas)
 }
@@ -407,8 +460,9 @@ fn gravar(caminho: &Path, entradas: &[Conhecido]) -> Result<()> {
                 e.caminhos.join(","),
                 e.bilhete.as_deref().unwrap_or(""),
                 e.impressao.as_deref().unwrap_or(""),
-                e.caminho_bps
-                    .map_or_else(String::new, |bps| bps.to_string())
+                e.caminho_lembrado
+                    .as_ref()
+                    .map_or_else(String::new, crate::caminho::CaminhoLembrado::escrever)
             )
         })
         .collect();
@@ -510,8 +564,10 @@ fn analisar_linha(linha: &str) -> Option<Conhecido> {
         .filter(|i| !i.is_empty())
         .map(str::to_owned);
     // Um número que não se lê vira ausência, e não zero: zero seria «este cano
-    // não carrega nada», que é o contrário de «ninguém mediu ainda».
-    let caminho_bps = campos.next().and_then(|c| c.trim().parse().ok());
+    // não carrega nada», que é o contrário de «ninguém mediu ainda». E o
+    // número solto que a 0.16 gravava, sem data nem rede, também: não há como
+    // saber se ele descreve o caminho de hoje.
+    let caminho_lembrado = campos.next().and_then(crate::caminho::CaminhoLembrado::ler);
 
     Some(Conhecido {
         alvo: alvo.to_owned(),
@@ -522,7 +578,9 @@ fn analisar_linha(linha: &str) -> Option<Conhecido> {
         caminhos,
         bilhete,
         impressao,
-        caminho_bps,
+        // Conferida em `ler`, que é quem sabe a hora e a rede.
+        caminho_bps: None,
+        caminho_lembrado,
         // Carregada em `abrir`, que é quem conhece o caminho.
         icone: None,
     })
@@ -636,7 +694,7 @@ pub(crate) fn trocar_privado(caminho: &Path, bytes: &[u8]) -> Result<()> {
         .with_context(|| format!("não consegui trocar {} pela nova", caminho.display()))
 }
 
-fn agora_em_segundos() -> i64 {
+pub(crate) fn agora_em_segundos() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |passou| i64::try_from(passou.as_secs()).unwrap_or(0))
@@ -680,9 +738,25 @@ mod tests {
         // **O nono campo, e ele é de conveniência como os outros.** Um arquivo
         // apagado custa doze segundos de imagem ruim uma vez, e nada mais — é
         // por isso que esta medida pode morar aqui, e não junto dos pins.
-        let com = analisar_linha("server.exemplo:8383\tmarcela\t1\t1738000000\t\t\t\t\t12480000")
-            .expect("uma linha de nove campos é válida");
-        assert_eq!(com.caminho_bps, Some(12_480_000));
+        let com = analisar_linha(
+            "server.exemplo:8383\tmarcela\t1\t1738000000\t\t\t\t\t12480000@1738000000@enlace-0.17|10.0.0.5|-",
+        )
+        .expect("uma linha de nove campos é válida");
+        assert_eq!(
+            com.caminho_lembrado,
+            Some(crate::caminho::CaminhoLembrado {
+                bps: 12_480_000,
+                medido_em: 1_738_000_000,
+                ambiente: "enlace-0.17|10.0.0.5|-".to_owned(),
+            })
+        );
+
+        // O número solto da 0.16, sem data nem rede, não é lembrança.
+        let da_016 =
+            analisar_linha("server.exemplo:8383\tmarcela\t1\t1738000000\t\t\t\t\t12480000")
+                .expect("a linha da 0.16 continua válida");
+        assert_eq!(da_016.caminho_lembrado, None);
+        assert_eq!(da_016.caminho_bps, None);
 
         // E oito campos — a linha que já está no disco de quem atualizar —
         // continua valendo, com ausência no lugar do número.
@@ -889,8 +963,17 @@ mod tests {
                 casa.icone.as_deref(),
                 casa.caminho_bps
             ),
-            (Some("Casa"), Some(&[1, 2, 3][..]), Some(12_480_000)),
+            (
+                Some("Casa"),
+                Some(&[1, 2, 3][..]),
+                Some(crate::caminho::TETO_DA_SEMENTE_BPS)
+            ),
             "a aparência e o caminho medido do mesmo servidor não ficaram os dois"
+        );
+        assert_eq!(
+            casa.caminho_lembrado.as_ref().map(|l| l.bps),
+            Some(12_480_000),
+            "o disco guarda a medida inteira; só a semente é grampeada"
         );
         assert!(
             de_volta.buscar("outro.exemplo:8383").is_some(),
@@ -902,6 +985,95 @@ mod tests {
             3,
             "a lista que gravou o caminho não ficou com o que está no arquivo"
         );
+
+        let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
+    }
+
+    /// **Uma medida de outra rede, de outra semana ou da 0.16 não é semente.**
+    ///
+    /// Decisão da 0.17: a estimativa lembrada não pode dar confiança ilimitada
+    /// ao caminho de hoje. A lembrança é conferida pela rede (o ambiente) e pela
+    /// idade, e grampeada em [`crate::caminho::TETO_DA_SEMENTE_BPS`].
+    #[test]
+    fn a_medida_lembrada_so_vale_na_mesma_rede_na_mesma_semana_e_com_teto() {
+        use crate::caminho::{IDADE_MAXIMA_DA_LEMBRANCA_S, TETO_DA_SEMENTE_BPS};
+        let caminho = rascunho("lembranca");
+        let casa = "enlace-0.17|192.168.0.10|-".to_owned();
+        let trabalho = "enlace-0.17|10.20.0.33|-".to_owned();
+        let agora = agora_em_segundos();
+
+        let mut lista = Conhecidos::abrir_em(caminho.clone(), casa.clone()).expect("abrir");
+        lista
+            .registrar("server.exemplo:8383", "marcela", None)
+            .expect("registrar");
+        lista
+            .anotar_caminho_medido_em("server.exemplo:8383", 4_000_000, agora)
+            .expect("anotar");
+
+        let semente = |ambiente: &str| {
+            Conhecidos::abrir_em(caminho.clone(), ambiente.to_owned())
+                .expect("reabrir")
+                .buscar("server.exemplo:8383")
+                .and_then(|c| c.caminho_bps)
+        };
+        assert_eq!(semente(&casa), Some(4_000_000), "na mesma rede, vale");
+        assert_eq!(
+            semente(&trabalho),
+            None,
+            "a medida de casa semeou o trabalho"
+        );
+        assert_eq!(
+            semente("quic-0.16|192.168.0.10|-"),
+            None,
+            "uma medida da linha anterior semeou o enlace"
+        );
+        // E a lembrança não se perde por ter sido aberta noutra rede.
+        assert_eq!(
+            semente(&casa),
+            Some(4_000_000),
+            "a volta para casa esqueceu"
+        );
+
+        // Velha demais.
+        lista
+            .anotar_caminho_medido_em(
+                "server.exemplo:8383",
+                4_000_000,
+                agora - IDADE_MAXIMA_DA_LEMBRANCA_S - 1,
+            )
+            .expect("anotar velha");
+        assert_eq!(
+            semente(&casa),
+            None,
+            "uma medida de mais de uma semana semeou"
+        );
+
+        // Do futuro: relógio errado.
+        lista
+            .anotar_caminho_medido_em("server.exemplo:8383", 4_000_000, agora + 86_400)
+            .expect("anotar do futuro");
+        assert_eq!(semente(&casa), None, "uma medida com data no futuro semeou");
+
+        // E o teto: uma medida grande vira, no máximo, a semente do teto.
+        lista
+            .anotar_caminho_medido_em("server.exemplo:8383", 90_000_000, agora)
+            .expect("anotar grande");
+        assert_eq!(semente(&casa), Some(TETO_DA_SEMENTE_BPS));
+
+        // A linha da 0.16, sem data, no lugar da coluna: sem semente.
+        let texto = std::fs::read_to_string(&caminho).expect("ler");
+        let antiga: String = texto
+            .lines()
+            .map(|linha| {
+                let mut campos: Vec<&str> = linha.split('\t').collect();
+                if let Some(ultimo) = campos.last_mut() {
+                    *ultimo = "12480000";
+                }
+                format!("{}\n", campos.join("\t"))
+            })
+            .collect();
+        std::fs::write(&caminho, antiga).expect("escrever a da 0.16");
+        assert_eq!(semente(&casa), None, "o número solto da 0.16 semeou a 0.17");
 
         let _ = std::fs::remove_dir_all(caminho.parent().expect("pai"));
     }

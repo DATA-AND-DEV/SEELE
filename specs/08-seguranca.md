@@ -8,7 +8,7 @@ Servidor auto-hospedado, comunidades pequenas, operador confiável mas não nece
 
 | Ameaça | Tratamento em v1 |
 |---|---|
-| Escuta passiva na rede | TLS 1.3 obrigatório via QUIC |
+| Escuta passiva na rede | TLS 1.3 obrigatório via QUIC (linha 1); DTLS do WebRTC desde a 0.17 (linha 2, ver «Transporte») |
 | Man-in-the-middle no primeiro contato | TOFU com pinning e aviso explícito na troca de chave |
 | Cliente malicioso falando em VoiceRoom sem permissão | Validação servidor-side em todo datagram |
 | Cliente forjando identidade de outro | `ssrc` atribuído pelo servidor, nunca aceito do cliente |
@@ -18,6 +18,74 @@ Servidor auto-hospedado, comunidades pequenas, operador confiável mas não nece
 | Enumeração de usuários | Mensagens de erro de login uniformes |
 
 ## Transporte
+
+**Desde a 0.17 (linha 2, ADR 0063): o DTLS do WebRTC**, pelo `str0m` com um provedor de cripto local (`crates/seele-enlace/src/cripto.rs`), passado por instância. Não há modo texto puro, nem flag para desabilitar.
+
+- **O DTLS é o `dimpl` com o backend `aws-lc-rs`, e só ele** (emenda de 25/10/2026 ao ADR 0063). Até ali era o `rust-crypto` do `dimpl`, que trazia o `crypto-bigint` 0.5.5 por baixo do `p256`/`p384` e caiu no RUSTSEC-2026-0387 (aritmética sem tempo constante). O `cargo deny` reprova nisso e **continua reprovando**: nada de `ignore` para vulnerabilidade. `cargo tree -i crypto-bigint --workspace --all-features` tem de dar vazio.
+- O resto do provedor local (o SRTP, o SHA-256 e o HMAC-SHA1 do STUN) continua em RustCrypto, e o certificado continua do `rcgen` com o `ring`: a impressão e a prova abaixo não mudaram.
+- **Custo de build:** o `aws-lc-sys` compila C e assembly, então quem compila precisa de um compilador C (clang, gcc ou MSVC). O NASM do Windows x86_64 é dispensado pelos objetos pré-montados (`prebuilt-nasm`), e o CMake não é exigido. Ver `docs/windows.md`.
+
+O que a linha 1 garantia pelo TLS do QUIC continua, assim:
+
+- **A identidade do servidor.**
+  - O certificado DTLS do `seeled` é o certificado longo **P-256** que ele já guarda (`seele-server/src/tls.rs:54-63`). A `a=fingerprint` é o `fp=` do convite, e **os pinos TOFU de quem já entrou continuam valendo** para o mesmo banco.
+  - Quem liga **escreve** a impressão esperada, e ela não vem da rede. O certificado DTLS do par é conferido contra ela antes do `Hello`.
+  - **O que cada lado sabe dizer quando a conferência falha.**
+    - O nativo sabe qual impressão veio, e é só ele que diz «impressão diferente», no alerta TOFU, com a impressão vista.
+    - O navegador não expõe o motivo de uma falha de DTLS. A página só sabe que **a verificação da conexão segura falhou**, sem saber a causa, e não pode afirmar impressão diferente.
+  - A sinalização (ENC/3 e `/sinal/1`) é terceiro não confiável. Ela só leva endereços e a credencial ICE, e uma resposta falsa custa não entrar.
+  - Pendente no A: um banco antigo cuja chave guardada não seja P-256 é recusado com erro nomeado, e nunca regerado calado. Regerar troca a chave e dispara «A CHAVE MUDOU».
+- **A sala pessoal (Ed25519).** O DTLS P-256 da sala é efêmero. A identidade vai na apresentação `0x03` do `ctl`: a chave e a assinatura da sala sobre `rótulo ‖ fp_dtls`, conferidas pelo `ConfereCodigo` antes do `Hello`.
+- **A prova do cliente.**
+  - O rótulo novo é `SEELE/2 prova-de-cliente\0`, e a assinatura cobre `rótulo ‖ fp_servidor ‖ fp_dtls_cliente ‖ nonce`.
+  - O servidor confere o `fp_dtls_cliente` contra o certificado DTLS que viu.
+  - Uma prova feita para uma conexão não vale para outra, nem para outro servidor.
+- **As credenciais ICE não são segredo.** O `U` é sorteado por quem liga. A segurança é o DTLS mais a prova.
+- **Limites antes de alocar, no enlace.**
+  - 64 canais por conexão.
+  - Fila de entrada de 1 MiB por canal; quem estoura é cortado e contado.
+  - Mensagem SCTP de até 16385 B, voz de até 1100 B, apresentação de até 512 B.
+  - O `MAX_FRAME_LEN` do controle continua valendo por cima do envelope.
+- **Taxa antes de criar estado.**
+  - O balde por endereço (ADR 0025) é consultado antes de criar um `Rtc` para um Binding novo, com teto de pendentes (64) e teto por IP (8).
+  - Antes dele, o balde de criações do enlace: no máximo 8 apertos **que não terminaram** por IP em 10 s. Para o laço de criações que nunca terminam (U novos sem DTLS, o navegador recriando o par depois de um alerta fatal). Um aperto que termina devolve a vaga: muitas pessoas atrás do mesmo NAT são limitadas pelo balde do servidor (30 de rajada, 30 por minuto, `seele-server/src/taxa.rs`), e não por este. Cada recusa do enlace tem contador e `tracing` próprios (`ContadoresDaPonta::recusa_*`).
+  - O balde de controle depois do `Hello` é o de sempre.
+- **TURN.**
+  - É opcional, configurado por quem usa (URL, usuário e credencial), nunca no link, nunca em log, e sem padrão.
+  - O relay não termina o DTLS e não lê o conteúdo, mas vê os dois endereços, o volume e o horário.
+  - O operador do relay é a pessoa ou quem ela escolheu, e não este projeto.
+
+### Riscos novos do anfitrião ICE-lite (revisão do coordenador)
+
+- **R2: reflexão por Indications.**
+  - O anfitrião manda Binding Indications aos candidatos do `CHAMA`, que **não são autenticados**: um terceiro os escolhe. A amplificação é baixa (de 20 a 28 B), mas é um refletor.
+  - Exigido do A: um teto de Indications por `CHAMADO` (5 por candidato, até 3 candidatos), um teto de `CHAMADO`s por minuto no anfitrião, e o `serve_de_candidato` também no anfitrião.
+  - O fuzz `datagrama_do_encontro` prende o teto e a regra dos candidatos lidos.
+  - **O comportamento do anfitrião ainda não foi conferido.**
+- **R3: estado criado por um STUN não autenticável.**
+  - O `U` é de quem liga, então qualquer origem UDP, inclusive forjada, cria um `Rtc` pendente. Com os tetos de 64 e 8, origens forjadas bloqueiam os legítimos por até 10 s.
+  - Mitigações, da mais barata para a mais cara:
+    - (a) responder o primeiro Binding sem estado e só criar o `Rtc` quando chegar DTLS daquela origem;
+    - (b) despejar o pendente mais velho;
+    - (c) um prazo de 2 s para o pendente que não começou o DTLS.
+  - O exigido é pelo menos (b) e (c). **Ainda não conferido.**
+- **R3b: laço de recriação depois de um alerta DTLS fatal.**
+  - Medido no spike C com a **página**, no Chromium 149 e no WebKit 26.5, com a impressão adulterada na resposta sintetizada (`docs/evidencias/spike-webrtc-0.17.md`, seção «Para o enlace de produto»):
+    - o navegador manda o alerta fatal 46;
+    - o navegador continua mandando Bindings de consentimento a cada 2 a 3 s;
+    - o anfitrião recriava o `Rtc` a cada um deles, com o mesmo `U`: foram 4 `Rtc` em 70 s no WebKit e 2 em 30 s no Chromium.
+  - Correção pedida ao A: um tombstone do `U` por um prazo, um backoff por IP e **nunca** um segundo `Rtc` para um `U` vivo, com um teste de regressão que reprova sem a correção.
+  - **Ainda não conferido.**
+- **R4: justiça entre a voz e a transferência.**
+  - Uma associação SCTP leva tudo. Um anexo ou a tela enchendo o buffer põe a voz atrás de até 1 MiB, cerca de 4 s a 2 Mbit/s.
+  - Exigido nos dois lados (o nativo e o `rtc-web.js`):
+    - a voz e o `ctl` saem na hora;
+    - os canais `u` e `b` só escrevem enquanto o `buffered_amount` **total** está abaixo de 64 KiB;
+    - os canais de volume se revezam (round-robin).
+  - Critério: o p95 da voz durante uma rajada de 32 MiB fica abaixo de 100 ms acima do repouso, em loopback. **Ainda não medido.**
+  - **Regressão aberta.** No spike, a voz perdeu de 8 a 9 % na subida durante uma rajada (`docs/evidencias/spike-webrtc-0.17.md`). Ela continua registrada como regressão até o browser-signaling remedir com o limitador real.
+
+### A linha 1 (até a 0.16)
 
 TLS 1.3 embutido no QUIC. Não há modo texto puro, nem flag para desabilitar. Cipher suites: padrão do `rustls`, sem downgrade.
 
@@ -80,7 +148,7 @@ notebook roubado e contra nada mais — e contra notebook roubado a cifra de dis
 inteiro do sistema protege melhor, é o que a pessoa já tem, e ela pode ligar
 hoje.
 
-Em trânsito nada muda: TLS 1.3 dentro do QUIC, sem modo claro. **O arquivo não é
+Em trânsito nada muda: o DTLS do WebRTC desde a 0.17 (até a 0.16, o TLS 1.3 dentro do QUIC), sem modo claro. **O arquivo não é
 legível na rede. É legível no disco de quem hospeda.**
 
 **Um servidor não varre vírus.** Não há motor, não há base de assinaturas e não há
@@ -101,7 +169,7 @@ recebeu, num lugar que a pessoa escolheu.
 - `#![forbid(unsafe_code)]` em todos os crates exceto `seele-ffi` e bindings de áudio, onde `unsafe` é justificado por comentário caso a caso.
 - `cargo deny` e `cargo audit` no CI, falhando o build em vulnerabilidade conhecida.
 - Nenhum segredo em log. Nenhum payload de mídia em log, nem em nível trace.
-- Fuzzing dos parsers de `seele-proto` (`cargo-fuzz`) — é a superfície que recebe bytes de rede não confiáveis.
+- Fuzzing dos parsers de `seele-proto` (`cargo-fuzz`) — é a superfície que recebe bytes de rede não confiáveis. Desde a 0.17, também o ENC/3 (no alvo `datagrama_do_encontro`), o corpo do `/sinal/1` (`sinal_do_encontro`) e o envelope dos canais do `seele-enlace` (`envelope`).
 - Toda entrada de rede tem limite de tamanho antes de alocar.
 
 ## Não fazer

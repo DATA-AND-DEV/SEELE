@@ -821,7 +821,7 @@ impl Chegada {
             };
             match localizado {
                 None => return Err(self.cancelar()),
-                Some(Err(falha)) => return Err(self.desistir(ConnectError::NaoLocalizou(falha))),
+                Some(Err(erro)) => return Err(self.desistir(erro)),
                 Some(Ok(())) => {}
             }
         }
@@ -859,12 +859,8 @@ impl Chegada {
         let perguntando = async move {
             match consulta {
                 Some((ponto, marcas)) => {
-                    crate::encontro::onde_mora_hoje(
-                        &ponto,
-                        &marcas,
-                        crate::encontro::PRAZO_DO_QUARTO,
-                    )
-                    .await
+                    crate::encontro::localizar3(&ponto, &marcas, crate::encontro::PRAZO_DO_QUARTO)
+                        .await
                 }
                 None => std::future::pending().await,
             }
@@ -884,7 +880,7 @@ impl Chegada {
                 // fim — e a etapa ao vivo existe para acompanhar a travessia,
                 // não para resumi-la depois.
                 biased;
-                Some(andamento) = tentativas.recv() => self.andou(andamento, de),
+                Some(andamento) = tentativas.recv() => self.andou(andamento, &mut de),
                 no_quarto = &mut perguntando, if !perguntado => {
                     perguntado = true;
                     if let Some(entrega) = entrega.take() {
@@ -910,7 +906,7 @@ impl Chegada {
         // candidato que venceu ficaria de fora da trilha justamente por ter
         // vencido — e é dele que sai o [`Caminho`].
         while let Ok(andamento) = tentativas.try_recv() {
-            self.andou(andamento, de);
+            self.andou(andamento, &mut de);
         }
         let Some(resultado) = resultado else {
             return Err(self.cancelar());
@@ -930,15 +926,22 @@ impl Chegada {
 
     /// Publica o que o laço contou: um candidato que ele acabou de começar a
     /// tentar, ou o que tocou.
-    fn andou(&mut self, andamento: crate::enlace::Andamento, de: u8) {
+    ///
+    /// Um candidato além da conta (os endereços que o `AQUI` do degrau 4 deu, e
+    /// que nenhum convite trazia) aumenta a conta: é por ela que a trilha sabe
+    /// qual tentativa é a última, e só a última desiste.
+    fn andou(&mut self, andamento: crate::enlace::Andamento, de: &mut u8) {
         use crate::enlace::Andamento;
         match andamento {
-            Andamento::Tentando(tentativa) => self.marcar(Etapa::Tentando {
-                candidato: tentativa.candidato,
-                de,
-                onde: tentativa.onde,
-                avisou: tentativa.avisou,
-            }),
+            Andamento::Tentando(tentativa) => {
+                *de = (*de).max(tentativa.candidato.saturating_add(1));
+                self.marcar(Etapa::Tentando {
+                    candidato: tentativa.candidato,
+                    de: *de,
+                    onde: tentativa.onde,
+                    avisou: tentativa.avisou,
+                });
+            }
             Andamento::Tocando { candidato, prazo_s } => {
                 self.marcar(Etapa::Tocando { candidato, prazo_s });
             }
@@ -947,25 +950,38 @@ impl Chegada {
 
     /// Pergunta ao quarto onde a sala do código mora, e faz da resposta os
     /// candidatos e o bilhete desta chegada.
-    async fn localizar(&mut self, pelo_codigo: PeloCodigo) -> Result<(), FalhaAoLocalizar> {
+    ///
+    /// Pergunta o ENC/3 e o ENC/2 **juntos** (R6 da revisão): quem só é achado
+    /// pelo ENC/2 está numa 0.16, e a chegada desiste com
+    /// [`ConnectError::LinhaLegada`], que a tela traduz por «essa pessoa está
+    /// no Servidor 1 (0.16)», com a ação de abrir a linha legada.
+    async fn localizar(&mut self, pelo_codigo: PeloCodigo) -> Result<(), ConnectError> {
         let PeloCodigo {
             codigo,
             ponto,
             apelido,
         } = pelo_codigo;
         let Some(ponto) = ponto else {
-            return Err(FalhaAoLocalizar::SemPonto);
+            return Err(ConnectError::NaoLocalizou(FalhaAoLocalizar::SemPonto));
         };
         self.marcar(Etapa::Localizando {
             ponto: ponto.clone(),
         });
-        let localizacao = crate::encontro::localizar(
+        let localizacao = match crate::encontro::localizar_com_a_linha(
             &ponto,
             &crate::encontro::Marcas::da_sala(&codigo),
             crate::encontro::PRAZO_DO_QUARTO,
         )
-        .await;
-        let (destinos, bilhete) = candidatos_da_sala(localizacao, codigo, &ponto, &apelido)?;
+        .await
+        {
+            crate::encontro::LocalizacaoComLinha::Achada(achada) => achada,
+            crate::encontro::LocalizacaoComLinha::NaLinhaUm => {
+                return Err(ConnectError::LinhaLegada);
+            }
+            crate::encontro::LocalizacaoComLinha::NaoAchou(falha) => falha,
+        };
+        let (destinos, bilhete) = candidatos_da_sala(localizacao, codigo, &ponto, &apelido)
+            .map_err(ConnectError::NaoLocalizou)?;
         self.destinos = destinos;
         self.bilhete = bilhete;
         Ok(())
@@ -987,19 +1003,21 @@ impl Chegada {
     /// forma canônica (na FFI, `chave_do_servidor`): o mesmo servidor com dois
     /// candidatos receberia dois apertos de mão e dois `Hello`, e um perdedor
     /// poderia desfazer o pin que o vencedor fixou.
-    fn do_quarto(&self, no_quarto: &crate::encontro::OndeMora, ja_correm: &[String]) -> DoQuarto {
+    ///
+    /// Desde a 0.17 o quarto é o do ENC/3 (`QUEM3`), e o bilhete não muda: o
+    /// `CHAMA` vai ao ponto, que sabe a escuta de hoje sem ninguém dizer.
+    fn do_quarto(&self, no_quarto: &Localizacao, ja_correm: &[String]) -> DoQuarto {
         let Some(quarto) = &self.quarto else {
             return DoQuarto::default();
         };
-        let candidato = no_quarto
-            .servidor()
+        let servidor = match no_quarto {
+            Localizacao::Achada { servidor, .. } => *servidor,
+            _ => None,
+        };
+        let candidato = servidor
             .map(|endereco| (quarto.candidato)(endereco))
             .filter(|destino| !ja_correm.contains(&destino.chave_do_pin));
-        let bilhete = self
-            .bilhete
-            .as_ref()
-            .map(|guardado| crate::encontro::bilhete_desta_volta(guardado, no_quarto));
-        DoQuarto { candidato, bilhete }
+        DoQuarto { candidato }
     }
 
     /// O ponto de encontro que vai ser avisado, se algum vai.
@@ -1120,10 +1138,11 @@ fn candidatos_da_sala(
         })
         .collect();
 
-    // Sem escuta, sem `LEVE`: a corrida segue, e só o furo do lado de quem
-    // recebe se perde. Um `SocketAddr` escrito é sempre um endereço que o
-    // bilhete aceita; se um dia não for, o log diz.
-    let bilhete = escuta.and_then(|escuta| {
+    // O bilhete leva o ponto do `CHAMA` do degrau 4 (o ponto sabe a escuta de
+    // hoje, e o aviso do bilhete não é lido desde a 0.17). Um `SocketAddr`
+    // escrito é sempre um endereço que o bilhete aceita; se um dia não for, o
+    // log diz.
+    let bilhete = escuta.or(servidor).and_then(|escuta| {
         Bilhete::novo(ponto.to_owned(), escuta.to_string())
             .inspect_err(|erro| {
                 tracing::info!(
@@ -1504,7 +1523,8 @@ mod tests {
     #[tokio::test]
     async fn cancelar_no_meio_da_corrida_acaba_em_cancelada_sem_esperar_os_prazos() {
         // Três candidatos que nunca respondem: sem cancelar, a corrida queimaria
-        // o prazo de cada um.
+        // o prazo. Desde a 0.17 os três vão num agente ICE só, e começam juntos:
+        // três `Tentando` antes de cancelar.
         let (mudos, destinos): (Vec<_>, Vec<_>) = (0..3).map(|_| mudo()).unzip();
         let comeco = Instant::now();
         let resultado = Chegada::nova(destinos, None)
@@ -1526,7 +1546,7 @@ mod tests {
             .collect();
         assert_eq!(
             nomes,
-            ["Parada", "Tentando", "Tentando", "Cancelada"],
+            ["Parada", "Tentando", "Tentando", "Tentando", "Cancelada"],
             "a trilha de quem cancelou no meio da corrida"
         );
         assert!(
@@ -1796,7 +1816,13 @@ mod tests {
             panic!("uma sala achada não deu candidato nenhum");
         };
         assert_eq!(destinos.len(), 1, "{destinos:?}");
-        assert!(bilhete.is_none(), "sem escuta, não há a quem mandar o LEVE");
+        // Sem escuta, o bilhete leva o ponto pelo servidor: o `CHAMA` do
+        // degrau 4 vai ao ponto, que sabe a escuta sem ninguém dizer.
+        assert_eq!(
+            bilhete.map(|bilhete| bilhete.ponto),
+            Some("p:8384".to_owned()),
+            "sem escuta, a ligação perdeu o ponto do CHAMA"
+        );
     }
 
     #[test]
@@ -1903,15 +1929,17 @@ mod tests {
         let chegada = volta_com_o_quarto("203.0.113.7:8383");
         let ja_correm = vec!["203.0.113.7:8383".to_owned()];
 
-        let mesmo = crate::encontro::OndeMora::Achado {
+        let mesmo = Localizacao::Achada {
             servidor: Some(endereco("203.0.113.7:8383")),
             escuta: None,
+            dicas: Vec::new(),
         };
         assert!(chegada.do_quarto(&mesmo, &ja_correm).candidato.is_none());
 
-        let outro = crate::encontro::OndeMora::Achado {
+        let outro = Localizacao::Achada {
             servidor: Some(endereco("203.0.113.9:8383")),
             escuta: None,
+            dicas: Vec::new(),
         };
         assert_eq!(
             chegada
@@ -1919,38 +1947,6 @@ mod tests {
                 .candidato
                 .map(|destino| destino.servidor),
             Some(endereco("203.0.113.9:8383"))
-        );
-    }
-
-    #[test]
-    fn a_escuta_de_hoje_so_vira_aviso_no_ip_do_servidor_da_mesma_resposta() {
-        // O I1 da revisão final do Plano 1, que o `connect` do app fazia com
-        // `bilhete_desta_volta` e que mora aqui desde a 14b. A marca da escuta
-        // está em todo link, e um anfitrião 0.15.0 nunca a registra: quem a
-        // ocupar de outro IP não pode receber o `LEVE`, que leva o endereço de
-        // quem chega.
-        let chegada = volta_com_o_quarto("203.0.113.7:8383");
-        let aviso = |no_quarto: &crate::encontro::OndeMora| {
-            chegada
-                .do_quarto(no_quarto, &[])
-                .bilhete
-                .and_then(|bilhete| bilhete.aviso().ok())
-        };
-
-        let do_anfitriao = crate::encontro::OndeMora::Achado {
-            servidor: Some(endereco("203.0.113.9:8383")),
-            escuta: Some(endereco("203.0.113.9:41000")),
-        };
-        assert_eq!(aviso(&do_anfitriao), Some(endereco("203.0.113.9:41000")));
-
-        let de_outro_ip = crate::encontro::OndeMora::Achado {
-            servidor: Some(endereco("203.0.113.9:8383")),
-            escuta: Some(endereco("198.51.100.66:41000")),
-        };
-        assert_eq!(
-            aviso(&de_outro_ip),
-            Some(endereco("198.51.100.4:41000")),
-            "a escuta de outro IP virou o aviso do LEVE"
         );
     }
 

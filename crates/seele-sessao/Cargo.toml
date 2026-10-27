@@ -32,3 +32,10 @@ reducao = ["dep:image"]
 
 [lints]
 workspace = true
+
+# `test = true` porque o `conferir_catalogo` tem teste próprio: o catálogo assinado de hoje, sem as
+# versões da API 7 dos MODs oficiais, tem de reprovar. Sem isto o `cargo test` nunca o rodaria.
+[[example]]
+name = "conferir_catalogo"
+path = "examples/conferir_catalogo.rs"
+test = true

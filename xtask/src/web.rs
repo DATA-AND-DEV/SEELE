@@ -233,7 +233,7 @@ pub(crate) fn run() -> ExitCode {
             Command::new("node")
                 .arg("xtask/web/ouro.mjs")
                 .arg(&web)
-                .arg("crates/seele-proto/tests/fio_1_0.txt"),
+                .arg("crates/seele-proto/tests/fio_2_0.txt"),
         )),
     ));
 

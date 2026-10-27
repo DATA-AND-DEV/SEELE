@@ -467,6 +467,10 @@ pub struct Room {
     /// valores, opaco aqui — quem os confere e aplica é a casca, antes de
     /// desenhar a sessão. `None` é sem tema.
     pub tema: Option<seele_proto::control::TemaDoServidor>,
+    /// **Os cargos deste servidor, como esta sessão os conhece** (ADR 0064):
+    /// o último `QuadroDeCargos`, o último `SuasPermissoes` e a última recusa.
+    /// Por `Room`, e o `Room` é de uma sessão só — o isolamento é este.
+    pub cargos: crate::cargos::CargosDaSessao,
 }
 
 /// Uma transmissão de tela acontecendo numa sala de voz.
@@ -551,6 +555,10 @@ pub struct Changed {
     /// a cada pedido de quadro-chave estaria redesenhando justamente a parte
     /// que não mudou.
     pub telas: bool,
+    /// Os cargos desta sessão mudaram: um `QuadroDeCargos`, um `SuasPermissoes`
+    /// ou um `CargoRecusado` (ADR 0064). Bandeira própria, e não o `server`: o
+    /// que se redesenha é a camada de cargos, e não o cabeçalho.
+    pub cargos: bool,
     /// The session ended.
     pub ended: bool,
 }
@@ -567,6 +575,7 @@ impl Changed {
             || self.notice
             || self.transfers
             || self.telas
+            || self.cargos
             || self.ended
     }
 }
@@ -1118,6 +1127,15 @@ impl Room {
         }
 
         match message {
+            // **Os cargos (E6 da 0.17)**, dobrados por `crate::cargos` (de F),
+            // por sessão. O `cargos` sobe, e o ffi o leva à casca como
+            // `Event::CargosChanged` com a marca nova.
+            ServerMessage::QuadroDeCargos(_)
+            | ServerMessage::SuasPermissoes(_)
+            | ServerMessage::CargoRecusado { .. } => {
+                let _ = self.cargos.aplicar(message);
+                changed.cargos = true;
+            }
             // **Qual servidor é este**, num quadro próprio — ver
             // `control::ServerMessage::Instancia`. Chega logo depois do
             // `Session`, e um servidor de antes desta versão não o manda: aí a
@@ -2421,9 +2439,9 @@ mod tests {
         let mut room = room();
 
         let changed = room.apply(&ServerMessage::Telemetry(Telemetry {
-            rtt_ms: 38.0,
-            jitter_ms: 12.0,
-            loss_fraction: 0.002,
+            rtt_ms: Some(38.0),
+            jitter_ms: Some(12.0),
+            loss_fraction: Some(0.002),
             subsystems: Vec::new(),
         }));
         assert!(changed.telemetry);

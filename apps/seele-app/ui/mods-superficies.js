@@ -408,6 +408,18 @@ function tipoDaSuperficie(descricao, dono) {
  * troca. Os filhos moram em `dentro` (uma lista, um nó só ou um texto), como
  * `planejar` os lê; o primeiro achado, em profundidade, é o que vale.
  */
+/** As chaves de todos os nós de uma subárvore declarada (ela e o que está sob ela). */
+function chavesDaSubarvore(no, chaves = new Set()) {
+  if (Array.isArray(no)) {
+    for (const um of no) chavesDaSubarvore(um, chaves);
+    return chaves;
+  }
+  if (no === null || typeof no !== "object") return chaves;
+  if (no.chave !== undefined && no.chave !== null) chaves.add(String(no.chave));
+  if (no.dentro !== undefined) chavesDaSubarvore(no.dentro, chaves);
+  return chaves;
+}
+
 function lugarDaChave(pai, campo, chave) {
   const no = pai[campo];
   if (Array.isArray(no)) {
@@ -806,7 +818,14 @@ class SuperficieDeMod {
         { perfil: perfil.nome, teto: perfil.nos, tamanho });
     }
     lugar.pai[lugar.campo] = subarvore;
-    return this.montar(raiz.declaracao);
+    // **Por partes é por partes**: os controles que a subárvore não traz ficam
+    // como a pessoa os deixou (ver `protegida`, em `mods-regiao.js`).
+    this.renderer.soAtualizarChaves = chavesDaSubarvore(subarvore);
+    try {
+      return this.montar(raiz.declaracao);
+    } finally {
+      this.renderer.soAtualizarChaves = null;
+    }
   }
 
   /** Recusa, pelo nome e com a forma, a árvore com uma forma que a API não tem. */

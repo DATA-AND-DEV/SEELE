@@ -42,6 +42,10 @@ seele-web = { path = "../seele-web" }
 # anfitrião registrando e um cliente perguntando — com o serviço de verdade no
 # meio, e este crate é o único lugar onde as duas cabem juntas.
 seele-encontro = { path = "../seele-encontro" }
+# O codificador do produto (o do sistema no macOS, ou o OpenH264), para a tela
+# sintética em H.264 válido do example `tela_e_voz_sinteticas` (o roteiro do
+# relato de 25/10 no CUA). Nenhuma captura: o padrão é gerado.
+seele-video = { path = "../seele-video" }
 # The acceptance tests draw the real interface into an off-screen buffer.
 ratatui = "0.30.2"
 # O teste da troca de aparelho monta os erros que o sistema operacional manda
@@ -55,14 +59,17 @@ tokio = { version = "1", features = ["full"] }
 ed25519-dalek = "3"
 rand = "0.10"
 anyhow = "1"
+# O example `harness_de_continuidade` manda o log do produto (a linha «diagnóstico
+# da voz») para o STDERR, separado do JSONL do stdout. A mesma versão e feature
+# do seele-server e do seele-enlace.
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tempfile = "3.27.0"
 serde_json = "1.0.151"
-# `tela_por_um_par.rs` fala QUIC cru — o par "compartilha" é deliberadamente um
-# par cru, não um `Enlace` — e precisa das mesmas versões que `seele-server`
-# usa, para o `AceitaQualquer` copiado de `subida_no_arranque.rs` bater com o
-# tipo que `quinn` devolve.
-quinn = "0.11.11"
-rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+# O transporte da linha 2 (ADR 0063): os testes que falam o fio cru — um par
+# que «compartilha» a tela, um servidor de mentira que só recusa, a prova
+# amarrada à impressão — falam pelo `seele-enlace`, como o servidor e o
+# cliente de verdade. O `quinn` e o `rustls` saíram com o QUIC.
+seele-enlace = { path = "../seele-enlace" }
 
 [lints]
 workspace = true

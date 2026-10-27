@@ -1,0 +1,9 @@
+{
+  "hospedando": true,
+  "aberto": true,
+  "tem_senha": false,
+  "aceita_convites": false,
+  "portaria_ligada": true,
+  "pendentes": 1,
+  "alcance": "SoRedeLocal"
+}

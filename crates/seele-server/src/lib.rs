@@ -34,6 +34,7 @@ pub mod admissao;
 pub mod alcance;
 pub mod autorizacao;
 pub mod campainha;
+pub mod cargos;
 pub mod frame;
 pub mod hospedagem;
 pub mod mods;
@@ -282,6 +283,22 @@ pub struct ServerConfig {
     /// recebe decidir, e quem recebe entra sem tocar. A recepção fica em
     /// [`server::Server::recepcao`].
     pub sala: Option<recepcao::Sala>,
+    /// O proprietário deste servidor, pela impressão da chave dele
+    /// (`key_fingerprint`, 64 hexadecimais), declarado pela máquina que hospeda
+    /// (ADR 0064). `None` não declara nada: o servidor sobe sem dono, ou com o
+    /// que o banco já tem, e o arranque diz isso no registro
+    /// (`cargos::aviso_sem_dono`). No `seeled`, `--proprietario <hex64>`.
+    pub proprietario: Option<String>,
+    /// **O modo local** (E9): atende só em loopback e não sobe a escada do
+    /// ADR 0022 — nenhum UPnP, PCP nem ponto de encontro. O alcance relatado é
+    /// [`alcance::Degrau::SoEstaMaquina`].
+    ///
+    /// Só quem constrói a configuração o liga (as provas, a build de teste do
+    /// app, por `Hospedagem::iniciar_local`). **Nunca é padrão de produto e
+    /// nunca vem da rede**: [`ServerConfig`] não é desserializada de lugar
+    /// nenhum. Com ele, o `listen` é trocado por `127.0.0.1` na mesma porta,
+    /// e o `::1` não é atendido (uma ponta, um socket).
+    pub modo_local: bool,
 }
 
 impl Default for ServerConfig {
@@ -317,6 +334,11 @@ impl Default for ServerConfig {
             identidade: None,
             // Um servidor de sempre, e não uma sala pessoal.
             sala: None,
+            // Ninguém declarado: quem hospeda declara (o app, a sala, o
+            // `--proprietario` do `seeled`).
+            proprietario: None,
+            // A escada sobe, como sempre: o modo local é só de quem o pede.
+            modo_local: false,
         }
     }
 }
@@ -496,84 +518,25 @@ fn seed(persistence: &mut persistence::Persistence, config: &ServerConfig) -> Re
     Ok(())
 }
 
+/// Os datagramas do ponto de encontro que chegam ao socket do servidor.
+///
+/// O enlace separa pelo primeiro byte o que não é STUN nem DTLS (RFC 7983) e
+/// entrega aqui, uma vez por ponta. O `Daemon` o guarda numa caixa para que o
+/// degrau 4 possa abri-lo, largá-lo e abri-lo de novo (`alcance::encontro`).
+pub type CaixaDoEnc = Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<(SocketAddr, Vec<u8>)>>>;
+
 /// A running server.
 pub struct Daemon {
-    endpoint: quinn::Endpoint,
+    /// O socket do servidor e todas as conexões WebRTC que passam por ele.
+    ponta: transporte::Ponta,
     config: Arc<ServerConfig>,
     pilha: alcance::Pilha,
-    /// O mesmo socket do endpoint, para escrever. Ver [`Daemon::espelho`].
-    espelho: Option<Arc<std::net::UdpSocket>>,
+    /// O que chega ao socket e não é WebRTC: o ENC/3 do degrau 4.
+    enc: Option<CaixaDoEnc>,
     fingerprint: String,
-    /// Quantos apertos de mão do `h3` acabaram com o navegador recusando o
-    /// certificado. Ver [`Daemon::recusas_do_navegador`].
-    recusas_do_navegador: Arc<std::sync::atomic::AtomicU64>,
     registry: Arc<session::Registry>,
     server: Arc<server::Server>,
     voice_rooms: Arc<voice_room::VoiceRooms>,
-}
-
-/// Se um aperto de mão acabou porque o cliente recusou o certificado, o alerta
-/// de TLS com que ele recusou: do 42 ao 46 (o certificado ruim, sem suporte,
-/// revogado, vencido ou desconhecido) e o 48 (a autoridade desconhecida). O
-/// Safari do iPhone recusa com o 46 (a medição 3).
-///
-/// **Pelo texto do erro**, e não pelo código: o `wtransport` embrulha o
-/// fechamento do `quinn` sem expor o código, e o texto que o `quinn-proto`
-/// escreve para um alerta de TLS é fixo (`the cryptographic handshake failed:
-/// error N`, em `TransportErrorCode`). Uma versão que o mude reprova
-/// `o_navegador_que_recusa_o_certificado_e_contado`, em `tests/alpn.rs`.
-fn alerta_de_certificado(erro: &str) -> Option<u8> {
-    let depois = erro
-        .split("the cryptographic handshake failed: error ")
-        .nth(1)?;
-    let numero: String = depois.chars().take_while(char::is_ascii_digit).collect();
-    let alerta = numero.parse::<u8>().ok()?;
-    [42_u8, 43, 44, 45, 46, 48]
-        .contains(&alerta)
-        .then_some(alerta)
-}
-
-/// **A sessão do navegador**: o `wtransport` adota a conexão `h3` que este
-/// endpoint aceitou e lê o pedido da WebTransport, e a sessão segue pelo mesmo
-/// `session::serve` do nativo (Tarefa 2.6 da F4).
-///
-/// O caminho e a `Origin` do pedido vão ao registro. **Conferir a `Origin` está
-/// em aberto no ADR 0057** («O que este ADR não decide»): até o dono decidir, o
-/// pedido é aceito com qualquer uma, e o registro diz qual veio.
-async fn aceitar_o_navegador(
-    conectando: quinn::Connecting,
-    recusas_do_navegador: &std::sync::atomic::AtomicU64,
-) -> Option<transporte::Conexao> {
-    let pedido = match wtransport::endpoint::IncomingSessionFuture::with_quic_connecting(conectando)
-        .await
-    {
-        Ok(pedido) => pedido,
-        Err(erro) if alerta_de_certificado(&erro.to_string()).is_some() => {
-            recusas_do_navegador.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            tracing::warn!(
-                %erro,
-                "um navegador recusou o certificado: link velho, ou link de outro \
-                 servidor que atende neste endereço noutra rede"
-            );
-            return None;
-        }
-        Err(erro) => {
-            tracing::warn!(%erro, "a sessão do navegador não abriu: a conexão caiu antes do pedido");
-            return None;
-        }
-    };
-    tracing::info!(
-        caminho = pedido.path(),
-        origem = pedido.origin().unwrap_or("(nenhuma)"),
-        "um navegador pediu a sessão pelo `h3`"
-    );
-    match pedido.accept().await {
-        Ok(conexao) => Some(transporte::Conexao::Web(conexao)),
-        Err(erro) => {
-            tracing::warn!(%erro, "a sessão do navegador caiu ao ser aceita");
-            None
-        }
-    }
 }
 
 impl Daemon {
@@ -583,10 +546,6 @@ impl Daemon {
     ///
     /// Fails if the certificate cannot be generated or the socket cannot bind.
     pub async fn bind(mut config: ServerConfig) -> Result<Self> {
-        // rustls 0.23 requires a crypto provider to be chosen explicitly. Doing
-        // it here rather than in `main` means the integration tests get it too.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
         // PERSISTENCE first: the handshake needs accounts before it can answer
         // anybody, and migrations run at boot (specs/04-servidor-seele.md).
         // A identidade TLS também mora nele, então ele vem antes dela.
@@ -603,6 +562,17 @@ impl Daemon {
         );
         seed(&mut persistence, &config)?;
 
+        // **O proprietário, antes de a primeira conexão existir** (ADR 0064):
+        // não há mais «a primeira conta vira Comandante». Quem hospeda declara
+        // o dono pela impressão da chave; sem declaração, o registro diz o que
+        // fazer.
+        if let Some(impressao) = &config.proprietario {
+            cargos::declarar_proprietario(&persistence, impressao)
+                .context("o proprietário declarado não foi gravado")?;
+        } else if let Some(aviso) = cargos::aviso_sem_dono(&persistence) {
+            tracing::warn!("{aviso}");
+        }
+
         // Lida do banco, não gerada a cada vez. Sem isto, reiniciar o servidor
         // trocava a chave e todo cliente já conectado via `A CHAVE DO SERVIDOR
         // MUDOU` — o alerta bloqueante do ADR 0003 — e era recusado. O aviso
@@ -611,6 +581,10 @@ impl Daemon {
         //
         // A sala pessoal traz a dela, e ela sai da configuração aqui: as
         // sessões recebem a configuração, e não precisam da chave.
+        // A identidade que veio na configuração pode ser a de uma sala (a
+        // semente da pessoa, `Identity::da_semente`); a do banco, nunca: uma
+        // chave guardada que não é P-256 é recusada (R1).
+        let dada = config.identidade.is_some();
         let identity = match config.identidade.take() {
             Some(identidade) => identidade,
             None => tls::Identity::load_or_create(
@@ -618,50 +592,65 @@ impl Daemon {
                 vec!["localhost".into(), config.listen.ip().to_string()],
             )?,
         };
-        let fingerprint = identity.fingerprint();
-        let impressao = identity.digest();
-        // Os curtos do `h3`: a janela vigente e as anunciadas depois dela, com
-        // a chave do longo (a medição 3). A sala pessoal não tem: a chave dela é
-        // Ed25519, e o navegador não a aceita pelo hash.
-        let agora = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let curtos = tls::curtos_do_banco(&persistence, &identity, agora)?;
-        let janelas = curtos.iter().map(tls::Curto::janela).collect();
-        let server_config = tls::server_config_do_seeled(identity, &curtos)?;
-
-        // Não é `Endpoint::server`: aquele faz um `UdpSocket::bind` cru e herda
-        // o padrão do sistema para `IPV6_V6ONLY`, que difere entre Linux, macOS
-        // e Windows. A própria documentação dele avisa. Ver
-        // [`alcance::abrir_escuta`], onde a opção é escrita e conferida.
-        let (socket, pilha) = alcance::abrir_escuta(config.listen)?;
-        // Um segundo descritor para o **mesmo** socket, antes de o quinn tomar
-        // conta dele. É o que torna o degrau 4 do ADR 0022 possível: furar um
-        // NAT exige mandar pacotes da porta em que o QUIC atende, e o quinn não
-        // empresta o socket dele. Só para **escrever** — ler daqui roubaria
-        // pacotes do QUIC, e é por isso que o degrau 4 abre uma escuta própria
-        // para as respostas. Ver `alcance::encontro`.
-        //
-        // `try_clone` num socket UDP duplica o descritor, não o socket: as duas
-        // pontas apontam para a mesma fila e para o mesmo mapeamento de NAT, que
-        // é exatamente a propriedade de que o furo precisa.
-        let espelho = match socket.try_clone() {
-            Ok(copia) => Some(Arc::new(copia)),
-            Err(erro) => {
-                tracing::info!(%erro, "sem espelho do socket: o degrau 4 do ADR 0022 fica de fora");
-                None
-            }
+        // **O que se apresenta no enlace** (D3): no `seeled`, o certificado
+        // longo do banco é o DTLS, e a impressão é a de sempre; na sala, DTLS
+        // efêmero e a apresentação `0x03` assinada. Uma chave guardada que não
+        // é P-256 para aqui, com a frase, e nada é regerado (R1).
+        let no_enlace = identity.no_enlace(dada)?;
+        let sala = !no_enlace.apresentacao.is_empty();
+        let impressao = no_enlace.impressao;
+        let fingerprint = if sala {
+            // A impressão da sala é a da chave, e não a do DTLS efêmero.
+            no_enlace
+                .impressao
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
+        } else {
+            identity.fingerprint()
         };
-        let runtime = quinn::default_runtime()
-            .ok_or_else(|| anyhow::anyhow!("não há runtime assíncrono para o QUIC"))?;
-        let endpoint = quinn::Endpoint::new(
-            quinn::EndpointConfig::default(),
-            Some(server_config),
-            socket,
-            runtime,
-        )
-        .with_context(|| format!("could not bind {}", config.listen))?;
-        tracing::info!(?pilha, escuta = %endpoint.local_addr()?, "o servidor está atendendo");
+        drop(identity);
+
+        // O socket de `alcance::abrir_escuta`, com o `IPV6_V6ONLY` escrito à
+        // mão: `[::]` em pilha dupla, como sempre. O enlace é dono dele daqui em
+        // diante (STUN, DTLS e o ENC/3 dividem a porta, RFC 7983).
+        if config.modo_local {
+            config.listen = SocketAddr::from(([127, 0, 0, 1], config.listen.port()));
+            tracing::info!(escuta = %config.listen, "modo local: sem escada, só loopback");
+        }
+        let (socket, pilha) = alcance::abrir_escuta(config.listen)?;
+
+        // **O balde antes do `Rtc`** (D2). O enlace o consulta antes de criar
+        // um par para um Binding novo; ver `taxa::Portaria::admite`, que olha
+        // sem gastar. `try_lock`: o motor do enlace não espera. Ocupada — a
+        // sessão gastando uma ficha naquele instante —, o Binding é recusado e
+        // quem liga repete o check em seguida.
+        let portaria = Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova()));
+        let anfitriao = transporte::ConfigDoAnfitriao {
+            certificado: no_enlace.certificado,
+            apresentacao: no_enlace.apresentacao,
+            admitir: {
+                let portaria = Arc::clone(&portaria);
+                Arc::new(move |ip| {
+                    portaria
+                        .try_lock()
+                        .is_ok_and(|mut portaria| portaria.admite(ip, std::time::Instant::now()))
+                })
+            },
+        };
+        let ponta = transporte::Ponta::de_socket(socket, Some(anfitriao))
+            .with_context(|| format!("could not bind {}", config.listen))?;
+        let enc = ponta
+            .mensagens_enc()
+            .map(|caixa| Arc::new(tokio::sync::Mutex::new(caixa)));
+        tracing::info!(?pilha, escuta = %ponta.local_addr(), "o servidor está atendendo");
+        // **A sonda de subida degradada** (ADR 0044), dita uma vez: o enlace
+        // não mede perda nem congestionamento. Ver `tela::LeituraDaConexao`.
+        tracing::info!(
+            "a sonda de subida da 0.17 não vê perda nem congestionamento (o enlace não os mede): \
+             ela fica parada na estimativa de partida, sem subir nem descer, e a subida não é \
+             anunciada como medida"
+        );
 
         // Before the mutex, because opening it sweeps the directory against the
         // table and both are still ours alone at this point. ADR 0027 wants the
@@ -679,18 +668,36 @@ impl Daemon {
         // primeira conexão. Um erro de leitura não impede o servidor de subir —
         // sem memória ele cai na ordem de sempre, que é o comportamento de
         // antes desta memória existir.
-        let subida_lembrada = crate::persistence::subida::lembrada(&persistence)
-            .inspect_err(|erro| {
+        //
+        // **Só a memória que vale aqui** (0.17): medida na mesma rede, há
+        // menos de `IDADE_MAXIMA`, pela linha 2, e grampeada no teto da
+        // memória. A da 0.16 (só o número) não é usada.
+        let rede = crate::persistence::subida::rede_de_agora();
+        let memoria = crate::persistence::subida::lembrada_aqui(
+            &persistence,
+            crate::persistence::subida::agora(),
+            rede.as_deref(),
+        );
+        let subida_lembrada = match memoria {
+            Ok(Ok(bps)) => Some(bps),
+            Ok(Err(porque)) => {
+                tracing::info!(
+                    ?porque,
+                    "a subida medida guardada não vale nesta rede ou já envelheceu; não é usada"
+                );
+                None
+            }
+            Err(erro) => {
                 tracing::warn!(%erro, "não deu para ler a subida medida do arranque anterior");
-            })
-            .ok()
-            .flatten();
+                None
+            }
+        };
         let caminho_do_arranque = tela::caminho_do_arranque(subida_lembrada, config.caminho_bps);
         match subida_lembrada {
             Some(bps) => tracing::info!(bps, "a sonda começa da subida medida da última vez"),
             None => tracing::info!(
                 bps = caminho_do_arranque,
-                "nenhuma subida medida guardada; o arranque usa o declarado ou a hipótese"
+                "nenhuma subida medida que valha aqui; o arranque usa o declarado ou a hipótese"
             ),
         }
 
@@ -738,7 +745,7 @@ impl Daemon {
                 Some(bps) => crate::tela::Subida::partindo_de(bps),
                 None => crate::tela::Subida::nova(),
             })),
-            portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
+            portaria,
             atrasos: Arc::new(server::Atrasos::default()),
             desconhecidas: Arc::new(server::MensagensDesconhecidas::default()),
             desassentamentos: Arc::new(server::Desassentamentos::default()),
@@ -752,7 +759,6 @@ impl Daemon {
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao,
-            janelas_do_navegador: janelas,
             recepcao,
         });
 
@@ -762,16 +768,41 @@ impl Daemon {
         // barramento, que são as duas coisas de que o despachante precisa. E
         // fica **depois** do `Server` existir, porque um MOD que reagisse a um
         // evento antes de haver sala reagiria a uma sala que não existe.
+        if let Some(pasta_dos_mods) = &config.mods_dir {
+            let banco = server.persistence.lock().await;
+            // A API e o tema das linhas habilitadas antes das migrações 14
+            // e 16, lidos dos bytes do hash numa leitura só. Antes de montar
+            // qualquer anúncio, e ditos no registro quando não se preenchem
+            // (D-fio-7, D-api-8).
+            for queixa in crate::mods::preencher_api_e_tema(&banco, pasta_dos_mods) {
+                tracing::warn!("MOD habilitado sem API ou tema conhecidos — {queixa}");
+            }
+            // E as permissões que cada MOD declara, para os cargos
+            // autorizarem as ações dele (ADR 0064).
+            for queixa in crate::mods::gravar_permissoes_declaradas(&banco, pasta_dos_mods) {
+                tracing::warn!("MOD habilitado sem permissões gravadas — {queixa}");
+            }
+        }
+
+        // **Um MOD ligado de uma API que esta linha não roda não deixa subir**
+        // (achado do diagnóstico da 0.15.1). Cada visita seria recusada com
+        // `ModsDeOutraApi` antes da portaria, e quem hospeda não veria batida
+        // nenhuma: um servidor no ar que recusa todo mundo em silêncio. O app
+        // já recusa antes de hospedar; o `seeled` subido direto sobre um banco
+        // legado caía nisso. Aqui o erro diz qual MOD e o que fazer.
+        if crate::mods::anuncio::o_anuncio_alcanca_alguem(config.versao_do_anuncio) {
+            let de_outra_api = {
+                let banco = server.persistence.lock().await;
+                crate::mods::ligados_de_outra_api(&banco)?
+            };
+            if !de_outra_api.is_empty() {
+                return Err(crate::mods::ModsDeOutraApiLigados { mods: de_outra_api }.into());
+            }
+        }
+
         if let Some(pasta_dos_mods) = config.mods_dir.clone() {
             let ligados = {
                 let banco = server.persistence.lock().await;
-                // A API e o tema das linhas habilitadas antes das migrações 14
-                // e 16, lidos dos bytes do hash numa leitura só. Antes de montar
-                // qualquer anúncio, e ditos no registro quando não se preenchem
-                // (D-fio-7, D-api-8).
-                for queixa in crate::mods::preencher_api_e_tema(&banco, &pasta_dos_mods) {
-                    tracing::warn!("MOD habilitado sem API ou tema conhecidos — {queixa}");
-                }
                 crate::persistence::mods::enabled(&banco).unwrap_or_default()
             };
             // O par, e não só o identificador: é o hash que diz **quais bytes**
@@ -829,12 +860,11 @@ impl Daemon {
         ));
 
         Ok(Self {
-            endpoint,
+            ponta,
             config: Arc::new(config),
             pilha,
-            espelho,
+            enc,
             fingerprint,
-            recusas_do_navegador: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             registry: Arc::new(session::Registry::new()),
             server,
             voice_rooms,
@@ -845,47 +875,38 @@ impl Daemon {
     ///
     /// # Errors
     ///
-    /// Fails if the socket cannot report its address.
+    /// Never since 0.17: the link knows its address. Kept as `Result` for the
+    /// callers.
     pub fn local_addr(&self) -> Result<SocketAddr> {
-        Ok(self.endpoint.local_addr()?)
+        Ok(self.ponta.local_addr())
     }
 
     /// The certificate fingerprint a client pins. ADR 0003.
+    ///
+    /// No `seeled`, a do certificado DTLS, a mesma do banco e da 0.16. Na sala
+    /// pessoal, a da chave dela (o SHA-256 dos 32 bytes), porque o DTLS da sala
+    /// é efêmero.
     #[must_use]
     pub fn fingerprint(&self) -> &str {
         &self.fingerprint
     }
 
-    /// **As janelas dos certificados curtos do `h3`** (ADR 0057): o hash e a
-    /// validade de cada um, da vigente em diante, como o
-    /// `ServerMessage::HashesDoNavegador` as leva. É o que o link do navegador
-    /// escreve no `wh=`. Vazias quando o servidor não serve ao navegador (a
-    /// sala pessoal).
+    /// A ponta do enlace: o socket do servidor, para o degrau 4 do ADR 0022
+    /// mandar o ENC/3 e furar o NAT pela porta em que o servidor atende.
+    ///
+    /// Até a 0.16 era o «espelho», um segundo descritor só de escrita, porque o
+    /// quinn não emprestava o socket. O enlace é sans-IO e é dono dele: o mesmo
+    /// socket escreve e lê o ENC/3 ([`Self::mensagens_enc`]).
     #[must_use]
-    pub fn janelas_do_navegador(&self) -> &[seele_proto::control::JanelaDoNavegador] {
-        &self.server.janelas_do_navegador
+    pub fn ponta(&self) -> transporte::Ponta {
+        self.ponta.clone()
     }
 
-    /// Quantas vezes um navegador recusou o certificado curto no aperto de mão
-    /// do `h3`: um link velho, ou de outro servidor que atende neste endereço
-    /// noutra rede. Cada uma vai ao registro com essa frase; a conta é para
-    /// quem investiga, e para o teste que a prova.
+    /// Os datagramas do ENC/3 que chegam ao socket do servidor. `None` só se o
+    /// enlace já os tiver entregue a outro dono, o que este crate não faz.
     #[must_use]
-    pub fn recusas_do_navegador(&self) -> u64 {
-        self.recusas_do_navegador
-            .load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    /// O socket em que o servidor atende, para **escrever**. Degrau 4 do ADR 0022.
-    ///
-    /// Furar um NAT exige mandar pacotes da porta em que o QUIC atende: o
-    /// roteador abre caminho por porta interna, e um pacote saído de outro
-    /// socket abriria caminho para o socket errado. Ver `alcance::encontro`.
-    ///
-    /// Só para escrever. Ler daqui roubaria pacotes do quinn, que é quem lê.
-    #[must_use]
-    pub fn espelho(&self) -> Option<Arc<std::net::UdpSocket>> {
-        self.espelho.clone()
+    pub fn mensagens_enc(&self) -> Option<CaixaDoEnc> {
+        self.enc.clone()
     }
 
     /// Que famílias de endereço esta escuta alcança. Degrau 2 do ADR 0022.
@@ -896,6 +917,12 @@ impl Daemon {
     #[must_use]
     pub fn pilha(&self) -> alcance::Pilha {
         self.pilha
+    }
+
+    /// Se este servidor está no modo local (só loopback, sem escada).
+    #[must_use]
+    pub fn modo_local(&self) -> bool {
+        self.config.modo_local
     }
 
     /// A impressão digital lida direto do banco, sem subir servidor.
@@ -930,60 +957,27 @@ impl Daemon {
         admissao::Politica::carregar(&guard)
     }
 
-    /// Accepts connections until the endpoint closes.
+    /// Accepts connections until the link closes.
     ///
-    /// One task per connection, as `specs/04-servidor-seele.md` requires.
+    /// One task per connection, as `specs/04-servidor-seele.md` requires. A
+    /// connection arrives here already past ICE and DTLS: the link refused
+    /// what did not pass its gates (integrity, the per-IP wait, the per-IP and
+    /// total ceilings, and [`taxa::Portaria::admite`]). The native client and
+    /// the browser arrive the same way since 0.17.
     ///
     /// # Errors
     ///
-    /// Returns when the endpoint is closed.
+    /// Returns when the link is closed.
     pub async fn run(&self) -> Result<()> {
-        while let Some(incoming) = self.endpoint.accept().await {
+        while let Some(conexao) = self.ponta.aceitar().await {
             let config = Arc::clone(&self.config);
             let registry = Arc::clone(&self.registry);
             let server = Arc::clone(&self.server);
             let voice_rooms = Arc::clone(&self.voice_rooms);
-            let recusas_do_navegador = Arc::clone(&self.recusas_do_navegador);
 
             tokio::spawn(async move {
-                let mut conectando = match incoming.accept() {
-                    Ok(conectando) => conectando,
-                    Err(error) => {
-                        tracing::warn!(%error, "connection failed before the handshake");
-                        return;
-                    }
-                };
-                // O ALPN que o aperto de mão escolheu: `seele/1` do nativo, ou o
-                // `h3` do navegador (ADR 0057). Ele sai antes de o aperto acabar,
-                // e é o que separa a recusa de um navegador da de um nativo.
-                let alpn = conectando
-                    .handshake_data()
-                    .await
-                    .ok()
-                    .and_then(|dados| {
-                        dados
-                            .downcast::<quinn::crypto::rustls::HandshakeData>()
-                            .ok()
-                    })
-                    .and_then(|dados| dados.protocol);
-                let do_navegador =
-                    alpn.as_deref() == Some(seele_proto::transport::ALPN_DO_NAVEGADOR);
-                let conexao = if do_navegador {
-                    match aceitar_o_navegador(conectando, &recusas_do_navegador).await {
-                        Some(conexao) => conexao,
-                        None => return,
-                    }
-                } else {
-                    match conectando.await {
-                        Ok(connection) => transporte::Conexao::Quic(connection),
-                        Err(error) => {
-                            tracing::warn!(%error, "connection failed before the handshake");
-                            return;
-                        }
-                    }
-                };
                 let peer = conexao.remote_address();
-                tracing::info!(%peer, navegador = conexao.do_navegador(), "link unverified");
+                tracing::info!(%peer, "link unverified");
 
                 if let Err(error) =
                     session::serve(conexao, config, registry, server, voice_rooms).await
@@ -1063,18 +1057,18 @@ impl Daemon {
         persistence::messages::Messages::new(&mut guard).history(channel, None, limite)
     }
 
-    /// Para de aceitar e fecha o endpoint, **na hora e sem avisar ninguém**.
+    /// Para de aceitar e fecha o enlace, **na hora e sem avisar ninguém**.
     ///
     /// Síncrono de propósito: é o que o `Drop` de quem hospeda pode chamar, e
     /// um `drop` não espera nada. Quem estava dentro lê a conexão caindo, e não
     /// um motivo. Quem pode esperar chama [`Self::encerrar_avisando`], que avisa
     /// cada sessão antes e só então chega aqui.
     pub fn shutdown(&self) {
-        self.endpoint.close(0_u32.into(), b"shutting down");
+        self.ponta.fechar();
     }
 
     /// Avisa cada sessão de que o servidor vai cair, espera elas se
-    /// despedirem até `prazo`, e só então fecha o endpoint.
+    /// despedirem até `prazo`, e só então fecha o enlace.
     ///
     /// # O defeito que isto conserta
     ///
@@ -1082,9 +1076,7 @@ impl Daemon {
     /// queda de transporte: a casca dizia «não foi possível alcançar o
     /// servidor», e a bateria batia cinco minutos numa porta que ninguém ia
     /// atender. O protocolo tinha a frase certa, `ServerShuttingDown`, e ninguém
-    /// a mandava. O `specs/04-servidor-seele.md` pede o aviso; o que faltava era
-    /// como alcançar cada sessão sem um registro delas, e a resposta é o
-    /// barramento, que toda sessão já escuta.
+    /// a mandava.
     ///
     /// # Como
     ///
@@ -1092,33 +1084,11 @@ impl Daemon {
     /// atende no braço da expulsão: escreve `Disconnecting { reason }`, espera
     /// até 1 s pela entrega (`session::despedir`) e fecha a conexão.
     ///
-    /// A espera é pelo **endpoint**, com `wait_idle` sob `prazo`: ele volta
-    /// quando não sobra conexão nenhuma, o que quer dizer que cada sessão se
-    /// despediu e que o fechamento dela já saiu para o outro lado. Não há
-    /// registro de sessões vivas para esperar por ele (`session::Registry` só
-    /// conta), e o endpoint já é quem sabe quantas conexões há.
-    ///
-    /// O prazo é o teto, e não a espera de sempre: sem ninguém conectado o
-    /// endpoint já está ocioso, e isto volta na hora. Ele vence em dois casos,
-    /// e o endpoint não distingue um do outro:
-    ///
-    /// - **uma conexão que não se despede** — uma ainda no aperto de mão, que
-    ///   não assinou o barramento, ou um par que não confirma a entrega. Essa
-    ///   é fechada sem aviso pelo [`Self::shutdown`] do fim;
-    /// - **uma sessão que já se despediu e ainda conta.** Uma conexão fechada
-    ///   fica no endpoint pelo dreno do QUIC, três PTO, e um PTO é o RTT
-    ///   suavizado, mais quatro vezes a variação, mais os 25 ms de atraso de
-    ///   confirmação. No laço local isso são milissegundos; numa internet com
-    ///   RTT de umas poucas dezenas de milissegundos (perto de 50 a 70 ms,
-    ///   conforme a variação), passa de meio segundo. Essa sessão já leu o
-    ///   aviso, o fechamento dela já saiu, e o `shutdown` não muda nada para
-    ///   ela.
-    ///
-    /// # O que isto não faz
-    ///
-    /// Não espera o fechamento terminar depois do [`Self::shutdown`]: quem vai
-    /// reabrir a porta, ou derrubar o runtime em seguida, chama
-    /// [`Self::wait_idle`] depois.
+    /// A espera é pela **ponta**: ela volta quando não sobra conexão nenhuma
+    /// nela ([`transporte::Ponta::conexoes_vivas`]), o que quer dizer que cada
+    /// sessão se despediu e fechou. O prazo é o teto: uma conexão ainda no
+    /// aperto, que não assinou o barramento, ou um par que não confirma a
+    /// entrega, é fechada sem aviso pelo [`Self::shutdown`] do fim.
     pub async fn encerrar_avisando(
         &self,
         reason: seele_proto::control::DisconnectReason,
@@ -1129,30 +1099,35 @@ impl Daemon {
             .server
             .events
             .send(server::Event::ServidorEncerrando { reason });
-        if tokio::time::timeout(prazo, self.endpoint.wait_idle())
+        if tokio::time::timeout(prazo, self.sem_conexoes())
             .await
             .is_err()
         {
-            // O que se sabe, e só isso: o endpoint conta as conexões ainda
-            // drenando junto com as que não se despediram. Ver o doc acima.
             tracing::info!(
-                conexoes = self.endpoint.open_connections(),
+                conexoes = self.ponta.conexoes_vivas(),
                 ?prazo,
-                "o prazo da despedida acabou com conexões ainda no endpoint: fechando depois do \
-                 aviso, ou sem ter se despedido (estas fecham agora, sem aviso)"
+                "o prazo da despedida acabou com conexões ainda na ponta: estas fecham agora, \
+                 sem aviso"
             );
         }
         self.shutdown();
     }
 
-    /// Espera o endpoint terminar de fechar.
+    /// Volta quando a ponta não tem conexão nenhuma, nem no aperto.
+    async fn sem_conexoes(&self) {
+        while self.ponta.conexoes_vivas() > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Espera o enlace terminar de fechar as conexões.
     ///
-    /// `shutdown` sinaliza e volta na hora; o socket UDP só é liberado quando o
-    /// endpoint termina. Sem esperar, parar de hospedar e recomeçar em seguida
-    /// falha com "endereço já em uso" — que é exatamente o que alguém faz ao
-    /// fechar uma conversa e abrir outra.
+    /// `shutdown` sinaliza e volta na hora. **O socket só volta ao sistema
+    /// quando a última cópia da ponta cai** (o `Daemon`, a tarefa de aceitação
+    /// e o degrau 4): quem vai reabrir a porta em seguida larga o `Daemon`
+    /// depois disto, como `Hospedagem::encerrar` faz.
     pub async fn wait_idle(&self) {
-        self.endpoint.wait_idle().await;
+        self.sem_conexoes().await;
     }
 }
 
@@ -1513,6 +1488,62 @@ mod tests {
             "the opening voice room was written back: {voice_rooms:?}"
         );
         assert_eq!(voice_rooms[0].name, "SALA-02 PONTE");
+    }
+
+    /// **Um MOD ligado de outra API não deixa o servidor subir** (achado do
+    /// diagnóstico da 0.15.1): com ele, toda visita seria recusada antes da
+    /// portaria, em silêncio para quem hospeda. A recusa nomeia o MOD e a ação.
+    /// O controle: o mesmo banco com o MOD na API desta linha sobe.
+    #[tokio::test]
+    async fn um_mod_ligado_de_outra_api_nao_deixa_o_servidor_subir() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let ligar = |api: u32, banco: &std::path::Path| {
+            let persistence =
+                Persistence::open(&Location::File(banco.to_path_buf())).expect("open");
+            crate::persistence::mods::enable(
+                &persistence,
+                &crate::persistence::mods::EnabledMod {
+                    id: "fulano/legado".into(),
+                    version: "1.0.0".into(),
+                    hash: "ab".repeat(32),
+                    repo: "https://example.invalid/legado".into(),
+                    reach: Vec::new(),
+                    server_half: false,
+                    api,
+                    tema: false,
+                },
+            )
+            .expect("ligar o MOD");
+        };
+        let config = |banco: &std::path::Path| ServerConfig {
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            database: Location::File(banco.to_path_buf()),
+            ..ServerConfig::default()
+        };
+
+        let legado = directory.path().join("legado.db");
+        ligar(4, &legado);
+        let Err(erro) = Daemon::bind(config(&legado)).await else {
+            panic!(
+                "o servidor subiu com um MOD da API 4 ligado: recusaria toda visita em silêncio"
+            );
+        };
+        let recusa = erro
+            .downcast_ref::<crate::mods::ModsDeOutraApiLigados>()
+            .unwrap_or_else(|| panic!("a recusa não é a dos MODs de outra API: {erro:#}"));
+        assert_eq!(recusa.mods, vec![("fulano/legado".to_owned(), 4)]);
+        let frase = erro.to_string();
+        assert!(
+            frase.contains("fulano/legado") && frase.contains("desligue"),
+            "a frase não diz qual MOD nem o que fazer: {frase}"
+        );
+
+        let em_dia = directory.path().join("em-dia.db");
+        ligar(seele_proto::mods::MOD_API_VERSION, &em_dia);
+        let daemon = Daemon::bind(config(&em_dia))
+            .await
+            .expect("o MOD da API desta linha não deixou subir");
+        daemon.shutdown();
     }
 
     #[test]

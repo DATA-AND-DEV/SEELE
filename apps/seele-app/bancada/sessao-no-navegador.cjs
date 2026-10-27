@@ -1,6 +1,6 @@
 // A sessão pelo navegador **de ponta a ponta** (Tarefa 2.6 da F4): a página
 // inteira (`ui/`) num Chromium de verdade, entrando num servidor de verdade
-// pela WebTransport, sem nada de mentira no meio.
+// pelo enlace WebRTC da 0.17 (`ui/rtc-web.js`), sem nada de mentira no meio.
 //
 //     node apps/seele-app/bancada/sessao-no-navegador.cjs \
 //       target/wasm32-unknown-unknown/release/seele_web.wasm \
@@ -29,11 +29,11 @@
 //    (`abertura_do_audio: "aberto"`), e os datagramas que uma manda chegam e
 //    são decodificados na outra; e o volume escolhido para a primeira chega à
 //    mistura da segunda, pela alça;
-// 5. **os hashes ficam guardados**: o `HashesDoNavegador` do servidor chega à
-//    identidade, que guarda as janelas com o servidor;
+// 5. **o servidor fica guardado**: a identidade guarda o servidor pela
+//    impressão, com a chave, e sem hashes nem janelas (a 0.17 não os tem);
 // 6. **o fim**: o `disconnect` fecha, e o `snapshot` volta `NotConnected`;
-// 7. **um hash que não é do servidor não entra**: a entrada desiste com
-//    `sem-rede`, e nada fica pendurado;
+// 7. **uma impressão que não é a do servidor não entra**: o DTLS falha, a
+//    entrada desiste com `verificacao-falhou`, e nada fica pendurado;
 // 8. **a casca larga do PC** (D-web-3), pelos comandos do desktop: o link
 //    colado no SERVIDORES (`ler_entrada`, `analisar_convite` e o `connect` com
 //    o endereço), a aparência guardada nos conhecidos, os aceites de MODs pelo
@@ -79,7 +79,7 @@ const path = require("node:path");
 const readline = require("node:readline");
 
 const raiz = path.resolve(__dirname, "..");
-const { chromium } = require("./playwright.cjs");
+const { chromium, webkit } = require("./playwright.cjs");
 const { cabecalhosDaOrigem } = require("./cabecalhos-da-origem.cjs");
 const [caminhoDoWasm, caminhoDoServidor, caminhoDoMotor] = process.argv.slice(2);
 if (![caminhoDoWasm, caminhoDoServidor, caminhoDoMotor].every((caminho) => caminho && fs.existsSync(caminho))) {
@@ -113,7 +113,7 @@ const PASTA_DO_MOD = (() => {
 })();
 
 /** Onde o catálogo mora: o `ENDERECO` do `seele_sessao::catalogo`. */
-const ENDERECO_DO_CATALOGO = "https://mods.seele.app.br";
+const ENDERECO_DO_CATALOGO = "https://mods.seele.sh";
 
 let terminou = false;
 process.on("beforeExit", () => {
@@ -145,6 +145,25 @@ function servirAPagina() {
   fs.cpSync(path.join(raiz, "ui"), pasta, { recursive: true });
   fs.copyFileSync(caminhoDoWasm, path.join(pasta, "seele_web.wasm"));
   fs.copyFileSync(caminhoDoMotor, path.join(pasta, "seele_motor_web.wasm"));
+  // O enlace da 0.17 antes da sessão: até o `index.html` (do ui-ux) ganhar a
+  // tag, a bancada a põe na cópia que serve, e diz que pôs.
+  const indice = path.join(pasta, "index.html");
+  const html = fs.readFileSync(indice, "utf8");
+  if (!html.includes('src="rtc-web.js"')) {
+    console.warn("sessao-no-navegador: o index.html não carrega o rtc-web.js; a bancada o pôs antes do sessao-web.js");
+    fs.writeFileSync(indice, html.replace('<script src="sessao-web.js"></script>', '<script src="rtc-web.js"></script>\n<script src="sessao-web.js"></script>'));
+  }
+  // `--reverter-recusa-da-tela`: a reversão do caso 12, só na cópia servida. A
+  // sonda da tela volta a não conferir o `MediaStreamTrackProcessor` (como antes
+  // do conserto do ui-ux), e no WebKit o caso 12 tem de reprovar.
+  if (process.argv.includes("--reverter-recusa-da-tela")) {
+    const compartilhar = path.join(pasta, "compartilhar-web.js");
+    const texto = fs.readFileSync(compartilhar, "utf8");
+    const de = ' &&\n    typeof MediaStreamTrackProcessor === "function";';
+    if (!texto.includes(de)) throw new Error("a reversão do caso 12 não casa com o compartilhar-web.js");
+    fs.writeFileSync(compartilhar, texto.replace(de, ";"));
+    console.warn("sessao-no-navegador: REVERSÃO do caso 12 na cópia servida");
+  }
   return http.createServer((pedido, resposta) => {
     const nome = decodeURIComponent(new URL(pedido.url, "http://x").pathname).replace(/^\/+/, "") || "index.html";
     const arquivo = path.join(pasta, nome);
@@ -328,7 +347,7 @@ async function abrirUmaPagina(navegador, endereco) {
   });
   await aba.goto(`${endereco}index.html`);
   await aba.evaluate(() =>
-    window.__TAURI__.event.listen("seele://event", ({ payload }) => window.eventosDaBancada.push(payload)),
+    window.__TAURI__.event.listen("seele://event", ({ payload }) => window.eventosDaBancada.push(payload && typeof payload === "object" && "sessao" in payload && "evento" in payload ? payload.evento : payload)),
   );
   return { contexto, aba, doConsole };
 }
@@ -363,9 +382,13 @@ const invocar = (aba, comando, args) =>
   await new Promise((resolve) => servidorDaPagina.listen(0, "127.0.0.1", resolve));
   const endereco = `http://localhost:${servidorDaPagina.address().port}/`;
   const servidor = await subirOServidor();
-  const navegador = await chromium().launch({
-    args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"],
-  });
+  // `--webkit`: o mesmo roteiro no WebKit do Playwright (que já tem os
+  // dispositivos de captura de mentira e não aceita as opções do Chromium).
+  const navegador = process.argv.includes("--webkit")
+    ? await webkit().launch()
+    : await chromium().launch({
+        args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"],
+      });
   const paginas = [];
   /** Os servidores além do primeiro, encerrados no fim. */
   const servidoresDaBancada = [];
@@ -375,7 +398,7 @@ const invocar = (aba, comando, args) =>
     paginas.push(a);
     const { lido, entrada } = await entrarPeloLink(a.aba, servidor.link, "ana");
     confere("1", lido && lido.estado === "pronto", `o link não ficou pronto: ${JSON.stringify(lido)}`);
-    confere("1", typeof servidor.ate === "number" && lido?.valeAte === servidor.ate, `o «vale até» lido não é o da casca: ${lido?.valeAte} e ${servidor.ate}`);
+    confere("1", lido?.valeAte == null, `a 0.17 não tem «vale até» no link do navegador, e veio ${lido?.valeAte}`);
     confere("1", entrada && entrada.ok === true, `a entrada não deu certo: ${JSON.stringify(entrada)}`);
     const resposta = entrada?.resposta ?? {};
     confere("1", resposta.snapshot?.server === "Bancada", `o retrato não traz o nome do servidor: ${JSON.stringify(resposta.snapshot?.server)}`);
@@ -477,7 +500,7 @@ const invocar = (aba, comando, args) =>
     const volumes = (await invocar(b.aba, "volumes_locais", {})).ok;
     confere("4", JSON.stringify(volumes) === '{"ANA":0}', `os volumes locais: ${JSON.stringify(volumes)}`);
 
-    // ------------------------------------------------------------ 5. os hashes guardados
+    // ------------------------------------------------------------ 5. o servidor guardado
     const guardado = await esperar(a.aba, async (impressao) => {
       const registro = await new Promise((resolver, rejeitar) => {
         const pedido = indexedDB.open("seele-identidade", 1);
@@ -492,9 +515,12 @@ const invocar = (aba, comando, args) =>
           ler.onerror = () => rejeitar(ler.error);
         };
       });
-      return { pronto: Boolean(registro && registro.janelas && registro.janelas.length > 4), janelas: registro?.janelas?.length ?? 0 };
+      return {
+        pronto: Boolean(registro && registro.chave && !registro.hashes && !registro.janelas),
+        registro: registro ? Object.keys(registro) : null,
+      };
     }, servidor.impressao);
-    confere("5", guardado.pronto, `as janelas do servidor não ficaram guardadas: ${guardado.janelas}`);
+    confere("5", guardado.pronto, `o servidor não ficou guardado como a 0.17 guarda: ${JSON.stringify(guardado.registro)}`);
 
     // ------------------------------------------------------------ 6. o fim
     confere("6", (await invocar(b.aba, "disconnect", {})).ok === null, "o disconnect não respondeu null");
@@ -506,12 +532,16 @@ const invocar = (aba, comando, args) =>
     });
     confere("6", saiu.pronto, `a primeira página ainda vê a segunda: ${JSON.stringify(saiu.presentes)}`);
 
-    // ------------------------------------------------------------ 7. o hash errado
+    // ------------------------------------------------------------ 7. a impressão errada
     const c = await abrirUmaPagina(navegador, endereco);
     paginas.push(c);
-    const errado = servidor.link.replace(/wh=[0-9a-f]{64}/, `wh=${"ab".repeat(32)}`).replace(/,[0-9a-f]{64}/g, "");
-    const comHashErrado = await entrarPeloLink(c.aba, errado, "caio");
-    confere("7", comHashErrado.entrada?.erro === "sem-rede", `a entrada com o hash errado: ${JSON.stringify(comHashErrado.entrada)}`);
+    const errado = servidor.link.replace(/fp=[0-9a-f]{64}/, `fp=${"ab".repeat(32)}`);
+    const comImpressaoErrada = await entrarPeloLink(c.aba, errado, "caio");
+    confere(
+      "7",
+      comImpressaoErrada.entrada?.erro === "verificacao-falhou",
+      `a entrada com a impressão errada: ${JSON.stringify(comImpressaoErrada.entrada)}`,
+    );
 
     // ------------------------------------------------------------ 9. as imagens
     const imagem = path.join(os.tmpdir(), `sessao-no-navegador-${process.pid}.png`);
@@ -643,12 +673,14 @@ const invocar = (aba, comando, args) =>
     }, conviteMudo?.alvo);
     confere("8", cancelada.cancelou === true && cancelada.desfecho === "Cancelada" && cancelada.ms < 2000, `o CANCELAR: ${JSON.stringify(cancelada)}`);
     confere("8", (await invocar(d.aba, "cancelar_ligacao", {})).ok === false, "o CANCELAR sem entrada em curso não respondeu false");
-    // Uma entrada que falha na hora (a porta que o navegador nem tenta): a
-    // recusa chega à casca, e nada fica sem dono no console.
+    // Uma entrada sem caminho (uma porta em que ninguém atende, e sem ponto de
+    // encontro no link): na 0.17 o ICE tenta até o prazo do enlace, e a casca
+    // recebe a falha do enlace com o motivo dela (`SemCaminho`), e nada fica
+    // sem dono no console.
     const recusado = comOutroAlvo(servidor.link, "127.0.0.1:9", servidor.endereco);
     const conviteRecusado = (await invocar(d.aba, "analisar_convite", { link: recusado })).ok;
     const naHora = await invocar(d.aba, "connect", { server: conviteRecusado?.alvo, nickname: "dani", audio: true, joinSecret: null, tentativa: 5 });
-    confere("8", naHora.erro === "Unreachable", `a entrada que falha na hora: ${JSON.stringify(naHora)}`);
+    confere("8", naHora.erro?.FalhaDoEnlace?.motivo === "SemCaminho", `a entrada sem caminho: ${JSON.stringify(naHora)}`);
     await new Promise((r) => setTimeout(r, 500));
     // E esquecer tira o servidor da lista.
     confere("8", (await invocar(d.aba, "esquecer", { alvo: servidor.endereco })).ok === null, "o esquecer não respondeu null");
@@ -660,43 +692,76 @@ const invocar = (aba, comando, args) =>
     paginas.push(e);
     confere("12", (await entrarPeloLink(e.aba, servidor.link, "eva")).entrada?.ok === true, "a página que assiste não entrou");
     await invocar(e.aba, "enter_voice_room", { voiceRoom: sala, senha: null });
-    const podeCompartilhar = (await invocar(a.aba, "permissao_de_tela", {})).ok;
-    confere("12", podeCompartilhar === "Concedida", `a permissão da tela: ${JSON.stringify(podeCompartilhar)}`);
-    const limites = { banda_bps: null, altura_maxima: 720, quadros_maximos: 15, prioridade: "nitidez", com_som: true };
-    // Contados desde antes de compartilhar: quem está na sala e ainda não
-    // escolheu recebe a tela sem pedir, e a abertura pode chegar antes do
-    // `assistir`.
-    const antesDeCompartilhar = await e.aba.evaluate(() => window.eventosDaBancada.length);
-    const compartilhou = await invocar(a.aba, "compartilhar_tela", { fonte: 1, limites });
-    confere("12", compartilhou.ok === null, `o compartilhar_tela: ${JSON.stringify(compartilhou)}`);
-    const transmitindo = await esperar(e.aba, async () => {
-      const r = await window.__TAURI__.core.invoke("snapshot");
-      return { pronto: r.transmissoes.length === 1, transmissoes: r.transmissoes };
-    }, undefined, 15_000);
-    confere("12", transmitindo.pronto, `a página que assiste não viu a transmissão: ${JSON.stringify(transmitindo.transmissoes)}`);
-    const tela = transmitindo.transmissoes?.[0]?.tela ?? transmitindo.transmissoes?.[0]?.screen;
-    confere("12", (await invocar(e.aba, "assistir", { tela, quero: true })).ok === null, "o assistir não respondeu null");
-    const assistindo = await esperar(e.aba, async (antes) => {
-      const eventos = window.eventosDaBancada.slice(antes);
-      const abriu = eventos.find((evento) => evento && evento.ScreenOpened);
-      const chaves = eventos.filter((evento) => evento && evento.ScreenFrame && evento.ScreenFrame.key).length;
-      const quadros = eventos.filter((evento) => evento && evento.ScreenFrame).length;
-      const som = vozDaPonte.atual ? vozDaPonte.atual.estadoDoSomDaTela().quadros : 0;
-      return { pronto: Boolean(abriu) && chaves >= 1 && quadros >= 5 && som > 0, abriu: abriu?.ScreenOpened, chaves, quadros, som };
-    }, antesDeCompartilhar, 20_000);
-    confere(
-      "12",
-      assistindo.pronto,
-      `a tela não chegou a quem assiste: aberta ${JSON.stringify(assistindo.abriu)}, ${assistindo.quadros} quadros (${assistindo.chaves} chaves), ${assistindo.som} quadros de som`,
-    );
-    const espelho = await a.aba.evaluate(() => window.eventosDaBancada.some((evento) => evento && evento.ScreenOpened));
-    confere("12", espelho, "quem compartilha não viu a própria tela (o espelho)");
-    confere("12", (await invocar(a.aba, "parar_de_compartilhar", {})).ok === null, "o parar_de_compartilhar não respondeu null");
-    const fechou = await esperar(e.aba, async (antes) => {
-      const eventos = window.eventosDaBancada.slice(antes);
-      return { pronto: eventos.some((evento) => evento && evento.ScreenClosed) };
-    }, antesDeCompartilhar);
-    confere("12", fechou.pronto, "a tela não fechou para quem assistia");
+    // **Quem compartilha depende do navegador, e a página diz qual é o caso.**
+    // O WebKit não tem o `MediaStreamTrackProcessor`, por onde os quadros da
+    // captura chegam ao codificador: ali o correto (igual na 0.16) é a recusa
+    // honesta ANTES do seletor — a permissão diz `NaoSeSabe` e o
+    // `compartilhar_tela` recusa com a frase da ponte — e nada quebra no meio.
+    // No `--webkit` a ausência é exigida (se o WebKit ganhar a peça, este caso
+    // reprova e pede o roteiro inteiro); no Chromium, o roteiro inteiro.
+    const temAPeca = await a.aba.evaluate(() => typeof MediaStreamTrackProcessor === "function");
+    if (process.argv.includes("--webkit")) {
+      confere("12", !temAPeca, "o WebKit tem o MediaStreamTrackProcessor: rode o roteiro inteiro da tela nele");
+    }
+    if (!temAPeca) {
+      const podeCompartilhar = (await invocar(a.aba, "permissao_de_tela", {})).ok;
+      confere("12", podeCompartilhar === "NaoSeSabe", `sem a peça, a permissão da tela devia ser NaoSeSabe: ${JSON.stringify(podeCompartilhar)}`);
+      const fontes = await invocar(a.aba, "fontes_de_tela", {});
+      confere("12", fontes.erro === "ScreenShareUnavailable", `sem a peça, as fontes da tela deviam ser recusadas: ${JSON.stringify(fontes)}`);
+      const limites = { banda_bps: null, altura_maxima: 720, quadros_maximos: 15, prioridade: "nitidez", com_som: true };
+      const antesDeCompartilhar = await e.aba.evaluate(() => window.eventosDaBancada.length);
+      const recusado = await invocar(a.aba, "compartilhar_tela", { fonte: 1, limites });
+      const recusa = recusado.erro?.RecusaDaPonte;
+      confere(
+        "12",
+        recusa?.comando === "compartilhar_tela" && typeof recusa.frase === "string" && recusa.frase.trim().length > 0,
+        `sem a peça, o compartilhar_tela devia recusar com a frase da ponte: ${JSON.stringify(recusado)}`,
+      );
+      await new Promise((resolver) => setTimeout(resolver, 1500));
+      const depois = await e.aba.evaluate(async (antes) => {
+        const r = await window.__TAURI__.core.invoke("snapshot");
+        return { transmissoes: r.transmissoes.length, abriu: window.eventosDaBancada.slice(antes).some((evento) => evento && evento.ScreenOpened) };
+      }, antesDeCompartilhar);
+      confere("12", depois.transmissoes === 0 && !depois.abriu, `a recusa deixou uma transmissão no ar: ${JSON.stringify(depois)}`);
+    } else {
+      const podeCompartilhar = (await invocar(a.aba, "permissao_de_tela", {})).ok;
+      confere("12", podeCompartilhar === "Concedida", `a permissão da tela: ${JSON.stringify(podeCompartilhar)}`);
+      const limites = { banda_bps: null, altura_maxima: 720, quadros_maximos: 15, prioridade: "nitidez", com_som: true };
+      // Contados desde antes de compartilhar: quem está na sala e ainda não
+      // escolheu recebe a tela sem pedir, e a abertura pode chegar antes do
+      // `assistir`.
+      const antesDeCompartilhar = await e.aba.evaluate(() => window.eventosDaBancada.length);
+      const compartilhou = await invocar(a.aba, "compartilhar_tela", { fonte: 1, limites });
+      confere("12", compartilhou.ok === null, `o compartilhar_tela: ${JSON.stringify(compartilhou)}`);
+      const transmitindo = await esperar(e.aba, async () => {
+        const r = await window.__TAURI__.core.invoke("snapshot");
+        return { pronto: r.transmissoes.length === 1, transmissoes: r.transmissoes };
+      }, undefined, 15_000);
+      confere("12", transmitindo.pronto, `a página que assiste não viu a transmissão: ${JSON.stringify(transmitindo.transmissoes)}`);
+      const tela = transmitindo.transmissoes?.[0]?.tela ?? transmitindo.transmissoes?.[0]?.screen;
+      confere("12", (await invocar(e.aba, "assistir", { tela, quero: true })).ok === null, "o assistir não respondeu null");
+      const assistindo = await esperar(e.aba, async (antes) => {
+        const eventos = window.eventosDaBancada.slice(antes);
+        const abriu = eventos.find((evento) => evento && evento.ScreenOpened);
+        const chaves = eventos.filter((evento) => evento && evento.ScreenFrame && evento.ScreenFrame.key).length;
+        const quadros = eventos.filter((evento) => evento && evento.ScreenFrame).length;
+        const som = vozDaPonte.atual ? vozDaPonte.atual.estadoDoSomDaTela().quadros : 0;
+        return { pronto: Boolean(abriu) && chaves >= 1 && quadros >= 5 && som > 0, abriu: abriu?.ScreenOpened, chaves, quadros, som };
+      }, antesDeCompartilhar, 20_000);
+      confere(
+        "12",
+        assistindo.pronto,
+        `a tela não chegou a quem assiste: aberta ${JSON.stringify(assistindo.abriu)}, ${assistindo.quadros} quadros (${assistindo.chaves} chaves), ${assistindo.som} quadros de som`,
+      );
+      const espelho = await a.aba.evaluate(() => window.eventosDaBancada.some((evento) => evento && evento.ScreenOpened));
+      confere("12", espelho, "quem compartilha não viu a própria tela (o espelho)");
+      confere("12", (await invocar(a.aba, "parar_de_compartilhar", {})).ok === null, "o parar_de_compartilhar não respondeu null");
+      const fechou = await esperar(e.aba, async (antes) => {
+        const eventos = window.eventosDaBancada.slice(antes);
+        return { pronto: eventos.some((evento) => evento && evento.ScreenClosed) };
+      }, antesDeCompartilhar);
+      confere("12", fechou.pronto, "a tela não fechou para quem assistia");
+    }
 
     // ------------------------------------------------------------ 13. a volta
     const naBateria = await a.aba.evaluate(async (canal) => {
@@ -1067,6 +1132,6 @@ const invocar = (aba, comando, args) =>
     process.exit(1);
   }
   console.log(
-    "sessao-no-navegador: a página entra num servidor de verdade pela WebTransport, conversa, vê a outra pessoa, a voz atravessa, os hashes ficam guardados, sai, um hash errado não entra, a sessão que cai volta sozinha, e o MOD que o servidor exige vem do catálogo e sobe.",
+    "sessao-no-navegador: a página entra num servidor de verdade pelo enlace WebRTC, conversa, vê a outra pessoa, a voz atravessa, o servidor fica guardado, sai, uma impressão errada não entra, a sessão que cai volta sozinha, e o MOD que o servidor exige vem do catálogo e sobe.",
   );
 })();

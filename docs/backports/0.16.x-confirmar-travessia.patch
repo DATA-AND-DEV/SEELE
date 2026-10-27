@@ -1,0 +1,3830 @@
+diff --git a/apps/seele-app/bancada/hospedar-com-mod-antigo.cjs b/apps/seele-app/bancada/hospedar-com-mod-antigo.cjs
+index 9c75760b..727c7325 100644
+--- a/apps/seele-app/bancada/hospedar-com-mod-antigo.cjs
++++ b/apps/seele-app/bancada/hospedar-com-mod-antigo.cjs
+@@ -114,7 +114,15 @@ for (const [nome, esperadas] of Object.entries(recusas)) {
+ }
+ const outroMod = contexto.fraseDeErro({ PacoteNaoServe: "conteudo-de-outro-mod" });
+ assert.match(outroMod, /NÃO SERVE: o pacote baixado é de outro MOD/, `a recusa do pacote não diz por quê: ${outroMod}`);
+-assert.match(outroMod, /continua como estava/, `a recusa do pacote não diz que nada mudou: ${outroMod}`);
++assert.match(outroMod, /Nada foi mudado/, `a recusa do pacote não diz que nada mudou: ${outroMod}`);
++// Backport 0.16.x: as duas recusas do botão final que vêm antes de converter.
++const falta = contexto.fraseDeErro({ FaltaEscolher: ["seele/mesa", "x/sumido"] });
++assert.match(falta, /FALTA ESCOLHER O QUE FAZER COM: seele\/mesa, x\/sumido/, `a falta de escolha não diz quais: ${falta}`);
++assert.match(falta, /Nada foi mudado/, `a falta de escolha não diz que nada mudou: ${falta}`);
++const semCopia = contexto.fraseDeErro({ CopiaNaoFeita: "copiar: disco cheio" });
++assert.doesNotMatch(semCopia, /ALGO FALHOU|CopiaNaoFeita/, `a falta da cópia caiu no recuo: ${semCopia}`);
++assert.match(semCopia, /disco cheio/, `a falta da cópia não diz o motivo: ${semCopia}`);
++assert.match(semCopia, /nada foi convertido/, `a falta da cópia não diz que nada foi convertido: ${semCopia}`);
+ const apiVelha = contexto.fraseDeErro({ PacoteNaoServe: "api-too-old" });
+ // **Verdadeira para toda API mais velha que a deste app** (rodada 1 do lote
+ // 58-1, M4). A frase dizia que o MOD «é de uma API que roda no Servidor 0.15»,
+@@ -141,7 +149,9 @@ assert.match(apiVelha, /use o Servidor 0\.15 pelo launcher/, `a recusa da API ve
+ const banco = contexto.fraseDeErro({ BancoNaoRespondeu: "database is locked" });
+ assert.doesNotMatch(banco, /ALGO FALHOU|BancoNaoRespondeu/, `a falha do banco caiu no recuo: ${banco}`);
+ assert.match(banco, /database is locked/, `a falha do banco não diz o que o banco disse: ${banco}`);
+-assert.match(banco, /continua como estava/, `a falha do banco não diz que nada mudou: ${banco}`);
++// Depois da cópia (backport 0.16.x): a frase aponta a cópia de antes, e não
++// promete que nada mudou — a falha pode vir no meio da conversão.
++assert.match(banco, /copias-de-seguranca/, `a falha do banco não aponta a cópia de antes: ${banco}`);
+ 
+ // 4. **A linha do pacote no cache diz o mesmo** (`linhaDePacoteNoCache`, em
+ //    `camada-mods.js`; a frase que o rascunho §2 cita): um pacote da API 4
+diff --git a/apps/seele-app/bancada/saidas-de-quem-hospeda.cjs b/apps/seele-app/bancada/saidas-de-quem-hospeda.cjs
+index 2b049715..f17b9680 100644
+--- a/apps/seele-app/bancada/saidas-de-quem-hospeda.cjs
++++ b/apps/seele-app/bancada/saidas-de-quem-hospeda.cjs
+@@ -93,7 +93,9 @@ const RECUSA = { ModsDeApiAntiga: { mods: [['seele/estilo', 4], ['seele/mesa', 4
+       window.saidas = () => [...document.querySelectorAll('#boot-saidas [data-mod]')].map(li => ({
+         mod: li.dataset.mod,
+         texto: li.textContent,
+-        botoes: [...li.querySelectorAll('button')].map(b => ({ saida: b.dataset.saida, rotulo: b.textContent, visivel: b.getClientRects().length > 0 })),
++        // O DESFAZER só existe com uma escolha feita (backport 0.16.x).
++        botoes: [...li.querySelectorAll('button')].filter(b => !b.hidden)
++          .map(b => ({ saida: b.dataset.saida, rotulo: b.textContent, visivel: b.getClientRects().length > 0 })),
+       }));
+       window.hospedarComRecusa = async () => {
+         servidorEscolhido = 'srv-1';
+@@ -138,43 +140,80 @@ const RECUSA = { ModsDeApiAntiga: { mods: [['seele/estilo', 4], ['seele/mesa', 4
+       `o pacote que falta oferece a 0.15, ou não oferece ATUALIZAR: ${JSON.stringify(de('x/sumido'))}`);
+     assert.doesNotMatch(de('x/sumido').texto, /API 0/, 'o pacote que falta escreveu «API 0»');
+ 
+-    // 3. ATUALIZAR: baixa pelo «obter», a saída 1 no servidor que recusou, hospeda de novo.
+-    await page.evaluate(() => { testCalls.length = 0; testTable.resolver_mod_de_api_antiga = null; });
++    // 3. **Escolher não chama o Rust** (backport 0.16.x): ATUALIZAR e DESLIGAR
++    // só estagiam, com DESFAZER, e o botão final espera uma escolha por MOD.
++    // Comando nenhum vai ao Rust até ele: é o que garante o banco intacto.
++    const GRAVAM = ['instalar_mod_do_catalogo', 'aplicar_saidas_dos_mods_antigos', 'hospedar'];
++    const gravou = () => page.evaluate(g => testCalls.filter(c => g.includes(c.cmd)).map(c => c.cmd), GRAVAM);
++    await page.evaluate(() => { testCalls.length = 0; testTable.aplicar_saidas_dos_mods_antigos = 'copias-de-seguranca/srv-1/esquema-13-1.db'; });
++    const confirmar = '#boot-saidas [data-saida="confirmar"]';
++    assert.equal(await page.locator(confirmar).isDisabled(), true, 'o botão final vale sem escolha nenhuma');
+     await page.click('#boot-saidas [data-mod="seele/estilo"] [data-saida="atualizar"]');
+-    await esperar(() => chamadas('hospedar').length === 1, 'ATUALIZAR não hospedou de novo');
+-    const baixou = await page.evaluate(() => chamadas('instalar_mod_do_catalogo'));
+-    assert.deepEqual(baixou.map(c => c.args), [{ id: 'seele/estilo', versao: '4.0.0', uso: 'obter' }],
+-      `ATUALIZAR não baixou a versão da 6 pelo «obter»: ${JSON.stringify(baixou)}`);
+-    const resolveu = await page.evaluate(() => chamadas('resolver_mod_de_api_antiga'));
+-    assert.deepEqual(resolveu.map(c => c.args), [{ servidor: 'srv-1', id: 'seele/estilo', saida: { atualizar: { hash: 'h40' } } }],
+-      `ATUALIZAR não passou o hash da 4.0.0 à saída 1 do servidor que recusou: ${JSON.stringify(resolveu)}`);
+-    assert.equal((await page.evaluate(() => chamadas('hospedar')))[0].args.servidor, 'srv-1',
+-      'depois de ATUALIZAR, hospedou outro servidor');
+-    const ordem = await page.evaluate(() => testCalls.map(c => c.cmd).filter(c => ['instalar_mod_do_catalogo', 'resolver_mod_de_api_antiga', 'hospedar'].includes(c)));
+-    assert.deepEqual(ordem, ['instalar_mod_do_catalogo', 'resolver_mod_de_api_antiga', 'hospedar'], `a ordem da saída 1: ${ordem}`);
++    assert.match(await page.textContent('#boot-saidas [data-mod="seele/estilo"]'), /ESCOLHIDO: atualizar para 4\.0\.0/,
++      'a escolha de ATUALIZAR não aparece');
++    assert.equal(await page.getAttribute('#boot-saidas [data-mod="seele/estilo"] [data-saida="atualizar"]', 'aria-pressed'), 'true');
++    assert.equal(await page.locator(confirmar).isDisabled(), true, 'o botão final vale com MOD sem escolha');
++    assert.match(await page.textContent('#boot-saidas'), /Falta escolher 2 MODs\. Nada foi mudado no servidor\./);
++    await page.click('#boot-saidas [data-mod="seele/estilo"] [data-saida="desfazer"]');
++    assert.doesNotMatch(await page.textContent('#boot-saidas [data-mod="seele/estilo"]'), /ESCOLHIDO/, 'DESFAZER não desfez');
++    await page.click('#boot-saidas [data-mod="seele/mesa"] [data-saida="desligar"]');
++    assert.deepEqual(await gravou(), [], `escolher ou desfazer chamou o Rust: ${await gravou()}`);
+ 
+-    // DESLIGAR.
++    // CANCELAR esquece tudo, e não chama o Rust.
++    await page.click('#boot-saidas [data-saida="cancelar"]');
++    assert.equal(await page.evaluate(() => $('boot-saidas').hidden), true, 'CANCELAR não fechou as saídas');
++    assert.match(await page.evaluate(() => $('boot-erro').textContent), /Nada foi mudado/);
++    assert.deepEqual(await gravou(), [], 'CANCELAR chamou o Rust');
++
++    // 4. O botão final: baixa pelo «obter», aplica tudo de uma vez no servidor
++    // que recusou (o Rust faz a cópia verificada antes), e hospeda de novo.
+     vistas = await desenhadas();
+     await page.evaluate(() => { testCalls.length = 0; });
++    await page.click('#boot-saidas [data-mod="seele/estilo"] [data-saida="atualizar"]');
+     await page.click('#boot-saidas [data-mod="seele/mesa"] [data-saida="desligar"]');
+-    await esperar(() => chamadas('hospedar').length === 1, 'DESLIGAR não hospedou de novo');
+-    assert.deepEqual((await page.evaluate(() => chamadas('resolver_mod_de_api_antiga'))).map(c => c.args),
+-      [{ servidor: 'srv-1', id: 'seele/mesa', saida: 'desligar' }], 'DESLIGAR não passou «desligar» ao servidor que recusou');
+-    assert.equal((await page.evaluate(() => chamadas('instalar_mod_do_catalogo'))).length, 0, 'DESLIGAR baixou alguma coisa');
++    await page.click('#boot-saidas [data-mod="x/sumido"] [data-saida="atualizar"]');
++    assert.deepEqual(await gravou(), [], 'escolher os três chamou o Rust');
++    assert.equal(await page.locator(confirmar).isDisabled(), false, 'com os três escolhidos, o botão final não vale');
++    assert.match(await page.textContent('#boot-saidas'), /cópia de segurança verificada/);
++    // Rodar com uma pasta como argumento guarda o retrato das escolhas.
++    if (process.argv[2]) {
++      await page.locator('#boot-saidas').screenshot({ path: require('node:path').join(process.argv[2], '07-saidas-estagiadas.png') });
++    }
++    await page.click(confirmar);
++    await esperar(() => chamadas('hospedar').length === 1, 'o botão final não hospedou de novo');
++    assert.deepEqual(await gravou(),
++      ['instalar_mod_do_catalogo', 'instalar_mod_do_catalogo', 'aplicar_saidas_dos_mods_antigos', 'hospedar'],
++      'a ordem do botão final: baixar, aplicar (com a cópia), hospedar');
++    assert.deepEqual((await page.evaluate(() => chamadas('instalar_mod_do_catalogo'))).map(c => c.args),
++      [{ id: 'seele/estilo', versao: '4.0.0', uso: 'obter' }, { id: 'x/sumido', versao: '2.0.0', uso: 'obter' }],
++      'o botão final não baixou as versões da 6 pelo «obter»');
++    assert.deepEqual((await page.evaluate(() => chamadas('aplicar_saidas_dos_mods_antigos'))).map(c => c.args), [{
++      servidor: 'srv-1',
++      escolhas: [
++        { id: 'seele/estilo', saida: { atualizar: { hash: 'h40' } } },
++        { id: 'seele/mesa', saida: 'desligar' },
++        { id: 'x/sumido', saida: { atualizar: { hash: 's20' } } },
++      ],
++    }], 'o botão final não mandou as três escolhas ao servidor que recusou');
++    assert.equal((await page.evaluate(() => chamadas('hospedar')))[0].args.servidor, 'srv-1',
++      'depois do botão final, hospedou outro servidor');
+ 
+-    // 4. Uma recusa da saída é dita, e não hospeda de novo.
++    // 5. Uma recusa do botão final é dita, não hospeda, e as escolhas ficam.
+     vistas = await desenhadas();
+     await page.evaluate(() => {
+       testCalls.length = 0;
+-      testTable.resolver_mod_de_api_antiga = () => { throw 'ServidorNoAr'; };
++      testTable.aplicar_saidas_dos_mods_antigos = () => { throw { CopiaNaoFeita: 'copiar: disco cheio' }; };
+     });
+-    await page.click('#boot-saidas [data-mod="seele/mesa"] [data-saida="desligar"]');
+-    await esperar(() => /PARE A HOSPEDAGEM/.test($('boot-saidas').textContent),
+-      'a recusa da saída não é dita debaixo das saídas (ou elas sumiram)');
+-    assert.equal((await page.evaluate(() => chamadas('hospedar'))).length, 0, 'com a saída recusada, hospedou de novo');
+-    assert.equal(await page.evaluate(() => document.querySelectorAll('#boot-saidas [data-mod]').length), 3,
+-      'a recusa da saída levou as saídas embora');
+-    await page.evaluate(() => { testTable.resolver_mod_de_api_antiga = null; });
++    for (const [mod, s] of [['seele/estilo', 'desligar'], ['seele/mesa', 'desligar'], ['x/sumido', 'desligar']]) {
++      await page.click(`#boot-saidas [data-mod="${mod}"] [data-saida="${s}"]`);
++    }
++    await page.click(confirmar);
++    await esperar(() => /CÓPIA DE SEGURANÇA DO BANCO NÃO FICOU PRONTA/.test($('boot-saidas').textContent),
++      'a recusa do botão final não é dita debaixo das saídas (ou elas sumiram)');
++    assert.match(await page.textContent('#boot-saidas'), /nada foi convertido/);
++    assert.equal((await page.evaluate(() => chamadas('hospedar'))).length, 0, 'com o botão final recusado, hospedou de novo');
++    assert.equal((await page.textContent('#boot-saidas')).match(/ESCOLHIDO/g)?.length, 3, 'a recusa levou as escolhas embora');
++    await page.evaluate(() => { testTable.aplicar_saidas_dos_mods_antigos = null; });
+ 
+     // 5. O catálogo fora do ar: a falha dele, e não «não há versão».
+     await page.evaluate(() => { testTable.catalogo_de_mods = () => { throw { NaoRespondeu: 'tempo esgotado' }; }; });
+@@ -211,5 +250,5 @@ const RECUSA = { ModsDeApiAntiga: { mods: [['seele/estilo', 4], ['seele/mesa', 4
+     await browser.close();
+     server.close();
+   }
+-  console.log('saídas de quem hospeda: as três na ordem do dono, ATUALIZAR só com a versão da 6, a saída no servidor que recusou e hospedar de novo, a recusa dita, o catálogo fora do ar dito, e a 0.15 pela tela das versões.');
++  console.log('saídas de quem hospeda: as três na ordem do dono, ATUALIZAR só com a versão da 6, escolher/DESFAZER/CANCELAR sem chamar o Rust, o botão final com as três escolhas no servidor que recusou e hospedar de novo, a recusa dita com as escolhas mantidas, o catálogo fora do ar dito, e a 0.15 pela tela das versões.');
+ })().catch(e => { console.error(e); process.exit(1); });
+diff --git a/apps/seele-app/bancada/travessia-de-versao.cjs b/apps/seele-app/bancada/travessia-de-versao.cjs
+new file mode 100644
+index 00000000..77437d99
+--- /dev/null
++++ b/apps/seele-app/bancada/travessia-de-versao.cjs
+@@ -0,0 +1,233 @@
++// **A confirmação antes de atualizar para outra versão do servidor** (backport
++// 0.16.x do E4 da 0.17). Com o HTML, o CSS e a `tela-server.js` reais; só a
++// ponte nativa é simulada, e a `VersaoNova` simulada tem a forma que o Rust
++// manda (`atualizador::Fronteira` serializada com `tipo`).
++//
++// # O que ela mede
++//
++// 1. **Da 0.16 para a 0.17** (Servidor 1.0 → 2.0): o painel diz, antes do
++//    botão, que a versão fala outra versão do servidor; INSTALAR abre a camada
++//    `#travessia` (alertdialog, modal, foco em CANCELAR) e **não** chama
++//    `instalar_atualizacao`.
++// 2. **Cancelar** chama `escolher_atualizacao` com «cancelar», não instala, e diz
++//    que nada foi baixado. Escape e o clique fora cancelam do mesmo jeito, e o
++//    Escape não fecha a configuração atrás.
++// 3. **Adiar** chama `escolher_atualizacao` com «adiar», não instala; uma oferta
++//    já adiada diz isso na camada.
++// 4. **Prosseguir** chama `instalar_atualizacao` com `confirmada` = a versão
++//    mostrada, e só então.
++// 5. **Mesma versão do servidor** (0.16.0 → 0.16.1): nenhuma camada, nenhuma
++//    frase de travessia, e `instalar_atualizacao` com `confirmada: null`.
++// 6. **A recusa do Rust** (`TravessiaNaoConfirmada`) é dita e deixa a oferta
++//    na tela, para confirmar de novo.
++// 7. **Sem a versão do servidor no manifesto** (`nao_sabe`) também pede a
++//    confirmação.
++//
++// Rodar:  node apps/seele-app/bancada/travessia-de-versao.cjs [pasta-das-capturas]
++
++const assert = require('node:assert/strict');
++const path = require('node:path');
++const { servir, respostas } = require('./telas.cjs');
++const { chromium } = require('./playwright.cjs');
++
++const CAPTURAS = process.argv[2] ? path.resolve(process.argv[2]) : null;
++
++const CRUZA = {
++  versao: '0.17.0',
++  instalada: '0.16.1',
++  notas: 'SEELE 0.17.0. As notas estão em https://github.com/DATA-AND-DEV/SEELE-RELEASES/releases/tag/v0.17.0',
++  fronteira: { tipo: 'cruza', de: '1', para: '2' },
++  pede_aviso: true,
++  adiada: false,
++};
++const MESMA = {
++  versao: '0.16.2',
++  instalada: '0.16.1',
++  notas: 'SEELE 0.16.2.',
++  fronteira: { tipo: 'mesma', linha: '1' },
++  pede_aviso: false,
++  adiada: false,
++};
++const NAO_SABE = { ...CRUZA, fronteira: { tipo: 'nao_sabe' } };
++
++(async () => {
++  const server = servir();
++  await new Promise(ok => server.listen(0, '127.0.0.1', ok));
++  const browser = await chromium().launch({ headless: true });
++  let medidas = 0;
++  try {
++    const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
++    const erros = [];
++    page.on('pageerror', e => erros.push(e.message));
++    await page.addInitScript(table => {
++      window.testTable = table;
++      window.testCalls = [];
++      window.__TAURI__ = {
++        core: { invoke: async (cmd, args) => {
++          testCalls.push({ cmd, args: JSON.parse(JSON.stringify(args ?? null)) });
++          const r = testTable[cmd];
++          return typeof r === 'function' ? r(args) : (r ?? null);
++        } },
++        event: { listen: async () => () => {} },
++        window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
++      };
++    }, respostas({ microfones: [], saidas: [], snapshot: null }));
++    await page.goto(`http://127.0.0.1:${server.address().port}`);
++    await page.evaluate(() => {
++      window.chamadas = cmd => testCalls.filter(c => c.cmd === cmd);
++      abrirServer('tela-boot');
++      abrirSecao('secao-atualizacao');
++    });
++
++    const visivel = sel => page.locator(sel).isVisible();
++    const oferecer = async oferta => {
++      // Um `instalar_atualizacao` que deu certo não volta no produto: o app
++      // fecha e reabre. Aqui ele volta, e os botões ficam travados como ficariam
++      // até a janela sumir; destravá-los é a «reabertura» desta bancada.
++      await page.evaluate(o => {
++        testCalls.length = 0;
++        testTable.procurar_atualizacao = o;
++        testTable.instalar_atualizacao = null;
++        $('atualizacao-procurar').disabled = false;
++        $('atualizacao-instalar').disabled = false;
++      }, oferta);
++      await page.click('#atualizacao-procurar');
++      await page.waitForFunction(() => !$('atualizacao-achado').hidden, null, { timeout: 5000 });
++    };
++    const capturar = async nome => {
++      if (!CAPTURAS) return;
++      await page.screenshot({ path: path.join(CAPTURAS, nome) });
++    };
++
++    // 1. Da 0.16 para a 0.17.
++    await oferecer(CRUZA);
++    assert.equal(await visivel('#atualizacao-travessia'), true, 'o painel não diz que a oferta fala outra versão do servidor');
++    assert.match(await page.textContent('#atualizacao-travessia'), /MUDA COM QUEM VOCÊ CONVERSA/);
++    await capturar('01-painel-com-a-travessia.png');
++    await page.click('#atualizacao-instalar');
++    assert.equal(await visivel('#travessia'), true, 'INSTALAR numa travessia não abriu a confirmação');
++    assert.deepEqual(await page.evaluate(() => chamadas('instalar_atualizacao')), [],
++      'INSTALAR numa travessia chamou instalar_atualizacao antes da confirmação');
++    const camada = await page.evaluate(() => ({
++      role: $('travessia').getAttribute('role'),
++      modal: $('travessia').getAttribute('aria-modal'),
++      titulo: $('travessia-titulo').textContent,
++      topo: $('travessia-topo').textContent,
++      itens: [...document.querySelectorAll('#travessia-consequencias li')].map(li => li.textContent),
++      foco: document.activeElement?.id,
++      botoes: [...document.querySelectorAll('#travessia button')].map(b => b.textContent.trim()),
++    }));
++    assert.equal(camada.role, 'alertdialog');
++    assert.equal(camada.modal, 'true');
++    assert.equal(camada.foco, 'travessia-cancelar', 'o foco não começa na saída que não muda nada');
++    assert.deepEqual(camada.botoes, ['CANCELAR', 'ADIAR', 'ATUALIZAR MESMO ASSIM']);
++    assert.match(camada.topo, /0\.17\.0 fala o Servidor 2\.0/);
++    assert.match(camada.topo, /0\.16\.1 fala o Servidor 1\.0/);
++    assert.ok(camada.itens.some(i => /WebRTC/.test(i) && /não conversa com a 0\.16/.test(i)), `sem a frase do WebRTC: ${camada.itens}`);
++    assert.ok(camada.itens.some(i => /não entra mais nos servidores/.test(i)), 'sem a consequência de quem atualiza');
++    assert.ok(camada.itens.some(i => /launcher/.test(i)), 'sem dizer que a versão de agora continua pelo launcher');
++    assert.ok(![camada.titulo, camada.topo, ...camada.itens].some(t => /\blinha\b/i.test(t)), 'a palavra «linha», que o ADR 0033 tirou da tela');
++    // Tab circula entre as três saídas e não sai da camada.
++    await page.keyboard.press('Tab');
++    await page.keyboard.press('Tab');
++    await page.keyboard.press('Tab');
++    assert.equal(await page.evaluate(() => document.activeElement?.id), 'travessia-cancelar', 'o Tab saiu da camada');
++    await capturar('02-confirmacao-0.16-para-0.17.png');
++    medidas++;
++
++    // 2. Cancelar.
++    await page.click('#travessia-cancelar');
++    assert.equal(await visivel('#travessia'), false);
++    assert.deepEqual(await page.evaluate(() => chamadas('escolher_atualizacao').map(c => c.args)), [{ escolha: 'cancelar' }]);
++    assert.deepEqual(await page.evaluate(() => chamadas('instalar_atualizacao')), [], 'cancelar instalou');
++    assert.match(await page.textContent('#atualizacao-estado'), /CANCELADA\. NADA FOI BAIXADO/);
++    assert.equal(await visivel('#atualizacao-achado'), false, 'a oferta cancelada ficou na tela');
++    await capturar('03-depois-de-cancelar.png');
++    medidas++;
++
++    // 2b. Escape cancela, e a configuração continua aberta.
++    await oferecer(CRUZA);
++    await page.click('#atualizacao-instalar');
++    await page.keyboard.press('Escape');
++    assert.equal(await visivel('#travessia'), false, 'Escape não fechou a confirmação');
++    assert.equal(await visivel('#tela-server'), true, 'o Escape da confirmação fechou a configuração atrás');
++    assert.deepEqual(await page.evaluate(() => chamadas('escolher_atualizacao').map(c => c.args)), [{ escolha: 'cancelar' }]);
++    assert.deepEqual(await page.evaluate(() => chamadas('instalar_atualizacao')), []);
++    medidas++;
++
++    // 2c. O clique fora, no véu, cancela.
++    await oferecer(CRUZA);
++    await page.click('#atualizacao-instalar');
++    await page.mouse.click(5, 5);
++    assert.equal(await visivel('#travessia'), false, 'o clique fora não fechou a confirmação');
++    assert.deepEqual(await page.evaluate(() => chamadas('escolher_atualizacao').map(c => c.args)), [{ escolha: 'cancelar' }]);
++    assert.deepEqual(await page.evaluate(() => chamadas('instalar_atualizacao')), []);
++    medidas++;
++
++    // 3. Adiar, e a oferta já adiada.
++    await oferecer(CRUZA);
++    await page.click('#atualizacao-instalar');
++    await page.click('#travessia-adiar');
++    assert.deepEqual(await page.evaluate(() => chamadas('escolher_atualizacao').map(c => c.args)), [{ escolha: 'adiar' }]);
++    assert.deepEqual(await page.evaluate(() => chamadas('instalar_atualizacao')), [], 'adiar instalou');
++    assert.match(await page.textContent('#atualizacao-estado'), /ADIADA\. NADA FOI BAIXADO/);
++    await oferecer({ ...CRUZA, adiada: true });
++    await page.click('#atualizacao-instalar');
++    assert.equal(await visivel('#travessia-adiada'), true, 'a oferta adiada não diz que foi adiada');
++    await capturar('04-confirmacao-ja-adiada.png');
++    medidas++;
++
++    // 4. Prosseguir.
++    await page.click('#travessia-prosseguir');
++    await page.waitForFunction(() => chamadas('instalar_atualizacao').length === 1, null, { timeout: 5000 });
++    assert.deepEqual(await page.evaluate(() => chamadas('instalar_atualizacao').map(c => c.args)), [{ confirmada: '0.17.0' }],
++      'prosseguir não mandou a confirmação desta versão');
++    assert.deepEqual(await page.evaluate(() => chamadas('escolher_atualizacao')), [], 'prosseguir também cancelou');
++    medidas++;
++
++    // 5. Mesma versão do servidor: sem camada.
++    await oferecer(MESMA);
++    assert.equal(await visivel('#atualizacao-travessia'), false, 'a 0.16.x ganhou a frase de travessia');
++    await page.click('#atualizacao-instalar');
++    assert.equal(await visivel('#travessia'), false, 'a 0.16.x abriu a confirmação de travessia');
++    await page.waitForFunction(() => chamadas('instalar_atualizacao').length === 1, null, { timeout: 5000 });
++    assert.deepEqual(await page.evaluate(() => chamadas('instalar_atualizacao').map(c => c.args)), [{ confirmada: null }]);
++    medidas++;
++
++    // 6. A recusa do Rust é dita, e a oferta fica.
++    await oferecer(CRUZA);
++    await page.evaluate(() => { testTable.instalar_atualizacao = () => { throw 'TravessiaNaoConfirmada'; }; });
++    await page.click('#atualizacao-instalar');
++    await page.click('#travessia-prosseguir');
++    await page.waitForFunction(() => !$('atualizacao-erro').hidden, null, { timeout: 5000 });
++    assert.match(await page.textContent('#atualizacao-erro'), /PRECISA DA SUA CONFIRMAÇÃO/);
++    assert.equal(await visivel('#atualizacao-achado'), true, 'a recusa da travessia apagou a oferta');
++    medidas++;
++
++    // 7. Sem a versão do servidor no manifesto.
++    await oferecer(NAO_SABE);
++    await page.click('#atualizacao-instalar');
++    assert.equal(await visivel('#travessia'), true, '«não sei» não pediu confirmação');
++    assert.match(await page.textContent('#travessia-titulo'), /NÃO SEI COM QUEM/);
++    await capturar('05-confirmacao-nao-sabe.png');
++    await page.click('#travessia-cancelar');
++    medidas++;
++
++    // Estreita: as três saídas continuam visíveis.
++    await page.setViewportSize({ width: 720, height: 860 });
++    await oferecer(CRUZA);
++    await page.click('#atualizacao-instalar');
++    for (const id of ['travessia-cancelar', 'travessia-adiar', 'travessia-prosseguir']) {
++      assert.equal(await page.locator(`#${id}`).isVisible(), true, `${id} sumiu a 720 px`);
++    }
++    await capturar('06-confirmacao-720px.png');
++    await page.click('#travessia-cancelar');
++    medidas++;
++
++    assert.deepEqual(erros, [], `erros na página: ${erros.join(' | ')}`);
++    console.log(`travessia-de-versao: ${medidas} cenas, todas passaram${CAPTURAS ? `; capturas em ${CAPTURAS}` : ''}`);
++  } finally {
++    await browser.close();
++    server.close();
++  }
++})().catch(e => { console.error(e); process.exitCode = 1; });
+diff --git a/apps/seele-app/src/atualizador.rs b/apps/seele-app/src/atualizador.rs
+new file mode 100644
+index 00000000..89b99e35
+--- /dev/null
++++ b/apps/seele-app/src/atualizador.rs
+@@ -0,0 +1,382 @@
++//! **A confirmação antes de atualizar para outra versão do servidor**
++//! (backport 0.16.x do E4 da 0.17).
++//!
++//! O botão de atualizar troca este app pela versão do topo do `latest.json`.
++//! Quando essa versão fala outra versão de servidor — esta 0.16 (Servidor 1)
++//! indo para a 0.17 (Servidor 2, que fala WebRTC) —, a troca não é só um
++//! número: quem atualiza deixa de entrar nos servidores de antes, e quem ficou
++//! neles deixa de entrar nos desta. Isso tem de ser dito **antes** de baixar e
++//! instalar, com três saídas: cancelar, adiar ou prosseguir.
++//!
++//! Este módulo é a decisão, sem rede e sem Tauri, para poder ser provada por
++//! teste. O `main.rs` só a chama: `procurar_atualizacao` põe a [`Fronteira`] na
++//! resposta, e `instalar_atualizacao` recusa uma travessia que não foi
++//! confirmada para **aquela** versão ([`pode_instalar`]).
++//!
++//! É o mesmo desenho do `apps/seele-app/src/atualizador.rs` da 0.17, sem nada
++//! do transporte novo: nenhuma mudança de fio, de protocolo nem de versão do
++//! servidor. A 0.16.x continua sendo Servidor 1.0.
++//!
++//! # De onde vem a linha da versão nova
++//!
++//! O `latest.json` é um arquivo só para o atualizador e para o launcher
++//! (`empacotar/manifesto.py`). O topo diz `version`, `notes` e `platforms`; a
++//! lista `versions[]` diz, de cada versão, a `unit.server` («2.0», «1.0»). A
++//! linha da nova sai de lá, pelo mesmo `Linha::do_servidor` do launcher. Sem a
++//! entrada, ou com um `server` ilegível, a resposta é [`Fronteira::NaoSabe`] —
++//! e não saber **avisa**: um aviso a mais custa um clique, e um a menos custa a
++//! pessoa descobrir pela sala vazia.
++//!
++//! # O que este módulo não alcança
++//!
++//! Quem ainda está na 0.16.0 **não tem este código**: o que uma 0.16.0 mostra
++//! antes de instalar é só o campo `notes` do `latest.json`, no bloco «O QUE
++//! MUDA» da configuração. A confirmação existe só para quem instalou esta
++//! 0.16.x antes de a versão de outra linha ser oferecida
++//! (`docs/backports/README.md`).
++
++use std::path::Path;
++
++use seele_lancador::Linha;
++
++/// A relação entre a linha desta versão e a da versão oferecida.
++#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
++#[serde(tag = "tipo", rename_all = "snake_case")]
++pub(crate) enum Fronteira {
++    /// A mesma linha: atualizar não muda com quem se conversa. Sem aviso.
++    Mesma {
++        /// A linha, no texto canônico («1»).
++        linha: String,
++    },
++    /// Outra linha: quem atualiza sai dos servidores de `de`, e entra nos de
++    /// `para`. Aviso antes de instalar.
++    Cruza {
++        /// A linha desta versão.
++        de: String,
++        /// A linha da versão oferecida.
++        para: String,
++    },
++    /// O manifesto não diz a linha da versão oferecida, ou esta versão não
++    /// sabe a dela. Aviso, com a frase de quem não sabe.
++    NaoSabe,
++}
++
++impl Fronteira {
++    /// Se instalar exige a confirmação da pessoa.
++    #[must_use]
++    pub(crate) const fn pede_aviso(&self) -> bool {
++        !matches!(self, Self::Mesma { .. })
++    }
++}
++
++/// A fronteira entre `instalada` e `nova`.
++#[must_use]
++pub(crate) fn fronteira(instalada: Option<&Linha>, nova: Option<&Linha>) -> Fronteira {
++    match (instalada, nova) {
++        (Some(de), Some(para)) if de == para => Fronteira::Mesma {
++            linha: de.como_texto(),
++        },
++        (Some(de), Some(para)) => Fronteira::Cruza {
++            de: de.como_texto(),
++            para: para.como_texto(),
++        },
++        _ => Fronteira::NaoSabe,
++    }
++}
++
++/// A linha que o manifesto atribui a `versao`: a `unit.server` da entrada dela
++/// em `versions[]`.
++#[must_use]
++pub(crate) fn linha_no_manifesto(manifesto: &serde_json::Value, versao: &str) -> Option<Linha> {
++    manifesto
++        .get("versions")?
++        .as_array()?
++        .iter()
++        .find(|entrada| entrada.get("version").and_then(|v| v.as_str()) == Some(versao))?
++        .get("unit")?
++        .get("server")?
++        .as_str()
++        .and_then(|servidor| Linha::do_servidor(servidor).ok())
++}
++
++/// A fronteira de uma oferta do atualizador, pelo manifesto que veio com ela.
++#[must_use]
++pub(crate) fn fronteira_da_oferta(
++    instalada: Option<&Linha>,
++    manifesto: &serde_json::Value,
++    versao_nova: &str,
++) -> Fronteira {
++    fronteira(
++        instalada,
++        linha_no_manifesto(manifesto, versao_nova).as_ref(),
++    )
++}
++
++/// O que a pessoa escolheu diante do aviso.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub(crate) enum Escolha {
++    /// Não atualizar agora, e esquecer a oferta.
++    Cancelar,
++    /// Não atualizar agora, e lembrar que esta versão foi adiada: a próxima
++    /// procura a mostra de novo, marcada como adiada, e ainda com o aviso.
++    Adiar,
++    /// Atualizar, sabendo da travessia.
++    Prosseguir,
++}
++
++/// Por que a instalação foi recusada antes de baixar um byte.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub(crate) enum Recusa {
++    /// A versão cruza a fronteira e a confirmação não veio, ou veio para outra
++    /// versão.
++    TravessiaNaoConfirmada,
++    /// A pessoa cancelou ou adiou.
++    NaoQuis,
++}
++
++/// Se a oferta `versao`, com esta `fronteira`, pode ser instalada pela
++/// `escolha` e pela `confirmada` que a tela mandou.
++///
++/// - na mesma linha, basta não ter cancelado nem adiado;
++/// - numa travessia, a tela tem de mandar `Prosseguir` **e** a versão que ela
++///   mostrou no aviso: uma confirmação velha, de outra oferta, não serve.
++///
++/// # Errors
++///
++/// [`Recusa`], que diz qual das duas regras faltou.
++pub(crate) fn pode_instalar(
++    fronteira: &Fronteira,
++    versao: &str,
++    escolha: Escolha,
++    confirmada: Option<&str>,
++) -> Result<(), Recusa> {
++    match escolha {
++        Escolha::Cancelar | Escolha::Adiar => Err(Recusa::NaoQuis),
++        Escolha::Prosseguir if !fronteira.pede_aviso() => Ok(()),
++        Escolha::Prosseguir if confirmada == Some(versao) => Ok(()),
++        Escolha::Prosseguir => Err(Recusa::TravessiaNaoConfirmada),
++    }
++}
++
++/// O nome do arquivo do adiamento, ao lado das preferências.
++pub(crate) const ARQUIVO_DO_ADIAMENTO: &str = "atualizacao-adiada";
++
++/// Guarda que `versao` foi adiada.
++///
++/// # Errors
++///
++/// O erro do sistema ao gravar.
++pub(crate) fn adiar(config: &Path, versao: &str) -> std::io::Result<()> {
++    std::fs::create_dir_all(config)?;
++    std::fs::write(config.join(ARQUIVO_DO_ADIAMENTO), format!("{versao}\n"))
++}
++
++/// Esquece o adiamento, se houver.
++pub(crate) fn esquecer_o_adiamento(config: &Path) {
++    let _ = std::fs::remove_file(config.join(ARQUIVO_DO_ADIAMENTO));
++}
++
++/// Se `versao` é a que foi adiada.
++#[must_use]
++pub(crate) fn foi_adiada(config: &Path, versao: &str) -> bool {
++    std::fs::read_to_string(config.join(ARQUIVO_DO_ADIAMENTO))
++        .is_ok_and(|guardada| guardada.trim() == versao)
++}
++
++/// O que fazer com a escolha, do lado do disco: adiar grava, cancelar e
++/// prosseguir esquecem o adiamento.
++///
++/// # Errors
++///
++/// O erro do sistema ao gravar o adiamento.
++pub(crate) fn registrar_a_escolha(
++    config: &Path,
++    versao: &str,
++    escolha: Escolha,
++) -> std::io::Result<()> {
++    match escolha {
++        Escolha::Adiar => adiar(config, versao),
++        Escolha::Cancelar | Escolha::Prosseguir => {
++            esquecer_o_adiamento(config);
++            Ok(())
++        }
++    }
++}
++
++#[cfg(test)]
++mod testes {
++    #![allow(clippy::unwrap_used, clippy::expect_used)]
++
++    use super::*;
++
++    fn linha(texto: &str) -> Linha {
++        Linha::nova(texto).unwrap()
++    }
++
++    /// Um `latest.json` na forma do `manifesto.py`: o topo é a primeira
++    /// entrada, e `versions[]` traz a `unit` de cada uma.
++    fn manifesto(entradas: &[(&str, u32, &str)]) -> serde_json::Value {
++        serde_json::json!({
++            "version": entradas.first().map(|entrada| entrada.0),
++            "notes": "SEELE",
++            "schema": 2,
++            "versions": entradas
++                .iter()
++                .map(|(versao, protocolo, servidor)| serde_json::json!({
++                    "version": versao,
++                    "unit": { "protocol": protocolo, "mod_api": 6, "server": servidor },
++                }))
++                .collect::<Vec<_>>(),
++        })
++    }
++
++    /// A linha que este app diz ser a dele é a «1», a do Servidor 1.0. Se ela
++    /// mudasse, toda a decisão abaixo estaria comparando a coisa errada.
++    #[test]
++    fn esta_versao_e_da_linha_1() {
++        assert_eq!(crate::versoes::linha_deste_app(), Some(linha("1")));
++    }
++
++    /// **Legado → nova avisa**: esta 0.16.x (linha 1) indo para a 0.17
++    /// (Servidor 2.0, linha 2).
++    #[test]
++    fn da_0_16_para_a_0_17_avisa() {
++        let m = manifesto(&[
++            ("0.17.0", 10, "2.0"),
++            ("0.16.1", 9, "1.0"),
++            ("0.16.0", 9, "1.0"),
++        ]);
++        let f = fronteira_da_oferta(crate::versoes::linha_deste_app().as_ref(), &m, "0.17.0");
++        assert_eq!(
++            f,
++            Fronteira::Cruza {
++                de: "1".into(),
++                para: "2".into()
++            }
++        );
++        assert!(f.pede_aviso());
++        assert_eq!(
++            pode_instalar(&f, "0.17.0", Escolha::Prosseguir, None),
++            Err(Recusa::TravessiaNaoConfirmada),
++            "a travessia passou sem confirmação"
++        );
++    }
++
++    /// **Mesma linha não avisa**: a 0.16.0 indo para a 0.16.1, as duas no
++    /// Servidor 1.0. Instalar continua sendo o clique de antes, sem argumento.
++    #[test]
++    fn da_0_16_para_a_0_16_x_nao_avisa() {
++        let m = manifesto(&[("0.16.2", 9, "1.0"), ("0.16.1", 9, "1.0")]);
++        let f = fronteira_da_oferta(Some(&linha("1")), &m, "0.16.2");
++        assert_eq!(f, Fronteira::Mesma { linha: "1".into() });
++        assert!(!f.pede_aviso());
++        assert_eq!(
++            pode_instalar(&f, "0.16.2", Escolha::Prosseguir, None),
++            Ok(())
++        );
++    }
++
++    /// Sem a entrada da versão nova, ou com um `server` ilegível, não se sabe —
++    /// e não saber avisa.
++    #[test]
++    fn sem_a_linha_no_manifesto_avisa() {
++        let m = manifesto(&[("0.16.1", 9, "1.0")]);
++        assert_eq!(
++            fronteira_da_oferta(Some(&linha("1")), &m, "0.17.0"),
++            Fronteira::NaoSabe
++        );
++        let torto = manifesto(&[("0.17.0", 10, "dois")]);
++        assert_eq!(
++            fronteira_da_oferta(Some(&linha("1")), &torto, "0.17.0"),
++            Fronteira::NaoSabe
++        );
++        assert_eq!(fronteira_da_oferta(None, &m, "0.16.1"), Fronteira::NaoSabe);
++        assert!(Fronteira::NaoSabe.pede_aviso());
++        assert_eq!(
++            fronteira_da_oferta(Some(&linha("1")), &serde_json::json!({}), "0.17.0"),
++            Fronteira::NaoSabe
++        );
++    }
++
++    /// **Cancelar não instala**, nem com a confirmação na mão.
++    #[test]
++    fn cancelar_nao_instala() {
++        let f = fronteira(Some(&linha("1")), Some(&linha("2")));
++        assert_eq!(
++            pode_instalar(&f, "0.17.0", Escolha::Cancelar, Some("0.17.0")),
++            Err(Recusa::NaoQuis)
++        );
++        let mesma = fronteira(Some(&linha("1")), Some(&linha("1")));
++        assert_eq!(
++            pode_instalar(&mesma, "0.16.2", Escolha::Cancelar, None),
++            Err(Recusa::NaoQuis)
++        );
++    }
++
++    /// **Prosseguir** instala uma travessia só com a confirmação **desta**
++    /// versão. Uma confirmação de outra oferta, ou nenhuma, recusa.
++    #[test]
++    fn prosseguir_pede_a_confirmacao_desta_versao() {
++        let f = fronteira(Some(&linha("1")), Some(&linha("2")));
++        assert_eq!(
++            pode_instalar(&f, "0.17.0", Escolha::Prosseguir, Some("0.17.0")),
++            Ok(())
++        );
++        assert_eq!(
++            pode_instalar(&f, "0.17.0", Escolha::Prosseguir, None),
++            Err(Recusa::TravessiaNaoConfirmada)
++        );
++        assert_eq!(
++            pode_instalar(&f, "0.17.1", Escolha::Prosseguir, Some("0.17.0")),
++            Err(Recusa::TravessiaNaoConfirmada),
++            "uma confirmação velha passou por uma oferta nova"
++        );
++    }
++
++    /// **Adiar** não instala, grava a versão adiada, e a próxima procura sabe
++    /// que foi ela. Uma versão mais nova não herda o adiamento; prosseguir e
++    /// cancelar o esquecem.
++    #[test]
++    fn adiar_nao_instala_e_lembra_a_versao() {
++        let dir = tempfile::tempdir().unwrap();
++        let f = fronteira(Some(&linha("1")), Some(&linha("2")));
++        assert_eq!(
++            pode_instalar(&f, "0.17.0", Escolha::Adiar, Some("0.17.0")),
++            Err(Recusa::NaoQuis)
++        );
++        registrar_a_escolha(dir.path(), "0.17.0", Escolha::Adiar).unwrap();
++        assert!(foi_adiada(dir.path(), "0.17.0"));
++        assert!(!foi_adiada(dir.path(), "0.17.1"));
++        registrar_a_escolha(dir.path(), "0.17.0", Escolha::Prosseguir).unwrap();
++        assert!(!foi_adiada(dir.path(), "0.17.0"));
++        registrar_a_escolha(dir.path(), "0.17.0", Escolha::Adiar).unwrap();
++        registrar_a_escolha(dir.path(), "0.17.0", Escolha::Cancelar).unwrap();
++        assert!(!foi_adiada(dir.path(), "0.17.0"));
++    }
++
++    /// A forma que a tela lê: `{"tipo": "cruza", "de": "1", "para": "2"}`, e a
++    /// escolha que ela manda, em minúsculas.
++    #[test]
++    fn a_fronteira_vai_para_a_tela_com_o_tipo() {
++        assert_eq!(
++            serde_json::to_value(fronteira(Some(&linha("1")), Some(&linha("2")))).unwrap(),
++            serde_json::json!({ "tipo": "cruza", "de": "1", "para": "2" })
++        );
++        assert_eq!(
++            serde_json::to_value(Fronteira::NaoSabe).unwrap(),
++            serde_json::json!({ "tipo": "nao_sabe" })
++        );
++        assert_eq!(
++            serde_json::to_value(Fronteira::Mesma { linha: "1".into() }).unwrap(),
++            serde_json::json!({ "tipo": "mesma", "linha": "1" })
++        );
++        for (texto, escolha) in [
++            ("\"cancelar\"", Escolha::Cancelar),
++            ("\"adiar\"", Escolha::Adiar),
++            ("\"prosseguir\"", Escolha::Prosseguir),
++        ] {
++            assert_eq!(serde_json::from_str::<Escolha>(texto).unwrap(), escolha);
++        }
++    }
++}
+diff --git a/apps/seele-app/src/copia_do_banco.rs b/apps/seele-app/src/copia_do_banco.rs
+new file mode 100644
+index 00000000..9a0457f0
+--- /dev/null
++++ b/apps/seele-app/src/copia_do_banco.rs
+@@ -0,0 +1,298 @@
++//! **A cópia de segurança verificada, antes de converter o banco** (backport
++//! 0.16.x; a mesma regra do `antes_de_hospedar::preparar_copia` da 0.17, sem o
++//! resto daquela tela).
++//!
++//! Na 0.16.0, escolher ATUALIZAR ou DESLIGAR para um MOD de API antiga abria o
++//! banco do servidor com `Persistence::open` — que **migra** — no próprio
++//! clique, sem cópia nenhuma do estado de antes. Daqui em diante quem converte
++//! é só o botão final das saídas (`mods::aplicar_saidas_dos_mods_antigos`), e
++//! ele passa por [`preparar`] antes: sem a cópia pronta e conferida, nada é
++//! convertido.
++//!
++//! # A regra
++//!
++//! 1. Lê o esquema gravado, só para leitura. Sem esquema legível, não copia.
++//! 2. Toma a **trava** do banco (`BEGIN IMMEDIATE` numa conexão própria): nenhum
++//!    outro escritor até a verificação; as leituras continuam.
++//! 3. Conta as linhas de cada tabela da fonte, sob a trava.
++//! 4. Escreve a cópia num nome provisório com `VACUUM INTO`, de uma conexão só
++//!    de leitura (que vê o que está no WAL).
++//! 5. Verifica: `PRAGMA integrity_check` igual a `ok`, as mesmas tabelas com as
++//!    mesmas contagens e o mesmo esquema da fonte.
++//! 6. Só então dá o nome final (`copias-de-seguranca/<servidor>/esquema-<n>-<ms>.db`,
++//!    o mesmo lugar e o mesmo nome que a 0.17 lista), e solta a trava sem
++//!    escrever nada.
++//!
++//! Uma cópia que não passa é apagada, e o erro diz a etapa. O banco original
++//! não é tocado em nenhum caminho deste arquivo.
++
++use std::path::{Path, PathBuf};
++
++/// A pasta das cópias de segurança, dentro da pasta de dados do SEELE. O mesmo
++/// nome da 0.17 (`antes_de_hospedar::PASTA_DAS_COPIAS`).
++pub(crate) const PASTA_DAS_COPIAS: &str = "copias-de-seguranca";
++
++/// A pasta das cópias de um servidor.
++pub(crate) fn pasta_das_copias(config: &Path, servidor: Option<&str>) -> PathBuf {
++    config
++        .join(PASTA_DAS_COPIAS)
++        .join(servidor.unwrap_or("padrao"))
++}
++
++/// O esquema gravado, lido só para leitura. `Err` quando não se lê.
++fn esquema_de(banco: &Path) -> Result<i64, String> {
++    let conexao = rusqlite::Connection::open_with_flags(
++        banco,
++        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
++    )
++    .map_err(|erro| erro.to_string())?;
++    let tem_a_tabela: i64 = conexao
++        .query_row(
++            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'",
++            [],
++            |linha| linha.get(0),
++        )
++        .map_err(|erro| erro.to_string())?;
++    if tem_a_tabela == 0 {
++        return Ok(0);
++    }
++    conexao
++        .query_row(
++            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
++            [],
++            |linha| linha.get(0),
++        )
++        .map_err(|erro| erro.to_string())
++}
++
++/// Quantas linhas cada tabela tem, por nome, em ordem: a régua com que a cópia
++/// é comparada à fonte.
++fn contagem_por_tabela(banco: &rusqlite::Connection) -> Result<Vec<(String, i64)>, String> {
++    let mut consulta = banco
++        .prepare(
++            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
++             ORDER BY name",
++        )
++        .map_err(|erro| erro.to_string())?;
++    let nomes: Vec<String> = consulta
++        .query_map([], |linha| linha.get(0))
++        .map_err(|erro| erro.to_string())?
++        .collect::<Result<_, _>>()
++        .map_err(|erro| erro.to_string())?;
++    nomes
++        .into_iter()
++        .map(|nome| {
++            let citado = nome.replace('"', "\"\"");
++            banco
++                .query_row(&format!("SELECT count(*) FROM \"{citado}\""), [], |linha| {
++                    linha.get::<_, i64>(0)
++                })
++                .map(|n| (nome, n))
++                .map_err(|erro| erro.to_string())
++        })
++        .collect()
++}
++
++/// **Cria e verifica uma cópia do estado atual de `banco`.** Devolve o caminho
++/// da cópia pronta.
++///
++/// # Errors
++///
++/// A etapa e o motivo, em texto. Nada foi convertido, e não sobra cópia
++/// provisória.
++pub(crate) fn preparar(
++    config: &Path,
++    servidor: Option<&str>,
++    banco: &Path,
++) -> Result<PathBuf, String> {
++    preparar_com(config, servidor, banco, |_| {})
++}
++
++/// [`preparar`] com o que acontece entre escrever e verificar, para o teste
++/// estragar a cópia.
++pub(crate) fn preparar_com(
++    config: &Path,
++    servidor: Option<&str>,
++    banco: &Path,
++    depois_de_escrever: impl FnOnce(&Path),
++) -> Result<PathBuf, String> {
++    // 1. O esquema.
++    let esquema = esquema_de(banco).map_err(|motivo| format!("conferir: {motivo}"))?;
++
++    // 2. A trava.
++    let trava = rusqlite::Connection::open_with_flags(
++        banco,
++        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
++    )
++    .map_err(|erro| format!("copiar: {erro}"))?;
++    trava
++        .busy_timeout(std::time::Duration::from_secs(2))
++        .map_err(|erro| format!("copiar: {erro}"))?;
++    // `IMMEDIATE`, e não `EXCLUSIVE`: os dois barram outro escritor, mas o
++    // `EXCLUSIVE` também barra leitores no diário tradicional, e aí o
++    // `VACUUM INTO` (um leitor) não leria (medido na 0.17: «database is locked»).
++    trava
++        .execute_batch("BEGIN IMMEDIATE")
++        .map_err(|erro| format!("copiar: o banco está em uso: {erro}"))?;
++
++    // 3. A régua da fonte.
++    let da_fonte = contagem_por_tabela(&trava).map_err(|motivo| format!("copiar: {motivo}"))?;
++
++    let pasta = pasta_das_copias(config, servidor);
++    std::fs::create_dir_all(&pasta).map_err(|erro| format!("copiar: {erro}"))?;
++    let agora_ms = std::time::SystemTime::now()
++        .duration_since(std::time::UNIX_EPOCH)
++        .map_or(0, |desde| desde.as_millis());
++    let final_ = pasta.join(format!("esquema-{esquema}-{agora_ms}.db"));
++    let provisoria = pasta.join(format!(".escrevendo-{esquema}-{agora_ms}.db"));
++    let _ = std::fs::remove_file(&provisoria);
++
++    // 4. A cópia.
++    let escrever = || -> Result<(), String> {
++        let origem = rusqlite::Connection::open_with_flags(
++            banco,
++            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
++        )
++        .map_err(|erro| erro.to_string())?;
++        origem
++            .execute("VACUUM INTO ?1", [provisoria.display().to_string()])
++            .map_err(|erro| erro.to_string())?;
++        Ok(())
++    };
++    if let Err(motivo) = escrever() {
++        let _ = std::fs::remove_file(&provisoria);
++        return Err(format!("copiar: {motivo}"));
++    }
++    depois_de_escrever(&provisoria);
++
++    // 5. A verificação, contra a fonte.
++    let verificar = || -> Result<(), String> {
++        let copia = rusqlite::Connection::open_with_flags(
++            &provisoria,
++            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
++        )
++        .map_err(|erro| erro.to_string())?;
++        let integridade: String = copia
++            .query_row("PRAGMA integrity_check", [], |linha| linha.get(0))
++            .map_err(|erro| erro.to_string())?;
++        if integridade != "ok" {
++            return Err(format!("integrity_check: {integridade}"));
++        }
++        let da_copia = contagem_por_tabela(&copia)?;
++        if da_copia != da_fonte {
++            return Err(format!(
++                "a cópia não tem o conteúdo da fonte: fonte {da_fonte:?}, cópia {da_copia:?}"
++            ));
++        }
++        drop(copia);
++        match esquema_de(&provisoria) {
++            Ok(n) if n == esquema => Ok(()),
++            outro => Err(format!(
++                "a cópia não tem o esquema da origem ({esquema}): {outro:?}"
++            )),
++        }
++    };
++    if let Err(motivo) = verificar() {
++        let _ = std::fs::remove_file(&provisoria);
++        return Err(format!("verificar: {motivo}"));
++    }
++
++    // 6. O nome final, e a trava sai sem escrever nada.
++    std::fs::rename(&provisoria, &final_).map_err(|erro| {
++        let _ = std::fs::remove_file(&provisoria);
++        format!("copiar: {erro}")
++    })?;
++    let _ = trava.execute_batch("ROLLBACK");
++    drop(trava);
++    tracing::info!(
++        banco = %banco.display(),
++        copia = %final_.display(),
++        esquema,
++        "cópia de segurança do banco feita e conferida contra a fonte antes de converter"
++    );
++    Ok(final_)
++}
++
++#[cfg(test)]
++mod testes {
++    #![allow(clippy::unwrap_used, clippy::expect_used)]
++
++    use super::{preparar, preparar_com, PASTA_DAS_COPIAS};
++    use std::path::Path;
++
++    fn banco_no_esquema(caminho: &Path, n: i64) {
++        let banco = rusqlite::Connection::open(caminho).unwrap();
++        banco
++            .execute_batch(
++                "CREATE TABLE schema_version (version INTEGER NOT NULL);
++                 CREATE TABLE coisa (x INTEGER);
++                 INSERT INTO coisa VALUES (42);",
++            )
++            .unwrap();
++        banco
++            .execute("INSERT INTO schema_version VALUES (?1)", [n])
++            .unwrap();
++    }
++
++    /// A cópia sai inteira, no esquema da fonte, com o conteúdo dela, e a fonte
++    /// fica byte a byte como estava.
++    #[test]
++    fn a_copia_sai_conferida_e_a_fonte_nao_muda() {
++        let dir = tempfile::tempdir().unwrap();
++        let banco = dir.path().join("seele.db");
++        banco_no_esquema(&banco, 13);
++        let antes = std::fs::read(&banco).unwrap();
++
++        let copia = preparar(dir.path(), None, &banco).unwrap();
++
++        assert!(copia.starts_with(dir.path().join(PASTA_DAS_COPIAS).join("padrao")));
++        assert!(copia
++            .file_name()
++            .unwrap()
++            .to_string_lossy()
++            .starts_with("esquema-13-"));
++        let lido: i64 = rusqlite::Connection::open(&copia)
++            .unwrap()
++            .query_row("SELECT x FROM coisa", [], |l| l.get(0))
++            .unwrap();
++        assert_eq!(lido, 42);
++        assert_eq!(
++            std::fs::read(&banco).unwrap(),
++            antes,
++            "copiar mexeu na fonte"
++        );
++    }
++
++    /// Uma cópia estragada entre escrever e verificar não passa, e não fica.
++    #[test]
++    fn uma_copia_estragada_nao_passa_e_nao_fica() {
++        let dir = tempfile::tempdir().unwrap();
++        let banco = dir.path().join("seele.db");
++        banco_no_esquema(&banco, 13);
++        let falha = preparar_com(dir.path(), None, &banco, |provisoria| {
++            rusqlite::Connection::open(provisoria)
++                .unwrap()
++                .execute("DELETE FROM coisa", [])
++                .unwrap();
++        })
++        .unwrap_err();
++        assert!(falha.starts_with("verificar:"), "{falha}");
++        let sobrou: Vec<_> = std::fs::read_dir(dir.path().join(PASTA_DAS_COPIAS).join("padrao"))
++            .unwrap()
++            .collect();
++        assert!(
++            sobrou.is_empty(),
++            "a cópia que não passou ficou: {sobrou:?}"
++        );
++    }
++
++    /// Um arquivo que não é banco não é copiado.
++    #[test]
++    fn um_arquivo_que_nao_e_banco_nao_e_copiado() {
++        let dir = tempfile::tempdir().unwrap();
++        let banco = dir.path().join("seele.db");
++        std::fs::write(&banco, b"isto nao e um banco sqlite, e nem finge ser").unwrap();
++        let falha = preparar(dir.path(), None, &banco).unwrap_err();
++        assert!(falha.starts_with("conferir:"), "{falha}");
++    }
++}
+diff --git a/apps/seele-app/src/main.rs b/apps/seele-app/src/main.rs
+index dbaa14d2..bc9ea39a 100644
+--- a/apps/seele-app/src/main.rs
++++ b/apps/seele-app/src/main.rs
+@@ -26,7 +26,13 @@
+ // razão, que a de `seele-video`.
+ #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+ 
++// A confirmação antes de atualizar para outra versão do servidor (backport
++// 0.16.x do E4 da 0.17): a decisão, sem Tauri, com os testes dela.
++mod atualizador;
+ mod catalogo;
++// A cópia de segurança verificada antes de converter o banco nas saídas de quem
++// hospeda com MODs de API antiga (backport 0.16.x).
++mod copia_do_banco;
+ // **O executor de MODs do cliente em QuickJS — experimento de bancada.**
+ //
+ // Etapa E1: o Worker de `blob:` não satisfaz o contrato — a sonda releu, num
+@@ -3366,26 +3372,28 @@ fn apagar_servidor(app: AppHandle, session: State<'_, Session>, id: String) -> R
+     servidores::apagar(&config_dir(&app), &id)
+ }
+ 
+-/// **As saídas 1 e 3 de quem hospeda com um MOD de API antiga**: atualizar o
+-/// MOD ou desligá-lo, com o servidor parado (tarefa 13 do plano da F3, Step
+-/// 5b; os limites da orquestradora de 15/10).
++/// **O botão final das saídas de quem hospeda com MODs de API antiga**:
++/// atualizar ou desligar todos eles de uma vez, com o servidor parado, depois
++/// da cópia de segurança verificada (tarefa 13 do plano da F3, Step 5b;
++/// backport 0.16.x: na 0.16.0 cada clique convertia o banco na hora).
+ ///
+-/// A regra e os limites são de [`mods::resolver_mod_de_api_antiga`], provados
+-/// lá com a pasta da 0.15.1. Aqui, o «no ar» lido da janela, pelo mesmo campo
+-/// do [`apagar_servidor`]: com um servidor guardado de pé nesta janela, nada
+-/// é aberto.
++/// As escolhas ficam na tela até aqui; este é o único comando das saídas, e o
++/// único que abre o banco para escrita. A regra e os limites são de
++/// [`mods::aplicar_saidas_dos_mods_antigos`], provados lá com a pasta da
++/// 0.15.1. Aqui, o «no ar» lido da janela, pelo mesmo campo do
++/// [`apagar_servidor`]: com um servidor guardado de pé nesta janela, nada é
++/// aberto. Devolve onde ficou a cópia, relativo à pasta de dados.
+ ///
+ /// # Errors
+ ///
+ /// [`mods::FalhaAoResolverModAntigo`], uma variante por motivo.
+ #[tauri::command]
+-async fn resolver_mod_de_api_antiga(
++async fn aplicar_saidas_dos_mods_antigos(
+     app: AppHandle,
+     session: State<'_, Session>,
+     servidor: Option<String>,
+-    id: String,
+-    saida: mods::SaidaDoModAntigo,
+-) -> Result<(), mods::FalhaAoResolverModAntigo> {
++    escolhas: Vec<mods::EscolhaDoModAntigo>,
++) -> Result<String, mods::FalhaAoResolverModAntigo> {
+     let no_ar = match session.hospedagens.lock() {
+         Ok(hospedagens) => hospedagens.guardado.is_some(),
+         // Sem saber, recusar: mexer no banco de um servidor de pé é o que a
+@@ -3393,9 +3401,17 @@ async fn resolver_mod_de_api_antiga(
+         Err(_) => true,
+     };
+     let config = config_dir(&app);
+-    // Abrir o banco migra, e uma migração não roda na thread da janela.
++    // Copiar e abrir o banco (que migra) não rodam na thread da janela.
+     tauri::async_runtime::spawn_blocking(move || {
+-        mods::resolver_mod_de_api_antiga(&config, servidor.as_deref(), &id, &saida, no_ar)
++        mods::aplicar_saidas_dos_mods_antigos(&config, servidor.as_deref(), &escolhas, no_ar).map(
++            |copia| {
++                copia
++                    .strip_prefix(&config)
++                    .unwrap_or(&copia)
++                    .display()
++                    .to_string()
++            },
++        )
+     })
+     .await
+     .map_err(|erro| mods::FalhaAoResolverModAntigo::BancoNaoRespondeu(erro.to_string()))?
+@@ -3654,7 +3670,7 @@ async fn hospedar(
+         servidores::marcar_uso(&config, id);
+     }
+     // O mesmo banco que as saídas de quem hospeda com um MOD de API antiga
+-    // abrem (`resolver_mod_de_api_antiga`): um lugar só, em `servidores`.
++    // abrem (`aplicar_saidas_dos_mods_antigos`): um lugar só, em `servidores`.
+     let banco = servidores::banco_de_hospedar(&config, id_do_servidor);
+     // **Um MOD ligado que este app não roda: dito antes de subir** (o corte da
+     // API 6; tarefa 13 do plano da F3, Step 5b). Com o mesmo banco e as mesmas
+@@ -3936,18 +3952,18 @@ mod o_ponto_de_encontro_de_quem_hospeda {
+ 
+     /// **As saídas de quem hospeda leem da janela se há servidor no ar**
+     /// (tarefa 13 do plano da F3, Step 5b). A recusa é de
+-    /// `mods::resolver_mod_de_api_antiga` (provada lá); aqui, que o comando
++    /// `mods::aplicar_saidas_dos_mods_antigos` (provada lá); aqui, que o comando
+     /// lhe passa o `guardado` desta janela, o campo do `apagar_servidor`, e
+     /// não uma constante. Com `false` no lugar, reprova.
+     #[test]
+     fn as_saidas_de_quem_hospeda_leem_da_janela_se_ha_servidor_no_ar() {
+         let fonte = super::fonte_sem_comentarios();
+-        let corpo = super::corpo_de(&fonte, "async fn resolver_mod_de_api_antiga(");
++        let corpo = super::corpo_de(&fonte, "async fn aplicar_saidas_dos_mods_antigos(");
+         let no_ar = corpo.find("guardado.is_some()").expect(
+             "as saídas não leem o servidor guardado desta janela: mexeriam num banco de pé",
+         );
+         let chamada = corpo
+-            .find("mods::resolver_mod_de_api_antiga(")
++            .find("mods::aplicar_saidas_dos_mods_antigos(")
+             .expect("o comando não chama a regra das saídas");
+         assert!(
+             no_ar < chamada && corpo[chamada..].contains("no_ar)"),
+@@ -11568,6 +11584,15 @@ struct VersaoNova {
+     instalada: String,
+     /// As notas do release, quando o manifesto trouxe alguma.
+     notas: Option<String>,
++    /// Se a versão oferecida fala outra versão de servidor (backport 0.16.x do
++    /// E4 da 0.17). Com `pede_aviso`, a tela mostra a confirmação antes de
++    /// instalar, e `instalar_atualizacao` só aceita com a confirmação desta
++    /// `versao`.
++    fronteira: atualizador::Fronteira,
++    /// Atalho de `fronteira`, para a tela não reimplementar a regra.
++    pede_aviso: bool,
++    /// Esta versão já foi adiada uma vez nesta máquina.
++    adiada: bool,
+ }
+ 
+ /// Quanto do pacote já veio.
+@@ -11634,6 +11659,12 @@ enum FalhaAoAtualizar {
+     /// do manifesto — outra linha. A tela esconde o botão; esta recusa é o que
+     /// vale quando alguém chega ao comando por outro caminho.
+     AbertaPeloLancador,
++    /// A versão escolhida fala outra versão de servidor, e a tela não mandou a
++    /// confirmação **desta** versão (`atualizador::pode_instalar`).
++    ///
++    /// Recusado antes de baixar um byte, e a escolha volta ao lugar: a tela
++    /// mostra a confirmação e pede de novo, sem procurar outra vez.
++    TravessiaNaoConfirmada,
+ }
+ 
+ /// Se esta janela pode procurar e instalar atualização.
+@@ -11737,10 +11768,14 @@ async fn procurar_atualizacao(
+         return Ok(None);
+     };
+ 
++    let fronteira = fronteira_da_oferta(&nova);
+     let resposta = VersaoNova {
+         versao: nova.version.clone(),
+         instalada: nova.current_version.clone(),
+         notas: nova.body.clone(),
++        pede_aviso: fronteira.pede_aviso(),
++        fronteira,
++        adiada: atualizador::foi_adiada(std::path::Path::new(&config_dir(&app)), &nova.version),
+     };
+ 
+     if let Ok(mut slot) = session.atualizacao.lock() {
+@@ -11779,21 +11814,42 @@ async fn procurar_atualizacao(
+ /// não é uma ação que ninguém consegue avisar direito. **A tela tem que dizer
+ /// antes que o SEELE vai fechar e abrir de novo** — e, se houver um servidor
+ /// hospedado nesta janela, que quem estiver dentro dele cai junto.
++///
++/// # A travessia para outra versão do servidor (backport 0.16.x)
++///
++/// `confirmada` é a versão que a tela mostrou na confirmação, e só importa
++/// quando a oferta fala outra versão de servidor: aí, sem ela — ou com a de
++/// outra oferta —, a resposta é [`FalhaAoAtualizar::TravessiaNaoConfirmada`],
++/// **antes** de baixar, e a escolha fica no lugar para a tela pedir de novo. Na
++/// mesma versão do servidor, `confirmada` é ignorada, e o clique de antes (sem
++/// argumento) continua valendo.
+ #[tauri::command]
+ async fn instalar_atualizacao(
+     app: AppHandle,
+     session: State<'_, Session>,
++    confirmada: Option<String>,
+ ) -> Result<(), FalhaAoAtualizar> {
+     atualizacao_permitida(&session.abertura)?;
+     // Tirado do lugar, e não emprestado: instalar é uma vez. Se falhar, quem
+     // quiser tentar de novo procura de novo — e a consulta nova é justamente o
+-    // que confirma que a versão ainda é aquela.
+-    let nova = session
+-        .atualizacao
+-        .lock()
+-        .ok()
+-        .and_then(|mut slot| slot.take())
+-        .ok_or(FalhaAoAtualizar::NadaEscolhido)?;
++    // que confirma que a versão ainda é aquela. A exceção é a travessia não
++    // confirmada, que devolve a escolha antes de baixar qualquer coisa.
++    let nova = {
++        let mut slot = session
++            .atualizacao
++            .lock()
++            .map_err(|_| FalhaAoAtualizar::NadaEscolhido)?;
++        let escolhida = slot.as_ref().ok_or(FalhaAoAtualizar::NadaEscolhido)?;
++        atualizador::pode_instalar(
++            &fronteira_da_oferta(escolhida),
++            &escolhida.version,
++            atualizador::Escolha::Prosseguir,
++            confirmada.as_deref(),
++        )
++        .map_err(|_| FalhaAoAtualizar::TravessiaNaoConfirmada)?;
++        slot.take().ok_or(FalhaAoAtualizar::NadaEscolhido)?
++    };
++    atualizador::esquecer_o_adiamento(std::path::Path::new(&config_dir(&app)));
+ 
+     let relator = app.clone();
+     let mut baixados: u64 = 0;
+@@ -11845,6 +11901,49 @@ async fn instalar_atualizacao(
+     app.restart()
+ }
+ 
++/// A fronteira de uma oferta do atualizador: a linha deste app contra a que o
++/// manifesto que veio com a oferta atribui a ela.
++fn fronteira_da_oferta(nova: &tauri_plugin_updater::Update) -> atualizador::Fronteira {
++    atualizador::fronteira_da_oferta(
++        versoes::linha_deste_app().as_ref(),
++        &nova.raw_json,
++        &nova.version,
++    )
++}
++
++/// Cancelar ou adiar a oferta que a tela mostrou.
++///
++/// As duas tiram a oferta do lugar: nada é baixado nem instalado, e um
++/// «instalar» seguinte responde `NadaEscolhido`. Adiar guarda a versão, e a
++/// próxima procura a devolve com `adiada`; cancelar esquece. `Prosseguir` aqui
++/// é o mesmo que cancelar: quem prossegue chama `instalar_atualizacao`.
++#[tauri::command]
++fn escolher_atualizacao(
++    app: AppHandle,
++    session: State<'_, Session>,
++    escolha: atualizador::Escolha,
++) -> Result<(), FalhaAoAtualizar> {
++    let nova = session
++        .atualizacao
++        .lock()
++        .ok()
++        .and_then(|mut slot| slot.take())
++        .ok_or(FalhaAoAtualizar::NadaEscolhido)?;
++    let escolha = match escolha {
++        atualizador::Escolha::Prosseguir => atualizador::Escolha::Cancelar,
++        outra => outra,
++    };
++    if let Err(erro) = atualizador::registrar_a_escolha(
++        std::path::Path::new(&config_dir(&app)),
++        &nova.version,
++        escolha,
++    ) {
++        tracing::warn!(%erro, versao = %nova.version, "não guardei o adiamento da atualização");
++    }
++    tracing::info!(versao = %nova.version, ?escolha, "a atualização ficou para depois");
++    Ok(())
++}
++
+ /// Onde fica o bilhete da atualização em curso.
+ ///
+ /// Ao lado das preferências, e não em `Program Files`: quem escreve é o app
+@@ -12299,7 +12398,7 @@ fn main() {
+             servidores_guardados,
+             criar_servidor,
+             apagar_servidor,
+-            resolver_mod_de_api_antiga,
++            aplicar_saidas_dos_mods_antigos,
+             abrir_versao,
+             abertura,
+             instalar_mod,
+@@ -12427,6 +12526,7 @@ fn main() {
+             busca_limpar,
+             procurar_atualizacao,
+             instalar_atualizacao,
++            escolher_atualizacao,
+             atualizacao_que_nao_pegou,
+             abrir_a_porta_no_firewall,
+             descrever_arquivo,
+diff --git a/apps/seele-app/src/mods.rs b/apps/seele-app/src/mods.rs
+index 20b1c8c2..17e0a41d 100644
+--- a/apps/seele-app/src/mods.rs
++++ b/apps/seele-app/src/mods.rs
+@@ -623,7 +623,7 @@ pub(crate) fn linha_do_pacote(
+ /// A saída que quem hospeda escolheu para um MOD de API antiga (decisão do
+ /// dono de 08/10). A saída 2, hospedar pelo Servidor 0.15, não mexe neste
+ /// banco: é o painel de versões.
+-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
++#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+ #[serde(rename_all = "lowercase")]
+ pub(crate) enum SaidaDoModAntigo {
+     /// A saída 1: liga os bytes deste hash, a versão do MOD feita para a API
+@@ -649,32 +649,71 @@ pub(crate) enum FalhaAoResolverModAntigo {
+     /// Os bytes da versão nova não servem, com o nome da recusa
+     /// ([`linha_do_pacote`]).
+     PacoteNaoServe(String),
++    /// Falta escolher a saída destes MODs (backport 0.16.x). Converter o banco
++    /// com um MOD ainda sem saída seria converter para o hospedar seguinte
++    /// recusar do mesmo jeito; nada foi mudado.
++    FaltaEscolher(Vec<String>),
++    /// A cópia de segurança verificada não ficou pronta, com a etapa e o
++    /// motivo ([`crate::copia_do_banco::preparar`]). Nada foi convertido.
++    CopiaNaoFeita(String),
+     /// O banco não abriu, não migrou ou não gravou, com o que ele disse.
+     BancoNaoRespondeu(String),
+ }
+ 
+-/// **As saídas 1 e 3 de quem hospeda com um MOD de API antiga, com o servidor
+-/// parado** (tarefa 13 do plano da F3, Step 5b; aprovado pela orquestradora em
+-/// 15/10, com os limites que esta função confere, nesta ordem):
++/// A escolha de quem hospeda para um MOD de API antiga: o MOD e a saída.
++#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
++pub(crate) struct EscolhaDoModAntigo {
++    /// O MOD.
++    pub(crate) id: String,
++    /// A saída escolhida para ele.
++    pub(crate) saida: SaidaDoModAntigo,
++}
++
++/// **As saídas 1 e 3 de quem hospeda com MODs de API antiga, todas de uma vez,
++/// no botão final** (tarefa 13 do plano da F3, Step 5b; backport 0.16.x da
++/// regra da 0.17: escolha estagiada → cópia verificada → conversão).
++///
++/// # O defeito que isto conserta
+ ///
+-/// 1. **só com o servidor parado** — `no_ar` vem da janela, e com ele de pé
+-///    nada é aberto;
++/// Na 0.16.0 cada clique em ATUALIZAR ou DESLIGAR chamava, por MOD, uma função
++/// que abria o banco com `Persistence::open` — que **migra** — e gravava a
++/// troca na hora, sem cópia do estado de antes e sem desfazer; com vários MODs
++/// antigos, o banco era convertido no primeiro clique. Agora as escolhas ficam
++/// na tela (estagiadas, com DESFAZER e CANCELAR, sem tocar em nada), e só esta
++/// função, chamada pelo botão final com **todas** elas, converte.
++///
++/// # A ordem, e nada é aberto para escrita antes do passo 5
++///
++/// 1. **só com o servidor parado** — `no_ar` vem da janela;
+ /// 2. **só os servidores guardados desta máquina** — um id fora da lista é
+ ///    recusado, e não cai no banco de sempre como `servidores::banco` cai;
+-/// 3. **só um MOD que hospedar recusaria** — pela mesma conferência do
+-///    `hospedar` ([`mods_de_api_antiga`]);
+-/// 4. **o mesmo banco e a mesma migração da subida** —
+-///    [`crate::servidores::banco_de_hospedar`] e `Persistence::open`;
+-/// 5. **os dados do MOD ficam** — `enable` e `disable` não tocam `mod_data`
++/// 3. **uma escolha para cada MOD que hospedar recusaria, e só para eles** —
++///    pela mesma conferência do `hospedar` ([`mods_de_api_antiga`], só
++///    leitura); um MOD sem escolha é [`FalhaAoResolverModAntigo::FaltaEscolher`],
++///    um que não é de API antiga (ou repetido) é `NaoEDeApiAntiga`;
++/// 4. **os bytes de cada versão nova servem** ([`linha_do_pacote`]);
++/// 5. **a cópia de segurança verificada** ([`crate::copia_do_banco::preparar`]):
++///    sem ela, `CopiaNaoFeita`, e nada foi convertido;
++/// 6. **o mesmo banco e a mesma migração da subida** —
++///    [`crate::servidores::banco_de_hospedar`] e `Persistence::open` —, e as
++///    escolhas, uma a uma;
++/// 7. **os dados dos MODs ficam** — `enable` e `disable` não tocam `mod_data`
+ ///    (ADR 0045), e a versão nova lê o quintal que a antiga gravou;
+-/// 6. **o `seele.log` diz o que mudou e em qual servidor.**
+-pub(crate) fn resolver_mod_de_api_antiga(
++/// 8. **o `seele.log` diz a cópia, o que mudou e em qual servidor.**
++///
++/// A API aceita continua a deste build (`MOD_API_MINIMA`, a 6): nada aqui faz
++/// o Servidor 1.0 rodar um MOD da API 5.
++///
++/// # Errors
++///
++/// [`FalhaAoResolverModAntigo`]. Até o passo 5, inclusive, o banco fica byte a
++/// byte como estava.
++pub(crate) fn aplicar_saidas_dos_mods_antigos(
+     config: &str,
+     servidor: Option<&str>,
+-    id: &str,
+-    saida: &SaidaDoModAntigo,
++    escolhas: &[EscolhaDoModAntigo],
+     no_ar: bool,
+-) -> Result<(), FalhaAoResolverModAntigo> {
++) -> Result<std::path::PathBuf, FalhaAoResolverModAntigo> {
+     if no_ar {
+         return Err(FalhaAoResolverModAntigo::ServidorNoAr);
+     }
+@@ -688,51 +727,82 @@ pub(crate) fn resolver_mod_de_api_antiga(
+     }
+     let banco = crate::servidores::banco_de_hospedar(config, servidor);
+     let raizes = crate::servidores::raizes_dos_mods(config, servidor);
+-    let Some(antigo) = mods_de_api_antiga(&banco, &raizes)
+-        .into_iter()
+-        .find(|antigo| antigo.id == id)
+-    else {
+-        return Err(FalhaAoResolverModAntigo::NaoEDeApiAntiga);
+-    };
+-    // Os bytes novos conferidos **antes** de abrir o banco: abrir migra, e uma
+-    // recusa não deixa um banco migrado para trás.
+-    let nova = match saida {
+-        SaidaDoModAntigo::Atualizar { hash } => Some(
+-            linha_do_pacote(config, id, hash).map_err(FalhaAoResolverModAntigo::PacoteNaoServe)?,
+-        ),
+-        SaidaDoModAntigo::Desligar => None,
+-    };
++    let antigos = mods_de_api_antiga(&banco, &raizes);
++
++    // 3. Uma escolha para cada antigo, e só para eles.
++    let mut vistos: Vec<&str> = Vec::new();
++    for escolha in escolhas {
++        if vistos.contains(&escolha.id.as_str())
++            || !antigos.iter().any(|antigo| antigo.id == escolha.id)
++        {
++            return Err(FalhaAoResolverModAntigo::NaoEDeApiAntiga);
++        }
++        vistos.push(&escolha.id);
++    }
++    let faltam: Vec<String> = antigos
++        .iter()
++        .filter(|antigo| !vistos.contains(&antigo.id.as_str()))
++        .map(|antigo| antigo.id.clone())
++        .collect();
++    if !faltam.is_empty() {
++        return Err(FalhaAoResolverModAntigo::FaltaEscolher(faltam));
++    }
++
++    // 4. Os bytes novos conferidos **antes** de abrir o banco: abrir migra, e
++    // uma recusa não deixa um banco migrado para trás.
++    let mut aplicar = Vec::with_capacity(escolhas.len());
++    for escolha in escolhas {
++        let nova = match &escolha.saida {
++            SaidaDoModAntigo::Atualizar { hash } => Some(
++                linha_do_pacote(config, &escolha.id, hash)
++                    .map_err(FalhaAoResolverModAntigo::PacoteNaoServe)?,
++            ),
++            SaidaDoModAntigo::Desligar => None,
++        };
++        aplicar.push((escolha.id.as_str(), nova));
++    }
++
++    // 5. A cópia, antes de qualquer conversão.
++    let copia = crate::copia_do_banco::preparar(Path::new(config), servidor, &banco)
++        .map_err(FalhaAoResolverModAntigo::CopiaNaoFeita)?;
++
++    // 6. A conversão e as escolhas.
+     let banco_aberto = seele_server::persistence::Persistence::open(
+         &seele_server::persistence::Location::File(banco),
+     )
+     .map_err(|erro| FalhaAoResolverModAntigo::BancoNaoRespondeu(format!("{erro:#}")))?;
+-    let gravado = match &nova {
+-        Some(linha) => seele_server::persistence::mods::enable(&banco_aberto, linha),
+-        None => seele_server::persistence::mods::disable(&banco_aberto, id),
+-    };
+-    gravado.map_err(|erro| FalhaAoResolverModAntigo::BancoNaoRespondeu(format!("{erro:#}")))?;
+-
+     let qual = servidor.unwrap_or("o de sempre");
+-    let api = antigo
+-        .api
+-        .map_or_else(|| "não lida".to_owned(), |api| api.to_string());
+-    match &nova {
+-        Some(linha) => tracing::info!(
+-            servidor = qual,
+-            mod_id = id,
+-            api_antiga = %api,
+-            versao = %linha.version,
+-            api = linha.api,
+-            "MOD de API antiga atualizado com o servidor parado"
+-        ),
+-        None => tracing::info!(
+-            servidor = qual,
+-            mod_id = id,
+-            api_antiga = %api,
+-            "MOD de API antiga desligado com o servidor parado; os dados dele ficam"
+-        ),
++    for (id, nova) in &aplicar {
++        let gravado = match nova {
++            Some(linha) => seele_server::persistence::mods::enable(&banco_aberto, linha),
++            None => seele_server::persistence::mods::disable(&banco_aberto, id),
++        };
++        gravado.map_err(|erro| FalhaAoResolverModAntigo::BancoNaoRespondeu(format!("{erro:#}")))?;
++        let api = antigos
++            .iter()
++            .find(|antigo| antigo.id == *id)
++            .and_then(|antigo| antigo.api)
++            .map_or_else(|| "não lida".to_owned(), |api| api.to_string());
++        match nova {
++            Some(linha) => tracing::info!(
++                servidor = qual,
++                mod_id = id,
++                api_antiga = %api,
++                versao = %linha.version,
++                api = linha.api,
++                copia = %copia.display(),
++                "MOD de API antiga atualizado com o servidor parado, depois da cópia verificada"
++            ),
++            None => tracing::info!(
++                servidor = qual,
++                mod_id = id,
++                api_antiga = %api,
++                copia = %copia.display(),
++                "MOD de API antiga desligado com o servidor parado, depois da cópia verificada; os dados dele ficam"
++            ),
++        }
+     }
+-    Ok(())
++    Ok(copia)
+ }
+ 
+ #[cfg(test)]
+@@ -836,19 +906,48 @@ mod mods_de_api_antiga {
+     }
+ }
+ 
++/// **O Perfis 3.3.1 (API 5) atravessando para o 4.0.0 pelas saídas
++/// estagiadas** (backport 0.16.x). Num arquivo próprio, ao lado deste; declarado
++/// aqui e não no `main.rs`, cujo recorte de produção
++/// (`o_ponto_de_encontro_de_quem_hospeda`) não aceita módulo de teste sem corpo.
++#[cfg(test)]
++#[path = "perfis_api5_testes.rs"]
++mod perfis_api5_testes;
++
+ /// **As saídas 1 e 3 de quem hospeda, com o servidor parado** (tarefa 13 do
+ /// plano da F3, Step 5b; os limites da orquestradora de 15/10). Sobre a pasta
+ /// da 0.15.1: o `seele/estilo` 3.1.0, da API 4, e o quintal que ele gravou.
+ #[cfg(test)]
+ mod saidas_do_mod_antigo {
+     use super::{
+-        instalar_de, mods_de_api_antiga, resolver_mod_de_api_antiga, FalhaAoResolverModAntigo,
+-        SaidaDoModAntigo,
++        aplicar_saidas_dos_mods_antigos, instalar_de, mods_de_api_antiga, EscolhaDoModAntigo,
++        FalhaAoResolverModAntigo, SaidaDoModAntigo,
+     };
+     use std::path::Path;
+ 
+     const PASTA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testes/pasta-da-0.15.1/pasta");
+ 
++    /// Uma saída só, pelo botão final: a pasta da 0.15.1 tem um MOD antigo, e
++    /// uma escolha para ele é a lista inteira.
++    fn resolver_mod_de_api_antiga(
++        config: &str,
++        servidor: Option<&str>,
++        id: &str,
++        saida: &SaidaDoModAntigo,
++        no_ar: bool,
++    ) -> Result<(), FalhaAoResolverModAntigo> {
++        aplicar_saidas_dos_mods_antigos(
++            config,
++            servidor,
++            &[EscolhaDoModAntigo {
++                id: id.to_owned(),
++                saida: saida.clone(),
++            }],
++            no_ar,
++        )
++        .map(|_| ())
++    }
++
+     fn copiar(de: &Path, para: &Path) {
+         std::fs::create_dir_all(para).unwrap();
+         for entrada in std::fs::read_dir(de).unwrap() {
+@@ -1154,6 +1253,236 @@ mod saidas_do_mod_antigo {
+         );
+         assert_eq!(esquema(&banco(&dir)), 13, "recusado, e o banco migrou");
+     }
++
++    // ---- backport 0.16.x: escolha estagiada → cópia verificada → conversão
++
++    /// O conteúdo lógico inteiro de um banco: cada tabela, cada linha, cada
++    /// valor, em ordem. A régua para dizer que a cópia é o estado de antes.
++    fn conteudo(banco: &Path) -> Vec<(String, Vec<String>)> {
++        let conexao = rusqlite::Connection::open_with_flags(
++            banco,
++            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
++        )
++        .unwrap();
++        let tabelas: Vec<String> = conexao
++            .prepare(
++                "SELECT name FROM sqlite_master WHERE type = 'table' \
++                 AND name NOT LIKE 'sqlite_%' ORDER BY name",
++            )
++            .unwrap()
++            .query_map([], |l| l.get(0))
++            .unwrap()
++            .map(Result::unwrap)
++            .collect();
++        tabelas
++            .into_iter()
++            .map(|tabela| {
++                let mut consulta = conexao
++                    .prepare(&format!("SELECT * FROM \"{tabela}\" ORDER BY rowid"))
++                    .unwrap();
++                let colunas = consulta.column_count();
++                let linhas = consulta
++                    .query_map([], |l| {
++                        Ok((0..colunas)
++                            .map(|i| format!("{:?}", l.get_ref(i).unwrap()))
++                            .collect::<Vec<_>>()
++                            .join("|"))
++                    })
++                    .unwrap()
++                    .map(Result::unwrap)
++                    .collect();
++                (tabela, linhas)
++            })
++            .collect()
++    }
++
++    /// O SHA-256 dos bytes do banco e dos arquivos ao lado dele (`-wal`,
++    /// `-shm`, `-journal`; `None` = não existe), para dizer «byte a byte como
++    /// estava» com uma falha que se lê.
++    fn bytes_do_banco(dir: &tempfile::TempDir) -> Vec<(String, Option<String>)> {
++        use sha2::Digest as _;
++        [
++            "seele.db",
++            "seele.db-wal",
++            "seele.db-shm",
++            "seele.db-journal",
++        ]
++        .into_iter()
++        .map(|nome| {
++            let soma = std::fs::read(dir.path().join(nome)).ok().map(|bytes| {
++                sha2::Sha256::digest(&bytes)
++                    .iter()
++                    .map(|b| format!("{b:02x}"))
++                    .collect::<String>()
++            });
++            (nome.to_owned(), soma)
++        })
++        .collect()
++    }
++
++    fn sem_copia(dir: &tempfile::TempDir) -> bool {
++        !dir.path()
++            .join(crate::copia_do_banco::PASTA_DAS_COPIAS)
++            .exists()
++    }
++
++    fn escolha(id: &str, saida: SaidaDoModAntigo) -> EscolhaDoModAntigo {
++        EscolhaDoModAntigo {
++            id: id.to_owned(),
++            saida,
++        }
++    }
++
++    /// **Antes da confirmação, o banco da 0.15.1 fica byte a byte como
++    /// estava.** O que a tela faz antes do botão final — perguntar quem hospedar
++    /// recusaria — só lê; e todo botão final recusado (lista vazia, MOD que não
++    /// é antigo, repetido, pacote de outro MOD, servidor no ar) recusa antes da
++    /// cópia e da conversão: nem o arquivo do banco, nem `-wal`, `-shm` ou
++    /// `-journal` mudam, e nenhuma cópia é criada.
++    #[test]
++    fn antes_da_confirmacao_o_banco_da_0_15_1_fica_byte_identico() {
++        let (dir, config) = pasta_da_0_15_1();
++        let antes = bytes_do_banco(&dir);
++        let hash_do_estilo_4 = estilo_4_no_cache(&config);
++
++        // O que a tela lê para desenhar as saídas.
++        assert_eq!(
++            mods_de_api_antiga(
++                &banco(&dir),
++                &crate::servidores::raizes_dos_mods(&config, None)
++            )
++            .len(),
++            1
++        );
++
++        let origem = tempfile::tempdir().unwrap();
++        std::fs::create_dir_all(origem.path().join("cliente")).unwrap();
++        std::fs::write(
++            origem.path().join("mod.json"),
++            super::manifesto_de_teste("x/outro"),
++        )
++        .unwrap();
++        std::fs::write(origem.path().join("cliente/main.js"), "/* nada */").unwrap();
++        let hash_de_outro = instalar_de(dir.path(), origem.path()).unwrap().hash;
++
++        let atualizar = |hash: &str| SaidaDoModAntigo::Atualizar {
++            hash: hash.to_owned(),
++        };
++        let recusados: Vec<(Vec<EscolhaDoModAntigo>, bool, FalhaAoResolverModAntigo)> = vec![
++            (
++                vec![],
++                false,
++                FalhaAoResolverModAntigo::FaltaEscolher(vec!["seele/estilo".to_owned()]),
++            ),
++            (
++                vec![escolha("x/outro", SaidaDoModAntigo::Desligar)],
++                false,
++                FalhaAoResolverModAntigo::NaoEDeApiAntiga,
++            ),
++            (
++                vec![
++                    escolha("seele/estilo", SaidaDoModAntigo::Desligar),
++                    escolha("seele/estilo", atualizar(&hash_do_estilo_4)),
++                ],
++                false,
++                FalhaAoResolverModAntigo::NaoEDeApiAntiga,
++            ),
++            (
++                vec![escolha("seele/estilo", atualizar(&hash_de_outro))],
++                false,
++                FalhaAoResolverModAntigo::PacoteNaoServe("conteudo-de-outro-mod".to_owned()),
++            ),
++            (
++                vec![escolha("seele/estilo", atualizar(&hash_do_estilo_4))],
++                true,
++                FalhaAoResolverModAntigo::ServidorNoAr,
++            ),
++        ];
++        for (escolhas, no_ar, esperada) in recusados {
++            assert_eq!(
++                aplicar_saidas_dos_mods_antigos(&config, None, &escolhas, no_ar),
++                Err(esperada.clone()),
++                "{escolhas:?}"
++            );
++            assert_eq!(
++                bytes_do_banco(&dir),
++                antes,
++                "a recusa {esperada:?} mexeu no banco"
++            );
++            assert!(sem_copia(&dir), "a recusa {esperada:?} fez cópia");
++        }
++    }
++
++    /// **Sem a cópia verificada, nada é convertido.** Com a pasta das cópias
++    /// impossível de criar, o botão final recusa com `CopiaNaoFeita`, e o
++    /// banco fica byte a byte como estava, no esquema 13.
++    #[test]
++    fn sem_a_copia_verificada_nada_e_convertido() {
++        let (dir, config) = pasta_da_0_15_1();
++        let antes = bytes_do_banco(&dir);
++        // Um arquivo no lugar da pasta: `create_dir_all` falha.
++        std::fs::write(
++            dir.path().join(crate::copia_do_banco::PASTA_DAS_COPIAS),
++            b"nao e pasta",
++        )
++        .unwrap();
++        let falha = aplicar_saidas_dos_mods_antigos(
++            &config,
++            None,
++            &[escolha("seele/estilo", SaidaDoModAntigo::Desligar)],
++            false,
++        );
++        assert!(
++            matches!(falha, Err(FalhaAoResolverModAntigo::CopiaNaoFeita(_))),
++            "{falha:?}"
++        );
++        assert_eq!(
++            bytes_do_banco(&dir),
++            antes,
++            "a cópia falhou e o banco mudou"
++        );
++        assert_eq!(esquema(&banco(&dir)), 13);
++    }
++
++    /// **O botão final: a cópia verificada primeiro, depois a conversão e as
++    /// escolhas.** A cópia é o estado de antes, inteiro (o mesmo conteúdo
++    /// lógico do banco da 0.15.1, no esquema 13, com o 3.1.0 ligado); o banco
++    /// passa ao esquema deste build com o 4.0.0, e o quintal fica.
++    #[test]
++    fn o_botao_final_copia_o_estado_de_antes_e_so_entao_converte() {
++        let (dir, config) = pasta_da_0_15_1();
++        let antes = conteudo(&banco(&dir));
++        let quintal = quintal_do_estilo(&banco(&dir));
++        let hash = estilo_4_no_cache(&config);
++
++        let copia = aplicar_saidas_dos_mods_antigos(
++            &config,
++            None,
++            &[escolha(
++                "seele/estilo",
++                SaidaDoModAntigo::Atualizar { hash: hash.clone() },
++            )],
++            false,
++        )
++        .expect("o botão final não aplicou");
++
++        assert!(copia.starts_with(
++            dir.path()
++                .join(crate::copia_do_banco::PASTA_DAS_COPIAS)
++                .join("padrao")
++        ));
++        assert_eq!(esquema(&copia), 13, "a cópia não é do esquema de antes");
++        assert_eq!(
++            conteudo(&copia),
++            antes,
++            "a cópia não tem o conteúdo de antes"
++        );
++        assert_eq!(linha_do_estilo(&copia).0, "3.1.0");
++
++        assert_eq!(esquema(&banco(&dir)), esquema_deste_build());
++        assert_eq!(linha_do_estilo(&banco(&dir)), ("4.0.0".to_owned(), hash, 1));
++        assert_eq!(quintal_do_estilo(&banco(&dir)), quintal, "o quintal mudou");
++    }
+ }
+ 
+ #[cfg(test)]
+diff --git a/apps/seele-app/src/perfis_api5_testes.rs b/apps/seele-app/src/perfis_api5_testes.rs
+new file mode 100644
+index 00000000..49394b09
+--- /dev/null
++++ b/apps/seele-app/src/perfis_api5_testes.rs
+@@ -0,0 +1,471 @@
++//! **O Perfis 3.3.1 (API 5) atravessa para o 4.0.0 (API 6) pelas saídas
++//! estagiadas do backport 0.16.x** (`revisao-astra-travessia-api5-6.md`,
++//! «validação nova mínima»).
++//!
++//! O caso relatado: quem hospedou na 0.15 com o `seele/perfis` 3.3.1 ligado
++//! abre a 0.16.x. A API 5 não roda no Servidor 1.0 (a API mínima é a 6) e não
++//! passa a rodar: o HOSPEDAR recusa, e a saída é ATUALIZAR para o 4.0.0. Pelas
++//! funções de verdade (`mods_de_api_antiga`, `aplicar_saidas_dos_mods_antigos`,
++//! o servidor de pé), prova-se:
++//!
++//! 1. o HOSPEDAR recusaria com `("seele/perfis", Some(5))`;
++//! 2. antes da confirmação o banco fica byte a byte como estava: a leitura da
++//!    tela e os botões finais recusados (sem escolha, servidor no ar) não o
++//!    tocam e não fazem cópia. Escolher, DESFAZER e CANCELAR moram só na tela
++//!    e não chamam o Rust (`tests/frontend.rs` e a bancada das saídas);
++//! 3. o botão final faz a cópia do estado de antes (esquema 13, o 3.3.1, o
++//!    `mod_data`) e só então converte e liga o 4.0.0;
++//! 4. o `mod_data` do Perfis chega igual, byte a byte, e a metade de servidor
++//!    do 4.0.0 o lê pelo caminho de pedido do servidor de pé.
++//!
++//! # Duas medidas, com pacotes diferentes, ditas
++//!
++//! - [`com_os_substitutos_da_fixture`] roda sempre: a pasta
++//!   `testes/pasta-da-0.15.1-perfis/` (banco e `mod_data` gravados **pelo
++//!   código da v0.15.1**), com o 3.3.1 e o 4.0.0 **substitutos** dela (o id, a
++//!   versão e a API dos oficiais, não os bytes nem o hash).
++//! - [`com_os_pacotes_oficiais`] usa os pacotes **oficiais** 3.3.1 e 4.0.0,
++//!   cujos hashes são conferidos contra o catálogo. Eles não estão neste
++//!   repositório (meio megabyte cada), então o teste é `#[ignore]` e lê a pasta
++//!   deles de `SEELE_PERFIS_OFICIAIS` (com `3.3.1/` e `4.0.0/` dentro):
++//!
++//!   ```sh
++//!   cargo test --manifest-path apps/seele-app/Cargo.toml \
++//!     --config 'env.SEELE_PERFIS_OFICIAIS="<pasta>"' -- --ignored com_os_pacotes_oficiais
++//!   ```
++//!
++//!   O banco é o da fixture (esquema 13, a conta de quem hospeda), com a linha
++//!   do Perfis apontando o hash do 3.3.1 oficial e o `mod_data` **na forma que
++//!   o servidor do 3.3.1 oficial grava** (`dados.profiles`, o perfil de cada
++//!   pessoa pelo `validate` dele). Esse `mod_data` foi escrito aqui, e não pelo
++//!   3.3.1 rodando numa 0.15.1.
++#![allow(
++    clippy::unwrap_used,
++    clippy::expect_used,
++    clippy::indexing_slicing,
++    reason = "num teste, o pânico é o relatório; e indexar um serde_json::Value devolve Null"
++)]
++
++use std::path::{Path, PathBuf};
++
++use crate::mods::{
++    aplicar_saidas_dos_mods_antigos, mods_de_api_antiga, EscolhaDoModAntigo,
++    FalhaAoResolverModAntigo, ModDeApiAntiga, SaidaDoModAntigo,
++};
++
++/// A pasta de quem hospedou na 0.15.1 com o Perfis 3.3.1 (API 5).
++const PASTA: &str = concat!(
++    env!("CARGO_MANIFEST_DIR"),
++    "/testes/pasta-da-0.15.1-perfis/pasta"
++);
++
++/// O hash do Perfis 3.3.1 substituto, que a 0.15.1 gravou em `mods`.
++const HASH_DO_SUBSTITUTO: &str = "d3f49d8addc6ee4ef438620af18e3981dc1ef5899b8b5b157564e8ead4902b2d";
++
++/// Os hashes dos pacotes oficiais, como o catálogo os publica
++/// (`catalogo-dos-pacotes.json`, ao lado deles).
++const HASH_OFICIAL_3_3_1: &str = "ec9fb794da41c8bf6d331f934024dcb9385ebb8db3434a2886b142683e4e8b96";
++const HASH_OFICIAL_4_0_0: &str = "6c5ecf4ea2d1b9ae2c201de8fee24c1c4c3ee1f3ff39d9e0f10710f796f7a368";
++
++const PERFIS: &str = "seele/perfis";
++
++fn copiar(de: &Path, para: &Path) {
++    std::fs::create_dir_all(para).unwrap();
++    for entrada in std::fs::read_dir(de).unwrap() {
++        let entrada = entrada.unwrap();
++        let destino = para.join(entrada.file_name());
++        if entrada.path().is_dir() {
++            copiar(&entrada.path(), &destino);
++        } else {
++            std::fs::copy(entrada.path(), destino).unwrap();
++        }
++    }
++}
++
++/// Os arquivos de uma pasta, com o caminho relativo em `/`, para o hash.
++fn arquivos(raiz: &Path) -> Vec<(String, Vec<u8>)> {
++    fn andar(raiz: &Path, pasta: &Path, achados: &mut Vec<(String, Vec<u8>)>) {
++        for entrada in std::fs::read_dir(pasta).unwrap() {
++            let caminho = entrada.unwrap().path();
++            if caminho.is_dir() {
++                andar(raiz, &caminho, achados);
++            } else {
++                let relativo = caminho
++                    .strip_prefix(raiz)
++                    .unwrap()
++                    .components()
++                    .map(|parte| parte.as_os_str().to_string_lossy().into_owned())
++                    .collect::<Vec<_>>()
++                    .join("/");
++                achados.push((relativo, std::fs::read(&caminho).unwrap()));
++            }
++        }
++    }
++    let mut achados = Vec::new();
++    andar(raiz, raiz, &mut achados);
++    achados
++}
++
++fn ler(banco: &Path) -> rusqlite::Connection {
++    rusqlite::Connection::open_with_flags(banco, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
++        .unwrap()
++}
++
++fn esquema(banco: &Path) -> i64 {
++    ler(banco)
++        .query_row(
++            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
++            [],
++            |l| l.get(0),
++        )
++        .unwrap()
++}
++
++/// A linha do Perfis em `mods`: versão, hash e ligado.
++fn linha_do_perfis(banco: &Path) -> (String, String, i64) {
++    ler(banco)
++        .query_row(
++            "SELECT version, hash, enabled FROM mods WHERE id = ?1",
++            [PERFIS],
++            |l| Ok((l.get(0)?, l.get(1)?, l.get(2)?)),
++        )
++        .unwrap()
++}
++
++/// O `mod_data` do Perfis, linha por linha, como o disco o tem.
++fn quintal_do_perfis(banco: &Path) -> Vec<(String, Vec<u8>)> {
++    let conexao = ler(banco);
++    let mut consulta = conexao
++        .prepare("SELECT key, CAST(value AS BLOB) FROM mod_data WHERE mod_id = ?1 ORDER BY key")
++        .unwrap();
++    consulta
++        .query_map([PERFIS], |l| Ok((l.get(0)?, l.get(1)?)))
++        .unwrap()
++        .map(Result::unwrap)
++        .collect()
++}
++
++/// O SHA-256 do banco e dos arquivos ao lado dele: o que «nada mudou» quer dizer.
++fn bytes_do_banco(banco: &Path) -> Vec<(String, Option<String>)> {
++    use sha2::Digest as _;
++    ["", "-wal", "-shm", "-journal"]
++        .into_iter()
++        .map(|sufixo| {
++            let caminho = format!("{}{sufixo}", banco.display());
++            let resumo = std::fs::read(&caminho).ok().map(|bytes| {
++                sha2::Sha256::digest(&bytes)
++                    .iter()
++                    .map(|byte| format!("{byte:02x}"))
++                    .collect::<String>()
++            });
++            (sufixo.to_owned(), resumo)
++        })
++        .collect()
++}
++
++fn copias_no_disco(config: &Path) -> Vec<PathBuf> {
++    std::fs::read_dir(
++        config
++            .join(crate::copia_do_banco::PASTA_DAS_COPIAS)
++            .join("padrao"),
++    )
++    .into_iter()
++    .flatten()
++    .flatten()
++    .map(|entrada| entrada.path())
++    .collect()
++}
++
++/// A pasta da 0.15.1 com o Perfis, sem migrar: o banco de sempre e o pacote
++/// substituto no cache por hash.
++fn pasta_da_0_15_1() -> (tempfile::TempDir, String) {
++    let dir = tempfile::tempdir().unwrap();
++    rusqlite::Connection::open(dir.path().join("seele.db"))
++        .unwrap()
++        .execute_batch(&std::fs::read_to_string(format!("{PASTA}/seele.sql")).unwrap())
++        .unwrap();
++    copiar(
++        &Path::new(PASTA).join("mod-packages"),
++        &dir.path().join("mod-packages"),
++    );
++    let config = dir.path().to_string_lossy().into_owned();
++    (dir, config)
++}
++
++/// O Perfis 4.0.0 substituto, na API 6, instalado no cache por hash. Lê o
++/// perfil que o 3.3.1 substituto gravou (`perfil:<pessoa>`).
++fn substituto_4_no_cache(config: &str) -> String {
++    let origem = tempfile::tempdir().unwrap();
++    std::fs::create_dir_all(origem.path().join("servidor")).unwrap();
++    std::fs::write(
++        origem.path().join("mod.json"),
++        serde_json::json!({
++            "schema": 1,
++            "id": PERFIS,
++            "version": "4.0.0",
++            "api": 6,
++            "repo": "https://github.com/DATA-AND-DEV/SEELE-MOD-PERFIS",
++            "reach": ["perfil de cada pessoa"],
++            "server": "servidor/main.js",
++        })
++        .to_string(),
++    )
++    .unwrap();
++    std::fs::write(
++        origem.path().join("servidor/main.js"),
++        "globalThis.aoPedir = (contextoJSON) => { \
++           const contexto = JSON.parse(contextoJSON); \
++           const guardado = dados['perfil:' + contexto.person]; \
++           return JSON.stringify({ ok: true, versao: '4.0.0', perfil: guardado ?? null }); \
++         };",
++    )
++    .unwrap();
++    crate::mods::instalar_de(Path::new(config), origem.path())
++        .unwrap()
++        .hash
++}
++
++/// O que se mede, e com quais pacotes.
++struct Travessia {
++    dir: tempfile::TempDir,
++    config: String,
++    /// O hash do 3.3.1 ligado no banco.
++    hash_3: String,
++    /// O hash do 4.0.0 no cache.
++    hash_4: String,
++}
++
++/// **A travessia, do HOSPEDAR recusado ao botão final.** Devolve a resposta do
++/// 4.0.0 de pé a um `view` de quem hospeda, para cada medida conferir o que o
++/// pacote dela lê.
++fn atravessar(t: &Travessia) -> serde_json::Value {
++    let config = t.config.as_str();
++    let banco = crate::servidores::banco_de_hospedar(config, None);
++    let raizes = crate::servidores::raizes_dos_mods(config, None);
++    let bytes_antes = bytes_do_banco(&banco);
++    let linha_antes = linha_do_perfis(&banco);
++    let quintal_antes = quintal_do_perfis(&banco);
++    assert_eq!(esquema(&banco), 13, "a pasta não é a da 0.15.1");
++    assert_eq!(
++        linha_antes,
++        ("3.3.1".to_owned(), t.hash_3.clone(), 1),
++        "o Perfis 3.3.1 não está ligado na pasta"
++    );
++    assert!(
++        !quintal_antes.is_empty(),
++        "a pasta não tem o mod_data do Perfis"
++    );
++
++    // 1. O HOSPEDAR recusaria pela API 5 — a mesma conferência dele.
++    assert_eq!(
++        mods_de_api_antiga(&banco, &raizes),
++        vec![ModDeApiAntiga {
++            id: PERFIS.to_owned(),
++            api: Some(5)
++        }],
++        "hospedar não recusaria o Perfis da API 5"
++    );
++
++    // 2. Antes da confirmação: os botões finais recusados não tocam em nada.
++    let atualizar = EscolhaDoModAntigo {
++        id: PERFIS.to_owned(),
++        saida: SaidaDoModAntigo::Atualizar {
++            hash: t.hash_4.clone(),
++        },
++    };
++    assert_eq!(
++        aplicar_saidas_dos_mods_antigos(config, None, &[], false),
++        Err(FalhaAoResolverModAntigo::FaltaEscolher(vec![
++            PERFIS.to_owned()
++        ]))
++    );
++    assert_eq!(
++        aplicar_saidas_dos_mods_antigos(config, None, std::slice::from_ref(&atualizar), true),
++        Err(FalhaAoResolverModAntigo::ServidorNoAr)
++    );
++    assert_eq!(
++        bytes_do_banco(&banco),
++        bytes_antes,
++        "antes da confirmação, o banco mudou"
++    );
++    assert_eq!(esquema(&banco), 13, "antes da confirmação, o banco migrou");
++    assert!(
++        copias_no_disco(t.dir.path()).is_empty(),
++        "uma cópia apareceu antes da confirmação"
++    );
++
++    // 3. O botão final: a cópia do estado de antes, depois a conversão.
++    let copia = aplicar_saidas_dos_mods_antigos(config, None, &[atualizar], false)
++        .expect("o botão final com o 4.0.0 escolhido não aplicou");
++    assert_eq!(copias_no_disco(t.dir.path()), vec![copia.clone()]);
++    assert_eq!(esquema(&copia), 13, "a cópia não é do estado de antes");
++    assert_eq!(
++        linha_do_perfis(&copia),
++        linha_antes,
++        "a cópia não tem o 3.3.1"
++    );
++    assert_eq!(
++        quintal_do_perfis(&copia),
++        quintal_antes,
++        "a cópia não tem o mod_data de antes"
++    );
++    assert!(esquema(&banco) > 13, "o botão final não converteu o banco");
++    assert_eq!(
++        linha_do_perfis(&banco),
++        ("4.0.0".to_owned(), t.hash_4.clone(), 1),
++        "o botão final não ligou o 4.0.0"
++    );
++    assert_eq!(
++        quintal_do_perfis(&banco),
++        quintal_antes,
++        "a travessia mexeu no mod_data do Perfis"
++    );
++    assert!(
++        mods_de_api_antiga(&banco, &raizes).is_empty(),
++        "depois do botão final, hospedar ainda recusaria"
++    );
++
++    // 4. O servidor de pé, com o 4.0.0, lê o mod_data.
++    let rt = tokio::runtime::Builder::new_multi_thread()
++        .enable_all()
++        .build()
++        .unwrap();
++    rt.block_on(async {
++        let servidor = seele_server::Daemon::bind(seele_server::ServerConfig {
++            name: "Casa".to_owned(),
++            mods_dir: Some(raizes),
++            listen: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0)),
++            database: seele_server::persistence::Location::File(banco.clone()),
++            ..seele_server::ServerConfig::default()
++        })
++        .await
++        .expect("o servidor não subiu depois do botão final");
++        let server = std::sync::Arc::clone(servidor.server());
++        let dono = {
++            let banco = server.persistence.lock().await;
++            seele_server::permissions::Permissions::new(&banco)
++                .register_or_find(&[0x5e; 32], "dono")
++                .unwrap()
++        };
++        let resposta = seele_server::mods::pedidos::executar(
++            &server,
++            dono.id,
++            0_u32.into(),
++            PERFIS,
++            r#"{"op":"view"}"#,
++        )
++        .await;
++        servidor.shutdown();
++        serde_json::from_str(&resposta)
++            .unwrap_or_else(|_| panic!("a resposta do 4.0.0 não é JSON: {resposta}"))
++    })
++}
++
++/// **Com os substitutos da fixture**: o `mod_data` foi gravado pelo 3.3.1
++/// substituto rodando no código da v0.15.1.
++#[test]
++fn com_os_substitutos_da_fixture() {
++    let (dir, config) = pasta_da_0_15_1();
++    let hash_4 = substituto_4_no_cache(&config);
++    let perfil = quintal_do_perfis(&dir.path().join("seele.db"));
++    let t = Travessia {
++        dir,
++        config,
++        hash_3: HASH_DO_SUBSTITUTO.to_owned(),
++        hash_4,
++    };
++    let lido = atravessar(&t);
++    assert_eq!(
++        lido["versao"], "4.0.0",
++        "o pedido não chegou ao 4.0.0: {lido}"
++    );
++    let (_, gravado) = perfil.first().unwrap();
++    assert_eq!(
++        lido["perfil"].as_str().map(str::as_bytes),
++        Some(gravado.as_slice()),
++        "o 4.0.0 não leu o perfil que o 3.3.1 gravou na 0.15.1: {lido}"
++    );
++}
++
++/// **Com os pacotes oficiais** 3.3.1 e 4.0.0, conferidos contra o catálogo.
++/// Ver o cabeçalho do módulo para rodar.
++#[test]
++#[ignore = "precisa dos pacotes oficiais em SEELE_PERFIS_OFICIAIS"]
++fn com_os_pacotes_oficiais() {
++    let Ok(oficiais) = std::env::var("SEELE_PERFIS_OFICIAIS") else {
++        panic!("SEELE_PERFIS_OFICIAIS não foi dada: sem os pacotes oficiais, nada a medir");
++    };
++    let oficiais = Path::new(&oficiais);
++
++    // Os pacotes são os do catálogo, byte a byte.
++    let mut do_3 = arquivos(&oficiais.join("3.3.1"));
++    assert_eq!(
++        seele_ffi::mods::hash_do_conjunto(&mut do_3),
++        HASH_OFICIAL_3_3_1,
++        "a pasta do 3.3.1 não é o pacote oficial"
++    );
++
++    // A pasta da 0.15.1: o 3.3.1 oficial no cache por hash, como a 0.15.1 o
++    // deixava, e a linha do Perfis apontando para ele.
++    let (dir, config) = pasta_da_0_15_1();
++    copiar(
++        &oficiais.join("3.3.1"),
++        &dir.path().join("mod-packages").join(HASH_OFICIAL_3_3_1),
++    );
++    let hash_4 = crate::mods::instalar_de(dir.path(), &oficiais.join("4.0.0"))
++        .expect("o 4.0.0 oficial não instalou")
++        .hash;
++    assert_eq!(
++        hash_4, HASH_OFICIAL_4_0_0,
++        "o 4.0.0 instalado não é o pacote oficial"
++    );
++
++    // O mod_data na forma que o servidor do 3.3.1 oficial grava: `profiles`,
++    // o perfil de cada pessoa pelo `validate` dele (pessoa 1, quem hospeda).
++    let perfil = serde_json::json!({
++        "revision": 1,
++        "displayName": "Dona da casa",
++        "pronouns": "ela",
++        "bio": "hospedo desde a 0.15",
++        "status": "por aqui",
++        "accent": "#f2521f",
++        "effect": "aurora",
++        "avatar": null,
++        "banner": null,
++    });
++    {
++        let banco = rusqlite::Connection::open(dir.path().join("seele.db")).unwrap();
++        banco
++            .execute(
++                "UPDATE mods SET hash = ?1, repo = 'https://github.com/DATA-AND-DEV/PERFIS', \
++                 reach = '[\"regiao\",\"perfis no servidor\",\"arquivos de perfis\"]' WHERE id = ?2",
++                [HASH_OFICIAL_3_3_1, PERFIS],
++            )
++            .unwrap();
++        banco
++            .execute("DELETE FROM mod_data WHERE mod_id = ?1", [PERFIS])
++            .unwrap();
++        banco
++            .execute(
++                "INSERT INTO mod_data VALUES (?1, 'profiles', ?2)",
++                rusqlite::params![
++                    PERFIS,
++                    serde_json::json!({ "1": perfil }).to_string().into_bytes()
++                ],
++            )
++            .unwrap();
++    }
++
++    let t = Travessia {
++        dir,
++        config,
++        hash_3: HASH_OFICIAL_3_3_1.to_owned(),
++        hash_4,
++    };
++    let lido = atravessar(&t);
++    assert_eq!(lido["ok"], true, "o 4.0.0 oficial recusou o view: {lido}");
++    assert_eq!(
++        lido["profiles"]["1"], perfil,
++        "o 4.0.0 oficial não leu o perfil gravado na forma do 3.3.1: {lido}"
++    );
++}
+diff --git a/apps/seele-app/src/servidores.rs b/apps/seele-app/src/servidores.rs
+index a0612f2b..caad8865 100644
+--- a/apps/seele-app/src/servidores.rs
++++ b/apps/seele-app/src/servidores.rs
+@@ -229,7 +229,7 @@ pub(crate) fn apagar(config: &str, id: &str) -> Result<(), String> {
+ ///
+ /// Um lugar só, porque são dois que precisam abrir o mesmo arquivo: o
+ /// `hospedar` e as saídas de quem hospeda com um MOD de API antiga
+-/// ([`crate::mods::resolver_mod_de_api_antiga`]), que mexem no banco que o
++/// ([`crate::mods::aplicar_saidas_dos_mods_antigos`]), que mexem no banco que o
+ /// HOSPEDAR seguinte vai subir.
+ pub(crate) fn banco_de_hospedar(config: &str, id: Option<&str>) -> PathBuf {
+     match id {
+diff --git a/apps/seele-app/src/versoes.rs b/apps/seele-app/src/versoes.rs
+index ba05771c..7de60ed2 100644
+--- a/apps/seele-app/src/versoes.rs
++++ b/apps/seele-app/src/versoes.rs
+@@ -2861,7 +2861,8 @@ mod o_quintal_sobe_da_0_15 {
+     /// 1. hospedar recusaria, com `("seele/estilo", 4)` — a mesma conferência
+     ///    do `hospedar`, antes de subir;
+     /// 2. a saída 1, **pelo caminho de código dela**
+-    ///    (`resolver_mod_de_api_antiga`), liga o 4.0.0 com o servidor parado;
++    ///    (`aplicar_saidas_dos_mods_antigos`, o botão final), faz a cópia
++    ///    verificada e liga o 4.0.0 com o servidor parado;
+     ///    o pacote entra pelo cache por hash, no lugar do catálogo;
+     /// 3. hospedar não recusa mais, sobe, e a metade de servidor do 4.0.0 lê o
+     ///    `theme` igual, byte a byte, ao que a 3.1.0 gravou.
+@@ -2898,13 +2899,15 @@ mod o_quintal_sobe_da_0_15 {
+         let origem = tempfile::tempdir().unwrap();
+         estilo_4(origem.path());
+         let publicado = crate::mods::instalar_de(dir.path(), origem.path()).unwrap();
+-        crate::mods::resolver_mod_de_api_antiga(
++        crate::mods::aplicar_saidas_dos_mods_antigos(
+             &config,
+             None,
+-            "seele/estilo",
+-            &crate::mods::SaidaDoModAntigo::Atualizar {
+-                hash: publicado.hash,
+-            },
++            &[crate::mods::EscolhaDoModAntigo {
++                id: "seele/estilo".to_owned(),
++                saida: crate::mods::SaidaDoModAntigo::Atualizar {
++                    hash: publicado.hash,
++                },
++            }],
+             false,
+         )
+         .expect("a saída 1 não ligou o 4.0.0");
+@@ -2973,11 +2976,13 @@ mod o_quintal_sobe_da_0_15 {
+         super::primeira_abertura(&config);
+         crate::mods::levar_pacotes_antigos_para_o_cache(dir.path());
+ 
+-        crate::mods::resolver_mod_de_api_antiga(
++        crate::mods::aplicar_saidas_dos_mods_antigos(
+             &config,
+             None,
+-            "seele/estilo",
+-            &crate::mods::SaidaDoModAntigo::Desligar,
++            &[crate::mods::EscolhaDoModAntigo {
++                id: "seele/estilo".to_owned(),
++                saida: crate::mods::SaidaDoModAntigo::Desligar,
++            }],
+             false,
+         )
+         .expect("a saída 3 não desligou o 3.1.0");
+diff --git a/apps/seele-app/testes/pasta-da-0.15.1-perfis/LEIA.md b/apps/seele-app/testes/pasta-da-0.15.1-perfis/LEIA.md
+new file mode 100644
+index 00000000..73ff93e3
+--- /dev/null
++++ b/apps/seele-app/testes/pasta-da-0.15.1-perfis/LEIA.md
+@@ -0,0 +1,38 @@
++# A pasta de quem hospedou na 0.15.1 com o Perfis 3.3.1 (API 5)
++
++A prova da travessia de um MOD da API 5 para a API 6 pelo fluxo estagiado do P1
++(25/10). O teste é `travessia_api5_testes`, em `apps/seele-app/src/`.
++
++## O que tem aqui
++
++- `pasta/` — **a gravação**, como a 0.15.1 a deixou numa máquina sem servidor
++  guardado: o banco em `seele.sql` (esquema 13) e o pacote no cache por conteúdo,
++  `mod-packages/<hash>/`. Não se edita à mão: regrava-se com o `gerar.sh`.
++- `perfis-3.3.1/` — o `seele/perfis` 3.3.1 **de mentira** que a gravação usou,
++  com o id, a versão e a API (5) do oficial, mas **não** os bytes nem o hash
++  dele: o pacote publicado não está neste repositório. A metade de servidor
++  guarda o perfil de cada pessoa no quintal, sob `perfil:<pessoa>`.
++- `gerar.rs` e `gerar.sh` — o gerador, derivado do `../pasta-da-0.15.1/` (o do
++  ESTILO), com o pedido do perfil no lugar do tema.
++
++## Como a gravação foi feita
++
++**Pelo código da v0.15.1** (`54f542f94`), que é a linha que roda a API 5: o
++banco é aberto e migrado pela `Persistence` de lá, a conta de quem hospeda é a
++do `register_or_find`, o MOD é ligado pelo `mods::enable`, e o perfil entra no
++quintal pelo `mods::pedidos::executar`, com o `aoPedir` rodando no QuickJS de
++lá. A saída do gerador, medida em 25/10:
++
++```text
++hash d3f49d8addc6ee4ef438620af18e3981dc1ef5899b8b5b157564e8ead4902b2d
++save {"ok":true,"versao":"3.3.1","revision":1,"apelido":"dona","bio":"hospedo desde a 0.15"}
++```
++
++O `seele.sql` desta pasta saiu de um despejo em Python (na ordem de criação,
++como o `sqlite3 .dump`), porque o `sqlite3` com redirecionamento não estava
++disponível na máquina que o gerou; o `gerar.sh` usa o `sqlite3`. Os dois são
++SQL que o `execute_batch` carrega.
++
++```sh
++sh apps/seele-app/testes/pasta-da-0.15.1-perfis/gerar.sh <pasta-de-trabalho>
++```
+diff --git a/apps/seele-app/testes/pasta-da-0.15.1-perfis/gerar.rs b/apps/seele-app/testes/pasta-da-0.15.1-perfis/gerar.rs
+new file mode 100644
+index 00000000..222dfc20
+--- /dev/null
++++ b/apps/seele-app/testes/pasta-da-0.15.1-perfis/gerar.rs
+@@ -0,0 +1,158 @@
++//! A pasta de dados de quem hospedou na 0.15.1 com o `seele/perfis` 3.3.1, da
++//! API 5, e gravou um perfil — escrita **pelo código da v0.15.1** (`54f542f94`).
++//!
++//! Derivado do `../pasta-da-0.15.1/gerar.rs` (o do ESTILO), com o pedido do
++//! perfil no lugar do tema; o resto é o mesmo, chamada por chamada. Não compila
++//! neste repositório: o `gerar.sh` ao lado o copia para
++//! `crates/seele-server/examples/` de uma cópia do commit da v0.15.1.
++//!
++//! ```text
++//! cargo run -p seele-server --example gerar-pasta-perfis -- <saída> <pacote>
++//! ```
++#![allow(clippy::unwrap_used, clippy::expect_used)]
++
++use std::path::Path;
++use std::sync::Arc;
++
++use seele_server::permissions::Permissions;
++use seele_server::persistence::mods::{self, EnabledMod};
++use seele_server::persistence::{Location, Persistence};
++use seele_server::server::{spawn_writer, Server, Telas};
++use tokio::sync::{broadcast, Mutex};
++
++/// A chave pública de quem hospeda. Só identifica a conta; nada assina com ela.
++const CHAVE_DE_QUEM_HOSPEDA: [u8; 32] = [0x5e; 32];
++
++/// O perfil que quem hospeda gravou na 0.15.1.
++const SALVAR: &str = r#"{"op":"save","apelido":"dona","bio":"hospedo desde a 0.15"}"#;
++
++/// Os arquivos do pacote, como `mods::pedidos::package` da v0.15.1 os lê
++/// (privada lá): sem `dados/` na raiz, sem atalho.
++fn arquivos(raiz: &Path, dir: &Path, saida: &mut Vec<(String, Vec<u8>)>) {
++    for entrada in std::fs::read_dir(dir).unwrap() {
++        let entrada = entrada.unwrap();
++        if dir == raiz && entrada.file_name() == "dados" {
++            continue;
++        }
++        assert!(!entrada.file_type().unwrap().is_symlink(), "atalho no pacote");
++        let caminho = entrada.path();
++        if caminho.is_dir() {
++            arquivos(raiz, &caminho, saida);
++        } else {
++            saida.push((
++                caminho.strip_prefix(raiz).unwrap().to_string_lossy().replace('\\', "/"),
++                std::fs::read(&caminho).unwrap(),
++            ));
++        }
++    }
++}
++
++fn copiar(de: &Path, para: &Path) {
++    std::fs::create_dir_all(para).unwrap();
++    for entrada in std::fs::read_dir(de).unwrap() {
++        let entrada = entrada.unwrap();
++        let destino = para.join(entrada.file_name());
++        if entrada.path().is_dir() {
++            copiar(&entrada.path(), &destino);
++        } else {
++            std::fs::copy(entrada.path(), destino).unwrap();
++        }
++    }
++}
++
++#[tokio::main]
++async fn main() {
++    let mut argumentos = std::env::args().skip(1);
++    let saida = std::path::PathBuf::from(argumentos.next().expect("uso: <saída> <pacote>"));
++    let pacote = std::path::PathBuf::from(argumentos.next().expect("uso: <saída> <pacote>"));
++    assert!(!saida.exists(), "a saída já existe: {}", saida.display());
++    std::fs::create_dir_all(&saida).unwrap();
++
++    // 1.
++    let banco = seele_server::persistence::banco_do_cliente(&saida);
++    let persistence = Persistence::open(&Location::File(banco)).expect("o banco abriu");
++
++    // 2.
++    let dono = Permissions::new(&persistence)
++        .register_or_find(&CHAVE_DE_QUEM_HOSPEDA, "dono")
++        .expect("a conta de quem hospeda");
++
++    // 3. O hash é conferido de novo pelo `executar`, abaixo: um hash errado
++    // aqui para o gerador com «package changed».
++    let mut lidos = Vec::new();
++    arquivos(&pacote, &pacote, &mut lidos);
++    let hash = seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut lidos));
++    let manifesto = seele_proto::mods::read_manifest(
++        &std::fs::read_to_string(pacote.join("mod.json")).unwrap(),
++    )
++    .expect("o manifesto");
++    let raizes = seele_server::RaizesDosMods {
++        // `servidores::raizes_dos_mods(config, None)` do app da v0.15.1.
++        pacotes: saida.clone(),
++        dados: saida.join("mod-data-legado"),
++    };
++    copiar(&pacote, &raizes.pacote_de(&hash));
++
++    // 4.
++    mods::enable(
++        &persistence,
++        &EnabledMod {
++            id: manifesto.id.clone(),
++            version: manifesto.version.clone(),
++            hash: hash.clone(),
++            repo: manifesto.repo.clone(),
++            reach: manifesto.reach.clone(),
++            server_half: manifesto.server.is_some(),
++        },
++    )
++    .expect("habilitar");
++
++    // 5. O servidor como `mods::pedidos::tests::servidor_que_recusa` da
++    // v0.15.1 o monta, com o banco de verdade e a raiz dos MODs.
++    let persistence = Arc::new(Mutex::new(persistence));
++    let (events, _) = broadcast::channel(64);
++    let writes = spawn_writer(Arc::clone(&persistence), events.clone());
++    let servidor = Arc::new(Server {
++        esperas: Arc::new(std::sync::Mutex::new(Default::default())),
++        mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
++        pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
++        persistence,
++        events,
++        writes,
++        slots: Arc::new(Mutex::new(seele_server::server::Slots::default())),
++        occupancy: Arc::new(Mutex::new(seele_server::server::Occupancy::default())),
++        presentes: Arc::new(Mutex::new(seele_server::server::Presentes::default())),
++        subida: Arc::new(Mutex::new(seele_server::tela::Subida::nova())),
++        portaria: Arc::new(Mutex::new(seele_server::taxa::Portaria::nova())),
++        atrasos: Arc::new(seele_server::server::Atrasos::default()),
++        desassentamentos: Arc::new(seele_server::server::Desassentamentos::default()),
++        pares: Arc::new(Mutex::new(seele_server::pares::Pares::default())),
++        versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
++        telas: Arc::new(Mutex::new(Telas::default())),
++        anexos: None,
++        caminho_bps: None,
++        mods_dir: Some(raizes),
++    });
++    let salvo = seele_server::mods::pedidos::executar(
++        &servidor,
++        dono.id,
++        seele_proto::ids::ChannelId(0),
++        &manifesto.id,
++        SALVAR,
++    )
++    .await;
++    let visto = seele_server::mods::pedidos::executar(
++        &servidor,
++        dono.id,
++        seele_proto::ids::ChannelId(0),
++        &manifesto.id,
++        r#"{"op":"view"}"#,
++    )
++    .await;
++    assert!(salvo.contains(r#""ok":true"#), "o save foi recusado: {salvo}");
++    assert!(visto.contains(r#""revision":1"#), "o view não leu o save: {visto}");
++    println!("hash {hash}");
++    println!("pessoa {}", dono.id.0);
++    println!("save {salvo}");
++    println!("view {visto}");
++}
+diff --git a/apps/seele-app/testes/pasta-da-0.15.1-perfis/gerar.sh b/apps/seele-app/testes/pasta-da-0.15.1-perfis/gerar.sh
+new file mode 100644
+index 00000000..70736e04
+--- /dev/null
++++ b/apps/seele-app/testes/pasta-da-0.15.1-perfis/gerar.sh
+@@ -0,0 +1,26 @@
++#!/bin/sh
++# Regrava `pasta/` com o código da v0.15.1, sem tocar no repositório de onde é
++# chamado (a travessia API 5 → API 6; ver o LEIA.md ao lado). O mesmo roteiro
++# do `../pasta-da-0.15.1/gerar.sh`, com o pacote `perfis-3.3.1/`.
++#
++#   sh gerar.sh <pasta-de-trabalho>
++set -eu
++V0151=54f542f94
++AQUI=$(cd "$(dirname "$0")" && pwd)
++REPO=$(git -C "$AQUI" rev-parse --show-toplevel)
++mkdir -p "$1"
++PASTA=$(cd "$1" && pwd)
++rm -rf "$PASTA/fonte" "$PASTA/saida"
++mkdir -p "$PASTA/fonte"
++
++git -C "$REPO" archive "$V0151" | tar -x -C "$PASTA/fonte"
++cp "$AQUI/gerar.rs" "$PASTA/fonte/crates/seele-server/examples/gerar-pasta-perfis.rs"
++( cd "$PASTA/fonte" \
++  && CARGO_TARGET_DIR="$PASTA/alvo" cargo run -q -p seele-server --example gerar-pasta-perfis \
++       -- "$PASTA/saida" "$AQUI/perfis-3.3.1" )
++
++rm -rf "$AQUI/pasta"
++mkdir -p "$AQUI/pasta"
++cp -R "$PASTA/saida/mod-packages" "$AQUI/pasta/"
++sqlite3 "$PASTA/saida/seele.db" .dump > "$AQUI/pasta/seele.sql"
++echo "pronto: $AQUI/pasta"
+diff --git a/apps/seele-app/testes/pasta-da-0.15.1-perfis/pasta/mod-packages/d3f49d8addc6ee4ef438620af18e3981dc1ef5899b8b5b157564e8ead4902b2d/mod.json b/apps/seele-app/testes/pasta-da-0.15.1-perfis/pasta/mod-packages/d3f49d8addc6ee4ef438620af18e3981dc1ef5899b8b5b157564e8ead4902b2d/mod.json
+new file mode 100644
+index 00000000..634478fb
+--- /dev/null
++++ b/apps/seele-app/testes/pasta-da-0.15.1-perfis/pasta/mod-packages/d3f49d8addc6ee4ef438620af18e3981dc1ef5899b8b5b157564e8ead4902b2d/mod.json
+@@ -0,0 +1,11 @@
++{
++  "schema": 1,
++  "id": "seele/perfis",
++  "version": "3.3.1",
++  "api": 5,
++  "repo": "https://github.com/DATA-AND-DEV/SEELE-MOD-PERFIS",
++  "reach": [
++    "perfil de cada pessoa"
++  ],
++  "server": "servidor/main.js"
++}
+diff --git a/apps/seele-app/testes/pasta-da-0.15.1-perfis/pasta/mod-packages/d3f49d8addc6ee4ef438620af18e3981dc1ef5899b8b5b157564e8ead4902b2d/servidor/main.js b/apps/seele-app/testes/pasta-da-0.15.1-perfis/pasta/mod-packages/d3f49d8addc6ee4ef438620af18e3981dc1ef5899b8b5b157564e8ead4902b2d/servidor/main.js
+new file mode 100644
+index 00000000..b86e20e6
+--- /dev/null
++++ b/apps/seele-app/testes/pasta-da-0.15.1-perfis/pasta/mod-packages/d3f49d8addc6ee4ef438620af18e3981dc1ef5899b8b5b157564e8ead4902b2d/servidor/main.js
+@@ -0,0 +1,17 @@
++/* Um `seele/perfis` 3.3.1 de mentira, da API 5, só para esta pasta (a travessia
++   API 5 → API 6, revisão de 25/10). NÃO é o pacote publicado: não tem os bytes
++   nem o hash do 3.3.1 oficial, que não está neste repositório. Guarda o perfil
++   de cada pessoa no quintal, sob `perfil:<pessoa>`, com o JSON de
++   `{ revision, apelido, bio }`. O que a travessia prova é que esse quintal
++   chega intacto ao 4.0.0. */
++globalThis.aoPedir = (contextoJSON, pedidoJSON) => {
++  const contexto = JSON.parse(contextoJSON);
++  const pedido = JSON.parse(pedidoJSON);
++  const chave = 'perfil:' + contexto.person;
++  let perfil = dados[chave] ? JSON.parse(dados[chave]) : { revision: 0, apelido: null, bio: null };
++  if (pedido.op === 'save') {
++    perfil = { revision: perfil.revision + 1, apelido: pedido.apelido, bio: pedido.bio };
++    dados[chave] = JSON.stringify(perfil);
++  }
++  return JSON.stringify({ ok: true, versao: '3.3.1', ...perfil });
++};
+diff --git a/apps/seele-app/testes/pasta-da-0.15.1-perfis/pasta/seele.sql b/apps/seele-app/testes/pasta-da-0.15.1-perfis/pasta/seele.sql
+new file mode 100644
+index 00000000..503d7c16
+--- /dev/null
++++ b/apps/seele-app/testes/pasta-da-0.15.1-perfis/pasta/seele.sql
+@@ -0,0 +1,209 @@
++PRAGMA foreign_keys=OFF;
++BEGIN TRANSACTION;
++CREATE TABLE schema_version (
++                 version    INTEGER PRIMARY KEY,
++                 applied_at INTEGER NOT NULL
++             ) STRICT;
++INSERT INTO schema_version VALUES(1,1792906903);
++INSERT INTO schema_version VALUES(2,1792906903);
++INSERT INTO schema_version VALUES(3,1792906903);
++INSERT INTO schema_version VALUES(4,1792906903);
++INSERT INTO schema_version VALUES(5,1792906903);
++INSERT INTO schema_version VALUES(6,1792906903);
++INSERT INTO schema_version VALUES(7,1792906903);
++INSERT INTO schema_version VALUES(8,1792906903);
++INSERT INTO schema_version VALUES(9,1792906903);
++INSERT INTO schema_version VALUES(10,1792906903);
++INSERT INTO schema_version VALUES(11,1792906903);
++INSERT INTO schema_version VALUES(12,1792906903);
++INSERT INTO schema_version VALUES(13,1792906903);
++CREATE TABLE "people" (
++            id           INTEGER PRIMARY KEY,
++            nickname     TEXT    NOT NULL UNIQUE,
++            -- ADR 0004: identity is an Ed25519 public key, 32 bytes.
++            public_key   BLOB    NOT NULL UNIQUE,
++            created_at   INTEGER NOT NULL,
++            last_seen_at INTEGER
++        , icon BLOB) STRICT;
++INSERT INTO people VALUES(1,'dono',X'5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E5E',1792906903,1792906903,NULL);
++CREATE TABLE roles (
++            id          INTEGER PRIMARY KEY,
++            name        TEXT    NOT NULL UNIQUE,
++            -- Permissions as JSON arrays of names rather than bitmasks.
++            -- specs/04 has twelve today and expects more; a bitmask would make
++            -- every addition a migration and every dump unreadable.
++            permissions TEXT    NOT NULL,
++            -- specs/04-servidor-seele.md: "permissões negadas vencem concedidas".
++            -- That sentence is empty without an explicit denial to win with:
++            -- a model of grants alone has nothing for a denial to beat. A role
++            -- may therefore both grant and deny, and denial wins across every
++            -- role a pilot holds.
++            denials     TEXT    NOT NULL DEFAULT '[]'
++        ) STRICT;
++INSERT INTO roles VALUES(1,'Commander','["ViewVoiceRoom","EnterVoiceRoom","Speak","ReadChannel","WriteChannel","RemoveMessage","MovePerson","Kick","Ban","ManageVoiceRooms","ManageRoles","AdministerServer","AttachFile"]','[]');
++INSERT INTO roles VALUES(2,'Operator','["ViewVoiceRoom","EnterVoiceRoom","Speak","ReadChannel","WriteChannel","RemoveMessage","MovePerson","Kick","Ban","AttachFile"]','[]');
++INSERT INTO roles VALUES(3,'Person','["ViewVoiceRoom","EnterVoiceRoom","Speak","ReadChannel","WriteChannel","AttachFile"]','[]');
++INSERT INTO roles VALUES(4,'Observer','["ViewVoiceRoom","EnterVoiceRoom","ReadChannel"]','["Speak","WriteChannel","AttachFile"]');
++CREATE TABLE "person_roles" (
++            person_id INTEGER NOT NULL REFERENCES "people"(id) ON DELETE CASCADE,
++            role_id  INTEGER NOT NULL REFERENCES roles(id)  ON DELETE CASCADE,
++            PRIMARY KEY (person_id, role_id)
++        ) STRICT;
++INSERT INTO person_roles VALUES(1,1);
++CREATE TABLE "voice_rooms" (
++            id             INTEGER PRIMARY KEY,
++            name           TEXT    NOT NULL,
++            member_limit   INTEGER NOT NULL,
++            -- specs/08-seguranca.md forbids home-made cryptography, so a Cage
++            -- password is stored hashed by the same primitive as anything else.
++            password_hash  TEXT,
++            minimum_role   INTEGER REFERENCES roles(id),
++            -- specs/04: a Cage may have an associated Line, but need not.
++            channel_id        INTEGER REFERENCES "channels"(id),
++            position       INTEGER NOT NULL DEFAULT 0
++        ) STRICT;
++CREATE TABLE "channels" (
++            id                 INTEGER PRIMARY KEY,
++            name               TEXT    NOT NULL,
++            minimum_read_role  INTEGER REFERENCES roles(id),
++            minimum_write_role INTEGER REFERENCES roles(id),
++            position           INTEGER NOT NULL DEFAULT 0
++        ) STRICT;
++CREATE TABLE messages (
++            id                INTEGER PRIMARY KEY,
++            channel_id           INTEGER NOT NULL REFERENCES "channels"(id) ON DELETE CASCADE,
++            author_id         INTEGER NOT NULL REFERENCES "people"(id),
++            body              TEXT    NOT NULL,
++            created_at        INTEGER NOT NULL,
++            edited_at         INTEGER,
++            deleted_at        INTEGER,
++            replies_to        INTEGER REFERENCES messages(id),
++            -- specs/02-protocolo.md makes the send idempotent by this. Gap G9:
++            -- the field was named in the notes and missing from the payload.
++            client_message_id INTEGER
++        ) STRICT;
++CREATE TABLE bans (
++            id          INTEGER PRIMARY KEY,
++            person_id    INTEGER NOT NULL REFERENCES "people"(id) ON DELETE CASCADE,
++            issued_by   INTEGER NOT NULL REFERENCES "people"(id),
++            reason      TEXT,
++            created_at  INTEGER NOT NULL,
++            -- NULL means permanent.
++            expires_at  INTEGER
++        ) STRICT;
++CREATE TABLE config (
++            key   TEXT PRIMARY KEY,
++            value TEXT NOT NULL
++        ) STRICT;
++INSERT INTO config VALUES('commandership_claimed','1');
++CREATE TABLE configuracao (
++                chave TEXT PRIMARY KEY,
++                valor ANY  NOT NULL
++            ) STRICT;
++CREATE TABLE convites (
++                token      TEXT PRIMARY KEY,
++                criado_em  INTEGER NOT NULL,
++                expira_em  INTEGER NOT NULL,
++                -- NULL enquanto não usado. O UPDATE de consumo condiciona a
++                -- esta coluna ser NULL, e é isso que impede dois clientes de
++                -- gastarem o mesmo convite ao mesmo tempo.
++                usado_em   INTEGER,
++                -- Para quem o operador mandou. Só para ele se lembrar.
++                observacao TEXT NOT NULL DEFAULT ''
++            ) STRICT;
++CREATE TABLE attachments (
++                id            INTEGER PRIMARY KEY,
++                message_id    INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
++                -- SHA-256 of the content, lowercase hex. This is also the file
++                -- name on disk: no byte anybody else chose ever reaches the
++                -- filesystem. Not UNIQUE — two pilots sending the same picture
++                -- get two rows and one blob, which is the whole of the
++                -- deduplication.
++                content_hash  TEXT    NOT NULL,
++                -- The name the sender gave it. A column, never a path.
++                file_name     TEXT    NOT NULL,
++                -- The type the sender claimed. A claim, not a fact: nothing
++                -- decides what to decode from this alone.
++                declared_type TEXT    NOT NULL,
++                byte_size     INTEGER NOT NULL,
++                created_at    INTEGER NOT NULL,
++                -- NULL while the bytes exist. Expiring stamps this and deletes
++                -- the blob; the row stays so the message can still say that a
++                -- file was here, with its name and its size. A row deleted
++                -- instead would render as a message with nothing in it, and
++                -- nobody would know there had been a file at all.
++                --
++                -- The consequence is written in the ADR and accepted: this
++                -- table never loses rows, only bytes, so it grows forever.
++                expired_at    INTEGER
++            ) STRICT;
++CREATE TABLE portaria (
++                impressao   TEXT PRIMARY KEY,
++
++                -- 'pendente' | 'admitido' | 'recusado'.
++                --
++                -- Texto e não inteiro porque este banco é lido à mão pelo dono
++                -- da máquina no dia em que a tela não bastar, e é ele quem tem a
++                -- autoridade final sobre a própria porta.
++                veredito    TEXT    NOT NULL,
++
++                -- O apelido **pedido** na batida, guardado como foi digitado.
++                --
++                -- Não é identidade e esta coluna não finge que seja: ela existe
++                -- para quem hospeda reconhecer o pedido, e a linha de cima do
++                -- cartão continua sendo a impressão. Congelado no momento da
++                -- batida em vez de lido de `pilots` na hora de mostrar, porque o
++                -- que se decidiu foi sobre o que estava escrito ali.
++                apelido     TEXT    NOT NULL DEFAULT '',
++
++                -- Com que segredo chegou: 'aberto' | 'senha' | 'convite'.
++                -- Prova exibida a quem decide, nunca decisão por si — ADR 0030
++                -- recusa aprovar sozinho quem traz convite válido.
++                segredo     TEXT    NOT NULL DEFAULT 'aberto',
++
++                -- A observação que quem hospeda escreveu ao gerar o convite.
++                -- `criar_convite` já guardava este campo e nada o lia; «chegou
++                -- com o convite *para o Rafael*» é a melhor prova que existe.
++                observacao  TEXT    NOT NULL DEFAULT '',
++
++                bateu_em    INTEGER NOT NULL,
++                -- Quantas vezes bateu. Tentar de novo é o caminho normal quando
++                -- o pedido está pendente, e não deve virar uma fila de linhas.
++                batidas     INTEGER NOT NULL DEFAULT 1,
++                -- NULL enquanto ninguém decidiu.
++                decidido_em INTEGER
++            ) STRICT;
++CREATE TABLE mods (
++                id         TEXT PRIMARY KEY NOT NULL,
++                version    TEXT NOT NULL,
++                hash       TEXT NOT NULL,
++                enabled    INTEGER NOT NULL DEFAULT 1,
++                config     TEXT NOT NULL DEFAULT '{}'
++            , repo        TEXT    NOT NULL DEFAULT '', reach       TEXT    NOT NULL DEFAULT '[]', server_half INTEGER NOT NULL DEFAULT 0);
++INSERT INTO mods VALUES('seele/perfis','3.3.1','d3f49d8addc6ee4ef438620af18e3981dc1ef5899b8b5b157564e8ead4902b2d',1,'{}','https://github.com/DATA-AND-DEV/SEELE-MOD-PERFIS','["perfil de cada pessoa"]',1);
++CREATE TABLE mod_data (
++                mod_id     TEXT NOT NULL REFERENCES mods(id),
++                key        TEXT NOT NULL,
++                value      BLOB NOT NULL,
++                PRIMARY KEY (mod_id, key)
++            );
++INSERT INTO mod_data VALUES('seele/perfis','perfil:1',X'7B227265766973696F6E223A312C226170656C69646F223A22646F6E61222C2262696F223A22686F737065646F206465736465206120302E3135227D');
++CREATE TABLE instancia (
++                id           INTEGER PRIMARY KEY CHECK (id = 1),
++                identidade   TEXT    NOT NULL,
++                nascida_em   INTEGER NOT NULL
++            );
++CREATE UNIQUE INDEX messages_idempotency
++            ON messages (author_id, client_message_id)
++            WHERE client_message_id IS NOT NULL;
++CREATE INDEX convites_por_prazo ON convites(expira_em) WHERE usado_em IS NULL;
++CREATE INDEX attachments_oldest_live
++                ON attachments (created_at, id) WHERE expired_at IS NULL;
++CREATE INDEX attachments_by_hash ON attachments (content_hash);
++CREATE INDEX attachments_by_message ON attachments (message_id);
++CREATE INDEX portaria_pendentes
++                ON portaria (bateu_em) WHERE decidido_em IS NULL;
++CREATE INDEX bans_by_person ON bans (person_id, expires_at);
++CREATE INDEX messages_by_channel_id ON messages (channel_id, id DESC);
++CREATE INDEX messages_by_channel_time ON messages (channel_id, created_at);
++COMMIT;
+diff --git a/apps/seele-app/testes/pasta-da-0.15.1-perfis/perfis-3.3.1/mod.json b/apps/seele-app/testes/pasta-da-0.15.1-perfis/perfis-3.3.1/mod.json
+new file mode 100644
+index 00000000..634478fb
+--- /dev/null
++++ b/apps/seele-app/testes/pasta-da-0.15.1-perfis/perfis-3.3.1/mod.json
+@@ -0,0 +1,11 @@
++{
++  "schema": 1,
++  "id": "seele/perfis",
++  "version": "3.3.1",
++  "api": 5,
++  "repo": "https://github.com/DATA-AND-DEV/SEELE-MOD-PERFIS",
++  "reach": [
++    "perfil de cada pessoa"
++  ],
++  "server": "servidor/main.js"
++}
+diff --git a/apps/seele-app/testes/pasta-da-0.15.1-perfis/perfis-3.3.1/servidor/main.js b/apps/seele-app/testes/pasta-da-0.15.1-perfis/perfis-3.3.1/servidor/main.js
+new file mode 100644
+index 00000000..b86e20e6
+--- /dev/null
++++ b/apps/seele-app/testes/pasta-da-0.15.1-perfis/perfis-3.3.1/servidor/main.js
+@@ -0,0 +1,17 @@
++/* Um `seele/perfis` 3.3.1 de mentira, da API 5, só para esta pasta (a travessia
++   API 5 → API 6, revisão de 25/10). NÃO é o pacote publicado: não tem os bytes
++   nem o hash do 3.3.1 oficial, que não está neste repositório. Guarda o perfil
++   de cada pessoa no quintal, sob `perfil:<pessoa>`, com o JSON de
++   `{ revision, apelido, bio }`. O que a travessia prova é que esse quintal
++   chega intacto ao 4.0.0. */
++globalThis.aoPedir = (contextoJSON, pedidoJSON) => {
++  const contexto = JSON.parse(contextoJSON);
++  const pedido = JSON.parse(pedidoJSON);
++  const chave = 'perfil:' + contexto.person;
++  let perfil = dados[chave] ? JSON.parse(dados[chave]) : { revision: 0, apelido: null, bio: null };
++  if (pedido.op === 'save') {
++    perfil = { revision: perfil.revision + 1, apelido: pedido.apelido, bio: pedido.bio };
++    dados[chave] = JSON.stringify(perfil);
++  }
++  return JSON.stringify({ ok: true, versao: '3.3.1', ...perfil });
++};
+diff --git a/apps/seele-app/tests/frontend.rs b/apps/seele-app/tests/frontend.rs
+index e9c3704c..e8280b3d 100644
+--- a/apps/seele-app/tests/frontend.rs
++++ b/apps/seele-app/tests/frontend.rs
+@@ -5609,11 +5609,16 @@ fn every_way_the_update_can_fail_asks_something_different_of_the_reader() {
+     // the manifest — another line (spec 0.16, D-linha-1). The button hides and
+     // the command refuses, and the refusal has its own sentence because it
+     // asks nothing of the reader: the other SEELE is the one that updates.
++    //
++    // Nine since the 0.16.x backport: `TravessiaNaoConfirmada`. The offered
++    // version speaks another server version and the screen did not send the
++    // confirmation for it; nothing was downloaded, the offer stays chosen, and
++    // what the reader is asked is to read the warning and confirm.
+     let variants = variants_of(&source, "FalhaAoAtualizar");
+     assert_eq!(
+         variants.len(),
+-        8,
+-        "`FalhaAoAtualizar` has {} variants; ADR 0026 and the 0.15.2 account for eight: {variants:?}",
++        9,
++        "`FalhaAoAtualizar` has {} variants; ADR 0026, the 0.15.2 and the 0.16.x backport account for nine: {variants:?}",
+         variants.len()
+     );
+ 
+@@ -15509,8 +15514,8 @@ fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
+         ),
+         // A saída 1 de quem hospeda com um MOD de API antiga (o corte da API 6;
+         // tarefa 13 do plano da F3, Step 5b): só baixa. Quem grava a
+-        // exigência é `resolver_mod_de_api_antiga`, no servidor parado que
+-        // recusou subir, e não o servidor hospedado aqui.
++        // exigência é `aplicar_saidas_dos_mods_antigos` (o botão final), no
++        // servidor parado que recusou subir, e não o servidor hospedado aqui.
+         (
+             js_function(&boot, "async function desenharSaidasDeQuemHospeda("),
+             "obter",
+@@ -21060,3 +21065,187 @@ fn todo_pedido_que_o_servidor_recusa_tem_a_acao_na_frase() {
+         "estas causas do fio chegam à faixa sem o porquê e sem o que fazer: {sem_causa:?}"
+     );
+ }
++
++// ------------------------------------- a travessia de versão do servidor
++//
++// Backport 0.16.x do E4 da 0.17: a confirmação antes de atualizar para outra
++// versão do servidor. O comportamento na tela é medido pela bancada
++// `bancada/travessia-de-versao.cjs` (Playwright); estes guardas são os que
++// rodam em todo `cargo test`, sem navegador.
++
++#[test]
++fn instalar_uma_travessia_e_recusado_antes_de_baixar_sem_a_confirmacao_desta_versao() {
++    let rust = without_comments(&read("src/main.rs"));
++    let instalar = body_of(&rust, "async fn instalar_atualizacao(");
++    assert!(
++        instalar.contains("confirmada: Option<String>"),
++        "`instalar_atualizacao` não recebe mais a versão confirmada:\n{instalar}"
++    );
++    let decide = instalar.find("pode_instalar(").unwrap_or(usize::MAX);
++    let baixa = instalar.find(".download(").unwrap_or(0);
++    assert!(
++        decide < baixa,
++        "a travessia é conferida depois de baixar, ou não é conferida — a confirmação \
++         tem de vir antes do primeiro byte:\n{instalar}"
++    );
++    assert!(
++        instalar[decide..baixa].contains("TravessiaNaoConfirmada"),
++        "a recusa da travessia não confirmada sumiu de `instalar_atualizacao`"
++    );
++
++    // E os dois comandos novos chegam à tela: sem estar no `generate_handler!`,
++    // cancelar e adiar seriam um `invoke` que nunca responde.
++    let registro = rust
++        .split("generate_handler![")
++        .nth(1)
++        .and_then(|resto| resto.split(']').next())
++        .unwrap_or_default();
++    assert!(
++        registro.contains("escolher_atualizacao"),
++        "`escolher_atualizacao` não está registrado: cancelar e adiar não chegam ao Rust"
++    );
++}
++
++#[test]
++fn o_clique_em_instalar_passa_pela_confirmacao_quando_a_oferta_pede() {
++    let servidor = read("ui/tela-server.js");
++    assert!(
++        without_comments(&servidor)
++            .contains("$(\"atualizacao-instalar\").addEventListener(\"click\", aoApertarInstalar)"),
++        "o botão de instalar foi ligado direto a `instalarAtualizacao`, e uma travessia \
++         instala sem ver a confirmação"
++    );
++
++    let apertar = js_function(&servidor, "function aoApertarInstalar(");
++    let pede = apertar.find("pede_aviso").unwrap_or(usize::MAX);
++    let abre = apertar.find("abrirTravessia(").unwrap_or(usize::MAX);
++    let instala = apertar.find("instalarAtualizacao(").unwrap_or(0);
++    assert!(
++        pede < abre && abre < instala,
++        "`aoApertarInstalar` instala antes de perguntar se a oferta pede confirmação:\n{apertar}"
++    );
++    assert!(
++        apertar[abre..instala].contains("return"),
++        "depois de abrir a confirmação, o clique segue e instala do mesmo jeito:\n{apertar}"
++    );
++
++    // Só prosseguir instala, e com a versão que a camada mostrou; cancelar e
++    // adiar vão a `escolher_atualizacao`.
++    let escolher = js_function(&servidor, "async function escolherNaTravessia(");
++    assert!(
++        escolher.contains("instalarAtualizacao(versao)"),
++        "prosseguir não manda a versão mostrada na confirmação:\n{escolher}"
++    );
++    assert!(
++        escolher.contains("invoke(\"escolher_atualizacao\""),
++        "cancelar e adiar não avisam o Rust, e a oferta continua escolhida:\n{escolher}"
++    );
++}
++
++#[test]
++fn a_confirmacao_da_travessia_e_um_alertdialog_com_as_tres_saidas() {
++    let pagina = read("ui/index.html");
++    let camada = tag_with_id(&pagina, "travessia");
++    for atributo in [
++        "role=\"alertdialog\"",
++        "aria-modal=\"true\"",
++        "aria-labelledby=\"travessia-titulo\"",
++        "aria-describedby=\"travessia-texto\"",
++        "hidden",
++    ] {
++        assert!(
++            camada.contains(atributo),
++            "a camada da travessia perdeu `{atributo}`: <{camada}>"
++        );
++    }
++    for saida in [
++        "travessia-cancelar",
++        "travessia-adiar",
++        "travessia-prosseguir",
++    ] {
++        assert!(
++            without_comments(&pagina).contains(&format!("<button type=\"button\" id=\"{saida}\"")),
++            "a saída `{saida}` não é um botão"
++        );
++    }
++
++    // O foco começa em CANCELAR: um Enter dado sem ler não pode ser a travessia.
++    let abrir = js_function(&read("ui/tela-server.js"), "function abrirTravessia(");
++    assert!(
++        abrir.contains("$(\"travessia-cancelar\").focus()"),
++        "a confirmação abre com o foco fora de CANCELAR:\n{abrir}"
++    );
++    assert!(
++        read("ui/tela-server.js").contains("fecharAoClicarFora(\"travessia\""),
++        "a camada da travessia não fecha (cancelando) apertando fora dela"
++    );
++}
++
++#[test]
++fn a_falha_da_travessia_nao_confirmada_tem_frase() {
++    let rust = read("src/main.rs");
++    let falhas = variants_of(&rust, "FalhaAoAtualizar");
++    assert!(
++        falhas.iter().any(|f| f == "TravessiaNaoConfirmada"),
++        "o leitor não achou `TravessiaNaoConfirmada` em `FalhaAoAtualizar`: {falhas:?}"
++    );
++    let frases = without_comments(&read("ui/frases.js"));
++    assert!(
++        frases.contains("TravessiaNaoConfirmada:"),
++        "`TravessiaNaoConfirmada` chega à tela como o nome cru do enum"
++    );
++}
++
++/// **As saídas dos MODs de API antiga só escolhem; quem converte é o botão
++/// final** (backport 0.16.x). Na 0.16.0 cada clique em ATUALIZAR ou DESLIGAR
++/// chamava o Rust, que migrava o banco na hora. Aqui: o único `invoke` que
++/// grava é o do botão final; escolher, DESFAZER e CANCELAR não chamam o Rust.
++/// O comportamento é medido pela bancada `saidas-de-quem-hospeda.cjs`.
++#[test]
++fn as_saidas_dos_mods_antigos_so_escolhem_e_quem_converte_e_o_botao_final() {
++    let boot = read("ui/tela-boot.js");
++    let corpo = js_function(&boot, "async function desenharSaidasDeQuemHospeda(");
++    let gravar = "invoke(\"aplicar_saidas_dos_mods_antigos\"";
++    assert_eq!(
++        without_comments(&scripts()).matches(gravar).count(),
++        1,
++        "o comando que converte o banco é chamado de mais de um lugar, ou de nenhum"
++    );
++    assert!(
++        !without_comments(&scripts()).contains("invoke(\"resolver_mod_de_api_antiga\""),
++        "o comando da 0.16.0, que convertia o banco a cada clique, voltou à tela"
++    );
++
++    let escolher = corpo.find("const escolher =").unwrap_or(usize::MAX);
++    let botao_final = corpo
++        .find("confirmar.addEventListener(\"click\"")
++        .unwrap_or(0);
++    let cancelar = corpo
++        .find("cancelar.addEventListener(\"click\"")
++        .unwrap_or(0);
++    let filhos = corpo.find("const filhos").unwrap_or(0);
++    let grava = corpo.find(gravar).unwrap_or(usize::MAX);
++    assert!(
++        escolher < botao_final && botao_final < grava && grava < cancelar && cancelar < filhos,
++        "o `invoke` que converte não está só dentro do botão final:\n{corpo}"
++    );
++    assert!(
++        !corpo[escolher..botao_final].contains("invoke("),
++        "escolher uma saída chama o Rust, e o banco muda antes da confirmação:\n{}",
++        &corpo[escolher..botao_final]
++    );
++    assert!(
++        !corpo[cancelar..filhos].contains("invoke("),
++        "CANCELAR chama o Rust:\n{}",
++        &corpo[cancelar..filhos]
++    );
++    let desfazer = corpo
++        .find("desfazer.addEventListener(\"click\"")
++        .unwrap_or(0);
++    let depois = &corpo[desfazer..];
++    let fim = depois.find("});").unwrap_or(depois.len());
++    assert!(
++        desfazer > 0 && !depois[..fim].contains("invoke("),
++        "DESFAZER chama o Rust, ou sumiu"
++    );
++}
+diff --git a/apps/seele-app/ui/celular-texto.css b/apps/seele-app/ui/celular-texto.css
+index a8b00331..ff3b2111 100644
+--- a/apps/seele-app/ui/celular-texto.css
++++ b/apps/seele-app/ui/celular-texto.css
+@@ -335,6 +335,10 @@
+ :where(:root[data-casca="celular"]) .server-atualizacao-estado { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+ :where(:root[data-casca="celular"]) .server-atualizacao-notas { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+ :where(:root[data-casca="celular"]) .server-atualizacao-aviso p { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
++:where(:root[data-casca="celular"]) .server-atualizacao-travessia { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
++:where(:root[data-casca="celular"]) .travessia-caixa .nomear-titulo { font-size: calc(20px * var(--cel-escala)); }
++:where(:root[data-casca="celular"]) .travessia-topo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
++:where(:root[data-casca="celular"]) .travessia-consequencias { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+ :where(:root[data-casca="celular"]) .server-atualizacao-barra { font-size: 11px; }
+ :where(:root[data-casca="celular"]) .server-atualizacao-baixados { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+ :where(:root[data-casca="celular"]) .server-icone-vazio { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
+diff --git a/apps/seele-app/ui/frases.js b/apps/seele-app/ui/frases.js
+index b392eeb3..83dfe646 100644
+--- a/apps/seele-app/ui/frases.js
++++ b/apps/seele-app/ui/frases.js
+@@ -824,14 +824,30 @@ function fraseDeErro(erro, apelido, deOnde) {
+         "conteudo-de-outro-mod": "o pacote baixado é de outro MOD",
+         "conteudo-nao-bate": "o conteúdo do pacote não é o que o catálogo publicou",
+       }[motivo] ?? RECUSAS_DE_PACOTE[motivo] ?? motivo;
+-      return `A VERSÃO NOVA DESTE MOD NÃO SERVE: ${porque}.\nO MOD continua como estava.`;
++      return `A VERSÃO NOVA DESTE MOD NÃO SERVE: ${porque}.\nNada foi mudado no servidor.`;
++    }
++    // Backport 0.16.x: o botão final precisa de uma escolha para cada MOD, e a
++    // cópia de segurança vem antes de qualquer conversão. Nas duas, o banco
++    // ficou como estava.
++    if (Array.isArray(erro.FaltaEscolher)) {
++      return (
++        `FALTA ESCOLHER O QUE FAZER COM: ${erro.FaltaEscolher.join(", ")}.\n` +
++        "Nada foi mudado no servidor."
++      );
++    }
++    if (typeof erro.CopiaNaoFeita === "string") {
++      return (
++        `A CÓPIA DE SEGURANÇA DO BANCO NÃO FICOU PRONTA (${erro.CopiaNaoFeita}).\n` +
++        "Sem ela, nada foi convertido: o servidor continua como estava."
++      );
+     }
+     // A de unidade com o mesmo nome é da `FalhaNoMod`, e chega como texto: esta
+-    // chega como objeto, com o que o banco disse.
++    // chega como objeto, com o que o banco disse. Ela vem depois da cópia de
++    // segurança (backport 0.16.x), e é a cópia que diz o estado de antes.
+     if (typeof erro.BancoNaoRespondeu === "string") {
+       return (
+         `O BANCO DESTE SERVIDOR NÃO RESPONDEU: ${erro.BancoNaoRespondeu}.\n` +
+-        "O MOD continua como estava."
++        "A cópia de antes fica na pasta «copias-de-seguranca» dos dados do SEELE."
+       );
+     }
+     // ADR 0046: esta versão foi revogada. A frase diz o defeito e o conserto,
+@@ -1516,8 +1532,78 @@ const FRASES = {
+     AbertaPeloLancador:
+       "ESTA VERSÃO FOI ABERTA POR OUTRO SEELE, QUE CUIDA DELA.\n" +
+       "Quem a atualiza é ele: não há nada a fazer aqui.",
++    // A versão oferecida fala outra versão do servidor, e a confirmação não
++    // veio (backport 0.16.x). Nada foi baixado, e a oferta continua escolhida:
++    // apertar INSTALAR de novo abre a confirmação.
++    TravessiaNaoConfirmada:
++      "ESTA ATUALIZAÇÃO PRECISA DA SUA CONFIRMAÇÃO.\n" +
++      "Nada foi baixado. Aperte INSTALAR E REABRIR de novo e leia o aviso antes de confirmar.",
+ };
+ 
++/**
++ * A confirmação antes de atualizar para outra versão do servidor (backport
++ * 0.16.x do E4 da 0.17).
++ *
++ * `nova` é a `VersaoNova` do Rust: `versao`, `instalada`, `fronteira` (`{tipo:
++ * "cruza", de, para}` ou `{tipo: "nao_sabe"}`) e `adiada`. Devolve o título, a
++ * frase de cima e as consequências, uma por item da lista.
++ *
++ * Sem a palavra «linha»: o ADR 0033 a tirou da tela, e quem lê conhece o número
++ * do servidor («Servidor 1.0»), que é o que a página de releases e a de entrar
++ * também dizem.
++ */
++function frasesDaTravessia(nova) {
++  const servidor = (linha) => (String(linha).includes(".") ? `Servidor ${linha}` : `Servidor ${linha}.0`);
++  const fronteira = nova?.fronteira ?? { tipo: "nao_sabe" };
++  const versao = nova?.versao ?? "nova";
++  const instalada = nova?.instalada ?? "de agora";
++  const adiada = nova?.adiada
++    ? `Você já adiou a ${versao} antes, e o aviso continua valendo para ela.`
++    : "";
++
++  if (fronteira.tipo === "cruza") {
++    const consequencias = [];
++    // A frase do transporte só para a 0.17 (Servidor 2.0), que é a única de que
++    // se sabe isso. Uma linha futura ganha as outras três, que valem para todas.
++    if (String(fronteira.para) === "2") {
++      consequencias.push(
++        "A 0.17 fala WebRTC, um transporte novo, e não conversa com a 0.16 nem com versões anteriores.",
++      );
++    }
++    consequencias.push(
++      `Depois de atualizar, você não entra mais nos servidores de quem continuar na ${instalada}.`,
++      `E quem continuar na ${instalada} não entra nos servidores da ${versao}, nem nos que você hospedar nela.`,
++      "A versão de agora continua disponível pelo launcher do SEELE, para abrir quando precisar entrar num servidor antigo.",
++    );
++    return {
++      titulo: "ESTA ATUALIZAÇÃO MUDA COM QUEM VOCÊ CONVERSA",
++      topo:
++        `A ${versao} fala o ${servidor(fronteira.para)}, e esta ${instalada} fala o ` +
++        `${servidor(fronteira.de)}. Os dois não se entendem.`,
++      consequencias,
++      adiada,
++    };
++  }
++
++  return {
++    titulo: "NÃO SEI COM QUEM A VERSÃO NOVA CONVERSA",
++    topo:
++      `O endereço de atualizações não diz qual versão do servidor a ${versao} fala. ` +
++      "Por isso o SEELE pede a sua confirmação antes de instalar.",
++    consequencias: [
++      `Se ela falar outra versão do servidor, você deixa de entrar nos servidores de quem continuar na ${instalada}.`,
++      "Leia O QUE MUDA, ou a página de releases, antes de continuar.",
++    ],
++    adiada,
++  };
++}
++
++/** O que a tela diz depois de cancelar ou adiar: nada foi baixado. */
++const DEPOIS_DA_TRAVESSIA = Object.freeze({
++  cancelar: "ATUALIZAÇÃO CANCELADA. NADA FOI BAIXADO.",
++  adiar: "ATUALIZAÇÃO ADIADA. NADA FOI BAIXADO; PROCURE DE NOVO QUANDO QUISER.",
++});
++
+ /**
+  * Por que um arquivo não foi aceito, ou não vem. ADR 0027.
+  *
+diff --git a/apps/seele-app/ui/index.html b/apps/seele-app/ui/index.html
+index 301c3b62..a341f40e 100644
+--- a/apps/seele-app/ui/index.html
++++ b/apps/seele-app/ui/index.html
+@@ -3697,6 +3697,13 @@
+               </div>
+ 
+               <div id="atualizacao-achado" class="server-campo" hidden>
++                <!--
++                  Uma oferta de outra versão do servidor diz isso já aqui, antes
++                  do botão; a confirmação com as três saídas abre ao apertar
++                  INSTALAR (camada `#travessia`). Vazia e escondida na mesma
++                  versão do servidor.
++                -->
++                <p id="atualizacao-travessia" class="server-atualizacao-travessia" hidden></p>
+                 <div id="atualizacao-notas-bloco" class="server-campo" hidden>
+                   <h4 class="rotulo">O QUE MUDA</h4>
+                   <p id="atualizacao-notas" class="server-atualizacao-notas"></p>
+@@ -4188,6 +4195,39 @@
+   </div>
+ </div>
+ 
++<!--
++  A confirmação antes de atualizar para outra versão do servidor (backport
++  0.16.x do E4 da 0.17). Abre quando INSTALAR E REABRIR é apertado numa oferta
++  com `pede_aviso`, **antes** de baixar um byte, e só ela manda a confirmação
++  que `instalar_atualizacao` exige. Numa atualização da mesma versão do
++  servidor (0.16 → 0.16.x) ela não aparece.
++
++  `alertdialog`: é uma pergunta que interrompe de propósito, e as três saídas
++  são botões. O foco vai para CANCELAR, que é a saída que não muda nada;
++  Escape e o clique fora também cancelam. Os textos vêm de `frasesDaTravessia`,
++  em `frases.js`.
++-->
++<div id="travessia" class="camada-nomear camada-travessia" role="alertdialog" aria-modal="true"
++     aria-labelledby="travessia-titulo" aria-describedby="travessia-texto" tabindex="-1" hidden>
++  <div class="nomear-caixa travessia-caixa">
++    <div class="nomear-cabeca">
++      <h2 id="travessia-titulo" class="nomear-titulo"></h2>
++    </div>
++    <div class="nomear-corpo">
++      <div id="travessia-texto" class="travessia-texto">
++        <p id="travessia-topo" class="travessia-topo"></p>
++        <ul id="travessia-consequencias" class="travessia-consequencias"></ul>
++      </div>
++      <p id="travessia-adiada" class="nota" hidden></p>
++      <div class="nomear-acoes travessia-acoes">
++        <button type="button" id="travessia-cancelar" class="botao-fantasma">CANCELAR</button>
++        <button type="button" id="travessia-adiar" class="botao-fantasma">ADIAR</button>
++        <button type="button" id="travessia-prosseguir" class="nomear-confirmar">ATUALIZAR MESMO ASSIM</button>
++      </div>
++    </div>
++  </div>
++</div>
++
+ <div id="ajuda" class="camada-ajuda" role="dialog" aria-modal="true"
+      aria-labelledby="ajuda-titulo" tabindex="-1" hidden>
+   <div class="ajuda-caixa">
+diff --git a/apps/seele-app/ui/ponte-web.js b/apps/seele-app/ui/ponte-web.js
+index 8364ebea..3a13c713 100644
+--- a/apps/seele-app/ui/ponte-web.js
++++ b/apps/seele-app/ui/ponte-web.js
+@@ -110,6 +110,11 @@ const RECUSAS_NOMEADAS = new Map([
+   ["apagar_pacote_do_cache", RECUSA_MODS],
+   ["apagar_servidor", RECUSA_HOSPEDAR],
+   ["aplicar_conjunto_de_mods", RECUSA_MODS],
++  // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
++  // tarefa 13 do plano da F3, Step 5b; o botão final, backport 0.16.x): mexem
++  // no banco de um servidor guardado desta máquina, e o navegador não guarda
++  // servidor.
++  ["aplicar_saidas_dos_mods_antigos", RECUSA_HOSPEDAR],
+   ["atender", RECUSA_SALA],
+   ["baixar_modulo_de_video", RECUSA_MODULO],
+   ["baixar_versao", RECUSA_VERSOES],
+@@ -124,6 +129,8 @@ const RECUSAS_NOMEADAS = new Map([
+   ["decidir_pedido", RECUSA_PORTARIA],
+   ["definir_senha_do_server", RECUSA_PORTARIA],
+   ["encerrar_a_ligacao", RECUSA_SALA],
++  // A confirmação antes de atualizar (backport 0.16.x): a página não instala.
++  ["escolher_atualizacao", RECUSA_ATUALIZAR],
+   // Quem pinta o servidor hospedado (tarefa 17f.0 da F3): escolher é de quem
+   // hospeda, e o navegador não hospeda.
+   ["escolher_o_tema_do_servidor", RECUSA_MODS],
+@@ -151,10 +158,6 @@ const RECUSAS_NOMEADAS = new Map([
+   ["receber_ligacoes", RECUSA_SALA],
+   ["recusar", RECUSA_SALA],
+   ["remover_versao", RECUSA_VERSOES],
+-  // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
+-  // tarefa 13 do plano da F3, Step 5b): mexem no banco de um servidor guardado
+-  // desta máquina, e o navegador não guarda servidor.
+-  ["resolver_mod_de_api_antiga", RECUSA_HOSPEDAR],
+   ["revogar_admissao", RECUSA_PORTARIA],
+   ["servidor_hospedado", RECUSA_HOSPEDAR],
+   ["servidores_guardados", RECUSA_HOSPEDAR]
+diff --git a/apps/seele-app/ui/tela-boot.js b/apps/seele-app/ui/tela-boot.js
+index ba5ecac9..ea4bcead 100644
+--- a/apps/seele-app/ui/tela-boot.js
++++ b/apps/seele-app/ui/tela-boot.js
+@@ -852,9 +852,14 @@ function esconderSaidasDeQuemHospeda() {
+  *    aqui), não é oferecida: nada diz que a 0.15 o roda;
+  * 3. **DESLIGAR**: os dados dele ficam (ADR 0045).
+  *
+- * Depois de ATUALIZAR ou DESLIGAR, hospeda de novo o mesmo servidor: se ainda
+- * houver MOD de API antiga, a recusa volta com os que faltam. Uma saída
+- * recusada é dita aqui, e as outras continuam.
++ * **ATUALIZAR e DESLIGAR só escolhem** (backport 0.16.x). Na 0.16.0 cada
++ * clique convertia o banco na hora, MOD a MOD, sem cópia e sem desfazer. Agora
++ * a escolha fica aqui, na tela, com DESFAZER, e nada vai ao Rust; CANCELAR
++ * esquece todas. Só o botão final, com uma escolha para cada MOD, baixa as
++ * versões novas pelo uso «obter» (que não mexe em servidor nenhum) e chama
++ * `aplicar_saidas_dos_mods_antigos`, que faz a cópia de segurança verificada,
++ * converte e aplica — e então hospeda de novo o mesmo servidor. Uma recusa é
++ * dita aqui, e as escolhas continuam.
+  */
+ async function desenharSaidasDeQuemHospeda(mods, servidor) {
+   const geracao = ++geracaoDasSaidas;
+@@ -899,13 +904,89 @@ async function desenharSaidasDeQuemHospeda(mods, servidor) {
+     });
+     return botao;
+   };
+-  /** Mexe no servidor que recusou, e hospeda de novo o mesmo. */
+-  const resolverEHospedar = async (id, comoResolver) => {
+-    await invoke("resolver_mod_de_api_antiga", { servidor, id, saida: comoResolver });
+-    servidorEscolhido = servidor;
+-    await hospedar();
++  // **As escolhas, estagiadas**: id → `{ saida: "atualizar", versao, hash }` ou
++  // `{ saida: "desligar" }`. Só esta tela as tem até o botão final.
++  const escolhas = new Map();
++  const confirmar = elemento(
++    "button",
++    "botao",
++    "FAZER A CÓPIA DE SEGURANÇA, APLICAR E HOSPEDAR",
++  );
++  confirmar.type = "button";
++  confirmar.dataset.saida = "confirmar";
++  const cancelar = elemento("button", "botao-fantasma", "CANCELAR");
++  cancelar.type = "button";
++  cancelar.dataset.saida = "cancelar";
++  const falta = elemento("p", "nota");
++  falta.setAttribute("role", "status");
++
++  /** Redesenha o que cada MOD tem escolhido, e se o botão final vale. */
++  const redesenharEscolhas = () => {
++    for (const item of bloco.querySelectorAll("[data-mod]")) {
++      const escolhida = escolhas.get(item.dataset.mod);
++      const marca = item.querySelector("[data-escolha]");
++      marca.textContent = !escolhida
++        ? ""
++        : escolhida.saida === "atualizar"
++          ? `ESCOLHIDO: atualizar para ${escolhida.versao}`
++          : "ESCOLHIDO: desligar";
++      marca.hidden = !escolhida;
++      marca.parentElement.hidden = !escolhida;
++      item.querySelector('[data-saida="desfazer"]').hidden = !escolhida;
++      for (const b of item.querySelectorAll('[data-saida="atualizar"], [data-saida="desligar"]')) {
++        b.setAttribute("aria-pressed", String(escolhida?.saida === b.dataset.saida));
++      }
++    }
++    const faltam = mods.length - escolhas.size;
++    confirmar.disabled = faltam > 0;
++    falta.textContent =
++      faltam > 0
++        ? `Falta escolher ${faltam === 1 ? "1 MOD" : `${faltam} MODs`}. Nada foi mudado no servidor.`
++        : "Nada foi mudado no servidor ainda. O botão abaixo faz uma cópia de segurança " +
++          "verificada do banco, converte os dados para o Servidor 1.0 e aplica as escolhas.";
+   };
+ 
++  /** Uma escolha: só a tela muda. */
++  const escolher = (id, escolha) =>
++    saida(escolha.saida, escolha.rotulo, async () => {
++      escolhas.set(id, escolha);
++      // `saida` desliga tudo enquanto anda; escolher não anda nada.
++      for (const b of bloco.querySelectorAll("button")) b.disabled = false;
++      redesenharEscolhas();
++    });
++
++  confirmar.addEventListener("click", async () => {
++    const botoes = [...bloco.querySelectorAll("button")];
++    for (const b of botoes) b.disabled = true;
++    estado.hidden = true;
++    try {
++      // Baixar não mexe em servidor nenhum (uso «obter»), e vem antes da cópia.
++      for (const [id, escolha] of escolhas) {
++        if (escolha.saida === "atualizar") {
++          await invoke("instalar_mod_do_catalogo", { id, versao: escolha.versao, uso: "obter" });
++        }
++      }
++      const lista = [...escolhas].map(([id, escolha]) => ({
++        id,
++        saida: escolha.saida === "atualizar" ? { atualizar: { hash: escolha.hash } } : "desligar",
++      }));
++      await invoke("aplicar_saidas_dos_mods_antigos", { servidor, escolhas: lista });
++      servidorEscolhido = servidor;
++      await hospedar();
++    } catch (falha) {
++      estado.textContent = fraseDaVersao(falha);
++      estado.hidden = false;
++      for (const b of botoes) b.disabled = false;
++      redesenharEscolhas();
++    }
++  });
++  cancelar.addEventListener("click", () => {
++    esconderSaidasDeQuemHospeda();
++    const erro = $("boot-erro");
++    erro.hidden = false;
++    erro.textContent = "Cancelado. Nada foi mudado no servidor nem nos MODs dele.";
++  });
++
+   const filhos = [];
+   if (catalogo.falha) {
+     filhos.push(
+@@ -936,9 +1017,11 @@ async function desenharSaidasDeQuemHospeda(mods, servidor) {
+       const nova = versaoParaEsteApp(catalogo.lido?.mods?.find((m) => m.id === id)?.versoes);
+       if (nova) {
+         caixa.append(
+-          saida("atualizar", `ATUALIZAR PARA ${nova.versao} E HOSPEDAR`, async () => {
+-            await invoke("instalar_mod_do_catalogo", { id, versao: nova.versao, uso: "obter" });
+-            await resolverEHospedar(id, { atualizar: { hash: nova.hash } });
++          escolher(id, {
++            saida: "atualizar",
++            rotulo: `ATUALIZAR PARA ${nova.versao}`,
++            versao: nova.versao,
++            hash: nova.hash,
+           }),
+         );
+       } else {
+@@ -964,12 +1047,31 @@ async function desenharSaidasDeQuemHospeda(mods, servidor) {
+       );
+     }
+ 
+-    caixa.append(saida("desligar", "DESLIGAR E HOSPEDAR", () => resolverEHospedar(id, "desligar")));
+-    item.append(caixa);
++    caixa.append(escolher(id, { saida: "desligar", rotulo: "DESLIGAR" }));
++
++    // O que está escolhido para este MOD, e o DESFAZER dele, numa linha
++    // própria debaixo das saídas: na mesma, o nome do MOD espremia.
++    const escolhido = elemento("div", "server-dispositivo");
++    const marca = elemento("span", "mods-versao");
++    marca.dataset.escolha = "";
++    marca.hidden = true;
++    const desfazer = elemento("button", "botao-fantasma", "DESFAZER");
++    desfazer.type = "button";
++    desfazer.dataset.saida = "desfazer";
++    desfazer.hidden = true;
++    desfazer.addEventListener("click", () => {
++      escolhas.delete(id);
++      redesenharEscolhas();
++    });
++    escolhido.append(marca, desfazer);
++    item.append(caixa, escolhido);
+     lista.append(item);
+   }
+-  filhos.push(lista, estado);
++  const acoes = elemento("div", "boot-saidas");
++  acoes.append(cancelar, confirmar);
++  filhos.push(lista, falta, acoes, estado);
+   bloco.replaceChildren(...filhos);
++  redesenharEscolhas();
+ }
+ 
+ /**
+diff --git a/apps/seele-app/ui/tela-server.css b/apps/seele-app/ui/tela-server.css
+index 9d27321a..6b719773 100644
+--- a/apps/seele-app/ui/tela-server.css
++++ b/apps/seele-app/ui/tela-server.css
+@@ -836,6 +836,69 @@
+   color: var(--seele-osso);
+ }
+ 
++/* ---------- a travessia de versão do servidor (backport 0.16.x) ----------
++
++   A frase que diz, já no painel, que a oferta fala outra versão do servidor, e
++   a camada `#travessia` que pede a confirmação. A camada reusa a caixa do
++   diálogo de nomear (`camada-nomear.css`), que já fica acima desta tela (26
++   contra 24); aqui só o que é dela. Laranja, pelo mesmo motivo do aviso de
++   cima: é o preço de uma ação que ainda não aconteceu, e não uma falha. */
++
++.server-atualizacao-travessia {
++  margin: 0;
++  max-width: 72ch;
++  padding: 12px 16px;
++  font-size: var(--seele-t-dado);
++  line-height: 1.6;
++  color: var(--seele-osso);
++  border: 1px solid var(--seele-laranja-nerv);
++  background: var(--seele-laranja-fraco);
++}
++
++.travessia-caixa {
++  max-width: 560px;
++  border-color: var(--seele-laranja-nerv);
++}
++
++/* O título desta camada quebra em duas linhas a 560px, e o de nomear herda a
++   altura de linha de uma linha só; sem isto as duas se sobrepõem. */
++.travessia-caixa .nomear-titulo {
++  font-size: 20px;
++  line-height: 1.2;
++}
++
++.travessia-texto {
++  display: flex;
++  flex-direction: column;
++  gap: 12px;
++}
++
++.travessia-topo {
++  margin: 0;
++  font-size: var(--seele-t-dado);
++  line-height: 1.6;
++  color: var(--seele-osso);
++}
++
++.travessia-consequencias {
++  margin: 0;
++  padding-left: 20px;
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++  font-size: var(--seele-t-dado);
++  line-height: 1.6;
++  color: var(--seele-osso);
++}
++
++/* Três saídas numa caixa de 560px: quebram de linha em vez de espremer. */
++.travessia-acoes { flex-wrap: wrap; }
++
++.travessia-acoes button:focus-visible {
++  outline: 2px solid var(--seele-laranja-nerv);
++  outline-offset: 2px;
++}
++
+ /* A barra de blocos do download, na mesma face e no mesmo desenho das outras
+    deste produto. Quando o servidor não diz o total ela vira travessão e ganha
+    `.ausente` de `base.css` — a mesma forma que a barra da bateria interna usa
+diff --git a/apps/seele-app/ui/tela-server.js b/apps/seele-app/ui/tela-server.js
+index f2fa9871..111b3541 100644
+--- a/apps/seele-app/ui/tela-server.js
++++ b/apps/seele-app/ui/tela-server.js
+@@ -1410,12 +1410,21 @@ function desenharAndamentoDoDownload(andamento) {
+  */
+ function desenharAchado(nova) {
+   const achado = $("atualizacao-achado");
++  ofertaNaTela = nova ?? null;
+   if (!nova) {
+     achado.hidden = true;
+     $("atualizacao-estado").textContent = "VOCÊ ESTÁ NA ÚLTIMA VERSÃO.";
+     return;
+   }
+ 
++  // Outra versão do servidor: dito já aqui, antes do botão. As três saídas
++  // abrem ao apertar INSTALAR, na camada `#travessia`.
++  const travessia = $("atualizacao-travessia");
++  travessia.hidden = !nova.pede_aviso;
++  travessia.textContent = nova.pede_aviso
++    ? `${frasesDaTravessia(nova).titulo}. O SEELE vai pedir a sua confirmação antes de baixar.`
++    : "";
++
+   // «da X para a Y», e não uma seta: a face de dados embarcada não tem seta, e
+   // as duas versões escritas por extenso são o que uma pessoa compara.
+   $("atualizacao-estado").textContent =
+@@ -1532,8 +1541,12 @@ async function procurarAtualizacao() {
+  * por `app.restart()` —, então a única linha que roda depois é a do erro. O
+  * aviso do que isso custa está na marcação, acima do botão, e é lido antes de
+  * ele ser apertado.
++ *
++ * `confirmada` é a versão que a confirmação de travessia mostrou, ou `null`
++ * numa atualização da mesma versão do servidor. O Rust recusa uma travessia
++ * sem ela antes de baixar (`TravessiaNaoConfirmada`).
+  */
+-async function instalarAtualizacao() {
++async function instalarAtualizacao(confirmada) {
+   const instalar = $("atualizacao-instalar");
+   const procurar = $("atualizacao-procurar");
+   const erro = $("atualizacao-erro");
+@@ -1547,7 +1560,7 @@ async function instalarAtualizacao() {
+   $("atualizacao-baixados").textContent = "";
+ 
+   try {
+-    await invoke("instalar_atualizacao");
++    await invoke("instalar_atualizacao", { confirmada: confirmada ?? null });
+   } catch (falha) {
+     // Qualquer falha daqui deixa este SEELE inteiro: o pacote é conferido antes
+     // de qualquer arquivo instalado ser tocado. As seis frases dizem isso.
+@@ -1560,10 +1573,131 @@ async function instalarAtualizacao() {
+     // A escolha foi consumida do lado do Rust — `instalar_atualizacao` a tira
+     // do lugar em vez de emprestá-la. Quem quiser tentar de novo procura de
+     // novo, e a consulta nova é o que confirma que a versão ainda é aquela.
+-    $("atualizacao-achado").hidden = true;
++    // A exceção é a travessia não confirmada: recusada antes de baixar, com a
++    // oferta ainda escolhida, e o botão continua valendo.
++    if (falha !== "TravessiaNaoConfirmada") {
++      $("atualizacao-achado").hidden = true;
++      ofertaNaTela = null;
++    }
++  }
++}
++
++// ------------------------------------------- a travessia de versão do servidor
++//
++// Backport 0.16.x do E4 da 0.17. Quando a oferta fala outra versão do servidor
++// (`pede_aviso`), INSTALAR não instala: abre `#travessia`, com cancelar, adiar
++// e prosseguir. Só prosseguir manda a versão confirmada ao Rust, e só com ela
++// `instalar_atualizacao` baixa. Na mesma versão do servidor o clique é o de
++// sempre, sem camada nenhuma.
++
++/** A última oferta desenhada, com a `fronteira` que o Rust decidiu. */
++let ofertaNaTela = null;
++
++/** Para onde o teclado volta quando a confirmação fecha. */
++let focoAntesDaTravessia = null;
++
++/** O clique em INSTALAR E REABRIR: confirma antes, se a oferta pede. */
++function aoApertarInstalar() {
++  if (ofertaNaTela?.pede_aviso) {
++    abrirTravessia(ofertaNaTela);
++    return;
+   }
++  instalarAtualizacao(null);
++}
++
++/** Abre a confirmação para `nova`, com o foco em CANCELAR. */
++function abrirTravessia(nova) {
++  focoAntesDaTravessia = document.activeElement;
++  const frases = frasesDaTravessia(nova);
++  $("travessia-titulo").textContent = frases.titulo;
++  $("travessia-topo").textContent = frases.topo;
++  $("travessia-consequencias").replaceChildren(
++    ...frases.consequencias.map((frase) => {
++      const item = document.createElement("li");
++      item.textContent = frase;
++      return item;
++    }),
++  );
++  const adiada = $("travessia-adiada");
++  adiada.hidden = frases.adiada === "";
++  adiada.textContent = frases.adiada;
++
++  const camada = $("travessia");
++  camada.dataset.versao = nova.versao;
++  camada.hidden = false;
++  // CANCELAR, e não ATUALIZAR: um Enter dado sem ler não pode ser a travessia.
++  $("travessia-cancelar").focus();
+ }
+ 
++/** Fecha a confirmação, devolvendo o teclado a quem abriu. */
++function fecharTravessia() {
++  const camada = $("travessia");
++  camada.hidden = true;
++  delete camada.dataset.versao;
++  if (focavel(focoAntesDaTravessia)) focoAntesDaTravessia.focus();
++  focoAntesDaTravessia = null;
++}
++
++/**
++ * Uma das três saídas. Cancelar e adiar não baixam nada: o Rust tira a oferta
++ * do lugar, e adiar guarda a versão para a próxima procura dizer que foi
++ * adiada. Prosseguir instala com a versão que esta camada mostrou.
++ */
++async function escolherNaTravessia(escolha) {
++  const camada = $("travessia");
++  if (camada.hidden) return;
++  const versao = camada.dataset.versao;
++  fecharTravessia();
++
++  if (escolha === "prosseguir") {
++    await instalarAtualizacao(versao);
++    return;
++  }
++
++  try {
++    await invoke("escolher_atualizacao", { escolha });
++  } catch (falha) {
++    // `NadaEscolhido`: não havia oferta guardada, e então não há o que baixar
++    // de qualquer jeito. O resultado para quem lê é o mesmo.
++    console.warn("escolher_atualizacao:", falha);
++  }
++  ofertaNaTela = null;
++  $("atualizacao-achado").hidden = true;
++  $("atualizacao-travessia").hidden = true;
++  $("atualizacao-estado").textContent = DEPOIS_DA_TRAVESSIA[escolha];
++}
++
++$("travessia-cancelar").addEventListener("click", () => escolherNaTravessia("cancelar"));
++$("travessia-adiar").addEventListener("click", () => escolherNaTravessia("adiar"));
++$("travessia-prosseguir").addEventListener("click", () => escolherNaTravessia("prosseguir"));
++// Apertar fora cancela, como em toda camada desta janela: cancelar é a saída
++// que não muda nada.
++fecharAoClicarFora("travessia", () => escolherNaTravessia("cancelar"));
++
++// Escape cancela, e Tab circula entre as três saídas. Em fase de captura: com a
++// confirmação aberta ela é a coisa mais de cima, e o Escape não pode fechar a
++// configuração atrás dela.
++window.addEventListener(
++  "keydown",
++  (evento) => {
++    if ($("travessia").hidden) return;
++    if (evento.key === "Escape") {
++      evento.preventDefault();
++      evento.stopPropagation();
++      escolherNaTravessia("cancelar");
++      return;
++    }
++    if (evento.key !== "Tab") return;
++    const saidas = [$("travessia-cancelar"), $("travessia-adiar"), $("travessia-prosseguir")];
++    const agora = saidas.indexOf(document.activeElement);
++    const passo = evento.shiftKey ? -1 : 1;
++    const proxima = saidas[(agora + passo + saidas.length) % saidas.length] ?? saidas[0];
++    evento.preventDefault();
++    proxima.focus();
++  },
++  true,
++);
++
+ // ------------------------------------------------------------------- ligação
+ 
+ $("botao-server").addEventListener("click", () => abrirServer("tela-boot"));
+@@ -1588,7 +1722,7 @@ for (const botao of document.querySelectorAll(".server-modo")) {
+ }
+ 
+ $("atualizacao-procurar").addEventListener("click", procurarAtualizacao);
+-$("atualizacao-instalar").addEventListener("click", instalarAtualizacao);
++$("atualizacao-instalar").addEventListener("click", aoApertarInstalar);
+ 
+ $("server-icone-escolher").addEventListener("click", escolherIcone);
+ $("server-icone-tirar").addEventListener("click", tirarIcone);

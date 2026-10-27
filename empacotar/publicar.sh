@@ -181,11 +181,17 @@ SEM_PONTO=nao
 # O ponto de encontro que o portão do ENC/2 confere. O padrão é o de produção,
 # o mesmo `PONTO_PADRAO` que o app usa; a variável existe para conferir uma VPS
 # nova antes de o nome apontar para ela.
-PONTO_PADRAO_DO_PORTAO="encontro.seele.app.br"
+PONTO_PADRAO_DO_PORTAO="rendzvous.seele.sh"
+# **Os MODs oficiais que esta versão pede no catálogo** (<id>@<versão>@<api>). A assinatura do catálogo não basta: o catálogo de hoje,
+# assinado, termina na 4.0.0 (API 6), e a 0.17 sairia sem as variantes da API 7 que ela exige. O preflight confere que cada uma está
+# em https://mods.seele.sh/catalogo.json com essa API e fora das revogações. Mudar esta lista é mudar o que a versão promete.
+# A MESA 4.0.1 (API 6) é o conserto para quem fica na 0.16 e faz parte da mesma entrega (SEQUENCIA-FINAL, passo 3b).
+MODS_OFICIAIS_DO_PORTAO="seele/estilo@5.0.0@7 seele/mesa@5.0.0@7 seele/perfis@5.0.0@7 seele/mesa@4.0.1@6"
 PONTO_DO_PORTAO="${SEELE_ENCONTRO_DO_PORTAO:-$PONTO_PADRAO_DO_PORTAO}"
 PARCIAL=nao
 SEM_ASSINATURA=nao
 SO_CONFERIR=nao
+SO_ATIVACAO=nao
 LINHA_LEGADA=nao
 
 COMMIT=""
@@ -266,7 +272,7 @@ uso() {
 "  SEELE_WINDOWS_SSH                     usuário@máquina do Windows" \
 "  SEELE_WINDOWS_REPO                    o repositório lá (hoje: C:\\SEELE)" \
 "  SEELE_ENCONTRO_DO_PORTAO              o ponto que o portão do ENC/2 confere" \
-"                                        (padrão: encontro.seele.app.br)" \
+"                                        (padrão: rendzvous.seele.sh)" \
 "  SEELE_MANIFESTO_ANTERIOR              manifestos a acumular além do publicado" \
 "                                        (a 0.16.0 recebe o da 0.15.2 por aqui)"
 }
@@ -802,7 +808,8 @@ linha_da_bateria() {
 #
 # Como a da bateria: quem baixa não vê o terminal de quem publica, e uma versão
 # que saiu com `--sem-ponto` não pode sair com o mesmo texto de uma conferida.
-# A linha legada não fala o ENC/2 e não ganha linha nenhuma.
+# A linha legada não fala o ENC/2 e não ganha linha nenhuma. Um sinal conferido fora do de produção
+# (`SEELE_SINAL_DO_PORTAO`, o ensaio local) também é dito em negrito.
 #
 # **E qual ponto.** O `SEELE_ENCONTRO_DO_PORTAO` confere uma VPS nova antes de o
 # nome apontar para ela, e nesse caso o portão passa com o nome ainda no
@@ -819,10 +826,14 @@ linha_do_ponto() {
         return 0
     fi
     if [ "$PONTO_DO_PORTAO" != "$PONTO_PADRAO_DO_PORTAO" ]; then
-        printf '%s\n' "**Ponto de encontro: conferido em $PONTO_DO_PORTAO, que fala o ENC/2 — e não no padrão: $PONTO_PADRAO_DO_PORTAO, o que o app usa, não foi conferido.**"
+        printf '%s\n' "**Ponto de encontro: conferido em $PONTO_DO_PORTAO, que fala o ENC/2, o ENC/3 e o STUN — e não no padrão: $PONTO_PADRAO_DO_PORTAO, o que o app usa, não foi conferido.**"
         return 0
     fi
-    printf '%s\n' "Ponto de encontro: conferido antes de publicar — o de produção ($PONTO_DO_PORTAO) fala o ENC/2 em toda família que responde."
+    if [ -n "${SEELE_SINAL_DO_PORTAO:-}" ]; then
+        printf '%s\n' "**Ponto de encontro: o de produção ($PONTO_DO_PORTAO) fala o ENC/2, o ENC/3 e o STUN; o sinal do navegador foi conferido em ${SEELE_SINAL_DO_PORTAO}, e não o de produção (https://$PONTO_DO_PORTAO/sinal/1).**"
+        return 0
+    fi
+    printf '%s\n' "Ponto de encontro: conferido antes de publicar — o de produção ($PONTO_DO_PORTAO) fala o ENC/2, o ENC/3 e o STUN em toda família que responde, e o sinal do navegador (https://$PONTO_DO_PORTAO/sinal/1) responde pelo protocolo, com o CORS só do web app."
 }
 
 # A tag da versão publicada antes desta.
@@ -948,6 +959,7 @@ while [ "$#" -gt 0 ]; do
         --sem-ponto) SEM_PONTO=sim; shift ;;
         --sem-assinatura) SEM_ASSINATURA=sim; shift ;;
         --conferir) SO_CONFERIR=sim; shift ;;
+        --so-ativacao) SO_ATIVACAO=sim; shift ;;
         --linha-legada) LINHA_LEGADA=sim; shift ;;
         -h|--help|--ajuda) uso; exit 0 ;;
         -*) uso >&2; morrer "não conheço a opção «${1}»." ;;
@@ -962,7 +974,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-if [ -z "$VERSAO" ]; then
+if [ -z "$VERSAO" ] && [ "${SO_ATIVACAO:-nao}" != sim ]; then
     uso >&2
     morrer "falta a versão."
 fi
@@ -1325,7 +1337,7 @@ prazo_dos_roteiros() {
 bancadas_de_navegador() {
     etapa_da_bateria --prazo prazo_das_bancadas \
         "uma bancada de navegador reprovou, ou falta nesta máquina o Playwright, o Chromium, o WebKit ou o Pillow." \
-        "Leia o fim da saída: ele diz quais reprovaram. Sem o Playwright de Node: «npm install --no-save playwright && npx playwright install chromium», ou PLAYWRIGHT=<pasta do pacote>. Para a do celular: «python3 -m pip install playwright pillow && python3 -m playwright install chromium webkit»." \
+        "Leia o fim da saída: ele diz quais reprovaram. Sem o Playwright de Node: «npm install --no-save playwright && npx playwright install chromium webkit», ou PLAYWRIGHT=<pasta do pacote>. Para a do celular: «python3 -m pip install playwright pillow && python3 -m playwright install chromium webkit»." \
         todas_as_bancadas_de_navegador
 }
 
@@ -1370,6 +1382,54 @@ todas_as_bancadas_de_navegador() {
     cargo build --quiet --package seele-server --example servidor_da_bancada ||
         BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS servidor_da_bancada"
     uma_bancada node apps/seele-app/bancada/sessao-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm
+    # A portaria-da-bancada, fora do workspace, como o passo do ci.yml a monta.
+    # **O binário é o recém-montado, e a falta do fonte é vermelho.** Um
+    # `target/debug/portaria-da-bancada` de outra rodada seria executado e
+    # passaria mesmo sem fonte nenhum: ele é apagado antes, e quem monta de
+    # novo é o passo abaixo. Sem o fonte ou com o build falho, a etapa nomeia a
+    # portaria e a bancada que a usa não tem binário para rodar.
+    rm -f target/debug/portaria-da-bancada
+    pasta_portaria="$TEMPORARIO/portaria-da-bancada"
+    mkdir -p "$pasta_portaria/src" &&
+        cp apps/seele-app/bancada/medidas/portaria-2026-10-24/portaria-da-bancada.main.rs.txt "$pasta_portaria/src/main.rs" &&
+        printf '[package]\nname = "portaria-da-bancada"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n[workspace]\n\n[dependencies]\nseele-server = { path = "%s/crates/seele-server" }\nserde_json = "1"\n' "$RAIZ" > "$pasta_portaria/Cargo.toml" &&
+        cargo build --quiet --manifest-path "$pasta_portaria/Cargo.toml" --target-dir target ||
+        BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS portaria-da-bancada"
+    cargo build --quiet --package seele-enlace --example eco --package seele-encontro ||
+        BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS eco-e-encontro"
+    # As bancadas da 0.17 (portaria, cargos, hospedar versus atualizar MOD...).
+    uma_bancada node apps/seele-app/bancada/atualizar-mod-sem-servidor.cjs
+    uma_bancada node apps/seele-app/bancada/aviso-antes-de-atualizar.cjs
+    uma_bancada node apps/seele-app/bancada/copia-antes-de-converter.cjs
+    uma_bancada node apps/seele-app/bancada/hospedar-com-servidor-no-ar.cjs
+    uma_bancada node apps/seele-app/bancada/diagnostico-0151.cjs
+    uma_bancada node apps/seele-app/bancada/estado-por-sessao.cjs
+    uma_bancada node apps/seele-app/bancada/palco-na-troca-de-vista.cjs
+    uma_bancada node apps/seele-app/bancada/isolamento-das-sessoes.cjs
+    uma_bancada node apps/seele-app/bancada/multi-sessao-na-ponte.cjs
+    uma_bancada node apps/seele-app/bancada/vista-pessoal-0-17.cjs
+    uma_bancada node apps/seele-app/bancada/palco-depois-de-reconectar.cjs
+    uma_bancada node apps/seele-app/bancada/ciclo-de-reconectar-o-servidor.cjs
+    uma_bancada node apps/seele-app/bancada/queda-que-volta-sozinha.cjs
+    uma_bancada node apps/seele-app/bancada/portaria-por-identidade.cjs
+    uma_bancada node apps/seele-app/bancada/recuperar-a-chave.cjs
+    uma_bancada node apps/seele-app/bancada/tela-sem-captura-no-navegador.cjs
+    uma_bancada node apps/seele-app/bancada/vista-da-entrada-pela-identidade.cjs
+    uma_bancada node apps/seele-app/bancada/cargos.cjs
+    uma_bancada node apps/seele-app/bancada/credito-no-navegador.cjs chromium playwright
+    uma_bancada node apps/seele-app/bancada/navegacao-0-17.cjs
+    # A área útil da 0.17: com `--webkit`, uma execução mede os DOIS motores (o mesmo comando do `ci.yml`, ~10 min; cabe no
+    # prazo da etapa, `PRAZO_DA_ETAPA_S`, 40 min). Pede o Playwright de Node com o Chromium e o WebKit.
+    uma_bancada node apps/seele-app/bancada/area-util.cjs target/area-util --webkit
+    uma_bancada node apps/seele-app/bancada/cargos-pela-tela.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada
+    uma_bancada node apps/seele-app/bancada/cargos-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada chromium playwright
+    uma_bancada node apps/seele-app/bancada/ficou-para-tras-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada chromium playwright
+    uma_bancada node apps/seele-app/bancada/tres-sessoes-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada chromium playwright
+    uma_bancada node apps/seele-app/bancada/vista-com-dois-servidores.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm chromium playwright
+    uma_bancada node apps/seele-app/bancada/portaria-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm target/debug/portaria-da-bancada chromium playwright
+    uma_bancada node apps/seele-app/bancada/rtc-eco.cjs target/debug/examples/eco chromium playwright
+    uma_bancada node apps/seele-app/bancada/rtc-credito.cjs target/debug/examples/eco chromium playwright
+    uma_bancada node apps/seele-app/bancada/rtc-sinal.cjs target/debug/seele-encontro target/debug/examples/eco target/wasm32-unknown-unknown/release/seele_web.wasm chromium playwright
     uma_bancada python3 tools/bancada-do-celular.py "$TEMPORARIO/bancada-do-celular"
     if [ -n "$BANCADAS_VERMELHAS" ]; then
         printf 'bancadas que reprovaram:%s\n' "$BANCADAS_VERMELHAS"
@@ -1598,6 +1658,16 @@ Write-Output ('estado=' + \$LASTEXITCODE)")
 # do lado de cá. **A VPS vai antes do app** (spec-mestre da 0.16, §4), e este
 # passo é o que impede o esquecimento.
 #
+# **A 0.17 pede mais (o achado P1 da ativação)**: a sala da 0.17 se registra pelo ENC/3, o navegador
+# aprende o próprio endereço pelo STUN deste ponto (e de nenhum outro, D8), e chama o anfitrião por
+# `https://<ponto>/sinal/1` (rtc-web.js, `urlDoSinalDoPonto`), um proxy TLS na frente do
+# `seele-encontro --sinal`. Um ponto da 0.16 passa no ENC/2 e deixa as três coisas mortas: o release
+# sairia verde com o navegador sem alcançar ninguém. Então o `sondar` roda com `--exige-enc3` (o
+# ENC/3 de ponta a ponta numa sala efêmera — MORO3, QUEM3, CHAMA/ATENDE — e o STUN Binding em toda
+# família que responde), e o sinal é conferido de fora, pelo HTTPS
+# de verdade (`conferir_sinal_do_ponto`): o certificado, o 200, o CORS só da origem do web app, e a
+# linha `SEELE-SINAL/1 NINGUEM` do protocolo — um 200 de outra coisa não passa.
+#
 # Quem pergunta é o `sondar`, de fora, falando o protocolo: `--exige-enc2`
 # reprova quando alguma família que respondeu ao `ONDE` não fala o ENC/2, e
 # mede o relógio do ponto, que tem de estar a menos de 300 s. Ele roda só aqui,
@@ -1619,8 +1689,8 @@ conferir_ponto_de_encontro() {
         return 0
     fi
     if ! cpe_saida=$(cargo run --manifest-path "$RAIZ/Cargo.toml" -q -p seele-encontro \
-        --example sondar -- --exige-enc2 "$PONTO_DO_PORTAO" 2>&1); then
-        morrer "o ponto de encontro em produção ($PONTO_DO_PORTAO) não fala o ENC/2 em toda família que responde." \
+        --example sondar -- --exige-enc2 --exige-enc3 "$PONTO_DO_PORTAO" 2>&1); then
+        morrer "o ponto de encontro em produção ($PONTO_DO_PORTAO) não fala o ENC/2, o ENC/3 e o STUN em toda família que responde." \
             "Esta versão acha as pessoas pelo código por ele. Com o ponto velho, ninguém acha" \
             "ninguém, e quem liga lê que o ponto não fala a versão 2." \
             "" \
@@ -1635,7 +1705,74 @@ conferir_ponto_de_encontro() {
         aviso "o ponto conferido foi $PONTO_DO_PORTAO, e não o padrão ($PONTO_PADRAO_DO_PORTAO)." \
             "O app pergunta ao padrão. O corpo do release vai dizer que ele não foi conferido."
     fi
-    passo "ponto de encontro ($PONTO_DO_PORTAO): fala o ENC/2 em toda família que responde"
+    passo "ponto de encontro ($PONTO_DO_PORTAO): fala o ENC/2, o ENC/3 e o STUN em toda família que responde"
+    conferir_sinal_do_ponto
+}
+
+# O sinal do navegador, pelo caminho que a página usa: `POST https://<ponto>/sinal/1` com a origem do
+# web app. `SEELE_SINAL_DO_PORTAO` troca a URL (só para o ensaio local, contra um `--sinal` no
+# loopback), e o corpo do release diz que o de produção não foi conferido.
+conferir_sinal_do_ponto() {
+    csp_origem=$(python3 -I -c 'import re,sys
+m = re.search(r"pub const ORIGEM_DO_NAVEGADOR: &str = \"([^\"]+)\";", open(sys.argv[1], encoding="utf-8").read())
+print(m.group(1) if m else "")' "$RAIZ/crates/seele-proto/src/uri.rs") || csp_origem=""
+    [ -n "$csp_origem" ] || morrer "sinal: não achei a ORIGEM_DO_NAVEGADOR em crates/seele-proto/src/uri.rs."
+    # O sinal mora no NOME do ponto, na 443 (rtc-web.js, `urlDoSinalDoPonto`): sem a porta do UDP. Um ponto escrito como IP não tem
+    # certificado que o navegador aceite, e a página não chama sinal nenhum: aqui também não há o que conferir, e isso é dito.
+    csp_maquina="${PONTO_DO_PORTAO%:*}"
+    case "$PONTO_DO_PORTAO" in \[*) csp_maquina="" ;; *:*:*) csp_maquina="" ;; esac
+    if [ -z "${SEELE_SINAL_DO_PORTAO:-}" ] && { [ -z "$csp_maquina" ] || printf '%s' "$csp_maquina" | LC_ALL=C grep -Eq '^[0-9.]+$'; }; then
+        aviso "o ponto conferido ($PONTO_DO_PORTAO) é um IP: o navegador não tem sinal por ele, e o sinal NÃO foi conferido." \
+            "O corpo do release diz que o ponto conferido não é o padrão."
+        return 0
+    fi
+    csp_url="${SEELE_SINAL_DO_PORTAO:-https://$csp_maquina/sinal/1}"
+    csp_proto="=https"
+    if [ -n "${SEELE_SINAL_DO_PORTAO:-}" ]; then
+        csp_proto="=http,https"
+        aviso "o sinal conferido foi $csp_url, e não o de produção (https://$PONTO_DO_PORTAO/sinal/1)." \
+            "O corpo do release vai dizer que o sinal de produção não foi conferido."
+    fi
+    csp_dir=$(mktemp -d -t seele-sinal) || morrer "sinal: sem pasta temporária."
+    csp_corpo=$(cargo run --manifest-path "$RAIZ/Cargo.toml" -q -p seele-encontro --example sondar -- --corpo-do-sinal) \
+        || { rm -rf "$csp_dir"; morrer "sinal: o sondar não montou o corpo do POST."; }
+    # Sem --location: o sinal responde ali mesmo, e um redirecionamento é um proxy errado.
+    for csp_quem in "https://$csp_origem" "https://exemplo.invalid"; do
+        if ! csp_out=$(curl --fail --silent --show-error --proto "$csp_proto" --max-time 20 \
+            --write-out '%{http_code}' --dump-header "$csp_dir/cabecalhos" --output "$csp_dir/corpo" \
+            -H "Origin: $csp_quem" -H 'Content-Type: text/plain' --data-binary "$csp_corpo" "$csp_url" 2>&1); then
+            rm -rf "$csp_dir"
+            morrer "sinal: $csp_url NÃO respondeu ao POST com certificado válido e 2xx: $csp_out" \
+                "O navegador chama esse endereço para alcançar o anfitrião atrás de NAT (rtc-web.js)." \
+                "Na VPS: o proxy TLS no nome do ponto, na 443, repassando /sinal/1 a 127.0.0.1:8385, e o" \
+                "seele-encontro com --sinal 127.0.0.1:8385 (docs/ponto-de-encontro.md). Nada foi publicado."
+        fi
+        if [ "$csp_out" != 200 ]; then
+            rm -rf "$csp_dir"
+            morrer "sinal: $csp_url respondeu HTTP $csp_out ao POST, e não 200 (um redirecionamento é um proxy errado)." \
+                "Nada foi publicado."
+        fi
+        csp_acao=$(LC_ALL=C tr -d '\r' < "$csp_dir/cabecalhos" | LC_ALL=C sed -n 's/^[Aa]ccess-[Cc]ontrol-[Aa]llow-[Oo]rigin: *//p' | tail -n 1)
+        if [ "$csp_quem" = "https://$csp_origem" ] && [ "$csp_acao" != "https://$csp_origem" ]; then
+            rm -rf "$csp_dir"
+            morrer "sinal: $csp_url respondeu sem Access-Control-Allow-Origin: https://$csp_origem (veio «${csp_acao}»)." \
+                "A página de https://$csp_origem não consegue ler a resposta. O seele-encontro tem de rodar com" \
+                "--origem https://$csp_origem (o padrão da 0.17), e o proxy não pode trocar o cabeçalho. Nada foi publicado."
+        fi
+        if [ "$csp_quem" != "https://$csp_origem" ] && [ -n "$csp_acao" ]; then
+            rm -rf "$csp_dir"
+            morrer "sinal: $csp_url deixa outra origem ($csp_quem) ler a resposta (Access-Control-Allow-Origin: $csp_acao)." \
+                "A resposta diz se um anfitrião está no ar e onde. Nada foi publicado."
+        fi
+        if ! csp_out=$(cargo run --manifest-path "$RAIZ/Cargo.toml" -q -p seele-encontro --example sondar -- \
+            --resposta-do-sinal < "$csp_dir/corpo" 2>&1); then
+            rm -rf "$csp_dir"
+            morrer "sinal: $csp_url respondeu 2xx, mas não é o sinal do ponto: $csp_out" \
+                "Um 200 de outra coisa (a SPA, um proxy que não repassa /sinal/1) não conta. Nada foi publicado."
+        fi
+    done
+    rm -rf "$csp_dir"
+    passo "sinal ($csp_url): POST responde SEELE-SINAL/1 NINGUEM, com o CORS só de https://$csp_origem"
 }
 
 conferir_arvore() {
@@ -1817,6 +1954,16 @@ limpar_entrega() {
     # parar era um passo manual em **toda** publicação, e o que se perde é
     # reconstruível a partir do commit que o gerou. O que não foi aceito é
     # apagar calado — daí o nome de cada arquivo na saída, um por linha.
+    # O `--conferir` só lê: ele diz o que a publicação de verdade apagaria, e não apaga. Uma entrega pronta de outra versão,
+    # ainda não publicada, não pode sumir por uma pergunta de «vale a pena começar?».
+    if [ "$SO_CONFERIR" = sim ]; then
+        passo "entrega/ tem restos de outra versão; a publicação de verdade os apagaria (o --conferir não apaga nada):"
+        printf '%s\n' "$ce_restos" | while IFS= read -r ce_um; do
+            [ -n "$ce_um" ] || continue
+            printf '     seria apagado: %s\n' "${ce_um#"$RAIZ/"}"
+        done
+        return 0
+    fi
     passo "limpando entrega/ de outra versão"
     printf '%s\n' "$ce_restos" | while IFS= read -r ce_um; do
         [ -n "$ce_um" ] || continue
@@ -2367,7 +2514,101 @@ for achado in marcador.finditer(texto):
     passo "notas de v$VERSAO: nenhuma condição pendente"
 }
 
+# ---------------------------------------- o preflight de ativação do domínio novo
+#
+# O produto aponta para o domínio novo, e o domínio antigo será APOSENTADO: não há recuo para ele. O mapa exato:
+#   a origem do web app    o WEB APP, lida de crates/seele-proto/src/uri.rs (`ORIGEM_DO_NAVEGADOR`), e não escrita aqui
+#   get.seele.sh           o site e os downloads do desktop
+#   docs.seele.sh          a documentação (a interna e a dos MODs)
+#   mods.seele.sh          o indexador/catálogo de MODs
+#   rendzvous.seele.sh     o ponto de encontro (escrito «rendzvous», sem o «e» do meio)
+# Publicar uma versão enquanto esse domínio não existe entrega um app cujos links e cujo catálogo não respondem. Este preflight RECUSA a
+# publicação (e o --conferir) até que a infraestrutura nova exista. NÃO HÁ OPÇÃO QUE O PULE.
+
+preflight_de_ativacao() {
+    command -v python3 >/dev/null 2>&1 || morrer "preflight de ativação: falta o python3 (lê a origem do produto)."
+    command -v curl >/dev/null 2>&1 || morrer "preflight de ativação: falta o curl (confere o HTTPS)."
+    # A origem do web app vem do produto, no mesmo texto que o `xtask/web/links.mjs` lê; se não achar, recusa.
+    pda_origem=$(python3 -I -c 'import re,sys
+m = re.search(r"pub const ORIGEM_DO_NAVEGADOR: &str = \"([^\"]+)\";", open(sys.argv[1], encoding="utf-8").read())
+print(m.group(1) if m else "")' "$RAIZ/crates/seele-proto/src/uri.rs") || pda_origem=""
+    [ -n "$pda_origem" ] || morrer "preflight de ativação: não achei a ORIGEM_DO_NAVEGADOR em crates/seele-proto/src/uri.rs, ou ela está vazia." \
+        "Sem ela não há como saber qual origem conferir. Nada foi publicado."
+    # A resolução não é conferida à parte: o HTTPS de cada nome não sai sem ela, e o rendzvous é resolvido família por família
+    # pelo sondar, em conferir_ponto_de_encontro, que roda antes deste.
+    # HTTPS com certificado VÁLIDO (o curl confere a cadeia e o nome; nada de -k), e o CONTEÚDO de quem devia responder. Um 200 não
+    # basta: o Pages devolve o index.html da SPA com 200 para qualquer caminho, um domínio estacionado também responde 200, e um
+    # catálogo copiado sem a assinatura certa responde 200. Cada página tem a marca do que ela é; o catálogo e as revogações são
+    # conferidos pela assinatura, com o código e a chave do app (crates/seele-sessao/examples/conferir_catalogo.rs).
+    pda_dir=$(mktemp -d -t seele-preflight) || morrer "preflight de ativação: sem pasta temporária."
+    pda_baixar() { # url arquivo [--sem-redirecionar]
+        pda_seguir=--location
+        [ "${3:-}" = "--sem-redirecionar" ] && pda_seguir=""
+        # shellcheck disable=SC2086
+        if ! pda_out=$(curl --fail --silent --show-error $pda_seguir --proto '=https' --max-time 20 \
+            --write-out '%{http_code} %{url_effective}' --output "$2" "$1" 2>&1); then
+            rm -rf "$pda_dir"
+            morrer "preflight de ativação: $1 NÃO responde por HTTPS com certificado válido: $pda_out" \
+                "Veja preparacao-0.17/ATIVACAO-SEELE-SH.md. Nada foi publicado."
+        fi
+        # O `--fail` deixa passar um 3xx (sem --location, é a resposta final): o status tem de ser 200, dito.
+        pda_status=${pda_out%% *}
+        if [ "$pda_status" != 200 ]; then
+            rm -rf "$pda_dir"
+            morrer "preflight de ativação: $1 respondeu HTTP $pda_status, e não 200 (${pda_out#* })." \
+                "Nada foi publicado."
+        fi
+        pda_host_pedido=$(printf '%s' "$1" | LC_ALL=C sed -E 's#^https://([^/]+).*#\1#')
+        pda_host_final=$(printf '%s' "${pda_out#* }" | LC_ALL=C sed -E 's#^https://([^/]+).*#\1#')
+        if [ "$pda_host_pedido" != "$pda_host_final" ]; then
+            rm -rf "$pda_dir"
+            morrer "preflight de ativação: $1 redirecionou para outro nome ($pda_out)." \
+                "Cada nome serve o que é dele, sem recuo para outro host. Nada foi publicado."
+        fi
+    }
+    for pda_par in "https://$pda_origem/|id=\"tela-boot\"|o web app (apps/seele-app/ui/index.html)" \
+        "https://get.seele.sh/|texto, voz e vídeo auto-hospedados|o site (SEELE-SITE)" \
+        "https://docs.seele.sh/|Documentação do SEELE|a documentação (gerar_docs.py)" \
+        "https://mods.seele.sh/|SEELE MODS|o índice dos MODs (SEELE-MODS-INDEXER)"; do
+        pda_url=${pda_par%%|*}; pda_resto=${pda_par#*|}; pda_marca=${pda_resto%%|*}; pda_quem=${pda_resto#*|}
+        pda_baixar "$pda_url" "$pda_dir/pagina"
+        if ! LC_ALL=C grep -qF -- "$pda_marca" "$pda_dir/pagina"; then
+            rm -rf "$pda_dir"
+            morrer "preflight de ativação: $pda_url responde, mas NÃO é $pda_quem (falta «${pda_marca}» na página)." \
+                "Um 200 de outra coisa (a SPA de outro projeto, um domínio estacionado) não conta. Nada foi publicado."
+        fi
+        passo "ativação: $pda_url é $pda_quem, com certificado válido"
+    done
+    for pda_arq in catalogo.json catalogo.json.minisig revogacoes.json revogacoes.json.minisig; do
+        pda_baixar "https://mods.seele.sh/$pda_arq" "$pda_dir/$pda_arq" --sem-redirecionar
+    done
+    if ! pda_out=$(cargo run --manifest-path "$RAIZ/Cargo.toml" -q -p seele-sessao --example conferir_catalogo -- \
+        "$pda_dir/catalogo.json" "$pda_dir/catalogo.json.minisig" "$pda_dir/revogacoes.json" "$pda_dir/revogacoes.json.minisig" \
+        "$RAIZ/apps/seele-app/chaves/mods.pub" $(for pda_mod in $MODS_OFICIAIS_DO_PORTAO; do printf -- '--exige %s ' "$pda_mod"; done) 2>&1); then
+        rm -rf "$pda_dir"
+        morrer "preflight de ativação: o catálogo de https://mods.seele.sh NÃO serve a esta versão: $pda_out" \
+            "O app lê catalogo.json, revogacoes.json e as duas assinaturas (apps/seele-app/src/catalogo.rs) e recusa o que não" \
+            "confere; e esta versão pede os MODs oficiais $MODS_OFICIAIS_DO_PORTAO. Nada foi publicado."
+    fi
+    passo "ativação: https://mods.seele.sh: $pda_out"
+    rm -rf "$pda_dir"
+    # O ponto de encontro: o UDP (ENC/1, /2, /3 e o STUN) e o HTTPS do sinal são conferidos pelo protocolo em
+    # conferir_ponto_de_encontro, e não aqui por um código de status.
+}
+
 # =========================================================================
+
+# **`--so-ativacao`: a checagem isolada do domínio e do ponto, que só lê.** O `--conferir` NÃO é só leitura do lado do Windows
+# (o conferir_windows limpa a entrega de lá, guarda o que estiver sujo e leva a árvore de lá a outro commit, e empurra o commit ao
+# origin se faltar). Para perguntar «o ponto e os cinco nomes estão de pé?» sem tocar em nada: o sondar, o sinal, as páginas e o
+# catálogo assinado, e nada mais. Não pede versão.
+if [ "${SO_ATIVACAO:-nao}" = sim ]; then
+    printf -- '--- conferindo só a ativação (nada é escrito, nada é empurrado, o Windows não é tocado) ---\n'
+    conferir_ponto_de_encontro
+    preflight_de_ativacao
+    printf -- '--- ativação conferida ---\n'
+    exit 0
+fi
 
 printf -- '--- conferindo antes de compilar ---\n'
 conferir_versao
@@ -2377,6 +2618,7 @@ conferir_arvore
 conferir_validacao
 conferir_config_tauri
 conferir_ponto_de_encontro
+preflight_de_ativacao
 limpar_entrega
 conferir_chave
 conferir_docker

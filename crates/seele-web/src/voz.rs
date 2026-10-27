@@ -69,6 +69,21 @@ impl Envio {
         Self::de(ssrc, 0, 0)
     }
 
+    /// O envio de uma voz **nova** de `ssrc`, com o relógio partindo da hora
+    /// da página, `agora_ms` (o `performance.timeOrigin + performance.now()`,
+    /// que é monotônico dentro da página), e não do zero. Ver
+    /// [`seele_voz::relogio::partida`]: quem saiu sentado e voltou recebe o
+    /// mesmo `ssrc`, e do zero ficava muda para quem ficou pela vida inteira
+    /// da voz velha. Uma hora que não é número (a página antiga, que não a
+    /// manda) dá o zero de antes.
+    #[must_use]
+    pub fn partindo_de(ssrc: u32, agora_ms: f64) -> Self {
+        // `as u64` satura: NaN e negativos dão zero, e o infinito o teto.
+        let (seq, carimbo) =
+            seele_voz::relogio::partida(std::time::Duration::from_millis(agora_ms as u64));
+        Self::de(ssrc, seq, carimbo)
+    }
+
     /// O envio de `ssrc` com o relógio continuando de `seq` e `carimbo`.
     ///
     /// O portão nasce com os controles de partida do desktop
@@ -548,6 +563,51 @@ mod testes {
     fn lido(datagrama: &[u8]) -> (u16, u32) {
         let (cabecalho, _) = MediaHeader::decode(datagrama).expect("um datagrama");
         (cabecalho.seq, cabecalho.timestamp)
+    }
+
+    /// **A voz nova da página parte à frente da velha pelo tempo fora, qualquer
+    /// que tenha sido a duração da velha** (o CUA de 25/10, e o relato de 15 a
+    /// 60 min). Tempo simulado: uma hora são 180 mil quadros, sem esperar.
+    /// Com a partida do zero, a de antes, a nova ficava atrás pela vida
+    /// inteira da velha, e quem ficou a descartava por esse tempo.
+    #[test]
+    fn a_voz_nova_da_pagina_parte_a_frente_da_velha_em_15_e_60_min() {
+        let opus = [0xAB_u8; 40];
+        for minutos in [15_u32, 60] {
+            let comeco_ms = 1_792_910_000_000.0;
+            let mut velha = Envio::partindo_de(77, comeco_ms);
+            for _ in 0..(minutos * 60 * 50) {
+                velha.quadro_passou();
+            }
+            let ultimo = lido(
+                &velha
+                    .datagrama(velha.carimbo_do_quadro(1, 0), &opus)
+                    .expect("o último datagrama da voz velha"),
+            );
+            let fora_ms = 22_000.0;
+            let mut nova =
+                Envio::partindo_de(77, comeco_ms + f64::from(minutos) * 60_000.0 + fora_ms);
+            let carimbo = nova.quadro_passou();
+            let primeiro = lido(
+                &nova
+                    .datagrama(carimbo, &opus)
+                    .expect("o primeiro datagrama da voz nova"),
+            );
+            let adiante = seele_voz::jitter::ts_delta(primeiro.1, ultimo.1);
+            assert!(
+                (22 * 48_000..=22 * 48_000 + 2 * 960).contains(&adiante),
+                "depois de {minutos} min, a voz nova partiu {adiante} amostras do fim da velha, \
+                 e não os 22 s fora"
+            );
+        }
+    }
+
+    /// Uma página antiga, que não manda a hora, chega com NaN: o zero de antes,
+    /// e não um pânico.
+    #[test]
+    fn sem_a_hora_da_pagina_o_relogio_parte_do_zero() {
+        assert_eq!(Envio::partindo_de(77, f64::NAN).relogio(), (0, 0));
+        assert_eq!(Envio::partindo_de(77, -5.0).relogio(), (0, 0));
     }
 
     /// **A mesma sequência fixa do desktop** (`seele-core`,

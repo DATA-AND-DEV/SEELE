@@ -488,3 +488,41 @@ window.addEventListener(
   },
   true,
 );
+
+// --------------------------------------------------- o foco preso no perfil
+//
+// O PERFIL é `aria-modal`, e com a sala pessoal ele ocupa a janela inteira: o Tab não pode sair dele para a tela de trás. Tab no último controle
+// visível volta ao primeiro, Shift+Tab no primeiro vai ao último, e um foco que já está fora é trazido de volta. O Esc fecha (o ouvinte acima) e o
+// foco volta a quem abriu (`fecharPerfil`, `focoAntesDoPerfil`).
+
+function focaveisDoPerfil() {
+  const seletor = 'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+  return [...$("perfil").querySelectorAll(seletor)]
+    .filter((e) => !e.disabled && !e.closest("[hidden]") && e.getClientRects().length > 0);
+}
+
+function prenderOFocoDoPerfil(evento) {
+  if (evento.key !== "Tab" || $("perfil").hidden) return;
+  const raiz = $("perfil");
+  const lista = focaveisDoPerfil();
+  if (lista.length === 0) {
+    evento.preventDefault();
+    raiz.focus();
+    return;
+  }
+  const primeiro = lista[0];
+  const ultimo = lista[lista.length - 1];
+  const ativo = document.activeElement;
+  if (!raiz.contains(ativo)) {
+    evento.preventDefault();
+    (evento.shiftKey ? ultimo : primeiro).focus();
+  } else if (evento.shiftKey && (ativo === primeiro || ativo === raiz)) {
+    evento.preventDefault();
+    ultimo.focus();
+  } else if (!evento.shiftKey && ativo === ultimo) {
+    evento.preventDefault();
+    primeiro.focus();
+  }
+}
+
+window.addEventListener("keydown", prenderOFocoDoPerfil);

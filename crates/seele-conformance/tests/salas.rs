@@ -50,19 +50,25 @@ use seele_server::{Daemon, ServerConfig};
 
 mod vaga;
 
+/// A semente de quem hospeda, em todos os testes deste arquivo.
+const SEMENTE_DE_QUEM_HOSPEDA: u8 = 46;
+
 /// Sobe um servidor numa porta que o sistema escolhe.
 ///
 /// Porta zero, nunca um número escrito à mão, que colidiria com o servidor que a
-/// pessoa deixou rodando na própria máquina. Cada teste sobe o seu, e isso
-/// importa mais aqui do que nos vizinhos: **a primeira conta a chegar num servidor
-/// vira Comandante**, então dois testes dividindo um servidor dividiriam também
-/// quem manda nele, e a ordem em que o `cargo test` os roda passaria a decidir
-/// o resultado.
+/// pessoa deixou rodando na própria máquina. Cada teste sobe o seu.
+///
+/// **Quem hospeda é declarado** (ADR 0064): desde a 0.17 a primeira conta a
+/// chegar não vira Comandante; a máquina que hospeda diz a impressão da chave
+/// de quem é dona (`ServerConfig::proprietario`), e é essa conta que manda.
+/// Aqui, a da semente [`SEMENTE_DE_QUEM_HOSPEDA`].
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let dona = ed25519_dalek::SigningKey::from_bytes(&[SEMENTE_DE_QUEM_HOSPEDA; 32]);
     let config = ServerConfig {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
+        proprietario: Some(seele_core::key_fingerprint(dona.verifying_key().as_bytes())),
         ..ServerConfig::default()
     };
     let servidor = Arc::new(Daemon::bind(config).await?);
@@ -153,10 +159,10 @@ async fn quem_hospeda_vira_comandante_e_a_segunda_conta_nao() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
-    // Quem hospeda é quem conecta primeiro ao próprio servidor. Medido em
+    // Quem hospeda é a dona declarada pela máquina (ADR 0064). Medido em
     // `Sessao::permissions`, que é o que a casca recebe — no banco a regra
     // poderia estar certa e não chegar até aqui, que é o defeito que importa.
-    let anfitriao = conectar(endereco, 46, "anfitriao").await?;
+    let anfitriao = conectar(endereco, SEMENTE_DE_QUEM_HOSPEDA, "anfitriao").await?;
     assert!(
         anfitriao
             .sessao()
@@ -200,7 +206,7 @@ async fn uma_sala_criada_aparece_para_quem_ja_estava_conectado() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
-    let anfitriao = conectar(endereco, 46, "anfitriao").await?;
+    let anfitriao = conectar(endereco, SEMENTE_DE_QUEM_HOSPEDA, "anfitriao").await?;
     let mut testemunha = conectar(endereco, 47, "rafael").await?;
 
     // A testemunha entrou antes de a sala existir, e é isso que se mede: ela
@@ -266,7 +272,7 @@ async fn um_pessoa_sem_manage_voice_rooms_e_recusado_pelo_server_e_nao_pela_casc
     // O anfitrião conecta primeiro e fica de pé, calado, como testemunha. Ele é
     // a peça que separa «a casca não mandou» de «o servidor recusou»: se a sala
     // tivesse sido feita, o anúncio chegaria a ele.
-    let mut anfitriao = conectar(endereco, 46, "anfitriao").await?;
+    let mut anfitriao = conectar(endereco, SEMENTE_DE_QUEM_HOSPEDA, "anfitriao").await?;
     let mut sem_permissao = conectar(endereco, 47, "rafael").await?;
     assert!(
         !sem_permissao
@@ -380,7 +386,7 @@ async fn o_comandante_renomeia_e_todo_mundo_ve_o_nome_novo() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, servidor) = server().await?;
 
-    let anfitriao = conectar(endereco, 46, "anfitriao").await?;
+    let anfitriao = conectar(endereco, SEMENTE_DE_QUEM_HOSPEDA, "anfitriao").await?;
     let mut testemunha = conectar(endereco, 47, "rafael").await?;
     let voice_room = anfitriao.sessao().voice_rooms[0].id;
 

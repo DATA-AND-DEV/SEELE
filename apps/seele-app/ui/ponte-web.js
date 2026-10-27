@@ -92,7 +92,7 @@ const RECUSA_HOSPEDAR = "hospedar é do app do SEELE: o navegador não hospeda";
 const RECUSA_PORTARIA = "a portaria mora no app de quem hospeda este servidor";
 const RECUSA_REDE = "o navegador não abre porta nem aceita conexão de entrada";
 const RECUSA_MODS = "MODs se instalam, se ligam e se aplicam pelo app do SEELE que hospeda o servidor";
-const RECUSA_VERSOES = "as versões do servidor moram no app do SEELE: esta página fala só o Servidor 1.0";
+const RECUSA_VERSOES = "as versões do servidor moram no app do SEELE: esta página fala só o Servidor 2.0";
 const RECUSA_ATUALIZAR = "a versão é a desta página: não há o que instalar";
 const RECUSA_SISTEMA = "a página não abre os ajustes do sistema";
 const RECUSA_MODULO = "o navegador não baixa módulo de vídeo: quem codifica é ele";
@@ -107,6 +107,12 @@ const RECUSAS_NOMEADAS = new Map([
   ["abrir_ajustes_de_acessibilidade", RECUSA_SISTEMA],
   ["abrir_ajustes_do_microfone", RECUSA_SISTEMA],
   ["abrir_versao", RECUSA_VERSOES],
+  // Os amigos moram na agenda desta máquina (0.17): o navegador não tem agenda.
+  ["adicionar_amigo", RECUSA_AGENDA],
+  ["amigos", RECUSA_AGENDA],
+  ["tirar_dos_amigos", RECUSA_AGENDA],
+  // A pré-conferência de hospedar (E2 da 0.17): o navegador não hospeda.
+  ["antes_de_hospedar", RECUSA_HOSPEDAR],
   ["apagar_pacote_do_cache", RECUSA_MODS],
   ["apagar_servidor", RECUSA_HOSPEDAR],
   ["aplicar_conjunto_de_mods", RECUSA_MODS],
@@ -122,10 +128,13 @@ const RECUSAS_NOMEADAS = new Map([
   ["criar_servidor", RECUSA_HOSPEDAR],
   ["dar_nome_na_agenda", RECUSA_AGENDA],
   ["decidir_pedido", RECUSA_PORTARIA],
+  // Desfazer a escolha de MOD de um servidor guardado desta máquina (P1).
+  ["desfazer_escolha_de_mod", RECUSA_HOSPEDAR],
   ["definir_senha_do_server", RECUSA_PORTARIA],
   ["encerrar_a_ligacao", RECUSA_SALA],
   // Quem pinta o servidor hospedado (tarefa 17f.0 da F3): escolher é de quem
   // hospeda, e o navegador não hospeda.
+  ["escolher_atualizacao", RECUSA_ATUALIZAR],
   ["escolher_o_tema_do_servidor", RECUSA_MODS],
   ["hospedar", RECUSA_HOSPEDAR],
   ["instalar_atualizacao", RECUSA_ATUALIZAR],
@@ -147,6 +156,9 @@ const RECUSAS_NOMEADAS = new Map([
   ["para_entrar_pela_recusa", RECUSA_VERSOES],
   ["parar_de_hospedar", RECUSA_HOSPEDAR],
   ["pedidos_da_portaria", RECUSA_PORTARIA],
+  // A cópia de segurança antes de converter (E2 da 0.17): é do banco de um
+  // servidor desta máquina, e o navegador não hospeda.
+  ["preparar_copia", RECUSA_HOSPEDAR],
   ["procurar_atualizacao", RECUSA_ATUALIZAR],
   ["receber_ligacoes", RECUSA_SALA],
   ["recusar", RECUSA_SALA],
@@ -217,7 +229,10 @@ const COMANDOS_DA_PONTE = new Set([
   "atualizacao_que_nao_pegou", "busca_andar", "busca_limpar", "buscar",
   "calar_a_tela", "cancelar_ligacao", "codigo_do_mod", "conferir_esta_versao", "conhecidos",
   "connect", "consentir_previa", "controles_da_voz", "descartar_mensagem",
-  "destino_do_anexo", "disconnect", "dispensar_aviso",
+  "destino_do_anexo", "disconnect", "dispensar_aviso", "encerrar_sessao",
+  "focar_voz", "sessoes", "ver_sessao",
+  "pedir_cargos", "explicar_permissoes", "prever_cargo", "criar_cargo", "editar_cargo",
+  "mover_cargo", "apagar_cargo", "atribuir_cargo", "revogar_cargo",
   "dominios_de_gif", "enter_voice_room", "enviar_anexo", "enviar_imagem_mod",
   "escolher_apelido", "escolher_apelido_local", "escolher_arquivo",
   "escolher_microfone", "escolher_minha_imagem", "escolher_para_o_mod",
@@ -341,7 +356,7 @@ const CONSTANTES_DO_DESKTOP = Object.freeze({
   },
   "regras_de_previa": { "limit": 4194304, "types": ["image/png", "image/jpeg", "image/gif", "image/webp"] },
   "regras_do_icone_do_server": { "limite_bytes": 8192, "lado": 256 },
-  "apis_de_mod_aceitas": [6],
+  "apis_de_mod_aceitas": [7, 6],
   "dominios_de_gif": ["tenor.com", "giphy.com", "imgur.com"],
   "controles_da_voz": {
     "supressao": 1,
@@ -375,12 +390,166 @@ const CASCA_DA_PONTE = PONTE_NO_LUGAR_DO_TAURI ? cascaDaCarga() : null;
 
 // ------------------------------------------------------------------- a sessão
 
+// ---------------------------------------------- várias sessões (E3, 0.17)
+//
+// **A página também abre várias sessões ao mesmo tempo** (contrato E3;
+// fronteiras.md v2, §7). Cada `connect` soma uma sessão ao registro da ponte,
+// com um `SessaoId` que nunca volta; `ver_sessao` troca a que a casca mostra
+// (a VISTA) sem derrubar ninguém; e a voz da página é de UMA sessão (o FOCO),
+// trocado só por ato (`focar_voz`, ou entrar numa sala de voz).
+//
+// **O pedido vai à sessão do carimbo.** A casca (`invoke`, em `base.js`) põe
+// em todo comando o carimbo da vista no instante do clique. `invocarNaPonte` o
+// tira dos argumentos e faz de `sessaoDaPonte.atual` a sessão do carimbo
+// durante a parte síncrona do atendimento — que é onde todo corpo daqui pega a
+// sessão (`comASessao`, `pelaSessao`). Um carimbo de sessão que já saiu volta
+// `NotConnected`; uma geração velha do enlace, `SessaoNaoConfere`.
+
+/** As sessões abertas pela página, pelo `SessaoId`. */
+const sessoesDaPonte = new Map();
+
+/** O próximo `SessaoId`: começa em 1 e nunca volta. */
+let proximaSessaoDaPonte = 1;
+
+/** A sessão mostrada, e a que tem a voz; 0 é nenhuma. */
+let vistaDaPonte = 0;
+let focoDaPonte = 0;
+
+/** A maior época de troca de vista já aplicada (`ver_sessao`). */
+let epocaAplicadaNaPonte = 0;
+
+/** A sessão do pedido que está sendo atendido agora, ou `null`. */
+let sessaoDoPedido = null;
+
 /**
- * A sessão desta página (`sessao-web.js`), aberta pelo `connect`. Sem ela, o
- * que pede uma sessão volta com `"NotConnected"`, como no desktop sem conexão.
- * É também a costura por onde a bancada põe uma sessão de mentira.
+ * A sessão desta página para quem atende: a do pedido em curso, ou a vista.
+ * Sem ela, o que pede uma sessão volta com `"NotConnected"`, como no desktop.
+ * É também a costura por onde a bancada põe uma sessão de mentira: atribuir
+ * soma a sessão ao registro e a põe na vista (e no foco, se ninguém o tem).
  */
-const sessaoDaPonte = { atual: null };
+const sessaoDaPonte = {
+  get atual() {
+    return sessaoDoPedido ?? sessoesDaPonte.get(vistaDaPonte) ?? null;
+  },
+  set atual(sessao) {
+    if (!sessao) {
+      if (vistaDaPonte) sessoesDaPonte.delete(vistaDaPonte);
+      if (focoDaPonte === vistaDaPonte) focoDaPonte = 0;
+      vistaDaPonte = [...sessoesDaPonte.keys()].pop() ?? 0;
+      return;
+    }
+    if (!sessao.idDaPonte) sessao.idDaPonte = proximaSessaoDaPonte++;
+    sessoesDaPonte.set(sessao.idDaPonte, sessao);
+    vistaDaPonte = sessao.idDaPonte;
+    // **Conectar só ganha a voz sendo a ÚNICA sessão** (fronteiras §5; o
+    // achado do Codex): depois de a sessão com a voz cair, o foco fica vazio,
+    // e uma entrada nova ao lado de outras não o toma sozinha.
+    if (!focoDaPonte && sessoesDaPonte.size === 1) focoDaPonte = sessao.idDaPonte;
+  },
+};
+
+/**
+ * **A cadeia única do foco de voz**: toda mudança dele — `focar_voz`, entrar
+ * numa sala de outra sessão, a sessão com a voz que cai — entra aqui, uma
+ * depois da outra. Nenhuma é feita fora dela (o mesmo desenho do registro web
+ * do browser-signaling, `criarRegistroDeSessoesWeb`).
+ */
+let cadeiaDoFoco = Promise.resolve();
+function naCadeiaDoFoco(passo) {
+  const vez = cadeiaDoFoco.catch(() => {}).then(passo);
+  cadeiaDoFoco = vez;
+  return vez;
+}
+
+/**
+ * As despedidas do servidor que NÃO acabam a sessão, e que a casca diz como
+ * queda que volta sozinha (`CaiuComMotivo`). A regra do desktop é a do core
+ * (`despedida::a_sessao_acabou_aqui`); a única medida na web hoje é o
+ * «ficou para trás» (browser-signaling e B).
+ */
+const DESPEDIDAS_QUE_VOLTAM = new Set(["FellBehind"]);
+
+/** O carimbo de uma sessão da ponte agora. */
+function carimboDaPonte(sessao) {
+  return { sessao: sessao.idDaPonte, geracao: sessao.geracaoDoEnlace ?? 1 };
+}
+
+/** O que mudou nas sessões: o sinal «releia `sessoes()`» (`seele://sessoes`). */
+function avisarAsSessoes(sessao, motivo) {
+  emitirNaPonte("seele://sessoes", { sessao, motivo });
+}
+
+/**
+ * As sessões, na forma do `SessaoNaTela` do app (fronteiras.md §6). Uma página
+ * nunca hospeda: todo servidor dela é de outra pessoa (`onde: "Outro"`).
+ */
+function sessoesNaPonte() {
+  return [...sessoesDaPonte.values()].map((sessao) => {
+    let lido = null;
+    try {
+      lido = sessao.acabou ? null : sessao.retrato?.();
+    } catch {
+      lido = null;
+    }
+    const sala = lido?.sala ?? {};
+    const naSala = (sala.voice_rooms ?? []).find((s) => s.occupied_by_us)?.name ?? null;
+    return {
+      carimbo: carimboDaPonte(sessao),
+      endereco: sessao.alvo?.endereco ?? "",
+      nome: sala.server || null,
+      na_vista: sessao.idDaPonte === vistaDaPonte,
+      foco_de_voz: sessao.idDaPonte === focoDaPonte,
+      na_sala_de_voz: naSala,
+      onde: sessao.onde ?? "Outro",
+      // O navegador não liga por código: aqui é sempre `null`. Só a costura das
+      // bancadas põe `ligacao` numa sessão de mentira, para provar a vista.
+      ligacao: sessao.ligacao ?? null,
+      enlace: sessao.acabou ? "encerrada" : sessao.voltando ? "reconectando" : "online",
+      encerrada: sessao.motivoDoFim ?? null,
+      nao_lidas: sessao.idDaPonte === vistaDaPonte ? 0 : sessao.naoLidas ?? 0,
+      mudou: sessao.idDaPonte !== vistaDaPonte && Boolean(sessao.mudou),
+    };
+  });
+}
+
+/**
+ * **Troca o foco de voz, em ordem**: a sessão que tinha a voz sai da sala dela
+ * e a voz da página sai com ela ANTES de a nova ganhar o foco. Nunca duas
+ * sessões com voz; e nada aqui é chamado sozinho (só `focar_voz` e entrar numa
+ * sala). Responde `{ antes, agora, saiu_da_sala }`.
+ */
+function focarAVozNaPonte(id, manterOMicrofone = false) {
+  return naCadeiaDoFoco(() => trocarOFocoDaPonte(id, manterOMicrofone));
+}
+
+/** O corpo da troca, só chamado pela cadeia. */
+async function trocarOFocoDaPonte(id, manterOMicrofone = false) {
+  const antes = focoDaPonte;
+  const nova = id ? sessoesDaPonte.get(id) : null;
+  // Uma sessão que saiu ou caiu enquanto a troca esperava a vez não ganha a voz.
+  if (id && (!nova || nova.acabou)) throw "NotConnected";
+  if (antes === (id || 0)) return { antes: antes || null, agora: antes || null, saiu_da_sala: null };
+  focoDaPonte = 0;
+  let saiuDaSala = null;
+  const velha = sessoesDaPonte.get(antes);
+  if (velha && !velha.acabou) {
+    try {
+      const lido = velha.retrato?.();
+      saiuDaSala = (lido?.sala?.voice_rooms ?? []).find((s) => s.occupied_by_us)?.name ?? null;
+      if (saiuDaSala) velha.atender("leave_voice_room", {});
+    } catch (falha) {
+      console.warn("ponte: a sessão que perdeu a voz não saiu da sala:", falha);
+    }
+  }
+  // **O microfone segue o requisito: fora da sala da sessão em foco, sem microfone.** Trocar o foco sozinho (`focar_voz`) deixa a pessoa fora de
+  // qualquer sala, e a captura é solta. A única exceção é ENTRAR numa sala de outra sessão (`enter_voice_room`): o `ligar` já abriu o microfone
+  // dentro do GESTO dessa sala nova (o iOS só deixa abrir ali), e soltá-lo agora o perderia e pediria o `getUserMedia` outra vez.
+  if (manterOMicrofone) sairDaVozMantendoOMicrofone();
+  else sairDaVozDaSessao();
+  focoDaPonte = id || 0;
+  avisarAsSessoes(id || antes, "foco");
+  return { antes: antes || null, agora: id || null, saiu_da_sala: saiuDaSala };
+}
 
 /**
  * A geração da sessão desta página: sobe a cada `connect`, como o `revogar`
@@ -396,14 +565,36 @@ function comASessao(fazer) {
   return fazer(sessao);
 }
 
-/** Sai da sessão desta página, se houver uma, e solta os arquivos guardados. */
+/**
+ * Sai de uma sessão desta página (a do pedido, ou a vista), e só dela: as
+ * outras continuam. A voz fecha só se era dela; os arquivos guardados, só com
+ * a última.
+ */
 async function sairDaSessaoDaPonte() {
   const sessao = sessaoDaPonte.atual;
-  sessaoDaPonte.atual = null;
-  ALCAS_DA_PONTE.clear();
-  fecharAVozDaSessao();
-  sessao?.transmissao?.fechar();
-  await sessao?.encerrar?.();
+  if (!sessao) {
+    // Sem sessão nenhuma, o `disconnect` de sempre: solta o que a página
+    // guardava e a voz, como antes da multi-sessão.
+    if (sessoesDaPonte.size === 0) {
+      ALCAS_DA_PONTE.clear();
+      fecharAVozDaSessao();
+    }
+    return null;
+  }
+  const id = sessao.idDaPonte;
+  sessoesDaPonte.delete(id);
+  if (vistaDaPonte === id) vistaDaPonte = [...sessoesDaPonte.keys()].pop() ?? 0;
+  // O foco, pela cadeia: a saída espera a troca em curso, e a solta depois.
+  await naCadeiaDoFoco(() => {
+    if (focoDaPonte === id) {
+      focoDaPonte = 0;
+      fecharAVozDaSessao();
+    }
+  });
+  if (sessoesDaPonte.size === 0) ALCAS_DA_PONTE.clear();
+  sessao.transmissao?.fechar();
+  await sessao.encerrar?.();
+  avisarAsSessoes(id, "saiu");
   return null;
 }
 
@@ -423,8 +614,11 @@ const entradaEmCurso = { cancelar: null };
 /** As frases dos links que o navegador não abre, pelo erro do `analisar_link`. */
 const FRASES_DO_LINK = Object.freeze({
   OutraOrigem: "este não é um link do navegador para o SEELE: peça a quem hospeda o link do navegador",
-  SemHashesDoNavegador:
-    "este link é de um servidor que não recebe o navegador (um Servidor 0.15, ou o link do app): peça a quem hospeda o link do navegador",
+  // Na 0.17 o navegador fala só o Servidor 2.0: um link da 0.16 ou de antes
+  // chega como `OutraLinha` (`seele_proto::uri::ErroDoNavegador`), e não mais
+  // como falta de hashes.
+  OutraLinha:
+    "este link é de um servidor de uma versão anterior do SEELE (0.16 ou antes), que o navegador não abre: abra-o no app do SEELE, que abre a versão certa ao lado",
   SemFragmento: "o link chegou sem o servidor: copie-o de novo, inteiro",
   ConsultaForaDoFragmento: "o link chegou partido: copie-o de novo, inteiro",
   SemImpressaoDigital: "o link chegou sem a impressão do servidor: copie-o de novo, inteiro",
@@ -436,6 +630,11 @@ const FRASES_DA_IDENTIDADE = Object.freeze({
   "link-vencido": "o link deste servidor venceu, e ele não trouxe um novo: peça a quem hospeda um link novo",
   "convite-vencido": "este link venceu: peça a quem hospeda um link novo",
   "sem-tentativa": "outra entrada começou no meio desta",
+  // A portaria de quem hospeda (browser-signaling, 0.17): a batida do navegador
+  // fica na fila dele, como a do app.
+  "espera-de-admissao":
+    "quem hospeda ainda não decidiu: a sua batida está na porta do servidor, e esta página entra quando ele admitir",
+  "admissao-recusada": "quem hospeda recusou esta entrada: fale com ele por outro canal se for engano",
 });
 
 /** O link lido pelo `.wasm` da página, com as regras do produto. */
@@ -514,13 +713,39 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
     if (typeof server === "string") return entrarPeloEndereco({ server, nickname });
     return Promise.reject({ RecusaDaPonte: { comando: "connect", frase: RECUSA_ENDERECO_SOZINHO } });
   }
-  if (sessaoDaPonte.atual && !sessaoDaPonte.atual.acabou) return Promise.reject("AlreadyConnected");
+  // **Várias sessões** (E3): uma entrada nova soma, e não recusa. Só duas
+  // entradas no MESMO servidor ao mesmo tempo são recusadas, como no desktop.
+  if ([...sessoesDaPonte.values()].some((s) => !s.acabou && s.alvo?.impressao === alvo.impressao)) {
+    return Promise.reject("AlreadyConnected");
+  }
   geracaoDaPonte += 1;
   const geracao = geracaoDaPonte;
-  const valeAinda = () => geracao === geracaoDaPonte;
+  // O `SessaoId` nasce na tentativa: os eventos da chegada já saem com ele.
+  const id = proximaSessaoDaPonte++;
+  const tentativa = { idDaPonte: id };
+  /** Esta sessão ainda é do registro (ou ainda está entrando). */
+  const valeAinda = () => !sessoesDaPonte.has(id) ? tentativa.entrando !== false : true;
+  tentativa.entrando = true;
+  /** O evento carimbado, e as marcas da placa quando a sessão está ao fundo. */
+  const emitirDaSessao = (evento) => {
+    const aberta = sessoesDaPonte.get(id);
+    if (aberta && vistaDaPonte !== id) {
+      aberta.mudou = true;
+      if (evento === "MessagesChanged") aberta.naoLidas = (aberta.naoLidas ?? 0) + 1;
+    }
+    emitirNaPonte("seele://event", {
+      sessao: id, geracao: aberta?.geracaoDoEnlace ?? 1, vista: vistaDaPonte === id, evento,
+    });
+    if (aberta && vistaDaPonte !== id) avisarAsSessoes(id, evento === "MessagesChanged" ? "mensagens" : "aviso");
+  };
   let wasm;
   try {
-    wasm = (await carregarOWasmDaPagina()).instancia.exports;
+    // **Uma instância do `.wasm` por sessão** (E3; browser-signaling): o estado
+    // da ligação mora dentro dela, e duas sessões numa instância só dividiriam
+    // a ligação. Sem a função (uma página antiga), a da página.
+    wasm = typeof instanciarOWasmDaSessao === "function"
+      ? await instanciarOWasmDaSessao()
+      : (await carregarOWasmDaPagina()).instancia.exports;
   } catch (falha) {
     console.warn("ponte: o .wasm da página não carregou para a sessão:", falha);
     return Promise.reject("Unreachable");
@@ -539,34 +764,40 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
       apelido: nickname ?? "",
       convite: joinSecret ?? null,
       aceito: aceiteDeModsGuardado(alvo.impressao),
+      // A voz só sai e só toca na sessão com o foco (o portão do transporte).
+      podeUsarAVoz: () => focoDaPonte === id,
       emitir: (evento) => {
         if (!valeAinda()) return;
-        if (evento && evento.ScreenClosed) vozDaPonte.atual?.esquecerOSomDaTela(evento.ScreenClosed.screen);
-        emitirNaPonte("seele://event", evento);
+        if (evento && evento.ScreenClosed && focoDaPonte === id) vozDaPonte.atual?.esquecerOSomDaTela(evento.ScreenClosed.screen);
+        emitirDaSessao(evento);
       },
-      aoAcabar: () => {
+      aoAcabar: (motivo) => {
         // Os arquivos escolhidos para os MODs saem com a sessão, como no
         // desktop, acabe ela por quem acabar.
         soltarOsEscolhidosDa(geracao).catch(() => {});
-        if (!valeAinda()) return;
-        fecharAVozDaSessao();
-        sessaoDaPonte.atual?.transmissao?.fechar();
-      },
-      aoReceberOsHashes: (janelas) => {
-        identidadeDaPagina()
-          .then((identidade) => identidade.lembrarOsHashes(alvo.impressao, janelas))
-          .catch((falha) => console.warn("ponte: os hashes do servidor não ficaram guardados:", falha));
+        const aberta = sessoesDaPonte.get(id);
+        if (!aberta) return;
+        aberta.motivoDoFim = motivo ?? aberta.motivoDoFim ?? "LinkLost";
+        aberta.transmissao?.fechar();
+        // A voz fecha só se era desta; o foco fica vazio, e ninguém o ganha
+        // sozinho (fronteiras §5). **Pela mesma cadeia do foco** (achado do
+        // Codex): solto fora dela, um `focar_voz` em curso podia dar a voz a
+        // esta sessão já caída, ou ser desfeito por ela.
+        naCadeiaDoFoco(() => {
+          if (focoDaPonte === id) {
+            focoDaPonte = 0;
+            fecharAVozDaSessao();
+            avisarAsSessoes(id, "foco");
+          }
+        }).catch(() => {});
+        avisarAsSessoes(id, "encerrada");
       },
     });
   } finally {
     entradaEmCurso.cancelar = null;
+    tentativa.entrando = false;
   }
-  // Outra entrada começou enquanto esta abria: esta é solta, como a
-  // substituída do desktop.
-  if (!valeAinda()) {
-    await sessao.encerrar();
-    return Promise.reject("NotConnected");
-  }
+  sessao.idDaPonte = id;
   sessao.geracao = geracao;
   sessao.alvo = alvo;
   sessao.snapshot = () => retratoDaSessao(sessao);
@@ -575,14 +806,28 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
     wasm,
     eu: () => sessao.retrato()?.sala?.me ?? null,
     emitir: (evento) => {
-      if (valeAinda()) emitirNaPonte("seele://event", evento);
+      if (sessoesDaPonte.has(id)) emitirDaSessao(evento);
     },
   });
+  // A voz da página segue a sala confirmada só na sessão com o foco: as
+  // outras ficam no texto, na presença e na tela, sem som.
   sessao.aoDobrar = (mensagem) => {
-    conferirAVozDaSessao(sessao);
+    if (focoDaPonte === id) conferirAVozDaSessao(sessao);
     sessao.transmissao.aoDobrar(mensagem);
+    // **A despedida recuperável, dita à casca** como o desktop a diz (o
+    // `CaiuComMotivo` do ffi do B, carimbado pela geração que caiu): a
+    // conexão volta sozinha, sem tela de fim. Pelo quadro ou pelo código de
+    // fechamento, o `sessao-web.js` dobra os dois num `Disconnecting` só; uma
+    // vez por geração do enlace.
+    const motivo = mensagem?.Disconnecting?.reason;
+    if (DESPEDIDAS_QUE_VOLTAM.has(motivo) && sessao.caiuNaGeracao !== sessao.geracaoDoEnlace) {
+      sessao.caiuNaGeracao = sessao.geracaoDoEnlace;
+      emitirDaSessao({ CaiuComMotivo: { reason: motivo } });
+    }
   };
-  sessao.aCadaVolta = () => seguirOsVolumes();
+  sessao.aCadaVolta = () => {
+    seguirOsVolumes().catch((falha) => console.warn("volumes na mistura:", falha));
+  };
   // **A queda e a volta**, como no desktop: a voz fica de pé na bateria (os
   // datagramas não saem, e ela segue no transporte novo), a tela que estava no
   // ar fecha com o transporte, e a volta repete o mudo e o isolamento. A sala
@@ -590,16 +835,26 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
   // número de voz novo faz a voz entrar com ele (`conferirAVozDaSessao`).
   sessao.escolhas = () => ({ mudo: vozDaSessao.mudo, isolado: vozDaSessao.isolado });
   sessao.aoCair = () => sessao.transmissao.fechar();
+  sessao.aoVoltar = () => {
+    if (focoDaPonte === id) conferirAVozDaSessao(sessao);
+  };
   // O som da tela vai à mistura; a tela que fecha leva o dela.
   sessao.aoSomDaTela = (tela, opus) => {
-    if (vozDaSessao.dentro) vozDaPonte.atual?.somDaTela(tela, Uint8Array.from(opus));
+    if (vozDaSessao.dentro && focoDaPonte === id) vozDaPonte.atual?.somDaTela(tela, Uint8Array.from(opus));
   };
+  // No registro, na vista, e com o foco só se ninguém o tem (o caso de uma
+  // sessão só, que é a página de antes): conectar nunca toma a voz de outra.
   sessaoDaPonte.atual = sessao;
+  avisarAsSessoes(id, "entrou");
   // O retrato guardado sobe com a entrada, como no `connect` do desktop.
   const retrato = bytesDoDataUri(guardadoNaOrigem(CHAVES_DA_ORIGEM.retrato));
   if (retrato) sessao.atender("minha_imagem", { icone: Array.from(retrato) });
   aVozDaPonte().catch((falha) => console.warn("ponte: a voz da página não carregou:", falha));
   return {
+    // A `Entrada` do app (fronteiras §2): o carimbo da sessão nova, e a época
+    // da vista, que os MODs conferem como `geracao`.
+    carimbo: carimboDaPonte(sessao),
+    vista: geracao,
     snapshot: sessao.snapshot(),
     veredito: alvo.conhecido ? "Known" : { FirstContactVerified: { fingerprint: alvo.impressao } },
     geracao,
@@ -617,8 +872,15 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
 function retratoDaSessao(sessao) {
   const lido = sessao.retrato();
   if (!lido) throw "NotConnected";
-  const voz = vozDaSessao;
+  // A voz da página é da sessão com o foco. As outras não medem nada dela:
+  // nem nível, nem fala, nem abertura (E3; fronteiras §5).
+  const comAVoz = !focoDaPonte || focoDaPonte === sessao.idDaPonte;
+  const voz = comAVoz
+    ? vozDaSessao
+    : { ...vozDaSessao, bitrate: 0, nivel: 0, recusados: 0, falando: false, abertura: "fora_de_sala" };
   return {
+    // O carimbo junto, achatado, como o `RetratoNaSessao` do app.
+    carimbo: sessao.idDaPonte ? carimboDaPonte(sessao) : undefined,
     caminho: null,
     link: sessao.enlace(),
     // A WebTransport só abre com um dos hashes que o link trouxe: quem atendeu
@@ -633,6 +895,7 @@ function retratoDaSessao(sessao) {
       local_fault: false,
       frames_refused: voz.recusados,
       microfone_entrega_silencio_digital: false,
+      cancelamento_de_eco_desligado: voz.semEco === true && voz.abertura === "aberto",
     },
     muted: voz.mudo,
     total_isolation: voz.isolado,
@@ -663,6 +926,15 @@ function pelaPagina(comando) {
  * Um comando da sessão pelo `.wasm` (`seele_web::comandos`), sempre numa
  * promessa: o `.wasm` responde na hora, e quem chama encadeia como no `invoke`.
  */
+/** O mesmo, numa sessão já escolhida: para depois de uma espera (E3). */
+function pelaSessaoDe(sessao, comando) {
+  return async (args) => {
+    const feito = sessao.atender(comando, args);
+    if (!feito) return Promise.reject({ ComandoDesconhecido: { comando } });
+    return "erro" in feito ? Promise.reject(feito.erro) : feito.resposta;
+  };
+}
+
 function pelaSessao(comando) {
   return (args) =>
     comASessao(async (sessao) => {
@@ -686,8 +958,22 @@ const vozDaSessao = {
   /** O número da voz com que ela entrou: a volta traz outro. */
   numero: null,
   ligando: null,
+  /**
+   * O PEDIDO mais novo de entrar ou sair da sala (cada ENTRAR e cada SAIR toma um número). Uma resposta (a rejeição de uma entrada, a resposta de um
+   * sair) só age sobre a captura se o pedido dela ainda é o mais novo: a resposta velha de um pedido não solta nem desliga a captura de um pedido novo.
+   */
+  pedido: 0,
+  /**
+   * Quantas vezes a voz abriu ou fechou. O que uma abertura deixou pendente (os
+   * callbacks de `conferirAVozDaSessao`) só vale se o número que ela viu é o de
+   * agora: uma abertura velha que termina depois de outra nascer não escreve o
+   * estado da nova. O erro da abertura VIGENTE continua escrevendo o dele.
+   */
+  geracao: 0,
   abertura: "fora_de_sala",
   falando: false,
+  /** Se o microfone desta abertura só abriu sem o cancelamento de eco (`semEcoPorque` do motor). */
+  semEco: false,
   /** O volume (0 a 4) e o mudo do som da tela, como o desktop os guarda. */
   volumeDaTela: 1,
   telaCalada: false,
@@ -707,13 +993,18 @@ const BYTE_DO_MODO = Object.freeze({ PushToTalk: 0, VoiceActivated: 1, Open: 2 }
 function ligarOAudioNoGesto() {
   const voz = vozDaPonte.atual;
   if (!voz || vozDaSessao.ligando) return;
-  vozDaSessao.ligando = voz
+  // **A abertura é dona do próprio `ligando`**: uma abertura antiga que falha
+  // depois de uma nova ter nascido (o `pagehide`, a sessão que acabou) não zera
+  // o da nova.
+  vozDaSessao.geracao += 1;
+  const esta = voz
     .ligar({ microfone: guardadoNaOrigem(CHAVES_DA_ORIGEM.microfone), saida: guardadoNaOrigem(CHAVES_DA_ORIGEM.saida) })
     .catch((falha) => {
-      vozDaSessao.ligando = null;
+      if (vozDaSessao.ligando === esta) vozDaSessao.ligando = null;
       throw falha;
     });
-  vozDaSessao.ligando.catch(() => {});
+  vozDaSessao.ligando = esta;
+  esta.catch(() => {});
 }
 
 /**
@@ -726,11 +1017,20 @@ function conferirAVozDaSessao(sessao) {
   const sala = lido && !("erro" in lido) ? lido.resposta.sala : null;
   const voz = vozDaPonte.atual;
   if (sala === null) {
-    sairDaVozDaSessao();
+    // `Voltou` confirma o transporte, não a reentrada: o assento desejado já
+    // existe, mas o confirmado espera o Pong marcado. Preserve a captura até
+    // essa decisão; recusa, saída e sala apagada desfazem o desejado no Rust.
+    if (lido?.resposta?.desejada != null) return;
+    // Quem estava DENTRO e já não está (saiu, foi expulso, a sala acabou):
+    // o microfone é solto. Quem ainda não entrou (o `ligar` do gesto espera
+    // a confirmação do servidor) mantém a abertura pendente: soltá-la agora
+    // derrubaria a entrada que acabou de ser pedida.
+    if (vozDaSessao.dentro) sairDaVozDaSessao();
+    else mudarAAbertura("fora_de_sala");
     return;
   }
-  // A conexão nova da volta tem outro número de voz: a voz sai e entra com ele.
-  if (vozDaSessao.dentro && vozDaSessao.numero !== lido.resposta.voz) sairDaVozDaSessao();
+  // A conexão nova da volta tem outro número de voz: a voz sai e entra com ele, e o microfone FICA (outra captura pediria a permissão de novo).
+  if (vozDaSessao.dentro && vozDaSessao.numero !== lido.resposta.voz) sairDaVozMantendoOMicrofone();
   if (vozDaSessao.dentro) return;
   if (!voz || !vozDaSessao.ligando) {
     mudarAAbertura("sem_aparelho");
@@ -740,9 +1040,10 @@ function conferirAVozDaSessao(sessao) {
   mudarAAbertura("abrindo");
   const numero = lido.resposta.voz;
   vozDaSessao.numero = numero;
+  const geracao = vozDaSessao.geracao;
   vozDaSessao.ligando.then(
     () => {
-      if (!vozDaSessao.dentro || sessao.acabou) return;
+      if (geracao !== vozDaSessao.geracao || !vozDaSessao.dentro || sessao.acabou) return;
       voz.mudo(vozDaSessao.mudo);
       voz.isolar(vozDaSessao.isolado);
       voz.modo(BYTE_DO_MODO[modoDeVozGuardado()] ?? 1);
@@ -757,6 +1058,8 @@ function conferirAVozDaSessao(sessao) {
       mudarAAbertura("aberto");
     },
     (falha) => {
+      // De outra geração (a abertura velha que termina depois de a nova nascer): nada a escrever.
+      if (geracao !== vozDaSessao.geracao) return;
       vozDaSessao.dentro = false;
       if (falha && falha.name === "NotAllowedError") recusaDoMicrofone.nestaPagina = true;
       console.warn("ponte: a voz da sala não abriu:", falha);
@@ -765,14 +1068,43 @@ function conferirAVozDaSessao(sessao) {
   );
 }
 
-/** A voz sai da sala (o microfone fica): a sala que acabou, ou o número que mudou. */
+/**
+ * **A voz sai da sala E o microfone é solto** (o requisito do dono: o microfone não persiste fora da sala). É a saída REAL: a pessoa saiu, foi
+ * expulsa, a sala acabou, ou o foco de voz trocou sem entrar noutra sala. `desligar()` do motor para a faixa (`track.stop()`), o codec e o contexto;
+ * a geração sobe, e uma abertura pendente (um `getUserMedia` que ainda não voltou) que resolver depois é DESCARTADA e a faixa que chegou, parada.
+ * Entrar de novo (o gesto de ENTRAR NA SALA) abre um `getUserMedia` novo.
+ */
 function sairDaVozDaSessao() {
+  soltarOMicrofoneDaVoz();
+}
+
+/**
+ * A voz sai da sala, e o microfone FICA: só para a volta da conexão (o número da voz mudou: a voz sai e entra com o novo, na mesma captura) e para
+ * a troca de foco que entra noutra sala (o microfone dela foi aberto no gesto). Nunca para uma saída real.
+ */
+function sairDaVozMantendoOMicrofone() {
   if (vozDaSessao.dentro) {
     vozDaPonte.atual?.sair();
     vozDaSessao.dentro = false;
     vozDaSessao.numero = null;
   }
   mudarAAbertura("fora_de_sala");
+}
+
+/** Solta o microfone da página, sem tocar no TESTE do microfone de CONFIGURAÇÕES (outro caminho, com o próprio ciclo): este fica de pé até a pessoa pará-lo. */
+function soltarOMicrofoneDaVoz() {
+  const voz = vozDaPonte.atual;
+  const haCaptura = vozDaSessao.dentro || Boolean(vozDaSessao.ligando);
+  Object.assign(vozDaSessao, { dentro: false, numero: null, ligando: null, falando: false });
+  vozDaSessao.geracao += 1;
+  mudarAAbertura("fora_de_sala");
+  if (!haCaptura || !voz) return;
+  // Com o teste de CONFIGURAÇÕES aberto, o áudio é dele: só a voz da sala sai, e o `fecharTeste` desliga quando ele acabar.
+  if (voz.estadoDoTeste && voz.estadoDoTeste() !== null) {
+    voz.sair();
+    return;
+  }
+  voz.desligar().catch(() => {});
 }
 
 function mudarAAbertura(abertura) {
@@ -785,9 +1117,11 @@ function mudarAAbertura(abertura) {
 function fecharAVozDaSessao() {
   const ligando = vozDaSessao.ligando;
   Object.assign(vozDaSessao, { dentro: false, numero: null, ligando: null, abertura: "fora_de_sala", falando: false });
-  if (ligando) {
-    ligando.then(() => vozDaPonte.atual?.desligar()).catch(() => {});
-  }
+  vozDaSessao.geracao += 1;
+  // **Cancela AGORA**, e não quando a abertura terminar: o `desligar` do motor
+  // marca a geração, e uma abertura pendente (o `getUserMedia` que ainda não
+  // voltou) para o que receber depois, sem desligar a voz de uma sessão nova.
+  if (ligando) vozDaPonte.atual?.desligar().catch(() => {});
 }
 
 /** As alças cujo ganho já foi aplicado, e com que ganho. */
@@ -798,11 +1132,17 @@ const ganhosAplicados = new Map();
  * cada volta, o ganho de quem tem volume escolhido, pela alça de agora (quem
  * voltou com outra voz ganha outra alça, e o mesmo ganho).
  */
-function seguirOsVolumes() {
-  const sessao = sessaoDaPonte.atual;
+async function seguirOsVolumes() {
+  // Os ganhos são da mistura, que toca só a sessão com o foco (E3).
+  const sessao = sessoesDaPonte.get(focoDaPonte) ?? sessaoDaPonte.atual;
   const voz = vozDaPonte.atual;
   if (!sessao || !voz || !vozDaSessao.dentro) return;
-  for (const [alca, ganho] of sessao.ganhosDaVoz()) {
+  // **Os volumes estão na instância da SESSÃO, e as alças da mistura na da
+  // PÁGINA** (medido pelo browser-signaling no servidor real: `ganhosDaVoz()`
+  // devolvia `{}`). O `ganhosNaMistura` leva um ao outro num bloco opaco.
+  const daPagina = (await carregarOWasmDaPagina()).instancia.exports;
+  if (vozDaPonte.atual !== voz) return;
+  for (const [alca, ganho] of sessao.ganhosNaMistura(daPagina)) {
     if (ganhosAplicados.get(alca) === ganho) continue;
     voz.ganho(alca, ganho);
     ganhosAplicados.set(alca, ganho);
@@ -1240,10 +1580,35 @@ const MODOS_DE_VOZ = Object.freeze(["PushToTalk", "VoiceActivated", "Open"]);
  */
 const vozDaPonte = { atual: null, nascendo: null };
 
+/**
+ * O que o motor da voz conta à ponte. Só o fim da página importa aqui: o áudio
+ * fechou (`pagehide`, `freeze`), e o estado da ponte diz que a voz não está
+ * ligada, em vez de «aberta». Nada reabre o microfone sozinho: quem volta entra
+ * na sala de novo, com um gesto (`ligarOAudioNoGesto`).
+ */
+function aoEventoDaVoz(evento) {
+  // O microfone que só abriu sem o cancelamento de eco (o motor tentou com ele,
+  // e a faixa chegou encerrada): a sala diz isso a quem fala, em uma frase.
+  if (evento && evento.tipo === "audio-ligado") {
+    vozDaSessao.semEco = Boolean(evento.semEcoPorque);
+    return;
+  }
+  if (!evento || evento.tipo !== "audio-fechado") return;
+  vozDaSessao.semEco = false;
+  // **O microfone que parou em uso** (o navegador ou o sistema encerrou a
+  // faixa): dentro da sala, a tela diz SEM ÁUDIO, e não «fora de sala», que não
+  // acusa falta de nada. Um gesto (sair e entrar) abre de novo.
+  const perdeuNaSala = evento.motivo === "captura-perdida" && vozDaSessao.dentro;
+  if (perdeuNaSala) console.warn("ponte: o microfone parou durante a sala (a faixa foi encerrada pelo navegador ou pelo sistema)");
+  Object.assign(vozDaSessao, { dentro: false, numero: null, ligando: null, abertura: perdeuNaSala ? "sem_aparelho" : "fora_de_sala", falando: false });
+  vozDaSessao.geracao += 1;
+  emitirNaPonte("seele://event", "TelemetryChanged");
+}
+
 function aVozDaPonte() {
   if (!vozDaPonte.nascendo) {
     vozDaPonte.nascendo = carregarOWasmDaPagina().then(({ bytes, instancia }) => {
-      vozDaPonte.atual = criarVozDoNavegador({ wasm: instancia.exports, bytesDoWasm: bytes });
+      vozDaPonte.atual = criarVozDoNavegador({ wasm: instancia.exports, bytesDoWasm: bytes, aoAcontecer: aoEventoDaVoz });
       return vozDaPonte.atual;
     });
     vozDaPonte.nascendo.catch(() => {
@@ -1264,6 +1629,9 @@ function fraseDoMicrofoneQueNaoAbriu(erro) {
     return "O navegador não deu o microfone a esta página. Permita o microfone nos ajustes do site e tente de novo.";
   }
   if (nome === "NotFoundError") return "Esta máquina não mostrou nenhum microfone ao navegador.";
+  if (nome === "SeeleCapturaEncerrada") {
+    return "O microfone abriu e parou na mesma hora: o sistema não entregou o som ao navegador. Tente de novo; se repetir, reinicie o navegador.";
+  }
   if (nome === "NotReadableError") {
     return "O microfone não abriu: outro programa pode estar com ele, ou o sistema não o entregou ao navegador.";
   }
@@ -1738,6 +2106,41 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   volumes_locais: () => (sessaoDaPonte.atual ? Promise.resolve(pelaSessao("volumes_locais")({})).catch(() => ({})) : {}),
   snapshot: () => comASessao((sessao) => sessao.snapshot()),
   disconnect: sairDaSessaoDaPonte,
+  // **As várias sessões da página** (E3; fronteiras §6), o mesmo vocabulário
+  // do app.
+  sessoes: () => sessoesNaPonte(),
+  ver_sessao: ({ sessao, epoca } = {}) => {
+    const aberta = sessoesDaPonte.get(sessao);
+    if (!aberta) return Promise.reject("NotConnected");
+    // **A época da troca** (base.js): um pedido mais velho que o último
+    // aplicado não muda a vista daqui, nem que chegue depois.
+    if (typeof epoca === "number") {
+      if (epoca < epocaAplicadaNaPonte) return Promise.reject({ VistaSuperada: { sessao, epoca } });
+      epocaAplicadaNaPonte = epoca;
+    }
+    vistaDaPonte = sessao;
+    aberta.naoLidas = 0;
+    aberta.mudou = false;
+    // A época da vista sobe: os MODs da anterior param, como numa saída.
+    geracaoDaPonte += 1;
+    aberta.geracao = geracaoDaPonte;
+    avisarAsSessoes(sessao, "vista");
+    return {
+      carimbo: carimboDaPonte(aberta), vista: geracaoDaPonte, geracao: geracaoDaPonte,
+      snapshot: aberta.acabou ? null : retratoDaSessao(aberta), veredito: "Known",
+    };
+  },
+  encerrar_sessao: ({ carimbo } = {}) => {
+    const aberta = sessoesDaPonte.get(carimbo?.sessao);
+    if (!aberta) return null;
+    sessaoDoPedido = aberta;
+    try {
+      return sairDaSessaoDaPonte();
+    } finally {
+      sessaoDoPedido = null;
+    }
+  },
+  focar_voz: ({ carimbo } = {}) => focarAVozNaPonte(carimbo?.sessao ?? 0),
   // **A sessão pelo navegador** (2.6): o `connect` pela WebTransport, e os
   // comandos da sessão pelo `.wasm`, que faz o que a FFI faz em cada um.
   connect: abrirASessaoPelaPonte,
@@ -1758,7 +2161,10 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     const texto = String(link ?? "").trim();
     const lido = await lerOLink(texto);
     if (lido.erro) {
-      const frase = FRASES_DO_LINK[lido.erro] ?? FRASES_DO_LINK.Convite;
+      // O erro chega como nome (`"OutraOrigem"`) ou como objeto com campo
+      // (`{ OutraLinha: { versao } }`): a frase é a do nome, nos dois.
+      const nome = typeof lido.erro === "object" && lido.erro ? Object.keys(lido.erro)[0] : lido.erro;
+      const frase = FRASES_DO_LINK[nome] ?? FRASES_DO_LINK.Convite;
       return Promise.reject({ RecusaDaPonte: { comando: "analisar_convite", frase } });
     }
     linkColadoDaPonte = { texto, alvo: lido.link.alvo, impressao: lido.link.impressao };
@@ -2129,21 +2535,37 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   pedir_quadro_chave: pelaSessao("pedir_quadro_chave"),
   // **A sala, e o áudio dentro do gesto**: o `ligar` vem antes de qualquer
   // espera, e a voz abre quando o servidor confirma a entrada.
+  // **Entrar numa sala é o pedido do foco** (fronteiras §5: «um ato, não
+  // dois»): a sessão que tinha a voz sai da sala dela e a voz sai com ela
+  // antes de esta entrar. A sessão é pega antes de qualquer espera.
   enter_voice_room: (args) =>
+    comASessao(async (sessao) => {
+      const pedido = ++vozDaSessao.pedido;
+      // O que este pedido abriu (o microfone do gesto) é dele até a entrada ser confirmada: qualquer saída por erro, ANTES ou DEPOIS do `await` da
+      // entrada (o foco recusado, a entrada recusada), solta a captura, e só se nenhum pedido mais novo a tomou para si.
+      try {
+        ligarOAudioNoGesto();
+        if (sessao.idDaPonte && focoDaPonte !== sessao.idDaPonte) await focarAVozNaPonte(sessao.idDaPonte, true);
+        const resposta = await pelaSessaoDe(sessao, "enter_voice_room")(args);
+        if (focoDaPonte === sessao.idDaPonte || !sessao.idDaPonte) conferirAVozDaSessao(sessao);
+        return resposta;
+      } catch (falha) {
+        if (pedido === vozDaSessao.pedido && !vozDaSessao.dentro) soltarOMicrofoneDaVoz();
+        throw falha;
+      }
+    }),
+  leave_voice_room: (args) =>
     comASessao((sessao) => {
-      ligarOAudioNoGesto();
-      return Promise.resolve(pelaSessao("enter_voice_room")(args)).then((resposta) => {
-        conferirAVozDaSessao(sessao);
+      const pedido = ++vozDaSessao.pedido;
+      // **O SAIR revoga a captura NO GESTO**, antes de esperar a resposta do servidor: a faixa para quando a pessoa toca, e não quando a resposta chega.
+      const daFoco = focoDaPonte === sessao.idDaPonte || !sessao.idDaPonte;
+      if (daFoco) soltarOMicrofoneDaVoz();
+      return Promise.resolve(pelaSessaoDe(sessao, "leave_voice_room")(args)).then((resposta) => {
+        // A resposta de um SAIR antigo não mexe numa reentrada que já nasceu: só o pedido mais novo confere a sala.
+        if (daFoco && pedido === vozDaSessao.pedido) conferirAVozDaSessao(sessao);
         return resposta;
       });
     }),
-  leave_voice_room: (args) =>
-    comASessao((sessao) =>
-      Promise.resolve(pelaSessao("leave_voice_room")(args)).then((resposta) => {
-        conferirAVozDaSessao(sessao);
-        return resposta;
-      }),
-    ),
   // O mudo e o isolamento são escolhas desta ponta (valem fora da sala), e o
   // servidor fica sabendo.
   set_muted: ({ on } = {}) =>
@@ -2163,15 +2585,32 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   set_volume: ({ nickname, percent } = {}) =>
     comASessao(() =>
       Promise.resolve(pelaSessao("set_volume")({ nickname, percent, comAudio: audioDisponivel() })).then((resposta) => {
-        seguirOsVolumes();
+        seguirOsVolumes().catch((falha) => console.warn("volumes na mistura:", falha));
         return resposta;
       }),
     ),
   // A busca: `buscar` lê a conversa da sessão; andar e limpar respondem sem
   // sessão, como no desktop, porque a busca é da página.
   buscar: pelaSessao("buscar"),
-  busca_andar: pelaPagina("busca_andar"),
-  busca_limpar: pelaPagina("busca_limpar"),
+  // **Os cargos** (F e G, 0.17): os nove, à sessão do carimbo (a
+  // `invocarNaPonte` já tirou o carimbo e escolheu a sessão), com o quadro e
+  // os membros DELA, no `.wasm` (`seele-web/src/cargos.rs`). As respostas e
+  // as recusas têm as formas do desktop (`CargoRecusado`, `SemQuadro`).
+  pedir_cargos: pelaSessao("pedir_cargos"),
+  explicar_permissoes: pelaSessao("explicar_permissoes"),
+  prever_cargo: pelaSessao("prever_cargo"),
+  criar_cargo: pelaSessao("criar_cargo"),
+  editar_cargo: pelaSessao("editar_cargo"),
+  mover_cargo: pelaSessao("mover_cargo"),
+  apagar_cargo: pelaSessao("apagar_cargo"),
+  atribuir_cargo: pelaSessao("atribuir_cargo"),
+  revogar_cargo: pelaSessao("revogar_cargo"),
+  // **Andar e limpar vão à SESSÃO** (medido pelo browser-signaling no servidor
+  // real): o estado da busca fica na instância da sessão, e a da página
+  // respondia `{atual: null, total: 0}`. Sem sessão, a da página responde o
+  // estado vazio, como o desktop.
+  busca_andar: (args) => (sessaoDaPonte.atual ? pelaSessao("busca_andar")(args) : pelaPagina("busca_andar")(args)),
+  busca_limpar: (args) => (sessaoDaPonte.atual ? pelaSessao("busca_limpar")(args) : pelaPagina("busca_limpar")(args)),
   // **O som da tela que se assiste** (R17): o volume e o mudo são escolhas
   // desta ponta, que valem antes de a tela tocar; sem áudio na página, o
   // desktop responde `null` e recusa os dois ajustes.
@@ -2210,7 +2649,12 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   },
   compartilhar_tela: ({ limites } = {}) =>
     comASessao((sessao) => {
-      if (!navigator.mediaDevices?.getDisplayMedia || !sessao.transmissao) return Promise.reject("ScreenShareUnavailable");
+      // Sem as peças da captura (o WebKit não tem o `MediaStreamTrackProcessor`),
+      // a recusa vem ANTES do seletor, dita como é do navegador.
+      if (!temCapturaParaCodificar()) {
+        return Promise.reject({ RecusaDaPonte: { comando: "compartilhar_tela", frase: FRASES_DA_TELA_NO_NAVEGADOR.recusa } });
+      }
+      if (!sessao.transmissao) return Promise.reject("ScreenShareUnavailable");
       const comSom = limites?.com_som !== false;
       // Dentro do gesto: nada espera antes do seletor.
       return navigator.mediaDevices
@@ -2450,8 +2894,35 @@ async function invocarNaPonte(comando, args) {
   if (!Object.hasOwn(ATENDIMENTOS_DA_PONTE, comando)) {
     return anotarNaPonte(comando, "desconhecido", { ComandoDesconhecido: { comando } });
   }
-  return ATENDIMENTOS_DA_PONTE[comando](args ?? {});
+  // **O carimbo escolhe a sessão** (E3). Tirado dos argumentos — o `.wasm` e
+  // os corpos daqui não o conhecem — e posto como a sessão do pedido durante a
+  // parte síncrona do atendimento, que é onde todo corpo pega a sessão.
+  const { carimbo, ...semCarimbo } = args ?? {};
+  let doPedido = null;
+  if (carimbo && typeof carimbo.sessao === "number" && !SEM_SESSAO_DO_CARIMBO.has(comando)) {
+    doPedido = sessoesDaPonte.get(carimbo.sessao) ?? null;
+    if (!doPedido) return Promise.reject("NotConnected");
+    const agora = doPedido.geracaoDoEnlace ?? 1;
+    if ((carimbo.geracao ?? agora) < agora) {
+      return Promise.reject({ SessaoNaoConfere: { esperado: agora, veio: carimbo.geracao } });
+    }
+  }
+  const antes = sessaoDoPedido;
+  sessaoDoPedido = doPedido ?? sessaoDoPedido;
+  try {
+    return ATENDIMENTOS_DA_PONTE[comando](
+      SEM_SESSAO_DO_CARIMBO.has(comando) ? (args ?? {}) : semCarimbo,
+    );
+  } finally {
+    sessaoDoPedido = antes;
+  }
 }
+
+/**
+ * Os comandos cujo `carimbo` é o argumento deles (a sessão a que se refere), e
+ * não a sessão do pedido: trazer a voz, sair de uma sessão.
+ */
+const SEM_SESSAO_DO_CARIMBO = new Set(["focar_voz", "encerrar_sessao", "connect", "sessoes", "foco_de_voz", "ver_sessao"]);
 
 /** Quem ouve cada evento. */
 const OUVINTES_DA_PONTE = new Map();

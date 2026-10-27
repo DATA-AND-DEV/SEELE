@@ -455,11 +455,11 @@ mod o_catalogo {
             vec![
                 (
                     "mod.json".to_owned(),
-                    "https://mods.seele.app.br/mods/alguem/rpg/1.0.0/mod.json".to_owned()
+                    "https://mods.seele.sh/mods/alguem/rpg/1.0.0/mod.json".to_owned()
                 ),
                 (
                     "cliente/main.js".to_owned(),
-                    "https://mods.seele.app.br/mods/alguem/rpg/1.0.0/cliente/main.js".to_owned()
+                    "https://mods.seele.sh/mods/alguem/rpg/1.0.0/cliente/main.js".to_owned()
                 ),
             ],
             "o cliente tem de buscar a lista do catálogo, e não descobrir \

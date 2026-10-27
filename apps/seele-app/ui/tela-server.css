@@ -1,25 +1,13 @@
 /* A camada que põe a configuração por cima, e não no lugar.
 
-   ---- por que ela deixou de ser um diálogo de 840 × 620 ----
+   A razão de ser camada e não tela está escrita em `index.html`: trocar de microfone no meio de uma conversa é o caso de uso, e uma tela que
+   substitui a sessão esconde o que se está tentando consertar. A voz e a conexão continuam de pé atrás dela, e a faixa de contexto no
+   cabeçalho diz isso em palavra.
 
-   U29 da auditoria de 20/09/2026 mediu o que sobrava: «o modal tem largura
-   máxima de 840 px e altura `min(620px, calc(100vh - 96px))`; a grade reserva
-   216 px à navegação. No limite máximo, sobram aproximadamente 574 px internos
-   para conteúdo». Dentro desses 574 px moravam a gestão de MODs inteira — com
-   catálogo, cache, consentimentos e contadores —, a administração do servidor e
-   a documentação de cada controle.
-
-   A razão de ser camada e não tela continua valendo e está escrita em
-   `index.html`: trocar de microfone no meio de uma conversa é o caso de uso, e
-   uma tela que substitui a sessão esconde o que se está tentando consertar. O
-   que mudou foi o **tamanho**: ela ocupa a área útil da janela, com a folga que
-   a mantém legível, em vez de uma caixa que cabia numa tela de 2015.
-
-   A voz e a conexão continuam de pé atrás dela — é a mesma camada, com o mesmo
-   `z-index` —, e a faixa de contexto no cabeçalho diz isso em palavra. */
+   Ela ocupa a JANELA INTEIRA: as seções à esquerda, o conteúdo da seção à direita, em grade de cartões que se redistribuem com a largura. Quem
+   fica estreito é o parágrafo (a medida de leitura), e não a tela. */
 .camada-server {
-  /* A camada cobre a sessão: não há varredura por cima nem faixa que desça, e
-     o rótulo miúdo sobe para o token da condição limpa — ver
+  /* A camada cobre a sessão: não há varredura por cima nem faixa que desça, e o rótulo miúdo sobe para o token da condição limpa — ver
      `--seele-rotulo-claro` em `tokens.css`, com a medida escrita. */
   --seele-osso-apagado: var(--seele-rotulo-claro);
   --seele-rotulo-painel: var(--seele-rotulo-claro);
@@ -27,9 +15,9 @@
   inset: 0;
   z-index: 24;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(12px, 3vh, 32px) clamp(12px, 3vw, 48px);
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
 }
 
 .camada-server::before {
@@ -40,33 +28,13 @@
   opacity: 0.78;
 }
 
-/* A caixa, com os valores literais da comp — e três deles eram defeito.
- *
- * **`background`.** Ela não tinha nenhum. O véu do `::before` é 0,78 sobre o
- * negro, e portanto translúcido: a tela de trás continuava legível através da
- * configuração. Na entrada, cujo fundo é claro de textura, ficava «ainda mais
- * feio» — que é como o relato de campo o descreveu.
- *
- * **`height` fixa, e não `max-height`.** Com a altura vindo do conteúdo, o
- * diálogo mudava de tamanho a cada seção escolhida na coluna da esquerda: o
- * mesmo diálogo, saltando, como se cada seção fosse uma janela diferente. A
- * comp escreve `min(620px, calc(100vh - 96px))` — 620 quando cabe, e o que
- * sobra da janela quando não cabe, sempre com os 32px de folga em volta mais
- * a margem de 16 de cada lado.
- *
- * **`max-width` de 840px**, e não 1040: era largura nossa, não da comp. */
+/* A caixa tem fundo próprio: o véu do `::before` é translúcido, e sem fundo a tela de trás continuava legível através da configuração. A
+   altura é a da janela (`height: 100%`), e não uma altura fixa que variasse com o conteúdo de cada seção. */
 .camada-server > .server {
   position: relative;
   width: 100%;
-  /* **A área útil, e não 840 px.** Um teto ainda existe — uma coluna de texto
-     de 1600 px é ilegível, e o §«Formato recomendado» da auditoria pede
-     «coluna de leitura confortável» em vez de parágrafos esticados pela
-     largura inteira. O que ele não faz mais é caber numa caixa de 574 px de
-     conteúdo com a gestão de MODs inteira dentro. */
-  max-width: min(1400px, 100%);
-  height: min(920px, calc(100vh - 24px));
+  height: 100%;
   background: var(--seele-negro-painel);
-  border: 1px solid var(--seele-linha-forte);
   overflow: hidden;
 }
 
@@ -324,9 +292,6 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
-  /* O comp trava o painel em 860px. Uma linha de 13px monoespaçado atravessando
-     uma janela de 1600 é uma linha que ninguém termina de ler. */
-  max-width: 860px;
 }
 
 .server-painel .rotulo {
@@ -348,9 +313,21 @@
    decisão não existe até alguém procurá-la. A régua continua sendo múltipla de
    quatro, e os alvos de toque não mudaram. */
 .server-painel-secao {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
   gap: 16px;
+  align-items: start;
+}
+
+/* O que não é um bloco (um aviso, um título solto) ocupa a linha inteira; o parágrafo mantém a medida de leitura. */
+.server-painel-secao > :not(.server-bloco) {
+  grid-column: 1 / -1;
+}
+
+.server-painel-secao p,
+.server-painel .nota,
+.server-painel .server-frase {
+  max-width: var(--seele-leitura);
 }
 
 /* ---------- um bloco ---------- */
@@ -1017,4 +994,64 @@
 .server-detalhes > summary:focus-visible {
   outline: 2px solid var(--seele-laranja-nerv);
   outline-offset: 2px;
+}
+
+
+/* ---------- o celular e a janela estreita ----------
+
+   Abaixo de 700px a tela é um ÍNDICE de seções seguido da seção inteira, e não uma barra lateral encolhida. `data-vista` (em `#tela-server`,
+   posto por `tela-server.js`) diz qual:
+   - `indice`: o cabeçalho (VOLTAR, que fecha a configuração) e a lista das seções ocupando o resto da altura;
+   - `secao`: o cabeçalho (SEÇÕES, que volta ao índice, e VOLTAR) e o painel da seção na área toda.
+   Sem JavaScript o painel e a lista aparecem juntos, empilhados, e nada some. */
+.server-so-celular { display: none; }
+
+@media (max-width: 700px) {
+  .server {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  /* O corpo (cabeçalho e painel) vem primeiro, a lista de seções depois, e cada vista esconde o que não é dela. */
+  .server-corpo { order: -1; min-height: 0; }
+
+  .server-coluna {
+    border-right: 0;
+    border-top: 1px solid var(--seele-linha-forte);
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .server-painel {
+    padding: 16px;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .server-painel-secao { grid-template-columns: minmax(0, 1fr); }
+
+  .server-voltar { min-height: 44px; }
+
+  #tela-server[data-vista="indice"] .server-painel,
+  #tela-server[data-vista="indice"] .server-faixa-texto,
+  #tela-server[data-vista="indice"] .server-contexto { display: none; }
+
+  #tela-server[data-vista="secao"] .server-coluna { display: none; }
+  #tela-server[data-vista="secao"] .server-so-celular { display: flex; }
+
+  /* No índice, o corpo tem só a faixa, e a lista toma o resto. */
+  #tela-server[data-vista="indice"] .server { grid-template-rows: auto minmax(0, 1fr); }
+  #tela-server[data-vista="secao"] .server { grid-template-rows: minmax(0, 1fr); }
+}
+
+
+/* O foco visível dos controles nativos (a caixa de marcar e a régua): o anel do sistema varia entre motores, e este é o mesmo dos botões da tela. */
+.server-marcar input:focus-visible,
+.server-regua input[type="range"]:focus-visible {
+  outline: 2px solid var(--seele-osso);
+  outline-offset: 2px;
+}
+
+/* O teclado aberto sobre um campo de uma seção: o painel ganha folga embaixo, para o campo poder rolar até ficar acima dele. */
+@media (max-width: 700px), (max-height: 500px) {
+  html[data-teclado] .server-painel { padding-bottom: 55vh; }
 }

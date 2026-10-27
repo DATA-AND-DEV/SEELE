@@ -27,6 +27,7 @@
 //! | | 1 | `{"erro": "sem-ligacao"}` |
 //! | `ligacao_assinado(assinatura)` | 0 | `{"passos": […]}` |
 //! | `ligacao_fluxo_acabou()` | 0 | `{"passos": […]}` |
+//! | `ligacao_fluxo_acabou_com(codigo)` | 0 | `{"passos": […]}`: com o `CODIGO_FICOU_PARA_TRAS`, antes a despedida `FellBehind` |
 //! | `ligacao_para_o_fio()` | 0 | os bytes enquadrados (talvez nenhum) |
 //! | `ligacao_retrato()` | 0 | `{"sala": RetratoDaSala, "contados": {…}, "telemetria": {…}}` |
 //! | | 1 | `{"erro": "sem-sessao"}` |
@@ -104,7 +105,7 @@
 //!
 //! | função | devolve | na saída |
 //! |---|---|---|
-//! | `voz_envio(ssrc)` | — | — |
+//! | `voz_envio(ssrc, agora_ms)` | — | — |
 //! | `voz_regua(abertura_milesimos, com_supressao)` | — | — |
 //! | `voz_modo(modo)` (0 aperte-para-falar, 1 por voz, 2 aberto) | — | — |
 //! | `voz_tecla(segurando)` | — | — |
@@ -305,7 +306,8 @@ fn dizer_o_link(lido: &serde_json::Value) -> u32 {
 }
 
 /// Um link do navegador, lido contra a origem do produto
-/// (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`, a D-web-2). Devolve 0
+/// (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`, a D-web-2, ou uma das anteriores,
+/// `ORIGENS_LEGADAS_DO_NAVEGADOR`). Devolve 0
 /// com `{"link": …}` na saída, ou 1 com `{"erro": …}`.
 ///
 /// **Sem parâmetro de origem, de propósito**: a página não escolhe contra que
@@ -319,10 +321,186 @@ pub unsafe extern "C" fn analisar_link(ptr: *const u8, len: usize) -> u32 {
     // SAFETY: repassa o contrato desta função ao de `entrada`.
     let bytes = unsafe { entrada(ptr, len) };
     let texto = std::str::from_utf8(bytes).unwrap_or("");
+    // A origem do produto que o link TRAZ: a atual, ou uma anterior exatamente (a troca de domínio da 0.17, com
+    // compatibilidade; `seele_proto::uri::origem_do_link`). Qualquer outra continua recusada.
     dizer_o_link(&crate::link_do_navegador(
         texto,
-        seele_proto::uri::ORIGEM_DO_NAVEGADOR,
+        seele_proto::uri::origem_do_link(texto),
     ))
+}
+
+/// O corpo do `POST /sinal/1` (contrato da 0.17, D7): `pedido` é
+/// `{"impressao", "credencial", "candidatos"}`. Devolve 0 com `{"corpo": …}`,
+/// ou 1 com `{"erro": …}`. Ver [`crate::sinal_chama`].
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn sinal_chama(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let lido = crate::sinal_chama(std::str::from_utf8(bytes).unwrap_or(""));
+    let codigo = u32::from(lido.get("corpo").is_none());
+    dizer(lido.to_string().into_bytes(), codigo)
+}
+
+/// A resposta do ponto ao `POST /sinal/1`, lida. Devolve 0 com o JSON de
+/// [`crate::sinal_resposta`], ou 1 com `{"erro": "ilegivel"}`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn sinal_resposta(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let lido = crate::sinal_resposta(std::str::from_utf8(bytes).unwrap_or(""));
+    let codigo = u32::from(lido.get("erro").is_some());
+    dizer(lido.to_string().into_bytes(), codigo)
+}
+
+// ------------------------------------------------- os cargos (ADR 0064, de F)
+//
+// O núcleo é `crate::cargos` (de F). Estas fronteiras só leem UM objeto JSON
+// por chamada — os dados DAQUELA sessão, que a página guardou dela — e
+// devolvem o JSON do núcleo. Nada aqui guarda quadro: duas sessões na mesma
+// página nunca se misturam porque cada chamada traz o seu. Um objeto só, e não
+// `u64` soltos, porque um `i64` do wasm vira `BigInt` no JavaScript.
+
+/// O campo `nome` do objeto, de volta em texto JSON (`null` quando falta).
+fn campo_em_json(objeto: &serde_json::Value, nome: &str) -> String {
+    objeto
+        .get(nome)
+        .map_or_else(|| "null".to_owned(), serde_json::Value::to_string)
+}
+
+/// O campo numérico `nome`, ou a recusa nomeada.
+fn campo_numero(objeto: &serde_json::Value, nome: &str) -> Result<u64, serde_json::Value> {
+    objeto
+        .get(nome)
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| serde_json::json!({ "erro": format!("falta o número «{nome}»") }))
+}
+
+/// A entrada como objeto JSON, ou a recusa nomeada.
+fn objeto_de(bytes: &[u8]) -> Result<serde_json::Value, serde_json::Value> {
+    match serde_json::from_slice::<serde_json::Value>(bytes) {
+        Ok(objeto) if objeto.is_object() => Ok(objeto),
+        Ok(_) => Err(serde_json::json!({ "erro": "a entrada não é um objeto JSON" })),
+        Err(e) => Err(serde_json::json!({ "erro": e.to_string() })),
+    }
+}
+
+/// 0 com a resposta do núcleo, ou 1 quando ela traz `erro` ou `recusa` (a
+/// mesma forma, `{"recusa": RecusaDeCargo}`, que o servidor diria).
+fn dizer_dos_cargos(resposta: &serde_json::Value) -> u32 {
+    let codigo = u32::from(resposta.get("erro").is_some() || resposta.get("recusa").is_some());
+    dizer(resposta.to_string().into_bytes(), codigo)
+}
+
+fn cargos_prever_de(bytes: &[u8]) -> serde_json::Value {
+    let lido = objeto_de(bytes).and_then(|o| {
+        let autor = campo_numero(&o, "autor")?;
+        let revisao = campo_numero(&o, "revisao")?;
+        Ok((o, autor, revisao))
+    });
+    match lido {
+        Ok((o, autor, revisao)) => crate::cargos::prever_na_sessao(
+            &campo_em_json(&o, "quadro"),
+            &campo_em_json(&o, "membros"),
+            autor,
+            revisao,
+            &campo_em_json(&o, "pedido"),
+        ),
+        Err(recusa) => recusa,
+    }
+}
+
+fn cargos_explicar_de(bytes: &[u8]) -> serde_json::Value {
+    let lido = objeto_de(bytes).and_then(|o| Ok((campo_numero(&o, "pessoa")?, o)));
+    match lido {
+        Ok((pessoa, o)) => crate::cargos::explicar_na_sessao(
+            &campo_em_json(&o, "quadro"),
+            &campo_em_json(&o, "membros"),
+            pessoa,
+        ),
+        Err(recusa) => recusa,
+    }
+}
+
+fn cargos_na_tela_de(bytes: &[u8]) -> serde_json::Value {
+    match objeto_de(bytes) {
+        Ok(o) => crate::cargos::na_tela(
+            &campo_em_json(&o, "quadro"),
+            &campo_em_json(&o, "suas"),
+            &campo_em_json(&o, "membros"),
+        ),
+        Err(recusa) => recusa,
+    }
+}
+
+fn cargos_comando_de(bytes: &[u8]) -> serde_json::Value {
+    let lido = objeto_de(bytes).and_then(|o| Ok((campo_numero(&o, "revisao")?, o)));
+    match lido {
+        Ok((revisao, o)) => crate::cargos::comando(revisao, &campo_em_json(&o, "pedido")),
+        Err(recusa) => recusa,
+    }
+}
+
+/// `prever_cargo` da página: a entrada é
+/// `{"quadro", "membros", "autor", "revisao", "pedido"}` daquela sessão; a
+/// saída, a de [`crate::cargos::prever_na_sessao`] (0 com `{"previa"}`, 1 com
+/// `{"recusa"}` ou `{"erro"}`).
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn cargos_prever(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    dizer_dos_cargos(&cargos_prever_de(bytes))
+}
+
+/// `explicar_permissoes` da página: a entrada é `{"quadro", "membros",
+/// "pessoa"}`; a saída, a de [`crate::cargos::explicar_na_sessao`].
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn cargos_explicar(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    dizer_dos_cargos(&cargos_explicar_de(bytes))
+}
+
+/// `pedir_cargos` da página (o que a tela lê): a entrada é `{"quadro",
+/// "suas", "membros"}` (`suas` pode faltar); a saída, o `CargosNaTela` de
+/// [`crate::cargos::na_tela`].
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn cargos_na_tela(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    dizer_dos_cargos(&cargos_na_tela_de(bytes))
+}
+
+/// Os seis verbos: a entrada é `{"revisao", "pedido": PedidoDeCargo}`; a
+/// saída, a `ClientMessage` em JSON para o [`codificar`] de sempre.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn cargos_comando(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    dizer_dos_cargos(&cargos_comando_de(bytes))
 }
 
 // ------------------------------------------------------------- a ligação
@@ -413,6 +591,14 @@ pub unsafe extern "C" fn ligacao_assinado(ptr: *const u8, len: usize) -> u32 {
 #[no_mangle]
 pub extern "C" fn ligacao_fluxo_acabou() -> u32 {
     com_a_ligacao(|ligacao| dizer_os_passos(&ligacao.fluxo_acabou()))
+}
+
+/// O fluxo de controle acabou com o código do fechamento (o `0x02 codigo` do
+/// `ctl`): o `CODIGO_FICOU_PARA_TRAS` vira a despedida `FellBehind`, uma vez
+/// por conexão; qualquer outro, a queda de sempre. Como [`ligacao_chegou`].
+#[no_mangle]
+pub extern "C" fn ligacao_fluxo_acabou_com(codigo: u32) -> u32 {
+    com_a_ligacao(|ligacao| dizer_os_passos(&ligacao.fluxo_acabou_com(codigo)))
 }
 
 /// Os bytes que esperam para ir ao fluxo de controle (0, e os bytes na saída;
@@ -612,6 +798,16 @@ fn dizer_os_passos_do_fluxo(passos: &[crate::fluxos::Passo]) -> u32 {
     )
 }
 
+/// A tela que o fluxo abriu ou fechou, contada à sessão: a que o servidor liga
+/// sozinho entra no retrato (`Sessao::ouvir_o_fluxo`).
+fn a_sessao_ouve_o_fluxo(passos: &[crate::fluxos::Passo], alca: u32) {
+    LIGACAO.with(|l| {
+        if let Some(sessao) = l.borrow_mut().as_mut().and_then(Ligacao::sessao_mut) {
+            sessao.ouvir_o_fluxo(passos, alca);
+        }
+    });
+}
+
 /// Um fluxo unidirecional que o servidor abriu: devolve a alça dele.
 #[no_mangle]
 pub extern "C" fn fluxo_novo() -> u32 {
@@ -640,6 +836,9 @@ pub unsafe extern "C" fn fluxo_chegou(alca: u32, ptr: *const u8, len: usize) -> 
             .get_mut(&alca)
             .map(|fluxo| fluxo.chegou(pedaco))
     });
+    if let Some(passos) = passos.as_deref() {
+        a_sessao_ouve_o_fluxo(passos, alca);
+    }
     match passos {
         Some(passos) => dizer_os_passos_do_fluxo(&passos),
         None => dizer(br#"{"erro":"sem-fluxo"}"#.to_vec(), 1),
@@ -655,6 +854,9 @@ pub extern "C" fn fluxo_acabou(alca: u32) -> u32 {
             .remove(&alca)
             .map(|mut fluxo| fluxo.acabou())
     });
+    if let Some(passos) = passos.as_deref() {
+        a_sessao_ouve_o_fluxo(passos, alca);
+    }
     match passos {
         Some(passos) => dizer_os_passos_do_fluxo(&passos),
         None => dizer(br#"{"erro":"sem-fluxo"}"#.to_vec(), 1),
@@ -1450,10 +1652,13 @@ fn erro_da_voz(texto: &str) -> u32 {
     )
 }
 
-/// O envio de quem o servidor chamou de `ssrc`, com o relógio em zero.
+/// O envio de quem o servidor chamou de `ssrc`, com o relógio partindo da hora
+/// da página `agora_ms` (`performance.timeOrigin + performance.now()`), e não
+/// do zero: ver [`Envio::partindo_de`]. A página antiga, que não a manda, chega
+/// com NaN, e isso dá o zero de antes.
 #[no_mangle]
-pub extern "C" fn voz_envio(ssrc: u32) {
-    ENVIO.with(|e| *e.borrow_mut() = Some(Envio::novo(ssrc)));
+pub extern "C" fn voz_envio(ssrc: u32, agora_ms: f64) {
+    ENVIO.with(|e| *e.borrow_mut() = Some(Envio::partindo_de(ssrc, agora_ms)));
 }
 
 /// A régua do portão: a sensibilidade escolhida em milésimos de dBFS (zero é
@@ -1606,6 +1811,51 @@ pub extern "C" fn voz_reabrir(ssrc: u32) {
 #[no_mangle]
 pub extern "C" fn voz_recepcao(ssrc: u32) {
     RECEPCAO.with(|r| *r.borrow_mut() = Some(Recepcao::nova(ssrc)));
+}
+
+/// **Os ganhos da sessão desta instância, opacos** (E3): com uma instância do
+/// `.wasm` por sessão, os volumes moram na instância da sessão e a recepção da
+/// voz na da página. Esta função dá, na instância da sessão, os ganhos num
+/// bloco que a página não lê e só repassa a [`voz_ganhos_pela_recepcao`], na
+/// instância da página. A SSRC continua sem atravessar para o JavaScript como
+/// número que ele use: o bloco é opaco para ele. Devolve 0 com o bloco.
+#[no_mangle]
+pub extern "C" fn voz_ganhos_da_sessao() -> u32 {
+    let ganhos = LIGACAO.with(|l| {
+        l.borrow()
+            .as_ref()
+            .and_then(Ligacao::sessao)
+            .map(crate::sessao::Sessao::ganhos)
+            .unwrap_or_default()
+    });
+    dizer(serde_json::json!(ganhos).to_string().into_bytes(), 0)
+}
+
+/// O bloco de [`voz_ganhos_da_sessao`] (de outra instância), traduzido pela
+/// recepção desta: `[[alça, ganho], …]`, como [`voz_ganhos`]. Um bloco torto
+/// dá a lista vazia.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn voz_ganhos_pela_recepcao(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let pares: Vec<(u32, f32)> = serde_json::from_slice(bytes).unwrap_or_default();
+    let por_alca: Vec<(u32, f32)> = RECEPCAO.with(|r| {
+        let recepcao = r.borrow();
+        pares
+            .into_iter()
+            .filter_map(|(ssrc, ganho)| {
+                recepcao
+                    .as_ref()
+                    .and_then(|recepcao| recepcao.alca_de(ssrc))
+                    .map(|alca| (alca, ganho))
+            })
+            .collect()
+    });
+    dizer(serde_json::json!(por_alca).to_string().into_bytes(), 0)
 }
 
 /// **O ganho de cada voz com volume escolhido, pela alça da recepção**: o
@@ -1947,5 +2197,425 @@ pub mod prova {
         let texto = std::str::from_utf8(texto).unwrap_or("");
         let origem = std::str::from_utf8(origem).unwrap_or("");
         dizer_o_link(&crate::link_do_navegador(texto, origem))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod os_cargos_pela_fronteira {
+    use super::*;
+    use seele_proto::cargos::{Atribuicao, Cargo, Permissao, QuadroDeCargos, NOME_DO_TODOS, TODOS};
+    use seele_proto::control::Permission;
+    use seele_proto::ids::{PersonId, RoleId};
+
+    /// Uma chamada pela fronteira de verdade: o bloco de `alocar`, a função
+    /// exportada, e a saída lida de `saida_ptr`/`saida_len`.
+    fn chamar(
+        f: unsafe extern "C" fn(*const u8, usize) -> u32,
+        entrada: &serde_json::Value,
+    ) -> (u32, serde_json::Value) {
+        let bytes = entrada.to_string().into_bytes();
+        let ptr = alocar(bytes.len());
+        // SAFETY: `ptr` é um bloco de `alocar` com capacidade para `bytes`.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len()) };
+        // SAFETY: o bloco é vivo e tem `bytes.len()` bytes escritos.
+        let codigo = unsafe { f(ptr, bytes.len()) };
+        // SAFETY: o bloco veio de `alocar(bytes.len())`.
+        unsafe { liberar(ptr, bytes.len()) };
+        let saida = SAIDA.with(|s| s.borrow().clone());
+        (codigo, serde_json::from_slice(&saida).unwrap())
+    }
+
+    /// Um quadro em que a pessoa 7 tem a Gestão (`ManageRoles`), com a revisão dada.
+    fn quadro(revisao: u64, nome: &str) -> serde_json::Value {
+        serde_json::to_value(QuadroDeCargos {
+            cargos: vec![
+                Cargo {
+                    id: RoleId(1),
+                    nome: nome.into(),
+                    posicao: 1,
+                    concede: vec![Permissao::Produto(Permission::ManageRoles)],
+                    restringe: vec![],
+                },
+                Cargo {
+                    id: TODOS,
+                    nome: NOME_DO_TODOS.into(),
+                    posicao: 0,
+                    concede: vec![],
+                    restringe: vec![],
+                },
+            ],
+            atribuicoes: vec![Atribuicao {
+                pessoa: PersonId(7),
+                cargos: vec![RoleId(1)],
+            }],
+            proprietario: None,
+            de_mods: vec![],
+            revisao,
+            dono_declarado: false,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn os_quatro_comandos_atravessam_a_fronteira_e_cada_sessao_traz_o_seu_quadro() {
+        let membros = serde_json::json!({ "7": "ana", "8": "bia" });
+        let (a, b) = (quadro(12, "Gestão A"), quadro(40, "Gestão B"));
+
+        // A tela de cada sessão: o quadro DELA, com os apelidos dela.
+        let (codigo, tela_a) = chamar(
+            cargos_na_tela,
+            &serde_json::json!({ "quadro": a, "membros": membros }),
+        );
+        assert_eq!(codigo, 0, "{tela_a}");
+        assert_eq!(tela_a["quadro"]["revisao"], 12);
+        assert_eq!(tela_a["apelidos"]["7"], "ana");
+        let (_, tela_b) = chamar(
+            cargos_na_tela,
+            &serde_json::json!({ "quadro": b, "membros": {}, "suas": null }),
+        );
+        assert_eq!(tela_b["quadro"]["revisao"], 40);
+        assert_eq!(tela_b["quadro"]["cargos"][0]["nome"], "Gestão B");
+
+        // A prévia com a revisão de A vale em A e é velha em B: a mesma recusa do servidor.
+        let pedido = serde_json::json!({ "Apagar": { "cargo": 1 } });
+        let (codigo, em_b) = chamar(
+            cargos_prever,
+            &serde_json::json!({ "quadro": b, "membros": membros, "autor": 7, "revisao": 12, "pedido": pedido }),
+        );
+        assert_eq!(codigo, 1);
+        assert_eq!(em_b["recusa"]["RevisaoVelha"]["atual"], 40);
+        let (codigo, recusa) = chamar(
+            cargos_prever,
+            &serde_json::json!({ "quadro": a, "membros": membros, "autor": 7, "revisao": 12,
+                                 "pedido": { "Atribuir": { "pessoa": 8, "cargo": 1 } } }),
+        );
+        assert_eq!(codigo, 1);
+        assert_eq!(recusa["recusa"], "CargoAcimaDeVoce");
+
+        // Explicar: uma por permissão do catálogo.
+        let (codigo, explicadas) = chamar(
+            cargos_explicar,
+            &serde_json::json!({ "quadro": a, "membros": membros, "pessoa": 8 }),
+        );
+        assert_eq!(codigo, 0, "{explicadas}");
+        assert_eq!(
+            explicadas["permissoes"].as_array().map(Vec::len),
+            Some(seele_proto::cargos::PERMISSOES_DO_PRODUTO.len())
+        );
+
+        // O verbo sai como a ClientMessage que o `codificar` de sempre aceita.
+        let (codigo, mensagem) = chamar(
+            cargos_comando,
+            &serde_json::json!({ "revisao": 12, "pedido": { "Atribuir": { "pessoa": 8, "cargo": 1 } } }),
+        );
+        assert_eq!(codigo, 0, "{mensagem}");
+        assert_eq!(
+            serde_json::from_value::<seele_proto::control::ClientMessage>(mensagem.clone())
+                .unwrap(),
+            seele_proto::control::ClientMessage::AtribuirCargo {
+                revisao: 12,
+                pessoa: PersonId(8),
+                cargo: RoleId(1)
+            }
+        );
+        assert!(
+            crate::codificar_do_cliente(seele_proto::PROTOCOL_VERSION, &mensagem.to_string())
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn a_entrada_torta_e_recusada_com_nome() {
+        for (f, entrada) in [
+            (
+                cargos_prever as unsafe extern "C" fn(*const u8, usize) -> u32,
+                serde_json::json!({ "quadro": quadro(1, "x"), "membros": {}, "revisao": 1, "pedido": {} }),
+            ),
+            (
+                cargos_explicar,
+                serde_json::json!({ "quadro": quadro(1, "x"), "membros": {} }),
+            ),
+            (
+                cargos_comando,
+                serde_json::json!({ "pedido": { "Apagar": { "cargo": 1 } } }),
+            ),
+            (cargos_na_tela, serde_json::json!([1, 2])),
+            (
+                cargos_comando,
+                serde_json::json!({ "revisao": 1, "pedido": "nao e pedido" }),
+            ),
+        ] {
+            let (codigo, saida) = chamar(f, &entrada);
+            assert_eq!(codigo, 1, "{entrada} -> {saida}");
+            assert!(saida["erro"].is_string(), "{saida}");
+        }
+    }
+}
+
+/// **A tela que o servidor liga sozinho aparece no retrato do navegador**,
+/// pela fronteira de verdade: o fluxo entra por `fluxo_chegou`/`fluxo_acabou`
+/// e o retrato sai da sessão guardada em `LIGACAO`. O mesmo defeito da FFI: o
+/// `ScreenOpened` ia só à página, e o retrato lia só a escolha.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod a_tela_ligada_pelo_servidor {
+    use super::*;
+    use seele_proto::control::{encode_em, ServerMessage, VoiceRoomInfo};
+    use seele_proto::ids::{PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
+    use seele_proto::quadro::enquadrar;
+    use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource, TipoDeQuadro};
+    use seele_proto::stream::StreamType;
+    use seele_proto::version::PROTOCOL_VERSION;
+
+    fn do_servidor(mensagem: &ServerMessage) -> Vec<u8> {
+        enquadrar(&encode_em(PROTOCOL_VERSION, mensagem).unwrap()).unwrap()
+    }
+
+    /// Dentro da sessão (somos a 7), sentada na sala 1, onde a pessoa 3
+    /// transmite a tela 9 e a 4 a tela 11; guardada em `LIGACAO`.
+    fn dentro() {
+        let mut ligacao = Ligacao::abrir(Pedido {
+            apelido: "marcela".into(),
+            chave_publica: [5; 32],
+            impressao: [7; 32],
+            impressao_dtls: [8; 32],
+            convite: None,
+            aceito: None,
+        })
+        .unwrap();
+        let _ = ligacao.chegou(&do_servidor(&ServerMessage::Challenge {
+            nonce: vec![3; 32],
+        }));
+        let _ = ligacao.assinado(&[9; 64]);
+        let _ = ligacao.chegou(&do_servidor(&ServerMessage::Session {
+            id: SessionId(41),
+            person: PersonId(7),
+            ssrc: Ssrc(700),
+            server: "Casa".into(),
+            voice_rooms: vec![VoiceRoomInfo {
+                id: VoiceRoomId(1),
+                name: "SALA-01".into(),
+                limit: 20,
+                password_required: false,
+                channel: None,
+            }],
+            channels: Vec::new(),
+            roles: Vec::new(),
+            permissions: Vec::new(),
+        }));
+        let sessao = ligacao.sessao_mut().expect("dentro da sessão");
+        sessao.room.enter_voice_room(VoiceRoomId(1));
+        for (pessoa, tela) in [(3, 9), (4, 11)] {
+            sessao.room.apply(&ServerMessage::ScreenShareStarted {
+                voice_room: VoiceRoomId(1),
+                person: PersonId(pessoa),
+                screen: ScreenId(tela),
+            });
+        }
+        LIGACAO.with(|l| *l.borrow_mut() = Some(ligacao));
+    }
+
+    /// Um fluxo de tela pela fronteira: a abertura e um quadro-chave. Devolve a
+    /// alça, ainda aberta.
+    fn abrir_o_fluxo(tela: u32) -> u32 {
+        let mut bytes = vec![StreamType::Screen.byte()];
+        let mut abertura = [0_u8; seele_proto::screen::SCREEN_HEADER_LEN];
+        ScreenHeader {
+            version: 1,
+            screen: ScreenId(tela),
+            source: ScreenSource::Monitor,
+            codec: ScreenCodec::H264Baseline,
+            width: 1280,
+            height: 720,
+        }
+        .encode(&mut abertura)
+        .unwrap();
+        bytes.extend(abertura);
+        bytes.push(TipoDeQuadro::Chave as u8);
+        bytes.extend(5_u32.to_be_bytes());
+        bytes.extend(b"chave");
+        let alca = fluxo_novo();
+        let ptr = alocar(bytes.len());
+        // SAFETY: `ptr` é um bloco de `alocar` com capacidade para `bytes`.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len()) };
+        // SAFETY: o bloco é vivo e tem `bytes.len()` bytes escritos.
+        let codigo = unsafe { fluxo_chegou(alca, ptr, bytes.len()) };
+        // SAFETY: o bloco veio de `alocar(bytes.len())`.
+        unsafe { liberar(ptr, bytes.len()) };
+        assert_eq!(codigo, 0);
+        let saida: serde_json::Value =
+            serde_json::from_slice(&SAIDA.with(|s| s.borrow().clone())).unwrap();
+        assert_eq!(
+            saida["passos"][0]["evento"]["ScreenOpened"]["screen"], tela,
+            "{saida}"
+        );
+        alca
+    }
+
+    /// A tela do retrato, e as que dizem `assistida`.
+    fn no_retrato() -> (Option<u32>, Vec<u32>) {
+        LIGACAO.with(|l| {
+            let retrato = l.borrow().as_ref().unwrap().sessao().unwrap().retrato();
+            (
+                retrato.tela.map(|tela| tela.tela),
+                retrato
+                    .transmissoes
+                    .iter()
+                    .filter(|transmissao| transmissao.assistida)
+                    .map(|transmissao| transmissao.tela)
+                    .collect(),
+            )
+        })
+    }
+
+    fn atender(comando: &str, args: &serde_json::Value) {
+        LIGACAO.with(|l| {
+            let mut pagina = DaPagina::nova(1);
+            let _ = l
+                .borrow_mut()
+                .as_mut()
+                .unwrap()
+                .atender(comando, args, &mut pagina, 0);
+        });
+    }
+
+    #[test]
+    fn a_abertura_automatica_aparece_e_o_fim_limpa() {
+        dentro();
+        assert_eq!(no_retrato(), (None, vec![]));
+        let alca = abrir_o_fluxo(9);
+        assert_eq!(
+            no_retrato(),
+            (Some(9), vec![9]),
+            "o servidor ligou a tela 9 e o retrato do navegador diz que ninguém compartilha"
+        );
+        let _ = fluxo_acabou(alca);
+        assert_eq!(no_retrato(), (None, vec![]));
+    }
+
+    #[test]
+    fn na_alternancia_9_11_9_fica_a_9_nova_e_o_fim_velho_nao_a_apaga() {
+        dentro();
+        let primeira = abrir_o_fluxo(9);
+        let onze = abrir_o_fluxo(11);
+        let _nova = abrir_o_fluxo(9);
+        assert_eq!(no_retrato(), (Some(9), vec![9]));
+        let _ = fluxo_acabou(primeira);
+        let _ = fluxo_acabou(onze);
+        assert_eq!(
+            no_retrato(),
+            (Some(9), vec![9]),
+            "um fim velho apagou a 9 nova"
+        );
+    }
+
+    #[test]
+    fn a_escolha_explicita_vence_a_automatica() {
+        dentro();
+        let _alca = abrir_o_fluxo(9);
+        atender(
+            "assistir",
+            &serde_json::json!({ "tela": 11, "quero": true }),
+        );
+        assert_eq!(no_retrato(), (Some(11), vec![11]));
+    }
+
+    #[test]
+    fn o_nao_ver_explicito_vence_a_automatica() {
+        dentro();
+        let _velha = abrir_o_fluxo(9);
+        atender(
+            "assistir",
+            &serde_json::json!({ "tela": 9, "quero": false }),
+        );
+        assert_eq!(
+            no_retrato(),
+            (None, vec![]),
+            "quem recusou aparece assistindo"
+        );
+        let _nova = abrir_o_fluxo(9);
+        assert_eq!(no_retrato(), (None, vec![]));
+    }
+
+    #[test]
+    fn a_queda_nao_deixa_tela_velha_e_o_fim_atrasado_nao_apaga_a_nova() {
+        dentro();
+        let velha = abrir_o_fluxo(9);
+        let _ = ligacao_largar();
+        LIGACAO.with(|l| {
+            let mut l = l.borrow_mut();
+            let ligacao = l.as_mut().unwrap();
+            // A volta: a sessão guardada, readotada.
+            let _ = ligacao.retomar(
+                Pedido {
+                    apelido: "marcela".into(),
+                    chave_publica: [5; 32],
+                    impressao: [7; 32],
+                    impressao_dtls: [8; 32],
+                    convite: None,
+                    aceito: None,
+                },
+                crate::sessao::Escolhas::default(),
+            );
+        });
+        // Antes de a volta abrir a tela de novo, o retrato não a mostra.
+        let sessao_ve = LIGACAO.with(|l| {
+            l.borrow()
+                .as_ref()
+                .unwrap()
+                .sessao()
+                .map(|sessao| sessao.retrato().tela.map(|tela| tela.tela))
+        });
+        assert_eq!(sessao_ve.flatten(), None, "a tela de antes da queda ficou");
+        // A volta entra e o servidor liga a 9 de novo; o fim atrasado da
+        // leitura de antes da queda chega depois.
+        let _ = LIGACAO.with(|l| {
+            let mut l = l.borrow_mut();
+            let ligacao = l.as_mut().unwrap();
+            let _ = ligacao.chegou(&do_servidor(&ServerMessage::Challenge {
+                nonce: vec![3; 32],
+            }));
+            let _ = ligacao.assinado(&[9; 64]);
+            ligacao.chegou(&do_servidor(&ServerMessage::Session {
+                id: SessionId(41),
+                person: PersonId(7),
+                ssrc: Ssrc(700),
+                server: "Casa".into(),
+                voice_rooms: vec![VoiceRoomInfo {
+                    id: VoiceRoomId(1),
+                    name: "SALA-01".into(),
+                    limit: 20,
+                    password_required: false,
+                    channel: None,
+                }],
+                channels: Vec::new(),
+                roles: Vec::new(),
+                permissions: Vec::new(),
+            }))
+        });
+        assert!(
+            LIGACAO.with(|l| l.borrow().as_ref().unwrap().sessao().is_some()),
+            "a volta não entrou"
+        );
+        // O servidor reanuncia a transmissão a quem volta à sala.
+        LIGACAO.with(|l| {
+            let mut l = l.borrow_mut();
+            let sessao = l.as_mut().unwrap().sessao_mut().unwrap();
+            sessao.room.enter_voice_room(VoiceRoomId(1));
+            sessao.room.apply(&ServerMessage::ScreenShareStarted {
+                voice_room: VoiceRoomId(1),
+                person: PersonId(3),
+                screen: ScreenId(9),
+            });
+        });
+        let _nova = abrir_o_fluxo(9);
+        assert_eq!(no_retrato(), (Some(9), vec![9]));
+        let _ = fluxo_acabou(velha);
+        assert_eq!(
+            no_retrato(),
+            (Some(9), vec![9]),
+            "o fim atrasado da leitura de antes da queda apagou a da volta"
+        );
     }
 }

@@ -251,17 +251,24 @@ async fn a_mesma_sala_pelo_endereco_nao_e_uma_ligacao() {
     let endereco = SocketAddr::from(([127, 0, 0, 1], sala.endereco().port()));
     let config = config_para(endereco.to_string(), &casa);
     let olhos = Arc::new(Etapas::default()) as Arc<dyn EventListener>;
-    let entrando = tokio::task::spawn_blocking(move || Connection::connect_watching(config, olhos));
+    let mut entrando =
+        tokio::task::spawn_blocking(move || Connection::connect_watching(config, olhos));
 
-    let toque = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            if let Ok(Aviso::Tocou { toque, .. }) = avisos.recv().await {
-                return toque;
+    // Se a entrada acabar antes de tocar, o motivo dela é o relatório: um
+    // «não tocou» sozinho esconderia a recusa que a fez acabar.
+    let toque = tokio::select! {
+        toque = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(Aviso::Tocou { toque, .. }) = avisos.recv().await {
+                    return toque;
+                }
             }
-        }
-    })
-    .await
-    .expect("a sala não tocou para quem entrou pelo endereço");
+        }) => toque.expect("a sala não tocou para quem entrou pelo endereço"),
+        acabou = &mut entrando => panic!(
+            "a entrada pelo endereço acabou antes de a sala tocar: {:?}",
+            acabou.map(|resultado| resultado.map(|_| "entrou sem tocar"))
+        ),
+    };
     assert!(recepcao.atender(toque), "o toque não estava mais tocando");
 
     let (conexao, _) = tokio::time::timeout(Duration::from_secs(10), entrando)

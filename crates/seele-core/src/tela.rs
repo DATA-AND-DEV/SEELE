@@ -1041,7 +1041,7 @@ struct ChaveEmVoo {
 /// conexão QUIC que já existe (§3.1 e §3.6).
 #[derive(Debug)]
 pub struct Transmissao {
-    fluxo: quinn::SendStream,
+    fluxo: crate::transporte::Envio,
     cabecalho: ScreenHeader,
     balde: Balde,
     em_voo: Option<ChaveEmVoo>,
@@ -1068,7 +1068,7 @@ impl Transmissao {
     /// [`ErroDeTela::Cabecalho`] se o cabeçalho não passa em
     /// `ScreenHeader::check`, ou [`ErroDeTela::Fluxo`] se a conexão não abre.
     pub async fn abrir(
-        conexao: &quinn::Connection,
+        conexao: &crate::transporte::Conexao,
         cabecalho: ScreenHeader,
         teto_bps: u32,
         agora: Instant,
@@ -1437,7 +1437,7 @@ impl QuadroRecebido {
 /// Uma transmissão de tela chegando nesta máquina.
 #[derive(Debug)]
 pub struct Recepcao {
-    fluxo: quinn::RecvStream,
+    fluxo: crate::transporte::Recebe,
     cabecalho: ScreenHeader,
     /// Os bytes crus do cabeçalho de abertura, como vieram do fio.
     ///
@@ -1460,7 +1460,7 @@ impl Recepcao {
     /// [`ErroDeTela::Cabecalho`] para um cabeçalho malformado — versão
     /// estranha, fonte ou codec desconhecidos, resolução fora do teto — e
     /// [`ErroDeTela::Fluxo`] quando a conexão acaba.
-    pub async fn aceitar(conexao: &quinn::Connection) -> Result<Self, ErroDeTela> {
+    pub async fn aceitar(conexao: &crate::transporte::Conexao) -> Result<Self, ErroDeTela> {
         let fluxo = conexao
             .accept_uni()
             .await
@@ -1477,7 +1477,7 @@ impl Recepcao {
     /// # Errors
     ///
     /// As mesmas de [`Self::aceitar`].
-    pub async fn do_fluxo(mut fluxo: quinn::RecvStream) -> Result<Self, ErroDeTela> {
+    pub async fn do_fluxo(mut fluxo: crate::transporte::Recebe) -> Result<Self, ErroDeTela> {
         // O tipo do fluxo primeiro, e conferido em vez de pulado: um byte lido
         // e jogado fora aceitaria um anexo como se fosse tela e leria o
         // cabeçalho errado sem reclamar. Ver o §5.2 da spec.
@@ -1509,7 +1509,9 @@ impl Recepcao {
     /// # Errors
     ///
     /// As mesmas de [`Self::aceitar`], menos as do byte de tipo.
-    pub async fn do_fluxo_ja_tipado(mut fluxo: quinn::RecvStream) -> Result<Self, ErroDeTela> {
+    pub async fn do_fluxo_ja_tipado(
+        mut fluxo: crate::transporte::Recebe,
+    ) -> Result<Self, ErroDeTela> {
         let mut abertura = [0_u8; SCREEN_HEADER_LEN];
         fluxo
             .read_exact(&mut abertura)
@@ -1557,14 +1559,21 @@ impl Recepcao {
     /// [`ErroDeTela::Fluxo`] para um fluxo cortado no meio de um quadro.
     pub async fn proximo_quadro(&mut self) -> Result<Option<QuadroRecebido>, ErroDeTela> {
         let mut cabecalho = [0_u8; CABECALHO_DE_QUADRO_LEN];
-        match self.fluxo.read_exact(&mut cabecalho).await {
-            Ok(()) => {}
+        // O primeiro byte à parte: é por ele que se distingue o fim limpo
+        // (nenhum byte do próximo quadro) do fluxo cortado no meio de um.
+        let (primeiro, resto) = cabecalho.split_at_mut(1);
+        match self.fluxo.read(primeiro).await {
+            Ok(Some(_)) => {}
             // O fim limpo do fluxo: quem compartilha parou. Não é erro, e
             // tratá-lo como erro faria toda transmissão terminar com uma
             // mensagem de falha na tela de quem assistia até o fim.
-            Err(quinn::ReadExactError::FinishedEarly(0)) => return Ok(None),
+            Ok(None) => return Ok(None),
             Err(erro) => return Err(ErroDeTela::Fluxo(erro.to_string())),
         }
+        self.fluxo
+            .read_exact(resto)
+            .await
+            .map_err(|erro| ErroDeTela::Fluxo(erro.to_string()))?;
 
         let (tipo, tamanho) = ler_cabecalho_de_quadro(&cabecalho)?;
 
@@ -1605,9 +1614,6 @@ pub fn intervalo_de_quadro(quadros_por_segundo: u32) -> Duration {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::net::SocketAddr;
-    use std::sync::Arc;
-
     use seele_proto::ids::ScreenId;
     use seele_proto::screen::{ScreenCodec, ScreenSource};
 
@@ -2058,107 +2064,95 @@ pub(crate) mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // O par QUIC
+    // O par do enlace
     // -----------------------------------------------------------------------
 
-    /// Um par QUIC ligado, sem o handshake do produto.
+    /// Um par ligado pelo enlace em `127.0.0.1`, sem o handshake do produto.
     ///
     /// Mesma forma que `crate::frame::tests::par`, e pelo mesmo motivo: o que
     /// está sob teste é o transporte da tela, e um handshake no meio só
     /// acrescentaria maneiras de o teste falhar que não têm a ver com a
-    /// pergunta.
-    pub(crate) async fn par() -> (quinn::Connection, quinn::Connection) {
-        montar_par(None).await
-    }
-
-    /// [`par`], com o prazo de ociosidade do QUIC escolhido por quem chama,
-    /// nas duas pontas.
-    ///
-    /// **O padrão do `quinn` é um prazo que ninguém escreveu**: 30 s sem
-    /// pacote nenhum e a conexão cai, e quem espera um fluxo lê «timed out».
-    /// Para quem manda logo depois do aperto, isso nunca aparece. Para quem
-    /// arma o codificador depois do aperto, aparece: ver
-    /// `crate::bomba::tests::par_paciente`.
-    pub(crate) async fn par_com_ociosidade(
-        ociosidade: Duration,
-    ) -> (quinn::Connection, quinn::Connection) {
-        let mut transporte = quinn::TransportConfig::default();
-        transporte.max_idle_timeout(Some(
-            ociosidade
-                .try_into()
-                .expect("uma ociosidade que o QUIC aceita"),
-        ));
-        montar_par(Some(Arc::new(transporte))).await
-    }
-
-    async fn montar_par(
-        transporte: Option<Arc<quinn::TransportConfig>>,
-    ) -> (quinn::Connection, quinn::Connection) {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        let certificado =
-            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificado");
-        let cadeia = vec![rustls::pki_types::CertificateDer::from(
-            certificado.cert.der().to_vec(),
-        )];
-        let chave =
-            rustls::pki_types::PrivatePkcs8KeyDer::from(certificado.signing_key.serialize_der());
-
-        let mut tls_servidor = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(cadeia.clone(), chave.into())
-            .expect("config do servidor");
-        tls_servidor.alpn_protocols = vec![b"seele-test".to_vec()];
-        let mut servidor = quinn::ServerConfig::with_crypto(Arc::new(
-            quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
-        ));
-        if let Some(transporte) = &transporte {
-            servidor.transport_config(Arc::clone(transporte));
-        }
-
-        let escuta = quinn::Endpoint::server(servidor, SocketAddr::from(([127, 0, 0, 1], 0)))
-            .expect("escutar");
-        let endereco = escuta.local_addr().expect("endereço");
-
-        let mut raiz = rustls::RootCertStore::empty();
-        raiz.add(cadeia[0].clone()).expect("raiz");
-        let mut tls_cliente = rustls::ClientConfig::builder()
-            .with_root_certificates(raiz)
-            .with_no_client_auth();
-        tls_cliente.alpn_protocols = vec![b"seele-test".to_vec()];
-
-        let mut cliente =
-            quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0))).expect("cliente");
-        let mut config_do_cliente = quinn::ClientConfig::new(Arc::new(
-            quinn::crypto::rustls::QuicClientConfig::try_from(tls_cliente).expect("quic"),
-        ));
-        if let Some(transporte) = transporte {
-            config_do_cliente.transport_config(transporte);
-        }
-        cliente.set_default_client_config(config_do_cliente);
-
-        let aceitando = tokio::spawn(async move {
-            let conexao = escuta
-                .accept()
-                .await
-                .expect("entrada")
-                .await
-                .expect("aceitar");
-            (conexao, escuta)
-        });
-
-        let saida = cliente
-            .connect(endereco, "localhost")
-            .expect("conectar")
-            .await
-            .expect("conexão");
-        let (entrada, escuta) = aceitando.await.expect("junção");
-
-        // Vazam de propósito: derrubar os endpoints fecharia as conexões que o
+    /// pergunta. Devolve (quem liga, quem atende).
+    pub(crate) async fn par() -> (crate::transporte::Conexao, crate::transporte::Conexao) {
+        let par = crate::transporte::teste::par().await;
+        let conexoes = (par.quem_liga.clone(), par.quem_atende.clone());
+        // Vazam de propósito: derrubar as pontas fecharia as conexões que o
         // teste ainda vai usar.
-        std::mem::forget(cliente);
-        std::mem::forget(escuta);
-        (saida, entrada)
+        std::mem::forget(par);
+        conexoes
+    }
+
+    /// [`par`], para quem espera muito antes do primeiro byte.
+    ///
+    /// No QUIC isto escolhia a ociosidade, porque o padrão do `quinn` (30 s)
+    /// derrubava quem armava o codificador depois do aperto. O enlace manda o
+    /// keepalive da voz a cada 5 s e só cai com 20 s sem **nenhum** pacote do
+    /// par, então uma conexão viva e calada não cai: o parâmetro ficou sem
+    /// efeito, e o nome continua para quem o chamava.
+    pub(crate) async fn par_com_ociosidade(
+        _ociosidade: Duration,
+    ) -> (crate::transporte::Conexao, crate::transporte::Conexao) {
+        par().await
+    }
+
+    /// Quem recebe a tela, **lendo ao lado** de quem manda, como no produto.
+    ///
+    /// No produto quem recebe aceita e lê junto (o laço do `seeled`, o roteador
+    /// de fluxos do cliente). Estes testes escreviam todos os quadros e só
+    /// depois aceitavam, ou não liam nunca.
+    ///
+    /// **O que está medido e o que não está.** Na suíte em paralelo (Codex,
+    /// 25/10), os quatro testes que faziam isso passavam de 60 s e prendiam a
+    /// suíte. Isolado, o teste antigo **passa** (`baixar_o_teto…`, 0,04 s, com
+    /// as escritas voltando antes de qualquer leitura): então a escrita antes do
+    /// aceite não espera para sempre, e a causa da espera em paralelo não está
+    /// medida aqui. O que este leitor garante é o caminho do produto, e o que
+    /// [`com_prazo`] garante é que uma espera presa vira falha com nome.
+    ///
+    /// Lê até `quantos` quadros, ou até o fluxo acabar. Cada espera tem prazo:
+    /// um teste que trava é um teste de que ninguém lê o motivo.
+    fn ler_ao_lado(
+        entrada: crate::transporte::Conexao,
+        quantos: usize,
+    ) -> tokio::task::JoinHandle<(ScreenHeader, Vec<QuadroRecebido>)> {
+        tokio::spawn(async move {
+            let mut recepcao =
+                tokio::time::timeout(Duration::from_secs(10), Recepcao::aceitar(&entrada))
+                    .await
+                    .expect("o fluxo da tela não chegou em 10 s")
+                    .expect("aceitar a tela");
+            let cabecalho = *recepcao.cabecalho();
+            let mut quadros = Vec::new();
+            while quadros.len() < quantos {
+                let lido = tokio::time::timeout(Duration::from_secs(10), recepcao.proximo_quadro())
+                    .await
+                    .expect("um quadro não chegou em 10 s")
+                    .expect("ler");
+                match lido {
+                    Some(quadro) => quadros.push(quadro),
+                    None => break,
+                }
+            }
+            (cabecalho, quadros)
+        })
+    }
+
+    /// O teste inteiro com prazo: uma escrita presa vira falha com nome, e não
+    /// uma suíte parada.
+    async fn com_prazo(corpo: impl std::future::Future<Output = ()>) {
+        tokio::time::timeout(Duration::from_secs(30), corpo)
+            .await
+            .expect("o teste de tela passou de 30 s: alguma escrita ou leitura ficou presa");
+    }
+
+    /// O que [`ler_ao_lado`] leu, com prazo.
+    async fn o_que_chegou(
+        lendo: tokio::task::JoinHandle<(ScreenHeader, Vec<QuadroRecebido>)>,
+    ) -> (ScreenHeader, Vec<QuadroRecebido>) {
+        tokio::time::timeout(Duration::from_secs(15), lendo)
+            .await
+            .expect("quem lê a tela não terminou em 15 s")
+            .expect("a leitura da tela caiu")
     }
 
     /// §3.1, e é a decisão mais cara da spec: **o vídeo vai num fluxo, e a voz
@@ -2177,12 +2171,17 @@ pub(crate) mod tests {
     /// porque o leitor de voz passa a receber quadros de tela.
     #[tokio::test(flavor = "multi_thread")]
     async fn o_video_vai_no_fluxo_e_nunca_no_datagrama() {
+        com_prazo(o_video_vai_no_fluxo_e_nunca_no_datagrama_corpo()).await;
+    }
+
+    async fn o_video_vai_no_fluxo_e_nunca_no_datagrama_corpo() {
         const VOZ: &[u8] = b"opus-20ms";
         const QUADROS: usize = 40;
 
         let (saida, entrada) = par().await;
         let agora = Instant::now();
 
+        let tela = ler_ao_lado(entrada.clone(), QUADROS);
         let mut transmissao = Transmissao::abrir(&saida, cabecalho(), 8_000_000, agora)
             .await
             .expect("abrir a transmissão");
@@ -2205,16 +2204,19 @@ pub(crate) mod tests {
             // Um quadro de tela de 6 KiB, que é a ordem de grandeza de um
             // quadro comum de 1080p no teto de 1200 kbps.
             let quadro = vec![u8::try_from(numero % 251).unwrap_or_default(); 6 * 1024];
-            transmissao
-                .enviar_quadro(
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                transmissao.enviar_quadro(
                     &quadro,
                     false,
                     agora + Duration::from_millis(numero as u64 * 33),
-                )
-                .await
-                .expect("enviar");
+                ),
+            )
+            .await
+            .expect("um quadro não saiu em 10 s")
+            .expect("enviar");
             saida
-                .send_datagram(VOZ.to_vec().into())
+                .send_datagram(VOZ.to_vec())
                 .expect("a voz sai por datagrama");
         }
 
@@ -2232,14 +2234,10 @@ pub(crate) mod tests {
         }
 
         // E a tela chegou, inteira, pelo fluxo.
-        let mut recepcao = Recepcao::aceitar(&entrada).await.expect("aceitar a tela");
-        assert_eq!(recepcao.cabecalho(), &cabecalho());
-        for numero in 0..QUADROS {
-            let quadro = recepcao
-                .proximo_quadro()
-                .await
-                .expect("ler")
-                .expect("o fluxo acabou cedo");
+        let (cabecalho_lido, quadros) = o_que_chegou(tela).await;
+        assert_eq!(cabecalho_lido, cabecalho());
+        assert_eq!(quadros.len(), QUADROS, "o fluxo acabou cedo");
+        for (numero, quadro) in quadros.iter().enumerate() {
             assert!(!quadro.chave());
             assert_eq!(quadro.bytes.len(), 6 * 1024);
             assert_eq!(
@@ -2264,6 +2262,10 @@ pub(crate) mod tests {
     /// ordenado e espalhar é uma decisão de quando escrever.
     #[tokio::test(flavor = "multi_thread")]
     async fn o_quadro_chave_sai_espalhado_e_chega_inteiro() {
+        com_prazo(o_quadro_chave_sai_espalhado_e_chega_inteiro_corpo()).await;
+    }
+
+    async fn o_quadro_chave_sai_espalhado_e_chega_inteiro_corpo() {
         // 65 KiB é o quadro-chave de 1080p que `spikes/tela-no-codec` mediu, e
         // os **três bytes a mais** não são enfeite: um tamanho que divide certo
         // por [`FATIAS_DO_QUADRO_CHAVE`] esconde o defeito que este teste
@@ -2276,6 +2278,8 @@ pub(crate) mod tests {
 
         let (saida, entrada) = par().await;
         let inicio = Instant::now();
+        // A chave e o quadro comum de depois dela.
+        let tela = ler_ao_lado(entrada, 2);
         let mut transmissao = Transmissao::abrir(&saida, cabecalho(), 8_000_000, inicio)
             .await
             .expect("abrir");
@@ -2315,26 +2319,18 @@ pub(crate) mod tests {
             Envio::Enviado
         );
 
-        let mut recepcao = Recepcao::aceitar(&entrada).await.expect("aceitar");
-        // Com prazo: uma fatia que não levasse o resto deixaria a leitura
-        // pendurada em vez de errada, e um teste que trava é um teste que
-        // ninguém lê o motivo.
-        let recebida = tokio::time::timeout(Duration::from_secs(5), recepcao.proximo_quadro())
-            .await
-            .expect("o quadro-chave nunca terminou de chegar")
-            .expect("ler")
-            .expect("o fluxo acabou cedo");
+        // Com prazo (o do leitor): uma fatia que não levasse o resto deixaria
+        // a leitura pendurada em vez de errada, e um teste que trava é um teste
+        // que ninguém lê o motivo.
+        let (_, quadros) = o_que_chegou(tela).await;
+        let [recebida, seguinte] = quadros.as_slice() else {
+            panic!("o fluxo acabou cedo: {} quadro(s)", quadros.len());
+        };
         assert!(recebida.chave(), "chegou sem a marca de quadro-chave");
         assert_eq!(
             recebida.bytes, chave,
             "o quadro-chave espalhado não chegou igual ao que saiu"
         );
-
-        let seguinte = recepcao
-            .proximo_quadro()
-            .await
-            .expect("ler")
-            .expect("o fluxo acabou cedo");
         assert_eq!(seguinte.bytes, comum);
     }
 
@@ -2352,6 +2348,10 @@ pub(crate) mod tests {
     /// chave em voo todo quadro que chega é descartado — o do espelho junto.
     #[tokio::test(flavor = "multi_thread")]
     async fn o_quadro_chave_fecha_com_a_tela_parada() {
+        com_prazo(o_quadro_chave_fecha_com_a_tela_parada_corpo()).await;
+    }
+
+    async fn o_quadro_chave_fecha_com_a_tela_parada_corpo() {
         // O mesmo tamanho com sobra do teste irmão, e pela mesma razão: uma
         // divisão exata esconderia bytes órfãos na última fatia.
         let chave: Vec<u8> = (0..65 * 1024 + 3)
@@ -2360,6 +2360,8 @@ pub(crate) mod tests {
 
         let (saida, entrada) = par().await;
         let inicio = Instant::now();
+        // A chave e o quadro comum que sai depois de ela fechar.
+        let tela = ler_ao_lado(entrada, 2);
         let mut transmissao = Transmissao::abrir(&saida, cabecalho(), 8_000_000, inicio)
             .await
             .expect("abrir");
@@ -2381,18 +2383,6 @@ pub(crate) mod tests {
                 .unwrap_or_else(|erro| panic!("escoar a fatia {numero}: {erro}"));
         }
 
-        let mut recepcao = Recepcao::aceitar(&entrada).await.expect("aceitar");
-        let recebida = tokio::time::timeout(Duration::from_secs(5), recepcao.proximo_quadro())
-            .await
-            .expect("o quadro-chave nunca terminou de chegar com a tela parada")
-            .expect("ler")
-            .expect("o fluxo acabou cedo");
-        assert!(recebida.chave(), "chegou sem a marca de quadro-chave");
-        assert_eq!(
-            recebida.bytes, chave,
-            "o quadro-chave não chegou igual ao que saiu"
-        );
-
         // E o fluxo voltou ao normal: o próximo quadro de verdade não é mais
         // descartado por haver chave em voo.
         let comum = vec![9_u8; 4096];
@@ -2404,6 +2394,22 @@ pub(crate) mod tests {
             Envio::Enviado,
             "a chave não soltou o fluxo depois de escoada"
         );
+
+        // O leitor tem prazo: sem a segunda fatia, a chave não fecharia e ele
+        // estouraria esperando por ela.
+        let (_, quadros) = o_que_chegou(tela).await;
+        let [recebida, depois] = quadros.as_slice() else {
+            panic!(
+                "o quadro-chave nunca terminou de chegar com a tela parada: {} quadro(s)",
+                quadros.len()
+            );
+        };
+        assert!(recebida.chave(), "chegou sem a marca de quadro-chave");
+        assert_eq!(
+            recebida.bytes, chave,
+            "o quadro-chave não chegou igual ao que saiu"
+        );
+        assert_eq!(depois.bytes, comum);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2450,11 +2456,17 @@ pub(crate) mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn baixar_o_teto_nao_devolve_fichas() {
+        com_prazo(baixar_o_teto_nao_devolve_fichas_corpo()).await;
+    }
+
+    async fn baixar_o_teto_nao_devolve_fichas_corpo() {
         // Uma queda de faixa que liberasse rajada seria o oposto exato do que a
         // queda de faixa quer dizer: o sinal piorou, e o vídeo passaria a poder
         // mandar mais de uma vez.
-        let (saida, _entrada) = par().await;
+        let (saida, entrada) = par().await;
         let agora = Instant::now();
+        // Lido ao lado, como no produto, e conferido: só o quadro que coube.
+        let tela = ler_ao_lado(entrada, 1);
         let mut transmissao = Transmissao::abrir(&saida, cabecalho(), 800_000, agora)
             .await
             .expect("abrir");
@@ -2474,6 +2486,12 @@ pub(crate) mod tests {
                 .await
                 .expect("não cabe"),
             Envio::Descartado(MotivoDeDescarte::AcimaDoTeto)
+        );
+        let (_, quadros) = o_que_chegou(tela).await;
+        assert_eq!(
+            quadros.iter().map(|q| q.bytes.len()).collect::<Vec<_>>(),
+            vec![99_000],
+            "chegou outra coisa que não o quadro que coube"
         );
     }
 

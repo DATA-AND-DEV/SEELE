@@ -28,6 +28,7 @@ use seele_proto::ids::PersonId;
 
 pub mod aparencia;
 pub mod attachments;
+pub mod cargos;
 pub mod channels;
 pub mod instancia;
 pub mod messages;
@@ -223,6 +224,82 @@ fn esquema_gravado(connection: &Connection) -> i64 {
             |row| row.get(0),
         )
         .unwrap_or(0)
+}
+
+/// O que se leu do esquema de um arquivo de banco, sem migrar nada.
+///
+/// **Só [`Self::Ausente`] permite dizer «banco novo».** [`Self::NaoESqlite`] e
+/// [`Self::Ilegivel`] nunca viram «pronto» nem «banco novo»: quem pergunta (o
+/// `antes_de_hospedar` do app) diz «não verificado» e bloqueia com o detalhe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EsquemaGravado {
+    /// O arquivo não existe.
+    Ausente,
+    /// O maior número da tabela das versões (`schema_version`), lido; zero num
+    /// SQLite sem a tabela.
+    Gravado(i64),
+    /// O arquivo existe, e o cabeçalho não é o de um SQLite (inclusive vazio
+    /// ou mais curto que o cabeçalho).
+    NaoESqlite,
+    /// O arquivo existe e não deu para abrir ou ler: permissão, corrompido,
+    /// truncado, travado. O texto é o motivo, para o detalhe da tela.
+    Ilegivel(String),
+}
+
+/// Os 16 bytes com que todo arquivo SQLite 3 começa.
+const CABECALHO_DO_SQLITE: &[u8; 16] = b"SQLite format 3\0";
+
+/// **O esquema gravado num arquivo de banco, sem migrar nada** (pedido do
+/// ui-ux para a tela ANTES DE HOSPEDAR, pelo `antes_de_hospedar` do app).
+///
+/// Confere o cabeçalho, abre o SQLite **só para leitura**
+/// (`SQLITE_OPEN_READ_ONLY`, sem criar o arquivo), lê o maior número da tabela
+/// das versões e fecha. Nenhum pragma é escrito e nenhuma migração roda: é o
+/// que deixa a tela dizer «hospedar converte os dados do esquema 13 para o 19»
+/// **antes** de converter. (O esquema deste banco mora na tabela
+/// `schema_version`, e não no `PRAGMA user_version`.)
+#[must_use]
+pub fn esquema_gravado_em(caminho: &std::path::Path) -> EsquemaGravado {
+    use std::io::Read as _;
+    let mut arquivo = match std::fs::File::open(caminho) {
+        Ok(arquivo) => arquivo,
+        Err(erro) if erro.kind() == std::io::ErrorKind::NotFound => return EsquemaGravado::Ausente,
+        Err(erro) => return EsquemaGravado::Ilegivel(erro.to_string()),
+    };
+    let mut cabecalho = [0_u8; 16];
+    match arquivo.read_exact(&mut cabecalho) {
+        Ok(()) if &cabecalho == CABECALHO_DO_SQLITE => {}
+        Ok(()) => return EsquemaGravado::NaoESqlite,
+        Err(erro) if erro.kind() == std::io::ErrorKind::UnexpectedEof => {
+            return EsquemaGravado::NaoESqlite
+        }
+        Err(erro) => return EsquemaGravado::Ilegivel(erro.to_string()),
+    }
+    drop(arquivo);
+    let connection = match Connection::open_with_flags(
+        caminho,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(connection) => connection,
+        Err(erro) => return EsquemaGravado::Ilegivel(erro.to_string()),
+    };
+    let tem_a_tabela = connection.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'",
+        [],
+        |row| row.get::<_, i64>(0),
+    );
+    match tem_a_tabela {
+        Err(erro) => EsquemaGravado::Ilegivel(erro.to_string()),
+        Ok(0) => EsquemaGravado::Gravado(0),
+        Ok(_) => match connection.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |row| row.get::<_, i64>(0),
+        ) {
+            Ok(versao) => EsquemaGravado::Gravado(versao),
+            Err(erro) => EsquemaGravado::Ilegivel(erro.to_string()),
+        },
+    }
 }
 
 impl Persistence {
@@ -597,7 +674,12 @@ mod tests {
             .unwrap()
             .filter_map(Result::ok)
             .collect();
-        assert_eq!(names, vec!["Commander", "Operator", "Person", "Observer"]);
+        // Desde a migração 18 (ADR 0064) há também o `@everyone`, no id 0 e
+        // vazio — a base que todo mundo tem sem ninguém atribuir.
+        assert_eq!(
+            names,
+            vec!["@everyone", "Commander", "Operator", "Person", "Observer"]
+        );
     }
 
     #[test]
@@ -683,6 +765,17 @@ mod tests {
                     "UPDATE roles SET permissions = replace(permissions, ',\"AttachFile\"', ''),
                                       denials     = replace(denials,     ',\"AttachFile\"', '');
                      DELETE FROM schema_version WHERE version >= 3;
+
+                     -- A parte da migração 18 (os cargos, ADR 0064), pela
+                     -- regra de baixo. Antes da 17, porque o gatilho dela sobe
+                     -- a marca da 17. (cargos-backend F, 24/10/2026.)
+                     DROP TRIGGER roles_sobem_o_maior_id;
+                     DROP TABLE revisao_dos_cargos;
+                     DROP TABLE mod_permissoes;
+                     DELETE FROM roles WHERE id = 0;
+                     ALTER TABLE roles DROP COLUMN position;
+                     UPDATE roles SET permissions = replace(replace(permissions, ',\"ShareScreen\"', ''), ',\"Administrator\"', ''),
+                                      denials     = replace(denials, ',\"ShareScreen\"', '');
 
                      -- A parte da migração 17 (os ids que não voltam), pela
                      -- regra de baixo: a marca e os dois gatilhos que a sobem.
@@ -847,5 +940,83 @@ mod tests {
         assert!(insert("marcela", &[1; 32]).is_ok());
         assert!(insert("marcela", &[2; 32]).is_err(), "duplicate nickname");
         assert!(insert("rafael", &[1; 32]).is_err(), "duplicate public key");
+    }
+
+    /// **Os quatro casos do esquema gravado**, e ler não migra nem cria.
+    #[test]
+    fn o_esquema_gravado_distingue_os_quatro_casos_sem_migrar_nem_criar() {
+        let pasta = tempfile::tempdir().expect("tempdir");
+        let caminho = pasta.path().join("seele.db");
+        assert_eq!(esquema_gravado_em(&caminho), EsquemaGravado::Ausente);
+        assert!(!caminho.exists(), "a leitura criou o arquivo");
+
+        drop(Persistence::open(&Location::File(caminho.clone())).expect("abrir"));
+        assert_eq!(
+            esquema_gravado_em(&caminho),
+            EsquemaGravado::Gravado(esquema_conhecido())
+        );
+
+        // Um banco parado no esquema 3, como uma versão velha o deixaria.
+        {
+            let conexao = Connection::open(&caminho).expect("abrir cru");
+            conexao
+                .execute("DELETE FROM schema_version WHERE version > 3", [])
+                .expect("voltar o esquema");
+        }
+        assert_eq!(esquema_gravado_em(&caminho), EsquemaGravado::Gravado(3));
+        assert_eq!(
+            esquema_gravado_em(&caminho),
+            EsquemaGravado::Gravado(3),
+            "a leitura migrou o banco"
+        );
+
+        // Não é SQLite: texto, vazio e curto demais.
+        let lixo = pasta.path().join("lixo.db");
+        std::fs::write(&lixo, b"isto nao e um sqlite de jeito nenhum").expect("escrever");
+        assert_eq!(esquema_gravado_em(&lixo), EsquemaGravado::NaoESqlite);
+        let vazio = pasta.path().join("vazio.db");
+        std::fs::write(&vazio, b"").expect("escrever");
+        assert_eq!(esquema_gravado_em(&vazio), EsquemaGravado::NaoESqlite);
+
+        // Truncado: o cabeçalho é de SQLite e o resto sumiu.
+        let inteiro = std::fs::read(&caminho).expect("ler");
+        let truncado = pasta.path().join("truncado.db");
+        std::fs::write(&truncado, &inteiro[..200]).expect("escrever");
+        assert!(
+            matches!(esquema_gravado_em(&truncado), EsquemaGravado::Ilegivel(_)),
+            "{:?}",
+            esquema_gravado_em(&truncado)
+        );
+
+        // Corrompido no meio: as páginas viram lixo.
+        let mut estragado = inteiro.clone();
+        for byte in estragado.iter_mut().skip(100) {
+            *byte = 0xA5;
+        }
+        let corrompido = pasta.path().join("corrompido.db");
+        std::fs::write(&corrompido, &estragado).expect("escrever");
+        assert!(
+            matches!(esquema_gravado_em(&corrompido), EsquemaGravado::Ilegivel(_)),
+            "{:?}",
+            esquema_gravado_em(&corrompido)
+        );
+    }
+
+    /// Sem permissão de leitura: ilegível, com o motivo, e nunca «banco novo».
+    #[cfg(unix)]
+    #[test]
+    fn um_banco_sem_permissao_de_leitura_e_ilegivel() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let pasta = tempfile::tempdir().expect("tempdir");
+        let caminho = pasta.path().join("seele.db");
+        drop(Persistence::open(&Location::File(caminho.clone())).expect("abrir"));
+        std::fs::set_permissions(&caminho, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+        let lido = esquema_gravado_em(&caminho);
+        std::fs::set_permissions(&caminho, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+        // Quem roda como root lê mesmo sem permissão: aí o teste não mede nada.
+        if lido == EsquemaGravado::Gravado(esquema_conhecido()) {
+            return;
+        }
+        assert!(matches!(lido, EsquemaGravado::Ilegivel(_)), "{lido:?}");
     }
 }

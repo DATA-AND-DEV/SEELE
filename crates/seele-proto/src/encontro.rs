@@ -181,7 +181,22 @@ pub const PORTA_PADRAO: u16 = 8383 + 1;
 /// Mora aqui, e não no `seele-server`, porque quem liga por código também
 /// precisa dele (um código não carrega ponto nenhum), e o `seele-core` não vê o
 /// `seele-server` (ADR 0002).
-pub const PONTO_PADRAO: &str = "encontro.seele.app.br";
+pub const PONTO_PADRAO: &str = "rendzvous.seele.sh";
+
+/// Os nomes ANTERIORES do ponto de encontro do projeto. **Só para os guardas** ([`aponta_para_a_producao`]): um teste que os
+/// escreva continua sendo pego como falando com a produção. Este build NÃO os consulta nem recua para eles: a migração para
+/// o domínio novo (o dono, 26/10/2026) aposenta o domínio antigo, e um produto que dependesse dele quebraria quando ele sair.
+pub const PONTOS_LEGADOS: [&str; 1] = ["encontro.seele.app.br"];
+
+/// Se `maquina` (sem porta, com ou sem o ponto final, sem diferença de caixa) é um NOME do ponto de produção, o atual ou um anterior
+/// (para os guardas). Só o nome exato; um sufixo (`….exemplo`) não é.
+#[must_use]
+pub fn e_nome_do_ponto_de_producao(maquina: &str) -> bool {
+    let maquina = maquina.trim().trim_end_matches('.');
+    std::iter::once(PONTO_PADRAO)
+        .chain(PONTOS_LEGADOS)
+        .any(|nome| maquina.eq_ignore_ascii_case(nome))
+}
 
 /// Os endereços do [`PONTO_PADRAO`], para quando o nome não resolver, e para
 /// os guardas dos testes saberem que IP é o da produção
@@ -260,7 +275,7 @@ pub fn aponta_para_a_producao(ponto: &str) -> bool {
         return false;
     };
     let maquina = alvo.maquina.trim_end_matches('.');
-    maquina.eq_ignore_ascii_case(PONTO_PADRAO)
+    e_nome_do_ponto_de_producao(maquina)
         || maquina.parse::<IpAddr>().is_ok_and(|ip| {
             REDE_DO_PADRAO
                 .iter()
@@ -1237,6 +1252,643 @@ fn ler_dicas(texto: &str) -> Option<Vec<SocketAddr>> {
     (dicas.len() <= LIMITE_DE_DICAS).then_some(dicas)
 }
 
+// ---------------------------------------------------------------------------
+// SEELE-ENC/3: o encontro da 0.17 (WebRTC), e a linha SEELE-SINAL/1
+// ---------------------------------------------------------------------------
+//
+// A 0.17 quebra a linha (contrato da 0.17, D6 e D7): o anfitrião da 0.17 se
+// registra **só** pela magia nova, e uma 0.16 que pergunta pelo ENC/1 ou pelo
+// ENC/2 não o acha. É a recusa da linha 1 dita pelo ponto, sem recusador QUIC.
+//
+// O ENC/3 é o ENC/2 com a magia nova, e mais três coisas:
+//
+// - `MORA3`: o registro **livre** de um servidor guardado, que não tem chave
+//   Ed25519 (o certificado dele é P-256). Tem as regras do quarto do ENC/1
+//   (quem escreveu primeiro fica por 60 s), e mais o cookie do ENC/2: quem
+//   forja a origem não registra em nome de ninguém. Nunca numa marca de sala
+//   (as que começam com `p`), que só o `MORO3` assinado registra;
+// - `CHAMA`, `CHAMADO` e `ATENDE`: o fluxo único da travessia de NAT (D7).
+//   Quem liga manda `CHAMA` ao ponto; o ponto repassa `CHAMADO` à escuta do
+//   anfitrião, com um `id` que só ela recebe; a escuta fura o NAT na direção
+//   dos candidatos de quem liga e responde `ATENDE`; e o ponto devolve a quem
+//   liga `AQUI`, `NINGUEM`, `RECUSA` ou `CALADO`;
+// - a linha de texto [`MAGIA_DO_SINAL`], a mesma conversa para o navegador,
+//   que não fala UDP: um `POST /sinal/1` com o `CHAMA` no corpo, e a resposta
+//   no corpo da resposta ([`pedido_do_sinal`], [`resposta_do_sinal`]).
+//
+// Nada disto é autenticação de quem atende. Quem liga escreve a impressão do
+// convite como o `a=fingerprint` da descrição remota, e o DTLS recusa outro
+// certificado (D3): o ponto, hostil, consegue no máximo «não entra».
+
+/// O que todo datagrama do ENC/3 começa dizendo.
+pub const MAGIA3: &str = "SEELE-ENC/3";
+
+/// O tamanho de todo datagrama do ENC/3, pedido ou resposta: o do ENC/2. O
+/// ponto separa as duas pela magia.
+pub const TAMANHO3: usize = TAMANHO2;
+
+/// Quantos candidatos próprios quem liga leva num `CHAMA`: o refletido pelo
+/// STUN e o de um TURN, se houver (D7).
+pub const LIMITE_DE_CANDIDATOS: usize = 2;
+
+/// Quantos bytes tem o `id` de uma chamada, que o ponto sorteia e só a escuta
+/// do anfitrião recebe.
+pub const BYTES_DO_ID: usize = 16;
+
+/// O menor e o maior comprimento da credencial ICE de quem liga (D2: 32
+/// caracteres, ou `s2` com a impressão do certificado e 16 a mais).
+pub const CREDENCIAL_MINIMA: usize = 32;
+/// Ver [`CREDENCIAL_MINIMA`].
+pub const CREDENCIAL_MAXIMA: usize = 96;
+
+/// O rótulo do que a chave da sala assina num `MORO3`: distinto do `MORO2`,
+/// para um `MORO2` da 0.16 copiado no caminho não registrar a sala no ENC/3.
+pub const ROTULO_MORO3: &[u8] = b"SEELE-ENC/3 moro\0";
+
+/// A credencial ICE de quem liga: `ufrag = pwd = U` nos dois lados (D2).
+///
+/// Só letras e números ASCII, de [`CREDENCIAL_MINIMA`] a
+/// [`CREDENCIAL_MAXIMA`]: ela vai num campo de texto do fio e na linha
+/// `a=ice-ufrag` da descrição que a página sintetiza, e um caractere de fora
+/// quebraria as duas.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Credencial(String);
+
+impl Credencial {
+    /// A credencial, se este texto puder ser uma.
+    #[must_use]
+    pub fn nova(texto: &str) -> Option<Self> {
+        let tamanho_certo = (CREDENCIAL_MINIMA..=CREDENCIAL_MAXIMA).contains(&texto.len());
+        (tamanho_certo && texto.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+            .then(|| Self(texto.to_owned()))
+    }
+
+    /// O texto dela.
+    #[must_use]
+    pub fn texto(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Credencial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Se este endereço pode ir como candidato de quem liga num `CHAMA`.
+///
+/// Porta de 1024 para cima, sem escopo, nem multicast nem «qualquer». **Não
+/// diz se ele é da internet**: isso é do ponto, que conhece a vizinhança dele
+/// ([`alcancavel`]), e do anfitrião, que fura só na direção de candidatos que
+/// ele também aceite.
+#[must_use]
+pub fn serve_de_candidato(endereco: SocketAddr) -> bool {
+    let sem_escopo = match endereco {
+        SocketAddr::V4(_) => true,
+        SocketAddr::V6(seis) => seis.scope_id() == 0 && seis.flowinfo() == 0,
+    };
+    sem_escopo
+        && endereco.port() >= 1024
+        && !endereco.ip().is_unspecified()
+        && !endereco.ip().is_multicast()
+}
+
+/// «Quero falar com este servidor, e é por aqui que eu chego.» O pedido de
+/// quem liga ao ponto, pelo ENC/3 ([`chama`]) ou pelo sinal
+/// ([`pedido_do_sinal`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chama {
+    /// A marca do servidor ([`Marcas::servidor`]): o endereço que o ponto
+    /// devolve.
+    pub servidor: Marca,
+    /// A marca da escuta ([`Marcas::escuta`]): para onde o ponto repassa.
+    pub escuta: Marca,
+    /// A credencial ICE desta tentativa.
+    pub credencial: Credencial,
+    /// Até [`LIMITE_DE_CANDIDATOS`] endereços de quem liga
+    /// ([`serve_de_candidato`]). Pelo ENC/3, o ponto junta o endereço que ele
+    /// viu, se não estiver aqui.
+    pub candidatos: Vec<SocketAddr>,
+}
+
+/// O `CHAMA` que o ponto repassa à escuta do anfitrião.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Chamado {
+    /// A marca da escuta, para o anfitrião conferir que é com ele.
+    pub escuta: Marca,
+    /// O número desta chamada, que volta no [`Atende`].
+    pub id: [u8; BYTES_DO_ID],
+    /// A credencial ICE de quem liga.
+    pub credencial: Credencial,
+    /// Para onde furar: os candidatos de quem liga, até
+    /// [`LIMITE_DE_CANDIDATOS`] + 1 (o que o ponto viu, pelo ENC/3).
+    pub candidatos: Vec<SocketAddr>,
+}
+
+/// A resposta da escuta a um [`Chamado`]: «furei, e é aqui que eu atendo».
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Atende {
+    /// A marca da escuta do [`Chamado`].
+    pub escuta: Marca,
+    /// O `id` do [`Chamado`].
+    pub id: [u8; BYTES_DO_ID],
+    /// O endereço público do servidor, como o último `MOROU` o disse.
+    pub endereco: SocketAddr,
+    /// As dicas de rede local do anfitrião ([`serve_de_dica`]).
+    pub dicas: Vec<SocketAddr>,
+}
+
+/// O que se pede a um ponto na versão 3.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pedido3 {
+    /// O registro assinado da sala: os campos do `MORO2`, com a assinatura
+    /// sobre [`mensagem_do_moro3`].
+    Moro3(Moro2),
+    /// O registro livre de um servidor guardado.
+    Mora3 {
+        /// A marca da escuta ou do servidor ([`Marcas::do_servidor`]). Nunca
+        /// uma marca de sala.
+        marca: Marca,
+        /// O cookie deste IP, ou `None` na primeira vez.
+        cookie: Option<[u8; BYTES_DO_COOKIE]>,
+    },
+    /// «Onde mora esta marca?» Responde sempre, como o `QUEM2`.
+    Quem3 {
+        /// De quem se quer o endereço.
+        marca: Marca,
+    },
+    /// A chamada de quem liga.
+    Chama(Chama),
+    /// A resposta da escuta ao `CHAMADO`.
+    Atende(Atende),
+}
+
+/// O que o ponto manda na versão 3. Sempre com [`TAMANHO3`] bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resposta3 {
+    /// O registro foi guardado (`MOROU`).
+    Morou {
+        /// A marca registrada.
+        marca: Marca,
+        /// O endereço de quem registrou, visto pelo ponto.
+        endereco: SocketAddr,
+        /// O cookie deste IP, na janela corrente.
+        cookie: [u8; BYTES_DO_COOKIE],
+    },
+    /// O registro veio sem cookie, ou com um que não confere (`DESAFIO`).
+    Desafio {
+        /// A marca do pedido.
+        marca: Marca,
+        /// O cookie deste IP, na janela corrente.
+        cookie: [u8; BYTES_DO_COOKIE],
+    },
+    /// Onde a marca mora (`AQUI`), resposta ao `QUEM3` e ao `CHAMA` atendido.
+    Aqui {
+        /// A marca perguntada (no `CHAMA`, a do servidor).
+        marca: Marca,
+        /// O endereço público.
+        endereco: SocketAddr,
+        /// As dicas de rede local.
+        dicas: Vec<SocketAddr>,
+    },
+    /// Ninguém mora nesta marca agora (`NINGUEM`).
+    Ninguem {
+        /// A marca perguntada.
+        marca: Marca,
+    },
+    /// O ponto recusou (`RECUSA`).
+    Recusa {
+        /// A marca do pedido.
+        marca: Marca,
+        /// Por quê.
+        motivo: Motivo,
+        /// Segundos Unix no relógio do ponto.
+        agora: u64,
+    },
+    /// O anfitrião mora lá e não atendeu o `CHAMADO` no prazo (`CALADO`).
+    Calado {
+        /// A marca do servidor.
+        marca: Marca,
+    },
+    /// O repasse à escuta do anfitrião (`CHAMADO`).
+    Chamado(Chamado),
+}
+
+/// O que a chave da sala assina num `MORO3`: o do `MORO2`
+/// ([`crate::assinatura::moro2`]) com o [`ROTULO_MORO3`] no lugar do rótulo.
+#[must_use]
+pub fn mensagem_do_moro3(
+    marca: &Marca,
+    chave: &[u8; 32],
+    carimbo: u64,
+    dicas: &[SocketAddr],
+) -> Vec<u8> {
+    let do_moro2 = crate::assinatura::moro2(marca, chave, carimbo, dicas);
+    let corpo = do_moro2
+        .get(crate::assinatura::ROTULO_MORO2.len()..)
+        .unwrap_or_default();
+    let mut mensagem = Vec::with_capacity(ROTULO_MORO3.len() + corpo.len());
+    mensagem.extend_from_slice(ROTULO_MORO3);
+    mensagem.extend_from_slice(corpo);
+    mensagem
+}
+
+/// Monta um `MORO3`. Escreve o que recebe, como [`moro2`].
+#[must_use]
+pub fn moro3(pedido: &Moro2) -> Vec<u8> {
+    use base64::Engine as _;
+    encher2(format!(
+        "{MAGIA3} MORO3 {} {} {} {} {} {}",
+        pedido.marca,
+        BASE64.encode(pedido.chave),
+        pedido.carimbo,
+        escrever_dicas(&pedido.dicas),
+        BASE64.encode(pedido.assinatura),
+        escrever_cookie(pedido.cookie.as_ref()),
+    ))
+}
+
+/// Monta um `MORA3`.
+#[must_use]
+pub fn mora3(marca: &Marca, cookie: Option<&[u8; BYTES_DO_COOKIE]>) -> Vec<u8> {
+    encher2(format!(
+        "{MAGIA3} MORA3 {marca} {}",
+        escrever_cookie(cookie)
+    ))
+}
+
+/// Monta um `QUEM3`.
+#[must_use]
+pub fn quem3(marca: &Marca) -> Vec<u8> {
+    encher2(format!("{MAGIA3} QUEM3 {marca}"))
+}
+
+/// Monta um `CHAMA`.
+#[must_use]
+pub fn chama(pedido: &Chama) -> Vec<u8> {
+    encher2(format!("{MAGIA3} {}", linha_do_chama(pedido)))
+}
+
+/// Monta um `ATENDE`.
+#[must_use]
+pub fn atende(resposta: &Atende) -> Vec<u8> {
+    use base64::Engine as _;
+    encher2(format!(
+        "{MAGIA3} ATENDE {} {} {} {}",
+        resposta.escuta,
+        BASE64.encode(resposta.id),
+        resposta.endereco,
+        escrever_dicas(&resposta.dicas),
+    ))
+}
+
+/// Monta uma resposta da versão 3.
+#[must_use]
+pub fn resposta3(resposta: &Resposta3) -> Vec<u8> {
+    use base64::Engine as _;
+    encher2(match resposta {
+        Resposta3::Morou {
+            marca,
+            endereco,
+            cookie,
+        } => format!(
+            "{MAGIA3} MOROU {marca} {endereco} {}",
+            BASE64.encode(cookie)
+        ),
+        Resposta3::Desafio { marca, cookie } => {
+            format!("{MAGIA3} DESAFIO {marca} {}", BASE64.encode(cookie))
+        }
+        Resposta3::Aqui {
+            marca,
+            endereco,
+            dicas,
+        } => format!("{MAGIA3} AQUI {marca} {endereco} {}", escrever_dicas(dicas)),
+        Resposta3::Ninguem { marca } => format!("{MAGIA3} NINGUEM {marca}"),
+        Resposta3::Recusa {
+            marca,
+            motivo,
+            agora,
+        } => format!("{MAGIA3} RECUSA {marca} {} {agora}", motivo.texto()),
+        Resposta3::Calado { marca } => format!("{MAGIA3} CALADO {marca}"),
+        Resposta3::Chamado(chamado) => format!(
+            "{MAGIA3} CHAMADO {} {} {} {}",
+            chamado.escuta,
+            BASE64.encode(chamado.id),
+            chamado.credencial,
+            escrever_enderecos(&chamado.candidatos),
+        ),
+    })
+}
+
+/// Lê um pedido da versão 3, sem conferir assinatura, cookie nem relógio.
+/// As regras de forma são as de [`analisar2`].
+#[must_use]
+pub fn analisar3(datagrama: &[u8]) -> Option<Pedido3> {
+    let (verbo, resto) = verbo3(datagrama)?;
+    match verbo {
+        "MORO3" => {
+            let [marca, chave, carimbo, dicas, assinatura, cookie] = campos(resto)?;
+            Some(Pedido3::Moro3(Moro2 {
+                marca: Marca::nova(marca)?,
+                chave: ler_base64(chave)?,
+                carimbo: ler_numero(carimbo)?,
+                dicas: ler_dicas(dicas)?,
+                assinatura: ler_base64(assinatura)?,
+                cookie: ler_cookie(cookie)?,
+            }))
+        }
+        "MORA3" => {
+            let [marca, cookie] = campos(resto)?;
+            let marca = Marca::nova(marca)?;
+            if e_marca_de_sala(&marca) {
+                return None;
+            }
+            Some(Pedido3::Mora3 {
+                marca,
+                cookie: ler_cookie(cookie)?,
+            })
+        }
+        "QUEM3" => {
+            let [marca] = campos(resto)?;
+            Some(Pedido3::Quem3 {
+                marca: Marca::nova(marca)?,
+            })
+        }
+        "CHAMA" => ler_chama(resto, LIMITE_DE_CANDIDATOS).map(Pedido3::Chama),
+        "ATENDE" => {
+            let [escuta, id, endereco, dicas] = campos(resto)?;
+            Some(Pedido3::Atende(Atende {
+                escuta: Marca::nova(escuta)?,
+                id: ler_base64(id)?,
+                endereco: ler_endereco(endereco)?,
+                dicas: ler_dicas(dicas)?,
+            }))
+        }
+        _ => None,
+    }
+}
+
+/// Lê uma resposta da versão 3, com as regras de [`analisar3`]. `None` para
+/// os pedidos.
+#[must_use]
+pub fn ler_resposta3(datagrama: &[u8]) -> Option<Resposta3> {
+    let (verbo, resto) = verbo3(datagrama)?;
+    match verbo {
+        "MOROU" => {
+            let [marca, endereco, cookie] = campos(resto)?;
+            Some(Resposta3::Morou {
+                marca: Marca::nova(marca)?,
+                endereco: ler_endereco(endereco)?,
+                cookie: ler_base64(cookie)?,
+            })
+        }
+        "DESAFIO" => {
+            let [marca, cookie] = campos(resto)?;
+            Some(Resposta3::Desafio {
+                marca: Marca::nova(marca)?,
+                cookie: ler_base64(cookie)?,
+            })
+        }
+        "AQUI" => {
+            let [marca, endereco, dicas] = campos(resto)?;
+            Some(Resposta3::Aqui {
+                marca: Marca::nova(marca)?,
+                endereco: ler_endereco(endereco)?,
+                dicas: ler_dicas(dicas)?,
+            })
+        }
+        "NINGUEM" => {
+            let [marca] = campos(resto)?;
+            Some(Resposta3::Ninguem {
+                marca: Marca::nova(marca)?,
+            })
+        }
+        "RECUSA" => {
+            let [marca, motivo, agora] = campos(resto)?;
+            Some(Resposta3::Recusa {
+                marca: Marca::nova(marca)?,
+                motivo: Motivo::ler(motivo)?,
+                agora: ler_numero(agora)?,
+            })
+        }
+        "CALADO" => {
+            let [marca] = campos(resto)?;
+            Some(Resposta3::Calado {
+                marca: Marca::nova(marca)?,
+            })
+        }
+        "CHAMADO" => {
+            let [escuta, id, credencial, candidatos] = campos(resto)?;
+            Some(Resposta3::Chamado(Chamado {
+                escuta: Marca::nova(escuta)?,
+                id: ler_base64(id)?,
+                credencial: Credencial::nova(credencial)?,
+                candidatos: ler_enderecos(candidatos, LIMITE_DE_CANDIDATOS + 1)?,
+            }))
+        }
+        _ => None,
+    }
+}
+
+/// Se esta marca é do espaço das salas pessoais ([`Marcas::da_sala`]): só o
+/// `MORO3` assinado as registra.
+#[must_use]
+pub fn e_marca_de_sala(marca: &Marca) -> bool {
+    marca.texto().starts_with('p')
+}
+
+/// A magia da linha de texto que o navegador manda ao ponto por HTTPS
+/// (`POST /sinal/1`, `text/plain`), e que o ponto responde no corpo.
+pub const MAGIA_DO_SINAL: &str = "SEELE-SINAL/1";
+
+/// O maior corpo de um pedido do sinal, em bytes. O maior `CHAMA` possível tem
+/// 266 (o teste `o_maior_chama_cabe`), e o ponto recusa corpo maior que isto
+/// sem ler o resto.
+pub const LIMITE_DO_SINAL: usize = 512;
+
+/// O que o ponto responde a um `CHAMA` do sinal: as quatro linhas de
+/// [`MAGIA_DO_SINAL`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RespostaDoSinal {
+    /// O anfitrião atendeu: o endereço público do servidor e as dicas.
+    Aqui {
+        /// O endereço público do servidor.
+        endereco: SocketAddr,
+        /// As dicas de rede local.
+        dicas: Vec<SocketAddr>,
+    },
+    /// Ninguém mora nas marcas do convite neste ponto.
+    Ninguem,
+    /// O ponto recusou, e diz por quê e que horas ele acha que são.
+    Recusa {
+        /// Por quê.
+        motivo: Motivo,
+        /// Segundos Unix no relógio do ponto.
+        agora: u64,
+    },
+    /// O anfitrião mora lá e não atendeu no prazo.
+    Calado,
+}
+
+/// O corpo do `POST /sinal/1`: `SEELE-SINAL/1 CHAMA <servidor> <escuta> <U>
+/// <candidatos>`, sem quebra de linha.
+#[must_use]
+pub fn pedido_do_sinal(pedido: &Chama) -> String {
+    format!("{MAGIA_DO_SINAL} {}", linha_do_chama(pedido))
+}
+
+/// Lê o corpo de um `POST /sinal/1`, com as regras de forma de [`analisar3`].
+/// Aceita uma quebra de linha no fim, e nada mais.
+#[must_use]
+pub fn ler_pedido_do_sinal(corpo: &str) -> Option<Chama> {
+    let linha = corpo.strip_suffix('\n').unwrap_or(corpo);
+    if linha.len() > LIMITE_DO_SINAL || linha.contains(['\n', '\r']) {
+        return None;
+    }
+    let resto = linha.strip_prefix(MAGIA_DO_SINAL)?.strip_prefix(' ')?;
+    let resto = resto.strip_prefix("CHAMA ")?;
+    ler_chama(resto, LIMITE_DE_CANDIDATOS)
+}
+
+/// O corpo da resposta ao `POST /sinal/1`, sem quebra de linha.
+#[must_use]
+pub fn resposta_do_sinal(resposta: &RespostaDoSinal) -> String {
+    match resposta {
+        RespostaDoSinal::Aqui { endereco, dicas } => {
+            format!("{MAGIA_DO_SINAL} AQUI {endereco} {}", escrever_dicas(dicas))
+        }
+        RespostaDoSinal::Ninguem => format!("{MAGIA_DO_SINAL} NINGUEM"),
+        RespostaDoSinal::Recusa { motivo, agora } => {
+            format!("{MAGIA_DO_SINAL} RECUSA {} {agora}", motivo.texto())
+        }
+        RespostaDoSinal::Calado => format!("{MAGIA_DO_SINAL} CALADO"),
+    }
+}
+
+/// Lê a resposta do sinal, com as regras de forma de [`analisar3`].
+#[must_use]
+pub fn ler_resposta_do_sinal(corpo: &str) -> Option<RespostaDoSinal> {
+    let linha = corpo.strip_suffix('\n').unwrap_or(corpo);
+    let resto = linha.strip_prefix(MAGIA_DO_SINAL)?.strip_prefix(' ')?;
+    // Sem espaço, só o verbo: `NINGUEM` e `CALADO` não têm campo, e um espaço
+    // no fim é um campo vazio a mais.
+    let Some((verbo, resto)) = resto.split_once(' ') else {
+        return match resto {
+            "NINGUEM" => Some(RespostaDoSinal::Ninguem),
+            "CALADO" => Some(RespostaDoSinal::Calado),
+            _ => None,
+        };
+    };
+    match verbo {
+        "AQUI" => {
+            let [endereco, dicas] = campos(resto)?;
+            Some(RespostaDoSinal::Aqui {
+                endereco: ler_endereco(endereco)?,
+                dicas: ler_dicas(dicas)?,
+            })
+        }
+        "RECUSA" => {
+            let [motivo, agora] = campos(resto)?;
+            Some(RespostaDoSinal::Recusa {
+                motivo: Motivo::ler(motivo)?,
+                agora: ler_numero(agora)?,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// A resposta do sinal que corresponde a uma do ENC/3, para o ponto dizer a
+/// mesma coisa pelos dois caminhos. `None` para o que não responde a `CHAMA`.
+#[must_use]
+pub fn sinal_de(resposta: &Resposta3) -> Option<RespostaDoSinal> {
+    match resposta {
+        Resposta3::Aqui {
+            endereco, dicas, ..
+        } => Some(RespostaDoSinal::Aqui {
+            endereco: *endereco,
+            dicas: dicas.clone(),
+        }),
+        Resposta3::Ninguem { .. } => Some(RespostaDoSinal::Ninguem),
+        Resposta3::Recusa { motivo, agora, .. } => Some(RespostaDoSinal::Recusa {
+            motivo: *motivo,
+            agora: *agora,
+        }),
+        Resposta3::Calado { .. } => Some(RespostaDoSinal::Calado),
+        Resposta3::Morou { .. } | Resposta3::Desafio { .. } | Resposta3::Chamado(_) => None,
+    }
+}
+
+/// `CHAMA <servidor> <escuta> <U> <candidatos>`, sem magia.
+fn linha_do_chama(pedido: &Chama) -> String {
+    format!(
+        "CHAMA {} {} {} {}",
+        pedido.servidor,
+        pedido.escuta,
+        pedido.credencial,
+        escrever_enderecos(&pedido.candidatos),
+    )
+}
+
+/// Os campos de um `CHAMA`, depois do verbo.
+fn ler_chama(resto: &str, limite: usize) -> Option<Chama> {
+    let [servidor, escuta, credencial, candidatos] = campos(resto)?;
+    Some(Chama {
+        servidor: Marca::nova(servidor)?,
+        escuta: Marca::nova(escuta)?,
+        credencial: Credencial::nova(credencial)?,
+        candidatos: ler_enderecos(candidatos, limite)?,
+    })
+}
+
+/// O verbo e o resto da linha de um datagrama do ENC/3.
+fn verbo3(datagrama: &[u8]) -> Option<(&str, &str)> {
+    if datagrama.len() != TAMANHO3 {
+        return None;
+    }
+    let linha = std::str::from_utf8(datagrama).ok()?.split('\n').next()?;
+    linha
+        .strip_prefix(MAGIA3)?
+        .strip_prefix(' ')?
+        .split_once(' ')
+}
+
+fn escrever_cookie(cookie: Option<&[u8; BYTES_DO_COOKIE]>) -> String {
+    use base64::Engine as _;
+    cookie.map_or_else(|| "-".to_owned(), |cookie| BASE64.encode(cookie))
+}
+
+/// `-` é «sem cookie»; o resto, um cookie canônico. `None` para lixo.
+fn ler_cookie(texto: &str) -> Option<Option<[u8; BYTES_DO_COOKIE]>> {
+    match texto {
+        "-" => Some(None),
+        cookie => Some(Some(ler_base64(cookie)?)),
+    }
+}
+
+/// Candidatos no fio: `-` para nenhum, ou separados por vírgula.
+fn escrever_enderecos(enderecos: &[SocketAddr]) -> String {
+    escrever_dicas(enderecos)
+}
+
+/// Até `limite` candidatos canônicos que [`serve_de_candidato`] aceita, sem
+/// repetir. Um só que não sirva recusa todos.
+fn ler_enderecos(texto: &str, limite: usize) -> Option<Vec<SocketAddr>> {
+    if texto == "-" {
+        return Some(Vec::new());
+    }
+    let mut enderecos = Vec::new();
+    for um in texto.split(',') {
+        let endereco = ler_endereco(um).filter(|endereco| serve_de_candidato(*endereco))?;
+        if enderecos.contains(&endereco) {
+            return None;
+        }
+        enderecos.push(endereco);
+    }
+    (enderecos.len() <= limite).then_some(enderecos)
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -1504,7 +2156,8 @@ mod testes {
                 );
             }
         }
-        assert_eq!(PONTO_PADRAO, "encontro.seele.app.br");
+        assert_eq!(PONTO_PADRAO, "rendzvous.seele.sh");
+        assert_eq!(PONTOS_LEGADOS, ["encontro.seele.app.br"]);
         assert_eq!(VARIAVEL, "SEELE_ENCONTRO");
     }
 
@@ -1518,6 +2171,11 @@ mod testes {
         // maiúsculas, com o ponto final do DNS, ou pelo IP da VPS.
         for producao in [
             PONTO_PADRAO,
+            "rendzvous.seele.sh:8384",
+            "RENDZVOUS.Seele.SH",
+            "rendzvous.seele.sh.",
+            // O nome ANTERIOR continua sendo o mesmo ponto de produção (a troca de domínio da 0.17).
+            "encontro.seele.app.br",
             "encontro.seele.app.br:8384",
             "ENCONTRO.Seele.App.BR",
             "encontro.seele.app.br.",
@@ -1543,6 +2201,10 @@ mod testes {
             "192.0.2.1:8384",
             "meu.ponto:9000",
             "encontro.seele.app.br.exemplo",
+            "rendzvous.seele.sh.exemplo",
+            "rendezvous.seele.sh",
+            crate::uri::ORIGEM_DO_NAVEGADOR,
+            "encontro.seele.sh",
             "nao",
             "",
         ] {
@@ -2055,5 +2717,307 @@ mod enc2 {
         assert_eq!(com_resto, sem_resto);
         assert_eq!(sem_cookie, "-");
         assert_eq!(com_cookie.len(), 22);
+    }
+}
+
+#[cfg(test)]
+mod enc3 {
+    //! O fio do SEELE-ENC/3 e da linha SEELE-SINAL/1 (contrato da 0.17, D7):
+    //! tamanho fixo, forma canônica, e a separação das versões.
+    use super::*;
+
+    fn marca(texto: &str) -> Marca {
+        Marca::nova(texto).expect("marca de teste inválida")
+    }
+
+    fn de(texto: &str) -> SocketAddr {
+        texto.parse().expect("endereço de teste inválido")
+    }
+
+    fn credencial() -> Credencial {
+        Credencial::nova("AbCdEfGhIjKlMnOpQrStUvWxYz012345").expect("credencial de teste")
+    }
+
+    fn um_chama() -> Chama {
+        Chama {
+            servidor: marca("3cbcfb0212da738fs"),
+            escuta: marca("3cbcfb0212da738fe"),
+            credencial: credencial(),
+            candidatos: vec![de("198.51.100.7:51000"), de("[2001:4860::9]:3478")],
+        }
+    }
+
+    fn maior_v6() -> SocketAddr {
+        de("[2fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535")
+    }
+
+    #[test]
+    fn todo_pedido_do_enc3_volta_igual_e_tem_o_tamanho_fixo() {
+        let moro = Moro2 {
+            marca: marca("pCSM7NBFRCAYQEV4s"),
+            chave: [7; 32],
+            carimbo: 1_791_000_000,
+            dicas: vec![de("192.168.0.10:8385")],
+            assinatura: [9; 64],
+            cookie: Some([5; BYTES_DO_COOKIE]),
+        };
+        let pedidos = [
+            (moro3(&moro), Pedido3::Moro3(moro.clone())),
+            (
+                mora3(&marca("3cbcfb0212da738fs"), None),
+                Pedido3::Mora3 {
+                    marca: marca("3cbcfb0212da738fs"),
+                    cookie: None,
+                },
+            ),
+            (
+                mora3(&marca("3cbcfb0212da738fe"), Some(&[1; BYTES_DO_COOKIE])),
+                Pedido3::Mora3 {
+                    marca: marca("3cbcfb0212da738fe"),
+                    cookie: Some([1; BYTES_DO_COOKIE]),
+                },
+            ),
+            (
+                quem3(&marca("pAs")),
+                Pedido3::Quem3 {
+                    marca: marca("pAs"),
+                },
+            ),
+            (chama(&um_chama()), Pedido3::Chama(um_chama())),
+            (
+                chama(&Chama {
+                    candidatos: Vec::new(),
+                    ..um_chama()
+                }),
+                Pedido3::Chama(Chama {
+                    candidatos: Vec::new(),
+                    ..um_chama()
+                }),
+            ),
+            (
+                atende(&Atende {
+                    escuta: marca("3cbcfb0212da738fe"),
+                    id: [0xAB; BYTES_DO_ID],
+                    endereco: de("203.0.113.7:8383"),
+                    dicas: vec![de("10.0.0.2:8383")],
+                }),
+                Pedido3::Atende(Atende {
+                    escuta: marca("3cbcfb0212da738fe"),
+                    id: [0xAB; BYTES_DO_ID],
+                    endereco: de("203.0.113.7:8383"),
+                    dicas: vec![de("10.0.0.2:8383")],
+                }),
+            ),
+        ];
+        for (datagrama, esperado) in pedidos {
+            assert_eq!(datagrama.len(), TAMANHO3, "{esperado:?}");
+            assert_eq!(analisar3(&datagrama), Some(esperado.clone()));
+            // Nenhuma versão lê a outra: o ENC/2 cala para a magia nova.
+            assert_eq!(analisar2(&datagrama), None, "{esperado:?}");
+            assert_eq!(ler_resposta3(&datagrama), None, "{esperado:?}");
+        }
+    }
+
+    #[test]
+    fn toda_resposta_do_enc3_volta_igual_e_tem_o_tamanho_fixo() {
+        let respostas = [
+            Resposta3::Morou {
+                marca: marca("pAs"),
+                endereco: de("203.0.113.7:41234"),
+                cookie: [3; BYTES_DO_COOKIE],
+            },
+            Resposta3::Desafio {
+                marca: marca("3cbcfb0212da738fs"),
+                cookie: [0xFE; BYTES_DO_COOKIE],
+            },
+            Resposta3::Aqui {
+                marca: marca("3cbcfb0212da738fs"),
+                endereco: de("[2001:4860::1]:8383"),
+                dicas: vec![de("10.0.0.2:8383")],
+            },
+            Resposta3::Ninguem {
+                marca: marca("pAs"),
+            },
+            Resposta3::Recusa {
+                marca: marca("pAs"),
+                motivo: Motivo::Taxa,
+                agora: 1_791_000_000,
+            },
+            Resposta3::Calado {
+                marca: marca("3cbcfb0212da738fs"),
+            },
+            Resposta3::Chamado(Chamado {
+                escuta: marca("3cbcfb0212da738fe"),
+                id: [0x11; BYTES_DO_ID],
+                credencial: credencial(),
+                candidatos: vec![
+                    de("198.51.100.7:51000"),
+                    de("198.51.100.7:51001"),
+                    de("[2001:4860::9]:3478"),
+                ],
+            }),
+        ];
+        for resposta in respostas {
+            let datagrama = resposta3(&resposta);
+            assert_eq!(datagrama.len(), TAMANHO3, "{resposta:?}");
+            assert_eq!(ler_resposta3(&datagrama), Some(resposta.clone()));
+            assert_eq!(ler_resposta2(&datagrama), None, "{resposta:?}");
+            assert_eq!(analisar3(&datagrama), None, "{resposta:?}");
+        }
+    }
+
+    #[test]
+    fn o_maior_chama_e_o_maior_chamado_cabem_no_datagrama() {
+        let longa = Credencial::nova(&"Z".repeat(CREDENCIAL_MAXIMA)).expect("cabe");
+        let pedido = Chama {
+            servidor: marca(&"s".repeat(LIMITE_DA_MARCA)),
+            escuta: marca(&"e".repeat(LIMITE_DA_MARCA)),
+            credencial: longa.clone(),
+            candidatos: vec![
+                maior_v6(),
+                de("[2fff:ffff:ffff:ffff:ffff:ffff:ffff:fffe]:65535"),
+            ],
+        };
+        let datagrama = chama(&pedido);
+        assert_eq!(analisar3(&datagrama), Some(Pedido3::Chama(pedido.clone())));
+        // E pelo sinal: o maior corpo cabe no limite que o ponto lê.
+        let corpo = pedido_do_sinal(&pedido);
+        assert!(corpo.len() <= LIMITE_DO_SINAL, "{}", corpo.len());
+        assert_eq!(ler_pedido_do_sinal(&corpo), Some(pedido));
+
+        let chamado = Resposta3::Chamado(Chamado {
+            escuta: marca(&"e".repeat(LIMITE_DA_MARCA)),
+            id: [0xFF; BYTES_DO_ID],
+            credencial: longa,
+            candidatos: vec![
+                maior_v6(),
+                de("[2fff:ffff:ffff:ffff:ffff:ffff:ffff:fffe]:65535"),
+                de("[2fff:ffff:ffff:ffff:ffff:ffff:ffff:fffd]:65535"),
+            ],
+        });
+        assert_eq!(ler_resposta3(&resposta3(&chamado)), Some(chamado));
+    }
+
+    #[test]
+    fn um_campo_fora_da_forma_canonica_cala() {
+        let linhas = [
+            // Credencial curta, longa, ou com símbolo.
+            format!("{MAGIA3} CHAMA a b {} -", "x".repeat(31)),
+            format!("{MAGIA3} CHAMA a b {} -", "x".repeat(97)),
+            format!("{MAGIA3} CHAMA a b {}+ -", "x".repeat(32)),
+            // Candidato com porta baixa, zero à esquerda, repetido, ou três.
+            format!("{MAGIA3} CHAMA a b {} 198.51.100.7:80", "x".repeat(32)),
+            format!("{MAGIA3} CHAMA a b {} 198.51.100.7:08080", "x".repeat(32)),
+            format!(
+                "{MAGIA3} CHAMA a b {} 198.51.100.7:8080,198.51.100.7:8080",
+                "x".repeat(32)
+            ),
+            format!(
+                "{MAGIA3} CHAMA a b {} 1.2.3.4:8080,1.2.3.5:8080,1.2.3.6:8080",
+                "x".repeat(32)
+            ),
+            // Candidato «qualquer» ou multicast.
+            format!("{MAGIA3} CHAMA a b {} 0.0.0.0:8080", "x".repeat(32)),
+            format!("{MAGIA3} CHAMA a b {} 239.1.1.1:8080", "x".repeat(32)),
+            // Campo a mais, a menos.
+            format!("{MAGIA3} CHAMA a b {} - -", "x".repeat(32)),
+            format!("{MAGIA3} CHAMA a b {}", "x".repeat(32)),
+            // Um `MORA3` numa marca de sala: só o assinado as registra.
+            format!("{MAGIA3} MORA3 pCSM7NBFRCAYQEV4s -"),
+            // Um `ATENDE` com dica que não é de rede local.
+            format!(
+                "{MAGIA3} ATENDE e {} 203.0.113.7:8383 8.8.8.8:8383",
+                "A".repeat(22)
+            ),
+        ];
+        for linha in linhas {
+            assert_eq!(analisar3(&encher2(linha.clone())), None, "{linha}");
+        }
+        // E o tamanho: um byte a menos ou a mais cala.
+        let certo = chama(&um_chama());
+        assert!(analisar3(certo.get(..TAMANHO3 - 1).expect("cabe")).is_none());
+        let mut maior = certo.clone();
+        maior.push(b'.');
+        assert!(analisar3(&maior).is_none());
+    }
+
+    #[test]
+    fn o_sinal_volta_igual_e_recusa_o_que_nao_e_canonico() {
+        let respostas = [
+            RespostaDoSinal::Aqui {
+                endereco: de("203.0.113.7:8383"),
+                dicas: vec![de("192.168.0.4:8383")],
+            },
+            RespostaDoSinal::Aqui {
+                endereco: de("[2001:4860::1]:8383"),
+                dicas: Vec::new(),
+            },
+            RespostaDoSinal::Ninguem,
+            RespostaDoSinal::Recusa {
+                motivo: Motivo::Cheio,
+                agora: 7,
+            },
+            RespostaDoSinal::Calado,
+        ];
+        for resposta in respostas {
+            let corpo = resposta_do_sinal(&resposta);
+            assert_eq!(ler_resposta_do_sinal(&corpo), Some(resposta.clone()));
+            assert_eq!(ler_resposta_do_sinal(&format!("{corpo}\n")), Some(resposta));
+        }
+        for ruim in [
+            "SEELE-SINAL/1 NINGUEM a",
+            "SEELE-SINAL/1 CALADO ",
+            "SEELE-SINAL/1 AQUI 203.0.113.7:08383 -",
+            "SEELE-SINAL/2 NINGUEM",
+            "SEELE-SINAL/1 RECUSA outro 1",
+        ] {
+            assert_eq!(ler_resposta_do_sinal(ruim), None, "{ruim}");
+        }
+        let corpo = pedido_do_sinal(&um_chama());
+        assert!(ler_pedido_do_sinal(&format!("{corpo}\r\n")).is_none());
+        assert!(ler_pedido_do_sinal(&format!("{corpo}\nmais")).is_none());
+        assert!(ler_pedido_do_sinal(&corpo.replace("SINAL/1", "SINAL/2")).is_none());
+    }
+
+    #[test]
+    fn a_mensagem_do_moro3_nao_e_a_do_moro2() {
+        // Um `MORO2` da 0.16 copiado no caminho não registra a sala no ENC/3.
+        let m = marca("pCSM7NBFRCAYQEV4s");
+        let dicas = [de("192.168.0.10:8385")];
+        let dois = crate::assinatura::moro2(&m, &[7; 32], 1, &dicas);
+        let tres = mensagem_do_moro3(&m, &[7; 32], 1, &dicas);
+        assert_ne!(dois, tres);
+        assert!(tres.starts_with(ROTULO_MORO3));
+        assert_eq!(
+            dois.get(crate::assinatura::ROTULO_MORO2.len()..),
+            tres.get(ROTULO_MORO3.len()..)
+        );
+    }
+
+    #[test]
+    fn o_sinal_e_o_enc3_dizem_a_mesma_coisa() {
+        let aqui = Resposta3::Aqui {
+            marca: marca("as"),
+            endereco: de("203.0.113.7:8383"),
+            dicas: Vec::new(),
+        };
+        assert_eq!(
+            sinal_de(&aqui),
+            Some(RespostaDoSinal::Aqui {
+                endereco: de("203.0.113.7:8383"),
+                dicas: Vec::new()
+            })
+        );
+        assert_eq!(
+            sinal_de(&Resposta3::Calado { marca: marca("as") }),
+            Some(RespostaDoSinal::Calado)
+        );
+        assert_eq!(
+            sinal_de(&Resposta3::Desafio {
+                marca: marca("as"),
+                cookie: [0; BYTES_DO_COOKIE]
+            }),
+            None
+        );
     }
 }

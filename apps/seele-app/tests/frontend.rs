@@ -138,9 +138,14 @@ fn linked_assets(page: &str, attribute: &str) -> Vec<String> {
 fn invoked_commands(script: &str) -> BTreeSet<String> {
     let script = without_comments(script);
     let mut found = BTreeSet::new();
-    for piece in script.split("invoke(\"").skip(1) {
-        if let Some(name) = piece.split('"').next() {
-            found.insert(name.to_owned());
+    // `invoke("…")` é o da casca (com o carimbo da vista); `invocarNaJanela`
+    // é o do Tauri por baixo, para o que não é de sessão nenhuma — a instância
+    // da janela de `base.js`, que numera os pedidos de `ver_sessao`.
+    for marca in ["invoke(\"", "invocarNaJanela(\""] {
+        for piece in script.split(marca).skip(1) {
+            if let Some(name) = piece.split('"').next() {
+                found.insert(name.to_owned());
+            }
         }
     }
     found
@@ -635,7 +640,12 @@ fn every_command_the_frontend_calls_is_registered() {
 //
 // `cancelar_ligacao` (tarefa 28 da F7) também, e saiu quando o CANCELAR do
 // CHAMANDO passou a chamá-lo. A lista voltou a ser vazia.
-const AGUARDANDO_TELA: &[&str] = &[];
+const AGUARDANDO_TELA: &[&str] = &[
+    // E3 da 0.17 (multi-sessão): o `encerrar_sessao` já é chamado pela casca
+    // (`base.js`) e saiu daqui, e o `desfazer_escolha_de_mod` do P1 também
+    // (`tela-boot.js`, rodada 3); a releitura do foco ainda não chama este.
+    "foco_de_voz",
+];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -2136,9 +2146,12 @@ fn a_lista_que_nao_abre_ou_nao_grava_diz_isso_no_log() {
          guardada, sem os caminhos e sem o bilhete, e o `seele.log` não diz por quê:\n{leitura}"
     );
 
+    // Desde a 0.17 (E3) a resposta do `anotar_a_chegada` também vai ao
+    // registro de sessões, e o ramo da visita é `if visita {` logo depois.
     let Some(visita) = connect
-        .split("ifligar::anotar_a_chegada(")
+        .split("letvisita=ligar::anotar_a_chegada(")
         .nth(1)
+        .and_then(|resto| resto.split("ifvisita{").nth(1))
         .and_then(|resto| resto.split("lista.registrar(").next())
     else {
         panic!(
@@ -2787,9 +2800,13 @@ fn the_arrival_stage_reaches_the_screen_while_the_arrival_is_happening() {
     // Either door that takes the listener before blocking: `connect_watching`,
     // or `connect_cancelavel` with the listener in it (task 28 of F7, the
     // CANCELAR of whoever is calling).
+    // Or the multi-session door (E3 of 0.17), with the listener as its second
+    // argument.
+    let sem_espaco: String = corpo.chars().filter(|c| !c.is_whitespace()).collect();
     assert!(
         corpo.contains("Connection::connect_watching")
-            || corpo.contains("Connection::connect_cancelavel(config, Some("),
+            || corpo.contains("Connection::connect_cancelavel(config, Some(")
+            || sem_espaco.contains("Connection::connect_com_foco(config,Some("),
         "the app still enters by the door that blocks with nobody listening, so \
          the stages happen inside a channel that answers only at the end:\n{corpo}"
     );
@@ -2898,25 +2915,10 @@ fn the_stage_that_gives_up_names_no_cause_it_does_not_know() {
 fn the_frontend_never_names_a_protocol_concept() {
     // `specs/06-clientes-gui.md`, in one sentence: "Se o frontend precisa saber
     // o que é um `ssrc`, algo está errado." This is that sentence as a test.
-    // **O nome da API da WebTransport fica de fora**, e só ele, e só na
-    // sessão do navegador (Tarefa 2.6 da F4): `wt.datagrams` é como o navegador
-    // chama o canal por onde a voz passa, e a sessão o entrega ao
-    // `voz-web.js` como `transporteDaVoz`, um tubo de bytes opacos. O resto da
-    // casca continua sem a palavra; e se a sessão deixar de usá-la, a exceção
-    // reprova em vez de ficar valendo para nada.
-    const DA_WEBTRANSPORT: &[&str] = &["wt.datagrams.readable", "wt.datagrams.writable"];
-    let da_sessao = without_comments(&read("ui/sessao-web.js"));
-    for nome in DA_WEBTRANSPORT {
-        assert!(
-            da_sessao.contains(nome),
-            "`sessao-web.js` não usa mais `{nome}`: tire-o da exceção deste guarda"
-        );
-    }
-    let script = DA_WEBTRANSPORT
-        .iter()
-        .fold(without_comments(&scripts()), |texto, nome| {
-            texto.replace(nome, "")
-        });
+    // A exceção da WebTransport (`wt.datagrams`) saiu com ela na 0.17: o enlace
+    // WebRTC da página (`rtc-web.js`) entrega a voz como `canalDaVoz`, e a casca
+    // inteira volta a não ter a palavra.
+    let script = without_comments(&scripts());
     let page = without_comments(&read("ui/index.html"));
 
     // **A transcrição de boot fica de fora, e é a única coisa que fica.**
@@ -5609,12 +5611,25 @@ fn every_way_the_update_can_fail_asks_something_different_of_the_reader() {
     // the manifest — another line (spec 0.16, D-linha-1). The button hides and
     // the command refuses, and the refusal has its own sentence because it
     // asks nothing of the reader: the other SEELE is the one that updates.
+    //
+    // Nine since the 0.17: `TravessiaNaoConfirmada` (ADR 0063, the update
+    // that crosses a protocol line). The installer refuses to cross from line
+    // 1 to line 2 without the reader having confirmed the warning, and the
+    // sentence asks something none of the other eight asks: read the warning
+    // and choose — nothing failed, nothing is to be retried as is.
     let variants = variants_of(&source, "FalhaAoAtualizar");
     assert_eq!(
         variants.len(),
-        8,
-        "`FalhaAoAtualizar` has {} variants; ADR 0026 and the 0.15.2 account for eight: {variants:?}",
+        9,
+        "`FalhaAoAtualizar` has {} variants; ADR 0026, the 0.15.2 and the 0.17 (ADR 0063) \
+         account for nine: {variants:?}",
         variants.len()
+    );
+    assert!(
+        variants
+            .iter()
+            .any(|variant| variant == "TravessiaNaoConfirmada"),
+        "the ninth variant is not the line crossing ADR 0063 accounts for: {variants:?}"
     );
 
     let mut written: BTreeSet<String> = BTreeSet::new();
@@ -9334,11 +9349,16 @@ fn saving_never_writes_to_a_path_this_window_cannot_name() {
         let Some(parametros) = comandos.get(comando) else {
             panic!("`{comando}` sumiu de main.rs, e a janela chama um comando que não existe");
         };
+        // O `carimbo` (E3 da 0.17) diz de qual sessão é o anexo: dois números,
+        // conferidos contra a conexão, e nunca um caminho ou um nome.
+        let mut aceitos: Vec<&str> = parametros.iter().map(String::as_str).collect();
+        aceitos.sort_unstable();
         assert_eq!(
-            parametros.iter().map(String::as_str).collect::<Vec<_>>(),
-            ["anexo"],
-            "`{comando}` aceita da janela mais que o anexo: um caminho ou um nome \
-             vindo dela é exatamente o que este comando deixou de aceitar"
+            aceitos,
+            ["anexo", "carimbo"],
+            "`{comando}` aceita da janela mais que o anexo e o carimbo da sessão: um \
+             caminho ou um nome vindo dela é exatamente o que este comando deixou de \
+             aceitar"
         );
     }
 }
@@ -11049,6 +11069,12 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ("sessao-web.js", "convite = null,"),
         // O pedido da volta é o mesmo sem ele: o convite é de uso único.
         ("sessao-web.js", "const recusa = ligacao.abrir({ ...pedido, convite });"),
+        // O registro de sessões web (E3) passa o convite à abertura da sessão.
+        (
+            "sessao-web.js",
+            "async function entrar({ alvo, apelido, convite = null, aceito = null, emitir = () => {}, aoAcabar = () => {}, cancelamento }) {",
+        ),
+        ("sessao-web.js", "convite,"),
     ];
     let mut pela_ponte = Vec::new();
     for arquivo in ["ponte-web.js", "sessao-web.js"] {
@@ -11518,7 +11544,9 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // visibilidade) e escapava dela. Campo novo no retrato é um campo que vai à
     // janela duas vezes por segundo: quem o acrescenta confere que não é segredo
     // e acerta o número.
-    const CAMPOS_DO_SNAPSHOT: usize = 37;
+    // 38 desde a 0.17: o `cargos_revision` (F) é a revisão do quadro de cargos,
+    // um número que sobe, e não segredo; ele tira o polling da tela de cargos.
+    const CAMPOS_DO_SNAPSHOT: usize = 38;
     let fora_da_leitura: Vec<&str> = retrato
         .lines()
         .map(str::trim)
@@ -12682,8 +12710,14 @@ fn no_script_calls_a_function_that_no_script_declares() {
         "AudioWorkletNode",
         "EncodedAudioChunk",
         "registerProcessor",
-        // A sessão pelo navegador (Tarefa 2.6 da F4): o transporte da página.
-        "WebTransport",
+        // A sessão pelo navegador (0.17, D4): o enlace WebRTC da página e os
+        // fluxos de bytes com que `rtc-web.js` dá a cada canal a forma que a
+        // sessão lê. A `WebTransport` saiu da página com a 0.17.
+        "RTCPeerConnection",
+        "ReadableStream",
+        "WritableStream",
+        "TransformStream",
+        "ByteLengthQueuingStrategy",
         // E a imagem escolhida, decodificada pelo navegador para o canvas que
         // a encolhe (o ícone e o retrato).
         "createImageBitmap",
@@ -12962,11 +12996,11 @@ fn the_key_frame_that_arms_the_decoder_is_handed_to_it() {
          decodificador fica armado esperando um segundo quadro-chave que o \
          codificador não manda sozinho — e a tela fica preta sem erro:\n{arma}"
     );
-    assert!(
-        !depois.contains("esperandoChave = true"),
-        "`armarPeloSps` volta pedindo outro quadro-chave, o que descarta todo \
-         delta que chegar até um que talvez nunca venha:\n{arma}"
-    );
+    // **O caso SEM perda é o de `os_quadros_descartados_durante_o_armando_pedem_uma_chave_nova`,
+    // (1)**: a chave que armou é entregue e os deltas seguem, sem nenhum pedido
+    // novo. Só o caso COM quadros descartados no `armando` (um estado de recuperação,
+    // com o pedido e o backoff de sempre) espera uma chave nova; o texto
+    // `esperandoChave = true` ali dentro não é mais o defeito, e quem o prova é o node.
 
     // E a entrega é uma função à parte, para quem arma e quem recebe usarem o
     // mesmo caminho. Duas cópias divergem, e foi uma divergência assim que
@@ -14944,8 +14978,15 @@ fn a_atualizacao_da_regiao_e_incremental_e_nao_reescreve_quem_tem_foco() {
         "a lista de opções voltou a ser refeita sem conferir se mudou, e \
          refazê-la fecha a caixa de quem está escolhendo: {escolha}"
     );
+    // A regra do foco mora em `protegida` (que também protege o que a montagem
+    // por partes não trouxe), e cada controle a consulta.
+    let protegida = js_function(&regiao, "\n  protegida(caixa, plano)");
     assert!(
-        escolha.contains("if (document.activeElement === caixa) return;"),
+        protegida.contains("if (document.activeElement === caixa) return true;"),
+        "`protegida` deixou de proteger quem tem o foco: {protegida}"
+    );
+    assert!(
+        escolha.contains("if (this.protegida(caixa, plano)) return;"),
         "a escolha de quem está com a caixa aberta voltou a ser reescrita: {escolha}"
     );
     let reconciliar = js_function(&regiao, "\n  reconciliar(pai, planos, fundura, orcamento)");
@@ -14959,7 +15000,7 @@ fn a_atualizacao_da_regiao_e_incremental_e_nao_reescreve_quem_tem_foco() {
     // tornaria a digitação impossível a partir da segunda letra.
     let campo = js_function(&regiao, "\n  atualizarCampo(elem, plano)");
     assert!(
-        campo.contains("if (document.activeElement === caixa) return;"),
+        campo.contains("if (this.protegida(caixa, plano)) return;"),
         "o valor de um campo em edição voltou a ser reescrito: {campo}"
     );
 }
@@ -16015,8 +16056,10 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
     let revoga = desmontar
         .find("session.revogar()")
         .expect("a desmontagem deixou de revogar");
+    // Desde a 0.17 (E3), «tirar do slot» é tirar a sessão do registro.
     let toma = desmontar
         .find(".and_then(|mut slot| slot.take())")
+        .or_else(|| desmontar.find("session.sessoes.tirar(sessao)"))
         .expect("a desmontagem deixou de tirar a conexão do slot");
     assert!(
         revoga < toma,
@@ -16104,8 +16147,12 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
         .expect("a ponte de eventos")
         .1;
     let ponte = ponte.split_once("\n}\n").map_or(ponte, |(a, _)| a);
+    // Desde a 0.17 (E3) a ponte é de UMA sessão: o que ela confere é se aquela
+    // sessão ainda vale (`marcas.viva`) e se o carimbo é dela, e não a geração da
+    // vista, que muda sem sessão nenhuma acabar.
     assert!(
-        ponte.contains("self.geracao != self.de_pe.load"),
+        ponte.contains("!self.marcas.viva.load(Ordering::Acquire)")
+            && ponte.contains("carimbo.sessao != self.marcas.sessao"),
         "a ponte voltou a emitir todo evento para a janela, inclusive os de uma \
          conexão que já caiu: {ponte}"
     );
@@ -16325,12 +16372,28 @@ fn toda_tela_de_cartao_declara_a_propria_rolagem() {
         if let Some(resto) = linha.split_once("<section id=\"tela-").map(|(_, r)| r) {
             atual = resto.split('"').next().map(|id| format!("tela-{id}"));
         }
-        if linha.contains("boot-caixa") {
+        // Uma `.boot-caixa.area` é o esqueleto da área útil (`base.css`): a tela não rola, e a linha do meio, `.area-conteudo`, é quem declara a
+        // rolagem. Ela é conferida mais abaixo; aqui ficam só as telas que ainda são um cartão que cresce.
+        let e_area = linha
+            .split('"')
+            .any(|classes| classes.split_whitespace().any(|c| c == "area"));
+        if linha.contains("boot-caixa") && !e_area {
             if let Some(id) = &atual {
                 de_cartao.insert(id.clone());
             }
         }
     }
+    // O esqueleto da área útil rola na própria linha: sem isto, o conteúdo de uma tela `.area` seria cortado em silêncio.
+    let rola_na_linha_do_conteudo = css.split('}').any(|bloco| {
+        bloco.split_once('{').is_some_and(|(seletores, corpo)| {
+            seletores.split(',').any(|s| s.trim() == ".area-conteudo")
+                && corpo.contains("overflow-y: auto")
+        })
+    });
+    assert!(
+        rola_na_linha_do_conteudo,
+        "`.area-conteudo` (a linha do meio da área útil, `base.css`) não declara `overflow-y: auto`: toda tela `.area` seria cortada sem barra"
+    );
     assert!(
         !de_cartao.is_empty(),
         "nenhuma tela desenha `.boot-caixa`; se o padrão saiu, este guarda sai junto"
@@ -16701,7 +16764,7 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
     let conectar = body_of(&fonte, "async fn connect");
     let (Some(onde), Some(condicao)) = (
         conectar.find("session.endereco_da_sessao"),
-        conectar.find("if ligar::anotar_a_chegada("),
+        conectar.find("ligar::anotar_a_chegada("),
     ) else {
         panic!("`connect` deixou de preencher o endereço da sessão, ou de filtrar a lista de visitados");
     };
@@ -16860,7 +16923,7 @@ fn a_sonda_e_semeada_fora_do_filtro_da_lista_de_visitados() {
 
     let (Some(semente), Some(filtro)) = (
         conectar.find("lembrar_o_caminho"),
-        conectar.find("if ligar::anotar_a_chegada("),
+        conectar.find("ligar::anotar_a_chegada("),
     ) else {
         panic!("`connect` deixou de semear a sonda, ou de filtrar a lista de visitados");
     };
@@ -18512,11 +18575,21 @@ fn o_modo_de_desenvolvedor_nao_toma_o_teclado_nem_o_clique() {
 /// Conferida por um `match` sem braço coringa, como a dos estados do aparelho:
 /// um estado novo **não compila** até entrar aqui.
 fn todos_os_estados_da_abertura() -> Vec<seele_ffi::AberturaDoAudio> {
-    use seele_ffi::AberturaDoAudio::{Aberto, Abrindo, ForaDeSala, NaoAbriuNoPrazo, SemAparelho};
-    let todos = vec![ForaDeSala, Abrindo, Aberto, SemAparelho, NaoAbriuNoPrazo];
+    use seele_ffi::AberturaDoAudio::{
+        Aberto, Abrindo, EmOutraSessao, ForaDeSala, NaoAbriuNoPrazo, SemAparelho,
+    };
+    // `EmOutraSessao` (E3 da 0.17): numa sala, com a voz da máquina noutra sessão.
+    let todos = vec![
+        ForaDeSala,
+        Abrindo,
+        Aberto,
+        SemAparelho,
+        NaoAbriuNoPrazo,
+        EmOutraSessao,
+    ];
     for estado in &todos {
         match estado {
-            ForaDeSala | Abrindo | Aberto | SemAparelho | NaoAbriuNoPrazo => {}
+            ForaDeSala | Abrindo | Aberto | SemAparelho | NaoAbriuNoPrazo | EmOutraSessao => {}
         }
     }
     todos
@@ -18881,10 +18954,13 @@ fn a_casca_veste_a_sessao_com_o_disco_logo_depois_do_connect() {
              gravadas não valem até a pessoa mexer de novo"
         );
     };
-    // Pela porta que escuta, ou pela que escuta e se cancela (tarefa 28 da F7).
+    // Pela porta que escuta, ou pela que escuta e se cancela (tarefa 28 da F7),
+    // ou pela da multi-sessão, que escuta, se cancela e entra no foco de voz
+    // (E3 da 0.17).
     let Some(conectou) = conectar
         .find("Connection::connect_watching(")
         .or_else(|| conectar.find("Connection::connect_cancelavel("))
+        .or_else(|| conectar.find("Connection::connect_com_foco("))
     else {
         panic!(
             "`connect` não conecta mais por `connect_watching` nem por `connect_cancelavel`, e \
@@ -19780,10 +19856,19 @@ fn a_semente_da_sala_nunca_atravessa_a_webview() {
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect();
+    // Duas idas, e só elas: a de sempre e a do modo local da build de teste
+    // (E9 da 0.17), que sobe a mesma sala só em loopback.
+    let idas = subir_em
+        .matches("iniciar_sala(porta,semente.bytes(),")
+        .count()
+        + subir_em
+            .matches("iniciar_sala_local(porta,semente.bytes(),")
+            .count();
     assert!(
         subir_em.contains("letsemente=seele_ffi::semente_da_sala(config)")
-            && subir_em.matches("semente.").count() == 1
-            && subir_em.contains("iniciar_sala(porta,semente.bytes(),"),
+            && subir_em.contains("iniciar_sala(porta,semente.bytes(),")
+            && subir_em.matches("semente.").count() == idas
+            && idas <= 2,
         "a semente faz em `sala::subir_em` outra coisa além de ir a `iniciar_sala`"
     );
 
@@ -20014,12 +20099,14 @@ fn a_faixa_do_toque_chama_nao_toma_a_tela_e_nenhum_mod_sabe_dela() {
          responde não:\n{desenhar}"
     );
 
-    // O ATENDER desmonta só o cliente: quem hospeda não derruba o próprio
-    // servidor ao atender.
+    // O ATENDER soma uma sessão (E3 da 0.17): não ejeta a que está aberta, e
+    // quem hospeda não derruba o próprio servidor ao atender.
     let entrar = js_function(&toque, "async function entrarNaSalaAoAtender(");
     assert!(
-        entrar.contains("ejetar()") && !entrar.contains("parar_de_hospedar"),
-        "o ATENDER não desmonta só o cliente:\n{entrar}"
+        entrar.contains("irParaAEntradaSemSair()")
+            && !entrar.contains("ejetar(")
+            && !entrar.contains("parar_de_hospedar"),
+        "o ATENDER ejeta a sessão aberta, ou não soma uma nova:\n{entrar}"
     );
 }
 
@@ -20459,6 +20546,13 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
              desktop, Tarefa 2.6 da F4): é tempo, e não tamanho de campo",
         ),
         (
+            "rtc-web.js",
+            "const MAX_APRESENTACAO = 512;",
+            "o corpo máximo da apresentação (0x03) do envelope do enlace, e não campo \
+             nenhum: é o `seele_enlace::MAX_APRESENTACAO`, conferido pelo guarda \
+             `as_constantes_do_enlace_da_pagina_sao_as_do_seele_enlace`",
+        ),
+        (
             "tela-sessao.js",
             "const TETO_DE_GRUPOS = 32;",
             "quantos grupos uma lista que um MOD arranja mostra: é desenho desta janela, \
@@ -20884,6 +20978,109 @@ fn o_preludio_e_o_roteador_falam_os_mesmos_tipos_pela_mesma_capacidade() {
     }
 }
 
+/// **A ação declarada de MOD (API 7, capacidade `acoes`) sai da janela como
+/// `mod_request` com `acao`, e o pedido comum, sem ela.** O prelúdio monta
+/// `SeeleMods.acao` só sob `acoes` (o espelho acima confere a guarda); aqui:
+///
+/// (a) o roteador atende `case "acao"` passando `m.acao` a `pedirAoServidor`, e
+///     a `CAPACIDADE_DA_MENSAGEM` exige `acoes` dele;
+/// (b) `pedirAoServidor`, rodado de verdade no `node` sobre a fonte real, põe
+///     `acao` no `invoke("mod_request", …)` quando ela vem, e NÃO põe a chave
+///     no pedido comum — o comando Tauri e o `seele-web` decidem por ela entre
+///     `AcaoDeMod` e `ModRequest`;
+/// (c) o nome da ação conta no teto de 12 KiB da mensagem.
+///
+/// A janela não confere a ação nem a permissão: isso é do servidor
+/// (`crates/seele-conformance/tests/acoes_de_mod.rs`).
+#[test]
+fn a_acao_de_mod_sai_da_janela_com_o_nome_e_o_pedido_comum_sem_ele() {
+    use std::io::Write;
+    let base = without_comments(&read("ui/base.js"));
+    let roteador = base
+        .split_once("async function atenderOMod(")
+        .and_then(|(_, resto)| resto.split_once("\n}\n"))
+        .map(|(corpo, _)| corpo)
+        .expect("`atenderOMod` sumiu de base.js");
+    let caso = roteador
+        .split_once("case \"acao\":")
+        .and_then(|(_, resto)| resto.split_once("break;"))
+        .map(|(corpo, _)| corpo)
+        .expect("o roteador não atende `case \"acao\"`");
+    assert!(
+        caso.contains("pedirAoServidor(mod.id, m.canal, m.valor, String(m.acao"),
+        "o `case \"acao\"` não leva o nome da ação a `pedirAoServidor`: {caso}"
+    );
+    assert!(
+        base.contains("  acao: \"acoes\","),
+        "a `CAPACIDADE_DA_MENSAGEM` não exige `acoes` da mensagem `acao`"
+    );
+
+    let funcao = base
+        .split_once("async function pedirAoServidor(")
+        .and_then(|(_, resto)| resto.split_once("\n}\n"))
+        .map(|(corpo, _)| format!("async function pedirAoServidor({corpo}\n}}\n"))
+        .expect("`pedirAoServidor` sumiu de base.js");
+    let script = r#"
+const fs = require("fs"), vm = require("vm");
+const fonte = fs.readFileSync(0, "utf8");
+const chamadas = [];
+const ctx = vm.createContext({
+  TextEncoder, setTimeout: () => 0, clearTimeout() {},
+  ouvirMod: Promise.resolve(), aguardarVezDePedidoDeMod: async () => {},
+  geracaoDaSessao: 3, daGeracaoDePe: (n) => n === 3, pedidosDeMod: new Map(),
+  proximoPedidoDeMod: 0, dizerRecusaDoPedido() {},
+  recusaAoMod: (nome) => Object.assign(new Error(nome), { erro: nome }),
+  invoke: async (cmd, args) => { chamadas.push([cmd, args]); },
+});
+vm.runInContext(fonte + "\n;globalThis.pedir = pedirAoServidor;", ctx);
+(async () => {
+  const falhas = [];
+  ctx.pedir("prova/acoes", 0, { op: "fechar" }, "fechar-mesa");
+  ctx.pedir("prova/acoes", 1, { op: "ler" });
+  let grande = null;
+  try { await ctx.pedir("prova/acoes", 0, { t: "x".repeat(12 * 1024 - 20) }, "a".repeat(64)); }
+  catch (e) { grande = e.erro || e.message; }
+  await new Promise((r) => setImmediate(r));
+  const [acao, comum] = chamadas;
+  if (!acao || acao[0] !== "mod_request" || acao[1].acao !== "fechar-mesa"
+    || acao[1].channel !== 0 || acao[1].payload !== '{"op":"fechar"}' || acao[1].geracao !== 3)
+    falhas.push("(b) a ação não saiu como mod_request com acao: " + JSON.stringify(acao));
+  if (!comum || comum[0] !== "mod_request" || "acao" in comum[1])
+    falhas.push("(b) o pedido comum levou a chave acao: " + JSON.stringify(comum));
+  if (grande !== "mensagem-grande" || chamadas.length !== 2)
+    falhas.push("(c) o nome da ação não contou no teto: " + grande + " " + chamadas.length);
+  if (falhas.length) { console.log(falhas.join("\n")); process.exit(1); }
+})();
+"#;
+    let mut filho = match std::process::Command::new("node")
+        .args(["-e", script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(filho) => filho,
+        Err(erro) if std::env::var_os("CI").is_none() => {
+            eprintln!("sem `node` ({erro}): o guarda da ação de MOD na janela não rodou");
+            return;
+        }
+        Err(erro) => panic!("o CI tem `node`, e ele não subiu: {erro}"),
+    };
+    filho
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(funcao.as_bytes())
+        .expect("a fonte ao node");
+    let saida = filho.wait_with_output().expect("node");
+    assert!(
+        saida.status.success(),
+        "a ação de MOD não sai da janela como devia:\n{}{}",
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
 #[test]
 fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
     // **D-fio-4: «todos veem, sem papéis e sem horário».** O grupo FORA DO AR
@@ -21058,5 +21255,4207 @@ fn todo_pedido_que_o_servidor_recusa_tem_a_acao_na_frase() {
     assert!(
         sem_causa.is_empty(),
         "estas causas do fio chegam à faixa sem o porquê e sem o que fazer: {sem_causa:?}"
+    );
+}
+
+/// **As constantes do enlace que a página copia são as do `seele-enlace`** (0.17,
+/// D4). O `rtc-web.js` não tem Rust a quem perguntar o tamanho do envelope: ele
+/// escreve `MAX_DADOS`, `MAX_VOZ`, `MAX_APRESENTACAO` e `MAX_FILA_DE_ENTRADA`.
+/// Uma cópia assim envelhece calada quando o fio muda; este guarda a lê dos dois
+/// lados (o fonte do `seele-enlace`, como `todo_pacote_recusado_e_dito_com_uma_frase`
+/// lê o do `seele-sessao`) e exige o mesmo valor.
+#[test]
+fn as_constantes_do_enlace_da_pagina_sao_as_do_seele_enlace() {
+    /// O valor de `const NOME = expr;` (só números, `*` e o tipo `usize`).
+    fn valor(fonte: &str, prefixo: &str, nome: &str) -> u64 {
+        let marca = format!("{prefixo}{nome}");
+        let resto = fonte
+            .split_once(&marca)
+            .unwrap_or_else(|| panic!("`{nome}` sumiu de onde este guarda o lê"))
+            .1;
+        let expr = resto
+            .split_once('=')
+            .expect("a constante tem valor")
+            .1
+            .split_once(';')
+            .expect("a constante fecha")
+            .0;
+        expr.split('*')
+            .map(|fator| {
+                let limpo: String = fator.chars().filter(char::is_ascii_digit).collect();
+                limpo.parse::<u64>().unwrap_or_else(|_| {
+                    panic!("`{nome}` não é um número que este guarda leia: {expr}")
+                })
+            })
+            .product()
+    }
+    let enlace = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/seele-enlace/src/lib.rs"),
+    )
+    .expect("crates/seele-enlace/src/lib.rs");
+    let pagina = without_comments(&read("ui/rtc-web.js"));
+    for nome in [
+        "MAX_DADOS",
+        "MAX_VOZ",
+        "MAX_APRESENTACAO",
+        "MAX_FILA_DE_ENTRADA",
+    ] {
+        assert_eq!(
+            valor(&pagina, "const ", nome),
+            valor(&enlace, "pub const ", nome),
+            "`{nome}` do `rtc-web.js` não é mais o do `seele-enlace`"
+        );
+    }
+
+    // **As etiquetas do envelope e os códigos de corte** (D4 e o crédito 0x04):
+    // o objeto `ENVELOPE`/`CORTE` da página contra os `TAG_*`/`CORTE_*` do
+    // enlace. Uma etiqueta nova no Rust que a página não conhece, ou com outro
+    // número, reprova aqui.
+    /// O número de `pub const NOME: u8 = 0x04;` (hex ou decimal).
+    fn numero_do_rust(fonte: &str, nome: &str) -> u64 {
+        let marca = format!("pub const {nome}:");
+        let resto = fonte
+            .split_once(&marca)
+            .unwrap_or_else(|| panic!("`{nome}` sumiu do `seele-enlace`"))
+            .1;
+        let expr = resto
+            .split_once('=')
+            .expect("tem valor")
+            .1
+            .split_once(';')
+            .expect("fecha")
+            .0
+            .trim();
+        match expr.strip_prefix("0x") {
+            Some(hex) => u64::from_str_radix(hex, 16).expect("hex"),
+            None => expr.parse().expect("decimal"),
+        }
+    }
+    /// O campo `campo: 0x04` dentro do `Object.freeze({ … })` de `objeto`.
+    fn numero_da_pagina(fonte: &str, objeto: &str, campo: &str) -> Option<u64> {
+        let corpo = fonte
+            .split_once(&format!("const {objeto} = Object.freeze({{"))
+            .unwrap_or_else(|| panic!("`{objeto}` sumiu do `rtc-web.js`"))
+            .1
+            .split_once("})")
+            .expect("o objeto fecha")
+            .0;
+        corpo.split(',').find_map(|par| {
+            let (chave, numero) = par.split_once(':')?;
+            if chave.trim() != campo {
+                return None;
+            }
+            let numero = numero.trim();
+            match numero.strip_prefix("0x") {
+                Some(hex) => u64::from_str_radix(hex, 16).ok(),
+                None => numero.parse().ok(),
+            }
+        })
+    }
+    let envelope = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/seele-enlace/src/envelope.rs"),
+    )
+    .expect("crates/seele-enlace/src/envelope.rs");
+    let pares: [(&str, &str, &str, &str); 8] = [
+        ("ENVELOPE", "dados", "TAG_DADOS", "envelope"),
+        ("ENVELOPE", "fim", "TAG_FIM", "envelope"),
+        ("ENVELOPE", "corte", "TAG_CORTE", "envelope"),
+        ("ENVELOPE", "apresentacao", "TAG_APRESENTACAO", "envelope"),
+        ("ENVELOPE", "credito", "TAG_CREDITO", "envelope"),
+        ("CORTE", "violacao", "CORTE_VIOLACAO", "lib"),
+        ("CORTE", "fila", "CORTE_FILA", "lib"),
+        ("CORTE", "desconhecido", "CORTE_CANAL_RECUSADO", "lib"),
+    ];
+    for (objeto, campo, rust, onde) in pares {
+        let fonte = if onde == "envelope" {
+            &envelope
+        } else {
+            &enlace
+        };
+        assert_eq!(
+            numero_da_pagina(&pagina, objeto, campo),
+            Some(numero_do_rust(fonte, rust)),
+            "`{objeto}.{campo}` do `rtc-web.js` não é o `{rust}` do `seele-enlace`"
+        );
+    }
+    // E nenhuma etiqueta do Rust fica sem par na página.
+    let etiquetas_do_rust = envelope.matches("pub const TAG_").count();
+    assert_eq!(
+        etiquetas_do_rust,
+        pares
+            .iter()
+            .filter(|(objeto, ..)| *objeto == "ENVELOPE")
+            .count(),
+        "o envelope do `seele-enlace` tem uma etiqueta que este guarda (e a página) não conhece"
+    );
+
+    // **O código de quem ficou para trás** (`CODIGO_FICOU_PARA_TRAS`, a
+    // auditoria Astra item 4): a página não o escreve — nem em hex, nem em
+    // decimal —, e quem o traduz é o `.wasm` da sessão, lendo-o do
+    // `seele-proto`. Um número copiado aqui envelheceria calado.
+    let transporte = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/seele-proto/src/transport.rs"),
+    )
+    .expect("crates/seele-proto/src/transport.rs");
+    let codigo = numero_do_rust(&transporte.replace('_', ""), "CODIGOFICOUPARATRAS");
+    for arquivo in ["ui/rtc-web.js", "ui/sessao-web.js"] {
+        let fonte = without_comments(&read(arquivo))
+            .to_lowercase()
+            .replace('_', "");
+        for escrito in [format!("0x{codigo:x}"), codigo.to_string()] {
+            assert!(
+                !fonte.contains(&escrito),
+                "`{arquivo}` escreve o CODIGO_FICOU_PARA_TRAS à mão ({escrito}): quem o traduz é o `.wasm`"
+            );
+        }
+    }
+    let ligacao = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/seele-web/src/ligacao.rs"),
+    )
+    .expect("crates/seele-web/src/ligacao.rs");
+    assert!(
+        ligacao.contains("seele_proto::transport::CODIGO_FICOU_PARA_TRAS"),
+        "o `seele-web` não lê mais o CODIGO_FICOU_PARA_TRAS do `seele-proto`"
+    );
+    assert!(
+        without_comments(&read("ui/sessao-web.js")).contains("ligacao_fluxo_acabou_com"),
+        "a sessão web não passa mais o código do fechamento ao `.wasm`"
+    );
+}
+
+/// **A leitura vigente de cada tela (web): o que vem de uma alça de fluxo
+/// substituída não chega à página.** A sessão Rust já ignora o fim da leitura
+/// velha; o JS repassava todo passo à página, e o `ScreenClosed` tardio da
+/// leitura antiga apagava a tela da nova, e um `ScreenFrame` antigo chegava ao
+/// decoder e ao palco (`palco-imagem.js` só conhece o `ScreenId`). O filtro
+/// (`criarOFiltroDasLeituras`, em `sessao-web.js`) roda de verdade no `node`,
+/// sobre a fonte real:
+///
+/// (a) o `ScreenClosed` da alça velha, depois da abertura nova, é descartado;
+/// (b) o `ScreenFrame` da alça velha, depois da nova, é descartado (também
+///     depois de a nova fechar), e o da vigente passa;
+/// (c) o `ScreenClosed` da alça vigente passa.
+///
+/// `SEELE_FLUXO_SESSAO_WEB` troca o arquivo lido: a mutação roda numa cópia.
+#[test]
+fn a_leitura_antiga_de_uma_tela_nao_chega_a_pagina_na_web() {
+    use std::io::Write;
+    let fonte = match std::env::var("SEELE_FLUXO_SESSAO_WEB") {
+        Ok(caminho) => std::fs::read_to_string(caminho).expect("a cópia da mutação"),
+        Err(_) => read("ui/sessao-web.js"),
+    };
+    let script = r#"
+const fs = require("fs"), vm = require("vm");
+const fonte = fs.readFileSync(0, "utf8");
+const ctx = vm.createContext({ console: { debug() {}, info() {}, warn() {} } });
+vm.runInContext(fonte + "\n;globalThis.criar = criarOFiltroDasLeituras;", ctx);
+const falhas = [];
+const confere = (caso, ok) => { if (!ok) falhas.push(caso); };
+const novo = () => ctx.criar(() => {});
+const abre = (t) => ({ ScreenOpened: { screen: t, width: 1, height: 1 } });
+const quadro = (t) => ({ ScreenFrame: { screen: t, key: true, data: "" } });
+const fecha = (t) => ({ ScreenClosed: { screen: t } });
+{ const f = novo(); f.vale(1, abre(7)); f.vale(2, abre(7));
+  confere("(a) o ScreenClosed da alça velha chegou à página", f.vale(1, fecha(7)) === false);
+  confere("(a) a tela nova deixou de receber quadros", f.vale(2, quadro(7)) === true); }
+{ const f = novo(); f.vale(1, abre(7)); f.vale(2, abre(7));
+  confere("(b) o quadro da alça velha chegou ao decoder", f.vale(1, quadro(7)) === false);
+  confere("(b) o quadro da alça vigente foi barrado", f.vale(2, quadro(7)) === true);
+  f.vale(2, fecha(7));
+  confere("(b) o quadro tardio da velha passou depois do fim da nova", f.vale(1, quadro(7)) === false); }
+{ const f = novo(); f.vale(1, abre(7)); f.vale(2, abre(7));
+  confere("(c) o ScreenClosed da vigente não fechou", f.vale(2, fecha(7)) === true); }
+{ const f = novo(); f.vale(1, abre(7)); f.vale(2, abre(7));
+  confere("(som) o som da alça velha chegou ao aoSomDaTela", f.valeOSom(1, 7) === false);
+  confere("(som) o som da vigente foi barrado", f.valeOSom(2, 7) === true); }
+{ const f = novo(); f.vale(1, abre(7)); f.vale(2, abre(8));
+  confere("outra tela não é substituição", f.vale(1, fecha(7)) === true && f.vale(2, quadro(8)) === true); }
+if (falhas.length) { console.log(falhas.join("\n")); process.exit(1); }
+"#;
+    let mut filho = match std::process::Command::new("node")
+        .args(["-e", script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(filho) => filho,
+        Err(erro) if std::env::var_os("CI").is_none() => {
+            eprintln!("sem `node` ({erro}): o guarda da leitura vigente não rodou");
+            return;
+        }
+        Err(erro) => panic!("o CI tem `node`, e ele não subiu: {erro}"),
+    };
+    filho
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(fonte.as_bytes())
+        .expect("a fonte ao node");
+    let saida = filho.wait_with_output().expect("node");
+    assert!(
+        saida.status.success(),
+        "a leitura antiga chega à página:\n{}{}",
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
+/// O filtro está ligado ao fluxo real: `lerUmFluxo` só emite o evento se a
+/// alça dele é a vigente (sem isso a função passaria em (a)-(c) sem uso).
+#[test]
+fn o_fluxo_do_servidor_passa_pelo_filtro_da_leitura_vigente() {
+    let fonte = without_comments(&read("ui/sessao-web.js"));
+    assert!(
+        fonte.contains("if (leituras.vale(alca, passo.evento)) emitir(passo.evento);"),
+        "`lerUmFluxo` repassa o evento do fluxo sem perguntar se a alça é a vigente"
+    );
+    assert!(
+        fonte.contains("if (leituras.valeOSom(alca, passo.som.tela)) sessao.aoSomDaTela?."),
+        "`lerUmFluxo` repassa o som do fluxo sem perguntar se a alça é a vigente"
+    );
+}
+
+/// **AJUSTES no celular não deixa promessa recusada sem dono (D1 do mobile real).**
+/// Na página do navegador a ponte recusa `saidas` e `saida_escolhida` com a
+/// `RecusaDaPonte` «o celular toca pela saída de som do sistema». Isso é o que
+/// a página não faz, e não uma falha: `desenharUmLado` (em `tela-server.js`) a
+/// trata, escreve a frase na lista e segue. Sem isso, `abrirServer` rejeitava e
+/// cada ida a AJUSTES dava um `pageerror` (medido no Chromium e no WebKit).
+/// `desenharUmLado` roda de verdade no `node`, sobre a fonte real:
+///
+/// (a) a `RecusaDaPonte` não rejeita, a lista diz a frase da recusa, e a escolha
+///     fica vazia;
+/// (b) qualquer outra falha (a do desktop) continua rejeitando, como antes;
+/// (c) o desktop que lista aparelhos desenha as linhas e guarda o escolhido.
+///
+/// `SEELE_TELA_SERVER_D1` troca o arquivo lido: a reversão roda numa cópia.
+#[test]
+fn ajustes_no_celular_trata_a_recusa_esperada_da_saida_sem_mexer_no_desktop() {
+    use std::io::Write;
+    let fonte = match std::env::var("SEELE_TELA_SERVER_D1") {
+        Ok(caminho) => std::fs::read_to_string(caminho).expect("a cópia da reversão"),
+        Err(_) => read("ui/tela-server.js"),
+    };
+    let script = r#"
+const fs = require("fs"), vm = require("vm");
+const fonte = fs.readFileSync(0, "utf8");
+const achado = fonte.match(/async function desenharUmLado\(lado\) \{[\s\S]*?\n\}\n/);
+if (!achado) { console.log("desenharUmLado sumiu do tela-server.js"); process.exit(1); }
+const frase = "o celular toca pela saída de som do sistema";
+const ctx = vm.createContext({});
+vm.runInContext(`
+  const escolhidoDe = {}; const nomeDe = {};
+  const listas = {};
+  const $ = (id) => (listas[id] ??= { filhos: [] });
+  const elemento = (tag, classe, texto) => ({ tag, classe, texto });
+  const repovoar = (lista, filhos) => { lista.filhos = filhos; };
+  const linhaDeDispositivo = (lado, id, nome) => ({ tag: "li", linha: nome });
+  const marcarLinhas = () => {};
+  const fraseDeErro = (f) => f.RecusaDaPonte ? f.RecusaDaPonte.frase.charAt(0).toUpperCase() + f.RecusaDaPonte.frase.slice(1) + "." : "outra";
+  ${achado[0]}
+  globalThis.desenhar = desenharUmLado; globalThis.estado = { escolhidoDe, nomeDe, listas };
+`, ctx);
+const falhas = [];
+const confere = (caso, ok) => { if (!ok) falhas.push(caso); };
+(async () => {
+  const recusa = { RecusaDaPonte: { comando: "saidas", frase } };
+  try {
+    await ctx.desenhar({ chave: "saida", lista: "lista-saidas", listar: () => Promise.reject(recusa), lerEscolhido: () => Promise.reject(recusa) });
+    const filhos = ctx.estado.listas["lista-saidas"].filhos;
+    confere("(a) a lista não diz a frase da recusa", filhos.length === 1 && /o celular toca pela saída de som do sistema/i.test(filhos[0].texto));
+    confere("(a) a escolha não ficou vazia", ctx.estado.escolhidoDe.saida === null);
+  } catch (e) { confere("(a) a RecusaDaPonte rejeitou a leitura da saída (promessa sem dono)", false); }
+  let subiu = false;
+  try { await ctx.desenhar({ chave: "saida", lista: "lista-saidas", listar: () => Promise.reject("Boom"), lerEscolhido: () => Promise.resolve(null) }); } catch (e) { subiu = e === "Boom"; }
+  confere("(b) uma falha que não é da ponte deixou de subir", subiu);
+  await ctx.desenhar({ chave: "saida", lista: "lista-saidas", listar: () => Promise.resolve([{ id: "a", name: "Alto-falante", default: true }]), lerEscolhido: () => Promise.resolve("a") });
+  const linhas = ctx.estado.listas["lista-saidas"].filhos;
+  confere("(c) o desktop não desenhou o padrão mais o aparelho", linhas.length === 2 && linhas[1].linha === "Alto-falante");
+  confere("(c) o desktop não guardou o escolhido", ctx.estado.escolhidoDe.saida === "a");
+  if (falhas.length) { console.log(falhas.join("\n")); process.exit(1); }
+})();
+"#;
+    let mut filho = match std::process::Command::new("node")
+        .args(["-e", script])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(filho) => filho,
+        Err(erro) if std::env::var_os("CI").is_none() => {
+            eprintln!("sem `node` ({erro}): o guarda do AJUSTES no celular não rodou");
+            return;
+        }
+        Err(erro) => panic!("o CI tem `node`, e ele não subiu: {erro}"),
+    };
+    filho
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(fonte.as_bytes())
+        .expect("a fonte ao node");
+    let saida = filho.wait_with_output().expect("node");
+    assert!(
+        saida.status.success(),
+        "AJUSTES no celular:\n{}{}",
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 0.17: o SEU CÓDIGO e os AMIGOS na entrada, e a vista da ligação pessoal.
+//
+// O `node` roda a FONTE REAL de `ui/` (`camada-sala.js`, `frases.js` e as
+// funções extraídas de `camada-sessoes.js`, `camada-toque.js` e
+// `camada-servidores.js`) sobre um DOM mínimo e um `invoke` que grava as
+// chamadas. `SEELE_UI_DIR` troca a pasta lida: a reversão roda numa cópia.
+// Limite dito: o `conectar` de `tela-boot.js` é grande demais para extrair, e
+// nos cenários de ATENDER e LIGAR ele é um duble que chama o `connect` e, na
+// falha, escreve em `#boot-erro` como o `catch` real faz (conferido abaixo na
+// fonte). O que a fonte real prova aqui é o caminho até ele: nada ejeta.
+// ---------------------------------------------------------------------------
+
+const MUNDO_NODE: &str = r##"
+const fs = require("fs"), vm = require("vm"), path = require("path");
+const dir = process.env.SEELE_UI_DIR;
+const ler = (f) => fs.readFileSync(path.join(dir, f), "utf8").replace(/\r\n/g, "\n");
+const funcao = (arquivo, nome) => {
+  const m = ler(arquivo).match(new RegExp("(?:async )?function " + nome + "\\([^)]*\\) \\{[\\s\\S]*?\\n\\}\\n"));
+  if (!m) { console.log("sumiu " + nome + " de " + arquivo); process.exit(1); }
+  return m[0];
+};
+class El {
+  constructor(id) { this.id = id; this.children = []; this.dataset = {}; this.handlers = {}; this.attrs = {};
+    this.hidden = false; this.textContent = ""; this.value = ""; this.checked = true; this.disabled = false;
+    this.className = ""; this.title = ""; }
+  addEventListener(t, f) { (this.handlers[t] ??= []).push(f); }
+  append(...c) { this.children.push(...c); }
+  replaceChildren(...c) { this.children = c; }
+  setAttribute(k, v) { this.attrs[k] = v; }
+  getAttribute(k) { return this.attrs[k]; }
+  select() {}
+  async emitir(t, ev = {}) { for (const f of this.handlers[t] ?? []) await f({ preventDefault() {}, ...ev }); await tick(); }
+  click() { return this.emitir("click"); }
+}
+const tick = () => new Promise((r) => setTimeout(r, 15));
+const falhas = [];
+const confere = (caso, ok) => { if (!ok) falhas.push(caso); };
+function mundo(comandos) {
+  const els = {};
+  const chamadas = [];
+  const ouvintes = {};
+  const $ = (id) => (els[id] ??= new El(id));
+  const invoke = async (cmd, args) => {
+    chamadas.push({ cmd, args });
+    if (!(cmd in comandos)) throw "sem-comando";
+    const r = comandos[cmd];
+    return typeof r === "function" ? r(args) : r;
+  };
+  const ctx = vm.createContext({
+    console, setTimeout, $, invoke,
+    listen: async (nome, f) => { ouvintes[nome] = f; },
+    document: { createElement: () => new El(""), querySelectorAll: () => [] },
+    MutationObserver: class { observe() {} },
+    copiarLink: async (campo, botao) => { chamadas.push({ cmd: "copiarLink", args: { campo: campo.id, botao: botao.id } }); },
+    irParaOServidor: (...a) => chamadas.push({ cmd: "irParaOServidor", args: a }),
+  });
+  return { els, chamadas, ouvintes, ctx, $, invoke };
+}
+const carregar = (m, ...arquivos) => { for (const a of arquivos) vm.runInContext(ler(a), m.ctx, { filename: a }); };
+const so = (m, cmd) => m.chamadas.filter((c) => c.cmd === cmd);
+const fim = () => { if (falhas.length) { console.log(falhas.join("\n")); process.exit(1); } };
+"##;
+
+fn rodar_node(titulo: &str, corpo: &str) {
+    let dir = std::env::var("SEELE_UI_DIR")
+        .unwrap_or_else(|_| app_dir().join("ui").to_string_lossy().into_owned());
+    let script = format!(
+        "{MUNDO_NODE}\n(async () => {{\n{corpo}\nfim();\n}})().catch((e) => {{ console.log('estourou: ' + (e && e.stack || e)); process.exit(1); }});"
+    );
+    let saida = match std::process::Command::new("node")
+        .args(["-e", &script])
+        .env("SEELE_UI_DIR", dir)
+        .output()
+    {
+        Ok(saida) => saida,
+        Err(erro) if std::env::var_os("CI").is_none() => {
+            eprintln!("sem `node` ({erro}): o guarda «{titulo}» não rodou");
+            return;
+        }
+        Err(erro) => panic!("o CI tem `node`, e ele não subiu: {erro}"),
+    };
+    assert!(
+        saida.status.success(),
+        "{titulo}:\n{}{}",
+        String::from_utf8_lossy(&saida.stdout),
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
+#[test]
+fn a_entrada_mostra_o_codigo_com_copiar_e_diz_a_verdade_da_sala() {
+    rodar_node(
+        "o código na entrada",
+        r##"
+const CODIGO = "K9P2-CSM7-NBFR-AYQ3";
+const m = mundo({ meu_codigo: CODIGO, estado_da_sala: { estado: "Desligada" }, amigos: [], contatos_da_agenda: [] });
+carregar(m, "frases.js", "camada-sala.js");
+await tick();
+const bloco = m.$("boot-codigo");
+confere("o bloco do código não aparece", bloco.hidden === false);
+confere("o campo não traz o código", m.$("boot-codigo-valor").value === CODIGO);
+confere("a sala desligada promete ligação", !/consegue ligar/.test(m.$("boot-codigo-estado").textContent));
+confere("a sala desligada não diz que NÃO recebe", /NÃO recebe/.test(m.$("boot-codigo-estado").textContent));
+confere("a sala desligada ficou com marca de recebendo", bloco.dataset.recebe === "nao");
+await m.$("boot-copiar-codigo").click();
+const c = so(m, "copiarLink");
+confere("COPIAR não copia o campo da entrada", c.length === 1 && c[0].args.campo === "boot-codigo-valor");
+
+const diz = (p) => { m.ouvintes["seele://sala"]({ payload: p }); return m.$("boot-codigo-estado").textContent; };
+confere("registrada não diz que consegue ligar", /consegue ligar/.test(diz({ estado: "NoAr", registro: { registro: "Registrado" } })));
+confere("registrada não marca recebendo", bloco.dataset.recebe === "sim");
+for (const registro of ["SemPonto", "Esperando", "SemResposta", "CookieRecusado"]) {
+  const t = diz({ estado: "NoAr", registro: { registro } });
+  confere(registro + " promete ligação que não se confirmou", !/consegue ligar/.test(t));
+  confere(registro + " marcou recebendo", bloco.dataset.recebe === "nao");
+}
+confere("SemPonto não diz só a mesma rede", /mesma rede/.test(diz({ estado: "NoAr", registro: { registro: "SemPonto" } })));
+confere("a porta ocupada promete ligação", /NINGUÉM CONSEGUE TE LIGAR/.test(diz({ estado: "Falhou", motivo: "PortaOcupada" })));
+confere("subindo promete ligação", /Ainda não dá/.test(diz({ estado: "Subindo" })));
+
+// O código existe sem a sala: sem resposta do `meu_codigo` (o navegador), nada aparece.
+const recusa = { RecusaDaPonte: { comando: "amigos", frase: "o código e a agenda moram no app do SEELE" } };
+const web = mundo({ estado_da_sala: { estado: "Desligada" }, amigos: () => Promise.reject(recusa) });
+carregar(web, "frases.js", "camada-sala.js");
+await tick();
+confere("o navegador mostra um código que não tem", web.$("boot-codigo").hidden === true);
+confere("a recusa da web não esconde o bloco dos amigos", web.$("boot-amigos").hidden === true);
+"##,
+    );
+}
+
+#[test]
+fn os_amigos_adicionam_ligam_renomeiam_e_saem_pelo_comando_certo() {
+    rodar_node(
+        "os amigos na entrada",
+        r##"
+const ANA = { codigo: "K9P2-CSM7-NBFR-AYQ3", nome: "Ana", apelido: "ana", visto_em: 5, direcao: "recebi", bloqueado: false, amigo: true, alvo: "@K9P2-CSM7-NBFR-AYQ3" };
+const m = mundo({ meu_codigo: "AAAA-BBBB-CCCC-DDDD", estado_da_sala: { estado: "Desligada" }, amigos: [ANA],
+  contatos_da_agenda: [], adicionar_amigo: null, tirar_dos_amigos: null, dar_nome_na_agenda: null, bloquear: null });
+carregar(m, "frases.js", "camada-sala.js");
+await tick();
+const lista = m.$("boot-amigos-lista");
+confere("o amigo não aparece na lista", lista.children.length === 1);
+const [, texto, acoes] = lista.children[0].children;
+const [nome, detalhe] = texto.children;
+const [ligar, tirar] = acoes.children;
+
+// ADICIONAR: uma vez, com código e nome.
+m.$("boot-amigo-codigo").value = " 1234-5678-9ABC-DEFG ";
+m.$("boot-amigo-nome").value = "Beto";
+await m.$("boot-amigos-form").emitir("submit");
+const add = so(m, "adicionar_amigo");
+confere("ADICIONAR não chamou uma vez com código e nome", add.length === 1 && add[0].args.codigo === "1234-5678-9ABC-DEFG" && add[0].args.nome === "Beto");
+confere("os campos de adicionar não limparam", m.$("boot-amigo-codigo").value === "");
+
+// LIGAR: o alvo do Rust, pelo caminho do código colado, sem ler o campo de colar.
+await ligar.click();
+const l = so(m, "irParaOServidor");
+confere("LIGAR não chamou irParaOServidor uma vez", l.length === 1);
+confere("LIGAR errou os argumentos", JSON.stringify(l[0]?.args) === JSON.stringify(["@K9P2-CSM7-NBFR-AYQ3", null, null, "Ana", null, true]));
+confere("LIGAR passou pelo campo de colar", so(m, "ler_entrada").length === 0);
+confere("LIGAR mexeu na agenda", so(m, "bloquear").length === 0 && so(m, "adicionar_amigo").length === 1);
+
+// RENOMEAR reaproveita dar_nome_na_agenda.
+nome.value = "  Ana Maria ";
+await nome.emitir("change");
+const r = so(m, "dar_nome_na_agenda");
+confere("RENOMEAR não chamou dar_nome_na_agenda", r.length === 1 && r[0].args.codigo === ANA.codigo && r[0].args.nome === "Ana Maria");
+
+// TIRAR DOS AMIGOS: só o comando de tirar.
+const antes = m.chamadas.length;
+await tirar.click();
+const depois = m.chamadas.slice(antes).map((c) => c.cmd);
+confere("TIRAR não chamou tirar_dos_amigos com o código", so(m, "tirar_dos_amigos").length === 1 && so(m, "tirar_dos_amigos")[0].args.codigo === ANA.codigo);
+confere("TIRAR bloqueou ou mexeu em outra coisa: " + depois.join(","), !depois.includes("bloquear") && !depois.includes("dar_nome_na_agenda") && !depois.includes("adicionar_amigo"));
+const nota = m.$("boot-amigos-nota").textContent;
+confere("a frase do TIRAR não diz que não desbloqueia", /não desbloqueia/i.test(nota) && /não apaga o histórico/i.test(nota) && /não esquece a chave/i.test(nota));
+confere("o botão não carrega a frase", /não desbloqueia/.test(tirar.title));
+
+// Erro do adicionar aparece com frase.
+const me = mundo({ amigos: [], adicionar_amigo: () => Promise.reject("SeuCodigo") });
+carregar(me, "frases.js", "camada-sala.js");
+await tick();
+me.$("boot-amigo-codigo").value = "AAAA-BBBB-CCCC-DDDD";
+await me.$("boot-amigos-form").emitir("submit");
+confere("o erro SeuCodigo não aparece", me.$("boot-amigos-erro").hidden === false && /SEU PRÓPRIO CÓDIGO/.test(me.$("boot-amigos-erro").textContent));
+
+// (a) A listagem que falha no desktop APARECE, com TENTAR DE NOVO; tentar de novo traz a lista.
+let falha = true;
+const mf = mundo({ amigos: () => (falha ? Promise.reject("NaoGravou") : [ANA]), contatos_da_agenda: [] });
+carregar(mf, "frases.js", "camada-sala.js");
+await tick();
+confere("(a) a falha nativa escondeu o bloco", mf.$("boot-amigos").hidden === false);
+confere("(a) a falha não diz a frase", mf.$("boot-amigos-erro").hidden === false && /AGENDA NÃO GRAVOU/.test(mf.$("boot-amigos-erro").textContent));
+confere("(a) falta o TENTAR DE NOVO", mf.$("boot-amigos-tentar").hidden === false);
+falha = false;
+await mf.$("boot-amigos-tentar").click();
+confere("(a) tentar de novo não mostrou a lista", mf.$("boot-amigos-lista").children.length === 1 && mf.$("boot-amigos-erro").hidden === true && mf.$("boot-amigos-tentar").hidden === true);
+
+// (b) A recusa da ponte do navegador esconde o bloco: lá não há agenda.
+const mw = mundo({ amigos: () => Promise.reject({ RecusaDaPonte: { comando: "amigos", frase: "x" } }) });
+carregar(mw, "frases.js", "camada-sala.js");
+await tick();
+confere("(b) a recusa da web não escondeu o bloco", mw.$("boot-amigos").hidden === true && mw.$("boot-amigos-tentar").hidden === true);
+
+// (c) Bloquear no PERFIL e voltar: o LIGAR daquele amigo reflete o estado novo.
+const estado = { ...ANA };
+const mc = mundo({
+  amigos: () => [{ ...estado }], contatos_da_agenda: () => [{ ...estado }],
+  bloquear: ({ bloqueado }) => { estado.bloqueado = bloqueado; return null; },
+});
+carregar(mc, "frases.js", "camada-sala.js");
+await tick();
+const ligarDe = () => mc.$("boot-amigos-lista").children[0].children[2].children[0];
+confere("(c) o amigo livre nasce bloqueado", ligarDe().disabled === false);
+await vm.runInContext("desenharAgenda()", mc.ctx);
+const bloquearDoPerfil = () => { const f = mc.$("perfil-agenda").children[0].children; return f[f.length - 1]; };
+await bloquearDoPerfil().click();
+confere("(c) bloquear no perfil não desabilitou o LIGAR", ligarDe().disabled === true);
+await bloquearDoPerfil().click();
+confere("(c) desbloquear não reabilitou o LIGAR", ligarDe().disabled === false);
+"##,
+    );
+}
+
+#[test]
+fn o_perfil_so_adiciona_amigo_com_o_clique() {
+    rodar_node(
+        "o perfil e os amigos",
+        r##"
+const PERDIDA = { codigo: "PPPP-PPPP-PPPP-PPPP", nome: null, apelido: "estranho", direcao: "perdida", bloqueado: false, amigo: false, alvo: "@PPPP" };
+const AMIGA = { codigo: "AAAA-AAAA-AAAA-AAAA", nome: "Ana", apelido: null, direcao: "recebi", bloqueado: false, amigo: true, alvo: "@AAAA" };
+const m = mundo({ meu_codigo: "ZZZZ-ZZZZ-ZZZZ-ZZZZ", estado_da_sala: { estado: "Desligada" }, amigos: [AMIGA],
+  contatos_da_agenda: [PERDIDA, AMIGA], adicionar_amigo: null });
+carregar(m, "frases.js", "camada-sala.js");
+await tick();
+await vm.runInContext("desenharAgenda()", m.ctx);
+confere("ligação perdida virou amigo sem clique", so(m, "adicionar_amigo").length === 0);
+const [linhaPerdida, linhaAmiga] = m.$("perfil-agenda").children;
+const botoes = (l) => l.children.filter((c) => c.textContent === "ADICIONAR AOS AMIGOS");
+confere("a perdida não tem o botão explícito", botoes(linhaPerdida).length === 1);
+confere("quem já é amigo ganhou o botão", botoes(linhaAmiga).length === 0 && linhaAmiga.children.some((c) => c.textContent === "AMIGO"));
+await botoes(linhaPerdida)[0].click();
+const add = so(m, "adicionar_amigo");
+confere("o clique não adicionou aquele código uma vez", add.length === 1 && add[0].args.codigo === PERDIDA.codigo);
+"##,
+    );
+}
+
+#[test]
+fn a_vista_da_ligacao_pessoal_vem_do_metadado_e_nao_do_nome() {
+    rodar_node(
+        "a vista pessoal",
+        r##"
+const montar = (sentado) => {
+  const m = mundo({ snapshot: { voice_rooms: [{ id: 1, occupied_by_us: sentado }] }, enter_voice_room: null });
+  carregar(m, "frases.js");
+  Object.assign(m.ctx, {
+    abrirChamada: async () => { m.chamadas.push({ cmd: "abrirChamada" }); },
+    fecharChamada: () => { m.chamadas.push({ cmd: "fecharChamada" }); },
+    mostrarOQueFicaForaDaGrade: () => { m.chamadas.push({ cmd: "painelDeFora" }); },
+    fecharOChat: () => { m.chamadas.push({ cmd: "fecharOChat" }); },
+  });
+  vm.runInContext(`
+    let sessoesNaTela = null;
+    let vistaPessoalAberta = null;
+    let aberturasDaVistaPessoal = 0;
+    const variasSessoes = () => Array.isArray(sessoesNaTela);
+    const nomeDaSessao = (s) => (s?.nome ?? "").trim() || s?.endereco || "servidor sem nome";
+    ${funcao("camada-sessoes.js", "vistaDaSessao")}
+    ${funcao("camada-sessoes.js", "desenharAVistaPessoal")}
+    ${funcao("camada-sessoes.js", "desenharACabecaDaLigacao")}
+    ${funcao("camada-sessoes.js", "abrirAVistaPessoal")}
+  `, m.ctx);
+  return m;
+};
+const m = montar(true);
+const vista = (s) => vm.runInContext("vistaDaSessao", m.ctx)(s);
+confere("`ligacao` não escolhe a vista pessoal", vista({ ligacao: "K9P2-CSM7-NBFR-AYQ3", nome: "Sala de jogos", endereco: "10.0.0.1:8383" }) === "ligacao");
+confere("`onde: Pessoal` não escolhe a vista pessoal", vista({ onde: "Pessoal", nome: "Servidor", ligacao: null }) === "ligacao");
+// Um servidor que se CHAMA «Ligação pessoal», ou tem endereço de código, continua servidor.
+confere("o nome escolheu a vista", vista({ nome: "LIGAÇÃO PESSOAL", endereco: "@K9P2-CSM7-NBFR-AYQ3", onde: "Outro", ligacao: null }) === "servidor");
+confere("o endereço escolheu a vista", vista({ nome: "Ana", endereco: "@K9P2-CSM7-NBFR-AYQ3" }) === "servidor");
+
+// Desenhar a vista só rotula: nenhum comando (foco, encerrar, ver) sai daqui.
+vm.runInContext(`sessoesNaTela = [
+  { carimbo: { sessao: 1 }, nome: "Servidor", endereco: "a:1", na_vista: false, foco_de_voz: true },
+  { carimbo: { sessao: 2 }, nome: "Ana", endereco: "@K9", na_vista: true, ligacao: "K9P2-CSM7-NBFR-AYQ3" }]`, m.ctx);
+vm.runInContext("desenharAVistaPessoal()", m.ctx);
+confere("a vista pessoal não apareceu", m.$("tela-sessao").dataset.vista === "ligacao" && m.$("sessao-ligacao").hidden === false);
+confere("o rótulo não é LIGAÇÃO PESSOAL e o nome do contato", m.$("sessao-ligacao").textContent === "LIGAÇÃO PESSOAL · Ana");
+await tick();
+// A vista pessoal abre a grade da chamada que já existe, uma vez; redesenhar não reabre.
+vm.runInContext("desenharAVistaPessoal()", m.ctx);
+confere("a vista pessoal não abriu a grade da chamada uma vez", so(m, "abrirChamada").length === 1);
+confere("trocar de vista mexeu em sessão ou voz: " + JSON.stringify(m.chamadas), m.chamadas.every((c) => ["abrirChamada", "snapshot", "painelDeFora", "fecharOChat"].includes(c.cmd)));
+vm.runInContext(`sessoesNaTela[0].na_vista = true; sessoesNaTela[1].na_vista = false;`, m.ctx);
+vm.runInContext("desenharAVistaPessoal()", m.ctx);
+confere("voltar ao servidor não fechou a grade da ligação", so(m, "fecharChamada").length === 1);
+confere("a vista de servidor ficou pessoal", m.$("tela-sessao").dataset.vista === "servidor" && m.$("sessao-ligacao").hidden === true);
+
+// A ligação recém-conectada, FORA da sala: o painel de fora, e a grade NÃO abre,
+// nada entra sozinho.
+const fora = montar(false);
+vm.runInContext(`sessoesNaTela = [
+  { carimbo: { sessao: 2 }, nome: "Ana", endereco: "@K9", na_vista: true, ligacao: "K9P2-CSM7-NBFR-AYQ3" }]`, fora.ctx);
+vm.runInContext("desenharAVistaPessoal()", fora.ctx);
+await tick();
+confere("fora da sala não mostrou o painel de fora", so(fora, "painelDeFora").length === 1);
+confere("fora da sala abriu a grade vazia", so(fora, "abrirChamada").length === 0);
+confere("fora da sala entrou sozinha", so(fora, "enter_voice_room").length === 0);
+"##,
+    );
+}
+
+/// A vista pessoal é a chamada de fato: participantes, palco da tela
+/// compartilhada e controles da chamada continuam à vista, uma vez só cada
+/// (sem cópia), e a navegação para as outras sessões não some.
+#[test]
+fn a_vista_pessoal_mostra_a_chamada_e_mantem_a_navegacao_entre_sessoes() {
+    let pagina = without_comments(&read("ui/index.html"));
+    let css = read("ui/camada-sala.css");
+    let regras: Vec<&str> = css
+        .split('}')
+        // Só as regras que ESCONDEM; as de posição não contam. O «SAIR DO
+        // SERVIDOR» fora de sala fica de fora: o painel dá DESLIGAR.
+        .filter(|r| {
+            r.contains("[data-vista=\"ligacao\"]")
+                && r.contains("display: none")
+                && !r.contains("[data-alvo=\"servidor\"]")
+        })
+        .collect();
+    let escondido = regras.join("}");
+    for id in [
+        "vista-chamada",
+        "chamada-grade",
+        "palco",
+        "operador-sair",
+        "operador-vista",
+        "voz-foco",
+        "trilha-sessoes",
+        "trilha-adicionar",
+    ] {
+        assert_eq!(
+            pagina.matches(&format!("id=\"{id}\"")).count(),
+            1,
+            "`{id}` não existe uma vez só: a vista pessoal duplicou ou perdeu a peça da chamada"
+        );
+        assert!(
+            !escondido.contains(&format!("#{id}")),
+            "a vista pessoal esconde `{id}`, que é a chamada ou a navegação entre sessões"
+        );
+    }
+    // O que ela tira é só o que é de servidor.
+    assert!(
+        escondido.contains(".canais-rolagem")
+            && escondido.contains(".painel-pessoas")
+            && escondido.contains("#operador-quem"),
+        "a vista pessoal não tira as listas de salas, o roster de servidor e o perfil"
+    );
+    let sessoes = without_comments(&read("ui/camada-sessoes.js"));
+    // A conversa só existe dentro do chat: fechada, escondida pelo `hidden`.
+    let fechar = body_of(&sessoes, "function fecharOChat");
+    assert!(
+        fechar.contains("painel.hidden = naVistaPessoal()"),
+        "a conversa de servidor não fica escondida na vista pessoal fora do chat:\n{fechar}"
+    );
+    let desenho = format!(
+        "{}{}",
+        body_of(&sessoes, "function desenharAVistaPessoal"),
+        body_of(&sessoes, "async function abrirAVistaPessoal")
+    );
+    assert!(
+        desenho.contains("abrirChamada(") && !desenho.contains("connect"),
+        "a vista pessoal não reaproveita a vista de chamada, ou abre conexão própria:\n{desenho}"
+    );
+}
+
+/// Atender e ligar SOMAM uma sessão: com um servidor aberto, nenhum dos dois
+/// chama `ejetar` (que faz `disconnect`) nem encerra a sessão. A entrada passa
+/// pelo `connect`, e a falha dele aparece na tela.
+#[test]
+fn atender_e_ligar_com_um_servidor_aberto_somam_uma_sessao_e_nao_ejetam() {
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    let atender = body_of(&toque, "async function entrarNaSalaAoAtender");
+    assert!(
+        !atender.contains("ejetar("),
+        "ATENDER voltou a ejetar a sessão que está aberta:\n{atender}"
+    );
+    // O `conectar` real escreve a falha na entrada, que é a tela para onde o
+    // atender e o ligar levam.
+    let boot = without_comments(&read("ui/tela-boot.js"));
+    assert!(
+        boot.contains("const erro = $(\"boot-erro\");"),
+        "o `conectar` deixou de escrever a falha em #boot-erro"
+    );
+    rodar_node(
+        "atender e ligar somam",
+        r##"
+const SERVIDOR = { carimbo: { sessao: 1 }, nome: "Casa", endereco: "10.0.0.2:8383", na_vista: true };
+function cenario(connect) {
+  const abertas = [SERVIDOR];
+  const m = mundo({ connect, onde_estou: () => (abertas.length > 1 ? "Pessoal" : "Outro"), disconnect: null, encerrar_sessao: null });
+  const telas = ["tela-sessao", "tela-boot", "tela-fim"].map((id) => m.$(id));
+  m.$("tela-sessao").hidden = false; m.$("tela-boot").hidden = true; m.$("tela-fim").hidden = true;
+  m.ctx.document.querySelectorAll = () => telas;
+  Object.assign(m.ctx, {
+    ejetar: async () => { m.chamadas.push({ cmd: "ejetar" }); await m.invoke("disconnect"); },
+    conectar: async (alvo, ap, tok, link, ligacao) => {
+      m.chamadas.push({ cmd: "conectar", args: [alvo, ap, tok, link, ligacao] });
+      try { await m.invoke("connect", { server: alvo }); abertas.push({ nome: "ligação" }); }
+      catch (f) { m.$("boot-erro").hidden = false; m.$("boot-erro").textContent = String(f); }
+    },
+    voltarParaTela: () => {}, desenharSessoesNaEntrada: () => {}, guardarOEstadoDaVista: () => m.chamadas.push({ cmd: "guardar" }),
+    fecharOQueEDaSessao: () => {}, esquecerOEstadoDaSessao: () => {}, vistaDaJanela: { sessao: 1 },
+    desenharToque: async () => {}, esperarOConectarEmVoo: async () => {}, sentarNaSalaDaLigacao: async () => {},
+    encerrarALigacao: async () => {}, atendendo: false, atendimentoFalho: null,
+    variasSessoes: () => true, pedirTrocaDeServidor: (...a) => m.chamadas.push({ cmd: "pedirTroca", args: a }),
+  });
+  vm.runInContext(`
+    ${funcao("camada-sessoes.js", "irParaAEntradaSemSair")}
+    ${funcao("camada-toque.js", "entrarNaSalaAoAtender")}
+    ${funcao("camada-servidores.js", "irParaOServidor")}`, m.ctx);
+  return { m, abertas };
+}
+const intacto = (m, abertas, caso) => {
+  confere(caso + ": ejetou a sessão aberta", so(m, "ejetar").length === 0);
+  confere(caso + ": desconectou ou encerrou", so(m, "disconnect").length === 0 && so(m, "encerrar_sessao").length === 0);
+  confere(caso + ": a sessão anterior saiu da lista", abertas.includes(SERVIDOR));
+  confere(caso + ": não foi à entrada", m.$("tela-boot").hidden === false && m.$("tela-sessao").hidden === true);
+  confere(caso + ": não guardou a vista que saiu", so(m, "guardar").length === 1);
+};
+
+// ATENDER, entrada bem-sucedida: passa pelo connect e abre a sessão da ligação.
+let { m, abertas } = cenario(null);
+await m.ctx.entrarNaSalaAoAtender("@K9P2-CSM7-NBFR-AYQ3", 1);
+intacto(m, abertas, "atender");
+confere("atender não passou pelo connect", so(m, "connect").length === 1 && so(m, "connect")[0].args.server === "@K9P2-CSM7-NBFR-AYQ3");
+confere("atender não abriu a sessão da ligação", abertas.length === 2);
+
+// ATENDER, o connect falha: a frase aparece na entrada, e nada foi derrubado.
+({ m, abertas } = cenario(() => Promise.reject("sala-recusou")));
+await m.ctx.entrarNaSalaAoAtender("@K9P2-CSM7-NBFR-AYQ3", 1);
+intacto(m, abertas, "atender com falha");
+confere("a falha do connect não apareceu na tela", m.$("boot-erro").hidden === false && /sala-recusou/.test(m.$("boot-erro").textContent));
+confere("a falha não oferece tentar de novo", m.ctx.atendimentoFalho !== null);
+confere("a falha do connect abriu uma sessão", abertas.length === 1);
+
+// LIGAR de um amigo com uma sessão aberta: soma, sem a caixa de «sai de».
+({ m, abertas } = cenario(null));
+m.ctx.irParaOServidor("@K9P2-CSM7-NBFR-AYQ3", null, null, "Ana", null, true);
+await tick();
+intacto(m, abertas, "ligar");
+confere("ligar pediu a troca de servidor", so(m, "pedirTroca").length === 0);
+const con = so(m, "conectar");
+confere("ligar não passou por conectar com a ligação", con.length === 1 && con[0].args[0] === "@K9P2-CSM7-NBFR-AYQ3" && con[0].args[4]?.nome === "Ana");
+confere("ligar não passou pelo connect", so(m, "connect").length === 1 && abertas.length === 2);
+
+// LIGAR, o connect falha: a frase aparece na entrada.
+({ m, abertas } = cenario(() => Promise.reject("indisponivel")));
+m.ctx.irParaOServidor("@K9P2-CSM7-NBFR-AYQ3", null, null, "Ana", null, true);
+await tick();
+intacto(m, abertas, "ligar com falha");
+confere("a falha de ligar não apareceu", m.$("boot-erro").hidden === false && /indisponivel/.test(m.$("boot-erro").textContent));
+
+// Sem sessões (contrato antigo), o comportamento de antes: confirma a troca.
+({ m } = cenario(null));
+m.ctx.variasSessoes = () => false;
+m.ctx.irParaOServidor("@K9", null, null, "Ana", null, true);
+confere("sem várias sessões a troca deixou de confirmar", so(m, "pedirTroca").length === 1 && so(m, "conectar").length === 0);
+"##,
+    );
+}
+
+/// 0.17, achado do mobile: ao entrar no 2º servidor aparecia UMA vez «Não foi
+/// possível conferir os MODs: disconnected». Era o pedido da sessão que acabou
+/// de sair (`pedirAoServidor` lança `disconnected` quando a geração não é mais
+/// a de pé) chegando ao `catch` de `carregarMods` como se fosse falha da sessão
+/// nova. O guarda roda a fonte real de `carregarMods` no `node`: o resultado
+/// tardio de A é descartado em silêncio, a consulta de B confere B, um erro
+/// verdadeiro da geração atual segue visível, e o descarte do velho não abre a
+/// porta para um segundo pedido concorrente.
+#[test]
+fn a_conferencia_de_mods_da_sessao_que_saiu_nao_vira_aviso_da_sessao_nova() {
+    rodar_node(
+        "a conferência de MODs entre sessões",
+        r##"
+const m = mundo({ snapshot: {}, mods_instalados: [] });
+const portas = [];
+const avisos = [];
+m.ctx.console = { ...console, warn: (...a) => avisos.push(a.map(String).join(" ")) };
+m.ctx.pedirAoServidor = () => new Promise((ok, no) => portas.push({ ok, no }));
+m.ctx.buscarOQueFaltaSeJaFoiAceito = async () => {};
+m.ctx.montarOMod = async () => {};
+m.ctx.dispatchEvent = () => {};
+m.ctx.CustomEvent = class {};
+m.ctx.alvoAtual = "A";
+m.ctx.alvoDaSessao = () => m.ctx.alvoAtual;
+const dentro = (codigo) => vm.runInContext(codigo, m.ctx);
+dentro(
+  `const modsCarregados = new Map(), modsExigidos = new Map(), estadoDosMods = new Map();
+   let conferindoMods = false, ultimoErroDeMods = "", conjuntoJaBuscado = null, geracaoDaSessao = 1;` +
+  funcao("base.js", "anotarEstadoDoMod") + funcao("base.js", "carregarMods"),
+);
+const trocar = (geracao, alvo) => { dentro("geracaoDaSessao = " + geracao); m.ctx.alvoAtual = alvo; };
+
+// (a) A -> B com a promessa EM VOO: o resultado tardio de A não vira aviso.
+const emA = m.ctx.carregarMods();
+await tick();
+confere("(a) o pedido de A não chegou a voo", portas.length === 1);
+trocar(2, "B");
+portas[0].no(new Error("disconnected"));
+await emA;
+confere("(a) o resultado tardio de A gerou warn: " + avisos.join("|"), avisos.length === 0);
+confere("(a) o resultado tardio de A virou anotação", dentro(`estadoDosMods.has("")`) === false);
+confere("(a) o descarte deixou a porta fechada", dentro("conferindoMods") === false);
+
+// (b) A consulta nova de B passa e confere B.
+const emB = m.ctx.carregarMods();
+await tick();
+confere("(b) a consulta de B não saiu", portas.length === 2);
+portas[1].ok({ ok: true, mods: [{ id: "x", hash: "h1", version: "1" }] });
+await emB;
+confere("(b) B não ficou exigindo o MOD dele", dentro(`modsExigidos.get("x")`) === "h1");
+confere("(b) B não anotou o MOD que falta", dentro(`estadoDosMods.get("x")?.fase`) === "sem-pacote");
+confere("(b) B gerou aviso: " + avisos.join("|"), avisos.length === 0);
+
+// (c) Um erro verdadeiro da geração ATUAL continua visível.
+avisos.length = 0;
+const emC = m.ctx.carregarMods();
+await tick();
+portas[2].no(new Error("disconnected"));
+await emC;
+confere("(c) o erro da geração atual sumiu do console", avisos.length === 1);
+confere("(c) o erro da geração atual não foi anotado", dentro(`estadoDosMods.get("")?.fase`) === "catalogo-recusado");
+
+// (d) O descarte do velho não libera OUTRO pedido em curso.
+dentro(`estadoDosMods.delete(""); ultimoErroDeMods = "";`);
+avisos.length = 0;
+const antes = portas.length;
+const velho = m.ctx.carregarMods();
+await tick();
+trocar(3, "C");
+const a2 = m.ctx.carregarMods(), a3 = m.ctx.carregarMods();
+await tick(); await a2; await a3;
+confere("(d) um segundo pedido nasceu com o velho em voo", portas.length === antes + 1);
+portas[antes].no(new Error("disconnected"));
+await velho;
+confere("(d) o descarte do velho gerou aviso", avisos.length === 0);
+const novo = m.ctx.carregarMods(), novo2 = m.ctx.carregarMods();
+await tick(); await novo2;
+confere("(d) dois pedidos da geração nova em voo ao mesmo tempo", portas.length === antes + 2);
+const novo3 = m.ctx.carregarMods();
+await tick(); await novo3;
+confere("(d) o pedido novo em curso perdeu a porta", portas.length === antes + 2 && dentro("conferindoMods") === true);
+portas[antes + 1].ok({ ok: true, mods: [] });
+await novo;
+confere("(d) o pedido novo não fechou a porta ao acabar", dentro("conferindoMods") === false);
+
+// (e) O erro tardio de A não mexe nem no `modsExigidos` já preenchido de B.
+avisos.length = 0;
+trocar(4, "D");
+const emE = m.ctx.carregarMods();
+await tick();
+dentro(`modsExigidos.clear(); modsExigidos.set("y", "hb"); modsExigidos.set("k", "hk");`);
+const exigidosDeB = dentro("JSON.stringify([...modsExigidos])");
+trocar(5, "E");
+portas[portas.length - 1].no(new Error("disconnected"));
+await emE;
+confere("(e) o erro tardio de A mexeu no modsExigidos de B", dentro("JSON.stringify([...modsExigidos])") === exigidosDeB);
+confere("(e) o erro tardio de A gerou warn ou anotação", avisos.length === 0 && dentro(`estadoDosMods.has("")`) === false);
+
+// (f) O SUCESSO tardio de A tampouco é aplicado em B; a conferência de B segue normal.
+let encerrados = 0;
+m.ctx.encerrou = () => { encerrados += 1; return Promise.resolve(); };
+dentro(`modsCarregados.set("w", { encerrar: () => encerrou() });`);
+const emF = m.ctx.carregarMods();
+await tick();
+trocar(6, "F");
+portas[portas.length - 1].ok({ ok: true, mods: [{ id: "z", hash: "hz", version: "1" }] });
+await emF;
+confere("(f) o catálogo tardio de A foi aplicado em B", dentro("JSON.stringify([...modsExigidos])") === exigidosDeB);
+confere("(f) o catálogo tardio de A anotou estado em B", dentro(`estadoDosMods.has("z")`) === false);
+confere("(f) o catálogo tardio de A descarregou MOD de B", encerrados === 0 && dentro(`modsCarregados.has("w")`) === true);
+confere("(f) o sucesso tardio deixou a porta fechada", dentro("conferindoMods") === false);
+const emG = m.ctx.carregarMods();
+await tick();
+portas[portas.length - 1].ok({ ok: true, mods: [] });
+await emG;
+confere("(f) a conferência de B não seguiu normal", encerrados === 1 && dentro("modsExigidos.size") === 0);
+"##,
+    );
+}
+
+/// **O COLAR UM LINK da casca do celular abre o campo** (homologação, iPhone
+/// real). `botao(f.colar, colar)` entregava o EVENTO DE CLIQUE a `colar(recusa)`:
+/// o evento, truthy, virava a «recusa», `aviso(evento)` lançava `{} is not
+/// iterable` antes de a tela trocar, e o toque não fazia nada, em silêncio.
+///
+/// O `node` roda a FONTE REAL de `celular-entrada.js` (e as frases reais) sobre
+/// um DOM mínimo, toca o botão com um evento de verdade e exige o campo
+/// `#cel-entrada-link`, sem exceção. O botão de voltar também é tocado com o
+/// evento.
+#[test]
+fn o_colar_um_link_do_celular_abre_o_campo_sem_estourar() {
+    rodar_node(
+        "o COLAR UM LINK do celular",
+        r##"
+class No {
+  constructor(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.className = ""; this.id = ""; this.value = ""; this.hidden = false; this.scrollTop = 0; this.dataset = {}; this.textContent = ""; }
+  append(...c) { for (const x of c) this.children.push(x); }
+  replaceChildren(...c) { this.children = c.slice(); }
+  addEventListener() {}
+  removeAttribute() {}
+  focus() { semFoco.push(this.id || this.tag); }
+  contains(x) { return x === this || this.children.some((c) => c && c.contains && c.contains(x)); }
+  procurar(fn) { if (fn(this)) return this; for (const c of this.children) { const r = c && c.procurar && c.procurar(fn); if (r) return r; } return null; }
+  querySelector(sel) { return sel.startsWith("#") ? this.procurar((n) => n.id === sel.slice(1)) : null; }
+  texto() { return this.textContent + this.children.map((c) => (typeof c === "string" ? c : c.texto())).join(""); }
+}
+const semFoco = [];
+const h = (tag, props = {}, ...filhos) => {
+  const no = new No(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") no.className = v;
+    else if (k === "text") no.textContent = v;
+    else if (k === "id") { no.id = v; no.attrs.id = v; }
+    else if (k.startsWith("on")) no[k] = v;
+    else no.attrs[k] = v;
+  }
+  for (const f of filhos.flat(Infinity)) if (f) no.append(typeof f === "string" ? Object.assign(new No("#texto"), { textContent: f }) : f);
+  return no;
+};
+const boot = new No("section");
+const soltos = {};
+const documento = {
+  documentElement: { dataset: { casca: "celular" } },
+  // `tela-boot` é a raiz; as outras peças da página (a sessão, o aceite) são nós soltos.
+  getElementById: (id) => (id === "tela-boot" ? boot : (soltos[id] ??= Object.assign(new No("div"), { id }))),
+  querySelector: () => null,
+  querySelectorAll: () => [],
+  activeElement: null,
+};
+const erros = [];
+const ctx = vm.createContext({
+  console: { warn() {}, info() {}, log() {}, error(e) { erros.push(String(e)); } },
+  document: documento, setTimeout, localStorage: { getItem: () => null, setItem() {} },
+  MutationObserver: class { observe() {} disconnect() {} },
+  CELULAR: { h, registrar() {}, ajudante() { return {}; } },
+  CASCA: {},
+  PAGINA_DO_APP: "https://exemplo.invalido/app",
+});
+vm.runInContext(ler("frases.js"), ctx, { filename: "frases.js" });
+try {
+  vm.runInContext(ler("celular-entrada.js"), ctx, { filename: "celular-entrada.js" });
+} catch (e) { confere("a fonte não carregou no DOM mínimo: " + e.message, false); }
+await tick();
+
+const tela = boot.children[0];
+const corpo = tela.children[1];
+const pe = tela.children[2];
+const botoes = () => pe.children.filter((b) => b && b.onclick);
+const colar = botoes().find((b) => /COLAR UM LINK/.test(b.texto()));
+confere("a tela de início não tem o botão COLAR UM LINK", Boolean(colar));
+if (colar) {
+  let estourou = null;
+  try { await colar.onclick({ type: "click", isTrusted: true }); } catch (e) { estourou = e; }
+  await tick();
+  confere("o toque no COLAR UM LINK estourou: " + (estourou && estourou.message), estourou === null);
+  confere("o campo do link não apareceu depois do toque", Boolean(corpo.querySelector("#cel-entrada-link")));
+  confere("o teclado do campo não foi pedido (focus)", semFoco.includes("cel-entrada-link"));
+  // O CONTINUAR com o campo vazio não faz nada; o «AGORA NÃO» volta ao início.
+  const volta = botoes().find((b) => !/CONTINUAR/i.test(b.texto()));
+  if (volta) {
+    let falhou = null;
+    try { await volta.onclick({ type: "click" }); } catch (e) { falhou = e; }
+    await tick();
+    confere("o botão de voltar estourou com o evento: " + (falhou && falhou.message), falhou === null);
+    confere("voltar não trouxe a tela de início de volta", botoes().some((b) => /COLAR UM LINK/.test(b.texto())));
+  }
+}
+"##,
+    );
+}
+
+/// **Os três defeitos que a bancada dos MODs oficiais 4.0.0 mediu** (MESA, PERFIS
+/// e ESTILO, `bancada/mods-oficiais-na-ui.cjs --estrito`), com o guarda de cada
+/// um no texto (a prova de comportamento é a bancada, no navegador):
+///
+/// 1. o aviso do MOD é também uma `.superficie-de-mod`, cujo `container:
+///    … / inline-size` zerava o tamanho de conteúdo dele: a caixa fixa dos
+///    avisos encolhia a 20 px, uma letra por linha;
+/// 2. a montagem por partes (`superficie.atualizar`) reaplicava o `valor` antigo
+///    em todo controle sem foco, e o editor do PERFIS perdia o campo anterior;
+/// 3. `modsQueOuvemATela` lia `instancia.api` de uma entrada nula do mapa.
+#[test]
+fn os_tres_defeitos_dos_mods_oficiais_tem_guarda() {
+    // 1. O aviso sem contêiner.
+    let css = without_comments(&read("ui/mods-superficies.css"));
+    let aviso = css
+        .split("\n.aviso-de-mod {")
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+        .expect("a regra `.aviso-de-mod`");
+    assert!(
+        aviso.contains("container: none"),
+        "o aviso do MOD voltou a ser um contêiner de largura, e encolhe a uma letra por linha:\n{aviso}"
+    );
+
+    // 2. Por partes é por partes: todo controle com valor consulta `protegida`.
+    let regiao = without_comments(&read("ui/mods-regiao.js"));
+    for atualizador in [
+        "atualizarCampo",
+        "atualizarEscolha",
+        "atualizarTextoLongo",
+        "atualizarNumero",
+        "atualizarDeslizante",
+        "atualizarMarca",
+        "atualizarCor",
+    ] {
+        let corpo = body_of(&regiao, &format!("  {atualizador}(elem, plano) {{"));
+        assert!(
+            corpo.contains("this.protegida("),
+            "`{atualizador}` reescreve o valor do controle sem consultar `protegida`: uma \
+             montagem por partes apagaria o que a pessoa escreveu fora dela:\n{corpo}"
+        );
+    }
+    let superficies = without_comments(&read("ui/mods-superficies.js"));
+    let atualizar = body_of(&superficies, "  atualizar(chave, subarvore) {");
+    assert!(
+        atualizar.contains("soAtualizarChaves = chavesDaSubarvore(subarvore)")
+            && atualizar.contains("soAtualizarChaves = null"),
+        "a montagem por partes não diz ao renderizador quais controles são dela:\n{atualizar}"
+    );
+
+    // 3. A entrada nula do mapa dos MODs.
+    let base = without_comments(&read("ui/base.js"));
+    let ouvem = body_of(&base, "function modsQueOuvemATela() {");
+    assert!(
+        ouvem.contains("if (!instancia) continue;"),
+        "`modsQueOuvemATela` volta a ler `instancia.api` de uma entrada nula:\n{ouvem}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 0.17: o candidato IPv6, o SDP do anfitrião e a página sem TURN.
+//
+// Medido no iPhone em 5G: o candidato IPv6 do navegador saía sem colchetes e o
+// `sinal_chama` do `seele-web` recusava a chamada inteira. O `node` roda a FONTE
+// REAL de `rtc-web.js` sobre um `RTCPeerConnection` falso (que entrega os
+// candidatos no tempo pedido) e um `sinal.montar` que faz o que o `sinal_chama`
+// faz: lê cada candidato como `SocketAddr`, e um que não lê derruba a chamada
+// inteira com `{"erro": "candidato"}`. O relógio é o de verdade; as margens são
+// largas de propósito (o laço de espera dorme 50 ms). **A página não tem TURN**
+// (diretriz do usuário: o SEELE é código na máquina de cada um, e o VPS é só o
+// ponto de encontro).
+// ---------------------------------------------------------------------------
+
+const ENLACE_NODE: &str = r##"
+// O limite de tempo do PRÓPRIO teste: uma espera que prende o `node` mata e reprova, em vez de pendurar o cargo.
+setTimeout(() => { console.log("o teste passou de 60 s e foi morto: uma espera prendeu o node"); process.exit(1); }, 60000).unref();
+const consolaEspia = (linhas) => {
+  const anotar = (...a) => linhas.push(a.map((x) => {
+    if (typeof x === "string") return x;
+    try { return JSON.stringify(x, Object.getOwnPropertyNames(Object(x))); } catch { return String(x); }
+  }).join(" "));
+  return { log: anotar, warn: anotar, error: anotar, info: anotar, debug: anotar };
+};
+const carregarORtc = ({ consola = console, guardado = {}, Par = class {}, armazenamento = null } = {}) => {
+  const localStorage = armazenamento ?? {
+    getItem: (k) => (k in guardado ? guardado[k] : null),
+    setItem: (k, v) => { guardado[k] = String(v); },
+    removeItem: (k) => { delete guardado[k]; },
+  };
+  const ctx = vm.createContext({
+    console: consola, setTimeout, clearTimeout, setInterval, clearInterval, performance,
+    crypto: require("crypto").webcrypto, TextEncoder, TextDecoder, URL, ReadableStream, WritableStream,
+    TransformStream, ByteLengthQueuingStrategy, CountQueuingStrategy, AbortController, DOMException,
+    queueMicrotask, localStorage, RTCPeerConnection: Par,
+  });
+  carregar({ ctx }, "rtc-web.js");
+  return ctx;
+};
+// Tudo o que o sinal.montar do `seele-web` recusa: um candidato que não é `SocketAddr`.
+const LE_COMO_SOCKETADDR = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:.]+\]):\d{1,5}$/;
+// `pendurar` faz UMA espera do navegador nunca voltar (o Safari faz isso): "setLocalDescription",
+// "addIceCandidate" ou "text" (o corpo da resposta do ponto). `aqui` faz o ponto responder AQUI.
+// `abrirCanais` abre o ctl e a voz aos 200 ms, e o anfitrião manda a apresentação (0x03): o ICE e o DTLS deram certo.
+// `pendurar: "getStats"` faz a telemetria do par vencedor nunca voltar; `estatisticas` é o mapa que ela devolve.
+const discarDeTeste = async ({ turn = null, chegam = [], prazo = 3200, guardado = {}, pendurar = null, aqui = false, abrirCanais = false, estatisticas = null, completarEm = null, fecharEm = null }) => {
+  const reg = { consoles: [], posts: [], montagens: [], etapas: [], config: null, falha: null, visto: null, ctx: null, fechou: false, fechouPc: false, pendurado: false, ateOFim: 0, abriu: false, atendeuPor: undefined };
+  const parada = () => new Promise(() => {});
+  let inicio = performance.now();
+  class Canal {
+    constructor(rotulo) { this.rotulo = rotulo; this.readyState = "connecting"; this.bufferedAmount = 0; this.ouvintes = {}; }
+    addEventListener(t, f) { (this.ouvintes[t] ??= []).push(f); }
+    emitir(t, e = {}) { (this.ouvintes[t] ?? []).slice().forEach((f) => f(e)); }
+    removeEventListener() {}
+    close() {}
+    send() {}
+  }
+  class Par {
+    constructor(config) {
+      reg.config = config;
+      // O navegador recusa um TURN sem usuário e credencial, e a recusa derruba a construção inteira.
+      for (const s of config.iceServers) {
+        if (/^turns?:/.test(String(s.urls)) && (!s.username || !s.credential)) {
+          throw new Error("InvalidAccessError: username and credential are required");
+        }
+      }
+      this.iceGatheringState = "new"; this.iceConnectionState = "new"; this.connectionState = "new"; this.ouvintes = {};
+    }
+    addEventListener(t, f) { (this.ouvintes[t] ??= []).push(f); }
+    createDataChannel(rotulo) { const c = new Canal(rotulo); (this.canais ??= []).push(c); return c; }
+    async createOffer() {
+      return { type: "offer", sdp: "v=0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:0\r\na=ice-ufrag:aaaa\r\na=ice-pwd:bbbbbbbbbbbbbbbbbbbbbbbb\r\n" };
+    }
+    async setLocalDescription() {
+      if (pendurar === "setLocalDescription") await parada();
+      this.iceGatheringState = "gathering";
+      inicio = performance.now();
+      if (completarEm !== null) setTimeout(() => { this.iceGatheringState = "complete"; }, completarEm);
+      for (const c of chegam) {
+        setTimeout(() => (this.ouvintes.icecandidate ?? []).forEach((f) => f({ candidate: { candidate: "candidate:x", type: c.type, address: c.address, port: c.port } })), c.em);
+      }
+    }
+    async setRemoteDescription() {
+      if (!abrirCanais) return;
+      setTimeout(() => {
+        for (const c of this.canais) { c.readyState = "open"; c.emitir("open"); }
+        const ctl = this.canais.find((c) => c.rotulo === "ctl");
+        ctl.emitir("message", { data: new Uint8Array([0x03, 1, 2, 3]) });
+      }, 200);
+    }
+    async addIceCandidate() { if (pendurar === "addIceCandidate") await parada(); }
+    close() { reg.fechouPc = true; }
+    async getStats() { if (pendurar === "getStats") await parada(); return estatisticas ?? new Map(); }
+  }
+  const sinal = {
+    montar: (pedido) => {
+      reg.montagens.push(pedido.candidatos.slice());
+      return pedido.candidatos.every((c) => LE_COMO_SOCKETADDR.test(c))
+        ? { corpo: "SEELE-SINAL/1 CHAMA " + pedido.candidatos.join(" ") }
+        : { erro: "candidato" };
+    },
+    ler: () => (aqui ? { aqui: { endereco: "192.0.2.10:8383", dicas: [] } } : { ninguem: true }),
+  };
+  const buscar = async (url, opcoes) => {
+    reg.posts.push({ url, quando: performance.now() - inicio, corpo: opcoes.body });
+    return { ok: true, text: async () => (pendurar === "text" ? parada() : "SEELE-SINAL/1 NINGUEM") };
+  };
+  reg.ctx = carregarORtc({ consola: consolaEspia(reg.consoles), guardado, Par });
+  const enlace = vm.runInContext("criarEnlaceRtc", reg.ctx)({
+    alvos: ["192.0.2.10:8383"], impressao: "ab".repeat(32), certificado: { certificado: {}, impressao: "ab".repeat(32) },
+    bilhete: { ponto: "ponto.exemplo", aviso: null }, turn, sinal, prazo,
+    aoMudar: (e) => reg.etapas.push(e), fetch: buscar,
+  });
+  if (fecharEm !== null) setTimeout(() => { try { enlace.close(); } catch { /* já fechado */ } }, fecharEm);
+  // BOUNDED: uma `ready` que nunca assenta não pendura o teste, vira `pendurado`.
+  const comeco = performance.now();
+  let assentou = false;
+  try {
+    await Promise.race([
+      enlace.ready.then(() => { reg.abriu = true; }, (f) => { reg.falha = f; }).then(() => { assentou = true; }),
+      new Promise((r) => setTimeout(() => { if (!assentou) reg.pendurado = true; r(); }, prazo + 1500)),
+    ]);
+    // As medidas ANTES da limpeza: o `close()` abaixo não pode falsear o «fechou».
+    reg.ateOFim = performance.now() - comeco;
+    reg.visto = enlace.visto;
+    reg.atendeuPor = enlace.atendeuPor;
+    reg.fechou = reg.fechouPc;
+  } finally {
+    // Limpeza do TESTE: o `keepalive` do enlace é um `setInterval`, e um enlace que abriu o mantém
+    // (e ao processo do `node`) vivo se ninguém o fecha.
+    try { enlace.close(); } catch { /* já fechado */ }
+  }
+  return reg;
+};
+const SRFLX = { em: 100, type: "srflx", address: "203.0.113.7", port: 41000 };
+// Uma constante que a fonte ainda não tem volta `null` (a conta falha, e o teste lista as outras).
+const dentroDe = (r, nome) => { try { return vm.runInContext(nome, r.ctx); } catch { return null; } };
+"##;
+
+/// O DOM mínimo e a FONTE REAL de `celular-entrada.js` (com as frases reais), para os testes da
+/// entrada do celular. Depois do `ENLACE_NODE`.
+const TELA_DA_ENTRADA_NODE: &str = r##"
+class No {
+  constructor(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.className = ""; this.id = ""; this.value = ""; this.hidden = false; this.scrollTop = 0; this.dataset = {}; this.textContent = ""; }
+  append(...c) { for (const x of c) this.children.push(x); }
+  replaceChildren(...c) { this.children = c.slice(); }
+  addEventListener() {}
+  removeAttribute() {}
+  setAttribute(k, v) { this.attrs[k] = v; }
+  focus() {}
+  contains(x) { return x === this || this.children.some((c) => c && c.contains && c.contains(x)); }
+  procurar(fn) { if (fn(this)) return this; for (const c of this.children) { const q = c && c.procurar && c.procurar(fn); if (q) return q; } return null; }
+  todos() { return [this, ...this.children.flatMap((c) => (c && c.todos ? c.todos() : []))]; }
+  querySelector(sel) { return sel.startsWith("#") ? this.procurar((n) => n.id === sel.slice(1)) : null; }
+  texto() { return this.textContent + this.children.map((c) => (typeof c === "string" ? c : c.texto())).join(""); }
+}
+const h = (tag, props = {}, ...filhos) => {
+  const no = new No(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") no.className = v;
+    else if (k === "text") no.textContent = v;
+    else if (k === "id") { no.id = v; no.attrs.id = v; }
+    else if (k.startsWith("on")) no[k] = v;
+    else no.attrs[k] = v;
+  }
+  for (const f of filhos.flat(Infinity)) if (f) no.append(typeof f === "string" ? Object.assign(new No("#texto"), { textContent: f }) : f);
+  return no;
+};
+const boot = new No("section");
+const soltos = {};
+const consoles = [];
+const guardado = {};
+const registrados = new Map();
+const ctx = carregarORtc({ consola: consolaEspia(consoles), guardado });
+Object.assign(ctx, {
+  document: {
+    documentElement: { dataset: { casca: "celular" } },
+    getElementById: (id) => (id === "tela-boot" ? boot : (soltos[id] ??= Object.assign(new No("div"), { id }))),
+    querySelector: () => null, querySelectorAll: () => [], activeElement: null,
+  },
+  MutationObserver: class { observe() {} disconnect() {} },
+  CELULAR: { h, registrar: (n, f) => registrados.set(n, f), ajudante: (n) => registrados.get(n) },
+  CASCA: {},
+  PAGINA_DO_APP: "https://exemplo.invalido/app",
+});
+try {
+  carregar({ ctx }, "frases.js", "celular-entrada.js");
+} catch (e) { confere("a tela de entrada não carregou: " + String(e.message).split("\n")[0], false); }
+await tick();
+"##;
+
+/// O candidato do navegador vai ao sinal como `SocketAddr`: o IPv6 com
+/// colchetes. O iPhone deu `2a02:26f7:…:6` na porta 58773; sem os colchetes o
+/// `sinal_chama` do `seele-web` não lê o texto (`parse::<SocketAddr>` falha),
+/// devolve `{"erro": "candidato"}` e a chamada inteira morre, o IPv4 junto.
+#[test]
+fn o_candidato_ipv6_vai_ao_sinal_com_colchetes() {
+    rodar_node(
+        "o IPv6 do candidato",
+        &format!(
+            "{ENLACE_NODE}\n{}",
+            r##"
+const seis = { em: 100, type: "srflx", address: "2a02:26f7:abcd:1::6", port: 58773 };
+// A coleta completa aos 400 ms: com uma família só, a espera sairia no teto de 1,5 s (ver o teste dos dois srflx).
+const soSeis = await discarDeTeste({ chegam: [seis], completarEm: 400, prazo: 2300 });
+confere("o IPv6 refletido saiu sem colchetes: " + JSON.stringify(soSeis.montagens[0]),
+  JSON.stringify(soSeis.montagens[0]) === JSON.stringify(["[2a02:26f7:abcd:1::6]:58773"]));
+confere("a chamada com IPv6 não chegou ao ponto (o sinal recusou o candidato)", soSeis.posts.length === 1);
+// Já com colchetes não duplica, e o IPv4 fica como está.
+const escrever = (m, p) => dentroDe(soSeis, `escreverEndereco(${JSON.stringify(m)}, ${p})`);
+confere("colchetes em dobro", escrever("[2001:db8::1]", 9) === "[2001:db8::1]:9");
+confere("o IPv4 ganhou colchetes", escrever("203.0.113.7", 9) === "203.0.113.7:9");
+process.exitCode = 0;
+fim();
+process.exit(0);
+"##
+        ),
+    );
+}
+
+/// **O anfitrião é ICE completo** (proposta B; `seele-enlace/src/ponta.rs`): ele
+/// checa e aprende o candidato peer-reflexive, e a página segue controladora. A
+/// descrição que a página sintetiza dele NÃO diz `a=ice-lite` (o spike C mediu o
+/// lite, e o lite não aprende o endereço que o NAT do celular deu). O resto não
+/// muda: DTLS passivo, o `fp` do convite, as credenciais iguais às da oferta.
+#[test]
+fn a_descricao_sintetizada_do_anfitriao_nao_e_ice_lite() {
+    rodar_node(
+        "a descrição do anfitrião",
+        &format!(
+            "{ENLACE_NODE}\n{}",
+            r##"
+const r = await discarDeTeste({ chegam: [], prazo: 600 });
+const impressao = "ab".repeat(32);
+const sdp = dentroDe(r, `descricaoDoAnfitriao(${JSON.stringify({ mid: "0", credencial: "CREDENCIALDETESTE0123456789abcdef", impressao, candidatos: ["a=candidate:1 1 udp 2130706431 192.0.2.10 8383 typ host"], acabou: true })})`);
+confere("a descrição não saiu", typeof sdp === "string");
+const linhas = String(sdp).split("\r\n");
+confere("a descrição ainda diz a=ice-lite", !linhas.includes("a=ice-lite") && !/ice-lite/.test(sdp));
+confere("o DTLS deixou de ser passivo", linhas.includes("a=setup:passive"));
+confere("o fingerprint do convite sumiu", linhas.includes("a=fingerprint:sha-256 " + impressao.toUpperCase().match(/../g).join(":")));
+confere("a credencial ICE não está nos dois campos", linhas.includes("a=ice-ufrag:CREDENCIALDETESTE0123456789abcdef") && linhas.includes("a=ice-pwd:CREDENCIALDETESTE0123456789abcdef"));
+confere("o mid ou o BUNDLE mudou", linhas.includes("a=mid:0") && linhas.includes("a=group:BUNDLE 0"));
+confere("o candidato do convite sumiu", linhas.includes("a=candidate:1 1 udp 2130706431 192.0.2.10 8383 typ host"));
+confere("o fim da lista sumiu", linhas.includes("a=end-of-candidates"));
+confere("a porta SCTP mudou", linhas.includes("a=sctp-port:5000"));
+process.exitCode = 0;
+fim();
+process.exit(0);
+"##
+        ),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 0.17: a FONTE da transmissão é a que a pessoa escolheu (homologação, Windows).
+//
+// O `id` de uma fonte é a POSIÇÃO dela na lista (`seele-core/src/video.rs`,
+// monitores e janelas com `enumerate`, as janelas na ordem z do Windows), e todo
+// `fontes_de_tela` troca o cache nativo por índices NOVOS. A caixa relistava a
+// cada desenho (o clique na fonte, a troca de qualidade, a de som), e o `id` que
+// a pessoa tinha armado passava a apontar para outra janela: armou a SEELE (id
+// 4), mexeu na qualidade, e a captura transmitiu o Brave.
+//
+// O `node` roda a FONTE REAL de `camada-compartilhar.js` sobre um DOM mínimo e
+// um `invoke` de mentira que REORDENA a lista a cada `fontes_de_tela` e guarda
+// a última como o cache nativo: o `id` que chega no `compartilhar_tela` tem de
+// apontar, nele, para a janela que a pessoa escolheu.
+// ---------------------------------------------------------------------------
+
+const CAIXA_NODE: &str = r##"
+// Uma promessa pendente faz o `node` sair com 0 em silêncio: o corpo precisa dizer que terminou.
+let corpoTerminou = false;
+process.on("exit", () => { if (!corpoTerminou) { console.log("o corpo do teste não terminou: uma promessa ficou pendente"); process.exitCode = 1; } });
+El.prototype.focus = function () {};
+// Espera uma promessa, e diz qual travou em vez de deixar o `node` sair calado.
+const ate = (promessa, nome, ms = 1500) => Promise.race([promessa, new Promise((r) => setTimeout(() => { confere("travou: " + nome, false); r(); }, ms))]);
+const FONTES_BASE = [{ nome: "Monitor 1", monitor: true }, { nome: "SEELE" }, { nome: "Brave" }, { nome: "Bloco de Notas" }];
+// A cada chamada a lista vem girada: o mesmo conjunto, índices novos.
+const girada = (n) => FONTES_BASE.map((_, i) => FONTES_BASE[(i + n) % FONTES_BASE.length]);
+const caixaDeTela = async ({ listas = girada, falhar = null } = {}) => {
+  const els = {};
+  const $ = (id) => (els[id] ??= new El(id));
+  const ordem = [];          // fontes_de_tela / compartilhar_tela, na ordem em que o invoke os viu
+  const enviadas = [];       // o que o compartilhar_tela recebeu, e a que janela o cache nativo o liga
+  const portoes = {};
+  // O cache nativo (`seele-ffi`, `fontes_de_tela` e `fonte_escolhida`): `fontes_de_tela` o REPÕE com
+  // índices novos; `compartilhar_tela` CONSOME a fonte (`swap_remove`) e, com o cache vazio, REENUMERA sozinho.
+  let cache = [];
+  let rodadas = 0;
+  let tentativas = 0;
+  const montar = (nomes) => nomes.map((f, i) => ({ id: i, nome: f.nome, monitor: Boolean(f.monitor), largura: 1280, altura: 720 }));
+  const ouvintes = {};
+  const invoke = async (cmd, args) => {
+    if (cmd === "fontes_de_tela") {
+      const n = rodadas++;
+      ordem.push("fontes_de_tela");
+      if (portoes[cmd]) await portoes[cmd];
+      cache = montar(listas(n));
+      return cache.map((f) => ({ ...f }));
+    }
+    if (cmd === "compartilhar_tela") {
+      ordem.push("compartilhar_tela:inicio");
+      if (cache.length === 0) { cache = montar(listas(rodadas++)); ordem.push("reenumeracao"); }
+      const onde = cache.findIndex((f) => f.id === args.fonte);
+      tentativas += 1;
+      let janela = null;
+      if (onde >= 0) { janela = cache[onde].nome; cache[onde] = cache[cache.length - 1]; cache.pop(); }
+      enviadas.push({ fonte: args.fonte, janela });
+      if (portoes[cmd]) await portoes[cmd];
+      ordem.push("compartilhar_tela:fim");
+      if (onde < 0 || (falhar && falhar(tentativas))) throw "ScreenShareUnavailable";
+      return null;
+    }
+    if (cmd === "permissao_de_tela" || cmd === "pedir_permissao_de_tela") return "Concedida";
+    if (cmd === "snapshot") return { minha_transmissao: null };
+    if (cmd === "exclusao_do_som_da_captura") return "Excluido";
+    if (cmd === "modulo_de_video_a_baixar") return null;
+    return null;
+  };
+  const elemento = (tag, classe, texto) => {
+    const n = new El("");
+    n.tag = tag;
+    if (classe) n.className = classe;
+    if (texto !== undefined) n.textContent = texto;
+    return n;
+  };
+  const ctx = vm.createContext({
+    console, setTimeout, $, invoke, elemento,
+    listen: async (nome, f) => { ouvintes[nome] = f; },
+    repovoar: (pai, filhos) => pai.replaceChildren(...filhos),
+    anunciar() {}, focavel: () => false, fecharAoClicarFora() {},
+    fraseDeErro: (f) => String(f),
+    abrirChamada: async () => {}, atualizarChamada: async () => {},
+    document: { activeElement: null, createElement: () => new El("") },
+    window: { addEventListener() {} },
+    FRASES_DA_TELA_NO_NAVEGADOR: {},
+  });
+  carregar({ ctx }, "camada-compartilhar.js");
+  const botoes = () => $("compartilhar-fontes").children.map((li) => li.children[0]);
+  // Dispara e dá um quadro; não espera o fim do ouvinte (um ouvinte pode estar preso numa fila de propósito).
+  const toca = async (el, tipo = "click", evento = {}) => { el.handlers[tipo][0](evento); await tick(); };
+  return {
+    $, ctx, ordem, enviadas, ouvintes,
+    abrir: () => ctx.abrirCompartilhar(),
+    segurar: (cmd) => { let soltar; portoes[cmd] = new Promise((r) => { soltar = r; }); return () => { delete portoes[cmd]; soltar(); }; },
+    clicarNaFonte: async (nome) => {
+      const botao = botoes().find((b) => b.children[0].textContent === nome);
+      if (!botao) throw new Error("sem botão para " + nome + ": " + JSON.stringify(botoes().map((b) => b.children[0].textContent)));
+      await toca($("compartilhar-fontes"), "click", { target: { closest: () => botao } });
+    },
+    mudar: (id) => toca($(id), "change"),
+    comecar: () => toca($("compartilhar-comecar")),
+    pedirPermissao: () => $("compartilhar-pedir").handlers.click[0]({}),
+    parar: () => toca($("compartilhar-parar")),
+    cache: () => cache.map((f) => f.nome),
+    armada: () => vm.runInContext("fonteArmada", ctx),
+    relistas: () => ordem.filter((x) => x === "fontes_de_tela").length,
+  };
+};
+"##;
+
+/// **(i) A reordenação.** O clique na fonte, a troca de qualidade e a de som só
+/// redesenham a caixa sobre a lista da abertura: nenhum chama `fontes_de_tela`,
+/// o cache nativo é o mesmo em que a pessoa escolheu, e o `compartilhar_tela`
+/// recebe o `id` DESSA lista.
+#[test]
+fn a_fonte_escolhida_e_a_que_sai_mesmo_com_a_lista_reordenando() {
+    rodar_node(
+        "a fonte escolhida",
+        &format!(
+            "{CAIXA_NODE}\n{}",
+            r##"
+const c = await caixaDeTela();
+await c.abrir();
+confere("abrir não enumerou as fontes uma vez: " + c.relistas(), c.relistas() === 1);
+await c.clicarNaFonte("SEELE");
+confere("o clique na fonte relistou: " + c.relistas(), c.relistas() === 1);
+await c.mudar("compartilhar-resolucao");
+await c.mudar("compartilhar-quadros");
+await c.ouvintes["seele://event"]({ payload: "ScreenChanged" });
+await tick();
+confere("a troca de qualidade (ou o evento da tela) relistou: " + c.relistas(), c.relistas() === 1);
+confere("a escolha se perdeu no redesenho", c.armada() !== null);
+await c.comecar();
+confere("o compartilhar_tela não saiu uma vez: " + JSON.stringify(c.enviadas), c.enviadas.length === 1);
+confere("o id enviado aponta para outra janela no cache nativo: " + JSON.stringify(c.enviadas), c.enviadas[0] && c.enviadas[0].janela === "SEELE");
+corpoTerminou = true;
+"##
+        ),
+    );
+}
+
+/// **(ii) A troca por mesmo título.** Uma relista em que a janela some e outra
+/// com o MESMO título aparece (até no mesmo índice) não herda a escolha: o título
+/// não prova que é o mesmo alvo. A escolha fica desarmada, a caixa diz que
+/// precisa de uma nova, e o COMEÇAR não manda nada.
+#[test]
+fn uma_relista_desarma_a_escolha_e_o_comecar_nao_manda_nada() {
+    rodar_node(
+        "a escolha desarmada pela relista",
+        &format!(
+            "{CAIXA_NODE}\n{}",
+            r##"
+// Na segunda leitura, outra janela "SEELE" ocupa o mesmo índice da que sumiu.
+const listas = (n) => (n === 0 ? FONTES_BASE : [FONTES_BASE[0], { nome: "SEELE" }, { nome: "Outra" }, { nome: "Bloco de Notas" }]);
+const c = await caixaDeTela({ listas });
+await c.abrir();
+await c.clicarNaFonte("SEELE");
+confere("a escolha não armou", c.armada() === 1);
+await c.pedirPermissao();
+await tick();
+confere("a relista não aconteceu: " + c.relistas(), c.relistas() === 2);
+confere("a escolha sobreviveu à relista: " + c.armada(), c.armada() === null);
+confere("a caixa não diz que precisa de uma escolha nova: " + c.$("compartilhar-erro").textContent, /escolha/i.test(c.$("compartilhar-erro").textContent) && c.$("compartilhar-erro").hidden === false);
+confere("o COMEÇAR ficou habilitado sem escolha", c.$("compartilhar-comecar").disabled === true);
+await c.comecar();
+confere("o COMEÇAR mandou uma fonte que ninguém escolheu: " + JSON.stringify(c.enviadas), c.enviadas.length === 0);
+const marcadas = c.$("compartilhar-fontes").children.filter((li) => li.children[0].attrs["aria-pressed"] === "true");
+confere("há fonte marcada como escolhida depois da relista", marcadas.length === 0);
+corpoTerminou = true;
+"##
+        ),
+    );
+}
+
+/// **(iii) A corrida.** Uma relista pedida durante o COMEÇAR espera o
+/// `compartilhar_tela` acabar (a ordem dos invokes prova), e um COMEÇAR durante a
+/// relista não sai: o `compartilhar_tela` só sai com uma escolha feita sobre a
+/// lista vigente.
+#[test]
+fn a_relista_e_o_comecar_nao_se_intercalam() {
+    rodar_node(
+        "a fila da relista e do começar",
+        &format!(
+            "{CAIXA_NODE}\n{}",
+            r##"
+// (a) A relista pedida no meio do COMEÇAR.
+const a = await caixaDeTela();
+await a.abrir();
+await a.clicarNaFonte("SEELE");
+const soltarOComecar = a.segurar("compartilhar_tela");
+const comecando = a.$("compartilhar-comecar").handlers.click[0]({});
+await tick();
+const relista = a.pedirPermissao();
+await tick(); await tick();
+confere("a relista intercalou com o começar: " + JSON.stringify(a.ordem),
+  JSON.stringify(a.ordem) === JSON.stringify(["fontes_de_tela", "compartilhar_tela:inicio"]));
+soltarOComecar();
+await ate(comecando, "o começar (a)"); await ate(relista, "a relista (a)"); await tick();
+confere("a ordem dos invokes não é a da fila: " + JSON.stringify(a.ordem),
+  JSON.stringify(a.ordem) === JSON.stringify(["fontes_de_tela", "compartilhar_tela:inicio", "compartilhar_tela:fim", "fontes_de_tela", "fontes_de_tela"]));
+confere("o começar mandou a janela errada: " + JSON.stringify(a.enviadas), a.enviadas.length === 1 && a.enviadas[0].janela === "SEELE");
+
+// (b) O COMEÇAR durante a relista.
+const b = await caixaDeTela();
+await b.abrir();
+await b.clicarNaFonte("SEELE");
+const soltarALista = b.segurar("fontes_de_tela");
+const pedido = b.pedirPermissao();
+await tick(); await tick();
+confere("o COMEÇAR ficou habilitado durante a relista", b.$("compartilhar-comecar").disabled === true);
+await b.comecar();
+confere("o COMEÇAR saiu durante a relista: " + JSON.stringify(b.enviadas), b.enviadas.length === 0);
+soltarALista();
+await ate(pedido, "a relista (b)"); await tick();
+await b.comecar();
+confere("saiu uma fonte sem escolha nova: " + JSON.stringify(b.enviadas), b.enviadas.length === 0);
+await b.clicarNaFonte("SEELE");
+await b.comecar();
+confere("com a escolha nova o começar não saiu, ou saiu na janela errada: " + JSON.stringify(b.enviadas),
+  b.enviadas.length === 1 && b.enviadas[0].janela === "SEELE");
+corpoTerminou = true;
+"##
+        ),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 0.17: a portaria no celular, e o apelido da retomada.
+//
+// Homologação (iPhone, PWA): o iPhone bateu, ficou em AdmissionPending, o host
+// admitiu, e o iPhone entrou pela RETOMADA (a lista de servidores). Entrou, e o
+// apelido «iphone5g» sumiu: a pessoa e o autor das mensagens saíram VAZIOS nos
+// dois lados. A causa está no caminho da retomada: `celular-entrada.js` mandava
+// o apelido deste aparelho (o travessão do perfil, que vira ""), a
+// `identidade-web.js` o repassava ao Hello sem olhar o registro, e o servidor
+// aplica o apelido pedido à conta que volta (`Permissions::registrar_ou_achar`).
+// ---------------------------------------------------------------------------
+
+const IDENTIDADE_NODE: &str = r##"
+// A identidade REAL da página, sobre um IndexedDB de mentira (um mapa por impressão).
+const identidadeDeTeste = (iniciais, conectar) => {
+  const registros = new Map(iniciais.map((r) => [r.impressao, JSON.parse(JSON.stringify(r))]));
+  const banco = () => ({
+    close() {},
+    transaction: () => {
+      const t = {};
+      const entrega = (resultado) => { setTimeout(() => t.oncomplete && t.oncomplete(), 0); return { result: resultado }; };
+      t.objectStore = () => ({
+        get: (k) => entrega(registros.get(k)),
+        getAll: () => entrega([...registros.values()]),
+        put: (v) => { registros.set(v.impressao, JSON.parse(JSON.stringify(v))); return entrega(v.impressao); },
+        delete: (k) => { registros.delete(k); return entrega(undefined); },
+      });
+      return t;
+    },
+  });
+  const ctx = vm.createContext({
+    console, setTimeout, Date, TextEncoder, TextDecoder, crypto: require("crypto").webcrypto,
+    indexedDB: { open: () => { const pedido = { result: banco() }; setTimeout(() => pedido.onsuccess && pedido.onsuccess(), 0); return pedido; } },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    window: { addEventListener() {}, location: { hash: "", href: "https://exemplo.invalido/" }, matchMedia: () => ({ matches: true }) },
+    history: { replaceState() {} },
+    navigator: { standalone: true, storage: { persist: async () => true } },
+    PONTE_NO_LUGAR_DO_TAURI: false,
+    invocarNaPonte: async () => null,
+    carregarOWasmDaPagina: async () => ({}),
+  });
+  carregar({ ctx }, "identidade-web.js");
+  const id = ctx.criarIdentidadeDoNavegador({ analisar: () => ({}), conectar, agora: () => Date.now(), instalado: () => true, casca: () => "celular" });
+  return { id, registros };
+};
+const IMPRESSAO = "ab".repeat(32);
+const SERVIDOR = { impressao: IMPRESSAO, endereco: "192.0.2.10:8383", alternativos: [], bilhete: null, versao: "2.0.0", chave: {}, nome: "SALA1", icone: null, visto: 1 };
+"##;
+
+/// **A frase da portaria no celular.** A identidade devolve
+/// `espera-de-admissao` (com a entrada ainda aberta: o convite não foi gasto) e
+/// `admissao-recusada` (que encerra), e `PALAVRAS.desfechos` não tinha as duas
+/// chaves: a tela caía em «O SERVIDOR RECUSOU A ENTRADA», com o motivo vazio. A
+/// espera diz que quem hospeda ainda não decidiu e que tocar ENTRAR de novo
+/// depois de admitido entra, e o ENTRAR continua lá.
+#[test]
+fn a_portaria_tem_frase_no_celular_e_a_espera_mantem_o_entrar() {
+    rodar_node(
+        "a frase da portaria",
+        &format!(
+            "{ENLACE_NODE}\n{TELA_DA_ENTRADA_NODE}\n{}",
+            r##"
+const entrada = registrados.get("entrada");
+soltos["boot-perfil-nome"] = Object.assign(new No("span"), { id: "boot-perfil-nome", textContent: "—" });
+const lido = { estado: "pronto", endereco: "192.0.2.10:8383", impressao: "ab".repeat(32), versaoDoServidor: "2.0.0" };
+let desfecho = { erro: "espera-de-admissao", motivo: { Refused: { reason: "AdmissionPending" } } };
+const identidadeFalsa = { ler: () => lido, abrir: async () => lido, entrar: async () => desfecho, agoraNao() {}, conhecidos: async () => [] };
+await entrada.usar(identidadeFalsa, { conhecidos: async () => [], entrarNoConhecido: null });
+await tick();
+const tela = boot.children[0], corpo = tela.children[1], pe = tela.children[2];
+const entrar = () => pe.children.find((b) => b && b.onclick && b.texto() === "ENTRAR");
+confere("a entrada não mostra o ENTRAR antes de tocar", Boolean(entrar()));
+
+await entrar().onclick({});
+await tick(); await tick();
+confere("a espera da portaria caiu em «RECUSOU A ENTRADA»: " + corpo.texto().slice(0, 120), !/RECUSOU A ENTRADA/.test(corpo.texto()));
+confere("a espera não diz que quem hospeda ainda não decidiu: " + corpo.texto().slice(0, 160), /AINDA NÃO DECIDIU/.test(corpo.texto()));
+confere("a espera não diz que ENTRAR de novo entra: " + corpo.texto().slice(0, 240), /ENTRAR de novo/.test(corpo.texto()) && /convite não foi gasto/.test(corpo.texto()));
+confere("a espera tirou o ENTRAR", Boolean(entrar()));
+
+desfecho = { erro: "admissao-recusada" };
+// Se a espera tirou o ENTRAR (o defeito), a tela volta ao ponto de partida para a segunda medida.
+if (!entrar()) { await entrada.usar(identidadeFalsa, { conhecidos: async () => [], entrarNoConhecido: null }); await tick(); }
+await entrar().onclick({});
+await tick(); await tick();
+confere("a recusa da portaria caiu em «O SERVIDOR RECUSOU A ENTRADA»: " + corpo.texto().slice(0, 120), !/O SERVIDOR RECUSOU/.test(corpo.texto()));
+confere("a recusa da portaria não tem frase dela: " + corpo.texto().slice(0, 160), /RECUSOU ESTA ENTRADA/.test(corpo.texto()));
+confere("a recusa da portaria não encerrou (o ENTRAR continua)", !entrar());
+"##
+        ),
+    );
+}
+
+/// **O apelido da retomada.** Entrar por um servidor da lista (o iPhone que
+/// ficou em AdmissionPending e foi admitido) manda o apelido que a identidade
+/// GUARDOU com o servidor, e nunca vazio: o toque na lista não olha só o
+/// travessão do perfil, a identidade completa o que falta pelo registro, e a
+/// entrada que deu certo não regrava o guardado com vazio. Sem apelido em lugar
+/// nenhum, a identidade não conecta: pede o apelido no mesmo campo da «ENTRAR EM».
+#[test]
+fn a_retomada_entra_com_o_apelido_guardado_e_nunca_vazio() {
+    rodar_node(
+        "o apelido da retomada",
+        &format!(
+            "{ENLACE_NODE}\n{TELA_DA_ENTRADA_NODE}\n{IDENTIDADE_NODE}\n{}",
+            r##"
+// (a) O toque na lista, com o perfil sem nome (o travessão).
+const entrada = registrados.get("entrada");
+soltos["boot-perfil-nome"] = Object.assign(new No("span"), { id: "boot-perfil-nome", textContent: "—" });
+const tela = boot.children[0], corpo = tela.children[1];
+const chamadas = [];
+const lista = [{ impressao: IMPRESSAO, endereco: "192.0.2.10:8383", nome: "SALA1", apelido: "iphone5g", versaoDoServidor: "2.0.0", visto: 1000, podeEntrar: true }];
+await entrada.usar({ ler: () => null, abrir: async () => null, agoraNao() {}, conhecidos: async () => lista },
+  { conhecidos: async () => lista, entrarNoConhecido: async (i, a) => { chamadas.push([i, a]); return { erro: "sem-rede" }; } });
+await tick();
+const linha = corpo.procurar((n) => n.onclick && /cel-entrada-servidor\b/.test(n.className));
+confere("a lista não tem a linha do servidor", Boolean(linha));
+if (linha) { await linha.onclick({}); await tick(); await tick(); }
+confere("o toque na lista não mandou o apelido guardado: " + JSON.stringify(chamadas), chamadas.length === 1 && chamadas[0][1] === "iphone5g");
+
+// (b) A identidade completa o que falta, e conecta com o apelido guardado.
+const feitas = [];
+const a = identidadeDeTeste([{ ...SERVIDOR, apelido: "iphone5g", naPortaria: true }], async (alvo, apelido) => { feitas.push(apelido); return { geracao: 1 }; });
+const r = await a.id.entrarNoConhecido(IMPRESSAO, "");
+confere("a retomada conectou com o apelido vazio: " + JSON.stringify(feitas), feitas.length === 1 && feitas[0] === "iphone5g");
+confere("a entrada não deu certo: " + JSON.stringify(r).slice(0, 80), r && r.ok === true);
+confere("a entrada que deu certo apagou o apelido guardado: " + JSON.stringify(a.registros.get(IMPRESSAO).apelido), a.registros.get(IMPRESSAO).apelido === "iphone5g");
+
+// (c) O que a pessoa digitou vale, e é o que fica guardado.
+const feitasC = [];
+const c = identidadeDeTeste([{ ...SERVIDOR, apelido: "iphone5g" }], async (alvo, apelido) => { feitasC.push(apelido); return { geracao: 1 }; });
+await c.id.entrarNoConhecido(IMPRESSAO, "  outro nome ");
+confere("o apelido digitado não valeu: " + JSON.stringify(feitasC), feitasC[0] === "outro nome" && c.registros.get(IMPRESSAO).apelido === "outro nome");
+
+// (d) Sem apelido em lugar nenhum: não conecta, e pede o apelido (a «ENTRAR EM»).
+const feitasD = [];
+const d = identidadeDeTeste([{ ...SERVIDOR }], async (alvo, apelido) => { feitasD.push(apelido); return { geracao: 1 }; });
+const rd = await d.id.entrarNoConhecido(IMPRESSAO, "   ");
+confere("conectou com apelido vazio: " + JSON.stringify(feitasD), feitasD.length === 0);
+confere("não pediu o apelido: " + JSON.stringify(rd), rd && rd.erro === "pede-apelido");
+confere("a tentativa não ficou aberta para o ENTRAR EM", d.id.ler() && d.id.ler().estado === "ja-conhecido");
+
+// (e) A espera da portaria também guarda o apelido do registro.
+const e = identidadeDeTeste([{ ...SERVIDOR, apelido: "iphone5g" }], async () => { throw { Refused: { reason: "AdmissionPending" } }; });
+const re = await e.id.entrarNoConhecido(IMPRESSAO, "");
+confere("a espera não devolveu a espera: " + JSON.stringify(re).slice(0, 60), re && re.erro === "espera-de-admissao");
+confere("a espera apagou o apelido guardado: " + JSON.stringify(e.registros.get(IMPRESSAO).apelido), e.registros.get(IMPRESSAO).apelido === "iphone5g");
+"##
+        ),
+    );
+}
+
+/// **A lista é consumida por todo `compartilhar_tela`** (`seele-ffi`,
+/// `fonte_escolhida`: `swap_remove` da fonte, e com o cache vazio ele REENUMERA
+/// sozinho, com índices novos). A lista que o JS guardou depois de um começo já
+/// não é o cache nativo. Depois de QUALQUER tentativa, na mesma fila e antes de
+/// outro início, a escolha é desarmada e a lista é lida de novo (o que repõe o
+/// cache); nenhum `compartilhar_tela` sai sobre uma lista consumida. Só o
+/// `fontes_de_tela` repõe o cache, e só o `compartilhar_tela` o consome: o
+/// `parar_de_compartilhar` (`lib.rs:3763`) não toca nele.
+#[test]
+fn depois_de_cada_tentativa_a_lista_conta_como_consumida_e_se_refaz() {
+    rodar_node(
+        "a lista consumida",
+        &format!(
+            "{CAIXA_NODE}\n{}",
+            r##"
+const certo = (c) => c.enviadas.filter((e) => e.janela !== null);
+
+// (i) começar -> parar -> começar de novo, sem reabrir a caixa.
+const a = await caixaDeTela();
+await a.abrir();
+await a.clicarNaFonte("SEELE");
+const idDaAbertura = a.armada();
+await a.comecar();
+confere("o primeiro início não saiu na SEELE: " + JSON.stringify(a.enviadas), a.enviadas.length === 1 && a.enviadas[0].janela === "SEELE");
+confere("depois do início a lista não foi lida de novo: " + JSON.stringify(a.ordem), a.relistas() === 2);
+confere("a escolha sobreviveu ao início", a.armada() === null);
+await a.parar();
+await a.comecar();
+confere("o segundo início saiu sem escolha nova: " + JSON.stringify(a.enviadas), a.enviadas.length === 1);
+confere("o segundo início caiu numa janela sem escolha: " + JSON.stringify(a.enviadas), certo(a).length === 1);
+await a.clicarNaFonte("SEELE");
+confere("a escolha nova não armou", a.armada() !== null);
+await a.comecar();
+confere("o segundo início não saiu com a escolha nova: " + JSON.stringify(a.enviadas), a.enviadas.length === 2 && a.enviadas[1].janela === "SEELE");
+confere("o segundo início usou o id da lista velha (" + idDaAbertura + "): " + JSON.stringify(a.enviadas), a.enviadas[1] && a.enviadas[1].fonte !== idDaAbertura && a.enviadas[1].janela === "SEELE");
+confere("o parar mexeu no cache nativo: " + JSON.stringify(a.ordem), !a.ordem.includes("reenumeracao"));
+
+// (ii) uma fonte só, que fecha entre os dois inícios: o segundo não sai, nem cai em outra janela.
+const listasB = (n) => (n === 0 ? [{ nome: "SEELE" }] : [{ nome: "Outra janela" }]);
+const b = await caixaDeTela({ listas: listasB });
+await b.abrir();
+await b.clicarNaFonte("SEELE");
+await b.comecar();
+confere("o primeiro início da fonte única não saiu: " + JSON.stringify(b.enviadas), b.enviadas.length === 1 && b.enviadas[0].janela === "SEELE");
+await b.comecar();
+confere("o segundo início saiu depois de a fonte única fechar: " + JSON.stringify(b.enviadas), b.enviadas.length === 1);
+confere("o segundo início caiu na outra janela: " + JSON.stringify(b.enviadas), !b.enviadas.some((e) => e.janela === "Outra janela"));
+confere("o cache nativo não foi reposto pela lista nova: " + JSON.stringify(b.cache()), JSON.stringify(b.cache()) === JSON.stringify(["Outra janela"]));
+confere("a caixa não pede a escolha de novo", b.$("compartilhar-comecar").disabled === true);
+
+// (iii) uma falha do compartilhar_tela: a escolha é desarmada e a lista se refaz antes de outro início.
+const c = await caixaDeTela({ falhar: (tentativa) => tentativa === 1 });
+await c.abrir();
+await c.clicarNaFonte("SEELE");
+await c.comecar();
+confere("a falha não foi tentada: " + JSON.stringify(c.enviadas), c.enviadas.length === 1);
+confere("a escolha sobreviveu à falha", c.armada() === null);
+confere("a lista não foi refeita depois da falha: " + JSON.stringify(c.ordem), c.relistas() === 2);
+confere("a caixa não pede a escolha de novo: " + c.$("compartilhar-erro").textContent, /Escolha outra vez/.test(c.$("compartilhar-erro").textContent));
+await c.comecar();
+confere("outro início saiu sobre a lista consumida: " + JSON.stringify(c.enviadas), c.enviadas.length === 1);
+await c.clicarNaFonte("SEELE");
+await c.comecar();
+confere("a escolha nova depois da falha não saiu na SEELE: " + JSON.stringify(c.enviadas), c.enviadas.length === 2 && c.enviadas[1].janela === "SEELE");
+
+// (iv) o TROCAR que falha também consome.
+const d = await caixaDeTela({ falhar: (tentativa) => tentativa === 1 });
+await d.abrir();
+await d.clicarNaFonte("SEELE");
+d.$("compartilhar-comecar").dataset.modo = "trocar";
+await d.comecar();
+confere("o TROCAR que falhou não refez a lista: " + JSON.stringify(d.ordem), d.relistas() === 2 && d.armada() === null);
+corpoTerminou = true;
+"##
+        ),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 0.17: a página NÃO tem TURN. Diretriz do usuário: «eu não quero TURN, SEELE
+// é código na máquina de cada um, VPS só ponto de encontro». Nem formulário,
+// nem armazenamento, nem relay na chamada pelo ponto, nem frase que o ofereça.
+// A única linha que fala da chave `seele.turn` é a que a APAGA, uma vez, na
+// carga: a chave existiu na rodada de homologação, com uma credencial
+// temporária, e não pode ficar nos aparelhos.
+// ---------------------------------------------------------------------------
+
+/// (i) Nenhum arquivo da `ui/` fala em `turn:`/`turns:`, em TURN, em credencial
+/// de `iceServers`, em relay ou na chave `seele.turn`, **exceto a linha da
+/// limpeza** (e o bloco de comentário colado nela), que existe uma vez só.
+#[test]
+fn a_ui_nao_oferece_turn_nem_relay_e_so_a_limpeza_fala_da_chave() {
+    let mut achados = Vec::new();
+    let mut limpezas = 0;
+    for extensao in [".js", ".html", ".css"] {
+        for nome in ui_files(extensao) {
+            let texto = read(&format!("ui/{nome}"));
+            let linhas: Vec<&str> = texto.lines().collect();
+            let mut livres = std::collections::BTreeSet::new();
+            for (i, linha) in linhas.iter().enumerate() {
+                if linha.contains("removeItem(\"seele.turn\")") {
+                    limpezas += 1;
+                    livres.insert(i);
+                    let mut k = i;
+                    while k > 0 && linhas[k - 1].trim_start().starts_with("//") {
+                        k -= 1;
+                        livres.insert(k);
+                    }
+                }
+            }
+            for (i, linha) in linhas.iter().enumerate() {
+                if livres.contains(&i) {
+                    continue;
+                }
+                let minuscula = linha.to_lowercase();
+                // `return`, `turno` e afins não contam: a palavra inteira.
+                let palavra_turn = minuscula
+                    .split(|c: char| !c.is_alphanumeric())
+                    .any(|p| p == "turn" || p == "turns");
+                let fala = palavra_turn
+                    || minuscula.contains("relay")
+                    || minuscula.contains("seele.turn")
+                    || minuscula
+                        .split(|c: char| !c.is_alphanumeric())
+                        .any(|p| p == "credential" || p == "username");
+                if fala {
+                    achados.push(format!("{nome}:{}: {}", i + 1, linha.trim()));
+                }
+            }
+        }
+    }
+    assert!(
+        achados.is_empty(),
+        "a ui/ voltou a falar em TURN, relay, credencial de iceServers ou na chave `seele.turn` \
+         (SEELE é código na máquina de cada um; o VPS é só o ponto de encontro):\n{}",
+        achados.join("\n")
+    );
+    assert_eq!(
+        limpezas, 1,
+        "a limpeza da chave `seele.turn` é uma só, num lugar só"
+    );
+    assert!(
+        !std::path::Path::new(&app_dir().join("ui").join("celular-turn.js")).exists(),
+        "o celular-turn.js voltou à ui/"
+    );
+}
+
+/// (ii) O `servidoresIce` devolve só o STUN do ponto, mesmo que alguém lhe passe
+/// um `turn`; (iii) a chamada pelo ponto não espera relay nenhum, com ou sem um
+/// `turn` na mão; e o relay nunca entra na lista de candidatos do sinal.
+#[test]
+fn a_pagina_so_tem_o_stun_do_ponto_e_a_chamada_nao_espera_relay() {
+    rodar_node(
+        "só o STUN do ponto, e nada de relay",
+        &format!(
+            "{ENLACE_NODE}\n{}",
+            r##"
+const relayTardio = { em: 2500, type: "relay", address: "198.51.100.9", port: 55000 };
+const quemSabe = { url: "turn:turn.exemplo.com:3478", usuario: "pessoa", credencial: "credencial-de-teste" };
+const [com, sem, semNada] = await Promise.all([
+  // O relay chega a 2,5 s, depois do refletido e do caminho direto: a chamada não o espera.
+  discarDeTeste({ turn: quemSabe, chegam: [SRFLX, relayTardio], completarEm: 400 }),
+  discarDeTeste({ chegam: [SRFLX, relayTardio], completarEm: 400 }),
+  // Sem refletido (o STUN mudo): espera o refletido e mais nada.
+  discarDeTeste({ turn: quemSabe, chegam: [], prazo: 3800 }),
+]);
+
+// (ii) Só o STUN do ponto.
+const lista = JSON.parse(dentroDe(com, `JSON.stringify(servidoresIce({ ponto: "ponto.exemplo", turn: ${JSON.stringify(quemSabe)} }))`));
+confere("o servidoresIce devolveu mais que o STUN do ponto: " + JSON.stringify(lista),
+  lista.length === 1 && /^stun:ponto\.exemplo:8384$/.test(lista[0].urls) && Object.keys(lista[0]).length === 1);
+confere("o servidoresIce sem ponto devolveu algo: " + dentroDe(com, `JSON.stringify(servidoresIce({ turn: ${JSON.stringify(quemSabe)} }))`),
+  dentroDe(com, `JSON.stringify(servidoresIce({ turn: ${JSON.stringify(quemSabe)} }))`) === "[]");
+for (const [nome, r] of [["com um turn na mão", com], ["sem turn", sem]]) {
+  confere("os iceServers do navegador (" + nome + ") não são só o STUN do ponto: " + JSON.stringify(r.config.iceServers),
+    r.config.iceServers.length === 1 && /^stun:/.test(String(r.config.iceServers[0].urls)));
+}
+
+// (iii) A chamada pelo ponto não espera relay, e o relay não vai ao sinal.
+const um = (r) => r.posts[0];
+for (const [nome, r] of [["com um turn na mão", com], ["sem turn", sem]]) {
+  confere("a chamada (" + nome + ") levou o relay: " + JSON.stringify(r.montagens[0]), JSON.stringify(r.montagens[0]) === JSON.stringify(["203.0.113.7:41000"]));
+  confere("a chamada (" + nome + ") esperou o relay (" + Math.round(um(r)?.quando) + " ms)", um(r) && um(r).quando < 2000);
+  confere("o `visto` (" + nome + ") ainda conta relay: " + JSON.stringify(r.visto), !("relay" in r.visto));
+}
+confere("sem refletido a espera mudou (" + Math.round(um(semNada)?.quando) + " ms)", um(semNada) && um(semNada).quando >= 2900 && um(semNada).quando < 3500);
+confere("a constante do relay voltou: " + dentroDe(com, "typeof ESPERA_DO_RELAY_MS"), dentroDe(com, "typeof ESPERA_DO_RELAY_MS") === "undefined");
+"##
+        ),
+    );
+}
+
+/// (iv) A limpeza da carga apaga SÓ a chave `seele.turn` (e nunca chama
+/// `clear()`), deixa as outras chaves do armazenamento onde estavam, e um
+/// armazenamento negado não derruba a página.
+#[test]
+fn a_limpeza_da_carga_apaga_so_a_chave_seele_turn() {
+    rodar_node(
+        "a limpeza do seele.turn",
+        &format!(
+            "{ENLACE_NODE}\n{}",
+            r##"
+const dados = {
+  "seele.turn": JSON.stringify({ url: "turn:h:3478", usuario: "u", credencial: "segredo-temporario" }),
+  "seele.casca": "larga",
+  "seele.aceites-de-mods": "{\"x\":{\"conjunto\":\"y\",\"quando\":1}}",
+  "seele.persistencia-dita": "concedida",
+  "seele.apelido": "iphone5g",
+};
+const chamadas = [];
+const armazenamento = {
+  getItem: (k) => (k in dados ? dados[k] : null),
+  setItem: (k, v) => { chamadas.push(["setItem", k]); dados[k] = String(v); },
+  removeItem: (k) => { chamadas.push(["removeItem", k]); delete dados[k]; },
+  clear: () => { chamadas.push(["clear"]); },
+};
+carregarORtc({ armazenamento });
+confere("a carga não apagou a chave seele.turn", !("seele.turn" in dados));
+confere("a carga mexeu em outra coisa: " + JSON.stringify(chamadas), JSON.stringify(chamadas) === JSON.stringify([["removeItem", "seele.turn"]]));
+confere("a carga mexeu nas outras chaves: " + JSON.stringify(Object.keys(dados)),
+  JSON.stringify(Object.keys(dados).sort()) === JSON.stringify(["seele.apelido", "seele.aceites-de-mods", "seele.casca", "seele.persistencia-dita"].sort()));
+
+// Armazenamento negado (modo privado, política): a página carrega do mesmo jeito.
+const negado = { getItem() { throw new Error("SecurityError"); }, setItem() { throw new Error("SecurityError"); }, removeItem() { throw new Error("SecurityError"); }, clear() { throw new Error("SecurityError"); } };
+let estourou = null;
+try { carregarORtc({ armazenamento: negado }); } catch (e) { estourou = e; }
+confere("o armazenamento negado derrubou a carga: " + (estourou && estourou.message), estourou === null);
+"##
+        ),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 0.17: o enlace NUNCA fica «conectando» para sempre.
+//
+// Teste físico (iPhone, sem TURN): o spinner não saía, sem erro. O `ready` do
+// `criarEnlaceRtc` só tinha prazo no ÚLTIMO `await` (o `aberto`); o `discar()`
+// (`setLocalDescription`, `setRemoteDescription`, `addIceCandidate`) e a
+// chamada pelo ponto (o corpo da resposta, os candidatos do `AQUI`) esperavam
+// sem prazo nenhum. Uma espera do navegador que não volta (o Safari faz isso)
+// pendurava o `ready`, e com ele a sessão e a tela. Aqui cada espera é
+// pendurada de propósito, com um prazo curto e um relógio que desiste.
+// ---------------------------------------------------------------------------
+
+/// O `ready` assenta dentro do prazo do enlace, com o motivo que já existe, e
+/// fecha o `RTCPeerConnection`, mesmo que uma espera do navegador nunca volte.
+#[test]
+fn o_ready_do_enlace_assenta_no_prazo_mesmo_com_uma_espera_do_navegador_pendurada() {
+    rodar_node(
+        "o ready sempre assenta",
+        &format!(
+            "{ENLACE_NODE}\n{}",
+            r##"
+const PRAZO = 2500;
+const casos = [
+  // O ICE fica em `checking` e não chega a `failed`: o prazo do `aberto` (já valia).
+  ["o caminho nunca abre", { aqui: true }, ["CaminhoNaoAbriu"]],
+  // O `AQUI` chegou e o navegador nunca respondeu ao `addIceCandidate` do anfitrião.
+  ["addIceCandidate pendurado depois do AQUI", { aqui: true, pendurar: "addIceCandidate" }, ["CaminhoNaoAbriu"]],
+  // O ponto respondeu os cabeçalhos e o corpo nunca terminou: o ponto não respondeu à página.
+  ["o corpo da resposta do ponto pendurado", { pendurar: "text" }, ["SinalMudo"]],
+  // O `setLocalDescription` nunca voltou: nada do que vem depois chegou a rodar.
+  ["setLocalDescription pendurado", { pendurar: "setLocalDescription" }, ["SemRefletido", "CaminhoNaoAbriu", "SinalMudo"]],
+];
+// A coleta completa aos 400 ms: com uma família só de srflx, a espera sairia no teto de 1,5 s, e o POST já não
+// caberia no prazo curto deste teste.
+const rodadas = await Promise.all(casos.map(([, opcoes]) => discarDeTeste({ chegam: [SRFLX], completarEm: 400, prazo: PRAZO, ...opcoes })));
+casos.forEach(([nome, , motivos], i) => {
+  const r = rodadas[i];
+  confere(nome + ": o ready ficou pendente para sempre (esperei " + Math.round(r.ateOFim) + " ms)", r.pendurado === false);
+  const motivo = r.falha && r.falha.FalhaDoEnlace && r.falha.FalhaDoEnlace.motivo;
+  confere(nome + ": o ready não rejeitou com um motivo que já existe: " + JSON.stringify(motivo), motivos.includes(motivo));
+  confere(nome + ": o prazo passou do combinado (" + Math.round(r.ateOFim) + " ms)", r.ateOFim < PRAZO + 600);
+  confere(nome + ": o RTCPeerConnection não foi fechado", r.fechou === true);
+  confere(nome + ": saiu mais de uma chamada ao ponto", r.posts.length <= 1);
+});
+process.exitCode = 0;
+fim();
+process.exit(0);
+"##
+        ),
+    );
+}
+
+/// **A telemetria não segura o `ready`.** Com o ICE e o DTLS abertos (os canais
+/// abertos e a apresentação do anfitrião chegada), o `candidatoVencedor()`
+/// fazia `await pc.getStats()` FORA de qualquer prazo: um `getStats` que não
+/// volta pendurava o `ready`, e a tela ficava em «conectando» com a conexão já
+/// aberta. Agora é best effort, com um prazo pequeno e nomeado; sem resposta, o
+/// `ready` assenta sem o candidato vencedor (`null`, «não sei»), e nunca com um
+/// valor inventado. Com resposta, o par escolhido continua sendo dito.
+#[test]
+fn o_get_stats_pendurado_nao_segura_o_ready_e_nao_inventa_o_candidato_vencedor() {
+    rodar_node(
+        "o getStats fora do prazo",
+        &format!(
+            "{ENLACE_NODE}\n{}",
+            r##"
+const mapa = new Map([
+  ["t", { type: "transport", selectedCandidatePairId: "p" }],
+  ["p", { type: "candidate-pair", remoteCandidateId: "r" }],
+  ["r", { address: "192.0.2.10", port: 8383 }],
+]);
+const [pendurado, normal] = await Promise.all([
+  discarDeTeste({ abrirCanais: true, pendurar: "getStats", prazo: 2500 }),
+  discarDeTeste({ abrirCanais: true, estatisticas: mapa, prazo: 2500 }),
+]);
+confere("os canais abertos não deixaram o ready abrir (o teste não mede nada): " + JSON.stringify(normal.falha), normal.abriu === true);
+confere("o getStats pendurado deixou o ready pendente para sempre (esperei " + Math.round(pendurado.ateOFim) + " ms)", pendurado.pendurado === false);
+confere("o ready com o getStats pendurado não abriu: " + JSON.stringify(pendurado.falha), pendurado.abriu === true);
+confere("o candidato vencedor foi inventado: " + JSON.stringify(pendurado.atendeuPor), pendurado.atendeuPor === null);
+confere("a telemetria pendurada passou do prazo pequeno (" + Math.round(pendurado.ateOFim) + " ms)", pendurado.ateOFim < 2000);
+confere("com resposta, o par vencedor não foi dito: " + JSON.stringify(normal.atendeuPor), normal.atendeuPor === "192.0.2.10:8383");
+confere("com resposta, o ready demorou (" + Math.round(normal.ateOFim) + " ms)", normal.ateOFim < 600);
+process.exitCode = 0;
+fim();
+process.exit(0);
+"##
+        ),
+    );
+}
+
+/// **A chamada pelo ponto leva os `srflx` distintos que o navegador já refletiu**,
+/// o v4 e o v6, e não só o primeiro. O `rtc-web.js` guardava só o primeiro
+/// `srflx`: com o IPv6 chegando antes do IPv4, o `CHAMA` levava um candidato
+/// único (o v6), e um anfitrião só IPv4 furava na direção errada.
+///
+/// O teto é o do protocolo: `LIMITE_DE_CANDIDATOS = 2` (`seele-proto/src/
+/// encontro.rs:1277`; `ler_enderecos` recusa o `CHAMA` inteiro com um repetido
+/// ou com mais que o limite). Sem repetir, com a diversidade primeiro (um v4 e
+/// um v6 vão os dois; dois da mesma família só se não houver da outra). A espera
+/// sai no que vier antes entre «já há um v4 e um v6», a coleta completa e o teto
+/// de 1,5 s que já existia: nenhum segundo extra. Só `srflx`: nada de `host`.
+#[test]
+fn a_chamada_pelo_ponto_leva_o_srflx_v4_e_o_v6_ate_o_teto_do_protocolo() {
+    rodar_node(
+        "os srflx v4 e v6 na chamada pelo ponto",
+        &format!(
+            "{ENLACE_NODE}\n{}",
+            r##"
+const TETO = 2; // LIMITE_DE_CANDIDATOS, seele-proto/src/encontro.rs:1277
+const s = (address, port, em) => ({ em, type: "srflx", address, port });
+const V6 = (em) => s("2a02:26f7:e514:5808:0:800:0:9", 53214, em), V6T = "[2a02:26f7:e514:5808:0:800:0:9]:53214";
+const V4 = (em) => s("172.225.223.49", 41729, em), V4T = "172.225.223.49:41729";
+const V4B = (em) => s("172.225.223.49", 41800, em), V4BT = "172.225.223.49:41800";
+const V4C = (em) => s("198.51.100.77", 40000, em), V4CT = "198.51.100.77:40000";
+const casos = {
+  a: { chegam: [V6(100), V4(300)], prazo: 2300 },
+  inversa: { chegam: [V4(100), V6(300)], prazo: 2300 },
+  soV4: { chegam: [V4(100)], prazo: 4300 },
+  soV4Completo: { chegam: [V4(100)], completarEm: 400, prazo: 2300 },
+  repetido: { chegam: [V4(100), V4(200)], prazo: 4300 },
+  teto: { chegam: [V6(100), V4(200), V4B(300), { em: 150, type: "host", address: "10.0.0.5", port: 5000 }], prazo: 2300 },
+  tetoInverso: { chegam: [V4(100), V4B(200), V6(300)], prazo: 2300 },
+  mesmaFamilia: { chegam: [V4(100), V4B(200), V4C(300)], prazo: 4300 },
+  tardio: { chegam: [V6(100), V4(3400)], prazo: 4800 },
+  fechado: { chegam: [V4(100)], fecharEm: 2000, prazo: 4300 },
+};
+const nomes = Object.keys(casos);
+const r = Object.fromEntries((await Promise.all(nomes.map((n) => discarDeTeste(casos[n])))).map((x, i) => [nomes[i], x]));
+const lista = (n) => JSON.stringify(r[n].montagens[0]);
+const quando = (n) => Math.round(r[n].posts[0]?.quando);
+const igual = (n, esperado) => lista(n) === JSON.stringify(esperado);
+
+confere("(a) o v6 e depois o v4: " + lista("a"), igual("a", [V6T, V4T]));
+confere("(a) a chamada demorou (" + quando("a") + " ms)", quando("a") < 2000);
+confere("(inversa) o v4 e depois o v6: " + lista("inversa"), igual("inversa", [V4T, V6T]));
+confere("(só v4) mudou o que sai: " + lista("soV4"), igual("soV4", [V4T]));
+confere("(só v4) passou do teto de 1,5 s da espera (" + quando("soV4") + " ms)", quando("soV4") >= 2900 && quando("soV4") < 3500);
+confere("(só v4, coleta completa) a coleta completa não encerrou a espera (" + quando("soV4Completo") + " ms)", igual("soV4Completo", [V4T]) && quando("soV4Completo") < 2000);
+confere("(repetido) o mesmo srflx saiu mais de uma vez: " + lista("repetido"), igual("repetido", [V4T]));
+confere("(teto) três srflx e um host não viraram dois com as duas famílias: " + lista("teto"), igual("teto", [V6T, V4T]));
+confere("(teto inverso) o v6 que chegou por último ficou de fora: " + lista("tetoInverso"), igual("tetoInverso", [V4T, V6T]));
+confere("(mesma família) passou do teto ou perdeu a ordem: " + lista("mesmaFamilia"), igual("mesmaFamilia", [V4T, V4BT]));
+confere("(tardio) o srflx depois do teto entrou na chamada: " + lista("tardio"), igual("tardio", [V6T]));
+confere("(tardio) o POST passou do teto da espera (" + quando("tardio") + " ms)", quando("tardio") >= 2900 && quando("tardio") < 3500);
+confere("(fechado) a tentativa fechada no meio da espera mandou POST: " + JSON.stringify(r.fechado.posts.length), r.fechado.posts.length === 0);
+for (const n of nomes) {
+  const m = r[n].montagens[0] ?? [];
+  confere("(" + n + ") passou do teto do protocolo: " + JSON.stringify(m), m.length <= TETO);
+  confere("(" + n + ") saiu mais de uma chamada", r[n].posts.length <= 1);
+  confere("(" + n + ") levou um candidato host: " + JSON.stringify(m), !m.some((c) => c.startsWith("10.0.0.")));
+}
+process.exitCode = 0;
+fim();
+process.exit(0);
+"##
+        ),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 0.17: o microfone do iPhone continua «em uso» depois de a pessoa fechar o PWA.
+//
+// Nenhum script da `ui/` escuta `pagehide` nem `freeze`: o único caminho que
+// solta o microfone (`track.stop()`) é o `desligar()` da voz, e quem o chama é a
+// sessão que acaba (`fecharAVozDaSessao`, `ponte-web.js:1049`) ou o teste do
+// microfone que fecha. Uma página que sai por outro caminho (a navegação, o
+// fechar do PWA, o bfcache) não passa por nenhum deles. O `node` roda a FONTE
+// REAL de `voz-web.js` sobre um WebAudio e um `getUserMedia` de mentira.
+// ---------------------------------------------------------------------------
+
+/// A voz do navegador solta o microfone quando a página sai, e não antes:
+/// o `pagehide` e o `freeze` soltam TODAS as faixas do stream; um `getUserMedia`
+/// que resolve DEPOIS do `desligar()` tem as faixas que acabou de entregar
+/// paradas, e não adotadas; o `pageshow` não religa o microfone sozinho; o
+/// `visibilitychange` (a tela bloqueada, o fundo) não para a voz; e o ouvinte
+/// sai com a voz, sem duplicar.
+#[test]
+fn a_voz_do_navegador_solta_o_microfone_quando_a_pagina_sai() {
+    rodar_node(
+        "o microfone solto no pagehide",
+        r##"
+setTimeout(() => { console.log("o teste passou de 20 s e foi morto"); process.exit(1); }, 20000).unref();
+let corpoAcabou = false;
+process.on("exit", () => { if (!corpoAcabou) { console.log("o corpo do teste não terminou: uma promessa ficou pendente"); process.exitCode = 1; } });
+const montar = async ({ segurar = false } = {}) => {
+  const faixas = [];
+  const janela = {};
+  const documento = { hidden: false };
+  const gum = { chamadas: 0, soltar: null };
+  const preso = new Promise((r) => { gum.soltar = r; });
+  class Faixa {
+    constructor() { this.readyState = "live"; this.muted = false; faixas.push(this); }
+    stop() { this.readyState = "ended"; }
+    getSettings() { return {}; }
+  }
+  class Contexto {
+    constructor() { this.state = "suspended"; this.audioWorklet = { addModule: async () => {} }; this.destination = {}; }
+    createMediaStreamDestination() { return { stream: {} }; }
+    createGain() { return { gain: { value: 1 }, connect: (x) => x }; }
+    createMediaStreamSource() { return { connect: (x) => x }; }
+    async resume() { this.state = "running"; }
+    async close() { this.state = "closed"; }
+  }
+  class No { constructor() { this.port = { postMessage() {}, onmessage: null, onmessageerror: null }; } connect(x) { return x; } }
+  const escuta = (dono) => ({
+    addEventListener: (t, f) => { (dono.ouvintes ??= {})[t] = [...(dono.ouvintes?.[t] ?? []), f]; },
+    removeEventListener: (t, f) => { dono.ouvintes[t] = (dono.ouvintes?.[t] ?? []).filter((x) => x !== f); },
+  });
+  const ctx = vm.createContext({
+    console, setTimeout, performance, TextDecoder, TextEncoder,
+    navigator: { audioSession: {}, mediaSession: {}, mediaDevices: { getUserMedia: async () => {
+      gum.chamadas += 1;
+      if (segurar) await preso;
+      const doStream = [new Faixa(), new Faixa()];
+      return { getAudioTracks: () => doStream, getTracks: () => doStream };
+    } } },
+    AudioContext: Contexto, AudioWorkletNode: No,
+    window: Object.assign(janela, escuta(janela)),
+    document: Object.assign(documento, escuta(documento), { body: { append() {} }, createElement: () => ({ play: async () => {}, remove() {} }) }),
+  });
+  carregar({ ctx }, "voz-web.js");
+  const voz = vm.runInContext("criarVozDoNavegador", ctx)({ wasm: {}, bytesDoWasm: new Uint8Array(4) });
+  const dispara = (dono, tipo, evento = {}) => (dono.ouvintes?.[tipo] ?? []).slice().forEach((f) => f({ type: tipo, ...evento }));
+  const ouvintes = () => ["pagehide", "freeze"].map((t) => (janela.ouvintes?.[t] ?? []).length + (documento.ouvintes?.[t] ?? []).length);
+  return { voz, faixas, janela, documento, gum, dispara, ouvintes };
+};
+// As contas esperam o worklet de reprodução: um áudio ainda aberto (adotado) deixa a resposta pendente.
+const contasOuPendente = (m) => Promise.race([m.voz.contas(), new Promise((r) => setTimeout(() => r({ pendente: true, faixa: "adotada", contexto: "aberto" }), 300))]);
+const todasEnded = (m) => m.faixas.length > 0 && m.faixas.every((f) => f.readyState === "ended");
+
+// (a) Controle: o desligar solta TODAS as faixas do stream, e o ouvinte sai com a voz.
+const a = await montar();
+await a.voz.ligar({});
+confere("(a) o gUM não entregou as faixas", a.faixas.length === 2 && a.faixas.every((f) => f.readyState === "live"));
+await a.voz.desligar();
+confere("(a) depois do desligar uma faixa do stream continua viva: " + a.faixas.map((f) => f.readyState), todasEnded(a));
+confere("(a) o desligar deixou ouvintes de pagehide/freeze: " + a.ouvintes(), a.ouvintes().every((n) => n === 0));
+
+// (b) O pagehide (persistente ou não) e o freeze (no window e no document) soltam TODAS as faixas.
+for (const [alvo, tipo, evento] of [["janela", "pagehide", { persisted: false }], ["janela", "pagehide", { persisted: true }], ["documento", "freeze", {}], ["janela", "freeze", {}]]) {
+  const b = await montar();
+  await b.voz.ligar({});
+  b.dispara({ janela: b.janela, documento: b.documento }[alvo], tipo, evento);
+  await tick();
+  confere("(b) o " + tipo + " (" + JSON.stringify(evento) + ") deixou o microfone aberto: " + b.faixas.map((f) => f.readyState), todasEnded(b));
+}
+
+// (c) A corrida: o getUserMedia resolve DEPOIS do desligar. As faixas que chegaram são paradas, e não adotadas.
+const c = await montar({ segurar: true });
+const ligando = c.voz.ligar({}).then(() => "abriu", (e) => "recusou");
+await tick();
+c.dispara(c.janela, "pagehide", { persisted: false });
+await tick();
+c.gum.soltar();
+const desfecho = await ligando;
+await tick();
+confere("(c) o gUM tardio deixou faixas vivas: " + c.faixas.map((f) => f.readyState) + " (" + desfecho + ")", todasEnded(c));
+const contas = await contasOuPendente(c);
+confere("(c) a faixa tardia foi adotada: " + JSON.stringify(contas.faixa), contas.faixa === null && contas.contexto === null);
+confere("(c) o ouvinte da página sobrou: " + c.ouvintes(), c.ouvintes().every((n) => n === 0));
+
+// (d) O pageshow não religa o microfone sozinho.
+const d = await montar();
+await d.voz.ligar({});
+d.dispara(d.janela, "pagehide", { persisted: true });
+await tick();
+d.dispara(d.janela, "pageshow", { persisted: true });
+await tick();
+confere("(d) o pageshow religou o microfone: gUM=" + d.gum.chamadas, d.gum.chamadas === 1 && todasEnded(d));
+const contasD = await contasOuPendente(d);
+confere("(d) o pageshow deixou o contexto aberto: " + contasD.contexto, contasD.contexto === null);
+
+// (e) O visibilitychange (tela bloqueada, outro app) NÃO para a voz.
+const e = await montar();
+await e.voz.ligar({});
+e.documento.hidden = true;
+e.dispara(e.documento, "visibilitychange");
+e.dispara(e.janela, "blur");
+await tick();
+confere("(e) o visibilitychange parou o microfone: " + e.faixas.map((f) => f.readyState), e.faixas.length === 2 && e.faixas.every((f) => f.readyState === "live"));
+
+// (f) Sem ouvinte duplicado: ligar de novo (já aberto), desligar e ligar outra vez.
+const f = await montar();
+await f.voz.ligar({});
+const primeiro = f.ouvintes();
+await f.voz.ligar({});
+confere("(f) ligar duas vezes duplicou o ouvinte: " + primeiro + " -> " + f.ouvintes(), JSON.stringify(f.ouvintes()) === JSON.stringify(primeiro) && primeiro[0] === 1 && primeiro[1] === 2);
+await f.voz.desligar();
+await f.voz.ligar({});
+confere("(f) religar depois do desligar duplicou o ouvinte: " + f.ouvintes(), JSON.stringify(f.ouvintes()) === JSON.stringify(primeiro));
+corpoAcabou = true;
+"##,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 0.17 (C): a tela cheia do iPhone abre, não deixa SAIR e corta o fundo.
+//
+// No celular a ponte recusa o comando `tela_cheia` («no celular a tela cheia é o
+// aparelho deitado», `ponte-web.js:177`), então o «TELA CHEIA» é só o cinema em
+// CSS: o script esconde tudo menos o caminho do canvas, e a única saída era o
+// Esc (que o iPhone não tem) ou o duplo toque no canvas. O cinema também media
+// `100vh`, que no Safari é a página com a barra recolhida (o rodapé fica fora
+// do que se vê), e o `!important` dele passava por cima do `100dvh` do celular.
+// ---------------------------------------------------------------------------
+
+/// No celular, com o cinema aberto, existe um controle que sai (visível, de
+/// toque, que o próprio cinema não esconde), um toque nele desfaz o cinema e
+/// devolve o foco ao botão de tela cheia, e tudo isso sem a Fullscreen API; a
+/// regra do cinema no celular mede `100dvh` e respeita a safe-area. A página não
+/// gira o aparelho (nada de `orientation.lock`): em retrato, uma dica discreta
+/// diz que virar o celular amplia, e ela some deitado e não cobre o SAIR.
+#[test]
+fn o_cinema_do_celular_tem_uma_saida_sempre_visivel_e_nao_mede_100vh() {
+    rodar_node(
+        "a saída do cinema no celular",
+        r##"
+setTimeout(() => { console.log("o teste passou de 20 s e foi morto"); process.exit(1); }, 20000).unref();
+let corpoAcabou = false;
+process.on("exit", () => { if (!corpoAcabou) { console.log("o corpo do teste não terminou: uma promessa ficou pendente"); process.exitCode = 1; } });
+const fonte = ler("palco-imagem.js");
+const corpo = (nome) => {
+  const m = fonte.match(new RegExp("(?:async )?function " + nome + "\\([^)]*\\) \\{[\\s\\S]*?\\n\\}\\n"));
+  return m ? m[0] : "";
+};
+const textos = ["marcarCaminhoDoCinema", "trocarCinema"].map(corpo);
+confere("faltam funções do cinema no palco-imagem.js: " + textos.map((t) => t.length), textos.every(Boolean));
+
+class N {
+  constructor(id, pai = null) { this.id = id; this.parentElement = pai; this.children = []; this.dataset = {}; this.attrs = {}; this.handlers = {}; this.textContent = ""; this.className = ""; this.focado = 0; if (pai) pai.children.push(this); }
+  addEventListener(t, f) { (this.handlers[t] ??= []).push(f); }
+  setAttribute(k, v) { this.attrs[k] = v; }
+  append(...c) { for (const x of c) { x.parentElement = this; this.children.push(x); } }
+  remove() { if (this.parentElement) this.parentElement.children = this.parentElement.children.filter((x) => x !== this); this.parentElement = null; }
+  focus() { this.focado += 1; }
+}
+const h = (tag, props = {}, ...filhos) => {
+  const no = new N(props.id ?? "");
+  no.tag = tag;
+  for (const [k, v] of Object.entries(props)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") no.className = v;
+    else if (k.startsWith("on")) no.addEventListener(k.slice(2), v);
+    else no.attrs[k] = v;
+  }
+  no.textContent = filhos.flat(Infinity).filter((f) => typeof f === "string").join("");
+  return no;
+};
+const montar = (casca) => {
+  const body = new N("body");
+  const sessao = new N("tela-sessao", body), topo = new N("topo", sessao), vista = new N("vista", sessao), abas = new N("abas", sessao);
+  const cabeca = new N("cabeca", vista), palco = new N("palco", vista), imagem = new N("palco-imagem", palco);
+  const cheia = new N("palco-cheia", cabeca);
+  const fora = new N("overlay", body);
+  const observadores = [];
+  const chamadas = [];
+  const ctx = vm.createContext({
+    console,
+    // Nada de Fullscreen API: o iPhone não a tem para um elemento qualquer.
+    document: { body, documentElement: { dataset: { casca } } },
+    MutationObserver: class { constructor(f) { observadores.push(f); } observe() {} },
+    CELULAR: { h },
+    $: (id) => ({ "palco-imagem": imagem, "palco-cheia": cheia })[id] ?? null,
+    invoke: async (cmd) => { chamadas.push(cmd); throw { RecusaDaPonte: { comando: cmd, frase: "no celular a tela cheia é o aparelho deitado" } }; },
+  });
+  vm.runInContext("let noCinema = false;\n" + textos.join("\n"), ctx);
+  try { carregar({ ctx }, "frases.js", "celular-cinema.js"); } catch (e) { confere("o celular-cinema.js não carregou: " + String(e.message).split("\n")[0], false); }
+  // O observador do `data-cinema` roda depois do script que marcou o caminho (um microtask depois).
+  const observar = async () => { await tick(); observadores.forEach((f) => f()); };
+  return { body, sessao, topo, abas, fora, imagem, cheia, ctx, chamadas, observar, observadores };
+};
+
+// No celular.
+const m = montar("celular");
+confere("o celular-cinema.js não registrou o observador do cinema", m.observadores.length === 1);
+await vm.runInContext("trocarCinema(true)", m.ctx);
+await m.observar();
+confere("o cinema não abriu", m.body.dataset.cinema === "sim");
+const dica = m.body.children.find((c) => c.id === "palco-dica-girar");
+confere("o cinema do celular não tem a dica de virar o celular", Boolean(dica));
+if (dica) {
+  confere("a dica não diz PARA AMPLIAR, VIRE O CELULAR.: " + dica.textContent, dica.textContent === "PARA AMPLIAR, VIRE O CELULAR.");
+  confere("a dica é um controle (devia ser só texto)", dica.tag !== "button" && !(dica.handlers.click ?? []).length);
+  confere("a dica foi escondida pelo próprio cinema", dica.dataset.foraDoCinema !== "sim");
+}
+const saida = m.body.children.find((c) => c.id === "palco-sair-da-cheia");
+confere("o cinema do celular não tem o controle de sair", Boolean(saida));
+if (saida) {
+  confere("o controle de sair foi escondido pelo próprio cinema", saida.dataset.foraDoCinema !== "sim");
+  confere("o controle de sair não é um botão", saida.tag === "button" && saida.attrs.type === "button");
+  confere("o controle de sair não diz SAIR DA TELA CHEIA: " + saida.textContent, saida.textContent === "SAIR DA TELA CHEIA");
+  confere("o toque no controle não está ligado", (saida.handlers.click ?? []).length === 1);
+  await saida.handlers.click[0]({ type: "click" });
+  await m.observar();
+  confere("o toque no controle não desfez o cinema", m.body.dataset.cinema === undefined);
+  confere("o controle ficou na tela depois de sair", !m.body.children.includes(saida));
+  confere("a dica de virar ficou na tela depois de sair", !m.body.children.some((c) => c.id === "palco-dica-girar"));
+  confere("o toque no controle não devolveu o resto da tela", m.sessao.dataset.foraDoCinema !== "sim" && m.topo.dataset.foraDoCinema !== "sim" && m.fora.dataset.foraDoCinema !== "sim");
+  confere("o foco não voltou ao botão de tela cheia (" + m.cheia.focado + ")", m.cheia.focado === 1);
+  confere("o recuo precisou da Fullscreen API: " + JSON.stringify(m.chamadas), m.chamadas.length >= 1);
+}
+// Um segundo cinema não duplica o controle.
+await vm.runInContext("trocarCinema(true)", m.ctx);
+await m.observar(); await m.observar();
+confere("o controle de sair duplicou", m.body.children.filter((c) => c.id === "palco-sair-da-cheia").length === 1);
+confere("a dica de virar duplicou", m.body.children.filter((c) => c.id === "palco-dica-girar").length === 1);
+// Sair por outro caminho (o botão da cabeça, o duplo toque) também tira o controle.
+await vm.runInContext("trocarCinema(false)", m.ctx);
+await m.observar();
+confere("o controle sobrou depois de sair por outro caminho", !m.body.children.some((c) => c.id === "palco-sair-da-cheia" || c.id === "palco-dica-girar"));
+
+// Na casca larga (o computador) o controle não existe: lá o Esc e a janela saem.
+const l = montar("larga");
+confere("a casca larga ganhou o observador do celular", l.observadores.length === 0);
+
+// A página não gira o aparelho: nenhuma chamada à API de orientação (o
+// comentário pode citá-la; o código, não).
+let script = ""; try { script = ler("celular-cinema.js"); } catch { /* ainda não existe */ }
+const codigo = script.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+confere("o celular-cinema.js chama a API de orientação", !/screen\.orientation|\.lock\(/.test(codigo));
+
+// O CSS do celular: o alvo de toque, a safe-area, o 100dvh e a dica do Esc.
+const css = ler("celular-sessao.css").replace(/\/\*[\s\S]*?\*\//g, "");
+const regras = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((x) => ({ seletor: x[1].trim(), corpo: x[2] }));
+const doCinema = regras.filter((r) => /cinema/.test(r.seletor));
+confere("o celular não tem regras do cinema", doCinema.length >= 3);
+confere("uma regra do cinema do celular mede 100vh: " + doCinema.filter((r) => /100vh/.test(r.corpo)).map((r) => r.seletor), !doCinema.some((r) => /100vh/.test(r.corpo)));
+confere("o cinema do celular não mede 100dvh", doCinema.some((r) => /100dvh/.test(r.corpo)));
+confere("o cinema do celular fica preso à coluna central (max-width) em vez de ocupar a tela", doCinema.some((r) => /data-no-cinema/.test(r.seletor) && /max-width:\s*none/.test(r.corpo)));
+const regraDaSaida = regras.find((r) => /palco-sair-da-cheia/.test(r.seletor) && /position:\s*fixed/.test(r.corpo));
+confere("o controle de sair não tem regra do celular", Boolean(regraDaSaida));
+if (regraDaSaida) {
+  confere("o controle de sair não respeita o alvo de toque", /min-height:\s*var\(--cel-alvo\)/.test(regraDaSaida.corpo) && /min-width:\s*var\(--cel-alvo\)/.test(regraDaSaida.corpo));
+  confere("o controle de sair não respeita a safe-area", /--cel-seguro-topo/.test(regraDaSaida.corpo) && /--cel-seguro-dir/.test(regraDaSaida.corpo));
+  confere("o controle de sair some do cinema (display)", !/display:\s*none/.test(regraDaSaida.corpo));
+}
+confere("o canvas do cinema do celular não respeita a safe-area", doCinema.some((r) => /palco-imagem/.test(r.seletor) && /--cel-seguro-/.test(r.corpo)));
+confere("a dica «ESC PARA SAIR» ainda aparece no celular", doCinema.some((r) => /::after/.test(r.seletor) && /display:\s*none|content:\s*none/.test(r.corpo)));
+// A dica de virar: presa ao pé e à safe-area, sem pegar toque (não cobre o
+// SAIR, que fica no topo), e escondida deitado.
+const regraDaDica = regras.find((r) => /palco-dica-girar/.test(r.seletor) && /position:\s*fixed/.test(r.corpo));
+confere("a dica de virar não tem regra do celular", Boolean(regraDaDica));
+if (regraDaDica) {
+  confere("a dica de virar não fica no pé com a safe-area", /bottom:[^;]*--cel-seguro-pe/.test(regraDaDica.corpo));
+  confere("a dica de virar pega toque (cobriria o que está embaixo)", /pointer-events:\s*none/.test(regraDaDica.corpo));
+}
+confere("a dica de virar não some deitado", /@media[^{]*orientation:\s*landscape[^{]*\{[^}]*palco-dica-girar[^{]*\{[^}]*display:\s*none/.test(css));
+corpoAcabou = true;
+"##,
+    );
+}
+
+/// **O guarda de geração depois de CADA espera do `ligar`**, e o `catch` que fecha
+/// só a própria geração. Cancelado (o `pagehide`, o `desligar`) em cada `await`
+/// (`addModule`, `play`, `resume`, `getUserMedia`), nada obsoleto abre depois:
+/// nem o microfone, nem o elemento, nem o nó. E uma abertura ANTIGA que termina
+/// (resolvendo ou rejeitando) depois de uma NOVA estar aberta não a derruba.
+#[test]
+fn o_ligar_cancelado_em_cada_espera_nao_abre_nada_obsoleto_e_a_geracao_nova_sobrevive() {
+    rodar_node(
+        "o guarda de geração do ligar",
+        r##"
+setTimeout(() => { console.log("o teste passou de 20 s e foi morto"); process.exit(1); }, 20000).unref();
+let corpoAcabou = false;
+process.on("exit", () => { if (!corpoAcabou) { console.log("o corpo do teste não terminou: uma promessa ficou pendente"); process.exitCode = 1; } });
+
+// `segurar[nome]` é a lista de chamadas (0, 1, ...) que ficam presas até o teste soltar.
+const montar = async (segurar = {}) => {
+  const conta = { addModule: 0, gum: 0, play: 0, resume: 0, nos: 0, elementos: 0, removidos: 0 };
+  const presos = { addModule: {}, gum: {}, play: {}, resume: {} };
+  const faixas = [];
+  const contextos = [];
+  const janela = {}, documento = {};
+  const esperar = (nome) => {
+    const i = conta[nome]++;
+    if (!segurar[nome] || !segurar[nome].includes(i)) return Promise.resolve();
+    return new Promise((resolver, rejeitar) => { presos[nome][i] = { resolver, rejeitar }; });
+  };
+  class Faixa {
+    constructor() { this.readyState = "live"; this.muted = false; faixas.push(this); }
+    stop() { this.readyState = "ended"; }
+    getSettings() { return {}; }
+  }
+  class Contexto {
+    constructor() { this.state = "suspended"; this.destination = {}; this.audioWorklet = { addModule: () => esperar("addModule") }; contextos.push(this); }
+    createMediaStreamDestination() { return { stream: {} }; }
+    createGain() { return { gain: { value: 1 }, connect: (x) => x }; }
+    createMediaStreamSource() { return { connect: (x) => x }; }
+    async resume() { await esperar("resume"); if (this.state !== "closed") this.state = "running"; }
+    async close() { this.state = "closed"; }
+  }
+  class No { constructor() { conta.nos += 1; this.port = { postMessage() {}, onmessage: null, onmessageerror: null }; } connect(x) { return x; } }
+  const escuta = (dono) => ({
+    addEventListener: (t, f) => { (dono.ouvintes ??= {})[t] = [...(dono.ouvintes?.[t] ?? []), f]; },
+    removeEventListener: (t, f) => { dono.ouvintes[t] = (dono.ouvintes?.[t] ?? []).filter((x) => x !== f); },
+  });
+  const ctx = vm.createContext({
+    console, setTimeout, performance, TextDecoder, TextEncoder,
+    navigator: { audioSession: {}, mediaSession: {}, mediaDevices: { getUserMedia: async () => {
+      await esperar("gum");
+      const doStream = [new Faixa(), new Faixa()];
+      return { getAudioTracks: () => doStream, getTracks: () => doStream };
+    } } },
+    AudioContext: Contexto, AudioWorkletNode: No,
+    window: Object.assign(janela, escuta(janela)),
+    document: Object.assign(documento, escuta(documento), {
+      body: { append() {} },
+      createElement: () => { conta.elementos += 1; return { play: async () => { await esperar("play"); }, remove() { conta.removidos += 1; } }; },
+    }),
+  });
+  carregar({ ctx }, "voz-web.js");
+  const voz = vm.runInContext("criarVozDoNavegador", ctx)({ wasm: {}, bytesDoWasm: new Uint8Array(4) });
+  const pagehide = () => (janela.ouvintes?.pagehide ?? []).slice().forEach((f) => f({ type: "pagehide" }));
+  return { voz, conta, presos, faixas, contextos, pagehide, soltar: (nome, i = 0) => presos[nome][i].resolver(), recusar: (nome, i = 0) => presos[nome][i].rejeitar(new Error("recusou")) };
+};
+const noMaximo = (promessa, ms = 600) => Promise.race([promessa, new Promise((r) => setTimeout(() => r("pendente"), ms))]);
+
+// (1) Cancelar em cada espera: nada obsoleto abre depois.
+const limites = {
+  addModule: { gum: 0, play: 0, resume: 0 },
+  play: { gum: 0, resume: 0 },
+  resume: { gum: 0 },
+  gum: {},
+};
+for (const nome of Object.keys(limites)) {
+  const m = await montar({ [nome]: [0] });
+  const ligando = m.voz.ligar({}).then(() => "abriu", () => "recusou");
+  await tick();
+  confere("(" + nome + ") a espera não ficou presa: " + JSON.stringify(m.conta), m.conta[nome] === 1);
+  m.pagehide();
+  await tick();
+  m.soltar(nome);
+  const desfecho = await noMaximo(ligando);
+  await tick();
+  confere("(" + nome + ") o ligar cancelado não assentou: " + desfecho, desfecho !== "pendente");
+  confere("(" + nome + ") o ligar cancelado abriu: " + desfecho, desfecho === "recusou");
+  for (const [depois, esperado] of Object.entries(limites[nome])) {
+    confere("(" + nome + ") abriu " + depois + " depois do cancelamento: " + JSON.stringify(m.conta), m.conta[depois] === esperado);
+  }
+  confere("(" + nome + ") sobrou faixa viva: " + m.faixas.map((f) => f.readyState), m.faixas.every((f) => f.readyState === "ended"));
+  confere("(" + nome + ") o contexto obsoleto ficou aberto: " + m.contextos.map((c) => c.state), m.contextos.every((c) => c.state === "closed"));
+  confere("(" + nome + ") o elemento obsoleto ficou na página: criados=" + m.conta.elementos + " removidos=" + m.conta.removidos, m.conta.elementos === m.conta.removidos);
+}
+
+// (2) A geração antiga termina DEPOIS de a nova estar aberta: a nova sobrevive (resolvendo e rejeitando).
+for (const como of ["resolve", "rejeita"]) {
+  for (const nome of ["addModule", "play", "resume", "gum"]) {
+    const m = await montar({ [nome]: [0] });
+    const velha = m.voz.ligar({}).then(() => "abriu", () => "recusou");
+    await tick();
+    m.pagehide();                               // cancela a primeira
+    await tick();
+    await m.voz.ligar({});                      // a segunda, sem espera presa, abre inteira
+    const nova = m.contextos[m.contextos.length - 1];
+    const faixasDaNova = m.faixas.length;
+    const daNova = m.faixas.slice(); // as faixas que a abertura NOVA recebeu, antes de a antiga voltar
+    confere("(" + como + "/" + nome + ") a abertura nova não abriu: " + m.contextos.length, m.contextos.length === 2 && faixasDaNova === 2 && nova.state === "running");
+    if (como === "resolve") m.soltar(nome); else m.recusar(nome);
+    await noMaximo(velha);
+    await tick();
+    confere("(" + como + "/" + nome + ") a antiga derrubou a nova: faixas=" + m.faixas.map((f) => f.readyState) + " ctx=" + nova.state,
+      nova.state === "running" && daNova.every((f) => f.readyState === "live"));
+    confere("(" + como + "/" + nome + ") a antiga deixou faixa viva: " + m.faixas.map((f) => f.readyState), m.faixas.filter((f) => !daNova.includes(f)).every((f) => f.readyState === "ended"));
+  }
+}
+corpoAcabou = true;
+"##,
+    );
+}
+
+/// **A faixa que o `getUserMedia` já entrega encerrada, e a que para em uso.**
+/// Medido no Safari do simulador do iOS 27 (preparacao-0.17, A/B cru): com o
+/// cancelamento de eco, a faixa chega `ended` (sem `stop()` e sem evento); sem
+/// ele, fica viva. O motor: (1) nunca diz `audio-ligado` com uma faixa morta;
+/// (2) faz no máximo UMA tentativa a mais, só sem o cancelamento de eco, e diz
+/// isso; (3) nunca repete uma recusa; (4) a tentativa a mais respeita o
+/// cancelamento (o `desligar`, o `pagehide`); (5) a captura que para em uso
+/// fecha o áudio e é dita, sem reabrir sozinha; (6) o nosso `stop()` e a faixa de
+/// um áudio velho não contam como captura perdida.
+#[test]
+fn a_faixa_que_chega_encerrada_tem_uma_tentativa_sem_eco_e_a_que_para_em_uso_fecha_o_audio() {
+    rodar_node(
+        "a faixa encerrada do getUserMedia",
+        r##"
+setTimeout(() => { console.log("o teste passou de 20 s e foi morto"); process.exit(1); }, 20000).unref();
+let corpoAcabou = false;
+process.on("exit", () => { if (!corpoAcabou) { console.log("o corpo do teste não terminou: uma promessa ficou pendente"); process.exitCode = 1; } });
+
+// `respostas[i]`: "live", "ended" ou o nome de um erro, para a i-ésima chamada ao getUserMedia.
+// `segurar`: as chamadas que ficam presas até o teste soltar. `stopDisparaEnded`: um navegador que dispara `ended` no `stop()`.
+const montar = ({ respostas = ["live"], segurar = [], stopDisparaEnded = false } = {}) => {
+  const conta = { gum: 0 };
+  const pedidos = [];
+  const presos = {};
+  const faixas = [];
+  const contextos = [];
+  const eventos = [];
+  const janela = {}, documento = {};
+  class Faixa {
+    // "live-morre": nasce viva e o navegador a encerra 4 ms depois (o Safari do simulador, lifecycle-2: audio-ligado@1829, ended@1833).
+    constructor(estado) {
+      this.readyState = estado === "ended" ? "ended" : "live"; this.muted = false; this.onended = null; faixas.push(this);
+      if (estado === "live-morre") setTimeout(() => { if (this.readyState === "live") this.encerrarPeloNavegador(); }, 4);
+    }
+    stop() { const viva = this.readyState === "live"; this.readyState = "ended"; if (viva && stopDisparaEnded && this.onended) this.onended(); }
+    getSettings() { return { echoCancellation: this.eco }; }
+    encerrarPeloNavegador() { this.readyState = "ended"; if (this.onended) this.onended(); }
+  }
+  class Contexto {
+    constructor() { this.state = "suspended"; this.destination = {}; this.audioWorklet = { addModule: async () => {} }; contextos.push(this); }
+    createMediaStreamDestination() { return { stream: {} }; }
+    createGain() { return { gain: { value: 1 }, connect: (x) => x }; }
+    createMediaStreamSource() { return { connect: (x) => x }; }
+    async resume() { if (this.state !== "closed") this.state = "running"; }
+    async close() { this.state = "closed"; }
+  }
+  class No { constructor() { this.port = { postMessage() {}, onmessage: null, onmessageerror: null }; } connect(x) { return x; } }
+  const escuta = (dono) => ({
+    addEventListener: (t, f) => { (dono.ouvintes ??= {})[t] = [...(dono.ouvintes?.[t] ?? []), f]; },
+    removeEventListener: (t, f) => { dono.ouvintes[t] = (dono.ouvintes?.[t] ?? []).filter((x) => x !== f); },
+  });
+  const ctx = vm.createContext({
+    console, setTimeout, performance, TextDecoder, TextEncoder,
+    navigator: { audioSession: {}, mediaSession: {}, mediaDevices: { getUserMedia: async (pedido) => {
+      const i = conta.gum++;
+      pedidos.push(JSON.parse(JSON.stringify(pedido)));
+      if (segurar.includes(i)) await new Promise((res) => { presos[i] = res; });
+      const resposta = respostas[Math.min(i, respostas.length - 1)];
+      if (!["live", "ended", "live-morre"].includes(resposta)) throw Object.assign(new Error("recusou"), { name: resposta });
+      const doStream = [new Faixa(resposta)];
+      doStream[0].eco = pedido.audio.echoCancellation;
+      return { getAudioTracks: () => doStream, getTracks: () => doStream };
+    } } },
+    AudioContext: Contexto, AudioWorkletNode: No,
+    window: Object.assign(janela, escuta(janela)),
+    document: Object.assign(documento, escuta(documento), { body: { append() {} }, createElement: () => ({ play: async () => {}, remove() {} }) }),
+  });
+  carregar({ ctx }, "voz-web.js");
+  const voz = vm.runInContext("criarVozDoNavegador", ctx)({ wasm: {}, bytesDoWasm: new Uint8Array(4), aoAcontecer: (e) => eventos.push(e) });
+  const pagehide = () => (janela.ouvintes?.pagehide ?? []).slice().forEach((f) => f({ type: "pagehide" }));
+  const de = (tipo) => eventos.filter((e) => e.tipo === tipo);
+  return { voz, conta, pedidos, faixas, contextos, eventos, de, pagehide, soltar: (i) => presos[i]() };
+};
+const desfecho = (p) => p.then(() => "abriu", (e) => "recusou:" + (e && e.name));
+const todasParadas = (m) => m.faixas.every((f) => f.readyState === "ended");
+
+// (1) Encerrada com o eco, viva sem ele: UMA tentativa a mais, só sem o eco, e dita.
+{
+  const m = montar({ respostas: ["ended", "live"] });
+  const r = await desfecho(m.voz.ligar({}));
+  confere("(1) não abriu com a tentativa sem eco: " + r, r === "abriu");
+  confere("(1) o getUserMedia não foi chamado 2x: " + m.conta.gum, m.conta.gum === 2);
+  confere("(1) o 1º pedido não tinha o eco: " + JSON.stringify(m.pedidos[0]), m.pedidos[0].audio.echoCancellation === true);
+  const { echoCancellation: e1, ...resto1 } = m.pedidos[0].audio, { echoCancellation: e2, ...resto2 } = m.pedidos[1].audio;
+  confere("(1) a 2ª tentativa não desligou só o eco: " + JSON.stringify(m.pedidos), e2 === false && JSON.stringify(resto1) === JSON.stringify(resto2));
+  confere("(1) a faixa encerrada da 1ª não foi parada: " + m.faixas.map((f) => f.readyState), m.faixas[0].readyState === "ended" && m.faixas[1].readyState === "live");
+  const ligados = m.de("audio-ligado");
+  confere("(1) o audio-ligado não saiu uma vez, dizendo o porquê sem eco: " + JSON.stringify(ligados), ligados.length === 1 && typeof ligados[0].semEcoPorque === "string" && ligados[0].cancelamentoDeEco === false);
+  confere("(1) a falha da 1ª tentativa não foi contada: " + JSON.stringify(m.de("falha")), m.de("falha").some((f) => f.onde === "microfone"));
+}
+// (2) Encerrada com e sem o eco: recusa nomeada, NENHUM audio-ligado, nada vivo.
+{
+  const m = montar({ respostas: ["ended", "ended"] });
+  const r = await desfecho(m.voz.ligar({}));
+  confere("(2) a faixa morta não deu SeeleCapturaEncerrada: " + r, r === "recusou:SeeleCapturaEncerrada");
+  confere("(2) mais de uma tentativa a mais: " + m.conta.gum, m.conta.gum === 2);
+  confere("(2) disse audio-ligado com a faixa morta: " + JSON.stringify(m.de("audio-ligado")), m.de("audio-ligado").length === 0);
+  confere("(2) sobrou faixa viva ou contexto aberto: " + m.faixas.map((f) => f.readyState) + " " + m.contextos.map((c) => c.state), todasParadas(m) && m.contextos.every((c) => c.state === "closed"));
+}
+// (3) Uma recusa nunca se repete: nem na 1ª, nem na tentativa sem eco.
+for (const [nome, respostas, gums] of [["1ª", ["NotAllowedError"], 1], ["2ª", ["ended", "NotAllowedError"], 2], ["NotReadable", ["NotReadableError"], 1]]) {
+  const m = montar({ respostas });
+  const r = await desfecho(m.voz.ligar({}));
+  await tick();
+  confere("(3/" + nome + ") a recusa não chegou como ela é: " + r, r === "recusou:" + respostas[respostas.length - 1]);
+  confere("(3/" + nome + ") a recusa foi repetida: gUM " + m.conta.gum, m.conta.gum === gums);
+  confere("(3/" + nome + ") disse audio-ligado: " + m.de("audio-ligado").length, m.de("audio-ligado").length === 0);
+  confere("(3/" + nome + ") sobrou contexto aberto: " + m.contextos.map((c) => c.state), m.contextos.every((c) => c.state === "closed"));
+}
+// (4) O cancelamento DURANTE a tentativa sem eco (o desligar, o pagehide): nada é adotado.
+for (const como of ["desligar", "pagehide"]) {
+  const m = montar({ respostas: ["ended", "live"], segurar: [1] });
+  const ligando = desfecho(m.voz.ligar({}));
+  for (let i = 0; i < 10 && m.conta.gum < 2; i++) await tick();
+  confere("(4/" + como + ") a tentativa sem eco não ficou presa: " + m.conta.gum, m.conta.gum === 2);
+  if (como === "desligar") await m.voz.desligar(); else m.pagehide();
+  await tick();
+  m.soltar(1);
+  const r = await ligando;
+  await tick();
+  confere("(4/" + como + ") o ligar cancelado abriu: " + r, r.startsWith("recusou"));
+  confere("(4/" + como + ") a faixa da tentativa cancelada ficou viva: " + m.faixas.map((f) => f.readyState), todasParadas(m));
+  confere("(4/" + como + ") disse audio-ligado: " + m.de("audio-ligado").length, m.de("audio-ligado").length === 0);
+  confere("(4/" + como + ") uma 3ª chamada: " + m.conta.gum, m.conta.gum === 2);
+}
+// (5) A captura que para EM USO fecha o áudio, é dita UMA vez, e nada reabre sozinho.
+{
+  const m = montar({ respostas: ["live"] });
+  await m.voz.ligar({});
+  confere("(5) não abriu: " + m.contextos.map((c) => c.state), m.contextos[0].state === "running");
+  m.faixas[0].encerrarPeloNavegador();
+  for (let i = 0; i < 5; i++) await tick();
+  const fechados = m.de("audio-fechado");
+  confere("(5) a captura perdida não foi dita uma vez: " + JSON.stringify(fechados), fechados.length === 1 && fechados[0].motivo === "captura-perdida");
+  confere("(5) o contexto ficou rodando com o microfone parado: " + m.contextos.map((c) => c.state), m.contextos[0].state === "closed");
+  confere("(5) a falha não foi contada: " + JSON.stringify(m.de("falha")), m.de("falha").some((f) => f.onde === "microfone" && /parou sozinha/.test(f.texto)));
+  confere("(5) algo reabriu o microfone sozinho: gUM " + m.conta.gum, m.conta.gum === 1);
+  m.faixas[0].encerrarPeloNavegador();
+  await tick();
+  confere("(5) um segundo ended do mesmo áudio contou de novo: " + m.de("audio-fechado").length, m.de("audio-fechado").length === 1);
+}
+// (6) O NOSSO stop() (o desligar), num navegador que dispara ended nele: não é captura perdida.
+{
+  const m = montar({ respostas: ["live"], stopDisparaEnded: true });
+  await m.voz.ligar({});
+  await m.voz.desligar();
+  await tick();
+  confere("(6) o stop() nosso contou como captura perdida: " + JSON.stringify(m.de("audio-fechado")), m.de("audio-fechado").every((e) => e.motivo !== "captura-perdida"));
+  confere("(6) o stop() nosso contou falha: " + JSON.stringify(m.de("falha")), !m.de("falha").some((f) => /parou sozinha/.test(f.texto)));
+}
+// (7) A faixa de um áudio VELHO que termina depois de um novo abrir não derruba o novo.
+{
+  const m = montar({ respostas: ["live"] });
+  await m.voz.ligar({});
+  const velha = m.faixas[0];
+  await m.voz.desligar();
+  await m.voz.ligar({});
+  const novo = m.contextos[m.contextos.length - 1];
+  const capturasAntes = m.de("captura").length;
+  velha.encerrarPeloNavegador();
+  await tick();
+  confere("(7) a faixa velha escreveu no estado do áudio novo (captura/encerrada): " + JSON.stringify(m.de("captura")), m.de("captura").length === capturasAntes);
+  confere("(7) a faixa velha derrubou o áudio novo: " + novo.state + " " + JSON.stringify(m.de("audio-fechado")), novo.state === "running" && m.de("audio-fechado").length === 0);
+  confere("(7) a faixa do áudio novo não está viva: " + m.faixas.map((f) => f.readyState), m.faixas[m.faixas.length - 1].readyState === "live");
+}
+// (8) A faixa que nasce VIVA e encerra no ARRANQUE (antes do audio-ligado): a mesma única tentativa sem eco.
+{
+  const m = montar({ respostas: ["live-morre", "live"] });
+  const r = await desfecho(m.voz.ligar({}));
+  await tick();
+  confere("(8) não abriu com a tentativa sem eco: " + r, r === "abriu");
+  confere("(8) não foram 2 chamadas: " + m.conta.gum, m.conta.gum === 2 && m.pedidos[1].audio.echoCancellation === false);
+  const ligados = m.de("audio-ligado");
+  confere("(8) disse audio-ligado da faixa que morreu no arranque, ou não disse o sem eco: " + JSON.stringify(ligados), ligados.length === 1 && typeof ligados[0].semEcoPorque === "string");
+  confere("(8) o arranque contou como captura perdida: " + JSON.stringify(m.de("audio-fechado")), m.de("audio-fechado").length === 0);
+  confere("(8) a faixa nova não ficou viva com o áudio de pé: " + m.faixas.map((f) => f.readyState) + " " + m.contextos.map((c) => c.state), m.faixas[1]?.readyState === "live" && m.contextos[0].state === "running");
+}
+// (9) As duas morrem no arranque: recusa nomeada, nenhum audio-ligado, nenhuma 3ª chamada, nada vivo.
+{
+  const m = montar({ respostas: ["live-morre", "live-morre"] });
+  const r = await desfecho(m.voz.ligar({}));
+  await tick();
+  confere("(9) não deu SeeleCapturaEncerrada: " + r, r === "recusou:SeeleCapturaEncerrada");
+  confere("(9) chamadas: " + m.conta.gum, m.conta.gum === 2);
+  confere("(9) disse audio-ligado: " + m.de("audio-ligado").length, m.de("audio-ligado").length === 0);
+  confere("(9) sobrou faixa viva ou contexto aberto: " + m.faixas.map((f) => f.readyState) + " " + m.contextos.map((c) => c.state), todasParadas(m) && m.contextos.every((c) => c.state === "closed"));
+}
+// (10) O desligar DURANTE o arranque: nada adotado, nenhum audio-ligado, nenhuma tentativa a mais.
+{
+  const m = montar({ respostas: ["live"] });
+  const ligando = desfecho(m.voz.ligar({}));
+  for (let i = 0; i < 10 && m.conta.gum < 1; i++) await tick();
+  await tick();
+  await m.voz.desligar();
+  const r = await ligando;
+  await tick();
+  confere("(10) o ligar cancelado no arranque abriu: " + r, r.startsWith("recusou"));
+  confere("(10) disse audio-ligado: " + m.de("audio-ligado").length, m.de("audio-ligado").length === 0);
+  confere("(10) uma tentativa a mais depois do desligar: " + m.conta.gum, m.conta.gum === 1);
+  confere("(10) sobrou faixa viva: " + m.faixas.map((f) => f.readyState), todasParadas(m));
+}
+// (11) A faixa que morre DEPOIS do audio-ligado não reabre: é a captura perdida (5), sem tentativa nova.
+{
+  const m = montar({ respostas: ["live"] });
+  await m.voz.ligar({});
+  confere("(11) não abriu", m.de("audio-ligado").length === 1);
+  m.faixas[0].encerrarPeloNavegador();
+  for (let i = 0; i < 5; i++) await tick();
+  confere("(11) reabriu depois de estabelecida: gUM " + m.conta.gum, m.conta.gum === 1);
+  confere("(11) não virou captura perdida: " + JSON.stringify(m.de("audio-fechado")), m.de("audio-fechado").length === 1 && m.de("audio-fechado")[0].motivo === "captura-perdida");
+}
+corpoAcabou = true;
+"##,
+    );
+}
+
+/// **A ponte diz o que o motor contou da faixa**: o microfone aberto só sem o
+/// cancelamento de eco acende a frase da sala (e só com a voz aberta); a captura
+/// perdida DENTRO da sala vira SEM ÁUDIO, e não «fora de sala»; fora dela, segue
+/// fora de sala; e a recusa nomeada do motor tem uma frase própria. Com o
+/// `aoEventoDaVoz`, o retrato e a frase reais do `ponte-web.js`/`tela-sessao.js`.
+#[test]
+fn a_ponte_diz_o_microfone_sem_eco_e_a_captura_perdida_na_sala() {
+    rodar_node(
+        "a ponte e a faixa do motor",
+        r##"
+const ponte = ler("ponte-web.js");
+const tela = ler("tela-sessao.js");
+const fn = (texto, nome) => { const m = texto.match(new RegExp("function " + nome + "\\([^)]*\\) \\{[\\s\\S]*?\\n\\}\\n")); return m ? m[0] : ""; };
+const pecas = [
+  (ponte.match(/const vozDaSessao = \{[\s\S]*?\n\};\n/) || [""])[0],
+  fn(ponte, "aoEventoDaVoz"), fn(ponte, "fraseDoMicrofoneQueNaoAbriu"), fn(tela, "fraseDoMicrofoneCalado"),
+];
+confere("faltam peças: " + pecas.map((p) => p.length), pecas.every(Boolean));
+const ctx = vm.createContext({ console: { warn() {}, log() {} }, emitirNaPonte: () => {}, $: () => ({ dataset: { plataforma: "ios" } }) });
+carregar({ ctx }, "frases.js");
+vm.runInContext(pecas.join("\n"), ctx);
+const roda = (js) => vm.runInContext(js, ctx);
+const retrato = () => roda("({ telemetry: { cancelamento_de_eco_desligado: vozDaSessao.semEco === true && vozDaSessao.abertura === 'aberto' } })");
+// A peça do retrato é a do ponte-web.js: a mesma expressão, conferida no texto.
+confere("o retrato da ponte não carrega o cancelamento_de_eco_desligado como o teste o lê",
+  ponte.includes('cancelamento_de_eco_desligado: voz.semEco === true && voz.abertura === "aberto"'));
+
+roda("vozDaSessao.dentro = true; vozDaSessao.abertura = 'aberto'");
+roda("aoEventoDaVoz({ tipo: 'audio-ligado', semEcoPorque: null })");
+confere("com o eco, a sala acusou falta dele: " + roda("fraseDoMicrofoneCalado(" + JSON.stringify(retrato()) + ")"), roda("fraseDoMicrofoneCalado(" + JSON.stringify(retrato()) + ")") === null);
+roda("aoEventoDaVoz({ tipo: 'audio-ligado', semEcoPorque: 'a faixa com o cancelamento de eco chegou encerrada' })");
+const frase = roda("fraseDoMicrofoneCalado(" + JSON.stringify(retrato()) + ")");
+confere("sem o eco, a sala não disse: " + frase, frase === roda("SEM_CANCELAMENTO_DE_ECO") && /fone/i.test(frase) && !/echoCancellation|faixa|getUserMedia/.test(frase));
+roda("vozDaSessao.abertura = 'abrindo'");
+confere("a frase do eco apareceu com a voz ainda abrindo", roda("fraseDoMicrofoneCalado(" + JSON.stringify(retrato()) + ")") === null);
+roda("vozDaSessao.abertura = 'aberto'");
+
+roda("aoEventoDaVoz({ tipo: 'audio-fechado', motivo: 'captura-perdida' })");
+confere("a captura perdida na sala não virou SEM ÁUDIO: " + roda("JSON.stringify(vozDaSessao)"), roda("vozDaSessao.abertura") === "sem_aparelho" && roda("vozDaSessao.dentro") === false && roda("vozDaSessao.ligando") === null);
+confere("a frase do eco sobreviveu ao áudio fechado", roda("vozDaSessao.semEco") === false);
+confere("o SEM ÁUDIO não tem frase no rodapé: " + roda("ABERTURA_DO_AUDIO.sem_aparelho.rodape"), roda("ABERTURA_DO_AUDIO.sem_aparelho.rodape") === "SEM ÁUDIO");
+roda("aoEventoDaVoz({ tipo: 'audio-fechado', motivo: 'captura-perdida' })");
+confere("fora da sala, a captura perdida acusou falta de áudio: " + roda("vozDaSessao.abertura"), roda("vozDaSessao.abertura") === "fora_de_sala");
+roda("vozDaSessao.dentro = true; vozDaSessao.abertura = 'aberto'");
+roda("aoEventoDaVoz({ tipo: 'audio-fechado', motivo: 'pagina' })");
+confere("o pagehide virou SEM ÁUDIO (é fora de sala): " + roda("vozDaSessao.abertura"), roda("vozDaSessao.abertura") === "fora_de_sala");
+
+const recusa = roda("fraseDoMicrofoneQueNaoAbriu({ name: 'SeeleCapturaEncerrada', message: 'x' })");
+confere("a recusa nomeada caiu na frase genérica: " + recusa, !/SeeleCapturaEncerrada/.test(recusa) && /parou/.test(recusa));
+"##,
+    );
+}
+
+/// **A voz da ponte sobre o motor de verdade**: o `voz-web.js` real e as
+/// funções reais do `ponte-web.js` (`ligarOAudioNoGesto`, `conferirAVozDaSessao`,
+/// `fecharAVozDaSessao`, `aVozDaPonte`), com o WebAudio e o `getUserMedia` de
+/// mentira. (a) fechar a sessão com a abertura ainda pendente cancela AGORA, e a
+/// abertura velha que termina depois não desliga a voz de uma sessão nova; (b)
+/// depois do `pagehide` o estado da ponte diz que a voz está fechada, nada
+/// reabre o microfone sozinho (nem um retrato novo, nem o `pageshow`), e um
+/// gesto explícito o religa.
+#[test]
+fn a_ponte_cancela_a_abertura_da_voz_agora_e_diz_a_verdade_depois_do_pagehide() {
+    rodar_node(
+        "a voz da ponte sobre o motor",
+        r##"
+setTimeout(() => { console.log("o teste passou de 20 s e foi morto"); process.exit(1); }, 20000).unref();
+let corpoAcabou = false;
+process.on("exit", () => { if (!corpoAcabou) { console.log("o corpo do teste não terminou: uma promessa ficou pendente"); process.exitCode = 1; } });
+
+const ponte = ler("ponte-web.js");
+const fn = (nome) => { const m = ponte.match(new RegExp("(?:async )?function " + nome + "\\([^)]*\\) \\{[\\s\\S]*?\\n\\}\\n")); return m ? m[0] : ""; };
+const pecas = [
+  (ponte.match(/const vozDaSessao = \{[\s\S]*?\n\};\n/) || [""])[0],
+  (ponte.match(/const vozDaPonte = \{[^\n]*\};\n/) || [""])[0],
+  (ponte.match(/const BYTE_DO_MODO = [^\n]*\n/) || [""])[0],
+  ...["ligarOAudioNoGesto", "conferirAVozDaSessao", "sairDaVozDaSessao", "sairDaVozMantendoOMicrofone", "soltarOMicrofoneDaVoz", "mudarAAbertura", "fecharAVozDaSessao", "aoEventoDaVoz", "aVozDaPonte"].map(fn),
+];
+confere("faltam peças da voz no ponte-web.js: " + pecas.map((p) => p.length), pecas.every(Boolean));
+
+const montar = ({ segurarGum = [] } = {}) => {
+  const conta = { gum: 0, telemetria: 0 };
+  const presos = {};
+  const faixas = [], contextos = [];
+  const janela = {}, documento = {};
+  const wasm = new Proxy({}, { get: (_, k) => (k === "memory" ? { buffer: new ArrayBuffer(8) } : () => 0) });
+  class Faixa { constructor() { this.readyState = "live"; this.muted = false; faixas.push(this); } stop() { this.readyState = "ended"; } getSettings() { return {}; } }
+  class Contexto {
+    constructor() { this.state = "suspended"; this.destination = {}; this.audioWorklet = { addModule: async () => {} }; contextos.push(this); }
+    createMediaStreamDestination() { return { stream: {} }; }
+    createGain() { return { gain: { value: 1 }, connect: (x) => x }; }
+    createMediaStreamSource() { return { connect: (x) => x }; }
+    async resume() { if (this.state !== "closed") this.state = "running"; }
+    async close() { this.state = "closed"; }
+  }
+  class No { constructor() { this.port = { postMessage() {}, onmessage: null, onmessageerror: null }; } connect(x) { return x; } }
+  const escuta = (dono) => ({
+    addEventListener: (t, f) => { (dono.ouvintes ??= {})[t] = [...(dono.ouvintes?.[t] ?? []), f]; },
+    removeEventListener: (t, f) => { dono.ouvintes[t] = (dono.ouvintes?.[t] ?? []).filter((x) => x !== f); },
+  });
+  const ctx = vm.createContext({
+    console, setTimeout, performance, TextDecoder, TextEncoder,
+    navigator: { audioSession: {}, mediaSession: {}, mediaDevices: { getUserMedia: async () => {
+      const i = conta.gum++;
+      if (segurarGum.includes(i)) await new Promise((res, rej) => { presos[i] = { res, rej }; });
+      const doStream = [new Faixa(), new Faixa()];
+      return { getAudioTracks: () => doStream, getTracks: () => doStream };
+    } } },
+    AudioContext: Contexto, AudioWorkletNode: No,
+    window: Object.assign(janela, escuta(janela)),
+    document: Object.assign(documento, escuta(documento), { body: { append() {} }, createElement: () => ({ play: async () => {}, remove() {} }) }),
+    // O que o resto do ponte-web.js dá a estas funções.
+    guardadoNaOrigem: () => null, CHAVES_DA_ORIGEM: { microfone: "m", saida: "s", sensibilidade: "x", reducao: "y" },
+    modoDeVozGuardado: () => "Open", milesimosGuardados: () => null,
+    emitirNaPonte: () => { conta.telemetria += 1; },
+  });
+  carregar({ ctx }, "voz-web.js");
+  // O `voz-web.js` declara o próprio carregador do `.wasm` (fetch); aqui ele entrega o da bancada.
+  ctx.carregarOWasmDaPagina = async () => ({ bytes: new Uint8Array(4), instancia: { exports: wasm } });
+  vm.runInContext(pecas.join("\n") + "\nconst ganhosAplicados = new Map(); const recusaDoMicrofone = { nestaPagina: false };", ctx);
+  const sessao = { acabou: false, transporteDaVoz: { ouvir: () => () => {}, enviar: () => true }, atender: () => ({ resposta: { sala: 1, voz: 7 } }) };
+  const roda = (js) => vm.runInContext(js, ctx);
+  const eco = (nome, ...args) => { ctx.__args = args; return roda(nome + "(...__args)"); };
+  return {
+    ctx, conta, faixas, contextos, sessao, roda, eco,
+    soltarGum: (i = 0) => presos[i].res(),
+    recusarGum: (i = 0) => presos[i].rej(Object.assign(new Error("recusou"), { name: "NotAllowedError" })),
+    sessaoCom: (voz) => ({ acabou: false, transporteDaVoz: { ouvir: () => () => {}, enviar: () => true }, atender: () => ({ resposta: { sala: 1, voz } }) }),
+    pagehide: () => (janela.ouvintes?.pagehide ?? []).slice().forEach((f) => f({ type: "pagehide", persisted: true })),
+    pageshow: () => (janela.ouvintes?.pageshow ?? []).slice().forEach((f) => f({ type: "pageshow", persisted: true })),
+    estado: () => roda("({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null, abertura: vozDaSessao.abertura, numero: vozDaSessao.numero })"),
+  };
+};
+const vivas = (m) => m.faixas.length > 0 && m.faixas.every((f) => f.readyState === "live");
+// A abertura assenta depois do arranque da captura (`arranqueDaCapturaMs`, 300 ms no voz-web.js): espera ela sair de
+// «abrindo», com prazo, em vez de supor dois ticks. As asserções depois são as mesmas.
+const assentar = async (m) => { for (let i = 0; i < 80 && m.estado().abertura === "abrindo"; i++) await tick(); await tick(); };
+const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// (a) Fechar a sessão com a abertura pendente cancela AGORA; a velha não desliga a voz da sessão nova.
+const a = montar({ segurarGum: [0] });
+await a.roda("aVozDaPonte()");
+a.roda("ligarOAudioNoGesto()");
+await tick();
+confere("(a) o getUserMedia da primeira abertura não ficou pendente: " + a.conta.gum, a.conta.gum === 1);
+a.roda("fecharAVozDaSessao()");           // a sessão 1 acaba, com a abertura ainda pendente
+await tick();
+confere("(a) fechar a sessão não cancelou a abertura pendente agora: " + a.contextos.map((c) => c.state), a.contextos[0].state === "closed");
+a.roda("ligarOAudioNoGesto()");           // a sessão 2
+a.eco("conferirAVozDaSessao", a.sessao);
+await tick(); await tick();
+const nova = a.contextos[a.contextos.length - 1];
+confere("(a) a sessão nova não abriu a voz dela: " + a.contextos.length + " " + JSON.stringify(a.estado()), a.contextos.length === 2 && nova.state === "running" && a.estado().dentro === true);
+const daNova = a.faixas.slice();
+a.soltarGum(0);                           // a velha termina DEPOIS
+await tick(); await tick();
+confere("(a) a abertura velha derrubou a voz da sessão nova: ctx=" + nova.state + " " + JSON.stringify(a.estado()) + " faixas=" + a.faixas.map((f) => f.readyState),
+  nova.state === "running" && daNova.every((f) => f.readyState === "live") && a.estado().dentro === true && a.estado().ligando === true);
+confere("(a) a velha deixou faixa viva: " + a.faixas.map((f) => f.readyState), a.faixas.filter((f) => !daNova.includes(f)).every((f) => f.readyState === "ended"));
+
+// (b) Depois do pagehide a ponte diz que a voz está fechada, nada reabre sozinho, e um gesto religa.
+const b = montar();
+await b.roda("aVozDaPonte()");
+b.roda("ligarOAudioNoGesto()");
+b.eco("conferirAVozDaSessao", b.sessao);
+await assentar(b);
+confere("(b) a voz não abriu antes do pagehide: " + JSON.stringify(b.estado()), b.estado().dentro === true && b.estado().abertura === "aberto" && vivas(b));
+b.pagehide();
+await tick();
+confere("(b) o pagehide deixou as faixas vivas: " + b.faixas.map((f) => f.readyState), b.faixas.every((f) => f.readyState === "ended"));
+confere("(b) depois do pagehide a ponte ainda diz que a voz está aberta: " + JSON.stringify(b.estado()), b.estado().dentro === false && b.estado().ligando === false && b.estado().abertura !== "aberto");
+const gums = b.conta.gum;
+b.eco("conferirAVozDaSessao", b.sessao);   // um retrato novo, como a cada volta
+b.eco("conferirAVozDaSessao", b.sessao);
+b.pageshow();
+await tick(); await tick();
+confere("(b) algo reabriu o microfone sozinho: gUM " + gums + " -> " + b.conta.gum, b.conta.gum === gums);
+confere("(b) a ponte não diz que a voz não está ligada: " + JSON.stringify(b.estado()), b.estado().dentro === false && b.estado().abertura === "sem_aparelho");
+b.roda("ligarOAudioNoGesto()");           // o gesto explícito
+b.eco("conferirAVozDaSessao", b.sessao);
+await assentar(b);
+confere("(b) o gesto explícito não religou: " + JSON.stringify(b.estado()) + " gUM=" + b.conta.gum, b.conta.gum === gums + 1 && b.estado().dentro === true && b.estado().abertura === "aberto");
+confere("(b) as faixas novas não estão vivas: " + b.faixas.map((f) => f.readyState), b.faixas.slice(-2).every((f) => f.readyState === "live"));
+// (c) Os callbacks do `conferirAVozDaSessao` são da abertura que os criou: a A, conferida; a sessão fecha; a B abre
+// e é conferida; depois a A resolve (ou rejeita). A B continua aberta, com o estado e o número dela.
+for (const como of ["resolve", "rejeita"]) {
+  const c = montar({ segurarGum: [0] });
+  await c.roda("aVozDaPonte()");
+  c.roda("ligarOAudioNoGesto()");
+  c.eco("conferirAVozDaSessao", c.sessaoCom(7));   // A: a voz número 7, com o getUserMedia pendente
+  await tick();
+  confere("(c/" + como + ") a abertura A não ficou pendente: " + JSON.stringify(c.estado()), c.estado().dentro === true && c.estado().abertura === "abrindo");
+  c.roda("fecharAVozDaSessao()");
+  await tick();
+  c.roda("ligarOAudioNoGesto()");                  // B
+  c.eco("conferirAVozDaSessao", c.sessaoCom(9));   // B: a voz número 9
+  await assentar(c);
+  confere("(c/" + como + ") a B não abriu: " + JSON.stringify(c.estado()), c.estado().dentro === true && c.estado().abertura === "aberto" && c.estado().numero === 9);
+  if (como === "resolve") c.soltarGum(0); else c.recusarGum(0);
+  await dormir(400);                               // mais que o arranque: se a A passasse por ele, teria terminado
+  confere("(c/" + como + ") a A, ao terminar, mexeu no estado da B: " + JSON.stringify(c.estado()), c.estado().dentro === true && c.estado().abertura === "aberto" && c.estado().numero === 9 && c.estado().ligando === true);
+}
+
+// (d) O erro da abertura VIGENTE ainda escreve o estado de erro (o caminho de erro de sempre).
+const d = montar({ segurarGum: [0] });
+await d.roda("aVozDaPonte()");
+d.roda("ligarOAudioNoGesto()");
+d.eco("conferirAVozDaSessao", d.sessaoCom(7));
+await tick();
+d.recusarGum(0);
+await tick(); await tick();
+confere("(d) o erro da abertura vigente não escreveu o estado de erro: " + JSON.stringify(d.estado()), d.estado().dentro === false && d.estado().abertura === "sem_aparelho");
+corpoAcabou = true;
+"##,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 0.17 (B): o vídeo que chega ao Safari com a imagem ERRADA, sem erro nenhum.
+//
+// Medido no WebKit do Mac (`/tmp/seele-017-claude/h264/medir-palco-armando-vivo.cjs`,
+// um anfitrião simulado que responde ao `pedir_quadro_chave`): com o
+// `isConfigSupported` demorando 700 ms, o `quadroDaTela` descartava em silêncio
+// os 21 quadros que chegavam enquanto o decodificador armava; depois, o
+// decodificador recebia a chave e os deltas que vinham em seguida, que
+// referenciam os quadros descartados: 24 quadros pintados em vez de 44 e a
+// imagem final a 11,33 da origem (2,79 sem a demora), sem erro, sem pedido de
+// chave e sem mensagem. O `node` roda a FONTE REAL de `palco-imagem.js` sobre
+// um `VideoDecoder` de mentira, que conta o que recebeu.
+// ---------------------------------------------------------------------------
+
+const PALCO_NODE: &str = r##"
+setTimeout(() => { console.log("o teste passou de 30 s e foi morto"); process.exit(1); }, 30000).unref();
+let corpoAcabou = false;
+process.on("exit", () => { if (!corpoAcabou) { console.log("o corpo do teste não terminou: uma promessa ficou pendente"); process.exitCode = 1; } });
+// Um quadro Annex-B com SPS (perfil High, nível 3.1): o `codecDoSps` lê `avc1.64001f` dele.
+const quadro = (chave, marca = 0) => Buffer.from([0, 0, 0, 1, chave ? 0x67 : 0x41, 0x64, 0x00, 0x1f, marca, 0, 0, 1, chave ? 0x65 : 0x41, 1, 2, 3]).toString("base64");
+const palcoDeTeste = async ({ segurarOSuporte = false } = {}) => {
+  const els = {};
+  const $ = (id) => (els[id] ??= new El(id));
+  let desenhos = 0;
+  $("palco-imagem").getContext = () => ({ drawImage() { desenhos += 1; } });
+  const pedidos = [];
+  const ouvintes = {};
+  const decoders = [];
+  let liberarOSuporte = null;
+  class VD {
+    static async isConfigSupported(c) {
+      if (segurarOSuporte) await new Promise((r) => { liberarOSuporte = r; });
+      return { supported: true, config: c };
+    }
+    constructor(init) { this.init = init; this.state = "unconfigured"; this.decodes = 0; this.tipos = []; decoders.push(this); }
+    configure(c) { this.state = "configured"; this.config = c; }
+    decode(chunk) { this.decodes += 1; this.tipos.push(chunk.type); this.init.output({ displayWidth: 640, displayHeight: 360, close() {} }); }
+    close() { this.state = "closed"; }
+  }
+  const ctx = vm.createContext({
+    console, setTimeout, clearTimeout, performance, atob: (s) => Buffer.from(s, "base64").toString("binary"),
+    $, VideoDecoder: VD, EncodedVideoChunk: class { constructor(i) { Object.assign(this, i); } },
+    invoke: async (cmd, args) => { pedidos.push({ cmd, args }); return null; },
+    listen: async (nome, f) => { ouvintes[nome] = f; },
+    window: { addEventListener() {} },
+    document: { body: { dataset: {} }, addEventListener() {} },
+  });
+  carregar({ ctx }, "palco-imagem.js");
+  // A régua do backoff de pedidos de chave que o palco já tem (`relogioDoPalco`, «a bancada a troca»).
+  ctx.__t = 0;
+  vm.runInContext("relogioDoPalco = () => __t", ctx);
+  const evento = (payload) => ouvintes["seele://event"]({ payload });
+  return {
+    decoders, $,
+    avancar: (ms) => { ctx.__t += ms; },
+    desenhos: () => desenhos,
+    chaves: () => pedidos.filter((p) => p.cmd === "pedir_quadro_chave").length,
+    abrir: async () => { evento({ ScreenOpened: { screen: 7, width: 640, height: 360 } }); await tick(); },
+    chegou: async (chave, marca) => { evento({ ScreenFrame: { screen: 7, key: chave, data: quadro(chave, marca) } }); await tick(); },
+    soltarOSuporte: () => liberarOSuporte && liberarOSuporte(),
+  };
+};
+"##;
+
+/// **Os quadros descartados durante o `armando` não deixam a imagem errada.** O
+/// `isConfigSupported` é assíncrono, e o que chega nesse intervalo é descartado.
+/// Os deltas que vêm depois referenciam o que se perdeu, e o `VideoDecoder` não
+/// dá erro: pinta uma imagem errada. Sem perda, a chave que armou é entregue e os
+/// deltas seguem. Com perda, a chave que armou é entregue (e desenhável), os
+/// deltas são descartados num estado de recuperação até uma chave nova, e a
+/// chave é PEDIDA com o backoff e o teto de sempre (`recuperarAChave`, sem timer
+/// novo); a chave nova sai da recuperação e os deltas voltam a ser aceitos.
+#[test]
+fn os_quadros_descartados_durante_o_armando_pedem_uma_chave_nova() {
+    rodar_node(
+        "o armando que descartou quadros",
+        &format!(
+            "{PALCO_NODE}\n{}",
+            r##"
+const tipos = (p) => p.decoders.map((d) => d.tipos.join());
+
+// (1) Sem perda: a chave que armou entra e os deltas seguem, sem pedido novo.
+const a = await palcoDeTeste();
+await a.abrir();
+await a.chegou(true, 1); await a.chegou(false, 2); await a.chegou(false, 3);
+confere("(1) sem perda o decodificador não recebeu a chave e os dois deltas: " + JSON.stringify(tipos(a)), JSON.stringify(tipos(a)) === JSON.stringify(["key,delta,delta"]));
+confere("(1) sem perda pediu chave de novo: " + a.chaves(), a.chaves() === 1);
+
+// (2) Com perda: a chave que armou é desenhável, e os deltas esperam uma chave nova.
+const b = await palcoDeTeste({ segurarOSuporte: true });
+await b.abrir();                 // o pedido da abertura, no relógio 0
+await b.chegou(true, 1);         // arma (o suporte está preso)
+await b.chegou(false, 2);        // descartado
+await b.chegou(false, 3);        // descartado
+b.soltarOSuporte();
+await tick(); await tick();
+confere("(2) a chave que armou não foi entregue e desenhada: " + JSON.stringify(tipos(b)) + " desenhos=" + b.desenhos(), JSON.stringify(tipos(b)) === JSON.stringify(["key"]) && b.desenhos() === 1);
+confere("(2) com perda o palco não pediu a chave nova ao armar: " + b.chaves(), b.chaves() === 2);
+await b.chegou(false, 4);        // um delta que referencia os descartados, ainda dentro do prazo do pedido
+confere("(2) o delta que referencia o que se perdeu foi decodificado: " + JSON.stringify(tipos(b)), JSON.stringify(tipos(b)) === JSON.stringify(["key"]));
+confere("(2) o delta dentro do prazo do pedido pediu de novo: " + b.chaves(), b.chaves() === 2);
+
+// (3) A primeira resposta não vem: os deltas depois do prazo existente disparam um retry LIMITADO.
+b.avancar(1100);                 // passa o primeiro intervalo (1 s)
+await b.chegou(false, 5);
+confere("(3) depois do prazo, o delta não disparou o novo pedido: " + b.chaves(), b.chaves() === 3);
+await b.chegou(false, 6); await b.chegou(false, 7);
+confere("(3) deltas seguidos dispararam pedidos em rajada (sem limite): " + b.chaves(), b.chaves() === 3);
+b.avancar(1000);                 // dentro do intervalo dobrado (2 s): ainda nada
+await b.chegou(false, 8);
+confere("(3) o intervalo dobrado não foi respeitado: " + b.chaves(), b.chaves() === 3);
+b.avancar(1200);                 // agora passou dos 2 s do segundo intervalo
+await b.chegou(false, 9);
+confere("(3) o retry depois do segundo prazo não saiu: " + b.chaves(), b.chaves() === 4);
+confere("(3) um delta sem chave nova foi decodificado: " + JSON.stringify(tipos(b)), JSON.stringify(tipos(b)) === JSON.stringify(["key"]));
+
+// (4) A chave nova sai da recuperação: os deltas voltam a ser aceitos, e o pedido para.
+await b.chegou(true, 10);
+await b.chegou(false, 11);
+await b.chegou(false, 12);
+confere("(4) a chave nova e os deltas depois dela não foram decodificados: " + JSON.stringify(tipos(b)), JSON.stringify(tipos(b)) === JSON.stringify(["key,key,delta,delta"]));
+b.avancar(20000);
+await b.chegou(false, 13);
+confere("(4) saiu da recuperação e ainda pede chave: " + b.chaves(), b.chaves() === 4);
+corpoAcabou = true;
+"##
+        ),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 0.17 (lote 2): o descarte do áudio da página, além das faixas do microfone.
+//
+// O `desligar()` parava o `getUserMedia` e fechava o contexto, mas do lado da
+// SAÍDA só fazia `elemento.remove()`: o `<audio>` seguia sem `pause()` e com o
+// `srcObject` preso ao stream da `MediaStreamDestination` (que ninguém parava), e
+// o `audioSession.type` («play-and-record») e o `mediaSession.metadata` («SEELE»)
+// ficavam como a voz os deixou. O iOS lê a sessão de áudio para decidir o que a
+// página ainda é; uma página sem voz que continua «play-and-record» não largou.
+// ---------------------------------------------------------------------------
+
+/// O `desligar` (e o `pagehide`) devolvem a SAÍDA como a encontraram: o `<audio>`
+/// pausado, sem `srcObject` e fora do DOM; as faixas do `destino.stream` e as do
+/// `getUserMedia` ended; o `audioSession.type` e o `mediaSession.metadata` de
+/// antes do `ligar`. Nenhuma via reabre o `getUserMedia` sem gesto. E o
+/// fechamento de uma geração VELHA (o `getUserMedia` que resolve depois do
+/// desligar) não mexe no áudio, na sessão nem nos metadados da geração NOVA.
+#[test]
+fn o_desligar_descarta_a_saida_e_restaura_a_sessao_e_a_geracao_velha_nao_toca_a_nova() {
+    rodar_node(
+        "o descarte do áudio da página",
+        r##"
+setTimeout(() => { console.log("o teste passou de 20 s e foi morto"); process.exit(1); }, 20000).unref();
+let corpoAcabou = false;
+process.on("exit", () => { if (!corpoAcabou) { console.log("o corpo do teste não terminou: uma promessa ficou pendente"); process.exitCode = 1; } });
+
+const montar = async ({ segurarGum = [], segurarClose = [], sessaoAntes = "auto", metadataAntes = null } = {}) => {
+  const closes = {};
+  const faixasDoMic = [], faixasDoDestino = [], elementos = [], contextos = [];
+  const janela = {}, documento = { hidden: false };
+  const gum = { chamadas: 0, presos: {} };
+  const dom = new Set();
+  class Faixa {
+    constructor(lista) { this.readyState = "live"; this.enabled = true; lista.push(this); }
+    stop() { this.readyState = "ended"; }
+    getSettings() { return {}; }
+  }
+  class Elemento {
+    constructor() { this.paused = true; this.srcObject = null; elementos.push(this); }
+    async play() { this.paused = false; }
+    pause() { this.paused = true; }
+    remove() { dom.delete(this); }
+  }
+  class Contexto {
+    constructor() { this.state = "suspended"; this.audioWorklet = { addModule: async () => {} }; this.destination = {}; contextos.push(this); }
+    createMediaStreamDestination() {
+      const faixas = [new Faixa(faixasDoDestino)];
+      return { stream: { getTracks: () => faixas, getAudioTracks: () => faixas } };
+    }
+    createGain() { return { gain: { value: 1 }, connect: (x) => x }; }
+    createMediaStreamSource() { return { connect: (x) => x }; }
+    async resume() { this.state = "running"; }
+    async close() { const i = contextos.indexOf(this); if (segurarClose.includes(i)) await new Promise((r) => { closes[i] = r; }); this.state = "closed"; }
+  }
+  class No { constructor() { this.port = { postMessage() {}, onmessage: null, onmessageerror: null }; } connect(x) { return x; } }
+  class MediaMetadata { constructor(o) { Object.assign(this, o); } }
+  const escuta = (dono) => ({
+    addEventListener: (t, f) => { (dono.ouvintes ??= {})[t] = [...(dono.ouvintes?.[t] ?? []), f]; },
+    removeEventListener: (t, f) => { dono.ouvintes[t] = (dono.ouvintes?.[t] ?? []).filter((x) => x !== f); },
+  });
+  const navegador = {
+    audioSession: { type: sessaoAntes },
+    mediaSession: { metadata: metadataAntes },
+    mediaDevices: { getUserMedia: async () => {
+      const i = gum.chamadas++;
+      if (segurarGum.includes(i)) await new Promise((r) => { gum.presos[i] = r; });
+      const doStream = [new Faixa(faixasDoMic), new Faixa(faixasDoMic)];
+      return { getAudioTracks: () => doStream, getTracks: () => doStream };
+    } },
+  };
+  janela.MediaMetadata = MediaMetadata;
+  const ctx = vm.createContext({
+    console, setTimeout, performance, TextDecoder, TextEncoder, MediaMetadata,
+    navigator: navegador,
+    AudioContext: Contexto, AudioWorkletNode: No,
+    window: Object.assign(janela, escuta(janela)),
+    document: Object.assign(documento, escuta(documento), { body: { append(e) { dom.add(e); } }, createElement: () => new Elemento() }),
+  });
+  carregar({ ctx }, "voz-web.js");
+  const voz = vm.runInContext("criarVozDoNavegador", ctx)({ wasm: {}, bytesDoWasm: new Uint8Array(4) });
+  const dispara = (dono, tipo, evento = {}) => (dono.ouvintes?.[tipo] ?? []).slice().forEach((f) => f({ type: tipo, ...evento }));
+  return { voz, navegador, faixasDoMic, faixasDoDestino, elementos, contextos, dom, gum, closes, janela, documento, dispara, MediaMetadata };
+};
+const acabaram = (l) => l.length > 0 && l.every((f) => f.readyState === "ended");
+const vivas = (l) => l.length > 0 && l.every((f) => f.readyState === "live");
+const saidaDescartada = (nome, m, i = 0) => {
+  const e = m.elementos[i];
+  confere("(" + nome + ") o <audio> não foi criado", Boolean(e));
+  if (!e) return;
+  confere("(" + nome + ") o <audio> segue tocando", e.paused === true);
+  confere("(" + nome + ") o <audio> segue com o srcObject preso ao stream de saída", e.srcObject === null);
+  confere("(" + nome + ") o <audio> segue no DOM", !m.dom.has(e));
+};
+
+// (a) O desligar.
+const metaAntes = { title: "OUTRO" };
+for (const [rotulo, antesSessao, antesMeta] of [["a1", "auto", null], ["a2", "playback", metaAntes]]) {
+  const a = await montar({ sessaoAntes: antesSessao, metadataAntes: antesMeta });
+  await a.voz.ligar({});
+  confere("(" + rotulo + ") o ligar não pôs a sessão em play-and-record: " + a.navegador.audioSession.type, a.navegador.audioSession.type === "play-and-record");
+  confere("(" + rotulo + ") o ligar não pôs o metadata «SEELE»", a.navegador.mediaSession.metadata && a.navegador.mediaSession.metadata.title === "SEELE");
+  confere("(" + rotulo + ") o <audio> não estava tocando antes de desligar", a.elementos[0].paused === false && a.elementos[0].srcObject !== null && a.dom.has(a.elementos[0]));
+  // O MUDO é o portão do .wasm: não toca na faixa (nem `enabled`, nem `stop`), então NÃO solta o hardware.
+  a.voz.mudo(true);
+  confere("(" + rotulo + ") o mudo mexeu na faixa do microfone (o contrato é só o portão): " + a.faixasDoMic.map((f) => f.enabled + "/" + f.readyState), a.faixasDoMic.every((f) => f.enabled === true && f.readyState === "live"));
+  // O sair da voz da sala, por desenho, MANTÉM o microfone aberto (a pessoa segue no teste/na próxima sala).
+  a.voz.sair();
+  confere("(" + rotulo + ") o sair da voz mudou a faixa do microfone: " + a.faixasDoMic.map((f) => f.readyState), vivas(a.faixasDoMic));
+  await a.voz.desligar();
+  saidaDescartada(rotulo, a);
+  confere("(" + rotulo + ") o stream de saída (MediaStreamDestination) ficou vivo: " + a.faixasDoDestino.map((f) => f.readyState), acabaram(a.faixasDoDestino));
+  confere("(" + rotulo + ") o microfone ficou vivo: " + a.faixasDoMic.map((f) => f.readyState), acabaram(a.faixasDoMic));
+  confere("(" + rotulo + ") o audioSession.type não voltou: " + a.navegador.audioSession.type + " em vez de " + antesSessao, a.navegador.audioSession.type === antesSessao);
+  confere("(" + rotulo + ") o mediaSession.metadata não voltou", a.navegador.mediaSession.metadata === antesMeta);
+  confere("(" + rotulo + ") o contexto não fechou", a.contextos[0].state === "closed");
+  // Desligar de novo (idempotente) não pisa na sessão que já voltou.
+  a.navegador.audioSession.type = "ambient";
+  await a.voz.desligar();
+  confere("(" + rotulo + ") um segundo desligar mexeu na sessão de outra coisa: " + a.navegador.audioSession.type, a.navegador.audioSession.type === "ambient");
+}
+
+// (b) O pagehide e o freeze descartam a saída igual, e NENHUMA via reabre o getUserMedia sem gesto.
+for (const [alvo, tipo] of [["janela", "pagehide"], ["documento", "freeze"]]) {
+  const b = await montar();
+  await b.voz.ligar({});
+  b.dispara({ janela: b.janela, documento: b.documento }[alvo], tipo, { persisted: true });
+  await tick(); await tick();
+  saidaDescartada("b " + tipo, b);
+  confere("(b " + tipo + ") o stream de saída ficou vivo", acabaram(b.faixasDoDestino));
+  confere("(b " + tipo + ") o microfone ficou vivo", acabaram(b.faixasDoMic));
+  confere("(b " + tipo + ") a sessão não voltou: " + b.navegador.audioSession.type, b.navegador.audioSession.type === "auto");
+  b.dispara(b.janela, "pageshow", { persisted: true });
+  b.documento.hidden = false;
+  b.dispara(b.documento, "visibilitychange");
+  b.dispara(b.janela, "focus");
+  b.dispara(b.janela, "online");
+  b.voz.sair();
+  b.voz.mudo(false);
+  b.voz.mudo(true);
+  await tick(); await tick();
+  confere("(b " + tipo + ") alguma via reabriu o getUserMedia sem gesto: " + b.gum.chamadas, b.gum.chamadas === 1);
+  confere("(b " + tipo + ") ganhou um <audio> novo sem gesto: " + b.elementos.length, b.elementos.length === 1);
+}
+
+// (c) A geração VELHA: o getUserMedia da geração 0 resolve depois do desligar e de a geração 1 abrir.
+const c = await montar({ segurarGum: [0] });
+const velha = c.voz.ligar({}).then(() => "abriu", () => "recusou");
+await tick(); await tick();
+confere("(c) o getUserMedia da geração velha não ficou preso", c.gum.chamadas === 1);
+await c.voz.desligar();
+await c.voz.ligar({});
+confere("(c) a geração nova não abriu: gUM=" + c.gum.chamadas, c.gum.chamadas === 2 && c.elementos.length === 2);
+const nova = c.elementos[1];
+const micNovo = c.faixasDoMic.slice();
+const destinoNovo = c.faixasDoDestino.slice(-1);
+const metaNova = c.navegador.mediaSession.metadata;
+c.gum.presos[0]();
+const desfecho = await velha;
+await tick(); await tick();
+confere("(c) a geração velha abriu: " + desfecho, desfecho === "recusou");
+// As faixas da nova nasceram antes (a velha só recebeu as suas ao soltar o getUserMedia): [0,1] são da nova, [2,3] da velha.
+confere("(c) a velha deixou faixas vivas: " + c.faixasDoMic.slice(2).map((f) => f.readyState), c.faixasDoMic.length === 4 && acabaram(c.faixasDoMic.slice(2)));
+confere("(c) a velha parou as faixas da nova: " + c.faixasDoMic.slice(0, 2).map((f) => f.readyState), c.faixasDoMic.slice(0, 2).every((f) => f.readyState === "live"));
+confere("(c) a velha parou o stream de saída da nova", vivas(destinoNovo));
+confere("(c) a velha pausou/limpou/tirou o <audio> da nova: paused=" + nova.paused + " src=" + (nova.srcObject !== null) + " dom=" + c.dom.has(nova), nova.paused === false && nova.srcObject !== null && c.dom.has(nova));
+confere("(c) a velha mexeu no audioSession da nova: " + c.navegador.audioSession.type, c.navegador.audioSession.type === "play-and-record");
+confere("(c) a velha mexeu no mediaSession da nova", c.navegador.mediaSession.metadata === metaNova && metaNova && metaNova.title === "SEELE");
+confere("(c) a velha fechou o contexto da nova: " + c.contextos.map((x) => x.state), c.contextos[1].state !== "closed");
+// A nova, ao desligar, devolve o que havia ANTES de tudo ('auto' e null), e não o que a velha viu.
+await c.voz.desligar();
+confere("(c) a nova não devolveu a sessão original: " + c.navegador.audioSession.type, c.navegador.audioSession.type === "auto");
+confere("(c) a nova não devolveu o metadata original", c.navegador.mediaSession.metadata === null);
+saidaDescartada("c", c, 1);
+confere("(c) a nova deixou o stream de saída vivo", acabaram(c.faixasDoDestino));
+confere("(c) a nova deixou o microfone vivo", acabaram(c.faixasDoMic));
+
+// (d) O desligar na ABERTURA (antes do metadata): a sessão de áudio que o ligar mudou também volta.
+const d = await montar({ segurarGum: [0] });
+const preso = d.voz.ligar({}).then(() => "abriu", () => "recusou");
+await tick(); await tick();
+confere("(d) o ligar não mudou a sessão antes do getUserMedia: " + d.navegador.audioSession.type, d.navegador.audioSession.type === "play-and-record");
+await d.voz.desligar();
+confere("(d) o desligar no meio da abertura não devolveu a sessão: " + d.navegador.audioSession.type, d.navegador.audioSession.type === "auto");
+saidaDescartada("d", d);
+confere("(d) o stream de saída ficou vivo", acabaram(d.faixasDoDestino));
+d.gum.presos[0]();
+await preso; await tick();
+confere("(d) o getUserMedia tardio deixou faixas vivas", acabaram(d.faixasDoMic));
+confere("(d) o tardio refez a sessão: " + d.navegador.audioSession.type, d.navegador.audioSession.type === "auto" && d.navegador.mediaSession.metadata === null);
+// (e) O ctx.close() da geração VELHA ainda PENDENTE quando a NOVA abre: a nova fica intacta quando ele termina.
+const e = await montar({ segurarClose: [0] });
+await e.voz.ligar({});
+const fechando = e.voz.desligar();
+await tick();
+confere("(e) o close da velha não ficou pendente", e.closes[0] !== undefined && e.contextos[0].state !== "closed");
+confere("(e) o desligar não devolveu a sessão antes do close: " + e.navegador.audioSession.type, e.navegador.audioSession.type === "auto");
+await e.voz.ligar({});
+confere("(e) a nova não abriu com o close da velha pendente: ctxs=" + e.contextos.length, e.contextos.length === 2 && e.elementos.length === 2);
+const novoEl = e.elementos[1];
+const metaDaNova = e.navegador.mediaSession.metadata;
+e.closes[0]();
+await fechando;
+await tick();
+confere("(e) o close da velha fechou o contexto da nova: " + e.contextos.map((x) => x.state), e.contextos[0].state === "closed" && e.contextos[1].state === "running");
+confere("(e) o close da velha mexeu no <audio> da nova", novoEl.paused === false && novoEl.srcObject !== null && e.dom.has(novoEl));
+confere("(e) o close da velha mexeu no audioSession da nova: " + e.navegador.audioSession.type, e.navegador.audioSession.type === "play-and-record");
+confere("(e) o close da velha mexeu no mediaSession da nova", e.navegador.mediaSession.metadata === metaDaNova && metaDaNova && metaDaNova.title === "SEELE");
+confere("(e) o close da velha parou as faixas da nova", vivas(e.faixasDoMic.slice(2)) && vivas(e.faixasDoDestino.slice(1)));
+await e.voz.desligar();
+confere("(e) a nova não devolveu a sessão original: " + e.navegador.audioSession.type, e.navegador.audioSession.type === "auto" && e.navegador.mediaSession.metadata === null);
+
+corpoAcabou = true;
+"##,
+    );
+}
+
+/// A impressão digital do aviso do celular («ver inteira») nunca fica presa a um valor que o texto vigente não tem.
+///
+/// O valor que o botão revela é o 64-hexadecimal do texto de AGORA. Cenários: A curta → expandir → o texto vira B sem `hidden` observável →
+/// expandir e ocultar mostram B; A expandida → um aviso sem impressão → o botão some e o estado é limpo; esconder e mostrar na mesma tarefa
+/// com outro texto. **A prova contra a regressão está no próprio teste**: o mesmo cenário roda contra dois MUTANTES do código (guardar o valor
+/// fora do texto; não descartar o estado sem impressão), e cada um tem de reprovar. Um guarda que passa com o conserto revertido não guarda nada.
+#[test]
+fn a_impressao_do_aviso_segue_o_texto_vigente_e_nao_um_valor_guardado() {
+    rodar_node(
+        "a impressão do aviso segue o texto vigente",
+        r##"
+const codigoDoArquivo = ler("celular-ajustes.js");
+const inicio = codigoDoArquivo.indexOf("(function faixaDeAvisos() {");
+if (inicio < 0) { console.log("sumiu a faixaDeAvisos de celular-ajustes.js"); process.exit(1); }
+const faixa = codigoDoArquivo.slice(inicio);
+const A = "a".repeat(8) + "1".repeat(48) + "b".repeat(8);
+const B = "c".repeat(8) + "2".repeat(48) + "d".repeat(8);
+const curta = (h) => h.slice(0, 8) + "…" + h.slice(-8);
+
+async function cenario(codigo) {
+  const reg = {};
+  const obs = { cb: null };
+  class No extends El {
+    constructor() {
+      super("");
+      this.classes = new Set();
+      this.tagName = "DIV";
+      this.classList = { toggle: (c, on) => { if (on) this.classes.add(c); else this.classes.delete(c); } };
+    }
+    set id(v) { this._id = v; if (v) reg[v] = this; }
+    get id() { return this._id; }
+    contains(n) { return n === this || this.children.includes(n); }
+    insertBefore(n, ref) { const i = this.children.indexOf(ref); if (i < 0) this.children.push(n); else this.children.splice(i, 0, n); }
+  }
+  const mk = (id, hidden, texto = "") => { const n = new No(); n.id = id; n.hidden = hidden; n.textContent = texto; return n; };
+  const sessao = mk("tela-sessao", false);
+  const veredito = mk("veredito", false);
+  const texto = mk("veredito-texto", false, "PRIMEIRO CONTATO VERIFICADO — " + A);
+  veredito.children.push(texto, mk("veredito-fechar", false, "dispensar"));
+  mk("aviso-fone", true); mk("aviso-audio", true); mk("cel-aviso-persistencia", true);
+  const ctx = vm.createContext({
+    console,
+    document: { getElementById: (id) => reg[id] ?? null, createElement: () => new No() },
+    MutationObserver: class { constructor(cb) { obs.cb = cb; } observe() {} },
+  });
+  vm.runInContext(ler("frases.js"), ctx, { filename: "frases.js" });
+  vm.runInContext(codigo, ctx, { filename: "faixa.js" });
+  const erros = [];
+  const chk = (caso, ok) => { if (!ok) erros.push(caso); };
+  const dispara = () => obs.cb([{ target: texto }]);
+
+  // 1. A curta; o botão existe e está recolhido.
+  chk("A abreviada", texto.textContent.includes(curta(A)) && !texto.textContent.includes(A));
+  const botao = reg["veredito-ver-inteira"];
+  chk("o botão existe", Boolean(botao));
+  if (!botao) return erros;
+  chk("recolhido: aria-expanded=false", botao.getAttribute("aria-expanded") === "false");
+  chk("o nome acessível diz que está abreviada", /abreviada/.test(botao.getAttribute("aria-label") ?? ""));
+  // 2. Expandir mostra A; o texto passa a B SEM esconder o aviso: a reconciliação é pelo texto.
+  await botao.click();
+  chk("A inteira ao expandir", texto.textContent.includes(A) && botao.getAttribute("aria-expanded") === "true");
+  texto.textContent = "PRIMEIRO CONTATO VERIFICADO — " + B;
+  dispara();
+  chk("B abreviada, e nada de A", texto.textContent.includes(curta(B)) && !texto.textContent.includes(B) && !texto.textContent.includes(A));
+  chk("o botão voltou a recolhido", botao.getAttribute("aria-expanded") === "false");
+  await botao.click();
+  chk("expandir mostra B, e não A", texto.textContent.includes(B) && !texto.textContent.includes(A));
+  await botao.click();
+  chk("ocultar volta a B abreviada", texto.textContent.includes(curta(B)) && !texto.textContent.includes(B));
+  // 3. B expandida, e o aviso passa a um texto SEM impressão: o botão some e o estado é limpo.
+  await botao.click();
+  texto.textContent = "UM AVISO SEM IMPRESSÃO NENHUMA";
+  dispara();
+  chk("o botão some sem impressão", botao.hidden === true);
+  chk("o estado é limpo", !("impressao" in sessao.dataset) && !("inteira" in texto.dataset));
+  // 4. Esconder e mostrar na mesma tarefa, com outro texto: nada do valor anterior sobrevive.
+  texto.textContent = "X " + A;
+  dispara();
+  await botao.click();
+  chk("A expandida de novo", texto.textContent.includes(A));
+  veredito.hidden = true;
+  veredito.hidden = false;
+  texto.textContent = "Y " + B;
+  obs.cb([{ target: veredito }]);
+  chk("depois de esconder e mostrar: B abreviada, e recolhida", texto.textContent.includes(curta(B)) && !texto.textContent.includes(A) && botao.getAttribute("aria-expanded") === "false");
+  return erros;
+}
+
+const reais = await cenario(faixa);
+confere("o código real passa: " + reais.join("; "), reais.length === 0);
+const mutantes = [
+  ["guardar o valor fora do texto vigente", faixa.replace("texto.dataset.inteira === valor", "true")],
+  ["não descartar o estado de um texto sem impressão", faixa.replace("if (!valor) return descartarAImpressao(texto, botao);", "if (!valor) return;")],
+];
+for (const [nome, codigo] of mutantes) {
+  if (codigo === faixa) { falhas.push("o mutante «" + nome + "» não mudou o código: o guarda ficou cego"); continue; }
+  const r = await cenario(codigo);
+  confere("o mutante «" + nome + "» tinha de reprovar o cenário", r.length > 0);
+}
+"##,
+    );
+}
+
+/// O teste do microfone de CONFIGURAÇÕES morre com a tela, com a seção e com o índice, e uma abertura tardia nunca o reabre.
+///
+/// Cobertos: (a) fechar CONFIGURAÇÕES e (b) `abandonarServer` (a queda, `mostrarFim`) ANTES de a abertura resolver; (c) abrir A, parar, abrir B e A
+/// resolver tarde: B segue vivo e a resposta velha não toca a UI nem fecha o de B; (d) trocar de áudio para outra seção; (e) SEÇÕES (o índice).
+/// Só o teste do microfone para: nenhum cenário toca na voz da sala. **A prova contra a regressão está no teste**: o mesmo cenário roda contra
+/// cinco MUTANTES do código (o encerramento depois do `continue`, a geração desligada, o `abandonarServer` sem parar, o SEÇÕES sem parar, o
+/// `fecharServerMesmo` sem parar), e cada um tem de reprovar.
+#[test]
+fn o_teste_do_microfone_para_com_a_tela_a_secao_e_o_indice_e_a_resposta_tardia_nao_o_reabre() {
+    rodar_node(
+        "o teste do microfone",
+        r##"
+const vigia = setTimeout(() => { console.log("travou: uma promessa ficou sem resolver"); process.exit(1); }, 15000);
+const fonte = ler("tela-server.js");
+const pega = (nome) => funcao("tela-server.js", nome);
+const iniBloco = fonte.indexOf("let geracaoDoTeste = 0;");
+const bloco = fonte.slice(iniBloco, fonte.indexOf("\n});\n", iniBloco) + 5);
+const secoes = fonte.slice(fonte.indexOf('$("server-ao-indice").addEventListener'));
+if (!bloco.includes("geracaoDoTeste") || !secoes.includes("server-ao-indice")) { console.log("sumiu a geração do teste ou o SEÇÕES"); process.exit(1); }
+const pecas = {
+  vistaDoServer: pega("vistaDoServer"), abrirSecao: pega("abrirSecao"), parar: pega("pararOTesteDeMicrofone"),
+  abandonar: pega("abandonarServer"), fechar: pega("fecharServerMesmo"), bloco, secoes,
+};
+
+function deferido() { let r, e; const p = new Promise((a, b) => { r = a; e = b; }); return { p, r, e }; }
+
+async function cenarios(pecas) {
+  const erros = [];
+  const chk = (caso, ok) => { if (!ok) erros.push(caso); };
+  async function montar() {
+    const pendentes = [];
+    const m = mundo({
+      abrir_teste_de_microfone: () => { const d = deferido(); pendentes.push(d); return d.p; },
+      fechar_teste_de_microfone: null, estado_do_teste_de_microfone: null,
+    });
+    const intervalos = [];
+    const foco = [];
+    El.prototype.focus = function () { foco.push(this.id); };
+    const botoes = ["secao-audio", "secao-mods"].map((id) => { const b = new El(id); b.dataset.painel = id === "secao-audio" ? "painel-audio" : "painel-mods"; return b; });
+    for (const b of botoes) m.$(b.id);
+    Object.assign(m.ctx, {
+      setInterval: (f) => { intervalos.push(f); return intervalos.length; }, clearInterval: () => {},
+      document: { createElement: () => new El(""), querySelectorAll: () => botoes, querySelector: (s) => (s.includes("aria-current") ? botoes.find((b) => b.attrs["aria-current"] === "true") ?? null : botoes[0]) },
+      fraseDeErro: String, desenharCorteDoMedidor() {}, lerOTesteDeMicrofone: async () => {},
+      desenharMods: async () => {}, desenharQualidadeDaVoz: async () => {}, desenharPreviasConsentidas: async () => {},
+      desenharPainelDeVersoes: async () => {}, desenharMalha: async () => {},
+      guardarFoco() {}, voltarParaTela() {}, atualizar: async () => {},
+    });
+    const abrir = `
+      let relogioDoTeste = null, corteMedidoDbfs = null, telaDeOrigem = null, abrindoOServer = false, controlesDaVoz = null;
+      const SERVER_ESTREITO = { matches: true };
+      ${pecas.vistaDoServer}\n${pecas.abrirSecao}\n${pecas.parar}\n${pecas.abandonar}\n${pecas.fechar}\n${pecas.bloco}\n${pecas.secoes}
+      globalThis.__estado = () => ({ relogio: relogioDoTeste, vivo: testeVivo });
+      globalThis.__abandonar = abandonarServer; globalThis.__fechar = fecharServerMesmo; globalThis.__parar = pararOTesteDeMicrofone;
+      globalThis.__abrirSecao = abrirSecao; globalThis.__modoOrigem = (v) => { abrindoOServer = v; };`;
+    vm.runInContext(abrir, m.ctx, { filename: "tela-server-recortada.js" });
+    const botaoTeste = m.$("server-testar-microfone");
+    const comecar = () => botaoTeste.handlers.click[0]({});
+    const fechados = () => so(m, "fechar_teste_de_microfone").length;
+    return { m, pendentes, intervalos, foco, botoes, botaoTeste, comecar, fechados, ctx: m.ctx };
+  }
+  const textoDoBotao = (c) => c.botaoTeste.textContent;
+
+  // (a) fechar CONFIGURAÇÕES antes de a abertura resolver.
+  { const c = await montar();
+    const p = c.comecar(); await tick();
+    c.ctx.__fechar();
+    await tick();
+    const antes = c.fechados();
+    c.pendentes[0].r(null); await p; await tick();
+    chk("(a) a resposta tardia não reabre a UI", textoDoBotao(c) !== "PARAR O TESTE" && c.intervalos.length === 0 && c.ctx.__estado().relogio === null);
+    chk("(a) a resposta tardia fecha o que abriu", c.fechados() > antes); }
+  // (b) abandonarServer (a queda) antes de resolver.
+  { const c = await montar();
+    const p = c.comecar(); await tick();
+    c.ctx.__abandonar();
+    await tick();
+    const antes = c.fechados();
+    c.pendentes[0].r(null); await p; await tick();
+    chk("(b) sem reativação", textoDoBotao(c) !== "PARAR O TESTE" && c.intervalos.length === 0);
+    chk("(b) a resposta tardia fecha o que abriu", c.fechados() > antes); }
+  // (c) abrir A, parar, abrir B; A resolve tarde: o fechar de A entra na fila ANTES do abrir de B, e B fica vivo.
+  { const c = await montar();
+    const pa = c.comecar(); await tick();
+    const parou = c.ctx.__parar(); await tick();
+    const pb = c.comecar(); await tick();
+    chk("(c) o abrir de B espera a fila (A ainda pendente)", c.pendentes.length === 1);
+    c.pendentes[0].r(null); await pa; await parou; await tick();
+    chk("(c) A tardia não toca a UI", textoDoBotao(c) !== "PARAR O TESTE" || c.pendentes.length === 2);
+    chk("(c) o fechar de A saiu antes do abrir de B", c.fechados() === 1 && c.pendentes.length === 2);
+    c.pendentes[1].r(null); await pb; await tick();
+    chk("(c) B fica vivo", textoDoBotao(c) === "PARAR O TESTE" && c.intervalos.length === 1 && c.ctx.__estado().relogio !== null);
+    chk("(c) nada fechou B", c.fechados() === 1); }
+  // (d) áudio → outra seção para o teste; sem teste, não fecha à toa.
+  { const c = await montar();
+    const p = c.comecar(); await tick(); c.pendentes[0].r(null); await p; await tick();
+    chk("(d) o teste está vivo antes", c.ctx.__estado().relogio !== null);
+    const antes = c.fechados();
+    c.ctx.__abrirSecao("secao-mods"); await tick();
+    chk("(d) trocar de seção para o teste", c.ctx.__estado().relogio === null && c.fechados() > antes);
+    const depois = c.fechados();
+    c.ctx.__abrirSecao("secao-audio"); c.ctx.__abrirSecao("secao-mods"); await tick();
+    chk("(d) sem teste, trocar de seção não chama o fechar", c.fechados() === depois); }
+  // (e) SEÇÕES (o índice) para o teste.
+  { const c = await montar();
+    const p = c.comecar(); await tick(); c.pendentes[0].r(null); await p; await tick();
+    const antes = c.fechados();
+    await c.m.$("server-ao-indice").click(); await tick();
+    chk("(e) SEÇÕES para o teste", c.ctx.__estado().relogio === null && c.fechados() > antes); }
+  return erros;
+}
+
+const reais = await cenarios(pecas);
+confere("o código real passa: " + reais.join("; "), reais.length === 0);
+
+// Os mutantes: o conserto revertido, de cinco jeitos. Cada um tem de reprovar.
+const stop = /    \/\/ \*\*E sair da seção de áudio[\s\S]*?\n    }\n/.exec(pecas.abrirSecao);
+const mutar = {
+  "o encerramento depois do continue": stop ? pecas.abrirSecao.replace(stop[0], "").replace("    if (!atual) continue;\n", "    if (!atual) continue;\n" + stop[0]) : null,
+};
+const mutantes = [
+  ["o encerramento depois do `continue`", { abrirSecao: mutar["o encerramento depois do continue"] }],
+  ["a geração desligada", { bloco: pecas.bloco.replace("  if (minha !== geracaoDoTeste) return;\n  abrindoOTeste = false;", "  abrindoOTeste = false;") }],
+  ["o abandonarServer sem parar o teste", { abandonar: pecas.abandonar.replace(/  pararOTesteDeMicrofone\(\)[^\n]*\n/, "") }],
+  ["o SEÇÕES sem parar o teste", { secoes: pecas.secoes.replace(/  if \(relogioDoTeste[^\n]*\n/, "") }],
+  ["o fecharServerMesmo sem parar o teste", { fechar: pecas.fechar.replace(/  pararOTesteDeMicrofone\(\)[^\n]*\n/, "") }],
+];
+for (const [nome, troca] of mutantes) {
+  const [chave, valor] = Object.entries(troca)[0];
+  if (!valor || valor === pecas[chave]) { falhas.push("o mutante «" + nome + "» não mudou o código: o guarda ficou cego"); continue; }
+  const r = await cenarios({ ...pecas, ...troca });
+  confere("o mutante «" + nome + "» tinha de reprovar", r.length > 0);
+}
+clearTimeout(vigia);
+"##,
+    );
+}
+
+/// CONFIGURAÇÕES na janela estreita: abrir uma seção move o foco para o título dela, e SEÇÕES o devolve ao botão da seção que estava aberta.
+///
+/// Abrir uma seção esconde a lista, e com ela o botão que tinha o foco: sem mover o foco, o teclado e o leitor de tela ficam num nó escondido.
+/// O foco só se move quando a pessoa VEIO do índice (o `abrirServer` abre a seção lembrada sem roubar o foco), e só na vista estreita. **A prova
+/// contra a regressão está no teste**: o mesmo cenário roda contra dois MUTANTES (sem o foco no título; sem o foco de volta no SEÇÕES), e cada um
+/// tem de reprovar.
+#[test]
+fn abrir_uma_secao_estreita_foca_o_titulo_e_secoes_devolve_o_foco_ao_botao() {
+    rodar_node(
+        "o foco das seções estreitas",
+        r##"
+const fonte = ler("tela-server.js");
+const pecas = { vistaDoServer: funcao("tela-server.js", "vistaDoServer"), abrirSecao: funcao("tela-server.js", "abrirSecao"),
+  secoes: fonte.slice(fonte.indexOf('$("server-ao-indice").addEventListener')) };
+
+async function cenario(pecas) {
+  const erros = [];
+  const chk = (caso, ok) => { if (!ok) erros.push(caso); };
+  const m = mundo({});
+  const foco = [];
+  El.prototype.focus = function () { foco.push(this.id); };
+  const botoes = ["secao-audio", "secao-mods"].map((id) => { const b = new El(id); b.dataset.painel = id === "secao-audio" ? "painel-audio" : "painel-mods"; m.$(id); return b; });
+  Object.assign(m.ctx, {
+    document: { createElement: () => new El(""), querySelectorAll: () => botoes,
+      querySelector: (s) => (s.includes("aria-current") ? botoes.find((b) => b.attrs["aria-current"] === "true") ?? null : botoes[0]) },
+    desenharMods: async () => {}, desenharQualidadeDaVoz: async () => {}, desenharPreviasConsentidas: async () => {},
+    desenharPainelDeVersoes: async () => {}, desenharMalha: async () => {},
+    pararOTesteDeMicrofone: async () => {},
+  });
+  vm.runInContext(`
+    let relogioDoTeste = null, testeVivo = null, abrindoOServer = false;
+    const SERVER_ESTREITO = { matches: true };
+    ${pecas.vistaDoServer}\n${pecas.abrirSecao}\n${pecas.secoes}
+    globalThis.__abrirSecao = abrirSecao; globalThis.__modo = (v) => { abrindoOServer = v; };`, m.ctx, { filename: "tela-server-recortada.js" });
+  // Veio do índice: abrir uma seção foca o título (tabindex -1), e a vista passa a «secao».
+  m.$("tela-server").dataset.vista = "indice";
+  m.ctx.__abrirSecao("secao-mods");
+  chk("o foco vai para o título da seção", foco.at(-1) === "server-titulo");
+  chk("o título aceita foco por programa (tabindex -1)", m.$("server-titulo").tabIndex === -1);
+  chk("a vista passa a «secao»", m.$("tela-server").dataset.vista === "secao");
+  // Já dentro de uma seção, trocar de seção não rouba o foco de novo.
+  foco.length = 0;
+  m.ctx.__abrirSecao("secao-audio");
+  chk("já na vista de seção, o foco não é movido", foco.length === 0);
+  // A abertura do próprio abrirServer (a seção lembrada) não rouba o foco.
+  m.$("tela-server").dataset.vista = "indice";
+  m.ctx.__modo(true);
+  m.ctx.__abrirSecao("secao-mods");
+  m.ctx.__modo(false);
+  chk("a abertura do abrirServer não rouba o foco", foco.length === 0);
+  // SEÇÕES: volta ao índice e devolve o foco ao botão da seção aberta.
+  botoes[1].setAttribute("aria-current", "true"); botoes[0].setAttribute("aria-current", "false");
+  foco.length = 0;
+  await m.$("server-ao-indice").click();
+  chk("SEÇÕES volta ao índice", m.$("tela-server").dataset.vista === "indice");
+  chk("o foco volta ao botão da seção que estava aberta", foco.at(-1) === "secao-mods");
+  return erros;
+}
+
+const reais = await cenario(pecas);
+confere("o código real passa: " + reais.join("; "), reais.length === 0);
+const mutantes = [
+  ["sem o foco no título", { abrirSecao: pecas.abrirSecao.replace('$("server-titulo").focus({ preventScroll: true });', "") }],
+  ["sem o foco de volta ao botão", { secoes: pecas.secoes.replace(/\n  \(document\.querySelector[^\n]*\n/, "\n") }],
+];
+for (const [nome, troca] of mutantes) {
+  const [chave, valor] = Object.entries(troca)[0];
+  if (valor === pecas[chave]) { falhas.push("o mutante «" + nome + "» não mudou o código: o guarda ficou cego"); continue; }
+  const r = await cenario({ ...pecas, ...troca });
+  confere("o mutante «" + nome + "» tinha de reprovar", r.length > 0);
+}
+"##,
+    );
+}
+
+/// CONFIGURAÇÕES é `aria-modal`, e o foco não sai dela: Tab no último controle volta ao primeiro, Shift+Tab no primeiro vai ao último, e um
+/// foco que já está fora é trazido de volta. Esc fecha e o foco volta a quem abriu (`fecharServerMesmo` guarda e devolve o foco).
+///
+/// Controles escondidos (`[hidden]`), desabilitados ou sem caixa não entram na volta. **A prova contra a regressão está no teste**: o mesmo
+/// cenário roda contra quatro MUTANTES (sem a volta ao primeiro, sem a volta ao último, sem trazer o foco de fora, e o ouvinte sem registrar),
+/// e cada um tem de reprovar.
+#[test]
+fn o_foco_de_configuracoes_fica_preso_dentro_e_o_esc_devolve_a_quem_abriu() {
+    rodar_node(
+        "o foco preso de CONFIGURAÇÕES",
+        r##"
+const fonte = ler("tela-server.js");
+const pecas = {
+  lista: funcao("tela-server.js", "focaveisDaConfiguracao"),
+  prender: funcao("tela-server.js", "prenderOFocoDaConfiguracao"),
+  registro: 'window.addEventListener("keydown", prenderOFocoDaConfiguracao);',
+  fechar: funcao("tela-server.js", "fecharServerMesmo"),
+};
+if (!fonte.includes(pecas.registro)) { console.log("sumiu o registro do ouvinte do foco preso"); process.exit(1); }
+if (!/^  guardarFoco\("tela-server"\);/m.test(pecas.fechar) || !pecas.fechar.includes("voltarParaTela(volta)")) { console.log("o fechar não guarda e devolve o foco"); process.exit(1); }
+
+async function cenario(pecas) {
+  const erros = [];
+  const chk = (caso, ok) => { if (!ok) erros.push(caso); };
+  const m = mundo({});
+  const foco = [];
+  const ouvintes = [];
+  const botao = (id, extra = {}) => { const b = new El(id); b.closest = () => null; b.getClientRects = () => [1]; b.focus = () => { ativo = b; foco.push(id); }; Object.assign(b, extra); return b; };
+  let ativo = null;
+  const a = botao("a"), b = botao("b"), c = botao("c");
+  const escondido = botao("esc"); escondido.closest = () => ({});
+  const desab = botao("dis", { disabled: true });
+  const semCaixa = botao("sem"); semCaixa.getClientRects = () => [];
+  const todos = [a, escondido, b, desab, semCaixa, c];
+  const raiz = m.$("tela-server");
+  raiz.setAttribute("aria-modal", "true"); // O atributo da camada desktop no HTML real.
+  raiz.hidden = false; raiz.querySelectorAll = () => todos; raiz.contains = (n) => n === raiz || todos.includes(n);
+  raiz.focus = () => { ativo = raiz; foco.push("tela-server"); };
+  const fora = botao("fora-da-camada");
+  Object.assign(m.ctx, {
+    document: { get activeElement() { return ativo; } },
+    window: { addEventListener: (t, f) => ouvintes.push([t, f]) },
+    guardarFoco: (t) => foco.push("guardar:" + t), voltarParaTela: (t) => foco.push("voltar:" + t),
+    pararOTesteDeMicrofone: async () => {}, atualizar: async () => {}, telaDeOrigem: null,
+  });
+  vm.runInContext(`let telaDeOrigem = "tela-sessao";\n${pecas.lista}\n${pecas.prender}\n${pecas.registro}\n${pecas.fechar}
+    globalThis.__prender = prenderOFocoDaConfiguracao; globalThis.__fechar = fecharServerMesmo;`, m.ctx, { filename: "tela-server-recortada.js" });
+  chk("o ouvinte de keydown foi registrado", ouvintes.some(([t]) => t === "keydown"));
+  const tab = (shift = false) => { let barrado = false; const ev = { key: "Tab", shiftKey: shift, preventDefault() { barrado = true; } }; for (const [, f] of ouvintes) f(ev); return barrado; };
+  // Tab no último (c) → primeiro (a); os escondidos, desabilitados e sem caixa não contam.
+  ativo = c; foco.length = 0;
+  chk("Tab no último é barrado", tab(false));
+  chk("Tab no último vai ao primeiro visível", foco.at(-1) === "a");
+  // Shift+Tab no primeiro (a) → último (c).
+  ativo = a; foco.length = 0;
+  chk("Shift+Tab no primeiro é barrado", tab(true));
+  chk("Shift+Tab no primeiro vai ao último visível", foco.at(-1) === "c");
+  // No meio, o navegador anda sozinho: nada é barrado.
+  ativo = b; foco.length = 0;
+  chk("Tab no meio não é barrado", tab(false) === false && foco.length === 0);
+  // Foco fora da camada é trazido de volta: Tab ao primeiro, Shift+Tab ao último.
+  ativo = fora; foco.length = 0;
+  chk("o foco de fora volta ao primeiro com Tab", tab(false) && foco.at(-1) === "a");
+  ativo = fora; foco.length = 0;
+  chk("o foco de fora volta ao último com Shift+Tab", tab(true) && foco.at(-1) === "c");
+  // Camada escondida: o ouvinte não se mete.
+  raiz.hidden = true; ativo = c; foco.length = 0;
+  chk("com a camada escondida o Tab segue livre", tab(false) === false && foco.length === 0);
+  raiz.hidden = false;
+  // A aba móvel é não modal: nem os extremos nem o foco de fora são presos.
+  raiz.setAttribute("aria-modal", "false");
+  for (const alvo of [a, c, fora]) for (const shift of [false, true]) {
+    ativo = alvo; foco.length = 0;
+    chk("a aba móvel deixa Tab e Shift+Tab livres", tab(shift) === false && foco.length === 0);
+  }
+  raiz.setAttribute("aria-modal", "true");
+  // O fechar guarda o foco ANTES de esconder e devolve a quem abriu.
+  foco.length = 0;
+  m.ctx.__fechar();
+  chk("fechar guarda o foco e devolve a quem abriu", foco[0] === "guardar:tela-server" && foco.includes("voltar:tela-sessao"));
+  return erros;
+}
+
+const reais = await cenario(pecas);
+confere("o código real passa: " + reais.join("; "), reais.length === 0);
+const mutantes = [
+  ["sem distinguir a aba móvel", { prender: pecas.prender.replace(' || raiz.getAttribute("aria-modal") !== "true"', "") }],
+  ["sem a volta ao primeiro", { prender: pecas.prender.replace("    primeiro.focus();\n  }\n}", "  }\n}") }],
+  ["sem a volta ao último", { prender: pecas.prender.replace("    ultimo.focus();\n  } else if", "  } else if") }],
+  ["sem trazer o foco de fora", { prender: pecas.prender.replace("(evento.shiftKey ? ultimo : primeiro).focus();", "") }],
+  ["o ouvinte sem registrar", { registro: "" }],
+];
+for (const [nome, troca] of mutantes) {
+  const [chave, valor] = Object.entries(troca)[0];
+  if (valor === pecas[chave]) { falhas.push("o mutante «" + nome + "» não mudou o código: o guarda ficou cego"); continue; }
+  const r = await cenario({ ...pecas, ...troca });
+  confere("o mutante «" + nome + "» tinha de reprovar", r.length > 0);
+}
+"##,
+    );
+}
+
+/// O ciclo do teste do microfone é UM só, em ordem: o fechar lento não re-rotula o teste novo, o estado velho não encerra o novo e o duplo
+/// clique em COMEÇAR não abre dois.
+///
+/// (a) fechar lento → COMEÇAR novo antes de o fechar resolver → o abrir novo espera o fechar, e a UI fica com o teste novo; (b) um estado
+/// velho (nulo) chegando depois de um abrir novo → o novo continua e ninguém chama PARAR; (c) duplo clique com a abertura pendente → um só abrir.
+/// Deferidos controlados, sem tempo real. **A prova contra a regressão está no teste**: cada cenário roda contra MUTANTES (sem a fila de
+/// operações, o reset da UI depois do `await`, sem a geração na leitura, sem o COMEÇAR ignorado), e cada um tem de reprovar.
+#[test]
+fn o_ciclo_do_teste_do_microfone_e_serial_e_nenhuma_resposta_velha_toca_o_teste_novo() {
+    rodar_node(
+        "o ciclo serial do teste do microfone",
+        r##"
+const vigia = setTimeout(() => { console.log("travou: uma promessa ficou sem resolver"); process.exit(1); }, 15000);
+const fonte = ler("tela-server.js");
+const iniBloco = fonte.indexOf("let geracaoDoTeste = 0;");
+const pecas = {
+  bloco: fonte.slice(iniBloco, fonte.indexOf("\n});\n", iniBloco) + 5),
+  parar: funcao("tela-server.js", "pararOTesteDeMicrofone"),
+  ler: funcao("tela-server.js", "lerOTesteDeMicrofone"),
+};
+if (!pecas.bloco.includes("naFilaDoTeste") || !pecas.ler.includes("estado_do_teste_de_microfone")) { console.log("sumiu a fila ou a leitura do teste"); process.exit(1); }
+function deferido() { let r; const p = new Promise((a) => { r = a; }); return { p, r }; }
+
+async function cenarios(pecas) {
+  const erros = [];
+  const chk = (caso, ok) => { if (!ok) erros.push(caso); };
+  async function montar() {
+    const abrirs = [], fechars = [], estados = [];
+    const lentos = { fechar: false, estado: false };
+    const m = mundo({
+      abrir_teste_de_microfone: () => { const d = deferido(); abrirs.push(d); return d.p; },
+      fechar_teste_de_microfone: () => { if (!lentos.fechar) return null; const d = deferido(); fechars.push(d); return d.p; },
+      estado_do_teste_de_microfone: () => { if (!lentos.estado) return { nivel_dbfs: -40, aberto: false, aberturas: 0, corte_dbfs: -50 }; const d = deferido(); estados.push(d); return d.p; },
+    });
+    const intervalos = [];
+    Object.assign(m.ctx, {
+      setInterval: (f) => { intervalos.push(f); return intervalos.length; }, clearInterval: () => {},
+      fraseDeErro: String, desenharCorteDoMedidor() {}, desenharCorteDoMedidor_: 0, porcentoNaBarra: () => 0, controlesDaVoz: null,
+    });
+    vm.runInContext(`
+      let relogioDoTeste = null, corteMedidoDbfs = null;
+      ${pecas.parar}\n${pecas.ler}\n${pecas.bloco}
+      globalThis.__estado = () => ({ relogio: relogioDoTeste, vivo: testeVivo, abrindo: abrindoOTeste });
+      globalThis.__parar = pararOTesteDeMicrofone;`, m.ctx, { filename: "tela-server-recortada.js" });
+    const botao = m.$("server-testar-microfone");
+    return { m, abrirs, fechars, estados, lentos, intervalos, botao, comecar: () => botao.handlers.click[0]({}), ctx: m.ctx,
+      abertos: () => so(m, "abrir_teste_de_microfone").length, fechados: () => so(m, "fechar_teste_de_microfone").length };
+  }
+  const ui = (c) => ({ rotulo: c.botao.textContent, medidor: c.m.$("server-nivel-da-voz").hidden });
+
+  // (a) fechar lento → COMEÇAR novo antes de o fechar resolver.
+  { const c = await montar();
+    let p = c.comecar(); await tick(); c.abrirs[0].r(null); await p; await tick();      // o teste A, vivo
+    c.lentos.fechar = true;
+    const parou = c.ctx.__parar(); await tick();                                       // o fechar de A, pendente
+    chk("(a) a UI já voltou ao parado, sem esperar o fechar", ui(c).rotulo === "COMEÇAR O TESTE" && ui(c).medidor === true);
+    const pb = c.comecar(); await tick();                                              // COMEÇAR novo, com o fechar ainda pendente
+    chk("(a) o abrir novo espera o fechar (um só abrir até ele resolver)", c.abertos() === 1);
+    c.fechars[0].r(null); await parou; await tick();
+    chk("(a) resolvido o fechar, o abrir novo sai", c.abertos() === 2);
+    c.abrirs[1].r(null); await pb; await tick();
+    chk("(a) a UI fica com o teste NOVO", ui(c).rotulo === "PARAR O TESTE" && ui(c).medidor === false && c.ctx.__estado().relogio !== null);
+    chk("(a) o fechar de A não voltou a mexer na UI do novo", c.fechados() === 1); }
+
+  // (b) um estado velho (nulo) chega depois de um abrir novo: o novo continua e ninguém chama PARAR.
+  { const c = await montar();
+    let p = c.comecar(); await tick(); c.abrirs[0].r(null); await p; await tick();      // A vivo, com a leitura periódica
+    c.lentos.estado = true;
+    c.intervalos[0](); await tick();                                                   // uma leitura de A, pendente
+    c.lentos.estado = false;
+    const parou = c.ctx.__parar(); await tick(); await parou;                          // A para
+    const fechadosAntes = c.fechados();
+    const pb = c.comecar(); await tick(); c.abrirs[1].r(null); await pb; await tick(); // B vivo
+    chk("(b) B está vivo", c.ctx.__estado().relogio !== null && ui(c).rotulo === "PARAR O TESTE");
+    c.estados[0].r(null); await tick(); await tick();                                  // o estado VELHO (nulo) de A chega agora
+    chk("(b) o estado velho não encerra o teste novo", c.ctx.__estado().relogio !== null && ui(c).rotulo === "PARAR O TESTE");
+    chk("(b) ninguém chamou o fechar por causa dele", c.fechados() === fechadosAntes); }
+
+  // (c) duplo clique em COMEÇAR com a abertura pendente: um só abrir.
+  { const c = await montar();
+    const p1 = c.comecar(); const p2 = c.comecar(); await tick();
+    c.abrirs[0].r(null); await tick(); await tick();
+    for (const d of c.abrirs) d.r(null);
+    await p1; await p2; await tick(); await tick();
+    for (const d of c.abrirs) d.r(null);
+    chk("(c) um só abrir, mesmo com dois cliques", c.abertos() === 1);
+    chk("(c) o teste fica vivo uma vez só", c.ctx.__estado().relogio !== null && c.intervalos.length === 1); }
+  return erros;
+}
+
+const reais = await cenarios(pecas);
+confere("o código real passa: " + reais.join("; "), reais.length === 0);
+const resetUI = /  \/\/ \*\*A UI volta ao parado AGORA[\s\S]*?  desenharCorteDoMedidor\(\);\n/.exec(pecas.parar);
+const mutantes = [
+  ["sem a fila de operações", { bloco: pecas.bloco.replace("const rodando = filaDoTeste.then(operacao, operacao);", "const rodando = Promise.resolve().then(operacao);"), }],
+  ["o reset da UI depois do await do fechar", resetUI ? { parar: pecas.parar.replace(resetUI[0], "").replace(/(    console\.warn\("fechar teste de microfone:", falha\);\n  \}\n)/, "$1" + resetUI[0]) } : null],
+  ["a leitura sem conferir a geração", { ler: pecas.ler.replace("  if (minha !== geracaoDoTeste) return;\n", "") }],
+  ["o COMEÇAR não ignorado com a abertura pendente", { bloco: pecas.bloco.replace("  if (abrindoOTeste) return;\n", "") }],
+];
+for (const [nome, troca] of mutantes) {
+  if (!troca) { falhas.push("o mutante «" + nome + "» não pôde ser montado"); continue; }
+  const [chave, valor] = Object.entries(troca)[0];
+  if (valor === pecas[chave]) { falhas.push("o mutante «" + nome + "» não mudou o código: o guarda ficou cego"); continue; }
+  const r = await cenarios({ ...pecas, ...troca });
+  confere("o mutante «" + nome + "» tinha de reprovar", r.length > 0);
+}
+clearTimeout(vigia);
+"##,
+    );
+}
+
+/// O PERFIL e os CARGOS são `aria-modal` e ocupam a janela (o perfil, com a sala pessoal): o foco fica preso dentro de cada um, e o perfil
+/// mantém SALVAR e CANCELAR no formulário e a sala pessoal no corpo que rola.
+///
+/// O mesmo cenário do foco preso de CONFIGURAÇÕES, para cada camada: Tab no último volta ao primeiro, Shift+Tab no primeiro vai ao último, um
+/// foco de fora é trazido de volta, e os controles escondidos, desabilitados ou sem caixa não contam. A estrutura (SALVAR e CANCELAR dentro de
+/// `#perfil-forma`; o formulário e a sala pessoal dentro de `.perfil-corpo`) é conferida na marcação. **A prova contra a regressão está no
+/// teste**: o cenário roda contra MUTANTES (sem a volta ao primeiro, sem a volta ao último, ouvinte sem registrar) de cada camada, e cada um
+/// tem de reprovar.
+#[test]
+fn o_perfil_e_os_cargos_prendem_o_foco_e_o_perfil_guarda_salvar_cancelar_e_a_sala_no_corpo() {
+    rodar_node(
+        "o foco preso do perfil e dos cargos",
+        r##"
+const vigia = setTimeout(() => { console.log("travou: uma promessa ficou sem resolver"); process.exit(1); }, 15000);
+// A marcação: SALVAR e CANCELAR no formulário do perfil; o formulário e a sala pessoal no corpo; o IDs que os XCUITests usam seguem lá.
+const pagina = ler("index.html");
+const ini = pagina.indexOf('<div id="perfil"'); const fimPerfil = pagina.indexOf('<div id="nomear"');
+const perfil = pagina.slice(ini, fimPerfil);
+const nosForm = perfil.slice(perfil.indexOf('<form id="perfil-forma"'), perfil.indexOf("</form>"));
+confere("SALVAR no formulário do perfil", nosForm.includes('id="perfil-salvar"'));
+confere("CANCELAR no formulário do perfil", nosForm.includes('id="perfil-cancelar"'));
+const corpo = perfil.indexOf('class="perfil-corpo"');
+confere("o corpo que rola existe", corpo > 0);
+confere("o formulário está no corpo", perfil.indexOf('<form id="perfil-forma"') > corpo);
+confere("a sala pessoal está no corpo", perfil.indexOf('<section id="perfil-sala"') > corpo);
+for (const id of ["perfil-apelido", "perfil-escolher", "perfil-tirar", "perfil-fechar", "perfil-codigo", "perfil-copiar-codigo", "perfil-receber", "perfil-agenda", "perfil-sala-firewall-abrir"]) {
+  confere("o id " + id + " continua no perfil", perfil.includes('id="' + id + '"'));
+}
+for (const id of ["cargos-form", "cargos-lista", "cargos-novo", "cargos-fechar", "cargos-voltar", "cargos-aba-cargos"]) {
+  confere("o id " + id + " continua nos cargos", pagina.includes('id="' + id + '"'));
+}
+
+const camadas = [
+  { nome: "perfil", arquivo: "camada-nomear.js", raiz: "perfil", lista: "focaveisDoPerfil", prender: "prenderOFocoDoPerfil" },
+  { nome: "cargos", arquivo: "cargos.js", raiz: "cargos", lista: "focaveisDosCargos", prender: "prenderOFocoDosCargos" },
+];
+
+async function cenario(c, pecas) {
+  const erros = [];
+  const chk = (caso, ok) => { if (!ok) erros.push(c.nome + ": " + caso); };
+  const m = mundo({});
+  const foco = []; const ouvintes = [];
+  let ativo = null;
+  const botao = (id, extra = {}) => { const b = new El(id); b.closest = () => null; b.getClientRects = () => [1]; b.focus = () => { ativo = b; foco.push(id); }; Object.assign(b, extra); return b; };
+  const a = botao("a"), b = botao("b"), z = botao("z");
+  const escondido = botao("esc"); escondido.closest = () => ({});
+  const desab = botao("dis", { disabled: true });
+  const semCaixa = botao("sem"); semCaixa.getClientRects = () => [];
+  const todos = [a, escondido, b, desab, semCaixa, z];
+  const raiz = m.$(c.raiz);
+  raiz.hidden = false; raiz.querySelectorAll = () => todos; raiz.contains = (n) => n === raiz || todos.includes(n);
+  raiz.focus = () => { ativo = raiz; foco.push(c.raiz); };
+  const fora = botao("fora");
+  Object.assign(m.ctx, { document: { get activeElement() { return ativo; } }, window: { addEventListener: (t, f) => ouvintes.push([t, f]) } });
+  vm.runInContext(`${pecas.lista}\n${pecas.prender}\n${pecas.registro}`, m.ctx, { filename: c.arquivo });
+  chk("o ouvinte de keydown foi registrado", ouvintes.some(([t]) => t === "keydown"));
+  const tab = (shift = false) => { let barrado = false; const ev = { key: "Tab", shiftKey: shift, preventDefault() { barrado = true; } }; for (const [, f] of ouvintes) f(ev); return barrado; };
+  ativo = z; foco.length = 0;
+  chk("Tab no último é barrado e vai ao primeiro visível", tab(false) && foco.at(-1) === "a");
+  ativo = a; foco.length = 0;
+  chk("Shift+Tab no primeiro é barrado e vai ao último visível", tab(true) && foco.at(-1) === "z");
+  ativo = b; foco.length = 0;
+  chk("Tab no meio não é barrado", tab(false) === false && foco.length === 0);
+  ativo = fora; foco.length = 0;
+  chk("o foco de fora volta ao primeiro", tab(false) && foco.at(-1) === "a");
+  raiz.hidden = true; ativo = z; foco.length = 0;
+  chk("escondida, o Tab segue livre", tab(false) === false && foco.length === 0);
+  return erros;
+}
+
+for (const c of camadas) {
+  const fonte = ler(c.arquivo);
+  const pecas = { lista: funcao(c.arquivo, c.lista), prender: funcao(c.arquivo, c.prender), registro: `window.addEventListener("keydown", ${c.prender});` };
+  if (!fonte.includes(pecas.registro)) { falhas.push("sumiu o registro do ouvinte do foco preso de " + c.nome); continue; }
+  const reais = await cenario(c, pecas);
+  confere("o código real de " + c.nome + " passa: " + reais.join("; "), reais.length === 0);
+  const mutantes = [
+    ["sem a volta ao primeiro", { prender: pecas.prender.replace("    primeiro.focus();\n  }\n}", "  }\n}") }],
+    ["sem a volta ao último", { prender: pecas.prender.replace("    ultimo.focus();\n  } else if", "  } else if") }],
+    ["o ouvinte sem registrar", { registro: "" }],
+  ];
+  for (const [nome, troca] of mutantes) {
+    const [chave, valor] = Object.entries(troca)[0];
+    if (valor === pecas[chave]) { falhas.push("o mutante «" + nome + "» de " + c.nome + " não mudou o código: o guarda ficou cego"); continue; }
+    const r = await cenario(c, { ...pecas, ...troca });
+    confere("o mutante «" + nome + "» de " + c.nome + " tinha de reprovar", r.length > 0);
+  }
+}
+clearTimeout(vigia);
+"##,
+    );
+}
+
+/// O microfone da página NÃO persiste fora da sala de voz (R5 do Xcode: depois de «Sair da sala de voz», uma faixa de entrada seguia viva).
+///
+/// A ponte (`ponte-web.js`) orquestra um motor de voz; aqui o motor é um duble que conta as faixas que abre e as que `desligar()` para (como o
+/// `voz-web.js` real: `desligar` para a faixa, e uma abertura que resolve depois dele é descartada). Cenários de ESTADO: sair da sala, a sala nula
+/// (expulso ou sala acabou) → a faixa é parada e não há faixa viva; a renovação do número da voz na volta → a MESMA faixa segue, sem parar; uma
+/// abertura pendente que resolve depois da saída → a ponte não instala a captura; o `getUserMedia` que falha, e a entrada recusada → nenhuma faixa
+/// viva; sair e reentrar → uma faixa NOVA e a velha parada; com o TESTE do microfone de CONFIGURAÇÕES aberto, sair da sala não o derruba. A troca de foco
+/// sozinha solta a captura, e ENTRAR noutra sala a mantém (o gesto já a abriu). **Contra a regressão**: o mesmo cenário roda com a saída antiga
+/// (só `sair()`, sem soltar) e tem de reprovar.
+#[test]
+fn o_microfone_da_pagina_e_solto_ao_sair_da_sala_e_a_renovacao_do_numero_o_mantem() {
+    rodar_node(
+        "o microfone fora da sala",
+        r##"
+const vigia = setTimeout(() => { console.log("travou: uma promessa ficou sem resolver"); process.exit(1); }, 15000);
+const fonte = ler("ponte-web.js");
+const ini = fonte.indexOf("const vozDaSessao = {");
+const declaracao = fonte.slice(ini, fonte.indexOf("\n};\n", ini) + 4);
+const pegar = (nome) => funcao("ponte-web.js", nome);
+const iniH = fonte.indexOf("  enter_voice_room: (args) =>");
+const fimH = fonte.indexOf("  // O mudo e o isolamento são escolhas desta ponta");
+const manipuladores = fonte.slice(iniH, fimH);
+if (!declaracao.includes("ligando") || iniH < 0 || fimH < 0) { console.log("a ponte mudou de forma: o guarda ficou cego"); process.exit(1); }
+const pecas = {
+  conferir: pegar("conferirAVozDaSessao"), ligar: pegar("ligarOAudioNoGesto"), sair: pegar("sairDaVozDaSessao"),
+  manter: pegar("sairDaVozMantendoOMicrofone"), soltar: pegar("soltarOMicrofoneDaVoz"), mudar: pegar("mudarAAbertura"),
+  trocar: pegar("trocarOFocoDaPonte"), manipuladores,
+  voltar: fonte.match(/  sessao\.aoVoltar = \(\) => \{[\s\S]*?\n  \};/)[0],
+};
+function deferido() { let r, e; const p = new Promise((a, b) => { r = a; e = b; }); return { p, r, e }; }
+
+async function cenarios(pecas) {
+  const erros = [];
+  const chk = (caso, ok) => { if (!ok) erros.push(caso); };
+  function montar() {
+    const faixas = []; const aberturas = []; const chamadas = [];
+    let teste = null; // o estado do teste de CONFIGURAÇÕES (null = fechado)
+    let geracaoDoMotor = 0;
+    const voz = {
+      // Como o `ligar` do voz-web: abre uma faixa; se o áudio foi fechado ENQUANTO abria, para a que chegou e rejeita.
+      ligar: (pedido) => {
+        chamadas.push("ligar");
+        const minha = geracaoDoMotor;
+        const d = deferido(); aberturas.push(d);
+        return d.p.then(() => {
+          if (minha !== geracaoDoMotor) throw new Error("o áudio foi fechado antes de abrir");
+          const faixa = { id: faixas.length + 1, readyState: "live", stop() { this.readyState = "ended"; } };
+          faixas.push(faixa);
+          return faixa;
+        });
+      },
+      sair: () => chamadas.push("sair"),
+      desligar: async () => { chamadas.push("desligar"); geracaoDoMotor += 1; for (const f of faixas) f.stop(); },
+      entrar: (_t, numero) => chamadas.push("entrar:" + numero),
+      mudo() {}, isolar() {}, modo() {}, tecla() {}, regua() {}, volumeDaTela() {}, calarATela() {},
+      estadoDoTeste: () => teste,
+    };
+    let sala = null, desejada = null, numeroDaVoz = 1;
+    const sessao = { atender: () => ({ resposta: { sala, desejada, voz: numeroDaVoz } }), transporteDaVoz: {}, acabou: false, idDaPonte: 1 };
+    const ctx = vm.createContext({
+      console, setTimeout, Promise, Object, Boolean,
+      vozDaPonte: { atual: voz }, emitirNaPonte() {}, modoDeVozGuardado: () => "Open", guardadoNaOrigem: () => null, milesimosGuardados: () => null,
+      CHAVES_DA_ORIGEM: { microfone: "m", saida: "s", sensibilidade: "x" }, BYTE_DO_MODO: { PushToTalk: 0, VoiceActivated: 1, Open: 2 },
+      ganhosAplicados: { clear() {} }, recusaDoMicrofone: { nestaPagina: false },
+      focoDaPonte: 1, sessoesDaPonte: new Map(), avisarAsSessoes() {},
+      comASessao: (fn) => fn(sessao), pelaSessao: () => async () => ({}), pelaSessaoDe: (s, nome) => (a) => ctx.__remoto(nome, a),
+      focarAVozNaPonte: async () => {},
+    });
+    ctx.__recusar = false;
+    ctx.__remoto = async (nome) => { if (ctx.__recusar && nome === "enter_voice_room") throw "Recusada"; return {}; };
+    vm.runInContext(`${declaracao}\n${pecas.mudar}\n${pecas.soltar}\n${pecas.sair}\n${pecas.manter}\n${pecas.conferir}\n${pecas.ligar}\n${pecas.trocar}
+      const manipuladores = {\n${pecas.manipuladores}\n};
+      globalThis.__estado = () => ({ dentro: vozDaSessao.dentro, ligando: vozDaSessao.ligando !== null, abertura: vozDaSessao.abertura, geracao: vozDaSessao.geracao });
+      globalThis.__M = manipuladores; globalThis.__conferir = conferirAVozDaSessao; globalThis.__ligar = ligarOAudioNoGesto; globalThis.__soltar = soltarOMicrofoneDaVoz;`, ctx, { filename: "ponte-recortada.js" });
+    return {
+      ctx, faixas, aberturas, chamadas, sessao, voz,
+      voltar: () => { ctx.sessao = sessao; ctx.id = 1; vm.runInContext(pecas.voltar, ctx); sessao.aoVoltar(); },
+      vivas: () => faixas.filter((f) => f.readyState === "live").length,
+      pôrSala: (v, n = 1, d = v) => { sala = v; numeroDaVoz = n; desejada = d; },
+      testando: (v) => { teste = v; },
+      conferir: () => ctx.__conferir(sessao),
+    };
+  }
+  async function entrar(c) {            // o gesto de ENTRAR NA SALA: o áudio abre, o servidor confirma, a voz entra
+    c.ctx.__recusar = false;
+    const p = c.ctx.__M.enter_voice_room({});
+    c.pôrSala("Sala 1", 1);
+    await p;
+    c.aberturas.at(-1).r(); await tick(); await tick();
+  }
+
+  // 1. SAIR da sala (o `leave_voice_room` da pessoa): a faixa é parada, e não resta faixa viva.
+  { const c = montar();
+    await entrar(c);
+    chk("1. entrou: uma faixa viva e a voz dentro", c.vivas() === 1 && c.ctx.__estado().dentro === true);
+    c.pôrSala(null);
+    await c.ctx.__M.leave_voice_room({}); await tick();
+    chk("1. sair: a faixa foi parada (ended)", c.faixas.every((f) => f.readyState === "ended"));
+    chk("1. sair: 0 faixas vivas", c.vivas() === 0);
+    chk("1. sair: o motor foi desligado, e o estado é fora_de_sala", c.chamadas.includes("desligar") && c.ctx.__estado().abertura === "fora_de_sala" && c.ctx.__estado().dentro === false); }
+
+  // 2. A SALA NULA (expulso, a sala acabou): idem, sem o `leave` da pessoa.
+  { const c = montar();
+    await entrar(c);
+    c.pôrSala(null); c.conferir(); await tick();
+    chk("2. sala nula: a faixa é parada e 0 viva", c.vivas() === 0 && c.faixas.every((f) => f.readyState === "ended"));
+    chk("2. sala nula: estado fora_de_sala", c.ctx.__estado().abertura === "fora_de_sala"); }
+
+  // 3. A RENOVAÇÃO do número da voz na volta: a MESMA faixa segue, sem parar, e a voz entra com o número novo.
+  { const c = montar();
+    await entrar(c);
+    const faixa = c.faixas[0];
+    c.pôrSala("Sala 1", 2); c.conferir(); await tick(); await tick();
+    chk("3. renovação: a faixa NÃO foi parada", faixa.readyState === "live" && c.vivas() === 1 && !c.chamadas.includes("desligar"));
+    chk("3. renovação: a voz saiu e entrou com o número novo", c.chamadas.includes("sair") && c.chamadas.includes("entrar:2"));
+    chk("3. renovação: nenhuma captura nova (um só ligar)", c.chamadas.filter((x) => x === "ligar").length === 1); }
+
+  // 4. Uma ABERTURA PENDENTE que resolve DEPOIS da saída: a ponte não instala a captura, e a faixa que chegou é parada.
+  { const c = montar();
+    c.ctx.__recusar = false;
+    const p = c.ctx.__M.enter_voice_room({}); c.pôrSala("Sala 1", 1); await p;     // o ligar está pendente; a voz espera
+    chk("4. a abertura está pendente e a voz já conta como dentro", c.ctx.__estado().ligando === true && c.ctx.__estado().dentro === true);
+    c.pôrSala(null); await c.ctx.__M.leave_voice_room({}); await tick();          // sai antes de o getUserMedia voltar
+    c.aberturas[0].r(); await tick(); await tick();                                  // ele volta tarde
+    chk("4. nada fica dentro, e a voz não entrou", c.ctx.__estado().dentro === false && !c.chamadas.some((x) => x.startsWith("entrar:")));
+    chk("4. a faixa que chegou tarde NÃO fica viva", c.vivas() === 0); }
+
+  // 5. O `getUserMedia` que FALHA: nenhuma faixa viva, estado coerente. E a ENTRADA RECUSADA pelo servidor: o microfone do gesto é solto.
+  { const c = montar();
+    c.ctx.__recusar = false;
+    const p = c.ctx.__M.enter_voice_room({}); c.pôrSala("Sala 1", 1); await p;
+    c.aberturas[0].e(Object.assign(new Error("negado"), { name: "NotAllowedError" })); await tick(); await tick();
+    chk("5. getUserMedia que falha: 0 faixas, voz fora, abertura coerente", c.vivas() === 0 && c.ctx.__estado().dentro === false && c.ctx.__estado().ligando === false); }
+  { const c = montar();
+    c.ctx.__recusar = true;
+    let recusou = false;
+    c.pôrSala(null);
+    const p = c.ctx.__M.enter_voice_room({}).catch(() => { recusou = true; });
+    await p; c.aberturas[0].r(); await tick(); await tick();
+    chk("5. entrada recusada: a promessa rejeitou, 0 faixas vivas", recusou && c.vivas() === 0 && c.ctx.__estado().dentro === false); }
+
+  // 6. SAIR e REENTRAR: uma faixa NOVA, e a velha parada.
+  { const c = montar();
+    await entrar(c);
+    const velha = c.faixas[0];
+    c.pôrSala(null); await c.ctx.__M.leave_voice_room({}); await tick();
+    await entrar(c);
+    chk("6. reentrar abre outra faixa", c.faixas.length === 2 && c.faixas[1] !== velha && c.chamadas.filter((x) => x === "ligar").length === 2);
+    chk("6. a velha está parada e só a nova vive", velha.readyState === "ended" && c.vivas() === 1 && c.faixas[1].readyState === "live"); }
+
+  // 7. O TESTE do microfone de CONFIGURAÇÕES aberto: sair da sala não o derruba (só a voz sai; o áudio é do teste).
+  { const c = montar();
+    await entrar(c);
+    c.testando({ nivel_dbfs: -40 });
+    c.pôrSala(null); await c.ctx.__M.leave_voice_room({}); await tick();
+    chk("7. com o teste aberto, o motor NÃO é desligado", !c.chamadas.includes("desligar") && c.vivas() === 1 && c.chamadas.includes("sair")); }
+
+  // 8. A troca de FOCO sozinha solta a captura; ENTRAR noutra sala a mantém.
+  { const c = montar();
+    await entrar(c);
+    c.ctx.sessoesDaPonte.set(1, c.sessao); c.ctx.sessoesDaPonte.set(2, { acabou: false, retrato: () => ({}), atender: () => ({}) });
+    vm.runInContext("focoDaPonte = 1", c.ctx);
+    await vm.runInContext("trocarOFocoDaPonte(2, false)", c.ctx);
+    chk("8. trocar o foco sem entrar noutra sala solta a captura", c.vivas() === 0); }
+  { const c = montar();
+    await entrar(c);
+    c.ctx.sessoesDaPonte.set(1, c.sessao); c.ctx.sessoesDaPonte.set(2, { acabou: false, retrato: () => ({}), atender: () => ({}) });
+    vm.runInContext("focoDaPonte = 1", c.ctx);
+    await vm.runInContext("trocarOFocoDaPonte(2, true)", c.ctx);
+    chk("8. entrar noutra sala mantém a captura que o gesto abriu", c.vivas() === 1 && !c.chamadas.includes("desligar")); }
+  // 9. O SAIR revoga a captura NO GESTO: com a resposta do servidor ainda pendente, a faixa já parou. E a resposta TARDIA de um sair antigo não derruba
+  //    a captura de uma reentrada que já nasceu.
+  { const c = montar();
+    await entrar(c);
+    const remoto = deferido();
+    c.ctx.__remoto = (nome) => (nome === "leave_voice_room" ? remoto.p : Promise.resolve({}));
+    const saida = c.ctx.__M.leave_voice_room({});                                      // a resposta do servidor ainda não veio
+    chk("9. o sair para a faixa no gesto, com a resposta pendente", c.vivas() === 0 && c.ctx.__estado().dentro === false);
+    c.ctx.__remoto = async () => ({});
+    await entrar(c);                                                                    // a pessoa reentra antes da resposta antiga
+    const nova = c.faixas.at(-1);
+    chk("9. a reentrada tem uma faixa nova e viva, e a voz dentro", nova.readyState === "live" && c.ctx.__estado().dentro === true);
+    remoto.r({}); await saida; await tick(); await tick();
+    chk("9. a resposta antiga do sair NÃO derruba a reentrada", nova.readyState === "live" && c.ctx.__estado().dentro === true && c.vivas() === 1); }
+
+  // 10. DUAS entradas sobrepostas: a rejeição TARDIA da primeira (a segunda ainda pendente) não solta a captura da segunda, que depois abre e fica «dentro».
+  { const c = montar();
+    const r1 = deferido(), r2 = deferido();
+    const fila = [r1, r2];
+    c.ctx.__remoto = (nome) => (nome === "enter_voice_room" ? fila.shift().p : Promise.resolve({}));
+    const e1 = c.ctx.__M.enter_voice_room({}).catch(() => "recusada-1");
+    const e2 = c.ctx.__M.enter_voice_room({}).catch(() => "recusada-2");
+    r1.e("Recusada"); chk("10. a primeira rejeitou", (await e1) === "recusada-1"); await tick();
+    chk("10. a rejeição velha não soltou a abertura pendente da segunda", c.ctx.__estado().ligando === true && !c.chamadas.includes("desligar"));
+    c.pôrSala("Sala 1", 1);
+    r2.r({}); await e2; c.aberturas[0].r(); await tick(); await tick();
+    chk("10. a segunda segue viva e «dentro»", c.vivas() === 1 && c.ctx.__estado().dentro === true && c.faixas[0].readyState === "live"); }
+
+  // 11. O FOCO recusado (a troca de sessão falha antes da entrada): nenhuma captura órfã.
+  { const c = montar();
+    vm.runInContext("focoDaPonte = 2", c.ctx);
+    c.ctx.focarAVozNaPonte = async () => { throw "NotConnected"; };
+    let rejeitou = false;
+    await c.ctx.__M.enter_voice_room({}).catch(() => { rejeitou = true; });
+    c.aberturas[0].r(); await tick(); await tick();
+    chk("11. foco recusado: a entrada rejeita, sem faixa viva e sem voz dentro", rejeitou && c.vivas() === 0 && c.ctx.__estado().dentro === false && c.ctx.__estado().ligando === false); }
+
+  // 12. SAIR antes de o servidor confirmar a entrada (a voz ainda não está «dentro»): a captura pendente também é solta.
+  { const c = montar();
+    c.ctx.__recusar = false;
+    const e = c.ctx.__M.enter_voice_room({});                                           // sem sala confirmada: a voz não entrou
+    await e; c.aberturas[0].r(); await tick(); await tick();
+    chk("12. uma captura aberta e a voz ainda fora", c.vivas() === 1 && c.ctx.__estado().dentro === false);
+    await c.ctx.__M.leave_voice_room({}); await tick();
+    chk("12. sair antes da confirmação solta a captura", c.vivas() === 0); }
+  // 13. Session/Voltou precedem a confirmação da sala. Nem o estado do
+  // transporte nem mensagens comuns podem descartar a captura nesse intervalo.
+  for (const voltando of [true, false]) { const c = montar();
+    await entrar(c); const faixa = c.faixas[0];
+    c.sessao.voltando = voltando;
+    c.pôrSala(null, 2, "Sala 1"); c.conferir(); c.voltar(); await tick();
+    chk("13. pendente mantém a captura (voltando=" + voltando + ")", c.vivas() === 1 && c.ctx.__estado().ligando && !c.chamadas.includes("desligar"));
+    c.pôrSala("Sala 1", 2); c.conferir(); await tick();
+    chk("13. confirmou com o novo número na mesma captura", c.faixas[0] === faixa && faixa.readyState === "live" && c.chamadas.includes("entrar:2") && c.aberturas.length === 1);
+  }
+  // 14. A restauração recusada/apagada ou concluída sem sala libera mesmo
+  // quando nenhuma outra mensagem chega depois do aoVoltar.
+  { const c = montar(); await entrar(c);
+    c.pôrSala(null, 2, "Sala 1"); c.conferir();
+    c.pôrSala(null, 2); c.voltar(); await tick();
+    chk("14. volta sem sala libera a captura", c.vivas() === 0 && !c.ctx.__estado().ligando);
+  }
+  // 15. SAIR durante a restauração é imediato, ainda com a entrada pendente.
+  { const c = montar(); await entrar(c);
+    c.pôrSala(null, 2, "Sala 1"); c.conferir();
+    await c.ctx.__M.leave_voice_room({}); await tick();
+    chk("15. sair na restauração libera", c.vivas() === 0 && !c.ctx.__estado().ligando);
+    c.pôrSala("Sala 1", 2); c.conferir(); await tick();
+    chk("15. resposta tardia não reabre", c.vivas() === 0 && !c.chamadas.includes("entrar:2"));
+  }
+  return erros;
+}
+
+const reais = await cenarios(pecas);
+confere("o código real passa: " + reais.join("; "), reais.length === 0);
+// A regressão: a saída antiga (só `sair()` do motor, sem soltar o microfone) tem de reprovar.
+const semPreservar = { conferir: pecas.conferir.replace("    if (lido?.resposta?.desejada != null) return;\n", "") };
+confere("o mutante da restauração mudou", semPreservar.conferir !== pecas.conferir);
+confere("soltar no null transitório deve reprovar", (await cenarios({ ...pecas, ...semPreservar })).some((e) => e.startsWith("13.")));
+confere("omitir aoVoltar deve reprovar", (await cenarios({ ...pecas, voltar: "sessao.aoVoltar = () => {};" })).some((e) => e.startsWith("14.")));
+const antigo = { sair: "function sairDaVozDaSessao() {\n  if (vozDaSessao.dentro) {\n    vozDaPonte.atual?.sair();\n    vozDaSessao.dentro = false;\n    vozDaSessao.numero = null;\n  }\n  mudarAAbertura(\"fora_de_sala\");\n}\n" };
+const r = await cenarios({ ...pecas, ...antigo });
+confere("a saída antiga (o microfone fica) tinha de reprovar", r.length > 0);
+const semSoltarNoLeave = { manipuladores: pecas.manipuladores.replace("if (daFoco) soltarOMicrofoneDaVoz();", "") };
+if (semSoltarNoLeave.manipuladores === pecas.manipuladores) falhas.push("o mutante do leave não mudou o código: o guarda ficou cego");
+else { const r2 = await cenarios({ ...pecas, ...semSoltarNoLeave }); confere("o leave sem soltar tinha de reprovar", r2.length > 0); }
+// Os mutantes dos pedidos: sem a identidade do pedido, a rejeição velha e a resposta velha derrubam a captura nova.
+const mutantesDePedido = [
+  ["a entrada sem a identidade do pedido", pecas.manipuladores.replace("if (pedido === vozDaSessao.pedido && !vozDaSessao.dentro) soltarOMicrofoneDaVoz();", "if (!vozDaSessao.dentro) soltarOMicrofoneDaVoz();")],
+  ["o sair sem a identidade do pedido", pecas.manipuladores.replace("if (daFoco && pedido === vozDaSessao.pedido) conferirAVozDaSessao(sessao);", "if (daFoco) { soltarOMicrofoneDaVoz(); conferirAVozDaSessao(sessao); }")],
+  ["a entrada sem soltar por erro", pecas.manipuladores.replace("        if (pedido === vozDaSessao.pedido && !vozDaSessao.dentro) soltarOMicrofoneDaVoz();\n", "")],
+];
+for (const [nome, m] of mutantesDePedido) {
+  if (m === pecas.manipuladores) { falhas.push("o mutante «" + nome + "» não mudou o código: o guarda ficou cego"); continue; }
+  const rr = await cenarios({ ...pecas, manipuladores: m });
+  confere("o mutante «" + nome + "» tinha de reprovar", rr.length > 0);
+}
+clearTimeout(vigia);
+"##,
     );
 }

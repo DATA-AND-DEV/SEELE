@@ -39,6 +39,13 @@ const QUADRO_DO_SOM_DA_TELA_US = 20_000;
 
 let sondaDaTela = null;
 
+/** As três peças que a transmissão do navegador usa, sem as quais ela não começa. */
+function temCapturaParaCodificar() {
+  return Boolean(navigator.mediaDevices?.getDisplayMedia) &&
+    typeof VideoEncoder === "function" &&
+    typeof MediaStreamTrackProcessor === "function";
+}
+
 /**
  * **Se esta página compartilha a tela**: o `getDisplayMedia`, o
  * `VideoEncoder`, e um quadro de verdade saindo do codificador dentro do
@@ -47,7 +54,13 @@ let sondaDaTela = null;
 function sondarATela(codec) {
   if (!sondaDaTela) {
     sondaDaTela = (async () => {
-      if (!navigator.mediaDevices?.getDisplayMedia || typeof VideoEncoder !== "function") return false;
+      // **O `MediaStreamTrackProcessor` também**: é por ele que os quadros da
+      // captura chegam ao codificador (abaixo). O WebKit (Safari) tem o
+      // `getDisplayMedia` e o `VideoEncoder`, e não ele — a sonda dizia «sim»,
+      // a escolha da tela abria, e a transmissão quebrava no meio (medido pelo
+      // browser-signaling, caso 12). Igual na 0.16; sem ele, a página diz que
+      // este navegador não compartilha, antes de qualquer aperto.
+      if (!temCapturaParaCodificar()) return false;
       const saiu = new Promise((resolver) => {
         let codificador;
         try {

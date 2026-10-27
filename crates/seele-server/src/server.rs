@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_proto::control::{ChannelInfo, PersonProfile, PersonState, VoiceRoomInfo};
+use seele_proto::control::{ChannelInfo, PersonProfile, PersonState, ServerMessage, VoiceRoomInfo};
 use seele_proto::ids::{ChannelId, MessageId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 use tokio::sync::{broadcast, mpsc, Mutex};
 
@@ -121,6 +121,15 @@ pub enum Event {
     HistoricoApagado {
         /// Quantas linhas saíram.
         apagadas: usize,
+    },
+    /// Os cargos mudaram (ADR 0064): o `QuadroDeCargos` novo
+    /// vai a toda sessão, e as `afetadas` recebem as permissões delas de novo e
+    /// recalculam o que guardavam (o `may_speak` da voz), **na hora**.
+    CargosMudaram {
+        /// O `ServerMessage::QuadroDeCargos` novo.
+        quadro: ServerMessage,
+        /// Quem teve as permissões efetivas mudadas.
+        afetadas: Vec<PersonId>,
     },
     /// A message was removed.
     MessageRemoved {
@@ -1582,21 +1591,17 @@ pub struct Server {
     /// identidade —, em bytes: o SHA-256 do DER dele, o mesmo cujo hex vai no
     /// `fp=` do link.
     ///
-    /// No `seele/1` é o certificado que o TLS apresenta. No `h3` do celular o
-    /// TLS apresenta um certificado **curto**, e a prova continua conferida
-    /// contra esta, porque a página assina com o `fp=` do link e não sabe qual
-    /// curto foi apresentado. **Não troque por algo lido da conexão**: o valor
-    /// sai de `Identity::digest()` na subida, de propósito (pedido da F4).
+    /// Na 0.17 é também o certificado DTLS que o enlace apresenta (D3): o
+    /// `a=fingerprint` é esta impressão, para o nativo e para o navegador.
+    /// **Na sala pessoal é outra coisa**: o DTLS dela é efêmero, e isto é o
+    /// SHA-256 dos 32 bytes da chave Ed25519 da sala, que é o que quem liga
+    /// por código amarra na prova (D5). O valor sai da subida
+    /// (`Daemon::bind`), e não da conexão, de propósito.
     ///
-    /// **É contra ela que a prova de identidade é conferida** (o S2,
-    /// `seele_proto::assinatura::prova_de_cliente`): uma prova feita para
+    /// **É contra ela que a prova de identidade é conferida** (o S2 e a D5,
+    /// `seele_proto::assinatura::prova_de_cliente_2`): uma prova feita para
     /// outro servidor carrega a impressão dele, e não confere aqui.
     pub impressao: [u8; 32],
-    /// **As janelas dos certificados curtos do `h3`** (ADR 0057; Tarefa 2.5 da
-    /// F4): o hash e a validade de cada uma, da vigente em diante. O
-    /// `HashesDoNavegador` as leva a quem entra, nos dois transportes. Vazias
-    /// na sala pessoal.
-    pub janelas_do_navegador: Vec<seele_proto::control::JanelaDoNavegador>,
     /// A recepção da sala pessoal, quando este servidor é uma.
     ///
     /// `None` em todo servidor de sempre. Com ela, o aperto de mão segura quem

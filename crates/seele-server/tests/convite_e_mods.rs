@@ -39,55 +39,7 @@ use seele_server::persistence::mods::{enable, EnabledMod};
 use seele_server::persistence::Location;
 use seele_server::{frame, Daemon, ServerConfig};
 
-/// Um verificador que aceita qualquer certificado: o que está sob teste é a
-/// recusa de um pedido, não o TOFU.
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
+mod comum;
 
 async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
@@ -119,19 +71,12 @@ enum Fim {
 /// Uma batida inteira: o `Hello` com `convite`, a prova, e então aceita os MODs
 /// (com o conjunto anunciado) ou os recusa.
 async fn bater(endereco: SocketAddr, semente: u8, convite: &str, aceita: bool) -> Result<Fim> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    )));
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
+    let comum::Ligado {
+        ponta: _ponta,
+        conexao,
+        mut envio,
+        mut recebe,
+    } = comum::ligar(endereco).await?;
     let chave = SigningKey::from_bytes(&[semente; 32]);
     frame::write(
         &mut envio,
@@ -159,7 +104,7 @@ async fn bater(endereco: SocketAddr, semente: u8, convite: &str, aceita: bool) -
         &mut envio,
         &ClientMessage::Response {
             proof: chave
-                .sign(&prova_amarrada(&conexao, &nonce))
+                .sign(&comum::prova_amarrada(&conexao, &nonce))
                 .to_bytes()
                 .to_vec(),
         },
@@ -239,25 +184,4 @@ async fn entrar_de_fato_gasta_o_convite() -> Result<()> {
 
     daemon.shutdown();
     Ok(())
-}
-
-/// A mensagem que a prova assina: o rótulo, a impressão do certificado que o
-/// TLS desta conexão conferiu e o nonce (o S2).
-fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS sempre entrega a cadeia do servidor");
-    let impressao = seele_proto::transport::certificate_digest(
-        cadeia
-            .first()
-            .expect("a cadeia tem um certificado")
-            .as_ref(),
-    );
-    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
-    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

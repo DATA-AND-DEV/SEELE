@@ -152,6 +152,10 @@ let jaPergunteiONome = false;
  */
 function depoisDeConectar(resposta, alvo, nossoServidor = false) {
   const { snapshot, veredito, geracao } = resposta;
+  // **A vista da janela é a sessão que entrou**, também quando a entrada não
+  // passou pelo `invoke("connect")` desta casca (a identidade do navegador):
+  // antes de desenhar, para nenhum comando de T sair carimbado para S.
+  porNaVistaAEntrada(resposta);
   // Daqui em diante quem manda é `#tela-auth`: o veredito da chave é lido
   // numa tela antes de se entrar em sala de voz nenhuma, e a entrada mudou de
   // lugar junto com ele. Enquanto isso não acontece, a sessão continua
@@ -648,6 +652,9 @@ $("boot-cancelar-ligacao").addEventListener("click", () => {
  * `RedeLocalOuVpn` conta como perto: quem hospeda com uma VPN de navegação
  * ligada tem um endereço que parece alcançar o mundo e não aceita ninguém.
  */
+/** O degrau do último convite, para o link do navegador dizer o mesmo. */
+let alcanceDoConvite = null;
+
 function mostrarAlcance(
   alcance,
   portaRecusada,
@@ -657,7 +664,10 @@ function mostrarAlcance(
 ) {
   const onde = $("convite-alcance");
   const frase = fraseDeErro(alcance);
-  const soPerto = alcance === "SoRedeLocal" || alcance === "RedeLocalOuVpn";
+  // O link do navegador vem do mesmo servidor: com ele só em 127.0.0.1, a
+  // frase do link também diz «nesta máquina» (`camada-portaria.js`).
+  alcanceDoConvite = alcance;
+  const soPerto = alcance === "SoRedeLocal" || alcance === "RedeLocalOuVpn" || alcance === "SoEstaMaquina";
 
   // **O resumo num nó próprio, e não num texto solto ao lado dos detalhes** —
   // U13.
@@ -781,9 +791,21 @@ async function hospedar() {
       nomePublico: nome === "" ? null : nome,
       // `null` é o banco de sempre: toda máquina que hospedou antes de os
       // servidores guardados existirem.
+      // As escolhas de MOD da tela ANTES DE HOSPEDAR estão estagiadas no
+      // backend (`escolhas_de_mods.rs`), e este `hospedar` as aplica depois da
+      // cópia e da conversão.
       servidor: servidorEscolhido,
     });
     servidorEscolhido = null;
+    // A porta passa a ser de outra hospedagem: um diálogo da portaria aberto
+    // antes não decide nesta (`camada-portaria.js`).
+    if (typeof hospedagemMudou === "function") hospedagemMudou();
+    // **O servidor está no ar, e a entrada diz** (diagnóstico do H, b2/R4): o
+    // bloco VOCÊ CONTINUA HOSPEDANDO só se redesenhava quando a entrada
+    // aparecia ou sumia. Se a entrada do dono falha logo depois (a pergunta dos
+    // MODs recusada, um apelido tomado), a pessoa fica nesta tela, que nunca
+    // sumiu, com o servidor no ar e nada dizendo isso.
+    desenharMeuServidor().catch((falha) => console.warn("o meu servidor:", falha));
     // Hospedar aqui é entrar aqui: o endereço da própria máquina vira o
     // alvo da conexão que vem em seguida, e é o que `conectar()` sem argumento
     // vai usar.
@@ -812,13 +834,20 @@ async function hospedar() {
 
     await conectar();
   } catch (falha) {
+    // **Um MOD que este app não roda, ou dados de uma versão mais nova: a tela
+    // ANTES DE HOSPEDAR** (E2 da 0.17), e não a parede vermelha na entrada. A
+    // frase inteira continua indo ao `#boot-erro` escondido para quem lê o
+    // registro da tela; o que se vê é a tela que separa dados, versão e MODs.
+    if (falha?.ModsDeApiAntiga || falha?.BancoDoFuturo || falha?.DadosNaoVerificados || falha?.CopiaDeSeguranca
+      || falha?.EscolhaDeModNaoAplicou) {
+      erro.textContent = fraseDeErro(falha);
+      abrirAntesDeHospedar({ servidor, recusa: falha, origem: "tela-boot" }).catch((f) =>
+        console.warn("antes de hospedar:", f),
+      );
+      return;
+    }
     erro.hidden = false;
     erro.textContent = fraseDeErro(falha);
-    if (falha?.ModsDeApiAntiga) {
-      desenharSaidasDeQuemHospeda(falha.ModsDeApiAntiga.mods ?? [], servidor).catch((f) =>
-        console.warn("saídas de quem hospeda:", f),
-      );
-    }
   } finally {
     botao.disabled = false;
   }
@@ -835,28 +864,35 @@ function esconderSaidasDeQuemHospeda() {
 }
 
 /**
- * **As saídas de quem hospeda com um MOD de API antiga, como botões** (o corte
- * da API 6; tarefa 13 do plano da F3, Step 5b; as decisões (i), (ii) e (iii)
- * da orquestradora, 15/10). A frase de cima diz o MOD, a API e as saídas;
- * aqui, cada MOD tem as dele, na ordem do dono (08/10):
+ * **As saídas de cada MOD de API antiga** (o corte da API 6; tarefa 13 do
+ * plano da F3, Step 5b; redesenhadas no E2 da 0.17), dentro do bloco MODS da
+ * tela ANTES DE HOSPEDAR. Cada MOD tem as dele, na ordem do dono (08/10):
  *
- * 1. **ATUALIZAR**, só quando o catálogo tem a versão para a API deste app
- *    (`versaoParaEsteApp`); sem ela, a frase diz que ainda não há; com o
- *    catálogo fora do ar, diz a falha dele, e não que não há versão — seria
- *    afirmar o que não se sabe. Baixa pelo uso «obter», que não mexe em
- *    servidor nenhum, e liga os bytes no servidor parado
- *    (`resolver_mod_de_api_antiga`, que confere o resto);
- * 2. **HOSPEDAR PELO SERVIDOR 0.15**, quando uma versão do servidor nesta
- *    máquina roda a API do MOD: abre a tela das versões com ela escolhida, e a
- *    frase diz que quem hospeda é a janela dela. Sem a API (o pacote não está
- *    aqui), não é oferecida: nada diz que a 0.15 o roda;
+ * 1. **ATUALIZAR PARA <versão>**, só quando o catálogo tem a versão para a API
+ *    deste app (`versaoParaEsteApp`); sem ela, a linha diz que ainda não há;
+ *    com o catálogo fora do ar, diz a falha dele, e não que não há versão —
+ *    seria afirmar o que não se sabe. Baixa pelo uso «obter», que não mexe em
+ *    servidor nenhum, e ESTAGIA a escolha (`resolver_mod_de_api_antiga`, que
+ *    só confere e guarda): quem a aplica é o `hospedar`, depois da cópia;
+ * 2. **hospedar por uma versão anterior do servidor** saiu daqui: ela é uma
+ *    escolha do servidor inteiro, e não de um MOD, e mora no bloco QUEM
+ *    CONSEGUE ENTRAR, que diz quais MODs só rodam lá;
  * 3. **DESLIGAR**: os dados dele ficam (ADR 0045).
  *
- * Depois de ATUALIZAR ou DESLIGAR, hospeda de novo o mesmo servidor: se ainda
- * houver MOD de API antiga, a recusa volta com os que faltam. Uma saída
- * recusada é dita aqui, e as outras continuam.
+ * **Uma saída não hospeda mais sozinha.** Antes, ATUALIZAR E HOSPEDAR com um
+ * segundo MOD ainda pendente subia, era recusado de novo e redesenhava a lista
+ * com um a menos — a pessoa via a tela piscar sem saber o que tinha mudado.
+ * Agora a linha diz o que foi ESCOLHIDO (A APLICAR AO HOSPEDAR: ATUALIZAR PARA
+ * 4.0.0), e o HOSPEDAR do fim da tela se acende quando não falta nenhum.
+ * `opcoes.aoResolver(id)` é como a tela fica sabendo; `opcoes.escolhidas`, as
+ * que já estavam estagiadas. Uma saída recusada é dita aqui, e as outras
+ * continuam.
  */
-async function desenharSaidasDeQuemHospeda(mods, servidor) {
+async function desenharSaidasDeQuemHospeda(mods, servidor, opcoesDaTela) {
+  // Sem chaves na assinatura (nem desestruturar, nem `= {}`): os guardas do
+  // frontend leem o corpo da função pela primeira `{` depois do nome.
+  const opcoes = opcoesDaTela ?? Object.create(null);
+  const resolvido = typeof opcoes.aoResolver === "function" ? opcoes.aoResolver : () => {};
   const geracao = ++geracaoDasSaidas;
   const bloco = $("boot-saidas");
   const esperando = elemento("p", "nota", "consultando o catálogo de MODs…");
@@ -864,33 +900,83 @@ async function desenharSaidasDeQuemHospeda(mods, servidor) {
   bloco.replaceChildren(esperando);
   bloco.hidden = false;
 
-  // As duas ao mesmo tempo. A do catálogo pode falhar, e a falha é guardada
-  // para ser dita, e não lançada.
-  const linhasPedidas = invoke("linhas_para_hospedar").catch(() => []);
+  // A do catálogo pode falhar, e a falha é guardada para ser dita, e não
+  // lançada.
   let catalogo;
   try {
     catalogo = { lido: await invoke("catalogo_de_mods") };
   } catch (falha) {
     catalogo = { falha };
   }
-  const linhas = await linhasPedidas;
   if (geracao !== geracaoDasSaidas) return;
 
   const estado = elemento("p", "erro");
   estado.setAttribute("role", "alert");
   estado.hidden = true;
 
-  /** Uma saída: tudo desligado enquanto anda, e a recusa dita aqui. */
-  const saida = (nome, rotulo, passos) => {
+  const desfeito = typeof opcoes.aoDesfazer === "function" ? opcoes.aoDesfazer : () => {};
+
+  /**
+   * A linha passa a dizer a escolha — a aplicar, e não feita — com DESFAZER:
+   * `desfazer_escolha_de_mod` esquece o que o `hospedar` aplicaria (o banco
+   * nunca foi tocado), e a linha volta com as saídas de antes.
+   */
+  const marcarEscolhido = (item, nome, aAplicar) => {
+    const acoes = item.querySelector(".antes-linha-acoes");
+    const antes = [...acoes.childNodes];
+    for (const b of acoes.querySelectorAll("button")) b.disabled = false;
+    item.dataset.resolvido = nome;
+    item.dataset.aplicado = "nao";
+    const marca = elemento("span", "antes-linha-feito", aAplicar);
+    item.querySelector(".antes-linha-texto")?.append(marca);
+    const desfazer = elemento("button", "botao-fantasma", FRASES_ANTES_DE_HOSPEDAR.modDesfazer);
+    desfazer.type = "button";
+    desfazer.dataset.saida = "desfazer";
+    desfazer.setAttribute("aria-label", FRASES_ANTES_DE_HOSPEDAR.modDesfazerDe(item.dataset.mod));
+    desfazer.addEventListener("click", async () => {
+      desfazer.disabled = true;
+      estado.hidden = true;
+      try {
+        await invoke("desfazer_escolha_de_mod", { servidor, id: item.dataset.mod });
+      } catch (falha) {
+        estado.textContent = fraseDaVersao(falha);
+        estado.hidden = false;
+        desfazer.disabled = false;
+        return;
+      }
+      delete item.dataset.resolvido;
+      delete item.dataset.aplicado;
+      marca.remove();
+      acoes.replaceChildren(...antes);
+      desfeito(item.dataset.mod);
+      acoes.querySelector("button")?.focus();
+    });
+    acoes.replaceChildren(desfazer);
+  };
+
+  /**
+   * Uma saída: os botões da linha desligados enquanto anda, e a recusa dita.
+   *
+   * **Escolher não é aplicar** (achado do Codex no app nativo, P1): abrir o
+   * banco parado para trocar o MOD já o convertia — antes da cópia de
+   * segurança e antes do botão do fim, com a tela dizendo «nada foi mudado».
+   * O `resolver_mod_de_api_antiga` agora só ESTAGIA a escolha (confere lendo,
+   * e guarda num arquivo do app, `src/escolhas_de_mods.rs`), e quem a aplica é
+   * o `hospedar`, depois da cópia e da conversão. A linha diz «A APLICAR AO
+   * HOSPEDAR», e não «feito».
+   */
+  const saida = (item, nome, rotulo, passos, aAplicar) => {
     const botao = elemento("button", "botao-fantasma", rotulo);
     botao.type = "button";
     botao.dataset.saida = nome;
     botao.addEventListener("click", async () => {
-      const botoes = [...bloco.querySelectorAll("button")];
+      const botoes = [...item.querySelectorAll("button")];
       for (const b of botoes) b.disabled = true;
       estado.hidden = true;
       try {
         await passos();
+        marcarEscolhido(item, nome, aAplicar);
+        resolvido(item.dataset.mod);
       } catch (falha) {
         estado.textContent = fraseDaVersao(falha);
         estado.hidden = false;
@@ -899,12 +985,12 @@ async function desenharSaidasDeQuemHospeda(mods, servidor) {
     });
     return botao;
   };
-  /** Mexe no servidor que recusou, e hospeda de novo o mesmo. */
-  const resolverEHospedar = async (id, comoResolver) => {
-    await invoke("resolver_mod_de_api_antiga", { servidor, id, saida: comoResolver });
-    servidorEscolhido = servidor;
-    await hospedar();
-  };
+  /** Estagia a escolha no servidor que recusou, e só nele: o banco não muda. */
+  const estagiar = (id, comoResolver) =>
+    invoke("resolver_mod_de_api_antiga", { servidor, id, saida: comoResolver });
+  // As escolhas que já estavam estagiadas (a tela reaberta), quando a
+  // pré-conferência as diz (`escolhas_pendentes`, pedido ao hosting-lifecycle).
+  const jaEscolhidas = new Map((opcoes.escolhidas ?? []).map((e) => [e.id, e.saida]));
 
   const filhos = [];
   if (catalogo.falha) {
@@ -918,54 +1004,55 @@ async function desenharSaidasDeQuemHospeda(mods, servidor) {
   }
   const lista = elemento("ul", "server-dispositivos");
   for (const [id, api] of mods) {
-    const item = elemento("li");
+    const item = elemento("li", "antes-linha");
     item.dataset.mod = id;
-    const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
-    const texto = elemento("span", "server-dispositivo-nome");
-    texto.append(elemento("span", "mods-id", id));
+    const texto = elemento("span", "antes-linha-texto");
+    texto.append(elemento("span", "antes-linha-nome", id));
     texto.append(
       elemento(
         "span",
-        "mods-versao",
+        "antes-linha-sub",
         api ? `feito para a API ${api}` : "o pacote deste MOD não está nesta máquina",
       ),
     );
-    caixa.append(texto);
+    item.append(texto);
+    const acoes = elemento("span", "antes-linha-acoes");
 
     if (!catalogo.falha) {
       const nova = versaoParaEsteApp(catalogo.lido?.mods?.find((m) => m.id === id)?.versoes);
       if (nova) {
-        caixa.append(
-          saida("atualizar", `ATUALIZAR PARA ${nova.versao} E HOSPEDAR`, async () => {
+        acoes.append(
+          saida(item, "atualizar", `ATUALIZAR PARA ${nova.versao}`, async () => {
             await invoke("instalar_mod_do_catalogo", { id, versao: nova.versao, uso: "obter" });
-            await resolverEHospedar(id, { atualizar: { hash: nova.hash } });
-          }),
+            await estagiar(id, { atualizar: { hash: nova.hash } });
+          }, FRASES_ANTES_DE_HOSPEDAR.modAAtualizar(nova.versao)),
         );
       } else {
         texto.append(
           elemento(
             "span",
-            "mods-versao",
-            `ainda não há versão dele para a API ${API_DESTE_APLICATIVO}`,
+            "antes-linha-sub",
+            `ainda não há versão dele para a API ${[...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort().join(" ou ")}`,
           ),
         );
       }
     }
 
-    const onde = api
-      ? linhas.find((l) => !l.esta && l.apis.includes(api) && (l.instalada || l.tem_pacote))
-      : undefined;
-    if (onde) {
-      caixa.append(
-        saida(`servidor-${onde.servidor}`, `HOSPEDAR PELO SERVIDOR ${onde.servidor}`, async () => {
-          await abrirPreparar();
-          escolherVersaoParaHospedar(onde, `${id} roda no Servidor ${onde.servidor}. `);
-        }),
-      );
+    acoes.append(saida(item, "desligar", "DESLIGAR", () => estagiar(id, "desligar"),
+      FRASES_ANTES_DE_HOSPEDAR.modADesligar));
+    item.append(acoes);
+    const ja = jaEscolhidas.get(id);
+    if (ja !== undefined) {
+      // A versão da escolha guardada, pelo hash, quando o catálogo a tem.
+      const pelaHash = ja?.atualizar?.hash
+        ? catalogo.lido?.mods?.find((m) => m.id === id)?.versoes?.find((v) => v.hash === ja.atualizar.hash)
+        : null;
+      marcarEscolhido(item, ja === "desligar" ? "desligar" : "atualizar",
+        ja === "desligar" ? FRASES_ANTES_DE_HOSPEDAR.modADesligar
+          : pelaHash ? FRASES_ANTES_DE_HOSPEDAR.modAAtualizar(pelaHash.versao)
+            : FRASES_ANTES_DE_HOSPEDAR.modAAtualizarSemVersao);
+      resolvido(id);
     }
-
-    caixa.append(saida("desligar", "DESLIGAR E HOSPEDAR", () => resolverEHospedar(id, "desligar")));
-    item.append(caixa);
     lista.append(item);
   }
   filhos.push(lista, estado);
@@ -1056,10 +1143,15 @@ async function abrirHospedagem() {
   } catch {
     meu = null;
   }
+  // E diz isso no rótulo (`rotularOHospedarAqui`, VER O SERVIDOR HOSPEDADO);
+  // com várias sessões, mostra a conversa que já está nele em vez de abrir
+  // outra (`irAoServidorHospedado`, de `camada-hospedagem.js`).
   if (meu?.alvo) {
-    await conectar(meu.alvo);
+    rotularOHospedarAqui(meu);
+    await irAoServidorHospedado(meu);
     return;
   }
+  rotularOHospedarAqui(null);
   let guardados = [];
   try {
     guardados = await invoke("servidores_guardados");
@@ -1113,7 +1205,11 @@ function desenharServidoresGuardados(guardados) {
         hospedarDaLista(s).catch((falha) => console.warn("hospedar:", falha));
       });
       caixa.append(botao);
-      const apagar = elemento("button", "botao-fantasma", "APAGAR SERVIDOR");
+      // APAGAR é o único ato sem volta desta lista, e não pode ter o mesmo
+      // peso do HOSPEDAR ao lado: mais discreto, com o nome no rótulo
+      // acessível, e a confirmação de sempre antes de qualquer coisa.
+      const apagar = elemento("button", "botao-fantasma servidores-apagar", "APAGAR");
+      apagar.setAttribute("aria-label", `Apagar ${s.nome || (adotado ? "o servidor que já estava aqui" : s.id)}`);
       apagar.type = "button";
       apagar.addEventListener("click", () => abrirConfirmacao(
         "APAGAR SERVIDOR?",
@@ -1149,6 +1245,28 @@ function desenharServidoresGuardados(guardados) {
  * v0.15.2 hospedaria outro. Com uma versão só, também: não há o que escolher.
  */
 async function hospedarDaLista(servidor) {
+  // **A pré-conferência** (E2 da 0.17): se hospedar por esta versão converte os
+  // dados, se eles são de uma versão mais nova, ou se um MOD ligado impede de
+  // subir, a tela ANTES DE HOSPEDAR diz isso antes de qualquer coisa subir. O
+  // comando é só leitura; sem ele (uma ponte que ainda não o tem), o caminho é
+  // o de sempre, e a recusa do `hospedar` leva à mesma tela.
+  let antes = null;
+  try {
+    antes = await invoke("antes_de_hospedar", { servidor: servidor.id });
+  } catch (falha) {
+    console.warn("antes_de_hospedar:", falha);
+    // **Uma leitura que falhou não é «nada a fazer»** (revisão do Codex): a
+    // tela diz que não verificou, e não deixa converter às cegas. Só o
+    // comando que não existe (o app de antes) segue o caminho de sempre.
+    if (!comandoQueNaoExiste(falha)) {
+      await abrirAntesDeHospedar({ servidor: servidor.id, falhaDaLeitura: falha, origem: "tela-servidores" });
+      return;
+    }
+  }
+  if (antes && (antes.converte || antes.futuro || antes.verificado === false || (antes.mods_de_api_antiga ?? []).length > 0)) {
+    await abrirAntesDeHospedar({ servidor: servidor.id, info: antes, origem: "tela-servidores" });
+    return;
+  }
   if (servidor.caminho === null) {
     let linhas = [];
     try {
@@ -1588,3 +1706,22 @@ async function confirmarPreparar() {
     confirmar.disabled = false;
   }
 }
+
+
+/**
+ * O teclado aberto sobre um campo: `html[data-teclado]` existe enquanto o `visualViewport` está bem menor que a janela e um campo tem o foco.
+ * A barra de ações das telas de área útil (`.area-barra`, `base.css`) sai de cena nesse intervalo, no celular, e o campo nunca fica debaixo
+ * dela; fechado o teclado, ela volta. Só apresentação: nada aqui muda o que uma tela faz.
+ */
+(function acompanharOTeclado() {
+  const vista = window.visualViewport;
+  if (!vista) return;
+  const raiz = document.documentElement;
+  const conferir = () => {
+    const campo = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement ? document.activeElement.tagName : "");
+    raiz.toggleAttribute("data-teclado", campo && window.innerHeight - vista.height > 150);
+  };
+  vista.addEventListener("resize", conferir);
+  document.addEventListener("focusin", conferir);
+  document.addEventListener("focusout", () => setTimeout(conferir, 50));
+})();

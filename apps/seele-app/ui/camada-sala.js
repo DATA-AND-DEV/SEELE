@@ -37,6 +37,13 @@ function desenharEstadoDaSala() {
     linha.textContent = frase ?? "";
     linha.hidden = !frase;
   }
+  // O bloco da entrada: diz a verdade da sala em todo estado.
+  $("boot-codigo-estado").textContent = fraseDoCodigo(estadoDaSala);
+  $("boot-codigo").dataset.recebe =
+    estadoDaSala?.estado === "NoAr" && estadoDaSala.registro?.registro === "Registrado"
+      ? "sim"
+      : "nao";
+
   // «Receber ligações» está marcado em todo estado menos o desligado: a sala
   // subindo, no ar ou que falhou ao subir são todas «quero receber».
   $("perfil-receber").checked = estadoDaSala?.estado !== "Desligada";
@@ -76,7 +83,7 @@ function linhaDaAgenda(contato) {
   nome.setAttribute("aria-label", `Nome para ${contato.codigo}`);
   nome.addEventListener("change", () => {
     invoke("dar_nome_na_agenda", { codigo: contato.codigo, nome: nome.value.trim() })
-      .then(() => desenharAgenda())
+      .then(() => Promise.all([desenharAgenda(), desenharAmigos()]))
       .catch((falha) => mostrarErroDaAgenda(falha));
   });
 
@@ -95,11 +102,30 @@ function linhaDaAgenda(contato) {
   bloquear.textContent = contato.bloqueado ? "DESBLOQUEAR" : "BLOQUEAR";
   bloquear.addEventListener("click", () => {
     invoke("bloquear", { codigo: contato.codigo, bloqueado: !contato.bloqueado })
-      .then(() => desenharAgenda())
+      .then(() => Promise.all([desenharAgenda(), desenharAmigos()]))
       .catch((falha) => mostrarErroDaAgenda(falha));
   });
 
-  linha.append(nome, quem, bloquear);
+  // **Só o clique faz amigo.** Perdida, desconhecida, ou de volta: nenhuma
+  // ligação adiciona sozinha.
+  let amigo;
+  if (contato.amigo) {
+    amigo = document.createElement("span");
+    amigo.className = "perfil-agenda-amigo";
+    amigo.textContent = SALA_PESSOAL.amigos.jaAmigo;
+  } else {
+    amigo = document.createElement("button");
+    amigo.type = "button";
+    amigo.className = "botao-fantasma";
+    amigo.textContent = SALA_PESSOAL.amigos.adicionarAosAmigos;
+    amigo.addEventListener("click", () => {
+      invoke("adicionar_amigo", { codigo: contato.codigo, nome: contato.nome ?? null })
+        .then(() => Promise.all([desenharAgenda(), desenharAmigos()]))
+        .catch((falha) => mostrarErroDaAgenda(falha));
+    });
+  }
+
+  linha.append(nome, quem, amigo, bloquear);
   return linha;
 }
 
@@ -121,6 +147,156 @@ async function desenharAgenda() {
   $("perfil-agenda").replaceChildren(...contatos.map(linhaDaAgenda));
   $("perfil-agenda-vazia").hidden = contatos.length > 0;
 }
+
+// ------------------------------------------------------------------ amigos
+
+function mostrarErroDosAmigos(falha) {
+  const erro = $("boot-amigos-erro");
+  erro.textContent = SALA_PESSOAL.naAgenda[falha] ?? SALA_PESSOAL.naAgenda.NaoGravou;
+  erro.hidden = false;
+}
+
+/** As iniciais de quem, para o ladrilho do cartão (nome ou código). */
+function iniciaisDe(quem) {
+  const letras = String(quem).match(/[\p{L}\p{N}]/gu) ?? ["?"];
+  return letras.slice(0, 2).join("").toUpperCase();
+}
+
+/**
+ * Um cartão da lista de amigos: o nome em destaque (e renomeável), o código
+ * menor, o LIGAR como ação principal, e o TIRAR DOS AMIGOS discreto.
+ */
+function linhaDoAmigo(contato) {
+  const quem = contato.nome || contato.codigo;
+  const linha = document.createElement("li");
+  linha.className = "amigo-cartao";
+
+  const avatar = document.createElement("span");
+  avatar.className = "amigo-avatar";
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.textContent = iniciaisDe(quem);
+
+  const nome = document.createElement("input");
+  nome.className = "amigo-nome";
+  nome.value = contato.nome ?? "";
+  nome.maxLength = 48;
+  nome.spellcheck = false;
+  nome.placeholder = "dar um nome";
+  nome.title = "clique para renomear";
+  nome.setAttribute("aria-label", `Nome para ${contato.codigo}`);
+  nome.addEventListener("change", () => {
+    invoke("dar_nome_na_agenda", { codigo: contato.codigo, nome: nome.value.trim() })
+      .then(() => desenharAmigos())
+      .catch((falha) => mostrarErroDosAmigos(falha));
+  });
+
+  const detalhe = document.createElement("div");
+  detalhe.className = "amigo-detalhe";
+  const codigo = document.createElement("span");
+  codigo.className = "amigo-codigo";
+  codigo.textContent = contato.codigo;
+  detalhe.append(codigo);
+  if (contato.bloqueado) {
+    const aviso = document.createElement("span");
+    aviso.className = "amigo-aviso";
+    aviso.textContent = SALA_PESSOAL.amigos.bloqueado;
+    detalhe.append(aviso);
+  }
+
+  const texto = document.createElement("div");
+  texto.className = "amigo-texto";
+  texto.append(nome, detalhe);
+
+  // LIGAR é o caminho do código colado, sem o campo: abre MAIS UMA sessão e
+  // não derruba as outras nem o servidor hospedado. O `alvo` vem montado do Rust.
+  const ligar = document.createElement("button");
+  ligar.type = "button";
+  ligar.className = "amigo-ligar";
+  ligar.textContent = SALA_PESSOAL.amigos.ligar;
+  ligar.disabled = contato.bloqueado === true;
+  ligar.setAttribute("aria-label", SALA_PESSOAL.amigos.ligarA(quem));
+  ligar.addEventListener("click", () => {
+    irParaOServidor(contato.alvo, null, null, quem, null, true);
+  });
+
+  const tirar = document.createElement("button");
+  tirar.type = "button";
+  tirar.className = "amigo-tirar";
+  tirar.textContent = SALA_PESSOAL.amigos.tirar;
+  tirar.title = SALA_PESSOAL.amigos.tirarDe(quem);
+  tirar.setAttribute("aria-label", SALA_PESSOAL.amigos.tirarDe(quem));
+  tirar.addEventListener("click", () => {
+    invoke("tirar_dos_amigos", { codigo: contato.codigo })
+      .then(() => Promise.all([desenharAmigos(), desenharAgenda()]))
+      .catch((falha) => mostrarErroDosAmigos(falha));
+  });
+
+  const acoes = document.createElement("div");
+  acoes.className = "amigo-acoes";
+  acoes.append(ligar, tirar);
+  linha.append(avatar, texto, acoes);
+  return linha;
+}
+
+/** A lista de AMIGOS da entrada; escondida onde a agenda não existe. */
+async function desenharAmigos() {
+  $("boot-amigos-erro").hidden = true;
+  $("boot-amigos-tentar").hidden = true;
+  let amigos;
+  let falhou = null;
+  try {
+    amigos = await invoke("amigos");
+  } catch (falha) {
+    amigos = null;
+    falhou = falha;
+  }
+  const bloco = $("boot-amigos");
+  // **Só a recusa esperada do navegador esconde o bloco**: ali a agenda não
+  // existe. Uma falha do desktop (NaoGravou, ou outra) aparece, com a frase e o
+  // TENTAR DE NOVO: o recurso existe, e sumir com ele seria calar o defeito.
+  if (!Array.isArray(amigos) && falhou?.RecusaDaPonte) {
+    bloco.hidden = true;
+    return;
+  }
+  if (!Array.isArray(amigos)) {
+    $("boot-amigos-lista").replaceChildren();
+    $("boot-amigos-vazia").hidden = true;
+    $("boot-amigos-nota").hidden = true;
+    mostrarErroDosAmigos(falhou);
+    $("boot-amigos-tentar").hidden = false;
+    bloco.hidden = false;
+    return;
+  }
+  $("boot-amigos-lista").replaceChildren(...amigos.map(linhaDoAmigo));
+  $("boot-amigos-vazia").textContent = SALA_PESSOAL.amigos.vazia;
+  $("boot-amigos-vazia").hidden = amigos.length > 0;
+  $("boot-amigos-nota").textContent = amigos.length > 0 ? SALA_PESSOAL.amigos.tirarDiz : "";
+  $("boot-amigos-detalhe").hidden = amigos.length === 0;
+  bloco.hidden = false;
+}
+
+$("boot-amigos-form").addEventListener("submit", (evento) => {
+  evento.preventDefault();
+  const codigo = $("boot-amigo-codigo").value.trim();
+  const nome = $("boot-amigo-nome").value.trim();
+  if (!codigo) return;
+  invoke("adicionar_amigo", { codigo, nome: nome || null })
+    .then(() => {
+      $("boot-amigo-codigo").value = "";
+      $("boot-amigo-nome").value = "";
+      return desenharAmigos();
+    })
+    .catch((falha) => mostrarErroDosAmigos(falha));
+});
+
+$("boot-amigos-tentar").addEventListener("click", () => {
+  desenharAmigos().catch((falha) => console.warn("amigos:", falha));
+});
+
+new MutationObserver(() => {
+  if (!$("tela-boot").hidden) desenharAmigos().catch((falha) => console.warn("amigos:", falha));
+}).observe($("tela-boot"), { attributes: true, attributeFilter: ["hidden"] });
+desenharAmigos().catch((falha) => console.warn("amigos:", falha));
 
 /** O bloco da sala no PERFIL, quando o PERFIL abre. */
 async function desenharSalaNoPerfil() {
@@ -164,6 +340,25 @@ $("perfil-receber").addEventListener("change", () => {
   );
 });
 
+/** O SEU CÓDIGO na entrada: independente de sessão, escondido sem resposta. */
+async function desenharCodigoNaEntrada() {
+  let codigo = null;
+  try {
+    codigo = await invoke("meu_codigo");
+  } catch {
+    codigo = null;
+  }
+  $("boot-codigo-valor").value = codigo ?? "";
+  $("boot-codigo").hidden = !codigo;
+  if (codigo) $("boot-codigo-estado").textContent = fraseDoCodigo(estadoDaSala);
+}
+
+$("boot-copiar-codigo").addEventListener("click", () => {
+  copiarLink($("boot-codigo-valor"), $("boot-copiar-codigo")).catch((falha) =>
+    console.warn("copiar o código:", falha),
+  );
+});
+
 $("perfil-sala-firewall-abrir").addEventListener("click", async () => {
   const abrir = $("perfil-sala-firewall-abrir");
   abrir.disabled = true;
@@ -194,4 +389,5 @@ invoke("estado_da_sala")
     estadoDaSala ??= estado;
     desenharEstadoDaSala();
   })
-  .catch(() => {});
+  .catch(() => {})
+  .finally(() => desenharCodigoNaEntrada());

@@ -1,8 +1,8 @@
-//! A ponte do celular contra os bytes-ouro da linha 1.
+//! A ponte do celular contra os bytes-ouro da linha 2 (a 0.17).
 //!
 //! A casca fala JSON e o fio fala `postcard`. Uma ida e volta pelo próprio
 //! codec não pegaria nada: os dois lados mudariam juntos. O que pega é comparar
-//! com os bytes que a F1 escreveu em `seele-proto/tests/fio_1_0.txt`, gerados de
+//! com os bytes que a linha 2 escreve em `seele-proto/tests/fio_2_0.txt`, gerados de
 //! exemplares escritos à mão.
 
 #![allow(
@@ -23,7 +23,7 @@ use seele_web::{codificar_do_cliente, decodificar_do_servidor, DoServidor, ErroD
 /// As linhas `nome<TAB>hex` do arquivo da F1.
 fn ouro(prefixo: &str) -> Vec<(String, Vec<u8>)> {
     let caminho =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../seele-proto/tests/fio_1_0.txt");
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../seele-proto/tests/fio_2_0.txt");
     let texto = std::fs::read_to_string(&caminho).expect("os bytes-ouro da F1");
     texto
         .lines()
@@ -112,7 +112,8 @@ fn o_carimbo_que_a_ponte_recebe_vai_no_byte_zero() {
 fn uma_mensagem_de_vocabulario_mais_novo_chega_como_desconhecida() {
     // O ordinal 10 000 em varint: 0x90 0x4e. Nenhuma build vai conhecê-lo.
     assert_eq!(
-        decodificar_do_servidor(&[9, 0x90, 0x4e]).expect("pular, e não derrubar"),
+        decodificar_do_servidor(&[seele_proto::version::PROTOCOL_VERSION, 0x90, 0x4e])
+            .expect("pular, e não derrubar"),
         DoServidor::Desconhecida { ordinal: 10_000 }
     );
 }

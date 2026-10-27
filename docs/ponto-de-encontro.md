@@ -186,6 +186,50 @@ Ele abre a porta **8384/UDP** em IPv4 e IPv6 e fica ali. Opções:
 --barulhento    imprimir quem falou com quem (é metadado; desligue depois)
 ```
 
+**A partir da 0.17**, o mesmo processo fala também o **ENC/3** (o registro e a chamada da 0.17) e
+responde **STUN Binding** na mesma porta UDP. O STUN é como o navegador descobre o próprio endereço
+público, e a página usa o ponto do convite, e só ele: nenhum STUN de terceiro.
+
+### O navegador: `--sinal`, atrás de um proxy TLS
+
+O navegador não fala UDP. Para ele chamar um anfitrião atrás de NAT, o ponto atende um
+`POST /sinal/1` em HTTP:
+
+```
+--sinal 127.0.0.1:8385     o HTTP do navegador, só no loopback
+--origem https://seele.sh   quem pode ler a resposta (repetível; este é o padrão)
+```
+
+O ponto **não fala TLS**, de propósito: ele continua Rust puro, sem certificado e sem ACME dentro
+dele. Quem termina o HTTPS é um proxy reverso na mesma máquina, no **mesmo nome** do ponto e na porta
+443. A página chama `https://<nome do ponto>/sinal/1`, então um ponto escrito como IP no convite não
+tem sinal, só o STUN. Se a máquina já tem um servidor em 443, o bloco vai nele (dois não sobem na mesma porta). Com o Caddy,
+que emite e renova o certificado sozinho, e o 404 dito para todo caminho que não é o sinal:
+
+```
+encontro.suacasa.exemplo {
+    handle /sinal/1 {
+        reverse_proxy 127.0.0.1:8385
+    }
+    handle {
+        respond 404
+    }
+}
+```
+
+```sh
+sudo ufw allow 443/tcp
+```
+
+O ponto confia no `X-Forwarded-For` só quando a conexão vem do loopback, e lê o último endereço
+dele. É por esse IP que o limite de chamadas é contado. Sem `--sinal`, o navegador entra só pelo
+caminho direto (a rede local, o IPv6 e a porta aberta); o resto continua igual.
+
+**O que o sinal fica sabendo**: o mesmo que o `LEVE` sempre soube. Ele vê o endereço público da
+página e o candidato que ela mandou, e conta à escuta do anfitrião que alguém quer entrar. A conversa
+não passa por ele: a página escreve a impressão do convite como a do anfitrião, e o navegador recusa
+outro certificado.
+
 Libere a porta no firewall da máquina:
 
 ```sh
@@ -201,7 +245,7 @@ Description=SEELE — ponto de encontro
 After=network.target
 
 [Service]
-ExecStart=/opt/seele/seele-encontro
+ExecStart=/opt/seele/seele-encontro --sinal 127.0.0.1:8385
 Restart=always
 DynamicUser=yes
 
@@ -290,12 +334,28 @@ Na ordem:
 2. de **outra** máquina, conferir:
 
    ```sh
-   cargo run -p seele-encontro --example sondar -- --exige-enc2 encontro.seele.app.br
+   cargo run -p seele-encontro --example sondar -- --exige-enc2 --exige-enc3 rendzvous.seele.sh
    ```
 
    Ele sai com sucesso só se toda família que responde ao `ONDE` também falar o
    ENC/2, com o relógio do ponto a menos de um minuto do da máquina que sonda,
-   e diz de quantos segundos é a diferença;
+   e diz de quantos segundos é a diferença. Com `--exige-enc3` (a 0.17), também o
+   `QUEM3` do ENC/3 e o STUN Binding em toda família: um ponto da 0.16 passa no
+   ENC/2 e reprova aqui. O ENC/3 é provado de ponta a ponta numa sala efêmera
+   (o `MORO3` com o cookie do `DESAFIO`, o `QUEM3`, e um `CHAMA` de um segundo
+   socket atendido pela escuta), e não só por uma consulta;
+   e o sinal do navegador, pelo HTTPS de verdade e com a origem do web app (a
+   resposta tem de ser a linha `SEELE-SINAL/1 NINGUEM`, e o
+   `Access-Control-Allow-Origin` tem de ser `https://seele.sh`; um `200` de outra
+   página não conta):
+
+   ```sh
+   corpo=$(cargo run -q -p seele-encontro --example sondar -- --corpo-do-sinal)
+   curl --fail -sS --proto '=https' -D - -H 'Origin: https://seele.sh' \
+     -H 'Content-Type: text/plain' --data-binary "$corpo" https://rendzvous.seele.sh/sinal/1 \
+     | tee /dev/stderr | sed '1,/^\r\{0,1\}$/d' \
+     | cargo run -q -p seele-encontro --example sondar -- --resposta-do-sinal
+   ```
 3. publicar. O `empacotar/publicar.sh` roda a mesma conferência antes de
    qualquer passo com efeito, e para se o ponto não falar o ENC/2. O
    `--sem-ponto` pula a conferência, para a emergência que não depende do ponto,
@@ -336,8 +396,17 @@ alguém mexer:
 - **O ponto de encontro nunca copia bytes de um pedido para uma resposta.** A
   resposta é montada campo a campo. O único pedaço do pedido que reaparece é a
   marca, que é alfanumérica e curta justamente por isso.
-- **Todo datagrama do ENC/1 tem 96 bytes, e todo do ENC/2 tem 384: pedido e
-  resposta, sempre do mesmo tamanho.** Um refletor que responde mais do que
-  recebe é uma arma apontada para quem nunca ouviu falar deste projeto. O
-  enchimento é o que mantém o ganho em 1:1, e um datagrama de qualquer outro
-  tamanho é calado.
+- **Todo datagrama do ENC/1 tem 96 bytes, e todo do ENC/2 e do ENC/3 tem 384:
+  pedido e resposta, sempre do mesmo tamanho.** Um refletor que responde mais
+  do que recebe é uma arma apontada para quem nunca ouviu falar deste
+  projeto. O enchimento é o que mantém o ganho em 1:1, e um datagrama de
+  qualquer outro tamanho é calado.
+- **A exceção, dita: o STUN Binding.** A resposta tem 32 bytes (IPv4) ou 44
+  (IPv6), contra um pedido de 20 ou mais: um ganho de até 2,2:1. Ele é contido
+  pelo balde próprio por prefixo, pela recusa de origem em porta abaixo de
+  1024 e pela recusa de qualquer pedido que não seja um Binding Request bem
+  formado (`crates/seele-encontro/src/stun.rs`).
+- **O `CHAMADO` é o único datagrama que o ponto manda a quem não pediu**, e só
+  a uma escuta registrada no ENC/3, com o tamanho do `CHAMA` que o causou e com
+  um `id` de 128 bits que só ela recebe. O `CHAMA` gasta um balde próprio por
+  prefixo, e as chamadas pendentes têm teto (`crates/seele-encontro/src/enc3.rs`).

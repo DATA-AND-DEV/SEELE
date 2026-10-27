@@ -696,6 +696,95 @@ pub const MIGRATIONS: &[Migration] = &[
             END;
         "#,
     },
+    Migration {
+        version: 18,
+        description: "cargos (ADR 0064): posição, @everyone, Transmitir tela, Administrador e as permissões de MOD",
+        sql: r#"
+            -- ADR 0064. Os quatro papéis viram cargos com posição, e a regra
+            -- passa a ser a soma das concessões menos as restrições. A prova de
+            -- que ninguém ganhou nada está em `persistence::cargos`, contra a
+            -- função legada copiada literalmente.
+            --
+            -- `permissions` e `denials` FICAM, com os mesmos nomes JSON: passam
+            -- a ser lidas como «concede» e «restringe». Renomear as colunas não
+            -- ganharia nada e mexeria em todo banco existente.
+
+            -- A posição. Quanto maior, mais alto; o @everyone é 0.
+            ALTER TABLE roles ADD COLUMN position INTEGER NOT NULL DEFAULT 0;
+
+            -- Os cargos feitos à mão (fora dos quatro semeados) ficam EMBAIXO,
+            -- pela ordem do id: um cargo baixo administra menos, e é o lado
+            -- seguro para um cargo que ninguém ordenou.
+            UPDATE roles SET position = (
+                SELECT COUNT(*) FROM roles AS outro
+                 WHERE outro.id NOT IN (0, 1, 2, 3, 4) AND outro.id <= roles.id
+            ) WHERE id NOT IN (0, 1, 2, 3, 4);
+            -- Depois deles: Observer, Person, Operator e Commander, nessa ordem.
+            UPDATE roles SET position =
+                (SELECT COUNT(*) FROM roles WHERE id NOT IN (0, 1, 2, 3, 4))
+                + CASE id WHEN 4 THEN 1 WHEN 3 THEN 2 WHEN 2 THEN 3 WHEN 1 THEN 4 END
+             WHERE id IN (1, 2, 3, 4);
+
+            -- O @everyone, com o id 0 e VAZIO de propósito: quem teve o Person
+            -- revogado não pode passar a ter coisa nenhuma. `OR IGNORE` para um
+            -- banco em que alguém já criou à mão um papel com esse nome — aí o
+            -- @everyone fica ausente, e ausente lê como vazio.
+            INSERT OR IGNORE INTO roles (id, name, permissions, denials, position)
+                VALUES (0, '@everyone', '[]', '[]', 0);
+
+            -- Transmitir tela espelha Falar: até aqui a tela era conferida
+            -- pelo `may_speak`. Onde Falar é concedido, a tela é concedida;
+            -- onde Falar é negado, a tela é restringida. Transmitir continua
+            -- exatamente igual a falar até alguém separar.
+            UPDATE roles SET permissions = json_insert(permissions, '$[#]', 'ShareScreen')
+             WHERE EXISTS (SELECT 1 FROM json_each(roles.permissions) WHERE value = 'Speak')
+               AND NOT EXISTS (SELECT 1 FROM json_each(roles.permissions) WHERE value = 'ShareScreen');
+            UPDATE roles SET denials = json_insert(denials, '$[#]', 'ShareScreen')
+             WHERE EXISTS (SELECT 1 FROM json_each(roles.denials) WHERE value = 'Speak')
+               AND NOT EXISTS (SELECT 1 FROM json_each(roles.denials) WHERE value = 'ShareScreen');
+
+            -- O Administrador vai para quem já concedia AS TREZE legadas — na
+            -- prática, o Commander. Para as treze o efeito é idêntico; o que ele
+            -- acrescenta são as permissões que ainda não existiam.
+            UPDATE roles SET permissions = json_insert(permissions, '$[#]', 'Administrator')
+             WHERE (SELECT COUNT(DISTINCT value) FROM json_each(roles.permissions)
+                     WHERE value IN ('ViewVoiceRoom', 'EnterVoiceRoom', 'Speak', 'ReadChannel',
+                                     'WriteChannel', 'RemoveMessage', 'MovePerson', 'Kick', 'Ban',
+                                     'ManageVoiceRooms', 'ManageRoles', 'AdministerServer',
+                                     'AttachFile')) = 13
+               AND NOT EXISTS (SELECT 1 FROM json_each(roles.permissions) WHERE value = 'Administrator');
+
+            -- Um id de cargo apagado nunca volta, pela razão da migração 17:
+            -- o `minimum_*_role` de um canal apontaria para o cargo novo.
+            INSERT OR IGNORE INTO maiores_ids (tabela, maior)
+                VALUES ('roles', COALESCE((SELECT MAX(id) FROM roles), 0));
+            CREATE TRIGGER roles_sobem_o_maior_id AFTER INSERT ON roles
+            BEGIN
+                UPDATE maiores_ids SET maior = MAX(maior, NEW.id) WHERE tabela = 'roles';
+            END;
+
+            -- A revisão do conjunto de cargos: sobe a cada mudança aceita, e
+            -- todo verbo de gestão diz a que viu. Uma linha só.
+            CREATE TABLE revisao_dos_cargos (
+                id      INTEGER PRIMARY KEY CHECK (id = 1),
+                revisao INTEGER NOT NULL
+            ) STRICT;
+            INSERT INTO revisao_dos_cargos (id, revisao) VALUES (1, 0);
+
+            -- As permissões que cada MOD declara no `mod.json` (campo
+            -- `permissoes`), gravadas ao habilitar, com os bytes que o hash
+            -- cobre — a mesma razão das colunas da migração 12. Uma ação só é
+            -- autorizável se estiver aqui E o MOD estiver ligado. Desligar não
+            -- apaga: o ADR 0045 preserva os dados.
+            CREATE TABLE mod_permissoes (
+                mod_id TEXT    NOT NULL REFERENCES mods(id),
+                acao   TEXT    NOT NULL,
+                nome   TEXT    NOT NULL,
+                todos  INTEGER NOT NULL DEFAULT 0 CHECK (todos IN (0, 1)),
+                PRIMARY KEY (mod_id, acao)
+            ) STRICT;
+        "#,
+    },
 ];
 
 #[cfg(test)]

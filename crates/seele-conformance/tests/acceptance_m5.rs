@@ -29,10 +29,18 @@ const CHANNEL: u32 = 1;
 const WAIT: Duration = Duration::from_secs(5);
 
 async fn start() -> Result<(SocketAddr, Arc<Daemon>)> {
+    start_com_dono(None).await
+}
+
+/// O mesmo, com o proprietário declarado pela impressão da chave dele (ADR
+/// 0064). Desde a 0.17, a primeira conta **não** vira mais Comandante: quem
+/// pode tudo é o proprietário que a máquina que hospeda declarou.
+async fn start_com_dono(proprietario: Option<String>) -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
+        proprietario,
         ..ServerConfig::default()
     };
     let server = Arc::new(Daemon::bind(config).await?);
@@ -88,6 +96,22 @@ fn home(name: &str) -> String {
 }
 
 fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Connection>, ConnectionError> {
+    connect_em(address, nickname, home(nickname))
+}
+
+/// Uma pasta nova e a impressão da chave que ela vai usar — para declarar o
+/// proprietário **antes** de o servidor nascer, como a máquina que hospeda faz.
+fn home_do_dono(nickname: &str) -> (String, String) {
+    let pasta = home(nickname);
+    let impressao = seele_ffi::impressao_desta_maquina(&pasta).expect("a identidade desta pasta");
+    (pasta, impressao)
+}
+
+fn connect_em(
+    address: SocketAddr,
+    nickname: &str,
+    home: String,
+) -> Result<Arc<Connection>, ConnectionError> {
     // `seele-ffi`'s unit tests cover the two ends of this — what goes into
     // `Destino`, and how a `Verdict` maps to a `Trust` — and neither of them
     // touches the one channel that puts the second inside the value `connect`
@@ -103,7 +127,7 @@ fn connect(address: SocketAddr, nickname: &str) -> Result<Arc<Connection>, Conne
         server: address.to_string(),
         alternate_servers: Vec::new(),
         nickname: nickname.to_owned(),
-        home: home(nickname),
+        home,
         join_secret: None,
         expected_fingerprint: None,
         codigo_esperado: None,
@@ -641,12 +665,15 @@ async fn dropping_the_handle_disconnects() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
     let _vaga = vaga::minha();
-    let (address, server) = start().await?;
-    let connection = tokio::task::spawn_blocking(move || connect(address, "anfitria")).await??;
+    let (pasta, impressao) = home_do_dono("anfitria");
+    let (address, server) = start_com_dono(Some(impressao)).await?;
+    let connection =
+        tokio::task::spawn_blocking(move || connect_em(address, "anfitria", pasta)).await??;
 
-    // The first account on a server is its Comandante, which is what makes this
-    // shell the one that may ask. The field exists so a screen can decide
-    // whether to draw the control at all.
+    // The declared proprietário (ADR 0064) is what makes this shell the one
+    // that may ask — since 0.17 the first account is no longer Comandante by
+    // arriving first. The field exists so a screen can decide whether to draw
+    // the control at all.
     assert!(
         connection.snapshot().may_manage_voice_rooms,
         "the shell that hosted this server was not told it may make rooms"
@@ -706,10 +733,17 @@ async fn a_shell_asks_for_a_room_and_the_server_makes_it() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_shell_without_the_permission_is_refused_by_the_server() -> Result<()> {
     let _vaga = vaga::minha();
-    let (address, server) = start().await?;
-
-    // Whoever connects first hosts. This one is the guest.
-    let anfitria = tokio::task::spawn_blocking(move || connect(address, "anfitria2")).await??;
+    // The host is the declared proprietário, so the refusal below is the
+    // server telling a guest apart from an owner who is right there — not a
+    // server where nobody may do anything.
+    let (pasta, impressao) = home_do_dono("anfitria2");
+    let (address, server) = start_com_dono(Some(impressao)).await?;
+    let anfitria =
+        tokio::task::spawn_blocking(move || connect_em(address, "anfitria2", pasta)).await??;
+    assert!(
+        anfitria.snapshot().may_manage_voice_rooms,
+        "the proprietário was not told it may make rooms, and the guest's refusal proves nothing"
+    );
     let convidado = tokio::task::spawn_blocking(move || connect(address, "convidado")).await??;
 
     assert!(

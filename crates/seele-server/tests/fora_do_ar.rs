@@ -32,55 +32,7 @@ use seele_server::permissions::Permissions;
 use seele_server::persistence::Location;
 use seele_server::{frame, Daemon, ServerConfig};
 
-/// Um verificador que aceita qualquer certificado: o que está sob teste é a
-/// lista de membros, não o TOFU.
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
+mod comum;
 
 async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
@@ -100,26 +52,19 @@ async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
 
 /// Um par cru que já entrou: a ponta, o fluxo de controle e a conta.
 struct Par {
-    _ponta: quinn::Endpoint,
-    envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
+    _ponta: (seele_enlace::Ponta, seele_enlace::Conexao),
+    envio: seele_enlace::Envio,
+    recebe: seele_enlace::Recebe,
     person: PersonId,
 }
 
 async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Par> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    )));
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
+    let comum::Ligado {
+        ponta,
+        conexao,
+        mut envio,
+        mut recebe,
+    } = comum::ligar(endereco).await?;
 
     let chave = SigningKey::from_bytes(&[semente; 32]);
     frame::write(
@@ -143,7 +88,7 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Par> {
         &mut envio,
         &ClientMessage::Response {
             proof: chave
-                .sign(&prova_amarrada(&conexao, &nonce))
+                .sign(&comum::prova_amarrada(&conexao, &nonce))
                 .to_bytes()
                 .to_vec(),
         },
@@ -154,7 +99,7 @@ async fn entrar(endereco: SocketAddr, semente: u8) -> Result<Par> {
         anyhow::bail!("o servidor não mandou Session");
     };
     Ok(Par {
-        _ponta: ponta,
+        _ponta: (ponta, conexao.clone()),
         envio,
         recebe,
         person,
@@ -211,6 +156,17 @@ fn apelidos(membros: &[Membro]) -> Vec<&str> {
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_entra_recebe_os_membros_e_fica_sabendo_do_banimento() -> Result<()> {
     let (endereco, daemon) = servidor().await?;
+    // A é a proprietária declarada (ADR 0064): ninguém administra por chegar
+    // primeiro.
+    {
+        let banco = daemon.server().persistence.lock().await;
+        seele_server::cargos::declarar_proprietario(
+            &banco,
+            &seele_proto::transport::key_fingerprint(
+                &SigningKey::from_bytes(&[91; 32]).verifying_key().to_bytes(),
+            ),
+        )?;
+    }
     let mut a = entrar(endereco, 91).await?;
     let b = entrar(endereco, 92).await?;
     let pessoa_b = b.person;
@@ -231,7 +187,7 @@ async fn quem_entra_recebe_os_membros_e_fica_sabendo_do_banimento() -> Result<()
         "quem saiu continua membro, e quem entra se vê na lista"
     );
 
-    // A é a primeira conta, então Comandante, e pode banir.
+    // A é a proprietária, e pode banir.
     frame::write(
         &mut a.envio,
         &ClientMessage::BanPerson {
@@ -365,25 +321,4 @@ async fn trezentos_membros_vao_em_duas_partes() -> Result<()> {
 
     daemon.shutdown();
     Ok(())
-}
-
-/// A mensagem que a prova assina: o rótulo, a impressão do certificado que o
-/// TLS desta conexão conferiu e o nonce (o S2).
-fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS sempre entrega a cadeia do servidor");
-    let impressao = seele_proto::transport::certificate_digest(
-        cadeia
-            .first()
-            .expect("a cadeia tem um certificado")
-            .as_ref(),
-    );
-    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
-    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

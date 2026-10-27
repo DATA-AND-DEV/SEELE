@@ -195,7 +195,81 @@ construção, com a linha acompanhando cada edição.
 > eles; o estilo vale onde a forma monta, e o `superficie-classes` pede
 > `superficies`. Depois desta, a v6 só muda na API 7.
 
-O que muda na forma do arquivo:
+## A API 7 (0.17)
+
+**A v6 saiu na v0.16.0 (`8faa3379b`) e está congelada de vez.** O `cargo xtask
+check-api` também confere `congeladas.sha256` desde a 0.17, e o
+`a_v6_da_arvore_e_a_publicada` prende o hash publicado.
+
+**A 7 é um alargamento da 6** (E8 da 0.17; ADR 0063, e o ADR 0064 dos cargos):
+a v6 inteira, mais o que os cargos pedem.
+
+- **`manifesto.permissoes`** (`Manifest::permissoes`, `cargos::PermissaoDeclarada`):
+  `[{ "acao": "fechar-mesa", "nome": "Fechar a mesa", "todos": false }]`.
+  - Declarar exige `"api": 7`. Um manifesto da 6 com a chave é recusado
+    com `PermissoesPedemApiNova`, e não ignorado.
+  - A lista passa pela regra dos cargos (`validar_declaradas`): ação em
+    `[a-z0-9-]` até 32 caracteres, nome não vazio, sem repetir, e o teto de
+    permissões por MOD.
+- **A ação `acao`** (`ClientMessage::AcaoDeMod`): o MOD pede uma ação
+  declarada, e o servidor confere o MOD ligado, a ação declarada e a
+  permissão da pessoa antes de chamar a metade de servidor. A recusa volta
+  como `acao-nao-declarada` ou `sem-permissao`.
+  - **Na janela, `SeeleMods.acao(id, canal, acao, valor)`**, só com a
+    capacidade `acoes` (sem ela, o membro não existe). A mensagem da ponte é
+    `acao`, e o id que vai é sempre o do próprio MOD, como no `request`. Ela
+    devolve a resposta da metade de servidor, como o `request`, e a recusa dos
+    cargos chega como valor: `{ ok: false, recusa: "sem-permissao" }`. As
+    recusas da ponte são as do pedido (`too-many-requests`, `mensagem-grande`
+    — o nome da ação conta no teto —, `sessao-encerrada`). A rota: o
+    `mod_request` com `acao` (o comando Tauri e o `seele-web`) →
+    `Connection::acao_de_mod` → `Enlace::acao_de_mod` → `Client::acao_de_mod`
+    → `AcaoDeMod` no fio. A janela não confere a ação nem a permissão.
+  - **O padrão que a metade de servidor segue.** O `ModRequest` comum
+    continua valendo, e o servidor não o veta: as leituras do MOD seguem por
+    ele. Quem guarda a operação protegida é o `aoPedir`, e só por
+    `contexto.acao`, que o host escreve depois do portão dos cargos e que é
+    `null` num `ModRequest`:
+
+    ```js
+    if (pedido.op === 'fechar' && contexto.acao !== 'fechar-mesa') {
+      return JSON.stringify({ ok: false, erro: 'pede-a-acao-fechar-mesa' });
+    }
+    ```
+
+    Nunca pelo corpo do pedido (um `pedido.acao`, um `admin` ou um
+    `contexto` escritos pelo cliente não decidem nada), e nunca por
+    `contexto.permissoes`: ela é informativa, para esconder botões, e chega
+    também num `ModRequest` comum. Guardar a operação por ela deixaria o
+    pedido legado executá-la sem passar pelo portão. O exemplo é a fixture
+    `apps/seele-app/testes/mod-de-acoes/`, provada de ponta a ponta em
+    `crates/seele-conformance/tests/acoes_de_mod.rs`.
+- **A capacidade `acoes`**, a última da lista da 7 (`capacidades_da_api(7)`).
+
+O que fica:
+
+- **Um MOD da 6 roda na 0.17 sem permissões.** `APIS_ACEITAS = [7, 6]` e
+  `APIS_POR_LINHA` é `("2", [7, 6])`, `("1", [6])`, `("0.15", [5, 4, 3])`.
+  O que os cargos fazem com um MOD sem permissões declaradas é regra do ADR 0064.
+- **A 0.16 não roda a 7, e a recusa dela não é a mesma nos dois casos**
+  (medido contra o parser congelado dela, `crates/seele-proto/tests/manifesto_da_0_16.rs`):
+  - um manifesto da 7 **com** `permissoes` é recusado como `Malformed`,
+    porque a 0.16 tem `deny_unknown_fields` e não conhece a chave;
+  - **sem** `permissoes`, é recusado como `ApiTooNew { 7, 6 }`.
+  - Por isso o catálogo não pode oferecer a uma 0.16 uma versão da 7. A
+    0.16 escolhe a versão pela `api` de cada entrada do catálogo
+    (`ui/camada-mods.js`), e o indexador tem de escrever a `api` que o
+    `mod.json` declara.
+- **O mínimo de app e de linha:** a API 7 pede a linha `2` (a 0.17 em diante), e a
+  6 roda nas linhas `1` e `2`.
+
+**Até a 0.17 sair, a v7 segue a regra da v6 antes da publicação** (D-api-8).
+`MOD_API_VERSION` já é 7, então ela conta como oferecida. Cada emenda é um
+commit só, escreve só o que foi entregue e refaz a linha dela em
+`congeladas.sha256`, com a razão escrita lá. Depois da 0.17, a mudança vai
+para a v8.
+
+O que muda na forma do arquivo da v6, e vale também para a v7:
 
 - **a v6 é escrita por inteiro**, sem `extends`: só a API 6 roda no app 0.16,
   e herdar traria de volta o que as versões 1 a 5 prometeram e não entregaram;

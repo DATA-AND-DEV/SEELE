@@ -1040,7 +1040,7 @@ fn origem_do_web_app() -> String {
 
 /// **A origem do web app é escrita num lugar só** (D-web-2, 15/10/2026).
 ///
-/// Ela é permanente: as identidades do navegador moram nela. Uma cópia escrita
+/// As identidades do navegador moram nela (e a troca de domínio da 0.17 começa identidades novas). Uma cópia escrita
 /// à mão — numa bancada, num script da página, numa configuração — é uma
 /// segunda verdade que ninguém confere, e o pedido da orquestradora foi um
 /// lugar só para cada coisa que precisa do nome. O lugar é a
@@ -1076,10 +1076,16 @@ fn a_origem_do_web_app_e_escrita_num_lugar_so() {
             continue;
         };
         lidos += 1;
-        if bytes
-            .windows(origem.len())
-            .any(|janela| janela == origem.as_bytes())
-        {
+        // O NOME INTEIRO, e não um pedaço: com a origem no apex do domínio, ela é sufixo de todo subdomínio do projeto
+        // (`mods.seele.sh`, `rendzvous.seele.sh`, `get.seele.sh`), que são outros endereços e não cópias dela.
+        let parte_de_nome = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'.';
+        if bytes.windows(origem.len()).enumerate().any(|(i, janela)| {
+            janela == origem.as_bytes()
+                && (i == 0 || !parte_de_nome(bytes[i - 1]))
+                && bytes
+                    .get(i + origem.len())
+                    .is_none_or(|&depois| !(depois.is_ascii_alphanumeric() || depois == b'-'))
+        }) {
             copias.push(caminho.into_owned());
         }
     }
@@ -1101,8 +1107,8 @@ fn a_origem_do_web_app_e_escrita_num_lugar_so() {
 const ENDERECOS_DA_PAGINA: &[(&str, &str, &str)] = &[
     (
         "ui/frases.js",
-        "https://seele.app.br",
-        "a `PAGINA_DO_APP`, BAIXAR O APP DO SEELE",
+        "https://get.seele.sh",
+        "a `PAGINA_DO_APP`, BAIXAR O APP DO SEELE (o site de downloads, get.seele.sh)",
     ),
     ("ui/glifos.js", "http://www.w3.org", "o namespace do SVG"),
 ];

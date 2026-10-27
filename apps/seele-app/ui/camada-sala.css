@@ -12,10 +12,17 @@
 .perfil-sala {
   display: flex;
   flex-direction: column;
-  gap: var(--seele-e1);
-  margin-top: var(--seele-e2);
-  padding-top: var(--seele-e2);
+  gap: var(--seele-e2);
+  margin: 0;
+  /* O mesmo respiro do formulário de cima (`.nomear-corpo`): 24 px. */
+  padding: var(--seele-e3);
   border-top: var(--seele-b) solid var(--seele-linha);
+}
+
+@media (max-width: 520px) {
+  .perfil-sala {
+    padding: var(--seele-e2);
+  }
 }
 
 .perfil-sala-codigo {
@@ -50,11 +57,20 @@
 }
 
 .perfil-agenda-linha {
-  display: grid;
-  grid-template-columns: minmax(6rem, 10rem) 1fr auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--seele-e1);
   padding: var(--seele-e1) 0;
+}
+
+/* O nome ao lado das ações; o código, quando não cabe, desce para a própria linha. */
+.perfil-agenda-linha > .perfil-agenda-nome {
+  flex: 1 1 9rem;
+}
+
+.perfil-agenda-linha > .perfil-agenda-quem {
+  flex: 1 1 14rem;
 }
 
 .perfil-agenda-quem {
@@ -64,4 +80,676 @@
 
 .perfil-agenda-nome {
   min-width: 0;
+}
+
+/* O SEU CÓDIGO na entrada (0.17): um quadro como o das sessões abertas, azul
+   quando a sala recebe, e laranja quando ela não recebe. */
+.boot-codigo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--seele-linha);
+  border-left: 2px solid var(--seele-padrao-azul);
+  background: var(--seele-negro-absoluto);
+}
+
+.boot-codigo[data-recebe="nao"] {
+  border-left-color: var(--seele-laranja-nerv);
+}
+
+.boot-codigo .nota {
+  margin: 0;
+}
+
+/* Os AMIGOS na entrada (0.17): o mesmo quadro do SEU CÓDIGO. */
+.boot-amigos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--seele-linha);
+  border-left: 2px solid var(--seele-padrao-azul);
+  background: var(--seele-negro-absoluto);
+}
+
+.boot-amigos .nota {
+  margin: 0;
+}
+
+.boot-amigos-form {
+  max-width: 44rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--seele-e1);
+}
+
+.boot-amigos-form input {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.perfil-agenda-amigo {
+  color: var(--seele-padrao-azul);
+  letter-spacing: 0.08em;
+}
+
+/* A vista da ligação pessoal (0.17): a grade da chamada, o palco e o operador
+   (microfone, dispositivos, sair) são os de sempre; sai o que é de servidor
+   (criar sala de voz, canais de texto e a conversa). A trilha com as outras
+   sessões fica, para voltar a elas. */
+#tela-sessao[data-vista="ligacao"] .canais-rolagem,
+#tela-sessao[data-vista="ligacao"] .painel-pessoas,
+#tela-sessao[data-vista="ligacao"] #operador-quem {
+  display: none;
+}
+
+/* **A organização da ligação pessoal (v2)**: sem a coluna intermediária (o
+   perfil, as salas e os canais), só o trilho das sessões à esquerda; no centro,
+   o cabeçalho, a grade e o palco; embaixo, a barra da chamada. A barra é o
+   `.operador` de sempre (microfone, surdez, AJUSTES, COMPARTILHAR, SAIR DA
+   SALA) reposicionado, com o CHAT e o DESLIGAR: os mesmos controles e
+   handlers, sem cópia. A coluna do servidor fica como era. */
+#tela-sessao[data-vista="ligacao"] .painel-canais {
+  display: contents;
+}
+
+#tela-sessao[data-vista="ligacao"] .paineis {
+  grid-template-columns: 60px minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "trilha linha painelmod"
+    "trilha barra painelmod";
+}
+
+#tela-sessao[data-vista="ligacao"] .operador {
+  grid-area: barra;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 16px;
+  padding: 10px 16px;
+  border-right: 1px solid var(--seele-linha);
+}
+
+/* A frase da voz e o gesto explícito de trazer a voz ficam numa linha própria,
+   acima dos botões. */
+#tela-sessao[data-vista="ligacao"] .operador > :is(.operador-frase, #sessao-ficou-para-tras, #voz-foco) {
+  flex: 1 1 100%;
+  order: -1;
+  margin: 0;
+  text-align: center;
+}
+
+#tela-sessao[data-vista="ligacao"] .operador-fileira {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#tela-sessao[data-vista="ligacao"] .operador-fileira > button {
+  margin-left: 0;
+}
+
+/* A frase «o microfone é de …» repete o aviso do foco de voz logo abaixo dela
+   quando a voz está em outra sessão: fica só o aviso, que traz o gesto. */
+#tela-sessao[data-vista="ligacao"] .operador:has(.voz-foco:not([hidden])) #voz-estado {
+  display: none;
+}
+
+/* A barra do centro quebra fileira em vez de passar da janela. */
+#tela-sessao[data-vista="ligacao"] .vista-chamada-barra {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+@media (max-width: 640px) {
+  #tela-sessao[data-vista="ligacao"] .operador {
+    padding: 6px 8px;
+    gap: 6px 8px;
+  }
+}
+
+/* O chat e o DESLIGAR só existem na barra da ligação pessoal. */
+#tela-sessao:not([data-vista="ligacao"]) :is(#ligacao-chat, #ligacao-desligar) {
+  display: none;
+}
+
+/* A barra tem UMA ação principal, o DESLIGAR, no fim e à parte; o SAIR DA SALA
+   fica secundário (só para a voz) e a frase de baixo diz a diferença. */
+#tela-sessao[data-vista="ligacao"] #operador-vista { order: 1; }
+#tela-sessao[data-vista="ligacao"] #ligacao-chat { order: 2; }
+#tela-sessao[data-vista="ligacao"] #operador-sair { order: 3; color: var(--nucleo-apagado); }
+#tela-sessao[data-vista="ligacao"] #ligacao-desligar { order: 4; margin-left: var(--seele-e3); }
+
+#tela-sessao:not([data-vista="ligacao"]) #ligacao-barra-dica {
+  display: none;
+}
+
+.ligacao-barra-dica {
+  flex: 1 1 100%;
+  order: 9;
+  margin: 0;
+  text-align: center;
+}
+
+.ligacao-desligar {
+  min-height: 34px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0.12em;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  border: 1px solid var(--seele-laranja-nerv);
+  cursor: pointer;
+}
+
+.ligacao-desligar:hover {
+  background: transparent;
+  color: var(--seele-laranja-nerv);
+}
+
+/* O cabeçalho: LIGAÇÃO PESSOAL · nome, e o estado da ligação. */
+.ligacao-cabeca:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: var(--seele-e2);
+  padding: var(--seele-e1) var(--seele-e2);
+  border-bottom: 1px solid var(--seele-linha);
+  min-width: 0;
+}
+
+.ligacao-cabeca-estado {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--seele-linha-forte);
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.14em;
+  color: var(--seele-osso-apagado);
+  white-space: nowrap;
+}
+
+/* O centro da ligação: poucos participantes ficam CENTRADOS, em cartões de
+   largura legível, e o palco parado vira uma faixa estreita no meio. Com a
+   tela compartilhada, o palco volta à largura toda. */
+#tela-sessao[data-vista="ligacao"] #chamada-grade {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: center;
+  gap: var(--seele-e2);
+  padding: var(--seele-e3);
+}
+
+#tela-sessao[data-vista="ligacao"] #chamada-grade > .chamada-cartao {
+  flex: 1 1 20rem;
+  max-width: 32rem;
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+#tela-sessao[data-vista="ligacao"] #palco[data-transmitindo="nao"] {
+  width: 100%;
+  max-width: 52rem;
+  margin-inline: auto;
+  border-inline: 1px solid var(--seele-linha);
+}
+
+/* O chat: a mesma `#vista-conversa` do servidor, sobreposta à direita
+   enquanto está aberto. Fechado, ela fica escondida na vista pessoal.
+   **Com espaço reservado**: o palco e a barra encolhem para a esquerda
+   (`padding-right`) e o painel fica no vão, então nada é coberto; sem largura
+   para isso (abaixo de 900px) o painel sobe até o topo da barra da chamada, e a
+   barra continua à vista e clicável. */
+@media (min-width: 900px) {
+  #tela-sessao[data-chat="aberto"] .paineis {
+    padding-right: min(34rem, 100vw);
+  }
+}
+.ligacao-chat-fechar {
+  display: none;
+}
+
+#tela-sessao[data-chat="aberto"] .ligacao-chat-fechar {
+  display: inline-flex;
+}
+
+#tela-sessao[data-chat="aberto"] #vista-conversa {
+  position: fixed;
+  z-index: 45;
+  top: var(--seele-barra-janela, 32px);
+  right: 0;
+  bottom: 0;
+  width: min(34rem, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--seele-negro-painel);
+  border-left: 1px solid var(--seele-laranja-nerv);
+  box-shadow: -12px 0 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Estreito: o painel acaba onde a barra da chamada começa (a altura vem de
+   `abrirOChat`, que mede a barra). */
+@media (max-width: 899px) {
+  #tela-sessao[data-chat="aberto"] #vista-conversa {
+    bottom: var(--ligacao-barra-alto, 0px);
+    width: 100vw;
+  }
+}
+
+/* Os botões CANAIS e PESSOAS abrem as colunas do servidor, que a ligação não
+   tem: no painel do chat eles não existem. */
+#tela-sessao[data-vista="ligacao"] #vista-conversa :is(.linha-canais, .linha-pessoas) {
+  display: none;
+}
+
+/* O campo de escrever ocupa a largura que sobra, e o ENVIAR não flutua longe. */
+#tela-sessao[data-chat="aberto"] #form-mensagem {
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+#tela-sessao[data-chat="aberto"] #form-mensagem .compor-caixa {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#tela-sessao[data-chat="aberto"] #campo-mensagem {
+  min-width: 0;
+  width: 100%;
+}
+
+#tela-sessao[data-chat="aberto"] #lista-mensagens {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Fora da sala, o painel já oferece DESLIGAR; o «SAIR DO SERVIDOR» do operador
+   falaria de um servidor que esta vista não tem. */
+#tela-sessao[data-vista="ligacao"] #operador-sair[data-alvo="servidor"] {
+  display: none;
+}
+
+/* O miolo da ligação fora da sala: o estado e as três saídas, nunca vazio. */
+.vista-ligacao-fora:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e2);
+  padding: var(--seele-e2);
+  max-width: 40rem;
+}
+
+/* O rótulo da ligação: LIGAÇÃO PESSOAL e o nome. */
+.sessao-ligacao {
+  margin: 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--seele-padrao-azul);
+  color: var(--seele-osso);
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* A lista de AMIGOS: um cartão por pessoa. O nome em destaque (e ainda campo
+   de renomear, sem moldura de formulário), o código menor embaixo, e o LIGAR
+   como a ação principal; TIRAR DOS AMIGOS é secundário, de baixo contraste. */
+.amigos-lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+  gap: var(--seele-e1);
+  max-height: min(34rem, 56vh);
+  overflow-y: auto;
+}
+
+.amigo-cartao {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "avatar texto"
+    "avatar acoes";
+  gap: 2px var(--seele-e2);
+  align-items: center;
+  padding: var(--seele-e2);
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+.amigo-cartao:hover {
+  border-color: var(--seele-linha-forte);
+}
+
+.amigo-avatar {
+  grid-area: avatar;
+  align-self: start;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--seele-linha-forte);
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  color: var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+}
+
+.amigo-texto {
+  grid-area: texto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* O nome é um título que se pode editar: sem caixa, e com o filete só ao passar
+   o ponteiro ou focar. */
+.amigo-nome {
+  min-width: 0;
+  width: 100%;
+  padding: 2px 0;
+  font-family: var(--seele-display);
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.04em;
+  color: var(--seele-osso);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  text-overflow: ellipsis;
+}
+
+.amigo-nome:hover,
+.amigo-nome:focus {
+  border-bottom-color: var(--seele-linha-forte);
+}
+
+.amigo-detalhe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--seele-e2);
+}
+
+.amigo-codigo {
+  white-space: nowrap;
+  letter-spacing: 0.06em;
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso-apagado);
+}
+
+.amigo-aviso {
+  font-size: var(--seele-t-dado);
+  color: var(--seele-laranja-nerv);
+}
+
+.amigo-acoes {
+  grid-area: acoes;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--seele-e1) var(--seele-e2);
+  margin-top: var(--seele-e1);
+}
+
+/* O LIGAR é a ação principal do cartão: cheio, na cor do acento. */
+.amigo-ligar {
+  min-height: 34px;
+  padding: 0 20px;
+  font: inherit;
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0.14em;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+  border: 1px solid var(--seele-laranja-nerv);
+  cursor: pointer;
+}
+
+.amigo-ligar:hover:not(:disabled) {
+  background: transparent;
+  color: var(--seele-laranja-nerv);
+}
+
+.amigo-ligar:disabled {
+  color: var(--seele-osso-apagado);
+  background: none;
+  border-color: var(--seele-linha-forte);
+  cursor: not-allowed;
+}
+
+/* TIRAR DOS AMIGOS: o rótulo inteiro e a confirmação de sempre, mas miúdo, sem
+   moldura e de baixo contraste; ganha cor só ao passar o ponteiro ou focar. */
+.amigo-tirar {
+  margin: 0;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.12em;
+  color: var(--seele-osso-apagado);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.amigo-tirar:hover,
+.amigo-tirar:focus-visible {
+  color: var(--seele-osso);
+  text-decoration: underline;
+}
+
+/* ===================================================== a entrada, v2 (0.17)
+ *
+ * Em largura total, três colunas: os SERVIDORES (e as conversas abertas) à
+ * esquerda, o SEU CÓDIGO e os AMIGOS no centro, o HOSPEDAR à direita; o
+ * perfil e a engrenagem no cabeçalho. Só o que existe: nenhuma presença, e
+ * cada botão é o de sempre, com o handler de sempre. A casca do celular
+ * esconde esta caixa (`celular-entrada.css`) e tem a entrada dela. */
+#tela-boot {
+  justify-content: flex-start;
+}
+
+#tela-boot .boot-caixa {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 24px clamp(16px, 3vw, 48px) 32px;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  flex: 1 0 auto;
+}
+
+.boot-topo {
+  width: 100%;
+  max-width: 112rem;
+  margin-inline: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px 32px;
+}
+
+.boot-topo .boot-marca {
+  margin: 0;
+}
+
+.boot-topo .boot-proposito {
+  flex: 1 1 18rem;
+  margin: 0;
+  max-width: 46ch;
+}
+
+.boot-topo .boot-rodape {
+  flex: 0 1 22rem;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border-top: 0;
+}
+
+.boot-colunas {
+  width: 100%;
+  max-width: 112rem;
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: minmax(16rem, 24rem) minmax(0, 1fr) minmax(16rem, 24rem);
+  gap: 24px;
+  align-items: start;
+}
+
+.boot-coluna {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e2);
+  min-width: 0;
+}
+
+/* A composição tem um CENTRO: o conjunto não passa de uma largura legível em
+   telas muito largas (`.boot-topo` e `.boot-colunas`, acima), e o centro (o
+   código e os amigos) tem a largura útil de um formulário, centrada entre as
+   duas colunas. */
+.boot-centro {
+  width: 100%;
+  max-width: 60rem;
+  justify-self: center;
+}
+
+.boot-dica-detalhe summary {
+  cursor: pointer;
+  color: var(--seele-osso-apagado);
+  font-size: var(--seele-t-dado);
+}
+
+.boot-coluna > * {
+  margin: 0;
+}
+
+/* Os blocos sem moldura própria ganham a mesma: um filete e a marca azul. */
+.boot-dir,
+.boot-servidores {
+  padding: 12px;
+  border: 1px solid var(--seele-linha);
+  border-left: 2px solid var(--seele-padrao-azul);
+  background: var(--seele-negro-absoluto);
+}
+
+.boot-dir {
+  border-left-color: var(--seele-laranja-nerv);
+}
+
+.boot-dica {
+  margin: 0;
+  max-width: var(--seele-leitura);
+}
+
+/* No centro, o SEU CÓDIGO é a peça de cima: o código grande, para ler e copiar. */
+.boot-centro .boot-codigo #boot-codigo-valor {
+  font-size: 20px;
+  letter-spacing: 0.1em;
+  padding: 10px 12px;
+}
+
+.boot-esq .servidores-lista {
+  max-height: min(28rem, 46vh);
+  overflow-y: auto;
+}
+
+/* Na coluna estreita o nome e o endereço quebram em vez de cortar, o «há 2 h»
+   desce para baixo do nome, e o REMOVER encolhe. */
+.boot-esq .servidor-linha {
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.boot-esq .servidor-nome,
+.boot-esq .servidor-endereco {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.boot-esq .servidor-visto {
+  flex-basis: 100%;
+  padding-left: 44px;
+}
+
+.boot-esq .servidor-esquecer {
+  min-width: 0;
+}
+
+/* Abaixo de 1180px a coluna do HOSPEDAR desce para baixo das duas outras. */
+@media (max-width: 1180px) {
+  .boot-colunas {
+    grid-template-columns: minmax(14rem, 20rem) minmax(0, 1fr);
+  }
+
+  .boot-dir {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Numa coluna só (janela estreita): sem nada lado a lado. */
+@media (max-width: 760px) {
+  .boot-colunas {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .boot-topo .boot-rodape {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+}
+
+/* A entrada chega em três tempos curtos, uma vez, sem repetir: nada de laço, e
+   nada que gaste CPU. Sem movimento para quem pede (`prefers-reduced-motion`) e
+   enquanto a voz está aberta em alguma sessão (`data-voz-aberta`). */
+@keyframes entrada-chega {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+#tela-boot .boot-topo,
+#tela-boot .boot-coluna {
+  animation: entrada-chega 240ms ease-out both;
+}
+
+#tela-boot .boot-esq {
+  animation-delay: 40ms;
+}
+
+#tela-boot .boot-centro {
+  animation-delay: 80ms;
+}
+
+#tela-boot .boot-dir {
+  animation-delay: 120ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #tela-boot *,
+  #tela-boot {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+:root[data-voz-aberta="sim"] #tela-boot *,
+:root[data-voz-aberta="sim"] #tela-boot {
+  animation: none !important;
+  transition: none !important;
 }

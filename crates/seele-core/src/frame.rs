@@ -1,7 +1,7 @@
-//! Length-prefixed framing over a QUIC stream.
+//! Length-prefixed framing over a reliable channel of the link.
 //!
 //! **A regra mora em [`seele_proto::quadro`]** — quantos bytes, em que ordem,
-//! com que teto —, e aqui fica só a E/S do `quinn`. Essa metade continua
+//! com que teto —, e aqui fica só a E/S do canal ([`crate::transporte`]). Essa metade continua
 //! duplicada do `seele-server` de propósito: o ADR 0002 não deixa o daemon e o
 //! cliente dividirem um crate de transporte, e quarenta linhas de E/S custam
 //! menos que um crate que os dois usariam e nenhum seria dono.
@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 /// # Errors
 ///
 /// Fails on a closed stream, an oversized length, or a malformed frame.
-pub async fn read<T>(stream: &mut quinn::RecvStream) -> Result<T>
+pub async fn read<T>(stream: &mut crate::transporte::Recebe) -> Result<T>
 where
     T: for<'de> Deserialize<'de> + Validate,
 {
@@ -42,7 +42,7 @@ where
 /// # Errors
 ///
 /// Fails on a closed stream, or an empty or oversized length.
-pub async fn ler_bruto(stream: &mut quinn::RecvStream) -> Result<Vec<u8>> {
+pub async fn ler_bruto(stream: &mut crate::transporte::Recebe) -> Result<Vec<u8>> {
     let mut prefixo = [0_u8; seele_proto::quadro::PREFIXO_LEN];
     stream.read_exact(&mut prefixo).await?;
 
@@ -68,7 +68,9 @@ pub async fn ler_bruto(stream: &mut quinn::RecvStream) -> Result<Vec<u8>> {
 /// # Errors
 ///
 /// Os mesmos de [`read`].
-pub async fn ler_da_lista<T: ListaDeCima>(stream: &mut quinn::RecvStream) -> Result<Lido<T>> {
+pub async fn ler_da_lista<T: ListaDeCima>(
+    stream: &mut crate::transporte::Recebe,
+) -> Result<Lido<T>> {
     let frame = ler_bruto(stream).await?;
     Ok(seele_proto::control::decode_da_lista::<T>(&frame)?)
 }
@@ -82,7 +84,7 @@ pub async fn ler_da_lista<T: ListaDeCima>(stream: &mut quinn::RecvStream) -> Res
 /// # Errors
 ///
 /// Fails if the message is invalid or the stream is closed.
-pub async fn write<T>(stream: &mut quinn::SendStream, message: &T) -> Result<()>
+pub async fn write<T>(stream: &mut crate::transporte::Envio, message: &T) -> Result<()>
 where
     T: Serialize + Validate,
 {
@@ -98,7 +100,11 @@ where
 /// # Errors
 ///
 /// Fails if the message is invalid or the stream is closed.
-pub async fn write_em<T>(stream: &mut quinn::SendStream, versao: u8, message: &T) -> Result<()>
+pub async fn write_em<T>(
+    stream: &mut crate::transporte::Envio,
+    versao: u8,
+    message: &T,
+) -> Result<()>
 where
     T: Serialize + Validate,
 {
@@ -111,88 +117,25 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
-    use std::sync::Arc;
     use std::time::Duration;
 
     use seele_proto::control::ClientMessage;
 
-    /// Um par QUIC ligado, com um fluxo bidirecional aberto dos dois lados.
+    /// Um par ligado pelo enlace, com o `ctl` aberto dos dois lados.
     ///
     /// Não usa o handshake do produto de propósito: o que está sob teste é o
     /// enquadramento, e um handshake no meio só acrescentaria motivos para o
     /// teste falhar que não têm nada a ver com a pergunta.
-    async fn par() -> (quinn::SendStream, quinn::RecvStream) {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        let certificado =
-            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificado");
-        let cadeia = vec![rustls::pki_types::CertificateDer::from(
-            certificado.cert.der().to_vec(),
-        )];
-        let chave =
-            rustls::pki_types::PrivatePkcs8KeyDer::from(certificado.signing_key.serialize_der());
-
-        let mut tls_servidor = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(cadeia.clone(), chave.into())
-            .expect("config do servidor");
-        tls_servidor.alpn_protocols = vec![b"seele-test".to_vec()];
-        let servidor = quinn::ServerConfig::with_crypto(Arc::new(
-            quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
-        ));
-
-        let escuta = quinn::Endpoint::server(servidor, SocketAddr::from(([127, 0, 0, 1], 0)))
-            .expect("escutar");
-        let endereco = escuta.local_addr().expect("endereço");
-
-        let mut raiz = rustls::RootCertStore::empty();
-        raiz.add(cadeia[0].clone()).expect("raiz");
-        let mut tls_cliente = rustls::ClientConfig::builder()
-            .with_root_certificates(raiz)
-            .with_no_client_auth();
-        tls_cliente.alpn_protocols = vec![b"seele-test".to_vec()];
-
-        let mut cliente =
-            quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0))).expect("cliente");
-        cliente.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-            quinn::crypto::rustls::QuicClientConfig::try_from(tls_cliente).expect("quic"),
-        )));
-
-        let aceitando = tokio::spawn(async move {
-            let conexao = escuta
-                .accept()
-                .await
-                .expect("entrada")
-                .await
-                .expect("aceitar");
-            let fluxo = conexao.accept_bi().await.expect("bi");
-            // O endpoint precisa continuar vivo enquanto o fluxo existir.
-            (fluxo, escuta)
-        });
-
-        let conexao = cliente
-            .connect(endereco, "localhost")
-            .expect("conectar")
-            .await
-            .expect("conexão");
-        let (mut envio, _) = conexao.open_bi().await.expect("abrir");
-        // Um byte para o outro lado enxergar o fluxo. Vai como um quadro
-        // inteiro, para não sujar o que o teste vai medir depois.
-        super::write(&mut envio, &ClientMessage::Ping { timestamp: 0 })
-            .await
-            .expect("abre-alas");
-
-        let ((_, recebe), escuta) = aceitando.await.expect("junção");
-        let mut recebe = recebe;
-        let abertura: ClientMessage = super::read(&mut recebe).await.expect("abre-alas");
-        assert!(matches!(abertura, ClientMessage::Ping { .. }));
-
-        // Vazam de propósito: o teste é curto e derrubar os endpoints fecharia
-        // os fluxos que ele ainda vai usar.
-        std::mem::forget(conexao);
-        std::mem::forget(cliente);
-        std::mem::forget(escuta);
+    async fn par() -> (crate::transporte::Envio, crate::transporte::Recebe) {
+        let par = crate::transporte::teste::par().await;
+        let (envio, recebe_de_quem_liga) = par.quem_liga.controle().expect("o ctl de quem liga");
+        let (envio_de_quem_atende, recebe) =
+            par.quem_atende.controle().expect("o ctl de quem atende");
+        // Vazam de propósito: o teste é curto, e soltar a outra metade de um
+        // `ctl` manda o fim (ou o corte) dela, que fecha o canal que o teste
+        // ainda vai usar; derrubar as pontas fecharia a conexão.
+        std::mem::forget((recebe_de_quem_liga, envio_de_quem_atende));
+        std::mem::forget(par);
         (envio, recebe)
     }
 

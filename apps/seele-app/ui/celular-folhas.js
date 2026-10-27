@@ -296,7 +296,7 @@
   // primeiro deles que aparece, e o `celular-folhas.css` posiciona os palcos por
   // ela. Medida, e não somada das alturas: a faixa só existe numa sala, os avisos
   // vão e vêm, e o teclado põe a faixa no alto.
-  const PE = ":scope > :is(#veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, #cel-aviso-persistencia, .voz-celular, .cel-abas, .cel-telemetria)";
+  const PE = ":scope > :is(#veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, #cel-aviso-persistencia, #cel-avisos-faixa, .voz-celular, .cel-abas, .cel-telemetria)";
   function medirOPe() {
     const fim = sessao.getBoundingClientRect().bottom;
     const altos = [...sessao.querySelectorAll(PE)]

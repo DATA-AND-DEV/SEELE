@@ -794,12 +794,58 @@ pub(crate) async fn conferir_esta_versao(
 /// não recusa (`persistence/mod.rs`, o levantamento de 08/10).
 pub(crate) const ESQUEMA_DA_0_15: i64 = 13;
 
-/// A linha legada, a única que o launcher oferece além da 1 (spec 0.16, §1).
-fn linha_legada() -> Linha {
+/// O maior esquema de banco que a 0.16.0 conhece.
+///
+/// Lido com `git show 8faa3379:crates/seele-server/src/persistence/schema.rs`
+/// (o commit da v0.16.0, conferido pela API de releases): dezessete
+/// migrações, da 1 à 17.
+pub(crate) const ESQUEMA_DA_0_16: i64 = 17;
+
+/// As linhas legadas que a primeira abertura guarda, da mais nova para a mais
+/// velha, cada uma com o maior esquema de banco que ela conhece (ADR 0063: a
+/// linha 1 entra ao lado da 0.15).
+///
+/// A pasta do app tem os dados da última versão que a abriu. Se o maior
+/// esquema achado nela cabe na 0.15, ela é da 0.15 (quem pulou a 0.16); se
+/// cabe na 0.16, é da 0.16; acima disso, já foi migrada por uma versão mais
+/// nova, e não é dado de linha legada nenhuma.
+const LINHAS_LEGADAS: [(&str, i64); 2] = [("1", ESQUEMA_DA_0_16), ("0.15", ESQUEMA_DA_0_15)];
+
+/// Uma linha legada, pelo texto constante de [`LINHAS_LEGADAS`].
+fn linha_constante(texto: &str) -> Linha {
     // O texto é constante e canônico; o `expect` não tem como falhar, e um
-    // teste prova (`a_primeira_abertura_guarda_os_dados_da_0_15_para_a_linha_dela`).
+    // teste prova (`as_linhas_legadas_sao_linhas`).
     #[allow(clippy::expect_used, reason = "texto constante, provado por teste")]
-    Linha::nova("0.15").expect("«0.15» é uma linha")
+    Linha::nova(texto).expect("as linhas legadas são linhas")
+}
+
+/// A linha legada mais velha que o launcher oferece (spec 0.16, §1).
+fn linha_legada() -> Linha {
+    linha_constante("0.15")
+}
+
+/// A linha legada dona de uma pasta cujo maior esquema é `esquema`: a mais
+/// velha que o conhece. `None` acima de todas.
+fn linha_legada_do_esquema(esquema: i64) -> Option<Linha> {
+    LINHAS_LEGADAS
+        .iter()
+        .rev()
+        .find(|(_, maximo)| esquema <= *maximo)
+        .map(|(texto, _)| linha_constante(texto))
+}
+
+/// O arquivo que diz que a primeira abertura desta linha já aconteceu.
+///
+/// **Sem ele, a segunda abertura de uma instalação nova copiaria os dados da
+/// própria 0.17 para a linha 1.** A 0.17 escreve o esquema 17, o mesmo da
+/// 0.16 (ela troca o transporte e não o banco), e pelo esquema as duas pastas
+/// não se distinguem. A 0.16 não precisava disto porque o esquema dela passava
+/// do da 0.15 (`o_esquema_deste_build_passa_do_da_0_15`).
+fn marca_da_primeira_abertura(config: &str) -> Option<PathBuf> {
+    let linha = linha_deste_app()?;
+    Some(
+        raiz_do_deposito(config).join(format!("primeira-abertura-da-linha-{}", linha.como_texto())),
+    )
 }
 
 /// Os bancos que a 0.15 escreve na pasta do app: o de sempre, o da identidade
@@ -838,13 +884,20 @@ fn esquema_do_banco(caminho: &std::path::Path) -> Option<i64> {
         .ok()
 }
 
-/// O que a primeira abertura fez com os dados da 0.15.
+/// O que a primeira abertura fez com os dados da versão anterior.
+///
+/// Desde a 0.17 (ADR 0063), `Guardados` diz **para que linha** os dados foram:
+/// a `1`, para quem vinha da 0.16, ou a `0.15`, para quem pulou a 0.16. A tela
+/// lê o campo `linha` em vez de escrever «0.15».
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) enum DadosDaLinhaLegada {
-    /// A linha 0.15 já tinha os dados dela: uma abertura anterior copiou.
+    /// A linha legada já tinha os dados dela, ou esta linha já fez a primeira
+    /// abertura dela: uma abertura anterior cuidou disso.
     JaGuardados,
     /// Copiados agora, com o tamanho e quanto custou.
     Guardados {
+        /// A linha que recebeu os dados: `"1"` ou `"0.15"`.
+        linha: String,
         /// Quantos arquivos.
         arquivos: u64,
         /// Quantos bytes.
@@ -852,9 +905,11 @@ pub(crate) enum DadosDaLinhaLegada {
         /// Quanto tempo, em milissegundos.
         ms: u128,
     },
-    /// A pasta do app não tem banco nenhum: não houve 0.15 nesta máquina.
+    /// A pasta do app não tem banco nenhum: não houve versão anterior nesta
+    /// máquina.
     SemDados,
-    /// A pasta tem um banco mais novo que a 0.15, e não é mais dado dela.
+    /// A pasta tem um banco mais novo que toda linha legada, e não é mais dado
+    /// de nenhuma.
     BancoJaMigrado {
         /// O maior esquema achado.
         esquema: i64,
@@ -864,14 +919,23 @@ pub(crate) enum DadosDaLinhaLegada {
 }
 
 impl DadosDaLinhaLegada {
-    /// Houve 0.15 nesta máquina, e os dados dela estão na linha legada.
+    /// Houve uma versão anterior nesta máquina, e os dados dela estão numa
+    /// linha legada.
     ///
-    /// É quem decide se a primeira abertura busca a linha legada: quem nunca
-    /// teve 0.15 a baixa quando precisar dela, e não fala com a rede no
+    /// É quem decide se a primeira abertura busca as linhas legadas: quem
+    /// nunca teve uma a baixa quando precisar dela, e não fala com a rede no
     /// arranque por isso.
     #[must_use]
-    pub(crate) fn houve_0_15(&self) -> bool {
+    pub(crate) fn houve_legado(&self) -> bool {
         matches!(self, Self::JaGuardados | Self::Guardados { .. })
+    }
+
+    /// O nome de antes de [`Self::houve_legado`], que o `setup` do `main.rs`
+    /// ainda chama (pedido ao hosting-lifecycle para trocar). Vale para
+    /// qualquer linha legada, e não só para a 0.15.
+    #[must_use]
+    pub(crate) fn houve_0_15(&self) -> bool {
+        self.houve_legado()
     }
 }
 
@@ -894,36 +958,64 @@ const DEIXADOS_DE_FORA_DA_COPIA: &[&str] = &["lancador", "identity.key"];
 /// MODs. Nunca falha para fora: o resultado é estado, e a tela o diz — o
 /// «o produto sabe e não conta» do `CLAUDE.md` pelo outro lado.
 pub(crate) fn primeira_abertura(config: &str) -> DadosDaLinhaLegada {
-    let pasta = std::path::Path::new(config);
-    let deposito = Deposito::em(raiz_do_deposito(config));
-    let legada = linha_legada();
-    if deposito.tem_dados_da_linha(&legada) {
+    let marca = marca_da_primeira_abertura(config);
+    if marca.as_ref().is_some_and(|marca| marca.exists()) {
         return DadosDaLinhaLegada::JaGuardados;
     }
+    let feito = guardar_os_dados_da_linha_legada(config);
+    // A marca vai com todo resultado menos a falha: uma cópia que falhou é
+    // tentada de novo no próximo arranque, e as outras respostas não mudam.
+    if !matches!(feito, DadosDaLinhaLegada::NaoGuardei(_)) {
+        if let Some(marca) = marca {
+            if let Err(erro) = std::fs::create_dir_all(raiz_do_deposito(config))
+                .and_then(|()| std::fs::write(&marca, format!("{feito:?}\n")))
+            {
+                tracing::warn!(%erro, "não marquei a primeira abertura; o próximo arranque olha a pasta de novo");
+            }
+        }
+    }
+    feito
+}
+
+/// O passo 1 da primeira abertura, sem a marca: achar de que linha legada é
+/// a pasta, e guardar os dados para ela.
+fn guardar_os_dados_da_linha_legada(config: &str) -> DadosDaLinhaLegada {
+    let pasta = std::path::Path::new(config);
+    let deposito = Deposito::em(raiz_do_deposito(config));
     let bancos = bancos_da_pasta(pasta);
     if bancos.is_empty() {
         return DadosDaLinhaLegada::SemDados;
     }
-    if let Some(esquema) = bancos.iter().filter_map(|b| esquema_do_banco(b)).max() {
-        if esquema > ESQUEMA_DA_0_15 {
-            tracing::warn!(
-                esquema,
-                "a pasta do app já tem banco mais novo que a 0.15; a linha legada abre vazia"
-            );
-            return DadosDaLinhaLegada::BancoJaMigrado { esquema };
-        }
+    // Um banco sem `schema_version` legível conta como o mais velho: é o que
+    // a 0.16 fazia, que só recusava pelo esquema achado.
+    let esquema = bancos
+        .iter()
+        .filter_map(|b| esquema_do_banco(b))
+        .max()
+        .unwrap_or(0);
+    let Some(legada) = linha_legada_do_esquema(esquema) else {
+        tracing::warn!(
+            esquema,
+            "a pasta do app já tem banco mais novo que toda linha legada; elas abrem vazias"
+        );
+        return DadosDaLinhaLegada::BancoJaMigrado { esquema };
+    };
+    if deposito.tem_dados_da_linha(&legada) {
+        return DadosDaLinhaLegada::JaGuardados;
     }
     let inicio = std::time::Instant::now();
     match deposito.semear_linha(&legada, pasta, DEIXADOS_DE_FORA_DA_COPIA) {
         Ok(seele_lancador::Semeadura::Semeada { arquivos, bytes }) => {
             let ms = inicio.elapsed().as_millis();
             tracing::info!(
+                linha = %legada.como_texto(),
                 arquivos,
                 bytes,
                 ms,
-                "dados da 0.15 guardados para a linha 0.15"
+                "dados da versão anterior guardados para a linha dela"
             );
             DadosDaLinhaLegada::Guardados {
+                linha: legada.como_texto(),
                 arquivos,
                 bytes,
                 ms,
@@ -931,7 +1023,7 @@ pub(crate) fn primeira_abertura(config: &str) -> DadosDaLinhaLegada {
         }
         Ok(seele_lancador::Semeadura::JaTinha) => DadosDaLinhaLegada::JaGuardados,
         Err(erro) => {
-            tracing::warn!(%erro, "não guardei os dados da 0.15 para a linha 0.15");
+            tracing::warn!(%erro, linha = %legada.como_texto(), "não guardei os dados da versão anterior para a linha dela");
             DadosDaLinhaLegada::NaoGuardei(erro.to_string())
         }
     }
@@ -963,29 +1055,60 @@ const LINHA_LEGADA_BUSCADA: &str = "linha-legada-buscada";
 /// num servidor 0.15 ou ao hospedar nele.
 pub(crate) async fn baixar_linha_legada_se_preciso(app: &tauri::AppHandle) -> Option<String> {
     let config = crate::config_dir(app);
-    let marca = raiz_do_deposito(&config).join(LINHA_LEGADA_BUSCADA);
-    if marca.exists() {
+    let pendentes = linhas_legadas_a_buscar(&config);
+    if pendentes.is_empty() {
         return None;
     }
     let atualizador = atualizador_do_app(app)?;
-    let resultado = match baixar(
-        &config,
-        &atualizador,
-        &Pedido::MaisNovaDaLinha(linha_legada()),
-    )
-    .await
-    {
-        Ok(versao) => format!("guardada: {versao}"),
-        Err(FalhaAoBaixarVersao::JaInstalada(versao)) => format!("guardada: {versao}"),
-        Err(falha) => format!("não baixei: {falha:?}"),
-    };
-    tracing::info!(%resultado, "a linha legada na primeira abertura");
-    if let Err(erro) = std::fs::create_dir_all(raiz_do_deposito(&config))
-        .and_then(|()| std::fs::write(&marca, format!("{resultado}\n")))
-    {
-        tracing::warn!(%erro, "não marquei a busca da linha legada; o próximo arranque busca de novo");
+    let mut resultados = Vec::new();
+    for (legada, marca) in pendentes {
+        let resultado = match baixar(
+            &config,
+            &atualizador,
+            &Pedido::MaisNovaDaLinha(legada.clone()),
+        )
+        .await
+        {
+            Ok(versao) => format!("guardada: {versao}"),
+            Err(FalhaAoBaixarVersao::JaInstalada(versao)) => format!("guardada: {versao}"),
+            Err(falha) => format!("não baixei: {falha:?}"),
+        };
+        tracing::info!(linha = %legada.como_texto(), %resultado, "a linha legada na primeira abertura");
+        if let Err(erro) = std::fs::create_dir_all(raiz_do_deposito(&config))
+            .and_then(|()| std::fs::write(&marca, format!("{resultado}\n")))
+        {
+            tracing::warn!(%erro, "não marquei a busca da linha legada; o próximo arranque busca de novo");
+        }
+        resultados.push(format!("{}: {resultado}", legada.como_texto()));
     }
-    Some(resultado)
+    Some(resultados.join("; "))
+}
+
+/// O arquivo-marca da busca de uma linha legada. O da 0.15 mantém o nome que
+/// a 0.16 escreveu, para uma máquina que já buscou não buscar de novo.
+fn marca_da_busca(config: &str, legada: &Linha) -> PathBuf {
+    let nome = if *legada == linha_legada() {
+        LINHA_LEGADA_BUSCADA.to_owned()
+    } else {
+        format!("{LINHA_LEGADA_BUSCADA}-{}", legada.como_texto())
+    };
+    raiz_do_deposito(config).join(nome)
+}
+
+/// As linhas legadas que têm dados guardados e ainda não foram buscadas uma
+/// vez, com a marca de cada uma.
+fn linhas_legadas_a_buscar(config: &str) -> Vec<(Linha, PathBuf)> {
+    let deposito = Deposito::em(raiz_do_deposito(config));
+    LINHAS_LEGADAS
+        .iter()
+        .map(|(texto, _)| linha_constante(texto))
+        .filter(|legada| deposito.tem_dados_da_linha(legada))
+        .map(|legada| {
+            let marca = marca_da_busca(config, &legada);
+            (legada, marca)
+        })
+        .filter(|(_, marca)| !marca.exists())
+        .collect()
 }
 
 /// A linha de servidor deste app: a do `VERSAO_DO_SERVIDOR` que o
@@ -1920,9 +2043,11 @@ mod o_launcher_ligado_ao_produto {
         );
     }
 
+    /// Desde a 0.17, o 14 deixou de ser «já migrado»: é a pasta da 0.16, e ela
+    /// vai para a linha 1. «Já migrado» é acima do esquema da 0.16.
     #[test]
     fn um_banco_ja_migrado_nao_vira_dado_da_linha_legada() {
-        for esquema in [super::ESQUEMA_DA_0_15 + 1, 9999] {
+        for esquema in [super::ESQUEMA_DA_0_16 + 1, 9999] {
             let dir = tempfile::tempdir().unwrap();
             config_da_0_15(dir.path(), esquema);
             let config = dir.path().to_string_lossy().into_owned();
@@ -1931,17 +2056,20 @@ mod o_launcher_ligado_ao_produto {
                 super::DadosDaLinhaLegada::BancoJaMigrado { esquema },
                 "com o esquema {esquema}"
             );
-            assert!(
-                !Deposito::em(super::raiz_do_deposito(&config)).tem_dados_da_linha(&linha("0.15")),
-                "com o esquema {esquema}, um banco do futuro virou dado da linha 0.15"
-            );
+            let deposito = Deposito::em(super::raiz_do_deposito(&config));
+            for legada in ["0.15", "1"] {
+                assert!(
+                    !deposito.tem_dados_da_linha(&linha(legada)),
+                    "com o esquema {esquema}, um banco do futuro virou dado da linha {legada}"
+                );
+            }
         }
     }
 
-    /// O banco de um servidor guardado também conta: um só migrado já basta
-    /// para a pasta não ser mais da 0.15.
+    /// O banco de um servidor guardado também conta: um só da 0.16 já basta
+    /// para a pasta não ser mais da 0.15, e ela vai inteira para a linha 1.
     #[test]
-    fn um_banco_de_servidor_guardado_ja_migrado_tambem_conta() {
+    fn um_banco_de_servidor_guardado_mais_novo_tambem_conta() {
         let dir = tempfile::tempdir().unwrap();
         config_da_0_15(dir.path(), super::ESQUEMA_DA_0_15);
         let outro = dir.path().join("servidores/abc");
@@ -1950,8 +2078,116 @@ mod o_launcher_ligado_ao_produto {
         let config = dir.path().to_string_lossy().into_owned();
         assert!(matches!(
             super::primeira_abertura(&config),
-            super::DadosDaLinhaLegada::BancoJaMigrado { .. }
+            super::DadosDaLinhaLegada::Guardados { linha, .. } if linha == "1"
         ));
+        let deposito = Deposito::em(super::raiz_do_deposito(&config));
+        assert!(!deposito.tem_dados_da_linha(&linha("0.15")));
+        assert!(deposito
+            .pasta_de_dados_da_linha(&linha("1"))
+            .join("servidores/abc/seele.db")
+            .is_file());
+    }
+
+    /// **A pasta da 0.16 vira a linha 1** na primeira abertura da 0.17, sem
+    /// a chave (ADR 0061), e a segunda abertura não copia de novo.
+    #[test]
+    fn a_primeira_abertura_guarda_os_dados_da_0_16_para_a_linha_1() {
+        for esquema in [super::ESQUEMA_DA_0_15 + 1, super::ESQUEMA_DA_0_16] {
+            let dir = tempfile::tempdir().unwrap();
+            config_da_0_15(dir.path(), esquema);
+            let config = dir.path().to_string_lossy().into_owned();
+            let feito = super::primeira_abertura(&config);
+            assert!(
+                matches!(&feito, super::DadosDaLinhaLegada::Guardados { linha, .. } if linha == "1"),
+                "com o esquema {esquema}, veio {feito:?}"
+            );
+            assert!(feito.houve_legado());
+            let deposito = Deposito::em(super::raiz_do_deposito(&config));
+            let destino = deposito.pasta_de_dados_da_linha(&linha("1"));
+            assert!(destino.join("seele.db").is_file());
+            assert!(
+                !destino.join("identity.key").exists(),
+                "a chave foi copiada"
+            );
+            assert!(!deposito.tem_dados_da_linha(&linha("0.15")));
+            assert_eq!(
+                super::primeira_abertura(&config),
+                super::DadosDaLinhaLegada::JaGuardados
+            );
+            // A busca em segundo plano é a da linha 1, e uma vez.
+            let pendentes = super::linhas_legadas_a_buscar(&config);
+            assert_eq!(pendentes.len(), 1);
+            assert_eq!(pendentes[0].0, linha("1"));
+            assert!(pendentes[0]
+                .1
+                .ends_with(format!("{}-1", super::LINHA_LEGADA_BUSCADA)));
+        }
+    }
+
+    /// **O defeito que a marca impede.** A 0.17 escreve o mesmo esquema da
+    /// 0.16, então, sem a marca, a segunda abertura de uma instalação nova
+    /// leria a própria pasta como dado da 0.16 e a copiaria para a linha 1 —
+    /// e iria buscar a 0.16 na rede sem ninguém ter pedido.
+    ///
+    /// Reverter: sem a checagem da marca em `primeira_abertura`, a segunda
+    /// chamada abaixo devolve `Guardados { linha: "1" }` e o teste reprova.
+    #[test]
+    fn a_segunda_abertura_de_uma_instalacao_nova_nao_copia_a_propria_pasta() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        assert_eq!(
+            super::primeira_abertura(&config),
+            super::DadosDaLinhaLegada::SemDados
+        );
+        // A 0.17 abre e escreve o banco dela, no esquema dela.
+        config_da_0_15(dir.path(), super::ESQUEMA_DA_0_16);
+        assert_eq!(
+            super::primeira_abertura(&config),
+            super::DadosDaLinhaLegada::JaGuardados
+        );
+        let deposito = Deposito::em(super::raiz_do_deposito(&config));
+        assert!(!deposito.tem_dados_da_linha(&linha("1")));
+        assert!(super::linhas_legadas_a_buscar(&config).is_empty());
+    }
+
+    /// Quem já buscou a 0.15 pela 0.16 não busca de novo: a marca dela mantém o
+    /// nome que a 0.16 escreveu.
+    #[test]
+    fn a_marca_da_busca_da_0_15_e_a_que_a_0_16_escreveu() {
+        let dir = tempfile::tempdir().unwrap();
+        config_da_0_15(dir.path(), super::ESQUEMA_DA_0_15);
+        let config = dir.path().to_string_lossy().into_owned();
+        assert!(matches!(
+            super::primeira_abertura(&config),
+            super::DadosDaLinhaLegada::Guardados { linha, .. } if linha == "0.15"
+        ));
+        assert_eq!(super::linhas_legadas_a_buscar(&config).len(), 1);
+        std::fs::write(
+            super::raiz_do_deposito(&config).join("linha-legada-buscada"),
+            "guardada: 0.15.2\n",
+        )
+        .unwrap();
+        assert!(super::linhas_legadas_a_buscar(&config).is_empty());
+    }
+
+    /// 17 é o maior esquema que a 0.16.0 conhece, lido com
+    /// `git show 8faa3379:crates/seele-server/src/persistence/schema.rs`
+    /// (dezessete migrações). O teste prende o número.
+    #[test]
+    fn o_esquema_da_0_16_e_o_da_0_16_0() {
+        assert_eq!(super::ESQUEMA_DA_0_16, 17);
+    }
+
+    #[test]
+    fn as_linhas_legadas_sao_linhas() {
+        for (texto, _) in super::LINHAS_LEGADAS {
+            assert_eq!(linha(texto).como_texto(), texto);
+        }
+        assert_eq!(super::linha_legada_do_esquema(0), Some(linha("0.15")));
+        assert_eq!(super::linha_legada_do_esquema(13), Some(linha("0.15")));
+        assert_eq!(super::linha_legada_do_esquema(14), Some(linha("1")));
+        assert_eq!(super::linha_legada_do_esquema(17), Some(linha("1")));
+        assert_eq!(super::linha_legada_do_esquema(18), None);
     }
 
     #[test]
@@ -2424,11 +2660,106 @@ mod o_launcher_ligado_ao_produto {
         );
     }
 
-    /// A linha deste app sai da constante que a F1 congelou: o app 0.16 fala o
-    /// Servidor 1.0, da linha `1`.
+    /// A linha deste app sai da constante que a F1 congelou: o app 0.17 fala o
+    /// Servidor 2.0, da linha `2` (ADR 0063).
     #[test]
     fn a_linha_deste_app_e_a_do_servidor_que_ele_fala() {
-        assert_eq!(super::linha_deste_app(), Some(linha("1")));
+        assert_eq!(super::linha_deste_app(), Some(linha("2")));
+    }
+
+    /// **Um link de um Servidor 1 (`v=1.0`, o que a 0.16 escreve) abre a 0.16
+    /// ao lado** quando ela está guardada, e pede para baixá-la quando não
+    /// está. É o lado da 0.17 do ADR 0063: a linha 1 não conversa com a 2, e o
+    /// launcher é quem a mantém de pé.
+    #[test]
+    fn um_link_de_um_servidor_1_abre_a_0_16_ao_lado() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(
+            &[("0.17.0", "2.0"), ("0.16.0", "1.0"), ("0.15.2", "0.15")],
+            None,
+        );
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+        for v in ["1.0", "0.16.0"] {
+            assert_eq!(
+                super::para_entrar(&config, Some(&chave()), Some(v)),
+                super::ParaEntrar::Baixar {
+                    linha: "1".to_owned(),
+                    servidor: "1.0".to_owned(),
+                    tem_pacote: true,
+                    perde_conversas: false,
+                },
+                "v={v}"
+            );
+        }
+        instalado(&config, &json, "0.16.0");
+        assert_eq!(
+            super::para_entrar(&config, Some(&chave()), Some("1.0")),
+            super::ParaEntrar::Abrir {
+                linha: "1".to_owned(),
+                servidor: "1.0".to_owned(),
+                versao: "0.16.0".to_owned(),
+                perde_conversas: false,
+            }
+        );
+        // E a 0.15 continua ao lado, como na 0.16.
+        assert!(matches!(
+            super::para_entrar(&config, Some(&chave()), Some("0.15.1")),
+            super::ParaEntrar::Baixar { linha, .. } if linha == "0.15"
+        ));
+        // Um link da linha desta janela entra aqui; um da 3, pede para atualizar.
+        assert_eq!(
+            super::para_entrar(&config, Some(&chave()), Some("2.0")),
+            super::ParaEntrar::Aqui
+        );
+        assert_eq!(
+            super::para_entrar(&config, Some(&chave()), Some("3.0")),
+            super::ParaEntrar::MaisNova {
+                linha: "3".to_owned()
+            }
+        );
+    }
+
+    /// A recusa que diz «Servidor 1» (o `OutraLinha` com o nome da linha,
+    /// pela `Linha::e_anterior` do `seele-proto`) leva ao mesmo lugar que o
+    /// link com `v=1.0`.
+    #[test]
+    fn a_recusa_de_um_servidor_1_leva_a_0_16() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(&[("0.17.0", "2.0"), ("0.16.0", "1.0")], None);
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+        instalado(&config, &json, "0.16.0");
+        assert!(matches!(
+            super::para_entrar_pela_recusa(&config, Some(&chave()), "1"),
+            super::ParaEntrar::Abrir { linha, versao, .. } if linha == "1" && versao == "0.16.0"
+        ));
+        assert_eq!(
+            seele_ffi::linha_do_protocolo(9),
+            Some("1"),
+            "o nome que a recusa leva para o 9"
+        );
+    }
+
+    /// **Hospedar oferece a linha 1 ao lado da 2**, com as APIs dela, e a
+    /// desta janela primeiro.
+    #[test]
+    fn hospedar_oferece_a_linha_1_ao_lado() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(
+            &[("0.17.0", "2.0"), ("0.16.0", "1.0"), ("0.15.2", "0.15")],
+            None,
+        );
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+        let linhas = super::linhas_para_hospedar(&config, Some(&chave()));
+        let nomes: Vec<&str> = linhas.iter().map(|l| l.linha.as_str()).collect();
+        assert_eq!(nomes, ["2", "1", "0.15"]);
+        assert!(linhas[0].esta);
+        assert_eq!(linhas[0].servidor, "2.0");
+        assert_eq!(linhas[1].servidor, "1.0");
+        assert_eq!(linhas[1].app.as_deref(), Some("0.16.0"));
+        assert!(!linhas[1].esta && !linhas[1].instalada);
     }
 
     /// **A guarda da linha legada, na casca.** O atualizador de uma versão
@@ -2503,6 +2834,20 @@ mod o_launcher_ligado_ao_produto {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/tela-boot.js"),
         )
         .unwrap();
+        // Só o código: um comentário que cita `invoke("connect")` não é uma
+        // chamada (as linhas de comentário viram linhas vazias, e as posições
+        // continuam comparáveis com as da conferência).
+        let tela: String = tela
+            .lines()
+            .map(|linha| {
+                if linha.trim_start().starts_with("//") {
+                    ""
+                } else {
+                    linha
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         let todos: Vec<usize> = tela
             .match_indices("invoke(\"connect\"")
             .map(|(i, _)| i)
@@ -2766,8 +3111,34 @@ mod o_quintal_sobe_da_0_15 {
             "a primeira abertura tirou o quintal da pasta que a 0.16 abre"
         );
 
+        // O 4.0.0 instalado no cache e escolhido no ANTES DE HOSPEDAR (a saída
+        // 1). Desde a 0.17 o servidor recusa subir com o 3.1.0 da API 4 ligado
+        // (`ModsDeOutraApiLigados`, do E), então o HOSPEDAR é o caminho do CTA:
+        // a cópia, a conversão com a escolha aplicada, e só então a subida.
+        let origem = tempfile::tempdir().unwrap();
+        estilo_4(origem.path());
+        let publicado = crate::mods::instalar_de(dir.path(), origem.path()).unwrap();
+        assert_ne!(
+            publicado.hash, HASH_DA_0_15,
+            "o 4.0.0 tem de ser outro pacote"
+        );
+        crate::mods::resolver_mod_de_api_antiga(
+            &config,
+            None,
+            "seele/estilo",
+            &crate::mods::SaidaDoModAntigo::Atualizar {
+                hash: publicado.hash.clone(),
+            },
+            false,
+        )
+        .expect("a saída 1 não estagiou o 4.0.0");
+
         // O HOSPEDAR.
         let banco = seele_server::persistence::banco_do_cliente(dir.path());
+        crate::antes_de_hospedar::garantir_a_copia(dir.path(), None, &banco)
+            .expect("o portão da cópia não abriu");
+        crate::escolhas_de_mods::aplicar_depois_do_portao(&config, None, &banco, "127.0.0.1:8383")
+            .expect("a escolha não se aplicou no CTA");
         let servidor = seele_server::Daemon::bind(seele_server::ServerConfig {
             name: "Casa".to_owned(),
             mods_dir: Some(crate::servidores::raizes_dos_mods(&config, None)),
@@ -2789,14 +3160,8 @@ mod o_quintal_sobe_da_0_15 {
             );
         }
 
-        // O 4.0.0, instalado e aplicado.
-        let origem = tempfile::tempdir().unwrap();
-        estilo_4(origem.path());
-        let publicado = crate::mods::instalar_de(dir.path(), origem.path()).unwrap();
-        assert_ne!(
-            publicado.hash, HASH_DA_0_15,
-            "o 4.0.0 tem de ser outro pacote"
-        );
+        // E a gestão, com o servidor de pé, aplicando o mesmo 4.0.0 como o
+        // `aplicar_conjunto_de_mods` aplica (lido por hash, `definir_conjunto`).
         let instalado = seele_ffi::mods::ler_por_hash(&config, &publicado.hash).unwrap();
         let dono = {
             let banco = server.persistence.lock().await;
@@ -2909,11 +3274,17 @@ mod o_quintal_sobe_da_0_15 {
         )
         .expect("a saída 1 não ligou o 4.0.0");
 
-        // 3. Hospedar não recusa mais, e sobe.
+        // 3. Hospedar não recusa mais, e sobe. Desde o P1 da 0.17 a saída só
+        // estagia: o CTA faz a cópia, a conversão e aplica a escolha, pelos
+        // passos do `hospedar` (hosting-lifecycle).
         assert!(
-            crate::mods::mods_de_api_antiga(&banco, &raizes).is_empty(),
+            crate::mods::recusas_de_hospedar(&config, None, &banco).is_empty(),
             "depois da saída 1, hospedar ainda recusaria"
         );
+        crate::antes_de_hospedar::garantir_a_copia(dir.path(), None, &banco)
+            .expect("o portão da cópia não abriu");
+        crate::escolhas_de_mods::aplicar_depois_do_portao(&config, None, &banco, "127.0.0.1:8383")
+            .expect("a escolha da saída 1 não se aplicou no CTA");
         let servidor = seele_server::Daemon::bind(seele_server::ServerConfig {
             name: "Casa".to_owned(),
             mods_dir: Some(raizes),
@@ -2984,10 +3355,15 @@ mod o_quintal_sobe_da_0_15 {
 
         let banco = crate::servidores::banco_de_hospedar(&config, None);
         let raizes = crate::servidores::raizes_dos_mods(&config, None);
+        // Desde o P1 da 0.17 a saída só estagia; o CTA copia, converte e aplica.
         assert!(
-            crate::mods::mods_de_api_antiga(&banco, &raizes).is_empty(),
+            crate::mods::recusas_de_hospedar(&config, None, &banco).is_empty(),
             "depois da saída 3, hospedar ainda recusaria"
         );
+        crate::antes_de_hospedar::garantir_a_copia(dir.path(), None, &banco)
+            .expect("o portão da cópia não abriu");
+        crate::escolhas_de_mods::aplicar_depois_do_portao(&config, None, &banco, "127.0.0.1:8383")
+            .expect("a escolha da saída 3 não se aplicou no CTA");
         let servidor = seele_server::Daemon::bind(seele_server::ServerConfig {
             name: "Casa".to_owned(),
             mods_dir: Some(raizes),

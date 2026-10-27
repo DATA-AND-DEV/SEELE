@@ -31,6 +31,15 @@ serde_json = "1.0.151"
 # produtores de retrato (fase 2 da Tarefa 2.2 da F4). Só o `seele-conformance`
 # a liga: o produto não leva uma conexão de mentira.
 conformidade = []
+# O ponto de encontro de quem liga, dito por casa (`costura_de_teste`), para os
+# testes do app ligarem por código como o produto sem a variável de ambiente do
+# processo. Só a `[dev-dependencies]` do `seele-app` a liga, e o resolver 2 não a
+# leva ao build do produto.
+costura-de-teste = []
+# O aparelho de mentira do áudio (só de teste), pela cadeia ffi -> core -> audio.
+# Só o recurso do mesmo nome do `seele-app` o liga; o `seele-audio` recusa o
+# build otimizado.
+aparelho-de-mentira = ["seele-core/aparelho-de-mentira"]
 
 [lints]
 workspace = true

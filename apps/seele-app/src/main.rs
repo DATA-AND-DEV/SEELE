@@ -26,6 +26,10 @@
 // razão, que a de `seele-video`.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+// O aviso antes de atualizar para outra linha de servidor (E4 da 0.17). É
+// do compat-validation, como o bloco do atualizador abaixo (fronteiras.md, §7).
+mod atualizador;
+mod cargos;
 mod catalogo;
 // **O executor de MODs do cliente em QuickJS — experimento de bancada.**
 //
@@ -51,7 +55,20 @@ mod mods;
 use seele_ffi::reducao;
 mod sala;
 mod servidores;
+// O ANTES DE HOSPEDAR e o portão da conversão: a cópia de segurança do estado
+// atual antes de converter um banco (E2 da 0.17).
+mod antes_de_hospedar;
+mod audio_de_mentira;
+mod escolhas_de_mods;
+// As sessões cliente, todas iguais, e o foco de voz da máquina (E3 da 0.17).
+mod sessoes;
+// O cenário da multi-sessão contra servidores de verdade (E3 da 0.17).
+#[cfg(test)]
+mod varias_sessoes_testes;
+// A travessia de um MOD da API 5 para a API 6 pelo P1 (compat, 25/10).
 mod toque;
+#[cfg(test)]
+mod travessia_api5_testes;
 mod versoes;
 
 use std::sync::{Arc, Mutex};
@@ -158,6 +175,21 @@ struct Session {
     /// que quem escreveu o MOD chama — ou que a saída da sessão chama por ele.
     arquivos_escolhidos: Mutex<ArquivosEscolhidos>,
 
+    /// **Todas as sessões cliente desta janela** (E3 da 0.17), e o foco de
+    /// voz da máquina. Os comandos de conversa acham a conexão aqui, pelo
+    /// carimbo que trouxeram ([`sessoes::Registro::conexao`]).
+    sessoes: sessoes::Registro,
+    /// **A ordem dos pedidos de [`ver_sessao`]**: a instância da janela (que o
+    /// backend emite na carga dela) e o maior número já aplicado nela. Um
+    /// pedido menor, ou de uma instância velha, é recusado e não leva a vista
+    /// para trás. Ver [`sessoes::DominioDaVista`].
+    dominio_da_vista: sessoes::DominioDaVista,
+    /// **A conexão da sessão na vista**: a mesma que está em [`Self::sessoes`],
+    /// e só ela. É por aqui que falam os comandos que são da vista — os MODs,
+    /// conferidos pela [`Self::geracao`] da vista —, e nunca um comando de
+    /// conversa, que leva carimbo.
+    ///
+    /// Até a 0.16 esta era a única conexão da janela.
     connection: Mutex<Option<Arc<Connection>>>,
     /// As hospedagens deste app: o servidor guardado e a sala pessoal (Plano 2).
     ///
@@ -461,13 +493,75 @@ impl Session {
             })
     }
 
-    /// The live handle, or the reason there is none.
+    /// O carimbo da sessão na vista, para um teste mandar um comando como a
+    /// janela que a mostra mandaria. Sem vista, um carimbo que nenhuma sessão
+    /// tem.
+    #[cfg(test)]
+    fn carimbo_da_vista(&self) -> sessoes::CarimboDaJanela {
+        self.sessoes
+            .vista()
+            .and_then(|vista| self.sessoes.buscar(vista))
+            .map_or(
+                sessoes::CarimboDaJanela {
+                    sessao: 0,
+                    geracao: 0,
+                },
+                |sessao| sessoes::CarimboDaJanela::de(sessao.conexao.carimbo()),
+            )
+    }
+
+    /// A conexão da sessão na vista, ou por que não há.
+    ///
+    /// **Só para o que é da vista** (os MODs, conferidos pela geração da
+    /// vista). Um comando de conversa acha a conexão pelo carimbo:
+    /// [`Self::conexao`].
     fn connection(&self) -> Result<Arc<Connection>, ConnectionError> {
         self.connection
             .lock()
             .map_err(|_| ConnectionError::NotConnected)?
             .clone()
             .ok_or(ConnectionError::NotConnected)
+    }
+
+    /// **A conexão de um comando de sessão**, pelo carimbo que ele trouxe, e
+    /// nunca pela vista. Ver [`sessoes::Registro::conexao`].
+    fn conexao(
+        &self,
+        carimbo: sessoes::CarimboDaJanela,
+    ) -> Result<Arc<Connection>, ConnectionError> {
+        self.sessoes.conexao(carimbo)
+    }
+
+    /// Põe a sessão `sessao` na vista: a conexão, o endereço e o alvo dela
+    /// passam a ser os da vista. `None` esvazia a vista.
+    ///
+    /// Quem chama já revogou a geração da vista (os MODs da anterior param).
+    fn por_na_vista(&self, sessao: Option<&sessoes::SessaoCliente>) {
+        if let Ok(mut slot) = self.connection.lock() {
+            self.por_na_vista_com(&mut slot, sessao);
+        }
+    }
+
+    /// O mesmo, com o cadeado da conexão da vista já na mão (o `connect`
+    /// confere a geração e grava sob ele, pelo guarda E54).
+    fn por_na_vista_com(
+        &self,
+        slot: &mut Option<Arc<Connection>>,
+        sessao: Option<&sessoes::SessaoCliente>,
+    ) {
+        *slot = sessao.map(|sessao| Arc::clone(&sessao.conexao));
+        if let Ok(mut onde) = self.endereco_da_sessao.lock() {
+            *onde = sessao.map(|sessao| sessao.endereco.clone());
+        }
+        if let Ok(mut alvo) = self.alvo.lock() {
+            *alvo = sessao.and_then(sessoes::SessaoCliente::alvo);
+        }
+        // A busca é da conversa que estava na tela.
+        if let Ok(mut busca) = self.busca.lock() {
+            *busca = None;
+        }
+        self.sessoes
+            .por_na_vista(sessao.map(sessoes::SessaoCliente::id));
     }
 }
 
@@ -894,17 +988,110 @@ impl ModsNativos {
 /// que está de pé. O que não bate é **contado** antes de ser descartado: um
 /// contador que sobe depois de uma saída é a prova de que alguma coisa da
 /// sessão anterior continuava falando, e sem ele isso seria invisível.
+///
+/// # Desde a 0.17: uma ponte por sessão, e todo evento carimbado
+///
+/// Com várias sessões de pé, «a geração de pé» deixou de dizer de quem é um
+/// evento: a vista troca sem que nenhuma sessão acabe. Cada ponte é de **uma**
+/// sessão ([`sessoes::Marcas`]) e manda **todo** evento à janela como
+/// [`EventoDeSessao`]: o `SessaoId`, a geração do enlace e se a sessão estava
+/// na vista. Não há evento cru. A janela aplica à tela só o da sessão que ela
+/// mostra, e o resto vai para a placa daquela sessão na trilha. Uma sessão que
+/// já saiu, ou foi substituída na entrada, tem as marcas apagadas: o que ainda
+/// vier dela é descartado e contado, como antes.
 struct Bridge<R: tauri::Runtime = tauri::Wry> {
     app: AppHandle<R>,
-    /// A execução em que esta ponte nasceu.
-    geracao: u64,
-    /// O número que está de pé agora, compartilhado com a `Session`.
+    /// As marcas da sessão desta ponte: o `SessaoId`, se ela ainda vale, e o
+    /// que a trilha lê.
+    marcas: Arc<sessoes::Marcas>,
+    /// Qual sessão está na vista agora, compartilhado com o registro.
+    vista: Arc<std::sync::atomic::AtomicU64>,
+    /// A geração da vista, compartilhada com a `Session`: o fim da sessão que
+    /// está na vista a revoga, e os MODs dela param.
     de_pe: Arc<std::sync::atomic::AtomicU64>,
     /// Onde contar o que foi descartado, compartilhado com a `Session`.
     descartados: Arc<std::sync::atomic::AtomicU64>,
     /// A tentativa da janela que pediu esta entrada, quando ela disse qual.
     /// Vai em cada etapa da chegada ([`carga_do_evento`]).
     tentativa: Option<u64>,
+}
+
+/// O canal do sinal «a lista de sessões mudou» ([`MudancaNaSessao`]).
+const CANAL_DAS_SESSOES: &str = "seele://sessoes";
+
+/// **Todo evento como ele vai à janela** (E3 da 0.17): de qual sessão, de qual
+/// volta do enlace, e se ela estava na vista quando ele saiu.
+#[derive(Debug, Clone, serde::Serialize)]
+struct EventoDeSessao {
+    /// O `SessaoId`.
+    sessao: u64,
+    /// A geração do enlace daquela sessão.
+    geracao: u64,
+    /// A sessão estava na vista quando o evento saiu. Informativo: quem decide
+    /// onde ele vai é a janela, pelo `sessao`.
+    vista: bool,
+    /// **A época da vista** no instante em que o evento saiu (a mesma das
+    /// respostas `NaSessao`): a janela que já trocou de vista sabe que o
+    /// evento é de antes da troca. Pedido dos cargos (G/F) para o evento de
+    /// cargos, e vale para todos.
+    epoca: u64,
+    /// O evento, como sempre foi ([`carga_do_evento`]).
+    evento: serde_json::Value,
+}
+
+/// **O sinal da trilha**: alguma coisa desta sessão mudou, releia `sessoes()`.
+/// Sem conteúdo nenhum da conversa.
+#[derive(Debug, Clone, serde::Serialize)]
+struct MudancaNaSessao {
+    /// O `SessaoId`.
+    sessao: u64,
+    /// O que mudou: `entrou`, `mensagens`, `presenca`, `enlace`, `aviso`,
+    /// `cargos`, `encerrada`, `foco`, `vista` ou `saiu`.
+    motivo: &'static str,
+}
+
+/// **O motivo da trilha de um evento**, ou nenhum: o que faz a placa de uma
+/// sessão (inclusive a do fundo) reler `sessoes()`.
+fn motivo_da_trilha(event: &Event, reconectou: bool) -> Option<&'static str> {
+    match event {
+        Event::Ended { .. } => Some("encerrada"),
+        Event::MessagesChanged => Some("mensagens"),
+        Event::RosterChanged => Some("presenca"),
+        Event::NoticeRaised { .. } => Some("aviso"),
+        // **Os cargos daquela sessão mudaram** (F: o quadro, as suas
+        // permissões ou uma recusa): a placa da sessão do fundo relê, e a
+        // camada de cargos dela relê pela marca (`cargos_revision`), sem laço.
+        Event::CargosChanged { .. } => Some("cargos"),
+        Event::TelemetryChanged if reconectou => Some("enlace"),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod o_motivo_da_trilha {
+    use super::{motivo_da_trilha, Event};
+
+    #[test]
+    fn os_cargos_marcam_a_placa_e_a_telemetria_so_na_volta() {
+        assert_eq!(
+            motivo_da_trilha(&Event::CargosChanged { marca: 3 }, false),
+            Some("cargos")
+        );
+        assert_eq!(
+            motivo_da_trilha(&Event::MessagesChanged, false),
+            Some("mensagens")
+        );
+        assert_eq!(motivo_da_trilha(&Event::TelemetryChanged, false), None);
+        assert_eq!(
+            motivo_da_trilha(&Event::TelemetryChanged, true),
+            Some("enlace")
+        );
+    }
+}
+
+/// Emite o sinal da trilha. Uma janela fechada não é motivo de log.
+fn avisar_a_trilha<R: tauri::Runtime>(app: &AppHandle<R>, sessao: u64, motivo: &'static str) {
+    let _ = app.emit(CANAL_DAS_SESSOES, MudancaNaSessao { sessao, motivo });
 }
 
 /// **O evento como ele vai à janela**, com a tentativa dela nas etapas da
@@ -930,12 +1117,39 @@ fn carga_do_evento(event: &Event, tentativa: Option<u64>) -> serde_json::Value {
 }
 
 impl<R: tauri::Runtime> EventListener for Bridge<R> {
+    /// Sem carimbo não há como dizer de quem é: só uma FFI antiga chamaria
+    /// isto, e o evento vai com o carimbo que a sessão tinha na entrada.
     fn on_event(&self, event: Event) {
-        if self.geracao != self.de_pe.load(std::sync::atomic::Ordering::Acquire) {
-            self.descartados
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.on_event_carimbado(
+            seele_ffi::Carimbo {
+                sessao: self.marcas.sessao,
+                geracao: self
+                    .marcas
+                    .geracao_vista
+                    .load(std::sync::atomic::Ordering::Acquire),
+            },
+            event,
+        );
+    }
+
+    fn on_event_carimbado(&self, carimbo: seele_ffi::Carimbo, event: Event) {
+        use std::sync::atomic::Ordering;
+        // Um carimbo de outra sessão nesta ponte seria um erro de fiação: ele é
+        // contado e não chega à janela com o número errado.
+        if !self.marcas.viva.load(Ordering::Acquire) || carimbo.sessao != self.marcas.sessao {
+            self.marcas.descartados.fetch_add(1, Ordering::Relaxed);
+            self.descartados.fetch_add(1, Ordering::Relaxed);
             return;
         }
+        let na_vista = self.vista.load(Ordering::Acquire) == self.marcas.sessao;
+        let reconectou = self.marcas.anotar_geracao(carimbo.geracao);
+        let carga = EventoDeSessao {
+            sessao: carimbo.sessao,
+            geracao: carimbo.geracao,
+            vista: na_vista,
+            epoca: self.de_pe.load(Ordering::Acquire),
+            evento: carga_do_evento(&event, self.tentativa),
+        };
         // **O fim revoga aqui, e não quando a janela pedir.**
         //
         // `Ended` chega quando a sessão acaba do outro lado: a sala terminou, o
@@ -952,13 +1166,38 @@ impl<R: tauri::Runtime> EventListener for Bridge<R> {
         // tela de fim aparecer, e revogar primeiro o descartaria na linha de
         // cima — a sessão acabaria sem ninguém ficar sabendo.
         let acabou = matches!(event, Event::Ended { .. });
+        // O fim fica anotado antes de sair: quem relê a trilha logo depois do
+        // evento já a encontra encerrada.
+        if let Event::Ended { reason } = &event {
+            *self
+                .marcas
+                .encerrada
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(*reason);
+        }
         // A failed emit means the window is gone, which is not worth a log channel
         // per event during shutdown.
-        let _ = self
-            .app
-            .emit(EVENT_CHANNEL, carga_do_evento(&event, self.tentativa));
-        if acabou {
-            let morta = self.de_pe.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        let _ = self.app.emit(EVENT_CHANNEL, carga);
+        // O sinal da trilha, para o que a placa de uma sessão mostra.
+        if matches!(event, Event::MessagesChanged) && !na_vista {
+            self.marcas.mudou.store(true, Ordering::Release);
+        }
+        if let Some(motivo) = motivo_da_trilha(&event, reconectou) {
+            avisar_a_trilha(&self.app, self.marcas.sessao, motivo);
+        }
+        if reconectou {
+            tracing::info!(
+                sessao = carimbo.sessao,
+                geracao = carimbo.geracao,
+                na_vista,
+                "uma sessão voltou de uma queda: a vista, o foco de voz e as outras sessões \
+                 ficam como estavam"
+            );
+        }
+        // **Só a sessão da vista revoga a vista.** O fim de uma sessão do fundo
+        // não para os MODs da que está na tela.
+        if acabou && na_vista {
+            let morta = self.de_pe.fetch_add(1, Ordering::AcqRel);
             // E os executores nativos daquela geração param junto, pela mesma
             // razão de `Session::revogar`: o dono do runtime é este lado, e a
             // janela pode não pedir — ela pode estar travada ou já ter fechado.
@@ -1050,6 +1289,10 @@ fn config_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> String {
 /// que se inscrevesse para ouvi-lo chegaria sempre tarde demais.
 #[derive(Debug, serde::Serialize)]
 struct Entrada {
+    /// **De qual sessão é esta entrada** (E3 da 0.17): é com este carimbo que a
+    /// janela manda todo comando de conversa a ela, e é por ele que a janela
+    /// separa os eventos dela dos das outras sessões.
+    carimbo: seele_ffi::Carimbo,
     /// A tela inteira, como sempre.
     snapshot: Snapshot,
     /// O que a chave deste servidor acabou de ser.
@@ -1222,15 +1465,24 @@ async fn connect<R: tauri::Runtime>(
     // E uma tentativa que falha também gasta um número, de propósito: ela pode
     // ter deixado tarefas pelo caminho, e as respostas delas não podem ser
     // admitidas pela tentativa seguinte.
+    //
+    // **Desde a 0.17 (E3), entrar noutro servidor não recusa nem derruba.** A
+    // sessão que estava na vista continua conectada no registro; esta é mais
+    // uma, e vai para a vista quando entrar. O que esta linha revoga é a
+    // **vista** (os MODs da que estava na tela param), e não sessão nenhuma.
+    // O guarda E54 continua: uma tentativa que outra substituiu — outra
+    // entrada começou, ou a pessoa trocou a vista enquanto esta andava — não
+    // entra.
     let geracao = {
         let slot = session.connection.lock();
-        if slot.as_ref().is_ok_and(|slot| slot.is_some()) {
-            return Err(ConnectionError::AlreadyConnected.into());
-        }
         let geracao = session.revogar();
         drop(slot);
         geracao
     };
+    // **O `SessaoId` nasce aqui, na tentativa** (E3): as etapas da chegada já
+    // saem carimbadas com ele.
+    let sessao_id = seele_ffi::SessaoId::nova();
+    let marcas = sessoes::Marcas::nova(sessao_id);
 
     // O convite guardado vale para o servidor dele e para nenhum outro. Quem cola
     // um link e depois troca o endereço no campo deixaria para trás uma
@@ -1422,11 +1674,13 @@ async fn connect<R: tauri::Runtime>(
         // escolhe de novo hoje, e quem nunca escolheu continua no padrão da
         // máquina. Um dispositivo que sumiu não impede de entrar — a FFI cai
         // para o padrão e a tela mostra o que abriu de verdade.
-        capture_device: preferencias(&app).and_then(|p| p.capture().map(str::to_owned)),
+        capture_device: audio_de_mentira::aparelho()
+            .or_else(|| preferencias(&app).and_then(|p| p.capture().map(str::to_owned))),
         // A saída de som, pela mesma política e lida do mesmo lugar. Os dois
         // ajustes são independentes: um fone que ficou na outra sala não pode
         // custar o microfone que a pessoa escolheu.
-        playback_device: preferencias(&app).and_then(|p| p.playback().map(str::to_owned)),
+        playback_device: audio_de_mentira::aparelho()
+            .or_else(|| preferencias(&app).and_then(|p| p.playback().map(str::to_owned))),
     };
 
     // `connect` blocks on a QUIC handshake. Running it on the async runtime's
@@ -1447,7 +1701,8 @@ async fn connect<R: tauri::Runtime>(
     // é o mesmo destino, ligado mais cedo.
     let ponte = Arc::new(Bridge {
         app: app.clone(),
-        geracao,
+        marcas: Arc::clone(&marcas),
+        vista: session.sessoes.vista_atomica(),
         de_pe: Arc::clone(&session.geracao),
         descartados: Arc::clone(&session.eventos_de_geracao_morta),
         tentativa,
@@ -1457,19 +1712,36 @@ async fn connect<R: tauri::Runtime>(
     // enquanto a chegada anda, e o `cancelar_ligacao` a acha lá.
     let em_voo = ligar::LigacaoEmVoo::abrir(&session);
     let cancelamento = em_voo.cancelamento();
+    // **No foco de voz da máquina** (E3): a voz desta sessão só abre quando
+    // ela tiver o microfone. Sozinha, ela o tem; com outras, só por um ato da
+    // pessoa (`focar_voz`, ou entrar numa sala de voz nela).
+    let foco = session.sessoes.foco();
     let resultado = tauri::async_runtime::spawn_blocking(move || {
-        Connection::connect_cancelavel(config, Some(atento), cancelamento)
+        Connection::connect_com_foco(
+            config,
+            Some(atento),
+            Some(cancelamento),
+            Some(foco),
+            Some(sessao_id),
+        )
     })
     .await
     .unwrap_or_else(|_| Err(ConnectFailure::from(ConnectionError::Unreachable)));
     drop(em_voo);
-    let (connection, veredito) = resultado.map_err(|falha| FalhaDaEntrada {
-        falha,
-        de_onde: DeOndeVeio {
-            origem_da_impressao,
-            a_lista_guardou: false,
-        },
-        substituida: false,
+    let (connection, veredito) = resultado.map_err(|falha| {
+        // Uma tentativa que não entrou não fala mais: o que ainda viesse dela
+        // seria de uma sessão que não existe.
+        marcas
+            .viva
+            .store(false, std::sync::atomic::Ordering::Release);
+        FalhaDaEntrada {
+            falha,
+            de_onde: DeOndeVeio {
+                origem_da_impressao,
+                a_lista_guardou: false,
+            },
+            substituida: false,
+        }
     })?;
 
     // **A tentativa que outra substituiu não entra** (pendência 58, item 54;
@@ -1483,6 +1755,9 @@ async fn connect<R: tauri::Runtime>(
     // em `comandos_de_geracao_morta` e diz em DEBUG, e a velha que chega tarde
     // é uma coisa da sessão anterior falando depois da hora.
     if session.confere_geracao(geracao).is_err() {
+        marcas
+            .viva
+            .store(false, std::sync::atomic::Ordering::Release);
         return Err(largar_a_substituida(
             &connection,
             geracao,
@@ -1493,6 +1768,20 @@ async fn connect<R: tauri::Runtime>(
     }
 
     connection.subscribe(ponte);
+
+    // **O mudo e o isolamento são da máquina** (E3, ADR 0031): a sessão nova
+    // nasce como as outras estão. Sem isto, quem estava mudo num servidor
+    // entraria noutro com o microfone aberto, e uma troca de foco para lá
+    // transmitiria.
+    if let Some(outra) = session.sessoes.todas().first() {
+        let retrato = outra.conexao.snapshot();
+        if retrato.muted {
+            let _ = connection.set_muted(true);
+        }
+        if retrato.total_isolation {
+            let _ = connection.set_total_isolation(true);
+        }
+    }
 
     // O modo de microfone, a supressão de ruído e a sensibilidade gravados,
     // aplicados assim que há o que aplicar.
@@ -1584,15 +1873,30 @@ async fn connect<R: tauri::Runtime>(
     // é desta e o slot é dela, ou a conexão dela é fechada e nada do que vem
     // abaixo — o endereço da sessão, o alvo, a lista de visitados — vale para
     // ela. Gravar sem conferir punha a conexão da velha no lugar da nova.
+    //
+    // **Desde a 0.17 (E3), «gravar» é entrar no registro e ir para a vista.**
+    // As outras sessões continuam como estavam: a que estava na vista vai para
+    // o fundo, conectada.
     let substituida = match session.connection.lock() {
         Ok(mut slot) if session.confere_geracao(geracao).is_ok() => {
-            *slot = Some(connection);
+            let nova = session.sessoes.inserir(
+                Arc::clone(&connection),
+                alvo.clone(),
+                None,
+                Arc::clone(&marcas),
+            );
+            session.por_na_vista_com(&mut slot, Some(&nova));
+            drop(slot);
+            avisar_a_trilha(&app, sessao_id, "entrou");
             None
         }
         Ok(_) => Some(connection),
         Err(_) => None,
     };
     if let Some(connection) = substituida {
+        marcas
+            .viva
+            .store(false, std::sync::atomic::Ordering::Release);
         return Err(largar_a_substituida(
             &connection,
             geracao,
@@ -1614,14 +1918,25 @@ async fn connect<R: tauri::Runtime>(
     // dizer a mesma coisa.
     // **Fora do `if`, e é essa a correção.** Onde a sessão está não depende de
     // o endereço merecer entrar na lista de atalhos.
-    if let Ok(mut onde) = session.endereco_da_sessao.lock() {
-        *onde = Some(alvo.clone());
+    //
+    // Só se esta sessão ainda é a vista (E3): o espelho da vista não pode
+    // receber o endereço de uma sessão que já foi para o fundo.
+    if session.sessoes.vista() == Some(sessao_id) {
+        if let Ok(mut onde) = session.endereco_da_sessao.lock() {
+            *onde = Some(alvo.clone());
+        }
     }
     // Falso até a lista gravar, lá embaixo, a impressão que a conexão aceitou.
     let mut a_lista_guardou = false;
     // Uma ligação vai para a agenda, e não para cá: é `anotar_a_chegada` quem
     // decide, pela origem da tentativa, e quem guarda o alvo da sessão.
-    if ligar::anotar_a_chegada(&session, &casa, &alvo, ligou_para) {
+    let visita = ligar::anotar_a_chegada(&session, &casa, &alvo, ligou_para);
+    // E «onde voltar» fica com a sessão no registro, pela mesma decisão: é o
+    // que a vista dela volta a ter quando a pessoa trocar para ela de novo.
+    if let Some(nova) = session.sessoes.buscar(sessao_id) {
+        nova.guardar_alvo(visita.then(|| alvo.clone()));
+    }
+    if visita {
         let aberta = seele_ffi::conhecidos::Conhecidos::abrir(
             std::path::PathBuf::from(&casa).join("conhecidos"),
         );
@@ -1721,6 +2036,7 @@ async fn connect<R: tauri::Runtime>(
     }
 
     Ok(Entrada {
+        carimbo: connection_carimbo(&session, sessao_id),
         snapshot,
         veredito,
         geracao,
@@ -1729,6 +2045,16 @@ async fn connect<R: tauri::Runtime>(
             a_lista_guardou,
         },
     })
+}
+
+/// O carimbo de agora de uma sessão do registro; o da entrada, se ela já saiu.
+fn connection_carimbo(session: &Session, sessao: u64) -> seele_ffi::Carimbo {
+    session
+        .sessoes
+        .buscar(sessao)
+        .map_or(seele_ffi::Carimbo { sessao, geracao: 1 }, |sessao| {
+            sessao.conexao.carimbo()
+        })
 }
 
 /// **Solta a entrada que a janela não adotou** (pendência 58, item 54; lote
@@ -1764,7 +2090,14 @@ fn soltar_a_entrada_em(session: &Session, geracao: u64) -> bool {
     let solta = match session.connection.lock() {
         Ok(mut slot) if session.confere_geracao(geracao).is_ok() && slot.is_some() => {
             session.revogar();
-            slot.take()
+            // A sessão da vista sai do registro também (E3): solta é solta, e
+            // não uma sessão a mais esquecida no fundo.
+            if let Some(vista) = session.sessoes.vista() {
+                session.sessoes.tirar(vista);
+            }
+            let solta = slot.take();
+            session.por_na_vista_com(&mut slot, None);
+            solta
         }
         _ => None,
     };
@@ -2148,7 +2481,12 @@ mod a_entrada_velha_que_chega_tarde {
             ("o servidor novo", servidor_novo.server().events.subscribe()),
         ];
         let corpo = "para onde eu vou?";
-        if let Err(erro) = send_message(app.state::<Session>(), canal, corpo.to_owned()) {
+        if let Err(erro) = send_message(
+            app.state::<Session>(),
+            super::sessoes::CarimboDaJanela::da(&nova),
+            canal,
+            corpo.to_owned(),
+        ) {
             vermelhos.push(format!("a mensagem não saiu: {erro:?}"));
         }
         let receberam = quem_recebeu(&mut ouvidos, corpo, Duration::from_secs(2)).await;
@@ -2341,7 +2679,12 @@ mod a_entrada_velha_que_chega_tarde {
             ("o servidor novo", servidor_novo.server().events.subscribe()),
         ];
         let corpo = "e agora, para onde?";
-        if let Err(erro) = send_message(app.state::<Session>(), canal, corpo.to_owned()) {
+        if let Err(erro) = send_message(
+            app.state::<Session>(),
+            super::sessoes::CarimboDaJanela::da(&nova),
+            canal,
+            corpo.to_owned(),
+        ) {
             vermelhos.push(format!("a mensagem não saiu: {erro:?}"));
         }
         let receberam = quem_recebeu(&mut ouvidos, corpo, Duration::from_secs(2)).await;
@@ -2639,7 +2982,9 @@ mod a_entrada_velha_que_chega_tarde {
              ainda é a de pé: a tentativa que outra substituiu manda o retrato e o \
              consentimento ao servidor que a pessoa deixou.\n{antes_dos_efeitos}"
         );
-        let Some(gravar) = corpo.find("*slot = Some(connection)") else {
+        // Desde a 0.17 (E3), gravar é pôr a sessão nova na vista, com o cadeado
+        // da conexão da vista na mão.
+        let Some(gravar) = corpo.find("session.por_na_vista_com(&mut slot, Some(&nova))") else {
             panic!("o `connect` não grava mais o slot: {corpo}");
         };
         let Some(cadeado) = corpo[..gravar].rfind("session.connection.lock()") else {
@@ -2877,6 +3222,43 @@ struct Hospedado {
     /// O identificador do servidor guardado. `None` no legado (a máquina que
     /// hospedava antes de haver lista, com o banco de sempre) e na sala.
     servidor: Option<String>,
+    /// **A geração desta hospedagem** (a portaria do E7): sobe a cada servidor
+    /// que esta janela levanta, e nunca se repete no processo. Parar A e subir
+    /// B (ou A de novo) dá outra geração, mesmo com a mesma chave e a mesma
+    /// porta: é o que deixa a decisão aberta para A ser recusada em B.
+    geracao: u64,
+}
+
+impl Hospedado {
+    /// Uma hospedagem de pé, com uma geração nova.
+    fn novo(hospedagem: seele_server::hospedagem::Hospedagem, servidor: Option<String>) -> Self {
+        static GERACOES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self {
+            hospedagem,
+            servidor,
+            geracao: GERACOES.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+
+    /// Quem esta hospedagem é, para a tela e para os atos da portaria.
+    fn identidade(&self) -> HospedagemDaPorta {
+        HospedagemDaPorta {
+            servidor: self.servidor.clone(),
+            geracao: self.geracao,
+        }
+    }
+}
+
+/// **A hospedagem exata de que a porta fala** (E7, a portaria): o servidor
+/// guardado e a geração da hospedagem. O `estado_da_porta` a devolve, e o
+/// `decidir_pedido` e o `revogar_admissao` a exigem de volta: uma decisão
+/// aberta para uma hospedagem nunca é aplicada noutra.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct HospedagemDaPorta {
+    /// O servidor guardado, ou `None` para o banco de sempre.
+    servidor: Option<String>,
+    /// A geração da hospedagem (ver [`Hospedado::geracao`]).
+    geracao: u64,
 }
 
 /// Onde a sessão desta janela está, em relação às hospedagens deste app.
@@ -3017,6 +3399,48 @@ fn dar_nome_na_agenda(
     nome: String,
 ) -> Result<(), sala::FalhaNaAgenda> {
     sala::dar_nome_em(&config_dir(&app), &codigo, &nome)
+}
+
+/// A lista de amigos (0.17): os contatos que a pessoa adicionou. Ligar para um
+/// é o `connect` com o `alvo` dele, o mesmo caminho do código colado.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda::NaoGravou`] quando a agenda não abre.
+#[tauri::command]
+fn amigos(app: AppHandle) -> Result<Vec<sala::ContatoNaTela>, sala::FalhaNaAgenda> {
+    sala::amigos_em(&config_dir(&app))
+}
+
+/// Põe um código na lista de amigos (0.17), com o nome, quando vem um; um nome
+/// vazio mantém o que a agenda já tinha.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda`]: o código não fecha, é o desta máquina, ou a agenda
+/// não gravou.
+#[tauri::command]
+fn adicionar_amigo(
+    app: AppHandle,
+    codigo: String,
+    nome: Option<String>,
+) -> Result<(), sala::FalhaNaAgenda> {
+    let adicionado = sala::adicionar_amigo_em(&config_dir(&app), &codigo, nome.as_deref());
+    tracing::info!(?adicionado, "amigo adicionado à agenda");
+    adicionado
+}
+
+/// Tira um código da lista de amigos (0.17), e só: o nome, o histórico, o
+/// bloqueio e o pin ficam.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda`]: o código não fecha, ou a agenda não gravou.
+#[tauri::command]
+fn tirar_dos_amigos(app: AppHandle, codigo: String) -> Result<(), sala::FalhaNaAgenda> {
+    let tirado = sala::tirar_dos_amigos_em(&config_dir(&app), &codigo);
+    tracing::info!(?tirado, "amigo tirado da agenda");
+    tirado
 }
 
 /// Bloqueia ou desbloqueia um código (tarefa 29 da F7), **ao vivo**: quem
@@ -3275,6 +3699,29 @@ struct Anfitriao {
 enum FalhaAoHospedar {
     /// Já se está hospedando nesta janela.
     JaHospedando,
+    /// **O banco deste servidor não pôde ser lido antes de hospedar** (o ANTES
+    /// DE HOSPEDAR, `antes_de_hospedar`): não é SQLite, ou não se lê. Nunca
+    /// «pronto»: nada sobe e nada é convertido até a pessoa resolver.
+    DadosNaoVerificados {
+        /// O motivo, para «Detalhes técnicos».
+        motivo: String,
+        /// O que a tela oferece: `tentar-de-novo`, `abrir-a-pasta`.
+        acoes: Vec<&'static str>,
+    },
+    /// **A cópia de segurança do estado atual não ficou pronta**, e hospedar
+    /// converteria os dados: nada sobe e nada é convertido, e o banco original
+    /// fica como estava. A etapa diz onde parou (`Copiar`, `Verificar`).
+    CopiaDeSeguranca {
+        /// Onde parou e por quê.
+        falha: antes_de_hospedar::FalhaNaCopia,
+    },
+    /// **Uma escolha de MOD do ANTES DE HOSPEDAR não se aplicou** (P1 da
+    /// 0.17), depois da cópia: o pacote saiu do cache, ou o banco não gravou.
+    /// Nada sobe, e a escolha continua pendente; a cópia feita fica.
+    EscolhaDeModNaoAplicou {
+        /// O MOD e o motivo, para «Detalhes técnicos».
+        motivo: String,
+    },
     /// A porta 8383 está ocupada — quase sempre outro SEELE aberto.
     PortaOcupada,
     /// Qualquer outro motivo para o servidor não subir.
@@ -3393,12 +3840,73 @@ async fn resolver_mod_de_api_antiga(
         Err(_) => true,
     };
     let config = config_dir(&app);
-    // Abrir o banco migra, e uma migração não roda na thread da janela.
+    // Só lê e estagia (P1 da 0.17): nada de abrir o banco para escrever. Fora
+    // da thread da janela porque lê o pacote e o banco do disco.
     tauri::async_runtime::spawn_blocking(move || {
         mods::resolver_mod_de_api_antiga(&config, servidor.as_deref(), &id, &saida, no_ar)
     })
     .await
-    .map_err(|erro| mods::FalhaAoResolverModAntigo::BancoNaoRespondeu(erro.to_string()))?
+    .map_err(|erro| mods::FalhaAoResolverModAntigo::NaoGuardou(erro.to_string()))?
+}
+
+/// **Desfaz a escolha estagiada para um MOD deste servidor** (P1 da 0.17): o
+/// banco nunca foi tocado, então desfazer é só esquecer o que o `hospedar`
+/// aplicaria. O «DESFAZER» do ANTES DE HOSPEDAR (pedido do ui-ux).
+///
+/// # Errors
+///
+/// [`mods::FalhaAoResolverModAntigo::NaoGuardou`], com o motivo do disco.
+#[tauri::command]
+fn desfazer_escolha_de_mod(
+    app: AppHandle,
+    servidor: Option<String>,
+    id: String,
+) -> Result<(), mods::FalhaAoResolverModAntigo> {
+    desfazer_escolha_de_mod_em(&config_dir(&app), servidor.as_deref(), &id)
+}
+
+/// O corpo do [`desfazer_escolha_de_mod`], sem o `AppHandle`: o servidor tem de
+/// ser um guardado desta máquina (a mesma regra do resolvedor; revisão do
+/// Codex, path traversal), e uma retirada que não chega ao disco é erro.
+fn desfazer_escolha_de_mod_em(
+    config: &str,
+    servidor: Option<&str>,
+    id: &str,
+) -> Result<(), mods::FalhaAoResolverModAntigo> {
+    mods::servidor_guardado(config, servidor)?;
+    escolhas_de_mods::retirar(std::path::Path::new(config), servidor, id)
+        .map_err(mods::FalhaAoResolverModAntigo::NaoGuardou)
+}
+
+/// **O DESFAZER só desfaz no servidor guardado que existe** (revisão do Codex):
+/// um id desconhecido é recusado antes de qualquer caminho.
+#[cfg(test)]
+mod o_desfazer_confere_o_servidor {
+    #[test]
+    fn um_servidor_que_esta_maquina_nao_guarda_e_recusado() {
+        let casa = tempfile::tempdir().expect("a casa");
+        let config = casa.path().to_string_lossy().into_owned();
+        for torto in ["nunca-existiu", "../sentinela", "/tmp/x"] {
+            assert_eq!(
+                super::desfazer_escolha_de_mod_em(&config, Some(torto), "x/y"),
+                Err(super::mods::FalhaAoResolverModAntigo::ServidorDesconhecido),
+                "o DESFAZER aceitou {torto:?}"
+            );
+        }
+        assert!(
+            !casa
+                .path()
+                .join(super::escolhas_de_mods::PASTA_DAS_ESCOLHAS)
+                .exists(),
+            "um servidor recusado ainda tocou a pasta das escolhas"
+        );
+        let guardado = super::servidores::criar(&config, "Casa", "0.17.0");
+        assert_eq!(
+            super::desfazer_escolha_de_mod_em(&config, Some(&guardado.id), "x/y"),
+            Ok(()),
+            "o DESFAZER recusou um guardado de verdade"
+        );
+    }
 }
 
 /// Guarda um servidor novo e devolve o que foi guardado.
@@ -3589,6 +4097,71 @@ fn estado_da_primeira_abertura(
     estado.0.lock().ok().and_then(|slot| slot.clone())
 }
 
+/// **ANTES DE HOSPEDAR**, só leitura (E2 da 0.17): o que hospedar vai fazer
+/// com os dados deste servidor — o esquema gravado, se converte, as cópias que
+/// existem e qual delas é do estado atual, se vai copiar antes — e os MODs de
+/// API antiga, sem subir nada. Ver [`antes_de_hospedar::conferir`].
+#[tauri::command]
+fn antes_de_hospedar(app: AppHandle, servidor: Option<String>) -> AntesDeHospedarNaTela {
+    let config = config_dir(&app);
+    let banco = servidores::caminho_do_banco(&config, servidor.as_deref());
+    let mods_de_api_antiga = if banco.exists() {
+        mods::mods_de_api_antiga(
+            &banco,
+            &servidores::raizes_dos_mods(&config, servidor.as_deref()),
+        )
+        .into_iter()
+        .map(|antigo| (antigo.id, antigo.api))
+        .collect()
+    } else {
+        Vec::new()
+    };
+    AntesDeHospedarNaTela {
+        dados: antes_de_hospedar::conferir(
+            std::path::Path::new(&config),
+            servidor.as_deref(),
+            &banco,
+        ),
+        mods_de_api_antiga,
+        escolhas_pendentes: escolhas_de_mods::pendentes(
+            std::path::Path::new(&config),
+            servidor.as_deref(),
+        ),
+    }
+}
+
+/// O ANTES DE HOSPEDAR como a tela o lê: os dados, e os MODs ao lado.
+#[derive(Debug, serde::Serialize)]
+struct AntesDeHospedarNaTela {
+    #[serde(flatten)]
+    dados: antes_de_hospedar::AntesDeHospedar,
+    /// Os MODs ligados que esta versão não roda, **como estão no banco**: uma
+    /// escolha estagiada não os tira daqui, porque o banco não mudou.
+    mods_de_api_antiga: Vec<(String, Option<u32>)>,
+    /// **As escolhas de MOD estagiadas para este servidor** (P1 da 0.17): o
+    /// `hospedar` as aplica depois da cópia e da conversão. Desistir, voltar e
+    /// reabrir mostram as mesmas; o banco não foi tocado.
+    escolhas_pendentes: Vec<escolhas_de_mods::Escolha>,
+}
+
+/// **PREPARAR CÓPIA** (E2 da 0.17): cria e verifica uma cópia de segurança do
+/// estado atual do banco deste servidor, sem hospedar nem converter nada. O
+/// `hospedar` faz o mesmo sozinho quando precisa; esta é a ação para quem quer
+/// a cópia antes.
+///
+/// # Errors
+///
+/// [`antes_de_hospedar::FalhaNaCopia`], com a etapa e o motivo.
+#[tauri::command]
+fn preparar_copia(
+    app: AppHandle,
+    servidor: Option<String>,
+) -> Result<antes_de_hospedar::Copia, antes_de_hospedar::FalhaNaCopia> {
+    let config = config_dir(&app);
+    let banco = servidores::caminho_do_banco(&config, servidor.as_deref());
+    antes_de_hospedar::preparar_copia(std::path::Path::new(&config), servidor.as_deref(), &banco)
+}
+
 /// Sobe um servidor dentro do app e devolve o link do convite.
 ///
 /// Este comando é o item de UX que faltava: sem ele, hospedar exige abrir um
@@ -3608,6 +4181,34 @@ async fn hospedar(
     // Qual servidor guardado levantar. `None` é o banco de sempre — o que toda
     // máquina que já hospedou antes desta versão tem.
     servidor: Option<String>,
+) -> Result<Anfitriao, FalhaAoHospedar> {
+    let config = config_dir(&app);
+    let atualizador = versoes::atualizador_do_app(&app);
+    hospedar_em(
+        &session,
+        &config,
+        atualizador.as_ref(),
+        nome_publico,
+        servidor,
+        PORTA_PADRAO,
+        modo_local(),
+    )
+    .await
+}
+
+/// **O corpo do `hospedar`**, sem o `AppHandle`: a pasta de dados, o
+/// atualizador, a porta e o modo local vêm de quem chama. O comando passa os de
+/// produto (`PORTA_PADRAO`, `modo_local()`); os testes passam porta zero e o
+/// modo local, para subir o servidor de verdade por este mesmo caminho sem
+/// tocar na porta 8383 nem na escada.
+async fn hospedar_em(
+    session: &Session,
+    config: &str,
+    atualizador: Option<&versoes::Atualizador>,
+    nome_publico: Option<String>,
+    servidor: Option<String>,
+    porta: u16,
+    local: bool,
 ) -> Result<Anfitriao, FalhaAoHospedar> {
     // Conferido **antes** de subir o servidor. Ver `FalhaAoHospedar::NomeRecusado`.
     //
@@ -3637,18 +4238,13 @@ async fn hospedar(
 
     // ADR 0046: a lista de revogação é conferida nos atos, e esta versão
     // também é uma versão. Sem rede vale a guardada; sem nenhuma, passa.
-    versoes::conferir_esta_versao(
-        &config_dir(&app),
-        versoes::atualizador_do_app(&app).as_ref(),
-        seele_lancador::Ato::Hospedar,
-    )
-    .await?;
+    versoes::conferir_esta_versao(config, atualizador, seele_lancador::Ato::Hospedar).await?;
 
     // **Qual banco, e por que isso passa pelo registro.** Até aqui era sempre
     // `<config>/seele.db`, um por máquina. `servidores::banco` devolve esse
     // mesmo caminho quando ninguém escolheu nada — e é o que faz hospedar
     // continuar funcionando numa máquina sem registro nenhum.
-    let config = config_dir(&app);
+    let config = config.to_owned();
     let id_do_servidor = servidor.as_deref();
     if let Some(id) = id_do_servidor {
         servidores::marcar_uso(&config, id);
@@ -3660,10 +4256,10 @@ async fn hospedar(
     // API 6; tarefa 13 do plano da F3, Step 5b). Com o mesmo banco e as mesmas
     // raízes que vão ao servidor, e antes de marcar o servidor como hospedado:
     // recusado aqui, nada sobe e nada fica dizendo que esta janela hospeda.
-    let antigos = mods::mods_de_api_antiga(
-        &banco,
-        &servidores::raizes_dos_mods(&config, id_do_servidor),
-    );
+    // Menos os que já têm uma escolha estagiada (ATUALIZAR ou DESLIGAR, no
+    // ANTES DE HOSPEDAR): essas são aplicadas depois da cópia e da conversão,
+    // em `preparar_a_casa_de_quem_hospeda`. Ver `escolhas_de_mods`.
+    let antigos = mods::recusas_de_hospedar(&config, id_do_servidor, &banco);
     if !antigos.is_empty() {
         return Err(FalhaAoHospedar::ModsDeApiAntiga {
             mods: antigos
@@ -3671,6 +4267,47 @@ async fn hospedar(
                 .map(|antigo| (antigo.id, antigo.api))
                 .collect(),
         });
+    }
+    // **O portão da conversão** (E2 da 0.17): hospedar por esta versão
+    // converte um banco de versão anterior, e só converte com uma cópia
+    // confirmada do estado atual — criada e verificada aqui, se não há. Falha
+    // fechado: um banco que não se lê, ou uma cópia que não ficou pronta, não
+    // sobe nada. Ver `antes_de_hospedar`.
+    match antes_de_hospedar::garantir_a_copia(std::path::Path::new(&config), id_do_servidor, &banco)
+    {
+        Ok(portao) => tracing::info!(?portao, "o portão da conversão abriu"),
+        Err(antes_de_hospedar::PortaoFechado::NaoVerificado { motivo, acoes }) => {
+            tracing::warn!(%motivo, "hospedar recusado: o banco não foi verificado");
+            return Err(FalhaAoHospedar::DadosNaoVerificados { motivo, acoes });
+        }
+        Err(antes_de_hospedar::PortaoFechado::Copia(falha)) => {
+            tracing::warn!(
+                ?falha,
+                "hospedar recusado: a cópia de segurança não ficou pronta"
+            );
+            return Err(FalhaAoHospedar::CopiaDeSeguranca { falha });
+        }
+    }
+    // A chave desta máquina no banco de um servidor guardado, **depois** do
+    // portão: plantá-la abre o banco, e abrir migra (P1 da 0.17).
+    if id_do_servidor.is_some() {
+        servidores::plantar_a_chave_depois_do_portao(&config, &banco);
+    }
+    // **As escolhas de MOD estagiadas, aplicadas só agora** (P1 da 0.17):
+    // depois da cópia nova e verificada; abrir o banco aqui é a conversão. E o
+    // sim do dono ao conjunto que resulta, sob o endereço por onde esta janela
+    // entra no próprio servidor (b1 do E7). Ver `escolhas_de_mods`.
+    let aqui = format!("127.0.0.1:{porta}");
+    match escolhas_de_mods::aplicar_depois_do_portao(&config, id_do_servidor, &banco, &aqui) {
+        Ok(aplicou) => {
+            if aplicou {
+                tracing::info!("as escolhas de MOD estagiadas foram aplicadas depois da cópia");
+            }
+        }
+        Err(motivo) => {
+            tracing::warn!(%motivo, "hospedar recusado: uma escolha de MOD estagiada não se aplicou");
+            return Err(FalhaAoHospedar::EscolhaDeModNaoAplicou { motivo });
+        }
     }
     // Guardado **antes** de subir: quem perguntar «qual servidor esta janela
     // hospeda?» entre o início e o fim recebe a resposta certa, e não «nenhum».
@@ -3681,56 +4318,40 @@ async fn hospedar(
     // admitir antes de a porta abrir. Falhar aqui é grave o bastante para não
     // hospedar — um servidor no ar em que o dono não entra é uma janela travada
     // com uma frase pedindo que alguém decida.
-    let minha = seele_ffi::impressao_desta_maquina(&config_dir(&app))
-        .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
+    let minha =
+        seele_ffi::impressao_desta_maquina(&config).map_err(|_| FalhaAoHospedar::NaoSubiu)?;
     // **Com o ponto de encontro do projeto**, pedido aqui e só aqui: sem
     // `$SEELE_ENCONTRO`, o `iniciar` curto não convoca ponto nenhum, que é o
     // padrão seguro dos testes. Quem hospeda pelo app é quem está atrás do
     // roteador de casa, e é para essa pessoa que o degrau 4 existe. O guarda é
     // `o_ponto_de_encontro_de_quem_hospeda`, logo abaixo desta função.
-    let server = seele_server::hospedagem::Hospedagem::iniciar_com_o_ponto_padrao(
-        PORTA_PADRAO,
-        seele_server::persistence::Location::File(banco),
-        "Casa",
-        // ADR 0045 para o pacote, e o plano de isolamento de 18/09 para os
-        // arquivos: o código é compartilhado porque é imutável e conferido por
-        // hash; o que o MOD escreve é **desta instância**, e não da máquina.
-        Some(servidores::raizes_dos_mods(&config, id_do_servidor)),
-        // **Antes de o servidor aceitar a primeira conexão** — D-seg-1, a
-        // janela do Comandante. Isto rodava depois de `iniciar` voltar, com o
-        // laço já no ar: num banco novo a portaria nasce desligada, e quem
-        // chegasse nesse intervalo virava a primeira conta, e a primeira conta
-        // vira a Comandante. Ver `crates/seele-server/tests/janela_do_comandante.rs`.
-        move |persistence| {
-            // A porta se fecha no mesmo gesto de hospedar, antes do primeiro
-            // pacote — ADR 0030. O `seeled` continua subindo aberto, porque
-            // quem digita `seeled` aceitou cerimônia; quem apertou um botão
-            // não, e para ele o padrão é perguntar.
-            //
-            // Semear, e não ligar: isto roda toda vez que a janela sobe um
-            // servidor, e um interruptor que se rearma sozinho é um
-            // interruptor quebrado.
-            if let Err(erro) = seele_server::portaria::semear_ligada(persistence) {
-                // Não impede de hospedar. Um servidor no ar com a portaria
-                // desligada é o comportamento de antes deste ADR, e a tela diz
-                // em que estado a porta está.
-                tracing::warn!(%erro, "não consegui semear a portaria");
-            }
-            // E quem hospeda entra na própria casa. Sem isto a portaria tranca
-            // o dono para fora: o app conecta no servidor que acabou de subir,
-            // o porteiro trata quem hospeda como desconhecido, e o pedido fica
-            // esperando a decisão de alguém que não consegue entrar para
-            // decidir — foi o que aconteceu numa máquina de verdade.
-            seele_server::portaria::admitir_o_dono(persistence, &minha)
-        },
-    )
-    .await
-    .map_err(|erro| classificar(&erro))?;
+    // ADR 0045 para o pacote, e o plano de isolamento de 18/09 para os
+    // arquivos: o código é compartilhado porque é imutável e conferido por
+    // hash; o que o MOD escreve é **desta instância**, e não da máquina.
+    let raizes = Some(servidores::raizes_dos_mods(&config, id_do_servidor));
+    let local_do_banco = seele_server::persistence::Location::File(banco);
+    // **Antes de o servidor aceitar a primeira conexão** — D-seg-1, a
+    // janela do Comandante. Isto rodava depois de `iniciar` voltar, com o
+    // laço já no ar: num banco novo a portaria nasce desligada, e quem
+    // chegasse nesse intervalo virava a primeira conta, e a primeira conta
+    // vira a Comandante. Ver `crates/seele-server/tests/janela_do_comandante.rs`.
+    let antes_de_aceitar = move |persistence: &mut seele_server::persistence::Persistence| {
+        preparar_a_casa_de_quem_hospeda(persistence, &minha)
+    };
+    let server = subir_o_guardado(porta, local_do_banco, raizes, antes_de_aceitar, local)
+        .await
+        .map_err(|erro| classificar(&erro))?;
 
     let alcance = server.alcance();
     let firewall = firewall_deste_executavel();
     let anfitriao = Anfitriao {
-        aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
+        // A porta em que ele de fato atende: a padrão no produto, a que o
+        // sistema escolheu num teste de porta zero.
+        aqui: if porta == 0 {
+            format!("127.0.0.1:{}", server.endereco().port())
+        } else {
+            aqui
+        },
         convite: server.convite_com_nome(nome_publico.as_deref()),
         alcance: alcance.map_or("SoRedeLocal", |alcance| alcance.degrau().nome()),
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
@@ -3747,12 +4368,377 @@ async fn hospedar(
         .hospedagens
         .lock()
         .map_err(|_| FalhaAoHospedar::NaoSubiu)?
-        .guardado = Some(Hospedado {
-        hospedagem: server,
-        servidor,
-    });
+        .guardado = Some(Hospedado::novo(server, servidor));
 
     Ok(anfitriao)
+}
+
+/// Sobe o servidor guardado do `hospedar`: com o ponto de encontro do projeto,
+/// ou, no **modo local** da build de teste, sem escada e só em loopback.
+async fn subir_o_guardado(
+    porta: u16,
+    banco: seele_server::persistence::Location,
+    raizes: Option<seele_server::RaizesDosMods>,
+    antes_de_aceitar: impl FnOnce(&mut seele_server::persistence::Persistence) -> anyhow::Result<()>,
+    local: bool,
+) -> anyhow::Result<seele_server::hospedagem::Hospedagem> {
+    // **O modo local (E9), só na build de teste**: sem escada (nenhum UPnP,
+    // PCP nem ponto de encontro) e só em loopback. Ver [`modo_local`]: o
+    // comando passa o `modo_local()`, e os testes passam `true`.
+    if local {
+        tracing::info!("modo local: o servidor guardado sobe sem escada, só em loopback");
+        seele_server::hospedagem::Hospedagem::iniciar_local(
+            porta,
+            banco,
+            "Casa",
+            raizes,
+            antes_de_aceitar,
+        )
+        .await
+    } else {
+        seele_server::hospedagem::Hospedagem::iniciar_com_o_ponto_padrao(
+            porta,
+            banco,
+            "Casa",
+            raizes,
+            antes_de_aceitar,
+        )
+        .await
+    }
+}
+
+/// **O que o `hospedar` faz no banco já convertido, antes da primeira
+/// conexão** (o `antes_de_aceitar` dele; D-seg-1, a janela do Comandante): a
+/// portaria semeada ligada (ADR 0030) e o dono admitido na própria casa. As
+/// escolhas de MOD estagiadas já foram aplicadas antes da subida, depois do
+/// portão da cópia (`escolhas_de_mods::aplicar_depois_do_portao`).
+fn preparar_a_casa_de_quem_hospeda(
+    persistence: &mut seele_server::persistence::Persistence,
+    minha: &str,
+) -> anyhow::Result<()> {
+    // A porta se fecha no mesmo gesto de hospedar, antes do primeiro
+    // pacote — ADR 0030. O `seeled` continua subindo aberto, porque
+    // quem digita `seeled` aceitou cerimônia; quem apertou um botão
+    // não, e para ele o padrão é perguntar.
+    //
+    // Semear, e não ligar: isto roda toda vez que a janela sobe um
+    // servidor, e um interruptor que se rearma sozinho é um
+    // interruptor quebrado.
+    if let Err(erro) = seele_server::portaria::semear_ligada(persistence) {
+        // Não impede de hospedar. Um servidor no ar com a portaria
+        // desligada é o comportamento de antes deste ADR, e a tela diz
+        // em que estado a porta está.
+        tracing::warn!(%erro, "não consegui semear a portaria");
+    }
+    // **E quem hospeda é o dono** (ADR 0064, achado do compat): a chave desta
+    // máquina é declarada proprietária antes da primeira conexão. Sem isto,
+    // quem apertou HOSPEDAR entrava sem autoridade nenhuma — nem salas, nem
+    // moderação, nem cargos. A mesma declaração a cada subida não muda nada
+    // nem sobe a revisão dos cargos (`declarar_proprietario`). Falha fechado:
+    // um servidor no ar em que o dono não manda é pior que um que não subiu.
+    seele_server::cargos::declarar_proprietario(persistence, minha)?;
+    // E quem hospeda entra na própria casa. Sem isto a portaria tranca
+    // o dono para fora: o app conecta no servidor que acabou de subir,
+    // o porteiro trata quem hospeda como desconhecido, e o pedido fica
+    // esperando a decisão de alguém que não consegue entrar para
+    // decidir — foi o que aconteceu numa máquina de verdade.
+    seele_server::portaria::admitir_o_dono(persistence, minha)
+}
+
+/// **Quem aperta HOSPEDAR é o dono** (ADR 0064; achado do compat, item 8):
+/// pelo corpo de verdade do comando (`hospedar_em`, em porta zero e no modo
+/// local), quem hospeda entra e tem a autoridade de dono — cria salas, gere
+/// cargos, administra —, e a impressão declarada é a desta máquina. Outra
+/// conta no mesmo banco não vira dona.
+#[cfg(test)]
+mod quem_hospeda_e_o_dono {
+    use super::a_entrada_velha_que_chega_tarde::{app, runtime, vez};
+    use super::{config_dir, connect, disconnect, hospedar_em, Session};
+    use seele_proto::control::Permission;
+    use seele_proto::ids::PersonId;
+    use tauri::Manager;
+
+    #[test]
+    fn hospedar_declara_a_chave_desta_maquina_dona_e_outra_conta_nao_e() {
+        let _vez = vez();
+        runtime().block_on(async {
+            let app = app();
+            let session = app.state::<Session>();
+            let config = config_dir(app);
+            let anfitriao = hospedar_em(&session, &config, None, None, None, 0, true)
+                .await
+                .unwrap_or_else(|falha| panic!("o hospedar não subiu: {falha:?}"));
+
+            let entrada = tokio::time::timeout(
+                std::time::Duration::from_secs(20),
+                connect(
+                    app.clone(),
+                    app.state::<Session>(),
+                    anfitriao.aqui.clone(),
+                    "dona".to_owned(),
+                    false,
+                    None,
+                    None,
+                ),
+            )
+            .await
+            .expect("a entrada de quem hospeda não voltou")
+            .unwrap_or_else(|falha| {
+                panic!("quem hospeda não entrou no próprio servidor: {falha:?}")
+            });
+            let eu = PersonId(entrada.snapshot.me.expect("o servidor disse quem eu sou"));
+
+            let banco = session
+                .hospedagens
+                .lock()
+                .expect("as hospedagens")
+                .do_guardado()
+                .expect("o guardado de pé")
+                .persistence();
+            {
+                let banco = banco.lock().await;
+                let minha = seele_ffi::impressao_desta_maquina(&config).expect("a impressão daqui");
+                assert_eq!(
+                    seele_server::cargos::aviso_sem_dono(&banco),
+                    None,
+                    "o servidor que o HOSPEDAR subiu está sem dono"
+                );
+                for permissao in [
+                    Permission::ManageVoiceRooms,
+                    Permission::ManageRoles,
+                    Permission::AdministerServer,
+                    Permission::Kick,
+                ] {
+                    assert!(
+                        seele_server::cargos::pode(&banco, eu, permissao),
+                        "quem hospeda ({minha}) não pode {permissao:?} no próprio servidor"
+                    );
+                }
+                assert!(seele_server::cargos::administra(&banco, eu));
+
+                // Outra conta, no mesmo banco: não é dona, nem por ter entrado.
+                let outra = seele_server::permissions::Permissions::new(&banco)
+                    .register_or_find(&[0x77; 32], "outra")
+                    .expect("a outra conta");
+                assert!(
+                    !seele_server::cargos::pode(&banco, outra.id, Permission::ManageRoles),
+                    "outra conta virou dona"
+                );
+                assert!(!seele_server::cargos::administra(&banco, outra.id));
+            }
+
+            disconnect(
+                app.clone(),
+                app.state::<Session>(),
+                super::sessoes::CarimboDaJanela::da(&entrada),
+            )
+            .await
+            .expect("o `disconnect` nunca falha");
+            let guardado = session
+                .hospedagens
+                .lock()
+                .expect("as hospedagens")
+                .guardado
+                .take();
+            if let Some(guardado) = guardado {
+                guardado.hospedagem.encerrar().await;
+            }
+        });
+    }
+}
+
+/// **A ordem do CTA, no `hospedar` de verdade** (P1 da 0.17). Os testes do
+/// `mods.rs` provam cada passo com bancos reais; este prende que o comando os
+/// chama **nesta ordem**: a recusa pelos MODs (menos os estagiados), o portão
+/// da cópia, a chave, as escolhas aplicadas, e só então a subida. E que os
+/// caminhos de MOD com o servidor parado não abrem o banco para escrever.
+#[cfg(test)]
+mod a_ordem_do_cta_no_hospedar {
+    use super::{corpo_de, fonte_sem_comentarios};
+
+    #[test]
+    fn a_copia_vem_antes_de_toda_abertura_do_banco_e_as_escolhas_antes_da_subida() {
+        let fonte = fonte_sem_comentarios();
+        let corpo = corpo_de(&fonte, concat!("async fn hospedar_em", "("));
+        let onde = |trecho: &str| {
+            corpo
+                .find(trecho)
+                .unwrap_or_else(|| panic!("o `hospedar` não chama `{trecho}`"))
+        };
+        let ordem = [
+            onde("mods::recusas_de_hospedar("),
+            onde("antes_de_hospedar::garantir_a_copia("),
+            onde("servidores::plantar_a_chave_depois_do_portao("),
+            onde("escolhas_de_mods::aplicar_depois_do_portao("),
+            onde("subir_o_guardado("),
+        ];
+        assert!(
+            ordem
+                .windows(2)
+                .all(|par| matches!(par, [antes, depois] if antes < depois)),
+            "a ordem do CTA no `hospedar` mudou: {ordem:?}"
+        );
+        assert!(
+            !corpo.contains("mods::mods_de_api_antiga("),
+            "o `hospedar` voltou a recusar sem olhar as escolhas estagiadas"
+        );
+        // O comando é só a casca do `hospedar_em`, com a porta e o modo do
+        // produto: é o mesmo corpo que os testes de dono sobem.
+        let comando = corpo_de(&fonte, concat!("async fn hospedar", "(\n"));
+        assert!(
+            comando.contains("hospedar_em(")
+                && comando.contains("PORTA_PADRAO,")
+                && comando.contains("modo_local(),"),
+            "o comando `hospedar` não sobe pelo `hospedar_em` com a porta e o modo do produto"
+        );
+    }
+
+    #[test]
+    fn nenhum_caminho_de_mod_com_o_servidor_parado_abre_o_banco_para_escrever() {
+        let fonte = fonte_sem_comentarios();
+        // Os cabeçalhos partidos: inteiros, este próprio teste seria a primeira
+        // ocorrência que o `corpo_de` acha.
+        for cabecalho in [
+            concat!("async fn resolver_mod_de_api_antiga", "("),
+            concat!("async fn apagar_pacote_do_cache", "("),
+            concat!("fn antes_de_hospedar", "("),
+        ] {
+            let corpo = corpo_de(&fonte, cabecalho);
+            assert!(
+                !corpo.contains("Persistence::open"),
+                "`{cabecalho}` abre o banco com `Persistence::open`, que migra"
+            );
+        }
+        let mods = include_str!("mods.rs");
+        let resolver = corpo_de(mods, "pub(crate) fn resolver_mod_de_api_antiga(");
+        assert!(
+            !resolver.contains("Persistence::open") && !resolver.contains("banco_de_hospedar"),
+            "o resolvedor das saídas voltou a abrir o banco (ou a pedi-lo com a chave plantada)"
+        );
+    }
+}
+
+/// **O modo local (E9 da 0.17): só na build de teste, e só pedido.**
+///
+/// Com `SEELE_MODO_LOCAL=1` **num build de debug**, o servidor guardado
+/// (`hospedar`) e a sala pessoal (`sala::subir`) sobem pelo `iniciar_local` e
+/// pelo `iniciar_sala_local` do `seele-server`: só em `127.0.0.1`, e sem a
+/// escada do ADR 0022 (nenhum UPnP, PCP nem ponto de encontro). É o que deixa a
+/// navegação nativa do Codex (CUA) hospedar sem mexer no roteador da casa. A
+/// navegação nesse modo **não valida NAT real**.
+///
+/// Num build otimizado a função é `false` constante: a variável nem é lida, e o
+/// modo é inalcançável no produto. O guarda é
+/// `o_modo_local_nao_existe_num_build_otimizado`.
+#[cfg(debug_assertions)]
+pub(crate) fn modo_local() -> bool {
+    std::env::var("SEELE_MODO_LOCAL").as_deref() == Ok("1")
+}
+
+/// O modo local num build otimizado: nunca. Ver a versão de debug.
+#[cfg(not(debug_assertions))]
+pub(crate) const fn modo_local() -> bool {
+    false
+}
+
+/// **O modo local, medido** (E9): com `SEELE_MODO_LOCAL=1`, o servidor guardado
+/// do `hospedar` e a sala pessoal do `setup` sobem só em `127.0.0.1` e sem a
+/// escada (o alcance é `SoEstaMaquina`, e o convite não leva bilhete). E o modo
+/// não existe num build otimizado.
+#[cfg(test)]
+mod o_modo_local_da_build_de_teste {
+    use super::{fonte_sem_comentarios, modo_local, subir_o_guardado};
+
+    /// A variável é do processo: um teste por vez, e ela volta ao que era.
+    struct ComOModoLocal(Option<std::ffi::OsString>);
+
+    impl ComOModoLocal {
+        fn ligar() -> Self {
+            let antes = std::env::var_os("SEELE_MODO_LOCAL");
+            std::env::set_var("SEELE_MODO_LOCAL", "1");
+            Self(antes)
+        }
+    }
+
+    impl Drop for ComOModoLocal {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(valor) => std::env::set_var("SEELE_MODO_LOCAL", valor),
+                None => std::env::remove_var("SEELE_MODO_LOCAL"),
+            }
+        }
+    }
+
+    #[test]
+    fn o_guardado_e_a_sala_sobem_so_em_loopback_e_sem_escada() {
+        let _vez = super::a_entrada_velha_que_chega_tarde::vez();
+        let _modo = ComOModoLocal::ligar();
+        assert!(
+            modo_local(),
+            "a variável não ligou o modo local num build de debug"
+        );
+        super::a_entrada_velha_que_chega_tarde::runtime().block_on(async {
+            let guardado = subir_o_guardado(
+                0,
+                seele_server::persistence::Location::Memory,
+                None,
+                |_| Ok(()),
+                modo_local(),
+            )
+            .await
+            .expect("o guardado no modo local");
+            assert!(
+                guardado.endereco().ip().is_loopback(),
+                "o guardado do modo local atende fora do loopback: {}",
+                guardado.endereco()
+            );
+            assert_eq!(
+                guardado.alcance().map(|alcance| alcance.degrau().nome()),
+                Some("SoEstaMaquina"),
+                "o guardado do modo local subiu a escada"
+            );
+            guardado.encerrar().await;
+
+            let casa = tempfile::tempdir().expect("a casa");
+            let sala = super::sala::subir_em(&casa.path().display().to_string(), 0, None)
+                .await
+                .expect("a sala no modo local");
+            assert!(
+                sala.endereco().ip().is_loopback(),
+                "a sala do modo local atende fora do loopback: {}",
+                sala.endereco()
+            );
+            assert_eq!(
+                sala.alcance().map(|alcance| alcance.degrau().nome()),
+                Some("SoEstaMaquina"),
+                "a sala do modo local subiu a escada"
+            );
+            sala.encerrar().await;
+        });
+    }
+
+    /// Num build otimizado o modo é `false` constante, e a variável nem é lida.
+    #[test]
+    fn o_modo_local_nao_existe_num_build_otimizado() {
+        let fonte = fonte_sem_comentarios();
+        let otimizado = fonte
+            .split("#[cfg(not(debug_assertions))]\npub(crate) const fn modo_local() -> bool {")
+            .nth(1)
+            .and_then(|resto| resto.split('}').next())
+            .expect("a versão otimizada do modo local sumiu");
+        assert_eq!(
+            otimizado.trim(),
+            "false",
+            "o modo local num build otimizado faz outra coisa que não `false`"
+        );
+        let debug = fonte
+            .split("#[cfg(debug_assertions)]\npub(crate) fn modo_local() -> bool {")
+            .nth(1)
+            .expect("a versão de debug do modo local sumiu ou perdeu o cfg");
+        assert!(debug
+            .trim_start()
+            .starts_with("std::env::var(\"SEELE_MODO_LOCAL\")"));
+    }
 }
 
 /// Toda hospedagem deste app sobe com o ponto de encontro do projeto.
@@ -3836,13 +4822,21 @@ mod o_ponto_de_encontro_de_quem_hospeda {
     ///
     /// **E ele se confere sozinho** (sugestão da F5, ao aceitar o recorte): o
     /// que se corta é um módulo, e dentro de um módulo toda linha é recuada,
-    /// menos a do nome e a do `}` final. Um `#[cfg(test)] mod x;`, sem corpo,
-    /// levaria o corte até a `}` da próxima função de produção, e é essa linha
-    /// na coluna zero que acusa.
+    /// menos a do nome e a do `}` final. Um `#[cfg(test)] mod x;`, **sem
+    /// corpo** (o módulo mora noutro arquivo), não tem o que cortar: só a linha
+    /// dele sai, e o resto volta à produção. Sem isso o corte iria até a `}` da
+    /// próxima função de produção — e a conferência da coluna zero acusa
+    /// qualquer corte que ainda leve produção junto.
     fn producao_de(fonte: &str) -> String {
         let mut pedacos = fonte.split(concat!("\n#[cfg(test)]\n", "mod "));
         let mut producao = pedacos.next().unwrap_or_default().to_owned();
         for pedaco in pedacos {
+            let (nome, resto) = pedaco.split_once('\n').unwrap_or((pedaco, ""));
+            if nome.trim_end().ends_with(';') {
+                producao.push('\n');
+                producao.push_str(resto);
+                continue;
+            }
             if let Some(fim) = pedaco.find("\n}\n") {
                 let soltas: Vec<&str> = pedaco[..fim]
                     .lines()
@@ -3860,9 +4854,11 @@ mod o_ponto_de_encontro_de_quem_hospeda {
         producao
     }
 
+    /// **Um módulo de teste sem corpo não leva a produção junto**: o
+    /// `#[cfg(test)] mod fora;` sai, e a função de produção logo depois dele
+    /// continua no recorte. E um módulo de teste com corpo sai inteiro.
     #[test]
-    #[should_panic(expected = "linhas da coluna zero")]
-    fn o_recorte_acusa_um_modulo_de_teste_sem_corpo() {
+    fn o_recorte_tira_o_modulo_de_teste_sem_corpo_e_deixa_a_producao() {
         let fonte = concat!(
             "fn antes() {}\n",
             "#[cfg(test)]\n",
@@ -3871,9 +4867,22 @@ mod o_ponto_de_encontro_de_quem_hospeda {
             "async fn hospedar_de_producao() {\n",
             "    let _ = 1;\n",
             "}\n",
+            "#[cfg(test)]\n",
+            "mod dentro {\n",
+            "    fn so_de_teste() {}\n",
+            "}\n",
             "fn depois() {}\n",
         );
-        let _ = producao_de(fonte);
+        let recortada = producao_de(fonte);
+        assert!(
+            recortada.contains("async fn hospedar_de_producao() {"),
+            "o recorte levou a produção que vem depois de um módulo de teste sem corpo: {recortada}"
+        );
+        assert!(recortada.contains("fn antes() {}") && recortada.contains("fn depois() {}"));
+        assert!(
+            !recortada.contains("mod fora;") && !recortada.contains("so_de_teste"),
+            "o recorte deixou módulos de teste na produção: {recortada}"
+        );
     }
 
     #[test]
@@ -3911,26 +4920,36 @@ mod o_ponto_de_encontro_de_quem_hospeda {
     #[test]
     fn hospedar_confere_os_mods_de_api_antiga_antes_de_subir() {
         let fonte = super::fonte_sem_comentarios();
-        let corpo = super::corpo_de(&fonte, "async fn hospedar(");
+        let corpo = super::corpo_de(&fonte, concat!("async fn hospedar_em", "("));
+        // A conferência é `mods::recusas_de_hospedar` desde o P1 da 0.17: a de
+        // `mods_de_api_antiga`, com o mesmo banco e as mesmas raízes, menos os
+        // MODs que já têm uma escolha estagiada (aplicada antes da subida).
         let conferir = corpo
-            .find("mods::mods_de_api_antiga(")
+            .find("mods::recusas_de_hospedar(")
             .expect("`hospedar` não confere os MODs de API antiga: o servidor subiria calado");
         let marcar = corpo
             .find("session.servidor_hospedado.lock()")
             .expect("`hospedar` deixou de marcar o servidor hospedado");
         let subir = corpo
-            .find(COM_O_PADRAO)
+            .find("subir_o_guardado(")
             .expect("`hospedar` deixou de subir o servidor");
         assert!(
             conferir < marcar && conferir < subir,
             "a conferência dos MODs de API antiga vem depois de marcar o servidor ou de subi-lo: \
              a recusa chegaria com o servidor no ar"
         );
-        let chamada = &corpo[conferir..];
         assert!(
-            chamada.contains("&banco")
-                && chamada.contains("servidores::raizes_dos_mods(&config, id_do_servidor)"),
-            "a conferência não usa o banco e as raízes que vão ao servidor"
+            corpo[conferir..]
+                .starts_with("mods::recusas_de_hospedar(&config, id_do_servidor, &banco)"),
+            "a conferência não usa o banco e o servidor que vão à subida"
+        );
+        let mods = include_str!("mods.rs");
+        let regra = super::corpo_de(mods, "pub(crate) fn recusas_de_hospedar(");
+        assert!(
+            regra.contains(
+                "mods_de_api_antiga(banco, &crate::servidores::raizes_dos_mods(config, servidor))"
+            ),
+            "a regra da recusa não usa as raízes do servidor que sobe"
         );
     }
 
@@ -3958,7 +4977,14 @@ mod o_ponto_de_encontro_de_quem_hospeda {
     #[test]
     fn hospedar_sobe_com_o_ponto_de_encontro_padrao() {
         let fonte = super::fonte_sem_comentarios();
-        let corpo = super::corpo_de(&fonte, "async fn hospedar(");
+        let corpo = super::corpo_de(&fonte, concat!("async fn hospedar_em", "("));
+        // A subida mora em `subir_o_guardado` desde o modo local (E9): o
+        // `hospedar` a chama, e ela sobe com o ponto padrão fora do modo local.
+        assert!(
+            corpo.contains("subir_o_guardado(") && !corpo.contains(SEM_O_PADRAO),
+            "o `hospedar` não sobe pelo `subir_o_guardado`"
+        );
+        let corpo = super::corpo_de(&fonte, concat!("async fn subir_o_guardado", "("));
         assert!(
             corpo.contains(COM_O_PADRAO) && !corpo.contains(SEM_O_PADRAO),
             "o `hospedar` não sobe o servidor com `{COM_O_PADRAO}`: sem ele, e sem \
@@ -4268,13 +5294,283 @@ fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
 ///
 /// Nunca: o tipo existe para a ponte, e desmontar o que já está desmontado é o
 /// desfecho normal de quem apertou duas vezes.
+///
+/// # Desde a 0.17: o SAIR de **uma** sessão (E3)
+///
+/// O carimbo diz qual. Sair dela não toca nas outras sessões, nem no foco de
+/// voz de outra, nem em hospedagem nenhuma. **Só o `sessao` do carimbo conta,
+/// e não a geração**: sair nunca é recusado, nem de uma sessão que reconectou
+/// depois de a janela desenhar o botão. Sair de uma sessão que já saiu, ou que
+/// nunca existiu, não faz nada — é o apertar duas vezes.
 #[tauri::command]
 async fn disconnect<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
 ) -> Result<(), ()> {
-    desmontar_o_cliente(&app, &session);
+    desmontar_o_cliente(&app, &session, carimbo.sessao);
     Ok(())
+}
+
+/// SAIR de uma sessão, ou dispensar a placa de uma que o servidor encerrou
+/// (E3 da 0.17). O mesmo corpo do [`disconnect`]: um verbo só para sair, com o
+/// nome que a trilha usa.
+///
+/// # Errors
+///
+/// Nunca.
+#[tauri::command]
+async fn encerrar_sessao<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<(), ()> {
+    desmontar_o_cliente(&app, &session, carimbo.sessao);
+    Ok(())
+}
+
+/// **As sessões cliente desta janela**, como a trilha as desenha (E3 da 0.17).
+///
+/// Todas, na ordem de entrada: qual está na vista, qual tem o foco de voz,
+/// qual é um servidor que esta máquina hospeda (pela chave), em que sala de
+/// voz cada uma está, se reconecta ou foi encerrada, e as não lidas.
+#[tauri::command]
+fn sessoes(session: State<'_, Session>) -> Vec<sessoes::SessaoNaTela> {
+    sessoes_na_tela(&session)
+}
+
+/// [`sessoes`] sem o `State`, para os testes.
+fn sessoes_na_tela(session: &Session) -> Vec<sessoes::SessaoNaTela> {
+    let vista = session.sessoes.vista();
+    let (guardado, pessoal) = session
+        .hospedagens
+        .lock()
+        .map_or((None, None), |hospedagens| hospedagens.impressoes());
+    session
+        .sessoes
+        .todas()
+        .iter()
+        .map(|sessao| {
+            let onde = onde_estou_em(
+                Some(&sessao.endereco),
+                sessao.conexao.impressao_do_servidor().as_deref(),
+                guardado.as_deref(),
+                pessoal.as_deref(),
+            );
+            sessao.na_tela(vista, onde)
+        })
+        .collect()
+}
+
+/// **Troca a sessão que a janela mostra** (E3 da 0.17). Nenhuma conexão cai,
+/// e o foco de voz não muda: ver uma sessão não é falar nela.
+///
+/// A geração da vista sobe, e os MODs da anterior param, como numa saída: os
+/// MODs são da vista. A [`Entrada`] devolvida é a da sessão pedida, com o
+/// carimbo dela e a geração nova da vista.
+///
+/// # Errors
+///
+/// [`ConnectionError::NotConnected`] quando não há sessão com esse número.
+///
+/// # A ordem dos pedidos (as corridas que o Codex reproduziu)
+///
+/// `pedido` é `{ instancia, n }`: a instância da janela, emitida pelo backend
+/// na carga dela ([`instancia_da_janela`]), e um número que a janela sobe a
+/// cada clique na trilha. Dois `ver_sessao` (para 2 e para 3) podem chegar fora
+/// de ordem; **o de número menor que o último aplicado, ou de uma instância
+/// que não é mais a da janela (a página de antes de um reload), é recusado**
+/// ([`FalhaAoVer::PedidoVelho`]) e não mexe na vista. Nada depende de relógio.
+/// Os pedidos são aplicados um por vez, sob o cadeado da conexão da vista, e
+/// cada um devolve a **época** nova (`Entrada::geracao`), que só sobe: a janela
+/// descarta qualquer resposta de uma época menor que a da vista dela — inclusive
+/// a da primeira A numa ida A→B→A. Sem `pedido` (uma janela antiga), vale a
+/// ordem de chegada.
+#[tauri::command]
+fn ver_sessao<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    session: State<'_, Session>,
+    sessao: u64,
+    pedido: Option<sessoes::PedidoDeVista>,
+) -> Result<Entrada, FalhaAoVer> {
+    ver_sessao_em(&app, &session, sessao, pedido)
+}
+
+/// **A instância desta carga da janela**, para os pedidos de [`ver_sessao`]:
+/// um número que só sobe no processo. A janela o pede uma vez, ao carregar, e
+/// numera os pedidos dela dentro dele. Recarregar a página pede outro, e todo
+/// pedido da carga anterior passa a ser velho.
+#[tauri::command]
+fn instancia_da_janela(session: State<'_, Session>) -> u64 {
+    session.dominio_da_vista.abrir_instancia()
+}
+
+/// Por que a vista não mudou.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+enum FalhaAoVer {
+    /// Não há sessão com esse número (saiu, ou nunca existiu).
+    SemSessao,
+    /// Um pedido mais novo que este já foi aplicado, ou ele é de uma carga da
+    /// janela que não está mais de pé: chegou atrasado e é recusado, para a
+    /// vista não voltar atrás.
+    PedidoVelho {
+        /// Este pedido.
+        pedido: sessoes::PedidoDeVista,
+        /// O último aplicado.
+        ultimo: sessoes::PedidoDeVista,
+    },
+}
+
+/// [`ver_sessao`] sem o `State`.
+fn ver_sessao_em<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    session: &Session,
+    sessao: u64,
+    pedido: Option<sessoes::PedidoDeVista>,
+) -> Result<Entrada, FalhaAoVer> {
+    let pedida = session
+        .sessoes
+        .buscar(sessao)
+        .ok_or(FalhaAoVer::SemSessao)?;
+    let geracao = {
+        let mut slot = session
+            .connection
+            .lock()
+            .map_err(|_| FalhaAoVer::SemSessao)?;
+        // Conferido e anotado com o cadeado na mão: dois pedidos nunca se
+        // cruzam entre a conferência e a troca.
+        if let Some(pedido) = pedido {
+            if let Err(ultimo) = session.dominio_da_vista.conferir(pedido) {
+                tracing::info!(
+                    sessao,
+                    ?pedido,
+                    ?ultimo,
+                    "um pedido de vista chegou depois de um mais novo, ou de uma carga \
+                     da janela que já não está de pé: recusado, e a vista ficou onde estava"
+                );
+                return Err(FalhaAoVer::PedidoVelho { pedido, ultimo });
+            }
+        }
+        let geracao = session.revogar();
+        session.por_na_vista_com(&mut slot, Some(&pedida));
+        geracao
+    };
+    avisar_a_trilha(app, sessao, "vista");
+    tracing::info!(
+        sessao,
+        geracao,
+        "a vista mudou de sessão; nenhuma conexão caiu"
+    );
+    Ok(Entrada {
+        carimbo: pedida.conexao.carimbo(),
+        snapshot: pedida.conexao.snapshot(),
+        veredito: seele_ffi::Trust::Known,
+        geracao,
+        de_onde: DeOndeVeio::default(),
+    })
+}
+
+/// O que uma troca de foco de voz fez, como a janela o lê.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+struct FocoNaTela {
+    /// O `SessaoId` que tinha o microfone.
+    antes: Option<u64>,
+    /// O que tem agora.
+    agora: Option<u64>,
+    /// A sala de voz que a anterior deixou, para a frase «a voz saiu de X».
+    saiu_da_sala: Option<String>,
+}
+
+/// Qual sessão tem o microfone desta máquina agora.
+#[tauri::command]
+fn foco_de_voz(session: State<'_, Session>) -> Option<u64> {
+    session.sessoes.com_o_foco().map(|sessao| sessao.id())
+}
+
+/// **Traz o microfone para uma sessão**, ou o tira de todas (E3 da 0.17).
+///
+/// A troca é a do [`seele_ffi::foco::FocoDeVoz::focar`], em ordem total: a
+/// anterior para de capturar e de tocar **antes** de esta abrir. Depois, a
+/// anterior sai da sala de voz em que estava — ninguém lá deve ver presente
+/// quem não ouve nem fala. Com o carimbo de outra geração, recusado e nada
+/// muda.
+///
+/// # Errors
+///
+/// - [`ConnectionError::NotConnected`]: a sessão não existe;
+/// - [`ConnectionError::SessaoNaoConfere`]: o carimbo é de antes de uma
+///   reconexão dela.
+#[tauri::command]
+async fn focar_voz<R: tauri::Runtime>(
+    app: AppHandle<R>,
+    session: State<'_, Session>,
+    carimbo: Option<sessoes::CarimboDaJanela>,
+) -> Result<FocoNaTela, ConnectionError> {
+    focar_voz_em(&app, &session, carimbo).await
+}
+
+/// [`focar_voz`] sem o `State`.
+async fn focar_voz_em<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    session: &Session,
+    carimbo: Option<sessoes::CarimboDaJanela>,
+) -> Result<FocoNaTela, ConnectionError> {
+    let nova = match carimbo {
+        Some(carimbo) => Some(session.conexao(carimbo)?),
+        None => None,
+    };
+    let antiga = session.sessoes.com_o_foco();
+    let antes = antiga.as_ref().map(|antiga| antiga.id());
+    let foco = session.sessoes.foco();
+    let id_da_nova = nova.as_ref().and_then(|nova| nova.id_no_foco());
+    if nova.is_some() && id_da_nova.is_none() {
+        // Uma sessão que não entrou pelo foco não tem como tê-lo.
+        return Err(ConnectionError::NotConnected);
+    }
+    // A troca bloqueia até a anterior confirmar: fora do runtime.
+    let troca = tauri::async_runtime::spawn_blocking(move || foco.focar(id_da_nova))
+        .await
+        .map_err(|_| ConnectionError::NotConnected)?
+        .map_err(|_| ConnectionError::NotConnected)?;
+    let mut saiu_da_sala = None;
+    let pedida = carimbo.map(|carimbo| carimbo.sessao);
+    if let Some(antiga) = antiga.filter(|antiga| Some(antiga.id()) != pedida) {
+        // **A anterior sai da sala depois de calada** (ADR 0031): o microfone
+        // dela já parou na troca; agora o servidor dela também fica sabendo.
+        saiu_da_sala = antiga
+            .conexao
+            .snapshot()
+            .voice_rooms
+            .iter()
+            .find(|sala| sala.occupied_by_us)
+            .map(|sala| sala.name.clone());
+        if saiu_da_sala.is_some() {
+            if let Err(erro) = antiga.conexao.leave_voice_room() {
+                tracing::warn!(
+                    ?erro,
+                    "a sessão que perdeu a voz não conseguiu sair da sala dela: o servidor a \
+                     vê presente, sem voz"
+                );
+            }
+        }
+        avisar_a_trilha(app, antiga.id(), "foco");
+    }
+    let agora = session.sessoes.com_o_foco().map(|sessao| sessao.id());
+    if let Some(agora) = agora {
+        avisar_a_trilha(app, agora, "foco");
+    }
+    tracing::info!(
+        antes = ?troca.antes,
+        agora = ?agora,
+        confirmada = troca.confirmada,
+        saiu_da_sala = saiu_da_sala.is_some(),
+        "foco de voz trocado"
+    );
+    Ok(FocoNaTela {
+        antes,
+        agora,
+        saiu_da_sala,
+    })
 }
 
 /// PARAR DE HOSPEDAR (tarefa 19 da F7): derruba o servidor guardado. Quem estava
@@ -4369,15 +5665,33 @@ fn meu_servidor_em(hospedagens: &Hospedagens, config: &str) -> Option<MeuServido
 ///
 /// Idempotente: desmontar o que já está desmontado gasta um número de geração e
 /// não faz mais nada, que é o desfecho certo para quem apertou duas vezes.
-fn desmontar_o_cliente<R: tauri::Runtime>(app: &tauri::AppHandle<R>, session: &State<'_, Session>) {
-    let morta = session.revogar();
-    tracing::debug!(geracao = morta, "sessão revogada antes de desmontar");
+///
+/// # Desde a 0.17: uma sessão, pelo `SessaoId` (E3)
+///
+/// Só a vista é revogada, e só se a sessão que sai é a da vista: sair de uma
+/// sessão do fundo não para os MODs da que está na tela. A que sai deixa de
+/// valer no registro **antes** de a conexão cair, e o que ainda vier dela é
+/// descartado e contado.
+fn desmontar_o_cliente<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    session: &Session,
+    sessao: u64,
+) {
+    let na_vista = session.sessoes.vista() == Some(sessao);
+    if na_vista {
+        let morta = session.revogar();
+        tracing::debug!(
+            geracao = morta,
+            "sessão da vista revogada antes de desmontar"
+        );
+    }
 
-    let connection = session
-        .connection
-        .lock()
-        .ok()
-        .and_then(|mut slot| slot.take());
+    let saindo = session.sessoes.tirar(sessao);
+    if na_vista {
+        session.por_na_vista(None);
+    }
+    let connection = saindo.as_ref().map(|saindo| Arc::clone(&saindo.conexao));
+    let alvo_da_saindo = saindo.as_ref().and_then(|saindo| saindo.alvo());
 
     // **A medida da escada sobrevive à sessão**, e este é o único ponto que tem
     // as duas coisas na mão: a conexão que mediu e o endereço que a nomeia.
@@ -4397,8 +5711,7 @@ fn desmontar_o_cliente<R: tauri::Runtime>(app: &tauri::AppHandle<R>, session: &S
                 tracing::debug!(%erro, "não guardei a subida desta máquina");
             }
         }
-        let alvo = session.alvo.lock().ok().and_then(|a| a.clone());
-        if let (Some(alvo), true) = (alvo, medido != 0) {
+        if let (Some(alvo), true) = (alvo_da_saindo, medido != 0) {
             if let Ok(mut lista) =
                 seele_ffi::conhecidos::Conhecidos::abrir(caminho_dos_conhecidos(app))
             {
@@ -4408,23 +5721,31 @@ fn desmontar_o_cliente<R: tauri::Runtime>(app: &tauri::AppHandle<R>, session: &S
             }
         }
     }
-    // Dropping the handle is what ends the session; taking it out of the slot
-    // is what makes the next `connect` allowed.
+    // A sessão acaba aqui, e não quando o último `Arc` cair: um comando em voo
+    // ainda pode segurar um, e a despedida não espera por ele.
+    if let Some(viva) = connection.as_ref() {
+        viva.disconnect();
+    }
     drop(connection);
+    drop(saindo);
 
-    // O convite morre com a sessão que ele abriu. Enquanto nada era conferido
-    // isto era inerte; deixou de ser no momento em que `expected_fingerprint`
-    // passou a sair daqui — quem sai, digita outro endereço e entra de novo
-    // levaria a impressão prometida por um link anterior para um servidor que
-    // nunca a prometeu, e a recusa apareceria sem nada na tela que a explique.
-    if let Ok(mut slot) = session.convite.lock() {
-        *slot = None;
+    if na_vista {
+        // O convite morre com a sessão que ele abriu. Enquanto nada era
+        // conferido isto era inerte; deixou de ser no momento em que
+        // `expected_fingerprint` passou a sair daqui — quem sai, digita outro
+        // endereço e entra de novo levaria a impressão prometida por um link
+        // anterior para um servidor que nunca a prometeu, e a recusa apareceria
+        // sem nada na tela que a explique.
+        if let Ok(mut slot) = session.convite.lock() {
+            *slot = None;
+        }
+        // Onde a sessão estava deixa de existir com ela: um sim gravado depois
+        // disso iria para o endereço da conversa anterior.
+        if let Ok(mut onde) = session.endereco_da_sessao.lock() {
+            *onde = None;
+        }
     }
-    // Onde a sessão estava deixa de existir com ela: um sim gravado depois
-    // disso iria para o endereço da conversa anterior.
-    if let Ok(mut onde) = session.endereco_da_sessao.lock() {
-        *onde = None;
-    }
+    avisar_a_trilha(app, sessao, "saiu");
 }
 
 /// **Um MOD do guardado continua respondendo enquanto o dono visita outro
@@ -4563,10 +5884,8 @@ mod o_mod_do_guardado_continua_respondendo {
                 .await
                 .expect("o guardado não subiu");
             let casa = format!("127.0.0.1:{}", guardado.endereco().port());
-            session.hospedagens.lock().expect("as hospedagens").guardado = Some(Hospedado {
-                hospedagem: guardado,
-                servidor: None,
-            });
+            session.hospedagens.lock().expect("as hospedagens").guardado =
+                Some(Hospedado::novo(guardado, None));
 
             // A dona entra no próprio servidor, e o MOD responde.
             entrar(app, &casa).await;
@@ -4584,9 +5903,13 @@ mod o_mod_do_guardado_continua_respondendo {
             );
 
             // A dona sai e vai a outro servidor.
-            disconnect(app.clone(), app.state::<Session>())
-                .await
-                .expect("o `disconnect` nunca falha");
+            disconnect(
+                app.clone(),
+                app.state::<Session>(),
+                session.carimbo_da_vista(),
+            )
+            .await
+            .expect("o `disconnect` nunca falha");
             let (outro, servidor_outro) = servidor("Outro").await;
             entrar(app, &outro.to_string()).await;
             assert_eq!(
@@ -4605,9 +5928,13 @@ mod o_mod_do_guardado_continua_respondendo {
                  noutro servidor: {fora}"
             );
 
-            disconnect(app.clone(), app.state::<Session>())
-                .await
-                .expect("o `disconnect` nunca falha");
+            disconnect(
+                app.clone(),
+                app.state::<Session>(),
+                session.carimbo_da_vista(),
+            )
+            .await
+            .expect("o `disconnect` nunca falha");
             assert!(
                 parar_de_hospedar_em(&session).await,
                 "o guardado não estava mais no ar no fim"
@@ -5027,13 +6354,21 @@ fn registrar_da_janela_em(
 }
 
 #[tauri::command]
-fn snapshot(session: State<'_, Session>) -> Result<Snapshot, ConnectionError> {
+fn snapshot(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<sessoes::RetratoNaSessao, ConnectionError> {
     // **Dito na entrada e na saída.** Um comando que não volta é
     // indistinguível, no registro, de um que nunca foi chamado — e era essa
     // ambiguidade que sobrava depois de instrumentar o resto do caminho de um
     // pedido de MOD, na medição de 19/09.
     tracing::trace!("retrato pedido");
-    let retrato = session.connection()?.snapshot();
+    let conexao = session.conexao(carimbo)?;
+    let retrato = sessoes::RetratoNaSessao {
+        carimbo: conexao.carimbo(),
+        epoca: session.geracao(),
+        retrato: conexao.snapshot(),
+    };
     tracing::trace!("retrato pronto");
     Ok(retrato)
 }
@@ -5228,8 +6563,16 @@ fn estado_da_sessao(session: State<'_, Session>) -> EstadoDaSessao {
 /// longa ficava lenta de escrever. A tela pede este quando o
 /// `messages_revision` do snapshot muda, e só então.
 #[tauri::command]
-fn messages(session: State<'_, Session>) -> Result<Vec<seele_ffi::Message>, ConnectionError> {
-    Ok(session.connection()?.messages())
+fn messages(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<sessoes::NaSessao<Vec<seele_ffi::Message>>, ConnectionError> {
+    let conexao = session.conexao(carimbo)?;
+    Ok(sessoes::NaSessao::de(
+        &conexao,
+        session.geracao(),
+        conexao.messages(),
+    ))
 }
 
 /// O FORA DO AR: os membros deste servidor que não estão conectados agora (P6,
@@ -5241,27 +6584,64 @@ fn messages(session: State<'_, Session>) -> Result<Vec<seele_ffi::Message>, Conn
 #[tauri::command]
 fn membros_fora_do_ar(
     session: State<'_, Session>,
-) -> Result<Vec<seele_ffi::MembroForaDoAr>, ConnectionError> {
-    Ok(session.connection()?.membros_fora_do_ar())
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<sessoes::NaSessao<Vec<seele_ffi::MembroForaDoAr>>, ConnectionError> {
+    let conexao = session.conexao(carimbo)?;
+    Ok(sessoes::NaSessao::de(
+        &conexao,
+        session.geracao(),
+        conexao.membros_fora_do_ar(),
+    ))
 }
 
+/// Entra numa sala de voz **e traz a voz desta máquina para cá** (E3 da 0.17).
+///
+/// Entrar numa sala é o ato explícito que pede o microfone (ADR 0031: «um ato,
+/// não dois»): se a voz estava noutra sessão, ela para lá — e a outra sai da
+/// sala dela — **antes** de esta abrir. É o único caminho, além do
+/// [`focar_voz`], por onde o foco muda; um operador que move esta pessoa para
+/// uma sala, do outro lado, não toma o microfone.
 #[tauri::command]
-fn enter_voice_room(
+async fn enter_voice_room<R: tauri::Runtime>(
+    app: AppHandle<R>,
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     voice_room: u32,
     senha: Option<String>,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.enter_voice_room(voice_room, senha)
+    entrar_na_sala_em(&app, &session, carimbo, voice_room, senha).await
+}
+
+/// [`enter_voice_room`] sem o `State`.
+async fn entrar_na_sala_em<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    session: &Session,
+    carimbo: sessoes::CarimboDaJanela,
+    voice_room: u32,
+    senha: Option<String>,
+) -> Result<(), ConnectionError> {
+    let conexao = session.conexao(carimbo)?;
+    if !conexao.tem_o_foco_de_voz() {
+        focar_voz_em(app, session, Some(carimbo)).await?;
+    }
+    conexao.enter_voice_room(voice_room, senha)
 }
 
 #[tauri::command]
-fn leave_voice_room(session: State<'_, Session>) -> Result<(), ConnectionError> {
-    session.connection()?.leave_voice_room()
+fn leave_voice_room(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.leave_voice_room()
 }
 
 #[tauri::command]
-fn open_channel(session: State<'_, Session>, channel: u32) -> Result<(), ConnectionError> {
-    session.connection()?.open_channel(channel)
+fn open_channel(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    channel: u32,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.open_channel(channel)
 }
 
 /// Manda uma mensagem, e devolve a chave por onde acompanhá-la.
@@ -5276,19 +6656,23 @@ fn open_channel(session: State<'_, Session>, channel: u32) -> Result<(), Connect
 #[tauri::command]
 fn send_message(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     channel: u32,
     body: String,
 ) -> Result<String, ConnectionError> {
-    session.connection()?.send_message(channel, body)
+    session.conexao(carimbo)?.send_message(channel, body)
 }
 
 /// Manda de novo uma mensagem que não foi gravada, com a mesma chave.
 #[tauri::command]
 fn reenviar_mensagem(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     client_message_id: String,
 ) -> Result<bool, ConnectionError> {
-    session.connection()?.reenviar_mensagem(&client_message_id)
+    session
+        .conexao(carimbo)?
+        .reenviar_mensagem(&client_message_id)
 }
 
 /// Desiste de uma mensagem que não foi gravada, e devolve o texto dela.
@@ -5298,9 +6682,12 @@ fn reenviar_mensagem(
 #[tauri::command]
 fn descartar_mensagem(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     client_message_id: String,
 ) -> Result<Option<String>, ConnectionError> {
-    Ok(session.connection()?.descartar_mensagem(&client_message_id))
+    Ok(session
+        .conexao(carimbo)?
+        .descartar_mensagem(&client_message_id))
 }
 
 /// O maior corpo que o servidor aceita, **em bytes**.
@@ -5333,6 +6720,10 @@ fn mod_request(
     id: String,
     channel: u32,
     payload: String,
+    // **A ação declarada** (API 7, capacidade `acoes`): com ela, o pedido vai
+    // como `AcaoDeMod`, e quem confere a ação e a permissão é o servidor. Sem
+    // ela, é o `ModRequest` de sempre. A janela não decide nada aqui.
+    acao: Option<String>,
 ) -> Result<(), ConnectionError> {
     // **Antes do efeito, e não depois.** Um pedido que a janela despachou antes
     // de sair pode chegar aqui depois; atendê-lo mandaria tráfego de um MOD da
@@ -5345,9 +6736,11 @@ fn mod_request(
     // na medição de 19/09. Com estas duas linhas a pergunta «ele chegou?» tem
     // resposta sem ninguém instrumentar nada.
     pedido_a_caminho_dito(&id, geracao, request, channel);
-    let saiu = session
-        .connection()?
-        .mod_request(request, id.clone(), channel, payload);
+    let conexao = session.connection()?;
+    let saiu = match acao {
+        Some(acao) => conexao.acao_de_mod(request, id.clone(), channel, acao, payload),
+        None => conexao.mod_request(request, id.clone(), channel, payload),
+    };
     if let Err(erro) = &saiu {
         pedido_recusado_na_saida_dito(&id, request, erro);
     }
@@ -5684,6 +7077,7 @@ fn tipo_alegado(nome: &str) -> String {
 #[tauri::command]
 fn enviar_anexo(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     channel: u32,
     body: String,
     caminho: String,
@@ -5691,7 +7085,7 @@ fn enviar_anexo(
     tipo: String,
 ) -> Result<u64, ConnectionError> {
     session
-        .connection()?
+        .conexao(carimbo)?
         .send_attachment(channel, body, caminho, nome, tipo)
 }
 
@@ -5731,10 +7125,11 @@ fn pasta_dos_anexos(app: &AppHandle) -> String {
 fn salvar_anexo(
     app: AppHandle,
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     anexo: u64,
 ) -> Result<(), ConnectionError> {
     session
-        .connection()?
+        .conexao(carimbo)?
         .save_attachment(anexo, pasta_dos_anexos(&app))
 }
 
@@ -5747,11 +7142,12 @@ fn salvar_anexo(
 fn destino_do_anexo(
     app: AppHandle,
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     anexo: u64,
 ) -> Result<SaveDestination, SaveRefused> {
     let pasta = pasta_dos_anexos(&app);
     // Sem sessão não há histórico, e sem histórico não há de onde tirar o nome.
-    let Ok(connection) = session.connection() else {
+    let Ok(connection) = session.conexao(carimbo) else {
         return Err(SaveRefused {
             reason: NotSavedReason::AnexoDesconhecido,
             claimed: String::new(),
@@ -5780,8 +7176,12 @@ fn destino_do_anexo(
 /// teto de disco de quem hospeda em banda de todo mundo, uma vez por vez que
 /// alguém abrisse a Linha.
 #[tauri::command]
-async fn prever_anexo(session: State<'_, Session>, anexo: u64) -> Result<Preview, ConnectionError> {
-    let connection = session.connection()?;
+async fn prever_anexo(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    anexo: u64,
+) -> Result<Preview, ConnectionError> {
+    let connection = session.conexao(carimbo)?;
     connection.preview_attachment(anexo).await
 }
 
@@ -5831,39 +7231,48 @@ fn pasta_de_downloads(app: AppHandle) -> String {
 #[tauri::command]
 fn criar_voice_room(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     name: String,
     limit: u16,
     channel: Option<u32>,
 ) -> Result<(), ConnectionError> {
     session
-        .connection()?
+        .conexao(carimbo)?
         .create_voice_room(name, limit, channel)
 }
 
 /// Pede ao servidor que faça uma Linha.
 #[tauri::command]
-fn criar_linha(session: State<'_, Session>, name: String) -> Result<(), ConnectionError> {
-    session.connection()?.create_channel(name)
+fn criar_linha(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    name: String,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.create_channel(name)
 }
 
 /// Pede ao servidor que renomeie uma sala de voz.
 #[tauri::command]
 fn renomear_voice_room(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     voice_room: u32,
     name: String,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.rename_voice_room(voice_room, name)
+    session
+        .conexao(carimbo)?
+        .rename_voice_room(voice_room, name)
 }
 
 /// Pede ao servidor que renomeie uma Linha.
 #[tauri::command]
 fn renomear_linha(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     channel: u32,
     name: String,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.rename_channel(channel, name)
+    session.conexao(carimbo)?.rename_channel(channel, name)
 }
 
 // ------------------------------------------------- a cara e o nome do servidor
@@ -5884,9 +7293,10 @@ fn renomear_linha(
 fn renomear_server(
     app: AppHandle,
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     name: String,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.rename_server(name.clone())?;
+    session.conexao(carimbo)?.rename_server(name.clone())?;
     // **E a lista para de mentir.** O nome de verdade mora no banco do
     // servidor; o do registro é só o que a lista mostra para se escolher entre
     // um e outro sem abrir os dois. Sem esta linha ele ficaria congelado no dia
@@ -6023,11 +7433,12 @@ const LADO_DO_ICONE: u32 = 256;
 async fn escolher_icone_do_server(
     app: AppHandle,
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
 ) -> Result<bool, ConnectionError> {
     let Some(pronto) = escolher_e_encolher(&app, "Escolha a imagem deste servidor").await? else {
         return Ok(false);
     };
-    session.connection()?.set_server_icon(Some(pronto))?;
+    session.conexao(carimbo)?.set_server_icon(Some(pronto))?;
     Ok(true)
 }
 
@@ -6126,9 +7537,10 @@ async fn preparar_icone_do_server(app: AppHandle) -> Result<Option<Vec<u8>>, Con
 #[tauri::command]
 fn aplicar_icone_do_server(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     icone: Vec<u8>,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.set_server_icon(Some(icone))
+    session.conexao(carimbo)?.set_server_icon(Some(icone))
 }
 
 /// Tira a imagem do servidor, deixando-o sem nenhuma.
@@ -6136,8 +7548,11 @@ fn aplicar_icone_do_server(
 /// Verbo próprio e não `escolher` com um argumento vazio: são duas coisas que
 /// uma pessoa faz por motivos diferentes, e são dois botões na tela.
 #[tauri::command]
-fn tirar_icone_do_server(session: State<'_, Session>) -> Result<(), ConnectionError> {
-    session.connection()?.set_server_icon(None)
+fn tirar_icone_do_server(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.set_server_icon(None)
 }
 
 // ------------------------------------------------------------------------ MODs
@@ -6382,13 +7797,13 @@ async fn apagar_pacote_do_cache(
         if !banco.exists() {
             continue;
         }
-        let db = seele_server::persistence::Persistence::open(
-            &seele_server::persistence::Location::File(banco),
-        )
-        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
-        let usados = seele_server::persistence::mods::enabled(&db)
-            .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
-        if usados.iter().any(|m| m.hash == hash) {
+        // **Só para leitura** (P1 da 0.17): o `Persistence::open` migrava o
+        // banco de cada servidor parado, sem cópia, só para perguntar se ele
+        // usa este pacote. `id` e `hash` das linhas ligadas existem do esquema
+        // 11 em diante, como lê `mods::mods_de_api_antiga`.
+        let usa =
+            mods::hash_ligado_no_banco(&banco, &hash).map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+        if usa {
             return Err(FalhaNoMod::Recusado {
                 motivo: format!(
                     "Desligue este MOD no servidor {} antes de apagar.",
@@ -7301,6 +8716,25 @@ fn gravar_o_sim_de_quem_hospeda(
     session: &Session,
     identidade: &str,
 ) -> Result<(), String> {
+    // **Toda sessão com o guardado, e não só a da vista** (E3 da 0.17): quem
+    // hospeda pode estar olhando outro servidor enquanto aplica os MODs do
+    // dele, e a sessão dele no próprio servidor, no fundo, é a que precisa do
+    // sim. Uma sessão com outro servidor nunca recebe este sim.
+    let (guardado, pessoal) = session
+        .hospedagens
+        .lock()
+        .map_or((None, None), |hospedagens| hospedagens.impressoes());
+    for sessao in session.sessoes.todas() {
+        let onde = onde_estou_em(
+            Some(&sessao.endereco),
+            sessao.conexao.impressao_do_servidor().as_deref(),
+            guardado.as_deref(),
+            pessoal.as_deref(),
+        );
+        gravar_o_sim_se_for_o_guardado(config, Some(&sessao.endereco), onde, identidade)?;
+    }
+    // E a vista, como sempre: é ela que existe sem registro (a janela que
+    // hospeda e entrou por outro caminho).
     let alvo = session
         .endereco_da_sessao
         .lock()
@@ -9705,9 +11139,10 @@ async fn escolher_minha_imagem(
     };
     gravar_retrato(&app, Some(&pronto))?;
     // E, se há sessão, o servidor sabe agora. Sem sessão não é erro nenhum —
-    // é o caso da tela inicial, e a imagem sobe no próximo `connect`.
-    if let Ok(connection) = session.connection() {
-        connection.set_person_icon(Some(pronto))?;
+    // é o caso da tela inicial, e a imagem sobe no próximo `connect`. O
+    // retrato é desta máquina (E3): vai a todas as sessões.
+    for connection in session.sessoes.conexoes() {
+        connection.set_person_icon(Some(pronto.clone()))?;
     }
     Ok(true)
 }
@@ -9804,8 +11239,12 @@ fn escolher_apelido_local(app: AppHandle, apelido: String) -> Result<(), FalhaAo
 /// O que a sessão devolver. Um nome já tomado volta como alerta do servidor, e
 /// não daqui: quem sabe quais nomes existem naquele servidor é ele.
 #[tauri::command]
-fn escolher_apelido(session: State<'_, Session>, apelido: String) -> Result<(), ConnectionError> {
-    session.connection()?.set_nickname(apelido)
+fn escolher_apelido(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    apelido: String,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.set_nickname(apelido)
 }
 
 /// Tira a sua imagem.
@@ -9816,7 +11255,8 @@ fn escolher_apelido(session: State<'_, Session>, apelido: String) -> Result<(), 
 #[tauri::command]
 fn tirar_minha_imagem(app: AppHandle, session: State<'_, Session>) -> Result<(), ConnectionError> {
     gravar_retrato(&app, None)?;
-    if let Ok(connection) = session.connection() {
+    // Da máquina (E3): sai de todas as sessões.
+    for connection in session.sessoes.conexoes() {
         connection.set_person_icon(None)?;
     }
     Ok(())
@@ -9832,8 +11272,12 @@ fn tirar_minha_imagem(app: AppHandle, session: State<'_, Session>) -> Result<(),
 ///
 /// Não falha: quem não tem imagem, e uma sessão que não existe, devolvem `None`.
 #[tauri::command]
-fn imagem_da_pessoa(session: State<'_, Session>, person: u64) -> Option<String> {
-    let bytes = session.connection().ok()?.person_icon(person)?;
+fn imagem_da_pessoa(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    person: u64,
+) -> Option<String> {
+    let bytes = session.conexao(carimbo).ok()?.person_icon(person)?;
     Some(format!(
         "data:image/png;base64,{}",
         seele_ffi::base64_de(&bytes)
@@ -9847,8 +11291,11 @@ fn imagem_da_pessoa(session: State<'_, Session>, person: u64) -> Option<String> 
 /// ele carrega `icon_revision` — um número — e a casca só vem buscar os bytes
 /// quando o número anda. É o precedente de `messages_revision`.
 #[tauri::command]
-fn icone_do_server(session: State<'_, Session>) -> Result<Option<Vec<u8>>, ConnectionError> {
-    Ok(session.connection()?.server_icon())
+fn icone_do_server(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<Option<Vec<u8>>, ConnectionError> {
+    Ok(session.conexao(carimbo)?.server_icon())
 }
 
 /// Pede ao servidor que acabe com a sessão de alguém — `expulsar`.
@@ -9864,8 +11311,144 @@ fn icone_do_server(session: State<'_, Session>) -> Result<Option<Vec<u8>>, Conne
 /// pedido sem a permissão não expulsa ninguém, e a `specs/08-seguranca.md` põe
 /// a segurança nessa recusa e não no botão escondido.
 #[tauri::command]
-fn expulsar_pessoa(session: State<'_, Session>, person: u64) -> Result<(), ConnectionError> {
-    session.connection()?.kick_person(person)
+fn expulsar_pessoa(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    person: u64,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.kick_person(person)
+}
+
+// ---- cargos e permissões (ADR 0064; os corpos estão em `cargos.rs`, de F) ----
+//
+// Todos de SESSÃO: a conexão pelo carimbo, nunca pela vista (fronteiras.md
+// §12). Quem decide é o servidor; as recusas dele chegam pelo evento da sessão,
+// e a prévia antecipa a mesma regra só para a tela explicar.
+
+/// O quadro de cargos desta sessão, os apelidos de quem aparece nele e o que
+/// esta pessoa pode. Também pede o quadro ao servidor, que responde pelo evento.
+#[tauri::command]
+fn pedir_cargos(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<sessoes::NaSessao<seele_ffi::cargos::CargosNaTela>, ConnectionError> {
+    let conexao = session.conexao(carimbo)?;
+    let valor = cargos::pedir(&conexao)?;
+    Ok(sessoes::NaSessao::de(&conexao, session.geracao(), valor))
+}
+
+/// Por que esta pessoa tem, ou não, cada permissão.
+#[tauri::command]
+fn explicar_permissoes(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    pessoa: u64,
+) -> Result<sessoes::NaSessao<Vec<seele_ffi::cargos::PermissaoExplicada>>, cargos::FalhaDeCargo> {
+    let conexao = session.conexao(carimbo)?;
+    let valor = cargos::explicar(&conexao, pessoa)?;
+    Ok(sessoes::NaSessao::de(&conexao, session.geracao(), valor))
+}
+
+/// Quem ganha e quem perde o quê com este verbo, ou a recusa que o servidor
+/// daria. Só informativa: a confirmação revalida tudo no servidor.
+#[tauri::command]
+fn prever_cargo(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    revisao: u64,
+    pedido: seele_ffi::cargos::PedidoDeCargo,
+) -> Result<sessoes::NaSessao<seele_ffi::cargos::Previa>, cargos::FalhaDeCargo> {
+    let conexao = session.conexao(carimbo)?;
+    let valor = cargos::prever(&conexao, revisao, &pedido)?;
+    Ok(sessoes::NaSessao::de(&conexao, session.geracao(), valor))
+}
+
+/// Cria um cargo, na posição 1.
+#[tauri::command]
+fn criar_cargo(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    revisao: u64,
+    nome: String,
+    concede: Vec<seele_ffi::cargos::Permissao>,
+    restringe: Vec<seele_ffi::cargos::Permissao>,
+) -> Result<(), cargos::FalhaDeCargo> {
+    let conexao = session.conexao(carimbo)?;
+    cargos::mandar(
+        &conexao,
+        revisao,
+        cargos::pedido::criar(nome, concede, restringe),
+    )
+}
+
+/// Troca o nome e as listas de um cargo.
+#[tauri::command]
+fn editar_cargo(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    revisao: u64,
+    cargo: u32,
+    nome: String,
+    concede: Vec<seele_ffi::cargos::Permissao>,
+    restringe: Vec<seele_ffi::cargos::Permissao>,
+) -> Result<(), cargos::FalhaDeCargo> {
+    let conexao = session.conexao(carimbo)?;
+    cargos::mandar(
+        &conexao,
+        revisao,
+        cargos::pedido::editar(cargo, nome, concede, restringe),
+    )
+}
+
+/// Põe um cargo noutra posição.
+#[tauri::command]
+fn mover_cargo(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    revisao: u64,
+    cargo: u32,
+    posicao: u32,
+) -> Result<(), cargos::FalhaDeCargo> {
+    let conexao = session.conexao(carimbo)?;
+    cargos::mandar(&conexao, revisao, cargos::pedido::mover(cargo, posicao))
+}
+
+/// Apaga um cargo e as atribuições dele.
+#[tauri::command]
+fn apagar_cargo(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    revisao: u64,
+    cargo: u32,
+) -> Result<(), cargos::FalhaDeCargo> {
+    let conexao = session.conexao(carimbo)?;
+    cargos::mandar(&conexao, revisao, cargos::pedido::apagar(cargo))
+}
+
+/// Dá um cargo a uma pessoa.
+#[tauri::command]
+fn atribuir_cargo(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    revisao: u64,
+    pessoa: u64,
+    cargo: u32,
+) -> Result<(), cargos::FalhaDeCargo> {
+    let conexao = session.conexao(carimbo)?;
+    cargos::mandar(&conexao, revisao, cargos::pedido::atribuir(pessoa, cargo))
+}
+
+/// Tira um cargo de uma pessoa.
+#[tauri::command]
+fn revogar_cargo(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    revisao: u64,
+    pessoa: u64,
+    cargo: u32,
+) -> Result<(), cargos::FalhaDeCargo> {
+    let conexao = session.conexao(carimbo)?;
+    cargos::mandar(&conexao, revisao, cargos::pedido::revogar(pessoa, cargo))
 }
 
 /// Pede ao servidor que impeça alguém de voltar — `banir`.
@@ -9875,11 +11458,14 @@ fn expulsar_pessoa(session: State<'_, Session>, person: u64) -> Result<(), Conne
 #[tauri::command]
 fn banir_pessoa(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     person: u64,
     reason: Option<String>,
     expires_at: Option<i64>,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.ban_person(person, reason, expires_at)
+    session
+        .conexao(carimbo)?
+        .ban_person(person, reason, expires_at)
 }
 
 /// Pede ao servidor que tire uma mensagem da Linha.
@@ -9887,18 +11473,23 @@ fn banir_pessoa(
 /// Sem permissão nenhuma quando a mensagem é de quem pede: a permissão do
 /// `specs/04-servidor-seele.md` diz «de outra pessoa».
 #[tauri::command]
-fn remover_mensagem(session: State<'_, Session>, message: u64) -> Result<(), ConnectionError> {
-    session.connection()?.remove_message(message)
+fn remover_mensagem(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    message: u64,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.remove_message(message)
 }
 
 /// Pede ao servidor que mova alguém para uma sala de voz — `mover_pessoa`.
 #[tauri::command]
 fn mover_pessoa(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     person: u64,
     voice_room: u32,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.move_person(person, voice_room)
+    session.conexao(carimbo)?.move_person(person, voice_room)
 }
 
 /// Pede ao servidor que destrua uma sala de voz — `apagar_voice_room`.
@@ -9912,15 +11503,23 @@ fn mover_pessoa(
 /// sala são permissões diferentes na `specs/04-servidor-seele.md`, e é preciso
 /// poder oferecer uma sem a outra. Isso é conveniência; quem nega é o servidor.
 #[tauri::command]
-fn apagar_voice_room(session: State<'_, Session>, voice_room: u32) -> Result<(), ConnectionError> {
-    session.connection()?.delete_voice_room(voice_room)
+fn apagar_voice_room(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    voice_room: u32,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.delete_voice_room(voice_room)
 }
 
 /// Pede ao servidor que destrua uma Linha, e tudo que foi escrito nela —
 /// `apagar_linha`.
 #[tauri::command]
-fn apagar_linha(session: State<'_, Session>, channel: u32) -> Result<(), ConnectionError> {
-    session.connection()?.delete_channel(channel)
+fn apagar_linha(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    channel: u32,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.delete_channel(channel)
 }
 
 /// Pergunta quanto custaria destruir uma Linha. Não destrói nada.
@@ -9940,23 +11539,57 @@ fn apagar_linha(session: State<'_, Session>, channel: u32) -> Result<(), Connect
 #[tauri::command]
 async fn peso_da_linha(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     channel: u32,
 ) -> Result<ChannelWeight, ConnectionError> {
     // O `Arc` sai do cadeado antes do `await`, e é de propósito: `Session::connection`
     // devolve um clone justamente para que nada segure o `Mutex` atravessando um
     // ponto de espera.
-    let connection = session.connection()?;
+    let connection = session.conexao(carimbo)?;
     connection.weigh_channel(channel).await
 }
 
+/// O mudo **da máquina** (E3 da 0.17, ADR 0031): vale em todas as sessões, e
+/// o servidor de cada uma o mostra no roster. Mudo num servidor e falando
+/// noutro seria o microfone a decidir pelo foco, e não a pessoa.
+///
+/// # Errors
+///
+/// [`ConnectionError::NotConnected`] sem sessão nenhuma; senão, o primeiro
+/// erro de uma delas (as outras recebem assim mesmo).
 #[tauri::command]
 fn set_muted(session: State<'_, Session>, on: bool) -> Result<(), ConnectionError> {
-    session.connection()?.set_muted(on)
+    em_todas(&session, |conexao| conexao.set_muted(on))
 }
 
+/// O isolamento total **da máquina**, pelo mesmo argumento do [`set_muted`].
+///
+/// # Errors
+///
+/// O mesmo de [`set_muted`].
 #[tauri::command]
 fn set_total_isolation(session: State<'_, Session>, on: bool) -> Result<(), ConnectionError> {
-    session.connection()?.set_total_isolation(on)
+    em_todas(&session, |conexao| conexao.set_total_isolation(on))
+}
+
+/// Faz `fazer` em todas as conexões, e devolve o primeiro erro.
+fn em_todas(
+    session: &Session,
+    mut fazer: impl FnMut(&Connection) -> Result<(), ConnectionError>,
+) -> Result<(), ConnectionError> {
+    let conexoes = session.sessoes.conexoes();
+    if conexoes.is_empty() {
+        return Err(ConnectionError::NotConnected);
+    }
+    let mut primeiro = Ok(());
+    for conexao in &conexoes {
+        if let Err(erro) = fazer(conexao) {
+            if primeiro.is_ok() {
+                primeiro = Err(erro);
+            }
+        }
+    }
+    primeiro
 }
 
 /// Push-to-talk, reported as it happens.
@@ -9964,10 +11597,21 @@ fn set_total_isolation(session: State<'_, Session>, on: bool) -> Result<(), Conn
 /// Not fallible on purpose: a key coming *up* must never be refused. Returning
 /// an error here would give the frontend a path where the microphone was opened
 /// and the close was rejected.
+///
+/// **Desde a 0.17, vai à sessão que tem o foco de voz, e só a ela** (E3,
+/// ADR 0031: «com voz exclusiva, espaço tem exatamente um significado»),
+/// qualquer que seja a sessão na vista. Uma soltura vai a todas: nenhuma tecla
+/// pode ficar segura numa sessão que perdeu o foco no meio da pressão.
 #[tauri::command]
 fn set_talking(session: State<'_, Session>, talking: bool) {
-    if let Ok(connection) = session.connection() {
-        connection.set_talking(talking);
+    if talking {
+        if let Some(com_o_foco) = session.sessoes.com_o_foco() {
+            com_o_foco.conexao.set_talking(true);
+        }
+    } else {
+        for conexao in session.sessoes.conexoes() {
+            conexao.set_talking(false);
+        }
     }
 }
 
@@ -10000,7 +11644,9 @@ fn set_voice_mode(
         tracing::warn!(%erro, "não consegui gravar o modo de voz escolhido");
         return Err(FalhaAoEscolher::NaoGravei);
     }
-    if let Ok(connection) = session.connection() {
+    // Da máquina (E3): em todas as sessões, para o foco que chegar já chegar
+    // com o modo escolhido.
+    for connection in session.sessoes.conexoes() {
         connection.set_voice_mode(mode);
     }
     Ok(())
@@ -10044,7 +11690,8 @@ fn ajustar_reducao_de_ruido(
     // importa quando o disco falha: a pessoa ouve a mudança e lê que ela não
     // ficou gravada, que é melhor que não ouvir nada e ler o mesmo.
     let aplicada = forca.unwrap_or(1.0);
-    if let Ok(conexao) = session.connection() {
+    // Da máquina (E3): em todas as sessões.
+    for conexao in session.sessoes.conexoes() {
         conexao.set_supressao_de_ruido(aplicada);
     }
     // E o teste em curso, se há um: a pessoa pode estar calibrando agora.
@@ -10076,7 +11723,8 @@ fn ajustar_sensibilidade_da_voz(
     session: State<'_, Session>,
     dbfs: Option<f32>,
 ) -> Result<(), String> {
-    if let Ok(conexao) = session.connection() {
+    // Da máquina (E3): em todas as sessões.
+    for conexao in session.sessoes.conexoes() {
         conexao.set_abertura_da_voz_dbfs(dbfs);
     }
     if let Ok(teste) = session.teste_de_microfone.lock() {
@@ -10099,7 +11747,14 @@ fn ajustar_sensibilidade_da_voz(
 /// não há o que ajustar.
 #[tauri::command]
 fn controles_da_voz(app: AppHandle, session: State<'_, Session>) -> seele_ffi::ControlesDaVoz {
-    if let Ok(conexao) = session.connection() {
+    // Os controles são da máquina (E3) e valem iguais em todas as sessões: a
+    // com o foco responde, e sem foco, qualquer uma.
+    let alguma = session
+        .sessoes
+        .com_o_foco()
+        .map(|sessao| Arc::clone(&sessao.conexao))
+        .or_else(|| session.sessoes.conexoes().into_iter().next());
+    if let Some(conexao) = alguma {
         if let Some(controles) = conexao.controles_da_voz() {
             return controles;
         }
@@ -10281,10 +11936,11 @@ fn escolher_tecla_de_falar(app: AppHandle, tecla: Option<String>) -> Result<(), 
 #[tauri::command]
 fn set_volume(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     nickname: String,
     percent: u16,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.set_volume(nickname, percent)
+    session.conexao(carimbo)?.set_volume(nickname, percent)
 }
 
 /// O volume que esta sessão guardou para cada pessoa, por apelido. F1-vazamento.
@@ -10296,9 +11952,12 @@ fn set_volume(
 ///
 /// Sem sessão, nenhum: não há de quem.
 #[tauri::command]
-fn volumes_locais(session: State<'_, Session>) -> std::collections::HashMap<String, u16> {
+fn volumes_locais(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> std::collections::HashMap<String, u16> {
     session
-        .connection()
+        .conexao(carimbo)
         .map(|conexao| conexao.volumes_locais())
         .unwrap_or_default()
 }
@@ -10328,16 +11987,18 @@ fn volumes_locais(session: State<'_, Session>) -> std::collections::HashMap<Stri
 #[tauri::command]
 fn fontes_de_tela(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
 ) -> Result<Vec<seele_ffi::FonteDeTela>, ConnectionError> {
-    session.connection()?.fontes_de_tela()
+    session.conexao(carimbo)?.fontes_de_tela()
 }
 
 /// O que o sistema operacional respondeu sobre gravar a tela.
 #[tauri::command]
 fn permissao_de_tela(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
 ) -> Result<seele_ffi::PermissaoDeTela, ConnectionError> {
-    Ok(session.connection()?.permissao_de_tela())
+    Ok(session.conexao(carimbo)?.permissao_de_tela())
 }
 
 /// Pede a permissão ao sistema.
@@ -10349,8 +12010,9 @@ fn permissao_de_tela(
 #[tauri::command]
 fn pedir_permissao_de_tela(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
 ) -> Result<seele_ffi::PermissaoDeTela, ConnectionError> {
-    Ok(session.connection()?.pedir_permissao_de_tela())
+    Ok(session.conexao(carimbo)?.pedir_permissao_de_tela())
 }
 
 /// Começa a transmitir a fonte escolhida, com os limites escolhidos.
@@ -10362,17 +12024,21 @@ fn pedir_permissao_de_tela(
 #[tauri::command]
 fn compartilhar_tela(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     fonte: u64,
     limites: seele_ffi::LimitesDeTela,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.compartilhar_tela(fonte, limites)
+    session.conexao(carimbo)?.compartilhar_tela(fonte, limites)
 }
 
 /// Para de transmitir. Idempotente do outro lado: parar sem estar
 /// compartilhando não é erro.
 #[tauri::command]
-fn parar_de_compartilhar(session: State<'_, Session>) -> Result<(), ConnectionError> {
-    session.connection()?.parar_de_compartilhar()
+fn parar_de_compartilhar(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.parar_de_compartilhar()
 }
 
 /// Pede um quadro-chave a quem está compartilhando.
@@ -10386,8 +12052,12 @@ fn parar_de_compartilhar(session: State<'_, Session>) -> Result<(), ConnectionEr
 ///
 /// [`ConnectionError::NotConnected`] sem sessão.
 #[tauri::command]
-fn pedir_quadro_chave(session: State<'_, Session>, tela: u32) -> Result<(), ConnectionError> {
-    session.connection()?.pedir_quadro_chave(tela)
+fn pedir_quadro_chave(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    tela: u32,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.pedir_quadro_chave(tela)
 }
 
 /// Passa a receber a imagem de uma transmissão, ou para de receber.
@@ -10399,8 +12069,13 @@ fn pedir_quadro_chave(session: State<'_, Session>, tela: u32) -> Result<(), Conn
 /// CPU dela, e nenhuma das duas entra na conta do teto, que só mede a subida de
 /// quem hospeda.
 #[tauri::command]
-fn assistir(session: State<'_, Session>, tela: u32, quero: bool) -> Result<(), ConnectionError> {
-    session.connection()?.assistir(tela, quero)
+fn assistir(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    tela: u32,
+    quero: bool,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.assistir(tela, quero)
 }
 
 /// O volume do som da transmissão que se está assistindo.
@@ -10409,22 +12084,31 @@ fn assistir(session: State<'_, Session>, tela: u32, quero: bool) -> Result<(), C
 /// calar as pessoas. Independente do volume dos participantes e do isolamento
 /// total — este último continua calando tudo, que é o que ele diz que faz.
 #[tauri::command]
-fn ajustar_volume_da_tela(session: State<'_, Session>, volume: f32) -> Result<(), ConnectionError> {
-    session.connection()?.ajustar_volume_da_tela(volume)
+fn ajustar_volume_da_tela(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    volume: f32,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.ajustar_volume_da_tela(volume)
 }
 
 /// Cala ou devolve o som da transmissão, sem mexer no volume dela.
 #[tauri::command]
-fn calar_a_tela(session: State<'_, Session>, calada: bool) -> Result<(), ConnectionError> {
-    session.connection()?.calar_a_tela(calada)
+fn calar_a_tela(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    calada: bool,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.calar_a_tela(calada)
 }
 
 /// O volume e o mudo do som da transmissão, como a tela os desenha.
 #[tauri::command]
 fn som_da_tela(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
 ) -> Result<Option<seele_ffi::SomDaTela>, ConnectionError> {
-    Ok(session.connection()?.som_da_tela())
+    Ok(session.conexao(carimbo)?.som_da_tela())
 }
 
 /// O que esta máquina faz com o **próprio** áudio ao capturar uma tela.
@@ -10440,9 +12124,10 @@ fn exclusao_do_som_da_captura() -> seele_ffi::ExclusaoDoSom {
 #[tauri::command]
 fn ajustar_limites_da_tela(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     limites: seele_ffi::LimitesDeTela,
 ) -> Result<(), ConnectionError> {
-    session.connection()?.ajustar_limites_da_tela(limites)
+    session.conexao(carimbo)?.ajustar_limites_da_tela(limites)
 }
 
 /// Põe a janela em tela cheia, ou a tira de lá.
@@ -10488,11 +12173,21 @@ fn tela_cheia(app: AppHandle, ligada: bool) {
 /// nome e a imagem vêm da `Connection`. Uma tela que passasse os três poderia passar
 /// os três de outro servidor.
 #[tauri::command]
-fn lembrar_aparencia_do_servidor(app: AppHandle, session: State<'_, Session>) {
-    let Ok(Some(alvo)) = session.alvo.lock().map(|guardado| guardado.clone()) else {
+fn lembrar_aparencia_do_servidor(
+    app: AppHandle,
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) {
+    // A conexão e o «onde voltar» **da sessão do carimbo** (E3), e não da
+    // vista: a aparência de um servidor não pode ir para a entrada de outro.
+    let Ok(connection) = session.conexao(carimbo) else {
         return;
     };
-    let Ok(connection) = session.connection() else {
+    let Some(alvo) = session
+        .sessoes
+        .buscar(carimbo.sessao)
+        .and_then(|sessao| sessao.alvo())
+    else {
         return;
     };
     let nome = connection.snapshot().server;
@@ -10602,8 +12297,11 @@ const fn ha_ajustes_de_acessibilidade() -> bool {
 /// vezes por segundo a partir do `Snapshot` — a trazia de volta. Apagar uma sala
 /// com alguém dentro deixava a janela coberta por um alerta que não fechava.
 #[tauri::command]
-fn dispensar_aviso(session: State<'_, Session>) -> Result<(), ConnectionError> {
-    session.connection()?.dispensar_aviso();
+fn dispensar_aviso(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Result<(), ConnectionError> {
+    session.conexao(carimbo)?.dispensar_aviso();
     Ok(())
 }
 
@@ -10668,7 +12366,8 @@ fn consentir_no_caminho_entre_pares(
             tracing::warn!(%erro, "não deu para guardar o consentimento de par");
         }
     }
-    if let Ok(connection) = session.connection() {
+    // O consentimento é desta máquina (E3): declarado a todas as sessões.
+    for connection in session.sessoes.conexoes() {
         let _ = connection.consentir_no_caminho_entre_pares(pares_que_atende, assiste_por_par);
     }
     Ok(())
@@ -10787,14 +12486,21 @@ fn escolher_microfone(
         return Err(FalhaAoEscolher::NaoGravei);
     }
 
-    let Ok(connection) = session.connection() else {
-        // Sem sessão a escolha está gravada, e era tudo o que havia para fazer.
-        return Ok(());
-    };
-    connection.set_capture_device(dispositivo).map_err(|erro| {
-        tracing::warn!(%erro, "não consegui trocar o microfone da sessão");
-        FalhaAoEscolher::DispositivoSumiu
-    })
+    // O microfone é da máquina (E3): a escolha vai a todas as sessões. Só a com
+    // o foco tem voz de pé para trocar agora; as outras guardam para quando o
+    // tiverem. Sem sessão, a escolha está gravada, e era tudo o que havia.
+    let mut sumiu = false;
+    for connection in session.sessoes.conexoes() {
+        if let Err(erro) = connection.set_capture_device(dispositivo.clone()) {
+            tracing::warn!(%erro, "não consegui trocar o microfone da sessão");
+            sumiu = true;
+        }
+    }
+    if sumiu {
+        Err(FalhaAoEscolher::DispositivoSumiu)
+    } else {
+        Ok(())
+    }
 }
 
 /// Por onde esta máquina está oferecendo tocar som agora.
@@ -10841,14 +12547,20 @@ fn escolher_saida(
         return Err(FalhaAoEscolher::NaoGravei);
     }
 
-    let Ok(connection) = session.connection() else {
-        // Sem sessão a escolha está gravada, e era tudo o que havia para fazer.
-        return Ok(());
-    };
-    connection.set_playback_device(dispositivo).map_err(|erro| {
-        tracing::warn!(%erro, "não consegui trocar a saída de som da sessão");
-        FalhaAoEscolher::DispositivoSumiu
-    })
+    // A saída é da máquina (E3): a escolha vai a todas as sessões, como o
+    // microfone.
+    let mut sumiu = false;
+    for connection in session.sessoes.conexoes() {
+        if let Err(erro) = connection.set_playback_device(dispositivo.clone()) {
+            tracing::warn!(%erro, "não consegui trocar a saída de som da sessão");
+            sumiu = true;
+        }
+    }
+    if sumiu {
+        Err(FalhaAoEscolher::DispositivoSumiu)
+    } else {
+        Ok(())
+    }
 }
 
 /// Onde fica a lista de servidores visitados.
@@ -11031,6 +12743,13 @@ enum FalhaNaPortaria {
     NaoEstaHospedando,
     /// O banco do servidor não respondeu.
     BancoNaoRespondeu,
+    /// **O ato foi aberto para outra hospedagem** (E7): o servidor parou e
+    /// subiu outro (ou o mesmo, de novo) depois de a decisão abrir. Nada foi
+    /// decidido; `agora` é a hospedagem de pé, para a tela redesenhar a fila.
+    HospedagemNaoConfere {
+        /// A hospedagem de pé agora.
+        agora: HospedagemDaPorta,
+    },
 }
 
 /// Em que estado está a porta do servidor que esta janela hospeda.
@@ -11059,6 +12778,11 @@ struct EstadoDaPorta {
     /// É o que transforma «está aberto» em «está aberto **para a internet**»,
     /// que são duas frases com urgências diferentes.
     alcance: &'static str,
+    /// **A hospedagem exata desta porta** (E7): o servidor e a geração. Os
+    /// atos (`decidir_pedido`, `revogar_admissao`) a devolvem, e são recusados
+    /// com `HospedagemNaoConfere` se ela não for mais a de pé. `None` sem
+    /// hospedagem.
+    hospedagem: Option<HospedagemDaPorta>,
 }
 
 /// Um pedido, como o cartão o desenha.
@@ -11102,6 +12826,121 @@ fn persistence_hospedada(
         .do_guardado()
         .ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
     Ok(server.persistence())
+}
+
+/// O banco do servidor guardado **só se ele é a hospedagem pedida** (E7, a
+/// portaria): o mesmo servidor e a mesma geração. A conferência e a cópia do
+/// banco saem sob o mesmo cadeado das hospedagens, então o banco devolvido é o
+/// da hospedagem conferida, mesmo que ela pare logo depois.
+fn persistence_da_hospedagem(
+    hospedagens: &Hospedagens,
+    pedida: &HospedagemDaPorta,
+) -> Result<seele_server::hospedagem::PersistenceCompartilhada, FalhaNaPortaria> {
+    let guardado = hospedagens
+        .guardado
+        .as_ref()
+        .ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+    let agora = guardado.identidade();
+    if &agora != pedida {
+        tracing::warn!(
+            ?pedida,
+            ?agora,
+            "um ato da portaria aberto para outra hospedagem foi recusado"
+        );
+        return Err(FalhaNaPortaria::HospedagemNaoConfere { agora });
+    }
+    Ok(guardado.hospedagem.persistence())
+}
+
+/// O banco de um ato da portaria: o da hospedagem pedida, conferida
+/// ([`persistence_da_hospedagem`]). **Sem hospedagem no pedido, recusado**
+/// (rodada 3: a casca manda a do `estado_da_porta`): um ato que não diz de
+/// qual hospedagem é não vai ao guardado de pé, e volta
+/// `HospedagemNaoConfere` com a de agora, para a tela reler a fila.
+fn persistence_do_ato(
+    hospedagens: &Hospedagens,
+    pedida: Option<&HospedagemDaPorta>,
+) -> Result<seele_server::hospedagem::PersistenceCompartilhada, FalhaNaPortaria> {
+    if let Some(pedida) = pedida {
+        return persistence_da_hospedagem(hospedagens, pedida);
+    }
+    let guardado = hospedagens
+        .guardado
+        .as_ref()
+        .ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+    tracing::warn!("um ato da portaria chegou sem a hospedagem e foi recusado");
+    Err(FalhaNaPortaria::HospedagemNaoConfere {
+        agora: guardado.identidade(),
+    })
+}
+
+/// **Parar A e subir B nunca aplica a B uma decisão aberta para A** (E7, a
+/// portaria), com hospedagens de verdade: a mesma chave e o mesmo servidor
+/// guardado (`None`, o de sempre) não bastam, porque a geração muda.
+#[cfg(test)]
+mod a_decisao_e_da_hospedagem_em_que_abriu {
+    use super::{
+        persistence_da_hospedagem, persistence_do_ato, FalhaNaPortaria, Hospedado, Hospedagens,
+    };
+    use seele_server::hospedagem::Hospedagem;
+    use seele_server::persistence::Location;
+
+    #[tokio::test]
+    async fn a_decisao_aberta_em_a_e_recusada_em_b_e_aceita_em_a() {
+        let a = Hospedagem::iniciar(0, Location::Memory, "A", None, |_| Ok(()))
+            .await
+            .expect("A subiu");
+        let mut hospedagens = Hospedagens {
+            guardado: Some(Hospedado::novo(a, None)),
+            pessoal: None,
+        };
+        let de_a = hospedagens.guardado.as_ref().expect("A").identidade();
+        assert!(
+            persistence_da_hospedagem(&hospedagens, &de_a).is_ok(),
+            "a decisão aberta em A foi recusada em A"
+        );
+
+        // Parar A, subir B (o mesmo servidor guardado, `None`).
+        if let Some(parado) = hospedagens.guardado.take() {
+            parado.hospedagem.encerrar().await;
+        }
+        assert!(matches!(
+            persistence_da_hospedagem(&hospedagens, &de_a),
+            Err(FalhaNaPortaria::NaoEstaHospedando)
+        ));
+        let b = Hospedagem::iniciar(0, Location::Memory, "B", None, |_| Ok(()))
+            .await
+            .expect("B subiu");
+        hospedagens.guardado = Some(Hospedado::novo(b, None));
+        let de_b = hospedagens.guardado.as_ref().expect("B").identidade();
+        assert_eq!(
+            de_a.servidor, de_b.servidor,
+            "o teste quer o mesmo servidor guardado"
+        );
+        match persistence_da_hospedagem(&hospedagens, &de_a) {
+            Err(FalhaNaPortaria::HospedagemNaoConfere { agora }) => {
+                assert_eq!(agora, de_b, "a recusa não diz qual hospedagem está de pé");
+            }
+            Err(outra) => panic!("a decisão de A em B foi recusada pelo motivo errado: {outra:?}"),
+            Ok(_) => panic!("a decisão aberta em A foi aplicada em B"),
+        }
+        assert!(persistence_da_hospedagem(&hospedagens, &de_b).is_ok());
+        // **O ato sem hospedagem é recusado** (rodada 3), e não cai no
+        // guardado de pé; com ela, passa pelo mesmo caminho dos comandos.
+        match persistence_do_ato(&hospedagens, None) {
+            Err(FalhaNaPortaria::HospedagemNaoConfere { agora }) => assert_eq!(agora, de_b),
+            Err(outra) => panic!("o ato sem hospedagem foi recusado pelo motivo errado: {outra:?}"),
+            Ok(_) => panic!("o ato sem hospedagem caiu no guardado de pé"),
+        }
+        assert!(persistence_do_ato(&hospedagens, Some(&de_b)).is_ok());
+        assert!(matches!(
+            persistence_do_ato(&hospedagens, Some(&de_a)),
+            Err(FalhaNaPortaria::HospedagemNaoConfere { .. })
+        ));
+        if let Some(parado) = hospedagens.guardado.take() {
+            parado.hospedagem.encerrar().await;
+        }
+    }
 }
 
 /// O que o servidor que esta janela hospeda tem a dizer de si, para a tela de
@@ -11199,11 +13038,12 @@ mod o_estado_do_servidor {
 /// O estado das três camadas da porta.
 #[tauri::command]
 async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, FalhaNaPortaria> {
-    let (persistence, alcance) = {
+    let (persistence, alcance, hospedagem) = {
         let hospedagens = session
             .hospedagens
             .lock()
             .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+        let hospedagem = hospedagens.guardado.as_ref().map(Hospedado::identidade);
         let Some(server) = hospedagens.do_guardado() else {
             // Não hospedar não é falha: é a resposta, e a tela desenha a partir
             // dela em vez de mostrar um erro a quem não pediu nada.
@@ -11215,12 +13055,13 @@ async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, F
                 portaria_ligada: false,
                 pendentes: 0,
                 alcance: "SoRedeLocal",
+                hospedagem: None,
             });
         };
         let alcance = server
             .alcance()
             .map_or("SoRedeLocal", |alcance| alcance.degrau().nome());
-        (server.persistence(), alcance)
+        (server.persistence(), alcance, hospedagem)
     };
 
     let persistence = persistence.lock().await;
@@ -11239,6 +13080,7 @@ async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, F
         portaria_ligada,
         pendentes,
         alcance,
+        hospedagem,
     })
 }
 
@@ -11296,11 +13138,9 @@ async fn criar_convite_do_server(
 struct LinkDoNavegadorNaTela {
     /// O link na origem do navegador (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`).
     link: String,
-    /// Até quando ele abre, em segundos Unix UTC: é o «vale até» da tela.
-    ate: u64,
-    /// Quando a tela pede outro, que dura mais, em segundos Unix UTC.
-    renova: u64,
-    /// Quem de fora entra por ele (`AlcanceDoNavegador`): `Alcanca`,
+    /// Quem de fora entra por ele. **Desde a 0.17 o link não vence** (o
+    /// WebRTC confere o certificado longo pela impressão, sem certificado
+    /// curto): não há «vale até» nem «renova». (`AlcanceDoNavegador`): `Alcanca`,
     /// `SoPeloEncontro`, `SoNaRede` ou `NaoSeSabe`. Nome, e não frase: a frase
     /// mora no `LINK_DO_NAVEGADOR` do JavaScript.
     alcance: &'static str,
@@ -11319,8 +13159,9 @@ enum FalhaNoLinkDoNavegador {
     ConviteInvalido,
     /// O convite é de outro servidor.
     OutroServidor,
-    /// O servidor não apresenta certificado ao navegador agora.
-    SemJanelas,
+    /// O que está no ar é a sala pessoal: ela é achada pelo código, e não por
+    /// um link do navegador.
+    SalaPessoal,
 }
 
 /// **O link do navegador do convite que a tela mostra** (D-web-6): o mesmo
@@ -11337,9 +13178,6 @@ fn link_do_navegador(
 ) -> Result<LinkDoNavegadorNaTela, FalhaNoLinkDoNavegador> {
     use seele_server::hospedagem::SemLinkDoNavegador;
 
-    let agora = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |desde| desde.as_secs());
     let hospedagens = session
         .hospedagens
         .lock()
@@ -11348,16 +13186,14 @@ fn link_do_navegador(
         .do_guardado()
         .ok_or(FalhaNoLinkDoNavegador::NaoEstaHospedando)?;
     let link = server
-        .link_do_navegador(&convite, agora)
+        .link_do_navegador(&convite)
         .map_err(|sem| match sem {
             SemLinkDoNavegador::ConviteInvalido => FalhaNoLinkDoNavegador::ConviteInvalido,
             SemLinkDoNavegador::OutroServidor => FalhaNoLinkDoNavegador::OutroServidor,
-            SemLinkDoNavegador::SemJanelas => FalhaNoLinkDoNavegador::SemJanelas,
+            SemLinkDoNavegador::SalaPessoal => FalhaNoLinkDoNavegador::SalaPessoal,
         })?;
     Ok(LinkDoNavegadorNaTela {
         link: link.link,
-        ate: link.ate,
-        renova: link.renova,
         alcance: link.alcance.nome(),
         porta: server.endereco().port(),
     })
@@ -11397,20 +13233,30 @@ async fn pedidos_da_portaria(
         .collect())
 }
 
-/// Quem hospeda decide sobre um pedido.
+/// Quem hospeda decide sobre um pedido, **da hospedagem em que a decisão
+/// abriu** (`hospedagem`, a do `estado_da_porta`; E7): outra hospedagem de pé
+/// recusa com `HospedagemNaoConfere`, e nada é decidido.
 #[tauri::command]
 async fn decidir_pedido(
     session: State<'_, Session>,
     impressao: String,
     admitir: bool,
+    hospedagem: Option<HospedagemDaPorta>,
 ) -> Result<(), FalhaNaPortaria> {
-    let persistence = persistence_hospedada(&session)?;
+    let persistence = {
+        let hospedagens = session
+            .hospedagens
+            .lock()
+            .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+        persistence_do_ato(&hospedagens, hospedagem.as_ref())?
+    };
     let mut persistence = persistence.lock().await;
     seele_server::portaria::decidir(&mut persistence, &impressao, admitir)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
 }
 
-/// Desfaz uma decisão: a pessoa volta a ser desconhecida.
+/// Desfaz uma decisão: a pessoa volta a ser desconhecida. Da hospedagem em
+/// que o ato abriu, como o [`decidir_pedido`].
 ///
 /// Não é banir e não derruba quem está dentro — ADR 0030. A frase que a tela
 /// mostra antes de fazer isto é que precisa dizer as duas coisas.
@@ -11418,8 +13264,15 @@ async fn decidir_pedido(
 async fn revogar_admissao(
     session: State<'_, Session>,
     impressao: String,
+    hospedagem: Option<HospedagemDaPorta>,
 ) -> Result<(), FalhaNaPortaria> {
-    let persistence = persistence_hospedada(&session)?;
+    let persistence = {
+        let hospedagens = session
+            .hospedagens
+            .lock()
+            .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
+        persistence_do_ato(&hospedagens, hospedagem.as_ref())?
+    };
     let mut persistence = persistence.lock().await;
     seele_server::portaria::revogar(&mut persistence, &impressao)
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)
@@ -11500,12 +13353,16 @@ impl BuscaEstado {
 /// cursor continua deste lado da ponte, em `Session::busca`: o JavaScript não
 /// decide nada sobre busca (`specs/06-clientes-gui.md:19`).
 #[tauri::command]
-fn buscar(session: State<'_, Session>, termo: String) -> Result<BuscaEstado, ConnectionError> {
+fn buscar(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+    termo: String,
+) -> Result<BuscaEstado, ConnectionError> {
     // `messages()` e não `snapshot()`: a conversa saiu do snapshot, que agora
     // carrega só a revisão dela. Aqui a lista inteira é mesmo necessária — é o
     // que se busca —, e este comando roda quando alguém digita, não a cada
     // quadro.
-    let mensagens = session.connection()?.messages();
+    let mensagens = session.conexao(carimbo)?.messages();
     let mut busca =
         seele_ffi::search::Search::new(mensagens.iter().map(|mensagem| &mensagem.body), &termo);
 
@@ -11568,6 +13425,14 @@ struct VersaoNova {
     instalada: String,
     /// As notas do release, quando o manifesto trouxe alguma.
     notas: Option<String>,
+    /// Se a versão oferecida fala outra linha de servidor (E4 da 0.17). Com
+    /// `pede_aviso`, a tela mostra o aviso antes de instalar, e
+    /// `instalar_atualizacao` só aceita com a confirmação desta `versao`.
+    fronteira: atualizador::Fronteira,
+    /// Atalho de `fronteira`, para a tela não reimplementar a regra.
+    pede_aviso: bool,
+    /// Esta versão já foi adiada uma vez nesta máquina.
+    adiada: bool,
 }
 
 /// Quanto do pacote já veio.
@@ -11634,6 +13499,12 @@ enum FalhaAoAtualizar {
     /// do manifesto — outra linha. A tela esconde o botão; esta recusa é o que
     /// vale quando alguém chega ao comando por outro caminho.
     AbertaPeloLancador,
+    /// A versão escolhida fala outra linha de servidor, e a tela não mandou a
+    /// confirmação **desta** versão (E4 da 0.17, `atualizador::pode_instalar`).
+    ///
+    /// Recusado antes de baixar um byte, e a escolha volta ao lugar: a tela
+    /// mostra o aviso e pede de novo, sem procurar outra vez.
+    TravessiaNaoConfirmada,
 }
 
 /// Se esta janela pode procurar e instalar atualização.
@@ -11737,10 +13608,14 @@ async fn procurar_atualizacao(
         return Ok(None);
     };
 
+    let fronteira = fronteira_da_oferta(&nova);
     let resposta = VersaoNova {
         versao: nova.version.clone(),
         instalada: nova.current_version.clone(),
         notas: nova.body.clone(),
+        pede_aviso: fronteira.pede_aviso(),
+        fronteira,
+        adiada: atualizador::foi_adiada(std::path::Path::new(&config_dir(&app)), &nova.version),
     };
 
     if let Ok(mut slot) = session.atualizacao.lock() {
@@ -11779,21 +13654,41 @@ async fn procurar_atualizacao(
 /// não é uma ação que ninguém consegue avisar direito. **A tela tem que dizer
 /// antes que o SEELE vai fechar e abrir de novo** — e, se houver um servidor
 /// hospedado nesta janela, que quem estiver dentro dele cai junto.
+///
+/// # A travessia de linha (E4 da 0.17)
+///
+/// `confirmada` é a versão que a tela mostrou no aviso de travessia, e só
+/// importa quando a oferta fala outra linha de servidor: aí, sem ela — ou com
+/// a de outra oferta —, a resposta é [`FalhaAoAtualizar::TravessiaNaoConfirmada`]
+/// e a escolha **fica** no lugar, para a tela pedir de novo. Na mesma linha,
+/// `confirmada` é ignorada, e a tela de antes (sem argumento) continua valendo.
 #[tauri::command]
 async fn instalar_atualizacao(
     app: AppHandle,
     session: State<'_, Session>,
+    confirmada: Option<String>,
 ) -> Result<(), FalhaAoAtualizar> {
     atualizacao_permitida(&session.abertura)?;
     // Tirado do lugar, e não emprestado: instalar é uma vez. Se falhar, quem
     // quiser tentar de novo procura de novo — e a consulta nova é justamente o
-    // que confirma que a versão ainda é aquela.
-    let nova = session
-        .atualizacao
-        .lock()
-        .ok()
-        .and_then(|mut slot| slot.take())
-        .ok_or(FalhaAoAtualizar::NadaEscolhido)?;
+    // que confirma que a versão ainda é aquela. A exceção é a travessia não
+    // confirmada, que devolve a escolha antes de baixar qualquer coisa.
+    let nova = {
+        let mut slot = session
+            .atualizacao
+            .lock()
+            .map_err(|_| FalhaAoAtualizar::NadaEscolhido)?;
+        let escolhida = slot.as_ref().ok_or(FalhaAoAtualizar::NadaEscolhido)?;
+        atualizador::pode_instalar(
+            &fronteira_da_oferta(escolhida),
+            &escolhida.version,
+            atualizador::Escolha::Prosseguir,
+            confirmada.as_deref(),
+        )
+        .map_err(|_| FalhaAoAtualizar::TravessiaNaoConfirmada)?;
+        slot.take().ok_or(FalhaAoAtualizar::NadaEscolhido)?
+    };
+    atualizador::esquecer_o_adiamento(std::path::Path::new(&config_dir(&app)));
 
     let relator = app.clone();
     let mut baixados: u64 = 0;
@@ -11843,6 +13738,49 @@ async fn instalar_atualizacao(
     // Só se chega aqui fora do Windows: lá o `install` acima já encerrou este
     // processo. `restart` não volta, e é por isso que não há `Ok(())` depois.
     app.restart()
+}
+
+/// A fronteira de uma oferta do atualizador: a linha deste app contra a que o
+/// manifesto que veio com a oferta atribui a ela (E4 da 0.17).
+fn fronteira_da_oferta(nova: &tauri_plugin_updater::Update) -> atualizador::Fronteira {
+    atualizador::fronteira_da_oferta(
+        versoes::linha_deste_app().as_ref(),
+        &nova.raw_json,
+        &nova.version,
+    )
+}
+
+/// Cancelar ou adiar a oferta que a tela mostrou (E4 da 0.17).
+///
+/// As duas tiram a oferta do lugar: nada é instalado, e um «instalar» seguinte
+/// responde `NadaEscolhido`. Adiar guarda a versão, e a próxima procura a
+/// devolve com `adiada`; cancelar esquece. `Prosseguir` aqui é o mesmo que
+/// cancelar: quem prossegue chama `instalar_atualizacao`.
+#[tauri::command]
+fn escolher_atualizacao(
+    app: AppHandle,
+    session: State<'_, Session>,
+    escolha: atualizador::Escolha,
+) -> Result<(), FalhaAoAtualizar> {
+    let nova = session
+        .atualizacao
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take())
+        .ok_or(FalhaAoAtualizar::NadaEscolhido)?;
+    let escolha = match escolha {
+        atualizador::Escolha::Prosseguir => atualizador::Escolha::Cancelar,
+        outra => outra,
+    };
+    if let Err(erro) = atualizador::registrar_a_escolha(
+        std::path::Path::new(&config_dir(&app)),
+        &nova.version,
+        escolha,
+    ) {
+        tracing::warn!(%erro, versao = %nova.version, "não guardei o adiamento da atualização");
+    }
+    tracing::info!(versao = %nova.version, ?escolha, "a atualização ficou para depois");
+    Ok(())
 }
 
 /// Onde fica o bilhete da atualização em curso.
@@ -12068,7 +14006,7 @@ fn main() {
     let filtro = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         "seele_app=info,seele_ffi=info,seele_core=info,\
          seele_video=info,seele_audio=info,seele_server=info,seele_proto=info,\
-         seele_encontro=info,seele_lancador=info,seele_motor=info,\
+         seele_encontro=info,seele_lancador=info,seele_motor=info,seele_enlace=info,\
          seele_sessao=info,seele_voz=info"
             .into()
     });
@@ -12133,6 +14071,9 @@ fn main() {
             // (`app.rs:2521-2531`): sem isso, a página e o IPC subiriam com a
             // cópia em andamento. Ver `versoes::primeira_abertura` e o guarda
             // `a_janela_so_nasce_depois_da_primeira_abertura`.
+            // O relatório do áudio de mentira (só a build de teste do CUA, e
+            // só com a variável); fora dela não faz nada.
+            audio_de_mentira::relatar(app.handle().clone());
             let primeira = versoes::primeira_abertura(&config_dir(app.handle()));
             let houve_0_15 = primeira.houve_0_15();
             app.manage(versoes::EstadoDaPrimeiraAbertura(std::sync::Mutex::new(
@@ -12300,6 +14241,7 @@ fn main() {
             criar_servidor,
             apagar_servidor,
             resolver_mod_de_api_antiga,
+            desfazer_escolha_de_mod,
             abrir_versao,
             abertura,
             instalar_mod,
@@ -12318,6 +14260,9 @@ fn main() {
             cancelar_ligacao,
             contatos_da_agenda,
             dar_nome_na_agenda,
+            amigos,
+            adicionar_amigo,
+            tirar_dos_amigos,
             bloquear,
             baixar_versao,
             conferir_esta_versao,
@@ -12328,6 +14273,14 @@ fn main() {
             catalogo_de_mods,
             instalar_mod_do_catalogo,
             disconnect,
+            antes_de_hospedar,
+            preparar_copia,
+            encerrar_sessao,
+            sessoes,
+            ver_sessao,
+            instancia_da_janela,
+            foco_de_voz,
+            focar_voz,
             parar_de_hospedar,
             meu_servidor,
             snapshot,
@@ -12377,6 +14330,15 @@ fn main() {
             esquecer_aceite_de_mods,
             icone_do_server,
             expulsar_pessoa,
+            pedir_cargos,
+            explicar_permissoes,
+            prever_cargo,
+            criar_cargo,
+            editar_cargo,
+            mover_cargo,
+            apagar_cargo,
+            atribuir_cargo,
+            revogar_cargo,
             banir_pessoa,
             remover_mensagem,
             mover_pessoa,
@@ -12427,6 +14389,7 @@ fn main() {
             busca_limpar,
             procurar_atualizacao,
             instalar_atualizacao,
+            escolher_atualizacao,
             atualizacao_que_nao_pegou,
             abrir_a_porta_no_firewall,
             descrever_arquivo,
@@ -12925,14 +14888,41 @@ fn despedir_da_sessao(sessao: &Session, teto: std::time::Duration) {
         );
     }
 
-    let Ok(connection) = sessao.connection() else {
-        return;
-    };
-    if !connection.encerrar_e_esperar(std::time::Duration::from_millis(500)) {
-        tracing::warn!(
-            "a despedida não terminou em 500 ms: quem ficou vai notar a saída pelo prazo de \
-             ociosidade, 20 s"
-        );
+    // **Todas as sessões se despedem, e ao mesmo tempo** (E3 da 0.17): três
+    // servidores, três despedidas, dentro dos mesmos 500 ms. Em fila, a
+    // terceira passaria do teto da saída, e quem estava lá a veria pelo prazo
+    // de ociosidade.
+    let mut conexoes = sessao.sessoes.conexoes();
+    if let Ok(da_vista) = sessao.connection() {
+        if !conexoes
+            .iter()
+            .any(|conexao| Arc::ptr_eq(conexao, &da_vista))
+        {
+            conexoes.push(da_vista);
+        }
+    }
+    let despedidas: Vec<_> = conexoes
+        .into_iter()
+        .map(|connection| {
+            std::thread::Builder::new()
+                .name("despedida de uma sessão".into())
+                .spawn(move || connection.encerrar_e_esperar(std::time::Duration::from_millis(500)))
+        })
+        .collect();
+    for despedida in despedidas {
+        let terminou = match despedida {
+            Ok(thread) => thread.join().unwrap_or(false),
+            Err(erro) => {
+                tracing::warn!(%erro, "a despedida de uma sessão não conseguiu thread");
+                false
+            }
+        };
+        if !terminou {
+            tracing::warn!(
+                "a despedida não terminou em 500 ms: quem ficou vai notar a saída pelo prazo de \
+                 ociosidade, 20 s"
+            );
+        }
     }
 }
 
@@ -19531,10 +21521,7 @@ mod parar_de_hospedar_e_so_o_guardado {
             .await
             .expect("o guardado de teste não subiu");
         let porta = hospedagem.endereco().port();
-        sessao.hospedagens.lock().unwrap().guardado = Some(Hospedado {
-            hospedagem,
-            servidor,
-        });
+        sessao.hospedagens.lock().unwrap().guardado = Some(Hospedado::novo(hospedagem, servidor));
         porta
     }
 
@@ -19545,10 +21532,7 @@ mod parar_de_hospedar_e_so_o_guardado {
         let sala = Hospedagem::iniciar_sala(0, &[1; 32], "dona", None)
             .await
             .expect("a sala não subiu");
-        sessao.hospedagens.lock().unwrap().pessoal = Some(Hospedado {
-            hospedagem: sala,
-            servidor: None,
-        });
+        sessao.hospedagens.lock().unwrap().pessoal = Some(Hospedado::novo(sala, None));
 
         assert!(parar_de_hospedar_em(&sessao).await, "havia guardado no ar");
 
@@ -19635,14 +21619,8 @@ mod a_saida_despede_as_hospedagens {
             .expect("a sala não subiu");
         {
             let mut hospedagens = sessao.hospedagens.lock().expect("o cadeado");
-            hospedagens.guardado = Some(Hospedado {
-                hospedagem: guardado,
-                servidor: None,
-            });
-            hospedagens.pessoal = Some(Hospedado {
-                hospedagem: sala,
-                servidor: None,
-            });
+            hospedagens.guardado = Some(Hospedado::novo(guardado, None));
+            hospedagens.pessoal = Some(Hospedado::novo(sala, None));
         }
 
         despedir_das_hospedagens(&sessao, std::time::Duration::from_millis(400)).await;
@@ -19796,14 +21774,8 @@ mod a_resposta_a_estou_no_meu_servidor {
         );
 
         let mut hospedagens = Hospedagens {
-            guardado: Some(Hospedado {
-                hospedagem: guardado,
-                servidor: None,
-            }),
-            pessoal: Some(Hospedado {
-                hospedagem: sala,
-                servidor: None,
-            }),
+            guardado: Some(Hospedado::novo(guardado, None)),
+            pessoal: Some(Hospedado::novo(sala, None)),
         };
         assert_eq!(
             hospedagens.impressoes(),

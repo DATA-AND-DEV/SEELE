@@ -29,6 +29,36 @@ function nomeDoMeuServidor() {
   return meuServidorNoAr?.nome || "O SEU SERVIDOR";
 }
 
+/**
+ * **Ir ao servidor que esta máquina hospeda**: a conversa que já está aberta
+ * nele, se há (várias sessões), ou uma conexão nova pelo endereço desta
+ * máquina. Nunca um segundo `hospedar`: o servidor no ar é um só por janela, e
+ * quem aperta qualquer um dos caminhos quer o que já está no ar (revisão do
+ * Codex: o HOSPEDAR AQUI com o servidor no ar não pode hospedar de novo).
+ */
+async function irAoServidorHospedado(meu = meuServidorNoAr) {
+  if (!meu?.alvo) return false;
+  // `camada-sessoes.js` carrega depois deste arquivo; no clique, já está.
+  const varias = typeof variasSessoes === "function" && variasSessoes();
+  const aberta = varias ? sessoesNaTela.find((s) => s.onde === "Guardado" && !s.encerrada) : null;
+  if (aberta) await verSessao(aberta.carimbo.sessao);
+  else if (varias) abrirMaisUmaSessao(meu.alvo);
+  else await conectar(meu.alvo);
+  return true;
+}
+
+/**
+ * O HOSPEDAR AQUI diz o que faz em cada estado: com o servidor no ar, VER O
+ * SERVIDOR HOSPEDADO, ligado à frase que diz qual; sem, HOSPEDAR AQUI.
+ */
+function rotularOHospedarAqui(meu) {
+  const botao = $("botao-hospedar");
+  botao.textContent = meu ? FRASES_DA_HOSPEDAGEM.verOHospedado : FRASES_DA_HOSPEDAGEM.hospedarAqui;
+  botao.dataset.estado = meu ? "no-ar" : "livre";
+  if (meu) botao.setAttribute("aria-describedby", "boot-meu-servidor-frase");
+  else botao.removeAttribute("aria-describedby");
+}
+
 /** Desenha o bloco, se a entrada está à vista e há servidor no ar. */
 async function desenharMeuServidor() {
   const bloco = $("boot-meu-servidor");
@@ -37,13 +67,12 @@ async function desenharMeuServidor() {
   } catch {
     meuServidorNoAr = null;
   }
+  rotularOHospedarAqui(meuServidorNoAr);
   if (!meuServidorNoAr || $("tela-boot").hidden) {
     bloco.hidden = true;
     return;
   }
-  $("boot-meu-servidor-frase").textContent =
-    `VOCÊ CONTINUA HOSPEDANDO ${nomeDoMeuServidor()}: ele está no ar neste ` +
-    "computador, e quem está nele continua lá.";
+  $("boot-meu-servidor-frase").textContent = FRASES_DA_HOSPEDAGEM.continuaHospedando(nomeDoMeuServidor());
   bloco.hidden = false;
 }
 
@@ -54,14 +83,14 @@ async function pararDeHospedarOMeuServidor() {
   } catch (falha) {
     console.warn("parar_de_hospedar:", falha);
   }
+  // A hospedagem acabou: o que a portaria tinha aberto era dela.
+  hospedagemMudou();
   esquecerOLinkDaPorta();
   await desenharMeuServidor();
 }
 
 $("boot-voltar-ao-meu-servidor").addEventListener("click", () => {
-  const alvo = meuServidorNoAr?.alvo;
-  if (!alvo) return;
-  conectar(alvo).catch((falha) => console.warn("VOLTAR AO MEU SERVIDOR:", falha));
+  irAoServidorHospedado().catch((falha) => console.warn("VOLTAR AO MEU SERVIDOR:", falha));
 });
 
 $("boot-parar-de-hospedar").addEventListener("click", () => {

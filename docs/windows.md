@@ -11,9 +11,7 @@
 > O resto desta página é para compilar do código-fonte, que é o que você quer
 > se for mexer no código ou se não confiar num binário baixado.
 
-**Nada disto foi executado.** Não tenho uma máquina Windows, e a matriz de CI de
-três sistemas nunca rodou por falta de repositório remoto. O que está aqui é
-derivado de ler o que cada dependência exige para compilar, e cada exigência
+**Pouco disto foi executado.** Na 0.17, em 25 e 26/10/2026, num Windows 11 Pro real e num checkout isolado: o `seele-app` compilou (perfil dev, sem o aparelho de mentira) e 8 testes de conformidade passaram; outros 8 testes, do codec oficial, passaram só com imagens geradas; uma hora corrida (3600 s) de voz e H264 gerados, em loopback, passou, com a saída e a reconexão do servidor inteiro, o primeiro som depois de entrar de novo na voz (12 s depois) em 62 ms e 0 erros; e um smoke físico de 3 s a 48 kHz abriu os callbacks de captura e de saída, com 2496 underruns e sem erro de stream. **Isso não é áudio físico aprovado**, e a hora sintética não teve captura de GUI nem WASAPI. Ritmo físico de 600 s no Windows: 600 s completos, exit 0, em 60 intervalos de 10 s; só o primeiro teve falta (1056 amostras, 1 bloco inicial); dos 20 s aos 600 s, todos com falta 0 e anel cheio 0; reserva de 44 ms e 1 reposição. O aparelho a 48 kHz foi alimentado com silêncio, no compasso real: não é uma chamada completa nem latência física. Não foram exercitados a interface (WebView2), a captura de tela real, uma chamada longa com hardware nem rede com NAT ou TURN. O resto do que está aqui é derivado de ler o que cada dependência exige para compilar, e cada exigência
 está justificada abaixo para que você possa julgar quando algo divergir.
 
 A parte que **está** verificada: o binário compila e roda em macOS aarch64, dois
@@ -32,7 +30,8 @@ Em **cada um dos dois PCs**.
 ### 1.1 Build Tools do Visual Studio
 
 O Rust no Windows usa o linker da Microsoft, e duas dependências compilam C:
-o SQLite embutido do PERSISTENCE e partes do QUIC.
+o SQLite embutido do PERSISTENCE e partes da criptografia (até a 0.16, as do
+QUIC; na 0.17, a lista exata das dependências em C não foi conferida no Windows).
 
 Baixe **Build Tools for Visual Studio** em
 <https://visualstudio.microsoft.com/downloads/> (seção *Tools for Visual
@@ -100,9 +99,20 @@ largada se não achar, em vez de deixar você descobrir depois do Opus.
 
 <https://git-scm.com/download/win>, padrões.
 
-> **Não é necessário:** CMake, NASM, Python, Node. O `aws-lc-rs`, que exigiria
-> CMake e NASM, foi removido da árvore — usamos só o provider `ring`, que é o
-> que o código instala em tempo de execução de qualquer forma.
+> **Não é necessário:** CMake, NASM, Python, Node.
+>
+> **O `aws-lc-rs` voltou à árvore na 0.17** (25/10/2026), pelo DTLS do
+> transporte (`dimpl`, ADR 0063, emenda do RUSTSEC-2026-0387). O `aws-lc-sys`
+> compila o AWS-LC em C com o MSVC do item 1.1 — nada além dele:
+>
+> - **NASM:** dispensado. O `dimpl` liga a feature `prebuilt-nasm`, e sem NASM
+>   no `PATH` o `aws-lc-sys` usa os objetos pré-montados que traz. Se houver um
+>   NASM instalado, ele é usado; `AWS_LC_SYS_PREBUILT_NASM=0` obriga o NASM.
+> - **CMake:** não é exigido. Com as ligações pré-geradas do
+>   `x86_64-pc-windows-msvc`, o `aws-lc-sys` 0.46 compila pelo `cc`.
+>
+> O TLS do `rustls` (os MODs e o atualizador) continua só no provider `ring`,
+> que é o que o código instala em tempo de execução.
 >
 > **Já vem no Windows 10 (1803+) e 11:** `curl`, `tar` e `certutil`. O build do
 > Opus usa os três para baixar e conferir a biblioteca pré-compilada. Numa
@@ -158,7 +168,8 @@ atualizados. Se reclamar, o runtime está em
 ## 3 · Liberar a porta no firewall
 
 **O passo que mais provavelmente vai faltar.** A porta 8383 é **UDP**, porque o
-transporte é QUIC — e a regra que se escreve de cabeça é sempre TCP.
+transporte é WebRTC desde a 0.17 (e era QUIC até a 0.16) — e a regra que se
+escreve de cabeça é sempre TCP.
 
 Só no PC que vai rodar o servidor. PowerShell **como administrador**:
 

@@ -1,5 +1,10 @@
 //! O MOD de referência: a API deste build provada por um vetor, e não por um
-//! guia. Na 0.16, a API 6 (o corte; tarefa 13 do plano da F3).
+//! guia. Na 0.16, a API 6 (o corte; tarefa 13 do plano da F3). Na 0.17, a API 7
+//! (ADR 0063): a 6 mais a capacidade `acoes` e o campo `permissoes` do
+//! manifesto. O vetor declara a 7 e **não** declara permissões nem chama ações:
+//! o verbo de pedir uma ação ainda não existe no prelúdio, e o guarda de baixo
+//! («cada coisa que a API oferece é exercitada») lê o prelúdio — quando o verbo
+//! entrar lá, é ele que cobra o vetor.
 //!
 //! # Por que ele existe
 //!

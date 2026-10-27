@@ -1,0 +1,206 @@
+diff --git a/apps/seele-app/tests/web.rs b/apps/seele-app/tests/web.rs
+index 6df79c2..ba2a8e2 100644
+--- a/apps/seele-app/tests/web.rs
++++ b/apps/seele-app/tests/web.rs
+@@ -1101,7 +1101,7 @@ fn a_origem_do_web_app_e_escrita_num_lugar_so() {
+ const ENDERECOS_DA_PAGINA: &[(&str, &str, &str)] = &[
+     (
+         "ui/frases.js",
+-        "https://seele.app.br",
++        "https://get.seele.sh",
+         "a `PAGINA_DO_APP`, BAIXAR O APP DO SEELE",
+     ),
+     ("ui/glifos.js", "http://www.w3.org", "o namespace do SVG"),
+diff --git a/apps/seele-app/ui/frases.js b/apps/seele-app/ui/frases.js
+index 83dfe64..17fa8a4 100644
+--- a/apps/seele-app/ui/frases.js
++++ b/apps/seele-app/ui/frases.js
+@@ -2078,7 +2078,7 @@ function fraseDoLinkDoNavegador(link, data, hora) {
+ // `tests/celular.rs` confere. O desktop não lê nada daqui.
+ 
+ /** Para onde vai quem quer o app do SEELE (decisão da orquestradora, 09/10). */
+-const PAGINA_DO_APP = "https://seele.app.br/#baixar";
++const PAGINA_DO_APP = "https://get.seele.sh/#baixar";
+ 
+ /**
+  * O aviso de fone no navegador (P9; matriz, achado E-6).
+diff --git a/crates/seele-core/src/encontro.rs b/crates/seele-core/src/encontro.rs
+index 52af9f8..7993d25 100644
+--- a/crates/seele-core/src/encontro.rs
++++ b/crates/seele-core/src/encontro.rs
+@@ -3371,7 +3371,7 @@ mod testes {
+         // única do `seele-proto`.
+         assert_eq!(
+             encontro::ponto_escolhido(None, Some(PONTO_PADRAO)).as_deref(),
+-            Some("encontro.seele.app.br")
++            Some("rendzvous.seele.sh")
+         );
+     }
+ }
+diff --git a/crates/seele-proto/src/encontro.rs b/crates/seele-proto/src/encontro.rs
+index 7e40f74..8177bf5 100644
+--- a/crates/seele-proto/src/encontro.rs
++++ b/crates/seele-proto/src/encontro.rs
+@@ -181,7 +181,11 @@ pub const PORTA_PADRAO: u16 = 8383 + 1;
+ /// Mora aqui, e não no `seele-server`, porque quem liga por código também
+ /// precisa dele (um código não carrega ponto nenhum), e o `seele-core` não vê o
+ /// `seele-server` (ADR 0002).
+-pub const PONTO_PADRAO: &str = "encontro.seele.app.br";
++pub const PONTO_PADRAO: &str = "rendzvous.seele.sh";
++
++/// O nome ANTERIOR do ponto de encontro (o mesmo serviço, o mesmo `SEELE-ENC/1`, a mesma rede de reserva). Só para os guardas
++/// ([`aponta_para_a_producao`]); este build não o consulta: o domínio antigo será aposentado. Backport 0.16.x do domínio seele.sh.
++pub const PONTOS_LEGADOS: [&str; 1] = ["encontro.seele.app.br"];
+ 
+ /// Os endereços do [`PONTO_PADRAO`], para quando o nome não resolver, e para
+ /// os guardas dos testes saberem que IP é o da produção
+@@ -261,6 +265,7 @@ pub fn aponta_para_a_producao(ponto: &str) -> bool {
+     };
+     let maquina = alvo.maquina.trim_end_matches('.');
+     maquina.eq_ignore_ascii_case(PONTO_PADRAO)
++        || PONTOS_LEGADOS.iter().any(|legado| maquina.eq_ignore_ascii_case(legado))
+         || maquina.parse::<IpAddr>().is_ok_and(|ip| {
+             REDE_DO_PADRAO
+                 .iter()
+@@ -1504,7 +1509,7 @@ mod testes {
+                 );
+             }
+         }
+-        assert_eq!(PONTO_PADRAO, "encontro.seele.app.br");
++        assert_eq!(PONTO_PADRAO, "rendzvous.seele.sh");
+         assert_eq!(VARIAVEL, "SEELE_ENCONTRO");
+     }
+ 
+diff --git a/crates/seele-proto/src/uri.rs b/crates/seele-proto/src/uri.rs
+index cbf9529..0e7ae97 100644
+--- a/crates/seele-proto/src/uri.rs
++++ b/crates/seele-proto/src/uri.rs
+@@ -333,7 +333,7 @@ impl Bilhete {
+         if ponto.is_empty() || aviso.is_empty() {
+             return Err(ErroDeUri::BilheteInvalido);
+         }
+-        Self::novo(ponto, aviso)
++        Self::novo(remapear_ponto_legado(ponto), aviso)
+     }
+ 
+     /// O ponto de encontro, separado em máquina e porta.
+@@ -388,6 +388,23 @@ impl Bilhete {
+     }
+ }
+ 
++/// O bilhete de um convite antigo aponta o ponto pelo nome anterior (`crate::encontro::PONTOS_LEGADOS`): lido, ele vira EXATAMENTE o
++/// [`crate::encontro::PONTO_PADRAO`] (o mesmo serviço), com a porta se ela veio escrita. Backport 0.16.x do domínio seele.sh.
++fn remapear_ponto_legado(ponto: &str) -> String {
++    let Ok(alvo) = separar_ponto(ponto) else {
++        return ponto.to_owned();
++    };
++    let maquina = alvo.maquina.trim_end_matches('.');
++    if !crate::encontro::PONTOS_LEGADOS.iter().any(|legado| maquina.eq_ignore_ascii_case(legado)) {
++        return ponto.to_owned();
++    }
++    if ponto.contains(':') {
++        format!("{}:{}", crate::encontro::PONTO_PADRAO, alvo.porta)
++    } else {
++        crate::encontro::PONTO_PADRAO.to_owned()
++    }
++}
++
+ impl fmt::Display for Bilhete {
+     fn fmt(&self, formatador: &mut fmt::Formatter<'_>) -> fmt::Result {
+         write!(formatador, "{}/{}", self.ponto, self.aviso)
+@@ -2131,4 +2148,25 @@ mod a_versao_do_servidor_no_link {
+             assert_eq!(versao_de(veneno), None, "«{veneno}» passou");
+         }
+     }
++
++#[cfg(test)]
++mod o_dominio_seele_sh {
++    use super::*;
++
++    /// Backport 0.16.x: um convite antigo (`enc=encontro.seele.app.br…`) aponta o MESMO ponto pelo nome novo; um nome parecido não.
++    #[test]
++    fn o_bilhete_de_um_convite_antigo_aponta_o_ponto_novo_e_so_pelo_nome_exato() {
++        for (enc, esperado) in [
++            ("encontro.seele.app.br/198.51.100.7:41234", "rendzvous.seele.sh"),
++            ("encontro.seele.app.br:8384/198.51.100.7:41234", "rendzvous.seele.sh:8384"),
++            ("encontro.seele.app.br.exemplo/198.51.100.7:41234", "encontro.seele.app.br.exemplo"),
++            ("encontro.exemplo:8384/198.51.100.7:41234", "encontro.exemplo:8384"),
++        ] {
++            assert_eq!(Bilhete::ler(enc).unwrap().ponto, esperado, "{enc}");
++        }
++        assert!(crate::encontro::aponta_para_a_producao("encontro.seele.app.br"), "o nome antigo saiu do guarda dos testes");
++        assert!(crate::encontro::aponta_para_a_producao("rendzvous.seele.sh:8384"));
++    }
++}
++
+ }
+diff --git a/crates/seele-server/src/alcance/encontro.rs b/crates/seele-server/src/alcance/encontro.rs
+index 7813fbc..d4b4670 100644
+--- a/crates/seele-server/src/alcance/encontro.rs
++++ b/crates/seele-server/src/alcance/encontro.rs
+@@ -3086,7 +3086,7 @@ mod testes {
+         };
+         assert_eq!(
+             com(PONTO_PADRAO).bilhete().ponto,
+-            "encontro.seele.app.br:8384",
++            "rendzvous.seele.sh:8384",
+             "o link saiu com o ponto padrão sem porta: o cliente 0.15.0 continua sem perguntar ao \
+              quarto"
+         );
+diff --git a/crates/seele-server/src/hospedagem.rs b/crates/seele-server/src/hospedagem.rs
+index 6b9c2c2..51af422 100644
+--- a/crates/seele-server/src/hospedagem.rs
++++ b/crates/seele-server/src/hospedagem.rs
+@@ -1249,7 +1249,7 @@ mod tests {
+     /// ponto padrão, a convocação seria nenhuma, não haveria pânico, e o teste
+     /// reprovaria — quem hospeda pelo app perderia o degrau 4 em silêncio.
+     #[tokio::test]
+-    #[should_panic(expected = "(«encontro.seele.app.br», pego em Hospedagem::iniciar")]
++    #[should_panic(expected = "(«rendzvous.seele.sh», pego em Hospedagem::iniciar")]
+     async fn iniciar_com_o_ponto_padrao_leva_o_ponto_do_projeto_a_escada() {
+         let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+         ambiente.tirar();
+diff --git a/crates/seele-sessao/src/catalogo.rs b/crates/seele-sessao/src/catalogo.rs
+index 2b65326..cabde7b 100644
+--- a/crates/seele-sessao/src/catalogo.rs
++++ b/crates/seele-sessao/src/catalogo.rs
+@@ -32,7 +32,7 @@ use serde::Deserialize;
+ /// Uma constante e não configuração: um endereço que a pessoa pudesse trocar
+ /// seria um endereço que alguém troca por ela. A assinatura protege o conteúdo;
+ /// o que protege a **origem** é não haver nada a apontar para outro lugar.
+-pub const ENDERECO: &str = "https://mods.seele.app.br";
++pub const ENDERECO: &str = "https://mods.seele.sh";
+ 
+ /// O esquema de catálogo que este build lê.
+ pub const ESQUEMA_CONHECIDO: u32 = 1;
+diff --git a/tools/bancada-do-celular.py b/tools/bancada-do-celular.py
+index 44ac6ea..9aadb58 100644
+--- a/tools/bancada-do-celular.py
++++ b/tools/bancada-do-celular.py
+@@ -2704,7 +2704,7 @@ def aba_ajustes(pg: Page) -> list[str]:
+             link: g.querySelector('a.cel-baixar')?.href ?? null })))()""")
+         if [g["grupo"] for g in fora] != ["SÓ NO APP DO SEELE", "NO COMPUTADOR"] or [g["itens"] for g in fora] != [8, 6]:
+             falhas.append(f"O QUE O CELULAR NÃO FAZ mostra {fora}")
+-        elif fora[0]["link"] != "https://seele.app.br/#baixar":
++        elif fora[0]["link"] != "https://get.seele.sh/#baixar":
+             falhas.append(f"HOSPEDAR UM SERVIDOR não leva a quem baixa o app: {fora[0]['link']}")
+         voltar()
+ 
+@@ -3586,7 +3586,7 @@ def casca_larga(pg: Page) -> list[str]:
+         falhas.append("a barra da janela continua à vista: no navegador, quem desenha a janela é ele")
+     if entrada["hospedar"] or entrada["nomePublico"]:
+         falhas.append(f"a entrada ainda oferece o que é de quem hospeda: {entrada}")
+-    if not entrada["frase"] or "app do SEELE" not in entrada["frase"] or entrada["link"] != "https://seele.app.br/#baixar":
++    if not entrada["frase"] or "app do SEELE" not in entrada["frase"] or entrada["link"] != "https://get.seele.sh/#baixar":
+         falhas.append(f"no lugar do HOSPEDAR AQUI não há a frase do app e o link: {entrada['frase']!r} {entrada['link']!r}")
+     if "pela" in entrada["proposito"] and "no ar a partir desta máquina" in entrada["proposito"] or "link" not in entrada["proposito"]:
+         falhas.append(f"o propósito ainda fala em pôr um servidor no ar: {entrada['proposito']!r}")
+@@ -3653,7 +3653,7 @@ def casca_larga(pg: Page) -> list[str]:
+         fora = pg.evaluate("""(() => { const p = document.getElementById('larga-painel-fora');
+             return { grupos: [...p.querySelectorAll('.rotulo')].map((r) => r.textContent), itens: p.querySelectorAll('li').length,
+                      link: p.querySelector('a')?.getAttribute('href') ?? null }; })()""")
+-        if fora["grupos"] != ["SÓ NO APP DO SEELE"] or fora["itens"] != 8 or fora["link"] != "https://seele.app.br/#baixar":
++        if fora["grupos"] != ["SÓ NO APP DO SEELE"] or fora["itens"] != 8 or fora["link"] != "https://get.seele.sh/#baixar":
+             falhas.append(f"O QUE O NAVEGADOR NÃO FAZ mostra {fora}")
+     return falhas
+ 

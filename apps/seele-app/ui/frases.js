@@ -423,6 +423,17 @@ const ABERTURA_DO_AUDIO = {
     medidor: "— SEM ÁUDIO NESTA SALA",
     frase: "O ÁUDIO NÃO ABRIU A TEMPO. A conversa por escrito já funciona; para tentar a voz de novo, saia da sala e entre de novo.",
   },
+  // **A voz está noutra sessão** (E3 da 0.17; fronteiras.md §5). Um microfone
+  // por máquina, e ele está com outro servidor: nada aqui abre aparelho, nada
+  // sai e nada toca. Não é falta de áudio, e a palavra do rodapé não diz que é.
+  em_outra_sessao: {
+    rodape: "VOZ NOUTRO SERVIDOR",
+    medidor: "— A VOZ ESTÁ NOUTRO SERVIDOR",
+    // Sem faixa: quem diz onde a voz está, e oferece trazê-la, é a linha da
+    // voz no operador (`#voz-foco`, `camada-sessoes.js`). A mesma frase em dois
+    // lugares da mesma tela é a mesma frase dita duas vezes.
+    frase: null,
+  },
 };
 
 /**
@@ -682,12 +693,24 @@ const RECUSAS_DE_PACOTE = {
   "malformed": "o mod.json dele não é um JSON que este app lê, ou tem uma chave que ele não conhece",
   "schema-too-new": "o mod.json dele é de um formato mais novo que este app; atualize o aplicativo",
   "api-too-new": "ele é de uma API mais nova que a deste app; atualize o aplicativo",
-  "api-too-old": `ele é de uma API mais velha que a 6, a deste app; procure a versão dele para a API 6, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
+  // A API 7 (0.17; `Refused::PermissoesPedemApiNova` e `PermissoesInvalidas`,
+  // `refusal_name` no seele-sessao): as permissões de MOD dos cargos.
+  "permissoes-pedem-api-nova":
+    "ele declara permissões de cargos, que só existem a partir da API 7, mas diz ser de uma API anterior; quem publica precisa declarar a API 7",
+  "permissoes-invalidas":
+    "a lista de permissões que ele declara não passa na conferência (nome repetido, vazio ou fora do formato); quem publica precisa corrigi-la",
+  "api-too-old": `ele é de uma API mais velha que a 6, a mais velha que este app roda; procure a versão dele para a API 6 ou 7, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
   "malformed-id": "o identificador dele não é «autor/nome»",
   "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",
   "tema-sem-metade-de-servidor": "ele declara a porta do tema sem a metade de servidor, que é quem pinta a aparência: o tema nunca apareceria",
   "arquivo-invalido": "ele declara um arquivo fora da pasta do pacote",
   "arquivos-demais": "ele declara mais arquivos do que o app carrega",
+  // Os tetos do `reach` no anúncio da linha 2 (`Refused::AlcancesDemais` e
+  // `AlcanceGrandeDemais`, `refusal_name` no seele-sessao).
+  "alcances-demais":
+    "ele declara mais itens de alcance do que o anúncio do servidor leva (até 16); quem publica precisa juntar alguns",
+  "alcance-grande-demais":
+    "um item do alcance que ele declara passa de 48 bytes, o tamanho que o anúncio do servidor leva; quem publica precisa encurtá-lo",
 };
 
 const NOMES_RECUSADOS = {
@@ -760,8 +783,17 @@ function fraseDaLigacao(erro, nome, trilha) {
 }
 
 function fraseDeErro(erro, apelido, deOnde) {
+  // A unidade do nativo para a conexão segura não verificada (0.17): a mesma
+  // frase da página, que não acusa ninguém. Ver o ramo de objeto, abaixo.
+  if (erro === "ConexaoSeguraNaoVerificada") return FRASES_DO_TRANSPORTE.falha.ImpressaoDiferente;
   if (typeof erro === "string") return FRASES[erro] ?? erro;
   if (erro && typeof erro === "object") {
+    // **A resposta de outra sessão** (E3 da 0.17; `invoke`, em `base.js`): o
+    // pedido foi feito noutro servidor, e a resposta chegou depois de a janela
+    // trocar de servidor. O que ele fez valeu lá; aqui nada foi aplicado.
+    if (erro.ForaDaVista) {
+      return "ISTO FOI FEITO NOUTRO SERVIDOR.\nA resposta chegou depois da troca, e ficou com ele: volte a ele para ver.";
+    }
     if (erro.Recusado?.motivo) {
       const motivo = erro.Recusado.motivo;
       // Um formato que o produto reconhece e não aceita, pelo nome dele: as
@@ -808,7 +840,7 @@ function fraseDeErro(erro, apelido, deOnde) {
         "ESTE SERVIDOR TEM MOD QUE ESTE APP NÃO RODA.\n" +
         ditos.join("\n") +
         (algumComApi
-          ? "\nAtualize o MOD para a versão da API 6; " +
+          ? "\nAtualize o MOD para a versão da API 6 ou 7; " +
             (algumDo015 ? "ou hospede pelo Servidor 0.15, no launcher; " : "") +
             "ou desligue o MOD e hospede sem ele — os dados dele ficam."
           : "")
@@ -825,6 +857,29 @@ function fraseDeErro(erro, apelido, deOnde) {
         "conteudo-nao-bate": "o conteúdo do pacote não é o que o catálogo publicou",
       }[motivo] ?? RECUSAS_DE_PACOTE[motivo] ?? motivo;
       return `A VERSÃO NOVA DESTE MOD NÃO SERVE: ${porque}.\nO MOD continua como estava.`;
+    }
+    // **A portaria de outra hospedagem** (E7): o ato foi aberto para um
+    // servidor que parou, ou que subiu de novo, depois do diálogo. O Rust
+    // recusa (`FalhaNaPortaria::HospedagemNaoConfere`), e a janela também,
+    // antes de perguntar. Nada foi decidido; a fila já é a de agora.
+    if (erro.HospedagemNaoConfere) {
+      return (
+        "O SERVIDOR HOSPEDADO MUDOU DEPOIS QUE ESTA DECISÃO FOI ABERTA.\n" +
+        "Nada foi decidido. A fila abaixo é a do servidor de agora: confira quem está nela e decida de novo."
+      );
+    }
+    // A escolha não foi guardada (o disco): o banco não foi tocado (P1 da 0.17).
+    if (typeof erro.NaoGuardou === "string") {
+      return `A ESCOLHA PARA ESTE MOD NÃO FOI GUARDADA: ${erro.NaoGuardou}.\nO banco não foi tocado; tente de novo.`;
+    }
+    // O `hospedar` fez a cópia e a conversão, e uma escolha estagiada não se
+    // aplicou: nada subiu, a escolha continua pendente e a cópia feita fica.
+    if (erro.EscolhaDeModNaoAplicou) {
+      return (
+        "UMA ESCOLHA DE MOD NÃO SE APLICOU, E O SERVIDOR NÃO SUBIU.\n" +
+        `${erro.EscolhaDeModNaoAplicou.motivo ?? ""}\n` +
+        "A escolha continua guardada, e a cópia de segurança feita antes fica. Confira o MOD e hospede de novo."
+      ).replace("\n\n", "\n");
     }
     // A de unidade com o mesmo nome é da `FalhaNoMod`, e chega como texto: esta
     // chega como objeto, com o que o banco disse.
@@ -857,6 +912,15 @@ function fraseDeErro(erro, apelido, deOnde) {
         `(esquema ${gravado}; esta versão conhece até o ${conhecido})`
       );
     }
+    // O portão da conversão do `hospedar` (E2 da 0.17): nada subiu e nada foi
+    // convertido. A tela ANTES DE HOSPEDAR mostra os dois com a ação.
+    if (erro.DadosNaoVerificados) {
+      return `${FRASES_ANTES_DE_HOSPEDAR.dadosNaoVerificados}\nNada subiu e nada foi convertido.`;
+    }
+    if (erro.CopiaDeSeguranca) {
+      const etapa = erro.CopiaDeSeguranca.falha?.etapa;
+      return `A CÓPIA DE SEGURANÇA NÃO FICOU PRONTA.\n${FRASES_ANTES_DE_HOSPEDAR.copiaParou[etapa] ?? FRASES_ANTES_DE_HOSPEDAR.copiaParouSemEtapa}`;
+    }
     if (erro.EstaVersaoRevogada) {
       const { defeito, corrigida_em: corrigida } = erro.EstaVersaoRevogada;
       return (
@@ -866,6 +930,14 @@ function fraseDeErro(erro, apelido, deOnde) {
           ? `A ${corrigida} corrige. Atualize antes de hospedar ou de entrar.`
           : "Atualize antes de hospedar ou de entrar.")
       );
+    }
+    // **A conexão segura que não se verificou, sem prova de quem atendeu**
+    // (0.17; revisão do Codex). O nativo sabe que o DTLS falhou e não tem a
+    // impressão ofertada para comparar: não acusa ninguém. «A chave mudou» só
+    // com o `PinChanged` (as duas impressões), e «não é o servidor do convite»
+    // só com o `InviteMismatch` (idem). Pedido ao B em `pedidos.md`.
+    if (erro.ConexaoSeguraNaoVerificada !== undefined) {
+      return FRASES_DO_TRANSPORTE.falha.ImpressaoDiferente;
     }
     if (erro.PinChanged) {
       return (
@@ -1449,6 +1521,11 @@ const FRASES = {
       "ESTE LINK SÓ ALCANÇA A SUA REDE, OU QUEM ESTIVER NA MESMA VPN.",
     SoRedeLocal:
       "ESTE LINK SÓ FUNCIONA NA SUA REDE.",
+    // O servidor escutando só em 127.0.0.1 (o modo local da build de teste,
+    // E9): nem a sua rede alcança — só esta máquina. Dizer «na sua rede» seria
+    // prometer o que o endereço não entrega (achado do Codex no app nativo).
+    SoEstaMaquina:
+      "ESTE LINK SÓ FUNCIONA NESTA MÁQUINA: o servidor está escutando só aqui, e ninguém de outro aparelho entra.",
 
     // Escolher microfone **ou saída de som**, no Terminal Server. Duas frases e
     // não uma porque pedem coisas diferentes de quem lê: a primeira não tem
@@ -1516,7 +1593,348 @@ const FRASES = {
     AbertaPeloLancador:
       "ESTA VERSÃO FOI ABERTA POR OUTRO SEELE, QUE CUIDA DELA.\n" +
       "Quem a atualiza é ele: não há nada a fazer aqui.",
+    // E4 da 0.17: instalar uma versão que muda a versão do servidor exige o sim
+    // do aviso, com a versão dita. Sem ele o Rust recusa antes de baixar.
+    TravessiaNaoConfirmada:
+      "ESTA ATUALIZAÇÃO MUDA A VERSÃO DO SERVIDOR, E O AVISO NÃO FOI CONFIRMADO.\n" +
+      "Nada foi baixado. Aperte INSTALAR de novo e leia o aviso antes de prosseguir.",
 };
+
+// As frases da 0.17 do ui-ux moram DEPOIS de `const FRASES`: o guarda
+// `os_pacotes_que_nao_voltam_nao_se_chamam_sincronizacao` lê o primeiro
+// `const FRASES` do arquivo.
+
+/**
+ * O servidor que esta máquina hospeda, visto da entrada (`camada-hospedagem.js`).
+ * O HOSPEDAR AQUI muda de rótulo com ele no ar: o clique leva a ele, e nunca
+ * hospeda um segundo (revisão do Codex).
+ */
+const FRASES_DA_HOSPEDAGEM = Object.freeze({
+  hospedarAqui: "HOSPEDAR AQUI",
+  verOHospedado: "VER O SERVIDOR HOSPEDADO",
+  continuaHospedando: (nome) =>
+    `VOCÊ CONTINUA HOSPEDANDO ${nome}: ele está no ar neste computador, e quem está nele continua lá.`,
+});
+
+/**
+ * **O ATUALIZAR da gestão de MODs** (`camada-mods.js`, `instalarDoCatalogo`):
+ * a frase sai do que aconteceu (QA-03), e sem servidor no ar ela diz o
+ * estágio, e não «desligado» (P1 da 0.17, combinado com o hosting-lifecycle:
+ * nenhum banco parado é tocado ao atualizar).
+ */
+const FRASES_DO_CATALOGO = Object.freeze({
+  aplicadoAqui: (id, versao) =>
+    `${id} ${versao} instalado e aplicado neste servidor. Quem estava dentro precisa entrar de novo e aceitar — o conjunto mudou.`,
+  naoLigadoAqui: (id, versao) =>
+    `${id} ${versao} está nesta máquina. Este servidor não o tem ligado: ligue quando quiser que ele valha aqui.`,
+  soNestaMaquina: (id, versao) =>
+    `${id} ${versao} está nesta máquina, e nenhum servidor mudou. Um servidor guardado que já usa este MOD continua ` +
+    "com a versão que tinha: hospede-o e atualize aqui com ele no ar — ou, se ele recusar subir por este MOD, " +
+    "escolha ATUALIZAR na tela ANTES DE HOSPEDAR, que aplica junto da subida.",
+});
+
+/**
+ * **A tela que este navegador não compartilha** (caso 12 do browser-signaling,
+ * medido no WebKit). Igual na 0.16: a transmissão do navegador precisa do
+ * `MediaStreamTrackProcessor`, e o Safari não o tem. Não é a versão nem a
+ * permissão — é o navegador —, e assistir à tela de outra pessoa funciona.
+ */
+const FRASES_DA_TELA_NO_NAVEGADOR = Object.freeze({
+  diz: "ESTE NAVEGADOR NÃO COMPARTILHA A TELA",
+  nota:
+    "Ver a tela de outra pessoa funciona aqui. Para mostrar a sua, use o app do SEELE, ou um navegador " +
+    "que capture e codifique a tela (o Chrome e o Edge, no computador).",
+  palco: "Este navegador não compartilha a tela. A de outra pessoa aparece aqui.",
+  recusa: "este navegador não compartilha a tela: use o app do SEELE, ou o Chrome ou o Edge no computador",
+});
+
+/**
+ * **As várias sessões** (E3 da 0.17): a trilha, a voz e a volta pela entrada.
+ * O estado vai em palavra no nome acessível e no `title` de cada placa; o
+ * desenho (as marcas VOZ, AQUI, o número) é a metade que se vê de relance.
+ */
+const FRASES_DAS_SESSOES = Object.freeze({
+  marcaVoz: "VOZ",
+  marcaAqui: "AQUI",
+  /** A vista dedicada da ligação pessoal (0.17). */
+  foraDaSala: (quem) =>
+    `Você está fora da sala${quem ? ` da ligação com ${quem}` : " da ligação"}. A ligação continua aberta, mas você não ouve nem fala até entrar.`,
+  entrarNaSala: "ENTRAR NA SALA",
+  voltarAChamada: "VOLTAR À CHAMADA",
+  lendoASala: "Conferindo se você está na sala…",
+  aindaNaSala: (quem) =>
+    `A grade da chamada está fechada, mas você continua na sala${quem ? ` da ligação com ${quem}` : ""}: o microfone segue como estava.`,
+  semLeitura: "Não deu para ler se você está na sala da ligação.",
+  // Os dois fazem o mesmo, e só isto: saem DESTA sessão (`encerrar_sessao`).
+  // Nenhum fecha a sala pessoal desta máquina nem toca em outra sessão.
+  desligar: "DESLIGAR",
+  sairDestaLigacao: "SAIR DESTA LIGAÇÃO",
+  soEstaSessao: "Isto sai só desta ligação: as outras sessões e a sua sala pessoal continuam.",
+  voltar: "VOLTAR",
+  ligacaoPessoal: (quem) => `LIGAÇÃO PESSOAL · ${quem}`,
+  chatDaLigacao: "Chat da ligação",
+  // O que cada botão da barra faz, em duas frases (a barra da ligação pessoal).
+  dicaDaBarra:
+    "SAIR DA SALA para a sua voz e a ligação continua aberta. DESLIGAR encerra a ligação e sai só desta sessão.",
+  estadoDaLigacao: Object.freeze({
+    naSala: "NA SALA DE VOZ",
+    fora: "FORA DA SALA DE VOZ",
+    reconectando: "RECONECTANDO",
+    encerrada: "ENCERRADA",
+  }),
+  marcaNoAr: "NO AR",
+  naoLidas: (n) => (n > 99 ? "99+" : String(n)),
+  enlace: Object.freeze({
+    online: "conectada",
+    reconectando: "voltando: a conexão caiu e está sendo refeita",
+    encerrada: "encerrada pelo servidor",
+  }),
+  placa: ({ nome, endereco, enlace, naoLidas, voz, aqui, naVista, sala }) => [
+    nome ? `${nome} · ${endereco}` : endereco,
+    FRASES_DAS_SESSOES.enlace[enlace] ?? enlace,
+    naVista ? "na tela agora" : null,
+    naoLidas > 0 ? `${naoLidas} ${naoLidas === 1 ? "mensagem nova" : "mensagens novas"}` : null,
+    voz ? `com a voz desta máquina${sala ? `, na sala ${sala}` : ""}` : null,
+    aqui ? "hospedado nesta máquina" : null,
+  ].filter(Boolean).join(" · "),
+  hospedando: (nome) => `${nome}: hospedado nesta máquina, no ar. Sair das conversas não o tira do ar.`,
+  vozAqui: (sala) => `A VOZ ESTÁ AQUI${sala ? ` (${sala})` : ""}.`,
+  // Curta: a linha de cima do operador já diz aonde a tecla vai e que aqui não
+  // se fala nem se ouve.
+  vozEmOutro: (servidor, sala) => `A VOZ ESTÁ EM ${servidor}${sala ? ` (${sala})` : ""}.`,
+  /** O servidor da vista, no topo do celular, e quantas conversas estão abertas. */
+  naVistaDoCelular: (nome, n) => `${nome} · ${n} ABERTAS`,
+  vozNinguem: "A VOZ NÃO ESTÁ EM SERVIDOR NENHUM. Entre numa sala para falar.",
+  /** A linha do operador numa vista sem a voz: aonde a tecla e o microfone vão. */
+  teclaFalaEm: (tecla, servidor) => `${tecla} fala em ${servidor}`,
+  microfoneDe: (servidor) => `o microfone é de ${servidor}`,
+  aquiSemVoz: "aqui sem microfone nem som",
+  trazer: "TRAZER A VOZ PARA CÁ",
+  trouxe: (saiuDe) =>
+    `A voz veio para cá.${saiuDe ? ` Você saiu da sala ${saiuDe} no outro servidor.` : ""}`,
+  abertasNaEntrada: (n) =>
+    `${n === 1 ? "UMA CONVERSA CONTINUA ABERTA" : `${n} CONVERSAS CONTINUAM ABERTAS`}. Conectar a mais um servidor não fecha nenhuma.`,
+  voltarA: "VOLTAR",
+  /**
+   * A queda recuperável (`CaiuComMotivo`): a conexão volta sozinha. Honesta:
+   * diz que foi esta ponta que não acompanhou, e que nada precisa ser feito.
+   */
+  ficouParaTras: Object.freeze({
+    FellBehind: "Você ficou para trás do servidor: a conexão não acompanhou. Reconectando sozinha…",
+    outro: "A conexão caiu e está voltando sozinha. Reconectando…",
+  }),
+  sairDesta: "SAIR",
+  sairDe: (nome, hospedado) =>
+    `Sair de ${nome}; as outras conversas continuam.` +
+    (hospedado ? " O servidor continua no ar: quem o derruba é o PARAR DE HOSPEDAR." : ""),
+  trocando: (nome) => `abrindo ${nome}…`,
+});
+
+/*
+ * **Antes de hospedar** (E2 da 0.17): as frases da tela que separa os dados, a
+ * versão do servidor e os MODs. Os estados são palavras, e não cores
+ * (`specs/06-clientes-gui.md`). Nenhuma diz «linha»: o ADR 0033 tirou a
+ * palavra da tela.
+ */
+
+/** Onde a cópia de segurança fica: a pasta, quando o Rust a diz; senão, em palavras. */
+function ondeFicaACopia(caminho) {
+  return caminho
+    ? `Ela fica em ${caminho}.`
+    : "Ela fica nos dados do SEELE desta máquina, separada deste servidor.";
+}
+
+/** Uma data do Rust (segundos), para gente: «24/10/2026». */
+function dataDaCopia(segundos) {
+  return segundos ? new Date(segundos * 1000).toLocaleDateString("pt-BR") : null;
+}
+
+/** O nome que a tela dá a uma linha do launcher: «1» é o Servidor 1.0. */
+function servidorDaLinha(linha) {
+  return ({ 1: "1.0", 2: "2.0" })[linha] ?? linha;
+}
+
+/** A faixa de avisos do pé da sessão no celular: os avisos recolhidos numa linha, e o botão que os abre. */
+const FRASES_AVISOS_DO_CELULAR = Object.freeze({
+  faixa: (n) => `${n} ${n === 1 ? "AVISO" : "AVISOS"}`,
+  abrir: "ABRIR",
+  fechar: "FECHAR",
+  // A impressão digital no aviso: a forma curta (o começo e o fim) e o botão que mostra a inteira, no próprio aviso.
+  verInteira: "ver inteira",
+  ocultar: "ocultar",
+  // O nome acessível dos botões: a forma curta está abreviada e NÃO é a impressão; o botão diz isso.
+  verInteiraRotulo: "Mostrar a impressão digital inteira (a do aviso está abreviada)",
+  ocultarRotulo: "Voltar à impressão digital abreviada",
+});
+
+const FRASES_ANTES_DE_HOSPEDAR = Object.freeze({
+  estado: Object.freeze({ ok: "NADA A FAZER", leia: "LEIA ANTES", resolva: "RESOLVA ANTES" }),
+  // No celular, o bloco que não pede nada vem recolhido, com um botão que o abre e fecha.
+  recolher: Object.freeze({ abrir: "ABRIR", fechar: "FECHAR" }),
+  // **O texto principal é estado, consequência e ação** (revisão de UI do
+  // Codex). O caminho da cópia, as APIs e os esquemas ficam nos «mais»
+  // fechados e nos detalhes técnicos; o aviso material fica sempre à vista.
+  // **Sem «nada foi mudado»** (P1 do Codex, no app nativo): a tela dizia isso
+  // com o banco já convertido pela atualização de um MOD. Ela não tem como
+  // provar o estado do disco; diz o que está escolhido e o que o botão aplica.
+  resumoBloqueia: "Ainda não sobe por esta versão.",
+  resumoLeia: "Confira o que muda antes de hospedar.",
+  resumoOk: "Nada impede de subir por esta versão.",
+  resumoEscolhas: (n) =>
+    `${n === 1 ? "Uma escolha de MOD está" : `${n} escolhas de MOD estão`} guardada${n === 1 ? "" : "s"} nesta tela: ` +
+    "o botão do fim as aplica, depois da cópia de segurança.",
+  pendencias: Object.freeze({
+    mods: (n) => `${n} ${n === 1 ? "MOD precisa" : "MODs precisam"} de atenção`,
+    dados: "os dados precisam de atenção",
+    dadosNaoVerificados: "os dados não foram verificados",
+    converte: "hospedar converte os dados",
+  }),
+  /** O servidor, como a lista o mostra, e a versão que o criou. */
+  servidor: (nome, criadoNa) => (criadoNa ? `${nome} · criado na ${criadoNa}` : nome),
+  dadosNoFormato: "Os dados já estão no formato desta versão. Nada é convertido.",
+  dadosConverte: (de, servidorDesta) =>
+    `Gravados pelo Servidor ${de}. Hospedar aqui os converte para o Servidor ${servidorDesta}; ` +
+    `depois disso, o Servidor ${de} não os abre mais. As conversas, os canais e os dados dos MODs continuam.`,
+  dadosConverteSemDetalhe: (criadoNa) =>
+    `Criado na ${criadoNa}. Hospedar por uma versão mais nova converte os dados para o formato dela.`,
+  dadosSemVersao: "O servidor de sempre desta máquina.",
+  dadosDoFuturo: () =>
+    "Gravados por uma versão mais nova do SEELE: esta não os abre, para não estragá-los. Atualize e hospede de novo.",
+  // **A leitura falhou, e isso não é «nada a fazer»**: a pré-conferência só
+  // lê, e sem ela não se sabe se há conversão nem cópia.
+  dadosNaoVerificados:
+    "NÃO FOI POSSÍVEL VERIFICAR OS DADOS. Sem a verificação, não dá para saber se hospedar converte o banco " +
+    "nem se há cópia de segurança.",
+  verificarDeNovo: "VERIFICAR DE NOVO",
+  // **«Do estado atual» só com a comprovação**: a cópia que o backend criou e
+  // verificou nesta tela (o retorno do `preparar_copia`, com
+  // `do_estado_atual`). Nome de arquivo e data de modificação não provam nada — o
+  // Codex mediu o erro com o WAL e com cópia corrompida.
+  copiaDoEstadoAtual: (servidor, data) =>
+    `Cópia de segurança do estado atual criada e verificada${data ? ` em ${data}` : ""}, para o Servidor ${servidor}: ` +
+    "ele continua abrindo as conversas como estão agora.",
+  copiaAFazer: (servidor) =>
+    `O SEELE faz uma cópia de segurança para o Servidor ${servidor} antes de converter.`,
+  // As cópias de antes: histórico, com a linha e a data, sem prometer nada.
+  copiaAnterior: (servidor, data) =>
+    `Cópia anterior para o Servidor ${servidor}${data ? `, de ${data}` : ""}. É histórico: não garante o estado atual.`,
+  historicoDeCopias: "CÓPIAS ANTERIORES",
+  // Toda conversão cria uma cópia nova e a verifica antes de converter (o
+  // backend faz isso sempre); o aviso fica à vista.
+  semCopiaAinda: (servidor) =>
+    `Antes de converter, o SEELE cria uma cópia de segurança nova destes dados para o Servidor ${servidor} e a ` +
+    "verifica; sem ela verificada, nada é convertido.",
+  copiaNaoDeu: (servidor) =>
+    // A segunda linha (`copiaParou`, pela etapa) diz que nada foi convertido.
+    `A CÓPIA DE SEGURANÇA PARA O SERVIDOR ${servidor} NÃO FICOU PRONTA, E NADA É CONVERTIDO SEM ELA.`,
+  tentarACopiaDeNovo: "TENTAR A CÓPIA DE NOVO",
+  criandoCopia: "criando a cópia de segurança e conferindo…",
+  copiaCriada: (caminho, data) =>
+    `Cópia de segurança criada e conferida${data ? ` em ${data}` : ""}${caminho ? `: ${caminho}` : ""}.`,
+  // A etapa em que a cópia parou (`FalhaNaCopia.etapa`, do backend); o motivo
+  // cru vai a «Detalhes técnicos» e ao seele.log.
+  copiaParou: Object.freeze({
+    Conferir: "O banco não pôde ser lido para copiar. Nada foi copiado nem convertido.",
+    Copiar: "O disco recusou a cópia (espaço, permissão ou trava). Nada foi convertido; libere espaço ou feche o que " +
+      "usa a pasta e tente de novo.",
+    Verificar: "A cópia foi escrita e não passou na verificação. Ela foi descartada; nada foi convertido. Tente de novo.",
+  }),
+  copiaParouSemEtapa: "A cópia não ficou pronta. Nada foi convertido; tente de novo.",
+  ondeFica: (caminho) => ondeFicaACopia(caminho),
+  detalhes: "Detalhes técnicos",
+  detalhe: Object.freeze({
+    servidor: "servidor guardado",
+    criadoNa: "criado na versão",
+    linhaDosDados: "versão do servidor dos dados",
+    esquemaGravado: "esquema gravado",
+    esquemaDesta: "esquema desta versão",
+    converte: "hospedar converte",
+    copia: (linha) => `cópia para o Servidor ${linha}`,
+    copiaComprovada: "cópia criada e verificada agora",
+    copiaFalhou: "cópia que não ficou pronta",
+    banco: "banco",
+    recusa: "recusa do hospedar",
+    semPreconferencia: "pré-conferência (antes_de_hospedar)",
+  }),
+  procurarAtualizacao: "PROCURAR ATUALIZAÇÃO",
+  // **Só a linha deste servidor, e nada sobre o futuro** (revisão do Codex):
+  // dizer «ou uma mais nova» prometeria uma compatibilidade que ninguém mediu.
+  versaoDesta: (servidor) =>
+    `Sobe como Servidor ${servidor}: entra quem usa um SEELE do Servidor ${servidor}, no app ou no navegador. ` +
+    "Quem usa uma versão anterior não entra.",
+  versaoForcada: (servidor, mods) =>
+    `${mods} só roda${mods.includes(",") ? "m" : ""} no Servidor ${servidor}.`,
+  versaoOutra: (servidor, app) =>
+    `Abre ${app ? `o SEELE ${app}` : "a versão dele"} noutra janela, com a cópia dos dados dele.`,
+  versaoAnteriores: (n) => (n === 1 ? "Hospedar pela versão anterior" : `Hospedar por uma das ${n} versões anteriores`),
+  versaoSoEsta: "Só esta versão hospeda este servidor.",
+  versaoNestaJanela: "esta janela",
+  versaoBaixar: "será baixado",
+  versaoSemPacote: "sem pacote para este sistema",
+  hospedarPor: (servidor) => `HOSPEDAR PELO SERVIDOR ${servidor}`,
+  modsNenhum: "Nenhum MOD ligado impede de subir.",
+  modsPendentes: "Feitos para uma API anterior: impedem de subir. Atualize ou desligue cada um; os dados dele ficam.",
+  modsResolvidos: "Resolvidos. Nada nos MODs impede de subir.",
+  modsEscolhidos: "Cada MOD tem uma escolha, a aplicar quando você hospedar. Nada foi aplicado ainda.",
+  modAAtualizar: (versao) => `A APLICAR AO HOSPEDAR: ATUALIZAR PARA ${versao}`,
+  modADesligar: "A APLICAR AO HOSPEDAR: DESLIGAR · OS DADOS DELE FICAM",
+  modAAtualizarSemVersao: "A APLICAR AO HOSPEDAR: ATUALIZAR",
+  modDesfazer: "DESFAZER",
+  modDesfazerDe: (id) => `Desfazer a escolha para ${id}: nada foi aplicado, e o MOD volta a pedir uma escolha.`,
+  modTemVersao: (versao) => `há versão para esta: ${versao}`,
+  modSemVersao: "ainda sem versão para esta",
+  modSemPacote: "o pacote não está nesta máquina",
+  modApi: (id, api, desta, doLegado) =>
+    `${id}: ${api ? `API ${api}` : "API não lida (o pacote não está aqui)"} · este app roda as APIs ${desta}` +
+    (api && doLegado ? ` · o Servidor 0.15 roda as APIs ${doLegado}` : ""),
+  modAtualizado: (versao) => `ATUALIZADO PARA ${versao}`,
+  modDesligado: "DESLIGADO · OS DADOS DELE FICAM",
+  // Sem o nome no botão: ele já está no alto da tela, e um nome comprido
+  // quebrava o rótulo em duas linhas no celular.
+  hospedar: () => "HOSPEDAR",
+  converterEHospedar: () => "CONVERTER E HOSPEDAR",
+  criarCopiaConverterEHospedar: () => "CRIAR CÓPIA, CONVERTER E HOSPEDAR",
+  aplicarEHospedar: () => "APLICAR AS ESCOLHAS E HOSPEDAR",
+  /** Por que o HOSPEDAR está apagado, ou o que ele vai fazer, ao lado dele. */
+  motivo: Object.freeze({
+    mods: (n) => `Bloqueado: ${n} ${n === 1 ? "MOD impede" : "MODs impedem"} de subir (bloco 3).`,
+    futuro: "Bloqueado: os dados são de uma versão mais nova (bloco 1).",
+    semCopia: "Bloqueado: a cópia de segurança falhou (bloco 1). Nada é convertido sem ela.",
+    naoVerificado: "Bloqueado: os dados não foram verificados (bloco 1).",
+    criaCopia: "Primeiro uma cópia de segurança nova, verificada; só então a conversão.",
+    escolhas: (n) =>
+      `Aplica ${n === 1 ? "a escolha de MOD" : `as ${n} escolhas de MOD`} depois da cópia de segurança, junto da conversão.`,
+  }),
+});
+
+/**
+ * **O aviso antes de atualizar para além da quebra** (E4 da 0.17; o contrato
+ * do compat em `pedidos.md`). Os nomes das linhas são os do launcher ("0.15",
+ * "1", "2"); a tela diz o servidor ("Servidor 1.0"), e nunca «linha» (ADR
+ * 0033).
+ */
+const FRASES_DA_TRAVESSIA = Object.freeze({
+  servidor: (linha) => ({ 1: "1.0", 2: "2.0" })[linha] ?? linha,
+  titulo: "ESTA ATUALIZAÇÃO MUDA A VERSÃO DO SERVIDOR",
+  tituloNaoSabe: "NÃO DÁ PARA SABER SE ESTA VERSÃO CONVERSA COM A SUA",
+  resumo: (instalada, versao) => `Da ${instalada} para a ${versao}. Leia antes de instalar: isto não se desfaz pelo botão de atualizar.`,
+  itens: (instalada, versao, de, para) => [
+    `A ${versao} fala o Servidor ${para}, que usa outra conexão (WebRTC). Ela não conversa com a ${instalada} nem com as versões anteriores.`,
+    `Quem ficar na ${instalada} não entra nos servidores da ${versao}; e, por esta janela, você deixa de entrar nos servidores da ${instalada} (Servidor ${de}).`,
+    `A ${instalada} continua disponível: o SEELE a guarda ao lado e a abre sozinho quando um link ou um servidor pedir o Servidor ${de}.`,
+  ],
+  conversas: (n) => (n === 1
+    ? "A conversa aberta agora cai com a troca."
+    : n > 1 ? `As ${n} conversas abertas agora caem com a troca.` : "As conversas abertas agora caem com a troca."),
+  hospedando: "Se você hospeda um servidor nesta janela, ele sai do ar, e quem usa a versão anterior não volta a entrar nele.",
+  naoSabe: "A lista de versões não diz que servidor esta versão fala. Leia as notas antes de instalar.",
+  adiadaAntes: "Você já adiou esta atualização uma vez. Ela continua aqui quando quiser.",
+  cancelada: "ATUALIZAÇÃO CANCELADA. Nada foi baixado.",
+  adiada: (versao) => `ATUALIZAÇÃO PARA A ${versao} ADIADA. Nada foi baixado; procure de novo quando quiser.`,
+  cancelar: "CANCELAR",
+  adiar: "ADIAR",
+  prosseguir: (versao) => `ENTENDI, INSTALAR A ${versao}`,
+});
 
 /**
  * Por que um arquivo não foi aceito, ou não vem. ADR 0027.
@@ -1888,10 +2306,38 @@ const SALA_PESSOAL = Object.freeze({
     JaParou: "ESSA LIGAÇÃO JÁ PAROU DE TOCAR",
   }),
 
+  /** O bloco SEU CÓDIGO da entrada: a verdade da sala, sem promessa a mais. */
+  codigo: Object.freeze({
+    recebendo: "A sua sala está no ar: quem tem este código consegue ligar para você.",
+    procurando: "A sua sala está no ar, e ainda não confirmamos que o código é achável por quem está fora da sua rede.",
+    subindo: "A sua sala está subindo. Ainda não dá para receber ligação.",
+    desligada: "O código é seu, mas a sala está desligada: você NÃO recebe ligações. Ligue em PERFIL, RECEBER LIGAÇÕES.",
+    falhou: "NINGUÉM CONSEGUE TE LIGAR AGORA: a sala não subiu.",
+    semNoticia: "Ainda não sabemos se a sua sala está recebendo ligações.",
+  }),
+
   /** `FalhaNaAgenda`. */
   naAgenda: Object.freeze({
     CodigoInvalido: "ESSE CÓDIGO TEM UM ERRO DE DIGITAÇÃO",
+    SeuCodigo: "ESSE É O SEU PRÓPRIO CÓDIGO: não dá para se adicionar aos amigos",
     NaoGravou: "A AGENDA NÃO GRAVOU. O motivo está no seele.log.",
+  }),
+
+  /** A lista de AMIGOS da entrada (0.17): sem presença, que não há de onde saber. */
+  amigos: Object.freeze({
+    vazia: "Nenhum amigo ainda. Adicione pelo código dele, uma vez só, e ligue sem copiar nada.",
+    ligar: "LIGAR",
+    adicionar: "ADICIONAR",
+    adicionarAosAmigos: "ADICIONAR AOS AMIGOS",
+    jaAmigo: "AMIGO",
+    tirar: "TIRAR DOS AMIGOS",
+    bloqueado: "bloqueado: desbloqueie no PERFIL para ligar",
+    // O que tirar dos amigos faz, e o que NÃO faz.
+    tirarDiz:
+      "TIRAR DOS AMIGOS só tira da lista. Não desbloqueia, não apaga o histórico de ligações e não esquece a chave dessa pessoa.",
+    ligarA: (quem) => `Ligar para ${quem}`,
+    tirarDe: (quem) =>
+      `Tirar ${quem} dos amigos (não desbloqueia, não apaga o histórico, não esquece a chave)`,
   }),
 
   /** O desfecho de um toque, dito quando a faixa some. */
@@ -1930,6 +2376,32 @@ function fraseDaSala(estado) {
 }
 
 /**
+ * O que a sala pessoal faz AGORA, para o bloco SEU CÓDIGO da entrada. Ao
+ * contrário de `fraseDaSala`, diz algo em todo estado: o código está na tela
+ * mesmo com a sala desligada, e a pessoa precisa saber se ele recebe ligação.
+ * Só afirma «recebendo» quando a sala está no ar E registrada; sem registro
+ * diz o que é verdade (só quem está na mesma rede chega, ou ninguém).
+ */
+function fraseDoCodigo(estado) {
+  switch (estado?.estado) {
+    case "Subindo":
+      return SALA_PESSOAL.codigo.subindo;
+    case "Desligada":
+      return SALA_PESSOAL.codigo.desligada;
+    case "Falhou":
+      return fraseDaSala(estado) ?? SALA_PESSOAL.codigo.falhou;
+    case "NoAr": {
+      const achavel = estado.registro?.registro === "Registrado";
+      if (achavel) return SALA_PESSOAL.codigo.recebendo;
+      const porque = fraseDaSala(estado);
+      return porque ?? SALA_PESSOAL.codigo.procurando;
+    }
+    default:
+      return SALA_PESSOAL.codigo.semNoticia;
+  }
+}
+
+/**
  * **O link do navegador na porta de quem hospeda** (D-web-6), ao lado do
  * convite. O rótulo e o botão estão no `index.html`, como os do convite; aqui
  * fica o que muda com o link.
@@ -1943,14 +2415,16 @@ function fraseDaSala(estado) {
  */
 const LINK_DO_NAVEGADOR = Object.freeze({
   // `data` em dd/mm e `hora` em hh:mm, no relógio desta máquina.
+  // **Na 0.17 o link do navegador não vence** (browser-signaling): o navegador
+  // confere a impressão do servidor no DTLS, como o app, e não há mais
+  // certificados curtos. A validade só é dita se o Rust ainda mandar uma.
   nota: (data, hora) =>
-    "Para quem entra pelo navegador, sem o app — no celular, é este. É o mesmo convite de cima. " +
-    `Vale até ${data}, às ${hora}; antes de vencer, este campo já mostra o próximo.`,
-  // `SemJanelas`: o servidor está no ar há mais tempo que os certificados que
-  // ele gerou ao subir (cerca de um ano).
+    "Para quem entra pelo navegador, sem o app — no celular, é este. É o mesmo convite de cima." +
+    (data ? ` Vale até ${data}, às ${hora}; antes de vencer, este campo já mostra o próximo.` : ""),
+  // `SemJanelas` era a validade dos certificados curtos da WebTransport, que
+  // saíram na 0.17; fica a frase para um servidor anterior que ainda a mande.
   SemJanelas:
-    "Sem link do navegador: os certificados deste servidor que o navegador aceita venceram. " +
-    "O convite de cima continua valendo. Pare de hospedar e hospede de novo, e o SEELE gera outros.",
+    "Sem link do navegador para este servidor. O convite de cima continua valendo.",
   // **Quem de fora entra pelo navegador** (D-web-7, saída C): o nome vem do
   // `AlcanceDoNavegador` do servidor, e a frase fica ao lado do botão. O
   // navegador não abre UDP e perde só o furo pelo ponto de encontro (o degrau
@@ -1961,12 +2435,16 @@ const LINK_DO_NAVEGADOR = Object.freeze({
     // A única que diz o que fazer, porque é a única que tem conserto de quem
     // hospeda e que o convite de cima não acusa: ele entra pelo ponto de
     // encontro, e o navegador não.
+    // **Na 0.17 o navegador também passa pelo ponto de encontro** (D7, o
+    // CHAMA pelo HTTPS do ponto): quem está fora entra como pelo convite, e o
+    // caminho pode não abrir entre duas redes do tipo que muda o endereço.
     SoPeloEncontro: (porta) =>
-      "PELO NAVEGADOR, SÓ QUEM ESTÁ NA SUA REDE ENTRA.\n" +
-      "O convite de cima chega de fora pelo ponto de encontro; o navegador não usa o encontro. " +
-      `Para quem está fora entrar pelo navegador, abra a porta UDP ${porta} no roteador, ` +
-      "ou ligue o IPv6 nele, se o seu provedor oferecer.",
+      "QUEM ESTÁ FORA DA SUA REDE ENTRA PELO PONTO DE ENCONTRO, como pelo convite.\n" +
+      "Entre duas redes que mudam o endereço a cada destino (NAT simétrico), o caminho pode não abrir. " +
+      `Para garantir, abra a porta UDP ${porta} no roteador, ou ligue o IPv6 nele, se o seu provedor oferecer.`,
     SoNaRede: () => "COMO O CONVITE, ESTE LINK SÓ FUNCIONA NA SUA REDE.",
+    // Só 127.0.0.1: o navegador de outro aparelho não chega, nem na sua rede.
+    SoEstaMaquina: () => "COMO O CONVITE, ESTE LINK SÓ FUNCIONA NESTA MÁQUINA.",
     NaoSeSabe: () =>
       "ESTE LINK PODE NÃO ABRIR DE FORA DA SUA REDE.\n" +
       "O roteador pode bloquear a entrada. Teste com alguém de fora da sua rede antes de contar com ele.",
@@ -1980,8 +2458,11 @@ const LINK_DO_NAVEGADOR = Object.freeze({
  * desta máquina. Um alcance que esta casca não conhece cai no «não se sabe»,
  * que é o que ele é: a casca não sabe.
  */
-function fraseDoLinkDoNavegador(link, data, hora) {
-  const aviso = LINK_DO_NAVEGADOR.alcance[link.alcance] ?? LINK_DO_NAVEGADOR.alcance.NaoSeSabe;
+function fraseDoLinkDoNavegador(link, data, hora, alcanceDoConvite = null) {
+  // Um servidor só em 127.0.0.1 não alcança nem a sua rede, diga o link o que
+  // disser: «só na sua rede» ao lado de «só nesta máquina» é uma contradição.
+  const qual = alcanceDoConvite === "SoEstaMaquina" ? "SoEstaMaquina" : link.alcance;
+  const aviso = LINK_DO_NAVEGADOR.alcance[qual] ?? LINK_DO_NAVEGADOR.alcance.NaoSeSabe;
   return { aviso: aviso(link.porta), nota: LINK_DO_NAVEGADOR.nota(data, hora) };
 }
 
@@ -1992,7 +2473,7 @@ function fraseDoLinkDoNavegador(link, data, hora) {
 // `tests/celular.rs` confere. O desktop não lê nada daqui.
 
 /** Para onde vai quem quer o app do SEELE (decisão da orquestradora, 09/10). */
-const PAGINA_DO_APP = "https://seele.app.br/#baixar";
+const PAGINA_DO_APP = "https://get.seele.sh/#baixar";
 
 /**
  * O aviso de fone no navegador (P9; matriz, achado E-6).
@@ -2006,6 +2487,14 @@ const PAGINA_DO_APP = "https://seele.app.br/#baixar";
  * voz. Até a medida da F4 (a 3.3 dela), a frase pede o fone sem afirmar o que o
  * navegador faz.
  */
+/**
+ * O microfone que o navegador só deu SEM o cancelamento de eco: a faixa com ele
+ * chegou encerrada, e o motor abriu sem (`semEcoPorque`, voz-web.js). A pessoa
+ * precisa saber o que fazer, e não o porquê técnico.
+ */
+const SEM_CANCELAMENTO_DE_ECO =
+  "O MICROFONE ABRIU SEM O CANCELAMENTO DE ECO. Use fone: sem ele, quem fala com você pode se ouvir de volta.";
+
 const AVISO_DE_FONE_CELULAR =
   "USE FONE. Sem fone, o som do alto-falante pode voltar pelo microfone, e quem fala com você se ouve de volta.";
 
@@ -2036,6 +2525,9 @@ const NO_COMPUTADOR = Object.freeze({
 });
 
 const FRASES_DO_CELULAR = Object.freeze({
+  // A tela cheia do celular é o cinema em CSS (a ponte recusa a Fullscreen API):
+  // a saída é um botão sempre à vista, e não o Esc, que o iPhone não tem.
+  cinema: Object.freeze({ sair: "SAIR DA TELA CHEIA", girar: "PARA AMPLIAR, VIRE O CELULAR." }),
   voz: Object.freeze({
     abas: { servidor: "SERVIDOR", conversa: "CONVERSA", pessoas: "PESSOAS", ajustes: "AJUSTES" },
     secoes: "seções",
@@ -2138,6 +2630,8 @@ const FRASES_DO_CELULAR = Object.freeze({
     valeNaProxima: "Vale na próxima vez que a página abrir. Abrir de novo agora sai da sessão.",
     naoGuardou: "Este navegador não deixou guardar a escolha: a página continua abrindo pelo tamanho da tela.",
     sobre: "SOBRE",
+    // A camada dos cargos (G): quem pode o quê neste servidor, e por quê.
+    cargos: "CARGOS E PERMISSÕES",
     sairDoServidor: "SAIR DO SERVIDOR",
     segurarParaFalar: "SEGURAR PARA FALAR",
     segurarNota: "fala só enquanto o dedo está no SEGURE",
@@ -2184,6 +2678,20 @@ const FRASES_DO_CELULAR = Object.freeze({
       agoraNao: "AGORA NÃO",
       servidores: "SERVIDORES DESTE APARELHO",
     }),
+    // **O endereço novo do SEELE no navegador começa identidades novas.** Dita uma vez na tela de início, até a pessoa dispensar, sem prometer
+    // migração: a identidade do navegador mora na origem, e a anterior não vem junto.
+    novaOrigem: Object.freeze({
+      titulo: "ESTE É O NOVO ENDEREÇO DO SEELE NO NAVEGADOR",
+      // A primeira linha é o resumo, sempre à vista; as outras ficam nos detalhes, que abrem e fecham.
+      detalhes: "DETALHES",
+      ocultar: "OCULTAR",
+      linhas: Object.freeze([
+        "A identidade aqui é nova.",
+        "Cargos e acessos ligados à identidade anterior do navegador não vêm com ela.",
+        "Quem administra o servidor pode admitir você de novo, com um convite novo.",
+        "O aplicativo de computador mantém a identidade local dele.",
+      ]),
+    }),
     // O botão do aviso da resposta na sessão: o mesmo dos avisos do pé ao lado
     // dele (o de fone e o do áudio, do desktop).
     dispensar: "dispensar",
@@ -2210,7 +2718,7 @@ const FRASES_DO_CELULAR = Object.freeze({
       }),
       "servidor-0.15": Object.freeze({
         titulo: "ESTE LINK É DE UM SERVIDOR 0.15",
-        corpo: "O celular entra só no Servidor 1.0. Abra o link no app do SEELE, ou peça a quem hospeda o Servidor 1.0.",
+        corpo: "O navegador entra só no Servidor 2.0, o do SEELE 0.17. Abra o link no app do SEELE, que abre a versão certa ao lado, ou peça a quem hospeda o Servidor 2.0.",
       }),
       incompleto: Object.freeze({
         titulo: "LINK INCOMPLETO",
@@ -2237,6 +2745,17 @@ const FRASES_DO_CELULAR = Object.freeze({
       "sem-rede": Object.freeze(["O SERVIDOR NÃO ABRIU A CONEXÃO",
         "Ele pode estar fora do ar, ou este link não é mais dele. O convite continua valendo: tente de novo."]),
       recusado: Object.freeze(["O SERVIDOR RECUSOU A ENTRADA", "O motivo que ele deu:"]),
+      // A portaria de quem hospeda (ADR 0030): a batida ficou na fila dele. A
+      // espera NÃO encerra a tentativa: o convite não foi gasto, e o ENTRAR
+      // continua na tela.
+      "espera-de-admissao": Object.freeze(["QUEM HOSPEDA AINDA NÃO DECIDIU",
+        "A sua batida está na porta do servidor. Quando ele admitir, toque ENTRAR de novo: o convite não foi gasto."]),
+      "admissao-recusada": Object.freeze(["QUEM HOSPEDA RECUSOU ESTA ENTRADA",
+        "Fale com ele por outro canal se for engano."]),
+      // Um servidor da lista cujo apelido este aparelho não guardou: a entrada
+      // não conecta com o nome vazio, e pede o apelido no mesmo campo da «ENTRAR EM».
+      "pede-apelido": Object.freeze(["ESCOLHA UM APELIDO PARA ENTRAR",
+        "Este aparelho não guardou o apelido que você usava neste servidor. Digite o que quer usar e toque ENTRAR: a sua chave é a mesma."]),
       // Os hashes guardados de um servidor deste aparelho venceram (os
       // certificados do navegador são curtos), e a sessão não trouxe novos.
       "link-vencido": Object.freeze(["O LINK DESTE SERVIDOR VENCEU",
@@ -2282,3 +2801,330 @@ const FRASES_DA_LARGA = (() => {
       itens: soNoApp,
   });
 })();
+
+// --- transporte 0.17 (browser-signaling) ---
+//
+// As frases do enlace WebRTC da página (`rtc-web.js`; contrato da 0.17, D8).
+// Uma por motivo de `FALHA_DO_ENLACE`, e cada uma diz o que se mediu e o que
+// fazer, sem prometer conectividade: a página só não entra quando o caminho
+// direto não abre e o ponto de encontro não consegue apresentar as duas
+// máquinas. O porquê longo está em `docs/alcance-pela-internet.md`.
+const FRASES_DO_TRANSPORTE = Object.freeze({
+  falha: Object.freeze({
+    // **O navegador só sabe que a verificação falhou** (revisão do Codex): o
+    // ICE abre e o DTLS não termina, sem dizer por quê (`rtc-web.js`). A frase
+    // não afirma «impressão diferente» nem «outro servidor», que a página não
+    // mediu; ela lista as causas possíveis, sem escolher uma, e diz o que fazer.
+    // O texto é da ui-ux (o tom); a chave é do browser-signaling.
+    ImpressaoDiferente:
+      "NÃO FOI POSSÍVEL VERIFICAR A CONEXÃO SEGURA COM ESTE SERVIDOR.\n" +
+      "O caminho até ele abriu, e a verificação da conexão cifrada não terminou. Nada foi enviado a ele. " +
+      "Causas possíveis:\n" +
+      "· o link é de outro servidor, ou está desatualizado;\n" +
+      "· o servidor foi reinstalado e ganhou outra chave;\n" +
+      "· algo no caminho interferiu na conexão.\n" +
+      "Peça a quem hospeda um link novo, por um canal em que você confia, e tente de novo.",
+    // O nome do motivo que o `rtc-web.js` dá (`FALHA_DO_ENLACE.verificacaoFalhou`):
+    // a mesma frase, sem acusar.
+    get VerificacaoDaConexaoSegura() {
+      return this.ImpressaoDiferente;
+    },
+    SemCaminho:
+      "NENHUM ENDEREÇO DO LINK RESPONDEU.\n" +
+      "O servidor pode estar fora do ar, ou numa rede que não aceita conexão de fora. " +
+      "Este link não traz ponto de encontro, então não há como furar o NAT dele.",
+    // O link só tinha nomes (um DNS dinâmico, por exemplo), e nenhum ponto de
+    // encontro: a página não sabe se o nome não resolveu ou se o servidor não
+    // respondeu nele, e diz as duas.
+    NomeSemResposta:
+      "ESTE LINK USA UM NOME, E NADA RESPONDEU NELE.\n" +
+      "O nome pode não ter resolvido neste aparelho, ou o servidor não está no endereço que ele aponta. " +
+      "No navegador, um link só com nome e sem ponto de encontro depende disso. Peça a quem hospeda um " +
+      "link novo: o do app já leva os endereços e o ponto de encontro.",
+    SemRefletido:
+      "ESTA REDE NÃO DEIXOU A PÁGINA FALAR COM O PONTO DE ENCONTRO.\n" +
+      "O ponto não respondeu ao STUN, que é por onde a página descobre o próprio endereço. Redes de empresa " +
+      "e de escola costumam bloquear UDP. Tente de outra rede, como a do celular.",
+    NinguemNoPonto:
+      "O PONTO DE ENCONTRO NÃO CONHECE ESTE SERVIDOR AGORA.\n" +
+      "Ou ele está fora do ar, ou quem hospeda não usa este ponto. Confira com quem hospeda.",
+    AnfitriaoCalado:
+      "O SERVIDOR ESTÁ NO PONTO DE ENCONTRO, MAS NÃO ATENDEU.\n" +
+      "Ele pode ter acabado de fechar, ou a rede dele parou de responder. Tente de novo em alguns segundos.",
+    PontoRecusou:
+      "O PONTO DE ENCONTRO RECUSOU A CHAMADA POR EXCESSO.\n" +
+      "O limite é por endereço público, e outras pessoas da sua rede podem estar usando o mesmo. " +
+      "Espere um pouco e tente de novo.",
+    SinalMudo:
+      "O PONTO DE ENCONTRO NÃO RESPONDEU À PÁGINA.\n" +
+      "Ele pode estar fora do ar, ou não atender o navegador (o navegador precisa do HTTPS do ponto). " +
+      "O caminho direto do link também não abriu.",
+    CaminhoNaoAbriu:
+      "O CAMINHO ENTRE AS DUAS REDES NÃO ABRIU.\n" +
+      "O ponto apresentou as duas máquinas, e o furo não passou: as duas redes provavelmente são do tipo que muda " +
+      "o endereço a cada destino (NAT simétrico). As saídas são abrir a porta no roteador de quem hospeda " +
+      "ou ligar o IPv6.",
+    HandshakeTimeout: "O SERVIDOR NÃO TERMINOU A ENTRADA NO PRAZO. Tente de novo.",
+    ProtocoloDoEnlace:
+      "O SERVIDOR RESPONDEU FORA DO QUE ESTA PÁGINA FALA.\n" +
+      "Ele pode ser de outra versão. Peça um link novo a quem hospeda.",
+    SemWebRtc:
+      "ESTE NAVEGADOR NÃO DEIXOU A PÁGINA ABRIR UMA CONEXÃO.\n" +
+      "A página precisa de WebRTC. Abra num Chrome, Edge, Firefox ou Safari atualizado.",
+  }),
+  // Um link de um Servidor de outra linha (`OutraLinha`): `versao` é o `v=`
+  // dele, quando o link o traz.
+  outraLinha: (versao) =>
+    `ESTE LINK É DE UM SERVIDOR ${versao ? `${versao} ` : ""}DE ANTES DA 0.17.\n` +
+    "A partir da 0.17, o SEELE fala WebRTC e não conversa com a 0.16 nem com as anteriores. " +
+    "Quem hospeda precisa atualizar para a 0.17; para entrar nele como está, use o app da 0.16, " +
+    "que o launcher continua oferecendo.",
+  // A permissão de rede local do Chrome (Local Network Access), quando o
+  // candidato do link é da rede de casa e a página vem da origem pública.
+  redeLocal:
+    "O NAVEGADOR VAI PERGUNTAR SE ESTA PÁGINA PODE FALAR COM A SUA REDE LOCAL.\n" +
+    "É o servidor que está na sua casa. Sem a permissão, a página só entra por fora.",
+  // A voz no foco de outra sessão (E3), na sessão que não tem o microfone.
+  vozEmOutraSessao:
+    "A VOZ ESTÁ EM OUTRO SERVIDOR.\n" + "Entre numa sala de voz aqui para trazer o microfone para cá.",
+});
+
+// --- cargos 0.17 (cargos-ui) ---
+//
+// As frases da gestão de cargos e permissões (`cargos.js`; contrato da 0.17,
+// E6). O modelo mental é o de quem vem do Discord — a ordem dos cargos é a
+// hierarquia, cada pessoa gere só o que está abaixo do seu cargo mais alto e
+// só concede o que ela mesma pode —, e a tela diz isso por extenso, porque o
+// pedido foi «precisa ficar bem esclarecido».
+//
+// Nenhuma frase aqui decide quem pode. Elas dizem o que o servidor respondeu:
+// o motivo de um controle desligado, a regra que decidiu uma permissão e a
+// recusa de um pedido vêm nomeados do servidor, e a tela só os traduz.
+const FRASES_DOS_CARGOS = Object.freeze({
+  titulo: "CARGOS E PERMISSÕES",
+  /** O cabeçalho diz de que servidor é: a camada é da sessão que está na tela. */
+  deOnde: (servidor) => (servidor ? `em ${servidor}` : "neste servidor"),
+  abas: Object.freeze({
+    cargos: "CARGOS",
+    pessoas: "PESSOAS",
+    explicar: "QUEM PODE O QUÊ",
+  }),
+  /** A regra inteira, em três frases curtas, no alto de toda aba. */
+  hierarquia:
+    "A ordem é a hierarquia: o primeiro cargo é o mais alto, e o de todos fica embaixo. Cada pessoa gere só " +
+    "os cargos abaixo do seu cargo mais alto, e só concede o que ela mesma pode.",
+  combinacao: Object.freeze({
+    restringe_vence:
+      "Os cargos de uma pessoa somam o que concedem. Uma RESTRIÇÃO em qualquer cargo dela vence, até o ADMINISTRADOR.",
+    concede_vence:
+      "Basta um cargo da pessoa conceder. O que nenhum cargo dela concede fica negado.",
+  }),
+  proprietario: "O proprietário do servidor pode tudo, e nenhum cargo muda isso.",
+  todos: "TODOS",
+  todosNota: "o cargo de quem entra",
+  pessoasNoCargo: (n) => (n === 1 ? "1 pessoa" : `${n} pessoas`),
+  posicao: (n) => `${n}º`,
+  /** O que se lê ao lado de um cargo que eu gero, e do que eu não gero. */
+  geres: "VOCÊ GERE",
+  naoGeres: "SÓ LEITURA",
+  /** Por que um cargo, uma pessoa ou uma permissão está desligada. */
+  motivo: Object.freeze({
+    acima_do_seu: "Está acima do seu cargo mais alto: só quem está acima dele o gere.",
+    igual_ao_seu: "É o seu cargo mais alto: só quem está acima dele o gere.",
+    sem_gerir_cargos: "Você não tem a permissão GERIR CARGOS neste servidor.",
+    do_proprietario: "É do proprietário do servidor: ninguém o muda.",
+    cargo_de_todos: "É o cargo de todos: vale para quem entra, e não se atribui nem se apaga.",
+    nao_concedivel: "Você não tem esta permissão, então não pode concedê-la. Restringir continua livre.",
+    pessoa_acima: "O cargo mais alto desta pessoa está acima do seu: você não muda os cargos dela.",
+    desconhecido: "O servidor não deixou mudar isto, e não disse por quê.",  }),
+  /** Os três estados de uma permissão num cargo. */
+  estado: Object.freeze({
+    concede: "CONCEDE",
+    neutro: "NÃO DECIDE",
+    restringe: "RESTRINGE",
+  }),
+  estadoNota:
+    "NÃO DECIDE deixa a decisão para os outros cargos. RESTRINGE tira a permissão de quem tem o cargo, mesmo que outro conceda.",
+  grupos: Object.freeze({
+    conversa: "CONVERSA",
+    voz: "VOZ",
+    moderacao: "MODERAÇÃO",
+    servidor: "SERVIDOR",
+    mod: "MODS",
+    outras: "OUTRAS",
+  }),
+  /** As permissões de um MOD ficam sob o nome dele. */
+  doMod: (titulo, id) => `MOD ${titulo}${id && id !== titulo ? ` · ${id}` : ""}`,
+  semDescricaoDoMod: "Uma ação que este MOD declarou: só quem tem esta permissão consegue pedi-la a ele.",
+  /**
+   * As permissões do produto (`Permission`, em seele-proto), pelo nome que o
+   * servidor manda. Cada uma: o nome curto e o que ela deixa fazer.
+   */
+  permissoes: Object.freeze({
+    ReadChannel: ["LER OS CANAIS", "Ver o que foi escrito nos canais de texto."],
+    WriteChannel: ["ESCREVER NOS CANAIS", "Mandar mensagens nos canais de texto."],
+    AttachFile: ["ANEXAR ARQUIVOS", "Pôr arquivos no disco de quem hospeda, junto das mensagens."],
+    ViewVoiceRoom: ["VER AS SALAS DE VOZ", "Saber que a sala existe e quem está dentro dela."],
+    EnterVoiceRoom: ["ENTRAR NAS SALAS DE VOZ", "Entrar numa sala e ouvir quem fala nela."],
+    Speak: ["FALAR", "Mandar a própria voz para a sala em que está."],
+    RemoveMessage: ["REMOVER MENSAGENS DE OUTROS", "Apagar o que outra pessoa escreveu. A própria, qualquer um apaga."],
+    MovePerson: ["MOVER PESSOAS", "Tirar alguém de uma sala de voz e pôr em outra."],
+    Kick: ["EXPULSAR", "Encerrar a sessão de alguém. A pessoa pode voltar em seguida."],
+    Ban: ["BANIR", "Encerrar a sessão de alguém e barrar a volta."],
+    ManageVoiceRooms: ["GERIR SALAS E CANAIS", "Criar, renomear e configurar salas de voz e canais."],
+    ManageRoles: ["GERIR CARGOS", "Criar, ordenar e editar os cargos abaixo do seu, e dá-los às pessoas."],
+    AdministerServer: ["GERIR O SERVIDOR", "O nome e a imagem do servidor, e apagar salas e canais."],
+    ShareScreen: ["TRANSMITIR A TELA", "Mostrar a própria tela para a sala de voz em que está."],
+    Administrator: [
+      "ADMINISTRADOR",
+      "Todas as permissões, inclusive as dos MODs. Não passa por uma restrição nem por quem está acima.",
+    ],
+  }),
+  /** O grupo de cada permissão do produto, quando o servidor não o diz. */
+  grupoDe: Object.freeze({
+    ReadChannel: "conversa",
+    WriteChannel: "conversa",
+    AttachFile: "conversa",
+    ViewVoiceRoom: "voz",
+    EnterVoiceRoom: "voz",
+    Speak: "voz",
+    RemoveMessage: "moderacao",
+    MovePerson: "moderacao",
+    Kick: "moderacao",
+    Ban: "moderacao",
+    ManageVoiceRooms: "servidor",
+    ManageRoles: "servidor",
+    AdministerServer: "servidor",
+    ShareScreen: "voz",
+    Administrator: "servidor",
+  }),
+  /** Uma permissão que esta versão do app não conhece: mostrada, nunca concedida. */
+  desconhecida: (chave) => [chave, "Esta versão do app não conhece esta permissão. Ela não concede nada."],
+  /** A explicação de uma permissão para uma pessoa. */
+  pode: "PODE",
+  naoPode: "NÃO PODE",
+  regra: Object.freeze({
+    proprietario: () => "É o proprietário do servidor: pode tudo.",
+    concedida_por: (nomes) => `Concedida por ${nomes}.`,
+    administrador: (nomes) => `Vem do ADMINISTRADOR, concedido por ${nomes}.`,
+    restringida_por: (nomes, tambem) =>
+      `Restringida por ${nomes}.${tambem ? ` ${tambem} concede, e a restrição vence.` : ""}`,
+    nenhum_concede: () => "Nenhum cargo desta pessoa concede: fica negada.",
+    banida: () => "Está banida: não tem permissão nenhuma.",
+    desconhecida: () => "O servidor não conhece esta permissão: ela não concede nada.",
+  }),
+  /** Os nomes de vários cargos, numa frase. */
+  nomes: (lista) =>
+    lista.length <= 1 ? lista.join("") : `${lista.slice(0, -1).join(", ")} e ${lista.at(-1)}`,
+  /** Os rótulos dos controles. */
+  novo: "NOVO CARGO",
+  nomeDoNovo: "novo cargo",
+  nome: "NOME DO CARGO",
+  cor: "COR",
+  semCor: "sem cor",
+  cores: Object.freeze({
+    osso: "osso",
+    laranja: "laranja",
+    ambar: "âmbar",
+    fosforo: "verde",
+  }),
+  salvar: "SALVAR O CARGO",
+  descartar: "DESCARTAR",
+  apagar: "APAGAR O CARGO",
+  subir: (nome) => `subir ${nome} uma posição`,
+  descer: (nome) => `descer ${nome} uma posição`,
+  voltarALista: "VOLTAR AOS CARGOS",
+  rascunho: "Há mudanças não salvas neste cargo.",
+  salvo: (nome) => `${nome} salvo.`,
+  ordenado: (nome, n) => `${nome} agora é o ${n}º.`,
+  desatualizado:
+    "OUTRO GESTOR MUDOU ESTE CARGO enquanto você editava.\nSuas mudanças continuam aqui, sem salvar. Confira o que mudou e refaça sobre o atual.",
+  refazer: "REFAZER SOBRE O ATUAL",
+  refeito: "Suas mudanças agora partem do cargo como ele está. Confira a prévia e salve.",
+  mudouFora: (antes, agora) => `MUDOU AGORA: estava ${antes}, ficou ${agora}.`,
+  nomeMudouFora: (antes, agora) => `O nome mudou agora: estava ${antes}, ficou ${agora}.`,
+  apagarConsequencia: (nome, n) =>
+    `${nome} some do servidor, e ${n === 0 ? "ninguém o tem agora" : `${n === 1 ? "1 pessoa perde" : `${n} pessoas perdem`} o que ele concedia`}.\n` +
+    "Nenhuma tela deste produto traz o cargo de volta.",
+  escolhaUmCargo: "Escolha um cargo na lista para ver o que ele concede.",
+  /** A aba PESSOAS. */
+  quem: "PESSOA",
+  cargosDe: (apelido) => `CARGOS DE ${apelido}`,
+  atribuido: (cargo, apelido) => `${apelido} agora tem ${cargo}.`,
+  revogado: (cargo, apelido) => `${apelido} não tem mais ${cargo}.`,
+  semPessoas: "Ninguém mais neste servidor por enquanto.",
+  escolhaUmaPessoa: "Escolha uma pessoa na lista para ver e mudar os cargos dela.",
+  voltarAsPessoas: "VOLTAR ÀS PESSOAS",
+  proprietarioCurto: "PROPRIETÁRIO",
+  pendenteDar: (cargo, apelido) => `DAR ${cargo} A ${apelido}?`,
+  pendenteTirar: (cargo, apelido) => `TIRAR ${cargo} DE ${apelido}?`,
+  confirmarDar: "DAR O CARGO",
+  confirmarTirar: "TIRAR O CARGO",
+  cancelar: "CANCELAR",
+  voce: "você",
+  verPorQue: "QUEM PODE O QUÊ",
+  /** Entrada pela moderação. */
+  cargosDestaPessoa: "CARGOS DESTA PESSOA",
+  /** Carregando e falhando. */
+  lendo: "lendo os cargos deste servidor…",
+  semSessao: "Sem servidor na tela: os cargos são de um servidor, e esta janela não está em nenhum.",
+  naoLeu: "NÃO FOI POSSÍVEL LER OS CARGOS DESTE SERVIDOR.",
+  semCargos:
+    "ESTE SERVIDOR NÃO RESPONDE SOBRE CARGOS.\nEle pode ser de uma versão sem cargos. Quem hospeda decide quando atualizar.",
+  /** O verbo foi mandado e o servidor não respondeu nem aceitando nem recusando. */
+  semConfirmacao:
+    "O SERVIDOR NÃO CONFIRMOU A MUDANÇA EM 6 SEGUNDOS.\nEla pode ter entrado ou não: a lista foi relida. Confira antes de tentar de novo.",
+  confirmando: "mandado ao servidor; esperando a resposta…",
+  semDono:
+    "ESTE SERVIDOR NÃO TEM PROPRIETÁRIO DECLARADO. Quem hospeda o declara pela máquina que hospeda.",
+  pessoaSemNome: (id) => `pessoa nº ${id}`,
+  /**
+   * As recusas que o servidor nomeia (`seele_proto::cargos::RecusaDeCargo`),
+   * uma por variante, e o que fazer. As que trazem a permissão ou a pessoa
+   * recebem os nomes que a tela usa. `tests/cargos_ui.rs` cobra uma frase por
+   * variante do tipo de verdade.
+   */
+  recusa: Object.freeze({
+    SemPermissao: "RECUSADO: você não tem GERIR CARGOS neste servidor, agora.",
+    CargoAcimaDeVoce: "RECUSADO: este cargo não está abaixo do seu cargo mais alto.",
+    PessoaAcimaDeVoce: "RECUSADO: esta pessoa não está abaixo de você na ordem dos cargos.",
+    Proprietario: "RECUSADO: ninguém mexe nos cargos do proprietário do servidor.",
+    NaoPodeConceder: ({ permissao }) => `RECUSADO: você não pode conceder ${permissao}, porque não a tem.`,
+    AtingeQuemEstaAcima: ({ pessoa }) =>
+      `RECUSADO: isto mudaria o que ${pessoa} pode, e ${pessoa} não está abaixo de você.`,
+    GanhoAlemDaSuaAutoridade: ({ pessoa, permissao }) =>
+      `RECUSADO: isto daria a ${pessoa} ${permissao}, que você não tem.`,
+    PermissaoDesconhecida: ({ permissao }) =>
+      `RECUSADO: nenhum MOD ligado declarou ${permissao}. Nada foi mudado.`,
+    CargoNaoExiste: "RECUSADO: este cargo não existe mais. A lista foi relida.",
+    PessoaNaoExiste: "RECUSADO: esta pessoa não tem conta neste servidor.",
+    CargoProtegido: "RECUSADO: o cargo de todos não se apaga, não se move e não se atribui.",
+    NomeInvalido: "RECUSADO: o nome do cargo está vazio, longo demais ou tem um caractere inválido.",
+    NomeTomado: "RECUSADO: já existe um cargo com este nome.",
+    LimiteDeCargos: "RECUSADO: este servidor já tem o máximo de cargos.",
+    PosicaoInvalida: "RECUSADO: esta posição não existe mais. A lista foi relida.",
+    QuadroCheio: "RECUSADO: os cargos ficariam grandes demais para o servidor mandar a todos.",
+    FalhaDoServidor: "O SERVIDOR NÃO CONSEGUIU GRAVAR. Nada foi mudado; tente de novo.",
+    RevisaoVelha: "RECUSADO: outro gestor mudou os cargos antes de você salvar. Nada seu foi gravado.",
+  }),
+  /** A prévia do que muda, antes de salvar, atribuir, revogar ou apagar. */
+  previa: Object.freeze({
+    titulo: "O QUE MUDA PARA AS PESSOAS",
+    nada: "Ninguém passa a poder nem deixa de poder nada com isto.",
+    ganha: (apelido, nomes) => `${apelido} PASSA A PODER: ${nomes}.`,
+    perde: (apelido, nomes) => `${apelido} DEIXA DE PODER: ${nomes}.`,
+    alem: (apelido, nomes) => `${apelido} ganharia ${nomes}, que você não tem: o servidor vai recusar.`,
+    lendo: "calculando o que muda…",
+    vaiRecusar: (frase) => `O servidor vai recusar. ${frase}`,
+    semPrevia: "O servidor não calculou a prévia. Ele confere o ganho de cada pessoa ao receber.",
+    informativa: "A prévia é do instante da leitura: o servidor confere tudo de novo ao receber, e pode recusar.",
+    /** Quando a prévia do servidor não veio, a diferença local: nunca inofensivo. */
+    devolve: (nomes) =>
+      `Tirar uma restrição devolve a quem tem este cargo: ${nomes}, se outro cargo dela conceder.`,
+    revogarRestritivo: (cargo, apelido, nomes) =>
+      `${cargo} restringe ${nomes}. Tirá-lo de ${apelido} pode devolver isso a ela.`,
+  }),
+  /** O que o servidor escreveu, como veio, sob a frase da recusa. */
+  doServidor: (texto) => `O servidor disse: «${texto}»`,
+  recusaSemNome: "O SERVIDOR RECUSOU O PEDIDO.",
+});

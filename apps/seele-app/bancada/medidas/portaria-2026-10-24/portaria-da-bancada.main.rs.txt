@@ -1,0 +1,49 @@
+//! A portaria de verdade de um `servidor_da_bancada` em pé, pelo banco dele.
+//!
+//!   portaria-da-bancada <seele.db> ligar
+//!   portaria-da-bancada <seele.db> pedidos
+//!   portaria-da-bancada <seele.db> decidir <impressao> <sim|nao>
+//!
+//! Cada comando imprime uma linha de JSON. É o papel do dono que decide no app
+//! (`portaria::decidir`), sem a casca.
+
+use seele_server::persistence::{Location, Persistence};
+use seele_server::portaria;
+
+fn main() {
+    let argumentos: Vec<String> = std::env::args().skip(1).collect();
+    let banco = argumentos.first().expect("o banco");
+    let mut persistence = Persistence::open(&Location::File(banco.into())).expect("o banco não abriu");
+    match argumentos.get(1).map(String::as_str) {
+        Some("ligar") => {
+            portaria::ligar(&mut persistence, true).expect("ligar");
+            println!("{}", serde_json::json!({ "ligada": portaria::ligada(&persistence).expect("ler") }));
+        }
+        Some("pedidos") => {
+            let fila: Vec<_> = portaria::pedidos(&persistence)
+                .expect("pedidos")
+                .into_iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "impressao": p.impressao,
+                        "apelido": p.apelido,
+                        "batidas": p.batidas,
+                        "decidido": p.decidido_em.is_some(),
+                        "admitido": p.admitido,
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::json!(fila));
+        }
+        Some("decidir") => {
+            let impressao = argumentos.get(2).expect("a impressão");
+            let admitir = argumentos.get(3).map(String::as_str) == Some("sim");
+            portaria::decidir(&mut persistence, impressao, admitir).expect("decidir");
+            println!("{}", serde_json::json!({ "decidido": impressao, "admitir": admitir }));
+        }
+        _ => {
+            eprintln!("uso: portaria-da-bancada <seele.db> ligar|pedidos|decidir <impressao> <sim|nao>");
+            std::process::exit(2);
+        }
+    }
+}

@@ -2,10 +2,24 @@
 //! como o app hospeda (`Hospedagem::iniciar`), com o banco numa pasta
 //! temporária.
 //!
-//!     cargo run -p seele-server --example servidor_da_bancada [pasta-de-um-mod]
+//!     cargo run -p seele-server --example servidor_da_bancada [--local] [--proprietario <hex64>] [pasta-de-um-mod]
+//!
+//! **`--local`**: o modo local (E9, `Hospedagem::iniciar_local`). Atende só em
+//! `127.0.0.1` e não sobe a escada, sem UPnP, PCP nem ponto de encontro. A
+//! bancada não depende da LAN nem do roteador, e o `endereco` sai em
+//! `127.0.0.1`. Sem a opção, o exemplo hospeda como o app e pode abrir porta
+//! no roteador real. A saída ganha `"local"`.
+//!
+//! **`--proprietario <hex64>`**, igual ao do `seeled` (ADR 0064): declara o dono
+//! pela impressão da chave dele, antes de aceitar a primeira conexão. Sem dono
+//! ninguém tem GERIR CARGOS (o assento por chegada saiu na 0.17), e a bancada
+//! de cargos não teria quem os gerisse. Uma impressão que não é hex de 64
+//! caracteres faz o exemplo sair com erro, sem subir. A saída ganha
+//! `"proprietario"` (`null` sem a opção).
 //!
 //! A primeira linha da saída é um JSON com o que a bancada precisa para entrar
-//! pela página: `{"endereco", "impressao", "link", "ate"}`.
+//! pela página: `{"endereco", "impressao", "link"}`. O `"ate"` saiu na 0.17: o link
+//! do navegador não vence mais (sem certificados curtos).
 //!
 //! **O link é o que a tela de quem hospeda mostra** (D-web-6): o convite que o
 //! `hospedar` do app devolve sem nome público (`convite_com_nome(None)`),
@@ -31,14 +45,12 @@
 
 #![allow(clippy::print_stdout, reason = "a saída é o contrato com a bancada")]
 
-use std::io::Read as _;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use seele_server::hospedagem::Hospedagem;
 use seele_server::mods::instalar::{instalar_de_pasta, raizes_de_um_mundo};
 use seele_server::persistence::mods::{enable, EnabledMod};
 use seele_server::persistence::{Location, Persistence};
+use std::io::Read as _;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -51,7 +63,27 @@ async fn main() -> Result<()> {
     let banco = Location::File(mundo.join("seele.db"));
     let mut exigido = serde_json::Value::Null;
     let mut raizes = None;
-    if let Some(origem) = std::env::args_os().nth(1) {
+    let mut proprietario: Option<String> = None;
+    let mut origem = None;
+    let mut local = false;
+    let mut argumentos = std::env::args_os().skip(1);
+    while let Some(argumento) = argumentos.next() {
+        if argumento == "--proprietario" {
+            let impressao = argumentos
+                .next()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("`--proprietario` precisa da impressão (hex64) do dono")
+                })?
+                .into_string()
+                .map_err(|_| anyhow::anyhow!("`--proprietario`: a impressão não é texto"))?;
+            proprietario = Some(impressao);
+        } else if argumento == "--local" {
+            local = true;
+        } else {
+            origem = Some(argumento);
+        }
+    }
+    if let Some(origem) = origem {
         let dos_mods = raizes_de_um_mundo(&mundo);
         let (manifesto, hash) = instalar_de_pasta(std::path::Path::new(&origem), &dos_mods)?;
         enable(
@@ -71,14 +103,21 @@ async fn main() -> Result<()> {
             serde_json::json!({ "id": manifesto.id, "version": manifesto.version, "hash": hash });
         raizes = Some(dos_mods);
     }
-    let hospedagem = Hospedagem::iniciar(0, banco, "Bancada", raizes, |_| Ok(())).await?;
-    let agora = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("o relógio desta máquina está antes de 1970")?
-        .as_secs();
+    let dono = proprietario.clone();
+    let antes_de_aceitar = move |persistence: &mut Persistence| {
+        if let Some(impressao) = &dono {
+            seele_server::cargos::declarar_proprietario(persistence, impressao)?;
+        }
+        Ok(())
+    };
+    let hospedagem = if local {
+        Hospedagem::iniciar_local(0, banco, "Bancada", raizes, antes_de_aceitar).await?
+    } else {
+        Hospedagem::iniciar(0, banco, "Bancada", raizes, antes_de_aceitar).await?
+    };
     let convite = hospedagem.convite_com_nome(None);
     let link = hospedagem
-        .link_do_navegador(&convite, agora)
+        .link_do_navegador(&convite)
         .map_err(|sem| anyhow::anyhow!("o link do navegador não saiu: {sem:?}"))?;
     let alvo = seele_proto::uri::analisar(&convite)
         .map_err(|erro| anyhow::anyhow!("o convite não se lê: {erro:?}"))?
@@ -89,8 +128,9 @@ async fn main() -> Result<()> {
             "endereco": alvo,
             "impressao": hospedagem.impressao_digital(),
             "link": link.link,
-            "ate": link.ate,
             "mod": exigido,
+            "proprietario": proprietario,
+            "local": local,
         })
     );
 

@@ -13,7 +13,7 @@ cpal (callback tempo real)
               ├─ supressão de ruído  [EM ABERTO]
               ├─ VAD ou push-to-talk
               └─ encoder Opus (quadros de 20 ms)
-                    └─▶ datagram QUIC
+                    └─▶ canal `voz` do WebRTC (um datagrama por mensagem; até a 0.16, datagram QUIC)
 ```
 
 ## Pipeline de reprodução

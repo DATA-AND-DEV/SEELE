@@ -35,8 +35,22 @@ pub const ROTULO_PROVA_DE_CLIENTE: &[u8] = b"SEELE/1 prova-de-cliente\0";
 /// A mensagem do `MORO2` é [`moro2`], neste módulo, ao lado da prova.
 pub const ROTULO_MORO2: &[u8] = b"SEELE-ENC/2 moro\0";
 
+/// O rótulo da prova de identidade do cliente na linha 2 (0.17, contrato D5):
+/// a prova passa a amarrar também o certificado DTLS de quem liga.
+pub const ROTULO_PROVA_DE_CLIENTE_2: &[u8] = b"SEELE/2 prova-de-cliente\0";
+
+/// O rótulo da apresentação da sala pessoal (0.17, contrato D3): a chave da
+/// pessoa assina a impressão do certificado DTLS efêmero da sala.
+pub const ROTULO_APRESENTACAO_DA_SALA: &[u8] = b"SEELE/2 apresentacao-da-sala\0";
+
 /// Todos os rótulos, para o guarda de que eles não se encontram.
-pub const ROTULOS: [&[u8]; 2] = [ROTULO_PROVA_DE_CLIENTE, ROTULO_MORO2];
+pub const ROTULOS: [&[u8]; 5] = [
+    ROTULO_PROVA_DE_CLIENTE,
+    ROTULO_MORO2,
+    ROTULO_PROVA_DE_CLIENTE_2,
+    ROTULO_APRESENTACAO_DA_SALA,
+    crate::encontro::ROTULO_MORO3,
+];
 
 /// Os bytes de uma impressão: o SHA-256 do DER do certificado de longa duração.
 pub const IMPRESSAO_BYTES: usize = 32;
@@ -58,6 +72,48 @@ pub fn prova_de_cliente(impressao: &[u8; IMPRESSAO_BYTES], nonce: &[u8; NONCE_BY
     mensagem.extend_from_slice(ROTULO_PROVA_DE_CLIENTE);
     mensagem.extend_from_slice(impressao);
     mensagem.extend_from_slice(nonce);
+    mensagem
+}
+
+/// O que o cliente assina para provar quem é **a este servidor, nesta conexão**
+/// (0.17, contrato D5).
+///
+/// `ROTULO_PROVA_DE_CLIENTE_2 ‖ impressao_servidor ‖ impressao_dtls_cliente ‖ nonce`:
+///
+/// - `impressao_servidor`: a impressão que o cliente conferiu, a do `fp=`. Na sala
+///   pessoal, a impressão da sala.
+/// - `impressao_dtls_cliente`: o SHA-256 do DER do certificado DTLS que **o
+///   cliente** apresentou nesta conexão. O servidor a confere contra o
+///   certificado que o DTLS mostrou: uma prova feita numa conexão não vale em
+///   outra, nem repassada por quem estiver no meio com outro certificado.
+/// - `nonce`: os 32 bytes do `Challenge`.
+#[must_use]
+pub fn prova_de_cliente_2(
+    impressao_servidor: &[u8; IMPRESSAO_BYTES],
+    impressao_dtls_cliente: &[u8; IMPRESSAO_BYTES],
+    nonce: &[u8; NONCE_BYTES],
+) -> Vec<u8> {
+    let mut mensagem =
+        Vec::with_capacity(ROTULO_PROVA_DE_CLIENTE_2.len() + 2 * IMPRESSAO_BYTES + NONCE_BYTES);
+    mensagem.extend_from_slice(ROTULO_PROVA_DE_CLIENTE_2);
+    mensagem.extend_from_slice(impressao_servidor);
+    mensagem.extend_from_slice(impressao_dtls_cliente);
+    mensagem.extend_from_slice(nonce);
+    mensagem
+}
+
+/// O que a chave da sala pessoal assina na apresentação do enlace (a `0x03`
+/// do `ctl`, contrato D3): `ROTULO_APRESENTACAO_DA_SALA ‖ impressao_dtls`.
+///
+/// A sala apresenta um certificado DTLS P-256 efêmero (o navegador não negocia
+/// Ed25519 no DTLS), e esta assinatura amarra esse certificado à chave da
+/// pessoa. Quem liga confere a assinatura com a chave que o código nomeia, e a
+/// impressão com a do certificado que o DTLS mostrou, antes do `Hello`.
+#[must_use]
+pub fn apresentacao_da_sala(impressao_dtls: &[u8; IMPRESSAO_BYTES]) -> Vec<u8> {
+    let mut mensagem = Vec::with_capacity(ROTULO_APRESENTACAO_DA_SALA.len() + IMPRESSAO_BYTES);
+    mensagem.extend_from_slice(ROTULO_APRESENTACAO_DA_SALA);
+    mensagem.extend_from_slice(impressao_dtls);
     mensagem
 }
 
@@ -133,6 +189,28 @@ mod tests {
             prova_de_cliente(&[2; 32], &nonce),
             prova_de_cliente(&[3; 32], &nonce)
         );
+    }
+
+    #[test]
+    fn a_prova_2_e_rotulo_servidor_dtls_do_cliente_e_nonce_nessa_ordem() {
+        let mensagem = prova_de_cliente_2(&[0xF0; 32], &[0xC1; 32], &[0x0A; 32]);
+        let mut esperada = b"SEELE/2 prova-de-cliente\0".to_vec();
+        esperada.extend_from_slice(&[0xF0; 32]);
+        esperada.extend_from_slice(&[0xC1; 32]);
+        esperada.extend_from_slice(&[0x0A; 32]);
+        assert_eq!(mensagem, esperada);
+        assert_ne!(
+            mensagem,
+            prova_de_cliente_2(&[0xF0; 32], &[0xC2; 32], &[0x0A; 32]),
+            "outro certificado DTLS, outra mensagem"
+        );
+    }
+
+    #[test]
+    fn a_apresentacao_da_sala_e_rotulo_e_impressao() {
+        let mut esperada = b"SEELE/2 apresentacao-da-sala\0".to_vec();
+        esperada.extend_from_slice(&[7; 32]);
+        assert_eq!(apresentacao_da_sala(&[7; 32]), esperada);
     }
 
     fn marca(texto: &str) -> crate::encontro::Marca {

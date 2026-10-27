@@ -37,7 +37,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::SigningKey;
 use seele_core::frame;
 use seele_core::{Client, ConnectError, MemoryPinStore};
 use seele_proto::control::{ClientMessage, DisconnectReason, ServerMessage};
@@ -46,6 +46,7 @@ use seele_server::persistence::mods::{enable, EnabledMod};
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
+mod par_cru;
 mod vaga;
 
 async fn servidor_com_limiar(limiar: u8) -> Result<(SocketAddr, Arc<Daemon>)> {
@@ -397,15 +398,13 @@ async fn habilitar_um_mod_acaba_com_a_sessao_de_quem_aceitou_outro_conjunto() ->
         "a sessão continuou de pé depois de o servidor passar a exigir um MOD"
     );
 
-    // **E a despedida foi entregue, não só escrita.** Ver
-    // `motivo_do_fechamento`: sem a espera do servidor, a conexão é recolhida
-    // por cima do quadro e quem lia via erro de transporte — «não foi possível
-    // alcançar o servidor» — no lugar de «os MODs mudaram».
+    // **E a conexão foi fechada pelo servidor, e não caiu.** Ver
+    // `motivo_do_fechamento`: desde a 0.17 o fechamento é o `corte` do `ctl`
+    // (`Motivo::Fechada`), e a frase («mods changed») fica só no registro do
+    // servidor — o fio leva o código. Ver a nota no `revisao.md` do porte.
     assert_eq!(
-        motivo_do_fechamento(&par, Duration::from_secs(5))
-            .await
-            .as_deref(),
-        Some(b"mods changed".as_slice()),
+        motivo_do_fechamento(&par, Duration::from_secs(5)).await,
+        Some(0),
         "a conexão caiu por cima da despedida em vez de ser fechada depois dela"
     );
 
@@ -504,61 +503,16 @@ async fn com_o_portao_dormente_habilitar_um_mod_nao_derruba_a_sala() -> Result<(
 
 // ------------------------------------------------------------- o par cru
 
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
-
 /// Uma conexão com o fluxo de controle na mão, sem tarefa leitora.
+///
+/// Desde a 0.17 (ADR 0063), pelo enlace (`par_cru`), e não por um QUIC cru.
 struct Par {
     /// Mantém a conexão viva, e responde **como** ela fechou. Ver
     /// [`motivo_do_fechamento`].
-    _conexao: quinn::Connection,
-    _envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
+    _conexao: seele_enlace::Conexao,
+    _envio: seele_enlace::Envio,
+    recebe: seele_enlace::Recebe,
+    _ponta: seele_enlace::Ponta,
 }
 
 /// Espera uma despedida, deixando passar o que não é uma.
@@ -584,20 +538,24 @@ async fn esperar_despedida(par: &mut Par, prazo: Duration) -> Option<DisconnectR
     }
 }
 
-/// Por que a conexão fechou, como o QUIC a fechou.
+/// Por que a conexão fechou: o código do `corte` com que o servidor a fechou,
+/// ou `None` se ela caiu (ociosa, DTLS, ICE) ou não fechou no prazo.
 ///
-/// **A prova de que a despedida foi entregue, e não só escrita.** Quem encerra
-/// uma sessão com motivo chama `despedir`, que espera o outro lado reconhecer o
-/// fim do fluxo e só então fecha a conexão **com uma razão de aplicação**.
-/// Quem apenas escreve e sai deixa a `Connection` ser recolhida, e aí o QUIC
-/// fecha com razão vazia — levando junto o quadro que ainda não tinha saído.
+/// **A prova de que o servidor fechou, e não deixou cair.** Quem encerra uma
+/// sessão com motivo chama `despedir`, que espera o outro lado reconhecer o fim
+/// do fluxo (`Envio::entregue`) e só então fecha com `close(0, motivo)`.
 ///
-/// Ler a razão é o que torna este guarda determinístico: o quadro em si escapa
-/// na maioria das execuções mesmo sem `despedir`, e um teste que só olhasse
-/// para ele reprovaria numa em cada doze.
-async fn motivo_do_fechamento(par: &Par, prazo: Duration) -> Option<Vec<u8>> {
+/// **O que mudou da 0.16, dito por inteiro.** No QUIC, a razão de aplicação
+/// («mods changed») viajava no fechamento, e era ela que distinguia o
+/// `despedir` de uma `Connection` recolhida. No enlace da 0.17, o fechamento é
+/// o `corte` do `ctl` com um **código** u32, e o texto fica só no registro de
+/// quem fechou (D4 do contrato). O que se confere aqui é que veio um corte, e
+/// não uma queda; o que distinguia o `despedir` de um largar a conexão é
+/// conferido pelo quadro `Disconnecting` lido antes, pelo ctl ordenado e
+/// confiável. Registrado no `revisao.md` do porte.
+async fn motivo_do_fechamento(par: &Par, prazo: Duration) -> Option<u32> {
     match tokio::time::timeout(prazo, par._conexao.closed()).await {
-        Ok(quinn::ConnectionError::ApplicationClosed(fim)) => Some(fim.reason.to_vec()),
+        Ok(seele_enlace::Motivo::Fechada { codigo }) => Some(codigo),
         _ => None,
     }
 }
@@ -640,64 +598,45 @@ impl std::error::Error for NaoEntrou {}
 /// recusaria o carimbo antes de ler o corpo: essa metade está em
 /// `seele_proto::control::a_publicada_ou_e_da_mesma_linha_ou_le_a_recusa_desta_build`.
 async fn abrir_falando(endereco: SocketAddr, semente: u8, faixa: Faixa) -> Result<Par> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    )));
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
-    // A ponta é dona do socket; sem isto ela cai no fim desta função.
-    std::mem::forget(ponta);
-
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
+    let (ponta, conexao) = par_cru::discar(endereco).await;
+    let (envio, recebe) = conexao.controle().expect("o ctl, uma vez");
+    let mut par = par_cru::Par {
+        conexao,
+        envio,
+        recebe,
+        ponta,
+    };
     let chave = SigningKey::from_bytes(&[semente; 32]);
-    frame::write(
-        &mut envio,
-        &ClientMessage::Hello {
-            faixa,
-            client: "par-cru".into(),
-            nickname: format!("pessoa{semente:03}"),
-            public_key: chave.verifying_key().to_bytes().to_vec(),
-            join_secret: None,
-            material_e2ee: None,
-            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
-        },
-    )
+    par.mandar(&ClientMessage::Hello {
+        faixa,
+        client: "par-cru".into(),
+        nickname: format!("pessoa{semente:03}"),
+        public_key: chave.verifying_key().to_bytes().to_vec(),
+        join_secret: None,
+        material_e2ee: None,
+        apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
+    })
     .await?;
 
     // Uma recusa que vem no lugar do `Challenge` — a da negociação, por
     // exemplo — volta inteira, pela mesma razão do `NaoEntrou` do fim.
-    let primeiro = frame::read::<ServerMessage>(&mut recebe).await?;
+    let primeiro = par.proximo().await?;
     let ServerMessage::Challenge { nonce } = primeiro else {
         return Err(NaoEntrou(primeiro).into());
     };
-    frame::write(
-        &mut envio,
-        &ClientMessage::Response {
-            proof: chave
-                .sign(&prova_amarrada(&conexao, &nonce))
-                .to_bytes()
-                .to_vec(),
-        },
-    )
-    .await?;
-    let ultimo = frame::read::<ServerMessage>(&mut recebe).await?;
+    let prova = par_cru::prova(&chave, &par.conexao, &nonce);
+    par.mandar(&ClientMessage::Response { proof: prova })
+        .await?;
+    let ultimo = par.proximo().await?;
     let ServerMessage::Session { .. } = ultimo else {
         return Err(NaoEntrou(ultimo).into());
     };
 
     Ok(Par {
-        _conexao: conexao,
-        _envio: envio,
-        recebe,
+        _conexao: par.conexao,
+        _envio: par.envio,
+        recebe: par.recebe,
+        _ponta: par.ponta,
     })
 }
 
@@ -750,21 +689,12 @@ async fn o_que_o_servidor_fez(servidor: tokio::task::JoinHandle<Result<Resposta>
 async fn servidor_que_anuncia(
     mods: Vec<seele_proto::mods::ModAnunciado>,
 ) -> Result<(SocketAddr, tokio::task::JoinHandle<Result<Resposta>>)> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let identidade = seele_server::tls::Identity::self_signed(vec!["localhost".to_owned()])?;
-    let ponta = quinn::Endpoint::server(
-        seele_server::tls::server_config(identidade)?,
-        SocketAddr::from(([127, 0, 0, 1], 0)),
-    )?;
-    let endereco = ponta.local_addr()?;
+    // O servidor de mentira fala pelo enlace, como todo servidor da linha 2.
+    let ponta = par_cru::anfitriao().await;
+    let endereco = ponta.local_addr();
 
     let tarefa = tokio::spawn(async move {
-        let conexao = ponta
-            .accept()
-            .await
-            .ok_or_else(|| anyhow::anyhow!("ninguém bateu"))?
-            .await?;
-        let (mut envia, mut recebe) = conexao.accept_bi().await?;
+        let (_conexao, mut envia, mut recebe) = par_cru::primeira_chegada(&ponta).await?;
 
         let ClientMessage::Hello { .. } = frame::read::<ClientMessage>(&mut recebe).await? else {
             anyhow::bail!("o primeiro quadro não foi Hello");
@@ -1079,50 +1009,32 @@ async fn bater_com_apis(
     apis_de_mod: Vec<u32>,
     convite: &str,
 ) -> Result<ServerMessage> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    )));
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
+    let (ponta, conexao) = par_cru::discar(endereco).await;
+    let (envio, recebe) = conexao.controle().expect("o ctl, uma vez");
+    let mut par = par_cru::Par {
+        conexao,
+        envio,
+        recebe,
+        ponta,
+    };
     let chave = SigningKey::from_bytes(&[semente; 32]);
-    frame::write(
-        &mut envio,
-        &ClientMessage::Hello {
-            faixa: seele_proto::FAIXA,
-            client: "par-cru".into(),
-            nickname: format!("pessoa{semente:03}"),
-            public_key: chave.verifying_key().to_bytes().to_vec(),
-            join_secret: Some(convite.to_owned()),
-            material_e2ee: None,
-            apis_de_mod,
-        },
-    )
+    par.mandar(&ClientMessage::Hello {
+        faixa: seele_proto::FAIXA,
+        client: "par-cru".into(),
+        nickname: format!("pessoa{semente:03}"),
+        public_key: chave.verifying_key().to_bytes().to_vec(),
+        join_secret: Some(convite.to_owned()),
+        material_e2ee: None,
+        apis_de_mod,
+    })
     .await?;
-    let ServerMessage::Challenge { nonce } = frame::read::<ServerMessage>(&mut recebe).await?
-    else {
+    let ServerMessage::Challenge { nonce } = par.proximo().await? else {
         anyhow::bail!("o servidor não mandou Challenge");
     };
-    frame::write(
-        &mut envio,
-        &ClientMessage::Response {
-            proof: chave
-                .sign(&prova_amarrada(&conexao, &nonce))
-                .to_bytes()
-                .to_vec(),
-        },
-    )
-    .await?;
-    let depois = frame::read::<ServerMessage>(&mut recebe).await?;
-    drop(ponta);
-    Ok(depois)
+    let prova = par_cru::prova(&chave, &par.conexao, &nonce);
+    par.mandar(&ClientMessage::Response { proof: prova })
+        .await?;
+    par.proximo().await
 }
 
 /// **O servidor recusa com `ModsDeOutraApi` antes da portaria e do convite.**
@@ -1245,26 +1157,4 @@ async fn o_app_sem_a_api_do_mod_nao_deixa_pedido_na_portaria() -> Result<()> {
 async fn pedidos_pendentes(daemon: &Daemon) -> Result<i64> {
     let banco = daemon.server().persistence.lock().await;
     seele_server::portaria::pendentes(&banco)
-}
-
-/// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
-/// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
-/// Desde o Servidor 1.0, o nonce cru não entra mais.
-fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS sempre entrega a cadeia do servidor");
-    let impressao = seele_proto::transport::certificate_digest(
-        cadeia
-            .first()
-            .expect("a cadeia tem um certificado")
-            .as_ref(),
-    );
-    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
-    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

@@ -125,16 +125,63 @@
     mostrar([
       titulo(f.titulo),
       desfecho?.erro && aviso(fraseDoDesfecho(desfecho), { erro: true }),
+      avisoDaOrigemNova(),
       linhas,
       h("p", { class: "cel-entrada-nota", text: f.identidade }),
       h("p", { class: "cel-entrada-fora" }, rotulo(f.hospedarRotulo), f.hospedar,
         h("a", { class: "cel-baixar", href: PAGINA_DO_APP, target: "_blank", rel: "noopener", text: PALAVRAS_DO_APP })),
-    ], [botao(f.colar, colar)]);
+    // `() => colar()`: o `onclick` entrega o EVENTO, e `colar(recusa)` o tomaria
+    // pela frase de recusa (`aviso(evento)` lançava, e o toque não fazia nada).
+    ], [botao(f.colar, () => colar())]);
+  }
+
+  /**
+   * O aviso do endereço novo: dito uma vez, até a pessoa dispensar (a escolha fica guardada na origem; sem armazenamento, ele volta, que é a
+   * verdade). Está no corpo da tela, e não sobre ela: não cobre COLAR UM LINK nem os servidores.
+   */
+  const ORIGEM_NOVA_DITA = "seele.origem-nova-dita";
+  function avisoDaOrigemNova() {
+    try {
+      if (localStorage.getItem(ORIGEM_NOVA_DITA)) return null;
+    } catch {
+      // Sem o armazenamento, o aviso aparece de novo a cada abertura.
+    }
+    const f = PALAVRAS.novaOrigem;
+    const [resumo, ...detalhes] = f.linhas;
+    // O título e uma frase; o resto nos detalhes, fechados, com o botão que os abre (aria-expanded/aria-controls, o foco fica no botão).
+    const lista = h("ul", { id: "cel-entrada-origem-detalhes", class: "cel-entrada-origem-linhas", hidden: true },
+      detalhes.map((linha) => h("li", { class: "cel-entrada-nota", text: linha })));
+    const abrir = h("button", {
+      class: "botao-fantasma cel-entrada-origem-abre", type: "button", "aria-expanded": "false", "aria-controls": "cel-entrada-origem-detalhes",
+      onclick: () => {
+        const aberto = lista.hidden;
+        lista.hidden = !aberto;
+        abrir.setAttribute("aria-expanded", String(aberto));
+        abrir.textContent = aberto ? f.ocultar : f.detalhes;
+      },
+    }, f.detalhes);
+    return h("div", { class: "cel-entrada-aviso cel-entrada-origem-nova", role: "status" },
+      h("p", { class: "cel-entrada-aviso-titulo", text: f.titulo }),
+      h("p", { class: "cel-entrada-nota", text: resumo }),
+      lista,
+      h("div", { class: "cel-entrada-origem-acoes" }, abrir, h("button", {
+        class: "botao-fantasma", type: "button",
+        onclick: () => {
+          try {
+            localStorage.setItem(ORIGEM_NOVA_DITA, "1");
+          } catch {
+            // Sem o armazenamento, ele só some desta tela.
+          }
+          inicio();
+        },
+      }, PALAVRAS.dispensar)));
   }
 
   async function entrarNoConhecido(servidor) {
     if (!fontes.entrarNoConhecido) return;
-    await conectando(servidor.endereco, () => fontes.entrarNoConhecido(servidor.impressao, apelidoDoAparelho()), null, servidor);
+    // O apelido que a identidade guardou com o servidor vem primeiro: o deste aparelho
+    // (o perfil do desktop) é o travessão na web, e vazio apagaria o nome da conta.
+    await conectando(servidor.endereco, () => fontes.entrarNoConhecido(servidor.impressao, servidor.apelido || apelidoDoAparelho()), null, servidor);
   }
 
   // ------------------------------------------------------- COLAR UM LINK
@@ -190,7 +237,7 @@
     const bloqueia = BLOQUEIAM.includes(estado);
     // Um desfecho que encerrou a tentativa (o convite gasto ou vencido, a
     // recusa) não deixa ENTRAR de novo: o mesmo link não serve mais.
-    const encerrou = desfecho && !["apelido-tomado", "sem-rede"].includes(desfecho.erro);
+    const encerrou = desfecho && !["apelido-tomado", "sem-rede", "espera-de-admissao", "pede-apelido"].includes(desfecho.erro);
 
     const avisoDoEstado = doEstado && aviso(
       [typeof doEstado.titulo === "function" ? doEstado.titulo(dia(lido.valeAte)) : doEstado.titulo, doEstado.corpo],
@@ -313,6 +360,9 @@
     }
     if (desfecho?.erro === "mods-a-aceitar") return aceite(endereco, desfecho, lido);
     if (lido) return entrarEm(identidade.ler() ?? lido, desfecho);
+    // Sem apelido para entrar pela lista: a tentativa segue aberta na identidade,
+    // e a «ENTRAR EM» pede o nome no campo de sempre.
+    if (desfecho?.erro === "pede-apelido" && identidade.ler()) return entrarEm(identidade.ler(), desfecho);
     return inicio(conhecido && desfecho);
   }
 
@@ -354,6 +404,8 @@
     calarAPersistencia();
     const frase = PALAVRAS.persistencia[resposta];
     if (!frase || jaDita() === resposta) return;
+    // A resposta vai ao elemento: a faixa de avisos do celular recolhe a que só informa («concedida») e deixa à vista a que alerta.
+    avisoDaPersistencia.dataset.resposta = resposta;
     const texto = h("span", { class: "veredito-texto", text: frase });
     avisoDaPersistencia.append(texto, h("button", {
       class: "botao-fantasma",

@@ -159,8 +159,8 @@ async function encerrarALigacao() {
 
 /**
  * Entra na sala depois de atender (spec, «Atender, nesta ordem», 3): espera um
- * `conectar` em voo, encerra os MODs e desmonta **só** o cliente (o `ejetar`,
- * que desde a tarefa 19 da F7 nunca derruba hospedagem nenhuma), entra na sala
+ * `conectar` em voo, leva à entrada **sem ejetar** nenhuma sessão (desde a
+ * 0.17 as sessões somam), entra na sala
  * pelo `conectar` de sempre (o Rust confere a sala pelo código desta máquina) e
  * senta na sala de voz. Quem responde se entrou é o `onde_estou`, e não a tela.
  */
@@ -169,7 +169,11 @@ async function entrarNaSalaAoAtender(alvo, tentativa) {
   await desenharToque();
   try {
     await esperarOConectarEmVoo();
-    if (!$("tela-sessao").hidden) await ejetar();
+    // **Atender soma uma sessão, e não troca** (E3 da 0.17): com um servidor
+    // aberto, `ejetar` o derrubaria. Vai à entrada sem sair de nenhuma, e o
+    // `conectar` de sempre abre a da ligação; se ele falhar, a frase aparece
+    // na entrada, e as outras sessões continuam na lista.
+    if (!$("tela-sessao").hidden) irParaAEntradaSemSair();
     await conectar(alvo);
     const onde = await invoke("onde_estou").catch(() => null);
     if (onde === "Pessoal") {

@@ -109,6 +109,42 @@
   order: 2;
 }
 
+/* ---- a faixa de avisos do pé (`celular-ajustes.js`, `faixaDeAvisos`)
+   Quem protege fica em resumo de uma linha (o texto inteiro abre ao tocar na faixa), os que só informam são recolhidos atrás de «N AVISOS».
+   Aberta, a pilha tem altura máxima e rola: a faixa de voz e as abas abaixo nunca são cobertas. */
+:root[data-casca="celular"] #tela-sessao > .cel-avisos-faixa {
+  order: 1;
+  flex-shrink: 0;
+  min-height: 44px;
+  margin: 0;
+  width: 100%;
+  text-align: left;
+  border-inline: 0;
+  padding-inline: 16px;
+  letter-spacing: 0.12em;
+}
+
+:root[data-casca="celular"] #tela-sessao > .cel-aviso-recolhido {
+  display: none;
+}
+
+/* O resumo: uma linha do texto do aviso, e o `dispensar` ao lado. A impressão digital inteira não vai ao painel principal: ela está no
+   texto que o aviso carrega, e só aparece quando a faixa «N AVISOS» está aberta. */
+:root[data-casca="celular"] #tela-sessao:not([data-avisos="aberto"]) > #veredito > .veredito-texto,
+:root[data-casca="celular"] #tela-sessao:not([data-avisos="aberto"]) > #cel-aviso-persistencia > .veredito-texto {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  white-space: normal;
+  text-overflow: ellipsis;
+}
+
+:root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia) {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
 /* O aviso da resposta do `persist()` (o `celular-entrada.js`) é uma região
    `role="status"` que existe sempre, para o leitor de tela anunciar o que entra
    nela: vazia, não tem altura, e o pé não muda. */
@@ -1049,6 +1085,12 @@
   display: none;
 }
 
+/* O índice móvel volta sem mudar data-vista do desktop. A regra estreita
+   do app ainda pode dizer secao: aqui só data-cel-pagina governa a coluna. */
+:root[data-casca="celular"] #tela-server[data-cel-pagina="lista"] .server-coluna {
+  display: flex;
+}
+
 /* A saída de AJUSTES é outra aba; o VOLTAR do desktop sai, e o «‹ AJUSTES»
    volta à lista. */
 :root[data-casca="celular"] #tela-server #server-fechar {
@@ -1276,23 +1318,25 @@
   order: -2;
 }
 
-/* Numa tela grande (um tablet, ou a escolha à mão), a coluna de um celular
-   grande no meio, com as abas presas a ela: quatro abas de 320 px para uma
-   palavra de oito letras não servem a ninguém. */
+/* **A sessão usa a superfície inteira, também deitada e num tablet.** A coluna de 480px no meio (e as folgas laterais de CONFIGURAÇÕES) era a
+   coluna estreita centrada que o dono recusou: ela valia só para o celular em pé, e a regra da área útil vale também para o navegador. O que
+   fica limitado é o que precisa de limite — o GRUPO das quatro abas (cada alvo com até 160px, e não quatro botões de 320px para uma palavra de
+   oito letras) e o parágrafo (`--seele-leitura`) —, e não a tela. Os recuos do aparelho (a ilha e os cantos, em paisagem) entram como
+   `padding` lateral da superfície, pelos `env(safe-area-inset-*)` já lidos em `--cel-seguro-*`. */
+:root[data-casca="celular"] #tela-sessao {
+  box-sizing: border-box;
+  width: 100%;
+  padding-inline: var(--cel-seguro-esq) var(--cel-seguro-dir);
+}
+
 @media (min-width: 600px) {
-  :root[data-casca="celular"] #tela-sessao {
-    width: 100%;
-    max-width: var(--cel-coluna);
-    margin-inline: auto;
-    --cel-lado-esq: max(0px, calc(var(--cel-seguro-esq) - max(0px, (100vw - var(--cel-coluna)) / 2)));
-    --cel-lado-dir: max(0px, calc(var(--cel-seguro-dir) - max(0px, (100vw - var(--cel-coluna)) / 2)));
-    border-left: 1px solid var(--seele-linha);
-    border-right: 1px solid var(--seele-linha);
+  :root[data-casca="celular"] #tela-sessao > .cel-abas {
+    grid-template-columns: repeat(4, minmax(0, 160px));
+    justify-content: center;
   }
 
-  :root[data-casca="celular"] #tela-server {
-    left: max(0px, calc((100vw - var(--cel-coluna)) / 2));
-    right: max(0px, calc((100vw - var(--cel-coluna)) / 2));
+  :root[data-casca="celular"] #tela-sessao :is(.nota, .veredito-texto) {
+    max-width: var(--seele-leitura);
   }
 }
 
@@ -1314,8 +1358,144 @@
   }
 }
 
+/* ------------------------------------------------------- o cinema (tela cheia)
+ *
+ * O cinema do `tela-chamada.css` mede `100vh`, que no Safari do iPhone é a
+ * página com a barra recolhida: o rodapé ficava fora do que se vê, e o
+ * `overflow: hidden !important` cortava o canvas. No celular ele mede `100dvh`
+ * (a altura que o navegador mostra) e respeita a safe-area. A especificidade é
+ * maior, e o `!important` também, para vencer o do cinema do computador. */
+:root[data-casca="celular"] [data-no-cinema="sim"] {
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  /* Deitado (largura >= 600 px) a sessão é uma coluna central de 480 px: no cinema ela solta a coluna. */
+  width: 100% !important;
+  max-width: none !important;
+}
+
+:root[data-casca="celular"] body[data-cinema="sim"] #palco-imagem {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  padding: var(--cel-seguro-topo) var(--cel-seguro-dir) var(--cel-seguro-pe) var(--cel-seguro-esq);
+}
+
+/* A saída, sempre à vista: presa à safe-area, com um alvo de toque inteiro. */
+:root[data-casca="celular"] .palco-sair-da-cheia {
+  position: fixed;
+  top: calc(12px + var(--cel-seguro-topo));
+  right: calc(12px + var(--cel-seguro-dir));
+  z-index: 40;
+  min-height: var(--cel-alvo);
+  min-width: var(--cel-alvo);
+  padding: 0 16px;
+  font-family: var(--seele-display);
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+  background: rgba(5, 4, 3, 0.85);
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  cursor: pointer;
+}
+
+/* A dica de virar o celular, só em retrato: no pé, dentro da safe-area, sem
+ * pegar toque (o SAIR fica no topo, e o que está embaixo continua tocável). */
+:root[data-casca="celular"] .palco-dica-girar {
+  position: fixed;
+  left: calc(12px + var(--cel-seguro-esq));
+  right: calc(12px + var(--cel-seguro-dir));
+  bottom: calc(12px + var(--cel-seguro-pe));
+  z-index: 39;
+  margin: 0;
+  text-align: center;
+  font-family: var(--seele-display);
+  letter-spacing: var(--seele-tracking-cartela);
+  font-size: 0.8rem;
+  color: var(--seele-osso);
+  opacity: 0.8;
+  pointer-events: none;
+}
+@media (orientation: landscape) {
+  :root[data-casca="celular"] .palco-dica-girar {
+    display: none;
+  }
+}
+
+/* «ESC PARA SAIR» não serve a quem não tem Esc: a saída é o botão. */
+:root[data-casca="celular"] body[data-cinema="sim"]::after {
+  display: none;
+}
+
 /* O botão que abre os ajustes do microfone do sistema: uma página não os abre,
    e a ponte recusa o pedido. A nota do bloco diz onde a permissão fica. */
 :root[data-casca="celular"] #boot-microfone-ajustes {
   display: none;
+}
+
+/* ------------------------------------------------- as várias sessões (E3)
+ *
+ * A trilha deitada na aba SERVIDOR ganha os grupos ABERTAS e NO AR, em pé, e
+ * o topo diz, em toda aba, qual servidor se vê; a linha da voz vem do
+ * operador do desktop para debaixo do topo (`celular-servidor.js`). */
+
+:root[data-casca="celular"] .trilha .trilha-grupo {
+  align-self: center;
+  border-bottom: none;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  padding: 0 2px;
+}
+
+:root[data-casca="celular"] .cel-sessao-na-vista {
+  display: block;
+  margin-top: 4px;
+  font-size: calc(11px * var(--cel-escala));
+  letter-spacing: 0.08em;
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] .cel-voz-foco {
+  margin: 0;
+  padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--seele-linha);
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] .cel-voz-foco .voz-foco-frase { flex: 1; }
+
+:root[data-casca="celular"] .cel-voz-foco .voz-foco-trazer {
+  width: auto;
+  margin: 0;
+  min-height: var(--cel-alvo);
+}
+
+
+/* O celular deitado (altura < 500px): a faixa e os avisos numa linha curta cada um, e a pilha de avisos ocupa no máximo um quarto da altura.
+   O alvo cai de 44 para 32px aqui (acima dos 24px mínimos do WCAG 2.5.8), porque 44px por linha não deixa altura para a sala. */
+@media (max-height: 500px) {
+  :root[data-casca="celular"] #tela-sessao > .cel-avisos-faixa { min-height: 32px; padding-block: 2px; }
+
+  :root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia) {
+    padding-block: 2px;
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  :root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia) > button {
+    min-height: 32px;
+    padding-block: 2px;
+  }
+}
+
+/* O «ver inteira» da impressão digital só aparece com a faixa de avisos aberta: fechada, o aviso é uma linha e a impressão nem aparece. */
+:root[data-casca="celular"] #tela-sessao:not([data-avisos="aberto"]) #veredito-ver-inteira {
+  display: none;
+}
+
+:root[data-casca="celular"] #tela-sessao > #veredito > #veredito-ver-inteira {
+  flex-shrink: 0;
+  min-height: 44px;
 }

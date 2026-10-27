@@ -30,20 +30,17 @@ seele-audio = { path = "../seele-audio" }
 # `.cargo/config.toml`. Quem compila `seele-core` passa a pagar isso — inclusive
 # quem só queria a voz.
 seele-video = { path = "../seele-video" }
-quinn = "0.11.11"
-# Só o provider `ring`, que é o que instalamos em tempo de execução. Os
-# defaults do rustls trazem o `aws-lc-rs` junto, e ele exige CMake e NASM
-# para compilar — num projeto cujo argumento inteiro é um binário
-# auto-contido, arrastar uma segunda pilha de cripto em C que nunca é
-# chamada é custo puro. No Windows é a diferença entre instalar o Rust e
-# instalar o Rust mais duas ferramentas de build.
-rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+# O transporte da 0.17 (contrato da fase 2, D1): WebRTC por `str0m`, o mesmo
+# crate do `seele-server`. Substitui o `quinn` e o `rustls` que moravam aqui: a
+# 0.17 quebra a compatibilidade com a 0.16 de propósito, e não há transporte
+# duplo. O ADR 0002 é emendado por este crate comum (os dois setups QUIC
+# diferentes que o justificavam deixaram de existir).
+seele-enlace = { path = "../seele-enlace" }
 tokio = { version = "1.53.1", features = ["full"] }
 # Só por causa do `IPV6_V6ONLY`, cujo padrão difere entre Linux, macOS e
-# Windows. O degrau 4 do ADR 0022 abre o próprio socket — o furo de NAT tem de
-# sair da mesma porta em que o QUIC vai falar —, e um socket aberto por nós não
-# herda o cuidado que o quinn tem com essa opção. O quinn já traz este crate
-# (via `quinn-udp`), então nada novo entra na árvore.
+# Windows. A ponta WebRTC de cada sessão é aberta sobre um socket nosso, de
+# pilha dupla (`client::socket_de_quem_conecta`), e um socket aberto por nós
+# precisa desse cuidado à mão. O `seele-enlace` já traz este crate.
 socket2 = "0.6.5"
 ed25519-dalek = "3.0.0"
 rand = "0.10.2"
@@ -51,10 +48,6 @@ anyhow = "1.0.104"
 thiserror = "2.0.19"
 tracing = "0.1.44"
 serde = "1.0.229"
-# Só para o certificado efêmero de `crate::par` e para o par QUIC do teste de
-# dessincronização do `frame`. Já está na árvore do workspace via
-# `seele-server`, então não acrescenta superfície de auditoria.
-rcgen = "0.14.8"
 # Para `enlace::Motor` saber os próprios endereços de rede local ao declarar
 # identidade no caminho entre pares (`EmprestarSubida.locais`) — a std não
 # enumera interfaces. Mesma versão que `seele-server::alcance::interfaces` já
@@ -78,6 +71,10 @@ recusar-encontro-de-producao = []
 # A redução de imagem do `seele-sessao` (`seele_core::reducao`), para o
 # `seele-ffi` a reexportar à casca do desktop.
 reducao = ["seele-sessao/reducao"]
+# O aparelho de mentira do `seele-audio`, reexportado em `aparelho_de_mentira`
+# para a casca o ver pela cadeia app -> ffi -> core -> audio. O `seele-audio`
+# recusa (`compile_error!`) o recurso num build otimizado, e a cadeia herda.
+aparelho-de-mentira = ["seele-audio/aparelho-de-mentira"]
 
 [dev-dependencies]
 # O relógio virtual do tokio, e nada além dele.

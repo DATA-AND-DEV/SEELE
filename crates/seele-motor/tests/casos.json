@@ -164,6 +164,23 @@
         { "tipo": "mensagem", "corpo": "[\"undefined\",\"undefined\"]" },
         { "tipo": "parou" }
       ]
+    },
+    {
+      "de": "a API 6 não tem a ação declarada: sem a capacidade acoes, SeeleMods.acao não existe",
+      "fonte": "seele.postar(JSON.stringify([typeof SeeleMods.acao, typeof SeeleMods.request]));",
+      "esperado": [
+        { "tipo": "mensagem", "corpo": "[\"undefined\",\"function\"]" },
+        { "tipo": "parou" }
+      ]
+    },
+    {
+      "de": "com a capacidade acoes (API 7), SeeleMods.acao pede a ação ao anfitrião pela mensagem acao, com o nome da ação",
+      "capacidades": ["acoes"],
+      "fonte": "SeeleMods.acao('prova/acoes', 0, 'fechar-mesa', { mesa: 3 });",
+      "esperado": [
+        { "tipo": "mensagem", "corpo": "{\"tipo\":\"acao\",\"n\":1,\"id\":\"prova/acoes\",\"canal\":0,\"acao\":\"fechar-mesa\",\"valor\":{\"mesa\":3}}" },
+        { "tipo": "parou" }
+      ]
     }
   ]
 }

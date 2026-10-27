@@ -11,7 +11,7 @@ Estes documentos são a fonte de verdade para o planejamento. Eles descrevem **o
 |---|---|
 | `00-visao-geral.md` | Produto, escopo, não-objetivos, critérios de sucesso |
 | `01-arquitetura.md` | Workspace de crates, decisões técnicas e trade-offs |
-| `02-protocolo.md` | Formato de mensagens, handshake, canais QUIC |
+| `02-protocolo.md` | Formato de mensagens, handshake, canais de dados do WebRTC (até a 0.16, QUIC) |
 | `03-audio.md` | Pipeline de captura, codec, jitter buffer, mixagem |
 | `04-servidor-seele.md` | Estado, permissões, subsistemas, persistência |
 | `06-clientes-gui.md` | Layout, atalhos, modelo de interação do terminal |

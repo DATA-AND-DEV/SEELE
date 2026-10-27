@@ -478,6 +478,9 @@ function desenharAberturaDoAudio(snapshot) {
  * A plataforma é a que `arrumarBarraDaJanela` (`base.js`) perguntou ao Rust.
  */
 function fraseDoMicrofoneCalado(snapshot) {
+  // O navegador que só deu o microfone sem o cancelamento de eco (a página: o
+  // `semEcoPorque` do motor). Dito a quem fala, sem o porquê técnico.
+  if (snapshot.telemetry?.cancelamento_de_eco_desligado === true) return SEM_CANCELAMENTO_DE_ECO;
   if (snapshot.telemetry?.microfone_entrega_silencio_digital !== true) return null;
   if ($("barra-janela").dataset.plataforma !== "macos") return null;
   return MICROFONE_EM_SILENCIO_NO_MACOS;
@@ -490,6 +493,16 @@ function fraseDoMicrofoneCalado(snapshot) {
  */
 function mostrarVeredito(veredito, deOnde = null) {
   const frase = fraseDoVeredito(veredito, deOnde);
+  // **A faixa é da sessão em que o `connect` a apurou** (achado do CUA com
+  // três sessões: na vista de A, a faixa mostrava a impressão de B, a última a
+  // entrar). A camada das sessões a guarda com a sessão da vista e a troca
+  // junto com a vista (`camada-sessoes.js`).
+  if (typeof guardarOVereditoDaVista === "function") guardarOVereditoDaVista(frase);
+  pintarVeredito(frase);
+}
+
+/** Desenha a faixa do veredito, ou a apaga com `null`. */
+function pintarVeredito(frase) {
   // Mostrar a faixa **antes** de escrever nela. Um `role="status"` só é lido
   // quando o texto muda com a região já visível: escrever primeiro e revelar
   // depois faz vários leitores de tela tratarem a mudança como conteúdo que
@@ -524,6 +537,10 @@ function desenhar(snapshot) {
   // servidor como `may_remove_message` — resolvida no PERMISSIONS a partir das
   // permissões desta conexão, e não decidida aqui.
   podeRemoverMensagem = snapshot.may_remove_message === true;
+
+  // A linha «ficou para trás · reconectando» some quando a geração nova está
+  // no ar (`camada-sessoes.js`).
+  if (typeof desenharFicouParaTras === "function") desenharFicouParaTras(snapshot);
 
   desenharTopo(snapshot);
   desenharCanais(snapshot);
@@ -786,12 +803,17 @@ function desenharTrilha(snapshot) {
   aplicarARegiao("redes", $("trilha-mods"));
   const nome = snapshot.server;
   const uri = iconeDesenhado.uri;
-  const outros = conhecidosDaTrilha.filter((conhecido) => conhecido.alvo !== alvoDoServer);
-  const voltar = meuServidorNaTrilha;
+  // Com várias sessões (E3 da 0.17, `camada-sessoes.js`), o histórico não
+  // repete as abertas, e o VOLTAR AO MEU SERVIDOR vira o grupo NO AR.
+  const varias = typeof variasSessoes === "function" && variasSessoes();
+  const abertos = varias ? alvosAbertos() : new Set();
+  const outros = conhecidosDaTrilha.filter((conhecido) => conhecido.alvo !== alvoDoServer && !abertos.has(conhecido.alvo));
+  const voltar = varias ? null : meuServidorNaTrilha;
   // A chave inclui nome e presença de imagem: sem isso, um servidor que ganhou
   // distintivo desde o último desenho não seria redesenhado — a lista teria
   // mudado e a comparação diria que não.
   const chave = [
+    varias ? "varias" : "uma",
     voltar ? `voltar|${voltar.alvo}|${voltar.nome}` : "",
     ...outros.map((conhecido) => `${conhecido.alvo}|${conhecido.nome ?? ""}|${conhecido.icone ? 1 : 0}`),
   ].join("\n");
@@ -1372,6 +1394,22 @@ function desenharOperador(snapshot) {
   // **E só quando muda** (pendência 63; lote R63): a linha é `role="status"` e
   // está à vista, e o tique a reescrevia com o mesmo texto duas vezes por
   // segundo — uma região viva mexida sem nada para dizer. Ver `escreverOTexto`.
+  // **Com a voz noutra sessão** (E3 da 0.17), a linha diz para onde a tecla
+  // e o microfone vão — a sessão com o foco —, e que aqui não se fala nem se
+  // ouve. Dizer «microfone abre enquanto segura ESPAÇO · ouvindo» nesta vista
+  // afirmaria sobre esta conversa o que é da outra. A tecla nunca traz a voz
+  // para cá: só o TRAZER A VOZ PARA CÁ, ou entrar numa sala daqui.
+  const vozNoutra = typeof vozNoutraSessao === "function" ? vozNoutraSessao() : null;
+  if (vozNoutra) {
+    escreverOTexto($("voz-estado"), [
+      snapshot.voice_mode === "PushToTalk"
+        ? FRASES_DAS_SESSOES.teclaFalaEm(nomeDaTecla(teclaDeFalar), vozNoutra)
+        : FRASES_DAS_SESSOES.microfoneDe(vozNoutra),
+      FRASES_DAS_SESSOES.aquiSemVoz,
+    ].join(" · "));
+    mudo.title = `${estadoDoMicrofone} em ${vozNoutra} · ${snapshot.muted ? "reativar" : "silenciar"}`;
+    return;
+  }
   escreverOTexto($("voz-estado"), [
     estadoDoMicrofone,
     // E a linha de estado diz o mesmo: quem lê «não está ouvindo» entende
@@ -4860,6 +4898,13 @@ function esquecerOEstadoDaSessao() {
   // instante em que B aparecia. Sem lista, também não há desenho pendente.
   $("lista-mensagens").replaceChildren();
   mensagensPorDesenhar = false;
+  // O palco (`palco-imagem.js`): a imagem, o decodificador e a escolha de
+  // transmissão eram desta sessão. Sem isto, a sessão seguinte herdava a
+  // escolha, e o VER da mesma transmissão não pedia nada (a tela que some
+  // depois de reconectar o servidor inteiro).
+  if (typeof esquecerOPalco === "function") esquecerOPalco();
+  // A linha «ficou para trás» é da sessão que saiu: com a vista vazia, some.
+  if (typeof desenharALinhaDaQueda === "function") desenharALinhaDaQueda();
 }
 
 /**
@@ -5473,7 +5518,11 @@ window.addEventListener("keydown", (evento) => {
     fecharAlerta();
   }
 });
-$("veredito-fechar").addEventListener("click", () => ($("veredito").hidden = true));
+// Dispensada, ela não volta com a sessão: a pessoa já leu.
+$("veredito-fechar").addEventListener("click", () => {
+  $("veredito").hidden = true;
+  if (typeof guardarOVereditoDaVista === "function") guardarOVereditoDaVista(null);
+});
 // Fechada, ela não volta nesta execução — ver `foneJaAvisado`. A frase continua
 // na ajuda e em CONFIGURAÇÕES · MICROFONE E SOM para quem quiser relê-la.
 $("aviso-fone-fechar").addEventListener("click", () => ($("aviso-fone").hidden = true));
@@ -5519,10 +5568,23 @@ $("lista-roster").addEventListener("input", (evento) => {
 $("trilha-outros").addEventListener("click", (evento) => {
   const item = evento.target.closest("button[data-alvo]");
   if (!item) return;
+  // **Com várias sessões, entrar noutro é somar, e não trocar** (E3 da 0.17):
+  // as abertas continuam, e não há o que confirmar.
+  if (typeof variasSessoes === "function" && variasSessoes()) {
+    abrirMaisUmaSessao(item.dataset.alvo, item.dataset.apelido);
+    return;
+  }
   pedirTrocaDeServidor(item.dataset.alvo, item.dataset.apelido, item.dataset.nome);
 });
 
-$("trilha-adicionar").addEventListener("click", pedirAEntrada);
+$("trilha-adicionar").addEventListener("click", () => {
+  // O `+` também soma: leva à entrada sem sair de nenhuma (E3 da 0.17).
+  if (typeof variasSessoes === "function" && variasSessoes()) {
+    abrirMaisUmaSessao(null);
+    return;
+  }
+  pedirAEntrada();
+});
 
 // A outra saída, escrita — ver a nota no `index.html`. Ela sai deste servidor;
 // o `SAIR DA SALA` ao lado sai só da sala de voz.

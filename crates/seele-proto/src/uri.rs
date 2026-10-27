@@ -67,13 +67,20 @@
 //! quem se liga, e nada mais ([`link_da_sala`], [`codigo_do_link`]). Não é um
 //! convite, e [`analisar`] o recusa.
 //!
-//! **O link do navegador**, `https://<origem>/<caminho>#<corpo do seele://>`,
-//! com `wh=` (os hashes dos certificados curtos) e `ate=` (até quando eles
-//! valem) — ADR 0057, emenda ao 0006. O fragmento é o corpo do `seele://` sem o
+//! **O link do navegador**, `https://<origem>/<caminho>#<corpo do seele://>`
+//! — ADR 0057, emenda ao 0006. O fragmento é o corpo do `seele://` sem o
 //! esquema, para haver um analisador só. A página o lê com
 //! [`analisar_no_navegador`], com as regras dela; o desktop o lê com
-//! [`analisar`], ignorando o `wh=` e o `ate=`. A origem é
-//! [`ORIGEM_DO_NAVEGADOR`] (a D-web-2 do dono, 15/10/2026).
+//! [`analisar`]. A origem é [`ORIGEM_DO_NAVEGADOR`] (a D-web-2 do dono,
+//! 15/10/2026).
+//!
+//! **Na 0.17 (a linha 2) o link do navegador mudou de sentido**: a página fala
+//! WebRTC, e o `fp=` é o `a=fingerprint` que ela escreve na descrição do
+//! anfitrião (contrato da 0.17, D3). Os hashes dos certificados curtos (`wh=`)
+//! e a validade deles (`ate=`) saíram, e o bilhete do encontro (`enc=`) voltou:
+//! é o ponto que dá à página o STUN e o sinal ([`crate::encontro::Chama`]).
+//! Um link com `wh=`, ou com o `v=` de outra linha, é de um Servidor anterior,
+//! e a página diz isso ([`ErroDoNavegador::OutraLinha`]) em vez de discar.
 
 use std::fmt;
 
@@ -100,24 +107,46 @@ pub const ESQUEMA_DA_SALA: &str = "seele://@";
 /// A origem do web app, para a forma `https://<origem>/<caminho>#<corpo>` do
 /// link (ADR 0057, emenda ao 0006).
 ///
-/// **Decidida pelo dono em 15/10/2026 (D-web-2), e permanente**: as
-/// identidades do celular e do navegador moram nela, e trocá-la perde todas.
+/// **Decidida pelo dono em 15/10/2026 (D-web-2)**: as identidades do celular e
+/// do navegador moram nela. **Trocada para seele.sh na 0.17 (o dono, em
+/// 26/10/2026; seele.sh É o web app)**: os links que este build ESCREVE são desta
+/// origem. Os da anterior ([`ORIGENS_LEGADAS_DO_NAVEGADOR`]) continuam sendo LIDOS
+/// (um convite antigo colado ainda diz o servidor), mas o produto não depende
+/// dela: o domínio antigo será aposentado. Uma identidade não passa de uma
+/// origem para a outra sozinha: o navegador separa o armazenamento por origem, e
+/// nada aqui promete isso (o plano de migração é anterior à desativação).
 /// É o único lugar do produto que a escreve. A página lê os links contra ela
 /// (`seele-web`, `analisar_link`), o desktop também (o link do navegador colado
 /// no app), e o guarda `a_origem_do_web_app_e_escrita_num_lugar_so`
 /// (`apps/seele-app/tests/web.rs`) reprova uma cópia escrita à mão. O nome do
 /// host, sem esquema e sem barra: é o que vem depois de `https://`.
-pub const ORIGEM_DO_NAVEGADOR: &str = "web.seele.app.br";
+pub const ORIGEM_DO_NAVEGADOR: &str = "seele.sh";
+
+/// As origens ANTERIORES do web app: lidas como a [`ORIGEM_DO_NAVEGADOR`], exatamente (o nome inteiro, e
+/// não um sufixo), e nunca escritas. Ver [`origem_do_link`].
+pub const ORIGENS_LEGADAS_DO_NAVEGADOR: [&str; 1] = ["web.seele.app.br"];
+
+/// A origem do produto contra a qual um link do navegador é lido: a que o link TRAZ, se ela é a
+/// [`ORIGEM_DO_NAVEGADOR`] ou uma das [`ORIGENS_LEGADAS_DO_NAVEGADOR`] (seguida de `/`, `#` ou do fim); a
+/// [`ORIGEM_DO_NAVEGADOR`] para qualquer outro texto, que então falha como sempre falhou (`OutraOrigem`).
+/// Assim um convite antigo continua valendo, e nenhuma outra origem passa a valer.
+#[must_use]
+pub fn origem_do_link(texto: &str) -> &'static str {
+    let resto = texto.trim().strip_prefix("https://").unwrap_or("");
+    std::iter::once(ORIGEM_DO_NAVEGADOR)
+        .chain(ORIGENS_LEGADAS_DO_NAVEGADOR)
+        .find(|origem| {
+            resto.strip_prefix(origem).is_some_and(|depois| {
+                depois.is_empty() || depois.starts_with('/') || depois.starts_with('#')
+            })
+        })
+        .unwrap_or(ORIGEM_DO_NAVEGADOR)
+}
 
 /// O caminho do link do navegador que o produto escreve: **a raiz**
 /// (D-web-4, decidida pela orquestradora em 16/10/2026). A página é uma só, e
 /// o corpo inteiro vai no fragmento ([`Convite::link_do_navegador`]).
 pub const CAMINHO_DO_NAVEGADOR: &str = "/";
-
-/// Quantos hashes de certificado curto um link do navegador leva: as janelas
-/// vigentes e a próxima, no momento em que o convite foi feito. Os além disso
-/// são ignorados, como os endereços além de [`LIMITE_DE_ALVOS`].
-pub const LIMITE_DE_HASHES_DO_NAVEGADOR: usize = 4;
 
 /// Um convite para entrar num servidor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,7 +362,7 @@ impl Bilhete {
         if ponto.is_empty() || aviso.is_empty() {
             return Err(ErroDeUri::BilheteInvalido);
         }
-        Self::novo(ponto, aviso)
+        Self::novo(remapear_ponto_legado(ponto), aviso)
     }
 
     /// O ponto de encontro, separado em máquina e porta.
@@ -385,6 +414,28 @@ impl Bilhete {
             format!("{}:{}", alvo.maquina, alvo.porta)
         };
         Self::novo(ponto, self.aviso.clone())
+    }
+}
+
+/// O bilhete de um convite ANTIGO aponta o ponto de encontro pelo nome anterior (`crate::encontro::PONTOS_LEGADOS`): lido, ele vira
+/// EXATAMENTE o [`crate::encontro::PONTO_PADRAO`] (com a porta, se ela veio escrita). A migração para seele.sh aposenta o domínio
+/// antigo, e um convite antigo não pode depender dele. Só o nome exato; qualquer outro ponto passa intacto (um recuo não atravessa a
+/// escolha de ninguém).
+fn remapear_ponto_legado(ponto: &str) -> String {
+    let Ok(alvo) = separar_ponto(ponto) else {
+        return ponto.to_owned();
+    };
+    let maquina = alvo.maquina.trim_end_matches('.');
+    if !crate::encontro::PONTOS_LEGADOS
+        .iter()
+        .any(|legado| maquina.eq_ignore_ascii_case(legado))
+    {
+        return ponto.to_owned();
+    }
+    if ponto.contains(':') {
+        format!("{}:{}", crate::encontro::PONTO_PADRAO, alvo.porta)
+    } else {
+        crate::encontro::PONTO_PADRAO.to_owned()
     }
 }
 
@@ -484,7 +535,7 @@ impl fmt::Display for Convite {
 /// [`ErroDeUri`] dizendo o que está errado. Aqui a mensagem específica ajuda e
 /// não vaza nada: quem colou o link é quem vai corrigi-lo.
 pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
-    analisar_com_origem(texto, ORIGEM_DO_NAVEGADOR)
+    analisar_com_origem(texto, origem_do_link(texto))
 }
 
 /// [`analisar`], com a origem do navegador dada: é o que deixa os testes
@@ -622,26 +673,20 @@ pub fn codigo_do_link(
     Some(crate::codigo::Codigo::ler(codigo))
 }
 
-/// Um convite lido da forma do navegador, com o que só a página usa.
+/// Um convite lido da forma do navegador.
+///
+/// Na 0.17 é o convite inteiro, **com** o bilhete do encontro: o ponto do
+/// `enc=` é o STUN e o sinal da página (contrato da 0.17, D7 e D8).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConviteDoNavegador {
-    /// O convite, como o `seele://` o daria. Sem bilhete do encontro: ele não
-    /// serve ao navegador.
+    /// O convite, como o `seele://` o daria.
     pub convite: Convite,
-    /// Os hashes dos certificados curtos (`wh=`), em hexadecimal minúsculo,
-    /// até [`LIMITE_DE_HASHES_DO_NAVEGADOR`].
-    pub hashes: Vec<String>,
-    /// Até quando o mais tardio dos hashes vale (`ate=`), em segundos Unix
-    /// UTC. É o que deixa a página dizer «este link venceu» em vez de uma
-    /// recusa muda.
-    pub ate: Option<u64>,
 }
 
 /// Por que um texto não é um link do navegador.
 ///
 /// Só a página o lê: é o vocabulário dela, e o desktop continua com
-/// [`ErroDeUri`]. [`Self::SemHashesDoNavegador`] é o link de um Servidor 0.15,
-/// ou de um desktop, e tem erro próprio para a página dizer isso sem discar.
+/// [`ErroDeUri`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErroDoNavegador {
     /// Não é `https://` da origem configurada, ou não há origem configurada.
@@ -653,15 +698,17 @@ pub enum ErroDoNavegador {
     SemFragmento,
     /// O fragmento não é o corpo de um convite.
     Convite(ErroDeUri),
-    /// Falta o `fp=`, que na forma do navegador é obrigatório.
+    /// Falta o `fp=`, que na forma do navegador é obrigatório: é ele que a
+    /// página escreve como o `a=fingerprint` do anfitrião.
     SemImpressaoDigital,
-    /// Falta o `wh=`.
-    SemHashesDoNavegador,
-    /// Um hash do `wh=` não é hexadecimal de 64 caracteres. Recusado, e não
-    /// ignorado: um hash truncado é um link adulterado ou cortado.
-    HashDoNavegadorInvalido,
-    /// O `ate=` não é um número.
-    ValidadeInvalida,
+    /// **O link é de um Servidor de outra linha** (a 0.16, o Servidor 1, ou
+    /// anterior; ou um posterior a este): o `v=` diz outra linha, ou o link traz
+    /// o `wh=` dos certificados curtos, que só a linha 1 escreve. A página da
+    /// 0.17 fala WebRTC e não conversa com ele, e diz isso antes de discar.
+    OutraLinha {
+        /// O `v=` do link, quando ele traz um.
+        versao: Option<String>,
+    },
 }
 
 impl fmt::Display for ErroDoNavegador {
@@ -671,6 +718,14 @@ impl fmt::Display for ErroDoNavegador {
 }
 
 impl std::error::Error for ErroDoNavegador {}
+
+/// Se a versão do `v=` é da linha deste build: o mesmo número antes do primeiro
+/// ponto que o de [`crate::version::VERSAO_DO_SERVIDOR`].
+#[must_use]
+pub fn versao_e_desta_linha(versao: &str) -> bool {
+    let maior = |texto: &str| texto.split('.').next().map(str::to_owned);
+    maior(versao) == maior(crate::version::VERSAO_DO_SERVIDOR)
+}
 
 /// O fragmento de um link `https://<origem>/<caminho>#<fragmento>`.
 fn fragmento_do_navegador<'a>(texto: &'a str, origem: &str) -> Result<&'a str, ErroDoNavegador> {
@@ -698,7 +753,7 @@ fn fragmento_do_navegador<'a>(texto: &'a str, origem: &str) -> Result<&'a str, E
 }
 
 /// Lê um link da forma do navegador, com as regras dela (ADR 0057, emenda ao
-/// 0006; pedido da F4, item 19).
+/// 0006; contrato da 0.17).
 ///
 /// # Errors
 ///
@@ -708,117 +763,61 @@ pub fn analisar_no_navegador(
     origem: &str,
 ) -> Result<ConviteDoNavegador, ErroDoNavegador> {
     let fragmento = fragmento_do_navegador(texto, origem)?;
-    let mut convite =
-        analisar_seele(&format!("{ESQUEMA}{fragmento}")).map_err(ErroDoNavegador::Convite)?;
-    convite.bilhete = None;
-    if convite.impressao_digital.is_none() {
-        return Err(ErroDoNavegador::SemImpressaoDigital);
-    }
-
     let consulta = fragmento
         .split_once('?')
         .map_or("", |(_, consulta)| consulta);
-    let mut hashes = Vec::new();
-    let mut ate = None;
-    for parte in consulta.split('&').filter(|parte| !parte.is_empty()) {
-        let (chave, valor) = parte.split_once('=').unwrap_or((parte, ""));
-        match chave {
-            "wh" => {
-                for hash in valor.split(',').filter(|hash| !hash.is_empty()) {
-                    validar_impressao_digital(hash)
-                        .map_err(|_| ErroDoNavegador::HashDoNavegadorInvalido)?;
-                    let hash = hash.to_ascii_lowercase();
-                    if hashes.len() < LIMITE_DE_HASHES_DO_NAVEGADOR && !hashes.contains(&hash) {
-                        hashes.push(hash);
-                    }
-                }
-            }
-            "ate" => {
-                ate = Some(
-                    valor
-                        .parse()
-                        .map_err(|_| ErroDoNavegador::ValidadeInvalida)?,
-                );
-            }
-            _ => {}
-        }
+    let tem_hashes_da_linha_um = consulta
+        .split('&')
+        .any(|parte| parte == "wh" || parte.starts_with("wh="));
+    // A linha vem antes de tudo: um link da 0.16 que falhasse por outra regra
+    // seria dito «incompleto», e a frase certa é «abra a 0.16».
+    let convite = analisar_seele(&format!("{ESQUEMA}{fragmento}"));
+    let versao = convite.as_ref().ok().and_then(|lido| lido.versao.clone());
+    if tem_hashes_da_linha_um || versao.as_deref().is_some_and(|v| !versao_e_desta_linha(v)) {
+        return Err(ErroDoNavegador::OutraLinha { versao });
     }
-    if hashes.is_empty() {
-        return Err(ErroDoNavegador::SemHashesDoNavegador);
+    let convite = convite.map_err(ErroDoNavegador::Convite)?;
+    if convite.impressao_digital.is_none() {
+        return Err(ErroDoNavegador::SemImpressaoDigital);
     }
-    Ok(ConviteDoNavegador {
-        convite,
-        hashes,
-        ate,
-    })
+    Ok(ConviteDoNavegador { convite })
 }
 
 impl Convite {
     /// Este convite na forma do navegador:
-    /// `https://<origem><caminho>#<corpo do seele://>&wh=…&ate=…`.
-    ///
-    /// Sem o bilhete do encontro, que não serve ao navegador. O `wh=` vai no
-    /// fim, depois do `fp=`: um link cortado na colagem perde o fim, e perder
-    /// o `wh=` é recusado em voz alta ([`ErroDoNavegador::SemHashesDoNavegador`]).
+    /// `https://<origem><caminho>#<corpo do seele://>`, com o bilhete.
     ///
     /// # Errors
     ///
-    /// [`ErroDoNavegador::SemImpressaoDigital`] sem `fp`,
-    /// [`ErroDoNavegador::SemHashesDoNavegador`] sem hash, e
-    /// [`ErroDoNavegador::HashDoNavegadorInvalido`] com um hash torto.
-    pub fn no_navegador(
-        &self,
-        origem: &str,
-        caminho: &str,
-        hashes: &[String],
-        ate: Option<u64>,
-    ) -> Result<String, ErroDoNavegador> {
+    /// [`ErroDoNavegador::SemImpressaoDigital`] sem `fp`.
+    pub fn no_navegador(&self, origem: &str, caminho: &str) -> Result<String, ErroDoNavegador> {
         if self.impressao_digital.is_none() {
             return Err(ErroDoNavegador::SemImpressaoDigital);
         }
-        if hashes.is_empty() {
-            return Err(ErroDoNavegador::SemHashesDoNavegador);
-        }
-        for hash in hashes {
-            validar_impressao_digital(hash)
-                .map_err(|_| ErroDoNavegador::HashDoNavegadorInvalido)?;
-        }
-        let sem_bilhete = Self {
-            bilhete: None,
-            ..self.clone()
-        };
-        let corpo = sem_bilhete.to_string();
+        let corpo = self.to_string();
         let corpo = corpo.strip_prefix(ESQUEMA).unwrap_or(&corpo);
         let caminho = if caminho.is_empty() || caminho.starts_with('/') {
             caminho.to_owned()
         } else {
             format!("/{caminho}")
         };
-        let mut texto = format!("https://{origem}{caminho}#{corpo}&wh={}", hashes.join(","));
-        if let Some(ate) = ate {
-            texto.push_str(&format!("&ate={ate}"));
-        }
-        Ok(texto)
+        Ok(format!("https://{origem}{caminho}#{corpo}"))
     }
 
     /// **O link do navegador que o produto escreve**: na origem do produto
     /// ([`ORIGEM_DO_NAVEGADOR`]) e na raiz ([`CAMINHO_DO_NAVEGADOR`], D-web-4).
     ///
-    /// O corpo inteiro — o endereço, a impressão, o `convite=`, os hashes e a
-    /// validade — vai no fragmento, que o navegador não manda a servidor
-    /// nenhum: o host estático da origem nunca o recebe, e ele fica fora do
-    /// registro de acesso dele. O teste
-    /// `o_link_do_produto_leva_o_corpo_so_no_fragmento` segura isso.
+    /// O corpo inteiro — o endereço, a impressão, o `convite=`, o bilhete — vai
+    /// no fragmento, que o navegador não manda a servidor nenhum: o host
+    /// estático da origem nunca o recebe, e ele fica fora do registro de acesso
+    /// dele. O teste `o_link_do_produto_leva_o_corpo_so_no_fragmento` segura
+    /// isso.
     ///
     /// # Errors
     ///
     /// Os de [`Self::no_navegador`].
-    pub fn link_do_navegador(
-        &self,
-        hashes: &[String],
-        ate: Option<u64>,
-    ) -> Result<String, ErroDoNavegador> {
-        self.no_navegador(ORIGEM_DO_NAVEGADOR, CAMINHO_DO_NAVEGADOR, hashes, ate)
+    pub fn link_do_navegador(&self) -> Result<String, ErroDoNavegador> {
+        self.no_navegador(ORIGEM_DO_NAVEGADOR, CAMINHO_DO_NAVEGADOR)
     }
 }
 
@@ -1829,9 +1828,8 @@ mod a_versao_no_link {
 #[cfg(test)]
 mod a_forma_do_navegador {
     //! O link `https://<origem>/<caminho>#<corpo do seele://>` do web app
-    //! (ADR 0057, emenda ao 0006; pedido da F4, item 19). Os casos vêm da
-    //! Tarefa 2.3 da F4, com a forma do fragmento que a F1 escolheu: o corpo
-    //! do `seele://`, sem o esquema.
+    //! (ADR 0057, emenda ao 0006), na forma da 0.17: o corpo do `seele://`,
+    //! com o bilhete do encontro, e sem os hashes dos certificados curtos.
     use super::*;
 
     const ORIGEM: &str = "origem.invalid";
@@ -1849,51 +1847,84 @@ mod a_forma_do_navegador {
     }
 
     #[test]
-    fn na_forma_https_o_fp_e_os_hashes_sao_obrigatorios() {
-        let lido = analisar_no_navegador(
-            &link(&format!("198.51.100.7:8383/?fp={}&wh={}", fp(), wh())),
-            ORIGEM,
-        )
-        .unwrap();
+    fn na_forma_https_o_fp_e_obrigatorio() {
+        let lido = analisar_no_navegador(&link(&format!("198.51.100.7:8383/?fp={}", fp())), ORIGEM)
+            .unwrap();
         assert_eq!(lido.convite.alvo, "198.51.100.7:8383");
         assert_eq!(lido.convite.impressao_digital, Some(fp()));
-        assert_eq!(lido.hashes, vec![wh()]);
-
         assert_eq!(
-            analisar_no_navegador(&link(&format!("198.51.100.7:8383/?wh={}", wh())), ORIGEM),
+            analisar_no_navegador(&link("198.51.100.7:8383/"), ORIGEM),
             Err(ErroDoNavegador::SemImpressaoDigital)
-        );
-        assert_eq!(
-            analisar_no_navegador(&link(&format!("198.51.100.7:8383/?fp={}", fp())), ORIGEM),
-            Err(ErroDoNavegador::SemHashesDoNavegador),
-            "um link sem wh= é de Servidor 0.15, ou de um desktop, e tem erro próprio"
         );
     }
 
     #[test]
-    fn um_hash_truncado_ou_torto_e_recusado_e_nao_ignorado() {
-        for ruim in [
-            "ab".repeat(31),
-            "zz".repeat(32),
-            format!("{},{}", wh(), "ab".repeat(31)),
+    fn um_link_da_linha_um_e_dito_e_nao_discado() {
+        // O `wh=` só a linha 1 escreve: é um link de Servidor 1 (a 0.16).
+        assert_eq!(
+            analisar_no_navegador(
+                &link(&format!("198.51.100.7:8383/?fp={}&wh={}&ate=1", fp(), wh())),
+                ORIGEM
+            ),
+            Err(ErroDoNavegador::OutraLinha { versao: None })
+        );
+        // O `v=` de outra linha, com ou sem `wh=`, antes ou depois.
+        for (versao, com_hashes) in [
+            ("1.0", true),
+            ("1.0", false),
+            ("0.15.1", false),
+            ("3.0", false),
         ] {
+            let hashes = if com_hashes {
+                format!("&wh={}", wh())
+            } else {
+                String::new()
+            };
             assert_eq!(
                 analisar_no_navegador(
-                    &link(&format!("198.51.100.7:8383/?fp={}&wh={ruim}", fp())),
+                    &link(&format!(
+                        "198.51.100.7:8383/?fp={}&v={versao}{hashes}",
+                        fp()
+                    )),
                     ORIGEM
                 ),
-                Err(ErroDoNavegador::HashDoNavegadorInvalido),
-                "{ruim}"
+                Err(ErroDoNavegador::OutraLinha {
+                    versao: Some(versao.to_owned())
+                }),
+                "{versao}"
             );
         }
+        // Mesmo sem `fp=`, a linha é a primeira coisa dita.
+        assert_eq!(
+            analisar_no_navegador(&link("198.51.100.7:8383/?v=1.0"), ORIGEM),
+            Err(ErroDoNavegador::OutraLinha {
+                versao: Some("1.0".to_owned())
+            })
+        );
+        // E o `v=` desta linha passa.
+        let desta = crate::version::VERSAO_DO_SERVIDOR;
+        assert!(analisar_no_navegador(
+            &link(&format!("198.51.100.7:8383/?fp={}&v={desta}", fp())),
+            ORIGEM
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn a_linha_e_o_numero_antes_do_primeiro_ponto() {
+        let desta = crate::version::VERSAO_DO_SERVIDOR;
+        let maior = desta.split('.').next().unwrap();
+        assert!(versao_e_desta_linha(desta));
+        assert!(versao_e_desta_linha(&format!("{maior}.9")));
+        assert!(!versao_e_desta_linha("1.0"));
+        assert!(!versao_e_desta_linha("0.15.1"));
     }
 
     #[test]
     fn o_convite_em_query_string_e_recusado() {
         let texto = format!(
-            "https://{ORIGEM}/e?convite=7K4M#198.51.100.7:8383/?fp={}&wh={}",
-            fp(),
-            wh()
+            "https://{ORIGEM}/e?convite=7K4M#198.51.100.7:8383/?fp={}",
+            fp()
         );
         assert_eq!(
             analisar_no_navegador(&texto, ORIGEM),
@@ -1903,20 +1934,13 @@ mod a_forma_do_navegador {
 
     #[test]
     fn so_a_origem_configurada_e_do_navegador() {
-        let texto = format!(
-            "https://outra.invalid/e#198.51.100.7:8383/?fp={}&wh={}",
-            fp(),
-            wh()
-        );
+        let texto = format!("https://outra.invalid/e#198.51.100.7:8383/?fp={}", fp());
         assert_eq!(
             analisar_no_navegador(&texto, ORIGEM),
             Err(ErroDoNavegador::OutraOrigem)
         );
         assert_eq!(
-            analisar_no_navegador(
-                &link(&format!("198.51.100.7:8383/?fp={}&wh={}", fp(), wh())),
-                ""
-            ),
+            analisar_no_navegador(&link(&format!("198.51.100.7:8383/?fp={}", fp())), ""),
             Err(ErroDoNavegador::OutraOrigem),
             "sem origem configurada, nenhum link é do navegador"
         );
@@ -1925,9 +1949,8 @@ mod a_forma_do_navegador {
             Err(ErroDoNavegador::SemFragmento)
         );
         let parecida = format!(
-            "https://{ORIGEM}.outra.exemplo/e#198.51.100.7:8383/?fp={}&wh={}",
-            fp(),
-            wh()
+            "https://{ORIGEM}.outra.exemplo/e#198.51.100.7:8383/?fp={}",
+            fp()
         );
         assert_eq!(
             analisar_no_navegador(&parecida, ORIGEM),
@@ -1937,98 +1960,64 @@ mod a_forma_do_navegador {
     }
 
     #[test]
-    fn o_bilhete_do_encontro_nao_serve_ao_navegador() {
+    fn o_bilhete_do_encontro_serve_ao_navegador() {
+        // Na 0.17 o ponto do `enc=` é o STUN e o sinal da página (D7, D8).
         let texto = link(&format!(
-            "198.51.100.7:8383/?enc=encontro.exemplo:8384/198.51.100.7:41234&fp={}&wh={}",
-            fp(),
-            wh()
+            "198.51.100.7:8383/?enc=encontro.exemplo:8384/198.51.100.7:41234&fp={}",
+            fp()
         ));
-        assert_eq!(
-            analisar_no_navegador(&texto, ORIGEM)
-                .unwrap()
-                .convite
-                .bilhete,
-            None
-        );
+        let bilhete = analisar_no_navegador(&texto, ORIGEM)
+            .unwrap()
+            .convite
+            .bilhete
+            .expect("o bilhete fica");
+        assert_eq!(bilhete.ponto, "encontro.exemplo:8384");
+        assert_eq!(bilhete.aviso, "198.51.100.7:41234");
     }
 
     #[test]
-    fn a_validade_e_lida_e_uma_torta_e_recusada() {
-        let base = format!("198.51.100.7:8383/?fp={}&wh={}", fp(), wh());
-        assert_eq!(
-            analisar_no_navegador(&link(&format!("{base}&ate=1792540800")), ORIGEM)
-                .unwrap()
-                .ate,
-            Some(1_792_540_800)
-        );
-        assert_eq!(
-            analisar_no_navegador(&link(&format!("{base}&ate=amanha")), ORIGEM),
-            Err(ErroDoNavegador::ValidadeInvalida)
-        );
-    }
-
-    #[test]
-    fn os_hashes_alem_do_limite_sao_ignorados() {
-        let cinco: Vec<String> = (0..5_u8).map(|n| format!("{n:02x}").repeat(32)).collect();
-        let lido = analisar_no_navegador(
-            &link(&format!(
-                "198.51.100.7:8383/?fp={}&wh={}",
-                fp(),
-                cinco.join(",")
-            )),
-            ORIGEM,
-        )
-        .unwrap();
-        assert_eq!(lido.hashes, cinco[..LIMITE_DE_HASHES_DO_NAVEGADOR].to_vec());
-    }
-
-    #[test]
-    fn o_link_do_navegador_vai_e_volta() {
+    fn o_link_do_navegador_vai_e_volta_com_o_bilhete() {
         let convite = Convite::novo("198.51.100.7:8383")
             .com_impressao_digital(fp())
             .com_token("7K4MNPQRSTVWXYZ23456")
-            .com_versao("1.0");
-        let texto = convite
-            .no_navegador(ORIGEM, "/e", &[wh()], Some(1_792_540_800))
-            .unwrap();
+            .com_versao(crate::version::VERSAO_DO_SERVIDOR)
+            .com_bilhete(Bilhete::novo("encontro.exemplo:8384", "198.51.100.7:41234").unwrap());
+        let texto = convite.no_navegador(ORIGEM, "/e").unwrap();
         assert!(
             texto.starts_with("https://origem.invalid/e#198.51.100.7:8383"),
             "{texto}"
         );
         assert!(
-            !texto.contains('?') || texto.find('?') > texto.find('#'),
-            "{texto}"
+            !texto.contains("wh="),
+            "a linha 2 não escreve hashes: {texto}"
         );
         let lido = analisar_no_navegador(&texto, ORIGEM).unwrap();
         assert_eq!(lido.convite, convite);
-        assert_eq!(lido.hashes, vec![wh()]);
-        assert_eq!(lido.ate, Some(1_792_540_800));
     }
 
     /// **O link que o produto escreve leva o corpo só no fragmento** (D-web-4).
     ///
     /// Antes do `#` vem `https://<origem>/` e nada mais: nem caminho, nem
     /// consulta. O navegador manda ao host estático só essa parte, e por isso
-    /// o endereço do servidor, a impressão, o token do convite, os hashes e a
-    /// validade não podem estar nela — iriam para o registro de acesso de quem
-    /// hospeda a página. E o link volta inteiro pela leitura da página.
+    /// o endereço do servidor, a impressão, o token do convite e o bilhete não
+    /// podem estar nela — iriam para o registro de acesso de quem hospeda a
+    /// página. E o link volta inteiro pela leitura da página.
     #[test]
     fn o_link_do_produto_leva_o_corpo_so_no_fragmento() {
         let token = "7K4MNPQRSTVWXYZ23456";
         let convite = Convite::novo("198.51.100.7:8383")
             .com_impressao_digital(fp())
             .com_token(token)
-            .com_versao("1.0");
-        let texto = convite
-            .link_do_navegador(&[wh()], Some(1_792_540_800))
-            .unwrap();
+            .com_versao(crate::version::VERSAO_DO_SERVIDOR)
+            .com_bilhete(Bilhete::novo("encontro.exemplo:8384", "198.51.100.7:41234").unwrap());
+        let texto = convite.link_do_navegador().unwrap();
         let (antes, fragmento) = texto.split_once('#').expect("o link tem fragmento");
         assert_eq!(
             antes,
             format!("https://{ORIGEM_DO_NAVEGADOR}/"),
             "antes do `#` vai algo além da origem e da raiz: {texto}"
         );
-        for parte in ["198.51.100.7", &fp(), token, &wh(), "1792540800"] {
+        for parte in ["198.51.100.7", &fp(), token, "encontro.exemplo"] {
             assert!(
                 !antes.contains(parte) && fragmento.contains(parte),
                 "`{parte}` não está só no fragmento: {texto}"
@@ -2036,30 +2025,110 @@ mod a_forma_do_navegador {
         }
         let lido = analisar_no_navegador(&texto, ORIGEM_DO_NAVEGADOR).unwrap();
         assert_eq!(lido.convite, convite);
-        assert_eq!(lido.hashes, vec![wh()]);
-        assert_eq!(lido.ate, Some(1_792_540_800));
+    }
+
+    /// **A troca para seele.sh, com compatibilidade**: o link escrito é da origem nova; o mesmo convite
+    /// escrito na origem ANTERIOR continua sendo lido (pelo desktop, `analisar`, e pela página,
+    /// `origem_do_link`), e um nome parecido com qualquer uma das duas não é.
+    #[test]
+    fn o_link_escrito_e_da_origem_nova_e_o_da_anterior_continua_valendo_so_pelo_nome_exato() {
+        let token = "7K4MNPQRSTVWXYZ23456";
+        let convite = Convite::novo("198.51.100.7:8383")
+            .com_impressao_digital(fp())
+            .com_token(token)
+            .com_versao(crate::version::VERSAO_DO_SERVIDOR);
+        let novo = convite.link_do_navegador().unwrap();
+        assert!(
+            novo.starts_with("https://seele.sh/#"),
+            "o link escrito não é da origem nova: {novo}"
+        );
+        let antigo = novo.replacen("https://seele.sh/", "https://web.seele.app.br/", 1);
+        for texto in [&novo, &antigo] {
+            assert_eq!(
+                analisar(texto).unwrap(),
+                convite,
+                "o desktop não leu {texto}"
+            );
+            let origem = origem_do_link(texto);
+            assert_eq!(
+                analisar_no_navegador(texto, origem).unwrap().convite,
+                convite,
+                "a página não leu {texto}"
+            );
+        }
+        assert_eq!(
+            origem_do_link(&antigo),
+            "web.seele.app.br",
+            "o link antigo não foi lido na origem dele"
+        );
+        for falso in [
+            novo.replacen("seele.sh", "seele.sh.exemplo", 1),
+            novo.replacen("seele.sh", "web.seele.app.br.exemplo", 1),
+            novo.replacen("seele.sh", "xseele.sh", 1),
+            novo.replacen("seele.sh", "web.seele.sh", 1),
+            novo.replacen("seele.sh", "get.seele.sh", 1),
+            novo.replacen("https://", "http://", 1),
+        ] {
+            assert!(
+                analisar(&falso).is_err(),
+                "um nome parecido passou como a origem do produto: {falso}"
+            );
+            assert!(
+                matches!(
+                    analisar_no_navegador(&falso, origem_do_link(&falso)),
+                    Err(ErroDoNavegador::OutraOrigem)
+                ),
+                "a página aceitou {falso}"
+            );
+        }
+        assert_eq!(ORIGENS_LEGADAS_DO_NAVEGADOR, ["web.seele.app.br"]);
+    }
+
+    /// **O bilhete de um convite antigo** (`enc=encontro.seele.app.br…`) é lido apontando o ponto NOVO, exatamente: o produto não
+    /// depende do domínio aposentado. Com a porta escrita, ela fica; um nome parecido não é remapeado.
+    #[test]
+    fn o_bilhete_de_um_convite_antigo_aponta_o_ponto_novo_e_so_pelo_nome_exato() {
+        for (enc, esperado) in [
+            (
+                "encontro.seele.app.br/198.51.100.7:41234",
+                "rendzvous.seele.sh",
+            ),
+            (
+                "encontro.seele.app.br:8384/198.51.100.7:41234",
+                "rendzvous.seele.sh:8384",
+            ),
+            (
+                "ENCONTRO.Seele.App.BR./198.51.100.7:41234",
+                "rendzvous.seele.sh",
+            ),
+            (
+                "encontro.seele.app.br.exemplo/198.51.100.7:41234",
+                "encontro.seele.app.br.exemplo",
+            ),
+            (
+                "encontro.exemplo:8384/198.51.100.7:41234",
+                "encontro.exemplo:8384",
+            ),
+        ] {
+            let convite = analisar(&format!("seele://198.51.100.7:8383?enc={enc}")).unwrap();
+            assert_eq!(convite.bilhete.unwrap().ponto, esperado, "enc={enc}");
+        }
     }
 
     #[test]
-    fn um_link_do_navegador_sem_fp_ou_sem_hash_nao_e_montado() {
-        let sem_fp = Convite::novo("198.51.100.7:8383");
+    fn um_link_do_navegador_sem_fp_nao_e_montado() {
         assert_eq!(
-            sem_fp.no_navegador(ORIGEM, "/e", &[wh()], None),
+            Convite::novo("198.51.100.7:8383").no_navegador(ORIGEM, "/e"),
             Err(ErroDoNavegador::SemImpressaoDigital)
         );
-        let com_fp = sem_fp.com_impressao_digital(fp());
-        assert_eq!(
-            com_fp.no_navegador(ORIGEM, "/e", &[], None),
-            Err(ErroDoNavegador::SemHashesDoNavegador)
-        );
     }
 
-    /// **O desktop também abre o link do navegador**, com o `fp`, ignorando o
-    /// `wh=` e o `ate=` (pedido da F4). Pela origem configurada; com ela vazia,
-    /// um link `https` continua não sendo um convite.
+    /// **O desktop também abre o link do navegador**, com o `fp`. Pela origem
+    /// configurada; com ela vazia, um link `https` continua não sendo um
+    /// convite.
     #[test]
-    fn o_desktop_le_o_link_do_navegador_ignorando_os_hashes() {
-        let texto = link(&format!("198.51.100.7:8383/?fp={}&wh={}&ate=1", fp(), wh()));
+    fn o_desktop_le_o_link_do_navegador() {
+        let texto = link(&format!("198.51.100.7:8383/?fp={}", fp()));
         let lido = analisar_com_origem(&texto, ORIGEM).unwrap();
         assert_eq!(lido.alvo, "198.51.100.7:8383");
         assert_eq!(lido.impressao_digital, Some(fp()));

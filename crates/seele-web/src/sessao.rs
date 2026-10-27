@@ -18,7 +18,8 @@ use std::collections::BTreeMap;
 use seele_proto::control::{decode_da_lista, Lido, ServerMessage};
 use seele_proto::ids::ScreenId;
 use seele_sessao::retrato::{
-    aviso_de, foto_da_sala, minha_tela_de, transmissoes_de, EndReason, LimitesDeTela, RetratoDaSala,
+    assistida_no_retrato, aviso_de, foto_da_sala, minha_tela_de, transmissoes_de, EndReason,
+    LimitesDeTela, RetratoDaSala, TelaLigada,
 };
 use seele_sessao::state::Room;
 use seele_sessao::SessionInfo;
@@ -88,6 +89,14 @@ pub struct Sessao {
     /// pessoa.
     apelido: String,
     pub(crate) escolha: EscolhaDeTela,
+    /// A transmissão que o servidor ligou sozinho, à parte da escolha: a mesma
+    /// regra da FFI ([`TelaLigada`]). O fluxo de tela que abre e fecha chega
+    /// por [`Self::ouvir_o_fluxo`].
+    pub(crate) tela_ligada: TelaLigada,
+    /// As voltas do enlace desta sessão, de um em um a partir de 1 (a geração
+    /// do carimbo da FFI): sobe em cada [`Self::caiu`]. Uma tela ligada noutra
+    /// volta não aparece no retrato desta.
+    voltas: u64,
     pedido: Option<LimitesDeTela>,
     pub(crate) contados: Contados,
     /// Quantas entradas em sala esta conexão pediu: o número do `Ping` marcado
@@ -143,6 +152,8 @@ impl Sessao {
             room,
             apelido: apelido.to_owned(),
             escolha: EscolhaDeTela::NinguemEscolheu,
+            tela_ligada: TelaLigada::default(),
+            voltas: 1,
             pedido: None,
             contados: Contados::default(),
             entradas_pedidas: 0,
@@ -227,6 +238,12 @@ impl Sessao {
             }
             eventos.push(json!("ServerChanged"));
         }
+        // **Os cargos desta sessão** (ADR 0064), na ordem da FFI: depois do
+        // `ServerChanged` e antes do `TelemetryChanged`, com a marca que o
+        // `Room` já subiu ao dobrar a mensagem (o `cargos_revision` do retrato).
+        if mudou.cargos {
+            eventos.push(json!({ "CargosChanged": { "marca": self.room.cargos.marca() } }));
+        }
         if mudou.telemetry {
             eventos.push(json!("TelemetryChanged"));
         }
@@ -249,6 +266,8 @@ impl Sessao {
             {
                 self.escolha = EscolhaDeTela::NinguemEscolheu;
             }
+            // E a que o servidor ligou também morre com a transmissão.
+            self.tela_ligada.esquecer_se_saiu(&self.room);
             let ha_transmissao = !transmissoes_de(&self.room, None).is_empty();
             if mudou.telas || (mudou.roster && ha_transmissao) {
                 eventos.push(json!("ScreenChanged"));
@@ -465,6 +484,38 @@ impl Sessao {
         // Os pesos pedidos à conexão que caiu não vão ter resposta dela: quem
         // os esperava fica sabendo pela página (`null`, como no fim).
         self.pesos_pendentes.clear();
+        // A volta seguinte é outra geração: a tela ligada antes da queda não
+        // aparece no retrato dela.
+        self.voltas = self.voltas.saturating_add(1);
+        self.tela_ligada.nova_geracao();
+    }
+
+    /// **Os passos de um fluxo do servidor, para a tela ligada**: o
+    /// `ScreenOpened` de uma leitura grava a tela que o servidor ligou, e o
+    /// `ScreenClosed` só a apaga se for o fim **desta** leitura. A identidade
+    /// da leitura é a alça do fluxo (`fluxo_novo`), como o número de leitura do
+    /// `Aviso::TelaAbriu` do desktop. É o braço `TelaAbriu`/`TelaFechou` do
+    /// laço da FFI.
+    pub fn ouvir_o_fluxo(&mut self, passos: &[crate::fluxos::Passo], leitura: u32) {
+        let tela_de = |evento: &Value, nome: &str| {
+            evento
+                .get(nome)
+                .and_then(|corpo| corpo.get("screen"))
+                .and_then(Value::as_u64)
+                .and_then(|tela| u32::try_from(tela).ok())
+                .map(ScreenId)
+        };
+        for passo in passos {
+            let crate::fluxos::Passo::Evento(evento) = passo else {
+                continue;
+            };
+            if let Some(tela) = tela_de(evento, "ScreenOpened") {
+                self.tela_ligada
+                    .abriu(&self.room, tela, self.voltas, u64::from(leitura));
+            } else if let Some(tela) = tela_de(evento, "ScreenClosed") {
+                let _ = self.tela_ligada.fechou(tela, u64::from(leitura));
+            }
+        }
     }
 
     /// **Uma mensagem do servidor, para a busca do buraco**: a página que ela
@@ -578,8 +629,16 @@ impl Sessao {
     /// O retrato e a perda que o servidor contou (`UplinkLoss`), que o
     /// `Snapshot` leva na telemetria e não no retrato da sala.
     #[must_use]
-    pub fn foto(&self) -> (f32, RetratoDaSala) {
-        let foto = foto_da_sala(&self.room, self.escolha.tela(), self.pedido);
+    pub fn foto(&self) -> (Option<f32>, RetratoDaSala) {
+        // A assistida é a escolhida, ou — sem escolha — a que o servidor ligou
+        // nesta volta: a mesma conta da FFI (`assistida_no_retrato`).
+        let escolhida = match self.escolha {
+            EscolhaDeTela::Esta(tela) => Some(Some(tela)),
+            EscolhaDeTela::Nenhuma => Some(None),
+            EscolhaDeTela::NinguemEscolheu => None,
+        };
+        let assistida = assistida_no_retrato(escolhida, self.tela_ligada.agora(self.voltas));
+        let foto = foto_da_sala(&self.room, assistida, self.pedido);
         let perda = foto.loss_fraction;
         (perda, foto.retrato(|| self.apelido.clone()))
     }

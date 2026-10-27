@@ -395,6 +395,12 @@ mod tests {
     /// resampler does to the stream, so this measures the real effect rather
     /// than describing it.
     fn depth_creep_ms(drift_ppm: f64, correct: bool) -> f64 {
+        creep_and_splices(drift_ppm, correct).0
+    }
+
+    /// The same run, also returning how many frames the buffer cut out of the
+    /// speech to keep up (`JitterMetrics::descartes_por_atraso`).
+    fn creep_and_splices(drift_ppm: f64, correct: bool) -> (f64, u64) {
         use crate::jitter::{JitterBuffer, JitterConfig};
 
         let frames = crate::netsim::drifting_stream(30_000, drift_ppm);
@@ -438,18 +444,32 @@ mod tests {
             };
             clock_ms += f64::from(crate::FRAME_MS) / ratio;
         }
-        late - early
+        (late - early, buffer.metrics().descartes_por_atraso)
     }
 
     #[test]
-    fn uncorrected_drift_makes_latency_creep() {
-        // The failure R3 describes. A fast sender fills the buffer and latency
-        // climbs; a slow one drains it until playout starves. Both start sounding
-        // wrong minutes into a call that began fine.
+    fn uncorrected_drift_is_paid_in_counted_splices_not_in_latency() {
+        // The failure R3 describes, and what changed in 0.17. Until then this
+        // test asserted that a fast sender with no correction made the buffer
+        // creep by at least 20 ms in eight minutes — the failure documented as
+        // a fact, and in continuous speech it never stopped: 560 ms at +300 ppm
+        // after thirty minutes (`tests/atraso_na_fala_continua.rs`).
+        //
+        // The jitter buffer now cuts the surplus out of the speech itself, one
+        // frame at a time and at most one per second, and counts every cut. So
+        // without resampling the depth stays within a frame of where it was,
+        // and the price shows up as splices instead of as latency.
+        let (creep, splices) = creep_and_splices(100.0, false);
         assert!(
-            depth_creep_ms(100.0, false) >= 20.0,
-            "a fast sender should have accumulated audio"
+            creep < 20.0,
+            "a fast sender still pushed the buffer {creep:.1} ms deeper"
         );
+        assert!(
+            splices > 0,
+            "the buffer held its depth without cutting anything — then what drained it?"
+        );
+        // A slow sender is the other direction: nothing to cut, the buffer
+        // drains and playout starves a tick per frame of drift.
         assert!(
             depth_creep_ms(-100.0, false) <= -10.0,
             "a slow sender should have drained the buffer"
@@ -457,15 +477,43 @@ mod tests {
     }
 
     #[test]
+    fn resampling_leaves_the_buffer_nothing_to_cut() {
+        // Why `correction_ratio` is still the better path when a caller can
+        // apply it per source: a resampled stream never builds the surplus, so
+        // the buffer has no reason to splice. Splicing is the fallback for the
+        // streams nobody resamples — which, in the 0.17 voice loop, is all of
+        // them (see the report in `jitter.rs`, `JANELA_DE_DERIVA_TICKS`).
+        let (_, uncorrected) = creep_and_splices(200.0, false);
+        let (_, corrected) = creep_and_splices(200.0, true);
+        assert!(
+            corrected < uncorrected,
+            "resampling did not spare any splices: {corrected} vs {uncorrected}"
+        );
+    }
+
+    #[test]
     fn correction_holds_the_buffer_steady() {
         // The fix, and the end-to-end guard on the sign convention: getting the
-        // direction backwards would double the drift rather than cancel it, and
-        // the symptom would look identical to having no correction at all.
+        // direction backwards would double the drift rather than cancel it.
+        //
+        // Since 0.17 the jitter buffer cuts a fast sender's surplus by itself,
+        // so a doubled drift no longer shows as depth creep — it shows as
+        // splices. The sign is therefore checked where it now surfaces: with the
+        // correction on, the buffer must never cut more than with it off. The
+        // depth bound stays, at one frame: the buffer may hold one surplus frame
+        // for up to `ADIAMENTO_DA_EMENDA_TICKS` waiting for a pause to pay it,
+        // and a single depth sample can land inside that wait.
         for drift_ppm in [50.0, 100.0, 200.0, -100.0, -200.0] {
-            let creep = depth_creep_ms(drift_ppm, true);
+            let (creep, corrected) = creep_and_splices(drift_ppm, true);
+            let (_, uncorrected) = creep_and_splices(drift_ppm, false);
             assert!(
-                creep.abs() < 20.0,
+                creep.abs() <= f64::from(crate::FRAME_MS),
                 "{drift_ppm} ppm still crept {creep:.1} ms with correction on"
+            );
+            assert!(
+                corrected <= uncorrected,
+                "{drift_ppm} ppm: correction made the buffer cut more ({corrected} vs \
+                 {uncorrected}) — the ratio points the wrong way"
             );
         }
     }

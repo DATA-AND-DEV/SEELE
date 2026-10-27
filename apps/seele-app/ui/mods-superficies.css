@@ -417,6 +417,12 @@
 }
 
 .aviso-de-mod {
+  /* **Sem contêiner.** O aviso é também uma `.superficie-de-mod`, que declara
+     `container: … / inline-size`; a contenção de largura zera o tamanho de
+     conteúdo dele, e a caixa fixa que o leva (`.avisos-de-mod`, sem largura)
+     encolhia ao preenchimento: 20 px, uma letra por linha. Nada neste aviso
+     consulta o contêiner. */
+  container: none;
   pointer-events: auto;
   padding: var(--seele-celula-y) var(--seele-celula-x);
   border: 1px solid var(--seele-linha-forte);

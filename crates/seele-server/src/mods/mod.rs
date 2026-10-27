@@ -1257,6 +1257,85 @@ pub fn preencher_api_e_tema(
     queixas
 }
 
+/// Os MODs ligados de uma API que esta linha não roda: `(id, api)`. A API 0 é
+/// «não preenchida» e não conta, pela mesma regra do portão de `session`.
+///
+/// # Errors
+///
+/// Se o banco não responder.
+pub fn ligados_de_outra_api(
+    persistence: &crate::persistence::Persistence,
+) -> anyhow::Result<Vec<(String, u32)>> {
+    Ok(crate::persistence::mods::enabled(persistence)?
+        .into_iter()
+        .filter(|ligado| ligado.api != 0 && !seele_proto::mods::APIS_ACEITAS.contains(&ligado.api))
+        .map(|ligado| (ligado.id, ligado.api))
+        .collect())
+}
+
+/// **O servidor não sobe com um MOD ligado de outra API**: cada visita seria
+/// recusada antes da portaria (`ModsDeOutraApi`), em silêncio para quem
+/// hospeda. A frase diz qual MOD e o que fazer.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "este servidor tem MODs ligados de uma API que esta versão não roda ({}): com eles, toda \
+     visita seria recusada antes da porta. Atualize cada um para a API {:?}, ou desligue-o \
+     (no app, nas configurações do servidor), e suba de novo",
+    mods.iter().map(|(id, api)| format!("{id}, API {api}")).collect::<Vec<_>>().join("; "),
+    seele_proto::mods::APIS_ACEITAS
+)]
+pub struct ModsDeOutraApiLigados {
+    /// `(id, api)` de cada um.
+    pub mods: Vec<(String, u32)>,
+}
+
+/// **As permissões que cada MOD ligado declara, gravadas para os cargos**
+/// (ADR 0064), lidas do `mod.json` do pacote de
+/// cada hash ligado.
+///
+/// No arranque, ao lado de [`preencher_api_e_tema`], e não em cada
+/// `persistence::mods::enable`: quem liga um MOD (o app, a bancada, o
+/// `seeled`) não tem todos o manifesto na mão, e todo MOD ligado passa por
+/// aqui antes de a primeira sessão poder pedir uma ação dele. Um pacote que
+/// não abre não declara nada — e uma ação não declarada é recusada pelo
+/// portão, o lado seguro. Devolve as queixas, para o registro.
+pub fn gravar_permissoes_declaradas(
+    persistence: &crate::persistence::Persistence,
+    raizes: &crate::RaizesDosMods,
+) -> Vec<String> {
+    let ligados = match crate::persistence::mods::enabled(persistence) {
+        Ok(ligados) => ligados,
+        Err(erro) => return vec![format!("não deu para ler a tabela de MODs: {erro}")],
+    };
+    let mut queixas = Vec::new();
+    for ligado in ligados {
+        let manifesto = std::fs::read_to_string(raizes.pacote_de(&ligado.hash).join("mod.json"))
+            .map_err(anyhow::Error::from)
+            .and_then(|texto| {
+                seele_proto::mods::read_manifest(&texto).map_err(anyhow::Error::from)
+            });
+        match manifesto {
+            Ok(manifesto) => {
+                if let Err(erro) = crate::cargos::gravar_permissoes_do_mod(
+                    persistence,
+                    &ligado.id,
+                    &manifesto.permissoes,
+                ) {
+                    queixas.push(format!(
+                        "{}: as permissões declaradas não foram gravadas: {erro}",
+                        ligado.id
+                    ));
+                }
+            }
+            Err(erro) => queixas.push(format!(
+                "{}: o mod.json do pacote não abriu, e as ações dele ficam sem permissão: {erro}",
+                ligado.id
+            )),
+        }
+    }
+    queixas
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

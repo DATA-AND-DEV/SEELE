@@ -52,7 +52,12 @@ Curto. Cinco a quinze linhas. O valor está em existir, não em ser longo.
 
 ## Versionamento
 
-SemVer. O protocolo tem versão própria, independente da versão do produto (`02`). Compatibilidade de protocolo: **1.x nunca quebra o fio** (ADR 0058). Toda build da linha 1 fala do 9 até o próprio número, e os dois lados conversam pelo menor dos máximos. A janela N−1 abaixo é a história de antes da 1.0.
+SemVer. O protocolo tem versão própria, independente da versão do produto (`02`). Compatibilidade de protocolo: **uma linha nunca quebra o fio** (ADR 0058). Toda build de uma linha fala do primeiro número dela até o próprio, e os dois lados conversam pelo menor dos máximos.
+
+- **A linha 1** (Servidor 1.0, a 0.16) é só o 9.
+- **A linha 2** (Servidor 2.0, a 0.17, transporte WebRTC) começa no 10 e não conversa com a 1 (ADR 0063). Uma linha nova é sempre uma quebra decidida, com ADR, e quem fica na anterior a abre pelo launcher (ADR 0046).
+
+A janela N−1 abaixo é a história de antes da 1.0.
 
 **A janela vale só para o lado que ouve, e isso precisa ser lido junto com a regra.** Todo quadro sai carimbado com a `PROTOCOL_VERSION` global (`control::encode`), nunca com a versão negociada, e a build mais velha recusa o carimbo antes de ler o corpo. Então alargar a janela não faz um par publicado voltar a conectar — foi tentado em 2026-09-14, com a subida para a v5, e desfeito pela medida no mesmo dia. Quem não atualizou perde o servidor quando a versão sobe, e o que resolve isso é o seletor de versão do ADR 0046 ou carimbar a versão negociada (pendência #42), não o número desta janela.
 

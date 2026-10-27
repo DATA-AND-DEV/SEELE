@@ -298,7 +298,28 @@ function desenharModeracao(snapshot) {
   // Mover some também quando não há para onde: um servidor de uma jaula só não
   // tem destino, e um controle cujo objeto não existe é ruído, não lacuna.
   $("moderar-acao-mover").hidden = !snapshot.may_move_person || desenharDestinos() === 0;
+
+  // **Os cargos da pessoa escolhida** (E6 da 0.17): a porta para a camada de
+  // cargos, já na pessoa. Nasce uma vez, pelo script, porque a marcação desta
+  // caixa é de outro dono; quem decide se ela pode mudar algo lá é o servidor,
+  // e a camada diz o motivo de cada caixa desligada.
+  if (typeof abrirCargos === "function" && !portaDosCargos) {
+    portaDosCargos = elemento("div", "moderar-acao");
+    const botao = elemento("button", "moderar-verbo", FRASES_DOS_CARGOS.cargosDestaPessoa);
+    botao.type = "button";
+    botao.addEventListener("click", () => {
+      const quem = quemEstaEscolhido();
+      if (!quem) return;
+      fecharModeracao();
+      abrirCargos({ pessoa: quem.id, aba: "pessoas" });
+    });
+    portaDosCargos.append(botao);
+    $("moderar-sobre").append(portaDosCargos);
+  }
 }
+
+/** A porta para os cargos da pessoa escolhida, criada na primeira abertura. */
+let portaDosCargos = null;
 
 /**
  * As jaulas para onde dá para mover quem está escolhido, e quantas são.
@@ -886,7 +907,9 @@ $("moderar-confirmar").addEventListener("click", async () => {
     // junto, e quem apertou ficaria sem saber se o ato saiu ou não.
     const erro = $("moderar-erro");
     erro.hidden = false;
-    erro.textContent = fraseDeErro(falha);
+    // Um ato que já traduziu a recusa (APAGAR um cargo, `cargos.js`) a manda
+    // pronta: a frase dele nomeia o motivo do servidor, e a genérica não.
+    erro.textContent = typeof falha?.FrasePronta === "string" ? falha.FrasePronta : fraseDeErro(falha);
     return;
   }
   fecharModeracao();

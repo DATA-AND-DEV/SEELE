@@ -48,6 +48,8 @@ use seele_proto::media::MediaHeader;
 use seele_server::persistence::Location;
 use seele_server::{frame, Daemon, ServerConfig};
 
+mod comum;
+
 /// O canal de texto semeado pela migração 1.
 const CANAL: u32 = 1;
 
@@ -71,57 +73,6 @@ const QUADROS: usize = 50;
 /// não importa e o tamanho é o que faz o teste parecer com a vida.
 const PAYLOAD: [u8; 80] = [7; 80];
 
-/// Um verificador que aceita qualquer certificado.
-///
-/// O que está sob teste é o escalonamento da sessão, não o TOFU.
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
-
 /// Um servidor em memória, já atendendo.
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
@@ -141,9 +92,9 @@ async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
 
 /// Um par cru: a conexão QUIC e o fluxo de controle, sem tarefa leitora.
 struct Par {
-    conexao: quinn::Connection,
-    envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
+    conexao: seele_enlace::Conexao,
+    envio: seele_enlace::Envio,
+    recebe: seele_enlace::Recebe,
     /// O que o servidor atribuiu a esta conexão. Nunca escolhido pelo cliente.
     ssrc: Ssrc,
     /// A primeira sala de voz que este par pode ver.
@@ -155,30 +106,16 @@ struct Par {
 /// `janela` é a janela de recepção de fluxo que este par anuncia. Uma janela
 /// pequena não cria o defeito: só encurta o tempo até o par parar de aceitar
 /// bytes, que é a condição do cenário.
-async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-
-    let mut config = quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    ));
-    let mut transporte = quinn::TransportConfig::default();
-    transporte.stream_receive_window(janela.into());
-    config.transport_config(Arc::new(transporte));
-
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(config);
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
-    // A ponta é dona do socket; sem isto ela cai no fim desta função.
+async fn abrir(endereco: SocketAddr, semente: u8, _janela: u32) -> Result<Par> {
+    let comum::Ligado {
+        ponta,
+        conexao,
+        mut envio,
+        mut recebe,
+    } = comum::ligar(endereco).await?;
+    // A ponta é dona do socket; sem isto ela cai no fim desta função e leva a
+    // conexão junto.
     std::mem::forget(ponta);
-
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
     let chave = SigningKey::from_bytes(&[semente; 32]);
     frame::write(
         &mut envio,
@@ -202,7 +139,7 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
         &mut envio,
         &ClientMessage::Response {
             proof: chave
-                .sign(&prova_amarrada(&conexao, &nonce))
+                .sign(&comum::prova_amarrada(&conexao, &nonce))
                 .to_bytes()
                 .to_vec(),
         },
@@ -367,7 +304,7 @@ async fn a_voz_atravessa_enquanto_o_controle_do_falante_esta_preso() -> Result<(
     for seq in 0..QUADROS {
         let _ = falante
             .conexao
-            .send_datagram(quadro(falante.ssrc, u16::try_from(seq).expect("cabe")).into());
+            .send_datagram(quadro(falante.ssrc, u16::try_from(seq).expect("cabe")));
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
@@ -389,26 +326,4 @@ async fn a_voz_atravessa_enquanto_o_controle_do_falante_esta_preso() -> Result<(
 
     servidor.shutdown();
     Ok(())
-}
-
-/// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
-/// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
-/// Desde o Servidor 1.0, o nonce cru não entra mais.
-fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS sempre entrega a cadeia do servidor");
-    let impressao = seele_proto::transport::certificate_digest(
-        cadeia
-            .first()
-            .expect("a cadeia tem um certificado")
-            .as_ref(),
-    );
-    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
-    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

@@ -1,51 +1,37 @@
-//! Quem ocupa a marca da ESCUTA no quarto não recebe o endereço de quem chega.
+//! Quem ocupa a marca da ESCUTA no quarto não recebe quem chega.
 //!
-//! O I1 da revisão final do Plano 1. A escuta que o quarto dá vira o aviso do
-//! `LEVE`, e o `LEVE` sai antes de qualquer aperto de mão: o ponto repassa a
-//! esse aviso um `AQUI` com o endereço público de quem chega. A marca da escuta
-//! (os 16 primeiros caracteres da impressão digital, e um `e`) está em todo
-//! link, e no quarto fica quem escreveu primeiro. Um anfitrião 0.15.0 nunca a
-//! registra: a marca dele está sempre livre. A revisão mediu um ocupante
-//! recebendo o endereço de quem voltava pela lista em 0,36 s.
+//! O I1 da revisão final do Plano 1, na linha 2.
 //!
-//! A regra que fecha o caso barato é `bilhete_desta_volta`: a escuta só troca o
-//! aviso quando mora no IP do servidor que a mesma resposta do quarto deu. A
-//! escuta e o servidor de um anfitrião moram na mesma máquina e saem pelo mesmo
-//! IP público.
+//! # O que mudou na 0.17
 //!
-//! # O caminho que estes testes percorrem
+//! Até a 0.16 o risco morava em quem chega: a escuta que o quarto dava virava
+//! o aviso do `LEVE`, e o ponto repassava a esse aviso um `AQUI` com o endereço
+//! público de quem chegava, antes de qualquer TLS. A regra que fechava o caso
+//! (`bilhete_desta_volta`) era do cliente: a escuta só valia no IP do servidor
+//! da mesma resposta.
 //!
-//! O de verdade: `Connection::connect` com o bilhete guardado (o do link) e a
-//! impressão conferida. Desde a tarefa 14b da F7 é a `Chegada` da ponte que
-//! pergunta ao quarto, junto com a corrida, e aplica a regra
-//! (`Chegada::com_o_quarto`). Antes, o `connect` do app perguntava e montava o
-//! bilhete desta volta, e este arquivo copiava os três passos à mão. A
-//! pergunta crua ao quarto que sobra aqui é só para conferir que o cenário
-//! está montado.
-//!
-//! O anfitrião X é o de um 0.15.0: o servidor dele se registra com a marca
-//! `fp16s`, pelo próprio socket do QUIC (o espelho, como `registrar` faz), e a
-//! escuta dele não registra a `fp16e`. Quem a registra é o ocupante.
+//! A linha 2 não manda `LEVE`. Quem chega manda `CHAMA` **ao ponto**, e quem
+//! decide a quem repassar é o ponto (`enc3.md`): ele procura as duas marcas
+//! (servidor e escuta) e só manda o `CHAMADO` — que leva o endereço que ele
+//! viu de quem chega e o `U` desta tentativa — se as duas estiverem lá **e no
+//! mesmo IP**. Senão, `NINGUEM`. A ameaça é a mesma (a marca da escuta está em
+//! todo link, e o `MORA3` de um servidor não é assinado); a guarda mudou de
+//! lado, e é o ponto de verdade (`seele_encontro::Ponto`) que este arquivo
+//! mede agora.
 //!
 //! # Por que o outro IP é o `::1`
 //!
-//! O macOS só tem o `127.0.0.1` no loopback IPv4 (o `127.0.0.2` é recusado com
-//! «Can't assign requested address»). O outro IP desta máquina é o `::1`. O
-//! ponto abre uma escuta por família e as duas dividem o quarto, como em
-//! produção (`seele_encontro::Ponto::abrir_com_quarto`). Quem chega, o ocupante
-//! e a escuta de X falam com a escuta IPv4, e o servidor de X se registra:
+//! O macOS só tem o `127.0.0.1` no loopback IPv4. O outro IP desta máquina é
+//! o `::1`, e o ponto abre uma escuta por família dividindo o quarto, como em
+//! produção.
 //!
-//! - **pela IPv6, de `::1`**, no caso que a regra corta: o ocupante mora noutro
-//!   IP que o servidor da mesma resposta;
-//! - **pela IPv4, de `127.0.0.1`**, no controle: o ocupante mora no IP do
-//!   servidor, como alguém atrás do mesmo NAT, ou quem tomou as duas marcas. Ele
-//!   recebe, e é o que prova que o caso de cima mede alguma coisa.
+//! # O que fica de resíduo, dito
 //!
-//! # Por que `[::ffff:127.0.0.1]`
-//!
-//! Pelo mesmo motivo de `volta_pela_trilha.rs`: `enlace::e_publico` pergunta por
-//! loopback na forma escrita, então a forma mapeada conta como pública e o
-//! `LEVE` sai por ela, mas o pacote ainda chega a um socket desta máquina.
+//! Quem ocupa a escuta **no mesmo IP** do servidor (atrás do mesmo NAT) recebe
+//! o `CHAMADO`, como recebia o `AQUI` até a 0.16 — é o controle abaixo. E quem
+//! ocupa **as duas** marcas recebe tudo e atende em nome do anfitrião; o que
+//! impede isso de virar sessão com um impostor é a impressão do DTLS conferida
+//! antes do `Hello`, e não o ponto.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -53,23 +39,21 @@ use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use seele_ffi::uri::Bilhete;
-use seele_ffi::{ConnectConfig, Connection, Trust};
-use seele_proto::encontro::{ler_aqui, moro, Marca, Marcas, Vizinhanca, TAMANHO};
-use seele_server::persistence::Location;
-use seele_server::{Daemon, ServerConfig};
+use seele_proto::encontro::{
+    chama, ler_resposta3, mora3, Chama, Credencial, Marca, Marcas, Resposta3, Vizinhanca,
+};
 
 mod vaga;
 
-/// Quanto se espera um `AQUI` que o `LEVE` faria chegar.
-///
-/// O `LEVE` sai antes do aperto de mão, e quem o recebe o recebe em
-/// milissegundos (a revisão mediu 0,36 s com o aperto de mão inteiro). Três
-/// segundos é a espera do controle da revisão.
-const ESPERA: Duration = Duration::from_secs(3);
+/// Quanto se espera um `CHAMADO` ou a resposta do ponto. O ponto espera o
+/// `ATENDE` por 3 s antes do `CALADO`.
+const ESPERA: Duration = Duration::from_secs(5);
+
+/// A impressão de um servidor X qualquer: as marcas saem dela.
+const IMPRESSAO_DE_X: &str = "5e1e0a0b0c0d0e0f00112233445566778899aabbccddeeff0011223344556677";
 
 /// Um ponto de verdade com as duas escutas, IPv4 e IPv6, dividindo o quarto.
-fn subir_o_ponto() -> (SocketAddr, SocketAddr, Arc<seele_encontro::Quarto>) {
+fn subir_o_ponto() -> (SocketAddr, SocketAddr) {
     let quarto = Arc::new(seele_encontro::Quarto::novo());
     let quatro = seele_encontro::Ponto::abrir_com_quarto(
         SocketAddr::from(([127, 0, 0, 1], 0)),
@@ -93,206 +77,170 @@ fn subir_o_ponto() -> (SocketAddr, SocketAddr, Arc<seele_encontro::Quarto>) {
     std::thread::spawn(move || {
         let _ = seis.servir();
     });
-    (em_quatro, em_seis, quarto)
+    (em_quatro, em_seis)
 }
 
-/// Espera o quarto chegar a `quantos` moradores, ou diz que não chegou.
-async fn esperar_o_quarto(quarto: &seele_encontro::Quarto, quantos: usize, quem: &str) {
-    let ate = tokio::time::Instant::now() + Duration::from_secs(1);
-    while quarto.quantos() < quantos && tokio::time::Instant::now() < ate {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+/// Registra `marca` pelo `MORA3`, com o cookie que o ponto pede.
+async fn morar(socket: &tokio::net::UdpSocket, ponto: SocketAddr, marca: &Marca) {
+    let mut cookie = None;
+    let mut balde = [0_u8; 1500];
+    for _ in 0..3 {
+        socket
+            .send_to(&mora3(marca, cookie.as_ref()), ponto)
+            .await
+            .unwrap();
+        let (lidos, _) = tokio::time::timeout(Duration::from_secs(2), socket.recv_from(&mut balde))
+            .await
+            .expect("o ponto não respondeu ao MORA3")
+            .unwrap();
+        match ler_resposta3(balde.get(..lidos).unwrap_or_default()) {
+            Some(Resposta3::Desafio { cookie: novo, .. }) => cookie = Some(novo),
+            Some(Resposta3::Morou { .. }) => return,
+            outra => panic!("o ponto não aceitou o MORA3 de {marca}: {outra:?}"),
+        }
     }
-    assert_eq!(
-        quarto.quantos(),
-        quantos,
-        "o registro de {quem} não chegou ao quarto em um segundo: sem ele, este teste não mede \
-         a regra"
-    );
+    panic!("o ponto pediu o cookie três vezes");
 }
 
-/// O primeiro `AQUI` com a marca do aviso de X que chega a `socket`, e de quem
-/// ele fala: é o endereço público de quem chega.
-async fn aqui_do_aviso(socket: &tokio::net::UdpSocket, aviso: &Marca) -> Option<SocketAddr> {
-    let mut balde = [0_u8; TAMANHO];
+/// O primeiro `CHAMADO` para `escuta` que chega a `socket`, se chegar.
+async fn chamado_para(socket: &tokio::net::UdpSocket, escuta: &Marca) -> Option<SocketAddr> {
+    let mut balde = [0_u8; 1500];
     let ate = tokio::time::Instant::now() + ESPERA;
     loop {
         let Ok(Ok((lidos, _))) = tokio::time::timeout_at(ate, socket.recv_from(&mut balde)).await
         else {
             return None;
         };
-        if let Some((marca, quem_chega)) = balde.get(..lidos).and_then(ler_aqui) {
-            if marca == *aviso {
-                return Some(quem_chega);
+        if let Some(Resposta3::Chamado(chamado)) =
+            ler_resposta3(balde.get(..lidos).unwrap_or_default())
+        {
+            if chamado.escuta == *escuta {
+                return chamado.candidatos.first().copied();
             }
         }
     }
 }
 
-/// O que cada um recebeu do `LEVE` de quem chegou.
-struct Recebido {
-    /// O que chegou à escuta de X, a do link.
-    escuta_de_x: Option<SocketAddr>,
-    /// O que chegou ao ocupante da marca da escuta.
-    ocupante: Option<SocketAddr>,
+/// O que o ponto respondeu a quem chamou, se respondeu.
+async fn resposta_a(socket: &tokio::net::UdpSocket, servidor: &Marca) -> Option<Resposta3> {
+    let mut balde = [0_u8; 1500];
+    let ate = tokio::time::Instant::now() + ESPERA;
+    loop {
+        let Ok(Ok((lidos, _))) = tokio::time::timeout_at(ate, socket.recv_from(&mut balde)).await
+        else {
+            return None;
+        };
+        let Some(resposta) = ler_resposta3(balde.get(..lidos).unwrap_or_default()) else {
+            continue;
+        };
+        let marca = match &resposta {
+            Resposta3::Ninguem { marca }
+            | Resposta3::Calado { marca }
+            | Resposta3::Aqui { marca, .. }
+            | Resposta3::Recusa { marca, .. } => marca,
+            _ => continue,
+        };
+        if marca == servidor {
+            return Some(resposta);
+        }
+    }
 }
 
-/// A volta a X, composta como o `connect` do app a compõe, com o servidor de X
-/// registrado pela escuta IPv6 do ponto (`servidor_pelo_ipv6`) ou pela IPv4.
-async fn voltar_com_o_ocupante(servidor_pelo_ipv6: bool) -> Recebido {
-    let (ponto, ponto_seis, quarto) = subir_o_ponto();
+/// O que cada lado viu de uma chamada a X com o ocupante na escuta.
+struct Visto {
+    /// O endereço de quem chega, se o `CHAMADO` chegou ao ocupante.
+    ocupante: Option<SocketAddr>,
+    /// O que o ponto respondeu a quem chamou.
+    resposta: Option<Resposta3>,
+}
 
-    // X, um servidor de verdade, em `[::]` como o de produção abre.
-    let config = ServerConfig {
-        name: "Casa".into(),
-        listen: SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)),
-        database: Location::Memory,
-        ..ServerConfig::default()
-    };
-    let x = Arc::new(Daemon::bind(config).await.unwrap());
-    let porta_de_x = x.local_addr().unwrap().port();
-    let fp = x.fingerprint().to_owned();
-    let rodando = Arc::clone(&x);
-    tokio::spawn(async move {
-        let _ = rodando.run().await;
-    });
-    let marcas = Marcas::do_servidor(&fp).expect("a impressão de X forma marcas");
+/// O servidor de X registra a marca dele pela escuta IPv6 do ponto
+/// (`servidor_pelo_ipv6`, o caso que a guarda corta) ou pela IPv4 (o controle:
+/// o mesmo IP do ocupante). O ocupante registra a marca da escuta de X, que
+/// está em todo link, pela IPv4. Quem chega chama X pelo ponto.
+async fn chamar_com_o_ocupante(servidor_pelo_ipv6: bool) -> Visto {
+    let (ponto, ponto_seis) = subir_o_ponto();
+    let marcas = Marcas::do_servidor(IMPRESSAO_DE_X).expect("a impressão de X forma marcas");
 
-    // A escuta de avisos de X: é ela que o link de X leva no bilhete.
-    let escuta_de_x = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let do_link = Bilhete::novo(
-        ponto.to_string(),
-        escuta_de_x.local_addr().unwrap().to_string(),
-    )
-    .unwrap();
-
-    // O ocupante: só precisa dos 16 primeiros caracteres da impressão, que
-    // estão em todo link. A resposta ao `MORO` sai depois do registro.
     let ocupante = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let ocupante_em = ocupante.local_addr().unwrap();
-    ocupante
-        .send_to(&moro(marcas.escuta()), ponto)
-        .await
-        .unwrap();
-    let mut balde = [0_u8; TAMANHO];
-    tokio::time::timeout(Duration::from_secs(1), ocupante.recv_from(&mut balde))
-        .await
-        .expect("o ponto não respondeu ao MORO do ocupante")
-        .unwrap();
-    esperar_o_quarto(&quarto, 1, "do ocupante").await;
+    morar(&ocupante, ponto, marcas.escuta()).await;
 
-    // O servidor de X se registra pelo socket do QUIC, como `registrar` faz.
-    // O espelho é `[::]`, então o IPv4 vai na forma mapeada.
-    let espelho = x.espelho().expect("X tem o espelho do socket do servidor");
-    let por_onde = if servidor_pelo_ipv6 {
-        ponto_seis
+    let servidor_de_x = if servidor_pelo_ipv6 {
+        let socket = tokio::net::UdpSocket::bind((Ipv6Addr::LOCALHOST, 0))
+            .await
+            .expect("o loopback IPv6 abre");
+        morar(&socket, ponto_seis, marcas.servidor()).await;
+        socket
     } else {
-        let SocketAddr::V4(quatro) = ponto else {
-            panic!("a escuta IPv4 do ponto não está em IPv4: {ponto}");
-        };
-        SocketAddr::from((quatro.ip().to_ipv6_mapped(), quatro.port()))
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        morar(&socket, ponto, marcas.servidor()).await;
+        socket
     };
-    espelho
-        .send_to(&moro(marcas.servidor()), por_onde)
-        .expect("o MORO do servidor de X sai pelo espelho");
-    esperar_o_quarto(&quarto, 2, "do servidor de X").await;
 
-    // O cenário, conferido por uma pergunta crua ao quarto: o ocupante na
-    // escuta, e o servidor de X no IP em que ele se registrou.
-    let achado = seele_ffi::onde_mora_hoje(&ponto.to_string(), &fp).await;
-    assert_eq!(
-        achado.escuta(),
-        Some(ocupante_em),
-        "o quarto não deu a escuta do ocupante ({achado:?}): este teste não mede a regra"
-    );
-    let ip_do_servidor = achado
-        .servidor()
-        .map(|servidor| servidor.ip().to_canonical());
-    let esperado: std::net::IpAddr = if servidor_pelo_ipv6 {
-        Ipv6Addr::LOCALHOST.into()
-    } else {
-        [127, 0, 0, 1].into()
-    };
-    assert_eq!(
-        ip_do_servidor,
-        Some(esperado),
-        "o quarto não deu o servidor de X no IP em que ele se registrou ({achado:?}): este \
-         teste não mede a regra"
-    );
+    let quem_chega = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let pedido = chama(&Chama {
+        servidor: marcas.servidor().clone(),
+        escuta: marcas.escuta().clone(),
+        credencial: Credencial::nova("Uabcdefghijklmnopqrstuvwxyz012345").unwrap(),
+        candidatos: Vec::new(),
+    });
+    quem_chega.send_to(&pedido, ponto).await.unwrap();
 
-    let casa = tempfile::tempdir().unwrap();
-    let config = ConnectConfig {
-        server: format!("[::ffff:127.0.0.1]:{porta_de_x}"),
-        alternate_servers: Vec::new(),
-        nickname: "pessoa".into(),
-        home: casa.path().display().to_string(),
-        join_secret: None,
-        expected_fingerprint: Some(fp.clone()),
-        codigo_esperado: None,
-        // O bilhete guardado, e não o desta volta: quem pergunta ao quarto e
-        // aplica a regra é a ponte, junto com a corrida.
-        bilhete: Some(do_link.clone()),
-        audio: false,
-        capture_device: None,
-        playback_device: None,
-    };
-    let entrada = tokio::task::spawn_blocking(move || Connection::connect(config))
-        .await
-        .unwrap();
-
-    let (escuta_de_x, ocupante) = tokio::join!(
-        aqui_do_aviso(&escuta_de_x, marcas.aviso()),
-        aqui_do_aviso(&ocupante, marcas.aviso()),
+    let (ocupante_viu, resposta) = tokio::join!(
+        chamado_para(&ocupante, marcas.escuta()),
+        resposta_a(&quem_chega, marcas.servidor()),
     );
-    let (conexao, confianca) = entrada.expect("a entrada em X deu certo");
-    assert!(
-        matches!(confianca, Trust::FirstContactVerified { .. }),
-        "a entrada em X não conferiu a impressão do link ({confianca:?}): este teste não mede o \
-         caso da volta"
-    );
-    conexao.disconnect();
-    x.shutdown();
-    Recebido {
-        escuta_de_x,
-        ocupante,
+    drop(servidor_de_x);
+    Visto {
+        ocupante: ocupante_viu,
+        resposta,
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_ocupa_a_marca_da_escuta_de_outro_ip_nao_recebe_quem_chega() {
     let _vaga = vaga::minha();
-    let recebido = voltar_com_o_ocupante(true).await;
+    let visto = chamar_com_o_ocupante(true).await;
 
     assert_eq!(
-        recebido.ocupante, None,
-        "quem ocupou a marca da escuta, noutro IP que o servidor de X, recebeu do `LEVE` o \
-         endereço de quem chega ({:?}), antes de qualquer TLS: a escuta do quarto virou aviso \
-         sem o servidor da mesma resposta confirmá-la",
-        recebido.ocupante
+        visto.ocupante, None,
+        "quem ocupou a marca da escuta, noutro IP que o servidor de X, recebeu o CHAMADO com o \
+         endereço de quem chega ({:?}): o ponto repassou sem conferir que a escuta e o servidor \
+         moram no mesmo IP",
+        visto.ocupante
     );
     assert!(
-        recebido.escuta_de_x.is_some(),
-        "a escuta de X, a do link, não recebeu o `LEVE`: com a escuta do quarto deixada de \
-         lado, o aviso tinha de ser o do bilhete guardado, e X não fura o NAT para quem chega"
+        matches!(visto.resposta, Some(Resposta3::Ninguem { .. })),
+        "com a escuta noutro IP, o ponto tinha de dizer NINGUEM a quem chamou, e disse {:?}",
+        visto.resposta
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn no_ip_do_servidor_a_escuta_do_quarto_recebe_quem_chega() {
     let _vaga = vaga::minha();
-    // O controle, e o resíduo: no IP do servidor da mesma resposta, a escuta
-    // do quarto vira o aviso. É o anfitrião que mudou de porta, ou quem tomou
-    // as duas marcas (até o SEELE-ENC/2, Plano 4).
-    let recebido = voltar_com_o_ocupante(false).await;
+    // O controle, e o resíduo: no IP do servidor, a escuta do quarto recebe o
+    // `CHAMADO`. É o anfitrião de verdade (escuta e servidor saem pelo mesmo
+    // IP público), ou quem está atrás do mesmo NAT. Sem este lado, o de cima
+    // passaria também com um ponto que nunca repassa nada.
+    let visto = chamar_com_o_ocupante(false).await;
 
-    assert!(
-        recebido.ocupante.is_some(),
-        "a escuta do quarto, no IP do servidor da mesma resposta, não recebeu o `LEVE`: ou a \
-         regra recusa a escuta do anfitrião de verdade, ou este arranjo não faz o `LEVE` \
-         chegar, e o outro teste deste arquivo passa sem medir nada"
-    );
+    let Some(quem_chega) = visto.ocupante else {
+        panic!(
+            "a escuta do quarto, no IP do servidor, não recebeu o CHAMADO: ou o ponto recusa o \
+             anfitrião de verdade, ou este arranjo não faz o CHAMA chegar, e o outro teste deste \
+             arquivo passa sem medir nada"
+        );
+    };
     assert_eq!(
-        recebido.escuta_de_x, None,
-        "a escuta do link recebeu o `LEVE` com a escuta do quarto confirmada: o aviso não foi \
-         trocado pela escuta de hoje"
+        quem_chega.ip().to_canonical(),
+        std::net::IpAddr::from([127, 0, 0, 1]),
+        "o CHAMADO não levou o endereço que o ponto viu de quem chega"
+    );
+    // Ninguém atendeu (o ocupante não manda ATENDE): o ponto diz CALADO.
+    assert!(
+        matches!(visto.resposta, Some(Resposta3::Calado { .. })),
+        "a escuta recebeu e não atendeu, e o ponto disse {:?} em vez de CALADO",
+        visto.resposta
     );
 }

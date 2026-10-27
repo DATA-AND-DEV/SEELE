@@ -1,11 +1,12 @@
-//! Length-prefixed framing over a QUIC stream.
+//! Length-prefixed framing over a channel of the link.
 //!
-//! `specs/02-protocolo.md` puts control on "bidirectional stream #0, long
-//! lived". A QUIC stream is a byte stream, so message boundaries have to be
-//! written down: four bytes of big-endian length, then the frame.
+//! `specs/02-protocolo.md` puts control on one long-lived ordered stream: since
+//! 0.17 that is the `ctl` channel of `seele-enlace`. The channel is a byte
+//! stream (the envelope's data messages concatenate), so message boundaries
+//! have to be written down: four bytes of big-endian length, then the frame.
 //!
 //! **A regra mora em [`seele_proto::quadro`]**, e aqui fica só a E/S do
-//! `quinn` e a distinção entre [`FimDoQuadro::Fechou`] e
+//! enlace e a distinção entre [`FimDoQuadro::Fechou`] e
 //! [`FimDoQuadro::NaoEntendi`], que é do servidor.
 //!
 //! The length is checked against [`seele_proto::control::MAX_FRAME_LEN`] **before**
@@ -84,7 +85,7 @@ impl std::fmt::Display for FimDoQuadro {
 /// # Errors
 ///
 /// Fails on a closed stream, an oversized length, or a malformed frame.
-pub async fn read<T>(stream: &mut quinn::RecvStream) -> Result<T>
+pub async fn read<T>(stream: &mut crate::transporte::Recebe) -> Result<T>
 where
     T: for<'de> Deserialize<'de> + Validate,
 {
@@ -103,7 +104,7 @@ where
 /// # Errors
 ///
 /// [`FimDoQuadro`], que nomeia o caso.
-pub async fn ler<T>(stream: &mut quinn::RecvStream) -> Result<T, FimDoQuadro>
+pub async fn ler<T>(stream: &mut crate::transporte::Recebe) -> Result<T, FimDoQuadro>
 where
     T: for<'de> Deserialize<'de> + Validate,
 {
@@ -126,7 +127,7 @@ where
 ///
 /// [`FimDoQuadro`], que nomeia o caso.
 pub async fn ler_da_lista<T: ListaDeCima>(
-    stream: &mut quinn::RecvStream,
+    stream: &mut crate::transporte::Recebe,
 ) -> Result<(u32, Lido<T>), FimDoQuadro> {
     let frame = ler_bruto(stream).await?;
     let lido = seele_proto::control::decode_da_lista::<T>(&frame)
@@ -150,7 +151,7 @@ pub async fn ler_da_lista<T: ListaDeCima>(
 ///
 /// [`FimDoQuadro::Fechou`] se o fluxo acabou, inclusive no meio de um quadro;
 /// [`FimDoQuadro::NaoEntendi`] para um comprimento vazio ou acima do teto.
-pub async fn ler_bruto(stream: &mut quinn::RecvStream) -> Result<Vec<u8>, FimDoQuadro> {
+pub async fn ler_bruto(stream: &mut crate::transporte::Recebe) -> Result<Vec<u8>, FimDoQuadro> {
     let mut prefixo = [0_u8; seele_proto::quadro::PREFIXO_LEN];
     stream
         .read_exact(&mut prefixo)
@@ -190,7 +191,7 @@ pub async fn ler_bruto(stream: &mut quinn::RecvStream) -> Result<Vec<u8>, FimDoQ
 /// # Errors
 ///
 /// Fails if the message is invalid or the stream is closed.
-pub async fn write<T>(stream: &mut quinn::SendStream, message: &T) -> Result<()>
+pub async fn write<T>(stream: &mut crate::transporte::Envio, message: &T) -> Result<()>
 where
     T: Serialize + Validate,
 {
@@ -207,7 +208,11 @@ where
 /// # Errors
 ///
 /// Fails if the message is invalid or the stream is closed.
-pub async fn write_em<T>(stream: &mut quinn::SendStream, versao: u8, message: &T) -> Result<()>
+pub async fn write_em<T>(
+    stream: &mut crate::transporte::Envio,
+    versao: u8,
+    message: &T,
+) -> Result<()>
 where
     T: Serialize + Validate,
 {

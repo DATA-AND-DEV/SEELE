@@ -48,6 +48,28 @@
   }
   new MutationObserver(desenharTopo).observe(sessao, { attributes: true, attributeFilter: ["data-aba"] });
 
+  // ------------------------------------------------- as várias sessões (E3)
+
+  // O operador do desktop não aparece aqui (os controles dele vão para a faixa
+  // de voz), e é nele que mora a linha da voz: ela muda de lugar, para debaixo
+  // do topo, com os mesmos ouvintes. E o topo diz, em toda aba, qual servidor
+  // se vê e quantas conversas estão abertas — a CONVERSA não tem outro lugar
+  // que diga. As palavras vêm de `camada-sessoes.js`.
+  const vozFoco = doDesktop("voz-foco");
+  vozFoco.classList.add("cel-voz-foco");
+  topo.after(vozFoco);
+  // A linha da queda que volta sozinha («ficou para trás»), também debaixo do
+  // topo: o operador não aparece no celular.
+  vozFoco.before(doDesktop("sessao-ficou-para-tras"));
+  const ondeEstou = h("span", { class: "cel-sessao-na-vista" });
+  ondeEstou.hidden = true;
+  topo.querySelector(".cel-topo-sobre").append(ondeEstou);
+  aoMudaremAsSessoes.push(() => {
+    const rotulo = rotuloDaSessaoNaVista();
+    ondeEstou.hidden = !rotulo;
+    ondeEstou.textContent = rotulo ?? "";
+  });
+
   // ------------------------------------------------------------- a trilha
 
   // As redes deitadas no alto da aba, num trilho que rola de lado.

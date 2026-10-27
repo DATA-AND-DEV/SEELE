@@ -40,15 +40,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::SigningKey;
 use seele_core::enlace::{Aviso, Destino, Enlace, Motivo};
-use seele_core::{frame, MemoryPinStore};
+use seele_core::MemoryPinStore;
 use seele_proto::control::{ClientMessage, DisconnectReason, ServerMessage};
 use seele_proto::ids::{ChannelId, ClientMessageId};
 use seele_server::hospedagem::Hospedagem;
 use seele_server::persistence::Location;
 
 mod ambiente;
+mod par_cru;
 mod vaga;
 
 /// O canal que todo servidor novo tem.
@@ -182,132 +183,35 @@ async fn encerrar_avisa_cada_sessao_que_o_servidor_fechou() -> Result<()> {
 
 // ------------------------------------------------- a despedida da saída do app
 
-/// Um verificador que aceita qualquer certificado: o que está sob teste não é
-/// o TOFU, e o certificado é o que este servidor acabou de gerar.
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
-
-/// Um par cru: o `closed()` do QUIC é o que este teste mede, e o `Enlace` não
-/// o expõe — ele trata a queda e segue para a bateria.
+/// Um par cru: o `closed()` da conexão é o que este teste mede, e o `Enlace`
+/// não o expõe — ele trata a queda e segue para a bateria.
+///
+/// Desde a 0.17 (ADR 0063), pelo `par_cru` do enlace, e não por um QUIC cru.
+/// O fechamento que o servidor manda ao se despedir é o `corte` no `ctl`, e o
+/// par o vê como `Motivo::Fechada { codigo }` — o que era o
+/// `ApplicationClosed` do QUIC.
 struct ParCru {
-    /// Guardado para o endpoint do cliente viver tanto quanto a conexão.
-    _ponta: quinn::Endpoint,
-    conexao: quinn::Connection,
+    /// Guardada para a ponta do cliente viver tanto quanto a conexão.
+    _ponta: seele_enlace::Ponta,
+    conexao: seele_enlace::Conexao,
     /// O envio fica aberto: fechá-lo seria o cliente se despedindo, e quem se
     /// despede aqui é o servidor.
-    _envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
+    _envio: seele_enlace::Envio,
+    recebe: seele_enlace::Recebe,
 }
 
-/// Só o aperto de mão do QUIC, sem nenhuma mensagem do SEELE: é quem está
-/// entrando, e ainda não se apresentou.
-async fn so_o_quic(endereco: SocketAddr) -> Result<(quinn::Endpoint, quinn::Connection)> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    )));
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
-    Ok((ponta, conexao))
+/// Só o aperto de mão do enlace (ICE, DTLS, os canais e a apresentação), sem
+/// nenhuma mensagem do SEELE: é quem está entrando, e ainda não se apresentou.
+async fn so_o_enlace(endereco: SocketAddr) -> (seele_enlace::Ponta, seele_enlace::Conexao) {
+    par_cru::discar(endereco).await
 }
 
 /// Faz o aperto de mão inteiro e espera o laço da sessão estar de pé.
 async fn par_cru(endereco: SocketAddr, semente: u8) -> Result<ParCru> {
-    let (ponta, conexao) = so_o_quic(endereco).await?;
-
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
     let chave = SigningKey::from_bytes(&[semente; 32]);
-    frame::write(
-        &mut envio,
-        &ClientMessage::Hello {
-            faixa: seele_proto::FAIXA,
-            client: "par-cru".into(),
-            nickname: format!("pessoa{semente:03}"),
-            public_key: chave.verifying_key().to_bytes().to_vec(),
-            join_secret: None,
-            material_e2ee: None,
-            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
-        },
-    )
-    .await?;
+    let mut par = par_cru::ate_a_prova(endereco, &chave, &format!("pessoa{semente:03}")).await;
     loop {
-        match frame::read::<ServerMessage>(&mut recebe).await? {
-            ServerMessage::Challenge { nonce } => {
-                let cadeia = conexao
-                    .peer_identity()
-                    .and_then(|identidade| {
-                        identidade
-                            .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                            .ok()
-                    })
-                    .expect("o TLS sempre entrega a cadeia do servidor");
-                let impressao = seele_proto::transport::certificate_digest(
-                    cadeia
-                        .first()
-                        .expect("a cadeia tem um certificado")
-                        .as_ref(),
-                );
-                let nonce: [u8; 32] = nonce.as_slice().try_into()?;
-                let prova = seele_proto::assinatura::prova_de_cliente(&impressao, &nonce);
-                frame::write(
-                    &mut envio,
-                    &ClientMessage::Response {
-                        proof: chave.sign(&prova).to_bytes().to_vec(),
-                    },
-                )
-                .await?;
-            }
+        match par.proximo().await? {
             ServerMessage::Session { .. } => break,
             ServerMessage::Disconnecting { reason } => {
                 anyhow::bail!("o servidor recusou o par cru: {reason:?}")
@@ -319,17 +223,17 @@ async fn par_cru(endereco: SocketAddr, semente: u8) -> Result<ParCru> {
     // A barreira: o `Session` sai no aperto de mão, **antes** de a sessão
     // assinar o barramento. O `Pong` só sai do laço, e o laço só começa
     // depois da assinatura.
-    frame::write(&mut envio, &ClientMessage::Ping { timestamp: 1 }).await?;
+    par.mandar(&ClientMessage::Ping { timestamp: 1 }).await?;
     loop {
-        if let ServerMessage::Pong { .. } = frame::read::<ServerMessage>(&mut recebe).await? {
+        if let ServerMessage::Pong { .. } = par.proximo().await? {
             break;
         }
     }
     Ok(ParCru {
-        _ponta: ponta,
-        conexao,
-        _envio: envio,
-        recebe,
+        _ponta: par.ponta,
+        conexao: par.conexao,
+        _envio: par.envio,
+        recebe: par.recebe,
     })
 }
 
@@ -398,15 +302,15 @@ async fn a_despedida_avisa_mesmo_com_o_runtime_caindo_em_seguida() -> Result<()>
         mut recebe,
     } = par_cru(endereco, 61).await?;
     // E alguém no meio do aperto de mão no instante em que quem hospeda fecha:
-    // conectado no QUIC, sem `Hello`. Esta conexão não é sessão, não escuta o
-    // barramento e não lê aviso nenhum. O que a alcança é o fechamento do
-    // endpoint no fim da despedida, e é ela que prova a espera depois dele —
+    // conectado no enlace, sem `Hello`. Esta conexão não é sessão, não escuta o
+    // barramento e não lê aviso nenhum. O que a alcança é o fechamento da
+    // ponta no fim da despedida, e é ela que prova a espera depois dele —
     // a sessão de cima já fechou sozinha a essa altura, e passaria sem ela.
-    let (_ponta_de_quem_entra, entrando) = so_o_quic(endereco).await?;
+    let (_ponta_de_quem_entra, entrando) = so_o_enlace(endereco).await;
 
     let leitor = tokio::spawn(async move {
         loop {
-            match frame::read::<ServerMessage>(&mut recebe).await {
+            match seele_server::frame::read::<ServerMessage>(&mut recebe).await {
                 Ok(ServerMessage::Disconnecting { reason }) => return Some(reason),
                 Ok(_) => {}
                 Err(_) => return None,
@@ -422,7 +326,7 @@ async fn a_despedida_avisa_mesmo_com_o_runtime_caindo_em_seguida() -> Result<()>
     // O prazo de espera é mais longo que o tempo ocioso do transporte, de
     // propósito: sem a despedida, o `closed()` só chega por ele, e a mensagem
     // da reprovação diz quanto levou em vez de um prazo esgotado sem número.
-    let ate_fechar = |conexao: quinn::Connection| async move {
+    let ate_fechar = |conexao: seele_enlace::Conexao| async move {
         let fechou = tokio::time::timeout(
             seele_proto::transport::IDLE_TIMEOUT + Duration::from_secs(5),
             conexao.closed(),
@@ -455,7 +359,7 @@ async fn a_despedida_avisa_mesmo_com_o_runtime_caindo_em_seguida() -> Result<()>
          cair (a conexão fechou em {levou:?}: {fechou:?}): a casca dele diz «não foi possível \
          alcançar o servidor» a quem precisa ler que quem hospeda fechou"
     );
-    let Ok(erro) = fechou else {
+    let Ok(motivo) = fechou else {
         panic!(
             "a conexão não fechou nem pelo tempo ocioso do transporte ({levou:?}): o teste não \
              mede nada"
@@ -463,13 +367,14 @@ async fn a_despedida_avisa_mesmo_com_o_runtime_caindo_em_seguida() -> Result<()>
     };
     assert!(
         levou < Duration::from_secs(1),
-        "o cliente levou {levou:?} para ver a conexão fechar ({erro}): o fechamento não saiu \
-         antes de o runtime cair, e quem estava dentro só descobre pelos {:?} do tempo ocioso",
+        "o cliente levou {levou:?} para ver a conexão fechar ({motivo:?}): o fechamento não \
+         saiu antes de o runtime cair, e quem estava dentro só descobre pelos {:?} do tempo \
+         ocioso",
         seele_proto::transport::IDLE_TIMEOUT
     );
     assert!(
-        matches!(erro, quinn::ConnectionError::ApplicationClosed(_)),
-        "a conexão fechou por outra coisa que não o servidor se despedindo: {erro}"
+        matches!(motivo, seele_enlace::Motivo::Fechada { .. }),
+        "a conexão fechou por outra coisa que não o servidor se despedindo: {motivo:?}"
     );
 
     // O teto é a promessa de `despedir` a quem fecha o app: a casca segura o
@@ -482,7 +387,7 @@ async fn a_despedida_avisa_mesmo_com_o_runtime_caindo_em_seguida() -> Result<()>
          inteira"
     );
 
-    let Ok(erro_de_quem_entrava) = fechou_entrando else {
+    let Ok(motivo_de_quem_entrava) = fechou_entrando else {
         panic!(
             "a conexão de quem entrava não fechou nem pelo tempo ocioso do transporte \
              ({levou_entrando:?}): o teste não mede nada"
@@ -490,14 +395,11 @@ async fn a_despedida_avisa_mesmo_com_o_runtime_caindo_em_seguida() -> Result<()>
     };
     assert!(
         levou_entrando < Duration::from_secs(1)
-            && matches!(
-                erro_de_quem_entrava,
-                quinn::ConnectionError::ApplicationClosed(_)
-            ),
+            && matches!(motivo_de_quem_entrava, seele_enlace::Motivo::Fechada { .. }),
         "quem estava no meio do aperto de mão levou {levou_entrando:?} para ver a conexão fechar \
-         ({erro_de_quem_entrava}): o fechamento do endpoint ficou na fila quando o runtime caiu, e \
-         só o tempo ocioso do transporte a derrubou. A despedida tem de esperar o endpoint \
-         terminar de fechar (`wait_idle`) antes de devolver"
+         ({motivo_de_quem_entrava:?}): o fechamento da ponta ficou na fila quando o runtime caiu, \
+         e só o tempo ocioso do transporte a derrubou. A despedida tem de esperar a ponta \
+         terminar de fechar antes de devolver"
     );
     Ok(())
 }

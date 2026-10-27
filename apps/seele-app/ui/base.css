@@ -212,6 +212,13 @@ input:focus {
   border-color: var(--seele-laranja-nerv);
 }
 
+/* O foco do teclado nos campos também tem anel: a cor da borda sozinha, de 1px, é pouco para quem navega por Tab (a bancada de área útil
+   mede o anel de cada parada). O clique do ponteiro continua só com a borda. */
+input:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 1px;
+}
+
 /* **Uma ação principal tem peso de ação principal** — U04.
  *
  * «Botões visualmente pouco diferenciados […] As ações principais parecem
@@ -648,4 +655,118 @@ input:focus {
 .barra-controle-fechar:hover {
   color: var(--seele-negro-absoluto);
   background: var(--seele-vermelho-alerta);
+}
+
+
+/* ------------------------------------------------- a área útil inteira
+ *
+ * O esqueleto das telas de hospedar e de configurar, e de toda tela que decide algo: a tela USA a janela toda, e o que fica estreito é o
+ * parágrafo (a medida de leitura), e não a tela.
+ *
+ *   ┌ cabeça ─────────────────────────────────────────┐   `.area-cabeca`: o título e o que diz onde se está
+ *   ├ contexto ─┬ conteúdo (rola na PRÓPRIA linha) ───┤   `.area-contexto` (opcional) | `.area-conteudo`
+ *   └ barra de ações ─────────────────────────────────┘   `.area-barra`: uma linha da grade, e não `sticky` sobre o conteúdo
+ *
+ * A barra é uma LINHA da grade (`auto minmax(0,1fr) auto`): o conteúdo rola dentro da linha dele, e nada fica debaixo da barra. O defeito do
+ * rodapé fixo que cobria o botão de um MOD (P1-isolada-4) some por construção, e não por margem.
+ *
+ * O conteúdo é uma grade (`.area-grade`) de cartões (`.area-cartao`) que se redistribuem com a largura (`auto-fit` + `minmax`); cada
+ * parágrafo dentro dela tem no máximo ~68ch (`--seele-leitura`). No celular (< 700px) a barra empilha os botões em largura inteira, com
+ * alvo de pelo menos 44px e a área segura do aparelho; com o teclado aberto sobre um campo ela sai de cena (`html[data-teclado]`, posto por
+ * `acompanharOTeclado` em `tela-boot.js`) e volta quando ele fecha. Sem animação nenhuma, então `prefers-reduced-motion` já é respeitado. */
+
+:root { --seele-leitura: 68ch; }
+
+.boot-caixa.area {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.area-cabeca {
+  padding: 20px 32px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 24px;
+}
+
+.area-cabeca > .boot-titulo { margin: 0; }
+
+.area-conteudo {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px 32px;
+}
+
+.area-grade {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.area-grade .area-larga { grid-column: 1 / -1; }
+
+.area-cartao {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-absoluto);
+  min-width: 0;
+}
+
+.area-cartao p,
+.area-leitura {
+  max-width: var(--seele-leitura);
+}
+
+.area-barra {
+  padding: 12px 32px;
+  padding-inline: max(32px, env(safe-area-inset-left)) max(32px, env(safe-area-inset-right));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+}
+
+.area-barra > p { margin: 0; flex: 1 1 320px; max-width: var(--seele-leitura); }
+.area-barra .boot-saidas { flex-direction: row; margin: 0; }
+.area-barra .boot-saidas > button { width: auto; min-width: 200px; margin: 0; }
+
+@media (max-width: 700px) {
+  .area-cabeca { padding: 12px 16px; }
+  .area-conteudo { padding: 16px; }
+  .area-grade { gap: 16px; }
+  .area-barra {
+    padding: 12px 16px;
+    padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .area-barra > p { flex: 0 0 auto; }
+  .area-barra .boot-saidas { flex-direction: column; }
+  .area-barra .boot-saidas > button { width: 100%; min-height: 44px; letter-spacing: 0.12em; padding-inline: 8px; }
+}
+
+/* O teclado sobre um campo: a barra sai de cena e o campo com foco nunca fica debaixo dela. Vale no celular em pé e deitado (844x390, onde a
+   largura passa de 700px mas a altura não deixa sobrar nada com o teclado aberto). Ao fechar o teclado, `data-teclado` cai e ela volta. */
+@media (max-width: 700px), (max-height: 500px) {
+  html[data-teclado] .area-barra { display: none; }
 }

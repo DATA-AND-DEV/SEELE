@@ -50,7 +50,22 @@ pub const MANIFEST_SCHEMA: u32 = 1;
 /// retrato projetado no lugar do `snapshot` inteiro, e ouve a tela e a metade
 /// de servidor por eventos. As APIs 3, 4 e 5 continuam rodando na linha do
 /// Servidor 0.15, pelo launcher — não aqui.
-pub const MOD_API_VERSION: u32 = 6;
+///
+/// **7 desde a 0.17, e é um alargamento** (E8 da 0.17; `api/v7.json`). A
+/// API 6 está publicada e congelada, e o que a 0.17 acrescenta para os
+/// cargos entra como versão nova: o manifesto declara as permissões do MOD
+/// (`permissoes`, [`Manifest::permissoes`]) e o MOD pede ações autorizadas pelo
+/// servidor (`ClientMessage::AcaoDeMod`). A 7 não tira nada da 6: um MOD da 6
+/// continua rodando aqui ([`APIS_ACEITAS`] é `[7, 6]`), sem permissões.
+pub const MOD_API_VERSION: u32 = 7;
+
+/// A primeira API em que um manifesto pode declarar `permissoes`.
+///
+/// Uma lista declarada num manifesto de API menor é recusada
+/// ([`Refused::PermissoesPedemApiNova`]), e não ignorada: um MOD que conta com
+/// a permissão e declara a 6 rodaria numa build que não a confere, e a
+/// pessoa só descobriria pela ação que passa sem cargo nenhum.
+pub const PRIMEIRA_API_COM_PERMISSOES: u32 = 7;
 
 /// **As versões que este build executa**, da mais nova para a mais velha.
 ///
@@ -105,7 +120,12 @@ pub const APIS_ACEITAS: &[u32] = APIS_POR_LINHA[0].1;
 /// que o indexador aceita: os MODs da 6 são da linha 1, e os legados das 3, 4 e
 /// 5 continuam publicáveis para quem hospeda pelo Servidor 0.15 — e saem
 /// **depois** dos da 6 (spec-mestre, §4).
-pub const APIS_POR_LINHA: [(&str, &[u32]); 2] = [("1", &[6]), ("0.15", &[5, 4, 3])];
+///
+/// **Desde a 0.17, a primeira é a `2`** (ADR 0063), que roda a 7 e a 6: a 7
+/// acrescenta as permissões de MOD dos cargos, e um MOD da 6 continua
+/// rodando. A `1` fica com a 6 só, porque o launcher a roda ao lado como ela
+/// saiu, e a `0.15` com as dela.
+pub const APIS_POR_LINHA: [(&str, &[u32]); 3] = [("2", &[7, 6]), ("1", &[6]), ("0.15", &[5, 4, 3])];
 
 /// A linha de servidor deste build, pela tabela congelada do fio (D-fio-1): o
 /// nome que [`crate::version::linha_do_protocolo`] dá ao `PROTOCOL_VERSION`.
@@ -157,6 +177,23 @@ pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
             "retrato",
             "eventos-da-tela",
             "aviso-do-servidor",
+        ],
+        // **A 7 é a 6 inteira, mais as ações autorizadas** (E8 da 0.17): um
+        // alargamento, como a 4 e a 5 foram da 3. A ordem é a da 6, com a nova
+        // no fim, para o espelho da casca (`CAPACIDADES_POR_API`, em
+        // `ui/base.js`) a conferir do mesmo jeito.
+        7 => &[
+            "superficies",
+            "contribuicoes",
+            "estilos",
+            "classes",
+            "volume",
+            "arquivo",
+            "tema",
+            "retrato",
+            "eventos-da-tela",
+            "aviso-do-servidor",
+            "acoes",
         ],
         _ => &[],
     }
@@ -455,6 +492,21 @@ pub struct Manifest {
     /// não tem onde rodar.
     #[serde(default)]
     pub tema: bool,
+    /// **As permissões que este MOD declara** (API 7, E8 da 0.17): as ações
+    /// que ele pede ao servidor por `ClientMessage::AcaoDeMod`, cada uma com o
+    /// nome que a tela de cargos mostra.
+    ///
+    /// Vazia sem a chave, e é o caso de todo MOD da API 6, que continua
+    /// rodando sem permissão nenhuma. Declarar uma exige a API 7
+    /// ([`PRIMEIRA_API_COM_PERMISSOES`]).
+    ///
+    /// **Uma build da linha 1 (a 0.16) recusa o manifesto inteiro** com a
+    /// chave, como `Malformed`, por `deny_unknown_fields`, e antes de olhar a
+    /// API. É o que o teste `tests/manifesto_da_0_16.rs` prende contra o
+    /// parser congelado dela. Por isso o catálogo não pode oferecer a uma 0.16
+    /// uma versão da 7: quem filtra é a `api` de cada versão do catálogo.
+    #[serde(default)]
+    pub permissoes: Vec<crate::cargos::PermissaoDeclarada>,
 }
 
 /// Why a manifest was refused.
@@ -545,6 +597,47 @@ pub enum Refused {
     ArquivosDemais {
         /// Quantos o manifesto traz.
         quantos: usize,
+        /// Quantos cabem.
+        teto: usize,
+    },
+
+    /// **Permissões declaradas num manifesto de API anterior à 7.**
+    ///
+    /// Recusado, e não ignorado: o autor que escreveu `permissoes` conta com
+    /// elas, e uma build que as ignorasse deixaria a ação passar sem cargo.
+    /// Quem quer permissão declara a API 7.
+    #[error("mod declares `permissoes` with API {api}; permissions need API {exige}")]
+    PermissoesPedemApiNova {
+        /// A API que o manifesto declara.
+        api: u32,
+        /// A primeira que aceita permissões.
+        exige: u32,
+    },
+
+    /// A lista de permissões declaradas não passa (`cargos::validar_declaradas`).
+    #[error("mod declares invalid permissions: {0}")]
+    PermissoesInvalidas(crate::cargos::RecusaDaDeclaracao),
+
+    /// **O `reach` tem mais itens do que o anúncio leva**
+    /// ([`crate::control::MAX_REACH_ITENS`]). Recusado na instalação, e não só
+    /// no anúncio: instalado, ele era um MOD que nenhum servidor consegue
+    /// anunciar.
+    #[error("mod declares {quantos} reach items, the ceiling is {teto}")]
+    AlcancesDemais {
+        /// Quantos o manifesto traz.
+        quantos: usize,
+        /// Quantos cabem.
+        teto: usize,
+    },
+
+    /// **Um item do `reach` passa do teto do anúncio**, em bytes UTF-8
+    /// ([`crate::control::MAX_REACH_LEN`]).
+    #[error("mod reach item {posicao} is {tamanho} bytes, the ceiling is {teto}")]
+    AlcanceGrandeDemais {
+        /// Qual da lista, contando do zero.
+        posicao: usize,
+        /// Quantos bytes ele tem.
+        tamanho: usize,
         /// Quantos cabem.
         teto: usize,
     },
@@ -645,6 +738,14 @@ pub fn read_manifest(text: &str) -> Result<Manifest, Refused> {
     if manifest.tema && manifest.server.is_none() {
         return Err(Refused::TemaSemMetadeDeServidor);
     }
+    if !manifest.permissoes.is_empty() && manifest.api < PRIMEIRA_API_COM_PERMISSOES {
+        return Err(Refused::PermissoesPedemApiNova {
+            api: manifest.api,
+            exige: PRIMEIRA_API_COM_PERMISSOES,
+        });
+    }
+    crate::cargos::validar_declaradas(&manifest.permissoes)
+        .map_err(Refused::PermissoesInvalidas)?;
     if manifest.arquivos.len() > TETO_DE_ARQUIVOS {
         return Err(Refused::ArquivosDemais {
             quantos: manifest.arquivos.len(),
@@ -658,6 +759,27 @@ pub fn read_manifest(text: &str) -> Result<Manifest, Refused> {
         if inner_path(&arquivo.split('/').collect::<Vec<_>>()).is_none() {
             return Err(Refused::ArquivoInvalido { posicao });
         }
+    }
+    // **Os tetos do anúncio, aqui também** (`control::check_anuncio`): um
+    // `reach` que o fio recusaria instalava calado, e o servidor que ligasse o
+    // MOD não conseguia anunciá-lo a ninguém.
+    if manifest.reach.len() > crate::control::MAX_REACH_ITENS {
+        return Err(Refused::AlcancesDemais {
+            quantos: manifest.reach.len(),
+            teto: crate::control::MAX_REACH_ITENS,
+        });
+    }
+    if let Some((posicao, item)) = manifest
+        .reach
+        .iter()
+        .enumerate()
+        .find(|(_, item)| item.len() > crate::control::MAX_REACH_LEN)
+    {
+        return Err(Refused::AlcanceGrandeDemais {
+            posicao,
+            tamanho: item.len(),
+            teto: crate::control::MAX_REACH_LEN,
+        });
     }
     Ok(manifest)
 }
@@ -1150,6 +1272,8 @@ mod tests {
             );
         }
         assert!(!capacidades_da_api(6).is_empty());
+        assert!(!capacidades_da_api(7).is_empty());
+        assert!(capacidades_da_api(8).is_empty());
     }
 
     /// **O conjunto desta linha é um só** (Step 5 do corte): `APIS_ACEITAS`,
@@ -1204,18 +1328,18 @@ mod tests {
                 "a linha {linha} aparece duas vezes"
             );
         }
-        assert_eq!(apis_de_toda_linha(), vec![6, 5, 4, 3]);
+        assert_eq!(apis_de_toda_linha(), vec![7, 6, 5, 4, 3]);
     }
 
-    /// **A API 6 é a deste build** (o corte; tarefa 13 do plano da F3). E é uma
-    /// ruptura, e não um alargamento: `regiao` e `cartoes` saem (decisão do
-    /// dono de 08/10), e o MOD que os usava reescreve para as regiões e os
-    /// pontos de contribuição.
+    /// **A API 6 continua como saiu** (o corte; tarefa 13 do plano da F3), e a
+    /// 0.17 a roda ao lado da 7. A 6 foi uma ruptura: `regiao` e `cartoes`
+    /// saíram (decisão do dono de 08/10), e o MOD que os usava reescreveu para
+    /// as regiões e os pontos de contribuição. A lista dela é a de sempre, e
+    /// não ganha a capacidade da 7.
     #[test]
-    fn a_api_6_e_a_deste_build() {
-        assert_eq!(MOD_API_VERSION, 6);
-        assert_eq!(APIS_ACEITAS, &[6]);
+    fn a_api_6_continua_como_saiu() {
         assert_eq!(MOD_API_MINIMA, 6);
+        assert!(APIS_ACEITAS.contains(&6), "a 0.17 deixou de rodar a API 6");
         let seis = capacidades_da_api(6);
         for nome in [
             "superficies",
@@ -1242,6 +1366,85 @@ mod tests {
             10,
             "a API 6 tem uma capacidade que o rascunho não lista"
         );
+        assert!(!seis.contains(&"acoes"), "a API 6 ganhou a capacidade da 7");
+    }
+
+    /// **A 7 é a deste build, e é um alargamento** (E8 da 0.17): a 6 inteira,
+    /// na mesma ordem, mais `acoes` no fim, e as duas rodam aqui.
+    #[test]
+    fn a_api_7_e_a_deste_build_e_alarga_a_6() {
+        assert_eq!(MOD_API_VERSION, 7);
+        assert_eq!(APIS_ACEITAS, &[7, 6]);
+        assert_eq!(PRIMEIRA_API_COM_PERMISSOES, 7);
+        let sete = capacidades_da_api(7);
+        assert_eq!(&sete[..sete.len() - 1], capacidades_da_api(6));
+        assert_eq!(sete.last(), Some(&"acoes"));
+    }
+
+    fn com_api(api: u32, extra: &str) -> String {
+        manifesto_minimo().replace(
+            &format!("\"api\": {MOD_API_VERSION},"),
+            &format!("\"api\": {api},{extra}"),
+        )
+    }
+
+    const PERMISSOES: &str =
+        r#" "permissoes": [{"acao": "fechar-mesa", "nome": "Fechar a mesa"}],"#;
+
+    /// **Um MOD da API 6 continua rodando na 0.17, sem permissões**, e um da 7
+    /// lê as que declara.
+    #[test]
+    fn a_api_6_roda_sem_permissoes_e_a_7_as_le() {
+        let seis = read_manifest(&com_api(6, "")).expect("um MOD da API 6 foi recusado na 0.17");
+        assert!(seis.permissoes.is_empty());
+        let sete = read_manifest(&com_api(7, PERMISSOES)).expect("um MOD da API 7 foi recusado");
+        assert_eq!(sete.permissoes.len(), 1);
+        assert_eq!(sete.permissoes[0].acao, "fechar-mesa");
+        assert!(!sete.permissoes[0].todos);
+        let sete_sem = read_manifest(&com_api(7, "")).expect("a 7 sem permissões foi recusada");
+        assert!(sete_sem.permissoes.is_empty());
+    }
+
+    /// **Permissões num manifesto que não declara a API 7 são recusadas**, pelo
+    /// nome e com os dois números, e não ignoradas.
+    ///
+    /// Reverter: sem a conferência em `read_manifest`, o `com_api(6, …)` abaixo
+    /// é lido com a permissão, e este teste reprova.
+    #[test]
+    fn permissoes_sem_a_api_7_declarada_sao_recusadas() {
+        assert_eq!(
+            read_manifest(&com_api(6, PERMISSOES)),
+            Err(Refused::PermissoesPedemApiNova { api: 6, exige: 7 })
+        );
+        // Sem `api` nenhuma, o manifesto inteiro é recusado: a API não se
+        // presume.
+        let sem_api = com_api(7, PERMISSOES).replace("\"api\": 7,", "");
+        assert!(matches!(
+            read_manifest(&sem_api),
+            Err(Refused::Malformed { .. })
+        ));
+    }
+
+    /// Uma lista de permissões que não passa na regra dos cargos é recusada
+    /// aqui, ao ler o pacote, e não só no servidor.
+    #[test]
+    fn permissoes_invalidas_sao_recusadas_ao_ler_o_pacote() {
+        let repetida =
+            r#" "permissoes": [{"acao": "a", "nome": "A"}, {"acao": "a", "nome": "B"}],"#;
+        assert!(matches!(
+            read_manifest(&com_api(7, repetida)),
+            Err(Refused::PermissoesInvalidas(_))
+        ));
+        let torta = r#" "permissoes": [{"acao": "Fechar Mesa", "nome": "A"}],"#;
+        assert!(matches!(
+            read_manifest(&com_api(7, torta)),
+            Err(Refused::PermissoesInvalidas(_))
+        ));
+        let chave_a_mais = r#" "permissoes": [{"acao": "a", "nome": "A", "admin": true}],"#;
+        assert!(matches!(
+            read_manifest(&com_api(7, chave_a_mais)),
+            Err(Refused::Malformed { .. })
+        ));
     }
 
     #[test]

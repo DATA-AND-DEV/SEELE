@@ -28,11 +28,28 @@ seele/
 
 ## Linguagem
 
-Rust, edição 2021, MSRV fixado. Justificativa: precisamos de áudio sem GC pausando o thread de tempo real, de um binário único sem runtime, e o ecossistema de QUIC/Opus/TUI em Rust é maduro. `ratatui` e `quinn` são as duas bibliotecas que decidem a viabilidade e ambas são sólidas.
+Rust, edição 2021, MSRV fixado. Justificativa: precisamos de áudio sem GC pausando o thread de tempo real, de um binário único sem runtime, e o ecossistema de QUIC/Opus/TUI em Rust é maduro. (Desde a 0.17 o transporte é o WebRTC do `str0m`, e não o QUIC do `quinn`: ver «Transporte» abaixo.) `ratatui` e `quinn` são as duas bibliotecas que decidem a viabilidade e ambas são sólidas.
 
-## Transporte: QUIC
+## Transporte: WebRTC desde a 0.17 (ADR 0063)
 
-**Decisão:** QUIC via `quinn`, uma única conexão por cliente.
+**Decisão vigente:** WebRTC, pelo `str0m`, no crate `seele-enlace`, que é comum ao `seele-core` e ao `seele-server` (emenda ao ADR 0002).
+- É **um transporte só**, no nativo e no navegador.
+- O anfitrião é ICE-lite, com DTLS passivo, num socket UDP só (8383), separado pelo primeiro byte: STUN, DTLS e o texto do ENC/3.
+- Os canais:
+  - `ctl` é confiável e ordenado: é o controle;
+  - `voz` não tem ordem nem retransmissão: são os datagramas de voz;
+  - `u` e `b` são os fluxos extras de antes, com `protocol = "seele/2"`.
+- O DTLS do `seeled` usa o mesmo certificado longo P-256 que o QUIC usava, então a impressão do convite não muda.
+- **Hospedar continua só nos nativos.** O navegador só entra.
+- A travessia de NAT é pelo ponto de encontro (ENC/3), com o TURN opcional de quem usa.
+
+O texto abaixo é a decisão da linha 1 (até a 0.16), preservado como registro. Os motivos dele valem para o WebRTC menos dois:
+- não há migração de conexão: a «bateria interna» reconecta por um aperto de mão novo;
+- não há 0-RTT.
+
+## Transporte: QUIC (linha 1, até a 0.16)
+
+**Decisão (linha 1):** QUIC via `quinn`, uma única conexão por cliente.
 
 Motivos:
 - **Streams confiáveis** para controle e texto; **datagrams não confiáveis** para voz, na mesma conexão. Sem head-of-line blocking entre as duas coisas.

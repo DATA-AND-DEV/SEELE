@@ -326,19 +326,24 @@ pub async fn serve(
     // Argon2id da admissão, que o ADR 0021 escolheu caro de propósito. Um
     // pacote que compra dezenas de milissegundos de CPU alheia é amplificação
     // boa demais para deixar de graça num servidor exposto.
+    //
+    // **Na 0.17 o balde é olhado duas vezes, e gasto uma.** O enlace o consulta
+    // sem gastar antes de criar o `Rtc` de um Binding novo
+    // (`taxa::Portaria::admite`, ligado em `Daemon::bind`): um endereço que já
+    // estourou não ganha nem DTLS. A ficha é gasta só aqui, depois do DTLS,
+    // quando a origem já provou que recebe o que se manda a ela: um STUN com a
+    // origem forjada não esvazia o balde de quem tem aquele endereço.
     let admitido = {
         let ip = connection.remote_address().ip();
         server.portaria.lock().await.permitir(ip, Instant::now())
     };
 
-    // Com prazo. Uma conexão que nunca abre o fluxo de controle segurava esta
-    // tarefa até o tempo ocioso do QUIC recolhê-la; o orçamento do aperto de
-    // mão em `specs/02-protocolo.md` é de dez segundos, e vale para a espera
-    // inteira e não só para a parte depois do primeiro quadro.
-    let (mut send, mut recv) = tokio::time::timeout(HANDSHAKE_TIMEOUT, connection.accept_bi())
-        .await
-        .with_context(|| format!("client opened no control stream in {HANDSHAKE_TIMEOUT:?}"))?
-        .context("client never opened the control stream")?;
+    // O `ctl` já vem aberto: o enlace o entrega com a conexão (canal 0,
+    // negociado). **Os dois lados ficam vivos até a sessão acabar**: largar o
+    // `Recebe` do `ctl` é o corte `02 0`, e isso fecha a conexão.
+    let (mut send, mut recv) = connection
+        .controle()
+        .context("o enlace não entregou o canal de controle")?;
 
     if !admitido {
         // Recusado com motivo, e não em silêncio: quem estoura este balde por
@@ -376,7 +381,13 @@ pub async fn serve(
     // Fase 1: `Hello`, `Challenge` e `Response`, até a chave provada.
     let provado = match tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
-        handshake(&mut send, &mut recv, &server, &mut carimbo),
+        handshake(
+            &mut send,
+            &mut recv,
+            &server,
+            &connection.impressao_dtls_do_par(),
+            &mut carimbo,
+        ),
     )
     .await
     {
@@ -423,7 +434,7 @@ pub async fn serve(
                 .await;
             }
             Toque::Fechou => {
-                connection.close(0_u32.into(), b"parou de tocar");
+                connection.close(0, b"parou de tocar");
                 bail!("a conexão parou de tocar sem decisão: quem ligava desistiu, ou outra conexão da mesma pessoa tomou o lugar desta");
             }
         }
@@ -493,6 +504,7 @@ pub async fn serve(
     // saída simétrica de [`assentar`]. Aqui havia quatro operações soltas, todas
     // chaveadas por pessoa, e era a ordem normal de uma queda de rede que as
     // fazia apagar a conexão seguinte da mesma pessoa.
+    reservar_ao_sair(&server, &session).await;
     desassentar(&server, &voice_rooms, &session, Saida::Conexao).await;
 
     // E sai de quem empresta a subida, pelo mesmo motivo de todo o resto desta
@@ -556,7 +568,7 @@ fn manda_esta_sessao_embora(event: &Event, person: PersonId) -> bool {
 /// e a despedida. Devolve o erro da sessão, com `detalhe`.
 async fn recusar_o_aperto(
     connection: &crate::transporte::Conexao,
-    send: &mut quinn::SendStream,
+    send: &mut crate::transporte::Envio,
     carimbo: u8,
     reason: DisconnectReason,
     detalhe: String,
@@ -585,7 +597,7 @@ enum Toque {
 /// e quem já foi atendido nesta ligação seguem sem tocar.
 async fn tocar(
     connection: &crate::transporte::Conexao,
-    send: &mut quinn::SendStream,
+    send: &mut crate::transporte::Envio,
     recepcao: &crate::recepcao::Recepcao,
     provado: &Provado,
 ) -> Toque {
@@ -666,13 +678,158 @@ fn sair_da_sala(server: &Server, chave: Option<crate::campainha::Chave>) {
 /// loopback precisa e pouco para quem não está mais lá.
 async fn despedir(
     connection: &crate::transporte::Conexao,
-    send: &mut quinn::SendStream,
+    send: &mut crate::transporte::Envio,
     motivo: &[u8],
 ) {
-    let _ = tokio::time::timeout(Duration::from_secs(1), send.stopped()).await;
+    despedir_com(connection, send, 0, motivo).await;
+}
+
+/// [`despedir`] com um código de fechamento próprio. Só o FellBehind tem um
+/// (`CODIGO_FICOU_PARA_TRAS`); as outras despedidas fecham com o código 0.
+async fn despedir_com(
+    connection: &crate::transporte::Conexao,
+    send: &mut crate::transporte::Envio,
+    codigo: u32,
+    motivo: &[u8],
+) {
+    // `entregue` é o `stopped()` do QUIC no enlace: volta quando o par
+    // confirmou o fim, cortou, ou a conexão caiu.
+    let _ = tokio::time::timeout(Duration::from_secs(1), send.entregue()).await;
     // Fechar com motivo, em vez de deixar cair: dá ao outro lado um encerramento
     // limpo em vez de um tempo esgotado.
-    connection.close(0_u32.into(), motivo);
+    connection.close(codigo, motivo);
+}
+
+/// **Guarda o assento da graça de uma sessão que acabou, por qualquer caminho.**
+///
+/// The connection is gone. Hold the seat for the grace window rather than
+/// letting a tunnel cost somebody their place — specs/02-protocolo.md.
+///
+/// Roda no `serve`, logo antes do [`desassentar`], e por isso cobre **toda**
+/// saída do `run_session`. Morava no fim do laço, e só rodava quando o laço saía
+/// pelo `break`: uma escrita que falhava (`?`) ou a vigia do FellBehind
+/// ([`escrever_vigiando`]) saíam sem reserva, e a reconexão chegava sem sala.
+/// Era o oposto da queda recuperável.
+///
+/// A sala vem da **lotação desta sessão**, e não de uma variável do laço que
+/// um `?` não devolve: o assento que esta conexão tem agora é o que ela guarda.
+///
+/// **Só se esta ainda for a conexão desta pessoa.** Uma sessão que morre
+/// depois de a pessoa já ter voltado guardava um assento com o `ssrc` dela, e
+/// essa reserva obsoleta vale cinco minutos: quem saiu da sala de propósito e
+/// se desconectou em seguida era re-sentado na conexão seguinte por causa de
+/// uma reserva deixada por uma conexão anterior. Mesma família do defeito que
+/// `desassentar` fecha, e a mesma pergunta o resolve.
+async fn reservar_ao_sair(server: &Server, session: &Session) {
+    let sala = server
+        .occupancy
+        .lock()
+        .await
+        .everywhere()
+        .into_iter()
+        .find(|(_, quem)| quem.person == session.person && quem.sessao == session.id)
+        .map(|(sala, _)| sala);
+    let Some(id) = sala else {
+        return;
+    };
+    let presentes = server.presentes.lock().await;
+    let mut slots = server.slots.lock().await;
+    if !crate::server::reservar_o_assento_da_carencia(
+        &presentes,
+        &mut slots,
+        session.person,
+        session.id,
+        id,
+        session.ssrc,
+        Instant::now(),
+    ) {
+        // Contado, e não só dito: o guarda acerta **não** escrevendo, e um
+        // teste de ponta a ponta não tem como distinguir «a reserva foi
+        // recusada» de «esta conexão nunca chegou ao fim» olhando só para o
+        // efeito. Ver [`crate::server::Desassentamentos::reserva_obsoleta`].
+        server.desassentamentos.reserva_obsoleta();
+        tracing::info!(
+            person = %session.person,
+            sessao = %session.id,
+            "esta conexão já não é a desta pessoa; o assento não foi reservado por ela"
+        );
+    }
+}
+
+/// De quanto em quanto a escrita pendente olha o barramento (ver
+/// [`escrever_vigiando`]).
+const VIGIA_DO_ATRASO: Duration = Duration::from_millis(250);
+
+/// A sessão ficou para trás enquanto uma escrita esperava crédito.
+///
+/// É o erro que tira a sessão do laço, como qualquer escrita que falha. A
+/// conexão já foi fechada com [`seele_proto::transport::CODIGO_FICOU_PARA_TRAS`]
+/// por [`escrever_vigiando`], e o atraso já foi contado.
+#[derive(Debug, thiserror::Error)]
+#[error("a sessão ficou {quantos} eventos para trás com a escrita parada")]
+struct FicouParaTras {
+    quantos: u64,
+}
+
+/// **Uma escrita para o par que não esquece o barramento.**
+///
+/// Com o crédito `0x04`, quem para de ler segura esta escrita, e ela fica
+/// pendente pelo tempo que o par quiser. Enquanto isso a sessão não volta ao
+/// `events.recv()`, e o `Lagged` que encerraria a sessão não é visto nunca. Era
+/// o buraco da pendência nº 1 por outro lado: a sessão ficava presa, os eventos
+/// saíam do anel e mensagens gravadas sumiam para aquela pessoa, sem palavra e
+/// sem número.
+///
+/// A vigia olha, a cada [`VIGIA_DO_ATRASO`], quantos eventos este receptor
+/// ainda não leu. Passou do anel, o `broadcast` já descartou eventos desta
+/// sessão. Então a escrita é abandonada, o atraso é contado e a conexão fecha
+/// com `CODIGO_FICOU_PARA_TRAS`, que não depende de crédito para chegar.
+///
+/// **Sem `Disconnecting` depois**: a escrita abandonada pode ter deixado meio
+/// quadro no fluxo, e um quadro depois dela seria lido torto. O código é a
+/// despedida inteira, e o cliente o lê como `FellBehind`.
+///
+/// A contrapressão sem perda (a escrita pendente com o barramento dentro do
+/// anel) não fecha nada: só espera, como antes.
+async fn escrever_vigiando<T>(
+    send: &mut crate::transporte::Envio,
+    versao: u8,
+    events: &tokio::sync::broadcast::Receiver<Event>,
+    connection: &crate::transporte::Conexao,
+    server: &Server,
+    person: PersonId,
+    mensagem: &T,
+) -> Result<()>
+where
+    T: serde::Serialize + seele_proto::control::Validate,
+{
+    let escrita = frame::write_em(send, versao, mensagem);
+    tokio::pin!(escrita);
+    let mut vigia = tokio::time::interval(VIGIA_DO_ATRASO);
+    vigia.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            feita = &mut escrita => return feita,
+            _ = vigia.tick() => {
+                let nao_lidos = events.len();
+                if nao_lidos > crate::server::ANEL_DO_BARRAMENTO {
+                    let quantos = (nao_lidos - crate::server::ANEL_DO_BARRAMENTO) as u64;
+                    server.atrasos.registrar(quantos);
+                    tracing::warn!(
+                        %person,
+                        quantos,
+                        "o barramento passou à frente desta sessão com a escrita parada; \
+                         fechando com o código de quem ficou para trás"
+                    );
+                    connection.close(
+                        seele_proto::transport::CODIGO_FICOU_PARA_TRAS,
+                        b"fell behind",
+                    );
+                    return Err(FicouParaTras { quantos }.into());
+                }
+            }
+        }
+    }
 }
 
 /// A handshake that did not succeed, with the reason to send back.
@@ -696,9 +853,10 @@ struct Provado {
 }
 
 async fn handshake(
-    send: &mut quinn::SendStream,
-    recv: &mut quinn::RecvStream,
+    send: &mut crate::transporte::Envio,
+    recv: &mut crate::transporte::Recebe,
     server: &Server,
+    impressao_dtls_do_cliente: &[u8; 32],
     carimbo: &mut u8,
 ) -> std::result::Result<Provado, Refusal> {
     // O primeiro quadro, **bruto**: o carimbo é conferido antes do `decode`.
@@ -880,7 +1038,19 @@ async fn handshake(
     // nonce (adendo de 08/10/2026, §9). Uma prova feita para outro servidor
     // carrega a impressão dele e não confere aqui, com a mesma recusa uniforme
     // de qualquer assinatura que não confere.
-    let assinada = seele_proto::assinatura::prova_de_cliente(&server.impressao, &nonce);
+    //
+    // **E a D5 da 0.17:** o rótulo é o `SEELE/2 prova-de-cliente\0`, e a prova
+    // amarra também a impressão do certificado DTLS **que este lado viu** do
+    // cliente. Ela não vem do cliente: vem do enlace. Uma prova feita numa
+    // conexão (com outro DTLS) não vale nesta, nem repassada por quem está no
+    // meio com um DTLS próprio. Na sala pessoal, `server.impressao` é o
+    // SHA-256 da chave da sala (`Daemon::bind`), que é o que quem liga por
+    // código assina.
+    let assinada = seele_proto::assinatura::prova_de_cliente_2(
+        &server.impressao,
+        impressao_dtls_do_cliente,
+        &nonce,
+    );
     verifying
         .verify_strict(&assinada, &Signature::from_bytes(&signature))
         .map_err(|_| Refusal {
@@ -903,8 +1073,8 @@ async fn handshake(
 /// A fase 3 do aperto: a portaria, a conta, os MODs e o `Session`.
 async fn admitir(
     provado: Provado,
-    send: &mut quinn::SendStream,
-    recv: &mut quinn::RecvStream,
+    send: &mut crate::transporte::Envio,
+    recv: &mut crate::transporte::Recebe,
     config: &ServerConfig,
     registry: &Registry,
     server: &Server,
@@ -1370,19 +1540,34 @@ async fn admitir(
         }
     }
 
-    // **Os hashes dos certificados curtos do `h3`** (ADR 0057; Tarefa 2.5 da
-    // F4), uma vez, logo depois do tema, **nos dois transportes**: o navegador
-    // os guarda pela impressão para voltar sem link novo, e o desktop os usa
-    // para montar o link do navegador (`Convite::link_do_navegador`). O nativo
-    // que não os usa os ignora. Só quando há janelas: a sala pessoal não serve
-    // ao navegador.
-    if !server.janelas_do_navegador.is_empty() {
-        let quadro_das_janelas = ServerMessage::HashesDoNavegador {
-            janelas: server.janelas_do_navegador.clone(),
-        };
-        if entende_a_mensagem(&quadro_das_janelas, version) {
-            if let Err(error) = frame::write_em(send, version, &quadro_das_janelas).await {
-                tracing::warn!(%error, "não deu para mandar os hashes do navegador a quem entra");
+    // Os hashes dos certificados curtos do `h3` (`HashesDoNavegador`) saíam
+    // aqui até a 0.16. Na 0.17 não há curto: o navegador confere o
+    // `a=fingerprint` do DTLS, que é o `fp=` do convite, e o quadro não sai
+    // mais (compat-validation pode tirá-lo do vocabulário da linha 2).
+
+    // **Os cargos, logo depois do `Session` e do tema** (ADR 0064,
+    // item 2): as permissões efetivas desta pessoa e o quadro do servidor.
+    let (suas, quadro) = {
+        let db = server.persistence.lock().await;
+        (
+            crate::cargos::suas(&db, account.id),
+            crate::cargos::quadro(&db),
+        )
+    };
+    let mensagens_dos_cargos = [
+        suas.map(ServerMessage::SuasPermissoes),
+        quadro.map(ServerMessage::QuadroDeCargos),
+    ];
+    for mensagem in mensagens_dos_cargos {
+        match mensagem {
+            Ok(mensagem) if entende_a_mensagem(&mensagem, version) => {
+                if let Err(error) = frame::write_em(send, version, &mensagem).await {
+                    tracing::warn!(%error, "não deu para mandar os cargos a quem entra");
+                }
+            }
+            Ok(_) => {}
+            Err(erro) => {
+                tracing::warn!(%erro, "cargos: não deu para ler o que mandar a quem entra")
             }
         }
     }
@@ -1525,8 +1710,8 @@ async fn admitir(
 /// [`Refusal`] com o motivo enumerado, já traduzido para o que o par consegue
 /// decodificar.
 async fn exigir_aceite_dos_mods(
-    send: &mut quinn::SendStream,
-    recv: &mut quinn::RecvStream,
+    send: &mut crate::transporte::Envio,
+    recv: &mut crate::transporte::Recebe,
     server: &Server,
     versao: u8,
 ) -> std::result::Result<String, Refusal> {
@@ -1980,7 +2165,7 @@ async fn run_session(
                     // tela. Parar o fluxo e não ignorá-lo, para que o outro
                     // lado descubra agora.
                     Err(_) => {
-                        let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
+                        let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
                         tracing::debug!(%pessoa, "um fluxo unidirecional chegou sem tipo conhecido");
                         continue;
                     }
@@ -2078,6 +2263,22 @@ async fn run_session(
 
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
     let mut events = server.events.subscribe();
+    // Toda escrita ao par daqui em diante passa pela vigia do atraso: ver
+    // [`escrever_vigiando`]. As despedidas (`let _ = frame::write_em(...)`
+    // com `Disconnecting`) ficam de fora, porque já são o fim.
+    macro_rules! escrever {
+        ($mensagem:expr $(,)?) => {
+            escrever_vigiando(
+                &mut send,
+                session.protocol_version,
+                &events,
+                &connection,
+                server,
+                session.person,
+                $mensagem,
+            )
+        };
+    }
     let mut channels: Vec<ChannelId> = Vec::new();
     // As chaves desta conexão que o escritor ainda não anunciou. Ver
     // [`TETO_NO_AR`].
@@ -2247,19 +2448,15 @@ async fn run_session(
             if quem.person == session.person {
                 continue;
             }
-            frame::write_em(
-                &mut send,
-                session.protocol_version,
-                &ServerMessage::PersonPresent {
-                    profile: PersonProfile {
-                        id: quem.person,
-                        nickname: quem.nickname.clone(),
-                        roles: Vec::new(),
-                        material_e2ee: None,
-                    },
-                    ssrc: quem.ssrc,
+            escrever!(&ServerMessage::PersonPresent {
+                profile: PersonProfile {
+                    id: quem.person,
+                    nickname: quem.nickname.clone(),
+                    roles: Vec::new(),
+                    material_e2ee: None,
                 },
-            )
+                ssrc: quem.ssrc,
+            },)
             .await?;
         }
         // E esta conexão passa a existir para as próximas. Anunciada só quando
@@ -2312,20 +2509,16 @@ async fn run_session(
         if occupant.person == session.person {
             continue;
         }
-        frame::write_em(
-            &mut send,
-            session.protocol_version,
-            &ServerMessage::PersonJoined {
-                voice_room,
-                profile: PersonProfile {
-                    id: occupant.person,
-                    nickname: occupant.nickname.clone(),
-                    roles: Vec::new(),
-                    material_e2ee: None,
-                },
-                ssrc: occupant.ssrc,
+        escrever!(&ServerMessage::PersonJoined {
+            voice_room,
+            profile: PersonProfile {
+                id: occupant.person,
+                nickname: occupant.nickname.clone(),
+                roles: Vec::new(),
+                material_e2ee: None,
             },
-        )
+            ssrc: occupant.ssrc,
+        },)
         .await?;
     }
 
@@ -2344,15 +2537,11 @@ async fn run_session(
     // inversa pode perder uma transmissão que começou entre as duas linhas, e
     // uma transmissão perdida é uma tela que ninguém sabe que existe.
     for (voice_room, person, screen) in server.telas.lock().await.todas() {
-        frame::write_em(
-            &mut send,
-            session.protocol_version,
-            &ServerMessage::ScreenShareStarted {
-                voice_room,
-                person,
-                screen,
-            },
-        )
+        escrever!(&ServerMessage::ScreenShareStarted {
+            voice_room,
+            person,
+            screen,
+        },)
         .await?;
     }
 
@@ -2380,7 +2569,7 @@ async fn run_session(
         Some(Ok(membros)) => {
             for parte in partes_dos_membros(membros) {
                 if entende_a_mensagem(&parte, session.protocol_version) {
-                    frame::write_em(&mut send, session.protocol_version, &parte).await?;
+                    escrever!(&parte).await?;
                 }
             }
         }
@@ -2420,13 +2609,9 @@ async fn run_session(
     // família da pendência 1 — segurar um recurso compartilhado enquanto se
     // escreve para quem não lê.
     let subida_medida = server.subida.lock().await.medida();
-    frame::write_em(
-        &mut send,
-        session.protocol_version,
-        &ServerMessage::HostUplink {
-            bps: crate::tela::caminho_no_fio(server.caminho_bps, subida_medida),
-        },
-    )
+    escrever!(&ServerMessage::HostUplink {
+        bps: crate::tela::caminho_no_fio(server.caminho_bps, subida_medida),
+    },)
     .await?;
 
     loop {
@@ -2449,7 +2634,7 @@ async fn run_session(
                     Veredito::Passa => {}
                     Veredito::Avisa => {
                         tracing::warn!(person = %session.person, "control frames over budget");
-                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
+                        escrever!(&ServerMessage::Alert {
                             severity: AlertSeverity::Warning,
                             reason: AlertReason::RateLimited,
                             operator_text: None,
@@ -2473,12 +2658,57 @@ async fn run_session(
                 }
 
                 match message {
+                    // **Os verbos de cargo** (ADR 0064): a
+                    // regra, a hierarquia e a gravação são de `crate::cargos`,
+                    // numa transação imediata, sobre o estado de agora.
+                    m @ (ClientMessage::CriarCargo { .. }
+                    | ClientMessage::EditarCargo { .. }
+                    | ClientMessage::MoverCargo { .. }
+                    | ClientMessage::ApagarCargo { .. }
+                    | ClientMessage::AtribuirCargo { .. }
+                    | ClientMessage::RevogarCargo { .. }
+                    | ClientMessage::PedirCargos) => {
+                        let atendimento = {
+                            let mut db = server.persistence.lock().await;
+                            crate::cargos::atender(&mut db, session.person, &m)
+                        };
+                        if let Some(atendimento) = atendimento {
+                            if let Some(resposta) = atendimento.resposta {
+                                escrever!(&resposta).await?;
+                            }
+                            if let Some(quadro) = atendimento.quadro_atual {
+                                escrever!(&quadro).await?;
+                            }
+                            if let Some(quadro) = atendimento.difundir {
+                                // **A segurança antes do aviso**: a voz cala e a
+                                // tela para no servidor agora, antes de qualquer
+                                // cliente saber — um par que não lê o `ctl` não
+                                // segura a revogação dele.
+                                aplicar_os_cargos(server, voice_rooms, &atendimento.afetadas).await;
+                                let _ = server.events.send(Event::CargosMudaram {
+                                    quadro,
+                                    afetadas: atendimento.afetadas,
+                                });
+                            }
+                        }
+                    }
+                    // **A ação de MOD**: o portão dos cargos ANTES do despacho
+                    // (`mods::pedidos::executar_acao`). Sem autorização, a metade
+                    // de servidor não é chamada.
+                    ClientMessage::AcaoDeMod { request, id, channel, acao, payload } => {
+                        let response = crate::mods::pedidos::executar_acao(server, session.person, channel, &id, &acao, &payload).await;
+                        let parts = crate::mods::pedidos::partes(&response);
+                        let total = parts.len() as u32;
+                        for (part, payload) in parts.into_iter().enumerate() {
+                            escrever!(&ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
+                        }
+                    }
                     ClientMessage::ModRequest { request, id, channel, payload } => {
                         let response = crate::mods::pedidos::executar(server, session.person, channel, &id, &payload).await;
                         let parts = crate::mods::pedidos::partes(&response);
                         let total = parts.len() as u32;
                         for (part, payload) in parts.into_iter().enumerate() {
-                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
+                            escrever!(&ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
                         }
                     }
                     ClientMessage::EnterVoiceRoom { voice_room: id, password } => {
@@ -2500,7 +2730,7 @@ async fn run_session(
                         // `specs/08-seguranca.md`: a segurança é o servidor
                         // recusando. Esconder o botão é conforto.
                         if !pode(server, session.person, Permission::EnterVoiceRoom).await {
-                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
+                            escrever!(&ServerMessage::Alert {
                                 severity: AlertSeverity::Warning,
                                 reason: AlertReason::VoiceRoomEntryRefused,
                                 operator_text: None,
@@ -2512,7 +2742,7 @@ async fn run_session(
                             id,
                             password.as_deref(),
                         ) {
-                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
+                            escrever!(&ServerMessage::Alert {
                                 severity: AlertSeverity::Warning,
                                 reason: AlertReason::VoiceRoomEntryRefused,
                                 operator_text: None,
@@ -2538,7 +2768,7 @@ async fn run_session(
                                 })
                         };
                         let Some(teto) = teto else {
-                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
+                            escrever!(&ServerMessage::Alert {
                                 severity: AlertSeverity::Warning,
                                 reason: AlertReason::VoiceRoomEntryRefused,
                                 operator_text: None,
@@ -2551,7 +2781,7 @@ async fn run_session(
                             // motivo vai por um alerta próprio para o cliente
                             // poder desfazer o assento que ele já tinha dado a
                             // si mesmo — ver `Room::apply`, braço `Alert`.
-                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
+                            escrever!(&ServerMessage::Alert {
                                 severity: AlertSeverity::Warning,
                                 reason: AlertReason::VoiceRoomFull,
                                 operator_text: None,
@@ -2642,12 +2872,12 @@ async fn run_session(
                                 reason,
                             };
                             if entende_a_mensagem(&aviso, session.protocol_version) {
-                                frame::write_em(&mut send, session.protocol_version, &aviso).await?;
+                                escrever!(&aviso).await?;
                             } else {
                                 // Um par que não conhece a variante recebe o
                                 // que ele conhece. Sem isto, calar a variante
                                 // nova seria calar a recusa inteira para ele.
-                                frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
+                                escrever!(&ServerMessage::Alert {
                                     severity: AlertSeverity::Warning,
                                     reason: AlertReason::PermissionDenied,
                                     operator_text: None,
@@ -2690,7 +2920,7 @@ async fn run_session(
                         };
                         // Oldest first on the wire, so a client can append.
                         for stored in page.into_iter().rev() {
-                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::MessageReceived {
+                            escrever!(&ServerMessage::MessageReceived {
                                 channel: stored.channel,
                                 id: stored.id,
                                 author: stored.author,
@@ -2704,7 +2934,7 @@ async fn run_session(
                         }
                     }
                     ClientMessage::Ping { timestamp } => {
-                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::Pong { timestamp }).await?;
+                        escrever!(&ServerMessage::Pong { timestamp }).await?;
                     }
                     // The roster shows all three (specs/07-estetica.md).
                     // Ignoring them, as this did, made every mute local-only:
@@ -3142,7 +3372,7 @@ async fn run_session(
                             // Everything else a write can fail with is the
                             // database's business and goes to the operator's log.
                             Err(erro) if erro.downcast_ref::<LastVoiceRoom>().is_some() => {
-                                frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
+                                escrever!(&ServerMessage::Alert {
                                     severity: AlertSeverity::Warning,
                                     reason: AlertReason::LastVoiceRoom,
                                     operator_text: None,
@@ -3183,7 +3413,7 @@ async fn run_session(
                         };
                         match pesado {
                             Ok(peso) => {
-                                frame::write_em(&mut send, session.protocol_version, &ServerMessage::ChannelWeighed {
+                                escrever!(&ServerMessage::ChannelWeighed {
                                     channel: id,
                                     messages: peso.messages,
                                     authors: peso.authors,
@@ -3228,14 +3458,14 @@ async fn run_session(
                             None => false,
                         };
                         if !liberado {
-                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::AttachmentUnavailable {
+                            escrever!(&ServerMessage::AttachmentUnavailable {
                                 attachment,
                                 reason: AttachmentRefusal::NotFound,
                             }).await?;
                             continue;
                         }
                         let Some(anexos) = server.anexos.clone() else {
-                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::AttachmentUnavailable {
+                            escrever!(&ServerMessage::AttachmentUnavailable {
                                 attachment,
                                 reason: AttachmentRefusal::Unavailable,
                             }).await?;
@@ -3305,7 +3535,9 @@ async fn run_session(
                         // pode transmitir mídia nesta sala não passa a poder
                         // transmitindo-a como imagem. `specs/08-seguranca.md`:
                         // verificado no servidor, sempre.
-                        if !session.may_speak {
+                        // Pela permissão de compartilhar, lida agora (os cargos),
+                        // e não pelo `may_speak` do aperto de mão.
+                        if !crate::cargos::pode(&*server.persistence.lock().await, session.person, Permission::ShareScreen) {
                             recusar(&mut send, session.protocol_version, session.person, "StartScreenShare").await?;
                             continue;
                         }
@@ -3793,7 +4025,7 @@ async fn run_session(
                 // não vem. Escrita aqui porque este é o dono do fluxo de
                 // controle, e não pela tarefa que descobriu o motivo.
                 let Some(aviso) = aviso else { break };
-                frame::write_em(&mut send, session.protocol_version, &aviso).await?;
+                escrever!(&aviso).await?;
             }
 
             event = events.recv() => {
@@ -3849,7 +4081,17 @@ async fn run_session(
                             }),
                         ).await;
                         let _ = send.finish();
-                        despedir(&connection, &mut send, b"fell behind").await;
+                        // O quadro acima é oportunista: sem crédito, ele não sai.
+                        // O código sai sempre, porque o corte não espera crédito, e
+                        // quem liga o lê como o mesmo `FellBehind` (contado uma vez
+                        // só se o quadro também chegou).
+                        despedir_com(
+                            &connection,
+                            &mut send,
+                            seele_proto::transport::CODIGO_FICOU_PARA_TRAS,
+                            b"fell behind",
+                        )
+                        .await;
                         break;
                     }
                     // O barramento fechou: o servidor está indo embora. Era um
@@ -3905,9 +4147,7 @@ async fn run_session(
                         ..
                     } => {
                         if pode(server, session.person, Permission::AdministerServer).await {
-                            frame::write_em(
-                                &mut send,
-                                session.protocol_version,
+                            escrever!(
                                 &ServerMessage::Alert {
                                     severity: AlertSeverity::Warning,
                                     reason: AlertReason::VoiceRoomOverHostUplink {
@@ -4032,10 +4272,10 @@ async fn run_session(
                         // sentence only a shell knows how to write. Being moved
                         // in silence is indistinguishable from a client that
                         // lost track of where it was.
-                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::MovedToVoiceRoom {
+                        escrever!(&ServerMessage::MovedToVoiceRoom {
                             voice_room: *destino,
                         }).await?;
-                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
+                        escrever!(&ServerMessage::Alert {
                             severity: AlertSeverity::Info,
                             reason: AlertReason::MovedByOperator,
                             operator_text: None,
@@ -4060,7 +4300,7 @@ async fn run_session(
                         desassentar(server, voice_rooms, session, Saida::Sala(Some(*id))).await;
                         current_voice_room = None;
                         midia.entrou(current_voice_room);
-                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::VoiceRoomDeleted {
+                        escrever!(&ServerMessage::VoiceRoomDeleted {
                             voice_room: *id,
                         }).await?;
                         // And then the sentence. Two frames for the reason
@@ -4068,7 +4308,7 @@ async fn run_session(
                         // fold in or go on sending voice into a room that is
                         // not there, the other is what the person should be
                         // told, and only a shell knows how to say it.
-                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
+                        escrever!(&ServerMessage::Alert {
                             severity: AlertSeverity::Warning,
                             reason: AlertReason::VoiceRoomDeleted,
                             operator_text: None,
@@ -4082,10 +4322,10 @@ async fn run_session(
                     // one that still asks about a room that is gone.
                     Event::ChannelDeleted { channel: id } if channels.contains(id) => {
                         channels.retain(|aberta| aberta != id);
-                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::ChannelDeleted {
+                        escrever!(&ServerMessage::ChannelDeleted {
                             channel: *id,
                         }).await?;
-                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
+                        escrever!(&ServerMessage::Alert {
                             severity: AlertSeverity::Warning,
                             reason: AlertReason::ChannelDeleted,
                             operator_text: None,
@@ -4129,17 +4369,42 @@ async fn run_session(
                 }
                 if let Some(message) = translate(&event, &channels, session.person) {
                     if entende_a_mensagem(&message, session.protocol_version) {
-                        frame::write_em(&mut send, session.protocol_version, &message).await?;
+                        escrever!(&message).await?;
+                    }
+                }
+                // **Os cargos mudaram e esta pessoa foi atingida**: as
+                // permissões dela de novo (ADR 0064). O efeito
+                // na mídia não espera por isto: ver `aplicar_os_cargos`.
+                if let Event::CargosMudaram { afetadas, .. } = &event {
+                    if afetadas.contains(&session.person) {
+                        // A voz e a tela já foram aplicadas no servidor por
+                        // quem gravou a mudança (`aplicar_os_cargos`); aqui é
+                        // só o aviso, que pode atrasar sem custar segurança.
+                        let suas = {
+                            let db = server.persistence.lock().await;
+                            crate::cargos::suas(&db, session.person)
+                        };
+                        match suas {
+                            Ok(suas) => {
+                                let mensagem = ServerMessage::SuasPermissoes(suas);
+                                if entende_a_mensagem(&mensagem, session.protocol_version) {
+                                    escrever!(&mensagem).await?;
+                                }
+                            }
+                            Err(erro) => tracing::warn!(%erro, person = %session.person, "cargos: não deu para ler as permissões de quem foi atingido"),
+                        }
                     }
                 }
             }
 
             _ = telemetry.tick() => {
-                // The server measures RTT and loss from QUIC itself, which is
-                // the only vantage point that sees both directions. Jitter is
-                // measured at the receiver, so the server reports zero rather
-                // than a number it cannot know.
-                let stats = connection.stats();
+                // Until 0.16 the server measured RTT and loss from QUIC. Since
+                // 0.17 it reads the link's `Leitura`, which has no loss (the
+                // str0m SCTP does not expose it) and has RTT only once an ICE
+                // check was answered (the host is full ICE since 26/10/2026).
+                // What is missing goes out as `None`, «not measured», and never
+                // as an invented zero. Jitter is measured at the receiver.
+                let stats = connection.leitura();
 
                 // A subida deste servidor, medida enquanto ele empurra cópias.
                 //
@@ -4153,7 +4418,7 @@ async fn run_session(
                     subida.observar(
                         std::time::Instant::now(),
                         connection.stable_id() as u64,
-                        (&stats).into(),
+                        stats.into(),
                     )
                 };
                 if let Some(bps) = andou {
@@ -4183,28 +4448,43 @@ async fn run_session(
                     // Um erro de escrita avisa e não derruba nada: o servidor
                     // continua com o número na memória, e o que se perde é a
                     // memória do próximo arranque.
-                    if let Err(erro) =
-                        crate::persistence::subida::lembrar(&*server.persistence.lock().await, bps)
-                    {
+                    // Com o contexto da medida: quando e em que rede. Ver
+                    // `persistence::subida::lembrada_aqui`.
+                    let contexto = crate::persistence::subida::Contexto {
+                        medida_em: crate::persistence::subida::agora(),
+                        rede: crate::persistence::subida::rede_de_agora(),
+                    };
+                    if let Err(erro) = crate::persistence::subida::lembrar(
+                        &*server.persistence.lock().await,
+                        bps,
+                        &contexto,
+                    ) {
                         tracing::warn!(%erro, bps, "não deu para guardar a subida medida");
                     }
                 }
 
-                let rtt_ms = connection.rtt().as_secs_f32() * 1000.0;
-                let sent = stats.path.sent_packets.max(1) as f32;
-                let lost = stats.path.lost_packets as f32;
-                let inputs = SyncInputs {
-                    rtt_ms,
-                    jitter_ms: 0.0,
-                    loss_fraction: (lost / sent).clamp(0.0, 1.0),
+                // **O que o enlace não mede vai como `None`** (a Telemetry da
+                // linha 2), e nunca como zero. O Sync Ratio só é alimentado
+                // quando há RTT e perda medidos; sem eles a sessão não inventa
+                // uma medida, e o valor é o «ainda sem medida» do `Signal`
+                // (`Signal::value` sem nenhum `update`).
+                let rtt_ms = stats.ida_e_volta.map(|volta| volta.as_secs_f32() * 1000.0);
+                let loss_fraction = stats.fracao_de_perda_na_saida;
+                let ratio = match (rtt_ms, loss_fraction) {
+                    (Some(rtt_ms), Some(loss_fraction)) => sync.update(SyncInputs {
+                        rtt_ms,
+                        // Medido no receptor; o servidor não tem.
+                        jitter_ms: 0.0,
+                        loss_fraction,
+                    }),
+                    _ => sync.value(),
                 };
-                let ratio = sync.update(inputs);
                 last_ratio = ratio;
 
-                frame::write_em(&mut send, session.protocol_version, &ServerMessage::Telemetry(Telemetry {
+                escrever!(&ServerMessage::Telemetry(Telemetry {
                     rtt_ms,
-                    jitter_ms: inputs.jitter_ms,
-                    loss_fraction: inputs.loss_fraction,
+                    jitter_ms: None,
+                    loss_fraction,
                     subsystems: vec![
                         (Subsystem::Permissions, SubsystemHealth::Nominal),
                         (Subsystem::Media, SubsystemHealth::Nominal),
@@ -4224,39 +4504,11 @@ async fn run_session(
         }
     }
 
-    // The connection is gone. Hold the seat for the grace window rather than
-    // letting a tunnel cost somebody their place — specs/02-protocolo.md.
+    // A reserva do assento da graça é do `serve`, e não daqui: ver
+    // [`reservar_ao_sair`]. Aqui ela só rodava quando o laço saía pelo `break`,
+    // e toda saída pelo `?` — uma escrita que falha, a vigia do FellBehind —
+    // perdia o assento.
     //
-    // **Só se esta ainda for a conexão desta pessoa.** Uma sessão que morre
-    // depois de a pessoa já ter voltado guardava um assento com o `ssrc` dela, e
-    // essa reserva obsoleta vale cinco minutos: quem saiu da sala de propósito e
-    // se desconectou em seguida era re-sentado na conexão seguinte por causa de
-    // uma reserva deixada por uma conexão anterior. Mesma família do defeito que
-    // `desassentar` fecha, e a mesma pergunta o resolve.
-    if let Some(id) = current_voice_room {
-        let presentes = server.presentes.lock().await;
-        let mut slots = server.slots.lock().await;
-        if !crate::server::reservar_o_assento_da_carencia(
-            &presentes,
-            &mut slots,
-            session.person,
-            session.id,
-            id,
-            session.ssrc,
-            Instant::now(),
-        ) {
-            // Contado, e não só dito: o guarda acerta **não** escrevendo, e um
-            // teste de ponta a ponta não tem como distinguir «a reserva foi
-            // recusada» de «esta conexão nunca chegou ao fim» olhando só para o
-            // efeito. Ver [`crate::server::Desassentamentos::reserva_obsoleta`].
-            server.desassentamentos.reserva_obsoleta();
-            tracing::info!(
-                person = %session.person,
-                sessao = %session.id,
-                "esta conexão já não é a desta pessoa; o assento não foi reservado por ela"
-            );
-        }
-    }
     // Coming out of the occupancy — and being announced — is `serve`'s job, and
     // it happens the moment this returns. It used to happen here, which meant
     // it did not happen at all on any path that left the loop through a `?`:
@@ -4281,20 +4533,23 @@ async fn run_session(
         );
     }
 
-    // E quantas vezes o controle de fluxo prendeu esta sessão.
+    // E o que o enlace recusou ou descartou nesta conexão.
     //
-    // Lido do quinn, que já conta: um `STREAM_DATA_BLOCKED` enviado por este
-    // lado quer dizer que o servidor tinha quadro para escrever e o par não tinha
-    // deixado espaço — quer dizer, **o par parou de ler**. É a primeira
-    // suspeita de `docs/pendencias.md` #1 virada em número, e é o número que
-    // separa "a rede está ruim" de "aquele cliente travou e o servidor ficou
-    // esperando por ele".
-    let bloqueios = connection.stats().frame_tx.stream_data_blocked;
-    if bloqueios > 0 {
+    // Até a 0.16 era o `STREAM_DATA_BLOCKED` do quinn («o par parou de ler»).
+    // O enlace não tem esse contador; tem os dele, e eles respondem à mesma
+    // pergunta por outro lado: canais recusados, cortes por fila estourada,
+    // violações do envelope, voz descartada na chegada e voz que não saiu.
+    // Zero em todos é o normal e não merece linha.
+    let contadores = connection.contadores();
+    if contadores != seele_enlace::Contadores::default() {
         tracing::warn!(
             person = %session.person,
-            bloqueios,
-            "o fluxo de controle para este cliente encheu; ele parou de ler"
+            canais_recusados = contadores.canais_recusados,
+            cortes_por_fila = contadores.cortes_por_fila,
+            violacoes = contadores.violacoes,
+            voz_descartada = contadores.voz_descartada,
+            voz_nao_saiu = contadores.voz_nao_saiu,
+            "o enlace recusou ou descartou coisas desta conexão"
         );
     }
 
@@ -4601,7 +4856,13 @@ async fn assentar(
             person: session.person,
             sessao: session.id,
             ssrc: session.ssrc,
-            may_speak: session.may_speak,
+            // Lido agora, e não o do aperto de mão: uma revogação de Falar
+            // vale também para quem entra numa sala depois dela.
+            may_speak: crate::cargos::pode(
+                &*server.persistence.lock().await,
+                session.person,
+                Permission::Speak,
+            ),
             outbound: outbound.clone(),
             tela: tela.clone(),
         })
@@ -4756,23 +5017,10 @@ async fn moderavel(
     alvo: PersonId,
     permission: Permission,
 ) -> bool {
-    if !pode(server, quem, permission).await {
-        return false;
-    }
-    if quem == alvo {
-        return true;
-    }
-    let guard = server.persistence.lock().await;
-    let permissions = Permissions::new(&guard);
-    // A database error reads as denial, like `pode`: a server whose disk is
-    // failing must not answer "nobody here is an administrator".
-    let alvo_administra = permissions
-        .may(alvo, Permission::AdministerServer)
-        .unwrap_or(true);
-    let quem_administra = permissions
-        .may(quem, Permission::AdministerServer)
-        .unwrap_or(false);
-    !alvo_administra || quem_administra
+    // **A regra dos cargos** (ADR 0064): a permissão E a
+    // hierarquia, lidas do banco agora. Erro de banco é negação.
+    let db = server.persistence.lock().await;
+    crate::cargos::pode_moderar(&db, quem, alvo, permission)
 }
 
 /// Se um cliente nesta versão de protocolo entende esta mensagem.
@@ -5004,12 +5252,12 @@ async fn receber_tela(
     person: PersonId,
     sessao: SessionId,
     avisos: &mpsc::Sender<ServerMessage>,
-    fluxo: &mut quinn::RecvStream,
+    fluxo: &mut crate::transporte::Recebe,
 ) -> Result<()> {
     let Some((voice_room, screen)) = server.telas.lock().await.de(person, sessao) else {
         // Parar o fluxo e não ignorá-lo: um cliente que abriu sem pedir tem de
         // descobrir agora, e não pela imagem que nunca aparece do outro lado.
-        let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
+        let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
         bail!("um fluxo de tela chegou de quem não está transmitindo");
     };
 
@@ -5020,7 +5268,7 @@ async fn receber_tela(
     fluxo.read_exact(&mut abertura).await?;
     let (cabecalho, _) = seele_proto::screen::ScreenHeader::decode(&abertura)?;
     if cabecalho.screen != screen {
-        let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
+        let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
         bail!(
             "um fluxo de tela declarou {} e não {screen}",
             cabecalho.screen
@@ -5047,7 +5295,7 @@ async fn receber_tela(
         // a tarefa leitora do controle existe para não ter.
         if let Ok(motivo) = fim_rx.try_recv() {
             tracing::info!(%person, %voice_room, %screen, ?motivo, "o servidor encerrou uma transmissão");
-            let _ = fluxo.stop(quinn::VarInt::from_u32(crate::tela::CODIGO_DE_CORTE));
+            let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
             // Anunciado, porque o plano de controle é o único lugar de onde a
             // sala aprende que a tela parou. Sem isto ficaria desenhada uma
             // transmissão que já não tem quem a bombeie.
@@ -5082,6 +5330,14 @@ async fn receber_tela(
             // provocou. Fica no log, onde quem escreve cliente vai procurar.
             return Ok(());
         }
+        // A transmissão pode ter sido encerrada por fora (a revogação de
+        // Compartilhar a tela, em `aplicar_os_cargos`): aí o fluxo é cortado, e
+        // nenhum byte a mais vai à sala.
+        if server.telas.lock().await.de(person, sessao) != Some((voice_room, screen)) {
+            let _ = fluxo.stop(crate::tela::CODIGO_DE_CORTE);
+            tracing::info!(%person, %screen, "a transmissão foi encerrada pelo servidor; o fluxo foi cortado");
+            return Ok(());
+        }
         match fluxo.read(&mut buffer).await? {
             Some(lidos) => {
                 let bytes = buffer.get(..lidos).unwrap_or_default().to_vec();
@@ -5108,6 +5364,47 @@ async fn receber_tela(
         })
         .await;
     Ok(())
+}
+
+/// **Aplica no servidor, na hora, o que uma mudança de cargos tirou** (ADR
+/// 0064; revisão do Codex da 0.17).
+///
+/// Chamado por quem gravou a mudança, logo depois da transação e **antes** de
+/// difundir o `QuadroDeCargos`: para cada pessoa afetada, as salas de voz
+/// recebem o que ela pode transmitir agora (o Falar cala o próximo
+/// datagrama), e sem Compartilhar a tela as transmissões dela acabam e são
+/// anunciadas. Nada disto depende de a sessão dela ler o `ctl`.
+pub(crate) async fn aplicar_os_cargos(
+    server: &Server,
+    voice_rooms: &crate::voice_room::VoiceRooms,
+    afetadas: &[PersonId],
+) {
+    for &pessoa in afetadas {
+        let (fala, compartilha) = {
+            let db = server.persistence.lock().await;
+            (
+                crate::cargos::pode(&db, pessoa, Permission::Speak),
+                crate::cargos::pode(&db, pessoa, Permission::ShareScreen),
+            )
+        };
+        voice_rooms.permissoes(pessoa, fala, compartilha).await;
+        if !compartilha {
+            // As transmissões dela, e só elas: o que ela assiste continua.
+            let encerradas = server.telas.lock().await.encerrar_de(pessoa, None);
+            if !encerradas.is_empty() {
+                let mut pares = server.pares.lock().await;
+                for (_, screen) in &encerradas {
+                    pares.a_transmissao_acabou(*screen);
+                }
+            }
+            for (voice_room, screen) in encerradas {
+                tracing::info!(%pessoa, %screen, "cargos: Compartilhar a tela revogado; a transmissão acabou");
+                let _ = server
+                    .events
+                    .send(Event::ScreenShareStopped { voice_room, screen });
+            }
+        }
+    }
 }
 
 /// Encerra e anuncia o que **esta conexão** estivesse transmitindo.
@@ -5211,7 +5508,7 @@ async fn encerrar_telas(
 
 /// Tells a client the server said no, and why.
 async fn recusar(
-    send: &mut quinn::SendStream,
+    send: &mut crate::transporte::Envio,
     versao: u8,
     person: PersonId,
     verbo: &str,
@@ -5241,7 +5538,7 @@ async fn recusar(
 /// trocar de apelido, apagar uma mensagem que sumiu — e o cliente lia «entrada
 /// na sala recusada» (revisão do lote I-a da F5, 08/10/2026).
 async fn nao_deu(
-    send: &mut quinn::SendStream,
+    send: &mut crate::transporte::Envio,
     versao: u8,
     pedido: u32,
     erro: &anyhow::Error,
@@ -5416,6 +5713,7 @@ fn translate(
         // A retenção apagou histórico: todo mundo, sem filtro de canal, porque a
         // janela é por idade e atravessa os canais. Ver
         // `AlertReason::RetencaoApagouHistorico`.
+        Event::CargosMudaram { quadro, .. } => Some(quadro.clone()),
         Event::HistoricoApagado { apagadas } => Some(ServerMessage::Alert {
             severity: AlertSeverity::Info,
             reason: AlertReason::RetencaoApagouHistorico {
@@ -5880,17 +6178,19 @@ mod versao_no_fio {
         ]
     }
 
-    /// **Tudo sai para quem negociou o 9.** Sem esta metade, um portão que
+    /// **Tudo sai para quem negociou o mais velho que esta build fala** — o
+    /// 10, o primeiro da linha 2, desde a 0.17. Sem esta metade, um portão que
     /// barrasse todo mundo passaria no teste de baixo e desligaria a malha, a
     /// ponte dos MODs e as recusas sem deixar rastro — o produto sabendo e não
     /// contando.
     #[test]
-    fn toda_mensagem_de_hoje_sai_para_quem_negociou_o_9() {
-        assert_eq!(seele_proto::version::oldest_supported_version(), 9);
+    fn toda_mensagem_de_hoje_sai_para_quem_negociou_o_mais_velho_da_linha() {
+        let mais_velho = seele_proto::version::oldest_supported_version();
+        assert_eq!(mais_velho, seele_proto::version::PRIMEIRO_DA_LINHA_DOIS);
         for (mensagem, nome) in amostra() {
             assert!(
-                entende_a_mensagem(&mensagem, seele_proto::version::PROTOCOL_VERSION),
-                "{nome} deixou de sair para quem fala o 9"
+                entende_a_mensagem(&mensagem, mais_velho),
+                "{nome} deixou de sair para quem fala o {mais_velho}"
             );
         }
     }
@@ -5927,9 +6227,10 @@ mod versao_no_fio {
             DisconnectReason::Incompatible
         );
         // E a tabela, e não só o limiar: com o limiar no 8, quem fala o 8 ainda
-        // não lê uma razão que nasceu no 9.
+        // não lê uma razão que nasceu no 9 (o primeiro da linha 1).
+        let antes_da_um = seele_proto::version::PRIMEIRO_DA_LINHA_UM - 1;
         assert_eq!(
-            recusa_de_mod(hoje - 1, hoje - 1, razao, String::new()).reason,
+            recusa_de_mod(antes_da_um, antes_da_um, razao, String::new()).reason,
             DisconnectReason::Incompatible
         );
     }
@@ -5968,106 +6269,31 @@ mod o_aceite_dos_mods {
     use crate::persistence::mods::{disable, enable, EnabledMod};
     use crate::persistence::Location;
 
-    #[derive(Debug)]
-    struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-    impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-        fn verify_server_cert(
-            &self,
-            _end_entity: &rustls::pki_types::CertificateDer<'_>,
-            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-            _server_name: &rustls::pki_types::ServerName<'_>,
-            _ocsp_response: &[u8],
-            _now: rustls::pki_types::UnixTime,
-        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-            Ok(rustls::client::danger::ServerCertVerified::assertion())
-        }
-
-        fn verify_tls12_signature(
-            &self,
-            message: &[u8],
-            cert: &rustls::pki_types::CertificateDer<'_>,
-            dss: &rustls::DigitallySignedStruct,
-        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-            rustls::crypto::verify_tls12_signature(
-                message,
-                cert,
-                dss,
-                &self.0.signature_verification_algorithms,
-            )
-        }
-
-        fn verify_tls13_signature(
-            &self,
-            message: &[u8],
-            cert: &rustls::pki_types::CertificateDer<'_>,
-            dss: &rustls::DigitallySignedStruct,
-        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-            rustls::crypto::verify_tls13_signature(
-                message,
-                cert,
-                dss,
-                &self.0.signature_verification_algorithms,
-            )
-        }
-
-        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-            self.0.signature_verification_algorithms.supported_schemes()
-        }
-    }
-
     /// Um fluxo de controle de verdade, com as quatro pontas na mão.
     struct Fluxo {
-        servidor_envia: quinn::SendStream,
-        servidor_recebe: quinn::RecvStream,
-        cliente_envia: quinn::SendStream,
-        cliente_recebe: quinn::RecvStream,
-        // Vivos enquanto o teste correr: um `Endpoint` que cai fecha o socket,
-        // e uma `Connection` que cai fecha os fluxos dela.
-        _pontas: (quinn::Endpoint, quinn::Endpoint),
-        _conexoes: (quinn::Connection, quinn::Connection),
+        servidor_envia: crate::transporte::Envio,
+        servidor_recebe: crate::transporte::Recebe,
+        cliente_envia: crate::transporte::Envio,
+        cliente_recebe: crate::transporte::Recebe,
+        // Vivo enquanto o teste correr: as pontas são donas dos sockets, e a
+        // conexão que cai fecha os canais dela.
+        _par: seele_enlace::teste::ParDeTeste,
     }
 
-    /// Abre a conexão e deixa o fluxo bidirecional #0 na posição em que o aperto
-    /// de mão o deixa: aberto pelo cliente, com o servidor já tendo lido dele.
-    ///
-    /// O `Ping` de abertura não é cerimônia: um fluxo aberto pelo cliente só
-    /// aparece do lado do servidor quando o primeiro byte chega, e o anúncio é
-    /// escrito **pelo servidor**. Sem um quadro de ida, o `accept_bi` esperaria
-    /// para sempre.
+    /// Abre um par de verdade do enlace (ICE, DTLS e SCTP em 127.0.0.1) e
+    /// entrega o `ctl` dos dois lados, na posição em que o aperto de mão o
+    /// deixa: com o servidor já tendo lido um quadro do cliente.
     async fn fluxo() -> anyhow::Result<Fluxo> {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-
-        let identidade = crate::tls::Identity::self_signed(vec!["localhost".to_owned()])?;
-        let ponta_servidor = quinn::Endpoint::server(
-            crate::tls::server_config(identidade)?,
-            SocketAddr::from(([127, 0, 0, 1], 0)),
-        )?;
-        let endereco = ponta_servidor.local_addr()?;
-
-        let mut tls = rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-            .with_no_client_auth();
-        tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-        let mut ponta_cliente = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-        ponta_cliente.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-            quinn::crypto::rustls::QuicClientConfig::try_from(tls)?,
-        )));
-
-        let atendendo = ponta_servidor.accept();
-        let discando = ponta_cliente.connect(endereco, "localhost")?;
-        let conexao_servidor = atendendo
-            .await
-            .ok_or_else(|| anyhow::anyhow!("ninguém bateu na ponta do servidor"))?
-            .await?;
-        let conexao_cliente = discando.await?;
-
-        let (mut cliente_envia, cliente_recebe) = conexao_cliente.open_bi().await?;
-        let aceitando = conexao_servidor.accept_bi();
+        let par = seele_enlace::teste::par_em_loopback().await;
+        let (mut cliente_envia, cliente_recebe) = par
+            .cliente
+            .controle()
+            .ok_or_else(|| anyhow::anyhow!("o cliente não tem ctl"))?;
+        let (servidor_envia, mut servidor_recebe) = par
+            .anfitriao
+            .controle()
+            .ok_or_else(|| anyhow::anyhow!("o anfitrião não tem ctl"))?;
         frame::write(&mut cliente_envia, &ClientMessage::Ping { timestamp: 0 }).await?;
-        let (servidor_envia, mut servidor_recebe) = aceitando.await?;
         let _: ClientMessage = frame::read(&mut servidor_recebe).await?;
 
         Ok(Fluxo {
@@ -6075,8 +6301,7 @@ mod o_aceite_dos_mods {
             servidor_recebe,
             cliente_envia,
             cliente_recebe,
-            _pontas: (ponta_servidor, ponta_cliente),
-            _conexoes: (conexao_servidor, conexao_cliente),
+            _par: par,
         })
     }
 
@@ -6517,7 +6742,6 @@ mod fim_de_tela_por_sessao {
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao: [0; 32],
-            janelas_do_navegador: Vec::new(),
             recepcao: None,
             persistence,
             events,

@@ -151,16 +151,24 @@ pub(crate) async fn subir_em(
             .and_then(|preferencias| preferencias.nickname().map(str::to_owned))
             .unwrap_or_else(|| "SEELE".to_owned());
     let apelido = nome_da_sala(&apelido);
-    seele_server::hospedagem::Hospedagem::iniciar_sala(porta, semente.bytes(), apelido, ponto)
-        .await
-        .map_err(|erro| {
-            let falha = match crate::classificar(&erro) {
-                crate::FalhaAoHospedar::PortaOcupada => FalhaDaSala::PortaOcupada,
-                _ => FalhaDaSala::NaoSubiu,
-            };
-            tracing::warn!(?falha, erro = %format!("{erro:#}"), "a sala pessoal não subiu");
-            falha
-        })
+    // **O modo local (E9), só na build de teste**: a sala sobe só em loopback,
+    // sem escada e sem registro no ponto de encontro. Ver `crate::modo_local`.
+    let subida = if crate::modo_local() {
+        tracing::info!("modo local: a sala pessoal sobe sem escada, só em loopback");
+        seele_server::hospedagem::Hospedagem::iniciar_sala_local(porta, semente.bytes(), apelido)
+            .await
+    } else {
+        seele_server::hospedagem::Hospedagem::iniciar_sala(porta, semente.bytes(), apelido, ponto)
+            .await
+    };
+    subida.map_err(|erro| {
+        let falha = match crate::classificar(&erro) {
+            crate::FalhaAoHospedar::PortaOcupada => FalhaDaSala::PortaOcupada,
+            _ => FalhaDaSala::NaoSubiu,
+        };
+        tracing::warn!(?falha, erro = %format!("{erro:#}"), "a sala pessoal não subiu");
+        falha
+    })
 }
 
 /// O nome com que a sala sobe: o apelido gravado, **cortado na última fronteira
@@ -306,10 +314,7 @@ pub(crate) fn guardar_se_ainda_subindo(
     if !subindo {
         return Some(sala);
     }
-    hospedagens.pessoal = Some(crate::Hospedado {
-        hospedagem: sala,
-        servidor: None,
-    });
+    hospedagens.pessoal = Some(crate::Hospedado::novo(sala, None));
     None
 }
 
@@ -477,6 +482,9 @@ pub(crate) fn meu_codigo_em(config: &str) -> Option<String> {
 pub(crate) enum FalhaNaAgenda {
     /// O texto não é um código: o verificador não fecha.
     CodigoInvalido,
+    /// É o código desta máquina: ninguém é amigo de si mesmo. Só o
+    /// `adicionar_amigo` recusa por isto.
+    SeuCodigo,
     /// A agenda não abriu ou não gravou; o motivo vai ao `seele.log`.
     NaoGravou,
 }
@@ -496,6 +504,32 @@ pub(crate) struct ContatoNaTela {
     pub(crate) direcao: Option<&'static str>,
     /// Se as ligações dela são recusadas sem tocar.
     pub(crate) bloqueado: bool,
+    /// Se eu a pus na lista de amigos.
+    pub(crate) amigo: bool,
+    /// O alvo canônico com que se liga para ela, `@CÓDIGO`
+    /// (`seele_ffi::alvo_do_codigo`): o `server` do `connect`. A tela não o
+    /// monta.
+    pub(crate) alvo: String,
+}
+
+impl ContatoNaTela {
+    fn de(contato: &seele_ffi::agenda::Contato) -> Self {
+        use seele_ffi::agenda::Direcao;
+        Self {
+            codigo: contato.codigo.to_string(),
+            nome: contato.nome.clone(),
+            apelido: contato.apelido.clone(),
+            visto_em: contato.visto_em,
+            direcao: contato.direcao.map(|direcao| match direcao {
+                Direcao::Liguei => "liguei",
+                Direcao::Recebi => "recebi",
+                Direcao::Perdida => "perdida",
+            }),
+            bloqueado: contato.bloqueado,
+            amigo: contato.amigo,
+            alvo: seele_ffi::alvo_do_codigo(&contato.codigo),
+        }
+    }
 }
 
 fn agenda_em(config: &str) -> Result<seele_ffi::agenda::Agenda, FalhaNaAgenda> {
@@ -511,23 +545,47 @@ fn codigo_lido(codigo: &str) -> Result<seele_ffi::Codigo, FalhaNaAgenda> {
 
 /// A agenda, para a tela.
 pub(crate) fn contatos_em(config: &str) -> Result<Vec<ContatoNaTela>, FalhaNaAgenda> {
-    use seele_ffi::agenda::Direcao;
     Ok(agenda_em(config)?
         .listar()
         .iter()
-        .map(|contato| ContatoNaTela {
-            codigo: contato.codigo.to_string(),
-            nome: contato.nome.clone(),
-            apelido: contato.apelido.clone(),
-            visto_em: contato.visto_em,
-            direcao: contato.direcao.map(|direcao| match direcao {
-                Direcao::Liguei => "liguei",
-                Direcao::Recebi => "recebi",
-                Direcao::Perdida => "perdida",
-            }),
-            bloqueado: contato.bloqueado,
-        })
+        .map(ContatoNaTela::de)
         .collect())
+}
+
+/// A lista de amigos, para a tela: os contatos que a pessoa adicionou, na
+/// ordem do arquivo.
+pub(crate) fn amigos_em(config: &str) -> Result<Vec<ContatoNaTela>, FalhaNaAgenda> {
+    Ok(agenda_em(config)?.amigos().map(ContatoNaTela::de).collect())
+}
+
+/// Põe um código na lista de amigos, com o nome, quando vem um. Recusa o que
+/// não fecha e o código desta máquina **antes** de abrir a agenda: nada é
+/// gravado. Sem a identidade, nenhum código é «o seu», como no `ler_entrada`.
+pub(crate) fn adicionar_amigo_em(
+    config: &str,
+    codigo: &str,
+    nome: Option<&str>,
+) -> Result<(), FalhaNaAgenda> {
+    let codigo = codigo_lido(codigo)?;
+    if seele_ffi::codigo_desta_maquina(config).is_ok_and(|meu| meu == codigo) {
+        return Err(FalhaNaAgenda::SeuCodigo);
+    }
+    agenda_em(config)?
+        .adicionar_amigo(codigo, nome.unwrap_or_default())
+        .map_err(|erro| {
+            tracing::warn!(erro = %format!("{erro:#}"), "o amigo não foi gravado na agenda");
+            FalhaNaAgenda::NaoGravou
+        })
+}
+
+/// Tira da lista de amigos, e só: o nome, o histórico, o bloqueio e o pin
+/// ficam.
+pub(crate) fn tirar_dos_amigos_em(config: &str, codigo: &str) -> Result<(), FalhaNaAgenda> {
+    let codigo = codigo_lido(codigo)?;
+    agenda_em(config)?.tirar_dos_amigos(codigo).map_err(|erro| {
+        tracing::warn!(erro = %format!("{erro:#}"), "o amigo não foi tirado da agenda");
+        FalhaNaAgenda::NaoGravou
+    })
 }
 
 /// Dá um nome a uma pessoa da agenda. Um nome vazio tira o nome.
@@ -589,10 +647,10 @@ fn anunciar<R: Runtime>(app: &AppHandle<R>, estado: EstadoDaSala) {
 )]
 mod a_sala_pessoal {
     use super::{
-        atender_em, bloquear_em, contatos_em, dar_nome_em, desligar, e_a_sala_daqui,
-        encerrar_a_ligacao_em, guardar_se_ainda_subindo, meu_codigo_em, porta_da_sala, recusar_em,
-        registro_de, subir, subir_em, Atendido, ContatoNaTela, EstadoDaSala, FalhaAoAtender,
-        FalhaDaSala, FalhaNaAgenda, Registro, Subida,
+        adicionar_amigo_em, amigos_em, atender_em, bloquear_em, contatos_em, dar_nome_em, desligar,
+        e_a_sala_daqui, encerrar_a_ligacao_em, guardar_se_ainda_subindo, meu_codigo_em,
+        porta_da_sala, recusar_em, registro_de, subir, subir_em, tirar_dos_amigos_em, Atendido,
+        ContatoNaTela, EstadoDaSala, FalhaAoAtender, FalhaDaSala, FalhaNaAgenda, Registro, Subida,
     };
     use tauri::Manager;
 
@@ -609,12 +667,25 @@ mod a_sala_pessoal {
         let sala = subir_em(casa.path().to_str().unwrap(), 0, None)
             .await
             .expect("a sala não subiu");
+        // **A impressão da sala é a da chave da pessoa** desde o enlace da 0.17
+        // (D3 do E): o DTLS da sala é efêmero, e quem liga pelo código confere
+        // a apresentação assinada e pina o SHA-256 da chave pública
+        // (`seele_core::client::conferir_quem_atendeu`). É a mesma conta da
+        // impressão desta máquina (`key_fingerprint`), então a sala de pé tem
+        // de dizer exatamente essa. O certificado de `Identity::da_semente`,
+        // que era a impressão até a 0.16, não é mais o que se pina.
+        let desta_maquina =
+            seele_ffi::impressao_desta_maquina(casa.path().to_str().unwrap()).unwrap();
         assert_eq!(
             sala.impressao_digital(),
-            seele_server::tls::Identity::da_semente(&[3; 32])
-                .unwrap()
-                .fingerprint(),
+            desta_maquina,
             "a sala subiu com outra chave: o código desta máquina não tocaria nela"
+        );
+        let de_outra = casa_com_a_chave(4);
+        assert_ne!(
+            sala.impressao_digital(),
+            seele_ffi::impressao_desta_maquina(de_outra.path().to_str().unwrap()).unwrap(),
+            "a impressão da sala não depende da chave"
         );
         assert!(sala.recepcao().is_some(), "a sala subiu sem campainha");
         sala.encerrar().await;
@@ -1282,7 +1353,163 @@ mod a_sala_pessoal {
                 visto_em: None,
                 direcao: None,
                 bloqueado: true,
+                amigo: false,
+                alvo: seele_ffi::alvo_do_codigo(&seele_ffi::Codigo::da_chave(&[2; 32])),
             }])
+        );
+    }
+
+    /// **A lista de amigos chega à tela e sobrevive ao app reabrir** (0.17):
+    /// `amigos` traz só quem foi adicionado, com o alvo `@CÓDIGO` canônico com
+    /// que se liga, e a agenda inteira diz quem é amigo.
+    #[test]
+    fn adicionar_um_amigo_chega_a_tela_com_o_alvo_e_sobrevive_a_reabrir() {
+        let casa = casa_com_a_chave(4);
+        let config = casa.path().to_str().unwrap();
+        let rafa = seele_ffi::Codigo::da_chave(&[2; 32]);
+        let bia = seele_ffi::Codigo::da_chave(&[3; 32]).to_string();
+        // Escrito à mão, minúsculo e sem hífens: entra como o código canônico.
+        let escrito = rafa.to_string().replace('-', "").to_lowercase();
+
+        assert_eq!(adicionar_amigo_em(config, &escrito, Some("Rafa")), Ok(()));
+        assert_eq!(dar_nome_em(config, &bia, "Bia"), Ok(()));
+
+        let amigos = amigos_em(config).unwrap();
+        assert_eq!(
+            amigos,
+            vec![ContatoNaTela {
+                codigo: rafa.to_string(),
+                nome: Some("Rafa".into()),
+                apelido: None,
+                visto_em: None,
+                direcao: None,
+                bloqueado: false,
+                amigo: true,
+                alvo: seele_ffi::alvo_do_codigo(&rafa),
+            }],
+            "a lista de amigos não é só quem foi adicionado"
+        );
+        assert!(
+            amigos
+                .first()
+                .is_some_and(|amigo| amigo.alvo == format!("@{rafa}")),
+            "o alvo do amigo não é o @CÓDIGO"
+        );
+        let todos = contatos_em(config).unwrap();
+        assert_eq!(
+            todos
+                .iter()
+                .map(|c| (c.codigo.clone(), c.amigo))
+                .collect::<Vec<_>>(),
+            vec![(rafa.to_string(), true), (bia, false)]
+        );
+        // O app que reabre lê o mesmo arquivo do zero.
+        assert_eq!(amigos_em(config).unwrap(), amigos);
+    }
+
+    /// **O código que não fecha e o próprio código não viram amigo**, com o
+    /// motivo tipado, e nada é gravado.
+    #[test]
+    fn o_codigo_invalido_e_o_proprio_codigo_nao_viram_amigo_e_nada_e_gravado() {
+        let casa = casa_com_a_chave(4);
+        let config = casa.path().to_str().unwrap();
+        let meu = meu_codigo_em(config).expect("a identidade de teste não abriu");
+
+        assert_eq!(
+            adicionar_amigo_em(config, "K9P2-CSM7-NBFR-AYQ4", Some("x")),
+            Err(FalhaNaAgenda::CodigoInvalido)
+        );
+        assert_eq!(
+            adicionar_amigo_em(config, &meu, Some("eu")),
+            Err(FalhaNaAgenda::SeuCodigo),
+            "o próprio código entrou nos amigos"
+        );
+        assert_eq!(
+            adicionar_amigo_em(config, &meu.replace('-', "").to_lowercase(), None),
+            Err(FalhaNaAgenda::SeuCodigo),
+            "o próprio código, escrito de outro jeito, entrou nos amigos"
+        );
+        assert!(
+            !crate::toque::caminho_da_agenda(config).exists(),
+            "uma recusa gravou a agenda"
+        );
+        assert_eq!(amigos_em(config), Ok(vec![]));
+        assert_eq!(
+            tirar_dos_amigos_em(config, "K9P2-CSM7-NBFR-AYQ4"),
+            Err(FalhaNaAgenda::CodigoInvalido)
+        );
+    }
+
+    /// **Tirar dos amigos preserva o bloqueio, o nome e o histórico**, e o pin
+    /// `@CÓDIGO` do arquivo de conhecidos fica como estava.
+    #[test]
+    fn tirar_dos_amigos_preserva_o_bloqueio_o_nome_o_historico_e_o_pin() {
+        let casa = casa_com_a_chave(4);
+        let config = casa.path().to_str().unwrap();
+        let app = app_de_teste();
+        let rafa = seele_ffi::Codigo::da_chave(&[2; 32]);
+        let agenda = crate::toque::caminho_da_agenda(config);
+        let pins = agenda.with_file_name("pins");
+        let pin = format!("{}\tpino\n", seele_ffi::alvo_do_codigo(&rafa));
+        std::fs::create_dir_all(pins.parent().unwrap()).unwrap();
+        std::fs::write(&pins, &pin).unwrap();
+        seele_ffi::agenda::Agenda::abrir(agenda)
+            .unwrap()
+            .anotar_ligacao(rafa, "rafa", seele_ffi::agenda::Direcao::Perdida, 7)
+            .unwrap();
+        let codigo = rafa.to_string();
+        assert_eq!(adicionar_amigo_em(config, &codigo, Some("Rafa")), Ok(()));
+        assert_eq!(
+            bloquear_em(&app.state::<crate::Session>(), config, &codigo, true),
+            Ok(())
+        );
+
+        assert_eq!(tirar_dos_amigos_em(config, &codigo), Ok(()));
+
+        assert_eq!(amigos_em(config), Ok(vec![]));
+        assert_eq!(
+            contatos_em(config),
+            Ok(vec![ContatoNaTela {
+                codigo,
+                nome: Some("Rafa".into()),
+                apelido: Some("rafa".into()),
+                visto_em: Some(7),
+                direcao: Some("perdida"),
+                bloqueado: true,
+                amigo: false,
+                alvo: seele_ffi::alvo_do_codigo(&rafa),
+            }]),
+            "tirar dos amigos levou o bloqueio, o nome ou o histórico"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&pins).unwrap(),
+            pin,
+            "tirar dos amigos mexeu no pin"
+        );
+    }
+
+    /// **Uma ligação perdida ou recebida de quem não é amigo não vira amigo**,
+    /// pelo caminho que a campainha usa para anotar.
+    #[test]
+    fn uma_ligacao_perdida_ou_recebida_nao_faz_amigo() {
+        let casa = casa_com_a_chave(4);
+        let config = casa.path().to_str().unwrap();
+        let mut agenda =
+            seele_ffi::agenda::Agenda::abrir(crate::toque::caminho_da_agenda(config)).unwrap();
+        for (n, direcao) in [
+            (2, seele_ffi::agenda::Direcao::Perdida),
+            (3, seele_ffi::agenda::Direcao::Recebi),
+            (5, seele_ffi::agenda::Direcao::Liguei),
+        ] {
+            agenda
+                .anotar_ligacao(seele_ffi::Codigo::da_chave(&[n; 32]), "x", direcao, 1)
+                .unwrap();
+        }
+        assert_eq!(contatos_em(config).unwrap().len(), 3);
+        assert_eq!(
+            amigos_em(config),
+            Ok(vec![]),
+            "uma ligação anotada fez amigo"
         );
     }
 

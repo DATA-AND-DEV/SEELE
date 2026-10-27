@@ -19,10 +19,31 @@ fn main() -> ExitCode {
     let mut porta = PORTA_PADRAO;
     let mut vizinhanca = Vizinhanca::Internet;
     let mut barulhento = false;
+    let mut sinal: Option<SocketAddr> = None;
+    let mut origens: Vec<String> = Vec::new();
 
     let mut argumentos = std::env::args().skip(1);
     while let Some(argumento) = argumentos.next() {
         match argumento.as_str() {
+            // O HTTP do navegador (`POST /sinal/1`), atrás de um proxy TLS na
+            // mesma máquina: ver `docs/ponto-de-encontro.md`.
+            "--sinal" => {
+                let Some(valor) = argumentos.next().and_then(|texto| texto.parse().ok()) else {
+                    eprintln!("--sinal pede um endereço, como 127.0.0.1:8385");
+                    return ExitCode::FAILURE;
+                };
+                sinal = Some(valor);
+            }
+            "--origem" => {
+                let Some(valor) = argumentos.next() else {
+                    eprintln!(
+                        "--origem pede uma origem, como {}",
+                        seele_encontro::sinal::origem_do_produto()
+                    );
+                    return ExitCode::FAILURE;
+                };
+                origens.push(valor);
+            }
             "--porta" | "-p" => {
                 let Some(valor) = argumentos.next().and_then(|texto| texto.parse().ok()) else {
                     eprintln!("--porta pede um número");
@@ -91,6 +112,40 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    if let Some(escuta) = sinal {
+        if origens.is_empty() {
+            origens.push(seele_encontro::sinal::origem_do_produto());
+        }
+        if !escuta.ip().is_loopback() {
+            eprintln!(
+                "--sinal {escuta}: o sinal fala HTTP em claro, e só escuta fora do loopback \
+                 quando um proxy TLS não está na mesma máquina. Confira que isso é o que você quer."
+            );
+        }
+        match seele_encontro::sinal::Sinal::abrir(
+            escuta,
+            std::sync::Arc::clone(&quarto),
+            vizinhanca,
+            origens.clone(),
+        ) {
+            Ok(servidor) => {
+                eprintln!(
+                    "sinal do navegador atendendo em http://{escuta}{} (origens: {})",
+                    seele_encontro::sinal::CAMINHO,
+                    origens.join(", ")
+                );
+                linhas.push(std::thread::spawn(move || {
+                    let Err(erro) = servidor.servir();
+                    eprintln!("o sinal {escuta} parou: {erro}");
+                }));
+            }
+            Err(erro) => {
+                eprintln!("não deu para escutar o sinal em {escuta}: {erro}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
     for linha in linhas {
         let _ = linha.join();
     }
@@ -103,8 +158,20 @@ fn ajuda() {
     eprintln!("  --porta N       em que porta atender (padrão {PORTA_PADRAO})");
     eprintln!("  --rede-local    também apresentar endereços de rede local (só para experimentar)");
     eprintln!("  --barulhento    imprimir quem falou com quem (é metadado; desligue depois)");
+    eprintln!(
+        "  --sinal ENDEREÇO  também atender o navegador por HTTP (POST /sinal/1), atrás de um"
+    );
+    eprintln!("                  proxy TLS; por exemplo 127.0.0.1:8385");
+    eprintln!(
+        "  --origem ORIGEM   a origem da página que pode ler a resposta do sinal (repetível;"
+    );
+    eprintln!(
+        "                  padrão {})",
+        seele_encontro::sinal::origem_do_produto()
+    );
     eprintln!();
-    eprintln!("Ele fala o ENC/1 e o ENC/2 ao mesmo tempo, e guarda só os dois quartos (onde cada");
+    eprintln!("Ele fala o ENC/1, o ENC/2 e o ENC/3 ao mesmo tempo, e responde STUN Binding na");
+    eprintln!("mesma porta. Guarda só os quartos (onde cada");
     eprintln!("anfitrião e cada sala disseram morar, em memória, nunca em disco) e o limite por");
     eprintln!("prefixo do ENC/2. Não vê nada do que é dito: o TLS é ponta a ponta.");
     eprintln!(

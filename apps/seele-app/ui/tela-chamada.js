@@ -305,7 +305,8 @@ function desenharPalco(snapshot, voice_room) {
       // O botão de verdade fica ao lado desta frase agora — ver `palco-vazio`
       // em `index.html` —, e por isso ela deixa de descrever um caminho.
       ? "Nada está sendo transmitido nesta sala."
-      : "Esta versão não sabe compartilhar tela desta máquina. A de outra pessoa apareceria aqui.";
+      // A do navegador diz que é o navegador (caso 12, WebKit).
+      : porQueNaoHaTela() ?? "Esta versão não sabe compartilhar tela desta máquina. A de outra pessoa apareceria aqui.";
     // O botão fica ao lado da frase, e só onde ele tem o que fazer: numa sala,
     // e com o controle de tela disponível nesta máquina.
     $("palco-compartilhar").hidden = !voice_room || !temControleDeTela();
@@ -769,14 +770,41 @@ function fraseDoEstado(pessoa) {
  * demais.
  */
 async function abrirChamada() {
+  // **Amarrada à vista que a pediu**: a abertura é assíncrona, e uma troca de
+  // sessão no meio dela (a época sobe a cada `ver_sessao`) não pode deixar a
+  // grade desta sessão desenhada na vista da outra.
+  const epoca = epocaDaVista;
+  const sessao = vistaDaJanela.sessao;
   mostrarDestinoNativo();
-  $("vista-conversa").hidden = true;
+  // Na ligação pessoal o chat (a conversa sobreposta) não se fecha por abrir a grade.
+  if (!naVistaPessoal()) $("vista-conversa").hidden = true;
+  $("vista-ligacao-fora").hidden = true;
   $("vista-chamada").hidden = false;
   // Antes do desenho, porque é ela que decide se o botão de compartilhar
   // existe: desenhar primeiro e esconder depois é um botão que ninguém viu
   // chegar nem sair.
   await conferirPermissaoDeTela();
+  if (epoca !== epocaDaVista || sessao !== vistaDaJanela.sessao) return;
   await atualizarChamada();
+}
+
+/** A vista pessoal (a ligação) está na tela? Quem escolhe é `camada-sessoes.js`. */
+function naVistaPessoal() {
+  return $("tela-sessao").dataset.vista === "ligacao";
+}
+
+/**
+ * Para onde vai o miolo quando a grade fecha. Numa conversa de servidor, para a
+ * conversa. Na ligação pessoal a conversa não existe, e o miolo mostra o estado
+ * FORA DA SALA (ENTRAR, ENCERRAR, VOLTAR): nunca os dois painéis escondidos.
+ */
+function mostrarOQueFicaForaDaGrade() {
+  $("vista-chamada").hidden = true;
+  const pessoal = naVistaPessoal();
+  // Na ligação pessoal a conversa é o painel do CHAT, que quem o abre controla.
+  if (!pessoal) $("vista-conversa").hidden = false;
+  $("vista-ligacao-fora").hidden = !pessoal;
+  if (pessoal && typeof desenharForaDaSala === "function") desenharForaDaSala();
 }
 
 /**
@@ -788,8 +816,8 @@ async function abrirChamada() {
  */
 function fecharChamada() {
   mostrarDestinoNativo();
-  $("vista-chamada").hidden = true;
-  $("vista-conversa").hidden = false;
+  mostrarOQueFicaForaDaGrade();
+  if (naVistaPessoal()) return;
   // O registro não foi redesenhado enquanto esteve escondido —
   // `desenharMensagens` sai cedo quando a lista está sem layout, porque ali não
   // dá para saber se a pessoa estava lendo o histórico ou acompanhando o fim.
@@ -807,8 +835,7 @@ function fecharChamada() {
  * anterior.
  */
 function abandonarChamada() {
-  $("vista-chamada").hidden = true;
-  $("vista-conversa").hidden = false;
+  mostrarOQueFicaForaDaGrade();
 }
 
 /**
@@ -818,6 +845,7 @@ function abandonarChamada() {
  * espera o `mostrarFim` que já está a caminho.
  */
 async function atualizarChamada() {
+  const epoca = epocaDaVista;
   let snapshot = null;
   try {
     snapshot = await invoke("snapshot");
@@ -827,6 +855,8 @@ async function atualizarChamada() {
   // Os volumes do Rust antes de pintar os cartões: o controle desenha o que a
   // conexão guardou, e não o que esta janela lembra. Ver `volumesLidos`.
   await lerVolumes();
+  // Uma troca de sessão enquanto o retrato vinha: o desenho seria o da outra.
+  if (epoca !== epocaDaVista) return;
   desenharChamada(snapshot);
 }
 
@@ -872,7 +902,10 @@ function desenharORodapeDoOperador(voice_room) {
 
   const sair = $("operador-sair");
   sair.dataset.alvo = dentro ? "sala" : "servidor";
-  sair.textContent = dentro ? "SAIR DA SALA" : "SAIR DO SERVIDOR";
+  const rotuloDaSaida = dentro ? "SAIR DA SALA" : "SAIR DO SERVIDOR";
+  // No WebKit, trocar o nó de texto entre down e up perde o clique.
+  // O snapshot repinta este rodapé mesmo quando a sala não mudou.
+  if (sair.textContent !== rotuloDaSaida) sair.textContent = rotuloDaSaida;
   sair.title = dentro
     ? `sair de ${voice_room.name}: você para de ouvir e de falar nesta sala`
     : "sair deste servidor e voltar à tela de entrada";
@@ -882,8 +915,14 @@ function desenharORodapeDoOperador(voice_room) {
   // um botão desabilitado prometeria que existe um jeito de habilitá-lo aqui.
   outro.hidden = !dentro;
   if (dentro) {
-    outro.textContent = "COMPARTILHAR";
-    outro.title = `mostrar uma tela ou uma janela para quem está em ${voice_room.name}`;
+    if (outro.textContent !== "COMPARTILHAR") outro.textContent = "COMPARTILHAR";
+    // **Indisponível, e dito** (caso 12): sem a captura (o navegador que não
+    // a tem), o botão fica à vista, apagado, com o porquê; o clique abre a
+    // caixa, que diz o mesmo — nada começa e quebra no meio.
+    const semTela = porQueNaoHaTela();
+    outro.setAttribute("aria-disabled", semTela ? "true" : "false");
+    outro.dataset.indisponivel = semTela ? "sim" : "nao";
+    outro.title = semTela ?? `mostrar uma tela ou uma janela para quem está em ${voice_room.name}`;
   }
 }
 
@@ -990,7 +1029,10 @@ window.addEventListener("keydown", (evento) => {
   // nos canais de texto. `role="dialog"` e não uma lista de `id`: uma terceira
   // caixa amanhã já entra coberta.
   const porCima = document.querySelector('[role="dialog"]:not([hidden])');
-  if (evento.key === "Escape" && !$("vista-chamada").hidden && !porCima) {
+  // **Na vista pessoal o Escape só fecha as sobreposições** (acima): fechar a
+  // grade não tira ninguém da sala, e o painel «fora da sala» só aparece depois
+  // de uma saída confirmada.
+  if (evento.key === "Escape" && !$("vista-chamada").hidden && !porCima && !naVistaPessoal()) {
     evento.preventDefault();
     fecharChamada();
   }

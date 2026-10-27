@@ -1,0 +1,129 @@
+/* SEELE — o aviso antes de atualizar para além da quebra (`#travessia`, E4 da
+   0.17).
+
+   O desenho é o da confirmação de moderar (`camada-moderar.css`): véu, caixa
+   com filete laranja, canto reto, sem sombra. Laranja e não vermelho: mudar de
+   versão do servidor é decisão que se toma lendo, e não falha nem queda
+   (`tokens.css` guarda o vermelho para essas duas).
+
+   Oitenta, como a moderação: acima da configuração (24), de onde ele abre, e
+   de toda camada de MOD (60 e 70). Uma confirmação de confiança do produto não
+   fica atrás de nada que um MOD desenhe.
+
+   Toda classe começa por `travessia-` (`no_two_screens_claim_the_same_class_name`).
+   Nenhuma cor literal: só tokens. */
+
+.camada-travessia {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.camada-travessia::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.8;
+}
+
+.travessia-caixa {
+  position: relative;
+  width: 640px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  padding: 28px 32px;
+  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  background: var(--seele-negro-painel);
+}
+
+.travessia-marca {
+  margin: 0;
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-laranja-nerv);
+}
+
+.travessia-titulo {
+  margin: 12px 0 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: var(--seele-t-titulo);
+  line-height: 1.1;
+  letter-spacing: var(--seele-tracking-cartela);
+  color: var(--seele-osso);
+}
+
+.travessia-resumo {
+  margin: 12px 0 0;
+  font-size: var(--seele-t-corpo);
+  line-height: 1.5;
+  color: var(--seele-osso);
+}
+
+/* Cada consequência numa linha com o marcador do produto — o quadrado da marca
+   em miniatura, e não um ponto de lista do navegador. */
+.travessia-itens {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.travessia-itens > li {
+  position: relative;
+  padding-left: 20px;
+  font-size: var(--seele-t-dado);
+  line-height: 1.55;
+  color: var(--seele-osso);
+}
+
+.travessia-itens > li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--seele-laranja-nerv);
+}
+
+.travessia-nota {
+  margin: 16px 0 0;
+  padding: 8px 12px;
+  border-left: 2px solid var(--seele-padrao-azul);
+  font-size: var(--seele-t-dado);
+  color: var(--seele-osso);
+  background: var(--seele-azul-fraco);
+}
+
+/* CANCELAR e ADIAR à esquerda, iguais; PROSSEGUIR à direita e mais largo. A
+   ordem de tabulação é a da leitura: a saída que não muda nada vem primeiro. */
+.travessia-acoes {
+  margin: 24px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.travessia-acoes > button {
+  flex: 1 1 140px;
+  min-height: 44px;
+  letter-spacing: 0.12em;
+}
+
+#travessia-prosseguir { flex: 2 1 240px; }
+
+@media (max-width: 560px) {
+  .travessia-caixa { padding: 20px 16px; }
+  .travessia-acoes { flex-direction: column; }
+  .travessia-acoes > button,
+  #travessia-prosseguir { flex: 0 0 auto; }
+}

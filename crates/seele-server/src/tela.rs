@@ -374,15 +374,16 @@ pub struct LeituraDaSubida {
     /// Todas e não só as que assistem: o cano é um só, e voz, controle e tela
     /// disputam o mesmo. O que se mede é o cano.
     pub bytes_enviados: u64,
-    /// `path.lost_packets`, somado.
-    pub pacotes_perdidos: u64,
+    /// Pacotes perdidos, somados. **`None` quando alguma conexão não mede**
+    /// (o enlace da 0.17 não mede): uma soma com um buraco não é uma soma.
+    pub pacotes_perdidos: Option<u64>,
     /// Quantos datagramas saíram, para a perda virar **fração**.
     ///
     /// Sem este número a perda é uma contagem, e uma contagem não distingue um
     /// pacote em dez mil de mil em dez mil. Ver a nota de [`PERDA_QUE_DOI`].
     pub pacotes_enviados: u64,
-    /// `path.congestion_events`, somado.
-    pub eventos_de_congestionamento: u64,
+    /// Eventos de congestionamento, somados. `None` como acima.
+    pub eventos_de_congestionamento: Option<u64>,
     /// O que a sala tinha licença de gastar na janela, em bits por segundo.
     ///
     /// [`teto_do_hospedeiro`] vezes o número de espectadores — o teto é **por
@@ -420,6 +421,8 @@ pub struct SondaDaSubida {
     /// Até onde a subida larga pode ir depois da primeira dor.
     limite_bps: Option<u32>,
     janela: Option<JanelaDaSubida>,
+    /// Quantas janelas fecharam sem medida de perda e foram descartadas.
+    janelas_sem_medida: u64,
 }
 
 impl Default for SondaDaSubida {
@@ -437,6 +440,7 @@ impl SondaDaSubida {
             estimativa_bps: CAMINHO_DO_SERVER_BPS,
             limite_bps: None,
             janela: None,
+            janelas_sem_medida: 0,
         }
     }
 
@@ -466,6 +470,7 @@ impl SondaDaSubida {
             },
             limite_bps: None,
             janela: None,
+            janelas_sem_medida: 0,
         }
     }
 
@@ -473,6 +478,13 @@ impl SondaDaSubida {
     #[must_use]
     pub const fn estimativa(&self) -> u32 {
         self.estimativa_bps
+    }
+
+    /// Quantas janelas fecharam sem medida de perda (o enlace da 0.17 não a
+    /// tem) e foram descartadas sem mover a estimativa.
+    #[must_use]
+    pub const fn janelas_sem_medida(&self) -> u64 {
+        self.janelas_sem_medida
     }
 
     /// Uma leitura. Devolve a estimativa nova **quando ela mudou**.
@@ -497,6 +509,29 @@ impl SondaDaSubida {
         });
 
         let antes = self.estimativa_bps;
+
+        // **Sem medida de dor, a sonda fica parada** (revisão da 0.17). O
+        // enlace não mede perda nem congestionamento, e esta sonda decide subir
+        // pela ausência deles: sem o sinal, «não doeu» seria um zero
+        // inventado, e o vídeo ganharia licença sobre bits que a voz usa. Então
+        // a janela é contada e descartada: nem sobe nem desce, e a estimativa
+        // continua a de partida (a hipótese, ou a medida lembrada).
+        let (
+            Some(perdidos_agora),
+            Some(perdidos_antes),
+            Some(congestao_agora),
+            Some(congestao_antes),
+        ) = (
+            leitura.pacotes_perdidos,
+            janela.leitura.pacotes_perdidos,
+            leitura.eventos_de_congestionamento,
+            janela.leitura.eventos_de_congestionamento,
+        )
+        else {
+            self.janelas_sem_medida = self.janelas_sem_medida.saturating_add(1);
+            return None;
+        };
+
         let bytes = leitura
             .bytes_enviados
             .saturating_sub(janela.leitura.bytes_enviados);
@@ -507,9 +542,7 @@ impl SondaDaSubida {
         // A perda como **fração do que saiu**, e não como contagem. Ver
         // `PERDA_QUE_DOI`: a contagem fazia um pacote solto derrubar a
         // estimativa, e um pacote solto por segundo é rotina.
-        let perdidos = leitura
-            .pacotes_perdidos
-            .saturating_sub(janela.leitura.pacotes_perdidos);
+        let perdidos = perdidos_agora.saturating_sub(perdidos_antes);
         let enviados = leitura
             .pacotes_enviados
             .saturating_sub(janela.leitura.pacotes_enviados);
@@ -526,10 +559,7 @@ impl SondaDaSubida {
         // Passa a decidir aqui, que é a única janela desta sonda cuja evidência
         // não é o vídeo enchendo a própria licença — ver o braço do piso
         // demonstrado, abaixo.
-        let congestionou = leitura
-            .eventos_de_congestionamento
-            .saturating_sub(janela.leitura.eventos_de_congestionamento)
-            > 0;
+        let congestionou = congestao_agora.saturating_sub(congestao_antes) > 0;
         // A faixa do meio segura: nem sobe nem desce. É onde a perda existe e
         // não é o cano falando.
         let calma = perda_pct <= PERDA_QUE_ACALMA;
@@ -594,35 +624,65 @@ impl SondaDaSubida {
 }
 
 /// O que **uma** conexão contou.
+///
+/// # A sonda degradada da 0.17 (ADR 0044)
+///
+/// Até a 0.16 os quatro números vinham do `quinn`. Na 0.17 vêm da
+/// [`seele_enlace::Leitura`], e **dois deles não existem lá**: o SCTP do
+/// `str0m` não expõe perdas nem eventos de congestionamento (`seele_enlace::Leitura`,
+/// «Leitura»). Eles chegam aqui como **zero**, que não é «não perdeu nada»: é
+/// «ninguém mediu». Com isso a sonda só sabe subir pelo que passou (o piso
+/// demonstrado e a janela cheia) e nunca veria o cano reclamar. Por isso eles
+/// chegam como **`None`**, e não como zero: com `None`, a
+/// [`SondaDaSubida`] descarta a janela e **não sobe nem desce**
+/// (`janelas_sem_medida`). A estimativa fica na de partida — a hipótese de
+/// [`CAMINHO_DO_SERVER_BPS`], ou a medida lembrada —, e o `HostUplink` não sai
+/// (`Subida::medida` continua `None`, «não medi»). É conservador de propósito:
+/// sem evidência de que o cano aguenta mais, a tela não ganha licença sobre a
+/// voz. Isso é dito no registro quando o servidor sobe (`Daemon::bind`).
+///
+/// O ida e volta pode faltar (antes do primeiro check respondido, o enlace deixa
+/// `ida_e_volta` em `None`; desde 26/10/2026 o anfitrião é ICE completo e checa,
+/// e não mais ICE-lite). Aqui ele vira `None`, e a soma ignora quem não mediu,
+/// em vez de um zero que a sonda leria como «caminho curto».
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct LeituraDaConexao {
-    /// `udp_tx.bytes`.
+    /// Bytes UDP que saíram para o par.
     pub bytes_enviados: u64,
-    /// `path.lost_packets`.
-    pub pacotes_perdidos: u64,
+    /// Pacotes perdidos. **`None` na 0.17**: o enlace não mede (ver acima).
+    pub pacotes_perdidos: Option<u64>,
     /// Quantos datagramas saíram, para a perda virar **fração**.
     ///
     /// Sem este número a perda é uma contagem, e uma contagem não distingue um
     /// pacote em dez mil de mil em dez mil. Ver a nota de [`PERDA_QUE_DOI`].
     pub pacotes_enviados: u64,
-    /// `path.congestion_events`.
-    pub eventos_de_congestionamento: u64,
-    /// O ida e volta que esta conexão está medindo.
+    /// Eventos de congestionamento. **`None` na 0.17**: o enlace não mede.
+    pub eventos_de_congestionamento: Option<u64>,
+    /// O ida e volta que esta conexão está medindo, quando mede.
     ///
     /// Não entra na conta de banda: entra na **pressa** dela. Ver
     /// [`SUBIDA_DE_CAMINHO_CURTO`].
-    pub ida_e_volta: Duration,
+    pub ida_e_volta: Option<Duration>,
 }
 
-impl From<&quinn::ConnectionStats> for LeituraDaConexao {
-    fn from(stats: &quinn::ConnectionStats) -> Self {
+impl LeituraDaConexao {
+    /// A leitura do enlace, como ele a dá: o que ele não mede chega `None`
+    /// (hoje, perdas e congestionamento, sempre; `seele_enlace::Leitura` diz por quê).
+    #[must_use]
+    pub fn do_enlace(leitura: seele_enlace::Leitura) -> Self {
         Self {
-            bytes_enviados: stats.udp_tx.bytes,
-            pacotes_perdidos: stats.path.lost_packets,
-            pacotes_enviados: stats.udp_tx.datagrams,
-            eventos_de_congestionamento: stats.path.congestion_events,
-            ida_e_volta: stats.path.rtt,
+            bytes_enviados: leitura.bytes_enviados,
+            pacotes_perdidos: leitura.pacotes_perdidos,
+            pacotes_enviados: leitura.pacotes_enviados,
+            eventos_de_congestionamento: leitura.eventos_de_congestionamento,
+            ida_e_volta: leitura.ida_e_volta,
         }
+    }
+}
+
+impl From<seele_enlace::Leitura> for LeituraDaConexao {
+    fn from(leitura: seele_enlace::Leitura) -> Self {
+        Self::do_enlace(leitura)
     }
 }
 
@@ -699,6 +759,12 @@ impl Subida {
         }
     }
 
+    /// Quantas janelas a sonda descartou por falta de medida de perda.
+    #[must_use]
+    pub const fn janelas_sem_medida(&self) -> u64 {
+        self.sonda.janelas_sem_medida()
+    }
+
     /// Quantos estão assistindo agora. Zero quando a transmissão acabou.
     pub fn assistindo(&mut self, quantos: u32) {
         self.espectadores = quantos;
@@ -736,22 +802,35 @@ impl Subida {
         conexao: LeituraDaConexao,
     ) -> Option<u32> {
         self.por_conexao.insert(quem, conexao);
+        // As somas começam medidas (zero de nada); uma conexão que não mede
+        // as torna `None`.
         let mut soma = LeituraDaSubida {
             permitido_bps: self.permitido_bps(),
+            pacotes_perdidos: Some(0),
+            eventos_de_congestionamento: Some(0),
             ..LeituraDaSubida::default()
         };
         for leitura in self.por_conexao.values() {
             soma.bytes_enviados = soma.bytes_enviados.saturating_add(leitura.bytes_enviados);
-            soma.pacotes_perdidos = soma
-                .pacotes_perdidos
-                .saturating_add(leitura.pacotes_perdidos);
-            soma.menor_ida_e_volta = Some(match soma.menor_ida_e_volta {
-                Some(menor) if menor <= leitura.ida_e_volta => menor,
-                _ => leitura.ida_e_volta,
-            });
-            soma.eventos_de_congestionamento = soma
-                .eventos_de_congestionamento
-                .saturating_add(leitura.eventos_de_congestionamento);
+            soma.pacotes_perdidos = match (soma.pacotes_perdidos, leitura.pacotes_perdidos) {
+                (Some(soma), Some(esta)) => Some(soma.saturating_add(esta)),
+                _ => None,
+            };
+            // Quem não mediu não entra: um zero aqui seria lido como «caminho
+            // curto», e a sonda subiria com a pressa de quem está perto.
+            if let Some(volta) = leitura.ida_e_volta {
+                soma.menor_ida_e_volta = Some(match soma.menor_ida_e_volta {
+                    Some(menor) if menor <= volta => menor,
+                    _ => volta,
+                });
+            }
+            soma.eventos_de_congestionamento = match (
+                soma.eventos_de_congestionamento,
+                leitura.eventos_de_congestionamento,
+            ) {
+                (Some(soma), Some(esta)) => Some(soma.saturating_add(esta)),
+                _ => None,
+            };
         }
         let andou = self.sonda.observar(agora, &soma);
         if andou.is_some() {
@@ -826,6 +905,10 @@ pub enum FimDaTela {
     /// Encaminhar depois disso seria encaminhar lixo para N pessoas. O motivo
     /// exato vai ao registro, em `voice_room`.
     FluxoMalformado,
+    /// A permissão de compartilhar a tela foi revogada (os cargos, ADR 0064):
+    /// a transmissão para na hora, no servidor, e nada mais dela é
+    /// encaminhado.
+    PermissaoRevogada,
 }
 
 /// Escreve as transmissões de uma sala no fluxo de um espectador.
@@ -878,7 +961,7 @@ pub async fn bombear(
             let _ = fluxo.finish();
         } else {
             // `reset` e não `finish`: ver [`CODIGO_DE_CORTE`].
-            let _ = fluxo.reset(quinn::VarInt::from_u32(CODIGO_DE_CORTE));
+            let _ = fluxo.reset(CODIGO_DE_CORTE);
         }
     }
 }
@@ -951,9 +1034,9 @@ mod tests {
     fn leitura(bytes: u64, perdidos: u64, permitido_bps: u32) -> LeituraDaSubida {
         LeituraDaSubida {
             bytes_enviados: bytes,
-            pacotes_perdidos: perdidos,
+            pacotes_perdidos: Some(perdidos),
             pacotes_enviados: bytes / 1200,
-            eventos_de_congestionamento: 0,
+            eventos_de_congestionamento: Some(0),
             permitido_bps,
             // Sem ida e volta: estes testes fixam o passo no de sempre, e é o
             // que se quer — quem afirma sobre o passo curto é o teste próprio
@@ -999,9 +1082,113 @@ mod tests {
         permitido_bps: u32,
     ) -> LeituraDaSubida {
         LeituraDaSubida {
-            eventos_de_congestionamento: eventos,
+            eventos_de_congestionamento: Some(eventos),
             ..leitura(bytes, 0, permitido_bps)
         }
+    }
+
+    /// A leitura como o enlace da 0.17 a dá: sem perda e sem
+    /// congestionamento medidos.
+    fn leitura_sem_medida(bytes: u64, permitido_bps: u32) -> LeituraDaSubida {
+        LeituraDaSubida {
+            pacotes_perdidos: None,
+            eventos_de_congestionamento: None,
+            ..leitura(bytes, 0, permitido_bps)
+        }
+    }
+
+    /// **Sem medida de perda, a sonda não sobe** (revisão da 0.17): janelas
+    /// cheias, que com perda medida em zero subiriam a estimativa, não a movem
+    /// quando o enlace não mede. E nada vai ao fio: `Subida::medida` continua
+    /// `None`, «não medi», e não «zero perda medida».
+    #[test]
+    fn sem_medida_de_perda_a_subida_nao_cresce_nem_se_anuncia() {
+        let permitido = 1_000_000;
+        let cheio = bytes_em_um_segundo(permitido * 2);
+        let inicio = Instant::now();
+
+        let mut medida = SondaDaSubida::nova();
+        let mut sem = SondaDaSubida::nova();
+        let mut bytes = 0;
+        for segundo in 1..=10 {
+            bytes += cheio;
+            let agora = inicio + Duration::from_secs(segundo);
+            medida.observar(agora, &leitura(bytes, 0, permitido));
+            sem.observar(agora, &leitura_sem_medida(bytes, permitido));
+        }
+        assert!(
+            medida.estimativa() > CAMINHO_DO_SERVER_BPS,
+            "a sonda de controle não subiu: o teste não mede nada"
+        );
+        assert_eq!(
+            sem.estimativa(),
+            CAMINHO_DO_SERVER_BPS,
+            "sem medida de perda a sonda cresceu: a tela ganhou licença sobre a voz sem evidência"
+        );
+        assert!(
+            sem.janelas_sem_medida() >= 8,
+            "{}",
+            sem.janelas_sem_medida()
+        );
+
+        // E pela `Subida`, com uma conexão do enlace: nada se anuncia.
+        let mut subida = Subida::nova();
+        subida.assistindo(3);
+        let mut enviados = 0;
+        for segundo in 1..=10 {
+            enviados += cheio;
+            let andou = subida.observar(
+                inicio + Duration::from_secs(segundo),
+                1,
+                LeituraDaConexao::do_enlace(seele_enlace::Leitura {
+                    bytes_enviados: enviados,
+                    pacotes_enviados: enviados / 1200,
+                    ..seele_enlace::Leitura::default()
+                }),
+            );
+            assert_eq!(andou, None);
+        }
+        assert_eq!(
+            subida.medida(),
+            None,
+            "a subida se anunciou medida sem medida de perda"
+        );
+    }
+
+    /// Uma conexão que não mede contamina a soma: com duas, uma medindo e uma
+    /// não, a sonda também fica parada, porque o cano é um só.
+    #[test]
+    fn uma_conexao_sem_medida_deixa_a_soma_sem_medida() {
+        let mut subida = Subida::nova();
+        subida.assistindo(2);
+        let inicio = Instant::now();
+        let por_segundo = bytes_em_um_segundo(4_000_000);
+        for segundo in 1..=10 {
+            let total = por_segundo * segundo;
+            let agora = inicio + Duration::from_secs(segundo);
+            subida.observar(
+                agora,
+                1,
+                LeituraDaConexao {
+                    bytes_enviados: total,
+                    pacotes_perdidos: Some(0),
+                    pacotes_enviados: total / 1200,
+                    eventos_de_congestionamento: Some(0),
+                    ida_e_volta: None,
+                },
+            );
+            subida.observar(
+                agora,
+                2,
+                LeituraDaConexao {
+                    bytes_enviados: total,
+                    pacotes_enviados: total / 1200,
+                    ..LeituraDaConexao::default()
+                },
+            );
+        }
+        assert_eq!(subida.estimativa(), CAMINHO_DO_SERVER_BPS);
+        assert_eq!(subida.medida(), None);
     }
 
     #[test]
@@ -1437,10 +1624,10 @@ mod a_sonda_em_lan {
                 1,
                 LeituraDaConexao {
                     bytes_enviados: bytes,
-                    pacotes_perdidos: 0,
+                    pacotes_perdidos: Some(0),
                     pacotes_enviados: bytes / 1200,
-                    eventos_de_congestionamento: 0,
-                    ida_e_volta: std::time::Duration::from_millis(40),
+                    eventos_de_congestionamento: Some(0),
+                    ida_e_volta: Some(std::time::Duration::from_millis(40)),
                 },
             );
         }

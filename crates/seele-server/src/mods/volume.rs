@@ -435,7 +435,7 @@ pub async fn receber(
     esperas: &std::sync::Mutex<Esperas>,
     raizes: Option<&crate::RaizesDosMods>,
     pessoa: PersonId,
-    fluxo: &mut quinn::RecvStream,
+    fluxo: &mut crate::transporte::Recebe,
 ) -> Result<Chegou, (String, seele_proto::volume::VolumeRefusal)> {
     use seele_proto::volume::VolumeRefusal;
 
@@ -509,7 +509,7 @@ pub async fn receber_imagem(
     esperas: &std::sync::Mutex<Esperas>,
     raizes: Option<&crate::RaizesDosMods>,
     pessoa: PersonId,
-    fluxo: &mut quinn::RecvStream,
+    fluxo: &mut crate::transporte::Recebe,
     cabecalho: seele_proto::volume::VolumeHeader,
     tamanho: Option<u64>,
 ) -> Result<Chegou, (String, Recusa)> {
@@ -595,7 +595,7 @@ impl Drop for LimparObras {
 /// Devolve um [`Chegou`] com os campos que só os bytes respondem; quem chama
 /// preenche o resto.
 async fn escorrer(
-    fluxo: &mut quinn::RecvStream,
+    fluxo: &mut crate::transporte::Recebe,
     obras: &std::path::Path,
     espera: &Espera,
     tamanho: Option<u64>,
@@ -686,8 +686,8 @@ fn hex(bytes: &[u8]) -> String {
 pub async fn atender_imagem(
     server: &std::sync::Arc<crate::server::Server>,
     pessoa: PersonId,
-    envio: &mut quinn::SendStream,
-    entrada: &mut quinn::RecvStream,
+    envio: &mut crate::transporte::Envio,
+    entrada: &mut crate::transporte::Recebe,
 ) -> anyhow::Result<()> {
     use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem};
     let pedido: PedidoDeImagem = crate::frame::read(entrada).await?;

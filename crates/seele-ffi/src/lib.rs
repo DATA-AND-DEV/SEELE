@@ -33,6 +33,10 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+/// O foco de voz: no máximo uma conexão desta máquina tem o microfone (E3 da
+/// 0.17, multi-sessão).
+pub mod cargos;
+pub mod foco;
 pub mod mods;
 /// Uma conexão que não existe, com o `fold` e o `snapshot` de uma que existe:
 /// para os testes daqui e para a conformidade dos dois produtores de retrato.
@@ -65,7 +69,7 @@ use seele_core::{
 };
 
 pub use types::{
-    AberturaDoAudio, Attachment, AttachmentRefusal, CaptureDevice, Channel, ChannelWeight,
+    AberturaDoAudio, Attachment, AttachmentRefusal, CaptureDevice, Carimbo, Channel, ChannelWeight,
     ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio,
     EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, LimitesDeTela,
     LimitesDosCampos, LinkState, LinkTrust, MembroForaDoAr, Message, MotivoDaRecusa,
@@ -99,6 +103,10 @@ pub use types::{
 pub use seele_core::{
     catalogo, conhecidos, escolhidos, midia_de_mod, preferences, preview, reducao, search, som, uri,
 };
+
+/// O aparelho de mentira do áudio, só com o recurso (build de teste do CUA).
+#[cfg(feature = "aparelho-de-mentira")]
+pub use seele_core::aparelho_de_mentira;
 
 /// A agenda, a leitura de um texto colado e o código de uma pessoa, para a sala
 /// pessoal (a F7).
@@ -427,6 +435,25 @@ fn codigo_com(home: &str, variavel: Option<&str>) -> Result<Codigo, ConnectionEr
 pub fn ponto_de_encontro() -> Option<String> {
     seele_core::encontro::ponto_de_quem_liga()
 }
+
+/// O ponto em que uma ligação desta casa pergunta pelo código.
+///
+/// No produto é sempre [`ponto_de_encontro`]. Com a feature `costura-de-teste`,
+/// um ponto dito para **esta casa** ([`costura_de_teste::usar_o_ponto_nesta_casa`])
+/// vem antes: é por onde um teste do app liga pelo código, como o produto, sem
+/// pôr `$SEELE_ENCONTRO` no processo inteiro.
+fn ponto_de_quem_liga_desta_casa(home: &str) -> Option<String> {
+    #[cfg(feature = "costura-de-teste")]
+    if let Some(ponto) = costura_de_teste::ponto_da_casa(home) {
+        return Some(ponto);
+    }
+    let _ = home;
+    ponto_de_encontro()
+}
+
+/// O ponto de encontro de quem liga, por casa, só nos testes do app.
+#[cfg(feature = "costura-de-teste")]
+pub mod costura_de_teste;
 
 /// A semente da sala pessoal: a chave desta máquina, de onde saem o
 /// certificado da sala e a assinatura do registro dela no ponto de encontro
@@ -942,6 +969,49 @@ fn step_of(passo: &seele_core::chegada::Passo) -> ConnectStep {
 pub trait EventListener: Send + Sync {
     /// Something happened.
     fn on_event(&self, event: Event);
+
+    /// O mesmo, dizendo de qual sessão e de qual volta do enlace (E3 da 0.17).
+    ///
+    /// É por aqui que este crate entrega **todo** evento. O corpo padrão chama
+    /// [`Self::on_event`], então quem só implementa aquele continua ouvindo
+    /// tudo, sem o carimbo; quem precisa dele (a casca com várias sessões)
+    /// implementa este.
+    fn on_event_carimbado(&self, carimbo: Carimbo, event: Event) {
+        let _ = carimbo;
+        self.on_event(event);
+    }
+}
+
+/// O `SessaoId` (E3 da 0.17): o número que identifica uma sessão cliente no
+/// processo, da tentativa de conexão até o fim, através das reconexões.
+///
+/// **Um contador do processo, e não estado de conexão**, de propósito: o número
+/// só serve se duas sessões nunca o dividem, nem uma que já acabou com uma que
+/// começa agora. Um contador por conexão daria 1 a todas; um aleatório poderia
+/// repetir. Ele não guarda nada de nenhuma sessão: só garante que o próximo
+/// número é novo. Por isso pode ser estático sem contrariar o «`Connection` não
+/// tem estado global».
+pub struct SessaoId;
+
+/// O próximo `SessaoId`. Começa em 1: o 0 nunca sai, e fica livre para quem
+/// precisar dizer «nenhuma».
+static PROXIMA_SESSAO: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+impl SessaoId {
+    /// Um `SessaoId` que nenhuma sessão deste processo usou: maior que todos os
+    /// anteriores, e nunca 0.
+    #[must_use]
+    pub fn nova() -> u64 {
+        // `fetch_add` é atômico: duas linhas pedindo juntas recebem números
+        // diferentes. O estouro de um u64 não acontece (um por nanossegundo
+        // levaria 584 anos), mas, se acontecesse, o 0 seria pulado.
+        let numero = PROXIMA_SESSAO.fetch_add(1, Ordering::Relaxed);
+        if numero == 0 {
+            PROXIMA_SESSAO.fetch_add(1, Ordering::Relaxed)
+        } else {
+            numero
+        }
+    }
 }
 
 /// A command on its way to the driver thread.
@@ -960,6 +1030,14 @@ enum Command {
         request: u32,
         id: String,
         channel: ChannelId,
+        payload: String,
+    },
+    /// Uma ação declarada de MOD (API 7, `ClientMessage::AcaoDeMod`).
+    AcaoDeMod {
+        request: u32,
+        id: String,
+        channel: ChannelId,
+        acao: String,
         payload: String,
     },
     /// Devolve à sonda o caminho medido da última visita a este servidor.
@@ -1015,6 +1093,9 @@ enum Command {
     KickPerson {
         person: PersonId,
     },
+    /// Um verbo de cargo com a revisão vista, ou `None` para pedir o quadro
+    /// (ADR 0064; `cargos.rs` é de F).
+    Cargo(Option<(u64, cargos::PedidoDeCargo)>),
     BanPerson {
         person: PersonId,
         reason: Option<String>,
@@ -1106,6 +1187,10 @@ enum Command {
         pares_que_atende: u8,
         assiste_por_par: bool,
     },
+    /// **O foco de voz mudou: olhe a voz de novo** (E3 da 0.17). Não faz nada
+    /// além de dar uma volta no laço, que termina no olhar da porta da voz;
+    /// com a resposta, ela sai depois desse olhar. Ver [`foco::FocoDeVoz::focar`].
+    OlharAVoz(Option<std::sync::mpsc::Sender<()>>),
     Shutdown,
 }
 
@@ -1158,6 +1243,14 @@ struct Shared {
     caminho_medido: std::sync::atomic::AtomicU32,
     room: Mutex<Room>,
     listeners: Mutex<Vec<Arc<dyn EventListener>>>,
+    /// O `SessaoId` desta conexão (E3 da 0.17): ver [`Carimbo`]. Fixo do
+    /// começo ao fim; não muda com a reconexão.
+    sessao: u64,
+    /// A geração do [`Carimbo`]: 1 na entrada, +1 a cada `Aviso::Reconectado`
+    /// do enlace, no braço dele em `drive`. Aqui, e não na `Connection`,
+    /// porque quem a sobe é a thread do driver e quem a lê é a casca e o
+    /// [`Shared::notify`], que carimba cada evento.
+    geracao: std::sync::atomic::AtomicU64,
     /// The voice path, and what the person chose for it.
     ///
     /// **Pendência 52.** A voz só existe dentro de uma sala de voz, então fora
@@ -1312,6 +1405,13 @@ struct Shared {
     /// Os três estados são os mesmos que a janela já distinguia, e continuam
     /// sendo três de propósito — ver [`EscolhaDeTela`].
     tela_escolhida: Mutex<EscolhaDeTela>,
+    /// A transmissão alheia que o **servidor** ligou sozinho, à parte da escolha.
+    ///
+    /// Ver [`seele_core::retrato::TelaLigada`]. É o que o retrato usa quando
+    /// ninguém escolheu ([`EscolhaDeTela::NinguemEscolheu`]): sem ela, quem não
+    /// clicou em VER recebia a imagem e o retrato dizia «ninguém está
+    /// compartilhando».
+    tela_ligada: Mutex<seele_core::retrato::TelaLigada>,
     /// A última lista de fontes que [`Connection::fontes_de_tela`] devolveu.
     ///
     /// **Existe porque o número que a casca devolve é o índice desta lista**, e
@@ -1409,6 +1509,15 @@ impl Shared {
     /// transmissão que acabou faria a próxima a começar ser recusada por uma
     /// decisão que ninguém tomou sobre ela.
     fn esquecer_tela_que_saiu(&self) {
+        // A que o servidor ligou também morre com a transmissão: uma leitura
+        // de par abortada não manda `TelaFechou`, e a próxima com o mesmo
+        // `ScreenId` não pode herdar a contagem desta. Cadeados na ordem de
+        // `tela_abriu`: o do `Room`, depois o da tela ligada.
+        if let Ok(room) = self.room.lock() {
+            if let Ok(mut ligada) = self.tela_ligada.lock() {
+                ligada.esquecer_se_saiu(&room);
+            }
+        }
         let Some(escolhida) = self.tela_escolhida().tela() else {
             return;
         };
@@ -1419,6 +1528,87 @@ impl Shared {
         if !ainda_existe {
             let _ = self.gravar_tela_escolhida(EscolhaDeTela::NinguemEscolheu);
         }
+    }
+
+    /// A leitura `leitura` de uma tela abriu, na geração que está no ar. Ver
+    /// [`seele_core::retrato::TelaLigada`].
+    fn tela_abriu(&self, tela: seele_core::ScreenId, leitura: u64) {
+        let geracao = self.carimbo().geracao;
+        if let Ok(room) = self.room.lock() {
+            if let Ok(mut ligada) = self.tela_ligada.lock() {
+                ligada.abriu(&room, tela, geracao, leitura);
+            }
+        }
+    }
+
+    /// A leitura `leitura` de uma tela acabou. Devolve se ela era a vigente
+    /// daquela tela; um cadeado envenenado responde que sim, que é o
+    /// comportamento de antes de haver identidade de leitura.
+    fn tela_fechou(&self, tela: seele_core::ScreenId, leitura: u64) -> bool {
+        self.tela_ligada
+            .lock()
+            .map_or(true, |mut ligada| ligada.fechou(tela, leitura))
+    }
+
+    /// Um quadro da leitura `leitura` vai à casca **só se ela é a vigente da
+    /// tela**. A casca conhece a tela e não a leitura: o quadro de uma leitura
+    /// já substituída (o abort ainda não efetivou) cairia no decodificador da
+    /// nova e o contaminaria. Um cadeado envenenado deixa passar, como antes.
+    fn quadro_da_tela(&self, tela: seele_core::ScreenId, leitura: u64, chave: bool, bytes: &[u8]) {
+        let vigente = self
+            .tela_ligada
+            .lock()
+            .map_or(true, |ligada| ligada.e_vigente(tela, leitura));
+        if !vigente {
+            tracing::debug!(%tela, leitura, "quadro de uma leitura de tela substituída: descartado");
+            return;
+        }
+        self.notify(&Event::ScreenFrame {
+            screen: tela.0,
+            key: chave,
+            data: base64_de(bytes),
+        });
+    }
+
+    /// Se o som da leitura `leitura` vai à fila da mistura: o mesmo filtro do
+    /// quadro ([`Self::quadro_da_tela`]), pela leitura vigente da tela. Um
+    /// cadeado envenenado deixa passar, como antes.
+    fn som_da_leitura_vale(&self, tela: seele_core::ScreenId, leitura: u64) -> bool {
+        self.tela_ligada
+            .lock()
+            .map_or(true, |ligada| ligada.e_vigente(tela, leitura))
+    }
+
+    /// Uma volta nova do enlace: a tela ligada da anterior não é desta.
+    fn tela_ligada_nova_geracao(&self) {
+        if let Ok(mut ligada) = self.tela_ligada.lock() {
+            ligada.nova_geracao();
+        }
+    }
+
+    /// Esquece a tela ligada, se for esta.
+    fn esquecer_tela_ligada(&self, tela: seele_core::ScreenId) {
+        if let Ok(mut ligada) = self.tela_ligada.lock() {
+            ligada.esquecer(tela);
+        }
+    }
+
+    /// A transmissão que esta sessão está assistindo, para o retrato: a
+    /// escolha explícita, ou — sem escolha — a que o servidor ligou nesta
+    /// geração. Ver [`seele_core::retrato::assistida_no_retrato`].
+    fn tela_assistida(&self) -> Option<seele_core::ScreenId> {
+        let escolhida = match self.tela_escolhida() {
+            EscolhaDeTela::Esta(tela) => Some(Some(tela)),
+            EscolhaDeTela::Nenhuma => Some(None),
+            EscolhaDeTela::NinguemEscolheu => None,
+        };
+        let geracao = self.carimbo().geracao;
+        let ligada = self
+            .tela_ligada
+            .lock()
+            .ok()
+            .and_then(|ligada| ligada.agora(geracao));
+        seele_core::retrato::assistida_no_retrato(escolhida, ligada)
     }
 
     /// O estado do enlace como a casca o vê.
@@ -1582,13 +1772,29 @@ impl Shared {
         true
     }
 
+    /// O carimbo de agora: a sessão e a geração que está no ar.
+    fn carimbo(&self) -> Carimbo {
+        Carimbo {
+            sessao: self.sessao,
+            geracao: self.geracao.load(Ordering::Acquire),
+        }
+    }
+
+    /// Uma volta nova do enlace: a geração sobe, e o carimbo de antes passa a
+    /// ser recusado por [`Connection::com`].
+    fn nova_geracao(&self) -> u64 {
+        self.geracao.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
     fn notify(&self, event: &Event) {
         let listeners = match self.listeners.lock() {
             Ok(listeners) => listeners.clone(),
             Err(_) => return,
         };
+        // Lido uma vez por evento: todos os ouvintes veem o mesmo carimbo.
+        let carimbo = self.carimbo();
         for listener in listeners {
-            listener.on_event(event.clone());
+            listener.on_event_carimbado(carimbo, event.clone());
         }
     }
 }
@@ -1696,7 +1902,7 @@ impl Connection {
     /// vem vazia quando a falha é de antes de haver chegada: um endereço que
     /// não resolve, uma identidade que não abre, uma thread que não sobe.
     pub fn connect_with_trail(config: ConnectConfig) -> Result<(Arc<Self>, Trust), ConnectFailure> {
-        Self::abrir(config, None, None)
+        Self::abrir(config, None, None, None, None)
     }
 
     /// O mesmo, com alguém ouvindo a chegada **enquanto** ela acontece.
@@ -1721,7 +1927,7 @@ impl Connection {
         config: ConnectConfig,
         olhos: Arc<dyn EventListener>,
     ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
-        Self::abrir(config, Some(olhos), None)
+        Self::abrir(config, Some(olhos), None, None, None)
     }
 
     /// O mesmo, com um [`Cancelamento`]: quem liga pode desistir enquanto a
@@ -1741,15 +1947,96 @@ impl Connection {
         olhos: Option<Arc<dyn EventListener>>,
         cancelamento: Arc<Cancelamento>,
     ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
-        Self::abrir(config, olhos, Some(cancelamento))
+        Self::abrir(config, olhos, Some(cancelamento), None, None)
     }
 
-    /// O corpo que as quatro portas compartilham.
+    /// **A porta da multi-sessão** (E3 da 0.17): o mesmo de
+    /// [`Connection::connect_cancelavel`], com a conexão inscrita no foco de voz
+    /// da máquina.
+    ///
+    /// Com `foco`, a voz desta conexão só abre quando ela tem o foco
+    /// ([`foco::FocoDeVoz`]); sentada numa sala sem ele, o retrato diz
+    /// [`AberturaDoAudio::EmOutraSessao`]. A conexão é inscrita antes de o
+    /// driver subir, e sai do foco quando acaba, por qualquer caminho. Sem
+    /// `foco`, é a porta de sempre.
+    ///
+    /// `sessao` é o `SessaoId` da casca, que entra no [`Carimbo`] desta
+    /// conexão; `None` sorteia um pelo contador ([`SessaoId::nova`]), como as
+    /// outras portas. Um `Some(0)` também é trocado por um novo: o 0 não é
+    /// sessão.
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Connection::connect_cancelavel`].
+    pub fn connect_com_foco(
+        config: ConnectConfig,
+        olhos: Option<Arc<dyn EventListener>>,
+        cancelamento: Option<Arc<Cancelamento>>,
+        foco: Option<Arc<foco::FocoDeVoz>>,
+        sessao: Option<u64>,
+    ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
+        Self::abrir(config, olhos, cancelamento, foco, sessao)
+    }
+
+    /// O número desta conexão no foco de voz, quando ela entrou num.
+    #[must_use]
+    pub fn id_no_foco(&self) -> Option<u64> {
+        self.shared.voice.id_no_foco()
+    }
+
+    /// Esta conexão tem a voz da máquina agora? Sem foco, sempre.
+    #[must_use]
+    pub fn tem_o_foco_de_voz(&self) -> bool {
+        self.shared.voice.tem_foco()
+    }
+
+    /// De qual sessão esta conexão é, e em qual volta do enlace ela está agora.
+    #[must_use]
+    pub fn carimbo(&self) -> Carimbo {
+        self.shared.carimbo()
+    }
+
+    /// **A porta dos comandos de sessão** (E3 da 0.17): devolve esta conexão
+    /// só se o carimbo que o comando trouxe é o de agora.
+    ///
+    /// `conexao.com(carimbo)?.send_message(...)`: um clique feito sobre a tela
+    /// de outra sessão, ou de antes de uma reconexão, é recusado aqui, antes de
+    /// qualquer coisa sair, e nunca vai calado para a conexão errada.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::SessaoNaoConfere`], com os dois carimbos, quando a
+    /// sessão ou a geração não batem.
+    pub fn com(&self, carimbo: Carimbo) -> Result<&Self, ConnectionError> {
+        let esperado = self.carimbo();
+        if carimbo == esperado {
+            Ok(self)
+        } else {
+            tracing::warn!(
+                ?esperado,
+                ?carimbo,
+                "um comando chegou com o carimbo de outra sessão, ou de antes de uma reconexão: recusado, e nada saiu"
+            );
+            Err(ConnectionError::SessaoNaoConfere {
+                esperado,
+                veio: carimbo,
+            })
+        }
+    }
+
+    /// O corpo que as portas compartilham.
     fn abrir(
         config: ConnectConfig,
         olhos: Option<Arc<dyn EventListener>>,
         cancelamento: Option<Arc<Cancelamento>>,
+        foco: Option<Arc<foco::FocoDeVoz>>,
+        sessao: Option<u64>,
     ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
+        // O `SessaoId` nasce na tentativa, antes de tudo: as etapas da chegada
+        // já saem carimbadas com ele. O 0 não é sessão.
+        let sessao = sessao
+            .filter(|&sessao| sessao != 0)
+            .unwrap_or_else(SessaoId::nova);
         // **O apelido que o `Hello` não leva é recusado aqui, antes de tudo**
         // (pendência 58, item 55; lote C55 da F5). O teto é do fio, em bytes,
         // e o apelido está na mão antes de qualquer endereço: conferido aqui,
@@ -1828,6 +2115,8 @@ impl Connection {
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
+            sessao,
+            geracao: std::sync::atomic::AtomicU64::new(1),
             voice: VozDaSala::nova(config.audio, chosen_devices(&config)),
             media: Mutex::new(None),
             nickname: Mutex::new(config.nickname.clone()),
@@ -1841,10 +2130,21 @@ impl Connection {
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
+            tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
         });
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        // **No foco de voz antes de o driver subir** (E3): o primeiro olhar da
+        // porta da voz já o encontra. Uma conexão que não chega a abrir sai do
+        // foco quando o `Shared` cai, pelo `Drop` do lugar.
+        if let Some(foco) = foco {
+            let id = foco.inscrever(Arc::new(foco::NaConexao {
+                shared: Arc::downgrade(&shared),
+                comandos: command_tx.clone(),
+            }));
+            shared.voice.entrar_no_foco(foco::NoFoco { foco, id });
+        }
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let (encerrada_tx, encerrada_rx) = std::sync::mpsc::channel();
 
@@ -1892,6 +2192,10 @@ impl Connection {
         let trust = ready_rx
             .recv()
             .map_err(|_| ConnectionError::Unreachable)??;
+
+        // **Só de pé ela pode ganhar a voz sozinha** (E3): a primeira conexão
+        // da vida do foco, e a única. Uma que falhou antes daqui nunca foi dona.
+        shared.voice.tomar_o_foco_se_primeira();
 
         let connection = Arc::new(Self {
             commands: command_tx,
@@ -2284,6 +2588,35 @@ impl Connection {
         })
     }
 
+    /// Pede uma **ação declarada** de MOD (API 7): o [`Self::mod_request`] com
+    /// o nome da ação que o `mod.json` declarou em `permissoes`.
+    ///
+    /// Este lado não decide nada: quem confere o MOD ligado, a ação declarada
+    /// e a permissão da pessoa é o servidor, antes de chamar a metade de
+    /// servidor. A resposta — inclusive a recusa `{"ok":false,"recusa":
+    /// "acao-nao-declarada" | "sem-permissao"}` — chega como
+    /// [`Event::ModReply`] deste `request`.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError`] quando a sessão já acabou.
+    pub fn acao_de_mod(
+        &self,
+        request: u32,
+        id: String,
+        channel: u32,
+        acao: String,
+        payload: String,
+    ) -> Result<(), ConnectionError> {
+        self.command(Command::AcaoDeMod {
+            request,
+            id,
+            channel: ChannelId(channel),
+            acao,
+            payload,
+        })
+    }
+
     /// Asks the server to make a voice room.
     ///
     /// Asks. It does not decide, and it does not report back whether it worked
@@ -2532,6 +2865,75 @@ impl Connection {
         self.command(Command::KickPerson {
             person: PersonId(person),
         })
+    }
+
+    // ---- cargos (ADR 0064; os tipos e a regra são de `cargos.rs`, de F) ----
+
+    /// Pede ao servidor o quadro de cargos desta sessão. A resposta chega
+    /// pelo `Room` (`cargos_na_tela`), como todo estado.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] depois do fim da sessão.
+    pub fn pedir_cargos(&self) -> Result<(), ConnectionError> {
+        self.command(Command::Cargo(None))
+    }
+
+    /// Pede um verbo de cargo com a revisão que a tela viu. **Quem decide é o
+    /// servidor**: a recusa volta como `CargoRecusado`, nomeada.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] depois do fim da sessão.
+    pub fn pedido_de_cargo(
+        &self,
+        revisao: u64,
+        pedido: cargos::PedidoDeCargo,
+    ) -> Result<(), ConnectionError> {
+        self.command(Command::Cargo(Some((revisao, pedido))))
+    }
+
+    /// Os apelidos que esta sessão conhece: os membros do FORA DO AR e quem
+    /// está no roster.
+    fn apelidos_conhecidos(room: &Room) -> std::collections::BTreeMap<PersonId, String> {
+        let mut apelidos = room.membros.clone();
+        for (id, pessoa) in &room.people {
+            apelidos.insert(*id, pessoa.nickname.clone());
+        }
+        apelidos
+    }
+
+    /// O que a tela de cargos lê desta sessão: o quadro, as suas permissões e
+    /// os apelidos de quem aparece no quadro.
+    #[must_use]
+    pub fn cargos_na_tela(&self) -> cargos::CargosNaTela {
+        match self.shared.room.lock() {
+            Ok(room) => room.cargos.na_tela(&Self::apelidos_conhecidos(&room)),
+            Err(_) => cargos::CargosDaSessao::default().na_tela(&std::collections::BTreeMap::new()),
+        }
+    }
+
+    /// A prévia de um verbo desta pessoa com a revisão `revisao`: a recusa que
+    /// o servidor daria, ou o ganho e a perda por pessoa. `None` antes do
+    /// primeiro quadro, ou sem saber quem é esta conexão. Só informativa.
+    #[must_use]
+    pub fn prever_cargo(
+        &self,
+        revisao: u64,
+        pedido: &cargos::PedidoDeCargo,
+    ) -> Option<Result<cargos::Previa, cargos::RecusaDeCargo>> {
+        let room = self.shared.room.lock().ok()?;
+        let eu = room.me?;
+        room.cargos
+            .prever(&Self::apelidos_conhecidos(&room), eu, revisao, pedido)
+    }
+
+    /// Por que `pessoa` tem, ou não, cada permissão, pelo último quadro.
+    #[must_use]
+    pub fn explicar_permissoes(&self, pessoa: u64) -> Option<Vec<cargos::PermissaoExplicada>> {
+        let room = self.shared.room.lock().ok()?;
+        room.cargos
+            .explicar_tudo(&Self::apelidos_conhecidos(&room), PersonId(pessoa))
     }
 
     /// Asks the server to bar a person from returning — `banir`.
@@ -2809,6 +3211,11 @@ impl Connection {
         };
         if self.shared.gravar_tela_escolhida(escolha) {
             self.shared.notify(&Event::ScreenChanged);
+        }
+        // Devolver a que o servidor ligou é deixar de recebê-la: a leitura do
+        // par é abortada sem `TelaFechou`, e a contagem dela não pode ficar.
+        if !quero {
+            self.shared.esquecer_tela_ligada(tela);
         }
         self.command(Command::Assistir { tela, quero })
     }
@@ -3466,7 +3873,9 @@ impl Connection {
         // cada uma tem o seu, e nenhuma precisa dele. A foto do `Room` é a do
         // `seele_core::retrato`, a mesma que o navegador monta (fase 2 da
         // Tarefa 2.2 da F4).
-        let escolhida = self.shared.tela_escolhida().tela();
+        // A assistida é a escolhida, ou — sem escolha — a que o servidor ligou
+        // sozinho na primeira transmissão (ver `TelaLigada`).
+        let escolhida = self.shared.tela_assistida();
         let pedido = self.shared.pedido_da_tela();
         let foto = match self.shared.room.lock() {
             Ok(room) => foto_da_sala(&room, escolhida, pedido),
@@ -3495,7 +3904,11 @@ impl Connection {
             clippy::cast_precision_loss,
             reason = "a round trip in microseconds is far below f32's exact range"
         )]
-        let rtt_ms = self.shared.rtt_micros.load(Ordering::Relaxed) as f32 / 1000.0;
+        let rtt_ms = match self.shared.rtt_micros.load(Ordering::Relaxed) {
+            // Zero é «nenhum `Pong` voltou ainda», e não uma ida e volta de 0 ms.
+            0 => None,
+            micros => Some(micros as f32 / 1000.0),
+        };
 
         Snapshot {
             caminho: self.shared.caminho(),
@@ -3511,6 +3924,8 @@ impl Connection {
             channels: sala.channels,
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
             fora_do_ar_revision: self.shared.fora_do_ar_revision.load(Ordering::Relaxed),
+            // Da sala: sai do `Room` pela foto, na mesma tomada do cadeado.
+            cargos_revision: sala.cargos_revision,
             telemetry: Telemetry {
                 rtt_ms,
                 // O jitter que a pessoa quer saber é o de chegada, medido
@@ -4426,7 +4841,7 @@ async fn drive(
         // de quem liga, a mesma leitura do ambiente com que a sala se registra.
         Alvo::Codigo(codigo) => seele_core::chegada::Chegada::para_o_codigo(
             codigo,
-            seele_core::encontro::ponto_de_quem_liga(),
+            ponto_de_quem_liga_desta_casa(&config.home),
             config.nickname.clone(),
         ),
         Alvo::Enderecos {
@@ -4477,10 +4892,13 @@ async fn drive(
     // haver sessão, e estas etapas todas acontecem antes disso.
     let vigia = olhos.map(|ouvinte| {
         let mut etapas = chegada.acompanhar();
+        // Carimbadas também (E3): a geração é 1 durante toda a chegada, porque
+        // nenhum enlace abriu ainda para poder voltar.
+        let carimbo = shared.carimbo();
         tokio::spawn(async move {
             while etapas.changed().await.is_ok() {
                 let etapa = ConnectStage::from(&*etapas.borrow_and_update());
-                ouvinte.on_event(Event::ConnectStageChanged { stage: etapa });
+                ouvinte.on_event_carimbado(carimbo, Event::ConnectStageChanged { stage: etapa });
             }
         })
     });
@@ -4576,7 +4994,7 @@ async fn drive(
             aviso = client.proximo() => {
                 match aviso {
                     seele_core::enlace::Aviso::Mensagem(message) => {
-                        receber(&shared, &message);
+                        receber_a_mensagem_do_motor(&shared, &message);
                         // A razão de uma recusa, que o `Room` guardou ao dobrar
                         // a mensagem. Drenada em vez de lida: duas
                         // transferências podem estar no ar, e a segunda falhar
@@ -4604,7 +5022,11 @@ async fn drive(
                         tela,
                         largura,
                         altura,
+                        leitura,
                     } => {
+                        // **Gravada antes do evento**: a casca que reage ao
+                        // `ScreenOpened` relendo o retrato já acha a tela nele.
+                        shared.tela_abriu(tela, leitura);
                         shared.notify(&Event::ScreenOpened {
                             screen: tela.0,
                             width: largura,
@@ -4614,40 +5036,67 @@ async fn drive(
                     seele_core::enlace::Aviso::TelaIlegivel { motivo } => {
                         shared.notify(&Event::ScreenUnreadable { reason: motivo });
                     }
-                    seele_core::enlace::Aviso::TelaQuadro { tela, chave, bytes } => {
-                        shared.notify(&Event::ScreenFrame {
-                            screen: tela.0,
-                            key: chave,
-                            data: base64_de(&bytes),
-                        });
+                    seele_core::enlace::Aviso::TelaQuadro {
+                        tela,
+                        chave,
+                        bytes,
+                        leitura,
+                    } => {
+                        shared.quadro_da_tela(tela, leitura, chave, &bytes);
                     }
                     // **O som não vira evento.** Ele vai direto para a mistura,
                     // que é onde o codec já mora e onde o isolamento total
                     // decide se alguma coisa toca. Mandá-lo à casca seria pedir
                     // a ela que decodificasse Opus para depois devolvê-lo.
-                    seele_core::enlace::Aviso::TelaSom { tela, bytes } => {
+                    seele_core::enlace::Aviso::TelaSom {
+                        tela,
+                        bytes,
+                        leitura,
+                    } => {
                         // **O identificador segue junto até a mistura.** Ele era
                         // descartado aqui — `{ bytes, .. }` —, e por isso a fila
                         // não sabia de quem ela era: qualquer `TelaFechou`
                         // limpava a fila, então alguém parando de transmitir
                         // calava o som de outra transmissão. R17 e ADR 0054.
-                        if let Ok(voice) = shared.voice.lock() {
+                        //
+                        // E só o da leitura vigente: o som de uma leitura já
+                        // substituída da mesma tela cairia na fila da nova.
+                        if !shared.som_da_leitura_vale(tela, leitura) {
+                            tracing::debug!(
+                                %tela,
+                                leitura,
+                                "som de uma leitura de tela substituída: descartado"
+                            );
+                        } else if let Ok(voice) = shared.voice.lock() {
                             if let Some(voice) = voice.as_ref() {
                                 voice.som_da_tela(tela, bytes);
                             }
                         }
                     }
-                    seele_core::enlace::Aviso::TelaFechou { tela } => {
-                        // A transmissão acabou: o que sobrou na fila é som de
-                        // uma tela que já não está na frente de ninguém — **se a
-                        // fila for daquela tela.** Ver
-                        // `Voice::esquecer_o_som_da_tela`.
-                        if let Ok(voice) = shared.voice.lock() {
-                            if let Some(voice) = voice.as_ref() {
-                                voice.esquecer_o_som_da_tela(tela);
+                    seele_core::enlace::Aviso::TelaFechou { tela, leitura } => {
+                        // **Só o fim da leitura vigente fecha.** O de uma leitura
+                        // que outra da mesma tela já substituiu (a troca de par
+                        // aborta a anterior, e o fim dela sai do `Drop`) pode
+                        // chegar depois da abertura nova, e apagaria o palco e a
+                        // fila de som dela.
+                        if shared.tela_fechou(tela, leitura) {
+                            // A transmissão acabou: o que sobrou na fila é som de
+                            // uma tela que já não está na frente de ninguém — **se a
+                            // fila for daquela tela.** Ver
+                            // `Voice::esquecer_o_som_da_tela`.
+                            if let Ok(voice) = shared.voice.lock() {
+                                if let Some(voice) = voice.as_ref() {
+                                    voice.esquecer_o_som_da_tela(tela);
+                                }
                             }
+                            shared.notify(&Event::ScreenClosed { screen: tela.0 });
+                        } else {
+                            tracing::info!(
+                                %tela,
+                                leitura,
+                                "fim de uma leitura de tela já substituída: nada a fechar"
+                            );
                         }
-                        shared.notify(&Event::ScreenClosed { screen: tela.0 });
                     }
                     // Cair não encerra: começa a bateria interna, e a casca
                     // esmaece em vez de fechar.
@@ -4681,6 +5130,13 @@ async fn drive(
                         }
                     }
                     seele_core::enlace::Aviso::Reconectado { media, sessao, voice_room } => {
+                        // **A geração sobe antes de qualquer evento desta volta**
+                        // (E3): o `Online` abaixo já sai com o carimbo novo, e um
+                        // comando com o de antes da queda passa a ser recusado
+                        // por `Connection::com`.
+                        let geracao = shared.nova_geracao();
+                        tracing::info!(geracao, "o enlace voltou: geração nova do carimbo");
+                        shared.tela_ligada_nova_geracao();
                         shared.gravar_enlace(seele_core::Link::Online, None);
                         // A pessoa volta sentada onde o motor a sentou de novo:
                         // ver `readotar_na_volta`. É esse assento que a porta da
@@ -4722,7 +5178,7 @@ async fn drive(
                         // braço da porta abaixo. Quem estava fora de sala não
                         // tem voz, e continua sem aparelho.
                         let (canal, ssrc) = ((*media).clone(), sessao.ssrc);
-                        let vez = Arc::clone(&shared.voice.vez_do_driver);
+                        let vez = shared.voice.vez();
                         porta.na_volta(
                             &shared.voice,
                             move |atual: Voice| -> Futuro<Voice> {
@@ -4875,6 +5331,9 @@ async fn drive(
     drop(porta);
     shared.voice.marcar(AberturaDoAudio::ForaDeSala);
     largar_sem_segurar(&shared, |shared| &shared.voice);
+    // E sai do foco de voz (E3): uma sessão que acabou não segura o microfone
+    // da máquina, nem enquanto a casca ainda guarda a `Connection` dela.
+    shared.voice.sair_do_foco();
     // E o canal com ela: um `set_capture_device` que chegasse depois abriria um
     // caminho de voz sobre uma conexão morta, e ele ficaria de pé sem sessão
     // nenhuma por trás.
@@ -5274,6 +5733,17 @@ struct VozDaSala<V> {
     /// [`Self::instalar`] põe numa voz aberta do zero, e o que faz a voz nova
     /// recebê-los. A reaberta da volta traz os da velha, e os mantém.
     aplicados: Mutex<Option<Vec<(Ssrc, f32)>>>,
+    /// **O lugar desta conexão no foco de voz da máquina** (E3 da 0.17). Vazio
+    /// numa conexão aberta pelas portas sem foco: ela é sempre dona da própria
+    /// voz, como antes de haver várias sessões. Ver [`foco`].
+    ///
+    /// Preenchido uma vez, logo depois de o `Shared` existir e antes de o driver
+    /// subir: nenhum olhar da porta da voz o vê vazio numa conexão com foco.
+    foco: std::sync::OnceLock<foco::NoFoco>,
+    /// Quem pediu para saber que o driver olhou a voz de novo: a troca do foco
+    /// espera esta resposta para saber que a abertura em curso foi largada.
+    /// Respondidos no fim de [`PortaDaVoz::olhar`].
+    olhadas: Mutex<Vec<std::sync::mpsc::Sender<()>>>,
 }
 
 impl<V> VozDaSala<V> {
@@ -5286,6 +5756,91 @@ impl<V> VozDaSala<V> {
             vez_do_driver: Arc::new(Mutex::new(())),
             volumes: Mutex::new(HashMap::new()),
             aplicados: Mutex::new(None),
+            foco: std::sync::OnceLock::new(),
+            olhadas: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Põe esta voz num foco de voz. Uma vez só; a segunda é ignorada e dita.
+    fn entrar_no_foco(&self, lugar: foco::NoFoco) {
+        if let Err(repetido) = self.foco.set(lugar) {
+            tracing::warn!(
+                id = repetido.id,
+                "uma voz já num foco foi posta noutro: o segundo foi ignorado"
+            );
+        }
+    }
+
+    /// Esta conexão tem a voz da máquina? Sem foco nenhum, sempre: é a conexão
+    /// sozinha de antes da 0.17.
+    fn tem_foco(&self) -> bool {
+        self.foco.get().is_none_or(foco::NoFoco::tem)
+    }
+
+    /// A primeira conexão da vida do foco, já de pé, toma a voz sozinha. Ver
+    /// [`foco::FocoDeVoz::tomar_se_primeira`].
+    fn tomar_o_foco_se_primeira(&self) {
+        if let Some(lugar) = self.foco.get() {
+            lugar.foco.tomar_se_primeira(lugar.id);
+        }
+    }
+
+    /// Tira esta conexão do foco, se ela está num. Idempotente; o `Drop` do
+    /// lugar faz o mesmo.
+    fn sair_do_foco(&self) {
+        if let Some(lugar) = self.foco.get() {
+            lugar.foco.desinscrever(lugar.id);
+        }
+    }
+
+    /// O número desta conexão no foco, quando ela está num.
+    fn id_no_foco(&self) -> Option<u64> {
+        self.foco.get().map(|lugar| lugar.id)
+    }
+
+    /// A vez de aparelho: a da máquina, num foco; a desta conexão, sem.
+    fn vez(&self) -> Arc<Mutex<()>> {
+        self.foco
+            .get()
+            .map_or_else(|| Arc::clone(&self.vez_do_driver), |lugar| lugar.foco.vez())
+    }
+
+    /// Uma pergunta «ainda tenho o foco?» que atravessa para a thread que abre
+    /// o aparelho. A abertura a faz **sob a vez da máquina**, logo depois de
+    /// abrir: sem o foco, larga o que abriu ali mesmo, antes de soltar a vez, e
+    /// a sessão que ganhou o foco só abre depois.
+    fn conferidor_do_foco(&self) -> impl Fn() -> bool + Send + 'static {
+        let lugar = self
+            .foco
+            .get()
+            .map(|lugar| (Arc::clone(&lugar.foco), lugar.id));
+        move || {
+            lugar
+                .as_ref()
+                .is_none_or(|(foco, id)| foco.dono() == Some(*id))
+        }
+    }
+
+    /// Guarda quem quer saber do próximo olhar da porta da voz.
+    fn esperar_o_olhar(&self, resposta: Option<std::sync::mpsc::Sender<()>>) {
+        if let Some(resposta) = resposta {
+            self.olhadas
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(resposta);
+        }
+    }
+
+    /// Responde a todos que esperavam um olhar.
+    fn responder_olhadas(&self) {
+        let esperando = std::mem::take(
+            &mut *self
+                .olhadas
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        for resposta in esperando {
+            let _ = resposta.send(());
         }
     }
 
@@ -5408,6 +5963,28 @@ impl<V: VozViva> VozDaSala<V> {
         self.escolher(|escolhida| escolhida.tecla_segura = segura);
     }
 
+    /// A tecla guardada volta a solta: a troca do foco faz isto na sessão que
+    /// vai ganhá-lo, antes de ela poder abrir. Ver [`foco::FocoDeVoz::focar`].
+    fn soltar_a_tecla_guardada(&self) {
+        self.segurar_a_tecla(false);
+    }
+
+    /// **A voz cai porque o foco saiu desta sessão**, da thread de quem troca.
+    ///
+    /// A tecla solta primeiro, e a voz sai do lugar depois: o mesmo acordo do
+    /// fechar da porta. O estado diz por que não há voz, se a sessão estava
+    /// abrindo ou com a voz de pé; o driver confirma no olhar seguinte.
+    fn calar_sem_foco(&self) {
+        self.segurar_a_tecla(false);
+        if matches!(
+            self.abertura(),
+            AberturaDoAudio::Abrindo | AberturaDoAudio::Aberto
+        ) {
+            self.marcar(AberturaDoAudio::EmOutraSessao);
+        }
+        self.largar();
+    }
+
     /// O volume e o mudo do som da tela: gravados, e postos na voz viva se há
     /// uma. M-2 do lote V.
     ///
@@ -5465,6 +6042,15 @@ impl<V: VozViva> VozDaSala<V> {
     ) -> Result<(), V> {
         match self.viva.lock() {
             Ok(mut viva) => {
+                // **Sem o foco, a voz que chegou é largada aqui** (E3), sob o
+                // mesmo cadeado com que a troca do foco cala esta sessão: ou a
+                // troca já calou, e esta conferência a vê sem foco, ou ela ainda
+                // vai calar, e cala esta voz junto.
+                if !self.tem_foco() {
+                    drop(nova);
+                    self.marcar(AberturaDoAudio::EmOutraSessao);
+                    return Ok(());
+                }
                 let escolhida = self.escolhida();
                 if escolhida.aparelhos != *pedidos {
                     return Err(nova);
@@ -5673,8 +6259,37 @@ impl<V: VozViva> PortaDaVoz<V> {
         agora: Option<VoiceRoomId>,
         abrir: impl FnOnce(&seele_core::DeviceChoice) -> Futuro<V>,
     ) {
+        // **O portão do foco de voz** (E3 da 0.17): sem o foco, a sala conta como
+        // nenhuma para o áudio. Perder o foco sentado é o mesmo fechar de sair da
+        // sala; ganhá-lo sentado é o mesmo abrir de entrar. O estado diz que a
+        // voz está noutra sessão, e não que a pessoa saiu da sala.
+        let tem_foco = voz.tem_foco();
+        let sentada = agora;
+        let agora = if tem_foco { agora } else { None };
         let antes = std::mem::replace(&mut self.sala_vista, agora);
         let ha_voz = self.em_curso.is_some() || voz.tem_voz();
+        self.decidir(voz, antes, agora, ha_voz, abrir);
+        if !tem_foco && sentada.is_some() {
+            voz.marcar(AberturaDoAudio::EmOutraSessao);
+        } else if sentada.is_none() && voz.abertura() == AberturaDoAudio::EmOutraSessao {
+            // Saiu da sala depois de perder o foco (a troca a faz sair): fora
+            // de sala, e não «a voz está noutra sessão».
+            voz.marcar(AberturaDoAudio::ForaDeSala);
+        }
+        // Quem trocou o foco espera isto: daqui em diante a abertura em curso
+        // desta sessão, se havia uma, foi largada.
+        voz.responder_olhadas();
+    }
+
+    /// O passo da pendência 52, do antes para o agora do assento.
+    fn decidir(
+        &mut self,
+        voz: &VozDaSala<V>,
+        antes: Option<VoiceRoomId>,
+        agora: Option<VoiceRoomId>,
+        ha_voz: bool,
+        abrir: impl FnOnce(&seele_core::DeviceChoice) -> Futuro<V>,
+    ) {
         match passo_da_voz(antes, agora, voz.quer_audio, ha_voz) {
             PassoDaVoz::Abrir => self.comecar(voz, abrir),
             PassoDaVoz::Fechar => {
@@ -5810,7 +6425,10 @@ impl<V: VozViva> PortaDaVoz<V> {
 fn abrir_a_voz(shared: &Shared, pedidos: &seele_core::DeviceChoice) -> Futuro<Voice> {
     let canal = shared.media.lock().ok().and_then(|slot| slot.clone());
     let pedidos = pedidos.clone();
-    let vez = Arc::clone(&shared.voice.vez_do_driver);
+    // A vez da máquina, num foco de voz (E3): as aberturas de todas as sessões
+    // passam uma de cada vez, e a troca do foco espera a que estiver no aparelho.
+    let vez = shared.voice.vez();
+    let tem_foco = shared.voice.conferidor_do_foco();
     Box::pin(async move {
         let Some((media, ssrc)) = canal else {
             return Ok(Err("sem conexão por onde a voz saia".to_owned()));
@@ -5818,7 +6436,17 @@ fn abrir_a_voz(shared: &Shared, pedidos: &seele_core::DeviceChoice) -> Futuro<Vo
         esperar_o_audio(
             &vez,
             move || {
-                Voice::start_preferring(&pedidos, media, ssrc).map_err(|erro| format!("{erro:#}"))
+                let aberta = Voice::start_preferring(&pedidos, media, ssrc)
+                    .map_err(|erro| format!("{erro:#}"))?;
+                // **Sem o foco, largada aqui, sob a vez** (E3): o foco saiu
+                // enquanto o aparelho abria, e a sessão que o ganhou espera esta
+                // vez para abrir a dela. Duas vozes vivas nunca se cruzam.
+                if tem_foco() {
+                    Ok(aberta)
+                } else {
+                    drop(aberta);
+                    Err("o foco de voz saiu desta sessão enquanto o aparelho abria".to_owned())
+                }
             },
             PRAZO_DO_AUDIO,
         )
@@ -6077,6 +6705,13 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         // E o das pessoas, pela mesma razão e com a mesma ordem: antes do aviso.
         shared.notify(&Event::ServerChanged);
     }
+    // **Os cargos desta sessão** (ADR 0064): o evento leva a marca nova, que o
+    // `Room` já subiu ao dobrar a mensagem — é por ela, e não por um laço de
+    // leituras, que a camada de cargos sabe quando reler `cargos_na_tela`.
+    if changed.cargos {
+        let marca = shared.room.lock().map_or(0, |room| room.cargos.marca());
+        shared.notify(&Event::CargosChanged { marca });
+    }
     if changed.telemetry {
         shared.notify(&Event::TelemetryChanged);
     }
@@ -6227,7 +6862,134 @@ fn measure(sync: &mut Signal, client: &Enlace, shared: &Arc<Shared>) -> bool {
         client.caminho_medido(),
         std::sync::atomic::Ordering::Relaxed,
     );
+    // Diagnóstico só da build de teste do CUA (`SEELE_AUDIO_DE_MENTIRA=1`):
+    // sobre a cópia acima, com o lock da voz já solto. Ver `diagnostico_da_voz`.
+    #[cfg(all(debug_assertions, feature = "aparelho-de-mentira"))]
+    let _ = diagnostico_da_voz::relatar(shared.carimbo(), telemetria.as_ref(), Instant::now());
     medir_a_volta(sync, shared, telemetria.as_ref(), rtt_micros)
+}
+
+/// **Diagnóstico da entrada de voz, só na build de teste do CUA.**
+///
+/// Existe para medir o buraco de 25/10 — depois de reconectar a sessão A, cerca
+/// de 100 s com uns 260 blocos com som a cada 500, e a volta sozinha —, sem
+/// supor a causa: jitter e decodificador (silêncio, conforto, fome), anel de
+/// reprodução vazio ou a máquina atrasando o laço. Uma linha por sessão a cada
+/// 5 s, chave=valor, com o local e cada fonte.
+///
+/// Com o recurso `aparelho-de-mentira`, num build de debug, **e** com
+/// `SEELE_AUDIO_DE_MENTIRA=1`, a mesma porta do `audio_de_mentira.rs` do app.
+/// Fora disso este módulo não existe: o `seele-audio` recusa o recurso num
+/// build otimizado (`compile_error!`), e sem o recurso o `cfg` tira o módulo e
+/// a chamada do `measure`. O guarda `o_diagnostico_da_voz::fora_da_build_de_teste_nao_existe`
+/// prende essas duas portas.
+///
+/// O que falta, e por quê: `recebidos`, `tocados`, `alvo_ms` e `silenciados`
+/// estão no `JitterMetrics` de cada fonte, mas só a task do `pipeline` o vê;
+/// a [`seele_core::AudioTelemetry`] não os carrega, e trazê-los pede campo
+/// novo na `SourceTelemetry` (API pública do `seele-audio`).
+#[cfg(all(debug_assertions, feature = "aparelho-de-mentira"))]
+mod diagnostico_da_voz {
+    use std::collections::HashMap;
+    use std::fmt::Write as _;
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    /// No máximo uma linha por sessão neste intervalo.
+    pub(super) const A_CADA: Duration = Duration::from_secs(5);
+
+    /// A última linha de cada sessão. O `SessaoId` é fixo do começo ao fim da
+    /// conexão, e a geração muda dentro dela: o limite é por sessão.
+    static ULTIMA: Mutex<Option<HashMap<u64, Instant>>> = Mutex::new(None);
+
+    /// A mesma variável, e o mesmo valor, que o `audio_de_mentira.rs` do app lê.
+    pub(super) fn ligado() -> bool {
+        std::env::var("SEELE_AUDIO_DE_MENTIRA").as_deref() == Ok("1")
+    }
+
+    /// Se a sessão pode dizer agora, e marca que disse.
+    fn na_vez(sessao: u64, agora: Instant) -> bool {
+        let Ok(mut ultima) = ULTIMA.lock() else {
+            return false;
+        };
+        let ultima = ultima.get_or_insert_with(HashMap::new);
+        match ultima.get(&sessao) {
+            Some(antes) if agora.saturating_duration_since(*antes) < A_CADA => false,
+            _ => {
+                ultima.insert(sessao, agora);
+                true
+            }
+        }
+    }
+
+    /// A linha, chave=valor. Pura, para o teste afirmar os campos.
+    pub(super) fn linha(
+        carimbo: super::Carimbo,
+        telemetria: Option<&seele_core::AudioTelemetry>,
+    ) -> String {
+        let mut linha = format!(
+            "diagnóstico da voz: sessao={} geracao={}",
+            carimbo.sessao, carimbo.geracao
+        );
+        let Some(telemetria) = telemetria else {
+            linha.push_str(" voz=nenhuma");
+            return linha;
+        };
+        let local = &telemetria.local;
+        let _ = write!(
+            linha,
+            " underruns={} overruns={} erros={} eventos={} catchup={} resyncs={} \
+             atraso_ms={:.1} pacing_ppm={:.1} pacing_prof_ms={:.1} pacing_alvo_ms={:.1} \
+             pacing_grampos={} pacing_primes={} fontes={}",
+            local.playback_underruns,
+            local.capture_overruns,
+            local.device_errors,
+            local.device_events,
+            local.playout_catchup_frames,
+            local.playout_resyncs,
+            local.playout_worst_lateness_ms,
+            local.pacing_ppm,
+            local.pacing_depth_ms,
+            local.pacing_target_ms,
+            local.pacing_clamps,
+            local.pacing_primes,
+            telemetria.sources.len(),
+        );
+        for fonte in &telemetria.sources {
+            let _ = write!(
+                linha,
+                " | ssrc={} prof_ms={:.1} jitter_ms={:.2} perda={:.4} plc={} comfort={} late={} \
+                 rajada={} buraco_pulado={}",
+                fonte.ssrc,
+                fonte.jitter_depth_ms,
+                fonte.jitter_ms,
+                fonte.loss_fraction,
+                fonte.concealed_frames,
+                fonte.comfort_frames,
+                fonte.late_frames,
+                // Os dois de fora da perda: quadros velhos cortados de uma rajada
+                // e lugares de buraco pulados com a fila no teto.
+                fonte.descartes_por_rajada,
+                fonte.buraco_pulado,
+            );
+        }
+        linha
+    }
+
+    /// Diz a linha, se a variável pede e se é a vez desta sessão. Devolve o que
+    /// disse, para o teste.
+    pub(super) fn relatar(
+        carimbo: super::Carimbo,
+        telemetria: Option<&seele_core::AudioTelemetry>,
+        agora: Instant,
+    ) -> Option<String> {
+        if !ligado() || !na_vez(carimbo.sessao, agora) {
+            return None;
+        }
+        let linha = linha(carimbo, telemetria);
+        tracing::info!("{linha}");
+        Some(linha)
+    }
 }
 
 /// Uma volta de medição: grava o que a casca lê, e diz se vale avisá-la.
@@ -6319,6 +7081,9 @@ fn medir_a_volta(
 /// Runs one command. Returns false when the driver should stop.
 async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) -> bool {
     match command {
+        // O olhar mora no fim da volta do laço de `drive`; aqui só se guarda
+        // quem espera por ele.
+        Command::OlharAVoz(resposta) => shared.voice.esperar_o_olhar(resposta),
         Command::LembrarCaminho(bps) => {
             let _ = client.lembrar_o_caminho(bps).await;
         }
@@ -6401,6 +7166,21 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         } => {
             if client
                 .mod_request(request, id, channel, payload)
+                .await
+                .is_err()
+            {
+                return false;
+            }
+        }
+        Command::AcaoDeMod {
+            request,
+            id,
+            channel,
+            acao,
+            payload,
+        } => {
+            if client
+                .acao_de_mod(request, id, channel, acao, payload)
                 .await
                 .is_err()
             {
@@ -6505,6 +7285,13 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
         // refused, which is the exact difference the button exists to expose.
         Command::KickPerson { person } => {
             if client.expulsar(person).await.is_err() {
+                return false;
+            }
+        }
+        // Como moderar: a resposta honesta é a do servidor (`QuadroDeCargos` ou
+        // `CargoRecusado`), que o `Room` dobra; nada se marca aqui.
+        Command::Cargo(pedido) => {
+            if client.cargo(pedido).await.is_err() {
                 return false;
             }
         }
@@ -6856,7 +7643,38 @@ fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
         | seele_core::ConnectError::TlsRefused
         | seele_core::ConnectError::HandshakeTimeout
         | seele_core::ConnectError::SemResposta
+        | seele_core::ConnectError::NatNaoAbriu
         | seele_core::ConnectError::ProtocolViolation => EndReason::LinkLost,
+        // Na volta, o servidor virou uma 0.16: a linha 1 é a do launcher.
+        seele_core::ConnectError::LinhaLegada => EndReason::Incompatible,
+    }
+}
+
+/// O que o braço `Aviso::Mensagem` de `drive` faz com a mensagem: dobra no
+/// `Room` ([`receber`]) e, se ela é uma despedida recuperável, avisa a casca
+/// com [`Event::CaiuComMotivo`], carimbado pela geração que caiu.
+fn receber_a_mensagem_do_motor(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
+    receber(shared, message);
+    if let Some(caiu) = caiu_com_motivo(message) {
+        shared.notify(&caiu);
+    }
+}
+
+/// O [`Event::CaiuComMotivo`] de uma mensagem, se ela é uma despedida
+/// recuperável.
+///
+/// A regra do que acaba e do que volta é a única, `a_sessao_acabou_aqui`: uma
+/// despedida que acaba vira `Ended` pelo `Room`, e esta não a repete.
+fn caiu_com_motivo(mensagem: &seele_core::ServerMessage) -> Option<Event> {
+    match mensagem {
+        seele_core::ServerMessage::Disconnecting { reason }
+            if !seele_core::despedida::a_sessao_acabou_aqui(*reason) =>
+        {
+            Some(Event::CaiuComMotivo {
+                reason: (*reason).into(),
+            })
+        }
+        _ => None,
     }
 }
 
@@ -6882,11 +7700,12 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
             let linha = seele_core::linha_de(*numero);
             ConnectionError::OutraLinha {
                 numero: *numero,
-                servidor: match linha {
-                    Some(seele_core::Linha::AntesDaUm { .. }) => {
-                        seele_core::linha_do_protocolo(*numero).map(str::to_owned)
-                    }
-                    _ => None,
+                // Na 0.17 a linha 1 (o 9) também é anterior: é a que o
+                // launcher abre ao lado (`Linha::e_anterior`, versao.md).
+                servidor: if linha.is_some_and(|linha| linha.e_anterior()) {
+                    seele_core::linha_do_protocolo(*numero).map(str::to_owned)
+                } else {
+                    None
                 },
                 mais_nova: matches!(linha, Some(seele_core::Linha::Posterior { .. })),
             }
@@ -6942,6 +7761,8 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
         }
         seele_core::ConnectError::HandshakeTimeout => ConnectionError::HandshakeTimeout,
         seele_core::ConnectError::SemResposta => ConnectionError::SemResposta,
+        seele_core::ConnectError::NatNaoAbriu => ConnectionError::NatNaoAbriu,
+        seele_core::ConnectError::LinhaLegada => ConnectionError::LinhaLegada,
         seele_core::ConnectError::Refused { reason } => ConnectionError::Refused {
             reason: (*reason).into(),
         },
@@ -8577,9 +9398,9 @@ mod tests {
         let compartilhado = bare_shared();
         if let Ok(mut room) = compartilhado.room.lock() {
             room.telemetry = Some(seele_core::Telemetry {
-                rtt_ms: 20.0,
-                jitter_ms: 99.0,
-                loss_fraction: 0.0,
+                rtt_ms: Some(20.0),
+                jitter_ms: Some(99.0),
+                loss_fraction: Some(0.0),
                 subsystems: Vec::new(),
             });
         }
@@ -8900,6 +9721,79 @@ mod tests {
         // And it goes away again, like the five beside it.
         fold(&shared, &sessao(Vec::new()));
         assert!(!connection.snapshot().may_delete_rooms);
+    }
+
+    /// **Os cargos chegam à casca por evento, com a marca no retrato** (pedido
+    /// do G: a camada de cargos relia em laço). Um quadro e duas recusas iguais
+    /// seguidas: três `CargosChanged`, a marca subindo a cada um e igual à do
+    /// `Snapshot`, e a segunda recusa com número maior que a primeira — a mesma
+    /// recusa de novo é outra recusa. Uma mensagem que não é de cargo não mexe.
+    #[test]
+    fn os_cargos_chegam_por_evento_com_a_marca_no_retrato() {
+        use seele_core::cargos::{QuadroDeCargos, RecusaDeCargo};
+        use seele_core::ServerMessage;
+
+        #[derive(Default)]
+        struct Marcas(Mutex<Vec<u64>>);
+        impl EventListener for Marcas {
+            fn on_event(&self, event: Event) {
+                if let Event::CargosChanged { marca } = event {
+                    if let Ok(mut vistas) = self.0.lock() {
+                        vistas.push(marca);
+                    }
+                }
+            }
+        }
+
+        let shared = bare_shared();
+        let marcas = Arc::new(Marcas::default());
+        shared
+            .listeners
+            .lock()
+            .unwrap()
+            .push(Arc::clone(&marcas) as Arc<dyn EventListener>);
+        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
+        let connection = Connection {
+            commands,
+            shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
+            ligacao: None,
+        };
+        assert_eq!(connection.snapshot().cargos_revision, 0);
+
+        let quadro = QuadroDeCargos {
+            cargos: Vec::new(),
+            atribuicoes: Vec::new(),
+            proprietario: None,
+            de_mods: Vec::new(),
+            revisao: 4,
+            dono_declarado: false,
+        };
+        fold(&shared, &ServerMessage::QuadroDeCargos(quadro));
+        let recusa = ServerMessage::CargoRecusado {
+            motivo: RecusaDeCargo::SemPermissao,
+        };
+        fold(&shared, &recusa);
+        let primeira = connection.cargos_na_tela().ultima_recusa.unwrap().seq;
+        fold(&shared, &recusa);
+        let segunda = connection.cargos_na_tela().ultima_recusa.unwrap().seq;
+        fold(&shared, &ServerMessage::Pong { timestamp: 1 });
+
+        assert_eq!(
+            *marcas.0.lock().unwrap(),
+            vec![1, 2, 3],
+            "um evento por mensagem de cargo, e só delas"
+        );
+        assert_eq!(
+            connection.snapshot().cargos_revision,
+            3,
+            "o retrato não leva a marca do último evento"
+        );
+        assert!(
+            segunda > primeira,
+            "a mesma recusa repetida não se distingue da anterior"
+        );
+        assert_eq!(connection.cargos_na_tela().quadro.unwrap().revisao, 4);
     }
 
     /// A shell watching a server dress itself, from the outside.
@@ -9555,6 +10449,8 @@ mod tests {
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
+            sessao: SessaoId::nova(),
+            geracao: std::sync::atomic::AtomicU64::new(1),
             voice: VozDaSala::nova(false, seele_core::DeviceChoice::default()),
             media: Mutex::new(None),
             nickname: Mutex::new("marcela".into()),
@@ -9568,6 +10464,7 @@ mod tests {
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
+            tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
         });
         let counter = Arc::new(Counter(std::sync::atomic::AtomicUsize::new(0)));
@@ -9712,6 +10609,8 @@ mod tests {
             person_icons_revision: std::sync::atomic::AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
+            sessao: SessaoId::nova(),
+            geracao: std::sync::atomic::AtomicU64::new(1),
             voice: VozDaSala::nova(false, seele_core::DeviceChoice::default()),
             media: Mutex::new(None),
             nickname: Mutex::new("marcela".into()),
@@ -9725,6 +10624,7 @@ mod tests {
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
+            tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
         })
     }
@@ -11105,6 +12005,17 @@ pub use seele_core::encontro::OndeMora;
 /// da escuta (`bilhete_desta_volta`) é aplicada. Isto fica para a pergunta
 /// avulsa: os testes do link (`quarto_pelo_link.rs`) e a conferência de um
 /// cenário (`ocupante_da_escuta.rs`).
+///
+/// # Pelo ENC/3, como a `Chegada`
+///
+/// Um anfitrião 0.17 só se registra pelo `MORA3`, e o `QUEM` do ENC/1 nunca o
+/// acha: esta função perguntava pelo ENC/1 e respondia `NinguemMora` a um
+/// anfitrião que estava no quarto. Agora pergunta pelo
+/// [`seele_core::encontro::localizar3`], o mesmo da `Chegada`. As dicas de rede
+/// local do ENC/3 não cabem no `OndeMora`, e ficam de fora: a conexão as usa
+/// pela `Chegada`, e não por aqui. O `Enc2Calado` (o ponto que cala o `QUEM3`)
+/// volta como `NinguemMora`, o caso que o `OndeMora` já descrevia como «ponto
+/// anterior que não conhece a pergunta».
 pub async fn onde_mora_hoje(ponto: &str, impressao: &str) -> OndeMora {
     let Some(marcas) = seele_core::encontro::Marcas::do_servidor(impressao) else {
         tracing::info!(
@@ -11112,8 +12023,24 @@ pub async fn onde_mora_hoje(ponto: &str, impressao: &str) -> OndeMora {
         );
         return OndeMora::SemMarca;
     };
-    seele_core::encontro::onde_mora_hoje(ponto, &marcas, seele_core::encontro::PRAZO_DO_QUARTO)
-        .await
+    onde_mora_pelo_enc3(
+        seele_core::encontro::localizar3(ponto, &marcas, seele_core::encontro::PRAZO_DO_QUARTO)
+            .await,
+    )
+}
+
+/// A resposta do ENC/3 na forma que a casca lê.
+fn onde_mora_pelo_enc3(localizacao: seele_core::encontro::Localizacao) -> OndeMora {
+    use seele_core::encontro::Localizacao;
+    match localizacao {
+        Localizacao::Achada {
+            servidor, escuta, ..
+        } => OndeMora::Achado { servidor, escuta },
+        Localizacao::NinguemMora | Localizacao::Enc2Calado => OndeMora::NinguemMora,
+        Localizacao::PontoRecusou => OndeMora::PontoRecusou,
+        Localizacao::PontoMudo => OndeMora::PontoMudo,
+        Localizacao::PontoNaoResolve => OndeMora::PontoNaoResolve,
+    }
 }
 
 #[cfg(test)]
@@ -12804,6 +13731,8 @@ mod o_audio_segue_a_sala {
             person_icons_revision: AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
+            sessao: super::SessaoId::nova(),
+            geracao: std::sync::atomic::AtomicU64::new(1),
             voice: VozDaSala::nova(quer_audio, DeviceChoice::default()),
             media: Mutex::new(None),
             nickname: Mutex::new("marcela".into()),
@@ -12817,6 +13746,7 @@ mod o_audio_segue_a_sala {
             pending_weights: Mutex::new(Vec::new()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(super::EscolhaDeTela::NinguemEscolheu),
+            tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
             fontes_de_tela: Mutex::new(Vec::new()),
         })
     }
@@ -14530,5 +15460,868 @@ mod o_toque {
             })
         });
         assert_eq!(tocado, Err(ConnectionError::NoAudioDevice));
+    }
+}
+
+/// O carimbo de sessão (E3 da 0.17): quem é a sessão, em que volta do enlace
+/// ela está, e o que acontece com um comando ou um evento de outra.
+#[cfg(test)]
+mod o_carimbo_da_sessao {
+    use std::sync::{Arc, Mutex};
+
+    use super::{Carimbo, Command, Connection, ConnectionError, Event, EventListener, SessaoId};
+
+    /// Uma `Connection` sem rede, com a fila dos comandos à vista.
+    fn conexao() -> (Connection, tokio::sync::mpsc::UnboundedReceiver<Command>) {
+        let (commands, fila) = tokio::sync::mpsc::unbounded_channel();
+        let conexao = Connection {
+            commands,
+            shared: super::sem_rede::shared("marcela"),
+            encerrada: Mutex::new(None),
+            ligacao: None,
+        };
+        (conexao, fila)
+    }
+
+    #[test]
+    fn o_contador_nunca_da_zero_nem_repete() {
+        let mut anterior = SessaoId::nova();
+        assert_ne!(anterior, 0, "o contador deu 0, que não é sessão");
+        for _ in 0..1000 {
+            let numero = SessaoId::nova();
+            assert_ne!(numero, 0, "o contador deu 0, que não é sessão");
+            assert!(
+                numero > anterior,
+                "o contador não subiu: {anterior} e depois {numero}"
+            );
+            anterior = numero;
+        }
+        // Linhas pedindo ao mesmo tempo nunca recebem o mesmo número.
+        let linhas: Vec<_> = (0..8)
+            .map(|_| std::thread::spawn(|| (0..500).map(|_| SessaoId::nova()).collect::<Vec<_>>()))
+            .collect();
+        let mut todos: Vec<u64> = linhas
+            .into_iter()
+            .flat_map(|linha| linha.join().unwrap_or_default())
+            .collect();
+        let quantos = todos.len();
+        assert_eq!(quantos, 8 * 500);
+        todos.sort_unstable();
+        todos.dedup();
+        assert_eq!(
+            todos.len(),
+            quantos,
+            "duas sessões do mesmo processo receberam o mesmo número"
+        );
+        assert!(!todos.contains(&0));
+    }
+
+    #[test]
+    fn duas_conexoes_tem_sessoes_diferentes_e_comecam_na_geracao_1() {
+        let (uma, _fila_de_uma) = conexao();
+        let (outra, _fila_da_outra) = conexao();
+        assert_eq!(uma.carimbo().geracao, 1);
+        assert_eq!(outra.carimbo().geracao, 1);
+        assert_ne!(uma.carimbo().sessao, 0);
+        assert_ne!(
+            uma.carimbo().sessao,
+            outra.carimbo().sessao,
+            "duas conexões com a mesma sessão: um comando de uma passaria na outra"
+        );
+    }
+
+    #[test]
+    fn o_comando_com_o_carimbo_certo_sai() {
+        let (conexao, mut fila) = conexao();
+        let carimbo = conexao.carimbo();
+        let aceita = conexao.com(carimbo);
+        assert!(aceita.is_ok(), "o carimbo da própria conexão foi recusado");
+        if let Ok(conexao) = aceita {
+            assert_eq!(conexao.open_channel(7), Ok(()));
+        }
+        assert!(
+            matches!(fila.try_recv(), Ok(Command::OpenChannel(canal)) if canal.0 == 7),
+            "o comando aceito não chegou à fila do driver"
+        );
+    }
+
+    #[test]
+    fn o_comando_de_outra_sessao_e_recusado_e_nada_sai() {
+        let (conexao, mut fila) = conexao();
+        let esperado = conexao.carimbo();
+        let veio = Carimbo {
+            sessao: esperado.sessao + 1,
+            geracao: esperado.geracao,
+        };
+        let recusa = conexao
+            .com(veio)
+            .and_then(|conexao| conexao.open_channel(7));
+        assert_eq!(
+            recusa,
+            Err(ConnectionError::SessaoNaoConfere { esperado, veio }),
+            "um comando com a sessão de outra conexão passou"
+        );
+        assert!(
+            fila.try_recv().is_err(),
+            "o comando recusado chegou à fila do driver mesmo assim"
+        );
+    }
+
+    #[test]
+    fn o_comando_de_antes_da_reconexao_e_recusado() {
+        let (conexao, mut fila) = conexao();
+        let velho = conexao.carimbo();
+        // O que o braço `Aviso::Reconectado` de `drive` faz.
+        assert_eq!(conexao.shared.nova_geracao(), 2);
+        let novo = conexao.carimbo();
+        assert_eq!(
+            novo,
+            Carimbo {
+                sessao: velho.sessao,
+                geracao: 2
+            },
+            "a reconexão mudou a sessão, ou não subiu a geração"
+        );
+        assert_eq!(
+            conexao.com(velho).map(|_| ()),
+            Err(ConnectionError::SessaoNaoConfere {
+                esperado: novo,
+                veio: velho
+            }),
+            "um comando de antes da reconexão passou"
+        );
+        assert!(fila.try_recv().is_err());
+        assert!(conexao.com(novo).is_ok(), "o carimbo novo foi recusado");
+    }
+
+    #[test]
+    fn a_recusa_tem_nome_e_os_dois_carimbos_no_serde() {
+        let recusa = ConnectionError::SessaoNaoConfere {
+            esperado: Carimbo {
+                sessao: 4,
+                geracao: 2,
+            },
+            veio: Carimbo {
+                sessao: 4,
+                geracao: 1,
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(&recusa).ok(),
+            Some(serde_json::json!({
+                "SessaoNaoConfere": {
+                    "esperado": { "sessao": 4, "geracao": 2 },
+                    "veio": { "sessao": 4, "geracao": 1 }
+                }
+            }))
+        );
+    }
+
+    /// Quem implementa o `on_event_carimbado`.
+    struct Carimbado(Mutex<Vec<(Carimbo, Event)>>);
+    impl EventListener for Carimbado {
+        fn on_event(&self, _: Event) {
+            panic!("o evento chegou sem carimbo a quem pediu o carimbo");
+        }
+        fn on_event_carimbado(&self, carimbo: Carimbo, event: Event) {
+            if let Ok(mut ouvidos) = self.0.lock() {
+                ouvidos.push((carimbo, event));
+            }
+        }
+    }
+
+    /// Quem só implementa o `on_event`, como toda casca de antes da 0.17.
+    struct SoOEvento(Mutex<Vec<Event>>);
+    impl EventListener for SoOEvento {
+        fn on_event(&self, event: Event) {
+            if let Ok(mut ouvidos) = self.0.lock() {
+                ouvidos.push(event);
+            }
+        }
+    }
+
+    #[test]
+    fn o_evento_sai_com_o_carimbo_de_agora() {
+        let (conexao, _fila) = conexao();
+        let ouvinte = Arc::new(Carimbado(Mutex::new(Vec::new())));
+        conexao.subscribe(Arc::clone(&ouvinte) as Arc<dyn EventListener>);
+        let antes = conexao.carimbo();
+        conexao.shared.messages_changed();
+        conexao.shared.nova_geracao();
+        let depois = conexao.carimbo();
+        conexao.shared.messages_changed();
+        let ouvidos = ouvinte.0.lock().map(|o| o.clone()).unwrap_or_default();
+        assert_eq!(
+            ouvidos,
+            vec![
+                (antes, Event::MessagesChanged),
+                (depois, Event::MessagesChanged)
+            ],
+            "o evento não saiu com o carimbo da sessão e da geração em que aconteceu"
+        );
+    }
+
+    /// **A despedida recuperável chega à casca com nome e carimbo, e não como
+    /// fim.** O `FellBehind` (pelo quadro, ou pelo código de fechamento que o
+    /// core traduz no mesmo quadro) vira um `CaiuComMotivo` com o carimbo da
+    /// geração que caiu, e nenhum `Ended`. A expulsão continua sendo fim, e não
+    /// ganha o aviso de queda.
+    #[test]
+    fn a_despedida_recuperavel_avisa_com_carimbo_e_nao_encerra() {
+        use seele_core::{DisconnectReason, ServerMessage};
+        let (para_tras, _fila) = conexao();
+        let ouvinte = Arc::new(Carimbado(Mutex::new(Vec::new())));
+        para_tras.subscribe(Arc::clone(&ouvinte) as Arc<dyn EventListener>);
+        let da_geracao_que_caiu = para_tras.carimbo();
+
+        super::receber_a_mensagem_do_motor(
+            &para_tras.shared,
+            &ServerMessage::Disconnecting {
+                reason: DisconnectReason::FellBehind,
+            },
+        );
+        let ouvidos = ouvinte.0.lock().map(|o| o.clone()).unwrap_or_default();
+        let quedas: Vec<_> = ouvidos
+            .iter()
+            .filter(|(_, evento)| matches!(evento, Event::CaiuComMotivo { .. }))
+            .collect();
+        assert_eq!(
+            quedas,
+            vec![&(
+                da_geracao_que_caiu,
+                Event::CaiuComMotivo {
+                    reason: DisconnectReason::FellBehind.into()
+                }
+            )],
+            "o «ficou para trás» não chegou à casca como uma queda com nome e carimbo"
+        );
+        assert!(
+            !ouvidos
+                .iter()
+                .any(|(_, evento)| matches!(evento, Event::Ended { .. })),
+            "o «ficou para trás» virou fim: {ouvidos:?}"
+        );
+        assert!(
+            para_tras.snapshot().ended.is_none(),
+            "o retrato marcou fim numa despedida recuperável"
+        );
+
+        // A expulsão é fim, e não ganha o aviso de queda.
+        let (expulsa, _fila) = conexao();
+        let ouvinte = Arc::new(Carimbado(Mutex::new(Vec::new())));
+        expulsa.subscribe(Arc::clone(&ouvinte) as Arc<dyn EventListener>);
+        super::receber_a_mensagem_do_motor(
+            &expulsa.shared,
+            &ServerMessage::Disconnecting {
+                reason: DisconnectReason::Kicked,
+            },
+        );
+        let ouvidos = ouvinte.0.lock().map(|o| o.clone()).unwrap_or_default();
+        assert!(
+            !ouvidos
+                .iter()
+                .any(|(_, evento)| matches!(evento, Event::CaiuComMotivo { .. })),
+            "a expulsão ganhou o aviso de queda recuperável"
+        );
+        assert!(
+            expulsa.snapshot().ended.is_some(),
+            "a expulsão deixou de ser fim"
+        );
+    }
+
+    #[test]
+    fn quem_so_implementa_on_event_continua_ouvindo() {
+        let (conexao, _fila) = conexao();
+        let ouvinte = Arc::new(SoOEvento(Mutex::new(Vec::new())));
+        conexao.subscribe(Arc::clone(&ouvinte) as Arc<dyn EventListener>);
+        conexao.shared.messages_changed();
+        let ouvidos = ouvinte.0.lock().map(|o| o.clone()).unwrap_or_default();
+        assert_eq!(ouvidos, vec![Event::MessagesChanged]);
+    }
+
+    /// Lido da fonte, como `nobody_raises_the_event_without_moving_the_revision`:
+    /// fora do corpo padrão do trait, nenhum evento é entregue sem carimbo, e a
+    /// geração sobe no braço da volta antes do primeiro evento dele.
+    #[test]
+    fn nenhum_evento_sai_sem_carimbo_e_a_volta_sobe_a_geracao() {
+        let fonte = include_str!("lib.rs");
+        let producao = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
+        let sem_comentarios: String = producao
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            sem_comentarios.matches(".on_event(").count(),
+            1,
+            "alguém entrega evento por `on_event` direto, sem o carimbo: só o corpo \
+             padrão de `on_event_carimbado` pode"
+        );
+        let Some(braco) = sem_comentarios
+            .split("seele_core::enlace::Aviso::Reconectado {")
+            .nth(1)
+        else {
+            panic!("o braço `Aviso::Reconectado` de `drive` sumiu");
+        };
+        let geracao = braco.find("shared.nova_geracao()");
+        let online = braco.find("shared.gravar_enlace(");
+        assert!(
+            matches!((geracao, online), (Some(g), Some(o)) if g < o),
+            "no braço da volta, a geração não sobe antes do primeiro evento: um \
+             comando de antes da queda passaria"
+        );
+    }
+}
+
+/// **A tela que o servidor liga sozinho aparece no retrato.**
+///
+/// O defeito: o servidor liga todo mundo na primeira transmissão da sala, o
+/// `TelaAbriu` só virava `ScreenOpened`, e o retrato lia a tela só da escolha
+/// da pessoa. Quem não tinha clicado em VER recebia a imagem e lia «NINGUÉM
+/// ESTÁ COMPARTILHANDO», com `assistida` falso. Ver
+/// [`seele_core::retrato::TelaLigada`].
+#[cfg(test)]
+mod a_tela_ligada_pelo_servidor {
+    use std::sync::{Arc, Mutex};
+
+    use seele_core::{
+        PersonId, ScreenId, ServerMessage, SessionId, Ssrc, VoiceRoomId, VoiceRoomInfo,
+    };
+
+    use super::{Connection, Shared};
+
+    /// Uma sessão (somos a pessoa 7) sentada na sala 1, onde a pessoa 3
+    /// transmite a tela 9 e a pessoa 4 a tela 11.
+    fn sessao() -> (Connection, Arc<Shared>) {
+        let shared = crate::sem_rede::shared("marcela");
+        if let Ok(mut room) = shared.room.lock() {
+            room.apply(&ServerMessage::Session {
+                id: SessionId(1),
+                person: PersonId(7),
+                ssrc: Ssrc(700),
+                server: "Casa".into(),
+                voice_rooms: vec![VoiceRoomInfo {
+                    id: VoiceRoomId(1),
+                    name: "SALA-01".into(),
+                    limit: 20,
+                    password_required: false,
+                    channel: None,
+                }],
+                channels: Vec::new(),
+                roles: Vec::new(),
+                permissions: Vec::new(),
+            });
+            room.enter_voice_room(VoiceRoomId(1));
+            for (pessoa, tela) in [(3, 9), (4, 11)] {
+                room.apply(&ServerMessage::ScreenShareStarted {
+                    voice_room: VoiceRoomId(1),
+                    person: PersonId(pessoa),
+                    screen: ScreenId(tela),
+                });
+            }
+        }
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let conexao = Connection {
+            commands,
+            shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
+            ligacao: None,
+        };
+        (conexao, shared)
+    }
+
+    /// A tela do retrato, e quais da lista dizem `assistida`.
+    fn no_retrato(conexao: &Connection) -> (Option<u32>, Vec<u32>) {
+        let retrato = conexao.snapshot();
+        let assistidas = retrato
+            .transmissoes
+            .iter()
+            .filter(|transmissao| transmissao.assistida)
+            .map(|transmissao| transmissao.tela)
+            .collect();
+        (retrato.tela.map(|tela| tela.tela), assistidas)
+    }
+
+    // Os números de leitura são os do `Aviso::TelaAbriu`/`TelaFechou`.
+
+    #[test]
+    fn a_abertura_automatica_aparece_no_retrato_e_como_assistida() {
+        let (conexao, shared) = sessao();
+        assert_eq!(no_retrato(&conexao), (None, vec![]));
+        shared.tela_abriu(ScreenId(9), 1);
+        assert_eq!(
+            no_retrato(&conexao),
+            (Some(9), vec![9]),
+            "o servidor ligou a tela 9 e o retrato diz que ninguém está compartilhando"
+        );
+        // A escolha continua sendo de ninguém: ligar não é escolher.
+        assert_eq!(conexao.tela_escolhida(), None);
+    }
+
+    #[test]
+    fn a_escolha_explicita_de_outra_tela_vence_a_automatica() {
+        let (conexao, shared) = sessao();
+        shared.tela_abriu(ScreenId(9), 1);
+        let _ = conexao.assistir(11, true);
+        assert_eq!(no_retrato(&conexao), (Some(11), vec![11]));
+        // E a 9 chegando de novo (o servidor reenviando) não muda a escolha.
+        shared.tela_abriu(ScreenId(9), 2);
+        assert_eq!(no_retrato(&conexao), (Some(11), vec![11]));
+    }
+
+    #[test]
+    fn o_nao_ver_explicito_vence_a_automatica() {
+        let (conexao, shared) = sessao();
+        shared.tela_abriu(ScreenId(9), 1);
+        let _ = conexao.assistir(9, false);
+        assert_eq!(
+            no_retrato(&conexao),
+            (None, vec![]),
+            "quem recusou aparece assistindo"
+        );
+        // O servidor religando não desfaz a recusa no retrato.
+        shared.tela_abriu(ScreenId(9), 2);
+        shared.tela_abriu(ScreenId(11), 3);
+        assert_eq!(no_retrato(&conexao), (None, vec![]));
+    }
+
+    #[test]
+    fn o_fechamento_limpa() {
+        let (conexao, shared) = sessao();
+        shared.tela_abriu(ScreenId(9), 1);
+        assert!(
+            shared.tela_fechou(ScreenId(9), 1),
+            "o fim da vigente não fechou"
+        );
+        assert_eq!(no_retrato(&conexao), (None, vec![]));
+    }
+
+    #[test]
+    fn o_fim_da_transmissao_no_servidor_limpa_mesmo_sem_tela_fechou() {
+        // O `ScreenShareStopped` tira a tela da sala antes do fim da leitura.
+        let (conexao, shared) = sessao();
+        shared.tela_abriu(ScreenId(9), 1);
+        crate::fold(
+            &shared,
+            &ServerMessage::ScreenShareStopped {
+                voice_room: VoiceRoomId(1),
+                screen: ScreenId(9),
+            },
+        );
+        assert_eq!(no_retrato(&conexao), (None, vec![]));
+        assert_eq!(
+            shared
+                .tela_ligada
+                .lock()
+                .ok()
+                .and_then(|ligada| ligada.agora(1)),
+            None,
+            "a tela que saiu da sala ficou guardada"
+        );
+    }
+
+    /// Astra: a troca de par aborta a leitura da mesma tela (o fim dela não
+    /// chegava), a nova abre e depois acaba — e o retrato não pode ficar com
+    /// um fantasma da primeira.
+    #[test]
+    fn a_leitura_substituida_nao_deixa_fantasma() {
+        let (conexao, shared) = sessao();
+        shared.tela_abriu(ScreenId(9), 1);
+        shared.tela_abriu(ScreenId(9), 2);
+        assert!(shared.tela_fechou(ScreenId(9), 2));
+        assert_eq!(
+            no_retrato(&conexao),
+            (None, vec![]),
+            "a leitura nova acabou e o retrato diz que se assiste"
+        );
+    }
+
+    #[test]
+    fn na_alternancia_9_11_9_fica_a_9_nova_e_o_fim_velho_nao_a_apaga() {
+        let (conexao, shared) = sessao();
+        shared.tela_abriu(ScreenId(9), 1);
+        shared.tela_abriu(ScreenId(11), 2);
+        shared.tela_abriu(ScreenId(9), 3);
+        assert_eq!(no_retrato(&conexao), (Some(9), vec![9]));
+        // Os fins atrasados das duas primeiras leituras.
+        assert!(
+            !shared.tela_fechou(ScreenId(9), 1),
+            "o fim de uma leitura substituída foi tratado como o da vigente"
+        );
+        let _ = shared.tela_fechou(ScreenId(11), 2);
+        assert_eq!(
+            no_retrato(&conexao),
+            (Some(9), vec![9]),
+            "um fim velho apagou a 9 nova"
+        );
+        assert!(shared.tela_fechou(ScreenId(9), 3));
+        assert_eq!(no_retrato(&conexao), (None, vec![]));
+    }
+
+    #[test]
+    fn o_fim_da_tela_anterior_nao_apaga_a_nova() {
+        let (conexao, shared) = sessao();
+        shared.tela_abriu(ScreenId(9), 1);
+        shared.tela_abriu(ScreenId(11), 2);
+        let _ = shared.tela_fechou(ScreenId(9), 1);
+        assert_eq!(
+            no_retrato(&conexao),
+            (Some(11), vec![11]),
+            "o `TelaFechou` da tela anterior apagou a nova"
+        );
+    }
+
+    #[test]
+    fn a_troca_de_geracao_nao_deixa_tela_velha_e_o_fim_atrasado_nao_apaga_a_nova() {
+        let (conexao, shared) = sessao();
+        shared.tela_abriu(ScreenId(9), 1);
+        // O enlace voltou (o braço `Reconectado`).
+        shared.nova_geracao();
+        shared.tela_ligada_nova_geracao();
+        assert_eq!(
+            no_retrato(&conexao),
+            (None, vec![]),
+            "a tela ligada antes da queda ficou no retrato da volta"
+        );
+        shared.tela_abriu(ScreenId(9), 2);
+        assert_eq!(no_retrato(&conexao), (Some(9), vec![9]));
+        // O fim da leitura de antes da queda chega agora.
+        assert!(!shared.tela_fechou(ScreenId(9), 1));
+        assert_eq!(
+            no_retrato(&conexao),
+            (Some(9), vec![9]),
+            "o fim atrasado da leitura da geração anterior apagou a da volta"
+        );
+    }
+
+    #[test]
+    fn o_proprio_espelho_nao_e_tela_ligada() {
+        let (conexao, shared) = sessao();
+        if let Ok(mut room) = shared.room.lock() {
+            room.apply(&ServerMessage::ScreenShareStarted {
+                voice_room: VoiceRoomId(1),
+                person: PersonId(7),
+                screen: ScreenId(20),
+            });
+        }
+        shared.tela_abriu(ScreenId(9), 1);
+        // Esta pessoa começa a compartilhar: o espelho dela chega como abertura.
+        shared.tela_abriu(ScreenId(20), 2);
+        assert_eq!(no_retrato(&conexao), (Some(9), vec![9]));
+        // E o fim do espelho é o vigente dele: o palco dele fecha.
+        assert!(shared.tela_fechou(ScreenId(20), 2));
+    }
+
+    #[test]
+    fn cada_sessao_tem_a_sua() {
+        let (uma, shared_uma) = sessao();
+        let (outra, _) = sessao();
+        shared_uma.tela_abriu(ScreenId(9), 1);
+        assert_eq!(no_retrato(&uma), (Some(9), vec![9]));
+        assert_eq!(no_retrato(&outra), (None, vec![]));
+    }
+
+    /// Astra P2: a leitura velha da 9 solta um quadro depois da abertura nova
+    /// da mesma 9, antes de o abort efetivar. Ele não chega à casca — que só
+    /// conhece a tela, e o daria ao decodificador da nova —, e os da nova sim.
+    #[test]
+    fn o_quadro_da_leitura_substituida_nao_chega_a_casca() {
+        struct Anota(Mutex<Vec<Vec<u8>>>);
+        impl crate::EventListener for Anota {
+            fn on_event(&self, event: crate::Event) {
+                if let crate::Event::ScreenFrame { data, .. } = event {
+                    if let Ok(mut anotados) = self.0.lock() {
+                        anotados.push(data.into_bytes());
+                    }
+                }
+            }
+        }
+        let (conexao, shared) = sessao();
+        let anota = Arc::new(Anota(Mutex::new(Vec::new())));
+        conexao.subscribe(Arc::clone(&anota) as Arc<dyn crate::EventListener>);
+
+        shared.tela_abriu(ScreenId(9), 1);
+        shared.quadro_da_tela(ScreenId(9), 1, true, b"velha-1");
+        shared.tela_abriu(ScreenId(9), 2);
+        shared.quadro_da_tela(ScreenId(9), 1, false, b"velha-2");
+        shared.quadro_da_tela(ScreenId(9), 2, true, b"nova-1");
+        shared.quadro_da_tela(ScreenId(9), 2, false, b"nova-2");
+
+        let chegaram = anota.0.lock().map(|a| a.clone()).unwrap_or_default();
+        let esperados: Vec<Vec<u8>> = [&b"velha-1"[..], b"nova-1", b"nova-2"]
+            .iter()
+            .map(|bytes| crate::base64_de(bytes).into_bytes())
+            .collect();
+        assert_eq!(
+            chegaram, esperados,
+            "um quadro da leitura substituída chegou à casca, ou um da nova não chegou"
+        );
+    }
+
+    /// O mesmo para o som: o pacote da leitura velha da 9, depois da abertura
+    /// nova da mesma 9, não vai à fila da mistura; o da nova vai. O braço
+    /// `TelaSom` do laço só chama `Voice::som_da_tela` quando
+    /// `som_da_leitura_vale` diz que sim.
+    #[test]
+    fn o_som_da_leitura_substituida_nao_entra_na_fila() {
+        let (_conexao, shared) = sessao();
+        shared.tela_abriu(ScreenId(9), 1);
+        assert!(shared.som_da_leitura_vale(ScreenId(9), 1));
+        shared.tela_abriu(ScreenId(9), 2);
+        assert!(
+            !shared.som_da_leitura_vale(ScreenId(9), 1),
+            "o som da leitura substituída entraria na fila da nova"
+        );
+        assert!(
+            shared.som_da_leitura_vale(ScreenId(9), 2),
+            "o som da leitura nova não entraria na fila"
+        );
+    }
+}
+
+#[cfg(test)]
+mod o_diagnostico_da_voz {
+    /// **Fora da build de teste, o diagnóstico não existe.** O guarda lê o
+    /// fonte, como o `fora_da_build_de_teste_e_constante` do app: a chamada no
+    /// `measure` e o módulo inteiro estão sob o `cfg` do recurso com debug.
+    /// Roda sem o recurso, que é a build de todo dia.
+    #[test]
+    fn fora_da_build_de_teste_nao_existe() {
+        let fonte = include_str!("lib.rs");
+        let porta = "#[cfg(all(debug_assertions, feature = \"aparelho-de-mentira\"))]";
+        assert!(
+            fonte.contains(&format!(
+                "{porta}\n    let _ = diagnostico_da_voz::relatar(shared.carimbo(), \
+                 telemetria.as_ref(), Instant::now());\n    medir_a_volta(sync, shared, \
+                 telemetria.as_ref(), rtt_micros)\n}}"
+            )),
+            "a chamada do diagnóstico no `measure` saiu de baixo do cfg da build de teste"
+        );
+        assert!(
+            fonte.contains(&format!("{porta}\nmod diagnostico_da_voz {{")),
+            "o módulo do diagnóstico saiu de baixo do cfg da build de teste"
+        );
+        // A produção chama num lugar só, o `measure`, que é o que está acima
+        // deste módulo de testes.
+        let producao = fonte
+            .split(concat!("mod o_diagnostico", "_da_voz {"))
+            .next()
+            .unwrap_or_default();
+        assert_eq!(
+            producao
+                .matches(concat!("diagnostico_da_voz", "::relatar("))
+                .count(),
+            1,
+            "o diagnóstico ganhou outra chamada fora do `measure`"
+        );
+    }
+
+    /// O resto pede o recurso: sem ele o módulo não compila.
+    #[cfg(all(debug_assertions, feature = "aparelho-de-mentira"))]
+    mod com_o_recurso {
+        use super::super::{diagnostico_da_voz, Carimbo};
+        use std::sync::{Arc, Mutex, PoisonError};
+        use std::time::Instant;
+
+        /// A variável é do processo: um teste destes por vez.
+        static VEZ: Mutex<()> = Mutex::new(());
+
+        /// Um assinante mínimo que guarda a mensagem de cada evento: o teste
+        /// afirma o que o `tracing::info!` de fato emitiu, e não só a função pura.
+        struct Captura(Arc<Mutex<Vec<String>>>);
+
+        struct Mensagem(String);
+        impl tracing::field::Visit for Mensagem {
+            fn record_debug(&mut self, campo: &tracing::field::Field, valor: &dyn std::fmt::Debug) {
+                if campo.name() == "message" {
+                    self.0 = format!("{valor:?}");
+                }
+            }
+        }
+
+        impl tracing::Subscriber for Captura {
+            fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+                true
+            }
+            fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+                tracing::span::Id::from_u64(1)
+            }
+            fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+            fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+            fn event(&self, evento: &tracing::Event<'_>) {
+                let mut mensagem = Mensagem(String::new());
+                evento.record(&mut mensagem);
+                if *evento.metadata().level() == tracing::Level::INFO {
+                    self.0
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(mensagem.0);
+                }
+            }
+            fn enter(&self, _: &tracing::span::Id) {}
+            fn exit(&self, _: &tracing::span::Id) {}
+        }
+
+        fn telemetria() -> seele_core::AudioTelemetry {
+            seele_core::AudioTelemetry {
+                local: seele_core::LocalTelemetry {
+                    playback_underruns: 11,
+                    capture_overruns: 2,
+                    playout_catchup_frames: 33,
+                    playout_resyncs: 4,
+                    playout_worst_lateness_ms: 27.5,
+                    pacing_ppm: -12.0,
+                    pacing_depth_ms: 41.0,
+                    pacing_target_ms: 40.0,
+                    pacing_clamps: 5,
+                    pacing_primes: 6,
+                    ..seele_core::LocalTelemetry::default()
+                },
+                sources: vec![
+                    seele_core::SourceTelemetry {
+                        ssrc: 7,
+                        jitter_depth_ms: 60.0,
+                        jitter_ms: 1.25,
+                        loss_fraction: 0.5,
+                        concealed_frames: 260,
+                        comfort_frames: 240,
+                        late_frames: 9,
+                        descartes_por_rajada: 12,
+                        buraco_pulado: 3,
+                        rtt_ms: None,
+                    },
+                    seele_core::SourceTelemetry {
+                        ssrc: 8,
+                        ..seele_core::SourceTelemetry::default()
+                    },
+                ],
+            }
+        }
+
+        /// Roda `corpo` com a variável no valor pedido, e a devolve depois.
+        fn com_a_variavel<T>(valor: Option<&str>, corpo: impl FnOnce() -> T) -> T {
+            let _vez = VEZ.lock().unwrap_or_else(PoisonError::into_inner);
+            let antes = std::env::var_os("SEELE_AUDIO_DE_MENTIRA");
+            match valor {
+                Some(valor) => std::env::set_var("SEELE_AUDIO_DE_MENTIRA", valor),
+                None => std::env::remove_var("SEELE_AUDIO_DE_MENTIRA"),
+            }
+            let feito = corpo();
+            match antes {
+                Some(antes) => std::env::set_var("SEELE_AUDIO_DE_MENTIRA", antes),
+                None => std::env::remove_var("SEELE_AUDIO_DE_MENTIRA"),
+            }
+            feito
+        }
+
+        #[test]
+        fn com_a_variavel_a_linha_sai_com_os_campos_uma_vez_a_cada_5_s() {
+            crate::trilha_no_log::segundo_despachante();
+            let capturado = Arc::new(Mutex::new(Vec::new()));
+            let assinante = Captura(Arc::clone(&capturado));
+            let telemetria = telemetria();
+            let carimbo = Carimbo {
+                sessao: 9_001,
+                geracao: 2,
+            };
+            let agora = Instant::now();
+            let (primeira, logo_depois, cinco_s_depois, outra_sessao) =
+                com_a_variavel(Some("1"), || {
+                    tracing::subscriber::with_default(assinante, || {
+                        (
+                            diagnostico_da_voz::relatar(carimbo, Some(&telemetria), agora),
+                            diagnostico_da_voz::relatar(
+                                carimbo,
+                                Some(&telemetria),
+                                agora + std::time::Duration::from_millis(4_999),
+                            ),
+                            diagnostico_da_voz::relatar(
+                                Carimbo {
+                                    sessao: 9_001,
+                                    geracao: 3,
+                                },
+                                None,
+                                agora + diagnostico_da_voz::A_CADA,
+                            ),
+                            diagnostico_da_voz::relatar(
+                                Carimbo {
+                                    sessao: 9_002,
+                                    geracao: 1,
+                                },
+                                Some(&telemetria),
+                                agora,
+                            ),
+                        )
+                    })
+                });
+            let primeira = primeira.expect("com a variável, a primeira linha da sessão sai");
+            assert_eq!(
+                primeira,
+                "diagnóstico da voz: sessao=9001 geracao=2 underruns=11 overruns=2 erros=0 \
+                 eventos=0 catchup=33 resyncs=4 atraso_ms=27.5 pacing_ppm=-12.0 \
+                 pacing_prof_ms=41.0 pacing_alvo_ms=40.0 pacing_grampos=5 pacing_primes=6 \
+                 fontes=2 | ssrc=7 prof_ms=60.0 jitter_ms=1.25 perda=0.5000 plc=260 \
+                 comfort=240 late=9 rajada=12 buraco_pulado=3 | ssrc=8 prof_ms=0.0 jitter_ms=0.00 \
+                 perda=0.0000 plc=0 comfort=0 late=0 rajada=0 buraco_pulado=0"
+            );
+            assert_eq!(
+                logo_depois, None,
+                "duas linhas da mesma sessão em menos de 5 s"
+            );
+            assert_eq!(
+                cinco_s_depois.as_deref(),
+                Some("diagnóstico da voz: sessao=9001 geracao=3 voz=nenhuma"),
+                "passados 5 s a sessão diz de novo, com a geração nova"
+            );
+            assert!(
+                outra_sessao.is_some(),
+                "o limite é por sessão, não do processo"
+            );
+            let emitido = capturado
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            assert_eq!(
+                emitido,
+                vec![
+                    primeira,
+                    cinco_s_depois.unwrap_or_default(),
+                    outra_sessao.unwrap_or_default()
+                ],
+                "o `tracing::info!` não emitiu exatamente as linhas devolvidas"
+            );
+        }
+
+        #[test]
+        fn sem_a_variavel_nao_sai() {
+            crate::trilha_no_log::segundo_despachante();
+            for valor in [None, Some("0"), Some("")] {
+                let capturado = Arc::new(Mutex::new(Vec::new()));
+                let assinante = Captura(Arc::clone(&capturado));
+                let disse = com_a_variavel(valor, || {
+                    tracing::subscriber::with_default(assinante, || {
+                        diagnostico_da_voz::relatar(
+                            Carimbo {
+                                sessao: 9_100,
+                                geracao: 1,
+                            },
+                            Some(&telemetria()),
+                            Instant::now(),
+                        )
+                    })
+                });
+                assert_eq!(
+                    disse, None,
+                    "com SEELE_AUDIO_DE_MENTIRA={valor:?} a linha saiu"
+                );
+                assert!(
+                    capturado
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .is_empty(),
+                    "com SEELE_AUDIO_DE_MENTIRA={valor:?} o log recebeu algo"
+                );
+            }
+        }
     }
 }

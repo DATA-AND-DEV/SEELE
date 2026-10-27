@@ -54,7 +54,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::SigningKey;
 use seele_core::enlace::{Aviso, Destino, Enlace, PARES_QUE_ESTA_VERSAO_ATENDE};
 use seele_core::{Link, MemoryPinStore, PinStore};
 use seele_proto::control::{ClientMessage, ConsentimentoDePar, ServerMessage};
@@ -65,6 +65,7 @@ use seele_server::server::Event;
 use seele_server::{frame, Daemon, ServerConfig};
 
 /// A espera pela porta que outro binário da suíte levou por um instante.
+mod par_cru;
 mod porta;
 mod vaga;
 use porta::{a_porta_e_de_outro, ligar_insistindo};
@@ -91,57 +92,6 @@ const INTERVALO: Duration = Duration::from_millis(33);
 /// atravessaria a ligação inteira sem repassar um byte, e o teste passaria a
 /// medir o silêncio.
 const A_CADA_QUANTOS_UMA_CHAVE: u32 = 3;
-
-/// Um verificador que aceita qualquer certificado.
-///
-/// O que está sob teste é o caminho entre pares, não o TOFU.
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
 
 /// Um servidor em memória, já atendendo.
 ///
@@ -219,11 +169,17 @@ async fn a_porta_tomada_por_um_instante_nao_reprova_a_volta_do_servidor() -> Res
     Ok(())
 }
 
-/// Um par cru: a conexão QUIC e o fluxo de controle, sem tarefa leitora.
+/// Um par cru: a conexão do enlace e o `ctl`, sem tarefa leitora.
+///
+/// Desde a 0.17 (ADR 0063), pelo `par_cru` do enlace, e não por um QUIC cru: o
+/// caminho entre pares é que está sob teste, e não o TOFU, então quem
+/// compartilha disca com `Pino::Qualquer` e prova a chave pela D5.
 struct Par {
-    conexao: quinn::Connection,
-    envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
+    conexao: seele_enlace::Conexao,
+    envio: seele_enlace::Envio,
+    recebe: seele_enlace::Recebe,
+    /// A ponta de quem liga, segura enquanto o par vive.
+    _ponta: seele_enlace::Ponta,
     /// Quem o servidor disse que esta conexão é. Nunca escolhido pelo cliente.
     pessoa: PersonId,
     /// A primeira sala de voz que este par pode ver.
@@ -232,60 +188,13 @@ struct Par {
 
 /// Abre uma conexão e faz o aperto de mão à mão.
 async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-
-    let config = quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    ));
-
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(config);
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
-    // A ponta é dona do socket; sem isto ela cai no fim desta função.
-    std::mem::forget(ponta);
-
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
     let chave = SigningKey::from_bytes(&[semente; 32]);
-    frame::write(
-        &mut envio,
-        &ClientMessage::Hello {
-            faixa: seele_proto::FAIXA,
-            client: "par-cru".into(),
-            nickname: format!("pessoa{semente:03}"),
-            public_key: chave.verifying_key().to_bytes().to_vec(),
-            join_secret: None,
-            material_e2ee: None,
-            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
-        },
-    )
-    .await?;
-
-    let ServerMessage::Challenge { nonce } = frame::read::<ServerMessage>(&mut recebe).await?
-    else {
-        anyhow::bail!("o servidor não mandou Challenge");
-    };
-    frame::write(
-        &mut envio,
-        &ClientMessage::Response {
-            proof: chave
-                .sign(&prova_amarrada(&conexao, &nonce))
-                .to_bytes()
-                .to_vec(),
-        },
-    )
-    .await?;
+    let mut cru = par_cru::ate_a_prova(endereco, &chave, &format!("pessoa{semente:03}")).await;
     let ServerMessage::Session {
         person,
         voice_rooms,
         ..
-    } = frame::read::<ServerMessage>(&mut recebe).await?
+    } = cru.proximo().await?
     else {
         anyhow::bail!("o servidor não mandou Session");
     };
@@ -295,9 +204,10 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
         .ok_or_else(|| anyhow::anyhow!("o servidor não ofereceu sala de voz nenhuma"))?;
 
     Ok(Par {
-        conexao,
-        envio,
-        recebe,
+        conexao: cru.conexao,
+        envio: cru.envio,
+        recebe: cru.recebe,
+        _ponta: cru.ponta,
         pessoa: person,
         sala,
     })
@@ -1346,7 +1256,7 @@ async fn o_fim_limpo_do_repasse_devolve_quem_assiste_ao_servidor() -> Result<()>
     // O fim do fluxo do par, visto de dentro de quem assiste. Daqui para
     // frente, tudo o que chegar tem de ter vindo de outro lugar.
     esperar(&mut assiste, "o fluxo do par terminar", |aviso| {
-        matches!(aviso, Aviso::TelaFechou { tela } if *tela == screen).then_some(())
+        matches!(aviso, Aviso::TelaFechou { tela, .. } if *tela == screen).then_some(())
     })
     .await?;
 
@@ -1453,7 +1363,7 @@ async fn retirar_o_consentimento_de_emprestar_encerra_o_repasse_e_o_servidor_rea
     esperar(
         &mut assiste,
         "o fluxo do par terminar depois de quem empresta retirar o consentimento",
-        |aviso| matches!(aviso, Aviso::TelaFechou { tela } if *tela == screen).then_some(()),
+        |aviso| matches!(aviso, Aviso::TelaFechou { tela, .. } if *tela == screen).then_some(()),
     )
     .await?;
 
@@ -1552,7 +1462,8 @@ async fn retirar_o_consentimento_de_assistir_por_par_devolve_a_tela_ao_servidor(
     // primeira versão deste teste esperou por `TelaFechou` e esgotou a
     // paciência. Fica registrado em `docs/pendencias.md`: a casca não é
     // avisada de que o caminho de par dela acabou, e o que a segura é a
-    // imagem não parar.
+    // imagem não parar. (Desde a 0.17 o fim sai do `Drop` da leitura: ver
+    // `a_leitura_do_par_cancelada_emite_o_proprio_fim`.)
     //
     // O que se afirma, então, são as duas coisas que **têm** de valer: o
     // servidor desfez a nomeação, e a imagem continua chegando.
@@ -1599,6 +1510,52 @@ async fn retirar_o_consentimento_de_assistir_por_par_devolve_a_tela_ao_servidor(
         "{QUADROS_PARA_PROVAR} quadros seguidos chegaram pelo servidor depois de quem assiste \
          retirar o consentimento"
     );
+
+    drop(compartilha);
+    drop(empresta);
+    drop(assiste);
+    servidor.shutdown();
+    Ok(())
+}
+
+/// **A leitura do par cancelada por esta máquina diz que acabou.**
+///
+/// A medida que o teste de cima registrou («uma tarefa cancelada não emite fim
+/// nenhum») era o defeito por trás do fantasma da tela ligada: a troca de par e
+/// a queda abortam a leitura no meio do laço, e o `TelaFechou` só existia
+/// depois dele. Agora ele sai do `Drop` da leitura, com o número dela.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leitura_do_par_cancelada_emite_o_proprio_fim() -> Result<()> {
+    let _vaga = vaga::minha();
+    let Cenario {
+        servidor,
+        compartilha,
+        empresta,
+        mut assiste,
+        screen,
+        copias,
+    } = cenario().await?;
+
+    let _ = ate_o_par_estar_servindo(
+        &mut assiste,
+        screen,
+        &copias,
+        "o cancelamento da leitura do par",
+    )
+    .await?;
+    assiste
+        .consentir_no_caminho_entre_pares(ConsentimentoDePar::de_ninguem())
+        .await?;
+    let leitura = esperar(
+        &mut assiste,
+        "o fim da leitura do par cancelada por esta máquina",
+        |aviso| match aviso {
+            Aviso::TelaFechou { tela, leitura } if *tela == screen => Some(*leitura),
+            _ => None,
+        },
+    )
+    .await?;
+    println!("a leitura {leitura} do par cancelada disse que acabou");
 
     drop(compartilha);
     drop(empresta);
@@ -2471,7 +2428,8 @@ async fn espectador_cru(
             // fecharia sozinho e o teste estaria medindo a própria negligência
             // em vez da saída de quem empresta.
             tokio::spawn(async move {
-                while let Ok(Some(_)) = fluxo.read_chunk(64 * 1024, false).await {}
+                let mut balde = vec![0_u8; 64 * 1024];
+                while let Ok(Some(_)) = fluxo.read(&mut balde).await {}
             });
         }
     });
@@ -3734,26 +3692,4 @@ async fn a_queda_de_uma_conexao_so_derruba_o_caminho_do_par_com_o_par_ainda_vivo
     drop(assiste);
     servidor.shutdown();
     Ok(())
-}
-
-/// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
-/// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
-/// Desde o Servidor 1.0, o nonce cru não entra mais.
-fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS sempre entrega a cadeia do servidor");
-    let impressao = seele_proto::transport::certificate_digest(
-        cadeia
-            .first()
-            .expect("a cadeia tem um certificado")
-            .as_ref(),
-    );
-    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
-    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

@@ -195,6 +195,24 @@ pub enum VoiceRoomCommand {
     /// mesma fila também **ordena** a resposta depois de todo comando já
     /// enfileirado, que é exatamente o que um teste precisa.
     Contadores(oneshot::Sender<DropCounts>),
+    /// **As permissões de mídia mudaram, e valem na hora** (os cargos, ADR
+    /// 0064).
+    ///
+    /// O `may_speak` do membro era o do aperto de mão, e uma revogação de
+    /// Falar só valia na reconexão. Quem manda isto é o ponto em que a mudança
+    /// de cargos foi gravada (`session::aplicar_os_cargos`), **antes** de
+    /// avisar qualquer cliente: um par que não lê o `ctl` não segura a
+    /// revogação. Sem `compartilha_tela`, a transmissão dele nesta sala acaba
+    /// ([`crate::tela::FimDaTela::PermissaoRevogada`]) e nada mais dela é
+    /// encaminhado.
+    Permissoes {
+        /// Quem.
+        person: PersonId,
+        /// Se pode transmitir voz agora.
+        may_speak: bool,
+        /// Se pode compartilhar a tela agora.
+        compartilha_tela: bool,
+    },
 }
 
 /// Why a datagram was not forwarded.
@@ -500,10 +518,17 @@ impl VoiceRoom {
                 // transmissões — a última a entrar é a primeira a sair —,
                 // aplicada a espectador em vez de a tela.
                 if self.telas.len() == 1 && self.cabe_mais_uma_copia() {
+                    let mut pedir = Vec::new();
                     for curso in self.telas.values_mut() {
                         if curso.dono != person {
+                            if curso.esperando.is_empty() {
+                                pedir.push((curso.dono, curso.screen));
+                            }
                             curso.esperando.push(person);
                         }
+                    }
+                    for (dono, screen) in pedir {
+                        self.pedir_a_chave(dono, screen, person);
                     }
                 } else if self.telas.len() == 1 {
                     self.drops.espectador_nao_coube += 1;
@@ -623,6 +648,18 @@ impl VoiceRoom {
                 // Quem perguntou pode ter desistido; a sala não tem o que fazer
                 // a respeito, e derrubá-la por isso seria pior que o silêncio.
                 let _ = responder.send(self.drops);
+            }
+            VoiceRoomCommand::Permissoes {
+                person,
+                may_speak,
+                compartilha_tela,
+            } => {
+                if let Some(member) = self.members.get_mut(&person) {
+                    member.may_speak = may_speak;
+                }
+                if !compartilha_tela && self.telas.contains_key(&person) {
+                    self.encerrar_tela(person, Some(FimDaTela::PermissaoRevogada));
+                }
             }
             VoiceRoomCommand::Subida => {
                 // **O número já chegou**, pelo `Arc` que esta sala partilha com
@@ -845,7 +882,34 @@ impl VoiceRoom {
         let Some(curso) = self.telas.values_mut().find(|curso| curso.screen == screen) else {
             return;
         };
+        let primeiro_da_leva = curso.esperando.is_empty();
         curso.esperando.push(person);
+        if primeiro_da_leva {
+            let dono = curso.dono;
+            self.pedir_a_chave(dono, screen, person);
+        }
+    }
+
+    /// **Quem entra em `esperando` pede a chave por intermédio da sala**, a
+    /// quem compartilha, uma vez por leva.
+    ///
+    /// O fluxo de quem espera só abre no próximo quadro-chave
+    /// ([`Self::tela_bytes`]), e ninguém o pedia: a página só pede a chave no
+    /// `ScreenOpened`, que só chega pelo próprio fluxo. Medido em 26/10/2026:
+    /// 8,6 s até a primeira imagem com a chave periódica, e nunca sem ela. Quem
+    /// chega com outro já esperando é servido pela mesma chave, e não pede outra.
+    /// O pedido é o mesmo `KeyFrameRequested` do pedido de um cliente, e quem
+    /// compartilha já junta pedidos repetidos num quadro-chave só
+    /// (`seele-core::bomba`).
+    fn pedir_a_chave(&self, dono: PersonId, screen: ScreenId, quem: PersonId) {
+        let Some(eventos) = self.eventos.as_ref() else {
+            return;
+        };
+        let _ = eventos.send(Event::KeyFrameRequested {
+            screen,
+            person: quem,
+            sharer: dono,
+        });
     }
 
     /// Se a subida de quem hospeda carrega **mais uma** cópia além das de agora.
@@ -1273,6 +1337,24 @@ impl VoiceRooms {
         }
     }
 
+    /// Diz a toda sala o que esta pessoa pode transmitir agora
+    /// ([`VoiceRoomCommand::Permissoes`]). Volta quando todas as salas
+    /// receberam o comando, que é processado na ordem, antes do próximo
+    /// datagrama.
+    pub async fn permissoes(&self, person: PersonId, may_speak: bool, compartilha_tela: bool) {
+        let tasks: Vec<mpsc::Sender<VoiceRoomCommand>> =
+            self.tasks.lock().await.values().cloned().collect();
+        for task in tasks {
+            let _ = task
+                .send(VoiceRoomCommand::Permissoes {
+                    person,
+                    may_speak,
+                    compartilha_tela,
+                })
+                .await;
+        }
+    }
+
     /// How many voice room tasks are running. For tests and for tooling.
     pub async fn running(&self) -> usize {
         self.tasks.lock().await.len()
@@ -1411,6 +1493,90 @@ mod tests {
             }
         }
         tudo
+    }
+
+    /// Os pedidos de quadro-chave que a sala pôs no barramento: (tela, quem, a quem).
+    fn pedidos_de_chave(ouvinte: &mut broadcast::Receiver<Event>) -> Vec<(u32, u64, u64)> {
+        let mut vistos = Vec::new();
+        while let Ok(evento) = ouvinte.try_recv() {
+            if let Event::KeyFrameRequested {
+                screen,
+                person,
+                sharer,
+            } = evento
+            {
+                vistos.push((screen.0, person.0, sharer.0));
+            }
+        }
+        vistos
+    }
+
+    /// **Quem entra numa transmissão em curso faz a sala pedir a chave** a quem
+    /// compartilha (medido em 26/10/2026: a página que chegava depois do
+    /// primeiro IDR ficava em `esperando`, e o fluxo dela só abria na chave
+    /// seguinte, que ninguém pedia antes do `ScreenOpened` — 8,6 s até a
+    /// primeira imagem, ou nunca sem chave periódica). Um pedido por leva: quem
+    /// chega enquanto outro já espera é servido pela mesma chave. Vale para a
+    /// entrada na sala e para o `assistir` de quem tinha deixado de ver.
+    #[test]
+    fn quem_entra_numa_transmissao_em_curso_faz_a_sala_pedir_um_quadro_chave() {
+        let (mut sala, mut ouvinte) = sala_com_barramento(crate::tela::CAMINHO_DO_SERVER_BPS);
+        let _dono = espectador(&mut sala, 1);
+        let _fim = compartilhar(&mut sala, 1, 7);
+        sala.handle(VoiceRoomCommand::TelaBytes {
+            from: PersonId(1),
+            bytes: quadro(true, 16),
+        });
+        let _ = pedidos_de_chave(&mut ouvinte);
+
+        let mut bia = espectador(&mut sala, 2);
+        assert_eq!(
+            pedidos_de_chave(&mut ouvinte),
+            vec![(7, 2, 1)],
+            "a entrada no meio pede a chave"
+        );
+        let mut caio = espectador(&mut sala, 3);
+        assert_eq!(
+            pedidos_de_chave(&mut ouvinte),
+            Vec::new(),
+            "quem chega com outro já esperando é servido pela mesma chave"
+        );
+
+        sala.handle(VoiceRoomCommand::TelaBytes {
+            from: PersonId(1),
+            bytes: quadro(true, 16),
+        });
+        assert!(
+            bia.try_recv().is_ok() && caio.try_recv().is_ok(),
+            "a chave liga os dois"
+        );
+
+        let _dani = espectador(&mut sala, 4);
+        assert_eq!(
+            pedidos_de_chave(&mut ouvinte),
+            vec![(7, 4, 1)],
+            "a leva seguinte pede de novo"
+        );
+
+        // E o `assistir` de quem tinha deixado de ver.
+        sala.handle(VoiceRoomCommand::TelaBytes {
+            from: PersonId(1),
+            bytes: quadro(true, 16),
+        });
+        sala.handle(VoiceRoomCommand::TelaParouDeAssistir {
+            person: PersonId(2),
+            screen: ScreenId(7),
+        });
+        let _ = pedidos_de_chave(&mut ouvinte);
+        sala.handle(VoiceRoomCommand::TelaAssistir {
+            person: PersonId(2),
+            screen: ScreenId(7),
+        });
+        assert_eq!(
+            pedidos_de_chave(&mut ouvinte),
+            vec![(7, 2, 1)],
+            "o assistir pede a chave"
+        );
     }
 
     #[test]

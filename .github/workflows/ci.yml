@@ -129,6 +129,12 @@ jobs:
         include:
           - os: ubuntu-24.04
             name: linux
+          # O DTLS do `seele-enlace` compila o AWS-LC (`aws-lc-sys`, ADR 0063,
+          # emenda do RUSTSEC-2026-0387). Nenhum passo de instalação a mais,
+          # de propósito: o MSVC do runner compila o C, o NASM é dispensado
+          # pelos objetos pré-montados (`prebuilt-nasm`, que o `dimpl` liga) e
+          # o CMake não entra (o `aws-lc-sys` 0.46 usa o `cc` com as ligações
+          # pré-geradas). Este job e o de clippy são a prova disso no Windows.
           - os: windows-2022
             name: windows
           # Pelo mesmo motivo da matriz de clippy acima: três sistemas
@@ -401,6 +407,76 @@ jobs:
       - run: node apps/seele-app/bancada/linhas-pelo-id.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # As bancadas da 0.17 que só precisam da casca (`ui/`) num Chromium, com a
+      # ponte do Tauri simulada pela `telas.cjs`: hospedar o servidor legado
+      # versus atualizar o MOD, o servidor hospedado versus a sessão de
+      # participação, a portaria, os cargos, a queda que volta sozinha e o
+      # isolamento entre sessões. Inscritas em 25/10/2026, quando o
+      # `toda_bancada_da_pasta_roda_em_algum_lugar` achou 33 sem lugar.
+      - run: node apps/seele-app/bancada/atualizar-mod-sem-servidor.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/aviso-antes-de-atualizar.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/copia-antes-de-converter.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/hospedar-com-servidor-no-ar.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/diagnostico-0151.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/estado-por-sessao.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/palco-na-troca-de-vista.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/isolamento-das-sessoes.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/multi-sessao-na-ponte.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/vista-pessoal-0-17.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/palco-depois-de-reconectar.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/ciclo-de-reconectar-o-servidor.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/queda-que-volta-sozinha.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/portaria-por-identidade.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/recuperar-a-chave.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/tela-sem-captura-no-navegador.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/vista-da-entrada-pela-identidade.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/cargos.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # O crédito de recepção, sem `.wasm` e sem servidor: só o Chromium e o
+      # Playwright que o `npm install` de cima pôs em `node_modules`.
+      - run: node apps/seele-app/bancada/credito-no-navegador.cjs chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # A volta pela casca inteira (E2 da 0.17): um retrato por tela, e reprova
+      # num erro de página. Os retratos vão para a pasta temporária do runner.
+      - run: node apps/seele-app/bancada/navegacao-0-17.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
       # **Os roteiros da casca** (lote RT da F5), que até 10/10/2026 só rodavam
       # na bateria da orquestradora. Nem este workflow nem a bateria do
       # `empacotar/publicar.sh` os rodavam, e assim eles apodreciam calados: o
@@ -499,6 +575,26 @@ jobs:
       - run: python3 tools/bancada-do-celular.py "$RUNNER_TEMP/bancada-do-celular"
         if: ${{ !cancelled() }}
         timeout-minutes: 30
+      # A área útil da 0.17 (`area-util.cjs`): cada tela na superfície inteira, no desktop e no celular de verdade (a largura real
+      # de cada tela e não só a da raiz, a rolagem própria, o foco preso das camadas, o teclado simulado sobre campos de texto,
+      # o aviso do endereço novo). Com `--webkit`, UMA execução mede os DOIS motores (area-util.cjs, `motores`): o Chromium que o
+      # job já instalou e o WebKit, o motor do Safari e do PWA do iPhone, instalado no passo logo antes (o `install` exato de
+      # cima é o que `o_passo_dos_roteiros_…` procura, e fica como está). A pasta é `target/area-util`, relativa à raiz, e não o
+      # `$RUNNER_TEMP`: a bateria do `publicar.sh` roda o MESMO comando, letra por letra
+      # (`toda_bancada_de_navegador_e_a_do_celular_rodam_no_ci_e_no_publicar`). Leva ~10 min nos dois motores (medido no Mac em
+      # 27/10); o prazo é três vezes isso. As capturas e o `medidas.json` sobem como artefato, vermelhos ou não.
+      - run: npx playwright install --with-deps webkit
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+      - run: node apps/seele-app/bancada/area-util.cjs target/area-util --webkit
+        if: ${{ !cancelled() }}
+        timeout-minutes: 30
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: area-util
+          path: target/area-util
+          retention-days: 7
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as
@@ -594,6 +690,61 @@ jobs:
       - run: cargo build --quiet --package seele-server --example servidor_da_bancada
         if: ${{ !cancelled() }}
       - run: node apps/seele-app/bancada/sessao-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # As bancadas da 0.17 que usam o `.wasm` e o `servidor_da_bancada` do
+      # passo acima, no Chromium: os cargos pela tela e no navegador, o que
+      # fica para trás, as três sessões na mesma página e a vista com dois
+      # servidores (que lê também o motor de MODs). Só o Chromium é instalado
+      # aqui, por isso `chromium` e não `webkit`.
+      - run: node apps/seele-app/bancada/cargos-pela-tela.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/cargos-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/ficou-para-tras-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/tres-sessoes-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/vista-com-dois-servidores.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # A portaria pelo navegador decide com a `portaria-da-bancada`, uma
+      # ferramenta que faz o papel do app sem a casca. O fonte dela mora em
+      # `apps/seele-app/bancada/medidas/portaria-2026-10-24/` (`.rs.txt`) e é
+      # compilado FORA do workspace: o passo monta um crate numa pasta
+      # temporária, com o `seele-server` por caminho, e o compila no `target/`
+      # daqui, de onde sai `target/debug/portaria-da-bancada`. Esse crate tem
+      # o próprio `Cargo.lock` (o `serde_json` não é fixado pelo do workspace).
+      - name: a portaria-da-bancada
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        run: |
+          pasta="$RUNNER_TEMP/portaria-da-bancada"
+          mkdir -p "$pasta/src"
+          cp apps/seele-app/bancada/medidas/portaria-2026-10-24/portaria-da-bancada.main.rs.txt "$pasta/src/main.rs"
+          printf 'PLACEHOLDER' "$GITHUB_WORKSPACE" > "$pasta/Cargo.toml"
+          cargo build --quiet --manifest-path "$pasta/Cargo.toml" --target-dir target
+      - run: node apps/seele-app/bancada/portaria-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm target/debug/examples/servidor_da_bancada target/wasm32-wasip1/release/seele_motor_web.wasm target/debug/portaria-da-bancada chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # O enlace WebRTC da página (`ui/rtc-web.js`) contra o enlace de produto
+      # (`crates/seele-enlace/examples/eco.rs`) e contra o `seele-encontro`, no
+      # Chromium. O eco e o ponto de encontro são compilados aqui mesmo.
+      - run: cargo build --quiet --package seele-enlace --example eco
+        if: ${{ !cancelled() }}
+      - run: cargo build --quiet --package seele-encontro
+        if: ${{ !cancelled() }}
+      - run: node apps/seele-app/bancada/rtc-eco.cjs target/debug/examples/eco chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/rtc-credito.cjs target/debug/examples/eco chromium playwright
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/rtc-sinal.cjs target/debug/seele-encontro target/debug/examples/eco target/wasm32-unknown-unknown/release/seele_web.wasm chromium playwright
         if: ${{ !cancelled() }}
         timeout-minutes: 5
 
@@ -697,6 +848,12 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 15
       - run: cargo +nightly fuzz run datagrama_do_encontro fuzz/corpus/datagrama_do_encontro fuzz/sementes/datagrama_do_encontro -- -max_total_time=60 -create_missing_dirs=1
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+      - run: cargo +nightly fuzz run sinal_do_encontro fuzz/corpus/sinal_do_encontro fuzz/sementes/sinal_do_encontro -- -max_total_time=60 -create_missing_dirs=1
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+      - run: cargo +nightly fuzz run envelope fuzz/corpus/envelope fuzz/sementes/envelope -- -max_total_time=60 -create_missing_dirs=1
         if: ${{ !cancelled() }}
         timeout-minutes: 15
       - uses: actions/upload-artifact@v4

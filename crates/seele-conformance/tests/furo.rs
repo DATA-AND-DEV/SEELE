@@ -1,33 +1,42 @@
-//! A coordenação entre o aviso e o aperto de mão.
+//! O degrau 4 de quem entra, na linha 2: o `CHAMA` do ENC/3.
 //!
-//! Nenhum teste do projeto olhava para o **relógio entre as duas coisas**:
-//! `candidatos.rs` prova que o próximo candidato é tentado, `apresentacao.rs`
-//! prova que o aviso chega, e o intervalo entre eles não era de ninguém. Era
-//! exatamente ali que o defeito morava — o furo abria por 600 ms e o aperto de
-//! mão chegava até doze segundos depois.
+//! # O que mudou na 0.17, e por que este arquivo foi reescrito
 //!
-//! # O que se mede aqui, e o que nunca se mede
+//! Até a 0.16 o degrau 4 era o `LEVE` do ENC/1: um aviso **de mão única**, um
+//! por candidato público, repetido três vezes enquanto o aperto de mão do QUIC
+//! corria, e o que este arquivo media era o relógio entre o aviso e o
+//! `Initial`. A linha 2 não manda `LEVE` (ADR 0063, `enc3.md`): quem entra manda
+//! **um** `CHAMA` por tentativa de entrar (`seele_core::encontro::Chamada`),
+//! da ponta da sessão, com o `U` desta tentativa; o ponto o repassa ao
+//! anfitrião, que fura e responde, e a discagem vai ao endereço que o ponto
+//! devolveu no `AQUI`. Não há mais «aviso por candidato» para contar, e as
+//! asserções antigas («nenhum aviso por candidato privado», «dois avisos para
+//! dois candidatos») perguntavam por um mecanismo que não existe.
 //!
-//! Nenhum destes testes conecta, e nenhum deles quer. O que se mede é **quando**
-//! o datagrama do degrau 4 sai, em relação a quando o candidato que depende dele
-//! é tentado. Um teste que exigisse sucesso precisaria de um NAT de verdade
-//! entre duas casas — que é justamente o teste de campo que este ciclo existe
-//! para fazer passar, e não cabe numa máquina só.
+//! O que se prende aqui é o que o mecanismo novo promete, de ponta a ponta,
+//! contra sockets de verdade:
+//!
+//! - o `CHAMA` sai **depois** da discagem direta (quem está na mesma casa
+//!   entra sem o ponto ouvir nada) e **da mesma porta** que disca — é o
+//!   endereço dessa porta que o ponto vê e que o anfitrião fura;
+//! - sem resposta, ele se repete no máximo três vezes, espaçado, e para;
+//! - uma resposta do ponto (`NINGUEM`) encerra a chamada no primeiro;
+//! - um `AQUI` que não veio do ponto não desvia a discagem para lugar nenhum;
+//! - sem impressão no convite não há marca, e nenhum `CHAMA` sai.
+//!
+//! Nenhum destes testes precisa conectar, como antes: o que se mede é o que
+//! sai e para onde. O sucesso pelo degrau 4 (`FuroDeNat`) é medido em
+//! `estados.rs`, e o ponto de verdade em `enc3_ponta_a_ponta.rs`.
 //!
 //! # Por que os endereços são estes
 //!
-//! `10.255.255.x` e `192.168.255.1` são privados e não levam a lugar nenhum: são
-//! o candidato da rede de outra casa, que de fora queima o prazo inteiro sem
-//! nunca devolver um ICMP. `203.0.113.x` é TEST-NET-3 (RFC 5737), reservado para
-//! documentação e sem rota em lugar nenhum, mas **global** para toda
-//! classificação que este código faz — é o candidato refletido, o único que
-//! depende de alguém ter furado o caminho até ele.
-//!
-//! E `[::ffff:127.0.0.1]:porta` é o candidato público que **responde**: a
-//! classificação de `enlace.rs` pergunta por loopback na forma escrita, então a
-//! forma mapeada do loopback conta como pública e ainda assim entrega o pacote a
-//! um socket desta máquina. É o que torna possível medir o intervalo entre o
-//! `LEVE` e o `Initial` sem duas casas e um NAT entre elas.
+//! `10.255.255.x` e `192.168.255.1` são privados e não levam a lugar nenhum.
+//! `203.0.113.x` é TEST-NET-3 (RFC 5737). E `[::ffff:127.0.0.1]:porta` é o
+//! candidato público que **recebe**: a classificação de `enlace.rs` pergunta
+//! por loopback na forma escrita, e o pacote ainda assim chega a um socket
+//! desta máquina.
+
+#![allow(clippy::expect_used, reason = "num teste, o pânico é o relatório")]
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -35,128 +44,120 @@ use std::time::{Duration, Instant};
 
 use seele_core::enlace::{e_privado, Destino, Enlace};
 use seele_core::{ConnectError, MemoryPinStore, PinStore};
+use seele_proto::encontro::{analisar3, resposta3, Pedido3, Resposta3};
 
 mod vaga;
 
 /// A impressão digital que o convite promete.
 ///
-/// Obrigatória: é dela que sai a marca do aviso, e sem marca não se prepara
-/// batida nenhuma — todos estes testes mediriam silêncio.
+/// Obrigatória: é dela que saem as marcas do `CHAMA`, e sem marca não se chama
+/// ninguém — todos estes testes, menos o último, mediriam silêncio.
 const IMPRESSAO: &str = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
 
-/// Um nome TLS que o quinn recusa antes de mandar pacote nenhum.
-///
-/// Serve para um candidato **acabar depressa** sem que nada precise responder:
-/// `Endpoint::connect` devolve erro na hora, e o que sobra para medir é o que o
-/// laço faz quando a tentativa termina.
-const NOME_TLS_IMPOSSIVEL: &str = "nome inválido com espaço";
+/// Um datagrama que chegou: quando, de onde, e os bytes.
+type Caderno = Arc<Mutex<Vec<(Instant, SocketAddr, Vec<u8>)>>>;
 
-/// Um ponto de encontro que só anota quando cada aviso chegou.
-async fn ponto_que_anota() -> Option<(SocketAddr, Arc<Mutex<Vec<Instant>>>)> {
-    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.ok()?;
-    let onde = socket.local_addr().ok()?;
-    let quando: Arc<Mutex<Vec<Instant>>> = Arc::new(Mutex::new(Vec::new()));
-    let anotador = Arc::clone(&quando);
-    tokio::spawn(async move {
-        let mut balde = [0_u8; 96];
-        while socket.recv_from(&mut balde).await.is_ok() {
-            if let Ok(mut lista) = anotador.lock() {
-                lista.push(Instant::now());
-            }
-        }
-    });
-    Some((onde, quando))
+/// Como o ponto de teste responde a um `CHAMA`.
+#[derive(Clone, Copy)]
+enum Responde {
+    /// Não responde nada.
+    Calado,
+    /// Responde `NINGUEM` para a marca do servidor.
+    Ninguem,
 }
 
-/// Um candidato de verdade, que anota quando cada pacote chegou e de onde.
-///
-/// Devolve o endereço **como ele vai no convite** e o caderno. `mapeado` decide
-/// entre a forma escrita (`127.0.0.1:porta`, que a classificação lê como
-/// loopback e não avisa) e a mapeada (`[::ffff:127.0.0.1]:porta`, que ela lê
-/// como pública e avisa) — as duas caem no mesmo socket.
-async fn candidato_que_anota(
-    mapeado: bool,
-) -> Option<(String, Arc<Mutex<Vec<(Instant, SocketAddr)>>>)> {
-    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.ok()?;
-    let onde = socket.local_addr().ok()?;
-    let escrito = if mapeado {
-        format!("[::ffff:127.0.0.1]:{}", onde.port())
-    } else {
-        onde.to_string()
-    };
-    let chegadas: Arc<Mutex<Vec<(Instant, SocketAddr)>>> = Arc::new(Mutex::new(Vec::new()));
-    let anotador = Arc::clone(&chegadas);
+/// Um socket que anota tudo o que chega e, se for o ponto, responde.
+async fn anotador(responde: Responde) -> (SocketAddr, Caderno, Arc<tokio::net::UdpSocket>) {
+    let socket = Arc::new(
+        tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("o loopback abre"),
+    );
+    let onde = socket.local_addr().expect("o socket sabe onde ligou");
+    let caderno: Caderno = Arc::new(Mutex::new(Vec::new()));
+    let anota = Arc::clone(&caderno);
+    let leitor = Arc::clone(&socket);
     tokio::spawn(async move {
         let mut balde = [0_u8; 1500];
-        while let Ok((_, de)) = socket.recv_from(&mut balde).await {
-            if let Ok(mut lista) = anotador.lock() {
-                lista.push((Instant::now(), de));
+        while let Ok((lidos, de)) = leitor.recv_from(&mut balde).await {
+            let bytes = balde.get(..lidos).unwrap_or_default().to_vec();
+            if let (Responde::Ninguem, Some(Pedido3::Chama(chama))) = (responde, analisar3(&bytes))
+            {
+                let _ = leitor
+                    .send_to(
+                        &resposta3(&Resposta3::Ninguem {
+                            marca: chama.servidor,
+                        }),
+                        de,
+                    )
+                    .await;
+            }
+            if let Ok(mut lista) = anota.lock() {
+                lista.push((Instant::now(), de, bytes));
             }
         }
     });
-    Some((escrito, chegadas))
+    (onde, caderno, socket)
 }
 
-/// O primeiro instante anotado, ou o pânico com a frase de quem chamou.
-fn primeira_chegada(caderno: &Arc<Mutex<Vec<(Instant, SocketAddr)>>>) -> Option<(Instant, u16)> {
+/// Os `CHAMA` do caderno de um ponto: quando e de onde.
+fn chamas(caderno: &Caderno) -> Vec<(Instant, SocketAddr, seele_proto::encontro::Chama)> {
+    caderno
+        .lock()
+        .expect("o caderno não envenena")
+        .iter()
+        .filter_map(|(quando, de, bytes)| match analisar3(bytes) {
+            Some(Pedido3::Chama(chama)) => Some((*quando, *de, chama)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// O primeiro datagrama que um candidato recebeu: quando e de onde.
+fn primeira_chegada(caderno: &Caderno) -> Option<(Instant, SocketAddr)> {
     let lista = caderno.lock().ok()?;
-    let (quando, de) = lista.first()?;
-    Some((*quando, de.port()))
+    let (quando, de, _) = lista.first()?;
+    Some((*quando, *de))
 }
 
-/// Um candidato do convite, com a impressão digital que o degrau 4 exige.
-///
-/// `e_o_alvo` diz se ele é o primeiro destino, o endereço que a pessoa
-/// escolheu. Se o pino dele prova o servidor sai como em produção
-/// (`build_destino`, na FFI): o alvo, e só quando o endereço dele não é de
-/// escopo local. Aqui o valor não pesa, porque a loja de pins começa vazia e ele
-/// só decide com um pino já fixado; ele sai como em produção para o fixture não
-/// dizer que um alvo privado, como o `10.255.255.1` destes testes, prova o
-/// servidor.
-fn destino_com_nome(alvo: &str, nome_tls: &str, e_o_alvo: bool) -> Destino {
-    let Ok(servidor) = alvo.parse::<SocketAddr>() else {
-        panic!("o alvo de teste `{alvo}` não é um endereço");
-    };
-    let o_pino_prova_o_servidor = e_o_alvo && !e_privado(servidor.ip());
+/// O endereço de um anotador como ele vai no convite: na forma mapeada, que a
+/// classificação lê como pública.
+fn mapeado(onde: SocketAddr) -> String {
+    format!("[::ffff:127.0.0.1]:{}", onde.port())
+}
+
+/// Um candidato do convite, como a FFI o monta em produção.
+fn destino(alvo: &str, e_o_alvo: bool, impressao: Option<&str>) -> Destino {
+    let servidor = alvo
+        .parse::<SocketAddr>()
+        .unwrap_or_else(|_| panic!("o alvo de teste `{alvo}` não é um endereço"));
     Destino {
         servidor,
-        nome_tls: nome_tls.to_owned(),
-        // Sob o endereço escrito, e não sob um nome fixo: dois candidatos são
-        // servidores diferentes até que um deles responda.
+        nome_tls: "localhost".to_owned(),
         chave_do_pin: alvo.to_owned(),
         apelido: "pessoa".to_owned(),
         segredo: None,
-        esperada: Some(seele_core::enlace::Esperada::Certificado(
-            IMPRESSAO.to_owned(),
-        )),
-        o_pino_prova_o_servidor,
+        esperada: impressao
+            .map(|impressao| seele_core::enlace::Esperada::Certificado(impressao.to_owned())),
+        o_pino_prova_o_servidor: e_o_alvo && !e_privado(servidor.ip()),
         aceito: None,
     }
 }
 
-/// Monta um convite com `alvos` de candidatos e `ponto` de ponto de encontro, e
-/// chama o caminho público de conexão do `seele-core`.
-///
-/// **Sempre falha em conectar**, e é isso que se quer: não há servidor nenhum em
-/// endereço nenhum destes. O que se mede é o relógio, não o sucesso.
-async fn tentar_convite_com_nome(
+/// Entra por um convite com estes candidatos e este ponto. **Sempre falha**:
+/// não há servidor em endereço nenhum destes, e o que se mede é o que saiu.
+async fn tentar(
     ponto: SocketAddr,
-    alvos: &[&str],
-    nome_tls: &str,
+    alvos: &[String],
+    impressao: Option<&str>,
 ) -> Result<Enlace, ConnectError> {
-    // O `aviso` do bilhete é para onde o anfitrião seria mandado furar. Nada
-    // deste lado o usa a não ser para escrever o `LEVE`, e ele nunca é tentado
-    // como candidato — daí um endereço global qualquer.
-    let Ok(bilhete) = seele_proto::uri::Bilhete::novo(ponto.to_string(), "45.33.32.156:41234")
-    else {
-        panic!("o bilhete de teste não se monta");
-    };
+    let bilhete = seele_proto::uri::Bilhete::novo(ponto.to_string(), "45.33.32.156:41234")
+        .expect("o bilhete de teste se monta");
     let destinos: Vec<Destino> = alvos
         .iter()
         .enumerate()
-        .map(|(posicao, alvo)| destino_com_nome(alvo, nome_tls, posicao == 0))
+        .map(|(posicao, alvo)| destino(alvo, posicao == 0, impressao))
         .collect();
-
     Enlace::conectar_entre_com_bilhete(
         destinos,
         Some(bilhete),
@@ -166,431 +167,289 @@ async fn tentar_convite_com_nome(
     .await
 }
 
-/// O mesmo, com um nome TLS que serve.
-async fn tentar_convite_de_teste(
+/// O mesmo, numa tarefa que se abandona depois de `quanto`.
+async fn tentar_por(
     ponto: SocketAddr,
-    alvos: &[&str],
-) -> Result<Enlace, ConnectError> {
-    tentar_convite_com_nome(ponto, alvos, "localhost").await
+    alvos: Vec<String>,
+    impressao: Option<&'static str>,
+    quanto: Duration,
+) {
+    let tentativa = tokio::spawn(async move {
+        let _ = tentar(ponto, &alvos, impressao).await;
+    });
+    tokio::time::sleep(quanto).await;
+    tentativa.abort();
 }
 
-#[tokio::test]
-async fn o_aviso_sai_imediatamente_antes_do_candidato_que_precisa_dele() {
+#[tokio::test(flavor = "multi_thread")]
+async fn o_chama_sai_depois_da_discagem_direta_e_da_mesma_porta() {
     let _vaga = vaga::minha();
-    // O teste-carro-chefe do ciclo, e ele tem de prender o aviso **dos dois
-    // lados**. Um limite inferior sozinho («saiu depois de 500 ms») não prende
-    // nada: o conserto inteiro desfeito, com um aviso único antes do laço
-    // atrasado por 700 ms, passa por ele — e um aviso que saísse *depois* da
-    // tentativa também.
+    // **Depois**: quem está na mesma casa entra pela discagem direta antes de o
+    // ponto ou o anfitrião ouvirem qualquer coisa (`Enlace::tentar_entre`: o
+    // lote do degrau 4 entra na defasagem de 250 ms). Um `CHAMA` no instante
+    // zero gastaria a janela de chamados do anfitrião (R2) por quem não
+    // precisava, e mandaria ao ponto o metadado de uma entrada que era local.
     //
-    // Por isso os dois candidatos são sockets de verdade, e o que se mede é a
-    // ordem entre três instantes:
-    //
-    //   1. o `Initial` chega ao candidato 1, que é loopback na forma escrita e
-    //      **não** avisa;
-    //   2. o `LEVE` chega ao ponto de encontro — tem de ser **depois** de (1),
-    //      porque o aviso é do candidato 2 e não do laço;
-    //   3. o `Initial` chega ao candidato 2, entre 100 e 600 ms depois de (2):
-    //      ESPERA_DO_FURO é de 200 ms, e é ela que faz o `Initial` cair dentro
-    //      do furo em vez de antes dele.
-    let Some((ponto, quando)) = ponto_que_anota().await else {
-        return;
-    };
-    let Some((primeiro_alvo, chegadas_no_primeiro)) = candidato_que_anota(false).await else {
-        return;
-    };
-    let Some((segundo_alvo, chegadas_no_segundo)) = candidato_que_anota(true).await else {
-        return;
-    };
+    // **Da mesma porta**: o NAT de quem entra mapeia por porta interna. O
+    // anfitrião fura para o endereço que o ponto viu no `CHAMA`; se o `CHAMA`
+    // saísse de um socket e a discagem de outro, o furo abriria para a porta
+    // errada e o degrau 4 nunca entraria — sem erro nenhum que dissesse isso.
+    let (ponto, do_ponto, _) = anotador(Responde::Calado).await;
+    let (candidato, do_candidato, _) = anotador(Responde::Calado).await;
 
     let comeco = Instant::now();
-    let _ = tentar_convite_de_teste(ponto, &[primeiro_alvo.as_str(), segundo_alvo.as_str()]).await;
-
-    let Ok(avisos) = quando.lock() else {
-        return;
-    };
-    let Some(primeiro_aviso) = avisos.first() else {
-        panic!("nenhum aviso saiu; o degrau 4 não aconteceu");
-    };
-    let atraso = primeiro_aviso.duration_since(comeco);
-    // **200 ms, e eram 500 até o ADR 0037.** O número antigo não media o aviso:
-    // media o tempo que o candidato 1 queimava **em série** antes de o 2
-    // começar. Com a corrida o candidato 2 parte na defasagem de 250 ms, e o
-    // aviso dele sai colado — em 253 ms.
-    //
-    // O que este limite prende continua sendo o defeito de origem, que é o aviso
-    // sair no instante zero, antes do laço. Quem prende o resto são as duas
-    // asserções de **ordem** logo abaixo, e o comentário no alto deste teste já
-    // dizia que é assim: «um limite inferior sozinho não prende nada».
-    assert!(
-        atraso > Duration::from_millis(200),
-        "o aviso saiu no instante zero — é o defeito de origem: ele tem de sair \
-         colado ao candidato refletido, e não antes do laço (saiu em {atraso:?})"
-    );
-
-    let Some((tentou_o_primeiro, _)) = primeira_chegada(&chegadas_no_primeiro) else {
-        panic!("o candidato 1 nunca foi tentado; não há ordem para conferir");
-    };
-    assert!(
-        *primeiro_aviso > tentou_o_primeiro,
-        "o aviso saiu antes de o candidato 1 chegar a ser tentado: ele é do laço \
-         e não do candidato que precisa dele"
-    );
-
-    let Some((tentou_o_segundo, _)) = primeira_chegada(&chegadas_no_segundo) else {
-        panic!("o candidato 2 nunca foi tentado; o aviso não coordenou com nada");
-    };
-    assert!(
-        tentou_o_segundo > *primeiro_aviso,
-        "o aperto de mão do candidato 2 saiu antes do aviso dele: o anfitrião \
-         ainda não teria furado nada quando o Initial chegou"
-    );
-    let entre = tentou_o_segundo.duration_since(*primeiro_aviso);
-    assert!(
-        entre > Duration::from_millis(100),
-        "o Initial saiu {entre:?} depois do LEVE: sem a espera do furo ele chega \
-         antes de o anfitrião ter furado, e o degrau 4 volta a depender de um \
-         PTO do quinn"
-    );
-    assert!(
-        entre < Duration::from_millis(600),
-        "o Initial saiu {entre:?} depois do LEVE: o furo do outro lado já fechou, \
-         que é exatamente o defeito de origem"
-    );
-}
-
-#[tokio::test]
-async fn um_candidato_da_rede_de_casa_nao_gasta_aviso_nenhum() {
-    let _vaga = vaga::minha();
-    // Um convite só com endereços privados não precisa de furo nenhum. Avisar
-    // ali gastaria metadado de quem não pediu e furos da janela do anfitrião:
-    // com três avisos por candidato, quatro candidatos privados custariam doze
-    // furos a uma pessoa que não precisava de um — e a janela é de sessenta por
-    // dez segundos, que é o teto dimensionado para quem **precisa**.
-    let Some((ponto, quando)) = ponto_que_anota().await else {
-        return;
-    };
-
-    let _ = tentar_convite_de_teste(ponto, &["10.255.255.1:8383", "192.168.255.1:8383"]).await;
-
-    {
-        let Ok(avisos) = quando.lock() else {
-            return;
-        };
-        assert!(
-            avisos.is_empty(),
-            "nenhum candidato privado precisa de furo, e nenhum aviso devia ter saído"
-        );
-    }
-
-    // O controle, e ele não é decorativo. Esta é uma asserção de **ausência**,
-    // e uma asserção de ausência fica verde também quando o mecanismo inteiro
-    // está quebrado: um bilhete que não vira batida, um ponto de encontro que
-    // não escuta, um `preparar` que devolve `None` — em qualquer um desses o
-    // `is_empty` de cima passa sem ter testado nada.
-    //
-    // Então o mesmo ponto de encontro, montado do mesmo jeito, recebe um
-    // convite que **tem** um candidato refletido. Se nada chegar aqui, o que o
-    // teste de cima mediu foi o próprio silêncio dele.
-    let Some((outro_ponto, outro_quando)) = ponto_que_anota().await else {
-        return;
-    };
-    let _ = tentar_convite_de_teste(outro_ponto, &["203.0.113.7:8383", "10.255.255.1:8383"]).await;
-    let Ok(avisos_do_controle) = outro_quando.lock() else {
-        return;
-    };
-    assert!(
-        !avisos_do_controle.is_empty(),
-        "o controle não recebeu aviso nenhum por um candidato público: o teste \
-         de ausência acima não estava medindo o silêncio dos candidatos \
-         privados, e sim o de um degrau 4 que não acontece nunca"
-    );
-}
-
-#[tokio::test]
-async fn um_candidato_privado_na_forma_mapeada_nao_engana_a_guarda() {
-    let _vaga = vaga::minha();
-    // A forma mapeada não é borda: um ponto de encontro atrás de socket de pilha
-    // dupla reflete a origem de quem bateu como `::ffff:a.b.c.d`, e é essa
-    // origem que volta no `AQUI` e entra no convite. Uma classificação que só
-    // olhasse a forma escrita veria `::ffff:192.168.1.5` como público — o
-    // endereço da rede de casa de alguém queimaria três furos, vazaria metadado
-    // e ainda levaria o prazo cheio de quatro segundos.
-    //
-    // As duas metades da mesma guarda são medidas juntas de propósito: nenhum
-    // aviso (é privado) **e** prazo curto (é de outra casa). São os dois
-    // caminhos que a canonização alimenta, e nenhum deles pode ficar verde por
-    // acaso: sem `to_canonical`, os quatro candidatos avisam e cada um custa
-    // 4,2 s em vez de 1 s.
-    let Some((ponto, quando)) = ponto_que_anota().await else {
-        return;
-    };
-
-    let comeco = Instant::now();
-    let _ = tentar_convite_de_teste(
+    tentar_por(
         ponto,
-        &[
-            "[::ffff:10.255.255.1]:8383",
-            "[::ffff:192.168.255.1]:8383",
-            "[::ffff:10.255.255.2]:8383",
-            "[::ffff:10.255.255.3]:8383",
-        ],
+        vec![mapeado(candidato)],
+        Some(IMPRESSAO),
+        Duration::from_millis(1500),
     )
     .await;
-    let gasto = comeco.elapsed();
 
-    {
-        let Ok(avisos) = quando.lock() else {
-            return;
-        };
-        assert!(
-            avisos.is_empty(),
-            "{} aviso(s) saíram por candidatos privados escritos na forma mapeada: \
-             a guarda do furo lê a forma escrita e não a canônica",
-            avisos.len()
-        );
-        assert!(
-            gasto < Duration::from_secs(8),
-            "quatro privados mapeados levaram {gasto:?}: o prazo curto do \
-             candidato distante não reconhece a forma mapeada"
-        );
-    }
-
-    // O controle, e ele cobre as duas direções de uma vez.
-    //
-    // A primeira metade é a de sempre: a asserção de cima é de **ausência**, e
-    // uma ausência fica verde também quando o degrau 4 inteiro está morto — um
-    // `preparar` que devolvesse `None` deixaria zero avisos e zero prazo longo,
-    // e o teste passaria sem ter medido nada.
-    //
-    // A segunda é o outro lado da mesma faca, e hoje não tem mais ninguém
-    // olhando para ela: uma canonização **exagerada**, que fizesse um endereço
-    // público mapeado parar de avisar, não acenderia teste nenhum deste arquivo.
-    // `[::ffff:203.0.113.7]` é as duas coisas — mapeado e público —, e é
-    // exatamente o que o ponto de encontro devolve para uma casa atrás de pilha
-    // dupla: se ele deixar de avisar, o degrau 4 morre para quem mais precisa
-    // dele, em silêncio.
-    let Some((ponto_do_controle, quando_do_controle)) = ponto_que_anota().await else {
-        return;
+    let chamados = chamas(&do_ponto);
+    let Some((primeiro_chama, porta_do_chama, _)) = chamados.first() else {
+        panic!("nenhum CHAMA chegou ao ponto: o degrau 4 não aconteceu, e nada abaixo mede nada");
     };
-    let _ = tentar_convite_de_teste(
-        ponto_do_controle,
-        &["[::ffff:203.0.113.7]:8383", "10.255.255.1:8383"],
-    )
-    .await;
-    let Ok(avisos_do_controle) = quando_do_controle.lock() else {
-        return;
+    let Some((discou, porta_da_discagem)) = primeira_chegada(&do_candidato) else {
+        panic!("o candidato direto nunca recebeu nada: não há ordem para conferir");
     };
     assert!(
-        !avisos_do_controle.is_empty(),
-        "nenhum aviso saiu por um candidato público escrito na forma mapeada: ou \
-         o degrau 4 não está acontecendo — e a ausência medida acima não provou \
-         nada —, ou a canonização passou do ponto e apagou o furo de quem mais \
-         depende dele"
+        discou < *primeiro_chama,
+        "o CHAMA saiu antes da discagem direta: o anfitrião é chamado por quem \
+         talvez estivesse na mesma casa"
+    );
+    assert!(
+        primeiro_chama.duration_since(comeco) >= Duration::from_millis(200),
+        "o CHAMA saiu em {:?}, antes da defasagem: ele é do laço e não do lote \
+         que espera o direto",
+        primeiro_chama.duration_since(comeco)
+    );
+    assert_eq!(
+        porta_do_chama.port(),
+        porta_da_discagem.port(),
+        "o CHAMA saiu de uma porta e a discagem de outra: o furo do anfitrião \
+         abriria para a porta que não disca"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sem_resposta_o_chama_sai_tres_vezes_espacado_e_para() {
+    let _vaga = vaga::minha();
+    // UDP perde pacote, e um `CHAMA` perdido custava a chamada inteira em
+    // silêncio. Por isso ele se repete — mas cada repetição vira um `CHAMADO`
+    // novo e um furo novo do anfitrião, que tem teto próprio (R2). Três,
+    // espaçados (`INTERVALO_DA_CHAMADA`, 800 ms), e nenhum depois.
+    let (ponto, do_ponto, _) = anotador(Responde::Calado).await;
+    tentar_por(
+        ponto,
+        vec!["203.0.113.7:8383".to_owned()],
+        Some(IMPRESSAO),
+        Duration::from_millis(6000),
+    )
+    .await;
+
+    let chamados = chamas(&do_ponto);
+    assert_eq!(
+        chamados.len(),
+        3,
+        "um ponto calado recebeu {} CHAMA(s): três é o que cabe no teto de \
+         chamados do anfitrião, e menos que isso perde a chamada por um pacote",
+        chamados.len()
+    );
+    let (Some((primeiro, ..)), Some((terceiro, ..))) = (chamados.first(), chamados.get(2)) else {
+        panic!("a contagem disse três e a lista não tem");
+    };
+    assert!(
+        terceiro.duration_since(*primeiro) > Duration::from_millis(1200),
+        "os três CHAMA couberam em {:?}: saíram em rajada, e uma rajada se perde \
+         junto",
+        terceiro.duration_since(*primeiro)
+    );
+    // E é a mesma tentativa: o mesmo `U` nos três, que é por onde o anfitrião
+    // reconhece quem furou.
+    let credenciais: std::collections::BTreeSet<String> = chamados
+        .iter()
+        .map(|(_, _, chama)| chama.credencial.texto().to_owned())
+        .collect();
+    assert_eq!(
+        credenciais.len(),
+        1,
+        "as repetições levaram credenciais diferentes: o anfitrião furaria por \
+         três tentativas que não existem"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn um_ninguem_do_ponto_encerra_a_chamada_no_primeiro_chama() {
+    let _vaga = vaga::minha();
+    // A metade de cima com resposta. O ponto disse que ninguém mora ali, e
+    // insistir gastaria pacote e taxa do ponto por uma resposta que já veio.
+    // O controle é o teste de cima: o mesmo ponto, calado, recebe três.
+    let (ponto, do_ponto, _) = anotador(Responde::Ninguem).await;
+    tentar_por(
+        ponto,
+        vec!["203.0.113.7:8383".to_owned()],
+        Some(IMPRESSAO),
+        Duration::from_millis(4000),
+    )
+    .await;
+    assert_eq!(
+        chamas(&do_ponto).len(),
+        1,
+        "o ponto respondeu NINGUEM e a chamada continuou insistindo"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn um_aqui_que_nao_vem_do_ponto_nao_desvia_a_discagem() {
+    let _vaga = vaga::minha();
+    // A ponta da sessão recebe datagramas de qualquer um. Um `AQUI` forjado,
+    // vindo de outro endereço que não o do ponto, mandaria a discagem — com o
+    // `U` desta tentativa — para onde o forjador quisesse. A impressão do DTLS
+    // impediria a sessão com um impostor, mas não o pacote: seria um jeito de
+    // fazer quem entra disparar Binding Requests contra terceiros.
+    //
+    // A isca é um socket que anota. O forjador manda, do socket dele, um `AQUI`
+    // perfeito (a marca certa, lida do `CHAMA` que o ponto recebeu) apontando
+    // para a isca. **O controle** é o mesmo `AQUI`, mandado do socket do ponto:
+    // ele tem de levar a discagem à isca, ou o forjado não ter levado não
+    // provaria nada.
+    for do_ponto_mesmo in [false, true] {
+        let (ponto, caderno_do_ponto, socket_do_ponto) = anotador(Responde::Calado).await;
+        let (isca, caderno_da_isca, _) = anotador(Responde::Calado).await;
+        let forjador = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("o loopback abre");
+
+        let tentativa = tokio::spawn(async move {
+            let _ = tentar(ponto, &["203.0.113.7:8383".to_owned()], Some(IMPRESSAO)).await;
+        });
+        let ate = Instant::now() + Duration::from_secs(3);
+        let (de_quem, chama) = loop {
+            if let Some((_, de, chama)) = chamas(&caderno_do_ponto).into_iter().next() {
+                break (de, chama);
+            }
+            assert!(Instant::now() < ate, "nenhum CHAMA chegou ao ponto");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        let aqui = resposta3(&Resposta3::Aqui {
+            marca: chama.servidor,
+            endereco: mapeado(isca).parse().expect("o endereço mapeado se lê"),
+            dicas: Vec::new(),
+        });
+        if do_ponto_mesmo {
+            socket_do_ponto
+                .send_to(&aqui, de_quem)
+                .await
+                .expect("o AQUI sai");
+        } else {
+            forjador
+                .send_to(&aqui, de_quem)
+                .await
+                .expect("o AQUI forjado sai");
+        }
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        tentativa.abort();
+
+        let a_isca_ouviu = primeira_chegada(&caderno_da_isca).is_some();
+        if do_ponto_mesmo {
+            assert!(
+                a_isca_ouviu,
+                "o AQUI do próprio ponto não levou a discagem à isca: o forjado \
+                 não ter levado não prova o guarda"
+            );
+        } else {
+            assert!(
+                !a_isca_ouviu,
+                "um AQUI que não veio do ponto desviou a discagem para a isca"
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sem_impressao_no_convite_nenhum_chama_sai() {
+    let _vaga = vaga::minha();
+    // As marcas do `CHAMA` saem da impressão que o convite promete. Sem ela não
+    // há a quem chamar, e chamar por uma marca inventada seria pedir ao ponto
+    // que acordasse qualquer anfitrião. O controle é o primeiro teste deste
+    // arquivo: o mesmo convite com a impressão chama.
+    let (ponto, do_ponto, _) = anotador(Responde::Calado).await;
+    tentar_por(
+        ponto,
+        vec!["203.0.113.7:8383".to_owned()],
+        None,
+        Duration::from_millis(2000),
+    )
+    .await;
+    assert!(
+        chamas(&do_ponto).is_empty(),
+        "um convite sem impressão chamou o ponto"
     );
 }
 
 #[tokio::test]
 async fn um_convite_de_enderecos_mortos_termina_em_segundos_e_nao_em_dezenas() {
     let _vaga = vaga::minha();
-    // Quatro endereços privados de outra casa: cada um custava
-    // PRAZO_POR_CANDIDATO = 4 s, e a má notícia chegava em dezesseis segundos.
-    // Com o prazo curto do candidato distante o pior caso cai para poucos.
-    let Some((ponto, _)) = ponto_que_anota().await else {
-        return;
-    };
-
-    let comeco = Instant::now();
-    let _ = tentar_convite_de_teste(
-        ponto,
-        &[
+    // Quatro endereços privados de outra casa, discados juntos num lote, mais a
+    // chamada pelo ponto: a má notícia chega em poucos segundos, e não na soma
+    // dos prazos de cada um. Inclui a forma mapeada, que um ponto atrás de
+    // pilha dupla devolve e que a classificação tem de canonizar.
+    let (ponto, _, _) = anotador(Responde::Calado).await;
+    for alvos in [
+        [
             "10.255.255.1:8383",
             "10.255.255.2:8383",
             "10.255.255.3:8383",
             "10.255.255.4:8383",
         ],
-    )
-    .await;
-
-    let gasto = comeco.elapsed();
-    assert!(
-        gasto < Duration::from_secs(8),
-        "quatro endereços mortos levaram {gasto:?}; o prazo curto do candidato \
-         distante não está sendo aplicado"
-    );
-}
-
-#[tokio::test]
-async fn o_aviso_se_repete_enquanto_o_aperto_de_mao_corre() {
-    let _vaga = vaga::minha();
-    // A retentativa que não existia. Um `AQUI` perdido no caminho custava a
-    // conexão inteira em silêncio: o anfitrião nunca furava, o candidato
-    // queimava os quatro segundos, e o erro que saía era o de outro endereço.
-    //
-    // Três avisos por candidato, espaçados de 700 ms, **enquanto** o aperto de
-    // mão corre — e não antes dele, que é o que os transformaria de novo em
-    // dois pacotes gastos cedo demais.
-    let Some((ponto, quando)) = ponto_que_anota().await else {
-        return;
-    };
-
-    // **Um candidato, e eram dois até o ADR 0037.**
-    //
-    // A propriedade sob teste é por candidato: as repetições **daquele** aviso,
-    // espaçadas, enquanto **aquele** aperto de mão corre. Com dois candidatos e a
-    // corrida, os três primeiros avisos vistos aqui deixam de ser as três
-    // repetições de um: são o candidato 1 em zero, o 2 na defasagem de 250 ms, e
-    // a primeira repetição do 1 em 700 ms. A janela encolhe para ~900 ms sem que
-    // nada tenha piorado — o contador é que somava candidatos diferentes.
-    //
-    // Com um candidato a medição fica sem ambiguidade sobre quem produziu qual
-    // aviso, que é o que este teste sempre quis medir.
-    //
-    // Abandonada no fim: este endereço não responde, e o que interessa acontece
-    // dentro do prazo dele.
-    let tentativa = tokio::spawn(async move {
-        let _ = tentar_convite_de_teste(ponto, &["203.0.113.7:8383"]).await;
-    });
-    tokio::time::sleep(Duration::from_millis(2500)).await;
-    tentativa.abort();
-
-    let Ok(avisos) = quando.lock() else {
-        return;
-    };
-    assert!(
-        avisos.len() >= 3,
-        "só {} aviso(s) em 2,5 s do primeiro candidato: a repetição não está \
-         correndo junto com o aperto de mão",
-        avisos.len()
-    );
-
-    // E são espaçados, não uma rajada. Três pacotes juntos no instante zero
-    // seriam os dois avisos de antes do laço com um irmão — cobertura temporal
-    // nenhuma, e a mesma corrida de sempre.
-    let (Some(primeiro), Some(terceiro)) = (avisos.first(), avisos.get(2)) else {
-        panic!("a contagem disse que havia três avisos e a lista não tem");
-    };
-    let janela = terceiro.duration_since(*primeiro);
-    assert!(
-        janela > Duration::from_millis(1000),
-        "os três avisos couberam em {janela:?}: saíram em rajada, e não \
-         espaçados enquanto o aperto de mão corria"
-    );
-}
-
-#[tokio::test]
-async fn a_repeticao_para_quando_o_candidato_acaba() {
-    let _vaga = vaga::minha();
-    // Avisar sobre um candidato que já terminou gasta furo da janela do
-    // anfitrião por um caminho que ninguém vai tentar de novo — e a janela é o
-    // que separa "quem tem o link entra" de "quem tem o link faz o servidor jorrar
-    // pacote".
-    //
-    // O que torna isto observável numa máquina só é o candidato **acabar
-    // rápido**, e não precisar conectar: com um nome TLS que o quinn recusa, a
-    // tentativa morre antes de qualquer pacote, muito antes de a repetição
-    // chegar ao segundo aviso (que sairia 700 ms depois do primeiro). Se o
-    // `abort` não acontecer, os dois avisos que faltam saem assim mesmo.
-    let Some((ponto, quando)) = ponto_que_anota().await else {
-        return;
-    };
-    let _ = tentar_convite_com_nome(ponto, &["203.0.113.7:8383"], NOME_TLS_IMPOSSIVEL).await;
-    tokio::time::sleep(Duration::from_millis(2500)).await;
-    {
-        let Ok(avisos) = quando.lock() else {
-            return;
-        };
-        assert_eq!(
-            avisos.len(),
-            1,
-            "o candidato único acabou na hora e mesmo assim saíram {} avisos: a \
-             repetição não foi abortada",
-            avisos.len()
+        [
+            "[::ffff:10.255.255.1]:8383",
+            "[::ffff:192.168.255.1]:8383",
+            "[::ffff:10.255.255.2]:8383",
+            "[::ffff:10.255.255.3]:8383",
+        ],
+    ] {
+        let alvos: Vec<String> = alvos.iter().map(|alvo| (*alvo).to_owned()).collect();
+        let comeco = Instant::now();
+        let _ = tentar(ponto, &alvos, Some(IMPRESSAO)).await;
+        let gasto = comeco.elapsed();
+        assert!(
+            gasto < Duration::from_secs(8),
+            "quatro endereços mortos ({alvos:?}) levaram {gasto:?}"
         );
     }
-
-    // E o mesmo pelo caminho do laço, que é o que roda no convite de verdade —
-    // o de cima passa pelo atalho do convite de um endereço só, e os dois têm o
-    // próprio `abort`.
-    let Some((ponto_do_laco, quando_do_laco)) = ponto_que_anota().await else {
-        return;
-    };
-    let _ = tentar_convite_com_nome(
-        ponto_do_laco,
-        &["203.0.113.7:8383", "203.0.113.8:8383"],
-        NOME_TLS_IMPOSSIVEL,
-    )
-    .await;
-    tokio::time::sleep(Duration::from_millis(2500)).await;
-    let Ok(avisos) = quando_do_laco.lock() else {
-        return;
-    };
-    assert_eq!(
-        avisos.len(),
-        2,
-        "dois candidatos que acabaram na hora deixaram {} avisos: o laço não \
-         aborta a repetição quando o candidato termina",
-        avisos.len()
-    );
 }
 
 #[tokio::test]
-async fn um_aviso_recusado_pelo_kernel_nao_derruba_o_laco() {
+async fn um_chama_recusado_pelo_kernel_nao_derruba_a_discagem() {
     let _vaga = vaga::minha();
-    // A decisão que o laço toma com o erro de `Batida::avisar`, e a única que
-    // não troca um defeito por outro: registrar e ir ao candidato seguinte.
+    // O ponto é `255.255.255.255:9`: resolver dá certo, e o envio é recusado
+    // pelo kernel na hora (o socket nunca liga `SO_BROADCAST`). A chamada
+    // desiste (`FalhaDaChamada::Mudo`) e a discagem direta continua.
     //
-    // O ponto de encontro aqui é `255.255.255.255:9`. `preparar` dá certo — é
-    // um endereço —, e o `send_to` é recusado pelo kernel na hora, sem rede
-    // nenhuma no meio: este socket nunca liga `SO_BROADCAST`, e sem essa opção
-    // o envio volta com permissão negada em BSD, Linux e Windows.
-    //
-    // # O guarda da premissa
-    //
-    // «O laço continuou» ficaria verde também se `preparar` tivesse devolvido
-    // `None`: sem batida não há aviso para falhar, e o segundo candidato seria
-    // tentado do mesmo jeito — o teste passaria sem nunca ter exercido o erro
-    // que diz cobrir.
-    //
-    // A premissa é conferida pela **porta de origem**. Com batida, todos os
-    // candidatos saem do socket dela, que é o do aviso; sem batida, cada
-    // tentativa abre um `Endpoint` próprio e sai de uma porta nova. Duas portas
-    // iguais nos dois candidatos é a prova de que a batida existia — e portanto
-    // de que houve um `avisar` para ser recusado.
-    let Some((primeiro_alvo, chegadas_no_primeiro)) = candidato_que_anota(true).await else {
-        return;
-    };
-    let Some((segundo_alvo, chegadas_no_segundo)) = candidato_que_anota(true).await else {
-        return;
-    };
-
+    // **O que este teste não prova mais**: até a 0.16 a premissa («houve um
+    // aviso para ser recusado») se conferia pela porta de origem, porque sem
+    // batida cada candidato saía de um socket novo. Desde a 0.17 há uma ponta
+    // por sessão sempre (R5), e a porta não distingue mais os dois casos. A
+    // recusa do kernel só aparece no registro (`o CHAMA não saiu`), que este
+    // teste não lê. O que fica é a metade que importa a quem entra: o
+    // candidato direto é tentado e a tentativa termina.
+    let (candidato, do_candidato, _) = anotador(Responde::Calado).await;
     let ponto = SocketAddr::from(([255, 255, 255, 255], 9));
-    let alvos = [primeiro_alvo.clone(), segundo_alvo.clone()];
-    let tentativa = tokio::spawn(async move {
-        let _ = tentar_convite_de_teste(ponto, &[alvos[0].as_str(), alvos[1].as_str()]).await;
-    });
-
-    // Folgado: o segundo candidato só é tentado depois de o primeiro queimar os
-    // quatro segundos dele.
-    let ate = Instant::now() + Duration::from_secs(20);
-    while Instant::now() < ate && primeira_chegada(&chegadas_no_segundo).is_none() {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    tentativa.abort();
-
-    let Some((_, porta_do_segundo)) = primeira_chegada(&chegadas_no_segundo) else {
-        panic!(
-            "o segundo candidato nunca foi tentado: um aviso que o kernel recusou \
-             derrubou o laço inteiro"
-        );
-    };
-    let Some((_, porta_do_primeiro)) = primeira_chegada(&chegadas_no_primeiro) else {
-        panic!("o primeiro candidato nunca foi tentado; não há premissa para conferir");
-    };
-    assert_eq!(
-        porta_do_primeiro, porta_do_segundo,
-        "os dois candidatos saíram de portas diferentes, então não havia batida \
-         nenhuma: `preparar` falhou, não houve `avisar` para o kernel recusar, e \
-         este teste não estava medindo o que diz medir"
+    let comeco = Instant::now();
+    let resultado = tokio::time::timeout(
+        Duration::from_secs(20),
+        tentar(ponto, &[mapeado(candidato)], Some(IMPRESSAO)),
+    )
+    .await;
+    assert!(
+        resultado.is_ok(),
+        "um CHAMA recusado pelo kernel prendeu a tentativa por {:?}",
+        comeco.elapsed()
+    );
+    assert!(
+        primeira_chegada(&do_candidato).is_some(),
+        "um CHAMA recusado pelo kernel derrubou a discagem direta"
     );
 }

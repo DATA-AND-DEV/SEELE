@@ -58,12 +58,6 @@ const BANCO_DA_IDENTIDADE = Object.freeze({ nome: "seele-identidade", versao: 1,
 /** O sim aos MODs de cada servidor, pela impressão (`aceitarOsMods`). */
 const CHAVE_DOS_ACEITES_DE_MODS = "seele.aceites-de-mods";
 
-/**
- * A folga do relógio desta máquina ao escolher as janelas dos certificados
- * curtos: um dia, o `ANTES` com que o servidor começa cada uma.
- */
-const FOLGA_DO_RELOGIO_S = 86_400;
-
 /** Os erros de rede: a tentativa segue, porque o convite não foi gasto. */
 const SEM_REDE = Object.freeze(["Unreachable", "UnresolvableHost", "HandshakeTimeout", "SemResposta", "LinkLost"]);
 
@@ -95,7 +89,7 @@ function tomarOLinkDaCarga() {
 
 /**
  * A entrada pela sessão do navegador: o `connect` da ponte, com o alvo inteiro
- * (o endereço, a impressão, os hashes e a chave). Até a 2.6, a ponte responde
+ * (o endereço, a impressão, o bilhete e a chave). Até a 2.6, a ponte responde
  * `AindaNaoNoNavegador`, e o `entrar` resolve `recusado` com essa razão.
  */
 function conectarPelaPonte(alvo, apelido, credencial) {
@@ -269,11 +263,6 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
   let tentativa = null;
   /** Quantas vezes a tentativa mudou: quem espera confere se ainda é a vez dele. */
   let vez = 0;
-  /**
-   * As janelas que cada servidor anunciou nesta carga, pela impressão: a
-   * entrada que grava o servidor depois as leva junto (`entrar`).
-   */
-  const janelasRecebidas = new Map();
 
   function esquecer() {
     segredos.credencial = null;
@@ -303,10 +292,10 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     return {
       estado: tentativa.estado,
       ...(tentativa.motivo ? { motivo: tentativa.motivo } : {}),
-      endereco: lido ? lido.alvo : null,
-      impressao: lido ? lido.impressao : null,
-      versaoDoServidor: lido ? lido.versao ?? null : null,
-      valeAte: lido ? lido.ate ?? null : null,
+      endereco: lido?.alvo ?? null,
+      impressao: lido?.impressao ?? null,
+      versaoDoServidor: lido?.versao ?? null,
+      valeAte: lido?.ate ?? null,
       podeInstalar: pedidoDeInstalar !== null,
       persistencia: tentativa.persistencia,
     };
@@ -319,8 +308,11 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     const resposta = analisar(texto);
     if (resposta.erro) {
       const estado =
-        resposta.erro === "OutraOrigem" ? "outra-origem" : resposta.erro === "SemHashesDoNavegador" ? "servidor-0.15" : "incompleto";
-      tentativa = { estado, motivo: estado === "incompleto" ? resposta.erro : null, lido: null, persistencia: null };
+        resposta.erro === "OutraOrigem" ? "outra-origem" : resposta.erro === "OutraLinha" ? "outra-linha" : "incompleto";
+      // Um link da 0.16 (Servidor 1) ou anterior diz a versão dele, quando a
+      // traz: a tela diz «abra a 0.16», e não «link incompleto».
+      const lido = estado === "outra-linha" ? { versao: resposta.versao ?? null } : null;
+      tentativa = { estado, motivo: estado === "incompleto" ? resposta.erro : null, lido, persistencia: null };
       return ler();
     }
     const { convite, ...lido } = resposta.link;
@@ -340,26 +332,14 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     return ler();
   }
 
-  /** Os hashes que valem: os guardados e ainda válidos têm precedência sobre os do link. */
-  function hashesQueValem() {
-    const { lido, conhecido } = tentativa;
-    if (conhecido && conhecido.ate != null && conhecido.ate * 1000 > agora()) return hashesDeAgora(conhecido);
-    return lido.hashes;
-  }
-
   /**
-   * Os hashes de um servidor guardado que servem agora: das janelas que a
-   * sessão guardou (`lembrarOsHashes`), as que já começaram e ainda não
-   * acabaram, com um dia de folga para o relógio desta máquina; sem janelas,
-   * os do link.
+   * O bilhete do encontro que vale: o do link, ou o guardado com o servidor.
+   * Na 0.17 o `fp` é a âncora inteira (o `a=fingerprint` que a página escreve,
+   * contrato da 0.17, D3), e não há hashes nem janelas a escolher.
    */
-  function hashesDeAgora(registro) {
-    if (!Array.isArray(registro.janelas) || registro.janelas.length === 0) return registro.hashes;
-    const segundos = agora() / 1000;
-    const servem = registro.janelas
-      .filter((janela) => janela.nao_antes - FOLGA_DO_RELOGIO_S <= segundos && segundos <= janela.nao_depois + FOLGA_DO_RELOGIO_S)
-      .map((janela) => janela.hash);
-    return servem.length > 0 ? servem : registro.hashes;
+  function bilheteQueVale() {
+    const { lido, conhecido } = tentativa;
+    return lido.bilhete ?? conhecido?.bilhete ?? null;
   }
 
   /** O `ConnectionError` do desktop no vocabulário da tela. */
@@ -367,8 +347,22 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     if (erro && erro.ModsNaoAceitos) {
       return { erro: "mods-a-aceitar", mods: erro.ModsNaoAceitos.mods ?? [], conjunto: erro.ModsNaoAceitos.conjunto ?? "", segue: true };
     }
+    // A falha do enlace WebRTC (`rtc-web.js`, D8): a conexão segura que não
+    // se verificou encerra a tentativa (o servidor pode não ser o do link, e
+    // insistir não muda isso); o resto é rede, e o convite não foi gasto. A
+    // frase de cada motivo está no bloco do transporte da `frases.js`.
+    if (erro && erro.FalhaDoEnlace) {
+      const { motivo } = erro.FalhaDoEnlace;
+      if (motivo === "VerificacaoDaConexaoSegura") return { erro: "verificacao-falhou", falha: motivo };
+      return { erro: "sem-rede", falha: motivo, segue: true };
+    }
     const razao = erro && erro.Refused ? erro.Refused.reason : erro;
     if (razao === "NicknameTaken") return { erro: "apelido-tomado", segue: true };
+    // **A portaria segura a entrada** (ADR 0030): a batida ficou na fila de quem
+    // hospeda, e o convite não foi gasto. A tentativa segue (a espera bate de
+    // novo pela mesma chave), e quem hospeda ainda pode recusar.
+    if (razao === "AdmissionPending") return { erro: "espera-de-admissao", segue: true, guardar: true };
+    if (razao === "AdmissionDenied") return { erro: "admissao-recusada" };
     if (SEM_REDE.includes(razao)) return { erro: "sem-rede", segue: true };
     if (razao === "CredentialRejected") {
       // O servidor responde igual a todo convite que não vale (spec 08): o
@@ -410,7 +404,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       endereco: lido.alvo,
       alternativos: lido.alternativos ?? [],
       impressao: lido.impressao,
-      hashes: hashesQueValem(),
+      bilhete: bilheteQueVale(),
       chave: tentativa.chave,
       // O veredito do desktop: o servidor que esta origem já conhecia é o
       // `Known`, e o do link, o primeiro contato conferido.
@@ -423,7 +417,27 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       resposta = await conectar(alvo, apelido, credencial);
     } catch (erro) {
       if (substituida()) return { erro: "sem-tentativa" };
-      const { segue, ...resultado } = desfecho(erro);
+      const { segue, guardar, ...resultado } = desfecho(erro);
+      // Na espera da portaria, a chave fica guardada com o servidor: quem
+      // desiste e volta pelo mesmo link (ou pela lista deste aparelho) bate com
+      // a mesma chave, e cai no mesmo pedido, em vez de entrar na fila como
+      // outra pessoa. O token não vai ao armazenamento.
+      if (guardar) {
+        await guardarOServidor({
+          impressao: lido.impressao,
+          endereco: lido.alvo,
+          alternativos: lido.alternativos ?? [],
+          bilhete: alvo.bilhete,
+          versao: lido.versao ?? null,
+          chave: esta.chave,
+          nome: esta.conhecido?.nome ?? null,
+          icone: esta.conhecido?.icone ?? null,
+          // Nunca vazio: o guardado do servidor vale se a entrada não trouxe nome.
+          apelido: esta.apelido || esta.conhecido?.apelido || null,
+          visto: agora(),
+          naPortaria: true,
+        }).catch((falha) => console.warn("identidade: a chave da espera não ficou guardada:", falha));
+      }
       if (!segue) encerrar();
       else if (resultado.erro === "mods-a-aceitar") tentativa.aguardaMods = true;
       // O `ConnectionError` do desktop vai junto: a casca larga do PC entra pelo
@@ -431,29 +445,23 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       return { ...resultado, motivo: erro };
     }
     // O servidor fica guardado a cada entrada que dá certo, com o relógio dela
-    // (`visto`, a ordem dos SERVIDORES DESTE APARELHO). Os hashes guardados são
-    // os de validade mais longa entre o guardado e o link; o nome do servidor
-    // chega depois, no primeiro retrato (`lembrarONome`). A entrada que outra
-    // tentativa substituiu também fica guardada: o servidor já conhece a chave.
-    // As janelas que a sessão já anunciou (`lembrarOsHashes`) entram junto: elas
-    // chegam logo depois da entrada, e esta gravação não pode apagá-las.
+    // (`visto`, a ordem dos SERVIDORES DESTE APARELHO), e com o bilhete que
+    // valeu. O nome do servidor chega depois, no primeiro retrato
+    // (`lembrarONome`). A entrada que outra tentativa substituiu também fica
+    // guardada: o servidor já conhece a chave. Na 0.17 não há hashes nem
+    // janelas: um registro guardado da 0.16 os perde aqui, na primeira entrada.
     const { conhecido } = esta;
-    const doLink = !conhecido || (lido.ate ?? 0) > (conhecido.ate ?? 0);
-    const janelas = janelasRecebidas.get(lido.impressao) ?? conhecido?.janelas ?? [];
-    const ateDasJanelas = janelas.length > 0 ? Math.max(...janelas.map((janela) => janela.nao_depois)) : null;
-    const ate = doLink ? lido.ate ?? null : conhecido.ate ?? null;
     await guardarOServidor({
       impressao: lido.impressao,
       endereco: lido.alvo,
       alternativos: lido.alternativos ?? [],
-      hashes: doLink ? lido.hashes : conhecido.hashes,
-      ate: ateDasJanelas === null ? ate : Math.max(ateDasJanelas, ate ?? 0),
-      janelas,
+      bilhete: alvo.bilhete,
       versao: lido.versao ?? null,
       chave: esta.chave,
       nome: conhecido ? conhecido.nome ?? null : null,
       icone: conhecido ? conhecido.icone ?? null : null,
-      apelido: esta.apelido ?? null,
+      // Nunca vazio: uma entrada sem nome não apaga o que o servidor já guardava.
+      apelido: esta.apelido || conhecido?.apelido || null,
       visto: agora(),
     });
     if (substituida()) {
@@ -476,8 +484,13 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       .catch((falha) => console.warn("identidade, soltar a entrada substituída:", falha));
   }
 
-  /** Se os hashes guardados de um servidor ainda valem. */
-  const hashesValem = (registro) => registro.ate == null || registro.ate * 1000 > agora();
+  /**
+   * Se um servidor guardado ainda se alcança pela página: na 0.17 sempre, pelo
+   * `fp` (a âncora não vence). Um registro da 0.16 (com `hashes` e sem
+   * `versao` da linha 2) é de um Servidor 1, que a página da 0.17 não alcança.
+   */
+  const daLinhaDesta = (registro) =>
+    !Array.isArray(registro.hashes) || (typeof registro.versao === "string" && !registro.versao.startsWith("1."));
 
   /** Os SERVIDORES DESTE APARELHO, do mais recente ao mais antigo. */
   async function conhecidos() {
@@ -496,16 +509,15 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
         apelido: registro.apelido ?? null,
         versaoDoServidor: registro.versao ?? null,
         visto: registro.visto ?? null,
-        podeEntrar: hashesValem(registro),
+        podeEntrar: daLinhaDesta(registro),
       }))
       .sort((a, b) => (b.visto ?? 0) - (a.visto ?? 0));
   }
 
   /**
    * Entra num servidor deste aparelho sem link: pela chave guardada, e sem
-   * convite. Resolve como o `entrar`, e com `link-vencido` quando os hashes
-   * guardados venceram sem a sessão ter trazido novos (os certificados são
-   * curtos, 2.5): a tela pede um link novo.
+   * convite. Resolve como o `entrar`, e com `outra-linha` quando o servidor
+   * guardado é de um Servidor 1 (a 0.16): a tela diz «abra a 0.16».
    */
   async function entrarNoConhecido(impressao, apelido) {
     const minha = vez;
@@ -518,15 +530,14 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     // Outro link aberto enquanto o banco respondia: a vez é dele.
     if (vez !== minha) return { erro: "sem-tentativa" };
     if (!registro) return { erro: "recusado", razao: "servidor-desconhecido" };
-    if (!hashesValem(registro)) return { erro: "link-vencido" };
+    if (!daLinhaDesta(registro)) return { erro: "outra-linha", versaoDoServidor: registro.versao ?? null };
     encerrar();
     tentativa = {
       lido: {
         alvo: registro.endereco,
         alternativos: registro.alternativos ?? [],
         impressao: registro.impressao,
-        hashes: registro.hashes,
-        ate: registro.ate ?? null,
+        bilhete: registro.bilhete ?? null,
         versao: registro.versao ?? null,
       },
       conhecido: registro,
@@ -536,7 +547,13 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       motivo: null,
       estado: "ja-conhecido",
     };
-    return entrar(apelido);
+    // **O apelido nunca vai vazio ao servidor**: ele aplica o apelido pedido à
+    // conta que volta (`registrar_ou_achar`), e vazio apagaria o nome de quem foi
+    // admitido. O digitado vale; sem ele, o que este servidor guardou. Sem nenhum
+    // dos dois a tentativa fica aberta, e a tela pede o nome no campo da «ENTRAR EM».
+    const nome = (apelido ?? "").trim() || (registro.apelido ?? "").trim();
+    if (!nome) return { erro: "pede-apelido" };
+    return entrar(nome);
   }
 
   /** O nome do servidor, que chega no primeiro retrato depois de entrar. */
@@ -567,7 +584,6 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
    */
   async function esquecerOServidor(impressao) {
     if (tentativa && tentativa.lido && tentativa.lido.impressao === impressao) encerrar();
-    janelasRecebidas.delete(impressao);
     try {
       await noBanco("readwrite", (servidores) => servidores.delete(impressao));
       return true;
@@ -577,30 +593,12 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
   }
 
   /**
-   * As janelas dos certificados curtos que o servidor anunciou depois da
-   * entrada (`HashesDoNavegador`, 2.5): guardadas com o servidor, para voltar
-   * sem link novo enquanto alguma valer. O `ate` passa a ser o fim da última.
+   * Os hashes dos certificados curtos da 0.16 (`HashesDoNavegador`) não servem
+   * à 0.17: o `fp` é a âncora inteira. Fica para a ponte que ainda chama, e não
+   * guarda nada.
    */
-  async function lembrarOsHashes(impressao, janelas) {
-    const lidas = (janelas ?? [])
-      .filter((janela) => Array.isArray(janela.hash) && janela.hash.length === 32)
-      .map((janela) => ({
-        hash: janela.hash.map((byte) => byte.toString(16).padStart(2, "0")).join(""),
-        nao_antes: Number(janela.nao_antes),
-        nao_depois: Number(janela.nao_depois),
-      }));
-    if (lidas.length === 0) return false;
-    janelasRecebidas.set(impressao, lidas);
-    let registro = null;
-    try {
-      registro = (await servidorConhecido(impressao)) ?? null;
-    } catch {
-      registro = null;
-    }
-    if (!registro) return false;
-    const ate = Math.max(...lidas.map((janela) => janela.nao_depois));
-    await guardarOServidor({ ...registro, janelas: lidas, ate: Math.max(ate, registro.ate ?? 0) });
-    return true;
+  async function lembrarOsHashes() {
+    return false;
   }
 
   /**

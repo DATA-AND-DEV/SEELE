@@ -36,8 +36,15 @@ assert.ok(tabela, "`APIS_POR_LINHA` sumiu de crates/seele-proto/src/mods.rs, ou 
 const porLinha = Object.fromEntries([...tabela[1].matchAll(/\("([^"]+)",\s*&\[([^\]]*)\]\)/g)]
   .map(([, linha, apis]) => [linha, apis.split(",").map((n) => Number(n.trim())).sort((a, b) => a - b)]));
 const legada = porLinha["0.15"];
-const desta = porLinha["1"];
-assert.ok(legada?.length > 0 && desta?.length === 1, `a leitura de \`APIS_POR_LINHA\` ficou cega: ${JSON.stringify(porLinha)}`);
+// A linha deste build é a primeira da tabela (`APIS_POR_LINHA[0]`): o "2" na
+// 0.17, e não o "1" escrito à mão, que mediria a linha errada (versao.md, aviso 4).
+// Pela ordem do texto, e não de `Object.values`: chaves como "1" e "2" são
+// índices para o JavaScript e saem em ordem numérica, não na da tabela.
+const desta = porLinha[/\("([^"]+)",/.exec(tabela[1])[1]];
+assert.equal(/\("([^"]+)",/.exec(tabela[1])[1], "2", "a primeira linha de `APIS_POR_LINHA` não é a \"2\" da 0.17");
+// A linha desta pode rodar mais de uma API (a 0.17 roda a 7 e a 6, ADR 0063);
+// as frases falam da MAIS VELHA que ela roda, que é a que separa «antiga».
+assert.ok(legada?.length > 0 && desta?.length >= 1, `a leitura de \`APIS_POR_LINHA\` ficou cega: ${JSON.stringify(porLinha)}`);
 const [menor, maior] = [legada[0], legada.at(-1)];
 assert.equal(legada.length, maior - menor + 1,
   `as APIs do Servidor 0.15 deixaram de ser seguidas (${legada}), e «as APIs ${menor} a ${maior}» não as diz`);
@@ -158,7 +165,7 @@ assert.match(banco, /continua como estava/, `a falha do banco não diz que nada 
   });
   const linha = vm.createContext({
     console, elemento: no, emBytes: (n) => `${n} B`,
-    API_DESTE_APLICATIVO: 6, APIS_QUE_ESTE_APLICATIVO_ACEITA: [6],
+    API_DESTE_APLICATIVO: 7, APIS_QUE_ESTE_APLICATIVO_ACEITA: [7, 6],
   });
   // O `frases.js` vem antes, como no `index.html`: a linha diz as APIs do
   // Servidor 0.15 pela cópia de lá.
@@ -272,7 +279,9 @@ assert.match(banco, /continua como estava/, `a falha do banco não diz que nada 
 //     9 nunca chegava a ser dita nesta rota.
 (async () => {
   const base = fs.readFileSync(path.join(__dirname, "../ui/base.js"), "utf8");
-  const i = base.indexOf("async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes) {");
+  // O terceiro parâmetro é o pedido de `carregarMods`, que diz se a resposta já
+  // ficou velha (a troca de sessão). Aqui ele não é passado: a busca é a vigente.
+  const i = base.indexOf("async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes, pedido) {");
   const j = base.indexOf("\n}\n", i);
   assert.ok(i >= 0 && j > i, "`buscarOQueFaltaSeJaFoiAceito` mudou de forma, e o recorte não a achou");
   const falha = { NaoInstalou: { NaoCopiei: "No space left on device (os error 28)" } };

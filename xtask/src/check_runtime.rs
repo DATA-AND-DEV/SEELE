@@ -100,7 +100,7 @@ use std::process::ExitCode;
 /// As bancadas, por nome e não por um laço sobre a pasta: um rascunho guardado
 /// em `bancada/` não pode passar a reprovar os três lugares que a chamam, e as
 /// de navegador moram na mesma pasta.
-const BANCADAS: [&str; 14] = [
+const BANCADAS: [&str; 17] = [
     "ciclo-do-executor.cjs",
     "ponte-web.cjs",
     "regiao-do-mod.cjs",
@@ -115,6 +115,9 @@ const BANCADAS: [&str; 14] = [
     "chaves-do-tema.cjs",
     "hospedar-com-mod-antigo.cjs",
     "aceite-dos-mods.cjs",
+    "envelope-do-invoke.cjs",
+    "fila-do-volume.cjs",
+    "registro-de-sessoes.cjs",
 ];
 
 fn raiz() -> PathBuf {
@@ -286,14 +289,49 @@ mod tests {
     /// página como a origem a serve; o carregador do Playwright; e o
     /// `telas.cjs`, que é o servidor que as de navegador usam e, rodado
     /// sozinho, uma ferramenta de retrato que não julga o que vê.
-    const NAO_SAO_BANCADA: [&str; 3] = ["cabecalhos-da-origem.cjs", "playwright.cjs", "telas.cjs"];
+    ///
+    /// E o `identidade-da-bancada.cjs`, que fixa a identidade da página nas
+    /// bancadas de navegador com `.wasm` (`cargos-no-navegador.cjs` e
+    /// `cargos-pela-tela.cjs` o importam) e não tem asserção própria.
+    const NAO_SAO_BANCADA: [&str; 4] = [
+        "cabecalhos-da-origem.cjs",
+        "identidade-da-bancada.cjs",
+        "playwright.cjs",
+        "telas.cjs",
+    ];
 
     /// As bancadas que não rodam em lugar nenhum, **de propósito e por nome**.
     ///
-    /// Vazia. Uma bancada que entra aqui é uma prova que ninguém roda, e o
-    /// nome escrito neste lugar é o que faz isso ser uma decisão e não um
-    /// esquecimento.
-    const SEM_LUGAR: [&str; 0] = [];
+    /// Uma bancada que entra aqui é uma prova que ninguém roda, e o nome
+    /// escrito neste lugar é o que faz isso ser uma decisão e não um
+    /// esquecimento. **Nenhuma das duas conta como validação executada**, nem
+    /// do transporte nem de outra coisa: rodam só à mão, e quem as roda diz
+    /// onde e com que resultado.
+    ///
+    /// - `rtc-eco-rodadas.cjs` é um **coletor estatístico**, não um gate: roda
+    ///   a `rtc-eco.cjs` 10 vezes por padrão (`--rodadas N`), engole a falha de cada rodada e
+    ///   grava a distribuição. O gate funcional é a própria `rtc-eco.cjs`, que
+    ///   já é obrigatória no job `bancadas-de-mod`.
+    /// - `rtc-rede-local.cjs` precisa de uma interface de rede **privada** de
+    ///   verdade (o pedido de rede local do navegador, LNA) e concede a
+    ///   permissão do navegador dentro da bancada. Pede um ambiente de rede
+    ///   explícito, fora do CI hermético e do loopback dos outros testes, e sai
+    ///   com 0 quando a máquina não tem endereço privado.
+    /// - `previa-ui-v2.cjs` é uma **prévia visual com dados de exemplo**: serve a
+    ///   página (e, com `--capturas`, tira capturas) e não testa nada. As provas
+    ///   da mesma UI são a `vista-pessoal-0-17.cjs` (no `ci.yml`) e o
+    ///   `frontend.rs`.
+    /// - `mods-oficiais-na-ui.cjs` roda os pacotes OFICIAIS 4.0.0 (MESA, PERFIS e
+    ///   ESTILO) na UI com um servidor real. Os pacotes moram nos repositórios
+    ///   deles, e não neste: a bancada recebe a pasta de cada um por argumento
+    ///   (`<pasta-do-mod>`), e ainda pede o `servidor_da_bancada` e os dois
+    ///   `.wasm` compilados. Roda à mão, a cada versão dos MODs.
+    const SEM_LUGAR: [&str; 4] = [
+        "rtc-eco-rodadas.cjs",
+        "rtc-rede-local.cjs",
+        "previa-ui-v2.cjs",
+        "mods-oficiais-na-ui.cjs",
+    ];
 
     /// Os jobs do `ci.yml` que rodam bancadas de navegador: o `bancadas`, de
     /// todas elas, e o `bancadas-de-mod`, da que precisa do `.wasm` do motor
@@ -382,8 +420,8 @@ mod tests {
     /// rodavam era um comentário, que nada mantinha verdadeiro. Este teste é a
     /// lista: cada `.cjs` de `bancada/` está em [`BANCADAS`] (Node puro), num
     /// `run: node apps/seele-app/bancada/<nome>` do job `bancadas` ou do
-    /// `bancadas-de-mod` do `ci.yml` (navegador), ou em [`SEM_LUGAR`], que é
-    /// vazia.
+    /// `bancadas-de-mod` do `ci.yml` (navegador), ou em [`SEM_LUGAR`], por nome
+    /// e com o motivo escrito.
     #[test]
     fn toda_bancada_da_pasta_roda_em_algum_lugar() {
         let do_job = bancadas_dos_jobs_de_navegador();

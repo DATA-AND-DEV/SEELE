@@ -683,79 +683,117 @@
 
 /* ---------- preparar o servidor ---------- */
 
-/* **Os campos chegavam encostados, medidos em 0px entre os três.**
-   `.server-campo` nasceu dentro do painel de CONFIGURAÇÕES, onde quem espaça
-   os blocos é o pai: `.server-bloco-corpo` é flex com `gap: 16px`. A
-   `.boot-caixa` é `display: block`, e reusar a classe trouxe o campo sem o pai
-   que o espaçava — o rótulo IMAGEM encostava no campo de nome, e VERSÃO QUE VAI
-   HOSPEDAR encostava no botão acima.
+/* A tela usa a área toda (o esqueleto `.area` de `base.css`): o título em cima, o conteúdo numa grade de cartões que rola na própria linha,
+   e a barra de ações (HOSPEDAR, VOLTAR e o que a operação diz) numa linha embaixo. A `.tela` não rola: quem rola é `.area-conteudo`, e a barra
+   nunca cobre nada. A `#tela-boot` (a entrada) continua como estava. */
+#tela-preparar {
+  overflow: hidden;
+}
 
-   O espaço é dado aqui e não no `.server-campo`: mexer nele mudaria o painel
-   inteiro de CONFIGURAÇÕES, que não tem defeito nenhum. As margens de bloco
-   colapsam com as do título e da nota, então o topo da tela não ganha folga
-   dupla. */
-/* **E ela rola.** O `body` é `overflow: hidden` e a `.tela` nasce
-   `overflow-y: visible`: uma tela mais alta que a janela é cortada em silêncio,
-   sem barra e sem nada que diga que há mais abaixo. A de entrada nunca chegou
-   lá; esta chega com três campos e a lista de versões — medida em 758px de
-   conteúdo contra 736px de janela, ou seja, já cortando o VOLTAR numa janela
-   de tamanho comum.
+#tela-preparar .boot-caixa.area {
+  flex: 1;
+}
 
-   `margin: auto` da `.boot-caixa` centraliza enquanto cabe. Quando não cabe,
-   `auto` em cima de um item que transborda come o topo, e é por isso que a
-   margem vira `0` acima do mínimo: melhor a caixa encostar no alto e ser
-   inteira do que ficar centrada e sem começo. */
-#tela-preparar,
-#tela-servidores,
+/* O nome e a imagem são dois cartões da mesma grade da versão; a nota que os introduz ocupa a linha inteira, com a medida de leitura. */
+#tela-preparar .preparar-do-novo {
+  display: contents;
+}
+
+#tela-preparar .area-cartao {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Os DOIS cartões (IDENTIDADE e VERSÃO) dividem a largura. A nota que abre a tela atravessa todas as colunas, e uma coluna atravessada por um item não
+   conta como vazia: com `auto-fit` a terceira coluna ficava ocupando um terço da largura. Com duas colunas explícitas a partir de 900px, os cartões
+   ocupam a área inteira; no servidor já existente (sem os campos do novo) a VERSÃO ocupa a linha toda. */
+@media (min-width: 900px) {
+  #tela-preparar .area-grade { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+#tela-preparar .area-grade:has(#preparar-do-novo[hidden]) #preparar-versoes { grid-column: 1 / -1; }
+
+/* IDENTIDADE: o nome e a imagem no mesmo cartão, lado a lado quando cabem; os controles não esticam (o campo do nome tem teto, a moldura da
+   imagem tem o tamanho dela). */
+#tela-preparar .preparar-identidade {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+#tela-preparar .preparar-identidade .server-nome-campo,
+#tela-preparar .preparar-identidade #preparar-nome {
+  max-width: 420px;
+}
+
+#tela-preparar .area-cartao .server-dispositivos {
+  max-height: none;
+}
+
+#tela-preparar .nota {
+  margin: 0;
+  max-width: var(--seele-leitura);
+}
+
+#tela-preparar .etapa,
+#tela-preparar .erro {
+  margin: 0;
+}
+
+/* ---------- a lista de servidores (HOSPEDAR) ----------
+
+   Usa a área toda (o esqueleto `.area` de `base.css`): os servidores desta máquina são uma grade de cartões que se redistribui com a largura, e
+   a barra de ações (NOVO SERVIDOR, VOLTAR) é uma linha própria. Cada cartão mantém o mesmo conteúdo e as mesmas ações de antes. */
+#tela-servidores {
+  overflow: hidden;
+}
+
+#tela-servidores .boot-caixa.area {
+  flex: 1;
+}
+
+#tela-servidores .servidores-grade {
+  margin: 20px 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+#tela-servidores .area-barra .erro { margin: 0; }
+
+/* A lista de servidores e a entrada rolam sozinhas: o `body` é `overflow: hidden` e a `.tela` nasce `overflow-y: visible`, então uma tela mais
+   alta que a janela seria cortada em silêncio, sem barra e sem nada que dissesse que há mais abaixo.
+
+   `justify-content: safe center` centraliza enquanto cabe e alinha ao topo quando não cabe. As duas linhas são uma escada, e a ordem é a
+   escada: `safe` é palavra recente do alinhamento de caixa, e um motor que não a conhece descarta a declaração INTEIRA e cairia no
+   `flex-start`; com `center` antes, ele fica com o comportamento de sempre. Este binário roda no WebKit do sistema, e o sistema de quem usa
+   não é escolha nossa. */
 #tela-boot {
   overflow-y: auto;
-  /* **Centralizada, e cortada nunca.** `safe` é a palavra inteira desta regra:
-     centraliza enquanto cabe e alinha ao topo quando não cabe, que é
-     exatamente a diferença entre as duas coisas que se quer.
-
-     A primeira tentativa foi `margin-block: 0` abaixo de 820px de altura, e
-     estava errada: ela tirava a centralização de toda janela baixa, inclusive
-     das que cabem com folga — a caixa grudava no topo sem motivo. O corte só
-     acontece quando o conteúdo passa da janela, e é só aí que a centralização
-     tem de ceder.
-
-     As duas linhas são uma escada, e a ordem é a escada. `safe` é palavra
-     recente do alinhamento de caixa: um motor que não a conhece descarta a
-     declaração **inteira** e cairia no `flex-start` — a caixa grudada no topo,
-     que é exatamente o defeito que esta regra conserta. Com `center` antes, ele
-     fica com o comportamento de sempre; quem conhece `safe` fica com o melhor.
-     Este binário roda no WebKit do sistema, e o sistema de quem usa não é
-     escolha nossa. */
   justify-content: center;
   justify-content: safe center;
 }
 
-/* O `auto` vertical da `.boot-caixa` é justamente o que come o topo quando o
-   conteúdo transborda, e é ele que `justify-content` substitui aqui. O
+/* O `auto` vertical da `.boot-caixa` é o que comeria o topo quando o conteúdo transborda, e é `justify-content` que o substitui aqui. O
    horizontal fica: centrar de lado não corta nada. */
-#tela-preparar .boot-caixa,
-#tela-servidores .boot-caixa,
 #tela-boot .boot-caixa {
   margin-block: 0;
   margin-inline: auto;
 }
 
-/* A de entrada tinha o mesmo defeito, e ele é anterior a esta tela: com os dois
-   `<details>` abertos — quem tem um DNS apontado e mais de uma versão — são
-   1074px de conteúdo. Numa janela de 560px o PERFIL e a engrenagem de
-   CONFIGURAÇÕES ficavam fora do alcance, sem barra de rolagem e sem nada
-   dizendo que havia mais embaixo. Medido, não deduzido. */
-
-#tela-preparar .server-campo,
-#tela-preparar .boot-saidas,
-#tela-servidores .server-dispositivos,
-#tela-servidores .boot-saidas {
-  margin-top: 20px;
+/* APAGAR na lista de servidores: o ato sem volta, mais discreto que o
+   HOSPEDAR ao lado. Sem vermelho (é decisão, não falha); o laranja só sob o
+   ponteiro e o foco, que é quando ele vai ser apertado. */
+.servidores-apagar {
+  color: var(--seele-rotulo-claro);
+  border-color: var(--seele-linha-forte);
 }
 
-/* O par de botões fica separado dos campos por mais que os campos entre si:
-   confirmar e voltar são a saída da tela, e não mais um campo dela. */
-#tela-preparar .boot-saidas,
-#tela-servidores .boot-saidas {
-  margin-top: 28px;
+.servidores-apagar:hover,
+.servidores-apagar:focus-visible {
+  color: var(--seele-laranja-nerv);
+  border-color: var(--seele-laranja-nerv);
 }

@@ -35,6 +35,12 @@ pub fn refusal_name(why: &Refused) -> &'static str {
         Refused::TemaSemMetadeDeServidor => "tema-sem-metade-de-servidor",
         Refused::ArquivoInvalido { .. } => "arquivo-invalido",
         Refused::ArquivosDemais { .. } => "arquivos-demais",
+        // Os de cargos (E6, agente F): a frase é do `ui/frases.js`.
+        Refused::PermissoesPedemApiNova { .. } => "permissoes-pedem-api-nova",
+        Refused::PermissoesInvalidas(_) => "permissoes-invalidas",
+        // Os tetos do `reach` no anúncio da linha 2, conferidos na instalação.
+        Refused::AlcancesDemais { .. } => "alcances-demais",
+        Refused::AlcanceGrandeDemais { .. } => "alcance-grande-demais",
     }
 }
 

@@ -2,7 +2,25 @@
 
 ## Camadas
 
-Uma conexão QUIC carrega três coisas:
+**Desde a 0.17 (linha 2, ADR 0063), a conexão é WebRTC**, e as três coisas abaixo viajam em canais de dados:
+
+| Canal | No WebRTC | Conteúdo |
+|---|---|---|
+| Controle | canal `ctl` (id 0, negociado, ordenado e confiável) | Handshake, estado, presença, comandos |
+| Texto e fluxos | canais `u` (unidirecional) e `b` (bidirecional), abertos por DCEP com `protocol = "seele/2"` | Anexos, tela, volume e imagens de MOD |
+| Mídia | canal `voz` (id 1, negociado, sem ordem e sem retransmissão) | Os datagramas de voz de sempre, uma mensagem cada, até 1100 B |
+
+- **O envelope.** Todo canal menos a `voz` leva `tag(1) ‖ corpo`. As tags são:
+  - `0x00` dados, até 16384 B;
+  - `0x01` fim;
+  - `0x02` corte, com um código u32;
+  - `0x03` apresentação, só como a primeira mensagem do anfitrião no `ctl`.
+- **Por cima do envelope, o fio é o mesmo**: o enquadramento, o byte 0 de versão, as duas listas e a recusa.
+- Os tetos e os tempos do enlace estão nas constantes de `seele_enlace` (o `lib.rs` e o `envelope.rs` dele). A medida do spike está em `docs/evidencias/spike-webrtc-0.17.md`.
+
+A tabela abaixo é a da linha 1 (até a 0.16).
+
+Até a 0.16, uma conexão QUIC carregava três coisas:
 
 | Canal | Tipo QUIC | Conteúdo |
 |---|---|---|
@@ -27,11 +45,24 @@ Primeiro byte de todo frame de controle é a versão do protocolo. Servidor recu
 
 **Desde o Servidor 1.0 (protocolo 9)**, a faixa mínima–máxima vai no `Hello`, os dois lados falam o menor dos máximos, e a recusa por versão é `[carimbo, 11, 0]`: ver o ADR 0058 e `docs/superpowers/specs/2026-10-08-0.16-adendo-negociacao-de-versao.md`.
 
+**Desde o Servidor 2.0 (protocolo 10, a 0.17)**, a faixa desta build é `[10, 10]`, e a linha 1 inteira (o 9) fica de fora: ADR 0063.
+- Não há transporte em comum com a 0.16, então uma 0.16 nunca chega a mandar um `Hello` a uma 0.17.
+- As duas pontas ficam sabendo antes de discar: pelo `v=2.0` do link, pela magia do ENC/3 e pelo launcher.
+- Dentro da linha 2, a recusa continua `[carimbo, 11, 0]`, no `ctl`.
+
 ## Handshake
+
+Na linha 2, as duas primeiras setas abaixo são:
+1. o ICE: quem liga é o controlling, e o anfitrião é ICE-lite;
+2. o DTLS: o anfitrião é passivo, e quem liga confere a impressão do certificado do anfitrião contra o `fp=` ou contra o pino **antes** do `Hello`;
+3. a abertura dos canais `ctl` e `voz`;
+4. a apresentação `0x03` do anfitrião no `ctl`.
+
+A prova do cliente passa a amarrar também a impressão DTLS dele (ver `08`).
 
 ```
 Cliente                                Servidor
-   │── QUIC ClientHello ──────────────────▶│   (TLS 1.3)
+   │── QUIC ClientHello ──────────────────▶│   (TLS 1.3; na linha 2, ICE + DTLS)
    │◀───────────────── ServerHello ────────│
    │── Ola { versao, cliente, apelido } ──▶│
    │◀── Desafio { nonce } ─────────────────│
@@ -95,7 +126,7 @@ Timeout de handshake: 10 s. Falha → `PadraoAzulNaoEstabelecido` com motivo esp
 
 ## Frames de mídia (datagram)
 
-Datagram QUIC tem entrega não confiável e sem ordem, que é exatamente o desejado para voz. Estrutura:
+O canal `voz` do WebRTC (desde a 0.17, ADR 0063; até a 0.16 era o datagram QUIC) tem entrega não confiável e sem ordem (`ordered: false`, `maxRetransmits: 0`), que é exatamente o desejado para voz. Uma mensagem é um datagrama, de até 1100 B, sem envelope. A mensagem de 1 byte `0x00` é o keepalive do enlace, e nunca chega à voz. Estrutura:
 
 ```
 ┌─────────┬──────────┬────────────┬─────────┬──────────────┐
@@ -128,7 +159,8 @@ Suavizada com média móvel exponencial (α ≈ 0,2) para não piscar. Faixas: �
 ## Keepalive e queda
 
 - `Ping` a cada 5 s. Três perdidos consecutivos → estado `Reconectando`.
-- QUIC tenta migração de conexão automaticamente.
+- Desde a 0.17 não há migração de conexão: o WebRTC não a tem. Uma troca de rede derruba o ICE, e a bateria interna abaixo reconecta com um aperto de mão novo. Até a 0.16, o QUIC tentava a migração sozinho.
+- O enlace tem tempos próprios, que não dependem do consentimento ICE: ocioso de 20 s, keepalive de 5 s pela voz e aperto de mão de 10 s.
 - Cliente mantém a sessão viva localmente por **5 minutos** (a "bateria interna") com backoff exponencial de reconexão. O servidor guarda o slot pelo mesmo período.
 - Após 5 min: sessão encerrada, histórico preservado.
 
@@ -144,6 +176,7 @@ Suavizada com média móvel exponencial (α ≈ 0,2) para não piscar. Faixas: �
   teto de corpo é 4 KiB e continua sendo (`MAX_BODY_LEN`); "sem anexos em v1"
   deixou de valer. **O servidor guarda anexo, com teto total fixo, e ao encher o
   mais velho sai** — 1 GiB por padrão, escolhido por quem hospeda com `seeled
-  anexos`. Cada transferência abre um fluxo QUIC unidirecional próprio e nunca
-  o de controle; a resposta volta pelo controle como razão enumerada. Ver
+  anexos`. Cada transferência abre um fluxo unidirecional próprio (desde a
+  0.17, um canal `u` do WebRTC; até a 0.16, um fluxo QUIC) e nunca o de
+  controle; a resposta volta pelo controle como razão enumerada. Ver
   `docs/adr/0027-anexos-com-teto-e-o-mais-velho-sai.md`.

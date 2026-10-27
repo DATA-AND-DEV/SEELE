@@ -18,12 +18,22 @@
 //! Uma linha por código, campos separados por tabulação:
 //!
 //! ```text
-//! K9P2-CSM7-NBFR-AYQ3 <TAB> Rafa <TAB> rafa <TAB> 1738000000 <TAB> recebi <TAB> 0
+//! K9P2-CSM7-NBFR-AYQ3 <TAB> Rafa <TAB> rafa <TAB> 1738000000 <TAB> recebi <TAB> 0 <TAB> 1
 //! ```
 //!
-//! código, o nome que eu dei, o apelido visto, a última ligação, a direção e o
-//! bloqueio. Texto, porque alguém vai querer editar à mão. Colunas novas vão
-//! sempre no fim.
+//! código, o nome que eu dei, o apelido visto, a última ligação, a direção, o
+//! bloqueio e, desde a 0.17, se é amigo. Texto, porque alguém vai querer
+//! editar à mão. Colunas novas vão sempre no fim: uma linha de antes de uma
+//! coluna a lê vazia (a de amigo, como `false`).
+//!
+//! # Amigos
+//!
+//! **Só a pessoa faz um amigo** ([`Agenda::adicionar_amigo`]). Uma ligação
+//! ([`Agenda::anotar_ligacao`]), perdida, recebida ou feita, nunca marca nem
+//! desmarca, e nunca troca o nome que eu dei. Tirar dos amigos
+//! ([`Agenda::tirar_dos_amigos`]) só desmarca: a linha, o nome, o histórico e
+//! o bloqueio ficam, e o pin `@CÓDIGO` do arquivo de conhecidos, que é o que
+//! prova quem a pessoa é, não é tocado por nada daqui.
 
 use std::path::{Path, PathBuf};
 
@@ -75,6 +85,8 @@ pub struct Contato {
     pub direcao: Option<Direcao>,
     /// Se as ligações dela são recusadas sem tocar.
     pub bloqueado: bool,
+    /// Se eu a pus na lista de amigos. Só a pessoa marca: uma ligação não.
+    pub amigo: bool,
 }
 
 /// A agenda, em disco.
@@ -156,6 +168,37 @@ impl Agenda {
         self.mudar(codigo, |contato| contato.bloqueado = bloqueado)
     }
 
+    /// Põe na lista de amigos, e grava o nome que veio. Um nome vazio mantém
+    /// o que já havia. Quem nunca ligou ganha a linha.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser gravado.
+    pub fn adicionar_amigo(&mut self, codigo: Codigo, nome: &str) -> Result<()> {
+        let nome = Some(limpo(nome)).filter(|n| !n.is_empty());
+        self.mudar(codigo, |contato| {
+            contato.amigo = true;
+            if nome.is_some() {
+                contato.nome = nome;
+            }
+        })
+    }
+
+    /// Tira da lista de amigos, e **só** isso: a linha, o nome, o apelido, o
+    /// histórico e o bloqueio ficam.
+    ///
+    /// # Errors
+    ///
+    /// Falha se o arquivo não puder ser gravado.
+    pub fn tirar_dos_amigos(&mut self, codigo: Codigo) -> Result<()> {
+        self.mudar(codigo, |contato| contato.amigo = false)
+    }
+
+    /// Os amigos, na ordem do arquivo.
+    pub fn amigos(&self) -> impl Iterator<Item = &Contato> {
+        self.contatos.iter().filter(|contato| contato.amigo)
+    }
+
     /// Os códigos bloqueados: a lista que a campainha da sala lê.
     #[must_use]
     pub fn bloqueados(&self) -> Vec<Codigo> {
@@ -189,6 +232,7 @@ impl Agenda {
                     visto_em: None,
                     direcao: None,
                     bloqueado: false,
+                    amigo: false,
                 };
                 mudanca(&mut novo);
                 contatos.push(novo);
@@ -224,13 +268,14 @@ fn gravar(caminho: &Path, contatos: &[Contato]) -> Result<()> {
         .iter()
         .map(|c| {
             format!(
-                "{}\t{}\t{}\t{}\t{}\t{}\n",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                 c.codigo,
                 c.nome.as_deref().unwrap_or(""),
                 c.apelido.as_deref().unwrap_or(""),
                 c.visto_em.map_or_else(String::new, |v| v.to_string()),
                 c.direcao.map_or("", Direcao::texto),
                 u8::from(c.bloqueado),
+                u8::from(c.amigo),
             )
         })
         .collect();
@@ -247,6 +292,8 @@ fn ler_linha(linha: &str) -> Option<Contato> {
     let visto_em = campos.next().and_then(|v| v.parse().ok());
     let direcao = campos.next().and_then(Direcao::ler);
     let bloqueado = campos.next() == Some("1");
+    // A coluna da 0.17: uma linha de antes dela não tem o campo, e não é amigo.
+    let amigo = campos.next() == Some("1");
     Some(Contato {
         codigo,
         nome,
@@ -254,6 +301,7 @@ fn ler_linha(linha: &str) -> Option<Contato> {
         visto_em,
         direcao,
         bloqueado,
+        amigo,
     })
 }
 
@@ -305,6 +353,7 @@ mod tests {
                 visto_em: Some(1_738_000_000),
                 direcao: Some(Direcao::Recebi),
                 bloqueado: false,
+                amigo: false,
             }),
             "a ligação anotada não sobreviveu ao reabrir"
         );
@@ -397,6 +446,139 @@ mod tests {
         assert!(
             de_novo.bloqueados().is_empty(),
             "desbloquear não tirou da lista"
+        );
+    }
+
+    /// **A lista de amigos** (0.17): adicionar marca, grava o nome que veio e
+    /// sobrevive ao reabrir; um nome vazio não apaga o que eu já tinha dado.
+    #[test]
+    fn adicionar_um_amigo_persiste_e_um_nome_vazio_nao_apaga_o_nome() {
+        let caminho = nova("amigo-adicionar");
+        let mut agenda = Agenda::abrir(caminho.clone()).unwrap();
+        agenda.adicionar_amigo(codigo(2), "Rafa").unwrap();
+        agenda.dar_nome(codigo(3), "Bia").unwrap();
+        agenda.adicionar_amigo(codigo(3), "  ").unwrap();
+
+        let de_novo = Agenda::abrir(caminho).unwrap();
+        let rafa = de_novo
+            .buscar(&codigo(2))
+            .expect("o amigo novo não criou a linha");
+        assert!(
+            rafa.amigo,
+            "o amigo adicionado não voltou como amigo ao reabrir"
+        );
+        assert_eq!(rafa.nome.as_deref(), Some("Rafa"));
+        let bia = de_novo.buscar(&codigo(3)).unwrap();
+        assert!(bia.amigo);
+        assert_eq!(
+            bia.nome.as_deref(),
+            Some("Bia"),
+            "adicionar com o nome vazio apagou o nome que eu tinha dado"
+        );
+        assert_eq!(
+            de_novo.amigos().map(|c| c.codigo).collect::<Vec<_>>(),
+            vec![codigo(2), codigo(3)]
+        );
+    }
+
+    /// **Tirar dos amigos só desmarca**: o nome, o apelido, o histórico e o
+    /// bloqueio ficam, e o arquivo de pins ao lado nem é aberto.
+    #[test]
+    fn tirar_dos_amigos_so_desmarca_e_nao_toca_no_resto_nem_nos_pins() {
+        let caminho = nova("amigo-tirar");
+        std::fs::create_dir_all(caminho.parent().unwrap()).unwrap();
+        let pins = caminho.with_file_name("pins");
+        let pin = format!("@{}\tabc\n", codigo(2));
+        std::fs::write(&pins, &pin).unwrap();
+        let mut agenda = Agenda::abrir(caminho.clone()).unwrap();
+        agenda
+            .anotar_ligacao(codigo(2), "rafa", Direcao::Recebi, 1_738_000_000)
+            .unwrap();
+        agenda.adicionar_amigo(codigo(2), "Rafa").unwrap();
+        agenda.bloquear(codigo(2), true).unwrap();
+
+        agenda.tirar_dos_amigos(codigo(2)).unwrap();
+
+        let de_novo = Agenda::abrir(caminho).unwrap();
+        assert_eq!(
+            de_novo.buscar(&codigo(2)),
+            Some(&Contato {
+                codigo: codigo(2),
+                nome: Some("Rafa".into()),
+                apelido: Some("rafa".into()),
+                visto_em: Some(1_738_000_000),
+                direcao: Some(Direcao::Recebi),
+                bloqueado: true,
+                amigo: false,
+            }),
+            "tirar dos amigos levou junto o nome, o histórico ou o bloqueio"
+        );
+        assert_eq!(de_novo.amigos().count(), 0);
+        assert_eq!(
+            std::fs::read_to_string(&pins).unwrap(),
+            pin,
+            "tirar dos amigos mexeu no arquivo de pins"
+        );
+    }
+
+    /// **Uma ligação nunca faz amigo**: a perdida e a recebida de quem não é
+    /// amigo continuam não sendo, e a de um amigo não tira a amizade nem o
+    /// nome que eu dei.
+    #[test]
+    fn uma_ligacao_nao_marca_nem_desmarca_amigo_nem_troca_o_nome() {
+        let caminho = nova("amigo-ligacao");
+        let mut agenda = Agenda::abrir(caminho.clone()).unwrap();
+        agenda
+            .anotar_ligacao(codigo(4), "estranho", Direcao::Perdida, 1)
+            .unwrap();
+        agenda
+            .anotar_ligacao(codigo(5), "conhecido", Direcao::Recebi, 2)
+            .unwrap();
+        agenda.adicionar_amigo(codigo(6), "Caio").unwrap();
+        agenda
+            .anotar_ligacao(codigo(6), "outro nome", Direcao::Liguei, 3)
+            .unwrap();
+
+        let de_novo = Agenda::abrir(caminho).unwrap();
+        assert!(
+            !de_novo.buscar(&codigo(4)).unwrap().amigo,
+            "uma chamada perdida virou amigo"
+        );
+        assert!(
+            !de_novo.buscar(&codigo(5)).unwrap().amigo,
+            "uma ligação recebida virou amigo"
+        );
+        let caio = de_novo.buscar(&codigo(6)).unwrap();
+        assert!(caio.amigo, "uma ligação tirou a amizade");
+        assert_eq!(caio.nome.as_deref(), Some("Caio"));
+    }
+
+    /// **Uma linha de antes da coluna** (as seis colunas da 0.16) lê como
+    /// amigo=false, e gravar de novo preserva tudo e acrescenta a coluna no fim.
+    #[test]
+    fn uma_linha_antiga_sem_a_coluna_le_como_nao_amigo_e_o_round_trip_preserva() {
+        let caminho = nova("amigo-antiga");
+        std::fs::create_dir_all(caminho.parent().unwrap()).unwrap();
+        let antiga = format!("{}\tRafa\trafa\t1738000000\trecebi\t1\n", codigo(2));
+        std::fs::write(&caminho, &antiga).unwrap();
+
+        let mut agenda = Agenda::abrir(caminho.clone()).unwrap();
+        let rafa = agenda.buscar(&codigo(2)).unwrap().clone();
+        assert!(!rafa.amigo, "a linha antiga, sem a coluna, leu como amigo");
+        assert!(rafa.bloqueado);
+
+        agenda.dar_nome(codigo(3), "Bia").unwrap();
+        let gravado = std::fs::read_to_string(&caminho).unwrap();
+        assert!(
+            gravado.starts_with(&format!(
+                "{}\tRafa\trafa\t1738000000\trecebi\t1\t0\n",
+                codigo(2)
+            )),
+            "a coluna nova não foi no fim, ou a linha antiga mudou: {gravado:?}"
+        );
+        assert_eq!(
+            Agenda::abrir(caminho).unwrap().buscar(&codigo(2)),
+            Some(&rafa)
         );
     }
 

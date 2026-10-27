@@ -26,9 +26,19 @@
 // que funciona numa máquina só é o que fez o defeito durar: nela tudo passa, e a
 // bancada parece coberta.
 
+/** O `webkit` do Playwright, pela mesma escolha do [`chromium`]. */
+function webkit() {
+  const daLinha = process.argv.find((argumento) => argumento.startsWith("--playwright="))?.slice("--playwright=".length);
+  const escolhido = daLinha || process.env.PLAYWRIGHT;
+  return require(escolhido || "playwright").webkit;
+}
+
 /** O `chromium` do Playwright, ou um erro que diz como consegui-lo. */
 function chromium() {
-  const escolhido = process.env.PLAYWRIGHT;
+  // Também pela linha de comando (`--playwright=<caminho>`), para quem não
+  // pode pôr variável de ambiente na frente do comando.
+  const daLinha = process.argv.find((argumento) => argumento.startsWith("--playwright="))?.slice("--playwright=".length);
+  const escolhido = daLinha || process.env.PLAYWRIGHT;
   if (escolhido) {
     return require(escolhido).chromium;
   }
@@ -46,4 +56,4 @@ function chromium() {
   }
 }
 
-module.exports = { chromium };
+module.exports = { chromium, webkit };

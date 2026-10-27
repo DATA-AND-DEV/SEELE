@@ -1,0 +1,1 @@
+globalThis.aoPedir = (contextoJSON) => { const contexto = JSON.parse(contextoJSON); const guardado = dados['perfil:' + contexto.person]; return JSON.stringify({ ok: true, versao: '4.0.0', perfil: guardado ?? null }); };

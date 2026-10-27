@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "seele/perfis",
+  "version": "3.3.1",
+  "api": 5,
+  "repo": "https://github.com/DATA-AND-DEV/SEELE-MOD-PERFIS",
+  "reach": [
+    "perfil de cada pessoa"
+  ],
+  "server": "servidor/main.js"
+}

@@ -429,14 +429,19 @@ async function dizerOQueAPrimeiraAberturaFez() {
   const dados = estado?.dados;
   if (!dados || typeof dados !== "object") return;
   const nota = $("boot-linha-legada");
+  // **Qual versão anterior**: desde a 0.17 a cópia pode ser da 0.16, para o
+  // Servidor 1.0 (`Guardados.linha`, do compat). Sem o campo, é a 0.15, como
+  // a 0.16 escrevia.
+  const linha = dados.Guardados?.linha ?? dados.NaoGuardei?.linha ?? dados.BancoJaMigrado?.linha ?? "0.15";
+  const [app, servidor] = linha === "1" ? ["0.16", "1.0"] : ["0.15", "0.15"];
   if ("Guardados" in dados) {
     nota.textContent =
-      "As conversas da 0.15 ficaram guardadas para o Servidor 0.15. O que você " +
+      `As conversas da ${app} ficaram guardadas para o Servidor ${servidor}. O que você ` +
       "escrever nesta versão não aparece lá, e o que estiver lá não aparece aqui.";
     nota.hidden = false;
   } else if ("BancoJaMigrado" in dados || "NaoGuardei" in dados) {
     nota.textContent =
-      "Não deu para guardar as conversas da 0.15 para o Servidor 0.15: ele vai " +
+      `Não deu para guardar as conversas da ${app} para o Servidor ${servidor}: ele vai ` +
       "abrir vazio. As conversas continuam aqui, nesta versão.";
     nota.hidden = false;
   }

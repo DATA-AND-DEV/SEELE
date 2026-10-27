@@ -138,16 +138,32 @@ use thiserror::Error;
 /// posição e um campo novo não pode chegar numa 1.x.
 ///
 /// Daqui em diante este número é **o maior que a build fala**, e não o único.
-/// Uma 1.1 sobe para 10 e continua falando o 9 ([`VERSAO_MINIMA`]); um conserto
-/// não sobe nada. A regra é o ADR 0058, e a linha de cada número é a tabela de
-/// [`linha_de`].
-pub const PROTOCOL_VERSION: u8 = 9;
+/// Um conserto não sobe nada. A regra é o ADR 0058, e a linha de cada número é
+/// a tabela de [`linha_de`].
+///
+/// **10 desde 24/10/2026: o Servidor 2.0, a linha 2** (ADR 0063).
+///
+/// A 0.17 troca o transporte: o QUIC sai e entra o WebRTC, nos nativos e no
+/// navegador. Não é acréscimo, e o ADR 0058 (`:41`) diz o que é uma mudança
+/// que não é acréscimo: a 2.0. A linha 1 fica de pé pelo launcher (ADR 0046),
+/// e **não recebe versão nova**: o 9 é o único número dela, e a linha 2
+/// começa no 10 ([`PRIMEIRO_DA_LINHA_DOIS`]). A linha 1 inteira fica fora da
+/// faixa desta build, e um par dela não chega nem a mandar um `Hello`, porque
+/// não há transporte em comum — o ADR 0063 diz como as duas pontas ficam
+/// sabendo disso antes de tentar.
+pub const PROTOCOL_VERSION: u8 = 10;
 
-/// O primeiro número da linha 1. **Congelado**: toda 1.x o fala (ADR 0058).
+/// O primeiro número da linha 1. **Congelado** (ADR 0058), e desde a linha 2 o
+/// único número dela: a linha 1 não recebe versão nova (ADR 0063).
 pub const PRIMEIRO_DA_LINHA_UM: u8 = 9;
 
-/// O menor número que esta build fala. Na linha 1, sempre
-/// [`PRIMEIRO_DA_LINHA_UM`].
+/// O primeiro número da linha 2. **Congelado**: toda 2.x o fala (ADR 0063,
+/// pela regra do ADR 0058).
+pub const PRIMEIRO_DA_LINHA_DOIS: u8 = 10;
+
+/// O menor número que esta build fala: o primeiro número da linha dela. Na
+/// linha 1 era [`PRIMEIRO_DA_LINHA_UM`]; na linha 2, sempre
+/// [`PRIMEIRO_DA_LINHA_DOIS`], e é isso que deixa o 9 de fora.
 ///
 /// # A janela N−1, que esta constante substitui
 ///
@@ -194,8 +210,8 @@ pub const PRIMEIRO_DA_LINHA_UM: u8 = 9;
 /// global: depois do `Hello`, cada lado carimba com o número negociado
 /// (`control::encode_em`), e o par mais velho lê. E o piso deixa de deslizar:
 /// toda 1.x fala o 9, então uma 1.0 conversa com qualquer 1.x, nos dois
-/// sentidos.
-pub const VERSAO_MINIMA: u8 = PRIMEIRO_DA_LINHA_UM;
+/// sentidos. Da linha 2 em diante, toda 2.x fala o 10, pela mesma regra.
+pub const VERSAO_MINIMA: u8 = PRIMEIRO_DA_LINHA_DOIS;
 
 /// Os números que um lado fala, do menor ao maior. Viaja no `Hello`.
 ///
@@ -239,24 +255,32 @@ pub const fn oldest_supported_version() -> u8 {
 ///
 /// Duas numerações desde a 0.16 (spec-mestre, §1): a do app, que o atualizador
 /// oferece, e a do servidor, que é o protocolo e a API de MODs. O app 0.16 sai
-/// falando o **Servidor 1.0**, e um conserto do `seeled` não muda este nome.
+/// falando o **Servidor 1.0**, e a 0.17 o **Servidor 2.0** (ADR 0063). Um
+/// conserto do `seeled` não muda este nome.
 ///
-/// **A forma desta linha é contrato:** o `empacotar/manifesto.py` a lê por
-/// expressão regular. Preso em `a_versao_do_servidor_e_a_que_a_0_16_fala`.
-pub const VERSAO_DO_SERVIDOR: &str = "1.0";
+/// **A forma desta linha é contrato:** o `empacotar/manifesto.py` e o
+/// `tools/carga-da-casca.py` a leem por expressão regular. Preso em
+/// `a_versao_do_servidor_e_a_que_a_0_17_fala`.
+pub const VERSAO_DO_SERVIDOR: &str = "2.0";
 
 /// A linha de servidor de um número do fio, com o nome que o launcher usa:
-/// `"0.15"` para o 8 e `"1"` do 9 em diante.
+/// `"0.15"` para o 8, `"1"` para o 9 e `"2"` do 10 em diante.
 ///
 /// **Congelada:** um número nunca troca de linha. As linhas de antes da 0.15
 /// (números 1 a 7) não são oferecidas pelo launcher, e por isso não têm nome.
-/// Uma linha 2, quando existir, entra aqui com o primeiro número dela; até lá,
-/// «9 em diante é a linha 1» é a regra decidida em 08/10/2026.
+///
+/// Até 24/10/2026 a regra era «9 em diante é a linha 1», decidida em
+/// 08/10/2026. Nenhum número acima de 9 foi publicado nela, e a linha 1 não
+/// recebe versão nova (ADR 0063): é por isso que o 10 pôde entrar como o
+/// primeiro da linha 2 sem que número nenhum trocasse de linha em campo. Uma
+/// 0.16 lê um 10 como `Posterior` pelo `linha_de` dela, e nunca pede este
+/// nome para ele (`seele-ffi`, `ConnectionError::OutraLinha`).
 #[must_use]
 pub const fn linha_do_protocolo(numero: u8) -> Option<&'static str> {
     match numero {
         8 => Some("0.15"),
-        9..=u8::MAX => Some("1"),
+        9 => Some("1"),
+        10..=u8::MAX => Some("2"),
         _ => None,
     }
 }
@@ -367,17 +391,34 @@ pub enum Linha {
         /// O número.
         numero: u8,
     },
-    /// O Servidor 1.x: do 9 até o máximo desta build.
+    /// O Servidor 1.x: só o 9. A linha 1 não recebe versão nova (ADR 0063), e
+    /// para esta build ela é anterior, como a [`Linha::AntesDaUm`]: o launcher
+    /// a abre ao lado, e nenhum quadro desta build a alcança.
     Um,
+    /// O Servidor 2.x: do 10 até o máximo desta build.
+    Dois,
     /// Acima do que esta build fala.
     ///
-    /// Como toda 1.x fala o 9, um par que **recusa** o 9 é de uma linha
-    /// posterior à 1. O nome dela quem sabe é o manifesto do launcher, e não
+    /// Como toda 2.x fala o 10, um par que **recusa** o 10 é de uma linha
+    /// posterior à 2. O nome dela quem sabe é o manifesto do launcher, e não
     /// esta build.
     Posterior {
         /// O número.
         numero: u8,
     },
+}
+
+impl Linha {
+    /// Se é uma linha anterior à desta build: uma que o launcher abre ao lado,
+    /// pelo nome de [`linha_do_protocolo`], e não esta.
+    ///
+    /// É o que a casca pergunta para decidir entre «abra a versão antiga» e
+    /// «atualize»: até a 0.16 só a [`Linha::AntesDaUm`] era anterior; da
+    /// linha 2 em diante, a [`Linha::Um`] também é.
+    #[must_use]
+    pub const fn e_anterior(self) -> bool {
+        matches!(self, Self::AntesDaUm { .. } | Self::Um)
+    }
 }
 
 /// A linha de `numero`, ou `None` para o 0, que nenhuma build escreveu.
@@ -386,7 +427,8 @@ pub const fn linha_de(numero: u8) -> Option<Linha> {
     match numero {
         0 => None,
         n if n < PRIMEIRO_DA_LINHA_UM => Some(Linha::AntesDaUm { numero: n }),
-        n if n <= PROTOCOL_VERSION => Some(Linha::Um),
+        n if n < PRIMEIRO_DA_LINHA_DOIS => Some(Linha::Um),
+        n if n <= PROTOCOL_VERSION => Some(Linha::Dois),
         n => Some(Linha::Posterior { numero: n }),
     }
 }
@@ -396,42 +438,63 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    /// **O Servidor 1.0 fala só o 9, e a 0.15 fica de fora.**
+    /// **O Servidor 2.0 fala só o 10, e a 0.16 fica de fora.**
     ///
-    /// É a quebra decidida em 08/10/2026 (spec-mestre da 0.16, §1): a última,
-    /// porque daqui em diante a linha 1 não quebra mais (ADR 0058). A 0.15
-    /// fala 8, e o 8 é de antes da 1.0.
+    /// É a quebra decidida em 24/10/2026 (ADR 0063): o transporte trocou, e a
+    /// linha 1 inteira — o 9 — fica fora da faixa. A 0.15 (8) continua fora.
     ///
-    /// Este teste substituiu `a_versao_anterior_continua_dentro_da_janela`,
-    /// que prendia a janela N−1. A janela valia só para quem ouvia — o carimbo
-    /// global derrubava quem falava —, e a faixa no `Hello` é o que a troca.
+    /// Substituiu `o_servidor_1_0_fala_so_o_9_e_a_0_15_fica_de_fora`, que
+    /// prendia a 1.0. Reverter `VERSAO_MINIMA` para o 9 reprova o segundo
+    /// `assert!` abaixo.
     #[test]
-    fn o_servidor_1_0_fala_so_o_9_e_a_0_15_fica_de_fora() {
-        assert_eq!(PROTOCOL_VERSION, 9);
-        assert_eq!(VERSAO_MINIMA, 9);
+    fn o_servidor_2_0_fala_so_o_10_e_a_0_16_fica_de_fora() {
+        assert_eq!(PROTOCOL_VERSION, 10);
+        assert_eq!(VERSAO_MINIMA, 10);
         assert!(
             confere_o_carimbo(8).is_err(),
             "a 0.15 foi aceita, e o decidido é que ela fique de fora"
         );
-        assert!(confere_o_carimbo(9).is_ok());
         assert!(
-            confere_o_carimbo(10).is_err(),
+            confere_o_carimbo(9).is_err(),
+            "a 0.16 foi aceita pelo carimbo, e a linha 2 não fala o 9 (ADR 0063)"
+        );
+        assert!(confere_o_carimbo(10).is_ok());
+        assert!(
+            confere_o_carimbo(11).is_err(),
             "um par do futuro foi aceito pelo carimbo"
         );
         assert_eq!(oldest_supported_version(), VERSAO_MINIMA);
+        assert!(
+            negociar(Faixa {
+                minima: 9,
+                maxima: 9
+            })
+            .is_err(),
+            "a faixa da 0.16 negociou com esta build"
+        );
     }
 
-    /// **Toda 1.x fala o primeiro número da linha.** É a frase do ADR 0058 em
-    /// uma linha de código: uma 1.x que largue o 9 deixa de conversar com a
-    /// 1.0 publicada, e isso é quebrar o fio.
+    /// **A linha 1 não recebe versão nova** (ADR 0063): o 9 é o único número
+    /// dela, e o primeiro da linha 2 vem logo depois. Uma constante que
+    /// deixasse um buraco entre as duas linhas daria um número sem linha.
     #[test]
-    fn toda_1x_fala_o_primeiro_numero_da_linha() {
+    fn a_linha_1_e_so_o_9_e_a_linha_2_vem_logo_depois() {
+        assert_eq!(PRIMEIRO_DA_LINHA_UM, 9, "congelado pelo ADR 0058");
+        assert_eq!(PRIMEIRO_DA_LINHA_DOIS, PRIMEIRO_DA_LINHA_UM + 1);
+        assert_eq!(linha_de(9), Some(Linha::Um));
+        assert_eq!(linha_de(10), Some(Linha::Dois));
+    }
+
+    /// **Toda 2.x fala o primeiro número da linha.** A frase do ADR 0058, na
+    /// linha 2: uma 2.x que largue o 10 deixa de conversar com a 2.0.
+    #[test]
+    fn toda_2x_fala_o_primeiro_numero_da_linha() {
         assert_eq!(
-            VERSAO_MINIMA, PRIMEIRO_DA_LINHA_UM,
-            "ADR 0058: uma 1.x que larga o 9 quebra o fio"
+            VERSAO_MINIMA, PRIMEIRO_DA_LINHA_DOIS,
+            "ADR 0063: uma 2.x que larga o 10 quebra o fio"
         );
-        assert_eq!(linha_de(VERSAO_MINIMA), Some(Linha::Um));
-        assert_eq!(linha_de(PROTOCOL_VERSION), Some(Linha::Um));
+        assert_eq!(linha_de(VERSAO_MINIMA), Some(Linha::Dois));
+        assert_eq!(linha_de(PROTOCOL_VERSION), Some(Linha::Dois));
         assert_eq!(
             FAIXA,
             Faixa {
@@ -453,7 +516,19 @@ mod tests {
             Some(Linha::AntesDaUm { numero: 8 }),
             "o 8 é o Servidor 0.15, a linha legada"
         );
-        assert_eq!(linha_de(9), Some(Linha::Um));
+        assert_eq!(
+            linha_de(9),
+            Some(Linha::Um),
+            "o 9 é o Servidor 1.0, a linha legada da 0.17"
+        );
+        assert_eq!(linha_de(10), Some(Linha::Dois));
+        assert!(Linha::AntesDaUm { numero: 8 }.e_anterior());
+        assert!(Linha::Um.e_anterior(), "a linha 1 é anterior à 2");
+        assert!(
+            !Linha::Dois.e_anterior(),
+            "a linha desta build não é anterior"
+        );
+        assert!(!Linha::Posterior { numero: 30 }.e_anterior());
         assert_eq!(
             linha_de(PROTOCOL_VERSION + 1),
             Some(Linha::Posterior {
@@ -473,21 +548,22 @@ mod tests {
         assert_eq!(negociar(FAIXA), Ok(PROTOCOL_VERSION));
         assert_eq!(
             negociar(Faixa {
-                minima: 9,
-                maxima: 12
+                minima: 10,
+                maxima: 13
             }),
             Ok(PROTOCOL_VERSION),
-            "uma 1.3 que encontra esta build desce até ela"
+            "uma 2.3 que encontra esta build desce até ela"
         );
         assert_eq!(
             negociar(Faixa {
-                minima: 7,
-                maxima: 8
+                minima: 9,
+                maxima: 9
             }),
             Err(Incompatible::PeerTooOld {
-                peer: 8,
+                peer: 9,
                 oldest_supported: VERSAO_MINIMA
-            })
+            }),
+            "a 0.16 não negocia com a linha 2"
         );
         assert_eq!(
             negociar(Faixa {
@@ -524,7 +600,7 @@ mod tests {
     /// anúncio de MODs —, e de que o anúncio continua alcançado pela global.
     #[test]
     fn a_api_de_pedidos_preserva_o_limiar_do_anuncio_original() {
-        assert_eq!(PROTOCOL_VERSION, 9);
+        assert_eq!(PROTOCOL_VERSION, 10);
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,
             5,
@@ -537,12 +613,17 @@ mod tests {
     /// O nome do servidor que esta build fala, lido pelo `empacotar/manifesto.py`
     /// por expressão regular: a forma da linha é contrato com ele.
     #[test]
-    fn a_versao_do_servidor_e_a_que_a_0_16_fala() {
-        assert_eq!(VERSAO_DO_SERVIDOR, "1.0");
+    fn a_versao_do_servidor_e_a_que_a_0_17_fala() {
+        assert_eq!(VERSAO_DO_SERVIDOR, "2.0");
         let fonte = include_str!("version.rs");
         assert!(
-            fonte.contains("pub const VERSAO_DO_SERVIDOR: &str = \"1.0\";"),
+            fonte.contains("pub const VERSAO_DO_SERVIDOR: &str = \"2.0\";"),
             "o manifesto.py lê esta linha por regex, e ela mudou de forma"
+        );
+        assert_eq!(
+            linha_do_protocolo(PROTOCOL_VERSION),
+            VERSAO_DO_SERVIDOR.split('.').next(),
+            "o nome do servidor e a linha do número desta build discordam"
         );
     }
 
@@ -557,7 +638,8 @@ mod tests {
         );
         assert_eq!(linha_do_protocolo(8), Some("0.15"));
         assert_eq!(linha_do_protocolo(9), Some("1"));
-        assert_eq!(linha_do_protocolo(u8::MAX), Some("1"));
+        assert_eq!(linha_do_protocolo(10), Some("2"));
+        assert_eq!(linha_do_protocolo(u8::MAX), Some("2"));
     }
 
     proptest! {

@@ -1126,15 +1126,108 @@ pub(crate) fn run() -> ExitCode {
         eprintln!("check-api: não achei `api/`");
         return ExitCode::FAILURE;
     };
-    let entradas = entradas.map(|entrada| entrada.map(|entrada| entrada.path()));
+    let entradas: Vec<_> = entradas
+        .map(|entrada| entrada.map(|entrada| entrada.path()))
+        .collect();
 
-    relatar(
+    // O congelamento também aqui, e não só no `seele-conformance` (E8 da
+    // 0.17): o `check-api` roda no job `regras` do CI, que não compila o
+    // produto, e a v6 publicada não pode mudar sem que ele fique vermelho.
+    let Ok(lista) = std::fs::read_to_string(raiz.join("api/congeladas.sha256")) else {
+        eprintln!("check-api: não deu para ler api/congeladas.sha256");
+        return ExitCode::FAILURE;
+    };
+    let mut jsons = Vec::new();
+    for caminho in entradas.iter().flatten() {
+        if versao_do_arquivo(caminho).is_none() {
+            continue;
+        }
+        let nome = caminho
+            .file_name()
+            .and_then(|nome| nome.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        match std::fs::read(caminho) {
+            Ok(bytes) => jsons.push((nome, bytes)),
+            Err(erro) => {
+                eprintln!("check-api: não deu para ler {} ({erro})", caminho.display());
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let congeladas = conferir_congeladas(&lista, &jsons);
+
+    let resultado = match (
         conferir_api(entradas, &fonte, &promessas, &casca),
+        congeladas,
+    ) {
+        (resultado, congeladas) if congeladas.is_empty() => resultado,
+        (Ok(_), congeladas) => Err(congeladas),
+        (Err(mut falhas), congeladas) => {
+            falhas.extend(congeladas);
+            Err(falhas)
+        }
+    };
+    relatar(
+        resultado,
         momentos.len(),
         eventos.len(),
         &mut std::io::stdout(),
         &mut std::io::stderr(),
     )
+}
+
+/// **Nenhuma versão listada em `api/congeladas.sha256` mudou de bytes**, e
+/// toda `vN.json` está na lista (E8 da 0.17).
+///
+/// É a regra do `a_api_publicada_nao_se_edita` (em `crates/seele-conformance`),
+/// repetida aqui porque aquele teste só roda com o produto compilando, e o
+/// `check-api` roda sem compilar nada. Uma versão em construção (acima de
+/// `MOD_API_VERSION`) também tem a linha conferida: a linha acompanha cada
+/// edição, e a reprovação dá a linha nova (`api/README.md`, «Publicar a
+/// versão seguinte»).
+fn conferir_congeladas(lista: &str, jsons: &[(String, Vec<u8>)]) -> Vec<Violation> {
+    use sha2::Digest as _;
+
+    let mut violacoes = Vec::new();
+    let mut listadas = std::collections::BTreeMap::new();
+    for linha in lista
+        .lines()
+        .map(str::trim)
+        .filter(|linha| !linha.is_empty() && !linha.starts_with('#'))
+    {
+        match linha.split_once("  ") {
+            Some((hash, nome)) => {
+                listadas.insert(nome.trim().to_owned(), hash.trim().to_owned());
+            }
+            None => violacoes.push(format!(
+                "api/congeladas.sha256 tem uma linha fora da forma `<hash>  vN.json`: {linha}"
+            )),
+        }
+    }
+    for (nome, bytes) in jsons {
+        let hash: String = sha2::Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        match listadas.remove(nome) {
+            Some(guardado) if guardado == hash => {}
+            Some(guardado) => violacoes.push(format!(
+                "api/{nome} mudou de bytes: o SHA-256 dela é {hash}, e api/congeladas.sha256 diz \
+                 {guardado}. Uma versão publicada não se edita, e a mudança vai para a versão \
+                 seguinte; uma em construção refaz a linha (api/README.md)"
+            )),
+            None => violacoes.push(format!(
+                "api/{nome} não está em api/congeladas.sha256; a linha dela é `{hash}  {nome}`"
+            )),
+        }
+    }
+    for nome in listadas.keys() {
+        violacoes.push(format!(
+            "api/congeladas.sha256 lista {nome}, e o arquivo não está em api/"
+        ));
+    }
+    violacoes
 }
 
 /// Concatenates every source file under `dir` that the façade can point into.
@@ -2758,5 +2851,107 @@ const TIPOS_DE_SUPERFICIE = Object.freeze({
                 "a violação de `{esperado}` não voltou de `conferir_arquivo`: {violacoes:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod o_congelamento_no_check_api {
+    //! O guarda de congelamento do `check-api` (E8 da 0.17): a v6 publicada
+    //! não muda sem que ele fique vermelho.
+    #![allow(clippy::unwrap_used, clippy::indexing_slicing)]
+
+    use super::conferir_congeladas;
+
+    fn sha(bytes: &[u8]) -> String {
+        use sha2::Digest as _;
+        sha2::Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    fn lista(versoes: &[(&str, &[u8])]) -> String {
+        let mut texto = String::from("# comentário\n");
+        for (nome, bytes) in versoes {
+            texto.push_str(&format!("{}  {nome}\n", sha(bytes)));
+        }
+        texto
+    }
+
+    #[test]
+    fn as_versoes_iguais_a_lista_passam() {
+        let v6: &[u8] = b"{\"version\": 6}";
+        let v7: &[u8] = b"{\"version\": 7}";
+        let jsons = vec![
+            ("v6.json".to_owned(), v6.to_vec()),
+            ("v7.json".to_owned(), v7.to_vec()),
+        ];
+        assert!(
+            conferir_congeladas(&lista(&[("v6.json", v6), ("v7.json", v7)]), &jsons).is_empty()
+        );
+    }
+
+    /// **Mudar a v6 reprova**, com o nome do arquivo e os dois hashes.
+    #[test]
+    fn mudar_a_v6_reprova() {
+        let v6: &[u8] = b"{\"version\": 6}";
+        let jsons = vec![("v6.json".to_owned(), b"{\"version\": 6, \"a\": 1}".to_vec())];
+        let violacoes = conferir_congeladas(&lista(&[("v6.json", v6)]), &jsons);
+        assert_eq!(violacoes.len(), 1, "{violacoes:?}");
+        assert!(
+            violacoes[0].contains("api/v6.json mudou de bytes"),
+            "{violacoes:?}"
+        );
+        assert!(violacoes[0].contains(&sha(v6)));
+    }
+
+    #[test]
+    fn uma_versao_fora_da_lista_e_uma_listada_que_sumiu_reprovam() {
+        let v6: &[u8] = b"6";
+        let v7: &[u8] = b"7";
+        let fora = conferir_congeladas(
+            &lista(&[("v6.json", v6)]),
+            &[
+                ("v6.json".to_owned(), v6.to_vec()),
+                ("v7.json".to_owned(), v7.to_vec()),
+            ],
+        );
+        assert!(
+            fora.iter().any(|v| v.contains("v7.json não está")),
+            "{fora:?}"
+        );
+        let sumiu = conferir_congeladas(
+            &lista(&[("v6.json", v6), ("v7.json", v7)]),
+            &[("v6.json".to_owned(), v6.to_vec())],
+        );
+        assert!(
+            sumiu.iter().any(|v| v.contains("lista v7.json")),
+            "{sumiu:?}"
+        );
+        let torta = conferir_congeladas("abc v6.json\n", &[]);
+        assert!(
+            torta.iter().any(|v| v.contains("fora da forma")),
+            "{torta:?}"
+        );
+    }
+
+    /// **A árvore de verdade passa**, e a linha da v6 é a de antes da 0.17:
+    /// o hash publicado na v0.16.0.
+    #[test]
+    fn a_v6_da_arvore_e_a_publicada() {
+        let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let lista = std::fs::read_to_string(raiz.join("api/congeladas.sha256")).unwrap();
+        assert!(
+            lista.contains(
+                "8dcf4aaf13f73b957e52b99f462bfdff656a232dd337bccebdad97edaae6f514  v6.json"
+            ),
+            "a linha da v6 em api/congeladas.sha256 não é mais a da v0.16.0"
+        );
+        let v6 = std::fs::read(raiz.join("api/v6.json")).unwrap();
+        assert_eq!(
+            sha(&v6),
+            "8dcf4aaf13f73b957e52b99f462bfdff656a232dd337bccebdad97edaae6f514",
+            "api/v6.json mudou de bytes depois de publicada"
+        );
     }
 }

@@ -21,7 +21,7 @@ use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, ConsentimentoDePar, Lido, ServerMessage};
 use seele_proto::ids::{ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId};
-use seele_proto::transport::{HANDSHAKE_TIMEOUT, IDLE_TIMEOUT, KEEPALIVE};
+use seele_proto::transport::HANDSHAKE_TIMEOUT;
 
 use crate::frame;
 use crate::tofu::{PinDecision, PinStore, TofuVerifier};
@@ -56,48 +56,47 @@ const ESPERA_DA_RECUSA: std::time::Duration = std::time::Duration::from_secs(1);
 /// reporting the wrong cause rather than none.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectError {
-    /// The QUIC endpoint could not be opened locally.
+    /// The local WebRTC endpoint (the UDP socket under it) could not be opened.
     ///
     /// A blocked UDP socket or an exhausted port range. Nothing to do with the
     /// server.
     LocalEndpoint,
     /// Nothing answered, or the network refused to carry it.
     Unreachable,
-    /// TLS refused the certificate for a reason other than the pin.
+    /// **O ponto de encontro levou o chamado, quem hospeda atendeu, e o
+    /// caminho não abriu** (degrau 4, D7 da 0.17).
+    ///
+    /// Não é [`Self::SemResposta`]: ali ninguém respondeu nada. Aqui o ponto
+    /// disse que a pessoa ou o servidor está lá e respondeu ao `CHAMA`, e as
+    /// checagens ICE para o endereço que ele devolveu não voltaram — o caso de
+    /// dois NATs simétricos, ou de um que não deixa entrar o que não saiu. Sem
+    /// um relay TURN configurado por quem usa, não há o que insistir.
+    NatNaoAbriu,
+    /// **O link é de um Servidor 1** (a linha da 0.16 e anteriores): `v=` do
+    /// link, ou a magia do ENC/2 no ponto. A 0.17 fala WebRTC e não conversa
+    /// com ele; quem abre essa linha é o launcher.
+    LinhaLegada,
+    /// DTLS refused the connection for a reason other than the pin.
     ///
     /// Nem a impressão esperada, nem a chave que o servidor não provou: essas
     /// têm nome próprio ([`Self::InviteMismatch`] e [`Self::ChaveNaoProvada`]).
     /// O que sobra aqui é o TLS que caiu por outro alerta, ou sem decisão do
     /// verificador.
     ///
-    /// **E um segundo motivo, que não é recusa de ninguém:** o TLS terminou sem
-    /// decisão do verificador de pin (`decisao_do_aperto`). O certificado não
-    /// foi conferido contra pin nem impressão, e a conexão não segue; o
-    /// `seele.log` diz qual dos dois foi, num `warn!`. A FFI traduz esta
-    /// variante por `Refused { Incompatible }`, e nesse segundo caso a tela
-    /// mostraria a frase de versão incompatível, que manda atualizar o SEELE
-    /// nas duas máquinas: imprecisa ali, e o caminho não é alcançável com o
-    /// `rustls` de hoje, que chama o verificador em todo aperto de mão completo.
+    /// Desde a 0.17 é o DTLS (ou o SCTP por cima dele) que caiu depois de o
+    /// ICE achar caminho, sem ser pela impressão: o enlace devolve
+    /// `FalhaAoDiscar::Protocolo`, e o `seele.log` leva o texto dele.
     TlsRefused,
     /// Quem atendeu mostrou um certificado que o verificador aceitou, e não
     /// provou ter a chave dele.
     ///
-    /// O certificado é público: um impostor pode repeti-lo inteiro. O que ele
-    /// não tem é a chave privada, e o TLS a cobra **depois** de o verificador
-    /// aceitar o certificado, na assinatura de quem atende sobre o aperto de
-    /// mão (`CertificateVerify`). A assinatura não confere, e o `rustls` daqui
-    /// recusa com o alerta `decrypt_error` (51), que o `quinn` devolve como
-    /// `TransportError` local (`classify_connection_error`).
-    ///
-    /// **Recusada dentro do TLS, antes do `Hello`**, como
-    /// [`Self::InviteMismatch`]: o convite, a senha e o apelido não chegam a
-    /// quem atendeu. Era [`Self::TlsRefused`], e a FFI a traduzia por
-    /// `Refused { Incompatible }`: a tela mandava atualizar o SEELE nas duas
-    /// máquinas por causa de um servidor que não é quem diz ser.
-    ///
-    /// Só com a decisão do verificador (`Matches` ou `FirstContact`) na mão: o
-    /// TLS sem decisão continua [`Self::TlsRefused`], porque ali ninguém
-    /// conferiu certificado nenhum.
+    /// **Não sai mais do núcleo desde a 0.17**, e isto está escrito para não
+    /// parecer guarda. No QUIC, o `rustls` recusava a assinatura do
+    /// `CertificateVerify` com o alerta 51, e dava para separá-la de outra
+    /// recusa. No DTLS do enlace a mesma recusa derruba o aperto de mão por
+    /// dentro, sem motivo próprio, e chega como [`Self::TlsRefused`]. O
+    /// `Hello` continua não saindo: quem não prova a chave não fecha o DTLS.
+    /// A variante fica porque a FFI e a tela ainda a nomeiam.
     ChaveNaoProvada,
     /// The pinned key is not the key offered. ADR 0003.
     PinChanged {
@@ -123,8 +122,9 @@ pub enum ConnectError {
     /// lento —, e descreve **mal** o caso mais comum: os pacotes saíram e nada
     /// voltou.
     ///
-    /// O `quinn` distingue: `ConnectionError::TimedOut` é a conexão inteira
-    /// expirando, e chega antes de existir aperto de mão nenhum. Traduzi-lo como
+    /// Desde a 0.17 é o ICE sem resposta: nenhum candidato devolveu a checagem
+    /// STUN (`FalhaAoDiscar::SemResposta`), e chega antes de existir aperto de
+    /// mão nenhum. No QUIC era o `ConnectionError::TimedOut`. Traduzi-lo como
     /// «sincronização» manda quem lê investigar protocolo, versão e servidor —
     /// quando o que aconteceu foi um datagrama que não chegou ao outro lado.
     ///
@@ -252,21 +252,24 @@ pub use seele_sessao::SessionInfo;
 /// borrow blocking the other, which is exactly the shape a shell needs.
 #[derive(Clone)]
 pub struct MediaChannel {
-    connection: quinn::Connection,
+    connection: crate::transporte::Conexao,
 }
 
 impl MediaChannel {
-    /// Sends one media datagram.
+    /// Sends one media datagram, on the `voz` channel of the link (unordered,
+    /// no retransmission: D4 da 0.17).
     ///
     /// The `ssrc` in the header must be the one in [`SessionInfo::ssrc`]; the
     /// server refuses anything else (gap G2).
     ///
     /// # Errors
     ///
-    /// Fails if the datagram is too large for the path.
+    /// Fails if the datagram is larger than `seele_enlace::MAX_VOZ` or the
+    /// connection is gone.
     pub fn send(&self, datagram: Vec<u8>) -> Result<()> {
-        self.connection.send_datagram(datagram.into())?;
-        Ok(())
+        self.connection
+            .send_datagram(datagram)
+            .map_err(|recusa| anyhow::anyhow!("a voz não saiu: {recusa:?}"))
     }
 
     /// Waits for the next media datagram.
@@ -275,7 +278,10 @@ impl MediaChannel {
     ///
     /// Fails when the connection closes.
     pub async fn next(&self) -> Result<Vec<u8>> {
-        Ok(self.connection.read_datagram().await?.to_vec())
+        self.connection
+            .read_datagram()
+            .await
+            .map_err(|motivo| anyhow::anyhow!("a conexão acabou: {motivo:?}"))
     }
 }
 
@@ -294,6 +300,12 @@ impl MediaChannel {
 /// draining fast enough. Sent means we said it about them.
 ///
 /// Zero on both sides is the ordinary reading: nothing was ever held back.
+///
+/// **Desde a 0.17, sempre zero, e não por nada ter sido segurado.** O SCTP dos
+/// DataChannels não tem janela por fluxo nem conta bloqueio; a contrapressão
+/// do enlace é o crédito de saída por canal (`seele_enlace::CREDITO_DE_SAIDA`),
+/// que faz `write_all` esperar sem deixar rastro aqui. Ler um zero desta
+/// estrutura numa sessão 0.17 é «não medido», e não «nada segurou».
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FlowControl {
     /// `STREAM_DATA_BLOCKED` this end sent: one stream of ours ran out of room.
@@ -305,17 +317,6 @@ pub struct FlowControl {
     pub connection_blocked_sent: u64,
     /// `DATA_BLOCKED` this end received.
     pub connection_blocked_received: u64,
-}
-
-impl From<&quinn::ConnectionStats> for FlowControl {
-    fn from(stats: &quinn::ConnectionStats) -> Self {
-        Self {
-            stream_blocked_sent: stats.frame_tx.stream_data_blocked,
-            stream_blocked_received: stats.frame_rx.stream_data_blocked,
-            connection_blocked_sent: stats.frame_tx.data_blocked,
-            connection_blocked_received: stats.frame_rx.data_blocked,
-        }
-    }
 }
 
 /// Stream priority for a transfer, below the control stream.
@@ -395,11 +396,12 @@ pub struct AttachmentRequest<'a> {
 
 /// Tells a server that refused apart from a link that fell.
 ///
-/// `Stopped` is QUIC's `STOP_SENDING`: somebody at the other end decided, on
-/// purpose, not to take these bytes. Anything else is the connection going
-/// away, which nobody decided.
-fn interpret(error: &quinn::WriteError, sent: u64) -> Sent {
-    if matches!(error, quinn::WriteError::Stopped(_)) {
+/// `Cortado` is the link's `corte` (envelope 0x02, D4 da 0.17), what QUIC's
+/// `STOP_SENDING` was: somebody at the other end decided, on purpose, not to
+/// take these bytes. Anything else is the connection going away, which nobody
+/// decided.
+fn interpret(error: &crate::transporte::FalhaDoCanal, sent: u64) -> Sent {
+    if matches!(error, crate::transporte::FalhaDoCanal::Cortado(_)) {
         Sent::Stopped { bytes: sent }
     } else {
         Sent::Interrupted { bytes: sent }
@@ -409,7 +411,7 @@ fn interpret(error: &quinn::WriteError, sent: u64) -> Sent {
 /// The same reading, for a header that could not be written.
 fn interpret_any(error: &anyhow::Error, sent: u64) -> Sent {
     error
-        .downcast_ref::<quinn::WriteError>()
+        .downcast_ref::<crate::transporte::FalhaDoCanal>()
         .map_or(Sent::Interrupted { bytes: sent }, |write| {
             interpret(write, sent)
         })
@@ -453,8 +455,8 @@ fn quarantine(path: &std::path::Path) {
 
 /// A connected, verified client.
 pub struct Client {
-    connection: quinn::Connection,
-    send: quinn::SendStream,
+    connection: crate::transporte::Conexao,
+    send: crate::transporte::Envio,
     /// O número que o servidor carimbou na primeira resposta, e com que toda
     /// escrita do fluxo de controle sai (adendo de 08/10/2026, §4). Na 1.0 é
     /// sempre o 9; numa 1.x mais nova diante de um servidor mais velho, é o
@@ -471,6 +473,14 @@ pub struct Client {
     pending_ping: Option<(u64, std::time::Instant)>,
     /// The most recent round trip.
     last_rtt: Option<std::time::Duration>,
+    /// O `Ping` da sonda que ainda não voltou: o carimbo e quando saiu.
+    ping_da_sonda: Option<(u64, std::time::Instant)>,
+    /// Quantos `Ping` da sonda já saíram, para o carimbo de cada um.
+    pings_da_sonda: u64,
+    /// Quando saiu o último `Ping` da sonda, para o intervalo entre eles.
+    ultimo_ping_da_sonda: Option<std::time::Instant>,
+    /// A última ida e volta da sonda, e quantas já voltaram.
+    ida_e_volta_da_sonda: Option<(std::time::Duration, u64)>,
     /// Fluxos de tela, já aceitos e classificados pelo roteador.
     ///
     /// Atrás de um `Mutex` embora só um lugar o leia: quem o lê é um braço de
@@ -483,7 +493,7 @@ pub struct Client {
     /// Atrás de um `Mutex` e não do `&mut self` como as telas: quem recebe um
     /// anexo é uma tarefa solta, criada por comando, e ela não tem o `Client`.
     anexos: FilaDeAnexos,
-    /// A ponta QUIC que esta conexão usa para falar com o servidor.
+    /// A ponta WebRTC que esta conexão usa para falar com o servidor.
     ///
     /// **Guardada para o caminho entre pares a reaproveitar** — `§3.1` da
     /// spec de 05/09 é explícito: "Não é escuta nova, socket novo nem porta
@@ -491,17 +501,33 @@ pub struct Client {
     /// `keep_alive_interval` da conexão com o servidor". Uma ponta nova teria
     /// endereço público desconhecido do servidor — ele só vê a origem desta
     /// conexão de controle — e furar NAT numa porta que ele nunca apontou não
-    /// tem como funcionar. Ver [`Self::endpoint`].
-    endpoint: quinn::Endpoint,
+    /// tem como funcionar. Ver [`Self::ponta`].
+    ///
+    /// **Uma por sessão** (E3 da 0.17): duas sessões não dividem ponta, então
+    /// fechar uma não mexe no socket da outra.
+    ponta: crate::transporte::PontaDaSessao,
 }
 
 /// A fila de onde sai a próxima transmissão de tela alheia.
-pub type FilaDeTelas =
-    std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<quinn::RecvStream>>>;
+pub type FilaDeTelas = std::sync::Arc<
+    tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<crate::transporte::Recebe>>,
+>;
 
 /// A fila de onde as tarefas de anexo tiram o fluxo que lhes cabe.
-type FilaDeAnexos =
-    std::sync::Arc<tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<quinn::RecvStream>>>;
+type FilaDeAnexos = std::sync::Arc<
+    tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<crate::transporte::Recebe>>,
+>;
+
+/// O código com que quem liga fecha a conexão que recusou antes do `Hello`.
+///
+/// Um só para toda recusa, e o motivo é uma frase neutra ([`RECUSA_NEUTRA`]):
+/// quem atendeu não aprende se esta máquina tinha um link, um pino ou um
+/// código, que é o que um impostor quer saber para forjar (o mesmo cuidado que
+/// o `crate::tofu` tinha com a frase do TLS).
+const CODIGO_DA_RECUSA: u32 = 0x5345_0010;
+
+/// A frase da recusa antes do `Hello`.
+const RECUSA_NEUTRA: &[u8] = b"certificado nao aceito";
 
 impl Client {
     /// Connects, runs the handshake, and returns once PATTERN: BLUE is reached.
@@ -543,14 +569,17 @@ impl Client {
         join_secret: Option<&str>,
         aceito: Option<&str>,
     ) -> Result<Self, ConnectError> {
-        let endpoint = local_endpoint(None)?;
-        Self::connect_por(
-            &endpoint,
-            server,
-            server_name,
+        // Sem SNI desde a 0.17: o DTLS não leva nome de servidor, e o nome que
+        // o TLS recebia era só um rótulo (o pin é por `pin_key`).
+        let _ = server_name;
+        let ponta = crate::transporte::abrir_ponta(None)?;
+        let conexao = discar(ponta.ponta(), vec![server], None, HANDSHAKE_TIMEOUT).await?;
+        Self::connect_sobre(
+            ponta,
+            conexao,
             pin_key,
             // Este caminho não confere impressão nenhuma: quem tem uma entra
-            // por `crate::enlace::Enlace`, que a leva até o TLS.
+            // por `crate::enlace::Enlace`, que a leva até antes do `Hello`.
             None,
             // Sem esperada, se o pino prova o servidor não pesa: o pin decide
             // como sempre decidiu.
@@ -566,52 +595,53 @@ impl Client {
         .await
     }
 
-    /// O mesmo, por um socket local já aberto.
+    /// O aperto de mão do protocolo sobre uma conexão que o enlace já abriu.
     ///
-    /// Existe por causa do degrau 4 do ADR 0022: furar um NAT exige que o aviso
-    /// ao ponto de encontro e o aperto de mão QUIC saiam da **mesma** porta
-    /// local, porque é por porta interna que o roteador do outro lado abre o
-    /// caminho. `None` é o caminho de sempre, e quem passa `Some` é
-    /// [`crate::enlace::Enlace::conectar_entre_com_bilhete`], com uma cópia do
-    /// socket por onde a `Batida` de [`crate::encontro`] avisou o ponto de
-    /// encontro — uma por candidato, porque um `Endpoint` fecha o socket que
-    /// adotou e a porta furada tem de sobreviver ao laço inteiro.
+    /// Quem disca é [`discar`] (ou a corrida de [`crate::enlace`], que disca
+    /// todos os candidatos de um anfitrião num agente ICE só); este passo é o
+    /// que vem depois do DTLS e **antes do `Hello`**: conferir quem atendeu.
     ///
-    /// `esperada` é conferida **dentro do TLS**, antes do `Hello`:
+    /// `esperada` é conferida aqui, contra o certificado DTLS que o enlace viu
+    /// (`Conexao::impressao_dtls_do_par`), antes de o `ctl` levar qualquer
+    /// coisa:
     ///
-    /// - um certificado ([`crate::enlace::Esperada::Certificado`]): um primeiro
-    ///   contato que não confere falha o aperto de mão e volta como
-    ///   [`ConnectError::InviteMismatch`]. Ver [`crate::tofu::TofuVerifier::decide`]
-    ///   para o que ela decide com pin e sem pin;
-    /// - um código ([`crate::enlace::Esperada::Codigo`]): o
-    ///   [`crate::confere_codigo::ConfereCodigo`] no lugar do TOFU por endereço,
-    ///   o SNI é sempre [`seele_proto::transport::NOME_DA_SALA`], e o pino é o
-    ///   da chave sob `@CÓDIGO`, gravado depois da primeira ligação completa.
-    ///   A recusa volta como [`ConnectError::CodigoNaoConfere`].
+    /// - um certificado ([`crate::enlace::Esperada::Certificado`]) ou nada: o
+    ///   TOFU de [`crate::tofu::TofuVerifier`], com as mesmas regras de pin e
+    ///   de impressão esperada de antes. Um primeiro contato que não confere
+    ///   volta como [`ConnectError::InviteMismatch`]; uma chave fixada que
+    ///   mudou, como [`ConnectError::PinChanged`];
+    /// - um código ([`crate::enlace::Esperada::Codigo`]): a sala apresentou a
+    ///   chave Ed25519 dela e uma assinatura sobre a impressão DTLS desta
+    ///   conexão (a mensagem 0x03 do enlace, D3 da 0.17), conferidas pelo
+    ///   [`crate::confere_codigo::ConfereCodigo`]. A recusa volta como
+    ///   [`ConnectError::CodigoNaoConfere`].
+    ///
+    /// Recusada, a conexão fecha com [`CODIGO_DA_RECUSA`] e uma frase neutra, e
+    /// nada do que quem liga diria — convite, senha, apelido, chave — chega a
+    /// quem atendeu.
     ///
     /// `o_pino_prova_o_servidor` diz se o pin de `pin_key` prova o servidor
     /// (`crate::enlace::Destino::o_pino_prova_o_servidor`), e vai ao
     /// verificador junto com a esperada: onde não prova, um pin que confere
     /// não passa por cima de uma esperada que não confere
-    /// ([`crate::tofu::TofuVerifier::new`]). É o único `bool` da lista, e
-    /// trocá-lo de lugar com qualquer vizinho não compila.
+    /// ([`crate::tofu::TofuVerifier::new`]).
+    ///
+    /// `tocou` recebe o `prazo_s` quando a sala manda `Tocando` (tarefa 16 da
+    /// F7): é por ele que a corrida de [`crate::enlace`] sabe que este lote
+    /// venceu, muito antes de o aperto de mão terminar.
     ///
     /// # Errors
     ///
     /// O mesmo de [`Client::connect`].
-    /// `tocou` recebe o `prazo_s` quando a sala manda `Tocando` (tarefa 16 da
-    /// F7): é por ele que a corrida de [`crate::enlace`] sabe que este candidato
-    /// venceu, muito antes de o aperto de mão terminar.
     #[expect(
         clippy::too_many_arguments,
-        reason = "quatro argumentos a mais que o `connect` público — o socket, a \
-                  impressão esperada, se o pino prova o servidor e o aviso do toque —, \
-                  que já passava do limite"
+        reason = "os oito do `connect` público mais a ponta, a conexão, a impressão \
+                  esperada, se o pino prova o servidor e o aviso do toque; agrupá-los \
+                  tocaria todo chamador do produto"
     )]
-    pub(crate) async fn connect_por(
-        endpoint: &quinn::Endpoint,
-        server: SocketAddr,
-        server_name: &str,
+    pub(crate) async fn connect_sobre(
+        ponta: crate::transporte::PontaDaSessao,
+        connection: crate::transporte::Conexao,
         pin_key: &str,
         esperada: Option<&crate::enlace::Esperada>,
         o_pino_prova_o_servidor: bool,
@@ -622,122 +652,30 @@ impl Client {
         aceito: Option<&str>,
         tocou: Option<tokio::sync::mpsc::UnboundedSender<u16>>,
     ) -> Result<Self, ConnectError> {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        // **Uma pessoa, e não um endereço**, quando o que se espera é um código:
-        // a chave tem de ser a do código, e o pino é o dela, e não o do
-        // endereço que respondeu (ADR 0060).
-        let verificacao = match esperada {
-            Some(crate::enlace::Esperada::Codigo(codigo)) => {
-                let pino = pins.pinned(&crate::confere_codigo::chave_do_pino(codigo));
-                Verificacao::Codigo {
-                    confere: Arc::new(crate::confere_codigo::ConfereCodigo::novo(
-                        *codigo,
-                        pino.clone(),
-                    )),
-                    codigo: *codigo,
-                    pino,
-                }
-            }
-            Some(crate::enlace::Esperada::Certificado(_)) | None => {
-                Verificacao::Tofu(Arc::new(TofuVerifier::new(
-                    Arc::clone(&pins),
-                    pin_key.to_owned(),
-                    esperada.and_then(|esperada| match esperada {
-                        crate::enlace::Esperada::Certificado(impressao) => Some(impressao.clone()),
-                        crate::enlace::Esperada::Codigo(_) => None,
-                    }),
-                    o_pino_prova_o_servidor,
-                )))
+        // O que o DTLS desta conexão viu: a impressão do certificado de quem
+        // atendeu, lida da própria conexão — nunca de algo que o servidor diga
+        // pelo protocolo, nem do link.
+        let impressao_dtls = connection.impressao_dtls_do_par();
+        let (pin, a_pinar, impressao) = match conferir_quem_atendeu(
+            connection.apresentacao(),
+            &impressao_dtls,
+            pin_key,
+            esperada,
+            o_pino_prova_o_servidor,
+            &pins,
+        ) {
+            Ok(conferido) => conferido,
+            Err(erro) => {
+                // **Antes do `Hello`.** Nada saiu pelo `ctl`.
+                connection.close(CODIGO_DA_RECUSA, RECUSA_NEUTRA);
+                return Err(erro);
             }
         };
-        let verificador: Arc<dyn rustls::client::danger::ServerCertVerifier> = match &verificacao {
-            Verificacao::Tofu(verifier) => Arc::clone(verifier) as Arc<_>,
-            Verificacao::Codigo { confere, .. } => Arc::clone(confere) as Arc<_>,
-        };
-        // O SNI viaja legível no Initial do QUIC: numa ligação pelo código ele é
-        // o nome da sala, qualquer que seja o que o destino diga, para não
-        // contar a quem olha a rede para quem se está ligando.
-        let server_name = match &verificacao {
-            Verificacao::Codigo { .. } => seele_proto::transport::NOME_DA_SALA,
-            Verificacao::Tofu(_) => server_name,
-        };
-        let mut tls = rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(verificador)
-            .with_no_client_auth();
-        tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-
-        let quic = quinn::crypto::rustls::QuicClientConfig::try_from(tls).map_err(|error| {
-            tracing::error!(%error, "could not build the QUIC TLS config");
-            ConnectError::LocalEndpoint
-        })?;
-        let mut client_config = quinn::ClientConfig::new(Arc::new(quic));
-
-        let mut transport = quinn::TransportConfig::default();
-        transport.max_idle_timeout(Some(
-            IDLE_TIMEOUT
-                .try_into()
-                .map_err(|_| ConnectError::LocalEndpoint)?,
-        ));
-        transport.keep_alive_interval(Some(KEEPALIVE));
-        client_config.transport_config(Arc::new(transport));
-
-        // `connect_with` e não `set_default_client_config` + `connect`: o
-        // `client_config` acima carrega o `TofuVerifier` **deste** candidato,
-        // com a `pin_key` dele. Um `Endpoint` compartilhado por vários
-        // candidatos não pode ter um config padrão — o de quem chegou por
-        // último valeria para todos, e a conferência de certificado passaria a
-        // ser feita contra o pin do vizinho. Ver o ADR 0037.
-        let connection = endpoint
-            .connect_with(client_config, server, server_name)
-            .map_err(|error| {
-                tracing::warn!(%error, "could not start the QUIC connection");
-                ConnectError::Unreachable
-            })?
-            .await
-            .map_err(|error| match &verificacao {
-                Verificacao::Tofu(verifier) => {
-                    classify_connection_error(&error, verifier.last_decision())
-                }
-                // O motivo tipado, que o verificador deixou antes de o `rustls`
-                // o achatar em texto.
-                Verificacao::Codigo { confere, .. } => confere
-                    .relato()
-                    .lock()
-                    .ok()
-                    .and_then(|vaga| vaga.clone())
-                    .map_or_else(
-                        || classify_connection_error(&error, None),
-                        ConnectError::CodigoNaoConfere,
-                    ),
-            })?;
 
         // PATTERN: ORANGE — connected, not verified.
-        let pin = match &verificacao {
-            Verificacao::Tofu(verifier) => decisao_do_aperto(verifier.last_decision())?,
-            // O código conferiu dentro do TLS. Com pino, a chave inteira também.
-            Verificacao::Codigo { pino, .. } => {
-                let fingerprint = seele_proto::transport::certificate_fingerprint(
-                    certificado_do_servidor(&connection)?.as_ref(),
-                );
-                if pino.is_some() {
-                    PinDecision::Matches { fingerprint }
-                } else {
-                    PinDecision::FirstContact { fingerprint }
-                }
-            }
-        };
-
-        // **A impressão que a prova de identidade amarra** (o S2): a do
-        // certificado que o TLS desta conexão acabou de aceitar, lida da
-        // própria conexão — nunca de algo que o servidor diga pelo protocolo,
-        // nem do link. É o que faz a prova valer só para quem foi conferido.
-        let impressao = impressao_do_servidor(&connection)?;
-
-        let (mut send, mut recv) = connection.open_bi().await.map_err(|error| {
-            tracing::warn!(%error, "could not open the control stream");
-            ConnectError::Unreachable
+        let (mut send, mut recv) = connection.controle().ok_or_else(|| {
+            tracing::warn!("o enlace não entregou o canal de controle");
+            ConnectError::ProtocolViolation
         })?;
         // Control above every transfer, on this end too. ADR 0027; the ordering
         // only holds inside this one connection, and that limit is written down
@@ -757,6 +695,7 @@ impl Client {
                 nickname,
                 signing_key,
                 &impressao,
+                &connection.impressao_dtls_local(),
                 join_secret,
             ),
         )
@@ -786,19 +725,12 @@ impl Client {
         // **A chave inteira fica pinada depois da primeira ligação completa**
         // (ADR 0060, «Força»): daqui em diante, a conferência daquele código usa
         // os 256 bits, e não só os 75. Depois do `Session`, e não dentro do
-        // TLS: uma ligação recusada não deixa pino.
-        if let Verificacao::Codigo {
-            codigo, pino: None, ..
-        } = &verificacao
-        {
-            if let Some(chave) =
-                crate::confere_codigo::chave_do_certificado(&certificado_do_servidor(&connection)?)
-            {
-                pins.pin(
-                    &crate::confere_codigo::chave_do_pino(codigo),
-                    seele_proto::transport::key_fingerprint(&chave),
-                );
-            }
+        // DTLS: uma ligação recusada não deixa pino.
+        if let Some((codigo, chave)) = a_pinar {
+            pins.pin(
+                &crate::confere_codigo::chave_do_pino(&codigo),
+                seele_proto::transport::key_fingerprint(&chave),
+            );
         }
 
         // Uma tarefa é dona do fluxo de leitura e entrega quadros inteiros por
@@ -806,15 +738,20 @@ impl Client {
         // e como ninguém cancela um `read_exact` no meio, o fluxo não
         // dessincroniza.
         let (para_dentro, inbox) = tokio::sync::mpsc::unbounded_channel();
+        let do_leitor = connection.clone();
         tokio::spawn(async move {
             let mut recv = recv;
             // As mensagens de um vocabulário mais novo que o servidor mandou. A
             // primeira vai ao registro; as outras só à contagem, para um
             // servidor defeituoso não encher o `seele.log`.
             let mut desconhecidas = seele_proto::control::Desconhecidas::default();
+            // Se uma `Disconnecting` já passou: o código de fechamento que vier
+            // depois dela não vira uma segunda despedida.
+            let mut despediu = false;
             loop {
                 match frame::ler_da_lista::<ServerMessage>(&mut recv).await {
                     Ok(Lido::Mensagem(mensagem)) => {
+                        despediu |= matches!(mensagem, ServerMessage::Disconnecting { .. });
                         if para_dentro.send(mensagem).is_err() {
                             // Ninguém mais escuta: o `Client` foi descartado.
                             return;
@@ -838,6 +775,25 @@ impl Client {
                     }
                     Err(erro) => {
                         tracing::debug!(%erro, "o fluxo de controle terminou");
+                        // **A despedida que o fio não levou.** Sem crédito no
+                        // `ctl`, o `Disconnecting { FellBehind }` do servidor
+                        // pode não sair, e ele fecha com
+                        // [`crate::transporte::CODIGO_FICOU_PARA_TRAS`]. O corte
+                        // não depende de crédito. Lido aqui, ele vira a mesma
+                        // mensagem que o quadro daria, e o motor, o `Room` e a
+                        // casca seguem o caminho de sempre: o aviso, a queda e a
+                        // bateria, sem fim.
+                        if !despediu {
+                            if let Some(reason) =
+                                despedida_pelo_fechamento(&do_leitor, ESPERA_PELO_CORTE).await
+                            {
+                                tracing::info!(
+                                    ?reason,
+                                    "o servidor fechou com o código de despedida, sem o quadro"
+                                );
+                                let _ = para_dentro.send(ServerMessage::Disconnecting { reason });
+                            }
+                        }
                         return;
                     }
                 }
@@ -915,21 +871,25 @@ impl Client {
             link_state: LinkTrust::Verified,
             pending_ping: None,
             last_rtt: None,
+            ping_da_sonda: None,
+            pings_da_sonda: 0,
+            ultimo_ping_da_sonda: None,
+            ida_e_volta_da_sonda: None,
             telas: std::sync::Arc::new(tokio::sync::Mutex::new(telas)),
             anexos: std::sync::Arc::new(tokio::sync::Mutex::new(anexos)),
-            endpoint: endpoint.clone(),
+            ponta,
         })
     }
 
-    /// A ponta QUIC que esta conexão usa para falar com o servidor.
+    /// A ponta WebRTC que esta conexão usa para falar com o servidor.
     ///
     /// **É o que o caminho entre pares reaproveita**, e não uma ponta nova —
-    /// ver o doc do campo. Devolvida como punho: `quinn::Endpoint` é barato de
-    /// clonar (é um punho sobre um estado compartilhado), e `enlace::Motor`
-    /// guarda a própria cópia para discar e atender nela.
+    /// ver o doc do campo. Devolvida como punho: a `Ponta` é barata de clonar
+    /// (um `Arc` por dentro), e `enlace::Motor` guarda a própria cópia para
+    /// discar e atender nela.
     #[must_use]
-    pub fn endpoint(&self) -> quinn::Endpoint {
-        self.endpoint.clone()
+    pub fn ponta(&self) -> crate::transporte::PontaDaSessao {
+        self.ponta.clone()
     }
 
     /// A fila por onde chegam os fluxos de tela, sem o byte de tipo.
@@ -1007,8 +967,7 @@ impl Client {
     ///
     /// Fails if the datagram is too large for the path.
     pub fn send_media(&self, datagram: Vec<u8>) -> Result<()> {
-        self.connection.send_datagram(datagram.into())?;
-        Ok(())
+        self.media().send(datagram)
     }
 
     /// Waits for the next media datagram.
@@ -1017,7 +976,7 @@ impl Client {
     ///
     /// Fails when the connection closes.
     pub async fn next_media(&self) -> Result<Vec<u8>> {
-        Ok(self.connection.read_datagram().await?.to_vec())
+        self.media().next().await
     }
 
     /// Subscribes to a text channel.
@@ -1077,6 +1036,38 @@ impl Client {
                 request,
                 id,
                 channel,
+                payload,
+            },
+        )
+        .await
+    }
+
+    /// Pede uma **ação declarada** de MOD (`ClientMessage::AcaoDeMod`, API 7).
+    ///
+    /// O mesmo pedido de [`Self::mod_request`], nomeando a ação que o
+    /// `mod.json` declarou. Quem autoriza é o servidor, antes de chamar a
+    /// metade de servidor; a resposta — ou a recusa `acao-nao-declarada` ou
+    /// `sem-permissao` — volta no `ModReply` deste `request`.
+    ///
+    /// # Errors
+    ///
+    /// Falha quando o fluxo de controle fecha.
+    pub async fn acao_de_mod(
+        &mut self,
+        request: u32,
+        id: String,
+        channel: ChannelId,
+        acao: String,
+        payload: String,
+    ) -> Result<()> {
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::AcaoDeMod {
+                request,
+                id,
+                channel,
+                acao,
                 payload,
             },
         )
@@ -1405,6 +1396,24 @@ impl Client {
         .await
     }
 
+    /// Pede um verbo de cargo (ADR 0064), com a revisão que a tela viu. Quem
+    /// decide é o servidor; a resposta é o `QuadroDeCargos` novo ou um
+    /// `CargoRecusado`. `None` no pedido é o `PedirCargos`.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn cargo(
+        &mut self,
+        pedido: Option<(u64, seele_proto::cargos::PedidoDeCargo)>,
+    ) -> Result<()> {
+        let mensagem = match pedido {
+            Some((revisao, pedido)) => seele_proto::cargos::mensagem_do_pedido(revisao, pedido),
+            None => ClientMessage::PedirCargos,
+        };
+        frame::write_em(&mut self.send, self.carimbo, &mensagem).await
+    }
+
     /// Asks the server to bar a person from returning.
     ///
     /// # Errors
@@ -1517,6 +1526,13 @@ impl Client {
                     self.pending_ping = None;
                 }
             }
+            if let Some((sent, at)) = self.ping_da_sonda {
+                if sent == timestamp {
+                    let contadas = self.ida_e_volta_da_sonda.map_or(0, |(_, n)| n);
+                    self.ida_e_volta_da_sonda = Some((at.elapsed(), contadas.saturating_add(1)));
+                    self.ping_da_sonda = None;
+                }
+            }
         }
         Ok(event)
     }
@@ -1590,10 +1606,8 @@ impl Client {
 
     /// What the transport says about flow control on this connection.
     ///
-    /// Read from `quinn`'s own frame counters rather than instrumented by hand:
-    /// the numbers that decide whether a burst was held back by the QUIC window
-    /// are already counted one layer down, and a second count kept up here would
-    /// only ever disagree with the first.
+    /// **Zero desde a 0.17**: ver [`FlowControl`]. O SCTP do enlace não conta
+    /// bloqueio, e este número não é inventado aqui em cima.
     ///
     /// This exists because of `docs/pendencias.md` #1, whose first suspicion was
     /// the flow-control window at the start of a connection. A suspicion like
@@ -1602,24 +1616,60 @@ impl Client {
     /// is not necessarily the machine anybody is developing on.
     #[must_use]
     pub fn flow_control(&self) -> FlowControl {
-        FlowControl::from(&self.connection.stats())
+        FlowControl::default()
     }
 
     /// O que o transporte contou sobre o caminho, para a [`crate::caminho::Sonda`].
     ///
-    /// Lida da mesma `ConnectionStats` que [`Self::flow_control`], e por um
-    /// motivo que vale escrever: **é a única fonte que sabe quantos bytes de
-    /// fato saíram pelo soquete.** O que a bomba conta são os bytes que ela
-    /// escreveu no fluxo, e um byte escrito num fluxo QUIC não é um byte na
-    /// rede — pode estar na janela de congestionamento esperando a vez. É
-    /// justamente essa diferença que a sonda precisa medir, então contá-la aqui
-    /// em cima seria contar a coisa errada.
+    /// Os bytes vêm da `Leitura` do enlace, e por um motivo que vale escrever:
+    /// **é a única fonte que sabe quantos bytes de fato saíram pelo soquete.**
+    /// O que a bomba conta são os bytes que ela escreveu no canal, e um byte
+    /// escrito num canal não é um byte na rede — pode estar na fila do SCTP
+    /// esperando a vez. É justamente essa diferença que a sonda precisa medir.
     ///
     /// Devolve o acumulado desde o começo desta conexão; a subtração é da sonda,
     /// que é quem sabe onde a janela dela começou.
     #[must_use]
     pub fn amostra_do_transporte(&self) -> crate::caminho::Transporte {
-        crate::caminho::Transporte::from(&self.connection.stats())
+        transporte_do_enlace(
+            self.connection.leitura().bytes_enviados,
+            self.ida_e_volta_da_sonda,
+            self.ping_da_sonda.map(|(_, saiu)| saiu.elapsed()),
+        )
+    }
+
+    /// Manda o `Ping` da sonda de subida, se não há um no ar.
+    ///
+    /// É a medida de dor da sonda desde a 0.17 (ver
+    /// [`crate::caminho::IdaEVolta`]): `crate::enlace` o chama a cada
+    /// [`INTERVALO_DO_PING_DA_SONDA`] enquanto a tela transmite. Um no ar de
+    /// cada vez, para a fila não ser medida pelo próprio `Ping`; o que ainda
+    /// não voltou é lido como piso da ida e volta (`IdaEVolta::em_voo`).
+    ///
+    /// O carimbo leva [`MARCA_DO_PING_DA_SONDA`], que não se confunde com o
+    /// `Ping` de rotina, o da entrada (bit 63) nem o da cerca do buraco (bit 62).
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn pingar_para_a_sonda(&mut self) -> Result<()> {
+        if self.ping_da_sonda.is_some()
+            || self
+                .ultimo_ping_da_sonda
+                .is_some_and(|saiu| saiu.elapsed() < INTERVALO_DO_PING_DA_SONDA)
+        {
+            return Ok(());
+        }
+        self.ultimo_ping_da_sonda = Some(std::time::Instant::now());
+        self.pings_da_sonda = self.pings_da_sonda.wrapping_add(1);
+        let carimbo = MARCA_DO_PING_DA_SONDA | (self.pings_da_sonda & (MARCA_DO_PING_DA_SONDA - 1));
+        self.ping_da_sonda = Some((carimbo, std::time::Instant::now()));
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::Ping { timestamp: carimbo },
+        )
+        .await
     }
 
     /// The most recent round trip, if a ping has been answered.
@@ -1639,7 +1689,7 @@ impl Client {
 
     /// Closes the connection, naming what closed it.
     ///
-    /// The reason travels in the QUIC `CONNECTION_CLOSE` frame and is what the
+    /// The reason travels in the link's closing `corte` on `ctl` and is what the
     /// server's log records, so it is the only trace the other side keeps of why
     /// a session that had already completed the handshake went away. Every
     /// close that is not a person leaving has to say so here: an invite that did
@@ -1647,7 +1697,7 @@ impl Client {
     /// that hides a refusal.
     pub fn close(&mut self, reason: &[u8]) {
         self.link_state = LinkTrust::Offline;
-        self.connection.close(0_u32.into(), reason);
+        self.connection.close(0, reason);
     }
 
     // ---- unmaking a room ----
@@ -1924,6 +1974,137 @@ impl Client {
 /// A person left. The ordinary end of a session.
 const EJECTED: &[u8] = b"ejected";
 
+/// A marca do carimbo do `Ping` da sonda de subida: o bit 61. O 63 é o da
+/// entrada (`assento`) e o 62 o da cerca do buraco (`volta`).
+pub const MARCA_DO_PING_DA_SONDA: u64 = 1 << 61;
+
+/// De quanto em quanto a sonda pede uma ida e volta enquanto a tela transmite.
+///
+/// Meio segundo: duas medidas por janela de um segundo da sonda, e duas
+/// mensagens por segundo no `ctl`, muito abaixo do balde de quadros do servidor
+/// (20 por segundo).
+pub const INTERVALO_DO_PING_DA_SONDA: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Quanto a tarefa leitora espera pelo motivo da conexão depois de o `ctl`
+/// terminar.
+///
+/// **Limitada, e não zero nem infinita** (a revisão do cliente lento). O fim do
+/// `ctl` pode chegar antes do corte que diz o motivo, então ler o motivo na hora
+/// às vezes não acha nada. E esperar sem teto seguraria a queda de toda conexão
+/// cujo `ctl` acabou e o resto não. Na queda comum o motivo já está lá, e a
+/// espera não custa nada; ela só é paga no caso raro do `ctl` terminado com a
+/// conexão de pé.
+const ESPERA_PELO_CORTE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A despedida que um código de fechamento diz, quando diz alguma.
+///
+/// **Só o código do «ficou para trás» vira despedida.** O 0 é o fechamento
+/// comum; o 1, o 2 e o 3 são cortes do enlace; os do core (`0x5345_0010`, a
+/// recusa antes do `Hello`, e `0x5345_0020`, a recusa de par) são deste lado; e
+/// um código desconhecido continua sendo uma queda sem nome. Inferir
+/// `FellBehind` de qualquer corte seria dar nome ao que não se sabe.
+fn despedida_do_codigo(codigo: u32) -> Option<seele_proto::control::DisconnectReason> {
+    (codigo == crate::transporte::CODIGO_FICOU_PARA_TRAS)
+        .then_some(seele_proto::control::DisconnectReason::FellBehind)
+}
+
+/// O motivo tipado da conexão, lido depois de o `ctl` terminar, como
+/// despedida. Espera no máximo `espera` pelo motivo.
+async fn despedida_pelo_fechamento(
+    conexao: &crate::transporte::Conexao,
+    espera: std::time::Duration,
+) -> Option<seele_proto::control::DisconnectReason> {
+    match tokio::time::timeout(espera, conexao.closed()).await {
+        Ok(crate::transporte::Motivo::Fechada { codigo }) => despedida_do_codigo(codigo),
+        Ok(_) | Err(_) => None,
+    }
+}
+
+/// A telemetria que o enlace da 0.17 dá à sonda: **só o que existe**.
+///
+/// O SCTP do enlace não conta perda nem reação de congestionamento, e esses
+/// ficam `None` — e não zero, que a sonda leria como «nada doeu». A ida e volta
+/// é a do `Ping` da sonda (`(última, quantas)`), e `em_voo` é há quanto tempo
+/// saiu o que ainda não voltou.
+fn transporte_do_enlace(
+    bytes_enviados: u64,
+    ida_e_volta_da_sonda: Option<(std::time::Duration, u64)>,
+    em_voo: Option<std::time::Duration>,
+) -> crate::caminho::Transporte {
+    crate::caminho::Transporte {
+        bytes_enviados,
+        eventos_de_congestionamento: None,
+        pacotes_perdidos: None,
+        ida_e_volta: ida_e_volta_da_sonda.map(|(valor, amostras)| crate::caminho::IdaEVolta {
+            valor,
+            amostras,
+            em_voo,
+        }),
+    }
+}
+
+#[cfg(test)]
+mod a_telemetria_do_enlace {
+    use super::transporte_do_enlace;
+    use crate::caminho::{Amostra, IdaEVolta, Sonda, TETO_SEM_MEDIDA_BPS};
+    use crate::tela::{TetoDeVideo, CAMINHO_DA_PROVA_BPS};
+    use seele_proto::signal::SignalBand;
+    use std::time::{Duration, Instant};
+
+    /// O que o enlace não mede chega à sonda como ausência, nunca como zero.
+    #[test]
+    fn perda_e_congestionamento_sao_ausentes_e_nao_zero() {
+        let t = transporte_do_enlace(1_000, None, None);
+        assert_eq!(t.bytes_enviados, 1_000);
+        assert_eq!(t.pacotes_perdidos, None);
+        assert_eq!(t.eventos_de_congestionamento, None);
+        assert_eq!(t.ida_e_volta, None, "sem Pong não há ida e volta");
+
+        let t = transporte_do_enlace(
+            1_000,
+            Some((Duration::from_millis(30), 4)),
+            Some(Duration::from_millis(5)),
+        );
+        assert_eq!(t.pacotes_perdidos, None);
+        assert_eq!(t.eventos_de_congestionamento, None);
+        assert_eq!(
+            t.ida_e_volta,
+            Some(IdaEVolta {
+                valor: Duration::from_millis(30),
+                amostras: 4,
+                em_voo: Some(Duration::from_millis(5)),
+            })
+        );
+    }
+
+    /// De ponta a ponta no cliente: janelas cheias com a telemetria que o
+    /// `Client` monta, sem `Pong`, não levam a estimativa acima do teto sem
+    /// medida.
+    #[test]
+    fn sem_pong_a_amostra_do_cliente_nao_faz_a_sonda_subir() {
+        let mut sonda = Sonda::nova();
+        let inicio = Instant::now();
+        // A perna de quem hospeda larga, fora do caminho: só a nossa conta.
+        let teto = TetoDeVideo::com_caminho(CAMINHO_DA_PROVA_BPS)
+            .com_caminho_de_quem_hospeda(200_000_000)
+            .teto(SignalBand::Nominal);
+        let mut bytes = 0;
+        for s in 0..30_u64 {
+            bytes += 400_000;
+            sonda.observar(
+                inicio + Duration::from_secs(s),
+                &Amostra {
+                    transporte: transporte_do_enlace(bytes, None, None),
+                    teto,
+                    faixa: SignalBand::Nominal,
+                },
+            );
+        }
+        assert!(sonda.estimativa() <= TETO_SEM_MEDIDA_BPS);
+        assert!(sonda.janelas_sem_medida() > 0);
+    }
+}
+
 /// The client refused the server: the invite named a different key.
 ///
 /// **Segunda linha, e não o caminho de sempre.** Desde que a impressão esperada
@@ -1979,54 +2160,13 @@ pub const INVITE_REFUSED: &[u8] = b"invite refused";
 /// [`pilha_dupla`] only logs a refusal. A platform that refuses it would leave a
 /// client that reaches IPv6 and not IPv4, and that is the trade being taken
 /// knowingly rather than missed.
-pub(crate) fn local_endpoint(
-    local: Option<std::net::UdpSocket>,
-) -> Result<quinn::Endpoint, ConnectError> {
-    // Um socket já aberto: o do degrau 4 do ADR 0022. Ele foi aberto com o mesmo
-    // cuidado que `Endpoint::client` teria tido — ver `crate::encontro` —, e vem
-    // pronto porque o furo de NAT já saiu dele.
-    if let Some(local) = local {
-        let runtime = quinn::default_runtime().ok_or_else(|| {
-            tracing::error!("não há runtime assíncrono para o QUIC");
-            ConnectError::LocalEndpoint
-        })?;
-        return quinn::Endpoint::new(quinn::EndpointConfig::default(), None, local, runtime)
-            .map_err(|error| {
-                tracing::warn!(%error, "could not adopt the rendezvous socket");
-                ConnectError::LocalEndpoint
-            });
-    }
-    match socket_de_quem_conecta() {
-        Ok(socket) => {
-            let runtime = quinn::default_runtime().ok_or_else(|| {
-                tracing::error!("não há runtime assíncrono para o QUIC");
-                ConnectError::LocalEndpoint
-            })?;
-            quinn::Endpoint::new(quinn::EndpointConfig::default(), None, socket, runtime).map_err(
-                |error| {
-                    tracing::error!(%error, "could not open a local QUIC endpoint");
-                    ConnectError::LocalEndpoint
-                },
-            )
-        }
-        // Uma máquina sem IPv6, ou — raro — sem porta que nenhum socket IPv4
-        // segure. O socket só IPv4 não tem o defeito de `socket_conferido`: a
-        // escolha de porta dele confere os outros sockets IPv4.
-        Err(error) => {
-            tracing::info!(
-                %error,
-                "no dual-stack local socket: falling back to an IPv4-only local socket"
-            );
-            quinn::Endpoint::client(SocketAddr::from(([0, 0, 0, 0], 0))).map_err(|error| {
-                tracing::error!(%error, "could not open a local QUIC endpoint");
-                ConnectError::LocalEndpoint
-            })
-        }
-    }
-}
-
-/// O socket de pilha dupla de quem conecta: o de [`local_endpoint`] e o da
-/// `Batida` de [`crate::encontro`], que o QUIC adota depois do furo.
+///
+/// # Desde a 0.17
+///
+/// Quem abre a ponta WebRTC em cima deste socket é
+/// `crate::transporte::abrir_ponta`, uma por sessão (E3): o `CHAMA` do degrau 4
+/// sai da porta dela, e a reconexão de uma sessão não fecha a de outra. O
+/// recuo para um socket só IPv4 continua lá.
 ///
 /// # Errors
 ///
@@ -2187,293 +2327,789 @@ thread_local! {
     > = const { std::cell::RefCell::new(None) };
 }
 
-/// A decisão do verificador, depois de um aperto de mão que terminou.
+/// Disca um anfitrião pela ponta desta sessão: todos os `alvos` num agente ICE
+/// só (D2 da 0.17).
 ///
-/// **A que falta não vira `Matches`.** Era `unwrap_or(Matches { fingerprint:
-/// "" })`: um TLS que terminasse sem o verificador rodar passava como pin que
-/// confere, o `Hello` saía para um servidor que ninguém conferiu, e com
-/// impressão esperada o veredito virava `InviteDisagrees { offered: "" }`, que
-/// a lista de conhecidos gravaria. Agora é [`ConnectError::TlsRefused`], dito
-/// no log, e antes do `Hello`: `connect_por` volta com o erro antes de abrir o
-/// fluxo de controle, e a conexão cai quando a única alça dela é solta.
+/// **Sem pino no DTLS, de propósito** (`Pino::Qualquer`): quem confere a
+/// impressão é [`conferir_quem_atendeu`], antes do `Hello`, com as regras de
+/// pin e de impressão esperada do ADR 0003 inteiras — inclusive a que deixa
+/// passar, com aviso, um servidor fixado cujo link está velho
+/// (`Verdict::InviteDisagrees`), que um pino no DTLS recusaria. O que sai para
+/// quem atendeu antes disso é o DTLS e nada do protocolo.
 ///
-/// Não há como um aperto de mão de verdade chegar aqui sem decisão:
-/// `connect_por` monta um `ClientConfig` novo a cada conexão, sem sessão para
-/// retomar, e o `rustls` chama `verify_server_cert` em todo aperto de mão
-/// completo. Por isso a regra é uma função à parte, e o teste é dela.
-fn decisao_do_aperto(decisao: Option<PinDecision>) -> Result<PinDecision, ConnectError> {
-    decisao.ok_or_else(|| {
-        tracing::warn!(
-            "o TLS terminou sem decisão do verificador de pin: o certificado não foi \
-             conferido contra pin nem impressão, e a conexão não segue (o `Hello` não sai)"
-        );
-        ConnectError::TlsRefused
+/// `credencial` é o U do `CHAMA` do degrau 4, quando houve; `None` sorteia.
+///
+/// # Errors
+///
+/// [`ConnectError::SemResposta`] quando nenhum candidato respondeu ao ICE, e os
+/// outros de [`classificar_a_discagem`].
+pub(crate) async fn discar(
+    ponta: &crate::transporte::Ponta,
+    alvos: Vec<SocketAddr>,
+    credencial: Option<String>,
+    prazo: std::time::Duration,
+) -> Result<crate::transporte::Conexao, ConnectError> {
+    let quantos = alvos.len();
+    let mut discagem = crate::transporte::Discagem::nova(alvos, crate::transporte::Pino::Qualquer);
+    discagem.credencial = credencial;
+    discagem.prazo = prazo;
+    ponta.discar(discagem).await.map_err(|falha| {
+        let erro = classificar_a_discagem(&falha);
+        tracing::warn!(?falha, ?erro, candidatos = quantos, "a discagem não abriu");
+        erro
     })
 }
 
-/// Decides what a failed QUIC connection actually was.
+/// O que uma discagem que falhou foi, com nome.
 ///
-/// The pin decision is consulted first: a certificate that changed produces a
-/// TLS rejection like any other, and the difference between "this server is not
-/// who it was" and "this server's certificate is unacceptable" is the whole of
-/// ADR 0003.
+/// Sem braço `_`, pela regra de `enlace::alguem_respondeu`: uma falha nova do
+/// enlace não compila até alguém dizer o que ela vira na tela.
+pub(crate) fn classificar_a_discagem(falha: &crate::transporte::FalhaAoDiscar) -> ConnectError {
+    use crate::transporte::FalhaAoDiscar;
+    match falha {
+        // **Nenhum candidato devolveu a checagem ICE.** É o «os pacotes saíram e
+        // nada voltou» de sempre, e não a sincronização.
+        FalhaAoDiscar::SemResposta => ConnectError::SemResposta,
+        // Só com um pino no DTLS, que o nativo não usa (ver [`discar`]). Se um
+        // dia usar, é a impressão que não confere, e sem a vista não há o que
+        // mostrar além da recusa.
+        FalhaAoDiscar::ImpressaoDiferente { vista } => ConnectError::InviteMismatch {
+            expected: String::new(),
+            offered: vista.map(|vista| hex(&vista)).unwrap_or_default(),
+        },
+        // O ICE achou caminho e o DTLS ou o SCTP caíram por outro motivo.
+        FalhaAoDiscar::Protocolo(_) => ConnectError::TlsRefused,
+        // Alguém respondeu ao ICE e o resto não fechou no prazo: é o servidor
+        // demorando, e não a rede sumindo.
+        FalhaAoDiscar::Prazo => ConnectError::HandshakeTimeout,
+        FalhaAoDiscar::SemAlvos | FalhaAoDiscar::Io(_) => ConnectError::Unreachable,
+        FalhaAoDiscar::PontaFechada => ConnectError::LocalEndpoint,
+    }
+}
+
+/// A impressão em hex minúsculo, como o `fp=` do link e o arquivo de pins a
+/// escrevem (`seele_proto::transport::certificate_fingerprint`).
+pub(crate) fn hex(digest: &[u8; 32]) -> String {
+    use std::fmt::Write as _;
+    digest
+        .iter()
+        .fold(String::with_capacity(64), |mut texto, byte| {
+            let _ = write!(texto, "{byte:02x}");
+            texto
+        })
+}
+
+/// O que [`conferir_quem_atendeu`] decidiu: a decisão de pin, a chave da sala a
+/// pinar depois da sessão (só no primeiro contato por código), e a impressão
+/// que a prova de cliente amarra.
+type Conferido = (
+    PinDecision,
+    Option<(seele_proto::codigo::Codigo, [u8; 32])>,
+    [u8; 32],
+);
+
+/// Confere quem atendeu **antes do `Hello`**: o TOFU por endereço, ou a sala
+/// do código.
 ///
-/// A recusa pela impressão esperada é o mesmo caso com outro nome: o
-/// verificador falhou o aperto de mão de propósito, e o motivo está na decisão
-/// que ele deixou. O `match` não tem braço `_` pela razão que
-/// `enlace::alguem_respondeu` escreve: uma decisão nova não compila até alguém
-/// dizer o que ela vira aqui.
-fn classify_connection_error(
-    error: &quinn::ConnectionError,
-    pin: Option<PinDecision>,
-) -> ConnectError {
-    match pin {
-        Some(PinDecision::Changed { pinned, offered }) => {
-            ConnectError::PinChanged { pinned, offered }
+/// - Por endereço: a impressão do certificado DTLS que o enlace viu passa pelo
+///   [`TofuVerifier`], com a esperada e a regra de onde o pino prova o
+///   servidor. A prova amarra essa impressão. **Se quem atendeu é uma sala**
+///   (apresentação 0x03 presente), a impressão conferida e amarrada é a da
+///   chave dela, depois de conferida a assinatura sobre este DTLS.
+/// - Por código: `apresentacao` é a mensagem 0x03 da sala (chave Ed25519 e a
+///   assinatura dela sobre esta impressão DTLS), conferida pelo
+///   [`crate::confere_codigo::ConfereCodigo`]. A prova amarra a impressão da
+///   sala, o SHA-256 da chave (D5).
+///
+/// # Errors
+///
+/// [`ConnectError::PinChanged`], [`ConnectError::InviteMismatch`] ou
+/// [`ConnectError::CodigoNaoConfere`].
+pub(crate) fn conferir_quem_atendeu(
+    apresentacao: &[u8],
+    impressao_dtls: &[u8; 32],
+    pin_key: &str,
+    esperada: Option<&crate::enlace::Esperada>,
+    o_pino_prova_o_servidor: bool,
+    pins: &Arc<dyn PinStore>,
+) -> Result<Conferido, ConnectError> {
+    if let Some(crate::enlace::Esperada::Codigo(codigo)) = esperada {
+        // **Uma pessoa, e não um endereço** (ADR 0060): o pino é o da chave
+        // sob `@CÓDIGO`, e não o do endereço que respondeu.
+        let pino = pins.pinned(&crate::confere_codigo::chave_do_pino(codigo));
+        let chave = crate::confere_codigo::ConfereCodigo::novo(*codigo, pino.clone())
+            .confere_apresentacao(apresentacao, impressao_dtls)
+            .map_err(ConnectError::CodigoNaoConfere)?;
+        let impressao_da_sala = seele_proto::transport::certificate_digest(&chave);
+        let fingerprint = hex(&impressao_da_sala);
+        let decisao = if pino.is_some() {
+            PinDecision::Matches { fingerprint }
+        } else {
+            PinDecision::FirstContact { fingerprint }
+        };
+        let a_pinar = pino.is_none().then_some((*codigo, chave));
+        return Ok((decisao, a_pinar, impressao_da_sala));
+    }
+    // **A sala atendeu um endereço, e entra pelo TOFU da chave dela** (como na
+    // 0.16: a decisão de 16/10 e o ADR 0060, «o dono entra na própria sala por
+    // `127.0.0.1:8385`, e o pino do TOFU é por endereço»).
+    //
+    // Um servidor manda a apresentação vazia; a sala manda a chave e a
+    // assinatura sobre este DTLS. O DTLS da sala é efêmero desde a 0.17, então
+    // pinar a impressão dele daria «a chave mudou» na entrada seguinte, e a
+    // prova amarrada a ele seria recusada pela sala, que confere pela da chave.
+    // Conferida a assinatura (o mesmo `ConfereCodigo`, com o código que a
+    // própria chave dá), a impressão que o TOFU confere e a prova amarra é a da
+    // chave, `certificate_digest(chave)`: a mesma que o `fp=` de um link da
+    // sala carrega.
+    let chave_da_sala = apresentacao
+        .get(..32)
+        .and_then(|chave| <[u8; 32]>::try_from(chave).ok())
+        .filter(|_| apresentacao.len() == crate::confere_codigo::APRESENTACAO_DA_SALA_LEN);
+    let impressao_conferida = match chave_da_sala {
+        Some(chave) => {
+            let codigo = seele_proto::codigo::Codigo::da_chave(&chave);
+            crate::confere_codigo::ConfereCodigo::novo(codigo, None)
+                .confere_apresentacao(apresentacao, impressao_dtls)
+                .map_err(ConnectError::CodigoNaoConfere)?;
+            seele_proto::transport::certificate_digest(&chave)
         }
-        // **Antes do `Hello`, e com nome.** Sem este braço a recusa sairia
-        // `TlsRefused`, a FFI a traduziria por `Refused { Incompatible }`, e a
-        // tela mandaria atualizar o SEELE nas duas máquinas, sobre um servidor
-        // que não é o do link.
-        Some(PinDecision::InviteRefused { expected, offered }) => {
-            ConnectError::InviteMismatch { expected, offered }
+        None => *impressao_dtls,
+    };
+    let verificador = TofuVerifier::new(
+        Arc::clone(pins),
+        pin_key.to_owned(),
+        esperada.and_then(|esperada| match esperada {
+            crate::enlace::Esperada::Certificado(impressao) => Some(impressao.clone()),
+            crate::enlace::Esperada::Codigo(_) => None,
+        }),
+        o_pino_prova_o_servidor,
+    );
+    match verificador.conferir_impressao(hex(&impressao_conferida)) {
+        decisao @ (PinDecision::FirstContact { .. } | PinDecision::Matches { .. }) => {
+            Ok((decisao, None, impressao_conferida))
         }
-        // **O verificador aceitou o certificado, e quem atendeu não provou ter
-        // a chave dele.** O certificado é público e se repete inteiro; a chave
-        // privada, não. O TLS a cobra depois do verificador, na assinatura de
-        // quem atende (`CertificateVerify`), e quando ela não confere o
-        // `rustls` daqui recusa com `decrypt_error` (51). É o TLS **local** que
-        // falha, então o alerta vem em `TransportError(e).code`, e não no
-        // `ConnectionClosed` que `par::motivo_da_recusa` lê (o alerta que o
-        // outro lado mandou).
-        //
-        // Sem este braço, o impostor saía `TlsRefused`, que a FFI traduz por
-        // versão incompatível.
-        Some(PinDecision::FirstContact { .. } | PinDecision::Matches { .. })
-            if matches!(
-                error,
-                quinn::ConnectionError::TransportError(e)
-                    if e.code == quinn::TransportErrorCode::crypto(51)
-            ) =>
-        {
-            tracing::warn!(
-                %error,
-                "quem atendeu mostrou um certificado que o verificador aceitou, e não provou \
-                 ter a chave dele: o TLS recusou a assinatura (`decrypt_error`)"
+        PinDecision::Changed { pinned, offered } => {
+            Err(ConnectError::PinChanged { pinned, offered })
+        }
+        PinDecision::InviteRefused { expected, offered } => {
+            Err(ConnectError::InviteMismatch { expected, offered })
+        }
+    }
+}
+
+#[cfg(test)]
+mod quem_atendeu_e_conferido_antes_do_hello {
+    use super::{conferir_quem_atendeu, discar, hex, ConnectError};
+    use crate::tofu::{MemoryPinStore, PinDecision, PinStore};
+    use std::sync::Arc;
+
+    fn loja() -> Arc<dyn PinStore> {
+        Arc::new(MemoryPinStore::new())
+    }
+
+    #[test]
+    fn o_hex_e_o_mesmo_do_fp_do_link() {
+        let der = b"um certificado qualquer";
+        assert_eq!(
+            hex(&seele_proto::transport::certificate_digest(der)),
+            seele_proto::transport::certificate_fingerprint(der),
+            "a impressão do DTLS saiu num formato diferente do `fp=` do link: todo pino \
+             existente dispararia «a chave mudou»"
+        );
+    }
+
+    #[test]
+    fn primeiro_contato_fixa_e_o_segundo_confere() {
+        let pins = loja();
+        let fp = [7_u8; 32];
+        let (decisao, _, amarrada) =
+            conferir_quem_atendeu(&[], &fp, "casa:8383", None, true, &pins).expect("primeiro");
+        assert_eq!(
+            decisao,
+            PinDecision::FirstContact {
+                fingerprint: hex(&fp)
+            }
+        );
+        assert_eq!(
+            amarrada, fp,
+            "a prova tem de amarrar a impressão DTLS vista"
+        );
+        let (decisao, _, _) =
+            conferir_quem_atendeu(&[], &fp, "casa:8383", None, true, &pins).expect("segundo");
+        assert_eq!(
+            decisao,
+            PinDecision::Matches {
+                fingerprint: hex(&fp)
+            }
+        );
+    }
+
+    #[test]
+    fn a_chave_que_mudou_e_recusada_antes_do_hello() {
+        let pins = loja();
+        pins.pin("casa:8383", hex(&[1; 32]));
+        assert_eq!(
+            conferir_quem_atendeu(&[], &[2; 32], "casa:8383", None, true, &pins).map(|_| ()),
+            Err(ConnectError::PinChanged {
+                pinned: hex(&[1; 32]),
+                offered: hex(&[2; 32]),
+            })
+        );
+        assert_eq!(
+            pins.pinned("casa:8383"),
+            Some(hex(&[1; 32])),
+            "o pino mudou"
+        );
+    }
+
+    #[test]
+    fn a_impressao_do_link_que_nao_confere_e_recusada_e_nada_e_fixado() {
+        let pins = loja();
+        let esperada = crate::enlace::Esperada::Certificado(hex(&[3; 32]));
+        assert_eq!(
+            conferir_quem_atendeu(&[], &[4; 32], "casa:8383", Some(&esperada), true, &pins)
+                .map(|_| ()),
+            Err(ConnectError::InviteMismatch {
+                expected: hex(&[3; 32]),
+                offered: hex(&[4; 32]),
+            })
+        );
+        assert_eq!(
+            pins.pinned("casa:8383"),
+            None,
+            "a recusa fixou a chave errada"
+        );
+    }
+
+    /// Um anfitrião de mentira em `127.0.0.1` que faz o aperto do protocolo e
+    /// confere a prova D5 como o `seeled` confere: sobre a impressão dele, a
+    /// impressão DTLS **que ele viu** de quem ligou, e o nonce. Devolve o
+    /// endereço, a impressão dele e por onde sai o veredito da prova.
+    fn anfitriao_que_confere_a_prova(
+        apresentacao: Vec<u8>,
+        certificado: crate::transporte::CertificadoDtls,
+        impressao_da_prova: [u8; 32],
+    ) -> (std::net::SocketAddr, tokio::sync::oneshot::Receiver<bool>) {
+        use ed25519_dalek::Verifier as _;
+        use seele_proto::control::{ClientMessage, ServerMessage};
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let config = crate::transporte::ConfigDoAnfitriao {
+            certificado,
+            apresentacao,
+            admitir: Arc::new(|_| true),
+        };
+        let ponta = crate::transporte::Ponta::de_socket(socket, Some(config)).unwrap();
+        let onde = ponta.local_addr();
+        let (veredito, ouvir) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let Some(conexao) = ponta.aceitar().await else {
+                return;
+            };
+            let Some((mut envio, mut recebe)) = conexao.controle() else {
+                return;
+            };
+            let Ok(ClientMessage::Hello { public_key, .. }) =
+                crate::frame::read::<ClientMessage>(&mut recebe).await
+            else {
+                return;
+            };
+            let nonce = [9_u8; 32];
+            let _ = crate::frame::write(
+                &mut envio,
+                &ServerMessage::Challenge {
+                    nonce: nonce.to_vec(),
+                },
+            )
+            .await;
+            let Ok(ClientMessage::Response { proof }) =
+                crate::frame::read::<ClientMessage>(&mut recebe).await
+            else {
+                return;
+            };
+            let chave = <[u8; 32]>::try_from(public_key.as_slice())
+                .ok()
+                .and_then(|chave| ed25519_dalek::VerifyingKey::from_bytes(&chave).ok());
+            let assinatura = <[u8; 64]>::try_from(proof.as_slice())
+                .ok()
+                .map(|bytes| ed25519_dalek::Signature::from_bytes(&bytes));
+            let mensagem = seele_proto::assinatura::prova_de_cliente_2(
+                &impressao_da_prova,
+                &conexao.impressao_dtls_do_par(),
+                &nonce,
             );
-            ConnectError::ChaveNaoProvada
-        }
-        // `None` fica aqui mesmo com o alerta 51: sem decisão do verificador,
-        // ninguém conferiu certificado nenhum, e não há chave que quem atendeu
-        // tenha deixado de provar (`decisao_do_aperto`).
-        Some(PinDecision::FirstContact { .. } | PinDecision::Matches { .. }) | None => {
-            match error {
-                // **A conexão expirou, e não o aperto de mão.** Ver `SemResposta`:
-                // este erro chega antes de haver aperto de mão nenhum, e chamá-lo
-                // de «sincronização» manda quem lê procurar no servidor um
-                // problema que está no caminho até ele.
-                quinn::ConnectionError::TimedOut => ConnectError::SemResposta,
-                quinn::ConnectionError::TransportError(_) => {
-                    tracing::warn!(%error, "TLS refused the connection");
-                    ConnectError::TlsRefused
+            let confere = matches!((chave, assinatura), (Some(chave), Some(assinatura))
+                if chave.verify(&mensagem, &assinatura).is_ok());
+            let _ = veredito.send(confere);
+            std::future::pending::<()>().await;
+        });
+        (onde, ouvir)
+    }
+
+    /// Como o anfitrião de [`anfitriao_que_despede`] encerra a sessão.
+    #[derive(Clone, Copy)]
+    enum Despedida {
+        /// Só o código de fechamento, sem o quadro: o `ctl` sem crédito.
+        SoOCodigo,
+        /// O quadro `Disconnecting { FellBehind }` e depois o código.
+        QuadroEOCodigo,
+        /// Um fechamento com este código, sem quadro.
+        Codigo(u32),
+    }
+
+    /// Um anfitrião de mentira que completa o aperto do protocolo, entrega o
+    /// `Session` e encerra como `despedida` diz.
+    fn anfitriao_que_despede(despedida: Despedida) -> std::net::SocketAddr {
+        use seele_proto::control::{ClientMessage, DisconnectReason, ServerMessage};
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let config = crate::transporte::ConfigDoAnfitriao {
+            certificado: crate::transporte::CertificadoDtls::efemero().unwrap(),
+            apresentacao: Vec::new(),
+            admitir: Arc::new(|_| true),
+        };
+        let ponta = crate::transporte::Ponta::de_socket(socket, Some(config)).unwrap();
+        let onde = ponta.local_addr();
+        tokio::spawn(async move {
+            let Some(conexao) = ponta.aceitar().await else {
+                return;
+            };
+            let Some((mut envio, mut recebe)) = conexao.controle() else {
+                return;
+            };
+            if crate::frame::read::<ClientMessage>(&mut recebe)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            let _ =
+                crate::frame::write(&mut envio, &ServerMessage::Challenge { nonce: vec![9; 32] })
+                    .await;
+            if crate::frame::read::<ClientMessage>(&mut recebe)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            let _ = crate::frame::write(
+                &mut envio,
+                &ServerMessage::Session {
+                    id: seele_proto::ids::SessionId(1),
+                    person: seele_proto::ids::PersonId(1),
+                    ssrc: seele_proto::ids::Ssrc(1),
+                    server: "servidor de teste".into(),
+                    voice_rooms: vec![],
+                    channels: vec![],
+                    roles: vec![],
+                    permissions: vec![],
+                },
+            )
+            .await;
+            let codigo = match despedida {
+                Despedida::SoOCodigo => crate::transporte::CODIGO_FICOU_PARA_TRAS,
+                Despedida::QuadroEOCodigo => {
+                    let _ = crate::frame::write(
+                        &mut envio,
+                        &ServerMessage::Disconnecting {
+                            reason: DisconnectReason::FellBehind,
+                        },
+                    )
+                    .await;
+                    crate::transporte::CODIGO_FICOU_PARA_TRAS
                 }
-                other => {
-                    tracing::warn!(error = %other, "could not establish the QUIC connection");
-                    ConnectError::Unreachable
-                }
+                Despedida::Codigo(codigo) => codigo,
+            };
+            // Um instante para o `Session` (e o quadro) saírem antes do corte,
+            // que no fechamento passa à frente do que está na fila.
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            conexao.close(codigo, b"teste");
+            let _ = conexao.closed().await;
+            std::future::pending::<()>().await;
+            drop((ponta, envio, recebe));
+        });
+        onde
+    }
+
+    /// As despedidas que a sessão viu até o `ctl` acabar.
+    async fn despedidas_vistas(
+        onde: std::net::SocketAddr,
+    ) -> Vec<seele_proto::control::DisconnectReason> {
+        use seele_proto::control::ServerMessage;
+        let mut cliente = super::Client::connect(
+            onde,
+            "servidor de teste",
+            &onde.to_string(),
+            "pessoa",
+            &ed25519_dalek::SigningKey::from_bytes(&[5; 32]),
+            loja(),
+            None,
+            None,
+        )
+        .await
+        .expect("a sessão não abriu");
+        let mut vistas = Vec::new();
+        loop {
+            match tokio::time::timeout(std::time::Duration::from_secs(10), cliente.next_event())
+                .await
+            {
+                Ok(Ok(ServerMessage::Disconnecting { reason })) => vistas.push(reason),
+                Ok(Ok(_)) => {}
+                Ok(Err(_)) => return vistas,
+                Err(_) => panic!("o `ctl` não acabou em 10 s depois do fechamento"),
             }
         }
     }
-}
 
-#[cfg(test)]
-mod a_recusa_do_tls_chega_com_nome {
-    use super::{classify_connection_error, ConnectError};
-    use crate::tofu::PinDecision;
-
-    #[test]
-    fn a_impressao_que_nao_confere_vira_invite_mismatch_e_nao_tls_refused() {
-        // O `quinn` só sabe que o aperto de mão falhou; o motivo está na decisão
-        // que o verificador deixou. Lida de outro jeito, a recusa sairia
-        // `TlsRefused`, a FFI a traduziria por `Refused { Incompatible }`, e a
-        // tela mandaria atualizar o SEELE nas duas máquinas, sobre um servidor
-        // que não é o do link.
-        let decisao = PinDecision::InviteRefused {
-            expected: "bbbb2222".into(),
-            offered: "aaaa1111".into(),
-        };
-        for erro in [
-            quinn::ConnectionError::TimedOut,
-            quinn::ConnectionError::LocallyClosed,
-        ] {
-            assert_eq!(
-                classify_connection_error(&erro, Some(decisao.clone())),
-                ConnectError::InviteMismatch {
-                    expected: "bbbb2222".into(),
-                    offered: "aaaa1111".into(),
-                },
-                "a recusa pela impressão chegou como a falha genérica de {erro:?}, \
-                 e a casca acusaria a rede ou a versão"
-            );
-        }
-    }
-
-    #[test]
-    fn sem_recusa_do_verificador_a_classificacao_e_a_de_sempre() {
+    /// **Sem o quadro, o código do «ficou para trás» é a mesma despedida.** É o
+    /// caso do cliente lento: o `ctl` sem crédito não leva o `Disconnecting`, e o
+    /// corte leva o código. A sessão vê um `Disconnecting { FellBehind }`, que o
+    /// motor trata como queda com nome (`a_sessao_acabou_aqui`): o aviso, a
+    /// bateria, e nada de fim.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_codigo_de_ficar_para_tras_sem_o_quadro_e_a_despedida_fell_behind() {
+        let vistas = despedidas_vistas(anfitriao_que_despede(Despedida::SoOCodigo)).await;
         assert_eq!(
-            classify_connection_error(&quinn::ConnectionError::TimedOut, None),
-            ConnectError::SemResposta,
-            "uma conexão que expirou deixou de ser «sem resposta» e a casca \
-             mandaria conferir a versão de quem só não foi alcançado"
-        );
-        assert_eq!(
-            classify_connection_error(
-                &quinn::ConnectionError::TimedOut,
-                Some(PinDecision::FirstContact {
-                    fingerprint: "aaaa1111".into()
-                })
-            ),
-            ConnectError::SemResposta,
-            "um primeiro contato aceito deu nome a uma falha que veio depois dele"
+            vistas,
+            vec![seele_proto::control::DisconnectReason::FellBehind],
+            "o fechamento com o código do «ficou para trás» não chegou como a despedida dele"
         );
     }
 
-    /// O TLS desta ponta que caiu com o alerta `alerta`, como o `quinn` o
-    /// devolve: um `TransportError` local, e não um `ConnectionClosed` vindo
-    /// do outro lado.
-    fn tls_local_com_o_alerta(alerta: u8) -> quinn::ConnectionError {
-        quinn::ConnectionError::TransportError(quinn::TransportErrorCode::crypto(alerta).into())
-    }
-
-    #[test]
-    fn o_tls_que_cai_na_assinatura_depois_de_o_verificador_aceitar_e_chave_nao_provada() {
-        // O impostor que repete o certificado do servidor: o verificador o
-        // aceita (o pin confere, ou é o primeiro contato), e o TLS cai na
-        // assinatura de quem atende com `decrypt_error` (51). Como
-        // `TlsRefused`, a FFI o traduzia por versão incompatível.
-        for decisao in [
-            PinDecision::Matches {
-                fingerprint: "aaaa1111".into(),
-            },
-            PinDecision::FirstContact {
-                fingerprint: "aaaa1111".into(),
-            },
-        ] {
-            assert_eq!(
-                classify_connection_error(&tls_local_com_o_alerta(51), Some(decisao.clone())),
-                ConnectError::ChaveNaoProvada,
-                "com {decisao:?}, quem não provou a chave saiu com outro nome, e a tela o \
-                 chamaria de versão incompatível"
-            );
-        }
-    }
-
-    #[test]
-    fn outro_alerta_do_tls_continua_tls_refused() {
-        // Só o 51 diz que a assinatura não conferiu. `no_application_protocol`
-        // (120) é outra coisa, e não acusa ninguém de impostor.
+    /// O quadro e o código juntos dão **uma** despedida, e não duas.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_quadro_seguido_do_codigo_da_uma_despedida_so() {
+        let vistas = despedidas_vistas(anfitriao_que_despede(Despedida::QuadroEOCodigo)).await;
         assert_eq!(
-            classify_connection_error(
-                &tls_local_com_o_alerta(120),
-                Some(PinDecision::Matches {
-                    fingerprint: "aaaa1111".into()
-                })
-            ),
-            ConnectError::TlsRefused,
-            "um alerta do TLS que não é o da assinatura virou `ChaveNaoProvada`, e a tela \
-             acusaria de impostor um servidor que só recusou o aperto de mão"
+            vistas,
+            vec![seele_proto::control::DisconnectReason::FellBehind],
+            "o quadro e o código viraram {} despedidas",
+            vistas.len()
         );
     }
 
-    #[test]
-    fn sem_decisao_do_verificador_o_alerta_da_assinatura_continua_tls_refused() {
-        // Sem decisão, ninguém conferiu certificado nenhum, e não há chave que
-        // quem atendeu deixou de provar: é o caso de `decisao_do_aperto`.
-        assert_eq!(
-            classify_connection_error(&tls_local_com_o_alerta(51), None),
-            ConnectError::TlsRefused,
-            "o TLS sem decisão do verificador virou `ChaveNaoProvada`, e a tela acusaria \
-             de impostor um certificado que ninguém conferiu"
-        );
-    }
-}
-
-#[cfg(test)]
-mod a_decisao_que_falta_nao_vira_matches {
-    use super::{decisao_do_aperto, ConnectError};
-    use crate::tofu::PinDecision;
-
-    #[test]
-    fn um_aperto_de_mao_sem_decisao_do_verificador_falha_e_diz_por_que() {
-        // `connect_por` fazia `unwrap_or(Matches { fingerprint: "" })`. Um TLS
-        // que terminasse sem o verificador rodar passava por pin que confere: o
-        // `Hello` saía para um servidor que ninguém conferiu, e com impressão
-        // esperada o veredito virava `InviteDisagrees { offered: "" }`, que a
-        // lista de conhecidos gravaria.
-        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
-        let _guarda = tracing::subscriber::set_default(captura.clone());
-
-        assert_eq!(
-            decisao_do_aperto(None),
-            Err(ConnectError::TlsRefused),
-            "o aperto de mão sem decisão do verificador seguiu como se o pin conferisse: o \
-             `Hello` sairia para um servidor que ninguém conferiu"
-        );
-        let linhas = captura.linhas();
+    /// O fechamento comum continua sem nome: o 0 não vira despedida nenhuma.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_codigo_zero_continua_sendo_um_fechamento_comum() {
+        let vistas = despedidas_vistas(anfitriao_que_despede(Despedida::Codigo(0))).await;
         assert!(
-            linhas
-                .iter()
-                .any(|linha| linha.starts_with("WARN")
-                    && linha.contains("sem decisão do verificador")),
-            "a falha saiu calada: o `seele.log` não diz que o TLS terminou sem decisão do \
-             verificador, e quem lê só vê um certificado recusado. Linhas: {linhas:?}"
+            vistas.is_empty(),
+            "um fechamento comum virou despedida: {vistas:?}"
         );
     }
 
+    /// A matriz dos códigos: só o do «ficou para trás» tem nome. Os do enlace,
+    /// os do core e um desconhecido continuam quedas sem nome.
     #[test]
-    fn connect_por_pergunta_a_regra_antes_de_abrir_o_fluxo_de_controle() {
-        // A regra de cima só vale se `connect_por` a usar, e antes do fluxo de
-        // controle, que é por onde o `Hello` sai. Nenhum aperto de mão de
-        // verdade termina sem decisão, então quem prende a fiação é o texto.
-        // As agulhas são montadas, e não escritas: este é o arquivo que o teste
-        // lê, e um literal inteiro aqui casaria consigo mesmo.
+    fn so_o_codigo_de_ficar_para_tras_vira_despedida() {
+        use seele_proto::control::DisconnectReason;
+        assert_eq!(
+            super::despedida_do_codigo(crate::transporte::CODIGO_FICOU_PARA_TRAS),
+            Some(DisconnectReason::FellBehind)
+        );
+        for codigo in [
+            0,
+            1,
+            2,
+            3,
+            0x5345_0010,
+            0x5345_0020,
+            0x5345_0031,
+            0xDEAD_BEEF,
+        ] {
+            assert_eq!(
+                super::despedida_do_codigo(codigo),
+                None,
+                "o código {codigo:#x} virou despedida"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_prova_de_cliente_amarra_o_certificado_dtls_que_o_servidor_viu() {
+        // D5: a prova assina a impressão do servidor **e** a do DTLS desta
+        // ponta. Quem está no meio e repassa a prova numa conexão dele não tem
+        // o certificado DTLS que ela amarra.
+        let certificado = crate::transporte::CertificadoDtls::efemero().unwrap();
+        let impressao = certificado.impressao();
+        let (onde, veredito) = anfitriao_que_confere_a_prova(Vec::new(), certificado, impressao);
+        let pins: Arc<dyn PinStore> = Arc::new(MemoryPinStore::new());
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(4),
+            super::Client::connect(
+                onde,
+                "localhost",
+                &onde.to_string(),
+                "pessoa",
+                &ed25519_dalek::SigningKey::from_bytes(&[5; 32]),
+                Arc::clone(&pins),
+                None,
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(10), veredito)
+                .await
+                .ok()
+                .and_then(Result::ok),
+            Some(true),
+            "a prova do cliente não confere sobre a impressão do servidor, a do DTLS de quem \
+             ligou e o nonce"
+        );
+        assert_eq!(
+            pins.pinned(&onde.to_string()),
+            Some(hex(&impressao)),
+            "o primeiro contato não fixou a impressão DTLS de quem atendeu"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_sala_que_assina_este_dtls_e_aceita_e_a_de_outro_codigo_e_recusada_antes_do_hello() {
+        use ed25519_dalek::Signer as _;
+        let semente = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+        let codigo = seele_proto::codigo::Codigo::da_chave(&semente.verifying_key().to_bytes());
+        let certificado = crate::transporte::CertificadoDtls::efemero().unwrap();
+        let assinatura = semente.sign(&seele_proto::assinatura::apresentacao_da_sala(
+            &certificado.impressao(),
+        ));
+        let mut apresentacao = semente.verifying_key().to_bytes().to_vec();
+        apresentacao.extend_from_slice(&assinatura.to_bytes());
+        let impressao_da_sala =
+            seele_proto::transport::certificate_digest(&semente.verifying_key().to_bytes());
+
+        // A sala certa: a prova amarra a impressão da sala (D5).
+        let (onde, veredito) = anfitriao_que_confere_a_prova(
+            apresentacao.clone(),
+            certificado.clone(),
+            impressao_da_sala,
+        );
+        let ponta =
+            crate::transporte::abrir_ponta(std::net::UdpSocket::bind("127.0.0.1:0").ok()).unwrap();
+        let conexao = discar(
+            ponta.ponta(),
+            vec![onde],
+            None,
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .expect("discar a sala");
+        let pins: Arc<dyn PinStore> = Arc::new(MemoryPinStore::new());
+        let esperada = crate::enlace::Esperada::Codigo(codigo);
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            super::Client::connect_sobre(
+                ponta,
+                conexao,
+                "sala",
+                Some(&esperada),
+                false,
+                "pessoa",
+                &ed25519_dalek::SigningKey::from_bytes(&[5; 32]),
+                Arc::clone(&pins),
+                None,
+                None,
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(10), veredito)
+                .await
+                .ok()
+                .and_then(Result::ok),
+            Some(true),
+            "a prova numa sala não amarrou a impressão da sala"
+        );
+
+        // Outro código: recusado antes do `Hello` (o anfitrião nunca dá veredito).
+        let (onde, veredito) =
+            anfitriao_que_confere_a_prova(apresentacao, certificado, impressao_da_sala);
+        let ponta =
+            crate::transporte::abrir_ponta(std::net::UdpSocket::bind("127.0.0.1:0").ok()).unwrap();
+        let conexao = discar(
+            ponta.ponta(),
+            vec![onde],
+            None,
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .expect("discar a sala");
+        let outro =
+            crate::enlace::Esperada::Codigo(seele_proto::codigo::Codigo::da_chave(&[7; 32]));
+        let resultado = super::Client::connect_sobre(
+            ponta,
+            conexao,
+            "sala",
+            Some(&outro),
+            false,
+            "pessoa",
+            &ed25519_dalek::SigningKey::from_bytes(&[5; 32]),
+            Arc::new(MemoryPinStore::new()),
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert!(
+            matches!(
+                resultado,
+                Err(ConnectError::CodigoNaoConfere(
+                    crate::confere_codigo::FalhaDoCodigo::CodigoNaoBate { .. }
+                ))
+            ),
+            "quem atendeu tinha outro código e a ligação não foi recusada pelo código"
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(500), veredito)
+                .await
+                .map_or(true, |lido| lido.is_err()),
+            "o `Hello` saiu para uma sala de outro código"
+        );
+    }
+
+    /// A apresentação de uma sala com a assinatura e a chave dela sobre `dtls`.
+    fn apresentacao_de(semente: &ed25519_dalek::SigningKey, dtls: &[u8; 32]) -> Vec<u8> {
+        use ed25519_dalek::Signer as _;
+        let assinatura = semente.sign(&seele_proto::assinatura::apresentacao_da_sala(dtls));
+        let mut apresentacao = semente.verifying_key().to_bytes().to_vec();
+        apresentacao.extend_from_slice(&assinatura.to_bytes());
+        apresentacao
+    }
+
+    /// **A sala pessoal pelo endereço entra, como na 0.16** (decisão de 16/10;
+    /// ADR 0060: o pino do TOFU é por endereço). Sem código, a sala confere pelo
+    /// TOFU da **chave** dela, e não do DTLS, que é efêmero desde a 0.17: a
+    /// prova amarra a impressão da chave, que é a que a sala confere, e a
+    /// segunda entrada, com outro DTLS, encontra o mesmo pino.
+    ///
+    /// Antes disto a prova ia amarrada ao DTLS efêmero, a sala a recusava, e a
+    /// pessoa lia `CredentialRejected` (o achado da conformidade e do
+    /// hosting-lifecycle).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_sala_pelo_endereco_entra_pelo_tofu_da_chave_e_a_volta_confere_com_outro_dtls() {
+        let semente = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+        let impressao_da_sala =
+            seele_proto::transport::certificate_digest(&semente.verifying_key().to_bytes());
+        let pins: Arc<dyn PinStore> = Arc::new(MemoryPinStore::new());
+        let pin_key = "sala.exemplo:8385";
+
+        for vez in ["a primeira", "a segunda"] {
+            // Um DTLS novo a cada abertura da sala, como no produto.
+            let certificado = crate::transporte::CertificadoDtls::efemero().unwrap();
+            let apresentacao = apresentacao_de(&semente, &certificado.impressao());
+            let (onde, veredito) =
+                anfitriao_que_confere_a_prova(apresentacao, certificado, impressao_da_sala);
+            let ponta =
+                crate::transporte::abrir_ponta(std::net::UdpSocket::bind("127.0.0.1:0").ok())
+                    .unwrap();
+            let conexao = discar(
+                ponta.ponta(),
+                vec![onde],
+                None,
+                std::time::Duration::from_secs(5),
+            )
+            .await
+            .expect("discar a sala");
+            let entrada = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                super::Client::connect_sobre(
+                    ponta,
+                    conexao,
+                    pin_key,
+                    None,
+                    false,
+                    "pessoa",
+                    &ed25519_dalek::SigningKey::from_bytes(&[5; 32]),
+                    Arc::clone(&pins),
+                    None,
+                    None,
+                    None,
+                ),
+            )
+            .await;
+            if let Ok(Err(erro)) = &entrada {
+                panic!("{vez} entrada pelo endereço da sala foi recusada: {erro:?}");
+            }
+            assert_eq!(
+                tokio::time::timeout(std::time::Duration::from_secs(10), veredito)
+                    .await
+                    .ok()
+                    .and_then(Result::ok),
+                Some(true),
+                "{vez} entrada pelo endereço não amarrou a prova à impressão da chave da sala"
+            );
+            assert_eq!(
+                pins.pinned(pin_key),
+                Some(hex(&impressao_da_sala)),
+                "{vez} entrada fixou outra coisa que não a chave da sala"
+            );
+        }
+    }
+
+    /// Uma apresentação de sala que não assina este DTLS é recusada antes do
+    /// `Hello`, e nada é fixado: sem isto, quem repete a apresentação de uma
+    /// sala de verdade passaria pelo TOFU com a chave dela.
+    #[test]
+    fn a_apresentacao_que_nao_assina_este_dtls_e_recusada_e_nada_e_fixado() {
+        let pins = loja();
+        let semente = ed25519_dalek::SigningKey::from_bytes(&[42; 32]);
+        let de_outro_dtls = apresentacao_de(&semente, &[1; 32]);
+        let resultado =
+            conferir_quem_atendeu(&de_outro_dtls, &[2; 32], "sala:8385", None, false, &pins);
+        assert!(
+            matches!(resultado, Err(ConnectError::CodigoNaoConfere(_))),
+            "uma apresentação sobre outro DTLS passou: {:?}",
+            resultado.map(|(decisao, _, _)| decisao)
+        );
+        assert_eq!(pins.pinned("sala:8385"), None, "a recusa fixou um pino");
+    }
+
+    #[test]
+    fn a_frase_da_recusa_nao_conta_se_havia_link_pino_ou_codigo() {
+        // A frase vai no corte que quem atendeu recebe. Uma por caso ensinaria a
+        // um impostor qual defesa esta máquina tinha; o porquê fica no log
+        // desta máquina e no erro com nome.
+        let frase = String::from_utf8_lossy(super::RECUSA_NEUTRA).to_lowercase();
+        for palavra in [
+            "pin", "fix", "link", "convite", "impress", "esperad", "invite", "chang", "mudou",
+            "troc", "promete", "codigo", "sala",
+        ] {
+            assert!(
+                !frase.contains(palavra),
+                "a frase da recusa diz «{palavra}» e conta a quem atendeu como esta \
+                 máquina decidiu: {frase}"
+            );
+        }
+    }
+
+    #[test]
+    fn connect_sobre_confere_antes_de_tocar_no_canal_de_controle() {
+        // O `Hello` sai pelo `ctl`, e o `ctl` só é tirado da conexão depois da
+        // conferência. Quem prende a ordem é o texto: as agulhas são montadas,
+        // e não escritas, porque este é o arquivo que o teste lê.
         let fonte = include_str!("client.rs");
         let inicio = fonte
-            .find(&format!("{} fn connect_por(", "pub(crate) async"))
-            .expect("`connect_por` sumiu de `client.rs`");
-        let depois = fonte.get(inicio..).expect("o começo de `connect_por`");
-        let fim = depois
-            .find(&format!("connection.{}()", "open_bi"))
-            .expect("`connect_por` deixou de abrir o fluxo de controle");
-        let antes_do_hello = depois
-            .get(..fim)
-            .expect("o trecho antes do fluxo de controle");
-
+            .find(&format!("{} fn connect_sobre(", "pub(crate) async"))
+            .expect("`connect_sobre` sumiu de `client.rs`");
+        let depois = fonte.get(inicio..).expect("o começo de `connect_sobre`");
+        let conferencia = depois
+            .find(&format!("{}(", "conferir_quem_atendeu"))
+            .expect("`connect_sobre` deixou de conferir quem atendeu");
+        let controle = depois
+            .find(&format!("connection.{}()", "controle"))
+            .expect("`connect_sobre` deixou de tirar o canal de controle");
         assert!(
-            antes_do_hello.contains(&format!(
-                "{}(verifier.last_decision())?",
-                "decisao_do_aperto"
-            )),
-            "`connect_por` deixou de pedir a decisão do verificador por `decisao_do_aperto` \
-             antes de abrir o fluxo de controle: um aperto de mão sem decisão mandaria o \
-             `Hello` a um servidor que ninguém conferiu"
-        );
-        assert!(
-            !fonte.contains(&format!("unwrap_or({}::Matches", "PinDecision")),
-            "a decisão que falta voltou a virar `Matches` por padrão em `client.rs`"
+            conferencia < controle,
+            "o canal de controle saiu antes da conferência: o `Hello` iria a quem \
+             ninguém conferiu"
         );
     }
 
     #[test]
     fn o_fluxo_de_controle_escreve_no_numero_negociado() {
-        // **Na 1.0 o fio não distingue isto, então quem prende é o texto.** A
-        // mínima e o número desta build são o mesmo 9: um `Hello` carimbado
-        // com um ou com o outro é o mesmo byte, e uma escrita da sessão no
-        // número negociado é a mesma de uma no desta build. A diferença aparece
-        // na primeira 1.x que subir o número, diante de um servidor 1.0 — e
-        // ali já seria tarde para descobrir que o `Hello` saía com o número
-        // novo, que o servidor velho recusa. As agulhas são montadas, e não
-        // escritas: este é o arquivo que o teste lê.
+        // O `Hello` sai com a mínima desta build, e o resto da sessão no número
+        // que o servidor carimbou. As agulhas são montadas, e não escritas:
+        // este é o arquivo que o teste lê.
         let fonte: String = include_str!("client.rs").split_whitespace().collect();
         let hello = format!(
             "{}(send,seele_proto::version::{},&ClientMessage::Hello{{",
@@ -2491,24 +3127,6 @@ mod a_decisao_que_falta_nao_vira_matches {
                 !fonte.contains(&sem_carimbo),
                 "o fluxo de controle voltou a escrever com o número desta build \
                  (`{sem_carimbo}`), e não com o que o servidor carimbou"
-            );
-        }
-    }
-
-    #[test]
-    fn a_decisao_que_o_verificador_deixou_passa_como_veio() {
-        for decisao in [
-            PinDecision::FirstContact {
-                fingerprint: "aaaa1111".into(),
-            },
-            PinDecision::Matches {
-                fingerprint: "aaaa1111".into(),
-            },
-        ] {
-            assert_eq!(
-                decisao_do_aperto(Some(decisao.clone())),
-                Ok(decisao.clone()),
-                "a decisão {decisao:?} do verificador não chegou ao veredito como veio"
             );
         }
     }
@@ -2562,51 +3180,6 @@ mod como_este_build_se_apresenta {
     }
 }
 
-/// A impressão do certificado que o TLS desta conexão aceitou, em bytes: o
-/// SHA-256 do DER, o mesmo cujo hex vai no `fp=` do link.
-///
-/// Uma conexão TLS sem certificado do servidor não existe — o `rustls` não
-/// fecha o aperto sem ele —, e se existisse, não haveria o que assinar: é
-/// violação de protocolo, e o cliente não prova nada a ninguém.
-/// Como a conexão confere quem atendeu: pelo TOFU por endereço, ou pelo código.
-enum Verificacao {
-    Tofu(Arc<TofuVerifier>),
-    Codigo {
-        confere: Arc<crate::confere_codigo::ConfereCodigo>,
-        codigo: seele_proto::codigo::Codigo,
-        /// A impressão da chave pinada sob `@CÓDIGO`, lida antes de discar.
-        pino: Option<String>,
-    },
-}
-
-fn impressao_do_servidor(connection: &quinn::Connection) -> Result<[u8; 32], ConnectError> {
-    Ok(seele_proto::transport::certificate_digest(
-        certificado_do_servidor(connection)?.as_ref(),
-    ))
-}
-
-/// O certificado que o TLS desta conexão aceitou.
-fn certificado_do_servidor(
-    connection: &quinn::Connection,
-) -> Result<rustls::pki_types::CertificateDer<'static>, ConnectError> {
-    let cadeia = connection
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .ok_or_else(|| {
-            tracing::warn!("a conexão não entregou o certificado do servidor");
-            ConnectError::ProtocolViolation
-        })?;
-    let certificado = cadeia.first().ok_or_else(|| {
-        tracing::warn!("a cadeia do servidor veio vazia");
-        ConnectError::ProtocolViolation
-    })?;
-    Ok(certificado.clone())
-}
-
 /// **A folga do prazo do toque** (tarefa 16 da F7): o que quem liga espera além
 /// do `prazo_s` que a sala mandou no `Tocando`.
 ///
@@ -2628,11 +3201,12 @@ fn prazo_do_toque(prazo_s: u16) -> std::time::Duration {
 /// A resposta é a sessão, o anúncio de MODs, uma recusa, ou, numa sala pessoal,
 /// `Tocando`: quem chama decide o prazo do resto, e o resto é [`concluir`].
 async fn handshake(
-    send: &mut quinn::SendStream,
-    recv: &mut quinn::RecvStream,
+    send: &mut crate::transporte::Envio,
+    recv: &mut crate::transporte::Recebe,
     nickname: &str,
     signing_key: &SigningKey,
     impressao: &[u8; 32],
+    impressao_dtls_local: &[u8; 32],
     join_secret: Option<&str>,
 ) -> Result<(ServerMessage, u8), ConnectError> {
     // **O `Hello` sai com a mínima desta build** (adendo de 08/10/2026, §4):
@@ -2701,7 +3275,10 @@ async fn handshake(
     // **O cliente nunca assina bytes vindos do fio** (o S2, adendo de
     // 08/10/2026, §9). O nonce tem de ter exatamente 32 bytes, e o que se
     // assina é a mensagem que o `seele-proto` monta: o rótulo, a impressão do
-    // servidor que esta conexão conferiu e o nonce.
+    // servidor que esta conexão conferiu, a impressão DTLS **desta** ponta e o
+    // nonce (D5 da 0.17). A impressão local amarra a prova a esta sessão DTLS:
+    // o servidor confere que ela é a do certificado que viu, e uma prova
+    // repassada por quem está no meio não vale noutra conexão.
     let Ok(nonce) = <[u8; seele_proto::control::NONCE_LEN]>::try_from(nonce.as_slice()) else {
         tracing::warn!(
             tamanho = nonce.len(),
@@ -2709,7 +3286,8 @@ async fn handshake(
         );
         return Err(ConnectError::ProtocolViolation);
     };
-    let assinada = seele_proto::assinatura::prova_de_cliente(impressao, &nonce);
+    let assinada =
+        seele_proto::assinatura::prova_de_cliente_2(impressao, impressao_dtls_local, &nonce);
     frame::write_em(
         send,
         carimbo,
@@ -2736,8 +3314,8 @@ async fn handshake(
 /// razão (`ChamadaRecusada`, `NinguemAtendeu`), que [`concluir`] devolve como
 /// [`ConnectError::Refused`].
 async fn depois_do_toque(
-    send: &mut quinn::SendStream,
-    recv: &mut quinn::RecvStream,
+    send: &mut crate::transporte::Envio,
+    recv: &mut crate::transporte::Recebe,
     carimbo: u8,
     aceito: Option<&str>,
 ) -> Result<(SessionInfo, u8), ConnectError> {
@@ -2750,8 +3328,8 @@ async fn depois_do_toque(
 
 /// O fim do aperto de mão: o anúncio de MODs, quando há, e a sessão.
 async fn concluir(
-    send: &mut quinn::SendStream,
-    recv: &mut quinn::RecvStream,
+    send: &mut crate::transporte::Envio,
+    recv: &mut crate::transporte::Recebe,
     carimbo: u8,
     aceito: Option<&str>,
     mut answer: ServerMessage,
@@ -2800,11 +3378,18 @@ async fn concluir(
             //
             // Encontrado por teste, e não por leitura: o servidor de mentira de
             // `aceite_dos_mods.rs` recebia a recusa numa corrida e não na
-            // outra. `stopped` volta quando o outro lado confirmou tudo depois
-            // do `finish`, e o prazo existe para que um servidor que não lê
-            // nunca prenda quem está saindo.
+            // outra. No QUIC, `stopped` voltava quando o outro lado confirmava
+            // tudo depois do `finish`. O canal do enlace não tem essa
+            // confirmação, então se espera a **reação** de quem hospeda: ele
+            // lê a recusa e encerra o `ctl`, e o fim (ou a queda) chega aqui.
+            // O prazo existe para que um servidor que não lê nunca prenda quem
+            // está saindo.
             let _ = send.finish();
-            let _ = tokio::time::timeout(ESPERA_DA_RECUSA, send.stopped()).await;
+            let _ = tokio::time::timeout(ESPERA_DA_RECUSA, async {
+                let mut sobra = [0_u8; 64];
+                while let Ok(Some(_)) = recv.read(&mut sobra).await {}
+            })
+            .await;
             tracing::info!(
                 %conjunto,
                 quantos = mods.len(),
@@ -2854,7 +3439,7 @@ async fn concluir(
 /// Cloneable, so a shell can put a transfer on a task of its own.
 #[derive(Clone)]
 pub struct Transfers {
-    connection: quinn::Connection,
+    connection: crate::transporte::Conexao,
     /// A fila que o roteador de `Client::connect` alimenta.
     anexos: FilaDeAnexos,
 }
@@ -2908,7 +3493,7 @@ impl Transfers {
     /// roteador, com o `accept_uni` no lugar desta fila, e continua sendo:
     /// endereçar fluxo por identificador é trabalho de outro dia, e não do dia
     /// em que a tela passou a ter para onde ir.
-    async fn proximo_fluxo(&self, wait: std::time::Duration) -> Result<quinn::RecvStream> {
+    async fn proximo_fluxo(&self, wait: std::time::Duration) -> Result<crate::transporte::Recebe> {
         let mut fila = self.anexos.lock().await;
         tokio::time::timeout(wait, fila.recv())
             .await
@@ -3037,12 +3622,8 @@ impl Transfers {
         // it as success was a real defect and an intermittent one: on a small
         // file the whole thing fits in one write, so whether the refusal shows
         // up as a failed `write_all` or as a stop code here is a race with the
-        // network. Only `Ok(None)` — the stream read to its end — is delivery.
-        match stream.stopped().await {
-            Ok(None) => Ok(Sent::Delivered { bytes: sent }),
-            Ok(Some(_)) => Ok(Sent::Stopped { bytes: sent }),
-            Err(_) => Ok(Sent::Interrupted { bytes: sent }),
-        }
+        // network. Only the channel read to its end is delivery.
+        Ok(crate::transporte::esperar_a_entrega(&mut stream, sent).await)
     }
 
     /// Envia bytes para o volume de um MOD, por um fluxo próprio — ADR 0048.
@@ -3108,11 +3689,7 @@ impl Transfers {
         // Espera o outro lado reconhecer o fim, pela razão escrita em
         // `send_attachment`: sem isto, um `STOP_SENDING` que chega depois do
         // último bloco seria lido como entrega.
-        match stream.stopped().await {
-            Ok(None) => Ok(Sent::Delivered { bytes: enviados }),
-            Ok(Some(_)) => Ok(Sent::Stopped { bytes: enviados }),
-            Err(_) => Ok(Sent::Interrupted { bytes: enviados }),
-        }
+        Ok(crate::transporte::esperar_a_entrega(&mut stream, enviados).await)
     }
 
     /// Recebe os bytes de um anexo no parcial que quem chama acabou de criar, e
@@ -3292,7 +3869,7 @@ impl Transfers {
         if delivery.byte_size > limit {
             // Stopped, not drained: telling the sender to stop is what keeps a
             // file nobody is going to look at off this link.
-            let _ = stream.stop(0_u32.into());
+            let _ = stream.stop(0);
             return Ok(Previewed::TooBig {
                 byte_size: delivery.byte_size,
             });

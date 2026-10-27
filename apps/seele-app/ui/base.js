@@ -33,8 +33,298 @@
 
 "use strict";
 
-const { invoke } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
+// ------------------------------------------------- várias sessões (E3, 0.17)
+//
+// **Toda a casca fala com uma sessão pelo carimbo dela** (fronteiras.md v2,
+// §3 e §4; o «ISOLAMENTO FUNCIONAL» do contrato). Com três conexões abertas,
+// «a sessão» deixou de existir: há a que a janela mostra (a VISTA) e as
+// outras, que continuam conectadas. O conserto mora aqui, num lugar só, e não
+// em cada uma das centenas de chamadas da casca:
+//
+// - **o comando leva o carimbo da vista no instante da chamada** — isto é, do
+//   clique. Um clique que sai durante a troca de vista vai à sessão em que foi
+//   dado (prova 4); um comando de máquina recebe o campo a mais e o ignora;
+// - **a resposta que chega depois de a vista mudar não é aplicada à vista
+//   nova** (prova 2): ela é recusada com `ForaDaVista`, nomeada, e a placa da
+//   sessão de origem é marcada para reler. O efeito no servidor aconteceu onde
+//   o clique o mandou; só a tela não o aplica no lugar errado;
+// - **o evento de outra sessão, ou de uma geração velha, não chega aos
+//   ouvintes da tela** (provas 1 e 3): vai à placa dela na trilha.
+//
+// Uma ponte que ainda não carimba (a de antes da 0.17, ou uma bancada) passa
+// por aqui sem mudança nenhuma: sem vista conhecida não há carimbo a pôr, e um
+// evento sem `sessao` é entregue como sempre.
+
+const invocarNaJanela = window.__TAURI__.core.invoke;
+const ouvirNaJanela = window.__TAURI__.event.listen;
+
+/** A sessão que a janela mostra, `{ sessao, geracao }`, ou `null`. */
+const vistaDaJanela = { sessao: null, geracao: 0 };
+
+/** A maior geração já vista de cada sessão: um evento abaixo dela é velho. */
+const geracoesDasSessoes = new Map();
+
+/** Quantas entradas (`connect`) estão em curso: os eventos da chegada passam. */
+let entradasEmCurso = 0;
+
+/** Os ids das sessões que a janela conhece (`sessoes()`), para a chegada. */
+let sessoesConhecidas = new Set();
+
+/** O que foi recusado ou desviado, para a bancada e o registro. */
+const contasDaVista = { foraDaVista: 0, eventosDesviados: 0, eventosVelhos: 0, refeitos: 0 };
+
+/**
+ * **Os comandos que falam com um servidor e cuja resposta a tela aplica**:
+ * a resposta que chega depois da troca de vista é recusada (`ForaDaVista`).
+ * Os de máquina ficam de fora, e uma resposta deles vale onde quer que a
+ * janela esteja.
+ */
+const COMANDOS_DA_SESSAO = new Set([
+  "snapshot", "messages", "estado_da_sessao", "membros_fora_do_ar", "open_channel",
+  "send_message", "reenviar_mensagem", "descartar_mensagem", "remover_mensagem",
+  "dispensar_aviso", "escolher_apelido", "icone_do_server", "imagem_da_pessoa",
+  "apagar_linha", "apagar_voice_room", "aplicar_icone_do_server", "banir_pessoa",
+  "criar_linha", "criar_voice_room", "expulsar_pessoa", "mover_pessoa",
+  "renomear_linha", "renomear_server", "renomear_voice_room", "tirar_icone_do_server",
+  "peso_da_linha", "assistir", "pedir_quadro_chave", "enter_voice_room",
+  "leave_voice_room", "set_volume", "buscar", "busca_andar", "busca_limpar",
+  "volumes_locais", "compartilhar_tela", "parar_de_compartilhar",
+  "ajustar_limites_da_tela", "minha_imagem", "destino_do_anexo", "cabecalho_do_anexo",
+  "enviar_anexo", "salvar_anexo", "prever_anexo",
+  // Os cargos (G e F, 0.17): a resposta que chega depois da troca de vista vira
+  // ForaDaVista, e a camada também confere a sessão de origem.
+  "pedir_cargos", "explicar_permissoes", "prever_cargo", "criar_cargo", "editar_cargo",
+  "mover_cargo", "apagar_cargo", "atribuir_cargo", "revogar_cargo",
+]);
+
+/** Comandos que trazem o carimbo deles, ou que não têm sessão a carimbar. */
+const SEM_CARIMBO_DA_VISTA = new Set(["connect", "sessoes", "foco_de_voz"]);
+
+/** A vista passa a ser esta sessão (a resposta de `connect` ou `ver_sessao`). */
+function porNaVista(carimbo) {
+  if (!carimbo || typeof carimbo.sessao !== "number") return;
+  vistaDaJanela.sessao = carimbo.sessao;
+  vistaDaJanela.geracao = carimbo.geracao ?? 0;
+  anotarGeracao(carimbo);
+}
+
+/**
+ * **A entrada que não passou pelo `invoke("connect")` da casca** (o defeito
+ * de isolamento achado pela E2E de cargos, G e browser-signaling): na web, o
+ * COLAR UM LINK e o ENTRAR do celular entram pela identidade do navegador, que
+ * chama a ponte por dentro. A ponte punha T na vista dela, e a janela ficava
+ * com S: a tela mostrava T e todo comando saía carimbado para S. Quem desenha
+ * a entrada (`depoisDeConectar`) chama isto antes de desenhar.
+ *
+ * Com o carimbo de outra sessão: sobe a época, como o `connect` sobe — uma
+ * resposta atrasada de S vira `outra-visita`, e não é desenhada em T —, e põe
+ * a sessão na vista. Com a mesma sessão (o caminho do desktop, em que o
+ * `invoke("connect")` já a pôs), ou sem carimbo, não faz nada.
+ */
+function porNaVistaAEntrada(resposta) {
+  const carimbo = resposta?.carimbo;
+  if (!carimbo || typeof carimbo.sessao !== "number") return false;
+  if (carimbo.sessao === vistaDaJanela.sessao) return false;
+  epocaDaVista += 1;
+  sessoesConhecidas.add(carimbo.sessao);
+  porNaVista(carimbo);
+  return true;
+}
+
+/** Anota a geração de uma sessão; responde se ela é velha. */
+function anotarGeracao(carimbo) {
+  const antes = geracoesDasSessoes.get(carimbo.sessao) ?? 0;
+  const geracao = carimbo.geracao ?? 0;
+  if (geracao < antes) return true;
+  geracoesDasSessoes.set(carimbo.sessao, geracao);
+  if (carimbo.sessao === vistaDaJanela.sessao) vistaDaJanela.geracao = geracao;
+  return false;
+}
+
+/** A placa de uma sessão mudou: a trilha relê `sessoes()` (tela-sessao.js). */
+function marcarAPlaca(sessao, motivo) {
+  if (typeof aoMudarUmaSessao === "function") aoMudarUmaSessao(sessao, motivo);
+}
+
+/** A resposta carimbada: `NaSessao { carimbo, valor }`, ou o retrato achatado. */
+function carimboDaResposta(resposta) {
+  if (!resposta || typeof resposta !== "object" || Array.isArray(resposta)) return null;
+  const carimbo = resposta.carimbo;
+  return carimbo && typeof carimbo.sessao === "number" ? carimbo : null;
+}
+
+/**
+ * **A época da vista**: sobe a cada pedido de troca (`ver_sessao`) e a cada
+ * entrada (`connect`), no instante do pedido. Só a resposta da época mais
+ * recente muda a vista — antes de qualquer efeito —, e a de uma época velha é
+ * descartada com `VistaSuperada`. E toda resposta de sessão leva a época em que
+ * foi pedida: uma resposta da primeira visita a A não vale na segunda (A → B →
+ * A), mesmo sendo de A.
+ */
+let epocaDaVista = 0;
+
+/**
+ * **O domínio do `pedido` nativo de `ver_sessao`**: a instância desta carga da
+ * janela, que o backend emite (`instancia_da_janela`, um número que só sobe no
+ * processo), e um contador local. Nada depende de relógio: o `Date.now() +
+ * época` de antes saía MENOR que o último pedido depois de recarregar a página
+ * ou com o relógio recuando, e o backend recusava pedidos válidos (medido pelo
+ * Codex). Não é a época do backend, e não é comparado com ela.
+ */
+let pedidosDaVista = 0;
+let instanciaDaJanela = null;
+
+/** A instância desta carga, pedida uma vez; `null` onde não há (a ponte web). */
+function aInstanciaDaJanela() {
+  if (instanciaDaJanela === null) {
+    instanciaDaJanela = Promise.resolve()
+      .then(() => invocarNaJanela("instancia_da_janela"))
+      .then((instancia) => (typeof instancia === "number" ? instancia : null))
+      .catch(() => null);
+  }
+  return instanciaDaJanela;
+}
+
+/** A recusa de uma resposta que não vale mais na tela, contada e nomeada. */
+function respostaQueNaoVale(sessao, comando, motivo) {
+  contasDaVista.foraDaVista += 1;
+  if (sessao !== null) marcarAPlaca(sessao, "resposta");
+  return { ForaDaVista: { sessao, comando, motivo } };
+}
+
+/**
+ * O `invoke` da casca: o do Tauri (ou o da ponte web), com o carimbo da vista
+ * e a conferência da resposta. Ver o começo desta seção.
+ */
+async function invoke(comando, args) {
+  const origem = vistaDaJanela.sessao;
+  const trocaDeVista = comando === "connect" || comando === "ver_sessao";
+  // A época deste pedido: nova para quem troca a vista, a de agora para o resto.
+  const epoca = trocaDeVista ? ++epocaDaVista : epocaDaVista;
+  let enviados = args;
+  if (origem !== null && !SEM_CARIMBO_DA_VISTA.has(comando) && !(args && "carimbo" in args)) {
+    enviados = { ...(args ?? {}), carimbo: { sessao: origem, geracao: vistaDaJanela.geracao } };
+  }
+  // O backend e a ponte recebem a ordem da troca, e ignoram uma mais velha
+  // que a última que aplicaram. A ponte web lê `epoca`; o comando nativo lê
+  // `pedido: { instancia, n }`, a instância desta carga da janela (emitida pelo
+  // backend) e o número do pedido nela. O número sai AGORA, na ordem dos
+  // cliques; a instância é a mesma promessa para todos, e os pedidos saem na
+  // mesma ordem em que foram numerados.
+  if (comando === "ver_sessao") {
+    const n = ++pedidosDaVista;
+    const instancia = await aInstanciaDaJanela();
+    enviados = { ...(enviados ?? {}), epoca };
+    if (instancia !== null) enviados.pedido = { instancia, n };
+  }
+  if (comando === "connect") entradasEmCurso += 1;
+  let resposta;
+  try {
+    try {
+      resposta = await invocarNaJanela(comando, enviados);
+    } catch (falha) {
+      // **Geração velha da MESMA sessão** (uma reconexão no meio): refeito uma
+      // vez, com a geração que o Rust disse, e nunca para outra sessão. O
+      // refeito passa pelo MESMO pós-processamento de baixo: a sessão, a
+      // geração e a época são conferidas como as de qualquer resposta.
+      // O nativo recusa o pedido de vista atrasado como `PedidoVelho`: para a
+      // tela é a mesma `VistaSuperada` da ponte web.
+      if (falha?.PedidoVelho && comando === "ver_sessao") {
+        throw { VistaSuperada: { sessao: enviados.sessao, epoca } };
+      }
+      const nao = falha?.SessaoNaoConfere;
+      if (!(nao && enviados?.carimbo && nao.esperado > enviados.carimbo.geracao)) throw falha;
+      contasDaVista.refeitos += 1;
+      anotarGeracao({ sessao: enviados.carimbo.sessao, geracao: nao.esperado });
+      enviados = { ...enviados, carimbo: { ...enviados.carimbo, geracao: nao.esperado } };
+      resposta = await invocarNaJanela(comando, enviados);
+    }
+  } finally {
+    if (comando === "connect") entradasEmCurso -= 1;
+  }
+
+  // Sair da sessão mostrada deixa a janela sem vista: nada mais leva o
+  // carimbo dela, e um evento atrasado dela vai à placa, e não à tela.
+  if ((comando === "disconnect" || comando === "encerrar_sessao") &&
+      enviados?.carimbo?.sessao === vistaDaJanela.sessao) {
+    vistaDaJanela.sessao = null;
+  }
+  // A entrada nova e a troca de vista põem a sessão na vista — só a mais
+  // recente, e antes de devolver a resposta a quem desenha.
+  if (trocaDeVista && resposta?.carimbo) {
+    if (epoca !== epocaDaVista) {
+      if (comando === "ver_sessao") throw { VistaSuperada: { sessao: resposta.carimbo.sessao, epoca } };
+      // Uma entrada superada por uma troca depois dela: a sessão nova existe
+      // (a placa a mostra), mas a vista é a da troca. Quem chamou o `connect`
+      // decide o resto pela tentativa dele (`tela-boot.js`).
+      sessoesConhecidas.add(resposta.carimbo.sessao);
+      anotarGeracao(resposta.carimbo);
+      resposta.superada = true;
+      return resposta;
+    }
+    porNaVista(resposta.carimbo);
+    // A época da vista é a `geracao` que os MODs conferem (`entrarNaGeracao`).
+    if (resposta.geracao === undefined && resposta.vista !== undefined) resposta.geracao = resposta.vista;
+    return resposta;
+  }
+
+  const carimbo = carimboDaResposta(resposta);
+  const veioDe = carimbo?.sessao ?? (enviados?.carimbo?.sessao ?? null);
+  const daSessao = COMANDOS_DA_SESSAO.has(comando) || carimbo !== null;
+  if (daSessao && veioDe !== null) {
+    if (veioDe !== vistaDaJanela.sessao) throw respostaQueNaoVale(veioDe, comando, "outra-sessao");
+    if (epoca !== epocaDaVista) throw respostaQueNaoVale(veioDe, comando, "outra-visita");
+    if (carimbo && anotarGeracao(carimbo)) throw respostaQueNaoVale(veioDe, comando, "geracao-velha");
+  }
+  // `NaSessao { carimbo, epoca, valor }` (ou o legado `{ carimbo, valor }`): a
+  // tela recebe o valor, como sempre recebeu — um array, `null` ou um objeto,
+  // sem tocar na forma. O retrato achatado tem os campos do `Snapshot` ao lado
+  // do carimbo, e passa inteiro.
+  if (ehEnvelopeNaSessao(resposta, carimbo)) return resposta.valor;
+  return resposta;
+}
+
+const CAMPOS_DO_ENVELOPE = new Set(["carimbo", "epoca", "valor"]);
+
+/** `NaSessao`: só `carimbo`, `valor` e (do backend atual) `epoca` — nada mais. */
+function ehEnvelopeNaSessao(resposta, carimbo) {
+  if (!carimbo || !("valor" in resposta)) return false;
+  return Object.keys(resposta).every((chave) => CAMPOS_DO_ENVELOPE.has(chave));
+}
+
+/**
+ * O `listen` da casca. O `seele://event` chega como `{ sessao, geracao,
+ * vista, evento }`; os ouvintes da tela recebem só o `evento` da vista, com a
+ * geração em dia. O das outras vai à placa delas.
+ */
+function listen(nome, ouvinte) {
+  if (nome !== "seele://event") return ouvirNaJanela(nome, ouvinte);
+  return ouvirNaJanela(nome, (mensagem) => {
+    const carga = mensagem?.payload;
+    if (!carga || typeof carga !== "object" || typeof carga.sessao !== "number" || !("evento" in carga)) {
+      ouvinte(mensagem);
+      return;
+    }
+    const carimbo = { sessao: carga.sessao, geracao: carga.geracao ?? 0 };
+    if (anotarGeracao(carimbo)) {
+      contasDaVista.eventosVelhos += 1;
+      return;
+    }
+    const daVista = carga.sessao === vistaDaJanela.sessao;
+    // Os eventos da chegada de uma sessão que a janela ainda não conhece: a
+    // entrada em curso os filtra pela tentativa (`ConnectStageChanged`).
+    const daChegada = !daVista && entradasEmCurso > 0 && !sessoesConhecidas.has(carga.sessao);
+    if (!daVista && !daChegada) {
+      // A abertura e o fim de tela da sessão de fora vão ao registro do palco
+      // antes do desvio: a volta à vista religa por ele (`palcoDeFora`).
+      if (typeof palcoDeFora === "function") palcoDeFora(carga.sessao, carimbo.geracao, carga.evento);
+      contasDaVista.eventosDesviados += 1;
+      marcarAPlaca(carga.sessao, "evento");
+      return;
+    }
+    ouvinte({ ...mensagem, payload: carga.evento });
+  });
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -801,7 +1091,13 @@ function dizerRecusaDoPedido(id, oQue) {
   registrarNoAnfitriao("pedido-de-mod", `${id}: ${oQue}`, "aviso", id);
 }
 
-async function pedirAoServidor(id, canal, valor) {
+/**
+ * `acao`, quando vem, é o nome de uma ação declarada (API 7, capacidade
+ * `acoes`): o pedido sai como `AcaoDeMod`, e quem confere a ação e a
+ * permissão é o servidor — esta janela só repassa, e a recusa volta como a
+ * resposta, `{ ok: false, recusa }`. Sem ela, é o `ModRequest` de sempre.
+ */
+async function pedirAoServidor(id, canal, valor, acao) {
   const geracaoDoPedido = geracaoDaSessao;
   await ouvirMod;
   await aguardarVezDePedidoDeMod(geracaoDoPedido);
@@ -822,7 +1118,8 @@ async function pedirAoServidor(id, canal, valor) {
   }
   const request = ++proximoPedidoDeMod;
   const payload = JSON.stringify(valor);
-  const tamanho = new TextEncoder().encode(payload).length;
+  // O nome da ação viaja na mesma mensagem, e conta no mesmo teto.
+  const tamanho = new TextEncoder().encode(payload + (acao ?? "")).length;
   if (tamanho > 12 * 1024) {
     dizerRecusaDoPedido(id, `carga de ${payload.length} caracteres não cabe`);
     // O mesmo nome e os mesmos campos da recusa do prelúdio.
@@ -835,7 +1132,9 @@ async function pedirAoServidor(id, canal, valor) {
       reject(new Error("timeout"));
     }, 15000);
     pedidosDeMod.set(request, { resolve, reject, timer, parts: [], geracao });
-    invoke("mod_request", { geracao, request, id, channel: canal, payload }).catch(error => {
+    const pedido = { geracao, request, id, channel: canal, payload };
+    if (typeof acao === "string") pedido.acao = acao;
+    invoke("mod_request", pedido).catch(error => {
       clearTimeout(timer); pedidosDeMod.delete(request); reject(error);
     });
   });
@@ -3077,6 +3376,13 @@ const CAPACIDADES_POR_API = Object.freeze({
     "superficies", "contribuicoes", "estilos", "classes", "volume",
     "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor",
   ]),
+  // A API 7 (0.17; `api/v7.json`, `capacidades_da_api(7)`): a 6 inteira, e as
+  // `acoes` no fim — as ações que um MOD pede ao servidor com as permissões
+  // dos cargos. O teste espelho confere a ordem.
+  7: Object.freeze([
+    "superficies", "contribuicoes", "estilos", "classes", "volume",
+    "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor", "acoes",
+  ]),
   // As 3, 4 e 5 saíram no corte (tarefa 13 do plano da F3), como os braços
   // delas em `capacidades_da_api`: este app não as executa, e quem as roda é a
   // linha do Servidor 0.15. Um pacote delas é recusado ao carregar.
@@ -3103,6 +3409,7 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "revogar-contribuicao": "contribuicoes",
   "atualizar-contribuicao": "contribuicoes",
   retrato: "retrato",
+  acao: "acoes",
 });
 
 /**
@@ -3367,6 +3674,9 @@ let ritmoDaFala = null;
 function modsQueOuvemATela() {
   const ouvem = [];
   for (const [id, instancia] of modsCarregados) {
+    // Um MOD que ainda sobe (ou acabou de cair) pode estar no mapa sem instância:
+    // ele não ouve a tela, e o desenho do retrato não estoura por causa dele.
+    if (!instancia) continue;
     const mod = { id, api: instancia.api };
     if ((CAPACIDADES_POR_API[Number(mod.api)] ?? []).includes("eventos-da-tela")) {
       ouvem.push(donoDaRegiao(mod, instancia));
@@ -3790,6 +4100,12 @@ async function atenderOMod(mod, instancia, m) {
       case "pedido":
         responder(true, { valor: await pedirAoServidor(mod.id, m.canal, m.valor) });
         break;
+      case "acao":
+        // **A ação declarada** (API 7): o mesmo caminho do `pedido`, com o nome
+        // da ação. A janela não confere se ela foi declarada nem quem a tem —
+        // isso é do servidor, e a recusa dele chega ao MOD como a resposta.
+        responder(true, { valor: await pedirAoServidor(mod.id, m.canal, m.valor, String(m.acao ?? "")) });
+        break;
       case "retrato": {
         // Depois do `await`: a sessão pode ter acabado enquanto o estado vinha,
         // e entregá-lo daria ao MOD o de uma sessão que já não é a dele. Quem
@@ -4025,7 +4341,7 @@ let conjuntoJaBuscado = "";
  * gravada para este destino. Diferente, não se busca nada: uma lista nova faz a
  * entrada falhar com a pergunta de sempre, que é onde ela pertence.
  */
-async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes) {
+async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes, pedido) {
   // `alvoDaSessao` mora em `tela-sessao.js`, que carrega depois deste arquivo.
   // Na primeira chamada — a que roda no fim de `base.js` — ela ainda não
   // existe, e não existir aqui quer dizer «não há sessão», que é a resposta
@@ -4040,16 +4356,18 @@ async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes) {
     console.warn("aceite deste destino:", falha);
     return;
   }
-  if (aceito !== catalogo.conjunto) return;
+  if (aceito !== catalogo.conjunto || pedido?.obsoleto()) return;
 
   conjuntoJaBuscado = catalogo.conjunto;
   for (const m of ausentes) {
+    if (pedido?.obsoleto()) return;
     anotarEstadoDoMod(m.id, "obtendo");
     try {
       // Obter, e não atualizar (lote X da F5, ADR 0045): o que este servidor
       // exige não muda o que exige o servidor que esta janela hospeda.
       await invoke("instalar_mod_do_catalogo", { id: m.id, versao: m.version, uso: "obter" });
     } catch (falha) {
+      if (pedido?.obsoleto()) return;
       // **Visível, e não só no console.** A falha é de um MOD que o servidor
       // exige: sem frase, a sessão continuaria sem ele e a pessoa descobriria
       // pela cor que não mudou.
@@ -4068,15 +4386,36 @@ function anotarEstadoDoMod(id, fase, detalhe = "") {
 async function carregarMods() {
   if (conferindoMods) return;
   conferindoMods = true;
+  // **O carimbo do pedido: a geração e o destino de quando ele saiu.** Um
+  // pedido em voo na troca A -> B volta com `disconnected` (a geração que ele
+  // levava deixou de ser a de pé), e esse erro é da sessão que saiu: lido como
+  // falha da sessão nova, aparecia «Não foi possível conferir os MODs» uma vez
+  // a cada entrada num segundo servidor. Só o que comprovadamente já não é a
+  // sessão vigente é descartado; erro da geração atual segue visível.
+  const geracaoDoPedido = geracaoDaSessao;
+  const alvoDoPedido = typeof alvoDaSessao === "function" ? alvoDaSessao() : null;
+  const pedidoObsoleto = () => geracaoDoPedido !== geracaoDaSessao
+    || alvoDoPedido !== (typeof alvoDaSessao === "function" ? alvoDaSessao() : null);
+  // Depois de CADA `await`: o que volta de uma sessão que saiu não se aplica
+  // na nova, nem o erro nem o sucesso. A saída em si já limpa o que é dela
+  // (`encerrarOAmbienteDosMods`).
+  const desistir = () => {
+    if (!pedidoObsoleto()) return false;
+    conferindoMods = false;
+    return true;
+  };
   let instalados;
   try {
     await invoke("snapshot");
+    if (desistir()) return;
     instalados = await invoke("mods_instalados");
+    if (desistir()) return;
     // Pelo caminho de dentro, e não pela API dos MODs: o `id` vazio é o
     // catálogo do próprio servidor, e não um MOD pedindo alguma coisa. Enquanto
     // isto passava por `globalThis.SeeleMods`, o produto dependia do objeto que
     // ele expunha aos MODs — e o ADR 0049 o tirou da janela.
     const catalogo = await pedirAoServidor("", 0, {});
+    if (desistir()) return;
     if (!catalogo.ok) throw new Error("catalogue-refused");
     // O catálogo respondeu: a notícia de que ele não respondia deixou de valer.
     if (estadoDosMods.has("")) {
@@ -4133,12 +4472,17 @@ async function carregarMods() {
     // tinha dito sim entrava direto, e se o pacote não estivesse mais no disco
     // — apagado pela manutenção local, ou numa máquina que trocou — a sessão
     // começava sem ele e ninguém dizia nada.
-    await buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes);
+    await buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes, { obsoleto: pedidoObsoleto });
+    if (desistir()) return;
 
     const diagnostico = ausentes.map(m => m.id).join(", ");
     ultimoErroDeMods = diagnostico;
     instalados = instalados.filter(m => catalogo.mods.some(active => active.id === m.id && active.hash === m.hash));
   } catch (erro) {
+    // **Antes de qualquer efeito**, até do `modsExigidos.clear()` logo abaixo:
+    // erro tardio da sessão anterior não toca no estado da nova. A volta de
+    // quatro segundos confere a sessão vigente.
+    if (desistir()) return;
     const mensagem = String(erro);
     // Sem sessão não há exigência nenhuma de pé. Deixar a lista cheia faria a
     // gestão dizer «exigido por este servidor» depois de sair dele.

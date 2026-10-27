@@ -34,11 +34,17 @@ const LINHA: ChannelId = ChannelId(1);
 /// Só para o teste não travar: cada espera acaba antes num sinal.
 const PRAZO: Duration = Duration::from_secs(20);
 
+/// A semente de quem modera. Desde a 0.17 (ADR 0064) quem entra primeiro não
+/// vira Comandante: o servidor só obedece a quem a máquina declarou dona.
+const SEMENTE_DO_DONO: u8 = 1;
+
 async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let dono = ed25519_dalek::SigningKey::from_bytes(&[SEMENTE_DO_DONO; 32]);
     let config = ServerConfig {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
+        proprietario: Some(seele_core::key_fingerprint(dono.verifying_key().as_bytes())),
         ..ServerConfig::default()
     };
     let servidor = Arc::new(Daemon::bind(config).await?);
@@ -104,8 +110,8 @@ fn eco_da_chave(mensagem: &ServerMessage, chave: ClientMessageId) -> Option<Mess
 async fn repetir_uma_mensagem_apagada_nao_a_anuncia_de_novo_ao_canal() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, servidor) = servidor().await?;
-    // Quem entra primeiro é o Comandante, e pode apagar a mensagem de outro.
-    let mut anfitriao = entrar(endereco, 1, "anfitriao").await?;
+    // O dono declarado pode apagar a mensagem de outro.
+    let mut anfitriao = entrar(endereco, SEMENTE_DO_DONO, "anfitriao").await?;
     let mut testemunha = entrar(endereco, 2, "testemunha").await?;
     let mut autora = entrar(endereco, 3, "autora").await?;
 
@@ -205,7 +211,7 @@ async fn repetir_uma_mensagem_apagada_nao_a_anuncia_de_novo_ao_canal() -> Result
 async fn repetir_muitas_apagadas_nao_para_a_leitura_de_quem_repete() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, servidor) = servidor().await?;
-    let mut anfitriao = entrar(endereco, 1, "anfitriao").await?;
+    let mut anfitriao = entrar(endereco, SEMENTE_DO_DONO, "anfitriao").await?;
     let mut testemunha = entrar(endereco, 2, "testemunha").await?;
     let mut autora = entrar(endereco, 3, "autora").await?;
 

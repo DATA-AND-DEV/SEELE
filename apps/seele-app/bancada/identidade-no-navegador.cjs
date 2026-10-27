@@ -23,8 +23,8 @@
 //    haver tentativa, e nada mais chega ao servidor;
 // 4. os estados, em ordem de precedência, e nada conecta ao abrir;
 // 5. o `apelido-tomado` e o `sem-rede` não gastam a tentativa; o
-//    `CredentialRejected` encerra, como `convite-gasto` ou `convite-vencido`
-//    pela validade do link;
+//    `CredentialRejected` encerra, como `convite-gasto` (na 0.17 o link não
+//    vence: não há certificados curtos);
 // 6. o `persist()` é pedido antes de a chave nascer;
 // 7. o fragmento sai da barra na carga, e o link da carga é entregue uma vez;
 // 8. quem já é conhecido entra pela chave, sem gastar o convite;
@@ -34,8 +34,7 @@
 //    «larga» passava por eles (achado da orquestradora na décima segunda);
 // 10. **os SERVIDORES DESTE APARELHO**: o `conhecidos()` do mais recente ao
 //     mais antigo, com o nome que chega depois (`lembrarONome`), e o
-//     `entrarNoConhecido` pela chave, sem convite, e com `link-vencido` quando
-//     os hashes guardados venceram, sem bater em servidor nenhum;
+//     `entrarNoConhecido` pela chave, sem convite;
 // 11. **a identidade da página** (`identidadeDaPagina()`): uma só, que abre
 //     sozinha o link da carga, e a casca não vê o token;
 // 12. **outro link aberto no meio de uma entrada** (o E54 da F5, do lado do
@@ -159,7 +158,7 @@ window.servidor = { entradas: [], roteiro: [], soltas: [] };
 async function conectarNaMentira(alvo, apelido, credencial) {
   // Anotada mesmo sem chave: uma entrada que chega sem ela também chegou.
   const chave = alvo.chave ? hex(await crypto.subtle.exportKey("raw", alvo.chave.publicKey)) : null;
-  window.servidor.entradas.push({ endereco: alvo.endereco, impressao: alvo.impressao, hashes: alvo.hashes, apelido, token: credencial, chave });
+  window.servidor.entradas.push({ endereco: alvo.endereco, impressao: alvo.impressao, bilhete: alvo.bilhete, apelido, token: credencial, chave });
   const proxima = window.servidor.roteiro.shift() ?? "ok";
   // Uma resposta pode ser uma função: ela roda no meio da entrada (o relógio
   // que anda, ou outro link aberto, enquanto o servidor responde) e devolve a
@@ -249,14 +248,15 @@ const IMPRESSAO = "3cbcfb02".repeat(8);
 const HASH = "ab".repeat(32);
 const TOKEN = "7K4MNPQRSTVWXYZ23456";
 const TOKEN_B = "23456XYZWVTSRQPNMK47";
-const FUTURO = Math.floor(Date.now() / 1000) + 7 * 86400;
-const link = ({ origem = "origem.invalid", fp = IMPRESSAO, wh = HASH, ate = FUTURO, token = TOKEN } = {}) => {
+// O link da 0.17 (a linha 2): sem `wh=` nem `ate=`, com o `v=` desta linha. O
+// `wh=` e o `v=1.0` são de um Servidor 1 (a 0.16), e a página os recusa
+// como `outra-linha`.
+const link = ({ origem = "origem.invalid", fp = IMPRESSAO, versao = "2.0", wh = null, token = TOKEN } = {}) => {
   const partes = [];
   if (fp) partes.push(`fp=${fp}`);
   if (token) partes.push(`convite=${token}`);
-  partes.push("v=1.0");
+  if (versao) partes.push(`v=${versao}`);
   if (wh) partes.push(`wh=${wh}`);
-  if (ate) partes.push(`ate=${ate}`);
   return `https://${origem}/e#198.51.100.7:8383?${partes.join("&")}`;
 };
 
@@ -288,8 +288,8 @@ async function principal() {
       return {
         outra: await lerCom(l.outra),
         incompleto: await (await window.criar()).abrir(l.semFp),
-        antigo: await lerCom(l.semWh),
-        vencido: await lerCom(l.vencido),
+        antigo: await lerCom(l.comWh),
+        linhaUm: await lerCom(l.linhaUm),
         numaAba: await lerCom(l.bom, { casca: "celular", instalado: false }),
         instalado: await lerCom(l.bom, { casca: "celular", instalado: true }),
         pc: await lerCom(l.bom, { casca: "larga" }),
@@ -300,32 +300,36 @@ async function principal() {
       {
         outra: link({ origem: "outra.invalid" }),
         semFp: link({ fp: null }),
-        semWh: link({ wh: null }),
-        vencido: link({ ate: Math.floor(Date.now() / 1000) - 60 }),
+        comWh: link({ wh: HASH, versao: null }),
+        linhaUm: link({ versao: "1.0" }),
         bom: link(),
       },
       null,
     ]);
     confere("estados", estados.outra === "outra-origem", `outra origem leu ${estados.outra}`);
     confere("estados", estados.incompleto.estado === "incompleto" && estados.incompleto.motivo === "SemImpressaoDigital", `sem fp leu ${JSON.stringify(estados.incompleto)}`);
-    confere("estados", estados.antigo === "servidor-0.15", `sem wh leu ${estados.antigo}`);
-    confere("estados", estados.vencido === "vencido", `o link vencido leu ${estados.vencido}`);
+    confere("estados", estados.antigo === "outra-linha", `com wh (a 0.16) leu ${estados.antigo}`);
+    confere("estados", estados.linhaUm === "outra-linha", `o link de um Servidor 1 leu ${estados.linhaUm}`);
     confere("estados", estados.numaAba === "numa-aba", `o celular numa aba leu ${estados.numaAba}`);
     confere("estados", estados.instalado === "pronto" && estados.pc === "pronto", `instalado ${estados.instalado}, no PC ${estados.pc}`);
     confere("estados", estados.produto === "outra-origem", `o analisador do produto leu ${estados.produto} num link de origem.invalid`);
     const leitura = await rodar(async (l) => (await window.criar()).abrir(l), link());
-    confere("estados", leitura.endereco === "198.51.100.7:8383" && leitura.impressao === IMPRESSAO && leitura.valeAte === FUTURO && leitura.persistencia === null, `a leitura do pronto: ${JSON.stringify(leitura)}`);
+    confere("estados", leitura.endereco === "198.51.100.7:8383" && leitura.impressao === IMPRESSAO && leitura.valeAte === null && leitura.persistencia === null, `a leitura do pronto: ${JSON.stringify(leitura)}`);
     confere("estados", !JSON.stringify(leitura).includes(TOKEN), `a leitura mostra o token à tela: ${JSON.stringify(leitura)}`);
     confere("estados", (await entradas()) === 0, "abrir um link conectou");
     const fora = await rodar(async (l) => {
       const vencido = await window.criar();
-      await vencido.abrir(l.vencido);
+      await vencido.abrir(l.linhaUm);
       const aba = await window.criar({ casca: "celular" });
       await aba.abrir(l.bom);
       return [await vencido.entrar("ana"), await aba.entrar("ana")];
-    }, { vencido: link({ ate: Math.floor(Date.now() / 1000) - 60 }), bom: link() });
-    confere("estados", fora[0].erro === "convite-vencido" && fora[1].erro === "recusado" && fora[1].razao === "numa-aba", `entrar fora do pronto: ${JSON.stringify(fora)}`);
-    confere("estados", (await entradas()) === 0, "entrar num link vencido ou numa aba conectou");
+    }, { linhaUm: link({ versao: "1.0" }), bom: link() });
+    confere(
+      "estados",
+      fora[0].erro === "recusado" && fora[0].razao === "outra-linha" && fora[1].erro === "recusado" && fora[1].razao === "numa-aba",
+      `entrar fora do pronto: ${JSON.stringify(fora)}`,
+    );
+    confere("estados", (await entradas()) === 0, "entrar num link da 0.16 ou numa aba conectou");
 
     // 1. O mods-a-aceitar e a volta com o mesmo token.
     const caso1 = await rodar(async (l) => {
@@ -346,7 +350,7 @@ async function principal() {
     confere("6", caso1.depois.persistencia === caso1.persistencia, `a entrada que deu certo não trouxe a persistência: ${JSON.stringify(caso1.depois)}`);
     confere("1", hellos.length === 2 && hellos.every((h) => h.token === TOKEN), `a volta não levou o mesmo token: ${JSON.stringify(hellos.map((h) => h.token))}`);
     confere("1", hellos.length === 2 && hellos[0].chave === hellos[1].chave && hellos[0].chave.length === 64, "a volta não levou a mesma chave");
-    confere("1", hellos.length === 2 && hellos[0].hashes[0] === HASH, `os hashes do link não chegaram ao alvo: ${JSON.stringify(hellos[0])}`);
+    confere("1", hellos.length === 2 && hellos[0].bilhete === null, `o alvo de um link sem enc= levou bilhete: ${JSON.stringify(hellos[0])}`);
     confere("6", ["concedida", "negada", "sem-suporte"].includes(caso1.persistencia), `a persistência depois do entrar: ${caso1.persistencia}`);
     const ordem = await rodar(() => window.ordem.splice(0));
     confere("6", ordem.indexOf("persist") !== -1 && ordem.indexOf("persist") < ordem.indexOf("chave"), `o persist() não veio antes da chave: ${JSON.stringify(ordem)}`);
@@ -379,9 +383,8 @@ async function principal() {
       const lembrou = await identidade.lembrarONome(impressao, "Casa");
       const lista = await identidade.conhecidos();
       const conhecida = await identidade.entrarNoConhecido(impressao, "ana");
-      const vencida = await (await window.criar({ agora: Date.now() + 400 * 86400_000 })).entrarNoConhecido(impressao, "ana");
       const desconhecida = await identidade.entrarNoConhecido("66".repeat(32), "ana");
-      return { entrou, antesDoNome, lembrou, lista, conhecida, vencida, desconhecida, outro };
+      return { entrou, antesDoNome, lembrou, lista, conhecida, desconhecida, outro };
     }, [link({ fp: OUTRO }), IMPRESSAO, OUTRO]);
     const pelaChave = await rodar(() => window.servidor.entradas.splice(0));
     const [primeiro, segundo] = aparelho.lista;
@@ -389,8 +392,8 @@ async function principal() {
     confere("10", aparelho.antesDoNome.every((s) => s.nome === null) && aparelho.lembrou === true && segundo.nome === "Casa", `o nome que chega depois: ${JSON.stringify(aparelho)}`);
     confere("10", aparelho.lista.every((s) => s.podeEntrar === true && typeof s.visto === "number"), `o podeEntrar e o visto: ${JSON.stringify(aparelho.lista)}`);
     confere("10", aparelho.conhecida.ok === true, `entrar no conhecido: ${JSON.stringify(aparelho.conhecida)}`);
-    confere("10", aparelho.vencida.erro === "link-vencido" && aparelho.desconhecida.erro === "recusado", `o vencido e o desconhecido: ${JSON.stringify(aparelho)}`);
-    confere("10", pelaChave.length === 2 && pelaChave[1].token === null && pelaChave[1].chave === hellos[0].chave && pelaChave[1].impressao === IMPRESSAO, `entrar no conhecido gastou convite, trocou de chave, ou o vencido bateu no servidor: ${JSON.stringify(pelaChave)}`);
+    confere("10", aparelho.desconhecida.erro === "recusado", `o desconhecido: ${JSON.stringify(aparelho)}`);
+    confere("10", pelaChave.length === 2 && pelaChave[1].token === null && pelaChave[1].chave === hellos[0].chave && pelaChave[1].impressao === IMPRESSAO, `entrar no conhecido gastou convite ou trocou de chave: ${JSON.stringify(pelaChave)}`);
 
     // 3. O agoraNao() esquece.
     const outra = "11".repeat(32);
@@ -419,21 +422,16 @@ async function principal() {
     confere("5", caso5[0].erro === "apelido-tomado" && caso5[1].erro === "sem-rede", `o que segue: ${JSON.stringify(caso5)}`);
     confere("5", caso5[2].erro === "convite-gasto" && caso5[3].erro === "sem-tentativa", `o que encerra: ${JSON.stringify(caso5)}`);
     confere("5", caso5Hellos.length === 3 && caso5Hellos.every((h) => h.token === TOKEN), `o apelido tomado e a rede gastaram a tentativa: ${JSON.stringify(caso5Hellos.map((h) => h.token))}`);
-    // O link vale ao abrir e vence enquanto o servidor responde: a mesma
-    // recusa, que o servidor dá igual a todo convite que não vale (spec 08),
-    // vira `convite-vencido` pela validade do link.
-    const ate = Math.floor(Date.now() / 1000) + 60;
-    const vencida = await rodar(async ([l, ate]) => {
-      let relogio = Date.now();
-      window.servidor.roteiro = [() => {
-        relogio = (ate + 1) * 1000;
-        return { Refused: { reason: "CredentialRejected" } };
-      }];
-      const identidade = await window.criar({ agora: () => relogio });
+    // Na 0.17 o link não vence: a recusa que o servidor dá igual a todo convite
+    // que não vale (spec 08) é sempre `convite-gasto`, mesmo com o relógio
+    // muito à frente.
+    const gasto = await rodar(async (l) => {
+      window.servidor.roteiro = [{ Refused: { reason: "CredentialRejected" } }];
+      const identidade = await window.criar({ agora: () => Date.now() + 400 * 86400_000 });
       await identidade.abrir(l);
       return identidade.entrar("ana");
-    }, [link({ fp: "33".repeat(32), ate }), ate]);
-    confere("5", vencida.erro === "convite-vencido", `o convite que venceu na entrada: ${JSON.stringify(vencida)}`);
+    }, link({ fp: "33".repeat(32) }));
+    confere("5", gasto.erro === "convite-gasto", `o convite recusado com o relógio à frente: ${JSON.stringify(gasto)}`);
     await rodar(() => window.servidor.entradas.splice(0));
 
     // 12. Outro link aberto no meio de uma entrada. Cada caso abre a tentativa
@@ -585,9 +583,8 @@ async function principal() {
       impressao: "44".repeat(32),
       convite: TOKEN,
       sala: null,
-      versao: "1.0",
-      hashes: [HASH],
-      ate: FUTURO,
+      versao: "2.0",
+      bilhete: null,
     };
     for (const [casca, esperado, opcoes] of [
       ["celular", "numa-aba", { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }],

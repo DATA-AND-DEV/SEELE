@@ -37,55 +37,7 @@ use seele_proto::version::PROTOCOL_VERSION;
 use seele_server::persistence::Location;
 use seele_server::{Daemon, ServerConfig};
 
-/// Um verificador que aceita qualquer certificado: o que está sob teste é o
-/// carimbo, não o TOFU.
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
+mod comum;
 
 async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
     let config = ServerConfig {
@@ -105,26 +57,19 @@ async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
 
 /// Um par cru: a ponta, a conexão e o fluxo de controle aberto.
 struct Par {
-    _ponta: quinn::Endpoint,
-    conexao: quinn::Connection,
-    envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
+    _ponta: seele_enlace::Ponta,
+    conexao: seele_enlace::Conexao,
+    envio: seele_enlace::Envio,
+    recebe: seele_enlace::Recebe,
 }
 
 async fn abrir(endereco: SocketAddr) -> Result<Par> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    )));
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
-    let (envio, recebe) = conexao.open_bi().await?;
+    let comum::Ligado {
+        ponta,
+        conexao,
+        envio,
+        recebe,
+    } = comum::ligar(endereco).await?;
     Ok(Par {
         _ponta: ponta,
         conexao,
@@ -135,7 +80,7 @@ async fn abrir(endereco: SocketAddr) -> Result<Par> {
 
 /// Escreve `quadro` com os quatro bytes de comprimento na frente, sem passar
 /// por nenhum `encode`: o carimbo é o que o teste puser no byte 0.
-async fn escrever_cru(envio: &mut quinn::SendStream, quadro: &[u8]) -> Result<()> {
+async fn escrever_cru(envio: &mut seele_enlace::Envio, quadro: &[u8]) -> Result<()> {
     envio
         .write_all(&seele_proto::quadro::enquadrar(quadro)?)
         .await?;
@@ -144,7 +89,7 @@ async fn escrever_cru(envio: &mut quinn::SendStream, quadro: &[u8]) -> Result<()
 
 /// Lê um quadro inteiro e devolve os bytes dele, carimbo incluído, sem
 /// decodificar nada.
-async fn ler_cru(recebe: &mut quinn::RecvStream) -> Result<Vec<u8>> {
+async fn ler_cru(recebe: &mut seele_enlace::Recebe) -> Result<Vec<u8>> {
     let mut prefixo = [0_u8; seele_proto::quadro::PREFIXO_LEN];
     recebe.read_exact(&mut prefixo).await?;
     let mut quadro = vec![0_u8; seele_proto::quadro::comprimento(prefixo)?];
@@ -189,10 +134,12 @@ async fn um_par_de_numero_maior_le_a_recusa_no_carimbo_do_servidor() -> Result<(
     Ok(())
 }
 
-/// **O caminho certo:** um `Hello` carimbado 9, com a faixa `[9, 9]`, entra, e
-/// todo quadro que volta sai com o número negociado.
+/// **O caminho certo:** um `Hello` carimbado com o número desta build (o 10 na
+/// 0.17), com a faixa `[10, 10]`, entra, e todo quadro que volta sai com o
+/// número negociado. Pelo `ctl` do enlace, como qualquer sessão da linha 2.
 #[tokio::test(flavor = "multi_thread")]
-async fn quem_fala_o_9_entra_e_todo_quadro_volta_carimbado_9() -> Result<()> {
+async fn quem_fala_o_numero_desta_build_entra_e_todo_quadro_volta_carimbado_com_ele() -> Result<()>
+{
     let (endereco, daemon) = servidor().await?;
     let mut par = abrir(endereco).await?;
     let chave = SigningKey::from_bytes(&[71; 32]);
@@ -220,7 +167,7 @@ async fn quem_fala_o_9_entra_e_todo_quadro_volta_carimbado_9() -> Result<()> {
         anyhow::bail!("o servidor não mandou Challenge");
     };
     let prova = chave
-        .sign(&prova_amarrada(&par.conexao, &nonce))
+        .sign(&comum::prova_amarrada(&par.conexao, &nonce))
         .to_bytes()
         .to_vec();
     let resposta = seele_proto::control::encode_em(
@@ -248,25 +195,4 @@ async fn quem_fala_o_9_entra_e_todo_quadro_volta_carimbado_9() -> Result<()> {
     );
     daemon.shutdown();
     Ok(())
-}
-
-/// A mensagem que a prova assina: o rótulo, a impressão do certificado que o
-/// TLS desta conexão conferiu e o nonce (o S2).
-fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS sempre entrega a cadeia do servidor");
-    let impressao = seele_proto::transport::certificate_digest(
-        cadeia
-            .first()
-            .expect("a cadeia tem um certificado")
-            .as_ref(),
-    );
-    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
-    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

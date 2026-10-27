@@ -203,26 +203,31 @@ impl Destino {
         }
     }
 
-    /// A marca com que o `LEVE` deste destino chega a quem atende.
+    /// As marcas com que o `CHAMA` deste destino procura quem atende (D7).
     ///
-    /// A de um servidor sai da impressão esperada, pela mesma função com que o
-    /// anfitrião a confere (`Marcas::do_servidor`); a de uma sala sai do código
-    /// (`Marcas::da_sala`, ADR 0062). Duas derivações da mesma regra seriam duas
-    /// regras para discordarem no dia em que uma mudar.
+    /// As de um servidor saem da impressão esperada, pela mesma função com que
+    /// o anfitrião as registra (`Marcas::do_servidor`); as de uma sala saem do
+    /// código (`Marcas::da_sala`, ADR 0062). Duas derivações da mesma regra
+    /// seriam duas regras para discordarem no dia em que uma mudar.
     ///
     /// `None` sem nada esperado, e com uma impressão que não dá marca (curta, ou
-    /// com um símbolo fora do alfabeto): aí não se bate em ponto nenhum.
+    /// com um símbolo fora do alfabeto): aí não se chama ponto nenhum.
     #[must_use]
-    pub(crate) fn marca_do_aviso(&self) -> Option<crate::encontro::Marca> {
+    pub(crate) fn marcas(&self) -> Option<crate::encontro::Marcas> {
         match &self.esperada {
             Some(Esperada::Certificado(impressao)) => {
-                crate::encontro::Marcas::do_servidor(impressao).map(|marcas| marcas.aviso().clone())
+                crate::encontro::Marcas::do_servidor(impressao)
             }
-            Some(Esperada::Codigo(codigo)) => {
-                Some(crate::encontro::Marcas::da_sala(codigo).aviso().clone())
-            }
+            Some(Esperada::Codigo(codigo)) => Some(crate::encontro::Marcas::da_sala(codigo)),
             None => None,
         }
+    }
+
+    /// A marca do aviso de [`Destino::marcas`], para quem só quer saber se
+    /// há o que chamar.
+    #[must_use]
+    pub(crate) fn marca_do_aviso(&self) -> Option<crate::encontro::Marca> {
+        self.marcas().map(|marcas| marcas.aviso().clone())
     }
 }
 
@@ -273,6 +278,12 @@ pub enum Aviso {
         largura: u16,
         /// Altura em pixels.
         altura: u16,
+        /// **Qual leitura abriu**: um número por leitura, crescente no
+        /// processo ([`nova_leitura_de_tela`]). O [`Self::TelaFechou`] dela leva
+        /// o mesmo número. Sem ele, o fim de uma leitura substituída (o par
+        /// renomeado aborta a anterior da mesma tela) não se distinguia do fim
+        /// da que está no ar.
+        leitura: u64,
     },
     /// Um quadro comprimido de uma tela alheia.
     ///
@@ -291,6 +302,9 @@ pub enum Aviso {
         tela: ScreenId,
         /// Um pacote Opus, como o outro lado o produziu.
         bytes: Vec<u8>,
+        /// De qual leitura, como no [`Self::TelaQuadro`]: o som de uma leitura
+        /// substituída não pode cair na fila da nova.
+        leitura: u64,
     },
     /// Um quadro comprimido de uma tela alheia.
     ///
@@ -306,6 +320,10 @@ pub enum Aviso {
         chave: bool,
         /// O quadro, em Annex-B.
         bytes: Vec<u8>,
+        /// De qual leitura: o número do [`Self::TelaAbriu`] dela. Uma leitura
+        /// substituída pode ainda soltar um quadro depois da abertura nova da
+        /// mesma tela, e ele não pode chegar ao decodificador da nova.
+        leitura: u64,
     },
     /// Chegou uma transmissão e esta versão não sabe lê-la.
     ///
@@ -328,9 +346,15 @@ pub enum Aviso {
         motivo: String,
     },
     /// A transmissão que estava chegando acabou.
+    ///
+    /// **Sai também quando a leitura é abortada** (a guarda `FimDaLeitura`):
+    /// a troca de par e a queda abortam a tarefa no meio do laço, e o fim que
+    /// só existia depois do laço não saía.
     TelaFechou {
         /// Qual transmissão.
         tela: ScreenId,
+        /// Qual leitura acabou: o número do [`Self::TelaAbriu`] dela.
+        leitura: u64,
     },
     /// Acabou. Ou os cinco minutos passaram, ou não vale a pena tentar.
     Encerrado(Motivo),
@@ -356,31 +380,48 @@ impl std::fmt::Debug for Aviso {
                 tela,
                 largura,
                 altura,
+                leitura,
             } => f
                 .debug_struct("TelaAbriu")
                 .field("tela", tela)
                 .field("largura", largura)
                 .field("altura", altura)
+                .field("leitura", leitura)
                 .finish(),
             Self::TelaIlegivel { motivo } => f
                 .debug_struct("TelaIlegivel")
                 .field("motivo", motivo)
                 .finish(),
             // Pelo mesmo motivo do quadro: os bytes viram um número.
-            Self::TelaSom { tela, bytes } => f
+            Self::TelaSom {
+                tela,
+                bytes,
+                leitura,
+            } => f
                 .debug_struct("TelaSom")
                 .field("tela", tela)
                 .field("bytes", &bytes.len())
+                .field("leitura", leitura)
                 .finish(),
             // Os bytes viram um número: um quadro-chave de 1080p tem 65 KiB, e
             // despejá-los num log é apagar o log.
-            Self::TelaQuadro { tela, chave, bytes } => f
+            Self::TelaQuadro {
+                tela,
+                chave,
+                bytes,
+                leitura,
+            } => f
                 .debug_struct("TelaQuadro")
                 .field("tela", tela)
                 .field("chave", chave)
                 .field("bytes", &bytes.len())
+                .field("leitura", leitura)
                 .finish(),
-            Self::TelaFechou { tela } => f.debug_struct("TelaFechou").field("tela", tela).finish(),
+            Self::TelaFechou { tela, leitura } => f
+                .debug_struct("TelaFechou")
+                .field("tela", tela)
+                .field("leitura", leitura)
+                .finish(),
             Self::Encerrado(motivo) => f.debug_tuple("Encerrado").field(motivo).finish(),
         }
     }
@@ -439,6 +480,14 @@ enum Comando {
         request: u32,
         id: String,
         channel: ChannelId,
+        payload: String,
+    },
+    /// Uma ação declarada de MOD (API 7): o `ModRequest` com o nome da ação.
+    AcaoDeMod {
+        request: u32,
+        id: String,
+        channel: ChannelId,
+        acao: String,
         payload: String,
     },
     /// Semeia a sonda com o caminho medido da última vez com este servidor.
@@ -508,6 +557,9 @@ enum Comando {
     Expulsar {
         pessoa: PersonId,
     },
+    /// Um verbo de cargo com a revisão vista, ou `None` para o `PedirCargos`
+    /// (ADR 0064). Não volta na reconexão: ver `Motor::lembrar`.
+    Cargo(Option<(u64, seele_proto::cargos::PedidoDeCargo)>),
     Banir {
         pessoa: PersonId,
         motivo: Option<String>,
@@ -618,6 +670,7 @@ impl Comando {
         match self {
             Self::ImagemDeMod { .. } => "ImagemDeMod",
             Self::ModRequest { .. } => "ModRequest",
+            Self::AcaoDeMod { .. } => "AcaoDeMod",
             Self::LembrarCaminho(_) => "LembrarCaminho",
             Self::EntrarNaVoiceRoom(..) => "EntrarNaVoiceRoom",
             Self::SairDaVoiceRoom => "SairDaVoiceRoom",
@@ -636,6 +689,7 @@ impl Comando {
             Self::MinhaImagem { .. } => "MinhaImagem",
             Self::IconeDoServer { .. } => "IconeDoServer",
             Self::Expulsar { .. } => "Expulsar",
+            Self::Cargo(_) => "Cargo",
             Self::Banir { .. } => "Banir",
             Self::RemoverMensagem { .. } => "RemoverMensagem",
             Self::MoverPersono { .. } => "MoverPersono",
@@ -908,37 +962,6 @@ const COMANDOS: usize = 32;
 /// de casa em primeiro, o caso comum nunca chega a esperar nada disto.
 const PRAZO_POR_CANDIDATO: Duration = Duration::from_secs(4);
 
-/// Quanto se espera entre avisar o ponto de encontro e começar o aperto de mão.
-///
-/// É o que tem de caber entre o `LEVE` sair daqui e o `Initial` chegar ao NAT do
-/// outro lado: uma perna até o ponto, mais uma perna do ponto até o anfitrião —
-/// que somadas dão mais ou menos a ida e volta que o ADR 0022 mediu entre 20 e
-/// 200 ms.
-///
-/// **Erra-se para baixo de propósito.** Errar para baixo custa um PTO do quinn,
-/// que cabe folgado nos 4 s do candidato; errar para cima é pago sempre, por
-/// todo mundo, inclusive por quem ia conectar de qualquer jeito.
-const ESPERA_DO_FURO: Duration = Duration::from_millis(200);
-
-/// Quantos avisos saem por candidato que precisa de furo, e de quanto em quanto.
-///
-/// Três, espaçados, **enquanto o aperto de mão corre**. É a retentativa que não
-/// existia: antes eram dois avisos antes do laço, e um `AQUI` perdido custava a
-/// conexão inteira em silêncio — o anfitrião nunca furava, o candidato queimava
-/// os quatro segundos, e o erro que saía era o de outro endereço.
-const AVISOS_POR_CANDIDATO: u8 = 3;
-/// O intervalo entre eles.
-const INTERVALO_DO_AVISO: Duration = Duration::from_millis(700);
-
-/// O prazo de um candidato privado que não é desta rede.
-///
-/// Um `192.168.x.x` visto de outra casa não devolve ICMP nenhum: ele queima o
-/// prazo inteiro. Um segundo cabe dez idas e voltas de rede local e um PTO.
-///
-/// **Nunca descartar, só encurtar.** Um /16 configurado à mão ou uma VPN
-/// capturando a rota dão falso negativo, e falso negativo só custa velocidade.
-const PRAZO_DE_CANDIDATO_DISTANTE: Duration = Duration::from_secs(1);
-
 /// Quanto se espera antes de disparar o próximo candidato da corrida.
 ///
 /// # O número que esta constante existe para apagar
@@ -1208,11 +1231,11 @@ async fn ouvir_um_toque(tocados: &mut Option<mpsc::UnboundedReceiver<usize>>) ->
 ///
 /// Um `select!` sobre a tentativa **inteira**, e não sobre uma leitura: quem
 /// perde é largado de uma vez, com a conexão dele.
-async fn ate_o_prazo_ou_o_toque<T>(
+async fn ate_o_prazo_ou_o_toque<T, M>(
     prazo: Option<Duration>,
     tentativa: impl std::future::Future<Output = T>,
-    ouviu: &mut mpsc::UnboundedReceiver<u16>,
-    ao_tocar: impl FnOnce(u16),
+    ouviu: &mut mpsc::UnboundedReceiver<M>,
+    ao_tocar: impl FnOnce(M),
 ) -> Option<T> {
     tokio::pin!(tentativa);
     let limite = async {
@@ -1247,76 +1270,89 @@ pub(crate) struct DoQuarto {
     /// O endereço de hoje como candidato, quando ele não é nenhum dos que já
     /// correm.
     pub(crate) candidato: Option<Destino>,
-    /// O bilhete desta volta: o guardado, com a escuta de hoje quando o quarto a
-    /// confirma (`crate::encontro::bilhete_desta_volta`). `None` deixa o
-    /// guardado.
-    pub(crate) bilhete: Option<seele_proto::uri::Bilhete>,
 }
 
-/// Um candidato da corrida e o que ele leva: a batida e o bilhete com que avisa
-/// e com que o motor dele volta depois, e o pin da chave dele antes da corrida,
-/// para a limpeza dos perdedores.
-///
-/// A batida e o bilhete são **por corredor** porque quem espera o quarto avisa
-/// a escuta de hoje, e quem começou antes avisa a guardada.
+/// Um candidato da corrida: o destino e o pin da chave dele **antes** da
+/// corrida, para a limpeza dos perdedores.
 #[derive(Clone)]
-struct Corredor {
+struct Candidato {
     destino: Destino,
     antes: Option<String>,
-    batida: Option<crate::encontro::Batida>,
-    bilhete: Option<seele_proto::uri::Bilhete>,
 }
 
-/// Se um `LEVE` sai por este candidato: há batida, e o endereço é público.
+/// O que corre na corrida desde a 0.17: **um agente ICE**, e não um endereço.
 ///
-/// **A pergunta é uma só.** É ela que `avisar_pelo_candidato` faz antes de
-/// mandar, e é ela que decide quem espera o quarto: quem não seria avisado não
-/// tem por que esperar a escuta de hoje. Uma segunda opinião sobre «quem precisa
-/// de furo» já foi escrita e desfeita uma vez (`b4f5ef94`), justamente onde as
-/// duas discordavam.
-fn pede_furo(batida: Option<&crate::encontro::Batida>, onde: SocketAddr) -> bool {
-    batida.is_some() && e_publico(onde.ip())
+/// Até a 0.16 cada endereço do convite era um aperto de mão QUIC próprio, e a
+/// corrida do ADR 0037 disparava um a cada 250 ms. Com WebRTC, o ICE já tenta
+/// vários candidatos de uma vez e fica com o primeiro que responde: os endereços
+/// diretos de um anfitrião vão juntos numa discagem só (D2). O que sobra como
+/// corrida é entre **caminhos**: o direto, o do degrau 4 (o `CHAMA` pelo ponto)
+/// e o que o quarto devolve depois.
+#[derive(Clone)]
+enum Lote {
+    /// Os endereços que se discam direto, todos num agente ICE.
+    Direto(Vec<Candidato>),
+    /// O degrau 4 (D7): chamar o anfitrião pelo ponto de encontro e discar o
+    /// endereço que ele devolver, com o `U` do `CHAMA`.
+    ///
+    /// `modelo` é o destino cujas regras o endereço devolvido herda — a
+    /// impressão esperada, a chave de pino, o apelido, o segredo —, **sem** a
+    /// prova pelo pino: é um candidato que ninguém escolheu
+    /// ([`Destino::o_pino_prova_o_servidor`]).
+    PelaChamada {
+        chamada: crate::encontro::Chamada,
+        modelo: Box<Candidato>,
+    },
 }
 
-/// O lote que o quarto solta na corrida: quem esperava, com o bilhete desta
-/// volta e uma batida que avisa a escuta dele, e o endereço de hoje logo depois
-/// do alvo (se o alvo esperava) ou na frente (se não).
+impl Lote {
+    /// Os candidatos de antes da corrida, para a limpeza de pin órfão.
+    fn candidatos(&self) -> Vec<&Candidato> {
+        match self {
+            Self::Direto(candidatos) => candidatos.iter().collect(),
+            Self::PelaChamada { modelo, .. } => vec![modelo.as_ref()],
+        }
+    }
+
+    /// Um endereço para o log de quem falhou.
+    fn onde(&self) -> Option<SocketAddr> {
+        match self {
+            Self::Direto(candidatos) => candidatos.first().map(|c| c.destino.servidor),
+            Self::PelaChamada { chamada, .. } => Some(chamada.ponto()),
+        }
+    }
+}
+
+/// Se este candidato depende de alguém ter furado o caminho até ele: há
+/// chamada possível, e o endereço é público.
+///
+/// **A pergunta é uma só**, a que decide quem espera o quarto: quem não
+/// precisa de furo não tem por que esperar a escuta de hoje.
+fn pede_furo(chamada: Option<&crate::encontro::Chamada>, onde: SocketAddr) -> bool {
+    chamada.is_some() && e_publico(onde.ip())
+}
+
+/// O lote que o quarto solta na corrida: quem esperava, e o endereço de hoje
+/// logo depois do alvo (se o alvo esperava) ou na frente (se não).
 fn lote_do_quarto(
     do_quarto: DoQuarto,
-    esperam: Vec<Corredor>,
+    esperam: Vec<Candidato>,
     o_alvo_espera: bool,
-    batida: Option<&crate::encontro::Batida>,
-    guardado: Option<seele_proto::uri::Bilhete>,
     pins: &dyn PinStore,
-) -> Vec<Corredor> {
-    let bilhete = do_quarto.bilhete.or(guardado);
-    // A mesma batida, com o aviso desta volta: o furo tem de abrir para a porta
-    // de onde saem os apertos de mão.
-    let batida = match (
-        batida,
-        bilhete.as_ref().and_then(|bilhete| bilhete.aviso().ok()),
-    ) {
-        (Some(batida), Some(aviso)) => Some(batida.com_aviso(aviso)),
-        (batida, _) => batida.cloned(),
-    };
-    let mut lote: Vec<Corredor> = esperam
-        .into_iter()
-        .map(|corredor| Corredor {
-            batida: batida.clone(),
-            bilhete: bilhete.clone(),
-            ..corredor
-        })
-        .collect();
+) -> Vec<Lote> {
+    let mut candidatos = esperam;
     if let Some(destino) = do_quarto.candidato {
-        let de_hoje = Corredor {
+        let de_hoje = Candidato {
             antes: pins.pinned(&destino.chave_do_pin),
             destino,
-            batida,
-            bilhete,
         };
-        lote.insert(usize::from(o_alvo_espera).min(lote.len()), de_hoje);
+        candidatos.insert(usize::from(o_alvo_espera).min(candidatos.len()), de_hoje);
     }
-    lote
+    if candidatos.is_empty() {
+        Vec::new()
+    } else {
+        vec![Lote::Direto(candidatos)]
+    }
 }
 
 /// Põe o lote que chegou depois **na frente** de quem espera a vez, na ordem
@@ -1330,36 +1366,56 @@ fn receber_o_lote<P>(fila: &mut std::collections::VecDeque<P>, lote: Vec<P>) -> 
     alguem
 }
 
+/// O que uma chamada que não deu em endereço vira para quem liga.
+fn falha_da_chamada(falha: crate::encontro::FalhaDaChamada) -> ConnectError {
+    use crate::encontro::{FalhaAoLocalizar, FalhaDaChamada};
+    ConnectError::NaoLocalizou(match falha {
+        FalhaDaChamada::Ninguem => FalhaAoLocalizar::NinguemMora,
+        FalhaDaChamada::Calado => FalhaAoLocalizar::AnfitriaoCalado,
+        FalhaDaChamada::Recusa => FalhaAoLocalizar::PontoRecusou,
+        FalhaDaChamada::Mudo => FalhaAoLocalizar::PontoMudo,
+    })
+}
+
+/// Os destinos que um `AQUI` do degrau 4 dá: o endereço público e as dicas de
+/// rede local, cada um herdando as regras do `modelo` sem a prova pelo pino.
+fn destinos_da_chamada(modelo: &Candidato, atendida: &crate::encontro::Atendida) -> Vec<Candidato> {
+    std::iter::once(atendida.endereco)
+        .chain(atendida.dicas.iter().copied())
+        .map(|servidor| Candidato {
+            destino: Destino {
+                servidor,
+                o_pino_prova_o_servidor: false,
+                ..modelo.destino.clone()
+            },
+            antes: modelo.antes.clone(),
+        })
+        .collect()
+}
+
+/// Se dois endereços são o mesmo, com o IPv4 mapeado igual ao escrito.
+fn mesmo_endereco(a: SocketAddr, b: SocketAddr) -> bool {
+    a.ip().to_canonical() == b.ip().to_canonical() && a.port() == b.port()
+}
+
+/// O prazo da discagem de um lote que corre com outros.
+///
+/// Quatro segundos, o número do ADR 0037 para um candidato. Com o ICE ele vale
+/// para o lote inteiro: um endereço morto não gasta o prazo de ninguém, porque
+/// os vivos respondem ao mesmo agente.
+const PRAZO_DA_DISCAGEM_NA_CORRIDA: Duration = PRAZO_POR_CANDIDATO;
+
 impl Enlace {
-    /// Conecta no primeiro endereço que atender, tentando um de cada vez.
+    /// Conecta no primeiro endereço que atender.
     ///
-    /// Um convite pode trazer vários endereços do mesmo server — ADR 0006 — e
+    /// Um convite pode trazer vários endereços do mesmo servidor — ADR 0006 — e
     /// eles não são intercambiáveis: o da rede de casa não é alcançável de
-    /// fora, e o público que o roteador abriu costuma não voltar para dentro,
-    /// porque a maioria dos roteadores domésticos não faz *hairpin*.
-    ///
-    /// # Em série, e não em corrida
-    ///
-    /// Uma corrida abriria vários apertos de mão contra o mesmo servidor para
-    /// descartar todos menos um — e cada aperto de mão fixa chave, gasta o
-    /// convite de uso único do ADR 0021 e aparece no log de quem hospeda como
-    /// uma tentativa. Em série nada disso acontece: no caso comum, o primeiro
-    /// endereço é o da rede local e responde antes de o segundo ser cogitado.
-    ///
-    /// # O prazo, e por que a lista de um não tem nenhum
-    ///
-    /// Com mais de um candidato, cada um vale [`PRAZO_POR_CANDIDATO`]: um
-    /// endereço que não volta não pode segurar a fila. Com um só, não há fila —
-    /// e aí o caminho é exatamente o de antes, sem prazo novo e sem mudança de
-    /// comportamento para um convite antigo.
+    /// fora, e o público que o roteador abriu costuma não voltar para dentro.
+    /// Desde a 0.17 eles vão **juntos** num agente ICE só ([`Lote`]).
     ///
     /// # Que erro sai quando nenhum entra
     ///
-    /// O de quem **respondeu**, se algum respondeu: "a chave deste servidor
-    /// mudou" diz o que aconteceu, e "não alcancei" de um endereço que nunca ia
-    /// voltar não diz nada. Sem nenhuma resposta, sai o erro do primeiro
-    /// candidato, que é o endereço que a pessoa mais provavelmente esperava
-    /// usar.
+    /// O de quem **respondeu**, se algum respondeu ([`FalhaAMostrar`]).
     ///
     /// # Errors
     ///
@@ -1372,41 +1428,19 @@ impl Enlace {
         Self::conectar_entre_com_bilhete(destinos, None, chave, pins).await
     }
 
-    /// O mesmo, avisando o ponto de encontro do convite a cada candidato.
+    /// O mesmo, com o degrau 4 do ponto de encontro do convite.
     ///
-    /// Degrau 4 do ADR 0022. O bilhete vem do `enc` do `seele://` — ADR 0006 —,
-    /// e o que ele acrescenta é um datagrama **colado em cada tentativa que
-    /// precisa dele**: o ponto de encontro conta ao anfitrião de onde viemos, o
-    /// anfitrião manda um pacote para cá, e o roteador dele passa a deixar
-    /// entrar o aperto de mão que sai logo em seguida.
+    /// O bilhete vem do `enc` do `seele://` — ADR 0006. Com ele, além da
+    /// discagem direta, corre a chamada do ENC/3 ([`crate::encontro::Chamada`]):
+    /// o ponto repassa o `CHAMA` ao anfitrião, o anfitrião fura o NAT dele para
+    /// a porta desta sessão e responde com o endereço público, e a discagem vai
+    /// para lá com o mesmo `U`.
     ///
-    /// # Por que colado, e não antes do laço
+    /// # O que acontece quando não dá para chamar
     ///
-    /// Porque é o defeito que este ciclo existe para consertar. O aviso saía uma
-    /// vez, antes de tudo, e o furo do outro lado abre por menos de um segundo;
-    /// o primeiro candidato do convite é o da rede de casa, que de outra casa
-    /// queima o prazo inteiro. Quando a vez do candidato refletido chegava, o
-    /// furo tinha fechado havia segundos — quatro no melhor caso, doze no pior,
-    /// e um teste de campo com duas casas falhou exatamente assim.
-    ///
-    /// Agora `encontro::Batida::preparar` só abre o socket e resolve o nome.
-    /// **Nenhum pacote sai daqui**: quem manda é o laço, uma vez por candidato
-    /// que precisa de furo, e mais dois avisos espaçados enquanto o aperto de
-    /// mão corre.
-    ///
-    /// # Por que todos os candidatos passam pelo mesmo socket
-    ///
-    /// Porque o furo é por porta. O anfitrião abriu caminho para a porta de onde
-    /// o aviso saiu, e um aperto de mão saindo de outra porta continuaria
-    /// batendo numa porta fechada. Cada tentativa recebe uma cópia daquele
-    /// socket — o original fica vivo aqui até o fim, para que a porta não seja
-    /// devolvida ao sistema entre uma tentativa e a seguinte.
-    ///
-    /// # O que acontece quando não dá para bater
-    ///
-    /// Conecta como sempre conectou. Um ponto de encontro fora do ar, um convite
-    /// sem impressão digital ou uma máquina sem rota nenhuma fazem o degrau 4
-    /// não acontecer — e nenhum dos endereços do convite depende dele.
+    /// Conecta como sempre conectou. Um ponto fora do ar, um convite sem
+    /// impressão digital ou uma máquina sem rota fazem o degrau 4 não acontecer
+    /// — e nenhum dos endereços do convite depende dele.
     ///
     /// # Errors
     ///
@@ -1423,14 +1457,7 @@ impl Enlace {
     /// O mesmo, contando cada candidato a quem observa.
     ///
     /// A porta por onde [`crate::chegada::Chegada`] entra. Uma [`Tentativa`] sai
-    /// por candidato, no instante em que a tentativa dele começa e com o aviso
-    /// já decidido — que é a informação de que o caminho da tela é feito, e a
-    /// única que não se pode ler do endereço.
-    ///
-    /// Um canal e não um retorno: as tentativas acontecem enquanto esta função
-    /// corre, e quem desenha quer saber delas **durante**, não no fim. O canal é
-    /// ilimitado porque a quantidade é a do convite — quatro endereços, no
-    /// máximo — e um `send` bloqueante aqui poria a tela no caminho da conexão.
+    /// por candidato, no instante em que o lote dele começa.
     ///
     /// # Errors
     ///
@@ -1448,24 +1475,13 @@ impl Enlace {
     /// O mesmo, com o quarto do ponto de encontro correndo **junto** com a
     /// corrida, e não antes dela (a pendência 55).
     ///
-    /// A porta por onde [`crate::chegada::Chegada`] entra quando volta a um
-    /// servidor guardado. `quarto` é a resposta, quando ela vier: o endereço de
-    /// hoje vira um candidato tardio, e o bilhete desta volta vale para quem
-    /// precisa de furo.
-    ///
     /// - **Quem não precisa de furo não espera**: um endereço da rede de casa
-    ///   começa na hora, e quem está na mesma casa entra sem pagar o prazo do
-    ///   quarto.
-    /// - **Quem precisa de furo espera a resposta**, como esperava antes: o
-    ///   `LEVE` dele vai à escuta de hoje, quando o quarto a confirma, e não à
-    ///   guardada.
-    /// - O endereço de hoje entra logo depois do alvo, se o alvo também
-    ///   esperava, e na frente dos que esperavam, se não. É a posição que ele
-    ///   tinha quando o `connect` do app o punha na frente dos alternativos.
+    ///   começa na hora.
+    /// - **Quem precisa de furo espera a resposta**, e entra num lote com o
+    ///   endereço de hoje, quando ele é novo.
     ///
     /// Quem passa `quarto` responde por ele chegar: a corrida não acaba sem ele.
-    /// Um remetente largado vale como um quarto que não trouxe nada. Sem
-    /// `quarto`, é [`Enlace::conectar_entre_observado`].
+    /// Um remetente largado vale como um quarto que não trouxe nada.
     ///
     /// # Errors
     ///
@@ -1490,19 +1506,17 @@ impl Enlace {
         olhos: Option<mpsc::UnboundedSender<Andamento>>,
         quarto: Option<tokio::sync::oneshot::Receiver<DoQuarto>>,
     ) -> Result<Self, ConnectError> {
-        // Preparado antes do laço porque o socket tem de ser um só — o NAT
-        // mapeia por porta interna. Mas **nenhum pacote sai daqui**: o aviso é
-        // por candidato, e é essa mudança que conserta a corrida.
-        let batida = match &bilhete {
+        // Só resolve o ponto. **Nenhum pacote sai daqui.**
+        let chamada = match &bilhete {
             Some(bilhete) => {
-                let marca = destinos.first().and_then(Destino::marca_do_aviso);
-                crate::encontro::Batida::preparar(bilhete, marca).await
+                let marcas = destinos.first().and_then(Destino::marcas);
+                crate::encontro::Chamada::preparar(bilhete, marcas).await
             }
             None => None,
         };
         Self::tentar_entre(
             destinos,
-            batida.as_ref(),
+            chamada,
             bilhete,
             chave,
             pins,
@@ -1512,228 +1526,123 @@ impl Enlace {
         .await
     }
 
-    /// O laço de tentativas, com ou sem furo de NAT.
+    /// A corrida entre os caminhos: o direto, o do degrau 4, e o do quarto.
     async fn tentar_entre(
         destinos: Vec<Destino>,
-        batida: Option<&crate::encontro::Batida>,
+        chamada: Option<crate::encontro::Chamada>,
         bilhete: Option<seele_proto::uri::Bilhete>,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
         olhos: Option<&mpsc::UnboundedSender<Andamento>>,
         quarto: Option<tokio::sync::oneshot::Receiver<DoQuarto>>,
     ) -> Result<Self, ConnectError> {
-        // Uma cópia por tentativa, e o original vivo até o fim: um `Endpoint`
-        // fecha o socket dele ao ser recolhido, e sem o original a porta que o
-        // anfitrião furou voltaria para o sistema no meio do caminho.
-        // **Um `Endpoint`, e não um por tentativa.**
-        //
-        // A razão de o socket ser um só continua a mesma — o NAT mapeia por porta
-        // interna, e o furo que o anfitrião abriu vale para aquela porta. O que
-        // mudou é a leitura da restrição: ela nunca foi «uma conexão por
-        // socket», e sim **um leitor por socket**. Dois `Endpoint` sobre cópias
-        // do mesmo descritor dividem uma fila de recepção e roubam pacote um do
-        // outro; um `Endpoint` só dirige quantas conexões se queira,
-        // demultiplexando por connection ID. Ver o ADR 0037.
-        let endpoint = crate::client::local_endpoint(
-            batida.and_then(crate::encontro::Batida::emprestar_socket),
-        )?;
-        let mut candidatos = destinos.into_iter().peekable();
-        let Some(primeiro) = candidatos.next() else {
+        // **Uma ponta por tentativa de entrar** (R5): o socket desta sessão, de
+        // onde saem a discagem e o `CHAMA`, e que só ela usa.
+        let ponta = crate::transporte::abrir_ponta(None)?;
+        if destinos.is_empty() {
             // Ninguém chama assim, e devolver um erro é melhor que entrar num
             // laço que termina sem resposta nenhuma.
             return Err(ConnectError::Unreachable);
-        };
-        // Com o quarto a caminho não há candidato único: o endereço de hoje
-        // ainda pode chegar, e só a corrida o recebe.
-        if candidatos.peek().is_none() && quarto.is_none() {
-            // Um convite de um endereço só continua sem prazo novo — o caminho
-            // de antes, para um link antigo. Mas o aviso ele leva: um convite
-            // que traz **só** o endereço refletido é exatamente a casa que mais
-            // depende do degrau 4, e pular o aviso aqui deixaria sem furo quem
-            // não tem outra chance.
-            let repeticao = avisar_pelo_candidato(batida, primeiro.servidor).await;
-            contar(
-                olhos,
-                Andamento::Tentando(Tentativa {
-                    candidato: 0,
-                    onde: primeiro.servidor,
-                    avisou: repeticao.is_some(),
-                }),
-            );
-            // Sem corrida não há a quem dar a vitória, e o prazo é só o do aperto
-            // de mão: o toque vai a quem acompanha, e mais nada.
-            let (tocou, mut ouviu) = mpsc::unbounded_channel();
-            let tentativa =
-                Self::conectar_por(&endpoint, bilhete, primeiro, chave, pins, Some(tocou));
-            let resultado = ate_o_prazo_ou_o_toque(None, tentativa, &mut ouviu, |prazo_s| {
-                contar(
-                    olhos,
-                    Andamento::Tocando {
-                        candidato: 0,
-                        prazo_s,
-                    },
-                );
-            })
-            .await
-            .unwrap_or(Err(ConnectError::SemResposta));
-            if let Some(repeticao) = repeticao {
-                repeticao.abort();
-            }
-            // Candidato único: não há corrida, e ainda assim a declaração só
-            // sai depois de a conexão estar de pé. Ver o doc de
-            // `Enlace::declarar_identidade_de_par`.
-            if let Ok(enlace) = &resultado {
-                let _ = enlace.declarar_identidade_de_par().await;
-            }
-            return resultado;
         }
-
-        let mut a_mostrar = FalhaAMostrar::default();
-
-        // A corrida do RFC 8305, no lugar das duas voltas em série.
-        //
-        // As duas voltas existiam para dar pouca paciência a todo mundo antes de
-        // dar a paciência inteira a quem merecia. A corrida torna a primeira
-        // metade desnecessária: ninguém espera o prazo de ninguém, então não há
-        // por que encurtá-lo. `PRAZO_DA_PRIMEIRA_VOLTA` fica sem uso aqui e
-        // continua valendo no caminho de candidato único, logo acima.
-        //
-        // O que **não** muda: `avisar_pelo_candidato` decide sozinho quem precisa
-        // de furo, por `pede_furo`, e o aviso continua saindo colado ao aperto de
-        // mão que ele acompanha — agora escalonado junto com ele. Ver o ADR 0037.
-        //
-        // Cada corredor leva a fotografia do pin da chave dele **antes** da
-        // corrida, que é o que a limpeza dos perdedores lê lá embaixo.
-        let corredor = |destino: Destino| Corredor {
-            antes: pins.pinned(&destino.chave_do_pin),
-            destino,
-            batida: batida.cloned(),
-            bilhete: bilhete.clone(),
-        };
-        let todos: Vec<Corredor> = std::iter::once(primeiro)
-            .chain(candidatos)
-            .map(corredor)
+        let todos: Vec<Candidato> = destinos
+            .into_iter()
+            .map(|destino| Candidato {
+                antes: pins.pinned(&destino.chave_do_pin),
+                destino,
+            })
             .collect();
+        let alvo = todos.first().cloned();
 
         // Com o quarto a caminho, quem precisa de furo espera a resposta dele, e
-        // quem não precisa começa na hora. Ver `conectar_entre_com_o_quarto`.
+        // quem não precisa começa na hora.
         let o_alvo_espera = quarto.is_some()
-            && todos
-                .first()
-                .is_some_and(|alvo| pede_furo(batida, alvo.destino.servidor));
-        let (ja, esperam): (Vec<Corredor>, Vec<Corredor>) =
-            todos.into_iter().partition(|corredor| {
-                quarto.is_none() || !pede_furo(batida, corredor.destino.servidor)
+            && alvo
+                .as_ref()
+                .is_some_and(|alvo| pede_furo(chamada.as_ref(), alvo.destino.servidor));
+        let (ja, esperam): (Vec<Candidato>, Vec<Candidato>) =
+            todos.into_iter().partition(|candidato| {
+                quarto.is_none() || !pede_furo(chamada.as_ref(), candidato.destino.servidor)
             });
+        let mut fila: Vec<Lote> = Vec::new();
+        if !ja.is_empty() {
+            fila.push(Lote::Direto(ja));
+        }
+        // O degrau 4 entra **depois** do direto, na defasagem: quem está na
+        // mesma casa entra antes de o ponto ou o anfitrião ouvirem qualquer
+        // coisa, e o `CHAMA` só sai quando o direto não respondeu logo.
+        if let (Some(chamada), Some(modelo)) = (chamada.clone(), alvo.clone()) {
+            fila.push(Lote::PelaChamada {
+                chamada,
+                modelo: Box::new(modelo),
+            });
+        }
+        let corrida_de_um = fila.len() == 1 && quarto.is_none();
         let tardios = quarto.map(|quarto| {
-            let batida = batida.cloned();
-            let guardado = bilhete.clone();
             let pins = Arc::clone(&pins);
             async move {
                 // Um remetente largado é um quarto que não trouxe nada.
                 let do_quarto = quarto.await.unwrap_or_default();
-                lote_do_quarto(
-                    do_quarto,
-                    esperam,
-                    o_alvo_espera,
-                    batida.as_ref(),
-                    guardado,
-                    pins.as_ref(),
-                )
+                lote_do_quarto(do_quarto, esperam, o_alvo_espera, pins.as_ref())
             }
         });
 
+        // A numeração dos candidatos para a trilha, na ordem em que cada um
+        // começou, através dos lotes.
+        let numeracao = Arc::new(std::sync::atomic::AtomicU8::new(0));
         // Quem ouvir `Tocando` avisa a corrida por aqui (tarefa 16 da F7).
         let (para_a_corrida, tocados) = mpsc::unbounded_channel();
         let corrida = correr(
-            ja,
+            fila,
             DEFASAGEM_ENTRE_CANDIDATOS,
             tardios,
             Some(tocados),
-            |posicao, corredor: Corredor| {
+            |posicao, lote: Lote| {
                 let chave = chave.clone();
                 let pins = Arc::clone(&pins);
-                let endpoint = endpoint.clone();
+                let ponta = ponta.clone();
                 let olhos = olhos.cloned();
                 let para_a_corrida = para_a_corrida.clone();
+                let bilhete = bilhete.clone();
+                let numeracao = Arc::clone(&numeracao);
                 async move {
-                    let Corredor {
-                        destino,
-                        batida,
-                        bilhete,
-                        ..
-                    } = corredor;
-                    let onde = destino.servidor;
-
-                    // O aviso sai **agora**, para este candidato, e o aperto de mão
-                    // sai logo atrás dele. O furo do outro lado dura menos de um
-                    // segundo, e a única forma de o `Initial` caber dentro dele é os
-                    // dois saírem juntos — que continua valendo com a corrida,
-                    // porque cada corredor leva o seu.
-                    let repeticao = avisar_pelo_candidato(batida.as_ref(), onde).await;
-                    contar(
-                        olhos.as_ref(),
-                        Andamento::Tentando(Tentativa {
-                            candidato: u8::try_from(posicao).unwrap_or(u8::MAX),
-                            onde,
-                            avisou: repeticao.is_some(),
-                        }),
-                    );
-
-                    // Um candidato privado de outra casa não devolve ICMP nenhum:
-                    // ele queima o prazo inteiro sem nunca ter tido chance. Aqui o
-                    // prazo curto não economiza tempo de parede — a corrida já faz
-                    // isso — e sim **solta** o corredor, em vez de deixá-lo
-                    // pendurado enquanto os outros terminam.
-                    let prazo = if e_de_outra_casa(onde) {
-                        PRAZO_DE_CANDIDATO_DISTANTE
-                    } else {
-                        PRAZO_POR_CANDIDATO
-                    };
-
                     let (tocou, mut ouviu) = mpsc::unbounded_channel();
-                    let tentativa =
-                        Self::conectar_por(&endpoint, bilhete, destino, chave, pins, Some(tocou));
-                    let resultado = match ate_o_prazo_ou_o_toque(
-                        Some(prazo),
+                    let tentativa = Self::tentar_o_lote(
+                        ponta,
+                        lote,
+                        bilhete,
+                        chave,
+                        pins,
+                        olhos.clone(),
+                        numeracao,
+                        tocou,
+                        if corrida_de_um {
+                            seele_proto::transport::HANDSHAKE_TIMEOUT
+                        } else {
+                            PRAZO_DA_DISCAGEM_NA_CORRIDA
+                        },
+                    );
+                    // Um lote sozinho não tem prazo além do da discagem e do
+                    // aperto: é o caminho de antes para um link de um endereço.
+                    // O degrau 4 soma o prazo da chamada ao da discagem.
+                    let prazo = (!corrida_de_um).then_some(
+                        crate::encontro::PRAZO_DA_CHAMADA + PRAZO_DA_DISCAGEM_NA_CORRIDA,
+                    );
+                    match ate_o_prazo_ou_o_toque(
+                        prazo,
                         tentativa,
                         &mut ouviu,
-                        |prazo_s| {
+                        |(candidato, prazo_s)| {
                             let _ = para_a_corrida.send(posicao);
-                            contar(
-                                olhos.as_ref(),
-                                Andamento::Tocando {
-                                    candidato: u8::try_from(posicao).unwrap_or(u8::MAX),
-                                    prazo_s,
-                                },
-                            );
+                            contar(olhos.as_ref(), Andamento::Tocando { candidato, prazo_s });
                         },
                     )
                     .await
                     {
                         Some(resultado) => resultado,
-                        // `SemResposta` e não `HandshakeTimeout`: este prazo é o do
-                        // **candidato inteiro**, e queimá-lo é não ter recebido nada
-                        // de volta. O aperto de mão tem um prazo próprio, dentro de
-                        // `Client::connect`, e é ele quem sabe dizer «o servidor
-                        // recebeu e demorou» — porque só ele roda depois de haver
-                        // conexão.
-                        //
-                        // Enquanto os dois casos saíam por aqui, a separação escrita
-                        // em `ConnectError::SemResposta` não chegava à tela uma vez
-                        // sequer: quatro segundos de silêncio na LAN eram anunciados
-                        // como problema de sincronização, e a frase mandava conferir
-                        // versão e protocolo — as duas coisas que estavam certas.
+                        // `SemResposta` e não `HandshakeTimeout`: este prazo é o
+                        // do lote inteiro, e queimá-lo é não ter recebido nada.
                         None => Err(ConnectError::SemResposta),
-                    };
-                    // A repetição para quando o candidato termina, dando certo ou
-                    // não: avisar sobre um candidato que já falhou gastaria furo da
-                    // janela do anfitrião por um caminho que ninguém vai tentar de
-                    // novo.
-                    if let Some(repeticao) = repeticao {
-                        repeticao.abort();
                     }
-                    resultado
                 }
             },
         )
@@ -1745,94 +1654,215 @@ impl Enlace {
         } = corrida;
 
         // A limpeza de pin órfão dos perdedores, **depois** do vencedor e
-        // pulando a chave dele.
-        //
-        // `desfazer_pin_orfao` só sabe «ninguém tinha fixado antes da corrida», e
-        // isso é exato em série e falso aqui: dois candidatos podem compartilhar
-        // `chave_do_pin` — ela é `host:porta` do nome do convite, e alternativos
-        // do mesmo nome colidem. Sem esta condição, limpar um perdedor
-        // encontraria `fixado_antes == None` e `pinned() == Some`, e apagaria o
-        // pin que o vencedor acabou de escrever: a confiança de primeiro contato
-        // do ADR 0003 desfeita em silêncio.
-        //
-        // Um perdedor que falhou por conta própria já se limpou em
-        // `conectar_por`, e só do que ele mesmo escreveu. Esta volta existe para
-        // o que aquela não alcança: o candidato cujo prazo estourou, derrubado
-        // no meio do aperto de mão sem chance de se limpar.
-        //
-        // As posições são a ordem em que cada um começou, e é por ela que se lê
-        // `iniciados`: um tardio que entrou na frente de quem esperava a vez
-        // tem a posição de quando começou, e não a da lista.
+        // pulando a chave dele (ADR 0037).
         let chave_do_vencedor = vencedor
             .as_ref()
-            .and_then(|(posicao, _)| iniciados.get(*posicao))
-            .map(|corredor| corredor.destino.chave_do_pin.clone());
+            .map(|(_, (_, chave_do_pin))| chave_do_pin.clone());
         for (posicao, falha) in &falhas {
             let Some(perdido) = iniciados.get(*posicao) else {
                 continue;
             };
-            let chave_perdida = &perdido.destino.chave_do_pin;
-            if chave_do_vencedor.as_deref() == Some(chave_perdida.as_str()) {
+            // Um degrau 4 que nem achou o anfitrião não discou ninguém, e não
+            // escreveu pin nenhum: limpar por ele apagaria o pin de um vizinho
+            // com o motivo errado no log.
+            if matches!(falha, ConnectError::NaoLocalizou(_)) {
                 continue;
             }
-            desfazer_pin_orfao(
-                pins.as_ref(),
-                chave_perdida,
-                perdido.antes.as_deref(),
-                falha,
-            );
+            for candidato in perdido.candidatos() {
+                let chave_perdida = &candidato.destino.chave_do_pin;
+                if chave_do_vencedor.as_deref() == Some(chave_perdida.as_str()) {
+                    continue;
+                }
+                desfazer_pin_orfao(
+                    pins.as_ref(),
+                    chave_perdida,
+                    candidato.antes.as_deref(),
+                    falha,
+                );
+            }
         }
 
-        // **Quem ganhou, dito por extenso.** O log tinha uma linha por candidato
-        // que falhou e nenhuma para o que deu certo, e a diferença custou uma
-        // noite: com quatro segundos de silêncio na LAN e uma entrada pelo
-        // endereço público no mesmo instante, não havia como saber, lendo o
-        // rastro, por qual dos dois a conversa tinha subido — só dava para
-        // inferir pelos milissegundos, e a inferência errou.
-        //
-        // A posição é lida daqui e não da trilha porque a trilha guarda a ordem
-        // em que as tentativas **começaram**, e elas correm em paralelo: a
-        // última a começar não é a que venceu. Aqui a corrida já terminou e
-        // sabe o nome de quem chegou.
-        //
-        // **E quem perdeu, antes de quem ganhou.** As falhas dos perdedores
-        // eram descartadas sem uma linha quando alguém vencia, e entre elas
-        // está o evento que a conferência da impressão existe para barrar: um
-        // servidor com a chave errada num endereço da corrida (o que o quarto
-        // devolveu, por exemplo). Ver [`registrar_a_falha_do_candidato`].
-        let onde_de = |posicao: usize| {
-            iniciados
-                .get(posicao)
-                .map(|corredor| corredor.destino.servidor)
-        };
-        if let Some((posicao, enlace)) = vencedor {
+        let onde_de = |posicao: usize| iniciados.get(posicao).and_then(Lote::onde);
+        if let Some((posicao, (enlace, _))) = vencedor {
             let onde = onde_de(posicao);
             for (perdedor, falha) in &falhas {
-                let de_quem = onde_de(*perdedor);
-                registrar_a_falha_do_candidato(de_quem, falha, onde);
+                registrar_a_falha_do_candidato(onde_de(*perdedor), falha, onde);
             }
-            tracing::info!(?onde, "este é o endereço que deu");
-            // Só o vencedor declara, e só agora que se sabe quem venceu — ver
-            // o doc de `Enlace::declarar_identidade_de_par` para o porquê de
-            // não declarar dentro de `conectar_por`.
+            tracing::info!(?onde, "este é o caminho que deu");
+            // Só o vencedor declara, e só agora que se sabe quem venceu.
             let _ = enlace.declarar_identidade_de_par().await;
             return Ok(enlace);
         }
 
+        let mut a_mostrar = FalhaAMostrar::default();
         for (posicao, falha) in falhas {
-            let onde = onde_de(posicao);
-            registrar_a_falha_do_candidato(onde, &falha, None);
+            registrar_a_falha_do_candidato(onde_de(posicao), &falha, None);
             a_mostrar.anotar(falha);
         }
-
         Err(a_mostrar.escolhida())
     }
 
-    /// Conecta pela primeira vez.
+    /// Um lote da corrida: a chamada pelo ponto, quando é o degrau 4, e a
+    /// discagem dos endereços dele num agente ICE.
+    ///
+    /// Devolve o enlace e a chave de pino de quem venceu, que é o que a limpeza
+    /// dos perdedores pula.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "o que cada lote leva para dentro da tarefa dele: a ponta, o lote, o \
+                  bilhete, a chave, os pins, quem observa, a numeração, o toque e o prazo"
+    )]
+    async fn tentar_o_lote(
+        ponta: crate::transporte::PontaDaSessao,
+        lote: Lote,
+        bilhete: Option<seele_proto::uri::Bilhete>,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+        olhos: Option<mpsc::UnboundedSender<Andamento>>,
+        numeracao: Arc<std::sync::atomic::AtomicU8>,
+        tocou: mpsc::UnboundedSender<(u8, u16)>,
+        prazo_da_discagem: Duration,
+    ) -> Result<(Self, String), ConnectError> {
+        let (candidatos, credencial, pelo_ponto) = match lote {
+            Lote::Direto(candidatos) => (candidatos, None, false),
+            Lote::PelaChamada { chamada, modelo } => {
+                let atendida = chamada
+                    .chamar(ponta.ponta(), crate::encontro::PRAZO_DA_CHAMADA)
+                    .await
+                    .map_err(falha_da_chamada)?;
+                (
+                    destinos_da_chamada(&modelo, &atendida),
+                    Some(atendida.credencial),
+                    true,
+                )
+            }
+        };
+        let numerados: Vec<(Candidato, u8)> = candidatos
+            .into_iter()
+            .map(|candidato| {
+                let numero = numeracao.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                contar(
+                    olhos.as_ref(),
+                    Andamento::Tentando(Tentativa {
+                        candidato: numero,
+                        onde: candidato.destino.servidor,
+                        avisou: pelo_ponto,
+                    }),
+                );
+                (candidato, numero)
+            })
+            .collect();
+        Self::discar_o_lote(
+            &ponta,
+            numerados,
+            credencial,
+            bilhete,
+            chave,
+            pins,
+            tocou,
+            prazo_da_discagem,
+        )
+        .await
+        .map_err(|erro| match erro {
+            // **O ponto disse que o anfitrião atendeu, e o caminho não abriu.**
+            // É a falha que o degrau 4 tem de nomear: dois NATs que não deixam
+            // entrar o que não saiu, sem relay.
+            ConnectError::SemResposta if pelo_ponto => ConnectError::NatNaoAbriu,
+            outro => outro,
+        })
+    }
+
+    /// Disca os endereços de um lote num agente ICE e faz o aperto do
+    /// protocolo com quem respondeu.
+    ///
+    /// **Um impostor na lista não derruba o lote.** Se quem respondeu não é o
+    /// servidor que a impressão promete (ou a chave fixada mudou), a conexão
+    /// fecha antes do `Hello`, a recusa vai ao log, e o lote disca de novo com
+    /// os endereços que sobram. A recusa só é devolvida se ninguém mais entrar.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "os de `tentar_o_lote`, menos o que já foi resolvido lá"
+    )]
+    async fn discar_o_lote(
+        ponta: &crate::transporte::PontaDaSessao,
+        mut restantes: Vec<(Candidato, u8)>,
+        credencial: Option<String>,
+        bilhete: Option<seele_proto::uri::Bilhete>,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+        tocou: mpsc::UnboundedSender<(u8, u16)>,
+        prazo: Duration,
+    ) -> Result<(Self, String), ConnectError> {
+        let mut recusa: Option<ConnectError> = None;
+        while !restantes.is_empty() {
+            let alvos: Vec<SocketAddr> = restantes
+                .iter()
+                .map(|(candidato, _)| candidato.destino.servidor)
+                .collect();
+            let conexao = match crate::client::discar(
+                ponta.ponta(),
+                alvos,
+                credencial.clone(),
+                prazo,
+            )
+            .await
+            {
+                Ok(conexao) => conexao,
+                // Uma recusa de antes diz mais que o silêncio de agora.
+                Err(erro) => return Err(recusa.unwrap_or(erro)),
+            };
+            let remoto = conexao.remote_address();
+            let indice = restantes
+                .iter()
+                .position(|(candidato, _)| mesmo_endereco(candidato.destino.servidor, remoto))
+                .unwrap_or(0);
+            let (candidato, numero) = restantes.remove(indice);
+            // O endereço como o convite o escreveu, e não na forma que o socket
+            // de pilha dupla devolve (`::ffff:a.b.c.d`): é o que quem lê o log
+            // procura.
+            let onde = candidato.destino.servidor;
+            // O toque deste candidato vai à corrida com o número dele.
+            let (tocou_aqui, mut ouviu_aqui) = mpsc::unbounded_channel();
+            let repasse = {
+                let tocou = tocou.clone();
+                tokio::spawn(async move {
+                    while let Some(prazo_s) = ouviu_aqui.recv().await {
+                        let _ = tocou.send((numero, prazo_s));
+                    }
+                })
+            };
+            let chave_do_pin = candidato.destino.chave_do_pin.clone();
+            let resultado = Self::conectar_sobre(
+                ponta.clone(),
+                conexao,
+                bilhete.clone(),
+                candidato.destino,
+                chave.clone(),
+                Arc::clone(&pins),
+                Some(tocou_aqui),
+            )
+            .await;
+            repasse.abort();
+            match resultado {
+                Ok(enlace) => return Ok((enlace, chave_do_pin)),
+                Err(
+                    erro @ (ConnectError::InviteMismatch { .. }
+                    | ConnectError::PinChanged { .. }
+                    | ConnectError::CodigoNaoConfere(_)),
+                ) if !restantes.is_empty() => {
+                    registrar_a_falha_do_candidato(Some(onde), &erro, None);
+                    recusa = Some(erro);
+                }
+                Err(erro) => return Err(erro),
+            }
+        }
+        Err(recusa.unwrap_or(ConnectError::Unreachable))
+    }
+
+    /// Conecta pela primeira vez, a um endereço só.
     ///
     /// A primeira conexão falha para fora: quem não conseguiu entrar não tem
-    /// sessão para segurar, e uma bateria interna antes de haver sessão seria
-    /// uma contagem regressiva para reconectar a lugar nenhum.
+    /// sessão para segurar.
     ///
     /// # Errors
     ///
@@ -1844,45 +1874,47 @@ impl Enlace {
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
-        let endpoint = crate::client::local_endpoint(None)?;
-        let enlace = Self::conectar_por(&endpoint, None, destino, chave, pins, None).await?;
+        let ponta = crate::transporte::abrir_ponta(None)?;
+        let conexao = crate::client::discar(
+            ponta.ponta(),
+            vec![destino.servidor],
+            None,
+            seele_proto::transport::HANDSHAKE_TIMEOUT,
+        )
+        .await?;
+        let enlace = Self::conectar_sobre(ponta, conexao, None, destino, chave, pins, None).await?;
         let _ = enlace.declarar_identidade_de_par().await;
         Ok(enlace)
     }
 
-    /// O mesmo, pelo socket que já furou o NAT. Degrau 4 do ADR 0022.
+    /// O aperto do protocolo sobre uma conexão que o enlace já abriu, e o motor.
     ///
     /// # Errors
     ///
     /// O mesmo de [`Enlace::conectar`].
-    async fn conectar_por(
-        endpoint: &quinn::Endpoint,
+    async fn conectar_sobre(
+        ponta: crate::transporte::PontaDaSessao,
+        conexao: crate::transporte::Conexao,
         bilhete: Option<seele_proto::uri::Bilhete>,
         destino: Destino,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
         tocou: Option<mpsc::UnboundedSender<u16>>,
     ) -> Result<Self, ConnectError> {
-        // O TLS escreve o pin de dentro do aperto de mão, e os vizinhos desta
+        // O verificador escreve o pin antes do `Hello`, e os vizinhos desta
         // tentativa escrevem na mesma chave quando são alternativos do mesmo
         // nome de convite. Por isso o que este aperto escreveu é **anotado**, e
         // não deduzido de olhar a loja antes e depois. Ver
         // [`desfazer_o_pin_deste_aperto`].
         let deste_aperto = Arc::new(PinsDesteAperto::nova(Arc::clone(&pins)));
 
-        let resultado = Client::connect_por(
-            endpoint,
-            destino.servidor,
-            &destino.nome_tls,
+        let resultado = Client::connect_sobre(
+            ponta,
+            conexao,
             &destino.chave_do_pin,
-            // Conferida **dentro do TLS**, antes do `Hello`: um primeiro
-            // contato que não confere nem chega a mandar o convite. É o mesmo
-            // caminho para todo candidato da corrida do ADR 0037, porque todos
-            // passam por aqui.
+            // Conferida **antes do `Hello`**: um primeiro contato que não
+            // confere nem chega a mandar o convite.
             destino.esperada.as_ref(),
-            // E se o pino deste candidato prova o servidor: onde não prova (fora
-            // do alvo, ou num alvo de escopo local), um pin que confere não
-            // passa por cima da impressão.
             destino.o_pino_prova_o_servidor,
             &destino.apelido,
             &chave,
@@ -1991,7 +2023,6 @@ impl Enlace {
             caminho_de_quem_hospeda_bps: None,
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
-            identidade_de_par: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             consentimento: ConsentimentoDePar::de_ninguem(),
             repasse: Arc::new(RepasseDeTela::default()),
@@ -2189,6 +2220,30 @@ impl Enlace {
             request,
             id,
             channel,
+            payload,
+        })
+        .await
+    }
+
+    /// Enfileira uma ação declarada de MOD (API 7). Quem autoriza é o servidor;
+    /// a resposta volta no `ModReply` deste `request`.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a tarefa da conexão já tiver fechado.
+    pub async fn acao_de_mod(
+        &self,
+        request: u32,
+        id: String,
+        channel: ChannelId,
+        acao: String,
+        payload: String,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::AcaoDeMod {
+            request,
+            id,
+            channel,
+            acao,
             payload,
         })
         .await
@@ -2410,6 +2465,21 @@ impl Enlace {
     /// Falha se a sessão já tiver acabado.
     pub async fn expulsar(&self, pessoa: PersonId) -> Result<(), Fechado> {
         self.mandar(Comando::Expulsar { pessoa }).await
+    }
+
+    /// Pede um verbo de cargo com a revisão que a tela viu, ou, com `None`, o
+    /// quadro de cargos (ADR 0064). **Não volta na reconexão**, como moderar:
+    /// refeito minutos depois, ele valeria contra uma revisão que já não é a
+    /// vista — e o servidor o recusaria com `RevisaoVelha` de qualquer jeito.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn cargo(
+        &self,
+        pedido: Option<(u64, seele_proto::cargos::PedidoDeCargo)>,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::Cargo(pedido)).await
     }
 
     /// Pede ao servidor que impeça alguém de voltar.
@@ -2822,13 +2892,6 @@ struct Motor {
     /// na tica que ele já tem — ver [`Motor::medir_o_caminho`]. Era a pergunta
     /// 2 do §8.
     caminho: crate::caminho::Sonda,
-    /// A identidade efêmera desta sessão para o caminho entre pares.
-    ///
-    /// Gerada na primeira vez que é necessária e guardada depois: quem chama
-    /// `par::passar_a_atender` e depois `par::ligar` na mesma ponta precisa
-    /// das duas — é para essa cópia que `Identidade::clone` existe, e é por
-    /// isso que a identidade tem de sobreviver ao primeiro uso.
-    identidade_de_par: Option<par::Identidade>,
     /// Se já há uma tentativa de servir um par em curso.
     ///
     /// No A1 quem empresta serve um par por vez (`crate::par::atender` só
@@ -3344,6 +3407,16 @@ impl Motor {
         // Antes da bateria, e não depois: o passo pode encerrar a sessão, e uma
         // leitura depois disso seria contra um cliente que já foi embora.
         self.medir_o_caminho();
+        // A medida de dor da sonda desde a 0.17: o `Ping` dela, só enquanto a
+        // tela transmite (ver `caminho::IdaEVolta`). O cliente espaça e não
+        // põe dois no ar.
+        if self.tela_viva.is_some() {
+            if let Some(cliente) = self.cliente.as_mut() {
+                if cliente.pingar_para_a_sonda().await.is_err() {
+                    self.cair();
+                }
+            }
+        }
         let agora = self.inicio.elapsed();
         let antes = self.bateria.state();
         let acao = self.bateria.poll(agora);
@@ -3507,65 +3580,17 @@ impl Motor {
     /// se perder. O que não podia acontecer é isto rodar dentro do `select!` da
     /// casca, e não roda.
     async fn tentar(&mut self) {
-        // O degrau 4 de novo, e não só na primeira entrada. Esta tentativa sai
-        // de um socket novo — porta nova —, e o caminho que o anfitrião abriu
-        // era para a porta anterior. Sem avisar o ponto de encontro outra vez, a
-        // reconexão bate numa porta fechada até a bateria acabar.
-        //
-        // Aqui não há laço de candidatos: a reconexão volta ao endereço que
-        // atendeu. Mesmo assim o aviso passa pelo mesmo `avisar_pelo_candidato`
-        // da primeira entrada, e pela mesma razão — se o endereço que atendeu
-        // for o da rede de casa, não há furo a pedir, e pedir gastaria a janela
-        // do anfitrião a cada tica da bateria.
-        let batida = match &self.bilhete {
-            Some(bilhete) => {
-                crate::encontro::Batida::preparar(bilhete, self.destino.marca_do_aviso()).await
-            }
-            None => None,
-        };
-        let repeticao = avisar_pelo_candidato(batida.as_ref(), self.destino.servidor).await;
-        let furo = batida
-            .as_ref()
-            .and_then(crate::encontro::Batida::emprestar_socket);
-        // O Endpoint desta reconexão. `match` e não `?` porque esta função não
-        // devolve `Result`: uma falha aqui é a mesma coisa que uma tentativa que
-        // não deu, e segue pelo mesmo caminho que todas as outras.
-        let resultado = match crate::client::local_endpoint(furo) {
-            Ok(endpoint) => {
-                Client::connect_por(
-                    &endpoint,
-                    self.destino.servidor,
-                    &self.destino.nome_tls,
-                    &self.destino.chave_do_pin,
-                    // A mesma conferência da entrada, e aqui ela é a única:
-                    // esta volta não passa por `conferir`. O pin normalmente já
-                    // existe e decide sozinho; ela pesa quando o pin sumiu entre
-                    // a queda e a volta, e sem ela a reconexão fixaria às cegas
-                    // quem atendesse. Guardado em `bateria_interna.rs`.
-                    self.destino.esperada.as_ref(),
-                    // A volta é ao endereço que venceu, e o pino dele prova o
-                    // servidor, ou não, como na entrada. Guardado nos dois
-                    // sentidos em `a_volta_da_bateria_onde_o_pino_…`.
-                    self.destino.o_pino_prova_o_servidor,
-                    &self.destino.apelido,
-                    &self.chave,
-                    Arc::clone(&self.pins),
-                    self.destino.segredo.as_deref(),
-                    self.destino.aceito.as_deref(),
-                    // A volta não corre candidatos: ela é ao endereço que venceu.
-                    None,
-                )
-                .await
-            }
-            Err(erro) => Err(erro),
-        };
-
-        // Esta tentativa acabou, dando certo ou não, e o que a repetição
-        // avisaria daqui para a frente é sobre uma porta que já foi usada.
-        if let Some(repeticao) = repeticao {
-            repeticao.abort();
-        }
-
+        // **Uma ponta nova por volta, desta sessão só** (R5): a reconexão de
+        // uma sessão nunca fecha o socket de outra. A volta é ao endereço que
+        // atendeu, e o degrau 4 vai junto quando ele falha: o caminho que o
+        // anfitrião furou era para a porta anterior.
+        let resultado = voltar(
+            &self.destino,
+            self.bilhete.as_ref(),
+            &self.chave,
+            &self.pins,
+        )
+        .await;
         let agora = self.inicio.elapsed();
         match resultado {
             Ok(mut cliente) => {
@@ -3753,6 +3778,17 @@ impl Motor {
                 channel,
                 payload,
             } => cliente.mod_request(request, id, channel, payload).await,
+            Comando::AcaoDeMod {
+                request,
+                id,
+                channel,
+                acao,
+                payload,
+            } => {
+                cliente
+                    .acao_de_mod(request, id, channel, acao, payload)
+                    .await
+            }
             Comando::Historico { linha, limite } => {
                 cliente.fetch_history(linha, None, limite).await
             }
@@ -3782,6 +3818,7 @@ impl Motor {
             Comando::MinhaImagem { icone } => cliente.set_person_icon(icone).await,
             Comando::MeuApelido { nome } => cliente.set_nickname(nome).await,
             Comando::Expulsar { pessoa } => cliente.kick_person(pessoa).await,
+            Comando::Cargo(pedido) => cliente.cargo(pedido).await,
             Comando::Banir {
                 pessoa,
                 motivo,
@@ -3926,10 +3963,7 @@ impl Motor {
             // este comando, e guardar depois abriria uma janela em que o
             // `ScreenShareStarted` chega e não encontra a escolha da pessoa.
             Comando::CompartilharTela { fonte, limites } => {
-                if self
-                    .caminho_medido
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    == 0
+                if self.caminho.estimativa_medida().is_none()
                     && self.caminho.estimativa() == crate::tela::CAMINHO_DA_PROVA_BPS
                 {
                     self.caminho =
@@ -4128,8 +4162,8 @@ impl Motor {
 
     // -------------------------------------------------------- caminho entre pares
 
-    /// A ponta QUIC do caminho entre pares — a mesma que já fala com o
-    /// servidor, e não uma nova.
+    /// A ponta do caminho entre pares — a mesma que já fala com o servidor, e
+    /// não uma nova.
     ///
     /// **Achado do fix round 2.** A primeira versão desta função abria um
     /// socket próprio (`crate::client::local_endpoint`), e o §3.1 da spec de
@@ -4144,23 +4178,23 @@ impl Motor {
     /// quando isto é chamado: só se chega aqui processando uma
     /// `ServerMessage`, que só existe porque há conexão, ou declarando
     /// identidade logo depois de conectar.
-    fn ponta_de_pares(&self) -> Option<quinn::Endpoint> {
-        self.cliente.as_ref().map(Client::endpoint)
+    fn ponta_de_pares(&self) -> Option<crate::transporte::PontaDaSessao> {
+        self.cliente.as_ref().map(Client::ponta)
     }
 
-    /// A identidade efêmera desta sessão para o caminho entre pares, gerada na
-    /// primeira vez que é necessária e reaproveitada depois.
+    /// A identidade efêmera desta sessão para o caminho entre pares: o
+    /// certificado DTLS que a ponta da conexão viva apresenta como par.
+    ///
+    /// Nasce com a ponta, e uma reconexão abre ponta nova, com identidade
+    /// nova: é por isso que a declaração se repete a cada volta.
     ///
     /// # Errors
     ///
-    /// [`par::ErroDePar::Certificado`] se o `rcgen` não gerar o certificado.
-    fn identidade_de_par(&mut self) -> Result<par::Identidade, par::ErroDePar> {
-        if let Some(identidade) = &self.identidade_de_par {
-            return Ok(identidade.clone());
-        }
-        let identidade = par::identidade_efemera()?;
-        self.identidade_de_par = Some(identidade.clone());
-        Ok(identidade)
+    /// [`par::ErroDePar::Escuta`] sem conexão viva.
+    fn identidade_de_par(&self) -> Result<par::Identidade, par::ErroDePar> {
+        self.ponta_de_pares()
+            .map(|ponta| ponta.identidade().clone())
+            .ok_or_else(|| par::ErroDePar::Escuta("sem conexão viva".to_owned()))
     }
 
     /// Declara ao servidor a identidade efêmera deste par — **mesmo sem optar
@@ -4308,21 +4342,10 @@ impl Motor {
             });
             return;
         };
-        let identidade = match self.identidade_de_par() {
-            Ok(identidade) => identidade,
-            Err(erro) => {
-                tracing::warn!(%erro, ?screen, "não deu para gerar a identidade deste par");
-                let _ = self.resultados_do_par_tx.send(ResultadoDoPar::ParFalhou {
-                    screen,
-                    motivo: MotivoDeFalhaDePar::NaoAlcancou,
-                });
-                return;
-            }
-        };
         let avisos = self.avisos.clone();
         let resultados = self.resultados_do_par_tx.clone();
         let tarefa = tokio::spawn(async move {
-            match discar_ate_o_prazo(&ponta, &enderecos, &impressao, &identidade).await {
+            match discar_ate_o_prazo(&ponta, &enderecos, &impressao).await {
                 par::PorOndeAssistir::Par(ligado) => {
                     // A conta de bytes é de quem empresta — `crate::par::repassar`
                     // escreve por pedaço do lado dele. Do lado de quem assiste
@@ -4419,14 +4442,7 @@ impl Motor {
             );
             return;
         };
-        let identidade = match self.identidade_de_par() {
-            Ok(identidade) => identidade,
-            Err(erro) => {
-                tracing::warn!(%erro, ?screen, "não deu para gerar a identidade deste par");
-                return;
-            }
-        };
-        self.passar_a_servir(vaga, ponta, identidade, screen, enderecos, impressao);
+        self.passar_a_servir(vaga, ponta, screen, enderecos, impressao);
     }
 
     /// Põe de pé a tarefa que serve este par, e passa a ser dono dela.
@@ -4441,16 +4457,15 @@ impl Motor {
     /// dois.** Medido: com `self.tarefas_de_par.servir(tarefa)` trocado por
     /// largar a alça, a suíte inteira continuava verde.
     ///
-    /// Daqui para baixo não há `Client` nenhum — só uma ponta QUIC, uma
-    /// identidade e endereços —, e é o que
+    /// Daqui para baixo não há `Client` nenhum — só a ponta da sessão e
+    /// endereços —, e é o que
     /// `testes::cair_devolve_a_vaga_de_quem_estava_servindo_um_par` monta à
     /// mão para prender as duas coisas que este método faz: guardar a alça e
     /// entregar a vaga a quem a solta.
     fn passar_a_servir(
         &mut self,
         vaga: VagaDeAtendimento,
-        ponta: quinn::Endpoint,
-        identidade: par::Identidade,
+        ponta: crate::transporte::PontaDaSessao,
         screen: ScreenId,
         enderecos: Vec<SocketAddr>,
         impressao: String,
@@ -4461,7 +4476,7 @@ impl Motor {
             // faz o `abort` de [`TarefasDePar`] devolvê-la: soltar a tarefa
             // solta tudo o que ela segurava, e o guarda é uma dessas coisas.
             let _vaga = vaga;
-            let ligado = servir_um_par(ponta, identidade, enderecos, impressao).await;
+            let ligado = servir_um_par(ponta, enderecos, impressao).await;
             match ligado {
                 Some(ligado) => {
                     tracing::info!(
@@ -4584,23 +4599,14 @@ async fn repassar_a_tela(repasse: &RepasseDeTela, ligado: &par::ParLigado, scree
 /// respondeu no lugar de quem o servidor apresentou —, e insistir contra quem
 /// se faz passar por outro é dar-lhe mais tentativas, não menos.
 async fn discar_ate_o_prazo(
-    ponta: &quinn::Endpoint,
+    ponta: &crate::transporte::PontaDaSessao,
     enderecos: &[SocketAddr],
     impressao: &str,
-    identidade: &par::Identidade,
 ) -> par::PorOndeAssistir {
     let ate = tokio::time::Instant::now() + PRAZO_DO_PAR;
     let mut ultimo = MotivoDeFalhaDePar::NaoAlcancou;
     while tokio::time::Instant::now() < ate {
-        match par::por_onde(
-            ponta,
-            enderecos,
-            impressao.to_owned(),
-            Some(identidade),
-            TENTATIVA_DE_PAR,
-        )
-        .await
-        {
+        match par::por_onde(ponta, enderecos, impressao.to_owned(), TENTATIVA_DE_PAR).await {
             par::PorOndeAssistir::Par(ligado) => return par::PorOndeAssistir::Par(ligado),
             par::PorOndeAssistir::Servidor(MotivoDeFalhaDePar::ImpressaoNaoBate) => {
                 return par::PorOndeAssistir::Servidor(MotivoDeFalhaDePar::ImpressaoNaoBate);
@@ -4616,110 +4622,63 @@ async fn discar_ate_o_prazo(
     par::PorOndeAssistir::Servidor(ultimo)
 }
 
-/// Passa a atender e disca para o outro lado, ao mesmo tempo — as duas
-/// tentativas simultâneas são o furo de NAT dos dois lados. A primeira que
-/// fechar o aperto de mão vence, como em `par::testes::dois_pares_apresentados_se_ligam_pelos_dois_lados`.
+/// Passa a atender, e fura o NAT desta ponta para o outro lado enquanto
+/// espera.
 ///
-/// `None` se nenhuma das duas fechar a tempo. Livre e não método de `Motor`
-/// porque roda dentro do `tokio::spawn` de [`Motor::servir_par`], depois de o
-/// `&mut Motor` já ter sido solto.
+/// **Quem assiste disca; quem empresta atende.** Desde a 0.17 a ponta de quem
+/// empresta é anfitriã (`crate::par::passar_a_atender`). Ela só checa quem já
+/// mandou um Binding (aqui não há `CHAMADO` com a credencial de quem vai discar),
+/// então o mapeamento de NAT deste lado abre pelas Binding Indications de
+/// `Ponta::furar` para os endereços de quem vai discar — a metade do furo
+/// simultâneo do §3.3 que a discagem de antes fazia.
+///
+/// `None` se ninguém chegar a tempo. Livre e não método de `Motor` porque roda
+/// dentro do `tokio::spawn` de [`Motor::servir_par`].
 async fn servir_um_par(
-    ponta: quinn::Endpoint,
-    identidade: par::Identidade,
+    ponta: crate::transporte::PontaDaSessao,
     enderecos: Vec<SocketAddr>,
     impressao: String,
 ) -> Option<par::ParLigado> {
-    if let Err(erro) = par::passar_a_atender(&ponta, identidade.clone(), impressao.clone()) {
-        tracing::warn!(%erro, "não deu para pôr esta ponta a atender o par");
-        return None;
-    }
-    let atende = par::atender(ponta.clone(), PRAZO_DO_PAR);
-    let disca = par::ligar(
-        &ponta,
-        &enderecos,
-        impressao,
-        Some(&identidade),
-        PRAZO_DO_PAR,
-    );
-    let resultado = tokio::select! {
-        atendido = atende => atendido,
-        // **O fim da discagem não é uma resposta**, e tratá-lo como uma era
-        // desistir de servir alguém que estava chegando. Quem assiste nunca
-        // chama `par::atender` — só disca —, então a discagem **desta** ponta
-        // não tem quem a atenda e não pode fechar. Ela existe por um efeito
-        // só, que é metade do §3.3: abrir o mapeamento de NAT deste lado para
-        // a discagem do outro entrar. Quando ela erra cedo — família de
-        // endereço incompatível, `connect_with` recusando na hora, todos os
-        // candidatos falhando rápido —, o braço que a esperava cancelava
-        // `atender` e devolvia `None`.
-        //
-        // O prazo global continua sendo o de `par::atender`, que é o mesmo
-        // [`PRAZO_DO_PAR`]: este braço nunca resolve, então é sempre o outro
-        // que termina a espera.
-        () = discagem_so_pelo_furo(disca) => None,
+    par::passar_a_atender(&ponta);
+    let furando = {
+        let ponta = ponta.clone();
+        let enderecos = enderecos.clone();
+        tokio::spawn(async move {
+            // Um furo a cada segundo enquanto se espera: a primeira rajada pode
+            // sair antes de quem assiste começar a discar, e o NAT de cá fecha
+            // o mapeamento de um destino calado em poucas dezenas de segundos.
+            loop {
+                let furados = ponta.ponta().furar(&enderecos);
+                tracing::debug!(furados, "furando o NAT desta ponta para o par");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        })
     };
-    // **Desarma sempre, sirva ou não sirva.** Achado do fix round 3: sem
-    // isto a ponta continuava aceitando conexões pelo resto da sessão — ver
-    // o doc de [`par::parar_de_atender`]. A função já drena e recusa
-    // sozinha qualquer sobra da corrida acima antes de desarmar de verdade —
-    // ver o doc dela para o pânico que isso evita — porque o perigo mora no
-    // `set_server_config(None)` que ela faz, não neste ponto de chamada: um
-    // `servir_um_par` de amanhã sem essa linha não devia poder reabri-lo.
-    par::parar_de_atender(&ponta).await;
+    let resultado = par::atender(&ponta, &impressao, PRAZO_DO_PAR, PRAZO_DO_PAR).await;
+    furando.abort();
+    // **Desarma sempre, sirva ou não sirva** (fix round 3): armada, a ponta
+    // criaria estado para todo Binding que chegasse.
+    par::parar_de_atender(&ponta);
     resultado
-}
-
-/// A discagem de quem empresta, que abre o furo e não decide nada.
-///
-/// **Nunca resolve, de propósito.** Um `select!` que espera esta função espera
-/// só o outro braço; o que esta metade faz é manter a discagem viva enquanto
-/// [`par::atender`] tem prazo, pelo efeito de abrir o mapeamento de NAT desta
-/// ponta. O resultado dela vai para o rastro e para lugar nenhum mais: quem
-/// assiste nunca atende, então uma discagem que «deu certo» aqui seria uma
-/// surpresa, e uma que falhou é o esperado.
-async fn discagem_so_pelo_furo<F>(disca: F)
-where
-    F: std::future::Future<Output = Result<par::ParLigado, par::ErroDePar>>,
-{
-    match disca.await {
-        // Não é o caminho de produção — quem assiste não atende —, mas se um
-        // dia for, largar a conexão aqui é o certo: é `atender` que decide.
-        Ok(_) => tracing::debug!("a discagem de quem empresta fechou; quem decide é o atendimento"),
-        Err(erro) => {
-            tracing::debug!(%erro, "a discagem de quem empresta não fechou, como se espera")
-        }
-    }
-    std::future::pending().await
 }
 
 /// Os endereços de rede local desta máquina, na porta que `ponta` já usa.
 ///
 /// **Achado do fix round 2.** Enumeração simples, sem a ordenação por
 /// heurística de VPN que `seele-server::alcance::interfaces::descobrir` faz
-/// para o convite: aqui não há convite nem degrau de furo a preparar, só uma
-/// lista de candidatos que `par::ligar` já tenta todos em paralelo. O ADR
-/// 0002 proíbe este crate de depender de `seele-server`, então a pergunta —
-/// "quais endereços desta máquina servem para alguém bater neles" — é
-/// refeita aqui, com o mesmo crate (`if_addrs`).
+/// para o convite. O ADR 0002 proíbe este crate de depender de `seele-server`,
+/// então a pergunta é refeita aqui, com o mesmo crate (`if_addrs`).
 ///
 /// Vazio se a enumeração falhar ou não achar nenhum endereço utilizável: o
-/// público que o servidor já vê na conexão de controle continua sobrando
-/// como candidato, e a ausência de locais não impede o furo, só tira o atalho
-/// de LAN.
+/// público que o servidor já vê na conexão de controle continua sobrando.
 ///
 /// # Sem caminho de produção hoje
 ///
 /// **Nada em `apps/` nem no `seele-ffi` liga o empréstimo**, e esta função só
-/// roda quando alguém o liga (ver [`locais_a_publicar`]). O único chamador do
-/// caminho inteiro no repositório é o teste de integração
-/// `seele-conformance/tests/tela_por_um_par.rs`, que fala com um servidor em
-/// memória — então **o atalho de LAN nunca foi exercitado contra uma rede de
-/// verdade**. `docs/teste-duas-maquinas.md` diz o mesmo, e este parágrafo
-/// existe para que a próxima pessoa não conclua o contrário lendo só o código.
-fn locais_de_pares(ponta: &quinn::Endpoint) -> Vec<SocketAddr> {
-    let Ok(local) = ponta.local_addr() else {
-        return Vec::new();
-    };
+/// roda quando alguém o liga (ver [`locais_a_publicar`]). O atalho de LAN nunca
+/// foi exercitado contra uma rede de verdade.
+fn locais_de_pares(ponta: &crate::transporte::PontaDaSessao) -> Vec<SocketAddr> {
+    let local = ponta.ponta().local_addr();
     match if_addrs::get_if_addrs() {
         Ok(interfaces) => interfaces
             .into_iter()
@@ -5061,7 +5020,9 @@ enum DeOndeVeioATela {
 /// `None` quando não há conexão, e aí este braço do `select!` nunca acorda —
 /// que é o certo: sem conexão não chega tela nenhuma. Um braço que devolvesse
 /// `None` de imediato giraria o laço a full CPU.
-async fn espera_da_fila(fila: &Option<crate::client::FilaDeTelas>) -> Option<quinn::RecvStream> {
+async fn espera_da_fila(
+    fila: &Option<crate::client::FilaDeTelas>,
+) -> Option<crate::transporte::Recebe> {
     match fila {
         Some(fila) => fila.lock().await.recv().await,
         None => std::future::pending().await,
@@ -5087,7 +5048,7 @@ async fn espera_da_fila(fila: &Option<crate::client::FilaDeTelas>) -> Option<qui
 /// estão no doc de [`DeOndeVeioATela`].
 fn escoar_tela_alheia(
     avisos: mpsc::UnboundedSender<Aviso>,
-    fluxo: quinn::RecvStream,
+    fluxo: crate::transporte::Recebe,
     de_onde: DeOndeVeioATela,
 ) {
     tokio::spawn(ler_a_tela_alheia(avisos, fluxo, de_onde));
@@ -5104,7 +5065,7 @@ fn escoar_tela_alheia(
 /// baixo. Uma tarefa só é o que faz a alça valer.
 async fn ler_a_tela_alheia(
     avisos: mpsc::UnboundedSender<Aviso>,
-    fluxo: quinn::RecvStream,
+    fluxo: crate::transporte::Recebe,
     de_onde: DeOndeVeioATela,
 ) {
     {
@@ -5153,16 +5114,27 @@ async fn ler_a_tela_alheia(
             if let DeOndeVeioATela::Servidor(repasse) = &de_onde {
                 repasse.abriu(tela, recepcao.abertura().to_vec());
             }
+            let leitura = nova_leitura_de_tela();
             if avisos
                 .send(Aviso::TelaAbriu {
                     tela,
                     largura: cabecalho.width,
                     altura: cabecalho.height,
+                    leitura,
                 })
                 .is_err()
             {
                 return;
             }
+            // **O fim desta leitura sai quando ela é solta, por onde for**: o
+            // fim do laço, um `return`, ou o `abort` da troca de par e da queda
+            // (`TarefasDePar`), que solta a tarefa parada no `await` e nunca
+            // chegava à linha do fim.
+            let _fim = FimDaLeitura {
+                avisos: avisos.clone(),
+                tela,
+                leitura,
+            };
 
             loop {
                 match recepcao.proximo_quadro().await {
@@ -5187,12 +5159,14 @@ async fn ler_a_tela_alheia(
                             Aviso::TelaSom {
                                 tela,
                                 bytes: quadro.bytes,
+                                leitura,
                             }
                         } else {
                             Aviso::TelaQuadro {
                                 tela,
                                 chave: quadro.chave(),
                                 bytes: quadro.bytes,
+                                leitura,
                             }
                         };
                         if avisos.send(aviso).is_err() {
@@ -5258,8 +5232,32 @@ async fn ler_a_tela_alheia(
             if let DeOndeVeioATela::Servidor(repasse) = &de_onde {
                 repasse.fechou(tela);
             }
-            let _ = avisos.send(Aviso::TelaFechou { tela });
+            // O `TelaFechou` sai do `Drop` de `_fim`, aqui.
         }
+    }
+}
+
+/// O número da próxima leitura de tela, crescente no processo: o `leitura` de
+/// [`Aviso::TelaAbriu`] e de [`Aviso::TelaFechou`].
+fn nova_leitura_de_tela() -> u64 {
+    static PROXIMA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    PROXIMA.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Manda o [`Aviso::TelaFechou`] de uma leitura quando ela é solta — também
+/// quando a tarefa é abortada, que é o caminho em que o fim não saía.
+struct FimDaLeitura {
+    avisos: mpsc::UnboundedSender<Aviso>,
+    tela: ScreenId,
+    leitura: u64,
+}
+
+impl Drop for FimDaLeitura {
+    fn drop(&mut self) {
+        let _ = self.avisos.send(Aviso::TelaFechou {
+            tela: self.tela,
+            leitura: self.leitura,
+        });
     }
 }
 
@@ -5290,6 +5288,8 @@ impl Motor {
         };
 
         let avisos = self.avisos.clone();
+        // Uma leitura por transmissão própria, como a das alheias.
+        let leitura = nova_leitura_de_tela();
         self.nascer_a_tela(tela, move |origem, mut eventos, pedido_de_chave| {
             // Numa tarefa própria pelo mesmo motivo de `Comando::Anexar`:
             // escoar dura o que a transmissão durar, e fazê-lo dentro do laço
@@ -5308,12 +5308,14 @@ impl Motor {
                                 tela,
                                 largura,
                                 altura,
+                                leitura,
                             }
                         }
                         crate::bomba::EspelhoDaTela::Quadro { chave, bytes } => Aviso::TelaQuadro {
                             tela,
                             chave,
                             bytes: bytes.to_vec(),
+                            leitura,
                         },
                     };
                     let _ = avisos.send(aviso);
@@ -5321,7 +5323,7 @@ impl Motor {
                 let fim = escoadouro
                     .escoar_espelhado(tela, origem, &mut eventos, espelho, Some(&pedido_de_chave))
                     .await;
-                let _ = avisos.send(Aviso::TelaFechou { tela });
+                let _ = avisos.send(Aviso::TelaFechou { tela, leitura });
                 // Pelo mesmo motivo da de cima: são as duas linhas que contam o
                 // fim de uma transmissão, uma vez cada, e as duas estavam
                 // apagadas. A contagem do caminho bom diz quantos quadros
@@ -5451,17 +5453,36 @@ impl Motor {
             teto: self.teto_de_video(Some(&viva.limites)).teto(self.faixa),
             faixa: self.faixa,
         };
+        let sem_medida_antes = self.caminho.janelas_sem_medida();
         if self.caminho.observar(Instant::now(), &amostra).is_some() {
             self.reconferir_o_teto();
+        }
+        // **O produto sabe e conta**: a primeira janela sem medida de dor, e
+        // depois uma a cada minuto, vão ao log com o que faltou. Sem isto uma
+        // tela presa no cano das provas seria um mistério.
+        let sem_medida = self.caminho.janelas_sem_medida();
+        if sem_medida > sem_medida_antes && (sem_medida == 1 || sem_medida.is_multiple_of(60)) {
+            tracing::warn!(
+                janelas = sem_medida,
+                ida_e_volta = ?amostra.transporte.ida_e_volta,
+                teto_bps = crate::caminho::TETO_SEM_MEDIDA_BPS,
+                "a sonda de subida fechou janela sem medida de dor (sem perda, congestionamento \
+                 nem ida e volta fresca): ela não sobe, e fica no cano das provas"
+            );
         }
         // **Fora do `if`, e de propósito.** O `Some` acima diz que a estimativa
         // *mudou*; o que quem grava a lista de conhecidos quer é o valor de
         // agora, e uma sessão inteira sem mudança nenhuma continua tendo um
         // número que vale a pena lembrar.
-        self.caminho_medido.store(
-            self.caminho.estimativa(),
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        //
+        // **Mas só o medido.** Uma sonda que só carrega a semente ou a
+        // suposição publica zero, que quem grava lê como «não mediu» e não
+        // regrava: sem isto a semente de ontem voltava ao disco com a data de
+        // hoje, e a lembrança se renovava sem nunca ter sido confirmada.
+        if let Some(medida) = self.caminho.estimativa_medida() {
+            self.caminho_medido
+                .store(medida, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// Conta à bomba que o teto andou.
@@ -5513,12 +5534,18 @@ impl Motor {
     fn lembrar(&mut self, comando: &Comando) {
         match comando {
             Comando::LembrarCaminho(bps) => {
-                tracing::info!(bps, "a sonda começa do caminho lembrado deste servidor");
-                self.caminho = crate::caminho::Sonda::partindo_de(*bps);
-                self.caminho_medido.store(
-                    self.caminho.estimativa(),
-                    std::sync::atomic::Ordering::Relaxed,
+                // **Grampeada, e não publicada como medida.** Quem lembra pode
+                // ter lido um número sem data nem rede (a casca não é obrigada
+                // a passar por `CaminhoLembrado::semente`), e o teto da semente
+                // vale aqui também. E `caminho_medido` fica como estava: uma
+                // semente que ninguém confirmou não volta ao disco como medida.
+                let semente = (*bps).min(crate::caminho::TETO_DA_SEMENTE_BPS);
+                tracing::info!(
+                    lembrado = bps,
+                    semente,
+                    "a sonda começa do caminho lembrado deste servidor"
                 );
+                self.caminho = crate::caminho::Sonda::partindo_de(semente);
             }
             // Pelas entradas pendentes, como o `Room` da casca: o pedido fica no
             // ar até o servidor decidir. Sem conexão, ele é só a intenção que a
@@ -5597,16 +5624,23 @@ impl Motor {
     ///    do QUIC, para reenviar o `CONNECTION_CLOSE` se o primeiro se perder.
     ///    **Sem prova**: o laço local não perde pacote — ver a constante.
     async fn despedir(&mut self) {
-        let ponta = self.cliente.as_ref().map(Client::endpoint);
+        let ponta = self.cliente.as_ref().map(Client::ponta);
         self.tarefas_de_par
             .largar_tudo_e_esperar(ESPERA_DAS_TAREFAS_DE_PAR)
             .await;
         self.encerrar(Motivo::Pedido);
         if let Some(ponta) = ponta {
-            if tokio::time::timeout(ESPERA_DA_DESPEDIDA, ponta.wait_idle())
-                .await
-                .is_err()
-            {
+            // O `close` do enlace pôs o corte no `ctl` e o fechamento na fila
+            // da ponta; espera-se a ponta ficar sem conexão viva, e então ela
+            // fecha o socket desta sessão — só o dela.
+            let esvaziou = tokio::time::timeout(ESPERA_DA_DESPEDIDA, async {
+                while ponta.ponta().conexoes_vivas() > 0 {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await;
+            ponta.ponta().fechar();
+            if esvaziou.is_err() {
                 // Não é falha: o fechamento saiu na primeira volta do driver, e
                 // o que o teto cortou foi o escoamento, que só responde a
                 // pacote atrasado.
@@ -6001,91 +6035,81 @@ fn contar(olhos: Option<&mpsc::UnboundedSender<Andamento>>, andamento: Andamento
     }
 }
 
-/// Avisa o ponto de encontro por causa **deste** candidato, e deixa a repetição
-/// correndo enquanto o aperto de mão dele acontece.
+/// Uma volta da bateria interna: a ponta nova desta sessão, a discagem ao
+/// endereço que atendeu, e o degrau 4 quando ela não responde.
 ///
-/// É o conserto do ciclo em uma função. O aviso saía uma vez, antes do laço, e o
-/// furo que ele provoca do outro lado dura menos de um segundo; o aperto de mão
-/// que devia atravessar aquele furo chegava de quatro a doze segundos depois,
-/// porque o candidato da rede de casa vinha primeiro e gastava o prazo inteiro.
-/// Aqui o aviso sai colado no candidato que precisa dele, e nada sai pelos
-/// outros.
+/// A mesma conferência da entrada, e aqui ela é a única: esta volta não passa
+/// por `conferir`. O pin normalmente já existe e decide sozinho; a esperada pesa
+/// quando o pin sumiu entre a queda e a volta, e sem ela a reconexão fixaria às
+/// cegas quem atendesse. A volta é ao endereço que venceu, e o pino dele prova
+/// o servidor, ou não, como na entrada.
 ///
-/// # O que devolve
+/// # Errors
 ///
-/// A tarefa que repete o aviso, para quem chama abortá-la quando o candidato
-/// termina — avisar sobre um candidato que já falhou gastaria furo da janela do
-/// anfitrião por um caminho que ninguém vai tentar de novo.
-///
-/// `None` quando não houve aviso nenhum: sem bilhete, num candidato que não
-/// precisa de furo, ou quando o envio foi recusado. Nos três não há nada para
-/// abortar.
-///
-/// # Por que um aviso recusado não derruba nada
-///
-/// Porque ele é de **um** candidato. Um `ENETUNREACH` no caminho até o ponto de
-/// encontro não diz nada sobre o candidato seguinte, e transformar essa falha em
-/// erro de conexão trocaria um defeito por outro. O erro é registrado — e a
-/// linha só diz que avisou quando avisou, porque a versão anterior deste código
-/// afirmava «avisamos o ponto de encontro» mesmo quando o `send_to` tinha sido
-/// recusado, e um log que mente sobre isso custa a próxima investigação inteira.
-async fn avisar_pelo_candidato(
-    batida: Option<&crate::encontro::Batida>,
-    onde: SocketAddr,
-) -> Option<tokio::task::JoinHandle<()>> {
-    // Só o candidato refletido depende de alguém ter furado o caminho. O da rede
-    // de casa não paga metadado, não gasta furo da janela do anfitrião, e não
-    // espera um milissegundo.
-    //
-    // A conta da janela mudou de tamanho com esta tarefa, e é bom que esteja
-    // escrita aqui, onde o gasto nasce. Cada aviso vira um furo do outro lado, e
-    // um candidato público custa `AVISOS_POR_CANDIDATO` avisos, não um: a
-    // repetição vive 1,4 s e o prazo de um candidato público morto é de 4,2 s,
-    // então ela sempre gasta os três. Um convite de quatro candidatos públicos
-    // custa **doze** furos a quem entra — onze a mais que antes desta tarefa.
-    // Por isso `FUROS_POR_JANELA`, do lado do anfitrião, subiu de 20 para 60 no
-    // mesmo commit: sem isso o teto passaria a barrar duas ou três entradas
-    // legítimas simultâneas em vez de barrar abuso.
-    //
-    // O que esta guarda economiza continua sendo o principal: um convite só de
-    // endereços de rede de casa não gasta furo nenhum.
-    if !pede_furo(batida, onde) {
-        return None;
-    }
-    let batida = batida?;
-
-    if let Err(erro) = batida.avisar().await {
-        tracing::info!(
-            %erro,
-            ponto = %batida.ponto(),
-            candidato = %onde,
-            "não deu para avisar o ponto de encontro por este candidato; o aperto de mão vai assim mesmo"
-        );
-        return None;
-    }
-    tracing::info!(
-        ponto = %batida.ponto(),
-        aviso = %batida.aviso(),
-        candidato = %onde,
-        "degrau 4: avisamos o ponto de encontro de que estamos chegando"
-    );
-
-    // O tempo de o `LEVE` chegar ao ponto, virar `AQUI`, e o `FURO` sair do
-    // roteador do anfitrião. Depois disto o `Initial` do quinn encontra o
-    // caminho aberto.
-    tokio::time::sleep(ESPERA_DO_FURO).await;
-
-    // A cópia divide o mesmo socket — é o `Arc` de dentro da `Batida`. Um
-    // segundo socket faria o anfitrião furar para uma porta que o QUIC não usa.
-    let repetindo = batida.clone();
-    Some(tokio::spawn(async move {
-        for _ in 1..AVISOS_POR_CANDIDATO {
-            tokio::time::sleep(INTERVALO_DO_AVISO).await;
-            if let Err(erro) = repetindo.avisar().await {
-                tracing::debug!(%erro, "a repetição do aviso não saiu");
-            }
+/// O [`ConnectError`] da discagem ou do aperto, como na entrada.
+async fn voltar(
+    destino: &Destino,
+    bilhete: Option<&seele_proto::uri::Bilhete>,
+    chave: &SigningKey,
+    pins: &Arc<dyn PinStore>,
+) -> Result<Client, ConnectError> {
+    let ponta = crate::transporte::abrir_ponta(None)?;
+    let direto = crate::client::discar(
+        ponta.ponta(),
+        vec![destino.servidor],
+        None,
+        PRAZO_POR_CANDIDATO,
+    )
+    .await;
+    let conexao = match direto {
+        Ok(conexao) => conexao,
+        // Só o silêncio pede o degrau 4: uma recusa é de quem respondeu.
+        Err(ConnectError::SemResposta) if bilhete.is_some() && e_publico(destino.servidor.ip()) => {
+            let chamada = match bilhete {
+                Some(bilhete) => {
+                    crate::encontro::Chamada::preparar(bilhete, destino.marcas()).await
+                }
+                None => None,
+            };
+            let Some(chamada) = chamada else {
+                return Err(ConnectError::SemResposta);
+            };
+            let atendida = chamada
+                .chamar(ponta.ponta(), crate::encontro::PRAZO_DA_CHAMADA)
+                .await
+                .map_err(falha_da_chamada)?;
+            let alvos = std::iter::once(atendida.endereco)
+                .chain(atendida.dicas.iter().copied())
+                .collect();
+            crate::client::discar(
+                ponta.ponta(),
+                alvos,
+                Some(atendida.credencial),
+                PRAZO_POR_CANDIDATO,
+            )
+            .await
+            .map_err(|erro| match erro {
+                ConnectError::SemResposta => ConnectError::NatNaoAbriu,
+                outro => outro,
+            })?
         }
-    }))
+        Err(erro) => return Err(erro),
+    };
+    Client::connect_sobre(
+        ponta,
+        conexao,
+        &destino.chave_do_pin,
+        destino.esperada.as_ref(),
+        destino.o_pino_prova_o_servidor,
+        &destino.apelido,
+        chave,
+        Arc::clone(pins),
+        destino.segredo.as_deref(),
+        destino.aceito.as_deref(),
+        // A volta não corre candidatos: ela é ao endereço que venceu.
+        None,
+    )
+    .await
 }
 
 /// Refaz, na conexão nova de uma reconexão, o que a pessoa tinha escolhido
@@ -6227,98 +6251,6 @@ fn e_cgnat(quatro: std::net::Ipv4Addr) -> bool {
     a == 100 && (64..128).contains(&b)
 }
 
-/// Se este candidato é um endereço privado que **não** é desta rede.
-///
-/// A pergunta é feita com destino: `connect` num socket UDP não manda pacote
-/// nenhum, mas faz o núcleo escolher a rota, e `local_addr` conta **qual
-/// endereço meu o sistema usaria para alcançar aquele destino**.
-///
-/// Isto não é o truque que o ADR 0022 reprovou. Lá a pergunta era "qual é o meu
-/// endereço", respondida pela rota padrão, e uma VPN capturava a resposta. Aqui
-/// há destino, e é exatamente o que o `connect` responde.
-///
-/// Quem responde `true` ganha [`PRAZO_DE_CANDIDATO_DISTANTE`] em vez dos quatro
-/// segundos: um `192.168.x.x` visto de outra casa não devolve ICMP nenhum e
-/// queima o prazo inteiro sem nunca ter tido chance. **Nunca descartar, só
-/// encurtar** — um /16 configurado à mão ou uma VPN capturando a rota dão falso
-/// negativo, e falso negativo só custa velocidade.
-///
-/// # A escolha da família da sonda não tem falsificador nesta máquina
-///
-/// Dito de frente, porque é uma afirmação sem teste que reprove sozinho. A
-/// canonização do alvo, logo abaixo, existe por dois motivos, e só um deles é
-/// falsificável aqui: a comparação de faixa está defendida por `mesma_rede`, que
-/// canoniza por conta própria, mas **a família da sonda só erra numa máquina sem
-/// IPv6**. Ali o `bind` de `[::]:0` falha, esta função devolve `false` por
-/// omissão, e o candidato da outra casa volta a custar os quatro segundos
-/// inteiros.
-///
-/// Numa máquina de pilha dupla — a que roda estes testes — as duas defesas se
-/// sobrepõem, e tirar a canonização daqui não acende nada. A ironia é que a
-/// máquina sem IPv6 é exatamente a casa atrás de CGNAT que o degrau 4 existe
-/// para servir: o caso que mais depende desta linha é o único em que ela pode
-/// ser medida. Por isso ele está na lista do portão de campo, na seção 8.4 do
-/// spec deste ciclo, e não numa suíte que roda aqui.
-fn e_de_outra_casa(candidato: SocketAddr) -> bool {
-    if !e_privado(candidato.ip()) {
-        return false;
-    }
-    // Na forma canônica, e não na escrita, pelo mesmo motivo de `e_privado` —
-    // com um agravante próprio, que é a **família da sonda**. Um
-    // `::ffff:10.255.255.1` escrito como veio faria a sonda ser aberta em IPv6;
-    // numa máquina sem IPv6 o `bind` falha, esta função devolve `false` por
-    // omissão, e o candidato da outra casa volta a custar os quatro segundos
-    // inteiros. Com a forma canônica a sonda é v4, que é o que o destino é.
-    //
-    // (A comparação de faixa também precisa da forma canônica, e `mesma_rede`
-    // canoniza por conta própria — ver o doc dela. Aqui não se confia nisso: as
-    // duas coisas são defeitos diferentes e cada uma se defende.)
-    let alvo = SocketAddr::new(candidato.ip().to_canonical(), candidato.port());
-    // Da mesma família do destino: uma sonda IPv4 não tem o que responder sobre
-    // um `fd00::` e chamaria de distante o vizinho do lado.
-    let daqui_qualquer = if alvo.is_ipv4() {
-        SocketAddr::from(([0, 0, 0, 0], 0))
-    } else {
-        SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0))
-    };
-    let Ok(sonda) = std::net::UdpSocket::bind(daqui_qualquer) else {
-        return false;
-    };
-    if sonda.connect(alvo).is_err() {
-        // Sem rota para lá: é de outra casa, e o sistema já sabe disso.
-        return true;
-    }
-    let Ok(daqui) = sonda.local_addr() else {
-        return false;
-    };
-    !mesma_rede(daqui.ip(), alvo.ip())
-}
-
-/// Um /24 para IPv4 e um /64 para IPv6.
-///
-/// É chute quando a rede é /16, e o chute é para o lado seguro: um vizinho
-/// legítimo de outra faixa cai no prazo curto e ainda tem um segundo inteiro.
-///
-/// # Canoniza o que recebe, e não confia em quem chama
-///
-/// Sem isto, dois endereços na forma mapeada comparariam os quatro primeiros
-/// grupos de `::ffff:x` contra os de `::ffff:y` — `0:0:0:0` dos dois lados,
-/// iguais sempre — e **todo** par mapeado passaria por vizinho de porta. O
-/// único chamador de hoje já canoniza antes de chegar aqui, então este defeito
-/// é inalcançável; um segundo chamador o reabriria, e uma pré-condição que só o
-/// comentário guarda é a próxima linha de uma lista de revisão.
-fn mesma_rede(daqui: IpAddr, la: IpAddr) -> bool {
-    match (daqui.to_canonical(), la.to_canonical()) {
-        (IpAddr::V4(a), IpAddr::V4(b)) => {
-            a.octets().first_chunk::<3>() == b.octets().first_chunk::<3>()
-        }
-        (IpAddr::V6(a), IpAddr::V6(b)) => {
-            a.segments().first_chunk::<4>() == b.segments().first_chunk::<4>()
-        }
-        _ => false,
-    }
-}
-
 /// Qual falha a pessoa vê quando nenhum candidato entra.
 ///
 /// Um convite traz vários endereços do mesmo servidor e eles correm juntos
@@ -6418,6 +6350,11 @@ fn alguem_respondeu(erro: &ConnectError) -> bool {
         // Não é de candidato nenhum: é quem liga, pela `Chegada`, que larga a
         // corrida inteira (tarefa 16 da F7).
         ConnectError::Cancelada => false,
+        // **O ponto respondeu e o anfitrião atendeu o `CHAMA`**: diz mais que o
+        // silêncio de um endereço morto, e é o que a pessoa precisa ler.
+        ConnectError::NatNaoAbriu => true,
+        // A linha 1 respondeu, e disse que é a linha 1.
+        ConnectError::LinhaLegada => true,
         ConnectError::LocalEndpoint
         | ConnectError::Unreachable
         | ConnectError::HandshakeTimeout
@@ -6468,6 +6405,11 @@ fn vale_insistir(erro: &ConnectError) -> bool {
         // Quem liga desistiu: insistir seria ligar de novo contra a vontade de
         // quem cancelou. Não chega à volta hoje, que ninguém cancela.
         ConnectError::Cancelada => false,
+        // Uma 0.16 continua 0.16 na próxima batida.
+        ConnectError::LinhaLegada => false,
+        // O NAT pode reabrir (o anfitrião trocou de rede, o mapeamento expirou
+        // e voltou): a bateria insiste, como insiste no silêncio.
+        ConnectError::NatNaoAbriu => true,
         ConnectError::LocalEndpoint
         | ConnectError::Unreachable
         | ConnectError::TlsRefused
@@ -7727,93 +7669,6 @@ mod tests {
             "uma limpeza que não apagou pino nenhum escreveu no log: {linhas:?}"
         );
     }
-
-    #[tokio::test]
-    async fn o_pin_que_um_impostor_fez_fixar_e_desfeito_e_o_log_nao_diz_que_o_tls_terminou() {
-        // O caso de segurança da limpeza de `conectar_por`, e o que os testes
-        // de cima não alcançam, porque chamam a limpeza com um erro escolhido à
-        // mão. Um impostor repete o certificado do servidor verdadeiro (que é
-        // público) sem ter a chave dele. O verificador aceita o certificado e
-        // fixa a chave; o TLS cai logo depois, na assinatura de quem atendeu.
-        //
-        // Quem investiga precisa ler duas coisas nesta linha: o erro que o
-        // aperto deu de verdade (e não um escolhido pelo caminho), e nenhuma
-        // afirmação de que o TLS terminou, porque aqui quem atendeu não provou
-        // ter a chave.
-        //
-        // `#[tokio::test]` de thread única: `set_default` fixa o rastro nesta
-        // thread, e o aperto de mão inteiro roda nela.
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-
-        let (onde_do_impostor, impressao_do_verdadeiro) = impostor_que_repete_o_certificado();
-        let chave = "chave-do-impostor";
-        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
-        let endpoint = crate::client::local_endpoint(None).expect("ponta local");
-
-        let resultado = tokio::time::timeout(
-            Duration::from_secs(20),
-            Enlace::conectar_por(
-                &endpoint,
-                None,
-                destino_na_chave(onde_do_impostor, chave, Some(&impressao_do_verdadeiro)),
-                SigningKey::from_bytes(&[7; 32]),
-                Arc::clone(&loja) as Arc<dyn PinStore>,
-                None,
-            ),
-        )
-        .await
-        .expect("o aperto de mão com o impostor não terminou");
-
-        // **Com o nome de quem não provou a chave**, e não `TlsRefused`: este
-        // a FFI traduz por versão incompatível, e a tela mandava atualizar o
-        // SEELE nas duas máquinas por causa de um impostor. O nome sai do
-        // alerta que o `rustls` daqui manda (`decrypt_error`, 51); se uma
-        // versão nova mudar o número, é aqui que reprova.
-        assert_eq!(
-            resultado.err(),
-            Some(ConnectError::ChaveNaoProvada),
-            "o impostor que mostrou o certificado sem a chave não saiu como \
-             `ChaveNaoProvada`: a tela o chamaria de versão incompatível, ou o teste \
-             mediu outra coisa"
-        );
-        assert_eq!(
-            loja.pinned(chave),
-            None,
-            "o pin que o verificador fixou para o impostor ficou na loja depois de o TLS cair"
-        );
-        let linhas = rastro.linhas();
-        let Some(desfeito) = linhas.iter().find(|linha| {
-            linha.starts_with("INFO")
-                && linha.contains(chave)
-                && linha.contains(&impressao_do_verdadeiro)
-        }) else {
-            panic!(
-                "o pin que o impostor fez o verificador fixar foi apagado sem dizer no log qual \
-                 chave e qual impressão. Rastro: {linhas:?}"
-            );
-        };
-        assert!(
-            desfeito.contains("ChaveNaoProvada"),
-            "a linha do pin desfeito não traz o erro que o aperto deu (`ChaveNaoProvada`), e \
-             sim outro: a falha que `conectar_por` passa à limpeza não é a do aperto. Linha: \
-             {desfeito}"
-        );
-        assert!(
-            ![
-                "depois do TLS",
-                "TLS terminou",
-                "TLS terminado",
-                "após o TLS"
-            ]
-            .iter()
-            .any(|afirmacao| desfeito.contains(afirmacao)),
-            "a linha do pin desfeito diz que o TLS terminou, e ele caiu no meio, na assinatura \
-             de quem atendeu: quem investiga fica achando que o servidor provou ter a chave. \
-             Linha: {desfeito}"
-        );
-    }
-
     #[tokio::test]
     async fn o_pin_orfao_de_um_candidato_que_estourou_o_prazo_vai_ao_log_com_a_falha_dele() {
         // A limpeza de depois da corrida, pelo caminho de verdade. Um candidato
@@ -7823,40 +7678,42 @@ mod tests {
         // que este candidato deu (`SemResposta`, o prazo), e não uma escolhida
         // pelo caminho.
         //
-        // Custa o prazo de um candidato (`PRAZO_POR_CANDIDATO`, 4 s), porque é
-        // ele que deixa o pin órfão.
+        // Desde a 0.17 o prazo é o do **lote**, e só existe quando há corrida:
+        // aqui o degrau 4 é o segundo lote, por um ponto de encontro mudo. O
+        // lote direto disca, fixa a chave, manda o `Hello` e não ouve nada até
+        // o prazo dele (o da chamada mais o da discagem, 8 s).
         let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
         let _guarda = tracing::subscriber::set_default(rastro.clone());
 
         let (escuta, onde_de_quem_segura, impressao_de_quem_segura) =
             ponta_com_certificado_proprio();
         let segura = tokio::spawn(async move {
-            let Some(entrada) = escuta.accept().await else {
-                return;
-            };
-            let Ok(conexao) = entrada.await else {
-                return;
-            };
+            let conexao = escuta.aceitar().await;
             std::future::pending::<()>().await;
             drop(conexao);
         });
         let chave = "chave-de-quem-segura";
-        let mut quem_nao_sai = destino_na_chave(
+        let quem_nao_sai = destino_na_chave(
             "127.0.0.1:9".parse().expect("endereço"),
             "chave-de-quem-nao-sai",
             None,
         );
-        quem_nao_sai.nome_tls = "nome inválido com espaço".into();
         let loja = Arc::new(crate::tofu::MemoryPinStore::new());
+        let ponto_mudo = std::net::UdpSocket::bind("127.0.0.1:0").expect("ponto mudo");
+        let bilhete = seele_proto::uri::Bilhete::novo(
+            ponto_mudo.local_addr().expect("endereço").to_string(),
+            "198.51.100.4:41000",
+        )
+        .expect("bilhete de teste");
 
         let resultado = tokio::time::timeout(
             Duration::from_secs(20),
             Enlace::conectar_entre_com_bilhete(
                 vec![
-                    destino_na_chave(onde_de_quem_segura, chave, None),
+                    destino_na_chave(onde_de_quem_segura, chave, Some(&impressao_de_quem_segura)),
                     quem_nao_sai,
                 ],
-                None,
+                Some(bilhete),
                 SigningKey::from_bytes(&[9; 32]),
                 Arc::clone(&loja) as Arc<dyn PinStore>,
             ),
@@ -8112,202 +7969,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn o_aperto_de_mao_sai_da_mesma_porta_que_bateu_no_ponto_de_encontro() {
-        // O degrau 4 do ADR 0022 em uma asserção, e é **a** asserção: o NAT
-        // mapeia por porta interna, então o anfitrião fura o caminho para a
-        // porta de onde o aviso saiu. Se o aperto de mão sair de outra porta, o
-        // furo abre para a porta errada e a conexão continua batendo numa porta
-        // fechada — em quase todo roteador doméstico, que filtra por endereço
-        // **e** porta.
-        //
-        // Não precisa de NAT nenhum para ser provado: bastam dois sockets no
-        // loopback, um fazendo de ponto de encontro e outro fazendo de server.
-        // Nenhum dos dois responde nada — o que se mede é de onde os pacotes
-        // saíram, e é isso que o outro lado usaria.
-        //
-        // # Por que o convite tem dois endereços, e por que o primeiro é público
-        //
-        // Porque desde o aviso por candidato **nem todo candidato avisa**: o da
-        // rede de casa não precisa de furo nenhum, e o loopback do servidor de
-        // teste é ainda menos. Com um convite de um endereço só, no loopback,
-        // nada chegaria ao ponto de encontro e este teste mediria o silêncio.
-        //
-        // Então o convite traz `203.0.113.7` — TEST-NET-3, RFC 5737, público em
-        // tudo que importa aqui e onde não há servidor nenhum — na frente, e o
-        // server de teste atrás. O aviso sai por causa do primeiro; o aperto de
-        // mão que chega ao segundo é o do mesmo laço, pelo socket emprestado da
-        // mesma `Batida`. É exatamente a fiação de produção, e é a porta dela
-        // que se compara.
-        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0")
-            .await
-            .expect("o loopback não abriu");
-        let server = tokio::net::UdpSocket::bind("127.0.0.1:0")
-            .await
-            .expect("o loopback não abriu");
-        let onde_o_server_atende = server.local_addr().expect("endereço");
-
-        let bilhete = seele_proto::uri::Bilhete::novo(
-            ponto.local_addr().expect("endereço").to_string(),
-            "45.33.32.156:41234",
-        )
-        .expect("bilhete de teste");
-        let destino = |servidor: SocketAddr, o_pino_prova_o_servidor: bool| Destino {
-            servidor,
-            nome_tls: "localhost".into(),
-            chave_do_pin: servidor.to_string(),
-            apelido: "pessoa".into(),
-            segredo: None,
-            // Uma impressão digital de verdade: é dela que sai a marca do
-            // aviso, e sem ela não se bate em ponto de encontro nenhum.
-            esperada: Some(Esperada::Certificado(
-                "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
-            )),
-            o_pino_prova_o_servidor,
-            aceito: None,
-        };
-        let refletido: SocketAddr = "203.0.113.7:8383".parse().expect("endereço");
-
-        // Ninguém atende do outro lado, então isto nunca volta com sucesso. O
-        // que interessa acontece nos primeiros segundos, e a tarefa é
-        // abandonada no fim.
-        let tentativa = tokio::spawn(Enlace::conectar_entre_com_bilhete(
-            vec![
-                destino(refletido, true),
-                destino(onde_o_server_atende, false),
-            ],
-            Some(bilhete),
-            SigningKey::from_bytes(&[7; 32]),
-            Arc::new(crate::tofu::MemoryPinStore::new()),
-        ));
-
-        let mut balde = [0_u8; 1500];
-        // Folgado: o servidor de teste é o **segundo** candidato, e só é tentado
-        // depois de o primeiro queimar o prazo dele.
-        let prazo = Duration::from_secs(15);
-
-        let (_, de_quem_bateu) = tokio::time::timeout(prazo, ponto.recv_from(&mut balde))
-            .await
-            .expect("nada chegou ao ponto de encontro")
-            .expect("o ponto de encontro não leu");
-        let (_, de_quem_conecta) = tokio::time::timeout(prazo, server.recv_from(&mut balde))
-            .await
-            .expect("nada chegou ao servidor")
-            .expect("o servidor não leu");
-
-        tentativa.abort();
-
-        assert_eq!(
-            de_quem_bateu.port(),
-            de_quem_conecta.port(),
-            "o aviso saiu de {de_quem_bateu} e o aperto de mão de {de_quem_conecta}: o \
-             anfitrião furaria o caminho para uma porta que o QUIC não usa"
-        );
-    }
-
-    /// O código da ligação dos testes de aviso, e um destino que liga para ele.
-    ///
-    /// Em `[::ffff:127.0.0.1]:9`: público na forma mapeada, que é o que faz o
-    /// laço pedir furo (ver `a_reconexao_tambem_para_a_repeticao_quando_a_tentativa_acaba`),
-    /// e sem ninguém do outro lado. O que se mede é o `LEVE`, e não a conexão.
-    fn ligacao_de_teste() -> (seele_proto::codigo::Codigo, Destino) {
-        let codigo = seele_proto::codigo::Codigo::da_chave(&[3; 32]);
-        let destino = Destino {
-            servidor: "[::ffff:127.0.0.1]:9".parse().expect("endereço"),
-            nome_tls: seele_proto::transport::NOME_DA_SALA.into(),
-            chave_do_pin: crate::confere_codigo::chave_do_pino(&codigo),
-            apelido: "pessoa".into(),
-            segredo: None,
-            esperada: Some(Esperada::Codigo(codigo)),
-            o_pino_prova_o_servidor: false,
-            aceito: None,
-        };
-        (codigo, destino)
-    }
-
-    /// Um ponto de encontro de teste, e o bilhete de uma ligação que o avisa,
-    /// com a escuta `198.51.100.4:41000`.
-    async fn ponto_e_bilhete_de_ligacao() -> (tokio::net::UdpSocket, seele_proto::uri::Bilhete) {
-        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0")
-            .await
-            .expect("o loopback não abriu");
-        let bilhete = seele_proto::uri::Bilhete::novo(
-            ponto.local_addr().expect("endereço").to_string(),
-            "198.51.100.4:41000",
-        )
-        .expect("bilhete de teste");
-        (ponto, bilhete)
-    }
-
-    /// O que chegou ao ponto, lido como pedido do ENC/1.
-    fn pedido_lido(
-        lido: Result<std::io::Result<(usize, SocketAddr)>, tokio::time::error::Elapsed>,
-        balde: &[u8],
-    ) -> Option<seele_proto::encontro::Pedido> {
-        let Ok(Ok((lidos, _))) = lido else {
-            panic!("nenhum aviso chegou ao ponto de encontro: {lido:?}");
-        };
-        balde.get(..lidos).and_then(seele_proto::encontro::analisar)
-    }
-
-    #[tokio::test]
-    async fn uma_ligacao_avisa_a_escuta_com_a_marca_do_aviso_da_sala() {
-        // A fiação da entrada: o laço de candidatos prepara a batida com a
-        // marca do primeiro destino. Com a impressão no lugar da marca, um
-        // destino de código não preparava batida nenhuma, e nenhum `LEVE` saía.
-        let (codigo, destino) = ligacao_de_teste();
-        let (ponto, bilhete) = ponto_e_bilhete_de_ligacao().await;
-
-        let tentativa = tokio::spawn(Enlace::conectar_entre_com_bilhete(
-            vec![destino],
-            Some(bilhete),
-            SigningKey::from_bytes(&[7; 32]),
-            Arc::new(crate::tofu::MemoryPinStore::new()),
-        ));
-        let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
-        let lido = tokio::time::timeout(Duration::from_secs(3), ponto.recv_from(&mut balde)).await;
-        tentativa.abort();
-
-        assert_eq!(
-            pedido_lido(lido, &balde),
-            Some(seele_proto::encontro::Pedido::Leve {
-                destino: "198.51.100.4:41000".parse().expect("endereço"),
-                marca: crate::encontro::Marcas::da_sala(&codigo).aviso().clone(),
-            }),
-            "o LEVE da ligação não foi para a escuta com a marca do aviso da sala"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_volta_de_uma_ligacao_avisa_com_a_marca_do_aviso_da_sala() {
-        // A outra fiação: `Motor::tentar`, a volta da bateria, prepara a sua
-        // própria batida a cada tentativa. A ligação volta ao `IP:porta` que
-        // atendeu (tarefa 6f), e o furo do lado de quem recebe só abre para a
-        // marca da sala.
-        let (codigo, destino) = ligacao_de_teste();
-        let (ponto, bilhete) = ponto_e_bilhete_de_ligacao().await;
-        let mut motor = motor_de_teste();
-        motor.bilhete = Some(bilhete);
-        motor.destino = destino;
-
-        let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
-        // Ninguém atende do outro lado: a tentativa é abandonada no prazo, e o
-        // que interessa sai antes do aperto de mão.
-        let (_, lido) = tokio::join!(
-            tokio::time::timeout(Duration::from_secs(3), motor.tentar()),
-            tokio::time::timeout(Duration::from_secs(3), ponto.recv_from(&mut balde)),
-        );
-
-        assert_eq!(
-            pedido_lido(lido, &balde),
-            Some(seele_proto::encontro::Pedido::Leve {
-                destino: "198.51.100.4:41000".parse().expect("endereço"),
-                marca: crate::encontro::Marcas::da_sala(&codigo).aviso().clone(),
-            }),
-            "a volta da ligação não avisou a escuta com a marca do aviso da sala"
-        );
-    }
-
     /// Um destino guardado em `servidor`, com uma impressão de verdade: é dela
     /// que sai a marca do aviso.
     fn guardado_em(servidor: &str) -> Destino {
@@ -8323,53 +7984,6 @@ mod tests {
             o_pino_prova_o_servidor: false,
             aceito: None,
         }
-    }
-
-    #[tokio::test]
-    async fn quem_precisa_de_furo_espera_o_quarto_e_avisa_a_escuta_de_hoje() {
-        // A razão de quem precisa de furo esperar o quarto: o `LEVE` dele vai à
-        // escuta de hoje, e não à guardada, que o roteador do anfitrião já pode
-        // ter dado a outro. Sem a espera, o aviso sairia na hora, para a escuta
-        // de ontem.
-        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0")
-            .await
-            .expect("o loopback não abriu");
-        let ponto_texto = ponto.local_addr().expect("endereço").to_string();
-        let guardado = seele_proto::uri::Bilhete::novo(ponto_texto.clone(), "198.51.100.4:41000")
-            .expect("bilhete de teste");
-        let de_hoje = seele_proto::uri::Bilhete::novo(ponto_texto, "198.51.100.5:42000")
-            .expect("bilhete de teste");
-        let (entrega, quarto) = tokio::sync::oneshot::channel();
-        let (olhos, _tentativas) = mpsc::unbounded_channel();
-
-        // Público na forma mapeada, que é o que faz pedir furo.
-        let tentativa = tokio::spawn(Enlace::conectar_entre_com_o_quarto(
-            vec![guardado_em("[::ffff:127.0.0.1]:9")],
-            Some(guardado),
-            SigningKey::from_bytes(&[7; 32]),
-            Arc::new(crate::tofu::MemoryPinStore::new()),
-            olhos,
-            Some(quarto),
-        ));
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let _ = entrega.send(DoQuarto {
-            candidato: None,
-            bilhete: Some(de_hoje),
-        });
-
-        let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
-        let lido = tokio::time::timeout(Duration::from_secs(3), ponto.recv_from(&mut balde)).await;
-        tentativa.abort();
-        let Some(seele_proto::encontro::Pedido::Leve { destino, .. }) = pedido_lido(lido, &balde)
-        else {
-            panic!("o primeiro pacote no ponto não foi um LEVE");
-        };
-        assert_eq!(
-            destino.to_string(),
-            "198.51.100.5:42000",
-            "o primeiro aviso foi à escuta guardada, e não à de hoje: quem precisa de furo \
-             não esperou o quarto"
-        );
     }
 
     #[tokio::test]
@@ -8415,33 +8029,144 @@ mod tests {
         );
     }
 
+    /// Um ponto de encontro de mentira que responde todo `CHAMA` com `AQUI`
+    /// para `endereco`, e conta quantos chegaram.
+    fn ponto_que_atende_o_chama(
+        endereco: SocketAddr,
+    ) -> (seele_proto::uri::Bilhete, Arc<std::sync::atomic::AtomicU32>) {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("ponto");
+        socket.set_nonblocking(true).expect("não bloqueante");
+        let onde = socket.local_addr().expect("endereço");
+        let chamados = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let contando = Arc::clone(&chamados);
+        tokio::spawn(async move {
+            let socket = tokio::net::UdpSocket::from_std(socket).expect("tokio");
+            let mut balde = [0_u8; seele_proto::encontro::TAMANHO3 + 1];
+            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+                let Some(seele_proto::encontro::Pedido3::Chama(chama)) =
+                    seele_proto::encontro::analisar3(balde.get(..lidos).unwrap_or_default())
+                else {
+                    continue;
+                };
+                contando.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let resposta =
+                    seele_proto::encontro::resposta3(&seele_proto::encontro::Resposta3::Aqui {
+                        marca: chama.servidor,
+                        endereco,
+                        dicas: Vec::new(),
+                    });
+                let _ = socket.send_to(&resposta, de).await;
+            }
+        });
+        let bilhete = seele_proto::uri::Bilhete::novo(onde.to_string(), "198.51.100.4:41000")
+            .expect("bilhete");
+        (bilhete, chamados)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn quando_o_direto_cala_o_chama_do_ponto_da_o_caminho() {
+        // O degrau 4 da 0.17 pelo caminho de produção: o endereço do convite
+        // não responde, o `CHAMA` sai pela ponta da sessão, o ponto devolve
+        // onde o anfitrião atende, e a discagem vai para lá.
+        let (onde_de_verdade, impressao, hellos) = servidor_que_conta_os_hellos();
+        let (bilhete, chamados) = ponto_que_atende_o_chama(onde_de_verdade);
+        let morto = std::net::UdpSocket::bind("127.0.0.1:0").expect("morto");
+        let mut destino = destino_na_chave(
+            morto.local_addr().expect("endereço"),
+            "chave-da-volta",
+            Some(&impressao),
+        );
+        destino.o_pino_prova_o_servidor = false;
+        let (olhos, mut andamentos) = mpsc::unbounded_channel();
+
+        let entrou = tokio::time::timeout(
+            Duration::from_secs(20),
+            Enlace::conectar_entre_observado(
+                vec![destino],
+                Some(bilhete),
+                SigningKey::from_bytes(&[9; 32]),
+                Arc::new(crate::tofu::MemoryPinStore::new()),
+                olhos,
+            ),
+        )
+        .await
+        .expect("a chegada pelo ponto não terminou");
+        assert!(
+            entrou.is_ok(),
+            "o CHAMA não deu caminho: {:?}",
+            entrou.err()
+        );
+        assert!(chamados.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+        assert_eq!(hellos.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let mut pelo_ponto = false;
+        while let Ok(andamento) = andamentos.try_recv() {
+            if let Andamento::Tentando(tentativa) = andamento {
+                pelo_ponto |= tentativa.avisou && tentativa.onde == onde_de_verdade;
+            }
+        }
+        assert!(
+            pelo_ponto,
+            "a trilha não diz que o endereço que entrou veio do ponto de encontro"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_ponto_atende_e_o_caminho_nao_abre_e_e_nat_que_nao_abriu() {
+        // O `AQUI` chegou e o ICE para o endereço dele não voltou: é a falha
+        // que o degrau 4 tem de nomear, e não «não alcancei».
+        let mudo_do_anfitriao = std::net::UdpSocket::bind("127.0.0.1:0").expect("mudo");
+        let (bilhete, _) =
+            ponto_que_atende_o_chama(mudo_do_anfitriao.local_addr().expect("endereço"));
+        let morto = std::net::UdpSocket::bind("127.0.0.1:0").expect("morto");
+        let destino = destino_na_chave(
+            morto.local_addr().expect("endereço"),
+            "chave-que-nao-abre",
+            Some(&"c".repeat(64)),
+        );
+        let resultado = tokio::time::timeout(
+            Duration::from_secs(25),
+            Enlace::conectar_entre_com_bilhete(
+                vec![destino],
+                Some(bilhete),
+                SigningKey::from_bytes(&[9; 32]),
+                Arc::new(crate::tofu::MemoryPinStore::new()),
+            ),
+        )
+        .await
+        .expect("a chegada não terminou");
+        assert_eq!(resultado.err(), Some(ConnectError::NatNaoAbriu));
+    }
+
     #[test]
     fn o_endereco_de_hoje_entra_logo_depois_do_alvo_que_espera() {
         // A posição que ele tinha quando o `connect` do app o punha na frente
-        // dos alternativos: logo depois do alvo.
+        // dos alternativos: logo depois do alvo. Desde a 0.17 os que esperavam
+        // o quarto e o endereço de hoje vão num lote só, um agente ICE.
         let pins = crate::tofu::MemoryPinStore::new();
-        let corredor = |onde: &str| Corredor {
+        let candidato = |onde: &str| Candidato {
             destino: guardado_em(onde),
             antes: None,
-            batida: None,
-            bilhete: None,
         };
         let de_hoje = |onde: &str| DoQuarto {
             candidato: Some(guardado_em(onde)),
-            bilhete: None,
         };
-        let ordem = |lote: Vec<Corredor>| -> Vec<String> {
-            lote.iter()
-                .map(|corredor| corredor.destino.servidor.to_string())
-                .collect()
+        let ordem = |lotes: Vec<Lote>| -> Vec<String> {
+            assert_eq!(lotes.len(), 1, "o quarto soltou mais de um lote");
+            lotes
+                .first()
+                .map(|lote| {
+                    lote.candidatos()
+                        .iter()
+                        .map(|candidato| candidato.destino.servidor.to_string())
+                        .collect()
+                })
+                .unwrap_or_default()
         };
 
         let alvo_espera = lote_do_quarto(
             de_hoje("203.0.113.9:8383"),
-            vec![corredor("203.0.113.1:8383"), corredor("203.0.113.2:8383")],
+            vec![candidato("203.0.113.1:8383"), candidato("203.0.113.2:8383")],
             true,
-            None,
-            None,
             &pins,
         );
         assert_eq!(
@@ -8451,130 +8176,55 @@ mod tests {
 
         let alvo_ja_corre = lote_do_quarto(
             de_hoje("203.0.113.9:8383"),
-            vec![corredor("203.0.113.2:8383")],
+            vec![candidato("203.0.113.2:8383")],
             false,
-            None,
-            None,
             &pins,
         );
         assert_eq!(
             ordem(alvo_ja_corre),
             ["203.0.113.9:8383", "203.0.113.2:8383"]
         );
-    }
-
-    #[test]
-    fn quem_esperava_o_quarto_leva_o_bilhete_desta_volta() {
-        let pins = crate::tofu::MemoryPinStore::new();
-        let guardado =
-            seele_proto::uri::Bilhete::novo("p:8384", "198.51.100.4:41000").expect("bilhete");
-        let de_hoje =
-            seele_proto::uri::Bilhete::novo("p:8384", "198.51.100.5:42000").expect("bilhete");
-        let esperava = Corredor {
-            destino: guardado_em("203.0.113.1:8383"),
-            antes: None,
-            batida: None,
-            bilhete: Some(guardado.clone()),
-        };
-
-        let lote = lote_do_quarto(
-            DoQuarto {
-                candidato: Some(guardado_em("203.0.113.9:8383")),
-                bilhete: Some(de_hoje.clone()),
-            },
-            vec![esperava],
-            true,
-            None,
-            Some(guardado.clone()),
-            &pins,
-        );
-        for corredor in &lote {
-            assert_eq!(corredor.bilhete.as_ref(), Some(&de_hoje));
-        }
-
-        // Um quarto que não confirmou escuta nenhuma deixa o guardado.
-        let sem_escuta = lote_do_quarto(
-            DoQuarto {
-                candidato: Some(guardado_em("203.0.113.9:8383")),
-                bilhete: None,
-            },
-            Vec::new(),
-            false,
-            None,
-            Some(guardado.clone()),
-            &pins,
-        );
-        assert_eq!(
-            sem_escuta
-                .first()
-                .and_then(|corredor| corredor.bilhete.as_ref()),
-            Some(&guardado)
+        assert!(
+            lote_do_quarto(DoQuarto::default(), Vec::new(), false, &pins).is_empty(),
+            "um quarto que não trouxe nada soltou um lote vazio na corrida"
         );
     }
 
-    /// Um ponto de encontro de teste que só anota quantos avisos chegaram.
-    async fn ponto_que_conta() -> Option<(SocketAddr, Arc<std::sync::Mutex<usize>>)> {
-        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.ok()?;
-        let onde = socket.local_addr().ok()?;
-        let quantos = Arc::new(std::sync::Mutex::new(0_usize));
-        let contador = Arc::clone(&quantos);
-        tokio::spawn(async move {
-            let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
-            while socket.recv_from(&mut balde).await.is_ok() {
-                if let Ok(mut conta) = contador.lock() {
-                    *conta += 1;
-                }
-            }
-        });
-        Some((onde, quantos))
-    }
-
-    /// A escuta QUIC das pontas de teste deste módulo, sobre o TLS que quem
-    /// chama montou: em `127.0.0.1`, numa porta qualquer, com o ALPN do SEELE.
+    /// Uma ponta anfitriã de teste (ICE completo controlado, DTLS passivo) com certificado
+    /// próprio, em `127.0.0.1`, e a impressão dele.
     ///
-    /// A montagem que as pontas dividem. O que muda de uma para outra é só o
-    /// certificado que ela mostra e a chave que assina o aperto de mão:
-    /// [`ponta_com_certificado_proprio`] monta os dois de um certificado só, e
-    /// [`impostor_que_repete_o_certificado`] assina com outra chave. Por isso o
-    /// `rustls::ServerConfig` vem de fora, já com o certificado, e o ALPN, a
-    /// configuração do `quinn` e a escuta saem daqui.
-    fn escuta_de_teste(mut tls_servidor: rustls::ServerConfig) -> (quinn::Endpoint, SocketAddr) {
-        tls_servidor.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-        let servidor_config = quinn::ServerConfig::with_crypto(Arc::new(
-            quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
-        ));
-
-        let escuta =
-            quinn::Endpoint::server(servidor_config, SocketAddr::from(([127, 0, 0, 1], 0)))
-                .expect("escutar");
-        let endereco = escuta.local_addr().expect("endereço");
-        (escuta, endereco)
+    /// Só fecha o aperto do enlace (DTLS, `ctl` e a apresentação vazia de um
+    /// `seeled`): o que acontece com a conexão depois é de quem chama, por
+    /// `Ponta::aceitar`.
+    fn ponta_com_certificado_proprio() -> (crate::transporte::Ponta, SocketAddr, String) {
+        let certificado = crate::transporte::CertificadoDtls::efemero().expect("certificado");
+        let impressao = crate::client::hex(&certificado.impressao());
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let ponta = crate::transporte::Ponta::de_socket(
+            socket,
+            Some(crate::transporte::ConfigDoAnfitriao::novo(certificado)),
+        )
+        .expect("ponta de teste");
+        let endereco = ponta.local_addr();
+        (ponta, endereco, impressao)
     }
 
-    /// Uma ponta QUIC de teste com certificado próprio, e a impressão dele.
-    ///
-    /// Só faz o aperto de mão do TLS: o que acontece com a conexão depois é
-    /// de quem chama.
-    fn ponta_com_certificado_proprio() -> (quinn::Endpoint, SocketAddr, String) {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        let certificado =
-            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificado");
-        let impressao = seele_proto::transport::certificate_fingerprint(certificado.cert.der());
-        let cadeia = vec![rustls::pki_types::CertificateDer::from(
-            certificado.cert.der().to_vec(),
-        )];
-        let chave =
-            rustls::pki_types::PrivatePkcs8KeyDer::from(certificado.signing_key.serialize_der());
-
-        // `with_single_cert` confere que a chave é a do certificado: uma ponta
-        // honesta montada errado reprova aqui, e não no meio do teste.
-        let tls_servidor = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(cadeia, chave.into())
-            .expect("config do servidor");
-        let (escuta, endereco) = escuta_de_teste(tls_servidor);
-        (escuta, endereco, impressao)
+    /// Discar `destino` e fazer o aperto do protocolo, como a entrada de um
+    /// endereço só faz, sem declarar identidade de par.
+    async fn conectar_por_teste(
+        destino: Destino,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+    ) -> Result<Enlace, ConnectError> {
+        let ponta = crate::transporte::abrir_ponta(None)?;
+        let conexao = crate::client::discar(
+            ponta.ponta(),
+            vec![destino.servidor],
+            None,
+            seele_proto::transport::HANDSHAKE_TIMEOUT,
+        )
+        .await?;
+        Enlace::conectar_sobre(ponta, conexao, None, destino, chave, pins, None).await
     }
 
     /// Uma loja de pins que finge o vizinho de uma corrida.
@@ -8660,36 +8310,24 @@ mod tests {
         let chave = "casa:8383";
         let loja = Arc::new(LojaComVizinho::nova(chave, &impressao_de_a));
 
-        // O impostor segura o TLS dele até o teste armar a loja, para que a
-        // leitura do verificador seja a que dispara o vizinho.
-        let (chegou_tx, chegou) = tokio::sync::oneshot::channel::<()>();
-        let (abrir, portao) = tokio::sync::oneshot::channel::<()>();
+        // Quem atende fecha o aperto do enlace e fica de pé. A loja é armada
+        // antes: a primeira leitura é a do verificador, depois do DTLS e antes
+        // do `Hello`, e é ela que dispara o vizinho.
         let segura_b = tokio::spawn(async move {
-            let Some(entrada) = ponta_b.accept().await else {
-                return;
-            };
-            let _ = chegou_tx.send(());
-            let _ = portao.await;
-            let _ = entrada.await;
+            let conexao = ponta_b.aceitar().await;
+            std::future::pending::<()>().await;
+            drop(conexao);
         });
+        loja.armar();
 
-        let endpoint = crate::client::local_endpoint(None).expect("ponta local");
-        let b = Enlace::conectar_por(
-            &endpoint,
-            None,
-            destino_na_chave(onde_b, chave, Some(&impressao_de_a)),
-            SigningKey::from_bytes(&[8; 32]),
-            Arc::clone(&loja) as Arc<dyn PinStore>,
-            None,
-        );
-        let armar_e_abrir = async {
-            let _ = chegou.await;
-            loja.armar();
-            let _ = abrir.send(());
-        };
-        let (resultado, ()) = tokio::time::timeout(Duration::from_secs(20), async {
-            tokio::join!(b, armar_e_abrir)
-        })
+        let resultado = tokio::time::timeout(
+            Duration::from_secs(20),
+            conectar_por_teste(
+                destino_na_chave(onde_b, chave, Some(&impressao_de_a)),
+                SigningKey::from_bytes(&[8; 32]),
+                Arc::clone(&loja) as Arc<dyn PinStore>,
+            ),
+        )
         .await
         .expect("a tentativa recusada não terminou");
         segura_b.abort();
@@ -8737,46 +8375,33 @@ mod tests {
         let loja = Arc::new(crate::tofu::MemoryPinStore::new());
 
         let segura_a = tokio::spawn(async move {
-            let Some(entrada) = ponta_a.accept().await else {
-                return;
-            };
-            let Ok(conexao) = entrada.await else {
-                return;
-            };
+            let conexao = ponta_a.aceitar().await;
             std::future::pending::<()>().await;
             drop(conexao);
         });
-        let (abrir, portao) = tokio::sync::oneshot::channel::<()>();
         let segura_b = tokio::spawn(async move {
-            let Some(entrada) = ponta_b.accept().await else {
-                return;
-            };
-            let _ = portao.await;
-            let _ = entrada.await;
+            let conexao = ponta_b.aceitar().await;
+            std::future::pending::<()>().await;
+            drop(conexao);
         });
 
-        let endpoint = crate::client::local_endpoint(None).expect("ponta local");
-        let a = Enlace::conectar_por(
-            &endpoint,
-            None,
+        let a = conectar_por_teste(
             destino_na_chave(onde_a, chave, Some(&impressao_a)),
             SigningKey::from_bytes(&[7; 32]),
             Arc::clone(&loja) as Arc<dyn PinStore>,
-            None,
         );
-        let b = Enlace::conectar_por(
-            &endpoint,
-            None,
-            destino_na_chave(onde_b, chave, None),
-            SigningKey::from_bytes(&[8; 32]),
-            Arc::clone(&loja) as Arc<dyn PinStore>,
-            None,
-        );
-        let quando_a_fixar = async {
+        // **B** só disca depois de **A** fixar: a ordem é a do texto acima, sem
+        // relógio.
+        let b = async {
             while loja.pinned(chave).as_deref() != Some(impressao_a.as_str()) {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
-            let _ = abrir.send(());
+            conectar_por_teste(
+                destino_na_chave(onde_b, chave, None),
+                SigningKey::from_bytes(&[8; 32]),
+                Arc::clone(&loja) as Arc<dyn PinStore>,
+            )
+            .await
         };
         let resultado_de_b = tokio::time::timeout(Duration::from_secs(20), async {
             tokio::select! {
@@ -8785,7 +8410,7 @@ mod tests {
                     "a tentativa que devia ficar parada no `Hello` terminou: o \
                      servidor de teste respondeu, ou o aperto de mão falhou"
                 ),
-                resultado = async { tokio::join!(b, quando_a_fixar).0 } => resultado,
+                resultado = b => resultado,
             }
         })
         .await
@@ -8812,53 +8437,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn a_reconexao_tambem_para_a_repeticao_quando_a_tentativa_acaba() {
-        // O terceiro `abort`, e o mais caro de esquecer. Os outros dois estão
-        // no laço de candidatos e acontecem uma vez por entrada;
-        // este está em `Motor::tentar`, que roda **a cada tica da bateria** —
-        // cinco minutos de reconexão contra um endereço público gastariam três
-        // furos por tentativa em vez de um, contra uma janela que é de sessenta
-        // por dez segundos.
-        //
-        // Nada precisa cair para provar isto, e nada precisa reconectar. O que
-        // torna observável é a tentativa **acabar rápido**: com um nome TLS que
-        // o quinn recusa, `Endpoint::connect` devolve erro antes de qualquer
-        // pacote, muito antes de a repetição chegar ao segundo aviso — que
-        // sairia 700 ms depois do primeiro.
-        let Some((ponto, quantos)) = ponto_que_conta().await else {
-            return;
-        };
-        let Ok(bilhete) = seele_proto::uri::Bilhete::novo(ponto.to_string(), "45.33.32.156:41234")
-        else {
-            panic!("o bilhete de teste não se monta");
-        };
-
-        let mut motor = motor_de_teste();
-        motor.bilhete = Some(bilhete);
-        // Público **e** alcançável na forma mapeada: é o que faz a reconexão
-        // pedir furo. Com `127.0.0.1` na forma escrita não sairia aviso nenhum
-        // e este teste mediria o próprio silêncio.
-        motor.destino.servidor = "[::ffff:127.0.0.1]:9".parse().expect("endereço");
-        motor.destino.nome_tls = "nome inválido com espaço".into();
-        motor.destino.esperada = Some(Esperada::Certificado(
-            "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
-        ));
-
-        motor.tentar().await;
-        tokio::time::sleep(Duration::from_millis(2500)).await;
-
-        let Ok(conta) = quantos.lock() else {
-            return;
-        };
-        assert_eq!(
-            *conta, 1,
-            "a tentativa de reconexão acabou na hora e mesmo assim saíram {} \
-             avisos: a repetição não foi abortada",
-            *conta
-        );
-    }
-
     /// Um servidor que fala só o aperto de mão do protocolo e derruba a
     /// conexão assim que ele termina — antes que quem está do outro lado
     /// consiga escrever mais nada por ela.
@@ -8876,13 +8454,10 @@ mod tests {
         let (escuta, endereco, _) = ponta_com_certificado_proprio();
 
         tokio::spawn(async move {
-            let Some(entrada) = escuta.accept().await else {
+            let Some(conexao) = escuta.aceitar().await else {
                 return;
             };
-            let Ok(conexao) = entrada.await else {
-                return;
-            };
-            let Ok((mut envio, mut recebe)) = conexao.accept_bi().await else {
+            let Some((mut envio, mut recebe)) = conexao.controle() else {
                 return;
             };
 
@@ -8923,7 +8498,7 @@ mod tests {
             // escreve não tem essa corrida: uma vez que o cliente processa o
             // pacote, a próxima escrita dele volta erro na hora, sem depender
             // de outro round-trip.
-            let _ = recebe.stop(0_u32.into());
+            let _ = recebe.stop(0);
             let _ = crate::frame::write(
                 &mut envio,
                 &seele_proto::control::ServerMessage::Session {
@@ -8998,18 +8573,34 @@ mod tests {
     /// servidor que os testes da volta da bateria olham: um `Hello` que chega
     /// aqui levou o apelido e a assinatura de quem reconectava.
     fn servidor_que_conta_os_hellos() -> (SocketAddr, String, Arc<std::sync::atomic::AtomicU32>) {
-        let (escuta, endereco, impressao) = ponta_com_certificado_proprio();
+        servidor_que_conta_os_hellos_depois_de(Duration::ZERO)
+    }
+
+    /// O mesmo, com o socket aberto na hora e a ponta só começando a ler
+    /// depois de `atraso`: as checagens ICE que chegam antes esperam no socket,
+    /// e quem responde primeiro é qualquer outro candidato do mesmo lote.
+    fn servidor_que_conta_os_hellos_depois_de(
+        atraso: Duration,
+    ) -> (SocketAddr, String, Arc<std::sync::atomic::AtomicU32>) {
+        let certificado = crate::transporte::CertificadoDtls::efemero().expect("certificado");
+        let impressao = crate::client::hex(&certificado.impressao());
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let endereco = socket.local_addr().expect("endereço");
         let hellos = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let contando = Arc::clone(&hellos);
         tokio::spawn(async move {
+            tokio::time::sleep(atraso).await;
+            let Ok(escuta) = crate::transporte::Ponta::de_socket(
+                socket,
+                Some(crate::transporte::ConfigDoAnfitriao::novo(certificado)),
+            ) else {
+                return;
+            };
             // As conexões ficam guardadas aqui, de pé, até o teste acabar: a
             // reconexão tem de encontrar a sessão viva depois do `Session`.
             let mut de_pe = Vec::new();
-            while let Some(entrada) = escuta.accept().await {
-                let Ok(conexao) = entrada.await else {
-                    continue;
-                };
-                let Ok((mut envio, mut recebe)) = conexao.accept_bi().await else {
+            while let Some(conexao) = escuta.aceitar().await {
+                let Some((mut envio, mut recebe)) = conexao.controle() else {
                     continue;
                 };
                 if crate::frame::read::<seele_proto::control::ClientMessage>(&mut recebe)
@@ -9277,52 +8868,9 @@ mod tests {
     fn ponta_que_so_mostra_a_chave() -> (SocketAddr, String) {
         let (escuta, endereco, impressao) = ponta_com_certificado_proprio();
         tokio::spawn(async move {
-            while let Some(entrada) = escuta.accept().await {
-                let _ = entrada.await;
-            }
-        });
-        (endereco, impressao)
-    }
-
-    /// Uma ponta que repete o certificado de outro servidor sem ter a chave dele.
-    ///
-    /// O certificado é público: quem atende pode mandá-lo inteiro. O que não se
-    /// copia é a chave privada, e o TLS a cobra **depois** de o verificador
-    /// aceitar o certificado, na assinatura do servidor sobre o aperto de mão
-    /// (`CertificateVerify`). Aqui a assinatura sai com outra chave, e o TLS cai
-    /// ali, com o pin já fixado.
-    ///
-    /// Devolve o endereço e a impressão do certificado repetido, que é a do
-    /// servidor verdadeiro.
-    fn impostor_que_repete_o_certificado() -> (SocketAddr, String) {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        let verdadeiro =
-            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificado");
-        let impressao = seele_proto::transport::certificate_fingerprint(verdadeiro.cert.der());
-        let outra = rcgen::KeyPair::generate().expect("outra chave");
-        let chave_do_impostor = rustls::crypto::ring::sign::any_supported_type(
-            &rustls::pki_types::PrivatePkcs8KeyDer::from(outra.serialize_der()).into(),
-        )
-        .expect("chave de assinatura");
-        // `CertifiedKey::new`, e não `with_single_cert`: este confere se a chave
-        // é a do certificado, e recusaria montar o impostor.
-        let certificado_e_chave = rustls::sign::CertifiedKey::new(
-            vec![rustls::pki_types::CertificateDer::from(
-                verdadeiro.cert.der().to_vec(),
-            )],
-            chave_do_impostor,
-        );
-
-        let tls_servidor = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_cert_resolver(Arc::new(rustls::sign::SingleCertAndKey::from(
-                certificado_e_chave,
-            )));
-        let (escuta, endereco) = escuta_de_teste(tls_servidor);
-        tokio::spawn(async move {
-            while let Some(entrada) = escuta.accept().await {
-                let _ = entrada.await;
+            let mut de_pe = Vec::new();
+            while let Some(conexao) = escuta.aceitar().await {
+                de_pe.push(conexao);
             }
         });
         (endereco, impressao)
@@ -9335,13 +8883,14 @@ mod tests {
         // candidato vencia, as falhas da corrida eram descartadas sem uma linha,
         // e esse evento não deixava rastro no `seele.log`.
         //
-        // Quatro candidatos, e o vencedor por último, para os três perdedores
-        // terminarem antes dele (a corrida dispara um a cada 250 ms, e cada
-        // perdedor falha em milissegundos):
+        // Desde a 0.17 os quatro vão num agente ICE só, e o ICE fica com quem
+        // responde primeiro. O verdadeiro começa a ler o socket um segundo
+        // depois, de propósito, para os outros dois responderem antes:
         // - um que a impressão esperada desmente (`InviteMismatch`);
         // - um cuja chave fixada mudou (`PinChanged`);
-        // - um que nem sai (um nome TLS que o `quinn` recusa: `Unreachable`);
+        // - um endereço onde ninguém responde;
         // - o verdadeiro.
+        // O lote redisca sem quem recusou, e cada recusa vai ao log.
         //
         // A chave de pino de cada um não é o texto do endereço, de propósito: o
         // verificador também registra as duas recusas, sob a chave de pino, e
@@ -9355,15 +8904,14 @@ mod tests {
 
         let (onde_do_impostor, impressao_do_impostor) = ponta_que_so_mostra_a_chave();
         let (onde_do_trocado, impressao_do_trocado) = ponta_que_so_mostra_a_chave();
-        let (onde_do_verdadeiro, impressao_do_verdadeiro, _) = servidor_que_conta_os_hellos();
+        let (onde_do_verdadeiro, impressao_do_verdadeiro, _) =
+            servidor_que_conta_os_hellos_depois_de(Duration::from_secs(1));
         let fixada_antes = "f".repeat(64);
         let onde_de_quem_nao_sai: SocketAddr = "127.0.0.1:9".parse().expect("endereço");
 
         let loja = Arc::new(crate::tofu::MemoryPinStore::new());
         loja.pin("chave-do-trocado", fixada_antes.clone());
-        let mut quem_nao_sai =
-            destino_na_chave(onde_de_quem_nao_sai, "chave-de-quem-nao-sai", None);
-        quem_nao_sai.nome_tls = "nome inválido com espaço".into();
+        let quem_nao_sai = destino_na_chave(onde_de_quem_nao_sai, "chave-de-quem-nao-sai", None);
         let destinos = vec![
             destino_na_chave(
                 onde_do_impostor,
@@ -9416,82 +8964,6 @@ mod tests {
             "a chave trocada de um candidato perdedor sumiu do log quando outro entrou: o \
              alarme do ADR 0003 em {do_trocado} não deixou rastro. Rastro: {linhas:?}"
         );
-        let de_quem_nao_sai = onde_de_quem_nao_sai.to_string();
-        assert!(
-            linhas.iter().any(|linha| linha.starts_with("INFO")
-                && linha.contains(&de_quem_nao_sai)
-                && linha.contains("Unreachable")),
-            "a falha comum de um candidato perdedor sumiu do log quando outro entrou, ou deixou \
-             de ir em `info`, como no caminho sem vencedor. Rastro: {linhas:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn o_candidato_perdedor_que_nao_prova_a_chave_vai_ao_log_como_aviso() {
-        // O impostor que repete o certificado de um servidor sem ter a chave
-        // dele é o mesmo evento que a recusa pela impressão, por outro caminho:
-        // alguém com a identidade errada num endereço da corrida. A linha da
-        // corrida (com o endereço e quem entrou) ia em `info`, como uma falha
-        // comum, porque `registrar_a_falha_do_candidato` só subia para `warn` a
-        // impressão que não confere e a chave trocada.
-        //
-        // O impostor primeiro, para ele perder antes de o verdadeiro vencer (a
-        // corrida dispara um candidato a cada 250 ms, e o impostor falha em
-        // milissegundos). Sem impressão esperada: o verificador o aceita como
-        // primeiro contato, e o TLS cai na assinatura.
-        //
-        // `#[tokio::test]` de thread única: `set_default` fixa o rastro nesta
-        // thread, e a corrida inteira roda nela.
-        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
-        let _guarda = tracing::subscriber::set_default(rastro.clone());
-
-        let (onde_do_impostor, _) = impostor_que_repete_o_certificado();
-        let (onde_do_verdadeiro, impressao_do_verdadeiro, _) = servidor_que_conta_os_hellos();
-        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
-        let destinos = vec![
-            destino_na_chave(onde_do_impostor, "chave-do-impostor", None),
-            destino_na_chave(
-                onde_do_verdadeiro,
-                "chave-do-verdadeiro",
-                Some(&impressao_do_verdadeiro),
-            ),
-        ];
-
-        let entrou = tokio::time::timeout(
-            Duration::from_secs(20),
-            Enlace::conectar_entre_com_bilhete(
-                destinos,
-                None,
-                SigningKey::from_bytes(&[11; 32]),
-                Arc::clone(&loja) as Arc<dyn PinStore>,
-            ),
-        )
-        .await
-        .expect("a corrida não terminou");
-        assert!(
-            entrou.is_ok(),
-            "o candidato verdadeiro não venceu a corrida ({:?}), e o teste mediu outra coisa",
-            entrou.err()
-        );
-
-        let linhas = rastro.linhas();
-        let do_impostor = format!("{onde_do_impostor:?}");
-        let do_verdadeiro = format!("{onde_do_verdadeiro:?}");
-        let Some(da_corrida) = linhas
-            .iter()
-            .find(|linha| linha.contains(&do_impostor) && linha.contains(&do_verdadeiro))
-        else {
-            panic!(
-                "a falha do impostor que perdeu a corrida não deixou a linha da corrida, com o \
-                 endereço dele e o de quem entrou. Rastro: {linhas:?}"
-            );
-        };
-        assert!(
-            da_corrida.starts_with("WARN"),
-            "o candidato perdedor que mostrou o certificado sem provar a chave foi ao log como \
-             falha comum, e não como aviso: quem lê o `seele.log` não separa o impostor de um \
-             endereço que não respondeu. Linha: {da_corrida}"
-        );
     }
 
     #[tokio::test]
@@ -9506,12 +8978,11 @@ mod tests {
 
         let (onde_do_impostor, impressao_do_impostor) = ponta_que_so_mostra_a_chave();
         let esperada = "e".repeat(64);
-        let mut quem_nao_sai = destino_na_chave(
+        let quem_nao_sai = destino_na_chave(
             "127.0.0.1:9".parse().expect("endereço"),
             "chave-de-quem-nao-sai",
             None,
         );
-        quem_nao_sai.nome_tls = "nome inválido com espaço".into();
         let destinos = vec![
             destino_na_chave(onde_do_impostor, "chave-do-impostor", Some(&esperada)),
             quem_nao_sai,
@@ -9999,8 +9470,15 @@ mod tests {
             let amostra = Amostra {
                 transporte: Transporte {
                     bytes_enviados: bytes,
-                    ida_e_volta: Duration::from_millis(20),
-                    ..Transporte::default()
+                    // A telemetria da 0.17: sem perda nem congestionamento, com a
+                    // ida e volta do `Ping` da sonda andando a cada janela.
+                    eventos_de_congestionamento: None,
+                    pacotes_perdidos: None,
+                    ida_e_volta: Some(crate::caminho::IdaEVolta {
+                        valor: Duration::from_millis(20),
+                        amostras: u64::from(segundo) * 2 + 1,
+                        em_voo: None,
+                    }),
                 },
                 teto,
                 faixa: SignalBand::Nominal,
@@ -10071,6 +9549,30 @@ mod tests {
              teto que 1080p custa; abriu em {teto:?} — a escolha só passaria a \
              valer oito janelas depois, que é o que este piso existe para não \
              fazer"
+        );
+    }
+
+    /// **A semente lembrada é grampeada e não volta ao disco como medida.**
+    ///
+    /// Decisão da 0.17: quem chama `lembrar_o_caminho` pode ter lido um número
+    /// sem data nem rede, e o motor não dá a ele confiança ilimitada; e uma
+    /// sessão que só recebeu a semente publica zero, que quem grava lê como
+    /// «não mediu».
+    #[test]
+    fn o_caminho_lembrado_tem_teto_e_nao_vira_medida() {
+        let mut motor = motor_de_teste();
+        motor.lembrar(&Comando::LembrarCaminho(90_000_000));
+        assert_eq!(
+            motor.caminho.estimativa(),
+            crate::caminho::TETO_DA_SEMENTE_BPS,
+            "a semente passou do teto da semente"
+        );
+        assert_eq!(
+            motor
+                .caminho_medido
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0,
+            "a semente foi publicada como medida, e voltaria ao disco com data nova"
         );
     }
 
@@ -10160,7 +9662,6 @@ mod tests {
             espectadores: 0,
             caminho: crate::caminho::Sonda::nova(),
             caminho_medido: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            identidade_de_par: None,
             atendendo_pares: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             consentimento: ConsentimentoDePar::de_ninguem(),
             repasse: Arc::new(RepasseDeTela::default()),
@@ -10258,6 +9759,7 @@ mod tests {
                     tela: ScreenId(1),
                     chave: false,
                     bytes: vec![0],
+                    leitura: 1,
                 };
                 if entregando.send(quadro).is_err() {
                     return;
@@ -10355,15 +9857,13 @@ mod tests {
              segundo `SirvaTelaPara` entraria por cima de um repasse em curso"
         );
 
-        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let buraco_negro = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ponta = ponta_de_sessao_de_teste();
+        let buraco_negro = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         let onde_ninguem_atende = buraco_negro.local_addr().unwrap();
-        let identidade = par::identidade_efemera().unwrap();
-        let impressao = par::impressao(&identidade);
+        let impressao = par::impressao(&par::identidade_efemera().unwrap());
         motor.passar_a_servir(
             vaga,
             ponta,
-            identidade,
             ScreenId(1),
             vec![onde_ninguem_atende],
             impressao,
@@ -10499,15 +9999,13 @@ mod tests {
         let punho = Arc::clone(&motor.atendendo_pares);
         let vaga = VagaDeAtendimento::tomar(&punho).expect("a vaga nasce livre");
 
-        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let buraco_negro = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let ponta = ponta_de_sessao_de_teste();
+        let buraco_negro = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         let onde_ninguem_atende = buraco_negro.local_addr().unwrap();
-        let identidade = par::identidade_efemera().unwrap();
-        let impressao = par::impressao(&identidade);
+        let impressao = par::impressao(&par::identidade_efemera().unwrap());
         motor.passar_a_servir(
             vaga,
             ponta,
-            identidade,
             ScreenId(1),
             vec![onde_ninguem_atende],
             impressao,
@@ -10658,88 +10156,76 @@ mod tests {
         panic!("a paciência acabou esperando: {o_que}");
     }
 
-    /// O ponto de chamada de `par::parar_de_atender` dentro de
-    /// `servir_um_par` desarma a ponta de quem empresta depois de servir.
+    /// O ponto de chamada de `par::parar_de_atender` dentro de `servir_um_par`
+    /// desarma a ponta de quem empresta depois de servir.
     ///
-    /// # O achado do round 1 desta tarefa
-    ///
-    /// A tentativa anterior deste guarda media só do lado de quem **disca**
-    /// uma segunda vez contra a ponta já servida — e lá, armada e desarmada
-    /// são indistinguíveis: sem ninguém para chamar `ponta.accept()` de
-    /// novo, as duas produzem o mesmo silêncio até o próprio prazo de
-    /// discagem vencer. Medido e descartado — ver o relatório da Task 10.
-    ///
-    /// O sinal mora do lado de quem **atende**, como
-    /// `par::testes::parar_de_atender_desarma_o_que_passar_a_atender_armou`
-    /// já prova para a função isolada: pôr alguém pronto para aceitar
-    /// (`par::atender`) depois do desarme, e só então discar. Armada, o
-    /// aperto de mão completa; desarmada, `accept()` nunca rende nada e quem
-    /// disca esgota o próprio prazo. Este teste faz o mesmo, mas contra
-    /// `servir_um_par` — o ponto de chamada de produção, não a função pura.
+    /// O sinal mora do lado de quem **atende**: pôr alguém pronto para aceitar
+    /// (`par::atender`) depois do desarme, e só então discar. Armada, o aperto
+    /// completa; desarmada, o portão recusa o Binding antes de criar estado e
+    /// quem disca esgota o próprio prazo. Contra `servir_um_par`, o ponto de
+    /// chamada de produção, e não a função pura.
     #[tokio::test(flavor = "multi_thread")]
     async fn servir_um_par_desarma_a_ponta_de_quem_empresta_depois_de_servir() {
-        let ponta_empresta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let onde_empresta = ponta_empresta.local_addr().unwrap();
-        let identidade_empresta = par::identidade_efemera().unwrap();
-        let impressao_empresta = par::impressao(&identidade_empresta);
+        let ponta_empresta = ponta_de_sessao_de_teste();
+        let onde_empresta = ponta_empresta.ponta().local_addr();
+        let impressao_empresta = par::impressao(ponta_empresta.identidade());
 
-        // Quem "assiste": só disca, nunca atende — o mesmo papel de
-        // `Motor::assistir_por_par`.
-        let identidade_assiste = par::identidade_efemera().unwrap();
-        let impressao_assiste = par::impressao(&identidade_assiste);
+        // Quem "assiste": só disca — o papel de `Motor::assistir_por_par`.
+        let ponta_assiste = ponta_de_sessao_de_teste();
+        let impressao_assiste = par::impressao(ponta_assiste.identidade());
 
-        // Um buraco negro: uma ponta de verdade, bindada, mas sem
-        // `ServerConfig` nenhum. É o endereço que `servir_um_par` tenta
-        // discar do lado dele — precisa ser um alvo que nunca responde, para
-        // a corrida interna resolver pelo lado de `atender`, que é o que a
-        // discagem de verdade abaixo aciona. Um pacote UDP para uma porta
-        // fechada arriscaria um erro rápido demais (`ECONNREFUSED` do SO) e
-        // venceria a corrida errada; este alvo só ignora, do jeito que um par
-        // de verdade que não respondesse também ignoraria.
-        let buraco_negro = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        // O furo de quem empresta vai a um endereço onde ninguém responde: ele
+        // só abre o NAT, e não decide nada.
+        let buraco_negro = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         let onde_buraco_negro = buraco_negro.local_addr().unwrap();
 
         let servindo = tokio::spawn(servir_um_par(
             ponta_empresta.clone(),
-            identidade_empresta,
             vec![onde_buraco_negro],
             impressao_assiste.clone(),
         ));
 
-        // A discagem de verdade, de fora da tarefa acima — o papel de
-        // `Motor::assistir_por_par` do lado de quem assiste.
-        let ponta_assiste = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
         let ligado = par::ligar(
             &ponta_assiste,
             &[onde_empresta],
             impressao_empresta.clone(),
-            Some(&identidade_assiste),
             Duration::from_secs(3),
         )
         .await
         .expect("a discagem de quem assiste tinha tudo para fechar e não fechou");
-        drop(ligado);
 
         let resultado = servindo.await.expect("a tarefa de servir_um_par");
         assert!(
             resultado.is_some(),
             "servir_um_par não serviu ninguém, e o resto deste teste não prova nada"
         );
+        drop(ligado);
+        assert!(
+            !ponta_empresta.armada(),
+            "servir_um_par devolveu com a ponta de quem empresta ainda armada"
+        );
 
         // **O discriminador.** Alguém pronto para aceitar, depois de
-        // `servir_um_par` já ter devolvido: se a ponta continuasse armada —
-        // por exemplo, com a chamada a `par::parar_de_atender` removida
-        // deste ponto de chamada —, é este `atender` quem completaria o
-        // aperto de mão, com a MESMA impressão que `passar_a_atender` já
-        // tinha fixado dentro de `servir_um_par`.
-        let _atendendo = tokio::spawn(par::atender(ponta_empresta, Duration::from_secs(2)));
-        let ponta_de_novo = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        // `servir_um_par` já ter devolvido: se a ponta continuasse armada, é
+        // este `atender` quem completaria o aperto.
+        let _atendendo = {
+            let ponta_empresta = ponta_empresta.clone();
+            let impressao_assiste = impressao_assiste.clone();
+            tokio::spawn(async move {
+                par::atender(
+                    &ponta_empresta,
+                    &impressao_assiste,
+                    Duration::from_secs(3),
+                    Duration::from_secs(2),
+                )
+                .await
+            })
+        };
         let tentou = par::ligar(
-            &ponta_de_novo,
+            &ponta_assiste,
             &[onde_empresta],
             impressao_empresta,
-            Some(&identidade_assiste),
-            Duration::from_millis(300),
+            Duration::from_millis(800),
         )
         .await;
         assert!(
@@ -10805,45 +10291,29 @@ mod tests {
         assert_eq!(repasse.abertura_de(primeira), None);
     }
 
-    /// **A discagem de quem empresta falha na hora, e `atender` ainda serve.**
+    /// **Sem endereço nenhum para furar, `atender` ainda serve.**
     ///
-    /// Quem assiste nunca chama `par::atender` — só disca. Então a discagem de
-    /// quem empresta não tem quem a atenda e **não pode** fechar: ela existe
-    /// por um efeito só, abrir o mapeamento de NAT desta ponta. O `select!`
-    /// tratava o fim dela como resposta, e bastava um erro rápido — lista de
-    /// candidatos vazia, família de endereço incompatível, `connect_with`
-    /// recusando na hora — para `atender` ser cancelado e quem empresta
-    /// desistir de servir alguém que estava no meio do caminho.
-    ///
-    /// A lista vazia é o erro instantâneo mais limpo que existe: `par::ligar`
-    /// não tem candidato para tentar e devolve `NaoAlcancou` sem esperar um
-    /// milissegundo.
+    /// O furo de quem empresta existe por um efeito só, abrir o mapeamento de
+    /// NAT desta ponta, e uma lista vazia de endereços (o servidor não soube de
+    /// nenhum) não pode desistir de servir quem está chegando por outro
+    /// caminho.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_discagem_que_falha_na_hora_nao_cancela_o_atendimento() {
-        let ponta_empresta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let onde_empresta = ponta_empresta.local_addr().unwrap();
-        let identidade_empresta = par::identidade_efemera().unwrap();
-        let impressao_empresta = par::impressao(&identidade_empresta);
+    async fn sem_endereco_para_furar_quem_empresta_ainda_atende() {
+        let ponta_empresta = ponta_de_sessao_de_teste();
+        let onde_empresta = ponta_empresta.ponta().local_addr();
+        let impressao_empresta = par::impressao(ponta_empresta.identidade());
+        let ponta_assiste = ponta_de_sessao_de_teste();
+        let impressao_assiste = par::impressao(ponta_assiste.identidade());
 
-        let identidade_assiste = par::identidade_efemera().unwrap();
-        let impressao_assiste = par::impressao(&identidade_assiste);
-
-        // **Sem endereço nenhum para discar.** `par::ligar` desiste no mesmo
-        // instante, e é esse instante que cancelava o `atender`.
         let servindo = tokio::spawn(servir_um_par(
             ponta_empresta.clone(),
-            identidade_empresta,
             Vec::new(),
-            impressao_assiste.clone(),
+            impressao_assiste,
         ));
-
-        // E quem assiste chega, como sempre chega: discando.
-        let ponta_assiste = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
         let ligado = par::ligar(
             &ponta_assiste,
             &[onde_empresta],
             impressao_empresta,
-            Some(&identidade_assiste),
             Duration::from_secs(3),
         )
         .await;
@@ -10851,14 +10321,19 @@ mod tests {
         let resultado = servindo.await.expect("a tarefa de servir_um_par");
         assert!(
             resultado.is_some(),
-            "a discagem de quem empresta falhou na hora e levou o `atender` junto: quem \
-             empresta desistiu de servir alguém que estava chegando"
+            "sem endereço para furar, quem empresta desistiu de servir alguém que chegava"
         );
         assert!(
             ligado.is_ok(),
             "quem assiste discou para uma ponta que devia estar atendendo e não fechou: {:?}",
             ligado.err()
         );
+    }
+
+    /// A ponta de uma sessão em `127.0.0.1`.
+    fn ponta_de_sessao_de_teste() -> crate::transporte::PontaDaSessao {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("socket");
+        crate::transporte::abrir_ponta(Some(socket)).expect("ponta da sessão")
     }
 }
 

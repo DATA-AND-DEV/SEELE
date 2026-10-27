@@ -1,4 +1,5 @@
-//! A medida da subida atravessa do `quinn` até o portão e até o disco.
+//! A medida da subida, do enlace até o portão e até o disco — e, desde a
+//! 0.17, a falta dela, que não vira número.
 //!
 //! # A lacuna que este teste fecha
 //!
@@ -43,6 +44,8 @@ use seele_proto::media::MediaHeader;
 use seele_server::persistence::Location;
 use seele_server::{frame, Daemon, ServerConfig};
 
+mod comum;
+
 /// Um quadro do maior tamanho que o protocolo aceita.
 ///
 /// **Grande de propósito, e não realista de propósito.** O que este teste
@@ -54,57 +57,6 @@ use seele_server::{frame, Daemon, ServerConfig};
 /// proíbe tocar no payload —, então o conteúdo não importa e só o tamanho faz
 /// diferença aqui.
 const PAYLOAD: [u8; seele_proto::media::MAX_PAYLOAD_LEN] = [7; seele_proto::media::MAX_PAYLOAD_LEN];
-
-/// Um verificador que aceita qualquer certificado.
-///
-/// O que está sob teste é o escalonamento da sessão, não o TOFU.
-#[derive(Debug)]
-struct AceitaQualquer(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for AceitaQualquer {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
 
 /// Um servidor em memória, já atendendo.
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
@@ -139,9 +91,9 @@ async fn servidor_com(database: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
 /// um par que o servidor derruba no meio da conversa.
 #[allow(dead_code, reason = "a ponta é segurada, não lida — ver o doc acima")]
 struct Par {
-    conexao: quinn::Connection,
-    envio: quinn::SendStream,
-    recebe: quinn::RecvStream,
+    conexao: seele_enlace::Conexao,
+    envio: seele_enlace::Envio,
+    recebe: seele_enlace::Recebe,
     /// O que o servidor atribuiu a esta conexão. Nunca escolhido pelo cliente.
     ssrc: Ssrc,
     /// A primeira sala de voz que este par pode ver.
@@ -153,30 +105,19 @@ struct Par {
 /// `janela` é a janela de recepção de fluxo que este par anuncia. Uma janela
 /// pequena não cria o defeito: só encurta o tempo até o par parar de aceitar
 /// bytes, que é a condição do cenário.
-async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-
-    let mut tls = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
-        .with_no_client_auth();
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-
-    let mut config = quinn::ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
-    ));
-    let mut transporte = quinn::TransportConfig::default();
-    transporte.stream_receive_window(janela.into());
-    config.transport_config(Arc::new(transporte));
-
-    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
-    ponta.set_default_client_config(config);
-    let conexao = ponta.connect(endereco, "localhost")?.await?;
-    // A ponta é dona do socket; sem isto ela cai no fim desta função.
+async fn abrir(endereco: SocketAddr, semente: u8, _janela: u32) -> Result<Par> {
+    // Na 0.17 não há janela de fluxo a anunciar: o enlace guarda até 1 MiB
+    // por canal e corta quem estoura (`seele_enlace::CORTE_FILA`). O
+    // parâmetro fica pela forma dos chamadores.
+    let comum::Ligado {
+        ponta,
+        conexao,
+        mut envio,
+        mut recebe,
+    } = comum::ligar(endereco).await?;
+    // A ponta é dona do socket; sem isto ela cai no fim desta função e leva a
+    // conexão junto.
     std::mem::forget(ponta);
-
-    let (mut envio, mut recebe) = conexao.open_bi().await?;
     let chave = SigningKey::from_bytes(&[semente; 32]);
     frame::write(
         &mut envio,
@@ -200,7 +141,7 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
         &mut envio,
         &ClientMessage::Response {
             proof: chave
-                .sign(&prova_amarrada(&conexao, &nonce))
+                .sign(&comum::prova_amarrada(&conexao, &nonce))
                 .to_bytes()
                 .to_vec(),
         },
@@ -243,31 +184,9 @@ fn quadro(ssrc: Ssrc, seq: u16) -> Vec<u8> {
     fora
 }
 
-/// A conversa ensina o cano, e o número chega ao portão e ao disco.
-///
-/// # O que cada asserção prende
-///
-/// **A primeira** é a costura de leitura: os contadores por conexão do `quinn`,
-/// somados na `Subida`, atravessaram uma janela cheia e moveram a estimativa
-/// acima da hipótese. Sem o braço do piso demonstrado ela não sai de
-/// `CAMINHO_DO_SERVER_BPS`, porque `permitido_bps` é zero sem tela.
-///
-/// **A segunda** é a costura de escrita: o mesmo número está no banco, pronto
-/// para o arranque seguinte não tatear de novo.
-///
-/// **E o portão?** `session.rs` avisa as salas e grava no disco **no mesmo
-/// bloco**, sob o mesmo `if let Some(bps)`. Provar que o disco recebeu prova
-/// que o bloco correu com um número de verdade; que a sala reage a ele é o que
-/// `a_sala_que_nasce_depois_da_medida_nasce_com_ela` afirma, em unidade. As
-/// duas juntas fecham a corrente, e esta linha existe para dizer qual metade é
-/// de quem — em vez de este teste fingir provar as duas.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_conversa_ensina_o_cano_e_a_medida_chega_ao_portao_e_ao_disco() -> Result<()> {
-    let (endereco, servidor) = server().await?;
-
-    // Quatro pares na mesma sala. O servidor copia o quadro de cada um para os
-    // outros três, então o que sai desta máquina é doze vezes o que entra — é
-    // essa multiplicação que enche o cano, e é a mesma do §5.1.
+/// Uma sala de quatro conversando por três segundos, como o teste de antes da
+/// 0.17 a montava: o que sai desta máquina é doze vezes o que entra.
+async fn conversar(endereco: SocketAddr) -> Result<Vec<Par>> {
     let mut pares = Vec::new();
     for semente in 1..=4_u8 {
         let mut par = abrir(endereco, semente, 1024 * 1024).await?;
@@ -283,15 +202,11 @@ async fn a_conversa_ensina_o_cano_e_a_medida_chega_ao_portao_e_ao_disco() -> Res
         pares.push(par);
     }
     tokio::time::sleep(Duration::from_millis(300)).await;
-
-    // Vinte milissegundos entre um quadro e o seguinte: o ritmo de um microfone
-    // de verdade, sob o teto que o `taxa::Vigia` aplica. Três segundos são
-    // janela mais que suficiente — a da `Subida` dura um.
     let mut falando = Vec::new();
     for par in pares {
         falando.push(tokio::spawn(async move {
             for seq in 0..150_u16 {
-                let _ = par.conexao.send_datagram(quadro(par.ssrc, seq).into());
+                let _ = par.conexao.send_datagram(quadro(par.ssrc, seq));
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
             par
@@ -301,134 +216,115 @@ async fn a_conversa_ensina_o_cano_e_a_medida_chega_ao_portao_e_ao_disco() -> Res
     for quem in falando {
         pares.push(quem.await?);
     }
+    Ok(pares)
+}
 
-    let medida = servidor.server().subida.lock().await.medida();
-    println!("subida medida: {medida:?}");
-    let medida = medida.expect(
-        "a sala inteira conversou por três segundos e o servidor continua sem medida nenhuma: \
-         a janela cheia por voz não chegou à sonda",
-    );
+/// **Na 0.17, a conversa enche o cano e o servidor não finge ter medido**
+/// (revisão do Codex; `tela::LeituraDaConexao`).
+///
+/// Até a 0.16 este teste provava a costura inteira — os contadores do `quinn`
+/// viravam uma medida, que chegava ao portão e ao disco. O enlace não mede
+/// perda nem congestionamento, e a sonda decide subir pela ausência deles: com
+/// o zero sintético, a conversa «provaria» uma subida que ninguém mediu.
+///
+/// A costura continua sendo provada, agora no sentido honesto: as janelas
+/// chegaram à sonda (contadas em `janelas_sem_medida`), a estimativa ficou na
+/// de partida, nada foi anunciado como medido e nada foi ao disco. Quando o
+/// enlace medir perda (pedido ao A), a sonda volta a subir, e este teste volta
+/// a ser o de antes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_conversa_sem_medida_de_perda_nao_vira_medida_nem_vai_ao_disco() -> Result<()> {
+    let (endereco, servidor) = server().await?;
+    let pares = conversar(endereco).await?;
+
+    let (medida, estimativa, sem_medida) = {
+        let subida = servidor.server().subida.lock().await;
+        (
+            subida.medida(),
+            subida.estimativa(),
+            subida.janelas_sem_medida(),
+        )
+    };
+    println!("subida medida: {medida:?}, estimativa {estimativa}, janelas sem medida {sem_medida}");
     assert!(
-        medida > seele_server::tela::CAMINHO_DO_SERVER_BPS,
-        "a conversa encheu o cano e a estimativa ficou na hipótese de {} bps (mediu {medida}): \
-         a primeira tela desta call ainda vai abrir tateando",
-        seele_server::tela::CAMINHO_DO_SERVER_BPS
+        sem_medida > 0,
+        "a sala conversou por três segundos e nenhuma janela chegou à sonda: a costura de \
+         leitura do tique de telemetria está cortada"
     );
-
+    assert_eq!(
+        medida, None,
+        "sem medida de perda, a subida foi anunciada como medida"
+    );
+    assert_eq!(estimativa, seele_server::tela::CAMINHO_DO_SERVER_BPS);
     let guardada = {
         let banco = servidor.server().persistence.lock().await;
         seele_server::persistence::subida::lembrada(&banco)?
     };
-    assert_eq!(
-        guardada,
-        Some(medida),
-        "a subida foi medida e não foi guardada: o próximo arranque recomeça na hipótese"
-    );
+    assert_eq!(guardada, None, "uma subida não medida foi ao disco");
 
-    // Sem isto os pares caem antes do servidor e o desligamento vira corrida.
     drop(pares);
     servidor.shutdown();
     Ok(())
 }
 
-/// O segundo arranque começa onde o primeiro parou.
+/// **O segundo arranque começa da memória que vale aqui**, e não de qualquer
+/// número guardado.
 ///
-/// # A afirmação que faltava
-///
-/// `persistence::subida` prova a ida e a volta num banco **em memória**, e o
-/// teste acima prova que a medida chega ao disco — dentro de um arranque só.
-/// Nenhum dos dois prova a frase que a onda vende: *«a medida sobrevive ao
-/// reinício»*. Entre eles cabia um servidor que grava direito, fecha, sobe de novo
-/// e ignora o que gravou — e o sintoma seria o tateio de catorze segundos
-/// voltando em silêncio, na primeira tela de todo arranque, que é exatamente o
-/// defeito que ninguém relata porque parece normal.
-///
-/// Aqui o banco é um arquivo, o primeiro servidor morre, e o segundo nasce sobre o
-/// mesmo arquivo.
+/// A medida da mesma rede, recente e da linha 2 sobrevive ao reinício (era a
+/// afirmação deste teste até a 0.16), grampeada no teto da memória. A que a
+/// 0.16 deixou — só o número, sem dizer onde nem quando — não dá confiança
+/// nenhuma ao caminho de agora: o servidor nasce na hipótese.
 #[tokio::test(flavor = "multi_thread")]
-async fn o_segundo_arranque_comeca_onde_o_primeiro_parou() -> Result<()> {
-    let diretorio = tempfile::tempdir()?;
-    let banco = diretorio.path().join("seele.db");
-
-    // Primeiro arranque: a conversa ensina o cano.
-    let medida = {
-        let (endereco, servidor) = servidor_com(Location::File(banco.clone())).await?;
-        let mut pares = Vec::new();
-        for semente in 1..=4_u8 {
-            let mut par = abrir(endereco, semente, 1024 * 1024).await?;
-            let sala = par.sala;
-            frame::write(
-                &mut par.envio,
-                &ClientMessage::EnterVoiceRoom {
-                    voice_room: sala,
-                    password: None,
-                },
-            )
-            .await?;
-            pares.push(par);
-        }
-        tokio::time::sleep(Duration::from_millis(300)).await;
-
-        let mut falando = Vec::new();
-        for par in pares {
-            falando.push(tokio::spawn(async move {
-                for seq in 0..150_u16 {
-                    let _ = par.conexao.send_datagram(quadro(par.ssrc, seq).into());
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                par
-            }));
-        }
-        let mut pares = Vec::new();
-        for quem in falando {
-            pares.push(quem.await?);
-        }
-
-        let medida = servidor
-            .server()
-            .subida
-            .lock()
-            .await
-            .medida()
-            .expect("o primeiro arranque não mediu nada");
-        drop(pares);
-        servidor.shutdown();
-        servidor.wait_idle().await;
-        medida
+async fn o_segundo_arranque_comeca_da_memoria_que_vale_aqui() -> Result<()> {
+    use seele_server::persistence::subida::{
+        agora, lembrar, rede_de_agora, Contexto, CHAVE, TETO_DA_MEMORIA_BPS,
     };
-    println!("o primeiro arranque mediu {medida} bps");
+    let diretorio = tempfile::tempdir()?;
 
-    // Segundo arranque, sobre o mesmo arquivo, sem ninguém conversando.
+    // A memória desta rede, de agora: vale, com teto.
+    let banco = diretorio.path().join("seele.db");
+    {
+        let persistence =
+            seele_server::persistence::Persistence::open(&Location::File(banco.clone()))?;
+        lembrar(
+            &persistence,
+            3_000_000,
+            &Contexto {
+                medida_em: agora(),
+                rede: rede_de_agora(),
+            },
+        )?;
+    }
     let (_, servidor) = servidor_com(Location::File(banco)).await?;
     let ao_nascer = servidor.server().subida.lock().await.medida();
+    servidor.shutdown();
+    servidor.wait_idle().await;
+    if rede_de_agora().is_some() {
+        assert_eq!(
+            ao_nascer,
+            Some(3_000_000_u32.min(TETO_DA_MEMORIA_BPS)),
+            "o servidor reabriu o mesmo banco e ignorou a medida desta rede"
+        );
+    } else {
+        // Sem rede de casa conhecida, nenhuma memória vale: o lado seguro.
+        assert_eq!(ao_nascer, None);
+    }
+
+    // O que a 0.16 deixou: o número, sem contexto. Não vale.
+    let da_016 = diretorio.path().join("da-0.16.db");
+    drop(seele_server::persistence::Persistence::open(
+        &Location::File(da_016.clone()),
+    )?);
+    rusqlite::Connection::open(&da_016)?.execute(
+        "INSERT INTO configuracao (chave, valor) VALUES (?1, 90000000)",
+        [CHAVE],
+    )?;
+    let (_, servidor) = servidor_com(Location::File(da_016)).await?;
     assert_eq!(
-        ao_nascer,
-        Some(medida),
-        "o servidor reabriu o mesmo banco e nasceu sem medida nenhuma: a primeira \
-         tela deste arranque vai tatear de novo o que ontem já se sabia"
+        servidor.server().subida.lock().await.medida(),
+        None,
+        "a memória sem contexto da 0.16 virou confiança no caminho de agora"
     );
     servidor.shutdown();
     Ok(())
-}
-
-/// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
-/// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
-/// Desde o Servidor 1.0, o nonce cru não entra mais.
-fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
-    let cadeia = conexao
-        .peer_identity()
-        .and_then(|identidade| {
-            identidade
-                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
-                .ok()
-        })
-        .expect("o TLS sempre entrega a cadeia do servidor");
-    let impressao = seele_proto::transport::certificate_digest(
-        cadeia
-            .first()
-            .expect("a cadeia tem um certificado")
-            .as_ref(),
-    );
-    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
-    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

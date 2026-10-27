@@ -73,17 +73,16 @@ pub struct EstadoDoServidor {
     pub sessoes_com_desconhecidas: u64,
 }
 
-/// O link do navegador de um convite, e até quando ele abre
-/// ([`Hospedagem::link_do_navegador`], D-web-6).
+/// O link do navegador de um convite ([`Hospedagem::link_do_navegador`]).
+///
+/// **Sem `wh=` e sem `ate=` desde a 0.17**: o navegador confere o
+/// `a=fingerprint` do DTLS contra o `fp=` do convite, que não vence. Um link
+/// feito hoje abre enquanto o servidor tiver a mesma identidade.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkDoNavegador {
-    /// O link na origem do navegador (`ORIGEM_DO_NAVEGADOR`), com o `wh=` e o `ate=`.
+    /// O link na origem do navegador (`ORIGEM_DO_NAVEGADOR`), com o `v=` da
+    /// linha 2 e o bilhete do degrau 4, quando houver.
     pub link: String,
-    /// Até quando ele abre, em segundos Unix UTC: o `ate=` que vai nele.
-    pub ate: u64,
-    /// Quando um link feito de novo passa a durar mais, em segundos Unix UTC: é
-    /// quando a casca pede outro.
-    pub renova: u64,
     /// Quem de fora entra por ele ([`alcance_do_navegador`]).
     pub alcance: AlcanceDoNavegador,
 }
@@ -102,8 +101,9 @@ pub enum AlcanceDoNavegador {
     /// Endereço próprio, ou porta aberta no roteador: entra de qualquer rede,
     /// como pelo app.
     Alcanca,
-    /// Só o ponto de encontro abriu o caminho: pelo app, quem tem o link entra
-    /// de fora; pelo navegador, só quem está na mesma rede.
+    /// Só o ponto de encontro abriu o caminho. Desde a 0.17 o navegador também
+    /// passa por ele (o `CHAMA` pelo `POST /sinal/1`), como o app; **nenhum dos
+    /// dois foi medido num NAT real**, e com NAT simétrico não fura.
     SoPeloEncontro,
     /// Nem o app passa da rede de casa (ou da VPN): os dois links são locais.
     SoNaRede,
@@ -132,7 +132,9 @@ pub fn alcance_do_navegador(degrau: Option<crate::alcance::Degrau>) -> AlcanceDo
     match degrau {
         Some(Degrau::EnderecoDireto | Degrau::PortaNoRoteador) => AlcanceDoNavegador::Alcanca,
         Some(Degrau::FuroDeNat) => AlcanceDoNavegador::SoPeloEncontro,
-        Some(Degrau::RedeLocalOuVpn | Degrau::SoRedeLocal) => AlcanceDoNavegador::SoNaRede,
+        Some(Degrau::RedeLocalOuVpn | Degrau::SoRedeLocal | Degrau::SoEstaMaquina) => {
+            AlcanceDoNavegador::SoNaRede
+        }
         Some(Degrau::Ipv6Direto) | None => AlcanceDoNavegador::NaoSeSabe,
     }
 }
@@ -144,9 +146,9 @@ pub enum SemLinkDoNavegador {
     ConviteInvalido,
     /// O convite leva a impressão de outro servidor.
     OutroServidor,
-    /// O servidor não apresenta certificado curto agora: a sala pessoal, ou um
-    /// servidor no ar há mais tempo que as janelas que ele gerou ao subir.
-    SemJanelas,
+    /// A sala pessoal: ela é achada pelo código, e não por um link do
+    /// navegador.
+    SalaPessoal,
 }
 
 /// Um servidor rodando dentro deste processo.
@@ -224,8 +226,8 @@ impl Hospedagem {
         Self::subir(
             config_guardada(porta, banco, nome, pasta_dos_mods),
             antes_de_aceitar,
-            |socket, impressao, _| {
-                crate::alcance::encontro::Convocacao::do_ambiente(socket, impressao)
+            |pelo, impressao, escuta| {
+                crate::alcance::encontro::Convocacao::do_ambiente(pelo, impressao, escuta)
             },
         )
         .await
@@ -257,8 +259,8 @@ impl Hospedagem {
         Self::subir(
             config_guardada(porta, banco, nome, pasta_dos_mods),
             antes_de_aceitar,
-            |socket, impressao, _| {
-                crate::alcance::encontro::Convocacao::com_o_ponto_padrao(socket, impressao)
+            |pelo, impressao, escuta| {
+                crate::alcance::encontro::Convocacao::com_o_ponto_padrao(pelo, impressao, escuta)
             },
         )
         .await
@@ -296,6 +298,46 @@ impl Hospedagem {
         apelido: &str,
         ponto: Option<String>,
     ) -> Result<Self> {
+        Self::subir_sala(porta, semente, apelido, ponto, false).await
+    }
+
+    /// **O modo local** (E9) de [`Self::iniciar`]: só loopback (`127.0.0.1`),
+    /// e **sem escada** — nenhum UPnP, PCP nem ponto de encontro, nem com
+    /// `$SEELE_ENCONTRO`. O alcance é [`crate::alcance::Degrau::SoEstaMaquina`].
+    /// Para as provas e a build de teste do app; nunca o padrão do produto.
+    ///
+    /// # Errors
+    ///
+    /// Os mesmos de [`Self::iniciar`].
+    pub async fn iniciar_local(
+        porta: u16,
+        banco: Location,
+        nome: &str,
+        pasta_dos_mods: Option<crate::RaizesDosMods>,
+        antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
+    ) -> Result<Self> {
+        let mut config = config_guardada(porta, banco, nome, pasta_dos_mods);
+        config.modo_local = true;
+        Self::subir(config, antes_de_aceitar, |_, _, _| None).await
+    }
+
+    /// **O modo local** (E9) da sala pessoal: só loopback, sem escada e sem
+    /// registro no ponto de encontro.
+    ///
+    /// # Errors
+    ///
+    /// Os mesmos de [`Self::iniciar_sala`].
+    pub async fn iniciar_sala_local(porta: u16, semente: &[u8; 32], apelido: &str) -> Result<Self> {
+        Self::subir_sala(porta, semente, apelido, None, true).await
+    }
+
+    async fn subir_sala(
+        porta: u16,
+        semente: &[u8; 32],
+        apelido: &str,
+        ponto: Option<String>,
+        modo_local: bool,
+    ) -> Result<Self> {
         let pessoa = ed25519_dalek::SigningKey::from_bytes(semente);
         let dono = pessoa.verifying_key().to_bytes();
         let config = ServerConfig {
@@ -306,19 +348,26 @@ impl Hospedagem {
             identidade: Some(crate::tls::Identity::da_semente(semente)?),
             voice_room_limit: u16::try_from(crate::campainha::TETO_DA_LIGACAO).unwrap_or(u16::MAX),
             sala: Some(crate::recepcao::Sala::de(dono)),
+            modo_local,
             ..ServerConfig::default()
         };
         let apelido = apelido.to_owned();
         Self::subir(
             config,
             move |persistence| {
+                // A dona da sala é a proprietária (ADR 0064): declarada pela
+                // máquina, antes de a conta existir e antes de aceitar.
+                crate::cargos::declarar_proprietario(
+                    persistence,
+                    &seele_proto::transport::key_fingerprint(&dono),
+                )?;
                 crate::permissions::Permissions::new(persistence)
                     .register_or_find(&dono, &apelido)
                     .map(|_| ())
             },
-            move |socket, _, escuta| {
+            move |pelo, _, escuta| {
                 ponto.map(|ponto| {
-                    crate::alcance::encontro::Convocacao::para_sala(socket, escuta, pessoa, ponto)
+                    crate::alcance::encontro::Convocacao::para_sala(pelo, escuta, pessoa, ponto)
                 })
             },
         )
@@ -338,7 +387,7 @@ impl Hospedagem {
         config: ServerConfig,
         antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
         convocar: impl FnOnce(
-            Arc<std::net::UdpSocket>,
+            crate::alcance::encontro::PeloServidor,
             &str,
             crate::alcance::Escuta,
         ) -> Option<crate::alcance::encontro::Convocacao>,
@@ -369,29 +418,41 @@ impl Hospedagem {
         // O degrau 4 vai junto, e ele é opcional em três sentidos: só é tentado
         // se os degraus de cima não resolveram, só existe se houver ponto (o do
         // ambiente, ou o do projeto em `iniciar_com_o_ponto_padrao`), e só
-        // funciona com o socket do próprio servidor — sem ele não há furo
-        // possível, e o degrau simplesmente não acontece.
+        // funciona com o socket do próprio servidor (a ponta do enlace, que lê e
+        // escreve o ENC/3 na mesma porta do WebRTC).
         //
         // Custa até `alcance::encontro::PRAZO` a mais, e só no caminho que hoje
         // termina em "só funciona na sua rede".
-        let escuta = crate::alcance::Escuta::nova(endereco.port(), server.pilha());
-        let convocacao = server
-            .espelho()
-            .and_then(|socket| convocar(socket, server.fingerprint(), escuta));
-        // A segunda parede, só nos testes: um teste que chega aqui com o ponto
-        // de produção — o ambiente apontando a VPS, ou
-        // `iniciar_com_o_ponto_padrao` sem ambiente — reprova antes da escada,
-        // em qualquer máquina, e não só numa sem IPv4 global, que é onde o
-        // degrau 4 é tentado. Fora deles, nada. Ver
-        // `crate::alcance::encontro::recusar_a_producao`.
-        if let Some(convocacao) = &convocacao {
-            crate::alcance::encontro::recusar_a_producao(
-                &convocacao.ponto,
-                "Hospedagem::iniciar, antes da escada",
-            );
-        }
-        let escada = crate::alcance::Escada::subir(escuta, convocacao).await;
-        tracing::info!(alcance = ?escada.alcance(), "escada do ADR 0022 subida");
+        // **O modo local** (E9): só loopback, e a escada não sobe — nenhum
+        // UPnP, PCP nem ponto de encontro. Nem a convocação é montada.
+        let escada = if server.modo_local() {
+            tracing::info!(%endereco, "modo local: sem escada");
+            crate::alcance::Escada::so_esta_maquina(endereco)
+        } else {
+            let escuta = crate::alcance::Escuta::nova(endereco.port(), server.pilha());
+            let convocacao = server.mensagens_enc().and_then(|enc| {
+                let pelo = crate::alcance::encontro::PeloServidor {
+                    ponta: server.ponta(),
+                    enc,
+                };
+                convocar(pelo, server.fingerprint(), escuta)
+            });
+            // A segunda parede, só nos testes: um teste que chega aqui com o ponto
+            // de produção — o ambiente apontando a VPS, ou
+            // `iniciar_com_o_ponto_padrao` sem ambiente — reprova antes da escada,
+            // em qualquer máquina, e não só numa sem IPv4 global, que é onde o
+            // degrau 4 é tentado. Fora deles, nada. Ver
+            // `crate::alcance::encontro::recusar_a_producao`.
+            if let Some(convocacao) = &convocacao {
+                crate::alcance::encontro::recusar_a_producao(
+                    &convocacao.ponto,
+                    "Hospedagem::iniciar, antes da escada",
+                );
+            }
+            let escada = crate::alcance::Escada::subir(escuta, convocacao).await;
+            tracing::info!(alcance = ?escada.alcance(), "escada do ADR 0022 subida");
+            escada
+        };
 
         // O laço de aceitação numa tarefa própria: quem chamou tem interface
         // para desenhar, e o `run` só volta quando o servidor acaba.
@@ -622,29 +683,25 @@ impl Hospedagem {
         }
     }
 
-    /// **O link do navegador de um convite deste servidor** (D-web-6): o mesmo
-    /// convite, na forma que o web app abre (`Convite::link_do_navegador`), com
-    /// os hashes dos certificados curtos que este servidor apresenta de agora em
-    /// diante ([`crate::tls::janelas_do_link`]).
+    /// **O link do navegador de um convite deste servidor**: o mesmo convite,
+    /// na forma que o web app abre (`Convite::link_do_navegador`).
     ///
     /// Recebe o convite que a casca mostra, e não monta outro: com um convite
     /// de uso único, o link do navegador leva **o mesmo** token, e com um nome
-    /// público, o mesmo nome. Duas construções do mesmo convite é uma que vai
-    /// ficar para trás, como o comentário de [`Self::convite`] já dizia.
-    ///
-    /// `agora` em segundos Unix UTC. É argumento, e não o relógio daqui, para a
-    /// casca e a bancada pedirem o mesmo link pelo mesmo caminho.
+    /// público, o mesmo nome. Leva o `v=` da linha 2 (sempre: o convite que
+    /// [`Self::convite`] monta o escreve, e um convite colado sem ele ganha
+    /// aqui) e o bilhete do degrau 4, que é por onde o navegador chama pelo
+    /// `/sinal/1`. **Não leva `wh=` nem `ate=`**: os certificados curtos da 0.16
+    /// não existem mais.
     ///
     /// # Errors
     ///
-    /// [`SemLinkDoNavegador`]: um convite que não se lê, um de outro servidor
-    /// (os hashes daqui num convite de lá não abririam nada), e um servidor sem
-    /// a janela de agora.
-    pub fn link_do_navegador(
-        &self,
-        convite: &str,
-        agora: u64,
-    ) -> Result<LinkDoNavegador, SemLinkDoNavegador> {
+    /// [`SemLinkDoNavegador`]: um convite que não se lê, um de outro servidor,
+    /// ou a sala pessoal.
+    pub fn link_do_navegador(&self, convite: &str) -> Result<LinkDoNavegador, SemLinkDoNavegador> {
+        if self.recepcao().is_some() {
+            return Err(SemLinkDoNavegador::SalaPessoal);
+        }
         let convite =
             seele_proto::uri::analisar(convite).map_err(|_| SemLinkDoNavegador::ConviteInvalido)?;
         let deste = convite
@@ -654,15 +711,12 @@ impl Hospedagem {
         if !deste {
             return Err(SemLinkDoNavegador::OutroServidor);
         }
-        let janelas = crate::tls::janelas_do_link(self.server.janelas_do_navegador(), agora)
-            .ok_or(SemLinkDoNavegador::SemJanelas)?;
+        let convite = convite.com_versao(seele_proto::version::VERSAO_DO_SERVIDOR);
         let link = convite
-            .link_do_navegador(&janelas.hashes, Some(janelas.ate))
+            .link_do_navegador()
             .map_err(|_| SemLinkDoNavegador::ConviteInvalido)?;
         Ok(LinkDoNavegador {
             link,
-            ate: janelas.ate,
-            renova: janelas.renova,
             alcance: alcance_do_navegador(self.alcance().map(crate::alcance::Alcance::degrau)),
         })
     }
@@ -858,6 +912,64 @@ mod o_alcance_do_navegador {
 mod tests {
     use super::*;
 
+    /// **O modo local (E9): só loopback, e a escada não sobe.** Com o ponto
+    /// de encontro **pedido** pelo ambiente (um endereço de documentação, que
+    /// nunca responde), nem o guardado nem a sala tentam UPnP, PCP ou o ponto:
+    /// o contador de `Escada::subir` fica em zero, o bind é `127.0.0.1`, e o
+    /// alcance é `SoEstaMaquina`. A prova por reversão é a metade de controle:
+    /// o mesmo ambiente pelo `iniciar` de sempre sobe a escada uma vez.
+    #[tokio::test(flavor = "current_thread")]
+    async fn o_modo_local_so_atende_em_loopback_e_nao_sobe_a_escada() {
+        use crate::alcance::{Degrau, SUBIDAS_DA_ESCADA};
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.pedir("192.0.2.1:8384");
+        let antes = SUBIDAS_DA_ESCADA.with(std::cell::Cell::get);
+
+        let guardado = Hospedagem::iniciar_local(0, Location::Memory, "Casa", None, |_| Ok(()))
+            .await
+            .expect("o guardado local");
+        let sala = Hospedagem::iniciar_sala_local(0, &[4; 32], "dona")
+            .await
+            .expect("a sala local");
+        assert_eq!(
+            SUBIDAS_DA_ESCADA.with(std::cell::Cell::get),
+            antes,
+            "o modo local subiu a escada: UPnP, PCP ou o ponto de encontro foram tentados"
+        );
+        for hospedagem in [&guardado, &sala] {
+            assert!(
+                hospedagem.endereco().ip().is_loopback(),
+                "o modo local atende em {}",
+                hospedagem.endereco()
+            );
+            assert_eq!(
+                hospedagem.alcance().map(crate::alcance::Alcance::degrau),
+                Some(Degrau::SoEstaMaquina)
+            );
+            assert!(hospedagem.registro_no_quarto().is_none());
+            let convite = seele_proto::uri::analisar(&hospedagem.convite()).expect("o convite");
+            assert!(
+                convite.bilhete.is_none(),
+                "o convite do modo local tem bilhete"
+            );
+            assert_eq!(convite.alvo, hospedagem.endereco().to_string());
+        }
+        guardado.encerrar().await;
+        sala.encerrar().await;
+
+        // O controle: sem o modo, o mesmo ambiente sobe a escada.
+        let sempre = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
+            .await
+            .expect("o guardado de sempre");
+        assert_eq!(
+            SUBIDAS_DA_ESCADA.with(std::cell::Cell::get),
+            antes + 1,
+            "o contador não conta a escada: este teste não mede nada"
+        );
+        sempre.encerrar().await;
+        drop(ambiente);
+    }
+
     /// A sala que fecha diz o resumo da campainha no log, pelas duas
     /// despedidas, e um servidor guardado não diz nada (tarefa 31 da F7).
     #[tokio::test]
@@ -1002,12 +1114,13 @@ mod tests {
     }
 
     /// **O link diz a versão do servidor**, e não a do app (spec-mestre da
-    /// 0.16, §3, item 22): `v=1.0`, de `VERSAO_DO_SERVIDOR`.
+    /// 0.16, §3, item 22): `v=2.0` na 0.17, de `VERSAO_DO_SERVIDOR`. É por
+    /// ele que uma 0.16 que recebe o link sabe que é outra linha.
     ///
     /// Até a 0.15 o `v=` era o carimbo da build do app, e um build sem carimbo
     /// não punha nada. Com as duas numerações, quem recebe o link precisa saber
     /// **que servidor** vai encontrar, e isso é fato do protocolo, que todo
-    /// build sabe: um build feito à mão também anuncia o Servidor 1.0.
+    /// build sabe: um build feito à mão também anuncia o Servidor 2.0.
     #[tokio::test]
     async fn o_link_anuncia_a_versao_do_servidor() {
         // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
@@ -1023,8 +1136,18 @@ mod tests {
             Some(seele_proto::version::VERSAO_DO_SERVIDOR),
             "o link não anuncia a versão do servidor: {link}"
         );
-        assert!(link.contains("v=1.0"), "{link}");
-        // E os links derivados levam o mesmo.
+        assert!(link.contains("v=2.0"), "{link}");
+        // E os links derivados levam o mesmo, inclusive o do navegador, que
+        // não leva mais `wh=` nem `ate=` (os curtos da 0.16 saíram).
+        let do_navegador = hospedagem
+            .link_do_navegador(&link)
+            .expect("link do navegador");
+        assert!(do_navegador.link.contains("v=2.0"), "{}", do_navegador.link);
+        assert!(
+            !do_navegador.link.contains("wh=") && !do_navegador.link.contains("ate="),
+            "{}",
+            do_navegador.link
+        );
         for derivado in [
             hospedagem.convite_com_nome(Some("casa.exemplo")),
             hospedagem.convite_com_token("a".repeat(43).as_str()),
@@ -1249,7 +1372,7 @@ mod tests {
     /// ponto padrão, a convocação seria nenhuma, não haveria pânico, e o teste
     /// reprovaria — quem hospeda pelo app perderia o degrau 4 em silêncio.
     #[tokio::test]
-    #[should_panic(expected = "(«encontro.seele.app.br», pego em Hospedagem::iniciar")]
+    #[should_panic(expected = "(«rendzvous.seele.sh», pego em Hospedagem::iniciar")]
     async fn iniciar_com_o_ponto_padrao_leva_o_ponto_do_projeto_a_escada() {
         let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
         ambiente.tirar();

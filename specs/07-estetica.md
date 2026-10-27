@@ -168,6 +168,19 @@ superfície de MOD o alcança.
 O contrato está em `api/v4.json`, e a validação em
 `apps/seele-app/ui/mods-estilos.js`. Ver ADR 0052.
 
+### Estado em palavra, e o vermelho guardado (0.17)
+
+As telas novas da 0.17 seguem a regra de sempre e a dizem aqui para a próxima:
+
+- **um estado se escreve**, e a cor só o acompanha: NADA A FAZER (fósforo), LEIA
+  ANTES (azul), RESOLVA ANTES (laranja) na tela de antes de hospedar; VOZ, AQUI,
+  NO AR e o número das não lidas nas placas da trilha;
+- **o vermelho continua só para erro e queda**: uma decisão pendente (um MOD que
+  impede de subir, uma atualização que muda a versão do servidor) é laranja. A
+  única placa vermelha da trilha é a da sessão encerrada;
+- **a confirmação de confiança fica por cima de tudo** que um MOD desenha
+  (z-index 80), como a moderação e o aviso antes de atualizar.
+
 ## Movimento
 
 Só a sequência de boot é generosa. No resto, movimento é diagnóstico: a barra do

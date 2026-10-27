@@ -469,6 +469,10 @@ pub enum Degrau {
     /// **Degrau 1.** Só quem estiver na mesma rede. É o que sempre existiu, e
     /// continua sendo a resposta honesta quando os dois de cima não deram.
     SoRedeLocal,
+    /// **O modo local** (E9): o servidor atende só em loopback, e a escada não
+    /// subiu — nenhum UPnP, PCP nem ponto de encontro. Só quem está nesta
+    /// máquina entra. Ver [`Escada::so_esta_maquina`].
+    SoEstaMaquina,
 }
 
 /// O que um candidato é, e o que ele precisa para funcionar.
@@ -637,6 +641,7 @@ impl Degrau {
             Self::EnderecoDireto => "EnderecoDireto",
             Self::RedeLocalOuVpn => "RedeLocalOuVpn",
             Self::SoRedeLocal => "SoRedeLocal",
+            Self::SoEstaMaquina => "SoEstaMaquina",
         }
     }
 
@@ -935,6 +940,19 @@ impl Alcance {
         }
     }
 
+    /// O alcance do modo local: este endereço de loopback, e ninguém mais.
+    #[must_use]
+    pub fn so_esta_maquina(endereco: SocketAddr) -> Self {
+        Self {
+            alvos: vec![endereco],
+            degrau: Degrau::SoEstaMaquina,
+            encontro_recusado: None,
+            porta_recusada: None,
+            pcp_recusada: None,
+            porta_nao_canonica: None,
+        }
+    }
+
     /// Guarda por que o degrau 4 não deu.
     ///
     /// Separado de [`Alcance::decidir`] porque é informação sobre o caminho, e
@@ -1034,7 +1052,29 @@ impl std::fmt::Debug for Escada {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Quantas vezes a escada subiu nesta linha de execução: o contador dos
+    /// testes do modo local (E9), que prova que nenhum UPnP, PCP nem encontro
+    /// foi tentado. Todo pedido ao roteador e ao ponto de encontro passa por
+    /// [`Escada::subir`].
+    pub(crate) static SUBIDAS_DA_ESCADA: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 impl Escada {
+    /// **A escada que não sobe** (o modo local, E9): o alcance é este
+    /// endereço de loopback, e nada foi pedido a roteador nem a ponto de
+    /// encontro nenhum.
+    #[must_use]
+    pub fn so_esta_maquina(endereco: SocketAddr) -> Self {
+        Self {
+            alcance: Alcance::so_esta_maquina(endereco),
+            porta: None,
+            firewall: None,
+            encontro: None,
+        }
+    }
+
     /// Sobe a escada e para no degrau mais alto que funcionar.
     ///
     /// O degrau mais alto vira a **frase**; os endereços de todos os degraus
@@ -1043,6 +1083,8 @@ impl Escada {
     /// `escuta` é onde o servidor está atendendo **de fato** — porta e famílias.
     /// Nenhum degrau é declarado sem que ela o sirva; ver [`Escuta`].
     pub async fn subir(escuta: Escuta, convocacao: Option<encontro::Convocacao>) -> Self {
+        #[cfg(test)]
+        SUBIDAS_DA_ESCADA.with(|n| n.set(n.get() + 1));
         let achados = descobrir_enderecos();
         // **A sala pessoal** sobe pela mesma escada, e três decisões mudam para
         // ela, todas pela mesma pergunta: o registro sai assinado? Ver
@@ -1607,6 +1649,8 @@ mod testes {
                     .expect("o degrau 3 não deu e ninguém disse por quê");
                 assert!(motivo.len() > 20, "o motivo não explica nada: {motivo}");
             }
+            // Só o modo local o produz, e ele não sobe a escada.
+            Degrau::SoEstaMaquina => panic!("a escada subiu e disse «só esta máquina»"),
         }
 
         escada.descer().await;
@@ -2428,7 +2472,8 @@ mod testes {
                 Degrau::Ipv6Direto
                 | Degrau::EnderecoDireto
                 | Degrau::RedeLocalOuVpn
-                | Degrau::SoRedeLocal => {}
+                | Degrau::SoRedeLocal
+                | Degrau::SoEstaMaquina => {}
             }
         }
 

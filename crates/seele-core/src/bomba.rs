@@ -988,16 +988,24 @@ pub struct Contagem {
 /// `tokio::spawn` — quem escoa vive tanto quanto a transmissão, e o motor do
 /// enlace precisa continuar lendo a conexão enquanto isso.
 ///
-/// É barato: uma [`quinn::Connection`] é um punho de `Arc`.
-#[derive(Debug, Clone)]
+/// É barato: uma `Conexao` do enlace é um punho de `Arc`.
+#[derive(Clone)]
 pub struct Escoadouro {
-    conexao: quinn::Connection,
+    conexao: crate::transporte::Conexao,
+}
+
+impl std::fmt::Debug for Escoadouro {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Escoadouro")
+            .field("conexao", &self.conexao.stable_id())
+            .finish()
+    }
 }
 
 impl Escoadouro {
     /// Um escoadouro sobre esta conexão.
     #[must_use]
-    pub const fn nova(conexao: quinn::Connection) -> Self {
+    pub const fn nova(conexao: crate::transporte::Conexao) -> Self {
         Self { conexao }
     }
 
@@ -1085,7 +1093,7 @@ pub enum EspelhoDaTela<'a> {
 /// [`ErroDeTela`] quando a conexão não abre um fluxo, quando o cabeçalho não
 /// passa em `ScreenHeader::check`, ou quando o fluxo morre no meio de um quadro.
 pub async fn escoar(
-    conexao: &quinn::Connection,
+    conexao: &crate::transporte::Conexao,
     tela: ScreenId,
     fonte: ScreenSource,
     eventos: &mut canal::Receiver<EventoDaBomba>,
@@ -1103,7 +1111,7 @@ pub async fn escoar(
 ///
 /// As mesmas de [`escoar`].
 pub async fn escoar_com_espelho(
-    conexao: &quinn::Connection,
+    conexao: &crate::transporte::Conexao,
     tela: ScreenId,
     fonte: ScreenSource,
     eventos: &mut canal::Receiver<EventoDaBomba>,
@@ -1319,7 +1327,7 @@ pub(crate) mod tests {
     /// bomba parada 35 s antes de armar a dá palavra por palavra. Que a
     /// primeira sessão passou de 30 s na máquina carregada é a única causa
     /// dessa ordem nessa janela, e não foi vista acontecer.
-    pub(crate) async fn par_paciente() -> (quinn::Connection, quinn::Connection) {
+    pub(crate) async fn par_paciente() -> (crate::transporte::Conexao, crate::transporte::Conexao) {
         crate::tela::tests::par_com_ociosidade(OCIOSIDADE).await
     }
 
@@ -1328,7 +1336,7 @@ pub(crate) mod tests {
     /// Se ela acabar, diz quem parou: a tarefa que escoa terminou (com erro,
     /// sem abrir fluxo) ou continua esperando a bomba armar.
     pub(crate) async fn aceitar_com_paciencia(
-        entrada: &quinn::Connection,
+        entrada: &crate::transporte::Conexao,
         escoou: impl Fn() -> bool,
     ) -> Recepcao {
         match tokio::time::timeout(PACIENCIA, Recepcao::aceitar(entrada)).await {

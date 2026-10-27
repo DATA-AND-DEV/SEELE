@@ -9,6 +9,13 @@ publish.workspace = true
 # ADR 0002 and specs/06: the desktop shell sees `seele-ffi`, which sees
 # `seele-core`. Nothing here may reach past it — a Tauri command that names an
 # `ssrc` is protocol knowledge in the shell.
+[features]
+# **Só para a build de teste do CUA** (o ciclo do relato de 25/10): com
+# `SEELE_AUDIO_DE_MENTIRA=1`, a entrada abre o aparelho de mentira do
+# `seele-audio` no lugar do CoreAudio. O `seele-audio` recusa compilar o
+# recurso num build otimizado, e sem ele `audio_de_mentira` é constante.
+aparelho-de-mentira = ["seele-ffi/aparelho-de-mentira"]
+
 [dependencies]
 seele-ffi = { path = "../../crates/seele-ffi" }
 # Exceção nomeada no `cargo xtask check-deps`, pelo motivo que a TUI também
@@ -83,8 +90,10 @@ tauri-plugin-updater = { version = "2.10", default-features = false, features = 
 # `rustls-tls`. Nada de OpenSSL nos dois casos, que é o que o `deny.toml` quer.
 # `rustls-no-provider` e não `rustls`: o segundo escolhe o `aws-lc-rs`, que
 # compila C e assembly, e a árvore já tem o `ring` — que é o que o próprio
-# atualizador usa. Ligar o outro poria duas pilhas de criptografia no binário e
-# um toolchain de C na conta de quem compila para Windows.
+# atualizador usa. Ligar o outro poria dois providers no TLS do processo.
+# (Desde 25/10 o `aws-lc-rs` já entra pelo DTLS do `seele-enlace` — ADR 0063,
+# RUSTSEC-2026-0387 —, e com ele o compilador C no build; o TLS continua no
+# `ring`.)
 #
 # O preço de «no-provider» é que alguém precisa dizer qual é: `main` instala o
 # `ring` como padrão do processo, e o comentário lá explica por que ali.
@@ -137,8 +146,25 @@ seele-lancador = { path = "../../crates/seele-lancador", features = ["fixtures"]
 base64 = "0.22"
 # O ocupante só IPv6 do teste da porta ocupada da sala (pendência 65): o `std`
 # não escolhe o `IPV6_V6ONLY`, e o seu padrão muda de sistema para sistema. Já
-# está na árvore, pelo `seele-server` e pelo `quinn`.
+# está na árvore, pelo `seele-server` e pelo `seele-enlace`.
 socket2 = { workspace = true }
+# O ponto de encontro de quem liga, por casa de teste, e não pela variável de
+# ambiente do processo (`seele_ffi::costura_de_teste`): os testes de ligação do
+# app ligam pelo código, como o produto, sem mexer nos outros testes do mesmo
+# processo. Só nos testes: o resolver 2 não leva a feature ao build do produto.
+seele-ffi = { path = "../../crates/seele-ffi", features = ["costura-de-teste"] }
+# O ponto de encontro em processo do teste de ligação (`ligar::o_cancelar_da_ligacao`):
+# a sala se registra nele e quem liga disca `@CÓDIGO`, como o produto. Só nos
+# testes; a casca de produção continua sem nomear o `seele-proto` (ADR 0002).
+seele-encontro = { path = "../../crates/seele-encontro" }
+# O aparelho de mentira (um tom que abre qualquer portão; nunca o microfone de
+# verdade), para os testes de voz do app pelos comandos dele (`varias_sessoes_testes`:
+# sair do servidor inteiro e voltar). Só nos testes.
+seele-audio = { path = "../../crates/seele-audio", features = ["aparelho-de-mentira"] }
+# Quem ouve, nesses testes: um `Enlace` de outra máquina contando a voz que o
+# servidor encaminha a ele. Só nos testes; a casca continua falando pela FFI.
+seele-core = { path = "../../crates/seele-core" }
+seele-proto = { path = "../../crates/seele-proto" }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -25,6 +25,13 @@
 )]
 
 pub mod aceites;
+/// O aparelho de mentira do `seele-audio` (só de teste), para a casca o ver pela
+/// cadeia app -> ffi -> core -> audio. Só com o recurso; o `seele-audio` recusa
+/// compilá-lo num build otimizado.
+#[cfg(feature = "aparelho-de-mentira")]
+pub mod aparelho_de_mentira {
+    pub use seele_audio::device::mentira::{contagem, id, Contagem};
+}
 pub mod agenda;
 pub mod anexo_no_disco;
 pub use seele_sessao::assento;
@@ -33,6 +40,9 @@ pub use seele_sessao::base64;
 /// A bateria interna mora no `seele-sessao` desde a Tarefa 2.6 da F4: o
 /// navegador volta da queda pela mesma conta (o tempo entra como parâmetro).
 pub use seele_sessao::battery;
+/// Os cargos de cada sessão (ADR 0064), de onde o desktop e o navegador os
+/// leem: o ffi não vê o `seele-proto` (ADR 0002). Linha de registro de F.
+pub use seele_sessao::cargos;
 /// O catálogo de MODs sem a rede: a assinatura, a leitura, o plano e o
 /// conjunto, de onde o desktop e o navegador os leem (Tarefa 2.6 da F4).
 pub use seele_sessao::catalogo;
@@ -83,6 +93,7 @@ pub use seele_sessao::state;
 pub mod tela;
 pub mod teste_de_microfone;
 pub mod tofu;
+pub mod transporte;
 pub mod video;
 pub mod voice;
 

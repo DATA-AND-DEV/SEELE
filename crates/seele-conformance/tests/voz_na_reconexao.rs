@@ -64,13 +64,20 @@ fn raiz() -> PathBuf {
 /// no caminho de conexão, que é onde ele está certo. Um teste que lesse o
 /// arquivo todo reprovaria o código correto, e um que buscasse só a menção
 /// passaria com o braço errado — os dois falham do jeito que não se percebe.
+///
+/// **O braço, e não a primeira menção.** A busca era pela primeira ocorrência
+/// de `Aviso::Reconectado`, e na 0.17 a primeira passou a ser um comentário de
+/// documentação (o do `Carimbo`, «+1 a cada `Aviso::Reconectado`»), milhares
+/// de linhas antes do braço: o recorte ia do comentário até o braço e pegava
+/// um `switch_capture(` legítimo de outro lugar. É o guarda casando com um
+/// comentário, e reprovando código certo. O braço é o padrão
+/// `Aviso::Reconectado {` — a desestruturação —, que nenhum comentário escreve.
 fn braco_da_reconexao(fonte: &str, arquivo: &str) -> String {
-    let Some(inicio) = fonte.find("Aviso::Reconectado") else {
+    const BRACO: &str = "Aviso::Reconectado {";
+    let Some(inicio) = fonte.find(BRACO) else {
         panic!("{arquivo} não trata `Aviso::Reconectado`; se o evento mudou de nome, este teste tem que mudar junto");
     };
-    let resto = fonte
-        .get(inicio + "Aviso::Reconectado".len()..)
-        .unwrap_or("");
+    let resto = fonte.get(inicio + BRACO.len()..).unwrap_or("");
     let fim = resto.find("Aviso::").unwrap_or(resto.len());
     resto.get(..fim).unwrap_or("").to_owned()
 }

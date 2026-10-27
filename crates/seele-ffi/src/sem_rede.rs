@@ -28,6 +28,8 @@ pub(crate) fn shared(apelido: &str) -> Arc<Shared> {
         person_icons_revision: std::sync::atomic::AtomicU64::new(0),
         room: Mutex::new(Room::new()),
         listeners: Mutex::new(Vec::new()),
+        sessao: crate::SessaoId::nova(),
+        geracao: std::sync::atomic::AtomicU64::new(1),
         voice: VozDaSala::nova(false, seele_core::DeviceChoice::default()),
         media: Mutex::new(None),
         nickname: Mutex::new(apelido.into()),
@@ -41,6 +43,7 @@ pub(crate) fn shared(apelido: &str) -> Arc<Shared> {
         pending_weights: Mutex::new(Vec::new()),
         limites_da_tela: Mutex::new(None),
         tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
+        tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
         fontes_de_tela: Mutex::new(Vec::new()),
     })
 }

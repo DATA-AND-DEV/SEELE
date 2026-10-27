@@ -32,7 +32,7 @@ use seele_core::encontro::FalhaAoLocalizar;
 use seele_core::enlace::{Aviso, Enlace};
 use seele_core::{ConnectError, Link, MemoryPinStore, PinStore};
 use seele_proto::codigo::Codigo;
-use seele_proto::encontro::{Marcas, Moro2, Resposta2, Vizinhanca};
+use seele_proto::encontro::{Marcas, Moro2, Resposta3, Vizinhanca};
 use seele_server::alcance::encontro::EstadoDoRegistro;
 use seele_server::alcance::{Escuta, Pilha};
 use seele_server::hospedagem::Hospedagem;
@@ -194,8 +194,11 @@ async fn registrar_com_o_publico_morto(ponto: SocketAddr, dicas: Vec<SocketAddr>
         .duration_since(std::time::UNIX_EPOCH)
         .expect("o relógio anda")
         .as_secs();
+    // Desde a 0.17 a sala registra pelo ENC/3 (`MORO3`, assinado sob o rótulo
+    // dele): um `MORO2` daqui seria uma sala da linha 1, e a chegada desistiria
+    // com `LinhaLegada` — que é o certo para uma sala 0.16, e não esta.
     let assinatura = chave(DONO)
-        .sign(&seele_proto::assinatura::moro2(
+        .sign(&seele_proto::encontro::mensagem_do_moro3(
             &marca, &publica, carimbo, &dicas,
         ))
         .to_bytes();
@@ -208,11 +211,11 @@ async fn registrar_com_o_publico_morto(ponto: SocketAddr, dicas: Vec<SocketAddr>
         cookie: None,
     };
 
-    // O primeiro `MORO2` volta com o cookie deste IP; o segundo, com ele, mora.
+    // O primeiro `MORO3` volta com o cookie deste IP; o segundo, com ele, mora.
     let mut balde = [0_u8; 512];
     for _ in 0..2 {
         fantasma
-            .send_to(&seele_proto::encontro::moro2(&pedido), ponto)
+            .send_to(&seele_proto::encontro::moro3(&pedido), ponto)
             .await
             .expect("o registro não saiu");
         let (lidos, _) =
@@ -220,9 +223,9 @@ async fn registrar_com_o_publico_morto(ponto: SocketAddr, dicas: Vec<SocketAddr>
                 .await
                 .expect("o ponto não respondeu ao registro")
                 .expect("o socket não leu");
-        match seele_proto::encontro::ler_resposta2(balde.get(..lidos).unwrap_or_default()) {
-            Some(Resposta2::Desafio { cookie, .. }) => pedido.cookie = Some(cookie),
-            Some(Resposta2::Morou { .. }) => return,
+        match seele_proto::encontro::ler_resposta3(balde.get(..lidos).unwrap_or_default()) {
+            Some(Resposta3::Desafio { cookie, .. }) => pedido.cookie = Some(cookie),
+            Some(Resposta3::Morou { .. }) => return,
             outra => panic!("o ponto não aceitou o registro: {outra:?}"),
         }
     }

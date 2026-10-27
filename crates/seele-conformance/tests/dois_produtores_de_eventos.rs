@@ -148,9 +148,10 @@ fn mensagens() -> Vec<ServerMessage> {
             icon: Some(vec![0x89, 0x50, 0x4e, 0x47]),
         },
         ServerMessage::Telemetry(Telemetry {
-            rtt_ms: 31.0,
-            jitter_ms: 2.5,
-            loss_fraction: 0.0,
+            // `Option` desde a linha 2: `None` é «não medido», e nunca 0.0.
+            rtt_ms: Some(31.0),
+            jitter_ms: Some(2.5),
+            loss_fraction: Some(0.0),
             subsystems: Vec::new(),
         }),
         ServerMessage::UplinkLoss { fraction: 0.04 },

@@ -47,8 +47,27 @@ async fn main() -> Result<()> {
         }
     }
 
-    let listen: SocketAddr = std::env::args()
-        .nth(1)
+    // `--proprietario <impressão>`: o dono deste servidor (ADR 0064), pela
+    // impressão da chave dele, a mesma que a portaria mostra.
+    let mut proprietario = None;
+    let mut posicionais = Vec::new();
+    let mut resto = argumentos.iter();
+    while let Some(argumento) = resto.next() {
+        if argumento == "--proprietario" {
+            proprietario = Some(
+                resto
+                    .next()
+                    .context("`--proprietario` precisa da impressão da chave do dono")?
+                    .clone(),
+            );
+        } else {
+            posicionais.push(argumento.clone());
+        }
+    }
+
+    let listen: SocketAddr = posicionais
+        .first()
+        .cloned()
         // `[::]` e não `0.0.0.0`: o segundo atende só IPv4, e um servidor que não
         // atende em IPv6 não tem o degrau 2 do ADR 0022 nem quando as duas
         // pontas têm IPv6. Ver `seele_server::alcance`.
@@ -65,6 +84,7 @@ async fn main() -> Result<()> {
         // critério de aceite de M3 — "servidor reiniciado preserva estado e
         // histórico" — só passava nos testes, que pedem arquivo explicitamente.
         database: banco(),
+        proprietario,
         ..seele_server::ServerConfig::default()
     };
 
@@ -205,6 +225,7 @@ fn uso() {
     println!("seeled — o servidor SEELE (um servidor)");
     println!();
     println!("  seeled [endereço]              sobe o servidor (padrão [::]:8383)");
+    println!("  seeled --proprietario <impressão>  declara o dono (a impressão da chave dele)");
     println!("  seeled senha <senha>           exige esta senha para entrar");
     println!("  seeled senha --remover         volta a aceitar qualquer um");
     println!("  seeled convite [para quem]     gera um convite de uso único");

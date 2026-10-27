@@ -2131,8 +2131,10 @@ async function desenharMods() {
  * discordam no dia em que só uma sobe, e esta é usada para dizer a alguém se o
  * problema está no aplicativo ou no pacote.
  */
-const API_DESTE_APLICATIVO = 6;
-const APIS_QUE_ESTE_APLICATIVO_ACEITA = [6];
+// Na 0.17 a API 7 entra (as permissões de MOD dos cargos, ADR 0063), e a 6
+// continua rodando: `seele_proto::mods::{MOD_API_VERSION, APIS_ACEITAS}`.
+const API_DESTE_APLICATIVO = 7;
+const APIS_QUE_ESTE_APLICATIVO_ACEITA = [7, 6];
 
 /** Os pacotes guardados nesta máquina, com tamanho e com quem os exige. */
 async function desenharOCache() {
@@ -2259,15 +2261,15 @@ function linhaDePacoteNoCache(pacote) {
         // roda como sempre rodou.
         : APIS_DO_SERVIDOR_0_15.includes(dele)
           ? `este pacote foi feito para a API ${dele}, que roda no Servidor `
-            + `0.15, e este SEELE roda a ${APIS_QUE_ESTE_APLICATIVO_ACEITA.join(" e ")}. `
-            + "Procure a versão dele para a API 6 no catálogo do servidor, ou "
+            + `0.15, e este SEELE roda as APIs ${[...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort().join(" e ")}. `
+            + "Procure a versão dele para a API 6 ou 7 no catálogo do servidor, ou "
             + "use o Servidor 0.15 pelo launcher, que roda o pacote como está."
           // Uma mais velha que essas, como as do layout antigo, nenhum
           // servidor de hoje roda (lote 58-1, rodada 2): só a versão nova serve.
           : `este pacote foi feito para a API ${dele}, que nenhum servidor de hoje `
-            + `roda: este SEELE roda a ${APIS_QUE_ESTE_APLICATIVO_ACEITA.join(" e ")}, e o `
+            + `roda: este SEELE roda as APIs ${[...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort().join(" e ")}, e o `
             + `Servidor 0.15, as ${APIS_DO_SERVIDOR_0_15_DITAS}. `
-            + "Procure a versão dele para a API 6 no catálogo do servidor.";
+            + "Procure a versão dele para a API 6 ou 7 no catálogo do servidor.";
     texto.append(elemento("span", "mods-recusado", explicacao));
   }
   caixa.append(texto);
@@ -2630,10 +2632,17 @@ async function instalarDoCatalogo(id, versao) {
     // aconteceu, e a frase passa a sair daí. E só este uso reaplica (lote X da
     // F5): é a gestão atualizando um MOD do servidor que esta janela hospeda.
     const reaplicado = await invoke("instalar_mod_do_catalogo", { id, versao, uso: "atualizar" });
+    // **«Instalado, e desligado» também mentia** (P1 da 0.17, combinado com o
+    // hosting-lifecycle): sem servidor no ar, nada foi ligado nem desligado —
+    // o pacote só chegou a esta máquina, e um servidor parado que liga este
+    // MOD continua exigindo a versão que tinha, até a escolha no ANTES DE
+    // HOSPEDAR dele. Com servidor no ar, o MOD só não está ligado nele.
+    const hospedando = reaplicado ? true : Boolean(await invoke("estou_hospedando").catch(() => false));
     resultado = reaplicado
-      ? `${id} ${versao} instalado e aplicado neste servidor. Quem estava dentro ` +
-        `precisa entrar de novo e aceitar — o conjunto mudou.`
-      : `${id} ${versao} instalado, e desligado. Ligue quando quiser que ele valha.`;
+      ? FRASES_DO_CATALOGO.aplicadoAqui(id, versao)
+      : hospedando
+        ? FRASES_DO_CATALOGO.naoLigadoAqui(id, versao)
+        : FRASES_DO_CATALOGO.soNestaMaquina(id, versao);
   } catch (falha) {
     estado.classList.add("mods-recusado");
     estado.textContent = fraseDeErro(falha);
@@ -2769,3 +2778,40 @@ $("mods-modo-desenvolvedor").addEventListener("change", (evento) => {
   ligarModoDeDesenvolvedor(evento.target.checked);
 });
 aplicarModoDeDesenvolvedor(modoDeDesenvolvedorLigado());
+
+// ------------------------------------------------ o foco preso no aceite
+//
+// O aceite de MODs é `aria-modal`: o Tab não sai dele para a tela de trás. Tab no último controle visível volta ao primeiro, Shift+Tab no primeiro
+// vai ao último, e um foco que já está fora é trazido de volta. (A bancada de área útil mediu o Tab saindo do diálogo para a entrada.)
+
+function focaveisDoAceiteDeMods() {
+  const seletor = 'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+  return [...$("mods-aceite").querySelectorAll(seletor)]
+    .filter((e) => !e.disabled && !e.closest("[hidden]") && e.getClientRects().length > 0);
+}
+
+function prenderOFocoDoAceiteDeMods(evento) {
+  if (evento.key !== "Tab" || $("mods-aceite").hidden) return;
+  const raiz = $("mods-aceite");
+  const lista = focaveisDoAceiteDeMods();
+  if (lista.length === 0) {
+    evento.preventDefault();
+    raiz.focus();
+    return;
+  }
+  const primeiro = lista[0];
+  const ultimo = lista[lista.length - 1];
+  const ativo = document.activeElement;
+  if (!raiz.contains(ativo)) {
+    evento.preventDefault();
+    (evento.shiftKey ? ultimo : primeiro).focus();
+  } else if (evento.shiftKey && (ativo === primeiro || ativo === raiz)) {
+    evento.preventDefault();
+    ultimo.focus();
+  } else if (!evento.shiftKey && ativo === ultimo) {
+    evento.preventDefault();
+    primeiro.focus();
+  }
+}
+
+window.addEventListener("keydown", prenderOFocoDoAceiteDeMods);

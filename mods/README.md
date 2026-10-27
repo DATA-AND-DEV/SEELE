@@ -15,4 +15,4 @@ não teria commit próprio a fixar — e o que se publica é sempre o commit que
 avaliado, nunca o que está na árvore de alguém.
 
 Quem quiser escrever um MOD começa pelo guia, e não por esta pasta:
-<https://mods.seele.app.br/guia/>
+<https://docs.seele.sh/> (a documentação, com o guia dos MODs)

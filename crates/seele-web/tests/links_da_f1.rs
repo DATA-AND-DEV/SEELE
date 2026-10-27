@@ -29,7 +29,7 @@ fn os_casos_da_f1_passam_pela_ponte() {
     .expect("a tabela é JSON");
     let casos = tabela["casos"].as_array().expect("os casos");
     assert!(
-        casos.len() >= 16,
+        casos.len() >= 12,
         "a tabela encolheu para {} casos",
         casos.len()
     );
@@ -43,6 +43,9 @@ fn os_casos_da_f1_passam_pela_ponte() {
         let esperado = &caso["esperado"];
         if let Some(erro) = esperado.get("erro") {
             assert_eq!(&lido["erro"], erro, "{de}: veio {lido}");
+            if let Some(versao) = esperado.get("versao") {
+                assert_eq!(&lido["versao"], versao, "{de}: veio {lido}");
+            }
             continue;
         }
         // Só os campos que o caso escreveu: o resto o caso não afirma.
@@ -61,11 +64,7 @@ fn com_a_origem_do_produto_so_o_link_dela_e_do_navegador() {
     // usa sempre esta constante. O mesmo corpo vale nela e não vale em outra.
     let origem = seele_proto::uri::ORIGEM_DO_NAVEGADOR;
     assert!(!origem.is_empty(), "a origem do produto voltou a ser vazia");
-    let corpo = format!(
-        "198.51.100.7:8383/?fp={}&wh={}",
-        "3cbcfb02".repeat(8),
-        "ab".repeat(32)
-    );
+    let corpo = format!("198.51.100.7:8383/?fp={}", "3cbcfb02".repeat(8));
     let da_origem = link_do_navegador(&format!("https://{origem}/#{corpo}"), origem);
     assert_eq!(
         da_origem["link"]["alvo"], "198.51.100.7:8383",

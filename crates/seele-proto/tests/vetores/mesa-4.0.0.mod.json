@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "seele/mesa",
+  "version": "4.0.0",
+  "api": 6,
+  "repo": "https://github.com/DATA-AND-DEV/MESA",
+  "reach": [
+    "estado da campanha no servidor",
+    "mapas e retratos de personagem, pelo volume",
+    "seletor de arquivos de quem usa",
+    "entrada na navegação do servidor",
+    "cabeçalho do canal",
+    "ações da sala de voz",
+    "palco da chamada",
+    "nomes de quem está no servidor",
+    "trilha sonora do pacote"
+  ],
+  "client": "cliente/main.js",
+  "server": "servidor/main.js",
+  "arquivos": [
+    "som/exploracao.wav",
+    "som/misterio.wav",
+    "som/combate.wav"
+  ]
+}

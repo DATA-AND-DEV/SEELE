@@ -27,10 +27,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use seele_core::chegada::{Chegada, Etapa, Passo, Quarto};
-use seele_core::encontro::{onde_mora_hoje, Marcas, PRAZO_DO_QUARTO};
+use seele_core::encontro::{localizar3, Localizacao, Marcas, PRAZO_DO_QUARTO};
 use seele_core::enlace::{Destino, Esperada};
 use seele_core::{MemoryPinStore, PinStore, SigningKey};
-use seele_proto::encontro::{moro, Vizinhanca, TAMANHO};
+use seele_proto::encontro::{ler_resposta3, mora3, Resposta3, Vizinhanca};
 use seele_proto::uri::Bilhete;
 use seele_server::hospedagem::Hospedagem;
 use seele_server::persistence::Location;
@@ -127,6 +127,24 @@ fn local(hospedagem: &Hospedagem) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], hospedagem.endereco().port()))
 }
 
+/// Onde o quarto diz que o servidor destas marcas mora, pelo `QUEM3`.
+///
+/// Desde a 0.17 o anfitrião só registra pelo ENC/3 (`MORA3`), e é o `QUEM3`
+/// que a `Chegada` pergunta (`chegada.rs`, `localizar3`). Até a 0.16 este
+/// arquivo perguntava pelo `QUEM` do ENC/1 (`onde_mora_hoje`), que um
+/// anfitrião 0.17 não responde mais.
+async fn servidor_no_quarto(
+    ponto: SocketAddr,
+    marcas: &Marcas,
+) -> (Option<SocketAddr>, Localizacao) {
+    let achado = localizar3(&ponto.to_string(), marcas, PRAZO_DO_QUARTO).await;
+    let servidor = match &achado {
+        Localizacao::Achada { servidor, .. } => *servidor,
+        _ => None,
+    };
+    (servidor, achado)
+}
+
 /// Os nomes da trilha, em ordem.
 fn nomes(trilha: &[Passo]) -> Vec<&'static str> {
     trilha.iter().map(|passo| passo.etapa.nome()).collect()
@@ -185,8 +203,8 @@ async fn um_servidor_que_mudou_de_endereco_entra_pelo_que_o_quarto_deu() {
     let marcas = Marcas::do_servidor(&impressao).expect("a impressão dá marcas");
     let ate = Instant::now() + Duration::from_secs(5);
     let hoje = loop {
-        let achado = onde_mora_hoje(&ponto.to_string(), &marcas, PRAZO_DO_QUARTO).await;
-        if let Some(endereco) = achado.servidor() {
+        let (servidor, achado) = servidor_no_quarto(ponto, &marcas).await;
+        if let Some(endereco) = servidor {
             break endereco;
         }
         assert!(
@@ -248,19 +266,25 @@ async fn a_trilha_de_uma_volta_que_nao_entrou_acaba_no_candidato_que_chegou_depo
     // de hoje onde ninguém atende.
     let fantasma = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let de_hoje = fantasma.local_addr().unwrap();
-    let mut balde = [0_u8; TAMANHO];
-    fantasma
-        .send_to(&moro(marcas.servidor()), ponto)
-        .await
-        .unwrap();
-    fantasma.recv_from(&mut balde).await.unwrap();
-    drop(fantasma);
-    assert_eq!(
-        onde_mora_hoje(&ponto.to_string(), &marcas, PRAZO_DO_QUARTO)
+    // O `MORA3`, com o cookie que o ponto pede no primeiro.
+    let mut balde = [0_u8; 1500];
+    let mut cookie = None;
+    loop {
+        fantasma
+            .send_to(&mora3(marcas.servidor(), cookie.as_ref()), ponto)
             .await
-            .servidor(),
-        Some(de_hoje)
-    );
+            .unwrap();
+        let (lidos, _) = fantasma.recv_from(&mut balde).await.unwrap();
+        match ler_resposta3(balde.get(..lidos).unwrap_or_default()) {
+            Some(Resposta3::Desafio { cookie: novo, .. }) if cookie.is_none() => {
+                cookie = Some(novo);
+            }
+            Some(Resposta3::Morou { .. }) => break,
+            outra => panic!("o ponto não aceitou o MORA3 do fantasma: {outra:?}"),
+        }
+    }
+    drop(fantasma);
+    assert_eq!(servidor_no_quarto(ponto, &marcas).await.0, Some(de_hoje));
 
     let bilhete = Bilhete::novo(ponto.to_string(), "198.51.100.4:41000").unwrap();
     let ontem = morto();

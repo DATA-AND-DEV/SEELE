@@ -7,13 +7,12 @@
 //! domain plus ports 80/443, which contradicts the single-UDP-port simplicity of
 //! `specs/01-arquitetura.md`.
 //!
-//! There is no plaintext path and no flag to disable TLS. `specs/08-seguranca.md`
-//! is categorical about that, so this module has no "insecure" branch to audit.
-
-use std::sync::Arc;
+//! There is no plaintext path and no flag to disable encryption.
+//! `specs/08-seguranca.md` is categorical about that, so this module has no
+//! "insecure" branch to audit. Since 0.17 the certificate is presented by the
+//! DTLS of `seele-enlace` ([`Identity::no_enlace`]), not by TLS-in-QUIC.
 
 use anyhow::{Context, Result};
-use quinn::crypto::rustls::QuicServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 /// O nome que o certificado da sala pessoal leva no SAN, e o SNI de quem liga.
@@ -196,476 +195,117 @@ impl std::fmt::Debug for Identity {
     }
 }
 
-/// Builds the QUIC server configuration.
-///
-/// # Errors
-///
-/// Fails if rustls rejects the certificate or key.
-pub fn server_config(identity: Identity) -> Result<quinn::ServerConfig> {
-    let mut tls = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(identity.chain, identity.key)
-        .context("rustls rejected the certificate")?;
-    // Refuse a mismatched peer during the TLS handshake, before a single
-    // application byte is exchanged.
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    com_o_transporte(tls)
-}
-
-/// O TLS dentro do QUIC, com o transporte do `seeled`: o ocioso, o keepalive e
-/// os datagramas da voz. Um lugar só, para o `seele/1` e o `h3` não divergirem.
-fn com_o_transporte(tls: rustls::ServerConfig) -> Result<quinn::ServerConfig> {
-    let quic = QuicServerConfig::try_from(tls).context("could not build the QUIC TLS config")?;
-    let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic));
-
-    let mut transport = quinn::TransportConfig::default();
-    transport.max_idle_timeout(Some(
-        seele_proto::transport::IDLE_TIMEOUT
-            .try_into()
-            .context("idle timeout out of range")?,
-    ));
-    transport.keep_alive_interval(Some(seele_proto::transport::KEEPALIVE));
-    // specs/02-protocolo.md puts voice on datagrams so a history fetch cannot
-    // block a presence event. Without this, quinn negotiates them off.
-    transport.datagram_receive_buffer_size(Some(1024 * 1024));
-    config.transport_config(Arc::new(transport));
-
-    Ok(config)
-}
-
-// ------------------------------------------------- o `h3` do navegador
+// ------------------------------------------------- a identidade no enlace
 //
-// ADR 0057 (emenda ao 0003): o `seeled` anuncia `seele/1` e `h3` no mesmo
-// socket, e escolhe o certificado pelo ALPN do ClientHello. O nativo recebe o
-// longo, como sempre. O navegador recebe um **curto**: ele só aceita, pelo
-// hash (`serverCertificateHashes`), um certificado de no máximo 14 dias.
-//
-// A medição 3 no iPhone (`docs/evidencias/medicao-3-iphone/LEIA.md`, 18 e
-// 20/10/2026) decidiu o caminho simples: **o curto tem a chave do longo**. O
-// Safari abriu o curto da mesma chave, e recusou só o longo.
+// Até a 0.16 aqui moravam o `quinn::ServerConfig`, o TLS do `seele/1` e os
+// certificados curtos do `h3` com o resolvedor por ALPN (ADR 0057). A 0.17 não
+// fala QUIC (contrato da fase 2, D1): o DTLS é do `seele-enlace`, o navegador
+// confere o `a=fingerprint` sem limite de validade, e os curtos, as janelas e
+// os `serverCertificateHashes` deixaram de existir.
 
-/// O começo da janela de índice 0: 01/01/2026, 00:00 UTC. As janelas andam de
-/// [`seele_proto::transport::PASSO_DA_JANELA`] em diante a partir daqui, e por
-/// isso são as mesmas em toda abertura do servidor.
-pub const EPOCA_DAS_JANELAS: u64 = 1_767_225_600;
-
-/// O nome que o certificado curto leva. O navegador confere o certificado pelo
-/// hash, e não pelo nome: o curto não nomeia endereço nenhum.
-const NOME_DO_CURTO: &str = "seele.invalid";
-
-/// Um certificado curto do `h3`, com a validade dele em segundos Unix UTC.
-#[derive(Clone)]
-pub struct Curto {
-    /// O DER, assinado pela chave do longo.
-    pub der: CertificateDer<'static>,
-    /// Desde quando ele vale: o começo da janela, menos
-    /// [`seele_proto::transport::ANTES_DA_JANELA`].
-    pub nao_antes: u64,
-    /// Até quando: [`seele_proto::transport::VALIDADE_DO_CURTO`] depois.
-    pub nao_depois: u64,
-}
-
-impl Curto {
-    /// O que o navegador confere: o SHA-256 do DER.
-    #[must_use]
-    pub fn hash(&self) -> [u8; 32] {
-        seele_proto::transport::certificate_digest(self.der.as_ref())
-    }
-
-    /// A janela como o `HashesDoNavegador` a leva.
-    #[must_use]
-    pub fn janela(&self) -> seele_proto::control::JanelaDoNavegador {
-        seele_proto::control::JanelaDoNavegador {
-            hash: self.hash(),
-            nao_antes: self.nao_antes,
-            nao_depois: self.nao_depois,
-        }
-    }
-}
-
-impl std::fmt::Debug for Curto {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Curto")
-            .field("nao_antes", &self.nao_antes)
-            .field("nao_depois", &self.nao_depois)
-            .finish_non_exhaustive()
-    }
-}
-
-/// O índice da janela que começou por último até `agora`.
-#[must_use]
-pub fn janela_de(agora: u64) -> u64 {
-    agora.saturating_sub(EPOCA_DAS_JANELAS) / seele_proto::transport::PASSO_DA_JANELA.as_secs()
-}
-
-/// O dia civil (ano, mês, dia) de um instante Unix UTC, pelo algoritmo de
-/// Howard Hinnant (`civil_from_days`). As janelas começam à meia-noite, e o
-/// `rcgen` monta a data por dia.
-fn dia_civil(segundos: u64) -> (i32, u8, u8) {
-    let dias = i64::try_from(segundos / 86_400).unwrap_or(i64::MAX) + 719_468;
-    let era = dias.div_euclid(146_097);
-    let do_ciclo = dias.rem_euclid(146_097);
-    let do_ano = (do_ciclo - do_ciclo / 1_460 + do_ciclo / 36_524 - do_ciclo / 146_096) / 365;
-    let ano = do_ano + era * 400;
-    let dia_do_ano = do_ciclo - (365 * do_ano + do_ano / 4 - do_ano / 100);
-    let mp = (5 * dia_do_ano + 2) / 153;
-    let dia = dia_do_ano - (153 * mp + 2) / 5 + 1;
-    let mes = if mp < 10 { mp + 3 } else { mp - 9 };
-    let ano = if mes <= 2 { ano + 1 } else { ano };
-    (
-        i32::try_from(ano).unwrap_or(i32::MAX),
-        u8::try_from(mes).unwrap_or(1),
-        u8::try_from(dia).unwrap_or(1),
-    )
-}
-
-/// Os curtos das janelas `de` em diante, `quantas`, assinados pela chave de
-/// `identity`.
-///
-/// **Vazio quando a chave não é P-256**: o navegador só aceita ECDSA P-256 pelo
-/// hash, e a sala pessoal, com a chave Ed25519 dela, não serve ao navegador (o
-/// celular não liga pelo código na 0.16; ADR 0057, emenda de 09/10/2026).
-///
-/// # Errors
-///
-/// Falha se o `rcgen` recusar os parâmetros ou não assinar.
-pub fn curtos_de(identity: &Identity, de: u64, quantas: usize) -> Result<Vec<Curto>> {
-    let Ok(par) = rcgen::KeyPair::try_from(identity.key.secret_der()) else {
-        return Ok(Vec::new());
-    };
-    if par.algorithm() != &rcgen::PKCS_ECDSA_P256_SHA256 {
-        return Ok(Vec::new());
-    }
-    let passo = seele_proto::transport::PASSO_DA_JANELA.as_secs();
-    let antes = seele_proto::transport::ANTES_DA_JANELA.as_secs();
-    let validade = seele_proto::transport::VALIDADE_DO_CURTO.as_secs();
-    let mut curtos = Vec::with_capacity(quantas);
-    for indice in de..de.saturating_add(u64::try_from(quantas).unwrap_or(u64::MAX)) {
-        let nao_antes = EPOCA_DAS_JANELAS + indice * passo - antes;
-        let nao_depois = nao_antes + validade;
-        let mut params = rcgen::CertificateParams::new(vec![NOME_DO_CURTO.to_owned()])
-            .context("o nome do curto não serve de nome de certificado")?;
-        let (ano, mes, dia) = dia_civil(nao_antes);
-        params.not_before = rcgen::date_time_ymd(ano, mes, dia);
-        let (ano, mes, dia) = dia_civil(nao_depois);
-        params.not_after = rcgen::date_time_ymd(ano, mes, dia);
-        let certificado = params
-            .self_signed(&par)
-            .context("o rcgen não assinou o certificado curto")?;
-        curtos.push(Curto {
-            der: certificado.der().clone(),
-            nao_antes,
-            nao_depois,
-        });
-    }
-    Ok(curtos)
-}
-
-/// A chave da tabela `configuracao` onde os curtos ficam, ao lado de
-/// `tls_cert` e `tls_key`.
-const CHAVE_DOS_CURTOS: &str = "tls_curtos";
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn de_hex(texto: &str) -> Option<Vec<u8>> {
-    texto
-        .len()
-        .is_multiple_of(2)
-        .then(|| {
-            (0..texto.len())
-                .step_by(2)
-                .map(|i| {
-                    texto
-                        .get(i..i + 2)
-                        .and_then(|par| u8::from_str_radix(par, 16).ok())
-                })
-                .collect()
-        })
-        .flatten()
-}
-
-/// Os curtos guardados neste banco, se são da identidade de impressão
-/// `longo`. Os de outra identidade não servem: a chave deles é outra.
-fn curtos_guardados(persistence: &crate::persistence::Persistence, longo: &str) -> Vec<Curto> {
-    let Ok(texto) = persistence.connection().query_row(
-        "SELECT valor FROM configuracao WHERE chave = ?1",
-        rusqlite::params![CHAVE_DOS_CURTOS],
-        |linha| linha.get::<_, String>(0),
-    ) else {
-        return Vec::new();
-    };
-    let Ok(guardado) = serde_json::from_str::<serde_json::Value>(&texto) else {
-        return Vec::new();
-    };
-    if guardado.get("longo").and_then(serde_json::Value::as_str) != Some(longo) {
-        return Vec::new();
-    }
-    guardado
-        .get("curtos")
-        .and_then(serde_json::Value::as_array)
-        .map(|lista| {
-            lista
-                .iter()
-                .filter_map(|curto| {
-                    Some(Curto {
-                        der: CertificateDer::from(de_hex(curto.get("der")?.as_str()?)?),
-                        nao_antes: curto.get("nao_antes")?.as_u64()?,
-                        nao_depois: curto.get("nao_depois")?.as_u64()?,
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn guardar_curtos(
-    persistence: &crate::persistence::Persistence,
-    longo: &str,
-    curtos: &[Curto],
-) -> Result<()> {
-    let lista: Vec<serde_json::Value> = curtos
-        .iter()
-        .map(|curto| {
-            serde_json::json!({
-                "nao_antes": curto.nao_antes,
-                "nao_depois": curto.nao_depois,
-                "der": hex(curto.der.as_ref()),
-            })
-        })
-        .collect();
-    let texto = serde_json::json!({ "longo": longo, "curtos": lista }).to_string();
-    persistence.connection().execute(
-        "INSERT INTO configuracao (chave, valor) VALUES (?1, ?2)
-         ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor",
-        rusqlite::params![CHAVE_DOS_CURTOS, texto],
-    )?;
-    Ok(())
-}
-
-/// **Os curtos deste servidor, guardados no banco** (Tarefa 2.5 da F4): da
-/// janela de agora até as [`seele_proto::transport::JANELAS_ANUNCIADAS`]
-/// seguintes.
-///
-/// **Um curto anunciado nunca é regenerado.** O ECDSA do `ring` assina com um
-/// número aleatório, e o mesmo certificado assinado de novo sai com outro DER e
-/// outro hash: sem o banco, reabrir o `seeled` trocava todos os hashes, e todo
-/// link já mandado deixava de abrir. Os guardados que ainda valem ficam como
-/// estão; só as janelas que faltam são geradas, e os vencidos saem.
-///
-/// Guardados com a impressão do longo: uma identidade nova descarta os curtos
-/// da antiga. Vazio, e nada guardado, para uma chave que não é P-256.
-///
-/// # Errors
-///
-/// Falha se o `rcgen` não assinar ou o banco não aceitar a escrita.
-pub fn curtos_do_banco(
-    persistence: &crate::persistence::Persistence,
-    identity: &Identity,
-    agora: u64,
-) -> Result<Vec<Curto>> {
-    let longo = identity.fingerprint();
-    let de_agora = janela_de(agora);
-    let antes = seele_proto::transport::ANTES_DA_JANELA.as_secs();
-    let guardados = curtos_guardados(persistence, &longo);
-    let mut curtos: Vec<Curto> = guardados
-        .iter()
-        .filter(|curto| janela_de(curto.nao_antes + antes) >= de_agora && agora < curto.nao_depois)
-        .cloned()
-        .collect();
-    let quantas = u64::try_from(seele_proto::transport::JANELAS_ANUNCIADAS).unwrap_or(u64::MAX);
-    for indice in de_agora..de_agora.saturating_add(quantas) {
-        if curtos
-            .iter()
-            .any(|curto| janela_de(curto.nao_antes + antes) == indice)
-        {
-            continue;
-        }
-        let novo = curtos_de(identity, indice, 1)?;
-        if novo.is_empty() {
-            return Ok(Vec::new());
-        }
-        curtos.extend(novo);
-    }
-    curtos.sort_by_key(|curto| curto.nao_antes);
-    let mudou = curtos.len() != guardados.len()
-        || curtos
-            .iter()
-            .zip(&guardados)
-            .any(|(agora, antes)| agora.der != antes.der);
-    if mudou {
-        guardar_curtos(persistence, &longo, &curtos)?;
-    }
-    Ok(curtos)
-}
-
-/// O certificado de cada ALPN: o longo para `seele/1`, o curto vigente para
-/// `h3`. O molde é o de `spikes/alpn-no-mesmo-socket`.
-#[derive(Debug)]
-struct PorAlpn {
-    longo: Arc<rustls::sign::CertifiedKey>,
-    curtos: Vec<(Curto, Arc<rustls::sign::CertifiedKey>)>,
-}
-
-impl PorAlpn {
-    /// O curto da janela de agora, pelo índice ([`janela_de`]), e não o que
-    /// começou por último.
+/// Por que uma identidade não serve ao enlace.
+#[derive(Debug, thiserror::Error)]
+pub enum IdentidadeQueNaoServe {
+    /// A chave guardada neste banco não é P-256 (R1 da revisão da 0.17).
     ///
-    /// O `not_before` de cada curto recua um dia
-    /// ([`seele_proto::transport::ANTES_DA_JANELA`]), para o relógio atrasado
-    /// do celular; com isso, no último dia de uma janela a seguinte já vale.
-    /// Mas um link feito antes leva só os hashes de algumas janelas a partir da
-    /// dele, e a seguinte pode não estar entre eles: apresentar a seguinte
-    /// nesse dia seria recusado por um link que a de agora ainda atende.
-    fn vigente(&self, agora: u64) -> Option<Arc<rustls::sign::CertifiedKey>> {
-        indice_vigente(self.curtos.iter().map(|(curto, _)| curto), agora)
-            .and_then(|indice| self.curtos.get(indice))
-            .map(|(_, certificado)| Arc::clone(certificado))
-    }
+    /// O DTLS do navegador e do `str0m` só negocia ECDSA P-256, e o `seeled`
+    /// sempre gerou P-256 (`rcgen::generate_simple_self_signed`). Um banco com
+    /// outra chave **não é regerado aqui**, de propósito: uma chave nova troca a
+    /// impressão, e todo cliente que fixou a de antes leria «A CHAVE DO
+    /// SERVIDOR MUDOU», o alerta reservado para ataque.
+    #[error(
+        "a identidade guardada neste banco não é uma chave P-256 ({0}), e a 0.17 só apresenta \
+         P-256 no DTLS. Ela não foi trocada: uma chave nova mudaria a impressão digital, e quem \
+         já entrou leria «A CHAVE DO SERVIDOR MUDOU». Para seguir, quem hospeda decide: \
+         apague `tls_cert` e `tls_key` da tabela `configuracao` deste banco (e avise quem entra \
+         que a impressão vai mudar), ou hospede este banco pela 0.16"
+    )]
+    NaoEP256(String),
+    /// A chave da sala não assinou a apresentação, ou o certificado efêmero não
+    /// saiu.
+    #[error("a identidade da sala não se apresentou: {0}")]
+    Sala(String),
 }
 
-/// A posição, em `curtos`, do curto da janela de `agora`, se ele está lá e
-/// ainda vale.
-fn indice_vigente<'a>(curtos: impl Iterator<Item = &'a Curto>, agora: u64) -> Option<usize> {
-    let antes = seele_proto::transport::ANTES_DA_JANELA.as_secs();
-    let de_agora = janela_de(agora);
-    curtos
-        .enumerate()
-        .find(|(_, curto)| {
-            janela_de(curto.nao_antes + antes) == de_agora && agora < curto.nao_depois
+/// O que um servidor apresenta no enlace.
+#[derive(Debug, Clone)]
+pub struct NoEnlace {
+    /// O certificado DTLS: o longo do banco no `seeled`, efêmero na sala.
+    pub certificado: seele_enlace::CertificadoDtls,
+    /// O corpo da apresentação `0x03` no `ctl`: vazio no `seeled`; na sala, a
+    /// chave Ed25519 (32) e a assinatura dela (64) sobre
+    /// [`seele_proto::assinatura::apresentacao_da_sala`] da impressão DTLS.
+    pub apresentacao: Vec<u8>,
+    /// A impressão que a prova do cliente amarra (D5): a do certificado no
+    /// `seeled`, a mesma do `fp=` e da 0.16; na sala, o SHA-256 dos 32 bytes
+    /// da chave, que é o que quem liga por código calcula.
+    pub impressao: [u8; 32],
+}
+
+impl Identity {
+    /// A semente Ed25519, quando esta é a identidade de uma sala
+    /// ([`Self::da_semente`]): o PKCS#8 v1 que ela monta, prefixo e semente.
+    fn semente_da_sala(&self) -> Option<[u8; 32]> {
+        let der = self.key.secret_der();
+        let semente = der.strip_prefix(&PREFIXO_PKCS8_ED25519[..])?;
+        semente.try_into().ok()
+    }
+
+    /// **O que esta identidade apresenta no enlace** (D3).
+    ///
+    /// - No `seeled`, o certificado longo P-256 **é** o certificado DTLS: o
+    ///   `a=fingerprint` é o `fp=` do convite, e é a mesma impressão da 0.16
+    ///   para o mesmo banco. Os pinos TOFU de quem atualiza continuam valendo.
+    /// - Com `sala` e uma identidade de [`Self::da_semente`], o DTLS é P-256
+    ///   efêmero (o DTLS não negocia Ed25519), e a identidade vai na
+    ///   apresentação `0x03`, assinada pela chave da sala.
+    ///
+    /// `sala` diz se esta identidade pode ser a de uma sala: só a que veio na
+    /// configuração da sala pessoal. Uma chave Ed25519 **guardada no banco**
+    /// não é sala nenhuma, e é recusada como qualquer outra que não é P-256.
+    ///
+    /// # Errors
+    ///
+    /// [`IdentidadeQueNaoServe`], com a frase para quem hospeda.
+    pub fn no_enlace(&self, sala: bool) -> Result<NoEnlace, IdentidadeQueNaoServe> {
+        if sala {
+            if let Some(semente) = self.semente_da_sala() {
+                return apresentacao_da_sala(&semente);
+            }
+        }
+        let der = self
+            .chain
+            .first()
+            .map(|c| c.as_ref().to_vec())
+            .unwrap_or_default();
+        let certificado = seele_enlace::CertificadoDtls::novo(der, self.key.secret_der().to_vec())
+            .map_err(|erro| IdentidadeQueNaoServe::NaoEP256(format!("{erro:#}")))?;
+        Ok(NoEnlace {
+            impressao: certificado.impressao(),
+            certificado,
+            apresentacao: Vec::new(),
         })
-        .map(|(posicao, _)| posicao)
-}
-
-/// O que um link do navegador feito agora leva (D-web-6): os hashes, até
-/// quando ele abre, e quando um feito de novo passa a durar mais.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JanelasDoLink {
-    /// Os hashes, em hexadecimal minúsculo, da janela de agora em diante.
-    pub hashes: Vec<String>,
-    /// Quando o servidor deixa de apresentar todos eles, em segundos Unix UTC.
-    pub ate: u64,
-    /// O começo da janela seguinte à de agora: a partir dele, um link feito de
-    /// novo leva uma janela a mais, e é esse que a casca passa a mostrar.
-    pub renova: u64,
-}
-
-/// **As janelas que um link do navegador feito `agora` leva** (D-web-6): a de
-/// agora e as seguintes, em sequência, até
-/// [`seele_proto::uri::LIMITE_DE_HASHES_DO_NAVEGADOR`].
-///
-/// **A de agora primeiro, e sem buraco**, porque o servidor apresenta só o
-/// curto da janela de agora ([`PorAlpn::vigente`]): um link sem ela não abre
-/// hoje, e um com um buraco no meio deixa de abrir no buraco. Por isso não
-/// servem «as que valem agora», que era a conta do `servidor_da_bancada`: no
-/// último dia de uma janela a seguinte já vale pelo `not_before`, e a anterior
-/// ainda vale por seis dias depois de o servidor tê-la largado.
-///
-/// **O `ate` é quando o servidor larga a última delas** — o começo da janela
-/// seguinte —, e não o fim da validade do curto, que vem um
-/// [`seele_proto::transport::PASSO_DA_JANELA`] depois. Nesse intervalo o
-/// certificado ainda vale, mas o servidor já apresenta outro: com o fim da
-/// validade, a página diria que o link vale, e a conexão seria recusada sem
-/// frase nenhuma.
-///
-/// `None` sem a janela de agora: a sala pessoal, que não tem curtos, ou um
-/// servidor no ar há mais que as
-/// [`seele_proto::transport::JANELAS_ANUNCIADAS`] que ele gerou ao subir.
-#[must_use]
-pub fn janelas_do_link(
-    janelas: &[seele_proto::control::JanelaDoNavegador],
-    agora: u64,
-) -> Option<JanelasDoLink> {
-    let antes = seele_proto::transport::ANTES_DA_JANELA.as_secs();
-    let passo = seele_proto::transport::PASSO_DA_JANELA.as_secs();
-    let comeco = |indice: u64| EPOCA_DAS_JANELAS.saturating_add(indice.saturating_mul(passo));
-    let de_agora = janela_de(agora);
-    let quantas = u64::try_from(seele_proto::uri::LIMITE_DE_HASHES_DO_NAVEGADOR).unwrap_or(1);
-    let mut hashes = Vec::new();
-    let mut ate = None;
-    for indice in de_agora..de_agora.saturating_add(quantas) {
-        let Some(janela) = janelas.iter().find(|janela| {
-            janela_de(janela.nao_antes.saturating_add(antes)) == indice && agora < janela.nao_depois
-        }) else {
-            break;
-        };
-        hashes.push(hex(&janela.hash));
-        ate = Some(comeco(indice.saturating_add(1)).min(janela.nao_depois));
-    }
-    let ate = ate?;
-    Some(JanelasDoLink {
-        hashes,
-        ate,
-        renova: comeco(de_agora.saturating_add(1)).min(ate),
-    })
-}
-
-impl rustls::server::ResolvesServerCert for PorAlpn {
-    fn resolve(
-        &self,
-        hello: rustls::server::ClientHello<'_>,
-    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
-        let pede = |alpn: &[u8]| {
-            hello
-                .alpn()
-                .is_some_and(|mut oferecidos| oferecidos.any(|o| o == alpn))
-        };
-        if pede(seele_proto::transport::ALPN) || !pede(seele_proto::transport::ALPN_DO_NAVEGADOR) {
-            return Some(Arc::clone(&self.longo));
-        }
-        let agora = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let vigente = self.vigente(agora);
-        if vigente.is_none() {
-            tracing::warn!(
-                agora,
-                "um navegador pediu o `h3`, e nenhum certificado curto vale agora: o aperto de mão falha"
-            );
-        }
-        vigente
     }
 }
 
-/// A configuração QUIC do `seeled`: a de [`server_config`] e, com `curtos`,
-/// também o `h3` do navegador, com o certificado escolhido pelo ALPN.
-///
-/// Sem curtos (a sala pessoal, ou uma chave que não é P-256), é a mesma de
-/// [`server_config`]: só `seele/1`.
-///
-/// # Errors
-///
-/// Falha se o rustls recusar uma chave ou um certificado.
-pub fn server_config_do_seeled(
-    identity: Identity,
-    curtos: &[Curto],
-) -> Result<quinn::ServerConfig> {
-    if curtos.is_empty() {
-        return server_config(identity);
-    }
-    let assina = rustls::crypto::ring::sign::any_supported_type(&identity.key)
-        .context("o rustls recusou a chave do servidor")?;
-    let longo = Arc::new(rustls::sign::CertifiedKey::new(
-        identity.chain,
-        Arc::clone(&assina),
+/// A apresentação da sala desta semente, sobre um certificado DTLS efêmero.
+fn apresentacao_da_sala(semente: &[u8; 32]) -> Result<NoEnlace, IdentidadeQueNaoServe> {
+    use ed25519_dalek::Signer as _;
+    let certificado = seele_enlace::CertificadoDtls::efemero()
+        .map_err(|erro| IdentidadeQueNaoServe::Sala(format!("{erro:#}")))?;
+    let chave = ed25519_dalek::SigningKey::from_bytes(semente);
+    let publica = chave.verifying_key().to_bytes();
+    let assinatura = chave.sign(&seele_proto::assinatura::apresentacao_da_sala(
+        &certificado.impressao(),
     ));
-    let curtos = curtos
-        .iter()
-        .map(|curto| {
-            let certificado =
-                rustls::sign::CertifiedKey::new(vec![curto.der.clone()], Arc::clone(&assina));
-            (curto.clone(), Arc::new(certificado))
-        })
-        .collect();
-    let mut tls = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_cert_resolver(Arc::new(PorAlpn { longo, curtos }));
-    tls.alpn_protocols = vec![
-        seele_proto::transport::ALPN.to_vec(),
-        seele_proto::transport::ALPN_DO_NAVEGADOR.to_vec(),
-    ];
-    com_o_transporte(tls)
+    let mut apresentacao = Vec::with_capacity(32 + 64);
+    apresentacao.extend_from_slice(&publica);
+    apresentacao.extend_from_slice(&assinatura.to_bytes());
+    Ok(NoEnlace {
+        certificado,
+        apresentacao,
+        impressao: seele_proto::transport::certificate_digest(&publica),
+    })
 }
 
 /// O par guardado neste banco, quando há um e os dois lados estão cheios.
@@ -758,34 +398,6 @@ pub fn herdar_identidade(
     let herdou = identidade_guardada(para).as_ref() != Some(&(cert.clone(), key.clone()));
     if herdou {
         guardar_identidade(para, &cert, &key)?;
-    }
-    // **E os curtos do `h3`, sempre da máquina** (Tarefa 2.5 da F4): os
-    // servidores guardados desta máquina atendem no mesmo endereço com a mesma
-    // chave, e o navegador confere pelo hash que o link levou. Um curto gerado
-    // por cada servidor teria outro DER e outro hash, e o link feito enquanto
-    // um rodava falharia no outro. Por isso eles nascem e se completam no banco
-    // da máquina (`de`), e vão iguais para `para` — também quando a chave já
-    // era a mesma, porque um servidor que herdou antes da 2.5 tem os próprios.
-    let identidade = Identity {
-        chain: vec![CertificateDer::from(cert)],
-        key: PrivateKeyDer::try_from(key)
-            .map_err(|erro| anyhow::anyhow!("a chave guardada não é uma chave: {erro}"))?,
-    };
-    let agora = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
-    let curtos = curtos_do_banco(de, &identidade, agora)?;
-    let longo = identidade.fingerprint();
-    let ja_tem: Vec<Vec<u8>> = curtos_guardados(para, &longo)
-        .iter()
-        .map(|curto| curto.der.as_ref().to_vec())
-        .collect();
-    let da_maquina: Vec<Vec<u8>> = curtos
-        .iter()
-        .map(|curto| curto.der.as_ref().to_vec())
-        .collect();
-    if !curtos.is_empty() && ja_tem != da_maquina {
-        guardar_curtos(para, &longo, &curtos)?;
     }
     Ok(herdou)
 }
@@ -893,275 +505,97 @@ mod uma_chave_por_maquina {
 #[allow(
     clippy::expect_used,
     clippy::unwrap_used,
+    clippy::indexing_slicing,
     reason = "num teste, o pânico é o relatório"
 )]
-mod os_curtos_do_h3 {
-    use super::{
-        curtos_de, dia_civil, indice_vigente, janela_de, janelas_do_link, Identity,
-        EPOCA_DAS_JANELAS,
-    };
-    use seele_proto::control::JanelaDoNavegador;
-    use seele_proto::transport::{ANTES_DA_JANELA, PASSO_DA_JANELA, VALIDADE_DO_CURTO};
-
-    const DIA: u64 = 86_400;
-
-    /// O dia civil de instantes conhecidos, conferidos à parte (o `calendar` do
-    /// Python): o começo do Unix, a época das janelas, o mês depois de um
-    /// fevereiro comum, um 29 de fevereiro, e o ano secular que não é bissexto.
-    #[test]
-    fn o_dia_civil_bate_com_o_calendario() {
-        for (segundos, dia) in [
-            (0, (1970, 1, 1)),
-            (EPOCA_DAS_JANELAS, (2026, 1, 1)),
-            (1_772_323_200, (2026, 3, 1)),
-            (1_835_395_200, (2028, 2, 29)),
-            (4_107_542_400, (2100, 3, 1)),
-        ] {
-            assert_eq!(dia_civil(segundos), dia, "{segundos}");
-        }
-    }
-
-    #[test]
-    fn a_chave_ed25519_da_sala_nao_tem_curtos() {
-        let sala = Identity::da_semente(&[3; 32]).unwrap();
-        assert!(curtos_de(&sala, 0, 4).unwrap().is_empty());
-    }
-
-    /// Cada curto começa à meia-noite (o `rcgen` monta a data por dia, e o
-    /// DER diz exatamente o `nao_antes` anunciado), vale 13 dias, e a janela
-    /// `k` começa `k` passos depois da época, um dia antes.
-    #[test]
-    fn os_curtos_comecam_a_meia_noite_e_valem_treze_dias() {
-        let longo = Identity::self_signed(vec!["localhost".into()]).unwrap();
-        let curtos = curtos_de(&longo, 5, 3).unwrap();
-        assert_eq!(curtos.len(), 3);
-        for (k, curto) in (5_u64..).zip(&curtos) {
-            assert_eq!(
-                curto.nao_antes,
-                EPOCA_DAS_JANELAS + k * PASSO_DA_JANELA.as_secs() - ANTES_DA_JANELA.as_secs()
-            );
-            assert_eq!(curto.nao_antes % DIA, 0);
-            assert_eq!(
-                curto.nao_depois - curto.nao_antes,
-                VALIDADE_DO_CURTO.as_secs()
-            );
-        }
-    }
-
-    /// **No último dia de uma janela, o vigente é ela, e não a seguinte** —
-    /// mesmo com a seguinte já valendo pelo `not_before`, que recua um dia.
-    #[test]
-    fn no_ultimo_dia_da_janela_o_vigente_e_ela_e_nao_a_seguinte() {
-        let longo = Identity::self_signed(vec!["localhost".into()]).unwrap();
-        let curtos = curtos_de(&longo, 3, 4).unwrap();
-        let inicio_da_3 = EPOCA_DAS_JANELAS + 3 * PASSO_DA_JANELA.as_secs();
-        let ultimo_dia = inicio_da_3 + PASSO_DA_JANELA.as_secs() - DIA / 2;
-        assert_eq!(janela_de(ultimo_dia), 3);
-        assert!(
-            curtos[1].nao_antes <= ultimo_dia,
-            "a armadilha não existe: a janela 4 ainda não vale no último dia da 3"
-        );
-        assert_eq!(indice_vigente(curtos.iter(), ultimo_dia), Some(0));
-        assert_eq!(
-            indice_vigente(curtos.iter(), inicio_da_3 + PASSO_DA_JANELA.as_secs()),
-            Some(1)
-        );
-        // Antes da primeira gerada, nenhuma é a de agora.
-        assert_eq!(indice_vigente(curtos.iter(), inicio_da_3 - 1), None);
-    }
-
-    /// As janelas de índice `indices`, como o servidor as anuncia, com o hash
-    /// feito do próprio índice.
-    fn anunciadas(indices: impl IntoIterator<Item = u64>) -> Vec<JanelaDoNavegador> {
-        indices
-            .into_iter()
-            .map(|k| {
-                let nao_antes =
-                    EPOCA_DAS_JANELAS + k * PASSO_DA_JANELA.as_secs() - ANTES_DA_JANELA.as_secs();
-                JanelaDoNavegador {
-                    hash: [u8::try_from(k).unwrap(); 32],
-                    nao_antes,
-                    nao_depois: nao_antes + VALIDADE_DO_CURTO.as_secs(),
-                }
-            })
-            .collect()
-    }
-
-    fn comeco(k: u64) -> u64 {
-        EPOCA_DAS_JANELAS + k * PASSO_DA_JANELA.as_secs()
-    }
-
-    /// **O link leva a janela de agora e as três seguintes, e vale até o
-    /// servidor largar a última** (D-web-6) — no último dia da janela também,
-    /// com a seguinte já valendo e a anterior ainda válida.
-    #[test]
-    fn o_link_leva_a_de_agora_e_as_seguintes_ate_o_servidor_largar_a_ultima() {
-        let janelas = anunciadas(3..12);
-        let hex = |k: u8| format!("{k:02x}").repeat(32);
-        for agora in [comeco(5) + DIA, comeco(6) - DIA / 2] {
-            let link = janelas_do_link(&janelas, agora).unwrap();
-            assert_eq!(link.hashes, [hex(5), hex(6), hex(7), hex(8)], "{agora}");
-            assert_eq!(link.ate, comeco(9));
-            assert_eq!(link.renova, comeco(6));
-        }
-        // A janela da vez decide, e não a ordem em que vieram.
-        let mut fora_de_ordem = janelas.clone();
-        fora_de_ordem.reverse();
-        assert_eq!(
-            janelas_do_link(&fora_de_ordem, comeco(5) + DIA),
-            janelas_do_link(&janelas, comeco(5) + DIA)
-        );
-    }
-
-    /// Sem a de agora não há link, e um buraco ou o fim das geradas encurtam o
-    /// link até elas.
-    #[test]
-    fn sem_a_de_agora_nao_ha_link_e_o_buraco_encurta_o_link() {
-        assert_eq!(janelas_do_link(&anunciadas(6..12), comeco(5) + DIA), None);
-        assert_eq!(janelas_do_link(&[], comeco(5) + DIA), None);
-        let com_buraco = anunciadas([5, 6, 8, 9]);
-        let link = janelas_do_link(&com_buraco, comeco(5) + DIA).unwrap();
-        assert_eq!(link.hashes.len(), 2);
-        assert_eq!(link.ate, comeco(7));
-        let no_fim = janelas_do_link(&anunciadas(3..6), comeco(5) + DIA).unwrap();
-        assert_eq!(no_fim.hashes.len(), 1);
-        assert_eq!((no_fim.ate, no_fim.renova), (comeco(6), comeco(6)));
-    }
-}
-
-#[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    reason = "num teste, o pânico é o relatório"
-)]
-mod os_curtos_no_banco {
-    use super::{
-        curtos_do_banco, curtos_guardados, guardar_identidade, herdar_identidade,
-        identidade_guardada, Curto, Identity, EPOCA_DAS_JANELAS,
-    };
+mod a_identidade_no_enlace {
+    use super::{guardar_identidade, identidade_guardada, IdentidadeQueNaoServe, Identity};
     use crate::persistence::{Location, Persistence};
-    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-    use seele_proto::transport::{JANELAS_ANUNCIADAS, PASSO_DA_JANELA};
 
-    fn banco() -> Persistence {
-        Persistence::open(&Location::Memory).expect("um banco em memória")
-    }
-
-    fn ders(curtos: &[Curto]) -> Vec<Vec<u8>> {
-        curtos
-            .iter()
-            .map(|curto| curto.der.as_ref().to_vec())
-            .collect()
-    }
-
-    fn identidade_de(banco: &Persistence) -> Identity {
-        let (cert, key) = identidade_guardada(banco).expect("uma identidade");
-        Identity {
-            chain: vec![CertificateDer::from(cert)],
-            key: PrivateKeyDer::try_from(key).unwrap(),
-        }
-    }
-
-    fn agora() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    }
-
-    const EM: u64 = EPOCA_DAS_JANELAS + 10 * 6 * 86_400 + 3_600;
-
-    /// **Um curto anunciado não é regenerado**: o ECDSA assina com um número
-    /// aleatório, e regenerar trocaria o hash que um link já levou.
+    /// **A impressão da 0.17 é a da 0.16 para o mesmo banco** (R1): o
+    /// certificado DTLS do `seeled` é o longo guardado, e o `a=fingerprint` é o
+    /// `fp=` de sempre. Sem isto, todo pino TOFU de quem atualiza dispararia
+    /// «A CHAVE MUDOU».
     #[test]
-    fn reabrir_nao_regenera_o_que_ja_foi_anunciado() {
-        let p = banco();
-        let id = Identity::load_or_create(&p, vec!["localhost".into()]).unwrap();
-        let primeira = curtos_do_banco(&p, &id, EM).unwrap();
-        let segunda = curtos_do_banco(&p, &id, EM).unwrap();
-        assert_eq!(primeira.len(), JANELAS_ANUNCIADAS);
-        assert_eq!(
-            ders(&primeira),
-            ders(&segunda),
-            "reabrir regenerou os curtos"
-        );
-    }
-
-    #[test]
-    fn com_o_tempo_os_vencidos_saem_e_os_que_ficam_sao_os_mesmos() {
-        let p = banco();
-        let id = Identity::load_or_create(&p, vec!["localhost".into()]).unwrap();
-        let antes = curtos_do_banco(&p, &id, EM).unwrap();
-        let depois = curtos_do_banco(&p, &id, EM + 3 * PASSO_DA_JANELA.as_secs()).unwrap();
-        assert_eq!(depois.len(), JANELAS_ANUNCIADAS);
-        assert_eq!(
-            ders(&depois[..JANELAS_ANUNCIADAS - 3]),
-            ders(&antes[3..]),
-            "as janelas que continuam valendo foram regeneradas"
-        );
-    }
-
-    #[test]
-    fn uma_identidade_nova_descarta_os_curtos_da_velha() {
-        let p = banco();
-        let velha = Identity::load_or_create(&p, vec!["localhost".into()]).unwrap();
-        let da_velha = curtos_do_banco(&p, &velha, EM).unwrap();
-        let nova = Identity::self_signed(vec!["localhost".into()]).unwrap();
-        let da_nova = curtos_do_banco(&p, &nova, EM).unwrap();
+    fn o_seeled_apresenta_no_dtls_a_mesma_impressao_do_banco() {
+        let banco = Persistence::open(&Location::Memory).unwrap();
+        let identidade = Identity::load_or_create(&banco, vec!["localhost".into()]).unwrap();
+        let no_enlace = identidade.no_enlace(false).unwrap();
+        assert_eq!(no_enlace.impressao, identidade.digest());
+        assert_eq!(no_enlace.certificado.impressao(), identidade.digest());
         assert!(
-            ders(&da_nova)
-                .iter()
-                .all(|der| !ders(&da_velha).contains(der)),
-            "a identidade nova anunciou um curto da velha, de outra chave"
+            no_enlace.apresentacao.is_empty(),
+            "o seeled se apresenta vazio"
         );
+        let (cert, _) = identidade_guardada(&banco).unwrap();
+        assert_eq!(no_enlace.certificado.der(), cert.as_slice());
     }
 
-    /// **Os servidores guardados desta máquina anunciam os mesmos curtos**: eles
-    /// atendem no mesmo endereço, e o link de um tem de abrir no outro.
+    /// **R1: uma chave guardada que não é P-256 é recusada com o nome, e o
+    /// banco fica como estava.** Regerar trocaria a chave em silêncio.
     #[test]
-    fn os_servidores_da_maquina_anunciam_os_mesmos_curtos() {
-        let maquina = banco();
-        Identity::load_or_create(&maquina, vec!["localhost".into()]).unwrap();
-        let (a, b) = (banco(), banco());
-        assert!(herdar_identidade(&maquina, &a).unwrap());
-        assert!(herdar_identidade(&maquina, &b).unwrap());
-        let de_a = curtos_do_banco(&a, &identidade_de(&a), agora()).unwrap();
-        let de_b = curtos_do_banco(&b, &identidade_de(&b), agora()).unwrap();
-        assert_eq!(de_a.len(), JANELAS_ANUNCIADAS);
-        assert_eq!(
-            ders(&de_a),
-            ders(&de_b),
-            "dois servidores da máquina anunciaram curtos diferentes"
-        );
-    }
+    fn uma_identidade_ed25519_guardada_e_recusada_sem_regerar() {
+        let banco = Persistence::open(&Location::Memory).unwrap();
+        let ed = Identity::da_semente(&[9; 32]).unwrap();
+        let cert = ed.chain.first().unwrap().as_ref().to_vec();
+        let chave = ed.key.secret_der().to_vec();
+        guardar_identidade(&banco, &cert, &chave).unwrap();
 
-    /// Um servidor que herdou a chave antes da 2.5 gerou os próprios curtos; a
-    /// herança seguinte troca os dele pelos da máquina, mesmo com a chave igual.
-    #[test]
-    fn um_servidor_que_herdou_antes_passa_a_ter_os_da_maquina() {
-        let maquina = banco();
-        Identity::load_or_create(&maquina, vec!["localhost".into()]).unwrap();
-        let a = banco();
-        let (cert, key) = identidade_guardada(&maquina).unwrap();
-        guardar_identidade(&a, &cert, &key).unwrap();
-        let proprios = curtos_do_banco(&a, &identidade_de(&a), agora()).unwrap();
+        let lida = Identity::load_or_create(&banco, vec!["localhost".into()]).unwrap();
+        let recusa = lida.no_enlace(false).unwrap_err();
         assert!(
-            !herdar_identidade(&maquina, &a).unwrap(),
-            "a chave já era a mesma"
+            matches!(recusa, IdentidadeQueNaoServe::NaoEP256(_)),
+            "{recusa}"
         );
-        let longo = identidade_de(&a).fingerprint();
-        let agora_em_a = curtos_guardados(&a, &longo);
-        let da_maquina = curtos_guardados(&maquina, &longo);
-        assert_eq!(ders(&agora_em_a), ders(&da_maquina));
-        assert_ne!(ders(&agora_em_a), ders(&proprios));
+        let frase = recusa.to_string();
+        assert!(
+            frase.contains("P-256") && frase.contains("A CHAVE DO SERVIDOR MUDOU"),
+            "{frase}"
+        );
+        assert_eq!(
+            identidade_guardada(&banco),
+            Some((cert, chave)),
+            "a recusa regerou a identidade guardada"
+        );
     }
 
+    /// **A sala se apresenta com a chave dela sobre o DTLS efêmero** (D3), e
+    /// a impressão da prova é o SHA-256 da chave (D5), a que quem liga por
+    /// código calcula.
     #[test]
-    fn a_sala_com_a_chave_ed25519_nao_guarda_curtos() {
-        let p = banco();
-        let sala = Identity::da_semente(&[5; 32]).unwrap();
-        assert!(curtos_do_banco(&p, &sala, EM).unwrap().is_empty());
-        assert!(curtos_guardados(&p, &sala.fingerprint()).is_empty());
+    fn a_sala_assina_a_impressao_do_dtls_efemero() {
+        let semente = [7_u8; 32];
+        let sala = Identity::da_semente(&semente).unwrap();
+        let no_enlace = sala.no_enlace(true).unwrap();
+        let chave = ed25519_dalek::SigningKey::from_bytes(&semente).verifying_key();
+        assert_eq!(no_enlace.apresentacao.len(), 96);
+        assert_eq!(no_enlace.apresentacao[..32], chave.to_bytes());
+        let assinatura =
+            ed25519_dalek::Signature::from_slice(&no_enlace.apresentacao[32..]).unwrap();
+        chave
+            .verify_strict(
+                &seele_proto::assinatura::apresentacao_da_sala(&no_enlace.certificado.impressao()),
+                &assinatura,
+            )
+            .expect("a apresentação da sala não confere com o DTLS dela");
+        assert_eq!(
+            no_enlace.impressao,
+            seele_proto::transport::certificate_digest(&chave.to_bytes())
+        );
+        // Efêmero: duas subidas, dois DTLS, a mesma identidade.
+        let outra = sala.no_enlace(true).unwrap();
+        assert_ne!(
+            outra.certificado.impressao(),
+            no_enlace.certificado.impressao()
+        );
+        assert_eq!(outra.impressao, no_enlace.impressao);
+    }
+
+    /// Fora da sala, a identidade Ed25519 da semente não vira sala: é uma
+    /// chave que não é P-256, e é recusada.
+    #[test]
+    fn a_semente_fora_da_sala_e_recusada() {
+        let sala = Identity::da_semente(&[1; 32]).unwrap();
+        assert!(sala.no_enlace(false).is_err());
     }
 }

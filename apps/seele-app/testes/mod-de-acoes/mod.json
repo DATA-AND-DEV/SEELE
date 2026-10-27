@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "id": "prova/acoes",
+  "version": "1.0.0",
+  "api": 7,
+  "repo": "https://github.com/DATA-AND-DEV/SEELE",
+  "reach": [
+    "pedido"
+  ],
+  "client": "cliente/main.js",
+  "server": "servidor/main.js",
+  "permissoes": [
+    {
+      "acao": "fechar-mesa",
+      "nome": "Fechar a mesa",
+      "todos": false
+    }
+  ]
+}

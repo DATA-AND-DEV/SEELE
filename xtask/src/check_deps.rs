@@ -78,9 +78,25 @@ const RULES: &[(&str, &[&str])] = &[
     // `seele-audio` para o navegador tocar a mesma voz. Sem dependência
     // nenhuma: o `cargo xtask web` o compila para o `wasm32-unknown-unknown`.
     ("seele-voz", &[]),
+    // O transporte da 0.17 (contrato da fase 2, D1): WebRTC sobre um socket UDP,
+    // comum a quem liga e a quem hospeda. **Emenda o ADR 0002**, que separava o
+    // transporte do `seele-core` e do `seele-server` porque os dois montavam o
+    // QUIC de jeitos diferentes; com o WebRTC, os dois lados são a mesma `Ponta`.
+    //
+    // A aresta que não existe é a que importa: o enlace não conhece sessão, sala
+    // nem pessoa. Ele vê o formato do fio (`seele-proto`: as constantes de tempo,
+    // os labels e a impressão) e mais nada. Se um dia precisar do `seele-core`
+    // ou do `seele-server`, a regra de quem conhece quem quebrou por baixo.
+    ("seele-enlace", &["seele-proto"]),
     (
         "seele-core",
-        &["seele-proto", "seele-sessao", "seele-audio", "seele-video"],
+        &[
+            "seele-proto",
+            "seele-sessao",
+            "seele-audio",
+            "seele-video",
+            "seele-enlace",
+        ],
     ),
     // O cliente do celular, a parte em `wasm` (ADR 0057): o codec do protocolo
     // atrás de uma fronteira de JSON, e nada que faça E/S. As peças sem E/S que
@@ -94,8 +110,9 @@ const RULES: &[(&str, &[&str])] = &[
     // O motor de MODs do celular (ADR 0057, D-web-1): o `seele-motor` em
     // `wasm32-wasip1`, num Worker separado do protocolo. Só a fronteira.
     ("seele-motor-web", &["seele-motor"]),
-    // The daemon speaks the wire format and nothing else.
-    ("seele-server", &["seele-proto"]),
+    // The daemon speaks the wire format and nothing else — e, na 0.17, o fala
+    // pelo mesmo transporte de quem liga.
+    ("seele-server", &["seele-proto", "seele-enlace"]),
     // Shells translate events into pixels and input into commands. Nothing more.
     //
     // A exceção do `seele-server` é nomeada e tem **dois** motivos, e os dois
@@ -150,6 +167,14 @@ const RULES: &[(&str, &[&str])] = &[
             // mais nada, e ninguém depende dele. É a mesma aresta lateral no
             // topo do grafo que `seele-server` já é aqui dentro.
             "seele-encontro",
+            // O transporte, pelo mesmo motivo: um teste de ponta a ponta monta
+            // as duas `Ponta`s, e o fuzz do envelope lê o montador dele.
+            "seele-enlace",
+            // A tela (só como dev-dependency no `Cargo.toml`): o helper `tela_e_voz_sinteticas`
+            // gera H.264 válido pelo codificador do produto, e um teste que
+            // inventasse os bytes à mão mediria o decodificador contra o que o
+            // próprio teste acha que é H.264.
+            "seele-video",
         ],
     ),
     // The desktop shell. Sees `seele-ffi`, which sees `seele-core`. Reaching past
@@ -184,6 +209,28 @@ const RULES: &[(&str, &[&str])] = &[
     ("seele-instalador", &[]),
 ];
 
+/// Exceções NOMINAIS, válidas só para dev-dependencies: `(crate, dependências)`.
+///
+/// ADR 0065. Os testes do `seele-app` que chamam os comandos de verdade só
+/// existem dentro do crate binário (`src/`), então precisam ver estes crates
+/// como dev-dependency. Dev-dependencies não chegam ao produto (resolver 2); a
+/// lista de produção do `seele-app` em `RULES` não muda, e a dependência normal
+/// ou de build nestes crates continua reprovada.
+const DEV_EXCEPTIONS: &[(&str, &[&str])] = &[(
+    "seele-app",
+    &["seele-audio", "seele-core", "seele-proto", "seele-encontro"],
+)];
+
+const DEV_KIND: &str = "dev-dependency";
+
+/// A aresta `kind` de `name` para `dependency` é uma exceção nominal?
+fn is_dev_exception(name: &str, dependency: &str, kind: &str) -> bool {
+    kind == DEV_KIND
+        && DEV_EXCEPTIONS
+            .iter()
+            .any(|(crate_name, deps)| *crate_name == name && deps.contains(&dependency))
+}
+
 /// One offending edge in the workspace graph.
 #[derive(Debug, PartialEq, Eq)]
 struct Violation {
@@ -211,6 +258,7 @@ fn evaluate(name: &str, edges: &[(String, &'static str)]) -> Vec<Violation> {
         .iter()
         .filter(|(dependency, _)| is_workspace_crate(dependency))
         .filter(|(dependency, _)| !allowed.contains(&dependency.as_str()))
+        .filter(|(dependency, kind)| !is_dev_exception(name, dependency, kind))
         .map(|(dependency, kind)| Violation {
             message: format!(
                 "`{name}` declares a {kind} on `{dependency}`, which the dependency \
@@ -382,6 +430,18 @@ mod tests {
     }
 
     #[test]
+    fn o_enlace_e_comum_aos_dois_lados_e_nao_ve_nenhum() {
+        // Contrato da 0.17, D1: o transporte é um só, e os dois lados o veem.
+        assert!(evaluate("seele-server", &[edge("seele-enlace")]).is_empty());
+        assert!(evaluate("seele-core", &[edge("seele-enlace")]).is_empty());
+        assert!(evaluate("seele-enlace", &[edge("seele-proto")]).is_empty());
+        // E ele não vê sessão nem servidor: é folha acima do protocolo.
+        assert_eq!(evaluate("seele-enlace", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-enlace", &[edge("seele-server")]).len(), 1);
+        assert_eq!(evaluate("seele-enlace", &[edge("seele-sessao")]).len(), 1);
+    }
+
+    #[test]
     fn the_conformance_crate_may_see_both_ends() {
         // The documented exception. It exists so an end-to-end test has a home
         // that is not a hole in the rule.
@@ -405,6 +465,60 @@ mod tests {
         // argue about, not a table entry to copy.
         assert_eq!(evaluate("seele-server", &[edge("seele-core")]).len(), 1);
         assert_eq!(evaluate("seele-core", &[edge("seele-server")]).len(), 1);
+    }
+
+    /// ADR 0065: os testes do app que chamam os comandos de verdade só existem
+    /// dentro do crate binário. A exceção é nominal e só de dev-dependency.
+    #[test]
+    fn o_app_ve_quatro_crates_so_como_dev_dependency() {
+        for dependency in ["seele-audio", "seele-core", "seele-proto", "seele-encontro"] {
+            assert!(
+                evaluate("seele-app", &[dev_edge(dependency)]).is_empty(),
+                "dev-dependency do app em {dependency}"
+            );
+            // A de produção continua reprovada.
+            assert_eq!(
+                evaluate("seele-app", &[edge(dependency)]).len(),
+                1,
+                "dependência normal do app em {dependency}"
+            );
+            // E a de build também.
+            assert_eq!(
+                evaluate("seele-app", &[(dependency.to_owned(), "build-dependency")]).len(),
+                1,
+                "build-dependency do app em {dependency}"
+            );
+        }
+        // A lista de produção não mudou.
+        for dependency in ["seele-ffi", "seele-server", "seele-lancador", "seele-motor"] {
+            assert!(evaluate("seele-app", &[edge(dependency)]).is_empty());
+        }
+    }
+
+    #[test]
+    fn a_excecao_do_app_nao_cobre_outras_dev_dependencies_nem_outros_pacotes() {
+        // Outro crate do workspace, fora da lista, como dev-dependency do app.
+        assert_eq!(evaluate("seele-app", &[dev_edge("seele-video")]).len(), 1);
+        assert_eq!(evaluate("seele-app", &[dev_edge("seele-enlace")]).len(), 1);
+        // A exceção é do app: nenhum outro pacote a herda.
+        for name in ["seele-lancador", "seele-instalador", "xtask"] {
+            for dependency in ["seele-audio", "seele-core", "seele-proto", "seele-encontro"] {
+                assert_eq!(
+                    evaluate(name, &[dev_edge(dependency)]).len(),
+                    1,
+                    "{name} dev-dep {dependency}"
+                );
+            }
+        }
+        for dependency in ["seele-audio", "seele-core", "seele-encontro"] {
+            assert_eq!(evaluate("seele-server", &[dev_edge(dependency)]).len(), 1);
+        }
+    }
+
+    #[test]
+    fn a_tela_so_aparece_na_conformidade_como_exceção_documentada() {
+        assert!(evaluate("seele-conformance", &[dev_edge("seele-video")]).is_empty());
+        assert_eq!(evaluate("seele-app", &[edge("seele-video")]).len(), 1);
     }
 
     #[test]

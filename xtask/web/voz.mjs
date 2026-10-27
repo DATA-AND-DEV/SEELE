@@ -69,6 +69,31 @@ const igual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   confere("envio", igual(pacotes, doDesktop), `os pacotes saíram ${JSON.stringify(pacotes)}, e não ${JSON.stringify(doDesktop)}`);
 }
 
+// ------------------------------------- a partida pela hora da página
+// A voz nova parte da hora que a página manda (`timeOrigin + now()`), e não do
+// zero: depois de 15 e de 60 min de voz (tempo simulado, sem esperar), a nova
+// parte à frente do fim da velha pelos 22 s fora. Sem a hora (a página antiga),
+// o zero de antes, que é o que os blocos acima usam.
+{
+  const opus = new Uint8Array(40).fill(0xab);
+  const carimboDoPacote = () => {
+    const carimbo = e.voz_carimbo_do_quadro(1, 0);
+    const codigo = comBytes(opus, (p, n) => e.voz_empacotar(carimbo, p, n));
+    confere("partida", codigo === 0, `o datagrama voltou ${codigo}`);
+    return new DataView(saida().buffer).getUint32(7);
+  };
+  for (const minutos of [15, 60]) {
+    const comeco = 1_792_910_000_000;
+    e.voz_envio(77, comeco);
+    for (let q = 0; q < minutos * 60 * 50; q++) e.voz_quadro_passou();
+    const fimDaVelha = carimboDoPacote();
+    e.voz_envio(77, comeco + minutos * 60_000 + 22_000);
+    e.voz_quadro_passou();
+    const adiante = (carimboDoPacote() - fimDaVelha) | 0;
+    confere("partida", adiante >= 22 * 48_000 && adiante <= 22 * 48_000 + 2 * 960, `depois de ${minutos} min, a voz nova partiu ${adiante} amostras do fim da velha`);
+  }
+}
+
 // ------------------------------------------------------------- a recepção
 {
   const EU = 5;

@@ -15,6 +15,10 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 seele-proto = { path = "../crates/seele-proto" }
+# O envelope dos canais (contrato D4) mora no enlace, e não no proto: é dele
+# que o `ler` sai, e é ele que os dois lados chamam antes de qualquer outra
+# coisa.
+seele-enlace = { path = "../crates/seele-enlace" }
 
 [[bin]]
 name = "version_negotiation"
@@ -51,6 +55,22 @@ bench = false
 [[bin]]
 name = "datagrama_do_encontro"
 path = "fuzz_targets/datagrama_do_encontro.rs"
+test = false
+doc = false
+bench = false
+
+# O corpo do `POST /sinal/1`, que o ponto lê de qualquer navegador (ADR 0063).
+[[bin]]
+name = "sinal_do_encontro"
+path = "fuzz_targets/sinal_do_encontro.rs"
+test = false
+doc = false
+bench = false
+
+# O envelope de todo canal de dados menos a voz (contrato D4).
+[[bin]]
+name = "envelope"
+path = "fuzz_targets/envelope.rs"
 test = false
 doc = false
 bench = false

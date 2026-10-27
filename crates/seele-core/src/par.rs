@@ -4,41 +4,37 @@
 //! uma frase — *«custa um caminho que este produto nunca teve»*. Este módulo é
 //! esse caminho, e a spec de 05/09 conta por que ele passou a valer a pena.
 //!
-//! # Por que o certificado não vem do `seele-server`
+//! # Desde a 0.17: WebRTC, e a ponta da sessão
 //!
-//! O `tls.rs` de lá faz a mesma coisa, e o ADR 0002 proíbe o `seele-core` de
-//! depender do daemon. Repetir as poucas linhas de `rcgen` é o que `crate::tela`
-//! já decidiu para as constantes de enquadramento, e pela mesma razão:
-//! *«quarenta linhas repetidas custam menos que um crate de transporte que os
-//! dois dependeriam e nenhum seria dono»*. O que não pode divergir é o
-//! **formato da impressão digital**, e ele não diverge porque os dois lados
-//! chamam `seele_proto::transport::certificate_fingerprint`.
+//! Até a 0.16 os dois pares falavam QUIC, e quem atendia armava um
+//! `ServerConfig` na ponta de quem discava o servidor. Agora a ponta de cada
+//! sessão ([`crate::transporte::PontaDaSessao`]) já nasce anfitriã (ICE completo e controlado), com
+//! o certificado DTLS da **identidade de par** desta sessão, e com o portão
+//! fechado. [`passar_a_atender`] abre o portão e [`parar_de_atender`] o fecha.
+//!
+//! # A identidade é apresentação, e não TOFU
+//!
+//! O ADR 0003 vale para o `seele://`, onde a primeira vez tem de ser confiada.
+//! Aqui há um intermediário: os dois clientes já fixaram o mesmo servidor e se
+//! autenticaram nele por chave (ADR 0004), e é o servidor quem diz a cada um a
+//! impressão do outro (`SirvaTelaPara`, `AssistaTelaPor`). Os dois lados
+//! conferem:
+//!
+//! - **quem disca** confere a impressão do certificado DTLS de quem atendeu,
+//!   antes de trocar um byte de aplicação ([`ligar`]);
+//! - **quem atende** confere a impressão do certificado DTLS de quem chegou, e
+//!   derruba quem não é o apresentado antes de qualquer tela sair ([`atender`]).
+//!
+//! O formato da impressão é um só, `seele_proto::transport::certificate_fingerprint`.
 
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, SignatureScheme};
+use crate::transporte::{CertificadoDtls, Conexao, PontaDaSessao};
 
-/// Um certificado e a chave que assina por ele.
-pub struct Identidade {
-    /// O certificado, em DER.
-    pub cadeia: Vec<CertificateDer<'static>>,
-    /// A chave privada, em DER.
-    pub chave: PrivateKeyDer<'static>,
-}
+/// A identidade de par de uma sessão: o certificado DTLS que a ponta dela
+/// apresenta. **Nunca vai para o disco** ([`identidade_efemera`]).
+pub type Identidade = CertificadoDtls;
 
-impl Clone for Identidade {
-    // Não dá para `#[derive(Clone)]`: `PrivateKeyDer` não implementa `Clone`,
-    // só `clone_key()`. Quem chama `passar_a_atender` e depois `ligar` na
-    // mesma ponta precisa das duas — a função consome a identidade — então
-    // este `Clone` existe para essa cópia, e não para persistência nenhuma:
-    // continua tudo em memória, como `identidade_efemera` documenta.
-    fn clone(&self) -> Self {
-        Self {
-            cadeia: self.cadeia.clone(),
-            chave: self.chave.clone_key(),
-        }
-    }
-}
+/// O código com que quem atende fecha a conexão de quem não foi apresentado.
+pub const CODIGO_PAR_RECUSADO: u32 = 0x5345_0020;
 
 /// Por que o caminho entre pares não deu certo.
 ///
@@ -49,10 +45,10 @@ pub enum ErroDePar {
     /// Não deu para gerar o certificado desta sessão.
     #[error("não deu para gerar o certificado deste par: {0}")]
     Certificado(String),
-    /// Não deu para pôr a ponta a atender.
+    /// Não deu para pôr a ponta a atender, ou a discagem não pôde sair.
     #[error("não deu para pôr esta ponta a atender: {0}")]
     Escuta(String),
-    /// Nenhum dos endereços fechou aperto de mão.
+    /// Nenhum dos endereços respondeu ao ICE.
     #[error("nenhum endereço deste par respondeu")]
     NaoAlcancou,
     /// Alguém respondeu, e não era quem o servidor apresentou.
@@ -67,67 +63,42 @@ pub enum ErroDePar {
         /// O que veio no aperto de mão.
         veio: String,
     },
-    /// Fechou aperto de mão do lado de quem disca, e quem atendeu recusou.
+    /// O DTLS fechou do lado de quem disca, e quem atendeu recusou.
     ///
-    /// **Não é o mesmo que [`Self::NaoAlcancou`].** Alguém respondeu, e a
-    /// discagem chegou a concluir seu lado do TLS — o 1.3 considera isso
-    /// pronto assim que processa o `Finished` do par, antes de saber se o par
-    /// vai aceitar a contrapartida (o certificado de cliente que
-    /// `ConfereQuemChega` pode exigir do lado de quem atende). A recusa
-    /// chega depois, como fechamento desta conexão.
+    /// **Não é o mesmo que [`Self::NaoAlcancou`].** Alguém respondeu e o DTLS
+    /// fechou; quem atende confere o certificado de quem chegou **depois**, e a
+    /// recusa chega como o fechamento desta conexão, antes da confirmação.
     #[error("a ligação fechou logo depois de conectar: {0}")]
     RecusadoDepoisDeLigar(MotivoDaRecusa),
     /// Alguém completou o aperto de mão, e o prazo venceu antes da
     /// confirmação de aplicação.
     ///
-    /// **Não é [`Self::NaoAlcancou`], pela mesma razão que
-    /// [`Self::ImpressaoNaoBate`] não é.** Aquele é silêncio total: nenhum
-    /// candidato respondeu. Aqui, pelo menos um respondeu e completou o
-    /// TLS — só não trocou o byte de confirmação a tempo, e dizer «nenhum
-    /// endereço deste par respondeu» seria falso. Também não
-    /// é [`Self::RecusadoDepoisDeLigar`]: aquele já tem um `CONNECTION_CLOSE`
-    /// de verdade para classificar; aqui não chegou fechamento nenhum, só o
-    /// prazo de `ligar` venceu primeiro.
+    /// **Não é [`Self::NaoAlcancou`]**: pelo menos um respondeu e completou o
+    /// DTLS — só não trocou o byte de confirmação a tempo.
     #[error("um candidato completou o aperto de mão, e o prazo venceu antes da confirmação")]
     ConfirmacaoNaoChegouATempo,
     /// O repasse de tela para um par parou no meio.
     ///
-    /// **Não é [`Self::Escuta`], e a diferença importa para quem lê o log.**
-    /// `Escuta` documenta «não deu para pôr esta ponta a atender» — a frase
-    /// certa para um `set_server_config` que falhou, e enganosa para um par
-    /// que caiu no meio de uma transmissão de tela já em andamento. Cobre três
-    /// causas: o fluxo QUIC não abriu ou parou de aceitar bytes (o par caiu,
-    /// ou mandou `STOP_SENDING`), ou os bytes que chegaram de quem está do
-    /// outro lado de [`crate::par::repassar`] já não formam um enquadramento
-    /// válido (ver [`crate::tela::Enquadramento::entrada`]) — o que quer dizer
-    /// que o repasse já não sabe mais onde um quadro-chave começaria, e
-    /// continuar seria repassar lixo.
+    /// **Não é [`Self::Escuta`]**: cobre o canal que não abriu ou parou de
+    /// aceitar bytes (o par caiu, ou cortou), ou os bytes que chegam de quem
+    /// está do outro lado de [`repassar`] que já não formam um enquadramento
+    /// válido (ver [`crate::tela::Enquadramento::entrada`]).
     #[error("o repasse de tela para o par parou: {0}")]
     Repasse(String),
 }
 
 /// Por que a conexão fechou depois que quem disca já a considerava pronta.
 ///
-/// **Enumerado, não texto solto** — `specs/02-protocolo.md` e o ADR 0012
-/// exigem isto de todo motivo de erro que chega à interface, e
-/// [`ErroDePar::ImpressaoNaoBate`] é o molde. Vem do `error_code` que o
-/// `CONNECTION_CLOSE` do `quinn` carrega: um alerta TLS, na faixa
-/// `0x100..0x200` de [RFC 8446 §6], quando é uma recusa de certificado — e
-/// qualquer outra coisa quando não é.
-///
-/// [RFC 8446 §6]: https://www.rfc-editor.org/rfc/rfc8446#section-6
+/// **Enumerado, não texto solto** — `specs/02-protocolo.md` e o ADR 0012.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MotivoDaRecusa {
-    /// `certificate_required` (alerta 116): quem atendeu exige certificado de
-    /// cliente, e não veio nenhum.
-    #[error("não apresentou certificado nenhum")]
-    SemCertificado,
-    /// `handshake_failure` (40), `bad_certificate` (42) ou `unknown_ca` (48):
-    /// veio um certificado, e quem atendeu não o aceitou.
+    /// Quem atendeu fechou com [`CODIGO_PAR_RECUSADO`]: o certificado de quem
+    /// discou não é o que o servidor apresentou.
+    ///
+    /// Desde a 0.17 não há «sem certificado»: o DTLS sempre apresenta um.
     #[error("apresentou um certificado que não foi aceito")]
     CertificadoErrado,
-    /// Fechou por outro motivo, sem relação com a conferência de certificado
-    /// — prazo, reinício do par, ou algo que este catálogo ainda não nomeia.
+    /// Fechou por outro motivo, sem relação com a conferência de certificado.
     #[error("{0}")]
     Outro(String),
 }
@@ -136,399 +107,39 @@ pub enum MotivoDaRecusa {
 ///
 /// # Errors
 ///
-/// Falha se o `rcgen` não gerar chave ou certificado.
+/// Falha se o certificado não puder ser gerado.
 pub fn identidade_efemera() -> Result<Identidade, ErroDePar> {
-    // A forma exata que `tela.rs:2049` já usa neste crate, e por isso está
-    // provada contra esta versão do `rcgen`. Não invente outra.
-    let gerado = rcgen::generate_simple_self_signed(vec!["seele-par".to_owned()])
-        .map_err(|erro| ErroDePar::Certificado(erro.to_string()))?;
-    let cadeia = vec![CertificateDer::from(gerado.cert.der().to_vec())];
-    let chave = rustls::pki_types::PrivatePkcs8KeyDer::from(gerado.signing_key.serialize_der());
-    Ok(Identidade {
-        cadeia,
-        chave: chave.into(),
-    })
+    CertificadoDtls::efemero().map_err(|erro| ErroDePar::Certificado(erro.to_string()))
 }
 
-/// A impressão digital que o servidor vai apresentar por esta identidade.
+/// A impressão digital que esta identidade apresenta, no formato de sempre.
 #[must_use]
 pub fn impressao(identidade: &Identidade) -> String {
-    identidade.cadeia.first().map_or_else(String::new, |cert| {
-        seele_proto::transport::certificate_fingerprint(cert.as_ref())
-    })
+    crate::client::hex(&identidade.impressao())
 }
 
-/// Diz a uma ponta que já existe que ela também atende.
+/// Diz à ponta desta sessão que ela também atende.
 ///
 /// **Só é chamada quando a pessoa optou por emprestar a subida.** Quem não
-/// optou nunca passa por aqui, e a ponta dela continua só discando, como antes
-/// desta onda existir.
+/// optou nunca passa por aqui, e a ponta dela continua só discando.
 ///
-/// `impressao_de_quem_vem` é a impressão digital de quem vai discar para esta
-/// ponta — a mesma que a mensagem `SirvaTelaPara` carrega. Sem ela, a conexão
-/// que *chega* nunca passaria pelo `ConfereQuemChega`, porque os dois lados
-/// discam e qualquer um pode acabar sendo quem aceita.
-///
-/// **Não guarda a identidade para quando esta mesma ponta disca.** Quem
-/// também vai chamar [`ligar`] nesta ponta precisa passar a própria
-/// identidade a ela — ver o parâmetro `identidade_propria` de [`ligar`] —,
-/// porque esta função já consome a que recebeu.
-///
-/// # Errors
-///
-/// Falha se o `rustls` recusar o certificado ou a chave.
-pub fn passar_a_atender(
-    ponta: &quinn::Endpoint,
-    identidade: Identidade,
-    impressao_de_quem_vem: String,
-) -> Result<(), ErroDePar> {
-    let mut tls = rustls::ServerConfig::builder()
-        .with_client_cert_verifier(std::sync::Arc::new(ConfereQuemChega::nova(
-            impressao_de_quem_vem,
-        )))
-        .with_single_cert(identidade.cadeia, identidade.chave)
-        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    let quic = quinn::crypto::rustls::QuicServerConfig::try_from(tls)
-        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
-    ponta.set_server_config(Some(quinn::ServerConfig::with_crypto(std::sync::Arc::new(
-        quic,
-    ))));
-    Ok(())
+/// Não muda a porta nem abre socket: é a mesma ponta que fala com o servidor,
+/// e naquela porta o mapeamento de NAT já está vivo (§3.1 da spec de 05/09).
+pub fn passar_a_atender(ponta: &PontaDaSessao) {
+    ponta.armar();
 }
-
-/// Por quanto tempo [`parar_de_atender`] ainda recusa uma ligação que chegue
-/// depois de a corrida em [`atender`]/[`ligar`] já ter um vencedor, antes de
-/// desarmar de verdade.
-///
-/// **Curta de propósito.** Uma sobra de verdade — a segunda de duas
-/// tentativas simultâneas para a mesma pessoa — chega dentro de um RTT da
-/// vencedora, não de um prazo de discagem inteiro: as duas saem do mesmo
-/// [`ligar`], no mesmo instante. Ver o doc de [`parar_de_atender`] para o
-/// pânico que a janela evita.
-const JANELA_DE_SOBRAS: std::time::Duration = std::time::Duration::from_millis(150);
 
 /// Desarma o que [`passar_a_atender`] armou.
 ///
-/// **Não é limpeza opcional — achado do fix round 3.** Sem isto, a ponta
-/// continua aceitando conexões pelo resto da sessão, muito depois de a única
-/// vaga de [`atender`] já ter sido servida, com o verificador ainda fixado na
-/// impressão do **último** par apontado. E QUIC sem `use_retry` responde ao
-/// primeiro pacote de quem quer que bata, antes de qualquer autenticação:
-/// uma porta armada é um refletor de amplificação (até 3× o `Initial`
-/// recebido, contra qualquer endereço de origem que o pacote alegue) por todo
-/// esse tempo — não só enquanto está de fato servindo alguém.
-///
-/// Chame depois que [`atender`] devolver, sirva ele ou não sirva. A conexão
-/// de controle desta mesma ponta não é afetada: `set_server_config` só rege
-/// o que a ponta faz com um `Initial` que chega, e uma conexão já
-/// estabelecida não passa por aí de novo.
-///
-/// # Por que esta função drena sobras antes de desarmar, e não quem a chama
-///
-/// **O perigo mora aqui, no `set_server_config(None)`, e não em nenhum
-/// ponto de chamada** — então é aqui que o guarda tem de estar, onde ninguém
-/// que vier a chamar `parar_de_atender` (o subprojeto B, um teste novo desta
-/// função) pode esquecê-lo.
-///
-/// [`ligar`] disca todos os endereços declarados em paralelo, e
-/// `enlace::locais_a_publicar` pode declarar mais de um endereço para a
-/// mesma pessoa — o local de rede e o público que o servidor viu. Quando os
-/// dois caem no mesmo soquete do outro lado — sempre em `localhost`, e em
-/// rede real atrás de um roteador com NAT *hairpin* —, o `quinn` enxerga isso
-/// como **duas** tentativas de ligação separadas para a mesma pessoa, não uma
-/// só. [`atender`] aceita a primeira que chega; a segunda fica esquecida no
-/// `quinn`, sem ninguém para aceitá-la ou recusá-la, porque `atender` serve
-/// **uma** vaga só.
-///
-/// Se essa sobra continuar esquecida quando esta função zera o
-/// `ServerConfig` da ponta, uma retransmissão dela — o `quinn` reenvia o
-/// pacote inicial de toda tentativa sem resposta — encontra a rota ainda
-/// indexada e o servidor já desarmado, e o `quinn-proto` 0.11.16
-/// (`endpoint.rs:217`) entra em pânico num `.unwrap()` que supõe o contrário.
-/// O pânico é num `Drop`, então não é só a tentativa que morre: **o processo
-/// inteiro aborta**. `crates/seele-conformance/tests/tela_por_um_par.rs`
-/// reproduz isto toda vez que roda, porque o servidor de testes escuta em
-/// `127.0.0.1` e a máquina de CI sempre tem pelo menos uma interface de rede
-/// além do loopback.
-///
-/// # `refuse`, e não `ignore` — mas não pela razão que uma versão anterior
-/// deste doc registrou
-///
-/// As duas limpam o mesmo estado: `Incoming::refuse` e `Incoming::ignore`
-/// chamam, os dois, `clean_up_incoming` por dentro do `quinn`
-/// (`endpoint.rs:715` e `785` do `quinn-proto` 0.11.16) — tirar a entrada do
-/// índice não é privilégio de um dos dois, e uma versão anterior deste doc
-/// dizia o contrário. A diferença real é o que sai no fio: `refuse` manda um
-/// `CONNECTION_REFUSED` na hora; `ignore` não manda nada. Escolho `refuse`
-/// porque avisa quem perdeu a corrida imediatamente, em vez de deixá-lo
-/// esperando o próprio prazo de discagem inteiro por um silêncio que já era
-/// definitivo — não porque `ignore` deixasse a sobra presa (não deixa).
-pub async fn parar_de_atender(ponta: &quinn::Endpoint) {
-    while let Ok(Some(sobrando)) = tokio::time::timeout(JANELA_DE_SOBRAS, ponta.accept()).await {
-        tracing::debug!(
-            par = %sobrando.remote_address(),
-            "uma segunda tentativa de ligação da mesma corrida foi recusada"
-        );
-        sobrando.refuse();
-    }
-    ponta.set_server_config(None);
-}
-
-/// Confere quem **chega**, contra a impressão que o servidor apresentou.
-///
-/// Espelho de [`ConfereImpressao`] na outra direção. As duas existem porque os
-/// dois lados discam: quem disca confere com aquele, quem atende confere com
-/// este, e sem os dois metade das ligações não passaria por conferência nenhuma.
-#[derive(Debug)]
-pub(crate) struct ConfereQuemChega {
-    esperada: String,
-    provedor: std::sync::Arc<rustls::crypto::CryptoProvider>,
-}
-
-impl ConfereQuemChega {
-    /// Um verificador de cliente que só aceita esta impressão digital.
-    #[must_use]
-    pub(crate) fn nova(esperada: String) -> Self {
-        Self {
-            esperada,
-            provedor: std::sync::Arc::new(rustls::crypto::ring::default_provider()),
-        }
-    }
-}
-
-impl rustls::server::danger::ClientCertVerifier for ConfereQuemChega {
-    fn client_auth_mandatory(&self) -> bool {
-        // Um par que não apresente certificado nenhum tem de ser recusado, não
-        // aceito por omissão — é a diferença entre este verificador e
-        // `with_no_client_auth()`, que aceitava qualquer um.
-        true
-    }
-
-    fn root_hint_subjects(&self) -> &[rustls::DistinguishedName] {
-        // Não há autoridade a sugerir: a conferência é por impressão digital,
-        // não por cadeia.
-        &[]
-    }
-
-    fn verify_client_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _now: UnixTime,
-    ) -> Result<rustls::server::danger::ClientCertVerified, rustls::Error> {
-        let veio = seele_proto::transport::certificate_fingerprint(end_entity.as_ref());
-        if veio == self.esperada {
-            Ok(rustls::server::danger::ClientCertVerified::assertion())
-        } else {
-            // Quem chegou não é quem foi apresentado. O rastro diz o que veio
-            // e o que se esperava — a mesma regra do `CLAUDE.md` deste
-            // repositório de que o rastro conta qual endereço, não só que algo
-            // falhou.
-            tracing::warn!(
-                esperada = %self.esperada,
-                veio = %veio,
-                "um par que chegou apresentou uma impressão digital diferente da esperada"
-            );
-            Err(rustls::Error::General(format!(
-                "o par apresentou {veio}, e esperava-se {esperada}",
-                esperada = self.esperada
-            )))
-        }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.provedor.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.provedor.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provedor
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-}
-
-/// Onde o verificador deixa o [`ErroDePar`] que o `rustls` não sabe carregar.
-///
-/// **É o que salva a distinção entre «ninguém respondeu» e «alguém respondeu
-/// no lugar dele».** O `rustls` só aceita de volta um `rustls::Error`, e o
-/// nosso motivo tipado teria de virar `Error::General(String)` no caminho —
-/// depois disso, quem disca só teria texto de mensagem para comparar. Esta
-/// vaga é uma segunda saída para o erro de verdade: o verificador o deixa aqui
-/// antes de responder ao `rustls`, e [`ligar`] o recolhe quando a conexão
-/// falha. Uma vaga por tentativa, criada em [`config_de_cliente`], então não
-/// há duas discagens a disputá-la.
-pub(crate) type Relato = std::sync::Arc<std::sync::Mutex<Option<ErroDePar>>>;
-
-/// Aceita **um** certificado, o que o servidor apresentou, e nenhum outro.
-///
-/// Espelho do `TofuVerifier` de `crate::tofu`, com a diferença que é o assunto
-/// todo: aquele **aprende** na primeira vez e guarda; este não aprende nada e
-/// não guarda nada. A impressão digital chega pelo servidor a cada
-/// apresentação, então não há primeira vez a confiar.
-#[derive(Debug)]
-pub(crate) struct ConfereImpressao {
-    esperada: String,
-    provedor: std::sync::Arc<rustls::crypto::CryptoProvider>,
-    relato: Relato,
-}
-
-impl ConfereImpressao {
-    /// Um verificador que só aceita esta impressão digital.
-    ///
-    /// A impressão é dada, e não lida do certificado nem do nome TLS, porque
-    /// quem a apresenta é o servidor: o par não tem como vouchear por si
-    /// mesmo. O nome TLS aqui é só um rótulo — este verificador nunca o
-    /// confere —, e é a mesma razão pela qual `TofuVerifier::new` recebe a
-    /// chave de pino em vez de a deduzir.
-    #[must_use]
-    pub(crate) fn nova(esperada: String) -> Self {
-        Self {
-            esperada,
-            provedor: std::sync::Arc::new(rustls::crypto::ring::default_provider()),
-            relato: Relato::default(),
-        }
-    }
-
-    /// A conferência em si, fora do `trait`, para o teste poder afirmá-la sem
-    /// montar uma sessão TLS inteira.
-    pub(crate) fn confere(&self, certificado: &CertificateDer<'_>) -> Result<(), ErroDePar> {
-        let veio = seele_proto::transport::certificate_fingerprint(certificado.as_ref());
-        if veio == self.esperada {
-            Ok(())
-        } else {
-            Err(ErroDePar::ImpressaoNaoBate {
-                esperada: self.esperada.clone(),
-                veio,
-            })
-        }
-    }
-}
-
-impl ServerCertVerifier for ConfereImpressao {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, rustls::Error> {
-        self.confere(end_entity)
-            .map(|()| ServerCertVerified::assertion())
-            .map_err(|erro| {
-                // O motivo tipado sai por aqui **antes** de ser achatado em
-                // texto; ver [`Relato`]. Se a vaga estiver envenenada, quem
-                // discou cai em `NaoAlcancou`, que é pior mas não é errado.
-                if let Ok(mut vaga) = self.relato.lock() {
-                    *vaga = Some(erro.clone());
-                }
-                rustls::Error::General(erro.to_string())
-            })
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.provedor.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.provedor.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provedor
-            .signature_verification_algorithms
-            .supported_schemes()
-    }
-}
-
-/// O `ClientConfig` com que se disca para um par, e a vaga do motivo.
-///
-/// Devolve as duas coisas porque a configuração sozinha não basta: quando o
-/// aperto de mão falha, o `quinn` só sabe dizer que falhou, e o motivo tipado
-/// está na [`Relato`] que o verificador desta configuração — e só ele — enche.
-/// Separá-las obrigaria [`ligar`] a adivinhar qual vaga é de qual discagem.
-///
-/// `identidade_propria` é o que esta ponta apresenta como certificado de
-/// cliente, dada por quem chama — ver o parâmetro de mesmo nome em
-/// [`ligar`]. Sem ela a discagem sai sem certificado nenhum, e só serve
-/// contra um par cujo `ConfereQuemChega` ainda não seja mandatório.
-///
-/// # Errors
-///
-/// Falha se o `rustls` recusar a configuração.
-pub(crate) fn config_de_cliente(
-    esperada: String,
-    identidade_propria: Option<&Identidade>,
-) -> Result<(quinn::ClientConfig, Relato), ErroDePar> {
-    let confere = ConfereImpressao::nova(esperada);
-    let relato = std::sync::Arc::clone(&confere.relato);
-    let sem_certificado = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(std::sync::Arc::new(confere));
-    let mut tls = match identidade_propria {
-        Some(identidade) => sem_certificado
-            .with_client_auth_cert(identidade.cadeia.clone(), identidade.chave.clone_key())
-            .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?,
-        None => sem_certificado.with_no_client_auth(),
-    };
-    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-    let quic = quinn::crypto::rustls::QuicClientConfig::try_from(tls)
-        .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
-    Ok((quinn::ClientConfig::new(std::sync::Arc::new(quic)), relato))
+/// **Não é limpeza opcional — achado do fix round 3.** Armada, a ponta cria
+/// estado para todo Binding que chegue. Desarmada, o `admitir` recusa antes de
+/// criar qualquer coisa. Chame depois que [`atender`] devolver, sirva ele ou
+/// não sirva. A conexão de controle desta mesma ponta não é afetada.
+pub fn parar_de_atender(ponta: &PontaDaSessao) {
+    ponta.desarmar();
 }
 
 /// Como a ligação com um par foi conseguida.
-///
-/// **É metade da razão de o subprojeto A existir.** Toda a aritmética da malha
-/// supõe que dois clientes domésticos se alcançam, e ninguém mediu isso. Se o
-/// furo falhar em boa parte dos pares, a árvore do subprojeto B não pode supor
-/// que qualquer par se alcança — e vira «árvore entre quem se alcança, estrela
-/// para o resto», que é um desenho bem diferente.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComoChegou {
     /// Mesma rede: nenhum furo foi necessário.
@@ -538,320 +149,224 @@ pub enum ComoChegou {
 }
 
 /// Um par ligado, e o que a ligação ensinou.
-#[derive(Debug)]
 pub struct ParLigado {
     /// A conexão viva.
-    pub conexao: quinn::Connection,
+    pub conexao: Conexao,
     /// Como ela foi conseguida.
     pub como: ComoChegou,
-    /// O ida e volta que o `quinn` está medindo nela. É o custo de um salto.
+    /// O ida e volta que o ICE mediu nela. É o custo de um salto.
     pub ida_e_volta: std::time::Duration,
 }
 
-/// Disca para um par e devolve a primeira conexão que fechar.
+impl std::fmt::Debug for ParLigado {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParLigado")
+            .field("par", &self.conexao.remote_address())
+            .field("como", &self.como)
+            .field("ida_e_volta", &self.ida_e_volta)
+            .finish()
+    }
+}
+
+/// A impressão de um texto hex de 64 dígitos, ou nada.
+fn impressao_em_bytes(texto: &str) -> Option<[u8; 32]> {
+    if texto.len() != 64 {
+        return None;
+    }
+    let mut bytes = [0_u8; 32];
+    for (indice, byte) in bytes.iter_mut().enumerate() {
+        let par = texto.get(indice * 2..indice * 2 + 2)?;
+        *byte = u8::from_str_radix(par, 16).ok()?;
+    }
+    Some(bytes)
+}
+
+/// Disca para um par e devolve a ligação, conferida e confirmada.
 ///
-/// Todos os endereços em paralelo, como o ADR 0037 faz para o servidor: uma
-/// lista tentada em série multiplica o pior caso pelo número de candidatos, e o
-/// pior caso é justamente o endereço que não responde.
+/// **Todos os endereços num agente ICE só** (D2 da 0.17), como o servidor: o
+/// ICE tenta os candidatos juntos e fica com o primeiro par que responde.
 ///
-/// **Só disca.** Quem atende do outro lado é o laço de [`quinn::Endpoint::accept`]
-/// de quem chamou [`passar_a_atender`] — o `quinn` enfileira a tentativa que
-/// chega e não responde nada até alguém a aceitar. As duas coisas juntas é que
-/// são o furo: a discagem abre o mapeamento de NAT desta ponta, e o atendimento
-/// deixa entrar a discagem que vem pelo mapeamento aberto do outro lado.
+/// # Um impostor na lista não derruba a discagem
+///
+/// A lista de um par mistura endereço de LAN e endereço público, e um deles
+/// estar obsoleto — reciclado por outra máquina — é cenário de todo dia. Se o
+/// ICE ficar com quem responde no lugar do par, a impressão não bate: o evento
+/// de segurança vai ao `warn!` na hora, a conexão fecha antes de qualquer byte
+/// de aplicação, **e a discagem continua com os endereços que sobram**.
+/// `ImpressaoNaoBate` só é devolvido se ninguém mais vencer.
 ///
 /// # Errors
 ///
-/// Cinco motivos, e a diferença entre eles é a diferença entre cinco consertos
-/// — numa casa em que o motivo enumerado é contrato de casca (ADR 0012), uma
-/// lista incompleta aqui é a casca escolhendo a frase errada:
-///
-/// - [`ErroDePar::NaoAlcancou`] — nenhum dos endereços respondeu dentro do
-///   prazo. É o silêncio: rede, NAT, endereço velho.
+/// - [`ErroDePar::NaoAlcancou`] — nenhum endereço respondeu ao ICE no prazo.
 /// - [`ErroDePar::ImpressaoNaoBate`] — alguém respondeu e não era quem o
-///   servidor apresentou. Único motivo que é evento de segurança, e o único
-///   que desacredita a declaração de quem foi apontado.
-/// - [`ErroDePar::RecusadoDepoisDeLigar`] — o aperto de mão fechou deste lado
-///   e quem atendeu recusou a contrapartida. Leva o [`MotivoDaRecusa`] dentro.
-/// - [`ErroDePar::ConfirmacaoNaoChegouATempo`] — alguém completou o TLS e o
-///   prazo venceu antes da troca do byte de confirmação. Não é
-///   `NaoAlcancou`: houve resposta.
-/// - [`ErroDePar::Escuta`] — a configuração de cliente desta discagem não
-///   pôde ser montada, `connect_with` recusou o endereço na hora, ou uma
-///   tentativa morreu sem responder por si.
-///
-/// [`ErroDePar::Certificado`] e [`ErroDePar::Repasse`] **não** saem daqui: o
-/// primeiro é de [`passar_a_atender`], o segundo de [`repassar`].
+///   servidor apresentou.
+/// - [`ErroDePar::RecusadoDepoisDeLigar`] — quem atendeu recusou a identidade
+///   desta sessão.
+/// - [`ErroDePar::ConfirmacaoNaoChegouATempo`] — alguém completou o DTLS e o
+///   prazo venceu antes da troca do byte de confirmação.
+/// - [`ErroDePar::Escuta`] — a impressão pedida não é uma impressão, ou a
+///   ponta fechou.
 pub async fn ligar(
-    ponta: &quinn::Endpoint,
+    ponta: &PontaDaSessao,
     enderecos: &[std::net::SocketAddr],
     impressao_esperada: String,
-    identidade_propria: Option<&Identidade>,
     prazo: std::time::Duration,
 ) -> Result<ParLigado, ErroDePar> {
-    let mut tentativas = tokio::task::JoinSet::new();
-    // **Marca se alguma tentativa chegou a completar o TLS.** Uma tentativa
-    // presa em `confirmar_com_quem_atende` quando o prazo vence é abortada
-    // sem nunca devolver nada — e sem esta marca, `ultimo` continuaria no
-    // `NaoAlcancou` inicial, que é falso: alguém respondeu, e completou o
-    // aperto de mão. É a mesma distinção que faz `ImpressaoNaoBate` não ser
-    // `NaoAlcancou`, só que para um candidato que trava depois de conectar
-    // em vez de mentir sobre quem é.
-    let apertou_a_mao = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    for endereco in enderecos {
-        // `config_de_cliente` roda aqui, fora da tarefa, e devolve uma
-        // configuração já dona dos próprios bytes — é o que deixa
-        // `identidade_propria` (emprestada de quem chamou `ligar`, e por
-        // isso não `'static`) de fora do `async move` logo abaixo.
-        let (config, relato) = config_de_cliente(impressao_esperada.clone(), identidade_propria)?;
-        let ponta = ponta.clone();
-        let endereco = *endereco;
-        let apertou_a_mao = std::sync::Arc::clone(&apertou_a_mao);
-        // Cada tentativa devolve **o próprio endereço** junto do resultado. Sem
-        // isso, o rastro diz que «um endereço» falhou sem dizer qual, e o que
-        // sobra no fim do prazo não tem nome nenhum.
-        tentativas.spawn(async move {
-            let tentada = async {
-                let ligando = ponta
-                    .connect_with(config, endereco, "seele-par")
-                    .map_err(|erro| ErroDePar::Escuta(erro.to_string()))?;
-                let conexao = ligando
-                    .await
-                    .map_err(|erro| classificar(&relato, endereco, &erro))?;
-                apertou_a_mao.store(true, std::sync::atomic::Ordering::Relaxed);
-                // **O aperto de mão do lado de quem disca conclui antes de
-                // saber se o par vai aceitar a contrapartida.** O TLS 1.3
-                // considera a sessão pronta assim que processa o `Finished`
-                // do par — antes de enviar, e muito antes de o par validar, o
-                // certificado de cliente que o `ConfereQuemChega` dele pode
-                // exigir. Uma recusa por causa disso chega como fechamento
-                // desta conexão, não como erro deste `.await`; a troca de um
-                // byte com quem atende, a seguir, é o sinal determinístico de
-                // que a ligação foi mesmo aceita.
-                if let Err(motivo) = confirmar_com_quem_atende(&conexao).await {
-                    tracing::warn!(
-                        par = %endereco,
-                        %motivo,
-                        "a ligação fechou logo depois de conectar"
-                    );
-                    return Err(ErroDePar::RecusadoDepoisDeLigar(motivo));
-                }
-                Ok::<_, ErroDePar>((conexao, como_chegou(endereco)))
-            }
-            .await;
-            (endereco, tentada)
-        });
-    }
-
-    let mut no_ar = enderecos.to_vec();
-    let mut ultimo = ErroDePar::NaoAlcancou;
+    let Some(esperada) = impressao_em_bytes(&impressao_esperada.to_ascii_lowercase()) else {
+        return Err(ErroDePar::Escuta(format!(
+            "a impressão apresentada não é um SHA-256 em hex: {impressao_esperada}"
+        )));
+    };
     let ate = tokio::time::Instant::now() + prazo;
-    // O laço é explícito para o fim saber **por que** acabou: um `while let`
-    // não distingue «venceu o prazo» de «todas as tentativas responderam», e a
-    // linha de rastro lá embaixo mente se confundir as duas.
-    let mut venceu_o_prazo = false;
-    loop {
-        let acabou = match tokio::time::timeout_at(ate, tentativas.join_next()).await {
-            Err(_) => {
-                venceu_o_prazo = true;
+    let mut restantes: Vec<std::net::SocketAddr> = enderecos.to_vec();
+    let mut ultimo = ErroDePar::NaoAlcancou;
+    while !restantes.is_empty() {
+        let falta = ate.saturating_duration_since(tokio::time::Instant::now());
+        if falta.is_zero() {
+            break;
+        }
+        let mut discagem =
+            crate::transporte::Discagem::nova(restantes.clone(), crate::transporte::Pino::Qualquer);
+        discagem.prazo = falta;
+        discagem.certificado = Some(ponta.identidade().clone());
+        let conexao = match ponta.ponta().discar(discagem).await {
+            Ok(conexao) => conexao,
+            Err(crate::transporte::FalhaAoDiscar::PontaFechada) => {
+                return Err(ErroDePar::Escuta("a ponta desta sessão fechou".to_owned()));
+            }
+            Err(falha) => {
+                tracing::debug!(%falha, ?restantes, "estes endereços do par não fecharam aperto");
                 break;
             }
-            Ok(None) => break,
-            Ok(Some(acabou)) => acabou,
         };
-        let (endereco, tentada) = match acabou {
-            Ok(devolvido) => devolvido,
-            Err(erro) => {
-                // A tarefa nem chegou a devolver endereço; é o único caso em
-                // que o rastro não sabe de quem fala.
-                tracing::warn!(%erro, "uma tentativa de ligação morreu sem responder");
-                ultimo = ErroDePar::Escuta(erro.to_string());
-                continue;
-            }
-        };
-        if let Some(posicao) = no_ar.iter().position(|candidato| *candidato == endereco) {
-            no_ar.remove(posicao);
+        let veio = conexao.impressao_dtls_do_par();
+        let onde = conexao.remote_address();
+        if veio != esperada {
+            let motivo = ErroDePar::ImpressaoNaoBate {
+                esperada: impressao_esperada.clone(),
+                veio: crate::client::hex(&veio),
+            };
+            // **Notícia, e não pode esperar o fim da discagem.**
+            tracing::warn!(par = %onde, %motivo, "alguém respondeu no lugar do par");
+            conexao.close(CODIGO_PAR_RECUSADO, b"impressao");
+            restantes.retain(|endereco| {
+                endereco.ip().to_canonical() != onde.ip().to_canonical()
+                    || endereco.port() != onde.port()
+            });
+            ultimo = motivo;
+            continue;
         }
-        match tentada {
-            Ok((conexao, como)) => {
+        let falta = ate.saturating_duration_since(tokio::time::Instant::now());
+        return match tokio::time::timeout(falta, confirmar_com_quem_atende(&conexao)).await {
+            Ok(Ok(())) => {
                 let ida_e_volta = conexao.rtt();
-                // **Por qual endereço a ligação entrou, dito por extenso** — a
-                // lição do `e56dbb2`, que consertou a mesma falta na corrida de
-                // candidatos do servidor. Sem esta linha só dava para inferir
-                // pelos milissegundos, e a inferência erra.
-                tracing::info!(
-                    par = %conexao.remote_address(),
-                    ?como,
-                    ?ida_e_volta,
-                    "um par ligou"
-                );
-                if !no_ar.is_empty() {
-                    tracing::debug!(?no_ar, "estas tentativas foram abandonadas: outra venceu");
-                }
-                // A primeira que fecha vence; as outras são abandonadas, e
-                // abandoná-las é o que fecha as conexões que sobraram.
-                tentativas.abort_all();
-                return Ok(ParLigado {
+                let como = como_chegou(onde);
+                tracing::info!(par = %onde, ?como, ?ida_e_volta, "um par ligou");
+                Ok(ParLigado {
                     conexao,
                     como,
                     ida_e_volta,
-                });
+                })
             }
-            // **A impressão que não bate ganha do silêncio no fim — e só no
-            // fim.** Devolvê-la na hora seria preempção, não precedência: um
-            // único endereço obsoleto da lista, reciclado por outra máquina,
-            // mataria a discagem inteira antes de o endereço legítimo fechar o
-            // aperto de mão um instante depois. Quem consegue pôr um endereço
-            // na lista teria negação de serviço de graça. A impostura já saiu
-            // no `warn!` da `classificar`, que é onde ela é notícia; aqui ela
-            // só espera, e é o motivo devolvido se ninguém vencer.
-            Err(erro) => {
-                if !matches!(ultimo, ErroDePar::ImpressaoNaoBate { .. }) {
-                    ultimo = erro;
-                }
+            Ok(Err(motivo)) => {
+                tracing::warn!(par = %onde, %motivo, "a ligação fechou logo depois de conectar");
+                Err(ErroDePar::RecusadoDepoisDeLigar(motivo))
             }
-        }
-    }
-    if venceu_o_prazo && !no_ar.is_empty() {
-        // O prazo venceu com gente no ar. O que essas tentativas teriam a
-        // dizer morre no `abort`, então o rastro diz ao menos **quais** eram —
-        // a alternativa é uma falha que não deixa nome nenhum para trás.
-        tracing::info!(
-            ?prazo,
-            ?no_ar,
-            "o prazo venceu e estes endereços do par ainda não tinham respondido"
-        );
-        tentativas.abort_all();
-    }
-    // **A tentativa abortada não teve como falar por si.** Se `ultimo` ainda
-    // é o `NaoAlcancou` de largada, e alguma tentativa chegou a completar o
-    // TLS, `NaoAlcancou` está mentindo — foi abortada depois de apertar a
-    // mão, não por silêncio nenhum.
-    if matches!(ultimo, ErroDePar::NaoAlcancou)
-        && apertou_a_mao.load(std::sync::atomic::Ordering::Relaxed)
-    {
-        ultimo = ErroDePar::ConfirmacaoNaoChegouATempo;
+            Err(_) => Err(ErroDePar::ConfirmacaoNaoChegouATempo),
+        };
     }
     Err(ultimo)
 }
 
 /// Atende **uma** ligação de par, e devolve o que chegou.
 ///
-/// Uma só, e não um laço: no A1 quem empresta serve um par por vez, e um laço
-/// aqui prometeria a topologia que o subprojeto B ainda vai desenhar.
+/// Uma só, e não um laço: no A1 quem empresta serve um par por vez.
 ///
-/// **É a metade que faltava de [`passar_a_atender`].** Instalar o
-/// `ServerConfig` não basta: o `quinn` enfileira a tentativa que chega e não
-/// responde nada até alguém chamar [`quinn::Endpoint::accept`]. Sem esta
-/// função, dois pares que só chamem [`ligar`] nunca se ligam.
+/// Quem chega e não apresenta `impressao_de_quem_vem` — a impressão que o
+/// servidor apresentou em `SirvaTelaPara` — é derrubado com
+/// [`CODIGO_PAR_RECUSADO`] antes de qualquer canal de aplicação, e a espera
+/// continua pelo par certo até `prazo`.
 ///
-/// `prazo_de_confirmacao` limita só a espera **depois** do aperto de mão, pela
-/// troca de byte que substitui o relógio em [`ligar`] (ver
-/// `confirmar_com_quem_atende`). **É obrigatório, e não um enfeite:** sem
-/// prazo nenhum, `accept_bi` fica preso ao `max_idle_timeout` do `quinn`
-/// (30 s nos padrões 0.11.11 deste crate) se o par ficar calado —
-/// **indefinidamente** se ele mandar qualquer coisa para manter a conexão
-/// viva sem nunca abrir o fluxo. Como esta função serve **uma** vaga só, um
-/// par autenticado e parado nega a vaga inteira de quem empresta a subida
-/// até vencer esse relógio. Não limita a espera por alguém chegar — essa,
-/// por desenho, não tem prazo.
+/// `prazo_de_confirmacao` limita a espera **depois** do aperto de mão, pela
+/// troca de byte de [`confirmar_com_quem_atende`]: sem ele, um par autenticado
+/// e parado prenderia a vaga inteira.
 ///
-/// `None` quando a ponta fechou sem ninguém chegar, quando quem chegou não
-/// completou o aperto de mão — inclusive por `ConfereQuemChega` ter recusado
-/// o certificado apresentado —, ou quando apertou a mão e não confirmou
-/// dentro do prazo.
+/// `None` quando o prazo venceu sem o par certo, a ponta fechou, ou quem chegou
+/// não confirmou a tempo.
 pub async fn atender(
-    ponta: quinn::Endpoint,
+    ponta: &PontaDaSessao,
+    impressao_de_quem_vem: &str,
+    prazo: std::time::Duration,
     prazo_de_confirmacao: std::time::Duration,
 ) -> Option<ParLigado> {
-    let chegando = ponta.accept().await?;
-    // Lido **antes** do `.await` que segue: `chegando` já sabe de onde a
-    // tentativa veio, e uma recusa por aí não pode ficar sem nome — é a
-    // mesma regra do `CLAUDE.md` deste repositório que a Task 4 já pagou por
-    // ignorar uma vez.
-    let remoto = chegando.remote_address();
-    let conexao = match chegando.await {
-        Ok(conexao) => conexao,
-        Err(erro) => {
-            tracing::warn!(par = %remoto, %erro, "uma ligação que chegou não fechou o aperto de mão");
-            return None;
-        }
-    };
-    // A metade de quem atende na troca que substitui o relógio em `ligar` —
-    // ver `confirmar_com_quem_atende`. Com prazo próprio: sem ele, um par que
-    // aperta a mão e some prenderia esta vaga até o `max_idle_timeout` do
-    // `quinn` — ou para sempre, se mandar qualquer coisa para manter a
-    // conexão viva.
-    match tokio::time::timeout(prazo_de_confirmacao, confirmar_para_quem_ligou(&conexao)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(erro)) => {
-            tracing::warn!(par = %remoto, %erro, "a troca de confirmação com quem ligou falhou");
-            return None;
-        }
-        Err(_elapsed) => {
+    let esperada = impressao_em_bytes(&impressao_de_quem_vem.to_ascii_lowercase())?;
+    let ate = tokio::time::Instant::now() + prazo;
+    loop {
+        let conexao = tokio::time::timeout_at(ate, ponta.ponta().aceitar())
+            .await
+            .ok()??;
+        let remoto = conexao.remote_address();
+        let veio = conexao.impressao_dtls_do_par();
+        if veio != esperada {
             tracing::warn!(
                 par = %remoto,
-                ?prazo_de_confirmacao,
-                "quem ligou apertou a mão e não confirmou dentro do prazo"
+                esperada = %impressao_de_quem_vem,
+                veio = %crate::client::hex(&veio),
+                "um par que chegou apresentou uma impressão digital diferente da esperada"
             );
-            return None;
+            conexao.close(CODIGO_PAR_RECUSADO, b"impressao");
+            continue;
         }
+        match tokio::time::timeout(prazo_de_confirmacao, confirmar_para_quem_ligou(&conexao)).await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(erro)) => {
+                tracing::warn!(par = %remoto, %erro, "a troca de confirmação com quem ligou falhou");
+                return None;
+            }
+            Err(_) => {
+                tracing::warn!(
+                    par = %remoto,
+                    ?prazo_de_confirmacao,
+                    "quem ligou apertou a mão e não confirmou dentro do prazo"
+                );
+                conexao.close(CODIGO_PAR_RECUSADO, b"sem confirmacao");
+                return None;
+            }
+        }
+        let ida_e_volta = conexao.rtt();
+        let como = como_chegou(remoto);
+        tracing::info!(par = %remoto, ?como, ?ida_e_volta, "um par foi atendido");
+        return Some(ParLigado {
+            conexao,
+            como,
+            ida_e_volta,
+        });
     }
-    let ida_e_volta = conexao.rtt();
-    let como = como_chegou(conexao.remote_address());
-    tracing::info!(par = %conexao.remote_address(), ?como, ?ida_e_volta, "um par foi atendido");
-    Some(ParLigado {
-        conexao,
-        como,
-        ida_e_volta,
-    })
 }
 
 /// Escreve uma transmissão de tela para um par, por pedaço, a partir do
 /// primeiro quadro-chave.
 ///
-/// **É o trabalho todo do subprojeto A.** As sete tarefas anteriores fazem
-/// dois clientes se ligarem; nenhuma faz um byte de tela atravessar. É esta
-/// função — chamada por quem empresta a subida, com `ligado` sendo o par que
-/// não alcança o servidor — que faz o quadro passar de um lado ao outro.
-///
 /// # Por pedaço, e nunca remontando quadro
 ///
-/// A mesma regra do encaminhamento do servidor, pela mesma razão: um fluxo
-/// QUIC é uma sequência ordenada de bytes, e esperar o quadro inteiro para
-/// repassar acrescenta um tempo de quadro de atraso **a cada salto**. Numa
-/// árvore de profundidade três isso é três quadros, que é o orçamento
-/// inteiro. Por isso `repassar` escreve cada pedaço assim que chega, sem
-/// jamais montar um quadro para depois desmontá-lo.
+/// A mesma regra do encaminhamento do servidor: esperar o quadro inteiro para
+/// repassar acrescenta um tempo de quadro de atraso **a cada salto**.
 ///
 /// # A abertura vai primeiro, e pedaço nenhum antes dela
 ///
 /// Quem recebe usa `crate::tela::Recepcao::do_fluxo`, que lê o byte de tipo e
-/// o [`seele_proto::screen::ScreenHeader`] antes de qualquer coisa. Um pedaço
-/// que chegasse antes deslocaria o enquadramento **para sempre** — é o defeito
-/// que o §5.2 do desenho de compartilhamento de tela nomeia, e ele não se
-/// corrige depois.
+/// o [`seele_proto::screen::ScreenHeader`] antes de qualquer coisa.
 ///
 /// # Quem entra por um par entra num quadro-chave
 ///
-/// Ligar no meio de um quadro é ligar em lixo. O servidor já sabe disto:
-/// `EmCurso::esperando`, em `crates/seele-server/src/voice_room.rs`, segura
-/// quem chega numa lista de espera até o próximo quadro-chave. `repassar` faz
-/// o mesmo, com o mesmo instrumento que o servidor usa para achar a
-/// fronteira: um [`crate::tela::Enquadramento`] que **conta bytes** através
-/// dos pedaços, em vez de supor que o primeiro byte de cada pedaço é sempre
-/// um byte de tipo — suposição que um pedaço `[quadro comum][quadro-chave]`
-/// (dois quadros, um pedaço só) ou um quadro comum partido ao meio entre dois
-/// pedaços quebra das duas formas possíveis: descartando o quadro-chave que
-/// vinha depois do comum, ou lendo o meio de um quadro comum como se fosse um
-/// cabeçalho novo — `Enquadramento::entrada` explica os dois casos por
-/// extenso. `repassar` descarta todo pedaço até o primeiro em que
-/// `Enquadramento::entrada` acha um quadro-chave, repassa desse deslocamento
-/// em diante, e a partir daí não descarta mais nada.
+/// Um [`crate::tela::Enquadramento`] **conta bytes** através dos pedaços para
+/// achar onde um quadro-chave começa; tudo antes dele é descartado, e nada
+/// depois.
 ///
 /// # Errors
 ///
-/// [`ErroDePar::Repasse`] quando o fluxo não abre, um pedaço não escreve, os
+/// [`ErroDePar::Repasse`] quando o canal não abre, um pedaço não escreve, os
 /// bytes que chegam já não formam um enquadramento válido, ou o par não
 /// confirma o fim da transmissão.
 pub async fn repassar(
@@ -865,19 +380,7 @@ pub async fn repassar(
         .open_uni()
         .await
         .map_err(|erro| ErroDePar::Repasse(erro.to_string()))?;
-    // Abaixo de tudo o mais que esta máquina escreve — a mesma prioridade que
-    // todo outro fluxo de tela do produto usa
-    // (`crate::tela::Transmissao::abrir`, `seele-server/src/tela.rs::bombear`,
-    // os dois com `PRIORIDADE_DA_TELA`). Quem repassa é quem empresta a
-    // subida, e está numa chamada de voz — o §3.2 («a voz nunca cede à
-    // tela») também se sustenta por esta linha. Só falha em fluxo já
-    // fechado, que aqui acabou de nascer; mesmo assim não vale derrubar o
-    // repasse por uma prioridade não aplicada.
     let _ = fluxo.set_priority(crate::tela::PRIORIDADE_DA_TELA);
-    // O tipo do fluxo antes do cabeçalho, e o cabeçalho antes de qualquer
-    // pedaço — a mesma ordem que `crate::tela::Transmissao::abrir` já escreve
-    // para o servidor, porque é a mesma leitura que `Recepcao::do_fluxo` faz
-    // do outro lado, venha o fluxo de onde vier.
     fluxo
         .write_all(&[seele_proto::stream::StreamType::Screen.byte()])
         .await
@@ -888,11 +391,6 @@ pub async fn repassar(
         .map_err(|erro| ErroDePar::Repasse(erro.to_string()))?;
     tracing::info!(%par, "repasse de tela para o par começou");
 
-    // Conta bytes através dos pedaços para achar onde um quadro-chave começa
-    // — ver a seção acima. Chamado em **todo** pedaço, mesmo depois de
-    // `viu_a_chave` virar `true`: é assim que este laço continua sabendo,
-    // quadro a quadro, se os bytes que chegam ainda formam um enquadramento
-    // válido.
     let mut enquadramento = crate::tela::Enquadramento::novo();
     let mut viu_a_chave = false;
     let mut descartados = 0_u64;
@@ -928,77 +426,40 @@ pub async fn repassar(
     fluxo
         .finish()
         .map_err(|erro| ErroDePar::Repasse(erro.to_string()))?;
-    // Espera o par confirmar antes de devolver. Sem isto, devolver soltaria o
-    // lado de envio e os últimos pedaços podiam ainda não ter saído — o mesmo
-    // achado que `Client::send_attachment` já documenta em `client.rs`: quem
-    // chama `repassar` não teria como saber quando é seguro soltar o par.
-    match fluxo.stopped().await {
-        Ok(None) => {
+    // Espera o par confirmar antes de devolver: sem isto, quem chama não teria
+    // como saber quando é seguro soltar o par.
+    match fluxo.entregue().await {
+        Ok(()) => {
             tracing::info!(%par, "repasse de tela para o par terminou e foi confirmado");
             Ok(())
         }
-        Ok(Some(codigo)) => Err(ErroDePar::Repasse(format!(
-            "o par parou de aceitar bytes (código {codigo})"
-        ))),
         Err(erro) => Err(ErroDePar::Repasse(erro.to_string())),
     }
 }
 
 /// De onde a imagem desta transmissão vai vir.
-///
-/// `Box` em [`Self::Par`] porque [`ParLigado`] carrega uma [`quinn::Connection`]
-/// e [`Self::Servidor`] não carrega nada além do motivo: sem a caixa o `enum`
-/// inteiro teria o tamanho da maior variante, e o `clippy::large_enum_variant`
-/// reclamaria com razão — a variante pequena pagaria pelo tamanho da grande a
-/// cada vez que aparecesse.
 #[derive(Debug)]
 pub enum PorOndeAssistir {
     /// Por este par.
     Par(Box<ParLigado>),
     /// Pelo servidor, como sempre — e por quê.
     ///
-    /// **Achado do fix round 1 da Task 8.** A primeira versão não devolvia
-    /// motivo nenhum, só o registrava no `tracing`; mas o motivo enumerado
-    /// existe para o **servidor** saber o que aconteceu, não só para quem lê
-    /// o log desta máquina. `ImpressaoNaoBate` é o evento de segurança que o
-    /// §4 da spec quer contado como tal, e escondê-lo dentro de um
-    /// `NaoAlcancou` genérico apagaria a diferença entre «ninguém respondeu» e
-    /// «alguém respondeu no lugar do par» bem no ponto em que ela mais
-    /// importa: o relato que chega ao servidor.
+    /// O motivo enumerado existe para o **servidor** saber o que aconteceu:
+    /// `ImpressaoNaoBate` é o evento de segurança que o §4 da spec quer contado.
     Servidor(seele_proto::control::MotivoDeFalhaDePar),
 }
 
 /// Tenta o par, e cai para o servidor sem drama quando ele não vem.
 ///
-/// **Nunca devolve erro**, e é de propósito: quem chama não tem decisão a tomar
-/// sobre a falha. A malha é alívio; falhar nela é voltar ao caminho de antes
-/// dela existir, e isso não é um erro, é o normal — a mesma regra que a spec de
-/// 05/09 registra: ninguém perde imagem por causa da máquina de outra pessoa.
-///
-/// `identidade_propria` é o que esta ponta apresenta como certificado de
-/// cliente ao discar — ver o parâmetro de mesmo nome em [`ligar`]. **Não é
-/// opcional na prática**, mesmo sendo `Option` aqui: a parede simétrica da
-/// Task 5 faz quem atende exigir certificado sempre
-/// (`ConfereQuemChega::client_auth_mandatory`), então quem chama sem
-/// identidade recebe `RecusadoDepoisDeLigar(SemCertificado)` de qualquer par
-/// que exista de verdade. `None` só serve para o caso em que não há
-/// identidade nenhuma a apresentar — o que hoje não deveria acontecer, porque
-/// `enlace::Motor` declara a própria identidade ao servidor assim que conecta
-/// (ver o doc de `Motor::declarar_identidade_de_par`), empreste ela a subida
-/// ou não.
-///
-/// O motivo enumerado da falha **não some**: vai para o `tracing` **e** para o
-/// [`PorOndeAssistir::Servidor`] que esta função devolve — quem chama não
-/// precisa mais adivinhar ou achatar tudo num motivo genérico para avisar o
-/// servidor.
+/// **Nunca devolve erro**, e é de propósito: a malha é alívio; falhar nela é
+/// voltar ao caminho de antes dela existir.
 pub async fn por_onde(
-    ponta: &quinn::Endpoint,
+    ponta: &PontaDaSessao,
     enderecos: &[std::net::SocketAddr],
     impressao: String,
-    identidade_propria: Option<&Identidade>,
     prazo: std::time::Duration,
 ) -> PorOndeAssistir {
-    match ligar(ponta, enderecos, impressao, identidade_propria, prazo).await {
+    match ligar(ponta, enderecos, impressao, prazo).await {
         Ok(ligado) => PorOndeAssistir::Par(Box::new(ligado)),
         Err(erro) => {
             let motivo = motivo_de_falha(&erro);
@@ -1009,22 +470,7 @@ pub async fn por_onde(
 }
 
 /// Traduz o motivo detalhado de [`ligar`] para o motivo enumerado que o
-/// protocolo leva ao servidor.
-///
-/// **Duas traduções exatas, e o resto é rotina.**
-/// [`ErroDePar::ImpressaoNaoBate`] é evento de segurança — alguém respondeu no
-/// lugar de quem o servidor apresentou — e vira
-/// [`MotivoDeFalhaDePar::ImpressaoNaoBate`].
-/// [`ErroDePar::RecusadoDepoisDeLigar`] é o inverso — quem respondeu **era**
-/// quem o servidor apresentou, e foi ele que recusou a identidade que eu
-/// ofereci — e vira [`MotivoDeFalhaDePar::NaoFuiAceito`] (fix round 2: os dois
-/// pedem consertos opostos do lado do servidor, e viajar como o mesmo motivo
-/// escondia essa diferença). Tudo o mais — certificado que não gerou, ponta
-/// que não abriu, silêncio, confirmação que não chegou a tempo — é rotina de
-/// rede sem nada a provar sobre nenhuma declaração, e cai em
-/// [`MotivoDeFalhaDePar::NaoAlcancou`]: a leitura mais honesta disponível sem
-/// inventar uma das outras duas variantes, que descrevem falhas de **depois**
-/// de já estar servindo (`CaiuNoMeio`, `ParouDeMandar`), não desta discagem.
+/// protocolo leva ao servidor. Duas traduções exatas, e o resto é rotina.
 fn motivo_de_falha(erro: &ErroDePar) -> seele_proto::control::MotivoDeFalhaDePar {
     match erro {
         ErroDePar::ImpressaoNaoBate { .. } => {
@@ -1033,11 +479,6 @@ fn motivo_de_falha(erro: &ErroDePar) -> seele_proto::control::MotivoDeFalhaDePar
         ErroDePar::RecusadoDepoisDeLigar(_) => {
             seele_proto::control::MotivoDeFalhaDePar::NaoFuiAceito
         }
-        // `Repasse` nunca sai de `ligar` — só de `repassar`, bem depois de a
-        // ligação já ter sido dada por boa — então esta função nunca a
-        // recebe de verdade. O braço existe só para a exaustão do `match`;
-        // cai no mesmo balde de rotina de rede por não ter nada a provar
-        // sobre a declaração publicada, a mesma razão dos outros três.
         ErroDePar::Certificado(_)
         | ErroDePar::Escuta(_)
         | ErroDePar::NaoAlcancou
@@ -1048,16 +489,13 @@ fn motivo_de_falha(erro: &ErroDePar) -> seele_proto::control::MotivoDeFalhaDePar
 
 /// Se este endereço é da mesma rede, e portanto não precisou de furo.
 fn como_chegou(endereco: std::net::SocketAddr) -> ComoChegou {
-    let local = match endereco.ip() {
+    let local = match endereco.ip().to_canonical() {
         std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback() || v4.is_link_local(),
         std::net::IpAddr::V6(v6) => {
             v6.is_loopback()
                 || v6.segments().first().is_some_and(|s| {
-                    // `fc00::/7`, o endereço único local, e `fe80::/10`, o
-                    // link-local — o par de `is_private()` e `is_link_local()`
-                    // do lado v4. Nenhum dos dois atravessa roteador, então
-                    // quem chega por eles está na mesma rede e não furou nada.
-                    // O `std` sabe dizer isto, mas só em API instável.
+                    // `fc00::/7` e `fe80::/10`, o par de `is_private()` e
+                    // `is_link_local()` do lado v4.
                     s & 0xfe00 == 0xfc00 || s & 0xffc0 == 0xfe80
                 })
         }
@@ -1071,41 +509,33 @@ fn como_chegou(endereco: std::net::SocketAddr) -> ComoChegou {
 
 /// Troca um byte com quem atende, e só então dá a ligação por boa.
 ///
-/// **Por que existe, e por que não é um relógio.** No TLS 1.3, quem disca
-/// conclui seu lado do aperto de mão assim que processa o `Finished` do
-/// par — antes de o par validar a contrapartida que ele próprio pediu (o
-/// certificado de cliente que `ConfereQuemChega` pode exigir). Uma recusa por
-/// causa disso chega como `CONNECTION_CLOSE`, e esse datagrama **não se
-/// retransmite sozinho**: perdido ele, um relógio (folga de RTT, o desenho
-/// anterior desta função) deixaria `ligar` dar por boa uma ligação que o
-/// outro lado já fechou. Um fluxo de aplicação que só fecha depois de o
-/// outro lado responder é o sinal determinístico: numa conexão recusada, o
-/// `open_bi` ou a leitura seguinte falha com o `ConnectionError` de verdade,
-/// sem margem e sem relógio.
-///
-/// [`confirmar_para_quem_ligou`] é a metade que responde, do lado de
-/// [`atender`].
-async fn confirmar_com_quem_atende(conexao: &quinn::Connection) -> Result<(), MotivoDaRecusa> {
+/// **Por que existe.** Quem atende confere o certificado de quem chegou depois
+/// do DTLS; uma recusa chega como o fechamento desta conexão. Um canal de
+/// aplicação que só fecha depois de o outro lado responder é o sinal
+/// determinístico: numa conexão recusada, a abertura ou a leitura seguinte
+/// falha com o motivo de verdade.
+async fn confirmar_com_quem_atende(conexao: &Conexao) -> Result<(), MotivoDaRecusa> {
     let (mut envio, mut recebe) = conexao
         .open_bi()
         .await
-        .map_err(|erro| motivo_da_recusa(&erro))?;
-    if let Err(erro) = envio.write_all(&[0]).await {
-        return Err(motivo_do_erro_de_envio(erro));
-    }
-    let mut resposta = [0u8; 1];
-    if let Err(erro) = recebe.read_exact(&mut resposta).await {
-        return Err(motivo_do_erro_de_leitura(erro));
-    }
+        .map_err(|motivo| motivo_da_recusa(conexao, &motivo.to_string()))?;
+    envio
+        .write_all(&[0])
+        .await
+        .map_err(|erro| motivo_da_recusa(conexao, &erro.to_string()))?;
+    let mut resposta = [0_u8; 1];
+    recebe
+        .read_exact(&mut resposta)
+        .await
+        .map_err(|erro| motivo_da_recusa(conexao, &erro.to_string()))?;
     let _ = envio.finish();
     Ok(())
 }
 
-/// A metade de [`atender`] na troca de [`confirmar_com_quem_atende`]: lê o
-/// byte que quem discou mandou, e devolve outro.
-async fn confirmar_para_quem_ligou(conexao: &quinn::Connection) -> Result<(), std::io::Error> {
+/// A metade de [`atender`] na troca de [`confirmar_com_quem_atende`].
+async fn confirmar_para_quem_ligou(conexao: &Conexao) -> Result<(), std::io::Error> {
     let (mut envio, mut recebe) = conexao.accept_bi().await.map_err(std::io::Error::other)?;
-    let mut byte = [0u8; 1];
+    let mut byte = [0_u8; 1];
     recebe
         .read_exact(&mut byte)
         .await
@@ -1115,81 +545,15 @@ async fn confirmar_para_quem_ligou(conexao: &quinn::Connection) -> Result<(), st
     Ok(())
 }
 
-/// Classifica um `ConnectionError` pelo alerta TLS que o `CONNECTION_CLOSE`
-/// carrega, quando ele carrega um.
-///
-/// Os números são os do registro de alertas da TLS — [RFC 8446 §6] —, e o
-/// `quinn` os expõe como `TransportErrorCode::crypto(alerta)` na faixa
-/// `0x100..0x200`.
-///
-/// [RFC 8446 §6]: https://www.rfc-editor.org/rfc/rfc8446#section-6
-fn motivo_da_recusa(erro: &quinn::ConnectionError) -> MotivoDaRecusa {
-    let quinn::ConnectionError::ConnectionClosed(fechamento) = erro else {
-        return MotivoDaRecusa::Outro(erro.to_string());
-    };
-    if fechamento.error_code == quinn::TransportErrorCode::crypto(116) {
-        // `certificate_required`.
-        MotivoDaRecusa::SemCertificado
-    } else if [40, 42, 48]
-        .into_iter()
-        .any(|alerta| fechamento.error_code == quinn::TransportErrorCode::crypto(alerta))
-    {
-        // `handshake_failure`, `bad_certificate`, `unknown_ca`.
-        MotivoDaRecusa::CertificadoErrado
-    } else {
-        MotivoDaRecusa::Outro(erro.to_string())
-    }
-}
-
-/// Recolhe o `ConnectionError` de dentro de um erro de envio, se houver um.
-fn motivo_do_erro_de_envio(erro: quinn::WriteError) -> MotivoDaRecusa {
-    match erro {
-        quinn::WriteError::ConnectionLost(erro) => motivo_da_recusa(&erro),
-        outro => MotivoDaRecusa::Outro(outro.to_string()),
-    }
-}
-
-/// Recolhe o `ConnectionError` de dentro de um erro de leitura, se houver um.
-fn motivo_do_erro_de_leitura(erro: quinn::ReadExactError) -> MotivoDaRecusa {
-    match erro {
-        quinn::ReadExactError::ReadError(quinn::ReadError::ConnectionLost(erro)) => {
-            motivo_da_recusa(&erro)
-        }
-        outro => MotivoDaRecusa::Outro(outro.to_string()),
-    }
-}
-
-/// Traduz uma falha de conexão para o motivo enumerado, e a registra.
-///
-/// **Sem comparar texto de mensagem.** O motivo real é o que o verificador
-/// deixou na [`Relato`] desta discagem; o `quinn::ConnectionError` que chega
-/// aqui é a mesma falha vista de longe, já achatada, e serve só para o rastro.
-/// Vaga cheia é «alguém respondeu, e não era ele»; vaga vazia é silêncio —
-/// ninguém chegou a apresentar certificado nenhum.
-///
-/// Recebe o `endereco` porque é aqui que o rastro sabe de quem fala: uma linha
-/// que diz que «um endereço» falhou, numa lista de candidatos, não diz nada.
-fn classificar(
-    relato: &Relato,
-    endereco: std::net::SocketAddr,
-    erro: &quinn::ConnectionError,
-) -> ErroDePar {
-    match relato.lock().ok().and_then(|mut vaga| vaga.take()) {
-        Some(motivo @ ErroDePar::ImpressaoNaoBate { .. }) => {
-            // **Notícia, e não pode esperar o fim da discagem.** Quem discou
-            // pode até ligar por outro endereço e nunca devolver este erro —
-            // alguém ter respondido no lugar do par continua sendo o evento de
-            // segurança que o §4 da spec quer contado, e é contado aqui.
-            tracing::warn!(par = %endereco, %motivo, "alguém respondeu no lugar do par");
-            motivo
-        }
-        Some(outro) => outro,
-        None => {
-            // O produto sabe qual erro o `quinn` deu; `NaoAlcancou` não tem
-            // onde o guardar, e perdê-lo em silêncio é o defeito de sempre.
-            tracing::debug!(par = %endereco, %erro, "este endereço do par não fechou aperto de mão");
-            ErroDePar::NaoAlcancou
-        }
+/// Por que a conexão caiu durante a confirmação: o código de quem atendeu,
+/// quando a conexão já sabe que acabou, e o texto do canal quando não.
+fn motivo_da_recusa(conexao: &Conexao, texto: &str) -> MotivoDaRecusa {
+    match conexao.acabou() {
+        Some(crate::transporte::Motivo::Fechada {
+            codigo: CODIGO_PAR_RECUSADO,
+        }) => MotivoDaRecusa::CertificadoErrado,
+        Some(outro) => MotivoDaRecusa::Outro(outro.to_string()),
+        None => MotivoDaRecusa::Outro(texto.to_owned()),
     }
 }
 
@@ -1203,312 +567,224 @@ mod testes {
     use super::*;
 
     /// O prazo de confirmação que os testes deste módulo dão a `atender`.
-    ///
-    /// Generoso para `127.0.0.1` (onde um RTT real custa microssegundos) e
-    /// curto o bastante para um teste que trava por causa deste prazo faltar
-    /// não segurar a suíte pelos 30 s do `max_idle_timeout` do `quinn`, ou
-    /// pior, para sempre.
     const PRAZO_DE_CONFIRMACAO_NO_TESTE: std::time::Duration = std::time::Duration::from_secs(2);
 
-    /// Liga duas pontas de par, uma contra a outra, e devolve os dois lados.
-    ///
-    /// Extraído de `dois_pares_se_ligam_e_o_teste_sabe_como`, que já montava
-    /// exatamente isto — duplicar o bloco aqui seria dois lugares para
-    /// consertar no dia em que a assinatura de [`ligar`] mudar.
-    ///
-    /// Devolve a conexão **do lado de quem atende** (por onde um teste lê o
-    /// que [`repassar`] escreveu do outro lado), o `Endpoint` de quem discou
-    /// — soltá-lo cedo demais arrisca a conexão que ele sustenta, então quem
-    /// chama decide quando `drop`á-lo — e o [`ParLigado`] de quem discou, que
-    /// é o que [`repassar`] recebe.
-    async fn duas_pontas_ligadas() -> (quinn::Connection, quinn::Endpoint, ParLigado) {
-        let a = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ia = identidade_efemera().unwrap();
-        let impressao_a = impressao(&ia);
-        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ib = identidade_efemera().unwrap();
-        let impressao_b = impressao(&ib);
-        passar_a_atender(&a, ia, impressao_b).unwrap();
-        let endereco_a = a.local_addr().unwrap();
-        let atendendo_a = tokio::spawn(atender(a, PRAZO_DE_CONFIRMACAO_NO_TESTE));
+    /// O prazo de espera de `atender` nos testes.
+    const PRAZO_NO_TESTE: std::time::Duration = std::time::Duration::from_secs(5);
 
-        let ib_para_discar = ib.clone();
-        passar_a_atender(&b, ib, impressao_a.clone()).unwrap();
+    /// A ponta de uma sessão em `127.0.0.1`.
+    fn ponta() -> PontaDaSessao {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        crate::transporte::abrir_ponta(Some(socket)).unwrap()
+    }
 
+    /// Liga duas pontas de par: `a` atende `b`. Devolve a conexão do lado de
+    /// quem atende, a ponta de quem discou e o [`ParLigado`] de quem discou.
+    async fn duas_pontas_ligadas() -> (Conexao, PontaDaSessao, PontaDaSessao, ParLigado) {
+        let a = ponta();
+        let b = ponta();
+        passar_a_atender(&a);
+        let impressao_b = impressao(b.identidade());
+        let impressao_a = impressao(a.identidade());
+        let endereco_a = a.ponta().local_addr();
+        let atendendo = {
+            let a = a.clone();
+            tokio::spawn(async move {
+                atender(
+                    &a,
+                    &impressao_b,
+                    PRAZO_NO_TESTE,
+                    PRAZO_DE_CONFIRMACAO_NO_TESTE,
+                )
+                .await
+            })
+        };
         let ligado = ligar(
             &b,
             &[endereco_a],
             impressao_a,
-            Some(&ib_para_discar),
             std::time::Duration::from_secs(5),
         )
         .await
         .expect("os dois pares não se ligaram");
-
-        let do_lado_de_quem_atende = atendendo_a
+        let do_lado_de_quem_atende = atendendo
             .await
             .expect("a tarefa que atende travou")
             .expect("quem atende não recebeu ninguém");
-
-        (do_lado_de_quem_atende.conexao, b, ligado)
+        (do_lado_de_quem_atende.conexao, a, b, ligado)
     }
 
     #[test]
     fn cada_identidade_e_nova_e_a_impressao_a_distingue() {
-        // **Efêmero é o ponto, e não um detalhe.** O certificado do servidor é
-        // persistido porque o pino do ADR 0003 depende dele. Este não é pinado
-        // por ninguém: quem confere recebe a impressão digital pelo servidor a
-        // cada apresentação. Guardá-lo em disco criaria um identificador
-        // estável da máquina de quem empresta, que é metadado que ninguém pediu.
+        // **Efêmero é o ponto.** Guardar a identidade em disco criaria um
+        // identificador estável da máquina de quem empresta.
         let uma = identidade_efemera().unwrap();
         let outra = identidade_efemera().unwrap();
-        assert_ne!(
-            impressao(&uma),
-            impressao(&outra),
-            "duas identidades saíram com a mesma impressão: ela não distingue nada"
-        );
+        assert_ne!(impressao(&uma), impressao(&outra));
     }
 
     #[test]
     fn a_impressao_e_a_do_certificado_e_no_formato_de_sempre() {
-        // Um formato só para a mesma coisa. Se isto divergir de
-        // `certificate_fingerprint`, o pino do `seele://` e a apresentação
-        // entre pares passam a dizer o mesmo hash de dois jeitos, e um dia
-        // discordam.
         let identidade = identidade_efemera().unwrap();
-        let der = identidade.cadeia.first().unwrap();
         assert_eq!(
             impressao(&identidade),
-            seele_proto::transport::certificate_fingerprint(der.as_ref())
+            seele_proto::transport::certificate_fingerprint(identidade.der())
         );
-        assert_eq!(impressao(&identidade).len(), 64, "não é SHA-256 em hex");
-        assert!(impressao(&identidade)
-            .chars()
-            .all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn o_par_certo_passa_e_o_errado_e_recusado_com_o_motivo_certo() {
-        // **A identidade aqui não é TOFU — é apresentação.** O ADR 0003 vale para
-        // o `seele://`, onde não há intermediário e a primeira vez tem de ser
-        // confiada. Aqui há: os dois clientes já fixaram o mesmo servidor e já se
-        // autenticaram nele por chave pública (ADR 0004). O servidor ocupa o lugar
-        // que o link ocupa no `seele://`.
-        //
-        // Sem pino novo em disco, e sem par anônimo alimentando quadro.
-        let identidade = identidade_efemera().unwrap();
-        let der = identidade.cadeia.first().unwrap().clone();
-        let certa = impressao(&identidade);
-
-        assert!(ConfereImpressao::nova(certa.clone()).confere(&der).is_ok());
-
-        let erro = ConfereImpressao::nova("f".repeat(64))
-            .confere(&der)
-            .unwrap_err();
-        match erro {
-            ErroDePar::ImpressaoNaoBate { esperada, veio } => {
-                assert_eq!(esperada, "f".repeat(64));
-                assert_eq!(veio, certa);
-            }
-            outro => panic!("o motivo errado saiu de uma impressão que não bate: {outro:?}"),
-        }
+        assert_eq!(impressao(&identidade).len(), 64);
+        assert_eq!(
+            impressao_em_bytes(&impressao(&identidade)),
+            Some(identidade.impressao())
+        );
     }
 
     #[tokio::test]
     async fn uma_ponta_de_cliente_passa_a_atender_sem_socket_novo() {
-        // **Nem escuta nova, nem porta nova.** `set_server_config` recebe `&self`,
-        // então a ponta que o cliente já usa para falar com o servidor aprende a
-        // atender na mesma porta — e naquela porta o mapeamento de NAT já está
-        // vivo, mantido pelo keep-alive da conexão que já existe. Abrir uma porta
-        // à parte perderia essa propriedade, que é a melhor do desenho.
-        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let porta_antes = ponta.local_addr().unwrap();
-
-        passar_a_atender(
-            &ponta,
-            identidade_efemera().unwrap(),
-            impressao(&identidade_efemera().unwrap()),
-        )
-        .unwrap();
-
-        assert_eq!(
-            ponta.local_addr().unwrap(),
-            porta_antes,
-            "atender trocou a porta: o mapeamento de NAT que já estava vivo se perdeu"
-        );
-        // **A prova de que atender funciona é da Task 4**, porque esta asserção
-        // só confere que a porta não mudou. Se `set_server_config` foi de verdade
-        // chamado com a configuração correta, é testado lá.
+        // **Nem escuta nova, nem porta nova** (§3.1).
+        let ponta = ponta();
+        let porta_antes = ponta.ponta().local_addr();
+        passar_a_atender(&ponta);
+        assert!(ponta.armada());
+        assert_eq!(ponta.ponta().local_addr(), porta_antes);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn dois_pares_se_ligam_e_o_teste_sabe_como() {
-        // **Os dois discam, e o furo sai de graça.** Como as duas pontas atendem,
-        // as próprias tentativas de conexão são os pacotes que abrem o NAT dos dois
-        // lados; a primeira que fecha o aperto de mão vence e a outra é descartada.
-        // Resolve o caso assimétrico sozinho — se só um lado consegue sair, é a
-        // conexão dele que vinga — e usa só a API pública do `quinn`.
-        //
-        // Em `127.0.0.1` não há NAT a furar, então o que este teste prende é o
-        // resto: que a ligação fecha, que a impressão digital é conferida no
-        // caminho, e que o resultado diz **como** chegou. A taxa de furo de verdade
-        // é o roteiro de duas máquinas que mede, e nenhum teste daqui pode medi-la.
-        let (_do_lado_de_quem_atende, _b, ligado) = duas_pontas_ligadas().await;
-
+        let (do_lado_de_quem_atende, _a, _b, ligado) = duas_pontas_ligadas().await;
         assert_eq!(
             ligado.como,
             ComoChegou::Local,
             "127.0.0.1 não é rede local?"
         );
-        assert!(
-            ligado.conexao.close_reason().is_none(),
-            "a conexão já morreu"
-        );
+        assert!(ligado.conexao.acabou().is_none(), "a conexão já morreu");
+        assert!(do_lado_de_quem_atende.acabou().is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn um_par_com_a_impressao_errada_nao_liga() {
-        // O caso que separa «não consegui falar com ele» de «alguém respondeu no
-        // lugar dele». Sem esta parede, qualquer um que alcance a porta alimenta
-        // quadro de tela a quem estava esperando o par certo.
-        let a = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        passar_a_atender(
-            &a,
-            identidade_efemera().unwrap(),
-            impressao(&identidade_efemera().unwrap()),
-        )
-        .unwrap();
-        let endereco_a = a.local_addr().unwrap();
-        let _atendendo_a = tokio::spawn(atender(a, PRAZO_DE_CONFIRMACAO_NO_TESTE));
-
-        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        // O caso que separa «não consegui falar com ele» de «alguém respondeu
+        // no lugar dele».
+        let a = ponta();
+        passar_a_atender(&a);
+        let endereco_a = a.ponta().local_addr();
+        let b = ponta();
+        let _atendendo = {
+            let a = a.clone();
+            let impressao_b = impressao(b.identidade());
+            tokio::spawn(async move {
+                atender(
+                    &a,
+                    &impressao_b,
+                    PRAZO_NO_TESTE,
+                    PRAZO_DE_CONFIRMACAO_NO_TESTE,
+                )
+                .await
+            })
+        };
         let erro = ligar(
             &b,
             &[endereco_a],
             "f".repeat(64),
-            None,
             std::time::Duration::from_secs(5),
         )
         .await
         .unwrap_err();
-        assert!(
-            matches!(erro, ErroDePar::ImpressaoNaoBate { .. }),
-            "a recusa saiu com o motivo errado: {erro:?}"
+        let ErroDePar::ImpressaoNaoBate { esperada, veio } = &erro else {
+            panic!("a recusa saiu com o motivo errado: {erro:?}");
+        };
+        assert_eq!(esperada, &"f".repeat(64), "não foi a impressão pedida");
+        assert_eq!(
+            veio,
+            &impressao(a.identidade()),
+            "o que veio não é a de quem atendeu"
         );
-        // **E o motivo veio inteiro** — que é o que o caminho limpo comprou.
-        // `classificar` recolhe o `ErroDePar` que o verificador guardou na
-        // `Relato`, então os dois hashes chegam até aqui; uma `classificar`
-        // que olhasse o texto da mensagem do `quinn` só saberia dizer «não
-        // bateu», com os dois campos vazios. Esta asserção é também o que faz
-        // o guarda morder: uma `ligar` que ignorasse a impressão pedida e
-        // discasse com outra passaria pelo `matches!` acima sem tropeçar.
-        if let ErroDePar::ImpressaoNaoBate { esperada, veio } = &erro {
-            assert_eq!(esperada, &"f".repeat(64), "não foi a impressão pedida");
-            assert_eq!(veio.len(), 64, "o que veio não é SHA-256 em hex");
-            assert_ne!(veio, esperada, "os dois lados do erro são o mesmo hash");
-        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn um_impostor_na_lista_nao_derruba_a_discagem_inteira() {
-        // **A impostura é notícia, não é motivo para desistir.** A lista de um
-        // par mistura endereço de LAN e endereço público, e um deles estar
-        // obsoleto — reciclado por outra máquina — é cenário de todo dia. Se
-        // bastasse um responder com o certificado errado para a discagem
-        // inteira morrer, quem conseguisse pôr um endereço na lista teria uma
-        // negação de serviço de graça contra o par legítimo. O evento de
-        // segurança sai no `warn!` da `classificar`, na hora; a discagem
-        // continua, e `ImpressaoNaoBate` só é devolvido se ninguém vencer.
-        //
-        // O legítimo atende com atraso **de propósito**: sem isso as duas
-        // tentativas correm juntas e o teste não prende nada — ele tem de ver
-        // o impostor falhar antes de o legítimo fechar o aperto de mão.
-        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ib = identidade_efemera().unwrap();
-        let impressao_b = impressao(&ib);
+        // **A impostura é notícia, não é motivo para desistir.** O ICE pode
+        // ficar com o impostor primeiro; a discagem continua com o resto.
+        let b = ponta();
+        let impressao_b = impressao(b.identidade());
 
-        let impostor = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        passar_a_atender(
-            &impostor,
-            identidade_efemera().unwrap(),
-            impressao_b.clone(),
-        )
-        .unwrap();
-        let endereco_impostor = impostor.local_addr().unwrap();
-        let _atendendo_impostor = tokio::spawn(atender(impostor, PRAZO_DE_CONFIRMACAO_NO_TESTE));
+        let impostor = ponta();
+        passar_a_atender(&impostor);
+        let endereco_impostor = impostor.ponta().local_addr();
+        let _atendendo_impostor = {
+            let impostor = impostor.clone();
+            let impressao_b = impressao_b.clone();
+            tokio::spawn(async move {
+                atender(
+                    &impostor,
+                    &impressao_b,
+                    PRAZO_NO_TESTE,
+                    PRAZO_DE_CONFIRMACAO_NO_TESTE,
+                )
+                .await
+            })
+        };
 
-        let legitimo = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let identidade = identidade_efemera().unwrap();
-        let esperada = impressao(&identidade);
-        passar_a_atender(&legitimo, identidade, impressao_b).unwrap();
-        let endereco_legitimo = legitimo.local_addr().unwrap();
-        let _atendendo_legitimo = tokio::spawn(async move {
-            // O legítimo atende com atraso **de propósito**: sem isso as duas
-            // tentativas correm juntas e o teste não prende nada — ele tem de
-            // ver o impostor falhar antes de o legítimo fechar o aperto de
-            // mão.
-            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-            atender(legitimo, PRAZO_DE_CONFIRMACAO_NO_TESTE).await
-        });
+        let legitimo = ponta();
+        passar_a_atender(&legitimo);
+        let esperada = impressao(legitimo.identidade());
+        let endereco_legitimo = legitimo.ponta().local_addr();
+        let _atendendo_legitimo = {
+            let legitimo = legitimo.clone();
+            tokio::spawn(async move {
+                atender(
+                    &legitimo,
+                    &impressao_b,
+                    PRAZO_NO_TESTE,
+                    PRAZO_DE_CONFIRMACAO_NO_TESTE,
+                )
+                .await
+            })
+        };
 
-        let ib_para_discar = ib.clone();
-        passar_a_atender(&b, ib, esperada.clone()).unwrap();
         let ligado = ligar(
             &b,
             &[endereco_impostor, endereco_legitimo],
             esperada,
-            Some(&ib_para_discar),
-            std::time::Duration::from_secs(5),
+            std::time::Duration::from_secs(8),
         )
         .await
         .expect("o impostor derrubou a discagem inteira");
-
         assert_eq!(
-            ligado.conexao.remote_address(),
-            endereco_legitimo,
+            ligado.conexao.remote_address().port(),
+            endereco_legitimo.port(),
             "a ligação fechou com quem não era o par"
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn quem_atende_recusa_quem_o_servidor_nao_apresentou() {
-        // **A parede simétrica.** Os dois lados discam, então qualquer um dos dois
-        // pode acabar sendo quem aceita — e quem aceita não passa pelo
-        // `ConfereImpressao`, que só roda em quem disca. Sem esta parede, metade
-        // das ligações não confere nada, e quem empresta a subida serve quadro a
-        // qualquer um que alcance a porta.
-        //
-        // Não é hipótese: `with_no_client_auth()` é literalmente «aceite qualquer
-        // um».
-        let anfitriao = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ia = identidade_efemera().unwrap();
-        let impressao_do_anfitriao = impressao(&ia);
-
-        let intruso = identidade_efemera().unwrap();
+        // **A parede simétrica.** Quem atende confere quem chega, e o intruso
+        // apresenta a identidade dele, que não é a esperada.
+        let anfitriao = ponta();
+        passar_a_atender(&anfitriao);
+        let impressao_do_anfitriao = impressao(anfitriao.identidade());
+        let onde = anfitriao.ponta().local_addr();
         let esperada_de_outro = impressao(&identidade_efemera().unwrap());
+        let atendendo = {
+            let anfitriao = anfitriao.clone();
+            tokio::spawn(async move {
+                atender(
+                    &anfitriao,
+                    &esperada_de_outro,
+                    std::time::Duration::from_millis(1500),
+                    PRAZO_DE_CONFIRMACAO_NO_TESTE,
+                )
+                .await
+            })
+        };
 
-        // O anfitrião só aceita quem apresentar `esperada_de_outro` — e o intruso
-        // apresenta a dele, que é outra.
-        passar_a_atender(&anfitriao, ia, esperada_de_outro).unwrap();
-        let onde = anfitriao.local_addr().unwrap();
-        let atendendo = tokio::spawn(atender(anfitriao.clone(), PRAZO_DE_CONFIRMACAO_NO_TESTE));
-
-        let ponta_do_intruso = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let intruso_para_discar = intruso.clone();
-        passar_a_atender(&ponta_do_intruso, intruso, impressao_do_anfitriao.clone()).unwrap();
+        let intruso = ponta();
         let tentou = ligar(
-            &ponta_do_intruso,
+            &intruso,
             &[onde],
             impressao_do_anfitriao,
-            Some(&intruso_para_discar),
             std::time::Duration::from_secs(3),
         )
         .await;
-
-        // **A variante exata, não só `is_err()`.** `RecusadoDepoisDeLigar` e
-        // `MotivoDaRecusa` existem para distinguir «apresentou o errado» de
-        // «não apresentou nenhum» — uma regressão que jogasse os dois em
-        // `MotivoDaRecusa::Outro(String)` deixaria só `is_err()` verde.
         assert!(
             matches!(
                 tentou,
@@ -1516,143 +792,77 @@ mod testes {
                     MotivoDaRecusa::CertificadoErrado
                 ))
             ),
-            "o intruso apresentou um certificado que o anfitrião nunca esperou, e entrou \
-             (ou saiu com o motivo errado): {tentou:?}"
+            "o intruso entrou, ou saiu com o motivo errado: {tentou:?}"
         );
         assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(200), atendendo)
-                .await
-                .map(|ligado| ligado.ok().flatten().is_none())
-                .unwrap_or(true),
+            atendendo.await.unwrap().is_none(),
             "o anfitrião deu por boa uma ligação de quem o servidor não apresentou"
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn dois_pares_apresentados_se_ligam_pelos_dois_lados() {
-        // O caso feliz, e a razão de `atender` existir no produto e não só no
-        // teste: com os dois lados discando **e** os dois lados atendendo, a
-        // primeira ligação que fechar vence, venha de que direção vier. É isso que
-        // faz o furo assimétrico se resolver sozinho.
-        let a = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ia = identidade_efemera().unwrap();
-        let impressao_a = impressao(&ia);
-        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ib = identidade_efemera().unwrap();
-        let impressao_b = impressao(&ib);
-
-        let ib_para_discar = ib.clone();
-        passar_a_atender(&a, ia, impressao_b.clone()).unwrap();
-        passar_a_atender(&b, ib, impressao_a.clone()).unwrap();
-        let onde_a = a.local_addr().unwrap();
-        let atendendo = tokio::spawn(atender(a.clone(), PRAZO_DE_CONFIRMACAO_NO_TESTE));
-
-        let ligado = ligar(
-            &b,
-            &[onde_a],
-            impressao_a,
-            Some(&ib_para_discar),
-            std::time::Duration::from_secs(5),
-        )
-        .await
-        .expect("dois pares apresentados um ao outro não se ligaram");
-        assert_eq!(ligado.como, ComoChegou::Local);
-
-        let do_outro_lado = tokio::time::timeout(std::time::Duration::from_secs(2), atendendo)
-            .await
-            .expect("o lado que atende travou")
-            .expect("a tarefa de atender morreu");
-        assert!(
-            do_outro_lado.is_some(),
-            "quem atendeu não devolveu a ligação: quem empresta não tem por onde mandar quadro"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn quem_atende_recusa_quem_nao_apresentou_certificado_nenhum() {
-        // **Por que este teste existe além do da parede simétrica.** Naquele,
-        // o intruso tem identidade própria — registrada ao chamar
-        // `passar_a_atender` nele mesmo — e o par certo o recusa por a
-        // impressão não bater. Isso prova `verify_client_cert`, mas nunca
-        // exercita `client_auth_mandatory`: revertê-lo para `false` e rodar
-        // toda a suíte não derruba teste nenhum, porque nenhum outro chega ao
-        // aperto de mão com o certificado do cliente genuinamente vazio.
-        //
-        // Este é esse caso: quem disca nunca chamou `passar_a_atender`, então
-        // não tem identidade nenhuma registrada — e o certificado do
-        // anfitrião é o certo, então a discagem chega inteira até a decisão
-        // de `client_auth_mandatory`.
-        let anfitriao = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ia = identidade_efemera().unwrap();
-        let impressao_do_anfitriao = impressao(&ia);
-        let esperada_de_quem_liga = impressao(&identidade_efemera().unwrap());
-        passar_a_atender(&anfitriao, ia, esperada_de_quem_liga).unwrap();
-        let onde = anfitriao.local_addr().unwrap();
-        let atendendo = tokio::spawn(atender(anfitriao, PRAZO_DE_CONFIRMACAO_NO_TESTE));
-
-        let sem_identidade = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let tentou = ligar(
-            &sem_identidade,
+    async fn quando_o_anfitriao_recusa_minha_identidade_o_motivo_e_naofuiaceito() {
+        let anfitriao = ponta();
+        passar_a_atender(&anfitriao);
+        let impressao_do_anfitriao = impressao(anfitriao.identidade());
+        let onde = anfitriao.ponta().local_addr();
+        let esperada_de_outro = impressao(&identidade_efemera().unwrap());
+        let _atendendo = {
+            let anfitriao = anfitriao.clone();
+            tokio::spawn(async move {
+                atender(
+                    &anfitriao,
+                    &esperada_de_outro,
+                    PRAZO_NO_TESTE,
+                    PRAZO_DE_CONFIRMACAO_NO_TESTE,
+                )
+                .await
+            })
+        };
+        let quem_disca = ponta();
+        let onde = por_onde(
+            &quem_disca,
             &[onde],
             impressao_do_anfitriao,
-            None,
             std::time::Duration::from_secs(3),
         )
         .await;
-
-        // A variante exata — ver o comentário equivalente em
-        // `quem_atende_recusa_quem_o_servidor_nao_apresentou`.
         assert!(
             matches!(
-                tentou,
-                Err(ErroDePar::RecusadoDepoisDeLigar(
-                    MotivoDaRecusa::SemCertificado
-                ))
+                onde,
+                PorOndeAssistir::Servidor(seele_proto::control::MotivoDeFalhaDePar::NaoFuiAceito)
             ),
-            "quem nunca apresentou certificado nenhum entrou mesmo assim \
-             (ou saiu com o motivo errado): {tentou:?}"
-        );
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(200), atendendo)
-                .await
-                .map(|ligado| ligado.ok().flatten().is_none())
-                .unwrap_or(true),
-            "o anfitrião deu por boa uma ligação sem certificado de cliente nenhum"
+            "o motivo não foi NaoFuiAceito: {onde:?}"
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn atender_nao_trava_para_sempre_com_um_par_que_aperta_a_mao_e_para() {
-        // **O achado do round 2 da revisão.** Antes da troca de byte, `atender`
-        // devolvia assim que o TLS fechava. Agora ela também espera o par abrir
-        // o fluxo de confirmação — e sem prazo próprio, um par que autentica e
-        // some prenderia a vaga inteira até o `max_idle_timeout` do `quinn`
-        // (30 s nos padrões), ou para sempre se mandar algo para manter a
-        // conexão viva. Este teste finge exatamente esse par: completa o TLS
-        // discando direto (sem passar por `ligar`, que sempre confirma) e
-        // nunca abre fluxo nenhum.
-        let anfitriao = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ia = identidade_efemera().unwrap();
-        let impressao_do_anfitriao = impressao(&ia);
-        let quieto = identidade_efemera().unwrap();
-        let impressao_do_quieto = impressao(&quieto);
-        passar_a_atender(&anfitriao, ia, impressao_do_quieto).unwrap();
-        let onde = anfitriao.local_addr().unwrap();
+        // Um par que completa o DTLS e nunca abre o canal de confirmação.
+        let anfitriao = ponta();
+        passar_a_atender(&anfitriao);
+        let quieto = ponta();
+        let impressao_do_quieto = impressao(quieto.identidade());
+        let onde = anfitriao.ponta().local_addr();
         let prazo_de_confirmacao = std::time::Duration::from_millis(150);
-        let atendendo = tokio::spawn(atender(anfitriao, prazo_de_confirmacao));
+        let atendendo = {
+            let anfitriao = anfitriao.clone();
+            tokio::spawn(async move {
+                atender(
+                    &anfitriao,
+                    &impressao_do_quieto,
+                    PRAZO_NO_TESTE,
+                    prazo_de_confirmacao,
+                )
+                .await
+            })
+        };
+        let mut discagem =
+            crate::transporte::Discagem::nova(vec![onde], crate::transporte::Pino::Qualquer);
+        discagem.certificado = Some(quieto.identidade().clone());
+        let conexao_quieta = quieto.ponta().discar(discagem).await.unwrap();
 
-        let ponta_do_quieto = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let (config, _relato) = config_de_cliente(impressao_do_anfitriao, Some(&quieto)).unwrap();
-        let conexao_quieta = ponta_do_quieto
-            .connect_with(config, onde, "seele-par")
-            .unwrap()
-            .await
-            .unwrap();
-
-        // Um limite bem maior que `prazo_de_confirmacao`: o que se prova aqui
-        // é que `atender` volta **por causa do prazo dele**, não por acaso do
-        // agendador.
-        let resultado = tokio::time::timeout(std::time::Duration::from_secs(2), atendendo)
+        let resultado = tokio::time::timeout(std::time::Duration::from_secs(3), atendendo)
             .await
             .expect("atender devia ter voltado dentro do próprio prazo, e travou")
             .expect("a tarefa de atender morreu");
@@ -1660,44 +870,33 @@ mod testes {
             resultado.is_none(),
             "atender deu por boa uma ligação que apertou a mão e nunca confirmou"
         );
-        drop(conexao_quieta); // mantida viva de propósito até aqui
+        drop(conexao_quieta);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn ligar_nao_diz_naoalcancou_para_quem_apertou_a_mao_e_travou() {
-        // **O terceiro achado do round 2.** `NaoAlcancou` diz «nenhum endereço
-        // respondeu» — falso aqui: o anfitrião completa o TLS e só não abre o
-        // fluxo de confirmação (segura a conexão de propósito, sem nunca
-        // chamar `accept_bi`). `ligar` tem de saber a diferença, pela mesma
-        // razão que `ImpressaoNaoBate` não é `NaoAlcancou`.
-        let anfitriao = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ia = identidade_efemera().unwrap();
-        let impressao_do_anfitriao = impressao(&ia);
-        let quem_disca = identidade_efemera().unwrap();
-        let impressao_de_quem_disca = impressao(&quem_disca);
-        passar_a_atender(&anfitriao, ia, impressao_de_quem_disca).unwrap();
-        let onde = anfitriao.local_addr().unwrap();
-
-        let _segurando = tokio::spawn(async move {
-            if let Some(chegando) = anfitriao.accept().await {
-                if let Ok(_conexao_apertada) = chegando.await {
-                    // Aperta a mão, e para — de propósito, sem `accept_bi`.
+        // O anfitrião completa o DTLS e não abre o canal de confirmação.
+        let anfitriao = ponta();
+        passar_a_atender(&anfitriao);
+        let impressao_do_anfitriao = impressao(anfitriao.identidade());
+        let onde = anfitriao.ponta().local_addr();
+        let _segurando = {
+            let anfitriao = anfitriao.clone();
+            tokio::spawn(async move {
+                if let Some(_conexao_apertada) = anfitriao.ponta().aceitar().await {
                     std::future::pending::<()>().await;
                 }
-            }
-        });
-
-        let ponta_de_quem_disca = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+            })
+        };
+        let quem_disca = ponta();
         let erro = ligar(
-            &ponta_de_quem_disca,
+            &quem_disca,
             &[onde],
             impressao_do_anfitriao,
-            Some(&quem_disca),
-            std::time::Duration::from_millis(300),
+            std::time::Duration::from_secs(2),
         )
         .await
         .unwrap_err();
-
         assert!(
             matches!(erro, ErroDePar::ConfirmacaoNaoChegouATempo),
             "o par apertou a mão e travou, e o motivo devolvido foi outro: {erro:?}"
@@ -1706,11 +905,6 @@ mod testes {
 
     #[test]
     fn o_que_e_da_mesma_rede_nunca_conta_como_furo() {
-        // **`ComoChegou` é o número que o subprojeto A existe para produzir.**
-        // Um endereço da própria rede contado como `Furo` infla a taxa que vai
-        // decidir se a árvore do subprojeto B pode supor que qualquer par se
-        // alcança. O `fe80::/10` faltava — o lado v4 conferia `is_link_local()`
-        // e o v6 não conferia nada equivalente.
         for texto in [
             "127.0.0.1:9",
             "10.0.0.1:9",
@@ -1721,6 +915,7 @@ mod testes {
             "[fd00::1]:9",
             "[fe80::1]:9",
             "[febf:ffff::1]:9",
+            "[::ffff:192.168.1.10]:9",
         ] {
             assert_eq!(
                 como_chegou(texto.parse().unwrap()),
@@ -1729,26 +924,13 @@ mod testes {
             );
         }
         for texto in ["203.0.113.5:9", "[2001:db8::1]:9"] {
-            assert_eq!(
-                como_chegou(texto.parse().unwrap()),
-                ComoChegou::Furo,
-                "{texto} não é da rede local"
-            );
+            assert_eq!(como_chegou(texto.parse().unwrap()), ComoChegou::Furo);
         }
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn o_prazo_manda_quando_ninguem_responde() {
-        // Dois endereços que nunca respondem (`192.0.2.0/24` e
-        // `198.51.100.0/24` são as faixas de documentação, reservadas
-        // justamente para isto). O prazo tem de mandar, e o motivo tem de ser
-        // o de rotina — não o de segurança.
-        //
-        // **O que este teste não prova:** que a linha de rastro do prazo saiu.
-        // Ele não instala assinante de `tracing` e não lê log nenhum; o que
-        // prende é o prazo e o motivo. A linha em si é lida por olho humano,
-        // e é honesto dizer isso aqui em vez de fingir cobertura.
-        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let b = ponta();
         let comecou = std::time::Instant::now();
         let erro = ligar(
             &b,
@@ -1757,170 +939,45 @@ mod testes {
                 "198.51.100.1:9".parse().unwrap(),
             ],
             "f".repeat(64),
-            None,
-            std::time::Duration::from_millis(300),
+            std::time::Duration::from_millis(500),
         )
         .await
         .unwrap_err();
-
-        assert!(
-            matches!(erro, ErroDePar::NaoAlcancou),
-            "silêncio não é evento de segurança: {erro:?}"
-        );
-        assert!(
-            comecou.elapsed() < std::time::Duration::from_secs(3),
-            "o prazo não mandou: a discagem levou {:?}",
-            comecou.elapsed()
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn quando_o_par_nao_liga_a_resposta_e_o_servidor() {
-        // **A malha é alívio, nunca dependência.** Decisão de quem desenha o
-        // produto, 05/09/2026: ninguém perde imagem por causa da máquina de outra
-        // pessoa. É a propriedade de segurança da malha inteira, e por isso ela é
-        // provada aqui e não adiada para o subprojeto B — uma propriedade de
-        // segurança provada depois é uma propriedade que passou um tempo sem
-        // existir.
-        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        // Uma porta em que ninguém atende: o endereço é válido e o aperto de mão
-        // nunca fecha.
-        let ninguem = std::net::SocketAddr::from(([127, 0, 0, 1], 1));
-
-        let onde = por_onde(
-            &ponta,
-            &[ninguem],
-            "a".repeat(64),
-            None,
-            std::time::Duration::from_millis(300),
-        )
-        .await;
-
-        assert!(
-            matches!(
-                onde,
-                PorOndeAssistir::Servidor(seele_proto::control::MotivoDeFalhaDePar::NaoAlcancou)
-            ),
-            "o par não ligou e o cliente não caiu para o servidor com o motivo certo: {onde:?}"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn quando_alguem_responde_no_lugar_do_par_o_motivo_nao_vira_naoalcancou() {
-        // **Achado do fix round 1.** A primeira versão de `por_onde` escondia
-        // até o motivo detalhado do chamador, e por isso todo `Servidor` saía
-        // com `NaoAlcancou` — inclusive quando alguém tinha respondido no
-        // lugar do par de verdade. `NaoAlcancou` é rotina; `ImpressaoNaoBate`
-        // é o evento de segurança do §4 da spec, e o servidor precisa saber a
-        // diferença, não só o `tracing` local desta máquina.
-        let a = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        passar_a_atender(
-            &a,
-            identidade_efemera().unwrap(),
-            impressao(&identidade_efemera().unwrap()),
-        )
-        .unwrap();
-        let endereco_a = a.local_addr().unwrap();
-        let _atendendo_a = tokio::spawn(atender(a, PRAZO_DE_CONFIRMACAO_NO_TESTE));
-
-        let b = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let onde = por_onde(
-            &b,
-            &[endereco_a],
-            "f".repeat(64),
-            None,
-            std::time::Duration::from_secs(5),
-        )
-        .await;
-
-        assert!(
-            matches!(
-                onde,
-                PorOndeAssistir::Servidor(
-                    seele_proto::control::MotivoDeFalhaDePar::ImpressaoNaoBate
-                )
-            ),
-            "alguém respondeu no lugar do par, e o motivo devolvido não foi o de segurança: {onde:?}"
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn quando_o_anfitriao_recusa_minha_identidade_o_motivo_e_naofuiaceito() {
-        // **Achado do fix round 2.** `RecusadoDepoisDeLigar` é o inverso de
-        // `ImpressaoNaoBate`: aqui quem respondeu **era** quem o servidor
-        // apresentou, e foi ele que recusou a identidade que eu ofereci — não
-        // impostura do par, e sim (o caso comum) a minha própria declaração
-        // desatualizada. Antes desta variante existir, os dois motivos
-        // viajavam como `NaoAlcancou`, que diz «ninguém respondeu» — falso
-        // quando o TLS fechou dos dois lados.
-        let anfitriao = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ia = identidade_efemera().unwrap();
-        let impressao_do_anfitriao = impressao(&ia);
-        let esperada_de_quem_liga = impressao(&identidade_efemera().unwrap());
-        passar_a_atender(&anfitriao, ia, esperada_de_quem_liga).unwrap();
-        let onde_atende = anfitriao.local_addr().unwrap();
-        let _atendendo = tokio::spawn(atender(anfitriao, PRAZO_DE_CONFIRMACAO_NO_TESTE));
-
-        // Quem disca não tem a identidade que o anfitrião espera — a mesma
-        // configuração de `quem_atende_recusa_quem_nao_apresentou_certificado_nenhum`,
-        // só que por `por_onde`.
-        let sem_a_identidade_certa =
-            quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let onde = por_onde(
-            &sem_a_identidade_certa,
-            &[onde_atende],
-            impressao_do_anfitriao,
-            None,
-            std::time::Duration::from_secs(3),
-        )
-        .await;
-
-        assert!(
-            matches!(
-                onde,
-                PorOndeAssistir::Servidor(seele_proto::control::MotivoDeFalhaDePar::NaoFuiAceito)
-            ),
-            "o anfitrião recusou a identidade de quem discou, e o motivo não foi NaoFuiAceito: {onde:?}"
-        );
+        assert!(matches!(erro, ErroDePar::NaoAlcancou), "{erro:?}");
+        assert!(comecou.elapsed() < std::time::Duration::from_secs(3));
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn parar_de_atender_desarma_o_que_passar_a_atender_armou() {
-        // **O achado do fix round 3.** Sem `parar_de_atender`, a ponta
-        // continua aceitando conexões pelo resto da sessão depois de servir a
-        // única vaga de `atender` — com o verificador fixado na impressão do
-        // último par, e funcionando como refletor de amplificação para quem
-        // quer que bata, sem `use_retry`.
-        // As duas identidades combinam de propósito: se `parar_de_atender`
-        // não desarmar nada, este par fecha o aperto de mão sem obstáculo
-        // nenhum, e o guarda tem algo de verdade para prender — um `ligar`
-        // que desse `NaoAlcancou` mesmo com a ponta armada (por exemplo, por
-        // impressões que nunca bateriam) não provaria nada sobre
-        // `parar_de_atender`.
-        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let identidade_da_ponta = identidade_efemera().unwrap();
-        let impressao_da_ponta = impressao(&identidade_da_ponta);
-        let identidade_de_quem_discaria = identidade_efemera().unwrap();
-        let impressao_de_quem_discaria = impressao(&identidade_de_quem_discaria);
-        passar_a_atender(&ponta, identidade_da_ponta, impressao_de_quem_discaria).unwrap();
-        let onde = ponta.local_addr().unwrap();
+        // As identidades combinam de propósito: armada, esta discagem fecharia.
+        let ponta_que_atende = ponta();
+        passar_a_atender(&ponta_que_atende);
+        let impressao_da_ponta = impressao(ponta_que_atende.identidade());
+        let onde = ponta_que_atende.ponta().local_addr();
+        parar_de_atender(&ponta_que_atende);
+        assert!(!ponta_que_atende.armada());
 
-        parar_de_atender(&ponta).await;
-
-        // Alguém pronto para aceitar, mesmo assim: se a ponta continuasse
-        // armada, é `atender` quem completaria o aperto de mão.
-        let _atendendo = tokio::spawn(atender(ponta, PRAZO_DE_CONFIRMACAO_NO_TESTE));
-
-        let discando = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        let discando = ponta();
+        let _atendendo = {
+            let ponta_que_atende = ponta_que_atende.clone();
+            let impressao_de_quem_disca = impressao(discando.identidade());
+            tokio::spawn(async move {
+                atender(
+                    &ponta_que_atende,
+                    &impressao_de_quem_disca,
+                    PRAZO_NO_TESTE,
+                    PRAZO_DE_CONFIRMACAO_NO_TESTE,
+                )
+                .await
+            })
+        };
         let tentou = ligar(
             &discando,
             &[onde],
             impressao_da_ponta,
-            Some(&identidade_de_quem_discaria),
-            std::time::Duration::from_millis(300),
+            std::time::Duration::from_millis(800),
         )
         .await;
-
         assert!(
             matches!(tentou, Err(ErroDePar::NaoAlcancou)),
             "a ponta continuou atendendo depois de parar_de_atender: {tentou:?}"
@@ -1928,134 +985,59 @@ mod testes {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_ponta_atende_um_par_sem_derrubar_a_conexao_de_controle() {
-        // **A propriedade central do §3.1, provada em código.** O teste
-        // antigo (`uma_ponta_de_cliente_passa_a_atender_sem_socket_novo`) só
-        // confere que a porta local não muda — ele nunca tem conexão nenhuma
-        // no ar para derrubar, e o próprio comentário dele admite isso. Aqui
-        // há uma conexão de controle de verdade, contra um "servidor" QUIC de
-        // teste, **antes** de `passar_a_atender` entrar em cena na MESMA
-        // ponta; a prova que importa é que essa conexão continua trocando
-        // bytes depois.
+    async fn a_ponta_atende_um_par_sem_derrubar_a_conexao_que_ja_tinha() {
+        // **A propriedade central do §3.1.** A ponta de `b` já tem uma conexão
+        // viva (com `a`); passar a atender um terceiro na mesma ponta não a
+        // derruba.
+        let (do_lado_de_a, _a, b, ligado_com_a) = duas_pontas_ligadas().await;
 
-        // O "servidor" — um par comum atendendo, fazendo o papel do
-        // seele-server só para dar a `ponta` uma conexão de controle de
-        // verdade.
-        let servidor = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let identidade_do_servidor = identidade_efemera().unwrap();
-        let impressao_do_servidor = impressao(&identidade_do_servidor);
-        let identidade_da_ponta = identidade_efemera().unwrap();
-        let impressao_da_ponta = impressao(&identidade_da_ponta);
-        passar_a_atender(&servidor, identidade_do_servidor, impressao_da_ponta).unwrap();
-        let endereco_do_servidor = servidor.local_addr().unwrap();
-        let atendendo_o_controle = tokio::spawn(atender(servidor, PRAZO_DE_CONFIRMACAO_NO_TESTE));
-
-        // `ponta`: só disca, do jeito que uma conexão de controle sai — sem
-        // `passar_a_atender` nenhum ainda.
-        let ponta = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let controle = ligar(
-            &ponta,
-            &[endereco_do_servidor],
-            impressao_do_servidor,
-            Some(&identidade_da_ponta),
-            std::time::Duration::from_secs(5),
-        )
-        .await
-        .expect("a conexão de controle não fechou");
-        let controle_do_lado_do_servidor = atendendo_o_controle
-            .await
-            .expect("a tarefa do servidor de teste morreu")
-            .expect("o servidor de teste não aceitou a conexão de controle");
-
-        // Um eco simples do lado do servidor: aceita um fluxo, devolve o que
-        // recebeu. Só o suficiente para provar, depois de tudo que acontece a
-        // seguir, que os bytes ainda atravessam nos dois sentidos.
-        //
-        // A tarefa recebe um **clone** da conexão, e não o `ParLigado`
-        // inteiro: soltar a última alça de uma `quinn::Connection` fecha a
-        // ligação, e a tarefa termina (e larga a dela) assim que ecoa —
-        // antes de o lado do cliente terminar de ler. `controle_do_lado_do_servidor`
-        // continua viva no escopo do teste até o fim, e é essa cópia que
-        // mantém a conexão de pé.
-        let conexao_para_o_eco = controle_do_lado_do_servidor.conexao.clone();
-        let eco = tokio::spawn(async move {
-            let (mut envio, mut recebe) = conexao_para_o_eco
-                .accept_bi()
+        passar_a_atender(&b);
+        let terceiro = ponta();
+        let impressao_do_terceiro = impressao(terceiro.identidade());
+        let onde_b = b.ponta().local_addr();
+        let atendendo = {
+            let b = b.clone();
+            tokio::spawn(async move {
+                atender(
+                    &b,
+                    &impressao_do_terceiro,
+                    PRAZO_NO_TESTE,
+                    PRAZO_DE_CONFIRMACAO_NO_TESTE,
+                )
                 .await
-                .expect("o servidor de teste não recebeu o fluxo de prova");
-            let mut buf = [0_u8; 10];
-            recebe
-                .read_exact(&mut buf)
-                .await
-                .expect("a leitura da prova falhou");
-            envio
-                .write_all(&buf)
-                .await
-                .expect("a escrita da prova falhou");
-            let _ = envio.finish();
-        });
-
-        // Agora, na MESMA `ponta` — nem escuta nova, nem porta nova —, ela
-        // também passa a atender um par, exatamente como `Motor::servir_par`
-        // faz.
-        let identidade_para_o_par = identidade_efemera().unwrap();
-        let impressao_de_quem_atende = impressao(&identidade_para_o_par);
-        let identidade_do_terceiro = identidade_efemera().unwrap();
-        let impressao_do_terceiro = impressao(&identidade_do_terceiro);
-        passar_a_atender(&ponta, identidade_para_o_par, impressao_do_terceiro).unwrap();
-        let onde_a_ponta_atende = ponta.local_addr().unwrap();
-        let atendendo_o_par = tokio::spawn(atender(ponta.clone(), PRAZO_DE_CONFIRMACAO_NO_TESTE));
-
-        // Um terceiro par — quem `SirvaTelaPara` mandaria discar para
-        // `ponta` — liga para ela.
-        let terceiro = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        let ligado_pelo_terceiro = ligar(
+            })
+        };
+        let _ligado_pelo_terceiro = ligar(
             &terceiro,
-            &[onde_a_ponta_atende],
-            impressao_de_quem_atende,
-            Some(&identidade_do_terceiro),
+            &[onde_b],
+            impressao(b.identidade()),
             std::time::Duration::from_secs(5),
         )
         .await
-        .expect("o terceiro par não conseguiu ligar para a ponta que também atende");
-        // Guardado, e não descartado: soltar o `ParLigado` deste lado
-        // fecharia a conexão imediatamente, e a asserção abaixo veria uma
-        // ligação morta por causa do próprio teste, não por
-        // `passar_a_atender`.
-        let _atendido_do_lado_da_ponta = atendendo_o_par
+        .expect("o terceiro par não ligou para a ponta que também atende");
+        let _atendido = atendendo
             .await
-            .expect("a tarefa que atende o par morreu")
-            .expect("a ponta não aceitou o par que discou para ela");
-        assert!(
-            ligado_pelo_terceiro.conexao.close_reason().is_none(),
-            "a ligação com o terceiro par já morreu"
-        );
+            .unwrap()
+            .expect("a ponta não aceitou o terceiro");
 
-        // **A prova que importa:** a conexão de controle, aberta antes de
-        // tudo isso, continua viva e trocando bytes — não foi derrubada nem
-        // por `passar_a_atender` nem pelo aperto de mão do terceiro par.
-        let (mut envio, mut recebe) = controle
-            .conexao
-            .open_bi()
-            .await
-            .expect("a conexão de controle não abre mais fluxo nenhum");
-        envio
-            .write_all(b"ainda viva")
-            .await
-            .expect("a escrita na conexão de controle falhou");
-        let _ = envio.finish();
+        // A conexão de antes continua trocando bytes.
+        let eco = tokio::spawn(async move {
+            let (mut envio, mut recebe) = do_lado_de_a.accept_bi().await.unwrap();
+            let mut buf = [0_u8; 10];
+            recebe.read_exact(&mut buf).await.unwrap();
+            envio.write_all(&buf).await.unwrap();
+            let _ = envio.finish();
+            do_lado_de_a
+        });
+        let (mut envio, mut recebe) = ligado_com_a.conexao.open_bi().await.unwrap();
+        envio.write_all(b"ainda viva").await.unwrap();
         let mut resposta = [0_u8; 10];
-        recebe
-            .read_exact(&mut resposta)
-            .await
-            .expect("a leitura na conexão de controle falhou");
+        recebe.read_exact(&mut resposta).await.unwrap();
         assert_eq!(&resposta, b"ainda viva");
-        eco.await.expect("a tarefa de eco do servidor morreu");
+        let _ = eco.await.unwrap();
     }
 
-    /// Monta os bytes de um quadro completo — cabeçalho e corpo —, pelo
-    /// mesmo escritor que o emissor usa (`seele_proto::screen`, reexportado em
-    /// `crate::tela`), e não por uma cópia à mão do formato.
+    /// Os bytes de um quadro completo, pelo mesmo escritor que o emissor usa.
     fn quadro(tipo: crate::tela::TipoDeQuadro, corpo: &[u8]) -> Vec<u8> {
         let tamanho = u32::try_from(corpo.len()).unwrap();
         let mut bytes = crate::tela::cabecalho_de_quadro(tipo, tamanho).to_vec();
@@ -2063,249 +1045,106 @@ mod testes {
         bytes
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn o_par_recebe_a_abertura_e_os_pedacos_na_ordem() {
-        // **Por pedaço, e nunca remontando quadro.** É a mesma regra que o
-        // encaminhamento do servidor segue — *«o encaminhamento é por pedaço, sem
-        // remontar quadro»* —, e ela não é estilo: um fluxo QUIC é uma sequência
-        // ordenada de bytes, e esperar o quadro inteiro para repassar acrescenta
-        // um tempo de quadro de atraso a cada salto. Numa árvore de profundidade
-        // três isso seria três quadros, que é o orçamento inteiro.
-        let (a, b, ligado) = duas_pontas_ligadas().await;
-
+    /// Repassa `pedacos` e devolve o que o outro lado leu depois do byte de
+    /// tipo.
+    async fn repassar_e_ler(pedacos: Vec<Vec<u8>>) -> (Vec<u8>, Vec<u8>) {
+        let (a, _pa, _pb, ligado) = duas_pontas_ligadas().await;
         let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
         let abertura_clone = abertura.clone();
         let (manda, recebe) = tokio::sync::mpsc::channel(8);
         let repassando =
             tokio::spawn(async move { repassar(&ligado, &abertura_clone, recebe).await });
-
-        // Dois quadros completos, em pedaços separados — o primeiro já é
-        // chave, então nada é descartado, e o segundo prova que tudo o que
-        // vem depois da chave atravessa, seja qual for o tipo.
-        let chave = quadro(crate::tela::TipoDeQuadro::Chave, &[1, 2, 3]);
-        let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[4, 5]);
-        manda.send(chave.clone()).await.unwrap();
-        manda.send(comum.clone()).await.unwrap();
+        for pedaco in pedacos {
+            manda.send(pedaco).await.unwrap();
+        }
         drop(manda);
-
-        // Do outro lado, o que chega é: o byte de tipo, a abertura, e os pedaços
-        // na ordem em que foram mandados.
         let mut fluxo = a.accept_uni().await.unwrap();
         let mut tipo = [0_u8; 1];
         fluxo.read_exact(&mut tipo).await.unwrap();
         assert_eq!(tipo[0], seele_proto::stream::StreamType::Screen.byte());
         let veio = fluxo.read_to_end(1024).await.unwrap();
-        assert_eq!(
-            veio,
-            [abertura, chave, comum].concat(),
-            "o que chegou ao par não é a abertura seguida dos pedaços na ordem"
-        );
-        // `repassar` só devolve depois de o par confirmar o fim do fluxo
-        // (`fluxo.stopped()`) — não há mais corrida com o `drop` de `ligado`
-        // no fim deste `spawn` para segurar com um clone extra da conexão.
         repassando.await.unwrap().unwrap();
-        drop(b);
+        (abertura, veio)
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_par_recebe_a_abertura_e_os_pedacos_na_ordem() {
+        let chave = quadro(crate::tela::TipoDeQuadro::Chave, &[1, 2, 3]);
+        let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[4, 5]);
+        let (abertura, veio) = repassar_e_ler(vec![chave.clone(), comum.clone()]).await;
+        assert_eq!(veio, [abertura, chave, comum].concat());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn quem_entra_por_um_par_entra_num_quadro_chave() {
-        // **Ligar no meio de um quadro é ligar em lixo.** O servidor já sabe disto:
-        // ele segura quem chega numa lista de espera e só abre a cópia no começo do
-        // próximo quadro-chave (`EmCurso::esperando`, em
-        // `crates/seele-server/src/voice_room.rs`). Quem repassa tem de fazer o
-        // mesmo, ou a pessoa que entrou por um par vê blocos coloridos até o
-        // quadro-chave seguinte — e não tem como saber por quê.
-        //
-        // O que se prende aqui é que `repassar` **descarta** o que vem antes do
-        // primeiro quadro-chave achado pelo `crate::tela::Enquadramento`, e
-        // nada depois dele.
-        let (a, b, ligado) = duas_pontas_ligadas().await;
-
-        let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
-        let abertura_clone = abertura.clone();
-        let (manda, recebe) = tokio::sync::mpsc::channel(8);
-        let repassando =
-            tokio::spawn(async move { repassar(&ligado, &abertura_clone, recebe).await });
-
         let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[1, 2]);
         let chave = quadro(crate::tela::TipoDeQuadro::Chave, &[3, 4]);
-        manda.send(comum).await.unwrap();
-        manda.send(chave.clone()).await.unwrap();
-        drop(manda);
-
-        let mut fluxo = a.accept_uni().await.unwrap();
-        let mut tipo = [0_u8; 1];
-        fluxo.read_exact(&mut tipo).await.unwrap();
-        let veio = fluxo.read_to_end(1024).await.unwrap();
+        let (abertura, veio) = repassar_e_ler(vec![comum, chave.clone()]).await;
         assert_eq!(
             veio,
             [abertura, chave].concat(),
             "o quadro comum que veio antes da chave atravessou, ou a chave não atravessou"
         );
-        repassando.await.unwrap().unwrap();
-        drop(b);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn um_pedaco_com_dois_quadros_nao_perde_o_quadro_chave_que_vem_depois_do_comum() {
-        // **Modo A do Critical do fix round 1.** Um pedaço não é um quadro: é
-        // o que uma leitura devolveu de uma vez, e pode carregar dois quadros
-        // inteiros — é literalmente o que uma leitura de
-        // `quinn::RecvStream::read` entrega ao `Enquadramento` do servidor em
-        // `session.rs`. Ler só o primeiro byte do pedaço como se fosse sempre
-        // o byte de tipo do quadro julgava o pedaço inteiro pelo quadro comum
-        // do começo, e o quadro-chave que vinha logo depois — no mesmo
-        // pedaço — nunca atravessava. Do lado de quem recebe isso não dava
-        // erro nenhum: `Recepcao::proximo_quadro` bateria em
-        // `FinishedEarly(0)` e devolveria `Ok(None)` — «quem compartilha
-        // parou» — sem nenhum dado dizendo por quê.
-        let (a, b, ligado) = duas_pontas_ligadas().await;
-
-        let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
-        let abertura_clone = abertura.clone();
-        let (manda, recebe) = tokio::sync::mpsc::channel(8);
-        let repassando =
-            tokio::spawn(async move { repassar(&ligado, &abertura_clone, recebe).await });
-
         let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[1, 2]);
         let chave = quadro(crate::tela::TipoDeQuadro::Chave, &[3, 4]);
-        let um_pedaco_so = [comum, chave.clone()].concat();
-        manda.send(um_pedaco_so).await.unwrap();
-        drop(manda);
-
-        let mut fluxo = a.accept_uni().await.unwrap();
-        let mut tipo = [0_u8; 1];
-        fluxo.read_exact(&mut tipo).await.unwrap();
-        let veio = fluxo.read_to_end(1024).await.unwrap();
-        assert_eq!(
-            veio,
-            [abertura, chave].concat(),
-            "o quadro-chave que vinha depois do comum, no mesmo pedaço, não atravessou"
-        );
-        repassando.await.unwrap().unwrap();
-        drop(b);
+        let (abertura, veio) = repassar_e_ler(vec![[comum, chave.clone()].concat()]).await;
+        assert_eq!(veio, [abertura, chave].concat());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn um_quadro_comum_partido_entre_pedacos_nao_vira_cabecalho_falso() {
-        // **Modo B do Critical do fix round 1.** `Transmissao` já escreve um
-        // quadro em duas chamadas — cabeçalho e depois corpo
-        // (`tela.rs::Transmissao::escrever`, chamada de `enviar_quadro` e de
-        // `escrever_fatia`) —, e o corpo de um payload H.264 Annex-B está
-        // cheio de `0x00` e `0x01`: não é caso de canto. Sob o guarda antigo
-        // (ler só o primeiro byte de cada pedaço), um segundo pedaço que
-        // continuasse o corpo de um quadro comum e por acaso começasse em `1`
-        // era lido como se fosse o começo de um quadro-chave — e os quatro
-        // bytes seguintes do corpo, lidos como o **tamanho** daquele quadro
-        // inventado, atravessavam para o par. Do lado de quem recebe isso não
-        // é ruído: é `QuadroGrandeDemais` acusando o par de anunciar um
-        // tamanho absurdo, por causa de um corte que o repasse local fez.
-        let (a, b, ligado) = duas_pontas_ligadas().await;
-
-        let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
-        let abertura_clone = abertura.clone();
-        let (manda, recebe) = tokio::sync::mpsc::channel(8);
-        let repassando =
-            tokio::spawn(async move { repassar(&ligado, &abertura_clone, recebe).await });
-
-        // Um quadro comum de seis bytes de corpo, com o quarto byte do corpo
-        // sendo `1` — o byte de `TipoDeQuadro::Chave` —, partido bem ali: o
-        // segundo pedaço começa exatamente nesse `1`.
         let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[9, 9, 9, 1, 9, 9]);
-        let (primeiro_pedaco, segundo_pedaco) =
-            comum.split_at(crate::tela::CABECALHO_DE_QUADRO_LEN + 3);
+        let (primeiro, segundo) = comum.split_at(crate::tela::CABECALHO_DE_QUADRO_LEN + 3);
         assert_eq!(
-            segundo_pedaco.first().copied(),
-            Some(crate::tela::TipoDeQuadro::Chave.byte()),
-            "o teste não montou o corte que provoca o Modo B"
+            segundo.first().copied(),
+            Some(crate::tela::TipoDeQuadro::Chave.byte())
         );
         let chave = quadro(crate::tela::TipoDeQuadro::Chave, &[7, 8]);
-        manda.send(primeiro_pedaco.to_vec()).await.unwrap();
-        manda.send(segundo_pedaco.to_vec()).await.unwrap();
-        manda.send(chave.clone()).await.unwrap();
-        drop(manda);
-
-        let mut fluxo = a.accept_uni().await.unwrap();
-        let mut tipo = [0_u8; 1];
-        fluxo.read_exact(&mut tipo).await.unwrap();
-        let veio = fluxo.read_to_end(1024).await.unwrap();
-        assert_eq!(
-            veio,
-            [abertura, chave].concat(),
-            "o corpo do quadro comum, partido ao meio, atravessou como se fosse um cabeçalho"
-        );
-        repassando.await.unwrap().unwrap();
-        drop(b);
+        let (abertura, veio) =
+            repassar_e_ler(vec![primeiro.to_vec(), segundo.to_vec(), chave.clone()]).await;
+        assert_eq!(veio, [abertura, chave].concat());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn quem_caiu_antes_do_repasse_e_relatado_como_repasse_e_nao_escuta() {
-        // **Guarda do achado Important 5 do fix round 1.** `ErroDePar::Escuta`
-        // documenta «não deu para pôr esta ponta a atender» — a frase certa
-        // para um `set_server_config` que falhou, e enganosa para um par que
-        // caiu no meio de uma transmissão de tela já em andamento. Fechar a
-        // conexão do lado de quem atende antes de `repassar` sequer abrir o
-        // fluxo reproduz exatamente essa queda: `open_uni` falha porque o par
-        // já não aceita mais nada. O que se prende aqui é a variante do erro
-        // que volta, não o `Ok`/`Err` — os dois braços do `match` antigo já
-        // devolviam erro, só que com a frase errada.
-        let (a, b, ligado) = duas_pontas_ligadas().await;
-        a.close(0_u32.into(), b"caiu antes do repasse");
-        // Espera este lado também ver a conexão fechada, para o teste não
-        // torcer com a rede: sem isto, `open_uni` podia correr contra o
-        // `CONNECTION_CLOSE` que ainda não chegou e passar por sorte de
-        // tempo.
+        let (a, _pa, _pb, ligado) = duas_pontas_ligadas().await;
+        a.close(0, b"caiu antes do repasse");
         let _ = ligado.conexao.closed().await;
-
         let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
         let (_manda, recebe) = tokio::sync::mpsc::channel(8);
         let erro = repassar(&ligado, &abertura, recebe)
             .await
-            .expect_err("o par já caiu; repassar não deveria conseguir abrir um fluxo");
-        assert!(
-            matches!(erro, ErroDePar::Repasse(_)),
-            "queda no meio do repasse voltou como {erro:?}, não como ErroDePar::Repasse"
-        );
-        drop(b);
+            .expect_err("o par já caiu; repassar não deveria conseguir abrir um canal");
+        assert!(matches!(erro, ErroDePar::Repasse(_)), "{erro:?}");
     }
 
     #[tokio::test]
     async fn repassar_avisa_quando_o_canal_fecha_sem_a_chave_chegar() {
-        // **Guarda do achado Important 4 do fix round 1.** `repassar` era a
-        // única função de peso em `par.rs` sem `tracing::` nenhum — quem
-        // opera via ao log e via silêncio nos dois casos mais importantes de
-        // diagnosticar: um par que nunca recebeu quadro-chave nenhum, e
-        // quantos pedaços foram descartados até lá (ou para sempre, como
-        // aqui). Este teste manda um quadro comum, nunca um quadro-chave, e
-        // fecha o canal — o caso em que o `warn!` tem de disparar.
-        //
-        // `#[tokio::test]` (de thread única, não `multi_thread`) de propósito:
-        // `tracing::subscriber::set_default` fixa o `Subscriber` só na
-        // `thread` corrente, e uma runtime de thread única roda toda tarefa
-        // — inclusive o `tokio::spawn(atender(..))` de dentro de
-        // `duas_pontas_ligadas` — nessa mesma `thread`. Numa `multi_thread` a
-        // tarefa spawnada podia cair noutra `thread` e o rastro dela sumir
-        // para este `Subscriber`; aqui não há essa aposta.
-        // Só `WARN` para cima: sem o filtro, o teste que falha despeja as
-        // linhas do aperto de mão do `quinn` na mensagem da asserção, e quem
-        // depura tem de procurar a ausência de um `WARN` no meio delas.
         let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
         let _guarda = tracing::subscriber::set_default(captura.clone());
 
-        let (a, b, ligado) = duas_pontas_ligadas().await;
+        let (a, _pa, _pb, ligado) = duas_pontas_ligadas().await;
         let abertura = vec![9_u8; seele_proto::screen::SCREEN_HEADER_LEN];
         let (manda, recebe) = tokio::sync::mpsc::channel(8);
-
-        let comum = quadro(crate::tela::TipoDeQuadro::Comum, &[1, 2]);
-        manda.send(comum).await.unwrap();
+        manda
+            .send(quadro(crate::tela::TipoDeQuadro::Comum, &[1, 2]))
+            .await
+            .unwrap();
         drop(manda);
-
+        let lendo = tokio::spawn(async move {
+            if let Ok(mut fluxo) = a.accept_uni().await {
+                let _ = fluxo.read_to_end(1024).await;
+            }
+            a
+        });
         repassar(&ligado, &abertura, recebe)
             .await
             .expect("nenhum par caiu; o repasse tem de terminar limpo mesmo sem chave");
-        drop(a);
-        drop(b);
-
+        let _ = lendo.await;
         let eventos = captura.linhas();
         assert!(
             eventos

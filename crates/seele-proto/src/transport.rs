@@ -35,6 +35,40 @@ pub const NOME_DA_SALA: &str = "seele-sala";
 /// continua congelado (ADR 0058).
 pub const ALPN_DO_NAVEGADOR: &[u8] = b"h3";
 
+/// O `protocol` do DCEP de todo canal extra do WebRTC da linha 2 (0.17, contrato D4).
+///
+/// É o que separa um canal do SEELE de qualquer outro que um navegador abra: um
+/// canal com outro `protocol` é fechado ao chegar. O `seele-enlace` e a página
+/// usam este mesmo texto.
+pub const PROTOCOLO_DO_CANAL: &str = "seele/2";
+
+/// O label do canal unidirecional (os fluxos de tela, anexo e volume de MOD).
+pub const LABEL_UNI: &str = "u";
+
+/// O label do canal bidirecional (as imagens de MOD).
+pub const LABEL_BI: &str = "b";
+
+/// O label do canal de controle (id 0, negociado fora de banda).
+pub const LABEL_CTL: &str = "ctl";
+
+/// O label do canal de voz (id 1, negociado fora de banda, sem ordem e sem retransmissão).
+pub const LABEL_VOZ: &str = "voz";
+
+/// O código do fechamento (`close`, que vai como `0x02 codigo` no `ctl`) de
+/// uma sessão que ficou para trás (`DisconnectReason::FellBehind`).
+///
+/// Com o crédito `0x04`, quem para de ler o `ctl` segura o quadro
+/// `Disconnecting`, que pode não sair a tempo. O corte não espera crédito, então
+/// este número chega mesmo assim, e quem liga o lê como a mesma despedida.
+///
+/// O espaço `0x5345_00xx` é o dos códigos de aplicação do SEELE:
+/// - `0x5345_0010` é a recusa antes do `Hello` (`seele-core`);
+/// - `0x5345_0020` é a recusa de par (`seele-core`);
+/// - este é o `0x5345_0030`.
+///
+/// O 0 é o fechamento comum. O 1, o 2 e o 3 são cortes do enlace.
+pub const CODIGO_FICOU_PARA_TRAS: u32 = 0x5345_0030;
+
 /// Uma janela de certificado curto nova a cada tanto (pedido da F4, item 17).
 pub const PASSO_DA_JANELA: Duration = Duration::from_secs(6 * 24 * 60 * 60);
 

@@ -1985,6 +1985,22 @@ function anotando(...anotadas) {
   contexto.conferirPermissaoDeTela = async () => {};
   contexto.atualizarChamada = async () => {};
   const chamada = ler("tela-chamada.js");
+  // As dependências REAIS de `abrirChamada` e `fecharChamada`, extraídas da
+  // fonte do mesmo modo: o estado da vista de `base.js` (a época e a sessão que
+  // a abertura amarra) e as duas funções de `tela-chamada.js` que decidem para
+  // onde vai o miolo quando a grade fecha (a conversa, ou a ligação pessoal).
+  const base = ler("base.js");
+  for (const declaracao of [/^let epocaDaVista = .*;$/m, /^const vistaDaJanela = .*;$/m]) {
+    const achada = declaracao.exec(base);
+    confere(`V14 · base.js ${declaracao.source}`, Boolean(achada), "a declaração do estado da vista sumiu de base.js");
+    if (achada) vm.runInContext(achada[0], contexto);
+  }
+  for (const nome of ["naVistaPessoal", "mostrarOQueFicaForaDaGrade"]) {
+    const inicio = chamada.indexOf(`function ${nome}(`);
+    confere(`V14 · ${nome} existe`, inicio >= 0, `${nome} sumiu de tela-chamada.js`);
+    if (inicio < 0) continue;
+    vm.runInContext(chamada.slice(inicio, chamada.indexOf("\n}", inicio) + 2), contexto);
+  }
   for (const nome of ["abrirChamada", "fecharChamada"]) {
     const inicio = chamada.indexOf(`function ${nome}(`);
     const fim = chamada.indexOf("\n}", inicio) + 2;

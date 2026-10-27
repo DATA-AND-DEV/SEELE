@@ -47,10 +47,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
-
 /// What happened when a certificate was checked against the pin store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PinDecision {
@@ -279,7 +275,12 @@ impl PinStore for MemoryPinStore {
     }
 }
 
-/// A rustls verifier that pins instead of chasing a certificate authority.
+/// A verifier that pins instead of chasing a certificate authority.
+///
+/// Desde a 0.17 ele não está dentro do TLS: quem o chama é
+/// `client::conferir_quem_atendeu`, com a impressão do certificado DTLS que o
+/// enlace viu, depois do DTLS e **antes do `Hello`** — o mesmo ponto em que o
+/// `rustls` o chamava, para efeito do que sai para quem atendeu.
 #[derive(Debug)]
 pub struct TofuVerifier {
     store: Arc<dyn PinStore>,
@@ -305,7 +306,6 @@ pub struct TofuVerifier {
     /// ([`PinDecision::InviteRefused`] vira `ConnectError::InviteMismatch`, e
     /// [`PinDecision::Changed`] vira `ConnectError::PinChanged`).
     last: Mutex<Option<PinDecision>>,
-    provider: Arc<rustls::crypto::CryptoProvider>,
 }
 
 impl TofuVerifier {
@@ -350,7 +350,6 @@ impl TofuVerifier {
             esperada,
             o_pino_prova_o_servidor,
             last: Mutex::new(None),
-            provider: Arc::new(rustls::crypto::ring::default_provider()),
         }
     }
 
@@ -412,7 +411,27 @@ impl TofuVerifier {
     /// A comparação não diferencia maiúsculas de minúsculas, como a de
     /// [`verdict`]: é a mesma função, `confere`, nos dois lugares.
     pub fn decide(&self, host: &str, certificate: &[u8]) -> PinDecision {
-        let offered = seele_proto::transport::certificate_fingerprint(certificate);
+        self.decide_impressao(
+            host,
+            seele_proto::transport::certificate_fingerprint(certificate),
+        )
+    }
+
+    /// A mesma decisão, a partir da impressão já calculada (o SHA-256 do DER, em
+    /// hex): é o que o DTLS da 0.17 entrega, e não o certificado inteiro.
+    ///
+    /// Grava a decisão em [`Self::last_decision`], como o aperto de mão gravava:
+    /// quem disca a lê para dar nome à recusa.
+    pub fn conferir_impressao(&self, offered: String) -> PinDecision {
+        let decisao = self.decide_impressao(&self.pin_key.clone(), offered);
+        if let Ok(mut last) = self.last.lock() {
+            *last = Some(decisao.clone());
+        }
+        decisao
+    }
+
+    /// O corpo de [`Self::decide`], sobre a impressão.
+    fn decide_impressao(&self, host: &str, offered: String) -> PinDecision {
         match self.store.pinned(host) {
             None => {
                 if let Some(expected) = self.desmente(&offered) {
@@ -480,90 +499,6 @@ impl TofuVerifier {
         self.esperada
             .as_deref()
             .filter(|esperada| !confere(esperada, ofertada))
-    }
-}
-
-/// A frase que o TLS leva a quem atendeu quando o verificador recusa.
-///
-/// **É a única frase, para os dois casos, e não conta nada.** O texto do `Err`
-/// de `verify_server_cert` vira o `reason` do `CONNECTION_CLOSE` que o servidor
-/// (ou quem atendeu no lugar dele) recebe — `quinn-proto`, `crypto/rustls.rs`,
-/// em `read_handshake`. Uma frase por caso ensinaria a quem atende se esta
-/// máquina tinha um link na mão ou uma chave fixada dele, e essa é justamente a
-/// informação que um impostor quer para saber o que forjar. O que distingue a
-/// chave trocada da impressão que não confere fica em `last` e no log desta
-/// máquina, que só quem a usa lê: [`TofuVerifier::decide`] escreve um `warn!`
-/// por recusa, com a chave de pino, as duas impressões e o porquê (inclusive
-/// quando havia um pino que conferia e a esperada decidiu), e a corrida de
-/// candidatos (`crate::enlace`) escreve outro para cada candidato recusado cuja
-/// falha ela recolheu, com o endereço, haja vencedor ou não.
-const RECUSA_NO_TLS: &str = "certificado não aceito";
-
-impl ServerCertVerifier for TofuVerifier {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, TlsError> {
-        // Deliberately not derived from `_server_name`: see `Self::new`.
-        let decision = self.decide(&self.pin_key.clone(), end_entity.as_ref());
-        if let Ok(mut last) = self.last.lock() {
-            *last = Some(decision.clone());
-        }
-
-        match decision {
-            PinDecision::FirstContact { .. } | PinDecision::Matches { .. } => {
-                Ok(ServerCertVerified::assertion())
-            }
-            // The handshake fails. specs/08-seguranca.md makes this alert
-            // blocking, and a warning a user can dismiss is not one.
-            //
-            // O aperto de mão falha **aqui** nos dois casos, e antes do `Hello`:
-            // o convite, a senha e o apelido não saem para quem atendeu. O
-            // porquê já está em `last`, gravado acima, para
-            // `client::classify_connection_error` devolver com nome. A frase é
-            // uma só, e neutra — ver [`RECUSA_NO_TLS`].
-            PinDecision::Changed { .. } | PinDecision::InviteRefused { .. } => {
-                Err(TlsError::General(RECUSA_NO_TLS.into()))
-            }
-        }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, TlsError> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &CertificateDer<'_>,
-        dss: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, TlsError> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.provider.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.provider
-            .signature_verification_algorithms
-            .supported_schemes()
     }
 }
 
@@ -842,26 +777,17 @@ mod tests {
 
     #[test]
     fn a_recusa_da_esperada_falha_o_aperto_de_mao_e_deixa_o_porque() {
-        // `decide` sozinho não prova que o TLS para. Quem o `rustls` chama no
-        // meio do aperto de mão é `verify_server_cert`, e um `Ok` dele manda o
-        // `Hello` logo em seguida. Aqui ele é chamado direto, sem sessão TLS
-        // nenhuma: só lê o certificado.
+        // Desde a 0.17 quem pergunta é `client::conferir_quem_atendeu`, depois
+        // do DTLS e antes do `Hello`, pela impressão que o DTLS mostrou. A
+        // decisão tem de ficar guardada: é dela que sai o erro com nome.
         let (_, verificador) = esperando(B);
-        let certificado = CertificateDer::from(b"certificate-one".to_vec());
-        let nome = ServerName::try_from("localhost").expect("nome TLS de teste");
-
-        let resposta = verificador.verify_server_cert(
-            &certificado,
-            &[],
-            &nome,
-            &[],
-            UnixTime::since_unix_epoch(std::time::Duration::ZERO),
+        let resposta = verificador.conferir_impressao(
+            seele_proto::transport::certificate_fingerprint(b"certificate-one"),
         );
 
         assert!(
-            resposta.is_err(),
-            "o TLS aceitou o certificado que a impressão esperada recusa: o \
-             `Hello` sairia com o convite dentro"
+            matches!(resposta, PinDecision::InviteRefused { .. }),
+            "a impressão que a esperada recusa passou: o `Hello` sairia com o convite dentro"
         );
         assert!(
             matches!(
@@ -1063,69 +989,6 @@ mod tests {
             None,
             "a chave que a esperada truncada deveria ter recusado ficou fixada"
         );
-    }
-
-    /// O que o `rustls` leva ao `CONNECTION_CLOSE` de quem atendeu, quando o
-    /// verificador recusa este certificado.
-    fn a_frase_que_vai_ao_fio(verificador: &TofuVerifier) -> String {
-        let certificado = CertificateDer::from(b"certificate-one".to_vec());
-        let nome = ServerName::try_from("localhost").expect("nome TLS de teste");
-        verificador
-            .verify_server_cert(
-                &certificado,
-                &[],
-                &nome,
-                &[],
-                UnixTime::since_unix_epoch(std::time::Duration::ZERO),
-            )
-            .expect_err("o certificado devia ter sido recusado")
-            .to_string()
-    }
-
-    #[test]
-    fn a_frase_que_vai_ao_fio_nao_conta_se_havia_link_ou_pino() {
-        // O texto do `Err` de `verify_server_cert` vira o `reason` do
-        // `CONNECTION_CLOSE` que **quem atendeu** recebe (`quinn-proto`,
-        // `crypto/rustls.rs`). Se as duas recusas dissessem coisas diferentes,
-        // um servidor qualquer (ou um impostor) aprenderia, só de ser recusado,
-        // se esta máquina tinha um link na mão ou uma chave fixada dele. A
-        // distinção fica na decisão que o verificador guarda e no log desta
-        // máquina (`a_recusa_no_primeiro_contato_vai_ao_log_sem_dizer_que_havia_pino`
-        // e `a_chave_trocada_vai_ao_log_com_as_duas_impressoes`, abaixo).
-        let (_, com_link) = esperando(B);
-        let por_link = a_frase_que_vai_ao_fio(&com_link);
-
-        let loja = Arc::new(MemoryPinStore::new());
-        loja.pin("seele.exemplo", A.into());
-        let com_pin = TofuVerifier::new(
-            Arc::clone(&loja) as Arc<dyn PinStore>,
-            "seele.exemplo".to_owned(),
-            None,
-            true,
-        );
-        let por_pin = a_frase_que_vai_ao_fio(&com_pin);
-        assert!(
-            matches!(com_pin.last_decision(), Some(PinDecision::Changed { .. })),
-            "o cenário do pin trocado não foi o que o teste montou"
-        );
-
-        assert_eq!(
-            por_link, por_pin,
-            "a recusa por link e a recusa por pin trocado dizem coisas diferentes a \
-             quem atendeu, e ele aprende qual das duas defesas esta máquina tinha"
-        );
-        let minuscula = por_link.to_lowercase();
-        // Sem «expect»: o `rustls` antepõe «unexpected error: » à frase.
-        for palavra in [
-            "pin", "fix", "link", "convite", "impress", "esperad", "invite", "chang", "mudou",
-            "troc", "promete",
-        ] {
-            assert!(
-                !minuscula.contains(palavra),
-                "a frase que vai ao fio diz «{palavra}» e conta a quem atendeu \
-                 como esta máquina decidiu: {por_link}"
-            );
-        }
     }
 
     #[test]

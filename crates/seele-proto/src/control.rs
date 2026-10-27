@@ -387,8 +387,17 @@ pub const MAX_MOD_REPO_LEN: usize = 256;
 /// Quantos alcances um MOD pode declarar.
 pub const MAX_REACH_ITENS: usize = 16;
 
-/// Teto de cada nome de alcance.
-pub const MAX_REACH_LEN: usize = 32;
+/// Teto de cada nome de alcance, em **bytes** UTF-8 — na linha 2.
+///
+/// Era 32, e o MESA 4.0.0 publicado declara itens de 43 e 34 bytes: a 0.17 o
+/// instalava e recusava o anúncio do servidor que o ligasse. Subiu para 48 só
+/// na linha 2 — esta build não fala outra (`version::VERSAO_MINIMA`) —, e não
+/// para 64: medido, o anúncio cheio (12 MODs, 16 itens) passa do quadro de
+/// [`MAX_FRAME_LEN`] acima de 55 bytes por item (18020 bytes com 64); com 48
+/// ele dá 14948. O `read_manifest` confere o mesmo teto na instalação
+/// (`mods::Refused::AlcanceGrandeDemais`), para nenhum pacote instalado ficar
+/// sem poder ser anunciado.
+pub const MAX_REACH_LEN: usize = 48;
 
 /// Why a control frame could not be handled.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -509,6 +518,22 @@ pub enum Permission {
     /// granting Observer to somebody who is also a pessoa *silence* them,
     /// instead of quietly doing nothing.
     AttachFile,
+
+    // ---- cargos e permissões, SEELE 0.17 (ADR 0064) ----
+    //
+    // No fim, pela regra do ADR 0058: os ordinais de cima não se mexem.
+    /// Transmitir a tela na sala de voz em que se está.
+    ///
+    /// Até a 0.16 a tela pegava carona no [`Self::Speak`]. A migração 18
+    /// espelha: quem concedia ou negava `Speak` concede ou restringe esta, e
+    /// transmitir continua exatamente igual a falar até alguém separar.
+    ShareScreen,
+    /// O equivalente do ADMINISTRATOR do Discord: implica todas as permissões,
+    /// inclusive as de MOD.
+    ///
+    /// Limites (ADR 0064): não passa por cima da restrição de cargo, nem da
+    /// hierarquia, nem das ações locais da máquina que hospeda.
+    Administrator,
 }
 
 /// A role and the permissions it carries.
@@ -668,12 +693,23 @@ pub struct PersonState {
 /// Connection quality, as the server sees it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Telemetry {
-    /// Round trip, milliseconds.
-    pub rtt_ms: f32,
-    /// Arrival jitter, milliseconds.
-    pub jitter_ms: f32,
-    /// Packet loss, 0.0 to 1.0.
-    pub loss_fraction: f32,
+    /// Round trip, milliseconds. **`None` é «não medido»**, e nunca zero.
+    ///
+    /// # Por que `Option` desde a linha 2 (correção no rascunho do 10)
+    ///
+    /// Na linha 1 os três eram `f32`, e quem não tinha medida mandava `0.0` —
+    /// que o cliente lia como «zero de atraso, zero de perda», a melhor
+    /// conexão possível. Na 0.17 o anfitrião é ICE-lite e o enlace não expõe
+    /// RTT nem perda do SCTP (E, em pedidos.md): o servidor passaria a mentir
+    /// a cada segundo. O 10 ainda não saiu para ninguém (`fio_2_0` em
+    /// rascunho), e a regra de só acrescentar vale para o que foi publicado;
+    /// por decisão do coordenador, o formato foi corrigido aqui. O ouro do 9
+    /// (`fio_1_0.txt`) não muda.
+    pub rtt_ms: Option<f32>,
+    /// Arrival jitter, milliseconds. `None` é «não medido».
+    pub jitter_ms: Option<f32>,
+    /// Packet loss, 0.0 to 1.0. `None` é «não medido».
+    pub loss_fraction: Option<f32>,
     /// State of each subsystem.
     pub subsystems: Vec<(Subsystem, SubsystemHealth)>,
 }
@@ -1829,6 +1865,103 @@ pub enum ClientMessage {
         /// Bounded JSON owned by the MOD.
         payload: String,
     },
+
+    // ---- cargos e permissões, SEELE 0.17 (ADR 0064) ----
+    //
+    // No fim da lista (ADR 0058/0063), na linha 2 em rascunho. Todos exigem
+    // `ManageRoles` e passam pela regra de `crate::cargos::Estado::decidir`,
+    // no servidor e no instante do pedido. A resposta a uma recusa é
+    // `ServerMessage::CargoRecusado`; a um sim, o `QuadroDeCargos` novo, que
+    // vai a todos.
+    /// Cria um cargo, na posição 1 (logo acima do `@everyone`).
+    CriarCargo {
+        /// A revisão do `QuadroDeCargos` que a tela viu. Uma velha é
+        /// recusada com `RecusaDeCargo::RevisaoVelha`.
+        revisao: u64,
+        /// O nome.
+        nome: String,
+        /// O que concede.
+        concede: Vec<crate::cargos::Permissao>,
+        /// O que restringe.
+        restringe: Vec<crate::cargos::Permissao>,
+    },
+    /// Troca o nome e as listas de um cargo. As listas vão inteiras.
+    EditarCargo {
+        /// A revisão do `QuadroDeCargos` que a tela viu. Uma velha é
+        /// recusada com `RecusaDeCargo::RevisaoVelha`.
+        revisao: u64,
+        /// Qual.
+        cargo: RoleId,
+        /// O nome novo; ignorado no `@everyone`.
+        nome: String,
+        /// O que passa a conceder.
+        concede: Vec<crate::cargos::Permissao>,
+        /// O que passa a restringir.
+        restringe: Vec<crate::cargos::Permissao>,
+    },
+    /// Põe um cargo noutra posição (de 1 em diante).
+    MoverCargo {
+        /// A revisão do `QuadroDeCargos` que a tela viu. Uma velha é
+        /// recusada com `RecusaDeCargo::RevisaoVelha`.
+        revisao: u64,
+        /// Qual.
+        cargo: RoleId,
+        /// A posição nova.
+        posicao: u32,
+    },
+    /// Apaga um cargo, e as atribuições dele.
+    ApagarCargo {
+        /// A revisão do `QuadroDeCargos` que a tela viu. Uma velha é
+        /// recusada com `RecusaDeCargo::RevisaoVelha`.
+        revisao: u64,
+        /// Qual.
+        cargo: RoleId,
+    },
+    /// Dá um cargo a uma pessoa.
+    AtribuirCargo {
+        /// A revisão do `QuadroDeCargos` que a tela viu. Uma velha é
+        /// recusada com `RecusaDeCargo::RevisaoVelha`.
+        revisao: u64,
+        /// Quem.
+        pessoa: PersonId,
+        /// Qual.
+        cargo: RoleId,
+    },
+    /// Tira um cargo de uma pessoa.
+    RevogarCargo {
+        /// A revisão do `QuadroDeCargos` que a tela viu. Uma velha é
+        /// recusada com `RecusaDeCargo::RevisaoVelha`.
+        revisao: u64,
+        /// Quem.
+        pessoa: PersonId,
+        /// Qual.
+        cargo: RoleId,
+    },
+    /// Pede o `QuadroDeCargos`. Sem permissão: os cargos de um servidor são
+    /// visíveis a quem está nele.
+    PedirCargos,
+    /// Um pedido a um MOD **que nomeia a ação declarada** que ele executa.
+    ///
+    /// O servidor confere, antes de despachar, que um MOD ligado declarou
+    /// `acao` e que esta pessoa a tem agora
+    /// (`crate::cargos::Estado::autorizar_acao_de_mod`). Só então a metade de
+    /// servidor recebe o pedido, com `contexto.acao` igual a esta ação. Uma
+    /// recusa volta no mesmo `ModReply`, com `{"ok":false,"recusa":…}`.
+    ///
+    /// O `ModRequest` de antes continua igual e com a regra de antes (ler o
+    /// canal; `admin` e `write` no contexto), e lá `contexto.acao` é `null`.
+    AcaoDeMod {
+        /// A correlação, como no `ModRequest`.
+        request: u32,
+        /// `autor/nome`.
+        id: String,
+        /// O canal; zero é o escopo de servidor, como no `ModRequest`.
+        channel: ChannelId,
+        /// A ação declarada no `mod.json`.
+        acao: String,
+        /// O JSON do MOD.
+        payload: String,
+    },
 }
 
 /// Server to client.
@@ -2617,6 +2750,25 @@ pub enum ServerMessage {
         /// O tema de agora, ou nenhum.
         tema: Option<TemaDoServidor>,
     },
+
+    // ---- cargos e permissões, SEELE 0.17 (ADR 0064) ----
+    /// Os cargos deste servidor, as atribuições, o proprietário e as
+    /// permissões de MOD declaradas.
+    ///
+    /// Vai logo depois do `Session`, em resposta ao `PedirCargos` e a todos a
+    /// cada mudança de cargo.
+    QuadroDeCargos(crate::cargos::QuadroDeCargos),
+    /// O que **esta** pessoa pode agora.
+    ///
+    /// Vai logo depois do `Session` e de novo a cada mudança que a afete — é o
+    /// que faz uma revogação aparecer na tela sem reconectar. Conveniência: o
+    /// servidor confere de novo em toda ação.
+    SuasPermissoes(crate::cargos::SuasPermissoes),
+    /// Um verbo de cargo foi recusado, e por quê.
+    CargoRecusado {
+        /// O motivo.
+        motivo: crate::cargos::RecusaDeCargo,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2743,11 +2895,11 @@ pub trait ListaDeCima: for<'de> Deserialize<'de> + Validate {
 }
 
 impl ListaDeCima for ClientMessage {
-    const CONHECIDAS: u32 = 37;
+    const CONHECIDAS: u32 = 45;
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 48;
+    const CONHECIDAS: u32 = 51;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3113,9 +3265,18 @@ const MAX_TIMING_MS: f32 = 10_000.0;
 
 impl Validate for Telemetry {
     fn validate(&self) -> Result<(), ControlError> {
-        check_range("rtt_ms", self.rtt_ms, 0.0, MAX_TIMING_MS)?;
-        check_range("jitter_ms", self.jitter_ms, 0.0, MAX_TIMING_MS)?;
-        check_range("loss_fraction", self.loss_fraction, 0.0, 1.0)
+        // A ausência é a ausência; o que vem medido continua conferido como
+        // antes — um `NaN` dentro de um `Some` é recusado igual.
+        if let Some(rtt) = self.rtt_ms {
+            check_range("rtt_ms", rtt, 0.0, MAX_TIMING_MS)?;
+        }
+        if let Some(jitter) = self.jitter_ms {
+            check_range("jitter_ms", jitter, 0.0, MAX_TIMING_MS)?;
+        }
+        match self.loss_fraction {
+            Some(loss) => check_range("loss_fraction", loss, 0.0, 1.0),
+            None => Ok(()),
+        }
     }
 }
 
@@ -3262,6 +3423,34 @@ impl Validate for ClientMessage {
             // O motivo é um enumerado de tamanho fixo, e a `ScreenId` segue a
             // mesma regra do braço acima: quem sabe se ela existe é o servidor.
             Self::ParFalhou { .. } => Ok(()),
+            // Os tetos de forma. A regra (quem pode, o que concede) é do
+            // servidor, em `cargos::Estado::decidir`.
+            Self::CriarCargo {
+                nome,
+                concede,
+                restringe,
+                ..
+            }
+            | Self::EditarCargo {
+                nome,
+                concede,
+                restringe,
+                ..
+            } => crate::cargos::validar_pedido(Some(nome), concede, restringe),
+            Self::MoverCargo { .. }
+            | Self::ApagarCargo { .. }
+            | Self::AtribuirCargo { .. }
+            | Self::RevogarCargo { .. }
+            | Self::PedirCargos => Ok(()),
+            Self::AcaoDeMod {
+                id, acao, payload, ..
+            } => {
+                check("mod_id", id.len(), MAX_ID_DO_MOD_NOS_PEDIDOS)?;
+                if !crate::cargos::acao_valida(acao) {
+                    return Err(ControlError::FieldOutOfRange { field: "acao" });
+                }
+                check("mod_payload", payload.len(), MAX_CARGA_DE_MOD)
+            }
         }
     }
 }
@@ -3455,6 +3644,16 @@ impl Validate for ServerMessage {
                     check_id_do_mod(&tema.mod_id)?;
                     check("tema_valores", tema.valores.len(), MAX_CARGA_DE_MOD)
                 }
+            },
+            Self::QuadroDeCargos(quadro) => quadro.validar(),
+            Self::SuasPermissoes(suas) => suas.validar(),
+            Self::CargoRecusado { motivo } => match motivo {
+                crate::cargos::RecusaDeCargo::NaoPodeConceder { permissao }
+                | crate::cargos::RecusaDeCargo::PermissaoDesconhecida { permissao }
+                | crate::cargos::RecusaDeCargo::GanhoAlemDaSuaAutoridade { permissao, .. } => {
+                    crate::cargos::validar_pedido(None, std::slice::from_ref(permissao), &[])
+                }
+                _ => Ok(()),
             },
         }
     }
@@ -3650,18 +3849,20 @@ mod tests {
     }
 
     /// A última release publicada, como ela lê o byte 0: a tag, o número que
-    /// ela fala e a janela dela.
+    /// ela fala e quantos números abaixo dele ela ainda lê.
     ///
-    /// **v0.15.1**, publicada em 08/10/2026 do commit `54f542f`, conferida pela
-    /// API de releases como manda o `CLAUDE.md`. No `version.rs` daquele commit,
-    /// `PROTOCOL_VERSION = 8` (`:124`) e `COMPATIBILITY_WINDOW = 1` (`:164`):
-    /// ela lê 7 e 8 no byte 0, e recusa o resto antes de olhar o corpo.
+    /// **v0.16.0**, publicada em 24/10/2026 do commit `8faa3379b`, conferida
+    /// pela API de releases como manda o `CLAUDE.md`. No `version.rs` daquele
+    /// commit, `PROTOCOL_VERSION = 9` e `VERSAO_MINIMA = 9` (`:144`, `:198`): a
+    /// faixa dela é `[9, 9]`, então ela lê só o 9 no byte 0 e recusa o resto
+    /// antes de olhar o corpo (`confere_o_carimbo`, `:313-327`). O terceiro
+    /// número é 0 por isso.
     ///
-    /// **Este número estava em 3 até 08/10/2026** — o da `v0.10.5-1` —, e com
-    /// ele o guarda passava sem medir nada: nenhuma subida de 4 a 8 o fazia
-    /// reprovar, porque o 3 já estava fora da janela de todas. Quem publicar uma
-    /// versão de servidor nova atualiza esta linha (ADR 0058).
-    const PUBLICADA: (&str, u8, u8) = ("v0.15.1", 8, 1);
+    /// **Esta linha ficou em `v0.15.1` depois de a v0.16.0 sair**, e o guarda
+    /// mediu contra a 0.15 até 24/10/2026. Antes disso já tinha ficado em 3 —
+    /// o da `v0.10.5-1` — até 08/10/2026, e com ele passava sem medir nada.
+    /// Quem publicar uma versão de servidor nova atualiza esta linha (ADR 0058).
+    const PUBLICADA: (&str, u8, u8) = ("v0.16.0", 9, 0);
 
     /// Se a publicada lê um quadro carimbado com `carimbo`.
     fn a_publicada_le(carimbo: u8) -> bool {
@@ -3677,18 +3878,28 @@ mod tests {
     /// - **mesma linha** (quando a publicada for uma 1.x): o `Hello` desta build
     ///   sai carimbado com a mínima, e a publicada tem de lê-lo — é o «1.x nunca
     ///   quebra o fio» do ADR 0058 do lado de quem já está em campo;
-    /// - **outra linha** (hoje, com a v0.15.1): a publicada **não** lê o `Hello`
-    ///   desta build — é a quebra decidida em 08/10/2026 —, e **lê** a recusa
-    ///   que esta build manda a ela, `[8, 11, 0]`, como `Disconnecting {
-    ///   Incompatible }`. É a frase «VERSÃO INCOMPATÍVEL» chegando a quem ficou
-    ///   na 0.15, em vez de «não foi possível alcançar».
+    /// - **outra linha, de antes da 1.0** (até 24/10/2026, com a v0.15.1): a
+    ///   publicada **não** lê o `Hello` desta build, e **lê** a recusa que esta
+    ///   build manda a ela, `[8, 11, 0]`, como `Disconnecting { Incompatible }`;
+    /// - **outra linha, da 1 em diante** (hoje, com a v0.16.0 e a linha 2): a
+    ///   publicada não lê o `Hello`, e a recusa sai com o número **desta**
+    ///   build, acima da faixa dela. Uma 0.16 lê esse byte 0 antes do corpo e
+    ///   o diz como `ConnectError::OutraLinha`, com `mais_nova` (o `linha_de`
+    ///   dela dá `Posterior` para todo número acima de 9) — e não como «não foi
+    ///   possível alcançar».
+    ///
+    /// **O que este guarda não mede, dito por inteiro** (ADR 0063): a linha 2
+    /// fala WebRTC e a 0.16 só QUIC, e não há recusador `seele/1`. Nenhuma 0.16
+    /// chega a receber estes três bytes; quem avisa as duas pontas é o `v=` do
+    /// link, a magia do ENC/3 e o launcher. O guarda prende os bytes da recusa
+    /// para o dia em que duas linhas dividirem um transporte de novo.
     ///
     /// Os testes de ida e volta não medem nada disso: neles as duas pontas são
     /// o mesmo codec. Esta conta é sobre o codec da publicada, escrito como os
     /// três números dele.
     #[test]
     fn a_publicada_ou_e_da_mesma_linha_ou_le_a_recusa_desta_build() {
-        use crate::version::{linha_de, VERSAO_MINIMA};
+        use crate::version::{linha_de, PRIMEIRO_DA_LINHA_UM, VERSAO_MINIMA};
 
         let (tag, protocolo, _) = PUBLICADA;
         let carimbo_do_hello = encode_em(VERSAO_MINIMA, &hello()).unwrap()[0];
@@ -3709,10 +3920,18 @@ mod tests {
                  decidida não aconteceu, ou a linha de {protocolo} está errada"
             );
             let recusa = recusa_por_versao(protocolo);
-            assert!(
-                a_publicada_le(recusa[0]),
-                "{tag} não lê o carimbo da recusa que esta build manda a ela"
-            );
+            if protocolo < PRIMEIRO_DA_LINHA_UM {
+                assert!(
+                    a_publicada_le(recusa[0]),
+                    "{tag} não lê o carimbo da recusa que esta build manda a ela"
+                );
+            } else {
+                assert!(
+                    recusa[0] > protocolo && !a_publicada_le(recusa[0]),
+                    "{tag} é da linha 1 em diante e precisa ver, no byte 0 da \
+                     recusa, um número acima do dela: é ele que vira «mais nova»"
+                );
+            }
             // Em `54f542f`, `Disconnecting` é o ordinal 11 de `ServerMessage` e
             // `Incompatible` é o 0 de `DisconnectReason`: os dois existem
             // desde a 0.11, e o ADR 0058 os congela.
@@ -4358,11 +4577,30 @@ mod numeric_tests {
 
     fn telemetry(rtt: f32, jitter: f32, loss: f32) -> ServerMessage {
         ServerMessage::Telemetry(Telemetry {
-            rtt_ms: rtt,
-            jitter_ms: jitter,
-            loss_fraction: loss,
+            rtt_ms: Some(rtt),
+            jitter_ms: Some(jitter),
+            loss_fraction: Some(loss),
             subsystems: vec![(Subsystem::Permissions, SubsystemHealth::Nominal)],
         })
+    }
+
+    /// **Não medido viaja como não medido** (linha 2): nem zero, nem `NaN`.
+    #[test]
+    fn o_que_nao_foi_medido_vai_como_none_e_volta_como_none() {
+        let sem_medida = ServerMessage::Telemetry(Telemetry {
+            rtt_ms: None,
+            jitter_ms: None,
+            loss_fraction: None,
+            subsystems: Vec::new(),
+        });
+        let frame = encode(&sem_medida).unwrap();
+        let ServerMessage::Telemetry(lida) = decode::<ServerMessage>(&frame).unwrap() else {
+            panic!("outra mensagem");
+        };
+        assert_eq!(
+            (lida.rtt_ms, lida.jitter_ms, lida.loss_fraction),
+            (None, None, None)
+        );
     }
 
     #[test]
@@ -4419,9 +4657,9 @@ mod numeric_tests {
         // The check has to be on the way in as well, or a hand-rolled frame
         // walks straight through.
         let hostile = Telemetry {
-            rtt_ms: f32::NAN,
-            jitter_ms: 0.0,
-            loss_fraction: 0.0,
+            rtt_ms: Some(f32::NAN),
+            jitter_ms: Some(0.0),
+            loss_fraction: Some(0.0),
             subsystems: Vec::new(),
         };
         let mut frame = vec![PROTOCOL_VERSION];
@@ -5121,14 +5359,14 @@ mod o_vocabulario_e_a_versao {
         // quando alguém acrescenta, e é a que faltava.
         assert_eq!(
             ultima_variante::<ClientMessage>(),
-            36,
+            44,
             "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
              sobre esta linha"
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            47,
+            50,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -5179,9 +5417,31 @@ mod o_vocabulario_e_a_versao {
         // A 0.15 fica de fora por decisão, e daqui em diante a regra é a do
         // ADR 0058: variante nova no fim, com o portão de quem manda, e nunca
         // campo novo numa mensagem que já existe.
+        //
+        // **10 em 24/10/2026, o Servidor 2.0, e as listas ainda não mudaram.**
+        // A subida é a troca do transporte (ADR 0063): o QUIC sai e o WebRTC
+        // entra, e a linha 1 fica de fora. Enquanto `tests/fio_2_0.txt` estiver
+        // em rascunho, a linha 2 pode mexer nas listas — e quem mexer conta
+        // aqui o que mexeu, como as entradas acima.
+        //
+        // **Cargos e permissões (ADR 0064), no mesmo 10, em 24/10/2026.** O
+        // cliente foi de 36 para 44: `CriarCargo`, `EditarCargo`,
+        // `MoverCargo`, `ApagarCargo`, `AtribuirCargo`, `RevogarCargo`,
+        // `PedirCargos` e `AcaoDeMod`. O servidor, de 47 para 50:
+        // `QuadroDeCargos`, `SuasPermissoes` e `CargoRecusado`. E o enum
+        // `Permission` ganhou `ShareScreen` e `Administrator` no fim. O 10
+        // ainda não saiu para ninguém, então não há par para trás.
+        //
+        // **`Telemetry` corrigida no rascunho do 10, em 24/10/2026** (decisão
+        // do coordenador, pedido do E): `rtt_ms`, `jitter_ms` e
+        // `loss_fraction` viraram `Option<f32>`, porque o anfitrião ICE-lite
+        // não tem RTT nem perda e mandaria `0.0` — «conexão perfeita» — como
+        // se fosse medida. É uma mudança de CAMPO, que a regra do ADR 0058
+        // proíbe no publicado; o 10 não foi publicado, e o ouro do 9 não muda.
+        // As listas não mudaram de tamanho por isso.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            9,
+            10,
             "a versão do protocolo mudou; confira se os ordinais acima, a faixa \
              de `version::FAIXA` e `mods::VERSAO_DO_ANUNCIO` continuam contando \
              a mesma história"

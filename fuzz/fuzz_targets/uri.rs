@@ -14,10 +14,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use seele_proto::uri::{
-    analisar, analisar_no_navegador, codigo_do_link, LIMITE_DE_ALVOS,
-    LIMITE_DE_HASHES_DO_NAVEGADOR,
-};
+use seele_proto::uri::{analisar, analisar_no_navegador, codigo_do_link, LIMITE_DE_ALVOS};
 
 /// A origem dos testes, de mentira, e não a do produto
 /// (`ORIGEM_DO_NAVEGADOR`). Precisa ser a mesma de `fuzz/sementes/uri/navegador`.
@@ -33,15 +30,14 @@ fuzz_target!(|dados: &[u8]| {
     // O link da sala: só não pode entrar em pânico.
     let _ = codigo_do_link(texto);
 
-    // A forma do navegador (ADR 0057): o que ela aceita respeita os tetos, e o
-    // que o SEELE escreve dela é lido de volta igual.
+    // A forma do navegador (ADR 0057; desde a 0.17, sem `wh=` nem `ate=`,
+    // ADR 0063): o que o SEELE escreve dela é lido de volta igual.
     if let Ok(lido) = analisar_no_navegador(texto, ORIGEM) {
-        assert!(lido.hashes.len() <= LIMITE_DE_HASHES_DO_NAVEGADOR);
-        assert!(lido.convite.bilhete.is_none());
+        assert!(lido.convite.alternativos.len() < LIMITE_DE_ALVOS);
         let escrito = lido
             .convite
-            .no_navegador(ORIGEM, "/e", &lido.hashes, lido.ate)
-            .expect("o link do navegador aceito tem fp e hashes");
+            .no_navegador(ORIGEM, "/e")
+            .expect("o link do navegador aceito tem fp");
         let relido = analisar_no_navegador(&escrito, ORIGEM)
             .expect("o link do navegador que o SEELE escreve tem de ser lido de volta");
         assert_eq!(relido, lido);

@@ -31,7 +31,7 @@ use std::cell::Cell;
 use std::fmt;
 
 use crate::control::{AlertReason, CausaDaRecusa, DisconnectReason, MessageRefusal, ServerMessage};
-use crate::version::PRIMEIRO_DA_LINHA_UM;
+use crate::version::{PRIMEIRO_DA_LINHA_DOIS, PRIMEIRO_DA_LINHA_UM};
 
 /// Os nomes das variantes do enum `T`, na ordem dos ordinais.
 ///
@@ -137,6 +137,10 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
         | ServerMessage::HashesDoNavegador { .. }
         | ServerMessage::ModAviso { .. }
         | ServerMessage::TemaMudou { .. } => PRIMEIRO_DA_LINHA_UM,
+        // Cargos e permissões (ADR 0064): as primeiras variantes da linha 2.
+        ServerMessage::QuadroDeCargos(..)
+        | ServerMessage::SuasPermissoes(..)
+        | ServerMessage::CargoRecusado { .. } => PRIMEIRO_DA_LINHA_DOIS,
     }
 }
 

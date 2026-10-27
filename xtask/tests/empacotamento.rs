@@ -754,6 +754,27 @@ print("bancada do celular: tudo passou")
             true,
         );
 
+        // O que o preflight de ativação lê do produto: a origem do web app
+        // (o mesmo texto que o `xtask/web/links.mjs` lê) e a chave do catálogo.
+        escrever(
+            &repo.join("crates/seele-proto/src/uri.rs"),
+            &format!("pub const ORIGEM_DO_NAVEGADOR: &str = \"{ORIGEM_DE_MENTIRA}\";\n"),
+            false,
+        );
+        escrever(
+            &repo.join("apps/seele-app/chaves/mods.pub"),
+            "untrusted comment: chave de mentira\n",
+            false,
+        );
+
+        // O fonte da `portaria-da-bancada`, no caminho e com o nome de verdade:
+        // a bateria o monta fora do workspace, e a falta dele é vermelho.
+        escrever(
+            &repo.join("apps/seele-app/bancada/medidas/portaria-2026-10-24/portaria-da-bancada.main.rs.txt"),
+            "fn main() {}\n",
+            false,
+        );
+
         // O `tauri.conf.json` como o script espera achá-lo: sem BOM, com o
         // título inteiro e com a metade pública da chave.
         escrever(
@@ -836,16 +857,66 @@ case "$*" in
         fi
         exit 0
         ;;
-    # O sondar do portão do ENC/2 (D-enc-2). O de verdade fala com o ponto de
-    # produção, e nenhum teste fala com ele: este diz o que o de verdade diz.
+    # A `portaria-da-bancada`, montada fora do workspace. O de verdade
+    # compila; este deixa em `target/debug/` um binário que anota quem o
+    # executar, e reprova com `FALSO_PORTARIA_BUILD`.
+    *'portaria-da-bancada/Cargo.toml'*)
+        if [ "${FALSO_PORTARIA_BUILD:-ok}" != ok ]; then
+            echo 'error: could not compile `portaria-da-bancada`' >&2
+            exit 1
+        fi
+        mkdir -p target/debug
+        printf '#!/bin/sh\necho "portaria recem-montada" >> "$SEELE_TESTE_DIARIO"\n' > target/debug/portaria-da-bancada
+        chmod +x target/debug/portaria-da-bancada
+        exit 0
+        ;;
+    # O corpo e a conferência do sinal do navegador: o de verdade usa os
+    # tipos do protocolo; este aceita só a linha NINGUEM.
+    *'--example sondar -- --corpo-do-sinal'*)
+        echo 'SEELE-SINAL/1 CHAMA marcadeteste escutadeteste 0123456789abcdef0123456789abcdef -'
+        exit 0
+        ;;
+    *'--example sondar -- --resposta-do-sinal'*)
+        if [ "$(cat)" = 'SEELE-SINAL/1 NINGUEM' ]; then
+            echo 'o sinal respondeu SEELE-SINAL/1 NINGUEM a uma marca que ninguém registrou'
+            exit 0
+        fi
+        echo 'o sinal NÃO respondeu o que o protocolo promete: o corpo não é uma linha SEELE-SINAL/1'
+        exit 1
+        ;;
+    # O sondar do portão do ponto (D-enc-2, e o ENC/3 e o STUN da 0.17). O de
+    # verdade fala com o ponto de produção, e nenhum teste fala com ele: este
+    # diz o que o de verdade diz. `so-enc2` é um ponto da 0.16.
     *'--example sondar'*)
-        if [ "${FALSO_SONDAR:-fala}" != fala ]; then
-            echo '  IPv4  203.0.113.7:8384  respondeu'
+        echo '  IPv4  203.0.113.7:8384  respondeu'
+        if [ "${FALSO_SONDAR:-fala}" = mudo ]; then
             echo '          o ENC/2: mudo — é um ponto anterior ao ENC/2, e quem liga pelo código não acha ninguém nele'
             exit 1
         fi
-        echo '  IPv4  203.0.113.7:8384  respondeu'
         echo '          o ENC/2: fala — MORO2, QUEM2 e NINGUEM responderam, e o relógio do ponto difere do daqui em 0 s'
+        if [ "${FALSO_SONDAR:-fala}" = so-enc2 ]; then
+            echo '          o ENC/3: mudo — é um ponto anterior à 0.17, e uma sala da 0.17 não se registra nele'
+            echo '          o STUN: mudo — o Binding Request não teve resposta em três tentativas'
+            # Como o de verdade: um ponto da 0.16 só reprova quem PEDE o ENC/3. Sem a bandeira, o portão do ENC/2 passa com ele.
+            case "$*" in *--exige-enc3*) exit 1 ;; esac
+            exit 0
+        fi
+        echo '          o ENC/3: fala — MORO3 morou, QUEM3 achou, e o CHAMA foi atendido pela escuta'
+        echo '          o STUN: responde — o Binding devolveu 198.51.100.4:50000 (XOR-MAPPED-ADDRESS)'
+        exit 0
+        ;;
+    # O catálogo de mods.seele.sh, conferido pela assinatura com o código do app.
+    *'--example conferir_catalogo'*)
+        if [ "${FALSO_CATALOGO:-ok}" = recusa ]; then
+            echo 'catalogo.json: AssinaturaDoCatalogoRecusada' >&2
+            exit 1
+        fi
+        # O catálogo de hoje: assinado, e sem as versões da API 7.
+        if [ "${FALSO_CATALOGO:-ok}" = sem-api7 ]; then
+            echo 'o catálogo é assinado e íntegro, mas NÃO tem as versões exigidas: seele/mesa 5.0.0 não está no catálogo' >&2
+            exit 1
+        fi
+        echo 'catálogo assinado: esquema 1, 3 MODs; revogações assinadas: 0 retiradas'
         exit 0
         ;;
     *'tauri signer sign'*)
@@ -947,16 +1018,59 @@ printf 'caffeinate %s\n' "$*" >> "$SEELE_TESTE_DIARIO"
         // que o script diria a quem baixar, sem publicar nada.
         escrever(
             &base.join("ferramentas/curl"),
-            r#"#!/bin/sh
+            &r#"#!/bin/sh
 cat > /dev/null 2>&1
 url=
+saida=
+cabecalhos=
+origem=
+escrever_url=nao
+anterior=
 for argumento in "$@"; do
+    case "$anterior" in
+        --output) saida="$argumento" ;;
+        --dump-header) cabecalhos="$argumento" ;;
+        -H) case "$argumento" in Origin:*) origem="${argumento#Origin: }" ;; esac ;;
+        --write-out) escrever_url=sim ;;
+    esac
     case "$argumento" in
-        https://*) url="$argumento" ;;
+        https://*|http://127.0.0.1*) url="$argumento" ;;
         @*) cat "${argumento#@}" >> "$SEELE_TESTE_CORPOS" ;;
     esac
+    anterior="$argumento"
 done
 printf 'curl %s\n' "$url" >> "$SEELE_TESTE_DIARIO"
+
+# O domínio novo (o preflight de ativação e o sinal do ponto). Cada nome
+# responde o que ele é, e o `FALSO_ATIVACAO`/`FALSO_SINAL` trocam por outra
+# coisa com 200, que é o defeito que um código de status não vê.
+pagina=
+case "$url" in
+    https://@ORIGEM@/) pagina='<main id="tela-boot"></main>'
+        [ "${FALSO_ATIVACAO:-ok}" = spa ] && pagina='<title>SEELE: texto, voz e vídeo auto-hospedados</title>' ;;
+    https://get.seele.sh/) pagina='<title>SEELE: texto, voz e vídeo auto-hospedados</title>' ;;
+    https://docs.seele.sh/) pagina='<title>Começar · Documentação do SEELE</title>' ;;
+    https://mods.seele.sh/) pagina='<title>SEELE MODS: o catálogo de mods da comunidade</title>' ;;
+    https://mods.seele.sh/*) pagina='bytes de mentira' ;;
+    */sinal/1)
+        corpo='SEELE-SINAL/1 NINGUEM'
+        [ "${FALSO_SINAL:-ok}" = spa ] && corpo='<!doctype html><title>SEELE</title>'
+        permitida=
+        if [ "$origem" = https://@ORIGEM@ ] || [ "${FALSO_SINAL:-ok}" = cors-aberto ]; then permitida="$origem"; fi
+        [ "${FALSO_SINAL:-ok}" = sem-cors ] && permitida=
+        codigo=200
+        [ "${FALSO_SINAL:-ok}" = redireciona ] && codigo=301
+        [ "$escrever_url" = sim ] && printf '%s' "$codigo"
+        { printf 'HTTP/1.1 %s X\r\n' "$codigo"; [ -n "$permitida" ] && printf 'Access-Control-Allow-Origin: %s\r\n' "$permitida"; printf '\r\n'; } > "$cabecalhos"
+        printf '%s' "$corpo" > "$saida"
+        exit 0
+        ;;
+esac
+if [ -n "$pagina" ]; then
+    printf '%s\n' "$pagina" > "$saida"
+    [ "$escrever_url" = sim ] && printf '200 %s' "$url"
+    exit 0
+fi
 
 if [ "${FALSO_TOKEN:-bom}" != bom ]; then
     printf '{"message":"Bad credentials"}\n401'
@@ -971,7 +1085,7 @@ case "$url" in
     */commits/*) printf '{}\n%s' "${FALSO_COMMIT:-200}" ;;
     *) printf '{"permissions":{"push":%s}}\n200' "${FALSO_PUSH:-true}" ;;
 esac
-"#,
+"#.replace("@ORIGEM@", ORIGEM_DE_MENTIRA),
             true,
         );
 
@@ -2167,7 +2281,9 @@ fn o_validado_pula_a_bateria_e_o_corpo_diz_onde_ela_passou() {
         );
     }
     assert!(
-        saida.corpos.contains(&format!("sobre o commit `{validado}`"))
+        saida
+            .corpos
+            .contains(&format!("sobre o commit `{validado}`"))
             && saida.corpos.contains("`docs/leia.md`"),
         "o corpo do release não diz em que commit a bateria passou, nem o que mudou \
          desde então:\n{}",
@@ -2287,7 +2403,13 @@ fn o_validado_diz_o_windows_mesmo_quando_so_refaz_a_publicacao() {
         false,
     );
     let saida = bancada.rodar(
-        &["1.2.3", "--pular", "macos,windows,linux", "--validado", &validado],
+        &[
+            "1.2.3",
+            "--pular",
+            "macos,windows,linux",
+            "--validado",
+            &validado,
+        ],
         &[],
     );
 
@@ -2333,7 +2455,10 @@ fn a_lista_de_commits_que_nao_cabe_sai_cortada_e_diz_onde_esta_o_resto() {
     let cabeca = com_faixa_longa(&bancada, 40);
     let saida = bancada.rodar(
         &["1.2.3", "--sem-bateria"],
-        &[("FALSO_SSH_HEAD", &cabeca), ("SEELE_LIMITE_DO_CORPO", "9000")],
+        &[
+            ("FALSO_SSH_HEAD", &cabeca),
+            ("SEELE_LIMITE_DO_CORPO", "9000"),
+        ],
     );
 
     assert_eq!(
@@ -2342,7 +2467,10 @@ fn a_lista_de_commits_que_nao_cabe_sai_cortada_e_diz_onde_esta_o_resto() {
         saida.texto
     );
     assert!(
-        saida.diario.lines().any(|linha| linha.ends_with("/releases")),
+        saida
+            .diario
+            .lines()
+            .any(|linha| linha.ends_with("/releases")),
         "o release não chegou a ser criado, e as asserções abaixo não provam nada:\n{}",
         saida.diario
     );
@@ -2358,9 +2486,9 @@ fn a_lista_de_commits_que_nao_cabe_sai_cortada_e_diz_onde_esta_o_resto() {
     );
     assert!(
         saida.corpos.contains(" e mais ")
-            && saida
-                .corpos
-                .contains(&format!("https://github.com/DATA-AND-DEV/SEELE/commits/{cabeca}")),
+            && saida.corpos.contains(&format!(
+                "https://github.com/DATA-AND-DEV/SEELE/commits/{cabeca}"
+            )),
         "a lista cortada não diz quantos ficaram de fora nem onde está o resto:\n{}",
         saida.corpos
     );
@@ -2377,7 +2505,10 @@ fn um_corpo_que_nao_cabe_nem_sem_a_lista_para_antes_do_github() {
     let cabeca = com_faixa_longa(&bancada, 5);
     let saida = bancada.rodar(
         &["1.2.3", "--sem-bateria"],
-        &[("FALSO_SSH_HEAD", &cabeca), ("SEELE_LIMITE_DO_CORPO", "500")],
+        &[
+            ("FALSO_SSH_HEAD", &cabeca),
+            ("SEELE_LIMITE_DO_CORPO", "500"),
+        ],
     );
 
     assert_ne!(
@@ -2391,7 +2522,10 @@ fn um_corpo_que_nao_cabe_nem_sem_a_lista_para_antes_do_github() {
         saida.texto
     );
     assert!(
-        !saida.diario.lines().any(|linha| linha.ends_with("/releases")),
+        !saida
+            .diario
+            .lines()
+            .any(|linha| linha.ends_with("/releases")),
         "o release foi pedido ao GitHub com um corpo que ele recusa:\n{}",
         saida.diario
     );
@@ -2404,7 +2538,13 @@ fn o_validado_e_o_sem_bateria_nao_andam_juntos() {
     };
     let validado = bancada.commit.clone();
     let saida = bancada.rodar(
-        &["1.2.3", "--conferir", "--sem-bateria", "--validado", &validado],
+        &[
+            "1.2.3",
+            "--conferir",
+            "--sem-bateria",
+            "--validado",
+            &validado,
+        ],
         &[],
     );
 
@@ -4944,6 +5084,78 @@ fn a_bancada_do_celular_vermelha_tambem_para_a_publicacao() {
 }
 
 #[test]
+fn sem_o_fonte_da_portaria_um_binario_antigo_nao_vale_e_a_bateria_reprova() {
+    // A `portaria-da-bancada` é montada fora do workspace. Sem o fonte, um
+    // `target/debug/portaria-da-bancada` de outra rodada ainda estaria lá, e a
+    // bancada que o usa passaria com ele: a ausência do fonte tem de ser
+    // vermelha, e o binário antigo não pode ser executado.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let codec = codec_de_mentira(&bancada);
+    std::fs::remove_file(bancada.repo.join(
+        "apps/seele-app/bancada/medidas/portaria-2026-10-24/portaria-da-bancada.main.rs.txt",
+    ))
+    .expect("o fonte da portaria é do repositório de mentira");
+    let antigo = bancada.repo.join("target/debug/portaria-da-bancada");
+    escrever(
+        &antigo,
+        "#!/bin/sh\necho 'portaria ANTIGA executada' >> \"$SEELE_TESTE_DIARIO\"\n",
+        true,
+    );
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "windows"],
+        &[("SEELE_OPENH264", codec.as_str())],
+    );
+    assert_ne!(
+        saida.estado, 0,
+        "o fonte da portaria sumiu, havia um binário antigo e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("bancadas que reprovaram:")
+            && saida.texto.contains("portaria-da-bancada"),
+        "o fim da etapa não nomeia a portaria:\n{}",
+        saida.texto
+    );
+    assert!(
+        !antigo.exists() && !saida.diario.contains("portaria ANTIGA executada"),
+        "o binário antigo da portaria sobreviveu à etapa ou foi executado:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida.nada_foi_empacotado(),
+        "a portaria reprovou e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn o_build_falho_da_portaria_reprova_a_bateria_nomeando_a_portaria() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let codec = codec_de_mentira(&bancada);
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "windows"],
+        &[
+            ("SEELE_OPENH264", codec.as_str()),
+            ("FALSO_PORTARIA_BUILD", "falha"),
+        ],
+    );
+    assert_ne!(
+        saida.estado, 0,
+        "o build da portaria falhou e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("portaria-da-bancada"),
+        "o fim da etapa não nomeia a portaria:\n{}",
+        saida.texto
+    );
+}
+
+#[test]
 fn uma_bancada_que_trava_e_nomeada_quando_o_prazo_da_etapa_vence() {
     // Como a dos roteiros: a frase de sempre do prazo fala do `seele-video`, e
     // a das bancadas diz a última que a etapa disse que rodava.
@@ -5462,8 +5674,13 @@ fn uma_assinatura_que_nao_sai_para_a_publicacao_em_vez_de_seguir() {
 // O portão do ENC/2 (D-enc-2, decidido pelo dono em 08/10/2026; ADR 0062)
 // ---------------------------------------------------------------------------
 
+/// A origem do web app do repositório DE MENTIRA (a `ORIGEM_DO_NAVEGADOR` que a bancada escreve no `uri.rs` dele). Não é a do
+/// produto, de propósito: a do produto mora num lugar só (`crates/seele-proto/src/uri.rs`, o guarda de `tests/web.rs`), e o
+/// `publicar.sh` a LÊ de lá; com outro nome aqui, a bancada prova que ele lê, e não que alguém copiou.
+const ORIGEM_DE_MENTIRA: &str = "origem.exemplo.test";
+
 /// A chamada do sondar que o portão faz, como o dublê do `cargo` a anota.
-const SONDAR_DO_PORTAO: &str = "--example sondar -- --exige-enc2 encontro.seele.app.br";
+const SONDAR_DO_PORTAO: &str = "--example sondar -- --exige-enc2 --exige-enc3 rendzvous.seele.sh";
 
 /// **Um ponto sem o ENC/2 para a publicação, antes de qualquer conferência com
 /// efeito.** O ADR 0047 foram dez dias de recurso morto por um binário velho na
@@ -5533,6 +5750,251 @@ fn o_ponto_que_fala_o_enc2_deixa_a_publicacao_seguir_e_diz_o_que_o_sondar_viu() 
         saida.texto.contains("relógio do ponto difere do daqui"),
         "o portão passou e não mostrou o que o sondar viu, o relógio inclusive:\n{}",
         saida.texto
+    );
+}
+
+/// **Um ponto da 0.16 para a 0.17** (o achado P1 da ativação). Ele fala o
+/// ENC/2 e passava no portão; a 0.17 registra a sala pelo ENC/3, e o navegador
+/// precisa do STUN e do sinal desse ponto. O portão pede os dois, antes de
+/// qualquer pergunta à rede.
+#[test]
+fn um_ponto_da_016_que_so_fala_o_enc2_para_a_publicacao_da_017() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SONDAR", "so-enc2")]);
+    assert_ne!(
+        saida.estado, 0,
+        "um ponto da 0.16 passou no portão da 0.17:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("o ENC/3: mudo") && saida.texto.contains("o STUN: mudo"),
+        "a recusa não mostra o que o sondar viu:\n{}",
+        saida.texto
+    );
+    for pergunta in ["ssh", "docker", "curl"] {
+        assert!(
+            !saida.diario.contains(pergunta),
+            "a recusa veio depois de perguntar ao «{pergunta}»:\n{}",
+            saida.diario
+        );
+    }
+}
+
+/// **O sinal é conferido pelo protocolo, e não pelo status.** Um 200 da SPA,
+/// um sinal sem o CORS do web app e um que deixa qualquer origem ler a
+/// resposta reprovam, cada um dizendo o quê.
+#[test]
+fn o_sinal_do_navegador_reprova_sem_o_protocolo_ou_com_o_cors_errado() {
+    for (falso, esperado) in [
+        ("spa", "não é o sinal do ponto"),
+        (
+            "sem-cors",
+            "sem Access-Control-Allow-Origin: https://origem.exemplo.test",
+        ),
+        ("cors-aberto", "deixa outra origem"),
+        ("redireciona", "respondeu HTTP 301"),
+    ] {
+        // Uma bancada por caso: o diário acumula entre rodadas.
+        let Some(bancada) = Bancada::nova() else {
+            return;
+        };
+        let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SINAL", falso)]);
+        assert_ne!(
+            saida.estado, 0,
+            "o sinal «{falso}» passou:\n{}",
+            saida.texto
+        );
+        assert!(
+            saida.texto.contains(esperado),
+            "o sinal «{falso}» reprovou sem dizer «{esperado}»:\n{}",
+            saida.texto
+        );
+        assert!(
+            saida
+                .diario
+                .contains("curl https://rendzvous.seele.sh/sinal/1"),
+            "o sinal não foi perguntado no nome do ponto:\n{}",
+            saida.diario
+        );
+        assert!(
+            !saida.texto.contains("tudo conferido"),
+            "deu o veredito:\n{}",
+            saida.texto
+        );
+    }
+}
+
+#[test]
+fn o_sinal_certo_passa_e_o_corpo_do_release_diz_o_que_foi_conferido() {
+    let (estado, linha) = linha_do_ponto(&[]);
+    assert_eq!(estado, 0, "{linha}");
+    assert!(
+        linha.contains("ENC/3")
+            && linha.contains("STUN")
+            && linha.contains("https://rendzvous.seele.sh/sinal/1"),
+        "a linha do release não diz que o ENC/3, o STUN e o sinal foram conferidos:\n{linha}"
+    );
+    let (_, ensaio) = linha_do_ponto_com(
+        &[],
+        &[("SEELE_SINAL_DO_PORTAO", "http://127.0.0.1:8385/sinal/1")],
+    );
+    assert!(
+        ensaio.contains("**")
+            && ensaio.contains("127.0.0.1:8385")
+            && ensaio.contains("não o de produção"),
+        "um sinal conferido fora da produção não é dito em negrito:\n{ensaio}"
+    );
+}
+
+/// **O preflight não confia num 200.** O Pages devolve a SPA com 200 para
+/// qualquer caminho: o web app tem de ser o web app, e o catálogo tem de
+/// conferir com a chave do app, as revogações e as duas assinaturas.
+#[test]
+fn o_preflight_de_ativacao_confere_o_conteudo_e_a_assinatura() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let certo = bancada.rodar(&["1.2.3", "--conferir"], &[]);
+    assert_eq!(certo.estado, 0, "{}", certo.texto);
+    for arquivo in [
+        "catalogo.json",
+        "catalogo.json.minisig",
+        "revogacoes.json",
+        "revogacoes.json.minisig",
+    ] {
+        assert!(
+            certo
+                .diario
+                .contains(&format!("curl https://mods.seele.sh/{arquivo}")),
+            "o preflight não baixou {arquivo}:\n{}",
+            certo.diario
+        );
+    }
+    assert!(
+        certo.diario.contains("--example conferir_catalogo"),
+        "o catálogo não foi conferido pela assinatura:\n{}",
+        certo.diario
+    );
+
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let spa = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_ATIVACAO", "spa")]);
+    assert_ne!(
+        spa.estado, 0,
+        "outra página com 200 na origem do web app passou:\n{}",
+        spa.texto
+    );
+    assert!(spa.texto.contains("NÃO é o web app"), "{}", spa.texto);
+
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let assinatura = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_CATALOGO", "recusa")]);
+    assert_ne!(
+        assinatura.estado, 0,
+        "um catálogo que não confere passou:\n{}",
+        assinatura.texto
+    );
+    assert!(
+        assinatura.texto.contains("NÃO serve a esta versão"),
+        "{}",
+        assinatura.texto
+    );
+
+    // O catálogo assinado de hoje, sem as variantes da API 7 dos três oficiais, também para.
+    for exigida in [
+        "seele/estilo@5.0.0@7",
+        "seele/mesa@5.0.0@7",
+        "seele/perfis@5.0.0@7",
+        "seele/mesa@4.0.1@6",
+    ] {
+        assert!(
+            certo.diario.contains(&format!("--exige {exigida}")),
+            "o preflight não exigiu {exigida} no catálogo:\n{}",
+            certo.diario
+        );
+    }
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let antigo = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_CATALOGO", "sem-api7")]);
+    assert_ne!(
+        antigo.estado, 0,
+        "o catálogo sem a API 7 passou:\n{}",
+        antigo.texto
+    );
+    assert!(
+        antigo.texto.contains("NÃO tem as versões exigidas"),
+        "{}",
+        antigo.texto
+    );
+}
+
+/// **O `--conferir` só lê.** Ele chegava ao `limpar_entrega` e apagava a
+/// entrega de outra versão, pronta e ainda não publicada (a revisão de 26/10).
+#[test]
+fn o_conferir_nao_apaga_a_entrega_de_outra_versao() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let pronta = bancada.repo.join("entrega/SEELE_0.9.9_aarch64.dmg");
+    escrever(&pronta, "dmg pronto de outra versão", false);
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[]);
+    assert_eq!(saida.estado, 0, "{}", saida.texto);
+    assert!(
+        pronta.exists(),
+        "o --conferir apagou uma entrega pronta:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida
+            .texto
+            .contains("seria apagado: entrega/SEELE_0.9.9_aarch64.dmg"),
+        "o --conferir não disse o que a publicação apagaria:\n{}",
+        saida.texto
+    );
+}
+
+/// **O `--so-ativacao` só pergunta ao ponto e aos nomes**: nada de ssh,
+/// docker, git push, entrega nem GitHub.
+#[test]
+fn a_checagem_isolada_da_ativacao_nao_toca_em_nada_alem_do_ponto_e_dos_nomes() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let pronta = bancada.repo.join("entrega/SEELE_0.9.9_aarch64.dmg");
+    escrever(&pronta, "dmg pronto de outra versão", false);
+    let saida = bancada.rodar(&["--so-ativacao"], &[]);
+    assert_eq!(saida.estado, 0, "{}", saida.texto);
+    assert!(
+        saida.texto.contains("ativação conferida"),
+        "{}",
+        saida.texto
+    );
+    assert!(saida.diario.contains(SONDAR_DO_PORTAO), "{}", saida.diario);
+    assert!(
+        saida
+            .diario
+            .contains("curl https://rendzvous.seele.sh/sinal/1"),
+        "{}",
+        saida.diario
+    );
+    assert!(pronta.exists(), "a checagem isolada mexeu na entrega");
+    for pergunta in ["ssh ", "docker", "api.github.com", "empacotei"] {
+        assert!(
+            !saida.diario.contains(pergunta),
+            "a checagem isolada chamou «{pergunta}»:\n{}",
+            saida.diario
+        );
+    }
+    let reprova = bancada.rodar(&["--so-ativacao"], &[("FALSO_SONDAR", "so-enc2")]);
+    assert_ne!(
+        reprova.estado, 0,
+        "um ponto da 0.16 passou na checagem isolada:\n{}",
+        reprova.texto
     );
 }
 
@@ -5676,7 +6138,7 @@ fn a_linha_legada_nao_confere_o_enc2() {
 fn a_linha_do_ponto_diz_qual_ponto_foi_conferido() {
     let (_, padrao) = linha_do_ponto(&[]);
     assert!(
-        padrao.contains("encontro.seele.app.br"),
+        padrao.contains("rendzvous.seele.sh"),
         "a linha não diz qual ponto foi conferido:\n{padrao}"
     );
 
@@ -5688,7 +6150,7 @@ fn a_linha_do_ponto_diz_qual_ponto_foi_conferido() {
         "um ponto conferido fora do padrão não é dito em negrito, com o nome:\n{outro}"
     );
     assert!(
-        outro.contains("encontro.seele.app.br") && outro.contains("não foi conferido"),
+        outro.contains("rendzvous.seele.sh") && outro.contains("não foi conferido"),
         "a linha não diz que o ponto padrão, o que o app usa, não foi conferido:\n{outro}"
     );
     assert!(
@@ -5713,9 +6175,22 @@ fn o_corpo_de_uma_versao_conferida_em_outro_ponto_diz_qual() {
         saida.texto
     );
     assert!(
-        saida.diario.contains("--exige-enc2 203.0.113.7:8384"),
+        saida
+            .diario
+            .contains("--exige-enc2 --exige-enc3 203.0.113.7:8384"),
         "o portão não conferiu o ponto que a variável pediu:\n{}",
         saida.diario
+    );
+    // Um ponto escrito como IP não tem sinal (a página não o chama, rtc-web.js): o portão não pergunta por ele, e diz.
+    assert!(
+        !saida.diario.contains("curl https://203.0.113.7"),
+        "o portão perguntou um sinal num IP:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida.texto.contains("o sinal NÃO foi conferido"),
+        "o sinal pulado num IP não foi dito:\n{}",
+        saida.texto
     );
     assert!(
         // O corpo vai em JSON, com os acentos escapados: o trecho é o da mesma

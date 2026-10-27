@@ -13,6 +13,31 @@ O núcleo está em `crates/seele-lancador`. Ele não fala com a rede: recebe os
 bytes do manifesto e do pacote, e responde qual executável roda, com que dados,
 ou por que não.
 
+## Desde a 0.17: três linhas, e a 1 vira legado (ADR 0063)
+
+A 0.17 fala o **Servidor 2.0** (protocolo 10, linha `2`, transporte WebRTC) e não conversa com a 0.16 em nenhuma direção. O launcher passa a guardar duas linhas além da própria: a `1` (a 0.16) e a `0.15`.
+
+- **A primeira abertura** (`apps/seele-app/src/versoes.rs`, `primeira_abertura`) lê o maior esquema de banco da pasta do app e copia a pasta para a linha legada dona dele.
+  - Até 13 (`ESQUEMA_DA_0_15`) é a `0.15`, para quem pulou a 0.16. De 14 a 17 (`ESQUEMA_DA_0_16`, lido do `8faa3379`) é a `1`. Acima disso é `BancoJaMigrado`.
+  - A chave fica de fora (ADR 0061).
+  - Uma marca por linha (`lancador/primeira-abertura-da-linha-2`) impede a 0.17 de copiar a própria pasta na segunda abertura: ela escreve o mesmo esquema 17 da 0.16, e pelo esquema as duas pastas não se distinguem.
+- **A busca em segundo plano** baixa, uma vez cada, toda linha legada que tem dados.
+  - A marca da `0.15` mantém o nome que a 0.16 escreveu (`linha-legada-buscada`).
+  - A da `1` é `linha-legada-buscada-1`.
+- **Um link `v=1.0`** dá `ParaEntrar::Abrir` ou `Baixar` da linha `1`. Um `v=2.0` entra aqui mesmo. Uma recusa que nomeia a linha `"1"` leva ao mesmo lugar.
+- **O manifesto** continua no schema 2. A entrada da 0.17 leva `unit { protocol: 10, server: "2.0", mod_api: 6, mod_apis: [6] }`, e `APIS_POR_LINHA` passa a `[("2",[6]), ("1",[6]), ("0.15",[5,4,3])]`.
+
+### O que uma 0.16 já instalada vê da 0.17
+
+Isto foi lido no código do `8faa3379`, e não medido numa 0.16 instalada.
+
+- **O botão de atualizar da 0.16** mostra o `notes` do topo do `latest.json` no bloco «O QUE MUDA», antes de INSTALAR E REABRIR.
+  - Desde a 0.17, esse `notes` é o bloco `AVISO-DO-ATUALIZADOR` das notas da versão, em texto puro, até 1200 caracteres, seguido da frase com o link (`empacotar/manifesto.py`, `xtask/tests/aviso_do_atualizador.rs`).
+  - **A 0.16 só mostra o aviso, e não pede confirmação.** Quem não lê instala com um clique.
+- **O launcher da 0.16**, diante de um link `v=2.0`, diz que precisa de uma versão mais nova (`MaisNova`). Na tela de HOSPEDAR, ele lista toda linha do manifesto, e por isso **oferece hospedar no Servidor 2.0 baixando a 0.17 ao lado**. Isso é coerente com o ADR 0046, e não foi medido.
+- **A confirmação antes de atualizar** (cancelar, adiar e prosseguir) existe da 0.17 em diante (`apps/seele-app/src/atualizador.rs`). Na 0.16, ela só existe para quem instalar a 0.16.x que a traz, se ela for publicada. Não há promessa para trás.
+- **Segurar a 0.16 sem oferta da 0.17** é decisão de publicação, e não de código: publicar a 0.17 sem a marca «latest» no SEELE-RELEASES mantém o `latest.json` que a 0.16 lê. O endpoint de toda versão é `releases/latest/download/latest.json`.
+
 > **A renumeração foi feita em 2026-09-17, ao integrar este trabalho na
 > `main`.** Esta página nasceu sobre o ramo dos MODs, onde a decisão do launcher
 > era a **0045** e a dos MODs a **0044**; na `main` elas são **0046** e

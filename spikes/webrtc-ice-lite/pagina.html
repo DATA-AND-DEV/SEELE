@@ -1,0 +1,272 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spike-rtc</title>
+<pre id="saida"></pre>
+<script>
+"use strict";
+const q = new URLSearchParams(location.search);
+const FP = q.get("fp");                 // AA:BB:... (64 hex)
+const PORTA = q.get("porta");
+const IP = q.get("ip") || "127.0.0.1";
+const MODO = q.get("modo") || "eco";    // eco | adulterar | sobe | desce
+const FURAR = q.get("furar") === "1";
+const N = Number(q.get("n") || 100);
+const TOTAL = Number(q.get("total") || 32 * 1024 * 1024);
+const ALTO = 1024 * 1024, BAIXO = 256 * 1024;
+
+const t0 = performance.now();
+const ms = () => Math.round((performance.now() - t0) * 10) / 10;
+const linhas = [];
+function log(...a) {
+  const l = `[${ms()} ms] ` + a.join(" ");
+  linhas.push(l);
+  document.getElementById("saida").textContent += l + "\n";
+}
+const R = { modo: MODO, ua: navigator.userAgent, eventos: [] };
+window.__resultado = null;
+const marca = (nome, extra) => { R.eventos.push({ t: ms(), nome, ...(extra || {}) }); log(nome, extra ? JSON.stringify(extra) : ""); };
+
+function sortearU() {
+  const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  const b = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(b, x => A[x % A.length]).join("");
+}
+function adulterar(fp) {
+  const b = (parseInt(fp.slice(0, 2), 16) ^ 0xff).toString(16).toUpperCase().padStart(2, "0");
+  return b + fp.slice(2);
+}
+const espera = (t) => new Promise(r => setTimeout(r, t));
+
+async function principal() {
+  const U = sortearU();
+  const fp = MODO === "adulterar" ? adulterar(FP) : FP;
+  R.u = U.slice(0, 6);
+  const pc = new RTCPeerConnection({ iceServers: [] });
+  window.pc = pc;
+  const ctl = pc.createDataChannel("ctl", { negotiated: true, id: 0 });
+  const voz = pc.createDataChannel("voz", { negotiated: true, id: 1, ordered: false, maxRetransmits: 0 });
+  ctl.binaryType = voz.binaryType = "arraybuffer";
+  pc.oniceconnectionstatechange = () => marca("ice", { s: pc.iceConnectionState });
+  pc.onconnectionstatechange = () => marca("conn", { s: pc.connectionState });
+  const ctlAberto = new Promise(r => ctl.onopen = () => { marca("ctl-aberto"); r(); });
+  const vozAberta = new Promise(r => voz.onopen = () => { marca("voz-aberta"); r(); });
+  ctl.onerror = (e) => marca("ctl-erro", { d: e.error && e.error.errorDetail, m: e.error && e.error.message });
+
+  let localPorta = null, localEnd = null;
+  const candidato = new Promise(r => {
+    pc.onicecandidate = (e) => {
+      if (e.candidate && e.candidate.candidate) {
+        const c = e.candidate;
+        marca("cand-local", { c: c.candidate });
+        if (localPorta === null && /typ host/.test(c.candidate)) {
+          localPorta = c.port; localEnd = c.address; r();
+        }
+      } else { marca("coleta-fim"); r(); }
+    };
+  });
+
+  const oferta = await pc.createOffer();
+  let sdp = oferta.sdp
+    .replace(/a=ice-ufrag:.*\r\n/, `a=ice-ufrag:${U}\r\n`)
+    .replace(/a=ice-pwd:.*\r\n/, `a=ice-pwd:${U}\r\n`);
+  await pc.setLocalDescription({ type: "offer", sdp });
+  const mid = (sdp.match(/a=mid:(\S+)/) || [])[1] || "0";
+  R.oferta_setup = (sdp.match(/a=setup:(\S+)/) || [])[1];
+  marca("local-ok", { mid, setup: R.oferta_setup });
+
+  if (FURAR) {
+    await Promise.race([candidato, espera(2000)]);
+    const ehIp = localEnd && /^[0-9.]+$/.test(localEnd);
+    const alvo = `${ehIp ? localEnd : IP}:${localPorta}`;
+    const r = await fetch(`/furar?alvo=${alvo}`).then(x => x.text());
+    marca("furo-pedido", { alvo, r, end_local: localEnd });
+    await espera(50);
+  }
+
+  const resposta = [
+    "v=0", "o=- 1 1 IN IP4 0.0.0.0", "s=-", "t=0 0",
+    `a=group:BUNDLE ${mid}`, "a=ice-lite",
+    `m=application ${PORTA} UDP/DTLS/SCTP webrtc-datachannel`,
+    `c=IN IP4 ${IP}`, `a=mid:${mid}`,
+    `a=ice-ufrag:${U}`, `a=ice-pwd:${U}`,
+    `a=fingerprint:sha-256 ${fp}`, "a=setup:passive",
+    "a=sctp-port:5000", "a=max-message-size:16385",
+    `a=candidate:1 1 UDP 2130706431 ${IP} ${PORTA} typ host`,
+    "a=end-of-candidates", ""
+  ].join("\r\n");
+  const tRemoto = performance.now();
+  await pc.setRemoteDescription({ type: "answer", sdp: resposta });
+  marca("remoto-ok");
+
+  const dtls = pc.sctp && pc.sctp.transport;
+  if (dtls) {
+    dtls.onstatechange = () => marca("dtls", { s: dtls.state });
+    dtls.onerror = (e) => {
+      const er = e.error || {};
+      marca("dtls-erro", { errorDetail: er.errorDetail, message: er.message, name: er.name, sdpLineNumber: er.sdpLineNumber, receivedAlert: er.receivedAlert, sentAlert: er.sentAlert });
+    };
+  } else marca("sem-pc.sctp.transport");
+
+  if (MODO === "adulterar") {
+    const ate = performance.now() + 12000;
+    while (performance.now() < ate) {
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") break;
+      if (ctl.readyState === "open") break;
+      await espera(100);
+    }
+    ctl.onclose = () => marca("ctl-fechou");
+    // dá tempo a um onerror/onclose tardio; `segura` mantém o pc aberto para
+    // medir os Bindings de consentimento depois do alerta.
+    await espera(Number(q.get("segura") || 2000));
+    R.final = {
+      ice: pc.iceConnectionState, conn: pc.connectionState,
+      dtls: dtls && dtls.state, ctl: ctl.readyState,
+    };
+    R.stats = await statsDtls(pc);
+    marca("adulterar-fim", R.final);
+    return R;
+  }
+
+  await Promise.race([Promise.all([ctlAberto, vozAberta]), espera(10000)]);
+  if (ctl.readyState !== "open") { marca("ctl-nao-abriu"); R.final = { ice: pc.iceConnectionState, conn: pc.connectionState, dtls: dtls && dtls.state }; return R; }
+  R.ms_remoto_ate_ctl = Math.round(performance.now() - tRemoto);
+  R.ms_inicio_ate_ctl = ms();
+  R.stats = await statsDtls(pc);
+
+  if (MODO === "eco") await eco(pc, ctl, voz);
+  if (MODO === "sobe" || MODO === "desce") await rajada(pc, ctl, voz);
+
+  ctl.send("!STATS");
+  R.host = await new Promise(r => { ctl.onmessage = (e) => r(JSON.parse(e.data)); setTimeout(() => r(null), 3000); });
+  pc.close();
+  return R;
+}
+
+async function statsDtls(pc) {
+  const out = {};
+  const s = await pc.getStats();
+  s.forEach(v => {
+    if (v.type === "transport") Object.assign(out, { dtlsState: v.dtlsState, tlsVersion: v.tlsVersion, dtlsCipher: v.dtlsCipher, srtpCipher: v.srtpCipher, dtlsRole: v.dtlsRole, iceRole: v.iceRole, iceState: v.iceState });
+    if (v.type === "candidate-pair" && v.nominated) Object.assign(out, { rtt: v.currentRoundTripTime });
+    if (v.type === "local-candidate") (out.locais = out.locais || []).push(`${v.candidateType} ${v.address}:${v.port}`);
+  });
+  return out;
+}
+
+async function eco(pc, ctl, voz) {
+  const u = pc.createDataChannel("u", { protocol: "seele/2" });
+  u.binaryType = "arraybuffer";
+  await new Promise((r, j) => { u.onopen = r; setTimeout(() => j(new Error("u não abriu")), 5000); });
+  marca("u-aberto", { id: u.id, protocol: u.protocol });
+  R.u_id = u.id;
+  const canais = { ctl, voz, u };
+  const vistos = { ctl: [], voz: [], u: [] };
+  const fim = new Promise(r => {
+    for (const [nome, ch] of Object.entries(canais)) {
+      ch.onmessage = (e) => {
+        const t = typeof e.data === "string" ? e.data : new TextDecoder().decode(e.data);
+        const seq = Number(t.split(":")[1]);
+        vistos[nome].push(seq);
+        if (Object.values(vistos).every(v => v.length >= N)) r();
+      };
+    }
+  });
+  const ti = performance.now();
+  for (const [nome, ch] of Object.entries(canais)) for (let i = 0; i < N; i++) ch.send(`E${nome}:${i}`);
+  await Promise.race([fim, espera(5000)]);
+  R.ms_eco = Math.round(performance.now() - ti);
+  R.eco = {};
+  for (const [nome, v] of Object.entries(vistos)) {
+    const unicos = new Set(v).size;
+    const ordem = v.every((x, i) => i === 0 || v[i - 1] < x);
+    R.eco[nome] = { recebidas: v.length, perdas: N - unicos, em_ordem: ordem };
+  }
+  marca("eco-fim", R.eco);
+}
+
+function voz50(voz) {
+  // 50 msg/s, 160 B, como um quadro Opus de 20 ms.
+  const enviados = new Map(), rtts = [];
+  let seq = 0, durante = null;
+  voz.onmessage = (e) => {
+    const t = typeof e.data === "string" ? e.data : new TextDecoder().decode(e.data);
+    const s = Number(t.split(":")[1]);
+    const ida = enviados.get(s);
+    if (ida !== undefined) { rtts.push({ s, ida, rtt: performance.now() - ida }); enviados.delete(s); }
+  };
+  const faseDe = (ida) => ida < durante.ini ? "antes" : (ida <= durante.fim ? "rajada" : "depois");
+  const timer = setInterval(() => {
+    const msg = (`V:${seq}:`).padEnd(160, "x");
+    try { voz.send(msg); enviados.set(seq, performance.now()); } catch (e) { }
+    seq++;
+  }, 20);
+  return {
+    marcarRajada(ini, fim) { durante = { ini, fim }; },
+    parar() { clearInterval(timer); },
+    resumo() {
+      const por = {};
+      for (const f of ["antes", "rajada", "depois"]) {
+        const v = rtts.filter(x => faseDe(x.ida) === f).map(x => x.rtt).sort((a, b) => a - b);
+        const p = (k) => v.length ? Math.round(v[Math.min(v.length - 1, Math.floor(k * v.length))] * 10) / 10 : null;
+        por[f] = { n: v.length, p50: p(0.5), p95: p(0.95), p99: p(0.99), max: v.length ? Math.round(v[v.length - 1] * 10) / 10 : null };
+      }
+      const perdidasNaRajada = [...enviados.values()].filter(t => durante && t >= durante.ini && t <= durante.fim).length;
+      return { enviados: seq, sem_eco: enviados.size, sem_eco_na_rajada: perdidasNaRajada, por };
+    },
+  };
+}
+
+async function rajada(pc, ctl, voz) {
+  const v = voz50(voz);
+  await espera(1000);                       // linha de base
+  const ini = performance.now();
+  let fim;
+  if (MODO === "sobe") {
+    const u = pc.createDataChannel("u", { protocol: "seele/2" });
+    u.binaryType = "arraybuffer";
+    u.bufferedAmountLowThreshold = BAIXO;
+    await new Promise(r => u.onopen = r);
+    const pedaco = new Uint8Array(16385); pedaco[0] = 0;
+    let enviados = 0, esperas = 0, maxBuf = 0;
+    while (enviados < TOTAL) {
+      while (u.bufferedAmount < ALTO && enviados < TOTAL) {
+        const n = Math.min(16384, TOTAL - enviados);
+        u.send(n === 16384 ? pedaco : pedaco.subarray(0, n + 1));
+        enviados += n;
+        maxBuf = Math.max(maxBuf, u.bufferedAmount);
+      }
+      if (enviados < TOTAL) { esperas++; await new Promise(r => u.onbufferedamountlow = r); }
+    }
+    const total = new Promise(r => u.onmessage = (e) => r(String(e.data)));
+    u.send("FIM");
+    const resp = await total;
+    fim = performance.now();
+    R.rajada = { sentido: "página→anfitrião", bytes: TOTAL, ms: Math.round(fim - ini), mbit_s: Math.round(TOTAL * 8 / (fim - ini) / 1000), esperas_low: esperas, max_buffered: maxBuf, resposta: resp };
+  } else {
+    const chegou = new Promise(r => {
+      pc.ondatachannel = (e) => {
+        const u = e.channel; u.binaryType = "arraybuffer";
+        marca("u-do-anfitriao", { id: u.id, label: u.label, protocol: u.protocol });
+        let bytes = 0, msgs = 0, maior = 0;
+        u.onmessage = (m) => {
+          if (typeof m.data === "string") { if (m.data === "FIM") r({ bytes, msgs, maior, label: u.label, protocol: u.protocol, id: u.id }); return; }
+          bytes += m.data.byteLength - 1; msgs++; maior = Math.max(maior, m.data.byteLength);
+        };
+      };
+    });
+    ctl.send(`!DESCE ${TOTAL}`);
+    const r = await Promise.race([chegou, espera(120000).then(() => null)]);
+    fim = performance.now();
+    R.rajada = { sentido: "anfitrião→página", pedidos: TOTAL, ...r, ms: Math.round(fim - ini), mbit_s: r ? Math.round(r.bytes * 8 / (fim - ini) / 1000) : null };
+  }
+  v.marcarRajada(ini, fim);
+  await espera(1500);                       // depois
+  v.parar();
+  await espera(500);
+  R.voz = v.resumo();
+  marca("rajada-fim", { rajada: R.rajada, voz: R.voz });
+}
+
+principal().then(r => { r.log = linhas; window.__resultado = r; })
+  .catch(e => { R.erro = String(e && e.stack || e); R.log = linhas; window.__resultado = R; });
+</script>

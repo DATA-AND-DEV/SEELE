@@ -98,6 +98,76 @@ const SHRINK_PER_FRAME: f64 = 0.002;
 /// jumped its clock. 3000 frames is a minute.
 const MAX_GAP_FRAMES: u32 = 3_000;
 
+/// Tiques de uma janela de medida do excesso, no regime de deriva: 1 s.
+///
+/// **A fala contínua não tem pausa para drenar.** Com DTX, o excesso da fila
+/// sai sozinho no resto de uma pausa de conforto (ver `drain_gap`). Sem pausa —
+/// alguém lendo, narrando, tocando —, o relógio de quem fala adiantado uns
+/// ppm empurra a fila para cima a cada quadro e nada a traz de volta: medido
+/// com este buffer e o `PlayoutClock` reais, +300 ppm eram 560 ms de atraso no
+/// trigésimo minuto (`seele-audio/tests/atraso_na_fala_continua.rs`).
+///
+/// O que se mede é o **piso** da fila ao longo da janela, e não a média: o
+/// jitter só faz a fila oscilar para cima e para baixo de um piso, e um piso
+/// que passou um quadro inteiro do alvo durante um segundo inteiro é um quadro
+/// que nenhuma chegada precisou. Tirá-lo não aproxima a fila da fome mais do
+/// que o alvo já permite.
+///
+/// Uma emenda por segundo, no máximo, é 2% do tempo — quarenta vezes o que a
+/// deriva de 500 ppm (o teto de `drift.rs`) exige.
+const JANELA_DE_DERIVA_TICKS: u32 = 50;
+
+/// Tiques de uma janela quando o excesso é grande: 200 ms.
+///
+/// Depois de uma pausa da máquina — meio segundo sem ler nem tocar —, a fila
+/// volta com o meio segundo inteiro, e a uma emenda por segundo isso levaria
+/// meio minuto para sair. Aqui o buffer tira um quadro a cada dez, nunca dois
+/// mais perto que nove quadros intactos: 10% de compressão por alguns
+/// segundos, em vez de 460 ms de atraso para sempre (o que a prova mediu) ou de
+/// um salto que apagasse meio segundo de palavras de uma vez.
+const JANELA_DE_RECUPERACAO_TICKS: u32 = 10;
+
+/// Excesso acima do qual o buffer passa para a janela de recuperação: 3 quadros.
+///
+/// A deriva sozinha nunca chega aqui: ela soma um quadro em 40 s ou mais (500
+/// ppm), e a janela de deriva o tira assim que ele aparece, então o excesso dela
+/// fica entre um e dois quadros. Três ou mais é um degrau — uma pausa da
+/// máquina, uma rajada — ou o alvo descendo depois de uma rede ruim, e nos dois
+/// casos esperar um segundo por quadro é atraso que se ouve.
+const EXCESSO_DE_RECUPERACAO_QUADROS: f64 = 3.0;
+
+/// Folga na comparação do excesso com um quadro, em ms.
+///
+/// O alvo desce geometricamente e, em ponto flutuante, nunca chega exatamente
+/// ao piso: fica em 20,000…01 ms para sempre. Sem folga, uma fila de exatamente
+/// alvo + um quadro nunca contava como excesso, e o regime assentava um quadro
+/// inteiro acima do que precisava (medido: 40–60 ms em vez de 20–40). Um
+/// milissegundo abaixo do alvo, depois da emenda, está dentro da folga de três
+/// jitters que o alvo já carrega.
+const FOLGA_DO_EXCESSO_MS: f64 = 1.0;
+
+/// Excesso sobre o alvo acima do qual a fila é uma rajada, e sai de uma vez: 500 ms.
+///
+/// A deriva de quem fala soma um quadro em 40 s ou mais e fica entre um e dois
+/// de excesso; a compressão de recuperação age a partir de três; o alvo vai até
+/// 200 ms. Meio segundo de excesso não é nenhum desses: é a fila de uma pausa
+/// desta máquina lida de uma vez. Ver `cortar_a_rajada`.
+const EXCESSO_DE_RAJADA_MS: f64 = 500.0;
+
+/// Quanto uma emenda de deriva espera por uma pausa que a pague: 6 s.
+///
+/// Uma emenda na fala é um estalo leve; a mesma sobra paga numa pausa de quem
+/// fala não se ouve (ver `plan_gap`). Numa conversa, alguém respira a cada
+/// poucos segundos, e esperar seis custa um quadro de latência (20 ms) por seis
+/// segundos. Medido com fala de 5 s e pausa de 1 s a +300 ppm: com 3 s de
+/// espera ainda saíam 3 emendas em 30 min; com 6, nenhuma. Na fala contínua a
+/// pausa não vem, e a emenda sai depois disso.
+///
+/// Só um quadro de excesso espera, que é a assinatura da deriva: ela soma um
+/// quadro em 40 s ou mais. Dois ou mais é um degrau ou um alvo descendo, e ali
+/// esperar é atraso que se ouve.
+const ADIAMENTO_DA_EMENDA_TICKS: u32 = 300;
+
 /// Wrap-aware difference between two sequence numbers.
 ///
 /// Returns how far `a` is ahead of `b`, treating the 16-bit space as circular.
@@ -186,6 +256,37 @@ pub struct JitterMetrics {
     pub duplicates: u64,
     /// Times the buffer gave up on a gap and resynchronised.
     pub resyncs: u64,
+    /// Quadros tirados da fala porque a fila passou do alvo e não voltava.
+    ///
+    /// **É a deriva de relógio de quem fala, ou uma pausa desta máquina, sendo
+    /// paga.** Cada um é uma emenda de 20 ms no áudio. Zero numa conversa com
+    /// pausas é o normal (as pausas pagam de graça); um a cada minuto ou dois
+    /// numa fala contínua é deriva de dezenas a centenas de ppm; uma rajada
+    /// seguida é a recuperação de uma pausa. Não é perda: nenhum desses
+    /// quadros faltou, eles chegaram e sobravam.
+    pub descartes_por_atraso: u64,
+    /// Quadros de pausa de quem fala que não tocaram, porque eram atraso.
+    ///
+    /// O mesmo excesso de [`Self::descartes_por_atraso`], pago no lugar barato:
+    /// a pausa sai 20 ms mais curta, e ninguém ouve. Numa conversa com pausas,
+    /// a deriva aparece aqui e não lá.
+    pub pausa_encurtada_quadros: u64,
+    /// Lugares de buraco (perda ou pausa) pulados sem tocar, porque já eram
+    /// tempo passado: a fila estava no teto, ou passava do alvo por mais de
+    /// meio segundo (ver `drain_gap` e `cortar_a_rajada`).
+    ///
+    /// Zero em qualquer regime normal; diferente de zero só depois de uma pausa
+    /// desta máquina, ou de uma voz que abriu com segundos de fila. Não entra
+    /// em [`Self::loss_fraction`], que conta lugares tocados, e estes não
+    /// tocaram como nada; nem separa perda de pausa de quem fala.
+    pub buraco_pulado: u64,
+    /// Quadros velhos tirados de uma vez da frente, porque a fila passou do
+    /// alvo por mais de meio segundo (ver `cortar_a_rajada`).
+    ///
+    /// Zero em qualquer regime normal; diferente de zero depois de uma pausa
+    /// desta máquina que devolveu segundos de voz de uma vez. Não é perda: os
+    /// quadros chegaram, e saíram por serem velhos.
+    pub descartes_por_rajada: u64,
     /// Current target depth.
     pub target_ms: f64,
     /// Current actual depth.
@@ -252,6 +353,18 @@ pub struct JitterBuffer<T> {
     /// arrives, and by then part of it may already have gone out as nothing.
     /// See `plan_gap`.
     starved_since_play: u64,
+    /// Menor profundidade vista na janela de excesso corrente, em ms.
+    piso_da_janela_ms: f64,
+    /// Tiques contados na janela de excesso corrente.
+    ticks_da_janela: u32,
+    /// Duração da janela corrente, em tiques — ver `JANELA_DE_DERIVA_TICKS`.
+    janela_ticks: u32,
+    /// Uma janela fechou com excesso, e o próximo tique contíguo tira um quadro.
+    descarte_devido: bool,
+    /// Tiques desde que o descarte ficou devido, esperando uma pausa.
+    espera_do_descarte: u32,
+    /// O excesso é de recuperação, e o descarte não espera pausa.
+    descarte_urgente: bool,
     metrics: JitterMetrics,
 }
 
@@ -272,6 +385,12 @@ impl<T> JitterBuffer<T> {
             last_transit_ms: None,
             consecutive_missing: 0,
             starved_since_play: 0,
+            piso_da_janela_ms: f64::MAX,
+            ticks_da_janela: 0,
+            janela_ticks: JANELA_DE_DERIVA_TICKS,
+            descarte_devido: false,
+            espera_do_descarte: 0,
+            descarte_urgente: false,
             metrics: JitterMetrics {
                 target_ms: config.initial_target_ms,
                 ..JitterMetrics::default()
@@ -317,6 +436,15 @@ impl<T> JitterBuffer<T> {
             return;
         }
 
+        // Uma rajada que enche a fila: o que sai é o quadro mais velho, e não o
+        // que acabou de chegar — descartar o novo abriria um buraco atrás da
+        // rajada, que `cortar_a_rajada` corta de qualquer jeito no próximo tique.
+        if self.queue.len() >= CAPACITY
+            && self.playing
+            && self.depth_ms() - self.target_ms > EXCESSO_DE_RAJADA_MS
+        {
+            let _ = self.cortar_o_mais_velho();
+        }
         if self.queue.len() >= CAPACITY {
             self.metrics.overflow_discards += 1;
             return;
@@ -363,6 +491,25 @@ impl<T> JitterBuffer<T> {
             return decision;
         }
 
+        // O passado sai antes de qualquer decisão sobre a frente, com a fila
+        // grande ou pequena: ver `descartar_o_passado`. Depois dele, nem o corte
+        // nem o `plan_gap` veem frente atrás do ponteiro.
+        let _ = self.descartar_o_passado();
+        // Uma rajada de segundos sai de uma vez. Ver `cortar_a_rajada`.
+        self.cortar_a_rajada();
+        let Some(next) = self.next_timestamp else {
+            return Decision::Starved;
+        };
+
+        // A fila que sobra e não volta: deriva de quem fala, ou uma pausa desta
+        // máquina. Ver `JANELA_DE_DERIVA_TICKS`.
+        self.medir_excesso();
+        if self.descarte_devido {
+            self.espera_do_descarte = self.espera_do_descarte.saturating_add(1);
+            if self.descarte_urgente || self.espera_do_descarte >= ADIAMENTO_DA_EMENDA_TICKS {
+                self.descartar_um(next);
+            }
+        }
         let Some(next) = self.next_timestamp else {
             return Decision::Starved;
         };
@@ -414,6 +561,190 @@ impl<T> JitterBuffer<T> {
             }
         }
         Decision::Starved
+    }
+
+    /// Mede o piso da fila nesta janela e, ao fechá-la, decide se um quadro sobra.
+    ///
+    /// O excesso é o que **fica** na fila depois de este tique tocar, acima do
+    /// alvo: o piso menos o quadro da vez menos o alvo. Só um quadro inteiro de
+    /// excesso, durante a janela inteira, autoriza uma emenda — menos que isso
+    /// é o buffer caçando a própria quantização, e a fala viraria uma emenda
+    /// atrás da outra sem ganhar latência nenhuma.
+    ///
+    /// Um tique de fome põe o piso em zero e cancela a janela: uma fila que
+    /// esvaziou uma vez nesse segundo não tem quadro sobrando.
+    fn medir_excesso(&mut self) {
+        self.piso_da_janela_ms = self.piso_da_janela_ms.min(self.depth_ms());
+        self.ticks_da_janela = self.ticks_da_janela.saturating_add(1);
+        if self.ticks_da_janela < self.janela_ticks {
+            return;
+        }
+        let quadro = self.config.frame_ms;
+        let excesso = self.piso_da_janela_ms - quadro - self.target_ms + FOLGA_DO_EXCESSO_MS;
+        let devido = excesso >= quadro;
+        if devido && !self.descarte_devido {
+            self.espera_do_descarte = 0;
+        }
+        self.descarte_devido = devido;
+        self.descarte_urgente = excesso >= 2.0 * quadro;
+        self.janela_ticks = if excesso >= EXCESSO_DE_RECUPERACAO_QUADROS * quadro {
+            JANELA_DE_RECUPERACAO_TICKS
+        } else {
+            JANELA_DE_DERIVA_TICKS
+        };
+        self.piso_da_janela_ms = f64::MAX;
+        self.ticks_da_janela = 0;
+    }
+
+    /// **Uma rajada de segundos sai de uma vez, e não a 10%.**
+    ///
+    /// Depois de uma pausa desta máquina, o laço de voz lê de uma vez tudo o que
+    /// a fila do enlace guardou e só então dá os tiques: a fila do buffer volta
+    /// com segundos de voz contígua. A compressão de recuperação
+    /// (`JANELA_DE_RECUPERACAO_TICKS`) tira um quadro a cada dez, e com 5 s isso
+    /// era ~50 s de quem ouve atrás do presente — medido na LAN de 25/10 com um
+    /// SIGSTOP de 8 s no receptor: 4820 ms, caindo 500 ms a cada 5 s.
+    ///
+    /// Acima de [`EXCESSO_DE_RAJADA_MS`] sobre o alvo, os quadros mais velhos
+    /// saem da frente até a fila voltar ao alvo, e a fala continua do mais
+    /// velho que sobrou. **O corte atravessa buracos** (a LAN03 de 25/10): a
+    /// fila do enlace guarda os mais velhos de uma pausa e perde os seguintes,
+    /// e um buraco entre os velhos e os novos é tempo que já passou. O ponteiro
+    /// vai direto ao primeiro quadro que fica, e os lugares de buraco no
+    /// caminho vão para `buraco_pulado` — não para `frames_silenced` nem
+    /// `frames_concealed`, que contam lugares tocados.
+    ///
+    /// Nunca com um buraco pendente: aí o ponteiro é de `drain_gap` (o achado
+    /// do Astra, `cortar_o_mais_velho`). Abaixo do limiar nada muda — a deriva
+    /// soma um ou dois quadros, e uma pausa curta continua na compressão, sem
+    /// apagar palavras de uma vez.
+    ///
+    /// Os quadros tirados vão para `descartes_por_rajada`, e não para a perda:
+    /// eles chegaram, e saíram por serem velhos.
+    fn cortar_a_rajada(&mut self) {
+        if self.depth_ms() - self.target_ms <= EXCESSO_DE_RAJADA_MS
+            || self.gap_lost_left > 0
+            || self.gap_comfort_left > 0
+        {
+            return;
+        }
+        let Some(vez) = self.next_timestamp else {
+            return;
+        };
+        // O passado sai primeiro, e nunca vira a frente: ver
+        // `descartar_o_passado`. Daqui em diante, tudo na fila é da vez ou
+        // depois dela, e o ponteiro só anda para a frente.
+        if self.descartar_o_passado() > 0
+            && self.depth_ms() - self.target_ms <= EXCESSO_DE_RAJADA_MS
+        {
+            return;
+        }
+        let quadro = i64::from(self.frame_samples().max(1));
+        let mut cortados = 0_u64;
+        while self.depth_ms() > self.target_ms + self.config.frame_ms && self.queue.len() > 1 {
+            let Some(held) = self.queue.pop_front() else {
+                break;
+            };
+            self.last_played_seq = Some(held.seq);
+            cortados += 1;
+        }
+        let Some(frente) = self.queue.front().map(|held| held.timestamp) else {
+            return;
+        };
+        if cortados == 0 {
+            return;
+        }
+        // Os lugares do caminho, da vez até a frente que fica: os quadros
+        // tirados (todos da vez em diante) e, o que sobra, buraco. A frente
+        // nunca está atrás da vez, pelo descarte do passado acima.
+        let lugares = u64::try_from(ts_delta(frente, vez) / quadro).unwrap_or(0);
+        self.next_timestamp = Some(frente);
+        self.metrics.descartes_por_rajada += cortados;
+        self.metrics.buraco_pulado += lugares.saturating_sub(cortados);
+        // A janela de excesso media a fila de antes do corte: recomeça, ou ela
+        // ainda pediria emendas por um excesso que já saiu.
+        self.piso_da_janela_ms = f64::MAX;
+        self.ticks_da_janela = 0;
+        self.janela_ticks = JANELA_DE_DERIVA_TICKS;
+        self.descarte_devido = false;
+        self.descarte_urgente = false;
+        self.espera_do_descarte = 0;
+    }
+
+    /// **O que está atrás do ponteiro é passado, e sai.** Quadros atrasados de
+    /// dentro de um buraco ficam na fila enquanto o buraco é pago; quando o
+    /// `drain_gap` pula o resto dele, eles ficam atrás do ponteiro. Escolher um
+    /// deles como frente faria o ponteiro recuar e reabrir o buraco (a revisão
+    /// do Astra, 25/10). A comparação é circular (`ts_delta`), como a da `seq`
+    /// e a do carimbo. Contados em `descartes_por_rajada` (quadros tirados), e
+    /// nunca em `buraco_pulado` (lugares): sem dupla contagem.
+    fn descartar_o_passado(&mut self) -> u64 {
+        let Some(vez) = self.next_timestamp else {
+            return 0;
+        };
+        let mut tirados = 0_u64;
+        while self
+            .queue
+            .front()
+            .is_some_and(|held| ts_delta(held.timestamp, vez) < 0)
+        {
+            if let Some(held) = self.queue.pop_front() {
+                self.last_played_seq = Some(held.seq);
+            }
+            tirados += 1;
+        }
+        self.metrics.descartes_por_rajada += tirados;
+        tirados
+    }
+
+    /// Tira o quadro da vez da frente, se ele e o seguinte são contíguos a
+    /// partir de `next_timestamp`, e conta em `descartes_por_rajada`. Devolve se
+    /// tirou.
+    fn cortar_o_mais_velho(&mut self) -> bool {
+        // Com um buraco pendente, o ponteiro é do buraco: andar com ele aqui e
+        // de novo no `drain_gap` pularia um quadro e desencontraria o buraco da
+        // frente planejada. Vale para os dois caminhos, o push e o tique.
+        if self.gap_lost_left > 0 || self.gap_comfort_left > 0 {
+            return false;
+        }
+        let Some(vez) = self.next_timestamp else {
+            return false;
+        };
+        let quadro = self.frame_samples();
+        let contiguo = matches!(
+            (self.queue.front(), self.queue.get(1)),
+            (Some(a), Some(b)) if a.timestamp == vez && b.timestamp == vez.wrapping_add(quadro)
+        );
+        if !contiguo {
+            return false;
+        }
+        if let Some(held) = self.queue.pop_front() {
+            self.last_played_seq = Some(held.seq);
+        }
+        self.next_timestamp = Some(vez.wrapping_add(quadro));
+        self.metrics.descartes_por_rajada += 1;
+        true
+    }
+
+    /// Tira da fala o quadro da vez, se o seguinte é contíguo a ele.
+    ///
+    /// **Só entre dois quadros que existem.** Emendar através de um buraco de
+    /// perda ou de uma pausa misturaria esta conta com a de `plan_gap`, e um
+    /// quadro descartado ali seria lido como perdido. Se a frente não é
+    /// contígua, o descarte espera o próximo tique que for.
+    fn descartar_um(&mut self, next: u32) {
+        let seguinte = next.wrapping_add(self.frame_samples());
+        let contiguo = matches!(
+            (self.queue.front(), self.queue.get(1)),
+            (Some(a), Some(b)) if a.timestamp == next && b.timestamp == seguinte
+        );
+        if !contiguo {
+            return;
+        }
+        let _ = self.queue.pop_front();
+        self.next_timestamp = Some(seguinte);
+        self.descarte_devido = false;
+        self.metrics.descartes_por_atraso += 1;
     }
 
     /// Frame duration in samples, from the configured frame length.
@@ -495,6 +826,36 @@ impl<T> JitterBuffer<T> {
         self.gap_lost_left = lost.min(remaining);
         self.gap_comfort_left = remaining - self.gap_lost_left;
 
+        // **A pausa paga a deriva, de graça.** Quando a pausa foi vivida em tempo
+        // real (`skipped > 0`), o conforto que sobra é exatamente o quanto quem
+        // ouve está atrás de quem fala: o alvo, mais o que a deriva acumulou.
+        // Tocar essa sobra inteira devolve o excesso para a fala, e lá ele só sai
+        // por emenda (`descartar_um`) — medido: 26 emendas em 30 min a +300 ppm
+        // com fala de 5 s e pausa de 1 s. Encurtar a pausa em 20 ms não se ouve.
+        //
+        // Só com a pausa vivida: um buraco achado com a fila ainda cheia
+        // (`skipped == 0`) é silêncio que ainda não tocou, e é dele o lugar.
+        if skipped > 0 && self.gap_lost_left == 0 && self.gap_comfort_left > 0 {
+            let quadro = self.config.frame_ms;
+            let atras = self.gap_comfort_left as f64 * quadro + self.depth_ms() - quadro;
+            let excesso = atras - self.target_ms + FOLGA_DO_EXCESSO_MS;
+            let sobra = if excesso >= quadro {
+                ((excesso / quadro).floor() as u64).min(self.gap_comfort_left)
+            } else {
+                0
+            };
+            if sobra > 0 {
+                let pulo = u32::try_from(sobra)
+                    .unwrap_or(0)
+                    .wrapping_mul(self.frame_samples());
+                self.next_timestamp = self.next_timestamp.map(|ts| ts.wrapping_add(pulo));
+                self.gap_comfort_left -= sobra;
+                self.metrics.pausa_encurtada_quadros += sobra;
+                // Pago aqui: a emenda que esperava esta pausa não é mais devida.
+                self.descarte_devido = false;
+            }
+        }
+
         // The skipped slots still happened, and the metrics have to describe
         // what a listener heard. Loss that fell inside them stays counted as
         // loss — understating it would make the Sync Ratio flatter the link
@@ -510,6 +871,45 @@ impl<T> JitterBuffer<T> {
 
     /// Emits one slot of a planned gap, if any remain.
     fn drain_gap(&mut self) -> Option<Decision<T>> {
+        // **O guarda do teto: com a fila cheia, um buraco não gasta tique.** Um
+        // tique de buraco não tira quadro da fila, e com ela no teto o quadro
+        // vivo que chega nesse tique transborda (`push`). Cada tique de buraco
+        // vira assim um quadro descartado, e o buraco se reabre do mesmo tamanho
+        // uma volta de fila adiante. Medido no P1 do CUA de 25/10: ~50% de perda
+        // por dois minutos, sem nenhum pacote perdido no fio; e na pausa de 8 s
+        // do laço (`seele-conformance/tests/voz_depois_de_um_tranco_do_laco.rs`).
+        //
+        // **E o buraco vencido** (a LAN03 de 25/10: ~2,5 s de silêncio depois
+        // da volta de uma pausa): se, enquanto o buraco é pago, a fila passa do
+        // alvo por mais de [`EXCESSO_DE_RAJADA_MS`], quem fala já está meio
+        // segundo à frente do buraco, e o resto dele é tempo que já passou —
+        // tocá-lo como silêncio só atrasa a voz do presente. O mesmo limiar da
+        // rajada (`cortar_a_rajada`), e abaixo dele nada muda: uma perda comum,
+        // com a fila no alvo, continua ocultada e silenciada lugar a lugar.
+        //
+        // O que se pula não é tocado nem como silêncio nem como ocultação, e
+        // por isso é contado à parte (`buraco_pulado`), e não em
+        // `frames_silenced`. O ponteiro anda o resto do buraco uma vez só, e os
+        // contadores do buraco zeram junto: o estado fica coerente.
+        let vencido = self.depth_ms() - self.target_ms > EXCESSO_DE_RAJADA_MS;
+        if (self.gap_lost_left > 0 || self.gap_comfort_left > 0)
+            && (self.queue.len() + 1 >= CAPACITY || vencido)
+        {
+            let resto = self.gap_lost_left + self.gap_comfort_left;
+            let pulo = u32::try_from(resto)
+                .unwrap_or(0)
+                .wrapping_mul(self.frame_samples());
+            self.next_timestamp = self.next_timestamp.map(|ts| ts.wrapping_add(pulo));
+            self.gap_lost_left = 0;
+            self.gap_comfort_left = 0;
+            self.consecutive_missing = 0;
+            self.metrics.buraco_pulado += resto;
+            self.metrics.resyncs += 1;
+            // Os atrasados de dentro do buraco ficaram atrás do ponteiro.
+            let _ = self.descartar_o_passado();
+            return None;
+        }
+
         if self.gap_lost_left > 0 {
             self.gap_lost_left -= 1;
             self.next_timestamp = self
@@ -1173,6 +1573,123 @@ mod tests {
         }
     }
 
+    /// Um falante com relógio adiantado `ppm`, por um perfil de rede, tocado no
+    /// relógio de quem ouve. Devolve as métricas, as profundidades no 1º e no
+    /// último minuto, e quantos quadros recebidos nunca tocaram.
+    fn fala_continua_com_deriva(
+        profile: NetworkProfile,
+        ppm: f64,
+        seed: u64,
+        minutos: usize,
+    ) -> (JitterMetrics, f64, f64, u64) {
+        let quadros = minutos * 3_000;
+        let mut rede = crate::netsim::Network::new(profile, seed);
+        let mut chegadas = Vec::new();
+        for quadro in crate::netsim::drifting_stream(quadros, ppm) {
+            rede.transmit(quadro, &mut chegadas);
+        }
+        rede.sort_arrivals(&mut chegadas);
+
+        let mut buffer = buffer();
+        let (mut cedo, mut tarde) = (0.0, 0.0);
+        let mut indice = 0;
+        let mut tocados = std::collections::BTreeSet::new();
+        let ticks = quadros - 3_000;
+        for tique in 0..ticks {
+            let agora = tique as f64 * f64::from(crate::FRAME_MS);
+            while let Some(chegou) = chegadas.get(indice).filter(|c| c.arrived_at_ms <= agora) {
+                buffer.push(
+                    chegou.seq,
+                    chegou.timestamp,
+                    chegou.arrived_at_ms,
+                    chegou.seq,
+                );
+                indice += 1;
+            }
+            if let Decision::Play(seq) = buffer.tick() {
+                tocados.insert(seq);
+            }
+            if tique == 3_000 {
+                cedo = buffer.depth_ms();
+            }
+            if tique == ticks - 1 {
+                tarde = buffer.depth_ms();
+            }
+        }
+        let metricas = buffer.metrics();
+        // Recebidos e únicos, antes do último quadro tocado, que não tocaram:
+        // perdidos por atraso, ou emendados.
+        let ultimo = tocados.iter().copied().max().unwrap_or(0);
+        let recebidos: std::collections::BTreeSet<u16> = chegadas
+            .iter()
+            .take(indice)
+            .map(|c| c.seq)
+            .filter(|seq| *seq <= ultimo)
+            .collect();
+        let nao_tocados = recebidos.difference(&tocados).count() as u64;
+        (metricas, cedo, tarde, nao_tocados)
+    }
+
+    #[test]
+    fn cada_emenda_e_contada_e_so_as_emendas_somem() {
+        // «O produto sabe e não conta.» Numa rede perfeita, todo quadro chega; o
+        // que não tocou só pode ter sido emendado, e o contador tem que bater com
+        // o que se vê de fora — nem a mais, nem a menos.
+        let (m, cedo, tarde, nao_tocados) =
+            fala_continua_com_deriva(NetworkProfile::perfect(), 300.0, 1, 10);
+        assert!(
+            m.descartes_por_atraso > 0,
+            "300 ppm em 9 min sem emenda nenhuma"
+        );
+        assert_eq!(m.late_discards, 0);
+        assert_eq!(
+            nao_tocados, m.descartes_por_atraso,
+            "o contador de emendas não bate com os quadros que não tocaram"
+        );
+        // 9 min a 300 ppm são 162 ms: 9 quadros, no máximo um a mais.
+        assert!(m.descartes_por_atraso <= 10, "emendou demais: {m:?}");
+        assert!((tarde - cedo).abs() <= 20.0, "fila andou {cedo} -> {tarde}");
+        assert_eq!(m.frames_concealed + m.frames_silenced, 0, "{m:?}");
+    }
+
+    #[test]
+    fn com_jitter_a_emenda_nao_tira_quadro_que_ia_faltar() {
+        // O medo de qualquer descarte: tirar da fila um quadro que o jitter da
+        // rede ia precisar, e trocar atraso por ocultação. O piso da janela é o
+        // que impede: só sai o que sobrou durante um segundo inteiro. A prova é
+        // comparar a perda com e sem deriva, na mesma rede e semente.
+        for profile in [
+            NetworkProfile::lan(),
+            NetworkProfile::wifi(),
+            NetworkProfile::regional(),
+            NetworkProfile::mobile_poor(),
+        ] {
+            let (parado, ..) = fala_continua_com_deriva(profile, 0.0, 11, 10);
+            let (derivando, cedo, tarde, _) = fala_continua_com_deriva(profile, 300.0, 11, 10);
+            eprintln!(
+                "{profile:?}\n  0 ppm: perda {:.4} emendas {} alvo {:.1}\n  +300: perda {:.4} \
+                 emendas {} alvo {:.1} fila {cedo}->{tarde}",
+                parado.loss_fraction(),
+                parado.descartes_por_atraso,
+                parado.target_ms,
+                derivando.loss_fraction(),
+                derivando.descartes_por_atraso,
+                derivando.target_ms,
+            );
+            assert!(
+                derivando.loss_fraction() <= parado.loss_fraction() + 0.005,
+                "as emendas viraram perda: {:.4} contra {:.4} sem deriva",
+                derivando.loss_fraction(),
+                parado.loss_fraction()
+            );
+            assert!(
+                tarde - cedo <= 2.0 * f64::from(crate::FRAME_MS) + derivando.target_ms,
+                "a fila andou {cedo} -> {tarde} ms com o alvo em {}",
+                derivando.target_ms
+            );
+        }
+    }
+
     #[test]
     fn an_implausible_gap_resyncs_instead_of_grinding() {
         // Not silence and not loss: a receiver that fell badly behind, or a
@@ -1222,5 +1739,439 @@ mod tests {
         }
         assert!(buffer.metrics().overflow_discards > 0);
         assert!(buffer.depth_ms() <= CAPACITY as f64 * f64::from(crate::FRAME_MS));
+    }
+
+    /// **Com a fila no teto, um buraco não gasta tique**: ele é pulado de uma
+    /// vez — sem gastar um tique por lugar, que era o que fazia o quadro vivo
+    /// transbordar e reabrir o buraco adiante (o P1 de 25/10). Desde a LAN03 o
+    /// corte da rajada atravessa o buraco no mesmo tique, e quem toca é o mais
+    /// novo da fila, e não o primeiro depois do buraco.
+    #[test]
+    fn com_a_fila_no_teto_o_buraco_e_pulado_e_a_frente_toca() {
+        let mut buffer = buffer();
+        let quadro = crate::FRAME_SAMPLES as u32;
+        for n in 1..=10_u32 {
+            buffer.push(n as u16, n * quadro, f64::from(n) * 20.0, n as u16);
+            let _ = buffer.tick();
+        }
+        // O pré-buffer atrasa um tique: o 10 toca agora, e a fila esvazia.
+        assert_eq!(buffer.tick(), Decision::Play(10));
+        // Cem quadros sumiram (11..=110), e os 256 seguintes chegam de uma vez.
+        for n in 111..111 + CAPACITY as u32 {
+            buffer.push(n as u16, n * quadro, 3_000.0, n as u16);
+        }
+        assert_eq!(buffer.queue.len(), CAPACITY);
+        let decisao = buffer.tick();
+        let m = buffer.metrics();
+        assert!(
+            matches!(decisao, Decision::Play(n) if n >= 360),
+            "{decisao:?} {m:?}"
+        );
+        assert_eq!(m.buraco_pulado, 100);
+        assert_eq!(m.frames_silenced + m.frames_concealed, 0, "{m:?}");
+        assert_eq!(m.overflow_discards, 0);
+    }
+
+    /// **O cenário ORIGINAL da revisão do Astra** (25/10): um buraco
+    /// 11..=110, os 254 quadros seguintes de uma vez e três atrasados de
+    /// dentro do buraco chegando com a fila cheia.
+    ///
+    /// O que era correto mudou com a regra do buraco vencido: o primeiro tique
+    /// não paga mais o buraco (antes, uma ocultação, e o buraco ficava
+    /// pendente); o corte da rajada o atravessa e toca o presente. A asserção
+    /// nova, explícita: o ponteiro fica coerente — nenhum buraco pendente, o
+    /// que tocou está depois do buraco, os atrasados são recusados como
+    /// atrasados (estão atrás do ponteiro) sem mexer nele, e os tiques
+    /// seguintes tocam em ordem, um quadro por tique, sem andar duas vezes.
+    #[test]
+    fn o_cenario_original_do_buraco_pendente_com_a_fila_cheia_fica_coerente() {
+        let mut buffer = buffer();
+        let quadro = crate::FRAME_SAMPLES as u32;
+        for n in 1..=10_u32 {
+            buffer.push(n as u16, n * quadro, f64::from(n) * 20.0, n as u16);
+            let _ = buffer.tick();
+        }
+        assert_eq!(buffer.tick(), Decision::Play(10));
+        for n in 111..111 + 254_u32 {
+            buffer.push(n as u16, n * quadro, 3_000.0, n as u16);
+        }
+        let Decision::Play(primeiro) = buffer.tick() else {
+            panic!(
+                "o primeiro tique depois do buraco não tocou: {:?}",
+                buffer.metrics()
+            );
+        };
+        assert!(primeiro >= 111, "{primeiro}");
+        assert_eq!(buffer.gap_lost_left + buffer.gap_comfort_left, 0);
+        let ponteiro = buffer.next_timestamp;
+        assert_eq!(ponteiro, Some((u32::from(primeiro) + 1) * quadro));
+        let atrasados_antes = buffer.metrics().late_discards;
+        for n in 12..15_u32 {
+            buffer.push(n as u16, n * quadro, 3_020.0, n as u16);
+        }
+        assert_eq!(
+            buffer.next_timestamp, ponteiro,
+            "um atrasado mexeu no ponteiro"
+        );
+        assert_eq!(buffer.metrics().late_discards, atrasados_antes + 3);
+        let mut anterior = primeiro;
+        while let Decision::Play(n) = buffer.tick() {
+            assert_eq!(n, anterior + 1, "andou duas vezes, ou para trás");
+            anterior = n;
+        }
+        assert_eq!(anterior, 111 + 253, "a fila não tocou até o fim");
+    }
+
+    /// **Com um buraco pendente, nem o push nem o tique cortam o mais velho**
+    /// (a revisão do Astra, 25/10), no caminho do `push`: o buraco fica
+    /// pendente com a fila no alvo e enche antes do tique seguinte. Quadros
+    /// atrasados que caem dentro do buraco
+    /// ficam na frente, contíguos a partir da vez; cortá-los avançaria o
+    /// ponteiro da reprodução enquanto o buraco ainda conta os lugares dele, e
+    /// o `drain_gap` avançaria de novo. O estado do buraco tem de continuar
+    /// coerente: o ponteiro mais o que falta do buraco é a frente planejada.
+    #[test]
+    fn com_um_buraco_pendente_a_fila_cheia_nao_corta_o_mais_velho() {
+        let mut buffer = buffer();
+        let quadro = crate::FRAME_SAMPLES as u32;
+        for n in 1..=10_u32 {
+            buffer.push(n as u16, n * quadro, f64::from(n) * 20.0, n as u16);
+            let _ = buffer.tick();
+        }
+        assert_eq!(buffer.tick(), Decision::Play(10));
+        // Cem quadros sumiram (11..=110); dez chegam depois do buraco.
+        for n in 111..121_u32 {
+            buffer.push(n as u16, n * quadro, 3_000.0, n as u16);
+        }
+        // O tique acha o buraco e começa a pagá-lo: com a fila no alvo (bem
+        // abaixo do excesso de rajada), ocultação.
+        assert_eq!(buffer.tick(), Decision::Conceal);
+        assert!(buffer.gap_lost_left > 0);
+        // Antes do próximo tique, dois atrasados de dentro do buraco e o resto
+        // da rajada, até a fila encher; o último atrasado chega com ela cheia,
+        // acima do excesso de rajada: é o caminho do `push`.
+        for n in 12..14_u32 {
+            buffer.push(n as u16, n * quadro, 3_020.0, n as u16);
+        }
+        for n in 121..121 + 244_u32 {
+            buffer.push(n as u16, n * quadro, 3_020.0, n as u16);
+        }
+        assert_eq!(buffer.queue.len(), CAPACITY);
+        buffer.push(14, 14 * quadro, 3_020.0, 14);
+        let pendente = buffer.gap_lost_left + buffer.gap_comfort_left;
+        let planejada = buffer
+            .next_timestamp
+            .map(|ts| ts.wrapping_add(u32::try_from(pendente).unwrap() * quadro));
+        assert_eq!(
+            planejada,
+            Some(111 * quadro),
+            "o ponteiro andou com o buraco ainda pendente: {:?}",
+            buffer.metrics()
+        );
+        assert_eq!(buffer.metrics().descartes_por_rajada, 0);
+    }
+
+    /// **O ponteiro nunca recua** (a revisão do Astra da regra do buraco
+    /// vencido, 25/10): atrasados de dentro de um buraco que o `drain_gap`
+    /// acabou de pular são passado, e o corte da rajada não pode escolher um
+    /// deles como frente — o ponteiro voltaria de 111 para 47, tocaria o 47 e
+    /// reabriria o buraco 48..110 com a fila já abaixo do limiar. Pela decisão
+    /// de cada tique: o que toca nunca anda para trás, nada de 48..110 toca, e
+    /// a voz não fica sem `Play` por mais de um tique.
+    #[test]
+    fn o_corte_depois_do_buraco_vencido_nunca_faz_o_ponteiro_recuar() {
+        // O cenário exato da revisão (10 quadros depois do buraco) e um com
+        // menos quadros depois dele (5), em que a frente retida cai com
+        // folga entre os atrasados, sem depender do arredondamento do alvo.
+        for depois_do_buraco in [10_u32, 5] {
+            ponteiro_depois_do_buraco_vencido(depois_do_buraco, 47, 200.0);
+        }
+        // E a FILA PEQUENA depois do pulo: poucos atrasados (12..=20) e vinte
+        // quadros depois do buraco, com o alvo de sempre. O pulo deixa a fila
+        // abaixo do limiar da rajada, e não há corte: o passado tem de sair do
+        // mesmo jeito, ou a frente fica atrás do ponteiro e o `plan_gap`
+        // ressincroniza para trás.
+        ponteiro_depois_do_buraco_vencido(20, 20, 40.0);
+    }
+
+    /// Um buraco 11..=110 com o ponteiro no 12, os atrasados 12..=47 e
+    /// `depois` quadros a partir do 111 na fila, o alvo em 200 ms; e então
+    /// cem tiques com um quadro vivo cada.
+    fn ponteiro_depois_do_buraco_vencido(depois: u32, ultimo_atrasado: u32, alvo_ms: f64) {
+        let mut buffer = buffer();
+        let quadro = crate::FRAME_SAMPLES as u32;
+        for n in 1..=10_u32 {
+            buffer.push(n as u16, n * quadro, f64::from(n) * 20.0, n as u16);
+            let _ = buffer.tick();
+        }
+        assert_eq!(buffer.tick(), Decision::Play(10));
+        buffer.target_ms = alvo_ms;
+        for n in 111..111 + depois {
+            buffer.push(n as u16, n * quadro, 2_400.0, n as u16);
+        }
+        assert_eq!(buffer.tick(), Decision::Conceal);
+        assert_eq!(buffer.next_timestamp, Some(12 * quadro));
+        for n in 12..=ultimo_atrasado {
+            buffer.push(n as u16, n * quadro, 2_420.0, n as u16);
+        }
+        assert_eq!(buffer.queue.len(), (ultimo_atrasado - 11 + depois) as usize);
+
+        let mut tocados: Vec<u16> = Vec::new();
+        let (mut sem_play, mut maior_sem_play) = (0_u32, 0_u32);
+        for (tique, n) in (111 + depois..211 + depois).enumerate() {
+            if tique > 0 {
+                buffer.push(
+                    n as u16,
+                    n * quadro,
+                    2_420.0 + 20.0 * tique as f64,
+                    n as u16,
+                );
+            }
+            match buffer.tick() {
+                Decision::Play(n) => {
+                    tocados.push(n);
+                    sem_play = 0;
+                }
+                _ => {
+                    sem_play += 1;
+                    maior_sem_play = maior_sem_play.max(sem_play);
+                }
+            }
+        }
+        let m = buffer.metrics();
+        println!("depois={depois}: tocados {tocados:?} maior_sem_play {maior_sem_play} {m:?}");
+        assert!(
+            tocados.windows(2).all(|par| matches!(par, [a, b] if a < b)),
+            "depois={depois}: o que tocou andou para trás: {tocados:?} {m:?}"
+        );
+        assert!(
+            tocados.iter().all(|n| *n >= 111),
+            "depois={depois}: tocou passado de dentro do buraco pulado: {tocados:?} {m:?}"
+        );
+        assert!(
+            maior_sem_play <= 1,
+            "depois={depois}: {maior_sem_play} tiques sem Play (o buraco 48..110 reaberto?): {m:?}"
+        );
+        // O passado não conta como fila: ele não pode inflar a profundidade e
+        // fazer o corte levar o presente junto. O primeiro a tocar é o 111.
+        assert_eq!(
+            tocados.first(),
+            Some(&111),
+            "depois={depois}: o presente não tocou primeiro: {tocados:?} {m:?}"
+        );
+    }
+
+    /// **O corte da rajada atravessa o buraco** (a LAN03): os velhos de uma
+    /// pausa, um buraco que o enlace deixou e os novos. Fica o mais novo, o
+    /// ponteiro vai direto a ele, e o buraco no caminho é pulado e contado à
+    /// parte — nada de silêncio nem ocultação por tempo que já passou.
+    #[test]
+    fn o_corte_da_rajada_atravessa_o_buraco_e_conta_os_dois_a_parte() {
+        let mut buffer = buffer();
+        let quadro = crate::FRAME_SAMPLES as u32;
+        for n in 1..=10_u32 {
+            buffer.push(n as u16, n * quadro, f64::from(n) * 20.0, n as u16);
+            let _ = buffer.tick();
+        }
+        assert_eq!(buffer.tick(), Decision::Play(10));
+        for n in (11..=60_u32).chain(91..=95) {
+            buffer.push(n as u16, n * quadro, 2_000.0, n as u16);
+        }
+        let decisao = buffer.tick();
+        let m = buffer.metrics();
+        assert_eq!(decisao, Decision::Play(93), "{m:?}");
+        assert_eq!(m.descartes_por_rajada, 52, "{m:?}");
+        assert_eq!(m.buraco_pulado, 30, "{m:?}");
+        assert_eq!(m.frames_silenced + m.frames_concealed, 0, "{m:?}");
+        assert_eq!(buffer.tick(), Decision::Play(94));
+        assert_eq!(buffer.tick(), Decision::Play(95));
+    }
+
+    /// **A rajada contígua de segundos sai de uma vez**, da frente, até o alvo;
+    /// a de 400 ms, abaixo do limiar, fica para a compressão.
+    #[test]
+    fn a_rajada_acima_do_limiar_sai_de_uma_vez_e_a_curta_nao() {
+        let quadro = crate::FRAME_SAMPLES as u32;
+        for (quadros, cortado) in [(50_u32, true), (20, false)] {
+            let mut buffer = buffer();
+            for n in 1..=10_u32 {
+                buffer.push(n as u16, n * quadro, f64::from(n) * 20.0, n as u16);
+                let _ = buffer.tick();
+            }
+            for n in 11..11 + quadros {
+                buffer.push(n as u16, n * quadro, 500.0, n as u16);
+            }
+            let decisao = buffer.tick();
+            let m = buffer.metrics();
+            assert!(matches!(decisao, Decision::Play(_)), "{decisao:?}");
+            assert_eq!(m.descartes_por_rajada > 0, cortado, "{quadros}: {m:?}");
+            assert_eq!(m.frames_concealed + m.frames_silenced, 0, "{m:?}");
+            if cortado {
+                assert!(m.depth_ms <= m.target_ms + 20.0, "{m:?}");
+            }
+        }
+    }
+
+    /// O controle: o mesmo buraco com a fila longe do teto continua sendo
+    /// ocultado e silenciado lugar a lugar, como sempre.
+    #[test]
+    fn longe_do_teto_o_buraco_continua_ocultado_e_silenciado() {
+        let mut buffer = buffer();
+        let quadro = crate::FRAME_SAMPLES as u32;
+        for n in 1..=10_u32 {
+            buffer.push(n as u16, n * quadro, f64::from(n) * 20.0, n as u16);
+            let _ = buffer.tick();
+        }
+        // O pré-buffer atrasa um tique: o 10 toca agora, e a fila esvazia.
+        assert_eq!(buffer.tick(), Decision::Play(10));
+        for n in 111..121_u32 {
+            buffer.push(n as u16, n * quadro, 3_000.0, n as u16);
+        }
+        assert_eq!(buffer.tick(), Decision::Conceal);
+        assert_eq!(buffer.tick(), Decision::Silence);
+        assert_eq!(buffer.metrics().buraco_pulado, 0);
+    }
+
+    /// Fala contínua de `quadros` quadros a partir de `seq0`/`ts0`, chegando em
+    /// tempo real desde `t0_ms`, com um tique por quadro. Devolve quantos
+    /// tocaram.
+    fn falar(buffer: &mut JitterBuffer<u16>, seq0: u16, ts0: u32, t0_ms: f64, quadros: u32) -> u32 {
+        let mut tocados = 0;
+        for indice in 0..quadros {
+            buffer.push(
+                seq0.wrapping_add(indice as u16),
+                ts0.wrapping_add(indice * 960),
+                t0_ms + f64::from(indice) * 20.0,
+                indice as u16,
+            );
+            if matches!(buffer.tick(), Decision::Play(_)) {
+                tocados += 1;
+            }
+        }
+        tocados
+    }
+
+    /// O tempo que passa do lado de quem ouve sem nada chegar: um tique a
+    /// cada 20 ms, como o laço de voz faz.
+    fn calar(buffer: &mut JitterBuffer<u16>, quadros: u32) {
+        for _ in 0..quadros {
+            let _ = buffer.tick();
+        }
+    }
+
+    /// 76 s de voz velha, e 22 s fora (o CUA de 25/10, 03:38–03:39), com quem
+    /// ouve tocando o tempo todo. Devolve o buffer e o carimbo do próximo
+    /// quadro da voz velha.
+    fn a_voz_velha_e_a_saida(ts0: u32) -> (JitterBuffer<u16>, u32) {
+        let mut buffer = buffer();
+        let velha = 76 * 50;
+        assert!(falar(&mut buffer, 0, ts0, 0.0, velha) > velha - 10);
+        calar(&mut buffer, 22 * 50);
+        (buffer, ts0.wrapping_add(velha * 960))
+    }
+
+    /// **O limite deste buffer, que é o motivo de quem manda não recomeçar o
+    /// carimbo do zero** (`partida` em `crate::relogio`): uma fonte cujo
+    /// carimbo volta para trás é descartada como atrasada até alcançar o que já
+    /// tocou. Uma caracterização, e não um defeito a consertar aqui: o buffer
+    /// não tem como separar «a fonte recomeçou» de «chegou a cauda velha
+    /// atrasada» (revisão do Astra, 25/10), e decidir errado derruba quem está
+    /// falando.
+    #[test]
+    fn um_carimbo_que_volta_para_tras_e_descartado_como_atrasado() {
+        let (mut buffer, _) = a_voz_velha_e_a_saida(0);
+        let tocados = falar(&mut buffer, 0, 0, 98_000.0, 100);
+        assert_eq!(tocados, 0);
+        assert!(buffer.metrics().late_discards >= 100);
+    }
+
+    /// **A conexão nova que parte do relógio da máquina toca logo**: o carimbo
+    /// dela está à frente do da voz velha pelo tempo que a pessoa ficou fora, e
+    /// o buffer lê o vão como a pausa que ele já tocou (os tiques da saída).
+    #[test]
+    fn um_carimbo_que_recomeca_a_frente_pelo_tempo_fora_toca_logo() {
+        let (mut buffer, fim_da_velha) = a_voz_velha_e_a_saida(0);
+        let nova = fim_da_velha.wrapping_add(22 * 48_000);
+        let tocados = falar(&mut buffer, 0, nova, 98_000.0, 100);
+        assert!(tocados >= 95, "a voz nova tocou só {tocados} de 100");
+        assert_eq!(buffer.metrics().late_discards, 0);
+    }
+
+    /// **E através da volta do carimbo de 32 bits** (a cada 24,8 h): a conta
+    /// circular de `ts_delta` lê a partida nova como à frente.
+    #[test]
+    fn um_carimbo_que_recomeca_a_frente_atraves_da_volta_dos_32_bits_toca_logo() {
+        let (mut buffer, fim_da_velha) = a_voz_velha_e_a_saida(u32::MAX - 30 * 48_000);
+        assert!(fim_da_velha < 76 * 48_000, "a voz velha não deu a volta");
+        let nova = fim_da_velha.wrapping_add(22 * 48_000);
+        let tocados = falar(&mut buffer, 0, nova, 98_000.0, 100);
+        assert!(tocados >= 95, "a voz nova tocou só {tocados} de 100");
+    }
+
+    /// **Fora mais de um minuto**, o vão passa do `MAX_GAP_FRAMES`, e o buffer
+    /// ressincroniza em vez de andar quadro a quadro: toca logo do mesmo jeito.
+    #[test]
+    fn um_carimbo_que_recomeca_muito_a_frente_ressincroniza_e_toca_logo() {
+        let (mut buffer, fim_da_velha) = a_voz_velha_e_a_saida(0);
+        calar(&mut buffer, 100 * 50);
+        let nova = fim_da_velha.wrapping_add(122 * 48_000);
+        let tocados = falar(&mut buffer, 0, nova, 198_000.0, 100);
+        assert!(tocados >= 95, "a voz nova tocou só {tocados} de 100");
+    }
+
+    /// Quantos quadros a voz nova manda até o primeiro tocar, depois de uma
+    /// voz velha de `minutos` e 22 s fora, com as duas vozes partindo de
+    /// `partida` (o relógio da máquina, ou o zero de antes). Tempo simulado:
+    /// uma hora de fala são 180 mil quadros, e não uma hora de teste.
+    fn quadros_ate_tocar(minutos: u32, partida: impl Fn(u64) -> u32) -> Option<u32> {
+        let mut buffer = buffer();
+        let velha = minutos * 60 * 50;
+        let t0_ms = 1_792_900_000_000_u64;
+        let comeco = partida(t0_ms);
+        for indice in 0..velha {
+            buffer.push(
+                indice as u16,
+                comeco.wrapping_add(indice.wrapping_mul(960)),
+                f64::from(indice) * 20.0,
+                0,
+            );
+            let _ = buffer.tick();
+        }
+        calar(&mut buffer, 22 * 50);
+        let nova = partida(t0_ms + u64::from(velha) * 20 + 22_000);
+        for indice in 0..(velha + 10 * 50) {
+            buffer.push(
+                indice as u16,
+                nova.wrapping_add(indice.wrapping_mul(960)),
+                f64::from(velha + 22 * 50 + indice) * 20.0,
+                0,
+            );
+            if matches!(buffer.tick(), Decision::Play(_)) {
+                return Some(indice);
+            }
+        }
+        None
+    }
+
+    /// **Com a partida no relógio da máquina, o mudo depois da volta não
+    /// depende de quanto a voz velha falou** (o relato: 15 min a 1 h de
+    /// sessão). E com a partida no zero, a de antes, ele é a vida da voz velha
+    /// inteira: com uma hora, uma hora de «sem áudio».
+    #[test]
+    fn o_mudo_da_volta_nao_cresce_com_a_duracao_da_fala() {
+        let da_maquina = |ms: u64| crate::relogio::partida(std::time::Duration::from_millis(ms)).1;
+        for minutos in [1, 15, 60] {
+            let quadros = quadros_ate_tocar(minutos, da_maquina);
+            assert!(
+                quadros.is_some_and(|quadros| quadros <= 3),
+                "depois de {minutos} min de fala, a voz nova esperou {quadros:?} quadros"
+            );
+        }
+        // A de antes, para a conta ficar à vista: 15 min de fala, 15 min mudo.
+        let do_zero = quadros_ate_tocar(15, |_| 0);
+        assert!(
+            do_zero.is_some_and(|quadros| quadros >= 15 * 60 * 50 - 50),
+            "do zero, o mudo foi de {do_zero:?} quadros"
+        );
     }
 }

@@ -1432,7 +1432,7 @@ class RegiaoDeMod {
     if (rotulo.textContent !== texto) rotulo.textContent = texto;
     this.marcarValidade(elem, caixa, plano);
     this.pintarContador(elem, caixa);
-    if (document.activeElement === caixa) return;
+    if (this.protegida(caixa, plano)) return;
     const valor = typeof plano.no.valor === "string"
       ? plano.no.valor.slice(0, LIMITES_DA_REGIAO.valorDoCampo)
       : "";
@@ -1485,7 +1485,7 @@ class RegiaoDeMod {
     if (rotulo.textContent !== texto) rotulo.textContent = texto;
     // O `erro` da escolha, como o do campo (Step 6e).
     this.marcarValidade(elem, caixa, plano);
-    if (document.activeElement === caixa) return;
+    if (this.protegida(caixa, plano)) return;
 
     const opcoes = (Array.isArray(plano.no.opcoes) ? plano.no.opcoes : [])
       .slice(0, LIMITES_DA_REGIAO.opcoes)
@@ -1711,7 +1711,7 @@ class RegiaoDeMod {
     if (caixa.placeholder !== sugestao) caixa.placeholder = sugestao;
     this.marcarValidade(elem, caixa, plano);
     this.pintarContador(elem, caixa);
-    if (document.activeElement === caixa) return;
+    if (this.protegida(caixa, plano)) return;
     const valor = typeof plano.no.valor === "string"
       ? plano.no.valor.slice(0, caixa.maxLength)
       : "";
@@ -1758,7 +1758,7 @@ class RegiaoDeMod {
       else caixa.removeAttribute(atributo);
     }
     this.marcarValidade(elem, caixa, plano);
-    if (document.activeElement === caixa) return;
+    if (this.protegida(caixa, plano)) return;
     const valor = plano.no.valor === null || plano.no.valor === undefined
       ? ""
       : String(plano.no.valor);
@@ -1798,7 +1798,7 @@ class RegiaoDeMod {
     caixa.min = String(Number(plano.no.minimo) || 0);
     caixa.max = String(Number(plano.no.maximo) || 100);
     caixa.step = String(Number(plano.no.passo) || 1);
-    if (document.activeElement !== caixa) {
+    if (!this.protegida(caixa, plano)) {
       const valor = String(Number(plano.no.valor) || 0);
       if (caixa.value !== valor) caixa.value = valor;
     }
@@ -1844,7 +1844,7 @@ class RegiaoDeMod {
     else caixa.removeAttribute("role");
     // Um campo como os outros, pela mesma razão do deslizante (B4).
     this.marcarValidade(elem, caixa, plano);
-    if (document.activeElement === caixa) {
+    if (this.protegida(caixa, plano)) {
       marcarEscolhido(elem, caixa.checked);
       return;
     }
@@ -1922,8 +1922,8 @@ class RegiaoDeMod {
     const valor = typeof plano.no.valor === "string" && /^#[0-9a-f]{6}$/i.test(plano.no.valor)
       ? plano.no.valor
       : "#000000";
-    if (document.activeElement !== seletor && seletor.value !== valor) seletor.value = valor;
-    if (document.activeElement !== hexa && hexa.value !== valor) hexa.value = valor;
+    if (!this.protegida(seletor, plano) && seletor.value !== valor) seletor.value = valor;
+    if (!this.protegida(hexa, plano) && hexa.value !== valor) hexa.value = valor;
     // O `erro` da cor, no hexadecimal, como o do campo (Step 6e).
     this.marcarValidade(elem, hexa, plano);
   }
@@ -2454,6 +2454,26 @@ class RegiaoDeMod {
       if (frase && !primeiro) primeiro = caixa;
     }
     return primeiro;
+  }
+
+  /**
+   * **O controle é de quem o edita?** Duas razões para não reescrever o valor
+   * dele a partir do que o MOD declarou:
+   *
+   * - ele tem o foco (reescrever apaga a seleção e leva o cursor ao fim);
+   * - a montagem **por partes** (`superficie.atualizar(chave, …)`) trocou só um
+   *   subárvore, e este controle não está nela. «Mantém pela chave o que não
+   *   mudou» inclui o que a pessoa escreveu e ainda não gravou: o editor do
+   *   PERFIS troca só a prévia a cada tecla, e reaplicar em todos os campos o
+   *   `valor` de quando o editor abriu apagava o campo anterior.
+   *
+   * Uma montagem inteira (`montar`, `aplicar`) não protege ninguém: é o MOD
+   * dizendo o valor de todos (o DESCARTAR, o depois do GRAVAR), e esse vale.
+   */
+  protegida(caixa, plano) {
+    if (document.activeElement === caixa) return true;
+    const so = this.soAtualizarChaves;
+    return so instanceof Set && !so.has(String(plano.no.chave ?? ""));
   }
 
   /** A pessoa mexeu no campo: a frase do produto e a do servidor saem, e o contador anda. */

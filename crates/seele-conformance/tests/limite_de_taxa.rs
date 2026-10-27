@@ -84,20 +84,57 @@ async fn quem_bate_a_porta_em_laco_e_recusado_por_taxa() -> Result<()> {
 
     // Passada a rajada, a recusa aparece — e diz o que é. Um erro de rede aqui
     // mandaria a pessoa procurar defeito que não existe.
-    let mut recusado = None;
-    for _ in 0..APERTOS_DE_RAJADA {
-        if let Err(erro) = entrar(endereco).await {
-            recusado = Some(erro);
+    //
+    // **Juntas, e não uma depois da outra** (desde a 0.17). No QUIC cada
+    // aperto levava milissegundos e o laço em série esvaziava o balde muito
+    // antes de ele se repor. Pelo enlace, um aperto inteiro contra o loopback
+    // leva perto de um segundo (medido nesta bateria: 60 em série, 70 s), e o
+    // balde repõe meia ficha por segundo: em série, a reposição acompanhava e
+    // nada era recusado, sem que o limite estivesse desligado. Juntas, as
+    // tentativas chegam mais rápido que a reposição, que é o laço que o balde
+    // existe para parar.
+    //
+    // E o motivo: as que passam pelo portão do enlace (`Portaria::admite`, que
+    // olha sem gastar) e chegam à sessão sem ficha leem `RateLimited`; as que
+    // o portão já barra não ganham nem DTLS, e para elas o silêncio é o certo
+    // (um STUN se forja). Pelo menos uma tem de ter lido o motivo.
+    //
+    // **Quatro de cada vez**, e não trinta: o enlace tem teto de apertos
+    // pendentes por IP (`MAX_PENDENTES_POR_IP`, 8), e trinta juntas medidas
+    // nesta bateria deram 28 silêncios (`SemResposta`) e nenhum motivo — o
+    // teto do enlace barrando antes do balde. Em lotes abaixo do teto, o que
+    // barra é o balde.
+    let mut recusas = Vec::new();
+    for _ in 0..15 {
+        let mut juntas = tokio::task::JoinSet::new();
+        for _ in 0..4 {
+            juntas.spawn(async move { entrar(endereco).await.err() });
+        }
+        while let Some(resultado) = juntas.join_next().await {
+            if let Some(erro) = resultado.expect("a tentativa não entrou em pânico") {
+                recusas.push(erro);
+            }
+        }
+        if recusas.iter().any(|erro| {
+            matches!(
+                erro,
+                ConnectError::Refused {
+                    reason: DisconnectReason::RateLimited,
+                }
+            )
+        }) {
             break;
         }
     }
-
-    match recusado {
-        Some(ConnectError::Refused {
-            reason: DisconnectReason::RateLimited,
-        }) => {}
-        outro => panic!("o laço de apertos de mão não foi limitado: {outro:?}"),
-    }
+    assert!(
+        recusas.iter().any(|erro| matches!(
+            erro,
+            ConnectError::Refused {
+                reason: DisconnectReason::RateLimited,
+            }
+        )),
+        "o laço de apertos de mão não foi limitado com motivo: {recusas:?}"
+    );
 
     servidor.shutdown();
     Ok(())

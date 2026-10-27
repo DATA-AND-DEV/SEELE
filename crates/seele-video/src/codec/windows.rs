@@ -208,6 +208,8 @@ pub struct Codificador {
     anel: Vec<IMFSample>,
     /// Qual delas é a vez.
     proxima_do_anel: usize,
+    /// A recusa do pedido de quadro-chave já foi dita (uma vez por codificador).
+    disse_da_chave: bool,
 }
 
 /// Quantas amostras giram no anel de entrada.
@@ -269,31 +271,44 @@ impl Codificador {
         //
         // Latência baixa **antes** dos tipos, que é o que a documentação do MFT
         // pede: depois de negociado, o modo já não muda.
-        botao(&transformador, &CODECAPI_AVLowLatencyMode, 1);
+        botao_dito(
+            &transformador,
+            "AVLowLatencyMode",
+            &CODECAPI_AVLowLatencyMode,
+            Valor::Booleano(true),
+        );
         // Taxa constante e a média igual ao teto. Sem dizer o modo, o padrão de
         // vários encoders é mirar **qualidade** e ignorar o número — e um teto
         // ignorado é uma imagem que não usa a banda que tem.
-        botao(
+        botao_dito(
             &transformador,
+            "AVEncCommonRateControlMode",
             &CODECAPI_AVEncCommonRateControlMode,
-            eAVEncCommonRateControlMode_CBR.0,
+            Valor::Ui4(u32::try_from(eAVEncCommonRateControlMode_CBR.0).unwrap_or(0)),
         );
-        botao(
+        botao_dito(
             &transformador,
+            "AVEncCommonMeanBitRate",
             &CODECAPI_AVEncCommonMeanBitRate,
-            i32::try_from(config.teto_bps).unwrap_or(i32::MAX),
+            Valor::Ui4(config.teto_bps),
         );
         // Zero quadros B, pela mesma razão que o macOS desliga a reordenação:
         // um quadro que só decodifica depois do que vem adiante troca latência
         // por bits, e esta é uma conversa.
-        botao(&transformador, &CODECAPI_AVEncMPVDefaultBPictureCount, 0);
+        botao_dito(
+            &transformador,
+            "AVEncMPVDefaultBPictureCount",
+            &CODECAPI_AVEncMPVDefaultBPictureCount,
+            Valor::Ui4(0),
+        );
         // Um quadro-chave por conta própria a cada dois segundos, como no
         // macOS: é o piso que faz quem chega atrasado não esperar para sempre
         // se ninguém pedir.
-        botao(
+        botao_dito(
             &transformador,
+            "AVEncMPVGOPSize",
             &CODECAPI_AVEncMPVGOPSize,
-            i32::try_from(quadros.saturating_mul(2)).unwrap_or(60),
+            Valor::Ui4(quadros.saturating_mul(2)),
         );
 
         // **A saída primeiro.** Um codificador não sabe descrever a entrada que
@@ -346,6 +361,7 @@ impl Codificador {
             contador: 0,
             anel: Vec::with_capacity(ANEL),
             proxima_do_anel: 0,
+            disse_da_chave: false,
             // Y inteiro mais um plano de croma com metade das linhas.
             nv12: vec![0; largura * altura + largura * altura.div_ceil(2)],
         })
@@ -569,18 +585,49 @@ impl Codificador {
     }
 }
 
+/// O valor de um botão do `ICodecAPI`, **no tipo que a propriedade declara**.
+///
+/// A documentação de cada propriedade fixa o tipo: `VT_UI4` para o
+/// `AVEncVideoForceKeyFrame`, o `AVEncMPVGOPSize`, o
+/// `AVEncCommonRateControlMode`, o `AVEncCommonMeanBitRate` e o
+/// `AVEncMPVDefaultBPictureCount`, e `VT_BOOL` para o `AVLowLatencyMode`. Até
+/// 26/10/2026 todos iam como `VT_I4`, com o resultado descartado, e no Windows
+/// real não saía quadro-chave nenhum depois do primeiro. Com os tipos certos,
+/// os testes de `testes` passaram num Windows real (Media Foundation, 4 de 4) e
+/// a tela voltou a abrir para quem chega no meio (26/10/2026).
+#[derive(Debug, Clone, Copy)]
+enum Valor {
+    /// `VT_UI4`.
+    Ui4(u32),
+    /// `VT_BOOL`.
+    Booleano(bool),
+}
+
 /// Um botão do `ICodecAPI`, quando o codificador oferece um.
 ///
-/// **Falhar aqui não é erro.** Nem todo MFT expõe `ICodecAPI`, e os que expõem
-/// não expõem os mesmos botões: pedir um quadro-chave a quem não atende deve
-/// custar um quadro-chave a menos, e não a transmissão inteira.
-fn botao(transformador: &IMFTransform, chave: &GUID, valor: i32) {
-    let Ok(api) = transformador.cast::<ICodecAPI>() else {
-        return;
+/// **Falhar aqui não derruba nada.** Nem todo MFT expõe `ICodecAPI`, e os que
+/// expõem não expõem os mesmos botões: pedir um quadro-chave a quem não atende
+/// deve custar um quadro-chave a menos, e não a transmissão inteira. Mas a
+/// recusa **é dita**, a quem chama: em silêncio, foi ela que escondeu o tipo
+/// errado.
+fn botao(transformador: &IMFTransform, chave: &GUID, valor: Valor) -> Result<(), String> {
+    let api = transformador
+        .cast::<ICodecAPI>()
+        .map_err(|erro| format!("o codificador não expõe ICodecAPI ({erro})"))?;
+    let valor = match valor {
+        Valor::Ui4(numero) => windows::Win32::System::Variant::VARIANT::from(numero),
+        Valor::Booleano(ligado) => windows::Win32::System::Variant::VARIANT::from(ligado),
     };
-    let valor = windows::Win32::System::Variant::VARIANT::from(valor);
     // SAFETY: a chave é estática do sistema e o valor vive até o fim da chamada.
-    let _ = unsafe { api.SetValue(chave, &raw const valor) };
+    unsafe { api.SetValue(chave, &raw const valor) }.map_err(|erro| erro.to_string())
+}
+
+/// O [`botao`] da montagem: a recusa vai ao registro uma vez, com o nome do
+/// botão. É uma linha por botão por codificador montado, e não por quadro.
+fn botao_dito(transformador: &IMFTransform, nome: &'static str, chave: &GUID, valor: Valor) {
+    if let Err(erro) = botao(transformador, chave, valor) {
+        tracing::warn!(botao = nome, ?valor, %erro, "o codificador do Windows recusou um ajuste");
+    }
 }
 
 impl Drop for Codificador {
@@ -629,8 +676,8 @@ impl Drop for Codificador {
 }
 
 impl Codificador {
-    fn botao(&self, chave: &GUID, valor: i32) {
-        botao(&self.transformador, chave, valor);
+    fn botao(&self, chave: &GUID, valor: Valor) -> Result<(), String> {
+        botao(&self.transformador, chave, valor)
     }
 }
 
@@ -655,10 +702,11 @@ impl super::CodificaVideo for Codificador {
         // Pelo `ICodecAPI` e **não** refazendo o tipo de saída: trocar o tipo no
         // meio do fluxo obriga a renegociar, e renegociar custa um quadro-chave
         // — que é exatamente o que a costura promete que mudar o teto não custa.
-        self.botao(
-            &CODECAPI_AVEncCommonMeanBitRate,
-            i32::try_from(teto_bps).unwrap_or(i32::MAX),
-        );
+        if let Err(erro) = self.botao(&CODECAPI_AVEncCommonMeanBitRate, Valor::Ui4(teto_bps)) {
+            // Uma vez por troca de teto, que é rara (a escada de qualidade), e
+            // não por quadro.
+            tracing::debug!(%erro, teto_bps, "o codificador do Windows recusou o teto novo");
+        }
         self.teto_bps = teto_bps;
         Ok(())
     }
@@ -694,7 +742,15 @@ impl super::CodificaVideo for Codificador {
 
         self.para_nv12(quadro)?;
         if pedido_de_chave {
-            self.botao(&CODECAPI_AVEncVideoForceKeyFrame, 1);
+            // O pedido fica ligado até a chave sair (`seele-core::bomba`), então
+            // isto roda a cada quadro enquanto ela não sai: a recusa é dita uma
+            // vez por codificador, e não por quadro.
+            if let Err(erro) = self.botao(&CODECAPI_AVEncVideoForceKeyFrame, Valor::Ui4(1)) {
+                if !self.disse_da_chave {
+                    self.disse_da_chave = true;
+                    tracing::warn!(%erro, "o codificador do Windows recusou o pedido de quadro-chave");
+                }
+            }
         }
         let amostra = self.amostra()?;
         self.contador = self
@@ -816,6 +872,110 @@ mod testes {
             "o Media Foundation devia entregar Annex-B e não entregou; \
              se ele passou a entregar AVCC, este caminho precisa converter \
              como o `macos.rs` converte"
+        );
+    }
+
+    /// Codifica até sair um quadro, com o pedido de chave ligado enquanto a
+    /// chave não sai (a regra da `seele-core::bomba`), e devolve quantas
+    /// entregas custou e se saiu chave.
+    fn ate_sair(
+        codificador: &mut Codificador,
+        resolucao: Resolucao,
+        passo: &mut usize,
+        pedir: bool,
+    ) -> Option<(usize, bool)> {
+        for entregas in 1..=20 {
+            *passo += 1;
+            if let Some(saiu) = codificador
+                .codificar(&quadro(resolucao, *passo), pedir)
+                .expect("codificar")
+            {
+                return Some((entregas, saiu.chave));
+            }
+        }
+        None
+    }
+
+    /// **O pedido de quadro-chave vale depois do primeiro**, no meio do fluxo.
+    ///
+    /// O defeito de 26/10/2026: o primeiro IDR saía (o teste acima passava) e
+    /// nenhum outro, nem pedido — o `ForceKeyFrame` ia como `VT_I4`, e a
+    /// propriedade é `VT_UI4`. Quem entrava numa transmissão já em curso
+    /// esperava para sempre. Aqui: a porta de entrada, dez quadros comuns, e
+    /// depois o pedido, que tem de sair como chave em poucas entregas.
+    #[test]
+    fn o_pedido_de_quadro_chave_vale_no_meio_do_fluxo() {
+        let resolucao = Resolucao::P720;
+        let Ok(mut codificador) = Codificador::novo(&config(resolucao)) else {
+            eprintln!("PULADO: esta máquina não deu um codificador de H.264.");
+            return;
+        };
+        let mut passo = 0;
+        let (_, primeiro) =
+            ate_sair(&mut codificador, resolucao, &mut passo, true).expect("o primeiro quadro");
+        assert!(primeiro, "o primeiro quadro não é porta de entrada");
+
+        // Dez quadros sem pedido, bem antes do GOP de 2 s (60 quadros a 30 por
+        // segundo): eles são o «meio do fluxo», e não podem ser chave.
+        let mut comuns = 0;
+        for _ in 0..10 {
+            if let Some((_, chave)) = ate_sair(&mut codificador, resolucao, &mut passo, false) {
+                if !chave {
+                    comuns += 1;
+                }
+            }
+        }
+        assert!(
+            comuns > 0,
+            "nenhum quadro comum saiu depois do primeiro: sem eles este teste não prova o meio do fluxo"
+        );
+
+        // O pedido, ligado até a chave sair, como a bomba faz.
+        let mut entregas_ate_a_chave = None;
+        let mut entregas = 0;
+        while entregas < 10 {
+            let Some((custou, chave)) = ate_sair(&mut codificador, resolucao, &mut passo, true)
+            else {
+                break;
+            };
+            entregas += custou;
+            if chave {
+                entregas_ate_a_chave = Some(entregas);
+                break;
+            }
+        }
+        assert!(
+            entregas_ate_a_chave.is_some(),
+            "o pedido de quadro-chave no meio do fluxo não produziu chave em 10 entregas: quem \
+             entra numa transmissão em curso nunca abre a tela"
+        );
+    }
+
+    /// **O GOP de 2 s vale**: sem pedido nenhum, sai uma chave por conta própria
+    /// dentro de três intervalos (180 quadros a 30 por segundo).
+    #[test]
+    fn sai_um_quadro_chave_sozinho_pelo_gop() {
+        let resolucao = Resolucao::P720;
+        let Ok(mut codificador) = Codificador::novo(&config(resolucao)) else {
+            eprintln!("PULADO: esta máquina não deu um codificador de H.264.");
+            return;
+        };
+        let mut passo = 0;
+        let (_, primeiro) =
+            ate_sair(&mut codificador, resolucao, &mut passo, true).expect("o primeiro quadro");
+        assert!(primeiro, "o primeiro quadro não é porta de entrada");
+        let mut chave_sozinha = false;
+        for _ in 0..180 {
+            if let Some((_, chave)) = ate_sair(&mut codificador, resolucao, &mut passo, false) {
+                if chave {
+                    chave_sozinha = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            chave_sozinha,
+            "nenhum quadro-chave sozinho em 180 quadros: o GOP de 2 s não está valendo"
         );
     }
 

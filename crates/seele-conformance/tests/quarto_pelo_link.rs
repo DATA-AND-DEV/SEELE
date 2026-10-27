@@ -72,7 +72,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use seele_core::encontro::{onde_mora_hoje, EscutaDoQuarto, Marcas, OndeMora, PRAZO_DO_QUARTO};
-use seele_proto::encontro::{ler_aqui, moro, quem, Marca, Vizinhanca, PORTA_PADRAO, TAMANHO};
+use seele_proto::encontro::{moro, Marca, Vizinhanca, PORTA_PADRAO, TAMANHO};
 use seele_proto::uri::{analisar, Convite};
 use seele_server::alcance::encontro::Convocacao;
 use seele_server::hospedagem::Hospedagem;
@@ -344,21 +344,36 @@ async fn um_ponto_escrito_sem_porta_e_procurado_na_porta_padrao() {
     );
 }
 
-/// Onde o quarto diz que `marca` mora, perguntado com um `QUEM` cru: sem a
+/// Onde o quarto diz que `marca` mora, perguntado com um `QUEM3` cru: sem a
 /// consulta do `seele-core` e sem a FFI no meio.
+///
+/// Desde a 0.17 o anfitrião registra pelo `MORA3` (ENC/3, ADR 0063), e é pela
+/// versão 3 que se pergunta. O `QUEM` do ENC/1 deste arquivo continua medido
+/// em `um_ponto_escrito_sem_porta_e_procurado_na_porta_padrao`, com o
+/// registro do ENC/1.
 async fn quem_mora(ponto: SocketAddr, marca: &Marca) -> Option<SocketAddr> {
     let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    socket.send_to(&quem(marca), ponto).await.unwrap();
-    let mut balde = [0_u8; TAMANHO];
+    socket
+        .send_to(&seele_proto::encontro::quem3(marca), ponto)
+        .await
+        .unwrap();
+    let mut balde = [0_u8; seele_proto::encontro::TAMANHO3];
     let ate = tokio::time::Instant::now() + Duration::from_millis(500);
     loop {
         let Ok(Ok((lidos, _))) = tokio::time::timeout_at(ate, socket.recv_from(&mut balde)).await
         else {
             return None;
         };
-        if let Some((de_quem, onde)) = balde.get(..lidos).and_then(ler_aqui) {
+        if let Some(seele_proto::encontro::Resposta3::Aqui {
+            marca: de_quem,
+            endereco,
+            ..
+        }) = balde
+            .get(..lidos)
+            .and_then(seele_proto::encontro::ler_resposta3)
+        {
             if de_quem == *marca {
-                return Some(onde);
+                return Some(endereco);
             }
         }
     }
@@ -379,10 +394,17 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
 
     // O servidor como o de produção abre: `[::]`, com pilha dupla quando a
     // máquina deixa.
-    let (socket, _) =
+    // Desde a 0.17, o socket do servidor é uma `Ponta` do enlace, e o ENC/3
+    // chega a ela pela caixa que o enlace separa do STUN e do DTLS.
+    let (socket, pilha) =
         seele_server::alcance::abrir_escuta(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)))
             .expect("a escuta do servidor abre");
-    let socket = Arc::new(socket);
+    let ponta = seele_enlace::Ponta::de_socket(socket, None).expect("a ponta do servidor");
+    let enc = Arc::new(tokio::sync::Mutex::new(
+        ponta.mensagens_enc().expect("a caixa do ENC/3"),
+    ));
+    let porta_do_servidor = ponta.local_addr().port();
+    let escuta = seele_server::alcance::Escuta::nova(porta_do_servidor, pilha);
 
     // O ponto como `PONTO_PADRAO` é escrito: um nome sem porta.
     let sem_porta = ponto.ip().to_string();
@@ -394,8 +416,9 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
 
     let antes = quarto.quantos();
     let convocacao = Convocacao::para_servidor(
-        Arc::clone(&socket),
+        seele_server::alcance::encontro::PeloServidor { ponta, enc },
         IMPRESSAO_DO_ANFITRIAO,
+        escuta,
         sem_porta.clone(),
     )
     .expect("uma impressão digital dá uma convocação");
@@ -563,15 +586,31 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
     // E largar, e não fechar: é o que acontece com o encontro quando uma
     // `Hospedagem` é descartada sem `encerrar`. A tarefa do degrau 4 tem de
     // soltar o socket do servidor, ou a porta fica presa até o app fechar.
+    //
+    // Até a 0.16 isto se media pela contagem do `Arc` do socket. Desde a 0.17 o
+    // socket mora dentro da `Ponta` do enlace, que não a expõe, e a pergunta
+    // vira a de quem hospeda: a porta volta a abrir? Este teste não guarda
+    // nenhuma outra cópia da `Ponta`, então a única que pode segurá-la é a
+    // tarefa do degrau 4.
     drop(convocacao);
     drop(aberto);
     let ate = tokio::time::Instant::now() + Duration::from_secs(1);
-    while Arc::strong_count(&socket) > 1 && tokio::time::Instant::now() < ate {
+    let voltou = loop {
+        if seele_server::alcance::abrir_escuta(SocketAddr::from((
+            Ipv6Addr::UNSPECIFIED,
+            porta_do_servidor,
+        )))
+        .is_ok()
+        {
+            break true;
+        }
+        if tokio::time::Instant::now() >= ate {
+            break false;
+        }
         tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(
-        Arc::strong_count(&socket),
-        1,
+    };
+    assert!(
+        voltou,
         "largar o encontro deixou a tarefa do degrau 4 viva segurando o socket do servidor: a \
          porta fica presa, e hospedar de novo nela falha"
     );

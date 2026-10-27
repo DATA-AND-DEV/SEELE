@@ -87,11 +87,17 @@ where
 }
 
 /// Sobe um servidor numa porta que o sistema escolhe.
+///
+/// O anfitrião (a semente 71) é o dono declarado (ADR 0064): desde a 0.17 a
+/// primeira conta a chegar não vira Comandante, e só o dono cria a sala de
+/// destino do teste da mudança de sala.
 async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let dono = SigningKey::from_bytes(&[71; 32]);
     let config = ServerConfig {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
+        proprietario: Some(seele_core::key_fingerprint(dono.verifying_key().as_bytes())),
         ..ServerConfig::default()
     };
     let daemon = Arc::new(Daemon::bind(config).await?);
@@ -293,10 +299,12 @@ impl Emudecivel {
     /// Conecta o visitante, senta-o na sala, e devolve o punho que o emudece.
     ///
     /// Num runtime próprio, em outra linha de execução, porque é o runtime que
-    /// responde ao keepalive do QUIC: desligá-lo é a única forma honesta de
+    /// responde ao keepalive (desde a 0.17, a tarefa da `Ponta` do enlace; até
+    /// a 0.16, o driver do QUIC): desligá-lo é a única forma honesta de
     /// produzir **silêncio** em vez de uma despedida. Derrubar a conexão pelo
-    /// `Drop` do quinn escreveria `CONNECTION_CLOSE`, o servidor desmontaria a
-    /// sessão na hora, e o teste mediria o caminho que já funciona.
+    /// `Drop` mandaria o fim (o `corte` do enlace, como era o
+    /// `CONNECTION_CLOSE` do quinn), o servidor desmontaria a sessão na hora, e
+    /// o teste mediria o caminho que já funciona.
     fn subir(endereco: SocketAddr, chave: SigningKey) -> Self {
         let (pronto_tx, pronto_rx) = std::sync::mpsc::channel();
         let (matar, aviso_de_morte) = std::sync::mpsc::channel();
@@ -323,7 +331,7 @@ impl Emudecivel {
             // runtime — até o sinal.
             let _ = aviso_de_morte.recv();
             // **A queda silenciosa, em duas partes.** O objeto é esquecido para
-            // que o `Drop` do quinn não enfileire a despedida, e o runtime é
+            // que o `Drop` não enfileire a despedida, e o runtime é
             // desligado para que ninguém mais responda a pacote nenhum. Do ponto
             // de vista do servidor, este par simplesmente parou de existir — que
             // é exactamente o que um Wi‑Fi que cai faz.

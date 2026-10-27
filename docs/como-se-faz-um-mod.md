@@ -54,7 +54,7 @@ nenhuma é recusado (`empty`). Um MOD que só mostra coisas não precisa de
 | `version` | sua. Nunca é interpretada por nós. |
 | `api` | a versão da API contra a qual você escreveu. Hoje, `6`. |
 | `repo` | seu repositório público. Obrigatório. |
-| `reach` | o que você declara alcançar, em palavras suas; o anúncio do servidor leva até 16, de até 32 bytes cada. A tela de aceite mostra isto antes de baixar. **É declaração, e nada a confere**: o que o MOD alcança de fato é o que a API 6 oferece. |
+| `reach` | o que você declara alcançar, em palavras suas; o anúncio do servidor leva até 16, de até 48 bytes UTF-8 cada na 0.17 (32 na 0.16), e a 0.17 recusa na instalação o que o anúncio recusaria (`alcances-demais`, `alcance-grande-demais`). A tela de aceite mostra isto antes de baixar. **É declaração, e nada a confere**: o que o MOD alcança de fato é o que a API 6 oferece. |
 | `client`, `server` | caminhos das metades, relativos à pasta. |
 | `arquivos` | a mídia que o MOD traz para mostrar ou tocar, relativa à pasta. Até 16, e só o que está nesta lista é servido. O tipo vem dos bytes, nunca da extensão. |
 | `tema` | opcional: `true` abre a porta do tema do servidor, `mundo.tema`, na metade de servidor (ver «O tema»). Sem `server`, o manifesto é recusado (`tema-sem-metade-de-servidor`): sem quem a abra, a porta nunca pintaria nada. |

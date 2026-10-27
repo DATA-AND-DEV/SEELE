@@ -218,20 +218,17 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             .into_bytes(),
     );
     // As duas formas novas da 0.16: o link do navegador, na origem dos testes,
-    // e o link da sala pessoal.
+    // e o link da sala pessoal. Desde a 0.17 o link do navegador não leva mais
+    // `wh=` nem `ate=` (os certificados curtos saíram com a WebTransport, ADR
+    // 0063), e a versão é a do Servidor 2.0.
     convites.insert(
         "navegador".to_owned(),
         Convite::novo("198.51.100.7:8383")
             .com_impressao_digital(IMPRESSAO)
             .com_token("7K4MNPQRSTVWXYZ23456")
-            .com_versao("1.0")
-            .no_navegador(
-                ORIGEM_DOS_TESTES,
-                "/e",
-                &["ab".repeat(32)],
-                Some(1_792_540_800),
-            )
-            .expect("o convite tem fp e hash")
+            .com_versao("2.0")
+            .no_navegador(ORIGEM_DOS_TESTES, "/e")
+            .expect("o convite tem fp")
             .into_bytes(),
     );
     convites.insert(
@@ -318,7 +315,158 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
     ] {
         do_encontro.insert(nome.to_owned(), encontro::resposta2(&resposta));
     }
+
+    // O ENC/3 (ADR 0063): cada pedido e cada resposta, pelos montadores do
+    // produto, no mesmo alvo do datagrama, porque o mesmo socket os lê.
+    let livres = Marcas::do_servidor(IMPRESSAO).expect("a impressão forma marcas");
+    let credencial = encontro::Credencial::nova(&"Ab3".repeat(11)[..32])
+        .expect("32 alfanuméricos são credencial");
+    let candidato: std::net::SocketAddr = "198.51.100.20:50123".parse().expect("endereço");
+    let id = [0x5A; encontro::BYTES_DO_ID];
+    let chama = encontro::Chama {
+        servidor: livres.servidor().clone(),
+        escuta: livres.escuta().clone(),
+        credencial: credencial.clone(),
+        candidatos: vec![candidato],
+    };
+    do_encontro.insert(
+        "moro3".to_owned(),
+        encontro::moro3(&encontro::Moro2 {
+            marca: sala.servidor().clone(),
+            chave: [0; 32],
+            carimbo: 1_792_000_000,
+            dicas: vec![dica],
+            assinatura: [0xAB; 64],
+            cookie: Some([0xC0; encontro::BYTES_DO_COOKIE]),
+        }),
+    );
+    do_encontro.insert(
+        "mora3".to_owned(),
+        encontro::mora3(livres.servidor(), Some(&[0xC0; encontro::BYTES_DO_COOKIE])),
+    );
+    do_encontro.insert("quem3".to_owned(), encontro::quem3(livres.servidor()));
+    do_encontro.insert("chama".to_owned(), encontro::chama(&chama));
+    do_encontro.insert(
+        "atende".to_owned(),
+        encontro::atende(&encontro::Atende {
+            escuta: livres.escuta().clone(),
+            id,
+            endereco: publico,
+            dicas: vec![dica],
+        }),
+    );
+    for (nome, resposta) in [
+        (
+            "morou3",
+            encontro::Resposta3::Morou {
+                marca: livres.servidor().clone(),
+                endereco: publico,
+                cookie: [0xC0; encontro::BYTES_DO_COOKIE],
+            },
+        ),
+        (
+            "desafio3",
+            encontro::Resposta3::Desafio {
+                marca: livres.servidor().clone(),
+                cookie: [0xC0; encontro::BYTES_DO_COOKIE],
+            },
+        ),
+        (
+            "aqui3",
+            encontro::Resposta3::Aqui {
+                marca: livres.servidor().clone(),
+                endereco: publico,
+                dicas: vec![dica],
+            },
+        ),
+        (
+            "ninguem3",
+            encontro::Resposta3::Ninguem {
+                marca: livres.servidor().clone(),
+            },
+        ),
+        (
+            "recusa3",
+            encontro::Resposta3::Recusa {
+                marca: livres.servidor().clone(),
+                motivo: encontro::Motivo::Taxa,
+                agora: 1_792_000_000,
+            },
+        ),
+        (
+            "calado3",
+            encontro::Resposta3::Calado {
+                marca: livres.servidor().clone(),
+            },
+        ),
+        (
+            "chamado3",
+            encontro::Resposta3::Chamado(encontro::Chamado {
+                escuta: livres.escuta().clone(),
+                id,
+                credencial: credencial.clone(),
+                candidatos: vec![candidato, publico],
+            }),
+        ),
+    ] {
+        do_encontro.insert(nome.to_owned(), encontro::resposta3(&resposta));
+    }
     todas.insert("datagrama_do_encontro", do_encontro);
+
+    // O corpo do `POST /sinal/1` (SEELE-SINAL/1), que o ponto lê de qualquer
+    // navegador, e as respostas que a página lê.
+    let mut do_sinal = DoAlvo::new();
+    do_sinal.insert(
+        "chama".to_owned(),
+        encontro::pedido_do_sinal(&chama).into_bytes(),
+    );
+    for (nome, resposta) in [
+        (
+            "aqui",
+            encontro::RespostaDoSinal::Aqui {
+                endereco: publico,
+                dicas: vec![dica],
+            },
+        ),
+        ("ninguem", encontro::RespostaDoSinal::Ninguem),
+        (
+            "recusa",
+            encontro::RespostaDoSinal::Recusa {
+                motivo: encontro::Motivo::Cheio,
+                agora: 1_792_000_000,
+            },
+        ),
+        ("calado", encontro::RespostaDoSinal::Calado),
+    ] {
+        do_sinal.insert(
+            nome.to_owned(),
+            encontro::resposta_do_sinal(&resposta).into_bytes(),
+        );
+    }
+    todas.insert("sinal_do_encontro", do_sinal);
+
+    // O envelope dos canais (contrato D4, `seele_enlace::envelope`). O
+    // `seele-proto` não depende do `seele-enlace` (ADR 0002), então os bytes
+    // vão escritos aqui, pela tabela do D4. Quem confere que o montador do
+    // enlace dá exatamente estes bytes é o teste
+    // `as_sementes_do_fuzz_sao_as_do_montador`, no `seele-enlace` (pedido ao A).
+    let mut do_envelope = DoAlvo::new();
+    do_envelope.insert("dados".to_owned(), vec![0x00, 0x0a, 0x0b, 0x00, 0x00]);
+    do_envelope.insert("fim".to_owned(), vec![0x01]);
+    do_envelope.insert("corte".to_owned(), vec![0x02, 0x00, 0x00, 0x00, 0x02]);
+    do_envelope.insert("apresentacao-vazia".to_owned(), vec![0x03]);
+    let mut da_sala = vec![0x03];
+    da_sala.extend_from_slice(&[0x11; 32]);
+    da_sala.extend_from_slice(&[0x22; 64]);
+    do_envelope.insert("apresentacao-da-sala".to_owned(), da_sala);
+    // O crédito `0x04` (enlace-api.md Δ8): `limite` u64 big-endian, 9 bytes
+    // exatos. O valor é o primeiro anúncio de quem lê, a janela de 1 MiB
+    // (`MAX_FILA_DE_ENTRADA`), que é o que todo canal da linha 2 recebe ao abrir.
+    do_envelope.insert(
+        "credito".to_owned(),
+        vec![0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00],
+    );
+    todas.insert("envelope", do_envelope);
 
     todas
 }
@@ -478,13 +626,50 @@ fn toda_semente_e_uma_entrada_que_o_alvo_aceita() {
         let aceita = encontro::analisar(bytes).is_some()
             || encontro::ler_aqui(bytes).is_some()
             || encontro::analisar2(bytes).is_some()
-            || encontro::ler_resposta2(bytes).is_some();
+            || encontro::ler_resposta2(bytes).is_some()
+            || encontro::analisar3(bytes).is_some()
+            || encontro::ler_resposta3(bytes).is_some();
         assert!(
             aceita,
             "a semente datagrama_do_encontro/{nome} não é um pedido nem uma resposta, de \
-             nenhuma das duas versões, que se leia"
+             nenhuma das três versões, que se leia"
         );
     }
+    for (nome, bytes) in do_alvo(&todas, "sinal_do_encontro") {
+        let texto = std::str::from_utf8(bytes).expect("o sinal é texto");
+        assert!(
+            bytes.len() <= encontro::LIMITE_DO_SINAL,
+            "a semente sinal_do_encontro/{nome} passa do teto do corpo"
+        );
+        assert!(
+            encontro::ler_pedido_do_sinal(texto).is_some()
+                || encontro::ler_resposta_do_sinal(texto).is_some(),
+            "a semente sinal_do_encontro/{nome} não é um pedido nem uma resposta do sinal: {texto}"
+        );
+    }
+    // O envelope: a tabela do D4, conferida aqui sem o `seele-enlace`. Uma tag
+    // de cada, e cada corpo no tamanho da tag dele.
+    for (nome, bytes) in do_alvo(&todas, "envelope") {
+        let (tag, corpo) = bytes.split_first().expect("o envelope tem a tag");
+        let certo = match tag {
+            0x00 => (1..=16 * 1024).contains(&corpo.len()),
+            0x01 => corpo.is_empty(),
+            0x02 => corpo.len() == 4,
+            0x03 => corpo.len() <= 512,
+            // O crédito: o limite em 8 bytes, nem mais nem menos (Δ8).
+            0x04 => corpo.len() == 8,
+            _ => false,
+        };
+        assert!(certo, "a semente envelope/{nome} não é um envelope do D4");
+    }
+    // E o crédito tem semente: sem ela o fuzz começa sem nenhum `0x04` válido,
+    // e o ramo que o lê só seria achado por sorte.
+    assert!(
+        do_alvo(&todas, "envelope")
+            .iter()
+            .any(|(_, bytes)| bytes.first() == Some(&0x04)),
+        "o alvo envelope não tem semente do crédito 0x04"
+    );
 }
 
 /// Os nomes dos `[[bin]]` de `fuzz/Cargo.toml`.

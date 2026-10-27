@@ -9,7 +9,7 @@ Os clientes gráficos existem para alcançar quem não vive no terminal e para d
 **Decisão:** Tauri, não Electron.
 
 - Usa a webview do sistema; binário na casa de dezenas de MB, não centenas.
-- O núcleo Rust roda no processo nativo, não em JS. Áudio, QUIC e estado ficam onde já estão.
+- O núcleo Rust roda no processo nativo, não em JS. Áudio, transporte (WebRTC desde a 0.17) e estado ficam onde já estão.
 - O frontend é apenas apresentação, comunicando por comandos e eventos Tauri, espelhando o contrato de `seele-core` descrito em `01`.
 
 Frontend: **decidido em M5 — HTML, CSS e JavaScript à mão, sem framework e sem npm** (ADR 0019). O critério que decidiu não foi preferência de framework: foi não ter duas árvores de dependência com só uma auditada. O `cargo deny` cobre o produto inteiro; um `node_modules` seria a única parte fora dele.
@@ -99,6 +99,55 @@ binário contém os dois papéis.
 O comando **não conecta**. Conectar continua sendo o caminho de sempre, com o
 endereço que ele devolve: um servidor hospedado aqui e um do outro lado do mundo
 entram pela mesma porta.
+
+### Antes de hospedar um servidor de outra versão (0.17)
+
+Hospedar por esta versão um servidor criado por uma anterior não é um clique
+qualquer: os dados são convertidos, quem usa a versão anterior deixa de entrar,
+e um MOD feito para outra API impede de subir. São três perguntas, e a tela
+**ANTES DE HOSPEDAR** as separa, cada uma com o estado escrito (NADA A FAZER,
+LEIA ANTES, RESOLVA ANTES) e as ações dela:
+
+1. **os dados** — de que versão do servidor eles são, que hospedar os converte,
+   e onde fica a cópia de segurança de antes. Os números de esquema ficam em
+   «Detalhes técnicos», fechado;
+2. **quem consegue entrar** — esta janela sobe o servidor da versão dela; as
+   anteriores abrem noutra janela, pelo launcher. É uma escolha do servidor, e
+   não de cada MOD;
+3. **os MODs** — atualizar ou desligar cada um; nenhuma das duas hospeda
+   sozinha, e desligar deixa os dados do MOD.
+
+HOSPEDAR é um botão só, no fim, e só acende sem nada bloqueando. Nada nessa tela
+apaga dado. Ela aparece pela pré-conferência (`antes_de_hospedar`, só leitura)
+ou pela recusa do `hospedar`; o caso que a trouxe e as capturas estão em
+`docs/evidencias/ui-0.17/inventario.md`.
+
+### Várias sessões ao mesmo tempo (0.17)
+
+O app hospeda e participa de várias conversas ao mesmo tempo (ADR 0031;
+contrato E3). A casca diz três coisas diferentes, e não as mistura:
+
+- **onde se conversa** — as sessões abertas, na trilha (ABERTAS) e na entrada.
+  Trocar a que se vê não derruba nenhuma. Cada placa diz, em palavra e em
+  número, as não lidas, se tem a voz, se o servidor é desta máquina, e se está
+  voltando ou encerrada;
+- **onde se hospeda** — o servidor no ar nesta máquina (NO AR), à parte: sair de
+  todas as conversas não o tira do ar;
+- **onde está a voz** — de uma sessão só. A linha da voz no operador diz qual, e
+  TRAZER A VOZ PARA CÁ é o ato explícito que a troca: a anterior para de receber
+  o microfone antes de a nova começar.
+
+Todo comando sai com o carimbo da sessão em que foi dado; a resposta e o evento
+de outra sessão não são aplicados à que está na tela. O que a pessoa estava
+fazendo numa sessão — o rascunho, o anexo, a busca — fica com ela, e volta
+quando ela volta. O navegador e o celular seguem o mesmo contrato, sem hospedar.
+
+### Atualizar para além da quebra (0.17)
+
+Uma atualização que muda a versão do servidor (a 0.16 para a 0.17) avisa ANTES
+de baixar qualquer coisa, num diálogo que diz o que deixa de conversar com o
+quê e que a versão de agora continua guardada. CANCELAR (o foco nasce nele),
+ADIAR e PROSSEGUIR. Uma atualização compatível segue sem aviso.
 
 ### A marca
 

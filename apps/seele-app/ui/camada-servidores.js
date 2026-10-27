@@ -37,6 +37,60 @@ function quandoFoi(segundos) {
   return `há ${Math.floor(passou / 86_400)} d`;
 }
 
+/** Uma linha de servidor conhecido: a que entra, e o esquecer ao lado. */
+function linhaDoServidor(conhecido) {
+  const item = elemento("li");
+  const botao = elemento("button", "servidor-linha");
+  botao.type = "button";
+  botao.dataset.alvo = conhecido.alvo;
+  botao.dataset.apelido = conhecido.apelido ?? "";
+  // O nome, para a caixa de confirmação da troca falar por nome.
+  if (conhecido.nome) botao.dataset.nome = conhecido.nome;
+
+  const nome = conhecido.nome || conhecido.alvo;
+  // **O ladrilho traz a imagem do servidor quando há uma.**
+  //
+  // Ela é gravada desde que `lembrar_aparencia_do_servidor` existe, e esta
+  // lista nunca a leu: desenhava sempre a sigla, e a sigla vinha do
+  // **endereço** mesmo quando o nome estava guardado. Duas coisas erradas na
+  // mesma caixa de 34px — «lista de server não trazem o último nome salvo
+  // nem o ícone».
+  //
+  // A sigla continua sendo o que aparece sem imagem, e passa a sair do nome
+  // quando ele existe: `CA` de «Casa» é o que alguém reconhece, e `19` de
+  // `192.168.0.39` não é nada.
+  const ladrilho = elemento("span", "servidor-sigla", siglaDoAlvo(nome));
+  if (conhecido.icone) {
+    ladrilho.style.backgroundImage = `url(${uriDeIcone(conhecido.icone)})`;
+    ladrilho.textContent = "";
+    ladrilho.dataset.comImagem = "sim";
+  }
+  botao.append(
+    ladrilho,
+    (() => {
+      const texto = elemento("span", "servidor-texto");
+      texto.append(
+        elemento("span", "servidor-nome", nome),
+        elemento("span", "servidor-endereco", conhecido.alvo),
+      );
+      return texto;
+    })(),
+    elemento("span", "servidor-visto", quandoFoi(conhecido.visto_em)),
+  );
+  botao.title = `entrar em ${nome} como ${conhecido.apelido || "você mesmo"}`;
+  item.append(botao);
+
+  // O esquecer, **fora** do botão que entra: um `<button>` dentro de outro
+  // não é marcação válida, e o alvo de cada gesto tem de ser só o seu.
+  const esquecer = elemento("button", "servidor-esquecer", "REMOVER");
+  esquecer.type = "button";
+  esquecer.dataset.esquecer = conhecido.alvo;
+  esquecer.title = `esquecer ${nome}`;
+  esquecer.setAttribute("aria-label", `Esquecer ${nome}`);
+  item.append(esquecer);
+  return item;
+}
+
 /** Desenha a lista do que está gravado em disco. */
 async function desenharServidores() {
   let conhecidos = [];
@@ -51,60 +105,33 @@ async function desenharServidores() {
   // defeito, e este é o estado de quem abriu o produto pela primeira vez.
   $("servidores-vazio").hidden = conhecidos.length > 0;
 
-  lista.replaceChildren(
-    ...conhecidos.map((conhecido) => {
-      const item = elemento("li");
-      const botao = elemento("button", "servidor-linha");
-      botao.type = "button";
-      botao.dataset.alvo = conhecido.alvo;
-      botao.dataset.apelido = conhecido.apelido ?? "";
-      // O nome, para a caixa de confirmação da troca falar por nome.
-      if (conhecido.nome) botao.dataset.nome = conhecido.nome;
+  lista.replaceChildren(...conhecidos.map(linhaDoServidor));
+  desenharServidoresNaEntrada(conhecidos);
+}
 
-      const nome = conhecido.nome || conhecido.alvo;
-      // **O ladrilho traz a imagem do servidor quando há uma.**
-      //
-      // Ela é gravada desde que `lembrar_aparencia_do_servidor` existe, e esta
-      // lista nunca a leu: desenhava sempre a sigla, e a sigla vinha do
-      // **endereço** mesmo quando o nome estava guardado. Duas coisas erradas na
-      // mesma caixa de 34px — «lista de server não trazem o último nome salvo
-      // nem o ícone».
-      //
-      // A sigla continua sendo o que aparece sem imagem, e passa a sair do nome
-      // quando ele existe: `CA` de «Casa» é o que alguém reconhece, e `19` de
-      // `192.168.0.39` não é nada.
-      const ladrilho = elemento("span", "servidor-sigla", siglaDoAlvo(nome));
-      if (conhecido.icone) {
-        ladrilho.style.backgroundImage = `url(${uriDeIcone(conhecido.icone)})`;
-        ladrilho.textContent = "";
-        ladrilho.dataset.comImagem = "sim";
-      }
-      botao.append(
-        ladrilho,
-        (() => {
-          const texto = elemento("span", "servidor-texto");
-          texto.append(
-            elemento("span", "servidor-nome", nome),
-            elemento("span", "servidor-endereco", conhecido.alvo),
-          );
-          return texto;
-        })(),
-        elemento("span", "servidor-visto", quandoFoi(conhecido.visto_em)),
-      );
-      botao.title = `entrar em ${nome} como ${conhecido.apelido || "você mesmo"}`;
-      item.append(botao);
+/**
+ * A mesma lista, sempre à vista na entrada (0.17). Onde `conhecidos` não existe
+ * (o navegador recusa), ela fica escondida inteira.
+ */
+function desenharServidoresNaEntrada(conhecidos) {
+  const bloco = $("boot-servidores");
+  if (!Array.isArray(conhecidos)) {
+    bloco.hidden = true;
+    return;
+  }
+  bloco.hidden = false;
+  $("boot-servidores-vazio").hidden = conhecidos.length > 0;
+  $("boot-servidores-lista").replaceChildren(...conhecidos.map(linhaDoServidor));
+}
 
-      // O esquecer, **fora** do botão que entra: um `<button>` dentro de outro
-      // não é marcação válida, e o alvo de cada gesto tem de ser só o seu.
-      const esquecer = elemento("button", "servidor-esquecer", "REMOVER");
-      esquecer.type = "button";
-      esquecer.dataset.esquecer = conhecido.alvo;
-      esquecer.title = `esquecer ${nome}`;
-      esquecer.setAttribute("aria-label", `Esquecer ${nome}`);
-      item.append(esquecer);
-      return item;
-    }),
-  );
+async function lerOsServidoresDaEntrada() {
+  let conhecidos = null;
+  try {
+    conhecidos = await invoke("conhecidos");
+  } catch {
+    conhecidos = null;
+  }
+  desenharServidoresNaEntrada(conhecidos);
 }
 
 /**
@@ -138,8 +165,9 @@ function recusarServidor(frase) {
   onde.textContent = frase;
 }
 
-// Uma linha da lista: entra naquele servidor, com o apelido daquela vez.
-$("servidores-lista").addEventListener("click", async (evento) => {
+// Uma linha da lista: entra naquele servidor, com o apelido daquela vez. A do
+// diálogo e a da entrada fazem o mesmo gesto; só a do diálogo precisa fechá-lo.
+async function cliqueNaListaDeServidores(evento, doDialogo) {
   // O esquecer primeiro: ele está dentro do mesmo `<li>` que a linha, e
   // procurar a linha antes o pegaria como se fosse ela.
   const esquecer = evento.target.closest("button[data-esquecer]");
@@ -155,9 +183,17 @@ $("servidores-lista").addEventListener("click", async (evento) => {
   }
   const linha = evento.target.closest("button[data-alvo]");
   if (!linha) return;
-  fecharServidores();
+  if (doDialogo) fecharServidores();
   irParaOServidor(linha.dataset.alvo, linha.dataset.apelido, null, linha.dataset.nome);
-});
+}
+
+$("servidores-lista").addEventListener("click", (evento) => cliqueNaListaDeServidores(evento, true));
+$("boot-servidores-lista").addEventListener("click", (evento) => cliqueNaListaDeServidores(evento, false));
+
+new MutationObserver(() => {
+  if (!$("tela-boot").hidden) lerOsServidoresDaEntrada();
+}).observe($("tela-boot"), { attributes: true, attributeFilter: ["hidden"] });
+lerOsServidoresDaEntrada();
 
 // O campo: um endereço cru, um `seele://`, ou o código de uma pessoa.
 //
@@ -284,7 +320,11 @@ window.addEventListener(
  */
 function irParaOServidor(alvo, apelido, token, nome, linkColado = null, ligar = false) {
   const naSessao = !$("tela-sessao").hidden;
-  if (naSessao) {
+  if (naSessao && ligar && typeof variasSessoes === "function" && variasSessoes()) {
+    // Ligar soma uma sessão (E3 da 0.17): as abertas continuam, e não há o que
+    // confirmar. A entrada mostra o CHAMANDO e a recusa.
+    irParaAEntradaSemSair();
+  } else if (naSessao) {
     // O nome junto: a caixa de confirmação fala por nome, e quem clicou numa
     // linha desta lista acabou de ler o nome nela. E se é uma ligação: aí a
     // caixa diz «ligar sai de», e não «trocar de servidor».

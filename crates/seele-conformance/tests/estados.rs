@@ -388,17 +388,20 @@ fn a_trilha_de_uma_chegada_que_falhou_atravessa_ate_a_casca() {
 //
 // Porque ele é a única forma de exercitar o degrau 4 inteiro numa máquina só.
 // `enlace::e_publico` pergunta por loopback na **forma escrita**, então a forma
-// mapeada conta como pública — o `LEVE` sai por ela — e ainda assim o pacote
-// chega a um socket desta máquina, porque na forma canônica ela é `127.0.0.1`.
-// É o mesmo endereço que `furo.rs` usa, e pelo mesmo motivo.
+// mapeada conta como pública e ainda assim o pacote chega a um socket desta
+// máquina, porque na forma canônica ela é `127.0.0.1`.
 //
 // # O par, e por que ele é um par
 //
-// Os dois testes conectam ao **mesmo endereço**, ao mesmo servidor, com a mesma
-// impressão digital. A única diferença é o bilhete, e portanto o `LEVE`. Um
-// deles sozinho não separaria a forma do endereço do aviso: os dois são a
-// linha da tabela em que a forma não decide, e é para isso que a tabela tem
-// duas linhas de IPv4 público.
+// Os dois testes entram no **mesmo servidor**, pelo **mesmo endereço**, com a
+// mesma impressão digital. A diferença é o degrau 4: no primeiro, o endereço
+// do convite está morto e o servidor só é achado pelo `CHAMA` do ENC/3 (o
+// ponto devolve o endereço mapeado, e a discagem sai `avisou`); no segundo,
+// sem bilhete, o endereço do convite é o próprio servidor. Um deles sozinho não
+// separaria a forma do endereço do aviso: os dois são a linha da tabela em que
+// a forma não decide, e é para isso que a tabela tem duas linhas de IPv4
+// público. (Até a 0.16 o primeiro media o `LEVE` do ENC/1, de mão única, que a
+// linha 2 não manda mais.)
 
 /// Sobe um servidor de verdade numa porta que o sistema escolhe.
 async fn server_de_teste() -> Option<(SocketAddr, Arc<Daemon>)> {
@@ -417,21 +420,36 @@ async fn server_de_teste() -> Option<(SocketAddr, Arc<Daemon>)> {
     Some((endereco, servidor))
 }
 
-/// Um ponto de encontro que só conta quantos avisos chegaram.
+/// Um ponto de encontro que atende o `CHAMA` do ENC/3 com `AQUI` para
+/// `atende`, e conta quantos `CHAMA` chegaram.
 ///
-/// Ninguém responde: o `LEVE` é de mão única, e quem entra não espera resposta
-/// a ele. Um contador é tudo que este lado precisa para provar que o datagrama
-/// saiu. A resposta que quem entra lê é a do quarto, a um `QUEM`, e não passa
-/// por aqui.
-async fn ponto_que_conta() -> Option<(SocketAddr, Arc<AtomicUsize>)> {
+/// Desde a 0.17 o degrau 4 não é mais o `LEVE` de mão única: é uma pergunta
+/// com resposta (`seele_core::encontro::Chamada`), e o endereço que a
+/// discagem tenta depois dela é o que o ponto devolveu. Este ponto faz o papel
+/// do ponto e do anfitrião ao mesmo tempo — o `ATENDE` que um anfitrião de
+/// verdade mandaria vira o `AQUI` direto —, porque o que se mede aqui é a
+/// fiação do lado de quem entra, e não o ponto (`enc3_ponta_a_ponta.rs` mede
+/// o ponto de verdade).
+async fn ponto_que_atende(atende: SocketAddr) -> Option<(SocketAddr, Arc<AtomicUsize>)> {
     let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.ok()?;
     let onde = socket.local_addr().ok()?;
     let quantos = Arc::new(AtomicUsize::new(0));
     let contador = Arc::clone(&quantos);
     tokio::spawn(async move {
-        let mut balde = [0_u8; 96];
-        while socket.recv_from(&mut balde).await.is_ok() {
+        let mut balde = [0_u8; 1500];
+        while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+            let Some(seele_proto::encontro::Pedido3::Chama(chama)) =
+                seele_proto::encontro::analisar3(balde.get(..lidos).unwrap_or_default())
+            else {
+                continue;
+            };
             contador.fetch_add(1, Ordering::Relaxed);
+            let aqui = seele_proto::encontro::resposta3(&seele_proto::encontro::Resposta3::Aqui {
+                marca: chama.servidor,
+                endereco: atende,
+                dicas: Vec::new(),
+            });
+            let _ = socket.send_to(&aqui, de).await;
         }
     });
     Some((onde, quantos))
@@ -443,7 +461,14 @@ async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
     let Some((server, servidor)) = server_de_teste().await else {
         panic!("o servidor de teste não subiu");
     };
-    let Some((ponto, avisos)) = ponto_que_conta().await else {
+    // O endereço que o ponto devolve é o do servidor, na forma mapeada (pública
+    // para a classificação). O do convite é a mesma forma numa porta morta: a
+    // discagem direta não entra, e quem entra é a discagem pela chamada.
+    let pelo_ponto = SocketAddr::new(
+        std::net::Ipv4Addr::LOCALHOST.to_ipv6_mapped().into(),
+        server.port(),
+    );
+    let Some((ponto, avisos)) = ponto_que_atende(pelo_ponto).await else {
         panic!("o ponto de encontro de teste não subiu");
     };
     let Ok(casa) = tempfile::tempdir() else {
@@ -454,7 +479,8 @@ async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
         panic!("o bilhete de teste não se monta");
     };
 
-    let mut config = config_de_teste(format!("[::ffff:127.0.0.1]:{}", server.port()), casa.path());
+    let morto = endereco_morto();
+    let mut config = config_de_teste(format!("[::ffff:127.0.0.1]:{}", morto.port()), casa.path());
     config.expected_fingerprint = Some(servidor.fingerprint().to_owned());
     config.bilhete = Some(bilhete);
 
@@ -470,8 +496,8 @@ async fn uma_conexao_que_venceu_por_um_candidato_avisado_diz_furo_de_nat() {
 
     assert!(
         avisos.load(Ordering::Relaxed) >= 1,
-        "nenhum `LEVE` chegou ao ponto de encontro, então este teste diria \
-         `FuroDeNat` sobre uma conexão que não avisou ninguém"
+        "nenhum `CHAMA` chegou ao ponto de encontro, então este teste diria \
+         `FuroDeNat` sobre uma conexão que não chamou ninguém"
     );
     assert_eq!(
         connection.snapshot().caminho,
@@ -644,10 +670,20 @@ fn quem_liga_a_ponte_antes_do_bloqueio_ve_as_etapas_acontecerem() {
         !etapas.is_empty(),
         "a ponte foi ligada antes do bloqueio e não recebeu etapa nenhuma: {eventos:?}"
     );
+    // **Qualquer um dos dois**, e não o primeiro. Até a 0.16 os candidatos
+    // partiam um a cada 250 ms, e cada `Tentando` tinha tempo de chegar à
+    // ponte. Desde a 0.17 os endereços de um lote são discados juntos, num
+    // agente ICE só (`Enlace::discar_o_lote`): os `Tentando` saem no mesmo
+    // instante, e a ponte — que entrega a etapa mais recente, como
+    // `quem_acompanha_uma_chegada_recebe_a_ultima_etapa_dela` cobra — pode
+    // entregar só o último. O que este teste existe para prender continua: a
+    // casca soube **um endereço de verdade** que estava sendo tentado, e não
+    // um texto vazio nem um endereço que não estava no convite.
     assert!(
         etapas.iter().any(|etapa| matches!(
             etapa,
-            ConnectStage::Tentando { onde, .. } if onde == &primeiro.to_string()
+            ConnectStage::Tentando { onde, .. }
+                if onde == &primeiro.to_string() || onde == &segundo.to_string()
         )),
         "nenhuma etapa disse qual endereço estava sendo tentado: {etapas:?}"
     );

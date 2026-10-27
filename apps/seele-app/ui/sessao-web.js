@@ -1,10 +1,10 @@
-// A sessão pelo navegador (Tarefa 2.6 da F4; ADR 0057).
+// A sessão pelo navegador (Tarefa 2.6 da F4; ADR 0057; na 0.17, WebRTC).
 //
 // O `connect` da ponte chega aqui com o alvo que a identidade montou (o
-// endereço, a impressão do certificado longo, os hashes dos curtos e a chave
-// desta pessoa para aquele servidor). Daqui sai uma WebTransport para o mesmo
-// socket do `seele/1`, e por ela a mesma sessão do desktop: o servidor serve
-// as duas pelo mesmo `session::serve`.
+// endereço e os alternativos, a impressão do servidor, o bilhete do encontro e
+// a chave desta pessoa para aquele servidor). Daqui sai um enlace WebRTC
+// (`rtc-web.js`) para o socket do anfitrião, e por ele a mesma sessão do
+// desktop: o servidor serve as duas pelo mesmo `session::serve`.
 //
 // # O que mora aqui, e o que não mora
 //
@@ -12,13 +12,22 @@
 // carrega bytes: os do fluxo de controle vão e vêm do `.wasm`
 // (`seele_web::ligacao`), que enquadra, confere o carimbo, responde o
 // desafio, dobra cada mensagem no `Room` e diz os eventos. Aqui fica só o que
-// o navegador tem e o `.wasm` não: a WebTransport, a assinatura pela
-// WebCrypto (a chave privada não se exporta, e não passa pelo `.wasm`), o
-// relógio, e a voz da página (`voz-web.js`).
+// o navegador tem e o `.wasm` não: o enlace, a assinatura pela WebCrypto (a
+// chave privada não se exporta, e não passa pelo `.wasm`), o relógio, e a voz
+// da página (`voz-web.js`).
 //
 // Os comandos da sessão (a conversa, a moderação, a sala, as telas) também
 // são do `.wasm` (`seele_web::comandos`): a ponte os entrega a `atender`, e a
 // resposta, os eventos e o que o fio recusou voltam prontos.
+//
+// # Várias sessões (E3)
+//
+// **Sem estado de módulo.** Cada sessão tem o próprio enlace, a própria
+// instância do `.wasm` de protocolo (`instanciarOWasmDaSessao`), a chave do
+// servidor dela, a volta, as filas e os eventos. O registro
+// (`criarRegistroDeSessoesWeb`, no fim deste arquivo) as junta, carimba cada
+// evento com a sessão e a geração, e guarda **o foco de voz único**: a voz só
+// sai pelo transporte da sessão em foco, e só a voz dela chega à mistura.
 //
 // # O que a casca ouve
 //
@@ -37,10 +46,7 @@ const ESPERA_DA_RECUSA_MS = 1_000;
 /** A volta da medida: o `TICK` do desktop. */
 const VOLTA_DA_MEDIDA_MS = 250;
 
-/** O caminho da WebTransport: o `CAMINHO_DO_NAVEGADOR` do `seele-proto`. */
-const CAMINHO_DA_SESSAO = "/";
-
-/** As funções da ligação no `.wasm` da página, com a memória por bloco. */
+/** As funções da ligação no `.wasm` da sessão, com a memória por bloco. */
 function fronteiraDaLigacao(w) {
   const codificador = new TextEncoder();
   const decodificador = new TextDecoder();
@@ -64,7 +70,19 @@ function fronteiraDaLigacao(w) {
     abrir: (pedido) => (comJson(pedido, (p, n) => w.ligacao_abrir(p, n)) === 0 ? null : saidaEmJson()),
     chegou: (bytes) => passos(comBytes(bytes, (p, n) => w.ligacao_chegou(p, n))),
     assinado: (bytes) => passos(comBytes(bytes, (p, n) => w.ligacao_assinado(p, n))),
-    fluxoAcabou: () => passos(w.ligacao_fluxo_acabou()),
+    /**
+     * O fluxo de CONTROLE acabou, com o código do fechamento quando ele veio
+     * (`{corte}` da leitura ou `{fechada}` do `closed`): o `.wasm` traduz o
+     * `CODIGO_FICOU_PARA_TRAS` na despedida `FellBehind`, uma vez por conexão.
+     * (Antes este nome era sobrescrito pelo `fluxoAcabou` dos fluxos do
+     * servidor, logo abaixo, e o fim do controle nunca chegava ao `.wasm`.)
+     */
+    controleAcabou: (codigo) =>
+      passos(
+        typeof codigo === "number" && typeof w.ligacao_fluxo_acabou_com === "function"
+          ? w.ligacao_fluxo_acabou_com(codigo >>> 0)
+          : w.ligacao_fluxo_acabou(),
+      ),
     paraOFio: () => (w.ligacao_para_o_fio() === 0 ? saida() : new Uint8Array(0)),
     retrato: () => (w.ligacao_retrato() === 0 ? saidaEmJson() : null),
     atender(comando, args) {
@@ -73,6 +91,8 @@ function fronteiraDaLigacao(w) {
       return { codigo, ...saidaEmJson() };
     },
     ganhosDaVoz: () => (w.voz_ganhos() === 0 ? saidaEmJson() : []),
+    /** Os ganhos desta sessão num bloco opaco, para a recepção da página traduzir. */
+    ganhosOpacos: () => (typeof w.voz_ganhos_da_sessao === "function" && w.voz_ganhos_da_sessao() === 0 ? saida() : new Uint8Array(0)),
     fluxoNovo: () => w.fluxo_novo(),
     fluxoChegou: (alca, bytes) => passos(comBytes(bytes, (p, n) => w.fluxo_chegou(alca, p, n))),
     fluxoAcabou: (alca) => passos(w.fluxo_acabou(alca)),
@@ -116,36 +136,98 @@ function fronteiraDaLigacao(w) {
   };
 }
 
-/** Bytes de um hex de 64 dígitos. */
-function bytesDoHex(hex) {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i += 1) bytes[i] = Number.parseInt(hex.slice(2 * i, 2 * i + 2), 16);
-  return bytes;
+/**
+ * As funções do sinal (`POST /sinal/1`) no `.wasm`: a página não monta nem lê
+ * linha do protocolo do ponto (`seele_web::sinal_chama`, `sinal_resposta`).
+ */
+/**
+ * **Qual leitura de cada tela é a vigente.** Cada fluxo do servidor tem uma
+ * alça (`fluxo_novo`), a identidade da leitura, como o `leitura: u64` do
+ * nativo. O `ScreenOpened` de uma alça a torna a vigente daquela tela; o
+ * `ScreenFrame` e o `ScreenClosed` de qualquer outra
+ * alça da mesma tela são de uma leitura substituída e não chegam à página:
+ * nem apagam a tela nova, nem pintam, nem entram no decoder dela. A sessão
+ * Rust já ignora o fim da leitura velha (`ouvir_o_fluxo`); isto fecha o resto.
+ * A entrada fica depois do `ScreenClosed` de propósito: o quadro tardio de
+ * uma leitura velha, com a tela já fechada, também é descartado. Um evento de
+ * tela sem abertura vista (nenhuma vigente) passa como sempre passou.
+ */
+function criarOFiltroDasLeituras(registrar = (texto) => console.debug(texto)) {
+  const vigente = new Map();
+  return {
+    /** O som da tela só segue se a alça é a vigente dela (o `TelaSom` do nativo). */
+    valeOSom(alca, tela) {
+      const atual = vigente.get(tela);
+      if (atual === undefined || atual === alca) return true;
+      registrar(`sessão: som da tela ${tela} descartado: alça ${alca} substituída pela ${atual}`);
+      return false;
+    },
+    vale(alca, evento) {
+      if (!evento || typeof evento !== "object") return true;
+      if (evento.ScreenOpened) {
+        vigente.set(evento.ScreenOpened.screen, alca);
+        return true;
+      }
+      for (const nome of ["ScreenFrame", "ScreenClosed"]) {
+        const corpo = evento[nome];
+        if (!corpo) continue;
+        const atual = vigente.get(corpo.screen);
+        if (atual === undefined || atual === alca) return true;
+        registrar(`sessão: ${nome} da tela ${corpo.screen} descartado: alça ${alca} substituída pela ${atual}`);
+        return false;
+      }
+      return true;
+    },
+  };
+}
+
+function fronteiraDoSinal(w) {
+  const codificador = new TextEncoder();
+  const decodificador = new TextDecoder();
+  function chamar(funcao, texto) {
+    const bytes = codificador.encode(texto);
+    const p = w.alocar(bytes.length);
+    new Uint8Array(w.memory.buffer).set(bytes, p);
+    try {
+      funcao(p, bytes.length);
+    } finally {
+      w.liberar(p, bytes.length);
+    }
+    return JSON.parse(decodificador.decode(new Uint8Array(w.memory.buffer, w.saida_ptr(), w.saida_len()).slice()));
+  }
+  return {
+    montar: (pedido) => chamar(w.sinal_chama, JSON.stringify(pedido)),
+    ler: (texto) => chamar(w.sinal_resposta, texto),
+  };
+}
+
+/**
+ * **Uma instância própria do `.wasm` de protocolo para uma sessão** (E3): o
+ * estado da ligação mora dentro dela, e duas sessões numa instância só
+ * dividiriam a ligação. Compilada a partir dos mesmos bytes da página.
+ */
+async function instanciarOWasmDaSessao() {
+  const { bytes } = await carregarOWasmDaPagina();
+  return (await WebAssembly.instantiate(bytes, {})).instance.exports;
 }
 
 /** O hex de uns bytes, em minúsculas. */
 const hexDe = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
-/** Uma WebTransport para um endereço, presa aos hashes dos certificados curtos. */
-function abrirAWebTransport(endereco, hashes) {
-  return new WebTransport(`https://${endereco}${CAMINHO_DA_SESSAO}`, {
-    serverCertificateHashes: hashes.map((hex) => ({ algorithm: "sha-256", value: bytesDoHex(hex) })),
-    requireUnreliable: true,
-  });
-}
-
 /**
- * Os hashes que a volta oferece: os do link, e os das janelas anunciadas
- * (`HashesDoNavegador`, os bytes de cada `hash`) que valem em `segundos`, com
- * a folga do relógio da identidade (`FOLGA_DO_RELOGIO_S`, de
- * `identidade-web.js`). Sem repetir.
+ * O enlace de uma tentativa, com o certificado DTLS já preparado: o padrão do
+ * parâmetro `transporte` (a bancada o troca).
  */
-function hashesDaVolta(doLink, janelas, segundos) {
-  const valem = (janelas ?? [])
-    .filter((janela) => Array.isArray(janela.hash) && janela.hash.length === 32)
-    .filter((janela) => janela.nao_antes - FOLGA_DO_RELOGIO_S <= segundos && segundos <= janela.nao_depois + FOLGA_DO_RELOGIO_S)
-    .map((janela) => hexDe(Uint8Array.from(janela.hash)));
-  return [...new Set([...valem, ...doLink.map((hex) => hex.toLowerCase())])];
+function abrirOEnlace({ alvos, alvo, preparo, sinal, aoMudar }) {
+  return criarEnlaceRtc({
+    alvos,
+    impressao: alvo.impressao,
+    certificado: preparo,
+    bilhete: alvo.bilhete ?? null,
+    sinal,
+    urlDoSinal: alvo.urlDoSinal ?? urlDoSinalDoPonto,
+    aoMudar,
+  });
 }
 
 /** Espera uma promessa até um prazo; vencido, rejeita com `motivo`. */
@@ -158,22 +240,40 @@ function comPrazo(promessa, ms, motivo) {
 }
 
 /**
+ * O motivo que a casca lê de uma falha do enlace: o `ConnectionError` do
+ * desktop quando ele existe (`HandshakeTimeout`, `Unreachable`), ou
+ * `{ FalhaDoEnlace: { motivo, detalhe } }`, com o motivo de `FALHA_DO_ENLACE`
+ * (`rtc-web.js`) e a frase dele no bloco do transporte da `frases.js`.
+ */
+function motivoDaFalhaDoEnlace(falha) {
+  if (falha && falha.FalhaDoEnlace) {
+    if (falha.FalhaDoEnlace.motivo === FALHA_DO_ENLACE.prazo) return "HandshakeTimeout";
+    return falha;
+  }
+  if (falha === FALHA_DO_ENLACE.semWebRtc) return { FalhaDoEnlace: { motivo: falha, detalhe: null } };
+  return typeof falha === "string" ? falha : "Unreachable";
+}
+
+/**
  * Abre a sessão do navegador e resolve quando o servidor a aceitou.
  *
- * - `wasm`: as exportações da instância da página;
+ * - `wasm`: as exportações da instância **desta sessão**
+ *   (`instanciarOWasmDaSessao`); duas sessões nunca dividem uma;
  * - `alvo`: o da identidade (`endereco`, `alternativos`, `impressao`,
- *   `hashes`, `chave`);
+ *   `bilhete` e `chave`);
  * - `apelido`, `convite` (o segredo do convite, ou `null`) e `aceito` (o
  *   conjunto de MODs já aceito neste servidor, ou `null`);
  * - `emitir(evento)`: cada `seele_ffi::Event` para a casca;
  * - `aoAcabar(motivo)`: a sessão acabou depois de aberta;
- * - `aoReceberOsHashes(janelas)`: o `HashesDoNavegador` do servidor;
- * - `transporte(endereco, hashes)`: a WebTransport, trocada na bancada;
+ * - `podeUsarAVoz()`: se esta sessão tem o foco de voz (o registro o dá); sem
+ *   registro, sempre;
+ * - `transporte(opcoes)`: o enlace, trocado na bancada;
  * - `cancelamento`: `{ cancelada, aoCancelar }`, o CANCELAR de quem espera
  *   (`cancelar_ligacao`): a entrada desiste com `"Cancelada"`, como a do
  *   desktop.
  *
- * Rejeita com o `ConnectionError` do desktop.
+ * Rejeita com o `ConnectionError` do desktop, ou com o `FalhaDoEnlace` da
+ * página (`motivoDaFalhaDoEnlace`).
  */
 async function abrirASessaoDoNavegador({
   wasm,
@@ -184,20 +284,36 @@ async function abrirASessaoDoNavegador({
   aceito = null,
   emitir = () => {},
   aoAcabar = () => {},
-  aoReceberOsHashes = () => {},
-  transporte = abrirAWebTransport,
+  podeUsarAVoz = () => true,
+  transporte = abrirOEnlace,
 }) {
   const ligacao = fronteiraDaLigacao(wasm);
+  const sinal = typeof wasm.sinal_chama === "function" ? fronteiraDoSinal(wasm) : null;
   ligacao.semente(crypto.getRandomValues(new Uint32Array(1))[0]);
+  const etapa = (stage) => emitir({ ConnectStageChanged: { stage } });
+
+  // O certificado DTLS desta conexão nasce antes do `Hello`: a impressão dele
+  // vai na prova D5, e o `Hello` espera no `.wasm` até o enlace abrir.
+  let preparo;
+  try {
+    preparo = await prepararCertificadoDtls();
+  } catch (falha) {
+    throw motivoDaFalhaDoEnlace(falha);
+  }
   const chavePublica = new Uint8Array(await crypto.subtle.exportKey("raw", alvo.chave.publicKey));
-  const pedido = { apelido, chave_publica: hexDe(chavePublica), impressao: alvo.impressao, aceito };
+  const pedido = {
+    apelido,
+    chave_publica: hexDe(chavePublica),
+    impressao: alvo.impressao,
+    impressao_dtls: preparo.impressao,
+    aceito,
+  };
   const recusa = ligacao.abrir({ ...pedido, convite });
   if (recusa) throw recusa.recusa ?? "Unreachable";
   ligacao.bateriaNova();
 
-  const candidatos = [alvo.endereco, ...(alvo.alternativos ?? [])];
-  const etapa = (stage) => emitir({ ConnectStageChanged: { stage } });
-  etapa({ Parada: { candidatos: candidatos.length, com_bilhete_e_impressao: false } });
+  const alvos = [alvo.endereco, ...(alvo.alternativos ?? [])];
+  etapa({ Parada: { candidatos: alvos.length, com_bilhete_e_impressao: Boolean(alvo.bilhete) } });
 
   /** A desistência pelo CANCELAR: a etapa da casca, e a recusa do desktop. */
   const cancelada = () => {
@@ -205,44 +321,48 @@ async function abrirASessaoDoNavegador({
     return "Cancelada";
   };
 
-  let wt = null;
-  let atendeu = alvo.endereco;
-  for (const [candidato, onde] of candidatos.entries()) {
-    if (cancelamento.cancelada) break;
-    etapa({ Tentando: { candidato, de: candidatos.length, onde, avisou: false } });
-    try {
-      const tentativa = transporte(onde, alvo.hashes);
-      cancelamento.aoCancelar = () => tentativa.close();
-      await comPrazo(tentativa.ready, PRAZO_DO_APERTO_MS, "HandshakeTimeout");
-      wt = tentativa;
-      atendeu = onde;
-      break;
-    } catch (falha) {
-      if (!cancelamento.cancelada) console.warn(`sessão: ${onde} não abriu a WebTransport:`, falha);
-    }
-  }
+  // **Um enlace só, com todos os candidatos no mesmo agente ICE**: a corrida
+  // de um por vez da WebTransport acabou. O ICE tenta os pares juntos, e o
+  // ponto só é chamado se o caminho direto não abrir logo (D9).
+  const aoMudar = (mudanca) => {
+    if (mudanca.Discando) etapa({ Tentando: { candidato: 0, de: alvos.length, onde: alvo.endereco, avisou: false } });
+    else if (mudanca.ChamandoPeloPonto) etapa({ Tentando: { candidato: 0, de: alvos.length, onde: alvo.endereco, avisou: true } });
+  };
   if (cancelamento.cancelada) {
     ligacao.fechar();
     throw cancelada();
   }
-  if (!wt) {
+  const wt = transporte({ alvos, alvo, preparo, sinal, aoMudar });
+  cancelamento.aoCancelar = () => wt.close();
+  try {
+    await wt.ready;
+  } catch (falha) {
     ligacao.fechar();
-    etapa({ Desistiu: { motivo: "Unreachable" } });
-    throw "Unreachable";
+    if (cancelamento.cancelada) throw cancelada();
+    const motivo = motivoDaFalhaDoEnlace(falha);
+    console.warn(`sessão: o enlace com ${alvo.endereco} não abriu:`, falha);
+    etapa({ Desistiu: { motivo: typeof motivo === "string" ? motivo : "Unreachable" } });
+    throw motivo;
+  }
+  if (cancelamento.cancelada) {
+    wt.close();
+    ligacao.fechar();
+    throw cancelada();
   }
 
-  // A volta entra pelo endereço que atendeu e com a mesma chave, sem o
-  // convite: o servidor já conhece a chave, e o convite é de uso único. Os
-  // hashes são os do link e os das janelas que a sessão anunciou e que valem
-  // agora: um servidor que reiniciou com o certificado da janela seguinte
-  // atende do mesmo jeito.
-  let janelas = [];
-  const reabrir = () => transporte(atendeu, hashesDaVolta(alvo.hashes, janelas, Date.now() / 1000));
-  const lembrar = (anunciadas) => {
-    janelas = anunciadas;
-    aoReceberOsHashes(anunciadas);
+  // A volta entra pelo endereço que atendeu (e os outros, atrás dele), com a
+  // mesma chave e sem o convite: o servidor já conhece a chave, e o convite é
+  // de uso único. Cada volta tem um certificado DTLS novo, e a prova D5 dela
+  // leva a impressão nova.
+  const atendeu = wt.atendeuPor ?? alvo.endereco;
+  const alvosDaVolta = [...new Set([atendeu, ...alvos])];
+  const reabrir = async () => {
+    const novoPreparo = await prepararCertificadoDtls();
+    pedido.impressao_dtls = novoPreparo.impressao;
+    return transporte({ alvos: alvosDaVolta, alvo, preparo: novoPreparo, sinal, aoMudar: () => {} });
   };
-  const sessao = criarASessaoAberta({ ligacao, wt, alvo, pedido, reabrir, emitir, aoAcabar, aoReceberOsHashes: lembrar });
+  const sessao = criarASessaoAberta({ ligacao, wt, alvo, pedido, reabrir, emitir, aoAcabar, podeUsarAVoz });
+  sessao.wasm = wasm;
   const desistiu = new Promise((_, rejeitar) => {
     cancelamento.aoCancelar = () => rejeitar("Cancelada");
   });
@@ -261,7 +381,7 @@ async function abrirASessaoDoNavegador({
 }
 
 /**
- * **A sessão sobre a WebTransport**, que sobrevive à troca dela: o aperto, a
+ * **A sessão sobre o enlace**, que sobrevive à troca dele: o aperto, a
  * leitura, os comandos, e a volta.
  *
  * # A volta (a bateria interna)
@@ -281,7 +401,7 @@ async function abrirASessaoDoNavegador({
  * Cada transporte tem a sua geração: o que um velho ainda diz (um fechamento
  * atrasado, um fluxo que termina) não mexe na sessão do novo.
  */
-function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emitir, aoAcabar, aoReceberOsHashes }) {
+function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emitir, aoAcabar, podeUsarAVoz = () => true }) {
   let wt = null;
   let geracao = 0;
   let escritor = null;
@@ -306,7 +426,22 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
   /** Quem espera cada anexo pedido, pela id: `{ abriu, pedaco, chegou }`. */
   const anexos = new Map();
   /** Quantas mensagens de um vocabulário mais novo foram puladas, e as voltas. */
-  const contas = { desconhecidas: 0, naoSairam: 0, voltas: 0, tentativasDeVolta: 0 };
+  const contas = {
+    desconhecidas: 0,
+    naoSairam: 0,
+    voltas: 0,
+    tentativasDeVolta: 0,
+    // A voz desta sessão, contada pelo transporte (a prova do foco único).
+    vozEnviada: 0,
+    vozRecusadaSemFoco: 0,
+    vozRecebida: 0,
+    vozCaladaSemFoco: 0,
+    // As despedidas `FellBehind` dobradas pelo CÓDIGO do fechamento (sem o
+    // quadro): uma por conexão que ficou para trás.
+    ficouParaTras: 0,
+  };
+  /** Qual alça de fluxo é a leitura vigente de cada tela (ver `criarOFiltroDasLeituras`). */
+  const leituras = criarOFiltroDasLeituras();
   /** Uma escrita por vez no fluxo de controle, na ordem. */
   let escrita = Promise.resolve();
 
@@ -365,7 +500,6 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
   }
 
   function chegou(mensagem, eventos) {
-    if (mensagem && mensagem.HashesDoNavegador) aoReceberOsHashes(mensagem.HashesDoNavegador.janelas ?? []);
     // O `Pong` de um `Ping` de rotina (os marcados têm os bits de cima) diz à
     // bateria que o enlace vive.
     if (mensagem && mensagem.Pong && mensagem.Pong.timestamp < 2 ** 62) ligacao.bateriaPong();
@@ -395,8 +529,16 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
     escrita = Promise.resolve();
     escritorDaVoz = null;
     const vale = () => minha === geracao && !acabou;
+    // **Uma causa por conexão** (a auditoria Astra, item 4): o código do
+    // fechamento chega por duas rotas — a leitura do controle que falha com
+    // `{corte}`, e o `closed` que resolve com `{fechada}` — e a primeira que o
+    // trouxer o guarda para ESTA geração, antes de a queda mudar de geração.
+    let codigoDaQueda = null;
+    const guardarOCodigo = (codigo) => {
+      if (codigoDaQueda === null && typeof codigo === "number") codigoDaQueda = codigo;
+    };
     (async () => {
-      const fluxo = await novo.createBidirectionalStream();
+      const fluxo = novo.controle();
       if (!vale()) return;
       escritor = fluxo.writable.getWriter();
       escreverOQueEspera();
@@ -408,9 +550,10 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
           await seguirOsPassos(ligacao.chegou(value));
         }
       } catch (falha) {
+        guardarOCodigo(falha?.corte);
         if (vale() && !voltando) console.warn("sessão: a leitura do fluxo de controle parou:", falha);
       }
-      if (vale()) await seguirOsPassos(ligacao.fluxoAcabou());
+      if (vale()) await seguirOsPassos(controleAcabou(codigoDaQueda));
       if (!dentro) rejeitarOAperto("Unreachable");
     })().catch((falha) => {
       if (!vale()) return;
@@ -419,7 +562,13 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
       else if (volta) volta.rejeitar("Unreachable");
     });
     novo.closed.then(
-      () => caiu(minha),
+      (motivo) => {
+        guardarOCodigo(motivo?.fechada);
+        // A mesma causa pela outra rota: se ela chega primeiro, o `.wasm` a
+        // ouve antes de a queda começar a volta.
+        if (dentro && minha === geracao && !acabou && !voltando) void seguirOsPassos(controleAcabou(codigoDaQueda));
+        caiu(minha);
+      },
       () => caiu(minha),
     );
     (async () => {
@@ -437,16 +586,32 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
     (async () => {
       try {
         // Antes de qualquer espera: o `wt` aqui ainda é o `novo` desta ligação.
-        const leitor = wt.datagrams.readable.getReader();
+        const leitor = wt.canalDaVoz.readable.getReader();
         for (;;) {
           const { value, done } = await leitor.read();
           if (done || !vale()) break;
+          // Fora do foco de voz, a voz desta sessão não toca (fronteiras.md,
+          // §2): ela é contada, e não chega à mistura.
+          if (!podeUsarAVoz()) {
+            contas.vozCaladaSemFoco += 1;
+            continue;
+          }
+          contas.vozRecebida += 1;
           ouvinteDaVoz?.(value);
         }
       } catch {
         // O transporte acabou; quem diz o que fazer é `caiu`.
       }
     })();
+  }
+
+  /** O fim do controle no `.wasm`, contando a despedida `FellBehind` que o código trouxe. */
+  function controleAcabou(codigo) {
+    const lidos = ligacao.controleAcabou(codigo);
+    for (const passo of lidos) {
+      if (passo?.chegou?.Disconnecting?.reason === "FellBehind") contas.ficouParaTras += 1;
+    }
+    return lidos;
   }
 
   /** O transporte `minha` fechou. */
@@ -488,7 +653,7 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
     let novo = null;
     try {
       if (voltaSegura) throw "Unreachable";
-      novo = reabrir();
+      novo = await reabrir();
       await comPrazo(novo.ready, PRAZO_DO_APERTO_MS, "HandshakeTimeout");
       if (acabou) return;
       const recusa = ligacao.retomar(pedido, sessao.escolhas());
@@ -533,8 +698,13 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
     let anexo = null;
     const seguir = (passos, pedaco) => {
       for (const passo of passos) {
-        if (passo.evento !== undefined) emitir(passo.evento);
-        else if (passo.som) sessao.aoSomDaTela?.(passo.som.tela, passo.som.opus);
+        if (passo.evento !== undefined) {
+          // Só chega à página o que vem da leitura vigente da tela.
+          if (leituras.vale(alca, passo.evento)) emitir(passo.evento);
+        }
+        else if (passo.som) {
+          if (leituras.valeOSom(alca, passo.som.tela)) sessao.aoSomDaTela?.(passo.som.tela, passo.som.opus);
+        }
         else if (passo.anexo_abriu) {
           anexo = { id: passo.anexo_abriu.anexo, ...(anexos.get(passo.anexo_abriu.anexo) ?? {}) };
           anexo.abriu?.(passo.anexo_abriu.tamanho, () => leitor.cancel().catch(() => {}));
@@ -583,8 +753,15 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
   const transporteDaVoz = Object.freeze({
     enviar(bytes) {
       if (acabou || voltando || !wt) return false;
-      escritorDaVoz ??= wt.datagrams.writable.getWriter();
+      // **O microfone só vai à sessão em foco**, nunca a várias: o portão é
+      // aqui, no transporte, e vale ainda que quem captura erre de sessão.
+      if (!podeUsarAVoz()) {
+        contas.vozRecusadaSemFoco += 1;
+        return false;
+      }
+      escritorDaVoz ??= wt.canalDaVoz.writable.getWriter();
       escritorDaVoz.write(bytes).catch(() => {});
+      contas.vozEnviada += 1;
       return true;
     },
     ouvir(aoChegar) {
@@ -595,7 +772,7 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
     },
   });
 
-  /** O tempo de ida e volta que a WebTransport estimou, em microssegundos. */
+  /** O tempo de ida e volta que o ICE mediu, em microssegundos. */
   async function idaEVolta() {
     try {
       const estatisticas = await wt.getStats();
@@ -650,6 +827,10 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
     get voltando() {
       return voltando;
     },
+    /** A geração do enlace: 1 na entrada, e mais 1 a cada volta que deu certo. */
+    get geracaoDoEnlace() {
+      return contas.voltas + 1;
+    },
     /** Quem a ponte põe para ouvir cada mensagem dobrada (a voz, a tela). */
     aoDobrar: null,
     /** O que a ponte faz na queda e na volta (a voz). */
@@ -681,6 +862,26 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
     },
     /** O ganho de cada voz com volume escolhido, pela alça da mistura. */
     ganhosDaVoz: () => (acabou || voltando ? [] : ligacao.ganhosDaVoz()),
+    /**
+     * **O ganho de cada voz pela alça da mistura, com uma instância por
+     * sessão** (E3): os volumes estão na instância desta sessão, e as alças na
+     * recepção da instância da página (`wasmDaPagina`, a da `voz-web.js`). O
+     * bloco entre as duas é opaco para o JavaScript.
+     */
+    ganhosNaMistura(wasmDaPagina) {
+      if (acabou || voltando || typeof wasmDaPagina?.voz_ganhos_pela_recepcao !== "function") return [];
+      const bloco = ligacao.ganhosOpacos();
+      if (bloco.length === 0) return [];
+      const p = wasmDaPagina.alocar(bloco.length);
+      new Uint8Array(wasmDaPagina.memory.buffer).set(bloco, p);
+      try {
+        wasmDaPagina.voz_ganhos_pela_recepcao(p, bloco.length);
+      } finally {
+        wasmDaPagina.liberar(p, bloco.length);
+      }
+      const saida = new Uint8Array(wasmDaPagina.memory.buffer, wasmDaPagina.saida_ptr(), wasmDaPagina.saida_len()).slice();
+      return JSON.parse(new TextDecoder().decode(saida));
+    },
     /** O retrato do `.wasm`: a sala, os contados e a telemetria. */
     retrato: () => ligacao.retrato(),
     /**
@@ -762,4 +963,304 @@ function motivoDoFimNaVolta(motivo) {
   if (motivo && motivo.ModsNaoAceitos) return "ModsMudaram";
   if (motivo && motivo.OutraLinha) return "Incompatible";
   return null;
+}
+
+/**
+ * **O registro das sessões da página** (E3; `fronteiras.md`, §1 a §4): várias
+ * sessões cliente ao mesmo tempo, cada uma com a sua, e **um foco de voz
+ * só**.
+ *
+ * - Cada sessão tem um `id` que nasce na tentativa, sobe sempre, nunca volta e
+ *   nunca é 0. Cada evento sai carimbado: `{ sessao, geracao, evento }`, com a
+ *   geração do enlace. Um evento de uma sessão que já saiu do registro é
+ *   largado aqui, e não chega à casca.
+ * - **À frente** está a que a janela mostra; as outras ficam **ao fundo**,
+ *   conectadas, recebendo texto e presença. `ver(id)` troca a vista sem
+ *   derrubar ninguém. Uma entrada nova vem à frente, e a anterior vai ao fundo
+ *   inteira.
+ * - **O foco de voz** é de no máximo uma sessão, e passa por **um coordenador
+ *   só**: toda troca, toda saída e toda queda entram na mesma cadeia, na ordem.
+ *   - Numa troca, primeiro ninguém tem o foco (o portão fecha na hora), a voz
+ *     da antiga para (`voz.soltar(antes)`, esperado), e só então a nova o
+ *     ganha (`voz.tomar(id, sessao)`).
+ *   - Depois do `soltar`, o alvo é conferido de novo: se ele saiu ou caiu no
+ *     meio, a troca é cancelada limpa e o foco fica vazio.
+ *   - Se o `tomar` falha, o foco fica vazio e a falha é dita.
+ *   - A queda do dono fecha o portão na hora e entra na cadeia para o `soltar`.
+ * - **Só a primeira entrada do registro toma o foco sozinha.** Um foco vazio
+ *   depois de uma queda, de uma saída ou de um ato explícito é da pessoa: uma
+ *   entrada nova não o rouba. Conectar, trocar a vista ou outra sessão cair
+ *   nunca movem o foco.
+ * - O portão também está no transporte de cada sessão (`podeUsarAVoz`): a voz
+ *   não sai nem toca fora do foco, ainda que quem captura erre de sessão.
+ * - `sessoes()` tem a forma do `SessaoNaTela` do app (`fronteiras.md`, §4).
+ *
+ * Sem estado de módulo: dois registros não dividem nada. As intercalações estão
+ * provadas em `apps/seele-app/bancada/registro-de-sessoes.cjs`.
+ *
+ * - `abrir`: a abertura de uma sessão (`abrirASessaoDoNavegador`; a bancada a troca);
+ * - `instanciar`: a instância própria do `.wasm` de cada sessão;
+ * - `voz`: `{ soltar(id), tomar(id, sessao) }`, a captura e a mistura da página
+ *   (a ponte as dá); sem ela, só o portão do transporte vale;
+ * - `aoMudar({ sessao, motivo })`: o sinal «releia `sessoes()`», com os motivos
+ *   do `seele://sessoes` (`entrou`, `mensagens`, `presenca`, `enlace`, `aviso`,
+ *   `encerrada`, `foco`, `vista`, `saiu`).
+ */
+function criarRegistroDeSessoesWeb({
+  abrir = abrirASessaoDoNavegador,
+  instanciar = instanciarOWasmDaSessao,
+  voz = null,
+  aoMudar = () => {},
+} = {}) {
+  // O parâmetro com padrão, num nome declarado: o guarda das chamadas
+  // (`no_script_calls_a_function_that_no_script_declares`) lê por linha, e não
+  // vê a desestruturação de várias linhas.
+  const instanciarOWasm = instanciar;
+  let proxima = 1;
+  const registros = new Map();
+  let frente = 0;
+  /** Quem tem o foco agora: o portão de cada transporte lê isto. */
+  let foco = 0;
+  /** Só a primeira entrada toma o foco sozinha. */
+  let primeiraEntrada = true;
+  /** A cadeia única do coordenador de voz: trocas, saídas e quedas, na ordem. */
+  let cadeia = Promise.resolve();
+
+  /** Põe um passo do foco na cadeia; resolve ou rejeita com ele. */
+  function naCadeia(passo) {
+    const este = cadeia.catch(() => {}).then(passo);
+    cadeia = este.catch(() => {});
+    return este;
+  }
+
+  /** Se esta sessão ainda está no registro e de pé. */
+  const viva = (id) => {
+    const registro = registros.get(id);
+    return Boolean(registro && registro.sessao && !registro.encerrada && !registro.sessao.acabou);
+  };
+
+  const motivoDoEvento = (evento) => {
+    if (!evento || typeof evento !== "object") {
+      if (evento === "MessagesChanged") return "mensagens";
+      if (evento === "RosterChanged") return "presenca";
+      if (evento === "TelemetryChanged") return "enlace";
+      return "aviso";
+    }
+    if (evento.Ended) return "encerrada";
+    return "aviso";
+  };
+
+  function avisar(sessao, motivo) {
+    try {
+      aoMudar({ sessao, motivo });
+    } catch (falha) {
+      console.warn("registro: quem ouve as sessões falhou:", falha);
+    }
+  }
+
+  /**
+   * O foco sai de `id` (a queda, a saída): o portão fecha na hora, e o
+   * `soltar` entra na cadeia e é esperado.
+   */
+  function soltarODe(id) {
+    if (foco !== id) return naCadeia(async () => {});
+    foco = 0;
+    return naCadeia(async () => {
+      try {
+        await voz?.soltar?.(id);
+      } catch (falha) {
+        console.warn(`registro: soltar a voz da sessão ${id} falhou:`, falha);
+      }
+      avisar(id, "foco");
+    });
+  }
+
+  /**
+   * Troca o foco de voz, na cadeia: a antiga para antes de a nova começar.
+   * Resolve com `{ antes, agora }` (`agora` é `null` quando a troca foi
+   * cancelada porque o alvo saiu no meio); rejeita com `NotConnected` para um
+   * alvo que não está, e com `{ FalhaAoTomarAVoz }` quando o `tomar` falha.
+   */
+  function focarVoz(id) {
+    const pedido = id ?? 0;
+    return naCadeia(async () => {
+      const antes = foco;
+      if (pedido !== 0 && !viva(pedido)) throw "NotConnected";
+      if (antes === pedido) return { antes: antes || null, agora: pedido || null };
+      // Ninguém tem o foco enquanto a voz da antiga para.
+      foco = 0;
+      if (antes !== 0) {
+        try {
+          await voz?.soltar?.(antes);
+        } catch (falha) {
+          console.warn(`registro: soltar a voz da sessão ${antes} falhou:`, falha);
+        }
+      }
+      if (pedido === 0) {
+        avisar(antes, "foco");
+        return { antes: antes || null, agora: null };
+      }
+      // O alvo pode ter saído ou caído enquanto a antiga soltava.
+      if (!viva(pedido)) {
+        avisar(antes || pedido, "foco");
+        return { antes: antes || null, agora: null, cancelada: true };
+      }
+      foco = pedido;
+      try {
+        await voz?.tomar?.(pedido, registros.get(pedido).sessao);
+      } catch (falha) {
+        if (foco === pedido) foco = 0;
+        avisar(pedido, "foco");
+        throw { FalhaAoTomarAVoz: { sessao: pedido, motivo: String(falha?.message ?? falha) } };
+      }
+      // Caiu durante o `tomar`: a queda já fechou o portão e pôs o `soltar` na
+      // cadeia, atrás deste passo.
+      if (foco !== pedido) return { antes: antes || null, agora: null, cancelada: true };
+      avisar(pedido, "foco");
+      return { antes: antes || null, agora: pedido };
+    });
+  }
+
+  /**
+   * Entra num servidor: uma sessão nova, à frente. Resolve com `{ id, sessao }`
+   * e rejeita como `abrirASessaoDoNavegador`. `emitir({ sessao, geracao,
+   * evento })` recebe cada evento carimbado.
+   */
+  async function entrar({ alvo, apelido, convite = null, aceito = null, emitir = () => {}, aoAcabar = () => {}, cancelamento }) {
+    const id = proxima;
+    proxima += 1;
+    const registro = {
+      id,
+      alvo,
+      sessao: null,
+      entrou: Date.now(),
+      encerrada: null,
+      avisosDeConversa: 0,
+      mudou: false,
+    };
+    registros.set(id, registro);
+    let sessao;
+    try {
+      const wasm = await instanciarOWasm();
+      sessao = await abrir({
+        wasm,
+        alvo,
+        apelido,
+        convite,
+        aceito,
+        cancelamento,
+        podeUsarAVoz: () => foco === id && registros.get(id) === registro,
+        emitir: (evento) => {
+          // A sessão que já saiu do registro não fala mais com a casca.
+          if (registros.get(id) !== registro) return;
+          if (frente !== id) {
+            registro.mudou = true;
+            if (evento === "MessagesChanged") registro.avisosDeConversa += 1;
+          }
+          if (evento && evento.Ended) registro.encerrada = evento.Ended.reason;
+          emitir({ sessao: id, geracao: registro.sessao?.geracaoDoEnlace ?? 1, evento });
+          if (registro.sessao) avisar(id, motivoDoEvento(evento));
+        },
+        aoAcabar: (motivo) => {
+          if (registros.get(id) !== registro) return;
+          registro.encerrada = registro.encerrada ?? motivo ?? "LinkLost";
+          // O dono que cai deixa o foco vazio, pela cadeia: ninguém o ganha
+          // sozinho, e o `soltar` termina antes de qualquer `tomar` seguinte.
+          soltarODe(id);
+          avisar(id, "encerrada");
+          aoAcabar(motivo);
+        },
+      });
+    } catch (motivo) {
+      if (registros.get(id) === registro) registros.delete(id);
+      throw motivo;
+    }
+    if (registros.get(id) !== registro) {
+      // Saiu do registro enquanto entrava (`encerrar` no meio): é solta.
+      await sessao.encerrar();
+      throw "NotConnected";
+    }
+    registro.sessao = sessao;
+    frente = id;
+    avisar(id, "entrou");
+    avisar(id, "vista");
+    if (primeiraEntrada) {
+      primeiraEntrada = false;
+      await focarVoz(id).catch((falha) => console.warn("registro: a primeira sessão não tomou a voz:", falha));
+    }
+    return { id, sessao };
+  }
+
+  /** Traz uma sessão à frente, sem derrubar ninguém. */
+  function ver(id) {
+    const registro = registros.get(id);
+    if (!registro || !registro.sessao) throw "NotConnected";
+    frente = id;
+    registro.mudou = false;
+    registro.avisosDeConversa = 0;
+    avisar(id, "vista");
+    return { id, sessao: registro.sessao };
+  }
+
+  /** Sai de uma sessão (com despedida), ou dispensa uma encerrada. As outras não mudam. */
+  async function encerrar(id) {
+    const registro = registros.get(id);
+    if (!registro) return;
+    // Fora do registro primeiro: uma troca pendente para ela se cancela.
+    registros.delete(id);
+    await soltarODe(id);
+    if (frente === id) {
+      frente = [...registros.keys()].filter((outro) => registros.get(outro).sessao).pop() ?? 0;
+      if (frente) avisar(frente, "vista");
+    }
+    try {
+      await registro.sessao?.encerrar();
+    } finally {
+      avisar(id, "saiu");
+    }
+  }
+
+  /** As sessões, na forma do `SessaoNaTela` (`fronteiras.md`, §4). */
+  function sessoes() {
+    return [...registros.values()]
+      .filter((registro) => registro.sessao || registro.encerrada)
+      .sort((a, b) => a.entrou - b.entrou || a.id - b.id)
+      .map((registro) => {
+        let retrato = null;
+        try {
+          retrato = registro.sessao && !registro.sessao.acabou ? registro.sessao.retrato() : null;
+        } catch {
+          retrato = null;
+        }
+        const sala = retrato?.sala ?? {};
+        return {
+          id: registro.id,
+          endereco: registro.alvo.endereco,
+          nome: sala.server ?? null,
+          a_frente: frente === registro.id,
+          foco_de_voz: foco === registro.id,
+          na_sala_de_voz: sala.voice_room ?? null,
+          // Uma página nunca hospeda: todo servidor dela é de outra pessoa.
+          onde: "Outro",
+          enlace: registro.encerrada ? "encerrada" : registro.sessao?.voltando ? "reconectando" : "online",
+          encerrada: registro.encerrada,
+          // Os avisos de conversa que chegaram com a sessão ao fundo: o
+          // `MessagesChanged` é grosso, e cada um conta como um.
+          nao_lidas: registro.avisosDeConversa,
+          mudou: registro.mudou,
+        };
+      });
+  }
+
+  return {
+    entrar,
+    ver,
+    focarVoz,
+    encerrar,
+    sessoes,
+    foco: () => foco || null,
+    frente: () => frente || null,
+    /** A sessão de um id, ou `null`: o handle por onde saem os comandos dela. */
+    sessao: (id) => registros.get(id)?.sessao ?? null,
+  };
 }

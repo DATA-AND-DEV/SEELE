@@ -198,12 +198,12 @@ pub(crate) fn apagar(config: &str, id: &str) -> Result<(), String> {
     } else {
         // O banco legado também era a origem da chave TLS das outras instâncias.
         let antigo = base.join("seele.db");
-        if antigo.exists() {
-            let de =
-                Persistence::open(&Location::File(antigo.clone())).map_err(|e| e.to_string())?;
+        // A fonte lida só para leitura (P1 da 0.17): abrir com
+        // `Persistence::open` migraria o legado sem cópia.
+        if let Some((cert, key)) = chave_lida_sem_migrar(&antigo) {
             let para = Persistence::open(&Location::File(base.join("identidade-servidor.db")))
                 .map_err(|e| e.to_string())?;
-            seele_server::tls::herdar_identidade(&de, &para).map_err(|e| e.to_string())?;
+            seele_server::tls::guardar_identidade(&para, &cert, &key).map_err(|e| e.to_string())?;
         }
         for nome in ["seele.db", "seele.db-wal", "seele.db-shm"] {
             let alvo = base.join(nome);
@@ -238,6 +238,31 @@ pub(crate) fn banco_de_hospedar(config: &str, id: Option<&str>) -> PathBuf {
         // hospedou antes de os servidores guardados existirem.
         None => seele_server::persistence::banco_do_cliente(Path::new(config)),
     }
+}
+
+/// **O caminho do banco que `hospedar` abriria, sem criar nada** (o ANTES DE
+/// HOSPEDAR, que é só leitura): nem a pasta, nem a chave plantada de
+/// [`banco`]. O mesmo caminho que [`banco_de_hospedar`] devolve.
+pub(crate) fn caminho_do_banco(config: &str, id: Option<&str>) -> PathBuf {
+    let Some(id) = id else {
+        // O `banco_do_cliente` renomeia um `dogma.db` antigo para `seele.db`;
+        // aqui não se renomeia nada: o antigo é lido onde está.
+        let novo = Path::new(config).join("seele.db");
+        let antigo = Path::new(config).join("dogma.db");
+        return if novo.exists() || !antigo.exists() {
+            novo
+        } else {
+            antigo
+        };
+    };
+    listar(config)
+        .into_iter()
+        .find(|s| s.id == id)
+        .and_then(|servidor| servidor.caminho)
+        .map_or_else(
+            || Path::new(config).join("seele.db"),
+            |relativo| Path::new(config).join(relativo),
+        )
 }
 
 /// O banco daquele servidor, com a pasta dele já criada.
@@ -290,7 +315,55 @@ pub(crate) fn banco(config: &str, id: Option<&str>) -> PathBuf {
 ///
 /// Silenciosa por escolha: não herdar significa que o servidor gera a própria
 /// chave, que é o comportamento de antes desta função existir.
+///
+/// **E sem converter nada antes da cópia** (P1 da 0.17). As duas pontas eram
+/// abertas com `Persistence::open`, que migra: pedir o caminho do banco de um
+/// servidor guardado migrava o banco de sempre (a fonte da chave) e o do
+/// próprio servidor antes do portão da cópia. Agora a fonte é **lida só para
+/// leitura**, e o destino só é aberto para escrever quando não há o que
+/// converter nele (não existe, ou já é desta versão). Um destino de versão
+/// anterior é deixado como está, e o `hospedar` planta a chave **depois** do
+/// portão ([`plantar_a_chave_depois_do_portao`]).
 fn uma_chave_por_maquina(config: &str, banco: &Path) {
+    let pode_abrir = match crate::antes_de_hospedar::esquema_de(banco) {
+        crate::antes_de_hospedar::Esquema::Ausente => true,
+        crate::antes_de_hospedar::Esquema::Gravado(n) => {
+            n == seele_server::persistence::esquema_conhecido()
+        }
+        _ => false,
+    };
+    if pode_abrir {
+        herdar_a_chave(config, banco);
+    }
+}
+
+/// **A chave desta máquina, plantada no banco que o `hospedar` vai subir,
+/// depois do portão da cópia**: a conversão já foi autorizada e a cópia do
+/// estado de antes já existe, então abrir (e migrar) o destino aqui é a mesma
+/// conversão que a subida faria um instante depois.
+pub(crate) fn plantar_a_chave_depois_do_portao(config: &str, banco: &Path) {
+    herdar_a_chave(config, banco);
+}
+
+/// O par TLS de um banco, lido **só para leitura** (a mesma consulta de
+/// `seele_server::tls::identidade_guardada`, sem `Persistence::open`).
+pub(crate) fn chave_lida_sem_migrar(banco: &Path) -> Option<(Vec<u8>, Vec<u8>)> {
+    let conexao =
+        rusqlite::Connection::open_with_flags(banco, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()?;
+    let (cert, key): (Vec<u8>, Vec<u8>) = conexao
+        .query_row(
+            "SELECT
+               (SELECT valor FROM configuracao WHERE chave = 'tls_cert'),
+               (SELECT valor FROM configuracao WHERE chave = 'tls_key')",
+            [],
+            |linha| Ok((linha.get(0)?, linha.get(1)?)),
+        )
+        .ok()?;
+    (!cert.is_empty() && !key.is_empty()).then_some((cert, key))
+}
+
+fn herdar_a_chave(config: &str, banco: &Path) {
     use seele_server::persistence::{Location, Persistence};
 
     let identidade = Path::new(config).join("identidade-servidor.db");
@@ -302,15 +375,17 @@ fn uma_chave_por_maquina(config: &str, banco: &Path) {
     if banco == legado || !legado.exists() {
         return;
     }
-    let (Ok(de), Ok(para)) = (
-        Persistence::open(&Location::File(legado)),
-        Persistence::open(&Location::File(banco.to_path_buf())),
-    ) else {
+    let Some((cert, key)) = chave_lida_sem_migrar(&legado) else {
         return;
     };
-    match seele_server::tls::herdar_identidade(&de, &para) {
-        Ok(true) => tracing::info!("o servidor novo herdou a chave desta máquina"),
-        Ok(false) => {}
+    if chave_lida_sem_migrar(banco).as_ref() == Some(&(cert.clone(), key.clone())) {
+        return;
+    }
+    let Ok(para) = Persistence::open(&Location::File(banco.to_path_buf())) else {
+        return;
+    };
+    match seele_server::tls::guardar_identidade(&para, &cert, &key) {
+        Ok(()) => tracing::info!("o servidor novo herdou a chave desta máquina"),
         Err(erro) => tracing::warn!(%erro, "não deu para herdar a chave desta máquina"),
     }
 }
@@ -444,7 +519,10 @@ fn mudar_os_dados_do_legado(pacotes: &Path, dados: &Path) {
 
 #[cfg(test)]
 mod os_servidores_guardados {
-    use super::{banco, criar, listar, marcar_uso, raizes_dos_mods, renomear};
+    use super::{
+        banco, banco_de_hospedar, caminho_do_banco, criar, listar, marcar_uso, raizes_dos_mods,
+        renomear,
+    };
 
     #[test]
     fn apagar_isola_os_dados_e_preserva_os_pacotes() {
@@ -852,6 +930,48 @@ mod os_servidores_guardados {
             nomeado.dados_de("seele/perfis"),
             raizes_dos_mods(&config.to_string_lossy(), None).dados_de("seele/perfis"),
             "os dados deixaram de ser por instância"
+        );
+    }
+
+    /// **Pedir o banco de um servidor guardado não converte nada** (P1 da
+    /// 0.17): o banco de sempre (a fonte da chave) e o do servidor, os dois da
+    /// 0.15.1 (esquema 13), ficam com os mesmos bytes. A chave é plantada só
+    /// depois do portão da cópia (`plantar_a_chave_depois_do_portao`).
+    #[test]
+    fn pedir_o_banco_de_um_servidor_antigo_nao_migra_nem_ele_nem_o_de_sempre() {
+        let sql = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/testes/pasta-da-0.15.1/pasta/seele.sql"
+        ))
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let de_sempre = dir.path().join("seele.db");
+        rusqlite::Connection::open(&de_sempre)
+            .unwrap()
+            .execute_batch(&sql)
+            .unwrap();
+        let servidor = criar(&config, "Antigo", "0.15.1");
+        let dele = caminho_do_banco(&config, Some(&servidor.id));
+        std::fs::create_dir_all(dele.parent().unwrap()).unwrap();
+        rusqlite::Connection::open(&dele)
+            .unwrap()
+            .execute_batch(&sql)
+            .unwrap();
+        let antes = (
+            std::fs::read(&de_sempre).unwrap(),
+            std::fs::read(&dele).unwrap(),
+        );
+
+        assert_eq!(banco_de_hospedar(&config, Some(&servidor.id)), dele);
+
+        assert!(
+            std::fs::read(&de_sempre).unwrap() == antes.0,
+            "pedir o banco do servidor guardado mexeu no banco de sempre"
+        );
+        assert!(
+            std::fs::read(&dele).unwrap() == antes.1,
+            "pedir o banco do servidor guardado o migrou antes da cópia"
         );
     }
 }

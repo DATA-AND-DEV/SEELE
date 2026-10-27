@@ -32,6 +32,7 @@ use seele_proto::ids::{PersonId, SessionId, Ssrc};
 pub mod assento;
 pub mod base64;
 pub mod battery;
+pub mod cargos;
 pub mod catalogo;
 pub mod despedida;
 pub mod escolhidos;

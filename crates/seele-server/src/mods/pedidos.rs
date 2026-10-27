@@ -51,7 +51,36 @@ pub async fn executar(
     id: &str,
     payload: &str,
 ) -> String {
-    match executar_inner(server, person, channel, id, payload).await {
+    executar_com(server, person, channel, id, None, payload).await
+}
+
+/// **Uma ação declarada de MOD** (`ClientMessage::AcaoDeMod`, ADR 0064).
+///
+/// A mesma estrada de [`executar`], com um portão a mais **antes do
+/// despacho**: `cargos::autorizar_acao_de_mod`, lido do banco no instante do
+/// pedido. Recusado, a resposta é `{"ok":false,"recusa":"<motivo>"}` e a
+/// metade de servidor do MOD **não é chamada**. A lista de permissões que vai
+/// no contexto do MOD é informativa, e não o bloqueio.
+pub async fn executar_acao(
+    server: &Arc<Server>,
+    person: PersonId,
+    channel: ChannelId,
+    id: &str,
+    acao: &str,
+    payload: &str,
+) -> String {
+    executar_com(server, person, channel, id, Some(acao), payload).await
+}
+
+async fn executar_com(
+    server: &Arc<Server>,
+    person: PersonId,
+    channel: ChannelId,
+    id: &str,
+    acao: Option<&str>,
+    payload: &str,
+) -> String {
+    match executar_inner(server, person, channel, id, acao, payload).await {
         Ok(text) => text,
         Err(error) => {
             // O pedido do catálogo (id vazio) não é de MOD nenhum, e um
@@ -140,6 +169,7 @@ async fn executar_inner(
     person: PersonId,
     channel: ChannelId,
     id: &str,
+    acao: Option<&str>,
     payload: &str,
 ) -> anyhow::Result<String> {
     // **O banco é lido e soltado.** Não levado ao trabalhador.
@@ -183,91 +213,11 @@ async fn executar_inner(
         })
         .to_string());
     }
-    let active = enabled
-        .iter()
-        .find(|m| m.id == id)
-        .ok_or_else(|| anyhow::anyhow!("disabled"))?;
-    // **Zero quer dizer «nenhum canal», e é o pedido de escopo de servidor.**
-    //
-    // O plano de 18/09 escreve o defeito: «para MOD de escopo servidor, leitura
-    // não deveria exigir que exista um canal de texto selecionado; hoje a
-    // interface comum e a ponte associam pedidos a canal». Um MOD que lê a
-    // configuração do servidor — tema, perfis, ficha — não é sobre canal
-    // nenhum, e falhava com `unknown channel` quando a janela ainda não tinha
-    // um aberto: um motivo que não tem nada a ver com ele.
-    //
-    // Zero, e não um `Option` no fio: `ChannelId` é a chave primária do SQLite,
-    // que começa em 1, então zero nunca é um canal de verdade. Um campo novo na
-    // variante quebraria a janela de compatibilidade do protocolo sem
-    // necessidade — o mesmo byte já diz a coisa nova.
-    let com_canal = channel.0 != 0;
-    // As perguntas restantes ao banco, numa tomada curta e só de leitura.
-    //
-    // **O escopo de um pedido** (rascunho da API 6, §8; tarefa 16 da F3): num
-    // canal, ler e escrever são **os do canal**, com o papel mínimo dele, por
-    // `autorizacao::pode_no_canal`, como no texto. Antes era a permissão
-    // global com o canal existindo: um pedido num canal que a pessoa não lê
-    // chegava ao MOD, e o `write` dele ignorava o papel de escrita do canal. No
-    // escopo de servidor (canal zero), o `write` é a permissão global.
-    //
-    // Hoje nenhum caminho do produto grava o papel mínimo, e as duas formas dão
-    // o mesmo resultado (medido em 10/10, pendência 62); o guarda
-    // `o_papel_minimo_de_um_canal_so_e_gravado_pela_migracao_e_pelos_testes`
-    // avisa quem criar um. Uma falha de banco lê como negação, como em todo
-    // `pode_no_canal`.
-    let (canal_existe, le_o_canal, admin, write) = {
-        let db = server.persistence.lock().await;
-        let permissions = Permissions::new(&db);
-        let admin = permissions
-            .may(person, Permission::AdministerServer)
-            .unwrap_or(false);
-        if com_canal {
-            let existe = Channels::new(&db)
-                .channels()?
-                .iter()
-                .any(|c| c.id == channel);
-            let le =
-                autorizacao::pode_no_canal(&db, person, channel, Acesso::Leitura).unwrap_or(false);
-            let escreve =
-                autorizacao::pode_no_canal(&db, person, channel, Acesso::Escrita).unwrap_or(false);
-            (existe, le, admin, escreve)
-        } else {
-            let escreve = permissions
-                .may(person, Permission::WriteChannel)
-                .unwrap_or(false);
-            (true, true, admin, escreve)
-        }
-    };
-    anyhow::ensure!(canal_existe, "unknown channel");
-    anyhow::ensure!(le_o_canal, "cannot read channel");
-    let raizes = server
-        .mods_dir
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("no directory"))?;
-    let root = raizes.pacote_de(&active.hash);
-    // **Da instância, e não da máquina.** Ver `RaizesDosMods`: o mesmo MOD em
-    // dois servidores lia e escrevia nos mesmos arquivos.
-    let dados = raizes.dados_de(id);
-    let hash = active.hash.clone();
-    // `channel` é **nulo** quando não há canal, e não zero: um MOD que
-    // comparasse com zero estaria lendo um identificador que não existe, e
-    // `null` é a única forma de dizer «esta pergunta não é sobre um canal».
-    let contexto_do_canal = if com_canal {
-        serde_json::Value::from(channel.0)
-    } else {
-        serde_json::Value::Null
-    };
-    // **A sala de quem pede, dita pelo servidor** (rascunho da API 6, §5; a
-    // pergunta da MESA): a da presença, ou `null` fora de sala. Escrita aqui, e
-    // nunca lida do pedido — como `person`, ela é do servidor, e um pedido que
-    // mandasse outra sala não muda nada.
-    let sala = server
-        .occupancy
-        .lock()
-        .await
-        .onde_esta(person)
-        .map(|sala| sala.0);
-    let context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"sala":sala,"admin":admin,"write":write}).to_string();
+    // **A primeira conferência**, antes da fila do MOD: recusa barato o que
+    // já não pode, sem esperar o turno de ninguém.
+    if let Conferencia::Recusada(recusa) = conferir(server, person, channel, id, acao).await? {
+        return Ok(recusa);
+    }
     let id = id.to_owned();
     let payload = payload.to_owned();
     // A lista de esperas é do servidor, e não deste pedido: ela tem de
@@ -291,6 +241,28 @@ async fn executar_inner(
         )
     };
     let _vez = cadeado.lock().await;
+
+    // **A segunda conferência, com o turno na mão** (revisão do Codex dos
+    // cargos): o pedido pode ter esperado um MOD lento, e nesse meio tempo a
+    // permissão ter sido revogada, o MOD desligado, o hash trocado ou a leitura
+    // do canal perdida. Tudo o que o despacho usa — a autorização, o MOD
+    // ligado e o hash dele, o contexto — é lido de novo **aqui**, e é esta
+    // leitura que vale. A de cima só poupa a fila.
+    let Conferido {
+        hash,
+        contexto: context,
+    } = match conferir(server, person, channel, &id, acao).await? {
+        Conferencia::Recusada(recusa) => return Ok(recusa),
+        Conferencia::Vale(conferido) => conferido,
+    };
+    let raizes = server
+        .mods_dir
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("no directory"))?;
+    let root = raizes.pacote_de(&hash);
+    // **Da instância, e não da máquina.** Ver `RaizesDosMods`: o mesmo MOD em
+    // dois servidores lia e escrevia nos mesmos arquivos.
+    let dados = raizes.dados_de(&id);
 
     // **O pacote é conferido uma vez por hash**, e não a cada pedido: a
     // conferência relê todos os arquivos e recalcula o hash do conteúdo, e a
@@ -400,6 +372,17 @@ async fn executar_inner(
     // depois dos dois gravados: um quintal que falhasse com o tema já
     // publicado seria o MOD contando a todos uma aparência que o estado dele
     // não sustenta. A mesma ordem que o aviso do servidor terá (rascunho §7.3).
+    // **A terceira, antes dos efeitos**: o JavaScript rodou fora do banco, e
+    // uma revogação (ou um MOD desligado ou trocado) no meio dele não pode
+    // deixar gravar o quintal, publicar o tema nem avisar ninguém. O que o MOD
+    // respondeu é descartado, e quem pediu lê a recusa.
+    match conferir(server, person, channel, &id, acao).await? {
+        Conferencia::Recusada(recusa) => return Ok(recusa),
+        Conferencia::Vale(agora) if agora.hash != hash => {
+            anyhow::bail!("package changed");
+        }
+        Conferencia::Vale(_) => {}
+    }
     if data != before || tema.is_some() {
         let mut db = server.persistence.lock().await;
         if data != before {
@@ -423,6 +406,147 @@ async fn executar_inner(
         });
     }
     Ok(response)
+}
+
+/// O que uma conferência de pedido de MOD decidiu.
+enum Conferencia {
+    /// Pode seguir, com o que o despacho usa.
+    Vale(Conferido),
+    /// Recusado pelos cargos: o JSON que volta a quem pediu.
+    Recusada(String),
+}
+
+/// O que o despacho de um pedido usa, lido do banco **agora**.
+struct Conferido {
+    /// O hash do MOD ligado.
+    hash: String,
+    /// O contexto que a metade de servidor recebe.
+    contexto: String,
+}
+
+/// **Confere um pedido de MOD contra o estado de agora**: o MOD ligado (e o
+/// hash dele), a leitura do canal, a autorização da ação declarada e o
+/// contexto (`admin`, `write`, a sala e as ações informativas).
+///
+/// Chamada três vezes por pedido em [`executar_inner`]: antes da fila do MOD,
+/// com o turno na mão (e é essa que o despacho usa) e antes dos efeitos. Um
+/// erro (`disabled`, `cannot read channel`, `unknown channel`) é a recusa
+/// genérica de [`executar`]; uma recusa dos cargos volta como JSON nomeado.
+async fn conferir(
+    server: &Arc<Server>,
+    person: PersonId,
+    channel: ChannelId,
+    id: &str,
+    acao: Option<&str>,
+) -> anyhow::Result<Conferencia> {
+    let (enabled, pode_ler) = {
+        let db = server.persistence.lock().await;
+        let enabled = mods::enabled(&db)?;
+        let pode_ler = Permissions::new(&db)
+            .may(person, Permission::ReadChannel)
+            .unwrap_or(false);
+        (enabled, pode_ler)
+    };
+    anyhow::ensure!(pode_ler, "cannot read");
+    let active = enabled
+        .iter()
+        .find(|m| m.id == id)
+        .ok_or_else(|| anyhow::anyhow!("disabled"))?;
+    // **Zero quer dizer «nenhum canal», e é o pedido de escopo de servidor.**
+    //
+    // O plano de 18/09 escreve o defeito: «para MOD de escopo servidor, leitura
+    // não deveria exigir que exista um canal de texto selecionado; hoje a
+    // interface comum e a ponte associam pedidos a canal». Um MOD que lê a
+    // configuração do servidor — tema, perfis, ficha — não é sobre canal
+    // nenhum, e falhava com `unknown channel` quando a janela ainda não tinha
+    // um aberto: um motivo que não tem nada a ver com ele.
+    //
+    // Zero, e não um `Option` no fio: `ChannelId` é a chave primária do SQLite,
+    // que começa em 1, então zero nunca é um canal de verdade. Um campo novo na
+    // variante quebraria a janela de compatibilidade do protocolo sem
+    // necessidade — o mesmo byte já diz a coisa nova.
+    let com_canal = channel.0 != 0;
+    // As perguntas restantes ao banco, numa tomada curta e só de leitura.
+    //
+    // **O escopo de um pedido** (rascunho da API 6, §8; tarefa 16 da F3): num
+    // canal, ler e escrever são **os do canal**, com o papel mínimo dele, por
+    // `autorizacao::pode_no_canal`, como no texto. Antes era a permissão
+    // global com o canal existindo: um pedido num canal que a pessoa não lê
+    // chegava ao MOD, e o `write` dele ignorava o papel de escrita do canal. No
+    // escopo de servidor (canal zero), o `write` é a permissão global.
+    //
+    // Hoje nenhum caminho do produto grava o papel mínimo, e as duas formas dão
+    // o mesmo resultado (medido em 10/10, pendência 62); o guarda
+    // `o_papel_minimo_de_um_canal_so_e_gravado_pela_migracao_e_pelos_testes`
+    // avisa quem criar um. Uma falha de banco lê como negação, como em todo
+    // `pode_no_canal`.
+    let (canal_existe, le_o_canal, admin, write) = {
+        let db = server.persistence.lock().await;
+        let permissions = Permissions::new(&db);
+        let admin = permissions
+            .may(person, Permission::AdministerServer)
+            .unwrap_or(false);
+        if com_canal {
+            let existe = Channels::new(&db)
+                .channels()?
+                .iter()
+                .any(|c| c.id == channel);
+            let le =
+                autorizacao::pode_no_canal(&db, person, channel, Acesso::Leitura).unwrap_or(false);
+            let escreve =
+                autorizacao::pode_no_canal(&db, person, channel, Acesso::Escrita).unwrap_or(false);
+            (existe, le, admin, escreve)
+        } else {
+            let escreve = permissions
+                .may(person, Permission::WriteChannel)
+                .unwrap_or(false);
+            (true, true, admin, escreve)
+        }
+    };
+    anyhow::ensure!(canal_existe, "unknown channel");
+    anyhow::ensure!(le_o_canal, "cannot read channel");
+    // **O portão da ação declarada**, depois das conferências do pedido comum e
+    // antes de qualquer coisa do MOD rodar. Num `ModRequest` legado, `acao` é
+    // `None` e nada muda.
+    let permissoes_do_mod = {
+        let db = server.persistence.lock().await;
+        if let Some(acao) = acao {
+            if let Err(recusa) = crate::cargos::autorizar_acao_de_mod(&db, person, id, acao) {
+                tracing::info!(mod_id = %id_seguro(id), acao = %id_seguro(acao), recusa = recusa.nome(), "ação de MOD recusada pelos cargos");
+                return Ok(Conferencia::Recusada(
+                    serde_json::json!({"ok": false, "recusa": recusa.nome()}).to_string(),
+                ));
+            }
+        }
+        crate::cargos::acoes_do_mod(&db, person, id)
+    };
+    // `channel` é **nulo** quando não há canal, e não zero: um MOD que
+    // comparasse com zero estaria lendo um identificador que não existe, e
+    // `null` é a única forma de dizer «esta pergunta não é sobre um canal».
+    let contexto_do_canal = if com_canal {
+        serde_json::Value::from(channel.0)
+    } else {
+        serde_json::Value::Null
+    };
+    // **A sala de quem pede, dita pelo servidor** (rascunho da API 6, §5; a
+    // pergunta da MESA): a da presença, ou `null` fora de sala. Escrita aqui, e
+    // nunca lida do pedido — como `person`, ela é do servidor, e um pedido que
+    // mandasse outra sala não muda nada.
+    let sala = server
+        .occupancy
+        .lock()
+        .await
+        .onde_esta(person)
+        .map(|sala| sala.0);
+    // `acao`: a ação declarada que este pedido executa, já autorizada, ou
+    // `null` num `ModRequest`. `permissoes`: as ações deste MOD que a pessoa
+    // tem agora, para a metade de servidor decidir o que mostrar; não é o
+    // bloqueio (o bloqueio é o portão acima).
+    let context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"sala":sala,"admin":admin,"write":write,"acao":acao,"permissoes":permissoes_do_mod}).to_string();
+    Ok(Conferencia::Vale(Conferido {
+        hash: active.hash.clone(),
+        contexto: context,
+    }))
 }
 
 /// Grava o tema que um MOD declarou e, se o tema em vigor mudou, o manda a
@@ -567,7 +691,6 @@ mod tests {
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao: [0; 32],
-            janelas_do_navegador: Vec::new(),
             recepcao: None,
             persistence,
             events,
@@ -851,6 +974,133 @@ mod tests {
             .expect("o papel mínimo");
     }
 
+    /// **Uma ação de MOD autorizada na entrada e revogada enquanto espera o
+    /// turno é NEGADA, sem efeito nenhum** (revisão do Codex dos cargos).
+    ///
+    /// 1. o turno do MOD fica preso (o cadeado de `mods_em_curso`, como um
+    ///    pedido lento o deixaria);
+    /// 2. a ação é pedida, passa pela primeira conferência e entra na fila;
+    /// 3. a permissão é revogada pelos cargos;
+    /// 4. o turno é solto;
+    /// 5. a ação volta recusada, e o quintal do MOD ficou como estava.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn uma_acao_revogada_enquanto_espera_o_turno_e_negada_sem_efeito() {
+        use seele_proto::cargos::{
+            ChaveDeMod, PedidoDeCargo, Permissao, PermissaoDeclarada, TODOS,
+        };
+        let pasta = tempfile::tempdir().expect("a pasta");
+        let fonte =
+            "globalThis.aoPedir = (c, p) => { dados.feito = 'sim'; return '{\"ok\":true}'; };";
+        let (servidor, pessoa) = servidor_com_o_mod(pasta.path(), fonte).await;
+        let chave = ChaveDeMod {
+            mod_id: "prova/eco".into(),
+            acao: "fazer".into(),
+        };
+        let gestora = {
+            let db = servidor.persistence.lock().await;
+            crate::cargos::declarar_proprietario(
+                &db,
+                &seele_proto::transport::key_fingerprint(&[1; 32]),
+            )
+            .expect("a proprietária");
+            crate::cargos::gravar_permissoes_do_mod(
+                &db,
+                "prova/eco",
+                &[PermissaoDeclarada {
+                    acao: "fazer".into(),
+                    nome: "Fazer".into(),
+                    todos: true,
+                }],
+            )
+            .expect("a permissão declarada");
+            assert!(
+                crate::cargos::autorizar_acao_de_mod(&db, pessoa, "prova/eco", "fazer").is_ok(),
+                "a pessoa não tinha a ação nem antes: o teste não mede nada"
+            );
+            crate::permissions::Permissions::new(&db)
+                .register_or_find(&[1; 32], "comando")
+                .expect("a gestora")
+                .id
+        };
+
+        // 1. O turno do MOD preso.
+        let cadeado = {
+            let mut em_curso = servidor.mods_em_curso.lock().expect("a tabela");
+            std::sync::Arc::clone(
+                em_curso
+                    .entry("prova/eco".to_owned())
+                    .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(()))),
+            )
+        };
+        let turno = std::sync::Arc::clone(&cadeado).lock_owned().await;
+
+        // 2. A ação, autorizada na entrada, esperando o turno.
+        let pedido = {
+            let servidor = std::sync::Arc::clone(&servidor);
+            tokio::spawn(async move {
+                super::executar_acao(
+                    &servidor,
+                    pessoa,
+                    seele_proto::ids::ChannelId(0),
+                    "prova/eco",
+                    "fazer",
+                    "{}",
+                )
+                .await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            !pedido.is_finished(),
+            "o pedido não esperou o turno: o teste não mede nada"
+        );
+
+        // 3. A revogação, pelos cargos: o `@everyone` passa a restringir a ação.
+        {
+            let mut db = servidor.persistence.lock().await;
+            let quadro = crate::cargos::quadro(&db).expect("o quadro");
+            let todos = quadro
+                .cargos
+                .iter()
+                .find(|c| c.id == TODOS)
+                .expect("o @everyone")
+                .clone();
+            let mut restringe = todos.restringe.clone();
+            restringe.push(Permissao::DeMod(chave.clone()));
+            crate::cargos::executar(
+                &mut db,
+                gestora,
+                quadro.revisao,
+                &PedidoDeCargo::Editar {
+                    cargo: TODOS,
+                    nome: todos.nome.clone(),
+                    concede: todos.concede.clone(),
+                    restringe,
+                },
+            )
+            .expect("a revogação");
+        }
+
+        // 4. O turno solto.
+        drop(turno);
+        let resposta: serde_json::Value =
+            serde_json::from_str(&pedido.await.expect("o pedido")).expect("JSON");
+
+        // 5. Negada, e sem efeito.
+        assert_eq!(
+            resposta["ok"], false,
+            "a ação revogada foi despachada: {resposta}"
+        );
+        assert!(resposta["recusa"].is_string(), "{resposta}");
+        let db = servidor.persistence.lock().await;
+        assert!(
+            crate::persistence::mods::ler_quintal(&db, "prova/eco")
+                .expect("o quintal")
+                .is_empty(),
+            "a ação revogada gravou no quintal do MOD"
+        );
+    }
+
     async fn pedir(
         servidor: &std::sync::Arc<crate::server::Server>,
         pessoa: seele_proto::ids::PersonId,
@@ -929,18 +1179,24 @@ mod tests {
     /// provas de fora conferiam só que o campo não é vazio e que não se forja:
     /// um `person` constante, ou um `admin` sempre falso, passavam. Aqui, o
     /// `person` é o `PersonId` de quem pediu, em texto, e o `admin` é o do
-    /// papel dela — a primeira conta, que tem o comando, administra; uma Pessoa
-    /// comum, não.
+    /// cargo dela — a conta com o Comandante administra; uma Pessoa comum, não.
+    /// (Desde a 0.17 a primeira conta não ganha o comando por chegar, ADR 0064:
+    /// o Comandante é dado à mão.)
     #[tokio::test(flavor = "current_thread")]
     async fn o_contexto_diz_quem_pediu_e_se_ela_administra() {
         let pasta = tempfile::tempdir().expect("a pasta");
         let (servidor, pessoa) = servidor_com_eco(pasta.path()).await;
         let comando = {
             let db = servidor.persistence.lock().await;
-            crate::permissions::Permissions::new(&db)
+            let permissions = crate::permissions::Permissions::new(&db);
+            let id = permissions
                 .register_or_find(&[1; 32], "comando")
-                .expect("a primeira conta")
-                .id
+                .expect("a conta")
+                .id;
+            permissions
+                .grant_role(id, crate::permissions::COMMANDER_ROLE)
+                .expect("o comando");
+            id
         };
         assert_ne!(
             comando, pessoa,
@@ -1075,7 +1331,13 @@ mod tests {
                 let permitida = relativo.ends_with("seele-server/src/persistence/schema.rs")
                     || (relativo.ends_with("seele-server/src/autorizacao.rs")
                         && limpa.starts_with("Self::")
-                        && limpa.contains("=> \"minimum_"));
+                        && limpa.contains("=> \"minimum_"))
+                    // Cargos (ADR 0064, F): só a LEITURA de «algum canal exige
+                    // este cargo?», para não apagar um cargo exigido — nada grava
+                    // a coluna. E o arquivo de testes dos cargos, que é todo teste.
+                    || (relativo.ends_with("seele-server/src/persistence/cargos.rs")
+                        && limpa.starts_with("\"SELECT EXISTS("))
+                    || relativo.ends_with("seele-server/src/cargos/testes.rs");
                 if !permitida {
                     achados.push(format!("{relativo}:{}: {limpa}", n + 1));
                 }

@@ -32,7 +32,7 @@ use serde::Deserialize;
 /// Uma constante e não configuração: um endereço que a pessoa pudesse trocar
 /// seria um endereço que alguém troca por ela. A assinatura protege o conteúdo;
 /// o que protege a **origem** é não haver nada a apontar para outro lugar.
-pub const ENDERECO: &str = "https://mods.seele.app.br";
+pub const ENDERECO: &str = "https://mods.seele.sh";
 
 /// O esquema de catálogo que este build lê.
 pub const ESQUEMA_CONHECIDO: u32 = 1;

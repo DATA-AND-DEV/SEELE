@@ -226,6 +226,25 @@ fn dar_papel(
     permissions.grant_role(person, papel).expect("conceder");
 }
 
+/// Entra e **recebe o Comandante pelo banco**, e volta para o `Session` trazer
+/// a moderação.
+///
+/// Desde a 0.17 ninguém vira Comandante por chegar primeiro (ADR 0064: o dono
+/// é declarado pela máquina que hospeda, e a ordem da rede não dá autoridade).
+/// O anfitrião destes testes ganha o cargo pelo mesmo caminho que o Operador
+/// já ganhava aqui, e o que cada teste mede continua o mesmo.
+async fn entrar_como_comandante(
+    endereco: SocketAddr,
+    arquivo: &std::path::Path,
+    apelido: &str,
+) -> Result<Arc<Connection>> {
+    let primeira = entrar(endereco, apelido).await?;
+    let eu = seele_proto::ids::PersonId(primeira.snapshot().me.expect("identidade"));
+    dar_papel(arquivo, eu, COMMANDER_ROLE);
+    drop(primeira);
+    voltar(endereco, apelido).await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()> {
     let _vaga = vaga::minha();
@@ -336,9 +355,9 @@ async fn um_pessoa_comum_e_recusado_pelo_server_e_nao_pela_casca() -> Result<()>
 #[tokio::test(flavor = "multi_thread")]
 async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
     let _vaga = vaga::minha();
-    let (endereco, servidor, _arquivo) = server("expulsar").await?;
+    let (endereco, servidor, arquivo) = server("expulsar").await?;
 
-    let anfitriao = entrar(endereco, "anfitriao-expulsar").await?;
+    let anfitriao = entrar_como_comandante(endereco, &arquivo, "anfitriao-expulsar").await?;
     assert!(
         anfitriao.snapshot().may_kick,
         "quem hospeda não recebeu Kick, e o verbo não tem quem o use"
@@ -476,9 +495,9 @@ async fn expulsar_acaba_com_a_sessao_e_deixa_voltar() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn banir_acaba_com_a_sessao_e_impede_de_voltar() -> Result<()> {
     let _vaga = vaga::minha();
-    let (endereco, servidor, _arquivo) = server("banir").await?;
+    let (endereco, servidor, arquivo) = server("banir").await?;
 
-    let anfitriao = entrar(endereco, "anfitriao-banir").await?;
+    let anfitriao = entrar_como_comandante(endereco, &arquivo, "anfitriao-banir").await?;
     let visita = entrar(endereco, "visita-banir").await?;
     let quem = visita.snapshot().me.expect("a visita tem identidade");
 
@@ -509,9 +528,9 @@ async fn banir_acaba_com_a_sessao_e_impede_de_voltar() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> {
     let _vaga = vaga::minha();
-    let (endereco, servidor, _arquivo) = server("apagar").await?;
+    let (endereco, servidor, arquivo) = server("apagar").await?;
 
-    let anfitriao = entrar(endereco, "anfitriao-apagar").await?;
+    let anfitriao = entrar_como_comandante(endereco, &arquivo, "anfitriao-apagar").await?;
     anfitriao.open_channel(LINE)?;
 
     let visita = entrar(endereco, "visita-apagar").await?;
@@ -568,9 +587,9 @@ async fn apagar_uma_mensagem_tira_ela_da_conversa_de_todo_mundo() -> Result<()> 
 #[tokio::test(flavor = "multi_thread")]
 async fn mover_leva_a_pessoa_e_a_conta_na_sala_nova() -> Result<()> {
     let _vaga = vaga::minha();
-    let (endereco, servidor, _arquivo) = server("mover").await?;
+    let (endereco, servidor, arquivo) = server("mover").await?;
 
-    let anfitriao = entrar(endereco, "anfitriao-mover").await?;
+    let anfitriao = entrar_como_comandante(endereco, &arquivo, "anfitriao-mover").await?;
     anfitriao.create_voice_room("SALA-02 SALA DOS FUNDOS".into(), 8, None)?;
     assert!(
         ate(&anfitriao, |connection| connection
@@ -594,6 +613,25 @@ async fn mover_leva_a_pessoa_e_a_conta_na_sala_nova() -> Result<()> {
                 |voice_room| voice_room.id == VOICE_ROOM && voice_room.occupied_by_us
             )),
         "a visita não entrou na primeira sala de voz"
+    );
+    // **E o servidor confirmou a entrada, antes de mover.** O `occupied_by_us` da
+    // visita é otimista: a FFI o marca quando o pedido sai para o enlace
+    // (`seele-ffi`, `Command::EnterVoiceRoom`), e não quando o servidor o assenta.
+    // Sem esta espera, o `MovePerson` podia chegar ao servidor antes do
+    // `EnterVoiceRoom`: o servidor movia a visita para a segunda sala, e o
+    // `EnterVoiceRoom` atrasado a sentava de volta na primeira — e quem assiste
+    // via, corretamente, `[(1, 1), (2, 0)]` (a falha de 26/10/2026 na suíte
+    // inteira, que não reproduziu isolada; a ordem não foi traçada naquela
+    // execução). O roster de quem assiste é o que o servidor publicou, e é ele
+    // que diz que a entrada aconteceu.
+    assert!(
+        ate(&anfitriao, |connection| sentado(
+            connection, VOICE_ROOM, quem
+        ) && !sentado(
+            connection, destino, quem
+        )),
+        "o servidor não confirmou a visita na primeira sala de voz; mover agora \
+         disputaria com a entrada dela"
     );
 
     anfitriao.move_person(quem, destino)?;
@@ -651,8 +689,9 @@ async fn um_operador_modera_pessoas_e_nao_o_comandante() -> Result<()> {
     let _vaga = vaga::minha();
     let (endereco, servidor, arquivo) = server("hierarquia").await?;
 
-    // O anfitrião é Comandante por ser o primeiro a chegar.
-    let anfitriao = entrar(endereco, "anfitriao-hierarquia").await?;
+    // O anfitrião recebe o Comandante (desde a 0.17, ninguém o ganha por
+    // chegar primeiro: ADR 0064).
+    let anfitriao = entrar_como_comandante(endereco, &arquivo, "anfitriao-hierarquia").await?;
     let comandante = anfitriao.snapshot().me.expect("identidade");
 
     // O segundo chega como Pessoa; é promovido a Operador pelo banco, que é o

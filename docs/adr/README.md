@@ -33,7 +33,7 @@ o ganho é de estética.
 | # | Título | Status | Decisão em aberto que fecha |
 |---|---|---|---|
 | [0001](0001-serializacao-postcard.md) | Serialização com `postcard` | aceito por default | `02` — serialização |
-| [0002](0002-regra-de-dependencia.md) | Regra de dependência mais estrita que a spec | aceito por default | — (divergência encontrada em M0) |
+| [0002](0002-regra-de-dependencia.md) | Regra de dependência mais estrita que a spec | aceito por default · o `seele-enlace` comum ao core e ao servidor, pelo `0063` | — (divergência encontrada em M0) |
 | [0003](0003-certificados-tofu.md) | TOFU como padrão de certificado | aceito por default · emendado no navegador pelo `0057` | `01`, `08` — certificados |
 | [0004](0004-autenticacao-chave-publica.md) | Autenticação por chave pública Ed25519 | aceito por default | `08` — autenticação |
 | [0005](0005-porta-padrao.md) | Porta padrão 8383/UDP | **proposto** | `01` — porta |
@@ -53,7 +53,7 @@ o ganho é de estética.
 | [0019](0019-frontend-sem-framework-e-sem-npm.md) | Frontend do desktop sem framework e sem npm | aceito · emendado no navegador pelo `0057` | `05` — frontend desktop |
 | [0020](0020-o-que-o-tauri-traz-junto.md) | O que o Tauri traz junto, e por que aceitamos | aceito | `01` — dependências do app |
 | [0021](0021-admissao-em-um-dogma.md) | Quem entra num servidor: convite de uso único, senha como alternativa | aceito | `08` — admissão |
-| [0022](0022-alcancar-um-dogma-pela-internet.md) | Alcançar um servidor pela internet | **aceito** · degrau 5 emendado pelo `0045` | `01` — alcance fora da rede local |
+| [0022](0022-alcancar-um-dogma-pela-internet.md) | Alcançar um servidor pela internet | **aceito** · degrau 5 emendado pelo `0045` e pelo `0063` (sem TURN na linha 2, desde 26/10/2026) | `01` — alcance fora da rede local |
 | [0023](0023-idioma-dentro-do-seele-core.md) | Idioma dentro do `seele-core` | aceito | `10` — idioma |
 | [0024](0024-faixas-de-sincronia-em-tres-e-a-media-no-core.md) | Faixas do sinal em três, e a média da sala no core | aceito | `03` — sincronia |
 | [0025](0025-limitacao-de-taxa-em-dois-baldes.md) | Limitação de taxa: dois baldes, e um aviso antes da porta | aceito | `08` — limitação de taxa |
@@ -86,12 +86,15 @@ o ganho é de estética.
 | [0054](0054-uma-transmissao-tem-identidade.md) | Uma transmissão tem identidade | **aceito** | — (revisão da v15, R16–R21: tudo de compartilhamento passa a ser por `ScreenId`) |
 | [0055](0055-o-filtro-e-o-que-torna-o-limiar-baixo-defensavel.md) | O filtro é o que torna o limiar baixo defensável | **aceito** | — (`features-v15.md` F01 e F02: supressão de ruído em Rust puro, e o limiar que passou a medir a sala em vez de supor o ruído dela — revisado pela auditoria de 22/09/2026) |
 | [0056](0056-mods-na-tela-inteira.md) | MODs na tela inteira | **aceito** · no corte da API 6 (15/10/2026), com o `api/v6.json` congelado e os limites da M3 | — (spec de 23/09, Parte II, e o spec-mestre da 0.16: a API 6 e a medição de custo do `0052`) |
-| [0057](0057-o-celular-entra-pelo-navegador.md) | No celular, o SEELE é uma página: web app instalável, sem app nativo | **aceito** · emendado em 08/10/2026: os MODs rodam no celular, e o `unsafe` da fronteira dos dois crates do celular | `06` — plataforma mobile (M6) |
-| [0058](0058-1x-nunca-quebra-o-fio.md) | 1.x nunca quebra o fio: a definição da versão de servidor | **aceito** | `02` e `10` — versionamento (substitui a janela N−1) |
+| [0057](0057-o-celular-entra-pelo-navegador.md) | No celular, o SEELE é uma página: web app instalável, sem app nativo | **aceito** · emendado em 08/10/2026: os MODs rodam no celular, e o `unsafe` da fronteira dos dois crates do celular · o navegador entra por WebRTC, pelo `0063` | `06` — plataforma mobile (M6) |
+| [0058](0058-1x-nunca-quebra-o-fio.md) | 1.x nunca quebra o fio: a definição da versão de servidor | **aceito** · a linha 2 sem recusador `seele/1`, pelo `0063` | `02` e `10` — versionamento (substitui a janela N−1) |
 | [0059](0059-a-sala-pessoal-segura-a-conexao-enquanto-toca.md) | A sala pessoal segura a conexão enquanto toca | **aceito** | — (decisão do dono de 23/09: o toque instantâneo; restringe o `0030` aos servidores guardados) |
 | [0060](0060-o-codigo-de-uma-pessoa.md) | O código de uma pessoa | **aceito** | — (decisão do dono de 23/09: o código de usuário; forma, marcas e o DER da sala congelados) |
 | [0061](0061-a-identidade-e-uma-por-maquina.md) | A identidade é uma por máquina, e não por linha nem por versão | **aceito** | — (decisões do dono de 08/10; emenda o `0017` e o `0046`; a 0.15.2 lê `$SEELE_IDENTIDADE` e só assina desafios de 32 bytes) |
-| [0062](0062-o-registro-assinado-no-ponto-de-encontro.md) | SEELE-ENC/2: o registro assinado no ponto de encontro | **aceito** | — (spec de 23/09 e decisões do dono de 08/10: o limite e o teto, o portão no `publicar.sh`, o teto por prefixo e o cookie de ida e volta; revê o §2.4 do `0047`) |
+| [0062](0062-o-registro-assinado-no-ponto-de-encontro.md) | SEELE-ENC/2: o registro assinado no ponto de encontro | **aceito** · o anfitrião da 0.17 registra pelo ENC/3, pelo `0063` | — (spec de 23/09 e decisões do dono de 08/10: o limite e o teto, o portão no `publicar.sh`, o teto por prefixo e o cookie de ida e volta; revê o §2.4 do `0047`) |
+| [0063](0063-a-linha-2-fala-webrtc.md) | A linha 2 fala WebRTC: um transporte só, o Servidor 2.0 e o fio 10 | **aceito** · não medido entre duas casas · emendado em 25/10/2026: o DTLS (`dimpl`) passa ao `aws-lc-rs` pelo RUSTSEC-2026-0387 | `02`, `08` e `10` — transporte e versionamento (emenda `0002`, `0022`, `0057`, `0058` e `0062`) |
+| [0064](0064-cargos-e-permissoes.md) | Cargos e permissões: a soma do Discord, a restrição que já existia e um dono que não nasce da rede | **aceito** · conformidade de ponta a ponta pendente do transporte novo | `04` e `08` — PERMISSIONS (substitui os quatro papéis fixos; usa a API 7 de MODs) |
+| [0065](0065-o-app-testa-os-comandos-com-dev-dependencies.md) | O app testa os comandos de verdade: dev-dependencies nominais, produção intacta | **aceito** | — (decisão do coordenador da 0.17; emenda o `0002`) |
 
 ## O que ainda não tem ADR
 

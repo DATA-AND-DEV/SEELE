@@ -337,8 +337,8 @@ mod o_cancelar_da_ligacao {
     use crate::a_entrada_velha_que_chega_tarde::{app, runtime, servidor, vez};
     use crate::Session;
     use seele_server::campainha::Desfecho;
-    use seele_server::recepcao::{Aviso, Sala};
-    use seele_server::{Daemon, ServerConfig};
+    use seele_server::hospedagem::Hospedagem;
+    use seele_server::recepcao::Aviso;
     use std::net::SocketAddr;
     use std::sync::Arc;
     use std::time::Duration;
@@ -347,35 +347,72 @@ mod o_cancelar_da_ligacao {
     /// A semente de quem recebe.
     const DONO: u8 = 1;
 
-    async fn sala() -> Arc<Daemon> {
-        // A chave do dono só precisa não ser a de quem liga (a do app, gerada na
-        // casa do teste): quem não é o dono toca.
-        let dono = [DONO; 32];
-        let config = ServerConfig {
-            identidade: Some(seele_server::tls::Identity::da_semente(&[DONO; 32]).unwrap()),
-            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
-            voice_room_limit: 6,
-            sala: Some(Sala {
-                dono,
-                prazo_do_toque: Duration::from_secs(30),
+    /// Um ponto de encontro de verdade, em processo, no loopback (o mesmo das
+    /// provas de `crates/seele-conformance/tests/discar_pelo_codigo.rs`).
+    fn subir_o_ponto() -> SocketAddr {
+        let ponto = seele_encontro::Ponto::abrir_com_quarto(
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            seele_proto::encontro::Vizinhanca::TambemAqui,
+            Arc::new(seele_encontro::Quarto::novo()),
+        )
+        .expect("a escuta do ponto abriu");
+        let onde = ponto.endereco().expect("o ponto sabe onde ligou");
+        std::thread::spawn(move || {
+            let _ = ponto.servir();
+        });
+        onde
+    }
+
+    /// **A sala de outra pessoa, como o produto a sobe** (`iniciar_sala`, com o
+    /// registro no ponto) e o código dela. Desde o enlace da 0.17 a sala só se
+    /// disca pelo código (ADR 0060, D3): pelo endereço, o cliente para antes
+    /// do `Hello` com `SalaDeUmaPessoa`. A chave do dono só precisa não ser a
+    /// de quem liga (a do app, gerada na casa do teste): quem não é o dono toca.
+    async fn sala_registrada(ponto: SocketAddr) -> (Hospedagem, String) {
+        let sala = Hospedagem::iniciar_sala(0, &[DONO; 32], "dona", Some(ponto.to_string()))
+            .await
+            .expect("a sala não subiu");
+        let mut registro = sala
+            .registro_no_quarto()
+            .expect("a sala subiu sem registro no ponto");
+        let registrou = tokio::time::timeout(
+            Duration::from_secs(5),
+            registro.wait_for(|estado| {
+                *estado == seele_server::alcance::encontro::EstadoDoRegistro::Registrado
             }),
-            ..ServerConfig::default()
-        };
-        let servidor = Arc::new(Daemon::bind(config).await.expect("a sala não subiu"));
-        let rodando = Arc::clone(&servidor);
-        tokio::spawn(async move { rodando.run().await });
-        servidor
+        )
+        .await
+        .is_ok_and(|visto| visto.is_ok());
+        assert!(
+            registrou,
+            "a sala não se registrou no ponto: {:?}",
+            *registro.borrow()
+        );
+        // O código da chave do dono, pela mesma conta da FFI: a casa de quem
+        // recebe, com a chave dele.
+        let casa_do_dono = tempfile::tempdir().expect("a casa do dono");
+        std::fs::write(casa_do_dono.path().join("identity.key"), [DONO; 32])
+            .expect("a chave do dono");
+        let codigo = seele_ffi::codigo_desta_maquina(casa_do_dono.path().to_str().unwrap())
+            .expect("o código do dono");
+        (sala, format!("@{codigo}"))
     }
 
     #[test]
     fn cancelar_larga_a_ligacao_que_toca_e_a_sala_ve_cancelada() {
         let _vez = vez();
         runtime().block_on(async {
-            let sala = sala().await;
-            let recepcao = sala.server().recepcao.clone().expect("a sala tem recepção");
+            let ponto = subir_o_ponto();
+            let (sala, alvo) = sala_registrada(ponto).await;
+            let recepcao = sala.recepcao().expect("a sala tem recepção");
             let mut avisos = recepcao.assinar();
             let app = app();
-            let alvo = sala.local_addr().unwrap().to_string();
+            // O ponto de quem liga, só para a casa deste app (a costura do B):
+            // nada vaza para os outros testes do processo.
+            let _ponto_da_casa = seele_ffi::costura_de_teste::usar_o_ponto_nesta_casa(
+                &crate::config_dir(app),
+                &ponto.to_string(),
+            );
             let ligando = std::thread::spawn(move || {
                 runtime().block_on(crate::connect(
                     app.clone(),
@@ -395,8 +432,17 @@ mod o_cancelar_da_ligacao {
                     }
                 }
             })
-            .await
-            .expect("a sala não tocou");
+            .await;
+            // Sem toque, o que o `connect` disse: «não tocou» sozinho foi o que
+            // escondeu, na 0.17, que a sala recusava quem a discava pelo endereço.
+            let Ok(toque) = toque else {
+                let disse = ligando.join().map(|resultado| {
+                    resultado
+                        .map(|_| ())
+                        .map_err(|falha| serde_json::to_value(&falha).unwrap_or_default())
+                });
+                panic!("a sala não tocou em 10 s; o connect: {disse:?}");
+            };
 
             assert!(
                 cancelar_em(&app.state::<Session>()),
@@ -442,6 +488,107 @@ mod o_cancelar_da_ligacao {
                 !cancelar_em(&app.state::<Session>()),
                 "a vaga da ligação ficou ocupada depois de o connect voltar"
             );
+            sala.encerrar().await;
+        });
+    }
+
+    /// **A sessão diz que é uma ligação pessoal, e com qual código** (0.17, a
+    /// vista pessoal da lista de amigos). Pelo `connect` de verdade contra a
+    /// sala de outra pessoa: ela toca, atende, e a sessão que entrou traz em
+    /// `ligacao` o código que a ponte discou. Um servidor aberto ao lado, pelo
+    /// endereço, não traz, e a ligação continua de pé quando ele entra.
+    #[test]
+    fn a_sessao_da_ligacao_diz_o_codigo_e_a_do_servidor_nao() {
+        let _vez = vez();
+        runtime().block_on(async {
+            let ponto = subir_o_ponto();
+            let (sala, alvo) = sala_registrada(ponto).await;
+            let recepcao = sala.recepcao().expect("a sala tem recepção");
+            let mut avisos = recepcao.assinar();
+            let app = app();
+            let _ponto_da_casa = seele_ffi::costura_de_teste::usar_o_ponto_nesta_casa(
+                &crate::config_dir(app),
+                &ponto.to_string(),
+            );
+            let ligando = {
+                let alvo = alvo.clone();
+                std::thread::spawn(move || {
+                    runtime().block_on(crate::connect(
+                        app.clone(),
+                        app.state::<Session>(),
+                        alvo,
+                        "quem-liga".to_owned(),
+                        false,
+                        None,
+                        None,
+                    ))
+                })
+            };
+            let toque = tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    if let Ok(Aviso::Tocou { toque, .. }) = avisos.recv().await {
+                        return toque;
+                    }
+                }
+            })
+            .await
+            .expect("a sala não tocou em 10 s");
+            assert!(recepcao.atender(toque), "a sala não atendeu o toque");
+
+            let fim = tokio::time::Instant::now() + Duration::from_secs(10);
+            while !ligando.is_finished() {
+                assert!(
+                    tokio::time::Instant::now() < fim,
+                    "o connect atendido não voltou"
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let entrou = ligando.join().expect("a linha do connect caiu");
+            assert!(
+                entrou.is_ok(),
+                "a ligação atendida não entrou: {:?}",
+                entrou
+                    .err()
+                    .map(|falha| serde_json::to_value(&falha).unwrap_or_default())
+            );
+
+            let (endereco, servidor) = servidor("Um servidor").await;
+            let no_servidor = crate::connect(
+                app.clone(),
+                app.state::<Session>(),
+                endereco.to_string(),
+                "quem-liga".to_owned(),
+                false,
+                None,
+                None,
+            )
+            .await;
+            assert!(no_servidor.is_ok(), "a entrada no servidor não entrou");
+
+            let codigo = alvo.trim_start_matches('@').to_owned();
+            let na_tela = crate::sessoes_na_tela(&app.state::<Session>());
+            let mut ligacoes: Vec<_> = na_tela
+                .iter()
+                .map(|sessao| (sessao.endereco.clone(), sessao.ligacao.clone()))
+                .collect();
+            ligacoes.sort();
+            assert_eq!(
+                ligacoes,
+                {
+                    let mut esperado =
+                        vec![(alvo.clone(), Some(codigo)), (endereco.to_string(), None)];
+                    esperado.sort();
+                    esperado
+                },
+                "a sessão não diz se é uma ligação pessoal, ou a ligação caiu quando o servidor \
+                 entrou"
+            );
+
+            for conexao in app.state::<Session>().sessoes.conexoes() {
+                conexao.disconnect();
+            }
+            servidor.shutdown();
+            sala.encerrar().await;
         });
     }
 
@@ -586,6 +733,7 @@ mod a_chegada {
             Some("Alice"),
             "a ligação apagou o nome que esta máquina deu"
         );
+        assert!(!contato.amigo, "a ligação feita marcou amigo");
     }
 
     #[test]
@@ -621,7 +769,11 @@ mod a_chegada {
             .collect();
         assert!(
             connect.contains("letligou_para=connection.codigo_da_ligacao();")
-                && connect.contains("ifligar::anotar_a_chegada(&session,&casa,&alvo,ligou_para){"),
+                && connect.contains(
+                    "letvisita=ligar::anotar_a_chegada(&session,&casa,&alvo,ligou_para);"
+                )
+                && connect.contains("nova.guardar_alvo(visita.then(||alvo.clone()));")
+                && connect.contains("ifvisita{"),
             "o `connect` não decide a chegada pela origem que a ponte deu \
              (`Connection::codigo_da_ligacao`): uma ligação voltaria para a lista de visitados"
         );

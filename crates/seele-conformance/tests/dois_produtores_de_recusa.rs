@@ -22,6 +22,9 @@ fn pedido(apelido: &str) -> Pedido {
         apelido: apelido.into(),
         chave_publica: [5; 32],
         impressao: [7; 32],
+        // A impressão DTLS da página nesta conexão (D5). A recusa que se
+        // compara aqui vem antes da prova, e não depende dela.
+        impressao_dtls: [8; 32],
         convite: None,
         aceito: None,
     }
@@ -104,8 +107,9 @@ fn a_recusa_do_servidor_e_a_mesma_antes_e_depois_da_prova() {
 
 #[test]
 fn outra_linha_diz_a_mesma_versao_e_o_mesmo_mais_nova() {
-    // Os números de antes da 1.0, o da 1.0 que não é este, e os depois dela.
-    for numero in (0..=8).chain([10, 11, 200, 255]) {
+    // Os números de antes da 1.0, o da linha 1 (9), que desde a 0.17 não é
+    // este, e os depois da linha 2 (10, o de agora, fica de fora: ele entra).
+    for numero in (0..=9).chain([11, 200, 255]) {
         let mut ligacao = Ligacao::abrir(pedido("marcela")).unwrap();
         let navegador = recusada(ligacao.chegou(&enquadrar(&[numero, 0, 0]).unwrap()));
         assert_eq!(

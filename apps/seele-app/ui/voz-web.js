@@ -73,6 +73,13 @@ const CONFIGURACAO_DA_VOZ = Object.freeze({
   worklet: "voz-worklet.js",
   /** A sessão de áudio do WebKit da rodada 5: uma ligação. */
   sessaoDeAudio: "play-and-record",
+  /**
+   * Quanto a captura fica ligada ao grafo antes de ser dada como aberta. O
+   * Safari do simulador do iOS 27 encerrou a faixa com o cancelamento de eco
+   * 4 ms depois de ela nascer viva (preparacao-0.17, lifecycle-2): 300 ms
+   * cobrem o arranque com folga, e é o que a abertura da voz espera a mais.
+   */
+  arranqueDaCapturaMs: 300,
 });
 
 /** O `.wasm` do `seele-web`, ao lado da página. */
@@ -164,12 +171,30 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     falhas: [],
   };
 
+  /**
+   * Quantas vezes o áudio foi fechado. Um `ligar` em voo confere o número que
+   * viu ao começar: se mudou, o que chegou depois (o `getUserMedia` que resolve
+   * tarde) é de um áudio que já foi fechado, e não é adotado.
+   */
+  let geracaoDoAudio = 0;
+
   const vivo = {
     ctx: null,
+    /** O stream inteiro do `getUserMedia`: o `desligar` para TODAS as faixas dele. */
+    fonte: null,
+    /** Se os ouvintes do fim da página estão registrados (um só jogo, sem duplicar). */
+    escutandoAPagina: false,
     faixa: null,
     captura: null,
     reproducao: null,
     elemento: null,
+    /** A `MediaStreamDestination` da saída: o `desligar` para as faixas do stream dela. */
+    destino: null,
+    /**
+     * O que a página tinha ANTES do `ligar` (`audioSession.type`, `mediaSession.metadata`),
+     * guardado uma vez por abertura, para o `desligar` devolver.
+     */
+    sessao: null,
     encoder: null,
     supressaoAplicada: null,
     decoders: new Map(),
@@ -541,23 +566,105 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
    */
   async function ligar(pedido = {}) {
     if (vivo.ctx) return;
+    const minhaGeracao = geracaoDoAudio;
     try {
-      await abrirOAudio(pedido);
+      await abrirOAudio(pedido, minhaGeracao);
     } catch (erro) {
       // Uma abertura pela metade (o microfone recusado, a saída que não
-      // tocou) não deixa contexto nem tag de áudio para trás.
-      await desligar();
+      // tocou) não deixa contexto nem tag de áudio para trás. **Só a própria
+      // geração**: se o áudio já foi fechado (o `pagehide`, o `desligar`), quem
+      // fechou já levou o que esta abertura tinha registrado, e uma abertura
+      // NOVA pode estar de pé, que este `catch` não pode derrubar.
+      if (minhaGeracao === geracaoDoAudio) await desligar();
       throw erro;
     }
   }
 
-  async function abrirOAudio({ microfone = null, saida: aparelhoDeSaida = null }) {
-    if (navigator.audioSession) navigator.audioSession.type = cfg.sessaoDeAudio;
+  /**
+   * **A página saindo solta o microfone.** O `pagehide` (a navegação, o fechar
+   * do PWA, o bfcache) e o `freeze` fecham o áudio: `track.stop()` em todas as
+   * faixas e o contexto fechado. **Só esses dois**: o `visibilitychange` (a tela
+   * bloqueada, outro app) não para a voz, que segue com a tela apagada, e o
+   * `pageshow` não religa nada: abrir o microfone pede um gesto, e quem volta
+   * entra na sala de novo.
+   */
+  const aoSairDaPagina = () => {
+    desligar().catch((erro) => falha("desligar", erro));
+    // Dito a quem mostra o estado da voz (a ponte): o áudio está fechado, e só um
+    // gesto da pessoa o reabre.
+    aoAcontecer({ tipo: "audio-fechado", motivo: "pagina" });
+  };
+
+  function escutarAPagina() {
+    if (vivo.escutandoAPagina) return;
+    vivo.escutandoAPagina = true;
+    window.addEventListener("pagehide", aoSairDaPagina);
+    window.addEventListener("freeze", aoSairDaPagina);
+    document.addEventListener("freeze", aoSairDaPagina);
+  }
+
+  function pararDeEscutarAPagina() {
+    if (!vivo.escutandoAPagina) return;
+    vivo.escutandoAPagina = false;
+    window.removeEventListener("pagehide", aoSairDaPagina);
+    window.removeEventListener("freeze", aoSairDaPagina);
+    document.removeEventListener("freeze", aoSairDaPagina);
+  }
+
+  /**
+   * Se a faixa passa do arranque: `true` se ela segue viva depois de `ms`,
+   * `false` se encerrar antes. O `onended` de antes volta ao lugar ao fim.
+   */
+  function sobreviveAoArranque(faixa, ms) {
+    return new Promise((resolver) => {
+      if (faixa.readyState === "ended") return resolver(false);
+      const anterior = faixa.onended;
+      let decidido = false;
+      const decidir = (subiu) => {
+        if (decidido) return;
+        decidido = true;
+        faixa.onended = anterior;
+        resolver(subiu && faixa.readyState !== "ended");
+      };
+      faixa.onended = () => decidir(false);
+      setTimeout(() => decidir(true), ms);
+    });
+  }
+
+  /** Se o stream do `getUserMedia` chegou sem faixa de áudio viva. */
+  function chegouEncerrada(fonte) {
+    const faixa = typeof fonte.getAudioTracks === "function" ? fonte.getAudioTracks()[0] : null;
+    return !faixa || faixa.readyState === "ended";
+  }
+
+  /** Para todas as faixas de um stream do `getUserMedia`. */
+  function pararAsFaixas(fonte) {
+    const todas = typeof fonte.getTracks === "function" ? fonte.getTracks() : typeof fonte.getAudioTracks === "function" ? fonte.getAudioTracks() : [];
+    for (const faixa of todas) faixa.stop();
+  }
+
+  async function abrirOAudio({ microfone = null, saida: aparelhoDeSaida = null }, minhaGeracao) {
+    // **Depois de cada espera, a geração**: um `addModule`, um `play`, um
+    // `resume` ou um `getUserMedia` que resolve depois do cancelamento não abre
+    // nada obsoleto (o microfone, o elemento, o nó).
+    const conferir = () => {
+      if (minhaGeracao !== geracaoDoAudio) throw new Error("o áudio foi fechado antes de abrir");
+    };
+    escutarAPagina();
+    if (!vivo.sessao) vivo.sessao = { tipo: undefined, tipoMudou: false, metadata: null, metadataMudou: false };
+    if (navigator.audioSession) {
+      if (!vivo.sessao.tipoMudou) {
+        vivo.sessao.tipo = navigator.audioSession.type;
+        vivo.sessao.tipoMudou = true;
+      }
+      navigator.audioSession.type = cfg.sessaoDeAudio;
+    }
     const ctx = new AudioContext({ sampleRate: cfg.taxa, latencyHint: "interactive" });
     vivo.ctx = ctx;
     ctx.onstatechange = () => aoAcontecer({ tipo: "contexto", estado: ctx.state });
 
     await ctx.audioWorklet.addModule(cfg.worklet);
+    conferir();
     const reproducao = new AudioWorkletNode(ctx, "seele-reproducao-da-voz", {
       numberOfInputs: 0,
       outputChannelCount: [2],
@@ -569,6 +676,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     // A saída pela tag `<audio>`: o iOS a trata como mídia, que segue com a
     // tela bloqueada.
     const destino = ctx.createMediaStreamDestination();
+    vivo.destino = destino;
     reproducao.connect(destino);
     const elemento = document.createElement("audio");
     elemento.playsInline = true;
@@ -579,34 +687,35 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     vivo.elemento = elemento;
     if (aparelhoDeSaida && elemento.setSinkId) {
       await elemento.setSinkId(aparelhoDeSaida).catch((erro) => falha("saída", erro));
+      conferir();
     }
     await elemento.play();
+    conferir();
     if (navigator.mediaSession && window.MediaMetadata) {
+      if (vivo.sessao && !vivo.sessao.metadataMudou) {
+        vivo.sessao.metadata = navigator.mediaSession.metadata;
+        vivo.sessao.metadataMudou = true;
+      }
       navigator.mediaSession.metadata = new MediaMetadata({ title: "SEELE" });
     }
     await ctx.resume();
+    conferir();
 
-    const fonte = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        ...cfg.microfone,
-        noiseSuppression: controles.supressao,
-        ...(microfone ? { deviceId: { ideal: microfone } } : {}),
-      },
-    });
-    const faixa = fonte.getAudioTracks()[0];
-    vivo.faixa = faixa;
-    const aplicado = faixa.getSettings ? faixa.getSettings() : {};
-    vivo.supressaoAplicada = typeof aplicado.noiseSuppression === "boolean" ? aplicado.noiseSuppression : null;
-    faixa.onmute = () => aoAcontecer({ tipo: "captura", estado: "muda" });
-    faixa.onunmute = () => aoAcontecer({ tipo: "captura", estado: "voltou" });
-    faixa.onended = () => {
-      if (vivo.testando) {
-        vivo.falhaDoTeste =
-          "o microfone parou durante o teste: o aparelho saiu, ou o navegador o tomou de volta. Tente de novo ou escolha outro microfone.";
-      }
-      aoAcontecer({ tipo: "captura", estado: "encerrada" });
+    const pedido = {
+      ...cfg.microfone,
+      noiseSuppression: controles.supressao,
+      ...(microfone ? { deviceId: { ideal: microfone } } : {}),
     };
-
+    // O áudio foi fechado enquanto o navegador pensava (o `pagehide`, o `desligar`):
+    // as faixas que acabaram de chegar são paradas, e não adotadas.
+    const pedirOMicrofone = async (restricoes) => {
+      const chegou = await navigator.mediaDevices.getUserMedia({ audio: restricoes });
+      if (minhaGeracao !== geracaoDoAudio) {
+        pararAsFaixas(chegou);
+        throw new Error("o áudio foi fechado antes de o microfone abrir");
+      }
+      return chegou;
+    };
     const captura = new AudioWorkletNode(ctx, "seele-captura-da-voz", { numberOfOutputs: 1 });
     vivo.captura = captura;
     captura.port.onmessage = (evento) => {
@@ -623,7 +732,74 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     // puxado sem devolver o microfone ao alto-falante.
     const calado = ctx.createGain();
     calado.gain.value = 0;
-    ctx.createMediaStreamSource(fonte).connect(captura).connect(calado).connect(ctx.destination);
+    captura.connect(calado).connect(ctx.destination);
+
+    // **A faixa que não sobe** (o Safari do simulador do iOS 27 com o
+    // cancelamento de eco; medido em preparacao-0.17): ou o `getUserMedia` já a
+    // entrega encerrada (A/B cru), ou ela nasce viva e encerra milissegundos
+    // depois, no arranque do processamento de voz (lifecycle-2: 4 ms). Adotá-la
+    // seria dizer «áudio ligado» com ninguém ouvindo. Por isso a captura só é
+    // dada como aberta depois de ARRANQUE_DA_CAPTURA_MS ligada ao grafo; se
+    // encerrar antes, UMA tentativa sem o cancelamento de eco (o resto do pedido
+    // igual), e dita. Uma recusa (o `getUserMedia` que rejeita) nunca é
+    // repetida, e uma faixa que passou do arranque nunca é trocada: depois do
+    // `audio-ligado`, encerrar é a captura perdida, e nada reabre sozinho.
+    const tentar = async (restricoes) => {
+      const chegou = await pedirOMicrofone(restricoes);
+      if (chegouEncerrada(chegou)) {
+        pararAsFaixas(chegou);
+        return null;
+      }
+      // Adotada já no arranque: um `desligar` ou um `pagehide` agora a para.
+      vivo.fonte = chegou;
+      vivo.faixa = chegou.getAudioTracks()[0];
+      const origem = ctx.createMediaStreamSource(chegou);
+      origem.connect(captura);
+      const subiu = await sobreviveAoArranque(vivo.faixa, cfg.arranqueDaCapturaMs);
+      conferir();
+      if (subiu) return chegou;
+      if (typeof origem.disconnect === "function") origem.disconnect();
+      pararAsFaixas(chegou);
+      vivo.fonte = null;
+      vivo.faixa = null;
+      return null;
+    };
+    let semEcoPorque = null;
+    let fonte = await tentar(pedido);
+    if (!fonte && pedido.echoCancellation !== false) {
+      falha("microfone", "a faixa com o cancelamento de eco não subiu (encerrada ao chegar ou no arranque): uma tentativa sem ele");
+      fonte = await tentar({ ...pedido, echoCancellation: false });
+      semEcoPorque = "a faixa com o cancelamento de eco não subiu";
+    }
+    if (!fonte) {
+      const erro = new Error(
+        semEcoPorque ? "o microfone não subiu, com e sem o cancelamento de eco" : "o microfone não subiu",
+      );
+      erro.name = "SeeleCapturaEncerrada";
+      throw erro;
+    }
+    const faixa = vivo.faixa;
+    const aplicado = faixa.getSettings ? faixa.getSettings() : {};
+    vivo.supressaoAplicada = typeof aplicado.noiseSuppression === "boolean" ? aplicado.noiseSuppression : null;
+    faixa.onmute = () => aoAcontecer({ tipo: "captura", estado: "muda" });
+    faixa.onunmute = () => aoAcontecer({ tipo: "captura", estado: "voltou" });
+    faixa.onended = () => {
+      // **Só a faixa de AGORA**, antes de tudo: a de um áudio já fechado (ou o
+      // nosso `stop()`, que o `desligar` faz depois de soltá-la) não escreve o
+      // teste, nem o estado, nem fecha o áudio de depois.
+      if (faixa !== vivo.faixa) return;
+      if (vivo.testando) {
+        vivo.falhaDoTeste =
+          "o microfone parou durante o teste: o aparelho saiu, ou o navegador o tomou de volta. Tente de novo ou escolha outro microfone.";
+      }
+      aoAcontecer({ tipo: "captura", estado: "encerrada" });
+      // **A captura que parou sozinha, em uso** (o navegador ou o sistema). O
+      // áudio fecha inteiro, como no `pagehide`, e a ponte deixa de dizer que a
+      // voz está ligada. Nada reabre sozinho: só um gesto.
+      falha("microfone", "a captura parou sozinha: o navegador ou o sistema encerrou a faixa");
+      desligar().catch((erro) => falha("desligar", erro));
+      aoAcontecer({ tipo: "audio-fechado", motivo: "captura-perdida" });
+    };
 
     vivo.encoder = criarEncoderSeguro();
     aoAcontecer({
@@ -631,6 +807,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
       microfone: aplicado.deviceId ?? null,
       supressao: vivo.supressaoAplicada,
       cancelamentoDeEco: aplicado.echoCancellation ?? null,
+      semEcoPorque,
     });
   }
 
@@ -660,7 +837,11 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
    * que ele é.
    */
   function entrar(transporte, numeroDaVoz) {
-    w.voz_envio(numeroDaVoz);
+    // A voz nova parte da hora da página, e não do zero: quem sai sentado e
+    // volta recebe o mesmo número, e do zero ficava mudo para quem ficou
+    // (`Envio::partindo_de`). `timeOrigin + now()`, e não `Date.now()`: é
+    // monotônico na página, e um acerto do relógio não a faz partir atrás.
+    w.voz_envio(numeroDaVoz, performance.timeOrigin + performance.now());
     w.voz_recepcao(numeroDaVoz);
     fecharDecoders();
     mandarAReproducao({ tipo: "recomecar" });
@@ -698,12 +879,41 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
 
   /** Fecha o áudio: solta o microfone (`track.stop()`), o codec e o contexto. */
   async function desligar() {
+    geracaoDoAudio += 1;
+    pararDeEscutarAPagina();
     sair();
-    if (vivo.faixa) vivo.faixa.stop();
+    // A faixa de agora deixa de ser «a de agora» ANTES do `stop()`: um navegador
+    // que dispare `ended` no nosso próprio `stop()` não conta isso como a
+    // captura perdida (o `onended` só age na faixa de agora).
+    const faixa = vivo.faixa;
+    vivo.faixa = null;
+    if (vivo.fonte) pararAsFaixas(vivo.fonte);
+    if (faixa) faixa.stop();
     if (vivo.encoder && vivo.encoder.state !== "closed") vivo.encoder.close();
-    if (vivo.elemento) vivo.elemento.remove();
+    // A SAÍDA: o `<audio>` pausado, sem o stream e fora do DOM; as faixas da
+    // `MediaStreamDestination` paradas. Os ganchos saem antes, para o `pause()`
+    // não contar «saída pausada» a quem já não escuta.
+    const elemento = vivo.elemento;
+    if (elemento) {
+      elemento.onpause = null;
+      elemento.onplay = null;
+      if (typeof elemento.pause === "function") elemento.pause();
+      elemento.srcObject = null;
+      elemento.remove();
+    }
+    if (vivo.destino && vivo.destino.stream) pararAsFaixas(vivo.destino.stream);
+    // A SESSÃO volta ao que a página tinha antes do `ligar`. **Tudo isto antes
+    // do `await`**: depois dele uma abertura NOVA pode já ter posto a sessão
+    // dela, e devolver o antigo por cima seria desfazê-la. Uma geração velha
+    // não passa por aqui (o `catch` do `abrirOAudio` só fecha a própria), e a
+    // nova guarda o seu «antes» do zero.
+    const antes = vivo.sessao;
+    if (antes) {
+      if (antes.tipoMudou && navigator.audioSession) navigator.audioSession.type = antes.tipo;
+      if (antes.metadataMudou && navigator.mediaSession) navigator.mediaSession.metadata = antes.metadata;
+    }
     const ctx = vivo.ctx;
-    Object.assign(vivo, { ctx: null, faixa: null, captura: null, reproducao: null, elemento: null, encoder: null });
+    Object.assign(vivo, { ctx: null, fonte: null, faixa: null, captura: null, reproducao: null, elemento: null, destino: null, sessao: null, encoder: null });
     if (ctx) await ctx.close();
   }
 

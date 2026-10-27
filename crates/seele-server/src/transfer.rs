@@ -132,7 +132,7 @@ pub enum Outcome {
 /// # Errors
 ///
 /// Fails if the header is not a header.
-pub async fn quem_perguntou(stream: &mut quinn::RecvStream) -> Result<ClientMessageId> {
+pub async fn quem_perguntou(stream: &mut crate::transporte::Recebe) -> Result<ClientMessageId> {
     let header: AttachmentHeader = crate::frame::read(stream)
         .await
         .context("could not read the transfer header")?;
@@ -151,7 +151,7 @@ pub async fn receive(
     server: &Server,
     person: PersonId,
     nickname: &str,
-    stream: &mut quinn::RecvStream,
+    stream: &mut crate::transporte::Recebe,
 ) -> Result<Outcome> {
     let header: AttachmentHeader = crate::frame::read(stream)
         .await

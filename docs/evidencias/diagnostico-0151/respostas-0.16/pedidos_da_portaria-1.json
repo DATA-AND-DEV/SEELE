@@ -1,0 +1,22 @@
+[
+  {
+    "impressao": "0e79eabe3607f3eb8503c7dc8b6216389816128b53e5d17e7aa77d8c5e51296c",
+    "apelido": "visita",
+    "segredo": "aberto",
+    "observacao": "",
+    "bateu_em": 1792873631,
+    "batidas": 1,
+    "decidido_em": null,
+    "admitido": false
+  },
+  {
+    "impressao": "0cb1f3f0f8318faaedf3eec9dd211c55a13d9355e3157a8578cbe9894d35a747",
+    "apelido": "",
+    "segredo": "aberto",
+    "observacao": "quem hospeda",
+    "bateu_em": 1792873631,
+    "batidas": 1,
+    "decidido_em": 1792873631,
+    "admitido": true
+  }
+]

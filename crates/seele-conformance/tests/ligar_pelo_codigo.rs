@@ -9,7 +9,9 @@
 //! - depois da primeira ligação completa, a chave inteira fica pinada sob
 //!   `@CÓDIGO`, e dali em diante uma chave diferente com o mesmo código é
 //!   «se passou por»;
-//! - o SNI é sempre o nome da sala, e nunca o código.
+//! - o código não viaja legível: até a 0.16, o SNI era sempre o nome da sala;
+//!   desde a 0.17 (WebRTC, sem SNI), nenhum datagrama da ligação leva o código
+//!   nem a chave da pessoa em claro.
 //!
 //! O caminho medido de ponta a ponta é o de quem recebe ligando para a própria
 //! sala (`127.0.0.1:8385`, tarefa 7e): ele não toca, então não depende do
@@ -157,44 +159,105 @@ async fn uma_chave_diferente_da_pinada_se_passou_pelo_dono_do_codigo() {
     );
 }
 
+/// **O código não viaja legível** (ADR 0060), desde a 0.17 pelo WebRTC.
+///
+/// Até a 0.16 a pergunta era o SNI do QUIC: quem liga pelo código mandava
+/// sempre o nome da sala (`NOME_DA_SALA`), e nunca o código, no Initial que
+/// qualquer um na rede lê. O WebRTC não tem SNI. O que vai em claro antes de a
+/// conexão segura fechar são os Bindings STUN (com o `U` sorteado por
+/// tentativa) e o aperto do DTLS, com os certificados P-256 das duas pontas,
+/// efêmeros, sem nome. A chave e a assinatura da sala só viajam dentro do
+/// `ctl`, cifradas (a `0x03`, D3).
+///
+/// Este teste põe um retransmissor UDP entre quem liga e a sala, deixa a
+/// ligação inteira passar por ele, e confere que **nenhum** datagrama, de
+/// nenhum dos dois lados, leva o código escrito ou os bytes da chave da
+/// pessoa. É mais forte que o guarda do SNI, que olhava um campo só.
 #[tokio::test]
-async fn o_sni_e_o_nome_da_sala_mesmo_quando_o_destino_diz_o_codigo() {
+async fn o_codigo_e_a_chave_nao_viajam_legiveis_numa_ligacao_pelo_codigo() {
     let _vaga = vaga::minha();
-    // Um servidor QUIC cru com o certificado da sala, para ler o SNI que chegou.
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let config =
-        seele_server::tls::server_config(Identity::da_semente(&[DONO; 32]).unwrap()).unwrap();
-    let ponta = quinn::Endpoint::server(config, SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-    let endereco = ponta.local_addr().unwrap();
-    let sni = tokio::spawn(async move {
-        let conexao = ponta.accept().await?.await.ok()?;
-        conexao
-            .handshake_data()?
-            .downcast::<quinn::crypto::rustls::HandshakeData>()
-            .ok()?
-            .server_name
-    });
+    let endereco_da_sala = sala().await;
+
+    // O retransmissor: quem liga fala com `frente`, e `tras` fala com a sala.
+    let frente = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    let tras = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    let endereco_da_frente = frente.local_addr().unwrap();
+    let vistos: Arc<std::sync::Mutex<Vec<Vec<u8>>>> = Arc::default();
+    let quem_liga: Arc<std::sync::Mutex<Option<SocketAddr>>> = Arc::default();
+    {
+        let (frente, tras, vistos, quem_liga) = (
+            Arc::clone(&frente),
+            Arc::clone(&tras),
+            Arc::clone(&vistos),
+            Arc::clone(&quem_liga),
+        );
+        tokio::spawn(async move {
+            let mut balde = vec![0_u8; 65_536];
+            while let Ok((n, de)) = frente.recv_from(&mut balde).await {
+                *quem_liga.lock().unwrap() = Some(de);
+                let lido = balde.get(..n).unwrap_or_default();
+                vistos.lock().unwrap().push(lido.to_vec());
+                let _ = tras.send_to(lido, endereco_da_sala).await;
+            }
+        });
+    }
+    {
+        let (frente, tras, vistos, quem_liga) = (
+            Arc::clone(&frente),
+            Arc::clone(&tras),
+            Arc::clone(&vistos),
+            Arc::clone(&quem_liga),
+        );
+        tokio::spawn(async move {
+            let mut balde = vec![0_u8; 65_536];
+            while let Ok((n, _)) = tras.recv_from(&mut balde).await {
+                let lido = balde.get(..n).unwrap_or_default();
+                vistos.lock().unwrap().push(lido.to_vec());
+                let destino = *quem_liga.lock().unwrap();
+                if let Some(destino) = destino {
+                    let _ = frente.send_to(lido, destino).await;
+                }
+            }
+        });
+    }
 
     let codigo = codigo_de(DONO);
-    // O destino pede o código como nome TLS: quem monta um destino errado não
-    // pode fazer o código viajar legível no Initial do QUIC.
-    let _ = tokio::time::timeout(
-        Duration::from_secs(5),
+    let enlace = tokio::time::timeout(
+        Duration::from_secs(15),
         Enlace::conectar(
-            destino(endereco, codigo, &codigo.to_string()),
+            destino(endereco_da_frente, codigo, NOME_DA_SALA),
             chave(DONO),
             Arc::new(MemoryPinStore::new()) as Arc<dyn PinStore>,
         ),
     )
-    .await;
+    .await
+    .expect("a ligação pelo retransmissor passou do prazo")
+    .expect("a ligação pelo código não passou pelo retransmissor");
+    drop(enlace);
 
-    assert_eq!(
-        tokio::time::timeout(Duration::from_secs(5), sni)
-            .await
-            .unwrap()
-            .unwrap()
-            .as_deref(),
-        Some(NOME_DA_SALA),
-        "o SNI de uma ligação pelo código não foi o nome da sala"
+    let vistos = vistos.lock().unwrap().clone();
+    assert!(
+        vistos.len() > 4,
+        "o retransmissor viu {} datagramas: a ligação não passou por ele",
+        vistos.len()
     );
+    let texto = codigo.to_string();
+    let sem_tracos: String = texto.chars().filter(|c| *c != '-').collect();
+    let chave_publica = chave(DONO).verifying_key().to_bytes();
+    let contem = |palheiro: &[u8], agulha: &[u8]| {
+        !agulha.is_empty()
+            && palheiro
+                .windows(agulha.len())
+                .any(|janela| janela == agulha)
+    };
+    for (i, datagrama) in vistos.iter().enumerate() {
+        assert!(
+            !contem(datagrama, texto.as_bytes()) && !contem(datagrama, sem_tracos.as_bytes()),
+            "o datagrama {i} leva o código legível"
+        );
+        assert!(
+            !contem(datagrama, &chave_publica),
+            "o datagrama {i} leva a chave da pessoa em claro"
+        );
+    }
 }

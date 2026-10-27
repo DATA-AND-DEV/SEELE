@@ -331,6 +331,14 @@ pub const PRELUDIO: &str = r#"
   // caminho que o monte (a limpeza da máquina das APIs 3 a 5, depois do corte).
   globalThis.SeeleMods = Object.freeze({
     request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
+    // **A ação declarada** (API 7, capacidade `acoes`): o `request` que nomeia
+    // uma ação do `permissoes` do `mod.json`. Quem confere o MOD ligado, a
+    // ação declarada e a permissão de quem pede é o servidor, antes da metade
+    // de servidor rodar; a recusa volta como valor, `{ ok: false, recusa:
+    // 'acao-nao-declarada' | 'sem-permissao' }`, como toda resposta do MOD.
+    ...(capacidades.has('acoes') ? {
+      acao: (id, canal, acao, valor) => pedir('acao', { id, canal, acao, valor }),
+    } : {}),
   });
 
   /**

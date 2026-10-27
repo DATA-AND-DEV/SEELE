@@ -1,0 +1,73 @@
+[package]
+name = "seele-enlace"
+description = "O transporte da 0.17: WebRTC (ICE, DTLS, DataChannels) sobre um socket UDP só."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Contrato da fase 2 da 0.17, D1: o transporte comum ao `seele-core` e ao
+# `seele-server`, e por isso um crate só (emenda o ADR 0002, que separava os dois
+# porque os setups QUIC eram diferentes — com WebRTC não são).
+#
+# `str0m` é sans-IO: este crate é dono do socket, e é isso que deixa STUN, DTLS e
+# os datagramas do ponto de encontro dividirem a porta 8383 (RFC 7983).
+# `default-features = false` e **nenhum** backend do str0m ligado: a feature
+# `rust-crypto` do str0m traz o `str0m-rust-crypto`, que liga a feature `rcgen`
+# do `dimpl` (`rcgen = ["dep:rcgen", "aws-lc-rs"]`) e, com ela, um segundo
+# gerador de certificado. O provedor de cripto mora aqui (`cripto.rs`), o
+# certificado é gerado pelo `rcgen` com o `ring` que o resto do workspace já
+# usa, e o provedor é passado por instância (`RtcConfig::set_crypto_provider`):
+# nada de provedor global no processo.
+#
+# **O DTLS (`dimpl`) usa o backend `aws-lc-rs`, e só ele** (25/10/2026). Até
+# aqui a 0.17 usava a feature `rust-crypto` do `dimpl`, para não trazer C ao
+# build — uma escolha técnica desta rodada. Ela caiu num gate de segurança: o
+# RUSTSEC-2026-0387 (o `crypto-bigint` < 0.7.6 sem tempo constante) chegava por
+# `dimpl/rust-crypto` → `ecdsa`/`p256`/`p384` → `elliptic-curve` 0.13 →
+# `crypto-bigint` 0.5.5, e a correção está numa faixa semver que a família
+# `elliptic-curve` 0.13 não aceita. Nada de `ignore` no `deny.toml` nem de
+# backport de cripto: trocou-se o backend. As duas features **não se somam**
+# (com as duas, o `dimpl` escolheria o AWS-LC e o RustCrypto ficaria no binário
+# à toa; `cargo tree -i crypto-bigint` tem de dar vazio).
+#
+# O custo, aceito por isso: entra o `aws-lc-rs` com o `aws-lc-sys`, que compila
+# o AWS-LC (C e assembly) no build. Precisa de um compilador C (o clang no
+# macOS, o gcc/clang no Linux, o MSVC no Windows) e, no Windows x86_64, de NASM
+# — que o `dimpl` dispensa ligando `prebuilt-nasm` (objetos pré-montados que o
+# `aws-lc-sys` traz). O CMake só entra se o `aws-lc-sys` cair no builder
+# antigo; o padrão dele (0.46.0), com as ligações pré-geradas dos quatro alvos
+# do `deny.toml`, é o `cc`. Licenças: `ISC AND (Apache-2.0 OR ISC)` no
+# `aws-lc-rs` e, no `aws-lc-sys`, ISC, Apache-2.0, MIT, MIT-0 e BSD-3-Clause —
+# todas já na lista do `deny.toml`, que não mudou. ADR 0063, emenda de
+# 25/10/2026.
+[dependencies]
+aes = "0.8"
+aes-gcm = "0.10"
+anyhow = "1.0.104"
+ctr = "0.9"
+dimpl = { version = "=0.7.6", default-features = false, features = ["aws-lc-rs"] }
+hmac = "0.12"
+rcgen = "0.14.8"
+seele-proto = { path = "../seele-proto" }
+sha1 = "0.10"
+sha2 = "0.10"
+socket2 = { workspace = true }
+str0m = { version = "=0.24.1", default-features = false }
+str0m-proto = { version = "=0.7.0", default-features = false, features = ["dtls"] }
+thiserror = "2.0.19"
+tokio = { version = "1.53.1", features = ["net", "rt", "sync", "time", "macros", "io-util"] }
+# O `PollSemaphore`, para o `AsyncWrite` do `Envio` esperar crédito. Já está no
+# `Cargo.lock` (0.7.19), então nenhum crate novo.
+tokio-util = "0.7.19"
+tracing = "0.1.44"
+rand = "0.10.2"
+
+[dev-dependencies]
+ed25519-dalek = "3.0.0"
+socket2 = { workspace = true }
+tokio = { version = "1.53.1", features = ["full", "test-util"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[lints]
+workspace = true

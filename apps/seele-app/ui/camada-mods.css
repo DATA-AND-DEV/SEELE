@@ -72,6 +72,9 @@
   flex-direction: column;
   gap: 14px;
   min-height: 0;
+  /* O corpo rola quando a pergunta não cabe na janela (um celular de 320x568 com três MODs): as palavras e a lista rolam, e ACEITAR e RECUSAR
+     ficam à vista no pé (`.mods-acoes`), porque os botões são a única saída desta pergunta. */
+  overflow-y: auto;
 }
 
 .mods-prosa {
@@ -208,6 +211,11 @@
   justify-content: flex-end;
   gap: 8px;
   flex: 0 0 auto;
+  position: sticky;
+  bottom: -20px;
+  margin-bottom: -20px;
+  padding: 12px 0 20px;
+  background: var(--seele-negro-painel);
 }
 
 /* ------------------------------------ a gestão, na tela de CONFIGURAÇÕES

@@ -7,6 +7,13 @@ Sobre `docs/superpowers/specs/2026-10-08-0.16-design.md` (§1 e §3) e o adendo
 `docs/superpowers/specs/2026-10-08-0.16-adendo-negociacao-de-versao.md`, que
 é o desenho. **Este ADR é a definição da versão de servidor.**
 
+> **Emendado pelo [0063](0063-a-linha-2-fala-webrtc.md) em 2026-10-24.**
+>
+> - A 0.17 é a linha 2: protocolo 10, Servidor 2.0, transporte WebRTC.
+> - A tabela do item 1 passa a ser `9 → linha 1` (o único número dela) e `10.. → linha 2`.
+> - A frase do item 7 «uma 2.0 continua aceitando o `seele/1`» **não vale para a linha 2**: não há QUIC nela, e a recusa à linha 1 sai pelo link, pelo ENC/3 e pelo launcher.
+> - O resto continua: a regra da mudança só por acréscimo vale dentro da linha 2, e o `[c, 11, 0]` continua congelado.
+
 ## Contexto
 
 O protocolo quebrou quatro vezes em 17 dias: 2→3, 3→6, 6→7 e 7→8 (análise

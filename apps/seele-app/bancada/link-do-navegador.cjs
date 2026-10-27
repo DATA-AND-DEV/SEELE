@@ -106,8 +106,11 @@ const LINK = 'https://' + ORIGEM + '/#203.0.113.7:8383?fp=' + 'ab'.repeat(32) + 
     // 2. Só pelo encontro: o link fica, e o aviso diz por quê e o que resolve.
     tela = await comAlcance(resposta('SoPeloEncontro'));
     assert.ok(tela.linha && tela.campo === LINK, 'o link do navegador sumiu quando só o encontro alcança');
-    assert.match(tela.aviso ?? '', /SÓ QUEM ESTÁ NA SUA REDE ENTRA/, `o aviso não diz quem entra: ${tela.aviso}`);
-    assert.match(tela.aviso, /o navegador não usa o encontro/, `o aviso não diz por quê: ${tela.aviso}`);
+    // Na 0.17 o navegador também passa pelo ponto de encontro (D7): o aviso
+    // diz que quem está fora entra por ele, e o caso em que o caminho não abre.
+    assert.match(tela.aviso ?? '', /ENTRA PELO PONTO DE ENCONTRO/, `o aviso não diz por onde quem está fora entra: ${tela.aviso}`);
+    assert.match(tela.aviso, /NAT simétrico/, `o aviso não diz quando o caminho pode não abrir: ${tela.aviso}`);
+    assert.doesNotMatch(tela.aviso, /não usa o encontro/, `o aviso repete a frase da 0.16, falsa na 0.17: ${tela.aviso}`);
     assert.match(tela.aviso, /porta UDP 8383/, `o aviso não diz qual porta abrir: ${tela.aviso}`);
     assert.match(tela.aviso, /IPv6/, `o aviso não oferece o IPv6: ${tela.aviso}`);
     assert.equal(tela.curto, true, 'o aviso de quem só alcança pelo encontro não tem a cor do alcance curto');
@@ -123,6 +126,26 @@ const LINK = 'https://' + ORIGEM + '/#203.0.113.7:8383?fp=' + 'ab'.repeat(32) + 
     assert.match(tela.aviso ?? '', /SÓ FUNCIONA NA SUA REDE/, `o aviso de só na rede: ${tela.aviso}`);
     tela = await comAlcance(resposta('UmDegrauNovo'));
     assert.match(tela.aviso ?? '', /PODE NÃO ABRIR DE FORA/, `um alcance desconhecido não caiu no «não se sabe»: ${tela.aviso}`);
+
+    // 4b. **A 0.17 não manda validade** (achado do Codex no app nativo: «Vale
+    //     até NaN/NaN, às NaN:NaN»): sem `ate`, a nota não diz data nenhuma, e
+    //     sem `renova` a porta não pede o link de novo sem parar.
+    tela = await comAlcance({ link: LINK, alcance: 'Alcanca', porta: 8383 });
+    assert.doesNotMatch(tela.nota, /NaN|Vale até/, `a nota inventou uma validade: ${tela.nota}`);
+    await page.waitForTimeout(400);
+    assert.equal(await page.evaluate(() => testCalls.filter(c => c.cmd === 'link_do_navegador').length), 1,
+      'sem `renova`, a porta pediu o link de novo sem parar');
+
+    // 4c. **Só nesta máquina** (127.0.0.1, o modo local): o convite e o link dizem
+    //     «nesta máquina», nunca «na sua rede», e nenhum nome cru aparece.
+    await page.evaluate(() => mostrarAlcance('SoEstaMaquina', null, null, null, null));
+    tela = await comAlcance(resposta('SoNaRede'));
+    const doConvite = await page.evaluate(() => $('convite-alcance').textContent);
+    assert.match(doConvite, /SÓ FUNCIONA NESTA MÁQUINA/, `o convite não diz «nesta máquina»: ${doConvite}`);
+    assert.doesNotMatch(doConvite, /SoEstaMaquina|SUA REDE/, `o convite mostra o nome cru ou promete a rede: ${doConvite}`);
+    assert.match(tela.aviso ?? '', /SÓ FUNCIONA NESTA MÁQUINA/, `o link não diz «nesta máquina»: ${tela.aviso}`);
+    assert.doesNotMatch(tela.aviso ?? '', /SUA REDE/, `o link promete a rede com o servidor só aqui: ${tela.aviso}`);
+    await page.evaluate(() => mostrarAlcance('SoRedeLocal', null, null, null, null));
 
     // 5. Sem janelas.
     tela = await comAlcance({ recusa: 'SemJanelas' });

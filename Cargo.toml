@@ -7,6 +7,7 @@ members = [
     "crates/seele-audio",
     "crates/seele-video",
     "crates/seele-sessao",
+    "crates/seele-enlace",
     "crates/seele-core",
     "crates/seele-server",
     "crates/seele-ffi",
@@ -59,3 +60,43 @@ shiguredo_opus = "2026.2.0"
 # own — so the version lives here, per the note above, rather than being
 # declared twice and drifting.
 socket2 = "0.6.5"
+
+# A cripto e o SCTP do transporte da 0.17 otimizados também no perfil de
+# desenvolvimento (pedido do E, 24/10). Sem otimização a cripto deixa a tarefa
+# da `Ponta` presa à CPU: medido em debug, 32 MiB num canal levavam 9–27 s,
+# contra 0,5 s em release, e a voz no teste do R4 dependia da carga da máquina.
+# Só estes pacotes: o código do produto continua em debug, com os
+# `debug_assertions` e os símbolos de sempre.
+#
+# O SRTP, o SHA e o HMAC do STUN continuam em RustCrypto (`aes` … `sha2`). O
+# DTLS passou ao AWS-LC em 25/10 (RUSTSEC-2026-0387, ADR 0063), e saíram daqui
+# o `p256`, o `primeorder`, o `elliptic-curve`, o `crypto-bigint` e o `ecdsa`,
+# que não estão mais na árvore. Entra o `aws-lc-sys`: o `cc` lê o `OPT_LEVEL`
+# do perfil do pacote, então é isto que compila o C do AWS-LC otimizado em
+# debug.
+[profile.dev.package.aes]
+opt-level = 3
+[profile.dev.package.aes-gcm]
+opt-level = 3
+[profile.dev.package.ctr]
+opt-level = 3
+[profile.dev.package.ghash]
+opt-level = 3
+[profile.dev.package.polyval]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.sha1]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.aws-lc-sys]
+opt-level = 3
+[profile.dev.package.aws-lc-rs]
+opt-level = 3
+[profile.dev.package.dimpl]
+opt-level = 3
+[profile.dev.package.sctp-proto]
+opt-level = 3
+[profile.dev.package.str0m]
+opt-level = 3

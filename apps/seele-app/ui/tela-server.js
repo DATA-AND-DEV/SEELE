@@ -119,12 +119,31 @@ const VOLTA = {
  * monocromático, e o `aria-current` é o que atravessa para quem não vê nenhuma
  * das duas.
  */
+// ---- o celular (< 700px): o ÍNDICE das seções e, ao tocar numa, a seção inteira com um botão que volta ao índice. `data-vista` mora em #tela-server.
+const SERVER_ESTREITO = window.matchMedia ? window.matchMedia("(max-width: 700px)") : null;
+let abrindoOServer = false;
+
+function vistaDoServer(vista) {
+  const tela = $("tela-server");
+  if (tela.dataset.vista !== vista) tela.dataset.vista = vista;
+}
+
 function abrirSecao(id) {
+  // Qualquer abertura de seção que não seja a do próprio abrirServer (o toque na lista, um atalho de outra tela) mostra a seção.
+  const vinhaDoIndice = $("tela-server").dataset.vista === "indice";
+  if (!abrindoOServer && SERVER_ESTREITO && SERVER_ESTREITO.matches) vistaDoServer("secao");
   if (id === "secao-mods" && $("secao-mods").hidden) id = "secao-audio";
-  for (const botao of document.querySelectorAll(".server-secao")) {
+  // Só as seções com painel: CARGOS E PERMISSÕES abre uma camada, e não um painel.
+  for (const botao of document.querySelectorAll(".server-secao[data-painel]")) {
     const atual = botao.id === id;
     botao.setAttribute("aria-current", atual ? "true" : "false");
     $(botao.dataset.painel).hidden = !atual;
+    // **E sair da seção de áudio para o teste.** Um microfone aberto por uma tela que ninguém está olhando é um microfone esquecido — a mesma
+    // regra do push-to-talk que perde o foco. Antes do `continue`: ele pulava as seções que não são a atual, e o encerramento nunca rodava.
+    // Para SÓ o teste do microfone, e só se há um (aberto ou a abrir); a voz da sala não é tocada.
+    if (!atual && botao.dataset.painel === "painel-audio" && (relogioDoTeste !== null || testeVivo !== null)) {
+      pararOTesteDeMicrofone().catch((falha) => console.warn("teste:", falha));
+    }
     if (!atual) continue;
     $("server-titulo").textContent = botao.dataset.titulo;
     $("server-subtitulo").textContent = botao.dataset.sub;
@@ -143,12 +162,6 @@ function abrirSecao(id) {
     if (atual && botao.dataset.painel === "painel-audio") {
       desenharQualidadeDaVoz().catch((falha) => console.warn("voz:", falha));
     }
-    // **E sair da seção de áudio para o teste.** Um microfone aberto por uma tela
-    // que ninguém está olhando é um microfone esquecido — a mesma regra do
-    // push-to-talk que perde o foco.
-    if (!atual && botao.dataset.painel === "painel-audio") {
-      pararOTesteDeMicrofone().catch((falha) => console.warn("teste:", falha));
-    }
     if (atual && botao.dataset.painel === "painel-identidade") {
       desenharPreviasConsentidas().catch((falha) => console.warn("prévias:", falha));
     }
@@ -160,6 +173,12 @@ function abrirSecao(id) {
     if (atual && botao.dataset.painel === "painel-malha") {
       desenharMalha().catch((falha) => console.warn("malha:", falha));
     }
+  }
+  // Na janela estreita, abrir uma seção esconde a lista, e com ela o botão que tinha o foco: o foco vai para o título da seção (que não é
+  // controle, `tabindex="-1"`), e o leitor de tela começa por ele. O SEÇÕES devolve o foco ao botão da seção que estava aberta.
+  if (vinhaDoIndice && !abrindoOServer && SERVER_ESTREITO && SERVER_ESTREITO.matches) {
+    $("server-titulo").tabIndex = -1;
+    $("server-titulo").focus({ preventScroll: true });
   }
   // **A seção nova começa no começo dela.**
   //
@@ -191,10 +210,27 @@ async function desenharDispositivos() {
 }
 
 async function desenharUmLado(lado) {
-  const [dispositivos, escolhido] = await Promise.all([
-    lado.listar(),
-    lado.lerEscolhido(),
-  ]);
+  let dispositivos;
+  let escolhido;
+  try {
+    [dispositivos, escolhido] = await Promise.all([
+      lado.listar(),
+      lado.lerEscolhido(),
+    ]);
+  } catch (falha) {
+    // **A recusa esperada do celular.** Na página do navegador a ponte recusa
+    // `saidas` e `saida_escolhida` com a frase «o celular toca pela saída de som
+    // do sistema» (`RecusaDaPonte`): é o que a página não faz, e não uma falha.
+    // Sem este desvio a recusa subia por `abrirServer` como promessa sem dono
+    // (um PAGEERROR a cada ida a AJUSTES), e a lista ficava como estava. Só a
+    // `RecusaDaPonte` é tratada; qualquer outra falha — a do desktop inclusive —
+    // continua subindo como antes.
+    if (!falha?.RecusaDaPonte) throw falha;
+    escolhidoDe[lado.chave] = null;
+    nomeDe[lado.chave] = new Map();
+    repovoar($(lado.lista), [elemento("li", "server-dispositivos-vazio", fraseDeErro(falha))]);
+    return;
+  }
   escolhidoDe[lado.chave] = escolhido ?? null;
   nomeDe[lado.chave] = new Map(dispositivos.map((d) => [d.id, d.name]));
 
@@ -614,43 +650,79 @@ $("server-sensibilidade-padrao")?.addEventListener("click", async () => {
   await desenharQualidadeDaVoz();
 });
 
+// **O ciclo do teste do microfone é UM só, em ordem.** O backend tem um teste (um slot) e responde em ordem de chegada, então:
+//   - `abrir` e `fechar` entram numa FILA (`filaDoTeste`): nenhum par de invokes corre ao mesmo tempo, e um fechar lento termina antes de o abrir
+//     seguinte sair;
+//   - cada COMEÇAR toma uma GERAÇÃO; parar, abandonar, fechar a tela, trocar de seção e o SEÇÕES a incrementam;
+//   - TODA continuação depois de um `await` (a abertura, a leitura do estado, o monitoramento) confere a geração antes de tocar a UI ou de chamar
+//     PARAR: uma resposta velha não esconde, não re-rotula e não encerra um teste novo;
+//   - COMEÇAR é ignorado enquanto uma abertura está pendente (`abrindoOTeste`): o duplo clique não abre dois.
+// Quem encerra um teste pendente é o `fechar` que PARAR enfileirou DEPOIS do abrir dele: não há fechar «tardio» solto que pudesse matar o novo.
+let geracaoDoTeste = 0;
+let testeVivo = null;
+let abrindoOTeste = false;
+let filaDoTeste = Promise.resolve();
+
+/** Põe uma operação do teste (abrir/fechar) na fila: ela só começa quando as anteriores terminaram, bem ou mal. */
+function naFilaDoTeste(operacao) {
+  const rodando = filaDoTeste.then(operacao, operacao);
+  filaDoTeste = rodando.catch(() => {});
+  return rodando;
+}
+
 $("server-testar-microfone")?.addEventListener("click", async () => {
   if (relogioDoTeste !== null) {
     await pararOTesteDeMicrofone();
     return;
   }
+  // Uma abertura já pendente: o segundo clique não abre outra.
+  if (abrindoOTeste) return;
+  const minha = ++geracaoDoTeste;
+  testeVivo = minha;
+  abrindoOTeste = true;
   try {
-    await invoke("abrir_teste_de_microfone");
+    await naFilaDoTeste(() => invoke("abrir_teste_de_microfone"));
   } catch (falha) {
+    if (minha !== geracaoDoTeste) return;
+    testeVivo = null;
+    abrindoOTeste = false;
     $("server-nivel-frase").textContent = fraseDeErro(falha);
     $("server-nivel-da-voz").hidden = false;
     return;
   }
+  // Foi parado, abandonado ou trocado enquanto a abertura estava pendente: não reabre a UI (o fechar que PARAR enfileirou encerra este).
+  if (minha !== geracaoDoTeste) return;
+  abrindoOTeste = false;
   $("server-testar-microfone").textContent = "PARAR O TESTE";
   $("server-ouvir-microfone").hidden = false;
   $("server-nivel-da-voz").hidden = false;
   // Dez vezes por segundo: o medidor tem de acompanhar a fala, e um quadro de
   // áudio são 20 ms — ler mais depressa que isso leria o mesmo número duas vezes.
   relogioDoTeste = setInterval(() => {
-    lerOTesteDeMicrofone().catch((falha) => console.warn("teste de microfone:", falha));
+    lerOTesteDeMicrofone(minha).catch((falha) => console.warn("teste de microfone:", falha));
   }, 100);
 });
 
 $("server-ouvir-microfone")?.addEventListener("click", async () => {
   const botao = $("server-ouvir-microfone");
   const ligado = botao.getAttribute("aria-pressed") !== "true";
+  const minha = geracaoDoTeste;
   try {
     await invoke("monitorar_o_microfone", { ligado });
   } catch (falha) {
     console.warn("monitorar o microfone:", falha);
   }
+  // O teste mudou (parou, ou outro começou) enquanto a resposta vinha: ela não toca a UI de quem não a pediu.
+  if (minha !== geracaoDoTeste) return;
   botao.setAttribute("aria-pressed", ligado ? "true" : "false");
   botao.textContent = ligado ? "PARAR DE OUVIR" : "OUVIR-ME";
 });
 
 /** Lê o teste e desenha o medidor. */
-async function lerOTesteDeMicrofone() {
+async function lerOTesteDeMicrofone(minha) {
   const estado = await invoke("estado_do_teste_de_microfone");
+  // Uma leitura VELHA (o teste parou ou outro começou enquanto ela vinha) não desenha, não para nada e não mexe na UI.
+  if (minha !== geracaoDoTeste) return;
   if (!estado) {
     await pararOTesteDeMicrofone();
     return;
@@ -686,15 +758,15 @@ async function lerOTesteDeMicrofone() {
 
 /** Fecha o teste e devolve os botões ao estado parado. */
 async function pararOTesteDeMicrofone() {
+  geracaoDoTeste += 1;
+  testeVivo = null;
+  abrindoOTeste = false;
   if (relogioDoTeste !== null) {
     clearInterval(relogioDoTeste);
     relogioDoTeste = null;
   }
-  try {
-    await invoke("fechar_teste_de_microfone");
-  } catch (falha) {
-    console.warn("fechar teste de microfone:", falha);
-  }
+  // **A UI volta ao parado AGORA, antes do `await`**: o fechar pode demorar, e um COMEÇAR novo no meio dele não pode ser re-rotulado nem
+  // escondido por um reset que chegasse depois.
   const botao = $("server-testar-microfone");
   if (botao) botao.textContent = "COMEÇAR O TESTE";
   const ouvir = $("server-ouvir-microfone");
@@ -708,6 +780,11 @@ async function pararOTesteDeMicrofone() {
   // Sem teste não há medida, e a marca volta para a régua.
   corteMedidoDbfs = null;
   desenharCorteDoMedidor();
+  try {
+    await naFilaDoTeste(() => invoke("fechar_teste_de_microfone"));
+  } catch (falha) {
+    console.warn("fechar teste de microfone:", falha);
+  }
 }
 
 // --------------------------------------------------------------------- ações
@@ -748,6 +825,7 @@ async function abrirServer(origem) {
   // A tela de origem **fica visível atrás**: este é um diálogo desde a 0.9.0,
   // e o que está atrás é justamente o que se está tentando consertar.
   telaDeOrigem = origem;
+  vistaDoServer("indice");
   $("tela-server").hidden = false;
   $("server-erro").hidden = true;
   // A tecla gravada, relida a cada abertura: ela pode ter sido trocada noutra
@@ -777,7 +855,12 @@ async function abrirServer(origem) {
   await atualizarServer();
   // A seção lembrada precisa reler a sessão: ela pode ter aberto antes de hospedar.
   const selecionada = document.querySelector('.server-secao[aria-current="true"]');
-  if (selecionada && !selecionada.hidden) abrirSecao(selecionada.id);
+  abrindoOServer = true;
+  try {
+    if (selecionada && !selecionada.hidden) abrirSecao(selecionada.id);
+  } finally {
+    abrindoOServer = false;
+  }
   abrirTela("tela-server");
 }
 
@@ -958,6 +1041,8 @@ function fecharServerMesmo() {
  * telas empilhadas, porque toda `.tela` tem a altura da janela.
  */
 function abandonarServer() {
+  // A tela some sem fechar por `fecharServerMesmo` (a queda, `mostrarFim`): o teste do microfone morre com ela, e só ele.
+  pararOTesteDeMicrofone().catch((falha) => console.warn("teste de microfone:", falha));
   $("tela-server").hidden = true;
   telaDeOrigem = null;
 }
@@ -1149,6 +1234,8 @@ async function seguirOServidor() {
 function desenharServidor(snapshot) {
   const pode = snapshot?.may_customise_server === true;
   $("secao-servidor-item").hidden = !pode;
+  // Os cargos são de um servidor: só com uma sessão desenhada.
+  $("secao-cargos-item").hidden = !snapshot || typeof abrirCargos !== "function";
 
   // Perder a permissão — ou a sessão — com a seção aberta deixaria o painel de
   // pé com o botão que o abre já apagado da coluna. Volta para a primeira, que
@@ -1410,6 +1497,7 @@ function desenharAndamentoDoDownload(andamento) {
  */
 function desenharAchado(nova) {
   const achado = $("atualizacao-achado");
+  atualizacaoAchada = nova ?? null;
   if (!nova) {
     achado.hidden = true;
     $("atualizacao-estado").textContent = "VOCÊ ESTÁ NA ÚLTIMA VERSÃO.";
@@ -1420,6 +1508,24 @@ function desenharAchado(nova) {
   // as duas versões escritas por extenso são o que uma pessoa compara.
   $("atualizacao-estado").textContent =
     `HÁ VERSÃO NOVA: da ${nova.instalada} para a ${nova.versao}.`;
+
+  // **A que muda a versão do servidor é dita aqui também** (E4 da 0.17), e não
+  // só no aviso: quem lê as notas antes de apertar já sabe o que o aviso vai
+  // perguntar. Na mesma versão do servidor, nada a mais.
+  const muda = $("atualizacao-travessia");
+  const fronteira = nova.fronteira;
+  if (nova.pede_aviso && fronteira?.tipo === "cruza") {
+    muda.textContent =
+      `MUDA A VERSÃO DO SERVIDOR: do Servidor ${FRASES_DA_TRAVESSIA.servidor(fronteira.de)} ` +
+      `para o Servidor ${FRASES_DA_TRAVESSIA.servidor(fronteira.para)}. Quem ficar na ${nova.instalada} não ` +
+      `conversa com a ${nova.versao}.` + (nova.adiada ? ` ${FRASES_DA_TRAVESSIA.adiadaAntes}` : "");
+    muda.hidden = false;
+  } else if (nova.pede_aviso) {
+    muda.textContent = FRASES_DA_TRAVESSIA.naoSabe;
+    muda.hidden = false;
+  } else {
+    muda.hidden = true;
+  }
 
   // As notas são opcionais — o manifesto pode não trazer nenhuma. O bloco some
   // inteiro nesse caso, porque um cabeçalho «O QUE MUDA» sobre o vazio é pior
@@ -1504,6 +1610,87 @@ invoke("abertura")
   })
   .catch((falha) => console.warn("abertura:", falha));
 
+/** A versão nova que a última procura achou, ou `null`. */
+let atualizacaoAchada = null;
+
+/** Quem tinha o foco antes do aviso, para devolvê-lo ao fechar. */
+let focoAntesDaTravessia = null;
+
+/**
+ * **O aviso antes de atualizar para além da quebra** (E4 da 0.17).
+ *
+ * Diz o que muda (a versão do servidor, quem deixa de conversar com quem, que
+ * a versão de agora continua guardada) e quantas conversas caem, quando o
+ * Rust diz (`conversas_abertas`). O foco nasce no CANCELAR.
+ */
+function abrirTravessia(nova) {
+  const fronteira = nova.fronteira ?? { tipo: "nao_sabe" };
+  const cruza = fronteira.tipo === "cruza";
+  const de = cruza ? FRASES_DA_TRAVESSIA.servidor(fronteira.de) : null;
+  const para = cruza ? FRASES_DA_TRAVESSIA.servidor(fronteira.para) : null;
+  $("travessia-de-para").textContent = `${nova.instalada} → ${nova.versao}`;
+  $("travessia-titulo").textContent = cruza ? FRASES_DA_TRAVESSIA.titulo : FRASES_DA_TRAVESSIA.tituloNaoSabe;
+  $("travessia-resumo").textContent = FRASES_DA_TRAVESSIA.resumo(nova.instalada, nova.versao);
+  const itens = cruza
+    ? FRASES_DA_TRAVESSIA.itens(nova.instalada, nova.versao, de, para)
+    : [FRASES_DA_TRAVESSIA.naoSabe];
+  itens.push(FRASES_DA_TRAVESSIA.conversas(Number(nova.conversas_abertas) || 0));
+  itens.push(FRASES_DA_TRAVESSIA.hospedando);
+  repovoar($("travessia-itens"), itens.map((texto) => elemento("li", null, texto)));
+  const adiada = $("travessia-adiada");
+  adiada.hidden = !nova.adiada;
+  adiada.textContent = nova.adiada ? FRASES_DA_TRAVESSIA.adiadaAntes : "";
+  $("travessia-cancelar").textContent = FRASES_DA_TRAVESSIA.cancelar;
+  $("travessia-adiar").textContent = FRASES_DA_TRAVESSIA.adiar;
+  $("travessia-prosseguir").textContent = FRASES_DA_TRAVESSIA.prosseguir(nova.versao);
+  for (const id of ["travessia-cancelar", "travessia-adiar", "travessia-prosseguir"]) $(id).disabled = false;
+  $("travessia-erro").hidden = true;
+  focoAntesDaTravessia = document.activeElement;
+  $("travessia").hidden = false;
+  $("travessia-cancelar").focus();
+}
+
+/** Fecha o aviso e devolve o foco a quem o abriu. */
+function fecharTravessia() {
+  $("travessia").hidden = true;
+  const volta = focoAntesDaTravessia;
+  focoAntesDaTravessia = null;
+  if (volta && document.contains(volta) && !volta.disabled) volta.focus();
+  else $("atualizacao-procurar")?.focus();
+}
+
+/**
+ * Uma das três respostas. CANCELAR e ADIAR dizem ao Rust a escolha
+ * (`escolher_atualizacao`) e nada é baixado; PROSSEGUIR instala com a versão
+ * confirmada.
+ */
+async function responderTravessia(resposta) {
+  if ($("travessia").hidden) return;
+  const nova = atualizacaoAchada;
+  if (resposta === "prosseguir" && nova) {
+    fecharTravessia();
+    await instalarAtualizacao(nova.versao);
+    return;
+  }
+  for (const id of ["travessia-cancelar", "travessia-adiar", "travessia-prosseguir"]) $(id).disabled = true;
+  try {
+    await invoke("escolher_atualizacao", { escolha: resposta === "adiar" ? "adiar" : "cancelar" });
+  } catch (falha) {
+    // A escolha não gravou: o aviso fica aberto e diz por quê, em vez de
+    // fechar como se tivesse dado certo.
+    for (const id of ["travessia-cancelar", "travessia-adiar", "travessia-prosseguir"]) $(id).disabled = false;
+    $("travessia-erro").hidden = false;
+    $("travessia-erro").textContent = fraseDeErro(falha);
+    return;
+  }
+  fecharTravessia();
+  $("atualizacao-achado").hidden = true;
+  atualizacaoAchada = null;
+  $("atualizacao-estado").textContent = resposta === "adiar"
+    ? FRASES_DA_TRAVESSIA.adiada(nova?.versao ?? "")
+    : FRASES_DA_TRAVESSIA.cancelada;
+}
+
 /** Pergunta se há versão nova. Não baixa nada. */
 async function procurarAtualizacao() {
   const botao = $("atualizacao-procurar");
@@ -1533,7 +1720,16 @@ async function procurarAtualizacao() {
  * aviso do que isso custa está na marcação, acima do botão, e é lido antes de
  * ele ser apertado.
  */
-async function instalarAtualizacao() {
+async function instalarAtualizacao(confirmada = null) {
+  // **O aviso vem antes do download** (E4 da 0.17): uma versão que muda a
+  // versão do servidor pergunta primeiro, e só o PROSSEGUIR do aviso volta
+  // aqui com a versão confirmada. O Rust confere de novo
+  // (`TravessiaNaoConfirmada`): a tela não é a única porta.
+  const nova = atualizacaoAchada;
+  if (nova?.pede_aviso && confirmada !== nova.versao) {
+    abrirTravessia(nova);
+    return;
+  }
   const instalar = $("atualizacao-instalar");
   const procurar = $("atualizacao-procurar");
   const erro = $("atualizacao-erro");
@@ -1547,7 +1743,8 @@ async function instalarAtualizacao() {
   $("atualizacao-baixados").textContent = "";
 
   try {
-    await invoke("instalar_atualizacao");
+    // Na mesma versão do servidor, o pedido de sempre, sem campo novo.
+    await invoke("instalar_atualizacao", confirmada ? { confirmada } : undefined);
   } catch (falha) {
     // Qualquer falha daqui deixa este SEELE inteiro: o pacote é conferido antes
     // de qualquer arquivo instalado ser tocado. As seis frases dizem isso.
@@ -1579,16 +1776,51 @@ $("server-fechar").addEventListener("click", fecharServer);
 // procurar o FECHAR entre eles.
 fecharAoClicarFora("tela-server", fecharServer);
 
-for (const botao of document.querySelectorAll(".server-secao")) {
+for (const botao of document.querySelectorAll(".server-secao[data-painel]")) {
   botao.addEventListener("click", () => abrirSecao(botao.id));
 }
+
+// **CARGOS E PERMISSÕES** (G, cargos-ui): a gestão é uma camada que se abre
+// olhando a sala, e não um painel destas configurações. Para todos numa
+// sessão: quem não gere vê a hierarquia e por que pode o que pode, com os
+// controles desligados e o motivo (`cargos.js`). As configurações fecham antes,
+// para a camada ficar sobre a sala de que ela fala.
+$("secao-cargos").addEventListener("click", () => {
+  if (typeof abrirCargos !== "function") return;
+  fecharServer();
+  abrirCargos({});
+});
 
 for (const botao of document.querySelectorAll(".server-modo")) {
   botao.addEventListener("click", () => escolherModo(botao.dataset.modo));
 }
 
 $("atualizacao-procurar").addEventListener("click", procurarAtualizacao);
-$("atualizacao-instalar").addEventListener("click", instalarAtualizacao);
+// Sem argumento: o clique não é uma confirmação do aviso.
+$("atualizacao-instalar").addEventListener("click", () => instalarAtualizacao());
+$("travessia-cancelar").addEventListener("click", () => responderTravessia("cancelar"));
+$("travessia-adiar").addEventListener("click", () => responderTravessia("adiar"));
+$("travessia-prosseguir").addEventListener("click", () => responderTravessia("prosseguir"));
+fecharAoClicarFora("travessia", () => responderTravessia("cancelar"));
+$("travessia").addEventListener("keydown", (evento) => {
+  if (evento.key === "Escape") {
+    evento.preventDefault();
+    evento.stopPropagation();
+    responderTravessia("cancelar");
+  }
+  // O foco não sai da caixa enquanto ela pergunta (`aria-modal`).
+  if (evento.key === "Tab") {
+    const botoes = [...$("travessia").querySelectorAll("button:not([hidden]):not(:disabled)")];
+    const [primeiro, ultimo] = [botoes[0], botoes.at(-1)];
+    if (evento.shiftKey && document.activeElement === primeiro) {
+      evento.preventDefault();
+      ultimo.focus();
+    } else if (!evento.shiftKey && document.activeElement === ultimo) {
+      evento.preventDefault();
+      primeiro.focus();
+    }
+  }
+});
 
 $("server-icone-escolher").addEventListener("click", escolherIcone);
 $("server-icone-tirar").addEventListener("click", tirarIcone);
@@ -1652,6 +1884,44 @@ window.addEventListener("keydown", (evento) => {
     fecharServer();
   }
 });
+
+/**
+ * **O foco fica DENTRO de CONFIGURAÇÕES.** A camada é `aria-modal`, e a tela de trás continua no documento (a voz e a sessão seguem de pé atrás
+ * dela): sem isto, o Tab saía do último controle direto para a entrada ou a sessão, e o leitor de tela anunciava como modal uma janela que o foco
+ * deixava sem aviso. Tab no último controle volta ao primeiro, Shift+Tab no primeiro vai ao último, e um foco que já está fora (um clique no vão)
+ * é trazido de volta. O Esc fecha (o ouvinte acima) e o foco volta a quem abriu (`fecharServerMesmo` → `voltarParaTela`).
+ */
+function focaveisDaConfiguracao() {
+  const seletor = 'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+  return [...$("tela-server").querySelectorAll(seletor)]
+    .filter((e) => !e.disabled && !e.closest("[hidden]") && e.getClientRects().length > 0);
+}
+
+function prenderOFocoDaConfiguracao(evento) {
+  const raiz = $("tela-server");
+  if (evento.key !== "Tab" || raiz.hidden || raiz.getAttribute("aria-modal") !== "true") return;
+  const lista = focaveisDaConfiguracao();
+  if (lista.length === 0) {
+    evento.preventDefault();
+    raiz.focus();
+    return;
+  }
+  const primeiro = lista[0];
+  const ultimo = lista[lista.length - 1];
+  const ativo = document.activeElement;
+  if (!raiz.contains(ativo)) {
+    evento.preventDefault();
+    (evento.shiftKey ? ultimo : primeiro).focus();
+  } else if (evento.shiftKey && (ativo === primeiro || ativo === raiz)) {
+    evento.preventDefault();
+    ultimo.focus();
+  } else if (!evento.shiftKey && ativo === ultimo) {
+    evento.preventDefault();
+    primeiro.focus();
+  }
+}
+
+window.addEventListener("keydown", prenderOFocoDaConfiguracao);
 
 // O estado inicial da tela, escrito uma vez com ela ainda escondida: a seção de
 // áudio aberta. Nenhum quadro chega a mostrar o cabeçalho vazio.
@@ -1796,3 +2066,12 @@ function uriDeIcone(bytes) {
   }
   return `data:image/png;base64,${btoa(cru)}`;
 }
+
+
+// O botão SEÇÕES (só no celular, dentro de uma seção): volta ao índice e põe o foco na seção que estava aberta.
+$("server-ao-indice").addEventListener("click", () => {
+  // Voltar ao índice sai da seção: o teste do microfone, se houver, para (só ele).
+  if (relogioDoTeste !== null || testeVivo !== null) pararOTesteDeMicrofone().catch((falha) => console.warn("teste:", falha));
+  vistaDoServer("indice");
+  (document.querySelector('.server-secao[aria-current="true"]') ?? document.querySelector(".server-secao"))?.focus();
+});

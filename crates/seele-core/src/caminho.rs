@@ -310,46 +310,195 @@ const _: () = assert!(
 // O que entra
 // ---------------------------------------------------------------------------
 
-/// Os quatro contadores do transporte que dizem alguma coisa sobre o caminho.
+/// O que se sabe do caminho, acumulado desde o começo da conexão — e **o que não
+/// se sabe**, dito como ausência e nunca como zero.
 ///
-/// Quatro campos e não `quinn::ConnectionStats` inteiro, pela mesma razão que
-/// [`crate::FlowControl`] dá: devolver o tipo do `quinn` poria a versão de um
-/// crate de transporte na API pública deste, e uma casca que lê um número
-/// passaria a recompilar porque um campo que ela nunca tocou mudou de lugar.
+/// # Por que cada medida é um `Option`
 ///
-/// Os quatro são acumulados desde o começo da conexão — quem faz a subtração é a
-/// [`Sonda`], porque só ela sabe onde a janela começou.
+/// Até a 0.16 os quatro números vinham do `quinn`, e os quatro existiam sempre.
+/// Desde a 0.17 o transporte é o enlace WebRTC, cujo SCTP não conta perda nem
+/// reação de congestionamento. Um zero ali seria lido pela [`Sonda`] como
+/// «nada doeu» — a ausência de dor confundida com a ausência de medida —, e a
+/// estimativa subiria sem evidência, em cima da reserva da voz. Por isso o que o
+/// transporte não mede é `None`, e a sonda trata `None` como não sabido
+/// ([`Sonda::observar`]).
+///
+/// Os acumulados são subtraídos pela [`Sonda`], porque só ela sabe onde a janela
+/// começou.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Transporte {
-    /// `udp_tx.bytes`: tudo o que saiu pelo soquete desta conexão.
+    /// Tudo o que saiu pelo soquete desta conexão (`Leitura::bytes_enviados`).
     ///
     /// **Tudo**, e não só a tela: voz, controle, retransmissão e a tela. É o que
-    /// se quer — o caminho carrega tudo isso junto, e o que se está medindo é o
-    /// caminho e não a tela.
+    /// se quer — o caminho carrega tudo isso junto.
     pub bytes_enviados: u64,
-    /// `path.congestion_events`: quantas vezes o controle de congestionamento
-    /// reagiu.
-    pub eventos_de_congestionamento: u64,
-    /// `path.lost_packets`: quantos pacotes o caminho comeu.
-    pub pacotes_perdidos: u64,
-    /// `path.rtt`: a ida e volta que o `quinn` estima agora.
-    ///
-    /// Não é a mesma coisa que `crate::Client::rtt`, e a diferença importa:
-    /// aquela é o `Ping`/`Pong` do `specs/02-protocolo.md`, medido pelo fluxo de
-    /// controle, e chega uma vez a cada cinco segundos. Esta é a do transporte,
-    /// vale a cada pacote reconhecido, e é a que vê a fila do gargalo encher.
-    pub ida_e_volta: Duration,
+    /// Quantas vezes o controle de congestionamento reagiu, quando o transporte
+    /// conta. `None` no enlace da 0.17.
+    pub eventos_de_congestionamento: Option<u64>,
+    /// Quantos pacotes o caminho comeu, quando o transporte conta. `None` no
+    /// enlace da 0.17.
+    pub pacotes_perdidos: Option<u64>,
+    /// A ida e volta medida, quando há medida. Ver [`IdaEVolta`].
+    pub ida_e_volta: Option<IdaEVolta>,
 }
 
-impl From<&quinn::ConnectionStats> for Transporte {
-    fn from(stats: &quinn::ConnectionStats) -> Self {
-        Self {
-            bytes_enviados: stats.udp_tx.bytes,
-            eventos_de_congestionamento: stats.path.congestion_events,
-            pacotes_perdidos: stats.path.lost_packets,
-            ida_e_volta: stats.path.rtt,
+/// Uma medida de ida e volta, com o que diz se ela é desta janela.
+///
+/// Desde a 0.17 ela vem do **`Ping` da sonda** (`Client::pingar_para_a_sonda`),
+/// e não do transporte: um `Ping` no `ctl` a cada meio segundo enquanto a tela
+/// transmite, respondido pelo servidor na mesma volta em que o lê. O `ctl` e a
+/// voz saem na frente dos canais de volume no escalonador do enlace, então o que
+/// atrasa o `Pong` é a fila do caminho — o soquete, o gargalo, a volta —, que é
+/// exatamente o atraso que a voz sofre. É a medida de dor que sobrou, e é de
+/// aplicação: o QUIC não foi recriado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct IdaEVolta {
+    /// A última ida e volta respondida.
+    pub valor: Duration,
+    /// Quantas foram respondidas até agora. A janela só conta como medida se
+    /// este número andou dentro dela: uma medida velha não é evidência de agora.
+    pub amostras: u64,
+    /// Há quanto tempo o `Ping` que ainda não voltou saiu, se há um.
+    ///
+    /// É um **piso** da ida e volta de agora: um `Pong` atrasado por uma fila de
+    /// segundos não chega dentro da janela, e sem isto a dor maior seria a que
+    /// nunca aparece.
+    pub em_voo: Option<Duration>,
+}
+
+/// A estimativa mais alta que uma janela **sem medida de dor** sustenta, em
+/// bits por segundo.
+///
+/// **É [`CAMINHO_DA_PROVA_BPS`], e é decisão (revisão do Codex na 0.17).** Sem
+/// perda, sem congestionamento e sem ida e volta fresca, a sonda não tem como
+/// saber se a tela está comendo a reserva da voz, e então não sobe e volta, se
+/// estava acima, ao cano das provas: o caminho sobre o qual
+/// `spikes/tela-no-transporte` mediu a reserva de 40% da voz, e a suposição com
+/// que o produto transmitia antes de a sonda existir. O piso seria ainda mais
+/// seguro e pararia a tela por falta de telemetria; o teto da estimativa seria
+/// a esperança que este módulo existe para não ter.
+pub const TETO_SEM_MEDIDA_BPS: u32 = CAMINHO_DA_PROVA_BPS;
+
+// ---------------------------------------------------------------------------
+// A lembrança
+// ---------------------------------------------------------------------------
+
+/// A semente mais alta que uma lembrança dá, em bits por segundo: **8 Mbps**,
+/// quatro vezes o cano das provas.
+///
+/// **Decisão da 0.17 (coordenador).** Uma estimativa gravada é de outro dia, e
+/// talvez de outra rede: ela encurta a escada, e não fala pelo caminho de
+/// hoje. Acima disto a sonda sobe **por evidência** desta sessão — numa LAN, a
+/// ida e volta curta já troca o passo para [`SUBIDA_DE_CAMINHO_CURTO`]. Os
+/// 12,48 Mbps medidos em campo começam em 8 e reencontram o topo em poucas
+/// janelas calmas, em vez de começar onde ontem estava.
+pub const TETO_DA_SEMENTE_BPS: u32 = 4 * CAMINHO_DA_PROVA_BPS;
+
+/// Por quanto tempo uma lembrança vale: **sete dias**, em segundos.
+///
+/// Uma semana cobre quem volta ao mesmo servidor nos mesmos dias, e não
+/// atravessa o mês em que o plano de internet, o roteador ou a casa mudaram.
+pub const IDADE_MAXIMA_DA_LEMBRANCA_S: i64 = 7 * 24 * 60 * 60;
+
+/// Quanto de relógio adiantado se tolera numa lembrança, em segundos. Uma data
+/// mais no futuro que isso é relógio errado, e lembrança de relógio errado não
+/// tem idade que se confira.
+const FOLGA_DO_RELOGIO_S: i64 = 5 * 60;
+
+/// A linha de transporte com que as medidas desta versão são tiradas.
+///
+/// Entra no [`ambiente_desta_maquina`]: uma medida tirada sobre o QUIC da 0.16
+/// não descreve o enlace da 0.17, que tem outro controle de congestionamento e
+/// outra telemetria.
+const LINHA_DA_MEDIDA: &str = "enlace-0.17";
+
+/// Uma medida do caminho gravada em disco, com o que diz **quando** e **onde**.
+///
+/// `crate::conhecidos` (por servidor) e `crate::preferences` (da máquina) a
+/// guardam. Sem data ou sem ambiente — o número solto que a 0.16 gravava —
+/// não há lembrança: [`Self::ler`] devolve `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaminhoLembrado {
+    /// O que a sonda mediu.
+    pub bps: u32,
+    /// Quando, em segundos desde a época.
+    pub medido_em: i64,
+    /// Onde: ver [`ambiente_desta_maquina`].
+    pub ambiente: String,
+}
+
+impl CaminhoLembrado {
+    /// A semente que esta lembrança dá **agora, neste ambiente**, ou `None`.
+    ///
+    /// `None` quando a rede é outra, quando passou de
+    /// [`IDADE_MAXIMA_DA_LEMBRANCA_S`] ou quando a data está no futuro. Quando
+    /// vale, é grampeada em [`TETO_DA_SEMENTE_BPS`].
+    #[must_use]
+    pub fn semente(&self, agora: i64, ambiente: &str) -> Option<u32> {
+        if self.ambiente != ambiente
+            || self.medido_em > agora.saturating_add(FOLGA_DO_RELOGIO_S)
+            || agora.saturating_sub(self.medido_em) > IDADE_MAXIMA_DA_LEMBRANCA_S
+            || self.bps == 0
+        {
+            return None;
         }
+        Some(self.bps.min(TETO_DA_SEMENTE_BPS))
     }
+
+    /// Como vai ao disco: `bps@medido_em@ambiente`, numa coluna só.
+    #[must_use]
+    pub fn escrever(&self) -> String {
+        format!("{}@{}@{}", self.bps, self.medido_em, self.ambiente)
+    }
+
+    /// O inverso de [`Self::escrever`]. Um número solto — o que a 0.16
+    /// gravava — não é lembrança: não diz quando nem onde.
+    #[must_use]
+    pub fn ler(texto: &str) -> Option<Self> {
+        let mut partes = texto.trim().splitn(3, '@');
+        let bps = partes.next()?.parse().ok()?;
+        let medido_em = partes.next()?.parse().ok()?;
+        let ambiente = partes.next()?.to_owned();
+        if ambiente.is_empty() || ambiente.contains(['\t', '\n', '\r']) {
+            return None;
+        }
+        Some(Self {
+            bps,
+            medido_em,
+            ambiente,
+        })
+    }
+}
+
+/// Em que rede esta máquina está agora, como a lembrança o confere.
+///
+/// A linha de transporte ([`LINHA_DA_MEDIDA`]) e o endereço local pelo qual o
+/// sistema sairia para a internet, em IPv4 e IPv6. Esse endereço é o que o
+/// sistema escolhe pela rota padrão, e muda quando muda a rede: Wi-Fi de casa,
+/// do trabalho, o celular roteando. Conferido sem mandar pacote nenhum — um
+/// `connect` UDP só escolhe a rota.
+///
+/// **O que ele não vê**, e por isso há também a idade e o teto: duas redes
+/// domésticas que dão o mesmo `192.168.0.10`. A idade e
+/// [`TETO_DA_SEMENTE_BPS`] limitam o que uma confusão dessas custa: no máximo
+/// uma semente de 8 Mbps que a primeira janela sem medida já desfaz.
+#[must_use]
+pub fn ambiente_desta_maquina() -> String {
+    let saida = |local: &str, longe: &str| {
+        std::net::UdpSocket::bind(local)
+            .and_then(|socket| {
+                socket.connect(longe)?;
+                socket.local_addr()
+            })
+            .map_or_else(|_| "-".to_owned(), |endereco| endereco.ip().to_string())
+    };
+    // Endereços de documentação (RFC 5737 e RFC 3849): nunca respondem, e
+    // nenhum pacote sai — o `connect` UDP só consulta a tabela de rotas.
+    format!(
+        "{LINHA_DA_MEDIDA}|{}|{}",
+        saida("0.0.0.0:0", "192.0.2.1:9"),
+        saida("[::]:0", "[2001:db8::1]:9")
+    )
 }
 
 /// Uma leitura: o que o transporte contou, sob que teto, em que faixa.
@@ -413,6 +562,14 @@ pub struct Sonda {
     /// Há uma sondagem no ar, esperando a janela que a julga.
     sondando: bool,
     janela: Option<Janela>,
+    /// Quantas janelas fecharam sem medida de dor nenhuma (sem perda, sem
+    /// congestionamento, sem ida e volta fresca). É o que `crate::enlace` conta
+    /// no log: uma sonda que não está medindo nada tem de dizer.
+    janelas_sem_medida: u64,
+    /// Quantas janelas fecharam **com** medida de dor nesta sonda. Zero numa
+    /// sonda que só recebeu a semente ([`Self::partindo_de`]): ver
+    /// [`Self::estimativa_medida`].
+    janelas_medidas: u64,
 }
 
 impl Default for Sonda {
@@ -438,6 +595,31 @@ impl Sonda {
             espera_da_sondagem: ESQUECIMENTO,
             sondando: false,
             janela: None,
+            janelas_sem_medida: 0,
+            janelas_medidas: 0,
+        }
+    }
+
+    /// Quantas janelas fecharam sem medida de dor nenhuma. Ver
+    /// [`TETO_SEM_MEDIDA_BPS`].
+    #[must_use]
+    pub const fn janelas_sem_medida(&self) -> u64 {
+        self.janelas_sem_medida
+    }
+
+    /// A estimativa, **se esta sonda mediu alguma coisa**; `None` se ela só
+    /// carrega a semente ou a suposição.
+    ///
+    /// É o que se pode gravar como medida. Gravar [`Self::estimativa`] fazia
+    /// uma sessão sem medida nenhuma regravar a semente que recebeu, com data
+    /// nova — e a lembrança se renovava sozinha para sempre, sem que o caminho
+    /// de hoje a tivesse confirmado uma vez.
+    #[must_use]
+    pub const fn estimativa_medida(&self) -> Option<u32> {
+        if self.janelas_medidas == 0 {
+            None
+        } else {
+            Some(self.estimativa_bps)
         }
     }
 
@@ -578,10 +760,14 @@ impl Sonda {
         // única que ela tem: se ela só fosse anotada no fim da primeira janela,
         // uma janela que já nasceu com fila viraria a linha de base, e daí em
         // diante fila nenhuma pareceria fila.
-        self.menor_ida_e_volta = Some(match self.menor_ida_e_volta {
-            Some(menor) => menor.min(amostra.transporte.ida_e_volta),
-            None => amostra.transporte.ida_e_volta,
-        });
+        // Só com medida: uma ida e volta que não existe não é um mínimo de
+        // zero, e zero aqui faria todo caminho parecer curto.
+        if let Some(medida) = amostra.transporte.ida_e_volta.filter(|m| m.amostras > 0) {
+            self.menor_ida_e_volta = Some(match self.menor_ida_e_volta {
+                Some(menor) => menor.min(medida.valor),
+                None => medida.valor,
+            });
+        }
 
         let teto_bps = match amostra.teto {
             Teto::Bps(bps) => bps,
@@ -635,18 +821,48 @@ impl Sonda {
             decorrido,
         );
 
-        let ida_e_volta = amostra.transporte.ida_e_volta;
-        // `menor_ida_e_volta` já foi atualizada em `observar`, nesta mesma
-        // leitura, então nunca é `None` aqui — e o `unwrap_or` existe para não
-        // haver um `unwrap` proibido pelo `forbid` do workspace, com o valor
-        // que dá fila zero, que é a resposta certa se a impossibilidade
-        // acontecesse.
-        let base = self.menor_ida_e_volta.unwrap_or(ida_e_volta);
+        // **Cada pergunta de dor só responde com medida.** `None` é «não
+        // sabido», e não «não doeu»: é a regressão que a revisão da 0.17 achou
+        // (um zero sintético lido como caminho limpo).
+        let cresceu = |agora: Option<u64>, antes: Option<u64>| match (agora, antes) {
+            (Some(agora), Some(antes)) => Some(agora > antes),
+            _ => None,
+        };
+        let perdeu = cresceu(
+            amostra.transporte.pacotes_perdidos,
+            janela.transporte.pacotes_perdidos,
+        );
+        let congestionou = cresceu(
+            amostra.transporte.eventos_de_congestionamento,
+            janela.transporte.eventos_de_congestionamento,
+        );
+        let base = self.menor_ida_e_volta;
+        let fila_de = |volta: Duration| base.map(|base| volta.saturating_sub(base) > FILA_TOLERADA);
+        // A ida e volta só conta se é **desta janela**: o número de respostas
+        // andou dentro dela.
+        let enfileirou = match (
+            amostra.transporte.ida_e_volta,
+            janela.transporte.ida_e_volta,
+        ) {
+            (Some(agora), antes) if agora.amostras > antes.map_or(0, |antes| antes.amostras) => {
+                fila_de(agora.valor)
+            }
+            _ => None,
+        };
+        // E um `Ping` que ainda não voltou e já passou da fila tolerada é dor
+        // medida, mesmo sem resposta: a fila de segundos é a que nunca responde
+        // dentro da janela.
+        let atrasou = amostra
+            .transporte
+            .ida_e_volta
+            .and_then(|medida| medida.em_voo)
+            .and_then(fila_de)
+            .filter(|atrasou| *atrasou);
 
-        let doeu = amostra.transporte.eventos_de_congestionamento
-            > janela.transporte.eventos_de_congestionamento
-            || amostra.transporte.pacotes_perdidos > janela.transporte.pacotes_perdidos
-            || ida_e_volta.saturating_sub(base) > FILA_TOLERADA;
+        let doeu = [perdeu, congestionou, enfileirou, atrasou].contains(&Some(true));
+        // O que prova que **não** doeu: uma ida e volta fresca, ou perda e
+        // congestionamento contados. Sem isso a janela não sabe, e não sobe.
+        let mediu = enfileirou.is_some() || (perdeu.is_some() && congestionou.is_some());
 
         let cheia = u64::from(entregue_bps) * 100
             >= u64::from(janela.teto_bps) * u64::from(OCUPACAO_MINIMA);
@@ -657,6 +873,12 @@ impl Sonda {
         // pelos espectadores) ou a escolha da pessoa, e o que a janela mediu foi
         // aquela perna e não esta.
         let nossa = janela.teto_bps >= nossa_perna(self.estimativa_bps, janela.faixa);
+
+        // Dor também é medida: o que se grava depois é o que alguma janela
+        // desta sonda confirmou, para baixo ou para cima.
+        if doeu || mediu {
+            self.janelas_medidas = self.janelas_medidas.saturating_add(1);
+        }
 
         if doeu {
             self.calmo_desde = Some(agora);
@@ -687,6 +909,17 @@ impl Sonda {
             // voltaria a subir até doer de novo, e o degrau de resolução
             // balançaria junto, uma troca a cada poucas janelas.
             self.limite_bps = Some(self.estimativa_bps);
+            return;
+        }
+
+        // **Sem medida, conservador.** A janela não sabe se doeu: não sobe, não
+        // sonda, e volta ao cano das provas se estava acima dele. Ver
+        // [`TETO_SEM_MEDIDA_BPS`] para o porquê deste número.
+        if !mediu {
+            self.janelas_sem_medida = self.janelas_sem_medida.saturating_add(1);
+            self.estimativa_bps = self
+                .estimativa_bps
+                .clamp(PISO_DA_ESTIMATIVA_BPS, TETO_SEM_MEDIDA_BPS);
             return;
         }
 
@@ -892,15 +1125,38 @@ mod tests {
     }
 
     impl Cano {
+        /// Um cano que conta tudo: perda, congestionamento e ida e volta.
         fn de(capacidade_bps: u32) -> Self {
             Self {
                 capacidade_bps,
                 transporte: Transporte {
-                    ida_e_volta: Duration::from_millis(20),
-                    ..Transporte::default()
+                    bytes_enviados: 0,
+                    eventos_de_congestionamento: Some(0),
+                    pacotes_perdidos: Some(0),
+                    ida_e_volta: Some(IdaEVolta {
+                        valor: Duration::from_millis(20),
+                        amostras: 1,
+                        em_voo: None,
+                    }),
                 },
                 base: Duration::from_millis(20),
             }
+        }
+
+        /// O cano do enlace da 0.17: só bytes e a ida e volta do `Ping` da
+        /// sonda — sem perda nem congestionamento contados.
+        fn do_enlace(capacidade_bps: u32) -> Self {
+            let mut cano = Self::de(capacidade_bps);
+            cano.transporte.eventos_de_congestionamento = None;
+            cano.transporte.pacotes_perdidos = None;
+            cano
+        }
+
+        /// Um cano sem medida de dor nenhuma: só os bytes que saíram.
+        fn cego(capacidade_bps: u32) -> Self {
+            let mut cano = Self::do_enlace(capacidade_bps);
+            cano.transporte.ida_e_volta = None;
+            cano
         }
 
         /// Roda `duracao` com a tela pedindo `oferta_bps` além da voz.
@@ -910,12 +1166,41 @@ mod tests {
             let entregue = pedido.min(cabe);
             let bytes = (entregue * duracao.as_micros() as u64) / (8 * 1_000_000);
             self.transporte.bytes_enviados += bytes;
-            if pedido > cabe {
-                self.transporte.eventos_de_congestionamento += 1;
-                self.transporte.pacotes_perdidos += 3;
-                self.transporte.ida_e_volta = self.base + Duration::from_millis(200);
-            } else {
-                self.transporte.ida_e_volta = self.base;
+            let estourou = pedido > cabe;
+            if estourou {
+                if let Some(eventos) = self.transporte.eventos_de_congestionamento.as_mut() {
+                    *eventos += 1;
+                }
+                if let Some(perdidos) = self.transporte.pacotes_perdidos.as_mut() {
+                    *perdidos += 3;
+                }
+            }
+            if let Some(medida) = self.transporte.ida_e_volta.as_mut() {
+                medida.amostras += 1;
+                medida.valor = if estourou {
+                    self.base + Duration::from_millis(200)
+                } else {
+                    self.base
+                };
+            }
+        }
+
+        /// A fila que a voz pega neste cano, com a tela pedindo `oferta_bps`:
+        /// zero enquanto cabe, e o que transborda dividido pela capacidade
+        /// quando não cabe (um segundo de excesso acumulado na fila).
+        fn atraso_da_voz(&self, oferta_bps: u32) -> Duration {
+            let pedido = u64::from(oferta_bps) + u64::from(VOZ_BPS);
+            let cabe = u64::from(self.capacidade_bps);
+            if pedido <= cabe {
+                return Duration::ZERO;
+            }
+            Duration::from_micros((pedido - cabe) * 1_000_000 / cabe)
+        }
+
+        /// Uma perda que só conta onde o cano conta perda.
+        fn perder(&mut self) {
+            if let Some(perdidos) = self.transporte.pacotes_perdidos.as_mut() {
+                *perdidos += 1;
             }
         }
 
@@ -1062,7 +1347,7 @@ mod tests {
         for k in 1..=ticas(60) {
             cano.correr(0, TICA);
             if k % ticas(20) == 0 {
-                cano.transporte.pacotes_perdidos += 1;
+                cano.perder();
             }
             sonda.observar(
                 inicio + TICA * (comeco + k),
@@ -1282,8 +1567,14 @@ mod tests {
         let piora = |quem: fn(&mut Transporte)| {
             let mut sonda = Sonda::nova();
             let mut fim = Transporte {
-                ida_e_volta: Duration::from_millis(20),
-                ..Transporte::default()
+                bytes_enviados: 0,
+                eventos_de_congestionamento: Some(0),
+                pacotes_perdidos: Some(0),
+                ida_e_volta: Some(IdaEVolta {
+                    valor: Duration::from_millis(20),
+                    amostras: 1,
+                    em_voo: None,
+                }),
             };
             let comeco = Amostra {
                 transporte: fim,
@@ -1307,13 +1598,19 @@ mod tests {
         for (nome, sinal) in [
             (
                 "eventos de congestionamento",
-                (|t: &mut Transporte| t.eventos_de_congestionamento += 1) as fn(&mut Transporte),
+                (|t: &mut Transporte| {
+                    t.eventos_de_congestionamento = t.eventos_de_congestionamento.map(|n| n + 1);
+                }) as fn(&mut Transporte),
             ),
             ("pacotes perdidos", |t: &mut Transporte| {
-                t.pacotes_perdidos += 1;
+                t.pacotes_perdidos = t.pacotes_perdidos.map(|n| n + 1);
             }),
             ("fila no gargalo", |t: &mut Transporte| {
-                t.ida_e_volta = Duration::from_millis(20) + FILA_TOLERADA * 2;
+                t.ida_e_volta = Some(IdaEVolta {
+                    valor: Duration::from_millis(20) + FILA_TOLERADA * 2,
+                    amostras: 2,
+                    em_voo: None,
+                });
             }),
         ] {
             let depois = piora(sinal);
@@ -1561,10 +1858,7 @@ mod tests {
         let mut sonda = Sonda::nova();
         let inicio = Instant::now();
         let parado = Teto::Parado(crate::tela::MotivoDeParada::SinalCritico);
-        let transporte = Transporte {
-            ida_e_volta: Duration::from_millis(20),
-            ..Transporte::default()
-        };
+        let transporte = Cano::de(8_000_000).transporte;
         let amostra = Amostra {
             transporte,
             teto: parado,
@@ -1575,5 +1869,218 @@ mod tests {
             assert_eq!(sonda.observar(inicio + TICA * k, &amostra), None);
         }
         assert_eq!(sonda.estimativa(), CAMINHO_DA_PROVA_BPS);
+    }
+
+    // ------------------------------------------------- telemetria da 0.17
+
+    /// **Sem telemetria nenhuma, a sonda não sobe e não fica acima do cano das
+    /// provas.** É a regressão que a revisão da 0.17 achou: a perda, o
+    /// congestionamento e a ida e volta que o enlace não mede viravam zero, e
+    /// zero se lia como caminho limpo e curto — a estimativa subia, com o passo
+    /// largo do caminho curto, até o teto, em cima da reserva da voz.
+    #[test]
+    fn sem_telemetria_a_estimativa_nao_sobe_e_volta_ao_cano_das_provas() {
+        // Partindo de uma medida lembrada alta, o caso que mais esconde o
+        // defeito: sem medida, ela não pode continuar valendo.
+        let mut sonda = Sonda::partindo_de(12_000_000);
+        let mut cano = Cano::cego(30_000_000);
+        let mut maior = 0;
+        correr(
+            &mut sonda,
+            &mut cano,
+            SignalBand::Nominal,
+            ticas(60),
+            |_, teto| {
+                maior = maior.max(teto.bps());
+            },
+        );
+        assert_eq!(
+            sonda.estimativa(),
+            TETO_SEM_MEDIDA_BPS,
+            "sem medida de dor a estimativa ficou em {}, e não no cano das provas",
+            sonda.estimativa()
+        );
+        assert!(
+            sonda.janelas_sem_medida() >= 50,
+            "a sonda não contou as janelas sem medida: {}",
+            sonda.janelas_sem_medida()
+        );
+        assert_eq!(
+            sonda.limite_bps(),
+            None,
+            "sem medida, a sonda inventou uma borda"
+        );
+        let _ = maior;
+        // E nada disto é gravável como medida: a semente não volta ao disco.
+        assert_eq!(
+            sonda.estimativa_medida(),
+            None,
+            "uma sonda que nunca mediu ofereceu a semente como medida"
+        );
+    }
+
+    /// Só a sonda que mediu oferece o que gravar; a que só tem semente, não.
+    #[test]
+    fn so_a_estimativa_medida_vai_ao_disco() {
+        assert_eq!(Sonda::partindo_de(6_000_000).estimativa_medida(), None);
+        assert_eq!(Sonda::nova().estimativa_medida(), None);
+        let mut sonda = Sonda::nova();
+        let mut cano = Cano::do_enlace(8_000_000);
+        correr(
+            &mut sonda,
+            &mut cano,
+            SignalBand::Nominal,
+            ticas(5),
+            |_, _| {},
+        );
+        assert_eq!(sonda.estimativa_medida(), Some(sonda.estimativa()));
+    }
+
+    /// **Sem ida e volta, e sem perda contada**: o enlace da 0.17 antes de o
+    /// `Ping` da sonda responder. O mesmo veredito: não sabe, não sobe.
+    #[test]
+    fn sem_ida_e_volta_no_enlace_a_estimativa_nao_cresce() {
+        let mut sonda = Sonda::nova();
+        let mut cano = Cano::cego(8_000_000);
+        correr(
+            &mut sonda,
+            &mut cano,
+            SignalBand::Nominal,
+            ticas(30),
+            |_, _| {},
+        );
+        assert!(
+            sonda.estimativa() <= CAMINHO_DA_PROVA_BPS,
+            "sem ida e volta a estimativa cresceu para {}",
+            sonda.estimativa()
+        );
+        // E uma ida e volta que não anda (a mesma medida velha, sem resposta
+        // nova) também não é evidência.
+        let mut sonda = Sonda::nova();
+        let mut cano = Cano::do_enlace(8_000_000);
+        let inicio = Instant::now();
+        let teto = teto_de(sonda.estimativa(), SignalBand::Nominal);
+        for k in 1..=ticas(30) {
+            cano.correr(teto.bps(), TICA);
+            if let Some(medida) = cano.transporte.ida_e_volta.as_mut() {
+                medida.amostras = 1;
+            }
+            sonda.observar(inicio + TICA * k, &cano.amostra(teto, SignalBand::Nominal));
+        }
+        assert!(
+            sonda.estimativa() <= CAMINHO_DA_PROVA_BPS,
+            "uma ida e volta velha valeu como evidência: {}",
+            sonda.estimativa()
+        );
+    }
+
+    /// Com a ida e volta do `Ping` da sonda, e sem perda nem congestionamento,
+    /// a sonda volta a medir: sobe por evidência num cano largo.
+    #[test]
+    fn com_a_ida_e_volta_da_sonda_a_estimativa_sobe_por_evidencia() {
+        let mut sonda = Sonda::nova();
+        let mut cano = Cano::do_enlace(8_000_000);
+        correr(
+            &mut sonda,
+            &mut cano,
+            SignalBand::Nominal,
+            ticas(15),
+            |_, _| {},
+        );
+        assert!(
+            sonda.estimativa() > CAMINHO_DA_PROVA_BPS,
+            "com ida e volta fresca e sem fila, a estimativa não subiu: {}",
+            sonda.estimativa()
+        );
+        assert_eq!(sonda.janelas_sem_medida(), 0);
+    }
+
+    /// Um `Ping` que não volta e já passou da fila tolerada é dor medida.
+    #[test]
+    fn um_ping_em_voo_alem_da_fila_e_dor() {
+        // A mesma história duas vezes; só muda o `Ping` preso. A janela sem
+        // resposta nova cai no teto sem medida nas duas — o que se compara é
+        // a dor, que só a do `Ping` preso tem (a [`Sonda`] desce abaixo do teto
+        // sem medida).
+        let historia = |preso: Option<Duration>| {
+            let mut sonda = Sonda::nova();
+            let mut cano = Cano::do_enlace(8_000_000);
+            let inicio = Instant::now();
+            let teto = teto_de(sonda.estimativa(), SignalBand::Nominal);
+            // Janelas limpas para a base.
+            for k in 1..=ticas(2) {
+                cano.correr(teto.bps(), TICA);
+                sonda.observar(inicio + TICA * k, &cano.amostra(teto, SignalBand::Nominal));
+            }
+            // E as seguintes sem resposta nova, cheias, com ou sem um `Ping` no ar.
+            for k in (ticas(2) + 1)..=ticas(4) {
+                cano.transporte.bytes_enviados += u64::from(teto.bps() + VOZ_BPS) / 8 / 10;
+                if let Some(medida) = cano.transporte.ida_e_volta.as_mut() {
+                    medida.em_voo = preso;
+                }
+                sonda.observar(inicio + TICA * k, &cano.amostra(teto, SignalBand::Nominal));
+            }
+            sonda.estimativa()
+        };
+        let sem_ping_preso = historia(None);
+        let com_ping_preso = historia(Some(Duration::from_millis(500)));
+        assert!(
+            com_ping_preso < sem_ping_preso,
+            "o Ping preso na fila não contou como dor: {com_ping_preso} com, {sem_ping_preso} sem"
+        );
+    }
+
+    /// **Tela, anexo e voz num gargalo controlado, com a telemetria da 0.17.**
+    ///
+    /// Um cano de 3 Mbps; aos 20 s um anexo passa a tomar 1 Mbps dele. A sonda
+    /// só tem a ida e volta do `Ping`. O que se prova:
+    /// - nenhuma amostra do enlace afirma perda nem congestionamento (são
+    ///   `None`: a sonda não anuncia «0 perda medida»);
+    /// - a sonda não passa do cano sem evidência, e volta a caber quando o
+    ///   anexo entra;
+    /// - a voz se preserva: no fim, com o anexo correndo, a fila da voz é zero
+    ///   em quase todas as janelas.
+    #[test]
+    fn tela_anexo_e_voz_num_gargalo_com_a_telemetria_da_0_17() {
+        let mut sonda = Sonda::nova();
+        let capacidade = 3_000_000;
+        let mut cano = Cano::do_enlace(capacidade);
+        let anexo_bps = 1_000_000;
+        let inicio = Instant::now();
+        let mut teto = teto_de(sonda.estimativa(), SignalBand::Nominal);
+        let mut com_fila_no_fim = 0;
+        let fim = ticas(60);
+        for k in 1..=fim {
+            let agora = inicio + TICA * k;
+            let anexo = if k > ticas(20) { anexo_bps } else { 0 };
+            let oferta = teto.bps() + anexo;
+            cano.correr(oferta, TICA);
+            assert_eq!(cano.transporte.pacotes_perdidos, None);
+            assert_eq!(cano.transporte.eventos_de_congestionamento, None);
+            if sonda
+                .observar(agora, &cano.amostra(teto, SignalBand::Nominal))
+                .is_some()
+            {
+                teto = teto_de(sonda.estimativa(), SignalBand::Nominal);
+            }
+            assert!(
+                sonda.estimativa() <= TETO_DA_ESTIMATIVA_BPS,
+                "a estimativa passou do teto"
+            );
+            if k > fim - ticas(20) && cano.atraso_da_voz(teto.bps() + anexo) > Duration::ZERO {
+                com_fila_no_fim += 1;
+            }
+        }
+        assert!(
+            com_fila_no_fim <= ticas(2),
+            "com o anexo correndo, a voz pegou fila em {com_fila_no_fim} de {} ticas do fim",
+            ticas(20)
+        );
+        assert!(
+            u64::from(teto.bps()) + u64::from(anexo_bps) + u64::from(VOZ_BPS)
+                <= u64::from(capacidade),
+            "no fim a tela e o anexo não cabem no cano com a voz: teto {}",
+            teto.bps()
+        );
     }
 }

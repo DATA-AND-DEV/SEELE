@@ -340,17 +340,43 @@ pub(crate) fn run() -> ExitCode {
 /// Só nesta compilação, que tem o `target/` dela: o `.wasm` da `prova` e o
 /// desktop não mudam. O custo fica escrito na decisão: sem a seção `name`, os
 /// rastros de pilha perdem os nomes das funções, e a mensagem do pânico fica.
-pub(crate) const PERFIL_DA_PAGINA: [&str; 3] = [
+///
+/// O `codegen-units=1` entrou na 0.17 (25/10/2026): medido no mesmo código,
+/// ele tira 88 740 bytes do `.wasm` (2 092 679 → 2 003 939; brotli 11 de
+/// 463 723 para 450 899), e custa só tempo de compilação desta construção.
+pub(crate) const PERFIL_DA_PAGINA: [&str; 4] = [
     "profile.release.opt-level=\"z\"",
     "profile.release.lto=true",
     "profile.release.strip=\"symbols\"",
+    "profile.release.codegen-units=1",
 ];
 
-/// **O teto do `.wasm` da página**, em bytes, pelos números de 21/10/2026: o
-/// do pacote com o [`PERFIL_DA_PAGINA`] tinha 1 714 052 (542 KB em gzip, 405
-/// KB em brotli 11), e o teto deixa uns 10% de folga. Passar dele é a hora de
-/// medir de novo o que chega ao celular, e não de subir o número calado.
-pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 1_900_000;
+/// **O teto do `.wasm` da página**, em bytes.
+///
+/// - **21/10/2026 (0.16):** o do pacote com o [`PERFIL_DA_PAGINA`] tinha
+///   1 714 052 (542 KB em gzip, 405 KB em brotli 11), e o teto de 1 900 000
+///   deixava uns 10% de folga.
+/// - **25/10/2026 (0.17), medido de novo antes de subir:** 2 092 679 com o
+///   perfil de antes, e 2 003 939 com o `codegen-units=1`. Com ele, comprimido
+///   nesta máquina, o gzip -9 dá 610 469 e o brotli 11 dá 450 899. São
+///   compressões locais, comparáveis só entre si e com as de 21/10, e não uma
+///   medida do que chega a um celular, que não foi medido. O Caddy planejado
+///   serve com `encode zstd gzip`, sem brotli: o número planejado no fio é o
+///   do gzip, e o do brotli fica como medida alternativa. Compilar e
+///   instanciar no node 24, que compila sob demanda, leva 1,5 ms e 0,1 ms
+///   (mediana de 7). O grafo do `.wasm` não ganhou crate: os
+///   `Cargo.toml` do `seele-web`, do `seele-sessao`, do `seele-proto` e do
+///   `seele-voz` são os da v0.16.0. Não entrou backend de cripto, `tracing`
+///   nem `regex`. O que cresceu foi código do produto: os cargos (~200 KB de
+///   código, com a leitura e a escrita em JSON dos tipos deles) e as
+///   variantes novas de `ClientMessage` e `ServerMessage`, que se multiplicam
+///   pelos quatro caminhos de serde da ponte (JSON lido, JSON escrito,
+///   postcard lido, postcard escrito).
+///   O teto novo deixa os mesmos ~10% sobre o medido.
+///
+/// Passar dele é a hora de medir de novo o que chega ao celular, e não de
+/// subir o número calado.
+pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_200_000;
 
 /// Os nomes das seções próprias (`custom`) de um `.wasm`, lidas do formato:
 /// o cabeçalho, e cada seção com o id e o tamanho em LEB128.
@@ -402,6 +428,7 @@ fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
         cargo()
             .args([
                 "build",
+                "--locked",
                 "--release",
                 "-p",
                 "seele-web",
@@ -422,6 +449,7 @@ fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
         cargo()
             .args([
                 "build",
+                "--locked",
                 "--release",
                 "-p",
                 "seele-motor-web",

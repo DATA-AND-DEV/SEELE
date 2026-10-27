@@ -174,7 +174,29 @@ async function desenharPortaria() {
 
   desenharCamadas(estado);
   desenharAlarme(estado);
-  desenharFila(pedidos);
+  portariaAberta = hospedagemDaPorta(estado);
+  // De qual servidor é esta porta, escrito: com a vista noutro servidor, ou
+  // na entrada, a camada não pode deixar dúvida de que hospedagem ela decide.
+  const qual = $("portaria-qual-servidor");
+  if (qual) {
+    qual.textContent = estado.hospedando
+      ? `A PORTA DE ${(portariaAberta.nome ?? meuServidorNoAr?.nome ?? "O SEU SERVIDOR").toLocaleUpperCase("pt-BR")}, hospedado nesta máquina`
+      : "Esta máquina não está hospedando agora.";
+  }
+  desenharFila(pedidos, estado);
+}
+
+/** A hospedagem da porta que a camada mostra, e que os atos carregam. */
+let portariaAberta = { servidor: null, geracao: 0, nome: null };
+
+/**
+ * Confere, logo antes de um ato, que a hospedagem ainda é a mesma da camada
+ * aberta: parar A e subir B durante o diálogo não aplica a decisão a B, nem
+ * com a mesma impressão.
+ */
+async function aindaEAMesmaHospedagem(hospedagem) {
+  const agora = hospedagemDaPorta(await invoke("estado_da_porta"));
+  return agora.servidor === hospedagem.servidor && agora.geracao === hospedagem.geracao;
 }
 
 /** As três camadas, cada uma com o estado escrito. */
@@ -233,10 +255,22 @@ function desenharAlarme(estado) {
     "Ligue a portaria, ponha uma senha, ou as duas.";
 }
 
+/**
+ * A fila está na frente de quem usa: a camada aberta, desenhada com tamanho, e
+ * nada que a esconda acima dela (uma tela oculta, ou `display: none`).
+ */
+function filaAVista() {
+  const camada = $("portaria");
+  if (camada.hidden || camada.closest("[hidden]")) return false;
+  const caixa = camada.getBoundingClientRect();
+  return caixa.width > 0 && caixa.height > 0 && getComputedStyle(camada).visibility !== "hidden";
+}
+
 /** A fila e o histórico. */
-function desenharFila(pedidos) {
+function desenharFila(pedidos, estado) {
   const esperando = pedidos.filter((pedido) => pedido.decidido_em === null);
   const decididos = pedidos.filter((pedido) => pedido.decidido_em !== null);
+  const hospedagem = hospedagemDaPorta(estado);
 
   $("portaria-fila-vazia").hidden = esperando.length > 0;
   $("portaria-decididos-vazio").hidden = decididos.length > 0;
@@ -245,14 +279,18 @@ function desenharFila(pedidos) {
   // que esta camada fechasse, sobre exatamente a gente que acabou de ser lida —
   // e um aviso que reaparece sozinho depois de atendido é o que ensina a
   // dispensá-lo sem ler.
-  calarBatidas(esperando.length);
+  //
+  // **Só se a fila está à vista de verdade** (diagnóstico do H, b6): desenhar a
+  // fila numa camada escondida, ou de tamanho zero dentro de uma tela oculta,
+  // calava quem ninguém viu. A pergunta é ao desenho, e não ao atributo.
+  if (filaAVista()) calarBatidas(chavesDosEsperando(estado, pedidos));
 
   repovoar(
     $("portaria-fila"),
     esperando.map((pedido) =>
       cartao(pedido, [
-        botao("ADMITIR", () => perguntarEDecidir(pedido, true)),
-        botao("RECUSAR", () => perguntarEDecidir(pedido, false)),
+        botao("ADMITIR", () => perguntarEDecidir(pedido, true, hospedagem)),
+        botao("RECUSAR", () => perguntarEDecidir(pedido, false, hospedagem)),
       ]),
     ),
   );
@@ -261,7 +299,7 @@ function desenharFila(pedidos) {
     $("portaria-decididos"),
     decididos.map((pedido) => {
       const cartaoFeito = cartao(pedido, [
-        botao("REVOGAR", () => perguntarERevogar(pedido)),
+        botao("REVOGAR", () => perguntarERevogar(pedido, hospedagem)),
       ]);
       cartaoFeito.prepend(
         elemento(
@@ -288,7 +326,7 @@ function desenharFila(pedidos) {
  * forma de confirmar seria uma segunda chance de alguém escrever «tem certeza?»,
  * que é a confirmação que não informa nada.
  */
-function perguntarEDecidir(pedido, admitir) {
+function perguntarEDecidir(pedido, admitir, hospedagem = portariaAberta) {
   const nome = `«${pedido.apelido}»`;
   const consequencia = admitir
     ? `A chave que se diz ${nome} passa a entrar neste servidor sem perguntar, ` +
@@ -304,10 +342,14 @@ function perguntarEDecidir(pedido, admitir) {
     admitir ? "ADMITIR QUEM BATEU" : "RECUSAR QUEM BATEU",
     consequencia,
     admitir ? "ADMITIR" : "RECUSAR",
-    async () => {
-      await invoke("decidir_pedido", { impressao: pedido.impressao, admitir });
-      await desenharPortaria();
-    },
+    // **A decisão é do servidor em que o diálogo abriu** (achado do Codex,
+    // E7): duas conferências. A da janela, logo antes, para não pedir nada
+    // à toa; e a do Rust, que é o portão — a hospedagem vai junto, e outra
+    // de pé recusa com `HospedagemNaoConfere`, dita aqui.
+    () => atoDaPortaria(async () => {
+      if (!(await aindaEAMesmaHospedagem(hospedagem))) throw { HospedagemNaoConfere: { agora: null } };
+      await invoke("decidir_pedido", { impressao: pedido.impressao, admitir, hospedagem: hospedagemDoAto(hospedagem) });
+    }),
   );
 }
 
@@ -318,7 +360,7 @@ function perguntarEDecidir(pedido, admitir) {
  * descreve um ato mais violento do que este é — e a caixa de moderação existe
  * justamente para a pessoa saber qual dos atos vai acontecer.
  */
-function perguntarERevogar(pedido) {
+function perguntarERevogar(pedido, hospedagem = portariaAberta) {
   abrirConfirmacao(
     "REVOGAR A DECISÃO",
     `A chave que se diz «${pedido.apelido}» volta a ser desconhecida: ` +
@@ -327,10 +369,11 @@ function perguntarERevogar(pedido) {
       `banir é para sempre e mora na caixa de moderação.\n` +
       agrupar(pedido.impressao),
     "REVOGAR",
-    async () => {
-      await invoke("revogar_admissao", { impressao: pedido.impressao });
-      await desenharPortaria();
-    },
+    // Da hospedagem em que o diálogo abriu, como o ADMITIR e o RECUSAR.
+    () => atoDaPortaria(async () => {
+      if (!(await aindaEAMesmaHospedagem(hospedagem))) throw { HospedagemNaoConfere: { agora: null } };
+      await invoke("revogar_admissao", { impressao: pedido.impressao, hospedagem: hospedagemDoAto(hospedagem) });
+    }),
   );
 }
 
@@ -402,6 +445,13 @@ async function fechando(acao) {
  * estão na frente, e a um leitor de tela não aconteceu nada.
  */
 async function abrirPortaria() {
+  // **A camada é da janela, e não da sessão** (E7 da 0.17). Ela nascia na
+  // marcação dentro de `#tela-sessao`, e a faixa VER QUEM É a abre de qualquer
+  // tela: da entrada, ou com a vista noutro servidor, ela abria escondida com a
+  // sessão (medido em `portaria-por-identidade.cjs` e no diagnóstico do H). A
+  // marcação agora fica fora das telas; esta linha guarda o caso de uma casca
+  // que a mova de volta. Ela é `position: fixed`, e o desenho não muda.
+  if ($("portaria").parentElement !== document.body) document.body.append($("portaria"));
   focoAntesDaPortaria = document.activeElement;
   $("portaria").hidden = false;
   $("portaria").focus();
@@ -461,10 +511,90 @@ async function atualizarPorta() {
   try {
     const estado = await invoke("estado_da_porta");
     $("portaria-abrir").textContent = rotuloDaPorta(estado);
-    avisarQueBatem(estado.hospedando ? estado.pendentes : 0);
+    // Na entrada, o estado da hospedagem acompanha a porta: um servidor que
+    // subiu ou caiu sem a entrada mudar de tela aparece em até cinco segundos
+    // (`camada-hospedagem.js`).
+    if (!$("tela-boot").hidden && estado.hospedando !== Boolean(meuServidorNoAr)) {
+      desenharMeuServidor().catch((falha) => console.warn("o meu servidor:", falha));
+    }
+    if (!estado.hospedando || !(estado.pendentes > 0)) {
+      avisarQueBatem([]);
+      return;
+    }
+    // **Quem bate, e não quantos** (achado do Codex, E7): a faixa lembra cada
+    // pedido pela identidade dele — o servidor hospedado, a geração da
+    // hospedagem, a impressão e o instante da batida —, e não por um número.
+    const pedidos = await invoke("pedidos_da_portaria");
+    avisarQueBatem(chavesDosEsperando(estado, pedidos));
   } catch (falha) {
     console.warn("estado_da_porta:", falha);
   }
+}
+
+/**
+ * A hospedagem de um estado da porta: o servidor guardado e a geração dela
+ * (sobe a cada vez que um servidor sobe nesta janela). Pedido ao
+ * hosting-lifecycle (`pedidos.md`); sem ele, o nome e zero, e a identidade
+ * fica na impressão e no instante da batida.
+ */
+function hospedagemDaPorta(estado) {
+  const h = estado?.hospedagem ?? null;
+  // Sem a geração do Rust, a desta janela: ela sobe a cada HOSPEDAR que deu
+  // certo e a cada PARAR (`tela-boot.js`, `camada-hospedagem.js`), que é como
+  // «parar A e subir B» deixa de parecer a mesma porta.
+  return {
+    servidor: h?.servidor ?? null,
+    geracao: h?.geracao ?? geracaoDaHospedagemNaJanela,
+    nome: h?.nome ?? null,
+    // A geração é do Rust (e então vai nos atos), ou só desta janela.
+    doRust: Boolean(h),
+  };
+}
+
+/**
+ * **A hospedagem que vai junto do ato** (`decidir_pedido`, `revogar_admissao`):
+ * a do `estado_da_porta` em que o diálogo abriu, e o Rust recusa com
+ * `HospedagemNaoConfere` se outra estiver de pé. Só a que veio do Rust: a
+ * geração desta janela é outra conta, e mandá-la recusaria todo ato.
+ */
+function hospedagemDoAto(hospedagem) {
+  return hospedagem?.doRust ? { servidor: hospedagem.servidor, geracao: hospedagem.geracao } : null;
+}
+
+/** Faz um ato da portaria; a hospedagem que mudou é dita, e a fila relida. */
+async function atoDaPortaria(fazer) {
+  let falhou = null;
+  try {
+    await fazer();
+  } catch (falha) {
+    falhou = falha;
+  }
+  // O redesenho apaga o erro anterior; o deste ato é escrito depois dele.
+  await desenharPortaria();
+  if (falhou !== null) {
+    const erro = $("portaria-erro");
+    erro.hidden = false;
+    erro.textContent = fraseDeErro(falhou);
+  }
+}
+
+/** Quantas vezes esta janela subiu ou derrubou um servidor (ver acima). */
+let geracaoDaHospedagemNaJanela = 0;
+
+/** Uma hospedagem começou ou acabou nesta janela. */
+function hospedagemMudou() {
+  geracaoDaHospedagemNaJanela += 1;
+}
+
+/** A identidade de um pedido esperando, para a faixa e para o DEPOIS. */
+function chaveDoPedido(hospedagem, pedido) {
+  return [hospedagem.servidor ?? "?", hospedagem.geracao, pedido.impressao, pedido.bateu_em ?? 0].join("#");
+}
+
+/** As chaves dos pedidos que ainda esperam decisão. */
+function chavesDosEsperando(estado, pedidos) {
+  const hospedagem = hospedagemDaPorta(estado);
+  return (pedidos ?? []).filter((pedido) => pedido.decidido_em == null).map((pedido) => chaveDoPedido(hospedagem, pedido));
 }
 
 // -------------------------------------------------- a faixa de quem está batendo
@@ -482,17 +612,26 @@ async function atualizarPorta() {
 // pior que o silêncio que havia antes dele.
 
 /**
- * Acima de quantos pendentes a faixa volta a aparecer.
+ * **Os pedidos calados, pela identidade de cada um** (achado do Codex, E7).
  *
- * Zero quando ninguém está esperando. Sobe para o tamanho da fila quando quem
- * hospeda a lê ou aperta DEPOIS — e é isso que faz DEPOIS calar **estas**
- * batidas sem calar a próxima, que é a única promessa que um aviso dispensável
- * pode fazer.
+ * Eram dois números: a faixa aparecia quando os pendentes passavam do número
+ * calado. Trocar de servidor entre duas leituras, com um pedido em cada,
+ * deixava o pedido de B calado pelo DEPOIS dado em A; e no mesmo servidor, um
+ * pedido decidido e outro novo mantinham a conta e calavam o novo. Agora o
+ * DEPOIS e a leitura da fila calam **estes** pedidos — a chave de cada um tem
+ * o servidor, a geração da hospedagem, a impressão e o instante —, e um pedido
+ * que não está aqui é sempre novo.
  */
-let batidasCaladas = 0;
+const batidasCaladas = new Set();
 
-/** O último número lido, que é o que DEPOIS precisa saber para calar. */
-let batidasAgora = 0;
+/** As chaves lidas por último, que é o que DEPOIS precisa saber para calar. */
+let batidasAgora = [];
+
+/** Um número vira chaves sem identidade (o que bancadas antigas passam). */
+function chavesDe(pendentes) {
+  if (Array.isArray(pendentes)) return pendentes;
+  return Array.from({ length: Number(pendentes) || 0 }, (_, i) => `numero#${i}`);
+}
 
 /**
  * Mostra, esconde e — uma vez por aparição — diz em voz alta que há gente
@@ -505,24 +644,26 @@ let batidasAgora = 0;
  * ensina alguém a não ouvir a décima terceira.
  */
 function avisarQueBatem(pendentes) {
-  batidasAgora = pendentes;
+  const chaves = chavesDe(pendentes);
+  batidasAgora = chaves;
   const faixa = $("portaria-batendo");
+  // A memória só guarda quem ainda espera: o que foi decidido, ou é de uma
+  // hospedagem que acabou, sai dela.
+  for (const calada of [...batidasCaladas]) if (!chaves.includes(calada)) batidasCaladas.delete(calada);
 
-  if (pendentes === 0) {
-    // Fila vazia zera a memória: quem bater depois disto é batida nova, e não a
-    // continuação de uma que já foi dispensada.
-    batidasCaladas = 0;
+  if (chaves.length === 0) {
     faixa.hidden = true;
     return;
   }
 
   const frase =
-    pendentes === 1
+    chaves.length === 1
       ? "ALGUÉM ESTÁ BATENDO À PORTA DESTE SERVIDOR"
-      : `${pendentes} PESSOAS ESTÃO BATENDO À PORTA DESTE SERVIDOR`;
+      : `${chaves.length} PESSOAS ESTÃO BATENDO À PORTA DESTE SERVIDOR`;
   $("portaria-batendo-texto").textContent = frase;
 
-  const mostrar = pendentes > batidasCaladas;
+  // Aparece se há UM pedido que ninguém calou, e não se o número subiu.
+  const mostrar = chaves.some((chave) => !batidasCaladas.has(chave));
   // Antes de escrever o `hidden`, porque a pergunta é se ela **estava**
   // escondida: é a transição que merece uma frase, não o estado.
   if (mostrar && faixa.hidden) {
@@ -531,10 +672,9 @@ function avisarQueBatem(pendentes) {
   faixa.hidden = !mostrar;
 }
 
-/** Cala a faixa para uma fila deste tamanho. */
+/** Cala a faixa para ESTES pedidos, e só para eles. */
 function calarBatidas(pendentes) {
-  batidasCaladas = pendentes;
-  batidasAgora = pendentes;
+  for (const chave of chavesDe(pendentes)) batidasCaladas.add(chave);
   $("portaria-batendo").hidden = true;
 }
 
@@ -730,9 +870,13 @@ async function escreverOLinkDoNavegador(convite) {
   // do mesmo servidor e no mesmo instante: um link que não serve a quem está
   // fora não sai calado, e também não some, porque quem está na mesma rede
   // ainda entra por ele.
-  const [data, hora] = link ? diaEHora(link.ate) : [];
+  // **A validade só com uma data de verdade** (achado do Codex no app nativo:
+  // «Vale até NaN/NaN, às NaN:NaN»). Na 0.17 o link não vence, e o Rust não
+  // manda `ate`; uma data que não é número não vira frase.
+  const temValidade = Boolean(link) && Number.isFinite(link.ate) && link.ate > 0;
+  const [data, hora] = temValidade ? diaEHora(link.ate) : [];
   const { aviso, nota } = link
-    ? fraseDoLinkDoNavegador(link, data, hora)
+    ? fraseDoLinkDoNavegador(link, data, hora, typeof alcanceDoConvite === "undefined" ? null : alcanceDoConvite)
     : { aviso: "", nota: falha === "SemJanelas" ? LINK_DO_NAVEGADOR.SemJanelas : "" };
   const alcancaDeFora = link?.alcance === "Alcanca";
   for (const lugar of LUGARES_DO_LINK_DO_NAVEGADOR) {
@@ -752,7 +896,9 @@ async function escreverOLinkDoNavegador(convite) {
     $(lugar.nota).hidden = nota === "";
   }
 
-  if (link) {
+  // Renovar só o que vence: sem `renova`, a conta dava NaN e o `setTimeout`
+  // de NaN roda na hora, pedindo o link de novo sem parar.
+  if (link && Number.isFinite(link.renova) && link.renova > 0) {
     const espera = Math.min(Math.max(link.renova * 1000 - Date.now(), 0) + 1000, TETO_DA_ESPERA_MS);
     renovacaoDoLinkDoNavegador = setTimeout(() => escreverOLinkDoNavegador(convite), espera);
   }

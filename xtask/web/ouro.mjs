@@ -1,7 +1,7 @@
 // Os bytes-ouro da linha 1, conferidos DENTRO do `.wasm` do `seele-web` e pela
 // fronteira de verdade, com o JSON passando pelo JavaScript.
 //
-//     node xtask/web/ouro.mjs <seele_web.wasm> <crates/seele-proto/tests/fio_1_0.txt>
+//     node xtask/web/ouro.mjs <seele_web.wasm> <crates/seele-proto/tests/fio_2_0.txt>
 //
 // O `.wasm` é o do `wasm32-unknown-unknown`, com a feature `prova`, que acrescenta
 // duas funções só de teste: o JSON de uma mensagem do cliente e o quadro de uma
@@ -58,8 +58,8 @@ for (const linha of readFileSync(caminhoDoFio, "utf8").split("\n")) {
   }
 }
 
-// Um ordinal de vocabulário mais novo (10 000, varint 0x90 0x4e) chega como desconhecido.
-if (comBytes(Uint8Array.of(9, 0x90, 0x4e), (p, n) => e.decodificar(p, n)) !== 0) falhas.push("desconhecida: virou erro");
+// Um ordinal de vocabulário mais novo (10 000, varint 0x90 0x4e), com o carimbo da linha 2 (10), chega como desconhecido.
+if (comBytes(Uint8Array.of(10, 0x90, 0x4e), (p, n) => e.decodificar(p, n)) !== 0) falhas.push("desconhecida: virou erro");
 else if (JSON.parse(dec.decode(saida())).desconhecida !== 10000) falhas.push(`desconhecida: ${dec.decode(saida())}`);
 
 // A recusa da 0.15.1, `[8, 11, 0]`: erro, com a versão que veio.

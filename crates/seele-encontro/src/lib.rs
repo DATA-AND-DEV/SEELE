@@ -68,6 +68,9 @@
 
 pub mod assinado;
 pub mod cookie;
+pub mod enc3;
+pub mod sinal;
+pub mod stun;
 pub mod taxa;
 
 use std::collections::HashMap;
@@ -77,8 +80,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use seele_proto::encontro::{
-    analisar, analisar2, aqui, responder_em, resposta2, Marca, Moro2, Motivo, Pedido, Pedido2,
-    Resposta, Resposta2, Vizinhanca, TAMANHO2,
+    analisar, analisar2, analisar3, aqui, responder_em, resposta2, resposta3, Marca, Moro2, Motivo,
+    Pedido, Pedido2, Pedido3, Resposta, Resposta2, Resposta3, Vizinhanca, MAGIA3, TAMANHO2,
 };
 
 /// O que aconteceu com um datagrama.
@@ -121,6 +124,9 @@ const PRAZO_DO_QUARTO: Duration = Duration::from_secs(60);
 /// caber quem acabou de chegar é a troca errada.
 const MARCAS_NO_QUARTO: usize = 4096;
 
+/// De quanto em quanto tempo, no máximo, o laço olha as chamadas vencidas.
+const VOLTA_DA_VARREDURA: Duration = Duration::from_millis(250);
+
 /// Onde cada marca disse que mora, e desde quando.
 ///
 /// **A memória deste processo, e o ADR 0022 a recusava.** A revisão de
@@ -145,6 +151,16 @@ pub struct Quarto {
     /// O segredo dos cookies do `MORO2`, sorteado na subida: ver [`cookie`].
     /// Um só para as duas famílias, como o resto do quarto.
     cookies: cookie::Cookies,
+    /// O quarto assinado do ENC/3 (as salas da 0.17): separado do ENC/2, para
+    /// uma 0.16 não achar uma sala da 0.17 ([`enc3`]).
+    assinados3: assinado::QuartoAssinado,
+    /// O quarto livre do ENC/3 (os servidores guardados da 0.17).
+    livres3: enc3::QuartoLivre,
+    /// As chamadas que esperam `ATENDE`.
+    chamadas: enc3::Chamadas,
+    /// Os sockets das escutas que dividem este quarto: o `CHAMADO` sai pelo da
+    /// família da escuta do anfitrião, venha a chamada de onde vier.
+    sockets: Mutex<Vec<Arc<UdpSocket>>>,
 }
 
 impl Quarto {
@@ -212,12 +228,43 @@ impl Quarto {
     pub fn assinados(&self) -> &assinado::QuartoAssinado {
         &self.assinados
     }
+
+    /// As chamadas do ENC/3 que esperam `ATENDE`.
+    #[must_use]
+    pub fn chamadas(&self) -> &enc3::Chamadas {
+        &self.chamadas
+    }
+
+    /// Anota o socket de uma escuta, para o `CHAMADO` poder sair por ele.
+    fn anotar(&self, socket: &Arc<UdpSocket>) {
+        self.sockets
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(Arc::clone(socket));
+    }
+
+    /// Manda um datagrama pelo socket da família do destino. Sem socket
+    /// daquela família, nada sai: a chamada termina em `CALADO`.
+    fn enviar(&self, destino: SocketAddr, datagrama: &[u8]) {
+        let sockets = self
+            .sockets
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let da_familia = sockets.iter().find(|socket| {
+            socket
+                .local_addr()
+                .is_ok_and(|local| local.is_ipv6() == destino.is_ipv6())
+        });
+        if let Some(socket) = da_familia {
+            let _ = socket.send_to(datagrama, destino);
+        }
+    }
 }
 
 /// Um ponto de encontro escutando numa porta.
 #[derive(Debug)]
 pub struct Ponto {
-    socket: UdpSocket,
+    socket: Arc<UdpSocket>,
     vizinhanca: Vizinhanca,
     barulhento: bool,
     /// Compartilhado entre as duas famílias: um anfitrião registra por uma e
@@ -228,7 +275,7 @@ pub struct Ponto {
 /// O relógio de parede, em segundos Unix: o carimbo do `MORO2` é conferido
 /// contra ele, e é ele que vai na `RECUSA`. Um relógio antes de 1970 vale zero,
 /// e todo carimbo é recusado pelo relógio, que é o que se quer dizer.
-fn agora_unix() -> u64 {
+pub(crate) fn agora_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |desde| desde.as_secs())
@@ -290,8 +337,10 @@ impl Ponto {
         vizinhanca: Vizinhanca,
         quarto: Arc<Quarto>,
     ) -> io::Result<Self> {
+        let socket = Arc::new(ligar(escuta)?);
+        quarto.anotar(&socket);
         Ok(Self {
-            socket: ligar(escuta)?,
+            socket,
             vizinhanca,
             barulhento: false,
             quarto,
@@ -343,7 +392,15 @@ impl Ponto {
         let (lidos, de) = self.socket.recv_from(&mut balde)?;
 
         let recebido = balde.get(..lidos);
+        if let Some(datagrama) = recebido.filter(|datagrama| stun::parece_stun(datagrama)) {
+            return Ok(self.atender_stun(datagrama, de));
+        }
         let resposta = match recebido {
+            Some(datagrama)
+                if datagrama.len() == TAMANHO2 && datagrama.starts_with(MAGIA3.as_bytes()) =>
+            {
+                self.atender3(datagrama, de)
+            }
             Some(datagrama) if datagrama.len() == TAMANHO2 => self.atender2(datagrama, de),
             _ => self.atender1(recebido, de),
         };
@@ -497,19 +554,191 @@ impl Ponto {
         }
     }
 
+    /// O STUN Binding ([`stun`]): o endereço visto, com o balde próprio.
+    fn atender_stun(&self, datagrama: &[u8], de: SocketAddr) -> Movimento {
+        let resposta = stun::responder(datagrama, de).filter(|_| {
+            self.quarto
+                .taxa
+                .pedir(de.ip(), taxa::Classe::Stun, Instant::now())
+                == taxa::Decisao::Passa
+        });
+        match resposta {
+            Some(resposta) => {
+                let _ = self.socket.send_to(&resposta, de);
+                Movimento::Levado { de, para: de }
+            }
+            None => Movimento::Calado { de },
+        }
+    }
+
+    /// A versão 3 ([`enc3`]): o registro e a pergunta da 0.17, e a chamada.
+    ///
+    /// **Nada disto é impresso, nem com `--barulhento`**, como no ENC/2.
+    fn atender3(&self, datagrama: &[u8], de: SocketAddr) -> Option<Resposta> {
+        let agora = agora_unix();
+        let resposta = match analisar3(datagrama)? {
+            Pedido3::Moro3(moro) => self.registrar3(&moro, de)?,
+            Pedido3::Mora3 { marca, cookie } => self.registrar_livre(marca, cookie, de)?,
+            Pedido3::Quem3 { marca } => {
+                match self.taxa(de, taxa::Classe::Pergunta, &marca, agora)? {
+                    Some(recusa) => recusa,
+                    None => match enc3::onde_mora3(&self.quarto, &marca, Instant::now()) {
+                        Some((endereco, dicas)) => Resposta3::Aqui {
+                            marca,
+                            endereco,
+                            dicas,
+                        },
+                        None => Resposta3::Ninguem { marca },
+                    },
+                }
+            }
+            Pedido3::Chama(chama) => {
+                if let Some(recusa) =
+                    self.taxa(de, taxa::Classe::Chamada, &chama.servidor, agora)?
+                {
+                    recusa
+                } else {
+                    let quem = enc3::QuemLiga::Udp {
+                        socket: Arc::clone(&self.socket),
+                        para: de,
+                    };
+                    match enc3::chamar(&self.quarto, &chama, Some(de), self.vizinhanca, quem, agora)
+                    {
+                        // A resposta vem pelo `ATENDE`, ou pelo `CALADO` da varredura.
+                        Ok(_) => return None,
+                        Err(caixa) => caixa.1,
+                    }
+                }
+            }
+            Pedido3::Atende(atende) => {
+                // O `ATENDE` não ouve resposta: quem a ouve é quem ligou.
+                if let Some((quem, resposta)) = self.quarto.chamadas.atendida(&atende, de) {
+                    quem.entregar(resposta);
+                }
+                return None;
+            }
+        };
+        Some(Resposta {
+            destino: de,
+            datagrama: resposta3(&resposta),
+        })
+    }
+
+    /// O balde do ENC/3: `None` cala, `Some(None)` passa, `Some(Some(recusa))`
+    /// diz a recusa.
+    fn taxa(
+        &self,
+        de: SocketAddr,
+        classe: taxa::Classe,
+        marca: &Marca,
+        agora: u64,
+    ) -> Option<Option<Resposta3>> {
+        match self.quarto.taxa.pedir(de.ip(), classe, Instant::now()) {
+            taxa::Decisao::Passa => Some(None),
+            taxa::Decisao::Recusa { dizer: false } => None,
+            taxa::Decisao::Recusa { dizer: true } => Some(Some(Resposta3::Recusa {
+                marca: marca.clone(),
+                motivo: Motivo::Taxa,
+                agora,
+            })),
+        }
+    }
+
+    /// O `MORA3`: o cookie, o limite, e o quarto livre do ENC/3.
+    fn registrar_livre(
+        &self,
+        marca: Marca,
+        cookie: Option<[u8; seele_proto::encontro::BYTES_DO_COOKIE]>,
+        de: SocketAddr,
+    ) -> Option<Resposta3> {
+        let agora = agora_unix();
+        let cookie_valido =
+            cookie.is_some_and(|cookie| self.quarto.cookies.confere(de.ip(), &cookie, agora));
+        if !cookie_valido {
+            return Some(Resposta3::Desafio {
+                marca,
+                cookie: self.quarto.cookies.emitir(de.ip(), agora),
+            });
+        }
+        if let Some(recusa) = self.taxa(de, taxa::Classe::Registro, &marca, agora)? {
+            return Some(recusa);
+        }
+        Some(
+            match self.quarto.livres3.morar(marca.texto(), de, Instant::now()) {
+                Ok(()) => Resposta3::Morou {
+                    marca,
+                    endereco: de,
+                    cookie: self.quarto.cookies.emitir(de.ip(), agora),
+                },
+                Err(motivo) => Resposta3::Recusa {
+                    marca,
+                    motivo,
+                    agora,
+                },
+            },
+        )
+    }
+
+    /// O `MORO3`: as regras do `MORO2`, no quarto assinado do ENC/3.
+    fn registrar3(&self, moro: &Moro2, de: SocketAddr) -> Option<Resposta3> {
+        let agora = agora_unix();
+        let marca = moro.marca.clone();
+        let cookie_valido = moro
+            .cookie
+            .is_some_and(|cookie| self.quarto.cookies.confere(de.ip(), &cookie, agora));
+        if !cookie_valido {
+            return Some(Resposta3::Desafio {
+                marca,
+                cookie: self.quarto.cookies.emitir(de.ip(), agora),
+            });
+        }
+        if let Some(recusa) = self.taxa(de, taxa::Classe::Registro, &marca, agora)? {
+            return Some(recusa);
+        }
+        if !assinado::conferir3(moro) {
+            return None;
+        }
+        Some(
+            match self
+                .quarto
+                .assinados3
+                .morar(moro, de, Instant::now(), agora)
+            {
+                Ok(()) => Resposta3::Morou {
+                    marca,
+                    endereco: de,
+                    cookie: self.quarto.cookies.emitir(de.ip(), agora),
+                },
+                Err(motivo) => Resposta3::Recusa {
+                    marca,
+                    motivo,
+                    agora,
+                },
+            },
+        )
+    }
+
     /// Atende para sempre.
     ///
     /// Só volta se a **leitura** falhar por um motivo que não é de um
     /// datagrama só ([`erro_de_um_datagrama`]): esses são calados, e o serviço
-    /// segue.
+    /// segue. A leitura tem prazo curto, e a cada volta as chamadas do ENC/3
+    /// vencidas ouvem `CALADO`.
     ///
     /// # Errors
     ///
     /// O erro de leitura que o fez parar.
     pub fn servir(&self) -> io::Result<std::convert::Infallible> {
+        self.socket.set_read_timeout(Some(VOLTA_DA_VARREDURA))?;
         loop {
+            self.quarto.chamadas.varrer(Instant::now());
             match self.atender() {
                 Ok(_) => {}
+                Err(erro)
+                    if matches!(
+                        erro.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) => {}
                 Err(erro) if erro_de_um_datagrama(&erro) => {
                     if self.barulhento {
                         eprintln!("um datagrama não se leu, e foi calado: {erro}");

@@ -70,6 +70,13 @@ pub enum Classe {
     Registro,
     /// Um `QUEM2`: a pergunta por uma sala.
     Pergunta,
+    /// Um `CHAMA` do ENC/3 ou do sinal: o pedido que faz o ponto escrever à
+    /// escuta de um anfitrião, e por isso com balde próprio. Uma enxurrada de
+    /// chamadas não cala a pergunta nem o registro daquela rede.
+    Chamada,
+    /// Um STUN Binding: a única resposta deste ponto maior que o pedido (até
+    /// 44 bytes para 20), e por isso contada à parte.
+    Stun,
 }
 
 /// O que fazer com um pedido.

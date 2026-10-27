@@ -51,11 +51,16 @@ mod vaga;
 ///
 /// Dois, e esse é o ponto do arquivo inteiro: com um só, o filtro que este
 /// teste existe para pegar não filtra nada e tudo passa.
+///
+/// Quem abre a segunda é a dona declarada (ADR 0064, a semente 46): desde a
+/// 0.17 a primeira conta a chegar não vira Comandante.
 async fn server() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let dona = ed25519_dalek::SigningKey::from_bytes(&[46; 32]);
     let config = ServerConfig {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
+        proprietario: Some(seele_core::key_fingerprint(dona.verifying_key().as_bytes())),
         ..ServerConfig::default()
     };
     let servidor = Arc::new(Daemon::bind(config).await?);

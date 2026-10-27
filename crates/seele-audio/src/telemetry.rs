@@ -397,6 +397,12 @@ pub struct SourceTelemetry {
     pub comfort_frames: u64,
     /// Frames that arrived too late to use.
     pub late_frames: u64,
+    /// Quadros velhos de uma rajada tirados de uma vez da frente do buffer
+    /// (`JitterMetrics::descartes_por_rajada`). Não é perda; diagnóstico só.
+    pub descartes_por_rajada: u64,
+    /// Lugares de buraco pulados com a fila no teto
+    /// (`JitterMetrics::buraco_pulado`). Não é perda; diagnóstico só.
+    pub buraco_pulado: u64,
     /// `rtt_ms` — round trip to the server.
     ///
     /// **Not measured by this crate.** Filled in by the layer that owns the
@@ -418,6 +424,8 @@ impl SourceTelemetry {
             concealed_frames: jitter.frames_concealed,
             comfort_frames: jitter.frames_comfort,
             late_frames: jitter.late_discards,
+            descartes_por_rajada: jitter.descartes_por_rajada,
+            buraco_pulado: jitter.buraco_pulado,
             rtt_ms: None,
         }
     }
@@ -742,6 +750,8 @@ mod tests {
         assert_eq!(telemetry.concealed_frames, 60);
         assert_eq!(telemetry.comfort_frames, 500);
         assert_eq!(telemetry.late_frames, 3);
+        assert_eq!(telemetry.descartes_por_rajada, 0);
+        assert_eq!(telemetry.buraco_pulado, 0);
         // 100 bad slots out of 1000 played-or-lost. The 500 comfort slots are
         // excluded from both halves, per task M1.9.
         assert!((telemetry.loss_fraction - 0.1).abs() < 1e-9);

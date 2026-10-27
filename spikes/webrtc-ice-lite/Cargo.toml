@@ -1,0 +1,37 @@
+[package]
+name = "spike-webrtc-ice-lite"
+description = "Prova de desenho da 0.17: anfitrião str0m ICE-lite/DTLS passivo contra Chromium e WebKit reais. DESCARTÁVEL."
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Fora do workspace de propósito, como os outros spikes: nada pode depender dele.
+# Existe para responder, num navegador real e ANTES do porte, se o desenho do
+# contrato da 0.17 (D1–D5) fica de pé com o str0m. Resultado e números:
+# docs/evidencias/spike-webrtc-0.17.md.
+#
+# As versões são as de `crates/seele-enlace/Cargo.toml`: o que se mede aqui só
+# vale para a mesma pilha. Trocar uma delas invalida os números.
+#
+# Desvio consciente de «str0m com features = ["rust-crypto"]»: essa feature liga
+# `str0m-rust-crypto` → `dimpl/rcgen` → `aws-lc-rs`, e com as duas o `dimpl`
+# escolhe o AWS-LC primeiro (dimpl-0.7.6/src/config.rs:494). O enlace usa um
+# provedor RustCrypto próprio, e `src/cripto.rs` é a cópia dele.
+# `--features str0m-rust-crypto` repete com o backend oficial (não medido).
+[workspace]
+
+[features]
+str0m-rust-crypto = ["str0m/rust-crypto"]
+
+[dependencies]
+aes = "0.8"
+aes-gcm = "0.10"
+ctr = "0.9"
+dimpl = { version = "=0.7.6", default-features = false, features = ["rust-crypto"] }
+hmac = "0.12"
+rcgen = "0.14.8"
+sha1 = "0.10"
+sha2 = "0.10"
+str0m = { version = "=0.24.1", default-features = false }
+str0m-proto = { version = "=0.7.0", default-features = false, features = ["dtls"] }
+x509-cert = "0.2"

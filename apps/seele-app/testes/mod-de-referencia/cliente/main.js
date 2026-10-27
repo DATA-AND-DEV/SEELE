@@ -11,6 +11,8 @@
 //   SeeleMods.request(id, canal, valor)  — perguntar à metade de servidor
 //                                          (canal é um identificador; zero
 //                                           quer dizer «nenhum canal»)
+//   SeeleMods.acao(id, canal, acao, v)   — uma ação declarada (API 7,
+//                                          `acoes`); quem autoriza é o servidor
 //   SeeleUI.retrato()                    — o que a janela sabe, por lista
 //                                          branca (no lugar do `snapshot`)
 //   SeeleUI.tema(valores, { previa })    — a prévia de cor, numa superfície
@@ -581,6 +583,18 @@ async function comecar() {
   digitado = estado.gravado;
   // E um aviso da metade de servidor, que volta por `aoEvento` como `servidor`.
   await aoServidor({ op: "avisar" });
+  // **A ação declarada** (API 7, capacidade `acoes`). Este vetor não declara
+  // `permissoes`, e o servidor responde `acao-nao-declarada`: a recusa chega
+  // como valor, e o que voltou vai ao quintal. O caminho que passa está em
+  // `testes/mod-de-acoes`, provado por `acoes_de_mod.rs`.
+  if (tem.has("acoes")) {
+    const acao = await tentar("acao", () => SeeleMods.acao(EU, SEM_CANAL, "sem-declaracao", {}), null);
+    await tentar(
+      "anotar acao",
+      () => aoServidor({ op: "anotar", chave: "acao", valor: String(acao?.recusa ?? acao?.erro ?? "") }),
+      null,
+    );
+  }
   await desenhar();
 }
 

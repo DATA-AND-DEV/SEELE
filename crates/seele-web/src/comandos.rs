@@ -21,10 +21,13 @@
 //! a de sempre, e o motivo volta em [`Feito::nao_saiu`] para a página dizer no
 //! console.
 
+use seele_proto::cargos::{PedidoDeCargo, Permissao};
 use seele_proto::control::{
     check_server_icon, AlertReason, AlertSeverity, ClientMessage, ControlError, MAX_NICKNAME_LEN,
 };
-use seele_proto::ids::{ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId};
+use seele_proto::ids::{
+    ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, VoiceRoomId,
+};
 use seele_sessao::assento::carimbo_da_entrada;
 use seele_sessao::retrato::aviso_de;
 use seele_sessao::search::Search;
@@ -117,12 +120,14 @@ pub type Atendido = Result<Feito, Value>;
 /// (`bancada/ponte-web.cjs`): um comando da lista que a ponte não manda para cá
 /// é um comando que ninguém atende.
 pub const COMANDOS_DA_SESSAO: &[&str] = &[
+    "apagar_cargo",
     "apagar_linha",
     "apagar_voice_room",
     "aplicar_icone_do_server",
     "abertura_da_tela",
     "ajustar_limites_da_tela",
     "assistir",
+    "atribuir_cargo",
     "banir_pessoa",
     "busca_andar",
     "busca_limpar",
@@ -133,6 +138,7 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     // Os três dos anexos que a ponte chama por dentro: o cabeçalho do envio,
     // o destino (com as regras do nome) e o pedido de um anexo ao servidor.
     "cabecalho_do_anexo",
+    "criar_cargo",
     "criar_linha",
     "criar_voice_room",
     "descartar_mensagem",
@@ -141,8 +147,10 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "destino_de_previa",
     "destino_do_anexo",
     "dispensar_aviso",
+    "editar_cargo",
     "enter_voice_room",
     "escolher_apelido",
+    "explicar_permissoes",
     "expulsar_pessoa",
     "icone_do_server",
     "imagem_da_pessoa",
@@ -152,12 +160,15 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "midia_da_pagina",
     "minha_imagem",
     "mod_request",
+    "mover_cargo",
     "mover_pessoa",
     "open_channel",
     "parar_de_compartilhar",
     "pedir_anexo",
+    "pedir_cargos",
     "pedir_quadro_chave",
     "peso_da_linha",
+    "prever_cargo",
     // Os dois da volta, que a ponte chama por dentro: o `Ping` de rotina da
     // bateria e a repetição das pendentes.
     "ping_de_rotina",
@@ -166,6 +177,7 @@ pub const COMANDOS_DA_SESSAO: &[&str] = &[
     "renomear_linha",
     "renomear_server",
     "renomear_voice_room",
+    "revogar_cargo",
     "send_message",
     // Uma consulta da ponte, e não um comando da casca: a sala que o servidor
     // já não pode recusar e o número da voz desta conexão, para a voz abrir
@@ -545,11 +557,25 @@ fn atender_na_sessao(
             }
         }
         "mod_request" => {
-            saida.mensagens.push(ClientMessage::ModRequest {
-                request: a.u32("request")?,
-                id: a.texto("id")?,
-                channel: ChannelId(a.u32("channel")?),
-                payload: a.texto("payload")?,
+            let (request, id) = (a.u32("request")?, a.texto("id")?);
+            let (channel, payload) = (ChannelId(a.u32("channel")?), a.texto("payload")?);
+            // **A ação declarada** (API 7, capacidade `acoes`), como no comando
+            // Tauri: com `acao`, o pedido vai como `AcaoDeMod`, e quem confere a
+            // ação e a permissão é o servidor.
+            saida.mensagens.push(match a.texto_opcional("acao")? {
+                Some(acao) => ClientMessage::AcaoDeMod {
+                    request,
+                    id,
+                    channel,
+                    acao,
+                    payload,
+                },
+                None => ClientMessage::ModRequest {
+                    request,
+                    id,
+                    channel,
+                    payload,
+                },
             });
             Ok(Value::Null)
         }
@@ -711,6 +737,7 @@ fn atender_na_sessao(
         }
         "sala_da_voz" => Ok(json!({
             "sala": sessao.room.sala_confirmada().map(|sala| sala.0),
+            "desejada": sessao.room.current_voice_room.map(|sala| sala.0),
             "voz": sessao.room.ssrc.map(|ssrc| ssrc.0),
         })),
         // A ordem dos erros é a do desktop: quem não está na sala, e depois a
@@ -755,6 +782,11 @@ fn atender_na_sessao(
             if escolha != sessao.escolha {
                 sessao.escolha = escolha;
                 saida.eventos.push(json!("ScreenChanged"));
+            }
+            // Devolver a que o servidor ligou é deixar de recebê-la (a mesma
+            // linha do `assistir` da FFI).
+            if !quero {
+                sessao.tela_ligada.esquecer(tela);
             }
             saida.mensagens.push(if quero {
                 ClientMessage::WatchScreen { screen: tela }
@@ -816,8 +848,109 @@ fn atender_na_sessao(
             });
             Ok(Value::Null)
         }
+        // ------------------------------------------- os cargos (ADR 0064)
+        //
+        // Os nove do desktop (`apps/seele-app/src/cargos.rs`, de F), com as
+        // mesmas respostas e recusas. O quadro, as suas e os apelidos são os do
+        // `Room` DESTA ligação — uma instância do `.wasm` por sessão —, então a
+        // sessão de origem é a que responde, e nada é guardado na página.
+        "pedir_cargos" => {
+            // **Só pergunta ao servidor enquanto não há quadro**, como o
+            // desktop (`apps/seele-app/src/cargos.rs`, `pedir`). Depois do
+            // primeiro, o servidor manda o novo sozinho a cada mudança, e a
+            // casca sabe pelo `CargosChanged`. Perguntar a cada leitura era um
+            // laço: a resposta andava a marca, o aviso fazia a camada reler, e a
+            // releitura perguntava de novo (medido pelo G: 177 leituras em 13 s,
+            // o aviso de ritmo do servidor por cima da tela).
+            let tela = sessao
+                .room
+                .cargos
+                .na_tela(&apelidos_conhecidos(&sessao.room));
+            if tela.quadro.is_none() {
+                saida.mensagens.push(ClientMessage::PedirCargos);
+            }
+            Ok(json!(tela))
+        }
+        "explicar_permissoes" => {
+            let pessoa = PersonId(a.u64("pessoa")?);
+            sessao
+                .room
+                .cargos
+                .explicar_tudo(&apelidos_conhecidos(&sessao.room), pessoa)
+                .map(|explicadas| json!(explicadas))
+                .ok_or_else(|| json!("SemQuadro"))
+        }
+        "prever_cargo" => {
+            let revisao = a.u64("revisao")?;
+            let pedido = a.pedido_de_cargo("pedido")?;
+            let eu = sessao.room.me.ok_or_else(|| json!("SemQuadro"))?;
+            match sessao.room.cargos.prever(
+                &apelidos_conhecidos(&sessao.room),
+                eu,
+                revisao,
+                &pedido,
+            ) {
+                Some(Ok(previa)) => Ok(json!(previa)),
+                Some(Err(motivo)) => Err(json!({ "CargoRecusado": { "motivo": motivo } })),
+                None => Err(json!("SemQuadro")),
+            }
+        }
+        "criar_cargo" | "editar_cargo" | "mover_cargo" | "apagar_cargo" | "atribuir_cargo"
+        | "revogar_cargo" => {
+            let revisao = a.u64("revisao")?;
+            let pedido = pedido_de_cargo(&a)?;
+            saida
+                .mensagens
+                .push(seele_proto::cargos::mensagem_do_pedido(revisao, pedido));
+            Ok(Value::Null)
+        }
         _ => Err(json!({ "ComandoDesconhecido": { "comando": comando } })),
     }
+}
+
+/// Os apelidos que esta sessão conhece: os membros do FORA DO AR e quem está
+/// no roster — o `apelidos_conhecidos` da FFI.
+fn apelidos_conhecidos(
+    room: &seele_sessao::state::Room,
+) -> std::collections::BTreeMap<PersonId, String> {
+    let mut apelidos = room.membros.clone();
+    for (id, pessoa) in &room.people {
+        apelidos.insert(*id, pessoa.nickname.clone());
+    }
+    apelidos
+}
+
+/// O `PedidoDeCargo` de um dos seis verbos, dos argumentos do desktop
+/// (`cargos::pedido`, em `apps/seele-app/src/cargos.rs`).
+fn pedido_de_cargo(a: &Args<'_>) -> Result<PedidoDeCargo, Value> {
+    let cargo = || a.u32("cargo").map(RoleId);
+    let lista = |nome: &str| a.permissoes(nome);
+    Ok(match a.comando {
+        "criar_cargo" => PedidoDeCargo::Criar {
+            nome: a.texto("nome")?,
+            concede: lista("concede")?,
+            restringe: lista("restringe")?,
+        },
+        "editar_cargo" => PedidoDeCargo::Editar {
+            cargo: cargo()?,
+            nome: a.texto("nome")?,
+            concede: lista("concede")?,
+            restringe: lista("restringe")?,
+        },
+        "mover_cargo" => PedidoDeCargo::Mover {
+            cargo: cargo()?,
+            posicao: a.u32("posicao")?,
+        },
+        "apagar_cargo" => PedidoDeCargo::Apagar { cargo: cargo()? },
+        "atribuir_cargo" => PedidoDeCargo::Atribuir {
+            pessoa: PersonId(a.u64("pessoa")?),
+            cargo: cargo()?,
+        },
+        _ => PedidoDeCargo::Revogar {
+            pessoa: PersonId(a.u64("pessoa")?),
+            cargo: cargo()?,
+        },
+    })
 }
 
 /// O que o histórico sabe de um anexo: `{nome, tipo, tamanho}`, ou `null`.
@@ -928,6 +1061,20 @@ impl Args<'_> {
     fn bytes_opcional(&self, nome: &str) -> Result<Option<Vec<u8>>, Value> {
         self.campo(nome).map(|_| self.bytes(nome)).transpose()
     }
+
+    fn pedido_de_cargo(&self, nome: &str) -> Result<PedidoDeCargo, Value> {
+        self.campo(nome)
+            .cloned()
+            .and_then(|valor| serde_json::from_value(valor).ok())
+            .ok_or_else(|| self.invalido(nome, "um PedidoDeCargo"))
+    }
+
+    fn permissoes(&self, nome: &str) -> Result<Vec<Permissao>, Value> {
+        self.campo(nome)
+            .cloned()
+            .and_then(|valor| serde_json::from_value(valor).ok())
+            .ok_or_else(|| self.invalido(nome, "uma lista de Permissao"))
+    }
 }
 
 /// Base64 padrão, com o preenchimento: o codificador do produto
@@ -963,6 +1110,7 @@ mod tests {
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
+            impressao_dtls: [8; 32],
             convite: None,
             aceito: None,
         })
@@ -1006,12 +1154,232 @@ mod tests {
             .expect("atendido")
     }
 
+    /// **A ação declarada de MOD sai como `AcaoDeMod`** (API 7, capacidade
+    /// `acoes`), e o pedido sem `acao` — ou com `acao: null` — continua o
+    /// `ModRequest` de sempre. O navegador não decide nada: quem autoriza é o
+    /// servidor.
+    #[test]
+    fn o_mod_request_com_acao_sai_como_acao_de_mod_e_sem_ela_como_mod_request() {
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "mod_request",
+            json!({ "request": 9, "id": "seele/mesa", "channel": 0, "acao": "fechar-mesa", "payload": "{}" }),
+        );
+        assert_eq!(
+            escritos(&mut ligacao),
+            vec![ClientMessage::AcaoDeMod {
+                request: 9,
+                id: "seele/mesa".into(),
+                channel: ChannelId(0),
+                acao: "fechar-mesa".into(),
+                payload: "{}".into(),
+            }]
+        );
+        for sem_acao in [
+            json!({ "request": 10, "id": "seele/mesa", "channel": 1, "payload": "{}" }),
+            json!({ "request": 10, "id": "seele/mesa", "channel": 1, "acao": null, "payload": "{}" }),
+        ] {
+            let _ = atender(&mut ligacao, &mut chaves, "mod_request", sem_acao);
+            assert_eq!(
+                escritos(&mut ligacao),
+                vec![ClientMessage::ModRequest {
+                    request: 10,
+                    id: "seele/mesa".into(),
+                    channel: ChannelId(1),
+                    payload: "{}".into(),
+                }]
+            );
+        }
+    }
+
+    /// O quadro em que a 7 (quem esta ligação é) tem a Gestão, com `ManageRoles`.
+    fn quadro_de_cargos(revisao: u64) -> seele_proto::cargos::QuadroDeCargos {
+        use seele_proto::cargos::{Atribuicao, Cargo, Permissao, NOME_DO_TODOS, TODOS};
+        seele_proto::cargos::QuadroDeCargos {
+            cargos: vec![
+                Cargo {
+                    id: RoleId(1),
+                    nome: "Gestão".into(),
+                    posicao: 1,
+                    concede: vec![Permissao::Produto(Permission::ManageRoles)],
+                    restringe: vec![],
+                },
+                Cargo {
+                    id: TODOS,
+                    nome: NOME_DO_TODOS.into(),
+                    posicao: 0,
+                    concede: vec![],
+                    restringe: vec![],
+                },
+            ],
+            atribuicoes: vec![Atribuicao {
+                pessoa: PersonId(7),
+                cargos: vec![RoleId(1)],
+            }],
+            proprietario: None,
+            de_mods: vec![],
+            revisao,
+            dono_declarado: false,
+        }
+    }
+
+    #[test]
+    fn os_nove_comandos_de_cargos_atendem_pelo_room_desta_ligacao() {
+        let mut ligacao = dentro();
+        let mut chaves = DaPagina::nova(SEMENTE);
+        // Antes do quadro: a explicação e a prévia dizem `SemQuadro`, como o desktop.
+        assert_eq!(
+            ligacao.atender(
+                "explicar_permissoes",
+                &json!({ "pessoa": 8 }),
+                &mut chaves,
+                0
+            ),
+            Some(Err(json!("SemQuadro")))
+        );
+        let antes = atender(&mut ligacao, &mut chaves, "pedir_cargos", json!({}));
+        assert_eq!(antes.resposta["quadro"], Value::Null);
+        assert_eq!(escritos(&mut ligacao), vec![ClientMessage::PedirCargos]);
+
+        // O quadro chega pelo fio e é dobrado no `Room` desta ligação.
+        let passos = ligacao.chegou(&do_servidor(&ServerMessage::QuadroDeCargos(
+            quadro_de_cargos(12),
+        )));
+        // O aviso da mudança (o `Event::CargosChanged` da FFI), com a marca que
+        // o retrato passa a ter no `cargos_revision`.
+        let marca = ligacao
+            .sessao_mut()
+            .map(|sessao| sessao.retrato().cargos_revision)
+            .expect("dentro da sessão");
+        assert!(marca >= 1, "a marca dos cargos não andou");
+        let eventos: Vec<Value> = passos
+            .iter()
+            .filter_map(|passo| match passo {
+                Passo::Chegou { eventos, .. } => Some(eventos.clone()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(
+            eventos,
+            vec![json!({ "CargosChanged": { "marca": marca } })],
+            "o quadro de cargos não avisou a casca"
+        );
+        let tela = atender(&mut ligacao, &mut chaves, "pedir_cargos", json!({}));
+        assert_eq!(tela.resposta["quadro"]["revisao"], 12);
+        assert_eq!(tela.resposta["quadro"]["cargos"][0]["nome"], "Gestão");
+        // Com o quadro na sessão, a leitura NÃO vai ao servidor (o laço do G):
+        // o novo chega sozinho, avisado pelo `CargosChanged`.
+        assert!(
+            escritos(&mut ligacao).is_empty(),
+            "com o quadro já na sessão, o pedir_cargos perguntou ao servidor de novo"
+        );
+        let _ = atender(&mut ligacao, &mut chaves, "pedir_cargos", json!({}));
+        assert!(
+            escritos(&mut ligacao).is_empty(),
+            "a segunda leitura também perguntou"
+        );
+
+        let explicadas = atender(
+            &mut ligacao,
+            &mut chaves,
+            "explicar_permissoes",
+            json!({ "pessoa": 8 }),
+        );
+        assert_eq!(
+            explicadas.resposta.as_array().map(Vec::len),
+            Some(seele_proto::cargos::PERMISSOES_DO_PRODUTO.len())
+        );
+
+        // A prévia: a recusa que o servidor daria, na forma do desktop.
+        assert_eq!(
+            ligacao.atender(
+                "prever_cargo",
+                &json!({ "revisao": 12, "pedido": { "Atribuir": { "pessoa": 7, "cargo": 1 } } }),
+                &mut chaves,
+                0
+            ),
+            Some(Err(
+                json!({ "CargoRecusado": { "motivo": "CargoAcimaDeVoce" } })
+            ))
+        );
+        assert_eq!(
+            ligacao.atender(
+                "prever_cargo",
+                &json!({ "revisao": 11, "pedido": { "Apagar": { "cargo": 1 } } }),
+                &mut chaves,
+                0
+            ),
+            Some(Err(
+                json!({ "CargoRecusado": { "motivo": { "RevisaoVelha": { "atual": 12 } } } })
+            ))
+        );
+        assert!(escritos(&mut ligacao).is_empty(), "a prévia não vai ao fio");
+
+        // Os seis verbos saem com a revisão vista; quem decide é o servidor.
+        for (comando, args) in [
+            (
+                "criar_cargo",
+                json!({ "revisao": 12, "nome": "Mod", "concede": [{ "Produto": "Kick" }], "restringe": [] }),
+            ),
+            (
+                "editar_cargo",
+                json!({ "revisao": 12, "cargo": 1, "nome": "G", "concede": [], "restringe": [{ "Produto": "Ban" }] }),
+            ),
+            (
+                "mover_cargo",
+                json!({ "revisao": 12, "cargo": 1, "posicao": 2 }),
+            ),
+            ("apagar_cargo", json!({ "revisao": 12, "cargo": 1 })),
+            (
+                "atribuir_cargo",
+                json!({ "revisao": 12, "pessoa": 8, "cargo": 1 }),
+            ),
+            (
+                "revogar_cargo",
+                json!({ "revisao": 12, "pessoa": 8, "cargo": 1 }),
+            ),
+        ] {
+            let feito = atender(&mut ligacao, &mut chaves, comando, args);
+            assert_eq!(feito.resposta, Value::Null, "{comando}");
+            assert_eq!(feito.nao_saiu, None, "{comando}");
+            assert_eq!(escritos(&mut ligacao).len(), 1, "{comando}");
+        }
+        let _ = atender(
+            &mut ligacao,
+            &mut chaves,
+            "atribuir_cargo",
+            json!({ "revisao": 12, "pessoa": 8, "cargo": 1 }),
+        );
+        assert_eq!(
+            escritos(&mut ligacao),
+            vec![ClientMessage::AtribuirCargo {
+                revisao: 12,
+                pessoa: PersonId(8),
+                cargo: RoleId(1)
+            }]
+        );
+        // O argumento torto é recusado com a frase do Tauri, e nada sai.
+        let torto = ligacao.atender(
+            "mover_cargo",
+            &json!({ "revisao": 12, "cargo": 1 }),
+            &mut chaves,
+            0,
+        );
+        assert!(matches!(torto, Some(Err(Value::String(_)))), "{torto:?}");
+        assert!(escritos(&mut ligacao).is_empty());
+    }
+
     #[test]
     fn sem_sessao_e_not_connected_e_o_que_nao_e_da_sessao_nao_e_atendido() {
         let mut ligacao = Ligacao::abrir(Pedido {
             apelido: "a".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
+            impressao_dtls: [8; 32],
             convite: None,
             aceito: None,
         })
@@ -1687,6 +2055,7 @@ mod tests {
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
+            impressao_dtls: [8; 32],
             convite: None,
             aceito: None,
         };
@@ -1716,6 +2085,66 @@ mod tests {
             roles: Vec::new(),
             permissions: vec![Permission::Speak],
         }))
+    }
+
+    /// `Voltou` não confirma a reentrada. A ponte precisa distinguir a sala
+    /// ainda desejada da ausência definitiva, sem interpretar o Ping em JS.
+    #[test]
+    fn a_sala_da_voz_distingue_a_restauracao_pendente_da_saida() {
+        for desfecho in ["pong", "recusa", "apagada", "sair"] {
+            let mut ligacao = dentro();
+            let mut pagina = DaPagina::nova(SEMENTE);
+            let _ = atender(
+                &mut ligacao,
+                &mut pagina,
+                "enter_voice_room",
+                json!({ "voiceRoom": 2 }),
+            );
+            let pong = ServerMessage::Pong {
+                timestamp: carimbo_da_entrada(1),
+            };
+            let _ = ligacao.chegou(&do_servidor(&pong));
+            let _ = escritos(&mut ligacao);
+            let _ = ligacao.largar_para_voltar();
+            assert_eq!(
+                voltar(&mut ligacao, crate::sessao::Escolhas::default()),
+                vec![Passo::Voltou]
+            );
+            let estado = atender(&mut ligacao, &mut pagina, "sala_da_voz", json!({})).resposta;
+            assert_eq!(estado, json!({ "sala": null, "desejada": 2, "voz": 701 }));
+            match desfecho {
+                "pong" => {
+                    let _ = ligacao.chegou(&do_servidor(&pong));
+                }
+                "recusa" => {
+                    let _ = ligacao.chegou(&do_servidor(&ServerMessage::Alert {
+                        severity: AlertSeverity::Warning,
+                        reason: AlertReason::VoiceRoomEntryRefused,
+                        operator_text: None,
+                    }));
+                }
+                "apagada" => {
+                    let _ = ligacao.chegou(&do_servidor(&ServerMessage::VoiceRoomDeleted {
+                        voice_room: VoiceRoomId(2),
+                    }));
+                }
+                _ => {
+                    let _ = atender(&mut ligacao, &mut pagina, "leave_voice_room", json!({}));
+                }
+            }
+            let estado = atender(&mut ligacao, &mut pagina, "sala_da_voz", json!({})).resposta;
+            let sala = if desfecho == "pong" {
+                json!(2)
+            } else {
+                Value::Null
+            };
+            assert_eq!(estado["sala"], sala, "{desfecho}");
+            assert_eq!(estado["desejada"], sala, "{desfecho}");
+            // A confirmação tardia de uma recusa/exclusão/saída não ressuscita a sala.
+            let _ = ligacao.chegou(&do_servidor(&pong));
+            let depois = atender(&mut ligacao, &mut pagina, "sala_da_voz", json!({})).resposta;
+            assert_eq!(depois, estado, "{desfecho}");
+        }
     }
 
     #[test]

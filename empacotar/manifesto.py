@@ -61,6 +61,25 @@ LINHAS_FORA = {"0.11", "0.12", "0.13", "0.14"}
 # Até a 0.15, a versão do app e a do servidor eram uma coisa só.
 ULTIMA_LINHA_SEM_NUMERACAO_PROPRIA = 15
 
+# **O aviso que um app já instalado lê antes de instalar** (E4 da 0.17,
+# `/tmp/.../atualizador.md` e `docs/versoes-lado-a-lado.md`).
+#
+# O atualizador de toda versão publicada mostra o `notes` do topo deste
+# manifesto no bloco «O QUE MUDA», antes do botão de instalar, em texto puro e
+# com as quebras de linha (`ui/tela-server.js`, `textContent`;
+# `tela-server.css`, `white-space: pre-line`). É o único canal que chega a
+# quem ainda está na 0.16 **antes** de ela instalar a 0.17. Não bloqueia
+# nada: quem não lê instala com um clique.
+#
+# O texto mora nas notas da versão, entre os dois marcadores abaixo, para ser
+# escrito uma vez e revisado junto com o resto. Sem marcador, o `notes` é a
+# frase de sempre, com o link.
+INICIO_DO_AVISO = "<!-- AVISO-DO-ATUALIZADOR -->"
+FIM_DO_AVISO = "<!-- /AVISO-DO-ATUALIZADOR -->"
+# Um teto, e não um corte: um aviso que passa dele reprova o manifesto, porque
+# cortar no meio de uma frase é o produto dizendo menos do que sabe sem contar.
+TETO_DO_AVISO = 1200
+
 
 class Falha(Exception):
     """Uma recusa com frase, que vira saída 1."""
@@ -188,6 +207,73 @@ def ler_unidade(raiz: pathlib.Path, versao: str) -> dict:
     return {"protocol": protocolo, "mod_api": api, "server": servidor, "mod_apis": apis}
 
 
+def texto_puro(markdown: str) -> str:
+    """O Markdown das notas como o atualizador o desenha: texto, sem marcação.
+
+    O bloco «O QUE MUDA» põe o texto em `textContent`, então um `**` ou um
+    `[link](url)` apareceriam literais. Sai: a citação (`> `), os comentários
+    HTML, a ênfase, o código em linha e a forma do link (fica o texto e, entre
+    parênteses, o endereço). Os parágrafos ficam separados por uma linha em
+    branco.
+    """
+    sem_comentarios = re.sub(r"<!--.*?-->", "", markdown, flags=re.S)
+    linhas = []
+    for linha in sem_comentarios.splitlines():
+        linha = re.sub(r"^\s*>\s?", "", linha)
+        linha = re.sub(r"^#+\s*", "", linha)
+        linhas.append(linha.rstrip())
+    texto = "\n".join(linhas)
+    texto = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1 (\2)", texto)
+    texto = re.sub(r"(\*\*|__)(.+?)\1", r"\2", texto)
+    texto = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"\1", texto)
+    texto = texto.replace("`", "")
+    paragrafos = [" ".join(p.split()) for p in re.split(r"\n\s*\n", texto)]
+    return "\n\n".join(p for p in paragrafos if p)
+
+
+def aviso_do_atualizador(raiz: pathlib.Path, versao: str) -> str | None:
+    """O bloco do aviso nas notas desta versão, em texto puro, ou `None`.
+
+    `None` quando não há notas ou não há marcador: aí o `notes` é a frase de
+    sempre. Um marcador sem o par, dois blocos, um bloco vazio ou um aviso acima
+    de `TETO_DO_AVISO` reprovam: são as notas dizendo uma coisa e o manifesto
+    outra.
+    """
+    caminho = raiz / "empacotar" / "notas" / f"{versao}.md"
+    try:
+        notas = caminho.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as erro:
+        raise Falha(f"não li as notas «{caminho}»: {erro}") from erro
+    inicios = notas.count(INICIO_DO_AVISO)
+    fins = notas.count(FIM_DO_AVISO)
+    if inicios == 0 and fins == 0:
+        return None
+    if inicios != 1 or fins != 1 or notas.index(INICIO_DO_AVISO) > notas.index(FIM_DO_AVISO):
+        raise Falha(
+            f"«{caminho}» tem {inicios} {INICIO_DO_AVISO} e {fins} {FIM_DO_AVISO}: "
+            "o aviso do atualizador é um bloco só, aberto e fechado nessa ordem."
+        )
+    bloco = notas.split(INICIO_DO_AVISO, 1)[1].split(FIM_DO_AVISO, 1)[0]
+    aviso = texto_puro(bloco)
+    if not aviso:
+        raise Falha(f"o aviso do atualizador em «{caminho}» está vazio.")
+    if len(aviso) > TETO_DO_AVISO:
+        raise Falha(
+            f"o aviso do atualizador em «{caminho}» tem {len(aviso)} caracteres em texto puro, "
+            f"acima do teto de {TETO_DO_AVISO}. Encurte o bloco: o resto das notas vai pelo link."
+        )
+    return aviso
+
+
+def notas_do_topo(raiz: pathlib.Path, versao: str, repo: str, tag: str) -> str:
+    """O `notes` do manifesto: o aviso, se houver, e sempre a frase com o link."""
+    frase = f"SEELE {versao}. As notas estão em https://github.com/{repo}/releases/tag/{tag}"
+    aviso = aviso_do_atualizador(raiz, versao)
+    return frase if aviso is None else f"{aviso}\n\n{frase}"
+
+
 def linha_de(servidor: str) -> str | None:
     """A linha de uma versão de servidor: 1.0 e 1.3 → 1; 0.15 → 0.15.
 
@@ -300,7 +386,7 @@ def montar(
     # RFC 3339, que é o único formato que o plugin analisa. Um `pub_date`
     # malformado faz o manifesto inteiro ser recusado.
     agora = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    notas = f"SEELE {versao}. As notas estão em https://github.com/{repo}/releases/tag/{tag}"
+    notas = notas_do_topo(raiz, versao, repo, tag)
     nova = {"version": versao, "pub_date": agora, "notes": notas, "unit": unidade, "platforms": launcher}
 
     anteriores_versoes, topo_anterior, revogacoes = juntar_anteriores(anteriores)

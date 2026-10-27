@@ -16,6 +16,8 @@
   const { h } = CELULAR;
   const sessao = document.getElementById("tela-sessao");
   const camada = document.getElementById("tela-server");
+  // A aba mantém voz e navegação acessíveis fora da camada.
+  camada.setAttribute("aria-modal", "false");
 
   // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
   // arquivo não escreve nenhuma.
@@ -25,7 +27,7 @@
   // abas): as medidas vêm da moldura, e acompanham quando ela muda.
   function encaixar() {
     const topo = sessao.querySelector(".cel-topo").getBoundingClientRect().bottom;
-    const pe = [...sessao.querySelectorAll(":scope > :is(#veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, #cel-aviso-persistencia, .voz-celular, .cel-abas)")]
+    const pe = [...sessao.querySelectorAll(":scope > :is(#veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, #cel-aviso-persistencia, #cel-avisos-faixa, .voz-celular, .cel-abas)")]
       .filter((e) => !e.hidden && getComputedStyle(e).display !== "none")
       .reduce((menor, e) => Math.min(menor, e.getBoundingClientRect().top), innerHeight);
     camada.style.setProperty("--cel-ajustes-topo", `${topo}px`);
@@ -37,7 +39,7 @@
   // aberto ficava inteiro embaixo da camada, e o toque no dispensar dele caía num
   // botão de AJUSTES.
   function vigiar() {
-    const partes = ":scope > :is(.cel-topo, #veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, #cel-aviso-persistencia, .voz-celular, .cel-abas)";
+    const partes = ":scope > :is(.cel-topo, #veredito, #aviso-fone, #aviso-audio, .cel-selo-da-previa, #cel-aviso-persistencia, #cel-avisos-faixa, .voz-celular, .cel-abas)";
     for (const parte of sessao.querySelectorAll(partes)) observador.observe(parte);
   }
   vigiar();
@@ -222,6 +224,17 @@
     comoAbre,
     // Ações, e não seções: o `abrirSecao` do desktop passa por toda
     // `.server-secao` escondendo o painel dela, e estas não têm painel.
+    // CARGOS E PERMISSÕES (G): a camada sobre a sala, como no desktop. A aba
+    // AJUSTES fecha antes, para a camada ficar sobre a conversa de que fala.
+    typeof abrirCargos === "function" && h("li", {}, h("button", {
+      class: "cel-ajustes-acao cel-cargos",
+      type: "button",
+      onclick: () => {
+        fecharServer();
+        abrirCargos({});
+      },
+    }, h("span", { class: "server-secao-icone" }, glifo("chave")),
+      h("span", { class: "server-secao-texto" }, h("span", { class: "server-secao-nome", text: PALAVRAS.cargos })))),
     h("li", {}, h("button", { class: "cel-ajustes-acao cel-sobre", type: "button", onclick: () => abrirAjuda() },
       h("span", { class: "server-secao-icone" }, glifo("comando")),
       h("span", { class: "server-secao-texto" }, h("span", { class: "server-secao-nome", text: PALAVRAS.sobre })))),
@@ -251,4 +264,130 @@
     vestirCapa(placa, snapshot.me);
     for (const [id, , valor] of valores) valor.textContent = document.getElementById(id)?.textContent ?? "";
   });
+})();
+
+// ------------------------------------------------- a faixa de avisos do pé
+
+/**
+ * Os avisos do pé da sessão no celular (o primeiro contato, o fone, o áudio, a identidade) eram quatro faixas fixas, cada uma com o texto inteiro
+ * e o `dispensar`: três juntas tomavam ~40% da altura e a impressão digital inteira ia ao painel principal. Agora:
+ *
+ *   - quem protege (o veredito de identidade, e a resposta de persistência que alerta) fica SEMPRE à vista, em resumo de uma linha;
+ *   - os que só informam (o fone, o áudio, a persistência «concedida») são recolhidos numa faixa «N AVISOS» com ABRIR/FECHAR;
+ *   - aberta, a pilha tem altura máxima e rola dentro dela, e a faixa de voz abaixo nunca é coberta;
+ *   - o texto continua o mesmo (de `frases.js`) e o `dispensar` de cada um continua onde o produto o dá; só a apresentação muda.
+ */
+(function faixaDeAvisos() {
+  const sessao = document.getElementById("tela-sessao");
+  if (!sessao || typeof FRASES_AVISOS_DO_CELULAR === "undefined") return;
+  const f = FRASES_AVISOS_DO_CELULAR;
+  const ids = ["veredito", "aviso-fone", "aviso-audio", "cel-aviso-persistencia"];
+  const faixa = document.createElement("button");
+  faixa.type = "button";
+  faixa.id = "cel-avisos-faixa";
+  faixa.className = "cel-avisos-faixa botao-fantasma";
+  faixa.hidden = true;
+  faixa.setAttribute("aria-controls", ids.join(" "));
+  faixa.setAttribute("aria-expanded", "false");
+  sessao.append(faixa);
+
+  const ativo = (e) => e && !e.hidden && e.textContent.trim() !== "";
+  const principal = (e) => e.id === "veredito" || (e.id === "cel-aviso-persistencia" && e.dataset.resposta && e.dataset.resposta !== "concedida");
+
+  // A IMPRESSÃO DIGITAL nunca inteira no painel principal: no aviso do veredito ela vira «começo…fim», e o botão «ver inteira» (no próprio aviso,
+  // com aria-expanded e aria-controls) a mostra e a oculta. O texto do produto não muda; só a apresentação.
+  //
+  // **A verdade é o texto VIGENTE do aviso.** Nada é guardado fora dele: o valor que o botão revela é o 64-hexadecimal que o texto de agora
+  // tinha quando foi abreviado (`texto.dataset.inteira`), e só vale enquanto a forma curta dele continua no texto. Se o texto trocou para
+  // outra impressão, ela é reconciliada do zero (curta de novo, botão ligado ao valor novo); se trocou para um texto sem impressão, o estado
+  // é descartado e o botão some. A forma curta NUNCA é apresentada como a impressão: o botão diz que ela está abreviada.
+  //
+  // Escreve só quando a forma muda: depois de abreviada, o texto não casa mais com os 64 hexadecimais, e o observador não tem o que reescrever.
+  const HEX64 = /[0-9a-fA-F]{64}/;
+  const curta = (h) => `${h.slice(0, 8)}…${h.slice(-8)}`;
+  function descartarAImpressao(texto, botao) {
+    if (texto && "inteira" in texto.dataset) delete texto.dataset.inteira;
+    if ("impressao" in sessao.dataset) delete sessao.dataset.impressao;
+    if (botao && !botao.hidden) botao.hidden = true;
+  }
+  function impressaoNoAviso() {
+    const texto = document.getElementById("veredito-texto");
+    const aviso = document.getElementById("veredito");
+    if (!texto || !aviso) return;
+    const botao = document.getElementById("veredito-ver-inteira");
+    if (aviso.hidden) return descartarAImpressao(texto, botao);
+    const vigente = texto.textContent;
+    const achou = HEX64.exec(vigente);
+    let valor = null;
+    if (achou) {
+      // O texto vigente traz a impressão inteira: é dele que vem o valor. Expandida só se a pessoa pediu para ESTA impressão.
+      valor = achou[0];
+      if (!(sessao.dataset.impressao === "inteira" && texto.dataset.inteira === valor)) {
+        texto.dataset.inteira = valor;
+        delete sessao.dataset.impressao;
+        texto.textContent = vigente.replace(valor, curta(valor));
+      }
+    } else if (texto.dataset.inteira && vigente.includes(curta(texto.dataset.inteira))) {
+      valor = texto.dataset.inteira; // ainda a mesma impressão, abreviada
+    }
+    if (!valor) return descartarAImpressao(texto, botao);
+    let b = botao;
+    if (!b) {
+      b = document.createElement("button");
+      b.type = "button";
+      b.id = "veredito-ver-inteira";
+      b.className = "botao-fantasma";
+      b.setAttribute("aria-controls", "veredito-texto");
+      b.addEventListener("click", () => {
+        const v = texto.dataset.inteira;
+        if (!v) return;
+        const inteira = sessao.dataset.impressao === "inteira";
+        // Troca só dentro do texto vigente: se ele não traz a forma esperada, não há o que mostrar e o estado é reconciliado.
+        const de = inteira ? v : curta(v);
+        const para = inteira ? curta(v) : v;
+        if (!texto.textContent.includes(de)) return organizar(null);
+        texto.textContent = texto.textContent.replace(de, para);
+        sessao.dataset.impressao = inteira ? "curta" : "inteira";
+        organizar(null);
+      });
+      aviso.insertBefore(b, document.getElementById("veredito-fechar"));
+    }
+    const inteira = sessao.dataset.impressao === "inteira";
+    const rotulo = inteira ? f.ocultar : f.verInteira;
+    if (b.textContent !== rotulo) b.textContent = rotulo;
+    const dizer = inteira ? f.ocultarRotulo : f.verInteiraRotulo;
+    if (b.getAttribute("aria-label") !== dizer) b.setAttribute("aria-label", dizer);
+    if (b.getAttribute("aria-expanded") !== String(inteira)) b.setAttribute("aria-expanded", String(inteira));
+    if (b.hidden) b.hidden = false;
+  }
+
+  // **Sem laço**: a faixa mora dentro da `#tela-sessao`, que este observador vigia. Escrever nela sem comparar (o `hidden`, o
+  // texto) gerava um registro novo a cada escrita, e o `organizar` se chamava para sempre: a página nem chegava ao
+  // DOMContentLoaded (pwa-curto-11, tela branca). Os registros da PRÓPRIA faixa são ignorados, e cada escrita só acontece
+  // quando o valor muda.
+  function organizar(registros) {
+    if (Array.isArray(registros) && registros.length && registros.every((r) => r.target === faixa || faixa.contains(r.target))) return;
+    impressaoNoAviso();
+    const vivos = ids.map((id) => document.getElementById(id)).filter(ativo);
+    const aberto = sessao.dataset.avisos === "aberto";
+    for (const e of ids.map((id) => document.getElementById(id))) {
+      if (e) e.classList.toggle("cel-aviso-recolhido", vivos.includes(e) && !principal(e) && !aberto);
+    }
+    // A faixa existe enquanto houver aviso: fechada, cada um que protege é uma linha e os que informam somem atrás dela; aberta, todos inteiros.
+    const esconder = vivos.length === 0;
+    if (faixa.hidden !== esconder) faixa.hidden = esconder;
+    if (!esconder) {
+      const texto = `${f.faixa(vivos.length)} · ${aberto ? f.fechar : f.abrir}`;
+      if (faixa.textContent !== texto) faixa.textContent = texto;
+      if (faixa.getAttribute("aria-expanded") !== String(aberto)) faixa.setAttribute("aria-expanded", String(aberto));
+    }
+    if (esconder && "avisos" in sessao.dataset) delete sessao.dataset.avisos;
+  }
+
+  faixa.addEventListener("click", () => {
+    sessao.dataset.avisos = sessao.dataset.avisos === "aberto" ? "fechado" : "aberto";
+    organizar(null);
+  });
+  new MutationObserver(organizar).observe(sessao, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "data-resposta"], characterData: true });
+  organizar(null);
 })();

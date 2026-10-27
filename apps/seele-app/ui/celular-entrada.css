@@ -384,3 +384,47 @@
 :root[data-casca="celular"] #tela-auth :is(.auth-nota, .registro-hora, .registro-texto[data-tom="apagado"], .auth-server-sub, .auth-espera-fatos) {
   color: var(--seele-rotulo-claro);
 }
+
+/* A lista do aviso do endereço novo: linhas curtas na medida de leitura, e o dispensar com alvo de 44px dentro do próprio aviso. */
+:root[data-casca="celular"] .cel-entrada-origem-linhas {
+  margin: 8px 0 12px;
+  padding: 0 0 0 18px;
+  max-width: var(--seele-leitura);
+}
+
+:root[data-casca="celular"] .cel-entrada-origem-acoes {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+:root[data-casca="celular"] .cel-entrada-origem-acoes > button {
+  flex: 1 1 0;
+  min-height: 44px;
+}
+
+/* O parágrafo da entrada tem a medida de leitura: no celular deitado (844 de largura) a linha corria 100 caracteres. */
+:root[data-casca="celular"] .cel-entrada-nota,
+:root[data-casca="celular"] .cel-entrada-fora,
+:root[data-casca="celular"] .cel-entrada-aviso p {
+  max-width: var(--seele-leitura);
+}
+
+/* O celular deitado (altura < 500px): o aviso do endereço novo vira duas colunas, o texto à esquerda e os botões à direita, e não toma mais que
+   um quarto da altura. Os alvos seguem de 44px. */
+@media (max-height: 500px) {
+  :root[data-casca="celular"] .cel-entrada-origem-nova {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 16px;
+    align-items: center;
+  }
+
+  :root[data-casca="celular"] .cel-entrada-origem-nova > :not(.cel-entrada-origem-acoes) { grid-column: 1; }
+
+  :root[data-casca="celular"] .cel-entrada-origem-nova > .cel-entrada-origem-acoes {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    margin-top: 0;
+  }
+}
