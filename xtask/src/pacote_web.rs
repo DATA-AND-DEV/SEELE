@@ -32,8 +32,62 @@
 //! à origem é o dono
 //! (`docs/superpowers/sdd/2026-10-08-0.16/F4/origem-para-o-dono.md`).
 
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+
+/// Só a cópia WEB recebe URLs por conteúdo. Uma página recém-carregada não
+/// mistura o HTML novo com recursos ainda frescos no cache da versão anterior.
+fn versionar_recursos(pasta: &Path) -> Result<String, String> {
+    fn listar(pasta: &Path, prefixo: &str, arquivos: &mut Vec<String>) -> Result<(), String> {
+        for entrada in std::fs::read_dir(pasta).map_err(|e| e.to_string())? {
+            let entrada = entrada.map_err(|e| e.to_string())?;
+            let nome = format!("{prefixo}{}", entrada.file_name().to_string_lossy());
+            if entrada.path().is_dir() {
+                listar(&entrada.path(), &format!("{nome}/"), arquivos)?;
+            } else {
+                arquivos.push(nome);
+            }
+        }
+        Ok(())
+    }
+    let mut arquivos = Vec::new();
+    listar(pasta, "", &mut arquivos)?;
+    arquivos.sort();
+    let mut hash = Sha256::new();
+    for nome in &arquivos {
+        let bytes = std::fs::read(pasta.join(nome)).map_err(|e| e.to_string())?;
+        hash.update(nome.as_bytes());
+        hash.update([0]);
+        hash.update((bytes.len() as u64).to_le_bytes());
+        hash.update(bytes);
+    }
+    let versao: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    for nome in &arquivos {
+        if !["html", "js", "css"]
+            .iter()
+            .any(|ext| nome.ends_with(&format!(".{ext}")))
+        {
+            continue;
+        }
+        let caminho = pasta.join(nome);
+        let mut texto = std::fs::read_to_string(&caminho).map_err(|e| e.to_string())?;
+        // As referências do pacote são literais locais, inclusive as constantes
+        // dos carregadores de WASM/iframe/worklet e os url("fontes/...").
+        // Não tocamos URLs remotas, dados do usuário ou nomes sem arquivo local.
+        for recurso in &arquivos {
+            for aspas in ['"', '\'', '`'] {
+                for prefixo in ["", "./", "/"] {
+                    let antes = format!("{aspas}{prefixo}{recurso}{aspas}");
+                    let depois = format!("{aspas}{prefixo}{recurso}?v={versao}{aspas}");
+                    texto = texto.replace(&antes, &depois);
+                }
+            }
+        }
+        std::fs::write(caminho, texto).map_err(|e| e.to_string())?;
+    }
+    Ok(versao)
+}
 
 fn raiz() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -482,6 +536,9 @@ fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
     let fronteira = std::fs::read_to_string(raiz.join("crates/seele-web/src/fronteira.rs"))
         .map_err(|e| format!("crates/seele-web/src/fronteira.rs: {e}"))?;
     let motivos = conferir(&pasta, &congelados, &exportacoes_da_prova(&fronteira));
+    if motivos.is_empty() {
+        versionar_recursos(&pasta)?;
+    }
     Ok((pasta, motivos))
 }
 
@@ -493,6 +550,33 @@ fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_de_uma_publicacao_nao_mistura_a_proxima() {
+        let mut versoes = Vec::new();
+        for versao in ["antiga", "nova"] {
+            let pasta = pasta_nova(&format!("cache-{versao}"));
+            std::fs::write(pasta.join("index.html"), "<!doctype html><link rel=\"stylesheet\" href=\"base.css\"><script src=\"app.js\"></script>").unwrap();
+            std::fs::write(
+                pasta.join("base.css"),
+                format!("body {{ --versao: {versao}; }}"),
+            )
+            .unwrap();
+            std::fs::write(pasta.join("app.js"), format!("window.versao = '{versao}'; window.recurso = fetch('motor.wasm').then(r => r.text()); window.worker = new Worker('worker.js'); window.worker.onmessage = e => window.trabalhador = e.data;")).unwrap();
+            std::fs::write(pasta.join("worker.js"), format!("postMessage('{versao}')")).unwrap();
+            std::fs::write(pasta.join("motor.wasm"), versao).unwrap();
+            let hash = versionar_recursos(&pasta).unwrap();
+            let html = std::fs::read_to_string(pasta.join("index.html")).unwrap();
+            assert!(html.contains(&format!("app.js?v={hash}")));
+            assert!(
+                std::fs::read_to_string(pasta.join("app.js"))
+                    .unwrap()
+                    .contains(&format!("motor.wasm?v={hash}"))
+            );
+            versoes.push(hash);
+        }
+        assert_ne!(versoes[0], versoes[1]);
+    }
 
     /// Uma pasta de teste nova, sob o `target/` deste crate.
     fn pasta_nova(nome: &str) -> PathBuf {
@@ -699,5 +783,21 @@ mod tests {
             motivos.is_empty(),
             "o pacote de hoje devia sair, e não sai: {motivos:?}"
         );
+        let hash = versionar_recursos(&pasta).unwrap();
+        for (arquivo, recurso) in [
+            ("index.html", "celular-entrada.js"),
+            ("voz-web.js", "seele_web.wasm"),
+            ("voz-web.js", "voz-worklet.js"),
+            ("mods-no-navegador.js", "seele_motor_web.wasm"),
+            ("mods-no-navegador.js", "executor-de-mod.html"),
+            ("fontes.css", "fontes/saira-condensed-500.woff2"),
+        ] {
+            assert!(
+                std::fs::read_to_string(pasta.join(arquivo))
+                    .unwrap()
+                    .contains(&format!("{recurso}?v={hash}")),
+                "faltou versionar {arquivo}: {recurso}"
+            );
+        }
     }
 }
