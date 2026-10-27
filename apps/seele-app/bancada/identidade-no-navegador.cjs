@@ -75,7 +75,7 @@ const confere = (caso, condicao, detalhe) => {
 };
 
 const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "identidade-no-navegador-"));
-for (const nome of ["ponte-web.js", "voz-web.js", "identidade-web.js"]) {
+for (const nome of ["ponte-web.js", "voz-web.js", "sessao-web.js", "identidade-web.js"]) {
   fs.copyFileSync(path.join(raiz, "ui", nome), path.join(pasta, nome));
 }
 fs.copyFileSync(caminhoDoWasm, path.join(pasta, "seele_web.wasm"));
@@ -86,6 +86,7 @@ fs.writeFileSync(
   `<!doctype html><meta charset="utf-8"><title>identidade</title>
 <script src="ponte-web.js"></script>
 <script src="voz-web.js"></script>
+<script src="sessao-web.js"></script>
 <script src="identidade-web.js"></script>
 <script src="bancada.js"></script>`,
 );
@@ -441,8 +442,10 @@ async function principal() {
     // velha, e o link novo é aberto enquanto quem a entrada espera responde.
     const [VELHO, NOVO, MODS, PERSIST, FORA_A, FORA_B] = ["71", "72", "73", "74", "75", "76"].map((b) => b.repeat(32));
     const caso12 = await rodar(async (l) => {
+      let aberturaEmCurso;
       const novoNoMeio = (identidade, texto, resposta) => async () => {
-        await identidade.abrir(texto);
+        aberturaEmCurso = identidade.abrir(texto);
+        await aberturaEmCurso;
         return resposta;
       };
       // a. O servidor aceita a entrada velha depois de o link novo abrir.
@@ -450,45 +453,56 @@ async function principal() {
       await aceita.abrir(l.velho);
       window.servidor.roteiro = [novoNoMeio(aceita, l.novo, "ok")];
       const velha = await aceita.entrar("ana");
+      await aberturaEmCurso;
       const lidaDepois = aceita.ler();
       const nova = await aceita.entrar("bia");
       const soltas = window.servidor.soltas.splice(0);
+      // O cancelamento termina antes da resposta tardia. A preservação da
+      // chave dela tem sua própria transação limitada: esperamos essa evidência.
+      const ateGuardar = Date.now() + 1000;
+      while (!(await servidorConhecido(l.impressaoVelha)) && Date.now() < ateGuardar) await new Promise(r => setTimeout(r, 5));
       const deVolta = await (await window.criar()).entrarNoConhecido(l.impressaoVelha, "ana");
       // b. O servidor recusa a velha: a recusa dela não encerra a nova.
       const recusada = await window.criar();
       await recusada.abrir(l.velho2);
       window.servidor.roteiro = [novoNoMeio(recusada, l.novo2, { Refused: { reason: "CredentialRejected" } })];
       const recusa = await recusada.entrar("ana");
+      await aberturaEmCurso;
       const lidaDepoisDaRecusa = recusada.ler();
       // c. A velha para nos MODs: o aceite não é da nova.
       const mods = await window.criar();
       await mods.abrir(l.velho3);
       window.servidor.roteiro = [novoNoMeio(mods, l.mods, { ModsNaoAceitos: { mods: [], conjunto: "c3" } })];
       const paradaNosMods = await mods.entrar("ana");
+      await aberturaEmCurso;
       const aceiteNaNova = await mods.aceitarOsMods("c3");
       // d. O link novo abre enquanto o navegador responde ao persist(): a
       // velha não conecta.
       const noPersist = await window.criar();
       await noPersist.abrir(l.velho4);
-      window.duranteOPersist = () => noPersist.abrir(l.persist);
+      window.duranteOPersist = () => (aberturaEmCurso = noPersist.abrir(l.persist));
       window.ordem.splice(0);
       const antesDeConectar = await noPersist.entrar("ana");
+      await aberturaEmCurso;
       const lidaNoPersist = noPersist.ler();
       const ordemNoPersist = window.ordem.splice(0);
       // e. O mesmo enquanto a chave nasce, e com a chave que não nasce: a
       // falha da velha não encerra a nova.
       const naChave = await window.criar();
       await naChave.abrir(l.velho5);
-      window.duranteAChave = () => naChave.abrir(l.chave);
+      window.duranteAChave = () => (aberturaEmCurso = naChave.abrir(l.chave));
       const enquantoNasce = await naChave.entrar("ana");
+      await aberturaEmCurso;
       const lidaNaChave = naChave.ler();
       const semChave = await window.criar();
       await semChave.abrir(l.velho6);
       window.duranteAChave = async () => {
-        await semChave.abrir(l.semChave);
+        aberturaEmCurso = semChave.abrir(l.semChave);
+        await aberturaEmCurso;
         throw new Error("a chave da bancada não nasceu");
       };
       const naoNasceu = await semChave.entrar("ana");
+      await aberturaEmCurso;
       const lidaSemChave = semChave.ler();
       return { velha, lidaDepois, nova, soltas, deVolta, recusa, lidaDepoisDaRecusa, paradaNosMods, aceiteNaNova, antesDeConectar, lidaNoPersist, ordemNoPersist, enquantoNasce, lidaNaChave, naoNasceu, lidaSemChave };
     }, {

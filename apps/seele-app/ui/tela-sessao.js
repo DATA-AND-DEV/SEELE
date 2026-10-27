@@ -513,8 +513,17 @@ function pintarVeredito(frase) {
 
 // ------------------------------------------------------------------- desenho
 
+let identidadesApresentadas = Object.create(null);
+function apelidoApresentado(id, legado, mapa = identidadesApresentadas) {
+  const detalhe = mapa?.[String(id)];
+  return Array.isArray(detalhe) && /^[0-9A-Z]{4}$/.test(detalhe[1])
+    ? `${detalhe[0]}#${detalhe[1]}` : legado;
+}
 function desenhar(snapshot) {
   if (!snapshot) return;
+  const novasIdentidades = snapshot.identidades_apresentadas ?? Object.create(null);
+  if (JSON.stringify(novasIdentidades) !== JSON.stringify(identidadesApresentadas)) mensagensPorDesenhar = true;
+  identidadesApresentadas = novasIdentidades;
 
   // **O tema do servidor antes de tudo** (tarefa 17d da F3): a sessão — e a
   // tela do fim — já se desenham com ele, ou sem ele.
@@ -1285,7 +1294,7 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
   const item = elemento("li", "voice_room-pessoa");
   chaveNaLista.set(item, `pessoa:${pessoa.id}`);
   item.append(glifo(pessoa.speaking ? "falando" : "silencio"));
-  item.append(elemento("span", "voice_room-pessoa-nome", pessoa.nickname));
+  item.append(elemento("span", "voice_room-pessoa-nome", apelidoApresentado(pessoa.id, pessoa.nickname)));
   if (pessoa.is_self) item.append(elemento("span", "voice_room-pessoa-eu", "(você)"));
   if (pessoa.muted) {
     item.append(elemento("span", "voice_room-pessoa-marca", "mudo"));
@@ -1301,7 +1310,7 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
 /** A tira do operador, no rodapé da coluna de canais. */
 function desenharOperador(snapshot) {
   aplicarARegiao("operador.barra", $("operador-mods"));
-  $("operador-nome").textContent = snapshot.nickname;
+  $("operador-nome").textContent = apelidoApresentado(snapshot.me, snapshot.nickname);
   // O próprio retrato, no quadrado que já mostrava a inicial. `snapshot.me` é
   // quem esta janela é para o servidor; sem ele não há a quem pedir a imagem.
   // A inicial ao lado do nome, como a comp a desenha — e é a mesma que a prévia
@@ -1797,7 +1806,7 @@ function itemDeMensagem(mensagem, indice, segue) {
   const conteudo = elemento("span", "mensagem-conteudo");
   const cabeca = elemento("span", "mensagem-cabeca");
   if (!segue) {
-    cabeca.append(elemento("span", "mensagem-autor", mensagem.author_nickname));
+    cabeca.append(elemento("span", "mensagem-autor", apelidoApresentado(mensagem.author, mensagem.author_nickname)));
     cabeca.append(elemento("span", "mensagem-hora", relogio(mensagem.at_seconds)));
   }
   if (mensagem.edited) cabeca.append(elemento("span", "editada", "editada"));
@@ -2753,7 +2762,7 @@ function desenharPessoas(snapshot) {
               // a contribuição que a apresenta, a ação que ela abre — e o nome
               // desenhado não serve para nada disso: um MOD pode tê-lo trocado.
               id: pessoa.id,
-              nome: pessoa.nickname + (pessoa.is_self ? " (você)" : ""),
+              nome: apelidoApresentado(pessoa.id, pessoa.nickname) + (pessoa.is_self ? " (você)" : ""),
               // Esta ramificação é a de quem está **numa sala**: é dela que
               // sai a diferença entre «o microfone está aberto» e «a voz está
               // indo para alguém». Ver `estado` em `linhaNativaDoRoster`.
@@ -2788,7 +2797,7 @@ function desenharPessoas(snapshot) {
         linhaDoRoster(
           {
             id: snapshot.me,
-            nome: `${snapshot.nickname} (você)`,
+            nome: `${apelidoApresentado(snapshot.me, snapshot.nickname)} (você)`,
             // Fora de sala: o microfone pode estar captando, e não há para
             // onde transmitir.
             emSala: false,
@@ -2844,7 +2853,7 @@ function desenharPessoas(snapshot) {
           linhaDoRoster(
             {
               id: pessoa.id,
-              nome: pessoa.nickname,
+              nome: apelidoApresentado(pessoa.id, pessoa.nickname),
               emSala: false,
               // Sem medida: o sinal de quem não está numa sala não é medido por
               // ninguém — não há voz atravessando para medir. Travessão é o que
@@ -2928,7 +2937,7 @@ function pintarVolumesDoRoster() {
  */
 function grupoForaDoAr(membros) {
   const linhas = membros.map((membro) => {
-    const li = elemento("li", "membro-fora-do-ar", membro.nickname);
+    const li = elemento("li", "membro-fora-do-ar", apelidoApresentado(membro.id, membro.nickname));
     chaveNaLista.set(li, `membro:${membro.id}`);
     return li;
   });
@@ -3184,6 +3193,12 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   // A faixa contém a apresentação; os detalhes e acréscimos seguem abaixo.
   const faixa = elemento("div", "pessoa-apresentada-faixa");
   faixa.append(miolo);
+  const tag = identidadesApresentadas[String(pessoa.id)]?.[1];
+  if (/^[0-9A-Z]{4}$/.test(tag ?? "")) {
+    const selo = elemento("span", "pessoa-tag-nativa", `#${tag}`);
+    selo.title = "Tag da conta neste servidor";
+    faixa.append(selo);
+  }
   item.append(faixa);
 
   // **O diagnóstico nativo não some: ele recolhe.** U15 pediu que sinal e
@@ -3228,13 +3243,24 @@ function cartaoDeContribuicao(contribuicao, id) {
  * apresentada por um MOD.
  */
 function nomeDaPessoa(pessoa) {
-  if (!pessoa.moderar) return elemento("span", "pessoa-nome", pessoa.nome);
-  const porta = elemento("button", "pessoa-nome pessoa-nome-porta", pessoa.nome);
-  porta.type = "button";
-  porta.dataset.moderarPessoa = pessoa.moderar;
-  porta.setAttribute("aria-label", `moderar ${pessoa.nome}`);
-  porta.title = `expulsar, banir ou mover ${pessoa.nome}`;
-  return porta;
+  const detalhe = identidadesApresentadas[String(pessoa.id)];
+  const tag = detalhe?.[1];
+  const temTag = Array.isArray(detalhe) && /^[0-9A-Z]{4}$/.test(tag ?? "");
+  const nome = temTag ? detalhe[0] : pessoa.nome;
+  const porta = elemento(pessoa.moderar ? "button" : "span",
+    pessoa.moderar ? "pessoa-nome pessoa-nome-porta" : "pessoa-nome", nome);
+  if (pessoa.moderar) {
+    porta.type = "button";
+    porta.dataset.moderarPessoa = pessoa.moderar;
+    porta.setAttribute("aria-label", `moderar ${pessoa.nome}`);
+    porta.title = `expulsar, banir ou mover ${pessoa.nome}`;
+  }
+  if (!temTag) return porta;
+  // A base pode encolher; a tag nativa nunca some no ellipsis do nome.
+  const conjunto = elemento("span", "pessoa-nome-com-tag");
+  conjunto.title = pessoa.nome;
+  conjunto.append(porta, elemento("span", "pessoa-tag-nativa", `#${tag}`));
+  return conjunto;
 }
 
 function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
@@ -4825,6 +4851,7 @@ function esquecerOEstadoDaSessao() {
   // servidor não é a do seguinte, e a primeira lista da sessão nasce com nós
   // novos, sem herdar linha nem cartão de MOD da que acabou.
   chaveNaLista = new WeakMap();
+  identidadesApresentadas = Object.create(null);
   modDoMarcador = new WeakMap();
   nosDeModNaLista = new WeakSet();
   abertoPedido = new WeakMap();

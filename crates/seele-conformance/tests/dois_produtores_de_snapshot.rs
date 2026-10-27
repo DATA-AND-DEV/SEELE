@@ -126,6 +126,11 @@ fn mensagens() -> Vec<ServerMessage> {
         ServerMessage::CargoRecusado {
             motivo: seele_proto::cargos::RecusaDeCargo::SemPermissao,
         },
+        ServerMessage::IdentidadeApresentada {
+            pessoa: EU,
+            base: "é".repeat(16),
+            tag: "AB01".into(),
+        },
     ]
 }
 
@@ -158,8 +163,8 @@ fn os_dois_produtores_dao_o_mesmo_retrato_depois_de_cada_mensagem() {
         let campos = navegador.as_object().expect("um objeto");
         assert_eq!(
             campos.len(),
-            20,
-            "o retrato da sala tem {} campos, e a lista deste teste é de 20",
+            21,
+            "o retrato da sala tem {} campos, e a lista deste teste é de 21",
             campos.len()
         );
         for (campo, valor) in campos {
@@ -240,7 +245,15 @@ fn os_dois_produtores_dao_o_mesmo_retrato_depois_de_cada_mensagem() {
     // E a marca dos cargos: parada até a primeira mensagem de cargo, e +1 em
     // cada uma das duas — nos dois produtores, que a comparação de cima já
     // prendeu iguais passo a passo.
-    let antes_dos_cargos = mensagens.len() - 2;
+    assert_eq!(
+        fim.identidades_apresentadas.get(&EU.0),
+        Some(&("é".repeat(16), "AB01".into())),
+        "a apresentação integral deve chegar sem substituir o alias marcela2"
+    );
+    let antes_dos_cargos = mensagens
+        .iter()
+        .position(|mensagem| matches!(mensagem, ServerMessage::QuadroDeCargos(_)))
+        .unwrap();
     assert_eq!(
         do_navegador[antes_dos_cargos].cargos_revision, 0,
         "a marca andou sem mensagem de cargo"

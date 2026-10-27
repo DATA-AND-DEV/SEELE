@@ -791,6 +791,8 @@ pub enum PermissaoDeTela {
 /// Everything the interface needs, in one value.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Snapshot {
+    /// Base integral e tag por identidade; não substitui o alias interno.
+    pub identidades_apresentadas: std::collections::BTreeMap<u64, (String, String)>,
     /// Por qual caminho esta conversa saiu, como nome estável.
     ///
     /// Um de `RedeLocal`, `Ipv6Direto`, `EnderecoPublico` ou `FuroDeNat` — os

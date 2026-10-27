@@ -80,6 +80,7 @@ where
 #[must_use]
 pub const fn desde(mensagem: &ServerMessage) -> u8 {
     match mensagem {
+        ServerMessage::IdentidadeApresentada { .. } => 11,
         // O `Alert` existe desde sempre, e o que pode ser novo é o motivo.
         ServerMessage::Alert { reason, .. } => maior(PRIMEIRO_DA_LINHA_UM, desde_o_alerta(reason)),
         // Puxa o número da razão que leva, como o `Alert` puxa o do motivo: uma

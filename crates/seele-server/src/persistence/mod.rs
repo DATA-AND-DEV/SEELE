@@ -414,6 +414,9 @@ impl Persistence {
             transaction
                 .execute_batch(migration.sql)
                 .with_context(|| format!("migration {} failed", migration.version))?;
+            if migration.version == 19 {
+                crate::permissions::migrar_tags(&transaction)?;
+            }
             transaction.execute(
                 "INSERT INTO schema_version (version, applied_at) VALUES (?1, ?2)",
                 rusqlite::params![migration.version, now_seconds()],
@@ -776,6 +779,12 @@ mod tests {
                      ALTER TABLE roles DROP COLUMN position;
                      UPDATE roles SET permissions = replace(replace(permissions, ',\"ShareScreen\"', ''), ',\"Administrator\"', ''),
                                       denials     = replace(denials, ',\"ShareScreen\"', '');
+
+                     -- A migração 19 acrescentou base/tag e índice; esta
+                     -- fixture rebobina o schema antes de testar o replay.
+                     DROP INDEX people_tag;
+                     ALTER TABLE people DROP COLUMN nickname_base;
+                     ALTER TABLE people DROP COLUMN nickname_tag;
 
                      -- A parte da migração 17 (os ids que não voltam), pela
                      -- regra de baixo: a marca e os dois gatilhos que a sobem.

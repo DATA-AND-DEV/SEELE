@@ -102,11 +102,12 @@
   // ------------------------------------------------------------- o teclado
   //
   // O teclado do sistema não muda a página, só o pedaço dela que se vê
-  // (`visualViewport`). Com ele aberto sobre um campo, a sessão ocupa só o que
-  // se vê: o compositor fica colado a ele, as abas saem e a faixa de voz sobe
-  // para o alto, com o MUDO à mão.
+  // (`visualViewport`). Entrada e sessão ocupam só o que se vê: o ENTRAR fica
+  // acima do teclado; na sessão, o compositor fica colado a ele, as abas saem
+  // e a faixa de voz sobe para o alto, com o MUDO à mão.
 
   const vista = window.visualViewport;
+  const telasDoTeclado = [sessao, document.getElementById("tela-boot")];
   function acompanharOTeclado() {
     const campo = document.activeElement;
     const escrevendo = !!campo && (campo.tagName === "TEXTAREA" || campo.tagName === "INPUT");
@@ -114,15 +115,18 @@
     // `innerHeight` encolhe junto com o teclado (medido no iOS 27: 714 sem ele,
     // 384 com ele, e o `clientHeight` da raiz em 714 nos dois).
     const aberto = escrevendo && vista.height < raiz.clientHeight - 120;
-    sessao.toggleAttribute("data-teclado", aberto);
-    if (aberto) {
-      sessao.style.setProperty("--cel-visivel", `${vista.height}px`);
-      sessao.style.setProperty("--cel-visivel-topo", `${vista.offsetTop}px`);
+    for (const tela of telasDoTeclado) {
+      tela.toggleAttribute("data-teclado", aberto);
+      if (aberto) {
+        tela.style.setProperty("--cel-visivel", `${vista.height}px`);
+        tela.style.setProperty("--cel-visivel-topo", `${vista.offsetTop}px`);
+      }
     }
   }
   if (vista) {
     vista.addEventListener("resize", acompanharOTeclado);
     vista.addEventListener("scroll", acompanharOTeclado);
+    document.addEventListener("focusin", acompanharOTeclado);
     document.addEventListener("focusout", () => requestAnimationFrame(acompanharOTeclado));
   }
 

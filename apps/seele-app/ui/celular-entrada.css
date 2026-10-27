@@ -20,6 +20,13 @@
   display: none;
 }
 
+/* O mesmo visualViewport da sessão: o teclado pode cobrir as ações mesmo
+   quando 100dvh não muda. O corpo continua rolável acima do pé da entrada. */
+:root[data-casca="celular"] #tela-boot[data-teclado] {
+  height: var(--cel-visivel);
+  transform: translateY(var(--cel-visivel-topo, 0px));
+}
+
 :root[data-casca="celular"] .cel-entrada {
   flex: 1 1 auto;
   min-height: 0;

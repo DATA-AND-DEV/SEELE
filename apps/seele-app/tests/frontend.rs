@@ -10992,22 +10992,22 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         // Quem já é conhecido entra pela chave, e não gasta o convite.
         (
             "identidade-web.js",
-            "const credencial = tentativa.conhecido ? null : segredos.credencial;",
+            "const credencial = esta.conhecido ? null : segredos.credencial;",
         ),
         (
             "identidade-web.js",
-            "resposta = await conectar(alvo, apelido, credencial);",
+            "const ligando = Promise.resolve(conectar(alvo, apelido, credencial, preparo)).then((entrada) => {",
         ),
         // O `conectar` da identidade da página: o `connect` da ponte, que na
         // 2.6 é a sessão pelo navegador. A credencial vai ao `connect`, e a
         // nenhum outro lugar.
         (
             "identidade-web.js",
-            "function conectarPelaPonte(alvo, apelido, credencial) {",
+            "function conectarPelaPonte(alvo, apelido, credencial, preparacao) {",
         ),
         (
             "identidade-web.js",
-            "return invocarNaPonte(\"connect\", { alvo, nickname: apelido, joinSecret: credencial });",
+            "return invocarNaPonte(\"connect\", { alvo, nickname: apelido, joinSecret: credencial, preparacao });",
         ),
         // Quem toma o link da carga: a função e a identidade da página, e
         // ninguém mais (a casca nunca toca no token do fragmento).
@@ -11055,7 +11055,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ),
         (
             "ponte-web.js",
-            "async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}) {",
+            "async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, preparacao } = {}) {",
         ),
         ("ponte-web.js", "convite: joinSecret ?? null,"),
         (
@@ -11224,8 +11224,9 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ),
         ("camada-mods.js", "alvo, null, credencial"),
         // A entrada pelo navegador (3.4): o link da página, com o token da
-        // tentativa. Só quem não é conhecido o leva.
-        ("identidade-web.js", "alvo, apelido, credencial"),
+        // tentativa. Só quem não é conhecido o leva. O quarto argumento da
+        // identidade é somente { sinal, ate }, sem outro caminho para o token.
+        ("identidade-web.js", "alvo, apelido, credencial, preparo"),
     ];
     let mut levam: Vec<(String, String)> = Vec::new();
     for nome in ui_files(".js") {
@@ -11546,7 +11547,9 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // e acerta o número.
     // 38 desde a 0.17: o `cargos_revision` (F) é a revisão do quadro de cargos,
     // um número que sobe, e não segredo; ele tira o polling da tela de cargos.
-    const CAMPOS_DO_SNAPSHOT: usize = 38;
+    // 39: identidades_apresentadas contém somente PersonId, base e tag públicas;
+    // nenhuma chave, credencial ou material de autenticação cruza essa fronteira.
+    const CAMPOS_DO_SNAPSHOT: usize = 39;
     let fora_da_leitura: Vec<&str> = retrato
         .lines()
         .map(str::trim)
@@ -19037,6 +19040,7 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
         ("subindo", "tirarAnexo()"),
         ("volumesLidos", "esquecerVolumes()"),
         ("geracaoDosVolumes", "esquecerVolumes()"),
+        ("campoPrecisaMedir", "restaurarRascunho()"),
     ];
     // Os que **atravessam** sessões de propósito, cada um com o motivo. Conferidos
     // um por um na rodada 1: nenhum guarda nada que um servidor tenha dito.
@@ -19159,6 +19163,20 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
         matches!((sem_linha, restaura), (Some(antes), Some(depois)) if antes < depois),
         "`esquecerOEstadoDaSessao` não esvazia o campo de mensagem depois de fechar a \
          Linha: o texto escrito num servidor vai no primeiro Enter do seguinte:\n{esquecer}"
+    );
+    let restaurar = body_of(&sessao, "function restaurarRascunho()");
+    let esvazia = restaurar.find("campo.value = linhaAberta === null ? \"\"");
+    let mede = restaurar.find("cresceOCampo()");
+    assert!(
+        matches!((esvazia, mede), (Some(antes), Some(depois)) if antes < depois),
+        "restaurarRascunho deve esvaziar o campo antes de recalcular sua medida"
+    );
+    let crescer = body_of(&sessao, "function cresceOCampo()");
+    assert!(
+        crescer.contains("if (campo.scrollHeight > 0)")
+            && crescer.contains("campoPrecisaMedir = false;")
+            && crescer.contains("else {\n    campoPrecisaMedir = true;"),
+        "cresceOCampo deve substituir a flag pela visibilidade atual, sem herdar a sessão anterior"
     );
     assert!(
         esquecer.contains("$(\"campo-busca\").value = \"\""),
@@ -21128,9 +21146,8 @@ fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
                 .next()
         })
         .collect();
-    // O apelido é o que a linha mostra, e o `id` é a conta: entra só na chave da
-    // linha (`membro:<id>`, lote FORA), que é o que faz o nó ser do membro e não
-    // da posição, e nunca no texto dela. Papel, horário e o resto não chegam.
+    // O id só seleciona a apresentação pública e a chave estável da linha;
+    // nunca vira texto. Papel, horário e o resto não chegam.
     assert!(
         lidos.contains("nickname"),
         "a linha do FORA DO AR não lê mais o apelido do membro:\n{linha}"
@@ -21140,10 +21157,18 @@ fn o_fora_do_ar_mostra_so_o_nome_e_nunca_um_horario() {
         "a linha do FORA DO AR lê do membro mais que o apelido e o id: {lidos:?}\n{linha}"
     );
     assert_eq!(
-        linha.matches("membro.id").count(),
-        linha.matches("`membro:${membro.id}`").count(),
-        "a linha do FORA DO AR lê o `id` do membro fora da chave `membro:<id>`: o id é a conta, e \
-         não vai para o texto da linha:\n{linha}"
+        linha
+            .matches("apelidoApresentado(membro.id, membro.nickname)")
+            .count(),
+        1,
+        "o nome deve vir uma vez da apresentação pública do membro:\n{linha}"
+    );
+    let sem_usos_internos = linha
+        .replace("`membro:${membro.id}`", "")
+        .replace("apelidoApresentado(membro.id, membro.nickname)", "");
+    assert!(
+        !sem_usos_internos.contains("membro.id"),
+        "o id só pode escolher a apresentação e a chave da linha, nunca o texto:\n{linha}"
     );
     for proibido in [
         "Date",
@@ -22499,8 +22524,10 @@ const dentroDe = (r, nome) => { try { return vm.runInContext(nome, r.ctx); } cat
 const TELA_DA_ENTRADA_NODE: &str = r##"
 class No {
   constructor(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.className = ""; this.id = ""; this.value = ""; this.hidden = false; this.scrollTop = 0; this.dataset = {}; this.textContent = ""; }
+  get isConnected() { return boot.contains(this) || Object.values(soltos).some((raiz) => raiz.contains(this)); }
   append(...c) { for (const x of c) this.children.push(x); }
   replaceChildren(...c) { this.children = c.slice(); }
+  replaceWith(no) { for (const raiz of [boot, ...Object.values(soltos)]) { const pai = raiz.procurar((n) => n.children.includes(this)); if (pai) { pai.children.splice(pai.children.indexOf(this), 1, no); return; } } }
   addEventListener() {}
   removeAttribute() {}
   setAttribute(k, v) { this.attrs[k] = v; }
@@ -22864,7 +22891,7 @@ const identidadeDeTeste = (iniciais, conectar) => {
     },
   });
   const ctx = vm.createContext({
-    console, setTimeout, Date, TextEncoder, TextDecoder, crypto: require("crypto").webcrypto,
+    console, setTimeout, clearTimeout, AbortController, Date, TextEncoder, TextDecoder, crypto: require("crypto").webcrypto,
     indexedDB: { open: () => { const pedido = { result: banco() }; setTimeout(() => pedido.onsuccess && pedido.onsuccess(), 0); return pedido; } },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     window: { addEventListener() {}, location: { hash: "", href: "https://exemplo.invalido/" }, matchMedia: () => ({ matches: true }) },
@@ -22874,7 +22901,7 @@ const identidadeDeTeste = (iniciais, conectar) => {
     invocarNaPonte: async () => null,
     carregarOWasmDaPagina: async () => ({}),
   });
-  carregar({ ctx }, "identidade-web.js");
+  carregar({ ctx }, "sessao-web.js", "identidade-web.js");
   const id = ctx.criarIdentidadeDoNavegador({ analisar: () => ({}), conectar, agora: () => Date.now(), instalado: () => true, casca: () => "celular" });
   return { id, registros };
 };

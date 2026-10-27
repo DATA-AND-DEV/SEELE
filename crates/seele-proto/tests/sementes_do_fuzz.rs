@@ -160,6 +160,14 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             reason: DisconnectReason::ServerShuttingDown,
         }),
     );
+    controle.insert(
+        "servidor-identidade-apresentada".to_owned(),
+        quadro(&ServerMessage::IdentidadeApresentada {
+            pessoa: seele_proto::ids::PersonId(1),
+            base: "é".repeat(16),
+            tag: "A001".into(),
+        }),
+    );
     todas.insert("control_frame", controle);
 
     let mut midia = DoAlvo::new();

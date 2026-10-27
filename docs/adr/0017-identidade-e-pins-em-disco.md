@@ -46,3 +46,22 @@ Consequências:
 - No Windows a proteção é a ACL herdada do diretório do perfil, que é mais fraca que o modo Unix. Registrado, não resolvido.
 
 Custo de reverter: **baixo** para o mecanismo — `seele-core::identity` é um módulo com duas funções e um `PinStore`. **Alto** para o formato, assim que existir um usuário: mudar o layout do arquivo depois de distribuído exige migração, e a coisa que migra é a única prova de quem a pessoa é.
+
+### Adendo de 27/10/2026 — bases iguais e tags do servidor
+
+A base do nome pode ser repetida por contas diferentes. A identidade continua
+sendo a chave pública e o PersonId; nomes e tags não concedem autoridade.
+O servidor atribui uma tag aleatória de quatro caracteres base36, única naquele
+servidor e persistida com a conta. Renomear, reconectar ou restaurar a cópia do
+banco não troca a tag. Ela não identifica a pessoa entre servidores distintos.
+
+A migração 19 preserva a base integral de até 32 bytes e todos os IDs. A primeira
+abertura pelo app conserva o portão de confirmação e cópia verificada antes de
+migrar. O protocolo 11 acrescenta uma mensagem de apresentação por PersonId;
+a faixa mínima continua 10 e os quadros publicados não mudam. Clientes 11
+apresentam base integral e tag. Clientes 10 recebem um alias único de até 32
+bytes: prefixo UTF-8 de até 27 bytes e a tag. Apenas essa apresentação legada
+pode ser abreviada; o nome no banco não é truncado. O alias também continua nos
+campos internos e no contrato MOD7, impedindo ambiguidade de volume/SSRC.
+Uma contribuição que substitui o cartão não esconde a tag nativa nem os detalhes
+de identidade e moderação. O cliente não escolhe a tag de outra conta.

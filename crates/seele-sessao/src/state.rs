@@ -275,6 +275,8 @@ pub struct Ended {
 /// Everything this client knows about the server it is attached to.
 #[derive(Debug, Default, Clone)]
 pub struct Room {
+    /// Apresentação completa indexada pela identidade, distinta do alias de mídia.
+    pub identidades_apresentadas: BTreeMap<u64, (String, String)>,
     /// **Qual servidor é este**, e não por onde se chegou a ele.
     ///
     /// Plano de isolamento de 18/09, P1. Endereço e impressão digital, juntos,
@@ -685,6 +687,7 @@ impl Room {
         // produto acharia que os dois são o mesmo. Uma identidade herdada é
         // pior que nenhuma: nenhuma diz «não sei», herdada afirma errado.
         self.instancia = String::new();
+        self.identidades_apresentadas.clear();
         // Cleared, and not left alone, because this runs again on every
         // reconnection. The handshake describes the server from scratch and the
         // picture arrives just behind it when there is one; keeping the old one
@@ -1749,6 +1752,12 @@ impl Room {
             // e só vale inteira no `fim`: uma parte sem ele não troca a lista
             // anterior, que é o que a volta de uma queda reenvia sem o grupo
             // piscar vazio.
+            ServerMessage::IdentidadeApresentada { pessoa, base, tag } => {
+                self.identidades_apresentadas
+                    .insert(pessoa.get(), (base.clone(), tag.clone()));
+                changed.roster = true;
+                changed.membros = true;
+            }
             ServerMessage::Membros { membros, fim } => {
                 let chegando = self.membros_chegando.get_or_insert_with(BTreeMap::new);
                 for membro in membros {
@@ -3454,5 +3463,40 @@ mod tests {
         );
         assert!(room.telas.is_empty());
         assert_eq!(room.chave_pedida, None);
+    }
+}
+
+#[cfg(test)]
+mod tags_testes {
+    use super::*;
+    #[test]
+    fn tags_apresentacao_nao_muda_alias_ssrc_nem_snapshot() {
+        let mut room = Room::new();
+        for (id, tag) in [(1, "AAAA"), (2, "BBBB")] {
+            room.apply(&ServerMessage::PersonPresent {
+                profile: seele_proto::control::PersonProfile {
+                    id: PersonId(id),
+                    nickname: format!("teste#{tag}"),
+                    roles: vec![],
+                    material_e2ee: None,
+                },
+                ssrc: Ssrc(id as u32),
+            });
+            let changed = room.apply(&ServerMessage::IdentidadeApresentada {
+                pessoa: PersonId(id),
+                base: "teste".into(),
+                tag: tag.into(),
+            });
+            assert!(changed.roster && changed.membros);
+        }
+        assert_eq!(room.ssrc_of("teste#AAAA"), Some(Ssrc(1)));
+        assert_eq!(room.ssrc_of("teste#BBBB"), Some(Ssrc(2)));
+        assert_eq!(room.ssrc_of("teste"), None);
+        let retrato = crate::retrato::foto_da_sala(&room, None, None).retrato(String::new);
+        assert_eq!(
+            retrato.identidades_apresentadas[&1],
+            ("teste".into(), "AAAA".into())
+        );
+        assert!(retrato.presentes.iter().any(|p| p.nickname == "teste#AAAA"));
     }
 }

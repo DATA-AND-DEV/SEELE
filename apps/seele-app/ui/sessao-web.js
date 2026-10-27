@@ -37,6 +37,32 @@
 // sai do `Room` vem do `.wasm`, e o que cada ponta mede é medido aqui
 // (`MEDIDOS_POR_CADA_PONTA`, em `dois_produtores_de_snapshot.rs`).
 
+const PRAZO_DA_PREPARACAO_DA_ENTRADA_MS = 30_000;
+
+/** Espera uma etapa local. Um resultado tardio não executa a etapa seguinte.
+ * O dono do recurso continua responsável por fechá-lo ao abortar. */
+function esperarEtapaDaEntrada(fazer, { sinal, ate = Infinity, motivo = "PreparacaoExpirada" } = {}) {
+  return new Promise((resolve, reject) => {
+    let terminou = false;
+    let relogio;
+    const terminar = (falha, valor) => {
+      if (terminou) return;
+      terminou = true;
+      clearTimeout(relogio);
+      sinal?.removeEventListener("abort", cancelar);
+      if (falha) reject(valor); else resolve(valor);
+    };
+    const cancelar = () => terminar(true, sinal.reason ?? "Cancelada");
+    if (sinal?.aborted) return cancelar();
+    if (Date.now() >= ate) return terminar(true, motivo);
+    sinal?.addEventListener("abort", cancelar, { once: true });
+    if (Number.isFinite(ate)) relogio = setTimeout(() => terminar(true, motivo), Math.max(0, ate - Date.now()));
+    Promise.resolve().then(() => {
+      if (!terminou) return fazer();
+    }).then((valor) => terminar(false, valor), (falha) => terminar(true, falha));
+  });
+}
+
 /** O prazo do aperto de mão: o `HANDSHAKE_TIMEOUT` do desktop. */
 const PRAZO_DO_APERTO_MS = 10_000;
 
@@ -279,6 +305,7 @@ async function abrirASessaoDoNavegador({
   wasm,
   alvo,
   cancelamento = { cancelada: false, aoCancelar: null },
+  preparacao = { ate: Date.now() + PRAZO_DA_PREPARACAO_DA_ENTRADA_MS },
   apelido,
   convite = null,
   aceito = null,
@@ -296,11 +323,11 @@ async function abrirASessaoDoNavegador({
   // vai na prova D5, e o `Hello` espera no `.wasm` até o enlace abrir.
   let preparo;
   try {
-    preparo = await prepararCertificadoDtls();
+    preparo = await esperarEtapaDaEntrada(() => prepararCertificadoDtls(), preparacao);
   } catch (falha) {
     throw motivoDaFalhaDoEnlace(falha);
   }
-  const chavePublica = new Uint8Array(await crypto.subtle.exportKey("raw", alvo.chave.publicKey));
+  const chavePublica = new Uint8Array(await esperarEtapaDaEntrada(() => crypto.subtle.exportKey("raw", alvo.chave.publicKey), preparacao));
   const pedido = {
     apelido,
     chave_publica: hexDe(chavePublica),
@@ -369,7 +396,8 @@ async function abrirASessaoDoNavegador({
   try {
     await comPrazo(Promise.race([sessao.aperto, desistiu]), PRAZO_DO_APERTO_MS, "HandshakeTimeout");
   } catch (motivo) {
-    await sessao.encerrar();
+    if (motivo === "Cancelada" || motivo === "HandshakeTimeout") sessao.abortar();
+    else await sessao.encerrar();
     if (motivo === "Cancelada") throw cancelada();
     etapa({ Desistiu: { motivo } });
     throw motivo;
@@ -448,11 +476,13 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
   function escreverOQueEspera() {
     // Sem fluxo de controle ainda (a volta abrindo), o que espera fica no
     // `.wasm`: o `Hello` da volta não pode ser largado.
-    if (!escritor) return escrita;
+    if (acabou || !escritor) return escrita;
     const bytes = ligacao.paraOFio();
     if (bytes.length === 0) return escrita;
     const deste = escritor;
-    escrita = escrita.then(() => deste.write(bytes)).catch((falha) => {
+    escrita = escrita.then(() => {
+      if (!acabou) return deste.write(bytes);
+    }).catch((falha) => {
       if (!acabou && !voltando) console.warn("sessão: a escrita no fluxo de controle falhou:", falha);
     });
     return escrita;
@@ -476,7 +506,8 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
           console.info(`sessão: o servidor falou uma mensagem mais nova (ordinal ${passo.desconhecida}); pulada`);
         }
       } else if (passo.recusada !== undefined) {
-        await escreverOQueEspera();
+        // O motivo chega à casca mesmo se o escritor travar. encerrar() dá
+        // à resposta que ficou no fio o orçamento único da despedida.
         if (volta) volta.rejeitar(passo.recusada);
         else rejeitarOAperto(passo.recusada);
       } else if (passo.perdida !== undefined) {
@@ -939,15 +970,20 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
      */
     async encerrar() {
       if (!acabou && escritor && !voltando) {
-        await escreverOQueEspera();
+        const deste = escritor;
         try {
-          await comPrazo(escritor.close(), ESPERA_DA_RECUSA_MS, "prazo");
+          await comPrazo((async () => {
+            await escreverOQueEspera();
+            if (!acabou) await deste.close();
+          })(), ESPERA_DA_RECUSA_MS, "prazo");
         } catch {
           // A recusa que não chegou no prazo: largamos mesmo assim.
         }
       }
       acabar(null);
     },
+    /** Uma entrada cancelada não espera flush nem reabre o transporte. */
+    abortar: () => acabar(null),
   };
   ligarOTransporte(primeiro);
   return sessao;

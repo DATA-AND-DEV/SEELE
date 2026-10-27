@@ -882,3 +882,76 @@ mod testes {
         ));
     }
 }
+
+#[cfg(test)]
+mod tags_migracao_testes {
+    use super::*;
+    #[test]
+    fn tags_esquema18_so_migra_depois_da_copia_confirmada() {
+        let pasta = tempfile::tempdir().unwrap();
+        let config = pasta.path();
+        let caminho = config.join("seele.db");
+        let base = "é".repeat(16);
+        {
+            let c = rusqlite::Connection::open(&caminho).unwrap();
+            c.execute_batch("CREATE TABLE schema_version(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL) STRICT;").unwrap();
+            for m in seele_server::persistence::schema::MIGRATIONS
+                .iter()
+                .filter(|m| m.version <= 18)
+            {
+                c.execute_batch(m.sql).unwrap();
+                c.execute("INSERT INTO schema_version VALUES (?1,0)", [m.version])
+                    .unwrap();
+            }
+            c.execute(
+                "INSERT INTO people(id,nickname,public_key,created_at) VALUES(99,?1,?2,0)",
+                rusqlite::params![base, vec![9u8; 32]],
+            )
+            .unwrap();
+        }
+        let bytes = std::fs::read(&caminho).unwrap();
+        let antes = conferir(config, None, &caminho);
+        assert!(antes.converte && antes.vai_copiar && antes.verificado);
+        assert_eq!(antes.esquema_desta_versao, 19);
+        assert_eq!(std::fs::read(&caminho).unwrap(), bytes);
+        assert_eq!(esquema_de(&caminho), Esquema::Gravado(18));
+        // A confirmação chama o portão; só depois de copiar ele abre o banco.
+        let Portao::CopiaFeita(copia) = garantir_a_copia(config, None, &caminho).unwrap() else {
+            panic!("sem backup")
+        };
+        assert!(copia.do_estado_atual);
+        assert_eq!(esquema_de(&caminho), Esquema::Gravado(18));
+        let backup = config.join(copia.caminho);
+        assert_eq!(esquema_de(&backup), Esquema::Gravado(18));
+        let db = seele_server::persistence::Persistence::open(
+            &seele_server::persistence::Location::File(caminho.clone()),
+        )
+        .unwrap();
+        assert_eq!(db.schema_version().unwrap(), 19);
+        drop(db);
+        let c = rusqlite::Connection::open(&caminho).unwrap();
+        let (nome, tag): (String, String) = c
+            .query_row(
+                "SELECT nickname_base,nickname_tag FROM people WHERE id=99",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(nome, base);
+        assert_eq!(tag.len(), 4);
+        drop(c);
+        assert_eq!(esquema_de(&backup), Esquema::Gravado(18));
+        let db = seele_server::persistence::Persistence::open(
+            &seele_server::persistence::Location::File(caminho.clone()),
+        )
+        .unwrap();
+        drop(db);
+        let c = rusqlite::Connection::open(&caminho).unwrap();
+        let relida: String = c
+            .query_row("SELECT nickname_tag FROM people WHERE id=99", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(relida, tag);
+    }
+}

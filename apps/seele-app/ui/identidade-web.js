@@ -63,6 +63,26 @@ const SEM_REDE = Object.freeze(["Unreachable", "UnresolvableHost", "HandshakeTim
 
 let linkDaCarga = lerEApagarOFragmento();
 
+// Uma navegação só pelo fragmento reutiliza o documento. Apagamos a
+// credencial antes de qualquer espera, tal como na carga, e só a identidade
+// recebe o link. O evento para as cascas não carrega o fragmento nem conecta.
+let vezDoFragmento = 0;
+if (PONTE_NO_LUGAR_DO_TAURI) window.addEventListener("hashchange", async () => {
+  const link = lerEApagarOFragmento();
+  if (!link) return;
+  const minha = ++vezDoFragmento;
+  linkDaCarga = null;
+  try {
+    const identidade = await identidadeDaPagina();
+    if (minha !== vezDoFragmento) return;
+    await identidade.abrir(link);
+    if (minha !== vezDoFragmento) return;
+    document.dispatchEvent(new Event("seele:link-do-navegador"));
+  } catch (falha) {
+    console.warn("identidade: não foi possível abrir o link recebido:", falha);
+  }
+});
+
 /** O pedido de instalação que o navegador oferece (Android), guardado para o `instalar()`. */
 let pedidoDeInstalar = null;
 if (PONTE_NO_LUGAR_DO_TAURI) {
@@ -92,8 +112,8 @@ function tomarOLinkDaCarga() {
  * (o endereço, a impressão, o bilhete e a chave). Até a 2.6, a ponte responde
  * `AindaNaoNoNavegador`, e o `entrar` resolve `recusado` com essa razão.
  */
-function conectarPelaPonte(alvo, apelido, credencial) {
-  return invocarNaPonte("connect", { alvo, nickname: apelido, joinSecret: credencial });
+function conectarPelaPonte(alvo, apelido, credencial, preparacao) {
+  return invocarNaPonte("connect", { alvo, nickname: apelido, joinSecret: credencial, preparacao });
 }
 
 /**
@@ -147,35 +167,75 @@ function analisadorDoWasm(w) {
 
 // ------------------------------------------------------------- o banco
 
-function abrirOBanco() {
+const PRAZO_DO_BANCO_DA_IDENTIDADE_MS = 3_000;
+
+/** O prazo inclui abrir e concluir a transação. Abortamos a escrita e fechamos
+ * também um banco que só entregue onsuccess depois de cancelar. */
+function noBanco(modo, fazer, { sinal } = {}) {
   return new Promise((resolve, reject) => {
-    const pedido = indexedDB.open(BANCO_DA_IDENTIDADE.nome, BANCO_DA_IDENTIDADE.versao);
-    pedido.onupgradeneeded = () =>
-      pedido.result.createObjectStore(BANCO_DA_IDENTIDADE.servidores, { keyPath: "impressao" });
-    pedido.onsuccess = () => resolve(pedido.result);
-    pedido.onerror = () => reject(pedido.error);
+    let banco = null;
+    let transacao = null;
+    let terminou = false;
+    let relogio;
+    const terminar = (falha, valor) => {
+      if (terminou) return;
+      terminou = true;
+      clearTimeout(relogio);
+      sinal?.removeEventListener("abort", cancelar);
+      if (falha) {
+        try { transacao?.abort(); } catch { /* já concluída */ }
+      }
+      banco?.close();
+      if (falha) reject(valor); else resolve(valor);
+    };
+    const cancelar = () => terminar(true, sinal.reason ?? "Cancelada");
+    if (sinal?.aborted) return cancelar();
+    sinal?.addEventListener("abort", cancelar, { once: true });
+    relogio = setTimeout(() => terminar(true, "ArmazenamentoIndisponivel"), PRAZO_DO_BANCO_DA_IDENTIDADE_MS);
+    let abertura;
+    try {
+      abertura = indexedDB.open(BANCO_DA_IDENTIDADE.nome, BANCO_DA_IDENTIDADE.versao);
+    } catch (falha) {
+      terminar(true, falha);
+      return;
+    }
+    abertura.onupgradeneeded = () => {
+      if (terminou) { abertura.transaction.abort(); return; }
+      abertura.result.createObjectStore(BANCO_DA_IDENTIDADE.servidores, { keyPath: "impressao" });
+    };
+    abertura.onerror = () => terminar(true, abertura.error);
+    abertura.onsuccess = () => {
+      banco = abertura.result;
+      if (terminou) { banco.close(); return; }
+      try {
+        transacao = banco.transaction(BANCO_DA_IDENTIDADE.servidores, modo);
+        const pedido = fazer(transacao.objectStore(BANCO_DA_IDENTIDADE.servidores));
+        transacao.oncomplete = () => terminar(false, pedido.result);
+        transacao.onerror = () => terminar(true, transacao.error);
+        transacao.onabort = () => terminar(true, transacao.error);
+      } catch (falha) {
+        terminar(true, falha);
+      }
+    };
   });
 }
 
-async function noBanco(modo, fazer) {
-  const banco = await abrirOBanco();
-  try {
-    return await new Promise((resolve, reject) => {
-      const transacao = banco.transaction(BANCO_DA_IDENTIDADE.servidores, modo);
-      const pedido = fazer(transacao.objectStore(BANCO_DA_IDENTIDADE.servidores));
-      transacao.oncomplete = () => resolve(pedido.result);
-      transacao.onerror = () => reject(transacao.error);
-      transacao.onabort = () => reject(transacao.error);
-    });
-  } finally {
-    banco.close();
-  }
-}
-
 /** O servidor que esta origem já conhece por esta impressão, com a chave dele. */
-const servidorConhecido = (impressao) => noBanco("readonly", (servidores) => servidores.get(impressao));
+const servidorConhecido = (impressao, opcoes) => noBanco("readonly", (servidores) => servidores.get(impressao), opcoes);
 
-const guardarOServidor = (registro) => noBanco("readwrite", (servidores) => servidores.put(registro));
+const guardarOServidor = (registro, opcoes) => noBanco("readwrite", (servidores) => servidores.put(registro), opcoes);
+
+/** Uma entrada aceita depois de substituída preserva sua chave só se nenhuma
+ * outra já foi guardada. A leitura e o put pertencem à mesma transação. */
+function guardarOServidorSeAusente(registro) {
+  return noBanco("readwrite", (servidores) => {
+    const pedido = servidores.get(registro.impressao);
+    pedido.onsuccess = () => {
+      if (!pedido.result) servidores.put(registro);
+    };
+    return pedido;
+  });
+}
 
 /**
  * Os aceites de MODs desta origem, pela impressão: `{conjunto, quando}`, com
@@ -263,6 +323,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
   let tentativa = null;
   /** Quantas vezes a tentativa mudou: quem espera confere se ainda é a vez dele. */
   let vez = 0;
+  let operacaoAtual = null;
 
   function esquecer() {
     segredos.credencial = null;
@@ -270,6 +331,8 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
   }
 
   function encerrar() {
+    operacaoAtual?.abort("Cancelada");
+    operacaoAtual = null;
     esquecer();
     tentativa = null;
     vez += 1;
@@ -279,6 +342,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
 
   function estadoDaTentativa() {
     const { lido, conhecido } = tentativa;
+    if (tentativa.bancoIndisponivel) return "armazenamento-indisponivel";
     if (venceu(lido)) return "vencido";
     if (conhecido) return "ja-conhecido";
     if (casca() === "celular" && !instalado()) return "numa-aba";
@@ -317,18 +381,41 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     }
     const { convite, ...lido } = resposta.link;
     let conhecido = null;
+    let bancoIndisponivel = false;
     try {
       conhecido = (await servidorConhecido(lido.impressao)) ?? null;
     } catch {
-      conhecido = null;
+      bancoIndisponivel = true;
     }
     // Outro link aberto enquanto o banco respondia: a tentativa é a dele, e o
     // token deste não vai a ela.
     if (vez !== minha) return ler();
     segredos.credencial = convite ?? null;
     segredos.link = texto;
-    tentativa = { lido, conhecido, chave: null, persistencia: null, apelido: null, motivo: null };
+    tentativa = { lido, conhecido, bancoIndisponivel, chave: null, persistencia: null, apelido: null, motivo: null };
     tentativa.estado = estadoDaTentativa();
+    return ler();
+  }
+
+  /** Repete só a leitura que falhou. Não cria chave e não abre conexão. */
+  async function reler() {
+    if (!tentativa?.bancoIndisponivel) return ler();
+    const esta = tentativa;
+    const minha = vez;
+    operacaoAtual?.abort("Cancelada");
+    const controle = new AbortController();
+    operacaoAtual = controle;
+    try {
+      const conhecido = await servidorConhecido(esta.lido.impressao, { sinal: controle.signal });
+      if (vez !== minha || operacaoAtual !== controle) return ler();
+      esta.conhecido = conhecido ?? null;
+      esta.bancoIndisponivel = false;
+      esta.estado = estadoDaTentativa();
+    } catch {
+      // Falha ao ler não é ausência de identidade: a tentativa continua bloqueada.
+    } finally {
+      if (operacaoAtual === controle) operacaoAtual = null;
+    }
     return ler();
   }
 
@@ -356,6 +443,8 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       if (motivo === "VerificacaoDaConexaoSegura") return { erro: "verificacao-falhou", falha: motivo };
       return { erro: "sem-rede", falha: motivo, segue: true };
     }
+    if (erro === "PreparacaoExpirada") return { erro: "preparacao-expirada", segue: true };
+    if (erro === "ArmazenamentoIndisponivel") return { erro: "armazenamento-indisponivel", segue: true };
     const razao = erro && erro.Refused ? erro.Refused.reason : erro;
     if (razao === "NicknameTaken") return { erro: "apelido-tomado", segue: true };
     // **A portaria segura a entrada** (ADR 0030): a batida ficou na fila de quem
@@ -375,8 +464,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
   /** Entra no servidor do link com `apelido`. A aba móvel é permitida, com aviso na UI. */
   async function entrar(apelido) {
     if (!tentativa || !tentativa.lido) return { erro: "sem-tentativa" };
-    const minha = vez;
-    const substituida = () => vez !== minha;
+    if (tentativa.bancoIndisponivel) return { erro: "armazenamento-indisponivel" };
     if (venceu(tentativa.lido)) {
       encerrar();
       return { erro: "convite-vencido" };
@@ -384,101 +472,129 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     if (!["pronto", "ja-conhecido", "numa-aba"].includes(tentativa.estado)) {
       return { erro: "recusado", razao: tentativa.estado };
     }
-    tentativa.apelido = apelido;
-    if (tentativa.persistencia === null) tentativa.persistencia = await pedirPersistencia();
-    if (substituida()) return { erro: "sem-tentativa" };
-    if (!tentativa.chave) {
+    operacaoAtual?.abort("Cancelada");
+    const controle = new AbortController();
+    operacaoAtual = controle;
+    const minha = vez;
+    const substituida = () => vez !== minha || operacaoAtual !== controle;
+    const esta = tentativa;
+    const { lido } = esta;
+    const preparo = { sinal: controle.signal, ate: Date.now() + PRAZO_DA_PREPARACAO_DA_ENTRADA_MS };
+    let resposta = null;
+    let soltou = false;
+    const soltarEsta = () => {
+      if (!resposta || soltou) return;
+      soltou = true;
+      soltarASubstituida(lido, resposta);
+    };
+    controle.signal.addEventListener("abort", soltarEsta);
+    const guardar = (registro) => esperarEtapaDaEntrada(
+      () => guardarOServidor(registro, { sinal: controle.signal }),
+      { sinal: controle.signal, ate: Date.now() + PRAZO_DO_BANCO_DA_IDENTIDADE_MS, motivo: "ArmazenamentoIndisponivel" },
+    );
+    try {
+      esta.apelido = apelido;
       try {
-        tentativa.chave = tentativa.conhecido ? tentativa.conhecido.chave : await nascerAChave();
+        if (esta.persistencia === null) {
+          const persistencia = await esperarEtapaDaEntrada(() => pedirPersistencia(), preparo);
+          if (substituida()) return { erro: "sem-tentativa" };
+          esta.persistencia = persistencia;
+        }
+        if (!esta.chave) {
+          const chave = esta.conhecido ? esta.conhecido.chave : await esperarEtapaDaEntrada(() => nascerAChave(), preparo);
+          if (substituida()) return { erro: "sem-tentativa" };
+          esta.chave = chave;
+        }
       } catch (falha) {
         if (substituida()) return { erro: "sem-tentativa" };
+        if (falha === "PreparacaoExpirada") return { erro: "preparacao-expirada" };
         encerrar();
         return { erro: "recusado", razao: `a chave não nasceu: ${falha && falha.message ? falha.message : falha}` };
       }
-      if (substituida()) return { erro: "sem-tentativa" };
-    }
-    // Daqui em diante a tentativa pode mudar, e a entrada lê só a dela.
-    const esta = tentativa;
-    const { lido } = esta;
-    const alvo = {
-      endereco: lido.alvo,
-      alternativos: lido.alternativos ?? [],
-      impressao: lido.impressao,
-      bilhete: bilheteQueVale(),
-      chave: tentativa.chave,
-      // O veredito do desktop: o servidor que esta origem já conhecia é o
-      // `Known`, e o do link, o primeiro contato conferido.
-      conhecido: Boolean(tentativa.conhecido),
-    };
-    // Quem já é conhecido entra pela chave, e o convite não é gasto.
-    const credencial = tentativa.conhecido ? null : segredos.credencial;
-    let resposta;
-    try {
-      resposta = await conectar(alvo, apelido, credencial);
-    } catch (erro) {
-      if (substituida()) return { erro: "sem-tentativa" };
-      const { segue, guardar, ...resultado } = desfecho(erro);
-      // Na espera da portaria, a chave fica guardada com o servidor: quem
-      // desiste e volta pelo mesmo link (ou pela lista deste aparelho) bate com
-      // a mesma chave, e cai no mesmo pedido, em vez de entrar na fila como
-      // outra pessoa. O token não vai ao armazenamento.
-      if (guardar) {
-        await guardarOServidor({
-          impressao: lido.impressao,
-          endereco: lido.alvo,
-          alternativos: lido.alternativos ?? [],
-          bilhete: alvo.bilhete,
-          versao: lido.versao ?? null,
-          chave: esta.chave,
-          nome: esta.conhecido?.nome ?? null,
-          icone: esta.conhecido?.icone ?? null,
-          // Nunca vazio: o guardado do servidor vale se a entrada não trouxe nome.
-          apelido: esta.apelido || esta.conhecido?.apelido || null,
-          visto: agora(),
-          naPortaria: true,
-        }).catch((falha) => console.warn("identidade: a chave da espera não ficou guardada:", falha));
+      const alvo = {
+        endereco: lido.alvo,
+        alternativos: lido.alternativos ?? [],
+        impressao: lido.impressao,
+        bilhete: bilheteQueVale(),
+        chave: esta.chave,
+        conhecido: Boolean(esta.conhecido),
+      };
+      const credencial = esta.conhecido ? null : segredos.credencial;
+      const registro = {
+        impressao: lido.impressao,
+        endereco: lido.alvo,
+        alternativos: lido.alternativos ?? [],
+        bilhete: alvo.bilhete,
+        versao: lido.versao ?? null,
+        chave: esta.chave,
+        nome: esta.conhecido?.nome ?? null,
+        icone: esta.conhecido?.icone ?? null,
+        apelido: esta.apelido || esta.conhecido?.apelido || null,
+        visto: agora(),
+      };
+      try {
+        // O retorno tardio pertence à operação antiga: fecha mesmo se o
+        // cancelamento já fez a espera da tela terminar.
+        const ligando = Promise.resolve(conectar(alvo, apelido, credencial, preparo)).then((entrada) => {
+          resposta = entrada;
+          if (controle.signal.aborted || substituida()) {
+            soltarEsta();
+            guardarOServidorSeAusente(registro).catch((falha) => console.warn("identidade: a chave da entrada tardia não ficou guardada:", falha));
+          }
+          return entrada;
+        });
+        // O cancelamento pode vencer antes de a espera começar a observar.
+        ligando.catch(() => {});
+        await esperarEtapaDaEntrada(() => ligando, { sinal: controle.signal });
+      } catch (erro) {
+        if (substituida()) return { erro: "sem-tentativa" };
+        const { segue, guardar: deveGuardar, ...resultado } = desfecho(erro);
+        if (deveGuardar) {
+          try {
+            await guardar({ ...registro, naPortaria: true });
+          } catch {
+            if (substituida()) return { erro: "sem-tentativa" };
+            return { erro: "armazenamento-indisponivel" };
+          }
+          if (substituida()) return { erro: "sem-tentativa" };
+        }
+        if (!segue) encerrar();
+        else if (resultado.erro === "mods-a-aceitar") tentativa.aguardaMods = true;
+        return { ...resultado, motivo: erro };
       }
-      if (!segue) encerrar();
-      else if (resultado.erro === "mods-a-aceitar") tentativa.aguardaMods = true;
-      // O `ConnectionError` do desktop vai junto: a casca larga do PC entra pelo
-      // `connect` da ponte (D-web-3), e é ele que a tela do desktop lê.
-      return { ...resultado, motivo: erro };
+      // A sessão já existe: cancelar a espera do banco a solta imediatamente.
+      try {
+        await guardar(registro);
+      } catch {
+        soltarEsta();
+        if (substituida()) return { erro: "sem-tentativa" };
+        // O servidor já reconheceu esta chave. A repetição usa a mesma chave
+        // em memória e não reapresenta o convite que ele pode ter consumido.
+        esta.conhecido = registro;
+        esta.estado = "ja-conhecido";
+        return { erro: "armazenamento-indisponivel" };
+      }
+      if (substituida()) {
+        soltarEsta();
+        return { erro: "sem-tentativa" };
+      }
+      const { persistencia } = esta;
+      controle.signal.removeEventListener("abort", soltarEsta);
+      operacaoAtual = null;
+      encerrar();
+      return { ok: true, resposta, persistencia };
+    } finally {
+      // Aborta também uma transação cujo resultado chegou tarde. Uma operação
+      // substituída nunca cancela nem apaga a tentativa que tomou seu lugar.
+      controle.abort("Cancelada");
+      controle.signal.removeEventListener("abort", soltarEsta);
+      if (operacaoAtual === controle) operacaoAtual = null;
     }
-    // O servidor fica guardado a cada entrada que dá certo, com o relógio dela
-    // (`visto`, a ordem dos SERVIDORES DESTE APARELHO), e com o bilhete que
-    // valeu. O nome do servidor chega depois, no primeiro retrato
-    // (`lembrarONome`). A entrada que outra tentativa substituiu também fica
-    // guardada: o servidor já conhece a chave. Na 0.17 não há hashes nem
-    // janelas: um registro guardado da 0.16 os perde aqui, na primeira entrada.
-    const { conhecido } = esta;
-    await guardarOServidor({
-      impressao: lido.impressao,
-      endereco: lido.alvo,
-      alternativos: lido.alternativos ?? [],
-      bilhete: alvo.bilhete,
-      versao: lido.versao ?? null,
-      chave: esta.chave,
-      nome: conhecido ? conhecido.nome ?? null : null,
-      icone: conhecido ? conhecido.icone ?? null : null,
-      // Nunca vazio: uma entrada sem nome não apaga o que o servidor já guardava.
-      apelido: esta.apelido || conhecido?.apelido || null,
-      visto: agora(),
-    });
-    if (substituida()) {
-      soltarASubstituida(lido, resposta);
-      return { erro: "sem-tentativa" };
-    }
-    // A resposta do `persist()` vai junto: com a tentativa encerrada, o `ler()`
-    // devolve `null`, e é justo agora que a tela tem de dizer se o navegador
-    // vai guardar a chave (achado da F8, 10/10).
-    const { persistencia } = esta;
-    encerrar();
-    return { ok: true, resposta, persistencia };
   }
 
   /** A entrada que o servidor aceitou depois de outro link abrir: dita e solta. */
   function soltarASubstituida(lido, resposta) {
-    console.warn(`identidade: a entrada em ${lido.alvo} deu certo depois de outro link abrir, e a sessão dela (geração ${resposta?.geracao}) é solta`);
+    console.warn(`identidade: a entrada em ${lido.alvo} foi encerrada antes de concluir a entrada, e a sessão dela (geração ${resposta?.geracao}) é solta`);
     Promise.resolve()
       .then(() => soltar(resposta))
       .catch((falha) => console.warn("identidade, soltar a entrada substituída:", falha));
@@ -525,7 +641,8 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     try {
       registro = (await servidorConhecido(impressao)) ?? null;
     } catch {
-      registro = null;
+      if (vez !== minha) return { erro: "sem-tentativa" };
+      return { erro: "armazenamento-indisponivel" };
     }
     // Outro link aberto enquanto o banco respondia: a vez é dele.
     if (vez !== minha) return { erro: "sem-tentativa" };
@@ -638,6 +755,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
   return {
     ler,
     abrir,
+    reler,
     entrar,
     aceitarOsMods,
     agoraNao,

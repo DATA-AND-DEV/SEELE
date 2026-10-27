@@ -43,9 +43,12 @@
    */
   let identidade = null;
   let fontes = { conhecidos: async () => [], entrarNoConhecido: null };
+  let desenho = 0;
+  let telasAntesDoLink = null;
 
   /** Troca o que a tela mostra; o título leva o foco, e o teclado não sobe sozinho. */
   function mostrar(conteudo, acoes) {
+    desenho += 1;
     corpo.replaceChildren(...conteudo.flat(Infinity).filter(Boolean));
     pe.replaceChildren(...acoes.filter(Boolean));
     pe.hidden = acoes.filter(Boolean).length === 0;
@@ -100,6 +103,7 @@
    * no COLAR.
    */
   async function inicio(desfecho = null) {
+    const minha = desenho;
     const f = PALAVRAS.inicio;
     let lista = [];
     try {
@@ -107,6 +111,7 @@
     } catch (falha) {
       console.warn("celular-entrada, conhecidos:", falha);
     }
+    if (minha !== desenho) return;
     const linhas = lista.length
       ? h("ul", { class: "cel-entrada-servidores" }, lista.map((s) => h("li", {},
         h("button", {
@@ -237,7 +242,7 @@
     const bloqueia = BLOQUEIAM.includes(estado);
     // Um desfecho que encerrou a tentativa (o convite gasto ou vencido, a
     // recusa) não deixa ENTRAR de novo: o mesmo link não serve mais.
-    const encerrou = desfecho && !["apelido-tomado", "sem-rede", "espera-de-admissao", "pede-apelido"].includes(desfecho.erro);
+    const encerrou = desfecho && !["apelido-tomado", "sem-rede", "espera-de-admissao", "pede-apelido", "preparacao-expirada", "armazenamento-indisponivel"].includes(desfecho.erro);
 
     const avisoDoEstado = doEstado && aviso(
       [typeof doEstado.titulo === "function" ? doEstado.titulo(dia(lido.valeAte)) : doEstado.titulo, doEstado.corpo],
@@ -257,12 +262,23 @@
     const podeEntrar = !bloqueia && !encerrou && ["pronto", "ja-conhecido", "numa-aba"].includes(estado);
     const campo = podeEntrar && h("input", {
       type: "text", id: "cel-entrada-apelido", class: "cel-entrada-campo-texto",
-      autocomplete: "nickname", autocapitalize: "none", spellcheck: "false",
+      autocomplete: "nickname", autocapitalize: "none", spellcheck: "false", enterkeyhint: "go",
       "aria-invalid": desfecho?.erro === "apelido-tomado" ? "true" : null,
     });
     // O apelido tomado devolve o campo vazio e marcado; o resto, com o apelido
     // de antes, ou o deste aparelho.
     if (campo) campo.value = desfecho?.erro === "apelido-tomado" ? "" : (desfecho?.apelido ?? apelidoDoAparelho());
+    let entradaIniciada = false;
+    const iniciar = () => {
+      if (entradaIniciada || !campo?.isConnected) return;
+      entradaIniciada = true;
+      entrar(lido, campo.value.trim());
+    };
+    if (campo) campo.addEventListener("keydown", (evento) => {
+      if (evento.key !== "Enter" || evento.isComposing || evento.repeat) return;
+      evento.preventDefault();
+      iniciar();
+    });
 
     const avisoDoDesfecho = desfecho && desfecho.erro && aviso(fraseDoDesfecho(desfecho), {
       erro: true,
@@ -271,9 +287,17 @@
     });
 
     const acoes = [];
-    if (estado === "numa-aba" && !encerrou) {
+    if (estado === "armazenamento-indisponivel") {
+      const repetir = botao(doEstado.tentar, async () => {
+        repetir.disabled = true;
+        const minha = desenho;
+        const relido = await identidade.reler();
+        if (minha === desenho) entrarEm(relido);
+      });
+      acoes.push(repetir, botao(f.agoraNao, agoraNao, "botao-fantasma"));
+    } else if (estado === "numa-aba" && !encerrou) {
       const e = PALAVRAS.estados["numa-aba"];
-      acoes.push(botao(f.entrar, () => entrar(lido, campo.value.trim())));
+      acoes.push(botao(f.entrar, iniciar));
       acoes.push(botao(e.copiar, async () => {
         let copiou = false;
         try {
@@ -288,7 +312,7 @@
       if (lido.podeInstalar) acoes.push(botao(e.instalar, () => identidade.instalar(), "botao botao-secundario"));
       acoes.push(botao(f.agoraNao, agoraNao, "botao-fantasma"));
     } else if (podeEntrar) {
-      acoes.push(botao(f.entrar, () => entrar(lido, campo.value.trim())));
+      acoes.push(botao(f.entrar, iniciar));
       acoes.push(botao(f.agoraNao, agoraNao, "botao-fantasma"));
     } else {
       acoes.push(botao(f.servidores, agoraNao, "botao-fantasma"));
@@ -323,6 +347,11 @@
   function agoraNao() {
     identidade?.agoraNao();
     inicio();
+    if (telasAntesDoLink) {
+      boot.hidden = true;
+      for (const tela of telasAntesDoLink) tela.hidden = false;
+      telasAntesDoLink = null;
+    }
   }
 
   // --------------------------------------------------------- conectando
@@ -335,19 +364,27 @@
    */
   async function conectando(endereco, tentar, lido, conhecido = null) {
     const etapa = document.getElementById("boot-etapa");
-    const simbolo = await simboloDaMarca();
+    // A decoração não participa da entrada: uma resposta de imagem parada
+    // não pode segurar persistência, chave e transporte (nem o gesto do toque).
+    const simbolo = h("img", { class: "cel-entrada-simbolo-parado", src: "marca-simbolo.svg", alt: "" });
     mostrar([
       h("div", { class: "cel-entrada-conectando", "aria-busy": "true" },
         simbolo,
         titulo(PALAVRAS.conectando, " ", h("span", { class: "cel-entrada-endereco", text: endereco })),
         etapa),
     ], []);
+    const minha = desenho;
+    simboloDaMarca().then((desenhado) => {
+      // A tentativa pode ter terminado enquanto a imagem chegava.
+      if (simbolo.isConnected) simbolo.replaceWith(desenhado);
+    });
     let desfecho;
     try {
       desfecho = await tentar();
     } catch (falha) {
       desfecho = { erro: "recusado", razao: String(falha?.message ?? falha) };
     }
+    if (minha !== desenho) return;
     // A etapa volta para a caixa do desktop, que é de onde ela é escrita.
     if (etapa) boot.querySelector(".boot-caixa")?.append(etapa);
     if (desfecho?.ok) {
@@ -356,6 +393,7 @@
       // do `connect` que a identidade devolveu. Sem resposta, o contrato da
       // identidade quebrou, e a tela diz isso em vez de ficar conectando.
       if (desfecho.resposta) {
+        telasAntesDoLink = null;
         dizerAPersistencia(desfecho.persistencia);
         return depoisDeConectar(desfecho.resposta, endereco);
       }
@@ -546,6 +584,19 @@
     },
   });
   inicio();
+  CASCA.oferecerLinkDoNavegador = (daPagina) => {
+    if (!daPagina.ler()) return;
+    // Só a vista muda. As sessões, as suas gerações e a voz continuam vivas;
+    // AGORA NÃO devolve a tela que estava aberta antes do convite.
+    if (boot.hidden) {
+      telasAntesDoLink = [...document.querySelectorAll("section.tela")].filter((tela) => !tela.hidden);
+      for (const tela of telasAntesDoLink) tela.hidden = true;
+      boot.hidden = false;
+    }
+    soltarOAceite?.();
+    fecharAceiteDeMods();
+    return CELULAR.ajudante("entrada").usar(daPagina);
+  };
   // **A identidade da página** é da F4 (`identidadeDaPagina()`, combinada em
   // 10/10): uma instância só, com o `.wasm` e o `conectar` da sessão pelo
   // navegador. Enquanto ela não existe na `identidade-web.js`, a tela fica na de

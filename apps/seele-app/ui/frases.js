@@ -18,6 +18,8 @@
  * português, porque é o mesmo produto.
  */
 const MOTIVOS = {
+  PreparacaoExpirada: "O NAVEGADOR NÃO CONCLUIU A PREPARAÇÃO. TENTE DE NOVO NESTA PÁGINA.",
+  ArmazenamentoIndisponivel: "O NAVEGADOR NÃO GUARDOU A IDENTIDADE. MANTENHA ESTA PÁGINA ABERTA E TENTE DE NOVO.",
   // **A frase diz o que fazer, e passou a dizer na v0.11.0.**
   //
   // Ela era só «VERSÃO INCOMPATÍVEL COM ESTE SERVIDOR» — verdadeira, e sem
@@ -2703,6 +2705,11 @@ const FRASES_DO_CELULAR = Object.freeze({
     }),
     // Os estados da tentativa, antes do ENTRAR: [título, corpo].
     estados: Object.freeze({
+      "armazenamento-indisponivel": Object.freeze({
+        titulo: "O NAVEGADOR NÃO LEU A IDENTIDADE",
+        corpo: "A leitura deste aparelho não terminou. Tente ler de novo antes de entrar; nenhuma identidade nova foi criada.",
+        tentar: "TENTAR LER DE NOVO",
+      }),
       "numa-aba": Object.freeze({
         titulo: "ENTRAR NESTA ABA",
         comoInstalar: "Como instalar (opcional)",
@@ -2736,6 +2743,10 @@ const FRASES_DO_CELULAR = Object.freeze({
     }),
     // Os desfechos do ENTRAR que não abrem a sessão: [título, corpo].
     desfechos: Object.freeze({
+      "preparacao-expirada": Object.freeze(["O NAVEGADOR NÃO CONCLUIU A PREPARAÇÃO",
+        "A preparação da entrada demorou demais. Tente de novo nesta página."]),
+      "armazenamento-indisponivel": Object.freeze(["O NAVEGADOR NÃO GUARDOU A IDENTIDADE",
+        "A entrada parou para não perder sua chave. Mantenha esta página aberta e toque ENTRAR de novo."]),
       "apelido-tomado": Object.freeze(["ESTE APELIDO JÁ É DE OUTRA CHAVE NESTE SERVIDOR",
         "Se for outra pessoa, escolha outro. Se for você, este aparelho perdeu a identidade, e quem hospeda libera o nome. O convite continua valendo."]),
       "convite-gasto": Object.freeze(["ESTE CONVITE JÁ FOI USADO",

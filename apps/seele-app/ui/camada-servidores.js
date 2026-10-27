@@ -151,6 +151,29 @@ async function abrirServidores(voltarPara = document.activeElement) {
   anunciar("Onde você já esteve. Escape fecha.");
 }
 
+// O convite do navegador chega também numa aba já aberta. A identidade
+// guarda a credencial; o diálogo recebe só o endereço e espera CONECTAR.
+// Abrir esta camada não troca nem encerra a sessão que já estava na janela.
+let vezDoLinkNaCascaLarga = 0;
+async function oferecerOLinkDoNavegador() {
+  if (!PONTE_NO_LUGAR_DO_TAURI) return;
+  const minha = ++vezDoLinkNaCascaLarga;
+  const identidade = await identidadeDaPagina();
+  const lido = identidade.ler();
+  if (!lido || minha !== vezDoLinkNaCascaLarga) return;
+  if (CASCA.oferecerLinkDoNavegador) return CASCA.oferecerLinkDoNavegador(identidade);
+  await abrirServidores();
+  if (minha !== vezDoLinkNaCascaLarga) return;
+  $("servidores-endereco").value = lido.endereco ?? "";
+  if (!["pronto", "ja-conhecido", "numa-aba"].includes(lido.estado)) {
+    const frase = FRASES_DO_CELULAR.entrada.estados[lido.estado];
+    recusarServidor(frase?.corpo ?? FRASES_DO_CELULAR.entrada.desfechos.recusado[1]);
+  }
+}
+const mostrarOLinkRecebido = () => oferecerOLinkDoNavegador().catch((falha) => console.warn("entrada do link:", falha));
+document.addEventListener("DOMContentLoaded", mostrarOLinkRecebido);
+document.addEventListener("seele:link-do-navegador", mostrarOLinkRecebido);
+
 /** Fecha, devolvendo o teclado. */
 function fecharServidores() {
   $("servidores").hidden = true;

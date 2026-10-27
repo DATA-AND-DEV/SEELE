@@ -826,6 +826,8 @@ pub fn minha_tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaE
 /// e é por isso que a foto é uma cópia, e não um empréstimo do `Room`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FotoDaSala {
+    /// Base integral e tag por identidade; alias permanece nos campos antigos.
+    pub identidades_apresentadas: std::collections::BTreeMap<u64, (String, String)>,
     /// Quem esta sessão é, quando o servidor já a apresentou.
     pub instancia_me: Option<PersonId>,
     /// O apelido desta pessoa no roster, quando o roster a conhece.
@@ -870,6 +872,8 @@ pub struct FotoDaSala {
 /// depois das mesmas mensagens. O doc de cada campo é o do `Snapshot`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct RetratoDaSala {
+    /// Base integral e tag por identidade.
+    pub identidades_apresentadas: std::collections::BTreeMap<u64, (String, String)>,
     /// O nome do servidor.
     pub server: String,
     /// Quem esta sessão é.
@@ -933,6 +937,7 @@ impl FotoDaSala {
     pub fn retrato(self, digitado: impl FnOnce() -> String) -> RetratoDaSala {
         let pode = |permissao: Permission| self.permissions.contains(&permissao);
         RetratoDaSala {
+            identidades_apresentadas: self.identidades_apresentadas,
             may_manage_voice_rooms: pode(Permission::ManageVoiceRooms),
             may_kick: pode(Permission::Kick),
             may_ban: pode(Permission::Ban),
@@ -988,6 +993,7 @@ pub fn foto_da_sala(
     pedido: Option<LimitesDeTela>,
 ) -> FotoDaSala {
     FotoDaSala {
+        identidades_apresentadas: room.identidades_apresentadas.clone(),
         instancia_me: room.me,
         nickname: room
             .me

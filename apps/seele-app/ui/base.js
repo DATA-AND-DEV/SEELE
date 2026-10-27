@@ -476,6 +476,7 @@ const CASCA = Object.seal({
   avisoDeFone: () => AVISO_DE_FONE,
   fraseDoModo: (_modo, doDesktop) => doDesktop,
   entradaDireta: (_veredito, _deOnde) => null,
+  oferecerLinkDoNavegador: null,
   vestirASala: (_item, _sala, _snapshot) => {},
   detalhesNaLinha: true,
 });

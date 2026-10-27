@@ -322,6 +322,7 @@
 :where(:root[data-casca="celular"]) .pessoa-apresentada-porta-rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .contribuicao-de-mod > .regiao-de-mod-parte { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .acao-de-mod { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoa-tag-nativa { font-size: inherit; }
 
 /* camada-servidores.css */
 :where(:root[data-casca="celular"]) .servidor-linha { font-size: inherit; }

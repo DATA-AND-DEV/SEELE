@@ -21,12 +21,12 @@
 
 const assert = require('node:assert/strict');
 const { servir, respostas, retrato } = require('./telas.cjs');
-const { chromium } = require('./playwright.cjs');
+const engines = require('./playwright.cjs');
 
 (async () => {
   const server = servir();
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
-  const browser = await chromium().launch({ headless: true });
+  const browser = await engines[process.env.SEELE_BROWSER || 'chromium']().launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
     const errors = [];
@@ -117,7 +117,13 @@ const { chromium } = require('./playwright.cjs');
       // operador, que tem fundo opaco, onde se vê a capa.
       const fundo = (el, tinta) => {
         if (!el) return [0, 0, 0];
-        if (el === quadro && corDaCapa) return corDaCapa === 'tinta' ? tinta : corDaCapa;
+        if (el === quadro && corDaCapa) {
+          const capa = corDaCapa === 'tinta' ? tinta : corDaCapa;
+          const camada = quadro.querySelector(':scope > .capa-camada');
+          const veu = camada ? rgb(getComputedStyle(camada, '::after').backgroundColor) : [];
+          const alfa = veu.length >= 3 ? (veu[3] ?? 1) : 0;
+          return capa.map((v,i) => alfa * (veu[i] ?? 0) + (1 - alfa) * v);
+        }
         const c = rgb(getComputedStyle(el).backgroundColor);
         const alfa = c.length >= 3 ? (c[3] ?? 1) : 0;
         const atras = alfa < 1 ? fundo(el.parentElement, tinta) : [0, 0, 0];
@@ -236,17 +242,28 @@ const { chromium } = require('./playwright.cjs');
     // **A capa de quem usa pinta o fundo da barra inteira** (o pedido do dono,
     // reafirmado em 08/10). Os controles inativos deixam a capa aparecer,
     // mantendo contraste mínimo de texto, glifo e borda nas três capas de prova;
-    // as demais placas conservam o contraste que tinham sem capa.
+    // a composição inclui o véu contínuo, sem exigir placas individuais opacas.
     assert.ok(nucleo.vestida && nucleo.cobre, `a capa de quem usa não pinta a barra inteira: ${JSON.stringify(nucleo)}`);
     for (const [nomeDaCapa, cor] of CAPAS_DE_PROVA) {
       const com = await medirEm('#tela-sessao .operador', cor);
       for (const [medido, antes] of Object.entries(barraSemCapa)) {
-        const controle = /botao-mudo|botao-surdo|botao-server-sessao|operador-sair|operador-vista|glifo/.test(medido);
-        const minimo = controle ? (medido.includes('(borda)') || medido.includes('glifo') ? 3 : 4.5) : antes - 0.01;
+        const minimo = medido.includes('(borda)') || medido.includes('glifo') ? 3 : 4.5;
         if ((com[medido] ?? 0) < minimo) pioras.push(`operador ${medido} (capa ${nomeDaCapa}): mínimo ${minimo} → ${com[medido]}`);
       }
     }
     assert.deepEqual(pioras, [], 'um texto ou controle da barra do operador perdeu contraste sobre a capa');
+    // Mutado/surdo continuam pastilhas opacas nativas, com glifo legível.
+    const ativosAntes=await page.evaluate(()=>['botao-mudo','botao-surdo'].map(id=>{
+      const e=document.getElementById(id),antes=e.getAttribute('data-ativo');e.dataset.ativo='sim';return [id,antes];
+    }));
+    for(const [nomeDaCapa,cor] of CAPAS_DE_PROVA) {
+      const estados=await medirEm('#tela-sessao .operador',cor);
+      for(const [nome,contraste] of Object.entries(estados)) {
+        if(/botao-mudo|botao-surdo|glifo/.test(nome) && !nome.includes('(borda)')) assert.ok(contraste>=3,`${nomeDaCapa}: ${nome} ativo ${contraste}`);
+      }
+    }
+    await page.evaluate(estados=>estados.forEach(([id,antes])=>{const e=document.getElementById(id);if(antes===null)e.removeAttribute('data-ativo');else e.dataset.ativo=antes;}),ativosAntes);
+
 
     // 5. O cabeçalho SEU PERFIL, com a capa de quem usa já registrada.
     await page.evaluate(() => abrirPerfil());

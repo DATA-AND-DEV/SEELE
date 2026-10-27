@@ -820,6 +820,13 @@ pub struct Presentes {
 }
 
 impl Presentes {
+    /// Atualiza somente a apresentação; sessão, chave e mídia não mudam.
+    pub fn renomear(&mut self, pessoa: PersonId, apelido: &str) {
+        if let Some(quem) = self.por_person.get_mut(&pessoa) {
+            quem.nickname = apelido.to_owned();
+        }
+    }
+
     /// Marca alguém como presente, e diz se ele ainda não estava.
     ///
     /// O `bool` é o que evita anunciar duas vezes: uma reconexão dentro da
@@ -1105,6 +1112,15 @@ pub struct Occupancy {
 pub struct Lotada;
 
 impl Occupancy {
+    /// Conserva o alias atual nos próximos snapshots de salas.
+    pub fn renomear(&mut self, pessoa: PersonId, apelido: &str) {
+        for sala in self.by_voice_room.values_mut() {
+            for quem in sala.iter_mut().filter(|quem| quem.person == pessoa) {
+                quem.nickname = apelido.to_owned();
+            }
+        }
+    }
+
     /// Seats a person, replacing any earlier seat they held, and says which
     /// voice rooms that emptied.
     ///

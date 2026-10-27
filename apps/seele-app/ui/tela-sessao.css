@@ -935,14 +935,6 @@ button.voice_room-nome:hover { text-decoration: underline; }
   contain: paint;
 }
 
-/* Os textos da identidade mantêm placas opacas. Os controles inativos
-   recebem a placa translúcida do núcleo no fim desta folha. */
-.operador[data-com-capa] :where(
-  .operador-inicial, .operador-rotulo, .operador-nome, #botao-server-sessao, #operador-vista
-) {
-  background-color: var(--seele-negro-painel);
-}
-
 /* **O núcleo de confiança, nas cores do produto** (rascunho da API 6, §10;
    tarefa 9 da F3). O tema do servidor escreve os `--seele-*` em
    `#tela-sessao`; os `--nucleo-*`, declarados na raiz a partir dos tokens,
@@ -2820,15 +2812,36 @@ button.linha-nome:hover { text-decoration: underline; }
   background-size: cover;
 }
 
-/* Com capa, os controles deixam a imagem aparecer; estados ativos e foco continuam nativos. */
+/* Uma superfície contínua protege a leitura sobre qualquer capa, sem placas
+   individuais que escondam a imagem. O véu usa cores do núcleo, não do MOD. */
+.operador[data-com-capa] > .capa-camada::after {
+  background: color-mix(in srgb, var(--nucleo-painel) 75%, transparent);
+}
+
+.operador[data-com-capa] :is(.operador-inicial, .operador-rotulo, .operador-nome, #voz-estado) {
+  background-color: transparent;
+  color: var(--nucleo-texto);
+}
+
+.operador[data-com-capa] .operador-inicial {
+  border-color: var(--nucleo-rotulo);
+}
+
 .operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista):not([data-ativo="sim"]):not(.ativo) {
-  background-color: color-mix(in srgb, var(--nucleo-painel) 80%, transparent);
+  background-color: transparent;
   color: var(--nucleo-texto);
   border-color: var(--nucleo-rotulo);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
 }
 
 .operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista):is(:hover, :focus-visible) {
   border-color: var(--nucleo-acento);
+}
+
+.operador[data-com-capa] .operador-quem:is(:hover, :focus-visible) .operador-inicial {
+  border-color: var(--nucleo-acento);
+}
+
+.operador[data-com-capa] .operador-quem:focus-visible {
+  outline: 2px solid var(--nucleo-texto);
+  outline-offset: 2px;
 }

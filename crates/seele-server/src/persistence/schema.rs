@@ -785,6 +785,16 @@ pub const MIGRATIONS: &[Migration] = &[
             ) STRICT;
         "#,
     },
+    Migration {
+        version: 19,
+        description: "stable account tags and full display names",
+        sql: r#"
+            ALTER TABLE people ADD COLUMN nickname_base TEXT NOT NULL DEFAULT '';
+            ALTER TABLE people ADD COLUMN nickname_tag TEXT NOT NULL DEFAULT '';
+            CREATE UNIQUE INDEX people_tag ON people(nickname_tag) WHERE nickname_tag <> '';
+            UPDATE people SET nickname_base = nickname;
+        "#,
+    },
 ];
 
 #[cfg(test)]

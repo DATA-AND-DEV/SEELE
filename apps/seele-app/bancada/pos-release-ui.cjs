@@ -51,6 +51,29 @@ const engines = require('./playwright.cjs');
           desenhar(testTable.snapshot);
         });
         await page.waitForTimeout(300);
+        // A imagem passa sob identidade, estado e controles: nenhuma placa local.
+        const superficies=await page.locator('.operador[data-com-capa]').evaluate(e=>{
+          const seletor='.operador-inicial,.operador-rotulo,.operador-nome,#voz-estado,.operador-glifo,#botao-server-sessao,#operador-sair,#operador-vista';
+          return [...e.querySelectorAll(seletor)].filter(x=>x.dataset.ativo!=='sim').map(x=>({id:x.id||x.className,fundo:getComputedStyle(x).backgroundColor}));
+        });
+        assert.ok(superficies.length>=8);
+        for(const s of superficies) assert.equal(s.fundo,'rgba(0, 0, 0, 0)',JSON.stringify(s));
+        const perfil=page.locator('.operador[data-com-capa] .operador-quem');
+        await perfil.hover();
+        const hover=await perfil.locator('.operador-inicial').evaluate(e=>getComputedStyle(e).borderColor);
+        await page.mouse.move(500,300);
+        await perfil.focus();
+        const foco=await perfil.evaluate(e=>({anel:getComputedStyle(e).outlineWidth,borda:getComputedStyle(e.querySelector('.operador-inicial')).borderColor}));
+        assert.equal(foco.anel,'2px');assert.equal(foco.borda,hover);
+        await perfil.evaluate(e=>e.blur());
+        const estados=await page.locator('#botao-mudo').evaluate(e=>{
+          const antes=e.getAttribute('data-ativo');e.dataset.ativo='sim';
+          const ativo={fundo:getComputedStyle(e).backgroundColor,cor:getComputedStyle(e).color};
+          if(antes===null)e.removeAttribute('data-ativo');else e.dataset.ativo=antes;
+          return ativo;
+        });
+        assert.notEqual(estados.fundo,'rgba(0, 0, 0, 0)');
+        assert.notEqual(estados.fundo,estados.cor);
         if(process.env.SEELE_PREVIEW_DIR) await page.screenshot({path:`${process.env.SEELE_PREVIEW_DIR}/${engine}-perfis-capa.png`});
         const linha=page.locator('li.pessoa-apresentada[data-pessoa-id="2"]').first();
         assert.equal(await linha.locator('.pessoa-apresentada-faixa .pessoa-nome').count(),0);

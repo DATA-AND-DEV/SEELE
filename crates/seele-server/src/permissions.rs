@@ -120,7 +120,7 @@ impl<'a> Permissions<'a> {
     ///
     /// # Errors
     ///
-    /// [`Refusal::NicknameTaken`] se o nome é de outra chave, ou o banco.
+    /// Falha de banco ou esgotamento da reserva de tags.
     pub fn register_or_find(&self, public_key: &[u8], nickname: &str) -> Result<Person> {
         self.registrar_ou_achar(public_key, nickname)
             .map(|(person, _criou)| person)
@@ -153,7 +153,7 @@ impl<'a> Permissions<'a> {
             )?;
             // O apelido pedido passa a valer (conserto da 0.9: a conta que
             // voltava mantinha o nome antigo em silêncio). O ADR 0017 continua:
-            // pedir o nome de outra chave é recusado logo abaixo, em `rename`.
+            // a chave identifica a conta; `rename` preserva a tag dela.
             // **Menos o vazio**: uma volta sem apelido (medido em 26/10/2026, a
             // retomada pela lista de servidores do navegador) mantém o da conta,
             // em vez de apagá-lo para todo mundo.
@@ -163,22 +163,12 @@ impl<'a> Permissions<'a> {
             return Ok((self.person(PersonId(id as u64))?, false));
         }
 
-        let taken: Option<i64> = self
-            .connection
-            .query_row(
-                "SELECT id FROM people WHERE nickname = ?1",
-                [nickname],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if taken.is_some() {
-            return Err(Refusal::NicknameTaken.into());
-        }
-
+        let tag = nova_tag(self.connection)?;
+        let alias = alias_do_nome(nickname, &tag);
         self.connection.execute(
-            "INSERT INTO people (nickname, public_key, created_at, last_seen_at)
-             VALUES (?1, ?2, ?3, ?3)",
-            params![nickname, public_key, now_seconds()],
+            "INSERT INTO people (nickname, nickname_base, nickname_tag, public_key, created_at, last_seen_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+            params![alias, nickname, tag, public_key, now_seconds()],
         )?;
         let id = self.connection.last_insert_rowid();
         self.seat_the_arrival(id)?;
@@ -186,57 +176,38 @@ impl<'a> Permissions<'a> {
         Ok((self.person(PersonId(id as u64))?, true))
     }
 
-    /// Se `nickname` já é de outra chave: a mesma regra de
-    /// [`Self::register_or_find`], **só lendo** — o aperto de mão pergunta antes
-    /// de gastar o convite de uso único.
+    /// Compatibilidade com a pré-checagem antiga da portaria: bases iguais
+    /// são permitidas desde as tags. Não consulta nem altera a identidade;
+    /// registro/rename preservam a tag e o alias únicos no banco.
     ///
-    /// # Errors
-    ///
-    /// Se o banco não responder.
+    /// A assinatura Result permanece para os chamadores antigos; não falha.
     pub fn apelido_de_outra_chave(&self, public_key: &[u8], nickname: &str) -> Result<bool> {
-        let dono: Option<Vec<u8>> = self
-            .connection
-            .query_row(
-                "SELECT public_key FROM people WHERE nickname = ?1",
-                [nickname],
-                |row| row.get(0),
-            )
-            .optional()?;
-        Ok(dono.is_some_and(|dono| dono != public_key))
+        // A chave autentica a conta; bases iguais não reservam identidade.
+        let _ = (public_key, nickname);
+        Ok(false)
     }
 
     /// Troca o apelido de uma conta. As duas rotas (a entrada e o
     /// `SetNickname`) escrevem pela mesma função, e nenhuma esquece a
-    /// conferência de unicidade.
+    /// preservação da tag e a unicidade do alias.
     ///
     /// # Errors
     ///
-    /// [`Refusal::NicknameTaken`] quando o nome é de outra conta, e o banco.
+    /// Falha de banco; bases iguais não transferem identidade.
     pub fn rename(&self, person: PersonId, nickname: &str) -> Result<()> {
-        let atual: String = self.connection.query_row(
-            "SELECT nickname FROM people WHERE id = ?1",
+        let (atual, tag): (String, String) = self.connection.query_row(
+            "SELECT nickname, nickname_tag FROM people WHERE id = ?1",
             [person.get() as i64],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
+        // Um cliente legado devolve o próprio alias no Hello. Não anexar tag
+        // de novo, nem interpretar o sufixo arbitrário de outra pessoa.
         if atual == nickname {
             return Ok(());
         }
-
-        let dono: Option<i64> = self
-            .connection
-            .query_row(
-                "SELECT id FROM people WHERE nickname = ?1",
-                [nickname],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if dono.is_some_and(|dono| dono != person.get() as i64) {
-            return Err(Refusal::NicknameTaken.into());
-        }
-
         self.connection.execute(
-            "UPDATE people SET nickname = ?1 WHERE id = ?2",
-            params![nickname, person.get() as i64],
+            "UPDATE people SET nickname = ?1, nickname_base = ?2 WHERE id = ?3",
+            params![alias_do_nome(nickname, &tag), nickname, person.get() as i64],
         )?;
         tracing::info!(person = person.get(), "this account changed its name");
         Ok(())
@@ -251,6 +222,23 @@ impl<'a> Permissions<'a> {
             params![person_row, i64::from(PERSON_ROLE.get())],
         )?;
         Ok(())
+    }
+
+    /// Apresentação completa, separada do alias compatível usado pela mídia.
+    pub fn identidade_apresentada(
+        &self,
+        id: PersonId,
+    ) -> Result<seele_proto::control::ServerMessage> {
+        let (base, tag) = self.connection.query_row(
+            "SELECT nickname_base, nickname_tag FROM people WHERE id = ?1",
+            [id.get() as i64],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        Ok(seele_proto::control::ServerMessage::IdentidadeApresentada {
+            pessoa: id,
+            base,
+            tag,
+        })
     }
 
     /// Carrega uma conta.
@@ -481,13 +469,15 @@ mod tests {
             let (pessoa, nova) = permissions.registrar_ou_achar(&chave, vazio).unwrap();
             assert!(!nova);
             assert_eq!(
-                pessoa.nickname, "iphone5g",
+                pessoa.nickname.split('#').next().unwrap(),
+                "iphone5g",
                 "o apelido {vazio:?} apagou o da conta"
             );
         }
         let (pessoa, _) = permissions.registrar_ou_achar(&chave, "iphone").unwrap();
         assert_eq!(
-            pessoa.nickname, "iphone",
+            pessoa.nickname.split('#').next().unwrap(),
+            "iphone",
             "um apelido de verdade na volta continua valendo"
         );
     }
@@ -510,9 +500,9 @@ mod tests {
         assert_eq!(
             permissions.membros().unwrap(),
             vec![
-                membro(anfitriao, "anfitriao"),
-                membro(maya.id, "maya"),
-                membro(rei.id, "rei"),
+                membro(anfitriao, &permissions.person(anfitriao).unwrap().nickname),
+                membro(maya.id, &maya.nickname),
+                membro(rei.id, &rei.nickname),
             ]
         );
     }
@@ -522,7 +512,7 @@ mod tests {
         let persistence = store();
         let permissions = Permissions::new(&persistence);
         permissions.register_or_find(&[1; 32], "maya").unwrap();
-        assert!(permissions
+        assert!(!permissions
             .apelido_de_outra_chave(&[2; 32], "maya")
             .unwrap());
         assert!(!permissions
@@ -544,11 +534,13 @@ mod tests {
     }
 
     #[test]
-    fn a_different_key_cannot_take_a_nickname() {
+    fn duas_chaves_podem_ter_a_base_mas_nao_o_alias() {
         let persistence = store();
         let permissions = Permissions::new(&persistence);
-        permissions.register_or_find(&[7; 32], "marcela").unwrap();
-        assert!(permissions.register_or_find(&[8; 32], "marcela").is_err());
+        let a = permissions.register_or_find(&[7; 32], "marcela").unwrap();
+        let b = permissions.register_or_find(&[8; 32], "marcela").unwrap();
+        assert_ne!(a.nickname, b.nickname);
+        assert_ne!(a.id, b.id);
     }
 
     #[test]
@@ -558,7 +550,10 @@ mod tests {
         let antes = permissions.register_or_find(&[1; 32], "pessoa").unwrap();
         let depois = permissions.register_or_find(&[1; 32], "nunes").unwrap();
         assert_eq!(depois.id, antes.id);
-        assert_eq!(depois.nickname, "nunes");
+        assert_eq!(
+            depois.nickname,
+            format!("nunes#{}", antes.nickname.rsplit_once('#').unwrap().1)
+        );
     }
 
     #[test]
@@ -567,7 +562,11 @@ mod tests {
         let permissions = Permissions::new(&persistence);
         permissions.register_or_find(&[1; 32], "nunes").unwrap();
         let outra = permissions.register_or_find(&[2; 32], "marcela").unwrap();
-        assert!(permissions.register_or_find(&[2; 32], "nunes").is_err());
+        let mesmo_nome = permissions.register_or_find(&[2; 32], "nunes").unwrap();
+        assert_ne!(
+            mesmo_nome.nickname,
+            permissions.person(PersonId(1)).unwrap().nickname
+        );
         let ainda = permissions.register_or_find(&[2; 32], "marcela").unwrap();
         assert_eq!(ainda.nickname, outra.nickname);
     }
@@ -705,8 +704,7 @@ mod tests {
     #[test]
     fn um_atacante_remoto_nao_vira_dono_nem_com_o_apelido_do_dono() {
         // O dono é a IMPRESSÃO declarada, e não o nome: uma chave diferente
-        // pedindo o apelido do dono é recusada (ADR 0017), e uma com outro
-        // apelido é só mais uma Pessoa.
+        // pedindo a mesma base ganha outra tag, sem autoridade do dono.
         let persistence = store();
         crate::cargos::declarar_proprietario(&persistence, &impressao(1)).unwrap();
         let permissions = Permissions::new(&persistence);
@@ -716,8 +714,8 @@ mod tests {
                 .unwrap()
                 .proprietario
         );
-        assert!(permissions.register_or_find(&[66; 32], "dono").is_err());
-        let atacante = permissions.register_or_find(&[66; 32], "outro").unwrap();
+        let atacante = permissions.register_or_find(&[66; 32], "dono").unwrap();
+        assert_ne!(atacante.nickname, dono.nickname);
         let dele = crate::cargos::efetivas(&persistence, atacante.id).unwrap();
         assert!(!dele.proprietario && !dele.pode(Permission::ManageRoles));
     }
@@ -949,5 +947,171 @@ mod tests {
             permissions.permissions(person).unwrap(),
             vec![Permission::ReadChannel]
         );
+    }
+}
+
+/// Alias legado, único por tag; a base integral permanece no banco.
+fn alias_do_nome(base: &str, tag: &str) -> String {
+    let mut prefixo = String::new();
+    for c in base.chars() {
+        let c = if c == '#' { ' ' } else { c };
+        if prefixo.len() + c.len_utf8() > 27 {
+            break;
+        }
+        prefixo.push(c);
+    }
+    format!("{prefixo}#{tag}")
+}
+
+fn nova_tag(connection: &rusqlite::Connection) -> Result<String> {
+    nova_tag_com(connection, || rand::random_range(0..36u32.pow(4)))
+}
+
+fn nova_tag_com(
+    connection: &rusqlite::Connection,
+    mut numero: impl FnMut() -> u32,
+) -> Result<String> {
+    for _ in 0..1024 {
+        let mut n = numero() % 36u32.pow(4);
+        let mut bytes = [b'0'; 4];
+        for b in bytes.iter_mut().rev() {
+            *b = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[(n % 36) as usize];
+            n /= 36;
+        }
+        let tag = String::from_utf8(bytes.to_vec())?;
+        let existe: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM people WHERE nickname_tag = ?1)",
+            [&tag],
+            |r| r.get(0),
+        )?;
+        if !existe {
+            return Ok(tag);
+        }
+    }
+    anyhow::bail!("não foi possível reservar uma tag única; nenhuma conta foi criada")
+}
+
+pub(crate) fn migrar_tags(connection: &rusqlite::Connection) -> Result<()> {
+    let pessoas = connection
+        .prepare("SELECT id, nickname_base FROM people ORDER BY id")?
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    // Fora do limite de nome do protocolo: não colide com aliases existentes
+    // enquanto a migração troca cada linha dentro da mesma transação.
+    connection.execute("UPDATE people SET nickname = '________________________________________________migration19_' || id", [])?;
+    for (id, base) in pessoas {
+        let tag = nova_tag(connection)?;
+        connection.execute(
+            "UPDATE people SET nickname = ?1, nickname_tag = ?2 WHERE id = ?3",
+            params![alias_do_nome(&base, &tag), tag, id],
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tags_testes {
+    use super::*;
+    use crate::persistence::Location;
+
+    #[test]
+    fn tags_mesma_base_retorno_rename_e_spoof() {
+        let db = Persistence::open(&Location::Memory).unwrap();
+        let p = Permissions::new(&db);
+        let a = p.register_or_find(&[61; 32], "teste").unwrap();
+        let b = p.register_or_find(&[62; 32], "teste").unwrap();
+        assert_ne!(a.id, b.id);
+        assert_ne!(a.nickname, b.nickname);
+        assert_eq!(a.nickname.len(), 10);
+        assert_eq!(p.register_or_find(&[61; 32], &a.nickname).unwrap(), a);
+        assert_eq!(p.register_or_find(&[61; 32], "teste").unwrap(), a);
+        let tag = a.nickname.rsplit_once('#').unwrap().1;
+        p.rename(a.id, "outra").unwrap();
+        assert_eq!(p.person(a.id).unwrap().nickname, format!("outra#{tag}"));
+        p.rename(a.id, &b.nickname).unwrap();
+        assert_ne!(p.person(a.id).unwrap().nickname, b.nickname);
+        assert!(p.person(a.id).unwrap().nickname.ends_with(tag));
+        assert!(p
+            .person(b.id)
+            .unwrap()
+            .nickname
+            .ends_with(b.nickname.rsplit_once('#').unwrap().1));
+    }
+
+    #[test]
+    fn tags_restart_e_colisao_controlada() {
+        let pasta = tempfile::tempdir().unwrap();
+        let local = Location::File(pasta.path().join("tags.db"));
+        let db = Persistence::open(&local).unwrap();
+        let a = Permissions::new(&db)
+            .register_or_find(&[71; 32], "é".repeat(16).as_str())
+            .unwrap();
+        drop(db);
+        let db = Persistence::open(&local).unwrap();
+        assert_eq!(
+            Permissions::new(&db)
+                .register_or_find(&[71; 32], &a.nickname)
+                .unwrap(),
+            a
+        );
+        db.connection()
+            .execute(
+                "UPDATE people SET nickname_tag='0000' WHERE id=?1",
+                [a.id.get() as i64],
+            )
+            .unwrap();
+        let mut chamadas = 0;
+        let tag = nova_tag_com(db.connection(), || {
+            chamadas += 1;
+            if chamadas <= 2 {
+                0
+            } else {
+                1
+            }
+        })
+        .unwrap();
+        assert_eq!(tag, "0001");
+        assert_eq!(chamadas, 3);
+        assert!(nova_tag_com(db.connection(), || 0).is_err());
+    }
+
+    #[test]
+    fn tags_migracao_preserva_base_unicode_ids_e_unicidade() {
+        let mut c = rusqlite::Connection::open_in_memory().unwrap();
+        for m in crate::persistence::schema::MIGRATIONS
+            .iter()
+            .filter(|m| m.version <= 18)
+        {
+            c.execute_batch(m.sql).unwrap();
+        }
+        let base = "é".repeat(16);
+        c.execute(
+            "INSERT INTO people(id,nickname,public_key,created_at) VALUES(123,?1,?2,0)",
+            params![base, vec![1u8; 32]],
+        )
+        .unwrap();
+        let t = c.transaction().unwrap();
+        t.execute_batch(crate::persistence::schema::MIGRATIONS.last().unwrap().sql)
+            .unwrap();
+        migrar_tags(&t).unwrap();
+        t.commit().unwrap();
+        let (id, alias, completa, tag): (i64, String, String, String) = c
+            .query_row(
+                "SELECT id,nickname,nickname_base,nickname_tag FROM people",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(id, 123);
+        assert_eq!(completa, base);
+        assert!(alias.len() <= 32);
+        assert_eq!(tag.len(), 4);
+        assert!(c.execute("INSERT INTO people(nickname,nickname_base,nickname_tag,public_key,created_at) VALUES('x','x',?1,?2,0)", params![tag,vec![2u8;32]]).is_err());
+        let again: String = c
+            .query_row("SELECT nickname_tag FROM people WHERE id=123", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(again, tag);
     }
 }

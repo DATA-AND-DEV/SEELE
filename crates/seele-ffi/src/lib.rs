@@ -3925,6 +3925,7 @@ impl Connection {
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
             fora_do_ar_revision: self.shared.fora_do_ar_revision.load(Ordering::Relaxed),
             // Da sala: sai do `Room` pela foto, na mesma tomada do cadeado.
+            identidades_apresentadas: sala.identidades_apresentadas,
             cargos_revision: sala.cargos_revision,
             telemetry: Telemetry {
                 rtt_ms,

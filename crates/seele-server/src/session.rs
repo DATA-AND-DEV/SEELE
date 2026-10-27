@@ -1208,31 +1208,8 @@ async fn admitir(
 
         match crate::portaria::bater(&mut guard, &impressao, &nickname, segredo, &observacao) {
             Ok(crate::portaria::Resposta::Entra) => {
-                // **O apelido, antes de gastar o convite.** A recusa por nome
-                // de outra chave vinha só lá embaixo, em `register_or_find`,
-                // com o convite de uso único já gasto: a pessoa trocava de
-                // nome e o mesmo link não entrava mais. Pedido da F4 (a P4 do
-                // plano F1b). Aqui, e não antes da portaria: depois dela, a
-                // recusa distinta não conta a quem não foi admitido que nomes
-                // existem — a mesma razão do `NicknameTaken` de baixo, que
-                // continua como rede.
-                match Permissions::new(&guard).apelido_de_outra_chave(&public_key, &nickname) {
-                    Ok(false) => {}
-                    Ok(true) => {
-                        return Err(Refusal {
-                            reason: DisconnectReason::NicknameTaken,
-                            detail: format!(
-                                "o apelido {nickname} é de outra chave; o convite ficou intacto"
-                            ),
-                        });
-                    }
-                    Err(error) => {
-                        return Err(Refusal {
-                            reason: DisconnectReason::CredentialRejected,
-                            detail: format!("could not check the nickname: {error}"),
-                        });
-                    }
-                }
+                // Bases iguais são admitidas. O registro atribui uma tag
+                // distinta sem transferir identidade ou autoridade.
                 // O convite **não** é gasto aqui: só depois dos MODs, logo
                 // abaixo do `exigir_aceite_dos_mods`. Ver lá.
             }
@@ -2268,17 +2245,58 @@ async fn run_session(
     // com `Disconnecting`) ficam de fora, porque já são o fim.
     macro_rules! escrever {
         ($mensagem:expr $(,)?) => {
-            escrever_vigiando(
-                &mut send,
-                session.protocol_version,
-                &events,
-                &connection,
-                server,
-                session.person,
-                $mensagem,
-            )
+            async {
+                let mensagem = $mensagem;
+                escrever_vigiando(
+                    &mut send,
+                    session.protocol_version,
+                    &events,
+                    &connection,
+                    server,
+                    session.person,
+                    mensagem,
+                )
+                .await?;
+                if session.protocol_version >= 11 {
+                    let ids = match mensagem {
+                        ServerMessage::PersonPresent { profile, .. }
+                        | ServerMessage::PersonJoined { profile, .. } => vec![profile.id],
+                        ServerMessage::PersonRenamed { person, .. } => vec![*person],
+                        ServerMessage::MessageReceived { author, .. } => vec![*author],
+                        ServerMessage::MembroNovo { membro } => vec![membro.id],
+                        ServerMessage::Membros { membros, .. } => {
+                            membros.iter().map(|m| m.id).collect()
+                        }
+                        _ => Vec::new(),
+                    };
+                    for id in ids {
+                        let detalhe = {
+                            let guard = server.persistence.lock().await;
+                            Permissions::new(&guard).identidade_apresentada(id)?
+                        };
+                        escrever_vigiando(
+                            &mut send,
+                            session.protocol_version,
+                            &events,
+                            &connection,
+                            server,
+                            session.person,
+                            &detalhe,
+                        )
+                        .await?;
+                    }
+                }
+                Ok::<(), anyhow::Error>(())
+            }
         };
     }
+    // O Hello contém a base escolhida; o próprio cliente também precisa
+    // conhecer o alias canônico usado pela mídia, inclusive no protocolo 10.
+    escrever!(&ServerMessage::PersonRenamed {
+        person: session.person,
+        nickname: session.nickname.clone(),
+    })
+    .await?;
     let mut channels: Vec<ChannelId> = Vec::new();
     // As chaves desta conexão que o escritor ainda não anunciou. Ver
     // [`TETO_NO_AR`].
@@ -3112,6 +3130,10 @@ async fn run_session(
                                 // publicar daqui em diante, e deixá-lo para
                                 // trás faria as mensagens seguintes saírem com
                                 // o nome antigo.
+                                let name = { let guard = server.persistence.lock().await;
+                                    Permissions::new(&guard).person(session.person)?.nickname };
+                                server.presentes.lock().await.renomear(session.person, &name);
+                                server.occupancy.lock().await.renomear(session.person, &name);
                                 apelido_de_agora.clone_from(&name);
                                 tracing::info!(
                                     person = %session.person,
@@ -4780,6 +4802,12 @@ async fn assentar(
     // **entrada**, e uma remoção de sala decidida por terceiro não é entrada.
     teto: Option<u16>,
 ) -> Result<bool> {
+    // A sessão guarda o nome do handshake; renomear pode ter ocorrido depois.
+    let nickname = {
+        let guard = server.persistence.lock().await;
+        Permissions::new(&guard).person(session.person)?.nickname
+    };
+
     // **O assento e o teto primeiro; a mídia e a tela depois.**
     //
     // Era o contrário, e era uma falha de confidencialidade, presente na
@@ -4810,7 +4838,7 @@ async fn assentar(
         // família de defeito que esta tarefa fechou.
         let quem = crate::server::Occupant {
             person: session.person,
-            nickname: session.nickname.clone(),
+            nickname: nickname.clone(),
             ssrc: session.ssrc,
             sessao: session.id,
         };
@@ -4926,7 +4954,7 @@ async fn assentar(
         voice_room: destino,
         profile: PersonProfile {
             id: session.person,
-            nickname: session.nickname.clone(),
+            nickname: nickname.clone(),
             roles: Vec::new(),
             material_e2ee: None,
         },

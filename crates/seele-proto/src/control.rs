@@ -2769,6 +2769,15 @@ pub enum ServerMessage {
         /// O motivo.
         motivo: crate::cargos::RecusaDeCargo,
     },
+    /// Base completa e tag atribuída pelo servidor; somente protocolo 11.
+    IdentidadeApresentada {
+        /// Identidade estável, nunca o apelido.
+        pessoa: PersonId,
+        /// Até 32 bytes, sem abreviação.
+        base: String,
+        /// Quatro caracteres ASCII base36 maiúsculos.
+        tag: String,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2846,6 +2855,10 @@ pub const fn recusa_por_versao(carimbo_do_par: u8) -> [u8; 3] {
 pub const fn carimbo_da_recusa(carimbo_do_par: u8) -> u8 {
     if carimbo_do_par < crate::version::PRIMEIRO_DA_LINHA_UM {
         carimbo_do_par
+    } else if carimbo_do_par < crate::version::VERSAO_MINIMA {
+        crate::version::VERSAO_MINIMA
+    } else if carimbo_do_par < PROTOCOL_VERSION {
+        carimbo_do_par
     } else {
         PROTOCOL_VERSION
     }
@@ -2899,7 +2912,7 @@ impl ListaDeCima for ClientMessage {
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 51;
+    const CONHECIDAS: u32 = 52;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3458,6 +3471,20 @@ impl Validate for ClientMessage {
 impl Validate for ServerMessage {
     fn validate(&self) -> Result<(), ControlError> {
         match self {
+            Self::IdentidadeApresentada { base, tag, .. } => {
+                check("nickname_base", base.len(), MAX_NICKNAME_LEN)?;
+                if tag.len() != 4
+                    || !tag
+                        .bytes()
+                        .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+                {
+                    return Err(ControlError::FieldOutOfRange {
+                        field: "nickname_tag",
+                    });
+                }
+                Ok(())
+            }
+
             // Exato, e não teto: o S2 (adendo de 08/10/2026, §9).
             Self::Challenge { nonce } => {
                 if nonce.len() == NONCE_LEN {
@@ -5366,7 +5393,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            50,
+            51,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -5441,7 +5468,7 @@ mod o_vocabulario_e_a_versao {
         // As listas não mudaram de tamanho por isso.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            10,
+            11,
             "a versão do protocolo mudou; confira se os ordinais acima, a faixa \
              de `version::FAIXA` e `mods::VERSAO_DO_ANUNCIO` continuam contando \
              a mesma história"
@@ -6166,7 +6193,9 @@ mod a_recusa_legivel {
     #[test]
     fn um_par_da_linha_1_em_diante_le_o_numero_de_quem_recusa() {
         assert_eq!(recusa_por_versao(30), [PROTOCOL_VERSION, 11, 0]);
-        assert_eq!(recusa_por_versao(9), [PROTOCOL_VERSION, 11, 0]);
+        assert_eq!(recusa_por_versao(9), [10, 11, 0]);
+        assert_eq!(recusa_por_versao(10), [10, 11, 0]);
+        assert_eq!(recusa_por_versao(11), [11, 11, 0]);
         assert_eq!(recusa_por_versao(u8::MAX), [PROTOCOL_VERSION, 11, 0]);
     }
 
@@ -6469,5 +6498,30 @@ mod o_ordinal_do_quadro {
         assert_eq!(ordinal_do_quadro(&[]), None);
         assert_eq!(ordinal_do_quadro(&[PROTOCOL_VERSION]), None);
         assert_eq!(ordinal_do_quadro(&[PROTOCOL_VERSION, 0x80]), None);
+    }
+}
+
+#[cfg(test)]
+mod tags_testes {
+    use super::*;
+    #[test]
+    fn tags_variante_nova_sem_mudar_quadros_dez() {
+        let mensagem = ServerMessage::IdentidadeApresentada {
+            pessoa: PersonId(1),
+            base: "é".repeat(16),
+            tag: "A001".into(),
+        };
+        assert_eq!(crate::vocabulario::desde(&mensagem), 11);
+        let frame = encode_em(11, &mensagem).unwrap();
+        assert_eq!(decode::<ServerMessage>(&frame).unwrap(), mensagem);
+        let antigo = ServerMessage::PersonRenamed {
+            person: PersonId(1),
+            nickname: "teste#A001".into(),
+        };
+        let dez = encode_em(10, &antigo).unwrap();
+        let onze = encode_em(11, &antigo).unwrap();
+        assert_eq!(&dez[1..], &onze[1..]);
+        assert_eq!(crate::version::VERSAO_MINIMA, 10);
+        assert_eq!(crate::version::linha_de(11), crate::version::linha_de(10));
     }
 }

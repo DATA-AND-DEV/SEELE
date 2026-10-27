@@ -570,8 +570,7 @@ function comASessao(fazer) {
  * outras continuam. A voz fecha só se era dela; os arquivos guardados, só com
  * a última.
  */
-async function sairDaSessaoDaPonte() {
-  const sessao = sessaoDaPonte.atual;
+async function sairDaSessaoDaPonte(sessao = sessaoDaPonte.atual) {
   if (!sessao) {
     // Sem sessão nenhuma, o `disconnect` de sempre: solta o que a página
     // guardava e a voz, como antes da multi-sessão.
@@ -607,6 +606,11 @@ async function sairDaSessaoDaPonte() {
  * entrega à identidade, que o abre e entra; ninguém mais o lê.
  */
 let linkColadoDaPonte = null;
+// Um convite recebido na URL substitui também o que ficou no diálogo da
+// casca larga. Para o mesmo endereço, ele não pode recuperar o token antigo.
+document.addEventListener("seele:link-do-navegador", () => {
+  linkColadoDaPonte = null;
+});
 
 /** A entrada em curso, para o `cancelar_ligacao`. */
 const entradaEmCurso = { cancelar: null };
@@ -627,6 +631,8 @@ const FRASES_DO_LINK = Object.freeze({
 
 /** As entradas pela identidade que acabam antes do servidor, com a frase. */
 const FRASES_DA_IDENTIDADE = Object.freeze({
+  "preparacao-expirada": "o navegador não concluiu a preparação da entrada a tempo; tente de novo nesta página",
+  "armazenamento-indisponivel": "o navegador não guardou a identidade; mantenha esta página aberta e tente de novo",
   "link-vencido": "o link deste servidor venceu, e ele não trouxe um novo: peça a quem hospeda um link novo",
   "convite-vencido": "este link venceu: peça a quem hospeda um link novo",
   "sem-tentativa": "outra entrada começou no meio desta",
@@ -652,6 +658,7 @@ async function lerOLink(texto) {
  */
 async function entrarPeloEndereco({ server, nickname } = {}) {
   const identidade = await identidadeDaPagina();
+  if (identidade.ler()?.estado === "armazenamento-indisponivel") await identidade.reler();
   const apelido = (nickname ?? "").trim() || guardadoNaOrigem(CHAVES_DA_ORIGEM.apelido) || "pessoa";
   let resultado;
   if (linkColadoDaPonte?.alvo === server) {
@@ -708,7 +715,7 @@ const RECUSA_ENDERECO_SOZINHO =
  * origem_da_impressao, a_lista_guardou}`) e rejeita com o `ConnectionError`
  * dele, nu: é o que o `desfecho` da identidade lê.
  */
-async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}) {
+async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server, preparacao } = {}) {
   if (!alvo || typeof alvo !== "object" || !alvo.chave) {
     if (typeof server === "string") return entrarPeloEndereco({ server, nickname });
     return Promise.reject({ RecusaDaPonte: { comando: "connect", frase: RECUSA_ENDERECO_SOZINHO } });
@@ -738,29 +745,29 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
     });
     if (aberta && vistaDaPonte !== id) avisarAsSessoes(id, evento === "MessagesChanged" ? "mensagens" : "aviso");
   };
-  let wasm;
-  try {
-    // **Uma instância do `.wasm` por sessão** (E3; browser-signaling): o estado
-    // da ligação mora dentro dela, e duas sessões numa instância só dividiriam
-    // a ligação. Sem a função (uma página antiga), a da página.
-    wasm = typeof instanciarOWasmDaSessao === "function"
-      ? await instanciarOWasmDaSessao()
-      : (await carregarOWasmDaPagina()).instancia.exports;
-  } catch (falha) {
-    console.warn("ponte: o .wasm da página não carregou para a sessão:", falha);
-    return Promise.reject("Unreachable");
-  }
+  const controle = new AbortController();
   const cancelamento = { cancelada: false, aoCancelar: null };
-  entradaEmCurso.cancelar = () => {
+  const cancelar = () => {
     cancelamento.cancelada = true;
+    controle.abort(preparacao?.sinal?.reason ?? "Cancelada");
     cancelamento.aoCancelar?.();
   };
+  // Instalado antes do WASM: cancelar durante a preparação também vale.
+  entradaEmCurso.cancelar = cancelar;
+  preparacao?.sinal?.addEventListener("abort", cancelar, { once: true });
+  if (preparacao?.sinal?.aborted) cancelar();
+  const preparo = { sinal: controle.signal, ate: preparacao?.ate ?? Date.now() + PRAZO_DA_PREPARACAO_DA_ENTRADA_MS };
+  let wasm;
   let sessao;
   try {
+    wasm = await esperarEtapaDaEntrada(async () => typeof instanciarOWasmDaSessao === "function"
+      ? instanciarOWasmDaSessao()
+      : (await carregarOWasmDaPagina()).instancia.exports, preparo);
     sessao = await abrirASessaoDoNavegador({
       wasm,
       alvo,
       cancelamento,
+      preparacao: preparo,
       apelido: nickname ?? "",
       convite: joinSecret ?? null,
       aceito: aceiteDeModsGuardado(alvo.impressao),
@@ -793,8 +800,13 @@ async function abrirASessaoPelaPonte({ alvo, nickname, joinSecret, server } = {}
         avisarAsSessoes(id, "encerrada");
       },
     });
+    if (controle.signal.aborted) {
+      if (sessao.abortar) sessao.abortar(); else sessao.encerrar();
+      throw controle.signal.reason ?? "Cancelada";
+    }
   } finally {
-    entradaEmCurso.cancelar = null;
+    preparacao?.sinal?.removeEventListener("abort", cancelar);
+    if (entradaEmCurso.cancelar === cancelar) entradaEmCurso.cancelar = null;
     tentativa.entrando = false;
   }
   sessao.idDaPonte = id;
@@ -2105,7 +2117,7 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // Sem sessão, o mapa vazio, como o `unwrap_or_default` do desktop.
   volumes_locais: () => (sessaoDaPonte.atual ? Promise.resolve(pelaSessao("volumes_locais")({})).catch(() => ({})) : {}),
   snapshot: () => comASessao((sessao) => sessao.snapshot()),
-  disconnect: sairDaSessaoDaPonte,
+  disconnect: () => sairDaSessaoDaPonte(),
   // **As várias sessões da página** (E3; fronteiras §6), o mesmo vocabulário
   // do app.
   sessoes: () => sessoesNaPonte(),
@@ -2145,9 +2157,10 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // comandos da sessão pelo `.wasm`, que faz o que a FFI faz em cada um.
   connect: abrirASessaoPelaPonte,
   soltar_a_entrada: ({ geracao } = {}) => {
-    const sessao = sessaoDaPonte.atual;
+    const sessao = [...sessoesDaPonte.values()].find((s) => s.geracao === geracao);
     if (!sessao || sessao.acabou || geracao == null || sessao.geracao !== geracao) return false;
-    return sairDaSessaoDaPonte().then(() => true);
+    sessao.abortar?.();
+    return sairDaSessaoDaPonte(sessao).then(() => true);
   },
   // **A entrada pela casca larga** (D-web-3): o SERVIDORES e o link colado.
   // Um link do produto é convite; o resto, endereço, que o `connect` só aceita

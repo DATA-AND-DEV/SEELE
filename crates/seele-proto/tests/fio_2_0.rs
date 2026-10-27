@@ -46,7 +46,7 @@ use seele_proto::cargos::{
     RecusaDeAcaoDeMod, RecusaDeCargo, SuasPermissoes,
 };
 use seele_proto::control::{
-    encode, recusa_por_versao, AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal,
+    encode_em, recusa_por_versao, AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal,
     AttachmentState, CausaDaRecusa, ChannelInfo, ClientMessage, ConsentimentoDePar,
     DisconnectReason, ListaDeCima, Membro, MessageRefusal, MotivoDeFalhaDePar, Permission,
     PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem, SubsystemHealth,
@@ -63,7 +63,16 @@ use seele_proto::screen::{
 };
 use seele_proto::stream::StreamType;
 use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem, VolumeHeader, VolumeRefusal};
-use seele_proto::{MediaHeader, FAIXA};
+use seele_proto::MediaHeader;
+const FAIXA: seele_proto::version::Faixa = seele_proto::version::Faixa {
+    minima: 10,
+    maxima: 10,
+};
+fn encode<T: serde::Serialize + seele_proto::control::Validate>(
+    m: &T,
+) -> Result<Vec<u8>, seele_proto::control::ControlError> {
+    encode_em(10, m)
+}
 
 /// Onde os bytes-ouro moram, a partir da raiz do crate.
 const ARQUIVO: &str = "tests/fio_2_0.txt";
@@ -385,6 +394,14 @@ fn chave_de_mod() -> ChaveDeMod {
 #[allow(clippy::too_many_lines, reason = "uma linha por variante, e são 41")]
 fn servidores() -> Vec<(&'static str, ServerMessage)> {
     vec![
+        (
+            "IdentidadeApresentada",
+            ServerMessage::IdentidadeApresentada {
+                pessoa: PersonId(1),
+                base: "ritsuko".into(),
+                tag: "A001".into(),
+            },
+        ),
         (
             "Challenge",
             ServerMessage::Challenge {
@@ -963,7 +980,14 @@ fn exemplares() -> Vec<(String, Vec<u8>)> {
         todos.push((format!("cliente:{nome}"), encode(&mensagem).unwrap()));
     }
     for (nome, mensagem) in servidores() {
-        todos.push((format!("servidor:{nome}"), encode(&mensagem).unwrap()));
+        todos.push((
+            format!("servidor:{nome}"),
+            encode_em(
+                seele_proto::vocabulario::desde(&mensagem).max(10),
+                &mensagem,
+            )
+            .unwrap(),
+        ));
     }
     todos.extend(cabecalhos());
     todos
