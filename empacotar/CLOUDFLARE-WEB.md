@@ -1,7 +1,8 @@
 # seele.sh pelo repositório no Cloudflare Pages
 
-Configuração do projeto Pages com integração Git:
+Configuração verificada no projeto Pages **`seele-web-git`**, ligado ao repositório:
 
+- branch de produção: `codex/0.17-cloudflare`;
 - raiz: raiz deste repositório;
 - preset: nenhum;
 - comando: `sh empacotar/cloudflare-web.sh`;
@@ -14,6 +15,35 @@ saída conforme as branches configuradas no projeto; executar o script localment
 não publica. Nenhuma credencial Cloudflare é necessária no script. Não adicionar
 WASM, `target/`, SDK ou credenciais ao Git. A release manual e o CI existentes
 continuam com seus comandos próprios.
+
+## Build Git verificado e próximos pushes
+
+Em 27/10/2026, o commit `fec5e0c` passou no build real do Cloudflare: comando
+iniciado às 13:31:36, publicação concluída às 13:33:44. O log confirmou Rust
+1.97.1, wasi-sdk 24 verificado, 100 assets e 5 regras de cabeçalhos. Esta é a
+prova do build pelo repositório; não declara a release web 0.17 concluída nem
+substitui os gates de domínio, ponto de encontro e uso externo.
+
+`seele-web-git` é o projeto novo com integração Git. O projeto anterior de
+upload direto é separado: enviar um commit não atualiza aquele projeto. O
+build verificado não implica migração de domínio nem merge em `main`.
+
+Para uma alteração revisada, criar o commit de fonte nesta branch e enviar
+explicitamente para ela:
+
+```sh
+git switch codex/0.17-cloudflare
+# revisar e adicionar somente os arquivos da alteração
+git commit -m "Descrição da alteração"
+git push origin codex/0.17-cloudflare
+```
+
+Não enviar `target/`, pacote pré-compilado, credenciais ou evidências locais.
+Depois do push, conferir em **seele-web-git → Deployments** que o commit esperado
+acionou um novo build e que montagem/publicação passaram. Um commit documental
+pode servir à prova desse gatilho; não é necessário merge em `main` para esta
+configuração. A publicação pelo Pages ocorre na branch de produção configurada,
+portanto o push é também o gatilho de deploy desse projeto.
 
 ## Ferramentas e saída
 
