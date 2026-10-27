@@ -16,6 +16,16 @@ não publica. Nenhuma credencial Cloudflare é necessária no script. Não adici
 WASM, `target/`, SDK ou credenciais ao Git. A release manual e o CI existentes
 continuam com seus comandos próprios.
 
+## Permissão GitHub para o gatilho
+
+Na instalação **Cloudflare Workers & Pages** do GitHub, a seleção explícita de
+repositórios deve incluir **`DATA-AND-DEV/SEELE`**. Um repositório público poder
+ser clonado no build não comprova que a instalação recebeu acesso aos seus
+webhooks. Sem essa seleção, o primeiro build pode funcionar enquanto novos
+pushes não acionam o projeto. Para confirmar o gatilho, envie uma alteração
+revisada e confira uma implantação automática com o SHA desse novo commit;
+iniciar uma compilação manualmente não comprova o recebimento do push.
+
 ## Build Git verificado e próximos pushes
 
 Em 27/10/2026, o commit `fec5e0c` passou no build real do Cloudflare: comando
@@ -26,7 +36,9 @@ substitui os gates de domínio, ponto de encontro e uso externo.
 
 `seele-web-git` é o projeto novo com integração Git. O projeto anterior de
 upload direto é separado: enviar um commit não atualiza aquele projeto. O
-build verificado não implica migração de domínio nem merge em `main`.
+build verificado, por si só, não implica migração de domínio nem merge em `main`.
+O domínio `seele.sh` foi ativado em etapa posterior e respondeu HTTP 200; isso
+também é independente da confirmação do gatilho automático por push.
 
 Para uma alteração revisada, criar o commit de fonte nesta branch e enviar
 explicitamente para ela:
