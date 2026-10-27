@@ -308,7 +308,7 @@
       ],
       "produto": [
         "o autor é a chave",
-        "o apelido verificado à vista"
+        "o apelido verificado acessível nos detalhes nativos"
       ],
       "celular": {
         "existe": true
@@ -426,7 +426,7 @@
     ],
     "garantias-do-produto": [
       "trocar o que se desenha não troca a identidade: o comando continua ligado ao ID real",
-      "quando um MOD troca o nome que aparece de uma pessoa, o apelido verificado fica à vista, num lugar que o MOD não cobre (D-nucleo-1)",
+      "quando um MOD substitui a apresentação de uma pessoa, o apelido verificado e a moderação ficam nos detalhes nativos, fora da raiz do MOD; sem conteúdo válido, permanece a apresentação nativa",
       "uma região substituída continua carregando os itens do núcleo que moram nela",
       "duas substituições do mesmo ponto se resolvem por prioridade declarada e escolha visível",
       "ao revogar, a apresentação nativa é recalculada do estado atual",
@@ -447,13 +447,13 @@
     "marcacao": "data-pessoa-da-capa (nunca data-faixa)",
     "onde": {
       "chamada": "o cartão da pessoa (pintarCartao), animada até o teto, no desktop e no celular (D-capa-1)",
-      "operador": "o fundo de .operador inteira com a capa de quem usa, e o núcleo (MUDO, fone, SAIR) sobre placas opacas; não no celular",
+      "operador": "o fundo de .operador inteira com a capa de quem usa; controles e ações inativos podem ter placas translúcidas com contraste preservado; estados ativos e foco continuam nativos; não no celular",
       "perfil": "os dois cabeçalhos: a página do PERFIS (por citação) e o «SEU PERFIL» nativo (por aplicador do produto)",
       "lista": "parada, se o MOD a citar no cartão"
     },
     "citacao": "fundoDeMidia: { daPessoa: 'capa' } e retrato({ daPessoa: 'avatar' }): carregada e contada uma vez (PERFIS R2); da pessoa do destino, e, com pessoa: id (fundoDeMidia: { daPessoa: 'capa', pessoa: id } e retrato({ daPessoa: 'avatar', pessoa: id })), da que o MOD nomeia, em qualquer destino, numa superfície também, se ela estiver na sessão pelo retrato; fora da sessão, ou com um id que não é id, o fundo fica liso e o retrato na inicial, sem recusa (D-api-9)",
     "preferencia": "herda a de pessoa.cartao: «o SEELE desenha» não recebe capa",
-    "legibilidade": "o texto e os controles do produto ficam em placas opacas da cor do fundo nativo; todo texto e controle sobre a capa mantém o contraste que tem sem capa, a cor e a borda, contra um quadro branco, um preto e um da cor da própria tinta; MUDO, fone e SAIR ficam sobre placas do núcleo, nunca sobre a capa sem placa",
+    "legibilidade": "o texto e os controles do produto mantêm legibilidade sobre capas claras e escuras; na barra do operador, controles e ações inativos podem usar placas translúcidas do núcleo, com estados ativos e foco nativos; os demais textos e controles mantêm suas placas opacas",
     "quem-fala": "o halo e a pastilha FALANDO ficam acima da capa; o véu passa a --seele-laranja-carga",
     "estados": "sem capa, carregando e recusada: fundo liso, como hoje; a recusada vai ao seele.log e ao MOD com ponto e alvo",
     "movimento-reduzido": "um quadro estático por capa, usado com prefers-reduced-motion (a preferência do sistema; o SEELE não tem uma própria), com a janela oculta, fora da vista e acima do teto",
@@ -654,7 +654,7 @@
       "sair",
       "microfone e no ar",
       "moderação por identidade",
-      "o apelido verificado à vista",
+      "o apelido verificado acessível nos detalhes nativos",
       "atribuição",
       "aceite",
       "a ligação",

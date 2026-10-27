@@ -1219,3 +1219,12 @@ branch `conserto/l2-textos-publicos`, reprova «nunca vê áudio em claro» em
 Voltar ao nativo é reabrir o `8632668` e pagar R$ 549,90 por ano. O lado do
 `seeled` (o `h3` e o certificado curto) não afeta o desktop e pode ficar. A
 origem é a parte que não tem volta, porque as identidades do celular moram nela.
+
+
+## Emenda de 27/10/2026: entrada pela aba
+
+Por decisão explícita do dono, instalar na Tela de Início passa a ser opcional.
+O estado `numa-aba` informa que a identidade pode diferir entre a aba e o aplicativo
+instalado, mas oferece ENTRAR. O gesto, a verificação da impressão do servidor,
+o aceite dos MODs e o pedido de persistência continuam obrigatórios nos mesmos
+pontos do fluxo. Esta decisão substitui as exigências de instalação prévia acima.

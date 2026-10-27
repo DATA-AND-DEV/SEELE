@@ -106,7 +106,7 @@ const { chromium } = require('./playwright.cjs');
     }, [alvo, sim]);
     const medirEm = (seletorDoQuadro, cor) => page.evaluate(([seletor, corDaCapa]) => {
       const quadro = document.querySelector(seletor);
-      const rgb = (texto) => (texto.match(/[\d.]+/g) || []).map(Number);
+      const rgb = (texto) => { const c = (texto.match(/[\d.]+/g) || []).map(Number); return texto.startsWith('color(srgb') ? c.map((v,i) => i < 3 ? v * 255 : v) : c; };
       const lum = ([r, g, b]) => [r, g, b]
         .map((c) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; })
         .reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
@@ -116,12 +116,12 @@ const { chromium } = require('./playwright.cjs');
       // dele. Olhar a cor do quadro primeiro diria «painel» na barra do
       // operador, que tem fundo opaco, onde se vê a capa.
       const fundo = (el, tinta) => {
-        for (let n = el; n; n = n.parentElement) {
-          if (n === quadro && corDaCapa) return corDaCapa === 'tinta' ? tinta : corDaCapa;
-          const c = rgb(getComputedStyle(n).backgroundColor);
-          if (c.length >= 3 && (c.length < 4 || c[3] >= 0.99)) return c.slice(0, 3);
-        }
-        return [0, 0, 0];
+        if (!el) return [0, 0, 0];
+        if (el === quadro && corDaCapa) return corDaCapa === 'tinta' ? tinta : corDaCapa;
+        const c = rgb(getComputedStyle(el).backgroundColor);
+        const alfa = c.length >= 3 ? (c[3] ?? 1) : 0;
+        const atras = alfa < 1 ? fundo(el.parentElement, tinta) : [0, 0, 0];
+        return atras.map((v,i) => alfa * (c[i] ?? 0) + (1 - alfa) * v);
       };
       // Os textos, e os controles — botões e glifos —, com a cor e a borda.
       const medidos = [...quadro.querySelectorAll('*')].filter((e) => e.getClientRects().length && (
@@ -234,14 +234,16 @@ const { chromium } = require('./playwright.cjs');
       }, 500));
     });
     // **A capa de quem usa pinta o fundo da barra inteira** (o pedido do dono,
-    // reafirmado em 08/10), e o MUDO, o fone e o SAIR ficam sobre placas
-    // opacas do núcleo: cada texto e cada controle — a cor e a borda — mantém o
-    // contraste que tinha sem capa, com as três capas de prova.
+    // reafirmado em 08/10). Os controles inativos deixam a capa aparecer,
+    // mantendo contraste mínimo de texto, glifo e borda nas três capas de prova;
+    // as demais placas conservam o contraste que tinham sem capa.
     assert.ok(nucleo.vestida && nucleo.cobre, `a capa de quem usa não pinta a barra inteira: ${JSON.stringify(nucleo)}`);
     for (const [nomeDaCapa, cor] of CAPAS_DE_PROVA) {
       const com = await medirEm('#tela-sessao .operador', cor);
       for (const [medido, antes] of Object.entries(barraSemCapa)) {
-        if ((com[medido] ?? 0) < antes - 0.01) pioras.push(`operador ${medido} (capa ${nomeDaCapa}): ${antes} → ${com[medido]}`);
+        const controle = /botao-mudo|botao-surdo|botao-server-sessao|operador-sair|operador-vista|glifo/.test(medido);
+        const minimo = controle ? (medido.includes('(borda)') || medido.includes('glifo') ? 3 : 4.5) : antes - 0.01;
+        if ((com[medido] ?? 0) < minimo) pioras.push(`operador ${medido} (capa ${nomeDaCapa}): mínimo ${minimo} → ${com[medido]}`);
       }
     }
     assert.deepEqual(pioras, [], 'um texto ou controle da barra do operador perdeu contraste sobre a capa');

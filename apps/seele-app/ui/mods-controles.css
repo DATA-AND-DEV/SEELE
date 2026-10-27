@@ -633,16 +633,11 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
    tirar: quem precisa do sinal continua a um toque dele. */
 .pessoa-apresentada { position: relative; padding-right: 24px; }
 
-/* **A linha apresentada começa por `[núcleo] [miolo]`**, numa faixa própria; o
-   «⋯» e os acréscimos seguem embaixo, na coluna de sempre da linha (rascunho
-   da API 6, §3 e §10; D-nucleo-1). O núcleo é o apelido verificado, à vista,
-   nas cores do tema — o que o protege é a estrutura: o lugar à esquerda, e o
-   miolo do MOD numa caixa fechada ao lado. O `overflow` e o `contain: paint`
-   do miolo cortam o desenho que um MOD desloque por cima do apelido
-   (`estilo.mover`), medido em `regioes-do-produto.cjs`. */
+/* A apresentação do MOD ocupa a faixa; identidade verificável e moderação
+   permanecem nos detalhes nativos, fora da caixa fechada do MOD. */
 .pessoa-apresentada-faixa {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   column-gap: 8px;
   align-items: start;
 }

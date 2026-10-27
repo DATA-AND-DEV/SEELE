@@ -322,14 +322,17 @@ async function principal() {
       await vencido.abrir(l.linhaUm);
       const aba = await window.criar({ casca: "celular" });
       await aba.abrir(l.bom);
+      window.servidor.roteiro.push({ FalhaDoEnlace: { motivo: "SemCaminho" } });
       return [await vencido.entrar("ana"), await aba.entrar("ana")];
     }, { linhaUm: link({ versao: "1.0" }), bom: link() });
     confere(
       "estados",
-      fora[0].erro === "recusado" && fora[0].razao === "outra-linha" && fora[1].erro === "recusado" && fora[1].razao === "numa-aba",
-      `entrar fora do pronto: ${JSON.stringify(fora)}`,
+      fora[0].erro === "recusado" && fora[0].razao === "outra-linha" && fora[1].erro === "sem-rede",
+      `aba permitida e linha antiga recusada: ${JSON.stringify(fora)}`,
     );
-    confere("estados", (await entradas()) === 0, "entrar num link da 0.16 ou numa aba conectou");
+    confere("estados", (await entradas()) === 1, "somente o gesto ENTRAR da aba deveria conectar");
+
+    await rodar(() => window.servidor.entradas.splice(0));
 
     // 1. O mods-a-aceitar e a volta com o mesmo token.
     const caso1 = await rodar(async (l) => {

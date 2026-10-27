@@ -935,13 +935,8 @@ button.voice_room-nome:hover { text-decoration: underline; }
   contain: paint;
 }
 
-/* **As placas da barra do operador sobre a capa** (rascunho da API 6, §4 e
-   §10; tarefa 6). A capa de quem usa pinta o fundo da barra inteira, e cada
-   texto e cada controle fica sobre uma placa opaca da cor do fundo nativo da
-   barra, o negro do painel: o contraste é o de sem capa, medido em `capa.cjs`
-   com a cor e a borda, contra uma capa branca, uma preta e uma da cor da
-   tinta. O MUDO, o fone, o «no ar» e o SAIR, que são do núcleo, não estão
-   aqui: a placa deles é a do núcleo, sempre (abaixo, tarefa 9). */
+/* Os textos da identidade mantêm placas opacas. Os controles inativos
+   recebem a placa translúcida do núcleo no fim desta folha. */
 .operador[data-com-capa] :where(
   .operador-inicial, .operador-rotulo, .operador-nome, #botao-server-sessao, #operador-vista
 ) {
@@ -2823,4 +2818,17 @@ button.linha-nome:hover { text-decoration: underline; }
   background-repeat: no-repeat;
   background-position: center;
   background-size: cover;
+}
+
+/* Com capa, os controles deixam a imagem aparecer; estados ativos e foco continuam nativos. */
+.operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista):not([data-ativo="sim"]):not(.ativo) {
+  background-color: color-mix(in srgb, var(--nucleo-painel) 80%, transparent);
+  color: var(--nucleo-texto);
+  border-color: var(--nucleo-rotulo);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.operador[data-com-capa] :is(.operador-glifo, #botao-server-sessao, #operador-sair, #operador-vista):is(:hover, :focus-visible) {
+  border-color: var(--nucleo-acento);
 }

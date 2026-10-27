@@ -20,8 +20,8 @@ O domínio antigo (seele.app.br) será desligado. Um convite antigo colado no ap
 
 - **No computador**: baixe o app em https://get.seele.sh. Ao atualizar de uma 0.16, a 0.17 guarda os dados da 0.16 ao lado e abre a
   0.16 numa janela própria quando um link ou um servidor da 0.16 pedir.
-- **No navegador**: abra https://seele.sh. No celular, numa aba, a página pede para ser instalada antes de entrar (Compartilhar,
-  Adicionar à Tela de Início) e aberta pelo ícone, porque a identidade nasce onde você entra.
+- **No navegador**: abra https://seele.sh. No celular, é possível entrar pela aba. Instalar na Tela de Início é opcional; a identidade da aba pode ser diferente
+  da usada pelo ícone, e mudar entre os dois pode exigir um novo convite.
 - **Ficam no app do computador**, e não no navegador: hospedar, a portaria e os convites, instalar e ligar MODs, ligar e receber
   ligações pelo código, moderar, criar salas e canais, e abrir outras versões lado a lado.
 

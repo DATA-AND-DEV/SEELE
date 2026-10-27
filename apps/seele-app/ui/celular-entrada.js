@@ -243,7 +243,9 @@
       [typeof doEstado.titulo === "function" ? doEstado.titulo(dia(lido.valeAte)) : doEstado.titulo, doEstado.corpo],
       {
         erro: bloqueia,
-        extra: doEstado.passos && h("ol", { class: "cel-entrada-passos" }, doEstado.passos.map((p) => h("li", { text: p }))),
+        extra: doEstado.passos && h("details", {},
+          h("summary", { text: doEstado.comoInstalar }),
+          h("ol", { class: "cel-entrada-passos" }, doEstado.passos.map((p) => h("li", { text: p })))),
       });
 
     const ficha = lido.endereco && h("dl", { class: "cel-entrada-ficha" },
@@ -252,7 +254,7 @@
       lido.versaoDoServidor && [h("dt", {}, rotulo(f.versao)), h("dd", { text: PALAVRAS.inicio.servidor(lido.versaoDoServidor) })],
       lido.valeAte && [h("dt", {}, rotulo(f.vale)), h("dd", { text: dia(lido.valeAte) })]);
 
-    const podeEntrar = !bloqueia && !encerrou && (estado === "pronto" || estado === "ja-conhecido");
+    const podeEntrar = !bloqueia && !encerrou && ["pronto", "ja-conhecido", "numa-aba"].includes(estado);
     const campo = podeEntrar && h("input", {
       type: "text", id: "cel-entrada-apelido", class: "cel-entrada-campo-texto",
       autocomplete: "nickname", autocapitalize: "none", spellcheck: "false",
@@ -271,6 +273,7 @@
     const acoes = [];
     if (estado === "numa-aba" && !encerrou) {
       const e = PALAVRAS.estados["numa-aba"];
+      acoes.push(botao(f.entrar, () => entrar(lido, campo.value.trim())));
       acoes.push(botao(e.copiar, async () => {
         let copiou = false;
         try {
@@ -281,7 +284,7 @@
         const nota = corpo.querySelector(".cel-entrada-copiado") ?? h("p", { class: "cel-entrada-copiado", role: "status" });
         nota.textContent = copiou ? e.copiado : e.naoCopiou;
         corpo.append(nota);
-      }));
+      }, "botao botao-secundario"));
       if (lido.podeInstalar) acoes.push(botao(e.instalar, () => identidade.instalar(), "botao botao-secundario"));
       acoes.push(botao(f.agoraNao, agoraNao, "botao-fantasma"));
     } else if (podeEntrar) {
@@ -299,7 +302,7 @@
       ficha,
       podeEntrar && h("p", { class: "cel-entrada-nota", text: f.impressaoNota }),
       campo && [h("label", { class: "cel-entrada-campo", for: "cel-entrada-apelido" }, rotulo(f.apelido)), campo],
-      podeEntrar && estado === "pronto" && h("p", { class: "cel-entrada-nota", text: f.primeiraEntrada }),
+      podeEntrar && (estado === "pronto" || estado === "numa-aba") && h("p", { class: "cel-entrada-nota", text: f.primeiraEntrada }),
       lido.persistencia && h("p", { class: "cel-entrada-nota", text: PALAVRAS.persistencia[lido.persistencia] }),
     ], acoes);
     if (desfecho?.erro === "apelido-tomado") campo?.focus();

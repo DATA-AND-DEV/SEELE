@@ -3170,16 +3170,8 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   item.dataset.apresentadaPor = contribuicao.mod;
   item.classList.add("pessoa-apresentada");
 
-  // **O núcleo: o apelido verificado, à vista** (rascunho da API 6, §3 e §10;
-  // D-nucleo-1). Lido do retrato pela chave da linha, e nunca do que o MOD
-  // desenhou; quando esta sessão tem verbo sobre a pessoa, ele é o botão de
-  // moderação. Até a tarefa 5 o apelido e a moderação moravam no «⋯»
-  // recolhido, e um cartão que escrevesse outro nome era o único nome à vista.
-  // Um nome falso no cartão fica **ao lado** do verdadeiro, e não no lugar dele.
-  const nucleo = elemento("span", "pessoa-nucleo");
-  nucleo.append(nomeDaPessoa(pessoa));
-
-  // **O miolo é do MOD**, numa caixa fechada e irmã do núcleo — nunca mãe —, com
+  // O MOD apresenta a pessoa; nome verificável e moderação ficam nos detalhes nativos.
+  // **O miolo é do MOD**, numa caixa fechada, separada dos detalhes nativos, com
   // o conteúdo dentro de um alvo de clique do produto quando há ação principal.
   const miolo = elemento("div", "pessoa-miolo");
   if (contribuicao.acaoPrincipal) {
@@ -3189,10 +3181,9 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   } else {
     miolo.append(cartao);
   }
-  // Os dois numa faixa própria: a linha continua a coluna de sempre — a faixa,
-  // o «⋯» e os acréscimos —, e a grade é só da faixa.
+  // A faixa contém a apresentação; os detalhes e acréscimos seguem abaixo.
   const faixa = elemento("div", "pessoa-apresentada-faixa");
-  faixa.append(nucleo, miolo);
+  faixa.append(miolo);
   item.append(faixa);
 
   // **O diagnóstico nativo não some: ele recolhe.** U15 pediu que sinal e
@@ -3267,9 +3258,8 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
 
   const cabeca = elemento("span", "pessoa-cabeca");
   const identidade = elemento("span", "pessoa-identidade");
-  // Como detalhe de uma linha apresentada, o nome já está no núcleo dela, à
-  // vista — repeti-lo aqui seria o leitor de tela anunciá-lo duas vezes.
-  if (!comoDetalhe) identidade.append(nomeDaPessoa(pessoa));
+  // Na apresentação do MOD, este é o nome verificável nos detalhes nativos.
+  identidade.append(nomeDaPessoa(pessoa));
 
   // `PERMISSIONS·01`, o subsistema por pessoa, não entra. O protocolo não diz qual
   // atende quem, e um travessão explicado em toda linha do roster é o ruído que
@@ -5297,10 +5287,31 @@ $("campo-mensagem").addEventListener("keydown", (evento) => {
  * `scrollHeight` depois de zerar a altura é a medida do conteúdo — sem zerar,
  * ela nunca diminui.
  */
+let campoPrecisaMedir = false;
 function cresceOCampo() {
   const campo = $("campo-mensagem");
   campo.style.height = "auto";
-  campo.style.height = `${Math.min(campo.scrollHeight, 160)}px`;
+  // Oculto não tem scrollHeight: mantenha a altura automática até ficar visível.
+  if (campo.scrollHeight > 0) {
+    campoPrecisaMedir = false;
+    campo.style.height = `${Math.min(campo.scrollHeight, 160)}px`;
+  } else {
+    campoPrecisaMedir = true;
+    requestAnimationFrame(() => { if (campo.getClientRects().length) cresceOCampo(); });
+  }
+}
+
+// Recalcula ao reaparecer ou mudar a largura, inclusive com rascunho multilinha.
+if (typeof ResizeObserver !== "undefined") {
+  let larguraDoCampo = -1;
+  new ResizeObserver(([medida]) => {
+    const largura = medida.contentRect.width;
+    if (largura === larguraDoCampo && !campoPrecisaMedir) return;
+    larguraDoCampo = largura;
+    // A altura que ajustamos não realimenta o observador. Medir fora da entrega
+    // também evita o ciclo de layout do WebKit quando o campo reaparece.
+    if (largura > 0) requestAnimationFrame(cresceOCampo);
+  }).observe($("campo-mensagem"));
 }
 
 $("campo-mensagem").addEventListener("input", () => {

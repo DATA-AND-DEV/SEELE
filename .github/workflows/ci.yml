@@ -586,6 +586,9 @@ jobs:
       - run: npx playwright install --with-deps webkit
         if: ${{ !cancelled() }}
         timeout-minutes: 10
+      - run: node apps/seele-app/bancada/pos-release-ui.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/area-util.cjs target/area-util --webkit
         if: ${{ !cancelled() }}
         timeout-minutes: 30

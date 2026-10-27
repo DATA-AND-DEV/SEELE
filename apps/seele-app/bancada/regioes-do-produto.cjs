@@ -350,8 +350,10 @@ const REGIOES = [
       desenhar(r);
       await quadro();
       const achar = () => document.querySelector('li.pessoa-apresentada[data-apresentada-por="mod/linha"]');
-      const apelidoDe = (li) => li?.querySelector(".pessoa-nucleo .pessoa-nome");
-      // A mira: do canto do miolo até o centro do apelido.
+      const apelidoDe = (li) => li?.querySelector(".pessoa-nativo .pessoa-nome");
+      const recolhido = !achar()?.querySelector("details")?.open;
+      achar().querySelector("details").open = true;
+      // A mira: do canto do miolo até o centro do apelido nos detalhes.
       const miolo = achar()?.querySelector(".pessoa-miolo")?.getBoundingClientRect();
       const alvo = apelidoDe(achar())?.getBoundingClientRect();
       if (miolo && alvo) {
@@ -368,12 +370,15 @@ const REGIOES = [
         await quadro();
       }
       const li = achar();
+      li.querySelector("details").open = true;
       const apelido = apelidoDe(li);
       const caixa = apelido?.getBoundingClientRect();
       const noCentro = caixa ? document.elementFromPoint(caixa.left + caixa.width / 2, caixa.top + caixa.height / 2) : null;
-      const moderar = li?.querySelector(`.pessoa-nucleo [data-moderar-pessoa="${lia.id}"]`);
+      const moderar = li?.querySelector(`.pessoa-nativo [data-moderar-pessoa="${lia.id}"]`);
       const medido = {
         achou: Boolean(li),
+        recolhido,
+        duplicado: Boolean(li.querySelector(".pessoa-apresentada-faixa .pessoa-nome")),
         apelido: apelido?.textContent ?? null,
         esperado: lia.nickname,
         escondido: Boolean(apelido?.closest("details:not([open])")),
@@ -397,9 +402,9 @@ const REGIOES = [
       if (linha.apelido !== linha.esperado) {
         falhas.push(`pessoa.cartao: o núcleo diz «${linha.apelido}», e o retrato diz «${linha.esperado}»`);
       }
-      if (linha.escondido || !linha.naVista) falhas.push("pessoa.cartao: o apelido verificado não está à vista");
+      if (!linha.recolhido || linha.duplicado || linha.escondido || !linha.naVista) falhas.push("pessoa.cartao: apresentação duplicada ou identidade inacessível nos detalhes");
       if (!linha.descoberto) falhas.push("pessoa.cartao: o desenho do MOD ficou por cima do apelido verificado");
-      if (!linha.moderar) falhas.push("pessoa.cartao: a moderação não está a um clique, fora do «⋯»");
+      if (!linha.moderar) falhas.push("pessoa.cartao: a moderação não está disponível nos detalhes");
       if (!linha.cartaoNoMiolo) falhas.push("pessoa.cartao: o cartão do MOD não está no miolo");
       if (!linha.nomeDeOutraPessoa) falhas.push("pessoa.cartao: o retrato não tem outra pessoa, e o caso não mede a personificação");
       if (!linha.foraDoMiolo) falhas.push("pessoa.cartao: o apelido verificado está dentro da raiz do MOD");

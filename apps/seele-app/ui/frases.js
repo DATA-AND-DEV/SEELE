@@ -2704,9 +2704,10 @@ const FRASES_DO_CELULAR = Object.freeze({
     // Os estados da tentativa, antes do ENTRAR: [título, corpo].
     estados: Object.freeze({
       "numa-aba": Object.freeze({
-        titulo: "INSTALE ANTES DE ENTRAR",
-        corpo: "Você está numa aba do navegador. A identidade nasce onde você entra, e a aba e o ícone da Tela de Início não se enxergam: quem entra pela aba e depois instala vira outra pessoa, já sem convite.",
-        passos: Object.freeze(["Toque em Compartilhar.", "Toque em Adicionar à Tela de Início.", "Abra o SEELE pelo ícone e cole este link."]),
+        titulo: "ENTRAR NESTA ABA",
+        comoInstalar: "Como instalar (opcional)",
+        corpo: "Instalar é opcional. Sua identidade nesta aba pode ser diferente da Tela de Início; mudar entre os dois pode pedir um novo convite.",
+        passos: Object.freeze(["Se preferir instalar: Compartilhar, Adicionar à Tela de Início.", "Abra pelo ícone e cole este link antes de usá-lo nesta aba."]),
         copiar: "COPIAR O LINK",
         copiado: "LINK COPIADO. Cole na tela de início do SEELE instalado.",
         naoCopiou: "O navegador não deixou copiar. Copie o link da mensagem em que ele chegou.",

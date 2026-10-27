@@ -372,7 +372,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     return { erro: "recusado", razao: typeof razao === "string" ? razao : JSON.stringify(razao) };
   }
 
-  /** Entra no servidor do link com `apelido`. Só no `pronto` e no `ja-conhecido`. */
+  /** Entra no servidor do link com `apelido`. A aba móvel é permitida, com aviso na UI. */
   async function entrar(apelido) {
     if (!tentativa || !tentativa.lido) return { erro: "sem-tentativa" };
     const minha = vez;
@@ -381,7 +381,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
       encerrar();
       return { erro: "convite-vencido" };
     }
-    if (tentativa.estado !== "pronto" && tentativa.estado !== "ja-conhecido") {
+    if (!["pronto", "ja-conhecido", "numa-aba"].includes(tentativa.estado)) {
       return { erro: "recusado", razao: tentativa.estado };
     }
     tentativa.apelido = apelido;
