@@ -15,6 +15,9 @@
 
 "use strict";
 
+// Compatibilidade com o lançamento por outra versão; não é um campo da entrada.
+let nomePublicoDoPedido = null;
+
 /* `subsistemas` saiu com a sequência de boot animada da tela antiga.
  *
  * Ela acendia uma marca por subsistema enquanto a conexão andava. A leitura de
@@ -784,9 +787,8 @@ async function hospedar() {
   const servidor = servidorEscolhido;
 
   try {
-    // O campo é opcional; vazio vira `null`, que é como o Rust escreve «sem
-    // nome público» e dá no link numérico de sempre.
-    const nome = $("campo-nome-publico").value.trim();
+    // Sem nome no pedido de lançamento, o backend escolhe o link padrão.
+    const nome = (nomePublicoDoPedido ?? "").trim();
     const anfitriao = await invoke("hospedar", {
       nomePublico: nome === "" ? null : nome,
       // `null` é o banco de sempre: toda máquina que hospedou antes de os
@@ -1104,7 +1106,7 @@ async function cumprirAAbertura() {
   }
   if (!pedido.hospedar) return;
   if (pedido.nome_publico) {
-    $("campo-nome-publico").value = pedido.nome_publico;
+    nomePublicoDoPedido = pedido.nome_publico;
   }
   await hospedar();
 }
@@ -1536,7 +1538,10 @@ async function desenharVersoesParaHospedar() {
       const texto = elemento("span", "server-dispositivo-nome");
       texto.append(elemento("span", "mods-id", `SERVIDOR ${l.servidor}`));
       const apis = l.apis.length > 0 ? `MODs da API ${l.apis.join(", ")}` : "sem MODs";
-      texto.append(elemento("span", "mods-versao", apis));
+      const compatibilidade = elemento("details", "preparar-compatibilidade");
+      compatibilidade.append(elemento("summary", "mods-versao", "Compatibilidade"));
+      compatibilidade.append(elemento("span", "mods-versao", apis));
+      texto.append(compatibilidade);
       if (l.esta) {
         texto.append(elemento("span", "mods-versao", "esta janela"));
       } else if (!l.instalada) {
@@ -1633,7 +1638,7 @@ async function confirmarPreparar() {
   erro.hidden = true;
   confirmar.disabled = true;
 
-  const nomePublico = $("campo-nome-publico").value.trim() || null;
+  const nomePublico = (nomePublicoDoPedido ?? "").trim() || null;
 
   try {
     if (linhaEscolhida !== null) {

@@ -2921,18 +2921,10 @@ fn the_frontend_never_names_a_protocol_concept() {
     let script = without_comments(&scripts());
     let page = without_comments(&read("ui/index.html"));
 
-    // **A transcrição de boot fica de fora, e é a única coisa que fica.**
-    //
-    // A regra da `06-clientes-gui.md` é sobre o que se lê **para agir**: «se
-    // alguém precisa decifrar um rótulo para resolver um problema, a interface
-    // falhou». `#boot-leitura` não é rótulo de nada — é um terminal escrito, e a
-    // comp da 0.9.0 o desenha dizendo a porta, o transporte e a chave. Ninguém
-    // precisa entender `quic/tls1.3` para apertar CONECTAR; quem entende ganha a
-    // confirmação de que a caixa não é cenário.
-    //
-    // O recorte é por elemento e não por palavra, de propósito: `quic` continua
-    // proibido em todo botão, rótulo, aviso e frase de erro desta janela.
-    let pagina_sem_leitura = fora_da_leitura_de_boot(&page);
+    // A entrada não tem terminal técnico: a regra agora vale para toda a página.
+    assert!(!page.contains("boot-leitura"));
+    assert!(!page.contains("campo-nome-publico"));
+    let pagina_sem_leitura = page;
 
     for forbidden in ["ssrc", "opus_frame", "datagram", "quic", "postcard"] {
         for (name, text) in [
@@ -2948,20 +2940,6 @@ fn the_frontend_never_names_a_protocol_concept() {
             );
         }
     }
-}
-
-/// A página sem o bloco `#boot-leitura` — ver o guarda acima.
-fn fora_da_leitura_de_boot(pagina: &str) -> String {
-    let Some(de) = pagina.find("class=\"boot-leitura\"") else {
-        panic!("`#boot-leitura` sumiu da entrada; o recorte deste guarda ficou sem assunto");
-    };
-    let Some(fim) = pagina[de..].find("</div>") else {
-        panic!("o bloco de `boot-leitura` nunca fecha");
-    };
-    let mut sem = String::with_capacity(pagina.len());
-    sem.push_str(&pagina[..de]);
-    sem.push_str(&pagina[de + fim..]);
-    sem
 }
 
 /// Every screen carries an id, and the app opens on exactly one of them.
@@ -7229,14 +7207,8 @@ fn saving_says_out_loud_what_this_product_does_not_promise() {
          viruses, which is the thing it must not let anybody assume: {frase}"
     );
     assert!(
-        frase.contains("quarentena"),
-        "the confirmation does not mention the quarantine mark, which is the \
-         one concrete guard this product can point at"
-    );
-    assert!(
-        frase.contains("chegou inteiro"),
-        "the confirmation does not separate the question that has an answer \
-         from the one that does not"
+        frase.contains("Abra apenas arquivos de quem você confia"),
+        "a confirmação deve conservar uma cautela curta antes de abrir"
     );
     // And it says where the file lands. Choosing a file to send now opens a
     // system dialog; saving one that arrived still does not, so this side has
@@ -21744,11 +21716,11 @@ const c = so(m, "copiarLink");
 confere("COPIAR não copia o campo da entrada", c.length === 1 && c[0].args.campo === "boot-codigo-valor");
 
 const diz = (p) => { m.ouvintes["seele://sala"]({ payload: p }); return m.$("boot-codigo-estado").textContent; };
-confere("registrada não diz que consegue ligar", /consegue ligar/.test(diz({ estado: "NoAr", registro: { registro: "Registrado" } })));
+confere("registrada não diz que pode ligar", diz({ estado: "NoAr", registro: { registro: "Registrado" } }) === "Quem tem seu código pode ligar para você.");
 confere("registrada não marca recebendo", bloco.dataset.recebe === "sim");
 for (const registro of ["SemPonto", "Esperando", "SemResposta", "CookieRecusado"]) {
   const t = diz({ estado: "NoAr", registro: { registro } });
-  confere(registro + " promete ligação que não se confirmou", !/consegue ligar/.test(t));
+  confere(registro + " promete ligação que não se confirmou", !/consegue ligar|pode ligar para você/.test(t));
   confere(registro + " marcou recebendo", bloco.dataset.recebe === "nao");
 }
 confere("SemPonto não diz só a mesma rede", /mesma rede/.test(diz({ estado: "NoAr", registro: { registro: "SemPonto" } })));
@@ -23542,9 +23514,8 @@ corpoAcabou = true;
 // ---------------------------------------------------------------------------
 // 0.17 (C): a tela cheia do iPhone abre, não deixa SAIR e corta o fundo.
 //
-// No celular a ponte recusa o comando `tela_cheia` («no celular a tela cheia é o
-// aparelho deitado», `ponte-web.js:177`), então o «TELA CHEIA» é só o cinema em
-// CSS: o script esconde tudo menos o caminho do canvas, e a única saída era o
+// Sem uma API nativa disponível, o cinema amplia por CSS. O script esconde
+// tudo menos o caminho do canvas, e a única saída originalmente era o
 // Esc (que o iPhone não tem) ou o duplo toque no canvas. O cinema também media
 // `100vh`, que no Safari é a página com a barra recolhida (o rodapé fica fora
 // do que se vê), e o `!important` dele passava por cima do `100dvh` do celular.
@@ -23607,9 +23578,9 @@ const montar = (casca) => {
     MutationObserver: class { constructor(f) { observadores.push(f); } observe() {} },
     CELULAR: { h },
     $: (id) => ({ "palco-imagem": imagem, "palco-cheia": cheia })[id] ?? null,
-    invoke: async (cmd) => { chamadas.push(cmd); throw { RecusaDaPonte: { comando: cmd, frase: "no celular a tela cheia é o aparelho deitado" } }; },
+    invoke: async (cmd) => { chamadas.push(cmd); throw { RecusaDaPonte: { comando: cmd, frase: "API indisponível na bancada" } }; },
   });
-  vm.runInContext("let noCinema = false;\n" + textos.join("\n"), ctx);
+  vm.runInContext("let noCinema = false; let vezDoCinema = 0; let videoDaTelaCheia = null;\n" + textos.join("\n"), ctx);
   try { carregar({ ctx }, "frases.js", "celular-cinema.js"); } catch (e) { confere("o celular-cinema.js não carregou: " + String(e.message).split("\n")[0], false); }
   // O observador do `data-cinema` roda depois do script que marcou o caminho (um microtask depois).
   const observar = async () => { await tick(); observadores.forEach((f) => f()); };

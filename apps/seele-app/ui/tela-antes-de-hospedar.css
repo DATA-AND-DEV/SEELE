@@ -25,7 +25,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px 32px;
-  align-content: start;
+  align-content: safe center;
 }
 
 .antes-contexto {

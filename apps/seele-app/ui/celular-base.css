@@ -118,3 +118,22 @@
   font-size: var(--cel-letra-de-campo);
   font-family: var(--seele-mono);
 }
+
+/* A marca e as ações móveis ficam nas linhas próprias; só o miolo se equilibra. */
+:root[data-casca="celular"] #tela-boot .cel-entrada-corpo {
+  display: grid;
+  align-content: safe center;
+}
+
+:root[data-casca="celular"] .cel-entrada-identidade {
+  margin-block: 12px;
+  color: var(--seele-osso-apagado);
+}
+:root[data-casca="celular"] .cel-entrada-identidade > summary {
+  cursor: pointer;
+  padding-block: 8px;
+}
+:root[data-casca="celular"] .cel-entrada-identidade > summary:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+}

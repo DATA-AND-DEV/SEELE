@@ -797,3 +797,33 @@
   color: var(--seele-laranja-nerv);
   border-color: var(--seele-laranja-nerv);
 }
+
+/* Conteúdo curto ocupa o centro; quando cresce, a tela continua rolável. */
+#tela-boot > .boot-caixa:not(.area) {
+  justify-content: safe center;
+  gap: clamp(24px, 5vh, 56px);
+}
+
+#tela-preparar .area-conteudo,
+#tela-servidores .area-conteudo {
+  display: grid;
+  align-content: safe center;
+}
+
+#tela-preparar .area-grade {
+  width: 100%;
+  max-width: 1200px;
+  margin-inline: auto;
+}
+
+.preparar-compatibilidade { margin-block: 4px; }
+.preparar-compatibilidade > summary { cursor: pointer; }
+.preparar-compatibilidade > summary:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+}
+
+#tela-preparar .boot-titulo,
+#tela-servidores .boot-titulo {
+  line-height: 1.2;
+}

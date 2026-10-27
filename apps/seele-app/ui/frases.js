@@ -1779,9 +1779,9 @@ const FRASES_ANTES_DE_HOSPEDAR = Object.freeze({
   // **Sem «nada foi mudado»** (P1 do Codex, no app nativo): a tela dizia isso
   // com o banco já convertido pela atualização de um MOD. Ela não tem como
   // provar o estado do disco; diz o que está escolhido e o que o botão aplica.
-  resumoBloqueia: "Ainda não sobe por esta versão.",
+  resumoBloqueia: "Resolva as pendências para hospedar.",
   resumoLeia: "Confira o que muda antes de hospedar.",
-  resumoOk: "Nada impede de subir por esta versão.",
+  resumoOk: "Pronto para hospedar.",
   resumoEscolhas: (n) =>
     `${n === 1 ? "Uma escolha de MOD está" : `${n} escolhas de MOD estão`} guardada${n === 1 ? "" : "s"} nesta tela: ` +
     "o botão do fim as aplica, depois da cópia de segurança.",
@@ -2031,14 +2031,9 @@ const NAO_SALVOS = {
  */
 function fraseDeSalvar(onde) {
   return (
-    `Grava «${onde.file_name}» em ${onde.folder}.\n` +
-    "Se já houver um arquivo com esse nome lá, o SEELE grava ao lado, como " +
-    `«${onde.beside}», e não substitui nada.\n` +
-    "O SEELE não confere se este arquivo é seguro: ele não varre vírus e não " +
-    "vai varrer. Ele confere só que o arquivo chegou inteiro. O arquivo é " +
-    "marcado com a quarentena do sistema ao ser gravado, e é o seu sistema " +
-    "operacional que vai parar você na frente dele se for o caso.\n" +
-    "Nenhuma tela do SEELE abre este arquivo. Abrir é um ato seu, fora daqui."
+    `Salvar «${onde.file_name}» em ${onde.folder}.\n` +
+    `Se o nome já existir, usa «${onde.beside}»: não substitui nada.\n` +
+    "O SEELE não varre vírus. Abra apenas arquivos de quem você confia."
   );
 }
 
@@ -2310,10 +2305,10 @@ const SALA_PESSOAL = Object.freeze({
 
   /** O bloco SEU CÓDIGO da entrada: a verdade da sala, sem promessa a mais. */
   codigo: Object.freeze({
-    recebendo: "A sua sala está no ar: quem tem este código consegue ligar para você.",
-    procurando: "A sua sala está no ar, e ainda não confirmamos que o código é achável por quem está fora da sua rede.",
+    recebendo: "Quem tem seu código pode ligar para você.",
+    procurando: "Sala no ar. O alcance do código fora desta rede ainda não foi confirmado.",
     subindo: "A sua sala está subindo. Ainda não dá para receber ligação.",
-    desligada: "O código é seu, mas a sala está desligada: você NÃO recebe ligações. Ligue em PERFIL, RECEBER LIGAÇÕES.",
+    desligada: "Você NÃO recebe ligações. Ative em PERFIL, RECEBER LIGAÇÕES.",
     falhou: "NINGUÉM CONSEGUE TE LIGAR AGORA: a sala não subiu.",
     semNoticia: "Ainda não sabemos se a sua sala está recebendo ligações.",
   }),
@@ -2327,7 +2322,7 @@ const SALA_PESSOAL = Object.freeze({
 
   /** A lista de AMIGOS da entrada (0.17): sem presença, que não há de onde saber. */
   amigos: Object.freeze({
-    vazia: "Nenhum amigo ainda. Adicione pelo código dele, uma vez só, e ligue sem copiar nada.",
+    vazia: "Adicione amigos pelo código para ligar direto.",
     ligar: "LIGAR",
     adicionar: "ADICIONAR",
     adicionarAosAmigos: "ADICIONAR AOS AMIGOS",
@@ -2529,7 +2524,11 @@ const NO_COMPUTADOR = Object.freeze({
 const FRASES_DO_CELULAR = Object.freeze({
   // A tela cheia do celular é o cinema em CSS (a ponte recusa a Fullscreen API):
   // a saída é um botão sempre à vista, e não o Esc, que o iPhone não tem.
-  cinema: Object.freeze({ sair: "SAIR DA TELA CHEIA", girar: "PARA AMPLIAR, VIRE O CELULAR." }),
+  cinema: Object.freeze({
+    sair: "SAIR DA TELA CHEIA", girar: "PARA AMPLIAR, VIRE O CELULAR.",
+    voltar: "VOLTAR À TRANSMISSÃO", abrir: "ABRIR TELA CHEIA", preparando: "Preparando…",
+    indisponivel: "Ampliado na página; tela cheia indisponível neste navegador.",
+  }),
   voz: Object.freeze({
     abas: { servidor: "SERVIDOR", conversa: "CONVERSA", pessoas: "PESSOAS", ajustes: "AJUSTES" },
     secoes: "seções",
@@ -2657,7 +2656,7 @@ const FRASES_DO_CELULAR = Object.freeze({
       continuar: "CONTINUAR",
       identidade: "Sua identidade mora neste navegador, neste aparelho.",
       hospedarRotulo: "HOSPEDAR",
-      hospedar: "Hospedar um servidor é pelo app do SEELE, instalado num computador.",
+      hospedar: "Para hospedar, use o app no computador.",
     }),
     // O que o COLAR UM LINK recusa antes de abrir a «ENTRAR EM».
     colado: Object.freeze({
@@ -2668,14 +2667,14 @@ const FRASES_DO_CELULAR = Object.freeze({
     }),
     entrarEm: Object.freeze({
       titulo: "ENTRAR EM",
-      sobre: "Nada saiu deste aparelho ainda: a conexão só abre quando você tocar em ENTRAR.",
+      sobre: "Toque em ENTRAR para conectar.",
       endereco: "ENDEREÇO",
       impressao: "IMPRESSÃO DO SERVIDOR",
       impressaoNota: "É a mesma que o SEELE de quem hospeda mostra. Quem atender com outra é recusado.",
       versao: "VERSÃO",
       vale: "O LINK VALE ATÉ",
       apelido: "COMO OS OUTROS VÃO TE CHAMAR",
-      primeiraEntrada: "Ao entrar, este aparelho cria a identidade dele. Ela fica neste navegador: sem cópia e sem troca de aparelho.",
+      primeiraEntrada: "Sua identidade fica neste navegador. Não é transferida para outro aparelho.",
       entrar: "ENTRAR",
       agoraNao: "AGORA NÃO",
       servidores: "SERVIDORES DESTE APARELHO",
@@ -2683,12 +2682,12 @@ const FRASES_DO_CELULAR = Object.freeze({
     // **O endereço novo do SEELE no navegador começa identidades novas.** Dita uma vez na tela de início, até a pessoa dispensar, sem prometer
     // migração: a identidade do navegador mora na origem, e a anterior não vem junto.
     novaOrigem: Object.freeze({
-      titulo: "ESTE É O NOVO ENDEREÇO DO SEELE NO NAVEGADOR",
-      // A primeira linha é o resumo, sempre à vista; as outras ficam nos detalhes, que abrem e fecham.
+      titulo: "Sobre sua identidade",
+      // A explicação fica no disclosure de identidade, fechado por padrão.
       detalhes: "DETALHES",
       ocultar: "OCULTAR",
       linhas: Object.freeze([
-        "A identidade aqui é nova.",
+        "Neste endereço, sua identidade é nova.",
         "Cargos e acessos ligados à identidade anterior do navegador não vêm com ela.",
         "Quem administra o servidor pode admitir você de novo, com um convite novo.",
         "O aplicativo de computador mantém a identidade local dele.",

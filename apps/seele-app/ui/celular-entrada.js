@@ -132,7 +132,6 @@
       desfecho?.erro && aviso(fraseDoDesfecho(desfecho), { erro: true }),
       avisoDaOrigemNova(),
       linhas,
-      h("p", { class: "cel-entrada-nota", text: f.identidade }),
       h("p", { class: "cel-entrada-fora" }, rotulo(f.hospedarRotulo), f.hospedar,
         h("a", { class: "cel-baixar", href: PAGINA_DO_APP, target: "_blank", rel: "noopener", text: PALAVRAS_DO_APP })),
     // `() => colar()`: o `onclick` entrega o EVENTO, e `colar(recusa)` o tomaria
@@ -152,24 +151,11 @@
       // Sem o armazenamento, o aviso aparece de novo a cada abertura.
     }
     const f = PALAVRAS.novaOrigem;
-    const [resumo, ...detalhes] = f.linhas;
-    // O título e uma frase; o resto nos detalhes, fechados, com o botão que os abre (aria-expanded/aria-controls, o foco fica no botão).
-    const lista = h("ul", { id: "cel-entrada-origem-detalhes", class: "cel-entrada-origem-linhas", hidden: true },
-      detalhes.map((linha) => h("li", { class: "cel-entrada-nota", text: linha })));
-    const abrir = h("button", {
-      class: "botao-fantasma cel-entrada-origem-abre", type: "button", "aria-expanded": "false", "aria-controls": "cel-entrada-origem-detalhes",
-      onclick: () => {
-        const aberto = lista.hidden;
-        lista.hidden = !aberto;
-        abrir.setAttribute("aria-expanded", String(aberto));
-        abrir.textContent = aberto ? f.ocultar : f.detalhes;
-      },
-    }, f.detalhes);
-    return h("div", { class: "cel-entrada-aviso cel-entrada-origem-nova", role: "status" },
-      h("p", { class: "cel-entrada-aviso-titulo", text: f.titulo }),
-      h("p", { class: "cel-entrada-nota", text: resumo }),
-      lista,
-      h("div", { class: "cel-entrada-origem-acoes" }, abrir, h("button", {
+    return h("details", { class: "cel-entrada-identidade" },
+      h("summary", { text: f.titulo }),
+      h("p", { class: "cel-entrada-nota", text: PALAVRAS.inicio.identidade }),
+      f.linhas.map((linha) => h("p", { class: "cel-entrada-nota", text: linha })),
+      h("button", {
         class: "botao-fantasma", type: "button",
         onclick: () => {
           try {
@@ -179,7 +165,7 @@
           }
           inicio();
         },
-      }, PALAVRAS.dispensar)));
+      }, PALAVRAS.dispensar));
   }
 
   async function entrarNoConhecido(servidor) {

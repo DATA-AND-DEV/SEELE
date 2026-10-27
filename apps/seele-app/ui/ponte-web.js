@@ -174,7 +174,6 @@ const RECUSAS_NOMEADAS = new Map([
 
 const SO_NO_PC_MODERAR = "moderar e administrar o servidor é pelo PC: no navegador largo ou no app";
 const SO_NO_PC_TECLA = "no celular, falar apertando é o SEGURAR PARA FALAR da faixa de voz";
-const SO_NO_PC_CHEIA = "no celular a tela cheia é o aparelho deitado";
 const SO_NO_PC_RUIDO = "o celular usa a supressão de ruído do navegador";
 const SO_NO_PC_SAIDA = "o celular toca pela saída de som do sistema";
 const SO_NO_PC_ARRASTAR = "no celular o arquivo vem do seletor, e não do arraste";
@@ -217,12 +216,12 @@ const SO_NA_CASCA_LARGA = new Map([
   ["renomear_voice_room", SO_NO_PC_MODERAR],
   ["saida_escolhida", SO_NO_PC_SAIDA],
   ["saidas", SO_NO_PC_SAIDA],
-  ["tela_cheia", SO_NO_PC_CHEIA],
   ["tirar_icone_do_server", SO_NO_PC_MODERAR]
 ]);
 
 /** Atendidos nas duas cascas. */
 const COMANDOS_DA_PONTE = new Set([
+  "tela_cheia",
   "abertura", "abrir_no_navegador", "aceitar_mods", "aceite_de_mods",
   "aceites_de_mods", "ajustar_sensibilidade_da_voz", "ajustar_volume_da_tela",
   "analisar_convite", "apelido_local", "apis_de_mod_aceitas", "assistir",
@@ -2849,19 +2848,9 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     gravarNaOrigem(CHAVES_DA_ORIGEM.saida, dispositivo == null ? null : String(dispositivo))
       ? null
       : Promise.reject("NaoGravei"),
-  // **A tela cheia do navegador**, no lugar da janela. Pedida dentro do clique,
-  // sem `await` antes. Como no desktop, não trocar de modo não lança na casca;
-  // aqui ele é dito no console.
-  tela_cheia: async ({ ligada } = {}) => {
-    const dentro = document.fullscreenElement != null;
-    try {
-      if (ligada && !dentro) await document.documentElement.requestFullscreen();
-      if (!ligada && dentro) await document.exitFullscreen();
-    } catch (falha) {
-      console.warn("ponte: a tela cheia não trocou", falha);
-    }
-    return null;
-  },
+  // A apresentação pertence ao palco: API genérica ou vídeo nativo no iPhone.
+  // A chamada continua dentro do gesto, antes de qualquer espera.
+  tela_cheia: ({ ligada } = {}) => trocarTelaCheiaDoNavegador(ligada),
   // **Numa aba nova, que não leva a página junto.** Sem `await` antes do
   // `open`: o navegador só abre a aba dentro do gesto de quem clicou.
   abrir_no_navegador: ({ url } = {}) => {

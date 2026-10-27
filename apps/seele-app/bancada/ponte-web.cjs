@@ -183,6 +183,13 @@ function pagina({
   if (duble) janela.__TAURI__ = duble;
   const contexto = vm.createContext(janela);
   vm.runInContext(fonte, contexto, { filename: "ponte-web.js" });
+  const palco = fs.readFileSync(path.join(raiz, "ui/palco-imagem.js"), "utf8");
+  const apresentacao = ['soltarVideoDaTelaCheia', 'prepararVideoDaTelaCheia', 'trocarTelaCheiaDoNavegador'].map(nome => {
+    const trecho = palco.match(new RegExp('(?:async )?function ' + nome + '\\([^)]*\\) \\{[\\s\\S]*?\\n\\}\\n'));
+    if (!trecho) throw Error(`sumiu ${nome}`);
+    return trecho[0];
+  }).join('\n');
+  vm.runInContext('let videoDaTelaCheia = null; const $ = () => null;\n' + apresentacao, contexto);
   const ler = (expressao) => vm.runInContext(expressao, contexto);
   return {
     janela,
@@ -616,7 +623,7 @@ async function aImagemColada() {
 async function oArraste() {
   const caso = "o arraste";
   const celular = pagina({ toque: true });
-  confere(caso, celular.doDocumento.size === 0, `no celular a ponte ouve ${[...celular.doDocumento.keys()]}`);
+  confere(caso, !celular.doDocumento.has("dragover") && !celular.doDocumento.has("drop"), `no celular a ponte ouve arraste: ${[...celular.doDocumento.keys()]}`);
 
   const p = pagina({ largura: 1280 });
   const recebidos = [];
@@ -688,8 +695,7 @@ async function aTelaCheia() {
   confere(caso, p.telaCheia.saidas === 1, `sair duas vezes saiu ${p.telaCheia.saidas}`);
   const q = pagina({ telaCheiaFalha: true });
   const r = await desfecho(q.invoke("tela_cheia", { ligada: true }));
-  confere(caso, r.ok === null, `um pedido recusado voltou ${util.inspect(r)}`);
-  confere(caso, q.avisos.some(([texto]) => String(texto).includes("tela cheia")), "o pedido recusado não foi dito");
+  confere(caso, igual(r.ok, { modo: "pagina" }), `pedido recusado deve informar modo página: ${util.inspect(r)}`);
 }
 
 /// **As preferências da voz moram na origem**, com as regras do desktop

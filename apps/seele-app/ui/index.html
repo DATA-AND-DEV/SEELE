@@ -341,9 +341,7 @@
       A ordem inverte: o que o programa faz, as duas ações, e só então — dentro
       de uma explicação que se abre — o que ele é por dentro.
     -->
-    <p class="boot-proposito">Voz, vídeo e texto entre pessoas, sem servidor de
-      ninguém no meio. Entre no servidor de alguém, ou ponha o seu no ar a
-      partir desta máquina.</p>
+    <p class="boot-proposito">Entre em um servidor ou hospede o seu.</p>
 
     <div class="boot-rodape">
       <button id="boot-perfil" class="boot-perfil" type="button"
@@ -419,7 +417,7 @@
     -->
     <section id="boot-amigos" class="boot-amigos" data-sala-pessoal
              aria-labelledby="boot-amigos-titulo" hidden>
-      <span id="boot-amigos-titulo" class="rotulo">AMIGOS · LIGUE SEM COPIAR O CÓDIGO</span>
+      <span id="boot-amigos-titulo" class="rotulo">AMIGOS</span>
       <p id="boot-amigos-vazia" class="nota" hidden></p>
       <ul id="boot-amigos-lista" class="amigos-lista"></ul>
       <form id="boot-amigos-form" class="boot-amigos-form" autocomplete="off">
@@ -455,7 +453,7 @@
       </section>
       <aside class="boot-coluna boot-dir" aria-label="Hospedar">
         <span class="rotulo boot-hospedar-titulo">HOSPEDAR</span>
-        <p class="nota boot-dica">Ponha um servidor seu no ar a partir desta máquina. Quem você convidar entra pelo link.</p>
+        <p class="nota boot-dica">Hospede neste computador e convide pelo link.</p>
     <!--
       O servidor que esta janela hospeda, no ar, com a sessão fora dele (tarefas
       19 e 20 da F7): sair não o derruba mais, e quem saiu precisa saber que ele
@@ -474,42 +472,6 @@
     <div class="boot-saidas">
       <button id="botao-hospedar" type="button" class="botao botao-secundario">HOSPEDAR AQUI</button>
     </div>
-    <!--
-      **Fechado por padrão, e não um campo a mais nesta tela.** Quem aperta
-      HOSPEDAR AQUI quer hospedar; um nome público é coisa de quem já tem um DNS
-      apontado, que é uma minoria conhecendo o próprio caso. Um `<details>`
-      fechado custa uma linha a quem não precisa e está inteiro a quem precisa.
-
-      O campo é opcional e nasce vazio — vazio é a ausência de escolha e dá no
-      link numérico de sempre, que é o comportamento de hoje inteiro preservado.
-    -->
-    <details id="boot-nome-publico" class="boot-nome-publico">
-      <summary>Tenho um nome apontado para esta máquina</summary>
-      <div class="server-campo">
-        <label class="rotulo" for="campo-nome-publico">NOME PÚBLICO (OPCIONAL)</label>
-        <input id="campo-nome-publico" type="text" autocomplete="off"
-               spellcheck="false" placeholder="casa.exemplo.br" />
-        <p class="nota">
-          O link sai com este nome no lugar do endereço numérico. Ele só serve se
-          o nome estiver apontado para este endereço — quem receber e não
-          conseguir resolver cai no endereço numérico, que vai junto no link.
-        </p>
-        <!--
-          O aviso do TOFU, e ele não é detalhe. A chave do pino é **o texto do
-          alvo** (`crates/seele-core/src/tofu.rs`), então o nome e o número são
-          dois pinos para o mesmo servidor. Quem já entrou por um e passa a
-          entrar pelo outro é perguntado de novo sobre a impressão digital — e
-          uma pergunta de segurança que chega sem explicação é uma pergunta que
-          se responde no automático, que é o contrário do que ela existe para
-          fazer.
-        -->
-        <p id="nota-nome-publico-tofu" class="nota">
-          Quem já entrou aqui pelo endereço numérico vai ser perguntado de novo
-          sobre a impressão digital ao entrar pelo nome: para o SEELE, os dois
-          são endereços diferentes do mesmo servidor.
-        </p>
-      </div>
-    </details>
 
     <!--
       **As versões lado a lado — ADR 0046.** O bloco só aparece quando há mais
@@ -526,67 +488,6 @@
          Preenchido por camada-versoes.js. -->
     <p id="boot-linha-legada" class="nota" role="status" hidden></p>
 
-    <!--
-      Os detalhes técnicos, recolhidos.
-
-      Fechado por padrão: quem veio conversar não precisa deles, e quem quer
-      conferir que o programa é o que diz ser os encontra num gesto. O
-      `<details>` é o mesmo padrão que o nome público já usa logo abaixo.
-    -->
-    <details class="boot-detalhes">
-      <summary>O que este programa é, por dentro</summary>
-      <!--
-        A leitura de boot. **Ela é verdade, e não cenário.**
-
-        Cada linha diz uma coisa que o produto de fato faz: a porta que o `seeled`
-        abre, o transporte, e a chave que fixa a identidade do servidor (ADR 0003
-        e 0004). Um terminal falso que rolasse texto inventado seria a única parte
-        desta janela que mente, e o `07-estetica.md` proíbe decoração que se
-        pareça com dado.
-
-        `aria-hidden` no cursor: ele pisca e não diz nada, e um leitor de tela
-        anunciando um quadrado a cada meio segundo é ruído.
-      -->
-      <div class="boot-leitura" role="status">
-        <span class="boot-linha">$ seeled 0.0.0.0:8383</span>
-        <!--
-          **As três linhas são as da comp, palavra por palavra**, e a do meio
-          nomeia o transporte.
-
-          `the_frontend_never_names_a_protocol_concept` recusava `quic` em
-          qualquer lugar da casca, e a regra que ele guarda é boa: a
-          `06-clientes-gui.md` não quer que alguém precise decifrar um rótulo para
-          resolver um problema. Ela foi escrita sobre **controles** — o que se lê
-          para agir.
-
-          Isto não é um controle. É a transcrição de um terminal, e o que ela faz
-          é dizer que o programa é o que diz ser: a porta que ele abriu, o
-          transporte que ele usa, a chave que fixa a identidade. Ninguém precisa
-          entender `quic/tls1.3` para apertar CONECTAR, e quem entende ganha a
-          confirmação de que não é enfeite. O guarda passou a cobrar a regra onde
-          ela vale — o texto de controle — e a abrir exceção para esta caixa, que
-          é a única transcrição da janela.
-        -->
-        <!--
-          **Era «porta udp aberta», e a tela não mede isso** — A12 da auditoria de
-          17/09. A frase aparecia sem hospedar, sem escuta e sem sonda: ela não
-          estava errada por acaso, estava afirmando um estado que nada nesta
-          janela apurou. Quem mede o alcance é `mostrarAlcance`, depois de
-          `hospedar` responder, e é lá que ele é dito.
-
-          O que sobra aqui é o que o produto **é**, que é o que esta caixa sempre
-          quis dizer: o transporte que ele usa.
-        -->
-        <!-- Na 0.17 o transporte é WebRTC: DTLS preso à impressão do
-             servidor, canais de dados SCTP, tudo sobre UDP (contrato, D1). -->
-        <span class="boot-linha">webrtc · dtls 1.2 · sobre udp</span>
-        <span class="boot-linha">ed25519 · impressão digital fixada na primeira visita</span>
-        <span class="boot-linha boot-linha-pronto">
-          <span>pronto.</span>
-          <span class="boot-cursor" aria-hidden="true"></span>
-        </span>
-      </div>
-    </details>
 
       </aside>
     </div>
@@ -616,8 +517,7 @@
     <!-- Os servidores desta máquina numa GRADE de cartões que se redistribui com a largura; a barra de ações é outra linha. -->
     <div class="area-conteudo">
     <p class="nota area-leitura">
-      Cada servidor guarda as próprias conversas, os próprios canais e quais
-      MODs estão ligados. Levantar um não toca nos outros.
+      Escolha um servidor ou crie outro.
     </p>
 
     <ul id="lista-servidores" class="server-dispositivos servidores-grade"></ul>
@@ -672,8 +572,7 @@
          são dois cartões da mesma grade da versão. -->
     <div id="preparar-do-novo" class="preparar-do-novo">
     <p class="nota area-larga">
-      O nome e a imagem são o que as pessoas veem ao entrar. Os dois são
-      opcionais e mudam depois, em CONFIGURAÇÕES.
+      Nome e imagem são opcionais. Você pode alterá-los depois.
     </p>
 
     <!-- IDENTIDADE: o nome e a imagem juntos, num cartão só; a versão é o outro. -->
@@ -713,8 +612,7 @@
            «sumiu» e «não existe» são a mesma coisa para quem olha: a pergunta
            que chegou foi «não mostra as versões disponíveis». -->
       <p id="preparar-versao-unica" class="nota" hidden>
-        Só esta versão do servidor está disponível. As outras aparecem aqui
-        depois que a lista de versões for lida uma vez.
+        Só esta versão está disponível.
       </p>
       <!-- O texto é escrito por tela-boot.js, com a versão do servidor
            escolhida e as conversas que não atravessam. -->
@@ -2980,9 +2878,7 @@
             dizia alguma coisa.
           -->
           <h3 class="server-bloco-nome">QUEM PODE ENTRAR</h3>
-          <p class="nota">Senha, convites de uso único e a portaria — quem bate
-            e quem passa. É outra decisão que a de cima: um link que alcança o
-            mundo atrás de uma porta fechada não é contradição nenhuma.</p>
+          <p class="nota">Escolha quem entra: senha, convite de uso único ou aprovação na portaria.</p>
           <button id="portaria-abrir" class="botao-fantasma" type="button">porta</button>
         </section>
 
@@ -3163,9 +3059,8 @@
                   <input id="server-reducao-de-ruido" type="checkbox" checked>
                   <span>reduzir ruído de fundo do microfone</span>
                 </label>
-                <p class="server-frase">Ventilador e ar-condicionado caem sem levar
-                  a voz junto. Digitação é um estalo curto: ela fica mais baixa, e
-                  não some. Desligar devolve o microfone como ele é.</p>
+                <p class="server-frase">Reduz ruído contínuo. A digitação pode continuar audível.
+                  Desligue para usar o som original.</p>
               </div>
 
               <!--
@@ -3196,12 +3091,9 @@
                   <button id="server-sensibilidade-padrao" class="server-lista-acao"
                           type="button">USAR O PADRÃO</button>
                 </div>
-                <p class="server-frase">Mais sensível abre com fala baixa e também
-                  com mais ruído. No padrão este número é o mais sensível que o
-                  SEELE chega: o corte acompanha o ruído da sala e o teste abaixo
-                  mostra onde ele está. Escolher um valor aqui o deixa fixo. Só vale
-                  no modo <strong>VOZ</strong>: na tecla e no aberto quem decide é
-                  você.</p>
+                <p class="server-frase">Só no modo <strong>VOZ</strong>. Mais sensível capta fala baixa e mais ruído.
+                  O padrão acompanha o ruído; um valor escolhido fica fixo.
+                  Confira no teste abaixo.</p>
               </div>
 
               <!--
@@ -3561,10 +3453,8 @@
                 diferentes, e a que discorda.
               -->
               <p id="server-identidade-frase" class="server-frase"></p>
-              <p class="server-frase">A chave mora nesta máquina, num arquivo só
-                seu. Perdê-la ou trocá-la custa o apelido em <em>todo</em> servidor
-                que você já visitou, e não há como recuperá-lo sem um operador de
-                cada um deles.</p>
+              <p class="server-frase">A identidade fica nesta máquina. Perder a chave cria outra identidade;
+                um administrador de cada servidor precisará devolver seus acessos.</p>
             </div>
           </div>
 
@@ -3585,10 +3475,8 @@
               <h3 class="server-bloco-nome">IMAGENS DE LINK</h3>
             </div>
             <div class="server-bloco-corpo">
-              <p class="server-frase">Uma imagem colada numa conversa só é
-                buscada depois de você liberar o domínio dela. Buscar entrega a
-                esse servidor o endereço desta máquina e a hora — é por isso que
-                a escolha é por domínio, e é sua.</p>
+              <p class="server-frase">Você escolhe quais domínios podem carregar imagens.
+                Ao carregar, o site recebe seu endereço de rede e a hora do acesso.</p>
               <ul id="server-previas" class="server-lista"></ul>
               <p id="server-previas-vazio" class="server-frase" hidden>Nenhum
                 domínio liberado. As imagens aparecem com um botão, e nada é
@@ -3870,11 +3758,8 @@
                   <input id="mods-modo-desenvolvedor" type="checkbox">
                   <span>contornar na tela cada lugar onde um MOD pode entrar</span>
                 </label>
-                <p class="server-frase">Cada contorno leva o nome do lugar como a
-                  API o chama — é o que um MOD escreve em «ponto». Os contornos não
-                  recebem clique nem teclado: a conversa continua funcionando por
-                  baixo, e a barra de espaço continua falando. Vale só nesta
-                  máquina.</p>
+                <p class="server-frase">Mostra os nomes dos pontos de MOD, só nesta máquina.
+                  Os contornos não interferem nos cliques nem no teclado.</p>
               </div>
             </div>
           </div>
@@ -3968,12 +3853,13 @@
                 <ul id="lista-versoes-instaladas" class="server-dispositivos mods-rolagem"></ul>
                 <button id="versoes-baixar" class="botao" type="button">GUARDAR A MAIS NOVA DO CATÁLOGO</button>
                 <p id="versoes-estado" class="nota" role="status"></p>
-                <p class="nota">Guardar uma versão <b>não substitui</b> a que
-                  está aberta. Entrar num servidor que roda outra versão do
-                  servidor abre o SEELE dela, e baixa antes se for preciso.</p>
-                <p class="nota">Cada versão do servidor guarda as conversas dela,
-                  em separado. Apagar o app de uma não apaga as conversas: o
-                  próximo app da mesma versão do servidor as abre.</p>
+                <details class="antes-mais">
+                  <summary>Como funcionam as versões</summary>
+                  <p class="nota">Guardar outra versão não substitui a aberta.
+                    Ao entrar, o SEELE abre a versão do servidor e baixa se necessário.</p>
+                  <p class="nota">As conversas ficam separadas por versão do servidor.
+                    Apagar o app não apaga essas conversas.</p>
+                </details>
               </div>
             </div>
           </div>

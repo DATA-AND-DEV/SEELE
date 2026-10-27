@@ -513,6 +513,7 @@ function entregarAoDecodificador(chave, bytes) {
 
 /** A transmissão acabou: solta o decodificador e apaga a imagem. */
 function fecharImagemDaTela() {
+  soltarVideoDaTelaCheia();
   // Toda abertura, todo fechamento e toda troca de sessão passam aqui: o que
   // ainda estiver em voo de antes deixa de valer (`epocaDoPalco`).
   epocaDoPalco += 1;
@@ -767,6 +768,112 @@ function podarOPalco(carimbos) {
  */
 let noCinema = false;
 
+// O compartilhamento é decodificado no canvas. Só quando a pessoa pede tela
+// cheia, e o navegador oferece apenas fullscreen de vídeo, nasce esta cópia.
+// Ela não captura microfone/áudio nem altera a transmissão recebida.
+let videoDaTelaCheia = null;
+let vezDoCinema = 0;
+
+function soltarVideoDaTelaCheia() {
+  const video = videoDaTelaCheia;
+  if (!video) return;
+  videoDaTelaCheia = null;
+  clearTimeout(video.prazoDaTelaCheia);
+  try { if (video.webkitDisplayingFullscreen) video.webkitExitFullscreen(); } catch { /* já saiu */ }
+  for (const track of video.srcObject?.getTracks() ?? []) track.stop();
+  video.pause();
+  video.srcObject = null;
+  video.remove();
+}
+
+function prepararVideoDaTelaCheia() {
+  if (videoDaTelaCheia) return videoDaTelaCheia;
+  const canvas = $("palco-imagem");
+  const video = document.createElement("video");
+  if (!video.webkitEnterFullscreen || !canvas?.captureStream || !canvas.width || !canvas.height) return null;
+  video.id = "palco-video-nativo";
+  video.muted = true;
+  video.playsInline = true;
+  video.controls = true;
+  video.setAttribute("aria-hidden", "true");
+  Object.assign(video.style, { position: "fixed", width: "1px", height: "1px", bottom: "0", left: "0", opacity: "0.001", pointerEvents: "none" });
+  try { video.srcObject = canvas.captureStream(30); } catch { return null; }
+  videoDaTelaCheia = video;
+  document.body.append(video);
+  video.addEventListener("webkitendfullscreen", () => {
+    if (videoDaTelaCheia === video && noCinema) void trocarCinema(false);
+  });
+  video.addEventListener("loadedmetadata", () => {
+    clearTimeout(video.prazoDaTelaCheia);
+    if (videoDaTelaCheia !== video || !noCinema) return;
+    document.body.dataset.cinemaModo = video.webkitSupportsFullscreen === false ? "pagina" : "video-pronto";
+    if (video.webkitSupportsFullscreen === false) soltarVideoDaTelaCheia();
+  });
+  video.prazoDaTelaCheia = setTimeout(() => {
+    if (videoDaTelaCheia !== video || video.readyState >= 1) return;
+    document.body.dataset.cinemaModo = "pagina";
+    soltarVideoDaTelaCheia();
+  }, 3000);
+  video.play().catch(() => {
+    if (videoDaTelaCheia !== video) return;
+    document.body.dataset.cinemaModo = "pagina";
+    soltarVideoDaTelaCheia();
+  });
+  return video;
+}
+
+/** Resultado honesto: CSS ampliado não é fullscreen do navegador. */
+async function trocarTelaCheiaDoNavegador(ligada) {
+  const doc = document;
+  const dentro = () => doc.fullscreenElement || doc.webkitFullscreenElement;
+  if (!ligada) {
+    soltarVideoDaTelaCheia();
+    if (dentro()) await (doc.exitFullscreen?.() ?? doc.webkitExitFullscreen?.());
+    return { modo: "fora" };
+  }
+  if (dentro()) return { modo: "nativa" };
+  const raiz = doc.documentElement;
+  const pedir = raiz.requestFullscreen ?? raiz.webkitRequestFullscreen;
+  let genericaRecusou = false;
+  if (pedir && !videoDaTelaCheia && doc.fullscreenEnabled !== false && doc.webkitFullscreenEnabled !== false) {
+    try {
+      await pedir.call(raiz);
+      if (dentro()) return { modo: "nativa" };
+      genericaRecusou = true;
+    } catch { genericaRecusou = true; }
+  }
+  const video = prepararVideoDaTelaCheia();
+  if (!video) return { modo: "pagina" };
+  if (video.readyState < 1) return { modo: "preparando-video" };
+  if (video.webkitSupportsFullscreen === false) { soltarVideoDaTelaCheia(); return { modo: "pagina" }; }
+  // Uma recusa assíncrona pode consumir o gesto. Oferece outro, já preparado.
+  if (genericaRecusou) return { modo: "video-pronto" };
+  return new Promise((resolve) => {
+    let timer;
+    const terminar = () => {
+      clearTimeout(timer);
+      video.removeEventListener("webkitbeginfullscreen", terminar);
+      const nativa = videoDaTelaCheia === video && video.webkitDisplayingFullscreen;
+      if (!nativa) soltarVideoDaTelaCheia();
+      resolve({ modo: nativa ? "nativa" : "pagina" });
+    };
+    video.addEventListener("webkitbeginfullscreen", terminar);
+    timer = setTimeout(terminar, 1500);
+    // O player nativo conserva propriedades do elemento: não deve herdar
+    // transparência/tamanho do vídeo usado apenas para preparar metadata.
+    video.removeAttribute("aria-hidden");
+    Object.assign(video.style, { width: "100%", height: "100%", opacity: "1", objectFit: "contain", background: "black", pointerEvents: "auto" });
+    try { video.webkitEnterFullscreen(); } catch { terminar(); }
+  });
+}
+
+for (const evento of ["fullscreenchange", "webkitfullscreenchange"]) {
+  document.addEventListener(evento, () => {
+    if (noCinema
+        && !document.fullscreenElement && !document.webkitFullscreenElement) void trocarCinema(false);
+  });
+}
+
 /**
  * Marca o caminho da imagem até o `<body>` e esconde tudo o que fica de fora.
  *
@@ -797,17 +904,32 @@ function marcarCaminhoDoCinema(ligada) {
 
 /** Entra ou sai da tela cheia, nos dois lados. */
 async function trocarCinema(ligada) {
+  const minha = ++vezDoCinema;
+  const mudou = noCinema !== ligada;
   noCinema = ligada;
   if (ligada) {
     document.body.dataset.cinema = "sim";
   } else {
     delete document.body.dataset.cinema;
+    delete document.body.dataset.cinemaModo;
   }
-  marcarCaminhoDoCinema(ligada);
+  if (mudou) marcarCaminhoDoCinema(ligada);
   const botao = $("palco-cheia");
   if (botao) botao.textContent = ligada ? "SAIR DA TELA CHEIA" : "TELA CHEIA";
   try {
-    await invoke("tela_cheia", { ligada });
+    const resultado = await invoke("tela_cheia", { ligada });
+    if (minha !== vezDoCinema) {
+      if (!noCinema && ligada) await invoke("tela_cheia", { ligada: false });
+      return;
+    }
+    if (ligada && resultado?.modo) {
+      // Metadata pode chegar enquanto a chamada volta à casca.
+      const modo = resultado.modo === "preparando-video" && videoDaTelaCheia?.readyState >= 1
+        ? "video-pronto" : resultado.modo;
+      document.body.dataset.cinemaModo = modo;
+      if (modo !== "nativa" && botao) botao.textContent = FRASES_DO_CELULAR.cinema.voltar;
+      if (modo === "pagina" && typeof anunciar === "function") anunciar(FRASES_DO_CELULAR.cinema.indisponivel);
+    }
   } catch (falha) {
     console.warn("tela_cheia:", falha);
   }

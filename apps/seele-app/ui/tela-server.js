@@ -391,9 +391,7 @@ function desenharNivel(snapshot) {
     if (nota) {
       const foraDeSala = !snapshot || snapshot.abertura_do_audio === "fora_de_sala";
       nota.textContent = foraDeSala
-        ? "O medidor mede a voz que está indo para uma sala. "
-          + "Aqui fora não há nenhuma: escolha os aparelhos agora e entre numa "
-          + "sala de voz para ver o nível."
+        ? "Entre numa sala de voz para ver o nível do microfone."
         : (abertura?.frase ?? "");
     }
     return;

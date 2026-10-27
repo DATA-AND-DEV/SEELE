@@ -1,18 +1,12 @@
 // SEELE — a saída do cinema (a «tela cheia») no celular.
 //
-// No celular a ponte recusa `tela_cheia` («no celular a tela cheia é o aparelho
-// deitado», `ponte-web.js`): o iPhone não tem a Fullscreen API para um
-// elemento qualquer, e o cinema do `palco-imagem.js` é só CSS, que esconde tudo
-// menos o caminho do canvas. A saída dele era o Esc (que o iPhone não tem) ou o
-// duplo toque no canvas. Aqui está uma saída que fica sempre à vista: um botão,
+// O palco tenta a API nativa disponível; sem ela, amplia dentro da página e
+// explica o limite. Aqui está uma saída que fica sempre à vista: um botão,
 // preso à safe-area, de alvo de toque inteiro (`celular-sessao.css`).
 //
-// **A página não gira o aparelho.** O cinema daqui é só CSS, sem a tela cheia
-// de um elemento, e esta página não chama a API de orientação. Em retrato, uma
-// dica discreta (`palco-dica-girar`, só texto, sem pegar toque, no pé e longe
-// do SAIR) diz que virar o celular amplia; deitado, o CSS a esconde, e o layout
-// acompanha a rotação que a pessoa fizer (o `100dvh` com a safe-area). Visto no
-// WebKit do Mac em retrato e em paisagem (a bancada-c), e não num aparelho.
+// A página não força orientação. O modo ampliado acompanha a rotação com
+// 100dvh/safe-area. Quando o iPhone exige metadata antes do gesto nativo,
+// esta faixa oferece o segundo gesto; sem suporte, explica o limite.
 //
 // O botão nasce quando o cinema liga (`body[data-cinema]`) e some quando ele
 // desliga, por qualquer caminho (o botão da cabeça, o duplo toque, a
@@ -31,10 +25,26 @@
   let dica = null;
 
   function mostrar() {
-    if (saida) return;
-    saida = h("button", { id: "palco-sair-da-cheia", class: "palco-sair-da-cheia", type: "button", onclick: () => sair() }, PALAVRAS.sair);
-    dica = h("p", { id: "palco-dica-girar", class: "palco-dica-girar" }, PALAVRAS.girar);
-    document.body.append(saida, dica);
+    if (!saida) {
+      saida = h("button", { id: "palco-sair-da-cheia", class: "palco-sair-da-cheia", type: "button", onclick: () => sair() }, PALAVRAS.sair);
+      dica = h("p", { id: "palco-dica-girar", class: "palco-dica-girar" }, PALAVRAS.girar);
+      document.body.append(saida, dica);
+    }
+    const modo = document.body.dataset.cinemaModo;
+    if (!modo) return;
+    saida.textContent = modo === "nativa" ? PALAVRAS.sair : PALAVRAS.voltar;
+    dica.textContent = modo === "nativa" ? PALAVRAS.girar
+      : modo === "preparando-video" ? PALAVRAS.preparando
+      : modo === "video-pronto" ? "" : PALAVRAS.indisponivel;
+    // Esta ação precisa de outro gesto: no iPhone a metadata deve existir
+    // ANTES de webkitEnterFullscreen, e esperar por ela perderia o gesto.
+    if (modo === "video-pronto") {
+      const abrir = h("button", { id: "palco-abrir-nativa", class: "botao", type: "button", onclick: () => trocarCinema(true) }, PALAVRAS.abrir);
+      abrir.style.pointerEvents = "auto";
+      dica.append(abrir);
+    }
+    // A explicação e o segundo gesto também são necessários em paisagem.
+    dica.style.display = modo === "nativa" ? "" : "block";
   }
 
   function esconder() {
@@ -54,5 +64,5 @@
   new MutationObserver(() => {
     if (document.body.dataset.cinema === "sim") mostrar();
     else esconder();
-  }).observe(document.body, { attributes: true, attributeFilter: ["data-cinema"] });
+  }).observe(document.body, { attributes: true, attributeFilter: ["data-cinema", "data-cinema-modo"] });
 })();
