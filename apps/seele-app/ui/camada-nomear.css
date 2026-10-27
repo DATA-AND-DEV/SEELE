@@ -251,7 +251,8 @@
 }
 
 #perfil:has(#perfil-sala:not([hidden])) .perfil-cabeca {
-  position: static;
+  /* A capa absoluta pertence ao cabeçalho, não à caixa inteira do editor. */
+  position: relative;
   padding-inline: max(32px, env(safe-area-inset-left)) max(32px, env(safe-area-inset-right));
 }
 

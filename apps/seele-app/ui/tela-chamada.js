@@ -326,7 +326,7 @@ function desenharPalco(snapshot, voice_room) {
   $("palco-quem").textContent = tela.e_minha
     ? "VOCÊ ESTÁ COMPARTILHANDO A SUA TELA"
     : dono
-      ? `${dono.nickname} ESTÁ COMPARTILHANDO A TELA`
+      ? `${apelidoApresentado(dono.id, dono.nickname)} ESTÁ COMPARTILHANDO A TELA`
       : "ALGUÉM DESTA SALA ESTÁ COMPARTILHANDO A TELA";
 
   // Só a contagem, e ela é a do **servidor**: `ScreenViewers` conta assinaturas
@@ -603,14 +603,14 @@ function pintarCartao(cartao, pessoa, temAudio) {
   // a terceira superfície que a comp desenha com avatar e a única que continuou
   // só com letras — «ícone do usuário não aparece na chamada».
   const avatar = cartao.querySelector(".chamada-avatar");
-  avatar.textContent = iniciaisDoCartao(pessoa.nickname);
+  avatar.textContent = iniciaisDoCartao(apelidoApresentado(pessoa.id, pessoa.nickname));
   vestirAvatar(avatar, pessoa.id);
   // A capa da pessoa, quando um MOD a dá (rascunho da API 6, §4; tarefa 6). Quem
   // fala vai à frente na escolha das capas que animam.
   if (pessoa.speaking) anotarQuemFala(pessoa.id);
   vestirCapa(cartao, pessoa.id);
   cartao.querySelector(".chamada-cartao-nome").textContent =
-    pessoa.nickname + (pessoa.is_self ? " (você)" : "");
+    apelidoApresentado(pessoa.id, pessoa.nickname) + (pessoa.is_self ? " (você)" : "");
   // O estado em frase, ao lado do estado em palavra, e sempre visível: é o dado
   // mais importante do cartão, e não havia versão desta tela em que escondê-lo
   // fosse defensável.
@@ -671,18 +671,19 @@ function pintarCartao(cartao, pessoa, temAudio) {
  * operação divide.
  */
 function pintarVolume(cartao, apelido) {
+  const nome = apelidoApresentado(cartao.dataset.pessoaDaCapa, apelido);
   const valor = volumesLidos.get(apelido) ?? VOLUME_NORMAL;
   const cheias = Math.round((valor / VOLUME_MAXIMO) * CELULAS_DE_VOLUME);
 
   const celas = cartao.querySelectorAll(".chamada-vol-cela");
   celas.forEach((cela, indice) => {
     cela.dataset.cheia = indice < cheias ? "sim" : "nao";
-    cela.setAttribute("aria-label", `pôr o volume de ${apelido} em ${cela.dataset.volAlvo}%`);
+    cela.setAttribute("aria-label", `pôr o volume de ${nome} em ${cela.dataset.volAlvo}%`);
   });
 
   const passos = cartao.querySelectorAll(".chamada-vol-passo");
-  passos[0].setAttribute("aria-label", `diminuir o volume de ${apelido}`);
-  passos[1].setAttribute("aria-label", `aumentar o volume de ${apelido}`);
+  passos[0].setAttribute("aria-label", `diminuir o volume de ${nome}`);
+  passos[1].setAttribute("aria-label", `aumentar o volume de ${nome}`);
 
   cartao.querySelector(".chamada-vol-valor").textContent = `${valor}%`;
 }

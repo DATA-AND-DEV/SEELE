@@ -228,12 +228,12 @@ function cargosAltura(altura) {
  */
 function cargosApelidos(bruto) {
   const nomes = new Map();
-  for (const [id, apelido] of Object.entries(bruto?.apelidos ?? {})) nomes.set(Number(id), apelido);
+  for (const [id, apelido] of Object.entries(bruto?.apelidos ?? {})) nomes.set(Number(id), apelidoApresentado(id, apelido));
   const pessoasDoRetrato = [
     ...(desenhado?.presentes ?? []),
     ...(desenhado?.voice_rooms ?? []).flatMap((sala) => sala.people ?? []),
   ];
-  for (const p of pessoasDoRetrato) if (!nomes.has(p.id)) nomes.set(p.id, p.nickname);
+  for (const p of pessoasDoRetrato) if (!nomes.has(p.id)) nomes.set(p.id, apelidoApresentado(p.id, p.nickname));
   return nomes;
 }
 
@@ -395,7 +395,7 @@ function cargosNormalizarPessoas(lista, quadro) {
   return lista.map((p) => {
     const pessoa = {
       pessoa: p.pessoa ?? p.id,
-      apelido: p.apelido ?? p.nickname ?? String(p.pessoa ?? p.id),
+      apelido: apelidoApresentado(p.pessoa ?? p.id, p.apelido ?? p.nickname ?? String(p.pessoa ?? p.id)),
       proprietario: p.proprietario === true,
       cargos: p.cargos ?? [],
     };

@@ -449,7 +449,7 @@ function desenharModos(snapshot, gravado) {
  */
 function desenharIdentidade(snapshot) {
   const alvo = $("server-apelido");
-  const apelido = snapshot?.nickname ?? "";
+  const apelido = apelidoApresentado(snapshot?.me, snapshot?.nickname ?? "", snapshot?.identidades_apresentadas ?? {});
   // **Fora de servidor, o travessão não responde nada** — U09.
   //
   // «Identidade fora de servidor mostra apelido `——` e fala em "neste
@@ -1141,18 +1141,19 @@ let regrasDoIcone = null;
  * cabeçalho do seguinte.
  */
 const iconeDesenhado = { revisao: null, uri: null };
+const iconesDasSessoes = new Map();
+let pedidoDoIcone = 0;
+
+function chaveDoIcone(carimbo = vistaDaJanela) {
+  return `${carimbo?.sessao ?? "legado"}:${carimbo?.geracao ?? 0}`;
+}
+
+function iconeDaSessao(carimbo) {
+  return iconesDasSessoes.get(chaveDoIcone(carimbo))?.uri ?? null;
+}
 
 
-/**
- * Põe a imagem guardada onde ela se desenha, ou a tira.
- *
- * **Um lugar aqui, e não dois.** Havia um `<img>` na barra da janela, que tem
- * 32px de altura: o retrato saía cortado ao meio e empurrava o resto da barra
- * para fora. A trilha da esquerda já desenha o mesmo retrato num ladrilho de
- * 56px, que é onde a comp dá identidade visual a um servidor, e ela o lê deste
- * mesmo `iconeDesenhado.uri` no quadro seguinte — não há terceira cópia a
- * manter em dia.
- */
+/** Pinta a prévia e a trilha a partir dos bytes já lidos, sem novo IPC. */
 function pintarIcone() {
   const uri = iconeDesenhado.uri;
   {
@@ -1164,10 +1165,13 @@ function pintarIcone() {
   // O dizer só existe na tela de configuração: no cabeçalho, a ausência de
   // imagem é o cabeçalho de sempre, e não uma lacuna a explicar.
   $("server-icone-vazio").hidden = Boolean(uri);
+  desenharSessoes();
 }
 
 /** Esquece a imagem desenhada. Toda sessão nova começa por aqui. */
 function esquecerIcone() {
+  pedidoDoIcone += 1;
+  iconesDasSessoes.delete(chaveDoIcone());
   if (iconeDesenhado.revisao === null && iconeDesenhado.uri === null) return;
   iconeDesenhado.revisao = null;
   iconeDesenhado.uri = null;
@@ -1187,15 +1191,34 @@ async function sincronizarIcone(snapshot) {
     esquecerIcone();
     return;
   }
-  if (iconeDesenhado.revisao === snapshot.icon_revision) return;
-  iconeDesenhado.revisao = snapshot.icon_revision;
+  const chave = chaveDoIcone();
+  const anterior = iconesDasSessoes.get(chave);
+  if (anterior && anterior.revisao === snapshot.icon_revision) {
+    const mudou = iconeDesenhado.uri !== anterior.uri;
+    iconeDesenhado.revisao = anterior.revisao;
+    iconeDesenhado.uri = anterior.uri;
+    if (mudou) pintarIcone();
+    return;
+  }
+  const pedido = ++pedidoDoIcone;
+  const epoca = epocaDaVista;
+  // Marcar a revisão antes da espera evita baixar de novo no próximo quadro.
+  const leitura = { revisao: snapshot.icon_revision, uri: anterior?.uri ?? null };
+  iconesDasSessoes.set(chave, leitura);
+  iconeDesenhado.revisao = leitura.revisao;
+  iconeDesenhado.uri = leitura.uri;
   try {
     const bytes = await invoke("icone_do_server");
-    iconeDesenhado.uri = bytes ? uriDeIcone(bytes) : null;
+    if (pedido !== pedidoDoIcone || epoca !== epocaDaVista || chave !== chaveDoIcone()) {
+      if (iconesDasSessoes.get(chave) === leitura) iconesDasSessoes.delete(chave);
+      return;
+    }
+    leitura.uri = bytes ? uriDeIcone(bytes) : null;
+    iconeDesenhado.uri = leitura.uri;
   } catch (falha) {
-    // A sessão acabou entre o snapshot e esta chamada. Não é aviso de nada, e
-    // a revisão volta a `null` para que a próxima leitura busque de novo.
-    if (falha !== "NotConnected") console.warn("icone_do_server:", falha);
+    if (iconesDasSessoes.get(chave) === leitura) iconesDasSessoes.delete(chave);
+    if (pedido !== pedidoDoIcone || epoca !== epocaDaVista || chave !== chaveDoIcone()) return;
+    if (falha !== "NotConnected" && !falha?.ForaDaVista) console.warn("icone_do_server:", falha);
     iconeDesenhado.revisao = null;
     iconeDesenhado.uri = null;
   }
@@ -1211,12 +1234,16 @@ async function sincronizarIcone(snapshot) {
  * quando o número anda.
  */
 async function seguirOServidor() {
+  const epoca = epocaDaVista;
+  const chave = chaveDoIcone();
   let snapshot = null;
   try {
     snapshot = await invoke("snapshot");
   } catch (falha) {
-    if (falha !== "NotConnected") console.warn("snapshot:", falha);
+    if (falha !== "NotConnected" && !falha?.ForaDaVista) console.warn("snapshot:", falha);
   }
+  // O invoke descarta respostas antigas; o catch também não pode limpar B.
+  if (epoca !== epocaDaVista || chave !== chaveDoIcone()) return;
   await sincronizarIcone(snapshot);
 }
 

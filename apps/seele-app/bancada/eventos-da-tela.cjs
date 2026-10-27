@@ -200,6 +200,7 @@ const retrato = (extra = {}) => ({
       tabela("mods-contribuicoes.js", "const PONTOS_DE_CONTRIBUICAO = Object.freeze({"),
       tabela("mods-superficies.js", "const TIPOS_DE_SUPERFICIE = Object.freeze({"),
       trecho("function aCascaTemARegiao("),
+      trecho("function apelidoNoRetrato("),
       trecho("function projetarORetrato("),
       doBloco("const REGIOES_E_CAMADAS_DA_API", "/**\n * O que o retrato diz da casca"),
       trecho("function cascaDoRetrato("),

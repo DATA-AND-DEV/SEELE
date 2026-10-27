@@ -54,7 +54,7 @@
     const texto = mensagem?.body ?? item.querySelector(".corpo")?.textContent ?? "";
     const id = mensagem?.id;
     CELULAR.ajudante("folhaDaMensagem")({
-      autor: item.querySelector(".mensagem-autor")?.textContent ?? mensagem?.author_nickname ?? "",
+      autor: item.querySelector(".mensagem-autor")?.textContent ?? apelidoApresentado(mensagem?.author, mensagem?.author_nickname ?? ""),
       hora: item.querySelector(".mensagem-hora")?.textContent ?? "",
       texto,
       propria: item.classList.contains("propria"),

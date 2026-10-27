@@ -1,0 +1,75 @@
+/* Conversa pessoal: a marca e os controles SEELE, sem administração de servidor. */
+.pessoal-web {
+  position: fixed;
+  inset: var(--seele-barra-janela, 0px) 0 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  background: radial-gradient(ellipse at 20% 35%, color-mix(in srgb, var(--seele-laranja-nerv) 8%, transparent), transparent 65%), var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  padding: 24px max(24px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-bottom));
+  gap: 16px;
+  z-index: 20;
+}
+.pessoal-web[hidden], .pessoal-web [hidden] { display: none !important; }
+.pessoal-web button { margin: 0; min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.pessoal-web button .glifo { width: 20px; height: 20px; flex: 0 0 auto; }
+.pessoal-web button:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 3px; }
+.pessoal-web-topo, .pessoal-web-rodape, .pessoal-web-acoes, .pessoal-web-convite { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; }
+.pessoal-web-topo { justify-content: space-between; border-bottom: 1px solid var(--seele-linha); padding-bottom: 16px; }
+.pessoal-web-assinatura { display: flex; align-items: center; gap: 20px; }
+.pessoal-web-marca { width: 112px; height: 38px; }
+.pessoal-web-titulo { margin: 0; font-family: var(--seele-display); font-size: 24px; font-weight: 700; }
+.pessoal-web-corpo { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); min-height: 0; gap: 24px; }
+.pessoal-web-corpo:has(.pessoal-web-chat[hidden]) { grid-template-columns: minmax(0, 1fr); }
+.pessoal-web-palco { min-height: 0; min-width: 0; display: grid; place-items: center; overflow: auto; }
+.pessoal-web-centro { width: min(100%, 640px); display: grid; justify-items: center; gap: 24px; padding: 12px 0; }
+.pessoal-web-estado { font-size: 16px; text-align: center; overflow-wrap: anywhere; margin: 0; color: var(--seele-osso-apagado); }
+.pessoal-web-participantes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; width: 100%; }
+.pessoal-web-participante { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-width: 0; padding: 36px 16px; border: 1px solid var(--seele-linha); border-radius: 12px; background: color-mix(in srgb, var(--seele-negro-painel) 85%, transparent); }
+.pessoal-web-participante:first-child { border-top: 2px solid var(--seele-laranja-nerv); }
+.pessoal-web-inicial { display: grid; place-items: center; width: 80px; height: 80px; border-radius: 50%; background: color-mix(in srgb, var(--seele-laranja-nerv) 16%, var(--seele-negro-painel)); color: var(--seele-osso); font-family: var(--seele-display); font-size: 36px; font-weight: 700; }
+.pessoal-web-participante-nome { font-size: 18px; text-align: center; overflow-wrap: anywhere; max-width: 100%; }
+.pessoal-web-participante-papel { font-size: 10px; letter-spacing: .12em; color: var(--seele-osso-apagado); }
+.pessoal-web-nome { display: grid; gap: 8px; width: min(100%, 320px); }
+.pessoal-web input, .pessoal-web textarea { font: inherit; color: inherit; background: var(--seele-negro-painel); border: var(--seele-b) solid var(--seele-linha); padding: 12px; min-width: 0; box-sizing: border-box; }
+.pessoal-web-convite { width: 100%; }
+.pessoal-web-link { flex: 1 1 260px; }
+.pessoal-web-chat { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; padding: 20px; border: 1px solid var(--seele-linha); border-radius: 12px; background: var(--seele-negro-painel); }
+.pessoal-web-chat-titulo { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 400; color: var(--seele-laranja-nerv); letter-spacing: .12em; margin: 0; }
+.pessoal-web-mensagens { min-height: 0; overflow: auto; padding: 0; margin: 0; list-style: none; }
+.pessoal-web-mensagem { padding: 12px 0; border-bottom: var(--seele-b) solid var(--seele-linha); }
+.pessoal-web-autor { font-size: 12px; color: var(--seele-osso-apagado); }
+.pessoal-web-conteudo { margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pessoal-web-escrever { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.pessoal-web-texto { min-height: 64px; max-height: 120px; resize: vertical; line-height: 1.5; }
+.pessoal-web-rodape { border-top: 1px solid var(--seele-linha); padding-top: 16px; }
+.pessoal-web-rodape > button { min-width: 130px; flex-direction: column; gap: 6px; padding: 12px 16px; border: 1px solid var(--seele-linha); border-radius: 8px; background: var(--seele-negro-painel); font-size: 11px; }
+.pessoal-web-rodape > button[aria-pressed="true"] { border-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
+.pessoal-web-rodape > button:last-child { border-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
+.pessoal-web-erro { margin: 0; text-align: center; }
+.pessoal-web-tela { width: 100%; height: 100%; min-height: 0; }
+.pessoal-web-palco:has(.pessoal-web-tela:not([hidden])) .pessoal-web-centro { display: none; }
+.pessoal-web-tela video, .pessoal-web-tela canvas { display: block; width: 100%; height: 100%; object-fit: contain; }
+@media (max-width: 700px) {
+  .pessoal-web { inset: 0; padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); gap: 12px; }
+  .pessoal-web-topo { padding-bottom: 10px; }
+  .pessoal-web-assinatura { gap: 10px; }
+  .pessoal-web-marca { width: 84px; height: 29px; }
+  .pessoal-web-titulo { font-size: 18px; }
+  .pessoal-web-topo > button { padding: 8px; font-size: 11px; }
+  .pessoal-web-corpo { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(100px, .85fr) minmax(140px, 1fr); gap: 12px; }
+  .pessoal-web-corpo:has(.pessoal-web-chat[hidden]) { grid-template-rows: minmax(0, 1fr); }
+  .pessoal-web-centro { gap: 12px; padding: 0; }
+  .pessoal-web-estado { font-size: 12px; }
+  .pessoal-web-participantes { gap: 10px; }
+  .pessoal-web-participante { padding: 16px 8px; gap: 8px; }
+  .pessoal-web-inicial { width: 52px; height: 52px; font-size: 24px; }
+  .pessoal-web-participante-nome { font-size: 15px; }
+  .pessoal-web-chat { padding: 12px; gap: 8px; }
+  .pessoal-web-convite { flex-direction: column; align-items: stretch; }
+  .pessoal-web-link { flex: 0 1 auto; width: 100%; }
+  .pessoal-web-rodape { gap: 8px; padding-top: 10px; }
+  .pessoal-web-rodape > button { flex: 1 1 0; min-width: 0; min-height: 70px; padding: 8px 4px; font-size: 9px; }
+  .pessoal-web-escrever > button { padding: 8px; }
+  .pessoal-web-escrever > button .pessoal-web-botao-texto { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+}

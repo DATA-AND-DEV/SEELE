@@ -67,6 +67,7 @@
 //! igual no Linux, no BSD e no Windows sem dependência nenhuma.
 
 pub mod assinado;
+pub mod chamadas;
 pub mod cookie;
 pub mod enc3;
 pub mod sinal;

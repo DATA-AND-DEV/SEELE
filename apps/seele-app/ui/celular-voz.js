@@ -205,7 +205,7 @@
     const caido = Boolean(snapshot.link) && snapshot.link !== "Online";
     faixa.toggleAttribute("data-caido", caido);
     quem.textContent = caido ? PALAVRAS.reconectando : abertura?.rodape
-      ?? (falando ? `${PALAVRAS.fala(falando.nickname)} · ${sinal}` : `${PALAVRAS.naSala(aqui.people.length)} · ${sinal}`);
+      ?? (falando ? `${PALAVRAS.fala(apelidoApresentado(falando.id, falando.nickname))} · ${sinal}` : `${PALAVRAS.naSala(aqui.people.length)} · ${sinal}`);
 
     mutado = !!snapshot.muted;
     desenharMudo();

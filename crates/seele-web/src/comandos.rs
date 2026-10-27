@@ -1107,6 +1107,7 @@ mod tests {
     /// Uma ligação já dentro da sessão, com o fio limpo.
     fn dentro() -> Ligacao {
         let mut ligacao = Ligacao::abrir(Pedido {
+            sala_pessoal: false,
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
@@ -1376,6 +1377,7 @@ mod tests {
     #[test]
     fn sem_sessao_e_not_connected_e_o_que_nao_e_da_sessao_nao_e_atendido() {
         let mut ligacao = Ligacao::abrir(Pedido {
+            sala_pessoal: false,
             apelido: "a".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
@@ -2052,6 +2054,7 @@ mod tests {
         escolhas: crate::sessao::Escolhas,
     ) -> Vec<crate::ligacao::Passo> {
         let pedido = crate::ligacao::Pedido {
+            sala_pessoal: false,
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],

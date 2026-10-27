@@ -2652,6 +2652,7 @@ const FRASES_DO_CELULAR = Object.freeze({
       // No lugar do ENTRAR, quando os hashes guardados do servidor venceram.
       linkVencido: "LINK VENCIDO",
       colar: "COLAR UM LINK",
+      conversar: "CONVERSAR POR LINK",
       campoDoLink: "O LINK QUE ALGUÉM TE MANDOU",
       continuar: "CONTINUAR",
       identidade: "Sua identidade mora neste navegador, neste aparelho.",

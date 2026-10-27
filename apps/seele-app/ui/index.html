@@ -72,6 +72,7 @@
 <link rel="stylesheet" href="camada-servidores.css">
 <link rel="stylesheet" href="camada-sessoes.css">
 <link rel="stylesheet" href="tela-chamada.css">
+<link rel="stylesheet" href="pessoal-web.css">
 <link rel="stylesheet" href="camada-compartilhar.css">
 <link rel="stylesheet" href="tela-server.css">
 <link rel="stylesheet" href="tela-fim.css">
@@ -390,6 +391,7 @@
     <p class="nota boot-dica">Cole um link, um endereço ou o código de uma pessoa.</p>
       </nav>
       <section class="boot-coluna boot-centro" aria-label="Você e seus amigos">
+    <button id="boot-conversa-pessoal" class="botao" type="button" hidden>CONVERSAR POR LINK</button>
     <!--
       **O seu código, na entrada** (0.17). Ele é seu e não depende de nenhuma
       sessão: está aqui com o app aberto, haja ou não conversa. A frase de baixo
@@ -5047,6 +5049,8 @@
   `prepararCertificadoDtls` dele. Na carga ele só declara.
 -->
 <script src="rtc-web.js"></script>
+<script src="rtc-chamada-web.js"></script>
+<script src="chamada-web.js"></script>
 <!--
   A sessão pelo navegador (Tarefa 2.6 da F4; WebRTC desde a 0.17): o enlace e o
   fluxo de controle em volta da ligação do `.wasm`. Na carga ela só declara;
@@ -5126,5 +5130,8 @@
 <script src="celular-cinema.js"></script>
 <script src="celular-entrada.js"></script>
 <script src="larga-casca.js"></script>
+<script src="compartilhar-pessoal-web.js"></script>
+<script src="pessoal-web.js"></script>
+<script src="pessoal-web-entrada.js"></script>
 </body>
 </html>

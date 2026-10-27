@@ -44,13 +44,20 @@ pub const ROTULO_PROVA_DE_CLIENTE_2: &[u8] = b"SEELE/2 prova-de-cliente\0";
 pub const ROTULO_APRESENTACAO_DA_SALA: &[u8] = b"SEELE/2 apresentacao-da-sala\0";
 
 /// Todos os rótulos, para o guarda de que eles não se encontram.
-pub const ROTULOS: [&[u8]; 5] = [
+pub const ROTULOS: [&[u8]; 7] = [
     ROTULO_PROVA_DE_CLIENTE,
     ROTULO_MORO2,
     ROTULO_PROVA_DE_CLIENTE_2,
     ROTULO_APRESENTACAO_DA_SALA,
     crate::encontro::ROTULO_MORO3,
+    ROTULO_CONVITE_PESSOAL,
+    ROTULO_PEDIDO_PESSOAL,
 ];
+
+/// O convite pessoal compartilhado fora do ponto de encontro.
+pub const ROTULO_CONVITE_PESSOAL: &[u8] = b"SEELE-CHAMADA/1 convite\0";
+/// Pedido pessoal vinculado ao ponto, às duas chaves e à chamada.
+pub const ROTULO_PEDIDO_PESSOAL: &[u8] = b"SEELE-CHAMADA/1 pedido\0";
 
 /// Os bytes de uma impressão: o SHA-256 do DER do certificado de longa duração.
 pub const IMPRESSAO_BYTES: usize = 32;

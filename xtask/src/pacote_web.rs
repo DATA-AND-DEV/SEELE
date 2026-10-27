@@ -428,9 +428,19 @@ pub(crate) const PERFIL_DA_PAGINA: [&str; 4] = [
 ///   postcard lido, postcard escrito).
 ///   O teto novo deixa os mesmos ~10% sobre o medido.
 ///
+/// - **27/10/2026 (0.17.3):** chamadas pessoais acrescentam contratos limitados
+///   e verificação Ed25519 estrita (Dalek já usado pelo desktop, sem features
+///   padrão no WASM). No mesmo perfil, 2 013 980 → 2 205 453 bytes (+191 473,
+///   9,51%); gzip -9 local, 610 183 → 661 504 (+51 321, 8,41%). A prova inclui
+///   convite/aceite/SDP autenticados em Chromium e WebKit; WebCrypto sozinho
+///   aceitou a chave fraca de identidade e não substitui esse verificador.
+///   O teto explícito de 2 250 000 deixa 44 547 bytes (2,02%) sobre a medida;
+///   o limite continua bloqueando pacotes maiores. Não é medida de download
+///   no aparelho nem autorização para crescimento posterior sem nova prova.
+///
 /// Passar dele é a hora de medir de novo o que chega ao celular, e não de
 /// subir o número calado.
-pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_200_000;
+pub(crate) const TETO_DO_WASM_DA_PAGINA: usize = 2_250_000;
 
 /// Os nomes das seções próprias (`custom`) de um `.wasm`, lidas do formato:
 /// o cabeçalho, e cada seção com o id e o tamanho em LEB128.
@@ -568,14 +578,13 @@ mod tests {
             let hash = versionar_recursos(&pasta).unwrap();
             let html = std::fs::read_to_string(pasta.join("index.html")).unwrap();
             assert!(html.contains(&format!("app.js?v={hash}")));
-            assert!(
-                std::fs::read_to_string(pasta.join("app.js"))
-                    .unwrap()
-                    .contains(&format!("motor.wasm?v={hash}"))
-            );
+            assert!(std::fs::read_to_string(pasta.join("app.js"))
+                .unwrap()
+                .contains(&format!("motor.wasm?v={hash}")));
             versoes.push(hash);
         }
-        assert_ne!(versoes[0], versoes[1]);
+        assert_eq!(versoes.len(), 2);
+        assert_ne!(versoes.first(), versoes.get(1));
     }
 
     /// Uma pasta de teste nova, sob o `target/` deste crate.

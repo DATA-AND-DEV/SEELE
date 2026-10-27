@@ -96,6 +96,9 @@ function lerEApagarOFragmento() {
   if (!PONTE_NO_LUGAR_DO_TAURI) return null;
   const { hash, href } = window.location;
   if (hash.length <= 1) return null;
+  // Convites pessoais têm identidade e aceite próprios. O consumidor da
+  // chamada apaga este fragmento antes de esperar a rede; não é um servidor.
+  if (hash.startsWith("#chamada/")) return null;
   history.replaceState(history.state, "", href.slice(0, href.length - hash.length));
   return href;
 }

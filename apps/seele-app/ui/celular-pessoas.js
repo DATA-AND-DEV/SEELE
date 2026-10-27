@@ -53,11 +53,13 @@
   }
 
   // Pelo apelido, para quem abre a folha de fora da lista (a grade da CHAMADA).
-  // A linha de quem usa o aparelho não tem deslizante, e é achada pelo nome.
+  // O alias interno resolve o PersonId, inclusive para quem não tem deslizante.
   CELULAR.registrar("abrirPessoa", (apelido) => {
     const linhas = [...lista.querySelectorAll("li.pessoa")];
-    const linha = linhas.find((l) => l.querySelector("input.volume")?.getAttribute("data-pessoa") === apelido)
-      ?? linhas.find((l) => !l.querySelector("input.volume") && l.querySelector(".pessoa-nome")?.textContent.startsWith(apelido));
+    const pessoas = [...(desenhado?.presentes ?? []),
+      ...(desenhado?.voice_rooms ?? []).flatMap(sala => sala.people ?? [])];
+    const pessoa = pessoas.find(p => p.nickname === apelido);
+    const linha = pessoa && linhas.find(l => l.dataset.pessoaId === String(pessoa.id));
     if (linha) abrirFolhaDaLinha(linha);
   });
 })();

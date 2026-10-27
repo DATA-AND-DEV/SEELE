@@ -515,12 +515,11 @@ function pintarVeredito(frase) {
 
 let identidadesApresentadas = Object.create(null);
 function apelidoApresentado(id, legado, mapa = identidadesApresentadas) {
-  const detalhe = mapa?.[String(id)];
-  return Array.isArray(detalhe) && /^[0-9A-Z]{4}$/.test(detalhe[1])
-    ? `${detalhe[0]}#${detalhe[1]}` : legado;
+  return apelidoNoRetrato(id, legado, mapa);
 }
 function desenhar(snapshot) {
   if (!snapshot) return;
+  sincronizarIcone(snapshot).catch((falha) => console.warn("ícone do servidor:", falha));
   const novasIdentidades = snapshot.identidades_apresentadas ?? Object.create(null);
   if (JSON.stringify(novasIdentidades) !== JSON.stringify(identidadesApresentadas)) mensagensPorDesenhar = true;
   identidadesApresentadas = novasIdentidades;
@@ -3193,12 +3192,6 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   // A faixa contém a apresentação; os detalhes e acréscimos seguem abaixo.
   const faixa = elemento("div", "pessoa-apresentada-faixa");
   faixa.append(miolo);
-  const tag = identidadesApresentadas[String(pessoa.id)]?.[1];
-  if (/^[0-9A-Z]{4}$/.test(tag ?? "")) {
-    const selo = elemento("span", "pessoa-tag-nativa", `#${tag}`);
-    selo.title = "Tag da conta neste servidor";
-    faixa.append(selo);
-  }
   item.append(faixa);
 
   // **O diagnóstico nativo não some: ele recolhe.** U15 pediu que sinal e
@@ -3243,10 +3236,7 @@ function cartaoDeContribuicao(contribuicao, id) {
  * apresentada por um MOD.
  */
 function nomeDaPessoa(pessoa) {
-  const detalhe = identidadesApresentadas[String(pessoa.id)];
-  const tag = detalhe?.[1];
-  const temTag = Array.isArray(detalhe) && /^[0-9A-Z]{4}$/.test(tag ?? "");
-  const nome = temTag ? detalhe[0] : pessoa.nome;
+  const nome = pessoa.nome;
   const porta = elemento(pessoa.moderar ? "button" : "span",
     pessoa.moderar ? "pessoa-nome pessoa-nome-porta" : "pessoa-nome", nome);
   if (pessoa.moderar) {
@@ -3255,12 +3245,7 @@ function nomeDaPessoa(pessoa) {
     porta.setAttribute("aria-label", `moderar ${pessoa.nome}`);
     porta.title = `expulsar, banir ou mover ${pessoa.nome}`;
   }
-  if (!temTag) return porta;
-  // A base pode encolher; a tag nativa nunca some no ellipsis do nome.
-  const conjunto = elemento("span", "pessoa-nome-com-tag");
-  conjunto.title = pessoa.nome;
-  conjunto.append(porta, elemento("span", "pessoa-tag-nativa", `#${tag}`));
-  return conjunto;
+  return porta;
 }
 
 function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
@@ -3407,7 +3392,7 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
     volume.max = "200";
     volume.step = "10";
     volume.value = String(volumesLidos.get(pessoa.volume) ?? 100);
-    volume.title = `volume de ${pessoa.volume}`;
+    volume.title = `volume de ${pessoa.nome}`;
     volume.dataset.pessoa = pessoa.volume;
     item.append(volume);
   }

@@ -329,6 +329,19 @@ pub unsafe extern "C" fn analisar_link(ptr: *const u8, len: usize) -> u32 {
     ))
 }
 
+/// Intenções locais e verificações estritas da chamada pessoal, em JSON.
+///
+/// # Safety
+/// `ptr..ptr+len` deve ser uma região válida da memória linear, como em `alocar`.
+#[no_mangle]
+pub unsafe extern "C" fn chamada_operar(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de entrada.
+    let bytes = unsafe { entrada(ptr, len) };
+    let lido = crate::chamada::operar(std::str::from_utf8(bytes).unwrap_or(""));
+    let codigo = u32::from(lido.get("erro").is_some());
+    dizer(lido.to_string().into_bytes(), codigo)
+}
+
 /// O corpo do `POST /sinal/1` (contrato da 0.17, D7): `pedido` é
 /// `{"impressao", "credencial", "candidatos"}`. Devolve 0 com `{"corpo": …}`,
 /// ou 1 com `{"erro": …}`. Ver [`crate::sinal_chama`].
@@ -2376,6 +2389,7 @@ mod a_tela_ligada_pelo_servidor {
     /// transmite a tela 9 e a 4 a tela 11; guardada em `LIGACAO`.
     fn dentro() {
         let mut ligacao = Ligacao::abrir(Pedido {
+            sala_pessoal: false,
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
@@ -2549,6 +2563,7 @@ mod a_tela_ligada_pelo_servidor {
             // A volta: a sessão guardada, readotada.
             let _ = ligacao.retomar(
                 Pedido {
+                    sala_pessoal: false,
                     apelido: "marcela".into(),
                     chave_publica: [5; 32],
                     impressao: [7; 32],

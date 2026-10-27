@@ -139,7 +139,7 @@ function botaoDeRemoverMensagem(mensagem, pode) {
   botao.dataset.moderarMensagem = String(mensagem.id);
   botao.setAttribute(
     "aria-label",
-    `remover a mensagem de ${mensagem.author_nickname} das ${relogio(mensagem.at_seconds)}`,
+    `remover a mensagem de ${apelidoApresentado(mensagem.author, mensagem.author_nickname)} das ${relogio(mensagem.at_seconds)}`,
   );
   return botao;
 }
@@ -266,11 +266,11 @@ function desenharModeracao(snapshot) {
     for (const pessoa of voice_room.people) {
       if (pessoa.is_self) continue;
       ondeEstaOPersono.set(String(pessoa.id), {
-        nome: pessoa.nickname,
+        nome: apelidoApresentado(pessoa.id, pessoa.nickname),
         voice_room: voice_room.name,
         voice_roomId: voice_room.id,
       });
-      const opcao = elemento("option", null, `${pessoa.nickname} — ${voice_room.name}`);
+      const opcao = elemento("option", null, `${apelidoApresentado(pessoa.id, pessoa.nickname)} — ${voice_room.name}`);
       opcao.value = String(pessoa.id);
       opcoes.push(opcao);
     }
@@ -730,7 +730,7 @@ $("lista-mensagens").addEventListener("click", (evento) => {
   if (!mensagem) return;
   abrirConfirmacao(
     "REMOVER MENSAGEM",
-    `A mensagem de ${mensagem.author_nickname} das ${relogio(mensagem.at_seconds)} some ` +
+    `A mensagem de ${apelidoApresentado(mensagem.author, mensagem.author_nickname)} das ${relogio(mensagem.at_seconds)} some ` +
       `deste canal para todo mundo, e não há como trazê-la de volta.\n` +
       `«${mensagem.body}»`,
     "REMOVER",

@@ -136,7 +136,8 @@
         h("a", { class: "cel-baixar", href: PAGINA_DO_APP, target: "_blank", rel: "noopener", text: PALAVRAS_DO_APP })),
     // `() => colar()`: o `onclick` entrega o EVENTO, e `colar(recusa)` o tomaria
     // pela frase de recusa (`aviso(evento)` lançava, e o toque não fazia nada).
-    ], [botao(f.colar, () => colar())]);
+    ], [botao(f.conversar, () => CELULAR.ajudante("conversaPessoal")?.abrir()),
+      botao(f.colar, () => colar(), "botao-fantasma")]);
   }
 
   /**
@@ -203,6 +204,12 @@
    * quê antes de abrir a tentativa.
    */
   async function abrirOLink(texto) {
+    try {
+      const pessoal = new URL(texto);
+      if (pessoal.hash.startsWith("#chamada/") && CELULAR.ajudante("conversaPessoal")) {
+        return CELULAR.ajudante("conversaPessoal").abrir(texto);
+      }
+    } catch { /* o analisador de convite explica a entrada inválida abaixo */ }
     if (!texto) return;
     if (!identidade) return colar(PALAVRAS.desfechos["sem-identidade"]);
     if (/^seele:/i.test(texto)) return colar(PALAVRAS.colado.doApp);

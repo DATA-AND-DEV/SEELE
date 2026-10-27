@@ -64,6 +64,8 @@ const LIMITE_DO_CABECALHO: usize = 8 * 1024;
 
 /// O caminho do sinal.
 pub const CAMINHO: &str = "/sinal/1";
+/// Caixa assinada das chamadas pessoais, sem modificar o ENC/3.
+pub const CAMINHO_DA_CHAMADA: &str = "/chamada/1";
 
 /// O HTTP do sinal. Ver o cabeçalho do módulo.
 #[derive(Debug)]
@@ -73,6 +75,7 @@ pub struct Sinal {
     vizinhanca: Vizinhanca,
     origens: Arc<Vec<String>>,
     abertos: Arc<AtomicUsize>,
+    pessoais: Arc<crate::chamadas::ChamadasPessoais>,
 }
 
 impl Sinal {
@@ -93,6 +96,7 @@ impl Sinal {
             vizinhanca,
             origens: Arc::new(origens),
             abertos: Arc::new(AtomicUsize::new(0)),
+            pessoais: Arc::new(crate::chamadas::ChamadasPessoais::nova()?),
         })
     }
 
@@ -132,12 +136,13 @@ impl Sinal {
                 let _ = escrever(&mut conexao, 503, "Service Unavailable", &[], "");
                 continue;
             }
+            let pessoais = Arc::clone(&self.pessoais);
             let quarto = Arc::clone(&self.quarto);
             let origens = Arc::clone(&self.origens);
             let abertos = Arc::clone(&self.abertos);
             let vizinhanca = self.vizinhanca;
             std::thread::spawn(move || {
-                let _ = atender(&mut conexao, par, &quarto, vizinhanca, &origens);
+                let _ = atender(&mut conexao, par, &quarto, vizinhanca, &origens, &pessoais);
                 abertos.fetch_sub(1, Ordering::SeqCst);
             });
         }
@@ -155,13 +160,36 @@ struct Pedido {
     corpo: Vec<u8>,
 }
 
+// Cada leitura tem somente o tempo restante, inclusive um cabeçalho pingado.
+struct LeituraComPrazo<'a> {
+    conexao: &'a TcpStream,
+    fim: Instant,
+}
+impl Read for LeituraComPrazo<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let restante = self.fim.saturating_duration_since(Instant::now());
+        if restante.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        self.conexao.set_read_timeout(Some(restante))?;
+        self.conexao.read(buf)
+    }
+}
+
 /// Lê o pedido, ou diz o código da recusa.
 fn ler(conexao: &TcpStream) -> Result<Pedido, (u16, &'static str)> {
     conexao
         .set_read_timeout(Some(PRAZO_DA_LEITURA))
         .map_err(|_| (400, "Bad Request"))?;
     let mut leitor = BufReader::new(
-        conexao.take(u64::try_from(LIMITE_DO_CABECALHO + LIMITE_DO_SINAL).unwrap_or(u64::MAX)),
+        LeituraComPrazo {
+            conexao,
+            fim: Instant::now() + PRAZO_DA_LEITURA,
+        }
+        .take(
+            u64::try_from(LIMITE_DO_CABECALHO + seele_proto::chamada::MAX_PEDIDO)
+                .unwrap_or(u64::MAX),
+        ),
     );
     let mut pedido = Pedido::default();
     let mut linha = String::new();
@@ -201,6 +229,9 @@ fn ler(conexao: &TcpStream) -> Result<Pedido, (u16, &'static str)> {
             "origin" => pedido.origem = Some(valor.to_owned()),
             "x-forwarded-for" => pedido.encaminhado = Some(valor.to_owned()),
             "content-length" => {
+                if pedido.comprimento.is_some() {
+                    return Err((400, "Bad Request"));
+                }
                 pedido.comprimento = Some(valor.parse().map_err(|_| (400, "Bad Request"))?);
             }
             "transfer-encoding" => return Err((400, "Bad Request")),
@@ -209,7 +240,12 @@ fn ler(conexao: &TcpStream) -> Result<Pedido, (u16, &'static str)> {
     }
     if pedido.metodo == "POST" {
         let comprimento = pedido.comprimento.ok_or((411, "Length Required"))?;
-        if comprimento > LIMITE_DO_SINAL {
+        let limite = if pedido.caminho == CAMINHO_DA_CHAMADA {
+            seele_proto::chamada::MAX_PEDIDO
+        } else {
+            LIMITE_DO_SINAL
+        };
+        if comprimento > limite {
             return Err((413, "Content Too Large"));
         }
         let mut corpo = vec![0_u8; comprimento];
@@ -268,7 +304,20 @@ fn escrever(
     }
     texto.push_str("\r\n");
     texto.push_str(corpo);
-    conexao.write_all(texto.as_bytes())?;
+    let fim = Instant::now() + PRAZO_DA_LEITURA;
+    let mut restante = texto.as_bytes();
+    while !restante.is_empty() {
+        let prazo = fim.saturating_duration_since(Instant::now());
+        if prazo.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        conexao.set_write_timeout(Some(prazo))?;
+        let escritos = conexao.write(restante)?;
+        if escritos == 0 {
+            return Err(io::ErrorKind::WriteZero.into());
+        }
+        restante = restante.get(escritos..).ok_or(io::ErrorKind::InvalidData)?;
+    }
     conexao.flush()
 }
 
@@ -278,12 +327,16 @@ fn atender(
     quarto: &Quarto,
     vizinhanca: Vizinhanca,
     origens: &[String],
+    pessoais: &crate::chamadas::ChamadasPessoais,
 ) -> io::Result<()> {
     let pedido = match ler(conexao) {
         Ok(pedido) => pedido,
         Err((codigo, frase)) => return escrever(conexao, codigo, frase, &[], ""),
     };
     let mut cabecalhos = cors(pedido.origem.as_deref(), origens);
+    if pedido.caminho == CAMINHO_DA_CHAMADA {
+        return atender_pessoal(conexao, par, pedido, cabecalhos, pessoais);
+    }
     if pedido.caminho != CAMINHO {
         return escrever(conexao, 404, "Not Found", &cabecalhos, "");
     }
@@ -316,6 +369,55 @@ fn atender(
             escrever(conexao, 405, "Method Not Allowed", &cabecalhos, "")
         }
     }
+}
+
+/// A caixa pessoal não bloqueia a thread esperando uma chamada.
+fn atender_pessoal(
+    conexao: &mut TcpStream,
+    par: SocketAddr,
+    pedido: Pedido,
+    mut cabecalhos: Vec<(&'static str, String)>,
+    pessoais: &crate::chamadas::ChamadasPessoais,
+) -> io::Result<()> {
+    use seele_proto::chamada::{self, Motivo, Resposta};
+    let ip = ip_de_quem_liga(par, pedido.encaminhado.as_deref());
+    if !pessoais.admitir(ip, Instant::now()) {
+        cabecalhos.push(("Retry-After", "1".into()));
+        let corpo = chamada::escrever_resposta(&Resposta::Recusa {
+            motivo: Motivo::Taxa,
+        })
+        .map_err(|_| io::Error::other("resposta da chamada invalida"))?;
+        return escrever(conexao, 429, "Too Many Requests", &cabecalhos, &corpo);
+    }
+    let resposta = match pedido.metodo.as_str() {
+        "OPTIONS" => {
+            cabecalhos.push(("Access-Control-Allow-Methods", "GET, POST".into()));
+            cabecalhos.push(("Access-Control-Allow-Headers", "Content-Type".into()));
+            return escrever(conexao, 204, "No Content", &cabecalhos, "");
+        }
+        "GET" => Resposta::Desafio {
+            epoca: pessoais.epoca(),
+            agora: crate::agora_unix(),
+        },
+        "POST" => {
+            let Some(p) = std::str::from_utf8(&pedido.corpo)
+                .ok()
+                .and_then(|s| chamada::ler_pedido(s).ok())
+            else {
+                return escrever(conexao, 400, "Bad Request", &cabecalhos, "");
+            };
+            pessoais
+                .responder(&p, ip, Instant::now(), crate::agora_unix())
+                .no_fio()
+        }
+        _ => {
+            cabecalhos.push(("Allow", "GET, POST, OPTIONS".into()));
+            return escrever(conexao, 405, "Method Not Allowed", &cabecalhos, "");
+        }
+    };
+    let corpo = chamada::escrever_resposta(&resposta)
+        .map_err(|_| io::Error::other("resposta da chamada invalida"))?;
+    escrever(conexao, 200, "OK", &cabecalhos, &corpo)
 }
 
 /// A chamada do sinal, do balde à resposta.

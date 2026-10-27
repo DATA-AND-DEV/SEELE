@@ -40,7 +40,7 @@ function trecho(fonte, comeco) {
 const contexto = { JSON, Object, Array, Number, String };
 vm.createContext(contexto);
 vm.runInContext(
-  `${trecho(base, "function projetarORetrato(")}\nglobalThis.projetarORetrato = projetarORetrato;`,
+  `${trecho(base, "function apelidoNoRetrato(")}\n${trecho(base, "function projetarORetrato(")}\nglobalThis.projetarORetrato = projetarORetrato;`,
   contexto,
 );
 const { projetarORetrato } = contexto;
@@ -177,6 +177,13 @@ if (vazio) {
     && vazio.onde === "celular",
   `um Snapshot sem as listas não deu o retrato vazio: ${JSON.stringify(vazio)}`);
 }
+
+// Um retrato legado não herda nomes da sessão ativa, mesmo com PersonId igual.
+contexto.identidadesApresentadas = {1: ["Outra sessão", "ZZ99"]};
+const legado = projetarORetrato({presentes:[pessoa(1,"nome#real")]}, {onde:"computador",regioes:[]});
+const comMapa = projetarORetrato({presentes:[pessoa(1,"alias#AB01")],identidades_apresentadas:{1:["Base integral","AB01"]}}, {onde:"computador",regioes:[]});
+confere("tags internas", comMapa.pessoas[0].apelido === "Base integral", JSON.stringify(comMapa));
+confere("legado isolado", legado.pessoas[0].apelido === "nome#real", JSON.stringify(legado));
 
 if (falhas.length) {
   console.error(`retrato-projetado: ${falhas.length} falha(s)\n  ${falhas.join("\n  ")}`);

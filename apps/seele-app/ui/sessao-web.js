@@ -256,6 +256,35 @@ function abrirOEnlace({ alvos, alvo, preparo, sinal, aoMudar }) {
   });
 }
 
+/** Uma campainha autenticada pode trocar o prazo uma única vez. */
+function prazoDoAperto() {
+  let relogio;
+  let tocou = false;
+  let terminou = false;
+  let rejeitar;
+  const limite = new Promise((_, recusar) => { rejeitar = recusar; });
+  function armar(ms) {
+    clearTimeout(relogio);
+    relogio = setTimeout(() => { terminou = true; rejeitar("HandshakeTimeout"); }, ms);
+  }
+  armar(PRAZO_DO_APERTO_MS);
+  return {
+    tocar(prazo_s) {
+      if (terminou || tocou || !Number.isInteger(prazo_s) || prazo_s < 1 || prazo_s > 45) return false;
+      tocou = true;
+      // A mesma folga de cinco segundos do cliente nativo.
+      armar((prazo_s + 5) * 1_000);
+      return true;
+    },
+    esperar(promessa) {
+      return Promise.race([promessa, limite]).finally(() => {
+        terminou = true;
+        clearTimeout(relogio);
+      });
+    },
+  };
+}
+
 /** Espera uma promessa até um prazo; vencido, rejeita com `motivo`. */
 function comPrazo(promessa, ms, motivo) {
   let relogio;
@@ -388,13 +417,17 @@ async function abrirASessaoDoNavegador({
     pedido.impressao_dtls = novoPreparo.impressao;
     return transporte({ alvos: alvosDaVolta, alvo, preparo: novoPreparo, sinal, aoMudar: () => {} });
   };
-  const sessao = criarASessaoAberta({ ligacao, wt, alvo, pedido, reabrir, emitir, aoAcabar, podeUsarAVoz });
+  const prazo = prazoDoAperto();
+  const aoTocar = prazo_s => {
+    if (prazo.tocar(prazo_s)) etapa({ Tocando: { prazo_s } });
+  };
+  const sessao = criarASessaoAberta({ ligacao, wt, alvo, pedido, reabrir, emitir, aoAcabar, podeUsarAVoz, aoTocar });
   sessao.wasm = wasm;
   const desistiu = new Promise((_, rejeitar) => {
     cancelamento.aoCancelar = () => rejeitar("Cancelada");
   });
   try {
-    await comPrazo(Promise.race([sessao.aperto, desistiu]), PRAZO_DO_APERTO_MS, "HandshakeTimeout");
+    await prazo.esperar(Promise.race([sessao.aperto, desistiu]));
   } catch (motivo) {
     if (motivo === "Cancelada" || motivo === "HandshakeTimeout") sessao.abortar();
     else await sessao.encerrar();
@@ -429,7 +462,7 @@ async function abrirASessaoDoNavegador({
  * Cada transporte tem a sua geração: o que um velho ainda diz (um fechamento
  * atrasado, um fluxo que termina) não mexe na sessão do novo.
  */
-function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emitir, aoAcabar, podeUsarAVoz = () => true }) {
+function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emitir, aoAcabar, podeUsarAVoz = () => true, aoTocar = () => {} }) {
   let wt = null;
   let geracao = 0;
   let escritor = null;
@@ -495,6 +528,9 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
         resolverOAperto();
       } else if (passo === "voltou") {
         volta?.resolver();
+      } else if (passo.tocando) {
+        if (volta) volta.prazo.tocar(passo.tocando.prazo_s);
+        else aoTocar(passo.tocando.prazo_s);
       } else if (passo.assinar) {
         const assinatura = await crypto.subtle.sign("Ed25519", alvo.chave.privateKey, new Uint8Array(passo.assinar));
         await seguirOsPassos(ligacao.assinado(new Uint8Array(assinatura)));
@@ -689,11 +725,12 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
       if (acabou) return;
       const recusa = ligacao.retomar(pedido, sessao.escolhas());
       if (recusa) throw recusa.recusa ?? "Unreachable";
+      const prazo = prazoDoAperto();
       const esperando = new Promise((resolver, rejeitar) => {
-        volta = { resolver, rejeitar };
+        volta = { resolver, rejeitar, prazo };
       });
       ligarOTransporte(novo);
-      await comPrazo(esperando, PRAZO_DO_APERTO_MS, "HandshakeTimeout");
+      await prazo.esperar(esperando);
       volta = null;
       voltando = false;
       contas.voltas += 1;

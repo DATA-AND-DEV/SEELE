@@ -20,6 +20,8 @@ seele-sessao = { path = "../seele-sessao", features = ["reducao"] }
 # A fronteira com a casca. A mesma versão do `seele-proto`, que já o usa para
 # o manifesto de MOD.
 serde_json = "1.0.151"
+# Mesmo verificador estrito de core/encontro; sem RNG, E/S ou assinatura WASM.
+ed25519-dalek = { version = "3.0.0", default-features = false }
 
 # Um `.wasm` para a página (`cdylib`) e o crate para os testes nativos (`rlib`).
 [lib]

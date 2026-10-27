@@ -55,6 +55,8 @@ pub fn quem_sou_eu() -> String {
 /// O que a página sabe antes de discar.
 #[derive(Debug, Clone)]
 pub struct Pedido {
+    /// Habilitado apenas após autenticar o bootstrap da sala pessoal.
+    pub sala_pessoal: bool,
     /// O apelido digitado.
     pub apelido: String,
     /// A chave pública Ed25519 desta identidade.
@@ -94,6 +96,11 @@ impl Pedido {
             bytes_do_hex(&hex).ok_or_else(|| format!("`{campo}` não tem 32 bytes em hex"))
         };
         Ok(Self {
+            sala_pessoal: match lido.get("sala_pessoal") {
+                None | Some(Value::Null) => false,
+                Some(Value::Bool(valor)) => *valor,
+                Some(_) => return Err("`sala_pessoal` não é booleano".into()),
+            },
             apelido: texto_de("apelido")?.ok_or("falta `apelido`")?,
             chave_publica: trinta_e_dois("chave_publica")?,
             impressao: trinta_e_dois("impressao")?,
@@ -125,6 +132,8 @@ enum Etapa {
     Assinando,
     /// A prova saiu; vem a sessão, o anúncio de MODs ou uma recusa.
     Resposta,
+    /// Aguarda uma única decisão da campainha, sem renovar o prazo.
+    Tocando,
     /// A sessão está aberta.
     Dentro(Box<Sessao>),
     /// Acabou, por recusa ou por erro: nada mais se lê.
@@ -134,6 +143,11 @@ enum Etapa {
 /// O que a página tem de fazer depois de um pedaço de bytes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Passo {
+    /// A campainha pessoal aguarda atendimento; prazo com folga limitada.
+    Tocando {
+        /// Prazo anunciado pela sala (máximo 45 segundos).
+        prazo_s: u16,
+    },
     /// Assinar estes bytes com a chave da identidade, e devolver a assinatura
     /// por [`Ligacao::assinado`].
     Assinar(Vec<u8>),
@@ -184,6 +198,7 @@ impl Passo {
     #[must_use]
     pub fn em_json(&self) -> Value {
         match self {
+            Self::Tocando { prazo_s } => json!({ "tocando": { "prazo_s": prazo_s } }),
             Self::Assinar(bytes) => json!({ "assinar": bytes }),
             Self::Entrou => json!("entrou"),
             Self::Voltou => json!("voltou"),
@@ -202,6 +217,7 @@ impl Passo {
 /// O aperto de mão e a sessão de uma conexão do navegador.
 #[derive(Debug)]
 pub struct Ligacao {
+    sala_pessoal: bool,
     etapa: Etapa,
     apelido: String,
     impressao: [u8; 32],
@@ -253,6 +269,7 @@ impl Ligacao {
         }
         let mut ligacao = Self {
             etapa: Etapa::Desafio,
+            sala_pessoal: pedido.sala_pessoal,
             apelido: pedido.apelido.clone(),
             impressao: pedido.impressao,
             impressao_dtls: pedido.impressao_dtls,
@@ -316,6 +333,7 @@ impl Ligacao {
             _ => self.guardada.take().ok_or_else(|| json!("NotConnected"))?,
         };
         self.etapa = Etapa::Desafio;
+        self.sala_pessoal = pedido.sala_pessoal;
         self.apelido.clone_from(&pedido.apelido);
         self.impressao = pedido.impressao;
         self.impressao_dtls = pedido.impressao_dtls;
@@ -506,7 +524,7 @@ impl Ligacao {
                 }
                 vec![Passo::Perdida("o fluxo de controle acabou".into())]
             }
-            Etapa::Desafio | Etapa::Assinando | Etapa::Resposta => {
+            Etapa::Desafio | Etapa::Assinando | Etapa::Resposta | Etapa::Tocando => {
                 self.recusar(json!("Unreachable"))
             }
         }
@@ -538,6 +556,13 @@ impl Ligacao {
                 // O servidor não fala antes da prova: o desktop nem leria.
                 self.recusar(classificar_protocolo())
             }
+            Etapa::Tocando => match decode::<ServerMessage>(quadro) {
+                Ok(
+                    resposta
+                    @ (ServerMessage::Session { .. } | ServerMessage::Disconnecting { .. }),
+                ) => self.resposta(resposta),
+                _ => self.recusar(classificar_protocolo()),
+            },
             Etapa::Resposta => match decode::<ServerMessage>(quadro) {
                 Ok(resposta) => self.resposta(resposta),
                 Err(_) => self.recusar(json!("Unreachable")),
@@ -627,6 +652,12 @@ impl Ligacao {
     /// Depois da prova: o anúncio de MODs, a sessão, ou a recusa.
     fn resposta(&mut self, resposta: ServerMessage) -> Vec<Passo> {
         match resposta {
+            ServerMessage::Tocando { prazo_s }
+                if self.sala_pessoal && (1..=45).contains(&prazo_s) =>
+            {
+                self.etapa = Etapa::Tocando;
+                vec![Passo::Tocando { prazo_s }]
+            }
             ServerMessage::ModsExigidos { mods, conjunto } => {
                 if self.aceito.as_deref() == Some(conjunto.as_str()) {
                     if self
@@ -793,6 +824,7 @@ mod tests {
 
     fn pedido() -> Pedido {
         Pedido {
+            sala_pessoal: false,
             apelido: "marcela".into(),
             chave_publica: [5; 32],
             impressao: [7; 32],
@@ -827,6 +859,71 @@ mod tests {
             channels: Vec::new(),
             roles: Vec::new(),
             permissions: vec![Permission::Speak],
+        }
+    }
+
+    fn aguardando_resposta(pessoal: bool) -> Ligacao {
+        let mut pedido = pedido();
+        pedido.sala_pessoal = pessoal;
+        let mut ligacao = Ligacao::abrir(pedido).unwrap();
+        ligacao.chegou(&do_servidor(&ServerMessage::Challenge {
+            nonce: vec![3; 32],
+        }));
+        ligacao.assinado(&[9; 64]);
+        ligacao
+    }
+
+    #[test]
+    fn campainha_pessoal_atende_recusa_e_cancela() {
+        for desfecho in 0..3 {
+            let mut ligacao = aguardando_resposta(true);
+            assert_eq!(
+                ligacao.chegou(&do_servidor(&ServerMessage::Tocando { prazo_s: 45 })),
+                vec![Passo::Tocando { prazo_s: 45 }]
+            );
+            let passos = match desfecho {
+                0 => ligacao.chegou(&do_servidor(&sessao())),
+                1 => ligacao.chegou(&do_servidor(&ServerMessage::Disconnecting {
+                    reason: DisconnectReason::AdmissionPending,
+                })),
+                _ => ligacao.fluxo_acabou(),
+            };
+            if desfecho == 0 {
+                assert_eq!(passos, vec![Passo::Entrou]);
+            } else {
+                assert!(matches!(passos.as_slice(), [Passo::Recusada(_)]));
+            }
+        }
+    }
+
+    #[test]
+    fn campainha_nao_admite_servidor_prazo_falso_ou_ciclo() {
+        for (pessoal, prazo_s) in [(false, 45), (true, 0), (true, 46), (true, u16::MAX)] {
+            let mut ligacao = aguardando_resposta(pessoal);
+            assert!(matches!(
+                ligacao
+                    .chegou(&do_servidor(&ServerMessage::Tocando { prazo_s }))
+                    .as_slice(),
+                [Passo::Recusada(_)]
+            ));
+        }
+        for mensagem in [
+            ServerMessage::Tocando { prazo_s: 45 },
+            ServerMessage::ModsExigidos {
+                mods: vec![],
+                conjunto: seele_proto::mods::hex(&seele_proto::mods::identidade_do_conjunto(
+                    &mut [],
+                )),
+            },
+            ServerMessage::Challenge { nonce: vec![3; 32] },
+        ] {
+            let mut ligacao = aguardando_resposta(true);
+            ligacao.chegou(&do_servidor(&ServerMessage::Tocando { prazo_s: 45 }));
+            assert!(matches!(
+                ligacao.chegou(&do_servidor(&mensagem)).as_slice(),
+                [Passo::Recusada(_)]
+            ));
+            assert!(ligacao.chegou(&do_servidor(&sessao())).is_empty());
         }
     }
 

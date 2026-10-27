@@ -8912,7 +8912,7 @@ fn the_waiting_screen_says_what_happened_what_to_do_and_what_is_useless() {
     // Only a pending knock takes the entrance over. Everything else stays on
     // the boot screen, where another server can be chosen — and the boot screen
     // writes its own red channel only when this screen did not take the failure.
-    let conectar = body_of(&scripts(), "async function conectar");
+    let conectar = body_of(&read("ui/tela-boot.js"), "async function conectar");
     let Some(desvio) = conectar.find("levarParaAEspera(") else {
         panic!("nothing sends a pending knock anywhere:\n{conectar}");
     };
@@ -10860,7 +10860,10 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
-        ("tela-boot.js", "async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = null) {"),
+        (
+            "tela-boot.js",
+            "async function conectar(alvo, apelido, credencial, linkColado = null, ligacao = null) {",
+        ),
         // O link colado (parte 7): o caminho pela recusa por versão o leva
         // ao `abrir_versao` da outra versão, e a nenhum outro lugar.
         (
@@ -10906,7 +10909,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ("camada-mods.js", "aceitePendente = null;"),
         ("camada-mods.js", "const pergunta = aceitePendente;"),
         ("camada-mods.js", "if (!pergunta) return;"),
-        ("camada-mods.js", "const { alvo, conjunto, mods } = pergunta;"),
+        (
+            "camada-mods.js",
+            "const { alvo, conjunto, mods } = pergunta;",
+        ),
         ("camada-mods.js", "if (aceitePendente !== pergunta) return;"),
         // A desistência durante a gravação do sim, que o desfaz e não volta
         // (lote W da F5): o corpo só chama `esquecer_aceite_de_mods`, que leva
@@ -10949,7 +10955,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ("camada-mods.js", "await conectar(alvo, null, credencial);"),
         // A entrada pelo navegador (3.4). O link lido do fragmento na carga,
         // entregue uma vez e esquecido.
-        ("identidade-web.js", "let linkDaCarga = lerEApagarOFragmento();"),
+        (
+            "identidade-web.js",
+            "let linkDaCarga = lerEApagarOFragmento();",
+        ),
         ("identidade-web.js", "const link = linkDaCarga;"),
         ("identidade-web.js", "linkDaCarga = null;"),
         // O token e o link só em `segredos`, e esquecidos juntos.
@@ -10959,7 +10968,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ),
         ("identidade-web.js", "segredos.credencial = null;"),
         ("identidade-web.js", "segredos.link = null;"),
-        ("identidade-web.js", "segredos.credencial = convite ?? null;"),
+        (
+            "identidade-web.js",
+            "segredos.credencial = convite ?? null;",
+        ),
         ("identidade-web.js", "segredos.link = texto;"),
         // Quem já é conhecido entra pela chave, e não gasta o convite.
         (
@@ -11040,7 +11052,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ),
         ("sessao-web.js", "convite = null,"),
         // O pedido da volta é o mesmo sem ele: o convite é de uso único.
-        ("sessao-web.js", "const recusa = ligacao.abrir({ ...pedido, convite });"),
+        (
+            "sessao-web.js",
+            "const recusa = ligacao.abrir({ ...pedido, convite });",
+        ),
         // O registro de sessões web (E3) passa o convite à abertura da sessão.
         (
             "sessao-web.js",
@@ -12667,6 +12682,7 @@ fn no_script_calls_a_function_that_no_script_declares() {
         "TextEncoder",
         "TextDecoder",
         "AbortController",
+        "DOMException",
         "Event",
         "CustomEvent",
         "VideoDecoder",
@@ -12731,6 +12747,31 @@ fn no_script_calls_a_function_that_no_script_declares() {
 
     for nome in ui_files(".js") {
         let texto = sem_texto(&read(&format!("ui/{nome}")));
+        // Parâmetros de funções também podem ocupar várias linhas. Leia a
+        // assinatura inteira, respeitando parênteses aninhados de defaults.
+        for parte in texto.split("function ").skip(1) {
+            let Some(abre) = parte.find('(') else {
+                continue;
+            };
+            let mut profundidade = 1usize;
+            let mut fim = None;
+            for (i, c) in parte[abre + 1..].char_indices() {
+                match c {
+                    '(' => profundidade += 1,
+                    ')' => {
+                        profundidade -= 1;
+                        if profundidade == 0 {
+                            fim = Some(abre + 1 + i);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(fim) = fim {
+                declarados.extend(nomes(&parte[abre + 1..fim]));
+            }
+        }
         for linha in texto.lines() {
             let palavras = nomes(linha);
             for (i, palavra) in palavras.iter().enumerate() {
@@ -12784,7 +12825,7 @@ fn no_script_calls_a_function_that_no_script_declares() {
                 );
                 if !primeira.is_empty()
                     && !controle
-                    && cru.ends_with('{')
+                    && cru.contains(") {")
                     && cru[primeira.len()..].trim_start().starts_with('(')
                 {
                     declarados.insert(primeira);
@@ -16741,7 +16782,9 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
         conectar.find("session.endereco_da_sessao"),
         conectar.find("ligar::anotar_a_chegada("),
     ) else {
-        panic!("`connect` deixou de preencher o endereço da sessão, ou de filtrar a lista de visitados");
+        panic!(
+            "`connect` deixou de preencher o endereço da sessão, ou de filtrar a lista de visitados"
+        );
     };
     assert!(
         onde < condicao,
@@ -22108,8 +22151,9 @@ m.ctx.alvoDaSessao = () => m.ctx.alvoAtual;
 const dentro = (codigo) => vm.runInContext(codigo, m.ctx);
 dentro(
   `const modsCarregados = new Map(), modsExigidos = new Map(), estadoDosMods = new Map();
-   let conferindoMods = false, ultimoErroDeMods = "", conjuntoJaBuscado = null, geracaoDaSessao = 1;` +
-  funcao("base.js", "anotarEstadoDoMod") + funcao("base.js", "carregarMods"),
+   let conferindoMods = false, conferirModsAoTerminar = false, ultimoErroDeMods = "", conjuntoJaBuscado = null, geracaoDaSessao = 1;` +
+  funcao("base.js", "anotarEstadoDoMod") + funcao("base.js", "terminarConferenciaDosMods") +
+  funcao("base.js", "pedirCargaDosMods") + funcao("base.js", "carregarMods"),
 );
 const trocar = (geracao, alvo) => { dentro("geracaoDaSessao = " + geracao); m.ctx.alvoAtual = alvo; };
 

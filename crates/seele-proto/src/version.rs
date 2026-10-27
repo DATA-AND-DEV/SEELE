@@ -653,7 +653,7 @@ mod tests {
         /// O carimbo aceito é exatamente a faixa desta build.
         #[test]
         fn accepts_exactly_the_range(peer: u8) {
-            let dentro = peer >= VERSAO_MINIMA && peer <= PROTOCOL_VERSION;
+            let dentro = (VERSAO_MINIMA..=PROTOCOL_VERSION).contains(&peer);
             prop_assert_eq!(confere_o_carimbo(peer).is_ok(), dentro);
         }
 

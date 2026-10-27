@@ -1017,7 +1017,9 @@ let geracaoDaSessao = 0;
 
 /** A janela soube de uma sessão nova. */
 function entrarNaGeracao(numero) {
+  const anterior = geracaoDaSessao;
   geracaoDaSessao = Number(numero) || 0;
+  if (geracaoDaSessao && geracaoDaSessao !== anterior) queueMicrotask(pedirCargaDosMods);
 }
 
 /** Esta geração ainda é a de pé? */
@@ -3448,6 +3450,13 @@ function podePedir(mod, tipo) {
  * `casca` diz o que não está no `Snapshot`: `onde` (`computador` ou `celular`) e
  * as `regioes` que existem nesta casca agora.
  */
+/** Nome público de um retrato específico; a tag e o alias ficam internos. */
+function apelidoNoRetrato(id, legado, mapa) {
+  const detalhe = mapa?.[String(id)];
+  return Array.isArray(detalhe) && /^[0-9A-Z]{4}$/.test(detalhe[1])
+    ? detalhe[0] : legado;
+}
+
 function projetarORetrato(snapshot, casca) {
   const s = snapshot ?? {};
   const lista = (valor) => (Array.isArray(valor) ? valor : []);
@@ -3456,7 +3465,7 @@ function projetarORetrato(snapshot, casca) {
     servidor: { nome: String(s.server ?? "") },
     pessoas: lista(s.presentes).map((p) => ({
       id: p.id,
-      apelido: String(p.nickname ?? ""),
+      apelido: String(apelidoNoRetrato(p.id, p.nickname ?? "", s.identidades_apresentadas ?? {})),
       falando: p.speaking === true,
       mudo: p.muted === true,
     })),
@@ -4384,6 +4393,21 @@ function anotarEstadoDoMod(id, fase, detalhe = "") {
   estadoDosMods.set(id, { fase, detalhe });
   globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
 }
+// A entrada não precisa esperar o relógio de quatro segundos. Se a consulta
+// anterior ainda está em voo, termina com as guardas de geração de sempre e
+// uma única nova conferência atende a vista atual.
+let conferirModsAoTerminar = false;
+function pedirCargaDosMods() {
+  if (conferindoMods) { conferirModsAoTerminar = true; return; }
+  carregarMods();
+}
+function terminarConferenciaDosMods() {
+  conferindoMods = false;
+  if (!conferirModsAoTerminar) return;
+  conferirModsAoTerminar = false;
+  if (geracaoDaSessao) queueMicrotask(pedirCargaDosMods);
+}
+
 async function carregarMods() {
   if (conferindoMods) return;
   conferindoMods = true;
@@ -4402,7 +4426,7 @@ async function carregarMods() {
   // (`encerrarOAmbienteDosMods`).
   const desistir = () => {
     if (!pedidoObsoleto()) return false;
-    conferindoMods = false;
+    terminarConferenciaDosMods();
     return true;
   };
   let instalados;
@@ -4498,7 +4522,7 @@ async function carregarMods() {
       // ninguém prometeu nada a conferir. Com sessão, a falha é notícia.
       anotarEstadoDoMod("", "catalogo-recusado", mensagem);
     }
-    conferindoMods = false;
+    terminarConferenciaDosMods();
     return;
   }
 
@@ -4514,7 +4538,7 @@ async function carregarMods() {
       modsCarregados.delete(mod.id);
     });
   }
-  conferindoMods = false;
+  terminarConferenciaDosMods();
 }
 
 ligarControlesDaJanela();

@@ -810,16 +810,3 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   gap: 6px;
   min-width: 0;
 }
-
-/* A tag é do núcleo e segue visível mesmo quando o MOD substitui o cartão. */
-.pessoa-tag-nativa {
-  color: var(--nucleo-texto);
-  background: var(--nucleo-painel);
-  font: inherit;
-  justify-self: end;
-  padding: 2px 4px;
-}
-
-.pessoa-nome-com-tag { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }
-.pessoa-nome-com-tag > .pessoa-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pessoa-nome-com-tag > .pessoa-tag-nativa { flex: 0 0 auto; white-space: nowrap; }

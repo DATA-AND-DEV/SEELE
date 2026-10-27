@@ -1234,7 +1234,7 @@ async function pararDeVer() {
  */
 function nomeDeQuem(snapshot, id) {
   const pessoa = (snapshot?.presentes ?? []).find((quem) => quem.id === id);
-  return pessoa?.nickname ?? "—";
+  return apelidoApresentado(id, pessoa?.nickname ?? "—", snapshot?.identidades_apresentadas ?? {});
 }
 
 /**

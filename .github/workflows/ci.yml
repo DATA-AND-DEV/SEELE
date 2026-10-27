@@ -667,7 +667,7 @@ jobs:
       # `xtask/src/check_runtime.rs`, segura a ordem e o caminho.
       - run: npm install --no-save playwright
         if: ${{ !cancelled() }}
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
         if: ${{ !cancelled() }}
       - run: node apps/seele-app/bancada/executor-no-navegador.cjs target/wasm32-wasip1/release/seele_motor_web.wasm
         if: ${{ !cancelled() }}
@@ -741,6 +741,64 @@ jobs:
         if: ${{ !cancelled() }}
       - run: cargo build --quiet --package seele-encontro
         if: ${{ !cancelled() }}
+      - run: cargo test --package xtask pacote_web::tests
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: cargo xtask pacote-web
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+      - run: node apps/seele-app/bancada/entrada-celular-sem-marca.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/entrada-prazos.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/entrada-simples.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/link-na-aba-aberta.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/sessao-flush-pendente.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/tags.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/pacote-web-cache.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/pacote-web-carregamento.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # Conversas por link e regressões de interface em Chromium/WebKit.
+      - run: node apps/seele-app/bancada/chamada-web.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/compartilhar-pessoal-web.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/entrada-dos-mods.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/icone-das-sessoes.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/pessoal-web.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/pessoal-web-entrada.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/pessoal-web-integrada.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/rtc-chamada-web.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/sessao-campainha.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/rtc-eco.cjs target/debug/examples/eco chromium playwright
         if: ${{ !cancelled() }}
         timeout-minutes: 5

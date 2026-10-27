@@ -218,9 +218,6 @@ async function abrirPerfil(titulo) {
 
   const identidade = snapshot?.identidades_apresentadas?.[String(snapshot.me)];
   let apelido = identidade?.[0] ?? snapshot?.nickname ?? "";
-  if (identidade && /^[0-9A-Z]{4}$/.test(identidade[1])) {
-    $("perfil-titulo").textContent += ` · #${identidade[1]}`;
-  }
   if (!snapshot) {
     try {
       apelido = (await invoke("apelido_local")) ?? "";

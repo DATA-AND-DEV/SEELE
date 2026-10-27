@@ -19,6 +19,7 @@ use seele_web::ligacao::{Ligacao, Passo, Pedido};
 
 fn pedido(apelido: &str) -> Pedido {
     Pedido {
+        sala_pessoal: false,
         apelido: apelido.into(),
         chave_publica: [5; 32],
         impressao: [7; 32],

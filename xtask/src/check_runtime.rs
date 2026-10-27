@@ -326,11 +326,15 @@ mod tests {
     ///   deles, e não neste: a bancada recebe a pasta de cada um por argumento
     ///   (`<pasta-do-mod>`), e ainda pede o `servidor_da_bancada` e os dois
     ///   `.wasm` compilados. Roda à mão, a cada versão dos MODs.
-    const SEM_LUGAR: [&str; 4] = [
+    /// - `tela-cheia-nativa.cjs` depende do servidor de fixture do projeto
+    ///   Xcode externo (porta 8733, ou --url). É executada na homologação
+    ///   nativa; não conta como teste executado pelo CI hermético.
+    const SEM_LUGAR: [&str; 5] = [
         "rtc-eco-rodadas.cjs",
         "rtc-rede-local.cjs",
         "previa-ui-v2.cjs",
         "mods-oficiais-na-ui.cjs",
+        "tela-cheia-nativa.cjs",
     ];
 
     /// Os jobs do `ci.yml` que rodam bancadas de navegador: o `bancadas`, de

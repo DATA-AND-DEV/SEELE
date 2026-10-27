@@ -1397,6 +1397,25 @@ todas_as_bancadas_de_navegador() {
         BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS portaria-da-bancada"
     cargo build --quiet --package seele-enlace --example eco --package seele-encontro ||
         BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS eco-e-encontro"
+    cargo test --package xtask pacote_web::tests || BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS cache-web-fixture"
+    cargo xtask pacote-web || BANCADAS_VERMELHAS="$BANCADAS_VERMELHAS pacote-web"
+    uma_bancada node apps/seele-app/bancada/entrada-celular-sem-marca.cjs
+    uma_bancada node apps/seele-app/bancada/entrada-prazos.cjs
+    uma_bancada node apps/seele-app/bancada/entrada-simples.cjs
+    uma_bancada node apps/seele-app/bancada/link-na-aba-aberta.cjs
+    uma_bancada node apps/seele-app/bancada/sessao-flush-pendente.cjs
+    uma_bancada node apps/seele-app/bancada/tags.cjs
+    uma_bancada node apps/seele-app/bancada/pacote-web-cache.cjs
+    uma_bancada node apps/seele-app/bancada/pacote-web-carregamento.cjs
+    uma_bancada node apps/seele-app/bancada/chamada-web.cjs
+    uma_bancada node apps/seele-app/bancada/compartilhar-pessoal-web.cjs
+    uma_bancada node apps/seele-app/bancada/entrada-dos-mods.cjs
+    uma_bancada node apps/seele-app/bancada/icone-das-sessoes.cjs
+    uma_bancada node apps/seele-app/bancada/pessoal-web.cjs
+    uma_bancada node apps/seele-app/bancada/pessoal-web-entrada.cjs
+    uma_bancada node apps/seele-app/bancada/pessoal-web-integrada.cjs
+    uma_bancada node apps/seele-app/bancada/rtc-chamada-web.cjs
+    uma_bancada node apps/seele-app/bancada/sessao-campainha.cjs
     # As bancadas da 0.17 (portaria, cargos, hospedar versus atualizar MOD...).
     uma_bancada node apps/seele-app/bancada/atualizar-mod-sem-servidor.cjs
     uma_bancada node apps/seele-app/bancada/aviso-antes-de-atualizar.cjs

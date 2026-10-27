@@ -5475,6 +5475,7 @@ version = "0.0.0"
 name = "seele-web"
 version = "0.0.0"
 dependencies = [
+ "ed25519-dalek",
  "seele-proto",
  "seele-sessao",
  "seele-voz",

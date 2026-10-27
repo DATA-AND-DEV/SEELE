@@ -10,6 +10,16 @@ versão promete é publicar a seguinte, e nunca editar esta — a v3 e a v4,
 editadas antes de o guarda existir, ficaram congeladas como estão, com a
 história no comentário da lista.
 
+## Registro do congelamento da API 7
+
+A 0.17.1 publicou ajustes nas descrições da apresentação de perfis e dos
+controles sobre capas em `v7.json` (commit `944924e4`), sem atualizar a soma
+congelada. A 0.17.3 reconcilia o registro com esses bytes já publicados na
+0.17.1 e mantidos na 0.17.2. Não modifica novamente `v7.json`, não acrescenta
+capacidades de MOD e não muda as APIs aceitas. A divergência histórica não
+autoriza novas emendas em uma versão congelada; mudanças futuras seguem a
+regra de versionamento abaixo.
+
 ## O que muda para quem escreve MOD nesta versão
 
 **Nada disto está num `vN.json`.** A superfície congelada é a mesma, e um MOD

@@ -100,4 +100,7 @@ f28d33eef08841daee7da58075d3513c0a7f3719bcf51fec784bc16b70e3505b  v2.json
 e31dda28805d2c4213889ea9437bfb7d7f49b14b041b127f47bb97676c50b973  v4.json
 7ff2570751fa4acbe52cf2d3cf7cec015453c12fae62ab5a469b74959aec046b  v5.json
 8dcf4aaf13f73b957e52b99f462bfdff656a232dd337bccebdad97edaae6f514  v6.json
-d7f423c1ef43ac239bd68260d8dd8fa7813ab7697cd8003c8a0a9d3bccb37474  v7.json
+# A 0.17.1 (944924e4) publicou emendas de apresentação no v7.json sem
+# atualizar este registro. Reconciliado na 0.17.3 com os mesmos bytes já
+# públicos; contrato executável e versões aceitas não mudam nesta correção.
+d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json

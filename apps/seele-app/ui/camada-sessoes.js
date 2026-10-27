@@ -432,6 +432,8 @@ async function recarregarSessoes() {
   }
   if (variasSessoes()) {
     sessoesConhecidas = new Set(sessoesNaTela.map((s) => s.carimbo?.sessao));
+    const chavesDeIcones = new Set(sessoesNaTela.map((s) => chaveDoIcone(s.carimbo)));
+    for (const chave of iconesDasSessoes.keys()) if (!chavesDeIcones.has(chave)) iconesDasSessoes.delete(chave);
     // A escolha de palco guardada de uma sessão que já não está aberta sai.
     if (typeof podarOPalco === "function") podarOPalco(sessoesNaTela.map((s) => s.carimbo));
     for (const s of sessoesNaTela) if (s.carimbo) anotarGeracao(s.carimbo);
@@ -461,7 +463,7 @@ function placaDaSessao(s) {
     nome: s.nome, endereco: s.endereco, enlace: s.enlace, naoLidas: s.nao_lidas ?? 0,
     voz: s.foco_de_voz, aqui, naVista: s.na_vista, sala: s.na_sala_de_voz,
   });
-  vestirItemDaTrilha(botao, s.nome ? sigla(s.nome) : siglaDoAlvo(s.endereco ?? ""), rotulo, null);
+  vestirItemDaTrilha(botao, s.nome ? sigla(s.nome) : siglaDoAlvo(s.endereco ?? ""), rotulo, iconeDaSessao(s.carimbo));
   if (s.na_vista) {
     botao.classList.add("trilha-atual");
     botao.setAttribute("aria-current", "true");

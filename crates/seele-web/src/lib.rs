@@ -17,6 +17,7 @@
 //! `.wasm` pelo `cargo xtask web`.
 
 pub mod cargos;
+pub mod chamada;
 pub mod comandos;
 pub mod fluxos;
 pub mod fronteira;

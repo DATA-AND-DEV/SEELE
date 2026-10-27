@@ -59,9 +59,12 @@ A migração 19 preserva a base integral de até 32 bytes e todos os IDs. A prim
 abertura pelo app conserva o portão de confirmação e cópia verificada antes de
 migrar. O protocolo 11 acrescenta uma mensagem de apresentação por PersonId;
 a faixa mínima continua 10 e os quadros publicados não mudam. Clientes 11
-apresentam base integral e tag. Clientes 10 recebem um alias único de até 32
+apresentam somente a base integral; a tag fica interna, inclusive nos nomes
+acessíveis e cartões de MOD. Clientes 10 recebem um alias único de até 32
 bytes: prefixo UTF-8 de até 27 bytes e a tag. Apenas essa apresentação legada
 pode ser abreviada; o nome no banco não é truncado. O alias também continua nos
-campos internos e no contrato MOD7, impedindo ambiguidade de volume/SSRC.
-Uma contribuição que substitui o cartão não esconde a tag nativa nem os detalhes
-de identidade e moderação. O cliente não escolhe a tag de outra conta.
+campos internos de mídia, impedindo ambiguidade de volume/SSRC. O retrato público
+dos MODs apresenta a base e mantém o PersonId como alvo das ações. Detalhes de
+identidade e moderação permanecem acessíveis. O cliente não escolhe a tag de
+outra conta. Sem metadados, o nome legado permanece inteiro: um `#` real não é
+removido por heurística.

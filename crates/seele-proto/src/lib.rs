@@ -25,6 +25,7 @@
 pub mod assinatura;
 pub mod attachment;
 pub mod cargos;
+pub mod chamada;
 pub mod codigo;
 pub mod control;
 pub mod encontro;
