@@ -2,7 +2,7 @@
 
 Configuração verificada no projeto Pages **`seele-web-git`**, ligado ao repositório:
 
-- branch de produção: `codex/0.17-cloudflare`;
+- branch de produção: `main`;
 - raiz: raiz deste repositório;
 - preset: nenhum;
 - comando: `sh empacotar/cloudflare-web.sh`;
@@ -36,7 +36,7 @@ substitui os gates de domínio, ponto de encontro e uso externo.
 
 `seele-web-git` é o projeto novo com integração Git. O projeto anterior de
 upload direto é separado: enviar um commit não atualiza aquele projeto. O
-build verificado, por si só, não implica migração de domínio nem merge em `main`.
+código da 0.17 está integrado à `main`, que passa a ser a origem de produção.
 O domínio `seele.sh` foi ativado em etapa posterior e respondeu HTTP 200; isso
 também é independente da confirmação do gatilho automático por push.
 
@@ -44,17 +44,17 @@ Para uma alteração revisada, criar o commit de fonte nesta branch e enviar
 explicitamente para ela:
 
 ```sh
-git switch codex/0.17-cloudflare
+git switch main
 # revisar e adicionar somente os arquivos da alteração
 git commit -m "Descrição da alteração"
-git push origin codex/0.17-cloudflare
+git push origin main
 ```
 
 Não enviar `target/`, pacote pré-compilado, credenciais ou evidências locais.
 Depois do push, conferir em **seele-web-git → Deployments** que o commit esperado
 acionou um novo build e que montagem/publicação passaram. Um commit documental
-pode servir à prova desse gatilho; não é necessário merge em `main` para esta
-configuração. A publicação pelo Pages ocorre na branch de produção configurada,
+pode servir à prova desse gatilho. Integre as alterações revisadas à `main`
+para atualizar produção. A publicação pelo Pages ocorre nessa branch,
 portanto o push é também o gatilho de deploy desse projeto.
 
 ## Ferramentas e saída
