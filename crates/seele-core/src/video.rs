@@ -242,9 +242,15 @@ impl CapturaRecusou {
     /// O erro de uma captura que recusou este degrau.
     #[must_use]
     pub fn nova(resolucao: Resolucao, detalhe: impl Into<String>) -> Self {
+        Self::com_medidas((resolucao.largura(), resolucao.altura()), detalhe)
+    }
+
+    /// O tamanho efetivamente pedido à captura, inclusive em retrato.
+    #[must_use]
+    pub fn com_medidas((largura, altura): (usize, usize), detalhe: impl Into<String>) -> Self {
         Self {
-            largura: resolucao.largura(),
-            altura: resolucao.altura(),
+            largura,
+            altura,
             detalhe: detalhe.into(),
         }
     }
@@ -266,6 +272,21 @@ impl CapturaRecusou {
 /// A [`crate::bomba::Bomba`] é quem as junta, e é para isso que ela pede isto em
 /// vez de pedir uma [`FonteDeQuadros`].
 pub trait Captura: Send + 'static {
+    /// Proporção da fonte na abertura. Zero mantém os construtores antigos.
+    fn tamanho_da_fonte(&self) -> (usize, usize) {
+        (0, 0)
+    }
+
+    /// O mesmo par que o encoder e o fluxo já validaram.
+    fn iniciar_com_medidas(
+        &mut self,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+        _medidas: (usize, usize),
+    ) -> Result<Self::Fonte, CapturaRecusou> {
+        self.iniciar(resolucao, cadencia)
+    }
+
     /// De onde os quadros saem depois de começar.
     type Fonte: FonteDeQuadros + Send;
 
@@ -321,6 +342,13 @@ impl std::fmt::Debug for CapturaEmCaixa {
 
 /// A metade objeto-segura de [`Captura`]: a fonte também sai numa caixa.
 trait AbreCaptura: Send {
+    fn tamanho_da_fonte(&self) -> (usize, usize);
+    fn iniciar_com_medidas(
+        &mut self,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+        medidas: (usize, usize),
+    ) -> Result<Box<dyn FonteDeQuadros + Send>, CapturaRecusou>;
     fn iniciar(
         &mut self,
         resolucao: Resolucao,
@@ -333,6 +361,18 @@ where
     C: Captura,
     C::Fonte: 'static,
 {
+    fn tamanho_da_fonte(&self) -> (usize, usize) {
+        Captura::tamanho_da_fonte(self)
+    }
+    fn iniciar_com_medidas(
+        &mut self,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+        medidas: (usize, usize),
+    ) -> Result<Box<dyn FonteDeQuadros + Send>, CapturaRecusou> {
+        Captura::iniciar_com_medidas(self, resolucao, cadencia, medidas)
+            .map(|fonte| Box::new(fonte) as Box<dyn FonteDeQuadros + Send>)
+    }
     fn iniciar(
         &mut self,
         resolucao: Resolucao,
@@ -354,6 +394,17 @@ impl FonteDeQuadros for Box<dyn FonteDeQuadros + Send> {
 }
 
 impl Captura for CapturaEmCaixa {
+    fn tamanho_da_fonte(&self) -> (usize, usize) {
+        self.0.tamanho_da_fonte()
+    }
+    fn iniciar_com_medidas(
+        &mut self,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+        medidas: (usize, usize),
+    ) -> Result<Self::Fonte, CapturaRecusou> {
+        self.0.iniciar_com_medidas(resolucao, cadencia, medidas)
+    }
     type Fonte = Box<dyn FonteDeQuadros + Send>;
 
     fn iniciar(
@@ -657,6 +708,21 @@ pub struct CapturaDoSistema {
 }
 
 impl Captura for CapturaDoSistema {
+    fn tamanho_da_fonte(&self) -> (usize, usize) {
+        #[cfg(target_os = "macos")]
+        {
+            self.alvo.tamanho()
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let (l, a) = self.alvo.tamanho();
+            (l as usize, a as usize)
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            match self.alvo {}
+        }
+    }
     type Fonte = FonteDoSistema;
 
     fn iniciar(
@@ -664,16 +730,34 @@ impl Captura for CapturaDoSistema {
         resolucao: Resolucao,
         cadencia: Cadencia,
     ) -> Result<Self::Fonte, CapturaRecusou> {
+        let (l, a) = Captura::tamanho_da_fonte(self);
+        Captura::iniciar_com_medidas(
+            self,
+            resolucao,
+            cadencia,
+            seele_video::codec::medidas_para(resolucao, l, a),
+        )
+    }
+
+    fn iniciar_com_medidas(
+        &mut self,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+        medidas: (usize, usize),
+    ) -> Result<Self::Fonte, CapturaRecusou> {
         #[cfg(target_os = "macos")]
         {
-            seele_video::captura::macos::CapturaDaTela::iniciar(&self.alvo, resolucao, cadencia)
-                .map_err(|erro| CapturaRecusou::nova(resolucao, erro.to_string()))
+            seele_video::captura::macos::CapturaDaTela::iniciar_com_medidas(
+                &self.alvo, resolucao, cadencia, medidas,
+            )
+            .map_err(|erro| CapturaRecusou::com_medidas(medidas, erro.to_string()))
         }
         #[cfg(target_os = "windows")]
         {
-            let imagem =
-                seele_video::captura::windows::Captura::iniciar(&self.alvo, resolucao, cadencia)
-                    .map_err(|erro| CapturaRecusou::nova(resolucao, erro.to_string()))?;
+            let imagem = seele_video::captura::windows::Captura::iniciar_com_medidas(
+                &self.alvo, resolucao, cadencia, medidas,
+            )
+            .map_err(|erro| CapturaRecusou::com_medidas(medidas, erro.to_string()))?;
             // O som ao lado, e **sem derrubar a transmissão quando não abre**:
             // mostrar a tela sem som é metade do que se queria; não mostrar
             // nada é zero.
@@ -713,7 +797,7 @@ impl Captura for CapturaDoSistema {
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
-            let _ = (resolucao, cadencia);
+            let _ = (resolucao, cadencia, medidas);
             match self.alvo {}
         }
     }
@@ -915,6 +999,7 @@ pub fn config_para(
     let degrau = crate::tela::resolucao_para(bps, prioridade);
     let resolucao = menor_resolucao(degrau, escolha);
     Some(ConfigDoCodificador {
+        medidas: None,
         resolucao,
         // **E a cadência cede, que é a outra metade do §2.**
         //
@@ -951,6 +1036,7 @@ pub struct Compartilhamento {
     /// [`armar`], num lugar só.
     codificador: Box<dyn CodificaVideo>,
     escolha_de_resolucao: Resolucao,
+    tamanho_da_fonte: (usize, usize),
     /// A cadência que a pessoa escolheu, que é **teto e nunca piso** (§5).
     ///
     /// Guardada à parte do codificador de propósito: o codificador carrega a
@@ -979,8 +1065,29 @@ impl Compartilhamento {
         cadencia: Cadencia,
         prioridade: Prioridade,
     ) -> Result<Self, ErroDeCompartilhamento> {
+        Self::abrir_para_fonte(
+            biblioteca,
+            teto_de_video,
+            faixa,
+            escolha_de_resolucao,
+            cadencia,
+            prioridade,
+            (0, 0),
+        )
+    }
+
+    /// Arma o encoder na proporção da fonte, com o mesmo orçamento do degrau.
+    pub fn abrir_para_fonte(
+        biblioteca: BibliotecaDeVideo,
+        teto_de_video: &TetoDeVideo,
+        faixa: SignalBand,
+        escolha_de_resolucao: Resolucao,
+        cadencia: Cadencia,
+        prioridade: Prioridade,
+        tamanho_da_fonte: (usize, usize),
+    ) -> Result<Self, ErroDeCompartilhamento> {
         let teto = teto_de_video.teto(faixa);
-        let config = match (
+        let mut config = match (
             teto,
             config_para(teto, escolha_de_resolucao, cadencia, prioridade),
         ) {
@@ -994,11 +1101,17 @@ impl Compartilhamento {
                 return Err(ErroDeCompartilhamento::Parado(MotivoDeParada::AbaixoDoPiso))
             }
         };
+        config.medidas = Some(seele_video::codec::medidas_para(
+            config.resolucao,
+            tamanho_da_fonte.0,
+            tamanho_da_fonte.1,
+        ));
         let codificador = armar(&biblioteca, config)?;
         Ok(Self {
             biblioteca,
             codificador,
             escolha_de_resolucao,
+            tamanho_da_fonte,
             escolha_de_cadencia: cadencia,
             prioridade,
             teto,
@@ -1027,6 +1140,11 @@ impl Compartilhamento {
     #[must_use]
     pub fn resolucao(&self) -> Resolucao {
         self.codificador.resolucao()
+    }
+
+    /// Dimensões reais para captura e abertura do fluxo.
+    pub fn medidas(&self) -> (usize, usize) {
+        self.codificador.medidas()
     }
 
     /// A resolução que a pessoa pediu, que é teto e nunca piso (§5).
@@ -1169,6 +1287,11 @@ impl Compartilhamento {
     /// [`ErroDeCompartilhamento::Video`] se o OpenH264 recusar a configuração.
     pub fn refazer_com(&mut self, resolucao: Resolucao) -> Result<(), ErroDeCompartilhamento> {
         let config = ConfigDoCodificador {
+            medidas: Some(seele_video::codec::medidas_para(
+                resolucao,
+                self.tamanho_da_fonte.0,
+                self.tamanho_da_fonte.1,
+            )),
             resolucao,
             // **A escolha da pessoa, e não a cadência que está valendo.**
             //
@@ -1821,5 +1944,18 @@ mod tests {
             erro,
             ErroDeCompartilhamento::Parado(MotivoDeParada::AbaixoDoPiso)
         ));
+    }
+}
+
+#[cfg(test)]
+mod erro_de_captura_por_medidas {
+    use super::*;
+    #[test]
+    fn a_recusa_nomeia_as_dimensoes_efetivas_e_preserva_o_construtor_antigo() {
+        let vertical = CapturaRecusou::com_medidas((720, 1280), "driver recusou");
+        assert_eq!((vertical.largura, vertical.altura), (720, 1280));
+        assert!(vertical.to_string().contains("720×1280"));
+        let antiga = CapturaRecusou::nova(Resolucao::P720, "driver recusou");
+        assert_eq!((antiga.largura, antiga.altura), (1280, 720));
     }
 }

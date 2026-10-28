@@ -85,6 +85,7 @@ fn medir(
     quantos: usize,
 ) -> Result<(usize, usize), String> {
     let config = ConfigDoCodificador {
+        medidas: None,
         resolucao,
         cadencia: Cadencia::Q30,
         teto_bps,
@@ -137,6 +138,7 @@ fn main() -> Result<(), String> {
     // um quadro atravessando.
     {
         let config = ConfigDoCodificador {
+            medidas: None,
             resolucao: Resolucao::P720,
             cadencia: Cadencia::Q30,
             teto_bps: 6_000_000,

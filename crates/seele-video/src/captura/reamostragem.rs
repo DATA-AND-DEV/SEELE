@@ -102,7 +102,9 @@ use dcv_color_primitives::{convert_image, ColorSpace, ImageFormat, PixelFormat};
 use fast_image_resize::images::{Image, ImageRef};
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 
-use crate::codec::{bytes_de_croma, bytes_de_luma, QuadroI420, Resolucao};
+#[cfg(test)]
+use crate::codec::Resolucao;
+use crate::codec::{bytes_de_croma, bytes_de_luma, QuadroI420};
 use crate::erro::ErroDeVideo;
 
 /// O preto do intervalo de TV, o mesmo que [`QuadroI420::preto`] usa.
@@ -148,7 +150,7 @@ pub(super) struct Mapa {
     /// O tamanho da fonte, lido pelo `windows.rs` para saber se ela mudou de
     /// tamanho no meio da transmissão e o mapa precisa ser refeito.
     pub(super) origem: (usize, usize),
-    destino: Resolucao,
+    destino: (usize, usize),
     /// A área útil dentro do destino, em pixels. Sempre par nos dois lados,
     /// porque o croma de um I420 anda de dois em dois.
     ativa: (usize, usize),
@@ -216,10 +218,15 @@ impl Mapa {
     /// exatamente o conteúdo que o §2 diz que se está transmitindo. Uma sessão
     /// SSH do Windows enxerga 1024×768, ou seja 4:3 dentro de um destino 16:9:
     /// a tarja não é caso raro, é o caso da máquina onde isto foi medido.
+    #[cfg(test)]
     pub(super) fn novo(origem: (usize, usize), destino: Resolucao) -> Self {
+        Self::com_medidas(origem, (destino.largura(), destino.altura()))
+    }
+
+    /// O destino calculado no orçamento do degrau, compartilhado com o encoder.
+    pub(super) fn com_medidas(origem: (usize, usize), destino: (usize, usize)) -> Self {
         let (largura_origem, altura_origem) = origem;
-        let largura_destino = destino.largura();
-        let altura_destino = destino.altura();
+        let (largura_destino, altura_destino) = destino;
 
         let (ativa_largura, ativa_altura) = if largura_origem == 0 || altura_origem == 0 {
             (largura_destino, altura_destino)
@@ -290,8 +297,7 @@ impl Mapa {
         bytes: &[u8],
         passo: usize,
     ) -> Result<QuadroI420, ErroDeVideo> {
-        let largura = self.destino.largura();
-        let altura = self.destino.altura();
+        let (largura, altura) = self.destino;
 
         let mut luma = vec![PRETO_LUMA; bytes_de_luma(largura, altura)];
         let mut croma_u = vec![CENTRO_CROMA; bytes_de_croma(largura, altura)];
@@ -433,6 +439,67 @@ mod testes {
         assert_eq!(luma_em(&quadro, 0, 360), PRETO_LUMA);
         assert_eq!(luma_em(&quadro, 1279, 360), PRETO_LUMA);
         assert_eq!(croma_em(&quadro, 0, 180), (CENTRO_CROMA, CENTRO_CROMA));
+    }
+
+    #[test]
+    fn um_monitor_vertical_mantem_um_quadrado_quadrado_dentro_das_tarjas() {
+        let (largura, altura) = (1080, 1920);
+        let mut bytes = origem(largura, altura, largura * 4, (0xFF, 0xFF, 0xFF));
+        // Um quadrado vermelho no centro de um monitor em pé. Uma conversão
+        // que esticasse a fonte para 16:9 o transformaria num retângulo largo.
+        for linha in bytes.chunks_exact_mut(largura * 4).skip(768).take(384) {
+            for pixel in linha.chunks_exact_mut(4).skip(348).take(384) {
+                pixel.copy_from_slice(&[0, 0, 255, 255]);
+            }
+        }
+        let mut mapa = Mapa::novo((largura, altura), Resolucao::P720);
+        assert_eq!(mapa.ativa, (404, 720));
+        assert_eq!(mapa.canto, (438, 0));
+        let quadro = mapa
+            .converter(&bytes, largura * 4)
+            .expect("os planos fecham");
+        assert_eq!((quadro.largura(), quadro.altura()), (1280, 720));
+        assert_eq!(luma_em(&quadro, 0, 360), PRETO_LUMA);
+        assert_eq!(luma_em(&quadro, 1279, 360), PRETO_LUMA);
+        assert_eq!(luma_em(&quadro, 438, 360), 235);
+
+        let (mut x_min, mut x_max, mut y_min, mut y_max) = (1280, 0, 720, 0);
+        for (y, linha) in quadro.luma().chunks_exact(1280).enumerate() {
+            for (x, luma) in linha.iter().enumerate() {
+                if (50..=80).contains(luma) {
+                    x_min = x_min.min(x);
+                    x_max = x_max.max(x);
+                    y_min = y_min.min(y);
+                    y_max = y_max.max(y);
+                }
+            }
+        }
+        assert!(x_min < x_max && y_min < y_max, "o quadrado vermelho sumiu");
+        let lado_x = x_max - x_min + 1;
+        let lado_y = y_max - y_min + 1;
+        assert!((140..=146).contains(&lado_x), "largura {lado_x}");
+        assert!((140..=146).contains(&lado_y), "altura {lado_y}");
+        // O arredondamento par do I420 pode tirar até dois pixels de uma borda.
+        assert!(
+            lado_x.abs_diff(lado_y) <= 2,
+            "quadrado virou {lado_x}×{lado_y}"
+        );
+    }
+
+    #[test]
+    fn o_monitor_vertical_ocupa_o_quadro_vertical_sem_tarjas() {
+        let medidas = crate::codec::medidas_para(Resolucao::P720, 1080, 1920);
+        let mut mapa = Mapa::com_medidas((1080, 1920), medidas);
+        assert_eq!(mapa.ativa, (720, 1280));
+        assert_eq!(mapa.canto, (0, 0));
+        let quadro = mapa
+            .converter(&origem(1080, 1920, 1080 * 4, (255, 255, 255)), 1080 * 4)
+            .expect("converte");
+        assert_eq!((quadro.largura(), quadro.altura()), (720, 1280));
+        assert!(
+            quadro.luma().iter().all(|y| *y == 235),
+            "o quadro preservado ganhou tarjas"
+        );
     }
 
     #[test]

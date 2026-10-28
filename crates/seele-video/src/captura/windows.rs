@@ -336,7 +336,7 @@ impl Caixa {
 /// anterior, e a caixa de um quadro é a fronteira entre as duas.
 struct Manipulador {
     caixa: Arc<Caixa>,
-    destino: Resolucao,
+    destino: (usize, usize),
     intervalo: Duration,
     ultimo: Option<Instant>,
     mapa: Option<Mapa>,
@@ -352,7 +352,7 @@ struct Manipulador {
 const FOLGA_DO_RITMO: u32 = 7;
 
 impl GraphicsCaptureApiHandler for Manipulador {
-    type Flags = (Arc<Caixa>, Resolucao, Duration);
+    type Flags = (Arc<Caixa>, (usize, usize), Duration);
     type Error = ErroDeCaptura;
 
     fn new(contexto: Context<Self::Flags>) -> Result<Self, Self::Error> {
@@ -398,7 +398,7 @@ impl GraphicsCaptureApiHandler for Manipulador {
         let origem = (buffer.width() as usize, buffer.height() as usize);
         let passo = buffer.row_pitch() as usize;
         if self.mapa.as_ref().is_none_or(|mapa| mapa.origem != origem) {
-            self.mapa = Some(Mapa::novo(origem, self.destino));
+            self.mapa = Some(Mapa::com_medidas(origem, self.destino));
         }
         // `as_mut` porque o mapa guarda os buffers intermediários da conversão
         // — cinco megabytes em 1440p — e reaproveitá-los entre quadros é parte
@@ -454,7 +454,7 @@ pub struct Captura {
 fn ligar<T>(
     item: T,
     caixa: Arc<Caixa>,
-    destino: Resolucao,
+    destino: (usize, usize),
     intervalo: Duration,
     do_sistema: MinimumUpdateIntervalSettings,
 ) -> Result<CaptureControl<Manipulador, ErroDeCaptura>, ErroDeCaptura>
@@ -495,7 +495,7 @@ where
 fn ligar_com_borda<T>(
     item: T,
     caixa: Arc<Caixa>,
-    destino: Resolucao,
+    destino: (usize, usize),
     intervalo: Duration,
     do_sistema: MinimumUpdateIntervalSettings,
     borda: DrawBorderSettings,
@@ -544,6 +544,23 @@ impl Captura {
         resolucao: Resolucao,
         cadencia: Cadencia,
     ) -> Result<Self, ErroDeCaptura> {
+        let medidas = (resolucao.largura(), resolucao.altura());
+        Self::iniciar_com_medidas(alvo, resolucao, cadencia, medidas)
+    }
+
+    /// Liga a captura com o mesmo tamanho validado do encoder e do fluxo.
+    pub fn iniciar_com_medidas(
+        alvo: &Alvo,
+        resolucao: Resolucao,
+        cadencia: Cadencia,
+        medidas: (usize, usize),
+    ) -> Result<Self, ErroDeCaptura> {
+        let medidas = crate::codec::ConfigDoCodificador {
+            resolucao,
+            medidas: Some(medidas),
+            ..Default::default()
+        }
+        .medidas_efetivas()?;
         let caixa = Arc::new(Caixa::default());
         let intervalo = Duration::from_nanos(u64::from(1_000_000_000 / cadencia.hz()));
 
@@ -558,20 +575,16 @@ impl Captura {
         };
 
         let controle = match alvo.fonte {
-            Fonte::Monitor(monitor) => ligar(
-                monitor,
-                Arc::clone(&caixa),
-                resolucao,
-                intervalo,
-                do_sistema,
-            )?,
+            Fonte::Monitor(monitor) => {
+                ligar(monitor, Arc::clone(&caixa), medidas, intervalo, do_sistema)?
+            }
             Fonte::Janela(janela) => {
                 if !janela.is_valid() {
                     return Err(ErroDeCaptura::AlvoSumiu {
                         nome: alvo.nome.clone(),
                     });
                 }
-                ligar(janela, Arc::clone(&caixa), resolucao, intervalo, do_sistema)?
+                ligar(janela, Arc::clone(&caixa), medidas, intervalo, do_sistema)?
             }
         };
 

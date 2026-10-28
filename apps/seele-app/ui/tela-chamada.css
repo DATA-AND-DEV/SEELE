@@ -983,10 +983,29 @@
 }
 
 body[data-cinema="sim"] #palco-imagem {
-  width: 100vw;
-  height: 100vh;
-  max-height: 100vh;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+  background: black;
   border: none;
+  z-index: 30;
+}
+
+.palco-sair-desktop {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  min-height: 44px;
+  z-index: 40;
+  color: var(--seele-osso);
+  background: #050403d9;
+  border: 1px solid var(--seele-linha-forte);
+  padding: 8px 16px;
+  cursor: pointer;
 }
 
 /*

@@ -89,6 +89,12 @@ const engines = require('./playwright.cjs');
         await mobile.addInitScript(()=>localStorage.setItem('seele.casca','celular'));
         await mobile.goto(`http://127.0.0.1:${server.address().port}`);
         await mobile.evaluate(async()=>{
+          // A carga real também entrega a identidade à entrada, depois do WASM.
+          // Espere essa entrega antes de instalar a fixture: a promessa tardia
+          // substituía o formulário de teste no meio do fill (também no HEAD).
+          // Observe só a carga já em voo; sem WASM no checkout, sua falha é
+          // esperada aqui: esta prova usa identidade fixture e mede geometria.
+          await identidadePrometida?.catch(() => null);
           window.entradasNaAba=0;
           await CELULAR.ajudante('entrada').usar({ler:()=>({estado:'numa-aba',endereco:'servidor-de-teste:8383',impressao:'ab'.repeat(32),versaoDoServidor:'2.0'}),entrar:async()=>{entradasNaAba++;return {erro:'sem-rede'};},copiarLink:async()=>true});
         });

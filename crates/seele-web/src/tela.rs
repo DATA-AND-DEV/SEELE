@@ -54,6 +54,8 @@ pub fn medidas_para(degrau: (u32, u32), fonte_largura: u32, fonte_altura: u32) -
     let proporcao = f64::from(fonte_largura) / f64::from(fonte_altura);
     let altura = (area / proporcao).sqrt();
     let largura = altura * proporcao;
+    let escala = (f64::from(seele_proto::screen::MAX_SCREEN_SIDE) / largura.max(altura)).min(1.0);
+    let (largura, altura) = (largura * escala, altura * escala);
     #[allow(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,

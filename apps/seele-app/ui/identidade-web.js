@@ -900,3 +900,55 @@ async function preferenciaDeReceberPessoalWeb(receber) {
   identidade.receber = Boolean(receber);
   return identidade.receber;
 }
+
+// Retratos opcionais de uma chamada autenticada. O banco e sua versão ficam
+// iguais: páginas antigas continuam lendo identidade e contatos. A chave
+// pública completa verificada impede reaproveitar o retrato sob outro pin.
+function chaveDoPerfilPessoal(codigo, publica) {
+  if (!Array.isArray(publica) || publica.length !== 32 || publica.some(b => !Number.isInteger(b) || b < 0 || b > 255)) throw new Error("PerfilPessoalInvalido");
+  return `perfil:${codigo}:${publica.map(b => b.toString(16).padStart(2, "0")).join("")}`;
+}
+async function guardarPerfilPessoalWeb({ codigo, publica, apelido, retrato }) {
+  const id = chaveDoPerfilPessoal(codigo, publica);
+  await noBancoPessoalWeb("identidade", "readwrite", loja => loja.put({ id, codigo, apelido, retrato, visto: Date.now() }));
+  // Cache visual limitado, separado de identidades e nomes dados aos amigos.
+  await noBancoPessoalWeb("identidade", "readwrite", loja => {
+    const pedido = loja.getAll(IDBKeyRange.bound("perfil:", "perfil:\uffff"));
+    pedido.onsuccess = () => {
+      const perfis = pedido.result.filter(p => p.id.startsWith("perfil:")).sort((a,b) => b.visto - a.visto);
+      for (const p of perfis.slice(128)) loja.delete(p.id);
+    };
+    return pedido;
+  });
+  document.dispatchEvent(new CustomEvent("seele:perfil-pessoal", { detail: { codigo } }));
+}
+async function lerPerfilPessoalWeb(codigo, publica = null) {
+  if (publica) return noBancoPessoalWeb("identidade", "readonly", loja => loja.get(chaveDoPerfilPessoal(codigo, publica)));
+  // Só para exibir. O serviço sempre fornece a chave pública verificada.
+  const prefixo = `perfil:${codigo}:`;
+  const registros = await noBancoPessoalWeb("identidade", "readonly", loja => loja.getAll(IDBKeyRange.bound(prefixo, prefixo + "\uffff")));
+  return registros.filter(p => p.id.startsWith(prefixo)).sort((a,b) => b.visto - a.visto)[0] || null;
+}
+async function retratoParaChamadaPessoal(uri) {
+  if (typeof uri !== "string" || uri.length > 100000 || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(uri)) return null;
+  let bytes;
+  try { bytes = Uint8Array.from(atob(uri.slice(22)), c => c.charCodeAt(0)); } catch { return null; }
+  if (bytes.length < 33 || bytes.length > 65536 || [137,80,78,71,13,10,26,10].some((b,i) => bytes[i] !== b)) return null;
+  const header = new DataView(bytes.buffer), largura = header.getUint32(16), altura = header.getUint32(20);
+  if (!largura || !altura || largura > 1024 || altura > 1024) return null;
+  let imagem;
+  try { imagem = await createImageBitmap(new Blob([bytes], { type: "image/png" })); } catch { return null; }
+  try {
+    for (const limite of [128,96,64,48]) {
+      const escala = Math.min(1, limite / Math.max(imagem.width,imagem.height));
+      const tela = document.createElement("canvas"); tela.width = Math.max(1,Math.round(imagem.width*escala)); tela.height = Math.max(1,Math.round(imagem.height*escala));
+      tela.getContext("2d").drawImage(imagem,0,0,tela.width,tela.height);
+      const png = await new Promise(ok => tela.toBlob(ok,"image/png"));
+      if (png && png.size <= 8192) {
+        const data = new Uint8Array(await png.arrayBuffer());
+        return "data:image/png;base64," + btoa(Array.from(data,b => String.fromCharCode(b)).join(""));
+      }
+    }
+  } finally { imagem.close(); }
+  return null;
+}

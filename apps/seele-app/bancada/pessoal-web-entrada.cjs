@@ -77,7 +77,11 @@ const ui = path.resolve(__dirname, '../ui');
       assert.equal(await page.evaluate(() => prova.recebeu), registrosAntesDoLink, 'abrir convite não deve restaurar a preferência inicial já desligada');
       await page.evaluate(async () => { prova.esperarRegistro = false; await seelePessoalWeb.receber(true); });
       await page.locator('#boot-conversa-pessoal').click();
+      await page.getByLabel('Seu nome', { exact: true }).fill('Nome escolhido');
       await page.getByRole('button', { name: 'CRIAR CONVERSA', exact: true }).click();
+      await page.evaluate(() => callbacksDaChamada.aoEstado({ estado: 'tocando', apelido: 'Par' }));
+      assert.equal(await page.getByLabel('Seu nome', { exact: true }).inputValue(), 'Nome escolhido', 'receber a chamada não troca o nome escolhido pelo perfil padrão');
+      assert.equal(await page.evaluate(() => prova.capturas), 0, 'tocar/aceitar não solicita captura antes do botão de microfone');
       await page.evaluate(() => {
         callbacksDaChamada.aoEstado({ estado: 'dentro', papel: 'quem-recebe' });
         callbacksDaChamada.aoPar({ transporteDaVoz: {}, tela: {}, abortar() {} }, { papel: 'quem-recebe' });

@@ -437,6 +437,9 @@ jobs:
       - run: node apps/seele-app/bancada/isolamento-das-sessoes.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      - run: node apps/seele-app/bancada/saida-hospedagem-navegacao.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/multi-sessao-na-ponte.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
@@ -587,6 +590,9 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 10
       - run: node apps/seele-app/bancada/pos-release-ui.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/proporcao-tela-cheia.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/visual-0174.cjs target/visual-0174

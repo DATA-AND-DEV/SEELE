@@ -136,6 +136,7 @@ fn hora_de(desde_a_epoca: Duration) -> String {
 
 fn codificador() -> anyhow::Result<Box<dyn CodificaVideo>> {
     let config = ConfigDoCodificador {
+        medidas: None,
         resolucao: RESOLUCAO,
         cadencia: Cadencia::Q30,
         teto_bps: 1_500_000,

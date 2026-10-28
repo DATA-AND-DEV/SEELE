@@ -1,9 +1,30 @@
 "use strict";
 
+// Perfil opcional da conexão: limite antes de decodificar a imagem.
+function nomeDoPerfilPessoalValido(apelido) {
+  return typeof apelido === "string" && Boolean(apelido.trim()) && new TextEncoder().encode(apelido).length <= 128 && !/[\u0000-\u001f\u007f-\u009f]/u.test(apelido);
+}
+async function validarPerfilDaChamadaPessoal(perfil) {
+  if (!perfil || perfil.v !== 1 || Object.keys(perfil).sort().join(",") !== "apelido,retrato,v" || !nomeDoPerfilPessoalValido(perfil.apelido)) throw new Error("chamada: perfil inválido");
+  if (perfil.retrato !== null) {
+    if (typeof perfil.retrato !== "string" || perfil.retrato.length > 11000 || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(perfil.retrato)) throw new Error("chamada: retrato inválido");
+    const bytes = Uint8Array.from(atob(perfil.retrato.slice(22)), c => c.charCodeAt(0));
+    if (bytes.length > 8192 || bytes.length < 33 || [137,80,78,71,13,10,26,10].some((b,i) => bytes[i] !== b)) throw new Error("chamada: retrato inválido");
+    const header = new DataView(bytes.buffer), largura = header.getUint32(16), altura = header.getUint32(20);
+    if (header.getUint32(8) !== 13 || header.getUint32(12) !== 0x49484452 || !largura || !altura || largura > 128 || altura > 128) throw new Error("chamada: retrato inválido");
+    const imagem = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+    try { if (imagem.width !== largura || imagem.height !== altura) throw new Error("chamada: retrato inválido"); }
+    finally { imagem.close(); }
+  }
+  return perfil;
+}
+
+
 // Serviço autenticado. O encontro só recebe envelopes de sinalização; texto,
 // voz e tela passam exclusivamente pelo transporte direto depois do aceite.
 // A identidade pessoal é durável no IndexedDB; a chave nunca é exportável.
 async function criarServicoDeChamadasWeb({
+  obterPerfil = async apelido => ({ apelido, retrato: null }), lerPerfil = async () => null, aoPerfil = () => {},
   aoEstado = () => {}, aoRecepcao = () => {}, aoTexto = () => {}, aoPar = () => {}, aoControle = () => {},
   urlDoEncontro, iceServers,
   wasm: wasmFornecido, buscar = (...args) => fetch(...args),
@@ -55,6 +76,21 @@ async function criarServicoDeChamadasWeb({
     if (contexto && contexto !== chamada) return;
     retrato = Object.freeze({ estado, motivo, id: contexto ? idTexto(contexto.id) : null, codigo: contexto?.codigo, papel: contexto?.papel, apelido: contexto?.apelido });
     notificar(aoEstado, retrato);
+  }
+  async function receberPerfil(c, bytes) {
+    if (c !== chamada || c.encerrada || !c.admitida || c.perfilRecebido || bytes.length > 12000) return;
+    c.perfilRecebido = true;
+    try {
+      const perfil = await validarPerfilDaChamadaPessoal(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
+      conferir(c);
+      if (c !== chamada) return;
+      if (conferirPar) await conferirPar(c.codigo, c.par, perfil.apelido, c.papel === "quem-liga" ? "liguei" : "recebi");
+      conferir(c);
+      if (c !== chamada) return;
+      c.apelido = perfil.apelido;
+      mostrar(retrato.estado, retrato.motivo, c);
+      await aoPerfil({ codigo: c.codigo, publica: c.par.slice(), ...perfil });
+    } catch { /* Um perfil opcional não derruba uma conversa estabelecida. */ }
   }
   function conferir(contexto) {
     if (destruido || contexto.abortador.signal.aborted) throw new DOMException("Chamada encerrada", "AbortError");
@@ -223,6 +259,7 @@ async function criarServicoDeChamadasWeb({
       // Encerrar, a próxima chamada pelo mesmo link ficava Ocupado até o TTL.
       aoEstado: estado => { if (estado === "encerrada" && !c.encerrada) terminar(c, "conexao"); } });
     c.enlace = enlace;
+    enlace.perfil?.ouvir(bytes => { void receberPerfil(c, bytes); });
     enlace.controle.ouvir(bytes => {
       if (c.encerrada || c !== chamada) return;
       try {
@@ -236,6 +273,14 @@ async function criarServicoDeChamadasWeb({
       for (const sinal of c.sinais.splice(0)) await enlace.receberSinalAutenticado(sinal);
       await enlace.pronto; conferir(c);
       if (c !== chamada) { enlace.abortar(); return; }
+      // O perfil só sai depois da ligação entre SDP assinado e par DTLS.
+      if (enlace.perfil) void (async () => {
+        try {
+          const perfil = await validarPerfilDaChamadaPessoal({ ...(await obterPerfil(c.nomeLocal)), v: 1 });
+          conferir(c);
+          if (c === chamada) enlace.perfil.enviar(encoder.encode(JSON.stringify(perfil)));
+        } catch { /* Falta de retrato ou nome local não derruba a conversa. */ }
+      })();
       mostrar("dentro", null, c); notificar(aoPar, enlace, { id: idTexto(c.id), papel: c.papel, apelido: c.apelido });
     } catch (erro) { try { enlace.abortar(); } catch {} if (!c.encerrada) terminar(c, "conexao"); }
   }
@@ -265,7 +310,7 @@ async function criarServicoDeChamadasWeb({
         return;
       }
       const c = contexto(caixa.convite, "quem-recebe", p.chamada, p.remetente, p.geracao);
-      c.remota = p.sequencia; c.apelido = p.operacao.Chamar.apelido;
+      c.remota = p.sequencia; c.apelido = p.operacao.Chamar.apelido; c.nomeLocal = nome;
       c.codigo = operar({ acao: "codigo_da_chave", chave: p.remetente }).codigo;
       if (conferirPar) {
         try { await conferirPar(c.codigo, p.remetente, c.apelido, "perdida"); await reservarChamada(idTexto(c.id)); }
@@ -386,10 +431,17 @@ async function criarServicoDeChamadasWeb({
     operar({ acao: "convite_verificar", convite: conviteAtual });
     const c = contexto(conviteAtual, "quem-liga", aleatorio(32), conviteAtual.dono, crypto.getRandomValues(new Uint32Array(1))[0]);
     c.codigo = operar({ acao: "codigo_da_chave", chave: c.par }).codigo;
-    c.apelido = c.codigo; chamada = c; mostrar("chamando", null, c);
+    if (!nomeDoPerfilPessoalValido(apelido)) throw new Error("chamada: nome inválido");
+    c.apelido = "Outra pessoa"; c.nomeLocal = apelido.trim(); chamada = c; mostrar("chamando", null, c);
     c.timer = setTimeout(() => terminar(c, "nao-atendida"), Math.max(0, Math.min(45000, c.convite.expira_em * 1000 - Date.now())));
     try {
       if (conferirPar) await conferirPar(c.codigo, c.par, null, "liguei");
+      conferir(c);
+      try {
+        const anterior = await lerPerfil(c.codigo, c.par);
+        conferir(c);
+        if (nomeDoPerfilPessoalValido(anterior?.apelido)) { c.apelido = anterior.apelido; mostrar("chamando", null, c); }
+      } catch (erro) { conferir(c); }
       conferir(c);
       await reservarChamada(idTexto(c.id));
       if (c.encerrada || destruido) { await reservarChamada(idTexto(c.id), false); conferir(c); }
@@ -398,10 +450,12 @@ async function criarServicoDeChamadasWeb({
     } catch (erro) { terminar(c, "sinalizacao"); throw erro; }
   }
 
-  async function atender() {
+  async function atender({ apelido = nome } = {}) {
     const c = chamada;
     if (!c || c.encerrada || retrato.estado !== "tocando") return false;
     operar({ acao: "convite_verificar", convite: c.convite });
+    if (!nomeDoPerfilPessoalValido(apelido)) throw new Error("chamada: nome inválido");
+    c.nomeLocal = apelido.trim();
     // Marca intenção antes do await: dois gestos não geram dois aceites.
     c.aceitando = true; mostrar("conectando", null, c);
     try {

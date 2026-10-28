@@ -1,19 +1,28 @@
 // Tela pessoal: o mesmo transmissor/LeitorDeTela SEELE, sem Snapshot de servidor.
 // Abrir/Dados/Fechar viajam no MESMO canal ordenado. Os avisos do controle não
 // abrem nem fecham leitores: não existe ordem entre dois DataChannels.
-function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarControle, aoEstado = () => {} }) {
+function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarControle, telaCheiaNativa = null, aoEstado = () => {} }) {
   const wasm = servico.wasm;
   let fechado = false, captura = 0, geracaoLocal = 0, geracaoRemota = 0;
   let videoNativo = null, prazoVideo = null, cancelarCaptura = null;
+  let janelaCheia = false;
   let leitura = null, decoder = null, esperaChave = true, timestamp = 0, ultimoPedido = -Infinity;
   const canvas = document.createElement("canvas");
   canvas.setAttribute("aria-label", "Imagem compartilhada pela outra pessoa");
-  canvas.style.width = "100%"; canvas.style.maxHeight = "70vh"; canvas.style.objectFit = "contain";
+  canvas.style.objectFit = "contain";
+  palco.classList.add("pessoal-web-tela");
   const expandir = document.createElement("button");
   expandir.type = "button"; expandir.textContent = "TELA CHEIA";
   palco.append(canvas, expandir);
   palco.hidden = true;
   function estado(tipo, detalhe) { if (!fechado) aoEstado(tipo, detalhe); }
+  function ajustarJanela(ligada) {
+    if (!telaCheiaNativa || janelaCheia === ligada) return;
+    janelaCheia = ligada;
+    // No WebView2, fullscreen DOM ocupa o WebView; a janela do Tauri também
+    // precisa entrar/sair. O mesmo gesto preserva o caminho web sem IPC.
+    Promise.resolve().then(() => telaCheiaNativa(ligada)).catch(erro => estado("erro", String(erro)));
+  }
   function controle(mensagem) { Promise.resolve(enviarControle(mensagem)).catch(erro => estado("erro", String(erro))); }
   const jsonDaSaida = () => JSON.parse(new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, wasm.saida_ptr(), wasm.saida_len()).slice()));
   function passos(alca, bytes) {
@@ -27,6 +36,7 @@ function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarCon
   function soltarDecoder() { if (decoder && decoder.state !== "closed") decoder.close(); decoder = null; esperaChave = true; }
   function fecharRecepcao() {
     soltarVideoNativo();
+    ajustarJanela(false);
     const doc = palco.ownerDocument;
     if (doc.fullscreenElement === palco || doc.webkitFullscreenElement === palco) Promise.resolve(doc.exitFullscreen?.() ?? doc.webkitExitFullscreen?.()).catch(() => {});
     const anterior = leitura; leitura = null;
@@ -50,6 +60,9 @@ function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarCon
         output(frame) {
           try {
             if (fechado || leitura !== identidade || decoder !== este) return;
+            if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+              canvas.width = frame.displayWidth; canvas.height = frame.displayHeight;
+            }
             canvas.getContext("2d").drawImage(frame, 0, 0, canvas.width, canvas.height);
             estado("quadro", { largura: canvas.width, altura: canvas.height, geracao: identidade.geracao });
           } finally { frame.close(); }
@@ -192,13 +205,25 @@ function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarCon
     if (doc.fullscreenElement === palco || doc.webkitFullscreenElement === palco) {
       await (doc.exitFullscreen?.() ?? doc.webkitExitFullscreen?.()); return;
     }
-    if (videoNativo?.readyState >= 1) { videoNativo.webkitEnterFullscreen(); return; }
+    if (videoNativo?.readyState >= 1) {
+      Object.assign(videoNativo.style, { width: "100%", height: "100%", opacity: "1", objectFit: "contain", background: "black", pointerEvents: "auto" });
+      try { videoNativo.webkitEnterFullscreen(); }
+      catch (erro) { soltarVideoNativo(); throw erro; }
+      return;
+    }
     const pedir = palco.requestFullscreen ?? palco.webkitRequestFullscreen;
     if (pedir) { try { await pedir.call(palco); return; } catch { /* fallback de vídeo do Safari */ } }
     // Preparar o vídeo pode consumir o gesto: o segundo toque é explícito.
     if (!videoNativo && !prepararVideoNativo()) estado("erro", "Tela cheia indisponível neste navegador.");
   }
-  const atualizarBotao = () => { expandir.textContent = (document.fullscreenElement === palco || document.webkitFullscreenElement === palco) ? "SAIR DA TELA CHEIA" : "TELA CHEIA"; };
+  let estavaEmTelaCheia = false;
+  const atualizarBotao = () => {
+    const cheia = document.fullscreenElement === palco || document.webkitFullscreenElement === palco;
+    ajustarJanela(cheia && !fechado && !palco.hidden);
+    expandir.textContent = cheia ? "SAIR DA TELA CHEIA" : "TELA CHEIA";
+    if (estavaEmTelaCheia && !cheia && !palco.hidden && !fechado) expandir.focus({ preventScroll: true });
+    estavaEmTelaCheia = cheia;
+  };
   expandir.addEventListener("click", () => telaCheia().catch(erro => estado("erro", String(erro))));
   document.addEventListener("fullscreenchange", atualizarBotao); document.addEventListener("webkitfullscreenchange", atualizarBotao);
   function fechar() {

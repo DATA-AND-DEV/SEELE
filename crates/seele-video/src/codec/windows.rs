@@ -147,7 +147,7 @@ fn procurar() -> Result<(IMFActivate, IMFTransform), ErroDeVideo> {
 /// Um tipo de mídia com major, subtipo e as medidas que os dois lados pedem.
 fn tipo(
     subtipo: GUID,
-    resolucao: Resolucao,
+    dimensoes: (usize, usize),
     quadros: u32,
     teto_bps: Option<u32>,
 ) -> Result<IMFMediaType, ErroDeVideo> {
@@ -158,8 +158,8 @@ fn tipo(
     // Largura e altura num `u64` só, e numerador e denominador da taxa noutro:
     // é a forma que o Media Foundation usa para pares, e escrever à mão é o que
     // evita depender de um utilitário que só existe em C++.
-    let medidas = (u64::from(u32::try_from(resolucao.largura()).unwrap_or(u32::MAX)) << 32)
-        | u64::from(u32::try_from(resolucao.altura()).unwrap_or(u32::MAX));
+    let medidas = (u64::from(u32::try_from(dimensoes.0).unwrap_or(u32::MAX)) << 32)
+        | u64::from(u32::try_from(dimensoes.1).unwrap_or(u32::MAX));
     let taxa = (u64::from(quadros) << 32) | 1;
 
     // SAFETY: todas as chaves são estáticas do sistema e os valores são escalares.
@@ -194,6 +194,7 @@ pub struct Codificador {
     /// colher.
     eventos: Option<IMFMediaEventGenerator>,
     resolucao: Resolucao,
+    medidas: (usize, usize),
     cadencia: Cadencia,
     quadros_por_segundo: u32,
     teto_bps: u32,
@@ -237,6 +238,7 @@ impl Codificador {
     /// [`ErroDeVideo::CodecRecusou`] em qualquer passo. Quem chama **cai para o
     /// software**: ver [`super::armar`].
     pub fn novo(config: &super::ConfigDoCodificador) -> Result<Self, ErroDeVideo> {
+        let medidas = config.medidas_efetivas()?;
         comecar()?;
         let (ativador, transformador) = procurar()?;
         let quadros = config.cadencia.hz();
@@ -315,18 +317,13 @@ impl Codificador {
         // aceita antes de saber o que tem de produzir, e a ordem inversa faz o
         // `SetInputType` recusar tudo. Está na documentação do MFT e é o erro
         // mais comum deste caminho.
-        let saida = tipo(
-            MFVideoFormat_H264,
-            config.resolucao,
-            quadros,
-            Some(config.teto_bps),
-        )?;
+        let saida = tipo(MFVideoFormat_H264, medidas, quadros, Some(config.teto_bps))?;
         // SAFETY: o tipo vive até o fim desta função e o índice 0 é o único
         // fluxo que um codificador de vídeo tem.
         unsafe { transformador.SetOutputType(0, &saida, 0) }
             .map_err(|erro| recusa("declarar a saída do codificador", erro))?;
 
-        let entrada = tipo(MFVideoFormat_NV12, config.resolucao, quadros, None)?;
+        let entrada = tipo(MFVideoFormat_NV12, medidas, quadros, None)?;
         // SAFETY: idem.
         unsafe { transformador.SetInputType(0, &entrada, 0) }
             .map_err(|erro| recusa("declarar a entrada do codificador", erro))?;
@@ -349,12 +346,13 @@ impl Codificador {
             None
         };
 
-        let (largura, altura) = (config.resolucao.largura(), config.resolucao.altura());
+        let (largura, altura) = medidas;
         Ok(Self {
             ativador,
             transformador,
             eventos,
             resolucao: config.resolucao,
+            medidas,
             cadencia: config.cadencia,
             quadros_por_segundo: quadros,
             teto_bps: config.teto_bps,
@@ -379,7 +377,7 @@ impl Codificador {
     /// O macOS não paga isto: o `CVPixelBuffer` aceita os três planos como
     /// estão.
     fn para_nv12(&mut self, quadro: &super::QuadroI420) -> Result<(), ErroDeVideo> {
-        let (largura, altura) = (self.resolucao.largura(), self.resolucao.altura());
+        let (largura, altura) = self.medidas;
         let luma = largura * altura;
         let (meia_largura, meia_altura) = (largura.div_ceil(2), altura.div_ceil(2));
 
@@ -682,6 +680,10 @@ impl Codificador {
 }
 
 impl super::CodificaVideo for Codificador {
+    fn medidas(&self) -> (usize, usize) {
+        self.medidas
+    }
+
     fn resolucao(&self) -> Resolucao {
         self.resolucao
     }
@@ -731,11 +733,9 @@ impl super::CodificaVideo for Codificador {
         quadro: &super::QuadroI420,
         pedido_de_chave: bool,
     ) -> Result<Option<super::QuadroCodificado>, ErroDeVideo> {
-        if quadro.largura() != self.resolucao.largura()
-            || quadro.altura() != self.resolucao.altura()
-        {
+        if (quadro.largura(), quadro.altura()) != self.medidas {
             return Err(ErroDeVideo::QuadroDeTamanhoErrado {
-                esperado: (self.resolucao.largura(), self.resolucao.altura()),
+                esperado: self.medidas,
                 recebido: (quadro.largura(), quadro.altura()),
             });
         }
@@ -823,6 +823,7 @@ mod testes {
 
     fn config(resolucao: Resolucao) -> ConfigDoCodificador {
         ConfigDoCodificador {
+            medidas: None,
             resolucao,
             cadencia: Cadencia::Q30,
             teto_bps: 2_000_000,
@@ -1047,6 +1048,7 @@ mod medida_de_memoria {
     fn quanto_o_codificador_segura_de_memoria() {
         let resolucao = Resolucao::P1080;
         let config = ConfigDoCodificador {
+            medidas: None,
             resolucao,
             cadencia: Cadencia::Q60,
             teto_bps: 4_000_000,

@@ -77,6 +77,7 @@ pub struct Codificador {
     /// fila já liberada.
     ponta: *const Mutex<VecDeque<QuadroCodificado>>,
     resolucao: Resolucao,
+    medidas: (usize, usize),
     cadencia: Cadencia,
     quadros_por_segundo: u32,
     teto_bps: u32,
@@ -389,6 +390,7 @@ impl Codificador {
     /// máquina sem suporte, ou um driver que recusa esta resolução, não pode
     /// custar o compartilhamento inteiro. Ver [`super::armar`].
     pub fn novo(config: &super::ConfigDoCodificador) -> Result<Self, ErroDeVideo> {
+        let medidas = config.medidas_efetivas()?;
         let resolucao = config.resolucao;
         let saida: Fila = Arc::new(Mutex::new(VecDeque::new()));
         let ponta = Arc::into_raw(Arc::clone(&saida));
@@ -399,8 +401,8 @@ impl Codificador {
         let estado = unsafe {
             VTCompressionSession::create(
                 None,
-                i32::try_from(resolucao.largura()).unwrap_or(i32::MAX),
-                i32::try_from(resolucao.altura()).unwrap_or(i32::MAX),
+                i32::try_from(medidas.0).unwrap_or(i32::MAX),
+                i32::try_from(medidas.1).unwrap_or(i32::MAX),
                 H264,
                 None,
                 None,
@@ -486,6 +488,7 @@ impl Codificador {
             saida,
             ponta,
             resolucao,
+            medidas,
             cadencia: config.cadencia,
             quadros_por_segundo: quadros,
             teto_bps,
@@ -507,8 +510,7 @@ impl Codificador {
             detalhe,
         };
 
-        let largura = self.resolucao.largura();
-        let altura = self.resolucao.altura();
+        let (largura, altura) = self.medidas;
         let mut cru: *mut CVPixelBuffer = std::ptr::null_mut();
         // SAFETY: o destino é um local válido e o formato é o de três planos.
         let estado = unsafe {
@@ -593,6 +595,10 @@ impl Codificador {
 }
 
 impl super::CodificaVideo for Codificador {
+    fn medidas(&self) -> (usize, usize) {
+        self.medidas
+    }
+
     fn resolucao(&self) -> Resolucao {
         self.resolucao
     }
@@ -649,11 +655,9 @@ impl super::CodificaVideo for Codificador {
         quadro: &QuadroI420,
         pedido_de_chave: bool,
     ) -> Result<Option<QuadroCodificado>, ErroDeVideo> {
-        if quadro.largura() != self.resolucao.largura()
-            || quadro.altura() != self.resolucao.altura()
-        {
+        if (quadro.largura(), quadro.altura()) != self.medidas {
             return Err(ErroDeVideo::QuadroDeTamanhoErrado {
-                esperado: (self.resolucao.largura(), self.resolucao.altura()),
+                esperado: self.medidas,
                 recebido: (quadro.largura(), quadro.altura()),
             });
         }
@@ -755,6 +759,7 @@ mod testes {
 
     fn config(resolucao: Resolucao) -> ConfigDoCodificador {
         ConfigDoCodificador {
+            medidas: None,
             resolucao,
             cadencia: Cadencia::Q30,
             teto_bps: 2_000_000,
@@ -908,6 +913,7 @@ mod testes {
         for teto in [500_000_u32, 1_200_000, 2_000_000, 4_000_000] {
             for resolucao in [Resolucao::P540, Resolucao::P720, Resolucao::P1080] {
                 let Ok(mut codec) = Codificador::novo(&ConfigDoCodificador {
+                    medidas: None,
                     resolucao,
                     cadencia: Cadencia::Q30,
                     teto_bps: teto,

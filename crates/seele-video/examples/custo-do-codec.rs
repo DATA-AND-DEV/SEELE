@@ -127,6 +127,7 @@ fn main() -> Result<(), String> {
     let lado = std::env::args().nth(1).unwrap_or_default();
     let resolucao = Resolucao::P1080;
     let config = ConfigDoCodificador {
+        medidas: None,
         resolucao,
         cadencia: Cadencia::Q60,
         teto_bps: 4_000_000,

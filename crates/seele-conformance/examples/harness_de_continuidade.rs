@@ -397,6 +397,7 @@ fn quadro(n: u64) -> QuadroI420 {
 /// OpenH264. **Sem codificador, devolve o erro: nada finge vídeo.**
 fn codificador(args: &Args) -> Result<(Box<dyn CodificaVideo>, &'static str), String> {
     let config = ConfigDoCodificador {
+        medidas: None,
         resolucao: RESOLUCAO,
         cadencia: Cadencia::Q30,
         teto_bps: 1_500_000,

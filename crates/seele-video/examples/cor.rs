@@ -108,6 +108,7 @@ fn main() -> Result<(), String> {
         let mut codificador = Codificador::novo(
             &biblioteca,
             ConfigDoCodificador {
+                medidas: None,
                 resolucao,
                 cadencia: Cadencia::Q30,
                 teto_bps: 6_000_000,

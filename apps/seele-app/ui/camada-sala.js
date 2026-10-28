@@ -180,7 +180,7 @@ function iniciaisDe(quem) {
  * menor, o LIGAR como ação principal, e o TIRAR DOS AMIGOS discreto.
  */
 function linhaDoAmigo(contato) {
-  const quem = contato.nome || contato.codigo;
+  const quem = contato.nome || contato.apelido || contato.codigo;
   const linha = document.createElement("li");
   linha.className = "amigo-cartao";
 
@@ -188,10 +188,16 @@ function linhaDoAmigo(contato) {
   avatar.className = "amigo-avatar";
   avatar.setAttribute("aria-hidden", "true");
   avatar.textContent = iniciaisDe(quem);
+  if (typeof lerPerfilPessoalWeb === "function") void lerPerfilPessoalWeb(contato.codigo).then(perfil => {
+    if (typeof perfil?.retrato !== "string" || perfil.retrato.length > 11000 || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(perfil.retrato) || !avatar.isConnected) return;
+    const imagem = document.createElement("img"); imagem.src = perfil.retrato; imagem.alt = "";
+    imagem.style.width = "100%"; imagem.style.height = "100%"; imagem.style.objectFit = "cover";
+    avatar.replaceChildren(imagem);
+  }).catch(() => {});
 
   const nome = document.createElement("input");
   nome.className = "amigo-nome";
-  nome.value = contato.nome ?? "";
+  nome.value = contato.nome ?? contato.apelido ?? "";
   nome.maxLength = 48;
   nome.spellcheck = false;
   nome.placeholder = "dar um nome";
@@ -405,3 +411,8 @@ invoke("estado_da_sala")
   })
   .catch(() => {})
   .finally(() => desenharCodigoNaEntrada());
+
+// Atualiza o retrato autenticado da última conversa sem buscar imagem remota.
+document.addEventListener("seele:perfil-pessoal", () => {
+  if (!$("tela-boot").hidden) desenharAmigos().catch(falha => console.warn("amigos:", falha));
+});

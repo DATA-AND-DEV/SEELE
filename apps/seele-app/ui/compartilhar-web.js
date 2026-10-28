@@ -295,7 +295,14 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
         continue;
       }
       ultimo = agora;
-      contexto.drawImage(original, 0, 0, largura, altura);
+      // A janela pode mudar de tamanho depois do ScreenOpened. O quadro
+      // efetivo manda na proporção; esticá-lo até as medidas iniciais achata
+      // monitores verticais e janelas redimensionadas durante a transmissão.
+      const fator = Math.min(largura / original.displayWidth, altura / original.displayHeight);
+      const w = original.displayWidth * fator, h = original.displayHeight * fator;
+      contexto.fillStyle = "black";
+      contexto.fillRect(0, 0, largura, altura);
+      contexto.drawImage(original, (largura - w) / 2, (altura - h) / 2, w, h);
       original.close();
       const quadroNovo = new VideoFrame(tela, { timestamp: agora });
       try {

@@ -8,12 +8,14 @@ function instalarConversasPessoaisWeb() {
   if (!entrada) return;
   let servico = null, preparando = null, voz = null, preparandoVoz = null, tela = null, par = null;
   let geracao = 0, geracaoDaRecepcao = 0, geracaoDaMidia = 0, microfone = false, abrindoMicrofone = false;
+  let apelidoDaConversa = "";
   let fase = "livre", linkDeEntrada = null, conviteNoServico = null, recebendoCodigo = true;
   let estadoDoCodigoDireto = { estado: "Subindo" }, criandoLink = false, preparoDoConvite = null;
   const viva = () => ["procurando", "tocando", "chamando", "conectando", "dentro"].includes(fase);
   const vista = criarVistaDaConversaPessoal({ acoes: {
     voltar() { terminar(); vista.fechar(); entrada.focus(); },
     async criar(apelido) {
+      apelidoDaConversa = apelido;
       vista.limpar(); linkDeEntrada = null; conviteNoServico = null; preparoDoConvite = null;
       criandoLink = true;
       try {
@@ -23,6 +25,7 @@ function instalarConversasPessoaisWeb() {
       } finally { criandoLink = false; }
     },
     async chamar(apelido) {
+      apelidoDaConversa = apelido;
       abrirSaidaNoGesto();
       const vez = geracao, preparo = preparoDoConvite;
       // O clique conserva o gesto para a saída, mas o convite só pode ser
@@ -38,7 +41,7 @@ function instalarConversasPessoaisWeb() {
       vista.limpar();
       return atual.chamar({ apelido });
     },
-    atender: () => { abrirSaidaNoGesto(); return servico?.atender(); },
+    atender: () => { abrirSaidaNoGesto(); return servico?.atender({ apelido: nomeLocal() }); },
     recusar: () => servico?.recusar(),
     encerrar: terminar,
     enviarTexto: texto => {
@@ -143,6 +146,7 @@ function instalarConversasPessoaisWeb() {
     preparada.entrar(enlace.transporteDaVoz, meta.papel === "quem-liga" ? 1 : 2);
     tela = criarCompartilhamentoPessoalWeb({ servico: atual, transporte: enlace.tela,
       palco: vista.palco, enviarControle: controle => atual.enviarControle(controle),
+      telaCheiaNativa: navegador ? null : ligada => chamarNativo("tela_cheia", { ligada }),
       aoEstado: (estado, detalhe) => {
         if (estado === "transmitindo" || estado === "parada") vista.compartilhando(estado === "transmitindo");
         if (estado === "erro") vista.falha(detalhe || "Não foi possível abrir o compartilhamento.");
@@ -184,6 +188,19 @@ function instalarConversasPessoaisWeb() {
         reservarChamada: (id, ativo = true) => chamarNativo("pessoal_reservar", { id, ativo }),
       };
       return criarServicoDeChamadasWeb({ ...opcoes,
+      lerPerfil: (codigo, publica) => typeof lerPerfilPessoalWeb === "function" ? lerPerfilPessoalWeb(codigo, publica) : null,
+      async obterPerfil(apelido) {
+        let retrato = null;
+        try {
+          const local = await (navegador ? invocarNaPonte("meu_retrato", {}) : chamarNativo("meu_retrato", {}));
+          if (typeof retratoParaChamadaPessoal === "function") retrato = await retratoParaChamadaPessoal(local);
+        } catch { /* O retrato é opcional. */ }
+        return { apelido, retrato };
+      },
+      async aoPerfil(perfil) {
+        if (vez !== geracao) return;
+        if (typeof guardarPerfilPessoalWeb === "function") await guardarPerfilPessoalWeb(perfil);
+      },
       aoRecepcao(estado) {
         if (vez !== geracao) return;
         if (estado.estado === "registrada") anunciarSala({ estado: "NoAr", registro: { registro: "Registrado" }, firewall: null });
@@ -223,7 +240,7 @@ function instalarConversasPessoaisWeb() {
     if (servico && !recebendoCodigo) terminar();
     vista.limpar(); fase = "livre";
     linkDeEntrada = link; conviteNoServico = null; preparoDoConvite = null;
-    vista.abrir({ porConvite: Boolean(link), apelido: document.getElementById("boot-perfil-nome")?.textContent?.replace(/^—$/, "") ?? "" });
+    vista.abrir({ porConvite: Boolean(link), apelido: apelidoDaConversa || document.getElementById("boot-perfil-nome")?.textContent?.replace(/^—$/, "") || "" });
     if (link) {
       const vez = geracao, preparo = { pronto: null };
       preparoDoConvite = preparo;
@@ -244,7 +261,7 @@ function instalarConversasPessoaisWeb() {
     history.replaceState(history.state, "", href.slice(0, -hash.length));
     void abrir(hash);
   }
-  const nomeLocal = () => String(document.getElementById("boot-perfil-nome")?.textContent || "").replace(/^—$/, "").trim() || "Pessoa";
+  const nomeLocal = () => apelidoDaConversa || String(document.getElementById("boot-perfil-nome")?.textContent || "").replace(/^—$/, "").trim() || "Pessoa";
   function anunciarSala(estado) {
     estadoDoCodigoDireto = estado;
     document.dispatchEvent(new CustomEvent("seele:estado-pessoal-direto", { detail: estado }));
@@ -256,6 +273,7 @@ function instalarConversasPessoaisWeb() {
   window.seelePessoalWeb = Object.freeze({
     get estadoDaSala() { return estadoDoCodigoDireto; },
     async chamarCodigo({ codigo, apelido } = {}) {
+      if (apelido) apelidoDaConversa = apelido;
       abrirSaidaNoGesto();
       vista.abrir({ apelido: apelido || nomeLocal() }); vista.limpar();
       try { return await (await obterServico()).chamarCodigo({ codigo, apelido: apelido || nomeLocal() }); }
@@ -267,7 +285,7 @@ function instalarConversasPessoaisWeb() {
         vista.falha(String(erro.message || erro)); throw erro;
       }
     },
-    atender: () => { abrirSaidaNoGesto(); return servico?.atender(); }, recusar: () => servico?.recusar(), encerrar: terminar,
+    atender: () => { abrirSaidaNoGesto(); return servico?.atender({ apelido: nomeLocal() }); }, recusar: () => servico?.recusar(), encerrar: terminar,
     async receber(receber) {
       const vez = ++geracaoDaRecepcao;
       recebendoCodigo = Boolean(receber);

@@ -89,6 +89,7 @@ fn main() -> Result<(), String> {
     ] {
         for resolucao in [Resolucao::P540, Resolucao::P720, Resolucao::P1080] {
             let config = ConfigDoCodificador {
+                medidas: None,
                 resolucao,
                 cadencia: Cadencia::Q30,
                 teto_bps: 4_000_000,

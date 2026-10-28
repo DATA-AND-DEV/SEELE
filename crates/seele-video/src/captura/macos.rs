@@ -230,6 +230,23 @@ pub enum Fonte {
 }
 
 impl Fonte {
+    /// Tamanho usado para preservar a proporção na abertura do fluxo.
+    #[must_use]
+    pub fn tamanho(&self) -> (usize, usize) {
+        match self {
+            Self::Monitor {
+                largura, altura, ..
+            } => (*largura as usize, *altura as usize),
+            Self::Janela { alvo, .. } => {
+                let frame = alvo.frame();
+                (
+                    frame.size.width.max(0.0) as usize,
+                    frame.size.height.max(0.0) as usize,
+                )
+            }
+        }
+    }
+
     /// Um rótulo para a interface mostrar.
     ///
     /// Montado aqui e não na casca porque a regra de montagem é do sistema — o
@@ -617,14 +634,8 @@ impl CapturaDaTela {
     /// entrega **até** essa cadência e nunca mais que ela, e entrega menos
     /// sozinha quando a tela não muda. A resolução segura e o quadro cede.
     ///
-    /// O quadro sai com exatamente as dimensões de `teto`, mesmo quando a fonte
-    /// tem outra proporção: o conteúdo é encaixado dentro delas, sem esticar, e
-    /// o que sobra vira tarja preta. **É uma escolha forçada por quem está do
-    /// outro lado**: [`crate::codec::Codificador`] é armado com uma
-    /// [`Resolucao`] e recusa qualquer quadro de outro tamanho. A alternativa —
-    /// capturar na proporção da fonte, sem tarja — pediria que o codificador
-    /// aceitasse uma dimensão calculada, e aí a resolução deixaria de ser uma
-    /// escolha de três e viraria um número que a interface não sabe mostrar.
+    /// Construtor compatível com o tamanho padrão do degrau. A transmissão
+    /// usa `iniciar_com_medidas` com a proporção da fonte e o tamanho do encoder.
     ///
     /// # Errors
     ///
@@ -639,6 +650,24 @@ impl CapturaDaTela {
         teto: Resolucao,
         cadencia: Cadencia,
     ) -> Result<Self, ErroDeCaptura> {
+        let medidas = (teto.largura(), teto.altura());
+        Self::iniciar_com_medidas(fonte, teto, cadencia, medidas)
+    }
+
+    /// Usa exatamente as dimensões já escolhidas para encoder e cabeçalho.
+    pub fn iniciar_com_medidas(
+        fonte: &Fonte,
+        teto: Resolucao,
+        cadencia: Cadencia,
+        medidas: (usize, usize),
+    ) -> Result<Self, ErroDeCaptura> {
+        let (largura, altura) = crate::codec::ConfigDoCodificador {
+            resolucao: teto,
+            medidas: Some(medidas),
+            ..Default::default()
+        }
+        .medidas_efetivas()
+        .map_err(ErroDeCaptura::PlanosRecusados)?;
         if !permissao().concedida() {
             return Err(ErroDeCaptura::SemPermissaoDeTela);
         }
@@ -650,9 +679,6 @@ impl CapturaDaTela {
                 .build(),
             Fonte::Janela { alvo, .. } => SCContentFilter::create().with_window(alvo).build(),
         };
-
-        let largura = teto.largura();
-        let altura = teto.altura();
 
         let config = SCStreamConfiguration::new()
             .with_width(u32::try_from(largura).unwrap_or(u32::MAX))

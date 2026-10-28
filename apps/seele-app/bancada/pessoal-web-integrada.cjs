@@ -234,6 +234,10 @@ function instrumentarPagina() {
           throw erro;
         });
         for (const p of [a,b]) await p.locator('.pessoal-web-estado').filter({hasText:'Conversa conectada'}).waitFor();
+        for (const [p,nomes] of [[a,['Anfitrião','Convidado']],[b,['Convidado','Anfitrião']]]) {
+          await p.waitForFunction(esperados=>JSON.stringify([...document.querySelectorAll('.pessoal-web-participante-nome')].map(el=>el.textContent))===JSON.stringify(esperados),nomes);
+          assert.equal(await p.evaluate(()=>fontesDaProva.length),0,'aceitar a conversa abre saída, sem pedir captura');
+        }
         if (soPreparoDoConvite) {
           await b.getByRole('button',{name:'SAIR DA CONVERSA',exact:true}).click();
           await a.locator('.pessoal-web-estado').filter({hasText:'Conversa encerrada'}).waitFor();

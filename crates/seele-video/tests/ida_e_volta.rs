@@ -134,6 +134,7 @@ fn um_quadro_atravessa_o_codec_e_volta_com_o_tamanho_certo() {
     let mut codificador = Codificador::novo(
         &biblioteca,
         ConfigDoCodificador {
+            medidas: None,
             resolucao: Resolucao::P540,
             cadencia: Cadencia::Q30,
             teto_bps: 0,
@@ -225,6 +226,7 @@ fn sem_pedido_nao_ha_quadro_chave_depois_do_primeiro() {
     let mut codificador = Codificador::novo(
         &biblioteca,
         ConfigDoCodificador {
+            medidas: None,
             resolucao: Resolucao::P540,
             cadencia: Cadencia::Q30,
             teto_bps: 0,
@@ -401,6 +403,7 @@ fn o_codificador_armado_nao_sai_em_baseline() {
     let mut codificador = armar(
         &biblioteca,
         ConfigDoCodificador {
+            medidas: None,
             resolucao: Resolucao::P540,
             cadencia: Cadencia::Q30,
             teto_bps: 1_200_000,
@@ -491,6 +494,7 @@ fn armar_o_codificador_custa_o_mesmo_em_qualquer_thread() {
         return;
     };
     let config = ConfigDoCodificador {
+        medidas: None,
         resolucao: Resolucao::P1080,
         cadencia: Cadencia::Q30,
         teto_bps: 12_000_000,
@@ -516,4 +520,62 @@ fn armar_o_codificador_custa_o_mesmo_em_qualquer_thread() {
         "\n  MEDIDA armar 1080p:\n    thread do teste: {na_thread_do_teste:?}\n    \
          thread nova:     {numa_thread_nova:?}\n"
     );
+}
+
+#[test]
+fn proporcao_vertical_no_fallback_software_preserva_quadrado() {
+    let Some(biblioteca) = biblioteca() else {
+        return;
+    };
+    let (largura, altura) = (720, 1280);
+    let mut y = vec![16; largura * altura];
+    for linha in y.chunks_exact_mut(largura).skip(512).take(256) {
+        for pixel in linha.iter_mut().skip(232).take(256) {
+            *pixel = 235;
+        }
+    }
+    let quadro = QuadroI420::novo(
+        largura,
+        altura,
+        y,
+        vec![128; largura * altura / 4],
+        vec![128; largura * altura / 4],
+    )
+    .expect("planos");
+    let mut encoder = Codificador::novo(
+        &biblioteca,
+        ConfigDoCodificador {
+            medidas: Some((largura, altura)),
+            resolucao: Resolucao::P720,
+            teto_bps: 8_000_000,
+            ..Default::default()
+        },
+    )
+    .expect("software aceita as dimensões efetivas");
+    let codificado = encoder
+        .codificar(&quadro, true)
+        .expect("codifica")
+        .expect("primeiro quadro");
+    let mut decoder = Decodificador::novo(&biblioteca).expect("decoder");
+    let mut recebido = None;
+    for _ in 0..3 {
+        if let Some(quadro) = decoder.decodificar(&codificado.bytes).expect("decodifica") {
+            recebido = Some(quadro);
+            break;
+        }
+    }
+    let recebido = recebido.expect("imagem vertical chegou");
+    assert_eq!((recebido.largura(), recebido.altura()), (largura, altura));
+    let (mut x0, mut x1, mut y0, mut y1) = (largura, 0, altura, 0);
+    for (j, linha) in recebido.luma().chunks_exact(largura).enumerate() {
+        for (i, pixel) in linha.iter().enumerate() {
+            if *pixel > 128 {
+                x0 = x0.min(i);
+                x1 = x1.max(i);
+                y0 = y0.min(j);
+                y1 = y1.max(j);
+            }
+        }
+    }
+    assert_eq!((x1 - x0 + 1, y1 - y0 + 1), (256, 256));
 }

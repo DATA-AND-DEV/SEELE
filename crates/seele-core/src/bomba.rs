@@ -192,6 +192,8 @@ pub enum EventoDaBomba {
         /// O degrau com que o codificador foi armado — o que **está saindo**, e
         /// não o que foi pedido (§5).
         resolucao: Resolucao,
+        /// Dimensões efetivas pares; o degrau limita sua área.
+        medidas: (usize, usize),
         /// O teto que está valendo, para o balde do fluxo novo.
         teto_bps: u32,
     },
@@ -790,21 +792,23 @@ impl<C: Captura> Laco<C> {
     fn trocar_de_degrau(&mut self, para: Resolucao, teto_bps: u32) -> Result<(), String> {
         let cadencia = self.arranjo.cadencia;
         self.fonte = None;
-        let fonte = self
-            .captura
-            .iniciar(para, cadencia)
-            .map_err(|erro: CapturaRecusou| erro.to_string())?;
         let Some(compartilhamento) = self.compartilhamento.as_mut() else {
             return Ok(());
         };
         compartilhamento
             .refazer_com(para)
             .map_err(|erro| erro.to_string())?;
+        let medidas = compartilhamento.medidas();
+        let fonte = self
+            .captura
+            .iniciar_com_medidas(para, cadencia, medidas)
+            .map_err(|erro: CapturaRecusou| erro.to_string())?;
         self.fonte = Some(fonte);
         self.geracao += 1;
         self.emitir(EventoDaBomba::Fluxo {
             geracao: self.geracao,
             resolucao: para,
+            medidas,
             teto_bps,
         });
         Ok(())
@@ -816,13 +820,14 @@ impl<C: Captura> Laco<C> {
     /// [`EventoDaBomba::Parou`] e a bomba fica esperando o próximo teto.
     fn armar(&mut self) -> Result<(), String> {
         let arranjo = self.arranjo;
-        let compartilhamento = match Compartilhamento::abrir(
+        let compartilhamento = match Compartilhamento::abrir_para_fonte(
             self.biblioteca.clone(),
             &arranjo.teto,
             arranjo.faixa,
             arranjo.escolha_de_resolucao,
             arranjo.cadencia,
             arranjo.prioridade,
+            self.captura.tamanho_da_fonte(),
         ) {
             Ok(compartilhamento) => compartilhamento,
             Err(ErroDeCompartilhamento::Parado(motivo)) => {
@@ -836,11 +841,12 @@ impl<C: Captura> Laco<C> {
 
         let resolucao = compartilhamento.resolucao();
         let teto_bps = compartilhamento.teto().bps();
+        let medidas = compartilhamento.medidas();
         // Depois do codificador: se o OpenH264 recusar a configuração, não vale
         // ter acendido o indicador de captura do sistema para nada.
         let fonte = self
             .captura
-            .iniciar(resolucao, compartilhamento.cadencia())
+            .iniciar_com_medidas(resolucao, compartilhamento.cadencia(), medidas)
             .map_err(|erro: CapturaRecusou| erro.to_string())?;
 
         self.compartilhamento = Some(compartilhamento);
@@ -849,6 +855,7 @@ impl<C: Captura> Laco<C> {
         self.emitir(EventoDaBomba::Fluxo {
             geracao: self.geracao,
             resolucao,
+            medidas,
             teto_bps,
         });
         Ok(())
@@ -1126,7 +1133,8 @@ pub async fn escoar_com_espelho(
         match evento {
             EventoDaBomba::Fluxo {
                 geracao: nova,
-                resolucao,
+                resolucao: _,
+                medidas,
                 teto_bps,
             } => {
                 if let Some(velha) = transmissao.take() {
@@ -1142,8 +1150,8 @@ pub async fn escoar_com_espelho(
                     // ordem de grandeza; o `unwrap_or` está aqui porque
                     // `expect` é `deny` neste workspace e não porque o caso
                     // exista.
-                    width: u16::try_from(resolucao.largura()).unwrap_or(u16::MAX),
-                    height: u16::try_from(resolucao.altura()).unwrap_or(u16::MAX),
+                    width: u16::try_from(medidas.0).unwrap_or(u16::MAX),
+                    height: u16::try_from(medidas.1).unwrap_or(u16::MAX),
                 };
                 transmissao =
                     Some(Transmissao::abrir(conexao, cabecalho, teto_bps, Instant::now()).await?);
@@ -1555,6 +1563,7 @@ pub(crate) mod tests {
             Some(EventoDaBomba::Fluxo {
                 geracao: 1,
                 resolucao: Resolucao::P1080,
+                medidas: (1920, 1080),
                 teto_bps: 12_000_000,
             })
         );
@@ -1725,6 +1734,7 @@ pub(crate) mod tests {
             Some(EventoDaBomba::Fluxo {
                 geracao: 1,
                 resolucao: Resolucao::P720,
+                medidas: (1280, 720),
                 teto_bps: 4_800_000,
             }),
             "a bomba entregou quadro antes de dizer em que fluxo ele vai"
@@ -1799,6 +1809,7 @@ pub(crate) mod tests {
             Some(EventoDaBomba::Fluxo {
                 geracao: 1,
                 resolucao: Resolucao::P1080,
+                medidas: (1920, 1080),
                 teto_bps: 12_000_000,
             })
         );
@@ -1812,6 +1823,7 @@ pub(crate) mod tests {
             Some(EventoDaBomba::Fluxo {
                 geracao: 2,
                 resolucao: Resolucao::P720,
+                medidas: (1280, 720),
                 teto_bps: 4_000_000,
             }),
             "o degrau caiu e ninguém abriu fluxo novo: quem recebe leria 720p \
@@ -1959,6 +1971,7 @@ pub(crate) mod tests {
             Some(EventoDaBomba::Fluxo {
                 geracao: 2,
                 resolucao: Resolucao::P720,
+                medidas: (1280, 720),
                 teto_bps: 4_800_000,
             }),
             "o sinal voltou e a tela não voltou com ele"
@@ -2007,6 +2020,7 @@ pub(crate) mod tests {
                 EventoDaBomba::Fluxo {
                     geracao: 1,
                     resolucao: Resolucao::P720,
+                    medidas: (1280, 720),
                     teto_bps: 8_000_000,
                 },
                 EventoDaBomba::Quadro(QuadroParaOFio {
@@ -2047,6 +2061,69 @@ pub(crate) mod tests {
     /// é a tradução do [`EventoDaBomba::Fluxo`] em cabeçalho de abertura: a
     /// resolução que quem recebe lê é a que o **codificador** está usando, e não
     /// a que a pessoa pediu (§5, *a tela não promete a escolha*).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_captura_vertical_atravessa_o_fluxo_com_dimensoes_reais() {
+        let Some(biblioteca) = biblioteca() else {
+            return;
+        };
+        struct CapturaVertical;
+        impl Captura for CapturaVertical {
+            type Fonte = FonteDeMentira;
+            fn tamanho_da_fonte(&self) -> (usize, usize) {
+                (1080, 1920)
+            }
+            fn iniciar(
+                &mut self,
+                resolucao: Resolucao,
+                cadencia: Cadencia,
+            ) -> Result<Self::Fonte, CapturaRecusou> {
+                Captura::iniciar_com_medidas(self, resolucao, cadencia, (720, 1280))
+            }
+            fn iniciar_com_medidas(
+                &mut self,
+                _: Resolucao,
+                _: Cadencia,
+                medidas: (usize, usize),
+            ) -> Result<Self::Fonte, CapturaRecusou> {
+                assert_eq!(medidas, (720, 1280));
+                Ok(FonteDeMentira {
+                    largura: medidas.0,
+                    altura: medidas.1,
+                    passo: AtomicUsize::new(0),
+                })
+            }
+        }
+        let (saida, entrada) = par_paciente().await;
+        let captura = crate::video::CapturaEmCaixa::nova(CapturaVertical);
+        let (bomba, mut eventos) = ligar(
+            biblioteca,
+            captura,
+            arranjo(
+                TetoDeVideo::com_caminho(20_000_000).com_caminho_de_quem_hospeda(20_000_000),
+                SignalBand::Nominal,
+                Resolucao::P720,
+            ),
+            || {},
+        )
+        .expect("bomba vertical");
+        let escoando = tokio::spawn(async move {
+            escoar(&saida, ScreenId(7), ScreenSource::Monitor, &mut eventos).await
+        });
+        let mut recepcao = aceitar_com_paciencia(&entrada, || escoando.is_finished()).await;
+        assert_eq!(
+            (recepcao.cabecalho().width, recepcao.cabecalho().height),
+            (720, 1280)
+        );
+        let quadro = recepcao
+            .proximo_quadro()
+            .await
+            .expect("ler quadro")
+            .expect("primeiro quadro");
+        assert!(quadro.chave());
+        bomba.parar();
+        escoando.await.expect("tarefa").expect("fluxo");
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_bomba_atravessa_a_conexao_e_o_outro_lado_le_o_que_saiu() {
         let Some(biblioteca) = biblioteca() else {

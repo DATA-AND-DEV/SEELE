@@ -416,20 +416,30 @@ function aoMudarUmaSessao() {
   }, 150);
 }
 
+/** A leitura mais recente: uma resposta velha não sobrescreve a lista nova. */
+let leiturasDasSessoes = 0;
+
 /** Relê as sessões e o servidor no ar, e redesenha o que depende deles. */
 async function recarregarSessoes() {
+  const leitura = ++leiturasDasSessoes;
+  const epoca = epocaDaVista;
   let lidas = null;
   try {
     lidas = await invoke("sessoes");
   } catch {
     lidas = null;
   }
-  sessoesNaTela = Array.isArray(lidas) ? lidas : null;
+  let hospedado = null;
   try {
-    hospedadoNaTela = await invoke("meu_servidor");
+    hospedado = await invoke("meu_servidor");
   } catch {
-    hospedadoNaTela = null;
+    hospedado = null;
   }
+  // Uma leitura iniciada antes de SAIR/trocar/abrir outra chegada não fala da
+  // vista de agora. Aplica as duas respostas juntas e só a leitura mais nova.
+  if (leitura !== leiturasDasSessoes || epoca !== epocaDaVista) return;
+  sessoesNaTela = Array.isArray(lidas) ? lidas : null;
+  hospedadoNaTela = hospedado;
   if (variasSessoes()) {
     sessoesConhecidas = new Set(sessoesNaTela.map((s) => s.carimbo?.sessao));
     const chavesDeIcones = new Set(sessoesNaTela.map((s) => chaveDoIcone(s.carimbo)));
@@ -685,7 +695,9 @@ async function verSessao(sessao) {
   if (entrada?.snapshot) desenhar(entrada.snapshot);
   restaurarOEstadoDaVista(sessao);
   trilhaDesenhada = null;
+  const epoca = epocaDaVista;
   await recarregarSessoes();
+  if (esta !== trocasDeVista || epoca !== epocaDaVista || vistaDaJanela.sessao !== sessao) return;
   abrirTela("tela-sessao", FRASES_DAS_SESSOES.trocando(nomeDaSessao(sessoesNaTela?.find((s) => s.carimbo?.sessao === sessao))));
 }
 
@@ -706,6 +718,11 @@ function abrirMaisUmaSessao(alvo, apelido) {
  * sessão) passa por aqui, e nunca por `ejetar`, que derruba a sessão na vista.
  */
 function irParaAEntradaSemSair() {
+  // Receber/começar outra chegada vence qualquer retorno de vista em voo.
+  // As sessões e o foco de voz continuam abertos no backend.
+  epocaDaVista += 1;
+  trocasDeVista += 1;
+  trocaEmCurso = null;
   // O que a sessão mostrada tinha fica guardado com ela, e a tela vazia: a
   // entrada nova é desenhada sem o rascunho nem o anexo de outra.
   const saindo = vistaDaJanela.sessao;

@@ -124,9 +124,9 @@ impl Resolucao {
 ///
 /// # O que esta função devolve
 ///
-/// As medidas que dão **o mesmo orçamento de pixels do degrau** na proporção da
-/// fonte — sem tarja, sem mentira no rótulo, e sem gastar mais bits: é a mesma
-/// área, distribuída como a tela é.
+/// As medidas na proporção da fonte com **até o orçamento de pixels do
+/// degrau**, sem tarjas. O limite de 1920 por lado também vale: uma fonte muito
+/// larga ou alta usa menos área para continuar cabendo no protocolo.
 ///
 /// Ambas pares, que é o que o 4:2:0 exige: um plano de croma tem metade de cada
 /// lado, e lado ímpar não tem metade inteira.
@@ -152,11 +152,18 @@ pub fn medidas_para(
     // `área = l × a` e `l = proporção × a`, então `a = raiz(área / proporção)`.
     let altura = (area / proporcao).sqrt();
     let largura = altura * proporcao;
+    // O protocolo limita cada lado a 1920, inclusive em retrato/ultrawide.
+    let escala = (degrau_maximo_lado() as f64 / largura.max(altura)).min(1.0);
+    let (largura, altura) = (largura * escala, altura * escala);
     // Para baixo e para par: arredondar para cima poria o quadro acima do
     // orçamento de pixels que o degrau nomeia, e é esse orçamento que a régua
     // de `seele_core::tela` usa para decidir a cadência.
     let par = |v: f64| ((v as usize) / 2 * 2).max(2);
     (par(largura), par(altura))
+}
+
+const fn degrau_maximo_lado() -> usize {
+    Resolucao::P1080.largura()
 }
 
 /// Os três tetos de quadros por segundo que o §5 fechou.
@@ -226,6 +233,9 @@ impl Cadencia {
 /// mediu: 225 ms de atraso na voz contra 22 ms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ConfigDoCodificador {
+    /// Dimensões efetivas pares, limitadas pela área do degrau. `None` mantém
+    /// o quadro padrão 16:9 dos construtores existentes.
+    pub medidas: Option<(usize, usize)>,
     /// A resolução, que **segura**: é o quadro que cede, não ela.
     pub resolucao: Resolucao,
     /// O máximo de quadros por segundo. Por baixo dele roda a faixa automática
@@ -239,6 +249,28 @@ pub struct ConfigDoCodificador {
 }
 
 impl ConfigDoCodificador {
+    /// As dimensões validadas que captura, encoder e cabeçalho compartilham.
+    pub fn medidas_efetivas(&self) -> Result<(usize, usize), ErroDeVideo> {
+        let (largura, altura) = self
+            .medidas
+            .unwrap_or((self.resolucao.largura(), self.resolucao.altura()));
+        let area = largura.checked_mul(altura);
+        if largura < 2
+            || altura < 2
+            || largura % 2 != 0
+            || altura % 2 != 0
+            || largura > degrau_maximo_lado()
+            || altura > degrau_maximo_lado()
+            || area.is_none_or(|area| area > self.resolucao.largura() * self.resolucao.altura())
+        {
+            return Err(ErroDeVideo::CodecRecusou {
+                operacao: "validar as medidas do vídeo",
+                detalhe: format!("{largura}×{altura} excede o degrau ou não tem lados pares"),
+            });
+        }
+        Ok((largura, altura))
+    }
+
     /// O teto de banda em uso, resolvendo o zero para [`TETO_DA_PROVA_BPS`].
     #[must_use]
     pub const fn teto_efetivo_bps(&self) -> u32 {
@@ -440,6 +472,11 @@ pub trait CodificaVideo: Send + std::fmt::Debug {
     /// alguém pediu.
     fn resolucao(&self) -> Resolucao;
 
+    /// Dimensões reais do quadro, independentes do rótulo do degrau.
+    fn medidas(&self) -> (usize, usize) {
+        (self.resolucao().largura(), self.resolucao().altura())
+    }
+
     /// A cadência com que está armado.
     fn cadencia(&self) -> Cadencia;
 
@@ -498,6 +535,10 @@ pub trait CodificaVideo: Send + std::fmt::Debug {
 }
 
 impl CodificaVideo for Codificador {
+    fn medidas(&self) -> (usize, usize) {
+        self.medidas
+    }
+
     fn resolucao(&self) -> Resolucao {
         Self::resolucao(self)
     }
@@ -631,6 +672,7 @@ pub fn armar(
 #[derive(Debug)]
 pub struct Codificador {
     encoder: Encoder,
+    medidas: (usize, usize),
     resolucao: Resolucao,
     cadencia: Cadencia,
     quadros_por_segundo: u32,
@@ -666,16 +708,12 @@ impl Codificador {
         entropia: EntropyCodingMode,
     ) -> Result<Self, ErroDeVideo> {
         let resolucao = config.resolucao;
+        let medidas = config.medidas_efetivas()?;
         let quadros = config.cadencia.hz();
         let teto = config.teto_efetivo_bps();
 
-        let mut bruta = EncoderConfig::new(
-            resolucao.largura(),
-            resolucao.altura(),
-            teto as usize,
-            quadros as usize,
-            1,
-        );
+        let mut bruta =
+            EncoderConfig::new(medidas.0, medidas.1, teto as usize, quadros as usize, 1);
         // Modo bitrate, e não qualidade: o §3.2 diz que o vídeo tem teto, e este
         // é o único modo em que o OpenH264 respeita um. É também o único em que
         // ele pula quadro sozinho — o que é informação, não defeito, e sai daqui
@@ -754,6 +792,7 @@ impl Codificador {
 
         Ok(Self {
             encoder,
+            medidas,
             resolucao,
             cadencia: config.cadencia,
             quadros_por_segundo: quadros,
@@ -860,11 +899,9 @@ impl Codificador {
         quadro: &QuadroI420,
         pedido_de_chave: bool,
     ) -> Result<Option<QuadroCodificado>, ErroDeVideo> {
-        if quadro.largura() != self.resolucao.largura()
-            || quadro.altura() != self.resolucao.altura()
-        {
+        if (quadro.largura(), quadro.altura()) != self.medidas {
             return Err(ErroDeVideo::QuadroDeTamanhoErrado {
-                esperado: (self.resolucao.largura(), self.resolucao.altura()),
+                esperado: self.medidas,
                 recebido: (quadro.largura(), quadro.altura()),
             });
         }
@@ -1026,6 +1063,41 @@ mod testes {
         assert_eq!(medidas_para(Resolucao::P720, 0, 0), (1280, 720));
     }
 
+    #[test]
+    fn medidas_verticais_e_extremas_cabem_no_degrau_e_no_fio() {
+        for degrau in Resolucao::TODAS {
+            for (l, a) in [(1080, 1920), (5120, 1440), (1, usize::MAX), (usize::MAX, 1)] {
+                let medidas = medidas_para(degrau, l, a);
+                assert!(medidas.0 >= 2 && medidas.1 >= 2);
+                assert!(medidas.0 <= 1920 && medidas.1 <= 1920);
+                assert_eq!(medidas.0 % 2, 0);
+                assert_eq!(medidas.1 % 2, 0);
+                assert!(medidas.0 * medidas.1 <= degrau.largura() * degrau.altura());
+                assert!(ConfigDoCodificador {
+                    resolucao: degrau,
+                    medidas: Some(medidas),
+                    ..Default::default()
+                }
+                .medidas_efetivas()
+                .is_ok());
+            }
+        }
+        assert_eq!(medidas_para(Resolucao::P720, 1080, 1920), (720, 1280));
+        for medidas in [
+            (0, 720),
+            (721, 1280),
+            (1920, 1920),
+            (usize::MAX, usize::MAX),
+        ] {
+            assert!(ConfigDoCodificador {
+                medidas: Some(medidas),
+                ..Default::default()
+            }
+            .medidas_efetivas()
+            .is_err());
+        }
+    }
+
     use super::*;
 
     /// Prova em tempo de compilação do que o §2 exige: o encoder mora numa
@@ -1103,6 +1175,7 @@ mod testes {
         );
         assert_eq!(
             ConfigDoCodificador {
+                medidas: None,
                 teto_bps: 640_000,
                 ..ConfigDoCodificador::default()
             }

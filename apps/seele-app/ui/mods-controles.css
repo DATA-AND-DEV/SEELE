@@ -628,10 +628,22 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
   outline-offset: -2px;
 }
 
-/* **O diagnóstico nativo recolhe, e não some.** U15 pediu hierarquia — nome e
-   presença primeiro, sinal e detalhes recolhíveis —, e recolher é diferente de
-   tirar: quem precisa do sinal continua a um toque dele. */
-.pessoa-apresentada { position: relative; padding-right: 24px; }
+/* Cada linha nativa reinicia a reserva; os detalhes abertos não herdam a
+   coluna de ações da pessoa que os contém. */
+.roster .pessoa {
+  --pessoa-espaco-acoes: 16px;
+  --pessoa-altura-minima: 56px;
+}
+
+/* A coluna do «⋯» pertence ao produto. O cartão e os detalhes do MOD ficam
+   fora do alvo de 44px, com 12px de folga e 16px até a borda da linha. */
+.roster :is(.pessoa-apresentada, .pessoa-com-detalhes) {
+  --pessoa-espaco-acoes: 72px;
+  --pessoa-altura-minima: 68px;
+  position: relative;
+  padding-right: var(--pessoa-espaco-acoes);
+  min-height: var(--pessoa-altura-minima);
+}
 
 /* A apresentação do MOD ocupa a faixa; identidade verificável e moderação
    permanecem nos detalhes nativos, fora da caixa fechada do MOD. */
@@ -663,11 +675,6 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
 .pessoa-nativo { margin: 0; }
 .pessoa-nativo[open] { margin-top: 6px; }
 
-/* A linha **nativa** com `pessoa.detalhes`: o mesmo «⋯» da linha apresentada,
-   no canto, com o lugar dele reservado. Sem contribuição, a classe não existe
-   e a linha é a de sempre. */
-.pessoa-com-detalhes { position: relative; padding-right: 24px; }
-
 /* **De quem é cada seção do «⋯»** (`pessoa.detalhes`; decisão da orquestradora,
    16/10): o nome do MOD, escrito pelo produto, fora do nó do MOD e nas cores
    do núcleo, que o tema não alcança — uma seção sem dono ao lado do MODERAR
@@ -691,9 +698,16 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
 
 .pessoa-nativo-resumo {
   position: absolute;
-  top: 8px;
-  right: 2px;
-  width: 22px;
+  top: 12px;
+  right: calc(16px + var(--cel-seguro-dir, 0px));
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  background: var(--seele-negro-absoluto);
   text-align: center;
   cursor: pointer;
   font-size: var(--seele-t-dado);

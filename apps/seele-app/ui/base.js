@@ -217,6 +217,13 @@ async function invoke(comando, args) {
     enviados = { ...(enviados ?? {}), epoca };
     if (instancia !== null) enviados.pedido = { instancia, n };
   }
+  // A saída revoga a vista no gesto, antes do IPC: snapshots e listas em voo
+  // não podem ressuscitá-la enquanto o nativo encerra a conexão.
+  const saiDaVista = (comando === "disconnect" || comando === "encerrar_sessao") &&
+    enviados?.carimbo?.sessao === origem && origem !== null;
+  const geracaoDaSaida = vistaDaJanela.geracao;
+  const epocaDaSaida = saiDaVista ? ++epocaDaVista : null;
+  if (saiDaVista) vistaDaJanela.sessao = null;
   if (comando === "connect") entradasEmCurso += 1;
   let resposta;
   try {
@@ -239,6 +246,14 @@ async function invoke(comando, args) {
       enviados = { ...enviados, carimbo: { ...enviados.carimbo, geracao: nao.esperado } };
       resposta = await invocarNaJanela(comando, enviados);
     }
+  } catch (falha) {
+    // Falha de transporte não transforma a saída em sucesso. Uma navegação
+    // posterior, porém, continua dona da vista e do foco.
+    if (saiDaVista && epocaDaVista === epocaDaSaida && vistaDaJanela.sessao === null) {
+      vistaDaJanela.sessao = origem;
+      vistaDaJanela.geracao = geracaoDaSaida;
+    }
+    throw falha;
   } finally {
     if (comando === "connect") entradasEmCurso -= 1;
   }

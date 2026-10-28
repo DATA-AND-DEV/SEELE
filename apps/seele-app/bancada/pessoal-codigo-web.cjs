@@ -42,17 +42,22 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/u
      let exportavel = true; try { await crypto.subtle.exportKey('pkcs8', chave.privateKey); } catch { exportavel = false; }
      if (exportavel) throw Error('chave privada exportável');
      await noBanco('readwrite', loja => loja.put({ impressao: 'servidor-antigo', apelido: 'antes', marcador: 173 }));
-     await alterarContatoPessoalWeb(codigo, c => ({ ...c, nome: 'Mesmo nome', amigo: true }));
+     await alterarContatoPessoalWeb(codigo, c => ({ ...c, nome: 'Nome que eu escolhi', amigo: true }));
      const outraChave = Array.from(new Uint8Array(await crypto.subtle.exportKey('raw', (await crypto.subtle.generateKey('Ed25519', false, ['sign','verify'])).publicKey)));
      const outro = await operarCodigoPessoalWeb({ acao: 'codigo_da_chave', chave: outraChave });
-     await alterarContatoPessoalWeb(outro, c => ({ ...c, nome: 'Mesmo nome', amigo: true }));
+     await alterarContatoPessoalWeb(outro, c => ({ ...c, nome: 'Nome que eu escolhi', amigo: true }));
     }, codigoB);
     await a.reload(); assert.equal(await a.evaluate(() => meuCodigoPessoalWeb()), codigoA);
     assert.equal(await a.evaluate(async () => (await servidorConhecido('servidor-antigo')).marcador), 173);
-    const amigos = await a.evaluate(() => contatosPessoaisWeb(true)); assert.equal(amigos.length, 2); assert.ok(amigos.every(c => c.nome === 'Mesmo nome')); assert.notEqual(amigos[0].codigo, amigos[1].codigo);
+    const amigos = await a.evaluate(() => contatosPessoaisWeb(true)); assert.equal(amigos.length, 2); assert.ok(amigos.every(c => c.nome === 'Nome que eu escolhi')); assert.notEqual(amigos[0].codigo, amigos[1].codigo);
     for (const p of [a, b]) await p.evaluate(async urlDoEncontro => {
      window.estados = []; window.textos = []; window.pares = [];
-     window.servico = await criarServicoDeChamadasWeb({ urlDoEncontro, iceServers: [], aoEstado: e => estados.push(e), aoTexto: e => textos.push(e), aoPar: p => pares.push(!!p) });
+     window.servico = await criarServicoDeChamadasWeb({ urlDoEncontro, iceServers: [], obterPerfil: async apelido => {
+       const tela=document.createElement('canvas');tela.width=tela.height=16;
+       tela.getContext('2d').fillRect(0,0,16,16);
+       return {apelido,retrato:tela.toDataURL('image/png')};
+     }, aoPerfil: perfil => guardarPerfilPessoalWeb(perfil),
+     aoEstado: e => estados.push(e), aoTexto: e => textos.push(e), aoPar: p => pares.push(!!p) });
      await servico.receberPorCodigo({ apelido: 'Mesmo nome' });
     }, urlDoEncontro);
     await b.evaluate(codigo => servico.chamarCodigo({ codigo, apelido: 'Mesmo nome' }), codigoA);
@@ -64,6 +69,12 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/u
     await a.evaluate(() => servico.atender());
     assert.equal(await a.evaluate(async codigo => (await contatosPessoaisWeb()).find(c => c.codigo === codigo).direcao, codigoB), 'recebi');
     await Promise.all([a,b].map(p => p.waitForFunction(() => servico.ler().estado === 'dentro', null, { timeout: 20000 })));
+    await Promise.all([a,b].map(p=>p.waitForFunction(()=>servico.ler().apelido==='Mesmo nome')));
+    assert.notEqual(codigoA,codigoB,'nomes iguais preservam identidades diferentes');
+    await a.waitForFunction(async codigo=>(await lerPerfilPessoalWeb(codigo))?.retrato?.startsWith('data:image/png;base64,'),codigoB);
+    await b.waitForFunction(async codigo=>(await lerPerfilPessoalWeb(codigo))?.retrato?.startsWith('data:image/png;base64,'),codigoA);
+    assert.equal(await a.evaluate(codigo=>lerPerfilPessoalWeb(codigo,Array(32).fill(0)),codigoB),undefined,'cache não reutiliza foto sob outra chave');
+    assert.equal(await a.evaluate(codigo=>lerPerfilPessoalWeb(codigo).then(p=>p.apelido),codigoB),'Mesmo nome');
     await b.evaluate(() => servico.enviarTexto('por código, direto'));
     await a.waitForFunction(() => textos.some(t => t.texto === 'por código, direto'));
     await b.evaluate(() => servico.encerrar());
@@ -84,7 +95,38 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/u
     await b.evaluate(codigo => servico.chamarCodigo({ codigo, apelido: 'Mesmo nome' }), codigoA);
     await b.waitForFunction(() => servico.ler().estado === 'encerrada');
     assert.equal(await a.evaluate(() => estados.filter(e => e.estado === 'tocando').length), toquesAntes, 'bloqueado não pode tocar');
-    console.log(JSON.stringify({ motor, identidadePersistente: true, primeirasAbasConvergem: true, servidorAntigoPreservado: true, nomesIguaisNaoColidem: true, codigoNosDoisSentidos: true, aceiteRecusaCancelamento: true, pinoIncorretoRecusado: true, bloqueadoNaoToca: true }));
+    assert.equal(await a.evaluate(()=>retratoParaChamadaPessoal('https://exemplo.invalid/foto.png')),null,'não busca retrato remoto');
+    assert.equal(await a.evaluate(async codigo=>(await contatosPessoaisWeb()).find(c=>c.codigo===codigo).nome,codigoB),'Nome que eu escolhi','perfil remoto não troca renomeação local');
+    const recusasDoPerfil=await a.evaluate(async codigo=>{
+      const perfil=await lerPerfilPessoalWeb(codigo);
+      const uri=perfil.retrato;
+      const alterar=editar=>{const b=Uint8Array.from(atob(uri.slice(22)),c=>c.charCodeAt(0));editar(b);return 'data:image/png;base64,'+btoa(Array.from(b,b=>String.fromCharCode(b)).join(''));};
+      const vetores=[
+        {v:1,apelido:'x'.repeat(129),retrato:null},
+        {v:1,apelido:'x\ny',retrato:null},
+        {v:1,apelido:'Lia',retrato:'https://exemplo.invalid/foto.png'},
+        {v:1,apelido:'Lia',retrato:'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='},
+        {v:1,apelido:'Lia',retrato:'data:image/png;base64,'+btoa('x'.repeat(8193))},
+        {v:1,apelido:'Lia',retrato:'data:image/png;base64,AAAA'},
+        {v:1,apelido:'Lia',retrato:alterar(b=>new DataView(b.buffer).setUint32(16,129))},
+        {v:1,apelido:'Lia',retrato:uri.slice(0,66)},
+      ];
+      let recusas=0;for(const p of vetores)try{await validarPerfilDaChamadaPessoal(p);}catch{recusas++;}
+      if(recusas!==vetores.length)throw Error('perfil inválido aceito');
+      await validarPerfilDaChamadaPessoal({v:1,apelido:'Lia',retrato:uri});
+      await validarPerfilDaChamadaPessoal({v:1,apelido:'Lia',retrato:null});
+      return recusas;
+    },codigoB);
+    assert.equal(recusasDoPerfil,8);
+    const perfilAntes=await a.evaluate(codigo=>lerPerfilPessoalWeb(codigo),codigoB);
+    await a.reload();
+    await contextoA.setOffline(true);
+    assert.deepEqual(await a.evaluate(codigo=>lerPerfilPessoalWeb(codigo),codigoB),perfilAntes,'cache da última conexão sobrevive à recarga e leitura offline');
+    await contextoA.setOffline(false);
+    const publicaB=await b.evaluate(async()=> (await identidadePessoalDoNavegador()).publica);
+    await a.evaluate(async ({codigo,publica})=>guardarPerfilPessoalWeb({codigo,publica,apelido:'Mesmo nome',retrato:null}),{codigo:codigoB,publica:publicaB});
+    assert.equal(await a.evaluate(codigo=>lerPerfilPessoalWeb(codigo).then(p=>p.retrato),codigoB),null,'remover foto substitui a cópia anterior');
+    console.log(JSON.stringify({ motor, identidadePersistente: true, primeirasAbasConvergem: true, servidorAntigoPreservado: true, nomesIguaisNaoColidem: true, codigoNosDoisSentidos: true, aceiteRecusaCancelamento: true, pinoIncorretoRecusado: true, bloqueadoNaoToca: true, perfilPngCacheOffline: true, recusasDoPerfil }));
    } finally { await navegador.close(); }
   }
  } finally { encontro.kill('SIGTERM'); await new Promise(r => servidor.close(r)); }

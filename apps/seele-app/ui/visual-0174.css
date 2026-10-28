@@ -8,6 +8,8 @@
 .abas-superiores > button, .abas-superiores .entrada-de-mod { min-height: 48px; padding: 10px 12px; background: transparent; color: var(--seele-osso-apagado); border: 0; border-bottom: 2px solid transparent; border-radius: 0; white-space: nowrap; font: inherit; }
 .abas-superiores > button[aria-current="page"], .abas-superiores .entrada-de-mod[aria-current="page"] { border-bottom-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
 .abas-superiores #lista-mods-navegacao { display: flex; align-items: stretch; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.abas-superiores #lista-mods-navegacao > li { display: flex; flex: 0 0 auto; align-items: stretch; }
+.abas-superiores .entrada-de-mod { flex-direction: row; align-items: center; justify-content: center; }
 .abas-superiores .entrada-de-mod-origem { display: none; }
 
 .inicio-conectar-linha { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; }

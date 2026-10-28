@@ -34,10 +34,12 @@
 // captura ou a reprodução para, a pessoa e a sala ficam sabendo» (ADR 0057). A
 // sala fica sabendo pela sessão, que é a Tarefa 2.6; daqui sai o evento.
 //
-// # No desktop, nada
+// # Captura nas duas cascas
 //
-// Este arquivo é carregado nas duas cascas e no desktop só declara: a voz de
-// lá é a do `seele-core`, e ninguém chama `criarVozDoNavegador` nela.
+// Salas de servidor no desktop usam seele-core/CPAL. Chamadas pessoais usam
+// este adaptador também no WebView desktop: getUserMedia pede autorização de
+// captura da plataforma. Aceitar uma chamada abre somente a saída; capturar
+// depende do gesto explícito no botão de microfone.
 
 /** A configuração da voz no navegador. */
 const CONFIGURACAO_DA_VOZ = Object.freeze({

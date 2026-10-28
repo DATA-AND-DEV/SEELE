@@ -643,7 +643,7 @@
 /* O rodapé: quem você é, e os ajustes desta máquina. Separado por um filete
    porque é outra coisa — não é uma terceira saída. */
 .boot-rodape {
-  --seele-rodape-altura: 56px;
+  --seele-rodape-altura: 44px;
   display: flex;
   align-items: stretch;
   gap: 8px;
@@ -663,7 +663,8 @@
   gap: 10px;
   flex: 1;
   min-width: 0;
-  padding: 10px 12px;
+  height: var(--seele-rodape-altura);
+  padding: 4px 12px;
   font: inherit;
   text-align: left;
   color: var(--seele-osso-apagado);
@@ -690,19 +691,10 @@
 }
 
 
-/* A engrenagem: **quadrada**, da altura do vizinho, com o glifo do mesmo corpo
-   que ela tem na sessão.
- *
- * A comp escreve 44px de largura e deixa a altura vir do `stretch` do rodapé, o
- * que dá um retângulo de 44×56 — mais largo que o avatar de 32 ao lado e mais
- * alto que largo. Somado a isso, o `.botao-fantasma` de `base.css` tem corpo de
- * rótulo, e o glifo, medido em `em`, saía com 11px contra os 15px da mesma
- * engrenagem na sessão. Caixa maior e desenho menor ao mesmo tempo: «o botão de
- * configuração parece ser maior do que o de perfil, aí não fica uniforme».
- *
- * `--seele-alvo-toque` é a altura do bloco do perfil ao lado — avatar de 32 mais
- * os 10 de folga em cima e embaixo e os dois filetes. Escrita uma vez e usada
- * nos dois lugares, para as duas nunca mais divergirem. */
+/* Perfil e ajustes compartilham a mesma altura; o glifo fica centrado no
+   alvo quadrado, inclusive quando a entrada esconde o nome no celular. */
+.boot-perfil .operador-quem-texto { line-height: 1.2; }
+
 .boot-rodape > .botao-fantasma {
   width: var(--seele-rodape-altura);
   height: var(--seele-rodape-altura);
@@ -1078,6 +1070,12 @@
   align-items: center;
   padding: 8px 24px;
   margin: 0;
+}
+
+#tela-boot .boot-topo .boot-rodape {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 #tela-boot .boot-topo .boot-marca {

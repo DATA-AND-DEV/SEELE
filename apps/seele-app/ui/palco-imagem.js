@@ -914,6 +914,20 @@ async function trocarCinema(ligada) {
     delete document.body.dataset.cinemaModo;
   }
   if (mudou) marcarCaminhoDoCinema(ligada);
+  // A casca móvel fornece sua saída junto da alternativa de vídeo do iOS.
+  // No computador a cabeça do palco fica escondida durante o cinema.
+  if (document.documentElement.dataset.casca !== "celular") {
+    let sair = $("palco-sair-desktop");
+    if (ligada && !sair) {
+      sair = document.createElement("button");
+      sair.id = "palco-sair-desktop";
+      sair.className = "palco-sair-desktop";
+      sair.type = "button";
+      sair.textContent = "SAIR DA TELA CHEIA";
+      sair.addEventListener("click", () => void trocarCinema(false));
+      document.body.append(sair);
+    } else if (!ligada) sair?.remove();
+  }
   const botao = $("palco-cheia");
   if (botao) botao.textContent = ligada ? "SAIR DA TELA CHEIA" : "TELA CHEIA";
   try {

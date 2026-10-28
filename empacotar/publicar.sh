@@ -1429,6 +1429,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/estado-por-sessao.cjs
     uma_bancada node apps/seele-app/bancada/palco-na-troca-de-vista.cjs
     uma_bancada node apps/seele-app/bancada/isolamento-das-sessoes.cjs
+    uma_bancada node apps/seele-app/bancada/saida-hospedagem-navegacao.cjs
     uma_bancada node apps/seele-app/bancada/multi-sessao-na-ponte.cjs
     uma_bancada node apps/seele-app/bancada/vista-pessoal-0-17.cjs
     uma_bancada node apps/seele-app/bancada/palco-depois-de-reconectar.cjs
@@ -1444,6 +1445,7 @@ todas_as_bancadas_de_navegador() {
     # A área útil da 0.17: com `--webkit`, uma execução mede os DOIS motores (o mesmo comando do `ci.yml`, ~10 min; cabe no
     # prazo da etapa, `PRAZO_DA_ETAPA_S`, 40 min). Pede o Playwright de Node com o Chromium e o WebKit.
     uma_bancada node apps/seele-app/bancada/pos-release-ui.cjs
+    uma_bancada node apps/seele-app/bancada/proporcao-tela-cheia.cjs
     uma_bancada node apps/seele-app/bancada/visual-0174.cjs target/visual-0174
     uma_bancada node apps/seele-app/bancada/mods-nav-0174.cjs target/mods-nav-0174
     uma_bancada node apps/seele-app/bancada/visual-0174.cjs target/visual-0174-extras --extras

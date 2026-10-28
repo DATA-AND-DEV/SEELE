@@ -222,6 +222,7 @@ fn o_codificador_do_sistema_ao_lado_do_de_software() {
     let resolucao = Resolucao::P720;
     let teto_bps = 2_000_000;
     let config = ConfigDoCodificador {
+        medidas: None,
         resolucao,
         cadencia: Cadencia::Q30,
         teto_bps,
@@ -297,6 +298,7 @@ fn quanto_a_cadencia_compra_pelo_mesmo_teto() {
                 let mut codificador = armar(
                     &biblioteca,
                     ConfigDoCodificador {
+                        medidas: None,
                         resolucao,
                         cadencia: Cadencia::Q60,
                         teto_bps,

@@ -120,6 +120,9 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unk
     assert.equal(await b.evaluate(()=>pares.includes(true)),false);
     await a.evaluate(()=>servico.atender());
     await Promise.all([a,b].map(p=>p.waitForFunction(()=>servico.ler().estado==='dentro',null,{timeout:20000})));
+    await a.waitForFunction(()=>servico.ler().apelido==='Visitante');
+    await b.waitForFunction(()=>servico.ler().apelido==='Receptor');
+    assert.notEqual(await b.evaluate(()=>servico.ler().apelido), await a.evaluate(()=>servico.codigo), 'código não vira nome da conversa');
     await b.evaluate(()=>servico.enviarTexto('mensagem direta autenticada'));
     await a.waitForFunction(()=>textos.some(t=>t.de==='par'&&t.texto==='mensagem direta autenticada'));
     // Fechar o transporte real simula perda do RTC sem invocar sair no serviço.

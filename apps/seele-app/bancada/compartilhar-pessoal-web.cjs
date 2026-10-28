@@ -37,15 +37,22 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
     a=criarCompartilhamentoPessoalWeb({servico:sa,transporte:transport,palco:document.getElementById('a'),enviarControle:c=>b.receberControle(c),aoEstado:(tipo,detalhe)=>events.push({de:'a',tipo,detalhe})});
     b=criarCompartilhamentoPessoalWeb({servico:sb,transporte:pb.tela,palco:document.getElementById('b'),enviarControle:c=>a.receberControle(c),aoEstado:(tipo,detalhe)=>events.push({de:'b',tipo,detalhe})});
     const frames=()=>events.filter(e=>e.de==='b'&&e.tipo==='quadro').length;
-    function artificial(color){const c=document.createElement('canvas');c.width=320;c.height=180;const ctx=c.getContext('2d');let n=0;const paint=()=>{ctx.fillStyle=color;ctx.fillRect(0,0,320,180);ctx.fillStyle='white';ctx.fillRect(100+(n++%20),60,20,20);};paint();const stream=c.captureStream(20);const timer=setInterval(paint,50);return{stream,stop:()=>{clearInterval(timer);stream.getTracks().forEach(t=>t.stop());}};}
+    function artificial(color,w=320,h=180){const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d');let n=0;const paint=()=>{ctx.fillStyle=color;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle='white';ctx.fillRect(100+(n++%20),60,20,20);};paint();const stream=c.captureStream(20);const timer=setInterval(paint,50);return{stream,resize:(w,h)=>{c.width=w;c.height=h;},stop:()=>{clearInterval(timer);stream.getTracks().forEach(t=>t.stop());}};}
     const pixel=()=>[...document.querySelector('#b canvas').getContext('2d').getImageData(10,10,1,1).data];
     let captured=false,oldPackets,newPackets;
     if(temLeituraDeVideoDaTela()&&typeof VideoEncoder==='function'){
      captured=true;const red=artificial('#e02020');a.usarMidia(red.stream);await until(()=>frames()>1);
      check(pixel()[0]>150&&pixel()[2]<80,'H264 vermelho real');a.parar();await until(()=>document.getElementById('b').hidden);red.stop();
      check(red.stream.getTracks().every(t=>t.readyState==='ended')&&!a.noAr,'parar solta captura');check(!document.querySelector('[data-captura-da-tela]'),'parar remove leitor de vídeo');oldPackets=packets.splice(0);
-     const blue=artificial('#2040e0');const before=frames();a.usarMidia(blue.stream);await until(()=>frames()>before+1);
+     const blue=artificial('#2040e0',180,320);const before=frames();a.usarMidia(blue.stream);await until(()=>frames()>before+1);
      check(pixel()[2]>150&&pixel()[0]<80,'reinício H264 azul real');
+     const output=document.querySelector('#b canvas');
+     check(output.height>output.width,'monitor vertical anunciado e decodificado vertical');
+     const square=()=>{const ctx=output.getContext('2d'),im=ctx.getImageData(0,0,output.width,output.height);let x0=Infinity,y0=Infinity,x1=-1,y1=-1;for(let y=0;y<output.height;y++)for(let x=0;x<output.width;x++){const i=(y*output.width+x)*4;if(im.data[i]>200&&im.data[i+1]>200&&im.data[i+2]>200){x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}}return (x1-x0+1)/(y1-y0+1);};
+     check(Math.abs(square()-1)<.15,'quadrado mantém proporção no monitor vertical');
+     const fResize=frames();blue.resize(320,180);await until(()=>frames()>fResize+8);
+     check(Math.abs(square()-1)<.15,'redimensionar captura não achata quadrado');
+     blue.resize(180,320);const fRestore=frames();await until(()=>frames()>fRestore+8);
      b.receberControle('TelaParou');check(!document.getElementById('b').hidden,'controle atrasado não fecha fluxo novo');
      for(const bytes of oldPackets)await pa.tela.enviar(new Uint8Array(bytes));await tick();
      check(!document.getElementById('b').hidden&&pixel()[2]>150,'geração velha não apaga nem pinta nova');

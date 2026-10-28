@@ -12273,7 +12273,7 @@ fn ajustar_limites_da_tela(
 /// Ignora a falta da janela em vez de reclamar: chamar isto durante o
 /// fechamento não é erro de ninguém.
 #[tauri::command]
-fn tela_cheia(app: AppHandle, ligada: bool) {
+fn tela_cheia(app: AppHandle, ligada: bool) -> Result<(), String> {
     // Pelo rótulo, e por qualquer uma se o rótulo não achar. O `main` é o que o
     // Tauri dá quando o `tauri.conf.json` não nomeia a janela — e ele não a
     // nomeia. Depender de um padrão que não está escrito em lugar nenhum é o
@@ -12284,11 +12284,12 @@ fn tela_cheia(app: AppHandle, ligada: bool) {
         .or_else(|| app.webview_windows().into_values().next());
     let Some(janela) = janela else {
         tracing::debug!(ligada, "não há janela para pôr em tela cheia");
-        return;
+        return Ok(());
     };
-    if let Err(erro) = janela.set_fullscreen(ligada) {
+    janela.set_fullscreen(ligada).map_err(|erro| {
         tracing::debug!(%erro, ligada, "a janela não trocou de modo");
-    }
+        "Não foi possível alterar a tela cheia da janela.".to_owned()
+    })
 }
 
 /// Anota o nome e a imagem do servidor na lista de visitados.

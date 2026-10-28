@@ -20,6 +20,9 @@ function criarEnlaceDaChamadaWeb({
     voz: pc.createDataChannel("voz", { negotiated: true, id: 1, ordered: false, maxRetransmits: 0 }),
     tela: pc.createDataChannel("tela", { negotiated: true, id: 2, ordered: true }),
   };
+  // Perfil opcional, sem negociação DCEP e fora da condição de abertura dos
+  // três canais: pares da 0.18 mantêm o transporte que já conhecem.
+  const canalDoPerfil = pc.createDataChannel("perfil", { negotiated: true, id: 3, ordered: true });
   const MAX_MENSAGEM = 16 * 1024;
   const MAX_VOZ = 1100;
   const MAX_FILA = 1024 * 1024;
@@ -147,6 +150,36 @@ function criarEnlaceDaChamadaWeb({
     },
   });
 
+  let perfilAEnviar = null;
+  const ouvintesDoPerfil = new Set();
+  const perfisPendentes = [];
+  canalDoPerfil.binaryType = "arraybuffer";
+  canalDoPerfil.addEventListener("message", evento => {
+    if (terminou || !(evento.data instanceof ArrayBuffer) || evento.data.byteLength > MAX_MENSAGEM) return;
+    const bytes = new Uint8Array(evento.data);
+    if (ouvintesDoPerfil.size) for (const ouvir of ouvintesDoPerfil) ouvir(bytes);
+    else if (perfisPendentes.length < 1) perfisPendentes.push(bytes);
+  });
+  function enviarPerfilPendente() {
+    if (!perfilAEnviar || terminou || canalDoPerfil.readyState !== "open") return;
+    const bytes = perfilAEnviar; perfilAEnviar = null;
+    try { if (canalDoPerfil.bufferedAmount <= LIMIAR) canalDoPerfil.send(bytes); } catch { /* O canal é opcional. */ }
+  }
+  canalDoPerfil.addEventListener("open", enviarPerfilPendente);
+  limpezas.add(() => { perfilAEnviar = null; ouvintesDoPerfil.clear(); perfisPendentes.length = 0; canalDoPerfil.close(); });
+  const perfil = {
+    enviar(bytes) {
+      if (terminou || !["connecting", "open"].includes(canalDoPerfil.readyState) || perfilAEnviar || !(bytes instanceof Uint8Array) || bytes.byteLength > MAX_MENSAGEM || canalDoPerfil.bufferedAmount > LIMIAR) return false;
+      perfilAEnviar = bytes.slice(); enviarPerfilPendente(); return true;
+    },
+    ouvir(ouvir) {
+      if (terminou) return () => {};
+      ouvintesDoPerfil.add(ouvir);
+      for (const bytes of perfisPendentes.splice(0)) ouvir(bytes);
+      return () => ouvintesDoPerfil.delete(ouvir);
+    },
+  };
+
   async function colherCandidatos() {
     if (pc.iceGatheringState === "complete") return;
     await esperar(new Promise((ok, nao) => {
@@ -219,6 +252,6 @@ function criarEnlaceDaChamadaWeb({
   }
   sinal?.addEventListener("abort", abortar, { once: true });
   if (sinal?.aborted) abortar();
-  return { pronto, iniciar, receberSinalAutenticado, controle, transporteDaVoz, tela, abortar,
+  return { pronto, iniciar, receberSinalAutenticado, controle, transporteDaVoz, tela, perfil, abortar,
     get estado() { return estado; }, get contas() { return { ...contas }; } };
 }
