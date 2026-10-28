@@ -1,0 +1,63 @@
+/* Composição nova 0.17.4: início e navegação superior. Primitivos e componentes permanecem em suas folhas proprietárias. */
+.inicio-conectar { margin: 0; padding: 24px; border: 1px solid var(--seele-linha); border-radius: var(--seele-raio); background: var(--seele-negro-absoluto); }
+.inicio-conectar h2 { font-family: var(--seele-display); color: var(--seele-osso); font-size: 24px; font-weight: 500; letter-spacing: .02em; text-transform: none; margin: 0 0 12px; display: block; }
+.inicio-conectar .boot-saidas { margin: 0; }
+.inicio-conectar .boot-dica { margin-bottom: 0; }
+.inicio-conectar #botao-conectar { width: 100%; }
+
+.abas-superiores > button, .abas-superiores .entrada-de-mod { min-height: 48px; padding: 10px 12px; background: transparent; color: var(--seele-osso-apagado); border: 0; border-bottom: 2px solid transparent; border-radius: 0; white-space: nowrap; font: inherit; }
+.abas-superiores > button[aria-current="page"], .abas-superiores .entrada-de-mod[aria-current="page"] { border-bottom-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
+.abas-superiores #lista-mods-navegacao { display: flex; align-items: stretch; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.abas-superiores .entrada-de-mod-origem { display: none; }
+
+.inicio-conectar-linha { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; }
+.inicio-conectar-linha .campo { font-size: 13px; gap: 8px; }
+
+.inicio-contexto { border-left: 1px solid var(--seele-linha-forte); padding-left: 24px; font-size: 18px; }
+.inicio-introducao h1 { font-family:var(--seele-display); font-weight:500; font-size:32px; line-height:1.25; margin: 0 0 8px; }
+.inicio-hospedar { padding: 24px; border: 1px solid var(--seele-linha); border-radius: var(--seele-raio); display: grid; gap: 12px; }
+
+.abas-superiores {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  min-height: 64px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--seele-linha);
+  overflow-x: auto;
+  flex: 0 0 auto;
+}
+.sessao-assinatura { font-family:var(--seele-display); font-weight:900; font-size:28px; line-height:1; color: var(--seele-laranja-nerv); align-self: center; padding-right: 12px; }
+.sessao-contexto { align-self: center; padding: 0 24px; border-left: 1px solid var(--seele-linha-forte); border-right: 1px solid var(--seele-linha-forte); white-space: nowrap; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; }
+
+/* Condições de composição, após os valores padrão do componente. */
+@media (max-width: 700px) {
+.inicio-conectar { padding: 16px; }
+.abas-superiores { min-height: 44px; padding: 0 12px; gap: 4px; }
+.abas-superiores > button, .abas-superiores .entrada-de-mod { min-height: 44px; font-size: 13px; }
+}
+
+@media(max-width: 700px) {
+.inicio-conectar-linha { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media(max-width: 700px) {
+.inicio-contexto { padding-left: 12px; font-size: 15px; }
+.inicio-introducao h1 { font-size: 28px; }
+.inicio-hospedar { padding: 16px; }
+}
+
+@media(max-width: 700px) {
+.abas-superiores { min-height: 52px; }
+.sessao-assinatura { font-size: 22px; padding-right: 4px; }
+.sessao-contexto { max-width: 12ch; font-size: 12px; padding: 0 8px; }
+}
+
+@media(max-width: 700px) {
+#tela-boot .inicio-conectar { order: 1; }
+#tela-boot .inicio-hospedar { order: 5; }
+#tela-boot .boot-esq > *:not(.inicio-conectar):not(#boot-servidores):not(#boot-amigos) { order: 6; }
+}
+@media(max-width:700px) {
+  .sessao-assinatura, .sessao-contexto, .abas-superiores > button { flex-shrink: 0; }
+}

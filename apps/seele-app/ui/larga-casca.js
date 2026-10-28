@@ -41,7 +41,6 @@
 
   // O propósito perde a metade «ou ponha o seu no ar a partir desta máquina»,
   // que no navegador seria mentira, e HOSPEDAR AQUI vira a frase do app.
-  document.querySelector("#tela-boot .boot-proposito").textContent = PALAVRAS.proposito;
   document.getElementById("botao-hospedar").after(h("p", { class: "nota larga-hospedar" }, PALAVRAS.hospedar, linkDoApp()));
 
   // -------------------------------------------------------- CONFIGURAÇÕES

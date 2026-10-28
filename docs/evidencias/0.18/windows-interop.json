@@ -1,0 +1,182 @@
+{
+  "pass": true,
+  "code_native": "KD3R-XAKC-CYCN-SDBX",
+  "code_browser": "XJT7-36V5-69R3-PHCG",
+  "native_ipc": true,
+  "code_and_accept_both_directions": true,
+  "text_both_directions_each_call": true,
+  "signaling": "Rust Mac loopback, CDP intercepted same-origin requests; no production network",
+  "rtc": "real WebView2 <-> Edge on same Windows host, iceServers=[]",
+  "audio": {
+    "pass": true,
+    "native": {
+      "pagina": {
+        "capturados": 26,
+        "semEntrada": 4,
+        "noPortao": 26,
+        "codificados": 11,
+        "semCarimbo": 0,
+        "enviados": 11,
+        "recusadosPeloTransporte": 0,
+        "dtx": 0,
+        "chegados": 16,
+        "daPropriaVoz": 0,
+        "tortos": 0,
+        "decodificados": 16,
+        "semCabecalho": 0,
+        "esquecidas": 0,
+        "falhas": [],
+        "decodificadoresAbertos": 1,
+        "noCodificador": 0
+      },
+      "portao": {
+        "abertos": 11,
+        "abertura_dbfs": -60,
+        "aberturas": 1,
+        "fechados": 0,
+        "nivel_dbfs": -3.0341575145721436,
+        "retidos_entregues": 0
+      },
+      "reproducao": {
+        "tipo": "contas",
+        "pedido": 3,
+        "contas": {
+          "fades": 0,
+          "fontes": {
+            "1": {
+              "alvo_ms": 39.56437370530491,
+              "atrasados": 0,
+              "calados": 0,
+              "ocultados": 0,
+              "oscilacao_ms": 0.03642804557511345,
+              "profundidade_ms": 40,
+              "recebidos": 12,
+              "repetidos": 0,
+              "ressincronias": 0,
+              "silenciados": 0,
+              "tocados": 10,
+              "transbordados": 0
+            }
+          },
+          "fora_do_quadro": 0,
+          "mistura": {
+            "ativas": 1,
+            "cortadas": 444,
+            "pico": 0.8379140496253967,
+            "pico_antes": 0.9552610516548157
+          }
+        },
+        "blocos": 2216,
+        "blocosComSom": 86,
+        "quadros": 296,
+        "falhasDaMistura": 0
+      },
+      "controles": {
+        "mudo": false,
+        "isolado": false,
+        "modo": 2,
+        "tecla": false,
+        "abertura": 0,
+        "supressao": true,
+        "ganhos": {}
+      },
+      "contexto": "running",
+      "faixa": {
+        "pronta": "live",
+        "muda": false
+      }
+    },
+    "browser": {
+      "pagina": {
+        "capturados": 31,
+        "semEntrada": 3,
+        "noPortao": 31,
+        "codificados": 16,
+        "semCarimbo": 0,
+        "enviados": 16,
+        "recusadosPeloTransporte": 0,
+        "dtx": 0,
+        "chegados": 12,
+        "daPropriaVoz": 0,
+        "tortos": 0,
+        "decodificados": 12,
+        "semCabecalho": 0,
+        "esquecidas": 0,
+        "falhas": [],
+        "decodificadoresAbertos": 1,
+        "noCodificador": 0
+      },
+      "portao": {
+        "abertos": 16,
+        "abertura_dbfs": -60,
+        "aberturas": 1,
+        "fechados": 0,
+        "nivel_dbfs": -2.9638872146606445,
+        "retidos_entregues": 0
+      },
+      "reproducao": {
+        "tipo": "contas",
+        "pedido": 1,
+        "contas": {
+          "fades": 0,
+          "fontes": {
+            "1": {
+              "alvo_ms": 39.5252449578943,
+              "atrasados": 0,
+              "calados": 0,
+              "ocultados": 0,
+              "oscilacao_ms": 4.708404166843793,
+              "profundidade_ms": 20,
+              "recebidos": 11,
+              "repetidos": 0,
+              "ressincronias": 0,
+              "silenciados": 0,
+              "tocados": 10,
+              "transbordados": 0
+            }
+          },
+          "fora_do_quadro": 0,
+          "mistura": {
+            "ativas": 1,
+            "cortadas": 494,
+            "pico": 0.8500000238418579,
+            "pico_antes": 1.0000001192092896
+          }
+        },
+        "blocos": 3139,
+        "blocosComSom": 72,
+        "quadros": 419,
+        "falhasDaMistura": 0
+      },
+      "controles": {
+        "mudo": false,
+        "isolado": false,
+        "modo": 2,
+        "tecla": false,
+        "abertura": 0,
+        "supressao": true,
+        "ganhos": {}
+      },
+      "contexto": "running",
+      "faixa": {
+        "pronta": "live",
+        "muda": false
+      }
+    }
+  },
+  "capabilities": {
+    "webview": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0",
+    "secure": true,
+    "audioEncoder": "function",
+    "audioDecoder": "function",
+    "rtc": "function",
+    "tracks": [
+      "ended"
+    ],
+    "audioErrors": []
+  },
+  "signals": 44,
+  "interceptions": 2,
+  "unexpected": [],
+  "errors": []
+}

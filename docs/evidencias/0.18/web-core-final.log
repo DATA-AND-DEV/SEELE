@@ -1,0 +1,87 @@
+   Compiling seele-proto v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-proto)
+   Compiling seele-sessao v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-sessao)
+   Compiling seele-web v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-web)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.90s
+     Running unittests src/lib.rs (target/debug/deps/seele_web-1dc7e93d0c0cafd5)
+guarda ok: 4 artefatos locais, todos desta fonte
+
+running 76 tests
+test chamada::tests::a_chave_fraca_aceita_pelo_webcrypto_nao_entra ... ok
+test chamada::tests::codigo_da_chave_e_verificador_sao_os_mesmos_do_nativo_com_espacos ... ok
+test chamada::tests::configuracao_publica_usa_as_constantes_do_protocolo ... ok
+test chamada::tests::assinatura_valida_e_alterada_passam_pelo_mesmo_verificador ... ok
+test cargos::testes::o_comando_sai_como_a_mensagem_que_a_pagina_codifica ... ok
+test comandos::tests::as_regras_da_previa_de_link_respondem_sem_sessao ... ok
+test comandos::tests::a_mensagem_sai_aparada_com_a_chave_da_pagina_e_fica_pendente ... ok
+test comandos::tests::o_buraco_anda_pela_cerca_e_pela_vez_do_relogio ... ok
+test comandos::tests::abrir_o_canal_pede_a_entrada_e_o_historico_e_avisa_a_conversa ... ok
+test comandos::tests::a_entrada_na_sala_leva_o_ping_marcado_e_a_senha_longa_e_recusada_aqui ... ok
+test comandos::tests::o_base64_e_o_padrao ... ok
+test comandos::tests::a_volta_readota_restabelece_e_repete_as_pendentes ... ok
+test comandos::tests::na_bateria_os_comandos_atendem_pela_sessao_guardada_e_nada_vai_ao_fio ... ok
+test comandos::tests::a_mensagem_grande_demais_fica_recusada_e_nao_sai ... ok
+test comandos::tests::nomes_em_branco_nao_saem_e_os_compridos_saem_ditos ... ok
+test comandos::tests::assistir_segue_os_tres_estados_da_ffi ... ok
+test comandos::tests::a_busca_e_a_do_desktop_e_o_cursor_atravessa_a_reconstrucao ... ok
+test comandos::tests::o_mod_request_com_acao_sai_como_acao_de_mod_e_sem_ela_como_mod_request ... ok
+test comandos::tests::o_anexo_tem_destino_pelas_regras_do_nome_e_o_cabecalho_volta_lido ... ok
+test comandos::tests::sem_sessao_e_not_connected_e_o_que_nao_e_da_sessao_nao_e_atendido ... ok
+test comandos::tests::reenviar_manda_de_novo_com_a_mesma_chave ... ok
+test cargos::testes::a_explicacao_e_a_previa_falam_json_e_recusam_entrada_torta ... ok
+test fluxos::tests::o_anexo_com_hash_errado_curto_ou_longo_nao_chega_inteiro ... ok
+test fluxos::tests::um_tipo_que_o_navegador_nao_le_e_dito_e_ignorado ... ok
+test comandos::tests::o_volume_segue_o_apelido_e_a_ordem_dos_erros_e_a_do_desktop ... ok
+test fluxos::tests::a_tela_abre_desenha_toca_e_fecha_em_qualquer_pedaco ... ok
+test fluxos::tests::uma_abertura_torta_e_ilegivel_e_um_quadro_torto_fecha_a_tela ... ok
+test cargos::testes::a_pagina_tem_as_mesmas_tres_respostas_do_desktop ... ok
+test comandos::tests::os_nove_comandos_de_cargos_atendem_pelo_room_desta_ligacao ... ok
+test comandos::tests::a_sala_da_voz_distingue_a_restauracao_pendente_da_saida ... ok
+test fronteira::a_tela_ligada_pelo_servidor::a_escolha_explicita_vence_a_automatica ... ok
+test fronteira::a_tela_ligada_pelo_servidor::a_abertura_automatica_aparece_e_o_fim_limpa ... ok
+test fronteira::a_tela_ligada_pelo_servidor::o_nao_ver_explicito_vence_a_automatica ... ok
+test ligacao::tests::a_recusa_do_servidor_leva_o_motivo ... ok
+test ligacao::tests::o_apelido_grande_demais_nem_disca ... ok
+test fronteira::a_tela_ligada_pelo_servidor::a_queda_nao_deixa_tela_velha_e_o_fim_atrasado_nao_apaga_a_nova ... ok
+test ligacao::tests::campainha_pessoal_atende_recusa_e_cancela ... ok
+test ligacao::tests::o_carimbo_de_outra_linha_e_conferido_antes_do_decode ... ok
+test fronteira::os_cargos_pela_fronteira::a_entrada_torta_e_recusada_com_nome ... ok
+test fronteira::a_tela_ligada_pelo_servidor::na_alternancia_9_11_9_fica_a_9_nova_e_o_fim_velho_nao_a_apaga ... ok
+test ligacao::tests::o_hello_sai_com_a_minima_e_a_prova_e_a_do_proto ... ok
+test comandos::tests::os_erros_sao_os_do_desktop ... ok
+test ligacao::tests::campainha_nao_admite_servidor_prazo_falso_ou_ciclo ... ok
+test ligacao::tests::mods_aceitos_seguem_e_os_outros_sao_recusados_com_nome ... ok
+test ligacao::tests::o_pedido_da_pagina_e_lido_em_hex_e_o_torto_e_dito ... ok
+test mods::tests::a_lista_diz_cada_guardado_e_o_que_o_navegador_nao_liga ... ok
+test mods::tests::o_baixado_que_diverge_ou_nao_serve_e_recusado_com_o_nome_do_desktop ... ok
+test ligacao::tests::o_codigo_de_quem_ficou_para_tras_e_a_mesma_despedida_do_quadro_uma_vez_por_conexao ... ok
+test mods::tests::a_midia_do_pacote_recusa_na_ordem_do_desktop ... ok
+test mods::tests::so_o_declarado_e_servido_e_nada_sobe_para_fora ... ok
+test mods::tests::o_codigo_sai_com_as_capacidades_da_api_e_as_recusas_sao_as_do_desktop ... ok
+test o_sinal::o_erro_de_dominio_aposentado_chega_ao_javascript ... ok
+test tela::tests::o_fluxo_que_sai_e_o_que_o_leitor_le ... ok
+test volume::tests::a_resposta_aos_pedacos_da_os_bytes_anunciados_e_o_resto_e_recusado ... ok
+test tela::tests::os_limites_caem_no_degrau_de_baixo_e_nunca_ampliam ... ok
+test o_sinal::a_pagina_monta_o_chama_sem_escrever_linha_e_le_a_resposta ... ok
+test volume::tests::o_pedido_sai_enquadrado_e_o_que_o_protocolo_recusa_vem_em_texto ... ok
+test voz::testes::a_recepcao_separa_por_alca_na_sequencia_fixa_do_desktop ... ok
+test voz::testes::a_abertura_solta_os_retidos_com_o_carimbo_de_cada_um ... ok
+test voz::testes::no_mudo_o_portao_e_o_relogio_andam_e_nada_sai ... ok
+test voz::testes::o_datagrama_e_o_do_protocolo ... ok
+test voz::testes::o_envio_manda_os_pacotes_da_sequencia_fixa_do_desktop ... ok
+test fronteira::os_cargos_pela_fronteira::os_quatro_comandos_atravessam_a_fronteira_e_cada_sessao_traz_o_seu_quadro ... ok
+test voz::testes::o_que_chega_atravessa_e_o_torto_e_recusado ... ok
+test voz::testes::o_teste_usa_a_regua_escolhida ... ok
+test voz::testes::reabrir_guarda_a_regua_o_modo_e_a_tecla ... ok
+test voz::testes::sem_a_hora_da_pagina_o_relogio_parte_do_zero ... ok
+test voz::testes::o_teste_do_microfone_conta_o_que_o_portao_da_voz_decide ... ok
+test voz::testes::um_quadro_de_outro_tamanho_e_acertado_e_contado ... ok
+test voz::testes::o_ganho_e_por_alca_e_esquecer_leva_os_dois ... ok
+test fluxos::tests::o_anexo_desce_conferido_pelo_hash_em_qualquer_pedaco ... ok
+test voz::testes::a_reproducao_toca_os_quadros_em_ordem ... ok
+test voz::testes::um_quadro_perdido_vira_silencio_com_fade ... ok
+test voz::testes::o_isolamento_cala_sem_parar_os_buffers ... ok
+test voz::testes::a_voz_nova_da_pagina_parte_a_frente_da_velha_em_15_e_60_min ... ok
+test mods::tests::o_catalogo_do_indexador_passa_com_a_chave_embutida ... ok
+
+test result: ok. 76 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

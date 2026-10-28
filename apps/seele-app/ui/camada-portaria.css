@@ -31,13 +31,11 @@
 .camada-portaria {
   position: fixed;
   inset: 0;
-  /* Abaixo de `.camada-moderar`, que está em 30: as confirmações desta camada
-     são armadas naquela caixa, e ela tem que aparecer por cima desta. */
   z-index: 25;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--seele-e4);
+  padding: 24px;
 }
 
 /* O véu num pseudoelemento, e não `opacity` na caixa: apagar a caixa apagaria
@@ -53,24 +51,27 @@
 .portaria-caixa {
   position: relative;
   width: 100%;
-  max-width: 720px;
-  max-height: calc(100vh - var(--seele-e8));
+  max-width: 800px;
+  max-height: calc(100dvh - 48px);
   display: flex;
   flex-direction: column;
   background: var(--seele-negro-painel);
-  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  border: 1px solid var(--seele-linha-forte);
   border-radius: var(--seele-raio);
   box-shadow: var(--seele-sombra);
+  overflow: hidden;
 }
 
 .portaria-cabeca {
   display: flex;
   align-items: center;
   gap: var(--seele-e2);
-  padding: var(--seele-e1) var(--seele-e2);
-  background: var(--seele-laranja-nerv);
-  color: var(--seele-negro-absoluto);
+  padding: 16px 24px;
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
   flex: 0 0 auto;
+  min-height: 64px;
+  border-bottom: 1px solid var(--seele-linha);
 }
 
 .portaria-marca {
@@ -81,28 +82,32 @@
 .portaria-titulo {
   flex: 1 1 auto;
   margin: 0;
-  font-size: 1rem;
-  letter-spacing: 0.08em;
+  font-size: 28px;
+  letter-spacing: .02em;
+  font-family: var(--seele-display);
+  font-weight: 500;
+  line-height: 1.25;
 }
 
 .portaria-fechar {
-  background: none;
-  border: var(--seele-b) solid var(--seele-negro-absoluto);
-  color: var(--seele-negro-absoluto);
-  padding: 0 var(--seele-e1);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
+  color: var(--seele-osso-apagado);
+  padding: 8px 12px;
   cursor: pointer;
+  min-height: 40px;
+  border-radius: var(--seele-raio);
+  font: inherit;
+  font-size: 13px;
 }
 
 .portaria-corpo {
   display: flex;
   flex-direction: column;
-  gap: var(--seele-e2);
-  /* `min-height: 0` é a metade difícil disto em flexbox, e sem ela o
-     `overflow-y` de `.portaria-rolagem` não faz nada visível: o conteúdo passa
-     da borda e `body { overflow: hidden }` de `base.css` garante que nem a
-     janela role atrás dele. */
+  gap: 24px;
   min-height: 0;
-  padding: var(--seele-e3);
+  padding: 24px;
+  overflow-y: auto;
 }
 
 /* O único vermelho desta folha. Ver o cabeçalho. */
@@ -129,9 +134,10 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--seele-e1);
-  padding: var(--seele-e1);
+  gap: 12px;
+  padding: 16px;
   border: var(--seele-b) solid var(--seele-linha);
+  border-radius: var(--seele-raio);
 }
 
 /* O estado em palavras, e nunca só por cor ou por posição de um interruptor.
@@ -152,12 +158,13 @@
 }
 
 .portaria-rolagem {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--seele-e1);
+  overflow: visible;
 }
 
 .portaria-secao {
@@ -179,10 +186,11 @@
 .portaria-cartao {
   display: flex;
   flex-direction: column;
-  gap: var(--seele-e1);
-  padding: var(--seele-e2);
+  gap: 12px;
+  padding: 16px;
   border: var(--seele-b) solid var(--seele-linha-forte);
   background: var(--seele-negro-absoluto);
+  border-radius: var(--seele-raio);
 }
 
 /* A identidade, e é por isso que ela é a linha grande e a primeira do cartão.
@@ -191,11 +199,12 @@
    estreita — um grupo partido é exatamente onde a conferência por olho erra. */
 .portaria-impressao {
   margin: 0;
-  font-family: var(--seele-fonte-mono, monospace);
-  font-size: 0.8125rem;
+  font-family: var(--seele-mono);
+  font-size: 13px;
   letter-spacing: 0.04em;
   color: var(--seele-osso);
   word-break: break-word;
+  line-height: 1.6;
 }
 
 /* O apelido é afirmação, e o desenho diz isso antes da frase: «diz chamar-se»
@@ -239,8 +248,9 @@
 
 .portaria-acoes {
   display: flex;
-  gap: var(--seele-e1);
+  gap: 12px;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* ---------- a faixa de quem está batendo ----------
@@ -368,3 +378,10 @@
 
 .portaria-identidade { color: var(--seele-osso); font-size: 12px; }
 .portaria-identidade summary { cursor: pointer; padding: 8px 0; }
+
+
+@media(max-width:700px) { .camada-portaria { padding: 12px; } .portaria-caixa { max-height: calc(100dvh - 24px); } .portaria-cabeca, .portaria-corpo { padding: 16px; } .portaria-acoes > button { min-height:44px; flex:1 1 120px; } }
+
+
+
+.portaria-acoes > button { margin:0; }

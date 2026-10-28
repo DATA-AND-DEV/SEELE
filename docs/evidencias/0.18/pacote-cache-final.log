@@ -1,0 +1,6 @@
+PASS sem-correcao: JS/CSS/Worker=antiga, WASM=antiga, identidade preservada
+PASS cache-antigo: JS/CSS/Worker=nova, WASM=nova, identidade preservada
+PASS cache-versionado: JS/CSS/Worker=nova, WASM=nova, identidade preservada
+PASS sem-correcao: JS/CSS/Worker=antiga, WASM=nova, identidade preservada
+PASS cache-antigo: JS/CSS/Worker=nova, WASM=nova, identidade preservada
+PASS cache-versionado: JS/CSS/Worker=nova, WASM=nova, identidade preservada

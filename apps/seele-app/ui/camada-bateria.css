@@ -41,10 +41,13 @@
 
 .bateria-caixa {
   pointer-events: auto;
-  width: 680px;
+  width: min(100%,600px);
   max-width: calc(100vw - 32px);
-  border: var(--seele-b-forte) solid var(--seele-vermelho-alerta);
+  border: 1px solid var(--seele-vermelho-alerta);
   background: var(--seele-negro-absoluto);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  border-radius: var(--seele-raio);
 }
 
 /* ---------- a cabeça ----------
@@ -55,16 +58,19 @@
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  padding: 12px 20px;
-  background: var(--seele-vermelho-alerta);
-  color: var(--seele-negro-absoluto);
+  padding: 16px 24px;
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-vermelho-alerta);
+  min-height: 64px;
+  border-bottom: 1px solid var(--seele-linha);
 }
 
 .bateria-nome {
   font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 24px;
-  letter-spacing: 0.14em;
+  font-weight: 500;
+  font-size: 28px;
+  letter-spacing: .02em;
+  line-height: 1.25;
 }
 
 /* Acento, e nada mais: `内部電源` não carrega informação que `BATERIA INTERNA`
@@ -75,11 +81,12 @@
 /* ---------- o corpo de cima ---------- */
 
 .bateria-corpo {
-  display: flex;
+  display: grid;
   align-items: center;
-  gap: 32px;
-  padding: 24px 20px;
+  gap: 24px;
+  padding: 24px;
   border-bottom: var(--seele-b) solid var(--seele-linha);
+  grid-template-columns: 112px minmax(0,1fr);
 }
 
 /* A contagem, em 92px — o maior número desta interface, e o comp o quer assim
@@ -101,13 +108,13 @@
 #bateria-conta {
   font-family: var(--seele-display);
   font-weight: 900;
-  font-size: 92px;
-  line-height: 0.82;
+  font-size: 64px;
+  line-height: 1;
   letter-spacing: 0;
   color: var(--seele-vermelho-alerta);
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
-  animation: seele-tique-bateria 1000ms steps(2, end) infinite;
+  animation: none;
 }
 
 @keyframes seele-tique-bateria {
@@ -131,7 +138,7 @@
    Tirando o nome, o que sobra é verdade inteira. */
 .bateria-frase {
   margin: 0;
-  font-size: var(--seele-t-dado);
+  font-size: 14px;
   line-height: 1.6;
   color: var(--seele-osso);
 }
@@ -142,7 +149,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 16px 20px;
+  padding: 24px;
 }
 
 .bateria-pe .rotulo {
@@ -188,17 +195,18 @@
 .bateria-forcar {
   margin: 12px 0 0;
   padding: 0;
-  font-size: var(--seele-t-corpo);
+  font-size: 13px;
   line-height: 1.6;
   letter-spacing: normal;
   text-align: left;
-  color: var(--seele-osso);
+  color: var(--seele-osso-apagado);
   background: none;
   border: 0;
-  /* Continua sendo um `<button>` na marcação enquanto quem cuida dela não o
-     troca por um parágrafo. Estas três linhas são o que impede que ele pareça
-     apertável — e um cursor de texto sobre texto é o que ele passou a ser. */
   cursor: default;
   text-transform: none;
   font-family: inherit;
+  min-height: 0;
+  opacity: 1;
 }
+
+@media(max-width:700px) { .bateria-cabeca,.bateria-corpo,.bateria-pe { padding:16px; } .bateria-corpo { grid-template-columns:80px minmax(0,1fr); gap:16px; } #bateria-conta { font-size:48px; } }

@@ -132,6 +132,12 @@ pub enum Operacao {
     Revogar,
     /// Negociação de transporte, permitida só depois do aceite.
     Sinal(Sinal),
+    /// Localiza uma caixa viva pelo código público. O pedido é assinado.
+    /// Adicionado ao fim para preservar os discriminantes da versão 1.
+    Localizar {
+        /// Código Crockford com verificador; nunca é apelido.
+        codigo: String,
+    },
 }
 
 /// Pedido autenticado do endpoint `/chamada/1`.
@@ -245,6 +251,11 @@ pub enum Resposta {
         /// Último cursor entregue nesta resposta.
         cursor: u64,
     },
+    /// Capacidade assinada do dono do código, para uma caixa ainda viva.
+    Localizado {
+        /// O consumidor confere assinatura, prazo e código da chave.
+        convite: Convite,
+    },
     /// Pedido recusado sem texto de aplicação.
     Recusa {
         /// Razão estruturada.
@@ -328,6 +339,15 @@ fn validar_forma(pedido: &Pedido) -> Result<(), Erro> {
         _ => {}
     }
     match &pedido.operacao {
+        Operacao::Localizar { codigo } => {
+            if crate::codigo::Codigo::ler(codigo).is_err()
+                || pedido.papel != Papel::QuemLiga
+                || pedido.chamada != [0; 32]
+                || pedido.destinatario != pedido.remetente
+            {
+                return Err(Erro::Invalido);
+            }
+        }
         Operacao::Registrar { convite } => {
             if pedido.convite != convite.id
                 || pedido.remetente != convite.dono
@@ -355,7 +375,10 @@ fn validar_forma(pedido: &Pedido) -> Result<(), Erro> {
     }
     if !matches!(
         pedido.operacao,
-        Operacao::Registrar { .. } | Operacao::Buscar { .. } | Operacao::Revogar
+        Operacao::Registrar { .. }
+            | Operacao::Buscar { .. }
+            | Operacao::Revogar
+            | Operacao::Localizar { .. }
     ) && pedido.chamada == [0; 32]
     {
         return Err(Erro::Invalido);

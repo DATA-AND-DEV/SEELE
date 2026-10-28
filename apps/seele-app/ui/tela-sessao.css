@@ -245,13 +245,7 @@
    voz. Com colunas numeradas, um quinto filho cairia numa segunda linha —
    a mesma armadilha que fez a faixa dos MODs nascer fora de `<main>`. */
 
-.paineis {
-  flex: 1 1 auto;
-  display: grid;
-  grid-template-columns: 60px 268px minmax(0, 1fr) 328px auto;
-  grid-template-areas: "trilha canais linha pessoas painelmod";
-  min-height: 0;
-}
+
 
 .paineis > .trilha { grid-area: trilha; }
 .paineis > .painel-canais { grid-area: canais; }
@@ -411,13 +405,7 @@
   color: var(--seele-osso);
 }
 
-.painel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border-right: 1px solid var(--seele-linha);
-  background: var(--seele-negro-painel);
-}
+
 
 .painel-pessoas { border-right: none; }
 
@@ -432,22 +420,7 @@
    semântico é o único lugar a mudar no dia da decisão. Quem quiser mais
    contraste já o recebe: `acessibilidade.css` sobe `.painel-titulo` para osso
    sob `prefers-contrast: more`. */
-.painel-titulo {
-  margin: 0;
-  padding: 0;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  font-family: var(--seele-mono);
-  font-size: var(--seele-t-micro);
-  font-weight: normal;
-  letter-spacing: 0.2em;
-  color: var(--seele-rotulo-painel);
-  flex: 0 0 auto;
-}
+
 
 /* O cabeçalho de uma das duas listas: o título e a nota que o explica.
 
@@ -1071,15 +1044,7 @@ button.voice_room-nome:hover { text-decoration: underline; }
 
 /* 52px no v3, contra os 40px do v2: o botão `BUSCAR` tem 34px de altura e não
    cabia numa barra de 40. */
-.linha-barra {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 52px;
-  padding: 6px 16px;
-  border-bottom: 1px solid var(--seele-linha);
-  flex: 0 0 auto;
-}
+
 
 /* O título de um grupo da navegação substituída (rascunho da API 6, §3): o texto
    é do MOD, e o desenho é o dos títulos do produto — miúdo, espaçado, apagado —,
@@ -1120,17 +1085,7 @@ button.voice_room-nome:hover { text-decoration: underline; }
   flex: 0 0 auto;
 }
 
-.linha-nome {
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 17px;
-  letter-spacing: 0.06em;
-  color: var(--seele-osso);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
 
 /* O nome como botão de renomear, para quem administra — o mesmo desenho que
    `button.voice_room-nome`, e pela mesma razão: ele **é** o nome, e desenhá-lo
@@ -1208,31 +1163,14 @@ button.linha-nome:hover { text-decoration: underline; }
    marca de 2px à esquerda. A marca é onde o comp separa mensagem de sistema e
    de alerta; `Message` não tem tipo, então aqui ela só separa a própria das
    outras. */
-.mensagem {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 12px;
-  border-left: 2px solid var(--seele-linha);
-  padding-left: 12px;
-}
+
 
 .mensagem.propria { border-left-color: var(--seele-linha-forte); }
 
 /* O avatar de iniciais. Contorno e não bloco cheio: cheio, uma conversa de seis
    pessoas vira seis quadrados sólidos numa coluna, e o que se lê passa a ser a
    coluna de quadrados. */
-.mensagem-avatar {
-  width: 34px;
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 14px;
-  color: var(--seele-osso-apagado);
-  border: 1px solid var(--seele-linha-forte);
-}
+
 
 .mensagem.propria .mensagem-avatar {
   color: var(--seele-padrao-azul);
@@ -1311,13 +1249,7 @@ button.linha-nome:hover { text-decoration: underline; }
 /* `pre-wrap`, e isto é contratual: a busca do outro lado da ponte indexou esta
    string com as quebras de linha dentro, e colapsá-las aqui deslocaria o realce
    em toda mensagem de mais de uma linha. */
-.mensagem .corpo {
-  font-size: var(--seele-t-corpo);
-  line-height: 1.55;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  text-wrap: pretty;
-}
+
 
 .mensagens .editada { color: var(--seele-osso-apagado); font-size: 11px; }
 
@@ -1393,14 +1325,7 @@ button.linha-nome:hover { text-decoration: underline; }
   contain: paint;
 }
 
-.compor {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--seele-linha);
-  flex: 0 0 auto;
-}
+
 
 .compor .prompt { color: var(--seele-laranja-nerv); font-size: var(--seele-t-corpo); flex: 0 0 auto; }
 
@@ -1466,19 +1391,7 @@ button.linha-nome:hover { text-decoration: underline; }
    e o botão é o que torna o caminho **visível**. Quem nunca leu a ajuda nem o
    `placeholder` — que some na primeira letra digitada — ficava com uma barra em
    que nada parecia mandar, e para quem navega por toque não há tecla nenhuma. */
-.compor-enviar {
-  flex: 0 0 auto;
-  align-self: end;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--seele-linha-forte);
-  background: none;
-  color: var(--seele-osso);
-  font-family: var(--seele-display);
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: var(--seele-tracking-rotulo);
-  cursor: pointer;
-}
+
 
 .compor-enviar:hover { border-color: var(--seele-laranja-nerv); color: var(--seele-laranja-nerv); }
 .compor-enviar:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
@@ -1748,21 +1661,7 @@ button.linha-nome:hover { text-decoration: underline; }
 /* A cartela invertida. O inventário §12 endurece essa regra no v2: cabeçalho de
    painel é **bloco sólido de cor com texto no negro absoluto**, e nunca texto
    colorido sobre fundo escuro. É a ênfase invertida da TUI. */
-.pessoas-cartela {
-  margin: 0;
-  padding: 8px 16px;
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  background: var(--seele-laranja-nerv);
-  color: var(--seele-negro-absoluto);
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 15px;
-  letter-spacing: 0.14em;
-  flex: 0 0 auto;
-}
+
 
 /* A contagem, dentro da cartela e no mesmo negro: um segundo tom aqui seria
    texto apagado sobre laranja, que é a metade da regra do §12 que se perde
@@ -1904,14 +1803,7 @@ button.linha-nome:hover { text-decoration: underline; }
   white-space: nowrap;
 }
 
-.roster .pessoa {
-  border-bottom: 1px solid var(--seele-linha);
-  border-left: 2px solid transparent;
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+
 
 /* Quem está falando ganha a marca e o fundo, como no comp. */
 .roster .pessoa.falando {
@@ -1949,17 +1841,7 @@ button.linha-nome:hover { text-decoration: underline; }
  * continua em palavra, dentro. */
 .pessoa-diagnostico { margin-top: 4px; }
 
-.pessoa-diagnostico-resumo {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  cursor: pointer;
-  list-style: none;
-  font-size: var(--seele-t-micro);
-  letter-spacing: 0.12em;
-  color: var(--seele-osso-apagado);
-}
+
 
 .pessoa-diagnostico-resumo::-webkit-details-marker { display: none; }
 
@@ -2059,15 +1941,7 @@ button.linha-nome:hover { text-decoration: underline; }
 
 /* ---------- rodapé de telemetria ---------- */
 
-.telemetria {
-  display: flex;
-  align-items: stretch;
-  height: 40px;
-  border-top: 1px solid var(--seele-linha-forte);
-  background: var(--seele-negro-painel);
-  font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
-}
+
 
 /* A região `status.barra` (rascunho da API 6, §3), na altura da barra, que é
    fixa. **Ela encolhe primeiro**: num item flex, `overflow: hidden` zera a
@@ -2555,131 +2429,9 @@ button.linha-nome:hover { text-decoration: underline; }
 .linha-canais,
 .linha-pessoas { display: none; }
 
-@media (max-width: 1240px) {
-  /* `relative` porque a gaveta de pessoas se posiciona contra esta caixa. */
-  .paineis {
-    position: relative;
-    grid-template-columns: 60px 268px minmax(0, 1fr) auto;
-    grid-template-areas: "trilha canais linha painelmod";
-  }
 
-  /* **A faixa de pessoas recolhe, e ganha uma porta.**
-   *
-   * A ordem de recolher está escrita acima e continua valendo. O que faltava
-   * era a porta: fechada sem controle nenhum, a faixa sumia e com ela as duas
-   * coisas que só ela mostra — quem está no servidor **fora** das salas, e o
-   * sinal por pessoa, que `specs/07` chama de elemento assinatura do produto.
-   *
-   * A coluna de salas lista quem está em cada sala, e é por isso que a faixa
-   * pode recolher primeiro; ela não lista quem não está em sala nenhuma, e não
-   * mostra sinal. A validação de janela pequena de 20/09/2026 encontrou as duas
-   * ausências sem caminho de volta. */
-  .painel-pessoas { display: none; }
 
-  #tela-sessao[data-pessoas="abertas"] .painel-pessoas {
-    display: flex;
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    right: 0;
-    width: min(320px, 100%);
-    z-index: 3;
-    /* A borda forte é o que separa a gaveta do que ela cobre. Sem sombra:
-       nenhuma superfície deste produto tem uma. */
-    border-left: 1px solid var(--seele-linha-forte);
-  }
 
-  .linha-pessoas {
-    display: flex;
-    align-items: center;
-    min-height: 34px;
-    padding: 0 12px;
-    flex: 0 0 auto;
-    font: inherit;
-    font-size: 11px;
-    letter-spacing: 0.1em;
-    color: var(--seele-osso-apagado);
-    background: none;
-    border: 1px solid var(--seele-linha-forte);
-    cursor: pointer;
-  }
-
-  .linha-pessoas:hover,
-  .linha-pessoas[aria-expanded="true"] {
-    color: var(--seele-laranja-nerv);
-    border-color: var(--seele-laranja-nerv);
-  }
-  /* A conversa passa a ser a última coluna, e a divisória dela seria uma linha
-     colada na borda da janela. */
-  .painel-linha { border-right: none; }
-  /* Oito métricas numa fileira de largura fixa não cabem, e o que não cabe
-     some sem dizer que existia. Rolando, ele continua alcançável — e a régua
-     de `body { overflow: hidden }` continua valendo para a página. */
-  .telemetria { overflow-x: auto; }
-}
-
-@media (max-width: 900px) {
-  /* `relative` porque a gaveta se posiciona contra esta caixa. */
-  .paineis {
-    position: relative;
-    grid-template-columns: 60px minmax(0, 1fr);
-    /* A gaveta de canais sai do fluxo (`position: absolute` logo abaixo), e o
-       painel de MOD não cabe como coluna nesta largura: ele se empilha sobre a
-       conversa, como a página. */
-    grid-template-areas: "trilha linha";
-  }
-
-  .paineis > .painel-canais,
-  .paineis > .palco-de-paineis { grid-area: linha; }
-
-  /* Numa janela estreita, um painel de MOD ocupa a largura toda em vez de
-     espremer a conversa a nada. U04 pede escala legível, e 200px de painel ao
-     lado de 300px de conversa não é nenhuma das duas coisas. */
-  .palco-de-paineis > .painel-de-mod { flex: 1 1 auto; border-left: none; }
-
-  /* Fechada, ela não existe: `display: none` e não uma coluna empurrada para
-     fora da tela. Fora da tela ela continua no caminho do teclado, e tabular
-     por trinta botões invisíveis até o campo de mensagem é pior do que não ter
-     a coluna. */
-  .painel-canais { display: none; }
-
-  #tela-sessao[data-canais="abertos"] .painel-canais {
-    display: flex;
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    left: 60px;
-    width: 268px;
-    z-index: 2;
-    /* A borda forte é o que separa a gaveta do que ela cobre. Sem sombra:
-       nenhuma superfície deste produto tem uma. */
-    border-right: 1px solid var(--seele-linha-forte);
-  }
-
-  /* A porta da gaveta. Ela existe só aqui — acima deste ponto a coluna está na
-     tela, e um botão que abre o que já está aberto é um botão que não faz
-     nada. */
-  .linha-canais {
-    display: flex;
-    align-items: center;
-    min-height: 34px;
-    padding: 0 12px;
-    flex: 0 0 auto;
-    font: inherit;
-    font-size: 11px;
-    letter-spacing: 0.1em;
-    color: var(--seele-osso-apagado);
-    background: none;
-    border: 1px solid var(--seele-linha-forte);
-    cursor: pointer;
-  }
-
-  .linha-canais:hover,
-  .linha-canais[aria-expanded="true"] {
-    color: var(--seele-laranja-nerv);
-    border-color: var(--seele-laranja-nerv);
-  }
-}
 
 
 /* A fileira do pé do operador: sair da sala, alternar a vista, compartilhar.
@@ -2844,4 +2596,335 @@ button.linha-nome:hover { text-decoration: underline; }
 .operador[data-com-capa] .operador-quem:focus-visible {
   outline: 2px solid var(--nucleo-texto);
   outline-offset: 2px;
+}
+
+/* Direção visual 0.17.4 — componente proprietário. */
+.painel-titulo {
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--seele-mono);
+  font-size: 12px;
+  font-weight: normal;
+  letter-spacing: .04em;
+  color: var(--seele-rotulo-painel);
+  line-height: 1.5;
+}
+.paineis {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 60px 268px minmax(0, 1fr) 328px auto;
+  grid-template-areas: "trilha canais linha pessoas painelmod";
+  min-height: 0;
+  gap: 12px;
+  padding: 12px;
+}
+.painel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--seele-linha);
+  background: var(--seele-negro-absoluto);
+}
+.linha-barra {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+.linha-nome {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 20px;
+  letter-spacing: 0.06em;
+  color: var(--seele-osso);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compor {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
+}
+.compor-enviar {
+  flex: 0 0 auto;
+  align-self: end;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--seele-laranja-nerv);
+  background: transparent;
+  color: var(--seele-laranja-nerv);
+  font-family: var(--seele-display);
+  font-size: var(--seele-t-rotulo);
+  letter-spacing: var(--seele-tracking-rotulo);
+  cursor: pointer;
+  border-radius: var(--seele-raio);
+}
+.telemetria {
+  display: flex;
+  align-items: stretch;
+  height: auto;
+  border-top: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-absoluto);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 6px 16px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.telemetria .metrica { font-size: 12px; gap: 8px; }
+.telemetria .rotulo { font-size: 12px; letter-spacing: 0; }
+
+
+.pessoas-cartela {
+  margin: 0;
+  padding: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso-apagado);
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: .02em;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--seele-linha);
+  font-family:var(--seele-mono); font-weight:normal; font-size:14px; line-height:1.5;
+}
+.pessoas-cartela > span { white-space: nowrap; }
+.mensagem-avatar {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 14px;
+  color: var(--seele-osso);
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  border-color: var(--seele-linha-forte);
+  background: var(--seele-negro-absoluto);
+}
+.mensagem.propria .mensagem-avatar, .mensagem.propria .mensagem-autor { color: var(--seele-osso); border-color: var(--seele-linha-forte); }
+.mensagem {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  border-left: 0;
+  padding-left: 12px;
+  padding-block: 12px;
+}
+
+#form-mensagem .compor-caixa { border-radius: var(--seele-raio); }
+#form-mensagem textarea { border: 0; padding: 8px 0; min-height: 40px; line-height: 24px; }
+
+
+.mensagem .corpo {
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  max-width: 76ch;
+}
+#aviso-fone { background: var(--seele-negro-absoluto); color: var(--seele-osso-apagado); padding: 8px 24px; min-height: 44px; gap: 16px; border-bottom: 1px solid var(--seele-linha); }
+.aviso-fone-detalhes { flex: 1; min-width: 0; font-size: 13px; line-height: 1.5; }
+.aviso-fone-detalhes summary { cursor: pointer; }
+.aviso-fone-detalhes summary::marker { color: var(--seele-laranja-nerv); }
+.aviso-fone-detalhes #aviso-fone-texto { display: block; margin-top: 8px; }
+.roster .pessoa {
+  border-bottom: 1px solid var(--seele-linha);
+  border-left: 2px solid transparent;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pessoa-diagnostico-resumo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  letter-spacing: 0;
+  color: var(--seele-osso-apagado);
+}
+
+/* Condições de composição, após os valores padrão do componente. */
+@media (max-width: 1240px) {
+  /* `relative` porque a gaveta de pessoas se posiciona contra esta caixa. */
+  .paineis {
+    position: relative;
+    grid-template-columns: 60px 268px minmax(0, 1fr) auto;
+    grid-template-areas: "trilha canais linha painelmod";
+  }
+
+  /* **A faixa de pessoas recolhe, e ganha uma porta.**
+   *
+   * A ordem de recolher está escrita acima e continua valendo. O que faltava
+   * era a porta: fechada sem controle nenhum, a faixa sumia e com ela as duas
+   * coisas que só ela mostra — quem está no servidor **fora** das salas, e o
+   * sinal por pessoa, que `specs/07` chama de elemento assinatura do produto.
+   *
+   * A coluna de salas lista quem está em cada sala, e é por isso que a faixa
+   * pode recolher primeiro; ela não lista quem não está em sala nenhuma, e não
+   * mostra sinal. A validação de janela pequena de 20/09/2026 encontrou as duas
+   * ausências sem caminho de volta. */
+  .painel-pessoas { display: none; }
+
+  #tela-sessao[data-pessoas="abertas"] .painel-pessoas {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: min(320px, 100%);
+    z-index: 3;
+    /* A borda forte é o que separa a gaveta do que ela cobre. Sem sombra:
+       nenhuma superfície deste produto tem uma. */
+    border-left: 1px solid var(--seele-linha-forte);
+  }
+
+  .linha-pessoas {
+    display: flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0 12px;
+    flex: 0 0 auto;
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--seele-osso-apagado);
+    background: none;
+    border: 1px solid var(--seele-linha-forte);
+    cursor: pointer;
+  }
+
+  .linha-pessoas:hover,
+  .linha-pessoas[aria-expanded="true"] {
+    color: var(--seele-laranja-nerv);
+    border-color: var(--seele-laranja-nerv);
+  }
+  /* A conversa passa a ser a última coluna, e a divisória dela seria uma linha
+     colada na borda da janela. */
+  .painel-linha { border-right: none; }
+  /* Oito métricas numa fileira de largura fixa não cabem, e o que não cabe
+     some sem dizer que existia. Rolando, ele continua alcançável — e a régua
+     de `body { overflow: hidden }` continua valendo para a página. */
+  .telemetria { overflow-x: auto; }
+}
+
+@media (max-width: 900px) {
+  /* `relative` porque a gaveta se posiciona contra esta caixa. */
+  .paineis {
+    position: relative;
+    grid-template-columns: 60px minmax(0, 1fr);
+    /* A gaveta de canais sai do fluxo (`position: absolute` logo abaixo), e o
+       painel de MOD não cabe como coluna nesta largura: ele se empilha sobre a
+       conversa, como a página. */
+    grid-template-areas: "trilha linha";
+  }
+
+  .paineis > .painel-canais,
+  .paineis > .palco-de-paineis { grid-area: linha; }
+
+  /* Numa janela estreita, um painel de MOD ocupa a largura toda em vez de
+     espremer a conversa a nada. U04 pede escala legível, e 200px de painel ao
+     lado de 300px de conversa não é nenhuma das duas coisas. */
+  .palco-de-paineis > .painel-de-mod { flex: 1 1 auto; border-left: none; }
+
+  /* Fechada, ela não existe: `display: none` e não uma coluna empurrada para
+     fora da tela. Fora da tela ela continua no caminho do teclado, e tabular
+     por trinta botões invisíveis até o campo de mensagem é pior do que não ter
+     a coluna. */
+  .painel-canais { display: none; }
+
+  #tela-sessao[data-canais="abertos"] .painel-canais {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 60px;
+    width: 268px;
+    z-index: 2;
+    /* A borda forte é o que separa a gaveta do que ela cobre. Sem sombra:
+       nenhuma superfície deste produto tem uma. */
+    border-right: 1px solid var(--seele-linha-forte);
+  }
+
+  /* A porta da gaveta. Ela existe só aqui — acima deste ponto a coluna está na
+     tela, e um botão que abre o que já está aberto é um botão que não faz
+     nada. */
+  .linha-canais {
+    display: flex;
+    align-items: center;
+    min-height: 34px;
+    padding: 0 12px;
+    flex: 0 0 auto;
+    font: inherit;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--seele-osso-apagado);
+    background: none;
+    border: 1px solid var(--seele-linha-forte);
+    cursor: pointer;
+  }
+
+  .linha-canais:hover,
+  .linha-canais[aria-expanded="true"] {
+    color: var(--seele-laranja-nerv);
+    border-color: var(--seele-laranja-nerv);
+  }
+}
+
+@media (max-width: 700px) {
+.telemetria { display: flex; gap: 8px 16px; padding: 6px 12px; max-height: 84px; overflow-y: auto; }
+}
+
+@media (max-width: 700px) {
+#tela-sessao .paineis { min-width: 0; grid-template-columns: minmax(0,1fr); grid-template-areas: "linha"; }
+#tela-sessao .painel-linha, #vista-conversa, .linha-barra { min-width: 0; }
+.linha-barra { flex-wrap: wrap; }
+}
+
+@media(max-width: 700px) {
+#form-mensagem { display: grid; grid-template-columns: 44px minmax(0,1fr) auto; gap: 8px; padding: 8px; align-items: end; }
+#form-mensagem .compor-caixa { grid-column: 2; grid-row: 1; padding: 0 8px; gap: 4px; }
+#form-mensagem #botao-anexar { grid-column: 1; grid-row: 1; width: 44px; min-height: 44px; }
+#form-mensagem #botao-enviar { grid-column: 3; grid-row: 1; min-width: 0; padding: 8px; font-size: 11px; min-height: 44px; }
+#form-mensagem textarea { min-height: 40px; height: 40px; }
+#form-mensagem .prompt { display: none; }
+.trilha { overflow-x: auto; }
+}
+
+@media (max-width:700px) {
+#aviso-fone { padding: 8px 12px; gap: 8px; font-size: 12px; line-height: 1.4; }
+}
+
+@media(max-width:700px) {
+#aviso-fone { padding: 6px 12px; gap: 8px; }
+}
+@media(max-width:700px) {
+  #tela-sessao .paineis > .trilha { display: none; }
 }

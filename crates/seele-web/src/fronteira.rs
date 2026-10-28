@@ -306,8 +306,8 @@ fn dizer_o_link(lido: &serde_json::Value) -> u32 {
 }
 
 /// Um link do navegador, lido contra a origem do produto
-/// (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`, a D-web-2, ou uma das anteriores,
-/// `ORIGENS_LEGADAS_DO_NAVEGADOR`). Devolve 0
+/// (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`). Origens aposentadas são recusadas.
+/// Devolve 0
 /// com `{"link": …}` na saída, ou 1 com `{"erro": …}`.
 ///
 /// **Sem parâmetro de origem, de propósito**: a página não escolhe contra que
@@ -321,8 +321,7 @@ pub unsafe extern "C" fn analisar_link(ptr: *const u8, len: usize) -> u32 {
     // SAFETY: repassa o contrato desta função ao de `entrada`.
     let bytes = unsafe { entrada(ptr, len) };
     let texto = std::str::from_utf8(bytes).unwrap_or("");
-    // A origem do produto que o link TRAZ: a atual, ou uma anterior exatamente (a troca de domínio da 0.17, com
-    // compatibilidade; `seele_proto::uri::origem_do_link`). Qualquer outra continua recusada.
+    // Só a origem atual aceita convites externos; origens aposentadas têm erro próprio.
     dizer_o_link(&crate::link_do_navegador(
         texto,
         seele_proto::uri::origem_do_link(texto),

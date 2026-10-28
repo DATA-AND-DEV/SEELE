@@ -427,29 +427,9 @@
    quatro, e esconder a quinta pessoa é a única forma de esta tela mentir sobre
    quem está na sala. `auto-fit` com um mínimo de 304px é o
    `minmax(300px,1fr)` do comp arredondado para a grade de 8. */
-.chamada-grade {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(304px, 1fr));
-  grid-auto-rows: minmax(160px, auto);
-  align-content: start;
-}
 
-.chamada-cartao {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px;
-  min-width: 0;
-  border-right: var(--seele-b) solid var(--seele-linha);
-  border-bottom: var(--seele-b) solid var(--seele-linha);
-}
+
+
 
 /* O halo do comp: `inset 0 0 0 2px` em laranja quando a pessoa transmite, mais
    o fundo de bloco em carga. Nunca sozinho — a pastilha do canto diz
@@ -509,20 +489,7 @@
 /* O avatar de iniciais do v3. Quadrado de 40px — 5 células —, contorno e não
    bloco, porque o bloco sólido é da placa e da pastilha de quem fala, e três
    inversões no mesmo cartão não distinguem mais nada. */
-.chamada-avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  flex: 0 0 auto;
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: var(--seele-t-secao);
-  letter-spacing: 0.02em;
-  border: var(--seele-b) solid var(--seele-linha-forte);
-  color: var(--seele-osso-apagado);
-}
+
 
 .chamada-cartao[data-fala="sim"] .chamada-avatar {
   border-color: var(--seele-laranja-nerv);
@@ -1048,10 +1015,7 @@ body[data-cinema="sim"]::after {
   pointer-events: none;
 }
 
-@keyframes seele-sumir {
-  0%, 60% { opacity: 1; }
-  100% { opacity: 0; }
-}
+
 
 /* ---------- a varredura, enquanto se olha uma tela ---------- */
 
@@ -1083,4 +1047,76 @@ body[data-vendo-tela="sim"] .varredura {
   letter-spacing: 0.08em;
   text-align: center;
   color: var(--seele-vermelho-alerta);
+}
+
+/* Direção visual 0.17.4 — componente proprietário. */
+.chamada-grade {
+  list-style: none;
+  margin: 0;
+  padding: 24px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(304px, 1fr));
+  grid-auto-rows: minmax(160px, auto);
+  align-content: start;
+  gap: 16px;
+}
+.chamada-cartao {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  min-width: 0;
+  border-right: var(--seele-b) solid var(--seele-linha);
+  border-bottom: var(--seele-b) solid var(--seele-linha);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha);
+  border-radius: var(--seele-raio);
+}
+.chamada-topo, .chamada-acoes { background: var(--seele-negro-absoluto); }
+#chamada-grade { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); align-content: start; }
+.chamada-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: var(--seele-t-secao);
+  letter-spacing: 0.02em;
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  color: var(--seele-osso-apagado);
+  border-radius: var(--seele-raio);
+}
+
+.chamada-acoes-estreitas { display: none; }
+
+/* Condições de composição, após os valores padrão do componente. */
+@keyframes seele-sumir {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@media(max-width:700px) {
+#vista-chamada { min-width: 0; }
+#vista-chamada .vista-chamada-barra { min-width: 0; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+#chamada-grade { padding: 12px; grid-template-columns: minmax(0, 1fr); }
+.chamada-cartao { min-width: 0; padding: 16px; }
+.chamada-cartao-topo, .chamada-cartao-identidade { min-width: 0; flex-wrap: wrap; }
+.chamada-volume { flex-wrap: wrap; }
+}
+
+@media(max-width:900px) {
+.chamada-acoes-estreitas { display: flex; gap: 8px; padding: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--seele-linha); }
+.chamada-acoes-estreitas > button { margin: 0; flex: 1 1 80px; padding: 8px; font-size: 12px; }
+.chamada-acoes-estreitas > button[aria-pressed="true"] { color: var(--seele-laranja-nerv); border-color: var(--seele-laranja-nerv); }
+}
+
+@media(max-width:900px) {
+  #tela-sessao[data-vista="ligacao"] .chamada-acoes-estreitas { display:none; }
 }

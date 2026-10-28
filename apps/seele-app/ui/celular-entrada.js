@@ -48,6 +48,7 @@
 
   /** Troca o que a tela mostra; o título leva o foco, e o teclado não sobe sozinho. */
   function mostrar(conteudo, acoes) {
+    delete tela.dataset.inicio;
     desenho += 1;
     corpo.replaceChildren(...conteudo.flat(Infinity).filter(Boolean));
     pe.replaceChildren(...acoes.filter(Boolean));
@@ -138,6 +139,7 @@
     // pela frase de recusa (`aviso(evento)` lançava, e o toque não fazia nada).
     ], [botao(f.conversar, () => CELULAR.ajudante("conversaPessoal")?.abrir()),
       botao(f.colar, () => colar(), "botao-fantasma")]);
+    tela.dataset.inicio = "";
   }
 
   /**
@@ -315,7 +317,6 @@
       titulo(f.titulo, " ", h("span", { class: "cel-entrada-endereco", text: lido.endereco ? `${lido.endereco}?` : "" })),
       avisoDoDesfecho,
       avisoDoEstado,
-      !doEstado && !desfecho && h("p", { class: "cel-entrada-nota", text: f.sobre }),
       ficha,
       podeEntrar && h("p", { class: "cel-entrada-nota", text: f.impressaoNota }),
       campo && [h("label", { class: "cel-entrada-campo", for: "cel-entrada-apelido" }, rotulo(f.apelido)), campo],

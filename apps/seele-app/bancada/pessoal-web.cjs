@@ -23,18 +23,23 @@ const engines = require('./playwright.cjs');
             window.acciones = [];
             window.vistaPessoal = criarVistaDaConversaPessoal({ acoes: {
               voltar: () => vistaPessoal.fechar(), criar: nome => acciones.push(['criar', nome]),
-              chamar: nome => acciones.push(['chamar', nome]), copiar: link => acciones.push(['copiar', link]),
+              chamar: nome => { if(window.erroDaOrigem){const erro=new Error('Este endereço foi aposentado. Peça um novo convite.');erro.origemDoConviteInvalida=true;throw erro;} acciones.push(['chamar', nome]); }, copiar: link => acciones.push(['copiar', link]),
               atender: () => acciones.push(['atender']), recusar: () => acciones.push(['recusar']),
               encerrar: () => { acciones.push(['encerrar']); vistaPessoal.estado({ estado: 'encerrada' }); },
               enviarTexto: texto => { acciones.push(['texto', texto]); vistaPessoal.texto({ id: 1, de: 'eu', texto }); },
               microfone: () => {}, compartilhar: () => {}, podeCompartilhar: () => false,
             } });
+            vistaPessoal.elemento.id = 'vista-pessoal-bancada';
             document.body.append(vistaPessoal.elemento);
             vistaPessoal.abrir({ porConvite: true, apelido: 'Alex' });
           });
-          const root = page.locator('#conversa-pessoal-web');
+          const root = page.locator('#vista-pessoal-bancada');
           await root.getByRole('button', { name: 'ENTRAR NA CONVERSA' }).click();
           assert.deepEqual(await page.evaluate(() => acciones[0]), ['chamar', 'Alex']);
+          await page.evaluate(()=>window.erroDaOrigem=true);
+          await root.getByRole('button', { name: 'ENTRAR NA CONVERSA' }).click();
+          assert.ok((await root.innerText()).includes('Este endereço foi aposentado. Peça um novo convite.'));
+          await page.evaluate(()=>{window.erroDaOrigem=false;vistaPessoal.limpar();});
           await page.evaluate(() => vistaPessoal.estado({ estado: 'tocando', apelido: '<img src=x onerror=alert(1)>' }));
           assert.equal(await root.locator('img:not(.pessoal-web-marca),[onerror]').count(), 0);
           await root.getByRole('button', { name: 'ATENDER', exact: true }).click();
@@ -56,6 +61,10 @@ const engines = require('./playwright.cjs');
             }) };
           });
           assert.deepEqual(layout, { overflow: false, fora: false });
+          assert.deepEqual(await root.locator('.pessoal-web-participante-nome').allTextContents(), ['Alex','Lia']);
+          // Reabrir após um evento de estado sem identidade local não pode
+          // apagar o próprio nome nem trocá-lo pelo nome remoto.
+          await page.evaluate(() => vistaPessoal.abrir());
           assert.deepEqual(await root.locator('.pessoal-web-participante-nome').allTextContents(), ['Alex','Lia']);
           const targets=await root.locator('button:visible').evaluateAll(buttons=>buttons.map(b=>({w:b.getBoundingClientRect().width,h:b.getBoundingClientRect().height,icon:!!b.querySelector('svg')})));
           assert.ok(targets.every(b=>b.w>=44&&b.h>=44&&b.icon),JSON.stringify(targets));

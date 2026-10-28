@@ -1,0 +1,28 @@
+SEELE 0.17.4 — prova nativa Mac, 28/10/2026
+
+Resultado: PASS no executável Tauri/WKWebView real, com o frontend final.
+
+Fontes exclusivamente sintéticas:
+- Tela: canvas.captureStream, 320 × 180 a 20 fps, vermelho e depois azul.
+- getDisplayMedia substituído pelo driver; nenhum seletor ou desktop físico foi aberto/capturado.
+- Áudio: oscilador sintético; nenhum microfone físico e todas as saídas de áudio silenciadas.
+
+Caminho de produto exercitado:
+- MediaStreamTrackProcessor ausente no WKWebView; leitura por HTMLVideoElement.requestVideoFrameCallback.
+- Mesmo VideoEncoder H.264, enquadramento WASM e DataChannel RTC autenticado do produto.
+- Quadros recebidos e decodificados no Chromium: vermelho [223,32,34,255]; azul [33,63,217,255].
+- Parar e reiniciar funcionaram; leitores de vídeo = 0 após cada parada; todas as faixas sintéticas terminaram.
+- Sem erros JS; chamadas por código e áudio nos dois sentidos, mensagens e encerramento também passaram.
+- A prova de tela cobriu Mac → navegador. Não afirma validação do seletor físico de tela nem de Windows/Linux.
+
+Limpeza:
+- Driver terminou com exit 0, aguardou browser.close e enviou SIGTERM apenas ao app e encontro que ele próprio abriu.
+- Verificação posterior por leitura de processos: nenhum native-proof-bin, native-proof.cjs ou encontro da porta 19977 permaneceu.
+- Nenhum Cargo, commit, push ou deploy foi executado nesta prova.
+
+Evidência pequena a preservar:
+native-screen-proof.json
+native-screen-result.json
+native-screen-red.png
+native-screen-blue.png
+native-screen-resumo.txt

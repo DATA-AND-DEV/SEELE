@@ -1,0 +1,26 @@
+[
+  {
+    "artefato_temporario": "microfone-controle45-lifecycle3.xcresult",
+    "bytes": 201370632
+  },
+  {
+    "artefato_temporario": "fullscreen.xcresult",
+    "bytes": 97535309
+  },
+  {
+    "artefato_temporario": "microfone.xcresult",
+    "bytes": 59639725
+  },
+  {
+    "artefato_temporario": "microfone-cru.xcresult",
+    "bytes": 19977
+  },
+  {
+    "artefato_temporario": "microfone-cru-controle.xcresult",
+    "bytes": 1439488
+  },
+  {
+    "artefato_temporario": "native-proof-bin",
+    "nota": "hardlink de binário instrumentado removido"
+  }
+]

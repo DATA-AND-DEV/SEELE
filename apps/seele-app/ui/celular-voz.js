@@ -17,6 +17,8 @@
   const { h } = CELULAR;
   const sessao = document.getElementById("tela-sessao");
   const doDesktop = (id) => document.getElementById(id);
+  document.querySelector(".telemetria")?.remove();
+  doDesktop("chamada-duracao")?.closest(".chamada-campo")?.remove();
 
   // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
   // arquivo não escreve nenhuma.
@@ -248,16 +250,9 @@
     desenharChamada();
   }).observe(vistaDaChamada, { attributes: true, attributeFilter: ["hidden"] });
 
-  // A telemetria lê o que o rodapé do desktop já escreveu, com as palavras do
-  // celular: PERDA, e não DISTÚRBIO (o glossário canônico).
-  const valores = PALAVRAS.medidas.map(([, id]) => [id, h("span", { class: "cel-telemetria-valor" })]);
-  sessao.append(h("div", { class: "cel-telemetria", role: "group", "aria-label": PALAVRAS.telemetria },
-    PALAVRAS.medidas.map(([rotulo], i) => h("div", { class: "cel-telemetria-celula" },
-      h("span", { class: "rotulo", text: rotulo }), valores[i][1]))));
   CASCA.depoisDeDesenhar.push((snapshot) => {
     nomeDaSala = (snapshot.voice_rooms ?? []).find((s) => s.occupied_by_us)?.name ?? "";
     desenharChamada();
-    for (const [id, valor] of valores) valor.textContent = doDesktop(id)?.textContent ?? "";
   });
 
   // Um toque num cartão da grade abre a folha da pessoa, como na aba PESSOAS:

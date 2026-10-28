@@ -96,16 +96,16 @@ const TELAS = [
         { id: "lia/mesa", version: "1.2.0", hash: "h1a2b3c4d5e6", repo: "https://github.com/lia/mesa", api: 6 },
         { id: "lia/dados", version: "0.4.1", hash: "h2f6e5d4c3b2", repo: null, api: 7 },
         { id: "lia/estilo-do-servidor-com-um-nome-bem-longo", version: "3.0.0", hash: "h3a4b5c6d7e8", repo: "https://github.com/lia/estilo", api: 7 }], "c1", null)` } },
-  // Os avisos do pé da sessão no celular: o primeiro contato, o fone e a identidade juntos (a captura do PWA no simulador: ~40% da altura).
+  // Os avisos do pé da sessão no celular: o primeiro contato, uma falha de áudio e a identidade juntos (a captura do PWA no simulador: ~40% da altura).
   { tela: "celular-avisos", raiz: "#tela-sessao", barra: null, caixa: "#tela-sessao", so_celular: true,
     cenaPropria: {
       nome: "celular-avisos", casca: "celular", sessao: true,
       passos: `mostrarVeredito({ FirstContactVerified: { fingerprint: "0a7311e23a170100f10f39a54da69431b106146a008868bb3674c8150fce5c87" } });
-        document.getElementById("aviso-fone").hidden = false;
-        document.getElementById("aviso-fone-texto").textContent = FRASES_DO_CELULAR ? CASCA.avisoDeFone() : "USE FONE.";
+        document.getElementById("aviso-audio").hidden = false;
+        document.getElementById("aviso-audio-texto").textContent = "Microfone bloqueado. Revise a permissão.";
         const p = document.getElementById("cel-aviso-persistencia");
-        p.dataset.resposta = "concedida";
-        p.replaceChildren(Object.assign(document.createElement("span"), { className: "veredito-texto", textContent: "Este navegador guarda a sua identidade neste aparelho." }),
+        p.dataset.resposta = "negada"; p.hidden = false;
+        p.replaceChildren(Object.assign(document.createElement("span"), { className: "veredito-texto", textContent: "Não foi possível guardar a identidade neste aparelho." }),
           Object.assign(document.createElement("button"), { className: "botao-fantasma", type: "button", textContent: "dispensar" }));` } },
 ];
 
@@ -675,7 +675,7 @@ async function principal() {
                 let n = 0;
                 const o = new MutationObserver((r) => { n += r.length; });
                 o.observe(document.getElementById("tela-sessao"), { subtree: true, childList: true, attributes: true, characterData: true });
-                const f = document.getElementById("aviso-fone");
+                const f = document.getElementById("aviso-audio");
                 f.hidden = !f.hidden; await new Promise((r) => setTimeout(r, 30)); f.hidden = !f.hidden;
                 await new Promise((r) => setTimeout(r, 1000));
                 o.disconnect();

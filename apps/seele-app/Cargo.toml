@@ -167,6 +167,8 @@ seele-core = { path = "../../crates/seele-core" }
 seele-proto = { path = "../../crates/seele-proto" }
 
 [build-dependencies]
+# Same SHA-256 already used by xtask; verifies the locally bundled WASM.
+sha2 = "0.11.0"
 tauri-build = { version = "2", features = [] }
 
 [lints]

@@ -2,13 +2,16 @@
 
 // Serviço autenticado. O encontro só recebe envelopes de sinalização; texto,
 // voz e tela passam exclusivamente pelo transporte direto depois do aceite.
-// A chave privada dura esta aba e nunca é exportada. Recarregar pede novo link.
+// A identidade pessoal é durável no IndexedDB; a chave nunca é exportável.
 async function criarServicoDeChamadasWeb({
-  aoEstado = () => {}, aoTexto = () => {}, aoPar = () => {}, aoControle = () => {},
-  urlDoEncontro = "https://rendzvous.seele.sh/chamada/1",
-  iceServers = [{ urls: "stun:rendzvous.seele.sh:8384" }],
+  aoEstado = () => {}, aoRecepcao = () => {}, aoTexto = () => {}, aoPar = () => {}, aoControle = () => {},
+  urlDoEncontro, iceServers,
   wasm: wasmFornecido, buscar = (...args) => fetch(...args),
   criarEnlace = criarEnlaceDaChamadaWeb,
+  origemDosLinks,
+  identidade: identidadeFornecida,
+  conferirPar = typeof conferirParPessoalWeb === "function" ? conferirParPessoalWeb : null,
+  reservarChamada = async () => {},
 } = {}) {
   const wasm = wasmFornecido || await instanciarOWasmDaSessao();
   const encoder = new TextEncoder(), decoder = new TextDecoder();
@@ -23,28 +26,41 @@ async function criarServicoDeChamadasWeb({
       return valor;
     } finally { wasm.liberar(ptr, bytes.length); }
   }
-  const chave = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
-  const publica = Array.from(new Uint8Array(await crypto.subtle.exportKey("raw", chave.publicKey)));
+  // As três fontes canônicas pertencem ao protocolo Rust; a bancada pode
+  // fornecer origens/transportes locais explicitamente, sem trocar o padrão.
+  const configuracao = operar({ acao: "configuracao" });
+  if (urlDoEncontro === undefined) urlDoEncontro = configuracao.url_do_encontro;
+  if (iceServers === undefined) iceServers = configuracao.ice_servers;
+  if (origemDosLinks === undefined) origemDosLinks = configuracao.origem_dos_links;
+  const identidade = identidadeFornecida || (typeof identidadePessoalDoNavegador === "function"
+    ? await identidadePessoalDoNavegador() : null);
+  const chave = identidade?.chave || (identidade?.assinar ? null : await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]));
+  const publica = identidade?.publica || Array.from(new Uint8Array(await crypto.subtle.exportKey("raw", chave.publicKey)));
+  const codigo = operar({ acao: "codigo_da_chave", chave: publica }).codigo;
   const zero = () => Array(32).fill(0);
   const aleatorio = n => Array.from(crypto.getRandomValues(new Uint8Array(n)));
   const igual = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]);
   const idTexto = a => a.map(v => v.toString(16).padStart(2, "0")).join("");
   const vazio = () => ({ primeira: zero(), segunda: zero() });
   let epoca, conviteAtual = null, recepcao = null, chamada = null, nome = "", proximoTexto = 0;
-  let criando = false, destruido = false;
+  let criando = false, destruido = false, buscaEmCurso = null, preparandoCodigo = null, codigoAtivo = false;
+  const recepcoes = new Set();
+  let retratoDaRecepcao = null, geracaoDaRecepcao = 0, geracaoDoPreparo = null;
+  const esperasDaRecepcao = [2000, 5000, 15000];
   let retrato = Object.freeze({ estado: "livre" });
   const vistos = new Map();
-  const chamadasVistas = new Set();
+  const chamadasVistas = new Map();
   const notificar = (f, ...args) => { try { f(...args); } catch { /* observador não governa recursos */ } };
   function mostrar(estado, motivo = null, contexto = chamada) {
     if (contexto && contexto !== chamada) return;
-    retrato = Object.freeze({ estado, motivo, papel: contexto?.papel, apelido: contexto?.apelido });
+    retrato = Object.freeze({ estado, motivo, id: contexto ? idTexto(contexto.id) : null, codigo: contexto?.codigo, papel: contexto?.papel, apelido: contexto?.apelido });
     notificar(aoEstado, retrato);
   }
   function conferir(contexto) {
     if (destruido || contexto.abortador.signal.aborted) throw new DOMException("Chamada encerrada", "AbortError");
   }
-  async function assinar(bytes) {
+  async function assinar(bytes, intencao) {
+    if (identidade?.assinar) return identidade.assinar(intencao);
     const prova = new Uint8Array(await crypto.subtle.sign("Ed25519", chave.privateKey, new Uint8Array(bytes)));
     return { primeira: Array.from(prova.slice(0, 32)), segunda: Array.from(prova.slice(32)) };
   }
@@ -82,7 +98,7 @@ async function criarServicoDeChamadasWeb({
     try { return await pedidoAssinado(contexto, operacao, { ...opcoes, sinalTerminal: terminal?.signal }); }
     finally { clearTimeout(prazo); }
   }
-  async function pedidoAssinado(contexto, operacao, { terminal = false, caixa = false, sinalTerminal } = {}) {
+  async function pedidoAssinado(contexto, operacao, { terminal = false, caixa = false, sinalTerminal, epocaRepetida = false } = {}) {
     const sinal = terminal ? sinalTerminal : contexto.abortador.signal;
     if (!terminal) conferir(contexto);
     await descobrir(sinal);
@@ -93,7 +109,7 @@ async function criarServicoDeChamadasWeb({
       destinatario: caixa ? publica : contexto.par,
       geracao: contexto.geracao, sequencia: ++contexto.sequencia,
       valido_ate: Math.floor(Date.now() / 1000) + 60, operacao, assinatura: vazio() };
-    p.assinatura = await assinar(operar({ acao: "pedido_mensagem", pedido: p }).bytes);
+    p.assinatura = await assinar(operar({ acao: "pedido_mensagem", pedido: p }).bytes, { Pedido: p });
     if (!terminal) conferir(contexto);
     const texto = operar({ acao: "pedido_escrever", pedido: p }).texto;
     let resposta;
@@ -113,8 +129,54 @@ async function criarServicoDeChamadasWeb({
       }
     }
     if (!terminal) conferir(contexto);
-    if (resposta?.Recusa) throw new Error(`chamada: ${resposta.Recusa.motivo}`);
+    if (resposta?.Recusa) {
+      if (resposta.Recusa.motivo === "Epoca" && !epocaRepetida) {
+        epoca = null;
+        return pedidoAssinado(contexto, operacao, { terminal, caixa, sinalTerminal, epocaRepetida: true });
+      }
+      const erro = new Error(`chamada: ${resposta.Recusa.motivo}`);
+      erro.motivo = resposta.Recusa.motivo;
+      throw erro;
+    }
     return resposta;
+  }
+  function estadoDaRecepcao(estado, motivo = null) {
+    if (retratoDaRecepcao?.estado === estado && retratoDaRecepcao?.motivo === motivo) return;
+    retratoDaRecepcao = Object.freeze({ estado, motivo }); notificar(aoRecepcao, retratoDaRecepcao);
+  }
+  function soltarRecepcao(c) {
+    if (!c) return;
+    clearTimeout(c.poll); clearTimeout(c.renovar); c.abortador.abort(); recepcoes.delete(c);
+  }
+  function renovarDepois(c) {
+    clearTimeout(c.renovar);
+    if (!codigoAtivo || c !== recepcao || c.revogando || destruido) return;
+    c.renovar = setTimeout(() => {
+      void receberPorCodigo({ apelido: nome, forcar: true }).catch(erro => falhaDaRecepcao(c, erro, true));
+    }, Math.max(1000, (c.convite.expira_em - 60) * 1000 - Date.now()));
+  }
+  function falhaDaRecepcao(c, erro, renovacao = false) {
+    if (c.abortador.signal.aborted || c.revogando || destruido) return;
+    c.falha = true;
+    if (c === recepcao) estadoDaRecepcao("indisponivel", erro.motivo || erro.status || "rede");
+    const repetivel = erro.motivo === "SemRegistro" || erro.motivo === "Epoca"
+      || erro.status === 429 || erro.status >= 500 || (!erro.status && !String(erro.message).startsWith("chamada:"));
+    const espera = esperasDaRecepcao[c.falhas || 0];
+    c.falhas = (c.falhas || 0) + 1;
+    if (!repetivel || espera === undefined) { c.pausada = true; return; }
+    c.poll = setTimeout(() => {
+      if (renovacao || c.convite.expira_em <= Math.floor(Date.now() / 1000)) {
+        void receberPorCodigo({ apelido: nome, forcar: true }).catch(e => falhaDaRecepcao(c, e, true));
+      } else {
+        void (async () => {
+          try {
+            await enfileirar(c, { Registrar: { convite: c.convite } }, { caixa: true });
+            c.cursor = 0;
+            await poll(c, true);
+          } catch (e) { falhaDaRecepcao(c, e); }
+        })();
+      }
+    }, espera);
   }
   function contexto(convite, papel, id = zero(), par = publica, geracao = 0) {
     return { convite, papel, id, par, geracao, sequencia: 0, remota: 0, cursor: 0,
@@ -129,10 +191,12 @@ async function criarServicoDeChamadasWeb({
   function terminar(c, motivo, avisar = true) {
     if (!c || c.encerrada) return false;
     c.encerrada = true;
+    void Promise.resolve(reservarChamada(idTexto(c.id), false)).catch(() => {});
     clearTimeout(c.timer); clearTimeout(c.poll);
     c.abortador.abort();
     try { c.enlace?.abortar(); } catch { /* limpa os demais recursos mesmo se o adaptador falhar */ }
     c.enlace = null; c.sinais.length = 0;
+    for (const caixa of recepcoes) if (caixa !== recepcao) soltarRecepcao(caixa);
     if (chamada === c) { notificar(aoPar, null, { id: idTexto(c.id), papel: c.papel }); mostrar("encerrada", motivo, c); }
     if (avisar) {
       const pendente = c.papel === "quem-recebe" ? "Recusar" : "Cancelar";
@@ -186,17 +250,34 @@ async function criarServicoDeChamadasWeb({
     if (vistos.size >= 1024) throw new Error("chamada: provas demais");
     vistos.set(nonce, p.valido_ate);
     if (p.operacao?.Chamar) {
-      if (caixa !== recepcao || p.papel !== "QuemLiga" || !igual(p.operacao.Chamar.convite.dono, publica)
+      if (p.papel !== "QuemLiga" || !igual(p.operacao.Chamar.convite.dono, publica)
         || p.operacao.Chamar.convite.expira_em !== caixa.convite.expira_em
         || !igual(p.operacao.Chamar.convite.assinatura.primeira, caixa.convite.assinatura.primeira)
         || !igual(p.operacao.Chamar.convite.assinatura.segunda, caixa.convite.assinatura.segunda)) throw new Error("chamada: convite inválido");
       const id = idTexto(p.chamada);
+      for (const [visto, ate] of chamadasVistas) if (ate <= agora) chamadasVistas.delete(visto);
       if (chamadasVistas.has(id)) return;
       if (chamadasVistas.size >= 256) throw new Error("chamada: convites demais");
-      chamadasVistas.add(id);
-      if (chamada && !chamada.encerrada) return; // 1:1; não substitui a conversa atual.
+      chamadasVistas.set(id, p.valido_ate + 120);
+      if (caixa !== recepcao || caixa.revogando || (chamada && !chamada.encerrada)) {
+        const ocupada = contexto(caixa.convite, "quem-recebe", p.chamada, p.remetente, p.geracao);
+        void enfileirar(ocupada, "Recusar", { terminal: true }).catch(() => {});
+        return;
+      }
       const c = contexto(caixa.convite, "quem-recebe", p.chamada, p.remetente, p.geracao);
-      c.remota = p.sequencia; c.apelido = p.operacao.Chamar.apelido; chamada = c;
+      c.remota = p.sequencia; c.apelido = p.operacao.Chamar.apelido;
+      c.codigo = operar({ acao: "codigo_da_chave", chave: p.remetente }).codigo;
+      if (conferirPar) {
+        try { await conferirPar(c.codigo, p.remetente, c.apelido, "perdida"); await reservarChamada(idTexto(c.id)); }
+        catch { void enfileirar(c, "Recusar", { terminal: true }).catch(() => {}); return; }
+        if (caixa.abortador.signal.aborted || destruido) { await reservarChamada(idTexto(c.id), false); return; }
+      }
+      if (chamada && !chamada.encerrada) {
+        await reservarChamada(idTexto(c.id), false);
+        void enfileirar(c, "Recusar", { terminal: true }).catch(() => {});
+        return;
+      }
+      chamada = c;
       mostrar("tocando", null, c);
       c.timer = setTimeout(() => terminar(c, "nao-atendida"), Math.max(0, Math.min(45000, c.convite.expira_em * 1000 - Date.now())));
       return;
@@ -221,46 +302,82 @@ async function criarServicoDeChamadasWeb({
       const resposta = await enfileirar(c, { Buscar: { cursor: c.cursor, confirmado: c.cursor } }, { caixa });
       if (!resposta.Eventos) throw new Error("chamada: caixa inválida");
       for (const e of resposta.Eventos.eventos) { await evento(c, e.pedido); c.cursor = e.cursor; }
+      c.falha = false; c.pausada = false; c.falhas = 0;
+      if (c === recepcao && !c.revogando) estadoDaRecepcao("registrada");
       c.poll = setTimeout(() => void poll(c, caixa), 2000);
     } catch (erro) {
       if (c.abortador.signal.aborted) return;
-      // A conversa direta já estabelecida não depende da disponibilidade da
-      // VPS. O DataChannel detecta a saída do par mesmo sem caixa de sinais.
-      if (chamada && !chamada.encerrada && chamada.admitida && retrato.estado === "dentro") return;
-      if (c === recepcao) { c.abortador.abort(); if (chamada && !chamada.encerrada && !chamada.admitida) terminar(chamada, "sinalizacao", false); else if (!chamada || chamada.encerrada) mostrar("encerrada", "sinalizacao", null); }
-      else terminar(c, "sinalizacao", false);
+      // Reconectar sinalização nunca recria RTC, captura ou uma chamada.
+      if (recepcoes.has(c)) {
+        falhaDaRecepcao(c, erro);
+        if (chamada && !chamada.encerrada && !chamada.admitida) terminar(chamada, "sinalizacao", false);
+      } else if (c.admitida && retrato.estado === "dentro") {
+        const espera = esperasDaRecepcao[c.falhas || 0]; c.falhas = (c.falhas || 0) + 1;
+        if (espera !== undefined) c.poll = setTimeout(() => void poll(c, caixa), espera);
+      } else terminar(c, "sinalizacao", false);
     }
   }
   async function criarConvite(opcoes) {
+    if (preparandoCodigo) await preparandoCodigo.catch(() => {});
     if (criando || destruido) throw new Error("chamada: indisponível");
     criando = true;
     try { return await prepararConvite(opcoes); } finally { criando = false; }
   }
-  async function prepararConvite({ apelido, validadeSegundos = 3600 }) {
-    if (chamada && !chamada.encerrada) throw new Error("chamada: ocupada");
+  async function prepararConvite({ apelido, validadeSegundos = 3600, preservarChamada = false }) {
+    const geracaoDoRegistro = geracaoDaRecepcao;
+    if (!preservarChamada && chamada && !chamada.encerrada) throw new Error("chamada: ocupada");
     if (!Number.isInteger(validadeSegundos) || validadeSegundos < 1 || validadeSegundos > 86400) throw new Error("chamada: validade inválida");
     nome = String(apelido || "").trim();
     if (!nome || encoder.encode(nome).length > 128) throw new Error("chamada: nome inválido");
-    if (recepcao) { recepcao.abortador.abort(); clearTimeout(recepcao.poll); }
+    const velha = recepcao;
     const convite = { id: aleatorio(32), dono: publica, expira_em: Math.floor(Date.now() / 1000) + validadeSegundos, assinatura: vazio() };
-    convite.assinatura = await assinar(operar({ acao: "convite_mensagem", convite }).bytes);
-    if (destruido) throw new DOMException("Chamada encerrada", "AbortError");
+    convite.assinatura = await assinar(operar({ acao: "convite_mensagem", convite }).bytes, { Convite: convite });
+    if (destruido || geracaoDoRegistro !== geracaoDaRecepcao) throw new DOMException("Recepção cancelada", "AbortError");
     const c = contexto(convite, "quem-recebe");
+    c.registrando = true;
+    recepcoes.add(c);
+    try { await enfileirar(c, { Registrar: { convite } }, { caixa: true }); conferir(c); }
+    catch (erro) { soltarRecepcao(c); throw erro; }
+    finally { c.registrando = false; }
+    if (geracaoDoRegistro !== geracaoDaRecepcao || c.revogando) {
+      // Revogar entrou na mesma fila, depois de Registrar. Mesmo se o servidor
+      // concluiu tarde, a resposta não reinstala a caixa nem volta ao polling.
+      try { await c.revogacao; } finally { soltarRecepcao(c); }
+      throw new DOMException("Recepção cancelada", "AbortError");
+    }
     recepcao = c;
-    await enfileirar(c, { Registrar: { convite } }, { caixa: true });
-    conferir(c); conviteAtual = convite; chamada = null;
+    if (velha) {
+      clearTimeout(velha.renovar);
+      if (!chamada || chamada.encerrada || !igual(chamada.convite.id, velha.convite.id)) soltarRecepcao(velha);
+    }
+    if (!chamada || chamada.encerrada) { conviteAtual = convite; chamada = null; mostrar("recebendo", null, null); }
+    estadoDaRecepcao("registrada"); renovarDepois(c);
     const fragmento = operar({ acao: "convite_escrever", convite }).fragmento;
-    mostrar("recebendo", null, null); void poll(c, true);
-    return { link: `${location.origin}/#chamada/${fragmento}`, expiraEm: convite.expira_em * 1000 };
+    void poll(c, true);
+    return { link: `${origemDosLinks}/#chamada/${fragmento}`, expiraEm: convite.expira_em * 1000 };
   }
   function abrirConvite(link) {
     if (destruido || criando) throw new Error("chamada: indisponível");
     if (chamada && !chamada.encerrada) throw new Error("chamada: ocupada");
-    const hash = new URL(link, location.href).hash;
+    const texto = String(link).trim();
+    const origem = new URL(origemDosLinks);
+    // O fragmento entregue pela própria página também funciona na casca nativa.
+    const endereco = texto.startsWith("#") ? new URL(texto, origem) : new URL(texto);
+    const host = endereco.hostname.toLowerCase().replace(/\.$/, "");
+    const aposentado = host === "seele.app.br" || host.endsWith(".seele.app.br");
+    if (aposentado || endereco.origin !== origem.origin || origem.origin === "null"
+        || endereco.username || endereco.password || !["https:", "http:"].includes(endereco.protocol)) {
+      const erro = new Error(aposentado
+        ? "Este endereço foi aposentado. Peça um novo convite."
+        : "Este convite usa outro endereço. Peça um novo convite.");
+      erro.origemDoConviteInvalida = true;
+      throw erro;
+    }
+    const hash = endereco.hash;
     if (!hash.startsWith("#chamada/")) throw new Error("chamada: link inválido");
     const convite = operar({ acao: "convite_ler", fragmento: hash.slice(9) }).convite;
     if (igual(convite.dono, publica)) throw new Error("chamada: seu próprio convite");
-    if (recepcao) { recepcao.abortador.abort(); clearTimeout(recepcao.poll); recepcao = null; }
+    if (recepcao && !codigoAtivo) { soltarRecepcao(recepcao); recepcao = null; }
     conviteAtual = convite;
     return { expiraEm: convite.expira_em * 1000, dono: idTexto(convite.dono) };
   }
@@ -268,18 +385,30 @@ async function criarServicoDeChamadasWeb({
     if (destruido || criando || !conviteAtual || (chamada && !chamada.encerrada)) throw new Error("chamada: indisponível");
     operar({ acao: "convite_verificar", convite: conviteAtual });
     const c = contexto(conviteAtual, "quem-liga", aleatorio(32), conviteAtual.dono, crypto.getRandomValues(new Uint32Array(1))[0]);
-    c.apelido = "Conversa pessoal"; chamada = c; mostrar("chamando", null, c);
+    c.codigo = operar({ acao: "codigo_da_chave", chave: c.par }).codigo;
+    c.apelido = c.codigo; chamada = c; mostrar("chamando", null, c);
     c.timer = setTimeout(() => terminar(c, "nao-atendida"), Math.max(0, Math.min(45000, c.convite.expira_em * 1000 - Date.now())));
-    try { await enfileirar(c, { Chamar: { convite: c.convite, apelido: String(apelido || "").trim() } }); conferir(c); void poll(c, false); }
-    catch (erro) { terminar(c, "sinalizacao"); throw erro; }
+    try {
+      if (conferirPar) await conferirPar(c.codigo, c.par, null, "liguei");
+      conferir(c);
+      await reservarChamada(idTexto(c.id));
+      if (c.encerrada || destruido) { await reservarChamada(idTexto(c.id), false); conferir(c); }
+      await enfileirar(c, { Chamar: { convite: c.convite, apelido: String(apelido || "").trim() } });
+      conferir(c); void poll(c, false);
+    } catch (erro) { terminar(c, "sinalizacao"); throw erro; }
   }
+
   async function atender() {
     const c = chamada;
     if (!c || c.encerrada || retrato.estado !== "tocando") return false;
     operar({ acao: "convite_verificar", convite: c.convite });
     // Marca intenção antes do await: dois gestos não geram dois aceites.
     c.aceitando = true; mostrar("conectando", null, c);
-    try { await enfileirar(c, "Atender"); conferir(c); void conectar(c); return true; }
+    try {
+      await enfileirar(c, "Atender"); conferir(c);
+      if (conferirPar) await conferirPar(c.codigo, c.par, c.apelido, "recebi");
+      conferir(c); void conectar(c); return true;
+    }
     catch (erro) { terminar(c, "sinalizacao"); throw erro; }
   }
   async function enviarControle(controle) {
@@ -288,16 +417,86 @@ async function criarServicoDeChamadasWeb({
     const bytes = operar({ acao: "controle_escrever", controle }).bytes;
     return c.enlace.controle.enviar(new Uint8Array(bytes));
   }
-  return Object.freeze({ wasm, operar, criarConvite, abrirConvite, chamar, atender,
+  async function receberPorCodigo({ apelido, forcar = false }) {
+    codigoAtivo = true;
+    const geracaoDesejada = geracaoDaRecepcao;
+    if (preparandoCodigo) {
+      if (geracaoDoPreparo === geracaoDesejada) return preparandoCodigo;
+      // OFF invalidou o preparo. ON espera sua limpeza, não reutiliza o
+      // convite cancelado e só inicia se essa preferência ainda for atual.
+      await preparandoCodigo.catch(() => {});
+      if (destruido || !codigoAtivo || geracaoDesejada !== geracaoDaRecepcao) throw new DOMException("Recepção cancelada", "AbortError");
+      return receberPorCodigo({ apelido, forcar });
+    }
+    if (!forcar && recepcao && !recepcao.falha && !recepcao.pausada && !recepcao.revogando && !recepcao.abortador.signal.aborted && recepcao.convite.expira_em > Math.floor(Date.now() / 1000) + 60) return { codigo };
+    estadoDaRecepcao("preparando");
+    const geracaoDoRegistro = geracaoDaRecepcao;
+    const promessa = criarConvite({ apelido, validadeSegundos: 86400, preservarChamada: true }).then(() => ({ codigo }))
+      .catch(erro => { if (geracaoDoRegistro === geracaoDaRecepcao) estadoDaRecepcao("indisponivel", erro.motivo || erro.status || "rede"); throw erro; })
+      .finally(() => { if (preparandoCodigo === promessa) preparandoCodigo = null; });
+    preparandoCodigo = promessa;
+    geracaoDoPreparo = geracaoDoRegistro;
+    return promessa;
+  }
+  async function chamarCodigo({ codigo: pedido, apelido }) {
+    if (destruido || criando || buscaEmCurso || (chamada && !chamada.encerrada)) throw new Error("chamada: indisponível");
+    const alvo = operar({ acao: "codigo_ler", codigo: String(pedido || "").replace(/^@/, "") }).codigo;
+    if (alvo === codigo) throw new Error("chamada: seu próprio código");
+    const c = contexto({ id: publica }, "quem-liga");
+    buscaEmCurso = c; mostrar("procurando", null, null);
+    try {
+      const resposta = await enfileirar(c, { Localizar: { codigo: alvo } }, { caixa: true });
+      conferir(c);
+      const convite = resposta.Localizado?.convite;
+      if (!convite) throw new Error("chamada: código indisponível");
+      operar({ acao: "convite_verificar", convite });
+      if (operar({ acao: "codigo_da_chave", chave: convite.dono }).codigo !== alvo) throw new Error("chamada: código não confere");
+      if (conferirPar) await conferirPar(alvo, convite.dono);
+      conferir(c);
+      if (destruido || criando || (chamada && !chamada.encerrada)) throw new Error("chamada: indisponível");
+      // Mantém a própria caixa ativa para continuar recebendo depois da saída.
+      conviteAtual = convite;
+      return await chamar({ apelido });
+    } catch (erro) {
+      if (buscaEmCurso === c && !c.abortador.signal.aborted && (!chamada || chamada.encerrada) && retrato.estado === "procurando") mostrar("encerrada", "sinalizacao", null);
+      throw erro;
+    } finally { if (buscaEmCurso === c) buscaEmCurso = null; c.abortador.abort(); }
+  }
+  function cancelarAtual(motivo) {
+    let tinhaBusca = false;
+    if (buscaEmCurso) { buscaEmCurso.abortador.abort(); buscaEmCurso = null; tinhaBusca = true; mostrar("encerrada", motivo, null); }
+    return terminar(chamada, motivo) || tinhaBusca;
+  }
+  return Object.freeze({ wasm, operar, codigo, receberPorCodigo, chamarCodigo, criarConvite, abrirConvite, chamar, atender,
     ler: () => retrato,
     recusar: () => retrato.estado === "tocando" && terminar(chamada, "recusada"),
-    cancelar: () => terminar(chamada, "cancelada"), encerrar: () => terminar(chamada, "encerrada"),
+    cancelar: () => cancelarAtual("cancelada"), encerrar: () => cancelarAtual("encerrada"),
     async revogarConvite() {
-      const c = recepcao; if (!c) return false;
-      await enfileirar(c, "Revogar", { caixa: true });
-      if (chamada && !chamada.encerrada && !chamada.admitida) terminar(chamada, "revogada", false);
-      // Aceitas continuam: o polling da caixa ainda entrega sinais/encerramento.
-      if (!chamada || chamada.encerrada) { c.abortador.abort(); clearTimeout(c.poll); mostrar("encerrada", "revogada", null); }
+      codigoAtivo = false;
+      const geracaoDaRevogacao = ++geracaoDaRecepcao;
+      const chamadaRevogada = chamada;
+      estadoDaRecepcao("desligada");
+      const caixas = [...recepcoes];
+      if (!caixas.length) return false;
+      const revogacoes = caixas.map(c => {
+        c.revogando = true; clearTimeout(c.renovar);
+        const aceita = chamada && !chamada.encerrada && chamada.admitida && igual(chamada.convite.id, c.convite.id);
+        if (!aceita) {
+          clearTimeout(c.poll);
+          // Registrar já enviado precisa concluir antes de Revogar; abortar o
+          // fetch aqui perderia a confirmação de um registro aplicado tarde.
+          if (!c.registrando) c.abortador.abort();
+        }
+        c.revogacao ??= enfileirar(c, "Revogar", { caixa: true, terminal: true });
+        return c.revogacao.finally(() => {
+          if (!aceita) { soltarRecepcao(c); if (recepcao === c) recepcao = null; }
+        });
+      });
+      try { await Promise.all(revogacoes); }
+      finally {
+        if (chamadaRevogada && !chamadaRevogada.encerrada && !chamadaRevogada.admitida) terminar(chamadaRevogada, "revogada", false);
+        if (geracaoDaRevogacao === geracaoDaRecepcao && (!chamada || chamada.encerrada)) mostrar("encerrada", "revogada", null);
+      }
       return true;
     },
     enviarControle,
@@ -306,8 +505,10 @@ async function criarServicoDeChamadasWeb({
     },
     destruir() {
       destruido = true;
-      terminar(chamada, "encerrada");
-      if (recepcao) { recepcao.abortador.abort(); clearTimeout(recepcao.poll); }
+      cancelarAtual("encerrada");
+      codigoAtivo = false;
+      for (const c of recepcoes) soltarRecepcao(c);
+      estadoDaRecepcao("desligada");
     },
   });
 }

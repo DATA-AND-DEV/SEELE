@@ -1,0 +1,16 @@
+
+running 11 tests
+test o_tema_nunca_escreve_o_nucleo ... ok
+test a_casca_veste_a_sala_uma_vez_e_antes_da_reconciliacao ... ok
+test toda_regra_das_cascas_do_navegador_comeca_pela_marca ... ok
+test todo_script_das_cascas_do_navegador_e_inerte_sem_a_marca ... ok
+test nenhum_script_das_cascas_do_navegador_chama_o_invoke ... ok
+test o_nucleo_do_celular_so_le_o_nucleo ... ok
+test nenhum_script_das_cascas_do_navegador_escreve_frase_de_tela ... ok
+test o_texto_do_sistema_alcanca_todo_tamanho_do_desktop ... ok
+test o_detalhe_da_pessoa_tem_um_dono_por_casca ... ok
+test nenhum_arquivo_do_desktop_cita_a_marca ... ok
+test nenhum_nome_global_e_declarado_por_dois_scripts_da_mesma_pagina ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+

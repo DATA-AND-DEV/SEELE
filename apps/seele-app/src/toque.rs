@@ -238,6 +238,15 @@ pub(crate) async fn ouvir<R: Runtime>(
                 };
                 let faixa = tocando.na_faixa(&impressao);
                 let primeiro = guardar(&app, impressao, tocando);
+                if app
+                    .state::<crate::Session>()
+                    .pessoal_web
+                    .lock()
+                    .map_or(true, |pessoal| pessoal.is_some())
+                {
+                    let _ = crate::sala::recusar_em(&app.state::<crate::Session>(), &faixa.quem);
+                    continue;
+                }
                 if primeiro {
                     com_som = alarme.comecar();
                 }

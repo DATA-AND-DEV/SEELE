@@ -187,7 +187,7 @@ function telaPeloNavegador() {
 function porQueNaoHaTela() {
   if (permissaoDeTela !== "NaoSeSabe") return null;
   return telaPeloNavegador() ? FRASES_DA_TELA_NO_NAVEGADOR.palco
-    : "Esta versão não sabe compartilhar tela desta máquina. A de outra pessoa apareceria aqui.";
+    : "Compartilhamento indisponível nesta máquina.";
 }
 
 /**
@@ -241,10 +241,9 @@ const PERMISSAO_DE_TELA = {
   // resposta mudar entre a conferência e a abertura, que é o único jeito de
   // alguém chegar aqui e não poder fazer nada.
   NaoSeSabe: {
-    diz: "ESTA VERSÃO NÃO SABE COMPARTILHAR TELA",
+    diz: "COMPARTILHAMENTO INDISPONÍVEL",
     nota:
-      "Não é a sua conexão nem permissão: a parte que captura a tela ainda não " +
-      "está neste app.",
+      "",
     pedir: false,
   },
   Negada: {
@@ -398,6 +397,7 @@ function desenharPermissaoDeTela(permissao) {
 
   $("compartilhar-permissao-diz").textContent = dito.diz;
   $("compartilhar-permissao-nota").textContent = dito.nota;
+  $("compartilhar-permissao-nota").hidden = !dito.nota;
 }
 
 /**
@@ -581,6 +581,13 @@ function limitesEscolhidos() {
 async function desenharSomDaCaptura() {
   const aviso = $("compartilhar-som-aviso");
   if (!aviso) return;
+  if (PONTE_NO_LUGAR_DO_TAURI && typeof temSomDaTelaParaCodificar === "function" && !temSomDaTelaParaCodificar()) {
+    const som = $("compartilhar-som");
+    if (som) { som.checked = false; som.disabled = true; }
+    aviso.hidden = false; aviso.dataset.exclusao = "sem-som";
+    aviso.textContent = "Som do sistema indisponível neste navegador. A voz continua separada.";
+    return;
+  }
   let dito = null;
   try {
     dito = await invoke("exclusao_do_som_da_captura");

@@ -1,0 +1,7 @@
+o target era de: SUJO (build de /Users/dev-alexandre/.codex/worktrees/136e/SEELE 566781805991c727955b8b6d0bf5b9fff0a09e241bbc4c895b55756abe7f4871 em curso ou falhou)
+passa a ser de:  /Users/dev-alexandre/.codex/worktrees/136e/SEELE b0cee35d861fef984eec2f4c94704d76b78e7a4c480da5f217ab6e4f83a0794e  → a árvore inteira desta fonte ganha a hora de agora (cada crate local recompila)
+   Compiling xtask v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.28s
+     Running `target/debug/xtask wasm-nativo`
+wasm-nativo: 2213342 bytes de produção conferidos
+guarda ok: 1 artefatos locais, todos desta fonte, todos recompilados (o dono trocou)

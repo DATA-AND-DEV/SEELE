@@ -1,0 +1,15 @@
+✔ Localizar atrasado não apaga uma chamada recebida que tomou a tela (32.3075ms)
+✔ recepção por código renova antes de 24h sem mudar a identidade (10.608625ms)
+✔ falha de rede ociosa anuncia indisponibilidade e permite retry explícito (16.347916ms)
+✔ falha de rede durante conversa anuncia indisponibilidade e permite retry explícito (16.895458ms)
+✔ restart da época refaz uma vez com novo nonce e assinatura válidos (13.169791ms)
+✔ desligar durante Registrar invalida a operação e revoga a conclusão tardia (5.123083ms)
+✔ OFF e ON durante Registrar esperam a revogação e criam uma recepção nova (8.176167ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 105.980083

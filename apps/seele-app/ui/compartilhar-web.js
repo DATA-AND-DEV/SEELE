@@ -39,11 +39,56 @@ const QUADRO_DO_SOM_DA_TELA_US = 20_000;
 
 let sondaDaTela = null;
 
-/** As três peças que a transmissão do navegador usa, sem as quais ela não começa. */
+/** O leitor nativo de quadros, ou o leitor de vídeo do WebKit. */
+function temLeituraDeVideoDaTela() {
+  return typeof MediaStreamTrackProcessor === "function" ||
+    (typeof HTMLVideoElement === "function" && typeof HTMLVideoElement.prototype.requestVideoFrameCallback === "function");
+}
 function temCapturaParaCodificar() {
-  return Boolean(navigator.mediaDevices?.getDisplayMedia) &&
-    typeof VideoEncoder === "function" &&
-    typeof MediaStreamTrackProcessor === "function";
+  return Boolean(navigator.mediaDevices?.getDisplayMedia) && typeof VideoEncoder === "function" &&
+    typeof VideoFrame === "function" && temLeituraDeVideoDaTela();
+}
+/** Sem TrackProcessor de áudio, só vídeo; a voz tem seu próprio transporte. */
+function temSomDaTelaParaCodificar() {
+  return typeof MediaStreamTrackProcessor === "function" && typeof AudioEncoder === "function";
+}
+
+/** Um quadro apresentado por vez, sem fila adicional nem outro codificador. */
+function leitorDeVideoSemProcessador(trilha) {
+  if (typeof HTMLVideoElement.prototype.requestVideoFrameCallback !== "function") throw new Error("Este navegador não lê os quadros da captura de tela.");
+  const video = document.createElement("video");
+  video.muted = true; video.playsInline = true; video.setAttribute("aria-hidden", "true");
+  video.dataset.capturaDaTela = "sim";
+  Object.assign(video.style, { position: "fixed", width: "1px", height: "1px", opacity: "0.001", pointerEvents: "none", left: "0", top: "0" });
+  video.srcObject = new MediaStream([trilha]); document.body.append(video);
+  let fechado = false, callback = null, pendente = null, avisarFim;
+  const fim = new Promise(resolve => { avisarFim = resolve; });
+  const pronto = video.play(); pronto.catch(() => {});
+  function cancelar() {
+    if (fechado) return Promise.resolve();
+    fechado = true;
+    if (callback !== null) video.cancelVideoFrameCallback?.(callback);
+    callback = null; video.pause(); video.srcObject = null; video.remove();
+    pendente?.resolve({ done: true }); pendente = null; avisarFim(false);
+    return Promise.resolve();
+  }
+  return {
+    cancel: cancelar,
+    async read() {
+      if (fechado || !await Promise.race([pronto.then(() => true), fim])) return { done: true };
+      if (fechado) return { done: true };
+      return new Promise((resolve, reject) => {
+        pendente = { resolve, reject };
+        callback = video.requestVideoFrameCallback(agora => {
+          callback = null;
+          if (fechado) { resolve({ done: true }); return; }
+          pendente = null;
+          try { resolve({ done: false, value: new VideoFrame(video, { timestamp: Math.round(agora * 1000) }) }); }
+          catch (erro) { void cancelar(); reject(erro); }
+        });
+      });
+    },
+  };
 }
 
 /**
@@ -54,12 +99,8 @@ function temCapturaParaCodificar() {
 function sondarATela(codec) {
   if (!sondaDaTela) {
     sondaDaTela = (async () => {
-      // **O `MediaStreamTrackProcessor` também**: é por ele que os quadros da
-      // captura chegam ao codificador (abaixo). O WebKit (Safari) tem o
-      // `getDisplayMedia` e o `VideoEncoder`, e não ele — a sonda dizia «sim»,
-      // a escolha da tela abria, e a transmissão quebrava no meio (medido pelo
-      // browser-signaling, caso 12). Igual na 0.16; sem ele, a página diz que
-      // este navegador não compartilha, antes de qualquer aperto.
+      // A sonda usa a mesma condição do transmissor, incluindo o leitor de
+      // vídeo do WebKit quando ele não oferece TrackProcessor.
       if (!temCapturaParaCodificar()) return false;
       const saiu = new Promise((resolver) => {
         let codificador;
@@ -189,7 +230,8 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
 
     // O som, no mesmo fluxo.
     const som = estaVez.midia.getAudioTracks()[0];
-    if (som && estaVez.limites.com_som !== false) lerOSom(estaVez, som);
+    if (som && estaVez.limites.com_som !== false && temSomDaTelaParaCodificar()) lerOSom(estaVez, som);
+    else if (som && !temSomDaTelaParaCodificar()) som.stop();
   }
 
   function escrever(fluxo, bytes) {
@@ -222,7 +264,9 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
   async function lerAImagem(estaVez, trilha, codificador) {
     const fluxo = estaVez.fluxo;
     const { largura, altura, quadros } = fluxo.medidas;
-    const leitor = new MediaStreamTrackProcessor({ track: trilha }).readable.getReader();
+    const leitor = typeof MediaStreamTrackProcessor === "function"
+      ? new MediaStreamTrackProcessor({ track: trilha }).readable.getReader()
+      : leitorDeVideoSemProcessador(trilha);
     fluxo.leitores.push(leitor);
     const tela = new OffscreenCanvas(largura, altura);
     const contexto = tela.getContext("2d");
@@ -232,7 +276,9 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
       let lido;
       try {
         lido = await leitor.read();
-      } catch {
+      } catch (erro) {
+        console.warn("tela: a leitura da captura parou:", erro);
+        if (viva === estaVez) parar();
         break;
       }
       if (lido.done || viva !== estaVez) {

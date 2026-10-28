@@ -1,0 +1,5 @@
+app launched
+native {"code":"JHEW-FEN2-W21A-63QM","secure":true,"rtc":"function","media":"function","errors":[]}
+native screen red received, stopped, reader released
+native screen blue received, stopped, reader released
+PASS native IPC + código nos2sentidos + áudio nos2sentidos + tela H264 Mac→web stop/restart + mensagens + encerramento

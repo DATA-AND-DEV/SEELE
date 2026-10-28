@@ -334,6 +334,19 @@ async function asListasEOsCorpos() {
 /// **As recusas, por casca.** No celular, os do PC voltam recusados com a
 /// frase do celular; no PC, não. Os recusados voltam recusados nas duas, com a
 /// frase deles. E a primeira recusa de cada comando é dita no console.
+async function oDominioDescontinuado() {
+  for (const toque of [false,true]) for (const lido of [
+    {erro:'DominioDescontinuado'},
+    {erro:'Convite',detalhe:'DominioDescontinuado'},
+    {erro:{Convite:'DominioDescontinuado'}},
+  ]) {
+    const p=pagina({toque});
+    p.ler(`lerOLink = async () => (${JSON.stringify(lido)})`);
+    const r=await desfecho(p.invoke('analisar_convite',{link:'https://web.seele.app.br/#convite'}));
+    confere('domínio descontinuado', r.erro?.RecusaDaPonte?.frase === 'Este endereço foi aposentado. Peça um novo convite.', util.inspect(r));
+  }
+}
+
 async function asRecusas() {
   const caso = "as recusas";
   for (const [casca, opcoes] of [["celular", { toque: true }], ["larga", { largura: 1280 }]]) {
@@ -393,8 +406,6 @@ async function osNeutros() {
     estou_hospedando: false,
     conjunto_exigido_agora: "",
     estado_do_servidor: { hospedando: false, mensagens_desconhecidas: 0, sessoes_com_desconhecidas: 0 },
-    // A sala viva da F7 (décima segunda integração): o navegador não tem sala.
-    estado_da_sala: null,
     toques_agora: [],
     // As tarefas 19 e 20 da F7: o navegador não hospeda.
     meu_servidor: null,
@@ -416,6 +427,22 @@ async function osNeutros() {
 /// **Sair da sessão sai.** O `disconnect` é um atendido comum desde a tarefa 19
 /// da F7 (no desktop ele não derruba mais a hospedagem), e tem de encerrar a
 /// sessão da ponte.
+async function oEstadoDaRecepcaoPessoal() {
+  const caso='estado da recepção pessoal';
+  for(const casca of [{toque:true},{largura:1280}]) {
+    const p=pagina(casca);
+    confere(caso,!p.ler('NEUTROS_DE_QUEM_NAO_HOSPEDA.has("estado_da_sala")'),'estado pessoal ainda neutro');
+    confere(caso,igual(await p.invoke('estado_da_sala'),{estado:'Subindo'}),'recepção inicial não sobe');
+    for(const estado of [{estado:'NoAr',registro:{registro:'Registrado'},firewall:null},{estado:'Falhou',motivo:'Rede'},{estado:'Desligada'}]) {
+      p.ler(`estadoPessoalDaPonte = ${JSON.stringify(estado)}`);
+      const lido=await p.invoke('estado_da_sala');
+      confere(caso,igual(lido,estado),'estado real não retornou');
+      lido.estado='Alterado';if(lido.registro)lido.registro.registro='Alterado';
+      confere(caso,igual(await p.invoke('estado_da_sala'),estado),'resposta expôs o estado interno por referência');
+    }
+  }
+}
+
 async function sairSai() {
   const caso = "sair sai";
   for (const comando of ["disconnect"]) {
@@ -794,7 +821,9 @@ async function aPermissaoDoMicrofone() {
     aMarca,
     asListasEOsCorpos,
     asRecusas,
+    oDominioDescontinuado,
     osNeutros,
+    oEstadoDaRecepcaoPessoal,
     sairSai,
     semSessao,
     aAberturaNuncaEntra,
@@ -811,7 +840,8 @@ async function aPermissaoDoMicrofone() {
     osMicrofones,
     aPermissaoDoMicrofone,
   ];
-  for (const prova of provas) {
+  const selecionadas = process.argv.includes('--so-dominio') ? [oDominioDescontinuado] : provas;
+  for (const prova of selecionadas) {
     try {
       await prova();
     } catch (erro) {
@@ -820,7 +850,7 @@ async function aPermissaoDoMicrofone() {
   }
   terminou = true;
   if (falhas.length === 0) {
-    console.log(`ponte web: as ${provas.length} provas passam`);
+    console.log(`ponte web: as ${selecionadas.length} provas passam`);
     process.exit(0);
   }
   for (const falha of falhas) console.error(`FALHOU — ${falha}`);

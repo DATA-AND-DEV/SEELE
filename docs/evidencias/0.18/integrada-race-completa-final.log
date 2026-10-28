@@ -1,0 +1,4 @@
+{"engine":"chromium","audio":[{"enviados":64,"decodificados":25},{"enviados":25,"decodificados":65}],"cspReal":true,"gestosAtivos":true,"permissaoTardiaLiberada":true}
+chromium: UI real, convite limpo, aceite, chat bidirecional, voz sintética enviada/decodificada nos dois sentidos permissão tardia, saída/perda/reentrada pelo mesmo link e novo convite limpo PASS
+{"engine":"webkit","audio":[{"enviados":66,"decodificados":25},{"enviados":25,"decodificados":66}],"cspReal":true,"gestosAtivos":true,"permissaoTardiaLiberada":true}
+webkit: UI real, convite limpo, aceite, chat bidirecional, voz sintética enviada/decodificada nos dois sentidos permissão tardia, saída/perda/reentrada pelo mesmo link e novo convite limpo PASS

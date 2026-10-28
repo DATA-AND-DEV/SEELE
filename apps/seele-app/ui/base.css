@@ -40,22 +40,9 @@
  *
  * Os dois lugares que a leem — `.barra-janela` e o `calc` de `.tela` — moram
  * neste arquivo, então a variável aqui já os cobre. */
-:root {
-  --seele-barra-janela: 32px;
-}
 
-html, body {
-  margin: 0;
-  height: 100%;
-  background: var(--seele-negro-absoluto);
-  color: var(--seele-osso);
-  font-family: var(--seele-mono);
-  font-size: 13px;
-  line-height: 16px;
-  /* Zero border-radius e zero sombra em todo o arquivo: é regra de tema
-     (specs/07-estetica.md), não gosto. */
-  -webkit-font-smoothing: antialiased;
-}
+
+
 
 body { overflow: hidden; }
 
@@ -69,12 +56,7 @@ body { overflow: hidden; }
  * `min-height` junto de `height` porque as telas são `flex` e o conteúdo delas
  * rola por dentro: sem o mínimo, um filho que cresce empurra a tela para fora
  * da janela em vez de rolar. */
-.tela {
-  height: calc(100vh - var(--seele-barra-janela));
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
+
 [hidden] { display: none !important; }
 
 /* ---------- a tela que acabou de entrar ----------
@@ -234,17 +216,7 @@ input:focus-visible {
  *
  * `peso` forte pela mesma razão: o contraste de forma entre primário e
  * secundário é o campo sólido; o de leitura é o peso. */
-.botao {
-  font: inherit;
-  font-weight: 700;
-  letter-spacing: var(--seele-tracking-rotulo);
-  min-height: 40px;
-  padding: 8px 16px;
-  color: var(--seele-negro-absoluto);
-  background: var(--seele-laranja-nerv);
-  border: 1px solid var(--seele-laranja-nerv);
-  cursor: pointer;
-}
+
 
 /* Hospedar é a alternativa, não o caminho principal: quem abre o app quase
    sempre vai entrar num Server que já existe. Contorno em vez de campo sólido,
@@ -281,17 +253,7 @@ input:focus-visible {
  * de 11px davam cerca de 20px de altura, abaixo do mínimo de 24 que a WCAG 2.2
  * fixa em AA. Trinta e dois medidos, com o corpo de dado no lugar do 11px solto
  * que não vinha de token nenhum. */
-.botao-fantasma {
-  margin-left: auto;
-  font: inherit;
-  font-size: var(--seele-t-dado);
-  min-height: 32px;
-  color: inherit;
-  background: none;
-  border: 1px solid currentColor;
-  padding: 4px 10px;
-  cursor: pointer;
-}
+
 
 /* ---------- os glifos desenhados ----------
    `docs/marca.md` explica o precedente: os katakana da marca estão em contorno
@@ -387,20 +349,7 @@ input:focus-visible {
    painel, que a 34% ia de (10 · 8 · 6) a (8,3 · 6,6 · 5,0) — menos de dois
    níveis de 255. A textura nunca foi visível onde deveria estar; ela era
    visível no texto. É isso que 6% devolve. */
-.varredura {
-  position: fixed;
-  inset: 0;
-  /* Ela cobre a janela inteira, inclusive todo botão. Sem isto o app fica
-     bonito e inoperante. */
-  pointer-events: none;
-  z-index: 9;
-  background: repeating-linear-gradient(
-    180deg,
-    transparent 0 2px,
-    var(--seele-negro-absoluto) 2px 4px
-  );
-  opacity: 0.06;
-}
+
 
 /* A faixa que desce. Altura de 5vh porque é o que o keyframe do comp pede: de
    -100% a 2000% são 21 alturas de percurso, e a faixa só cruza uma tela inteira
@@ -430,10 +379,7 @@ input:focus-visible {
   animation: seele-varredura 7000ms linear infinite;
 }
 
-@keyframes seele-varredura {
-  from { transform: translateY(-100%); }
-  to   { transform: translateY(2000%); }
-}
+
 
 /* ---------- a nota ao lado de um controle ----------
 
@@ -467,12 +413,7 @@ input:focus-visible {
    legibilidade: o rótulo é Saira em caixa alta com tracking largo, a nota é
    monoespaçada em caixa baixa. Isso separa os dois sem que um deles seja
    difícil de ler. */
-.nota {
-  display: block;
-  font-size: var(--seele-t-dado);
-  line-height: 1.4;
-  color: var(--seele-osso);
-}
+
 
 
 /* ---------------------------------------------------------- a rolagem
@@ -528,16 +469,7 @@ input:focus-visible {
  * `-webkit-app-region: drag` é o que faz a faixa mover a janela; os controles
  * pedem `no-drag` de volta, ou o clique neles vira um arrasto de zero pixel e
  * o botão nunca dispara. */
-.barra-janela {
-  height: var(--seele-barra-janela);
-  flex: 0 0 auto;
-  display: flex;
-  align-items: stretch;
-  background: var(--seele-negro-painel);
-  border-bottom: 1px solid var(--seele-linha);
-  user-select: none;
-  -webkit-app-region: drag;
-}
+
 
 .barra-marca {
   width: 56px;
@@ -675,7 +607,10 @@ input:focus-visible {
  * alvo de pelo menos 44px e a área segura do aparelho; com o teclado aberto sobre um campo ela sai de cena (`html[data-teclado]`, posto por
  * `acompanharOTeclado` em `tela-boot.js`) e volta quando ele fecha. Sem animação nenhuma, então `prefers-reduced-motion` já é respeitado. */
 
-:root { --seele-leitura: 68ch; }
+:root {
+  --seele-barra-janela: 32px;
+  --seele-leitura: 68ch;
+}
 
 .boot-caixa.area {
   box-sizing: border-box;
@@ -749,6 +684,109 @@ input:focus-visible {
 .area-barra .boot-saidas { flex-direction: row; margin: 0; }
 .area-barra .boot-saidas > button { width: auto; min-width: 200px; margin: 0; }
 
+
+
+/* O teclado sobre um campo: a barra sai de cena e o campo com foco nunca fica debaixo dela. Vale no celular em pé e deitado (844x390, onde a
+   largura passa de 700px mas a altura não deixa sobrar nada com o teclado aberto). Ao fechar o teclado, `data-teclado` cai e ela volta. */
+
+
+/* Direção visual 0.17.4 — componente proprietário. */
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+.tela {
+  height: calc(100dvh - var(--seele-barra-janela));
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.varredura {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+  background: repeating-linear-gradient(
+    180deg,
+    transparent 0 2px,
+    var(--seele-negro-absoluto) 2px 4px
+  );
+  opacity: 0.06;
+  display: none;
+}
+button, input, textarea, select { font: inherit; border-radius: var(--seele-raio); }
+button { cursor: pointer; }
+button:not(:disabled):hover { border-color: var(--seele-laranja-nerv); }
+button:active:not(:disabled) { background: var(--seele-selected); }
+button:disabled { cursor: default; opacity: .55; }
+:where(button, input, select, textarea, summary, a):focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 3px; }
+input:not([type="range"]):not([type="checkbox"]):not([type="radio"]), textarea, select {
+  min-height: 40px; padding: 8px 12px; border: 1px solid var(--seele-linha-forte); background: var(--seele-negro-absoluto); color: var(--seele-osso); min-width: 0;
+}
+input::placeholder, textarea::placeholder { color: var(--seele-osso-apagado); opacity: 1; }
+.botao, .botao-fantasma { min-height: 40px; font-size: 14px; letter-spacing: 0; font-weight: 500; padding: 8px 16px; border-radius: var(--seele-raio); }
+.botao {
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: var(--seele-tracking-rotulo);
+  min-height: 40px;
+  padding: 8px 16px;
+  color: var(--seele-laranja-nerv);
+  background: transparent;
+  border: 1px solid var(--seele-laranja-nerv);
+  cursor: pointer;
+}
+.botao-fantasma {
+  margin-left: auto;
+  font: inherit;
+  font-size: var(--seele-t-dado);
+  min-height: 32px;
+  color: inherit;
+  background: none;
+  border: 1px solid currentColor;
+  padding: 4px 10px;
+  cursor: pointer;
+  border-color: var(--seele-linha-forte);
+}
+.rotulo, .coordenada { font-size: 12px; line-height: 1.5; letter-spacing: .04em; }
+.nota {
+  display: block;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--seele-osso-apagado);
+}
+h1, h2, h3, p { overflow-wrap: anywhere; }
+.barra-janela {
+  height: var(--seele-barra-janela);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  background: var(--seele-negro-absoluto);
+  border-bottom: 1px solid var(--seele-linha);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+:where(.boot, .area-cartao, .server-bloco, .painel, .nomear-caixa, .portaria-caixa, .mods-caixa, .moderar-caixa, .cargos-caixa, .superficie-de-mod, .servidor-linha, .amigo, .roster .pessoa) { border-radius: var(--seele-raio); }
+:where(.operador-inicial, .perfil-previa, .pessoa-imagem, .trilha-placa) { border-radius: var(--seele-raio); }
+.boot-hospedar-titulo { font-family: var(--seele-display); color: var(--seele-osso); font-size: 24px; font-weight: 500; letter-spacing: .02em; text-transform: none; margin: 0 0 12px; display: block; }
+#cabeca-mods-navegacao { display: none; }
+.mensagem-texto { font-size: 15px; line-height: 1.6; }
+.estado-sem-sessao { display: flex; gap: 24px; flex-wrap: wrap; border-top: 1px solid var(--seele-linha); padding: 8px 24px; margin-top: auto; font-size: 12px; color: var(--seele-osso-apagado); }
+
+.camada-server .estado-sem-sessao { position: relative; flex: 0 0 auto; margin-top: 0; }
+
+/* Condições de composição, após os valores padrão do componente. */
+@keyframes seele-varredura {
+  from { transform: translateY(-100%); }
+  to   { transform: translateY(2000%); }
+}
+
 @media (max-width: 700px) {
   .area-cabeca { padding: 12px 16px; }
   .area-conteudo { padding: 16px; }
@@ -765,8 +803,11 @@ input:focus-visible {
   .area-barra .boot-saidas > button { width: 100%; min-height: 44px; letter-spacing: 0.12em; padding-inline: 8px; }
 }
 
-/* O teclado sobre um campo: a barra sai de cena e o campo com foco nunca fica debaixo dela. Vale no celular em pé e deitado (844x390, onde a
-   largura passa de 700px mas a altura não deixa sobrar nada com o teclado aberto). Ao fechar o teclado, `data-teclado` cai e ela volta. */
 @media (max-width: 700px), (max-height: 500px) {
   html[data-teclado] .area-barra { display: none; }
+}
+
+@media (max-width: 700px) {
+:where(button, .botao, .botao-fantasma) { min-height: 44px; }
+.estado-sem-sessao { gap: 8px 16px; padding: 8px 16px; }
 }

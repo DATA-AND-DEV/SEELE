@@ -277,9 +277,17 @@ fn comandos_que_a_casca_chama() -> BTreeSet<String> {
     let mut achados = BTreeSet::new();
     for (_, fonte) in scripts_por_arquivo() {
         let codigo = sem_comentarios(&fonte);
-        for pedaco in codigo.split("invoke(\"").skip(1) {
-            if let Some(nome) = pedaco.split('"').next() {
-                achados.insert(nome.to_owned());
+        // O adaptador pessoal usa um wrapper de argumentos estruturados. Só
+        // esse alias comprovado de invoke participa da análise.
+        if codigo.contains("chamarNativo(") {
+            let compacto: String = codigo.chars().filter(|c| !c.is_whitespace()).collect();
+            assert!(compacto.contains("constchamarNativo=(comando,args={})=>window.__TAURI__.core.invoke(comando,args);"), "chamarNativo deixou de ser o encaminhador direto conferido pelo guarda");
+        }
+        for chamada in ["invoke(\"", "chamarNativo(\""] {
+            for pedaco in codigo.split(chamada).skip(1) {
+                if let Some(nome) = pedaco.split('"').next() {
+                    achados.insert(nome.to_owned());
+                }
             }
         }
     }
@@ -588,6 +596,53 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
             "só pergunta se o alvo é a sala desta máquina; no navegador não há sala",
         ),
     ];
+    // A agenda e a chamada pessoal ganharam implementações locais reais no
+    // navegador. O código nativo ainda toca sala::, mas cada equivalente web
+    // precisa estar atendido e chamar a implementação específica abaixo.
+    let pessoais: &[(&str, &str)] = &[
+        ("meu_codigo", "meuCodigoPessoalWeb()"),
+        ("amigos", "contatosPessoaisWeb(true)"),
+        ("contatos_da_agenda", "contatosPessoaisWeb()"),
+        ("dar_nome_na_agenda", "alterarContatoPessoalWeb("),
+        ("adicionar_amigo", "alterarContatoPessoalWeb("),
+        ("tirar_dos_amigos", "alterarContatoPessoalWeb("),
+        ("bloquear", "alterarContatoPessoalWeb("),
+        ("estado_da_sala", "structuredClone(estadoPessoalDaPonte)"),
+        ("receber_ligacoes", "pessoalWebNaPonte().receber(receber)"),
+        ("atender", "pessoalWebNaPonte().atender()"),
+        ("recusar", "pessoalWebNaPonte().recusar()"),
+        ("encerrar_a_ligacao", "pessoalWebNaPonte().encerrar()"),
+    ];
+    let ponte = sem_comentarios(&ler("ui/ponte-web.js"));
+    for (comando, implementacao) in pessoais {
+        assert!(
+            mexem.contains(*comando),
+            "{comando} não toca mais sala nativa: reveja este contrato"
+        );
+        assert!(
+            l.atendidos.contains(*comando),
+            "{comando} precisa ser atendido nas duas cascas"
+        );
+        let inicio = ponte
+            .find(&format!("  {comando}:"))
+            .expect("handler web declarado");
+        let trecho = &ponte[inicio..];
+        let fim = trecho
+            .match_indices("\n  ")
+            .find_map(|(em, _)| {
+                trecho[em + 3..]
+                    .chars()
+                    .next()
+                    .filter(|c| !c.is_whitespace())
+                    .map(|_| em)
+            })
+            .unwrap_or(trecho.len());
+        let handler = &trecho[..fim];
+        assert!(
+            handler.contains(implementacao),
+            "{comando} perdeu seu equivalente local no navegador"
+        );
+    }
     for (comando, _motivo) in leem_e_seguem_a_lista {
         assert!(
             mexem.contains(*comando),
@@ -605,6 +660,7 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
             leem_e_seguem_a_lista
                 .iter()
                 .any(|(nome, _)| nome == comando)
+                || pessoais.iter().any(|(nome, _)| nome == comando)
                 || l.recusados.contains(comando)
                 || l.neutros.contains(comando),
             "`{comando}` mexe na hospedagem local (main.rs) e não está em `RECUSAS_NOMEADAS` \

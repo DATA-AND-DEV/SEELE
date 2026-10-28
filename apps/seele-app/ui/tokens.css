@@ -1,27 +1,27 @@
-/* SEELE — tokens de design (palheta v2, congelada em M0.12)
+/* SEELE — tokens de design (direção visual 0.17.4)
    Fonte: comp v2. Ver ADR 0014 e docs/tokens-achados.md.
    Célula de terminal: 8px × 16px. Todo espaçamento é múltiplo de célula.
-   Zero border-radius. Zero sombra. */
+   Raio de 6px. Sem sombra decorativa. */
 
 :root {
   /* ---- cor ----
      O índice ANSI 256 ao lado de cada cor é o mesmo do seele-tokens.json e é o
      que a TUI usa ao degradar de truecolor. Calculado por vizinho mais próximo
      em CIELAB, restrito a 16–255. Contraste medido sobre --seele-negro-painel. */
-  --seele-negro-absoluto: #050403;   /* ansi 232 · fundo. nunca cinza-carvão neutro */
-  --seele-negro-painel:   #0A0806;   /* ansi 232 · superfície de painel */
-  --seele-linha:          #241F19;   /* ansi 234 · borda 1px padrão */
-  --seele-linha-forte:    #3A322A;   /* ansi 236 · borda de painel ativo / régua */
-  --seele-osso:           #EAE3CF;   /* ansi 254 · texto corrido · 15,60:1 AAA */
-  --seele-osso-apagado:   #7A7061;   /* ansi 243 · rótulo secundário ·  4,11:1 só texto grande */
-  --seele-laranja-nerv:   #F2521F;   /* ansi 202 · acento institucional ·  5,71:1 AA */
-  --seele-laranja-fraco:  #331704;   /* ansi 234 · preenchimento laranja */
-  --seele-vermelho-alerta:#FF1A1A;   /* ansi 196 · EXCLUSIVO alerta e queda ·  5,16:1 AA */
-  --seele-vermelho-fraco: #2C0508;   /* ansi 233 */
-  --seele-fosforo:        #6BFFB6;   /* ansi  85 · telemetria e nominal · 15,81:1 AAA */
-  --seele-fosforo-fraco:  #06220F;   /* ansi 234 */
-  --seele-padrao-azul:    #2F8FE0;   /* ansi  32 · PADRÃO: AZUL ·  5,83:1 AA */
-  --seele-azul-fraco:     #04182B;   /* ansi 233 */
+  --seele-negro-absoluto: #000000; /* ansi 16 · fundo do app */
+  --seele-negro-painel:   #000000; /* ansi 16 · superfície de painel */
+  --seele-linha:          #252525; /* ansi 235 · borda 1px padrão */
+  --seele-linha-forte:    #626262; /* ansi 241 · painel ativo, réguas, marcas de escala */
+  --seele-osso:           #EAEAEA; /* ansi 255 · texto corrido */
+  --seele-osso-apagado:   #B0B0B0; /* ansi 145 · rótulo secundário, log inativo */
+  --seele-laranja-nerv:   #F47732; /* ansi 166 · acento primário institucional */
+  --seele-laranja-fraco:  #331704; /* ansi 234 · preenchimento laranja */
+  --seele-vermelho-alerta:#FF6262; /* ansi 203 · EXCLUSIVO alerta e queda de conexão */
+  --seele-vermelho-fraco: #2F1413; /* ansi 234 · preenchimento de alerta */
+  --seele-fosforo:        #6BFFB6; /* ansi 85 · telemetria e valores nominais */
+  --seele-fosforo-fraco:  #06220F; /* ansi 234 · preenchimento nominal */
+  --seele-padrao-azul:    #2F8FE0; /* ansi 32 · identidade verificada */
+  --seele-azul-fraco:     #04182B; /* ansi 233 · preenchimento de identidade */
 
   /* ---- placas da marca (docs/marca.md) ----
      A profundidade do ícone de app é cor plana deslocada, nunca sombra: as três
@@ -54,7 +54,7 @@
      custa de contraste"): sob o véu isto entrega 4,97:1, e dentro da faixa que
      desce, 4,81:1. Uma cor escolhida para bater 4,5:1 no vácuo chegaria à tela
      abaixo de AA nas duas condições em que a tela de fato é vista. */
-  --seele-rotulo-painel:  #908574;   /* ansi 102 · rótulo miúdo 9–10px · 5,52:1 AA */
+  --seele-rotulo-painel:  #8A8A8A;   /* ansi 102 · rótulo miúdo 9–10px · 5,52:1 AA */
 
   /* O mesmo papel, uma camada acima — V02 da validação visual de 20/09/2026:
      «texto secundário pequeno e fraco».
@@ -71,7 +71,7 @@
      mudaria também o rótulo sob a varredura, que é justamente onde o número
      foi escolhido. Dois papéis parecidos em duas condições diferentes são dois
      tokens. */
-  --seele-rotulo-claro:   #A29583;   /* ansi 144 · rótulo miúdo em camada · 6,82:1 AA */
+  --seele-rotulo-claro:   #B0B0B0;   /* ansi 144 · rótulo miúdo em camada · 6,82:1 AA */
 
   /* Preenchimento de bloco em carga — o polígono MAGI que ainda não acendeu.
      `#2B0F05`, e não `laranja-fraco #331704`: o comp v2 escureceu este valor
@@ -104,13 +104,13 @@
 
   --seele-cartela: 700;   /* peso de cartela */
   --seele-tracking-cartela: 0.02em;
-  --seele-tracking-rotulo: 0.22em;
+  --seele-tracking-rotulo: 0.04em;
 
   --seele-t-cartela: 56px;
   --seele-t-titulo: 28px;
   --seele-t-secao: 18px;
-  --seele-t-corpo: 14px;
-  --seele-t-dado: 13px;
+  --seele-t-corpo: 15px;
+  --seele-t-dado: 14px;
   /* **Dez virou doze, e nove virou dez** — U04 da auditoria de 20/09/2026:
      «Rótulos muito pequenos […] As ações principais parecem controles
      auxiliares.»
@@ -127,7 +127,7 @@
      micro acompanha porque ele é a régua ao lado, e uma régua menor que o que
      ela mede não ajuda ninguém. */
   --seele-t-rotulo: 12px;   /* uppercase, tracking largo */
-  --seele-t-micro: 10px;    /* réguas e coordenadas */
+  --seele-t-micro: 12px;    /* réguas e coordenadas */
 
   /* ---- espaçamento: múltiplos de célula ---- */
   --seele-celula-x: 8px;
@@ -142,7 +142,7 @@
   /* ---- borda ---- */
   --seele-b: 1px;
   --seele-b-forte: 2px;
-  --seele-raio: 0;
+  --seele-raio: 6px;
   --seele-sombra: none;
 }
 
@@ -152,4 +152,23 @@
     --seele-respiro-sync: none;
     --seele-pulso-fala: none;
   }
+}
+
+/* Papéis semânticos 0.17.4. Os nomes públicos anteriores permanecem disponíveis. */
+:root {
+  --seele-bg: var(--seele-negro-absoluto);
+  --seele-surface: var(--seele-negro-painel);
+  --seele-text: var(--seele-osso);
+  --seele-text-secondary: var(--seele-osso-apagado);
+  --seele-text-muted: var(--seele-rotulo-painel);
+  --seele-border: var(--seele-linha);
+  --seele-control-border: var(--seele-linha-forte);
+  --seele-accent: var(--seele-laranja-nerv);
+  --seele-selected: #101010;
+  --seele-alert: var(--seele-vermelho-alerta);
+  --seele-radius: var(--seele-raio);
+  --seele-header-height: 64px;
+  --seele-status-height: 32px;
+  --seele-content-width: 1120px;
+  --seele-form-width: 480px;
 }

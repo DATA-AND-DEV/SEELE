@@ -1,23 +1,9 @@
-// **O navegador que não compartilha a tela diz isso antes de qualquer aperto**
-// (caso 12 do browser-signaling, medido no WebKit; igual na 0.16).
+// Capacidade da captura: TrackProcessor ou requestVideoFrameCallback para a
+// imagem, com o mesmo VideoEncoder. Sem ambos, a ponte recusa antes do seletor
+// e a interface explica a indisponibilidade. Só o fallback de vídeo não pode
+// prometer som do sistema: o seletor recebe audio:false e a caixa diz por quê.
 //
-// A transmissão do navegador lê os quadros da captura pelo
-// `MediaStreamTrackProcessor`, que o WebKit (Safari) não tem. A sonda olhava só
-// o `getDisplayMedia` e o `VideoEncoder`, dizia «sim», e a transmissão quebrava
-// no meio. Esta bancada roda a casca do NAVEGADOR (a `ponte-web.js` de verdade,
-// sem duble do Tauri) no Chromium, com o `MediaStreamTrackProcessor` tirado da
-// página — o que o WebKit é —, e mede:
-//
-// 1. a sonda diz «não», e o `compartilhar_tela` recusa ANTES do seletor, com a
-//    frase do navegador (e o `getDisplayMedia` nunca é chamado);
-// 2. a caixa de compartilhar diz «ESTE NAVEGADOR NÃO COMPARTILHA A TELA», e não
-//    «esta versão»;
-// 3. o COMPARTILHAR do rodapé fica à vista, com `aria-disabled` e o porquê no
-//    `title`; o palco diz o mesmo.
-// 4. Com o `MediaStreamTrackProcessor` (o Chromium como ele é), a mesma página
-//    não marca nada como indisponível.
-//
-// Rodar:  node apps/seele-app/bancada/tela-sem-captura-no-navegador.cjs
+// Rodar: node apps/seele-app/bancada/tela-sem-captura-no-navegador.cjs
 
 const assert = require("node:assert/strict");
 const { servir } = require("./telas.cjs");
@@ -28,26 +14,27 @@ const { chromium } = require("./playwright.cjs");
   await new Promise((ok) => server.listen(0, "127.0.0.1", ok));
   const browser = await chromium().launch({ headless: true });
   try {
-    const abrir = async ({ semProcessador }) => {
+    const abrir = async ({ semProcessador, semVideo = false }) => {
       const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
       const erros = [];
       page.on("pageerror", (e) => erros.push(e.message));
-      await page.addInitScript((sem) => {
+      await page.addInitScript(({ sem, semVideo }) => {
         if (sem) delete globalThis.MediaStreamTrackProcessor;
+        if (semVideo) delete HTMLVideoElement.prototype.requestVideoFrameCallback;
         window.__pediuCaptura = 0;
         if (navigator.mediaDevices) {
           navigator.mediaDevices.getDisplayMedia = async () => { window.__pediuCaptura += 1; throw new Error("não devia chegar aqui"); };
         }
-      }, semProcessador);
+      }, { sem: semProcessador, semVideo });
       await page.goto(`http://127.0.0.1:${server.address().port}`);
       await page.waitForFunction(() => typeof PONTE_NO_LUGAR_DO_TAURI !== "undefined");
       return { page, erros };
     };
 
-    // 1–3. Sem o processador (o WebKit).
-    let { page, erros } = await abrir({ semProcessador: true });
+    // 1–3. Sem nenhum dos leitores de vídeo.
+    let { page, erros } = await abrir({ semProcessador: true, semVideo: true });
     assert.equal(await page.evaluate(() => PONTE_NO_LUGAR_DO_TAURI), true, "a bancada não está na casca do navegador");
-    assert.equal(await page.evaluate(() => temCapturaParaCodificar()), false, "sem o processador, a página diz que captura");
+    assert.equal(await page.evaluate(() => temCapturaParaCodificar()), false, "sem nenhum leitor, a página diz que captura");
     assert.equal(await page.evaluate(() => sondarATela("avc1.42001f")), false, "a sonda diz que esta página compartilha");
 
     // A recusa vem antes do seletor (com uma sessão de mentira na ponte, só para
@@ -82,9 +69,29 @@ const { chromium } = require("./playwright.cjs");
     assert.doesNotMatch(tela.caixa, /ESTA VERSÃO/, `a caixa culpa a versão: ${tela.caixa}`);
     assert.equal(tela.botao.visivel, true, "o COMPARTILHAR sumiu em vez de dizer por quê");
     assert.equal(tela.botao.aria, "true", "o COMPARTILHAR não está marcado como indisponível");
-    assert.match(tela.botao.title, /Este navegador não compartilha a tela/, `o porquê do botão: ${tela.botao.title}`);
-    assert.match(tela.palco ?? "", /Este navegador não compartilha a tela/, `o palco: ${tela.palco}`);
+    assert.match(tela.botao.title, /Compartilhamento indisponível neste navegador/, `o porquê do botão: ${tela.botao.title}`);
+    assert.match(tela.palco ?? "", /Compartilhamento indisponível neste navegador/, `o palco: ${tela.palco}`);
     assert.deepEqual(erros.filter((e) => !/seele_web\.wasm|404/.test(e)), [], `erros na página: ${erros.join(" | ")}`);
+    await page.close();
+
+    // O vídeo do WebKit substitui apenas a leitura de imagem; sistema sem som.
+    ({ page, erros } = await abrir({ semProcessador: true }));
+    assert.equal(await page.evaluate(() => temCapturaParaCodificar()), true);
+    assert.equal(await page.evaluate(() => temSomDaTelaParaCodificar()), false);
+    const fallback = await page.evaluate(async () => {
+      await desenharSomDaCaptura();
+      let pedido, limites;
+      navigator.mediaDevices.getDisplayMedia = async opcoes => { pedido = opcoes; return new MediaStream(); };
+      const antes = sessaoDoPedido;
+      sessaoDoPedido = { transmissao: { comecar(_midia, escolha) { limites = escolha; } } };
+      try { await ATENDIMENTOS_DA_PONTE.compartilhar_tela({ limites: { com_som: true } }); }
+      finally { sessaoDoPedido = antes; }
+      return { pedido, limites, aviso: $("compartilhar-som-aviso").textContent,
+        desabilitado: $("compartilhar-som").disabled, marcado: $("compartilhar-som").checked };
+    });
+    assert.equal(fallback.pedido.audio, false); assert.equal(fallback.pedido.systemAudio, "exclude");
+    assert.equal(fallback.limites.com_som, false); assert.equal(fallback.desabilitado, true); assert.equal(fallback.marcado, false);
+    assert.match(fallback.aviso, /Som do sistema indisponível.*voz continua separada/);
     await page.close();
 
     // 4. Com o processador, nada fica indisponível.

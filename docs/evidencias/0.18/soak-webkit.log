@@ -1,0 +1,33 @@
+webkit: retenção 0s, voz progredindo nos dois sentidos
+webkit: retenção 30s, voz progredindo nos dois sentidos
+webkit: retenção 60s, voz progredindo nos dois sentidos
+webkit: retenção 90s, voz progredindo nos dois sentidos
+webkit: retenção 120s, voz progredindo nos dois sentidos
+webkit: retenção 150s, voz progredindo nos dois sentidos
+webkit: retenção 180s, voz progredindo nos dois sentidos
+webkit: retenção 211s, voz progredindo nos dois sentidos
+webkit: retenção 241s, voz progredindo nos dois sentidos
+webkit: retenção 271s, voz progredindo nos dois sentidos
+webkit: retenção 301s, voz progredindo nos dois sentidos
+webkit: retenção 331s, voz progredindo nos dois sentidos
+webkit: retenção 361s, voz progredindo nos dois sentidos
+webkit: retenção 391s, voz progredindo nos dois sentidos
+webkit: retenção 422s, voz progredindo nos dois sentidos
+webkit: retenção 452s, voz progredindo nos dois sentidos
+webkit: retenção 482s, voz progredindo nos dois sentidos
+webkit: retenção 512s, voz progredindo nos dois sentidos
+webkit: retenção 542s, voz progredindo nos dois sentidos
+webkit: retenção 572s, voz progredindo nos dois sentidos
+webkit: retenção 603s, voz progredindo nos dois sentidos
+webkit: retenção 633s, voz progredindo nos dois sentidos
+webkit: retenção 663s, voz progredindo nos dois sentidos
+webkit: retenção 693s, voz progredindo nos dois sentidos
+webkit: retenção 723s, voz progredindo nos dois sentidos
+webkit: retenção 753s, voz progredindo nos dois sentidos
+webkit: retenção 784s, voz progredindo nos dois sentidos
+webkit: retenção 814s, voz progredindo nos dois sentidos
+webkit: retenção 844s, voz progredindo nos dois sentidos
+webkit: retenção 874s, voz progredindo nos dois sentidos
+webkit: retenção 900s, voz progredindo nos dois sentidos
+{"engine":"webkit","audio":[{"enviados":66,"decodificados":24},{"enviados":24,"decodificados":66}],"cspReal":true,"gestosAtivos":true,"permissaoTardiaLiberada":true}
+webkit: UI real, convite limpo, aceite, chat bidirecional, voz sintética enviada/decodificada nos dois sentidos permissão tardia, saída/perda/reentrada pelo mesmo link e novo convite limpo PASS

@@ -1,0 +1,63 @@
+   Compiling xtask v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/xtask)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.06s
+     Running unittests src/main.rs (target/debug/deps/xtask-ddef9ee7f989c087)
+     Running tests/adr_index.rs (target/debug/deps/adr_index-65ec12c15e8af673)
+     Running tests/aviso_do_atualizador.rs (target/debug/deps/aviso_do_atualizador-cc55ab644c25aefc)
+     Running tests/empacotamento.rs (target/debug/deps/empacotamento-5462b6bf622bf85e)
+     Running tests/folha_de_lints.rs (target/debug/deps/folha_de_lints-6fd02a5b2a83c589)
+     Running tests/fronteira_do_celular.rs (target/debug/deps/fronteira_do_celular-27bd0e13f535c4fe)
+     Running tests/log_com_segundo_despachante.rs (target/debug/deps/log_com_segundo_despachante-2a415baaea47813d)
+     Running tests/plataforma.rs (target/debug/deps/plataforma-b2cf527410e02ece)
+     Running tests/textos_publicos.rs (target/debug/deps/textos_publicos-837c96b3cf36561f)
+guarda ok: 10 artefatos locais, todos desta fonte
+
+running 6 tests
+test pacote_web::tests::as_exportacoes_da_prova_vem_da_fronteira ... ok
+test pacote_web::tests::o_wasm_unsafe_eval_nao_e_o_unsafe_eval ... ok
+test pacote_web::tests::um_pacote_bom_sai ... ok
+test pacote_web::tests::cache_de_uma_publicacao_nao_mistura_a_proxima ... ok
+test pacote_web::tests::cada_regra_reprova_o_que_ela_guarda ... ok
+test pacote_web::tests::hoje_o_pacote_sai ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 101 filtered out; finished in 2.86s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 143 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+

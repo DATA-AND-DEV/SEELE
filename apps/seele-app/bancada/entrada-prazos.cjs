@@ -4,11 +4,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const pw = require('./playwright.cjs');
+const {origemDoProduto} = require('./origem-do-produto.cjs');
 (async () => {
   const browser = await (process.argv.includes('--webkit') ? pw.webkit() : pw.chromium()).launch();
   try {
     const page = await browser.newPage({ viewport: { width: 440, height: 956 }, isMobile: true, hasTouch: true });
-    await page.route('https://seele.sh/**', route => {
+    await page.route(`${origemDoProduto}/**`, route => {
       const nome = new URL(route.request().url()).pathname.slice(1) || 'index.html';
       const arquivo = nome === 'seele_web.wasm' ? path.resolve(__dirname, '../../../target/wasm32-unknown-unknown/release/seele_web.wasm') : path.resolve(__dirname, '../ui', nome);
       if (!fs.existsSync(arquivo)) return route.fulfill({ status: 404, body: '' });
@@ -24,7 +25,7 @@ const pw = require('./playwright.cjs');
       const tipos = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.wasm': 'application/wasm' };
       return route.fulfill({ contentType: tipos[path.extname(nome)] || 'application/octet-stream', body });
     });
-    await page.goto('https://seele.sh/');
+    await page.goto(`${origemDoProduto}/`);
     const casos = await page.evaluate(async () => {
       await identidadeDaPagina();
       const resultados = [];

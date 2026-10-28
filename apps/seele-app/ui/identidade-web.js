@@ -772,3 +772,131 @@ function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPon
     esquecerOServidor,
   };
 }
+
+// Identidade pessoal da origem, separada das chaves por servidor da versão 1.
+// CryptoKey é clonada pelo IndexedDB; a chave privada continua não exportável.
+// Nomes nunca indexam contatos: códigos e chaves completas governam a agenda.
+const BANCO_PESSOAL_WEB = "seele-pessoal";
+let identidadePessoalPrometida = null;
+function noBancoPessoalWeb(loja, modo, fazer) {
+  return new Promise((resolve, reject) => {
+    let banco, transacao, terminou = false;
+    const concluir = (erro, valor) => {
+      if (terminou) return;
+      terminou = true; clearTimeout(prazo);
+      if (erro) { try { transacao?.abort(); } catch {} }
+      banco?.close(); erro ? reject(valor) : resolve(valor);
+    };
+    const prazo = setTimeout(() => concluir(true, "ArmazenamentoIndisponivel"), 3000);
+    let pedido;
+    try { pedido = indexedDB.open(BANCO_PESSOAL_WEB, 1); }
+    catch (erro) { concluir(true, erro); return; }
+    pedido.onupgradeneeded = () => {
+      if (terminou) { pedido.transaction.abort(); return; }
+      pedido.result.createObjectStore("identidade", { keyPath: "id" });
+      pedido.result.createObjectStore("contatos", { keyPath: "codigo" });
+    };
+    pedido.onerror = () => concluir(true, pedido.error);
+    pedido.onsuccess = () => {
+      banco = pedido.result;
+      if (terminou) { banco.close(); return; }
+      banco.onversionchange = () => banco.close();
+      try {
+        transacao = banco.transaction(loja, modo);
+        const resultado = fazer(transacao.objectStore(loja));
+        transacao.oncomplete = () => concluir(false, resultado.result);
+        transacao.onerror = () => concluir(true, transacao.error);
+        transacao.onabort = () => concluir(true, transacao.error || "NaoGravou");
+      } catch (erro) { concluir(true, erro); }
+    };
+  });
+}
+async function identidadePessoalDoNavegador() {
+  if (!identidadePessoalPrometida) {
+    identidadePessoalPrometida = (async () => {
+      let registro = await noBancoPessoalWeb("identidade", "readonly", loja => loja.get("pessoal"));
+      if (!registro) {
+        const chave = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
+        const publica = Array.from(new Uint8Array(await crypto.subtle.exportKey("raw", chave.publicKey)));
+        const candidato = { id: "pessoal", chave, publica, criadoEm: Date.now() };
+        // A leitura e a decisão de inserir são atômicas, inclusive entre abas.
+        await noBancoPessoalWeb("identidade", "readwrite", loja => {
+          const pedido = loja.get("pessoal");
+          pedido.onsuccess = () => { if (!pedido.result) loja.put(candidato); };
+          return pedido;
+        });
+        registro = await noBancoPessoalWeb("identidade", "readonly", loja => loja.get("pessoal"));
+      }
+      if (!registro?.chave?.privateKey || registro.chave.privateKey.extractable
+        || registro.chave.privateKey.algorithm.name !== "Ed25519") throw new Error("IdentidadePessoalInvalida");
+      return registro;
+    })();
+    identidadePessoalPrometida.catch(() => { identidadePessoalPrometida = null; });
+  }
+  return identidadePessoalPrometida;
+}
+let wasmDoCodigoPessoal = null;
+async function operarCodigoPessoalWeb(intencao) {
+  if (!wasmDoCodigoPessoal) wasmDoCodigoPessoal = instanciarOWasmDaSessao().catch(erro => { wasmDoCodigoPessoal = null; throw erro; });
+  const wasm = await wasmDoCodigoPessoal;
+  const bytes = new TextEncoder().encode(JSON.stringify(intencao));
+  const p = wasm.alocar(bytes.length);
+  try {
+    new Uint8Array(wasm.memory.buffer).set(bytes, p); wasm.chamada_operar(p, bytes.length);
+    const valor = JSON.parse(new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, wasm.saida_ptr(), wasm.saida_len()).slice()));
+    if (valor.erro) throw valor.erro;
+    return valor.codigo;
+  } finally { wasm.liberar(p, bytes.length); }
+}
+async function meuCodigoPessoalWeb() {
+  return operarCodigoPessoalWeb({ acao: "codigo_da_chave", chave: (await identidadePessoalDoNavegador()).publica });
+}
+async function codigoPessoalWebLido(codigo) {
+  return operarCodigoPessoalWeb({ acao: "codigo_ler", codigo: String(codigo || "").replace(/^@/, "") });
+}
+async function alterarContatoPessoalWeb(codigo, mudar) {
+  codigo = await codigoPessoalWebLido(codigo);
+  if (codigo === await meuCodigoPessoalWeb()) throw "SeuCodigo";
+  return noBancoPessoalWeb("contatos", "readwrite", loja => {
+    const pedido = loja.get(codigo);
+    pedido.onsuccess = () => {
+      try {
+        const contato = pedido.result || { codigo, nome: null, apelido: null, visto_em: null,
+          direcao: null, bloqueado: false, amigo: false, alvo: `@${codigo}` };
+        loja.put(mudar(contato));
+      } catch (erro) { pedido.transaction?.abort(); throw erro; }
+    };
+    return pedido;
+  });
+}
+async function contatosPessoaisWeb(soAmigos = false) {
+  const contatos = await noBancoPessoalWeb("contatos", "readonly", loja => loja.getAll());
+  // O pino de chave não atravessa a projeção da agenda.
+  return contatos.filter(c => !soAmigos || c.amigo).map(({ chavePublica, ...contato }) => contato);
+}
+async function conferirParPessoalWeb(codigo, publica, apelido = null, direcao = null) {
+  codigo = await codigoPessoalWebLido(codigo);
+  const texto = publica.map(b => b.toString(16).padStart(2, "0")).join("");
+  if (await operarCodigoPessoalWeb({ acao: "codigo_da_chave", chave: publica }) !== codigo) throw new Error("CodigoNaoConfere");
+  let falha = null;
+  await alterarContatoPessoalWeb(codigo, contato => {
+    if (contato.bloqueado) { falha = "Bloqueado"; return contato; }
+    if (contato.chavePublica && contato.chavePublica !== texto) { falha = "ChaveMudou"; return contato; }
+    return { ...contato, chavePublica: texto, apelido: apelido || contato.apelido,
+      visto_em: Math.floor(Date.now() / 1000), direcao: direcao || contato.direcao };
+  });
+  if (falha) throw new Error(falha);
+  return codigo;
+}
+
+async function preferenciaDeReceberPessoalWeb(receber) {
+  const identidade = await identidadePessoalDoNavegador();
+  if (receber === undefined) return identidade.receber !== false;
+  await noBancoPessoalWeb("identidade", "readwrite", loja => {
+    const pedido = loja.get("pessoal");
+    pedido.onsuccess = () => loja.put({ ...pedido.result, receber: Boolean(receber) });
+    return pedido;
+  });
+  identidade.receber = Boolean(receber);
+  return identidade.receber;
+}

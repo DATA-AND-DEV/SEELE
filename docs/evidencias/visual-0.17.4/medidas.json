@@ -1,0 +1,256 @@
+[
+  {
+    "cena": "inicio",
+    "largura": 320,
+    "conteudo": 320,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "perfil",
+    "largura": 320,
+    "conteudo": 320,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "audio",
+    "largura": 320,
+    "conteudo": 320,
+    "fundo": "rgb(0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "sessao",
+    "largura": 320,
+    "conteudo": 320,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [
+      "sessao-contexto"
+    ],
+    "erros": []
+  },
+  {
+    "cena": "chamada",
+    "largura": 320,
+    "conteudo": 320,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [
+      "sessao-contexto"
+    ],
+    "erros": []
+  },
+  {
+    "cena": "pessoal",
+    "largura": 320,
+    "conteudo": 320,
+    "fundo": "rgb(0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "inicio",
+    "largura": 390,
+    "conteudo": 390,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "perfil",
+    "largura": 390,
+    "conteudo": 390,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "audio",
+    "largura": 390,
+    "conteudo": 390,
+    "fundo": "rgb(0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "sessao",
+    "largura": 390,
+    "conteudo": 390,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [
+      "sessao-contexto"
+    ],
+    "erros": []
+  },
+  {
+    "cena": "chamada",
+    "largura": 390,
+    "conteudo": 390,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [
+      "sessao-contexto"
+    ],
+    "erros": []
+  },
+  {
+    "cena": "pessoal",
+    "largura": 390,
+    "conteudo": 390,
+    "fundo": "rgb(0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "inicio",
+    "largura": 768,
+    "conteudo": 768,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [
+      "boot-codigo-valor"
+    ],
+    "erros": []
+  },
+  {
+    "cena": "perfil",
+    "largura": 768,
+    "conteudo": 768,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "audio",
+    "largura": 768,
+    "conteudo": 768,
+    "fundo": "rgb(0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "sessao",
+    "largura": 768,
+    "conteudo": 768,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "chamada",
+    "largura": 768,
+    "conteudo": 768,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "pessoal",
+    "largura": 768,
+    "conteudo": 768,
+    "fundo": "rgb(0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "inicio",
+    "largura": 1280,
+    "conteudo": 1280,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "perfil",
+    "largura": 1280,
+    "conteudo": 1280,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "audio",
+    "largura": 1280,
+    "conteudo": 1280,
+    "fundo": "rgb(0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "sessao",
+    "largura": 1280,
+    "conteudo": 1280,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "chamada",
+    "largura": 1280,
+    "conteudo": 1280,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [
+      "chamada-nome",
+      "chamada-cartao-nome",
+      "chamada-vol-celas"
+    ],
+    "erros": []
+  },
+  {
+    "cena": "pessoal",
+    "largura": 1280,
+    "conteudo": 1280,
+    "fundo": "rgb(0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "inicio",
+    "largura": 1920,
+    "conteudo": 1920,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "perfil",
+    "largura": 1920,
+    "conteudo": 1920,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "audio",
+    "largura": 1920,
+    "conteudo": 1920,
+    "fundo": "rgb(0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "sessao",
+    "largura": 1920,
+    "conteudo": 1920,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "chamada",
+    "largura": 1920,
+    "conteudo": 1920,
+    "fundo": "rgba(0, 0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  },
+  {
+    "cena": "pessoal",
+    "largura": 1920,
+    "conteudo": 1920,
+    "fundo": "rgb(0, 0, 0)",
+    "rolagens": [],
+    "erros": []
+  }
+]

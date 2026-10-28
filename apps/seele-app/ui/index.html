@@ -77,6 +77,7 @@
 <link rel="stylesheet" href="tela-server.css">
 <link rel="stylesheet" href="tela-fim.css">
 <link rel="stylesheet" href="tela-auth.css">
+<link rel="stylesheet" href="visual-0174.css">
 <link rel="stylesheet" href="celular-texto.css">
 <link rel="stylesheet" href="celular-base.css">
 <link rel="stylesheet" href="celular-sessao.css">
@@ -342,7 +343,7 @@
       A ordem inverte: o que o programa faz, as duas ações, e só então — dentro
       de uma explicação que se abre — o que ele é por dentro.
     -->
-    <p class="boot-proposito">Entre em um servidor ou hospede o seu.</p>
+
 
     <div class="boot-rodape">
       <button id="boot-perfil" class="boot-perfil" type="button"
@@ -388,7 +389,7 @@
     <div class="boot-saidas">
       <button id="botao-conectar" type="button" class="botao">CONECTAR</button>
     </div>
-    <p class="nota boot-dica">Cole um link, um endereço ou o código de uma pessoa.</p>
+
       </nav>
       <section class="boot-coluna boot-centro" aria-label="Você e seus amigos">
     <button id="boot-conversa-pessoal" class="botao" type="button" hidden>CONVERSAR POR LINK</button>
@@ -455,7 +456,7 @@
       </section>
       <aside class="boot-coluna boot-dir" aria-label="Hospedar">
         <span class="rotulo boot-hospedar-titulo">HOSPEDAR</span>
-        <p class="nota boot-dica">Hospede neste computador e convide pelo link.</p>
+
     <!--
       O servidor que esta janela hospeda, no ar, com a sessão fora dele (tarefas
       19 e 20 da F7): sair não o derruba mais, e quem saiu precisa saber que ele
@@ -514,13 +515,12 @@
          data-anuncio="Os servidores desta máquina.">
   <div class="boot-caixa area">
     <header class="area-cabeca">
+      <p class="hospedagem-etapa">Hospedagem / Seus servidores</p>
       <h1 id="hospedar-titulo" class="boot-titulo">HOSPEDAR</h1>
     </header>
     <!-- Os servidores desta máquina numa GRADE de cartões que se redistribui com a largura; a barra de ações é outra linha. -->
     <div class="area-conteudo">
-    <p class="nota area-leitura">
-      Escolha um servidor ou crie outro.
-    </p>
+
 
     <ul id="lista-servidores" class="server-dispositivos servidores-grade"></ul>
     </div>
@@ -563,6 +563,7 @@
          data-anuncio="Preparar este servidor: nome, imagem e versão.">
   <div class="boot-caixa area">
     <header class="area-cabeca">
+      <p class="hospedagem-etapa">Hospedagem / Preparar</p>
       <h1 id="preparar-titulo" class="boot-titulo">PREPARAR ESTE SERVIDOR</h1>
     </header>
     <!-- O conteúdo rola na PRÓPRIA linha da grade, e a barra de ações (HOSPEDAR, VOLTAR) é outra linha: nada fica debaixo dela. -->
@@ -573,12 +574,11 @@
          (tela-boot.js, `abrirPreparar`). `display: contents`: o nome e a imagem
          são dois cartões da mesma grade da versão. -->
     <div id="preparar-do-novo" class="preparar-do-novo">
-    <p class="nota area-larga">
-      Nome e imagem são opcionais. Você pode alterá-los depois.
-    </p>
+
 
     <!-- IDENTIDADE: o nome e a imagem juntos, num cartão só; a versão é o outro. -->
     <div class="area-cartao preparar-identidade">
+    <h2 class="hospedagem-bloco-titulo">Identidade do servidor</h2>
     <div class="server-campo">
       <label class="server-nome-campo">
         <span class="rotulo">NOME DESTE SERVIDOR</span>
@@ -608,14 +608,12 @@
     </div>
 
     <div id="preparar-versoes" class="server-campo area-cartao" hidden>
-      <span class="rotulo">VERSÃO QUE VAI HOSPEDAR</span>
+      <h2 class="hospedagem-bloco-titulo">VERSÃO QUE VAI HOSPEDAR</h2>
       <ul id="preparar-lista-versoes" class="server-dispositivos"></ul>
       <!-- Dito, e não escondido. O bloco sumia quando havia uma versão só, e
            «sumiu» e «não existe» são a mesma coisa para quem olha: a pergunta
            que chegou foi «não mostra as versões disponíveis». -->
-      <p id="preparar-versao-unica" class="nota" hidden>
-        Só esta versão está disponível.
-      </p>
+
       <!-- O texto é escrito por tela-boot.js, com a versão do servidor
            escolhida e as conversas que não atravessam. -->
       <p id="preparar-versao-aviso" class="nota" hidden></p>
@@ -669,6 +667,7 @@
          data-anuncio="Antes de hospedar: os dados, a versão do servidor e os MODs.">
   <div class="boot-caixa antes-caixa area">
     <header class="area-cabeca">
+      <p class="hospedagem-etapa">Hospedagem / Conferir antes de iniciar</p>
       <h1 id="antes-titulo" class="boot-titulo" tabindex="-1">ANTES DE HOSPEDAR</h1>
       <p id="antes-servidor" class="antes-servidor"></p>
     </header>
@@ -825,11 +824,11 @@
         -->
         <div class="portaria-rolagem">
           <h3 class="portaria-secao">QUEM ESTÁ BATENDO</h3>
-          <p id="portaria-fila-vazia" class="nota" hidden>Ninguém esperando.</p>
+          <p id="portaria-fila-vazia" class="nota" hidden>Fila vazia.</p>
           <ul id="portaria-fila" class="portaria-lista"></ul>
 
           <h3 class="portaria-secao">JÁ DECIDIDOS</h3>
-          <p id="portaria-decididos-vazio" class="nota" hidden>Nada decidido ainda.</p>
+          <p id="portaria-decididos-vazio" class="nota" hidden>Sem decisões.</p>
           <ul id="portaria-decididos" class="portaria-lista"></ul>
         </div>
 
@@ -2286,7 +2285,7 @@
 
     <!-- ---------------- A·02 ---------------- -->
     <div class="auth-entrada">
-      <p class="coordenada">A·02 / ENTRADA NO SERVIDOR</p>
+      <h1 class="auth-titulo">Entrar no servidor</h1>
 
       <div class="auth-corpo">
         <!--
@@ -2417,7 +2416,7 @@
 
     <!-- ---------------- C·02 ---------------- -->
     <div class="auth-server">
-      <h2 class="coordenada">C·02 / SERVIDOR</h2>
+      <h2 class="auth-servidor-cabecalho">Servidor</h2>
       <div class="auth-server-corpo">
         <div>
           <p id="auth-server-nome" class="auth-server-nome">——</p>
@@ -2832,7 +2831,7 @@
             Junta-las numa coluna so fazia a segunda parecer consequencia da
             primeira. Separadas, cada uma responde o que ela responde.
           -->
-          <h3 class="server-bloco-nome">CONEXÃO EXTERNA</h3>
+          <div class="server-bloco"><div class="server-bloco-topo"><h3 class="server-bloco-nome">CONEXÃO EXTERNA</h3></div><div class="server-bloco-corpo">
           <p class="nota">O link de convite deste servidor e até onde ele chega.
             Ele aparece uma vez quando a rede sobe, e mora aqui depois disso.</p>
           <div class="porta-linha">
@@ -2879,9 +2878,10 @@
             neste lugar — dois botões para o mesmo diálogo, e só um deles
             dizia alguma coisa.
           -->
-          <h3 class="server-bloco-nome">QUEM PODE ENTRAR</h3>
+          </div></div><div class="server-bloco"><div class="server-bloco-topo"><h3 class="server-bloco-nome">QUEM PODE ENTRAR</h3></div><div class="server-bloco-corpo">
           <p class="nota">Escolha quem entra: senha, convite de uso único ou aprovação na portaria.</p>
           <button id="portaria-abrir" class="botao-fantasma" type="button">porta</button>
+        </div></div>
         </section>
 
         <section id="painel-audio" class="server-painel-secao" aria-labelledby="secao-audio">
@@ -2961,9 +2961,7 @@
                   a consequência. O parágrafo que a explica — igual para os dois
                   lados — está uma vez só, no fim do painel.
                 -->
-                <p id="nota-fixa-entrada" class="nota">A troca vale agora e fica
-                  guardada nesta máquina. Escolher pelo nome <b>fixa ele</b>: o
-                  SEELE deixa de acompanhar o padrão.</p>
+
               </div>
 
               <div class="server-campo">
@@ -3017,18 +3015,15 @@
                 <div class="server-modos" role="group" aria-label="como o microfone abre">
                   <button id="server-modo-tecla" class="server-modo" type="button"
                           data-modo="PushToTalk" aria-pressed="false">
-                    <span class="server-modo-nome">TECLA</span>
-                    <span class="server-modo-desc">abre só enquanto você segura</span>
+                    <span class="server-modo-nome">SEGURAR TECLA</span>
                   </button>
                   <button id="server-modo-voz" class="server-modo" type="button"
                           data-modo="VoiceActivated" aria-pressed="false">
-                    <span class="server-modo-nome">VOZ</span>
-                    <span class="server-modo-desc">abre quando você fala</span>
+                    <span class="server-modo-nome">AO FALAR</span>
                   </button>
                   <button id="server-modo-aberto" class="server-modo" type="button"
                           data-modo="Open" aria-pressed="false">
-                    <span class="server-modo-nome">ABERTO</span>
-                    <span class="server-modo-desc">fica aberto o tempo todo</span>
+                    <span class="server-modo-nome">SEMPRE ABERTO</span>
                   </button>
                 </div>
               </div>
@@ -3061,8 +3056,7 @@
                   <input id="server-reducao-de-ruido" type="checkbox" checked>
                   <span>reduzir ruído de fundo do microfone</span>
                 </label>
-                <p class="server-frase">Reduz ruído contínuo. A digitação pode continuar audível.
-                  Desligue para usar o som original.</p>
+
               </div>
 
               <!--
@@ -3093,9 +3087,7 @@
                   <button id="server-sensibilidade-padrao" class="server-lista-acao"
                           type="button">USAR O PADRÃO</button>
                 </div>
-                <p class="server-frase">Só no modo <strong>VOZ</strong>. Mais sensível capta fala baixa e mais ruído.
-                  O padrão acompanha o ruído; um valor escolhido fica fixo.
-                  Confira no teste abaixo.</p>
+
               </div>
 
               <!--
@@ -3126,9 +3118,7 @@
                   </div>
                   <p id="server-nivel-frase" class="server-frase" role="status"></p>
                 </div>
-                <p class="server-frase">Fale normalmente e veja onde a transmissão
-                  abre. <strong>OUVIR-ME</strong> toca o que sairia daqui — de fone,
-                  ou o alto-falante volta para o microfone.</p>
+
               </div>
 
             </div>
@@ -3165,10 +3155,6 @@
                 porque nenhum aparelho daquela lista cancela eco.
               -->
               <div class="server-campo">
-                <h4 class="rotulo">FONE</h4>
-                <p id="server-aviso-fone" class="server-frase">USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta.</p>
-              </div>
-              <div class="server-campo">
                 <h4 class="rotulo">DISPOSITIVO DE SAÍDA</h4>
                 <!--
                   Vazia na marcação, como a de microfones: quem a preenche é
@@ -3178,16 +3164,8 @@
                 <ul id="lista-saidas" class="server-dispositivos"></ul>
 
                 <!-- O mesmo aviso da entrada; ver o comentário lá em cima. -->
-                <p id="nota-fixa-saida" class="nota">Escolher pelo nome <b>fixa
-                  ele</b>: o SEELE deixa de acompanhar o padrão da máquina.</p>
-                <details class="server-detalhes">
-                  <summary>E quando o sistema troca de aparelho padrão?</summary>
-                  <p class="nota">Se o sistema trocar de padrão depois, o SEELE
-                    fica no que você escolheu. <b>PADRÃO DA MÁQUINA</b> é a opção
-                    que acompanha a troca. Vale igual para o microfone e para a
-                    saída — e é por isso que esta explicação está aqui uma vez, e
-                    não duas.</p>
-                </details>
+
+
               </div>
             </div>
           </div>
@@ -3371,8 +3349,7 @@
             sob demanda e histórico fora do fluxo.» O histórico foi para as
             notas da versão, que é onde ele responde a pergunta de alguém.
           -->
-          <p class="nota">O SEELE tem um tema só, e o contraste dele segue a
-            acessibilidade do sistema. O que dá para mudar aqui está abaixo.</p>
+
           <ul class="aparencia-lista">
             <!--
               **Não são botões, e a diferença importa.**
@@ -3669,11 +3646,11 @@
           </div>
           <div id="mods-painel-armazenamento" class="mods-painel" role="tabpanel"
                aria-labelledby="mods-aba-armazenamento" tabindex="0" hidden>
-            <p class="nota">Quanto espaço os pacotes ocupam aqui.</p>
+
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">ESPAÇO EM DISCO</h3>
-              <p class="nota">Os pacotes guardados nesta máquina</p>
+
             </div>
             <div class="server-bloco-corpo">
               <div class="server-campo">
@@ -3693,20 +3670,18 @@
                   não é de nenhum MOD: é da janela.
                 -->
                 <p id="sessao-contadores" class="nota" role="status"></p>
-                <p class="nota">Apagar um pacote tira só os bytes que a janela
-                  carrega. O que um MOD guardou fica no servidor que o hospeda,
-                  e não sai daqui — nem quando você entrou como convidado.</p>
+                <p class="nota">Apaga o pacote local. Os dados do MOD permanecem no servidor.</p>
               </div>
             </div>
           </div>
           </div>
           <div id="mods-painel-permissoes" class="mods-painel" role="tabpanel"
                aria-labelledby="mods-aba-permissoes" tabindex="0" hidden>
-            <p class="nota">A quem esta máquina já disse sim.</p>
+
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">SERVIDORES A QUEM VOCÊ DISSE SIM</h3>
-              <p class="nota">Cada sim vale para uma combinação de MODs e versões</p>
+
             </div>
             <div class="server-bloco-corpo">
               <div class="server-campo">
@@ -3732,11 +3707,11 @@
           -->
           <div id="mods-painel-diagnostico" class="mods-painel" role="tabpanel"
                aria-labelledby="mods-aba-diagnostico" tabindex="0" hidden>
-            <p class="nota">Para quem escreve MOD: quem desenha cada lugar agora, e onde ele fica na tela.</p>
+
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">QUEM PINTA CADA LUGAR</h3>
-              <p class="nota">Os onze lugares onde um MOD pode entrar nesta versão</p>
+
             </div>
             <div class="server-bloco-corpo">
               <div class="server-campo">
@@ -3994,7 +3969,7 @@
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">NOME</h3>
-              <p class="nota">O que se lê no alto da tela de quem está aqui dentro</p>
+
             </div>
             <div class="server-bloco-corpo">
               <div class="server-campo">
@@ -4014,7 +3989,7 @@
                          spellcheck="false" autocomplete="off"
                          placeholder="nome do servidor">
                 </label>
-                <p class="nota">Salva ao apertar Enter, ou ao sair do campo.</p>
+
               </div>
             </div>
           </div>
@@ -4022,7 +3997,7 @@
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">IMAGEM</h3>
-              <p class="nota">O quadrado à esquerda do nome, no alto da tela</p>
+
             </div>
             <div class="server-bloco-corpo">
 
@@ -4055,9 +4030,7 @@
                   recusa vinha sem dizer como obedecer. Encolher virou trabalho
                   do app.
                 -->
-                <p class="server-frase">Ela é reduzida e recomprimida aqui, antes
-                  de sair. Uma imagem que já era pequena atravessa sem mudar
-                  nenhum pixel.</p>
+
 
                 <div class="server-icone-botoes">
                   <button id="server-icone-escolher" class="botao" type="button">
@@ -4161,9 +4134,7 @@
       <button id="porta-fechar" class="botao-fantasma" type="button">FECHAR</button>
     </div>
     <div class="porta-corpo">
-      <p class="porta-prosa">Este servidor está de pé nesta máquina. Mande o
-        link para quem você quer dentro — ele carrega a impressão digital do
-        certificado, então quem recebe não precisa conferi-la por outro canal.</p>
+
       <div class="porta-linha">
         <span class="rotulo">CONVITE</span>
         <input id="porta-link" class="convite-link" readonly spellcheck="false">
@@ -4193,8 +4164,7 @@
         durante o intervalo.
       -->
       <p id="porta-alcance" class="convite-alcance" hidden></p>
-      <p class="nota">Depois de fechar, o link e as três camadas da porta
-        continuam em CONFIGURAÇÕES · A PORTA.</p>
+
       <div class="porta-acoes">
         <button id="porta-configuracoes" class="botao-fantasma" type="button">ABRIR CONFIGURAÇÕES</button>
         <button id="porta-entendi" class="nomear-confirmar" type="button">ENTENDI</button>
@@ -4269,9 +4239,9 @@
       <h2 id="perfil-titulo" class="nomear-titulo">SEU PERFIL</h2>
       <button id="perfil-fechar" class="botao-fantasma" type="button">FECHAR</button>
     </div>
-    <!-- O corpo rola na PRÓPRIA linha da caixa. Sem a sala pessoal (o navegador não tem), a caixa segue um diálogo simples de 480px; com ela,
-         a janela inteira, com o formulário (imagem e apelido) numa coluna e a sala pessoal em cartões ao lado. -->
+    <!-- Um painel de altura natural reúne identidade, código e agenda. O corpo inteiro rola; o cabeçalho conserva a saída. -->
     <div class="perfil-corpo">
+    <div class="perfil-painel">
     <form id="perfil-forma" class="nomear-corpo perfil-cartao-eu" autocomplete="off">
       <div id="perfil-imagem" class="perfil-imagem">
         <!--
@@ -4281,11 +4251,10 @@
         -->
         <span id="perfil-previa" class="perfil-previa" role="img"></span>
         <div class="perfil-imagem-texto">
-          <span class="rotulo">IMAGEM</span>
           <p class="nota">PNG · até 8 KiB · 256 px.</p>
           <div class="perfil-imagem-acoes">
-            <button id="perfil-escolher" class="botao-fantasma" type="button">ESCOLHER</button>
-            <button id="perfil-tirar" class="botao-fantasma" type="button">TIRAR</button>
+            <button id="perfil-escolher" class="botao-fantasma" type="button" aria-label="Escolher imagem">ESCOLHER</button>
+            <button id="perfil-tirar" class="botao-fantasma" type="button" aria-label="Remover imagem">REMOVER</button>
           </div>
         </div>
       </div>
@@ -4296,9 +4265,6 @@
         gesto que diz «o valor mudou **e** a edição acabou» de uma vez, e é o
         que faz o Enter e o clique fora valerem a mesma coisa sem um botão no
         meio — que esta janela não tem, por regra.
-
-        A nota diz o que **não** muda, e ela importa: quem troca de nome pode
-        esperar que o passado o acompanhe, e ele não acompanha.
 
         **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele dizia
         32 e contava caracteres, e o fio conta 32 **bytes**: vinte letras `á`
@@ -4313,10 +4279,9 @@
                spellcheck="false" autocomplete="off"
                placeholder="como as pessoas te veem">
         <!--
-          Escondida na pergunta do nome: ela fala com quem troca de nome, e
-          quem é perguntado ainda não disse nada com nome nenhum.
+          ID mantido para o ciclo da pergunta do nome; a microdescrição foi removida.
         -->
-        <span id="perfil-nota-do-apelido" class="nota">O que você já disse continua com o nome de então.</span>
+        <span id="perfil-nota-do-apelido" class="nota" hidden></span>
       </label>
       <!--
         Só na pergunta do nome, antes da primeira entrada desta execução
@@ -4369,7 +4334,7 @@
       </div>
       <label class="perfil-sala-receber">
         <input id="perfil-receber" type="checkbox" checked>
-        <span>RECEBER LIGAÇÕES PELO SEU CÓDIGO</span>
+        <span>Receber ligações</span>
       </label>
       <p id="perfil-sala-estado" class="nota sala-estado" role="status" hidden></p>
       <div id="perfil-sala-firewall" class="perfil-sala-firewall" hidden>
@@ -4377,13 +4342,14 @@
         <button id="perfil-sala-firewall-abrir" class="botao-fantasma" type="button">ABRIR A PORTA AGORA</button>
       </div>
       </div>
-      <div class="area-cartao perfil-cartao-agenda">
-      <span class="rotulo">AGENDA</span>
-      <p id="perfil-agenda-vazia" class="nota" hidden>Ninguém ligou para o seu código ainda.</p>
-      <ul id="perfil-agenda" class="perfil-agenda"></ul>
+      <div class="area-cartao perfil-cartao-agenda" aria-labelledby="perfil-agenda-titulo">
+      <h3 id="perfil-agenda-titulo" class="perfil-agenda-titulo">Agenda</h3>
+      <p id="perfil-agenda-vazia" class="nota" hidden>Agenda vazia.</p>
+      <ul id="perfil-agenda" class="perfil-agenda" aria-labelledby="perfil-agenda-titulo"></ul>
       <p id="perfil-agenda-erro" class="nomear-erro" role="alert" hidden></p>
       </div>
     </section>
+    </div>
     </div>
   </div>
 </div>
@@ -4453,8 +4419,6 @@
             `AVISO_DE_FONE` de `frases.js`. A faixa se fecha e não volta nesta
             execução; aqui ela continua escrita para quem a fechou.
           -->
-          <dt class="ajuda-termo">FONE</dt>
-          <dd id="ajuda-aviso-fone" class="ajuda-diz">USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta.</dd>
         </dl>
       </section>
 
@@ -5133,5 +5097,6 @@
 <script src="compartilhar-pessoal-web.js"></script>
 <script src="pessoal-web.js"></script>
 <script src="pessoal-web-entrada.js"></script>
+<script src="composicao-0174.js"></script>
 </body>
 </html>

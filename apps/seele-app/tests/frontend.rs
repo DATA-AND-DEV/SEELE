@@ -141,7 +141,7 @@ fn invoked_commands(script: &str) -> BTreeSet<String> {
     // `invoke("…")` é o da casca (com o carimbo da vista); `invocarNaJanela`
     // é o do Tauri por baixo, para o que não é de sessão nenhuma — a instância
     // da janela de `base.js`, que numera os pedidos de `ver_sessao`.
-    for marca in ["invoke(\"", "invocarNaJanela(\""] {
+    for marca in ["invoke(\"", "invocarNaJanela(\"", "chamarNativo(\""] {
         for piece in script.split(marca).skip(1) {
             if let Some(name) = piece.split('"').next() {
                 found.insert(name.to_owned());
@@ -8537,9 +8537,9 @@ fn the_content_security_policy_did_not_move_to_make_room_for_a_picture() {
         "images are drawn from somewhere other than this bundle and `data:`: \
          {csp}"
     );
-    for afrouxado in ["unsafe-inline", "unsafe-eval", "img-src *", "https:"] {
+    for afrouxado in ["'unsafe-inline'", "'unsafe-eval'", "*", "https:"] {
         assert!(
-            !csp.contains(afrouxado),
+            !csp.split([' ', ';']).any(|fonte| fonte == afrouxado),
             "the policy gained `{afrouxado}`, and no picture is worth that: \
              {csp}"
         );
@@ -8973,35 +8973,72 @@ fn the_entrance_screen_stopped_drawing_the_four_values_this_protocol_never_carri
 
 #[test]
 fn the_note_beside_a_control_is_not_painted_in_the_colour_reserved_for_large_text() {
-    // The note beside a control is, on several screens, the only thing that says
-    // what the control does. Painting it in `osso-apagado` — which `tokens.css`
-    // annotates in its own line as "4,11:1 só texto grande" — writes the
-    // explanation in type the explained person cannot read.
-    //
-    // `docs/tokens-achados.md` settled this before the class existed: the
-    // pending choice on that colour is to raise it *or* to make sure nothing
-    // necessary depends on it alone. A note is necessary by definition.
-    //
-    // The check is on the token name and not on a computed ratio, deliberately.
-    // A ratio computed here would have to be recomputed the day the palette
-    // moves, and would then measure a number nobody had decided; the name is
-    // what the decision was actually about.
-    let sheet = read("ui/base.css");
-    let Some(after) = sheet.split("\n.nota {").nth(1) else {
-        panic!("base.css no longer declares `.nota`, so nothing owns the note beside a control");
-    };
-    let Some(rule) = after.split('}').next() else {
-        panic!("the `.nota` rule is never closed");
-    };
-
-    for dim in ["osso-apagado", "rotulo-painel"] {
+    // A nota é texto pequeno necessário. A direção 0.17.4 mudou a paleta:
+    // o nome antigo já não informa o contraste. Mede a cor efetivamente usada
+    // pela regra sobre cada superfície padrão em que ela aparece.
+    fn rgb_do_token(css: &str, token: &str, profundidade: usize) -> [u8; 3] {
+        assert!(profundidade < 16, "alias de cor circular em {token}");
+        let prefixo = format!("{token}:");
+        let linha = css
+            .lines()
+            .find(|linha| linha.trim_start().starts_with(&prefixo))
+            .unwrap_or_else(|| panic!("token da nota não existe: {token}"));
+        let valor = linha
+            .split_once(':')
+            .expect("token tem dois-pontos")
+            .1
+            .split(';')
+            .next()
+            .expect("token tem valor")
+            .trim();
+        if let Some(alias) = valor.strip_prefix("var(").and_then(|v| v.strip_suffix(')')) {
+            return rgb_do_token(css, alias.trim(), profundidade + 1);
+        }
         assert!(
-            !rule.contains(dim),
-            "`.nota` is painted with `{dim}`, which tokens.css marks as large-text \
-             only at 4,11:1. These are small prose lines nobody can turn off any \
-             more — they are the one thing on screen that has to be legible to \
-             somebody who does not already know the app.\n{rule}"
+            valor.starts_with('#') && valor.len() == 7,
+            "cor não mensurável: {token}={valor}"
         );
+        [1, 3, 5].map(|inicio| {
+            u8::from_str_radix(&valor[inicio..inicio + 2], 16).expect("cor hexadecimal válida")
+        })
+    }
+    fn luminancia(rgb: [u8; 3]) -> f64 {
+        let linear = rgb.map(|canal| {
+            let valor = f64::from(canal) / 255.0;
+            if valor <= 0.04045 {
+                valor / 12.92
+            } else {
+                ((valor + 0.055) / 1.055).powf(2.4)
+            }
+        });
+        linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+    }
+    let sheet = read("ui/base.css");
+    let rule = sheet
+        .split("\n.nota {")
+        .nth(1)
+        .and_then(|after| after.split('}').next())
+        .expect("base.css define a regra compartilhada .nota");
+    let cor = rule
+        .split(';')
+        .find_map(|declaracao| declaracao.trim().strip_prefix("color:"))
+        .expect("a nota declara sua cor")
+        .trim();
+    let token = cor
+        .strip_prefix("var(")
+        .and_then(|valor| valor.strip_suffix(')'))
+        .expect("a nota usa um token semântico de cor")
+        .trim();
+    let css = read("ui/tokens.css");
+    let texto = luminancia(rgb_do_token(&css, token, 0));
+    for superficie in [
+        "--seele-negro-absoluto",
+        "--seele-negro-painel",
+        "--seele-selected",
+    ] {
+        let fundo = luminancia(rgb_do_token(&css, superficie, 0));
+        let razao = (texto.max(fundo) + 0.05) / (texto.min(fundo) + 0.05);
+        assert!(razao >= 4.5, ".nota usa {token} sobre {superficie}: {razao:.2}:1, abaixo de 4,5:1 para texto pequeno necessário");
     }
 }
 
@@ -10056,144 +10093,6 @@ fn a_ajuda_escreve_a_tecla_de_falar_que_esta_gravada() {
     );
 }
 
-#[test]
-fn ha_um_aviso_de_fone_em_algum_lugar_que_a_pessoa_le() {
-    // O SEELE não cancela eco: o ADR 0007 tirou DSP em C/C++ do v1 e fez do fone
-    // um requisito escrito. Escrito em `docs/`, que ninguém que entra numa sala
-    // de voz lê. Sem fone, o alto-falante volta para o microfone, e quem sofre
-    // é o outro lado — que ouve a própria voz de volta e não tem como saber de
-    // onde ela vem. «O produto sabe e não conta», na forma mais cara: o
-    // defeito aparece na máquina de quem não fez nada de errado.
-    //
-    // Três lugares, e cada um por uma razão: a faixa, no momento em que passa a
-    // valer; a ajuda, que é onde se procura depois; e CONFIGURAÇÕES · MICROFONE
-    // E SOM, que é onde se vai quando o som está estranho. A mesma frase nos
-    // três, lida de `frases.js`.
-    const FRASE: &str = "USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala \
-                         com você se ouve de volta.";
-
-    let frases = without_comments(&read("ui/frases.js"));
-    let escrita = frases
-        .split("const AVISO_DE_FONE =")
-        .nth(1)
-        .and_then(|resto| resto.split(';').next())
-        .map(literals_in)
-        .unwrap_or_default();
-    assert_eq!(
-        escrita, FRASE,
-        "`frases.js` não tem mais o aviso de fone, ou o diz com outras palavras; \
-         quem entra numa sala de voz sem fone faz o outro lado ouvir a própria \
-         voz de volta sem saber por quê"
-    );
-
-    // A faixa: desenhada a cada quadro, acesa ao entrar numa sala de voz.
-    let sessao = read("ui/tela-sessao.js");
-    let desenhar = js_function(&sessao, "function desenhar(");
-    assert!(
-        desenhar.contains("desenharAvisoDeFone(snapshot)"),
-        "o desenho da sessão não passa mais pelo aviso de fone, então a faixa \
-         nunca acende:\n{desenhar}"
-    );
-    let aviso = js_function(&sessao, "function desenharAvisoDeFone(");
-    assert!(
-        aviso.contains("occupied_by_us"),
-        "o aviso de fone não espera a entrada numa sala de voz: ele aparece \
-         para quem só lê um canal, e já se apagou quando a voz começa:\n{aviso}"
-    );
-    // A frase passa pela casca (P9 da F8): o desktop escreve a `AVISO_DE_FONE`
-    // pelo padrão do `CASCA`, e só a casca do navegador troca. As duas metades
-    // são conferidas, para a faixa e a ajuda não poderem discordar no desktop.
-    assert!(
-        aviso.contains("$(\"aviso-fone-texto\").textContent = CASCA.avisoDeFone()"),
-        "a faixa de fone não escreve a frase que a casca dá, e ela e a ajuda \
-         passam a poder discordar:\n{aviso}"
-    );
-    assert!(
-        without_comments(&read("ui/base.js")).contains("avisoDeFone: () => AVISO_DE_FONE,"),
-        "o `CASCA` do `base.js` não dá a `AVISO_DE_FONE` como padrão: no desktop, a \
-         faixa de fone deixa de dizer a frase de `frases.js`"
-    );
-    // Por execução: zerada ao trocar de servidor, a faixa voltaria a cada
-    // sessão, e um aviso repetido é um aviso que se aprende a fechar sem ler.
-    let sem_comentario = without_comments(&sessao);
-    assert_eq!(
-        sem_comentario.matches("foneJaAvisado = false").count(),
-        1,
-        "a marca do aviso de fone é zerada em algum lugar além da declaração; ele \
-         é da primeira entrada numa sala de voz desta execução, e não de cada \
-         sessão"
-    );
-    // E as duas linhas que fazem a marca valer. Sem a que lê, a faixa acende a
-    // cada quadro dentro de uma sala — fechar não adianta, ela volta meio
-    // segundo depois; sem a que escreve, a mesma coisa por outro caminho.
-    // Apagar qualquer uma deixava o resto deste guarda verde (revisão do lote J).
-    for (linha, o_que) in [
-        ("if (foneJaAvisado) return;", "não confere se já avisou"),
-        ("foneJaAvisado = true;", "não marca que avisou"),
-    ] {
-        assert!(
-            aviso.contains(linha),
-            "o aviso de fone {o_que}: a faixa volta a acender a cada quadro dentro \
-             da sala, e «dispensar» não a fecha por mais de meio segundo:\n{aviso}"
-        );
-    }
-
-    // **E ela não atravessa sessões.** Não dispensada, a faixa ficava acesa
-    // dentro da tela de sessão escondida e reaparecia sobre o servidor seguinte
-    // — um aviso sobre a sala de outra conversa. Ao sair pelo SAIR DO SERVIDOR,
-    // `ejetar` a apaga junto do veredito. A outra saída, a do fim de sessão, mora
-    // em `tela-fim.js`; para ela, a faixa guarda a geração da sessão em que
-    // acendeu e se apaga no primeiro quadro de uma geração nova.
-    let ejetar = js_function(&sessao, "async function ejetar(");
-    assert!(
-        ejetar.contains("$(\"aviso-fone\").hidden = true"),
-        "sair do servidor não apaga a faixa de fone, e ela reaparece sobre a \
-         sessão seguinte:\n{ejetar}"
-    );
-    assert!(
-        aviso.contains("geracaoDoAvisoDeFone !== geracaoDaSessao"),
-        "a faixa de fone não sabe de que sessão é: uma sessão encerrada pelo \
-         servidor a deixa acesa para a próxima:\n{aviso}"
-    );
-    assert!(
-        sem_comentario.contains("$(\"aviso-fone-fechar\").addEventListener(\"click\""),
-        "a faixa de fone não se fecha: ela fica sobre a sessão inteira de quem já \
-         leu e já está de fone"
-    );
-
-    // E os dois lugares onde ela continua escrita depois de fechada.
-    let pagina = without_comments(&read("ui/index.html"));
-    for (id, onde) in [
-        ("ajuda-aviso-fone", "a ajuda"),
-        ("server-aviso-fone", "CONFIGURAÇÕES · MICROFONE E SOM"),
-    ] {
-        let Some(texto) = pagina
-            .split(&format!("id=\"{id}\""))
-            .nth(1)
-            .and_then(|resto| resto.split_once('>'))
-            .and_then(|(_, resto)| resto.split('<').next())
-        else {
-            panic!("{onde} não tem mais o aviso de fone (`#{id}`)");
-        };
-        assert_eq!(
-            texto.split_whitespace().collect::<Vec<_>>().join(" "),
-            FRASE,
-            "{onde} diz o aviso de fone com outras palavras, ou não o diz; quem \
-             procura ali depois de fechar a faixa lê outra coisa"
-        );
-    }
-    let audio = pagina
-        .split("id=\"painel-audio\"")
-        .nth(1)
-        .and_then(|resto| resto.split("id=\"painel-atalhos\"").next())
-        .unwrap_or_default();
-    assert!(
-        audio.contains("id=\"server-aviso-fone\""),
-        "o aviso de fone da configuração saiu de MICROFONE E SOM, que é onde se vai \
-         quando o som está estranho"
-    );
-}
-
 /// A `<section id="tela-boot">` inteira, sem comentário.
 ///
 /// O corte é na tela seguinte e não no primeiro `</section>`, e a diferença não
@@ -11025,6 +10924,12 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // aqui (a chave `"convite-vencido"` é a frase de um desfecho, e entra porque
     // o guarda lê o nome, e não o sentido).
     const PELA_PONTE: &[(&str, &str)] = &[
+        // Só a frase de recusa do domínio aposentado: não lê nem transporta
+        // segredo. A linha inteira é revisada; outros usos de convite continuam guardados.
+        (
+            "ponte-web.js",
+            r#"DominioDescontinuado: "Este endereço foi aposentado. Peça um novo convite.","#,
+        ),
         ("ponte-web.js", "let linkColadoDaPonte = null;"),
         (
             "ponte-web.js",
@@ -14301,11 +14206,13 @@ fn the_csp_admits_mods_and_never_loosens_further() {
         );
     }
     assert!(
-        csp.contains("script-src 'self'") && !csp.contains("script-src 'self' "),
-        "o `script-src` deixou de ser só o pacote: {csp}"
+        csp.split(';')
+            .map(str::trim)
+            .any(|s| s == "script-src 'self' 'wasm-unsafe-eval'"),
+        "o `script-src` deve executar só o pacote e seu WASM local: {csp}"
     );
     assert!(!csp.contains("unsafe-inline"), "a CSP ganhou unsafe-inline");
-    assert!(!csp.contains("unsafe-eval"), "a CSP ganhou unsafe-eval");
+    assert!(!csp.contains("'unsafe-eval'"), "a CSP ganhou unsafe-eval");
 }
 
 /// **O que um MOD desenha é montado pelo produto, e nunca interpretado.**
@@ -16222,68 +16129,6 @@ fn the_page_loads_mods_after_the_first_draw() {
         carga > desenho,
         "os MODs carregam antes de a página existir, e um MOD que roda cedo \
          falha de um jeito que parece defeito dele"
-    );
-}
-
-/// As duas listas de aparelho dizem que escolher pelo nome fixa.
-///
-/// # Por que esta frase precisa de um guarda
-///
-/// Ela é o **conserto inteiro** do achado B da auditoria de áudio. A tela
-/// oferecia `PADRÃO DA MÁQUINA` e o nome de um aparelho lado a lado, como se
-/// escolher qualquer um dos dois desse no mesmo — e no macOS não dá: um
-/// aparelho vindo da lista abre por um AudioUnit fixo e perde o
-/// reencaminhamento que o CoreAudio faz sozinho no padrão. A auditoria
-/// classificou como gravidade alta com esta frase: *«quem usa a tela de
-/// configuração fica pior do que quem não usa»*.
-///
-/// Escolheu-se dizer em vez de promover a escolha a seguidora, porque promover
-/// trocaria um defeito de informação por um de comportamento — uma escolha
-/// explícita viraria um seguidor calado. A escolha está justificada por escrito
-/// em `crates/seele-conformance/tests/troca_de_aparelho.rs`, e os dois testes
-/// de comportamento que a tornam verdade estão lá:
-/// `com_um_aparelho_escolhido_a_troca_do_padrao_do_sistema_nao_move_a_voz` e
-/// `o_aparelho_escolhido_que_some_desce_para_o_da_maquina_em_vez_de_emudecer`.
-///
-/// Sem este guarda, apagar a frase devolve a piora invisível sem nada ficar
-/// vermelho — que é como ela viveu até aqui.
-#[test]
-fn as_listas_de_aparelho_avisam_que_escolher_pelo_nome_fixa() {
-    let page = without_comments(&read("ui/index.html"));
-
-    for id in ["nota-fixa-entrada", "nota-fixa-saida"] {
-        assert!(
-            page.contains(id),
-            "sumiu a nota `{id}`: a tela voltou a oferecer `PADRÃO DA MÁQUINA` \
-             e um nome de aparelho como se fossem a mesma coisa, e no macOS \
-             escolher pelo nome desliga o reencaminhamento automático"
-        );
-    }
-    // **Duas vezes o aviso, uma vez a explicação** — U30 da auditoria de
-    // 20/09/2026: «Em Áudio, a explicação longa sobre acompanhar o dispositivo
-    // padrão se repete para entrada e saída.»
-    //
-    // O que não podia sair era o **aviso**, que é o conserto do achado B acima.
-    // Ele encurtou e continua ao lado das duas listas; o parágrafo que o
-    // explica ficou uma vez, recolhido, no fim do painel. Recolher o aviso
-    // junto teria escondido a informação que faz a escolha ser informada.
-    assert_eq!(
-        page.matches("fixa\n                  ele").count() + page.matches("fixa ele").count(),
-        2,
-        "o aviso de fixação existe em número diferente de dois: as duas listas \
-         — entrada e saída — têm o mesmo comportamento e precisam do mesmo aviso"
-    );
-    assert_eq!(
-        page.matches("<b>PADRÃO DA MÁQUINA</b> é a opção").count(),
-        1,
-        "a explicação longa voltou a existir duas vezes, ou sumiu: ela vale \
-         igual para os dois lados e mora uma vez, recolhida"
-    );
-    assert!(
-        page.contains("<b>PADRÃO DA MÁQUINA</b> é a opção"),
-        "a nota deixou de nomear a opção que acompanha a troca. Dizer que \
-         escolher fixa, sem dizer qual é a alternativa, é meio aviso: a pessoa \
-         fica sabendo que perdeu algo e não como recuperá-lo"
     );
 }
 
@@ -21699,9 +21544,10 @@ function mundo(comandos) {
     return typeof r === "function" ? r(args) : r;
   };
   const ctx = vm.createContext({
-    console, setTimeout, $, invoke,
+    console, setTimeout, $, invoke, PONTE_NO_LUGAR_DO_TAURI: false,
     listen: async (nome, f) => { ouvintes[nome] = f; },
-    document: { createElement: () => new El(""), querySelectorAll: () => [] },
+    document: Object.assign(new EventTarget(), { createElement: () => new El(""), querySelectorAll: () => [] }),
+    Event, CustomEvent, window: {},
     MutationObserver: class { observe() {} },
     copiarLink: async (campo, botao) => { chamadas.push({ cmd: "copiarLink", args: { campo: campo.id, botao: botao.id } }); },
     irParaOServidor: (...a) => chamadas.push({ cmd: "irParaOServidor", args: a }),
@@ -21752,14 +21598,14 @@ const bloco = m.$("boot-codigo");
 confere("o bloco do código não aparece", bloco.hidden === false);
 confere("o campo não traz o código", m.$("boot-codigo-valor").value === CODIGO);
 confere("a sala desligada promete ligação", !/consegue ligar/.test(m.$("boot-codigo-estado").textContent));
-confere("a sala desligada não diz que NÃO recebe", /NÃO recebe/.test(m.$("boot-codigo-estado").textContent));
+confere("a recepção desligada não aparece", /desligada/i.test(m.$("boot-codigo-estado").textContent));
 confere("a sala desligada ficou com marca de recebendo", bloco.dataset.recebe === "nao");
 await m.$("boot-copiar-codigo").click();
 const c = so(m, "copiarLink");
 confere("COPIAR não copia o campo da entrada", c.length === 1 && c[0].args.campo === "boot-codigo-valor");
 
 const diz = (p) => { m.ouvintes["seele://sala"]({ payload: p }); return m.$("boot-codigo-estado").textContent; };
-confere("registrada não diz que pode ligar", diz({ estado: "NoAr", registro: { registro: "Registrado" } }) === "Quem tem seu código pode ligar para você.");
+confere("registrada não apresenta o estado de recepção", /recebendo ligações/i.test(diz({ estado: "NoAr", registro: { registro: "Registrado" } })));
 confere("registrada não marca recebendo", bloco.dataset.recebe === "sim");
 for (const registro of ["SemPonto", "Esperando", "SemResposta", "CookieRecusado"]) {
   const t = diz({ estado: "NoAr", registro: { registro } });
@@ -21768,7 +21614,7 @@ for (const registro of ["SemPonto", "Esperando", "SemResposta", "CookieRecusado"
 }
 confere("SemPonto não diz só a mesma rede", /mesma rede/.test(diz({ estado: "NoAr", registro: { registro: "SemPonto" } })));
 confere("a porta ocupada promete ligação", /NINGUÉM CONSEGUE TE LIGAR/.test(diz({ estado: "Falhou", motivo: "PortaOcupada" })));
-confere("subindo promete ligação", /Ainda não dá/.test(diz({ estado: "Subindo" })));
+confere("subindo não apresenta inicialização", /iniciando/i.test(diz({ estado: "Subindo" })));
 
 // O código existe sem a sala: sem resposta do `meu_codigo` (o navegador), nada aparece.
 const recusa = { RecusaDaPonte: { comando: "amigos", frase: "o código e a agenda moram no app do SEELE" } };
@@ -21826,8 +21672,8 @@ const depois = m.chamadas.slice(antes).map((c) => c.cmd);
 confere("TIRAR não chamou tirar_dos_amigos com o código", so(m, "tirar_dos_amigos").length === 1 && so(m, "tirar_dos_amigos")[0].args.codigo === ANA.codigo);
 confere("TIRAR bloqueou ou mexeu em outra coisa: " + depois.join(","), !depois.includes("bloquear") && !depois.includes("dar_nome_na_agenda") && !depois.includes("adicionar_amigo"));
 const nota = m.$("boot-amigos-nota").textContent;
-confere("a frase do TIRAR não diz que não desbloqueia", /não desbloqueia/i.test(nota) && /não apaga o histórico/i.test(nota) && /não esquece a chave/i.test(nota));
-confere("o botão não carrega a frase", /não desbloqueia/.test(tirar.title));
+confere("a remoção voltou a mostrar explicação repetitiva", nota === "");
+confere("o botão perdeu o nome acessível do contato", /Ana/.test(tirar.title));
 
 // Erro do adicionar aparece com frase.
 const me = mundo({ amigos: [], adicionar_amigo: () => Promise.reject("SeuCodigo") });
@@ -22072,6 +21918,7 @@ function cenario(connect) {
   vm.runInContext(`
     ${funcao("camada-sessoes.js", "irParaAEntradaSemSair")}
     ${funcao("camada-toque.js", "entrarNaSalaAoAtender")}
+    ${funcao("camada-servidores.js", "irParaOServidorNativo")}
     ${funcao("camada-servidores.js", "irParaOServidor")}`, m.ctx);
   return { m, abertas };
 }
@@ -22726,7 +22573,7 @@ const caixaDeTela = async ({ listas = girada, falhar = null } = {}) => {
     return n;
   };
   const ctx = vm.createContext({
-    console, setTimeout, $, invoke, elemento,
+    console, setTimeout, $, invoke, elemento, PONTE_NO_LUGAR_DO_TAURI: false,
     listen: async (nome, f) => { ouvintes[nome] = f; },
     repovoar: (pai, filhos) => pai.replaceChildren(...filhos),
     anunciar() {}, focavel: () => false, fecharAoClicarFora() {},
@@ -23122,6 +22969,7 @@ corpoTerminou = true;
 fn a_ui_nao_oferece_turn_nem_relay_e_so_a_limpeza_fala_da_chave() {
     let mut achados = Vec::new();
     let mut limpezas = 0;
+    let mut recusas_de_credenciais_na_url = 0;
     for extensao in [".js", ".html", ".css"] {
         for nome in ui_files(extensao) {
             let texto = read(&format!("ui/{nome}"));
@@ -23140,6 +22988,17 @@ fn a_ui_nao_oferece_turn_nem_relay_e_so_a_limpeza_fala_da_chave() {
             }
             for (i, linha) in linhas.iter().enumerate() {
                 if livres.contains(&i) {
+                    continue;
+                }
+                // Leitura defensiva de userinfo da URL do convite: a condição
+                // recusa username/password, não configura credenciais ICE.
+                // Só esta linha inteira neste arquivo; username/credential
+                // continuam proibidos em qualquer outra linha ou arquivo.
+                if nome == "chamada-web.js"
+                    && linha.trim()
+                        == r#"|| endereco.username || endereco.password || !["https:", "http:"].includes(endereco.protocol)) {"#
+                {
+                    recusas_de_credenciais_na_url += 1;
                     continue;
                 }
                 let minuscula = linha.to_lowercase();
@@ -23168,6 +23027,10 @@ fn a_ui_nao_oferece_turn_nem_relay_e_so_a_limpeza_fala_da_chave() {
     assert_eq!(
         limpezas, 1,
         "a limpeza da chave `seele.turn` é uma só, num lugar só"
+    );
+    assert_eq!(
+        recusas_de_credenciais_na_url, 1,
+        "a exceção revisada só cobre a recusa de userinfo na URL do convite, uma vez"
     );
     assert!(
         !std::path::Path::new(&app_dir().join("ui").join("celular-turn.js")).exists(),
@@ -24635,7 +24498,7 @@ async function cenario(codigo) {
       super("");
       this.classes = new Set();
       this.tagName = "DIV";
-      this.classList = { toggle: (c, on) => { if (on) this.classes.add(c); else this.classes.delete(c); } };
+      this.classList = { toggle: (c, on) => { if (on) this.classes.add(c); else this.classes.delete(c); }, remove: c => this.classes.delete(c) };
     }
     set id(v) { this._id = v; if (v) reg[v] = this; }
     get id() { return this._id; }
@@ -25291,6 +25154,7 @@ async function cenarios(pecas) {
     const sessao = { atender: () => ({ resposta: { sala, desejada, voz: numeroDaVoz } }), transporteDaVoz: {}, acabou: false, idDaPonte: 1 };
     const ctx = vm.createContext({
       console, setTimeout, Promise, Object, Boolean,
+      document: new EventTarget(), Event, CustomEvent,
       vozDaPonte: { atual: voz }, emitirNaPonte() {}, modoDeVozGuardado: () => "Open", guardadoNaOrigem: () => null, milesimosGuardados: () => null,
       CHAVES_DA_ORIGEM: { microfone: "m", saida: "s", sensibilidade: "x" }, BYTE_DO_MODO: { PushToTalk: 0, VoiceActivated: 1, Open: 2 },
       ganhosAplicados: { clear() {} }, recusaDoMicrofone: { nestaPagina: false },

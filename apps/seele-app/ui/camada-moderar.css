@@ -55,6 +55,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
 }
 
 .camada-moderar::before {
@@ -73,12 +74,16 @@
    o pior lugar possível para um botão sumir. */
 .moderar-caixa {
   position: relative;
-  width: 640px;
-  max-width: calc(100vw - 32px);
-  max-height: calc(100vh - 64px);
+  width: min(100%, 760px);
+  max-width: none;
+  max-height: calc(100dvh - 48px);
   overflow-y: auto;
-  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+  border: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-absoluto);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--seele-raio);
 }
 
 /* ---------- a cabeça ----------
@@ -88,9 +93,11 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 16px 20px;
-  background: var(--seele-laranja-nerv);
-  color: var(--seele-negro-absoluto);
+  padding: 16px 24px;
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  min-height: 64px;
+  border-bottom: 1px solid var(--seele-linha);
 }
 
 /* O kanji é acento. `MODERAÇÃO` ao lado carrega a informação, e é por isso que
@@ -105,10 +112,10 @@
 .moderar-titulo {
   margin: 0;
   font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 26px;
-  line-height: 1;
-  letter-spacing: 0.12em;
+  font-weight: 500;
+  font-size: 28px;
+  line-height: 1.25;
+  letter-spacing: .02em;
 }
 
 /* ---------- o corpo ---------- */
@@ -116,8 +123,10 @@
 .moderar-corpo {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 20px;
+  gap: 24px;
+  padding: 24px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .moderar-vazio {
@@ -163,22 +172,24 @@
 .moderar-acao {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   padding-top: 16px;
   border-top: var(--seele-b) solid var(--seele-linha);
+  flex-wrap: wrap;
 }
 
 .moderar-verbo {
   align-self: flex-start;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 15px;
-  letter-spacing: 0.16em;
+  font-family: var(--seele-mono);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
   padding: 8px 16px;
   color: var(--seele-osso);
   background: none;
   border: var(--seele-b) solid var(--seele-linha-forte);
   cursor: pointer;
+  border-radius: var(--seele-raio);
 }
 
 .moderar-verbo:hover { border-color: var(--seele-laranja-nerv); }
@@ -221,15 +232,17 @@
 .moderar-cancelar {
   flex: 0 1 auto;
   font: inherit;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 16px;
-  letter-spacing: 0.16em;
-  padding: 12px;
-  color: var(--seele-osso);
-  background: none;
-  border: var(--seele-b) solid var(--seele-linha-forte);
+  font-family: var(--seele-mono);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
+  padding: 8px 12px;
+  color: var(--seele-osso-apagado);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
   cursor: pointer;
+  min-height: 40px;
+  border-radius: var(--seele-raio);
 }
 
 .moderar-cancelar:hover { border-color: var(--seele-osso); }
@@ -237,12 +250,14 @@
 
 .moderar-confirmar {
   flex: 0 1 auto;
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 16px;
-  letter-spacing: 0.16em;
+  font-family: var(--seele-mono);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
   padding: 12px;
   border: 0;
+  border-radius: var(--seele-raio);
+  min-height: 40px;
 }
 
 /* **A saída não sai de vista.** A caixa rola — `max-height` mais
@@ -260,14 +275,18 @@
   z-index: 1;
   width: 100%;
   font: inherit;
-  font-size: 11px;
-  letter-spacing: var(--seele-tracking-rotulo);
-  padding: 8px;
+  font-size: 14px;
+  letter-spacing: 0;
+  padding: 8px 12px;
   color: var(--seele-osso-apagado);
-  background: var(--seele-negro-painel);
-  border: 0;
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
   border-top: var(--seele-b) solid var(--seele-linha);
   cursor: pointer;
+  min-height: 40px;
+  border-radius: var(--seele-raio);
+  font-family: var(--seele-mono);
+  font-weight: 500;
 }
 
 .moderar-fechar:hover { color: var(--seele-osso); }
@@ -352,3 +371,9 @@ li:hover .moderar-remover,
 
 .moderar-remover:hover { color: var(--seele-laranja-nerv); }
 .moderar-remover:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+@media(max-width:700px) { .camada-moderar { padding:12px; } .moderar-caixa { max-height:calc(100dvh - 24px); } .moderar-cabeca, .moderar-corpo { padding:16px; } .moderar-acao > button, .moderar-botoes > button { min-height:44px; flex:1 1 120px; } }
+
+
+
+@media(max-width:700px) { .moderar-acao > button { flex:0 0 auto; align-self:flex-start; } }

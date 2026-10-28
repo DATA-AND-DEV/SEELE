@@ -1,0 +1,14 @@
+Controles docs/catalogo — verificacao local 0.17.4
+35 cenas; 0 erros JS, 0 overflow de documento, 0 controles cortados.
+Largura | cenas | controles de cada estado inicial | clientWidth/scrollWidth
+320 | 7 | 244 | 320/320
+390 | 7 | 244 | 390/390
+720 | 7 | 244 | 720/720
+768 | 7 | 244 | 768/768
+1440 | 7 | 242 | 1440/1440
+720px verifica o reflow equivalente a 1440px com zoom de 200%.
+Cabecalhos, menus historicos abertos, busca, select de ordem, botoes por versao, detalhes, publicar/revogacoes e rodapes medidos.
+Todos os 28 capitulos do guia foram acionados em cada uma das cinco larguras.
+Corrigido: capitulos do guia <=720px deixaram de exigir rolagem horizontal; navegacoes compartilhadas podem quebrar linha.
+Tabelas e codigo podem ter rolagem interna; nenhum controle depende dessa rolagem para aparecer.
+Prova detalhada: docs-mods-controles.json; testes5pytestpass1skip e NodeUI/guia no controles-tests.log.

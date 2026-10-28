@@ -565,7 +565,14 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
    * e dito em `contas()`.
    */
   async function ligar(pedido = {}) {
-    if (vivo.ctx) return;
+    if (vivo.ctx) {
+      if (!pedido.somenteOuvir && !vivo.faixa) {
+        const minhaGeracao = geracaoDoAudio;
+        try { await abrirCaptura(pedido.microfone ?? null, minhaGeracao); }
+        catch (erro) { if (minhaGeracao === geracaoDoAudio) calarMicrofone(); throw erro; }
+      }
+      return;
+    }
     const minhaGeracao = geracaoDoAudio;
     try {
       await abrirOAudio(pedido, minhaGeracao);
@@ -643,7 +650,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     for (const faixa of todas) faixa.stop();
   }
 
-  async function abrirOAudio({ microfone = null, saida: aparelhoDeSaida = null }, minhaGeracao) {
+  async function abrirOAudio({ microfone = null, saida: aparelhoDeSaida = null, somenteOuvir = false }, minhaGeracao) {
     // **Depois de cada espera, a geração**: um `addModule`, um `play`, um
     // `resume` ou um `getUserMedia` que resolve depois do cancelamento não abre
     // nada obsoleto (o microfone, o elemento, o nó).
@@ -701,6 +708,16 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     await ctx.resume();
     conferir();
 
+    if (!somenteOuvir) await abrirCaptura(microfone, minhaGeracao);
+  }
+
+  // A saída pode abrir no gesto de Atender sem pedir permissão de captura.
+  async function abrirCaptura(microfone, minhaGeracao) {
+    const ctx = vivo.ctx;
+    const conferir = () => {
+      if (minhaGeracao !== geracaoDoAudio || ctx !== vivo.ctx) throw new Error("a captura foi fechada antes de abrir");
+    };
+    conferir();
     const pedido = {
       ...cfg.microfone,
       noiseSuppression: controles.supressao,
@@ -877,6 +894,19 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     mandarAReproducao({ tipo: "recomecar" });
   }
 
+  /** Solta apenas a captura; ouvir o par não depende da permissão de microfone. */
+  function calarMicrofone() {
+    geracaoDoAudio += 1;
+    controles.mudo = true;
+    const faixa = vivo.faixa;
+    vivo.faixa = null;
+    if (vivo.fonte) pararAsFaixas(vivo.fonte);
+    if (faixa) faixa.stop();
+    if (vivo.captura) { vivo.captura.port.onmessage = null; vivo.captura.port.onmessageerror = null; vivo.captura.disconnect(); }
+    if (vivo.encoder && vivo.encoder.state !== "closed") vivo.encoder.close();
+    Object.assign(vivo, { fonte: null, captura: null, encoder: null });
+  }
+
   /** Fecha o áudio: solta o microfone (`track.stop()`), o codec e o contexto. */
   async function desligar() {
     geracaoDoAudio += 1;
@@ -986,6 +1016,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
 
   return {
     ligar,
+    calarMicrofone,
     entrar,
     reconectar,
     sair,

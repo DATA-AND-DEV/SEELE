@@ -49,6 +49,27 @@ fn stylesheets() -> String {
         .join("\n")
 }
 
+// Read the complete CSS hash token: #cabeca-mods is an ID, not #cab.
+fn names_hex_colour(line: &str) -> bool {
+    line.split('#').skip(1).any(|rest| {
+        let token: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+            .collect();
+        matches!(token.len(), 3 | 4 | 6 | 8) && token.chars().all(|c| c.is_ascii_hexdigit())
+    })
+}
+
+#[test]
+fn colour_guard_does_not_mistake_a_long_id_for_a_hex_prefix() {
+    assert!(!names_hex_colour(
+        "#cabeca-mods-navegacao { display: none; }"
+    ));
+    for literal in ["#abc", "#abcd", "#abc123", "#abc123ff"] {
+        assert!(names_hex_colour(&format!("color: {literal};")));
+    }
+}
+
 /// The window's copy. The web app's copy — the one that goes to the origin
 /// (D-web-2) inside the package — is held by the same rule
 /// in `cargo xtask pacote-web` (`xtask/src/pacote_web.rs`, rule 1 of
@@ -79,12 +100,7 @@ fn the_stylesheet_uses_no_colour_the_tokens_do_not_define() {
     let literals: Vec<&str> = css
         .lines()
         .filter(|channel| channel.contains('#') && !channel.trim_start().starts_with("/*"))
-        .filter(|channel| {
-            channel
-                .split('#')
-                .skip(1)
-                .any(|rest| rest.chars().take(3).all(|c| c.is_ascii_hexdigit()))
-        })
+        .filter(|channel| names_hex_colour(channel))
         .collect();
 
     assert!(

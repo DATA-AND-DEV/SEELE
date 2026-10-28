@@ -1,0 +1,317 @@
+[
+  {
+    "cena": "docs-topo",
+    "width": 390,
+    "client": 390,
+    "scroll": 390,
+    "controles": 58,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-api-topo",
+    "width": 390,
+    "client": 390,
+    "scroll": 390,
+    "controles": 53,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-guia-topo",
+    "width": 390,
+    "client": 390,
+    "scroll": 390,
+    "controles": 25,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "catalogo-topo",
+    "width": 390,
+    "client": 390,
+    "scroll": 390,
+    "controles": 24,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "mod-detalhe-topo",
+    "width": 390,
+    "client": 390,
+    "scroll": 390,
+    "controles": 53,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "revogacoes-topo",
+    "width": 390,
+    "client": 390,
+    "scroll": 390,
+    "controles": 15,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "publicar-topo",
+    "width": 390,
+    "client": 390,
+    "scroll": 390,
+    "controles": 16,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-topo",
+    "width": 768,
+    "client": 768,
+    "scroll": 768,
+    "controles": 58,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-api-topo",
+    "width": 768,
+    "client": 768,
+    "scroll": 768,
+    "controles": 53,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-guia-topo",
+    "width": 768,
+    "client": 768,
+    "scroll": 768,
+    "controles": 25,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "catalogo-topo",
+    "width": 768,
+    "client": 768,
+    "scroll": 768,
+    "controles": 24,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "mod-detalhe-topo",
+    "width": 768,
+    "client": 768,
+    "scroll": 768,
+    "controles": 53,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "revogacoes-topo",
+    "width": 768,
+    "client": 768,
+    "scroll": 768,
+    "controles": 15,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "publicar-topo",
+    "width": 768,
+    "client": 768,
+    "scroll": 768,
+    "controles": 16,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-topo",
+    "width": 1440,
+    "client": 1440,
+    "scroll": 1440,
+    "controles": 57,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-api-topo",
+    "width": 1440,
+    "client": 1440,
+    "scroll": 1440,
+    "controles": 52,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-guia-topo",
+    "width": 1440,
+    "client": 1440,
+    "scroll": 1440,
+    "controles": 25,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "catalogo-topo",
+    "width": 1440,
+    "client": 1440,
+    "scroll": 1440,
+    "controles": 24,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "mod-detalhe-topo",
+    "width": 1440,
+    "client": 1440,
+    "scroll": 1440,
+    "controles": 53,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "revogacoes-topo",
+    "width": 1440,
+    "client": 1440,
+    "scroll": 1440,
+    "controles": 15,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "publicar-topo",
+    "width": 1440,
+    "client": 1440,
+    "scroll": 1440,
+    "controles": 16,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-topo",
+    "width": 720,
+    "client": 720,
+    "scroll": 720,
+    "controles": 58,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-api-topo",
+    "width": 720,
+    "client": 720,
+    "scroll": 720,
+    "controles": 53,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-guia-topo",
+    "width": 720,
+    "client": 720,
+    "scroll": 720,
+    "controles": 25,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "catalogo-topo",
+    "width": 720,
+    "client": 720,
+    "scroll": 720,
+    "controles": 24,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "mod-detalhe-topo",
+    "width": 720,
+    "client": 720,
+    "scroll": 720,
+    "controles": 53,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "revogacoes-topo",
+    "width": 720,
+    "client": 720,
+    "scroll": 720,
+    "controles": 15,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "publicar-topo",
+    "width": 720,
+    "client": 720,
+    "scroll": 720,
+    "controles": 16,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-topo",
+    "width": 320,
+    "client": 320,
+    "scroll": 320,
+    "controles": 58,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-api-topo",
+    "width": 320,
+    "client": 320,
+    "scroll": 320,
+    "controles": 53,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "docs-guia-topo",
+    "width": 320,
+    "client": 320,
+    "scroll": 320,
+    "controles": 25,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "catalogo-topo",
+    "width": 320,
+    "client": 320,
+    "scroll": 320,
+    "controles": 24,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "mod-detalhe-topo",
+    "width": 320,
+    "client": 320,
+    "scroll": 320,
+    "controles": 53,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "revogacoes-topo",
+    "width": 320,
+    "client": 320,
+    "scroll": 320,
+    "controles": 15,
+    "fora": [],
+    "erros": []
+  },
+  {
+    "cena": "publicar-topo",
+    "width": 320,
+    "client": 320,
+    "scroll": 320,
+    "controles": 16,
+    "fora": [],
+    "erros": []
+  }
+]

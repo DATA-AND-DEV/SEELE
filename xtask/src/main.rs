@@ -12,6 +12,8 @@ mod check_versao;
 mod check_vetores;
 mod pacote_web;
 mod wasi_sdk;
+#[path = "../../empacotar/wasm_nativo.rs"]
+mod wasm_nativo;
 mod web;
 
 fn main() -> ExitCode {
@@ -23,6 +25,7 @@ fn main() -> ExitCode {
         Some("check-versao") => check_versao::run(),
         Some("check-vetores") => check_vetores::run(),
         Some("pacote-web") => pacote_web::run(),
+        Some("wasm-nativo") => pacote_web::wasm_nativo(),
         Some("wasi-sdk") => wasi_sdk::run(),
         Some("web") => web::run(),
         Some(other) => {
@@ -41,6 +44,7 @@ fn usage() {
     eprintln!("usage: cargo xtask <command>");
     eprintln!();
     eprintln!("commands:");
+    eprintln!("  wasm-nativo  prepara e confere o WASM local para o desktop, sem publicar");
     eprintln!("  check-api    enforce the MOD API façade from `api/` (ADR 0045)");
     eprintln!("  check-deps   enforce the dependency rule from specs/01-arquitetura.md");
     eprintln!("  check-runtime roda as bancadas de MOD de Node puro (precisa de Node)");

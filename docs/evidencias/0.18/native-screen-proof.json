@@ -1,0 +1,52 @@
+{
+  "pass": true,
+  "source": "canvas.captureStream",
+  "encoder": "production VideoEncoder H264",
+  "reader": "production requestVideoFrameCallback",
+  "transport": "production authenticated RTC data channel",
+  "screenResults": [
+    {
+      "color": "red",
+      "pixel": [
+        223,
+        32,
+        34,
+        255
+      ],
+      "capture": {
+        "capable": true,
+        "sources": [
+          "ended"
+        ],
+        "readers": 0,
+        "processor": "undefined",
+        "videoCallback": "function",
+        "phase": "dentro",
+        "errors": [],
+        "body": "SEELE\n16:19:33\n\nSEELE\nInício\n?\nPERFIL\n—\nConversas\nConectar\nLink, endereço ou código\nCONECTAR\nSERVIDORES\n\nVocê ainda não entrou em nenhum servidor.\n\nAMIGOS\n\nSem amigos.\n\nADICIONAR\nVOLTAR À CONVERSA\nSEU CÓDIGO\nCOPIAR\n\nRecebendo ligações.\n\nHOSPEDAR\nHOSPEDAR AQUI\nConversa pessoal\nVOLTAR\n\nConversa conectada\n\nP\nPessoa\nVOCÊ\nNP\nNavegador prova\nNA CONVERSA\nMENSAGENS\nNavegador prova\n\nbrowser para Mac\n\nVocê\n\nMac para browser\n\nENVIAR\nMICROFONE\nCOMPARTILHAR\nSAIR"
+      }
+    },
+    {
+      "color": "blue",
+      "pixel": [
+        33,
+        63,
+        217,
+        255
+      ],
+      "capture": {
+        "capable": true,
+        "sources": [
+          "ended",
+          "ended"
+        ],
+        "readers": 0,
+        "processor": "undefined",
+        "videoCallback": "function",
+        "phase": "dentro",
+        "errors": [],
+        "body": "SEELE\n16:19:33\n\nSEELE\nInício\n?\nPERFIL\n—\nConversas\nConectar\nLink, endereço ou código\nCONECTAR\nSERVIDORES\n\nVocê ainda não entrou em nenhum servidor.\n\nAMIGOS\n\nSem amigos.\n\nADICIONAR\nVOLTAR À CONVERSA\nSEU CÓDIGO\nCOPIAR\n\nRecebendo ligações.\n\nHOSPEDAR\nHOSPEDAR AQUI\nConversa pessoal\nVOLTAR\n\nConversa conectada\n\nP\nPessoa\nVOCÊ\nNP\nNavegador prova\nNA CONVERSA\nMENSAGENS\nNavegador prova\n\nbrowser para Mac\n\nVocê\n\nMac para browser\n\nENVIAR\nMICROFONE\nCOMPARTILHAR\nSAIR"
+      }
+    }
+  ]
+}

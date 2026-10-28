@@ -1,0 +1,32 @@
+﻿2026-10-28T17:28:19.9243480-03:00 perfil novo: C:\s17v1025\perfis\primeira-abertura-018-interop-20261028-172819 (SEELE_HOME=C:\s17v1025\perfis\primeira-abertura-018-interop-20261028-172819\casa, WEBVIEW2_USER_DATA_FOLDER=C:\s17v1025\perfis\primeira-abertura-018-interop-20261028-172819\webview2); exe C:\s17v1025\t\debug\seele-app.exe sha256 6ec5bc3da858
+2026-10-28T17:28:21.7612699-03:00 casa ANTES de abrir: 1 (ilegíveis: 0) arquivos em casa-antes-de-abrir-20261028-172819.json
+2026-10-28T17:28:21.8472673-03:00 tarefa seele-017-primeira-abertura-20261028-172819 disparada
+2026-10-28T17:28:25.0527306-03:00 CDP ok em loopback:9334, dono pid=11460 (msedgewebview2)
+2026-10-28T17:28:31.8624335-03:00 CDP: cdp-t005.png
+2026-10-28T17:28:41.9332663-03:00 CDP: cdp-t015.png
+2026-10-28T17:28:56.9783730-03:00 CDP: cdp-t030.png
+2026-10-28T17:29:27.0249459-03:00 CDP: cdp-t060.png
+2026-10-28T17:29:30.0380389-03:00 capturas: 4 PNGs em C:\s17v1025\perfis\primeira-abertura-018-interop-20261028-172819\capturas (cdp-t*.png = o que a página desenha; janela-t*.png = os pixels da janela visível)
+2026-10-28T17:29:30.2310401-03:00 árvore: pid=19428 pai=35900 C:\s17v1025\t\debug\seele-app.exe nascido=2026-10-28T17:28:22.2544240-03:00
+2026-10-28T17:29:30.2320403-03:00 árvore: pid=21212 pai=19428 C:\WINDOWS\system32\conhost.exe nascido=2026-10-28T17:28:22.2594140-03:00
+2026-10-28T17:29:30.2330394-03:00 árvore: pid=11460 pai=19428 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe nascido=2026-10-28T17:28:22.4220250-03:00
+2026-10-28T17:29:30.2340413-03:00 árvore: pid=24924 pai=11460 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe nascido=2026-10-28T17:28:22.4345890-03:00
+2026-10-28T17:29:30.2350397-03:00 árvore: pid=6496 pai=11460 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe nascido=2026-10-28T17:28:22.8761560-03:00
+2026-10-28T17:29:30.2360413-03:00 árvore: pid=31552 pai=11460 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe nascido=2026-10-28T17:28:22.8784580-03:00
+2026-10-28T17:29:30.2370396-03:00 árvore: pid=20744 pai=11460 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe nascido=2026-10-28T17:28:22.8996880-03:00
+2026-10-28T17:29:30.2380405-03:00 árvore: pid=14856 pai=11460 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe nascido=2026-10-28T17:28:22.9981630-03:00
+2026-10-28T17:29:30.2390390-03:00 árvore: pid=13396 pai=11460 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe nascido=2026-10-28T17:28:26.8250160-03:00
+2026-10-28T17:29:30.3059957-03:00 encerrando pid=13396 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe
+2026-10-28T17:29:30.3655377-03:00 encerrando pid=14856 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe
+2026-10-28T17:29:30.4285354-03:00 encerrando pid=20744 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe
+2026-10-28T17:29:30.4885203-03:00 encerrando pid=31552 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe
+2026-10-28T17:29:30.5503248-03:00 encerrando pid=6496 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe
+2026-10-28T17:29:30.6103208-03:00 encerrando pid=24924 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe
+2026-10-28T17:29:30.6703197-03:00 encerrando pid=11460 C:\Program Files (x86)\Microsoft\EdgeWebView\Application\156.0.4314.50\msedgewebview2.exe
+2026-10-28T17:29:30.7343214-03:00 encerrando pid=21212 C:\WINDOWS\system32\conhost.exe
+2026-10-28T17:29:30.8043233-03:00 encerrando pid=19428 C:\s17v1025\t\debug\seele-app.exe
+2026-10-28T17:29:31.8693215-03:00 tarefa seele-017-primeira-abertura-20261028-172819 removida
+2026-10-28T17:29:32.8733231-03:00 tarefa seele-017-primeira-abertura-cap-20261028-172819 removida
+2026-10-28T17:29:33.3086644-03:00 árvore desta rodada encerrada: 9 processo(s), nenhum vivo
+2026-10-28T17:29:35.3229387-03:00 casa no FIM: 7 (ilegíveis: 0) arquivos em casa-fim-20261028-172819.json
+2026-10-28T17:29:36.5129363-03:00 perfil real e C:\SEELE: sem mudança

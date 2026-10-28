@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running `target/debug/xtask pacote-web`
+pacote-web: o pacote sai, em /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/pacote-web
+guarda ok: 1 artefatos locais, todos desta fonte

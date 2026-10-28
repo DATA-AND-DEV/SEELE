@@ -42,7 +42,7 @@ const TIPOS = {
 };
 
 /** A política do desktop (`tauri.conf.json`), num lugar só para as bancadas que servem a página dele. */
-const CSP_DO_DESKTOP = "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; font-src 'self'";
+const CSP_DO_DESKTOP = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../tauri.conf.json"), "utf8")).app.security.csp;
 
 /** O servidor de arquivos: `ui/` como está, sem transformação nenhuma. */
 function servir() {

@@ -1527,7 +1527,6 @@ async function desenharVersoesParaHospedar() {
     console.warn("linhas para hospedar:", falha);
   }
   $("preparar-versoes").hidden = linhas.length === 0;
-  $("preparar-versao-unica").hidden = linhas.length !== 1;
   if (linhas.length === 0) return;
 
   repovoar(

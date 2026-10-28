@@ -1,13 +1,17 @@
 {
   "$meta": {
     "produto": "SEELE · Entry Plug",
-    "versao": "2",
-    "origem": "comp v2 — palheta v2 adotada como canônica (ADR 0014, tarefa M0.12)",
-    "celula": { "largura": 8, "altura": 16, "nota": "TUI: 1 célula = 8×16px. Todo espaçamento é múltiplo." },
+    "versao": "0.17.4",
+    "origem": "Direção visual aprovada em 28/10/2026; preserva nomes públicos do ADR 0014.",
+    "celula": {
+      "largura": 8,
+      "altura": 16,
+      "nota": "TUI: 1 célula = 8×16px. Todo espaçamento é múltiplo."
+    },
     "regras": [
-      "border-radius: 0 em qualquer lugar",
-      "nenhuma sombra",
-      "superfície = linha 1px + vazio"
+      "border-radius: 6px nos controles gráficos",
+      "nenhuma sombra decorativa",
+      "superfície preta, controles com contorno perceptível"
     ],
     "ansi": {
       "metodo": "vizinho mais próximo em CIELAB, busca restrita aos índices 16–255",
@@ -15,44 +19,169 @@
       "ansi16_e_semantico": "não é calculado — é escolha, e respeita a exclusividade do vermelho definida em specs/07"
     },
     "contraste": {
-      "referencia": "WCAG 2.1, sobre negro-painel #0A0806",
-      "aviso": "osso-apagado fica em 4,11:1 — passa só como texto grande. Ver docs/tokens-achados.md"
+      "referencia": "WCAG, sobre negro-painel #000000",
+      "aviso": "Contrastes calculados para os tokens padrão; MODs mantêm seu contrato de personalização."
     }
   },
   "cor": {
-    "negro-absoluto":   { "hex": "#050403", "uso": "fundo do app",                              "ansi256": 232, "ansi16": "black" },
-    "negro-painel":     { "hex": "#0A0806", "uso": "superfície de painel",                      "ansi256": 232, "ansi16": "black" },
-    "linha":            { "hex": "#241F19", "uso": "borda 1px padrão",                          "ansi256": 234, "ansi16": "bright-black" },
-    "linha-forte":      { "hex": "#3A322A", "uso": "painel ativo, réguas, marcas de escala",    "ansi256": 236, "ansi16": "bright-black" },
-    "osso":             { "hex": "#EAE3CF", "uso": "texto corrido",                             "ansi256": 254, "ansi16": "white",        "contraste": 15.60 },
-    "osso-apagado":     { "hex": "#7A7061", "uso": "rótulo secundário, log inativo",            "ansi256": 243, "ansi16": "bright-black", "contraste": 4.11 },
-    "laranja-nerv":     { "hex": "#F2521F", "uso": "acento primário institucional",             "ansi256": 202, "ansi16": "yellow-bold",  "contraste": 5.71 },
-    "laranja-fraco":    { "hex": "#331704", "uso": "preenchimento laranja",                     "ansi256": 234, "ansi16": "black" },
-    "vermelho-alerta":  { "hex": "#FF1A1A", "uso": "EXCLUSIVO alerta e queda de conexão",       "ansi256": 196, "ansi16": "red-bold",     "contraste": 5.16 },
-    "vermelho-fraco":   { "hex": "#2C0508", "uso": "preenchimento de alerta",                   "ansi256": 233, "ansi16": "black" },
-    "fosforo":          { "hex": "#6BFFB6", "uso": "telemetria e valores nominais",             "ansi256": 85,  "ansi16": "green-bold",   "contraste": 15.81 },
-    "fosforo-fraco":    { "hex": "#06220F", "uso": "preenchimento nominal",                     "ansi256": 234, "ansi16": "black" },
-    "padrao-azul":      { "hex": "#2F8FE0", "uso": "identidade verificada",                     "ansi256": 32,  "ansi16": "blue-bold",    "contraste": 5.83 },
-    "azul-fraco":       { "hex": "#04182B", "uso": "preenchimento de identidade",               "ansi256": 233, "ansi16": "black" }
+    "negro-absoluto": {
+      "hex": "#000000",
+      "uso": "fundo do app",
+      "ansi256": 16,
+      "ansi16": "black"
+    },
+    "negro-painel": {
+      "hex": "#000000",
+      "uso": "superfície de painel",
+      "ansi256": 16,
+      "ansi16": "black"
+    },
+    "linha": {
+      "hex": "#252525",
+      "uso": "borda 1px padrão",
+      "ansi256": 235,
+      "ansi16": "bright-black"
+    },
+    "linha-forte": {
+      "hex": "#626262",
+      "uso": "painel ativo, réguas, marcas de escala",
+      "ansi256": 241,
+      "ansi16": "bright-black"
+    },
+    "osso": {
+      "hex": "#EAEAEA",
+      "uso": "texto corrido",
+      "ansi256": 255,
+      "ansi16": "white",
+      "contraste": 17.46
+    },
+    "osso-apagado": {
+      "hex": "#B0B0B0",
+      "uso": "rótulo secundário, log inativo",
+      "ansi256": 145,
+      "ansi16": "bright-black",
+      "contraste": 9.68
+    },
+    "laranja-nerv": {
+      "hex": "#F47732",
+      "uso": "acento primário institucional",
+      "ansi256": 166,
+      "ansi16": "yellow-bold",
+      "contraste": 7.53
+    },
+    "laranja-fraco": {
+      "hex": "#331704",
+      "uso": "preenchimento laranja",
+      "ansi256": 234,
+      "ansi16": "black"
+    },
+    "vermelho-alerta": {
+      "hex": "#FF6262",
+      "uso": "EXCLUSIVO alerta e queda de conexão",
+      "ansi256": 203,
+      "ansi16": "red-bold",
+      "contraste": 7.18
+    },
+    "vermelho-fraco": {
+      "hex": "#2F1413",
+      "uso": "preenchimento de alerta",
+      "ansi256": 234,
+      "ansi16": "black"
+    },
+    "fosforo": {
+      "hex": "#6BFFB6",
+      "uso": "telemetria e valores nominais",
+      "ansi256": 85,
+      "ansi16": "green-bold",
+      "contraste": 16.6
+    },
+    "fosforo-fraco": {
+      "hex": "#06220F",
+      "uso": "preenchimento nominal",
+      "ansi256": 234,
+      "ansi16": "black"
+    },
+    "padrao-azul": {
+      "hex": "#2F8FE0",
+      "uso": "identidade verificada",
+      "ansi256": 32,
+      "ansi16": "blue-bold",
+      "contraste": 6.13
+    },
+    "azul-fraco": {
+      "hex": "#04182B",
+      "uso": "preenchimento de identidade",
+      "ansi256": 233,
+      "ansi16": "black"
+    }
   },
   "faixas_sync": [
-    { "min": 90, "rotulo": "nominal",    "cor": "fosforo" },
-    { "min": 70, "rotulo": "aceitável",  "cor": "osso" },
-    { "min": 40, "rotulo": "degradado",  "cor": "laranja-nerv" },
-    { "min": 0,  "rotulo": "crítico",    "cor": "vermelho-alerta" }
+    {
+      "min": 90,
+      "rotulo": "nominal",
+      "cor": "fosforo"
+    },
+    {
+      "min": 70,
+      "rotulo": "aceitável",
+      "cor": "osso"
+    },
+    {
+      "min": 40,
+      "rotulo": "degradado",
+      "cor": "laranja-nerv"
+    },
+    {
+      "min": 0,
+      "rotulo": "crítico",
+      "cor": "vermelho-alerta"
+    }
   ],
   "tipografia": {
-    "display": { "familia": "Saira Condensed", "peso": 700, "caixa": "alta", "tracking": "0.02em", "uso": "cartelas e cabeçalhos" },
-    "mono":    { "familia": "IBM Plex Mono", "uso": "todo dado, endereço, número, log", "tabular": true },
-    "jp":      { "familia": "Noto Sans JP", "peso": 700, "uso": "acento em kanji — nunca informação operacional" },
-    "escala": {
-      "cartela": 56, "titulo": 28, "secao": 18, "corpo": 14,
-      "dado": 13, "rotulo": 10, "micro": 9
+    "display": {
+      "familia": "Saira Condensed",
+      "peso": 700,
+      "caixa": "alta",
+      "tracking": "0.02em",
+      "uso": "cartelas e cabeçalhos"
     },
-    "tracking": { "cartela": "0.02em", "rotulo": "0.22em" }
+    "mono": {
+      "familia": "IBM Plex Mono",
+      "uso": "todo dado, endereço, número, log",
+      "tabular": true
+    },
+    "jp": {
+      "familia": "Noto Sans JP",
+      "peso": 700,
+      "uso": "acento em kanji — nunca informação operacional"
+    },
+    "escala": {
+      "cartela": 56,
+      "titulo": 28,
+      "secao": 18,
+      "corpo": 15,
+      "dado": 14,
+      "rotulo": 12,
+      "micro": 12
+    },
+    "tracking": {
+      "cartela": "0.02em",
+      "rotulo": "0.04em"
+    }
   },
-  "espacamento": { "e1": 8, "e2": 16, "e3": 24, "e4": 32, "e6": 48, "e8": 64 },
-  "borda": { "padrao": 1, "forte": 2, "raio": 0 },
+  "espacamento": {
+    "e1": 8,
+    "e2": 16,
+    "e3": 24,
+    "e4": 32,
+    "e6": 48,
+    "e8": 64
+  },
+  "borda": {
+    "padrao": 1,
+    "forte": 2,
+    "raio": 6
+  },
   "movimento": {
     "respiro-sync": "2400ms ease-in-out infinite",
     "pulso-fala": "derivado de amplitude real",
@@ -61,8 +190,39 @@
     "nao_adotado": "a varredura contínua (seeleVarredura) do protótipo v2 é decoração e contraria specs/07 — ver docs/tokens-achados.md"
   },
   "terminal": {
-    "box": ["│", "─", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼", "╭", "╮"],
-    "barra": ["█", "▓", "▒", "░", "▁", "▂", "▃", "▄", "▅", "▆", "▇"],
-    "enfase": ["cor", "negrito", "inverso", "sublinhado"]
+    "box": [
+      "│",
+      "─",
+      "┌",
+      "┐",
+      "└",
+      "┘",
+      "├",
+      "┤",
+      "┬",
+      "┴",
+      "┼",
+      "╭",
+      "╮"
+    ],
+    "barra": [
+      "█",
+      "▓",
+      "▒",
+      "░",
+      "▁",
+      "▂",
+      "▃",
+      "▄",
+      "▅",
+      "▆",
+      "▇"
+    ],
+    "enfase": [
+      "cor",
+      "negrito",
+      "inverso",
+      "sublinhado"
+    ]
   }
 }

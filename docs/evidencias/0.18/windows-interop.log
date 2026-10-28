@@ -1,0 +1,4 @@
+codes KD3R-XAKC-CYCN-SDBX XJT7-36V5-69R3-PHCG native http://tauri.localhost
+PASS browser -> native code, acceptance, bidirectional text
+PASS synthetic audio bidirectional
+PASS Windows WebView2 <-> Edge: real native IPC, code and accept both directions, text both directions, cleanup reception

@@ -90,7 +90,7 @@ function lacoLocal(outro) {
     enviar(datagrama) {
       const copia = datagrama.slice();
       new DataView(copia.buffer).setUint32(1, outro);
-      queueMicrotask(() => ouvinte && ouvinte(copia));
+      queueMicrotask(() => { if (ouvinte) ouvinte(copia); if (window.bancada?.entregarAoOuvinte) window.bancada.entregarAoOuvinte(copia.slice()); });
       return true;
     },
     ouvir(fn) {
@@ -230,6 +230,28 @@ async function principal() {
     confere("ponta a ponta", fonte1 && fonte1.tocados >= 50, `a alça 1 tocou ${fonte1 && fonte1.tocados} quadros: ${JSON.stringify(c1.reproducao)}`);
     confere("ponta a ponta", c1.reproducao && c1.reproducao.blocosComSom > 0, "a mistura não tocou som nenhum");
     confere("ponta a ponta", p1.falhas.length === 0, `falhas: ${JSON.stringify(p1.falhas)}`);
+
+    // A escuta abre sem getUserMedia; até uma recusa posterior de captura
+    // conserva a saída e continua decodificando os datagramas reais do par.
+    await aba.evaluate(async () => {
+      const { instance } = await WebAssembly.instantiate(window.bancada.bytes, {});
+      window.bancada.ouvinte = criarVozDoNavegador({ wasm: instance.exports, bytesDoWasm: window.bancada.bytes });
+      const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      window.bancada.restaurarCaptura = () => navigator.mediaDevices.getUserMedia = original;
+      window.bancada.pediuCaptura = 0;
+      navigator.mediaDevices.getUserMedia = async () => { window.bancada.pediuCaptura++; throw new DOMException("captura recusada", "NotAllowedError"); };
+      await window.bancada.ouvinte.ligar({ somenteOuvir: true });
+      window.bancada.ouvinte.entrar({ enviar: () => false, ouvir(fn) { window.bancada.entregarAoOuvinte = fn; return () => window.bancada.entregarAoOuvinte = null; } }, 42);
+      await window.bancada.ouvinte.reproducaoPronta();
+    });
+    await esperar(1000);
+    const escutaSemMic = await aba.evaluate(async () => ({ chamadas: window.bancada.pediuCaptura, ...(await window.bancada.ouvinte.contas()) }));
+    confere("escuta sem microfone", escutaSemMic.chamadas === 0 && escutaSemMic.faixa === null && escutaSemMic.reproducao.blocosComSom > 0, JSON.stringify(escutaSemMic));
+    await aba.evaluate(async () => { try { await window.bancada.ouvinte.ligar(); } catch {} });
+    await esperar(1000);
+    const escutaAposRecusa = await aba.evaluate(async () => ({ chamadas: window.bancada.pediuCaptura, ...(await window.bancada.ouvinte.contas()) }));
+    confere("recusar captura preserva escuta", escutaAposRecusa.chamadas === 1 && escutaAposRecusa.contexto === "running" && escutaAposRecusa.pagina.decodificados > escutaSemMic.pagina.decodificados, JSON.stringify(escutaAposRecusa));
+    await aba.evaluate(async () => { window.bancada.restaurarCaptura(); await window.bancada.ouvinte.desligar(); });
 
     // 2. O mudo para o envio; o isolamento cala a saída.
     await aba.evaluate(() => window.bancada.voz.mudo(true));

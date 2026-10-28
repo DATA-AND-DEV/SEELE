@@ -1,0 +1,99 @@
+[
+  {
+    "cena": "inicio",
+    "arquivo": "/Users/dev-alexandre/.codex/worktrees/136e/SEELE/docs/evidencias/visual-0.17.4/mobile-limpo/inicio.png",
+    "viewport": "390x844",
+    "casca": "celular",
+    "erros": [],
+    "semResposta": [
+      "limite_da_mensagem",
+      "tecla_de_falar",
+      "dominios_de_gif",
+      "toques_agora",
+      "meu_servidor",
+      "apis_de_mod_aceitas",
+      "estado_da_primeira_abertura",
+      "sessoes",
+      "ha_ajustes_de_acessibilidade",
+      "atualizacao_que_nao_pegou",
+      "regras_do_icone_do_server",
+      "controles_da_voz"
+    ],
+    "motor": "chromium"
+  },
+  {
+    "cena": "perfil",
+    "arquivo": "/Users/dev-alexandre/.codex/worktrees/136e/SEELE/docs/evidencias/visual-0.17.4/mobile-limpo/perfil.png",
+    "viewport": "390x844",
+    "casca": "celular",
+    "erros": [],
+    "semResposta": [
+      "limite_da_mensagem",
+      "tecla_de_falar",
+      "dominios_de_gif",
+      "toques_agora",
+      "meu_servidor",
+      "apis_de_mod_aceitas",
+      "estado_da_primeira_abertura",
+      "sessoes",
+      "ha_ajustes_de_acessibilidade",
+      "atualizacao_que_nao_pegou",
+      "regras_do_icone_do_server",
+      "controles_da_voz"
+    ],
+    "motor": "chromium"
+  },
+  {
+    "cena": "sessao",
+    "arquivo": "/Users/dev-alexandre/.codex/worktrees/136e/SEELE/docs/evidencias/visual-0.17.4/mobile-limpo/sessao.png",
+    "viewport": "390x844",
+    "casca": "celular",
+    "erros": [],
+    "semResposta": [
+      "limite_da_mensagem",
+      "tecla_de_falar",
+      "dominios_de_gif",
+      "toques_agora",
+      "meu_servidor",
+      "apis_de_mod_aceitas",
+      "estado_da_primeira_abertura",
+      "sessoes",
+      "ha_ajustes_de_acessibilidade",
+      "atualizacao_que_nao_pegou",
+      "regras_do_icone_do_server",
+      "controles_da_voz",
+      "icone_do_server",
+      "membros_fora_do_ar",
+      "imagem_da_pessoa",
+      "onde_estou"
+    ],
+    "motor": "chromium"
+  },
+  {
+    "cena": "chamada",
+    "arquivo": "/Users/dev-alexandre/.codex/worktrees/136e/SEELE/docs/evidencias/visual-0.17.4/mobile-limpo/chamada.png",
+    "viewport": "390x844",
+    "casca": "celular",
+    "erros": [],
+    "semResposta": [
+      "limite_da_mensagem",
+      "tecla_de_falar",
+      "dominios_de_gif",
+      "toques_agora",
+      "meu_servidor",
+      "apis_de_mod_aceitas",
+      "estado_da_primeira_abertura",
+      "sessoes",
+      "ha_ajustes_de_acessibilidade",
+      "atualizacao_que_nao_pegou",
+      "regras_do_icone_do_server",
+      "controles_da_voz",
+      "icone_do_server",
+      "membros_fora_do_ar",
+      "imagem_da_pessoa",
+      "onde_estou",
+      "permissao_de_tela"
+    ],
+    "motor": "chromium"
+  }
+]

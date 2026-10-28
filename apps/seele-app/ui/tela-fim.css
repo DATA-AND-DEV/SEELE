@@ -14,12 +14,12 @@
 .fim-titulo {
   color: var(--seele-vermelho-alerta);
   font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  letter-spacing: var(--seele-tracking-cartela);
-  font-size: 32px;
-  line-height: 32px;
+  font-weight: 500;
+  letter-spacing: .02em;
+  font-size: 28px;
+  line-height: 1.25;
   display: block;
-  margin: 0 0 32px;
+  margin: 0 0 16px;
 }
 
 /* Mesmo tratamento do `.erro` da entrada — `pre-line` e `overflow-wrap:
@@ -34,10 +34,11 @@
    `margin-bottom: 32px` é `margin: 16px 0 32px`, e o vermelho nunca chegava a
    pintar nada. */
 .fim-motivo {
-  margin: 16px 0 32px;
+  margin: 0 0 24px;
   color: var(--seele-osso);
   white-space: pre-line;
   overflow-wrap: anywhere;
+  line-height: 1.6;
 }
 
 /* A saída secundária, embaixo do RECONECTAR e visivelmente menor que ele.
@@ -49,5 +50,10 @@
    de um bloco centraliza pela metade. */
 .fim-sair {
   display: block;
-  margin: 16px 0 0;
+  margin: 12px 0 0;
+  min-height: 40px;
 }
+
+#tela-fim .boot { width: min(480px,calc(100vw - 32px)); padding: 24px; border-radius: var(--seele-raio); }
+
+@media(max-width:700px) { #tela-fim .boot { padding:20px; } #tela-fim button { min-height:44px; } }

@@ -354,6 +354,10 @@ async fn resolver(bilhete: &Bilhete) -> Option<SocketAddr> {
     // Nos testes, antes do DNS: ver [`recusar_a_producao`].
     recusar_a_producao(&bilhete.ponto, "encontro::resolver, a batida, antes do DNS");
     let alvo = bilhete.ponto().ok()?;
+    if seele_proto::uri::ponto_aposentado(alvo.maquina) {
+        tracing::warn!(ponto = %bilhete.ponto, "ponto de encontro descontinuado: atualize SEELE_ENCONTRO; a batida não saiu");
+        return None;
+    }
     let aviso = bilhete.aviso().ok()?;
     let achados: Vec<SocketAddr> = tokio::net::lookup_host((alvo.maquina, alvo.porta))
         .await
@@ -416,6 +420,10 @@ async fn resolver_ponto(ponto: &str) -> Vec<SocketAddr> {
             return Vec::new();
         }
     };
+    if seele_proto::uri::ponto_aposentado(alvo.maquina) {
+        tracing::warn!(ponto, novo = PONTO_PADRAO, "SEELE_ENCONTRO usa domínio descontinuado: atualize a configuração; a pergunta ao quarto não saiu");
+        return Vec::new();
+    }
     match tokio::net::lookup_host((alvo.maquina, alvo.porta)).await {
         Ok(achados) => ordenar_os_achados(ponto, achados.collect()),
         Err(erro) => {

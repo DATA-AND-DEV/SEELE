@@ -6,19 +6,7 @@
 
    Ela ocupa a JANELA INTEIRA: as seções à esquerda, o conteúdo da seção à direita, em grade de cartões que se redistribuem com a largura. Quem
    fica estreito é o parágrafo (a medida de leitura), e não a tela. */
-.camada-server {
-  /* A camada cobre a sessão: não há varredura por cima nem faixa que desça, e o rótulo miúdo sobe para o token da condição limpa — ver
-     `--seele-rotulo-claro` em `tokens.css`, com a medida escrita. */
-  --seele-osso-apagado: var(--seele-rotulo-claro);
-  --seele-rotulo-painel: var(--seele-rotulo-claro);
-  position: fixed;
-  inset: 0;
-  z-index: 24;
-  display: flex;
-  align-items: stretch;
-  justify-content: stretch;
-  padding: 0;
-}
+
 
 .camada-server::before {
   content: "";
@@ -28,15 +16,10 @@
   opacity: 0.78;
 }
 
+
 /* A caixa tem fundo próprio: o véu do `::before` é translúcido, e sem fundo a tela de trás continuava legível através da configuração. A
    altura é a da janela (`height: 100%`), e não uma altura fixa que variasse com o conteúdo de cada seção. */
-.camada-server > .server {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  background: var(--seele-negro-painel);
-  overflow: hidden;
-}
+
 
 /* SEELE — o Terminal Server (`#tela-server`).
    A configuração local: o que é desta máquina e não deste servidor. §8 do comp v3.
@@ -69,12 +52,7 @@
    esta tela decidindo sozinha se a explicação de um controle aparece, e
    `the_note_beside_a_control_is_defined_once_and_never_by_a_screen` reprova. */
 
-.server {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 216px minmax(0, 1fr);
-}
+
 
 /* ---------- a coluna das seções ---------- */
 
@@ -87,6 +65,7 @@
   overflow-y: auto;
 }
 
+
 .server-marca {
   padding: 16px;
   border-bottom: 1px solid var(--seele-linha);
@@ -95,6 +74,7 @@
   gap: 8px;
   flex-shrink: 0;
 }
+
 
 /* `line-height: 1` porque a cartela é 22px numa página de entrelinha 16: sem
    isto a linha da marca cresce e empurra a primeira seção meia célula. */
@@ -108,6 +88,7 @@
   color: var(--seele-laranja-nerv);
 }
 
+
 .server-secoes {
   margin: 0;
   padding: 0;
@@ -115,38 +96,25 @@
   flex-shrink: 0;
 }
 
+
 /* Uma seção. Botão de verdade — e não o `<span>` que esta tela usava quando só
    havia uma —, porque agora as quatro levam a painéis diferentes. */
-.server-secao {
-  width: 100%;
-  min-height: 48px;
-  padding: 6px 16px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  font: inherit;
-  text-align: left;
-  color: var(--seele-osso);
-  background: none;
-  /* A marca laranja da esquerda é o que o comp usa para dizer "esta". Reservada
-     em transparente nas outras para que acender não empurre o texto 2px. */
-  border: none;
-  border-bottom: 1px solid var(--seele-linha);
-  border-left: 2px solid transparent;
-  cursor: pointer;
+
+
+.server-secao:hover {
+  background: var(--seele-negro-absoluto);
 }
 
-.server-secao:hover { background: var(--seele-negro-absoluto); }
-.server-secao:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
+.server-secao:focus-visible {
+  outline: 2px solid var(--seele-osso);
+  outline-offset: -2px;
+}
+
 
 /* A seção aberta. Nunca só pela cor: `aria-current` é o que um leitor de tela
    anuncia, e a barra da esquerda é o que sobra em monocromático —
    `specs/06-clientes-gui.md` proíbe informação transmitida só por cor. */
-.server-secao[aria-current="true"] {
-  border-left-color: var(--seele-laranja-nerv);
-  background: var(--seele-laranja-fraco);
-  color: var(--seele-laranja-nerv);
-}
+
 
 .server-secao-icone {
   flex-shrink: 0;
@@ -155,7 +123,11 @@
   color: var(--seele-osso-apagado);
 }
 
-.server-secao[aria-current="true"] .server-secao-icone { color: var(--seele-laranja-nerv); }
+
+.server-secao[aria-current="true"] .server-secao-icone {
+  color: var(--seele-laranja-nerv);
+}
+
 
 .server-secao-texto {
   min-width: 0;
@@ -164,13 +136,8 @@
   gap: 2px;
 }
 
-.server-secao-nome {
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 15px;
-  line-height: 1;
-  letter-spacing: 0.1em;
-}
+
+
 
 /* Os grupos da coluna — U31.
 
@@ -191,6 +158,7 @@
   letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-laranja-nerv);
 }
+
 
 
 
@@ -216,8 +184,16 @@
   cursor: pointer;
 }
 
-.server-voltar:hover { color: var(--seele-laranja-nerv); }
-.server-voltar:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
+
+.server-voltar:hover {
+  color: var(--seele-laranja-nerv);
+}
+
+.server-voltar:focus-visible {
+  outline: 2px solid var(--seele-osso);
+  outline-offset: -2px;
+}
+
 
 /* ---------- o corpo ---------- */
 
@@ -228,24 +204,13 @@
   flex-direction: column;
 }
 
+
 /* O cabeçalho persistente: voltar, categoria atual e contexto — U33.
 
    `sticky` e não `fixed`: ele pertence ao corpo que rola, e uma barra fixa
    sobre uma camada que já é fixa é um segundo sistema de coordenadas para
    alguém manter em dia. O fundo é opaco porque o conteúdo passa por baixo. */
-.server-faixa {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 12px 24px;
-  border-bottom: 1px solid var(--seele-linha);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-shrink: 0;
-  background: var(--seele-negro-painel);
-  flex-wrap: wrap;
-}
+
 
 .server-faixa-texto {
   display: flex;
@@ -254,6 +219,7 @@
   min-width: 0;
   flex: 1 1 240px;
 }
+
 
 /* A faixa de contexto: onde você está enquanto mexe aqui.
 
@@ -270,6 +236,7 @@
   overflow-wrap: anywhere;
 }
 
+
 /* Onde o comp punha SALVAR, DESCARTAR e «alterações não salvas», esta faixa tem
    título e subtítulo e mais nada. A escolha vale na hora e a tela mostra o que
    está valendo — a lista de microfones diz qual abriu, e não qual foi pedido —,
@@ -285,14 +252,8 @@
   color: var(--seele-osso);
 }
 
-.server-painel {
-  min-height: 0;
-  padding: 24px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
+
+
 
 .server-painel .rotulo {
   display: block;
@@ -305,6 +266,7 @@
   color: var(--seele-osso-apagado);
 }
 
+
 /* O painel de uma seção. Quatro deles, um só visível — `hidden` em `base.css`
    é `display: none !important`, então esconder não deixa a grade com buracos. */
 /* 24px entre blocos virou 16px, e 16px dentro deles virou 12px, depois da
@@ -312,17 +274,13 @@
    painel que exige rolagem para ver dois blocos é um painel em que a segunda
    decisão não existe até alguém procurá-la. A régua continua sendo múltipla de
    quatro, e os alvos de toque não mudaram. */
-.server-painel-secao {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
-  gap: 16px;
-  align-items: start;
-}
+
 
 /* O que não é um bloco (um aviso, um título solto) ocupa a linha inteira; o parágrafo mantém a medida de leitura. */
 .server-painel-secao > :not(.server-bloco) {
   grid-column: 1 / -1;
 }
+
 
 .server-painel-secao p,
 .server-painel .nota,
@@ -330,44 +288,18 @@
   max-width: var(--seele-leitura);
 }
 
+
 /* ---------- um bloco ---------- */
 
-.server-bloco {
-  border: 1px solid var(--seele-linha);
-  display: flex;
-  flex-direction: column;
-}
 
-.server-bloco-topo {
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--seele-linha);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
 
-.server-bloco-nome {
-  margin: 0;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 15px;
-  line-height: 1;
-  letter-spacing: 0.12em;
-  color: var(--seele-laranja-nerv);
-}
 
-.server-bloco-corpo {
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
 
-.server-campo {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+
+
+
+
+
 
 /* ---------- as listas de dispositivo ---------- */
 
@@ -375,14 +307,13 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  /* `gap: 1px` sobre a cor de linha é a técnica de borda do comp: uma régua de
-     1px entre linhas vizinhas sem duas bordas encostando e virando duas. */
   display: flex;
   flex-direction: column;
   gap: 1px;
   background: var(--seele-linha);
   border: 1px solid var(--seele-linha);
 }
+
 
 .server-dispositivo {
   width: 100%;
@@ -400,8 +331,16 @@
   cursor: pointer;
 }
 
-.server-dispositivo:hover:not(:disabled) { background: var(--seele-negro-absoluto); }
-.server-dispositivo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: -2px; }
+
+.server-dispositivo:hover:not(:disabled) {
+  background: var(--seele-negro-absoluto);
+}
+
+.server-dispositivo:focus-visible {
+  outline: 2px solid var(--seele-osso);
+  outline-offset: -2px;
+}
+
 
 /* O escolhido. Nunca só pela cor: o rótulo `EM USO` vem junto, desenhado pelo
    JavaScript, porque `specs/06-clientes-gui.md` proíbe informação transmitida só
@@ -411,7 +350,12 @@
   background: var(--seele-laranja-fraco);
 }
 
-.server-dispositivo-nome { flex: 1; overflow-wrap: anywhere; }
+
+.server-dispositivo-nome {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
 
 .server-dispositivo-marca {
   font-size: 11px;
@@ -419,9 +363,11 @@
   color: var(--seele-osso-apagado);
 }
 
+
 .server-dispositivo[data-escolhido="sim"] .server-dispositivo-marca {
   color: var(--seele-laranja-nerv);
 }
+
 
 /* Nada para escolher. Uma lista vazia não quer dizer "sem microfone" — quer
    dizer que a máquina não quis enumerar —, e a frase que o JavaScript escreve
@@ -432,6 +378,7 @@
   color: var(--seele-osso-apagado);
   background: var(--seele-negro-painel);
 }
+
 
 /* ---------- o medidor de entrada ---------- */
 
@@ -444,16 +391,16 @@
   overflow-wrap: anywhere;
 }
 
+
 /* Sem sessão não há nível, e um medidor apagado não é um medidor em zero. */
-.server-medidor[data-vivo="nao"] { color: var(--seele-osso-apagado); }
+.server-medidor[data-vivo="nao"] {
+  color: var(--seele-osso-apagado);
+}
+
 
 /* ---------- os modos do microfone ---------- */
 
-.server-modos {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
+
 
 .server-modo {
   flex: 1;
@@ -472,14 +419,23 @@
   cursor: pointer;
 }
 
-.server-modo:hover:not(:disabled) { border-color: var(--seele-laranja-nerv); }
-.server-modo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+.server-modo:hover:not(:disabled) {
+  border-color: var(--seele-laranja-nerv);
+}
+
+.server-modo:focus-visible {
+  outline: 2px solid var(--seele-osso);
+  outline-offset: 2px;
+}
+
 
 .server-modo[aria-pressed="true"] {
   border-color: var(--seele-laranja-nerv);
   background: var(--seele-laranja-fraco);
   color: var(--seele-laranja-nerv);
 }
+
 
 .server-modo-nome {
   font-family: var(--seele-display);
@@ -489,13 +445,18 @@
   letter-spacing: 0.1em;
 }
 
+
 .server-modo-desc {
   font-size: 12px;
   line-height: 1.35;
   color: var(--seele-osso-apagado);
 }
 
-.server-modo[aria-pressed="true"] .server-modo-desc { color: var(--seele-laranja-nerv); }
+
+.server-modo[aria-pressed="true"] .server-modo-desc {
+  color: var(--seele-laranja-nerv);
+}
+
 
 /* ---------- o que saiu daqui ----------
 
@@ -510,48 +471,67 @@
 
 .server-atalhos {
   margin: 0;
-  padding: 0;
   list-style: none;
-}
-
-.server-atalho {
-  padding: 12px 16px;
-  border-top: 1px solid var(--seele-linha);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 0 24px 24px;
   gap: 16px;
 }
 
-.server-atalho:first-child { border-top: none; }
+
+.server-atalho {
+  border-top: 1px solid var(--seele-linha);
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--seele-linha);
+  border-radius: var(--seele-raio);
+  align-items: start;
+  gap: 20px;
+}
+
+
+.server-atalho:first-child {
+  border-top: 1px solid var(--seele-linha);
+}
+
 
 .server-atalho-texto {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
 }
 
-.server-atalho-acao { font-size: var(--seele-t-dado); }
+
+.server-atalho-acao {
+  font-size: var(--seele-t-dado);
+}
+
 
 .server-atalho-desc {
-  font-size: 12px;
-  line-height: 1.35;
   color: var(--seele-osso-apagado);
+  font-size: 12px;
+  line-height: 1.6;
 }
+
 
 /* A tecla desenhada como tecla. Contorno e fundo do painel, porque ela é a
    única coisa nesta lista que a pessoa vai procurar com o olho. */
 .server-atalho-tecla {
-  flex-shrink: 0;
-  padding: 8px;
   font-size: 12px;
   letter-spacing: 0.06em;
   white-space: nowrap;
   color: var(--seele-laranja-nerv);
   background: var(--seele-negro-absoluto);
   border: 1px solid var(--seele-linha-forte);
+  flex-shrink: 0;
+  padding: 8px 12px;
+  min-width: 48px;
+  text-align: center;
 }
+
 
 /*
   A tecla que se pode trocar.
@@ -568,9 +548,11 @@
   cursor: pointer;
 }
 
+
 .server-atalho-tecla-troca:hover {
   border-color: var(--seele-laranja-nerv);
 }
+
 
 /*
   Enquanto espera a tecla. Não é só a cor que muda: o rótulo vira «APERTE UMA
@@ -582,18 +564,13 @@
   border-color: var(--seele-laranja-nerv);
 }
 
+
 /* ---------- prosa e pares ---------- */
 
 /* Uma frase que o produto tem para dizer, e que não é o rótulo de controle
    nenhum. `60ch` porque abaixo disso a linha de 13px monoespaçado ainda é uma
    linha que se lê de ponta a ponta sem perder a próxima. */
-.server-frase {
-  margin: 0;
-  max-width: 60ch;
-  font-size: var(--seele-t-dado);
-  line-height: 1.6;
-  color: var(--seele-osso);
-}
+
 
 .server-par {
   display: flex;
@@ -604,11 +581,13 @@
   border-bottom: 1px solid var(--seele-linha);
 }
 
+
 .server-par-valor {
   font-size: var(--seele-t-dado);
   text-align: right;
   overflow-wrap: anywhere;
 }
+
 
 /* ---------- os controles de qualidade de voz (F01, F02) ----------
 
@@ -623,6 +602,7 @@
   color: var(--seele-osso);
 }
 
+
 .server-regua {
   display: flex;
   align-items: center;
@@ -630,11 +610,13 @@
   flex-wrap: wrap;
 }
 
+
 .server-regua input[type="range"] {
   flex: 1 1 160px;
   min-width: 120px;
   accent-color: var(--seele-laranja-nerv);
 }
+
 
 .server-regua-valor {
   font-family: var(--seele-mono);
@@ -643,6 +625,7 @@
   color: var(--seele-fosforo);
   flex: 0 0 auto;
 }
+
 
 /* O medidor: uma barra do nível e uma marca de onde a transmissão abre.
 
@@ -655,6 +638,7 @@
   padding-top: 8px;
 }
 
+
 .server-nivel-barra {
   position: relative;
   height: 14px;
@@ -663,6 +647,7 @@
   overflow: hidden;
 }
 
+
 .server-nivel-preenchido {
   display: block;
   height: 100%;
@@ -670,6 +655,7 @@
   background: var(--seele-osso-apagado);
   transition: width 60ms linear;
 }
+
 
 /* Transmitindo é laranja, e a frase ao lado diz a palavra: quem não distingue as
    duas cores lê `TRANSMITINDO` do mesmo jeito.
@@ -683,6 +669,7 @@
   background: var(--seele-laranja-nerv);
 }
 
+
 .server-nivel-corte {
   position: absolute;
   top: 0;
@@ -690,6 +677,7 @@
   width: 2px;
   background: var(--seele-fosforo);
 }
+
 
 /* ---------- uma lista de itens com uma ação cada ----------
 
@@ -704,6 +692,7 @@
   flex-direction: column;
 }
 
+
 .server-lista-item {
   display: flex;
   align-items: baseline;
@@ -713,11 +702,13 @@
   border-bottom: 1px solid var(--seele-linha);
 }
 
+
 .server-lista-valor {
   font-size: var(--seele-t-dado);
   overflow-wrap: anywhere;
   min-width: 0;
 }
+
 
 .server-lista-acao {
   background: transparent;
@@ -731,11 +722,13 @@
   flex: 0 0 auto;
 }
 
+
 .server-lista-acao:hover,
 .server-lista-acao:focus-visible {
   border-color: var(--seele-laranja-nerv);
   color: var(--seele-laranja-nerv);
 }
+
 
 /* ---------- o que ainda não tem comando atrás ----------
    Um controle desabilitado aqui é a exceção, não a convenção: esta tela omite o
@@ -752,10 +745,12 @@
   cursor: default;
 }
 
+
 .server-dispositivo[title]:disabled,
 .server-modo[title]:disabled {
   cursor: help;
 }
+
 
 /* ---------- atualizar (ADR 0026) ----------
 
@@ -781,6 +776,7 @@
   overflow-wrap: anywhere;
 }
 
+
 /* As notas do release chegam como o autor as escreveu, com as quebras de linha
    dele. `pre-line` é o que as preserva sem virar `<pre>`, que reflui mal numa
    coluna estreita. */
@@ -794,6 +790,7 @@
   overflow-wrap: anywhere;
 }
 
+
 /* O aviso do que instalar custa. Moldura laranja e não vermelha: ele não
    relata falha nenhuma, ele diz o preço de uma ação que ainda não aconteceu. */
 .server-atualizacao-aviso {
@@ -805,6 +802,7 @@
   background: var(--seele-laranja-fraco);
 }
 
+
 .server-atualizacao-aviso p {
   margin: 0;
   max-width: 72ch;
@@ -812,6 +810,7 @@
   line-height: 1.6;
   color: var(--seele-osso);
 }
+
 
 /* A barra de blocos do download, na mesma face e no mesmo desenho das outras
    deste produto. Quando o servidor não diz o total ela vira travessão e ganha
@@ -826,11 +825,13 @@
   overflow-wrap: anywhere;
 }
 
+
 .server-atualizacao-baixados {
   margin: 0;
   font-size: var(--seele-t-dado);
   color: var(--seele-osso);
 }
+
 
 /* ---------- a porta, lá da entrada ----------
    Refina o `.botao-fantasma` de `base.css`, cujo `margin-left: auto` o
@@ -840,6 +841,7 @@
   width: 100%;
   color: var(--seele-osso-apagado);
 }
+
 
 /* ---------- o servidor: nome e imagem ----------
 
@@ -855,12 +857,14 @@
   min-width: 0;
 }
 
+
 /* O nome do servidor cabe em 64 bytes, e uma caixa da largura do painel
    convidaria a escrever um parágrafo. `48ch` é folga sobre o teto sem ser
    convite. */
 .server-nome-campo input {
   max-width: 48ch;
 }
+
 
 /* A moldura do que está valendo. Fica de pé com imagem ou sem, e é isso que a
    faz dizer alguma coisa: um espaço em branco onde a imagem apareceria não
@@ -876,6 +880,7 @@
   border: 1px solid var(--seele-linha-forte);
 }
 
+
 /* `contain` e não `cover`: recortar a imagem de alguém para caber na moldura é
    a tela decidindo o que da imagem importa. O que o servidor aceita já é
    quadrado o bastante — 256px de lado no máximo —, e o que sobra é margem. */
@@ -885,12 +890,14 @@
   object-fit: contain;
 }
 
+
 .server-icone-vazio {
   font-size: var(--seele-t-rotulo);
   letter-spacing: var(--seele-tracking-rotulo);
   color: var(--seele-osso-apagado);
   text-align: center;
 }
+
 
 .server-icone-botoes {
   display: flex;
@@ -899,12 +906,14 @@
   align-items: center;
 }
 
+
 /* `margin-left: 0` porque `.botao-fantasma` de `base.css` traz um
    `margin-left: auto` que o empurraria para a outra ponta da fileira, longe do
    botão de que ele é o par. */
 .server-icone-botoes .botao-fantasma {
   margin-left: 0;
 }
+
 
 /* ---------- a mesma imagem, no cabeçalho da sessão ----------
 
@@ -926,6 +935,7 @@
 }
 
 
+
 /* APARÊNCIA: dois cartões que dizem o que o tema é, e não o alternam.
  *
  * `disabled` e ainda assim desenhados como cartão: eles informam, e um
@@ -941,6 +951,7 @@
   gap: 8px;
 }
 
+
 .aparencia-cartao {
   display: flex;
   flex-direction: column;
@@ -950,16 +961,19 @@
   border: 1px solid var(--seele-linha-forte);
 }
 
+
 /* O que está valendo, marcado pela moldura, pelo nome em laranja **e pela
    palavra** — nunca só pela cor (`06-clientes-gui.md`). */
 .aparencia-cartao[data-valendo="sim"] {
   border-color: var(--seele-laranja-nerv);
 }
 
+
 .aparencia-cartao[data-valendo="sim"] .aparencia-nome,
 .aparencia-cartao[data-valendo="sim"] .aparencia-estado {
   color: var(--seele-laranja-nerv);
 }
+
 
 .aparencia-estado {
   font-size: 9px;
@@ -967,12 +981,14 @@
   color: var(--seele-osso-apagado);
 }
 
+
 .aparencia-nome {
   font-family: var(--seele-display);
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.1em;
 }
+
 
 
 /* Os detalhes sob demanda — U30.
@@ -990,11 +1006,16 @@
   padding: 4px 0;
 }
 
-.server-detalhes > summary:hover { color: var(--seele-laranja-nerv); }
+
+.server-detalhes > summary:hover {
+  color: var(--seele-laranja-nerv);
+}
+
 .server-detalhes > summary:focus-visible {
   outline: 2px solid var(--seele-laranja-nerv);
   outline-offset: 2px;
 }
+
 
 
 /* ---------- o celular e a janela estreita ----------
@@ -1004,8 +1025,417 @@
    - `indice`: o cabeçalho (VOLTAR, que fecha a configuração) e a lista das seções ocupando o resto da altura;
    - `secao`: o cabeçalho (SEÇÕES, que volta ao índice, e VOLTAR) e o painel da seção na área toda.
    Sem JavaScript o painel e a lista aparecem juntos, empilhados, e nada some. */
-.server-so-celular { display: none; }
+.server-so-celular {
+  display: none;
+}
 
+
+
+
+
+/* O foco visível dos controles nativos (a caixa de marcar e a régua): o anel do sistema varia entre motores, e este é o mesmo dos botões da tela. */
+.server-marcar input:focus-visible,
+.server-regua input[type="range"]:focus-visible {
+  outline: 2px solid var(--seele-osso);
+  outline-offset: 2px;
+}
+
+
+/* O teclado aberto sobre um campo de uma seção: o painel ganha folga embaixo, para o campo poder rolar até ficar acima dele. */
+
+
+/* Direção visual 0.17.4 — componente proprietário. */
+.server-frase {
+  margin: 0;
+  max-width: 60ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--seele-osso-apagado);
+}
+
+.server {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+}
+
+.server-painel {
+  min-height: 0;
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  align-items: stretch;
+}
+
+.server-painel-secao {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.server-bloco {
+  border: 1px solid var(--seele-linha);
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+}
+
+.server-bloco-topo {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--seele-linha);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.server-bloco-corpo {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.server-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.server-campo > .rotulo {
+  margin: 0;
+}
+
+
+.server-faixa {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--seele-linha);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+  background: var(--seele-negro-absoluto);
+  flex-wrap: wrap;
+}
+
+.server-secao {
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font: inherit;
+  text-align: left;
+  color: var(--seele-osso);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--seele-linha);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  border-radius: var(--seele-raio);
+}
+
+
+.server-secao .nota {
+  font-size: 12px;
+}
+
+.server-secao[aria-current="true"] {
+  border-left-color: var(--seele-laranja-nerv);
+  background: var(--seele-selected);
+  color: var(--seele-laranja-nerv);
+}
+
+
+
+.camada-server {
+  --seele-osso-apagado: var(--seele-rotulo-claro);
+  --seele-rotulo-painel: var(--seele-rotulo-claro);
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+  flex-direction: column;
+  background: var(--seele-negro-absoluto);
+}
+
+.camada-server > .server {
+  position: relative;
+  width: 100%;
+  height: auto;
+  background: var(--seele-negro-painel);
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.server-dispositivo[data-escolhido="sim"], .server-modo[aria-pressed="true"] {
+  background: var(--seele-selected);
+}
+
+.server-modos {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.server-secao-nome {
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.server-bloco-nome {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 1.3;
+  letter-spacing: .02em;
+  color: var(--seele-osso);
+}
+
+.server-painel-secao > * {
+  min-width: 0;
+}
+
+.server-painel-secao:not(#painel-audio) .server-bloco {
+  border-color: var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  overflow: hidden;
+  width: 100%;
+}
+
+.server-painel-secao:not(#painel-audio) .server-bloco-topo {
+  gap: 8px;
+  padding: 20px 24px;
+}
+
+.server-painel-secao:not(#painel-audio) .server-bloco-corpo {
+  gap: 20px;
+}
+
+.server-painel-secao:not(#painel-audio) .server-bloco-nome {
+  font-size: 26px;
+  letter-spacing: 0;
+}
+
+.server-painel-secao:not(#painel-audio) .nota,
+.server-painel-secao:not(#painel-audio) .server-frase {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.server-painel-secao:not(#painel-audio) .rotulo {
+  font-size: 11px;
+  letter-spacing: .04em;
+}
+
+.server-painel-secao:not(#painel-audio) .botao-fantasma {
+  min-height: 40px;
+}
+
+#painel-atalhos {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#painel-aparencia > .nota {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+#painel-aparencia .aparencia-lista {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+#painel-aparencia .aparencia-cartao {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+}
+
+#painel-aparencia .aparencia-nome {
+  font-family:var(--seele-display); font-weight:500; font-size:26px; line-height:1.2;
+  letter-spacing: 0;
+}
+
+#painel-aparencia .aparencia-estado {
+  margin-top: auto;
+  padding: 6px 10px;
+  border: 1px solid currentColor;
+  border-radius: var(--seele-raio);
+}
+
+#painel-identidade .server-par {
+  align-items: start;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#painel-identidade .server-lista-item {
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 0;
+}
+
+#painel-identidade .server-lista-valor {
+  overflow-wrap: anywhere;
+}
+
+#painel-versoes, #painel-atualizacao {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#painel-versoes .server-dispositivos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+  max-height: none;
+}
+
+#painel-versoes .server-dispositivo {
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  flex-wrap: wrap;
+  padding: 16px;
+}
+
+#painel-versoes #versoes-baixar {
+  align-self: start;
+  max-width: 100%;
+  white-space: normal;
+}
+
+#painel-atualizacao #atualizacao-achado {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+#painel-atualizacao #atualizacao-instalar {
+  justify-self: start;
+  white-space: normal;
+}
+
+#painel-atualizacao .server-atualizacao-aviso {
+  margin: 0;
+  padding: 20px;
+  border: 1px solid var(--seele-laranja-nerv);
+  border-radius: var(--seele-raio);
+}
+
+#painel-atualizacao #atualizacao-travessia {
+  grid-column: 1 / -1;
+}
+
+#painel-atualizacao #atualizacao-andamento {
+  grid-column: 1 / -1;
+}
+
+#painel-malha .server-dispositivo {
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+}
+
+#painel-malha > #malha-estado {
+  grid-column: 1 / -1;
+}
+
+#painel-porta .porta-linha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+#painel-porta .porta-linha > .rotulo {
+  flex-basis: 100%;
+}
+
+#painel-porta .convite-link {
+  min-width: 0;
+  flex: 1 1 220px;
+  width: 100%;
+}
+
+#painel-porta .porta-linha > button {
+  margin: 0;
+  flex: 0 1 auto;
+  white-space: normal;
+}
+
+#painel-porta #portaria-abrir {
+  align-self: start;
+  margin: 0;
+  padding-inline: 20px;
+}
+
+#painel-servidor .server-nome-campo {
+  width: 100%;
+  max-width: none;
+}
+
+#painel-servidor .server-nome-campo input {
+  width: 100%;
+  max-width: none;
+}
+
+#painel-servidor .server-icone-botoes {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+#painel-mods {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#painel-mods > .mods-tiras {
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+}
+
+#painel-mods .mods-painel {
+  min-width: 0;
+  width: 100%;
+}
+
+#painel-malha .mods-id {
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* Condições de composição, após os valores padrão. */
+
+
+/* Condições de composição, após os valores padrão do componente. */
 @media (max-width: 700px) {
   .server {
     grid-template-columns: minmax(0, 1fr);
@@ -1044,14 +1474,46 @@
 }
 
 
-/* O foco visível dos controles nativos (a caixa de marcar e a régua): o anel do sistema varia entre motores, e este é o mesmo dos botões da tela. */
-.server-marcar input:focus-visible,
-.server-regua input[type="range"]:focus-visible {
-  outline: 2px solid var(--seele-osso);
-  outline-offset: 2px;
-}
-
-/* O teclado aberto sobre um campo de uma seção: o painel ganha folga embaixo, para o campo poder rolar até ficar acima dele. */
 @media (max-width: 700px), (max-height: 500px) {
   html[data-teclado] .server-painel { padding-bottom: 55vh; }
+}
+
+
+@media (min-width: 701px) and (max-width: 1000px) {
+.server-painel-secao { grid-template-columns: minmax(0, 1fr); }
+}
+
+
+@media (max-width: 700px) {
+.server-painel-secao { grid-template-columns: minmax(0, 1fr); }
+.server-painel { padding: 16px; }
+.server-bloco-corpo { padding: 16px; }
+.server-faixa { padding: 12px 16px; }
+}
+
+
+@media(max-width: 700px) {
+.server-modos { grid-template-columns: minmax(0, 1fr); }
+}
+
+
+@media (max-width: 700px) {
+.server-modos { display: grid; min-width: 0; }
+.server-modo { min-width: 0; }
+}
+
+@media (max-width: 1000px) {
+  .server-atalhos { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 700px) {
+  .server-painel-secao:not(#painel-audio) .server-bloco-topo,
+  .server-painel-secao:not(#painel-audio) .server-bloco-corpo { padding: 16px; }
+  .server-atalhos { padding: 0 16px 16px; gap: 12px; }
+  .server-atalho { padding: 16px; gap: 12px; flex-wrap: wrap; }
+  #painel-aparencia .aparencia-lista,
+  #painel-atualizacao #atualizacao-achado { grid-template-columns: minmax(0, 1fr); }
+  #painel-porta .porta-linha > button { min-height: 44px; flex: 1 1 100%; }
+  #painel-porta .porta-linha > input { flex-basis: 100%; }
+  #painel-servidor .server-icone-botoes > button { white-space: normal; min-height: 44px; }
 }

@@ -1,0 +1,18 @@
+{
+    "scope":  "only interop test profile prefixes and exact process identities",
+    "native_cdp_closed":  true,
+    "profiles_removed":  [
+                             "edge-018-interop-20261028-171919",
+                             "edge-018-interop-20261028-172031",
+                             "primeira-abertura-018-interop-20261028-171934",
+                             "primeira-abertura-018-interop-20261028-172313",
+                             "primeira-abertura-018-interop-20261028-172453",
+                             "primeira-abertura-018-interop-20261028-172819"
+                         ],
+    "edge_tasks_removed":  [
+                               "seele-018-interop-edge-20261028-172032"
+                           ],
+    "edge_cdp_closed":  true,
+    "status":  "PASS",
+    "edge_processes_closed":  10
+}

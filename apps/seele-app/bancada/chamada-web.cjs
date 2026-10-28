@@ -5,6 +5,7 @@ const path = require('node:path');
 const http = require('node:http');
 const {spawn} = require('node:child_process');
 const engines = require('./playwright.cjs');
+const {origemDoProduto} = require('./origem-do-produto.cjs');
 const raiz = path.resolve(__dirname, '../../..');
 const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unknown-unknown/release/seele_web.wasm');
 (async()=>{
@@ -31,7 +32,7 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unk
       const bytes=await(await fetch('/wasm')).arrayBuffer();
       const {instance}=await WebAssembly.instantiate(bytes,{});
       window.estados=[];window.textos=[];window.pares=[];
-      window.servico=await criarServicoDeChamadasWeb({wasm:instance.exports,urlDoEncontro:'http://127.0.0.1:19885/chamada/1',iceServers:[],
+      window.servico=await criarServicoDeChamadasWeb({wasm:instance.exports,urlDoEncontro:'http://127.0.0.1:19885/chamada/1',origemDosLinks:location.origin,iceServers:[],
        aoEstado:e=>estados.push(e),aoTexto:e=>textos.push(e),aoPar:p=>{pares.push(!!p);window.ultimoPar=p;}});
      });
     }
@@ -72,8 +73,48 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unk
     assert.equal(criptografia.recusas,criptografia.esperadas);
     console.log(JSON.stringify({motor,criptografia}));
     const link=await a.evaluate(async()=> (await servico.criarConvite({apelido:'Receptor'})).link);
-    await b.evaluate(link=>servico.abrirConvite(link),link);
+    const origens = await b.evaluate(link => {
+      const url = new URL(link), recusas = [];
+      const origem = servico.operar({acao:'configuracao'}).origem_dos_links;
+      const hostNovo = new URL(origem).hostname;
+      for (const host of ['seele.app.br', 'web.seele.app.br', 'outra.seele.app.br.', `${hostNovo}.exemplo.invalid`, 'seele.app.br.exemplo.invalid']) {
+        try { servico.abrirConvite(`https://${host}/${url.hash}`); recusas.push({host, aceitou:true}); }
+        catch (e) { recusas.push({host, marcada:e.origemDoConviteInvalida === true, aposentado:e.message.includes('aposentado')}); }
+      }
+      for (const candidata of [origem.replace('https:','http:'), `${origem}:444`, 'javascript:alert(1)']) {
+        try { servico.abrirConvite(candidata + '/' + url.hash); recusas.push({host:candidata, aceitou:true}); }
+        catch (e) { recusas.push({host:candidata, marcada:e.origemDoConviteInvalida === true}); }
+      }
+      for(const relativo of ['seele.app.br/'+url.hash, '/'+url.hash, '//web.seele.app.br/'+url.hash]) {
+        let recusou=false;try{servico.abrirConvite(relativo);}catch{recusou=true;}
+        if(!recusou)throw Error('URL relativa aceita: '+relativo);
+      }
+      for(const endereco of [`${origem}@outra.invalid/`+url.hash, url.origin.replace('://','://outra@')+'/'+url.hash]) {
+        let recusou=false;try{servico.abrirConvite(endereco);}catch(e){recusou=e.origemDoConviteInvalida === true;}
+        if(!recusou)throw Error('URL com credenciais aceita');
+      }
+      servico.abrirConvite(url.hash); // Fragmento inicial local.
+      servico.abrirConvite(link); // A origem local explicitamente configurada.
+      return recusas;
+    }, link);
+    const origemNova=await b.evaluate(async ({link,origem})=>{
+      // Sem overrides: a origem padrão precisa vir do WASM, embora a página seja local.
+      const novo=await criarServicoDeChamadasWeb({wasm:servico.wasm});
+      try {
+        const fragmento=new URL(link).hash;
+        const resultado=novo.abrirConvite(origem+'/'+fragmento);
+        novo.abrirConvite(fragmento);
+        try{novo.abrirConvite(origem+':444/'+fragmento);return false;}catch(e){return !!resultado.dono && e.origemDoConviteInvalida === true;}
+      } finally {novo.destruir();}
+    },{link,origem:origemDoProduto});
+    assert.equal(origemNova,true);
+    assert.equal(origens.length,8);
+    assert.ok(origens.every(r=>r.marcada && !r.aceitou));
+    assert.ok(origens.slice(0,3).every(r=>r.aposentado));
+    assert.ok(origens.slice(3,5).every(r=>!r.aposentado));
+    console.log(JSON.stringify({motor,origensDoConvite:'PASS'}));
     assert.equal(await b.evaluate(()=>servico.ler().estado),'livre');
+    if(process.argv.includes('--so-origem')){await contexto.close();continue;}
     await b.evaluate(()=>servico.chamar({apelido:'Visitante'}));
     await a.waitForFunction(()=>servico.ler().estado==='tocando',{timeout:12000});
     assert.equal(await b.evaluate(()=>pares.includes(true)),false);

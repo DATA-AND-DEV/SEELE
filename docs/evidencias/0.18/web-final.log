@@ -1,0 +1,37 @@
+   Compiling seele-proto v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-proto)
+   Compiling seele-voz v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-voz)
+   Compiling seele-video v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-video)
+   Compiling seele-enlace v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-enlace)
+   Compiling seele-sessao v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-sessao)
+   Compiling seele-audio v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-audio)
+   Compiling seele-app v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/apps/seele-app)
+   Compiling seele-core v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-core)
+   Compiling seele-ffi v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-ffi)
+   Compiling seele-server v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-server)
+   Compiling seele-motor v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-motor)
+   Compiling seele-lancador v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-lancador)
+   Compiling seele-encontro v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-encontro)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 51.40s
+     Running tests/web.rs (target/debug/deps/web-5c9fda3d5f3769ad)
+guarda ok: 15 artefatos locais, todos desta fonte
+
+running 16 tests
+test a_csp_do_iframe_nao_deixa_conectar_a_nada ... ok
+test o_hash_da_csp_do_iframe_e_o_do_script_dele ... ok
+test as_regras_da_voz_da_ponte_sao_as_do_desktop ... ok
+test a_escada_do_icone_da_ponte_e_a_do_desktop ... ok
+test a_base_pede_o_executor_do_lugar_sem_saber_qual ... ok
+test as_regras_do_arquivo_da_ponte_sao_as_do_desktop ... ok
+test as_constantes_da_ponte_sao_as_do_desktop ... ok
+test a_ponte_e_o_primeiro_script_do_head_e_le_a_casca_uma_vez ... ok
+test so_a_ponte_le_o_tauri_para_saber_o_lugar ... ok
+test a_pagina_nao_escreve_outra_origem ... ok
+test todo_comando_que_a_casca_chama_esta_na_ponte_nas_duas_cascas ... ok
+test o_iframe_dos_executores_nunca_tem_a_origem_da_pagina ... ok
+test nenhum_html_cru_na_casca ... ok
+test os_cabecalhos_da_origem_sao_um_so ... ok
+test todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo ... ok
+test a_origem_do_web_app_e_escrita_num_lugar_so ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s
+

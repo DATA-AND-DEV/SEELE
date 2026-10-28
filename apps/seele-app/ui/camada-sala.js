@@ -13,13 +13,23 @@
 // escondido, e o perfil é o de sempre. As ações do bloco valem na hora, sem o
 // SALVAR, que é do apelido: por isso ele mora depois do formulário.
 //
-// **O navegador não tem sala.** Toda peça daqui leva `data-sala-pessoal`, e
-// toda chamada aceita a recusa da ponte do navegador sem estourar.
+// Na 0.17.4 o navegador usa identidade persistente e serviço pessoal. As peças
+// `data-sala-pessoal` conservam os mesmos IDs e estados nas duas plataformas.
 
 "use strict";
 
 /** O último estado da sala que chegou, ou `null` antes do primeiro. */
 let estadoDaSala = null;
+// A sala física/QUIC e o atendimento direto conservam estados separados.
+let estadoDaSalaDireta = null;
+function estadoDoCodigoPessoal() {
+  return estadoDaSalaDireta?.estado === "NoAr" && estadoDaSalaDireta.registro?.registro === "Registrado"
+    ? estadoDaSalaDireta : estadoDaSala;
+}
+document.addEventListener("seele:estado-pessoal-direto", ({ detail }) => {
+  estadoDaSalaDireta = detail;
+  desenharEstadoDaSala();
+});
 
 /**
  * A regra nasceu por este botão: a frase de sucesso e o botão escondido valem
@@ -32,15 +42,18 @@ let regraDoFirewallCriada = false;
 /** Escreve a frase da sala onde a pessoa está, ou esconde. */
 function desenharEstadoDaSala() {
   const frase = fraseDaSala(estadoDaSala);
+  const codigoEstado = estadoDoCodigoPessoal();
+  const recebeDireto = codigoEstado === estadoDaSalaDireta && codigoEstado?.estado === "NoAr";
   for (const id of ["boot-sala-estado", "sala-estado", "perfil-sala-estado"]) {
     const linha = $(id);
-    linha.textContent = frase ?? "";
-    linha.hidden = !frase;
+    const dizer = recebeDireto ? (id === "perfil-sala-estado" ? fraseDoCodigo(codigoEstado) : null) : frase;
+    linha.textContent = dizer ?? "";
+    linha.hidden = !dizer;
   }
   // O bloco da entrada: diz a verdade da sala em todo estado.
-  $("boot-codigo-estado").textContent = fraseDoCodigo(estadoDaSala);
+  $("boot-codigo-estado").textContent = fraseDoCodigo(estadoDoCodigoPessoal());
   $("boot-codigo").dataset.recebe =
-    estadoDaSala?.estado === "NoAr" && estadoDaSala.registro?.registro === "Registrado"
+    codigoEstado?.estado === "NoAr" && codigoEstado.registro?.registro === "Registrado"
       ? "sim"
       : "nao";
 
@@ -271,7 +284,8 @@ async function desenharAmigos() {
   $("boot-amigos-vazia").textContent = SALA_PESSOAL.amigos.vazia;
   $("boot-amigos-vazia").hidden = amigos.length > 0;
   $("boot-amigos-nota").textContent = amigos.length > 0 ? SALA_PESSOAL.amigos.tirarDiz : "";
-  $("boot-amigos-detalhe").hidden = amigos.length === 0;
+  $("boot-amigos-detalhe").hidden = amigos.length === 0 || !SALA_PESSOAL.amigos.tirarDiz;
+  $("boot-amigos-nota").hidden = !SALA_PESSOAL.amigos.tirarDiz;
   bloco.hidden = false;
 }
 
@@ -350,7 +364,7 @@ async function desenharCodigoNaEntrada() {
   }
   $("boot-codigo-valor").value = codigo ?? "";
   $("boot-codigo").hidden = !codigo;
-  if (codigo) $("boot-codigo-estado").textContent = fraseDoCodigo(estadoDaSala);
+  if (codigo) $("boot-codigo-estado").textContent = fraseDoCodigo(estadoDoCodigoPessoal());
 }
 
 $("boot-copiar-codigo").addEventListener("click", () => {

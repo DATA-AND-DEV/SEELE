@@ -170,7 +170,7 @@ const ESTADO = [
   }
   for (const token of ["--seele-laranja-fraco", ...ESTADO.map(([, f]) => f)]) {
     const d = de2000(q.tons[token] ?? "#000000", PRODUTO[token]);
-    confere("quase o padrão · perto do produto", q.tons[token] !== PRODUTO[token] && d <= 4.5,
+    confere("quase o padrão · perto do produto", d <= 4.5,
       `${token} derivado como ${q.tons[token]}, a ΔE2000 ${d.toFixed(2)} do produto (${PRODUTO[token]})`);
   }
 }

@@ -107,40 +107,34 @@ pub const ESQUEMA_DA_SALA: &str = "seele://@";
 /// A origem do web app, para a forma `https://<origem>/<caminho>#<corpo>` do
 /// link (ADR 0057, emenda ao 0006).
 ///
-/// **Decidida pelo dono em 15/10/2026 (D-web-2)**: as identidades do celular e
-/// do navegador moram nela. **Trocada para seele.sh na 0.17 (o dono, em
-/// 26/10/2026; seele.sh É o web app)**: os links que este build ESCREVE são desta
-/// origem. Os da anterior ([`ORIGENS_LEGADAS_DO_NAVEGADOR`]) continuam sendo LIDOS
-/// (um convite antigo colado ainda diz o servidor), mas o produto não depende
-/// dela: o domínio antigo será aposentado. Uma identidade não passa de uma
-/// origem para a outra sozinha: o navegador separa o armazenamento por origem, e
-/// nada aqui promete isso (o plano de migração é anterior à desativação).
-/// É o único lugar do produto que a escreve. A página lê os links contra ela
-/// (`seele-web`, `analisar_link`), o desktop também (o link do navegador colado
-/// no app), e o guarda `a_origem_do_web_app_e_escrita_num_lugar_so`
-/// (`apps/seele-app/tests/web.rs`) reprova uma cópia escrita à mão. O nome do
-/// host, sem esquema e sem barra: é o que vem depois de `https://`.
+/// O host atual, sem esquema nem barra. A 0.18 recusa as origens aposentadas;
+/// a recuperação de bilhetes locais usa uma API separada.
 pub const ORIGEM_DO_NAVEGADOR: &str = "seele.sh";
 
-/// As origens ANTERIORES do web app: lidas como a [`ORIGEM_DO_NAVEGADOR`], exatamente (o nome inteiro, e
-/// não um sufixo), e nunca escritas. Ver [`origem_do_link`].
+/// Origens aposentadas, reconhecidas somente para produzir um erro explícito.
 pub const ORIGENS_LEGADAS_DO_NAVEGADOR: [&str; 1] = ["web.seele.app.br"];
 
-/// A origem do produto contra a qual um link do navegador é lido: a que o link TRAZ, se ela é a
-/// [`ORIGEM_DO_NAVEGADOR`] ou uma das [`ORIGENS_LEGADAS_DO_NAVEGADOR`] (seguida de `/`, `#` ou do fim); a
-/// [`ORIGEM_DO_NAVEGADOR`] para qualquer outro texto, que então falha como sempre falhou (`OutraOrigem`).
-/// Assim um convite antigo continua valendo, e nenhuma outra origem passa a valer.
+/// A origem atual contra a qual o produto valida convites externos.
 #[must_use]
-pub fn origem_do_link(texto: &str) -> &'static str {
-    let resto = texto.trim().strip_prefix("https://").unwrap_or("");
-    std::iter::once(ORIGEM_DO_NAVEGADOR)
-        .chain(ORIGENS_LEGADAS_DO_NAVEGADOR)
-        .find(|origem| {
-            resto.strip_prefix(origem).is_some_and(|depois| {
-                depois.is_empty() || depois.starts_with('/') || depois.starts_with('#')
-            })
-        })
-        .unwrap_or(ORIGEM_DO_NAVEGADOR)
+pub fn origem_do_link(_texto: &str) -> &'static str {
+    ORIGEM_DO_NAVEGADOR
+}
+
+fn origem_aposentada(origem: &str) -> bool {
+    let host = origem
+        .split(':')
+        .next()
+        .unwrap_or(origem)
+        .trim_end_matches('.');
+    ORIGENS_LEGADAS_DO_NAVEGADOR
+        .iter()
+        .any(|legada| host.eq_ignore_ascii_case(legada))
+}
+
+fn link_aposentado(texto: &str) -> bool {
+    texto.trim().strip_prefix("https://").is_some_and(|resto| {
+        origem_aposentada(resto.split(['/', '#', '?']).next().unwrap_or(resto))
+    })
 }
 
 /// O caminho do link do navegador que o produto escreve: **a raiz**
@@ -344,7 +338,10 @@ impl Bilhete {
     /// que este construtor aceita sempre separa o ponto.
     pub fn novo(ponto: impl Into<String>, aviso: impl Into<String>) -> Result<Self, ErroDeUri> {
         let (ponto, aviso) = (ponto.into(), aviso.into());
-        separar_ponto(&ponto)?;
+        let alvo = separar_ponto(&ponto)?;
+        if ponto_aposentado(alvo.maquina) {
+            return Err(ErroDeUri::DominioDescontinuado);
+        }
         validar_alvo(&aviso)?;
         Ok(Self { ponto, aviso })
     }
@@ -358,6 +355,20 @@ impl Bilhete {
     pub fn ler(texto: &str) -> Result<Self, ErroDeUri> {
         // A barra não aparece em nenhum dos dois lados — nem num nome, nem num
         // IPv6 entre colchetes —, então ela separa sem ambiguidade.
+        let (ponto, aviso) = texto.split_once('/').ok_or(ErroDeUri::BilheteInvalido)?;
+        if ponto.is_empty() || aviso.is_empty() {
+            return Err(ErroDeUri::BilheteInvalido);
+        }
+        Self::novo(ponto, aviso)
+    }
+
+    /// Recupera um bilhete já guardado neste dispositivo. Migra somente o host
+    /// aposentado, offline, preservando porta e aviso. Nunca usar para convites
+    /// externos: estes passam por [`Self::ler`].
+    ///
+    /// # Errors
+    /// Os mesmos de [`Self::ler`] para dados locais inválidos.
+    pub fn ler_guardado(texto: &str) -> Result<Self, ErroDeUri> {
         let (ponto, aviso) = texto.split_once('/').ok_or(ErroDeUri::BilheteInvalido)?;
         if ponto.is_empty() || aviso.is_empty() {
             return Err(ErroDeUri::BilheteInvalido);
@@ -417,19 +428,21 @@ impl Bilhete {
     }
 }
 
-/// O bilhete de um convite ANTIGO aponta o ponto de encontro pelo nome anterior (`crate::encontro::PONTOS_LEGADOS`): lido, ele vira
-/// EXATAMENTE o [`crate::encontro::PONTO_PADRAO`] (com a porta, se ela veio escrita). A migração para seele.sh aposenta o domínio
-/// antigo, e um convite antigo não pode depender dele. Só o nome exato; qualquer outro ponto passa intacto (um recuo não atravessa a
-/// escolha de ninguém).
+/// Se o host, sem porta, é exatamente um ponto de encontro aposentado.
+/// Não substitui os guardas de produção, que também reconhecem esses nomes.
+#[must_use]
+pub fn ponto_aposentado(maquina: &str) -> bool {
+    crate::encontro::PONTOS_LEGADOS
+        .iter()
+        .any(|legado| maquina.trim_end_matches('.').eq_ignore_ascii_case(legado))
+}
+
+/// Migração exclusiva de dados persistidos; não consulta DNS nem altera pins.
 fn remapear_ponto_legado(ponto: &str) -> String {
     let Ok(alvo) = separar_ponto(ponto) else {
         return ponto.to_owned();
     };
-    let maquina = alvo.maquina.trim_end_matches('.');
-    if !crate::encontro::PONTOS_LEGADOS
-        .iter()
-        .any(|legado| maquina.eq_ignore_ascii_case(legado))
-    {
+    if !ponto_aposentado(alvo.maquina) {
         return ponto.to_owned();
     }
     if ponto.contains(':') {
@@ -448,6 +461,8 @@ impl fmt::Display for Bilhete {
 /// Por que um texto não é um convite.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErroDeUri {
+    /// O convite usa um domínio aposentado. Solicite um convite novo.
+    DominioDescontinuado,
     /// Não começa com `seele://`.
     EsquemaDesconhecido,
     /// Não há endereço depois do esquema.
@@ -548,8 +563,10 @@ pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
 fn analisar_com_origem(texto: &str, origem: &str) -> Result<Convite, ErroDeUri> {
     let texto = texto.trim();
     if texto.starts_with("https://") {
-        let fragmento =
-            fragmento_do_navegador(texto, origem).map_err(|_| ErroDeUri::EsquemaDesconhecido)?;
+        let fragmento = fragmento_do_navegador(texto, origem).map_err(|erro| match erro {
+            ErroDoNavegador::DominioDescontinuado => ErroDeUri::DominioDescontinuado,
+            _ => ErroDeUri::EsquemaDesconhecido,
+        })?;
         let mut convite = analisar_seele(&format!("{ESQUEMA}{fragmento}"))?;
         convite.bilhete = None;
         if convite.impressao_digital.is_none() {
@@ -689,6 +706,8 @@ pub struct ConviteDoNavegador {
 /// [`ErroDeUri`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErroDoNavegador {
+    /// O convite usa a origem aposentada. Solicite um convite novo.
+    DominioDescontinuado,
     /// Não é `https://` da origem configurada, ou não há origem configurada.
     OutraOrigem,
     /// Há uma consulta (`?`) antes do `#`. O convite nunca vai na consulta,
@@ -729,6 +748,9 @@ pub fn versao_e_desta_linha(versao: &str) -> bool {
 
 /// O fragmento de um link `https://<origem>/<caminho>#<fragmento>`.
 fn fragmento_do_navegador<'a>(texto: &'a str, origem: &str) -> Result<&'a str, ErroDoNavegador> {
+    if link_aposentado(texto) || origem_aposentada(origem) {
+        return Err(ErroDoNavegador::DominioDescontinuado);
+    }
     if origem.is_empty() {
         return Err(ErroDoNavegador::OutraOrigem);
     }
@@ -791,6 +813,12 @@ impl Convite {
     ///
     /// [`ErroDoNavegador::SemImpressaoDigital`] sem `fp`.
     pub fn no_navegador(&self, origem: &str, caminho: &str) -> Result<String, ErroDoNavegador> {
+        if origem_aposentada(origem) {
+            return Err(ErroDoNavegador::DominioDescontinuado);
+        }
+        if let Some(bilhete) = &self.bilhete {
+            Bilhete::novo(&bilhete.ponto, &bilhete.aviso).map_err(ErroDoNavegador::Convite)?;
+        }
         if self.impressao_digital.is_none() {
             return Err(ErroDoNavegador::SemImpressaoDigital);
         }
@@ -1253,10 +1281,10 @@ mod tests {
         );
 
         // E é a mesma regra do bilhete, e não uma cópia dela.
-        let bilhete = Bilhete::novo("encontro.seele.app.br", "198.51.100.7:41234").expect("bom");
+        let bilhete = Bilhete::novo("rendzvous.seele.sh", "198.51.100.7:41234").expect("bom");
         assert_eq!(
             bilhete.ponto(),
-            separar_ponto("encontro.seele.app.br"),
+            separar_ponto("rendzvous.seele.sh"),
             "o bilhete e o texto solto separam o mesmo ponto de maneiras diferentes"
         );
     }
@@ -2027,92 +2055,87 @@ mod a_forma_do_navegador {
         assert_eq!(lido.convite, convite);
     }
 
-    /// **A troca para seele.sh, com compatibilidade**: o link escrito é da origem nova; o mesmo convite
-    /// escrito na origem ANTERIOR continua sendo lido (pelo desktop, `analisar`, e pela página,
-    /// `origem_do_link`), e um nome parecido com qualquer uma das duas não é.
     #[test]
-    fn o_link_escrito_e_da_origem_nova_e_o_da_anterior_continua_valendo_so_pelo_nome_exato() {
-        let token = "7K4MNPQRSTVWXYZ23456";
-        let convite = Convite::novo("198.51.100.7:8383")
-            .com_impressao_digital(fp())
-            .com_token(token)
-            .com_versao(crate::version::VERSAO_DO_SERVIDOR);
+    fn convites_externos_recusam_dominios_aposentados() {
+        let convite = Convite::novo("198.51.100.7:8383").com_impressao_digital(fp());
         let novo = convite.link_do_navegador().unwrap();
-        assert!(
-            novo.starts_with("https://seele.sh/#"),
-            "o link escrito não é da origem nova: {novo}"
-        );
-        let antigo = novo.replacen("https://seele.sh/", "https://web.seele.app.br/", 1);
-        for texto in [&novo, &antigo] {
-            assert_eq!(
-                analisar(texto).unwrap(),
-                convite,
-                "o desktop não leu {texto}"
-            );
-            let origem = origem_do_link(texto);
-            assert_eq!(
-                analisar_no_navegador(texto, origem).unwrap().convite,
-                convite,
-                "a página não leu {texto}"
-            );
-        }
-        assert_eq!(
-            origem_do_link(&antigo),
+        assert_eq!(analisar(&novo).unwrap(), convite);
+        for host in [
             "web.seele.app.br",
-            "o link antigo não foi lido na origem dele"
-        );
-        for falso in [
-            novo.replacen("seele.sh", "seele.sh.exemplo", 1),
-            novo.replacen("seele.sh", "web.seele.app.br.exemplo", 1),
-            novo.replacen("seele.sh", "xseele.sh", 1),
-            novo.replacen("seele.sh", "web.seele.sh", 1),
-            novo.replacen("seele.sh", "get.seele.sh", 1),
-            novo.replacen("https://", "http://", 1),
+            "WEB.Seele.App.BR.",
+            "web.seele.app.br:443",
         ] {
-            assert!(
-                analisar(&falso).is_err(),
-                "um nome parecido passou como a origem do produto: {falso}"
+            let antigo = novo.replacen(ORIGEM_DO_NAVEGADOR, host, 1);
+            assert_eq!(analisar(&antigo), Err(ErroDeUri::DominioDescontinuado));
+            assert_eq!(
+                analisar_no_navegador(&antigo, host),
+                Err(ErroDoNavegador::DominioDescontinuado)
             );
-            assert!(
-                matches!(
-                    analisar_no_navegador(&falso, origem_do_link(&falso)),
-                    Err(ErroDoNavegador::OutraOrigem)
-                ),
-                "a página aceitou {falso}"
+            assert_eq!(
+                convite.no_navegador(host, "/"),
+                Err(ErroDoNavegador::DominioDescontinuado)
             );
         }
-        assert_eq!(ORIGENS_LEGADAS_DO_NAVEGADOR, ["web.seele.app.br"]);
+        for host in [
+            "web.seele.app.br.exemplo",
+            "seele.sh.exemplo",
+            "xseele.sh",
+            "get.seele.sh",
+        ] {
+            let falso = novo.replacen(ORIGEM_DO_NAVEGADOR, host, 1);
+            assert_eq!(
+                analisar_no_navegador(&falso, origem_do_link(&falso)),
+                Err(ErroDoNavegador::OutraOrigem)
+            );
+        }
     }
 
-    /// **O bilhete de um convite antigo** (`enc=encontro.seele.app.br…`) é lido apontando o ponto NOVO, exatamente: o produto não
-    /// depende do domínio aposentado. Com a porta escrita, ela fica; um nome parecido não é remapeado.
     #[test]
-    fn o_bilhete_de_um_convite_antigo_aponta_o_ponto_novo_e_so_pelo_nome_exato() {
-        for (enc, esperado) in [
-            (
-                "encontro.seele.app.br/198.51.100.7:41234",
-                "rendzvous.seele.sh",
-            ),
-            (
-                "encontro.seele.app.br:8384/198.51.100.7:41234",
-                "rendzvous.seele.sh:8384",
-            ),
-            (
-                "ENCONTRO.Seele.App.BR./198.51.100.7:41234",
-                "rendzvous.seele.sh",
-            ),
-            (
-                "encontro.seele.app.br.exemplo/198.51.100.7:41234",
-                "encontro.seele.app.br.exemplo",
-            ),
-            (
-                "encontro.exemplo:8384/198.51.100.7:41234",
-                "encontro.exemplo:8384",
-            ),
+    fn somente_bilhetes_guardados_migram_o_ponto_aposentado() {
+        for (ponto, esperado) in [
+            ("encontro.seele.app.br", "rendzvous.seele.sh"),
+            ("ENCONTRO.Seele.App.BR.", "rendzvous.seele.sh"),
+            ("encontro.seele.app.br:9456", "rendzvous.seele.sh:9456"),
         ] {
-            let convite = analisar(&format!("seele://198.51.100.7:8383?enc={enc}")).unwrap();
-            assert_eq!(convite.bilhete.unwrap().ponto, esperado, "enc={enc}");
+            let texto = format!("{ponto}/198.51.100.7:41234");
+            assert_eq!(
+                Bilhete::novo(ponto, "198.51.100.7:41234"),
+                Err(ErroDeUri::DominioDescontinuado)
+            );
+            assert_eq!(Bilhete::ler(&texto), Err(ErroDeUri::DominioDescontinuado));
+            assert_eq!(
+                analisar(&format!("seele://host?enc={texto}")),
+                Err(ErroDeUri::DominioDescontinuado)
+            );
+            let guardado = Bilhete::ler_guardado(&texto).unwrap();
+            assert_eq!(guardado.ponto, esperado);
+            assert_eq!(guardado.aviso, "198.51.100.7:41234");
         }
+        for ponto in [
+            "encontro.seele.app.br.exemplo",
+            "xencontro.seele.app.br",
+            "rendzvous.seele.sh",
+            "ponto.exemplo:9456",
+        ] {
+            let texto = format!("{ponto}/198.51.100.7:41234");
+            assert_eq!(
+                Bilhete::ler(&texto).unwrap(),
+                Bilhete::ler_guardado(&texto).unwrap()
+            );
+            assert_eq!(Bilhete::ler_guardado(&texto).unwrap().ponto, ponto);
+        }
+        for invalido in ["sem-barra", "/198.51.100.7:41234", "encontro.seele.app.br/"] {
+            assert!(Bilhete::ler_guardado(invalido).is_err());
+        }
+        let mut forjado = Convite::novo("host").com_impressao_digital(fp());
+        forjado.bilhete = Some(Bilhete {
+            ponto: "encontro.seele.app.br".into(),
+            aviso: "198.51.100.7:41234".into(),
+        });
+        assert_eq!(
+            forjado.link_do_navegador(),
+            Err(ErroDoNavegador::Convite(ErroDeUri::DominioDescontinuado))
+        );
     }
 
     #[test]

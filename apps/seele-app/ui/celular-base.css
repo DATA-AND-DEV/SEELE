@@ -69,13 +69,7 @@
   overflow: hidden;
 }
 
-/* **A sala pessoal** (F7): a faixa do toque, a linha da sala na entrada e na
-   sessão, e o SEU CÓDIGO com a agenda no perfil. O navegador não tem sala que
-   atenda, e toda peça com `data-sala-pessoal` fica fora, mesmo que o script
-   dela a mostre; o SÓ NO APP DO SEELE diz onde receber ligações. */
-:root[data-casca="celular"] [data-sala-pessoal] {
-  display: none;
-}
+/* Código pessoal e agenda também estão disponíveis no navegador (0.17.4). */
 
 /* A altura que o navegador mostra, e não a de trás da barra dele: `100vh` num
    celular é a página com a barra do navegador recolhida, e o pé ficaria

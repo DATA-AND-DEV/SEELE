@@ -148,11 +148,6 @@
     return h("li", {}, botao);
   }
 
-  const valores = Object.entries(PALAVRAS.medidas).map(([id, rotulo]) => [id, rotulo, h("span", { class: "cel-medida-valor" })]);
-  const conexao = secaoNova("cel-secao-conexao", PALAVRAS.conexao, PALAVRAS.conexaoSub, "linhas",
-    h("dl", { class: "cel-medidas" }, valores.map(([, rotulo, valor]) =>
-      h("div", { class: "cel-medida" }, h("dt", { class: "rotulo", text: rotulo }), h("dd", {}, valor)))));
-
   const fora = secaoNova("cel-secao-fora", PALAVRAS.foraDoCelular, PALAVRAS.foraDoCelularSub, "desligar",
     PALAVRAS.grupos.map(([grupo, itens]) => h("section", { class: "cel-fora-grupo" },
       h("h3", { class: "rotulo", text: grupo }),
@@ -189,7 +184,6 @@
   }
   pelaTela.hidden = guardada() === null;
   const comoAbre = secaoNova("cel-secao-casca", PALAVRAS.comoAbre, PALAVRAS.comoAbreSub, "atualizar",
-    h("p", { class: "cel-folha-nota", text: PALAVRAS.abriuComoCelular }),
     h("div", { class: "cel-folha-acoes" },
       h("button", { class: "botao", type: "button", "data-casca-escolhida": "larga", onclick: () => escolherCasca("larga") },
         PALAVRAS.abrirComoComputador),
@@ -218,7 +212,6 @@
     doDesktop("secao-aparencia"),
     doDesktop("secao-servidor"),
     doDesktop("secao-mods"),
-    conexao,
     doDesktop("secao-identidade"),
     fora,
     comoAbre,
@@ -256,13 +249,11 @@
 
   const tecla = document.getElementById("server-modo-tecla");
   tecla.querySelector(".server-modo-nome").textContent = PALAVRAS.segurarParaFalar;
-  tecla.querySelector(".server-modo-desc").textContent = PALAVRAS.segurarNota;
 
   CASCA.depoisDeDesenhar.push((snapshot) => {
     apelido.textContent = document.getElementById("operador-nome").textContent;
     iniciais.textContent = document.getElementById("operador-inicial").textContent;
     vestirCapa(placa, snapshot.me);
-    for (const [id, , valor] of valores) valor.textContent = document.getElementById(id)?.textContent ?? "";
   });
 })();
 
@@ -281,18 +272,7 @@
   const sessao = document.getElementById("tela-sessao");
   if (!sessao || typeof FRASES_AVISOS_DO_CELULAR === "undefined") return;
   const f = FRASES_AVISOS_DO_CELULAR;
-  const ids = ["veredito", "aviso-fone", "aviso-audio", "cel-aviso-persistencia"];
-  const faixa = document.createElement("button");
-  faixa.type = "button";
-  faixa.id = "cel-avisos-faixa";
-  faixa.className = "cel-avisos-faixa botao-fantasma";
-  faixa.hidden = true;
-  faixa.setAttribute("aria-controls", ids.join(" "));
-  faixa.setAttribute("aria-expanded", "false");
-  sessao.append(faixa);
-
-  const ativo = (e) => e && !e.hidden && e.textContent.trim() !== "";
-  const principal = (e) => e.id === "veredito" || (e.id === "cel-aviso-persistencia" && e.dataset.resposta && e.dataset.resposta !== "concedida");
+  const ids = ["veredito", "aviso-audio", "cel-aviso-persistencia"];
 
   // A IMPRESSÃO DIGITAL nunca inteira no painel principal: no aviso do veredito ela vira «começo…fim», e o botão «ver inteira» (no próprio aviso,
   // com aria-expanded e aria-controls) a mostra e a oculta. O texto do produto não muda; só a apresentação.
@@ -366,28 +346,16 @@
   // DOMContentLoaded (pwa-curto-11, tela branca). Os registros da PRÓPRIA faixa são ignorados, e cada escrita só acontece
   // quando o valor muda.
   function organizar(registros) {
-    if (Array.isArray(registros) && registros.length && registros.every((r) => r.target === faixa || faixa.contains(r.target))) return;
     impressaoNoAviso();
-    const vivos = ids.map((id) => document.getElementById(id)).filter(ativo);
-    const aberto = sessao.dataset.avisos === "aberto";
-    for (const e of ids.map((id) => document.getElementById(id))) {
-      if (e) e.classList.toggle("cel-aviso-recolhido", vivos.includes(e) && !principal(e) && !aberto);
+    for (const id of ids) {
+      const e = document.getElementById(id);
+      if (!e) continue;
+      if (id === "cel-aviso-persistencia" && e.dataset.resposta === "concedida" && !e.hidden) e.hidden = true;
+      e.classList.remove("cel-aviso-recolhido");
     }
-    // A faixa existe enquanto houver aviso: fechada, cada um que protege é uma linha e os que informam somem atrás dela; aberta, todos inteiros.
-    const esconder = vivos.length === 0;
-    if (faixa.hidden !== esconder) faixa.hidden = esconder;
-    if (!esconder) {
-      const texto = `${f.faixa(vivos.length)} · ${aberto ? f.fechar : f.abrir}`;
-      if (faixa.textContent !== texto) faixa.textContent = texto;
-      if (faixa.getAttribute("aria-expanded") !== String(aberto)) faixa.setAttribute("aria-expanded", String(aberto));
-    }
-    if (esconder && "avisos" in sessao.dataset) delete sessao.dataset.avisos;
+
   }
 
-  faixa.addEventListener("click", () => {
-    sessao.dataset.avisos = sessao.dataset.avisos === "aberto" ? "fechado" : "aberto";
-    organizar(null);
-  });
   new MutationObserver(organizar).observe(sessao, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "data-resposta"], characterData: true });
   organizar(null);
 })();

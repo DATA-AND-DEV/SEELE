@@ -286,27 +286,11 @@ function desenharPalco(snapshot, voice_room) {
     palco.dataset.transmitindo = "nao";
     $("palco-razao").textContent = "";
     $("palco-quem").textContent = snapshot
-      ? "NINGUÉM ESTÁ COMPARTILHANDO A TELA"
+      ? "SEM COMPARTILHAMENTO"
       : "SEM SESSÃO";
     const nota = $("palco-nota");
-    // Fora de uma sala de voz não há para quem compartilhar, e a frase que
-    // manda apertar um botão desabilitado é pior que nenhuma. Sem o controle
-    // desenhado, mandar apertar um botão que não existe é pior ainda.
-    nota.hidden = !voice_room;
-    nota.textContent = temControleDeTela()
-      // **A orientação aponta para onde o botão está** — U28.
-      //
-      // «O estado vazio diz "Use COMPARTILHAR, aqui em cima", mas o botão está
-      // na base da coluna esquerda.» A frase foi escrita quando o botão ficava
-      // no cabeçalho, e ficou quando ele mudou de lugar: uma instrução que
-      // aponta para o canto errado é pior que nenhuma, porque quem a segue
-      // conclui que o botão não existe.
-      //
-      // O botão de verdade fica ao lado desta frase agora — ver `palco-vazio`
-      // em `index.html` —, e por isso ela deixa de descrever um caminho.
-      ? "Nada está sendo transmitido nesta sala."
-      // A do navegador diz que é o navegador (caso 12, WebKit).
-      : porQueNaoHaTela() ?? "Esta versão não sabe compartilhar tela desta máquina. A de outra pessoa apareceria aqui.";
+    nota.hidden = true;
+    nota.textContent = "";
     // O botão fica ao lado da frase, e só onde ele tem o que fazer: numa sala,
     // e com o controle de tela disponível nesta máquina.
     $("palco-compartilhar").hidden = !voice_room || !temControleDeTela();
@@ -324,10 +308,10 @@ function desenharPalco(snapshot, voice_room) {
   // alguém está, e não um nome que esta janela inventaria.
   const dono = voice_room ? voice_room.people.find((pessoa) => pessoa.id === tela.de) : null;
   $("palco-quem").textContent = tela.e_minha
-    ? "VOCÊ ESTÁ COMPARTILHANDO A SUA TELA"
+    ? "SUA TELA"
     : dono
-      ? `${apelidoApresentado(dono.id, dono.nickname)} ESTÁ COMPARTILHANDO A TELA`
-      : "ALGUÉM DESTA SALA ESTÁ COMPARTILHANDO A TELA";
+      ? `${apelidoApresentado(dono.id, dono.nickname)} · TELA`
+      : "ALGUÉM DESTA SALA · TELA";
 
   // Só a contagem, e ela é a do **servidor**: `ScreenViewers` conta assinaturas
   // de verdade. A resolução saiu daqui junto com as três caixas de métrica — ela
@@ -343,10 +327,8 @@ function desenharPalco(snapshot, voice_room) {
   // explicar: o que ela vê é o espelho do que saiu, e não a própria tela sendo
   // redesenhada — a diferença aparece quando um quadro é descartado pelo teto.
   const nota = $("palco-nota");
-  nota.hidden = false;
-  nota.textContent = tela.e_minha
-    ? "Esta é a imagem que está saindo daqui — a mesma que a sala recebe."
-    : "Duplo clique na imagem para vê-la em tela cheia.";
+  nota.hidden = true;
+  nota.textContent = "";
 
   // O motivo de uma parada chega como **nome** (`TelaEmCurso::parada`), e a
   // frase é escrita aqui, como a de todo enum deste produto. O `??` cobre um
@@ -453,6 +435,7 @@ function desenharBarraDaChamada(snapshot, voice_room) {
   // discordam. O rótulo na marcação diz `EM SESSÃO` justamente porque é isto
   // que ele está contando.
   const tempo = $("chamada-duracao");
+  if (!tempo) return;
   if (comecoDaSessao === null) {
     naoMedido(tempo, "esta janela ainda não desenhou um quadro desta sessão");
   } else {

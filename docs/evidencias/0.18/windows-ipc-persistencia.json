@@ -1,0 +1,22 @@
+﻿{
+    "reopened_same_profile":  true,
+    "source_manifest_sha256":  "ce1b386d905602ccd13107f0a36a7331952ba3ce9376c403325b86a855e15cdf",
+    "profile":  "C:\\s17v1025\\perfis\\primeira-abertura-018-20261028-163745",
+    "logs":  [
+                 "C:\\s17v1025\\perfis\\primeira-abertura-018-20261028-163745\\primeira-abertura-20261028-163746.log",
+                 "C:\\s17v1025\\perfis\\primeira-abertura-018-20261028-163745\\primeira-abertura-20261028-163842.log"
+             ],
+    "exe_sha256":  "fc7fe0c76e3931519e91b477a23d4c08dd457478c6bd86a41701b0daf625cf72",
+    "receiving":  false,
+    "scope":  "native DOM/WASM/IPC identity persistence/bounds; no interop claim",
+    "identity":  {
+                     "status":  "PASS018_IDENTIDADE",
+                     "codigo":  "NN3Q-1VF1-G6H2-K365",
+                     "publica_sha256":  "ad4770ede181a2298cd21b0dff9f81066e4e09033d71a3961ddd67d66a8c2248",
+                     "receber":  false,
+                     "encontro_producao_recursos":  0
+                 },
+    "ipc_real":  true,
+    "receiving_disabled_before_first_launch":  true,
+    "status":  "PASS"
+}

@@ -1,0 +1,1804 @@
+{
+  "concluido": true,
+  "segundosDeEnsaio": 900,
+  "amostras": [
+    {
+      "engine": "webkit",
+      "decorridoMs": 4,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 81,
+            "semEntrada": 2,
+            "noPortao": 81,
+            "codificados": 67,
+            "semCarimbo": 0,
+            "enviados": 67,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 24,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 24,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 40,
+            "semEntrada": 0,
+            "noPortao": 40,
+            "codificados": 25,
+            "semCarimbo": 0,
+            "enviados": 25,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 66,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 66,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 30129,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 1587,
+            "semEntrada": 2,
+            "noPortao": 1587,
+            "codificados": 1573,
+            "semCarimbo": 0,
+            "enviados": 1573,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 1531,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 1531,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 1546,
+            "semEntrada": 0,
+            "noPortao": 1546,
+            "codificados": 1531,
+            "semCarimbo": 0,
+            "enviados": 1531,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 1573,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 1573,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 60228,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 3092,
+            "semEntrada": 2,
+            "noPortao": 3092,
+            "codificados": 3078,
+            "semCarimbo": 0,
+            "enviados": 3078,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 3036,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 3036,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 3051,
+            "semEntrada": 0,
+            "noPortao": 3051,
+            "codificados": 3036,
+            "semCarimbo": 0,
+            "enviados": 3036,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 3078,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 3078,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 90363,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 4598,
+            "semEntrada": 2,
+            "noPortao": 4598,
+            "codificados": 4584,
+            "semCarimbo": 0,
+            "enviados": 4584,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 4542,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 4542,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 4557,
+            "semEntrada": 0,
+            "noPortao": 4557,
+            "codificados": 4542,
+            "semCarimbo": 0,
+            "enviados": 4542,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 4584,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 4584,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 120475,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 6104,
+            "semEntrada": 2,
+            "noPortao": 6104,
+            "codificados": 6090,
+            "semCarimbo": 0,
+            "enviados": 6090,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 6048,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 6048,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 6063,
+            "semEntrada": 0,
+            "noPortao": 6063,
+            "codificados": 6048,
+            "semCarimbo": 0,
+            "enviados": 6048,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 6090,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 6090,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 150601,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 7610,
+            "semEntrada": 2,
+            "noPortao": 7610,
+            "codificados": 7596,
+            "semCarimbo": 0,
+            "enviados": 7596,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 7554,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 7554,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 7569,
+            "semEntrada": 0,
+            "noPortao": 7569,
+            "codificados": 7554,
+            "semCarimbo": 0,
+            "enviados": 7554,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 7596,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 7596,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 180874,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 9124,
+            "semEntrada": 2,
+            "noPortao": 9124,
+            "codificados": 9110,
+            "semCarimbo": 0,
+            "enviados": 9110,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 9068,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 9068,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 9083,
+            "semEntrada": 0,
+            "noPortao": 9083,
+            "codificados": 9068,
+            "semCarimbo": 0,
+            "enviados": 9068,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 9110,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 9110,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 211062,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 10634,
+            "semEntrada": 2,
+            "noPortao": 10634,
+            "codificados": 10620,
+            "semCarimbo": 0,
+            "enviados": 10620,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 10577,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 10577,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 10592,
+            "semEntrada": 0,
+            "noPortao": 10592,
+            "codificados": 10577,
+            "semCarimbo": 0,
+            "enviados": 10577,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 10620,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 10620,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 241197,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 12140,
+            "semEntrada": 2,
+            "noPortao": 12140,
+            "codificados": 12126,
+            "semCarimbo": 0,
+            "enviados": 12126,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 12084,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 12084,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 12099,
+            "semEntrada": 0,
+            "noPortao": 12099,
+            "codificados": 12084,
+            "semCarimbo": 0,
+            "enviados": 12084,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 12126,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 12126,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 271314,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 13646,
+            "semEntrada": 2,
+            "noPortao": 13646,
+            "codificados": 13632,
+            "semCarimbo": 0,
+            "enviados": 13632,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 13590,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 13590,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 13605,
+            "semEntrada": 0,
+            "noPortao": 13605,
+            "codificados": 13590,
+            "semCarimbo": 0,
+            "enviados": 13590,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 13632,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 13632,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 301432,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 15152,
+            "semEntrada": 2,
+            "noPortao": 15152,
+            "codificados": 15138,
+            "semCarimbo": 0,
+            "enviados": 15138,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 15096,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 15096,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 15111,
+            "semEntrada": 0,
+            "noPortao": 15111,
+            "codificados": 15096,
+            "semCarimbo": 0,
+            "enviados": 15096,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 15138,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 15138,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 331560,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 16658,
+            "semEntrada": 2,
+            "noPortao": 16658,
+            "codificados": 16644,
+            "semCarimbo": 0,
+            "enviados": 16644,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 16602,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 16602,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 16617,
+            "semEntrada": 0,
+            "noPortao": 16617,
+            "codificados": 16602,
+            "semCarimbo": 0,
+            "enviados": 16602,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 16643,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 16643,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 361781,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 18169,
+            "semEntrada": 2,
+            "noPortao": 18169,
+            "codificados": 18155,
+            "semCarimbo": 0,
+            "enviados": 18155,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 18113,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 18113,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 18128,
+            "semEntrada": 0,
+            "noPortao": 18128,
+            "codificados": 18113,
+            "semCarimbo": 0,
+            "enviados": 18113,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 18155,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 18155,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 391906,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 19675,
+            "semEntrada": 2,
+            "noPortao": 19675,
+            "codificados": 19661,
+            "semCarimbo": 0,
+            "enviados": 19661,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 19619,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 19619,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 19634,
+            "semEntrada": 0,
+            "noPortao": 19634,
+            "codificados": 19619,
+            "semCarimbo": 0,
+            "enviados": 19619,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 19661,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 19661,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 422163,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 21187,
+            "semEntrada": 2,
+            "noPortao": 21187,
+            "codificados": 21173,
+            "semCarimbo": 0,
+            "enviados": 21173,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 21131,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 21131,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 21146,
+            "semEntrada": 0,
+            "noPortao": 21146,
+            "codificados": 21131,
+            "semCarimbo": 0,
+            "enviados": 21131,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 21173,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 21173,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 452293,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 22694,
+            "semEntrada": 2,
+            "noPortao": 22694,
+            "codificados": 22680,
+            "semCarimbo": 0,
+            "enviados": 22680,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 22637,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 22637,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 22652,
+            "semEntrada": 0,
+            "noPortao": 22652,
+            "codificados": 22637,
+            "semCarimbo": 0,
+            "enviados": 22637,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 22680,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 22680,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 482401,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 24199,
+            "semEntrada": 2,
+            "noPortao": 24199,
+            "codificados": 24185,
+            "semCarimbo": 0,
+            "enviados": 24185,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 24143,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 24143,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 24158,
+            "semEntrada": 0,
+            "noPortao": 24158,
+            "codificados": 24143,
+            "semCarimbo": 0,
+            "enviados": 24143,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 24185,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 24185,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 512527,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 25705,
+            "semEntrada": 2,
+            "noPortao": 25705,
+            "codificados": 25691,
+            "semCarimbo": 0,
+            "enviados": 25691,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 25649,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 25649,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 25664,
+            "semEntrada": 0,
+            "noPortao": 25664,
+            "codificados": 25649,
+            "semCarimbo": 0,
+            "enviados": 25649,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 25691,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 25691,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 542764,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 27217,
+            "semEntrada": 2,
+            "noPortao": 27217,
+            "codificados": 27203,
+            "semCarimbo": 0,
+            "enviados": 27203,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 27160,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 27160,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 27175,
+            "semEntrada": 0,
+            "noPortao": 27175,
+            "codificados": 27160,
+            "semCarimbo": 0,
+            "enviados": 27160,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 27203,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 27203,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 572884,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 28723,
+            "semEntrada": 2,
+            "noPortao": 28723,
+            "codificados": 28709,
+            "semCarimbo": 0,
+            "enviados": 28709,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 28666,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 28666,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 28681,
+            "semEntrada": 0,
+            "noPortao": 28681,
+            "codificados": 28666,
+            "semCarimbo": 0,
+            "enviados": 28666,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 28709,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 28708,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 603027,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 30230,
+            "semEntrada": 2,
+            "noPortao": 30230,
+            "codificados": 30216,
+            "semCarimbo": 0,
+            "enviados": 30216,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 30173,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 30173,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 30188,
+            "semEntrada": 0,
+            "noPortao": 30188,
+            "codificados": 30173,
+            "semCarimbo": 0,
+            "enviados": 30173,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 30216,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 30216,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 633139,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 31735,
+            "semEntrada": 2,
+            "noPortao": 31735,
+            "codificados": 31721,
+            "semCarimbo": 0,
+            "enviados": 31721,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 31679,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 31679,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 31694,
+            "semEntrada": 0,
+            "noPortao": 31694,
+            "codificados": 31679,
+            "semCarimbo": 0,
+            "enviados": 31679,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 31721,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 31721,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 663298,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 33243,
+            "semEntrada": 2,
+            "noPortao": 33243,
+            "codificados": 33229,
+            "semCarimbo": 0,
+            "enviados": 33229,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 33187,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 33185,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 33202,
+            "semEntrada": 0,
+            "noPortao": 33202,
+            "codificados": 33187,
+            "semCarimbo": 0,
+            "enviados": 33187,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 33229,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 33228,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 693568,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 34756,
+            "semEntrada": 2,
+            "noPortao": 34756,
+            "codificados": 34742,
+            "semCarimbo": 0,
+            "enviados": 34742,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 34700,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 34700,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 34715,
+            "semEntrada": 0,
+            "noPortao": 34715,
+            "codificados": 34700,
+            "semCarimbo": 0,
+            "enviados": 34700,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 34742,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 34742,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 723818,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 36269,
+            "semEntrada": 2,
+            "noPortao": 36269,
+            "codificados": 36255,
+            "semCarimbo": 0,
+            "enviados": 36255,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 36213,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 36213,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 36228,
+            "semEntrada": 0,
+            "noPortao": 36228,
+            "codificados": 36213,
+            "semCarimbo": 0,
+            "enviados": 36213,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 36255,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 36255,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 753978,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 37777,
+            "semEntrada": 2,
+            "noPortao": 37777,
+            "codificados": 37763,
+            "semCarimbo": 0,
+            "enviados": 37763,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 37721,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 37721,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 37736,
+            "semEntrada": 0,
+            "noPortao": 37736,
+            "codificados": 37721,
+            "semCarimbo": 0,
+            "enviados": 37721,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 37763,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 37763,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 784120,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 39284,
+            "semEntrada": 2,
+            "noPortao": 39284,
+            "codificados": 39270,
+            "semCarimbo": 0,
+            "enviados": 39270,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 39227,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 39227,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 39243,
+            "semEntrada": 0,
+            "noPortao": 39243,
+            "codificados": 39228,
+            "semCarimbo": 0,
+            "enviados": 39228,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 39270,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 39270,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 814380,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 40797,
+            "semEntrada": 2,
+            "noPortao": 40797,
+            "codificados": 40783,
+            "semCarimbo": 0,
+            "enviados": 40783,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 40741,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 40741,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 40756,
+            "semEntrada": 0,
+            "noPortao": 40756,
+            "codificados": 40741,
+            "semCarimbo": 0,
+            "enviados": 40741,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 40783,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 40783,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 844495,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 42303,
+            "semEntrada": 2,
+            "noPortao": 42303,
+            "codificados": 42289,
+            "semCarimbo": 0,
+            "enviados": 42289,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 42247,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 42247,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 42262,
+            "semEntrada": 0,
+            "noPortao": 42262,
+            "codificados": 42247,
+            "semCarimbo": 0,
+            "enviados": 42247,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 42289,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 42289,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 874648,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 43811,
+            "semEntrada": 2,
+            "noPortao": 43811,
+            "codificados": 43797,
+            "semCarimbo": 0,
+            "enviados": 43797,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 43754,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 43754,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 43769,
+            "semEntrada": 0,
+            "noPortao": 43769,
+            "codificados": 43754,
+            "semCarimbo": 0,
+            "enviados": 43754,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 43796,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 43796,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    },
+    {
+      "engine": "webkit",
+      "decorridoMs": 900178,
+      "medidas": [
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 45087,
+            "semEntrada": 2,
+            "noPortao": 45087,
+            "codificados": 45073,
+            "semCarimbo": 0,
+            "enviados": 45073,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 45031,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 45031,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        },
+        {
+          "estado": "dentro",
+          "contas": {
+            "capturados": 45046,
+            "semEntrada": 0,
+            "noPortao": 45046,
+            "codificados": 45031,
+            "semCarimbo": 0,
+            "enviados": 45031,
+            "recusadosPeloTransporte": 0,
+            "dtx": 0,
+            "chegados": 45073,
+            "daPropriaVoz": 0,
+            "tortos": 0,
+            "decodificados": 45073,
+            "semCabecalho": 0,
+            "esquecidas": 0,
+            "falhas": [],
+            "decodificadoresAbertos": 1,
+            "noCodificador": 0
+          },
+          "faixas": [
+            "live"
+          ],
+          "falhas": []
+        }
+      ]
+    }
+  ]
+}

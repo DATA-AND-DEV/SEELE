@@ -1,0 +1,16 @@
+ponto de encontro atendendo em 0.0.0.0:0
+ponto de encontro atendendo em [::]:0
+sinal do navegador atendendo em http://127.0.0.1:19886/sinal/1 (origens: http://127.0.0.1:64104)
+
+AssertionError [ERR_ASSERTION]: clique cedo foi recusado durante preparo do convite
+
+true !== false
+
+    at /Users/dev-alexandre/.codex/worktrees/136e/SEELE/apps/seele-app/bancada/pessoal-web-integrada.cjs:145:18 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: true,
+  expected: false,
+  operator: 'strictEqual',
+  diff: 'simple'
+}

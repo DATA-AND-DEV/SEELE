@@ -24,8 +24,9 @@
   inset: 0;
   z-index: 75;
   display: flex;
-  align-items: stretch;
-  justify-content: stretch;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
 }
 
 .camada-cargos::before {
@@ -46,12 +47,14 @@
   flex-direction: column;
   box-sizing: border-box;
   width: 100%;
-  height: 100%;
+  height: min(860px, calc(100dvh - 48px));
   padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
   padding-bottom: env(safe-area-inset-bottom);
-  border: 0;
+  border: 1px solid var(--seele-linha-forte);
   background: var(--seele-negro-absoluto);
   overflow: hidden;
+  max-width: 1120px;
+  border-radius: var(--seele-raio);
 }
 
 .cargos-cabeca {
@@ -59,18 +62,21 @@
   align-items: baseline;
   flex-wrap: wrap;
   gap: 8px 16px;
-  padding: 12px 20px;
-  background: var(--seele-laranja-nerv);
-  color: var(--seele-negro-absoluto);
+  padding: 16px 24px;
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  min-height: 64px;
+  border-bottom: 1px solid var(--seele-linha);
+  flex: 0 0 auto;
 }
 
 .cargos-titulo {
   margin: 0;
   font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: 0.12em;
+  font-weight: 500;
+  font-size: 28px;
+  line-height: 1.25;
+  letter-spacing: .02em;
 }
 
 .cargos-servidor {
@@ -82,36 +88,45 @@
 .cargos-fechar {
   margin-left: auto;
   font: inherit;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
+  font-family: var(--seele-mono);
+  font-weight: 500;
   font-size: 14px;
-  letter-spacing: 0.16em;
-  padding: 6px 12px;
-  color: var(--seele-negro-absoluto);
-  background: none;
-  border: var(--seele-b-forte) solid var(--seele-negro-absoluto);
+  letter-spacing: 0;
+  padding: 8px 12px;
+  color: var(--seele-osso-apagado);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
   cursor: pointer;
+  min-height: 40px;
+  border-radius: var(--seele-raio);
 }
 
-.cargos-fechar:focus-visible { outline: 2px solid var(--seele-negro-absoluto); outline-offset: 2px; }
+.cargos-fechar:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 3px;
+}
 
 /* ---------- a regra, sempre à vista ----------
    Três frases curtas no alto de toda aba: a ordem, a combinação e o
    proprietário. É a parte do pedido que diz «precisa ficar bem esclarecido»,
    e uma regra que só aparece num tooltip não esclarece ninguém. */
 .cargos-regra {
-  display: flex;
+  display: grid;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 20px;
+  gap: 16px;
+  padding: 16px 24px;
   border-bottom: var(--seele-b) solid var(--seele-linha-forte);
   background: var(--seele-negro-painel);
+  font-size: 13px;
+  line-height: 1.6;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  flex: 0 0 auto;
 }
 
 .cargos-regra-frase {
   margin: 0;
-  font-size: var(--seele-t-dado);
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.6;
   color: var(--seele-osso);
   max-width: var(--seele-leitura);
 }
@@ -121,17 +136,19 @@
 /* ---------- as abas ---------- */
 .cargos-abas {
   display: flex;
-  gap: 0;
+  gap: 16px;
   border-bottom: var(--seele-b) solid var(--seele-linha-forte);
+  padding: 0 24px;
+  flex: 0 0 auto;
 }
 
 .cargos-aba {
   flex: 0 1 auto;
   font: inherit;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 15px;
-  letter-spacing: 0.14em;
+  font-family: var(--seele-mono);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
   padding: 10px 20px;
   min-height: 44px;
   color: var(--seele-rotulo-claro);
@@ -139,6 +156,7 @@
   border: 0;
   border-bottom: var(--seele-b-forte) solid transparent;
   cursor: pointer;
+  border-radius: var(--seele-raio);
 }
 
 .cargos-aba[aria-selected="true"] {
@@ -169,7 +187,7 @@
   flex: 1 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(280px, 380px) 1fr;
+  grid-template-columns: 240px minmax(0,1fr);
 }
 
 .cargos-painel[hidden] { display: none; }
@@ -194,7 +212,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 16px 20px;
+  padding: 24px;
+  gap: 24px;
 }
 
 /* O que o servidor enche rola por dentro: um servidor com quarenta cargos não
@@ -325,16 +344,17 @@
 .cargos-botao {
   align-self: flex-start;
   font: inherit;
-  font-family: var(--seele-display);
-  font-weight: var(--seele-cartela);
-  font-size: 15px;
-  letter-spacing: 0.14em;
+  font-family: var(--seele-mono);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
   padding: 10px 16px;
   min-height: 44px;
   color: var(--seele-osso);
   background: none;
   border: var(--seele-b) solid var(--seele-linha-forte);
   cursor: pointer;
+  border-radius: var(--seele-raio);
 }
 
 .cargos-botao:hover:not(:disabled) { border-color: var(--seele-laranja-nerv); }
@@ -344,13 +364,14 @@
 .cargos-botao-apagar { margin-right: auto; }
 
 .cargos-salvar {
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 15px;
-  letter-spacing: 0.14em;
+  font-family: var(--seele-mono);
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0;
   padding: 10px 16px;
   min-height: 44px;
   border: 0;
+  border-radius: var(--seele-raio);
 }
 
 .cargos-salvar:disabled { background: var(--seele-negro-painel); border: var(--seele-b) solid var(--seele-linha); }
@@ -387,7 +408,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 24px;
 }
 
 .cargos-form[hidden] { display: none; }
@@ -428,7 +449,7 @@
 .cargos-campos {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px 16px;
+  gap: 16px;
 }
 
 .cargos-campo {
@@ -754,3 +775,11 @@
 
 /* A nota do editor (como PODE e NÃO PODE combinam) tem a medida de leitura; a classe `.nota` é de `base.css`, e esta é a classe da própria tela. */
 .cargos-estado-nota { max-width: var(--seele-leitura); }
+
+@media(max-width:700px) { .camada-cargos { padding:12px; } .cargos-caixa { height:calc(100dvh - 24px); } .cargos-cabeca,.cargos-regra,.cargos-detalhe { padding:16px; } .cargos-abas { padding:0 16px; gap:8px; overflow-x:auto; } .cargos-aba { white-space:nowrap; } .cargos-painel { grid-template-columns:minmax(0,1fr); } .cargos-botoes { flex-wrap:wrap; } .cargos-botoes > button { min-height:44px; } }
+
+
+
+@media(max-width:700px) { .cargos-regra { grid-template-columns:minmax(0,1fr); gap:8px; } }
+
+@media(max-width:700px) { .cargos-cabeca { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 12px; } .cargos-titulo { grid-column:1; font-size:24px; } .cargos-servidor { grid-column:1; font-size:12px; } .cargos-fechar { grid-column:2; grid-row:1 / span 2; margin:0; align-self:center; } }

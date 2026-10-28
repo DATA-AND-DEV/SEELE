@@ -484,9 +484,8 @@ fn secoes_proprias(bytes: &[u8]) -> Result<Vec<String>, String> {
     Ok(nomes)
 }
 
-fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
+fn compilar_wasm_da_pagina() -> Result<PathBuf, String> {
     let raiz = raiz();
-    let sdk = crate::wasi_sdk::caminho_sem_baixar()?;
     let construcao = raiz.join("target/pacote-web-build");
     rodar(
         cargo()
@@ -508,6 +507,13 @@ fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
             .arg(&construcao),
     )
     .map_err(|e| format!("o seele-web sem a prova: {e}"))?;
+    Ok(construcao.join("wasm32-unknown-unknown/release/seele_web.wasm"))
+}
+
+fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
+    let raiz = raiz();
+    let sdk = crate::wasi_sdk::caminho_sem_baixar()?;
+    let wasm = compilar_wasm_da_pagina()?;
     // O motor não tem `prova`: o `target/` de sempre, o mesmo do `xtask web`.
     rodar(
         cargo()
@@ -528,10 +534,7 @@ fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
     let _ = std::fs::remove_dir_all(&pasta);
     copiar_pasta(&raiz.join("apps/seele-app/ui"), &pasta)?;
     for (de, para) in [
-        (
-            construcao.join("wasm32-unknown-unknown/release/seele_web.wasm"),
-            "seele_web.wasm",
-        ),
+        (wasm, "seele_web.wasm"),
         (
             raiz.join("target/wasm32-wasip1/release/seele_motor_web.wasm"),
             "seele_motor_web.wasm",
@@ -550,6 +553,49 @@ fn montar_e_conferir() -> Result<(PathBuf, Vec<String>), String> {
         versionar_recursos(&pasta)?;
     }
     Ok((pasta, motivos))
+}
+
+/// The desktop uses the same production module for personal WebRTC calls.
+/// Build before invoking Tauri/Cargo; never recursively invoke Cargo in build.rs.
+pub(crate) fn wasm_nativo() -> ExitCode {
+    let preparar = || -> Result<(), String> {
+        let raiz = raiz();
+        let antes = crate::wasm_nativo::fontes(&raiz)?;
+        let caminho = compilar_wasm_da_pagina()?;
+        let bytes = std::fs::read(caminho).map_err(|e| e.to_string())?;
+        let fronteira = std::fs::read_to_string(raiz.join("crates/seele-web/src/fronteira.rs"))
+            .map_err(|e| e.to_string())?;
+        let provas = exportacoes_da_prova(&fronteira);
+        if !bytes.starts_with(b"\0asm")
+            || provas.is_empty()
+            || provas
+                .iter()
+                .any(|nome| bytes.windows(nome.len()).any(|b| b == nome.as_bytes()))
+            || secoes_proprias(&bytes)?.iter().any(|nome| nome == "name")
+        {
+            return Err("o módulo nativo não é o WASM de produção".into());
+        }
+        if antes != crate::wasm_nativo::fontes(&raiz)? {
+            return Err("as fontes mudaram durante a compilação; repita wasm-nativo".into());
+        }
+        let app = raiz.join("apps/seele-app");
+        std::fs::write(app.join("ui/seele_web.wasm"), &bytes).map_err(|e| e.to_string())?;
+        std::fs::write(
+            app.join("wasm-nativo.sha256"),
+            format!("{antes}\n{}\n", crate::wasm_nativo::soma(&bytes)),
+        )
+        .map_err(|e| e.to_string())?;
+        crate::wasm_nativo::conferir(&raiz)?;
+        eprintln!("wasm-nativo: {} bytes de produção conferidos", bytes.len());
+        Ok(())
+    };
+    match preparar() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("wasm-nativo: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]

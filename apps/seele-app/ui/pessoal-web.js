@@ -76,7 +76,8 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     return { el, inicial, nome, papel };
   }
   const meuCartao = cartao(), outroCartao = cartao();
-  centro.append(estado, participantes, nomeRotulo, convite, conviteAcoes);
+  const entradaTitulo = no("h2", "pessoal-web-entrada-titulo", "Conversa pessoal");
+  centro.append(entradaTitulo, estado, participantes, nomeRotulo, convite, conviteAcoes);
   const tela = no("div", "pessoal-web-tela");
   tela.setAttribute("aria-label", "Tela compartilhada");
   tela.hidden = true;
@@ -133,14 +134,15 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   let operacao = 0;
   const ids = new Set();
   const frases = {
-    livre: "Converse por um link.", recebendo: "Esperando alguém entrar. Mantenha esta aba aberta.",
-    chamando: "Chamando…", tocando: "Quer entrar na conversa.",
+    livre: "Nova conversa.", recebendo: "Aguardando chamada.",
+    procurando: "Procurando pelo código…", chamando: "Chamando…", tocando: "Quer entrar na conversa.",
     conectando: "Conectando…", reconectando: "Reconectando…",
     dentro: "Conversa conectada", encerrada: "Conversa encerrada",
   };
   function desenhar() {
     const fase = retrato.estado;
     const dentro = fase === "dentro";
+    entradaTitulo.hidden = !["livre", "encerrada", "recebendo"].includes(fase);
     raiz.dataset.fase = fase;
     const iniciais = texto => texto.trim().split(/\s+/u).filter(Boolean).slice(0, 2).map(p => Array.from(p)[0]).join("").toUpperCase();
     meuCartao.nome.textContent = nome.value.trim() || "Você";
@@ -152,7 +154,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     outroCartao.el.hidden = !nomeDoPar;
     participantes.hidden = !["dentro", "conectando", "reconectando", "tocando"].includes(fase);
     estado.textContent = fase === "tocando" && retrato.apelido
-      ? `${retrato.apelido} quer entrar na conversa.` : frases[fase] ?? "Aguardando…";
+      ? `${retrato.apelido} está chamando.` : frases[fase] ?? "Aguardando…";
     const podeEntrar = fase === "livre" || fase === "encerrada";
     nomeRotulo.hidden = !podeEntrar;
     criar.hidden = !podeEntrar || recebido;
@@ -161,7 +163,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     atender.hidden = recusar.hidden = fase !== "tocando";
     mic.hidden = compartilhar.hidden = !dentro;
     compartilhar.disabled = ocupado || !acoes.podeCompartilhar();
-    compartilhar.title = acoes.podeCompartilhar() ? "" : "Este navegador não oferece captura de tela";
+    compartilhar.title = acoes.podeCompartilhar() ? "Compartilhar tela sem som do sistema" : "Captura de tela indisponível";
     desligar.hidden = ["livre", "encerrada"].includes(fase);
     rotular(desligar, fase === "recebendo" ? "ENCERRAR CONVITE"
       : dentro ? "SAIR DA CONVERSA" : "CANCELAR");
@@ -176,7 +178,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     erro.hidden = true;
     desenhar();
     try { await acao(); }
-    catch { if (minha === operacao) falha("Não foi possível concluir. Tente novamente."); }
+    catch (erro) { if (minha === operacao) falha((erro?.capacidadeAusente === true || erro?.origemDoConviteInvalida === true) ? erro.message : "Não foi possível concluir. Tente novamente."); }
     finally { if (minha === operacao) { ocupado = false; desenhar(); } }
   }
   function falha(frase) {
@@ -189,7 +191,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     palco: tela,
     abrir({ porConvite = false, apelido = "" } = {}) {
       recebido = porConvite;
-      nome.value = apelido;
+      if (apelido.trim()) nome.value = apelido;
       raiz.hidden = false;
       desenhar();
       (retrato.estado === "livre" ? nome : raiz).focus();

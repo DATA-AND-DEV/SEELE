@@ -390,13 +390,12 @@ function desenharNivel(snapshot) {
     // de um medidor que acabara de dizer que não há sessão de áudio.
     if (nota) {
       const foraDeSala = !snapshot || snapshot.abertura_do_audio === "fora_de_sala";
-      nota.textContent = foraDeSala
-        ? "Entre numa sala de voz para ver o nível do microfone."
-        : (abertura?.frase ?? "");
+      nota.textContent = foraDeSala ? "" : (abertura?.frase ?? "");
+      nota.hidden = !nota.textContent;
     }
     return;
   }
-  if (nota) nota.textContent = "Fale normalmente: os blocos sobem com a sua voz.";
+  if (nota) { nota.textContent = ""; nota.hidden = true; }
 
   const nivel = Math.max(0, Math.min(1, snapshot.telemetry.input_level));
   const cheios = Math.round(nivel * BLOCOS_DO_MEDIDOR);

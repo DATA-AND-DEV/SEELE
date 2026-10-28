@@ -1,0 +1,244 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test -project /Users/dev-alexandre/SEELE-RELEASES/preparacao-0.17/xcode/SeeleSafariUITests.xcodeproj -scheme SafariCinemaUITests -destination id=5F81E549-FC3B-42EC-9CA7-05ACD4342526 -derivedDataPath target/xcode-017 -resultBundlePath /private/tmp/seele-018/microfone.xcresult "-only-testing:SafariCinemaUITests/SafariMicrofoneUITests/testMicrofoneLiveTresEncerramentosENadaReabreSozinho" "SEELE_FIXTURE_URL=http://127.0.0.1:8732/cinema"
+
+Build settings from command line:
+    SEELE_FIXTURE_URL = http://127.0.0.1:8732/cinema
+
+Writing result bundle at path:
+	/private/tmp/seele-018/microfone.xcresult
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (2 targets)
+    Target 'SafariCinemaUITests' in project 'SeeleSafariUITests'
+        ➜ Explicit dependency on target 'HostApp' in project 'SeeleSafariUITests'
+    Target 'HostApp' in project 'SeeleSafariUITests' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: d8c254bfc077cf591f0b555746bbafc4
+Build description path: /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Intermediates.noindex/XCBuildData/d8c254bfc077cf591f0b555746bbafc4.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-35d3147121984ba087c28d913653d626.sdkstatcache
+    cd /Users/dev-alexandre/SEELE-RELEASES/preparacao-0.17/xcode/SeeleSafariUITests.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator27.1.sdk -o /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/SDKStatCaches.noindex/iphonesimulator27.1-24A94232-35d3147121984ba087c28d913653d626.sdkstatcache
+
+ProcessInfoPlistFile /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/HostApp.app/Info.plist /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Intermediates.noindex/SeeleSafariUITests.build/Debug-iphonesimulator/HostApp.build/empty-HostApp.plist (in target 'HostApp' from project 'SeeleSafariUITests')
+    cd /Users/dev-alexandre/SEELE-RELEASES/preparacao-0.17/xcode
+    builtin-infoPlistUtility /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Intermediates.noindex/SeeleSafariUITests.build/Debug-iphonesimulator/HostApp.build/empty-HostApp.plist -producttype com.apple.product-type.application -genpkginfo /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/HostApp.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -o /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/HostApp.app/Info.plist
+
+CopySwiftLibs /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/HostApp.app (in target 'HostApp' from project 'SeeleSafariUITests')
+    cd /Users/dev-alexandre/SEELE-RELEASES/preparacao-0.17/xcode
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/HostApp.app/HostApp --scan-folder /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/HostApp.app/Frameworks --scan-folder /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/HostApp.app/PlugIns --scan-folder /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/HostApp.app/SystemExtensions --scan-folder /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/HostApp.app/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/HostApp.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Intermediates.noindex/SeeleSafariUITests.build/Debug-iphonesimulator/HostApp.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+Ignoring --strip-bitcode because --sign was not passed
+
+ProcessInfoPlistFile /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/SafariCinemaUITests-Runner.app/PlugIns/SafariCinemaUITests.xctest/Info.plist /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Intermediates.noindex/SeeleSafariUITests.build/Debug-iphonesimulator/SafariCinemaUITests.build/empty-SafariCinemaUITests.plist (in target 'SafariCinemaUITests' from project 'SeeleSafariUITests')
+    cd /Users/dev-alexandre/SEELE-RELEASES/preparacao-0.17/xcode
+    builtin-infoPlistUtility /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Intermediates.noindex/SeeleSafariUITests.build/Debug-iphonesimulator/SafariCinemaUITests.build/empty-SafariCinemaUITests.plist -producttype com.apple.product-type.bundle.ui-testing -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Intermediates.noindex/SeeleSafariUITests.build/Debug-iphonesimulator/SafariCinemaUITests.build/ProductTypeInfoPlistAdditions.plist -o /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/SafariCinemaUITests-Runner.app/PlugIns/SafariCinemaUITests.xctest/Info.plist
+
+CopySwiftLibs /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/SafariCinemaUITests-Runner.app/PlugIns/SafariCinemaUITests.xctest (in target 'SafariCinemaUITests' from project 'SeeleSafariUITests')
+    cd /Users/dev-alexandre/SEELE-RELEASES/preparacao-0.17/xcode
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/SafariCinemaUITests-Runner.app/PlugIns/SafariCinemaUITests.xctest/SafariCinemaUITests --scan-folder /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/SafariCinemaUITests-Runner.app/PlugIns/SafariCinemaUITests.xctest/Frameworks --scan-folder /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/SafariCinemaUITests-Runner.app/PlugIns/SafariCinemaUITests.xctest/PlugIns --scan-folder /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/SafariCinemaUITests-Runner.app/PlugIns/SafariCinemaUITests.xctest/SystemExtensions --scan-folder /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/SafariCinemaUITests-Runner.app/PlugIns/SafariCinemaUITests.xctest/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Products/Debug-iphonesimulator/SafariCinemaUITests-Runner.app/PlugIns/SafariCinemaUITests.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Intermediates.noindex/SeeleSafariUITests.build/Debug-iphonesimulator/SafariCinemaUITests.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+Ignoring --strip-bitcode because --sign was not passed
+
+PruneExplicitPrecompiledModules /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+PruneExplicitPrecompiledModules /Users/dev-alexandre/.codex/worktrees/136e/SEELE/target/xcode-017/SDKExplicitPrecompiledModules
+
+2026-10-28 16:11:46.355 xcodebuild[7785:3807724] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-28 16:11:47.672857-0300 SafariCinemaUITests-Runner[7804:3808198] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+Test Suite 'Selected tests' started at 2026-10-28 16:11:50.208.
+Test Suite 'SafariCinemaUITests.xctest' started at 2026-10-28 16:11:50.209.
+Test Suite 'SafariMicrofoneUITests' started at 2026-10-28 16:11:50.210.
+Test Case '-[SafariCinemaUITests.SafariMicrofoneUITests testMicrofoneLiveTresEncerramentosENadaReabreSozinho]' started.
+    t =     0.00s Start Test at 2026-10-28 16:11:50.212
+    t =     0.03s Set Up
+    t =     0.03s Setting device orientation to Portrait
+    t =     0.04s     Wait for com.apple.springboard to idle
+    t =     0.20s Open com.apple.mobilesafari
+    t =     0.20s     Launch com.apple.mobilesafari
+objc[7804]: Class UIAccessibilityLoaderWebShared is implemented in both /Library/Developer/CoreSimulator/Volumes/iOS_24A434/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebKit.axbundle/WebKit (0x10840c398) and /Library/Developer/CoreSimulator/Volumes/iOS_24A434/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/AccessibilityBundles/WebCore.axbundle/WebCore (0x108520310). This may cause spurious casting failures and mysterious crashes. One of the duplicates must be removed or renamed.
+    t =     0.23s         Setting up automation session
+    t =     1.83s         Wait for com.apple.mobilesafari to idle
+    t =     4.45s Opening default application for URL http://127.0.0.1:8732/microfone
+    t =     4.48s     Wait for com.apple.mobilesafari to idle
+    t =     5.45s Waiting 30.0s for WebView (First Match) to exist
+    t =     6.49s     Checking `Expect predicate `existsNoRetry == 1` for object WebView (First Match)`
+    t =     6.49s         Checking existence of `WebView (First Match)`
+    t =     6.51s Checking existence of `StaticText (First Match)`
+    t =     6.54s Find the StaticText (First Match)
+    t =     6.56s Checking existence of `StaticText (First Match)`
+    t =     6.57s Find the StaticText (First Match)
+    t =     6.64s Added attachment named '1-antes-de-ligar'
+    t =     6.64s Tap "LIGAR O MICROFONE" Button
+    t =     6.64s     Wait for com.apple.mobilesafari to idle
+    t =     6.65s     Find the "LIGAR O MICROFONE" Button
+    t =     6.66s     Check for interrupting elements affecting "LIGAR O MICROFONE" Button
+    t =     6.68s     Synthesize event
+    t =     6.99s     Wait for com.apple.mobilesafari to idle
+    t =     7.00s Checking existence of `"Allow" Button`
+    t =     7.04s Checking existence of `"Permitir" Button`
+    t =     7.06s Checking existence of `"OK" Button`
+    t =     7.12s Checking existence of `"Allow" Button`
+    t =     7.18s Checking existence of `"Permitir" Button`
+    t =     7.20s Checking existence of `"OK" Button`
+    t =     7.52s Checking existence of `"Allow" Button`
+    t =     7.56s Checking existence of `"Permitir" Button`
+    t =     7.64s Added attachment named 'permissao-do-microfone-antes-de-aceitar'
+    t =     7.64s Tap "Permitir" Button
+    t =     7.64s     Wait for com.apple.mobilesafari to idle
+    t =     7.65s     Find the "Permitir" Button
+    t =     7.67s     Check for interrupting elements affecting "Permitir" Button
+    t =     7.70s     Synthesize event
+    t =     7.99s     Wait for com.apple.mobilesafari to idle
+    t =     8.38s o diálogo de permissão apareceu e foi aceito pelo botão «Permitir»
+    t =     8.38s Checking existence of `StaticText (First Match)`
+    t =     8.39s Find the StaticText (First Match)
+    t =     8.40s Checking existence of `StaticText (First Match)`
+    t =     8.41s Find the StaticText (First Match)
+    t =     8.43s Checking existence of `StaticText (First Match)`
+    t =     8.44s Find the StaticText (First Match)
+    t =     8.51s Added attachment named '2-ligado-live-barra-de-status'
+    t =     8.51s retenção forte: 30 s
+    t =     9.51s Checking existence of `StaticText (First Match)`
+    t =     9.53s Find the StaticText (First Match)
+    t =     9.54s Checking existence of `StaticText (First Match)`
+    t =     9.56s Find the StaticText (First Match)
+    t =    10.58s Checking existence of `StaticText (First Match)`
+    t =    10.60s Find the StaticText (First Match)
+    t =    10.61s Checking existence of `StaticText (First Match)`
+    t =    10.63s Find the StaticText (First Match)
+    t =    11.64s Checking existence of `StaticText (First Match)`
+    t =    11.67s Find the StaticText (First Match)
+    t =    11.69s Checking existence of `StaticText (First Match)`
+    t =    11.70s Find the StaticText (First Match)
+    t =    12.72s Checking existence of `StaticText (First Match)`
+    t =    12.75s Find the StaticText (First Match)
+    t =    12.77s Checking existence of `StaticText (First Match)`
+    t =    12.78s Find the StaticText (First Match)
+    t =    13.79s Checking existence of `StaticText (First Match)`
+    t =    13.81s Find the StaticText (First Match)
+    t =    13.83s Checking existence of `StaticText (First Match)`
+    t =    13.84s Find the StaticText (First Match)
+    t =    14.85s Checking existence of `StaticText (First Match)`
+    t =    14.87s Find the StaticText (First Match)
+    t =    14.89s Checking existence of `StaticText (First Match)`
+    t =    14.91s Find the StaticText (First Match)
+    t =    15.93s Checking existence of `StaticText (First Match)`
+    t =    15.96s Find the StaticText (First Match)
+    t =    15.98s Checking existence of `StaticText (First Match)`
+    t =    15.99s Find the StaticText (First Match)
+    t =    17.01s Checking existence of `StaticText (First Match)`
+    t =    17.03s Find the StaticText (First Match)
+    t =    17.05s Checking existence of `StaticText (First Match)`
+    t =    17.07s Find the StaticText (First Match)
+    t =    18.09s Checking existence of `StaticText (First Match)`
+    t =    18.11s Find the StaticText (First Match)
+    t =    18.13s Checking existence of `StaticText (First Match)`
+    t =    18.14s Find the StaticText (First Match)
+    t =    19.16s Checking existence of `StaticText (First Match)`
+    t =    19.18s Find the StaticText (First Match)
+    t =    19.19s Checking existence of `StaticText (First Match)`
+    t =    19.21s Find the StaticText (First Match)
+    t =    20.23s Checking existence of `StaticText (First Match)`
+    t =    20.24s Find the StaticText (First Match)
+    t =    20.26s Checking existence of `StaticText (First Match)`
+    t =    20.28s Find the StaticText (First Match)
+    t =    21.29s Checking existence of `StaticText (First Match)`
+    t =    21.31s Find the StaticText (First Match)
+    t =    21.32s Checking existence of `StaticText (First Match)`
+    t =    21.34s Find the StaticText (First Match)
+    t =    22.35s Checking existence of `StaticText (First Match)`
+    t =    22.37s Find the StaticText (First Match)
+    t =    22.39s Checking existence of `StaticText (First Match)`
+    t =    22.40s Find the StaticText (First Match)
+    t =    23.42s Checking existence of `StaticText (First Match)`
+    t =    23.44s Find the StaticText (First Match)
+    t =    23.45s Checking existence of `StaticText (First Match)`
+    t =    23.46s Find the StaticText (First Match)
+    t =    24.48s Checking existence of `StaticText (First Match)`
+    t =    24.50s Find the StaticText (First Match)
+    t =    24.51s Checking existence of `StaticText (First Match)`
+    t =    24.53s Find the StaticText (First Match)
+    t =    25.55s Checking existence of `StaticText (First Match)`
+    t =    25.57s Find the StaticText (First Match)
+    t =    25.58s Checking existence of `StaticText (First Match)`
+    t =    25.60s Find the StaticText (First Match)
+    t =    26.61s Checking existence of `StaticText (First Match)`
+    t =    26.63s Find the StaticText (First Match)
+    t =    26.64s Checking existence of `StaticText (First Match)`
+    t =    26.66s Find the StaticText (First Match)
+    t =    27.67s Checking existence of `StaticText (First Match)`
+    t =    27.69s Find the StaticText (First Match)
+    t =    27.71s Checking existence of `StaticText (First Match)`
+    t =    27.73s Find the StaticText (First Match)
+    t =    28.74s Checking existence of `StaticText (First Match)`
+    t =    28.76s Find the StaticText (First Match)
+    t =    28.78s Checking existence of `StaticText (First Match)`
+    t =    28.79s Find the StaticText (First Match)
+    t =    28.87s Added attachment named '1b-ligado-30s-caiu-19s'
+    t =    28.87s 1b-ligado-30s: amostras até a queda:
+1s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+2s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+3s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+4s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+5s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+6s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+7s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+8s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+9s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+10s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+11s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+12s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+13s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+14s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+15s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+16s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+17s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+18s: MIC · vivas: 1 · faixas: ended,live · contexto: running · getUserMedia: 2x · áudio mudo: sim · sessão: play-and-record · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@1644[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: reproducao-pronta@802,gum@1644,falha:microfone@1644,gum@1725,audio-ligado@2036 · falhas do motor: 0
+19s: MIC · vivas: 0 · faixas: ended,ended · contexto: closed · getUserMedia: 2x · áudio mudo: sem audio · sessão: auto · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@21741[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42],stop()@21741[desligar@http://127.0.0.1:8732/voz-web.js:921:26],stop()@21744[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: audio-ligado@2036,captura:encerrada@21740,falha:microfone@21740,audio-fechado@21744,contexto:closed@21750 · falhas do motor: 0
+/Users/dev-alexandre/SEELE-RELEASES/preparacao-0.17/xcode/UITests/SafariMicrofoneUITests.swift:110: error: -[SafariCinemaUITests.SafariMicrofoneUITests testMicrofoneLiveTresEncerramentosENadaReabreSozinho] : failed - 1b-ligado-30s: a captura caiu 19 s depois de aberta (nenhuma faixa viva): MIC · vivas: 0 · faixas: ended,ended · contexto: closed · getUserMedia: 2x · áudio mudo: sem audio · sessão: auto · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@21741[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42],stop()@21741[desligar@http://127.0.0.1:8732/voz-web.js:921:26],stop()@21744[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: audio-ligado@2036,captura:encerrada@21740,falha:microfone@21740,audio-fechado@21744,contexto:closed@21750 · falhas do motor: 0
+    t =    28.96s Tear Down
+Test Case '-[SafariCinemaUITests.SafariMicrofoneUITests testMicrofoneLiveTresEncerramentosENadaReabreSozinho]' failed (29.191 seconds).
+Test Suite 'SafariMicrofoneUITests' failed at 2026-10-28 16:12:19.404.
+	 Executed 1 test, with 1 failure (0 unexpected) in 29.191 (29.194) seconds
+Test Suite 'SafariCinemaUITests.xctest' failed at 2026-10-28 16:12:19.404.
+	 Executed 1 test, with 1 failure (0 unexpected) in 29.191 (29.195) seconds
+Test Suite 'Selected tests' failed at 2026-10-28 16:12:19.404.
+	 Executed 1 test, with 1 failure (0 unexpected) in 29.191 (29.196) seconds
+2026-10-28 16:12:19.447 xcodebuild[7785:3807724] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-28 16:12:19.447 xcodebuild[7785:3807724] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-28 16:12:19.449 xcodebuild[7785:3807724] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-28 16:12:36.832 xcodebuild[7785:3807724] [MT] IDETestOperationsObserverDebug: 50.517 elapsed -- Testing started completed.
+2026-10-28 16:12:36.832 xcodebuild[7785:3807724] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-28 16:12:36.832 xcodebuild[7785:3807724] [MT] IDETestOperationsObserverDebug: 50.518 sec, +50.518 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/seele-018/microfone.xcresult
+
+Failing tests:
+	SafariMicrofoneUITests.testMicrofoneLiveTresEncerramentosENadaReabreSozinho()
+
+** TEST FAILED **
+
+Testing started

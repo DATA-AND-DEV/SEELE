@@ -17,9 +17,11 @@
   overflow: hidden;
 }
 
+
 #tela-antes-de-hospedar .boot-caixa.area {
   flex: 1;
 }
+
 
 .antes-corpo {
   display: grid;
@@ -28,26 +30,26 @@
   align-content: safe center;
 }
 
+
 .antes-contexto {
   min-width: 0;
+  position: static;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px 24px;
+  padding: 0 0 24px;
+  border-bottom: 1px solid var(--seele-linha);
+  margin-bottom: 24px;
 }
+
 
 .antes-principal {
   min-width: 0;
 }
 
-@media (min-width: 1100px) {
-  .antes-corpo {
-    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
-  }
 
-  /* A coluna de contexto acompanha a rolagem dos passos, dentro da linha do conteúdo (e não sobre a barra). */
-  .antes-contexto {
-    position: sticky;
-    top: 0;
-    align-self: start;
-  }
-}
+
 
 .antes-servidor {
   margin: 8px 0 0;
@@ -56,91 +58,124 @@
   color: var(--seele-rotulo-claro);
 }
 
+
 .antes-resumo {
   margin: 0;
   max-width: var(--seele-leitura);
 }
+
 
 .antes-passos {
   margin: 0;
   padding: 0;
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
-  gap: 16px;
   align-items: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
 }
+
 
 /* O passo: um filete à esquerda que muda com o estado, como a linha escolhida
    da configuração. O estado escrito ao lado do título é o que vale; o filete é
    o reforço para quem passa o olho. */
 .antes-passo {
-  padding: 16px;
   border: 1px solid var(--seele-linha);
   border-left: 2px solid var(--seele-linha-forte);
   background: var(--seele-negro-absoluto);
+  min-width: 0;
+  padding: 24px;
+  border-color: var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
 }
 
-.antes-passo[data-estado="ok"] { border-left-color: var(--seele-fosforo); }
-.antes-passo[data-estado="leia"] { border-left-color: var(--seele-padrao-azul); }
+
+.antes-passo[data-estado="ok"] {
+  border-left-color: var(--seele-fosforo);
+}
+
+.antes-passo[data-estado="leia"] {
+  border-left-color: var(--seele-padrao-azul);
+}
+
 .antes-passo[data-estado="resolva"] {
   border-left-color: var(--seele-laranja-nerv);
   background: var(--seele-laranja-carga);
 }
 
+
 .antes-passo-topo {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
   flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
 }
+
 
 .antes-passo-num {
   font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: var(--seele-t-secao);
   line-height: 1;
   color: var(--seele-laranja-nerv);
+  font-size: 26px;
+  font-weight: 500;
 }
+
 
 .antes-passo-titulo {
   margin: 0;
   flex: 1;
   font-family: var(--seele-display);
-  font-weight: 700;
-  font-size: var(--seele-t-secao);
-  letter-spacing: 0.06em;
   color: var(--seele-osso);
+  font-size: 25px;
+  font-weight: 500;
+  letter-spacing: 0;
+  flex-basis: calc(100% - 48px);
 }
+
 
 /* O estado em palavra, numa pastilha de borda. Doze pixels e caixa alta: é o
    rótulo do produto (`--seele-t-rotulo`), e não um enfeite. */
 .antes-estado {
-  padding: 2px 8px;
-  font-size: var(--seele-t-rotulo);
-  letter-spacing: 0.16em;
   text-transform: uppercase;
   border: 1px solid currentColor;
   color: var(--seele-rotulo-claro);
+  margin-top: 8px;
+  padding: 5px 8px;
+  border-radius: var(--seele-raio);
+  font-size: 10px;
+  letter-spacing: .03em;
 }
 
-.antes-passo[data-estado="ok"] .antes-estado { color: var(--seele-fosforo); }
-.antes-passo[data-estado="leia"] .antes-estado { color: var(--seele-padrao-azul); }
-.antes-passo[data-estado="resolva"] .antes-estado { color: var(--seele-laranja-nerv); }
+
+.antes-passo[data-estado="ok"] .antes-estado {
+  color: var(--seele-fosforo);
+}
+
+.antes-passo[data-estado="leia"] .antes-estado {
+  color: var(--seele-padrao-azul);
+}
+
+.antes-passo[data-estado="resolva"] .antes-estado {
+  color: var(--seele-laranja-nerv);
+}
+
 
 .antes-passo-frase {
   margin: 12px 0 0;
-  font-size: var(--seele-t-dado);
-  line-height: 1.5;
   color: var(--seele-osso);
   white-space: pre-line;
   overflow-wrap: anywhere;
   max-width: var(--seele-leitura);
+  font-size: 13px;
+  line-height: 1.65;
+  margin-top: 16px;
 }
+
 
 .antes-passo-detalhe {
   color: var(--seele-rotulo-claro);
 }
+
 
 .antes-acoes {
   margin: 12px 0 0;
@@ -149,13 +184,21 @@
   gap: 8px;
 }
 
-.antes-acoes:empty { display: none; }
+
+.antes-acoes:empty {
+  display: none;
+}
+
 
 .antes-lista {
   margin: 12px 0 0;
 }
 
-.antes-lista:empty { display: none; }
+
+.antes-lista:empty {
+  display: none;
+}
+
 
 /* A linha de uma versão ou de um MOD: o nome e o que ele quer dizer à
    esquerda, as ações à direita, e embaixo delas quando não cabem. */
@@ -168,6 +211,7 @@
   background: var(--seele-negro-painel);
 }
 
+
 .antes-linha-texto {
   flex: 1 1 220px;
   min-width: 0;
@@ -179,14 +223,17 @@
   overflow-wrap: anywhere;
 }
 
+
 .antes-linha-nome {
   font-weight: 700;
   letter-spacing: 0.04em;
 }
 
+
 .antes-linha-sub {
   color: var(--seele-rotulo-claro);
 }
+
 
 /* O que já foi resolvido numa linha: a palavra, e não só o filete. */
 .antes-linha-feito {
@@ -196,12 +243,14 @@
   color: var(--seele-fosforo);
 }
 
+
 .antes-linha-acoes {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-left: auto;
 }
+
 
 /* `.botao-fantasma` traz `margin-left: auto` de `base.css` para empurrar um
    botão só ao fim da linha; aqui os botões vêm em grupo e quem empurra é o
@@ -212,19 +261,22 @@
   min-height: 36px;
 }
 
+
 .antes-mods-saidas {
   margin-top: 12px;
 }
 
+
 /* O que pede atenção, no alto: cada item um botão-link para o bloco dele. */
 .antes-pendencias {
-  margin: 12px 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin: 0;
 }
+
 
 .antes-ir {
   font: inherit;
@@ -238,11 +290,23 @@
   text-underline-offset: 3px;
 }
 
-.antes-ir:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+
+.antes-ir:focus-visible {
+  outline: 2px solid var(--seele-osso);
+  outline-offset: 2px;
+}
+
 
 /* O bloco recebe o foco quando o resumo leva até ele. */
-.antes-passo:focus { outline: none; }
-.antes-passo:focus-visible { outline: 2px solid var(--seele-osso); outline-offset: 2px; }
+.antes-passo:focus {
+  outline: none;
+}
+
+.antes-passo:focus-visible {
+  outline: 2px solid var(--seele-osso);
+  outline-offset: 2px;
+}
+
 
 /* O aviso material: à vista sempre, com um filete. O da cópia válida é a
    prova curta, em fósforo; o resto, em laranja (decisão, e não falha). */
@@ -252,16 +316,19 @@
   background: var(--seele-laranja-carga);
 }
 
+
 .antes-aviso[data-tom="ok"] {
   border-left-color: var(--seele-fosforo);
   background: var(--seele-fosforo-fraco);
 }
+
 
 /* Os «mais» de cada bloco: o caminho da cópia, as versões anteriores, as
    APIs. O triângulo do navegador diz «isto abre». */
 .antes-mais {
   margin: 12px 0 0;
 }
+
 
 .antes-mais > summary {
   cursor: pointer;
@@ -270,8 +337,16 @@
   color: var(--seele-rotulo-claro);
 }
 
-.antes-mais > summary:hover { color: var(--seele-laranja-nerv); }
-.antes-mais > summary:focus-visible { outline: 2px solid var(--seele-laranja-nerv); outline-offset: 2px; }
+
+.antes-mais > summary:hover {
+  color: var(--seele-laranja-nerv);
+}
+
+.antes-mais > summary:focus-visible {
+  outline: 2px solid var(--seele-laranja-nerv);
+  outline-offset: 2px;
+}
+
 
 .antes-mods-apis {
   margin: 8px 0 0;
@@ -281,6 +356,7 @@
   color: var(--seele-rotulo-claro);
 }
 
+
 /* O motivo do HOSPEDAR apagado, ao lado dele. */
 .antes-motivo {
   margin: 0 0 10px;
@@ -288,6 +364,7 @@
   line-height: 1.45;
   color: var(--seele-osso);
 }
+
 
 /* **Apagado de verdade** (revisão do Codex): sem o laranja cheio, que lê
    como ativo; borda e texto apagados, e o cursor que diz «não». */
@@ -298,11 +375,13 @@
   cursor: not-allowed;
 }
 
+
 .antes-garantia {
   margin: 16px 0 0;
   max-width: var(--seele-leitura);
   color: var(--seele-rotulo-claro);
 }
+
 
 /* Os detalhes técnicos: o triângulo do navegador diz «isto abre», como nos
    outros `<details>` da entrada. Monoespaçado em par termo–valor, para quem
@@ -311,6 +390,7 @@
   margin: 24px 0 0;
 }
 
+
 .antes-detalhes > summary {
   cursor: pointer;
   padding: 4px 0;
@@ -318,11 +398,16 @@
   color: var(--seele-rotulo-claro);
 }
 
-.antes-detalhes > summary:hover { color: var(--seele-laranja-nerv); }
+
+.antes-detalhes > summary:hover {
+  color: var(--seele-laranja-nerv);
+}
+
 .antes-detalhes > summary:focus-visible {
   outline: 2px solid var(--seele-laranja-nerv);
   outline-offset: 2px;
 }
+
 
 .antes-detalhes-lista {
   margin: 8px 0 0;
@@ -336,25 +421,103 @@
   line-height: 18px;
 }
 
-.antes-detalhes-lista > dt { color: var(--seele-rotulo-claro); }
+
+.antes-detalhes-lista > dt {
+  color: var(--seele-rotulo-claro);
+}
+
 .antes-detalhes-lista > dd {
   margin: 0;
   color: var(--seele-osso);
   overflow-wrap: anywhere;
 }
 
-/* A barra de ações é `.area-barra` (base.css): HOSPEDAR em destaque e VOLTAR ao lado, o motivo do bloqueio junto do botão. */
-.antes-rodape .boot-saidas > button { flex: 1 1 0; }
 
-#antes-hospedar { flex-grow: 2; }
+/* A barra de ações é `.area-barra` (base.css): HOSPEDAR em destaque e VOLTAR ao lado, o motivo do bloqueio junto do botão. */
+.antes-rodape .boot-saidas > button {
+  flex: 1 1 0;
+  max-width: 100%;
+  min-height: 44px;
+  white-space: normal;
+}
+
+
+#antes-hospedar {
+  flex-grow: 2;
+}
+
 
 /* O título recebe o foco ao abrir a tela (o leitor de tela começa por ele),
    mas não é controle: sem anel. */
-#antes-titulo:focus { outline: none; }
+#antes-titulo:focus {
+  outline: none;
+}
+
 
 /* O HOSPEDAR apagado diz por quê ao lado (o resumo), e o cursor não promete
    clique. */
-#antes-hospedar:disabled { cursor: not-allowed; }
+#antes-hospedar:disabled {
+  cursor: not-allowed;
+}
+
+
+/* Pré-conferência 0.17.4: as três decisões ocupam a largura disponível.
+   Estados, bloqueios, cópia comprovada e ações continuam na ordem original. */
+#tela-antes-de-hospedar .area-cabeca {
+  padding: 24px 32px;
+  align-items: center;
+}
+
+#tela-antes-de-hospedar .boot-titulo {
+  font-family:var(--seele-display); font-weight:500; font-size:36px; line-height:1.15;
+  letter-spacing: 0;
+}
+
+#tela-antes-de-hospedar .antes-corpo {
+  display: block;
+  padding: 24px 32px;
+}
+
+.antes-contexto .antes-resumo {
+  max-width: 75ch;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.antes-contexto .antes-garantia {
+  margin: 0;
+  grid-column: 1 / -1;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.antes-aviso, .antes-linha {
+  border-radius: var(--seele-raio);
+}
+
+.antes-acoes > button, .antes-linha-acoes > button {
+  min-height: 40px;
+  white-space: normal;
+}
+
+.antes-mais > summary, .antes-detalhes > summary {
+  padding: 12px 0;
+  line-height: 1.6;
+}
+
+.antes-rodape {
+  gap: 12px 24px;
+  padding: 16px 32px;
+}
+
+.antes-rodape .boot-saidas {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Condições de composição, após os valores padrão. */
+
 
 /* O celular e a janela estreita: os passos empilham e perdem um pouco de recuo, e as ações de cada linha descem para baixo do texto, inteiras e
    com alvo de 44px. A barra de ações empilha por conta de `.area-barra`. */
@@ -382,6 +545,21 @@
   }
 }
 
+
 @media (min-width: 701px) {
   .antes-abre { display: none; }
+}
+
+@media (max-width: 1100px) { .antes-passos { grid-template-columns: minmax(0, 1fr); } .antes-contexto { grid-template-columns: minmax(0, 1fr); } }
+
+@media (max-width: 700px) {
+  #tela-antes-de-hospedar .area-cabeca { padding: 20px 16px; }
+  #tela-antes-de-hospedar .boot-titulo { font-size: 30px; }
+  #tela-antes-de-hospedar .antes-corpo { padding: 20px 16px; }
+  .antes-passo { padding: 20px; }
+  .antes-rodape { padding: 12px 16px max(12px, env(safe-area-inset-bottom)); }
+  .antes-rodape .boot-saidas { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; gap: 8px; }
+  .antes-rodape .boot-saidas > button { width: 100%; min-width: 0; }
+  .antes-detalhes-lista { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .antes-detalhes-lista > dd { margin-bottom: 12px; }
 }

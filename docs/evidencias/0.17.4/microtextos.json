@@ -1,0 +1,479 @@
+{
+  "app": {
+    "remocoes": [
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Entre em um servidor ou hospede o seu."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Cole um link, um endereço ou o código de uma pessoa."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Hospede neste computador e convide pelo link."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Escolha um servidor ou crie outro."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Nome e imagem são opcionais. Você pode alterá-los depois."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Só esta versão está disponível."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "A troca vale agora e fica guardada nesta máquina. Escolher pelo nome fixa ele : o SEELE deixa de acompanhar o padrão."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Reduz ruído contínuo. A digitação pode continuar audível. Desligue para usar o som original."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Só no modo VOZ . Mais sensível capta fala baixa e mais ruído. O padrão acompanha o ruído; um valor escolhido fica fixo. Confira no teste abaixo."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Fale normalmente e veja onde a transmissão abre. OUVIR-ME toca o que sairia daqui — de fone, ou o alto-falante volta para o microfone."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Escolher pelo nome fixa ele : o SEELE deixa de acompanhar o padrão da máquina."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "O SEELE tem um tema só, e o contraste dele segue a acessibilidade do sistema. O que dá para mudar aqui está abaixo."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Quanto espaço os pacotes ocupam aqui."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Os pacotes guardados nesta máquina"
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "A quem esta máquina já disse sim."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Cada sim vale para uma combinação de MODs e versões"
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Para quem escreve MOD: quem desenha cada lugar agora, e onde ele fica na tela."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Os onze lugares onde um MOD pode entrar nesta versão"
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "O que se lê no alto da tela de quem está aqui dentro"
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Salva ao apertar Enter, ou ao sair do campo."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "O quadrado à esquerda do nome, no alto da tela"
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Ela é reduzida e recomprimida aqui, antes de sair. Uma imagem que já era pequena atravessa sem mudar nenhum pixel."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Este servidor está de pé nesta máquina. Mande o link para quem você quer dentro — ele carrega a impressão digital do certificado, então quem recebe não precisa conferi-la por outro canal."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover descrição padrão",
+        "texto": "Depois de fechar, o link e as três camadas da porta continuam em CONFIGURAÇÕES · A PORTA."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover explicação padrão de aparelhos",
+        "texto": "E quando o sistema troca de aparelho padrão?"
+      },
+      {
+        "arquivo": "composicao-0174.js",
+        "acao": "remover aviso educativo",
+        "texto": "Use fones para evitar eco."
+      },
+      {
+        "arquivo": "composicao-0174.js",
+        "acao": "não criar rodapé sem medições",
+        "texto": "REDE · Métricas na conversa / ATRASO — / JITTER —"
+      },
+      {
+        "arquivo": "frases.js",
+        "acao": "reduzir estados e retirar aviso padrão",
+        "texto": "Recepção por código; avisos de fone; legenda de capacidade de tela"
+      },
+      {
+        "arquivo": "tela-chamada.js",
+        "acao": "remover orientações e reduzir estado",
+        "texto": "Nada está sendo transmitido; Esta é a imagem que está saindo; Duplo clique; ausência de capacidade"
+      },
+      {
+        "arquivo": "camada-compartilhar.js",
+        "acao": "reduzir indisponibilidade à capacidade atual",
+        "texto": "Esta versão não sabe compartilhar... outra pessoa apareceria aqui."
+      },
+      {
+        "arquivo": "tela-sessao.js",
+        "acao": "não renderizar faixa educativa vazia",
+        "texto": "Aviso padrão de fone"
+      },
+      {
+        "arquivo": "celular-voz.js",
+        "acao": "remover criação/atualização de métricas mobile",
+        "texto": "ATRASO / JITTER / PERDA / CODEC"
+      },
+      {
+        "arquivo": "celular-ajustes.js",
+        "acao": "não criar seção de métricas mobile nem badge educativo",
+        "texto": "CONEXÃO: atraso/jitter/perda/codec/caminho/uptime; N AVISOS · ABRIR"
+      },
+      {
+        "arquivo": "pessoal-web.js",
+        "acao": "remover métricas fictícias e instruções padrão",
+        "texto": "ATRASO — / JITTER —; voz separada; crie conversa e compartilhe link"
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover microdescrição/atualização residual",
+        "texto": "FONE: aviso educativo repetido na ajuda"
+      },
+      {
+        "arquivo": "larga-casca.js",
+        "acao": "remover microdescrição/atualização residual",
+        "texto": "não reescrever propósito removido"
+      },
+      {
+        "arquivo": "tela-boot.js",
+        "acao": "remover microdescrição/atualização residual",
+        "texto": "remover render da nota versão única"
+      },
+      {
+        "arquivo": "frases.js",
+        "acao": "remover microdescrição/atualização residual",
+        "texto": "amigos: vazio curto, sem rodapé educativo; erro de recepção curto"
+      },
+      {
+        "arquivo": "celular-voz.js",
+        "acao": "remover microdescrição/atualização residual",
+        "texto": "remover DOM do rodapé desktop e relógio em sessão no mobile"
+      },
+      {
+        "arquivo": "celular-sessao.css",
+        "acao": "remover microdescrição/atualização residual",
+        "texto": "remover estilos/células de métricas mobile sem deixar faixa vazia"
+      },
+      {
+        "arquivo": "camada-sala.js",
+        "acao": "ocultar contêiner sem explicação",
+        "texto": "rodapé TIRAR DOS AMIGOS"
+      },
+      {
+        "arquivo": "frases.js",
+        "acao": "remover dicionários não usados de métricas mobile",
+        "texto": "voz.medidas e ajustes.medidas"
+      },
+      {
+        "arquivo": "frases.js",
+        "acao": "encurtar entrada mobile",
+        "texto": "Nenhum servidor salvo; hospedagem: Só no computador."
+      },
+      {
+        "arquivo": "celular-entrada.js",
+        "acao": "remover instrução óbvia",
+        "texto": "Toque em ENTRAR para conectar."
+      },
+      {
+        "arquivo": "celular-ajustes.js",
+        "acao": "remover descrição do modo já visível",
+        "texto": "Esta página abriu como celular."
+      },
+      {
+        "arquivo": "index.html",
+        "acao": "remover instruções duplicadas e rótulo órfão",
+        "texto": "Modos: Segurar tecla/Ao falar/Sempre aberto; bloco FONE vazio removido"
+      },
+      {
+        "arquivo": "tela-server.js",
+        "acao": "remover instrução dinâmica e nó vazio; preservar falhas de áudio",
+        "texto": "Fale normalmente: os blocos sobem com a sua voz."
+      },
+      {
+        "arquivo": "celular-ajustes.js",
+        "acao": "não recriar subdescrição dos modos",
+        "texto": "Modo segurar somente no rótulo"
+      }
+    ],
+    "preservado": [
+      "erros atuais",
+      "permissões e consentimentos",
+      "backup e migração",
+      "consequências de apagar/desfazer consentimento",
+      "nomes acessíveis dos controles"
+    ]
+  },
+  "perfil": [
+    {
+      "antes": "          <span class=\"rotulo\">IMAGEM</span>\n",
+      "depois": "",
+      "motivo": "A prévia e o botão nomeiam a imagem; elimina rótulo repetido."
+    },
+    {
+      "antes": "PNG · até 8 KiB · 256 px.",
+      "depois": "PNG · até 8 KiB · 256 px.",
+      "motivo": "Limites reais preservados sem ampliar formatos ou tamanho."
+    },
+    {
+      "antes": "O que você já disse continua com o nome de então.",
+      "depois": "",
+      "motivo": "Microdescrição removida por pedido explícito; ID vazio preservado e oculto sem espaço."
+    },
+    {
+      "antes": "RECEBER LIGAÇÕES PELO SEU CÓDIGO",
+      "depois": "Receber ligações",
+      "motivo": "O checkbox já está no grupo Seu código."
+    },
+    {
+      "antes": "Ninguém ligou para o seu código ainda.",
+      "depois": "Agenda vazia.",
+      "motivo": "Estado vazio compacto; código e ação de copiar estão próximos."
+    }
+  ],
+  "sites": {
+    "cortes": 11,
+    "itens": [
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-SITE/src/componentes/SecaoBaixar.tsx",
+        "trecho": "          <p className=\"baixar__texto\">\n            Você não precisa instalar nada diferente para hospedar: abra o app e escolha HOSPEDAR\n            AQUI.\n          </p>\n",
+        "acao": "cortar",
+        "resultado": "",
+        "motivo": "Repete o título sobre app e servidor no mesmo executável e o passo de hospedar."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-SITE/src/App.tsx",
+        "trecho": " Este lote ainda está em integração.",
+        "acao": "cortar",
+        "resultado": "",
+        "motivo": "O estado Em desenvolvimento está no mesmo bloco; permanece o limite de recepção com a página aberta."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-SITE/src/App.tsx",
+        "trecho": "<h3>Abra o app</h3><p>Baixe e inicie o SEELE no seu computador.</p>",
+        "acao": "reduzir",
+        "resultado": "<h3>Baixe e abra o app</h3>",
+        "motivo": "Concentra a ação no título sem mini descrição repetida."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-SITE/src/App.tsx",
+        "trecho": "<h3>Compartilhe o convite</h3><p>Envie o link do servidor para o seu grupo.</p>",
+        "acao": "reduzir",
+        "resultado": "<h3>Envie o convite ao grupo</h3>",
+        "motivo": "Concentra a ação no título sem repetir compartilhar/enviar."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/site/index.html",
+        "trecho": "<p>Personalize a experiência do seu servidor.</p>",
+        "acao": "cortar",
+        "resultado": "",
+        "motivo": "Subtítulo genérico não acrescenta informação ao catálogo."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/site/tela.js",
+        "trecho": "  const explicacao = elemento(\n    \"p\",\n    \"cartao-resumo\",\n    \"O índice não tem cadastro e não coleta nada. Ele guarda o veredito da avaliação, o commit que foi avaliado, e o número que identifica os bytes.\",\n  );\n  lateral.append(grupoNivel, grupoOrdem, explicacao);",
+        "acao": "reduzir",
+        "resultado": "  lateral.append(grupoNivel, grupoOrdem);",
+        "motivo": "Nota lateral já oculta por CSS; as garantias e limites concretos continuam na conferência de integridade."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/ferramentas/gerar_guia.py",
+        "trecho": "<p class=\"cartao-resumo\">Guia de criação e referência da API. Do primeiro pacote à publicação no catálogo.</p>",
+        "acao": "cortar",
+        "resultado": "",
+        "motivo": "Repete título e modos Guia/Referência visíveis."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/ferramentas/gerar_guia.py",
+        "trecho": "<aside class=\"sumario\"><p class=\"coordenada\">{label}</p><nav",
+        "acao": "reduzir",
+        "resultado": "<aside class=\"sumario\"><nav",
+        "motivo": "Repete modo selecionado; mantém aria-label dos capítulos e coordenadas dos artigos."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/ferramentas/gerar_docs.py",
+        "trecho": "Documentação / {html.escape(titulo)}</p>{corpo}",
+        "acao": "cortar",
+        "resultado": "",
+        "motivo": "Breadcrumb repetia o título e a seção já indicada no cabeçalho; remoção evita a duplicação também no início da documentação."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/ferramentas/gerar_docs.py",
+        "trecho": "             '<p>Guias de uso, decisões e contratos do produto. Cada página identifica sua versão e procedência.</p>'\n",
+        "acao": "cortar",
+        "resultado": "",
+        "motivo": "Texto genérico repetido pela navegação e pelos rótulos de procedência."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/ferramentas/gerar_docs.py",
+        "trecho": "             'Os guias anteriores permanecem no histórico.</p></aside>' + secoes)",
+        "acao": "reduzir",
+        "resultado": "             '</p></aside>' + secoes)",
+        "motivo": "A seção Histórico já identifica os guias; preservados os avisos sobre integração e versões públicas."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-SITE/src/App.tsx",
+        "trecho": "Demonstração da interface · participantes e indicadores ilustrativos",
+        "acao": "preservar",
+        "motivo": "Qualifica captura para não sugerir telemetria real."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-SITE/src/App.tsx",
+        "trecho": "A página precisa permanecer aberta para receber.",
+        "acao": "preservar",
+        "motivo": "Limitação funcional substantiva; preservado também Em desenvolvimento."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-SITE/src/App.tsx",
+        "trecho": "A avaliação é por versão e não garante segurança.",
+        "acao": "preservar",
+        "motivo": "Limite real da avaliação de MODs."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-SITE/src/componentes/SecaoBaixar.tsx",
+        "trecho": "Versão, tamanho, data, links e estados da release",
+        "acao": "preservar",
+        "motivo": "Informações necessárias ao download preservadas, assim como requisitos e FAQ."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/site/index.html",
+        "trecho": "A instalação e a gestão são feitas no app para computador.",
+        "acao": "preservar",
+        "motivo": "Limitação de plataforma substantiva."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/site/tela.js",
+        "trecho": "Conferência de integridade, revogações, hashes, commits e advertência de versões antigas",
+        "acao": "preservar",
+        "motivo": "Avisos de segurança e procedência mantidos; dados assinados não foram editados."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/ferramentas/gerar_docs.py",
+        "trecho": "Rótulos Atual/Histórico/Em desenvolvimento e procedência",
+        "acao": "preservar",
+        "motivo": "Estado de documentação e limites de publicação preservados."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/ferramentas/gerar_guia.py",
+        "trecho": "API 7 (e 6) · Schema 1 · Revisado em 25/10/2026",
+        "acao": "preservar",
+        "motivo": "Compatibilidade e revisão substantivas."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-MODS-INDEXER/docs/guia-criacao-mods.md",
+        "trecho": "Artigos e referência técnica",
+        "acao": "preservar",
+        "motivo": "Nenhuma reescrita de conteúdo técnico neste corte de casca."
+      },
+      {
+        "arquivo": "/Users/dev-alexandre/SEELE-SITE/src/dados/privacidade.ts",
+        "trecho": "Conteúdo de privacidade",
+        "acao": "preservar",
+        "motivo": "Conteúdo substantivo de privacidade preservado."
+      }
+    ],
+    "derivados_atualizados": [
+      "/Users/dev-alexandre/SEELE-MODS-INDEXER/publicado/index.html",
+      "/Users/dev-alexandre/SEELE-MODS-INDEXER/publicado/tela.js",
+      "/Users/dev-alexandre/SEELE-MODS-INDEXER/site/guia/index.html",
+      "/Users/dev-alexandre/SEELE-MODS-INDEXER/publicado/guia/index.html",
+      "/Users/dev-alexandre/SEELE-MODS-INDEXER/site-docs/**/*.html (casca regenerada)"
+    ],
+    "validacao": {
+      "produto_build": "passou",
+      "testes_node": {
+        "passaram": 31
+      },
+      "testes_docs": {
+        "passaram": 5,
+        "ignorados": 1
+      },
+      "git_diff_check": "passou nos dois repos",
+      "dados_assinados": "sem diferenças em catálogo, revogações, assinaturas e publicado/mods",
+      "previews_existentes": [
+        5174,
+        5175,
+        5176
+      ],
+      "docs_catalogo": {
+        "cenas": 40,
+        "larguras": [
+          320,
+          390,
+          720,
+          768,
+          1440
+        ],
+        "overflow_controle_cortado_erro": 0,
+        "relatorio": "/private/tmp/seele-sites-0174/docs-mods-controles.json"
+      },
+      "produto": {
+        "cenas": 3,
+        "larguras": [
+          390,
+          768,
+          1440
+        ],
+        "overflow_controle_cortado": 0,
+        "relatorio": "/private/tmp/seele-sites-0174/produto-larguras.json"
+      },
+      "capturas_finais": "/private/tmp/seele-sites-0174/copy-final/",
+      "scripts": [
+        "/private/tmp/seele-docs-mods-qa.cjs",
+        "/private/tmp/seele-produto-qa.cjs",
+        "/private/tmp/seele-copy-capturas.cjs"
+      ]
+    }
+  }
+}

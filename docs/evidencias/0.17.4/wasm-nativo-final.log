@@ -1,0 +1,5 @@
+   Compiling xtask v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.04s
+     Running `target/debug/xtask wasm-nativo`
+wasm-nativo: 2213446 bytes de produção conferidos
+guarda ok: 1 artefatos locais, todos desta fonte

@@ -123,6 +123,23 @@ pub struct Conhecido {
     pub caminho_lembrado: Option<crate::caminho::CaminhoLembrado>,
 }
 
+impl Conhecido {
+    /// Recupera o bilhete local sem alterar o registro nem a impressão aceita.
+    /// A migração offline do ponto aposentado é exclusiva desta leitura;
+    /// convites externos devem usar `Bilhete::ler`.
+    ///
+    /// # Errors
+    /// Dados locais malformados são devolvidos ao chamador, nunca descartados.
+    pub fn bilhete_para_voltar(
+        &self,
+    ) -> std::result::Result<Option<crate::uri::Bilhete>, crate::uri::ErroDeUri> {
+        self.bilhete
+            .as_deref()
+            .map(crate::uri::Bilhete::ler_guardado)
+            .transpose()
+    }
+}
+
 /// A lista, em disco.
 #[derive(Debug, Clone, Default)]
 pub struct Conhecidos {
@@ -1243,6 +1260,25 @@ mod a_escada_do_convite {
             Some("encontro.seele.app.br/187.255.97.152:9454"),
             "o bilhete de encontro sumiu, e com ele o degrau que furava o NAT"
         );
+        let bytes_antes = std::fs::read(pasta.join("conhecidos")).unwrap();
+        let reaberta = Conhecidos::abrir(pasta.join("conhecidos")).unwrap();
+        let recuperado = reaberta.buscar("192.168.0.7:8383").unwrap();
+        assert_eq!(recuperado, guardado);
+        let bilhete = recuperado.bilhete_para_voltar().unwrap().unwrap();
+        assert_eq!(bilhete.ponto, crate::encontro::PONTO_PADRAO);
+        assert_eq!(bilhete.aviso, "187.255.97.152:9454");
+        assert_eq!(
+            recuperado.impressao.as_deref(),
+            Some("abcdef0123456789cafe")
+        );
+        assert_eq!(
+            std::fs::read(pasta.join("conhecidos")).unwrap(),
+            bytes_antes
+        );
+        let mut invalido = recuperado.clone();
+        invalido.bilhete = Some("sem-barra".into());
+        assert!(invalido.bilhete_para_voltar().is_err());
+        assert_eq!(invalido.impressao, recuperado.impressao);
     }
 
     #[test]

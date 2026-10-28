@@ -84,7 +84,7 @@ let selo = null;
 const raizCss = { "--seele-osso": "#e8e4dc", "--seele-negro-absoluto": "#000000" };
 const ctx = {
   console,
-  setTimeout, clearTimeout, Promise, Map, Set, Error, Object, Number, String, JSON, Array, Math,
+  setTimeout, clearTimeout, queueMicrotask, Promise, Map, Set, Error, Object, Number, String, JSON, Array, Math,
   CustomEvent: class { constructor(t) { this.type = t; } },
   dispatchEvent: () => true,
   $: (id) => (id === "tela-sessao" ? sessao : null),
@@ -104,6 +104,9 @@ const ctx = {
   conjuntoJaBuscado: "",
   superficiesDosMods: new Map(),
   encerrarOSomDosMods: () => {},
+  // O ambiente real agenda a carga na próxima microtarefa; esta bancada só
+  // verifica o descarte do tema, sem executor ou transporte de MOD.
+  pedirCargaDosMods: () => {},
 };
 ctx.globalThis = ctx;
 vm.createContext(ctx);

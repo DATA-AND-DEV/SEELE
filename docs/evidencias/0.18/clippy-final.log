@@ -1,0 +1,17 @@
+    Checking seele-proto v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-proto)
+    Checking seele-voz v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-voz)
+    Checking seele-video v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-video)
+    Checking seele-enlace v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-enlace)
+    Checking seele-sessao v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-sessao)
+    Checking seele-audio v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-audio)
+   Compiling seele-app v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/apps/seele-app)
+    Checking seele-server v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-server)
+    Checking seele-core v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-core)
+    Checking seele-encontro v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-encontro)
+    Checking seele-ffi v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-ffi)
+    Checking seele-lancador v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-lancador)
+    Checking seele-motor v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-motor)
+    Checking seele-web v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-web)
+    Checking xtask v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 48s
+guarda ok: 65 artefatos locais, todos desta fonte

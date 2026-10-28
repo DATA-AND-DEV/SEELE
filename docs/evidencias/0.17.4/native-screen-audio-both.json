@@ -1,0 +1,85 @@
+{
+  "voices": [
+    {
+      "pagina": {
+        "capturados": 21,
+        "semEntrada": 1,
+        "noPortao": 21,
+        "codificados": 6,
+        "semCarimbo": 0,
+        "enviados": 6,
+        "recusadosPeloTransporte": 0,
+        "dtx": 0,
+        "chegados": 78,
+        "daPropriaVoz": 0,
+        "tortos": 0,
+        "decodificados": 78,
+        "semCabecalho": 0,
+        "esquecidas": 0,
+        "falhas": [],
+        "decodificadoresAbertos": 1,
+        "noCodificador": 0
+      },
+      "portao": {
+        "abertos": 6,
+        "abertura_dbfs": -60,
+        "aberturas": 1,
+        "fechados": 0,
+        "nivel_dbfs": -2.991384983062744,
+        "retidos_entregues": 0
+      },
+      "reproducao": {
+        "tipo": "contas",
+        "pedido": 3,
+        "contas": {
+          "fades": 0,
+          "fontes": {
+            "1": {
+              "alvo_ms": 39.761196804796164,
+              "atrasados": 0,
+              "calados": 0,
+              "ocultados": 0,
+              "oscilacao_ms": 0.6630744934082031,
+              "profundidade_ms": 40,
+              "recebidos": 7,
+              "repetidos": 0,
+              "ressincronias": 0,
+              "silenciados": 0,
+              "tocados": 5,
+              "transbordados": 0
+            }
+          },
+          "fora_do_quadro": 0,
+          "mistura": {
+            "ativas": 1,
+            "cortadas": 391,
+            "pico": 0.820888876914978,
+            "pico_antes": 0.9024813175201416
+          }
+        },
+        "blocos": 2356,
+        "blocosComSom": 556,
+        "quadros": 315,
+        "falhasDaMistura": 0
+      },
+      "controles": {
+        "mudo": false,
+        "isolado": false,
+        "modo": 2,
+        "tecla": false,
+        "abertura": 0,
+        "supressao": true,
+        "ganhos": {}
+      },
+      "contexto": "running",
+      "faixa": {
+        "pronta": "live",
+        "muda": false
+      }
+    }
+  ],
+  "tracks": [
+    "live"
+  ],
+  "audioErrors": []
+}

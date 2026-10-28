@@ -1,0 +1,14 @@
+chromium celular-avisos 390x844: ok
+chromium celular-avisos 390x844 (reduced-motion): ok
+chromium celular-avisos 320x568: ok
+chromium celular-avisos 844x390: ok
+chromium celular-avisos 820x1180: ok
+chromium celular-avisos 1024x768-tablet: ok
+webkit celular-avisos 390x844: ok
+webkit celular-avisos 390x844 (reduced-motion): ok
+webkit celular-avisos 320x568: ok
+webkit celular-avisos 844x390: ok
+webkit celular-avisos 820x1180: ok
+webkit celular-avisos 1024x768-tablet: ok
+
+12 medidas, 0 reprovadas → /private/tmp/seele-copy-avisos/medidas.json

@@ -468,8 +468,7 @@ const MICROFONE_EM_SILENCIO_NO_MACOS =
  * últimas escritas no `index.html`, e conferidas contra esta pelo
  * `ha_um_aviso_de_fone_em_algum_lugar_que_a_pessoa_le`.
  */
-const AVISO_DE_FONE =
-  "USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta.";
+const AVISO_DE_FONE = "";
 
 /**
  * Com que nome entra quem fecha a pergunta do nome sem responder.
@@ -1378,6 +1377,7 @@ const FRASES = {
 
     // Por que um texto colado não é um convite. O Rust devolve o nome da
     // falha; a frase é daqui, como todas as outras.
+    DominioDescontinuado: "Este endereço foi aposentado. Peça um novo convite.",
     EsquemaDesconhecido: "ISTO NÃO PARECE UM CONVITE SEELE",
     SemEndereco: "ESTE CONVITE NÃO TRAZ ENDEREÇO NENHUM",
     EnderecoInvalido: "O ENDEREÇO DENTRO DESTE CONVITE NÃO É UM ENDEREÇO",
@@ -1644,9 +1644,8 @@ const FRASES_DO_CATALOGO = Object.freeze({
 const FRASES_DA_TELA_NO_NAVEGADOR = Object.freeze({
   diz: "ESTE NAVEGADOR NÃO COMPARTILHA A TELA",
   nota:
-    "Ver a tela de outra pessoa funciona aqui. Para mostrar a sua, use o app do SEELE, ou um navegador " +
-    "que capture e codifique a tela (o Chrome e o Edge, no computador).",
-  palco: "Este navegador não compartilha a tela. A de outra pessoa aparece aqui.",
+    "",
+  palco: "Compartilhamento indisponível neste navegador.",
   recusa: "este navegador não compartilha a tela: use o app do SEELE, ou o Chrome ou o Edge no computador",
 });
 
@@ -2305,12 +2304,13 @@ const SALA_PESSOAL = Object.freeze({
 
   /** O bloco SEU CÓDIGO da entrada: a verdade da sala, sem promessa a mais. */
   codigo: Object.freeze({
-    recebendo: "Quem tem seu código pode ligar para você.",
-    procurando: "Sala no ar. O alcance do código fora desta rede ainda não foi confirmado.",
-    subindo: "A sua sala está subindo. Ainda não dá para receber ligação.",
-    desligada: "Você NÃO recebe ligações. Ative em PERFIL, RECEBER LIGAÇÕES.",
+    recebendo: "Recebendo ligações.",
+    procurando: "Verificando alcance…",
+    subindo: "Iniciando recepção…",
+    desligada: "Recepção desligada.",
     falhou: "NINGUÉM CONSEGUE TE LIGAR AGORA: a sala não subiu.",
-    semNoticia: "Ainda não sabemos se a sua sala está recebendo ligações.",
+    falhouNoNavegador: "Não foi possível receber chamadas.",
+    semNoticia: "Verificando recepção…",
   }),
 
   /** `FalhaNaAgenda`. */
@@ -2322,7 +2322,7 @@ const SALA_PESSOAL = Object.freeze({
 
   /** A lista de AMIGOS da entrada (0.17): sem presença, que não há de onde saber. */
   amigos: Object.freeze({
-    vazia: "Adicione amigos pelo código para ligar direto.",
+    vazia: "Sem amigos.",
     ligar: "LIGAR",
     adicionar: "ADICIONAR",
     adicionarAosAmigos: "ADICIONAR AOS AMIGOS",
@@ -2330,11 +2330,10 @@ const SALA_PESSOAL = Object.freeze({
     tirar: "TIRAR DOS AMIGOS",
     bloqueado: "bloqueado: desbloqueie no PERFIL para ligar",
     // O que tirar dos amigos faz, e o que NÃO faz.
-    tirarDiz:
-      "TIRAR DOS AMIGOS só tira da lista. Não desbloqueia, não apaga o histórico de ligações e não esquece a chave dessa pessoa.",
+    tirarDiz: "",
     ligarA: (quem) => `Ligar para ${quem}`,
     tirarDe: (quem) =>
-      `Tirar ${quem} dos amigos (não desbloqueia, não apaga o histórico, não esquece a chave)`,
+      `Remover ${quem} dos amigos`,
   }),
 
   /** O desfecho de um toque, dito quando a faixa some. */
@@ -2386,6 +2385,7 @@ function fraseDoCodigo(estado) {
     case "Desligada":
       return SALA_PESSOAL.codigo.desligada;
     case "Falhou":
+      if (typeof PONTE_NO_LUGAR_DO_TAURI !== "undefined" && PONTE_NO_LUGAR_DO_TAURI) return SALA_PESSOAL.codigo.falhouNoNavegador;
       return fraseDaSala(estado) ?? SALA_PESSOAL.codigo.falhou;
     case "NoAr": {
       const achavel = estado.registro?.registro === "Registrado";
@@ -2490,10 +2490,9 @@ const PAGINA_DO_APP = "https://get.seele.sh/#baixar";
  * precisa saber o que fazer, e não o porquê técnico.
  */
 const SEM_CANCELAMENTO_DE_ECO =
-  "O MICROFONE ABRIU SEM O CANCELAMENTO DE ECO. Use fone: sem ele, quem fala com você pode se ouvir de volta.";
+  "Microfone sem cancelamento de eco.";
 
-const AVISO_DE_FONE_CELULAR =
-  "USE FONE. Sem fone, o som do alto-falante pode voltar pelo microfone, e quem fala com você se ouve de volta.";
+const AVISO_DE_FONE_CELULAR = "";
 
 /**
  * O que só o app do SEELE faz, a lista canônica da matriz: a mesma nas duas
@@ -2554,8 +2553,6 @@ const FRASES_DO_CELULAR = Object.freeze({
     reconectando: "SEM SOM · RECONECTANDO",
     recolher: "RECOLHER",
     recolherChamada: "Recolher a chamada e voltar à sessão",
-    telemetria: "telemetria da chamada",
-    medidas: [["ATRASO", "tel-rtt"], ["JITTER", "tel-jit"], ["PERDA", "tel-loss"], ["CODEC", "tel-codec"]],
   }),
   servidor: Object.freeze({
     ajustes: "AJUSTES",
@@ -2608,24 +2605,12 @@ const FRASES_DO_CELULAR = Object.freeze({
     audio: "ÁUDIO",
     esteServidor: "ESTE SERVIDOR",
     modsDesteServidor: "MODS DESTE SERVIDOR",
-    conexao: "CONEXÃO",
-    conexaoSub: "As medidas do enlace com este servidor, também fora de sala.",
-    medidas: Object.freeze({
-      "tel-rtt": "ATRASO",
-      "tel-jit": "JITTER",
-      "tel-loss": "PERDA",
-      "tel-codec": "CODEC",
-      "tel-caminho": "CAMINHO",
-      "tel-uptime": "UPTIME",
-      "tel-sinal-valor": "SINAL DA SALA",
-    }),
     foraDoCelular: "O QUE O CELULAR NÃO FAZ",
     foraDoCelularSub: "O que fica no app do SEELE, e o que é pelo SEELE no computador.",
     baixar: "BAIXAR O APP DO SEELE",
     grupos: Object.freeze([["SÓ NO APP DO SEELE", SO_NO_APP_DO_SEELE("este aparelho")], ["NO COMPUTADOR", NO_COMPUTADOR]]),
     comoAbre: "COMO ESTA PÁGINA ABRE",
     comoAbreSub: "Como celular ou como computador, na próxima vez que ela abrir.",
-    abriuComoCelular: "Esta página abriu como celular.",
     abrirComoComputador: "ABRIR COMO COMPUTADOR",
     pelaTela: "PELO TAMANHO DA TELA",
     valeNaProxima: "Vale na próxima vez que a página abrir. Abrir de novo agora sai da sessão.",
@@ -2635,7 +2620,6 @@ const FRASES_DO_CELULAR = Object.freeze({
     cargos: "CARGOS E PERMISSÕES",
     sairDoServidor: "SAIR DO SERVIDOR",
     segurarParaFalar: "SEGURAR PARA FALAR",
-    segurarNota: "fala só enquanto o dedo está no SEGURE",
     // Na faixa de contexto de CONFIGURAÇÕES, no lugar do «segura ESPAÇO».
     modoSegurar: "microfone abre só enquanto o dedo está no SEGURE",
   }),
@@ -2646,7 +2630,7 @@ const FRASES_DO_CELULAR = Object.freeze({
   entrada: Object.freeze({
     inicio: Object.freeze({
       titulo: "SERVIDORES DESTE APARELHO",
-      vazio: "Nenhum servidor ainda. Abra um link de convite, ou cole um aqui.",
+      vazio: "Nenhum servidor salvo.",
       entrar: "ENTRAR",
       servidor: (versao) => `Servidor ${versao}`,
       // No lugar do ENTRAR, quando os hashes guardados do servidor venceram.
@@ -2657,7 +2641,7 @@ const FRASES_DO_CELULAR = Object.freeze({
       continuar: "CONTINUAR",
       identidade: "Sua identidade mora neste navegador, neste aparelho.",
       hospedarRotulo: "HOSPEDAR",
-      hospedar: "Para hospedar, use o app no computador.",
+      hospedar: "Só no computador.",
     }),
     // O que o COLAR UM LINK recusa antes de abrir a «ENTRAR EM».
     colado: Object.freeze({
@@ -2668,7 +2652,6 @@ const FRASES_DO_CELULAR = Object.freeze({
     }),
     entrarEm: Object.freeze({
       titulo: "ENTRAR EM",
-      sobre: "Toque em ENTRAR para conectar.",
       endereco: "ENDEREÇO",
       impressao: "IMPRESSÃO DO SERVIDOR",
       impressaoNota: "É a mesma que o SEELE de quem hospeda mostra. Quem atender com outra é recusado.",

@@ -975,7 +975,13 @@ fn nova_tag_com(
         let mut n = numero() % 36u32.pow(4);
         let mut bytes = [b'0'; 4];
         for b in bytes.iter_mut().rev() {
-            *b = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[(n % 36) as usize];
+            // The remainder is 0..=35; encode directly without an indexed read.
+            let digito = (n % 36) as u8;
+            *b = if digito < 10 {
+                b'0' + digito
+            } else {
+                b'A' + (digito - 10)
+            };
             n /= 36;
         }
         let tag = String::from_utf8(bytes.to_vec())?;

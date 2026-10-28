@@ -1,0 +1,37 @@
+{
+  "tipo": "UI real com IPC e dados simulados",
+  "viewport": "390x844",
+  "casca": "celular",
+  "semConexaoComPares": true,
+  "semCapturaFisica": true,
+  "verificacoes": [
+    "casca celular efetiva",
+    "nenhuma métrica/uptime/badge no DOM",
+    "nenhum rodapé fictício",
+    "nenhuma dica padrão listada",
+    "sem transbordamento horizontal",
+    "controles visíveis com nomes acessíveis"
+  ],
+  "cenas": [
+    {
+      "nome": "inicio",
+      "passou": true,
+      "erros": []
+    },
+    {
+      "nome": "perfil",
+      "passou": true,
+      "erros": []
+    },
+    {
+      "nome": "sessao",
+      "passou": true,
+      "erros": []
+    },
+    {
+      "nome": "chamada",
+      "passou": true,
+      "erros": []
+    }
+  ]
+}

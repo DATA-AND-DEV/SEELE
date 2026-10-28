@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const pw = require('./playwright.cjs');
+const {origemDoProduto} = require('./origem-do-produto.cjs');
 (async () => {
   const browser = await (process.argv.includes('--webkit') ? pw.webkit() : pw.chromium()).launch();
   try {
@@ -12,7 +13,7 @@ const pw = require('./playwright.cjs');
       const page = await browser.newPage({ viewport: celular ? { width: 440, height: 956 } : { width: 1440, height: 900 }, isMobile: celular, hasTouch: celular });
       page.setDefaultTimeout(5000);
       page.on('pageerror', e => console.error('pagina:', e.message));
-      await page.route('https://seele.sh/**', route => {
+      await page.route(`${origemDoProduto}/**`, route => {
         const nome = new URL(route.request().url()).pathname.slice(1) || 'index.html';
         const arquivo = nome === 'seele_web.wasm' ? path.resolve(__dirname, '../../../target/wasm32-unknown-unknown/release/seele_web.wasm') : path.resolve(__dirname, '../ui', nome);
         if (!fs.existsSync(arquivo)) return route.fulfill({ status: 404, body: '' });
@@ -25,7 +26,7 @@ const pw = require('./playwright.cjs');
         localStorage.setItem('seele.casca', celular ? 'celular' : 'larga');
         window.documentoDaBancada = 'mesmo documento';
       }, celular);
-      const link = n => `https://seele.sh/#192.0.2.${n}:8383?fp=${String(n).repeat(64)}&v=2.0&convite=${'ab'.repeat(32)}`;
+      const link = n => `${origemDoProduto}/#192.0.2.${n}:8383?fp=${String(n).repeat(64)}&v=2.0&convite=${'ab'.repeat(32)}`;
       await page.goto(link(1));
       await page.waitForFunction(() => typeof identidadeDaPagina === 'function');
       await page.evaluate(async () => { await identidadeDaPagina(); window.entradas = []; const original = invocarNaPonte; invocarNaPonte = async (comando, args) => { if (comando !== 'connect') return original(comando, args); entradas.push({ endereco: args.alvo.endereco, apelido: args.nickname, token: args.joinSecret }); throw { Refused: { reason: 'AdmissionPending' } }; }; });

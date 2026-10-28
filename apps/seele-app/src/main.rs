@@ -101,6 +101,8 @@ const CANAL_DE_ATUALIZACAO: &str = "seele://atualizacao";
 /// Everything the commands share.
 #[derive(Default)]
 struct Session {
+    /// Chamada direta da WebView, por id; saída velha não libera a seguinte.
+    pessoal_web: Mutex<Option<String>>,
     /// Com que intenção este processo foi aberto, se com alguma.
     ///
     /// É por onde o launcher fala com a versão que ele abriu: `--hospedar`, e
@@ -1545,10 +1547,10 @@ async fn connect<R: tauri::Runtime>(
                 .map(|conhecido| {
                     (
                         conhecido.caminhos.clone(),
-                        conhecido
-                            .bilhete
-                            .as_deref()
-                            .and_then(|texto| seele_ffi::uri::Bilhete::ler(texto).ok()),
+                        conhecido.bilhete_para_voltar().unwrap_or_else(|erro| {
+                            tracing::warn!(%erro, "bilhete guardado inválido: não será usado; a impressão e os demais caminhos foram preservados");
+                            None
+                        }),
                         conhecido.impressao.clone(),
                     )
                 })
@@ -3353,6 +3355,129 @@ fn atender(
 ///
 /// Nunca com motivo: a identidade que não abre é dita no `seele.log`, e a tela
 /// mostra o campo vazio.
+#[derive(serde::Serialize)]
+struct IdentidadePessoalNaTela {
+    publica: [u8; 32],
+    receber: bool,
+}
+
+#[tauri::command]
+fn pessoal_identidade(
+    app: AppHandle,
+) -> Result<IdentidadePessoalNaTela, seele_ffi::chamada_pessoal::Falha> {
+    let receber = preferencias(&app)
+        .ok_or(seele_ffi::chamada_pessoal::Falha::Armazenamento)?
+        .receber_ligacoes();
+    Ok(IdentidadePessoalNaTela {
+        publica: seele_ffi::chamada_pessoal::publica(&config_dir(&app))?,
+        receber,
+    })
+}
+
+#[tauri::command]
+fn pessoal_assinar(
+    app: AppHandle,
+    intencao: seele_ffi::chamada_pessoal::Intencao,
+) -> Result<seele_ffi::chamada_pessoal::Prova, seele_ffi::chamada_pessoal::Falha> {
+    let receber = preferencias(&app)
+        .ok_or(seele_ffi::chamada_pessoal::Falha::Armazenamento)?
+        .receber_ligacoes();
+    let agora = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| seele_ffi::chamada_pessoal::Falha::Invalido)?
+        .as_secs();
+    seele_ffi::chamada_pessoal::assinar(&config_dir(&app), &intencao, agora, receber)
+}
+
+#[tauri::command]
+fn pessoal_conferir_par(
+    app: AppHandle,
+    codigo: String,
+    publica: [u8; 32],
+    apelido: Option<String>,
+    direcao: Option<String>,
+) -> Result<(), seele_ffi::chamada_pessoal::Falha> {
+    let agora = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| seele_ffi::chamada_pessoal::Falha::Invalido)?
+        .as_secs();
+    seele_ffi::chamada_pessoal::conferir_par(
+        &config_dir(&app),
+        &codigo,
+        &publica,
+        apelido.as_deref(),
+        direcao.as_deref(),
+        i64::try_from(agora).map_err(|_| seele_ffi::chamada_pessoal::Falha::Invalido)?,
+    )
+}
+
+#[tauri::command]
+fn pessoal_reservar(
+    session: State<'_, Session>,
+    id: String,
+    ativo: bool,
+) -> Result<(), seele_ffi::chamada_pessoal::Falha> {
+    pessoal_reservar_em(&session, &id, ativo)
+}
+
+fn pessoal_reservar_em(
+    session: &Session,
+    id: &str,
+    ativo: bool,
+) -> Result<(), seele_ffi::chamada_pessoal::Falha> {
+    use seele_ffi::chamada_pessoal::Falha;
+    if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(Falha::Invalido);
+    }
+    let mut pessoal = session
+        .pessoal_web
+        .lock()
+        .map_err(|_| Falha::Armazenamento)?;
+    if !ativo {
+        if pessoal.as_deref() == Some(id) {
+            *pessoal = None;
+        }
+        return Ok(());
+    }
+    if pessoal.as_deref().is_some_and(|anterior| anterior != id)
+        || !session
+            .toques
+            .lock()
+            .map_err(|_| Falha::Armazenamento)?
+            .na_faixa()
+            .is_empty()
+        || sessoes_na_tela(session).iter().any(|s| {
+            s.enlace != "encerrada" && (s.onde == OndeEstou::Pessoal || s.ligacao.is_some())
+        })
+    {
+        return Err(Falha::Ocupado);
+    }
+    *pessoal = Some(id.to_owned());
+    Ok(())
+}
+
+#[cfg(test)]
+mod reserva_pessoal_web {
+    #[test]
+    fn encerramento_tardio_nao_libera_nova_chamada() {
+        let session = super::Session::default();
+        let primeira = "a".repeat(64);
+        let segunda = "b".repeat(64);
+        assert!(super::pessoal_reservar_em(&session, &primeira, true).is_ok());
+        assert_eq!(
+            super::pessoal_reservar_em(&session, &segunda, true),
+            Err(seele_ffi::chamada_pessoal::Falha::Ocupado)
+        );
+        assert!(super::pessoal_reservar_em(&session, &primeira, false).is_ok());
+        assert!(super::pessoal_reservar_em(&session, &segunda, true).is_ok());
+        assert!(super::pessoal_reservar_em(&session, &primeira, false).is_ok());
+        assert_eq!(
+            session.pessoal_web.lock().unwrap().as_deref(),
+            Some(segunda.as_str())
+        );
+    }
+}
+
 #[tauri::command]
 fn meu_codigo(app: AppHandle) -> Result<String, ()> {
     sala::meu_codigo_em(&config_dir(&app)).ok_or(())
@@ -3530,6 +3655,10 @@ async fn receber_ligacoes(
             "as preferências não abriram: a escolha de receber ligações vale até o app fechar"
         ),
     }
+    // A escolha governa também a recepção RTC, independentemente de a sala
+    // QUIC ter conseguido abrir sua porta ou registrar no encontro legado.
+    let _ = app.emit("seele://preferencia-pessoal", receber);
+
     if !receber {
         sala::desligar(&app).await;
         return Ok(());
@@ -5556,6 +5685,9 @@ async fn focar_voz_em<R: tauri::Runtime>(
         avisar_a_trilha(app, antiga.id(), "foco");
     }
     let agora = session.sessoes.com_o_foco().map(|sessao| sessao.id());
+    if agora.is_some() {
+        let _ = app.emit("seele://foco-pessoal", ());
+    }
     if let Some(agora) = agora {
         avisar_a_trilha(app, agora, "foco");
     }
@@ -12698,6 +12830,7 @@ fn para_entrar_pela_recusa(app: AppHandle, linha: String) -> versoes::ParaEntrar
 fn nome_da_falha(erro: &seele_ffi::uri::ErroDeUri) -> &'static str {
     use seele_ffi::uri::ErroDeUri as Falha;
     match erro {
+        Falha::DominioDescontinuado => "DominioDescontinuado",
         Falha::EsquemaDesconhecido => "EsquemaDesconhecido",
         Falha::SemEndereco => "SemEndereco",
         Falha::EnderecoInvalido => "EnderecoInvalido",
@@ -14206,6 +14339,10 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            pessoal_identidade,
+            pessoal_assinar,
+            pessoal_conferir_par,
+            pessoal_reservar,
             abrir_no_navegador,
             previa_de_link,
             dominios_de_gif,

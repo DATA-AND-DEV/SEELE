@@ -1,6 +1,6 @@
 // H264 de canvas artificial, WebRTC real e LeitorDeTela do WASM do produto.
-// Nunca chama o seletor real de desktop. Safari sem TrackProcessor recebe a
-// amostra H264 produzida pelo Chromium; não se declara captura suportada.
+// Nunca chama o seletor real de desktop. WebKit sem TrackProcessor transmite
+// vídeo por requestVideoFrameCallback com o mesmo encoder e protocolo.
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),assert=require('node:assert/strict');
 const engines=require('./playwright.cjs');
 const wasmPath=process.argv[2];if(!wasmPath)throw new Error('uso: compartilhar-pessoal-web.cjs caminho/seele_web.wasm');
@@ -20,6 +20,7 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
   const browser=await engines[engine]().launch({headless:true});
   try{
    const page=await browser.newPage({viewport:{width:1000,height:700}});
+   if(engine==='webkit') await page.addInitScript(()=>{delete globalThis.MediaStreamTrackProcessor;});
    if(process.env.SEELE_PREVIEW_DIR){fs.mkdirSync(process.env.SEELE_PREVIEW_DIR,{recursive:true});await page.exposeFunction('preview',()=>page.screenshot({path:path.join(process.env.SEELE_PREVIEW_DIR,`${engine}-tela-pessoal-h264.png`)}));}
    await page.goto(`http://127.0.0.1:${server.address().port}`);
    const result=await page.evaluate(async sample=>{
@@ -39,10 +40,10 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
     function artificial(color){const c=document.createElement('canvas');c.width=320;c.height=180;const ctx=c.getContext('2d');let n=0;const paint=()=>{ctx.fillStyle=color;ctx.fillRect(0,0,320,180);ctx.fillStyle='white';ctx.fillRect(100+(n++%20),60,20,20);};paint();const stream=c.captureStream(20);const timer=setInterval(paint,50);return{stream,stop:()=>{clearInterval(timer);stream.getTracks().forEach(t=>t.stop());}};}
     const pixel=()=>[...document.querySelector('#b canvas').getContext('2d').getImageData(10,10,1,1).data];
     let captured=false,oldPackets,newPackets;
-    if(typeof MediaStreamTrackProcessor==='function'&&typeof VideoEncoder==='function'){
+    if(temLeituraDeVideoDaTela()&&typeof VideoEncoder==='function'){
      captured=true;const red=artificial('#e02020');a.usarMidia(red.stream);await until(()=>frames()>1);
      check(pixel()[0]>150&&pixel()[2]<80,'H264 vermelho real');a.parar();await until(()=>document.getElementById('b').hidden);red.stop();
-     check(red.stream.getTracks().every(t=>t.readyState==='ended')&&!a.noAr,'parar solta captura');oldPackets=packets.splice(0);
+     check(red.stream.getTracks().every(t=>t.readyState==='ended')&&!a.noAr,'parar solta captura');check(!document.querySelector('[data-captura-da-tela]'),'parar remove leitor de vídeo');oldPackets=packets.splice(0);
      const blue=artificial('#2040e0');const before=frames();a.usarMidia(blue.stream);await until(()=>frames()>before+1);
      check(pixel()[2]>150&&pixel()[0]<80,'reinício H264 azul real');
      b.receberControle('TelaParou');check(!document.getElementById('b').hidden,'controle atrasado não fecha fluxo novo');
@@ -72,13 +73,44 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
      check(!document.getElementById('b').hidden&&pixel()[2]>150,'WebKit geração velha ignorada');if(window.preview)await window.preview();a.fechar();
     }
     const errors=events.filter(e=>e.tipo==='erro');check(errors.length===0,'erros: '+JSON.stringify(errors));
+    // O mesmo leitor também alimenta a fachada de sessão de servidor: bytes
+    // completos passam pelo LeitorDeTela Rust, sem a adaptação pessoal externa.
+    let servidorTx, leitorServidor=0, quadrosServidor=0, aberturasServidor=0;
+    const sessaoServidor={
+      atender(comando,args={}){
+        if(comando==='codificacao_da_tela')return sa.operar({acao:comando,...args});
+        if(comando==='abertura_da_tela')return{resposta:sa.operar({acao:comando,...args}).bytes};
+        if(comando==='compartilhar_tela')queueMicrotask(()=>servidorTx.aoDobrar({ScreenShareStarted:{person:1,screen:1}}));
+        return{resposta:null};
+      },
+      async abrirUmFluxo(){
+        const alca=sb.wasm.fluxo_novo();leitorServidor++;
+        return new WritableStream({write(bytes){
+          const w=sb.wasm,p=w.alocar(bytes.length);
+          try{new Uint8Array(w.memory.buffer).set(bytes,p);check(w.fluxo_chegou(alca,p,bytes.length)===0,'fluxo servidor válido');}
+          finally{w.liberar(p,bytes.length);}
+          const passos=JSON.parse(new TextDecoder().decode(new Uint8Array(w.memory.buffer,w.saida_ptr(),w.saida_len()))).passos;
+          for(const passo of passos){if(passo.evento?.ScreenOpened)aberturasServidor++;if(passo.evento?.ScreenFrame)quadrosServidor++;check(!passo.evento?.ScreenUnreadable,'servidor sem frame ilegível');}
+        },close(){sb.wasm.fluxo_acabou(alca);}});
+      },
+    };
+    servidorTx=criarATransmissaoDoNavegador({sessao:sessaoServidor,wasm:sa.wasm,eu:()=>1,emitir:()=>{}});
+    const primeiraServidor=artificial('#30e040');
+    servidorTx.comecar(primeiraServidor.stream,{altura_maxima:720,quadros_maximos:20,banda_bps:1200000,com_som:false});
+    await until(()=>quadrosServidor>1);servidorTx.parar();primeiraServidor.stop();
+    check(!servidorTx.noAr&&!document.querySelector('[data-captura-da-tela]'),'servidor para leitor');
+    const antesServidor=quadrosServidor,segundaServidor=artificial('#e0d030');
+    servidorTx.comecar(segundaServidor.stream,{altura_maxima:720,quadros_maximos:20,banda_bps:1200000,com_som:false});
+    await until(()=>quadrosServidor>antesServidor+1);servidorTx.parar();segundaServidor.stop();
+    check(leitorServidor===2&&aberturasServidor===2,'servidor reabre stream canônico');
     const decoded=frames();b.fechar();b.fechar();pa.abortar();pb.abortar();
     check(!document.querySelector('#a canvas')&&!document.querySelector('#b canvas'),'canvas removidos');
-    return {captured,decoded,errors,oldPackets,newPackets};
+    return {captured,decoded,errors,oldPackets,newPackets,leitor:typeof MediaStreamTrackProcessor==='function'?'TrackProcessor':'requestVideoFrameCallback',quadrosServidor};
    },sample);
    if(result.captured)sample={oldPackets:result.oldPackets,newPackets:result.newPackets};
-   console.log(JSON.stringify({engine,version:browser.version(),captura:result.captured?'canvas real':'indisponível: receptor com amostra real',quadrosDecodificados:result.decoded,erros:result.errors}));
+   console.log(JSON.stringify({engine,version:browser.version(),captura:result.captured?'canvas real':'indisponível: receptor com amostra real',leitor:result.leitor,quadrosDecodificados:result.decoded,quadrosServidor:result.quadrosServidor,erros:result.errors}));
    assert.ok(result.decoded>0);
+   if(engine==='webkit'){assert.equal(result.captured,true);assert.equal(result.leitor,'requestVideoFrameCallback');}
   }finally{await browser.close();}
  }}finally{server.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

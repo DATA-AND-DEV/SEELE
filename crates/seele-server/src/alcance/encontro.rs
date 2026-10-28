@@ -118,6 +118,8 @@ const JANELA_DOS_CHAMADOS: Duration = Duration::from_secs(60);
 /// fazer a respeito é diferente em cada uma.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FalhaNoEncontro {
+    /// A configuração explícita ainda usa o domínio de encontro aposentado.
+    DominioDescontinuado,
     /// Ninguém pediu um ponto de encontro — `$SEELE_ENCONTRO=nao`.
     ///
     /// Não é falha de rede e não vira frase de erro: é uma escolha de quem
@@ -142,6 +144,10 @@ pub enum FalhaNoEncontro {
 impl std::fmt::Display for FalhaNoEncontro {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::DominioDescontinuado => write!(
+                f,
+                "{VARIAVEL} usa domínio descontinuado: atualize a configuração para {PONTO_PADRAO}"
+            ),
             Self::Desligado => write!(
                 f,
                 "o ponto de encontro está desligado nesta máquina ({VARIAVEL})"
@@ -708,6 +714,7 @@ impl Drop for Encontro {
 ///
 /// [`FalhaNoEncontro`], sempre dizendo qual dos casos foi.
 pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro> {
+    validar_ponto_configurado(&convocacao.ponto)?;
     let ate = tokio::time::Instant::now() + PRAZO;
     let candidatos = resolver(&convocacao.ponto, ate).await?;
 
@@ -819,6 +826,16 @@ async fn subir_no(
             }
         }
     }
+}
+
+// Recusar antes do DNS impede registro e emissão de um bilhete aposentado.
+fn validar_ponto_configurado(texto: &str) -> Result<(), FalhaNoEncontro> {
+    let alvo = seele_proto::uri::separar_ponto(texto)
+        .map_err(|_| FalhaNoEncontro::NaoResolve(texto.to_owned()))?;
+    if seele_proto::uri::ponto_aposentado(alvo.maquina) {
+        return Err(FalhaNoEncontro::DominioDescontinuado);
+    }
+    Ok(())
 }
 
 /// Onde o ponto de encontro atende, resolvendo o nome se for um nome.
@@ -1495,6 +1512,48 @@ mod testes {
                 .all(|(p, _)| !matches!(p, Pedido3::Mora3 { .. })),
             "a sala registrou sem assinatura"
         );
+    }
+
+    #[test]
+    fn configuracao_aposentada_e_recusada_sem_resolver_o_nome() {
+        for host in [
+            "encontro.seele.app.br",
+            "ENCONTRO.Seele.App.BR.",
+            "encontro.seele.app.br:9456",
+        ] {
+            assert_eq!(
+                validar_ponto_configurado(host),
+                Err(FalhaNoEncontro::DominioDescontinuado)
+            );
+        }
+        for host in [
+            PONTO_PADRAO,
+            "encontro.seele.app.br.exemplo",
+            "xencontro.seele.app.br",
+            "127.0.0.1:9456",
+        ] {
+            assert_eq!(validar_ponto_configurado(host), Ok(()));
+        }
+        let erro = FalhaNoEncontro::DominioDescontinuado.to_string();
+        assert!(erro.contains(VARIAVEL));
+        assert!(erro.contains(PONTO_PADRAO));
+    }
+
+    #[tokio::test]
+    async fn configuracao_aposentada_nao_abre_registro_nem_bilhete() {
+        let pelo = pelo().await;
+        let convocacao = Convocacao::para_servidor(
+            pelo.clone(),
+            IMPRESSAO,
+            escuta(&pelo),
+            "encontro.seele.app.br",
+        )
+        .unwrap();
+        assert!(matches!(
+            abrir(&convocacao).await,
+            Err(FalhaNoEncontro::DominioDescontinuado)
+        ));
+        assert!(pelo.enc.try_lock().is_ok());
     }
 
     #[tokio::test]

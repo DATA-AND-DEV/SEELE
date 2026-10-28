@@ -20,46 +20,101 @@ const ui = path.resolve(__dirname, '../ui');
       const page = await browser.newPage();
       await page.addInitScript(() => {
         window.PONTE_NO_LUGAR_DO_TAURI = true;
-        window.prova = { fechouVoz: 0, entrouVoz: 0, fechouTela: 0, destruiu: 0, liberouFoco: 0 };
-        window.invocarNaPonte = async cmd => { if (cmd === 'focar_voz') prova.liberouFoco++; };
+        // Esta bancada usa adaptador de voz controlado; capacidade é um vetor.
+        window.AudioEncoder ||= function() {}; window.AudioDecoder ||= function() {};
+        window.prova = { fechouVoz: 0, entrouVoz: 0, fechouTela: 0, destruiu: 0, liberouFoco: 0, recebeu: 0, capturas: 0, calou: 0, trilhasVivas: 0, abriuConvite: 0, rejeicoes: [] };
+        window.addEventListener("unhandledrejection", e => prova.rejeicoes.push(String(e.reason)));
+        window.estadoPessoalDaPonte = null;
+        window.emitirNaPonte = () => {};
+        window.preferenciaDeReceberPessoalWeb = async () => true;
+        window.invocarNaPonte = async cmd => {
+          if (cmd !== 'focar_voz') return;
+          prova.liberouFoco++;
+          if (prova.falharFoco) throw new Error('foco recusado');
+          if (prova.esperarFoco) await new Promise(ok => window.permitirFoco = ok);
+        };
         window.carregarOWasmDaPagina = async () => ({ bytes: new ArrayBuffer(0) });
         window.temCapturaParaCodificar = () => false;
-        window.criarVozDoNavegador = () => ({
-          ligar: () => new Promise(ok => window.permitirMicrofone = ok),
-          desligar: async () => { prova.fechouVoz++; }, modo() {},
+        window.criarVozDoNavegador = () => {
+          let geracao = 0;
+          return {
+          ligar: pedido => {
+            if (pedido?.somenteOuvir) return Promise.resolve();
+            prova.capturas++;
+            const vez = geracao;
+            return new Promise((ok, nao) => {
+              window.permitirMicrofone = () => { if (vez === geracao) prova.trilhasVivas++; ok(); };
+              window.recusarMicrofone = () => nao(new Error('microfone recusado'));
+            });
+          },
+          calarMicrofone() { geracao++; prova.calou++; prova.trilhasVivas = 0; }, mudo() {},
+          desligar: async () => { geracao++; prova.trilhasVivas = 0; prova.fechouVoz++; }, modo() {},
           entrar: () => { prova.entrouVoz++; }, contas: async () => ({ pagina: { falhas: [] } }),
-        });
+        }; };
         window.criarCompartilhamentoPessoalWeb = () => ({
           fechar: () => { prova.fechouTela++; }, receberControle() {},
         });
         window.criarServicoDeChamadasWeb = async callbacks => {
           window.callbacksDaChamada = callbacks;
           return {
-            wasm: {}, criarConvite: async () => { callbacks.aoEstado({ estado: 'recebendo' }); return { link: 'https://example.test/#chamada/teste' }; },
-            abrirConvite: async () => {}, chamar: async () => {}, atender: async () => {},
+            wasm: {}, receberPorCodigo: async () => { prova.recebeu++; if (prova.esperarRegistro) await new Promise((ok, nao) => { window.rejeitarRegistro = () => nao(new DOMException("Cancelada", "AbortError")); }); }, criarConvite: async () => { callbacks.aoEstado({ estado: 'recebendo' }); return { link: 'https://example.test/#chamada/teste' }; },
+            abrirConvite: () => { prova.abriuConvite++; }, chamar: async () => {}, atender: async () => {},
             destruir: () => { prova.destruiu++; }, encerrar: () => callbacks.aoEstado({ estado: 'encerrada' }),
             revogarConvite: async () => {},
           };
         };
       });
       await page.goto(`http://127.0.0.1:${server.address().port}`);
+      await page.waitForFunction(() => prova.recebeu >= 1);
+      await page.evaluate(() => { prova.esperarRegistro = true; window.registroAntigo = seelePessoalWeb.receber(true); });
+      await page.waitForFunction(() => typeof rejeitarRegistro === 'function');
+      await page.evaluate(() => seelePessoalWeb.receber(false));
+      await page.evaluate(async () => { rejeitarRegistro(); await registroAntigo; });
+      assert.equal(await page.evaluate(() => seelePessoalWeb.estadoDaSala.estado), 'Desligada', 'registro antigo não deve trocar Desligada por Falhou');
+      const registrosAntesDoLink = await page.evaluate(() => prova.recebeu);
+      await page.evaluate(() => location.hash = '#chamada/teste');
+      await page.waitForFunction(() => prova.abriuConvite === 1);
+      assert.equal(await page.evaluate(() => prova.recebeu), registrosAntesDoLink, 'abrir convite não deve restaurar a preferência inicial já desligada');
+      await page.evaluate(async () => { prova.esperarRegistro = false; await seelePessoalWeb.receber(true); });
       await page.locator('#boot-conversa-pessoal').click();
       await page.getByRole('button', { name: 'CRIAR CONVERSA', exact: true }).click();
       await page.evaluate(() => {
         callbacksDaChamada.aoEstado({ estado: 'dentro', papel: 'quem-recebe' });
         callbacksDaChamada.aoPar({ transporteDaVoz: {}, tela: {}, abortar() {} }, { papel: 'quem-recebe' });
       });
-      await page.waitForFunction(() => prova.liberouFoco === 1);
+      await page.waitForFunction(() => prova.liberouFoco === 1 && prova.entrouVoz === 1);
+      assert.equal(await page.evaluate(() => prova.capturas), 0, 'a escuta não deve pedir microfone');
+      const fechamentosAntes = await page.evaluate(() => prova.fechouVoz);
+      // IPC de foco falha antes da permissão: cancela captura pendente sem
+      // interromper a reprodução e sem promessa rejeitada sem dono.
+      await page.evaluate(() => prova.falharFoco = true);
       await page.getByRole('button', { name: 'LIGAR MICROFONE' }).click();
-      await page.waitForFunction(() => typeof permitirMicrofone === 'function');
+      await page.waitForFunction(() => prova.calou === 1);
+      await page.evaluate(() => permitirMicrofone());
+      assert.equal(await page.evaluate(() => prova.trilhasVivas), 0);
+      assert.equal(await page.evaluate(() => prova.fechouVoz), fechamentosAntes);
+      await page.evaluate(() => { prova.falharFoco = false; prova.esperarFoco = true; });
+      await page.getByRole('button', { name: 'LIGAR MICROFONE' }).click();
+      await page.waitForFunction(() => typeof permitirFoco === 'function');
+      await page.evaluate(() => recusarMicrofone());
+      await page.waitForFunction(() => prova.calou === 2);
+      await page.evaluate(() => { permitirFoco(); prova.esperarFoco = false; });
+      assert.deepEqual(await page.evaluate(() => prova.rejeicoes), []);
+      await page.getByRole('button', { name: 'LIGAR MICROFONE' }).click();
+      await page.waitForFunction(() => prova.capturas === 3);
       await page.getByRole('button', { name: 'SAIR DA CONVERSA' }).click();
       await page.evaluate(() => permitirMicrofone());
-      await page.waitForFunction(() => prova.fechouVoz >= 2);
-      assert.equal(await page.evaluate(() => prova.entrouVoz), 0, 'a permissão tardia reabriu voz após sair');
-      assert.ok(await page.evaluate(() => prova.fechouTela >= 1 && prova.destruiu >= 1));
+      await page.waitForFunction(base => prova.fechouVoz >= base + 2, fechamentosAntes);
+      assert.equal(await page.evaluate(() => prova.entrouVoz), 1, 'a permissão tardia reabriu voz após sair');
+      assert.ok(await page.evaluate(() => prova.fechouTela >= 1));
       assert.equal(await page.getByRole('button', { name: 'DESLIGAR MICROFONE' }).count(), 0);
+      const antesDeSuspender = await page.evaluate(() => ({ destruiu: prova.destruiu, recebeu: prova.recebeu }));
       await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
-      console.log(`${engine}: foco cedido, permissão tardia, saída com operação pendente e pagehide PASS`);
+      await page.waitForFunction(base => prova.destruiu > base, antesDeSuspender.destruiu);
+      await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+      await page.waitForFunction(base => prova.recebeu > base, antesDeSuspender.recebeu);
+      assert.equal(await page.evaluate(() => prova.capturas), 3, 'BFCache não reabre microfone');
+      console.log(`${engine}: foco recusado, captura recusada, permissão tardia, saída e BFCache PASS`);
     } finally { await browser.close(); }
   } } finally { server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

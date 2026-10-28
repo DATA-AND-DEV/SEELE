@@ -100,7 +100,8 @@ use std::process::ExitCode;
 /// As bancadas, por nome e não por um laço sobre a pasta: um rascunho guardado
 /// em `bancada/` não pode passar a reprovar os três lugares que a chamam, e as
 /// de navegador moram na mesma pasta.
-const BANCADAS: [&str; 17] = [
+const BANCADAS: [&str; 18] = [
+    "chamada-web-configuracao.cjs",
     "ciclo-do-executor.cjs",
     "ponte-web.cjs",
     "regiao-do-mod.cjs",
@@ -293,7 +294,9 @@ mod tests {
     /// E o `identidade-da-bancada.cjs`, que fixa a identidade da página nas
     /// bancadas de navegador com `.wasm` (`cargos-no-navegador.cjs` e
     /// `cargos-pela-tela.cjs` o importam) e não tem asserção própria.
-    const NAO_SAO_BANCADA: [&str; 4] = [
+    // Lê a origem canônica para outras bancadas, sem prova independente.
+    const NAO_SAO_BANCADA: [&str; 5] = [
+        "origem-do-produto.cjs",
         "cabecalhos-da-origem.cjs",
         "identidade-da-bancada.cjs",
         "playwright.cjs",

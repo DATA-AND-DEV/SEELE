@@ -1,0 +1,58 @@
+{
+  "versao": "0.18.0",
+  "publicado": false,
+  "rust": {
+    "core": 460,
+    "proto": 441,
+    "server": 673,
+    "web": 76,
+    "observacao": "Core repetido com SEELE_EXIGE_CODEC=1 e OpenH264 local; todos passaram."
+  },
+  "mac_nativo": {
+    "pass": true,
+    "native": "JHEW-FEN2-W21A-63QM",
+    "web": "880B-A2Q4-FH5W-CB3P",
+    "secure": true,
+    "rtc": "function",
+    "errors": []
+  },
+  "xcode": {
+    "fullscreen_nativo": "passou",
+    "microfone_lifecycle_3s": "passou",
+    "microfone_estabilidade_30s": "falhou",
+    "controle_safari_cru_45s": "falhou: ended pelo navegador, stop=0, sem amostras; independe do motor SEELE"
+  },
+  "windows": {
+    "build": "PASS final após patch JS",
+    "frontend": 348,
+    "ipc_persistencia": "PASS",
+    "interop": "PASS WebView2 e Edge reais no mesmo Windows, sinalização Rust local, código/aceite/chat nos dois sentidos",
+    "audio_sintetico": {
+      "native": {
+        "enviados": 11,
+        "decodificados": 16
+      },
+      "edge": {
+        "enviados": 16,
+        "decodificados": 12
+      }
+    },
+    "captura_ao_sair": "ended",
+    "limites": "Não é Brave/5G, microfone físico ou prova de instalador/updater."
+  },
+  "soak_15min": {
+    "chromium": "PASS 900s, 31 amostras",
+    "webkit": "PASS 900s, 31 amostras",
+    "limite": "Mídia sintética; anterior à centralização final de configuração, transporte inalterado."
+  },
+  "fontes": "Código JS de preparo do convite corrigido e congelado; WASM final2215066 be69ec49e09af26a45fdaa480c70d2192ad91f058a11f9a5033cde350b02eefc. Mac normal e pacoteweb recompilados após patch.",
+  "clippy": "PASS avisos como erro",
+  "web_pacote": "Pacote final regenerado, carregamento CSP C/W PASS; frontend348+web16 PASS após patch.",
+  "dominios": "Produto estrito e migração offline PASS; seele.app.br e mods.seele.app.br ainda HTTP200, retirar vínculos no lançamento.",
+  "race_convite": "Regressão controlada e cancelamento C/W PASS; remover correção causa falha esperada. Integrada completa final C/W PASS.",
+  "formulario_webkit": "Ocorrência anterior isolada; 10 páginas/contextos novos PASS sem retry. Causa histórica não comprovada.",
+  "publicacao": {
+    "realizada": false,
+    "pendente": "Congelar revisão de release, gerar e conferir instaladores finais, assinaturas, publicação coordenada e retirada de vínculos antigos."
+  }
+}

@@ -335,6 +335,26 @@ fn atender(
     };
     let mut cabecalhos = cors(pedido.origem.as_deref(), origens);
     if pedido.caminho == CAMINHO_DA_CHAMADA {
+        // Apenas as origens locais da WebView do app; nunca Origin:null.
+        // A mesma abertura não se aplica ao endpoint de sessões de servidor.
+        const ORIGENS_NATIVAS: &[&str] = &[
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+        ];
+        if pedido
+            .origem
+            .as_deref()
+            .is_some_and(|o| ORIGENS_NATIVAS.contains(&o))
+        {
+            cabecalhos = cors(
+                pedido.origem.as_deref(),
+                &ORIGENS_NATIVAS
+                    .iter()
+                    .map(|o| (*o).to_owned())
+                    .collect::<Vec<_>>(),
+            );
+        }
         return atender_pessoal(conexao, par, pedido, cabecalhos, pessoais);
     }
     if pedido.caminho != CAMINHO {

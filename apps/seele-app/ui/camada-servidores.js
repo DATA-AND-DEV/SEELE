@@ -342,6 +342,21 @@ window.addEventListener(
  * troca pergunta antes, e volta pelo alvo.
  */
 function irParaOServidor(alvo, apelido, token, nome, linkColado = null, ligar = false) {
+  const argumentos = [alvo, apelido, token, nome, linkColado, ligar];
+  const pessoal = window.seelePessoalWeb;
+  if (typeof alvo === "string" && alvo.startsWith("@") && pessoal?.chamarCodigo) {
+    return Promise.resolve(pessoal.chamarCodigo({ codigo: alvo, apelido })).then(resultado => {
+      if (resultado?.ausente && !PONTE_NO_LUGAR_DO_TAURI) return irParaOServidorNativo(...argumentos);
+    }).catch(() => {
+      const erro = $("boot-erro");
+      erro.hidden = false;
+      erro.textContent = "Não foi possível iniciar a ligação. Tente novamente.";
+    });
+  }
+  return irParaOServidorNativo(...argumentos);
+}
+
+function irParaOServidorNativo(alvo, apelido, token, nome, linkColado = null, ligar = false) {
   const naSessao = !$("tela-sessao").hidden;
   if (naSessao && ligar && typeof variasSessoes === "function" && variasSessoes()) {
     // Ligar soma uma sessão (E3 da 0.17): as abertas continuam, e não há o que

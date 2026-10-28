@@ -434,6 +434,7 @@ let geracaoDoAvisoDeFone = 0;
  * no instante em que o texto muda não é anunciado.
  */
 function desenharAvisoDeFone(snapshot) {
+  if (!CASCA.avisoDeFone()) { $("aviso-fone").hidden = true; return; }
   if (!$("aviso-fone").hidden && geracaoDoAvisoDeFone !== geracaoDaSessao) {
     $("aviso-fone").hidden = true;
   }
@@ -3365,23 +3366,21 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   // tirar: quem precisa do número continua a um toque dele, e `specs/06` não
   // perde nada — o estado continua em palavra, dentro.
   //
-  // **Aberto quando há o que dizer.** Mudo, isolado ou fora da faixa nominal
-  // não são repouso: são exatamente os casos em que alguém abriria. Deixá-los
-  // recolhidos seria esconder o que a lista existe para mostrar.
-  const interessante = pessoa.atField || pessoa.isolado
-    || (medido && pessoa.faixa !== "Nominal");
+  // 0.17.4: o estado fica sempre ao lado da pessoa; as medidas detalhadas
+  // ficam recolhidas, salvo sinal crítico. Recolher mantém nome, fala e mudo.
+  const interessante = medido && pessoa.faixa === "Critical";
   const diagnostico = elemento("details", "pessoa-diagnostico");
   if (interessante) diagnostico.open = true;
   const resumo = elemento("summary", "pessoa-diagnostico-resumo");
   resumo.append(
-    elemento("span", "pessoa-diagnostico-rotulo", "SINAL E ESTADO"),
+    elemento("span", "pessoa-diagnostico-rotulo", "Diagnóstico"),
     // O valor no resumo: recolhido, a linha continua dizendo o essencial sem
     // que seja preciso abrir para saber se vale a pena abrir.
     elemento("span", "pessoa-diagnostico-valor", medido ? String(pessoa.ratio) : SEM_MEDIDA),
   );
-  diagnostico.append(resumo, numero, barra, rodape);
+  diagnostico.append(resumo, numero, barra);
 
-  item.append(cabeca, diagnostico);
+  item.append(cabeca, rodape, diagnostico);
 
   // Volume por pessoa (`specs/03-audio.md`).
   if (pessoa.volume !== null && temAudio) {
@@ -3472,6 +3471,7 @@ function redesenharAsEntradasDeMod() {
 // ---------------------------------------------------------------- telemetria
 
 function desenharTelemetria(snapshot) {
+  if (!$("tel-rtt")) return;
   aplicarARegiao("status.barra", $("telemetria-mods"));
   const tel = snapshot.telemetry;
 

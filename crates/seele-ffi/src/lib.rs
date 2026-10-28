@@ -36,6 +36,7 @@
 /// O foco de voz: no máximo uma conexão desta máquina tem o microfone (E3 da
 /// 0.17, multi-sessão).
 pub mod cargos;
+pub mod chamada_pessoal;
 pub mod foco;
 pub mod mods;
 /// Uma conexão que não existe, com o `fold` e o `snapshot` de uma que existe:

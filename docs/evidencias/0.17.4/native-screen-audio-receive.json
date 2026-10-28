@@ -1,0 +1,80 @@
+{
+  "voices": [
+    {
+      "pagina": {
+        "capturados": 0,
+        "semEntrada": 0,
+        "noPortao": 0,
+        "codificados": 0,
+        "semCarimbo": 0,
+        "enviados": 0,
+        "recusadosPeloTransporte": 0,
+        "dtx": 0,
+        "chegados": 45,
+        "daPropriaVoz": 0,
+        "tortos": 0,
+        "decodificados": 45,
+        "semCabecalho": 0,
+        "esquecidas": 0,
+        "falhas": [],
+        "decodificadoresAbertos": 1,
+        "noCodificador": 0
+      },
+      "portao": {
+        "abertos": 0,
+        "abertura_dbfs": -60,
+        "aberturas": 0,
+        "fechados": 0,
+        "nivel_dbfs": -78,
+        "retidos_entregues": 0
+      },
+      "reproducao": {
+        "tipo": "contas",
+        "pedido": 1,
+        "contas": {
+          "fades": 0,
+          "fontes": {
+            "1": {
+              "alvo_ms": 38.313603714213265,
+              "atrasados": 0,
+              "calados": 0,
+              "ocultados": 0,
+              "oscilacao_ms": 1.8301629255028042,
+              "profundidade_ms": 20,
+              "recebidos": 45,
+              "repetidos": 0,
+              "ressincronias": 0,
+              "silenciados": 0,
+              "tocados": 44,
+              "transbordados": 0
+            }
+          },
+          "fora_do_quadro": 0,
+          "mistura": {
+            "ativas": 1,
+            "cortadas": 493,
+            "pico": 0.85162353515625,
+            "pico_antes": 1.0065652132034302
+          }
+        },
+        "blocos": 2113,
+        "blocosComSom": 328,
+        "quadros": 282,
+        "falhasDaMistura": 0
+      },
+      "controles": {
+        "mudo": true,
+        "isolado": false,
+        "modo": 0,
+        "tecla": false,
+        "abertura": 0,
+        "supressao": true,
+        "ganhos": {}
+      },
+      "contexto": "running",
+      "faixa": null
+    }
+  ],
+  "tracks": [],
+  "audioErrors": []
+}

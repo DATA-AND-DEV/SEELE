@@ -1,0 +1,45 @@
+﻿{
+    "source_manifest_sha256":  "1702895ea4ff08f8bc329ddcf4eb55181f9959a6d6280366d5debfffcc83c871",
+    "exe_size":  92573184,
+    "kind":  "debug isolated, no installer",
+    "cargo_jobs":  2,
+    "version":  "0.18.0",
+    "exe_sha256":  "6ec5bc3da858ccb55fb0383bca733a2dfb39f06618f22f251ab5c83d1afdfb93",
+    "exe":  "C:\\s17v1025\\t\\debug\\seele-app.exe",
+    "target":  "C:\\s17v1025\\t",
+    "wasm_source_version_env":  "0.18.0",
+    "status":  "PASS",
+    "steps":  [
+                  {
+                      "args":  [
+                                   "build",
+                                   "--locked",
+                                   "-p",
+                                   "seele-app",
+                                   "--bin",
+                                   "seele-app",
+                                   "--jobs",
+                                   "2"
+                               ],
+                      "name":  "build-app",
+                      "log":  "C:\\s17v1025\\validacao-018\\rodada-20261028-171836\\build-app.log",
+                      "exit":  0
+                  },
+                  {
+                      "args":  [
+                                   "test",
+                                   "--locked",
+                                   "-p",
+                                   "seele-app",
+                                   "--test",
+                                   "frontend",
+                                   "--jobs",
+                                   "2"
+                               ],
+                      "name":  "frontend",
+                      "log":  "C:\\s17v1025\\validacao-018\\rodada-20261028-171836\\frontend.log",
+                      "exit":  0
+                  }
+              ],
+    "ui_executed":  false
+}

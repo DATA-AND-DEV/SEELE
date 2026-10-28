@@ -40,6 +40,46 @@ fn pedido_verificado(pedido: &Pedido, agora: u64) -> bool {
         .is_ok_and(|bytes| verificar(&pedido.remetente, &bytes, &pedido.assinatura))
 }
 
+/// Configuração pública derivada exclusivamente das constantes do protocolo.
+struct Configuracao {
+    origem_dos_links: String,
+    url_do_encontro: String,
+    ice_servers: [ServidorIce; 1],
+}
+
+struct ServidorIce {
+    urls: String,
+}
+
+impl Configuracao {
+    fn em_json(self) -> Value {
+        let servidores: Vec<Value> = self
+            .ice_servers
+            .into_iter()
+            .map(|servidor| json!({"urls": servidor.urls}))
+            .collect();
+        json!({
+            "origem_dos_links": self.origem_dos_links,
+            "url_do_encontro": self.url_do_encontro,
+            "ice_servers": servidores,
+        })
+    }
+
+    fn do_produto() -> Self {
+        Self {
+            origem_dos_links: format!("https://{}", seele_proto::uri::ORIGEM_DO_NAVEGADOR),
+            url_do_encontro: format!("https://{}/chamada/1", seele_proto::encontro::PONTO_PADRAO),
+            ice_servers: [ServidorIce {
+                urls: format!(
+                    "stun:{}:{}",
+                    seele_proto::encontro::PONTO_PADRAO,
+                    seele_proto::encontro::PORTA_PADRAO
+                ),
+            }],
+        }
+    }
+}
+
 /// Executa uma intenção da casca sem E/S nem material secreto.
 #[must_use]
 pub fn operar(texto: &str) -> Value {
@@ -52,6 +92,22 @@ pub fn operar(texto: &str) -> Value {
     let campo = |nome: &str| lido.get(nome).unwrap_or(&Value::Null);
     let agora = lido.get("agora").and_then(Value::as_u64).unwrap_or(0);
     match lido.get("acao").and_then(Value::as_str) {
+        Some("configuracao") => Configuracao::do_produto().em_json(),
+        Some("codigo_da_chave") => {
+            let Ok(chave) = serde_json::from_value::<[u8; 32]>(campo("chave").clone()) else {
+                return json!({"erro":"Invalido"});
+            };
+            json!({"codigo":seele_proto::codigo::Codigo::da_chave(&chave).to_string()})
+        }
+        Some("codigo_ler") => {
+            match seele_proto::codigo::Codigo::ler(campo("codigo").as_str().unwrap_or("")) {
+                Ok(codigo) => json!({"codigo":codigo.to_string()}),
+                Err(seele_proto::codigo::CodigoInvalido::Verificador) => {
+                    json!({"erro":"CodigoComErro"})
+                }
+                Err(_) => json!({"erro":"CodigoInvalido"}),
+            }
+        }
         Some("convite_mensagem" | "convite_verificar") => {
             let Ok(convite) = serde_json::from_value::<Convite>(campo("convite").clone()) else {
                 return json!({"erro":"Invalido"});
@@ -193,6 +249,50 @@ pub fn operar(texto: &str) -> Value {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+
+    #[test]
+    fn configuracao_publica_usa_as_constantes_do_protocolo() {
+        assert_eq!(
+            operar(r#"{"acao":"configuracao"}"#),
+            json!({
+                "origem_dos_links": format!("https://{}", seele_proto::uri::ORIGEM_DO_NAVEGADOR),
+                "url_do_encontro": format!("https://{}/chamada/1", seele_proto::encontro::PONTO_PADRAO),
+                "ice_servers": [{"urls": format!("stun:{}:{}", seele_proto::encontro::PONTO_PADRAO, seele_proto::encontro::PORTA_PADRAO)}],
+            })
+        );
+        assert_eq!(
+            operar(r#"{"acao":"configuracao","url_do_encontro":"https://falso.exemplo"}"#),
+            operar(r#"{"acao":"configuracao"}"#)
+        );
+    }
+
+    #[test]
+    fn codigo_da_chave_e_verificador_sao_os_mesmos_do_nativo_com_espacos() {
+        assert_eq!(
+            operar(
+                r#"{"acao":"codigo_da_chave","chave":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}"#
+            ).get("codigo").and_then(Value::as_str),
+            Some("CSM7-NBFR-CAYQ-EV4Y")
+        );
+        assert_eq!(
+            operar(r#"{"acao":"codigo_ler","codigo":"c s m 7 n b f r c a y q e v 4 y"}"#)
+                .get("codigo")
+                .and_then(Value::as_str),
+            Some("CSM7-NBFR-CAYQ-EV4Y")
+        );
+        assert_eq!(
+            operar(r#"{"acao":"codigo_ler","codigo":"c s m 7 n b f r c a y q e v 4 z"}"#)
+                .get("erro")
+                .and_then(Value::as_str),
+            Some("CodigoComErro")
+        );
+        assert_eq!(
+            operar(r#"{"acao":"codigo_ler","codigo":"host.exemplo"}"#)
+                .get("erro")
+                .and_then(Value::as_str),
+            Some("CodigoInvalido")
+        );
+    }
 
     #[test]
     fn a_chave_fraca_aceita_pelo_webcrypto_nao_entra() {

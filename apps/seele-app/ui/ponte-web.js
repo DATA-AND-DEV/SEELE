@@ -98,40 +98,35 @@ const RECUSA_SISTEMA = "a página não abre os ajustes do sistema";
 const RECUSA_MODULO = "o navegador não baixa módulo de vídeo: quem codifica é ele";
 const RECUSA_NATIVO = "no navegador os MODs rodam no executorNoNavegador, e estes comandos são do executor nativo do desktop";
 // A sala viva da F7 (`F4/ponte-no-pc.md`, «A sala viva da F7»).
-const RECUSA_SALA = "a sala pessoal e as ligações moram no app do SEELE: o navegador não recebe ligação";
-const RECUSA_AGENDA = "o código e a agenda moram no app do SEELE, nesta máquina";
+const RECUSA_SALA = "este comando controla a sala nativa; no navegador a conversa pessoal usa a conexão direta";
+const RECUSA_ASSINADOR_NATIVO = "a identidade do navegador assina localmente; este comando pertence ao aplicativo";
 
 /** Recusados nas duas cascas: o comando e a frase. */
 const RECUSAS_NOMEADAS = new Map([
+  ["pessoal_identidade", RECUSA_ASSINADOR_NATIVO],
+  ["pessoal_assinar", RECUSA_ASSINADOR_NATIVO],
+  ["pessoal_conferir_par", RECUSA_ASSINADOR_NATIVO],
+  ["pessoal_reservar", RECUSA_ASSINADOR_NATIVO],
   ["abrir_a_porta_no_firewall", RECUSA_REDE],
   ["abrir_ajustes_de_acessibilidade", RECUSA_SISTEMA],
   ["abrir_ajustes_do_microfone", RECUSA_SISTEMA],
   ["abrir_versao", RECUSA_VERSOES],
-  // Os amigos moram na agenda desta máquina (0.17): o navegador não tem agenda.
-  ["adicionar_amigo", RECUSA_AGENDA],
-  ["amigos", RECUSA_AGENDA],
-  ["tirar_dos_amigos", RECUSA_AGENDA],
   // A pré-conferência de hospedar (E2 da 0.17): o navegador não hospeda.
   ["antes_de_hospedar", RECUSA_HOSPEDAR],
   ["apagar_pacote_do_cache", RECUSA_MODS],
   ["apagar_servidor", RECUSA_HOSPEDAR],
   ["aplicar_conjunto_de_mods", RECUSA_MODS],
-  ["atender", RECUSA_SALA],
   ["baixar_modulo_de_video", RECUSA_MODULO],
   ["baixar_versao", RECUSA_VERSOES],
-  ["bloquear", RECUSA_SALA],
   ["caminho_entre_pares", RECUSA_REDE],
   ["catalogo_de_mods", RECUSA_MODS],
   ["consentir_no_caminho_entre_pares", RECUSA_REDE],
-  ["contatos_da_agenda", RECUSA_AGENDA],
   ["criar_convite_do_server", RECUSA_PORTARIA],
   ["criar_servidor", RECUSA_HOSPEDAR],
-  ["dar_nome_na_agenda", RECUSA_AGENDA],
   ["decidir_pedido", RECUSA_PORTARIA],
   // Desfazer a escolha de MOD de um servidor guardado desta máquina (P1).
   ["desfazer_escolha_de_mod", RECUSA_HOSPEDAR],
   ["definir_senha_do_server", RECUSA_PORTARIA],
-  ["encerrar_a_ligacao", RECUSA_SALA],
   // Quem pinta o servidor hospedado (tarefa 17f.0 da F3): escolher é de quem
   // hospeda, e o navegador não hospeda.
   ["escolher_atualizacao", RECUSA_ATUALIZAR],
@@ -144,7 +139,6 @@ const RECUSAS_NOMEADAS = new Map([
   // O link do navegador é do servidor que esta máquina hospeda (D-web-6), e o
   // navegador não hospeda.
   ["link_do_navegador", RECUSA_HOSPEDAR],
-  ["meu_codigo", RECUSA_AGENDA],
   ["mod_nativo_ativar", RECUSA_NATIVO],
   ["mod_nativo_colher", RECUSA_NATIVO],
   ["mod_nativo_encerrar", RECUSA_NATIVO],
@@ -160,8 +154,6 @@ const RECUSAS_NOMEADAS = new Map([
   // servidor desta máquina, e o navegador não hospeda.
   ["preparar_copia", RECUSA_HOSPEDAR],
   ["procurar_atualizacao", RECUSA_ATUALIZAR],
-  ["receber_ligacoes", RECUSA_SALA],
-  ["recusar", RECUSA_SALA],
   ["remover_versao", RECUSA_VERSOES],
   // As saídas de quem hospeda com um MOD de API antiga (o corte da API 6;
   // tarefa 13 do plano da F3, Step 5b): mexem no banco de um servidor guardado
@@ -221,6 +213,8 @@ const SO_NA_CASCA_LARGA = new Map([
 
 /** Atendidos nas duas cascas. */
 const COMANDOS_DA_PONTE = new Set([
+  "meu_codigo", "amigos", "contatos_da_agenda", "adicionar_amigo", "tirar_dos_amigos",
+  "dar_nome_na_agenda", "bloquear", "estado_da_sala", "receber_ligacoes", "atender", "recusar", "encerrar_a_ligacao",
   "tela_cheia",
   "abertura", "abrir_no_navegador", "aceitar_mods", "aceite_de_mods",
   "aceites_de_mods", "ajustar_sensibilidade_da_voz", "ajustar_volume_da_tela",
@@ -296,10 +290,6 @@ const NEUTROS_DE_QUEM_NAO_HOSPEDA = new Map([
   // A sala viva da F7: `null` e `[]` dizem «não há sala neste lugar», e nunca
   // `Desligada`, que diria que existe uma e que alguém a desligou. A casca
   // esconde a linha da sala com o `null` (`fraseDaSala`).
-  [
-    "estado_da_sala",
-    { resposta: null, motivo: "o navegador não tem sala; chamado sem gesto na carga (camada-sala.js)" },
-  ],
   [
     "toques_agora",
     { resposta: [], motivo: "o navegador não tem sala; chamado sem gesto na carga (camada-toque.js)" },
@@ -546,6 +536,7 @@ async function trocarOFocoDaPonte(id, manterOMicrofone = false) {
   if (manterOMicrofone) sairDaVozMantendoOMicrofone();
   else sairDaVozDaSessao();
   focoDaPonte = id || 0;
+  if (id) document.dispatchEvent(new Event("seele:foco-servidor"));
   avisarAsSessoes(id || antes, "foco");
   return { antes: antes || null, agora: id || null, saiu_da_sala: saiuDaSala };
 }
@@ -616,6 +607,7 @@ const entradaEmCurso = { cancelar: null };
 
 /** As frases dos links que o navegador não abre, pelo erro do `analisar_link`. */
 const FRASES_DO_LINK = Object.freeze({
+  DominioDescontinuado: "Este endereço foi aposentado. Peça um novo convite.",
   OutraOrigem: "este não é um link do navegador para o SEELE: peça a quem hospeda o link do navegador",
   // Na 0.17 o navegador fala só o Servidor 2.0: um link da 0.16 ou de antes
   // chega como `OutraLinha` (`seele_proto::uri::ErroDoNavegador`), e não mais
@@ -2088,7 +2080,35 @@ async function instalarDoCatalogoNaPagina(id, versao) {
  * O corpo de cada atendido que já tem um. `bancada/ponte-web.cjs` confere que
  * todo atendido tem corpo aqui ou está em `AINDA_A_FAZER`, e nunca os dois.
  */
+let estadoPessoalDaPonte = { estado: "Subindo" };
+function nomeNaAgendaPessoalWeb(nome) {
+  const texto = String(nome || "").trim();
+  if (new TextEncoder().encode(texto).length > 128 || /[\u0000-\u001f\u007f]/.test(texto)) throw "NomeInvalido";
+  return texto || null;
+}
+function pessoalWebNaPonte() {
+  if (!window.seelePessoalWeb) throw new Error("Conversa pessoal ainda está preparando");
+  return window.seelePessoalWeb;
+}
 const ATENDIMENTOS_DA_PONTE = Object.freeze({
+  meu_codigo: () => meuCodigoPessoalWeb(),
+  amigos: () => contatosPessoaisWeb(true),
+  contatos_da_agenda: () => contatosPessoaisWeb(),
+  adicionar_amigo: ({ codigo, nome } = {}) => {
+    const dado = nomeNaAgendaPessoalWeb(nome);
+    return alterarContatoPessoalWeb(codigo, c => ({ ...c, amigo: true, nome: dado || c.nome })).then(() => {});
+  },
+  tirar_dos_amigos: ({ codigo } = {}) => alterarContatoPessoalWeb(codigo, c => ({ ...c, amigo: false })).then(() => {}),
+  dar_nome_na_agenda: ({ codigo, nome } = {}) => {
+    const dado = nomeNaAgendaPessoalWeb(nome);
+    return alterarContatoPessoalWeb(codigo, c => ({ ...c, nome: dado })).then(() => {});
+  },
+  bloquear: ({ codigo, bloqueado } = {}) => alterarContatoPessoalWeb(codigo, c => ({ ...c, bloqueado: Boolean(bloqueado) })).then(() => {}),
+  estado_da_sala: () => structuredClone(estadoPessoalDaPonte),
+  receber_ligacoes: ({ receber } = {}) => pessoalWebNaPonte().receber(receber),
+  atender: () => pessoalWebNaPonte().atender(),
+  recusar: () => pessoalWebNaPonte().recusar(),
+  encerrar_a_ligacao: () => pessoalWebNaPonte().encerrar(),
   // **Nunca `entrar`.** Se viesse, `cumprirAAbertura` (`tela-boot.js`)
   // conectaria sem toque, contra o ADR 0057: o link do navegador entra pela
   // tela ENTRAR EM (3.4). E nunca `hospedar`.
@@ -2166,6 +2186,14 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // de um servidor deste aparelho.
   ler_entrada: async ({ texto } = {}) => {
     const escrito = String(texto ?? "").trim();
+    let codigo;
+    try { codigo = await codigoPessoalWebLido(escrito.replace(/^seele:\/\/@/, "")); }
+    catch (falha) { if (falha === "CodigoComErro" || escrito.startsWith("seele://@")) return "CodigoComErro"; }
+    if (codigo) {
+      if (codigo === await meuCodigoPessoalWeb()) return "SeuCodigo";
+      const contato = (await contatosPessoaisWeb()).find(c => c.codigo === codigo);
+      return { Codigo: { codigo, alvo: `@${codigo}`, nome: contato?.nome || null } };
+    }
     const lido = await lerOLink(escrito);
     return lido.erro === "OutraOrigem" ? { Endereco: escrito } : { Convite: escrito };
   },
@@ -2176,7 +2204,8 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
       // O erro chega como nome (`"OutraOrigem"`) ou como objeto com campo
       // (`{ OutraLinha: { versao } }`): a frase é a do nome, nos dois.
       const nome = typeof lido.erro === "object" && lido.erro ? Object.keys(lido.erro)[0] : lido.erro;
-      const frase = FRASES_DO_LINK[nome] ?? FRASES_DO_LINK.Convite;
+      const detalhe = lido.detalhe ?? lido.erro?.Convite;
+      const frase = FRASES_DO_LINK[detalhe === "DominioDescontinuado" ? detalhe : nome] ?? FRASES_DO_LINK.Convite;
       return Promise.reject({ RecusaDaPonte: { comando: "analisar_convite", frase } });
     }
     linkColadoDaPonte = { texto, alvo: lido.link.alvo, impressao: lido.link.impressao };
@@ -2661,13 +2690,12 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   },
   compartilhar_tela: ({ limites } = {}) =>
     comASessao((sessao) => {
-      // Sem as peças da captura (o WebKit não tem o `MediaStreamTrackProcessor`),
-      // a recusa vem ANTES do seletor, dita como é do navegador.
+      // Sem nenhum leitor de vídeo disponível, recusa antes do seletor.
       if (!temCapturaParaCodificar()) {
         return Promise.reject({ RecusaDaPonte: { comando: "compartilhar_tela", frase: FRASES_DA_TELA_NO_NAVEGADOR.recusa } });
       }
       if (!sessao.transmissao) return Promise.reject("ScreenShareUnavailable");
-      const comSom = limites?.com_som !== false;
+      const comSom = limites?.com_som !== false && temSomDaTelaParaCodificar();
       // Dentro do gesto: nada espera antes do seletor.
       return navigator.mediaDevices
         .getDisplayMedia({
@@ -2678,7 +2706,7 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
         })
         .then(
           (midia) => {
-            sessao.transmissao.comecar(midia, limites);
+            sessao.transmissao.comecar(midia, { ...limites, com_som: comSom });
             return null;
           },
           (falha) =>
@@ -2924,7 +2952,7 @@ async function invocarNaPonte(comando, args) {
  * Os comandos cujo `carimbo` é o argumento deles (a sessão a que se refere), e
  * não a sessão do pedido: trazer a voz, sair de uma sessão.
  */
-const SEM_SESSAO_DO_CARIMBO = new Set(["focar_voz", "encerrar_sessao", "connect", "sessoes", "foco_de_voz", "ver_sessao"]);
+const SEM_SESSAO_DO_CARIMBO = new Set(["meu_codigo", "amigos", "contatos_da_agenda", "adicionar_amigo", "tirar_dos_amigos", "dar_nome_na_agenda", "bloquear", "estado_da_sala", "receber_ligacoes", "atender", "recusar", "encerrar_a_ligacao", "focar_voz", "encerrar_sessao", "connect", "sessoes", "foco_de_voz", "ver_sessao"]);
 
 /** Quem ouve cada evento. */
 const OUVINTES_DA_PONTE = new Map();

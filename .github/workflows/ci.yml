@@ -589,6 +589,18 @@ jobs:
       - run: node apps/seele-app/bancada/pos-release-ui.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      - run: node apps/seele-app/bancada/visual-0174.cjs target/visual-0174
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/mods-nav-0174.cjs target/mods-nav-0174
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/visual-0174.cjs target/visual-0174-extras --extras
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+      - run: node apps/seele-app/bancada/hospedagem-config-0174.cjs target/hospedagem-config-0174
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
       - run: node apps/seele-app/bancada/area-util.cjs target/area-util --webkit
         if: ${{ !cancelled() }}
         timeout-minutes: 30
@@ -791,8 +803,20 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/pessoal-web-integrada.cjs
+        env:
+          SEELE_CHAMADA_WASM: target/pacote-web/seele_web.wasm
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      - run: node apps/seele-app/bancada/pessoal-codigo-web.cjs
+        env:
+          SEELE_CHAMADA_WASM: target/pacote-web/seele_web.wasm
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      - run: node apps/seele-app/bancada/chamada-web-recepcao.cjs
+        env:
+          SEELE_CHAMADA_WASM: target/pacote-web/seele_web.wasm
+        if: ${{ !cancelled() }}
+        timeout-minutes: 2
       - run: node apps/seele-app/bancada/rtc-chamada-web.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5

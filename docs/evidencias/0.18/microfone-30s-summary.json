@@ -1,0 +1,52 @@
+{
+  "devicesAndConfigurations" : [
+    {
+      "device" : {
+        "architecture" : "arm64",
+        "deviceId" : "5F81E549-FC3B-42EC-9CA7-05ACD4342526",
+        "deviceName" : "iPhone 17",
+        "modelName" : "iPhone 17",
+        "osBuildNumber" : "24A434",
+        "osVersion" : "27.0",
+        "platform" : "iOS Simulator"
+      },
+      "expectedFailures" : 0,
+      "failedTests" : 1,
+      "passedTests" : 0,
+      "skippedTests" : 0,
+      "testPlanConfiguration" : {
+        "configurationId" : "1",
+        "configurationName" : "Test Scheme Action"
+      }
+    }
+  ],
+  "environmentDescription" : "SafariCinemaUITests · Built with macOS 27.2",
+  "expectedFailures" : 0,
+  "failedTests" : 1,
+  "finishTime" : 1793214756.843,
+  "passedTests" : 0,
+  "result" : "Failed",
+  "runtimeWarnings" : [
+
+  ],
+  "skippedTests" : 0,
+  "startTime" : 1793214705.384,
+  "statistics" : [
+
+  ],
+  "testFailures" : [
+    {
+      "failureText" : "failed - 1b-ligado-30s: a captura caiu 19 s depois de aberta (nenhuma faixa viva): MIC · vivas: 0 · faixas: ended,ended · contexto: closed · getUserMedia: 2x · áudio mudo: sem audio · sessão: auto · carga: ikp2sa · relatos de pagehide: 0 · DIAG fim: stop()@21741[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42],stop()@21741[desligar@http://127.0.0.1:8732/voz-web.js:921:26],stop()@21744[pararAsFaixas@http://127.0.0.1:8732/voz-web.js:650:42] · eventos: audio-ligado@2036,captura:encerrada@21740,falha:microfone@21740,audio-fechado@21744,contexto:closed@21750 · falhas do motor: 0",
+      "targetName" : "SafariCinemaUITests",
+      "testIdentifier" : 1,
+      "testIdentifierString" : "SafariMicrofoneUITests/testMicrofoneLiveTresEncerramentosENadaReabreSozinho()",
+      "testIdentifierURL" : "test://com.apple.xcode/SeeleSafariUITests/SafariCinemaUITests/SafariMicrofoneUITests/testMicrofoneLiveTresEncerramentosENadaReabreSozinho",
+      "testName" : "testMicrofoneLiveTresEncerramentosENadaReabreSozinho()"
+    }
+  ],
+  "title" : "Test - SafariCinemaUITests",
+  "topInsights" : [
+
+  ],
+  "totalTestCount" : 1
+}

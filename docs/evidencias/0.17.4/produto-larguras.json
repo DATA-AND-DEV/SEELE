@@ -1,0 +1,197 @@
+[
+  {
+    "viewport": 390,
+    "client": 390,
+    "scroll": 390,
+    "pagina": {
+      "client": 390,
+      "scroll": 390
+    },
+    "itens": [
+      {
+        "nome": "SEELESEELE",
+        "left": 20,
+        "right": 133.375,
+        "width": 113.375
+      },
+      {
+        "nome": "Produto",
+        "left": 20,
+        "right": 70.40625,
+        "width": 50.40625
+      },
+      {
+        "nome": "Downloads",
+        "left": 90.40625,
+        "right": 155.21875,
+        "width": 64.8125
+      },
+      {
+        "nome": "Documentação",
+        "left": 175.21875,
+        "right": 261.625,
+        "width": 86.40625
+      },
+      {
+        "nome": "MODs",
+        "left": 281.625,
+        "right": 310.4375,
+        "width": 28.8125
+      },
+      {
+        "nome": "BAIXAR",
+        "left": 276.796875,
+        "right": 370,
+        "width": 93.203125
+      },
+      {
+        "nome": "Baixar o app",
+        "left": 20,
+        "right": 162,
+        "width": 142
+      },
+      {
+        "nome": "Abrir no navegador",
+        "left": 174,
+        "right": 370,
+        "width": 196
+      },
+      {
+        "nome": "Demonstração da interface · participantes e indica",
+        "left": 20,
+        "right": 370,
+        "width": 350
+      }
+    ]
+  },
+  {
+    "viewport": 768,
+    "client": 768,
+    "scroll": 768,
+    "pagina": {
+      "client": 768,
+      "scroll": 768
+    },
+    "itens": [
+      {
+        "nome": "SEELESEELE",
+        "left": 38.390625,
+        "right": 151.765625,
+        "width": 113.375
+      },
+      {
+        "nome": "Produto",
+        "left": 38.390625,
+        "right": 97.203125,
+        "width": 58.8125
+      },
+      {
+        "nome": "Downloads",
+        "left": 121.203125,
+        "right": 196.8125,
+        "width": 75.609375
+      },
+      {
+        "nome": "Documentação",
+        "left": 220.8125,
+        "right": 321.625,
+        "width": 100.8125
+      },
+      {
+        "nome": "MODs",
+        "left": 345.625,
+        "right": 379.234375,
+        "width": 33.609375
+      },
+      {
+        "nome": "BAIXAR",
+        "left": 636.40625,
+        "right": 729.609375,
+        "width": 93.203125
+      },
+      {
+        "nome": "Baixar o app",
+        "left": 38.40625,
+        "right": 192.40625,
+        "width": 154
+      },
+      {
+        "nome": "Abrir no navegador",
+        "left": 208.40625,
+        "right": 416.40625,
+        "width": 208
+      },
+      {
+        "nome": "Demonstração da interface · participantes e indica",
+        "left": 38.40625,
+        "right": 729.59375,
+        "width": 691.1875
+      }
+    ]
+  },
+  {
+    "viewport": 1440,
+    "client": 1440,
+    "scroll": 1440,
+    "pagina": {
+      "client": 1440,
+      "scroll": 1440
+    },
+    "itens": [
+      {
+        "nome": "SEELESEELE",
+        "left": 64,
+        "right": 177.375,
+        "width": 113.375
+      },
+      {
+        "nome": "Produto",
+        "left": 217.375,
+        "right": 276.1875,
+        "width": 58.8125
+      },
+      {
+        "nome": "Downloads",
+        "left": 308.1875,
+        "right": 383.796875,
+        "width": 75.609375
+      },
+      {
+        "nome": "Documentação",
+        "left": 415.796875,
+        "right": 516.609375,
+        "width": 100.8125
+      },
+      {
+        "nome": "MODs",
+        "left": 548.609375,
+        "right": 582.21875,
+        "width": 33.609375
+      },
+      {
+        "nome": "BAIXAR",
+        "left": 1282.796875,
+        "right": 1376,
+        "width": 93.203125
+      },
+      {
+        "nome": "Baixar o app",
+        "left": 100,
+        "right": 254,
+        "width": 154
+      },
+      {
+        "nome": "Abrir no navegador",
+        "left": 270,
+        "right": 478,
+        "width": 208
+      },
+      {
+        "nome": "Demonstração da interface · participantes e indica",
+        "left": 603.28125,
+        "right": 1340,
+        "width": 736.71875
+      }
+    ]
+  }
+]

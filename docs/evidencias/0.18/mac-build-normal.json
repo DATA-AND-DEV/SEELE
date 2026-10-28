@@ -1,0 +1,11 @@
+{
+  "versao_solicitada": "0.18.0",
+  "tipo": "debug, sem TAURI_CONFIG de teste",
+  "bytes": 136052200,
+  "sha256": "5339328eb1db9ef75b57bab5b3abc0616b048eea5c00c65fc9313dbd25b4a1d0",
+  "marcadores_de_instrumentacao_ausentes": [
+    "screen-v1",
+    "native-proof.js",
+    "syntheticScreenOnly"
+  ]
+}

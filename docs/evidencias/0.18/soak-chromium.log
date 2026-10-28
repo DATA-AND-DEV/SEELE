@@ -1,0 +1,33 @@
+chromium: retenção 0s, voz progredindo nos dois sentidos
+chromium: retenção 30s, voz progredindo nos dois sentidos
+chromium: retenção 60s, voz progredindo nos dois sentidos
+chromium: retenção 90s, voz progredindo nos dois sentidos
+chromium: retenção 120s, voz progredindo nos dois sentidos
+chromium: retenção 150s, voz progredindo nos dois sentidos
+chromium: retenção 180s, voz progredindo nos dois sentidos
+chromium: retenção 210s, voz progredindo nos dois sentidos
+chromium: retenção 240s, voz progredindo nos dois sentidos
+chromium: retenção 270s, voz progredindo nos dois sentidos
+chromium: retenção 300s, voz progredindo nos dois sentidos
+chromium: retenção 330s, voz progredindo nos dois sentidos
+chromium: retenção 361s, voz progredindo nos dois sentidos
+chromium: retenção 391s, voz progredindo nos dois sentidos
+chromium: retenção 421s, voz progredindo nos dois sentidos
+chromium: retenção 451s, voz progredindo nos dois sentidos
+chromium: retenção 481s, voz progredindo nos dois sentidos
+chromium: retenção 511s, voz progredindo nos dois sentidos
+chromium: retenção 542s, voz progredindo nos dois sentidos
+chromium: retenção 572s, voz progredindo nos dois sentidos
+chromium: retenção 602s, voz progredindo nos dois sentidos
+chromium: retenção 632s, voz progredindo nos dois sentidos
+chromium: retenção 662s, voz progredindo nos dois sentidos
+chromium: retenção 692s, voz progredindo nos dois sentidos
+chromium: retenção 722s, voz progredindo nos dois sentidos
+chromium: retenção 752s, voz progredindo nos dois sentidos
+chromium: retenção 782s, voz progredindo nos dois sentidos
+chromium: retenção 812s, voz progredindo nos dois sentidos
+chromium: retenção 842s, voz progredindo nos dois sentidos
+chromium: retenção 872s, voz progredindo nos dois sentidos
+chromium: retenção 900s, voz progredindo nos dois sentidos
+{"engine":"chromium","audio":[{"enviados":66,"decodificados":24},{"enviados":24,"decodificados":66}],"cspReal":true,"gestosAtivos":true,"permissaoTardiaLiberada":true}
+chromium: UI real, convite limpo, aceite, chat bidirecional, voz sintética enviada/decodificada nos dois sentidos permissão tardia, saída/perda/reentrada pelo mesmo link e novo convite limpo PASS

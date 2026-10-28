@@ -222,6 +222,29 @@ mod o_sinal {
     use super::*;
 
     #[test]
+    fn o_erro_de_dominio_aposentado_chega_ao_javascript() {
+        let fp = "ab".repeat(32);
+        let origem = seele_proto::uri::ORIGEM_DO_NAVEGADOR;
+        let antigo = format!("https://web.seele.app.br/#host?fp={fp}");
+        assert_eq!(
+            link_do_navegador(&antigo, seele_proto::uri::ORIGEM_DO_NAVEGADOR),
+            serde_json::json!({"erro": "DominioDescontinuado"})
+        );
+        let enc =
+            format!("https://{origem}/#host?fp={fp}&enc=encontro.seele.app.br/198.51.100.7:41234");
+        assert_eq!(
+            link_do_navegador(&enc, seele_proto::uri::ORIGEM_DO_NAVEGADOR),
+            serde_json::json!({"erro": "Convite", "detalhe": "DominioDescontinuado"})
+        );
+        let novo = format!("https://{origem}/#host?fp={fp}");
+        assert!(
+            link_do_navegador(&novo, seele_proto::uri::ORIGEM_DO_NAVEGADOR)
+                .get("link")
+                .is_some()
+        );
+    }
+
+    #[test]
     fn a_pagina_monta_o_chama_sem_escrever_linha_e_le_a_resposta() {
         let pedido = serde_json::json!({
             "impressao": "3cbcfb02".repeat(8),

@@ -19,11 +19,7 @@
   border-top: var(--seele-b) solid var(--seele-linha);
 }
 
-@media (max-width: 520px) {
-  .perfil-sala {
-    padding: var(--seele-e2);
-  }
-}
+
 
 .perfil-sala-codigo {
   display: flex;
@@ -48,13 +44,7 @@
   gap: var(--seele-e1);
 }
 
-.perfil-agenda {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  max-height: 12rem;
-  overflow-y: auto;
-}
+
 
 .perfil-agenda-linha {
   display: flex;
@@ -207,12 +197,7 @@
   gap: 4px 12px;
 }
 
-@media (max-width: 640px) {
-  #tela-sessao[data-vista="ligacao"] .operador {
-    padding: 6px 8px;
-    gap: 6px 8px;
-  }
-}
+
 
 /* O chat e o DESLIGAR só existem na barra da ligação pessoal. */
 #tela-sessao:not([data-vista="ligacao"]) :is(#ligacao-chat, #ligacao-desligar) {
@@ -306,11 +291,7 @@
    (`padding-right`) e o painel fica no vão, então nada é coberto; sem largura
    para isso (abaixo de 900px) o painel sobe até o topo da barra da chamada, e a
    barra continua à vista e clicável. */
-@media (min-width: 900px) {
-  #tela-sessao[data-chat="aberto"] .paineis {
-    padding-right: min(34rem, 100vw);
-  }
-}
+
 .ligacao-chat-fechar {
   display: none;
 }
@@ -335,12 +316,7 @@
 
 /* Estreito: o painel acaba onde a barra da chamada começa (a altura vem de
    `abrirOChat`, que mede a barra). */
-@media (max-width: 899px) {
-  #tela-sessao[data-chat="aberto"] #vista-conversa {
-    bottom: var(--ligacao-barra-alto, 0px);
-    width: 100vw;
-  }
-}
+
 
 /* Os botões CANAIS e PESSOAS abrem as colunas do servidor, que a ligação não
    tem: no painel do chat eles não existem. */
@@ -410,39 +386,13 @@
   overflow-y: auto;
 }
 
-.amigo-cartao {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas:
-    "avatar texto"
-    "avatar acoes";
-  gap: 2px var(--seele-e2);
-  align-items: center;
-  padding: var(--seele-e2);
-  border: 1px solid var(--seele-linha);
-  background: var(--seele-negro-painel);
-}
+
 
 .amigo-cartao:hover {
   border-color: var(--seele-linha-forte);
 }
 
-.amigo-avatar {
-  grid-area: avatar;
-  align-self: start;
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--seele-linha-forte);
-  font-family: var(--seele-display);
-  font-weight: 900;
-  font-size: 15px;
-  letter-spacing: 0.06em;
-  color: var(--seele-laranja-nerv);
-  background: var(--seele-negro-absoluto);
-}
+
 
 .amigo-texto {
   grid-area: texto;
@@ -491,14 +441,7 @@
   color: var(--seele-laranja-nerv);
 }
 
-.amigo-acoes {
-  grid-area: acoes;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--seele-e1) var(--seele-e2);
-  margin-top: var(--seele-e1);
-}
+
 
 /* O LIGAR é a ação principal do cartão: cheio, na cor do acento. */
 .amigo-ligar {
@@ -686,42 +629,15 @@
 }
 
 /* Abaixo de 1180px a coluna do HOSPEDAR desce para baixo das duas outras. */
-@media (max-width: 1180px) {
-  .boot-colunas {
-    grid-template-columns: minmax(14rem, 20rem) minmax(0, 1fr);
-  }
 
-  .boot-dir {
-    grid-column: 1 / -1;
-  }
-}
 
 /* Numa coluna só (janela estreita): sem nada lado a lado. */
-@media (max-width: 760px) {
-  .boot-colunas {
-    grid-template-columns: minmax(0, 1fr);
-  }
 
-  .boot-topo .boot-rodape {
-    flex: 1 1 100%;
-    margin-left: 0;
-  }
-}
 
 /* A entrada chega em três tempos curtos, uma vez, sem repetir: nada de laço, e
    nada que gaste CPU. Sem movimento para quem pede (`prefers-reduced-motion`) e
    enquanto a voz está aberta em alguma sessão (`data-voz-aberta`). */
-@keyframes entrada-chega {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
 
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
 
 #tela-boot .boot-topo,
 #tela-boot .boot-coluna {
@@ -740,6 +656,123 @@
   animation-delay: 120ms;
 }
 
+
+
+:root[data-voz-aberta="sim"] #tela-boot *,
+:root[data-voz-aberta="sim"] #tela-boot {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* Direção visual 0.17.4 — componente proprietário. */
+.perfil-agenda {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 420px;
+  overflow-y: auto;
+  overflow: auto;
+}
+
+
+.amigo-cartao {
+  display: grid;
+  grid-template-columns: 40px minmax(0,1fr) auto;
+  grid-template-areas: "avatar texto acoes";
+  gap: 12px;
+  align-items: center;
+  padding: var(--seele-e2);
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+  border-radius: var(--seele-raio);
+}
+.amigo-acoes {
+  grid-area: acoes;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--seele-e1);
+}
+.amigo-avatar {
+  grid-area: avatar;
+  align-self: start;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--seele-linha-forte);
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+  color: var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+  border-radius: var(--seele-raio);
+}
+.amigo-ligar, .amigo-tirar { min-height: 40px; border-radius: var(--seele-raio); }
+
+/* Condições de composição, após os valores padrão do componente. */
+@media (max-width: 520px) {
+  .perfil-sala {
+    padding: var(--seele-e2);
+  }
+}
+
+@media (max-width: 640px) {
+  #tela-sessao[data-vista="ligacao"] .operador {
+    padding: 6px 8px;
+    gap: 6px 8px;
+  }
+}
+
+@media (min-width: 900px) {
+  #tela-sessao[data-chat="aberto"] .paineis {
+    padding-right: min(34rem, 100vw);
+  }
+}
+
+@media (max-width: 899px) {
+  #tela-sessao[data-chat="aberto"] #vista-conversa {
+    bottom: var(--ligacao-barra-alto, 0px);
+    width: 100vw;
+  }
+}
+
+@media (max-width: 1180px) {
+  .boot-colunas {
+    grid-template-columns: minmax(14rem, 20rem) minmax(0, 1fr);
+  }
+
+  .boot-dir {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .boot-colunas {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .boot-topo .boot-rodape {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+}
+
+@keyframes entrada-chega {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   #tela-boot *,
   #tela-boot {
@@ -748,8 +781,23 @@
   }
 }
 
-:root[data-voz-aberta="sim"] #tela-boot *,
-:root[data-voz-aberta="sim"] #tela-boot {
-  animation: none !important;
-  transition: none !important;
+@media(max-width: 700px) {
+.perfil-sala-codigo { flex-wrap: wrap; }
+}
+
+@media(max-width:700px) {
+#tela-sessao[data-vista="ligacao"] .paineis { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(0,1fr) auto; grid-template-areas: "linha" "barra"; }
+#tela-sessao[data-vista="ligacao"] .trilha { display: none; }
+#tela-sessao[data-vista="ligacao"] .painel-linha { min-height: 0; overflow: hidden; }
+#tela-sessao[data-vista="ligacao"] #vista-chamada { overflow-y: auto; }
+#tela-sessao[data-vista="ligacao"] .operador { position: relative; z-index: 2; background: var(--seele-negro-absoluto); min-height: 0; border-top: 1px solid var(--seele-linha); }
+#tela-sessao[data-vista="ligacao"] .chamada-acoes-estreitas { display: none; }
+#tela-sessao[data-vista="ligacao"] #palco { flex: 0 0 auto; max-height: 24vh; overflow-y: auto; }
+#tela-sessao[data-vista="ligacao"] #chamada-grade { flex: 0 0 auto; padding: 12px; }
+}
+
+@media(max-width:700px) {
+.amigo-cartao { grid-template-columns: 40px minmax(0,1fr); grid-template-areas: "avatar texto" "acoes acoes"; padding: 12px; gap: 8px 12px; }
+.amigo-acoes > button { min-height: 44px; }
+.amigo-codigo { font-size: 12px; letter-spacing: 0; }
 }

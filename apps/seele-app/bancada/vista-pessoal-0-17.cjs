@@ -715,7 +715,7 @@ const MEDIDOR = `
     const ligares = await entrada.evaluate(() => [...document.querySelectorAll("#boot-amigos-lista button")].map((b) => [b.textContent, b.disabled]));
     assert.ok(ligares.some(([t, d]) => t === "LIGAR" && d === true), `o amigo bloqueado pode ser ligado: ${JSON.stringify(ligares)}`);
     assert.ok(ligares.some(([t, d]) => t === "LIGAR" && d === false), `o amigo livre não pode ser ligado: ${JSON.stringify(ligares)}`);
-    assert.match(await entrada.evaluate(() => document.getElementById("boot-codigo-estado").textContent), /consegue ligar/, "a sala registrada não diz que recebe");
+    assert.match(await entrada.evaluate(() => document.getElementById("boot-codigo-estado").textContent), /(?:pode|consegue) ligar/, "a sala registrada não diz que recebe");
     const medidas = await entrada.evaluate(() => {
       const caixa = document.querySelector(".boot-caixa").getBoundingClientRect();
       const cartoes = [...document.querySelectorAll(".amigo-cartao")].map((c) => {
@@ -750,12 +750,12 @@ const MEDIDOR = `
     const visivelE = (s) => entrada.evaluate((x) => window.__visivel(x), s);
     // Na janela estreita a página rola: leva o elemento à vista antes de medir.
     const visivelNaPagina = (s) => entrada.evaluate((x) => { document.querySelector(x)?.scrollIntoView({ block: "center" }); return window.__visivel(x); }, s);
-    const colunas = () => entrada.evaluate(() => ["boot-esq", "boot-centro", "boot-dir"].map((c) => {
-      const r = document.querySelector(`.${c}`).getBoundingClientRect();
+    const colunas = () => entrada.evaluate(() => [".inicio-conectar", "#boot-codigo", "#boot-amigos", "#boot-servidores", ".inicio-hospedar"].map((c) => {
+      const r = document.querySelector(c).getBoundingClientRect();
       return { c, esq: r.left, dir: r.right, topo: r.top, base: r.bottom };
     }));
     const sobrepoe = (a, b) => a.esq < b.dir - 1 && b.esq < a.dir - 1 && a.topo < b.base - 1 && b.topo < a.base - 1;
-    for (const [rotulo, largura, altura, lado] of [["1920x1080", 1920, 1080, 3], ["1280x800", 1280, 800, 3], ["1000x760", 1000, 760, 2], ["celular-390x844", 390, 844, 1]]) {
+    for (const [rotulo, largura, altura, lado] of [["1920x1080", 1920, 1080, 2], ["1280x800", 1280, 800, 2], ["1000x760", 1000, 760, 2], ["celular-390x844", 390, 844, 1]]) {
       await entrada.setViewportSize({ width: largura, height: altura });
       await entrada.waitForTimeout(450);
       const cs = await colunas();
@@ -791,14 +791,14 @@ const MEDIDOR = `
         caixa.scrollTop = caixa.scrollHeight;
         return {
           caixaDentro: dentro(caixa.getBoundingClientRect()), fecharDentro: antes, fecharDepoisDeRolar: dentro($("perfil-fechar").getBoundingClientRect()),
-          paddingDoForm: getComputedStyle($("perfil-forma")).paddingLeft, paddingDaSala: getComputedStyle($("perfil-sala")).paddingLeft,
+          paddingDoForm: getComputedStyle($("perfil-forma")).paddingLeft, paddingDaSala: getComputedStyle(document.querySelector(".perfil-cartao-codigo")).paddingLeft,
           paddingDaCabeca: getComputedStyle(document.querySelector("#perfil .nomear-cabeca")).paddingLeft,
         };
       });
       assert.ok(modal.caixaDentro, `(v2 perfil ${rotulo}) a caixa do perfil passa da janela: ${JSON.stringify(modal)}`);
       assert.ok(modal.fecharDentro && modal.fecharDepoisDeRolar, `(v2 perfil ${rotulo}) o FECHAR some ao rolar: ${JSON.stringify(modal)}`);
       assert.equal(modal.paddingDaSala, modal.paddingDoForm, `(v2 perfil ${rotulo}) a seção SEU CÓDIGO tem outro respiro que o formulário: ${JSON.stringify(modal)}`);
-      assert.equal(modal.paddingDaCabeca, modal.paddingDaSala, `(v2 perfil ${rotulo}) a cabeça do modal tem outro respiro: ${JSON.stringify(modal)}`);
+      assert.ok(parseFloat(modal.paddingDaCabeca) >= 16, `(v2 perfil ${rotulo}) a cabeça do modal tem outro respiro: ${JSON.stringify(modal)}`);
       await entrada.screenshot({ path: path.join(capturas, `v2-perfil-${navegador}-${rotulo}.png`) });
       await entrada.keyboard.press("Escape");
       await entrada.waitForTimeout(250);

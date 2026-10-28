@@ -83,7 +83,7 @@
 
 /* Só o painel do meio cede altura. O resto tem a altura do que diz: com a
    CHAMADA cheia, a coluna encolhia também a telemetria, e o MUDO subia. */
-:root[data-casca="celular"] #tela-sessao > :is(.cel-topo, #veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia, .voz-celular, .cel-abas, .cel-telemetria) {
+:root[data-casca="celular"] #tela-sessao > :is(.cel-topo, #veredito, #aviso-fone, #aviso-audio, #cel-aviso-persistencia, .voz-celular, .cel-abas) {
   flex-shrink: 0;
 }
 
@@ -890,46 +890,6 @@
   display: none;
 }
 
-:root[data-casca="celular"] .cel-telemetria {
-  display: none;
-}
-
-:root[data-casca="celular"] #tela-sessao[data-chamada] > .cel-telemetria {
-  order: 3;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  /* A altura das abas, escrita do mesmo jeito: o MUDO fica no mesmo lugar. */
-  box-sizing: border-box;
-  height: calc(var(--cel-abas) + 1px + var(--cel-seguro-pe));
-  padding: 0 var(--cel-seguro-dir) var(--cel-seguro-pe) var(--cel-seguro-esq);
-  border-top: 1px solid var(--seele-linha);
-  background: var(--seele-negro-painel);
-}
-
-:root[data-casca="celular"] .cel-telemetria-celula {
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 2px;
-  border-top: 2px solid transparent;
-  border-left: 1px solid var(--seele-linha);
-}
-
-:root[data-casca="celular"] .cel-telemetria-celula:first-child {
-  border-left: 0;
-}
-
-:root[data-casca="celular"] .cel-telemetria-celula .rotulo {
-  /* Com teto, como as abas: quatro rótulos numa largura de 390. */
-  font-size: min(calc(var(--seele-t-micro) * var(--cel-escala)), 11px);
-}
-
-:root[data-casca="celular"] .cel-telemetria-valor {
-  font-size: min(calc(var(--seele-t-dado) * var(--cel-escala)), 14px);
-  color: var(--seele-osso);
-  white-space: nowrap;
-}
-
 :root[data-casca="celular"] #vista-chamada {
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1228,29 +1188,6 @@
   flex-basis: calc(130px * var(--cel-escala));
 }
 
-/* CONEXÃO: as sete medidas numa grade de duas colunas, que vira uma quando o
-   texto do sistema não cabe em duas (a 1, o mínimo de 150 dá duas a 360 e a
-   480). */
-:root[data-casca="celular"] .cel-medidas {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(150px * var(--cel-escala))), 1fr));
-  gap: 12px;
-  margin: 0;
-}
-
-:root[data-casca="celular"] .cel-medida {
-  display: grid;
-  gap: 2px;
-  padding: 10px 12px;
-  border: 1px solid var(--seele-linha);
-}
-
-:root[data-casca="celular"] .cel-medida dd {
-  margin: 0;
-  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
-  color: var(--seele-osso);
-}
-
 /* O QUE O CELULAR NÃO FAZ: os dois grupos da lista canônica. */
 :root[data-casca="celular"] .cel-fora-grupo {
   margin-bottom: 20px;
@@ -1344,7 +1281,7 @@
    da faixa: o topo, a barra da chamada, a grade e a telemetria saem. A faixa
    fica, com o MUDO: o palco nunca a cobre. */
 @media (orientation: landscape) and (max-height: 500px) {
-  :root[data-casca="celular"] #tela-sessao[data-chamada]:has(#palco[data-transmitindo="sim"]) > :is(.cel-topo, .cel-telemetria) {
+  :root[data-casca="celular"] #tela-sessao[data-chamada]:has(#palco[data-transmitindo="sim"]) > :is(.cel-topo) {
     display: none;
   }
 

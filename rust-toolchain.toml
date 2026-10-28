@@ -10,3 +10,6 @@ profile = "minimal"
 # falha no build script — e falha só na máquina de quem ainda não o tinha,
 # que é o pior lugar para descobrir.
 components = ["rustfmt", "clippy", "llvm-tools"]
+
+# Personal calls also run the local WASM inside the desktop webview.
+targets = ["wasm32-unknown-unknown"]

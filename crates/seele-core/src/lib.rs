@@ -66,6 +66,7 @@ pub use seele_sessao::som;
 pub use seele_sessao::volta;
 pub mod bomba;
 pub mod caminho;
+pub mod chamada_pessoal;
 pub mod chegada;
 pub mod client;
 pub mod confere_codigo;

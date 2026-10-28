@@ -55,6 +55,7 @@ pub(crate) struct Evento {
 #[derive(Debug, Clone)]
 pub(crate) enum Resultado {
     Ok,
+    Localizado(Convite),
     Eventos(Vec<Evento>, u64),
     Recusa(Recusa),
 }
@@ -63,6 +64,7 @@ impl Resultado {
     fn bytes(&self) -> usize {
         match self {
             Self::Eventos(e, _) => e.iter().map(|e| e.bytes).sum(),
+            Self::Localizado(_) => 256,
             _ => 0,
         }
     }
@@ -70,6 +72,7 @@ impl Resultado {
         use chamada::{Motivo, Resposta};
         match self {
             Self::Ok => Resposta::Ok,
+            Self::Localizado(convite) => Resposta::Localizado { convite },
             Self::Eventos(eventos, cursor) => Resposta::Eventos {
                 cursor,
                 eventos: eventos
@@ -323,6 +326,18 @@ impl ChamadasPessoais {
             .map_err(|_| Recusa::Invalido)?
             .len();
         match &p.operacao {
+            Operacao::Localizar { codigo } => {
+                let codigo =
+                    seele_proto::codigo::Codigo::ler(codigo).map_err(|_| Recusa::Invalido)?;
+                let registro = e
+                    .registros
+                    .values()
+                    .filter(|r| !r.revogado && r.lease > agora && r.convite.expira_em > unix)
+                    .filter(|r| codigo.confere_chave(&r.dono))
+                    .max_by_key(|r| r.convite.expira_em)
+                    .ok_or(Recusa::Ausente)?;
+                return Ok(Resultado::Localizado(registro.convite.clone()));
+            }
             Operacao::Registrar { convite } => {
                 conferir_convite(convite, unix)?;
                 if convite.id != p.convite
@@ -611,7 +626,10 @@ mod testes {
             operacao: op,
             assinatura: Assinatura::default(),
         };
-        if matches!(p.operacao, Operacao::Registrar { .. } | Operacao::Revogar) {
+        if matches!(
+            p.operacao,
+            Operacao::Registrar { .. } | Operacao::Revogar | Operacao::Localizar { .. }
+        ) {
             p.chamada = ZERO;
         }
         assinar(&mut p, origem);
@@ -668,6 +686,52 @@ mod testes {
         assinar(&mut p, &chave(quem));
         p
     }
+    #[test]
+    fn codigo_localiza_so_capacidade_viva_assinada_e_nao_da_acesso_a_caixa() {
+        let (s, t, c) = base();
+        let visitante = chave(2);
+        let codigo = seele_proto::codigo::Codigo::da_chave(&c.dono).to_string();
+        let mut p = pedido(
+            &s,
+            &visitante,
+            visitante.verifying_key().to_bytes(),
+            6,
+            Operacao::Localizar { codigo },
+        );
+        p.chamada = ZERO;
+        assinar(&mut p, &visitante);
+        match enviar(&s, &p, t, 1000) {
+            Resultado::Localizado(encontrado) => assert_eq!(encontrado, c),
+            outro => panic!("{outro:?}"),
+        }
+        let mut intruso = p.clone();
+        intruso.nonce = [7; 16];
+        intruso.operacao = Operacao::Buscar {
+            cursor: 0,
+            confirmado: 0,
+        };
+        intruso.convite = c.id;
+        assinar(&mut intruso, &visitante);
+        assert!(matches!(
+            enviar(&s, &intruso, t, 1000),
+            Resultado::Recusa(Recusa::Assinatura)
+        ));
+        let mut adulterado = p.clone();
+        adulterado.nonce = [8; 16];
+        assert!(matches!(
+            enviar(&s, &adulterado, t, 1000),
+            Resultado::Recusa(Recusa::Assinatura)
+        ));
+        let mut expirado = p.clone();
+        expirado.nonce = [9; 16];
+        expirado.valido_ate = 1121;
+        assinar(&mut expirado, &visitante);
+        assert!(matches!(
+            enviar(&s, &expirado, t + LEASE + Duration::from_secs(1), 1061),
+            Resultado::Recusa(Recusa::Ausente)
+        ));
+    }
+
     #[test]
     fn ambas_pontas_assinam_e_o_aceite_precede_sinal_sem_consumir_a_leitura() {
         let (s, t, c) = base();

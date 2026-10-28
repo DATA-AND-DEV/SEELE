@@ -1,0 +1,23 @@
+    Checking seele-proto v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-proto)
+    Checking tauri v2.11.5
+    Checking seele-enlace v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-enlace)
+    Checking tower-http v0.6.11
+    Checking seele-voz v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-voz)
+    Checking reqwest v0.13.4
+    Checking seele-audio v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-audio)
+    Checking seele-video v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-video)
+    Checking seele-sessao v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-sessao)
+    Checking igd-next v0.17.1
+    Checking seele-core v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-core)
+   Compiling seele-app v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/apps/seele-app)
+    Checking tauri-plugin-fs v2.5.1
+    Checking tauri-plugin-updater v2.10.1
+    Checking seele-ffi v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-ffi)
+    Checking tauri-plugin-dialog v2.7.2
+    Checking seele-server v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-server)
+    Checking seele-motor v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-motor)
+    Checking seele-lancador v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-lancador)
+    Checking seele-encontro v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/crates/seele-encontro)
+    Checking xtask v0.0.0 (/Users/dev-alexandre/.codex/worktrees/136e/SEELE/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 27.42s
+guarda ok: 37 artefatos locais, todos desta fonte
