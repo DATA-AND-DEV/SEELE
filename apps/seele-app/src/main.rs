@@ -14107,6 +14107,18 @@ fn girar_o_log(arquivo: &std::path::Path) {
 }
 
 fn main() {
+    // A validação pode usar o mesmo app final com WebView sem persistência.
+    // A pasta nativa também precisa ser explícita e absoluta; recusar antes
+    // de abrir o log evita tocar o perfil padrão numa invocação incompleta.
+    let webview_descartavel = std::env::var("SEELE_WEBVIEW_DESCARTAVEL").as_deref() == Ok("1");
+    if webview_descartavel
+        && !std::env::var("SEELE_HOME")
+            .is_ok_and(|pasta| std::path::Path::new(&pasta).is_absolute())
+    {
+        eprintln!("SEELE_WEBVIEW_DESCARTAVEL=1 exige SEELE_HOME explícito e absoluto.");
+        std::process::exit(2);
+    }
+
     // Marca de arranque. `specs/06-clientes-gui.md` aceita M5 com inicialização
     // abaixo de 2 s, e um critério que ninguém mede é um critério que passa a
     // valer o que a lembrança de alguém sobre "pareceu rápido" valer.
@@ -14217,7 +14229,13 @@ fn main() {
                 }),
             )));
             for janela in app.config().app.windows.clone() {
-                tauri::WebviewWindowBuilder::from_config(app.handle(), &janela)?.build()?;
+                let janela = tauri::WebviewWindowBuilder::from_config(app.handle(), &janela)?;
+                let janela = if webview_descartavel {
+                    janela.incognito(true)
+                } else {
+                    janela
+                };
+                janela.build()?;
             }
 
             // **Os pacotes do layout antigo, levados uma vez.**
