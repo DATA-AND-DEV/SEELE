@@ -104,3 +104,12 @@ e31dda28805d2c4213889ea9437bfb7d7f49b14b041b127f47bb97676c50b973  v4.json
 # atualizar este registro. Reconciliado na 0.17.3 com os mesmos bytes já
 # públicos; contrato executável e versões aceitas não mudam nesta correção.
 d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
+#
+# ## v8 nasceu em 29/10/2026 (API 8, plataformas), e emenda antes da publicação
+#
+# A v8 é a v7 inteira, mais o `plataformas` do manifesto (ADR 0058, acréscimo).
+# `MOD_API_VERSION` já está em 8, e por isso ela conta como oferecida. O
+# `check-api` exige a linha dela desde o commit que a cria; até a v8 sair numa
+# release, cada emenda a refaz aqui, na regra da v6 e da v7. Quando sair, ela
+# congela.
+0f38893bc7bd64d1bdbd4811364d99ce1f6fd47cbd4e3fa861a24df0d894a149  v8.json

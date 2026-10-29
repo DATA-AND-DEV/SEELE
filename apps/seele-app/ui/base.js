@@ -3401,6 +3401,12 @@ const CAPACIDADES_POR_API = Object.freeze({
     "superficies", "contribuicoes", "estilos", "classes", "volume",
     "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor", "acoes",
   ]),
+  // A API 8 (`api/v8.json`, `capacidades_da_api(8)`): a mesma lista da 7. O que
+  // a 8 acrescenta é do manifesto (`plataformas`), e não algo que o MOD chame.
+  8: Object.freeze([
+    "superficies", "contribuicoes", "estilos", "classes", "volume",
+    "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor", "acoes",
+  ]),
   // As 3, 4 e 5 saíram no corte (tarefa 13 do plano da F3), como os braços
   // delas em `capacidades_da_api`: este app não as executa, e quem as roda é a
   // linha do Servidor 0.15. Um pacote delas é recusado ao carregar.

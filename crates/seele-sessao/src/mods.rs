@@ -38,6 +38,10 @@ pub fn refusal_name(why: &Refused) -> &'static str {
         // Os de cargos (E6, agente F): a frase é do `ui/frases.js`.
         Refused::PermissoesPedemApiNova { .. } => "permissoes-pedem-api-nova",
         Refused::PermissoesInvalidas(_) => "permissoes-invalidas",
+        // As de plataforma (API 8): a frase é do `ui/frases.js`.
+        Refused::PlataformasPedemApiNova { .. } => "plataformas-pedem-api-nova",
+        Refused::PlataformasVazias => "plataformas-vazias",
+        Refused::PlataformaRepetida { .. } => "plataforma-repetida",
         // Os tetos do `reach` no anúncio da linha 2, conferidos na instalação.
         Refused::AlcancesDemais { .. } => "alcances-demais",
         Refused::AlcanceGrandeDemais { .. } => "alcance-grande-demais",

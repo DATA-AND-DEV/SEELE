@@ -298,6 +298,39 @@ e não «aplicado».** O servidor confere a forma — as chaves, os valores, o
 conhece a paleta do produto e as cores que deriva dela, e cada uma conta ao MOD
 pelo evento `tema`: `aplicado`, ou `recusado` com os pares e a região.
 
+## A API 8
+
+**A 8 é um alargamento da 7** (ADR 0058, acréscimo): a v7 inteira, mais a
+declaração de onde o MOD roda. A `api/v8.json` é escrita por inteiro, sem
+`extends`, como a v6 e a v7, e **ainda não está em `congeladas.sha256`**: ela só
+congela quando sair numa release.
+
+- **`manifesto.plataformas`** (`Manifest::plataformas`, `Plataforma`):
+  `["app", "navegador"]`.
+  - **Ausente quer dizer as duas** (`plataformas_efetivas`). Escrita e vazia é
+    recusada (`PlataformasVazias`), e repetir uma plataforma também
+    (`PlataformaRepetida`).
+  - Declarar exige `"api": 8`. Um manifesto da 7 ou da 6 com a chave é recusado
+    com `PlataformasPedemApiNova`, e não ignorado.
+  - **O celular é navegador.** Um MOD só do `app` não carrega nele.
+  - Existe para o MOD de servidor de jogo, que só faz sentido onde há um
+    servidor para hospedá-lo.
+- **As capacidades da 8 são as da 7** (`capacidades_da_api(8)`): nada novo que o
+  MOD chame, só o que o manifesto declara.
+
+O que fica:
+
+- **Entra na linha `2`**, ao lado da 7 e da 6: `APIS_POR_LINHA` é
+  `("2", [8, 7, 6])`. As linhas `1` e `0.15` não mudam.
+- **A 0.18 não roda a 8**, e a recusa não é a mesma nos dois casos, como foi
+  com a 7: um manifesto da 8 **com** `plataformas` é recusado como `Malformed`
+  (`deny_unknown_fields`), e **sem** ela como `ApiTooNew`. O catálogo não pode
+  oferecer a uma 0.18 uma versão da 8; o indexador tem de escrever a `api` que o
+  `mod.json` declara.
+- **O indexador** (repositório `SEELE-MODS-INDEXER`) precisa aceitar a 8 antes
+  de um MOD da 8 ser publicado. A cópia do número dele neste repositório é
+  `apps/seele-app/testes/api-do-indexador.json`.
+
 ## Os quatro blocos
 
 - **`reads`** — o que um MOD lê do domínio.

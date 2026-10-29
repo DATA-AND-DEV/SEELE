@@ -214,8 +214,21 @@ pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
             "acoes",
         ],
         // **A 8 tem as capacidades da 7, iguais e na mesma ordem**: o que ela
-        // acrescenta é do manifesto (`plataformas`), e não algo que o MOD chame.
-        8 => capacidades_da_api(7),
+        // acrescenta é do manifesto (`plataformas`), e não algo que o MOD chame. Escrita
+        // por inteiro, como a 7, para o espelho da casca a conferir do mesmo jeito.
+        8 => &[
+            "superficies",
+            "contribuicoes",
+            "estilos",
+            "classes",
+            "volume",
+            "arquivo",
+            "tema",
+            "retrato",
+            "eventos-da-tela",
+            "aviso-do-servidor",
+            "acoes",
+        ],
         _ => &[],
     }
 }

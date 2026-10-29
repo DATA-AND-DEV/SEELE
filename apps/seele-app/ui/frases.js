@@ -700,6 +700,14 @@ const RECUSAS_DE_PACOTE = {
     "ele declara permissões de cargos, que só existem a partir da API 7, mas diz ser de uma API anterior; quem publica precisa declarar a API 7",
   "permissoes-invalidas":
     "a lista de permissões que ele declara não passa na conferência (nome repetido, vazio ou fora do formato); quem publica precisa corrigi-la",
+  // A API 8 (`Refused::PlataformasPedemApiNova`, `PlataformasVazias` e
+  // `PlataformaRepetida`, `refusal_name` no seele-sessao): onde o MOD roda.
+  "plataformas-pedem-api-nova":
+    "ele declara em que plataformas roda, o que só existe a partir da API 8, mas diz ser de uma API anterior; quem publica precisa declarar a API 8",
+  "plataformas-vazias":
+    "a lista de plataformas que ele declara está vazia, e assim ele não roda em lugar nenhum; quem publica precisa listar app, navegador ou as duas, ou tirar a chave",
+  "plataforma-repetida":
+    "a lista de plataformas que ele declara repete uma plataforma; quem publica precisa corrigi-la",
   "api-too-old": `ele é de uma API mais velha que a 6, a mais velha que este app roda; procure a versão dele para a API 6 ou 7, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
   "malformed-id": "o identificador dele não é «autor/nome»",
   "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",

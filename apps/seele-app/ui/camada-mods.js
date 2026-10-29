@@ -2132,9 +2132,10 @@ async function desenharMods() {
  * problema está no aplicativo ou no pacote.
  */
 // Na 0.17 a API 7 entra (as permissões de MOD dos cargos, ADR 0063), e a 6
-// continua rodando: `seele_proto::mods::{MOD_API_VERSION, APIS_ACEITAS}`.
-const API_DESTE_APLICATIVO = 7;
-const APIS_QUE_ESTE_APLICATIVO_ACEITA = [7, 6];
+// continua rodando: `seele_proto::mods::{MOD_API_VERSION, APIS_ACEITAS}`. A 8
+// (`plataformas` no manifesto) entra na linha 2 ao lado delas.
+const API_DESTE_APLICATIVO = 8;
+const APIS_QUE_ESTE_APLICATIVO_ACEITA = [8, 7, 6];
 
 /** Os pacotes guardados nesta máquina, com tamanho e com quem os exige. */
 async function desenharOCache() {
