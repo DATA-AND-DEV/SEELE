@@ -123,9 +123,11 @@ Funciona igual para o jogo puro e para o jogo com mods.
 ## A API 8
 
 A 8 é um **alargamento da 7**, como a 7 foi da 6: a v7 inteira, mais o que segue.
-Ela entra numa linha nova de `APIS_POR_LINHA`, que roda `[8, 7, 6]`. Um app que
-não roda a 8 recusa o manifesto da 8 como `ApiTooNew`, ou como `Malformed` se ele
-traz as chaves novas, do mesmo jeito que a 0.16 recusa a 7.
+Ela entra **na linha 2**, que passa a rodar `[8, 7, 6]` (`APIS_POR_LINHA`), sem
+linha nova: o ADR 0058 só pede linha nova para mudança que não é acréscimo. Um
+app que não roda a 8 recusa o manifesto da 8 como `ApiTooNew`, ou como
+`Malformed` se ele traz as chaves novas, do mesmo jeito que a 0.16 recusa a 7.
+(Corrigido em 29/10 ao planejar; a primeira versão dizia «linha nova».)
 
 ### 1. `plataformas` no manifesto
 
@@ -137,6 +139,10 @@ traz as chaves novas, do mesmo jeito que a 0.16 recusa a 7.
   porque o celular é a casca web. Ausente quer dizer as duas, que é o
   comportamento de hoje. Um valor desconhecido é recusado, para um app nativo de
   celular futuro poder ganhar o próprio valor sem ser confundido com estes.
+- **A marca viaja no catálogo** que a janela pede ao servidor (o JSON de
+  `seele-server/src/mods/pedidos.rs`), e não no `ModAnunciado`: campo novo
+  numa mensagem do fio nunca entra (ADR 0058), e campo novo nesse JSON não toca
+  no protocolo. O aceite do conjunto não muda.
 - Quem entra por uma plataforma fora da lista **não baixa** a metade de cliente.
   A tela de MODs mostra o MOD com a frase «só funciona no app», e o MOD não
   conta como falha.
