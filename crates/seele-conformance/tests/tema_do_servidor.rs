@@ -146,6 +146,7 @@ fn ligado(id: &str, hash: &str) -> EnabledMod {
         server_half: true,
         api: seele_proto::mods::MOD_API_VERSION,
         tema: false,
+        plataformas: None,
     }
 }
 

@@ -6378,6 +6378,7 @@ mod o_aceite_dos_mods {
             server_half: no_servidor,
             api: 6,
             tema: false,
+            plataformas: None,
         }
     }
 

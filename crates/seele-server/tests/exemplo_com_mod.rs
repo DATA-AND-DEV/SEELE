@@ -49,6 +49,7 @@ async fn o_mod_que_o_exemplo_instala_responde_ao_pedido() {
             server_half: manifesto.server.is_some(),
             api: manifesto.api,
             tema: false,
+            plataformas: None,
         },
     )
     .unwrap();

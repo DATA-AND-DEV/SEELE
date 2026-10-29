@@ -295,6 +295,7 @@ mod tests {
             server_half: false,
             api: 6,
             tema: false,
+            plataformas: None,
         }
     }
 

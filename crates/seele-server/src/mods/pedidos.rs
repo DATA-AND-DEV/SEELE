@@ -209,7 +209,20 @@ async fn executar_inner(
         return Ok(serde_json::json!({
             "ok": true,
             "conjunto": identidade,
-            "mods": enabled.iter().map(|m| serde_json::json!({"id":m.id,"hash":m.hash,"version":m.version})).collect::<Vec<_>>(),
+            "mods": enabled.iter().map(|m| serde_json::json!({
+                "id": m.id,
+                "hash": m.hash,
+                "version": m.version,
+                // **Sempre a lista, nunca a chave ausente** (API 8): o navegador
+                // decide o que oferecer por ela. Uma linha ainda não preenchida
+                // diz as duas, que é o que um manifesto sem a chave diz.
+                "plataformas": m.plataformas
+                    .clone()
+                    .unwrap_or_else(|| vec![
+                        seele_proto::mods::Plataforma::App,
+                        seele_proto::mods::Plataforma::Navegador,
+                    ]),
+            })).collect::<Vec<_>>(),
         })
         .to_string());
     }
@@ -942,6 +955,7 @@ mod tests {
                     server_half: true,
                     api: seele_proto::mods::MOD_API_VERSION,
                     tema: false,
+                    plataformas: None,
                 },
             )
             .expect("ligar o MOD");
@@ -955,6 +969,55 @@ mod tests {
                 .id
         };
         (servidor, pessoa)
+    }
+
+    /// **O catálogo diz as plataformas de cada MOD, sempre como lista** (API 8;
+    /// migração 20). Um MOD de `["app"]` diz `["app"]`; um MOD cuja linha ainda
+    /// não foi preenchida (o `prova/eco`, ligado com a coluna nula) diz as
+    /// duas — e nenhum omite a chave, que o navegador lê para decidir o que
+    /// oferecer.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_catalogo_diz_as_plataformas_de_cada_mod_e_nunca_omite_a_chave() {
+        let pasta = tempfile::tempdir().expect("a pasta");
+        let (servidor, pessoa) = servidor_com_o_mod(pasta.path(), "").await;
+        {
+            let db = servidor.persistence.lock().await;
+            crate::persistence::mods::enable(
+                &db,
+                &crate::persistence::mods::EnabledMod {
+                    id: "prova/so-app".to_owned(),
+                    version: "1.0.0".to_owned(),
+                    hash: "ab".repeat(32),
+                    repo: "https://example.invalid/so-app".to_owned(),
+                    reach: Vec::new(),
+                    server_half: false,
+                    api: seele_proto::mods::MOD_API_VERSION,
+                    tema: false,
+                    plataformas: Some(vec![seele_proto::mods::Plataforma::App]),
+                },
+            )
+            .expect("ligar o MOD");
+        }
+
+        let resposta =
+            super::executar(&servidor, pessoa, seele_proto::ids::ChannelId(0), "", "{}").await;
+        let catalogo: serde_json::Value = serde_json::from_str(&resposta).expect("JSON");
+        let plataformas_de = |id: &str| {
+            catalogo["mods"]
+                .as_array()
+                .and_then(|mods| mods.iter().find(|m| m["id"] == id))
+                .map(|m| m["plataformas"].clone())
+        };
+        assert_eq!(
+            plataformas_de("prova/so-app"),
+            Some(serde_json::json!(["app"])),
+            "{catalogo}"
+        );
+        assert_eq!(
+            plataformas_de("prova/eco"),
+            Some(serde_json::json!(["app", "navegador"])),
+            "{catalogo}"
+        );
     }
 
     /// Grava um papel mínimo no canal 1, como nenhum caminho do produto grava

@@ -1511,6 +1511,7 @@ mod tests {
                     server_half: false,
                     api,
                     tema: false,
+                    plataformas: None,
                 },
             )
             .expect("ligar o MOD");

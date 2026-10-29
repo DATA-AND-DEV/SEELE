@@ -6009,6 +6009,7 @@ mod o_mod_do_guardado_continua_respondendo {
                     server_half: manifesto.server.is_some(),
                     api: manifesto.api,
                     tema: manifesto.tema,
+                    plataformas: None,
                 },
             )
             .expect("o MOD de referência não ligou");
@@ -8740,6 +8741,10 @@ fn habilitado_de(
         server_half: instalado.server,
         api: instalado.api,
         tema: instalado.tema,
+        // O `ModInstalado` ainda não leva as plataformas até aqui; nula é «não
+        // preenchida», e a subida do servidor a preenche pelo `mod.json` dos
+        // bytes do hash (migração 20).
+        plataformas: None,
     }
 }
 
@@ -8931,6 +8936,7 @@ mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
             server_half: false,
             api: seele_ffi::mods::MOD_API_VERSION,
             tema: false,
+            plataformas: None,
         }
     }
 
@@ -11039,6 +11045,7 @@ mod so_a_gestao_reaplica_no_servidor_hospedado {
             server_half: false,
             api: seele_ffi::mods::MOD_API_VERSION,
             tema: false,
+            plataformas: None,
         }
     }
 

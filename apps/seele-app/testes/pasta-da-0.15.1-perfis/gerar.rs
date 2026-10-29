@@ -103,6 +103,7 @@ async fn main() {
             repo: manifesto.repo.clone(),
             reach: manifesto.reach.clone(),
             server_half: manifesto.server.is_some(),
+            plataformas: None,
         },
     )
     .expect("habilitar");

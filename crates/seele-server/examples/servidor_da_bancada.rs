@@ -97,6 +97,7 @@ async fn main() -> Result<()> {
                 server_half: manifesto.server.is_some(),
                 api: manifesto.api,
                 tema: false,
+                plataformas: None,
             },
         )?;
         exigido =

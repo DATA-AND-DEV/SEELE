@@ -111,6 +111,7 @@ fn um_mod(id: &str, hash_de: u8) -> EnabledMod {
         server_half: true,
         api: 6,
         tema: false,
+        plataformas: None,
     }
 }
 

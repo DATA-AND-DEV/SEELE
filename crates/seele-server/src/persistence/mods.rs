@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 use rusqlite::params;
+use seele_proto::mods::Plataforma;
 
 use super::Persistence;
 
@@ -61,6 +62,19 @@ pub struct EnabledMod {
     /// O «não preenchido» mora só no banco, nulo, e é [`por_preencher`] que o
     /// encontra.
     pub tema: bool,
+    /// As plataformas em que este MOD roda (API 8; migração 20): a lista
+    /// efetiva, que já resolveu o «sem a chave, nas duas».
+    ///
+    /// **`None` é «não preenchida»**: uma linha gravada antes da coluna, que a
+    /// subida do servidor preenche pelo `mod.json` dos bytes do hash
+    /// ([`preencher_do_pacote`]). Quem lê para dizer (o catálogo) trata `None`
+    /// como as duas, e nunca omite a chave.
+    pub plataformas: Option<Vec<Plataforma>>,
+}
+
+/// A lista de plataformas como a coluna a guarda: o JSON dela, ou nada.
+fn plataformas_em_texto(plataformas: Option<&[Plataforma]>) -> Option<String> {
+    plataformas.and_then(|lista| serde_json::to_string(lista).ok())
 }
 
 /// Turns a MOD on, or updates everything about one already known.
@@ -75,11 +89,12 @@ pub struct EnabledMod {
 pub fn enable(persistence: &Persistence, ligado: &EnabledMod) -> Result<()> {
     let reach = serde_json::to_string(&ligado.reach).unwrap_or_else(|_| "[]".to_owned());
     persistence.connection().execute(
-        "INSERT INTO mods (id, version, hash, repo, reach, server_half, api, tema, enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)
+        "INSERT INTO mods (id, version, hash, repo, reach, server_half, api, tema,
+                            plataformas, enabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)
          ON CONFLICT(id) DO UPDATE SET
             version = ?2, hash = ?3, repo = ?4, reach = ?5, server_half = ?6, api = ?7,
-            tema = ?8, enabled = 1",
+            tema = ?8, plataformas = ?9, enabled = 1",
         params![
             ligado.id,
             ligado.version,
@@ -88,7 +103,8 @@ pub fn enable(persistence: &Persistence, ligado: &EnabledMod) -> Result<()> {
             reach,
             i64::from(ligado.server_half),
             i64::from(ligado.api),
-            i64::from(ligado.tema)
+            i64::from(ligado.tema),
+            plataformas_em_texto(ligado.plataformas.as_deref())
         ],
     )?;
     // Depois de gravado, e não antes: quem acorda vai ao banco, e acordar antes
@@ -130,11 +146,12 @@ pub fn definir_conjunto(persistence: &Persistence, ligados: &[EnabledMod]) -> Re
     for ligado in ligados {
         let reach = serde_json::to_string(&ligado.reach).unwrap_or_else(|_| "[]".to_owned());
         transaction.execute(
-            "INSERT INTO mods (id, version, hash, repo, reach, server_half, api, tema, enabled)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1)
+            "INSERT INTO mods (id, version, hash, repo, reach, server_half, api, tema,
+                                plataformas, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)
              ON CONFLICT(id) DO UPDATE SET
                 version = ?2, hash = ?3, repo = ?4, reach = ?5, server_half = ?6, api = ?7,
-                tema = ?8, enabled = 1",
+                tema = ?8, plataformas = ?9, enabled = 1",
             params![
                 ligado.id,
                 ligado.version,
@@ -143,7 +160,8 @@ pub fn definir_conjunto(persistence: &Persistence, ligados: &[EnabledMod]) -> Re
                 reach,
                 i64::from(ligado.server_half),
                 i64::from(ligado.api),
-                i64::from(ligado.tema)
+                i64::from(ligado.tema),
+                plataformas_em_texto(ligado.plataformas.as_deref())
             ],
         )?;
     }
@@ -177,7 +195,7 @@ pub fn disable(persistence: &Persistence, id: &str) -> Result<()> {
 pub fn enabled(persistence: &Persistence) -> Result<Vec<EnabledMod>> {
     let connection = persistence.connection();
     let mut statement = connection.prepare(
-        "SELECT id, version, hash, repo, reach, server_half, api, tema
+        "SELECT id, version, hash, repo, reach, server_half, api, tema, plataformas
          FROM mods WHERE enabled = 1 ORDER BY id",
     )?;
     let rows = statement.query_map([], |row| {
@@ -202,13 +220,20 @@ pub fn enabled(persistence: &Persistence) -> Result<Vec<EnabledMod>> {
             // pinta a aparência sem o pacote dizer. A subida o preenche, e
             // nomeia no registro a linha que não consegue.
             tema: row.get::<_, Option<i64>>(7)?.is_some_and(|tema| tema != 0),
+            // Nulo, ou um texto que não é uma lista de plataformas conhecidas,
+            // lê-se «não preenchida»: o catálogo diz as duas e a subida tenta
+            // de novo. Uma linha estragada não derruba a leitura das outras.
+            plataformas: row
+                .get::<_, Option<String>>(8)?
+                .and_then(|texto| serde_json::from_str(&texto).ok()),
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// As linhas habilitadas que ainda não têm o que o pacote declara: a API zero
-/// (migração 14) ou o tema nulo (migração 16). O par, porque é o hash que diz
+/// (migração 14), o tema nulo (migração 16) ou as plataformas nulas (migração
+/// 20). O par, porque é o hash que diz
 /// de que bytes ler.
 ///
 /// # Errors
@@ -218,16 +243,18 @@ pub fn por_preencher(persistence: &Persistence) -> Result<Vec<(String, String)>>
     let connection = persistence.connection();
     let mut statement = connection.prepare(
         "SELECT id, hash FROM mods
-         WHERE enabled = 1 AND (api = 0 OR tema IS NULL) ORDER BY id",
+         WHERE enabled = 1 AND (api = 0 OR tema IS NULL OR plataformas IS NULL)
+         ORDER BY id",
     )?;
     let linhas = statement.query_map([], |linha| Ok((linha.get(0)?, linha.get(1)?)))?;
     Ok(linhas.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-/// Preenche a API e o tema de uma linha que ainda não os tem, e só eles.
+/// Preenche a API, o tema e as plataformas de uma linha que ainda não os tem, e
+/// só eles.
 ///
 /// Só toca a linha de `id` **com o mesmo `hash`**, e só o que falta: a API se
-/// ela for zero, o tema se ele for nulo. Uma linha que outro caminho já
+/// ela for zero, o tema e as plataformas se forem nulos. Uma linha que outro caminho já
 /// preencheu, ou que passou a exigir outros bytes, não é sobrescrita. Devolve
 /// se alguma linha mudou.
 ///
@@ -240,13 +267,22 @@ pub fn preencher_do_pacote(
     hash: &str,
     api: u32,
     tema: bool,
+    plataformas: &[Plataforma],
 ) -> Result<bool> {
     let mudou = persistence.connection().execute(
         "UPDATE mods
             SET api = CASE WHEN api = 0 THEN ?3 ELSE api END,
-                tema = COALESCE(tema, ?4)
-          WHERE id = ?1 AND hash = ?2 AND (api = 0 OR tema IS NULL)",
-        params![id, hash, i64::from(api), i64::from(tema)],
+                tema = COALESCE(tema, ?4),
+                plataformas = COALESCE(plataformas, ?5)
+          WHERE id = ?1 AND hash = ?2
+            AND (api = 0 OR tema IS NULL OR plataformas IS NULL)",
+        params![
+            id,
+            hash,
+            i64::from(api),
+            i64::from(tema),
+            plataformas_em_texto(Some(plataformas))
+        ],
     )?;
     Ok(mudou > 0)
 }
@@ -397,6 +433,9 @@ mod tests {
             server_half: false,
             api: 6,
             tema: false,
+            // Uma linha completa: as plataformas já preenchidas, para os testes
+            // que não são sobre elas não verem a linha em `por_preencher`.
+            plataformas: Some(vec![Plataforma::App, Plataforma::Navegador]),
         }
     }
 
@@ -532,13 +571,15 @@ mod tests {
         enable(&persistence, &com_api).expect("habilitar");
 
         assert!(
-            preencher_do_pacote(&persistence, "seele/sem", &hash, 6, false).expect("preencher")
+            preencher_do_pacote(&persistence, "seele/sem", &hash, 6, false, &[])
+                .expect("preencher")
         );
         assert!(
-            !preencher_do_pacote(&persistence, "seele/com", &hash, 6, false).expect("preencher")
+            !preencher_do_pacote(&persistence, "seele/com", &hash, 6, false, &[])
+                .expect("preencher")
         );
         assert!(
-            !preencher_do_pacote(&persistence, "seele/sem", &"d4".repeat(32), 9, false)
+            !preencher_do_pacote(&persistence, "seele/sem", &"d4".repeat(32), 9, false, &[])
                 .expect("preencher"),
             "outro hash não é a mesma linha"
         );
@@ -547,6 +588,82 @@ mod tests {
         let api_de = |id: &str| lista.iter().find(|m| m.id == id).map(|m| m.api);
         assert_eq!(api_de("seele/sem"), Some(6));
         assert_eq!(api_de("seele/com"), Some(5));
+    }
+
+    /// A marca de plataformas (migração 20) é gravada no mesmo ato que o hash,
+    /// uma linha nula é «não preenchida» e aparece em `por_preencher`, e
+    /// preencher só toca a coluna nula.
+    #[test]
+    fn a_marca_de_plataformas_e_gravada_com_o_hash_e_preenchida_na_subida() {
+        let persistence = banco();
+        let hash = "e5".repeat(32);
+        let mut so_app = ligado("seele/so-app", "1.0.0", &hash);
+        so_app.plataformas = Some(vec![Plataforma::App]);
+        enable(&persistence, &so_app).expect("habilitar");
+
+        let lista = enabled(&persistence).expect("listar");
+        assert_eq!(lista[0].plataformas, Some(vec![Plataforma::App]));
+        assert!(
+            por_preencher(&persistence).expect("ler").is_empty(),
+            "uma linha gravada com a marca não está por preencher"
+        );
+
+        // Uma linha com a coluna nula: a de antes da migração, ou a de quem
+        // ligou sem saber.
+        let mut nula = ligado("seele/nula", "1.0.0", &hash);
+        nula.plataformas = None;
+        enable(&persistence, &nula).expect("habilitar");
+        assert_eq!(
+            por_preencher(&persistence).expect("ler"),
+            vec![("seele/nula".to_owned(), hash.clone())]
+        );
+
+        assert!(preencher_do_pacote(
+            &persistence,
+            "seele/nula",
+            &hash,
+            6,
+            false,
+            &[Plataforma::App]
+        )
+        .expect("preencher"));
+        assert!(
+            !preencher_do_pacote(
+                &persistence,
+                "seele/nula",
+                &hash,
+                6,
+                false,
+                &[Plataforma::Navegador]
+            )
+            .expect("preencher"),
+            "a segunda chamada não sobrescreve"
+        );
+        let lista = enabled(&persistence).expect("listar");
+        let de = |id: &str| {
+            lista
+                .iter()
+                .find(|m| m.id == id)
+                .unwrap()
+                .plataformas
+                .clone()
+        };
+        assert_eq!(de("seele/nula"), Some(vec![Plataforma::App]));
+        assert!(por_preencher(&persistence).expect("ler").is_empty());
+
+        // Re-habilitar com outro hash regrava a coluna.
+        let mut nova = ligado("seele/so-app", "2.0.0", &"f6".repeat(32));
+        nova.plataformas = Some(vec![Plataforma::App, Plataforma::Navegador]);
+        enable(&persistence, &nova).expect("habilitar");
+        let lista = enabled(&persistence).expect("listar");
+        assert_eq!(
+            lista
+                .iter()
+                .find(|m| m.id == "seele/so-app")
+                .unwrap()
+                .plataformas,
+            Some(vec![Plataforma::App, Plataforma::Navegador])
+        );
     }
 
     /// O que a tela de aceite precisa dizer vai e volta do banco.
@@ -568,6 +685,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("habilitar");

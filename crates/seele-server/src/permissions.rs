@@ -1097,8 +1097,14 @@ mod tags_testes {
         )
         .unwrap();
         let t = c.transaction().unwrap();
-        t.execute_batch(crate::persistence::schema::MIGRATIONS.last().unwrap().sql)
-            .unwrap();
+        t.execute_batch(
+            crate::persistence::schema::MIGRATIONS
+                .iter()
+                .find(|m| m.version == 19)
+                .unwrap()
+                .sql,
+        )
+        .unwrap();
         migrar_tags(&t).unwrap();
         t.commit().unwrap();
         let (id, alias, completa, tag): (i64, String, String, String) = c

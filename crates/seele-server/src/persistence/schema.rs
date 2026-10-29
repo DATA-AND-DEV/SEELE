@@ -795,6 +795,28 @@ pub const MIGRATIONS: &[Migration] = &[
             UPDATE people SET nickname_base = nickname;
         "#,
     },
+    Migration {
+        version: 20,
+        description: "as plataformas em que cada MOD habilitado roda, para o catálogo dizer antes de baixar",
+        sql: r#"
+            -- API 8: o catálogo diz em que plataformas cada MOD roda, para o
+            -- navegador não oferecer o que só o app executa.
+            --
+            -- Coluna, pela razão das migrações 14 e 16: ela é gravada no mesmo
+            -- ato que grava o `hash`, e o catálogo lê só o banco — o pedido não
+            -- vai ao disco por MOD.
+            --
+            -- **Nula é «não preenchida»**, como a `tema` da 16: uma linha
+            -- gravada antes desta coluna não sabe, e esta migração não inventa
+            -- o que o produto não sabe. Quem a preenche é a subida do servidor,
+            -- na mesma passada e na mesma leitura do `mod.json` que preenchem
+            -- a `api` e o `tema`; quem a regrava é habilitar o MOD. Até lá o
+            -- catálogo diz as duas, que é o que um manifesto sem a chave diz.
+            --
+            -- O texto é o JSON da lista, como o catálogo a leva: `["app"]`.
+            ALTER TABLE mods ADD COLUMN plataformas TEXT;
+        "#,
+    },
 ];
 
 #[cfg(test)]

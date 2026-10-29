@@ -88,6 +88,7 @@ fn mod_exigido() -> EnabledMod {
         server_half: false,
         api: 0,
         tema: false,
+        plataformas: None,
     }
 }
 

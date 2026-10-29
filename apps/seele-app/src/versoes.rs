@@ -3176,6 +3176,7 @@ mod o_quintal_sobe_da_0_15 {
                     server_half: instalado.server,
                     api: instalado.api,
                     tema: false,
+                    plataformas: None,
                 }],
             )
             .unwrap();

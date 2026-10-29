@@ -1181,12 +1181,18 @@ pub fn api_do_pacote(raizes: &crate::RaizesDosMods, hash: &str) -> Result<u32, S
 }
 
 /// O que um pacote instalado declara de si para o anúncio.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoPacote {
     /// A API que o manifesto pede.
     pub api: u32,
     /// Se o manifesto declara `"tema": true` (D-api-8). Falso sem a chave.
     pub tema: bool,
+    /// As plataformas em que o MOD roda (API 8): a lista efetiva, que já
+    /// resolveu o «sem a chave, nas duas» (`plataformas_efetivas`). `None` quando
+    /// o manifesto não passa pela leitura completa (uma API que este build não
+    /// roda, por exemplo): a leitura leniente que dá a `api` não diz as
+    /// plataformas, e inventá-las seria o produto afirmando o que não leu.
+    pub plataformas: Option<Vec<seele_proto::mods::Plataforma>>,
 }
 
 /// **A API e o tema de um pacote instalado, numa leitura só** (D-api-8): a
@@ -1209,12 +1215,15 @@ pub fn do_pacote(raizes: &crate::RaizesDosMods, hash: &str) -> Result<DoPacote, 
         api => Ok(DoPacote {
             api,
             tema: declarado.tema,
+            plataformas: seele_proto::mods::read_manifest(&texto)
+                .ok()
+                .map(|manifest| seele_proto::mods::plataformas_efetivas(&manifest)),
         }),
     }
 }
 
-/// Preenche a API e o tema das linhas habilitadas que ainda não os têm
-/// (migrações 14 e 16), na mesma passada e na mesma leitura.
+/// Preenche a API, o tema e as plataformas das linhas habilitadas que ainda
+/// não os têm (migrações 14, 16 e 20), na mesma passada e na mesma leitura.
 ///
 /// Lê o `mod.json` da pasta do **hash** que a linha exige — os bytes que a
 /// exigência cobre, e não «o que estiver na pasta do MOD» —, como
@@ -1235,15 +1244,41 @@ pub fn preencher_api_e_tema(
     let mut queixas = Vec::new();
     for (id, hash) in por_preencher {
         match do_pacote(raizes, &hash) {
-            Ok(DoPacote { api, tema }) => {
+            Ok(DoPacote {
+                api,
+                tema,
+                plataformas,
+            }) => {
+                // Sem as plataformas lidas, o pacote ainda dá a API e o tema, e
+                // são eles que a linha precisa para o aperto de mão. As
+                // plataformas ficam as duas — o que o catálogo já diz de uma
+                // linha nula —, e a linha é **nomeada**: em silêncio, seria o
+                // catálogo oferecendo ao navegador o que talvez só o app roda.
+                // Menos a de uma API que este build não roda: essa o servidor já
+                // recusa pelo nome ao subir (`ligados_de_outra_api`).
+                if plataformas.is_none() && seele_proto::mods::APIS_ACEITAS.contains(&api) {
+                    queixas.push(format!(
+                        "{id}: o manifesto não passa pela leitura completa, e as plataformas \
+                         foram gravadas como as duas"
+                    ));
+                }
+                let plataformas = plataformas.unwrap_or_else(|| {
+                    vec![
+                        seele_proto::mods::Plataforma::App,
+                        seele_proto::mods::Plataforma::Navegador,
+                    ]
+                });
                 if let Err(erro) = crate::persistence::mods::preencher_do_pacote(
                     persistence,
                     &id,
                     &hash,
                     api,
                     tema,
+                    &plataformas,
                 ) {
-                    queixas.push(format!("{id}: a API e o tema não foram gravados: {erro}"));
+                    queixas.push(format!(
+                        "{id}: a API, o tema e as plataformas não foram gravados: {erro}"
+                    ));
                 }
             }
             Err(motivo) => {
@@ -1369,7 +1404,8 @@ mod tests {
         pacote_com(raizes, hash, api, "");
     }
 
-    /// Um pacote cujo `mod.json` termina com `resto` — `,"tema":true`, por
+    /// Um pacote (com as duas metades, para passar pela leitura completa
+    /// como um de verdade) cujo `mod.json` termina com `resto` — `,"tema":true`, por
     /// exemplo, ou nada.
     fn pacote_com(raizes: &crate::RaizesDosMods, hash: &str, api: u32, resto: &str) {
         let dir = raizes.pacote_de(hash);
@@ -1377,7 +1413,7 @@ mod tests {
         std::fs::write(
             dir.join("mod.json"),
             format!(
-                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{api},"repo":"https://github.com/seele/bot","reach":[]{resto}}}"#
+                r#"{{"schema":1,"id":"seele/bot","version":"1.0.0","api":{api},"repo":"https://github.com/seele/bot","reach":[],"client":"cliente/main.js","server":"servidor/main.js"{resto}}}"#
             ),
         )
         .expect("manifesto");
@@ -1407,6 +1443,7 @@ mod tests {
             server_half: true,
             api: 6,
             tema: false,
+            plataformas: None,
         };
         let pinta = "a1".repeat(32);
         let sem_chave = "b2".repeat(32);
@@ -1450,6 +1487,57 @@ mod tests {
         );
     }
 
+    /// **As linhas habilitadas antes da migração 20 ganham as plataformas na
+    /// subida**, lidas do `mod.json` dos bytes do hash e já efetivas: a lista
+    /// declarada, ou as duas quando o manifesto não traz a chave.
+    #[test]
+    fn a_subida_preenche_as_plataformas_das_linhas_antigas() {
+        use crate::persistence::mods::{enable, enabled, EnabledMod};
+        use crate::persistence::{Location, Persistence};
+        use seele_proto::mods::Plataforma;
+
+        let raiz = pasta_de_teste("plataformas-na-subida");
+        let raizes = crate::RaizesDosMods {
+            pacotes: raiz.clone(),
+            dados: raiz.join("mod-data"),
+        };
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        let linha = |id: &str, hash: &str| EnabledMod {
+            id: id.to_owned(),
+            version: "1.0.0".to_owned(),
+            hash: hash.to_owned(),
+            repo: String::new(),
+            reach: Vec::new(),
+            server_half: false,
+            api: 8,
+            tema: false,
+            plataformas: None,
+        };
+        let so_app = "a1".repeat(32);
+        let sem_chave = "b2".repeat(32);
+        pacote_com(&raizes, &so_app, 8, r#","plataformas":["app"]"#);
+        pacote_com(&raizes, &sem_chave, 8, "");
+        enable(&banco, &linha("seele/bot", &so_app)).expect("habilitar");
+        enable(&banco, &linha("seele/outro", &sem_chave)).expect("habilitar");
+
+        let queixas = preencher_api_e_tema(&banco, &raizes);
+
+        assert!(queixas.is_empty(), "{queixas:?}");
+        let lista = enabled(&banco).expect("listar");
+        let de = |id: &str| {
+            lista
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| m.plataformas.clone())
+        };
+        assert_eq!(de("seele/bot"), Some(Some(vec![Plataforma::App])));
+        assert_eq!(
+            de("seele/outro"),
+            Some(Some(vec![Plataforma::App, Plataforma::Navegador])),
+            "sem a chave, a subida grava as duas"
+        );
+    }
+
     /// **As linhas habilitadas antes da coluna ganham a API na subida**, lida
     /// do manifesto dos bytes que o hash cobre (a P7a da F1b). Uma que não se
     /// preenche é dita pelo nome, e não fica zero em silêncio.
@@ -1473,6 +1561,7 @@ mod tests {
             server_half: false,
             api: 0,
             tema: false,
+            plataformas: None,
         };
         let com_pacote = "e5".repeat(32);
         pacote_com_api(&raizes, &com_pacote, 6);

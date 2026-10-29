@@ -140,6 +140,7 @@ async fn servidor_fechado() -> Result<(SocketAddr, Arc<Daemon>, String)> {
                 server_half: false,
                 api: 0,
                 tema: false,
+                plataformas: None,
             },
         )?;
         seele_server::portaria::ligar(&mut banco, false)?;

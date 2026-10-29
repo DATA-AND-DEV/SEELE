@@ -637,6 +637,7 @@ fn o_sim_aos_mods_de_a_respondido_depois_da_troca_vai_para_a() {
                 server_half: manifesto.server.is_some(),
                 api: manifesto.api,
                 tema: manifesto.tema,
+                plataformas: None,
             },
         )
         .expect("o MOD não ligou em A");

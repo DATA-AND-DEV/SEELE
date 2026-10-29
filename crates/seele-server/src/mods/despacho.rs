@@ -742,6 +742,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("ligar");
@@ -822,6 +823,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("ligar");
@@ -898,6 +900,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("ligar");
@@ -979,6 +982,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("ligar");
@@ -1439,6 +1443,7 @@ mod tests {
                     server_half: true,
                     api: 6,
                     tema: false,
+                    plataformas: None,
                 },
             )
             .expect("ligar");
@@ -1518,6 +1523,7 @@ mod tests {
                 server_half: true,
                 api: 6,
                 tema: false,
+                plataformas: None,
             },
         )
         .expect("ligar");
