@@ -304,3 +304,11 @@
   .pessoal-web-corpo { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); grid-template-rows: minmax(0, 1fr); }
   .pessoal-web-corpo:has(.pessoal-web-chat[hidden]) { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* A escolha enumera apenas saídas que o navegador realmente expõe. */
+.pessoal-web .pessoal-web-rodape > .pessoal-web-saida { flex: 0 0 44px; min-width: 44px; width: 44px; padding: 8px; }
+.pessoal-web-saida .pessoal-web-botao-texto { display: none; }
+.pessoal-web-painel-saida { position: absolute; z-index: 3; bottom: 74px; right: 12px; width: min(300px, calc(100% - 24px)); max-height: calc(100% - 100px); overflow: auto; padding: 12px; background: var(--fundo, #17191c); border: 1px solid currentColor; border-radius: 8px; box-shadow: 0 4px 20px #0006; }
+.pessoal-web-painel-saida label { display: grid; gap: 6px; }
+.pessoal-web-painel-saida select { width: 100%; min-width: 0; min-height: 44px; }
+.pessoal-web-painel-saida button { width: 100%; min-height: 44px; margin-top: 8px; }

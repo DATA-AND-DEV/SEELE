@@ -21,7 +21,7 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz, 'apps/seele-app/u
  const origem = `http://127.0.0.1:${servidor.address().port}`;
  const ponto = http.createServer(); await new Promise(r => ponto.listen(0, '127.0.0.1', r)); const porta = ponto.address().port; await new Promise(r => ponto.close(r));
  const urlDoEncontro = `http://127.0.0.1:${porta}/chamada/1`;
- const encontro = spawn(path.join(raiz, 'target/debug/seele-encontro'), ['--porta', '0', '--rede-local', '--sinal', `127.0.0.1:${porta}`, '--origem', origem], { stdio: ['ignore','pipe','pipe'] });
+ const encontro = spawn(process.env.SEELE_ENCONTRO_BIN || path.join(raiz, 'target/debug/seele-encontro'), ['--porta', '0', '--rede-local', '--sinal', `127.0.0.1:${porta}`, '--origem', origem], { stdio: ['ignore','pipe','pipe'] });
  let logs = ''; encontro.stdout.on('data', b => logs += b); encontro.stderr.on('data', b => logs += b);
  try {
   let pronto = false;

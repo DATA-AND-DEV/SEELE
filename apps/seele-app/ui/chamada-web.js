@@ -25,7 +25,7 @@ async function validarPerfilDaChamadaPessoal(perfil) {
 // A identidade pessoal é durável no IndexedDB; a chave nunca é exportável.
 async function criarServicoDeChamadasWeb({
   obterPerfil = async apelido => ({ apelido, retrato: null }), lerPerfil = async () => null, aoPerfil = () => {},
-  aoEstado = () => {}, aoRecepcao = () => {}, aoTexto = () => {}, aoPar = () => {}, aoControle = () => {},
+  aoEstado = () => {}, aoRecepcao = () => {}, aoTexto = () => {}, aoPar = () => {}, aoControle = () => {}, aoDiagnostico = () => {},
   urlDoEncontro, iceServers,
   wasm: wasmFornecido, buscar = (...args) => fetch(...args),
   criarEnlace = criarEnlaceDaChamadaWeb,
@@ -197,10 +197,14 @@ async function criarServicoDeChamadasWeb({
     if (c === recepcao) estadoDaRecepcao("indisponivel", erro.motivo || erro.status || "rede");
     const repetivel = erro.motivo === "SemRegistro" || erro.motivo === "Epoca"
       || erro.status === 429 || erro.status >= 500 || (!erro.status && !String(erro.message).startsWith("chamada:"));
-    const espera = esperasDaRecepcao[c.falhas || 0];
-    c.falhas = (c.falhas || 0) + 1;
+    const continuada = (c.falhas || 0) >= esperasDaRecepcao.length;
+    const admitida = chamada && !chamada.encerrada && chamada.admitida;
+    const espera = esperasDaRecepcao[c.falhas || 0] ?? (admitida ? 15000 : undefined);
+    c.falhas = Math.min((c.falhas || 0) + 1, esperasDaRecepcao.length);
     if (!repetivel || espera === undefined) { c.pausada = true; return; }
     c.poll = setTimeout(() => {
+      // Só a chamada admitida sustenta tentativas além do orçamento ocioso.
+      if (continuada && (!chamada || chamada.encerrada || !chamada.admitida)) { c.pausada = true; return; }
       if (renovacao || c.convite.expira_em <= Math.floor(Date.now() / 1000)) {
         void receberPorCodigo({ apelido: nome, forcar: true }).catch(e => falhaDaRecepcao(c, e, true));
       } else {
@@ -223,6 +227,29 @@ async function criarServicoDeChamadasWeb({
     const retorno = c.fila.then(() => pedido(c, operacao, opcoes));
     c.fila = retorno.catch(() => {});
     return retorno;
+  }
+  function esperarSinal(c, ms) {
+    return new Promise((ok, nao) => {
+      const abortar = () => { clearTimeout(timer); nao(new DOMException("Chamada encerrada", "AbortError")); };
+      const timer = setTimeout(() => { c.abortador.signal.removeEventListener("abort", abortar); ok(); }, ms);
+      c.abortador.signal.addEventListener("abort", abortar, { once: true });
+      if (c.abortador.signal.aborted) abortar();
+    });
+  }
+  async function enviarSinalDaChamada(c, sinal) {
+    // A caixa publicada comporta oito eventos. Candidatos não podem monopolizar
+    // a fila de pedidos: polls precisam continuar drenando a outra ponta.
+    if (sinal.Candidato) await esperarSinal(c, 500);
+    for (let tentativa = 0; ; tentativa++) {
+      conferir(c);
+      try { return await enfileirar(c, { Sinal: sinal }); }
+      catch (erro) {
+        if (erro.motivo !== "Cheio" || tentativa >= 5 || c.abortador.signal.aborted) throw erro;
+        // Pedido novo só após recusa explícita: o mesmo nonce repetiria a
+        // recusa em cache. Retry de resposta HTTP perdida segue idempotente.
+        await esperarSinal(c, 1000);
+      }
+    }
   }
   function terminar(c, motivo, avisar = true) {
     if (!c || c.encerrada) return false;
@@ -254,10 +281,18 @@ async function criarServicoDeChamadasWeb({
     if (c.enlace) return;
     c.admitida = true; clearTimeout(c.timer); mostrar("conectando", null, c);
     const enlace = criarEnlace({ papel: c.papel, sinal: c.abortador.signal, iceServers,
-      enviarSinal: sinal => enfileirar(c, { Sinal: sinal }),
+      enviarSinal: sinal => enviarSinalDaChamada(c, sinal),
       // Uma queda local também precisa liberar a admissão no encontro. Sem
       // Encerrar, a próxima chamada pelo mesmo link ficava Ocupado até o TTL.
-      aoEstado: estado => { if (estado === "encerrada" && !c.encerrada) terminar(c, "conexao"); } });
+      aoEstado: estado => {
+        if (c.encerrada) return;
+        if (estado === "encerrada") {
+          notificar(aoDiagnostico, c.enlace?.diagnostico || { etapa: "sinalizacao", motivo: "transporte-encerrado" });
+          terminar(c, "conexao");
+        } else if (estado === "recuperando" || estado === "aberta") {
+          notificar(aoDiagnostico, c.enlace?.diagnostico || { etapa: estado });
+        }
+      } });
     c.enlace = enlace;
     enlace.perfil?.ouvir(bytes => { void receberPerfil(c, bytes); });
     enlace.controle.ouvir(bytes => {
@@ -356,9 +391,11 @@ async function criarServicoDeChamadasWeb({
       if (recepcoes.has(c)) {
         falhaDaRecepcao(c, erro);
         if (chamada && !chamada.encerrada && !chamada.admitida) terminar(chamada, "sinalizacao", false);
-      } else if (c.admitida && retrato.estado === "dentro") {
-        const espera = esperasDaRecepcao[c.falhas || 0]; c.falhas = (c.falhas || 0) + 1;
-        if (espera !== undefined) c.poll = setTimeout(() => void poll(c, caixa), espera);
+      } else if (c.admitida && ["dentro", "conectando"].includes(retrato.estado)
+          && (erro.status === 429 || erro.status >= 500 || (!erro.status && !String(erro.message).startsWith("chamada:")))) {
+        const espera = esperasDaRecepcao[c.falhas || 0] ?? 15000;
+        c.falhas = Math.min((c.falhas || 0) + 1, esperasDaRecepcao.length);
+        c.poll = setTimeout(() => void poll(c, caixa), espera);
       } else terminar(c, "sinalizacao", false);
     }
   }
