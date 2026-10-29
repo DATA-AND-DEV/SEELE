@@ -1,6 +1,6 @@
 {
   "version": 8,
-  "notes": "A v8 é a v7 inteira, mais a declaração de plataformas do manifesto (API 8; ADR 0058, acréscimo). É escrita por inteiro, sem extends, como a v6 e a v7. Servidor 2.0 = protocolo 10 + APIs 8, 7 e 6: um MOD da 7 ou da 6 continua rodando, nas duas plataformas. Enquanto a v8 não sai numa release, ela segue a regra da v7 antes da publicação: não está em congeladas.sha256. A v7 e a v6 estão publicadas e não mudam.",
+  "notes": "A v8 é a v7 inteira, mais a declaração de plataformas do manifesto (API 8; ADR 0058, acréscimo). É escrita por inteiro, sem extends, como a v6 e a v7. Servidor 2.0 = protocolo 10 + APIs 8, 7 e 6: um MOD da 7 ou da 6 continua rodando, nas duas plataformas. Enquanto a v8 não sai numa release, ela segue a regra da v7 antes da publicação: a linha dela já está em congeladas.sha256 e é refeita a cada emenda. A v7 e a v6 estão publicadas e não mudam.",
   "compatibilidade": {
     "aceitas": [
       8,

@@ -302,8 +302,9 @@ pelo evento `tema`: `aplicado`, ou `recusado` com os pares e a região.
 
 **A 8 é um alargamento da 7** (ADR 0058, acréscimo): a v7 inteira, mais a
 declaração de onde o MOD roda. A `api/v8.json` é escrita por inteiro, sem
-`extends`, como a v6 e a v7, e **ainda não está em `congeladas.sha256`**: ela só
-congela quando sair numa release.
+`extends`, como a v6 e a v7. **A linha dela já está em `congeladas.sha256`**
+(o `check-api` a exige desde o commit que cria a versão) e é refeita a cada
+emenda da v8, até a release: só então ela congela, como a v7 fez.
 
 - **`manifesto.plataformas`** (`Manifest::plataformas`, `Plataforma`):
   `["app", "navegador"]`.
