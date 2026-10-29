@@ -5,9 +5,11 @@
 > revisto pelo [ADR 0049](adr/0049-um-mod-deixa-de-rodar-na-janela-do-produto.md);
 > o indexador, em `indexador-de-mods.md`, no repositório `SEELE-MODS-INDEXER`.
 >
-> **Este guia é da API 6**, a única que o app 0.16 executa (`MOD_API_VERSION`
-> e `APIS_ACEITAS`, em `crates/seele-proto/src/mods.rs`). Servidor 1.0 é o
-> protocolo 1.0 mais a API 6. O contrato é [`api/v6.json`](../api/v6.json). O
+> **Este guia é da API 8** (`MOD_API_VERSION` e `APIS_ACEITAS`, em
+> `crates/seele-proto/src/mods.rs`), que alarga a 7 com a declaração de onde o
+> MOD roda (`plataformas`, abaixo); a 7 e a 6 continuam rodando nesta linha. O
+> contrato é [`api/v8.json`](../api/v8.json); o que a 8 acrescenta está em
+> [`api/README.md`](../api/README.md), «A API 8». **A 0.18 não executa a 8.** O
 > MOD de referência, `apps/seele-app/testes/mod-de-referencia/`, chama tudo o
 > que a API oferece, e a bateria o executa: quando este guia e ele discordarem,
 > vale ele.
@@ -37,13 +39,14 @@ nenhuma é recusado (`empty`). Um MOD que só mostra coisas não precisa de
   "schema": 1,
   "id": "fulano/meu-mod",
   "version": "1.0.0",
-  "api": 6,
+  "api": 8,
   "repo": "https://github.com/fulano/meu-mod",
   "reach": ["superficie", "contribuicao", "pedido"],
   "client": "cliente/main.js",
   "server": "servidor/main.js",
   "arquivos": ["som/toque.wav"],
-  "tema": true
+  "tema": true,
+  "plataformas": ["app", "navegador"]
 }
 ```
 
@@ -52,19 +55,20 @@ nenhuma é recusado (`empty`). Um MOD que só mostra coisas não precisa de
 | `schema` | formato deste arquivo. Hoje, `1`. |
 | `id` | `autor/nome`. Minúsculas, dígitos e hífen. É ele, e não o nome da pasta, que identifica o MOD: instalado, o pacote mora numa pasta com o hash do conteúdo. |
 | `version` | sua. Nunca é interpretada por nós. |
-| `api` | a versão da API contra a qual você escreveu. Hoje, `6`. |
+| `api` | a versão da API contra a qual você escreveu. Hoje, `8`; a `7` e a `6` continuam aceitas. |
 | `repo` | seu repositório público. Obrigatório. |
 | `reach` | o que você declara alcançar, em palavras suas; o anúncio do servidor leva até 16, de até 48 bytes UTF-8 cada na 0.17 (32 na 0.16), e a 0.17 recusa na instalação o que o anúncio recusaria (`alcances-demais`, `alcance-grande-demais`). A tela de aceite mostra isto antes de baixar. **É declaração, e nada a confere**: o que o MOD alcança de fato é o que a API 6 oferece. |
 | `client`, `server` | caminhos das metades, relativos à pasta. |
 | `arquivos` | a mídia que o MOD traz para mostrar ou tocar, relativa à pasta. Até 16, e só o que está nesta lista é servido. O tipo vem dos bytes, nunca da extensão. |
 | `tema` | opcional: `true` abre a porta do tema do servidor, `mundo.tema`, na metade de servidor (ver «O tema»). Sem `server`, o manifesto é recusado (`tema-sem-metade-de-servidor`): sem quem a abra, a porta nunca pintaria nada. |
+| `plataformas` | opcional: onde o MOD roda. Os valores são `"app"` e `"navegador"`. **Ausente quer dizer as duas.** **Declarar exige `"api": 8`**: a chave num manifesto da 7 ou da 6 é recusada (`PlataformasPedemApiNova`, no shell `plataformas-pedem-api-nova`), e não ignorada, mesmo escrita como `[]`, porque o que se confere é a presença da chave. Escrita e vazia é recusada (`PlataformasVazias`, `plataformas-vazias`); repetir um valor também (`PlataformaRepetida { posicao }`, `plataforma-repetida`); um valor desconhecido faz o manifesto inteiro ser recusado como malformado. **O celular é o navegador**: um MOD só `"app"` não carrega nele. Uma casca que não está na lista pula o MOD e diz qual plataforma ele pede («só funciona no app», «só funciona no navegador»). |
 | `state` | opcional: a versão do esquema dos seus dados, para as suas migrações. Lida, e ainda não usada pelo produto. |
 
 **Chave desconhecida é recusada, e é de propósito.** `vesion` com um `s` a menos
 instalaria calado um MOD sem versão, e você nunca ficaria sabendo. A recusa é a
 única forma de retorno que este formato te dá.
 
-**Este build executa a API 6, e só ela.** Um `api` mais novo é recusado como
+**O build desta linha (a 2, em desenvolvimento) executa as APIs 8, 7 e 6.** Um `api` mais novo é recusado como
 `api-too-new`. Um `api` de 3 a 5 é recusado como `api-too-old`, e a tela aponta
 o Servidor 0.15 no launcher, que é a linha onde as APIs 3, 4 e 5 continuam
 rodando. A 1 e a 2 rodavam na janela do produto, e isso não volta
@@ -1057,6 +1061,15 @@ sabe dela por `retrato.onde`, `retrato.regioes` e o evento `lugar`.
   página. Pinça, área de acerto mínima e toque longo não estão na 6.
 - **No navegador, `SeeleUI.enviar` e o seletor de arquivo não existem**, como o
   que a plataforma não tem não existe.
+- **`plataformas` (API 8) diz onde o MOD roda**, e o celular conta como
+  `"navegador"`. Declare só `"app"` se o MOD depende do que só o app tem; o
+  celular e o navegador o pulam. **Um limite, dito como é**: antes de entrar, o
+  anúncio de aceite que o servidor manda não leva as plataformas (mensagem do
+  fio, ADR 0058), então um navegador pode baixar o pacote de um MOD só do app
+  durante o aceite. Ele **nunca o executa**; as plataformas chegam no catálogo
+  depois da entrada, e é aí que a casca o pula. Levá-las antes da entrada fica
+  para o plano seguinte. Para o que os MODs oficiais fazem no navegador hoje, ver
+  [`docs/evidencias/api-8/mods-oficiais-no-navegador.md`](evidencias/api-8/mods-oficiais-no-navegador.md).
 
 ## Testar antes de publicar
 
