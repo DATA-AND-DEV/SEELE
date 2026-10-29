@@ -61,13 +61,14 @@ function leitorDeVideoSemProcessador(trilha) {
   video.dataset.capturaDaTela = "sim";
   Object.assign(video.style, { position: "fixed", width: "1px", height: "1px", opacity: "0.001", pointerEvents: "none", left: "0", top: "0" });
   video.srcObject = new MediaStream([trilha]); document.body.append(video);
-  let fechado = false, callback = null, pendente = null, avisarFim;
+  let fechado = false, callback = null, timer = null, pendente = null, avisarFim, ultimoTempo = -1, ultimoQuadro = null;
   const fim = new Promise(resolve => { avisarFim = resolve; });
   const pronto = video.play(); pronto.catch(() => {});
   function cancelar() {
     if (fechado) return Promise.resolve();
     fechado = true;
     if (callback !== null) video.cancelVideoFrameCallback?.(callback);
+    clearTimeout(timer); timer = null;
     callback = null; video.pause(); video.srcObject = null; video.remove();
     pendente?.resolve({ done: true }); pendente = null; avisarFim(false);
     return Promise.resolve();
@@ -78,14 +79,37 @@ function leitorDeVideoSemProcessador(trilha) {
       if (fechado || !await Promise.race([pronto.then(() => true), fim])) return { done: true };
       if (fechado) return { done: true };
       return new Promise((resolve, reject) => {
-        pendente = { resolve, reject };
-        callback = video.requestVideoFrameCallback(agora => {
-          callback = null;
-          if (fechado) { resolve({ done: true }); return; }
+        const leitura = { resolve, reject }; pendente = leitura;
+        function entregar() {
+          if (fechado || pendente !== leitura || video.readyState < 2) return false;
+          const tempo = Math.round(video.currentTime * 1000000);
+          if (tempo <= ultimoTempo) return false;
+          const numero = video.getVideoPlaybackQuality?.().totalVideoFrames;
+          if (numero > 0 && numero === ultimoQuadro) return false;
+          if (callback !== null) video.cancelVideoFrameCallback?.(callback);
+          callback = null; clearTimeout(timer); timer = null;
           pendente = null;
-          try { resolve({ done: false, value: new VideoFrame(video, { timestamp: Math.round(agora * 1000) }) }); }
+          try {
+            const value = new VideoFrame(video, { timestamp: tempo });
+            ultimoTempo = tempo; ultimoQuadro = numero; resolve({ done: false, value });
+          }
           catch (erro) { void cancelar(); reject(erro); }
-        });
+          return true;
+        }
+        function apresentado() {
+          callback = null;
+          if (!entregar() && !fechado && pendente === leitura) callback = video.requestVideoFrameCallback(apresentado);
+        }
+        // WKWebView pode deixar de apresentar o vídeo auxiliar quando outra
+        // janela o cobre. Ler sua mídia não pode depender só do compositor.
+        // Um único prazo por read usa o quadro atual apenas se o tempo da
+        // mídia avançou; não cria fila nem substitui a captura já autorizada.
+        function verificar() {
+          timer = null;
+          if (!entregar() && !fechado && pendente === leitura) timer = setTimeout(verificar, 100);
+        }
+        callback = video.requestVideoFrameCallback(apresentado);
+        timer = setTimeout(verificar, 100);
       });
     },
   };

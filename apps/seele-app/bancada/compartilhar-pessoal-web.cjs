@@ -42,7 +42,7 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
     a=criarCompartilhamentoPessoalWeb({servico:sa,transporte:transport,palco:document.getElementById('a'),enviarControle:c=>b.receberControle(c),aoEstado:(tipo,detalhe)=>events.push({de:'a',tipo,detalhe})});
     b=criarCompartilhamentoPessoalWeb({servico:sb,transporte:pb.tela,palco:document.getElementById('b'),enviarControle:c=>a.receberControle(c),aoEstado:(tipo,detalhe)=>events.push({de:'b',tipo,detalhe})});
     const frames=()=>events.filter(e=>e.de==='b'&&e.tipo==='quadro').length;
-    function artificial(color,w=320,h=180){const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d');let n=0;const paint=()=>{ctx.fillStyle=color;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle='white';ctx.fillRect(100+(n++%20),60,20,20);};paint();const stream=c.captureStream(20);const timer=setInterval(paint,50);return{stream,resize:(w,h)=>{c.width=w;c.height=h;},stop:()=>{clearInterval(timer);stream.getTracks().forEach(t=>t.stop());}};}
+    function artificial(color,w=320,h=180){const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d');let n=0;const paint=()=>{ctx.fillStyle=color;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle='white';ctx.fillRect(100+(n++%20),60,20,20);};paint();const stream=c.captureStream(20);const timer=setInterval(paint,50);return{stream,color:next=>{color=next;},resize:(w,h)=>{c.width=w;c.height=h;},stop:()=>{clearInterval(timer);stream.getTracks().forEach(t=>t.stop());}};}
     const pixel=()=>[...document.querySelector('#b canvas').getContext('2d').getImageData(10,10,1,1).data];
     let captured=false,oldPackets,newPackets;
     if(temLeituraDeVideoDaTela()&&typeof VideoEncoder==='function'){
@@ -51,6 +51,23 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
      check(red.stream.getTracks().every(t=>t.readyState==='ended')&&!a.noAr,'parar solta captura');check(!document.querySelector('[data-captura-da-tela]'),'parar remove leitor de vídeo');oldPackets=packets.splice(0);
      const blue=artificial('#2040e0',180,320);const before=frames();a.usarMidia(blue.stream);await until(()=>frames()>before+1);
      check(pixel()[2]>150&&pixel()[0]<80,'reinício H264 azul real');
+     if(typeof MediaStreamTrackProcessor!=='function'){
+      const apresentar=HTMLVideoElement.prototype.requestVideoFrameCallback;
+      HTMLVideoElement.prototype.requestVideoFrameCallback=function(callback){return apresentar.call(this,this.dataset.capturaDaTela==='sim'?()=>{}:callback);};
+      try{
+       const antesSemApresentar=frames();blue.color('#e020e0');
+       await until(()=>frames()>antesSemApresentar+3&&pixel()[0]>150&&pixel()[2]>150);
+       check(a.noAr&&!document.getElementById('b').hidden,'mídia real segue quando callbacks de apresentação param');
+      }finally{HTMLVideoElement.prototype.requestVideoFrameCallback=apresentar;blue.color('#2040e0');}
+      await until(()=>pixel()[2]>150&&pixel()[0]<80);
+      const clone=blue.stream.getVideoTracks()[0].clone(),leitorParado=leitorDeVideoSemProcessador(clone);
+      const primeiro=await leitorParado.read();primeiro.value.close();
+      const auxiliar=[...document.querySelectorAll('[data-captura-da-tela]')].at(-1);auxiliar.pause();
+      const esperando=leitorParado.read();
+      const duplicou=await Promise.race([esperando.then(()=>true),new Promise(ok=>setTimeout(()=>ok(false),250))]);
+      check(!duplicou,'watchdog não duplica vídeo pausado');
+      await leitorParado.cancel();check((await esperando).done,'cancelar solta leitura e watchdog pendentes');clone.stop();
+     }
      const output=document.querySelector('#b canvas');
      check(output.height>output.width,'monitor vertical anunciado e decodificado vertical');
      const square=()=>{const ctx=output.getContext('2d'),im=ctx.getImageData(0,0,output.width,output.height);let x0=Infinity,y0=Infinity,x1=-1,y1=-1;for(let y=0;y<output.height;y++)for(let x=0;x<output.width;x++){const i=(y*output.width+x)*4;if(im.data[i]>200&&im.data[i+1]>200&&im.data[i+2]>200){x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}}return (x1-x0+1)/(y1-y0+1);};
