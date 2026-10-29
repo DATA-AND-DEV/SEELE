@@ -17077,6 +17077,101 @@ fn o_que_o_servidor_exige_e_nao_esta_aqui_tem_linha_na_gestao() {
     );
 }
 
+/// **O MOD que não roda nesta plataforma é pulado, e a gestão diz por quê**
+/// (API 8, `plataformas`). A bancada `plataformas-dos-mods.cjs` mede no
+/// navegador; estes três guardam a forma, que é o que a suíte de texto vê.
+#[test]
+fn plataforma_o_mod_de_outro_lugar_sai_antes_da_conta_do_que_falta() {
+    let base = without_comments(&read("ui/base.js"));
+    let carregar = js_function(&base, "async function carregarMods(");
+    let ausentes = carregar
+        .find("const ausentes")
+        .expect("`carregarMods` perdeu a conta de `ausentes`");
+    let filtro = carregar
+        .find("rodaAqui(")
+        .expect("`carregarMods` não consulta `rodaAqui`: o MOD de outra plataforma voltaria a contar como ausente");
+    assert!(
+        filtro < ausentes,
+        "`rodaAqui` é consultado depois de montar `ausentes`: a busca do que falta veria o MOD de outra plataforma: {carregar}"
+    );
+    let conta = &carregar[ausentes..];
+    let conta = conta.split_once(';').map_or(conta, |(a, _)| a);
+    assert!(
+        conta.contains("daqui.filter") && !conta.contains("catalogo.mods"),
+        "`ausentes` sai de `catalogo.mods` inteiro, e não do grupo que roda aqui: {conta}"
+    );
+    // O de fora continua exigido (a gestão tem de dizer), e leva o estado e a frase.
+    assert!(
+        carregar.contains("modsExigidos.set(m.id, m.hash)")
+            && carregar.contains("\"so-noutra-plataforma\"")
+            && carregar.contains("só funciona no"),
+        "o MOD de fora deixou de ganhar o estado e a frase da plataforma: {carregar}"
+    );
+    // Uma vez por conferência, junto do snapshot.
+    assert!(
+        carregar.contains("invoke(\"plataforma\")") && carregar.contains("plataformaDaCasca("),
+        "a conferência não pergunta onde a casca roda: {carregar}"
+    );
+    // As duas peças.
+    let rodaaqui = js_function(&base, "function rodaAqui(");
+    assert!(
+        rodaaqui.contains("Array.isArray(plataformas)") && rodaaqui.contains("plataformas.includes(aqui)"),
+        "`rodaAqui` perdeu o caso do host antigo (sem a chave, roda) ou o `includes`: {rodaaqui}"
+    );
+    let casca = js_function(&base, "function plataformaDaCasca(");
+    assert!(
+        casca.contains("\"web\"") && casca.contains("\"navegador\"") && casca.contains("\"app\""),
+        "`plataformaDaCasca` deixou de mapear web -> navegador e o resto -> app: {casca}"
+    );
+}
+
+#[test]
+fn plataforma_o_laco_de_carga_pula_o_mod_marcado_como_de_outro_lugar() {
+    let base = without_comments(&read("ui/base.js"));
+    let carregar = js_function(&base, "async function carregarMods(");
+    let laco = carregar
+        .split("for (const mod of instalados)")
+        .nth(1)
+        .expect("o laço de carga de `carregarMods` sumiu");
+    let antes_de_montar = laco.split("montarOMod(").next().unwrap();
+    assert!(
+        antes_de_montar.contains("\"so-noutra-plataforma\"") && antes_de_montar.contains("continue"),
+        "o laço de carga não pula o MOD marcado `so-noutra-plataforma`: {laco}"
+    );
+    // O que já estava carregado e o host trocou de lado sai pelo caminho de «saiu da exigência».
+    assert!(
+        carregar.contains("!daqui.some(m => m.id === id)"),
+        "o MOD já carregado que passou para fora desta plataforma não é descarregado: {carregar}"
+    );
+    // E o aceite não baixa o que não roda aqui.
+    let camada = without_comments(&read("ui/camada-mods.js"));
+    let obter = js_function(&camada, "async function obterOConjunto(");
+    assert!(
+        obter.contains("rodaAqui(") && !obter.contains("mods.filter((m) => !temOExato(m))"),
+        "a obtenção do aceite baixa o MOD que não roda aqui: {obter}"
+    );
+}
+
+#[test]
+fn plataforma_a_gestao_desenha_o_detalhe_do_estado_e_nao_o_de_sem_pacote() {
+    let camada = without_comments(&read("ui/camada-mods.js"));
+    let fases = camada
+        .split("const FASES_DO_MOD = {")
+        .nth(1)
+        .and_then(|d| d.split_once("};"))
+        .map(|(a, _)| a)
+        .expect("`FASES_DO_MOD` sumiu");
+    assert!(
+        fases.contains("\"so-noutra-plataforma\":"),
+        "`FASES_DO_MOD` não tem frase para `so-noutra-plataforma`, e a fase sem frase não é desenhada: {fases}"
+    );
+    let linha = js_function(&camada, "function linhaDeModQueFalta(");
+    assert!(
+        linha.contains("estado.detalhe") && linha.contains("${frase} — ${estado.detalhe}"),
+        "a linha do que falta deixou de acrescentar o detalhe do estado à frase: {linha}"
+    );
+}
+
 /// **Os interruptores editam um rascunho; SALVAR aplica o conjunto uma vez.**
 ///
 /// Relatado no documento de ajustes de 18/09: «cada ativação expulsa o host da
@@ -22000,7 +22095,8 @@ dentro(
   `const modsCarregados = new Map(), modsExigidos = new Map(), estadoDosMods = new Map();
    let conferindoMods = false, conferirModsAoTerminar = false, ultimoErroDeMods = "", conjuntoJaBuscado = null, geracaoDaSessao = 1;` +
   funcao("base.js", "anotarEstadoDoMod") + funcao("base.js", "terminarConferenciaDosMods") +
-  funcao("base.js", "pedirCargaDosMods") + funcao("base.js", "carregarMods"),
+  funcao("base.js", "pedirCargaDosMods") + funcao("base.js", "plataformaDaCasca") +
+  funcao("base.js", "rodaAqui") + funcao("base.js", "carregarMods"),
 );
 const trocar = (geracao, alvo) => { dentro("geracaoDaSessao = " + geracao); m.ctx.alvoAtual = alvo; };
 

@@ -4414,6 +4414,25 @@ function anotarEstadoDoMod(id, fase, detalhe = "") {
   estadoDosMods.set(id, { fase, detalhe });
   globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
 }
+/**
+ * Em que lugar esta casca roda, no vocabulário do manifesto (`plataformas`, API 8).
+ * O `invoke("plataforma")` responde `"web"` no navegador (`ponte-web.js`) e
+ * `"macos"`, `"windows"` ou `"outro"` no app: tudo o que não é web é o app.
+ */
+function plataformaDaCasca(respostaDoInvoke) {
+  return respostaDoInvoke === "web" ? "navegador" : "app";
+}
+/**
+ * Este MOD do catálogo roda neste lugar? Sem `plataformas` — um servidor 0.18,
+ * que não conhece a chave — é «roda nos dois», como sempre foi. Sem saber onde
+ * estamos (`aqui` vazio) também não se recusa nada: recusar por não saber seria
+ * tirar do jogo um MOD que talvez rode.
+ */
+function rodaAqui(modDoCatalogo, aqui) {
+  const plataformas = modDoCatalogo?.plataformas;
+  if (!Array.isArray(plataformas) || !aqui) return true;
+  return plataformas.includes(aqui);
+}
 // A entrada não precisa esperar o relógio de quatro segundos. Se a consulta
 // anterior ainda está em voo, termina com as guardas de geração de sempre e
 // uma única nova conferência atende a vista atual.
@@ -4456,6 +4475,11 @@ async function carregarMods() {
     if (desistir()) return;
     instalados = await invoke("mods_instalados");
     if (desistir()) return;
+    // Onde esta casca roda, perguntado uma vez por conferência. Quem não
+    // responde fica sem lugar (`null`), e `rodaAqui` não recusa nada por isso.
+    let aqui = null;
+    try { aqui = plataformaDaCasca(await invoke("plataforma")); } catch { /* sem lugar: nada é recusado */ }
+    if (desistir()) return;
     // Pelo caminho de dentro, e não pela API dos MODs: o `id` vazio é o
     // catálogo do próprio servidor, e não um MOD pedindo alguma coisa. Enquanto
     // isto passava por `globalThis.SeeleMods`, o produto dependia do objeto que
@@ -4468,24 +4492,40 @@ async function carregarMods() {
       estadoDosMods.delete("");
       globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
     }
+    // **Dois grupos, antes de qualquer conta de «o que falta».** O MOD que não
+    // roda neste lugar continua exigido pelo servidor (entra em `modsExigidos`
+    // e no aceite do conjunto), mas não está ausente: não há o que baixar nem
+    // carregar, e dizer «sem pacote» mandaria instalar o que não serve aqui.
+    const daqui = catalogo.mods.filter(m => rodaAqui(m, aqui));
+    const deFora = catalogo.mods.filter(m => !rodaAqui(m, aqui));
     for (const [id, instancia] of modsCarregados) {
-      if (!catalogo.mods.some(m => m.id === id)) {
+      if (!daqui.some(m => m.id === id)) {
         // Pelo ciclo único: `encerrar` põe a instância em `encerrando` antes de
         // qualquer espera, pede ao executor que pare, espera ele confirmar, e
         // só então descarta os recursos dela — a região entre eles.
         instancia?.encerrar().catch(() => {});
         modsCarregados.delete(id);
-        anotarEstadoDoMod(id, "descarregado");
+        // O que o host trocou para fora deste lugar sai pelo mesmo caminho,
+        // mas a frase é a da plataforma, e não a de «deixou de exigir».
+        if (!deFora.some(m => m.id === id)) anotarEstadoDoMod(id, "descarregado");
       }
     }
     // E o que voltou a bater deixa de ser notícia ruim: sem isto, um MOD que
     // aparecia como «outra versão» continuaria assim depois de instalado.
-    for (const m of catalogo.mods) {
-      if (["sem-pacote", "outra-versao"].includes(estadoDosMods.get(m.id)?.fase)
-          && instalados.some(i => i.id === m.id && i.hash === m.hash)) {
+    for (const m of daqui) {
+      const fase = estadoDosMods.get(m.id)?.fase;
+      // «Só noutra plataforma» também passa: se o host mudou a marca, ou esta
+      // casca é outra, a frase velha não pode ficar na tela.
+      if (fase === "so-noutra-plataforma"
+          || (["sem-pacote", "outra-versao"].includes(fase)
+              && instalados.some(i => i.id === m.id && i.hash === m.hash))) {
         estadoDosMods.delete(m.id);
         globalThis.dispatchEvent(new CustomEvent("seele-mods-estado"));
       }
+    }
+    for (const m of deFora) {
+      const onde = m.plataformas.includes("app") ? "app" : "navegador";
+      anotarEstadoDoMod(m.id, "so-noutra-plataforma", `só funciona no ${onde}`);
     }
     // O conjunto exigido por este destino, como ele acabou de ser anunciado.
     // Reescrito por inteiro a cada volta: um MOD que saiu da exigência tem de
@@ -4494,7 +4534,7 @@ async function carregarMods() {
     modsExigidos.clear();
     for (const m of catalogo.mods) modsExigidos.set(m.id, m.hash);
 
-    const ausentes = catalogo.mods.filter(active => !instalados.some(m => m.id === active.id && m.hash === active.hash));
+    const ausentes = daqui.filter(active => !instalados.some(m => m.id === active.id && m.hash === active.hash));
     for (const m of ausentes) {
       // **Duas causas, duas frases.** Ter o id e não ter o hash é versão
       // diferente da exigida — e mandar «instale» quem já instalou é mandar
@@ -4523,7 +4563,7 @@ async function carregarMods() {
 
     const diagnostico = ausentes.map(m => m.id).join(", ");
     ultimoErroDeMods = diagnostico;
-    instalados = instalados.filter(m => catalogo.mods.some(active => active.id === m.id && active.hash === m.hash));
+    instalados = instalados.filter(m => daqui.some(active => active.id === m.id && active.hash === m.hash));
   } catch (erro) {
     // **Antes de qualquer efeito**, até do `modsExigidos.clear()` logo abaixo:
     // erro tardio da sessão anterior não toca no estado da nova. A volta de
@@ -4549,6 +4589,7 @@ async function carregarMods() {
 
   for (const mod of instalados) {
     if (!mod.client || modsCarregados.has(mod.id)) continue;
+    if (estadoDosMods.get(mod.id)?.fase === "so-noutra-plataforma") continue;
     // Marcado **antes** do `await`: o laço roda a cada quatro segundos, e sem
     // isto dois tiques sobrepostos criariam dois workers do mesmo MOD.
     modsCarregados.set(mod.id, null);

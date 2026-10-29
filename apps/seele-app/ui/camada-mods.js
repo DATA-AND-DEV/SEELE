@@ -394,7 +394,12 @@ async function obterOConjunto(mods) {
 
   const temOExato = (m) =>
     instalados.some((i) => i.id === m.id && i.hash === m.hash);
-  const faltando = mods.filter((m) => !temOExato(m));
+  // O que não roda neste lugar não se baixa: não serve aqui, e o servidor o
+  // exige do mesmo jeito (a casca só o pula, e diz por quê na gestão).
+  let aqui = null;
+  try { aqui = plataformaDaCasca(await invoke("plataforma")); } catch { /* sem lugar: nada é pulado */ }
+  const daqui = mods.filter((m) => rodaAqui(m, aqui));
+  const faltando = daqui.filter((m) => !temOExato(m));
   if (faltando.length === 0) return true;
 
   for (const [quantos, m] of faltando.entries()) {
@@ -427,7 +432,7 @@ async function obterOConjunto(mods) {
     dizer(`não consegui conferir o que chegou: ${fraseDeErro(falha)}`);
     return false;
   }
-  const errados = mods.filter((m) => !temOExato(m));
+  const errados = daqui.filter((m) => !temOExato(m));
   if (errados.length > 0) {
     dizer(
       `o que chegou não é o que o servidor exige: ${errados
@@ -836,6 +841,8 @@ const FASES_DO_MOD = {
   "sem-pacote": "o servidor exige este MOD e ele não está instalado aqui",
   "outra-versao": "o que está instalado aqui não é o que o servidor exige",
   descarregado: "descarregado: o servidor deixou de exigi-lo",
+  // O servidor o exige, e ele não roda neste lugar: o detalhe diz onde roda.
+  "so-noutra-plataforma": "o servidor exige este MOD, mas ele não roda aqui",
 };
 
 // ------------------------------------------------- o rascunho do conjunto
