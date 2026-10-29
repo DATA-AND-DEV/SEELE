@@ -102,9 +102,10 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     event.preventDefault();
     if (!texto.value.trim() || enviar.disabled) return;
     const rascunho = texto.value;
+    const conversa = geracaoDaConversa;
     executar(async () => {
       await acoes.enviarTexto(rascunho);
-      if (texto.value === rascunho) texto.value = "";
+      if (conversa === geracaoDaConversa && texto.value === rascunho) texto.value = "";
     });
   });
   texto.addEventListener("keydown", event => {
@@ -132,7 +133,12 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   let nomeDoPar = "";
   let ocupado = false;
   let operacao = 0;
+  let geracaoDaConversa = 0;
   const ids = new Set();
+  function limparHistorico() {
+    ++geracaoDaConversa;
+    nomeDoPar = ""; ids.clear(); mensagens.replaceChildren(); texto.value = "";
+  }
   const frases = {
     livre: "Nova conversa.", recebendo: "Aguardando chamada.",
     procurando: "Procurando pelo código…", chamando: "Chamando…", tocando: "Quer entrar na conversa.",
@@ -170,7 +176,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     enviar.disabled = texto.disabled = !dentro || ocupado;
     for (const item of [criar, entrar, atender, recusar, copiar, mic]) item.disabled = ocupado;
     // Sair e voltar continuam disponíveis durante operações demoradas.
-    chat.hidden = !dentro && !mensagens.childElementCount;
+    chat.hidden = !dentro;
   }
   async function executar(acao) {
     const minha = ++operacao;
@@ -197,12 +203,17 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
       (retrato.estado === "livre" ? nome : raiz).focus();
     },
     estado(novo) {
+      if (novo.estado === "encerrada") {
+        ++operacao; ocupado = false;
+        limparHistorico();
+      }
       retrato = novo;
       if (typeof novo.apelido === "string") nomeDoPar = novo.apelido;
       desenhar();
     },
     convite({ link: valor }) { link.value = valor; desenhar(); },
     texto({ id, de, texto: conteudo }) {
+      if (retrato.estado !== "dentro") return;
       const chave = `${de}:${id}`;
       if (ids.has(chave)) return;
       ids.add(chave);
@@ -223,7 +234,7 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     falha,
     limpar() {
       ++operacao; ocupado = false; retrato = { estado: "livre" };
-      nomeDoPar = ""; ids.clear(); mensagens.replaceChildren(); link.value = ""; texto.value = "";
+      limparHistorico(); link.value = "";
       tela.replaceChildren(); tela.hidden = true; erro.hidden = true;
       rotular(mic, "LIGAR MICROFONE"); mic.setAttribute("aria-pressed", "false");
       rotular(compartilhar, "COMPARTILHAR TELA"); compartilhar.setAttribute("aria-pressed", "false");

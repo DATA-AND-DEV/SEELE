@@ -212,11 +212,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     emitir({ ScreenOpened: { screen: estaVez.tela, width: medidas.largura, height: medidas.altura } });
 
     // A imagem.
-    const codificador = new VideoEncoder({
-      output: (pedaco) => quadro(estaVez, pedaco.type === "key" ? 1 : 0, bytesDoPedaco(pedaco)),
-      error: (falha) => console.warn("tela: o codificador da imagem falhou:", falha),
-    });
-    codificador.configure({
+    fluxo.configuracaoVideo = {
       codec: medidas.codec,
       width: medidas.largura,
       height: medidas.altura,
@@ -224,14 +220,43 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
       framerate: medidas.quadros,
       latencyMode: "realtime",
       avc: { format: "annexb" },
-    });
-    fluxo.codificadores.push(codificador);
-    lerAImagem(estaVez, trilha, codificador);
+    };
+    fluxo.recuperacoesVideo = 0;
+    criarCodificadorDaImagem(estaVez, fluxo);
+    lerAImagem(estaVez, trilha);
 
     // O som, no mesmo fluxo.
     const som = estaVez.midia.getAudioTracks()[0];
     if (som && estaVez.limites.com_som !== false && temSomDaTelaParaCodificar()) lerOSom(estaVez, som);
     else if (som && !temSomDaTelaParaCodificar()) som.stop();
+  }
+
+  function criarCodificadorDaImagem(estaVez, fluxo) {
+    const codificador = new VideoEncoder({
+      output: pedaco => {
+        if (fluxo.codificadorVideo === codificador) quadro(estaVez, pedaco.type === "key" ? 1 : 0, bytesDoPedaco(pedaco));
+      },
+      error: falha => recuperarCodificadorDaImagem(estaVez, fluxo, codificador, falha),
+    });
+    fluxo.codificadorVideo = codificador;
+    fluxo.codificadores.push(codificador);
+    fluxo.chave = true;
+    codificador.configure(fluxo.configuracaoVideo);
+  }
+
+  function recuperarCodificadorDaImagem(estaVez, fluxo, codificador, falha) {
+    if (viva !== estaVez || estaVez.fluxo !== fluxo || fluxo.codificadorVideo !== codificador) return;
+    if (codificador.state !== "closed") codificador.close();
+    fluxo.codificadores = fluxo.codificadores.filter(item => item !== codificador);
+    // O navegador pode recolher recursos do codec. Reutilizar um encoder
+    // fechado deixa a UI no ar, mas sem imagem. A captura e o fluxo seguem;
+    // apenas o codec é substituído, com chave, por no máximo duas tentativas.
+    if (["QuotaExceededError", "EncodingError"].includes(falha.name) && fluxo.recuperacoesVideo++ < 2) {
+      try { criarCodificadorDaImagem(estaVez, fluxo); return; }
+      catch (erro) { console.warn("tela: não foi possível recuperar o codificador:", erro); }
+    }
+    console.warn("tela: o codificador da imagem parou:", falha);
+    parar("A imagem compartilhada parou. Compartilhe a tela novamente.");
   }
 
   function escrever(fluxo, bytes) {
@@ -261,7 +286,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
   }
 
   /** A imagem da captura, na cadência e nas medidas do degrau. */
-  async function lerAImagem(estaVez, trilha, codificador) {
+  async function lerAImagem(estaVez, trilha) {
     const fluxo = estaVez.fluxo;
     const { largura, altura, quadros } = fluxo.medidas;
     const leitor = typeof MediaStreamTrackProcessor === "function"
@@ -278,14 +303,16 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
         lido = await leitor.read();
       } catch (erro) {
         console.warn("tela: a leitura da captura parou:", erro);
-        if (viva === estaVez) parar();
+        if (viva === estaVez && estaVez.fluxo === fluxo) parar("Não foi possível continuar lendo a captura. Compartilhe a tela novamente.");
         break;
       }
-      if (lido.done || viva !== estaVez) {
+      if (lido.done || viva !== estaVez || estaVez.fluxo !== fluxo) {
         lido.value?.close();
+        if (lido.done && viva === estaVez && estaVez.fluxo === fluxo) parar("A captura da imagem terminou. Compartilhe a tela novamente.");
         break;
       }
       const original = lido.value;
+      const codificador = fluxo.codificadorVideo;
       const agora = original.timestamp;
       // A cadência pedida, e a fila de escrita: um quadro que não cabe agora
       // é descartado, e o próximo sai como chave.
@@ -309,7 +336,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
         codificador.encode(quadroNovo, { keyFrame: fluxo.chave });
         fluxo.chave = false;
       } catch (falha) {
-        console.warn("tela: um quadro não entrou no codificador:", falha);
+        recuperarCodificadorDaImagem(estaVez, fluxo, codificador, falha);
       } finally {
         quadroNovo.close();
       }
@@ -366,7 +393,7 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
   }
 
   /** Fecha o fluxo e os codificadores; `avisar` diz à casca que a tela fechou. */
-  function fechar({ avisar = true } = {}) {
+  function fechar({ avisar = true, erro = null } = {}) {
     const estaVez = viva;
     viva = null;
     if (!estaVez) return;
@@ -379,12 +406,12 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
       fluxo.escrita.finally(() => fluxo.escritor.close().catch(() => {}));
     }
     for (const trilha of estaVez.midia.getTracks()) trilha.stop();
-    if (estaVez.tela !== null && (avisar || fluxo)) emitir({ ScreenClosed: { screen: estaVez.tela } });
+    if (estaVez.tela !== null && (avisar || fluxo)) emitir({ ScreenClosed: { screen: estaVez.tela, ...(erro ? { erro } : {}) } });
   }
 
   /** Para: o fluxo fecha, a captura solta, e o servidor fica sabendo. Idempotente. */
-  function parar() {
-    fechar();
+  function parar(erro = null) {
+    fechar({ erro });
     try {
       pedir("parar_de_compartilhar", {});
     } catch {
@@ -416,15 +443,8 @@ function criarATransmissaoDoNavegador({ sessao, wasm, eu, emitir }) {
     }
     const imagem = fluxo.codificadores.find((codificador) => codificador instanceof VideoEncoder);
     if (imagem && imagem.state === "configured" && limites.banda_bps) {
-      imagem.configure({
-        codec: fluxo.medidas.codec,
-        width: fluxo.medidas.largura,
-        height: fluxo.medidas.altura,
-        bitrate: limites.banda_bps,
-        framerate: fluxo.medidas.quadros,
-        latencyMode: "realtime",
-        avc: { format: "annexb" },
-      });
+      fluxo.configuracaoVideo = { ...fluxo.configuracaoVideo, bitrate: limites.banda_bps };
+      imagem.configure(fluxo.configuracaoVideo);
       fluxo.chave = true;
     }
   }

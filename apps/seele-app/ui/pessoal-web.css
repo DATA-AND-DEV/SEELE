@@ -209,47 +209,98 @@
 }
 .pessoal-web-status { padding: 8px 24px; border-top: 1px solid var(--seele-linha); color: var(--seele-osso-apagado); display: flex; gap: 24px; flex-wrap: wrap; font-size: 12px; }
 
-/* Condições de composição, após os valores padrão do componente. */
-@media (max-width: 700px) {
-  .pessoal-web { inset: 0; padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom)); gap: 12px; }
-  .pessoal-web-topo { padding-bottom: 10px; }
-  .pessoal-web-assinatura { gap: 10px; }
-  .pessoal-web-marca { width: 84px; height: 29px; }
-  .pessoal-web-titulo { font-size: 18px; }
-  .pessoal-web-topo > button { padding: 8px; font-size: 11px; }
-  .pessoal-web-corpo { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(100px, .85fr) minmax(140px, 1fr); gap: 12px; }
+/* A conversa ocupa a janela: participantes e mensagens dividem o espaço
+   restante; somente o histórico rola, mantendo escrita e ações ao alcance. */
+@media (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  .pessoal-web {
+    inset: 0;
+    height: 100dvh;
+    box-sizing: border-box;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    gap: 0;
+  }
+  .pessoal-web-topo { padding: 6px 12px; gap: 8px; flex-wrap: nowrap; }
+  .pessoal-web-assinatura { min-width: 0; gap: 10px; }
+  .pessoal-web-titulo { font-size: 18px; padding-left: 10px; line-height: 1.2; }
+  .pessoal-web-marca { width: 56px; height: 26px; flex: 0 0 auto; }
+  .pessoal-web-topo > button { padding: 8px; font-size: 11px; flex: 0 0 auto; }
+  .pessoal-web-corpo {
+    box-sizing: border-box;
+    padding: 12px;
+    gap: 12px;
+    overflow: hidden;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 2fr) minmax(112px, 3fr);
+  }
   .pessoal-web-corpo:has(.pessoal-web-chat[hidden]) { grid-template-rows: minmax(0, 1fr); }
-  .pessoal-web-centro { gap: 12px; padding: 0; }
-  .pessoal-web-estado { font-size: 12px; }
-  .pessoal-web-participantes { gap: 10px; }
-  .pessoal-web-participante { padding: 16px 8px; gap: 8px; }
-  .pessoal-web-inicial { width: 52px; height: 52px; font-size: 24px; }
-  .pessoal-web-participante-nome { font-size: 15px; }
-  .pessoal-web-chat { padding: 12px; gap: 8px; }
-  .pessoal-web-convite { flex-direction: column; align-items: stretch; }
-  .pessoal-web-link { flex: 0 1 auto; width: 100%; }
-  .pessoal-web-rodape { gap: 8px; padding-top: 10px; }
-  .pessoal-web-rodape > button { flex: 1 1 0; min-width: 0; min-height: 70px; padding: 8px 4px; font-size: 9px; }
+  .pessoal-web-palco { overflow: hidden; }
+  .pessoal-web-centro {
+    box-sizing: border-box;
+    height: 100%;
+    min-height: 0;
+    gap: 8px;
+    padding: 0;
+    align-content: stretch;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .pessoal-web-acoes:not(:has(button:not([hidden]))) { display: none; }
+  .pessoal-web-estado { font-size: 12px; line-height: 1.4; }
+  .pessoal-web-participantes { min-height: 0; gap: 8px; }
+  .pessoal-web-participante { min-height: 0; padding: 8px; gap: 6px; overflow: hidden; }
+  .pessoal-web-inicial { width: clamp(32px, 7dvh, 64px); height: clamp(32px, 7dvh, 64px); font-size: 24px; flex: 0 0 auto; }
+  .pessoal-web-participante-nome { font-size: 14px; line-height: 1.2; max-height: 2.4em; overflow: hidden; }
+  .pessoal-web .pessoal-web-participante-papel { font-size: 10px; }
+  .pessoal-web-chat { padding: 10px; gap: 8px; overflow: hidden; }
+  .pessoal-web-chat-titulo { font-size: 12px; }
+  .pessoal-web-texto { height: 44px; min-height: 44px; max-height: 44px; padding: 10px; resize: none; }
   .pessoal-web-escrever > button { padding: 8px; }
   .pessoal-web-escrever > button .pessoal-web-botao-texto { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .pessoal-web input:not([type="range"]):not([type="checkbox"]):not([type="radio"]) { min-height: 44px; }
+  .pessoal-web-convite { flex-direction: column; align-items: stretch; gap: 8px; }
+  .pessoal-web-link { flex: 0 1 auto; width: 100%; }
+  .pessoal-web-rodape { flex-wrap: nowrap; padding: 8px 12px; gap: 6px; }
+  .pessoal-web-rodape:not(:has(button:not([hidden]))) { display: none; }
+  .pessoal-web .pessoal-web-rodape > button { flex: 1 1 0; min-width: 0; min-height: 44px; font-size: 10px; padding: 8px 4px; gap: 4px; }
+  .pessoal-web-rodape > button .glifo { width: 16px; height: 16px; }
+  .pessoal-web-erro { padding: 4px 12px; font-size: 12px; }
+  .pessoal-web[data-fase="livre"] .pessoal-web-centro,
+  .pessoal-web[data-fase="encerrada"] .pessoal-web-centro,
+  .pessoal-web[data-fase="recebendo"] .pessoal-web-centro {
+    height: auto;
+    max-height: 100%;
+    overflow: auto;
+    grid-template-rows: none;
+    align-content: center;
+    gap: 12px;
+    padding: 16px;
+  }
+  .pessoal-web-entrada-titulo { font-size: 26px; }
+  .pessoal-web[data-fase="tocando"] .pessoal-web-centro { grid-template-rows: auto minmax(0, 1fr) auto; }
+  .pessoal-web-tela { overflow: hidden; }
+  .pessoal-web-tela video, .pessoal-web-tela canvas { min-height: 0; min-width: 0; }
 }
 
-@media(max-width: 700px) {
-  .pessoal-web { inset: 0; height: 100dvh; grid-template-rows: auto minmax(0, 1fr) auto auto auto; }
-  .pessoal-web-topo { padding: max(8px, env(safe-area-inset-top)) 12px 8px; gap: 8px; }
-  .pessoal-web-titulo { font-size: 20px; padding-left: 12px; }
-  .pessoal-web-marca { width: 64px; height: 28px; }
-  .pessoal-web-assinatura { gap: 12px; }
-  .pessoal-web-topo > button { font-size: 12px; }
-  .pessoal-web-corpo { padding: 12px; gap: 12px; overflow: auto; grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(120px, auto) minmax(180px, 1fr); }
-  .pessoal-web-corpo:has(.pessoal-web-chat[hidden]) { grid-template-rows: minmax(0, 1fr); }
-  .pessoal-web-centro { gap: 12px; }
-  .pessoal-web[data-fase="livre"] .pessoal-web-centro, .pessoal-web[data-fase="encerrada"] .pessoal-web-centro { padding: 20px; gap: 20px; }
-  .pessoal-web-participante { padding: 12px 8px; }
-  .pessoal-web-inicial { width: 48px; height: 48px; font-size: 22px; }
-  .pessoal-web-chat { padding: 12px; }
-  .pessoal-web-rodape { padding: 8px 12px; gap: 8px; }
-  .pessoal-web-rodape > button { flex: 1 1 80px; min-width: 0; min-height: 44px; font-size: 12px; padding: 8px; }
-  .pessoal-web-rodape > button .glifo { width: 16px; height: 16px; }
-  .pessoal-web-status { padding: 6px 12px max(6px, env(safe-area-inset-bottom)); gap: 8px 16px; }
+/* Altura reduzida também cobre a janela encolhida pelo teclado. */
+@media (max-height: 600px) and (max-width: 700px), (max-height: 500px) and (max-width: 1000px) {
+  .pessoal-web-topo { padding-top: 2px; padding-bottom: 2px; }
+  .pessoal-web-corpo { padding: 6px 10px; gap: 6px; grid-template-rows: minmax(0, 1fr) minmax(96px, 1.3fr); }
+  .pessoal-web-centro { gap: 4px; }
+  .pessoal-web-participante { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; row-gap: 2px; align-content: center; justify-items: start; padding: 6px; }
+  .pessoal-web-inicial { grid-row: 1 / 3; width: 32px; height: 32px; font-size: 18px; }
+  .pessoal-web-participante-nome { font-size: 12px; text-align: start; }
+  .pessoal-web .pessoal-web-participante-papel { font-size: 9px; }
+  .pessoal-web-chat { padding: 6px; gap: 4px; }
+  .pessoal-web-rodape { padding: 4px 10px; }
+  .pessoal-web[data-fase="livre"] .pessoal-web-centro,
+  .pessoal-web[data-fase="encerrada"] .pessoal-web-centro,
+  .pessoal-web[data-fase="recebendo"] .pessoal-web-centro { gap: 6px; padding: 10px; }
+  .pessoal-web-entrada-titulo { font-size: 20px; }
+  .pessoal-web-nome { gap: 4px; font-size: 12px; }
+  .pessoal-web-nome input { padding: 8px; min-height: 44px; }
+}
+
+@media (orientation: landscape) and (min-width: 500px) and (max-height: 500px) and (max-width: 1000px) {
+  .pessoal-web-corpo { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); grid-template-rows: minmax(0, 1fr); }
+  .pessoal-web-corpo:has(.pessoal-web-chat[hidden]) { grid-template-columns: minmax(0, 1fr); }
 }

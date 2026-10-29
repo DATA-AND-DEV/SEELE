@@ -20,6 +20,7 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
   const browser=await engines[engine]().launch({headless:true});
   try{
    const page=await browser.newPage({viewport:{width:1000,height:700}});
+   await page.exposeFunction('abrirTelaCheiaRecebida',()=>page.locator('#b > button').click());
    if(engine==='webkit') await page.addInitScript(()=>{delete globalThis.MediaStreamTrackProcessor;});
    if(process.env.SEELE_PREVIEW_DIR){fs.mkdirSync(process.env.SEELE_PREVIEW_DIR,{recursive:true});await page.exposeFunction('preview',()=>page.screenshot({path:path.join(process.env.SEELE_PREVIEW_DIR,`${engine}-tela-pessoal-h264.png`)}));}
    await page.goto(`http://127.0.0.1:${server.address().port}`);
@@ -33,7 +34,11 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
     pb=criarEnlaceDaChamadaWeb({papel:'quem-recebe',enviarSinal:s=>pa.receberSinalAutenticado(s)});
     await pb.iniciar();await pa.iniciar();await Promise.all([pa.pronto,pb.pronto]);
     window.events=[];const packets=[];let a,b;
-    const transport={ouvir:fn=>pa.tela.ouvir(fn),enviar:bytes=>{packets.push([...bytes]);return pa.tela.enviar(bytes);}};
+    let omitirProximoFechar=false;
+    const transport={ouvir:fn=>pa.tela.ouvir(fn),enviar:bytes=>{
+     if(omitirProximoFechar&&sa.operar({acao:'tela_desempacotar',bytes:[...bytes]}).resposta.Fechar){omitirProximoFechar=false;return;}
+     packets.push([...bytes]);return pa.tela.enviar(bytes);
+    }};
     a=criarCompartilhamentoPessoalWeb({servico:sa,transporte:transport,palco:document.getElementById('a'),enviarControle:c=>b.receberControle(c),aoEstado:(tipo,detalhe)=>events.push({de:'a',tipo,detalhe})});
     b=criarCompartilhamentoPessoalWeb({servico:sb,transporte:pb.tela,palco:document.getElementById('b'),enviarControle:c=>a.receberControle(c),aoEstado:(tipo,detalhe)=>events.push({de:'b',tipo,detalhe})});
     const frames=()=>events.filter(e=>e.de==='b'&&e.tipo==='quadro').length;
@@ -57,7 +62,24 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
      for(const bytes of oldPackets)await pa.tela.enviar(new Uint8Array(bytes));await tick();
      check(!document.getElementById('b').hidden&&pixel()[2]>150,'geração velha não apaga nem pinta nova');
      if(window.preview)await window.preview();newPackets=packets.splice(0);
-     a.parar();await until(()=>document.getElementById('b').hidden);blue.stop();
+     // Reabertura válida sem Fechar anterior: o novo cabeçalho substitui o
+     // leitor. O transporte, H264 e fullscreen são reais; só se
+     // retém o Fechar para exercitar exatamente essa ordem do protocolo.
+     if(document.getElementById('b').requestFullscreen||document.getElementById('b').webkitRequestFullscreen){
+      const emTelaCheia=()=> (document.fullscreenElement??document.webkitFullscreenElement)===document.getElementById('b');
+      await window.abrirTelaCheiaRecebida();
+      await until(emTelaCheia);
+      check(emTelaCheia(),'receptor entrou em fullscreen real');
+      omitirProximoFechar=true;a.parar();blue.stop();await until(()=>!omitirProximoFechar);
+      const antesReabrir=frames(),green=artificial('#20e040',640,360);a.usarMidia(green.stream);
+      await until(()=>frames()>antesReabrir+3);
+      check(emTelaCheia(),'nova geração mantém fullscreen');
+      check(!document.getElementById('b').hidden&&pixel()[1]>150,'nova geração entrega imagem verde sem esconder palco');
+      for(const bytes of oldPackets)await pa.tela.enviar(new Uint8Array(bytes));await tick();
+      check(emTelaCheia()&&pixel()[1]>150,'geração velha não encerra fullscreen nem altera nova imagem');
+      a.parar();green.stop();await until(()=>document.getElementById('b').hidden);
+      await until(()=>!document.fullscreenElement&&!document.webkitFullscreenElement);
+     }else{a.parar();await until(()=>document.getElementById('b').hidden);blue.stop();}
      // Resolver o seletor após fechar não deixa captura órfã.
      let deliver;Object.defineProperty(navigator.mediaDevices,'getDisplayMedia',{configurable:true,value:()=>new Promise(ok=>deliver=ok)});
      const pending=a.compartilhar();a.fechar();await pending;const late=artificial('#ffffff');deliver(late.stream);await tick();
@@ -80,6 +102,31 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
      check(!document.getElementById('b').hidden&&pixel()[2]>150,'WebKit geração velha ignorada');if(window.preview)await window.preview();a.fechar();
     }
     const errors=events.filter(e=>e.tipo==='erro');check(errors.length===0,'erros: '+JSON.stringify(errors));
+    // Falha injetada no callback de um encoder nativo real: recuperação
+    // deve produzir H264 novamente no mesmo fluxo, com chave decodificável.
+    const NativeEncoder=VideoEncoder,codecs=[];
+    globalThis.VideoEncoder=class extends NativeEncoder{
+     constructor(callbacks){super(callbacks);codecs.push({codec:this,falhar:callbacks.error});}
+    };
+    const emissor=document.createElement('div'),receptor=document.createElement('div');document.body.append(emissor,receptor);
+    let retomadas=0;const estadoRecuperacao=[];let tx,rx;
+    tx=criarCompartilhamentoPessoalWeb({servico:sa,transporte:pa.tela,palco:emissor,enviarControle:c=>rx.receberControle(c),aoEstado:tipo=>estadoRecuperacao.push(tipo)});
+    rx=criarCompartilhamentoPessoalWeb({servico:sb,transporte:pb.tela,palco:receptor,enviarControle:c=>tx.receberControle(c),aoEstado:tipo=>{if(tipo==='quadro')retomadas++;}});
+    const fonteRecuperacao=artificial('#20e040');
+    try{
+     tx.usarMidia(fonteRecuperacao.stream);await until(()=>retomadas>2);
+     for(let tentativa=0;tentativa<2;tentativa++){
+      const antes=retomadas,atual=codecs.at(-1);atual.codec.close();atual.falhar(new DOMException('recurso recolhido','QuotaExceededError'));
+      await until(()=>retomadas>antes+2);
+      check(tx.noAr&&!receptor.hidden,'recurso do codec recuperado mantém captura e receptor');
+     }
+     check(codecs.length===3,'duas substituições de encoder, sem reabrir captura');
+     const atual=codecs.at(-1);atual.codec.close();atual.falhar(new DOMException('recurso recolhido','QuotaExceededError'));
+     await until(()=>receptor.hidden);
+     check(!tx.noAr&&fonteRecuperacao.stream.getTracks().every(t=>t.readyState==='ended'),'limite encerra captura, fluxo e estado noAr');
+     check(estadoRecuperacao.filter(tipo=>tipo==='erro').length===1,'falha definitiva aparece na UI');
+     check(codecs.every(item=>item.codec.state==='closed')&&!document.querySelector('[data-captura-da-tela]'),'falha definitiva não deixa encoder/leitor órfão');
+    }finally{tx.fechar();rx.fechar();fonteRecuperacao.stop();emissor.remove();receptor.remove();globalThis.VideoEncoder=NativeEncoder;}
     // O mesmo leitor também alimenta a fachada de sessão de servidor: bytes
     // completos passam pelo LeitorDeTela Rust, sem a adaptação pessoal externa.
     let servidorTx, leitorServidor=0, quadrosServidor=0, aberturasServidor=0;
@@ -102,9 +149,16 @@ const at=originalSps.indexOf('function codecDoSps(');const sps=originalSps.slice
       },
     };
     servidorTx=criarATransmissaoDoNavegador({sessao:sessaoServidor,wasm:sa.wasm,eu:()=>1,emitir:()=>{}});
+    const NativeProcessor=globalThis.MediaStreamTrackProcessor;let leitorNativo;
+    if(NativeProcessor)globalThis.MediaStreamTrackProcessor=class{
+     constructor(args){const original=new NativeProcessor(args);this.readable={getReader(){return leitorNativo=original.readable.getReader();}};}
+    };
     const primeiraServidor=artificial('#30e040');
     servidorTx.comecar(primeiraServidor.stream,{altura_maxima:720,quadros_maximos:20,banda_bps:1200000,com_som:false});
-    await until(()=>quadrosServidor>1);servidorTx.parar();primeiraServidor.stop();
+    await until(()=>quadrosServidor>1);
+    if(leitorNativo){await leitorNativo.cancel();await until(()=>!servidorTx.noAr);check(primeiraServidor.stream.getTracks().every(t=>t.readyState==='ended'),'fim inesperado de leitor real encerra captura');}
+    else servidorTx.parar();
+    globalThis.MediaStreamTrackProcessor=NativeProcessor;primeiraServidor.stop();
     check(!servidorTx.noAr&&!document.querySelector('[data-captura-da-tela]'),'servidor para leitor');
     const antesServidor=quadrosServidor,segundaServidor=artificial('#e0d030');
     servidorTx.comecar(segundaServidor.stream,{altura_maxima:720,quadros_maximos:20,banda_bps:1200000,com_som:false});

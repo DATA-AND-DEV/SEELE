@@ -26,7 +26,11 @@ const engines = require('./playwright.cjs');
               chamar: nome => { if(window.erroDaOrigem){const erro=new Error('Este endereço foi aposentado. Peça um novo convite.');erro.origemDoConviteInvalida=true;throw erro;} acciones.push(['chamar', nome]); }, copiar: link => acciones.push(['copiar', link]),
               atender: () => acciones.push(['atender']), recusar: () => acciones.push(['recusar']),
               encerrar: () => { acciones.push(['encerrar']); vistaPessoal.estado({ estado: 'encerrada' }); },
-              enviarTexto: texto => { acciones.push(['texto', texto]); vistaPessoal.texto({ id: 1, de: 'eu', texto }); },
+              enviarTexto: texto => {
+                acciones.push(['texto', texto]);
+                if (window.adiarEnvio) return new Promise(resolve => { window.concluirEnvio = resolve; });
+                vistaPessoal.texto({ id: 1, de: 'eu', texto });
+              },
               microfone: () => {}, compartilhar: () => {}, podeCompartilhar: () => false,
             } });
             vistaPessoal.elemento.id = 'vista-pessoal-bancada';
@@ -45,7 +49,7 @@ const engines = require('./playwright.cjs');
           await root.getByRole('button', { name: 'ATENDER', exact: true }).click();
           await page.evaluate(() => vistaPessoal.estado({ estado: 'dentro', apelido: 'Lia' }));
           assert.ok(await root.getByRole('button', { name: 'COMPARTILHAR TELA' }).isDisabled());
-          const message = root.getByRole('textbox', { name: 'Mensagem', exact: true });
+          const message = root.getByRole('textbox', { name: 'Mensagem', exact: true, includeHidden: true });
           await message.fill('Primeira linha\nSegunda linha');
           await root.getByRole('button', { name: 'ENVIAR', exact: true }).click();
           assert.equal(await message.inputValue(), '');
@@ -80,6 +84,25 @@ const engines = require('./playwright.cjs');
           await page.evaluate(()=>vistaPessoal.estado({estado:'dentro',apelido:'Lia'}));
           await page.mouse.up();
           assert.ok(await message.isDisabled());
+          assert.equal(await root.locator('.pessoal-web-mensagem').count(), 0, 'encerrar descarta o chat da chamada anterior');
+          assert.ok(await root.locator('.pessoal-web-chat').isHidden(), 'nova conversa não divide espaço com chat encerrado');
+          await page.evaluate(() => {
+            vistaPessoal.texto({ id: 99, de: 'par', texto: 'Evento atrasado' });
+            vistaPessoal.estado({ estado: 'dentro', apelido: 'Outra pessoa' });
+            vistaPessoal.texto({ id: 1, de: 'par', texto: 'Nova chamada' });
+          });
+          assert.deepEqual(await root.locator('.pessoal-web-conteudo').allTextContents(), ['Nova chamada'], 'nova chamada começa vazia e aceita ids reutilizados');
+          await message.fill('Rascunho antigo');
+          await page.evaluate(() => vistaPessoal.estado({ estado: 'encerrada' }));
+          assert.equal(await message.inputValue(), '', 'encerramento remoto também descarta rascunho');
+          await page.evaluate(() => { vistaPessoal.estado({ estado: 'dentro', apelido: 'Par' }); window.adiarEnvio = true; });
+          await message.fill('Mesmo texto');
+          await root.getByRole('button', { name: 'ENVIAR', exact: true }).click();
+          await page.waitForFunction(() => typeof concluirEnvio === 'function');
+          await page.evaluate(() => { vistaPessoal.estado({ estado: 'encerrada' }); vistaPessoal.estado({ estado: 'dentro', apelido: 'Novo par' }); });
+          await message.fill('Mesmo texto');
+          await page.evaluate(async () => { concluirEnvio(); await Promise.resolve(); });
+          assert.equal(await message.inputValue(), 'Mesmo texto', 'envio antigo não apaga rascunho de outra chamada');
           await page.close();
         }
         console.log(`${engine}: vista pessoal 1280/390/320, convite, aceite, chat multiline, duplicação, saída e controles PASS`);

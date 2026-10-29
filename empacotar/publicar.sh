@@ -1412,6 +1412,7 @@ todas_as_bancadas_de_navegador() {
     uma_bancada node apps/seele-app/bancada/entrada-dos-mods.cjs
     uma_bancada node apps/seele-app/bancada/icone-das-sessoes.cjs
     uma_bancada node apps/seele-app/bancada/pessoal-web.cjs
+    uma_bancada node apps/seele-app/bancada/pessoal-web-layout-0181.cjs
     uma_bancada node apps/seele-app/bancada/pessoal-web-entrada.cjs
     export SEELE_CHAMADA_WASM=target/pacote-web/seele_web.wasm
     uma_bancada node apps/seele-app/bancada/pessoal-web-integrada.cjs

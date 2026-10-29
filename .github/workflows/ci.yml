@@ -803,6 +803,7 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/pessoal-web.cjs
+      - run: node apps/seele-app/bancada/pessoal-web-layout-0181.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/pessoal-web-entrada.cjs

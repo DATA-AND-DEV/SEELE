@@ -555,7 +555,10 @@ async function criarServicoDeChamadasWeb({
     },
     enviarControle,
     async enviarTexto(texto) {
-      const id = ++proximoTexto; await enviarControle({ Texto: { id, texto } }); notificar(aoTexto, { id, de: "eu", texto });
+      const atual = chamada, id = ++proximoTexto;
+      await enviarControle({ Texto: { id, texto } });
+      if (atual !== chamada || atual.encerrada) return;
+      notificar(aoTexto, { id, de: "eu", texto });
     },
     destruir() {
       destruido = true;

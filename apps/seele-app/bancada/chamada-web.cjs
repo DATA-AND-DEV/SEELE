@@ -146,7 +146,12 @@ const wasm = process.env.SEELE_CHAMADA_WASM || path.join(raiz,'target/wasm32-unk
     await b.evaluate(()=>servico.enviarTexto('VPS fora, canal direto vivo'));
     await a.waitForFunction(()=>textos.some(t=>t.texto.includes('VPS fora')));
     await b.unroute('**/chamada/1');
-    await b.evaluate(()=>servico.encerrar());
+    await b.evaluate(async()=>{
+      const envio = servico.enviarTexto('envio encerrado antes de confirmar');
+      servico.encerrar();
+      await envio.catch(erro => { if (!/encerrada/.test(String(erro))) throw erro; });
+    });
+    assert.equal(await b.evaluate(()=>textos.some(t=>t.de==='eu'&&t.texto==='envio encerrado antes de confirmar')),false,'envio pendente não repõe mensagem após encerrar');
     await a.waitForFunction(()=>servico.ler().estado==='encerrada',null,{timeout:10000});
     const link2=await a.evaluate(async()=> (await servico.criarConvite({apelido:'Receptor'})).link);
     await b.evaluate(link=>servico.abrirConvite(link),link2);

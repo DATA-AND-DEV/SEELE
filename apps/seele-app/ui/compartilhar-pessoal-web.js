@@ -34,14 +34,17 @@ function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarCon
     return jsonDaSaida().passos;
   }
   function soltarDecoder() { if (decoder && decoder.state !== "closed") decoder.close(); decoder = null; esperaChave = true; }
-  function fecharRecepcao() {
-    soltarVideoNativo();
-    ajustarJanela(false);
-    const doc = palco.ownerDocument;
-    if (doc.fullscreenElement === palco || doc.webkitFullscreenElement === palco) Promise.resolve(doc.exitFullscreen?.() ?? doc.webkitExitFullscreen?.()).catch(() => {});
+  function fecharRecepcao({ manterApresentacao = false } = {}) {
+    if (!manterApresentacao) {
+      soltarVideoNativo();
+      ajustarJanela(false);
+      const doc = palco.ownerDocument;
+      if (doc.fullscreenElement === palco || doc.webkitFullscreenElement === palco) Promise.resolve(doc.exitFullscreen?.() ?? doc.webkitExitFullscreen?.()).catch(() => {});
+      palco.hidden = true;
+    }
     const anterior = leitura; leitura = null;
     if (anterior) wasm.fluxo_acabou(anterior.alca);
-    soltarDecoder(); palco.hidden = true;
+    soltarDecoder();
   }
   function pedirChave() {
     if (performance.now() - ultimoPedido < 500) return;
@@ -86,7 +89,10 @@ function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarCon
       if (mensagem.Abrir) {
         const geracao = mensagem.Abrir.geracao;
         if (geracao <= geracaoRemota) return;
-        fecharRecepcao(); geracaoRemota = geracao;
+        // Uma abertura substitui o fluxo, mas não a escolha de apresentação.
+        // Sair da tela cheia aqui reduz o vídeo no celular a cada reabertura
+        // do emissor, mesmo quando a próxima imagem já vem no mesmo canal.
+        fecharRecepcao({ manterApresentacao: true }); geracaoRemota = geracao;
         leitura = { geracao, alca: wasm.fluxo_novo() }; timestamp = 0;
       } else if (mensagem.Dados) {
         if (!leitura || mensagem.Dados.geracao !== leitura.geracao) return;
@@ -146,7 +152,10 @@ function criarCompartilhamentoPessoalWeb({ servico, transporte, palco, enviarCon
     if (evento.ScreenOpened) {
       const { width, height } = evento.ScreenOpened;
       controle({ TelaComecou: { largura: width, altura: height } }); estado("transmitindo");
-    } else if (evento.ScreenClosed) { controle("TelaParou"); estado("parada"); }
+    } else if (evento.ScreenClosed) {
+      controle("TelaParou"); estado("parada");
+      if (evento.ScreenClosed.erro) estado("erro", evento.ScreenClosed.erro);
+    }
   } });
   function parar() { captura++; cancelarCaptura?.(); transmissao.parar(); }
   function usarMidia(midia, limites = { altura_maxima: 720, quadros_maximos: 30, banda_bps: 1200000, com_som: false }) {
