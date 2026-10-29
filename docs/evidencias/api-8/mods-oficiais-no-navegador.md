@@ -67,31 +67,51 @@ mods-oficiais-na-ui (seele/perfis): 2 falha(s)
 D
 Dona de Teste
 ⋯
-- perfis: erros no console: ["error: Access to fetch at 'https://rendzvous.seele.sh/chamada/1' from origin 'http://localhost:49506' has been blocked by CORS policy: ... @ http://localhost:49506/index.html:0"]
+- perfis: erros no console: ["error: Access to fetch at 'https://rendzvous.seele.sh/chamada/1' from origin 'http://localhost:49506' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ http://localhost:49506/index.html:0"]
 === MESA
 mods-oficiais-na-ui (seele/mesa): 1 falha(s)
-- mesa: erros no console: ["error: Access to fetch at 'https://rendzvous.seele.sh/chamada/1' from origin 'http://localhost:49544' has been blocked by CORS policy: ... @ http://localhost:49544/index.html:0"]
+- mesa: erros no console: ["error: Access to fetch at 'https://rendzvous.seele.sh/chamada/1' from origin 'http://localhost:49544' has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present on the requested resource. @ http://localhost:49544/index.html:0"]
 ```
 
 A falha de console é igual nos três e **não é de MOD**: é a página, no
 `localhost`, chamando o rendezvous de produção (`https://rendzvous.seele.sh`,
 que não responde CORS a essa origem). A bancada não a filtra porque foi escrita
-para a origem de produção. Para ver o que sobra sem ela, rodei de novo com uma
-cópia **descartável** da bancada que só acrescenta `blocked by CORS policy` ao
-filtro de console (a cópia foi apagada; o arquivo do repositório não mudou):
+para a origem de produção. (A saída acima é a íntegra; nada foi encurtado. O
+`ruins` da bancada imprime só o que reprovou, e o PERFIS tem as duas linhas.)
 
+### A segunda rodada, com o filtro
+
+Para ver o que sobra sem esse erro, rodei de novo uma cópia **descartável** da
+bancada (`zz-tmp-medida.cjs`, na mesma pasta, apagada depois; o arquivo do
+repositório não mudou). A mudança, em duas linhas:
+
+```diff
+285c285
+-      const ruins = ... |sem janela do Tauri|RecusaDaPonte/i.test(l) &&
++      const ruins = ... |sem janela do Tauri|RecusaDaPonte|blocked by CORS policy/i.test(l) &&
+287a288
++      console.log("CORS-FILTRADOS:", JSON.stringify(doConsole.filter((l) => /blocked by CORS policy/.test(l))));
 ```
-=== ESTILO
-mods-oficiais-na-ui (seele/estilo, chromium): ok
-=== PERFIS
-mods-oficiais-na-ui (seele/perfis): 1 falha(s)
-- perfis: o apelido do servidor sumiu do cartão: FORA DE SALA
-D
-Dona de Teste
-⋯
-=== MESA
-mods-oficiais-na-ui (seele/mesa, chromium): ok
-```
+
+(a segunda linha só imprime o que o filtro derruba; a rodada anterior, que deu os
+mesmos resultados, tinha só a primeira). Esta rodada foi refeita para registrar
+isso, com os mesmos binários:
+
+| MOD | código de saída | linha final |
+|---|---|---|
+| ESTILO | 0 | `mods-oficiais-na-ui (seele/estilo, chromium): ok` |
+| PERFIS | 1 | `mods-oficiais-na-ui (seele/perfis): 1 falha(s)` e o apelido do cartão |
+| MESA | 0 | `mods-oficiais-na-ui (seele/mesa, chromium): ok` |
+
+**O filtro derrubou um erro de CORS por rodada, sempre o mesmo**: o `fetch` a
+`https://rendzvous.seele.sh/chamada/1`, e nenhum outro CORS (`CORS-FILTRADOS`
+tinha exatamente um item nos três). O texto: `Access to fetch at
+'https://rendzvous.seele.sh/chamada/1' from origin 'http://localhost:<porta>'
+has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is
+present on the requested resource.`
+
+**Fica para depois**: a bancada do repositório deveria ignorar esse erro do
+rendezvous em `localhost` (hoje ela sai com 1 para todo mundo que a roda).
 
 ## O resultado por MOD
 
