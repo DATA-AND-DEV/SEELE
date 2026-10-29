@@ -100,6 +100,11 @@ pub struct ModInstalado {
     /// `"tema": true`, e a metade de servidor pode pintar a aparência do
     /// servidor inteiro.
     pub tema: bool,
+    /// **As plataformas em que este MOD roda** (API 8): a lista efetiva, que
+    /// já resolveu o «sem a chave, nas duas» (`plataformas_efetivas`). Vazia
+    /// num pacote recusado, que não roda em lugar nenhum. É o que o ato de
+    /// habilitar grava junto com o hash.
+    pub plataformas: Vec<seele_proto::mods::Plataforma>,
     /// O nome da recusa, de uma lista fechada, quando houve uma.
     pub refused: Option<String>,
 }
@@ -108,6 +113,7 @@ impl ModInstalado {
     /// Um pacote que leu limpo, sob o hash dele em hexadecimal.
     #[must_use]
     pub fn lido(manifest: Manifest, hash: String) -> Self {
+        let plataformas = seele_proto::mods::plataformas_efetivas(&manifest);
         Self {
             id: manifest.id,
             version: manifest.version,
@@ -119,6 +125,7 @@ impl ModInstalado {
             reach: manifest.reach,
             server: manifest.server.is_some(),
             tema: manifest.tema,
+            plataformas,
             refused: None,
         }
     }
@@ -149,6 +156,7 @@ impl ModInstalado {
             reach: Vec::new(),
             server: false,
             tema: false,
+            plataformas: Vec::new(),
             refused: Some(refusal_name(why).to_owned()),
         }
     }
