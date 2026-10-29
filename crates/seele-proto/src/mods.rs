@@ -56,8 +56,14 @@ pub const MANIFEST_SCHEMA: u32 = 1;
 /// cargos entra como versão nova: o manifesto declara as permissões do MOD
 /// (`permissoes`, [`Manifest::permissoes`]) e o MOD pede ações autorizadas pelo
 /// servidor (`ClientMessage::AcaoDeMod`). A 7 não tira nada da 6: um MOD da 6
-/// continua rodando aqui ([`APIS_ACEITAS`] é `[7, 6]`), sem permissões.
-pub const MOD_API_VERSION: u32 = 7;
+/// continua rodando aqui, sem permissões.
+///
+/// **8 desde a 0.19, e é outro alargamento** (API 8, multiplayer): o manifesto
+/// declara em que plataformas o MOD roda (`plataformas`,
+/// [`Manifest::plataformas`]), porque o MOD de servidor de jogo só faz sentido
+/// onde há um servidor para hospedá-lo. A 8 não tira nada da 7: um MOD da 7 ou
+/// da 6 continua rodando, nas duas plataformas ([`APIS_ACEITAS`] é `[8, 7, 6]`).
+pub const MOD_API_VERSION: u32 = 8;
 
 /// A primeira API em que um manifesto pode declarar `permissoes`.
 ///
@@ -66,6 +72,14 @@ pub const MOD_API_VERSION: u32 = 7;
 /// a permissão e declara a 6 rodaria numa build que não a confere, e a
 /// pessoa só descobriria pela ação que passa sem cargo nenhum.
 pub const PRIMEIRA_API_COM_PERMISSOES: u32 = 7;
+
+/// A primeira API em que um manifesto pode declarar `plataformas`.
+///
+/// Recusado em API menor ([`Refused::PlataformasPedemApiNova`]), e não
+/// ignorado, pelo mesmo motivo das permissões: um MOD que conta em ficar fora
+/// do navegador e declara a 7 rodaria lá assim mesmo numa build que não
+/// confere a lista.
+pub const PRIMEIRA_API_COM_PLATAFORMAS: u32 = 8;
 
 /// **As versões que este build executa**, da mais nova para a mais velha.
 ///
@@ -123,9 +137,13 @@ pub const APIS_ACEITAS: &[u32] = APIS_POR_LINHA[0].1;
 ///
 /// **Desde a 0.17, a primeira é a `2`** (ADR 0063), que roda a 7 e a 6: a 7
 /// acrescenta as permissões de MOD dos cargos, e um MOD da 6 continua
-/// rodando. A `1` fica com a 6 só, porque o launcher a roda ao lado como ela
-/// saiu, e a `0.15` com as dela.
-pub const APIS_POR_LINHA: [(&str, &[u32]); 3] = [("2", &[7, 6]), ("1", &[6]), ("0.15", &[5, 4, 3])];
+/// rodando.
+///
+/// **Desde a 0.19, a `2` roda também a 8** (`plataformas`): a linha 2 roda a 8,
+/// a 7 e a 6, e nenhuma delas deixou de rodar. A `1` fica com a 6 só, porque o
+/// launcher a roda ao lado como ela saiu, e a `0.15` com as dela.
+pub const APIS_POR_LINHA: [(&str, &[u32]); 3] =
+    [("2", &[8, 7, 6]), ("1", &[6]), ("0.15", &[5, 4, 3])];
 
 /// A linha de servidor deste build, pela tabela congelada do fio (D-fio-1): o
 /// nome que [`crate::version::linha_do_protocolo`] dá ao `PROTOCOL_VERSION`.
@@ -195,6 +213,9 @@ pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
             "aviso-do-servidor",
             "acoes",
         ],
+        // **A 8 tem as capacidades da 7, iguais e na mesma ordem**: o que ela
+        // acrescenta é do manifesto (`plataformas`), e não algo que o MOD chame.
+        8 => capacidades_da_api(7),
         _ => &[],
     }
 }
@@ -507,6 +528,60 @@ pub struct Manifest {
     /// uma versão da 7: quem filtra é a `api` de cada versão do catálogo.
     #[serde(default)]
     pub permissoes: Vec<crate::cargos::PermissaoDeclarada>,
+    /// **Em que plataformas este MOD roda** (API 8): `app` é o aplicativo de
+    /// desktop e `navegador` é o navegador, que inclui o celular.
+    ///
+    /// Vazia sem a chave, e quer dizer «nas duas» ([`plataformas_efetivas`]):
+    /// é o caso de todo MOD da API 7 e da 6. **Escrita, não pode ser vazia**:
+    /// `"plataformas": []` é recusada ([`Refused::PlataformasVazias`]), e por
+    /// isso `read_manifest` olha a chave no texto, e não só esta lista, que
+    /// não distingue a ausente da vazia. Declarar uma exige a API 8
+    /// ([`PRIMEIRA_API_COM_PLATAFORMAS`]).
+    ///
+    /// Uma build anterior à 0.19 recusa o manifesto inteiro com a chave, como
+    /// `Malformed`, por `deny_unknown_fields`.
+    #[serde(default)]
+    pub plataformas: Vec<Plataforma>,
+}
+
+/// Onde um MOD roda (API 8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Plataforma {
+    /// O aplicativo de desktop.
+    App,
+    /// O navegador, e o celular com ele.
+    Navegador,
+}
+
+impl Plataforma {
+    /// O nome que o manifesto escreve, e que a interface mostra.
+    #[must_use]
+    pub const fn nome(self) -> &'static str {
+        match self {
+            Self::App => "app",
+            Self::Navegador => "navegador",
+        }
+    }
+}
+
+/// **As plataformas em que o MOD roda de fato**: a lista declarada, ou as duas
+/// quando o manifesto não declara nenhuma. É por aqui que o resto do produto
+/// lê, e nunca por `Manifest::plataformas` direto, para a regra «sem a chave,
+/// nas duas» ficar escrita num lugar só.
+#[must_use]
+pub fn plataformas_efetivas(manifest: &Manifest) -> Vec<Plataforma> {
+    if manifest.plataformas.is_empty() {
+        vec![Plataforma::App, Plataforma::Navegador]
+    } else {
+        manifest.plataformas.clone()
+    }
+}
+
+/// Só a chave `plataformas`, para distinguir a ausente da lista vazia escrita.
+#[derive(Deserialize)]
+struct SoPlataformas {
+    plataformas: Option<Vec<Plataforma>>,
 }
 
 /// Why a manifest was refused.
@@ -612,6 +687,28 @@ pub enum Refused {
         api: u32,
         /// A primeira que aceita permissões.
         exige: u32,
+    },
+
+    /// **`plataformas` num manifesto de API anterior à 8.** Recusado, e não
+    /// ignorado: ver [`PRIMEIRA_API_COM_PLATAFORMAS`].
+    #[error("mod declares `plataformas` with API {api}; platforms need API {exige}")]
+    PlataformasPedemApiNova {
+        /// A API que o manifesto declara.
+        api: u32,
+        /// A primeira que aceita plataformas.
+        exige: u32,
+    },
+
+    /// **`"plataformas": []`.** Um MOD que não roda em lugar nenhum é um erro
+    /// do autor; quem quer as duas plataformas omite a chave.
+    #[error("mod declares an empty `plataformas`; omit the key to run on both")]
+    PlataformasVazias,
+
+    /// A mesma plataforma duas vezes em `plataformas`.
+    #[error("mod repeats a platform at position {posicao} of `plataformas`")]
+    PlataformaRepetida {
+        /// A posição da segunda ocorrência, a partir de 0.
+        posicao: usize,
     },
 
     /// A lista de permissões declaradas não passa (`cargos::validar_declaradas`).
@@ -746,6 +843,28 @@ pub fn read_manifest(text: &str) -> Result<Manifest, Refused> {
     }
     crate::cargos::validar_declaradas(&manifest.permissoes)
         .map_err(Refused::PermissoesInvalidas)?;
+    // A ordem é a API, depois a vazia, depois a repetida. A chave é lida do
+    // texto de novo porque `Manifest::plataformas` não distingue a ausente da
+    // `[]`; o texto já passou pelo parser acima, então este não falha.
+    let escrita = serde_json::from_str::<SoPlataformas>(text)
+        .ok()
+        .and_then(|s| s.plataformas);
+    if escrita.is_some() && manifest.api < PRIMEIRA_API_COM_PLATAFORMAS {
+        return Err(Refused::PlataformasPedemApiNova {
+            api: manifest.api,
+            exige: PRIMEIRA_API_COM_PLATAFORMAS,
+        });
+    }
+    if escrita.as_ref().is_some_and(Vec::is_empty) {
+        return Err(Refused::PlataformasVazias);
+    }
+    let mut vistas: Vec<Plataforma> = Vec::new();
+    for (posicao, plataforma) in manifest.plataformas.iter().enumerate() {
+        if vistas.contains(plataforma) {
+            return Err(Refused::PlataformaRepetida { posicao });
+        }
+        vistas.push(*plataforma);
+    }
     if manifest.arquivos.len() > TETO_DE_ARQUIVOS {
         return Err(Refused::ArquivosDemais {
             quantos: manifest.arquivos.len(),
@@ -1273,7 +1392,7 @@ mod tests {
         }
         assert!(!capacidades_da_api(6).is_empty());
         assert!(!capacidades_da_api(7).is_empty());
-        assert!(capacidades_da_api(8).is_empty());
+        assert!(capacidades_da_api(9).is_empty());
     }
 
     /// **O conjunto desta linha é um só** (Step 5 do corte): `APIS_ACEITAS`,
@@ -1328,7 +1447,7 @@ mod tests {
                 "a linha {linha} aparece duas vezes"
             );
         }
-        assert_eq!(apis_de_toda_linha(), vec![7, 6, 5, 4, 3]);
+        assert_eq!(apis_de_toda_linha(), vec![8, 7, 6, 5, 4, 3]);
     }
 
     /// **A API 6 continua como saiu** (o corte; tarefa 13 do plano da F3), e a
@@ -1369,12 +1488,12 @@ mod tests {
         assert!(!seis.contains(&"acoes"), "a API 6 ganhou a capacidade da 7");
     }
 
-    /// **A 7 é a deste build, e é um alargamento** (E8 da 0.17): a 6 inteira,
-    /// na mesma ordem, mais `acoes` no fim, e as duas rodam aqui.
+    /// **A 7 alarga a 6** (E8 da 0.17): a 6 inteira, na mesma ordem, mais
+    /// `acoes` no fim, e a 8 deste build ainda a roda.
     #[test]
-    fn a_api_7_e_a_deste_build_e_alarga_a_6() {
-        assert_eq!(MOD_API_VERSION, 7);
-        assert_eq!(APIS_ACEITAS, &[7, 6]);
+    fn a_api_7_alarga_a_6() {
+        assert_eq!(MOD_API_VERSION, 8);
+        assert_eq!(APIS_ACEITAS, &[8, 7, 6]);
         assert_eq!(PRIMEIRA_API_COM_PERMISSOES, 7);
         let sete = capacidades_da_api(7);
         assert_eq!(&sete[..sete.len() - 1], capacidades_da_api(6));
@@ -1403,6 +1522,52 @@ mod tests {
         assert!(!sete.permissoes[0].todos);
         let sete_sem = read_manifest(&com_api(7, "")).expect("a 7 sem permissões foi recusada");
         assert!(sete_sem.permissoes.is_empty());
+    }
+
+    /// **A API 8 lê `plataformas` e a 7 continua rodando** (E1 da API 8): sem a
+    /// chave o MOD roda nas duas, e é o caso de todo MOD que já existe.
+    #[test]
+    fn a_api_8_le_plataformas_e_a_7_continua_rodando() {
+        let oito = read_manifest(&com_api(8, r#" "plataformas": ["app"],"#)).expect("8");
+        assert_eq!(oito.plataformas, vec![Plataforma::App]);
+        assert_eq!(plataformas_efetivas(&oito), vec![Plataforma::App]);
+        let sem = read_manifest(&com_api(8, "")).expect("8 sem a chave");
+        assert_eq!(
+            plataformas_efetivas(&sem),
+            vec![Plataforma::App, Plataforma::Navegador]
+        );
+        assert!(read_manifest(&com_api(7, "")).is_ok());
+        assert_eq!(APIS_ACEITAS, &[8, 7, 6]);
+        assert_eq!(capacidades_da_api(8), capacidades_da_api(7));
+    }
+
+    /// **`plataformas` num manifesto de API anterior à 8 é recusado**, pelo nome
+    /// e com os dois números, e não ignorado.
+    #[test]
+    fn plataformas_sem_a_api_8_sao_recusadas() {
+        assert_eq!(
+            read_manifest(&com_api(7, r#" "plataformas": ["app"],"#)),
+            Err(Refused::PlataformasPedemApiNova { api: 7, exige: 8 })
+        );
+    }
+
+    /// **Vazia, repetida ou desconhecida é recusada.** A lista vazia escrita
+    /// não é a chave ausente: a ausente quer dizer «roda nas duas», e a vazia
+    /// diria «não roda em lugar nenhum», que é um erro do autor.
+    #[test]
+    fn plataformas_vazias_repetidas_ou_desconhecidas_sao_recusadas() {
+        assert_eq!(
+            read_manifest(&com_api(8, r#" "plataformas": [],"#)),
+            Err(Refused::PlataformasVazias)
+        );
+        assert_eq!(
+            read_manifest(&com_api(8, r#" "plataformas": ["app", "app"],"#)),
+            Err(Refused::PlataformaRepetida { posicao: 1 })
+        );
+        assert!(matches!(
+            read_manifest(&com_api(8, r#" "plataformas": ["celular"],"#)),
+            Err(Refused::Malformed { .. })
+        ));
     }
 
     /// **Permissões num manifesto que não declara a API 7 são recusadas**, pelo
