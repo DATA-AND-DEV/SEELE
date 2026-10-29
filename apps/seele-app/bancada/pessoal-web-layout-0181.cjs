@@ -56,12 +56,18 @@ const motores = require('./playwright.cjs');
                 }
                 return false;
               }).map(el => ({ min:getComputedStyle(el).minHeight,css:el.style.cssText,name:el.getAttribute('aria-label') || el.tagName, rect:el.getBoundingClientRect().toJSON(), parent:el.parentElement.getBoundingClientRect().toJSON() }));
+              const initials = [...root.querySelectorAll('.pessoal-web-inicial')].filter(el => el.getClientRects().length && el.textContent).filter(el => {
+                const range = document.createRange(); range.selectNodeContents(el);
+                const text = range.getBoundingClientRect(), box = el.getBoundingClientRect();
+                return text.top < box.top-2 || text.bottom > box.bottom+2 || text.left < box.left-2 || text.right > box.right+2;
+              }).map(el => el.textContent);
               const rect = selector => { const r=root.querySelector(selector).getBoundingClientRect(); return {top:r.top,bottom:r.bottom,height:r.height}; };
-              return { clipped, overflow: root.scrollWidth > innerWidth+1, body:rect('.pessoal-web-corpo'), stage:rect('.pessoal-web-palco'), chat:rect('.pessoal-web-chat'), foot:rect('.pessoal-web-rodape') };
+              return { clipped, initials, overflow: root.scrollWidth > innerWidth+1, body:rect('.pessoal-web-corpo'), stage:rect('.pessoal-web-palco'), chat:rect('.pessoal-web-chat'), foot:rect('.pessoal-web-rodape') };
             });
             const label = `${motor} ${width}x${height} ${fase}`;
             assert.deepEqual(medidas.clipped, [], `${label}: controles cortados ${JSON.stringify(medidas)}`);
             assert.equal(medidas.overflow, false, `${label}: rolagem horizontal`);
+            assert.deepEqual(medidas.initials, [], `${label}: iniciais fora do avatar`);
             if (['dentro','tela'].includes(fase)) {
               assert.ok(medidas.chat.height >= 96, `${label}: chat espremido`);
               assert.ok(medidas.stage.height > 50, `${label}: palco espremido`);
