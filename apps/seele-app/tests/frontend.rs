@@ -17143,13 +17143,6 @@ fn plataforma_o_laco_de_carga_pula_o_mod_marcado_como_de_outro_lugar() {
         carregar.contains("!daqui.some(m => m.id === id)"),
         "o MOD já carregado que passou para fora desta plataforma não é descarregado: {carregar}"
     );
-    // E o aceite não baixa o que não roda aqui.
-    let camada = without_comments(&read("ui/camada-mods.js"));
-    let obter = js_function(&camada, "async function obterOConjunto(");
-    assert!(
-        obter.contains("rodaAqui(") && !obter.contains("mods.filter((m) => !temOExato(m))"),
-        "a obtenção do aceite baixa o MOD que não roda aqui: {obter}"
-    );
 }
 
 #[test]

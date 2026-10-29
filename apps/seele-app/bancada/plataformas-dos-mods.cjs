@@ -11,8 +11,8 @@
 //    «só funciona no app» na tela de MODs, e ele continua EXIGIDO;
 // 2. MOD sem `plataformas` (servidor 0.18): carregado como hoje;
 // 3. MOD `["app", "navegador"]` e `["navegador"]`: carregados;
-// 4. o aceite do conjunto (`aceitar_mods`) acontece igual com o MOD de fora na lista,
-//    e a obtenção do aceite não baixa o de fora;
+// 4. o aceite (itens do anúncio, sem `plataformas`) emite `aceitar_mods`; o pacote de
+//    fora pode ser baixado, e depois de instalado não é montado;
 // 5. a marca trocada pelo host depois de carregado descarrega o MOD.
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/plataformas-dos-mods.cjs
@@ -88,24 +88,41 @@ const CATALOGO = [
         assert.match(tela, /EXIGIDO POR ESTE SERVIDOR/, `${motor}: ${tela}`);
         assert.doesNotMatch(tela, /não está instalado aqui/, `${motor}: ${tela}`);
 
-        // O aceite do conjunto: o `aceitar_mods` sai igual, sem baixar o de fora.
+        // O aceite do conjunto, como o anúncio o entrega: itens `ModExigido`
+        // (id, version, hash, repo, reach, no_servidor, tema), SEM `plataformas`.
+        // O pacote de fora pode ser baixado aqui (é o aceite deste plano); o que
+        // não pode é ser executado, e o `aceitar_mods` tem de sair igual.
         const aceite = await pagina.evaluate(async (catalogo) => {
           table.mods_instalados = [];
-          // A ponte de mentira instala de verdade, para a conferência do hash fechar.
           table.instalar_mod_do_catalogo = ({ id }) => {
             const m = catalogo.find((c) => c.id === id);
             table.mods_instalados.push({ id, hash: m.hash, client: true });
           };
           chamadas.length = 0;
-          await abrirAceiteDeMods("srv.exemplo:1", catalogo, "conj-1", null);
+          const anunciados = catalogo.map(({ id, version, hash }) => ({
+            id, version, hash, repo: "r", reach: [], no_servidor: false, tema: false,
+          }));
+          await abrirAceiteDeMods("srv.exemplo:1", anunciados, "conj-1", null);
           await aceitarOsMods();
           return {
             baixou: chamadas.filter((c) => c.cmd === "instalar_mod_do_catalogo").map((c) => c.args.id).sort(),
             aceitou: chamadas.filter((c) => c.cmd === "aceitar_mods").map((c) => c.args),
           };
         }, CATALOGO);
-        assert.deepEqual(aceite.baixou, ["x/antigo", "x/dois", "x/so-web"], `${motor}: ${JSON.stringify(aceite)}`);
         assert.deepEqual(aceite.aceitou, [{ alvo: "srv.exemplo:1", conjunto: "conj-1" }], `${motor}: ${JSON.stringify(aceite)}`);
+        assert.deepEqual(aceite.baixou, CATALOGO.map((m) => m.id).sort(), `${motor}: ${JSON.stringify(aceite)}`);
+
+        // Já na sessão, o catálogo traz `plataformas`: o de app, agora INSTALADO,
+        // não é montado e diz por quê.
+        const depois = await pagina.evaluate(async (catalogo) => {
+          modsCarregados.clear(); estadoDosMods.clear(); montados.length = 0;
+          pedirAoServidor = async () => ({ ok: true, conjunto: "conj-1", mods: catalogo });
+          entrarNaGeracao(3);
+          await carregarMods();
+          return { montados: [...montados].sort(), estado: estadoDosMods.get("x/so-app") };
+        }, CATALOGO);
+        assert.deepEqual(depois.montados, ["x/antigo", "x/dois", "x/so-web"], `${motor}: ${JSON.stringify(depois)}`);
+        assert.equal(depois.estado?.fase, "so-noutra-plataforma", `${motor}: ${JSON.stringify(depois)}`);
 
         // O host trocou a marca de um MOD já carregado para fora daqui: descarrega.
         const trocou = await pagina.evaluate(async (catalogo) => {
