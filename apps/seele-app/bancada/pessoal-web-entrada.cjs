@@ -8,10 +8,10 @@ const engines = require('./playwright.cjs');
 const ui = path.resolve(__dirname, '../ui');
 (async () => {
   const server = http.createServer((req, res) => {
-    if (req.url === '/') { res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><meta name="viewport" content="width=device-width"><button id="boot-conversa-pessoal" hidden>CONVERSAR POR LINK</button><span id="boot-perfil-nome">Pessoa</span><script src="/glifos.js"></script><script src="/pessoal-web.js"></script><script src="/pessoal-web-entrada.js"></script>'); return; }
+    if (req.url === '/') { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end('<!doctype html><meta name="viewport" content="width=device-width"><button id="boot-conversa-pessoal" hidden>CONVERSAR POR LINK</button><span id="boot-perfil-nome">Pessoa</span><script src="/glifos.js"></script><script src="/pessoal-web.js"></script><script src="/pessoal-web-entrada.js"></script>'); return; }
     const nome = req.url.slice(1);
     if (!['glifos.js','pessoal-web.js','pessoal-web-entrada.js'].includes(nome)) { res.statusCode = 404; res.end(); return; }
-    res.setHeader('Content-Type', 'text/javascript'); res.end(fs.readFileSync(path.join(ui, nome)));
+    res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); res.end(fs.readFileSync(path.join(ui, nome)));
   });
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
   try { for (const engine of ['chromium', 'webkit']) {
@@ -57,8 +57,13 @@ const ui = path.resolve(__dirname, '../ui');
         window.criarServicoDeChamadasWeb = async callbacks => {
           window.callbacksDaChamada = callbacks;
           return {
-            wasm: {}, receberPorCodigo: async () => { prova.recebeu++; if (prova.esperarRegistro) await new Promise((ok, nao) => { window.rejeitarRegistro = () => nao(new DOMException("Cancelada", "AbortError")); }); }, criarConvite: async () => { callbacks.aoEstado({ estado: 'recebendo' }); return { link: 'https://example.test/#chamada/teste' }; },
-            abrirConvite: () => { prova.abriuConvite++; }, chamar: async () => {}, atender: async () => {},
+            wasm: {}, receberPorCodigo: async () => { prova.recebeu++; if (prova.esperarRegistro) await new Promise((ok, nao) => { window.rejeitarRegistro = () => nao(new DOMException("Cancelada", "AbortError")); }); }, criarConvite: async () => {
+              if (prova.esperarCriacao) await new Promise((ok, nao) => { window.rejeitarCriacao = () => nao(new Error('encontro indisponível')); });
+              callbacks.aoEstado({ estado: 'recebendo' }); return { link: 'https://example.test/#chamada/teste' };
+            },
+            abrirConvite: () => { prova.abriuConvite++; }, chamar: async () => {
+              if (prova.esperarChamada) await new Promise((ok, nao) => { window.rejeitarChamada = () => nao(new Error('conexão recusada')); });
+            }, atender: async () => {},
             destruir: () => { prova.destruiu++; }, encerrar: () => callbacks.aoEstado({ estado: 'encerrada' }),
             revogarConvite: async () => {},
           };
@@ -78,6 +83,30 @@ const ui = path.resolve(__dirname, '../ui');
       await page.evaluate(async () => { prova.esperarRegistro = false; await seelePessoalWeb.receber(true); });
       await page.locator('#boot-conversa-pessoal').click();
       await page.getByLabel('Seu nome', { exact: true }).fill('Nome escolhido');
+      await page.evaluate(() => prova.esperarCriacao = true);
+      await page.getByRole('button', { name: 'CRIAR CONVERSA', exact: true }).click();
+      await page.waitForFunction(() => typeof rejeitarCriacao === 'function');
+      assert.equal(await page.getByRole('button', { name: 'CRIAR CONVERSA', exact: true }).isDisabled(), true, 'limpar a conversa não pode liberar outro clique durante a criação');
+      await page.evaluate(() => rejeitarCriacao());
+      await page.getByRole('alert').waitFor({ state: 'visible' });
+      assert.match(await page.getByRole('alert').textContent(), /Não foi possível concluir/);
+      assert.equal(await page.getByRole('button', { name: 'CRIAR CONVERSA', exact: true }).isEnabled(), true);
+      // Sair durante outra tentativa continua invalidando seu erro tardio.
+      await page.getByRole('button', { name: 'CRIAR CONVERSA', exact: true }).click();
+      await page.getByRole('button', { name: 'VOLTAR', exact: true }).click();
+      await page.evaluate(() => rejeitarCriacao());
+      await page.locator('#boot-conversa-pessoal').click();
+      assert.equal(await page.getByRole('alert').isVisible(), false);
+      await page.evaluate(() => prova.esperarCriacao = false);
+      await page.evaluate(() => { prova.esperarChamada = true; location.hash = '#chamada/outro'; });
+      await page.getByRole('button', { name: 'ENTRAR NA CONVERSA', exact: true }).click();
+      await page.waitForFunction(() => typeof rejeitarChamada === 'function');
+      assert.equal(await page.getByRole('button', { name: 'ENTRAR NA CONVERSA', exact: true }).isDisabled(), true);
+      await page.evaluate(() => rejeitarChamada());
+      await page.getByRole('alert').waitFor({ state: 'visible' });
+      assert.match(await page.getByRole('alert').textContent(), /Não foi possível concluir/);
+      await page.getByRole('button', { name: 'VOLTAR', exact: true }).click();
+      await page.locator('#boot-conversa-pessoal').click();
       await page.getByRole('button', { name: 'CRIAR CONVERSA', exact: true }).click();
       await page.evaluate(() => callbacksDaChamada.aoEstado({ estado: 'tocando', apelido: 'Par' }));
       assert.equal(await page.getByLabel('Seu nome', { exact: true }).inputValue(), 'Nome escolhido', 'receber a chamada não troca o nome escolhido pelo perfil padrão');
@@ -118,7 +147,7 @@ const ui = path.resolve(__dirname, '../ui');
       await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
       await page.waitForFunction(base => prova.recebeu > base, antesDeSuspender.recebeu);
       assert.equal(await page.evaluate(() => prova.capturas), 3, 'BFCache não reabre microfone');
-      console.log(`${engine}: foco recusado, captura recusada, permissão tardia, saída e BFCache PASS`);
+      console.log(`${engine}: criação/entrada recusadas visíveis, cliques pendentes bloqueados, cancelamento, foco recusado, captura recusada, permissão tardia, saída e BFCache PASS`);
     } finally { await browser.close(); }
   } } finally { server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

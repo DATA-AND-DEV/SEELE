@@ -232,8 +232,11 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     },
     compartilhando(ligado) { rotular(compartilhar, ligado ? "PARAR COMPARTILHAMENTO" : "COMPARTILHAR TELA"); compartilhar.setAttribute("aria-pressed", String(ligado)); },
     falha,
-    limpar() {
-      ++operacao; ocupado = false; retrato = { estado: "livre" };
+    limpar({ preservarOperacao = false } = {}) {
+      // Criar/entrar limpam a conversa dentro da ação já em andamento.
+      // Preservar seu dono mantém o botão bloqueado e a falha visível.
+      if (!preservarOperacao) { ++operacao; ocupado = false; }
+      retrato = { estado: "livre" };
       limparHistorico(); link.value = "";
       tela.replaceChildren(); tela.hidden = true; erro.hidden = true;
       rotular(mic, "LIGAR MICROFONE"); mic.setAttribute("aria-pressed", "false");

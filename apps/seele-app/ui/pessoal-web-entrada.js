@@ -16,7 +16,7 @@ function instalarConversasPessoaisWeb() {
     voltar() { terminar(); vista.fechar(); entrada.focus(); },
     async criar(apelido) {
       apelidoDaConversa = apelido;
-      vista.limpar(); linkDeEntrada = null; conviteNoServico = null; preparoDoConvite = null;
+      vista.limpar({ preservarOperacao: true }); linkDeEntrada = null; conviteNoServico = null; preparoDoConvite = null;
       criandoLink = true;
       try {
         const atual = await obterServico();
@@ -38,7 +38,7 @@ function instalarConversasPessoaisWeb() {
         atual.abrirConvite(linkDeEntrada); conviteNoServico = atual;
       }
       if (atual !== servico) return;
-      vista.limpar();
+      vista.limpar({ preservarOperacao: true });
       return atual.chamar({ apelido });
     },
     atender: () => { abrirSaidaNoGesto(); return servico?.atender({ apelido: nomeLocal() }); },
