@@ -76,7 +76,7 @@ mods-oficiais-na-ui (seele/mesa): 1 falha(s)
 A falha de console é igual nos três e **não é de MOD**: é a página, no
 `localhost`, chamando o rendezvous de produção (`https://rendzvous.seele.sh`,
 que não responde CORS a essa origem). A bancada não a filtra porque foi escrita
-para a origem de produção. (A saída acima é a íntegra; nada foi encurtado. O
+para a origem de produção. (A saída acima é a íntegra; nada foi encurtado. O `⋯` nas linhas do PERFIS é texto da própria saída da bancada, não elisão minha: é o `innerText` do cartão da lista de pessoas (`#lista-roster`), e o `⋯` está no log bruto da rodada; é um glifo que a UI põe no cartão (provavelmente o botão de ações, o que não verifiquei). O
 `ruins` da bancada imprime só o que reprovou, e o PERFIS tem as duas linhas.)
 
 ### A segunda rodada, com o filtro
@@ -86,14 +86,23 @@ bancada (`zz-tmp-medida.cjs`, na mesma pasta, apagada depois; o arquivo do
 repositório não mudou). A mudança, em duas linhas:
 
 ```diff
-285c285
--      const ruins = ... |sem janela do Tauri|RecusaDaPonte/i.test(l) &&
-+      const ruins = ... |sem janela do Tauri|RecusaDaPonte|blocked by CORS policy/i.test(l) &&
-287a288
+--- a/apps/seele-app/bancada/mods-oficiais-na-ui.cjs
++++ b/apps/seele-app/bancada/mods-oficiais-na-ui.cjs
+@@ -282,9 +282,10 @@
+       // subindo): `modsQueOuvemATela` (ui/base.js) lê `instancia.api` de uma entrada nula.
+       const dasInstancias = doConsole.filter((l) => /reading 'api'|evaluating 'instancia\.api'/.test(l));
+       defeito(curto, dasInstancias.length === 0, `o desenho do retrato estoura em \`modsQueOuvemATela\` com um MOD ainda subindo (\`instancia.api\` de uma entrada nula em modsCarregados, ui/base.js:3677; ${dasInstancias.length}x): ${dasInstancias[0]?.slice(0, 120)}`);
+-      const ruins = doConsole.filter((l) => !dasInstancias.includes(l)).filter((l) => !/Failed to load resource|favicon|net::ERR|permissions policy|sem janela do Tauri|RecusaDaPonte/i.test(l) &&
++      const ruins = doConsole.filter((l) => !dasInstancias.includes(l)).filter((l) => !/Failed to load resource|favicon|net::ERR|permissions policy|sem janela do Tauri|RecusaDaPonte|blocked by CORS policy/i.test(l) &&
+         // O `screenshot` do Playwright no WebKit injeta uma folha que a CSP da origem recusa: linha 0 do documento, e sem `--capturas` ela não aparece: não é do produto.
+         !/Refused to apply a stylesheet.* @ \S*(index|executor-de-mod)\.html:0$/.test(l));
 +      console.log("CORS-FILTRADOS:", JSON.stringify(doConsole.filter((l) => /blocked by CORS policy/.test(l))));
+       confere(curto, ruins.length === 0, `erros no console: ${JSON.stringify(ruins.slice(0, 6))}`);
+     } finally {
+       await navegador.close();
 ```
 
-(a segunda linha só imprime o que o filtro derruba; a rodada anterior, que deu os
+(o diff é `diff -u` íntegro, aplicável com `patch -p1`; conferi com `patch --dry-run`; a linha `+console.log` só imprime o que o filtro derruba; a rodada anterior, que deu os
 mesmos resultados, tinha só a primeira). Esta rodada foi refeita para registrar
 isso, com os mesmos binários:
 
