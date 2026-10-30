@@ -742,6 +742,10 @@ const RECUSAS_DE_PACOTE = {
     "ele declara uma metade de máquina, mas nenhum poder para ela usar; quem publica precisa declarar o poder ou tirar a metade",
   "porta-sem-entrar-no-jogo":
     "ele declara a porta do jogo, mas não a permissão entrar-no-jogo que decide quem pode usá-la, e assim ninguém conseguiria abrir o túnel; quem publica precisa declarar a permissão",
+  "poderes-sem-maquina":
+    "ele declara poderes, mas não a metade de máquina que os exerceria, e assim a porta nunca abriria; quem publica precisa declarar a metade de máquina ou tirar os poderes",
+  "maquina-sem-servidor":
+    "ele declara uma metade de máquina, mas não a metade de servidor que a liga e a oferece a quem hospeda; quem publica precisa declarar a metade de servidor",
   "api-too-old": `ele é de uma API mais velha que a 6, a mais velha que este app roda; procure a versão dele para a API ${APIS_ACEITAS_DITAS_OU}, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
   "malformed-id": "o identificador dele não é «autor/nome»",
   "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",
@@ -1710,6 +1714,7 @@ const FRASES_DO_TUNEL = Object.freeze({
     "porta-local-ocupada":
       "nenhuma das portas perto da do jogo está livre neste computador; feche o que as usa e tente de novo",
     "sem-resposta": "o servidor não respondeu a tempo",
+    "fora-do-aceite": "este computador não aceitou servir este jogo, ou a porta não é a que foi aceita",
   }),
   quedas: Object.freeze({
     "porta-ocupada": "nenhuma porta livre neste computador para o jogo ligar",

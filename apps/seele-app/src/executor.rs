@@ -557,6 +557,7 @@ mod testes {
             tema: false,
             plataformas: Vec::new(),
             poderes,
+            maquina: false,
             refused: None,
         };
         let o_que_ve = |instalado: &seele_ffi::mods::ModInstalado| {

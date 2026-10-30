@@ -4068,6 +4068,7 @@ const RECUSAS_AO_MOD = Object.freeze([
   "canais-esgotados",
   "porta-local-ocupada",
   "sem-resposta",
+  "fora-do-aceite",
 ]);
 
 /**

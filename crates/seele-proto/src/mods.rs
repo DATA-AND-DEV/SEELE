@@ -265,6 +265,20 @@ pub fn capacidades_de(api: u32, poderes: &[Poder]) -> Vec<&'static str> {
     capacidades
 }
 
+/// **O que a metade de máquina deste manifesto pode chamar.** Lista própria, e
+/// não uma extensão de [`capacidades_de`]: a metade de máquina não tem tela,
+/// então nenhuma capacidade de [`capacidades_da_api`] entra aqui, e somar as
+/// duas listas daria a ela um `SeeleUI` que ela não tem. `Programa` não dá
+/// capacidade nesta parte.
+#[must_use]
+pub fn capacidades_da_maquina(manifest: &Manifest) -> Vec<&'static str> {
+    let mut capacidades = vec!["maquina"];
+    if manifest.poderes.contains(&Poder::Porta) {
+        capacidades.push("maquina.porta");
+    }
+    capacidades
+}
+
 /// A forma do valor de uma chave do tema (rascunho da API 6, §9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormaDoValorDoTema {
@@ -824,6 +838,18 @@ pub enum Refused {
     #[error("mod declares the `porta` power without the `entrar-no-jogo` permission")]
     PortaSemEntrarNoJogo,
 
+    /// **Poder sem a metade de máquina.** Um poder é o que a máquina faz (o
+    /// túnel abre socket nela); sem `maquina` ninguém o exerce, e o pacote
+    /// instalaria prometendo uma porta que nunca abre.
+    #[error("mod declares `poderes` without a `maquina` half")]
+    PoderesSemMaquina,
+
+    /// **`maquina` sem a metade de servidor.** Quem põe o jogo na máquina é o
+    /// servidor que liga o MOD; sem `server` não há quem o ligue nem quem
+    /// receba o aceite da pessoa dona da máquina.
+    #[error("mod declares `maquina` without a `server` half")]
+    MaquinaSemServidor,
+
     /// A lista de permissões declaradas não passa (`cargos::validar_declaradas`).
     #[error("mod declares invalid permissions: {0}")]
     PermissoesInvalidas(crate::cargos::RecusaDaDeclaracao),
@@ -1020,6 +1046,14 @@ pub fn read_manifest(text: &str) -> Result<Manifest, Refused> {
             .any(|p| p.acao == crate::tunel::ACAO_ENTRAR_NO_JOGO)
     {
         return Err(Refused::PortaSemEntrarNoJogo);
+    }
+    // Depois da porta, para o autor ouvir primeiro a permissão que falta e só
+    // então a metade: as duas dizem «falta algo», e a ordem é a do guia.
+    if !manifest.poderes.is_empty() && manifest.maquina.is_none() {
+        return Err(Refused::PoderesSemMaquina);
+    }
+    if manifest.maquina.is_some() && manifest.server.is_none() {
+        return Err(Refused::MaquinaSemServidor);
     }
     if manifest.arquivos.len() > TETO_DE_ARQUIVOS {
         return Err(Refused::ArquivosDemais {
@@ -1712,6 +1746,7 @@ mod tests {
     }
 
     const PORTA_COMPLETA: &str = r#" "plataformas": ["app"], "poderes": ["porta"], "maquina": "maquina/main.js",
+        "server": "servidor.js",
         "permissoes": [{"acao": "entrar-no-jogo", "nome": "Entrar no jogo", "todos": true}],"#;
 
     /// **A API 8 lê `poderes` e `maquina`**, e o `tunel` é do poder, e não da
@@ -1790,6 +1825,34 @@ mod tests {
             ),
             Err(Refused::PortaSemEntrarNoJogo)
         );
+    }
+
+    /// **Poder pede a metade de máquina, e ela pede a de servidor.** Sem a
+    /// segunda, o pacote instalaria com uma porta que nenhuma máquina serve.
+    #[test]
+    fn poderes_pedem_metade_de_maquina_e_ela_pede_a_de_servidor() {
+        let permissao =
+            r#" "permissoes": [{"acao": "entrar-no-jogo", "nome": "Entrar", "todos": true}],"#;
+        let recusa = |extra: &str| read_manifest(&com_api(8, extra));
+        let sem_maquina = format!(r#" "plataformas": ["app"], "poderes": ["porta"], {permissao}"#);
+        assert_eq!(recusa(&sem_maquina), Err(Refused::PoderesSemMaquina));
+        let sem_servidor = format!(
+            r#" "plataformas": ["app"], "poderes": ["porta"], "maquina": "maquina/main.js", {permissao}"#
+        );
+        assert_eq!(recusa(&sem_servidor), Err(Refused::MaquinaSemServidor));
+        assert!(read_manifest(&com_api(8, PORTA_COMPLETA)).is_ok());
+    }
+
+    /// **A metade de máquina não ganha capacidade de tela**: ela não tem
+    /// `SeeleUI`, e uma capacidade da API que vazasse para cá prometeria um
+    /// chamado que nunca teria onde cair.
+    #[test]
+    fn a_metade_de_maquina_nao_ganha_capacidade_de_tela() {
+        let m = read_manifest(&com_api(8, PORTA_COMPLETA)).expect("8");
+        assert_eq!(capacidades_da_maquina(&m), vec!["maquina", "maquina.porta"]);
+        for c in capacidades_da_api(8) {
+            assert!(!capacidades_da_maquina(&m).contains(c), "{c} vazou");
+        }
     }
 
     /// **`plataformas` num manifesto de API anterior à 8 é recusado**, pelo nome

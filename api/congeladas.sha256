@@ -125,4 +125,4 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 #   anfitrião e por que as portas fecham na troca de vista. Conferido em
 #   30/10/2026 no release (`curl` do CLAUDE.md): a v0.18.3 diz que a API 8 não
 #   entrou nela, e a v8 segue sem release.
-57985039603671272a7bd26f0e030d9a7420a9e803dc59fd3e232bef393c2daf  v8.json
+6896eb504873a44f330589c4efeeabfec94dc165e497a38c47003f7cfced407f  v8.json

@@ -88,6 +88,8 @@ async fn montar_completo(
         "repo": "https://github.com/x/jogo", "reach": [],
         "client": "cliente.js",
         "plataformas": ["app"], "poderes": ["porta"],
+        // A porta pede a metade de máquina, e ela a de servidor (API 8, parte 3).
+        "maquina": "maquina.js", "server": "servidor.js",
         "permissoes": [{"acao": ACAO_ENTRAR_NO_JOGO, "nome": "Entrar no jogo", "todos": todos}],
     })
     .to_string()
@@ -95,6 +97,8 @@ async fn montar_completo(
     let mut arquivos = vec![
         ("mod.json".to_owned(), manifesto),
         ("cliente.js".to_owned(), b"void 0;".to_vec()),
+        ("maquina.js".to_owned(), b"void 0;".to_vec()),
+        ("servidor.js".to_owned(), b"void 0;".to_vec()),
     ];
     let hash = seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut arquivos));
     let pacote = raizes.pacote_de(&hash);
