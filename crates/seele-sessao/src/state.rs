@@ -1879,7 +1879,12 @@ impl Room {
             | ServerMessage::SirvaTunelPara { .. }
             | ServerMessage::AlcanceTunelPor { .. }
             | ServerMessage::TunelEncerrado { .. }
-            | ServerMessage::TunelRetirado { .. } => {}
+            | ServerMessage::TunelRetirado { .. }
+            // A máquina (API 8 parte 3): quem a trata é o núcleo, e a sessão
+            // não guarda estado dela.
+            | ServerMessage::PedidoDeMaquina { .. }
+            | ServerMessage::AvisoParaMaquina { .. }
+            | ServerMessage::MaquinaDispensada { .. } => {}
         }
 
         changed

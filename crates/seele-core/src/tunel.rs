@@ -2252,7 +2252,8 @@ pub(crate) fn fim_pela_recusa(motivo: RecusaDeTunel) -> Option<Queda> {
         | RecusaDeTunel::CanaisEsgotados
         | RecusaDeTunel::ServidorAntigo
         | RecusaDeTunel::PortaLocalOcupada
-        | RecusaDeTunel::SemResposta => None,
+        | RecusaDeTunel::SemResposta
+        | RecusaDeTunel::ForaDoAceite => None,
     }
 }
 

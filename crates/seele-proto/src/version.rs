@@ -161,7 +161,14 @@ use thiserror::Error;
 /// (`ServirTunel`, `PararTunel`, `EntrarNoTunel`, `SairDoTunel`, `TunelFalhou`)
 /// e seis respostas do servidor (`TunelConcedido`, `TunelRecusado`,
 /// `SirvaTunelPara`, `AlcanceTunelPor`, `TunelEncerrado`, `TunelRetirado`), mais os rótulos de
-/// canal `t` e `j`. A 11 **está publicada** (v0.18.1, commit `ae0f2715`,
+/// canal `t` e `j`.
+///
+/// **E a máquina, em 30/10/2026, ainda no 12** (API 8 parte 3): o pedido, o
+/// aceite e a parada. Quatro verbos do cliente (`AceiteDeMaquina`,
+/// `RecusaDeMaquina`, `MaquinaParada`, `PedidoDaMaquina`), três respostas do
+/// servidor (`PedidoDeMaquina`, `AvisoParaMaquina`, `MaquinaDispensada`) e a
+/// recusa `ForaDoAceite`. A oferta já carrega o que a parte 4 vai usar, porque
+/// o 12 ainda não saiu e campo novo em mensagem que existe nunca entra. A 11 **está publicada** (v0.18.1, commit `ae0f2715`,
 /// conferido no release em 29/10), então nada pôde pegar carona nela.
 ///
 /// **Um par 11 continua entrando** — `PRIMEIRO_DA_LINHA_DOIS` e

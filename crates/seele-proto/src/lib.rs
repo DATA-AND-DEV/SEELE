@@ -31,6 +31,7 @@ pub mod control;
 pub mod encontro;
 pub mod ids;
 pub mod imagem;
+pub mod maquina;
 pub mod media;
 pub mod midia_de_mod;
 pub mod mods;

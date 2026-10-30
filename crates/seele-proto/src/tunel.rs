@@ -135,6 +135,10 @@ pub enum RecusaDeTunel {
     /// tinha acabado, o canal de comandos fechou, ou o prazo venceu sem
     /// `TunelConcedido` nem `TunelRecusado`.
     SemResposta,
+    /// A máquina deste nome existe, mas a pessoa que a opera ainda não aceitou
+    /// o que o servidor lhe mostrou (API 8 parte 3). **Atravessa o fio**: é o
+    /// servidor quem a recusa, e por isso `so_na_ponta` não a inclui.
+    ForaDoAceite,
 }
 
 impl RecusaDeTunel {

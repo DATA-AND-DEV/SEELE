@@ -2134,6 +2134,7 @@ pub const fn nome_da_recusa_do_tunel(recusa: seele_core::tunel::RecusaDeTunel) -
         RecusaDeTunel::ServidorAntigo => "servidor-antigo",
         RecusaDeTunel::PortaLocalOcupada => "porta-local-ocupada",
         RecusaDeTunel::SemResposta => "sem-resposta",
+        RecusaDeTunel::ForaDoAceite => "fora-do-aceite",
     }
 }
 

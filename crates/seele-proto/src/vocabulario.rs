@@ -93,7 +93,11 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
         | ServerMessage::SirvaTunelPara { .. }
         | ServerMessage::AlcanceTunelPor { .. }
         | ServerMessage::TunelEncerrado { .. }
-        | ServerMessage::TunelRetirado { .. } => 12,
+        | ServerMessage::TunelRetirado { .. }
+        // A máquina (30/10/2026), ainda no 12.
+        | ServerMessage::PedidoDeMaquina { .. }
+        | ServerMessage::AvisoParaMaquina { .. }
+        | ServerMessage::MaquinaDispensada { .. } => 12,
         // O `Alert` existe desde sempre, e o que pode ser novo é o motivo.
         ServerMessage::Alert { reason, .. } => maior(PRIMEIRO_DA_LINHA_UM, desde_o_alerta(reason)),
         // Puxa o número da razão que leva, como o `Alert` puxa o do motivo: uma
@@ -226,7 +230,12 @@ pub const fn desde_do_cliente(mensagem: &ClientMessage) -> u8 {
         | ClientMessage::PararTunel { .. }
         | ClientMessage::EntrarNoTunel { .. }
         | ClientMessage::SairDoTunel { .. }
-        | ClientMessage::TunelFalhou { .. } => 12,
+        | ClientMessage::TunelFalhou { .. }
+        // A máquina (30/10/2026), ainda no 12.
+        | ClientMessage::AceiteDeMaquina { .. }
+        | ClientMessage::RecusaDeMaquina { .. }
+        | ClientMessage::MaquinaParada { .. }
+        | ClientMessage::PedidoDaMaquina { .. } => 12,
     }
 }
 
@@ -513,6 +522,75 @@ mod tests {
                 quem: crate::ids::PersonId(2),
             },
         ]
+    }
+
+    /// A máquina nasceu no 12, e as sete variantes valem 12 nos dois sentidos.
+    #[test]
+    fn a_maquina_nasceu_no_doze() {
+        use crate::maquina::{MotivoDaDispensa, MotivoDaParadaDeMaquina, MotivoDaRecusaDeMaquina};
+        let servidor = "mc-1".to_owned();
+        let mod_id = "a/b".to_owned();
+        for nova in [
+            ServerMessage::AvisoParaMaquina {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                carga: String::new(),
+            },
+            ServerMessage::MaquinaDispensada {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                motivo: MotivoDaDispensa::SemAceite,
+            },
+        ] {
+            assert_eq!(desde(&nova), 12, "{nova:?}");
+        }
+        for nova in [
+            ClientMessage::AceiteDeMaquina {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                resumo: "0".repeat(64),
+            },
+            ClientMessage::RecusaDeMaquina {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                motivo: MotivoDaRecusaDeMaquina::PeloDono,
+            },
+            ClientMessage::MaquinaParada {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                motivo: MotivoDaParadaDeMaquina::PeloDono,
+            },
+            ClientMessage::PedidoDaMaquina {
+                request: 1,
+                mod_id,
+                servidor,
+                payload: String::new(),
+            },
+        ] {
+            assert_eq!(desde_do_cliente(&nova), 12, "{nova:?}");
+        }
+        // E o pedido, que leva a oferta, é a sétima.
+        let pedido = ServerMessage::PedidoDeMaquina {
+            mod_id: "a/b".into(),
+            hash: "0".repeat(64),
+            servidor: "mc-1".into(),
+            pedido_por: crate::ids::PersonId(1),
+            oferta: crate::maquina::OfertaDeMaquina {
+                titulo: "t".into(),
+                receita: "r".into(),
+                versao_da_receita: "1".into(),
+                versao_do_jogo: "1".into(),
+                tuneis: vec![],
+                artefatos: vec![],
+                pack: None,
+                origens: vec![],
+                dominios_do_jogo: vec![],
+                rodar: None,
+                disco_maximo: 0,
+                termos: vec![],
+            },
+        };
+        assert_eq!(desde(&pedido), 12);
     }
 
     /// **Um par 11 não recebe o que nasceu no 12.** O servidor só escreve para

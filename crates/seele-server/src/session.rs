@@ -2878,6 +2878,17 @@ async fn run_session(
                     ClientMessage::TunelFalhou { mod_id, nome, motivo } => {
                         tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, ?motivo, "túnel: o caminho direto falhou; quem joga continua pela estrela");
                     }
+                    // A máquina (protocolo 12, API 8 parte 3): o vocabulário
+                    // entrou antes do livro-razão do servidor. Até ele chegar,
+                    // o verbo é lido e registrado, e não responde — o servidor
+                    // ainda não pede máquina a ninguém, então nenhum cliente
+                    // honesto o manda.
+                    ClientMessage::AceiteDeMaquina { mod_id, servidor, .. }
+                    | ClientMessage::RecusaDeMaquina { mod_id, servidor, .. }
+                    | ClientMessage::MaquinaParada { mod_id, servidor, .. }
+                    | ClientMessage::PedidoDaMaquina { mod_id, servidor, .. } => {
+                        tracing::warn!(mod_id = %mod_id, servidor = %servidor, person = %session.person, "máquina: verbo recebido antes de o servidor tratar máquinas; ignorado");
+                    }
                     ClientMessage::ModRequest { request, id, channel, payload } => {
                         let response = crate::mods::pedidos::executar(server, session.person, channel, &id, &payload).await;
                         let parts = crate::mods::pedidos::partes(&response);

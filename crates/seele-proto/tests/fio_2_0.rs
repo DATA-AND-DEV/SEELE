@@ -56,6 +56,11 @@ use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc, VoiceRoomId,
 };
+use seele_proto::maquina::{
+    AlgoritmoDeHash, ArtefatoOferecido, ComandoOferecido, HashDeArtefato, MotivoDaDispensa,
+    MotivoDaParadaDeMaquina, MotivoDaRecusaDeMaquina, OfertaDeMaquina, TermoOferecido,
+    TunelOferecido,
+};
 use seele_proto::mods::{ModAnunciado, Plataforma, PlataformasDoMod};
 use seele_proto::screen::{
     cabecalho_de_quadro, LeitorDeTela, LidoDaTela, ScreenCodec, ScreenHeader, ScreenSource,
@@ -422,7 +427,79 @@ fn clientes() -> Vec<(&'static str, ClientMessage)> {
                 motivo: MotivoDeFalhaDePar::CaiuNoMeio,
             },
         ),
+        (
+            "AceiteDeMaquina",
+            ClientMessage::AceiteDeMaquina {
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                resumo: "3c".repeat(32),
+            },
+        ),
+        (
+            "RecusaDeMaquina",
+            ClientMessage::RecusaDeMaquina {
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                motivo: MotivoDaRecusaDeMaquina::PacoteDiferente,
+            },
+        ),
+        (
+            "MaquinaParada",
+            ClientMessage::MaquinaParada {
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                motivo: MotivoDaParadaDeMaquina::MetadeFalhou,
+            },
+        ),
+        (
+            "PedidoDaMaquina",
+            ClientMessage::PedidoDaMaquina {
+                request: 7,
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                payload: "{\"cmd\":\"list\"}".into(),
+            },
+        ),
     ]
+}
+
+/// A oferta com todos os campos preenchidos.
+fn oferta_cheia() -> OfertaDeMaquina {
+    OfertaDeMaquina {
+        titulo: "Minecraft 1.21".into(),
+        receita: "minecraft-java".into(),
+        versao_da_receita: "1.0.0".into(),
+        versao_do_jogo: "1.21.4".into(),
+        tuneis: vec![TunelOferecido {
+            nome: "mc-1".into(),
+            protocolo: ProtocoloDeTunel::Tcp,
+            porta: 25565,
+        }],
+        artefatos: vec![ArtefatoOferecido {
+            nome: "server.jar".into(),
+            url: "https://piston-data.mojang.com/server.jar".into(),
+            tamanho: 51_000_000,
+            hash: HashDeArtefato {
+                algoritmo: AlgoritmoDeHash::Sha1,
+                hex: "ab".repeat(20),
+            },
+        }],
+        pack: Some(HashDeArtefato {
+            algoritmo: AlgoritmoDeHash::Sha512,
+            hex: "cd".repeat(64),
+        }),
+        origens: vec!["piston-data.mojang.com".into()],
+        dominios_do_jogo: vec!["sessionserver.mojang.com".into()],
+        rodar: Some(ComandoOferecido {
+            comando: "java".into(),
+            argumentos: vec!["-jar".into(), "server.jar".into(), "nogui".into()],
+        }),
+        disco_maximo: 4 * 1024 * 1024 * 1024,
+        termos: vec![TermoOferecido {
+            titulo: "EULA".into(),
+            url: "https://aka.ms/MinecraftEULA".into(),
+        }],
+    }
 }
 
 /// A chave de MOD dos exemplares.
@@ -948,6 +1025,32 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 quem: PersonId(42),
             },
         ),
+        (
+            "PedidoDeMaquina",
+            ServerMessage::PedidoDeMaquina {
+                mod_id: "seele/mesa".into(),
+                hash: "ab".repeat(32),
+                servidor: "mc-1".into(),
+                pedido_por: PersonId(42),
+                oferta: oferta_cheia(),
+            },
+        ),
+        (
+            "AvisoParaMaquina",
+            ServerMessage::AvisoParaMaquina {
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                carga: "{\"evento\":\"ola\"}".into(),
+            },
+        ),
+        (
+            "MaquinaDispensada",
+            ServerMessage::MaquinaDispensada {
+                mod_id: "seele/mesa".into(),
+                servidor: "mc-1".into(),
+                motivo: MotivoDaDispensa::OutroPedido,
+            },
+        ),
     ]
 }
 
@@ -1301,7 +1404,7 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
         &'static [&'static str],
     );
 
-    let casos: [Caso; 21] = [
+    let casos: [Caso; 25] = [
         (
             "DisconnectReason",
             variantes::<DisconnectReason>(),
@@ -1498,7 +1601,34 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
                 "ServidorAntigo",
                 "PortaLocalOcupada",
                 "SemResposta",
+                "ForaDoAceite",
             ],
+        ),
+        (
+            "AlgoritmoDeHash",
+            variantes::<AlgoritmoDeHash>(),
+            &["Sha1", "Sha256", "Sha512"],
+        ),
+        (
+            "MotivoDaRecusaDeMaquina",
+            variantes::<MotivoDaRecusaDeMaquina>(),
+            &[
+                "PeloDono",
+                "SemTela",
+                "SoNoApp",
+                "PacoteDiferente",
+                "OfertaInvalida",
+            ],
+        ),
+        (
+            "MotivoDaParadaDeMaquina",
+            variantes::<MotivoDaParadaDeMaquina>(),
+            &["PeloDono", "Revogada", "AppFechou", "MetadeFalhou"],
+        ),
+        (
+            "MotivoDaDispensa",
+            variantes::<MotivoDaDispensa>(),
+            &["ModDesligado", "OutroPedido", "SemAceite"],
         ),
         (
             "MotivoDoFimDoTunel",
