@@ -734,7 +734,7 @@ pub async fn atender_servir(
     // `maquinas()` fica tomado até o túnel entrar no livro: uma parada que
     // corra agora ou vê o túnel e o para, ou tira o aceite antes e este pedido
     // é recusado. Solto entre os dois, um túnel podia sobrar de uma máquina que
-    // já parou. A ordem é a de `session::apontar_um_par`: `maquinas` antes de
+    // já parou. A ordem é a do doc de `Server::maquinas`: `maquinas` antes de
     // `tuneis`, e o banco já lido.
     let maquinas = server.maquinas();
     if !server.servir_tuneis {

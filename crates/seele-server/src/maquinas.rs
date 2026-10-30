@@ -15,9 +15,8 @@
 //! Quem pede uma máquina é a metade de servidor do MOD (Task 5). Aqui só se
 //! guarda o pendente, se confere o aceite contra o que foi mostrado, e se
 //! responde se um túnel estava na oferta aceita. O cadeado é um
-//! `std::sync::Mutex` que nunca atravessa um `await`, e vem **antes** do de
-//! [`crate::tuneis::Tuneis`] em todo lugar que toma os dois (a ordem do doc de
-//! `session::apontar_um_par`): nunca os dois com o banco aberto.
+//! `std::sync::Mutex` que nunca atravessa um `await`; a ordem dele com o de
+//! [`crate::tuneis::Tuneis`] e com o banco está em [`Server::maquinas`].
 
 use std::collections::HashMap;
 
@@ -268,9 +267,11 @@ impl Maquinas {
     }
 
     /// Os nomes de túnel de `saindo` que nenhuma outra máquina aceita da mesma
-    /// pessoa e conexão, no mesmo MOD, ainda oferece. `saindo` já tem de ter
-    /// saído do livro: parar um nome que outra oferta aceita ainda cobre
-    /// derrubaria um túnel legítimo.
+    /// pessoa e conexão, no mesmo MOD, ainda oferece **igual** — nome,
+    /// protocolo e porta. `saindo` já tem de ter saído do livro (ou sido
+    /// trocado): parar um túnel que outra oferta aceita ainda cobre derrubaria
+    /// um túnel legítimo, e deixar de pé um cujo nome sobrou mas a porta mudou
+    /// deixaria servindo o que ninguém aceitou.
     fn so_desta(&self, saindo: &Aceitada, mod_id: &str) -> Vec<String> {
         saindo
             .tuneis
@@ -280,7 +281,7 @@ impl Maquinas {
                     m == mod_id
                         && a.quem == saindo.quem
                         && a.conexao == saindo.conexao
-                        && a.tuneis.iter().any(|o| o.nome == t.nome)
+                        && a.tuneis.contains(t)
                 })
             })
             .map(|t| t.nome.clone())
@@ -512,8 +513,18 @@ impl Maquinas {
 
 impl Server {
     /// O livro das máquinas, sem a poluição de um cadeado envenenado (a mesma
-    /// razão de [`Server::tuneis`]). **Antes** de `tuneis()` sempre que os dois
-    /// forem tomados juntos.
+    /// razão de [`Server::tuneis`]).
+    ///
+    /// # A ordem dos cadeados
+    ///
+    /// 1. O banco (`persistence`) é lido **antes**, e solto: os dois livros são
+    ///    `std::sync::Mutex` e não podem esperar por ele.
+    /// 2. `maquinas()` **antes** de `tuneis()` sempre que os dois forem tomados
+    ///    juntos (`tuneis::atender_servir` segura os dois para que uma parada
+    ///    não ache meio túnel). Nunca `maquinas()` com `tuneis()` já tomado.
+    ///
+    /// Dois cadeados tomados sempre na mesma ordem são uma ordem; em ordens
+    /// diferentes, um travamento esperando o primeiro dia ruim.
     pub fn maquinas(&self) -> std::sync::MutexGuard<'_, Maquinas> {
         self.maquinas
             .lock()
@@ -801,6 +812,34 @@ mod tests {
         m.aceitar(B, 20, MOD, "mc-1", &resumo("mc-1", &o))
             .expect("B aceita");
         assert!(m.maquina_de(B, 20, MOD, "mc-1"));
+    }
+
+    /// Aceitar de novo, pela mesma conexão, uma oferta que mudou a porta de um
+    /// túnel: o túnel da porta velha sai do aceite e tem de parar. O nome igual
+    /// não basta para cobri-lo — o que foi aceito é nome, protocolo e porta.
+    #[test]
+    fn reaceitar_com_outra_porta_para_o_tunel_da_porta_velha() {
+        let mut m = Maquinas::default();
+        let velha = oferta(25565);
+        let _ = m.pedir(MOD, HASH, "mc-1", A, GESTORA, &velha);
+        m.aceitar(A, 10, MOD, "mc-1", &resumo("mc-1", &velha))
+            .expect("o primeiro aceite");
+
+        let nova = oferta(25566);
+        let _ = m.pedir(MOD, HASH, "mc-1", A, GESTORA, &nova);
+        let aceita = m
+            .aceitar(A, 10, MOD, "mc-1", &resumo("mc-1", &nova))
+            .expect("o segundo aceite");
+        assert_eq!(aceita.a_parar, vec!["mc".to_owned()]);
+        assert!(!m.tunel_permitido(A, 10, MOD, "mc", ProtocoloDeTunel::Tcp, 25565));
+        assert!(m.tunel_permitido(A, 10, MOD, "mc", ProtocoloDeTunel::Tcp, 25566));
+
+        // A mesma oferta aceita de novo não para nada.
+        let _ = m.pedir(MOD, HASH, "mc-2", A, GESTORA, &nova);
+        let outra = m
+            .aceitar(A, 10, MOD, "mc-2", &resumo("mc-2", &nova))
+            .expect("outro servidor de jogo, mesma oferta");
+        assert!(outra.a_parar.is_empty());
     }
 
     #[test]

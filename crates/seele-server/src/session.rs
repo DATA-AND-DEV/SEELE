@@ -2939,7 +2939,7 @@ async fn run_session(
                     ClientMessage::MaquinaParada { mod_id, servidor, motivo } => {
                         let nome = seele_proto::maquina::nome_da_parada(&motivo);
                         // `maquinas()` solto antes de `parar_tuneis` tomar
-                        // `tuneis()`: a ordem de `apontar_um_par`.
+                        // `tuneis()`: a ordem do doc de `Server::maquinas`.
                         let parada = server.maquinas().parar(
                             session.person,
                             connection.stable_id() as u64,
