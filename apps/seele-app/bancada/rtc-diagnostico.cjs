@@ -81,3 +81,23 @@ test('cancelar e testar novamente não mistura resultados nem cancela a coleta n
  p.pendentes[1].resolve();await novo;const rel=JSON.parse(p.el('resultado').textContent);assert.equal(rel.conectou,true);
  const n=p.medicoes();await new Promise(r=>setTimeout(r,320));assert.equal(p.medicoes(),n);
 });
+test('diagnóstico IPv6 não reintroduz IPv4 pela resposta do encontro',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'../ui/diagnostico-rede.js'),'utf8').split('(() => {')[0];
+ const ctx=contexto();vm.runInContext(source,ctx);
+ let pedido;
+ const sinal={montar:p=>{pedido=p;return {corpo:'ok'};},ler:()=>({aqui:{endereco:'203.0.113.7:8383',dicas:['192.168.0.2:8383','[2804:14c::1]:8383']}})};
+ const filtrado=ctx.sinalDaFamilia(sinal,6);
+ filtrado.montar({credencial:'nao-exportar',candidatos:['203.0.113.8:5000','[2804:14c::2]:5001']});
+ assert.deepEqual(Array.from(pedido.candidatos),['[2804:14c::2]:5001']);
+ assert.equal(pedido.credencial,'nao-exportar');assert.equal(filtrado.enviados.size,1);
+ const r=filtrado.ler('resposta');assert.equal(r.aqui.endereco,'[2804:14c::1]:8383');assert.equal(r.aqui.dicas.length,0);
+});
+test('diagnóstico por família não inventa candidato nem envia POST sem candidato',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'../ui/diagnostico-rede.js'),'utf8').split('(() => {')[0];
+ const ctx=contexto();vm.runInContext(source,ctx);
+ let chamadas=0;const sinal={montar:()=>{chamadas++;return {corpo:'ok'};},ler:()=>({aqui:{endereco:'[2804:14c::1]:8383',dicas:[]}})};
+ const f=ctx.sinalDaFamilia(sinal,4);
+ assert.equal(f.montar({candidatos:['[2804:14c::2]:5001','nome.local:5000']}).erro,'SemCandidatoIPv4');assert.equal(chamadas,0);
+ assert.equal(f.ler('').semFamilia,true);
+ assert.equal(f.enviados.size,0);
+});

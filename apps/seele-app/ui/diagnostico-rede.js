@@ -1,5 +1,28 @@
 // Prova somente do transporte até a apresentação do servidor. Não autentica
 // uma pessoa, não entra em salas e nunca coleta mídia nem envia o diagnóstico.
+// O filtro só pertence ao diagnóstico; não altera a negociação do aplicativo.
+function sinalDaFamilia(sinal, familia) {
+  const enviados = new Set();
+  const aceita = (alvo) => separarAlvo(alvo, 8383)?.familia === familia;
+  return {
+    enviados,
+    aceita,
+    montar(pedido) {
+      const candidatos = pedido.candidatos.filter(aceita);
+      if (!candidatos.length) return { erro: `SemCandidatoIPv${familia}` };
+      const montado = sinal.montar({ ...pedido, candidatos });
+      if (montado.corpo) candidatos.forEach(c => enviados.add(c));
+      return montado;
+    },
+    ler(texto) {
+      const lido = sinal.ler(texto);
+      if (!lido.aqui) return lido;
+      const alvos = [lido.aqui.endereco, ...(lido.aqui.dicas || [])].filter(aceita);
+      if (!alvos.length) return { semFamilia: true };
+      return { ...lido, aqui: { ...lido.aqui, endereco: alvos[0], dicas: alvos.slice(1) } };
+    },
+  };
+}
 (() => {
   const campo = document.getElementById("convite");
   const testar = document.getElementById("testar");
@@ -9,6 +32,9 @@
   const copiar = document.getElementById("copiar");
   const entrar = document.getElementById("entrar");
   let ativo = null, geracao = 0, pararMedidas = () => {};
+  const pedida = Number(new URLSearchParams(location.search).get("familia"));
+  const familia = pedida === 4 || pedida === 6 ? pedida : null;
+  if (familia) testar.textContent = `Testar IPv${familia}`;
   const fragmento = location.hash;
   if (fragmento) {
     campo.value = `https://seele.sh/${fragmento}`;
@@ -53,13 +79,22 @@
     const relatorio = { teste: "servidor-hospedado-3", horario: new Date().toISOString(), etapas: [] };
     let pararEstaMedicao = () => {};
     let enlace;
+    let sinalFiltrado;
     try {
       const convite = lerConvite(campo.value);
       const bytes = await (await fetch("seele_web.wasm", { cache: "no-cache" })).arrayBuffer();
       const wasm = (await WebAssembly.instantiate(bytes, {})).instance.exports;
       const certificado = await prepararCertificadoDtls();
       if (vez !== geracao) return;
-      enlace = ativo = criarEnlaceRtc({ ...convite, certificado, sinal: fronteiraDoSinal(wasm),
+      const sinal = fronteiraDoSinal(wasm);
+      sinalFiltrado = familia ? sinalDaFamilia(sinal, familia) : null;
+      const alvos = sinalFiltrado ? convite.alvos.filter(sinalFiltrado.aceita) : convite.alvos;
+      if (familia) {
+        relatorio.familia = `IPv${familia}`;
+        relatorio.alvosDaFamilia = alvos.length;
+      }
+      if (!alvos.length) throw new Error("Convite sem endereço desta família.");
+      enlace = ativo = criarEnlaceRtc({ ...convite, alvos, certificado, sinal: sinalFiltrado || sinal,
         aoMudar(e) { relatorio.etapas.push({ etapa: Object.keys(e)[0], ms: Math.round(performance.now() - inicio) }); },
       });
       pararEstaMedicao = pararMedidas = acompanhar(enlace, relatorio, vez, inicio);
@@ -82,10 +117,10 @@
         // Somente contagens/estados. Sem IPs, SDP, convite, credenciais ou nomes.
         const s = v.sinal || {};
         relatorio.refletido = Boolean(v.refletido);
-        relatorio.sinal = ["aqui", "ninguem", "calado", "recusa", "mudo", "semSinal", "erro", "pendente"].find(k => s[k]) || "nao-iniciado";
+        relatorio.sinal = ["aqui", "ninguem", "calado", "recusa", "mudo", "semSinal", "semFamilia", "erro", "pendente"].find(k => s[k]) || "nao-iniciado";
         relatorio.dtls = v.dtls || null;
         relatorio.anuncios = v.chamadasAoPonto || 0;
-        relatorio.enderecosEnviados = v.candidatosAnunciados || 0;
+        relatorio.enderecosEnviados = sinalFiltrado ? sinalFiltrado.enviados.size : v.candidatosAnunciados || 0;
         relatorio.enderecosDoServidor = v.candidatos.length;
         relatorio.antesDeFechar = v.antesDeFechar || null;
         relatorio.candidatosRecusados = enlace.contas.candidatosRecusados;
