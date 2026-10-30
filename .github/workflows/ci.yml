@@ -595,6 +595,11 @@ jobs:
       - run: node apps/seele-app/bancada/proporcao-tela-cheia.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # Plataformas dos MODs (API 8): nos dois motores, por isso depois do
+      # `install webkit` de cima.
+      - run: node apps/seele-app/bancada/plataformas-dos-mods.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/visual-0174.cjs target/visual-0174
         if: ${{ !cancelled() }}
         timeout-minutes: 5
@@ -803,6 +808,8 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
       - run: node apps/seele-app/bancada/pessoal-web.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/pessoal-web-layout-0181.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5

@@ -1447,6 +1447,7 @@ todas_as_bancadas_de_navegador() {
     # prazo da etapa, `PRAZO_DA_ETAPA_S`, 40 min). Pede o Playwright de Node com o Chromium e o WebKit.
     uma_bancada node apps/seele-app/bancada/pos-release-ui.cjs
     uma_bancada node apps/seele-app/bancada/proporcao-tela-cheia.cjs
+    uma_bancada node apps/seele-app/bancada/plataformas-dos-mods.cjs
     uma_bancada node apps/seele-app/bancada/visual-0174.cjs target/visual-0174
     uma_bancada node apps/seele-app/bancada/mods-nav-0174.cjs target/mods-nav-0174
     uma_bancada node apps/seele-app/bancada/visual-0174.cjs target/visual-0174-extras --extras
