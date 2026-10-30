@@ -219,7 +219,39 @@ impl PortaLocal {
     }
 }
 
+/// Confere que ninguém escuta a `porta` em `0.0.0.0`, que é o que um servidor de
+/// jogo de verdade costuma fazer.
+///
+/// **Por que não basta ligar em `127.0.0.1`.** No macOS (e no Windows) ligar
+/// `127.0.0.1:P` dá certo enquanto `0.0.0.0:P` escuta: as duas coexistem, e a
+/// conexão do jogo iria para a mais específica, a nossa, sem que o servidor
+/// que a pessoa tem aberto recebesse nada. A porta pareceria livre e o jogo
+/// entraria no túnel em vez do servidor local.
+///
+/// O teste liga o curinga **sem** guardar o socket. No Unix com
+/// `SO_REUSEADDR` (medido no macOS: sem ele, uma conexão que o nosso lado fechou
+/// primeiro, em `TIME_WAIT`, faria uma porta livre parecer ocupada; com ele, o
+/// curinga ainda enxerga um escutador de verdade); no Windows sem, porque lá o
+/// `SO_REUSEADDR` deixaria roubar a porta.
+fn curinga_livre(protocolo: ProtocoloDeTunel, porta: u16) -> std::io::Result<()> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    if porta == 0 {
+        return Ok(());
+    }
+    let (tipo, protocolo_do_so) = match protocolo {
+        ProtocoloDeTunel::Tcp => (Type::STREAM, Protocol::TCP),
+        ProtocoloDeTunel::Udp => (Type::DGRAM, Protocol::UDP),
+    };
+    let socket = Socket::new(Domain::IPV4, tipo, Some(protocolo_do_so))?;
+    #[cfg(unix)]
+    socket.set_reuse_address(true)?;
+    socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, porta)).into())
+}
+
 fn ligar(protocolo: ProtocoloDeTunel, porta: u16) -> std::io::Result<(Escuta, SocketAddr)> {
+    // Antes de qualquer coisa: um escutador em `0.0.0.0` torna a porta ocupada
+    // mesmo que `127.0.0.1` ainda aceite o `bind`.
+    curinga_livre(protocolo, porta)?;
     // **Só `127.0.0.1`.** A porta de quem joga é de quem está na máquina; em
     // `0.0.0.0` a rede de casa inteira entraria no túnel por ela.
     match protocolo {
@@ -2178,6 +2210,63 @@ mod testes {
         // A casca diz «a <desejada> estava ocupada»: a porta pedida volta.
         assert_eq!(porta.desejada, p);
         assert!(porta.porta > p && porta.porta <= p.saturating_add(64));
+    }
+
+    /// **M1.** No macOS, ligar `127.0.0.1:P` funciona com `0.0.0.0:P` escutando;
+    /// o jogo local ficaria sem voz e o túnel responderia no lugar dele. Quem
+    /// já escuta no curinga faz a porta contar como ocupada.
+    #[tokio::test]
+    async fn quem_escuta_no_curinga_ocupa_a_porta_mesmo_em_loopback() {
+        let tcp = std::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+        let p_tcp = tcp.local_addr().unwrap().port();
+        let porta = abrir_porta_local(ProtocoloDeTunel::Tcp, p_tcp)
+            .await
+            .unwrap();
+        assert_ne!(
+            porta.porta, p_tcp,
+            "ficou com a porta de um escutador em 0.0.0.0"
+        );
+        assert!(!porta.preferida);
+        assert_eq!(porta.desejada, p_tcp);
+
+        let udp = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+        let p_udp = udp.local_addr().unwrap().port();
+        let porta = abrir_porta_local(ProtocoloDeTunel::Udp, p_udp)
+            .await
+            .unwrap();
+        assert_ne!(
+            porta.porta, p_udp,
+            "ficou com a porta de um socket UDP em 0.0.0.0"
+        );
+        assert!(!porta.preferida);
+    }
+
+    /// A outra metade do guarda do curinga: ele não pode ver ocupada uma porta
+    /// livre. Uma conexão que **este** lado fechou primeiro fica em `TIME_WAIT`
+    /// na porta do túnel, e abrir o mesmo túnel de novo tem de devolver a mesma
+    /// porta, a preferida.
+    #[tokio::test]
+    async fn a_porta_com_time_wait_continua_livre() {
+        let porta = abrir_porta_local(ProtocoloDeTunel::Tcp, 0).await.unwrap();
+        let p = porta.porta;
+        let Some((_, Escuta::Tcp(escuta))) = porta.separar() else {
+            panic!("uma porta TCP tem escuta TCP")
+        };
+        let cliente = TcpStream::connect((Ipv4Addr::LOCALHOST, p)).await.unwrap();
+        let (aceita, _) = escuta.accept().await.unwrap();
+        // O lado da porta fecha primeiro: o `TIME_WAIT` fica nele.
+        drop(aceita);
+        let mut cliente = cliente;
+        let mut resto = Vec::new();
+        let _ = tokio::io::AsyncReadExt::read_to_end(&mut cliente, &mut resto).await;
+        drop(cliente);
+        drop(escuta);
+        let de_novo = abrir_porta_local(ProtocoloDeTunel::Tcp, p).await.unwrap();
+        assert_eq!(
+            de_novo.porta, p,
+            "o TIME_WAIT fez a porta livre parecer ocupada"
+        );
+        assert!(de_novo.preferida);
     }
 
     #[tokio::test]
