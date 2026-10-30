@@ -261,6 +261,269 @@ pub fn esquecer_aceite(home: &str, alvo: &str) -> Result<(), String> {
         .map_err(|_| "NaoDeuParaGravar".to_owned())
 }
 
+// ------------------------------------------- o aceite de uma máquina de jogo
+//
+// API 8 parte 3. Como o aceite de MODs logo acima: guardar é da casca, que tem
+// a tela; onde se guarda é do núcleo (`seele_core::aceites_de_maquina`), no
+// mesmo diretório da identidade. A chave do servidor sai de
+// `chave_do_servidor`, pelo mesmo motivo: um aceite arquivado sob a forma que a
+// casca digitou seria um sim que ninguém acha.
+
+/// Um aceite de máquina guardado, como a casca o lê e o devolve.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AceiteDeMaquinaGuardado {
+    /// Sob que chave o servidor SEELE está arquivado.
+    pub alvo: String,
+    /// `autor/nome` do MOD.
+    pub mod_id: String,
+    /// O hash do pacote ligado quando a pessoa aceitou.
+    pub hash: String,
+    /// O servidor de jogo.
+    pub servidor: String,
+    /// O resumo do que foi mostrado, como o [`crate::Event::MachineRequest`]
+    /// o trouxe.
+    pub resumo: String,
+    /// A oferta que a pessoa leu.
+    pub oferta: crate::OfertaDeMaquinaFfi,
+    /// O apelido de quem pediu.
+    pub pedido_por: String,
+    /// Quando, em segundos desde a época.
+    pub quando: u64,
+}
+
+impl AceiteDeMaquinaGuardado {
+    fn de(aceite: seele_core::aceites_de_maquina::AceiteDeMaquina) -> Self {
+        Self {
+            oferta: crate::OfertaDeMaquinaFfi::from(&aceite.oferta),
+            alvo: aceite.alvo,
+            mod_id: aceite.mod_id,
+            hash: aceite.hash,
+            servidor: aceite.servidor,
+            resumo: aceite.resumo,
+            pedido_por: aceite.pedido_por,
+            quando: aceite.quando,
+        }
+    }
+}
+
+/// Os aceites de máquina legíveis, e quantas linhas não se leram.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AceitesDeMaquina {
+    /// Os que se leram.
+    pub aceites: Vec<AceiteDeMaquinaGuardado>,
+    /// Quantas linhas foram puladas. Diferente de zero, vai ao log da casca:
+    /// é um aceite que a pessoa deu e que o produto não acha mais.
+    pub ilegiveis: usize,
+}
+
+fn repositorio(home: &str) -> seele_core::aceites_de_maquina::AceitesDeMaquina {
+    seele_core::aceites_de_maquina::AceitesDeMaquina::em(std::path::Path::new(home))
+}
+
+/// Todo aceite de máquina desta instalação.
+///
+/// # Errors
+///
+/// `"NaoDeuParaLer"` quando o arquivo existe e não se lê.
+pub fn aceites_de_maquina(home: &str) -> Result<AceitesDeMaquina, String> {
+    let repositorio = repositorio(home);
+    let aceites = repositorio
+        .listar()
+        .map_err(|_| "NaoDeuParaLer".to_owned())?
+        .into_iter()
+        .map(AceiteDeMaquinaGuardado::de)
+        .collect();
+    Ok(AceitesDeMaquina {
+        aceites,
+        ilegiveis: repositorio.ilegiveis(),
+    })
+}
+
+/// O aceite desta máquina, se houver. `alvo` como a pessoa o digitou.
+///
+/// # Errors
+///
+/// `"EnderecoInvalido"` e `"NaoDeuParaLer"`.
+pub fn aceite_de_maquina(
+    home: &str,
+    alvo: &str,
+    mod_id: &str,
+    servidor: &str,
+) -> Result<Option<AceiteDeMaquinaGuardado>, String> {
+    let chave = crate::chave_do_servidor(alvo).ok_or("EnderecoInvalido")?;
+    Ok(repositorio(home)
+        .de(&chave, mod_id, servidor)
+        .map_err(|_| "NaoDeuParaLer".to_owned())?
+        .map(AceiteDeMaquinaGuardado::de))
+}
+
+/// Guarda o sim da pessoa, no lugar do anterior da mesma máquina. `quando` é
+/// o relógio desta máquina, e `alvo` vira a chave canônica antes de ir ao
+/// disco — o `alvo` do `aceite` que chega é ignorado.
+///
+/// # Errors
+///
+/// `"EnderecoInvalido"`, `"OfertaInvalida"` (uma oferta que o fio recusaria
+/// não vira aceite) e `"NaoDeuParaGravar"`.
+pub fn guardar_aceite_de_maquina(
+    home: &str,
+    alvo: &str,
+    aceite: &AceiteDeMaquinaGuardado,
+) -> Result<(), String> {
+    let chave = crate::chave_do_servidor(alvo).ok_or("EnderecoInvalido")?;
+    let oferta = aceite
+        .oferta
+        .para_o_nucleo()
+        .map_err(|_| "OfertaInvalida".to_owned())?;
+    let quando = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |passou| passou.as_secs());
+    repositorio(home)
+        .guardar(&seele_core::aceites_de_maquina::AceiteDeMaquina {
+            alvo: chave,
+            mod_id: aceite.mod_id.clone(),
+            hash: aceite.hash.clone(),
+            servidor: aceite.servidor.clone(),
+            resumo: aceite.resumo.clone(),
+            oferta,
+            pedido_por: aceite.pedido_por.clone(),
+            quando,
+        })
+        .map_err(|_| "NaoDeuParaGravar".to_owned())
+}
+
+/// Apaga o aceite desta máquina. `true` se havia um.
+///
+/// # Errors
+///
+/// `"EnderecoInvalido"` e `"NaoDeuParaGravar"`.
+pub fn revogar_aceite_de_maquina(
+    home: &str,
+    alvo: &str,
+    mod_id: &str,
+    servidor: &str,
+) -> Result<bool, String> {
+    let chave = crate::chave_do_servidor(alvo).ok_or("EnderecoInvalido")?;
+    repositorio(home)
+        .revogar(&chave, mod_id, servidor)
+        .map_err(|_| "NaoDeuParaGravar".to_owned())
+}
+
+/// Onde mora a pasta deste servidor de jogo (Desvio 10). Não cria nada.
+///
+/// # Errors
+///
+/// `"EnderecoInvalido"`.
+pub fn pasta_do_servidor_de_jogo(
+    home: &str,
+    alvo: &str,
+    mod_id: &str,
+    servidor: &str,
+) -> Result<std::path::PathBuf, String> {
+    let chave = crate::chave_do_servidor(alvo).ok_or("EnderecoInvalido")?;
+    Ok(seele_core::aceites_de_maquina::pasta_do_servidor_de_jogo(
+        std::path::Path::new(home),
+        &chave,
+        mod_id,
+        servidor,
+    ))
+}
+
+#[cfg(test)]
+mod tests_do_aceite_de_maquina {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    fn pasta(nome: &str) -> String {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static QUAL: AtomicUsize = AtomicUsize::new(0);
+        let n = QUAL.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "seele-ffi-maquinas-{nome}-{}-{n}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temporário");
+        dir.to_string_lossy().into_owned()
+    }
+
+    fn aceite() -> AceiteDeMaquinaGuardado {
+        AceiteDeMaquinaGuardado {
+            alvo: String::new(),
+            mod_id: "seele/jogo".into(),
+            hash: "ab".repeat(32),
+            servidor: "mundo".into(),
+            resumo: "cd".repeat(32),
+            oferta: crate::OfertaDeMaquinaFfi {
+                titulo: "Minecraft".into(),
+                receita: "minecraft-java".into(),
+                versao_da_receita: "1.0.0".into(),
+                versao_do_jogo: "1.21.4".into(),
+                tuneis: vec![crate::TunelOferecidoFfi {
+                    nome: "mc".into(),
+                    protocolo: "tcp".into(),
+                    porta: 25565,
+                }],
+                artefatos: vec![],
+                pack: None,
+                origens: vec![],
+                dominios_do_jogo: vec![],
+                rodar: None,
+                disco_maximo: 0,
+                termos: vec![],
+            },
+            pedido_por: "marcela".into(),
+            quando: 0,
+        }
+    }
+
+    /// O caminho da casca: guarda pelo endereço digitado, acha pela chave
+    /// canônica, revoga, e a pasta do jogo nunca é a de configuração.
+    #[test]
+    fn a_casca_guarda_acha_e_revoga_pela_chave_do_servidor() {
+        let home = pasta("ciclo");
+        assert_eq!(
+            aceite_de_maquina(&home, "casa", "seele/jogo", "mundo"),
+            Ok(None)
+        );
+        guardar_aceite_de_maquina(&home, "casa", &aceite()).unwrap();
+
+        let achado = aceite_de_maquina(&home, "casa:8383", "seele/jogo", "mundo")
+            .unwrap()
+            .expect("o aceite guardado pelo endereço curto");
+        assert_eq!(achado.alvo, crate::chave_do_servidor("casa").unwrap());
+        assert_eq!(achado.oferta, aceite().oferta);
+        assert!(achado.quando > 0);
+        assert_eq!(aceites_de_maquina(&home).unwrap().aceites.len(), 1);
+
+        let pasta_do_jogo =
+            pasta_do_servidor_de_jogo(&home, "casa", "seele/jogo", "mundo").unwrap();
+        assert_ne!(pasta_do_jogo, std::path::PathBuf::from(&home));
+
+        assert_eq!(
+            revogar_aceite_de_maquina(&home, "casa", "seele/jogo", "mundo"),
+            Ok(true)
+        );
+        assert_eq!(
+            aceite_de_maquina(&home, "casa", "seele/jogo", "mundo"),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn uma_oferta_torta_nao_vira_aceite() {
+        let home = pasta("torta");
+        let mut torta = aceite();
+        torta.oferta.tuneis[0].protocolo = "quic".into();
+        assert_eq!(
+            guardar_aceite_de_maquina(&home, "casa", &torta),
+            Err("OfertaInvalida".to_owned())
+        );
+        assert_eq!(aceites_de_maquina(&home).unwrap().aceites.len(), 0);
+    }
+}
+
 #[cfg(test)]
 mod tests_do_aceite {
     use super::*;

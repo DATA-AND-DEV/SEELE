@@ -1277,6 +1277,49 @@ pub enum Event {
         /// O que o túnel mediu.
         report: RelatorioDeTunel,
     },
+    /// O servidor pede a esta pessoa que rode uma máquina de jogo (API 8 parte
+    /// 3). Só chega a uma conexão com tela
+    /// ([`crate::Connection::aceitar_pedidos_de_maquina`]); o mesmo pedido não
+    /// se repete enquanto a casca não responde.
+    ///
+    /// `resumo` é o que se aceita: é ele que volta em
+    /// [`crate::Connection::aceitar_maquina`] e que se guarda em
+    /// [`crate::mods::guardar_aceite_de_maquina`], como veio.
+    MachineRequest {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O hash do pacote ligado, em hex.
+        hash: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// Quem pediu; `0` quando foi um momento do MOD, sem pessoa. A casca o
+        /// troca pelo apelido.
+        pedido_por: u64,
+        /// Tudo o que a pessoa vê antes de aceitar. Numa caixa porque é de
+        /// longe o maior evento, e raro: sem ela, todo `RosterChanged` pagaria
+        /// o tamanho dele na fila.
+        oferta: Box<OfertaDeMaquinaFfi>,
+        /// O resumo da oferta, 64 caracteres em hex.
+        resumo: String,
+    },
+    /// A metade de servidor do MOD avisou a máquina deste servidor de jogo.
+    MachineNotice {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// O que o MOD mandou, sem interpretação aqui.
+        carga: String,
+    },
+    /// O servidor dispensou a máquina. Pode chegar a toda conexão da pessoa.
+    MachineDismissed {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// `mod-desligado`, `outro-pedido` ou `sem-aceite`. A frase é da casca.
+        motivo: &'static str,
+    },
 }
 
 /// Where one file is on its way.
@@ -2672,5 +2715,363 @@ mod tests {
     /// What a field declaration looks like, so a doc channel is not mistaken for one.
     fn known_field_marker() -> &'static str {
         "pub "
+    }
+}
+
+// ------------------------------------------------------- a máquina de jogo
+
+/// Um túnel que a máquina vai servir, como a casca o lê.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TunelOferecidoFfi {
+    /// O nome do túnel.
+    pub nome: String,
+    /// `tcp` ou `udp` ([`nome_do_protocolo`]).
+    pub protocolo: String,
+    /// A porta em que o jogo escuta, em `127.0.0.1`.
+    pub porta: u16,
+}
+
+/// O hash de um artefato.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HashDeArtefatoFfi {
+    /// `sha1`, `sha256` ou `sha512`.
+    pub algoritmo: String,
+    /// Hexadecimal minúsculo.
+    pub hex: String,
+}
+
+/// Um arquivo que a máquina vai baixar.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ArtefatoOferecidoFfi {
+    /// O nome com que ele fica no disco.
+    pub nome: String,
+    /// De onde baixar; sempre `https://`.
+    pub url: String,
+    /// O tamanho esperado, em bytes.
+    pub tamanho: u64,
+    /// O hash esperado.
+    pub hash: HashDeArtefatoFfi,
+}
+
+/// O comando que a máquina vai executar.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ComandoOferecidoFfi {
+    /// O programa.
+    pub comando: String,
+    /// Os argumentos, um a um.
+    pub argumentos: Vec<String>,
+}
+
+/// Um termo que a pessoa aceita junto.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TermoOferecidoFfi {
+    /// Como ele se chama.
+    pub titulo: String,
+    /// Onde ler.
+    pub url: String,
+}
+
+/// A oferta de uma máquina de jogo, como a casca a desenha e a devolve.
+///
+/// **Espelho de [`seele_core::maquina::OfertaDeMaquina`], campo a campo**, com
+/// os enums trocados por nomes em kebab-case (`tcp`, `sha256`): a casca não
+/// alcança o `seele-proto`, e os nomes que ela lê são os mesmos com que a
+/// metade de máquina pede `maquina.porta.servir({ protocolo: "tcp" })`. Ida e
+/// volta são exatas ([`Self::para_o_nucleo`]), porque o aceite guardado é a
+/// oferta que se mostrou, e uma volta que perdesse um campo guardaria outra.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OfertaDeMaquinaFfi {
+    /// Como a pessoa chama esta máquina.
+    pub titulo: String,
+    /// O nome da receita que a monta.
+    pub receita: String,
+    /// A versão da receita.
+    pub versao_da_receita: String,
+    /// A versão do jogo.
+    pub versao_do_jogo: String,
+    /// Os túneis que ela serve.
+    pub tuneis: Vec<TunelOferecidoFfi>,
+    /// O que ela baixa.
+    pub artefatos: Vec<ArtefatoOferecidoFfi>,
+    /// O hash do pacote de arquivos do jogo, se houver.
+    pub pack: Option<HashDeArtefatoFfi>,
+    /// De onde a máquina pode baixar (hosts).
+    pub origens: Vec<String>,
+    /// Com quem o jogo pode falar (hosts).
+    pub dominios_do_jogo: Vec<String>,
+    /// O que ela executa.
+    pub rodar: Option<ComandoOferecidoFfi>,
+    /// O disco que ela pode ocupar, em bytes.
+    pub disco_maximo: u64,
+    /// O que a pessoa precisa aceitar além da oferta.
+    pub termos: Vec<TermoOferecidoFfi>,
+}
+
+/// A recusa de máquina de um nome em kebab-case
+/// ([`seele_core::maquina::nome_da_recusa`]).
+#[must_use]
+pub fn recusa_de_maquina_de(nome: &str) -> Option<seele_core::maquina::MotivoDaRecusaDeMaquina> {
+    use seele_core::maquina::MotivoDaRecusaDeMaquina as M;
+    [
+        M::PeloDono,
+        M::SemTela,
+        M::SoNoApp,
+        M::PacoteDiferente,
+        M::OfertaInvalida,
+    ]
+    .into_iter()
+    .find(|motivo| seele_core::maquina::nome_da_recusa(motivo) == nome)
+}
+
+/// A parada de máquina de um nome em kebab-case
+/// ([`seele_core::maquina::nome_da_parada`]).
+#[must_use]
+pub fn parada_de_maquina_de(nome: &str) -> Option<seele_core::maquina::MotivoDaParadaDeMaquina> {
+    use seele_core::maquina::MotivoDaParadaDeMaquina as M;
+    [M::PeloDono, M::Revogada, M::AppFechou, M::MetadeFalhou]
+        .into_iter()
+        .find(|motivo| seele_core::maquina::nome_da_parada(motivo) == nome)
+}
+
+/// `tcp` ou `udp`.
+#[must_use]
+pub const fn nome_do_protocolo(protocolo: seele_core::tunel::ProtocoloDeTunel) -> &'static str {
+    match protocolo {
+        seele_core::tunel::ProtocoloDeTunel::Tcp => "tcp",
+        seele_core::tunel::ProtocoloDeTunel::Udp => "udp",
+    }
+}
+
+/// O protocolo de um nome de [`nome_do_protocolo`].
+#[must_use]
+pub fn protocolo_de(nome: &str) -> Option<seele_core::tunel::ProtocoloDeTunel> {
+    match nome {
+        "tcp" => Some(seele_core::tunel::ProtocoloDeTunel::Tcp),
+        "udp" => Some(seele_core::tunel::ProtocoloDeTunel::Udp),
+        _ => None,
+    }
+}
+
+const fn nome_do_algoritmo(algoritmo: seele_core::maquina::AlgoritmoDeHash) -> &'static str {
+    use seele_core::maquina::AlgoritmoDeHash;
+    match algoritmo {
+        AlgoritmoDeHash::Sha1 => "sha1",
+        AlgoritmoDeHash::Sha256 => "sha256",
+        AlgoritmoDeHash::Sha512 => "sha512",
+    }
+}
+
+fn algoritmo_de(nome: &str) -> Option<seele_core::maquina::AlgoritmoDeHash> {
+    use seele_core::maquina::AlgoritmoDeHash;
+    match nome {
+        "sha1" => Some(AlgoritmoDeHash::Sha1),
+        "sha256" => Some(AlgoritmoDeHash::Sha256),
+        "sha512" => Some(AlgoritmoDeHash::Sha512),
+        _ => None,
+    }
+}
+
+fn hash_ffi(hash: &seele_core::maquina::HashDeArtefato) -> HashDeArtefatoFfi {
+    HashDeArtefatoFfi {
+        algoritmo: nome_do_algoritmo(hash.algoritmo).to_owned(),
+        hex: hash.hex.clone(),
+    }
+}
+
+fn hash_do_nucleo(
+    hash: &HashDeArtefatoFfi,
+) -> Result<seele_core::maquina::HashDeArtefato, &'static str> {
+    Ok(seele_core::maquina::HashDeArtefato {
+        algoritmo: algoritmo_de(&hash.algoritmo).ok_or("oferta-invalida")?,
+        hex: hash.hex.clone(),
+    })
+}
+
+impl From<&seele_core::maquina::OfertaDeMaquina> for OfertaDeMaquinaFfi {
+    fn from(oferta: &seele_core::maquina::OfertaDeMaquina) -> Self {
+        Self {
+            titulo: oferta.titulo.clone(),
+            receita: oferta.receita.clone(),
+            versao_da_receita: oferta.versao_da_receita.clone(),
+            versao_do_jogo: oferta.versao_do_jogo.clone(),
+            tuneis: oferta
+                .tuneis
+                .iter()
+                .map(|t| TunelOferecidoFfi {
+                    nome: t.nome.clone(),
+                    protocolo: nome_do_protocolo(t.protocolo).to_owned(),
+                    porta: t.porta,
+                })
+                .collect(),
+            artefatos: oferta
+                .artefatos
+                .iter()
+                .map(|a| ArtefatoOferecidoFfi {
+                    nome: a.nome.clone(),
+                    url: a.url.clone(),
+                    tamanho: a.tamanho,
+                    hash: hash_ffi(&a.hash),
+                })
+                .collect(),
+            pack: oferta.pack.as_ref().map(hash_ffi),
+            origens: oferta.origens.clone(),
+            dominios_do_jogo: oferta.dominios_do_jogo.clone(),
+            rodar: oferta.rodar.as_ref().map(|r| ComandoOferecidoFfi {
+                comando: r.comando.clone(),
+                argumentos: r.argumentos.clone(),
+            }),
+            disco_maximo: oferta.disco_maximo,
+            termos: oferta
+                .termos
+                .iter()
+                .map(|t| TermoOferecidoFfi {
+                    titulo: t.titulo.clone(),
+                    url: t.url.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl OfertaDeMaquinaFfi {
+    /// A oferta do núcleo, conferida pela mesma régua do fio.
+    ///
+    /// # Errors
+    ///
+    /// `"oferta-invalida"` com um nome de protocolo ou de algoritmo que não
+    /// existe, ou com qualquer campo que o fio recusaria: uma oferta que a casca
+    /// remontou torta não vira aceite guardado.
+    pub fn para_o_nucleo(&self) -> Result<seele_core::maquina::OfertaDeMaquina, &'static str> {
+        use seele_core::maquina::{
+            ArtefatoOferecido, ComandoOferecido, OfertaDeMaquina, TermoOferecido, TunelOferecido,
+        };
+        use seele_core::Validate as _;
+        let oferta = OfertaDeMaquina {
+            titulo: self.titulo.clone(),
+            receita: self.receita.clone(),
+            versao_da_receita: self.versao_da_receita.clone(),
+            versao_do_jogo: self.versao_do_jogo.clone(),
+            tuneis: self
+                .tuneis
+                .iter()
+                .map(|t| {
+                    Ok(TunelOferecido {
+                        nome: t.nome.clone(),
+                        protocolo: protocolo_de(&t.protocolo).ok_or("oferta-invalida")?,
+                        porta: t.porta,
+                    })
+                })
+                .collect::<Result<_, &'static str>>()?,
+            artefatos: self
+                .artefatos
+                .iter()
+                .map(|a| {
+                    Ok(ArtefatoOferecido {
+                        nome: a.nome.clone(),
+                        url: a.url.clone(),
+                        tamanho: a.tamanho,
+                        hash: hash_do_nucleo(&a.hash)?,
+                    })
+                })
+                .collect::<Result<_, &'static str>>()?,
+            pack: self.pack.as_ref().map(hash_do_nucleo).transpose()?,
+            origens: self.origens.clone(),
+            dominios_do_jogo: self.dominios_do_jogo.clone(),
+            rodar: self.rodar.as_ref().map(|r| ComandoOferecido {
+                comando: r.comando.clone(),
+                argumentos: r.argumentos.clone(),
+            }),
+            disco_maximo: self.disco_maximo,
+            termos: self
+                .termos
+                .iter()
+                .map(|t| TermoOferecido {
+                    titulo: t.titulo.clone(),
+                    url: t.url.clone(),
+                })
+                .collect(),
+        };
+        oferta.validate().map_err(|_| "oferta-invalida")?;
+        Ok(oferta)
+    }
+}
+
+#[cfg(test)]
+mod a_oferta_de_maquina {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use seele_core::maquina::{
+        AlgoritmoDeHash, ArtefatoOferecido, ComandoOferecido, HashDeArtefato, OfertaDeMaquina,
+        TermoOferecido, TunelOferecido,
+    };
+
+    fn completa() -> OfertaDeMaquina {
+        OfertaDeMaquina {
+            titulo: "Minecraft".into(),
+            receita: "minecraft-java".into(),
+            versao_da_receita: "1.0.0".into(),
+            versao_do_jogo: "1.21.4".into(),
+            tuneis: vec![
+                TunelOferecido {
+                    nome: "mc".into(),
+                    protocolo: seele_core::tunel::ProtocoloDeTunel::Tcp,
+                    porta: 25565,
+                },
+                TunelOferecido {
+                    nome: "voz".into(),
+                    protocolo: seele_core::tunel::ProtocoloDeTunel::Udp,
+                    porta: 24454,
+                },
+            ],
+            artefatos: vec![ArtefatoOferecido {
+                nome: "server.jar".into(),
+                url: "https://piston-data.mojang.com/server.jar".into(),
+                tamanho: 51_000_000,
+                hash: HashDeArtefato {
+                    algoritmo: AlgoritmoDeHash::Sha1,
+                    hex: "a".repeat(40),
+                },
+            }],
+            pack: Some(HashDeArtefato {
+                algoritmo: AlgoritmoDeHash::Sha512,
+                hex: "b".repeat(128),
+            }),
+            origens: vec!["piston-data.mojang.com".into()],
+            dominios_do_jogo: vec!["*.mojang.com".into()],
+            rodar: Some(ComandoOferecido {
+                comando: "java".into(),
+                argumentos: vec!["-jar".into(), String::new()],
+            }),
+            disco_maximo: 4 << 30,
+            termos: vec![TermoOferecido {
+                titulo: "EULA".into(),
+                url: "https://aka.ms/MinecraftEULA".into(),
+            }],
+        }
+    }
+
+    /// O aceite guardado é a oferta mostrada: ida e volta pela casca não
+    /// perdem nem mudam campo nenhum — e o resumo, que é sobre a oferta do
+    /// núcleo, continua o mesmo.
+    #[test]
+    fn a_oferta_vai_a_casca_e_volta_igual() {
+        let oferta = completa();
+        let ida = OfertaDeMaquinaFfi::from(&oferta);
+        assert_eq!(ida.tuneis[1].protocolo, "udp");
+        assert_eq!(ida.artefatos[0].hash.algoritmo, "sha1");
+        let json = serde_json::to_string(&ida).unwrap();
+        let volta: OfertaDeMaquinaFfi = serde_json::from_str(&json).unwrap();
+        assert_eq!(volta.para_o_nucleo().unwrap(), oferta);
+    }
+
+    #[test]
+    fn um_nome_que_nao_existe_e_oferta_invalida() {
+        let mut torta = OfertaDeMaquinaFfi::from(&completa());
+        torta.tuneis[0].protocolo = "TCP".into();
+        assert_eq!(torta.para_o_nucleo(), Err("oferta-invalida"));
+        let mut torta = OfertaDeMaquinaFfi::from(&completa());
+        torta.artefatos[0].url = "http://inseguro".into();
+        assert_eq!(torta.para_o_nucleo(), Err("oferta-invalida"));
     }
 }

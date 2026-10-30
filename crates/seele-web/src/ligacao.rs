@@ -192,6 +192,19 @@ pub enum Passo {
     /// que o `seguir` do desktop diz no `seele.log`, para o console da página
     /// (`alerta` quando um pedaço ficou de fora).
     Buraco(Value),
+    /// O servidor pediu a esta pessoa que rodasse uma máquina de jogo, e o
+    /// navegador recusou sozinho (`SoNoApp`): para o console da página, como
+    /// o `seele.log` do desktop diz a recusa sem tela. A casca não recebe o
+    /// pedido.
+    MaquinaRecusada {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// `so-no-app`, ou o porquê de a recusa não ter saído
+        /// (`servidor-antigo`, `nao-coube`).
+        motivo: &'static str,
+    },
 }
 
 impl Passo {
@@ -213,6 +226,15 @@ impl Passo {
                 json!({ "peso_recusado": { "channel": canal, "causa": causa } })
             }
             Self::Buraco(aviso) => json!({ "buraco": aviso }),
+            Self::MaquinaRecusada {
+                mod_id,
+                servidor,
+                motivo,
+            } => json!({ "maquina_recusada": {
+                "mod_id": mod_id,
+                "servidor": servidor,
+                "motivo": motivo,
+            } }),
         }
     }
 }
@@ -542,9 +564,7 @@ impl Ligacao {
             | Etapa::Assinando
             | Etapa::Resposta
             | Etapa::Anuncio
-            | Etapa::Tocando => {
-                self.recusar(json!("Unreachable"))
-            }
+            | Etapa::Tocando => self.recusar(json!("Unreachable")),
         }
     }
 
@@ -595,6 +615,13 @@ impl Ligacao {
             Etapa::Dentro(mut sessao) => {
                 let mut buraco = None;
                 let passo = match decode_da_lista::<ServerMessage>(quadro) {
+                    Ok(Lido::Mensagem(ServerMessage::PedidoDeMaquina {
+                        mod_id, servidor, ..
+                    })) => {
+                        let passo = self.recusar_maquina(mod_id, servidor);
+                        self.etapa = Etapa::Dentro(sessao);
+                        return vec![passo];
+                    }
                     Ok(Lido::Mensagem(mensagem)) => {
                         if matches!(
                             mensagem,
@@ -639,6 +666,35 @@ impl Ligacao {
                 }
             }
             Etapa::Fim => Vec::new(),
+        }
+    }
+
+    /// Um pedido de máquina de jogo, que o navegador não roda (Desvio 5).
+    ///
+    /// Recusado na hora com `SoNoApp`, e não ignorado: a metade de servidor do
+    /// MOD fica sabendo (`MaquinaRecusou`) e pode pedir a outra pessoa, em vez
+    /// de esperar um aceite que nunca vem. O carimbo é conferido antes, como o
+    /// desktop faz com todo verbo do 12: um servidor que manda o pedido fala o
+    /// 12, mas a conferência não custa e o fluxo desalinhado custaria a sessão.
+    fn recusar_maquina(&mut self, mod_id: String, servidor: String) -> Passo {
+        let recusa = ClientMessage::RecusaDeMaquina {
+            mod_id: mod_id.clone(),
+            servidor: servidor.clone(),
+            motivo: seele_proto::maquina::MotivoDaRecusaDeMaquina::SoNoApp,
+        };
+        let motivo = if seele_proto::vocabulario::desde_do_cliente(&recusa) > self.carimbo {
+            "servidor-antigo"
+        } else if self.escrever(&recusa).is_err() {
+            "nao-coube"
+        } else {
+            seele_proto::maquina::nome_da_recusa(
+                &seele_proto::maquina::MotivoDaRecusaDeMaquina::SoNoApp,
+            )
+        };
+        Passo::MaquinaRecusada {
+            mod_id,
+            servidor,
+            motivo,
         }
     }
 
@@ -849,8 +905,8 @@ fn mods_nao_aceitos(
             });
             // Ausente, e não vazio, quando o servidor não disse (um 11): é o
             // mesmo contrato do `ModExigido` do desktop.
-            if let Some(dita) = plataformas
-                .and_then(|lista| lista.iter().find(|dita| dita.hash == anunciado.hash))
+            if let Some(dita) =
+                plataformas.and_then(|lista| lista.iter().find(|dita| dita.hash == anunciado.hash))
             {
                 let nomes: Vec<&str> = dita
                     .plataformas
@@ -1356,9 +1412,7 @@ mod tests {
         use seele_proto::mods::Plataforma;
         let dita = plataformas_de(0xa1, vec![Plataforma::App]);
         let (anuncio, conjunto) = anuncio_de(vec![um_anunciado(0xa1)]);
-        let violacao = |passos: &[Passo]| {
-            matches!(passos, [Passo::Recusada(m)] if *m == classificar_protocolo())
-        };
+        let violacao = |passos: &[Passo]| matches!(passos, [Passo::Recusada(m)] if *m == classificar_protocolo());
 
         let mut ligacao = depois_da_prova(None);
         ligacao.chegou(&do_servidor(&dita));
@@ -1373,5 +1427,61 @@ mod tests {
         let mut ligacao = depois_da_prova(None);
         ligacao.chegou(&do_servidor(&dita));
         assert!(violacao(&ligacao.chegou(&do_servidor(&sessao()))));
+    }
+
+    /// **O navegador não é máquina de jogo** (Desvio 5): baixar e executar o
+    /// servidor de um jogo só o app faz. O pedido é recusado aqui com
+    /// `SoNoApp`, a página só o põe no console, e nada chega à casca — que
+    /// nem teria onde mostrá-lo.
+    #[test]
+    fn o_navegador_recusa_ser_maquina() {
+        use seele_proto::maquina::{MotivoDaRecusaDeMaquina, OfertaDeMaquina};
+        let mut ligacao = dentro();
+        let pedido = ServerMessage::PedidoDeMaquina {
+            mod_id: "seele/jogo".into(),
+            hash: "ab".repeat(32),
+            servidor: "mundo".into(),
+            pedido_por: PersonId(3),
+            oferta: OfertaDeMaquina {
+                titulo: "Minecraft".into(),
+                receita: "minecraft-java".into(),
+                versao_da_receita: "1.0.0".into(),
+                versao_do_jogo: "1.21.4".into(),
+                tuneis: vec![],
+                artefatos: vec![],
+                pack: None,
+                origens: vec![],
+                dominios_do_jogo: vec![],
+                rodar: None,
+                disco_maximo: 0,
+                termos: vec![],
+            },
+        };
+
+        let passos = ligacao.chegou(&do_servidor(&pedido));
+        assert!(
+            !passos
+                .iter()
+                .any(|passo| matches!(passo, Passo::Chegou { .. })),
+            "o pedido de máquina chegou à casca do navegador: {passos:?}"
+        );
+        assert_eq!(
+            passos.iter().map(Passo::em_json).collect::<Vec<_>>(),
+            vec![json!({ "maquina_recusada": {
+                "mod_id": "seele/jogo",
+                "servidor": "mundo",
+                "motivo": "so-no-app",
+            } })],
+            "a recusa não foi dita à página, que é quem a põe no console"
+        );
+        let escritos = escritos(&mut ligacao);
+        assert_eq!(
+            escritos.iter().map(|(_, m)| m.clone()).collect::<Vec<_>>(),
+            vec![ClientMessage::RecusaDeMaquina {
+                mod_id: "seele/jogo".into(),
+                servidor: "mundo".into(),
+                motivo: MotivoDaRecusaDeMaquina::SoNoApp,
+            }]
+        );
     }
 }

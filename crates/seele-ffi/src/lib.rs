@@ -70,16 +70,24 @@ use seele_core::{
 };
 
 pub use types::{
-    AberturaDoAudio, Attachment, AttachmentRefusal, CaminhoDeTunel, CaptureDevice, Carimbo,
-    Channel, ChannelWeight, ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho,
-    EstadoDoEnvio, EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela,
-    LimitesDeTela, LimitesDosCampos, LinkState, LinkTrust, MembroForaDoAr, Message, MotivoDaRecusa,
-    NotSavedReason, Notice, NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person,
-    PlaybackDevice, PortaDeTunel, Preview, PreviewRefusal, PreviewRules, QuedaDeTunel,
-    RelatorioDeTunel, SaveDestination, SaveRefused, Severity, SignalBand as Band, Snapshot,
-    SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, Transfer, TransmissaoNaSala, Trust, VoiceMode,
-    VoiceRoom, VoiceRoomSync, VolumeRefusal,
+    AberturaDoAudio, ArtefatoOferecidoFfi, Attachment, AttachmentRefusal, CaminhoDeTunel,
+    CaptureDevice, Carimbo, Channel, ChannelWeight, ComandoOferecidoFfi, ConnectionError,
+    ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio, EstadoDoTesteDeMicrofone, Event,
+    ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, HashDeArtefatoFfi, LimitesDeTela,
+    LimitesDosCampos, LinkState, LinkTrust, MembroForaDoAr, Message, MotivoDaRecusa,
+    NotSavedReason, Notice, NoticeReason, OfertaDeMaquinaFfi, PermissaoDeMicrofone,
+    PermissaoDeTela, Person, PlaybackDevice, PortaDeTunel, Preview, PreviewRefusal, PreviewRules,
+    QuedaDeTunel, RelatorioDeTunel, SaveDestination, SaveRefused, Severity, SignalBand as Band,
+    Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, TermoOferecidoFfi, Transfer,
+    TransmissaoNaSala, Trust, TunelOferecidoFfi, VoiceMode, VoiceRoom, VoiceRoomSync,
+    VolumeRefusal,
 };
+
+/// Diz que este processo tem tela para pedidos de máquina de jogo: toda
+/// conexão aberta depois disto já nasce aceitando-os. Ver
+/// [`seele_core::enlace::este_processo_tem_tela`] — é o que fecha a corrida com
+/// os pedidos que o servidor manda na chegada. Só o `main` do app chama.
+pub use seele_core::enlace::este_processo_tem_tela;
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
 ///
@@ -1016,12 +1024,62 @@ impl SessaoId {
     }
 }
 
+/// O que a casca decidiu sobre uma máquina, já com o motivo do núcleo.
+enum VerboDaMaquina {
+    Aceitar {
+        mod_id: String,
+        servidor: String,
+        resumo: String,
+    },
+    Recusar {
+        mod_id: String,
+        servidor: String,
+        motivo: seele_core::maquina::MotivoDaRecusaDeMaquina,
+    },
+    Parar {
+        mod_id: String,
+        servidor: String,
+        motivo: seele_core::maquina::MotivoDaParadaDeMaquina,
+    },
+}
+
 /// A command on its way to the driver thread.
 /// Onde a resposta de uma pesagem chega: o peso, ou a causa com que o servidor
 /// recusou a pergunta (`AlertReason::PedidoRecusado`).
 type RespostaDoPeso = tokio::sync::oneshot::Sender<Result<ChannelWeight, types::CausaDaRecusa>>;
 
 enum Command {
+    /// Se esta conexão mostra pedidos de máquina (API 8 parte 3).
+    AceitarPedidosDeMaquina(bool),
+    /// O aceite, a recusa ou a parada de uma máquina.
+    VerboDaMaquina(VerboDaMaquina),
+    /// Um pedido da máquina à metade de servidor; a espera vai para uma
+    /// tarefa, como a do túnel.
+    PedidoDaMaquina {
+        mod_id: String,
+        servidor: String,
+        payload: String,
+        resposta: tokio::sync::oneshot::Sender<Result<String, &'static str>>,
+    },
+    /// A máquina passa a servir um túnel.
+    ServirTunel {
+        mod_id: String,
+        nome: String,
+        protocolo: seele_core::tunel::ProtocoloDeTunel,
+        porta: u16,
+        resposta: tokio::sync::oneshot::Sender<Result<(), &'static str>>,
+    },
+    /// A máquina para de servir um túnel.
+    PararTunel {
+        mod_id: String,
+        nome: String,
+    },
+    /// As quedas de um túnel que esta máquina serve.
+    QuedasDoTunelServido {
+        mod_id: String,
+        nome: String,
+        resposta: tokio::sync::oneshot::Sender<Vec<QuedaDeTunel>>,
+    },
     /// Quem joga entra num túnel de jogo. A resposta vai por `resposta`, e a
     /// espera por ela não pode parar este laço (ver `run_command`).
     EntrarNoTunel {
@@ -2720,6 +2778,164 @@ impl Connection {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    // --------------------------------------------- a máquina de jogo (API 8)
+
+    /// Se esta conexão mostra pedidos de máquina ([`Event::MachineRequest`]).
+    /// Sem isso — e sem [`este_processo_tem_tela`] —, todo pedido é recusado
+    /// no núcleo com `sem-tela` e só o log fica sabendo.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn aceitar_pedidos_de_maquina(&self, sim: bool) -> Result<(), ConnectionError> {
+        self.command(Command::AceitarPedidosDeMaquina(sim))
+    }
+
+    /// A pessoa aceitou a oferta de `resumo`: o do [`Event::MachineRequest`],
+    /// como veio.
+    ///
+    /// # Errors
+    ///
+    /// `sessao-encerrada` quando a sessão já acabou.
+    pub fn aceitar_maquina(
+        &self,
+        mod_id: String,
+        servidor: String,
+        resumo: String,
+    ) -> Result<(), &'static str> {
+        self.command(Command::VerboDaMaquina(VerboDaMaquina::Aceitar {
+            mod_id,
+            servidor,
+            resumo,
+        }))
+        .map_err(|_| "sessao-encerrada")
+    }
+
+    /// A máquina não vai rodar; `motivo` em kebab-case (`pelo-dono`,
+    /// `pacote-diferente`, `oferta-invalida`, ...).
+    ///
+    /// # Errors
+    ///
+    /// `motivo-desconhecido` para um nome que não existe; `sessao-encerrada`.
+    pub fn recusar_maquina(
+        &self,
+        mod_id: String,
+        servidor: String,
+        motivo: &str,
+    ) -> Result<(), &'static str> {
+        let motivo = types::recusa_de_maquina_de(motivo).ok_or("motivo-desconhecido")?;
+        self.command(Command::VerboDaMaquina(VerboDaMaquina::Recusar {
+            mod_id,
+            servidor,
+            motivo,
+        }))
+        .map_err(|_| "sessao-encerrada")
+    }
+
+    /// A máquina parou; `motivo` em kebab-case (`pelo-dono`, `revogada`,
+    /// `app-fechou`, `metade-falhou`).
+    ///
+    /// # Errors
+    ///
+    /// `motivo-desconhecido` para um nome que não existe; `sessao-encerrada`.
+    pub fn parar_maquina(
+        &self,
+        mod_id: String,
+        servidor: String,
+        motivo: &str,
+    ) -> Result<(), &'static str> {
+        let motivo = types::parada_de_maquina_de(motivo).ok_or("motivo-desconhecido")?;
+        self.command(Command::VerboDaMaquina(VerboDaMaquina::Parar {
+            mod_id,
+            servidor,
+            motivo,
+        }))
+        .map_err(|_| "sessao-encerrada")
+    }
+
+    /// Um pedido da máquina à metade de servidor do MOD, e a resposta dela.
+    ///
+    /// # Errors
+    ///
+    /// `sem-aceite` (esta conexão não é a máquina daquele servidor de jogo),
+    /// `sem-resposta` (prazo de 15 s, queda, ou o pedido não saiu — o porquê
+    /// vai ao log), `sessao-encerrada`.
+    pub async fn pedido_da_maquina(
+        &self,
+        mod_id: String,
+        servidor: String,
+        payload: String,
+    ) -> Result<String, &'static str> {
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.command(Command::PedidoDaMaquina {
+            mod_id,
+            servidor,
+            payload,
+            resposta,
+        })
+        .map_err(|_| "sessao-encerrada")?;
+        caixa.await.map_err(|_| "sessao-encerrada")?
+    }
+
+    /// A máquina passa a servir `porta` (a do jogo, em `127.0.0.1`) como o
+    /// túnel `mod_id/nome`; `protocolo` é `tcp` ou `udp`. Quem confere o
+    /// aceite é o servidor (`fora-do-aceite`).
+    ///
+    /// # Errors
+    ///
+    /// O nome em kebab-case da recusa (`RecusaDeTunel`), `protocolo-desconhecido`,
+    /// ou `sessao-encerrada`.
+    pub async fn servir_tunel(
+        &self,
+        mod_id: String,
+        nome: String,
+        protocolo: &str,
+        porta: u16,
+    ) -> Result<(), &'static str> {
+        let protocolo = types::protocolo_de(protocolo).ok_or("protocolo-desconhecido")?;
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.command(Command::ServirTunel {
+            mod_id,
+            nome,
+            protocolo,
+            porta,
+            resposta,
+        })
+        .map_err(|_| "sessao-encerrada")?;
+        caixa.await.map_err(|_| "sessao-encerrada")?
+    }
+
+    /// A máquina para de servir o túnel `nome` do MOD.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn parar_tunel(&self, mod_id: String, nome: String) -> Result<(), ConnectionError> {
+        self.command(Command::PararTunel { mod_id, nome })
+    }
+
+    /// Por que as conexões de um túnel que esta máquina serve acabaram,
+    /// contadas por motivo (é aqui que aparece `jogo-recusou`). Vazio para um
+    /// túnel que ela não serve.
+    ///
+    /// # Errors
+    ///
+    /// `sessao-encerrada` quando a sessão já acabou.
+    pub async fn quedas_do_tunel_servido(
+        &self,
+        mod_id: String,
+        nome: String,
+    ) -> Result<Vec<QuedaDeTunel>, &'static str> {
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.command(Command::QuedasDoTunelServido {
+            mod_id,
+            nome,
+            resposta,
+        })
+        .map_err(|_| "sessao-encerrada")?;
+        caixa.await.map_err(|_| "sessao-encerrada")
     }
 
     /// Asks the server to make a voice room.
@@ -5342,6 +5558,48 @@ async fn drive(
                         guardar_relatorio_de_tunel(&shared, &relatorio);
                         shared.notify(&Event::TunnelReport { report: relatorio });
                     }
+                    // **A máquina de jogo** (API 8 parte 3). O núcleo já
+                    // calculou o resumo e já tirou os repetidos; aqui só se
+                    // achata para a casca.
+                    seele_core::enlace::Aviso::PedidoDeMaquina {
+                        mod_id,
+                        hash,
+                        servidor,
+                        pedido_por,
+                        oferta,
+                        resumo,
+                    } => {
+                        shared.notify(&Event::MachineRequest {
+                            mod_id,
+                            hash,
+                            servidor,
+                            pedido_por: pedido_por.0,
+                            oferta: Box::new(OfertaDeMaquinaFfi::from(&*oferta)),
+                            resumo,
+                        });
+                    }
+                    seele_core::enlace::Aviso::AvisoParaMaquina {
+                        mod_id,
+                        servidor,
+                        carga,
+                    } => {
+                        shared.notify(&Event::MachineNotice {
+                            mod_id,
+                            servidor,
+                            carga,
+                        });
+                    }
+                    seele_core::enlace::Aviso::MaquinaDispensada {
+                        mod_id,
+                        servidor,
+                        motivo,
+                    } => {
+                        shared.notify(&Event::MachineDismissed {
+                            mod_id,
+                            servidor,
+                            motivo: seele_core::maquina::nome_da_dispensa(&motivo),
+                        });
+                    }
                     seele_core::enlace::Aviso::Encerrado(motivo) => {
                         shared.notify(&Event::Ended {
                             reason: fim_da_sessao(&motivo),
@@ -5608,6 +5866,23 @@ fn guardar_tunel_aberto(
 /// «O produto sabe e não conta»: toda recusa de entrada num túnel vai ao
 /// registro com o MOD e o túnel, no nível que ela merece (uma recusa do
 /// servidor é rotina; a de porta local é uma máquina com problema).
+/// Uma recusa a servir um túnel, dita: `fora-do-aceite` é a que a pessoa vai
+/// perguntar, e só o log a guarda.
+fn tunel_servido_recusado_dito(
+    mod_id: &str,
+    nome: &str,
+    porta: u16,
+    recusa: seele_core::tunel::RecusaDeTunel,
+) {
+    tracing::warn!(
+        mod_id = %mod_id,
+        tunel = %nome,
+        porta,
+        motivo = types::nome_da_recusa_do_tunel(recusa),
+        "servir o túnel de jogo foi recusado"
+    );
+}
+
 fn tunel_recusado_dito(mod_id: &str, nome: &str, recusa: seele_core::tunel::RecusaDeTunel) {
     tracing::warn!(
         mod_id = %mod_id,
@@ -7359,6 +7634,106 @@ fn medir_a_volta(
 /// Runs one command. Returns false when the driver should stop.
 async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) -> bool {
     match command {
+        Command::AceitarPedidosDeMaquina(sim) => {
+            tracing::info!(
+                com_tela = sim,
+                "máquina: esta conexão mostra pedidos de máquina"
+            );
+            client.aceitar_pedidos_de_maquina(sim);
+        }
+        Command::VerboDaMaquina(verbo) => {
+            let saiu = match verbo {
+                VerboDaMaquina::Aceitar {
+                    mod_id,
+                    servidor,
+                    resumo,
+                } => client.aceitar_maquina(&mod_id, &servidor, &resumo).await,
+                VerboDaMaquina::Recusar {
+                    mod_id,
+                    servidor,
+                    motivo,
+                } => client.recusar_maquina(&mod_id, &servidor, motivo).await,
+                VerboDaMaquina::Parar {
+                    mod_id,
+                    servidor,
+                    motivo,
+                } => client.parar_maquina(&mod_id, &servidor, motivo).await,
+            };
+            if saiu.is_err() {
+                return false;
+            }
+        }
+        Command::PedidoDaMaquina {
+            mod_id,
+            servidor,
+            payload,
+            resposta,
+        } => {
+            // O pedido sai agora; a espera (até 15 s) vai para uma tarefa, pela
+            // razão do túnel logo abaixo.
+            match client.pedir_da_maquina(&mod_id, &servidor, payload).await {
+                Err(falha) => {
+                    tracing::warn!(mod_id = %mod_id, servidor = %servidor, motivo = falha.nome(), "máquina: o pedido à metade de servidor não saiu");
+                    let _ = resposta.send(Err(falha.nome()));
+                }
+                Ok(espera) => {
+                    tokio::spawn(async move {
+                        let desfecho = espera.aguardar().await.map_err(|falha| {
+                            tracing::warn!(mod_id = %mod_id, servidor = %servidor, motivo = falha.nome(), "máquina: o pedido à metade de servidor falhou");
+                            falha.nome()
+                        });
+                        let _ = resposta.send(desfecho);
+                    });
+                }
+            }
+        }
+        Command::ServirTunel {
+            mod_id,
+            nome,
+            protocolo,
+            porta,
+            resposta,
+        } => match client
+            .pedir_servico_de_tunel(&mod_id, &nome, protocolo, porta)
+            .await
+        {
+            Err(recusa) => {
+                tunel_servido_recusado_dito(&mod_id, &nome, porta, recusa);
+                let _ = resposta.send(Err(types::nome_da_recusa_do_tunel(recusa)));
+            }
+            Ok(espera) => {
+                tokio::spawn(async move {
+                    let desfecho = espera.aguardar().await.map_err(|recusa| {
+                        tunel_servido_recusado_dito(&mod_id, &nome, porta, recusa);
+                        types::nome_da_recusa_do_tunel(recusa)
+                    });
+                    if desfecho.is_ok() {
+                        tracing::info!(mod_id = %mod_id, tunel = %nome, porta, "túnel: a máquina serve");
+                    }
+                    let _ = resposta.send(desfecho);
+                });
+            }
+        },
+        Command::PararTunel { mod_id, nome } => {
+            if client.parar_tunel(&mod_id, &nome).await.is_err() {
+                return false;
+            }
+        }
+        Command::QuedasDoTunelServido {
+            mod_id,
+            nome,
+            resposta,
+        } => {
+            let quedas = client
+                .quedas_do_tunel_servido(&mod_id, &nome)
+                .into_iter()
+                .map(|(queda, vezes)| QuedaDeTunel {
+                    motivo: types::nome_da_queda(queda),
+                    vezes,
+                })
+                .collect();
+            let _ = resposta.send(quedas);
+        }
         // O olhar mora no fim da volta do laço de `drive`; aqui só se guarda
         // quem espera por ele.
         Command::EntrarNoTunel {
@@ -8087,9 +8462,9 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
                     // A marca vem do quadro que o servidor 12 manda antes do
                     // anúncio, juntada pelo hash; sem o quadro (servidor 11) ou
                     // sem o hash nele, o campo fica ausente.
-                    let plataformas = plataformas.as_deref().and_then(|lista| {
-                        lista.iter().find(|p| p.hash == anunciado.hash)
-                    });
+                    let plataformas = plataformas
+                        .as_deref()
+                        .and_then(|lista| lista.iter().find(|p| p.hash == anunciado.hash));
                     crate::types::ModExigido::from(anunciado).com_plataformas(plataformas)
                 })
                 .collect(),

@@ -34,11 +34,11 @@ use std::time::Duration;
 // Republicada para a FFI nomear a recusa sem tocar em `seele-proto` (ADR 0002).
 use seele_proto::control::{ClientMessage, MotivoDeFalhaDePar, ServerMessage};
 use seele_proto::ids::PersonId;
-pub use seele_proto::tunel::RecusaDeTunel;
 use seele_proto::tunel::{
     datagrama_de_abertura, ler_datagrama_j, AberturaDeTunel, DatagramaJ, MotivoDoFimDoTunel,
-    ProtocoloDeTunel, SinalDeTunel, TipoDeCanalDeTunel, REPETE_A_ABERTURA_A_CADA, TAG_DE_DADO,
+    SinalDeTunel, TipoDeCanalDeTunel, REPETE_A_ABERTURA_A_CADA, TAG_DE_DADO,
 };
+pub use seele_proto::tunel::{ProtocoloDeTunel, RecusaDeTunel};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -2252,8 +2252,13 @@ pub(crate) fn fim_pela_recusa(motivo: RecusaDeTunel) -> Option<Queda> {
         | RecusaDeTunel::CanaisEsgotados
         | RecusaDeTunel::ServidorAntigo
         | RecusaDeTunel::PortaLocalOcupada
-        | RecusaDeTunel::SemResposta
-        | RecusaDeTunel::ForaDoAceite => None,
+        | RecusaDeTunel::SemResposta => None,
+        // Só responde a um `ServirTunel` (a máquina pediu para servir algo que
+        // a oferta aceita não trazia), e essa resposta acha o pedido em
+        // `servindo` antes de chegar aqui. Depois de uma concessão a quem joga
+        // ela não tem sentido; se um servidor a mandasse, o túnel de quem joga
+        // não é o que foi recusado, e não acaba por isso.
+        RecusaDeTunel::ForaDoAceite => None,
     }
 }
 

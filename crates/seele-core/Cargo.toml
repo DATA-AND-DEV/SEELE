@@ -47,7 +47,10 @@ rand = "0.10.2"
 anyhow = "1.0.104"
 thiserror = "2.0.19"
 tracing = "0.1.44"
-serde = "1.0.229"
+serde = { version = "1.0.229", features = ["derive"] }
+# Os aceites de máquina (`aceites_de_maquina`) guardam a oferta inteira, uma
+# linha JSON por aceite. A mesma versão do `seele-proto`.
+serde_json = "1.0.151"
 # Para `enlace::Motor` saber os próprios endereços de rede local ao declarar
 # identidade no caminho entre pares (`EmprestarSubida.locais`) — a std não
 # enumera interfaces. Mesma versão que `seele-server::alcance::interfaces` já

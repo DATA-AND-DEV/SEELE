@@ -362,6 +362,51 @@ pub enum Aviso {
     /// A cada segundo enquanto há tráfego, e sempre que o caminho ou o estado
     /// muda. O último de um túnel traz `encerrado: Some(..)`.
     Tunel(crate::tunel::RelatorioDoTunel),
+    /// O servidor pede a esta pessoa que rode uma máquina de jogo (API 8 parte
+    /// 3). Só sai de um enlace com tela ([`Enlace::aceitar_pedidos_de_maquina`]);
+    /// sem ela, o pedido é recusado aqui e a casca não fica sabendo.
+    ///
+    /// **`resumo` é o que a casca compara e guarda**, já calculado por
+    /// [`seele_proto::maquina::resumo_da_oferta`]: é ele que volta em
+    /// [`Enlace::aceitar_maquina`] e que vai para
+    /// [`crate::aceites_de_maquina::AceiteDeMaquina`]. Ninguém mais o recalcula
+    /// — duas contas do mesmo resumo são duas contas para discordarem.
+    ///
+    /// O mesmo pedido (mesmo MOD, servidor de jogo e resumo) sai uma vez só
+    /// enquanto a casca não responde, mesmo que o servidor o repita.
+    PedidoDeMaquina {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O hash do pacote ligado, em hex.
+        hash: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// Quem pediu. `PersonId(0)` quando foi um momento do MOD, sem pessoa.
+        pedido_por: PersonId,
+        /// Tudo o que a pessoa vê antes de aceitar.
+        oferta: Box<seele_proto::maquina::OfertaDeMaquina>,
+        /// O resumo da oferta, em hex: o que se aceita.
+        resumo: String,
+    },
+    /// A metade de servidor do MOD avisou a máquina deste servidor de jogo.
+    AvisoParaMaquina {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// O que o MOD mandou.
+        carga: String,
+    },
+    /// O servidor dispensou a máquina, e por quê. Pode chegar a toda sessão da
+    /// pessoa, e não só à que aceitou: quem não roda aquela máquina ignora.
+    MaquinaDispensada {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// O motivo.
+        motivo: seele_proto::maquina::MotivoDaDispensa,
+    },
     /// Acabou. Ou os cinco minutos passaram, ou não vale a pena tentar.
     Encerrado(Motivo),
 }
@@ -428,6 +473,41 @@ impl std::fmt::Debug for Aviso {
                 .debug_struct("TelaFechou")
                 .field("tela", tela)
                 .field("leitura", leitura)
+                .finish(),
+            // A oferta fica de fora: o log diz qual pedido, e o resumo a
+            // identifica inteira.
+            Self::PedidoDeMaquina {
+                mod_id,
+                servidor,
+                pedido_por,
+                resumo,
+                ..
+            } => f
+                .debug_struct("PedidoDeMaquina")
+                .field("mod_id", mod_id)
+                .field("servidor", servidor)
+                .field("pedido_por", pedido_por)
+                .field("resumo", resumo)
+                .finish_non_exhaustive(),
+            Self::AvisoParaMaquina {
+                mod_id,
+                servidor,
+                carga,
+            } => f
+                .debug_struct("AvisoParaMaquina")
+                .field("mod_id", mod_id)
+                .field("servidor", servidor)
+                .field("carga", &carga.len())
+                .finish(),
+            Self::MaquinaDispensada {
+                mod_id,
+                servidor,
+                motivo,
+            } => f
+                .debug_struct("MaquinaDispensada")
+                .field("mod_id", mod_id)
+                .field("servidor", servidor)
+                .field("motivo", motivo)
                 .finish(),
             Self::Encerrado(motivo) => f.debug_tuple("Encerrado").field(motivo).finish(),
         }
@@ -696,6 +776,20 @@ enum Comando {
         mod_id: String,
         nome: String,
     },
+    /// O aceite, a recusa ou a parada de uma máquina, já como verbo do fio.
+    ///
+    /// Um comando só para os três porque o motor faz o mesmo com eles: confere
+    /// a versão, escreve, e esquece o pedido daquela máquina que já avisou à
+    /// casca.
+    VerboDaMaquina(ClientMessage),
+    /// Um pedido da máquina à metade de servidor do MOD; a resposta vai por
+    /// `resposta`.
+    PedidoDaMaquina {
+        mod_id: String,
+        servidor: String,
+        payload: String,
+        resposta: tokio::sync::oneshot::Sender<Result<String, FalhaDoPedidoDaMaquina>>,
+    },
     Sair,
 }
 
@@ -746,7 +840,30 @@ impl Comando {
             Self::SairDosTuneisDoMod { .. } => "SairDosTuneisDoMod",
             Self::ServirTunel { .. } => "ServirTunel",
             Self::PararTunel { .. } => "PararTunel",
+            Self::VerboDaMaquina(_) => "VerboDaMaquina",
+            Self::PedidoDaMaquina { .. } => "PedidoDaMaquina",
             Self::Sair => "Sair",
+        }
+    }
+
+    /// A máquina de que este comando fala, se ele é dela.
+    fn da_maquina(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::VerboDaMaquina(
+                ClientMessage::AceiteDeMaquina {
+                    mod_id, servidor, ..
+                }
+                | ClientMessage::RecusaDeMaquina {
+                    mod_id, servidor, ..
+                }
+                | ClientMessage::MaquinaParada {
+                    mod_id, servidor, ..
+                },
+            )
+            | Self::PedidoDaMaquina {
+                mod_id, servidor, ..
+            } => Some((mod_id, servidor)),
+            _ => None,
         }
     }
 }
@@ -963,6 +1080,65 @@ impl EsperaDeTunel {
     }
 }
 
+/// Quanto se espera a resposta de um pedido da máquina: os 15 s com que a
+/// janela de um MOD espera a dela. A metade de servidor é a mesma, e um prazo
+/// diferente só porque quem pergunta é a máquina daria duas paciências ao
+/// mesmo MOD.
+pub const PRAZO_DO_PEDIDO_DA_MAQUINA: Duration = Duration::from_secs(15);
+
+/// Por que um pedido da máquina não teve resposta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FalhaDoPedidoDaMaquina {
+    /// O servidor disse que esta conexão não é a máquina aceita daquele
+    /// servidor de jogo (`MaquinaDispensada { SemAceite }`).
+    SemAceite,
+    /// Nada voltou: prazo vencido, sessão caída, ou o pedido nem saiu (o
+    /// porquê vai ao log).
+    SemResposta,
+}
+
+impl FalhaDoPedidoDaMaquina {
+    /// O nome em kebab-case, o que a casca recebe.
+    #[must_use]
+    pub const fn nome(self) -> &'static str {
+        match self {
+            Self::SemAceite => "sem-aceite",
+            Self::SemResposta => "sem-resposta",
+        }
+    }
+}
+
+impl std::fmt::Display for FalhaDoPedidoDaMaquina {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.nome())
+    }
+}
+
+impl std::error::Error for FalhaDoPedidoDaMaquina {}
+
+/// A resposta que [`Enlace::pedir_da_maquina`] ainda espera.
+///
+/// Pela razão de [`EsperaDeTunel`]: o laço da FFI não pode parar 15 s por um
+/// pedido, e esta espera vai para outra tarefa sem segurar o enlace.
+#[derive(Debug)]
+pub struct EsperaDoPedidoDaMaquina {
+    caixa: tokio::sync::oneshot::Receiver<Result<String, FalhaDoPedidoDaMaquina>>,
+}
+
+impl EsperaDoPedidoDaMaquina {
+    /// Espera até [`PRAZO_DO_PEDIDO_DA_MAQUINA`].
+    ///
+    /// # Errors
+    ///
+    /// As de [`FalhaDoPedidoDaMaquina`].
+    pub async fn aguardar(self) -> Result<String, FalhaDoPedidoDaMaquina> {
+        match tokio::time::timeout(PRAZO_DO_PEDIDO_DA_MAQUINA, self.caixa).await {
+            Ok(Ok(resultado)) => resultado,
+            Ok(Err(_)) | Err(_) => Err(FalhaDoPedidoDaMaquina::SemResposta),
+        }
+    }
+}
+
 /// A sessão com um servidor, viva através de quedas.
 pub struct Enlace {
     comandos: mpsc::Sender<Comando>,
@@ -992,6 +1168,9 @@ pub struct Enlace {
     caminho_medido: Arc<std::sync::atomic::AtomicU32>,
     /// O que a máquina que serve túneis de jogo já contou, para quem investiga.
     maquina: Arc<crate::tunel::EstadoDaMaquina>,
+    /// Se este enlace tem tela para mostrar um pedido de máquina. Dividido
+    /// com o motor, que é quem decide na chegada do pedido.
+    com_tela: Arc<std::sync::atomic::AtomicBool>,
     /// A tarefa do motor. `None` depois de [`Enlace::sair`], que a espera
     /// terminar — ou a aborta, vencido o teto.
     tarefa: Option<tokio::task::JoinHandle<()>>,
@@ -2057,6 +2236,8 @@ impl Enlace {
         let bateria = bateria_de(&destino);
         let tuneis = crate::tunel::Tuneis::nova(avisos_tx.clone());
         let maquina = tuneis.estado_da_maquina();
+        let lado_da_maquina = LadoDaMaquina::default();
+        let com_tela = Arc::clone(&lado_da_maquina.com_tela);
         let motor = Motor {
             destino,
             // Guardado para a reconexão, e não só para a primeira entrada: uma
@@ -2092,6 +2273,7 @@ impl Enlace {
             resultados_do_par_tx,
             tarefas_de_par: TarefasDePar::default(),
             tuneis,
+            lado_da_maquina,
         };
         // **Não declara identidade aqui.** Achado do fix round 2:
         // `conectar_por` é o funil que **cada candidato** de uma conexão com
@@ -2117,6 +2299,7 @@ impl Enlace {
             rtt,
             caminho_medido,
             maquina,
+            com_tela,
             tarefa: Some(tarefa),
         })
     }
@@ -3019,8 +3202,363 @@ impl Enlace {
         self.maquina.dados_antes_da_abertura()
     }
 
+    // ------------------------------------------------- a máquina de jogo
+
+    /// Se este enlace mostra pedidos de máquina a alguém.
+    ///
+    /// **Começa em `false`, e é o guarda do Desvio 5.** Sem tela não há quem
+    /// leia a oferta, e um pedido que ninguém lê não pode ficar parado: o
+    /// motor responde `RecusaDeMaquina { SemTela }` na hora, e loga. Só quem
+    /// tem tela — o app — liga isto, e aí o pedido vira
+    /// [`Aviso::PedidoDeMaquina`].
+    ///
+    /// Começa em `false` **a menos que o processo tenha dito que tem tela**
+    /// ([`este_processo_tem_tela`]): ligar só aqui, depois da conexão, perde os
+    /// pedidos que o servidor manda na chegada.
+    pub fn aceitar_pedidos_de_maquina(&self, sim: bool) {
+        self.com_tela
+            .store(sim, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// A pessoa aceitou a oferta de `resumo` — o do [`Aviso::PedidoDeMaquina`],
+    /// como veio.
+    ///
+    /// Um servidor que negociou menos de 12 não recebe nada: o verbo fica no
+    /// log, e não no fio.
+    ///
+    /// # Errors
+    ///
+    /// [`Fechado`] quando a sessão já acabou.
+    pub async fn aceitar_maquina(
+        &self,
+        mod_id: &str,
+        servidor: &str,
+        resumo: &str,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::VerboDaMaquina(ClientMessage::AceiteDeMaquina {
+            mod_id: mod_id.to_owned(),
+            servidor: servidor.to_owned(),
+            resumo: resumo.to_owned(),
+        }))
+        .await
+    }
+
+    /// A pessoa (ou quem decide por ela) não vai rodar a máquina.
+    ///
+    /// # Errors
+    ///
+    /// [`Fechado`] quando a sessão já acabou.
+    pub async fn recusar_maquina(
+        &self,
+        mod_id: &str,
+        servidor: &str,
+        motivo: seele_proto::maquina::MotivoDaRecusaDeMaquina,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::VerboDaMaquina(ClientMessage::RecusaDeMaquina {
+            mod_id: mod_id.to_owned(),
+            servidor: servidor.to_owned(),
+            motivo,
+        }))
+        .await
+    }
+
+    /// A máquina parou, e por quê.
+    ///
+    /// # Errors
+    ///
+    /// [`Fechado`] quando a sessão já acabou.
+    pub async fn parar_maquina(
+        &self,
+        mod_id: &str,
+        servidor: &str,
+        motivo: seele_proto::maquina::MotivoDaParadaDeMaquina,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::VerboDaMaquina(ClientMessage::MaquinaParada {
+            mod_id: mod_id.to_owned(),
+            servidor: servidor.to_owned(),
+            motivo,
+        }))
+        .await
+    }
+
+    /// Um pedido da máquina à metade de servidor do MOD, e a resposta dela.
+    ///
+    /// A resposta é o `ModReply` de sempre, no mesmo espaço de números de
+    /// `request` do [`Self::mod_request`] — o motor escolhe o número, numa
+    /// faixa que a casca não usa, e monta as partes. `MaquinaDispensada {
+    /// SemAceite }` para este MOD e servidor de jogo é a recusa do servidor.
+    ///
+    /// # Errors
+    ///
+    /// [`FalhaDoPedidoDaMaquina::SemAceite`] quando o servidor diz que esta
+    /// conexão não é a máquina; [`FalhaDoPedidoDaMaquina::SemResposta`] depois
+    /// de [`PRAZO_DO_PEDIDO_DA_MAQUINA`], com a sessão caída, ou quando o
+    /// pedido nem pôde sair.
+    pub async fn pedido_da_maquina(
+        &self,
+        mod_id: &str,
+        servidor: &str,
+        payload: String,
+    ) -> Result<String, FalhaDoPedidoDaMaquina> {
+        self.pedir_da_maquina(mod_id, servidor, payload)
+            .await?
+            .aguardar()
+            .await
+    }
+
+    /// A primeira metade de [`Self::pedido_da_maquina`]: manda, e devolve a
+    /// espera sem esperar. Pela razão de [`Self::pedir_entrada_no_tunel`].
+    ///
+    /// # Errors
+    ///
+    /// [`FalhaDoPedidoDaMaquina::SemResposta`] quando a sessão já acabou.
+    pub async fn pedir_da_maquina(
+        &self,
+        mod_id: &str,
+        servidor: &str,
+        payload: String,
+    ) -> Result<EsperaDoPedidoDaMaquina, FalhaDoPedidoDaMaquina> {
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.mandar(Comando::PedidoDaMaquina {
+            mod_id: mod_id.to_owned(),
+            servidor: servidor.to_owned(),
+            payload,
+            resposta,
+        })
+        .await
+        .map_err(|_| FalhaDoPedidoDaMaquina::SemResposta)?;
+        Ok(EsperaDoPedidoDaMaquina { caixa })
+    }
+
+    /// A primeira metade de [`Self::servir_tunel`]: manda, e devolve a espera
+    /// sem esperar. Pela razão de [`Self::pedir_entrada_no_tunel`]: o laço da
+    /// FFI não para.
+    ///
+    /// # Errors
+    ///
+    /// As recusas que se sabem antes de mandar: nome malformado e sessão
+    /// caída.
+    pub async fn pedir_servico_de_tunel(
+        &self,
+        mod_id: &str,
+        nome: &str,
+        protocolo: ProtocoloDeTunel,
+        porta: u16,
+    ) -> Result<EsperaDeServico, RecusaDeTunel> {
+        seele_proto::tunel::check_tunel(mod_id, nome).map_err(|_| RecusaDeTunel::NaoExiste)?;
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.mandar(Comando::ServirTunel {
+            mod_id: mod_id.to_owned(),
+            nome: nome.to_owned(),
+            protocolo,
+            porta,
+            resposta,
+        })
+        .await
+        .map_err(|_| RecusaDeTunel::SemResposta)?;
+        Ok(EsperaDeServico { caixa })
+    }
+
     async fn mandar(&self, comando: Comando) -> Result<(), Fechado> {
         self.comandos.send(comando).await.map_err(|_| Fechado)
+    }
+}
+
+/// A resposta que [`Enlace::pedir_servico_de_tunel`] ainda espera.
+#[derive(Debug)]
+pub struct EsperaDeServico {
+    caixa: tokio::sync::oneshot::Receiver<Result<(), RecusaDeTunel>>,
+}
+
+impl EsperaDeServico {
+    /// Espera até `PRAZO_DO_PAR`, como [`Enlace::servir_tunel`].
+    ///
+    /// # Errors
+    ///
+    /// A recusa do servidor, ou [`RecusaDeTunel::SemResposta`].
+    pub async fn aguardar(self) -> Result<(), RecusaDeTunel> {
+        match tokio::time::timeout(PRAZO_DO_PAR, self.caixa).await {
+            Ok(Ok(resultado)) => resultado,
+            Ok(Err(_)) | Err(_) => Err(RecusaDeTunel::SemResposta),
+        }
+    }
+}
+
+/// O primeiro número de `request` dos pedidos da máquina.
+///
+/// O mesmo espaço do `ModRequest`, que a casca conta de 1 para cima: a faixa
+/// de cima é deste motor, e o `ModReply` de um número que ele pôs no ar é dele
+/// — não vai à casca, onde seria a resposta de um pedido que ela não fez.
+const PRIMEIRO_PEDIDO_DA_MAQUINA: u32 = 0x8000_0000;
+
+/// Quantos pedidos de máquina avisados sem resposta se guardam para não
+/// repetir o aviso. Quem os gera é o servidor; um teto impede que um servidor
+/// que varia a oferta encha a memória deste lado.
+const MAX_PEDIDOS_AVISADOS: usize = 64;
+
+/// Quantas partes um `ModReply` de pedido da máquina pode ter. As do servidor
+/// são de 10 KiB; isto é folga, e o que passar disso é resposta torta.
+const MAX_PARTES_DA_RESPOSTA: u32 = 1024;
+
+/// Um pedido da máquina no ar.
+#[derive(Debug)]
+struct PedidoNoAr {
+    mod_id: String,
+    servidor: String,
+    partes: Vec<Option<String>>,
+    resposta: tokio::sync::oneshot::Sender<Result<String, FalhaDoPedidoDaMaquina>>,
+}
+
+/// O que o motor sabe da máquina de jogo desta pessoa.
+#[derive(Debug)]
+struct LadoDaMaquina {
+    /// Ver [`Enlace::aceitar_pedidos_de_maquina`].
+    com_tela: Arc<std::sync::atomic::AtomicBool>,
+    /// O contador dos pedidos da máquina, somado a
+    /// [`PRIMEIRO_PEDIDO_DA_MAQUINA`].
+    contador: u32,
+    no_ar: std::collections::HashMap<u32, PedidoNoAr>,
+    /// `(mod_id, servidor, resumo)` dos pedidos já avisados à casca e ainda
+    /// sem resposta dela.
+    avisados: std::collections::HashSet<(String, String, String)>,
+}
+
+/// Se este processo tem tela: o padrão de todo enlace que nasce nele. Ver
+/// [`este_processo_tem_tela`].
+static TELA_DESTE_PROCESSO: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Diz que **todo enlace que nascer daqui em diante** neste processo tem tela
+/// para pedidos de máquina — o padrão de
+/// [`Enlace::aceitar_pedidos_de_maquina`], que cada enlace ainda pode mudar.
+///
+/// # Por que existe, ao lado do método do enlace
+///
+/// O servidor manda os pedidos pendentes **na chegada**, logo depois do
+/// `Session` — e o motor decide na hora em que o pedido chega. Um
+/// `aceitar_pedidos_de_maquina(true)` chamado depois de o `Enlace` voltar
+/// perde essa corrida: o pedido já foi recusado com `SemTela`, e o servidor
+/// não pergunta de novo a esta conexão. Quem tem tela de nascença (o app)
+/// diz isso uma vez, antes de conectar, e a corrida não existe.
+///
+/// É do processo e não de uma conexão porque é isso que a frase do Desvio 5
+/// diz: o app tem tela, o CLI não tem. **Só o `main` do app chama isto**; um
+/// teste que o chamasse mudaria o padrão dos outros testes do mesmo binário.
+pub fn este_processo_tem_tela(sim: bool) {
+    TELA_DESTE_PROCESSO.store(sim, std::sync::atomic::Ordering::Relaxed);
+}
+
+impl Default for LadoDaMaquina {
+    fn default() -> Self {
+        Self {
+            com_tela: Arc::new(std::sync::atomic::AtomicBool::new(
+                TELA_DESTE_PROCESSO.load(std::sync::atomic::Ordering::Relaxed),
+            )),
+            contador: 0,
+            no_ar: std::collections::HashMap::new(),
+            avisados: std::collections::HashSet::new(),
+        }
+    }
+}
+
+impl LadoDaMaquina {
+    fn com_tela(&self) -> bool {
+        self.com_tela.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn proximo_numero(&mut self) -> u32 {
+        self.contador = self.contador.wrapping_add(1) & !PRIMEIRO_PEDIDO_DA_MAQUINA;
+        PRIMEIRO_PEDIDO_DA_MAQUINA | self.contador
+    }
+
+    /// `true` na primeira vez deste pedido: é a vez de a casca o ver.
+    fn avisar(&mut self, mod_id: &str, servidor: &str, resumo: &str) -> bool {
+        let chave = (mod_id.to_owned(), servidor.to_owned(), resumo.to_owned());
+        if self.avisados.contains(&chave) {
+            return false;
+        }
+        if self.avisados.len() >= MAX_PEDIDOS_AVISADOS {
+            tracing::warn!(
+                avisados = self.avisados.len(),
+                "máquina: pedidos demais sem resposta da casca; a lista de repetidos recomeça"
+            );
+            self.avisados.clear();
+        }
+        self.avisados.insert(chave);
+        true
+    }
+
+    /// A casca respondeu, ou o servidor dispensou: um pedido seguinte desta
+    /// máquina é novo.
+    fn esquecer(&mut self, mod_id: &str, servidor: &str) {
+        self.avisados
+            .retain(|(m, s, _)| !(m == mod_id && s == servidor));
+    }
+
+    /// Falha todo pedido no ar desta máquina.
+    fn falhar(&mut self, mod_id: &str, servidor: &str, falha: FalhaDoPedidoDaMaquina) {
+        let numeros: Vec<u32> = self
+            .no_ar
+            .iter()
+            .filter(|(_, pedido)| pedido.mod_id == mod_id && pedido.servidor == servidor)
+            .map(|(numero, _)| *numero)
+            .collect();
+        for numero in numeros {
+            if let Some(pedido) = self.no_ar.remove(&numero) {
+                tracing::info!(
+                    mod_id,
+                    servidor,
+                    request = numero,
+                    motivo = falha.nome(),
+                    "máquina: o pedido à metade de servidor falhou"
+                );
+                let _ = pedido.resposta.send(Err(falha));
+            }
+        }
+    }
+
+    /// Uma parte de resposta de um pedido no ar.
+    fn parte(&mut self, request: u32, part: u32, total: u32, payload: String) {
+        let Some(pedido) = self.no_ar.get_mut(&request) else {
+            return;
+        };
+        let torta = total == 0
+            || total > MAX_PARTES_DA_RESPOSTA
+            || part >= total
+            || (!pedido.partes.is_empty() && pedido.partes.len() != total as usize);
+        if torta {
+            if let Some(pedido) = self.no_ar.remove(&request) {
+                tracing::warn!(mod_id = %pedido.mod_id, servidor = %pedido.servidor, request, part, total, motivo = "resposta-torta", "máquina: a resposta do pedido não se monta");
+                let _ = pedido
+                    .resposta
+                    .send(Err(FalhaDoPedidoDaMaquina::SemResposta));
+            }
+            return;
+        }
+        if pedido.partes.is_empty() {
+            pedido.partes = vec![None; total as usize];
+        }
+        if let Some(lugar) = pedido.partes.get_mut(part as usize) {
+            *lugar = Some(payload);
+        }
+        if pedido.partes.iter().all(Option::is_some) {
+            if let Some(pedido) = self.no_ar.remove(&request) {
+                let inteira: String = pedido.partes.into_iter().flatten().collect();
+                let _ = pedido.resposta.send(Ok(inteira));
+            }
+        }
+    }
+
+    /// A conexão caiu: nada no ar terá resposta, e o servidor da conexão nova
+    /// pede de novo o que ainda quiser.
+    fn soltar(&mut self) {
+        for (numero, pedido) in self.no_ar.drain() {
+            tracing::info!(mod_id = %pedido.mod_id, servidor = %pedido.servidor, request = numero, motivo = "conexao-caiu", "máquina: o pedido à metade de servidor ficou sem resposta");
+            let _ = pedido
+                .resposta
+                .send(Err(FalhaDoPedidoDaMaquina::SemResposta));
+        }
+        self.avisados.clear();
     }
 }
 
@@ -3168,6 +3706,9 @@ struct Motor {
     tarefas_de_par: TarefasDePar,
     /// Os túneis de jogo: o de quem joga, o da máquina e os pedidos no ar.
     tuneis: crate::tunel::Tuneis,
+    /// A máquina de jogo do lado de quem a opera: se há tela, os pedidos já
+    /// avisados e os pedidos à metade de servidor no ar.
+    lado_da_maquina: LadoDaMaquina,
 }
 
 /// O que uma conexão que caiu deixa para a volta. Ver [`Motor::queda`].
@@ -3570,7 +4111,16 @@ impl Motor {
                             Some(Comando::Sair) | None => return self.despedir().await,
                             // Guardado, não perdido: entrar numa sala de voz durante a
                             // queda é uma intenção que vale quando voltar.
-                            Some(comando) => { self.lembrar(&comando); None }
+                            Some(comando) => {
+                                // Um verbo da máquina não volta (`lembrar` não o
+                                // guarda): o servidor da conexão nova pede de
+                                // novo. Mas não some calado.
+                                if let Some((mod_id, servidor)) = comando.da_maquina() {
+                                    tracing::warn!(mod_id, servidor, comando = comando.nome(), motivo = "sem-conexao", "máquina: o verbo não saiu: o enlace está na bateria");
+                                }
+                                self.lembrar(&comando);
+                                None
+                            }
                         }
                     }
                     _ = tica.tick() => None,
@@ -3613,7 +4163,13 @@ impl Motor {
                         // bomba nasce.
                         self.a_tela_ouviu(&mensagem);
                         self.o_tunel_ouviu(&mensagem);
-                        let _ = self.avisos.send(Aviso::Mensagem(Box::new(mensagem)));
+                        // A máquina **consome** o que é dela: o pedido vira
+                        // aviso próprio (ou recusa, sem tela), e a resposta de
+                        // um pedido da máquina não chega à casca como um
+                        // `ModReply` que ela não pediu.
+                        if let Some(mensagem) = self.a_maquina_ouviu(mensagem).await {
+                            let _ = self.avisos.send(Aviso::Mensagem(Box::new(mensagem)));
+                        }
                         if let Some(reason) = despedida {
                             tracing::info!(?reason, "o servidor acabou com esta sessão");
                             return self.encerrar(Motivo::Moderado(reason)).await;
@@ -3769,6 +4325,7 @@ impl Motor {
         // ninguém mais repassa. Quem joga reconecta no mesmo `localhost:porta`
         // depois de entrar de novo.
         self.tuneis.derrubar_tudo(crate::tunel::Queda::ServidorSaiu);
+        self.lado_da_maquina.soltar();
     }
 
     /// O caminho entre pares não sobrevive à conexão que o montou.
@@ -3980,6 +4537,20 @@ impl Motor {
                 self.entrar_no_tunel(mod_id, nome, resposta).await;
                 return;
             }
+            Comando::VerboDaMaquina(verbo) => {
+                self.verbo_da_maquina(verbo).await;
+                return;
+            }
+            Comando::PedidoDaMaquina {
+                mod_id,
+                servidor,
+                payload,
+                resposta,
+            } => {
+                self.pedir_a_maquina(mod_id, servidor, payload, resposta)
+                    .await;
+                return;
+            }
             Comando::SairDoTunel { mod_id, nome } => {
                 self.sair_do_tunel(&mod_id, &nome).await;
                 return;
@@ -4139,7 +4710,9 @@ impl Motor {
             | Comando::SairDoTunel { .. }
             | Comando::SairDosTuneisDoMod { .. }
             | Comando::ServirTunel { .. }
-            | Comando::PararTunel { .. } => Ok(()),
+            | Comando::PararTunel { .. }
+            | Comando::VerboDaMaquina(_)
+            | Comando::PedidoDaMaquina { .. } => Ok(()),
 
             // Numa tarefa própria, e não aqui dentro. Executar vinte megabytes
             // no laço de comandos devolveria, dentro do cliente, exatamente o
@@ -4401,6 +4974,225 @@ impl Motor {
                 }
                 Err(recusa_do_verbo(&erro))
             }
+        }
+    }
+
+    // ------------------------------------------------------------- a máquina
+
+    /// Um verbo da máquina para o servidor: conferido contra o número
+    /// negociado (um servidor 11 desalinharia o fluxo com uma variante que não
+    /// conhece) e contra o teto dos campos, antes de escrever.
+    ///
+    /// # Errors
+    ///
+    /// O nome do porquê, para o log de quem chamou: `sem-conexao`,
+    /// `servidor-antigo`, `campo-fora-do-teto` ou `escrita`. Só `escrita` é
+    /// queda.
+    async fn mandar_verbo_da_maquina(
+        &mut self,
+        mensagem: &ClientMessage,
+    ) -> Result<(), &'static str> {
+        use seele_proto::control::Validate as _;
+        let Some(cliente) = self.cliente.as_mut() else {
+            return Err("sem-conexao");
+        };
+        // Antes do fio: `enviar_verbo_do_tunel` trata toda falha de escrita
+        // como queda, e um payload grande demais é recusa local, não rede.
+        if mensagem.validate().is_err() {
+            return Err("campo-fora-do-teto");
+        }
+        match cliente.enviar_verbo_do_tunel(mensagem).await {
+            Ok(()) => Ok(()),
+            Err(crate::client::NaoSaiu::ServidorAntigo) => Err("servidor-antigo"),
+            Err(crate::client::NaoSaiu::Escrita(porque)) => {
+                tracing::warn!(%porque, "o fluxo de controle não aceitou o verbo da máquina");
+                self.cair();
+                Err("escrita")
+            }
+        }
+    }
+
+    /// O aceite, a recusa ou a parada que a casca decidiu.
+    async fn verbo_da_maquina(&mut self, verbo: ClientMessage) {
+        let (mod_id, servidor, qual) = match &verbo {
+            ClientMessage::AceiteDeMaquina {
+                mod_id, servidor, ..
+            } => (mod_id.clone(), servidor.clone(), "aceite"),
+            ClientMessage::RecusaDeMaquina {
+                mod_id,
+                servidor,
+                motivo,
+            } => (
+                mod_id.clone(),
+                servidor.clone(),
+                seele_proto::maquina::nome_da_recusa(motivo),
+            ),
+            ClientMessage::MaquinaParada {
+                mod_id,
+                servidor,
+                motivo,
+            } => (
+                mod_id.clone(),
+                servidor.clone(),
+                seele_proto::maquina::nome_da_parada(motivo),
+            ),
+            _ => return,
+        };
+        // A casca respondeu: o mesmo pedido, se vier de novo, é outra
+        // pergunta — e tem de chegar a ela.
+        self.lado_da_maquina.esquecer(&mod_id, &servidor);
+        match self.mandar_verbo_da_maquina(&verbo).await {
+            Ok(()) => {
+                tracing::info!(mod_id, servidor, verbo = qual, "máquina: verbo ao servidor");
+            }
+            Err(porque) => {
+                tracing::warn!(
+                    mod_id,
+                    servidor,
+                    verbo = qual,
+                    motivo = porque,
+                    "máquina: o verbo não saiu"
+                );
+            }
+        }
+    }
+
+    /// Um pedido da máquina à metade de servidor: o número sai da faixa deste
+    /// motor, e a resposta é montada em [`Self::a_maquina_ouviu`].
+    async fn pedir_a_maquina(
+        &mut self,
+        mod_id: String,
+        servidor: String,
+        payload: String,
+        resposta: tokio::sync::oneshot::Sender<Result<String, FalhaDoPedidoDaMaquina>>,
+    ) {
+        // Quem desistiu de esperar (o prazo venceu do lado do `Enlace`) não
+        // precisa de lugar: sem isto, um servidor que nunca responde
+        // acumularia pedidos aqui pela sessão inteira.
+        self.lado_da_maquina
+            .no_ar
+            .retain(|_, pedido| !pedido.resposta.is_closed());
+        let request = self.lado_da_maquina.proximo_numero();
+        let mensagem = ClientMessage::PedidoDaMaquina {
+            request,
+            mod_id: mod_id.clone(),
+            servidor: servidor.clone(),
+            payload,
+        };
+        self.lado_da_maquina.no_ar.insert(
+            request,
+            PedidoNoAr {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                partes: Vec::new(),
+                resposta,
+            },
+        );
+        if let Err(porque) = self.mandar_verbo_da_maquina(&mensagem).await {
+            tracing::warn!(
+                mod_id,
+                servidor,
+                request,
+                motivo = porque,
+                "máquina: o pedido à metade de servidor não saiu"
+            );
+            if let Some(pedido) = self.lado_da_maquina.no_ar.remove(&request) {
+                let _ = pedido
+                    .resposta
+                    .send(Err(FalhaDoPedidoDaMaquina::SemResposta));
+            }
+        }
+    }
+
+    /// O que uma mensagem do servidor faz com a máquina. Devolve a mensagem
+    /// quando ela não é da máquina, para seguir à casca como sempre.
+    async fn a_maquina_ouviu(&mut self, mensagem: ServerMessage) -> Option<ServerMessage> {
+        match mensagem {
+            ServerMessage::PedidoDeMaquina {
+                mod_id,
+                hash,
+                servidor,
+                pedido_por,
+                oferta,
+            } => {
+                if !self.lado_da_maquina.com_tela() {
+                    // Desvio 5: sem tela não há quem leia a oferta. Recusar na
+                    // hora é o que deixa a metade de servidor saber
+                    // (`MaquinaRecusou`), em vez de esperar quem não vem.
+                    let recusa = ClientMessage::RecusaDeMaquina {
+                        mod_id: mod_id.clone(),
+                        servidor: servidor.clone(),
+                        motivo: seele_proto::maquina::MotivoDaRecusaDeMaquina::SemTela,
+                    };
+                    let saiu = self.mandar_verbo_da_maquina(&recusa).await;
+                    tracing::info!(%mod_id, %servidor, %pedido_por, motivo = "sem-tela", saiu = ?saiu, "máquina: pedido recusado sozinho: este enlace não tem tela");
+                    return None;
+                }
+                let resumo = seele_proto::maquina::resumo_em_hex(
+                    &seele_proto::maquina::resumo_da_oferta(&mod_id, &hash, &servidor, &oferta),
+                );
+                if !self.lado_da_maquina.avisar(&mod_id, &servidor, &resumo) {
+                    // O servidor pode mandar o mesmo pedido duas vezes na
+                    // mesma conexão; a casca já o tem e ainda não respondeu.
+                    tracing::debug!(%mod_id, %servidor, %resumo, "máquina: o mesmo pedido de novo; a casca já o tem");
+                    return None;
+                }
+                tracing::info!(%mod_id, %servidor, %pedido_por, %resumo, "máquina: pedido à casca");
+                let _ = self.avisos.send(Aviso::PedidoDeMaquina {
+                    mod_id,
+                    hash,
+                    servidor,
+                    pedido_por,
+                    oferta: Box::new(oferta),
+                    resumo,
+                });
+                None
+            }
+            ServerMessage::AvisoParaMaquina {
+                mod_id,
+                servidor,
+                carga,
+            } => {
+                let _ = self.avisos.send(Aviso::AvisoParaMaquina {
+                    mod_id,
+                    servidor,
+                    carga,
+                });
+                None
+            }
+            ServerMessage::MaquinaDispensada {
+                mod_id,
+                servidor,
+                motivo,
+            } => {
+                tracing::info!(%mod_id, %servidor, motivo = seele_proto::maquina::nome_da_dispensa(&motivo), "máquina: dispensada pelo servidor");
+                self.lado_da_maquina.esquecer(&mod_id, &servidor);
+                if motivo == seele_proto::maquina::MotivoDaDispensa::SemAceite {
+                    // A resposta do servidor a um `PedidoDaMaquina` de quem
+                    // não é a máquina: não vem `ModReply` nenhum depois dela.
+                    self.lado_da_maquina.falhar(
+                        &mod_id,
+                        &servidor,
+                        FalhaDoPedidoDaMaquina::SemAceite,
+                    );
+                }
+                let _ = self.avisos.send(Aviso::MaquinaDispensada {
+                    mod_id,
+                    servidor,
+                    motivo,
+                });
+                None
+            }
+            ServerMessage::ModReply {
+                request,
+                part,
+                total,
+                payload,
+            } if self.lado_da_maquina.no_ar.contains_key(&request) => {
+                self.lado_da_maquina.parte(request, part, total, payload);
+                None
+            }
+            outra => Some(outra),
         }
     }
 
@@ -10081,6 +10873,7 @@ mod tests {
             resultados_do_par_tx,
             tarefas_de_par: TarefasDePar::default(),
             tuneis,
+            lado_da_maquina: LadoDaMaquina::default(),
         }
     }
 
@@ -10795,6 +11588,352 @@ mod o_debug_do_destino {
         assert!(
             impresso.contains("segredo: None"),
             "sem segredo, o `Debug` de `Destino` não diz `None`:\n{impresso}"
+        );
+    }
+}
+
+/// A máquina de jogo do lado de quem a opera (API 8 parte 3), contra um
+/// servidor de mentira que aperta a mão, manda o que o teste pede e devolve o
+/// que ouve.
+#[cfg(test)]
+mod a_maquina {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+
+    use super::*;
+    use seele_proto::maquina::{
+        resumo_da_oferta, resumo_em_hex, ComandoOferecido, MotivoDaDispensa,
+        MotivoDaRecusaDeMaquina, OfertaDeMaquina, TunelOferecido,
+    };
+
+    const MOD: &str = "seele/jogo";
+    const SERVIDOR: &str = "mundo";
+
+    fn hash() -> String {
+        "ab".repeat(32)
+    }
+
+    fn oferta() -> OfertaDeMaquina {
+        OfertaDeMaquina {
+            titulo: "Minecraft".into(),
+            receita: "minecraft-java".into(),
+            versao_da_receita: "1.0.0".into(),
+            versao_do_jogo: "1.21.4".into(),
+            tuneis: vec![TunelOferecido {
+                nome: "mc".into(),
+                protocolo: ProtocoloDeTunel::Tcp,
+                porta: 25565,
+            }],
+            artefatos: vec![],
+            pack: None,
+            origens: vec![],
+            dominios_do_jogo: vec![],
+            rodar: Some(ComandoOferecido {
+                comando: "java".into(),
+                argumentos: vec!["-jar".into(), "server.jar".into()],
+            }),
+            disco_maximo: 1024,
+            termos: vec![],
+        }
+    }
+
+    fn pedido() -> ServerMessage {
+        ServerMessage::PedidoDeMaquina {
+            mod_id: MOD.into(),
+            hash: hash(),
+            servidor: SERVIDOR.into(),
+            pedido_por: PersonId(3),
+            oferta: oferta(),
+        }
+    }
+
+    /// O servidor de mentira: `manda` escreve no fio, `ouvidos` é o que o
+    /// cliente escreveu depois do aperto de mão.
+    struct Servidor {
+        manda: mpsc::UnboundedSender<ServerMessage>,
+        ouvidos: mpsc::UnboundedReceiver<ClientMessage>,
+    }
+
+    impl Servidor {
+        /// A próxima mensagem da máquina que o cliente escreveu, pulando o
+        /// resto (pings, declarações), ou `None` se nada veio em `prazo`.
+        async fn ouvir_da_maquina(&mut self, prazo: Duration) -> Option<ClientMessage> {
+            tokio::time::timeout(prazo, async {
+                loop {
+                    let mensagem = self.ouvidos.recv().await?;
+                    if matches!(
+                        mensagem,
+                        ClientMessage::AceiteDeMaquina { .. }
+                            | ClientMessage::RecusaDeMaquina { .. }
+                            | ClientMessage::MaquinaParada { .. }
+                            | ClientMessage::PedidoDaMaquina { .. }
+                    ) {
+                        return Some(mensagem);
+                    }
+                }
+            })
+            .await
+            .ok()
+            .flatten()
+        }
+    }
+
+    async fn enlace_com_servidor() -> (Enlace, Servidor) {
+        let certificado = crate::transporte::CertificadoDtls::efemero().expect("certificado");
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("socket");
+        let endereco = socket.local_addr().expect("endereço");
+        let escuta = crate::transporte::Ponta::de_socket(
+            socket,
+            Some(crate::transporte::ConfigDoAnfitriao::novo(certificado)),
+        )
+        .expect("ponta");
+        let (manda, mut a_mandar) = mpsc::unbounded_channel::<ServerMessage>();
+        let (ouviu, ouvidos) = mpsc::unbounded_channel::<ClientMessage>();
+        tokio::spawn(async move {
+            let Some(conexao) = escuta.aceitar().await else {
+                return;
+            };
+            let Some((mut envio, mut recebe)) = conexao.controle() else {
+                return;
+            };
+            // `Hello` e `Response` ignorados: não há assinatura a conferir.
+            let _ = crate::frame::read::<ClientMessage>(&mut recebe).await;
+            let _ =
+                crate::frame::write(&mut envio, &ServerMessage::Challenge { nonce: vec![0; 32] })
+                    .await;
+            let _ = crate::frame::read::<ClientMessage>(&mut recebe).await;
+            let _ = crate::frame::write(
+                &mut envio,
+                &ServerMessage::Session {
+                    id: seele_proto::ids::SessionId(1),
+                    person: PersonId(1),
+                    ssrc: seele_proto::ids::Ssrc(1),
+                    server: "servidor de teste".into(),
+                    voice_rooms: vec![],
+                    channels: vec![],
+                    roles: vec![],
+                    permissions: vec![],
+                },
+            )
+            .await;
+            tokio::spawn(async move {
+                while let Ok(mensagem) = crate::frame::read::<ClientMessage>(&mut recebe).await {
+                    if ouviu.send(mensagem).is_err() {
+                        break;
+                    }
+                }
+            });
+            while let Some(mensagem) = a_mandar.recv().await {
+                if crate::frame::write(&mut envio, &mensagem).await.is_err() {
+                    break;
+                }
+            }
+            drop((conexao, escuta));
+        });
+
+        let ponta = crate::transporte::abrir_ponta(None).expect("ponta");
+        let conexao = crate::client::discar(
+            ponta.ponta(),
+            vec![endereco],
+            None,
+            seele_proto::transport::HANDSHAKE_TIMEOUT,
+        )
+        .await
+        .expect("discar");
+        let destino = Destino {
+            servidor: endereco,
+            nome_tls: "localhost".into(),
+            chave_do_pin: endereco.to_string(),
+            apelido: "pessoa".into(),
+            segredo: None,
+            esperada: None,
+            o_pino_prova_o_servidor: true,
+            aceito: None,
+        };
+        let enlace = Enlace::conectar_sobre(
+            ponta,
+            conexao,
+            None,
+            destino,
+            SigningKey::from_bytes(&[5; 32]),
+            Arc::new(crate::tofu::MemoryPinStore::new()),
+            None,
+        )
+        .await
+        .expect("o aperto de mão com o servidor de mentira");
+        (enlace, Servidor { manda, ouvidos })
+    }
+
+    /// Os avisos da máquina que chegaram em `prazo`, sem os de estado.
+    async fn avisos_da_maquina(enlace: &mut Enlace, prazo: Duration) -> Vec<Aviso> {
+        let mut vistos = Vec::new();
+        let fim = tokio::time::Instant::now() + prazo;
+        while let Ok(aviso) = tokio::time::timeout_at(fim, enlace.proximo()).await {
+            match aviso {
+                Aviso::PedidoDeMaquina { .. }
+                | Aviso::AvisoParaMaquina { .. }
+                | Aviso::MaquinaDispensada { .. } => vistos.push(aviso),
+                Aviso::Mensagem(mensagem)
+                    if matches!(
+                        *mensagem,
+                        ServerMessage::PedidoDeMaquina { .. }
+                            | ServerMessage::AvisoParaMaquina { .. }
+                            | ServerMessage::MaquinaDispensada { .. }
+                            | ServerMessage::ModReply { .. }
+                    ) =>
+                {
+                    vistos.push(Aviso::Mensagem(mensagem));
+                }
+                _ => {}
+            }
+        }
+        vistos
+    }
+
+    /// Desvio 5: um enlace sem tela — o CLI, um teste, qualquer uso do núcleo
+    /// que não seja o app — não tem como mostrar a oferta, e diz isso ao
+    /// servidor na hora em vez de deixá-lo esperando. A casca não recebe nada.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sem_tela_o_pedido_e_recusado_sozinho() {
+        let (mut enlace, mut servidor) = enlace_com_servidor().await;
+        servidor.manda.send(pedido()).unwrap();
+
+        let ouvido = servidor.ouvir_da_maquina(Duration::from_secs(5)).await;
+        assert_eq!(
+            ouvido,
+            Some(ClientMessage::RecusaDeMaquina {
+                mod_id: MOD.into(),
+                servidor: SERVIDOR.into(),
+                motivo: MotivoDaRecusaDeMaquina::SemTela,
+            }),
+            "o enlace sem tela não recusou o pedido sozinho"
+        );
+        let avisos = avisos_da_maquina(&mut enlace, Duration::from_millis(300)).await;
+        assert!(
+            avisos.is_empty(),
+            "o pedido recusado sozinho chegou à casca mesmo assim: {avisos:?}"
+        );
+    }
+
+    /// Com tela, o pedido vira aviso uma vez só, com o resumo já calculado — e
+    /// é esse resumo que volta no aceite, sem ninguém o recalcular.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn com_tela_o_pedido_vira_aviso_com_o_resumo() {
+        let (mut enlace, mut servidor) = enlace_com_servidor().await;
+        enlace.aceitar_pedidos_de_maquina(true);
+        // O mesmo pedido duas vezes na mesma conexão (o servidor pode
+        // mandá-lo de novo enquanto espera): a casca o vê uma vez.
+        servidor.manda.send(pedido()).unwrap();
+        servidor.manda.send(pedido()).unwrap();
+
+        let avisos = avisos_da_maquina(&mut enlace, Duration::from_secs(2)).await;
+        let esperado = resumo_em_hex(&resumo_da_oferta(MOD, &hash(), SERVIDOR, &oferta()));
+        let [Aviso::PedidoDeMaquina {
+            mod_id,
+            hash: hash_do_aviso,
+            servidor: servidor_do_aviso,
+            pedido_por,
+            oferta: oferta_do_aviso,
+            resumo,
+        }] = avisos.as_slice()
+        else {
+            panic!("esperava um só aviso de pedido, vieram: {avisos:?}");
+        };
+        assert_eq!(mod_id, MOD);
+        assert_eq!(*hash_do_aviso, hash());
+        assert_eq!(servidor_do_aviso, SERVIDOR);
+        assert_eq!(*pedido_por, PersonId(3));
+        assert_eq!(**oferta_do_aviso, oferta());
+        assert_eq!(*resumo, esperado);
+        assert_eq!(
+            servidor.ouvir_da_maquina(Duration::from_millis(300)).await,
+            None,
+            "com tela, o enlace respondeu sozinho"
+        );
+
+        enlace.aceitar_maquina(MOD, SERVIDOR, resumo).await.unwrap();
+        assert_eq!(
+            servidor.ouvir_da_maquina(Duration::from_secs(5)).await,
+            Some(ClientMessage::AceiteDeMaquina {
+                mod_id: MOD.into(),
+                servidor: SERVIDOR.into(),
+                resumo: esperado,
+            })
+        );
+    }
+
+    /// O pedido da máquina volta inteiro, montado das partes do `ModReply`
+    /// com o número que ele levou; e quem não é a máquina fica sabendo na
+    /// hora, em vez de esperar o prazo.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_pedido_da_maquina_volta_inteiro_e_o_sem_aceite_e_dito() {
+        let (mut enlace, mut servidor) = enlace_com_servidor().await;
+
+        let (resultado, ouvido) = tokio::join!(
+            enlace.pedido_da_maquina(MOD, SERVIDOR, "{\"oi\":1}".into()),
+            async {
+                let ouvido = servidor.ouvir_da_maquina(Duration::from_secs(5)).await;
+                let Some(ClientMessage::PedidoDaMaquina { request, .. }) = ouvido.clone() else {
+                    panic!("o pedido não chegou ao servidor: {ouvido:?}");
+                };
+                for (part, payload) in ["{\"ok\":", "true}"].into_iter().enumerate() {
+                    servidor
+                        .manda
+                        .send(ServerMessage::ModReply {
+                            request,
+                            part: u32::try_from(part).unwrap(),
+                            total: 2,
+                            payload: payload.into(),
+                        })
+                        .unwrap();
+                }
+                ouvido
+            }
+        );
+        assert_eq!(resultado, Ok("{\"ok\":true}".to_owned()));
+        let Some(ClientMessage::PedidoDaMaquina {
+            mod_id,
+            servidor: servidor_ouvido,
+            payload,
+            ..
+        }) = ouvido
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            (mod_id.as_str(), servidor_ouvido.as_str(), payload.as_str()),
+            (MOD, SERVIDOR, "{\"oi\":1}")
+        );
+
+        let (resultado, ()) = tokio::join!(
+            enlace.pedido_da_maquina(MOD, SERVIDOR, "{}".into()),
+            async {
+                servidor
+                    .ouvir_da_maquina(Duration::from_secs(5))
+                    .await
+                    .expect("o pedido");
+                servidor
+                    .manda
+                    .send(ServerMessage::MaquinaDispensada {
+                        mod_id: MOD.into(),
+                        servidor: SERVIDOR.into(),
+                        motivo: MotivoDaDispensa::SemAceite,
+                    })
+                    .unwrap();
+            }
+        );
+        assert_eq!(resultado, Err(FalhaDoPedidoDaMaquina::SemAceite));
+        // A resposta montada não vazou para a casca como `ModReply`, e a
+        // dispensa chegou como aviso próprio.
+        let avisos = avisos_da_maquina(&mut enlace, Duration::from_millis(300)).await;
+        assert!(
+            matches!(
+                avisos.as_slice(),
+                [Aviso::MaquinaDispensada {
+                    motivo: MotivoDaDispensa::SemAceite,
+                    ..
+                }]
+            ),
+            "{avisos:?}"
         );
     }
 }

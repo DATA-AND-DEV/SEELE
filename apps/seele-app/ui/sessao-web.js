@@ -554,6 +554,11 @@ function criarASessaoAberta({ ligacao, wt: primeiro, alvo, pedido, reabrir, emit
         // ou o pedaço que ficou de fora.
         const { alerta, ...buraco } = passo.buraco;
         (alerta ? console.warn : console.info)("sessão: o buraco do histórico:", buraco);
+      } else if (passo.maquina_recusada) {
+        // O servidor pediu uma máquina de jogo, e o navegador recusou sozinho
+        // (só o app roda uma): o que o `seele.log` do desktop diria.
+        const { mod_id, servidor, motivo } = passo.maquina_recusada;
+        console.info(`máquina: pedido recusado (${motivo}) mod_id=${mod_id} servidor=${servidor}`);
       } else if (passo.peso_recusado) {
         // O primeiro pedido daquele canal: a recusa do desktop, com o motivo.
         const { channel, causa } = passo.peso_recusado;

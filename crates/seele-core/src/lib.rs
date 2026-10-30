@@ -25,6 +25,7 @@
 )]
 
 pub mod aceites;
+pub mod aceites_de_maquina;
 /// O aparelho de mentira do `seele-audio` (só de teste), para a casca o ver pela
 /// cadeia app -> ffi -> core -> audio. Só com o recurso; o `seele-audio` recusa
 /// compilá-lo num build otimizado.
@@ -247,6 +248,9 @@ pub use seele_proto::transport::key_fingerprint;
 /// `seele-proto`, pelo mesmo ADR 0002 que já traz os enumerados de anexo daqui.
 pub use seele_proto::volume::VolumeRefusal;
 
+/// A régua do fio, para a FFI conferir uma oferta que a casca devolve antes de
+/// a guardar como aceite.
+pub use seele_proto::control::Validate;
 pub use seele_proto::control::MAX_BODY_LEN;
 /// O teto do apelido, e também da senha de uma sala de voz, em **bytes**.
 ///
@@ -271,6 +275,9 @@ pub use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc, VoiceRoomId,
 };
+/// A máquina de jogo (API 8 parte 3): a oferta, o resumo e os motivos, para a
+/// FFI os achatar sem alcançar o `seele-proto` (ADR 0002).
+pub use seele_proto::maquina;
 /// O cabeçalho de abertura de uma transmissão de tela, e o que ele carrega.
 ///
 /// Reexportado porque a casca é quem sabe **o que** a pessoa escolheu

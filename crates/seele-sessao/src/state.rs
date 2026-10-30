@@ -1879,10 +1879,20 @@ impl Room {
             | ServerMessage::SirvaTunelPara { .. }
             | ServerMessage::AlcanceTunelPor { .. }
             | ServerMessage::TunelEncerrado { .. }
-            | ServerMessage::TunelRetirado { .. }
-            // A máquina (API 8 parte 3): quem a trata é o núcleo, e a sessão
-            // não guarda estado dela.
-            | ServerMessage::PedidoDeMaquina { .. }
+            | ServerMessage::TunelRetirado { .. } => {}
+
+            // A máquina de jogo (API 8 parte 3). Quem a trata é o motor do
+            // enlace (`seele-core::enlace`, `a_maquina_ouviu`), que **consome**
+            // as três antes de a sala as ver: o pedido vira aviso próprio da
+            // casca (ou recusa, sem tela), e o aviso e a dispensa também. No
+            // navegador, `seele-web::ligacao` recusa o pedido com `SoNoApp` e
+            // nem o dobra.
+            //
+            // Dito e decidido, e não calado: o `Room` é o que a interface
+            // desenha da sala, e se uma máquina roda neste computador não é
+            // estado da sala de ninguém. Se uma delas chegar aqui, não há o
+            // que absorver, e o roster não muda.
+            ServerMessage::PedidoDeMaquina { .. }
             | ServerMessage::AvisoParaMaquina { .. }
             | ServerMessage::MaquinaDispensada { .. } => {}
         }
