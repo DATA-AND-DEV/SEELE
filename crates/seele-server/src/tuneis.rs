@@ -133,6 +133,19 @@ pub enum CorteDeCanal {
     SemMaquina,
 }
 
+/// O contador em que os bytes de um canal entram: o do túnel para o jogo, e um
+/// descartável para o controle (o ping de latência não é jogo repassado).
+///
+/// Sem esta separação o contador nunca ficaria em zero: o túnel de quem joga
+/// nasce na estrela e manda o primeiro ping por ela, antes de o caminho direto
+/// existir, e `contador_de_repasse` passaria a medir o ping, e não o jogo.
+fn contador_do_canal(tipo: TipoDeCanalDeTunel, do_tunel: &Arc<AtomicU64>) -> Arc<AtomicU64> {
+    match tipo {
+        TipoDeCanalDeTunel::Controle => Arc::default(),
+        TipoDeCanalDeTunel::Tcp | TipoDeCanalDeTunel::Udp => Arc::clone(do_tunel),
+    }
+}
+
 /// Por onde um canal chegado vai: tudo o que o repasse lê do livro de uma vez.
 pub struct Rota {
     /// Quem serve.
@@ -481,7 +494,10 @@ impl Tuneis {
             || tokio::sync::watch::channel(()).1,
             |c| c.vigia.subscribe(),
         );
-        let contador = self.contadores.get(&k).cloned().unwrap_or_default();
+        let contador = contador_do_canal(
+            abertura.tipo,
+            &self.contadores.get(&k).cloned().unwrap_or_default(),
+        );
         Ok(Rota {
             maquina,
             conexao,
@@ -1165,6 +1181,25 @@ mod tests {
         assert!(tipo_combina(false, Udp, ProtocoloDeTunel::Udp));
         assert!(!tipo_combina(false, Udp, ProtocoloDeTunel::Tcp));
         assert!(!tipo_combina(true, Udp, ProtocoloDeTunel::Udp));
+    }
+
+    #[test]
+    fn o_ping_do_controle_nao_conta_como_repasse_do_jogo() {
+        use std::sync::atomic::Ordering;
+        use TipoDeCanalDeTunel::{Controle, Tcp, Udp};
+        let do_tunel = Arc::new(AtomicU64::new(0));
+        for jogo in [Tcp, Udp] {
+            assert!(
+                Arc::ptr_eq(&contador_do_canal(jogo, &do_tunel), &do_tunel),
+                "o tráfego do jogo tem de entrar no contador do túnel"
+            );
+        }
+        // O ping que quem joga manda pela estrela antes de o direto existir
+        // não é jogo repassado: se contasse, «direto é direto» (contador em
+        // zero) nunca valeria, porque o túnel nasce na estrela.
+        let do_ping = contador_do_canal(Controle, &do_tunel);
+        do_ping.fetch_add(14, Ordering::Relaxed);
+        assert_eq!(do_tunel.load(Ordering::Relaxed), 0);
     }
 
     use seele_proto::ids::PersonId;
