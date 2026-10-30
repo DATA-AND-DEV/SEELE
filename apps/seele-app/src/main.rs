@@ -6917,17 +6917,36 @@ fn mod_request(
 #[tauri::command]
 async fn tunel_entrar(
     session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
     geracao: u64,
     id: String,
     nome: String,
 ) -> Result<seele_ffi::PortaDeTunel, FalhaNoMod> {
-    entrar_no_tunel_do_mod(&session, geracao, &id, nome).await
+    entrar_no_tunel_do_mod(&session, carimbo, geracao, &id, nome).await
+}
+
+/// A recusa de um comando de túnel que não achou a sessão do carimbo: ela
+/// acabou (`sessao-encerrada`), ou é outra a razão (`falhou`, dita no registro).
+fn recusa_da_sessao_do_tunel(erro: &ConnectionError) -> FalhaNoMod {
+    let motivo = if matches!(erro, ConnectionError::NotConnected) {
+        "sessao-encerrada"
+    } else {
+        tracing::warn!(
+            ?erro,
+            "comando de túnel recusado pela conferência do carimbo"
+        );
+        "falhou"
+    };
+    FalhaNoMod::Recusado {
+        motivo: motivo.to_owned(),
+    }
 }
 
 /// O corpo de [`tunel_entrar`], sem o `State`: é o que deixa um teste chamá-lo
 /// com uma `Session` à mão.
 async fn entrar_no_tunel_do_mod(
     session: &Session,
+    carimbo: sessoes::CarimboDaJanela,
     geracao: u64,
     id: &str,
     nome: String,
@@ -6951,9 +6970,11 @@ async fn entrar_no_tunel_do_mod(
             motivo: "mod-sem-porta".to_owned(),
         });
     }
-    let conexao = session.connection().map_err(|_| FalhaNoMod::Recusado {
-        motivo: "sessao-encerrada".to_owned(),
-    })?;
+    // **A sessão do MOD pelo carimbo que ele trouxe**, e não a da vista: um
+    // comando de sessão nunca se endereça pela vista (`Session::conexao`).
+    let conexao = session
+        .conexao(carimbo)
+        .map_err(|erro| recusa_da_sessao_do_tunel(&erro))?;
     conexao
         .entrar_no_tunel(id.to_owned(), nome)
         .await
@@ -6963,35 +6984,41 @@ async fn entrar_no_tunel_do_mod(
 }
 
 /// **Fecha os túneis de jogo de um MOD** que saiu (desligado, descarregado,
-/// sessão nova): a porta fecha e os fluxos acabam. Fechar o que não existe não
-/// é erro.
+/// sessão nova, troca de vista): a porta fecha e os fluxos acabam. Fechar o que
+/// não existe não é erro.
+///
+/// **Endereçado pelo carimbo da sessão a que o MOD pertencia**, e não pela
+/// vista nem pela geração dos MODs: na troca de vista a geração velha já não
+/// vale e a sessão de antes continua viva em segundo plano — era ali que a
+/// porta ficava aberta, sem MOD e sem ninguém ver. Fechar é sempre permitido.
 ///
 /// # Errors
 ///
-/// [`FalhaNoMod::Recusado`] com `sessao-encerrada` quando a sessão (ou a
-/// geração) já acabou; nesse caso o enlace já derrubou os túneis ao sair.
+/// [`FalhaNoMod::Recusado`] com `sessao-encerrada` só quando a sessão do carimbo
+/// de fato acabou (o enlace já derrubou os túneis ao sair).
 #[tauri::command]
 fn tunel_sair_do_mod(
     session: State<'_, Session>,
-    geracao: u64,
+    carimbo: sessoes::CarimboDaJanela,
     id: String,
 ) -> Result<(), FalhaNoMod> {
-    session.recusar_se_morta(geracao)?;
     session
-        .connection()
+        .conexao(carimbo)
         .and_then(|conexao| conexao.sair_dos_tuneis_do_mod(id))
-        .map_err(|_| FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        })
+        .map_err(|erro| recusa_da_sessao_do_tunel(&erro))
 }
 
-/// Os túneis de jogo abertos agora nesta sessão, com o último relatório de
-/// cada um: o que a faixa do produto lê ao carregar e quando a sessão da vista
-/// muda. Sem sessão, lista vazia — e é a resposta certa: não há porta aberta.
+/// Os túneis de jogo abertos agora **na sessão do carimbo**, com o último
+/// relatório de cada um: o que a faixa do produto lê ao carregar e quando a
+/// vista muda. Sem a sessão, lista vazia — e é a resposta certa: ela acabou, e
+/// não há porta aberta.
 #[tauri::command]
-fn tuneis_abertos(session: State<'_, Session>) -> Vec<seele_ffi::RelatorioDeTunel> {
+fn tuneis_abertos(
+    session: State<'_, Session>,
+    carimbo: sessoes::CarimboDaJanela,
+) -> Vec<seele_ffi::RelatorioDeTunel> {
     session
-        .connection()
+        .conexao(carimbo)
         .map(|conexao| conexao.tuneis_abertos())
         .unwrap_or_default()
 }
@@ -16730,7 +16757,6 @@ mod a_supervisao_dos_mods_nativos {
             ("fn mod_nativo_entregar(", 1),
             ("fn ler_codigo_do_mod(", 1),
             ("async fn entrar_no_tunel_do_mod(", 1),
-            ("fn tunel_sair_do_mod(", 1),
             ("fn reservar_no_executor(", 1),
             ("fn midia_do_mod(", 1),
             ("fn som_do_mod(", 1),
@@ -22402,6 +22428,11 @@ mod o_tunel_de_jogo_pelo_app {
     use super::{entrar_no_tunel_do_mod, EstadoNativo, FalhaNoMod, InstanciaNativa, Session};
     use crate::executor::{ExecutorQuickJs, Limites};
 
+    const SEM_SESSAO: crate::sessoes::CarimboDaJanela = crate::sessoes::CarimboDaJanela {
+        sessao: 0,
+        geracao: 0,
+    };
+
     fn motivo(falha: &FalhaNoMod) -> &str {
         match falha {
             FalhaNoMod::Recusado { motivo } => motivo,
@@ -22453,6 +22484,7 @@ mod o_tunel_de_jogo_pelo_app {
         for geracao in [0, viva] {
             let falha = rodar(entrar_no_tunel_do_mod(
                 &sessao,
+                SEM_SESSAO,
                 geracao,
                 "x/jogo",
                 "n".into(),
@@ -22471,6 +22503,7 @@ mod o_tunel_de_jogo_pelo_app {
         );
         let falha = rodar(entrar_no_tunel_do_mod(
             &sessao,
+            SEM_SESSAO,
             geracao,
             "x/sem-porta",
             "n".into(),
@@ -22480,6 +22513,7 @@ mod o_tunel_de_jogo_pelo_app {
         // Um MOD que não está de pé tampouco.
         let falha = rodar(entrar_no_tunel_do_mod(
             &sessao,
+            SEM_SESSAO,
             geracao,
             "x/ninguem",
             "n".into(),
@@ -22496,6 +22530,7 @@ mod o_tunel_de_jogo_pelo_app {
         let (sessao, geracao) = sessao_com("x/jogo", vec!["tunel"]);
         let falha = rodar(entrar_no_tunel_do_mod(
             &sessao,
+            SEM_SESSAO,
             geracao,
             "x/jogo",
             "n".into(),

@@ -25515,8 +25515,16 @@ fn tunel_pode_pedir_exige_a_capacidade_do_poder_porta() {
     );
     let pode = js_function(&base, "function podePedir(");
     assert!(
-        pode.contains("poderes") && pode.contains("\"porta\"") && pode.contains("\"tunel\""),
+        pode.contains("temOPoderPorta(mod)") && pode.contains("\"tunel\""),
         "`podePedir` não soma `tunel` quando o MOD declara o poder `porta`: {pode}"
+    );
+    // M5: o poder só vale de uma API que o tem (a 8 em diante).
+    let poder = js_function(&base, "function temOPoderPorta(");
+    assert!(
+        poder.contains("Number(mod?.api) >= 8")
+            && poder.contains("poderes")
+            && poder.contains("\"porta\""),
+        "`temOPoderPorta` não confere a API 8: {poder}"
     );
     // E a lista por API continua sem `tunel`: dois MODs da 8 têm listas diferentes.
     let tabela = base
@@ -25540,6 +25548,22 @@ fn tunel_o_roteador_gasta_o_gesto_antes_do_invoke() {
         .split_once("case \"tunel-entrar\"")
         .map(|(_, resto)| resto.to_owned())
         .expect("`atenderOMod` não trata `tunel-entrar`");
+    // O nome vem conferido antes de tudo (a regra do fio), e a recusa sem
+    // clique não vai à faixa.
+    assert!(
+        caso.find("nomeDeTunelValido(")
+            .is_some_and(|n| n < caso.find("gastarGesto(").unwrap_or(0)),
+        "o caso `tunel-entrar` não confere o nome antes do bilhete"
+    );
+    let ate_o_invoke = &caso[..caso.find("invoke(\"tunel_entrar\"").expect("invoke")];
+    assert!(
+        !ate_o_invoke.contains("dizerARecusaDoTunel(mod, nome, \"fora-de-um-clique\")"),
+        "a recusa sem clique voltou a escrever na faixa do produto"
+    );
+    assert!(
+        caso.contains("carimboDaInstancia(instancia)"),
+        "`tunel_entrar` não leva o carimbo da sessão do MOD"
+    );
     let gasta = caso
         .find("gastarGesto(")
         .expect("o caso `tunel-entrar` não gasta o bilhete de gesto");
@@ -25587,6 +25611,10 @@ fn tunel_descarregar_um_mod_chama_tunel_sair_do_mod() {
         "o fecho só vale para o MOD com `porta` e roda no descarte da instância: {ligar}"
     );
     let fechar = js_function(&base, "function fecharOsTuneisDoMod(");
+    assert!(
+        fechar.contains("carimbo ? { carimbo }"),
+        "o fecho não leva o carimbo da sessão do MOD: na troca de vista ele iria para a vista"
+    );
     assert!(
         fechar.contains("invoke(\"tunel_sair_do_mod\"") && fechar.contains("registrarNoAnfitriao("),
         "o fecho não chama `tunel_sair_do_mod` ou a falha dele não vai ao registro: {fechar}"

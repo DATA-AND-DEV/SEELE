@@ -3468,9 +3468,7 @@ function podePedir(mod, tipo) {
   // listas diferentes, e a lista por API continua a mesma. `poderes` vem de
   // `mods_instalados`, lido do manifesto do pacote cujo hash esta janela
   // conferiu — e nunca de um campo da mensagem.
-  const tem = Array.isArray(mod?.poderes) && mod.poderes.includes("porta")
-    ? [...daApi, "tunel"]
-    : daApi;
+  const tem = temOPoderPorta(mod) ? [...daApi, "tunel"] : daApi;
   return tem.includes(exigida);
 }
 
@@ -3507,9 +3505,31 @@ function gastarGesto(instancia, gesto) {
   return performance.now() <= bilhete.ate;
 }
 
-/** Este MOD declara o poder `porta`? Só ele recebe bilhetes e fecha túneis. */
+/**
+ * Este MOD declara o poder `porta`? Só ele recebe bilhetes e fecha túneis. Os
+ * poderes nascem na API 8: um manifesto de API anterior com `poderes` é recusado
+ * ao instalar, e aqui o número também é conferido — a segunda porta.
+ */
 function temOPoderPorta(mod) {
-  return Array.isArray(mod?.poderes) && mod.poderes.includes("porta");
+  return Number(mod?.api) >= 8 && Array.isArray(mod?.poderes) && mod.poderes.includes("porta");
+}
+
+/**
+ * **A regra de `seele_proto::tunel::nome_valido`**: `[a-z0-9-]`, de 1 a 32, sem
+ * `-` nas pontas. O nome vem do MOD e vai à faixa do produto e ao registro;
+ * conferido aqui, antes de qualquer um dos dois, o que ele escreve é limitado.
+ */
+function nomeDeTunelValido(nome) {
+  return typeof nome === "string" && /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(nome);
+}
+
+/**
+ * O carimbo da sessão a que a instância pertence, tirado **quando ela subiu**:
+ * é por ele que os comandos de túnel se endereçam, e não pela vista de quando
+ * rodam (na troca de vista a de agora é outra sessão). `null` sem vista.
+ */
+function carimboDaInstancia(instancia) {
+  return instancia?.carimbo ?? null;
 }
 
 /**
@@ -3541,15 +3561,19 @@ function dizerARecusaDoTunel(mod, nome, motivo) {
  * enlace derrubou os túneis ao sair —, e as outras vão ao `seele.log` e à
  * faixa, que **continua mostrando** o que não conseguiu fechar.
  */
-function fecharOsTuneisDoMod(modId, geracao) {
+function fecharOsTuneisDoMod(modId, carimbo) {
   const aviso = (detail) => globalThis.dispatchEvent(new CustomEvent("seele-tunel-mod-saiu", { detail }));
-  invoke("tunel_sair_do_mod", { geracao, id: modId }).then(
+  // **Pelo carimbo da sessão do MOD**, explícito: `invoke` só põe o da vista
+  // quando não há um, e na troca de vista o da vista é de outra sessão.
+  invoke("tunel_sair_do_mod", { id: modId, ...(carimbo ? { carimbo } : {}) }).then(
     () => aviso({ modId, fechou: true }),
     (falha) => {
       const motivo = motivoDoTunel(falha);
       registrarNoAnfitriao(
         "tunel",
         `${modId}: não consegui fechar os túneis do MOD — ${motivo}`,
+        // `sessao-encerrada` é a sessão do MOD que de fato acabou (o enlace
+        // derrubou os túneis ao sair); qualquer outra recusa é um defeito.
         motivo === "sessao-encerrada" ? "info" : "aviso",
         modId,
       );
@@ -3565,8 +3589,11 @@ function fecharOsTuneisDoMod(modId, geracao) {
  */
 function ligarOFechoDosTuneis(mod, instancia) {
   if (!temOPoderPorta(mod)) return;
+  if (typeof vistaDaJanela?.sessao === "number") {
+    instancia.carimbo = { sessao: vistaDaJanela.sessao, geracao: vistaDaJanela.geracao };
+  }
   instancia.registrar(`${mod.id}: os túneis de jogo`, () => {
-    fecharOsTuneisDoMod(mod.id, instancia.geracao);
+    fecharOsTuneisDoMod(mod.id, carimboDaInstancia(instancia));
   });
 }
 
@@ -4404,12 +4431,19 @@ async function atenderOMod(mod, instancia, m) {
         break;
       // ---- o túnel de jogo (API 8, poder `porta`) ----
       case "tunel-entrar": {
-        const nome = String(m.nome ?? "");
+        // **O nome é conferido antes de tudo**, pela regra do fio: o que o MOD
+        // escolhe não vai à faixa nem ao registro sem caber nela. É o que o
+        // servidor diria (`nao-existe`), dito aqui sem sair da casca.
+        if (!nomeDeTunelValido(m.nome)) {
+          throw recusaAoMod("nao-existe", `${mod.id}: tunel-entrar com um nome que não é [a-z0-9-] de 1 a 32`);
+        }
+        const nome = m.nome;
         // **O bilhete é conferido aqui, antes do `invoke`**: sem clique (ou com
         // o clique vencido, ou já gasto), nada vai ao Rust. O prelúdio só o
-        // carrega.
+        // carrega. A recusa vai ao MOD e ao registro (o `catch` de baixo), e
+        // **não à faixa**: sem clique, quem joga não pediu nada, e a faixa não é
+        // um lugar onde um MOD escreve à vontade.
         if (!gastarGesto(instancia, m.gesto)) {
-          dizerARecusaDoTunel(mod, nome, "fora-de-um-clique");
           throw recusaAoMod(
             "fora-de-um-clique",
             `${mod.id}: tunel-entrar sem o bilhete de um clique (sem ele, vencido ou já gasto)`,
@@ -4417,7 +4451,12 @@ async function atenderOMod(mod, instancia, m) {
         }
         let aberta;
         try {
-          aberta = await invoke("tunel_entrar", { geracao: instancia.geracao, id: mod.id, nome });
+          aberta = await invoke("tunel_entrar", {
+            geracao: instancia.geracao,
+            id: mod.id,
+            nome,
+            ...(carimboDaInstancia(instancia) ? { carimbo: carimboDaInstancia(instancia) } : {}),
+          });
         } catch (falha) {
           dizerARecusaDoTunel(mod, nome, motivoDoTunel(falha));
           throw falha;
@@ -4425,7 +4464,7 @@ async function atenderOMod(mod, instancia, m) {
         if (!meu()) {
           // Entrou enquanto o MOD saía: o fecho dele já passou, e a porta que
           // acabou de abrir não tem mais dono.
-          fecharOsTuneisDoMod(mod.id, instancia.geracao);
+          fecharOsTuneisDoMod(mod.id, carimboDaInstancia(instancia));
         } else {
           globalThis.dispatchEvent(new CustomEvent("seele-tunel-aberto", {
             detail: { modId: mod.id, nome, ...aberta },
@@ -4842,9 +4881,11 @@ function encerrarOAmbienteDosMods() {
     instancia?.encerrar().catch(() => {});
   }
   modsCarregados.clear();
-  // Os túneis de jogo acabaram com a sessão (o enlace os derruba ao sair): a
-  // faixa do produto limpa o que mostrava.
-  globalThis.dispatchEvent(new CustomEvent("seele-tuneis-sessao-acabou"));
+  // Os MODs desta vista saem (fim da sessão ou troca de vista): a faixa limpa o
+  // que mostrava, e relê o que está de pé na vista seguinte quando ela entra
+  // (`entrarNaGeracao`). Não diz que a sessão acabou — na troca ela segue viva, e
+  // os túneis dela fecham pelo descarregar dos MODs, pelo carimbo dela.
+  globalThis.dispatchEvent(new CustomEvent("seele-tuneis-limpar"));
   // A exigência é de um destino, e o destino acabou. Esperar o tique seguinte
   // deixaria a gestão dizendo «exigido por este servidor» por até quatro
   // segundos depois de a sessão ter terminado.

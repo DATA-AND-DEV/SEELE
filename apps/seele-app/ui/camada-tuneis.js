@@ -29,7 +29,7 @@
 // - os eventos da casca (`base.js`): `seele-tunel-aberto` (a porta acabou de
 //   abrir), `seele-tunel-recusado` (a entrada foi recusada, e por quê),
 //   `seele-tunel-mod-saiu` (o MOD saiu; a linha sai junto, **se o Rust fechou**)
-//   e `seele-tuneis-sessao-acabou`.
+//   e `seele-tuneis-limpar` (os MODs da vista saíram: fim ou troca de vista).
 //
 // **Nada aqui engole uma falha**: o que não vem é dito ao `seele.log`.
 
@@ -217,18 +217,26 @@ listen("seele://event", ({ payload }) => {
 
 globalThis.addEventListener("seele-tunel-aberto", ({ detail }) => {
   const chave = chaveDoTunel(detail.modId, detail.nome);
-  const entrada = entradaNova(detail.modId, detail.nome, "aberta");
+  // **Junta, e não troca**: um relatório que chegou antes de o `invoke` voltar
+  // já trouxe o caminho e a latência, e a linha nova os perderia.
+  let entrada = tuneisNaFaixa.get(chave);
+  if (!entrada || entrada.estado !== "aberta") {
+    entrada = entradaNova(detail.modId, detail.nome, "aberta");
+    tuneisNaFaixa.set(chave, entrada);
+  }
   entrada.porta = detail.porta;
   entrada.preferida = detail.preferida;
   entrada.desejada = detail.desejada ?? 0;
-  tuneisNaFaixa.set(chave, entrada);
   desenharOsTuneis();
 });
 
 globalThis.addEventListener("seele-tunel-recusado", ({ detail }) => {
+  // **Uma linha de recusa por MOD, trocada e não somada**: a recusa mais nova
+  // vale, e a faixa não cresce com o que um MOD pedir. O nome já veio conferido
+  // (`nomeDeTunelValido`), e o motivo é um nome da lista.
   const entrada = entradaNova(detail.modId, detail.nome, "recusada");
-  entrada.motivo = detail.motivo;
-  tuneisNaFaixa.set(`recusa\u0000${chaveDoTunel(detail.modId, detail.nome)}`, entrada);
+  entrada.motivo = String(detail.motivo).slice(0, 40);
+  tuneisNaFaixa.set(`recusa\u0000${detail.modId}`, entrada);
   desenharOsTuneis();
 });
 
@@ -242,7 +250,7 @@ globalThis.addEventListener("seele-tunel-mod-saiu", ({ detail }) => {
   desenharOsTuneis();
 });
 
-globalThis.addEventListener("seele-tuneis-sessao-acabou", () => {
+globalThis.addEventListener("seele-tuneis-limpar", () => {
   tuneisNaFaixa.clear();
   desenharOsTuneis();
 });

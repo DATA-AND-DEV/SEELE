@@ -91,6 +91,8 @@ async function caso(motor, numero, prova) {
         await pagina.waitForFunction(() => !conferindoMods);
 
         await pagina.evaluate(() => {
+          // A sessão 1 está na vista: é o carimbo que os MODs que sobem levam.
+          porNaVista({ sessao: 1, geracao: 1 });
           window.entregues = [];
           window.paradas = 0;
           const levantar = (mod) => {
@@ -183,9 +185,12 @@ async function caso(motor, numero, prova) {
           assert.equal(await entradas(), antes, `${motor}: 2 · o invoke saiu com um bilhete inventado`);
           const certo = await entrar("minecraft-2a", gesto);
           assert.equal(certo.ok, true, `${motor}: 2 · o bilhete certo foi gasto pelo inventado: ${JSON.stringify(certo)}`);
-          // A recusa também chega a quem joga.
+          // A recusa é do MOD e do registro, e **não da faixa**: sem clique, quem
+          // joga não pediu nada, e um MOD não escreve na faixa à vontade.
           const faixa = await pagina.evaluate(() => faixa());
-          assert.match(faixa, /minecraft-sem-clique: a porta só abre com um clique seu/, `${motor}: 2 · a faixa calou a recusa: ${faixa}`);
+          assert.doesNotMatch(faixa, /minecraft-sem-clique|inventado|um clique seu/, `${motor}: 2 · a recusa sem clique foi para a faixa: ${faixa}`);
+          const noRegistro = await pagina.evaluate(() => chamadas.filter((c) => c.cmd === "registrar_da_janela").map((c) => c.args.oQue).join("\n"));
+          assert.match(noRegistro, /«tunel-entrar» falhou.*bilhete de um clique/, `${motor}: 2 · a recusa sem clique não foi ao registro`);
         });
 
         // 3. O mesmo bilhete duas vezes: a segunda é recusada.
@@ -313,6 +318,50 @@ async function caso(motor, numero, prova) {
           assert.deepEqual(dentro, { emSuperficie: false, filhosDeMod: 0 }, `${motor}: 12 · ${JSON.stringify(dentro)}`);
         });
 
+        // 14. O nome do MOD não escreve na faixa à vontade: fora de
+        //     `[a-z0-9-]{1,32}` é recusado na casca (`nao-existe`), sem invoke e
+        //     sem linha; e a recusa sem clique, repetida, não acrescenta nada.
+        await caso(motor, "14", async () => {
+          const antes = await entradas();
+          const blocos = () => pagina.evaluate(() => $("tuneis").querySelectorAll(".tunel-bloco").length);
+          const nBlocos = await blocos();
+          for (const nome of ["Maiuscula", "com espaço", "<img src=x onerror=1>", "-borda", "a".repeat(33), "", 7, null, { x: 1 }]) {
+            const gesto = await clicar();
+            const r = await pagina.evaluate(([nome, gesto]) => pedir(jogo, { tipo: "tunel-entrar", nome, gesto }), [nome, gesto]);
+            assert.equal(r?.erro, "nao-existe", `${motor}: 14 · o nome ${JSON.stringify(nome)} não foi recusado pelo nome: ${JSON.stringify(r)}`);
+          }
+          for (let i = 0; i < 25; i += 1) await entrar(`sem-clique-${i}`, undefined);
+          assert.equal(await entradas(), antes, `${motor}: 14 · um nome inválido ou um pedido sem clique chegou ao Rust`);
+          assert.equal(await blocos(), nBlocos, `${motor}: 14 · a faixa cresceu com o que o MOD pediu sem clique ou com nome inválido`);
+          assert.doesNotMatch(await pagina.evaluate(() => faixa()), /Maiuscula|onerror|sem-clique-/, `${motor}: 14 · texto do MOD na faixa`);
+        });
+
+        // 15. Uma linha de recusa por MOD, trocada e não somada.
+        await caso(motor, "15", async () => {
+          await pagina.evaluate(() => { table.tunel_entrar = () => { throw { Recusado: { motivo: "nome-tomado" } }; }; });
+          for (const nome of ["jogo-a", "jogo-b", "jogo-c"]) {
+            const gesto = await clicar();
+            const r = await entrar(nome, gesto);
+            assert.equal(r.erro, "nome-tomado", `${motor}: 15 · ${JSON.stringify(r)}`);
+          }
+          await pagina.evaluate(() => { table.tunel_entrar = () => ({ porta: 25565, preferida: true, desejada: 25565 }); });
+          const recusadas = await pagina.evaluate(() => [...$("tuneis").querySelectorAll('[data-estado="recusada"]')].map((b) => b.dataset.nome));
+          assert.deepEqual(recusadas, ["jogo-c"], `${motor}: 15 · ${JSON.stringify(recusadas)}`);
+        });
+
+        // 16. O relatório que chega antes de o `invoke` voltar não se perde.
+        await caso(motor, "16", async () => {
+          await pagina.evaluate(() => emitir("seele://event", { TunnelReport: { report: {
+            mod_id: "x/jogo", nome: "mescla", porta: 25565, preferida: true, desejada: 25565,
+            caminho: { tipo: "direto", par: 7, apelido: "Fulano" }, latencia_ms: 12,
+            bytes_por_segundo: 0, bytes_por_segundo_ida: 0, bytes_por_segundo_volta: 0,
+            conexoes: 0, quedas: [], udp_descartados: 0, encerrado: null,
+          } } }));
+          await pagina.evaluate(() => window.dispatchEvent(new CustomEvent("seele-tunel-aberto", { detail: { modId: "x/jogo", nome: "mescla", porta: 25565, preferida: true, desejada: 25565 } })));
+          const linha = (await pagina.evaluate(() => faixa())).split("\n").join(" ");
+          assert.match(linha, /mescla \(x\/jogo\) · ligação direta com Fulano · 12 ms/, `${motor}: 16 · ${linha}`);
+        });
+
         // 7. Um MOD sem `porta` que posta `tunel-entrar` direto.
         await caso(motor, "7", async () => {
           const antes = await entradas();
@@ -334,8 +383,8 @@ async function caso(motor, numero, prova) {
             .catch(() => { throw new Error(`${motor}: 6 · o MOD saiu e tunel_sair_do_mod não foi chamado`); });
           const saida = await pagina.evaluate(() => chamadas.filter((c) => c.cmd === "tunel_sair_do_mod").map((c) => c.args));
           assert.deepEqual(
-            saida.map(({ geracao, id }) => ({ geracao, id })),
-            [{ geracao: 1, id: "x/jogo" }],
+            saida.map(({ id, carimbo }) => ({ id, carimbo })),
+            [{ id: "x/jogo", carimbo: { sessao: 1, geracao: 1 } }],
             `${motor}: 6 · ${JSON.stringify(saida)}`,
           );
           await pagina.waitForFunction(() => !/\(x\/jogo\)/.test(faixa()), null, { timeout: 5000 })
@@ -344,8 +393,36 @@ async function caso(motor, numero, prova) {
           assert.equal(saida.some(({ id }) => id === "x/sem-porta"), false, `${motor}: 6 · fechou túneis de um MOD sem porta`);
         });
 
+        // 13. A troca de vista: o MOD da sessão 1 sai com a vista já na 2, e o
+        //     fecho leva o carimbo da sessão DELE — a porta fecha lá, e a casca
+        //     não diz que a sessão acabou.
+        await caso(motor, "13", async () => {
+          await pagina.evaluate(() => {
+            window.outro = (() => {
+              const mod = { id: "x/outro", hash: "h-outro", api: 8, poderes: ["porta"] };
+              const instancia = new InstanciaDeMod(mod.id, mod.hash, geracaoDaSessao, {
+                pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+              });
+              instancia.estado = ESTADOS_DE_MOD.ativa;
+              modsCarregados.set(mod.id, instancia);
+              ligarOFechoDosTuneis(mod, instancia);
+              return instancia;
+            })();
+            chamadas.length = 0;
+            porNaVista({ sessao: 2, geracao: 1 });
+            outro.encerrar();
+          });
+          await pagina.waitForFunction(() => chamadas.some((c) => c.cmd === "tunel_sair_do_mod"), null, { timeout: 5000 })
+            .catch(() => { throw new Error(`${motor}: 13 · o MOD saiu e tunel_sair_do_mod não foi chamado`); });
+          const chamada = await pagina.evaluate(() => chamadas.find((c) => c.cmd === "tunel_sair_do_mod").args);
+          await pagina.evaluate(() => porNaVista({ sessao: 1, geracao: 1 }));
+          assert.deepEqual(chamada.carimbo, { sessao: 1, geracao: 1 }, `${motor}: 13 · o fecho foi para a sessão da vista, e não para a do MOD: ${JSON.stringify(chamada)}`);
+          const log = await pagina.evaluate(() => chamadas.filter((c) => c.cmd === "registrar_da_janela").map((c) => c.args.oQue).join("\n"));
+          assert.doesNotMatch(log, /x\/outro.*sessao-encerrada/, `${motor}: 13 · a sessão viva foi dita como encerrada: ${log}`);
+        });
+
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 12, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 16, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();
