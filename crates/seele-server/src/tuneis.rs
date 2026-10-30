@@ -351,6 +351,12 @@ impl Tuneis {
 
     /// O MOD foi desligado (ou deixou de declarar o poder): todos os túneis dele
     /// acabam, para quem servia e para quem jogava.
+    ///
+    /// **Não conte com o `TunelEncerrado { ModDesligado }` chegando a um
+    /// cliente ao vivo**: mudar o conjunto de MODs derruba as sessões com
+    /// `ModsMudaram` antes, e quem está dentro costuma ver a queda da conexão
+    /// (e `MaquinaSaiu`/`PessoaSaiu` no livro), não o aviso. O que este método
+    /// garante é o estado do servidor: o túnel some e os canais caem.
     pub fn mod_desligado(&mut self, mod_id: &str) -> Vec<Encerramento> {
         let acabaram: Vec<Chave> = self
             .servidos
@@ -535,7 +541,10 @@ impl Server {
         self.tuneis().contador(mod_id, nome)
     }
 
-    /// Quantos canais de túnel chegaram sem concessão e foram cortados.
+    /// Quantos canais de túnel foram cortados **antes de chegar à máquina**:
+    /// sem concessão, com abertura ilegível ou fora do prazo, de tipo que não
+    /// combina com o túnel, ou sem conexão de máquina registrada. (O nome é o
+    /// do caso principal; o log de cada corte diz qual foi.)
     #[must_use]
     pub fn canais_sem_concessao(&self) -> u64 {
         self.tuneis().canais_sem_concessao()
@@ -548,26 +557,38 @@ impl Server {
 /// não está ligado ou cujo pacote não abre.
 async fn poderes_do_mod(server: &Server, mod_id: &str) -> Vec<Poder> {
     let Some(raizes) = &server.mods_dir else {
+        tracing::warn!(mod_id = %mod_id, "túnel: o servidor não tem pasta de MODs; sem poderes");
         return Vec::new();
     };
     let hash = {
         let banco = server.persistence.lock().await;
-        crate::persistence::mods::enabled(&banco)
-            .ok()
-            .and_then(|ligados| ligados.into_iter().find(|m| m.id == mod_id))
-            .map(|m| m.hash)
+        match crate::persistence::mods::enabled(&banco) {
+            Ok(ligados) => ligados.into_iter().find(|m| m.id == mod_id).map(|m| m.hash),
+            Err(erro) => {
+                tracing::warn!(mod_id = %mod_id, %erro, "túnel: não deu para ler a tabela de MODs; sem poderes");
+                None
+            }
+        }
     };
     let Some(hash) = hash else {
+        tracing::info!(mod_id = %mod_id, "túnel: o MOD não está ligado; sem poderes");
         return Vec::new();
     };
     // O mesmo `mod.json` da pasta do hash que as permissões declaradas leem.
-    let Ok(texto) = tokio::fs::read_to_string(raizes.pacote_de(&hash).join("mod.json")).await
-    else {
-        return Vec::new();
+    let texto = match tokio::fs::read_to_string(raizes.pacote_de(&hash).join("mod.json")).await {
+        Ok(texto) => texto,
+        Err(erro) => {
+            tracing::warn!(mod_id = %mod_id, %erro, "túnel: o mod.json do pacote não abriu; sem poderes");
+            return Vec::new();
+        }
     };
-    seele_proto::mods::read_manifest(&texto)
-        .map(|m| m.poderes)
-        .unwrap_or_default()
+    match seele_proto::mods::read_manifest(&texto) {
+        Ok(manifesto) => manifesto.poderes,
+        Err(erro) => {
+            tracing::warn!(mod_id = %mod_id, %erro, "túnel: o manifesto do pacote não passou na leitura; sem poderes");
+            Vec::new()
+        }
+    }
 }
 
 /// A máquina de uma sessão passa a servir um túnel.
@@ -756,10 +777,46 @@ pub async fn repassar(
     server: &Server,
     de: PersonId,
     canal: CanalDeTunel,
-) -> Result<(), RecusaDeTunel> {
-    match canal {
-        CanalDeTunel::Ordenado(envio, recebe) => repassar_t(server, de, envio, recebe).await,
-        CanalDeTunel::SemOrdem(datagramas) => repassar_j(server, de, datagramas).await,
+) -> Result<(), RepasseCortado> {
+    let mut tunel = None;
+    let resultado = match canal {
+        CanalDeTunel::Ordenado(envio, recebe) => {
+            repassar_t(server, de, envio, recebe, &mut tunel).await
+        }
+        CanalDeTunel::SemOrdem(datagramas) => repassar_j(server, de, datagramas, &mut tunel).await,
+    };
+    resultado.map_err(|motivo| RepasseCortado { tunel, motivo })
+}
+
+/// Um canal que o repasse cortou: o motivo enumerado e, quando a abertura foi
+/// lida, o túnel que ela nomeava (`mod_id`, `nome`). Quem chama diz o motivo a
+/// quem abriu o canal (`TunelRecusado`), em vez de deixá-lo com um socket
+/// fechado e nenhuma razão.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepasseCortado {
+    /// `(mod_id, nome)` da abertura; `None` quando ela nem foi lida.
+    pub tunel: Option<(String, String)>,
+    /// Por que o canal foi cortado.
+    pub motivo: RecusaDeTunel,
+}
+
+impl RepasseCortado {
+    /// O `TunelRecusado` a mandar a quem abriu o canal, ou `None` quando não
+    /// há o que dizer: a abertura não foi lida, ou o corte foi por falta de
+    /// concessão (`SemPermissao`), que quem a perdeu já soube por
+    /// `TunelEncerrado` (e quem nunca a teve não tem túnel a que se referir).
+    #[must_use]
+    pub fn aviso(&self, para: PersonId) -> Option<Event> {
+        let (mod_id, nome) = self.tunel.clone()?;
+        if self.motivo == RecusaDeTunel::SemPermissao {
+            return None;
+        }
+        Some(Event::TunelRecusado {
+            para,
+            mod_id,
+            nome,
+            motivo: self.motivo,
+        })
     }
 }
 
@@ -795,6 +852,7 @@ async fn repassar_t(
     de: PersonId,
     mut envio: Envio,
     mut recebe: Recebe,
+    tunel: &mut Option<(String, String)>,
 ) -> Result<(), RecusaDeTunel> {
     let lida = tokio::time::timeout(
         PRAZO_DA_ABERTURA,
@@ -814,6 +872,7 @@ async fn repassar_t(
             return Err(RecusaDeTunel::SemPermissao);
         }
     };
+    *tunel = Some((abertura.mod_id.clone(), abertura.nome.clone()));
     let rota = server.tuneis().rota(de, &abertura, true);
     let rota = match rota {
         Ok(rota) => rota,
@@ -827,6 +886,12 @@ async fn repassar_t(
     let (mut m_envio, mut m_recebe) = match aberto {
         Ok(CanalDeTunel::Ordenado(e, r)) => (e, r),
         Ok(CanalDeTunel::SemOrdem(_)) => {
+            tracing::warn!(
+                mod_id = %abertura.mod_id,
+                tunel = %abertura.nome,
+                pessoa = %de,
+                "túnel: o enlace devolveu um j onde se pediu um t; canal cortado"
+            );
             cortar_t(&mut envio, &mut recebe);
             return Err(RecusaDeTunel::MaquinaSaiu);
         }
@@ -890,6 +955,7 @@ async fn repassar_j(
     server: &Server,
     de: PersonId,
     mut datagramas: seele_enlace::Datagramas,
+    tunel: &mut Option<(String, String)>,
 ) -> Result<(), RecusaDeTunel> {
     let primeiro = tokio::time::timeout(PRAZO_DA_ABERTURA, datagramas.receber()).await;
     let abertura = match primeiro {
@@ -901,6 +967,7 @@ async fn repassar_j(
         tracing::warn!(pessoa = %de, "túnel: canal j sem abertura legível, cortado");
         return Err(RecusaDeTunel::SemPermissao);
     };
+    *tunel = Some((abertura.mod_id.clone(), abertura.nome.clone()));
     let rota = server.tuneis().rota(de, &abertura, false);
     let rota = match rota {
         Ok(rota) => rota,
@@ -909,7 +976,15 @@ async fn repassar_j(
     let mut vigia = rota.vigia;
     let mut da_maquina = match rota.conexao.abrir_tunel(Confiabilidade::SemOrdem).await {
         Ok(CanalDeTunel::SemOrdem(d)) => d,
-        Ok(CanalDeTunel::Ordenado(..)) => return Err(RecusaDeTunel::MaquinaSaiu),
+        Ok(CanalDeTunel::Ordenado(..)) => {
+            tracing::warn!(
+                mod_id = %abertura.mod_id,
+                tunel = %abertura.nome,
+                pessoa = %de,
+                "túnel: o enlace devolveu um t onde se pediu um j; canal cortado"
+            );
+            return Err(RecusaDeTunel::MaquinaSaiu);
+        }
         Err(motivo) => {
             tracing::warn!(
                 mod_id = %abertura.mod_id,
@@ -925,9 +1000,27 @@ async fn repassar_j(
         de: Some(de),
         ..abertura.clone()
     };
-    let quadro =
-        seele_proto::control::encode(&reescrita).map_err(|_| RecusaDeTunel::MaquinaSaiu)?;
-    if da_maquina.mandar(&quadro).is_err() {
+    let quadro = match seele_proto::control::encode(&reescrita) {
+        Ok(quadro) => quadro,
+        Err(erro) => {
+            tracing::warn!(
+                mod_id = %abertura.mod_id,
+                tunel = %abertura.nome,
+                pessoa = %de,
+                %erro,
+                "túnel: a abertura do canal j não codificou; canal cortado"
+            );
+            return Err(RecusaDeTunel::MaquinaSaiu);
+        }
+    };
+    if let Err(erro) = da_maquina.mandar(&quadro) {
+        tracing::warn!(
+            mod_id = %abertura.mod_id,
+            tunel = %abertura.nome,
+            pessoa = %de,
+            %erro,
+            "túnel: a abertura do canal j não chegou à máquina; canal cortado"
+        );
         return Err(RecusaDeTunel::MaquinaSaiu);
     }
     let antes = rota.contador.load(Ordering::Relaxed);
@@ -1161,5 +1254,40 @@ mod tests {
         assert_eq!(t.pode_repassar(PersonId(9), &abertura("eco")), None);
         t.sem_permissao(JOGA, "x/jogo");
         assert_eq!(t.pode_repassar(JOGA, &abertura("eco")), None);
+    }
+
+    #[test]
+    fn o_teto_de_canais_da_maquina_vira_a_recusa_nomeada() {
+        assert_eq!(
+            motivo_de_abrir(&Motivo::CanaisEsgotados),
+            RecusaDeTunel::CanaisEsgotados
+        );
+        assert_eq!(
+            motivo_de_abrir(&Motivo::Caiu("x".into())),
+            RecusaDeTunel::MaquinaSaiu
+        );
+    }
+
+    #[test]
+    fn so_o_corte_que_nao_e_falta_de_concessao_vira_aviso_a_quem_abriu() {
+        let corte = |tunel: Option<(&str, &str)>, motivo| RepasseCortado {
+            tunel: tunel.map(|(m, n)| (m.to_owned(), n.to_owned())),
+            motivo,
+        };
+        let jogador = PersonId(3);
+        let aviso = corte(Some(("x/jogo", "eco")), RecusaDeTunel::CanaisEsgotados).aviso(jogador);
+        assert!(matches!(
+            aviso,
+            Some(Event::TunelRecusado { para, motivo: RecusaDeTunel::CanaisEsgotados, .. })
+                if para == jogador
+        ));
+        // Sem concessão quem perdeu já soube por `TunelEncerrado`; sem
+        // abertura lida não há túnel a nomear.
+        assert!(corte(Some(("x/jogo", "eco")), RecusaDeTunel::SemPermissao)
+            .aviso(jogador)
+            .is_none());
+        assert!(corte(None, RecusaDeTunel::MaquinaSaiu)
+            .aviso(jogador)
+            .is_none());
     }
 }

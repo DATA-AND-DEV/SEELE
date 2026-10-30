@@ -655,3 +655,59 @@ async fn o_udp_vai_pela_estrela_com_a_abertura_no_primeiro_datagrama() -> Result
     daemon.shutdown();
     Ok(())
 }
+
+/// **O corte do repasse chega a quem abriu o canal, com o nome.**
+///
+/// O túnel é posto no livro à mão, **sem a conexão da máquina registrada**, e o
+/// jogador (de verdade, conectado) entra nele. O canal que ele abre é cortado
+/// pelo anfitrião por `MaquinaSaiu`, e ele tem de ler `TunelRecusado`, e não só
+/// ver o canal fechar. (O teto de canais da máquina, `CanaisEsgotados`, é o
+/// mesmo caminho com outro motivo; o mapeamento dele está provado na unidade,
+/// porque o teto é simétrico e um jogador só bate antes no da própria conexão.)
+#[tokio::test(flavor = "multi_thread")]
+async fn o_corte_do_repasse_chega_a_quem_abriu_o_canal_como_recusa_nomeada() -> Result<()> {
+    let (endereco, daemon, _temp) = montar(true).await?;
+    let _gestora = entrar(endereco, GESTORA, 12).await?;
+    let mut jogador = entrar(endereco, JOGADOR, 12).await?;
+    {
+        let mut livro = daemon.server().tuneis();
+        livro
+            .servir(
+                PersonId(77),
+                12345,
+                seele_server::tuneis::PedidoDeTunel {
+                    mod_id: MOD,
+                    nome: NOME,
+                    protocolo: ProtocoloDeTunel::Tcp,
+                    porta: 1,
+                },
+                &[seele_proto::mods::Poder::Porta],
+            )
+            .expect("serve");
+        livro.entrar(jogador.pessoa, 1, MOD, NOME).expect("entra");
+    }
+    let CanalDeTunel::Ordenado(mut envio, _recebe) = jogador
+        .ligado
+        .conexao
+        .abrir_tunel(Confiabilidade::Ordenada)
+        .await?
+    else {
+        anyhow::bail!("o t veio sem ordem");
+    };
+    frame::write(&mut envio, &abertura(None)).await?;
+    let recusa = esperar(&mut jogador.ligado.recebe, |m| match m {
+        ServerMessage::TunelRecusado {
+            mod_id,
+            nome,
+            motivo,
+        } => Some((mod_id.clone(), nome.clone(), *motivo)),
+        _ => None,
+    })
+    .await;
+    assert_eq!(
+        recusa,
+        Some((MOD.to_owned(), NOME.to_owned(), RecusaDeTunel::MaquinaSaiu))
+    );
+    daemon.shutdown();
+    Ok(())
+}

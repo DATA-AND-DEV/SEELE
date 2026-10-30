@@ -2277,7 +2277,14 @@ async fn run_session(
                         let Ok(canal) = canal else { break };
                         let contexto = Arc::clone(&contexto);
                         repasses.spawn(async move {
-                            let _ = crate::tuneis::repassar(&contexto, pessoa, canal).await;
+                            if let Err(cortado) =
+                                crate::tuneis::repassar(&contexto, pessoa, canal).await
+                            {
+                                // O motivo enumerado chega a quem abriu o canal.
+                                if let Some(aviso) = cortado.aviso(pessoa) {
+                                    let _ = contexto.events.send(aviso);
+                                }
+                            }
                         });
                     }
                     Some(_) = repasses.join_next(), if !repasses.is_empty() => {}
@@ -2777,7 +2784,9 @@ async fn run_session(
                     m @ (ClientMessage::ServirTunel { .. }
                     | ClientMessage::PararTunel { .. }
                     | ClientMessage::EntrarNoTunel { .. }
-                    | ClientMessage::SairDoTunel { .. }) if session.protocol_version < 12 => {
+                    | ClientMessage::SairDoTunel { .. })
+                        if session.protocol_version < seele_proto::vocabulario::desde_do_cliente(&m) =>
+                    {
                         tracing::warn!(
                             person = %session.person,
                             versao = session.protocol_version,
@@ -6163,6 +6172,19 @@ fn translate(
             impressao: impressao.clone(),
         }),
 
+        // O canal que o repasse cortou por um motivo que não é a falta de
+        // concessão (o teto de canais da máquina, ela ter saído): quem o abriu
+        // fica sabendo o porquê, e não só vê o socket fechar.
+        Event::TunelRecusado {
+            para,
+            mod_id,
+            nome,
+            motivo,
+        } => (*para == self_person).then(|| ServerMessage::TunelRecusado {
+            mod_id: mod_id.clone(),
+            nome: nome.clone(),
+            motivo: *motivo,
+        }),
         // O túnel que acabou é dito a quem servia ou jogava, e a mais ninguém:
         // quem está noutro jogo não tem o que fazer com o fim deste. O corte
         // por versão (nada de 12 chega a um par 11) é de `entende_a_mensagem`,

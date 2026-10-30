@@ -464,6 +464,19 @@ pub enum Event {
     /// Endereçado a uma pessoa e entregue a todas, como o [`Self::SirvaTelaPara`]:
     /// um servidor não tem outra maneira de uma sessão alcançar outra. Quem
     /// estreita a audiência é `session::translate`.
+    TunelRecusado {
+        /// A quem entregar: quem abriu o canal que o repasse cortou.
+        para: PersonId,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// Por quê, enumerado.
+        motivo: seele_proto::tunel::RecusaDeTunel,
+    },
+    /// Um túnel acabou, e esta pessoa precisa saber.
+    ///
+    /// Endereçado como o [`Self::TunelRecusado`] acima.
     TunelEncerrado {
         /// A quem entregar.
         para: PersonId,
