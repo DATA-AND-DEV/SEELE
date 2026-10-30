@@ -1,6 +1,6 @@
 {
   "version": 8,
-  "notes": "A v8 é a v7 inteira, mais a declaração de plataformas do manifesto (API 8; ADR 0058, acréscimo). É escrita por inteiro, sem extends, como a v6 e a v7. Servidor 2.0 = protocolo 11 + APIs 8, 7 e 6: um MOD da 7 ou da 6 continua rodando, nas duas plataformas. Enquanto a v8 não sai numa release, ela segue a regra da v7 antes da publicação: a linha dela já está em congeladas.sha256 e é refeita a cada emenda. A v7 e a v6 estão publicadas e não mudam.",
+  "notes": "A v8 é a v7 inteira, mais a declaração de plataformas, de poderes e da metade de máquina do manifesto (API 8; ADR 0058, acréscimo). É escrita por inteiro, sem extends, como a v6 e a v7. Servidor 2.0 = protocolo 11 + APIs 8, 7 e 6: um MOD da 7 ou da 6 continua rodando, nas duas plataformas. Enquanto a v8 não sai numa release, ela segue a regra da v7 antes da publicação: a linha dela já está em congeladas.sha256 e é refeita a cada emenda. A v7 e a v6 estão publicadas e não mudam.",
   "compatibilidade": {
     "aceitas": [
       8,
@@ -47,6 +47,11 @@
         "eventos-da-tela",
         "aviso-do-servidor",
         "acoes"
+      ]
+    },
+    "capacidades-por-poder": {
+      "porta": [
+        "tunel"
       ]
     },
     "rotulos": "estilos e classes são rótulos, sem efeito: SeeleUI.capacidades() os lista na 6, e nada pergunta por eles. O estilo de um nó vale onde a forma dele monta, numa superfície ou numa contribuição, e o superficie-classes pede superficies; nenhum manifesto declara capacidade, que vem com a api (D-api-10)",
@@ -162,7 +167,11 @@
     "acao": "O pedido de uma ação declarada em permissoes. O servidor confere, antes de chamar a metade de servidor, que o MOD está ligado, que ele declarou a ação e que a pessoa tem a permissão (cargos::autorizar_acao_de_mod). Sem ela, a resposta é ok:false com a recusa acao-nao-declarada ou sem-permissao, e a metade de servidor não é chamada. Na janela: SeeleMods.acao(id, canal, acao, valor), só com a capacidade acoes (sem ela, o membro não existe); a mensagem da ponte é acao, e o id que vai é sempre o do próprio MOD, como no request; devolve a resposta da metade de servidor, como o request, e a recusa dos cargos chega como valor, { ok: false, recusa }; as recusas da ponte são as do pedido (too-many-requests, mensagem-grande — o nome da ação conta no teto —, sessao-encerrada). A janela não confere a ação nem a permissão: quem decide é o servidor.",
     "acao-o-padrao": "O ModRequest comum continua valendo, e o servidor não o veta: as leituras do MOD seguem por ele. Quem guarda a operação protegida é a metade de servidor, e só por contexto.acao, que o host escreve depois do portão dos cargos (null num ModRequest): if (contexto.acao !== 'fechar-mesa') recusa. Nunca pelo corpo do pedido (um pedido.acao, um admin ou um contexto escrito pelo cliente não decidem nada) e nunca por contexto.permissoes, que é informativo e chega também num ModRequest comum. A fixture apps/seele-app/testes/mod-de-acoes é o exemplo, provado em crates/seele-conformance/tests/acoes_de_mod.rs.",
     "permissoes": "No mod.json: [{acao, nome, todos}]. acao em [a-z0-9-], até 32; nome não vazio; sem repetir; até o teto de permissões por MOD. todos=true dá a permissão ao @everyone na primeira vez que o MOD é ligado neste servidor; sem a chave, só o proprietário e quem administra a têm até alguém concedê-la.",
-    "plataformas": "No mod.json: [\"app\", \"navegador\"], valores de Plataforma (minúsculos). Ausente quer dizer as duas (plataformas_efetivas); a chave presente e vazia é recusada (PlataformasVazias), e um valor repetido também (PlataformaRepetida). Declarar exige \"api\": 8 (PlataformasPedemApiNova). O celular é navegador: um MOD só do app não carrega nele."
+    "plataformas": "No mod.json: [\"app\", \"navegador\"], valores de Plataforma (minúsculos). Ausente quer dizer as duas (plataformas_efetivas); a chave presente e vazia é recusada (PlataformasVazias), e um valor repetido também (PlataformaRepetida). Declarar exige \"api\": 8 (PlataformasPedemApiNova). O celular é navegador: um MOD só do app não carrega nele.",
+    "poderes": "No mod.json: [\"porta\"], valores de Poder (minúsculos); hoje só a porta, o túnel de quem joga, existe. Ausente quer dizer nenhum poder; a chave presente e vazia é recusada (PoderesVazios), e um valor repetido também (PoderRepetido). Declarar exige \"api\": 8 (PoderesPedemApiNova) e vale só para o MOD que roda apenas no app (PoderesExigemSoOApp). Um valor desconhecido faz o manifesto inteiro ser recusado (Malformed).",
+    "maquina": "No mod.json: o caminho, dentro do pacote, do script da metade de máquina. Fora do pacote é recusado (MaquinaForaDoPacote), e sem poderes também (MaquinaSemPoderes). Declará-la numa API anterior à 8 é recusado (PoderesPedemApiNova).",
+    "porta": "O poder porta exige a permissão entrar-no-jogo declarada no próprio manifesto (ACAO_ENTRAR_NO_JOGO); sem ela o MOD é recusado na instalação (PortaSemEntrarNoJogo), porque ninguém poderia abrir o túnel.",
+    "capacidades-por-poder": "A capacidade tunel é do poder porta, e não da versão: capacidades_do_manifesto soma tunel a capacidades_da_api quando o manifesto declara a porta, e a lista da API 8 não muda."
   },
   "moments": [
     "PersonJoined",
@@ -795,6 +804,8 @@
   },
   "manifesto": {
     "permissoes": "PermissaoDeclarada",
-    "plataformas": "Plataforma"
+    "plataformas": "Plataforma",
+    "poderes": "Poder",
+    "maquina": "caminho"
   }
 }

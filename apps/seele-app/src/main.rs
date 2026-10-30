@@ -15296,6 +15296,7 @@ mod a_tela_le_o_que_o_rust_manda {
                 server: true,
                 tema: true,
                 plataformas: Vec::new(),
+                poderes: Vec::new(),
                 refused: None,
             },
             enabled: false,
@@ -15348,6 +15349,43 @@ mod a_tela_le_o_que_o_rust_manda {
         assert!(
             !pinta_o_servidor(true, None, "seele/estilo"),
             "sem escolhido, ninguém pinta"
+        );
+    }
+
+    /// **`mods_instalados` diz os `poderes` de cada MOD**, como lista de nomes
+    /// no topo do objeto (o `flatten` apaga o invólucro): vazia sem a chave, e
+    /// `["porta"]` para quem a declara. É o que a casca lê para saber se o MOD
+    /// tem túnel, sem abrir o manifesto.
+    #[test]
+    fn mods_instalados_diz_os_poderes_de_cada_mod() {
+        let tela = |poderes: Vec<seele_ffi::mods::Poder>| {
+            let mut v = serde_json::to_value(ModNaTela {
+                instalado: ModInstalado {
+                    id: "autor/nome".to_owned(),
+                    version: "1.0.0".to_owned(),
+                    api: seele_ffi::mods::MOD_API_VERSION,
+                    hash: "0".repeat(64),
+                    client: None,
+                    arquivos: Vec::new(),
+                    repo: String::new(),
+                    reach: Vec::new(),
+                    server: true,
+                    tema: false,
+                    plataformas: Vec::new(),
+                    poderes,
+                    refused: None,
+                },
+                enabled: false,
+                pinta: false,
+                exigencia_vale_na_rede: true,
+            })
+            .expect("serializa");
+            v["poderes"].take()
+        };
+        assert_eq!(tela(Vec::new()), serde_json::json!([]));
+        assert_eq!(
+            tela(vec![seele_ffi::mods::Poder::Porta]),
+            serde_json::json!(["porta"])
         );
     }
 

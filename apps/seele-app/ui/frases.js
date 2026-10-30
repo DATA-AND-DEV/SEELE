@@ -726,6 +726,22 @@ const RECUSAS_DE_PACOTE = {
     "a lista de plataformas que ele declara está vazia, e assim ele não roda em lugar nenhum; quem publica precisa listar app, navegador ou as duas, ou tirar a chave",
   "plataforma-repetida":
     "a lista de plataformas que ele declara repete uma plataforma; quem publica precisa corrigi-la",
+  // Os poderes da API 8 (`Refused::PoderesPedemApiNova` e as que vêm com ela,
+  // `refusal_name` no seele-sessao): o que o MOD pode fazer além de pintar.
+  "poderes-pedem-api-nova":
+    "ele declara poderes ou uma metade de máquina, que só existem a partir da API 8, mas diz ser de uma API anterior; quem publica precisa declarar a API 8",
+  "poderes-vazios":
+    "a lista de poderes que ele declara está vazia, e assim ele não pede poder nenhum; quem publica precisa listar o poder que quer ou tirar a chave",
+  "poder-repetido":
+    "a lista de poderes que ele declara repete um poder; quem publica precisa corrigi-la",
+  "poderes-exigem-so-o-app":
+    "ele declara poderes, que abrem conexões na máquina de quem usa, mas não diz que roda só no app; quem publica precisa declarar plataformas como [\"app\"], porque o navegador não tem como",
+  "maquina-fora-do-pacote":
+    "a metade de máquina que ele declara aponta para fora da pasta do pacote; quem publica precisa apontar para um arquivo de dentro dela",
+  "maquina-sem-poderes":
+    "ele declara uma metade de máquina, mas nenhum poder para ela usar; quem publica precisa declarar o poder ou tirar a metade",
+  "porta-sem-entrar-no-jogo":
+    "ele declara a porta do jogo, mas não a permissão entrar-no-jogo que decide quem pode usá-la, e assim ninguém conseguiria abrir o túnel; quem publica precisa declarar a permissão",
   "api-too-old": `ele é de uma API mais velha que a 6, a mais velha que este app roda; procure a versão dele para a API ${APIS_ACEITAS_DITAS_OU}, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
   "malformed-id": "o identificador dele não é «autor/nome»",
   "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",

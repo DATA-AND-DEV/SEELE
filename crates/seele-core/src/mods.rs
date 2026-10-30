@@ -34,8 +34,9 @@ use seele_proto::mods::read_manifest;
 // precisa destes dois tipos, então esta camada, que é a fronteira, os
 // republica. É a mesma disciplina, não uma brecha nela.
 pub use seele_proto::mods::{
-    capacidades_da_api, como_ele_se_chama, inner_path, ComoEleSeChama, Manifest, ModAnunciado,
-    Plataforma, PlataformasDoMod, Refused, APIS_ACEITAS, MOD_API_MINIMA, MOD_API_VERSION,
+    capacidades_da_api, capacidades_do_manifesto, como_ele_se_chama, inner_path, ComoEleSeChama,
+    Manifest, ModAnunciado, Plataforma, PlataformasDoMod, Poder, Refused, APIS_ACEITAS,
+    MOD_API_MINIMA, MOD_API_VERSION,
 };
 
 /// A MOD that read cleanly.
