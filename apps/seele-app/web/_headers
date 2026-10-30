@@ -33,3 +33,9 @@
 # em 24/10/2026, na primeira publicação da 0.16).
 /executor-de-mod
   Content-Security-Policy: frame-ancestors 'self'
+
+/diagnostico-rede.html
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self' https://rendzvous.seele.sh; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+
+/diagnostico-rede
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; connect-src 'self' https://rendzvous.seele.sh; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
