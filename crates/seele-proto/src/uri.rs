@@ -579,6 +579,20 @@ fn analisar_com_origem(texto: &str, origem: &str) -> Result<Convite, ErroDeUri> 
 
 /// A leitura do `seele://`, que as duas formas dividem.
 fn analisar_seele(texto: &str) -> Result<Convite, ErroDeUri> {
+    // URLs compartilhadas podem codificar os colchetes do IPv6. Aceitar as
+    // duas escritas sem decodificar separadores como %26 ou %3F, que poderiam
+    // mudar os campos do convite. Escapes duplos continuam inválidos.
+    let decodificado;
+    let texto = if texto.contains('%') {
+        decodificado = texto
+            .replace("%5B", "[")
+            .replace("%5b", "[")
+            .replace("%5D", "]")
+            .replace("%5d", "]");
+        decodificado.as_str()
+    } else {
+        texto
+    };
     let resto = texto
         .strip_prefix(ESQUEMA)
         .ok_or(ErroDeUri::EsquemaDesconhecido)?;
@@ -824,6 +838,9 @@ impl Convite {
         }
         let corpo = self.to_string();
         let corpo = corpo.strip_prefix(ESQUEMA).unwrap_or(&corpo);
+        // Evita que detectores de links em mensagens tratem os colchetes do
+        // IPv6 como pontuação externa e cortem o convite antes do fp.
+        let corpo = corpo.replace('[', "%5B").replace(']', "%5D");
         let caminho = if caminho.is_empty() || caminho.starts_with('/') {
             caminho.to_owned()
         } else {
