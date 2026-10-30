@@ -11,8 +11,9 @@
 //    «só funciona no app» na tela de MODs, e ele continua EXIGIDO;
 // 2. MOD sem `plataformas` (servidor 0.18): carregado como hoje;
 // 3. MOD `["app", "navegador"]` e `["navegador"]`: carregados;
-// 4. o aceite (itens do anúncio, sem `plataformas`) emite `aceitar_mods`; o pacote de
-//    fora pode ser baixado, e depois de instalado não é montado;
+// 4. o aceite: com `plataformas` no anúncio (anfitrião 12) o de fora NÃO é baixado e o
+//    `aceitar_mods` sai igual; sem `plataformas` (anfitrião 11) os quatro são baixados,
+//    e o de fora, depois de instalado, não é montado;
 // 5. a marca trocada pelo host depois de carregado descarrega o MOD.
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/plataformas-dos-mods.cjs
@@ -89,18 +90,19 @@ const CATALOGO = [
         assert.doesNotMatch(tela, /não está instalado aqui/, `${motor}: ${tela}`);
 
         // O aceite do conjunto, como o anúncio o entrega: itens `ModExigido`
-        // (id, version, hash, repo, reach, no_servidor, tema), SEM `plataformas`.
-        // O pacote de fora pode ser baixado aqui (é o aceite deste plano); o que
-        // não pode é ser executado, e o `aceitar_mods` tem de sair igual.
-        const aceite = await pagina.evaluate(async (catalogo) => {
+        // (id, version, hash, repo, reach, no_servidor, tema) e, vindo de um
+        // anfitrião 12, `plataformas`. Rodado duas vezes sobre o mesmo catálogo:
+        // com a marca e sem ela.
+        const aceitar = (comMarca) => pagina.evaluate(async ([catalogo, comMarca]) => {
           table.mods_instalados = [];
           table.instalar_mod_do_catalogo = ({ id }) => {
             const m = catalogo.find((c) => c.id === id);
             table.mods_instalados.push({ id, hash: m.hash, client: true });
           };
           chamadas.length = 0;
-          const anunciados = catalogo.map(({ id, version, hash }) => ({
+          const anunciados = catalogo.map(({ id, version, hash, plataformas }) => ({
             id, version, hash, repo: "r", reach: [], no_servidor: false, tema: false,
+            ...(comMarca && plataformas ? { plataformas } : {}),
           }));
           await abrirAceiteDeMods("srv.exemplo:1", anunciados, "conj-1", null);
           await aceitarOsMods();
@@ -108,9 +110,17 @@ const CATALOGO = [
             baixou: chamadas.filter((c) => c.cmd === "instalar_mod_do_catalogo").map((c) => c.args.id).sort(),
             aceitou: chamadas.filter((c) => c.cmd === "aceitar_mods").map((c) => c.args),
           };
-        }, CATALOGO);
-        assert.deepEqual(aceite.aceitou, [{ alvo: "srv.exemplo:1", conjunto: "conj-1" }], `${motor}: ${JSON.stringify(aceite)}`);
-        assert.deepEqual(aceite.baixou, CATALOGO.map((m) => m.id).sort(), `${motor}: ${JSON.stringify(aceite)}`);
+        }, [CATALOGO, comMarca]);
+
+        // Anfitrião 12: o de fora não se baixa, e o aceite sai igual.
+        const com = await aceitar(true);
+        assert.deepEqual(com.aceitou, [{ alvo: "srv.exemplo:1", conjunto: "conj-1" }], `${motor}: ${JSON.stringify(com)}`);
+        assert.deepEqual(com.baixou, ["x/antigo", "x/dois", "x/so-web"], `${motor}: baixou o que não roda aqui: ${JSON.stringify(com)}`);
+
+        // Anfitrião 11: sem a marca nada sabe-se de fora, e baixam-se os quatro.
+        const sem = await aceitar(false);
+        assert.deepEqual(sem.aceitou, [{ alvo: "srv.exemplo:1", conjunto: "conj-1" }], `${motor}: ${JSON.stringify(sem)}`);
+        assert.deepEqual(sem.baixou, CATALOGO.map((m) => m.id).sort(), `${motor}: ${JSON.stringify(sem)}`);
 
         // Já na sessão, o catálogo traz `plataformas`: o de app, agora INSTALADO,
         // não é montado e diz por quê.

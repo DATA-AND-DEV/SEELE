@@ -7751,16 +7751,26 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
         seele_core::ConnectError::ChaveNaoProvada => ConnectionError::ChaveNaoProvada,
         // Não é uma falha traduzida: é a pergunta do ADR 0045 atravessando
         // inteira, com o que a tela precisa para fazê-la.
-        seele_core::ConnectError::ModsNaoAceitos { mods, conjunto } => {
-            ConnectionError::ModsNaoAceitos {
-                mods: mods
-                    .iter()
-                    .cloned()
-                    .map(crate::types::ModExigido::from)
-                    .collect(),
-                conjunto: conjunto.clone(),
-            }
-        }
+        seele_core::ConnectError::ModsNaoAceitos {
+            mods,
+            conjunto,
+            plataformas,
+        } => ConnectionError::ModsNaoAceitos {
+            mods: mods
+                .iter()
+                .cloned()
+                .map(|anunciado| {
+                    // A marca vem do quadro que o servidor 12 manda antes do
+                    // anúncio, juntada pelo hash; sem o quadro (servidor 11) ou
+                    // sem o hash nele, o campo fica ausente.
+                    let plataformas = plataformas.as_deref().and_then(|lista| {
+                        lista.iter().find(|p| p.hash == anunciado.hash)
+                    });
+                    crate::types::ModExigido::from(anunciado).com_plataformas(plataformas)
+                })
+                .collect(),
+            conjunto: conjunto.clone(),
+        },
         seele_core::ConnectError::HandshakeTimeout => ConnectionError::HandshakeTimeout,
         seele_core::ConnectError::SemResposta => ConnectionError::SemResposta,
         seele_core::ConnectError::NatNaoAbriu => ConnectionError::NatNaoAbriu,
@@ -7862,6 +7872,7 @@ mod a_volta_recusada_diz_o_motivo {
                 ConnectError::ModsNaoAceitos {
                     mods: Vec::new(),
                     conjunto: "conjunto".into(),
+                    plataformas: None,
                 },
                 EndReason::ModsMudaram,
             ),

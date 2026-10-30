@@ -1836,13 +1836,18 @@ impl Room {
             ServerMessage::ModsExigidos { .. } => {}
             ServerMessage::ModReply { .. } => {}
 
-            // O protocolo 12: as plataformas antes da entrada e o túnel de
-            // jogo. O `Room` ainda não os dobra; o tratamento real chega nas
-            // tarefas seguintes do plano «API 8, parte 2: o túnel de jogo»
-            // (servidor, enlace, núcleo e casca). Calada de propósito até lá,
-            // e não por esquecimento.
-            ServerMessage::PlataformasDosMods { .. }
-            | ServerMessage::TunelConcedido { .. }
+            // As plataformas dos MODs (protocolo 12) vêm **imediatamente antes**
+            // do anúncio, no aperto de mão, e valem para o aceite — quem as lê é
+            // `client::concluir`. Pela mesma razão do anúncio, não chegam a um
+            // `Room`; dito e decidido: se um servidor as mandar depois da
+            // entrada, a casca já decidiu o que baixar e não há o que absorver.
+            ServerMessage::PlataformasDosMods { .. } => {}
+
+            // O túnel de jogo (protocolo 12). O `Room` ainda não o dobra; o
+            // tratamento real chega nas tarefas seguintes do plano «API 8, parte
+            // 2: o túnel de jogo» (servidor, enlace, núcleo e casca). Calado de
+            // propósito até lá, e não por esquecimento.
+            ServerMessage::TunelConcedido { .. }
             | ServerMessage::TunelRecusado { .. }
             | ServerMessage::SirvaTunelPara { .. }
             | ServerMessage::AlcanceTunelPor { .. }

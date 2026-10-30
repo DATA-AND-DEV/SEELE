@@ -110,7 +110,11 @@ async fn bater(endereco: SocketAddr, semente: u8, convite: &str, aceita: bool) -
         },
     )
     .await?;
-    let depois = frame::read::<ServerMessage>(&mut recebe).await?;
+    let mut depois = frame::read::<ServerMessage>(&mut recebe).await?;
+    // Um par que fala 12 recebe as plataformas antes do anúncio; este não as lê.
+    if matches!(depois, ServerMessage::PlataformasDosMods { .. }) {
+        depois = frame::read::<ServerMessage>(&mut recebe).await?;
+    }
     let ServerMessage::ModsExigidos { conjunto, .. } = depois else {
         return Ok(fim(depois));
     };
@@ -182,6 +186,173 @@ async fn entrar_de_fato_gasta_o_convite() -> Result<()> {
         Fim::Recusada(DisconnectReason::CredentialRejected),
         "o convite de uso único entrou duas vezes"
     );
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// Os quadros que o servidor manda depois da prova até o anúncio (inclusive),
+/// lidos de um par cru que declara `faixa` no `Hello`, e como a entrada acabou
+/// depois do aceite.
+async fn quadros_depois_da_prova(
+    endereco: SocketAddr,
+    semente: u8,
+    faixa: seele_proto::version::Faixa,
+) -> Result<(Vec<ServerMessage>, Fim)> {
+    let comum::Ligado {
+        ponta: _ponta,
+        conexao,
+        mut envio,
+        mut recebe,
+    } = comum::ligar(endereco).await?;
+    let chave = SigningKey::from_bytes(&[semente; 32]);
+    frame::write(
+        &mut envio,
+        &ClientMessage::Hello {
+            faixa,
+            client: "par-cru".into(),
+            nickname: format!("pessoa{semente:03}"),
+            public_key: chave.verifying_key().to_bytes().to_vec(),
+            join_secret: None,
+            material_e2ee: None,
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
+        },
+    )
+    .await?;
+    let ServerMessage::Challenge { nonce } = frame::read::<ServerMessage>(&mut recebe).await?
+    else {
+        anyhow::bail!("o servidor não mandou Challenge");
+    };
+    frame::write(
+        &mut envio,
+        &ClientMessage::Response {
+            proof: chave
+                .sign(&comum::prova_amarrada(&conexao, &nonce))
+                .to_bytes()
+                .to_vec(),
+        },
+    )
+    .await?;
+    let mut quadros = Vec::new();
+    let conjunto = loop {
+        let quadro = frame::read::<ServerMessage>(&mut recebe).await?;
+        let primeiro = quadros.is_empty();
+        match &quadro {
+            ServerMessage::ModsExigidos { conjunto, .. } => {
+                let conjunto = conjunto.clone();
+                quadros.push(quadro);
+                break conjunto;
+            }
+            ServerMessage::PlataformasDosMods { .. } if primeiro => quadros.push(quadro),
+            outro => anyhow::bail!("quadro inesperado antes do anúncio: {outro:?}"),
+        }
+    };
+    frame::write(&mut envio, &ClientMessage::AceitarMods { conjunto }).await?;
+    let fim = match frame::read::<ServerMessage>(&mut recebe).await? {
+        ServerMessage::Session { .. } => Fim::Entrou,
+        ServerMessage::Disconnecting { reason } => Fim::Recusada(reason),
+        outro => Fim::Outro(format!("{outro:?}")),
+    };
+    Ok((quadros, fim))
+}
+
+/// Dois MODs: um que declara só o app, e um sem a chave (a coluna nula).
+async fn servidor_com_dois_mods() -> Result<(SocketAddr, Arc<Daemon>)> {
+    let (endereco, daemon) = servidor().await?;
+    {
+        let banco = daemon.server().persistence.lock().await;
+        for (id, hash, plataformas) in [
+            (
+                "fulano/so-app",
+                "a1".repeat(32),
+                Some(vec![seele_proto::mods::Plataforma::App]),
+            ),
+            ("fulano/sem-chave", "b2".repeat(32), None),
+        ] {
+            enable(
+                &banco,
+                &EnabledMod {
+                    id: id.into(),
+                    version: "1.0.0".into(),
+                    hash,
+                    repo: "https://github.com/seele/exemplo".into(),
+                    reach: vec![],
+                    server_half: false,
+                    api: 8,
+                    tema: false,
+                    plataformas,
+                },
+            )?;
+        }
+    }
+    Ok((endereco, daemon))
+}
+
+/// **As plataformas viajam logo antes do anúncio** (API 8, parte 2): a lista de
+/// cada MOD, pelo hash, na mesma ordem do anúncio; a coluna nula vira as duas.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_par_doze_recebe_as_plataformas_antes_do_anuncio() -> Result<()> {
+    use seele_proto::mods::{Plataforma, PlataformasDoMod};
+    let (endereco, daemon) = servidor_com_dois_mods().await?;
+
+    let (quadros, fim) = quadros_depois_da_prova(
+        endereco,
+        151,
+        seele_proto::version::Faixa {
+            minima: 10,
+            maxima: 12,
+        },
+    )
+    .await?;
+    let [ServerMessage::PlataformasDosMods { mods }, ServerMessage::ModsExigidos { mods: anunciados, .. }] =
+        quadros.as_slice()
+    else {
+        panic!("depois da prova tinham de vir PlataformasDosMods e ModsExigidos: {quadros:?}");
+    };
+    let hashes: Vec<_> = anunciados.iter().map(|m| m.hash.clone()).collect();
+    assert_eq!(
+        mods.iter().map(|m| m.hash.clone()).collect::<Vec<_>>(),
+        hashes,
+        "as plataformas não vêm pelos mesmos hashes, na mesma ordem do anúncio"
+    );
+    let de = |hash: &str| -> Vec<Plataforma> {
+        mods.iter()
+            .find(|m: &&PlataformasDoMod| m.hash == hash)
+            .map(|m| m.plataformas.clone())
+            .unwrap_or_default()
+    };
+    assert_eq!(de(&"a1".repeat(32)), vec![Plataforma::App]);
+    assert_eq!(
+        de(&"b2".repeat(32)),
+        vec![Plataforma::App, Plataforma::Navegador],
+        "sem a chave, as duas"
+    );
+    assert_eq!(fim, Fim::Entrou);
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **Um par 11 entra como sempre entrou:** o quadro depois da prova é o anúncio,
+/// sem as plataformas (uma variante que ele não conhece perderia o fluxo).
+#[tokio::test(flavor = "multi_thread")]
+async fn o_par_onze_entra_sem_as_plataformas() -> Result<()> {
+    let (endereco, daemon) = servidor_com_dois_mods().await?;
+
+    let (quadros, fim) = quadros_depois_da_prova(
+        endereco,
+        152,
+        seele_proto::version::Faixa {
+            minima: 10,
+            maxima: 11,
+        },
+    )
+    .await?;
+    assert!(
+        matches!(quadros.as_slice(), [ServerMessage::ModsExigidos { .. }]),
+        "o par 11 recebeu outra coisa antes do anúncio: {quadros:?}"
+    );
+    assert_eq!(fim, Fim::Entrou, "o aceite do par 11 segue como antes");
 
     daemon.shutdown();
     Ok(())

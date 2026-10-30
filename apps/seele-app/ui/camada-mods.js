@@ -394,7 +394,15 @@ async function obterOConjunto(mods) {
 
   const temOExato = (m) =>
     instalados.some((i) => i.id === m.id && i.hash === m.hash);
-  const faltando = mods.filter((m) => !temOExato(m));
+  // O que não roda neste lugar não se baixa: não serve aqui. A marca vem do
+  // anúncio do servidor 12 (`plataformas`, juntada pelo hash); um anúncio sem
+  // ela — um anfitrião 11 — é «as duas», e baixa tudo, como sempre. O de fora
+  // continua exigido pelo servidor do mesmo jeito: a casca só o pula, e a gestão
+  // de MODs o mostra, dizendo por quê.
+  let aqui = null;
+  try { aqui = plataformaDaCasca(await invoke("plataforma")); } catch { /* sem lugar: nada é pulado */ }
+  const daqui = mods.filter((m) => rodaAqui(m, aqui));
+  const faltando = daqui.filter((m) => !temOExato(m));
   if (faltando.length === 0) return true;
 
   for (const [quantos, m] of faltando.entries()) {
@@ -427,7 +435,7 @@ async function obterOConjunto(mods) {
     dizer(`não consegui conferir o que chegou: ${fraseDeErro(falha)}`);
     return false;
   }
-  const errados = mods.filter((m) => !temOExato(m));
+  const errados = daqui.filter((m) => !temOExato(m));
   if (errados.length > 0) {
     dizer(
       `o que chegou não é o que o servidor exige: ${errados

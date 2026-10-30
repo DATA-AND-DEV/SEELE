@@ -181,10 +181,28 @@ async fn um_servidor_com_mod_devolve_a_lista_a_quem_nao_aceitou() -> Result<()> 
     let Err(erro) = entrar(endereco, 1).await else {
         panic!("entrou num servidor com MOD habilitado sem aceitar nada");
     };
-    let ConnectError::ModsNaoAceitos { mods, conjunto } = erro else {
+    let ConnectError::ModsNaoAceitos {
+        mods,
+        conjunto,
+        plataformas,
+    } = erro
+    else {
         panic!("a casca não recebeu a pergunta, recebeu {erro:?}");
     };
 
+    // O servidor 12 diz onde cada MOD roda, pelo hash do anúncio; sem a chave na
+    // tabela, as duas.
+    assert_eq!(
+        plataformas,
+        Some(vec![seele_proto::mods::PlataformasDoMod {
+            hash: "a1".repeat(32),
+            plataformas: vec![
+                seele_proto::mods::Plataforma::App,
+                seele_proto::mods::Plataforma::Navegador
+            ],
+        }]),
+        "a pergunta do cliente 12 não carregou as plataformas do servidor 12"
+    );
     assert_eq!(
         conjunto, exigido,
         "o conjunto anunciado não é o que a tabela exige"
@@ -318,7 +336,7 @@ async fn um_aceite_de_ontem_nao_vale_para_o_conjunto_de_hoje() -> Result<()> {
     let Err(erro) = entrar_tendo_aceito(endereco, 12, Some(&de_ontem)).await else {
         panic!("um aceite para outro conjunto abriu o fluxo protegido");
     };
-    let ConnectError::ModsNaoAceitos { mods, conjunto } = erro else {
+    let ConnectError::ModsNaoAceitos { mods, conjunto, .. } = erro else {
         panic!("o aceite velho não virou uma pergunta nova, virou {erro:?}");
     };
     assert_eq!(
@@ -690,6 +708,18 @@ async fn o_que_o_servidor_fez(servidor: tokio::task::JoinHandle<Result<Resposta>
 async fn servidor_que_anuncia(
     mods: Vec<seele_proto::mods::ModAnunciado>,
 ) -> Result<(SocketAddr, tokio::task::JoinHandle<Result<Resposta>>)> {
+    // Sem nada antes do anúncio e com a sessão depois do aceite: o servidor 11.
+    servidor_que_anuncia_com(Vec::new(), None, mods).await
+}
+
+/// O mesmo servidor de mentira, com o que se quiser escrito **antes** do
+/// anúncio (as plataformas, ou o que as imitasse mal) e, se `no_lugar_da_sessao`,
+/// um quadro escrito depois do aceite em vez do `Session`.
+async fn servidor_que_anuncia_com(
+    antes: Vec<ServerMessage>,
+    no_lugar_da_sessao: Option<ServerMessage>,
+    mods: Vec<seele_proto::mods::ModAnunciado>,
+) -> Result<(SocketAddr, tokio::task::JoinHandle<Result<Resposta>>)> {
     // O servidor de mentira fala pelo enlace, como todo servidor da linha 2.
     let ponta = par_cru::anfitriao().await;
     let endereco = ponta.local_addr();
@@ -716,6 +746,9 @@ async fn servidor_que_anuncia(
         let mut mods = mods;
         let conjunto =
             seele_proto::mods::hex(&seele_proto::mods::identidade_do_conjunto(&mut mods));
+        for quadro in &antes {
+            frame::write(&mut envia, quadro).await?;
+        }
         frame::write(
             &mut envia,
             &ServerMessage::ModsExigidos {
@@ -733,6 +766,11 @@ async fn servidor_que_anuncia(
 
         if let Resposta::Aceitou(aceito) = &resposta {
             if aceito == &conjunto {
+                if let Some(quadro) = &no_lugar_da_sessao {
+                    frame::write(&mut envia, quadro).await?;
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    return Ok(resposta);
+                }
                 frame::write(
                     &mut envia,
                     &ServerMessage::Session {
@@ -784,10 +822,20 @@ async fn sem_aceite_guardado_o_cliente_recusa_e_devolve_a_lista() -> Result<()> 
     let Err(erro) = resultado else {
         panic!("o cliente entrou sem ter aceitado nada");
     };
-    let ConnectError::ModsNaoAceitos { mods, conjunto } = erro else {
+    let ConnectError::ModsNaoAceitos {
+        mods,
+        conjunto,
+        plataformas,
+    } = erro
+    else {
         let la = o_que_o_servidor_fez(servidor).await;
         panic!("o cliente não devolveu a pergunta: {erro:?}; {la}");
     };
+    // Um servidor 11 não diz onde os MODs rodam, e o cliente não inventa.
+    assert_eq!(
+        plataformas, None,
+        "o cliente fabricou plataformas que o servidor 11 não mandou"
+    );
     assert_eq!(mods.len(), 1);
     assert_eq!(mods[0].id, "seele/bot");
     assert_eq!(mods[0].repo, "https://github.com/seele/exemplo");
@@ -1035,7 +1083,13 @@ async fn bater_com_apis(
     let prova = par_cru::prova(&chave, &par.conexao, &nonce);
     par.mandar(&ClientMessage::Response { proof: prova })
         .await?;
-    par.proximo().await
+    let depois = par.proximo().await?;
+    // Este par fala 12: as plataformas dos MODs vêm antes do anúncio, e aqui o
+    // que se quer ver é o anúncio ou a recusa que o segue.
+    if matches!(depois, ServerMessage::PlataformasDosMods { .. }) {
+        return par.proximo().await;
+    }
+    Ok(depois)
 }
 
 /// **O servidor recusa com `ModsDeOutraApi` antes da portaria e do convite.**
@@ -1158,4 +1212,77 @@ async fn o_app_sem_a_api_do_mod_nao_deixa_pedido_na_portaria() -> Result<()> {
 async fn pedidos_pendentes(daemon: &Daemon) -> Result<i64> {
     let banco = daemon.server().persistence.lock().await;
     seele_server::portaria::pendentes(&banco)
+}
+
+// ------------------------------------- as plataformas antes do anúncio (API 8)
+
+fn plataformas_do(hash_de: u8) -> seele_proto::mods::PlataformasDoMod {
+    seele_proto::mods::PlataformasDoMod {
+        hash: format!("{hash_de:02x}").repeat(32),
+        plataformas: vec![seele_proto::mods::Plataforma::App],
+    }
+}
+
+/// **O cliente 12 diante do servidor de verdade com um MOD só de app:** a
+/// pergunta devolve a marca do servidor, que é o que o aceite usa para não
+/// baixar o que não roda aqui.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_cliente_doze_devolve_as_plataformas_que_o_servidor_disse() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, daemon) = servidor().await?;
+    let mut so_app = um_mod("seele/so-app", 0xa1);
+    so_app.plataformas = Some(vec![seele_proto::mods::Plataforma::App]);
+    habilitar(&daemon, &so_app).await;
+
+    let Err(ConnectError::ModsNaoAceitos { plataformas, .. }) = entrar(endereco, 61).await else {
+        panic!("o servidor com MOD não devolveu a pergunta");
+    };
+    assert_eq!(plataformas, Some(vec![plataformas_do(0xa1)]));
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **As plataformas duas vezes antes do anúncio são violação de protocolo**, e
+/// não um silêncio que escolhe uma das duas listas.
+#[tokio::test(flavor = "multi_thread")]
+async fn plataformas_duas_vezes_sao_violacao_de_protocolo() -> Result<()> {
+    let _vaga = vaga::minha();
+    let dita = ServerMessage::PlataformasDosMods {
+        mods: vec![plataformas_do(0xa1)],
+    };
+    let (endereco, servidor) =
+        servidor_que_anuncia_com(vec![dita.clone(), dita], None, vec![anunciado("seele/bot", 0xa1)])
+            .await?;
+
+    let resultado = entrar(endereco, 62).await;
+    assert!(
+        matches!(resultado, Err(ConnectError::ProtocolViolation)),
+        "plataformas repetidas passaram: {:?}",
+        resultado.err()
+    );
+    drop(servidor);
+    Ok(())
+}
+
+/// **As plataformas depois do anúncio também:** com o aceite guardado, o que
+/// chega no lugar do `Session` é violação, não uma sessão sem a lista.
+#[tokio::test(flavor = "multi_thread")]
+async fn plataformas_depois_do_anuncio_sao_violacao_de_protocolo() -> Result<()> {
+    let _vaga = vaga::minha();
+    let mut mods = vec![anunciado("seele/bot", 0xa1)];
+    let conjunto = seele_proto::mods::hex(&seele_proto::mods::identidade_do_conjunto(&mut mods));
+    let tarde = ServerMessage::PlataformasDosMods {
+        mods: vec![plataformas_do(0xa1)],
+    };
+    let (endereco, servidor) = servidor_que_anuncia_com(Vec::new(), Some(tarde), mods).await?;
+
+    let resultado = entrar_tendo_aceito(endereco, 63, Some(&conjunto)).await;
+    assert!(
+        matches!(resultado, Err(ConnectError::ProtocolViolation)),
+        "plataformas depois do anúncio passaram: {:?}",
+        resultado.err()
+    );
+    drop(servidor);
+    Ok(())
 }

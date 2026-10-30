@@ -1774,6 +1774,20 @@ async fn exigir_aceite_dos_mods(
         });
     }
 
+    // **As plataformas vão antes, e só para quem as lê.** Um par 11 que recebesse
+    // `PlataformasDosMods` leria uma variante que não conhece e perderia o fluxo;
+    // ele recebe o anúncio de sempre, e a casca dele baixa o que o servidor exige
+    // sem saber onde cada MOD roda. A versão vem do mesmo `vocabulario::desde`
+    // que guarda todo envio, e não de um número escrito aqui.
+    let plataformas = exigido.plataformas();
+    if versao >= seele_proto::vocabulario::desde(&plataformas) {
+        frame::write_em(send, versao, &plataformas)
+            .await
+            .map_err(|error| Refusal {
+                reason: DisconnectReason::ProtocolViolation,
+                detail: format!("could not send PlataformasDosMods: {error}"),
+            })?;
+    }
     frame::write_em(send, versao, &anuncio)
         .await
         .map_err(|error| Refusal {
@@ -6426,11 +6440,19 @@ mod o_aceite_dos_mods {
         // Este teste não roda a etapa e o cliente no mesmo lugar porque os dois
         // esperam um pelo outro: a etapa escreve e fica esperando a resposta.
         let mut cliente_recebe = fluxo.cliente_recebe;
+        // Na versão de agora as plataformas vêm imediatamente antes do anúncio.
+        let ServerMessage::PlataformasDosMods { mods: plataformas } =
+            frame::read::<ServerMessage>(&mut cliente_recebe).await?
+        else {
+            anyhow::bail!("o servidor não disse as plataformas antes do anúncio");
+        };
         let ServerMessage::ModsExigidos { mods, conjunto } =
             frame::read::<ServerMessage>(&mut cliente_recebe).await?
         else {
             anyhow::bail!("o servidor não anunciou os MODs");
         };
+        assert_eq!(plataformas.len(), 1);
+        assert_eq!(plataformas[0].hash, mods[0].hash);
 
         assert_eq!(mods.len(), 1);
         assert_eq!(mods[0].id, "seele/bot");

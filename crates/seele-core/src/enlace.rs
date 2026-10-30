@@ -7264,6 +7264,7 @@ mod tests {
         let pergunta = || ConnectError::ModsNaoAceitos {
             mods: Vec::new(),
             conjunto: "9f86d0".into(),
+            plataformas: None,
         };
 
         assert!(
@@ -7293,6 +7294,7 @@ mod tests {
         a_mostrar.anotar(ConnectError::ModsNaoAceitos {
             mods: Vec::new(),
             conjunto: "9f86d0".into(),
+            plataformas: None,
         });
 
         assert!(

@@ -200,6 +200,11 @@ pub enum ConnectError {
         mods: Vec<seele_proto::mods::ModAnunciado>,
         /// A identidade do conjunto, que é o que se guarda ao aceitar.
         conjunto: String,
+        /// Onde cada MOD roda, como o servidor disse **logo antes** do anúncio
+        /// (protocolo 12). `None` é «o servidor não disse» — um servidor 11, que
+        /// não conhece o quadro —, e a casca então baixa tudo, como sempre; `Some`
+        /// deixa o aceite pular o que não roda na plataforma dela.
+        plataformas: Option<Vec<seele_proto::mods::PlataformasDoMod>>,
     },
 
     /// Quem atendeu não é a sala do código para o qual se ligou (ADR 0060).
@@ -3334,6 +3339,28 @@ async fn concluir(
     aceito: Option<&str>,
     mut answer: ServerMessage,
 ) -> Result<(SessionInfo, u8), ConnectError> {
+    // **As plataformas dos MODs, quando o servidor as diz** (protocolo 12): vêm
+    // imediatamente antes do anúncio, e só dele. Guardá-las e ler o quadro
+    // seguinte; qualquer coisa que não seja o anúncio ali — a sessão, uma
+    // segunda lista — é violação de protocolo, e não um silêncio que escolheria
+    // uma das listas. Uma lista que chegasse DEPOIS do anúncio cai no
+    // `ProtocolViolation` do fim desta função, no lugar em que se espera a sessão.
+    let mut plataformas = None;
+    if let ServerMessage::PlataformasDosMods { mods } = answer {
+        plataformas = Some(mods);
+        answer = frame::read::<ServerMessage>(recv).await.map_err(|error| {
+            tracing::warn!(%error, "no announcement came back after the MOD platforms");
+            ConnectError::Unreachable
+        })?;
+        if !matches!(answer, ServerMessage::ModsExigidos { .. }) {
+            tracing::warn!(
+                ?answer,
+                "expected ModsExigidos right after PlataformasDosMods"
+            );
+            return Err(ConnectError::ProtocolViolation);
+        }
+    }
+
     // O anúncio de MODs, quando o servidor exige algum. ADR 0045.
     //
     // # Por que a decisão não é tomada aqui
@@ -3395,7 +3422,11 @@ async fn concluir(
                 quantos = mods.len(),
                 "o servidor exige um conjunto de MODs que esta máquina não aceitou"
             );
-            return Err(ConnectError::ModsNaoAceitos { mods, conjunto });
+            return Err(ConnectError::ModsNaoAceitos {
+                mods,
+                conjunto,
+                plataformas,
+            });
         }
     }
 

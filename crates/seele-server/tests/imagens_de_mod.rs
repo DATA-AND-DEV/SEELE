@@ -104,6 +104,11 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
     )
     .await?;
     let mut chegada = frame::read::<ServerMessage>(&mut recebe).await?;
+    // Este par fala 12: as plataformas dos MODs vêm antes do anúncio, e aqui não
+    // importam.
+    if matches!(chegada, ServerMessage::PlataformasDosMods { .. }) {
+        chegada = frame::read::<ServerMessage>(&mut recebe).await?;
+    }
     if let ServerMessage::ModsExigidos { conjunto, .. } = chegada {
         frame::write(&mut envio, &ClientMessage::AceitarMods { conjunto }).await?;
         chegada = frame::read::<ServerMessage>(&mut recebe).await?;

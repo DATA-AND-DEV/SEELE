@@ -30,7 +30,7 @@ use seele_proto::control::{
     decode, decode_da_lista, encode_em, ClientMessage, ControlError, Lido, ServerMessage,
     MAX_NICKNAME_LEN, NONCE_LEN,
 };
-use seele_proto::mods::ModAnunciado;
+use seele_proto::mods::{ModAnunciado, Plataforma, PlataformasDoMod};
 use seele_proto::quadro::{enquadrar, Desenquadrador};
 use seele_proto::version::{
     confere_o_carimbo, linha_de, linha_do_protocolo, Linha, FAIXA, VERSAO_MINIMA,
@@ -132,6 +132,9 @@ enum Etapa {
     Assinando,
     /// A prova saiu; vem a sessão, o anúncio de MODs ou uma recusa.
     Resposta,
+    /// As plataformas dos MODs chegaram (protocolo 12); só o anúncio pode vir
+    /// agora.
+    Anuncio,
     /// Aguarda uma única decisão da campainha, sem renovar o prazo.
     Tocando,
     /// A sessão está aberta.
@@ -242,6 +245,12 @@ pub struct Ligacao {
     /// quadro, ou pelo código do fechamento): o outro não conta duas vezes.
     /// Volta a `false` a cada conexão nova ([`Ligacao::retomar`]).
     ficou_para_tras: bool,
+    /// O que o servidor 12 disse sobre onde cada MOD roda, antes do anúncio.
+    /// Fica `None` com um servidor 11, que não manda o quadro.
+    plataformas: Option<Vec<PlataformasDoMod>>,
+    /// O anúncio desta conexão já passou: as plataformas que chegassem agora
+    /// não valem para ele, e são violação de protocolo.
+    anuncio_visto: bool,
 }
 
 /// O sinal desta ponta: o `Signal` do `seele-proto`, alimentado a cada volta
@@ -282,6 +291,8 @@ impl Ligacao {
             voltando: None,
             relogio: std::time::Duration::ZERO,
             ficou_para_tras: false,
+            plataformas: None,
+            anuncio_visto: false,
         };
         ligacao.dizer_ola(pedido)?;
         Ok(ligacao)
@@ -464,6 +475,9 @@ impl Ligacao {
             return self.recusar(json!("Unreachable"));
         }
         self.etapa = Etapa::Resposta;
+        // Uma conexão nova (ou a volta): nada do que a anterior disse vale.
+        self.plataformas = None;
+        self.anuncio_visto = false;
         Vec::new()
     }
 
@@ -524,7 +538,11 @@ impl Ligacao {
                 }
                 vec![Passo::Perdida("o fluxo de controle acabou".into())]
             }
-            Etapa::Desafio | Etapa::Assinando | Etapa::Resposta | Etapa::Tocando => {
+            Etapa::Desafio
+            | Etapa::Assinando
+            | Etapa::Resposta
+            | Etapa::Anuncio
+            | Etapa::Tocando => {
                 self.recusar(json!("Unreachable"))
             }
         }
@@ -565,6 +583,13 @@ impl Ligacao {
             },
             Etapa::Resposta => match decode::<ServerMessage>(quadro) {
                 Ok(resposta) => self.resposta(resposta),
+                Err(_) => self.recusar(json!("Unreachable")),
+            },
+            // Depois das plataformas só o anúncio é legítimo: a sessão sem ele, ou
+            // uma segunda lista, é violação — o desktop faz o mesmo.
+            Etapa::Anuncio => match decode::<ServerMessage>(quadro) {
+                Ok(anuncio @ ServerMessage::ModsExigidos { .. }) => self.resposta(anuncio),
+                Ok(_) => self.recusar(classificar_protocolo()),
                 Err(_) => self.recusar(json!("Unreachable")),
             },
             Etapa::Dentro(mut sessao) => {
@@ -658,7 +683,13 @@ impl Ligacao {
                 self.etapa = Etapa::Tocando;
                 vec![Passo::Tocando { prazo_s }]
             }
+            ServerMessage::PlataformasDosMods { mods } if !self.anuncio_visto => {
+                self.plataformas = Some(mods);
+                self.etapa = Etapa::Anuncio;
+                Vec::new()
+            }
             ServerMessage::ModsExigidos { mods, conjunto } => {
+                self.anuncio_visto = true;
                 if self.aceito.as_deref() == Some(conjunto.as_str()) {
                     if self
                         .escrever(&ClientMessage::AceitarMods {
@@ -677,7 +708,11 @@ impl Ligacao {
                     // **Recusa explícita, e não sumir**: quem hospeda distingue
                     // «leu e não quis» de «a conexão caiu».
                     let _ = self.escrever(&ClientMessage::RecusarMods);
-                    self.recusar(mods_nao_aceitos(&mods, &conjunto))
+                    self.recusar(mods_nao_aceitos(
+                        &mods,
+                        &conjunto,
+                        self.plataformas.as_deref(),
+                    ))
                 }
             }
             ServerMessage::Session {
@@ -794,12 +829,16 @@ fn outra_linha(numero: u8) -> Value {
 }
 
 /// `ModsNaoAceitos`, com os MODs no JSON do `ModExigido` (o anúncio sem a
-/// `api`).
-fn mods_nao_aceitos(mods: &[ModAnunciado], conjunto: &str) -> Value {
+/// `api`, e com `plataformas` quando o servidor 12 as disse para aquele hash).
+fn mods_nao_aceitos(
+    mods: &[ModAnunciado],
+    conjunto: &str,
+    plataformas: Option<&[PlataformasDoMod]>,
+) -> Value {
     let mods: Vec<Value> = mods
         .iter()
         .map(|anunciado| {
-            json!({
+            let mut item = json!({
                 "id": anunciado.id,
                 "version": anunciado.version,
                 "hash": anunciado.hash,
@@ -807,7 +846,25 @@ fn mods_nao_aceitos(mods: &[ModAnunciado], conjunto: &str) -> Value {
                 "reach": anunciado.reach,
                 "no_servidor": anunciado.no_servidor,
                 "tema": anunciado.tema,
-            })
+            });
+            // Ausente, e não vazio, quando o servidor não disse (um 11): é o
+            // mesmo contrato do `ModExigido` do desktop.
+            if let Some(dita) = plataformas
+                .and_then(|lista| lista.iter().find(|dita| dita.hash == anunciado.hash))
+            {
+                let nomes: Vec<&str> = dita
+                    .plataformas
+                    .iter()
+                    .map(|p| match p {
+                        Plataforma::App => "app",
+                        Plataforma::Navegador => "navegador",
+                    })
+                    .collect();
+                if let Some(campos) = item.as_object_mut() {
+                    campos.insert("plataformas".into(), json!(nomes));
+                }
+            }
+            item
         })
         .collect();
     json!({ "ModsNaoAceitos": { "mods": mods, "conjunto": conjunto } })
@@ -1197,5 +1254,124 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Uma ligação que mandou a prova e espera o que vem depois dela.
+    fn depois_da_prova(aceito: Option<String>) -> Ligacao {
+        let mut pedido = pedido();
+        pedido.aceito = aceito;
+        let mut ligacao = Ligacao::abrir(pedido).unwrap();
+        let _ = escritos(&mut ligacao);
+        let _ = ligacao.chegou(&do_servidor(&ServerMessage::Challenge {
+            nonce: vec![3; 32],
+        }));
+        let _ = ligacao.assinado(&[9; 64]);
+        let _ = escritos(&mut ligacao);
+        ligacao
+    }
+
+    fn um_anunciado(hash_de: u8) -> ModAnunciado {
+        ModAnunciado {
+            id: format!("fulano/mod-{hash_de:02x}"),
+            version: "1.0.0".into(),
+            hash: format!("{hash_de:02x}").repeat(32),
+            repo: "https://github.com/seele/exemplo".into(),
+            reach: Vec::new(),
+            no_servidor: false,
+            api: 8,
+            tema: false,
+        }
+    }
+
+    fn plataformas_de(hash_de: u8, lista: Vec<seele_proto::mods::Plataforma>) -> ServerMessage {
+        ServerMessage::PlataformasDosMods {
+            mods: vec![seele_proto::mods::PlataformasDoMod {
+                hash: format!("{hash_de:02x}").repeat(32),
+                plataformas: lista,
+            }],
+        }
+    }
+
+    fn anuncio_de(mods: Vec<ModAnunciado>) -> (ServerMessage, String) {
+        let mut ordenados = mods.clone();
+        let conjunto =
+            seele_proto::mods::hex(&seele_proto::mods::identidade_do_conjunto(&mut ordenados));
+        (
+            ServerMessage::ModsExigidos {
+                mods,
+                conjunto: conjunto.clone(),
+            },
+            conjunto,
+        )
+    }
+
+    /// **As plataformas chegam antes do anúncio e saem no JSON da recusa**, pelo
+    /// hash, como o desktop as junta no `ModExigido`; um servidor 11 (sem o
+    /// quadro) não tem o campo.
+    #[test]
+    fn as_plataformas_ditas_antes_do_anuncio_saem_no_json_da_recusa() {
+        use seele_proto::mods::Plataforma;
+        let (anuncio, _) = anuncio_de(vec![um_anunciado(0xa1), um_anunciado(0xb2)]);
+
+        let mut ligacao = depois_da_prova(None);
+        assert!(ligacao
+            .chegou(&do_servidor(&plataformas_de(0xa1, vec![Plataforma::App])))
+            .is_empty());
+        let passos = ligacao.chegou(&do_servidor(&anuncio));
+        let [Passo::Recusada(recusa)] = passos.as_slice() else {
+            panic!("o anúncio não virou a recusa: {passos:?}");
+        };
+        let mods = &recusa["ModsNaoAceitos"]["mods"];
+        let de = |hash_de: u8| {
+            mods.as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["hash"] == format!("{hash_de:02x}").repeat(32))
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(de(0xa1)["plataformas"], json!(["app"]));
+        assert!(
+            de(0xb2).get("plataformas").is_none(),
+            "um MOD que o servidor não marcou ganhou uma marca: {}",
+            de(0xb2)
+        );
+
+        // Sem o quadro (servidor 11): nenhum MOD leva o campo.
+        let mut ligacao = depois_da_prova(None);
+        let passos = ligacao.chegou(&do_servidor(&anuncio));
+        let [Passo::Recusada(recusa)] = passos.as_slice() else {
+            panic!("{passos:?}");
+        };
+        assert!(recusa["ModsNaoAceitos"]["mods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|m| m.get("plataformas").is_none()));
+    }
+
+    /// **Duas vezes, ou depois do anúncio, é violação de protocolo.**
+    #[test]
+    fn as_plataformas_repetidas_ou_tardias_sao_violacao_de_protocolo() {
+        use seele_proto::mods::Plataforma;
+        let dita = plataformas_de(0xa1, vec![Plataforma::App]);
+        let (anuncio, conjunto) = anuncio_de(vec![um_anunciado(0xa1)]);
+        let violacao = |passos: &[Passo]| {
+            matches!(passos, [Passo::Recusada(m)] if *m == classificar_protocolo())
+        };
+
+        let mut ligacao = depois_da_prova(None);
+        ligacao.chegou(&do_servidor(&dita));
+        assert!(violacao(&ligacao.chegou(&do_servidor(&dita))));
+
+        // Depois do anúncio aceito: no lugar da sessão.
+        let mut ligacao = depois_da_prova(Some(conjunto));
+        assert!(ligacao.chegou(&do_servidor(&anuncio)).is_empty());
+        assert!(violacao(&ligacao.chegou(&do_servidor(&dita))));
+
+        // E um quadro que não é o anúncio, depois delas.
+        let mut ligacao = depois_da_prova(None);
+        ligacao.chegou(&do_servidor(&dita));
+        assert!(violacao(&ligacao.chegou(&do_servidor(&sessao()))));
     }
 }

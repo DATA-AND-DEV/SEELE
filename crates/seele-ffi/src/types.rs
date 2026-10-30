@@ -187,6 +187,37 @@ pub struct ModExigido {
     /// Se ele pode pintar a aparência do servidor inteiro (D-api-8): a linha
     /// que a tela de aceite diz, porque quem aceita tem de saber.
     pub tema: bool,
+    /// Onde ele roda (`"app"`, `"navegador"`), como o servidor 12 disse antes do
+    /// anúncio. **Ausente**, e não vazia, quando o servidor não disse (um 11): a
+    /// casca lê ausente como «as duas» e baixa tudo, como sempre.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plataformas: Option<Vec<String>>,
+}
+
+impl ModExigido {
+    /// Junta o que o servidor disse sobre onde este MOD roda.
+    #[must_use]
+    pub fn com_plataformas(
+        mut self,
+        dita: Option<&seele_core::mods::PlataformasDoMod>,
+    ) -> Self {
+        self.plataformas = dita.map(|dita| {
+            dita.plataformas
+                .iter()
+                .map(|p| nome_da_plataforma(*p).to_owned())
+                .collect()
+        });
+        self
+    }
+}
+
+/// O nome da plataforma como a casca o lê, o mesmo do manifesto.
+#[must_use]
+pub fn nome_da_plataforma(plataforma: seele_core::mods::Plataforma) -> &'static str {
+    match plataforma {
+        seele_core::mods::Plataforma::App => "app",
+        seele_core::mods::Plataforma::Navegador => "navegador",
+    }
 }
 
 impl From<seele_core::mods::ModAnunciado> for ModExigido {
@@ -199,6 +230,7 @@ impl From<seele_core::mods::ModAnunciado> for ModExigido {
             reach: anunciado.reach,
             no_servidor: anunciado.no_servidor,
             tema: anunciado.tema,
+            plataformas: None,
         }
     }
 }
