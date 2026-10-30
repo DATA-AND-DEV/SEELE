@@ -357,8 +357,9 @@ fn global_v6(endereco: std::net::Ipv6Addr) -> bool {
 /// rota padrão ainda acerta em toda máquina **sem** VPN, que é a maioria; é
 /// pior que enumerar e muito melhor que convidar para o loopback.
 fn descobrir_enderecos() -> Vec<interfaces::Achado> {
-    let achados = interfaces::descobrir();
+    let mut achados = interfaces::descobrir();
     if !achados.is_empty() {
+        priorizar_saida_v6(&mut achados, endereco_de_saida_v6());
         return achados;
     }
     tracing::warn!("sem enumeração de interfaces; caindo no endereço da rota padrão");
@@ -373,6 +374,27 @@ fn descobrir_enderecos() -> Vec<interfaces::Achado> {
         })
         .into_iter()
         .collect()
+}
+
+// A ordem de enumeração não é a escolha de origem do UDP: no Windows, o
+// temporário pode vir depois de dois IPv6 permanentes e perder a vaga no
+// convite. Promovemos apenas um IPv6 físico já enumerado. Uma rota de VPN
+// nunca inventa um endereço nem substitui a descoberta das interfaces.
+fn priorizar_saida_v6(achados: &mut [interfaces::Achado], saida: Option<std::net::Ipv6Addr>) {
+    let Some(saida) = saida.filter(|ip| global_v6(*ip)) else {
+        return;
+    };
+    let fisico_global_v6 = |achado: &interfaces::Achado| {
+        achado.classe() == interfaces::Origem::Fisica
+            && matches!(achado.ip, IpAddr::V6(ip) if global_v6(ip))
+    };
+    let primeiro = achados.iter().position(fisico_global_v6);
+    let preferido = achados
+        .iter()
+        .position(|achado| fisico_global_v6(achado) && achado.ip == IpAddr::V6(saida));
+    if let (Some(primeiro), Some(preferido)) = (primeiro, preferido) {
+        achados.swap(primeiro, preferido);
+    }
 }
 
 /// O endereço desta máquina **na rede de casa**, sem consultar a rota padrão.
@@ -798,8 +820,8 @@ impl Alcance {
             candidatos.push((Tipo::Refletido, furado));
         }
 
-        // Estável: dentro de uma classe vale a ordem em que a máquina listou as
-        // interfaces, que é a ordem em que o próprio sistema as prefere.
+        // Estável: dentro de uma classe vale a ordem da descoberta, que promove
+        // o IPv6 físico de saída antes do corte; enumeração não implica preferência.
         //
         // Reservar antes de cortar. Dois endereços são insubstituíveis e não
         // podem perder a vaga para um terceiro da mesma classe:
@@ -2749,6 +2771,64 @@ mod testes {
             onde(furado) < onde(liberado("2001:db8::1", 8383)),
             "o palpite do PCP passou na frente da observação: {alvos:?}"
         );
+    }
+
+    #[test]
+    fn o_ipv6_de_saida_sobrevive_a_dois_permanentes_no_convite() {
+        let mut achados = vec![
+            na_placa("192.168.0.32"),
+            na_placa("2001:db8::1"),
+            na_placa("2001:db8::2"),
+            na_placa("2001:db8::3"),
+        ];
+        let saida = "2001:db8::3".parse().unwrap();
+        let refletido = "203.0.113.7:14334".parse().unwrap();
+        let decidir = |achados: &[interfaces::Achado], liberada| {
+            Alcance::decidir(
+                Escuta::nova(8383, Pilha::Dupla),
+                None,
+                liberada,
+                Some(refletido),
+                achados,
+                None,
+                None,
+            )
+            .alvos()
+            .to_vec()
+        };
+        let destino = SocketAddr::new(IpAddr::V6(saida), 8383);
+        assert!(!decidir(&achados, None).contains(&destino));
+        priorizar_saida_v6(&mut achados, Some(saida));
+        let alvos = decidir(&achados, None);
+        assert!(alvos.contains(&destino));
+        assert!(alvos.contains(&refletido));
+        assert_eq!(alvos.first(), Some(&"192.168.0.32:8383".parse().unwrap()));
+        assert_eq!(alvos.len(), LIMITE_DE_CANDIDATOS);
+        // Um pinhole que o PCP confirmou continua acima da preferência de saída.
+        let liberada = "[2001:db8::2]:8383".parse().unwrap();
+        let alvos = decidir(&achados, Some(liberada));
+        assert!(alvos.contains(&liberada));
+        assert!(alvos.contains(&destino));
+    }
+
+    #[test]
+    fn a_saida_v6_nao_promove_tunel_nem_inventa_endereco() {
+        let original = vec![
+            na_placa("192.168.0.32"),
+            na_placa("2001:db8::1"),
+            no_tunel("2001:db8::2"),
+            na_placa("2001:db8::3"),
+        ];
+        for saida in [
+            None,
+            Some("2001:db8::2"),
+            Some("2001:db8::4"),
+            Some("fd00::1"),
+        ] {
+            let mut achados = original.clone();
+            priorizar_saida_v6(&mut achados, saida.map(|ip| ip.parse().unwrap()));
+            assert_eq!(achados, original);
+        }
     }
 
     #[test]

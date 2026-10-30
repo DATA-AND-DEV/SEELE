@@ -79,7 +79,7 @@ use crate::{CertificadoDtls, Motivo};
 
 /// Os canais de volume só escrevem no SCTP com a associação abaixo disto.
 pub const LIMIAR_DE_VOLUME: usize = 64 * 1024;
-/// Quanto um pendente do anfitrião espera o primeiro DTLS.
+/// Quanto o anfitrião espera o primeiro DTLS depois de o ICE nomear um caminho.
 pub const ESPERA_PELO_DTLS: Duration = Duration::from_secs(2);
 /// Binding Indications por candidato num furo (R2).
 pub const INDICACOES_POR_CANDIDATO: usize = 5;
@@ -921,13 +921,14 @@ struct Par {
     pronto: bool,
     dtls_visto: bool,
     algum_pacote: bool,
+    falhas_de_envio: u64,
     criado: Instant,
     prazo: Instant,
     ultimo_rx: Instant,
     ultimo_tx: Instant,
     /// Desde quando o anfitrião espera o primeiro DTLS ([`ESPERA_PELO_DTLS`]).
-    /// O par do Binding conta do nascimento; o do `CHAMADO`, do primeiro
-    /// Binding de quem liga (`None` até lá).
+    /// Só começa depois de o ICE nomear um caminho. Um Binding inicial ainda
+    /// pode ser apenas uma checagem; até a nomeação vale o prazo geral do aperto.
     espera_do_dtls_desde: Option<Instant>,
     /// Os candidatos que os `CHAMADO`s deram a este par (anfitrião).
     remotos_do_chamado: Vec<SocketAddr>,
@@ -1097,11 +1098,6 @@ impl Motor {
                 if let Some(&id) = self.credenciais.get(&u) {
                     if ativa.is_none_or(|ativa| ativa == id) {
                         self.donos.insert(origem, id);
-                    }
-                    if let Some(par) = self.pares.get_mut(&id) {
-                        // O par do `CHAMADO` começa a esperar o DTLS no primeiro
-                        // Binding de quem liga.
-                        par.espera_do_dtls_desde.get_or_insert(agora);
                     }
                     self.entregar(id, agora, entrada, bytes.len(), None);
                     return;
@@ -1671,12 +1667,6 @@ impl Motor {
         );
         if let Some(par) = self.pares.get_mut(&id) {
             par.apresentacao = apresentacao;
-            if pelo_chamado {
-                // O par do `CHAMADO` nasce antes de quem liga checar (quem liga
-                // ainda espera o ATENDE pelo sinal): os 2 s sem DTLS só contam a
-                // partir do primeiro Binding dele. Até lá, vale o prazo do aperto.
-                par.espera_do_dtls_desde = None;
-            }
             let (criado, ip) = (par.criado, par.ip);
             self.gastar_uma_criacao(criado, ip);
         }
@@ -1746,11 +1736,12 @@ impl Motor {
                 pronto: false,
                 dtls_visto: false,
                 algum_pacote: false,
+                falhas_de_envio: 0,
                 criado: agora,
                 prazo: agora + prazo,
                 ultimo_rx: agora,
                 ultimo_tx: agora,
-                espera_do_dtls_desde: Some(agora),
+                espera_do_dtls_desde: None,
                 remotos_do_chamado: Vec::new(),
                 proximo: agora,
                 fechando: None,
@@ -2226,6 +2217,9 @@ impl Motor {
                         self.contadores
                             .datagramas_perdidos_na_saida
                             .fetch_add(1, Ordering::Relaxed);
+                        if let Some(par) = self.pares.get_mut(&id) {
+                            par.falhas_de_envio = par.falhas_de_envio.saturating_add(1);
+                        }
                     }
                     if let Some(par) = self.pares.get_mut(&id) {
                         par.ultimo_tx = Instant::now();
@@ -2262,6 +2256,14 @@ impl Motor {
 
     fn evento(&mut self, id: usize, evento: Event) {
         match evento {
+            Event::IceConnectionStateChange(estado) if estado.is_connected() => {
+                if let Some(par) = self.pares.get_mut(&id) {
+                    // A nomeação vem de uma entrada já validada pelo ICE. Não
+                    // iniciar no primeiro Binding nem renovar com repetições:
+                    // o prazo geral e os portões de admissão continuam valendo.
+                    par.espera_do_dtls_desde.get_or_insert(par.ultimo_rx);
+                }
+            }
             Event::Connected => {
                 if let Some(par) = self.pares.get_mut(&id) {
                     par.conectado = true;
@@ -2869,6 +2871,31 @@ impl Motor {
         };
         self.vivas.store(self.pares.len(), Ordering::Relaxed);
         let agora = Instant::now();
+        if !par.pronto && par.papel == Papel::Anfitriao && !par.superado {
+            // Uma linha por aperto encerrado, sem endereços, credenciais ou
+            // conteúdo. "Gerados" inclui falhas locais de send_to: não prova
+            // que um datagrama chegou à rede ou ao outro aparelho.
+            tracing::info!(
+                conexao = id,
+                idade_ms = agora.saturating_duration_since(par.criado).as_millis() as u64,
+                ice_nomeado = par.espera_do_dtls_desde.is_some(),
+                dtls_recebido = par.dtls_visto,
+                datagramas_gerados = par.comp.pacotes_enviados.load(Ordering::Relaxed),
+                falhas_de_envio = par.falhas_de_envio,
+                bytes_recebidos = par.comp.bytes_recebidos.load(Ordering::Relaxed),
+                candidatos_ipv4 = par
+                    .remotos_do_chamado
+                    .iter()
+                    .filter(|c| c.is_ipv4())
+                    .count(),
+                candidatos_ipv6 = par
+                    .remotos_do_chamado
+                    .iter()
+                    .filter(|c| c.is_ipv6())
+                    .count(),
+                "aperto do anfitrião encerrado antes de abrir os canais"
+            );
+        }
         self.credenciais.remove(&par.comp.credencial);
         self.donos.retain(|_, dono| *dono != id);
         if par.papel == Papel::Anfitriao {
@@ -3131,3 +3158,6 @@ mod tests {
         assert_eq!(ponta.furar(&alvos[..1]), 0);
     }
 }
+
+#[cfg(test)]
+mod dtls_prazo_testes;
