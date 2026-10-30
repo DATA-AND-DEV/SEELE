@@ -9,6 +9,7 @@ function instalarConversasPessoaisWeb() {
   let servico = null, preparando = null, voz = null, preparandoVoz = null, tela = null, par = null;
   let geracao = 0, geracaoDaRecepcao = 0, geracaoDaMidia = 0, microfone = false, abrindoMicrofone = false;
   let apelidoDaConversa = "";
+  let diagnosticoDaConexao = null;
   let fase = "livre", linkDeEntrada = null, conviteNoServico = null, recebendoCodigo = true;
   let estadoDoCodigoDireto = { estado: "Subindo" }, criandoLink = false, preparoDoConvite = null;
   const viva = () => ["procurando", "tocando", "chamando", "conectando", "dentro"].includes(fase);
@@ -77,6 +78,7 @@ function instalarConversasPessoaisWeb() {
         estaVoz.mudo(false); estaVoz.modo(2);
         estaVoz.entrar(estePar.enlace.transporteDaVoz, estePar.meta.papel === "quem-liga" ? 1 : 2);
         microfone = true; vista.microfone(true);
+        void selecaoDaSaida.restaurar();
       } catch (erro) {
         // Invalida uma captura pendente sem desligar a reprodução do par nem
         // atingir uma tentativa mais nova que use a mesma instância de voz.
@@ -88,9 +90,20 @@ function instalarConversasPessoaisWeb() {
       if (!tela || fase !== "dentro") throw new Error("Tela ainda está abrindo");
       return tela.noAr ? tela.parar() : tela.compartilhar();
     },
+    saida: id => selecaoDaSaida.selecionar(id),
     podeCompartilhar: () => typeof temCapturaParaCodificar === "function" && temCapturaParaCodificar(),
   } });
   document.body.append(vista.elemento);
+  const selecaoDaSaida = criarSelecaoDaSaidaPessoal({
+    aplicar: id => {
+      if (!voz || fase !== "dentro") throw new Error("Conversa encerrada");
+      return voz.trocarSaida(id);
+    },
+    aoEstado: estado => vista.saida(estado),
+  });
+  const atualizarSaidas = () => void selecaoDaSaida.atualizar();
+  navigator.mediaDevices?.addEventListener?.("devicechange", atualizarSaidas);
+  atualizarSaidas();
 
   function fecharMicrofone() {
     const tinhaCaptura = microfone || abrindoMicrofone;
@@ -102,7 +115,7 @@ function instalarConversasPessoaisWeb() {
   }
   function soltarMidia(guardarVoz = false) {
     fecharMicrofone();
-    if (!guardarVoz) { void voz?.desligar().catch(() => {}); voz = null; preparandoVoz = null; }
+    if (!guardarVoz) { selecaoDaSaida.invalidar(); void voz?.desligar().catch(() => {}); voz = null; preparandoVoz = null; }
     par = null;
     if (tela) tela.fechar();
     tela = null; vista.palco.replaceChildren(); vista.palco.hidden = true;
@@ -130,7 +143,7 @@ function instalarConversasPessoaisWeb() {
   function abrirSaidaNoGesto() {
     if (!voz) { vista.falha("O áudio está preparando. Toque no microfone depois de conectar para abrir a escuta."); return; }
     // AudioContext nasce aqui, no gesto, sem solicitar getUserMedia.
-    void voz.ligar({ somenteOuvir: true }).catch(erro => vista.falha(`Não foi possível abrir a escuta: ${erro.message || erro}`));
+    void voz.ligar({ somenteOuvir: true }).then(() => { if (fase === "dentro") return selecaoDaSaida.restaurar(); }).catch(erro => vista.falha(`Não foi possível abrir a escuta: ${erro.message || erro}`));
   }
   async function receberPar(enlace, meta, minhaGeracao) {
     soltarMidia(true);
@@ -144,6 +157,7 @@ function instalarConversasPessoaisWeb() {
     if (!preparada || vez !== geracaoDaMidia || par?.enlace !== enlace) return;
     preparada.mudo(true);
     preparada.entrar(enlace.transporteDaVoz, meta.papel === "quem-liga" ? 1 : 2);
+    void selecaoDaSaida.restaurar();
     tela = criarCompartilhamentoPessoalWeb({ servico: atual, transporte: enlace.tela,
       palco: vista.palco, enviarControle: controle => atual.enviarControle(controle),
       telaCheiaNativa: navegador ? null : ligada => chamarNativo("tela_cheia", { ligada }),
@@ -188,6 +202,9 @@ function instalarConversasPessoaisWeb() {
         reservarChamada: (id, ativo = true) => chamarNativo("pessoal_reservar", { id, ativo }),
       };
       return criarServicoDeChamadasWeb({ ...opcoes,
+      aoDiagnostico(diagnostico) {
+        if (vez === geracao) diagnosticoDaConexao = JSON.parse(JSON.stringify(diagnostico));
+      },
       lerPerfil: (codigo, publica) => typeof lerPerfilPessoalWeb === "function" ? lerPerfilPessoalWeb(codigo, publica) : null,
       async obterPerfil(apelido) {
         let retrato = null;
@@ -271,6 +288,7 @@ function instalarConversasPessoaisWeb() {
     }
   }
   window.seelePessoalWeb = Object.freeze({
+    diagnostico: () => diagnosticoDaConexao && JSON.parse(JSON.stringify(diagnosticoDaConexao)),
     get estadoDaSala() { return estadoDoCodigoDireto; },
     async chamarCodigo({ codigo, apelido } = {}) {
       if (apelido) apelidoDaConversa = apelido;

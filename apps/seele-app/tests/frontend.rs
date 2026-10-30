@@ -22288,10 +22288,11 @@ const LE_COMO_SOCKETADDR = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:.]+\]):\d{1,5}$
 // "addIceCandidate" ou "text" (o corpo da resposta do ponto). `aqui` faz o ponto responder AQUI.
 // `abrirCanais` abre o ctl e a voz aos 200 ms, e o anfitrião manda a apresentação (0x03): o ICE e o DTLS deram certo.
 // `pendurar: "getStats"` faz a telemetria do par vencedor nunca voltar; `estatisticas` é o mapa que ela devolve.
-const discarDeTeste = async ({ turn = null, chegam = [], prazo = 3200, guardado = {}, pendurar = null, aqui = false, abrirCanais = false, estatisticas = null, completarEm = null, fecharEm = null }) => {
+const discarDeTeste = async ({ turn = null, chegam = [], prazo = 3200, guardado = {}, pendurar = null, aqui = false, abrirCanais = false, estatisticas = null, completarEm = null, fecharEm = null, abrirAoAnunciar = null, falharIceEm = null }) => {
   const reg = { consoles: [], posts: [], montagens: [], etapas: [], config: null, falha: null, visto: null, ctx: null, fechou: false, fechouPc: false, pendurado: false, ateOFim: 0, abriu: false, atendeuPor: undefined };
   const parada = () => new Promise(() => {});
   let inicio = performance.now();
+  let parAtual;
   class Canal {
     constructor(rotulo) { this.rotulo = rotulo; this.readyState = "connecting"; this.bufferedAmount = 0; this.ouvintes = {}; }
     addEventListener(t, f) { (this.ouvintes[t] ??= []).push(f); }
@@ -22302,7 +22303,7 @@ const discarDeTeste = async ({ turn = null, chegam = [], prazo = 3200, guardado 
   }
   class Par {
     constructor(config) {
-      reg.config = config;
+      reg.config = config; parAtual = this;
       // O navegador recusa um TURN sem usuário e credencial, e a recusa derruba a construção inteira.
       for (const s of config.iceServers) {
         if (/^turns?:/.test(String(s.urls)) && (!s.username || !s.credential)) {
@@ -22319,6 +22320,10 @@ const discarDeTeste = async ({ turn = null, chegam = [], prazo = 3200, guardado 
     async setLocalDescription() {
       if (pendurar === "setLocalDescription") await parada();
       this.iceGatheringState = "gathering";
+      if (falharIceEm !== null) setTimeout(() => {
+        this.iceConnectionState = "failed"; this.connectionState = "failed";
+        for (const t of ["iceconnectionstatechange", "connectionstatechange"]) (this.ouvintes[t] ?? []).forEach(f => f());
+      }, falharIceEm);
       inicio = performance.now();
       if (completarEm !== null) setTimeout(() => { this.iceGatheringState = "complete"; }, completarEm);
       for (const c of chegam) {
@@ -22348,6 +22353,13 @@ const discarDeTeste = async ({ turn = null, chegam = [], prazo = 3200, guardado 
   };
   const buscar = async (url, opcoes) => {
     reg.posts.push({ url, quando: performance.now() - inicio, corpo: opcoes.body });
+    if (abrirAoAnunciar && opcoes.body.includes(abrirAoAnunciar)) {
+      setTimeout(() => {
+        parAtual.iceConnectionState = "connected"; parAtual.connectionState = "connected";
+        for (const c of parAtual.canais) { c.readyState = "open"; c.emitir("open"); }
+        parAtual.canais.find((c) => c.rotulo === "ctl").emitir("message", { data: new Uint8Array([0x03, 1, 2, 3]) });
+      }, 30);
+    }
     return { ok: true, text: async () => (pendurar === "text" ? parada() : "SEELE-SINAL/1 NINGUEM") };
   };
   reg.ctx = carregarORtc({ consola: consolaEspia(reg.consoles), guardado, Par });
@@ -25364,4 +25376,35 @@ for (const [nome, m] of mutantesDePedido) {
 clearTimeout(vigia);
 "##,
     );
+}
+
+/// O anfitrião precisa do endereço tardio para checar o caminho de volta.
+/// O mesmo enlace abre quando o segundo anúncio chega; nenhum TURN/novo par.
+#[test]
+fn o_convite_atualiza_candidatos_tardios_sem_loop_nem_post_apos_sair() {
+    rodar_node("candidatos tardios do servidor hospedado", &format!("{ENLACE_NODE}\n{}", r##"
+const v4 = { em: 3400, type: "srflx", address: "203.0.113.7", port: 41000 };
+const v6 = { em: 100, type: "srflx", address: "2001:4860::7", port: 41001 };
+const alvo = "203.0.113.7:41000";
+const [tardio, primeiroTardio, fechado, repetido, terceiro, icePrecoce] = await Promise.all([
+  discarDeTeste({ chegam: [v6, v4], aqui: true, abrirAoAnunciar: alvo, prazo: 6000 }),
+  discarDeTeste({ chegam: [v4], aqui: true, abrirAoAnunciar: alvo, prazo: 6000 }),
+  discarDeTeste({ chegam: [v6, v4], aqui: true, fecharEm: 3200, prazo: 6000 }),
+  discarDeTeste({ chegam: [v6, {...v6, em: 3500}], aqui: true, prazo: 4100 }),
+  discarDeTeste({ chegam: [v6, {...v4, port: 41002, em: 200}, v4], aqui: true, abrirAoAnunciar: alvo, prazo: 6000 }),
+  discarDeTeste({ chegam: [v6, v4], aqui: true, abrirAoAnunciar: alvo, prazo: 6000, falharIceEm: 2500 }),
+]);
+for (const [nome, r] of [["segunda família", tardio], ["primeiro refletido tardio", primeiroTardio], ["terceiro candidato", terceiro], ["ICE falhou antes do candidato", icePrecoce]]) {
+  confere(nome + ": não abriu com o candidato tardio: " + JSON.stringify(r.falha), r.abriu);
+  confere(nome + ": não enviou exatamente dois anúncios", r.posts.length === 2);
+  confere(nome + ": candidato útil não chegou", r.montagens[1]?.includes(alvo));
+}
+confere("sair deixou anúncio tardio", fechado.posts.length === 1);
+confere("candidato repetido criou anúncios", repetido.posts.length === 1);
+for (const r of [tardio, primeiroTardio, fechado, repetido, terceiro, icePrecoce]) {
+  confere("excedeu dois candidatos por POST", r.montagens.every((a) => a.length <= 2));
+  confere("excedeu três candidatos no par", new Set(r.montagens.flat()).size <= 3);
+  confere("excedeu três POSTs", r.posts.length <= 3);
+}
+"##));
 }

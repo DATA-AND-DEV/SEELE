@@ -66,7 +66,7 @@ function instrumentarPagina() {
   });
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
   const origem = `http://127.0.0.1:${server.address().port}`;
-  const ponto = spawn(path.join(raiz, 'target/debug/seele-encontro'), ['--porta','0','--rede-local','--sinal',`127.0.0.1:${portaDoSinal}`,'--origem',origem], { stdio: ['ignore','pipe','pipe'] });
+  const ponto = spawn(process.env.SEELE_ENCONTRO_BIN || path.join(raiz, 'target/debug/seele-encontro'), ['--porta','0','--rede-local','--sinal',`127.0.0.1:${portaDoSinal}`,'--origem',origem], { stdio: ['ignore','pipe','pipe'] });
   let logs = ''; ponto.stderr.on('data', b => logs += b);
   try {
     let pronto = false;

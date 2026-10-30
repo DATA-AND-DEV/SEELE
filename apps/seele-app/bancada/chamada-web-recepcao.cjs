@@ -80,7 +80,7 @@ async function criarBancada() {
     return c;
   }
   const remoto = await convite(par);
-  const rede = { epoca: Array(32).fill(7), pedidos: [], gets: 0, registros: [], eventos: [], falharBusca: false, recusarEpoca: false, localizar: null, registrar: null, registrosAtivos: new Set() };
+  const rede = { epoca: Array(32).fill(7), pedidos: [], gets: 0, registros: [], eventos: [], eventosPorQuemLiga: [], falharBusca: false, recusarEpoca: false, localizar: null, registrar: null, sinal: null, aoBuscar: null, registrosAtivos: new Set() };
   function responder(valor) { return new Response(JSON.stringify(valor), { headers: { 'Content-Type': 'application/json' } }); }
   async function buscar(_url, opcoes) {
     if (opcoes.signal?.aborted) throw new DOMException('Abortada', 'AbortError');
@@ -102,9 +102,12 @@ async function criarBancada() {
       if (rede.localizar) await rede.localizar.promessa;
       return responder({ Localizado: { convite: remoto } });
     }
+    if (p.operacao.Sinal && rede.sinal) return responder(await rede.sinal(p));
     if (p.operacao.Buscar) {
+      rede.aoBuscar?.(p);
+      if (rede.falharBusca === 500) return new Response('Indisponível', { status: 500 });
       if (rede.falharBusca) throw new TypeError('Rede indisponível na bancada');
-      const eventos = p.papel === 'QuemRecebe' ? rede.eventos.splice(0) : [];
+      const eventos = (p.papel === 'QuemRecebe' ? rede.eventos : rede.eventosPorQuemLiga).splice(0);
       return responder({ Eventos: { eventos, cursor: eventos.at(-1)?.cursor || p.operacao.Buscar.cursor } });
     }
     return responder('Ok');
@@ -130,7 +133,7 @@ async function criarBancada() {
       ociosas = assinaturasEmCurso ? 0 : ociosas + 1;
     }
   };
-  const estados = [], recepcoes = [];
+  const estados = [], recepcoes = [], opcoesDosEnlaces = [];
   let enlaces = 0;
   const contexto = vm.createContext({ crypto: cryptoControlada, TextEncoder, TextDecoder, AbortController, DOMException,
     Date: clock.Date, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
@@ -141,8 +144,8 @@ async function criarBancada() {
     conferirPar: async (codigo, publica) => {
       assert.equal(operar({ acao: 'codigo_da_chave', chave: publica }).codigo, codigo);
     },
-    criarEnlace: () => {
-      enlaces++;
+    criarEnlace: opcoes => {
+      opcoesDosEnlaces.push(opcoes); enlaces++;
       return { controle: { ouvir() {}, enviar() {} }, iniciar: async () => {}, pronto: Promise.resolve(), receberSinalAutenticado: async () => {}, abortar() {} };
     },
     aoEstado: e => estados.push(copiar(e)), aoRecepcao: e => recepcoes.push(copiar(e)),
@@ -163,12 +166,24 @@ async function criarBancada() {
     await clock.saltar(2000);
     await esperar(() => servico.ler().estado === 'tocando', 'chamada recebida assinada');
   }
+  async function chamadaFeita() {
+    await servico.chamarCodigo({ codigo: operar({ acao: 'codigo_da_chave', chave: par.publica }).codigo, apelido: 'Pessoa' });
+    await clock.assentar();
+    const enviada = rede.pedidos.findLast(p => p.operacao.Chamar);
+    const p = { papel: 'QuemRecebe', epoca: rede.epoca, nonce: Array(16).fill(12), convite: enviada.convite,
+      chamada: enviada.chamada, remetente: par.publica, destinatario: propria.publica, geracao: enviada.geracao,
+      sequencia: 1, valido_ate: Math.floor(clock.now() / 1000) + 60, operacao: 'Atender', assinatura: assinaturaVazia() };
+    p.assinatura = await assinar(par.chave, operar({ acao: 'pedido_mensagem', pedido: p }).bytes);
+    rede.eventosPorQuemLiga.push({ pedido: p, cursor: 1 });
+    await clock.saltar(2000);
+    await esperar(() => servico.ler().estado === 'dentro', 'chamada feita admitida por resposta assinada');
+  }
   async function esgotarRetry() {
     // Mantém a falha nos três backoffs limitados. O tempo real só permite que
     // Ed25519 termine; a passagem de segundos/minutos é inteiramente fake.
     for (const intervalo of [2100, 5100, 15100, 16000]) await clock.saltar(intervalo);
   }
-  return { clock, rede, servico, estados, recepcoes, registrar, chamadaRecebida, esgotarRetry,
+  return { clock, rede, servico, estados, recepcoes, registrar, chamadaRecebida, chamadaFeita, esgotarRetry, opcoesDosEnlaces,
     remoto, codigoPar: operar({ acao: 'codigo_da_chave', chave: par.publica }).codigo,
     enlaces: () => enlaces, fechar: () => servico.destruir() };
 }
@@ -200,17 +215,15 @@ test('recepção por código renova antes de 24h sem mudar a identidade', async 
   } finally { b.fechar(); }
 });
 
-for (const ativa of [false, true]) test(`falha de rede ${ativa ? 'durante conversa' : 'ociosa'} anuncia indisponibilidade e permite retry explícito`, async () => {
+test('falha de rede ociosa anuncia indisponibilidade e permite retry explícito', async () => {
   const b = await criarBancada();
   try {
     await b.registrar();
-    if (ativa) { await b.chamadaRecebida(); await b.servico.atender(); await esperar(() => b.servico.ler().estado === 'dentro', 'transporte admitido'); }
     b.rede.falharBusca = true; await b.clock.saltar(2000);
     await esperar(() => b.recepcoes.some(r => r.estado === 'indisponivel'), 'aviso de recepção indisponível');
     await b.esgotarRetry(); const depoisDasFalhas = b.rede.pedidos.length;
     await b.clock.saltar(60000);
     assert.equal(b.rede.pedidos.length, depoisDasFalhas, 'o backoff esgotado não vira repetição sem limite');
-    if (ativa) assert.equal(b.servico.ler().estado, 'dentro', 'falha da mailbox preserva a conversa direta');
     const antes = b.rede.registros.length, codigo = b.servico.codigo, enlaces = b.enlaces();
     b.rede.falharBusca = false; await b.servico.receberPorCodigo({ apelido: 'Pessoa' });
     await esperar(() => b.rede.registros.length > antes, 'Registrar no retry explícito');
@@ -218,6 +231,94 @@ for (const ativa of [false, true]) test(`falha de rede ${ativa ? 'durante conver
     assert.equal(b.servico.codigo, codigo); assert.equal(b.enlaces(), enlaces, 'retry de recepção não reconecta mídia');
     const ultimoRegistro = b.rede.pedidos.findLastIndex(p => p.operacao.Registrar);
     await esperar(() => b.rede.pedidos.slice(ultimoRegistro + 1).some(p => p.operacao.Buscar && p.operacao.Buscar.cursor === 0), 'cursor reiniciado depois de Registrar');
+  } finally { b.fechar(); }
+});
+
+for (const lado of ['quem liga', 'quem recebe']) {
+  async function admitir(b) {
+    if (lado === 'quem liga') await b.chamadaFeita();
+    else {
+      await b.registrar(); await b.chamadaRecebida(); await b.servico.atender();
+      await esperar(() => b.servico.ler().estado === 'dentro', 'transporte recebido admitido');
+    }
+  }
+  test(`sinalização de ${lado} retoma após esgotar backoff sem recriar transporte`, async () => {
+    const b = await criarBancada();
+    try {
+      await admitir(b); const enlaces = b.enlaces();
+      b.rede.falharBusca = 500; await b.clock.saltar(2000); await b.esgotarRetry();
+      const contar = () => b.rede.pedidos.filter(p => p.operacao.Buscar).length;
+      const antes = contar(); await b.clock.saltar(15000);
+      assert.ok(contar() > antes, 'chamada admitida continua tentando com teto de 15 segundos');
+      b.rede.falharBusca = false; const falhas = contar(); await b.clock.saltar(15000);
+      assert.ok(contar() > falhas, 'a volta da rede alcança novo polling');
+      if (lado === 'quem recebe') assert.equal(b.recepcoes.at(-1).estado, 'registrada');
+      assert.equal(b.servico.ler().estado, 'dentro'); assert.equal(b.enlaces(), enlaces);
+      const sucesso = contar(); await b.clock.saltar(2000);
+      assert.ok(contar() > sucesso, 'polling volta ao intervalo normal depois do sucesso');
+    } finally { b.fechar(); }
+  });
+  test(`encerrar cancela continuação do backoff de ${lado}`, async () => {
+    const b = await criarBancada();
+    try {
+      await admitir(b); b.rede.falharBusca = 500; await b.clock.saltar(2000); await b.esgotarRetry();
+      b.servico.encerrar(); await b.clock.assentar();
+      const contar = () => b.rede.pedidos.filter(p => p.operacao.Buscar || p.operacao.Registrar).length;
+      const antes = contar(); await b.clock.saltar(60000);
+      assert.equal(contar(), antes, 'encerramento não deixa retry de sinalização admitida rodando');
+    } finally { b.fechar(); }
+  });
+}
+
+function candidatoDaBancada() {
+  return { Candidato: { candidato: 'candidate:1 1 UDP 100 192.0.2.1 4000 typ host ufrag testgen', mid: '0', linha: 0 } };
+}
+function pedidosDeSinal(b) { return b.rede.pedidos.filter(p => p.operacao.Sinal); }
+
+test('Cheio usa novo nonce e deixa polling drenar durante espera fora da fila', async () => {
+  const b = await criarBancada();
+  try {
+    await b.chamadaFeita(); let cheia = true, recusas = 0;
+    b.rede.sinal = () => { if (cheia) { recusas++; return { Recusa: { motivo: 'Cheio' } }; } return 'Ok'; };
+    b.rede.aoBuscar = () => { cheia = false; };
+    const envio = b.opcoesDosEnlaces.at(-1).enviarSinal(candidatoDaBancada());
+    await b.clock.saltar(499); assert.equal(pedidosDeSinal(b).length, 0, 'candidato respeita pacing inicial de 500ms');
+    await b.clock.saltar(1); assert.equal(pedidosDeSinal(b).length, 1);
+    await b.clock.saltar(1000); assert.equal(pedidosDeSinal(b).length, 2);
+    await b.clock.saltar(500); assert.equal(cheia, false, 'Buscar executa antes do retry pendente terminar');
+    await b.clock.saltar(500); await envio;
+    const sinais = pedidosDeSinal(b); assert.equal(recusas, 2); assert.equal(sinais.length, 3);
+    assert.equal(new Set(sinais.map(p => p.nonce.join(','))).size, 3, 'recusas explícitas exigem nonces novos');
+    assert.equal(new Set(sinais.map(p => JSON.stringify(p.assinatura))).size, 3);
+    assert.ok(sinais.every(p => JSON.stringify(p.operacao) === JSON.stringify(sinais[0].operacao)));
+    const primeiro = b.rede.pedidos.indexOf(sinais[0]), ultimo = b.rede.pedidos.indexOf(sinais.at(-1));
+    assert.ok(b.rede.pedidos.slice(primeiro + 1, ultimo).some(p => p.operacao.Buscar));
+  } finally { b.fechar(); }
+});
+
+test('Cheio persistente tem somente uma tentativa inicial e cinco retries', async () => {
+  const b = await criarBancada();
+  try {
+    await b.chamadaFeita(); b.rede.sinal = () => ({ Recusa: { motivo: 'Cheio' } });
+    const resultado = b.opcoesDosEnlaces.at(-1).enviarSinal(candidatoDaBancada()).then(() => null, erro => erro);
+    await b.clock.saltar(500);
+    for (let i = 0; i < 5; i++) await b.clock.saltar(1000);
+    assert.equal((await resultado)?.motivo, 'Cheio');
+    const sinais = pedidosDeSinal(b); assert.equal(sinais.length, 6);
+    assert.equal(new Set(sinais.map(p => p.nonce.join(','))).size, 6);
+    await b.clock.saltar(60000); assert.equal(pedidosDeSinal(b).length, 6, 'erro final não deixa retry tardio');
+  } finally { b.fechar(); }
+});
+
+for (const fase of ['pacing', 'retry de Cheio']) test(`cancelamento durante ${fase} impede sinal tardio`, async () => {
+  const b = await criarBancada();
+  try {
+    await b.chamadaFeita(); b.rede.sinal = () => ({ Recusa: { motivo: 'Cheio' } });
+    const resultado = b.opcoesDosEnlaces.at(-1).enviarSinal(candidatoDaBancada()).then(() => null, erro => erro);
+    if (fase === 'retry de Cheio') await b.clock.saltar(500);
+    const enviados = pedidosDeSinal(b).length; assert.equal(enviados, fase === 'pacing' ? 0 : 1);
+    b.servico.encerrar(); assert.equal((await resultado)?.name, 'AbortError');
+    await b.clock.saltar(60000); assert.equal(pedidosDeSinal(b).length, enviados);
   } finally { b.fechar(); }
 });
 

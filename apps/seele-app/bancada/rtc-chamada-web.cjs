@@ -29,8 +29,10 @@ const engines = require('./playwright.cjs');
     b=criarEnlaceDaChamadaWeb({papel:'quem-recebe',enviarSinal:async s=>{signals.push(s);await a.receberSinalAutenticado(s);}});
     b.controle.ouvir(x=>received.ctl.push([...x]));b.tela.ouvir(x=>received.tela.push([...x]));
     await b.iniciar();await a.iniciar();await Promise.all([a.pronto,b.pronto]);
-    check(signals.length===2&&signals[0].Oferta&&signals[1].Resposta,'oferta/resposta completas');
-    check(signals.every(s=>Object.values(s)[0].impressao.length===32),'fingerprint local');
+    const descriptions=signals.filter(s=>s.Oferta||s.Resposta);
+    check(descriptions.length===2&&descriptions[0].Oferta&&descriptions[1].Resposta,'oferta/resposta autenticadas');
+    check(descriptions.every(s=>Object.values(s)[0].impressao.length===32),'fingerprint local');
+    check(signals.some(s=>s.Candidato),'candidatos incrementais enviados');
     check(channels.every((c,i)=>c.id===i%4&&c.negotiated&&c.ordered===(i%4!==1)),'IDs e ordenação');
     let perfilRecebido=null;b.perfil.ouvir(bytes=>perfilRecebido=[...bytes]);
     check(a.perfil.enviar(new Uint8Array([1,2,3])),'perfil opcional aberto');await until(()=>perfilRecebido);
@@ -65,6 +67,28 @@ const engines = require('./playwright.cjs');
     const reconstructed=received.tela.slice(beforeFrame).flat();
     check(reconstructed.length===largeFrame.length&&reconstructed.every((x,i)=>x===largeFrame[i]),'quadro250KiB íntegro e ordenado');
 
+    // Injeta somente a notificação de perda; offer/answer, ICE restart, DTLS
+    // e SCTP abaixo são dos motores reais. Não simula travessia de outro NAT.
+    const caller=pcs[0];
+    Object.defineProperty(caller,'connectionState',{get:()=> 'disconnected',configurable:true});
+    Object.defineProperty(caller,'iceConnectionState',{get:()=> 'disconnected',configurable:true});
+    caller.dispatchEvent(new Event('connectionstatechange'));
+    check(a.estado==='recuperando','queda não encerra imediatamente');
+    check(a.transporteDaVoz.enviar(new Uint8Array([8]))===false,'voz não enfileira na recuperação');
+    const inicioRestart=performance.now();
+    while(signals.filter(s=>s.Oferta||s.Resposta).length<4||caller.signalingState!=='stable'){
+      if(performance.now()-inicioRestart>15000)throw new Error('restart real não completou SDP');
+      await tick();
+    }
+    delete caller.connectionState;delete caller.iceConnectionState;
+    caller.dispatchEvent(new Event('connectionstatechange'));
+    await until(()=>a.estado==='aberta'&&b.estado==='aberta');
+    const descriptionsAfterRestart=signals.filter(s=>s.Oferta||s.Resposta);
+    check(descriptionsAfterRestart[0].Oferta.sdp.match(/a=ice-ufrag:([^\r\n]+)/)[1]!==descriptionsAfterRestart[2].Oferta.sdp.match(/a=ice-ufrag:([^\r\n]+)/)[1],'restart troca geração ICE');
+    const beforeRestartText=received.ctl.length;
+    await a.controle.enviar(new Uint8Array([77]));await until(()=>received.ctl.length===beforeRestartText+1);
+    check(a.diagnostico.reinicios===1&&b.diagnostico.reinicios===1,'restart coordenado dos dois lados');
+
     check(await rejected(a.controle.enviar(new Uint8Array(16385))),'limite de mensagem');
     check(a.transporteDaVoz.enviar(new Uint8Array(1101))===false,'voz devolve boolean síncrono e limita tamanho');
     buffered=65536;const blocked=a.tela.enviar(new Uint8Array([4]));await tick();a.abortar();a.abortar();
@@ -73,11 +97,11 @@ const engines = require('./playwright.cjs');
     check(await rejected(a.iniciar())&&a.estado==='encerrada','iniciar depois de abort não reabre');
     // Recusa de SDP que contradiz a impressão autenticada.
     const bad=criarEnlaceDaChamadaWeb({papel:'quem-recebe',enviarSinal:async()=>{throw new Error('não deve responder');}});
-    const forged=structuredClone(signals[0]);forged.Oferta.impressao[0]^=1;
+    const forged=structuredClone(descriptions[0]);forged.Oferta.impressao[0]^=1;
     check(await rejected(bad.receberSinalAutenticado(forged)),'impressão divergente recusada');
     check(bad.estado==='encerrada','recusa fecha');
     const noIce=criarEnlaceDaChamadaWeb({papel:'quem-recebe',enviarSinal:async()=>{throw new Error('não deve responder');}});
-    const missing=structuredClone(signals[0]);missing.Oferta.sdp=missing.Oferta.sdp.replace(/^a=ice-pwd:.*\r?\n/gm,'');
+    const missing=structuredClone(descriptions[0]);missing.Oferta.sdp=missing.Oferta.sdp.replace(/^a=ice-pwd:.*\r?\n/gm,'');
     check(await rejected(noIce.receberSinalAutenticado(missing))&&noIce.estado==='encerrada','SDP sem credenciais ICE recusado');
 
     // Callback de sinalização atrasado não ressuscita a chamada cancelada.
@@ -94,12 +118,13 @@ const engines = require('./playwright.cjs');
     const queuedWrites=Array.from({length:64},()=>rejected(queued.tela.enviar(new Uint8Array(16384))));
     check(await rejected(queued.tela.enviar(new Uint8Array([1]))),'teto de fila');
     queued.abortar();check((await Promise.all(queuedWrites)).every(Boolean),'abort solta toda a fila');
-    // O prazo único também vale quando não chega nenhuma descrição remota.
+    // A sinalização continua limitada, com prazo próprio antes do ICE.
     const timed=criarEnlaceDaChamadaWeb({papel:'quem-recebe',enviarSinal:async()=>{}});
     const began=performance.now();await timed.iniciar();
     check(await rejected(timed.pronto),'tentativa sem resposta vence');
     const deadlineMs=performance.now()-began;
-    check(deadlineMs>=9500&&deadlineMs<12500&&timed.estado==='encerrada','prazo global de dez segundos');
+    check(deadlineMs>=29500&&deadlineMs<33000&&timed.estado==='encerrada','prazo de sinalização de trinta segundos');
+    check(timed.diagnostico.motivo==='prazo-sinalizacao','diagnóstico sem SDP nem endereços');
 
     return {controle:received.ctl.length,voz:received.voz.length,tela:received.tela.length,signals:signals.length,deadlineMs,peersFechados:pcs.every(pc=>pc.connectionState==='closed')};
    });

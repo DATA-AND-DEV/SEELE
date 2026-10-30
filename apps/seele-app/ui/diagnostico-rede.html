@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SEELE — teste de conexão</title>
+<link rel="stylesheet" href="diagnostico-rede.css">
+<main>
+  <h1>SEELE · conexão</h1>
+  <label for="convite">Convite do servidor</label>
+  <textarea id="convite" rows="4" autocomplete="off" spellcheck="false"></textarea>
+  <button id="testar">Testar conexão</button>
+  <button id="parar" disabled>Cancelar</button>
+  <p id="estado" role="status">Não usa microfone, câmera nem lê conversas.</p>
+  <pre id="resultado"></pre>
+  <button id="copiar" disabled>Copiar diagnóstico</button>
+  <a id="entrar" hidden>Entrar no servidor</a>
+</main>
+<script src="rtc-web.js"></script>
+<script src="sessao-web.js"></script>
+<script src="diagnostico-rede.js"></script>
+</html>

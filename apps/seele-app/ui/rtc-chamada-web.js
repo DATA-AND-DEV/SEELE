@@ -27,8 +27,18 @@ function criarEnlaceDaChamadaWeb({
   const MAX_VOZ = 1100;
   const MAX_FILA = 1024 * 1024;
   const LIMIAR = 64 * 1024;
+  const MAX_CANDIDATOS = 64;
+  const CAPACIDADE_REINICIO = "a=x-seele-ice-restart:1";
   let estado = "novo", iniciado = false, terminou = false, abriu = false;
   let sinaisEmOrdem = Promise.resolve();
+  let saidaEmOrdem = Promise.resolve(), saidasPendentes = 0;
+  let prazo, prazoTotal, prazoDeQueda, prazoDeRecuperacao;
+  let etapa = "aguardando", motivoFinal = null, recuperando = false, reinicios = 0;
+  let recuperacao = null, liberarRecuperacao;
+  let aceitaReinicio = false, impressaoRemota = null, geracaoLocal = null, geracaoRemota = null;
+  let descricaoEnfileirada = false;
+  const candidatosLocais = [], candidatosRemotos = [], geracoesRemotas = new Set();
+  const tiposLocais = {}, tiposRemotos = {};
   const limpezas = new Set();
   const contas = { vozDescartada: 0, esperasPorPressao: 0 };
   let resolverPronto, recusarPronto, recusarEncerrado;
@@ -37,12 +47,22 @@ function criarEnlaceDaChamadaWeb({
   // São promessas públicas/competidoras; fechar antes de o consumidor esperar
   // não deixa rejeição sem observador. Quem as espera ainda recebe a falha.
   pronto.catch(() => {}); encerrado.catch(() => {});
-  const prazo = setTimeout(() => fechar(new Error("chamada: prazo de conexão esgotado")), 10000);
+  function marcarEtapa(proxima, ms = 30000) {
+    etapa = proxima; clearTimeout(prazo);
+    prazo = setTimeout(() => falhar(`prazo-${proxima}`), ms);
+  }
+  function falhar(motivo) {
+    motivoFinal = motivo;
+    fechar(new Error(`chamada: ${motivo}`));
+  }
   function mudar(proximo) { estado = proximo; try { aoEstado(proximo); } catch { /* observador não é dono do transporte */ } }
   function fechar(motivo = new Error("chamada: encerrada")) {
     if (terminou) return;
     terminou = true;
     clearTimeout(prazo);
+    clearTimeout(prazoTotal); clearTimeout(prazoDeQueda); clearTimeout(prazoDeRecuperacao);
+    liberarRecuperacao?.(); recuperacao = null;
+    candidatosLocais.length = 0; candidatosRemotos.length = 0;
     sinal?.removeEventListener("abort", abortar);
     for (const limpar of [...limpezas]) limpar(motivo);
     limpezas.clear();
@@ -55,15 +75,37 @@ function criarEnlaceDaChamadaWeb({
   function conferirViva() { if (terminou) throw new Error("chamada: encerrada"); }
   async function esperar(promessa) { const valor = await Promise.race([promessa, encerrado]); conferirViva(); return valor; }
   function conferirAbertura() {
-    if (terminou || abriu || !Object.values(canais).every(c => c.readyState === "open")) return;
-    abriu = true; clearTimeout(prazo); mudar("aberta"); resolverPronto();
+    if (terminou || !Object.values(canais).every(c => c.readyState === "open")) return;
+    if (recuperando && !["connected", "completed"].includes(pc.iceConnectionState)) return;
+    abriu = true; recuperando = false; etapa = "aberta";
+    liberarRecuperacao?.(); recuperacao = null;
+    clearTimeout(prazo); clearTimeout(prazoTotal); clearTimeout(prazoDeQueda); clearTimeout(prazoDeRecuperacao);
+    prazoDeQueda = null; prazoDeRecuperacao = null;
+    if (estado !== "aberta") mudar("aberta"); resolverPronto();
   }
-  pc.addEventListener("connectionstatechange", () => {
-    if (["failed", "closed", "disconnected"].includes(pc.connectionState)) fechar(new Error("chamada: conexão interrompida"));
-  });
-  pc.addEventListener("iceconnectionstatechange", () => {
-    if (["failed", "closed"].includes(pc.iceConnectionState)) fechar(new Error("chamada: caminho direto indisponível"));
-  });
+  function olharConexao() {
+    if (terminou) return;
+    if (pc.connectionState === "closed" || pc.iceConnectionState === "closed") { falhar("transporte-fechado"); return; }
+    if (["connected", "completed"].includes(pc.iceConnectionState) && pc.connectionState === "connected") {
+      conferirAbertura(); return;
+    }
+    const falhou = pc.iceConnectionState === "failed" || pc.connectionState === "failed";
+    const caiu = pc.iceConnectionState === "disconnected" || pc.connectionState === "disconnected";
+    if (!falhou && !caiu) return;
+    // Antes de abrir, os prazos da sinalização/ICE continuam valendo. Uma
+    // oscilação não transforma uma tentativa ainda viável em encerramento.
+    if (!abriu) { if (falhou) falhar("ice-indisponivel"); return; }
+    if (!recuperando) {
+      recuperando = true; etapa = "recuperando"; mudar("recuperando");
+      recuperacao = new Promise(ok => { liberarRecuperacao = ok; });
+      prazoDeRecuperacao = setTimeout(() => falhar("prazo-recuperacao"), aceitaReinicio ? 45000 : 12000);
+    }
+    if (!prazoDeQueda && aceitaReinicio && papel === "quem-liga" && reinicios < 2) {
+      prazoDeQueda = setTimeout(() => { void reiniciar().catch(() => falhar("reinicio-falhou")); }, falhou ? 0 : 5000);
+    }
+  }
+  pc.addEventListener("connectionstatechange", olharConexao);
+  pc.addEventListener("iceconnectionstatechange", olharConexao);
   pc.addEventListener("datachannel", evento => { evento.channel.close(); fechar(new Error("chamada: canal não negociado")); });
 
   function adaptar(canal, voz) {
@@ -83,6 +125,7 @@ function criarEnlaceDaChamadaWeb({
         fechar(new Error("chamada: mensagem inválida")); return;
       }
       const bytes = new Uint8Array(evento.data);
+      if (voz && recuperando) { contas.vozDescartada++; return; }
       if (ouvintes.size) { for (const ouvir of ouvintes) ouvir(bytes); return; }
       // Voz é tempo real: iniciar o receptor não deve reproduzir o passado.
       if (voz) { contas.vozDescartada++; return; }
@@ -103,7 +146,13 @@ function criarEnlaceDaChamadaWeb({
         };
         const andar = () => { if (canal.bufferedAmount < LIMIAR) terminar(); };
         limpezas.add(terminar); canal.addEventListener("bufferedamountlow", andar);
-        timer = setTimeout(() => { const erro = new Error("chamada: envio sem progresso"); terminar(erro); fechar(erro); }, 5000);
+        const conferirProgresso = () => {
+          // O orçamento da recuperação é finito e governa também a fila SCTP.
+          // Não derrubar a chamada por pressão enquanto ICE busca outro caminho.
+          if (recuperando) { timer = setTimeout(conferirProgresso, 5000); return; }
+          const erro = new Error("chamada: envio sem progresso"); terminar(erro); fechar(erro);
+        };
+        timer = setTimeout(conferirProgresso, 5000);
         andar();
       });
     }
@@ -113,7 +162,7 @@ function criarEnlaceDaChamadaWeb({
       enviar(bytes) {
         const valido = bytes instanceof Uint8Array && bytes.byteLength <= teto;
         if (voz) {
-          if (!valido || terminou || canal.readyState !== "open" || canal.bufferedAmount >= LIMIAR) { contas.vozDescartada++; return false; }
+          if (!valido || terminou || recuperando || canal.readyState !== "open" || canal.bufferedAmount >= LIMIAR) { contas.vozDescartada++; return false; }
           try { canal.send(bytes); return true; }
           catch (erro) { fechar(erro); return false; }
         }
@@ -122,7 +171,13 @@ function criarEnlaceDaChamadaWeb({
         if (pedidosPendentes >= 256 || bytesPendentes + bytes.byteLength > MAX_FILA) return Promise.reject(new Error("chamada: fila de envio cheia"));
         pedidosPendentes++;
         const copia = bytes.slice(); bytesPendentes += copia.byteLength;
-        const pedido = fila.then(async () => { await esperar(pronto); await esperar(pressao()); canal.send(copia); return true; });
+        const pedido = fila.then(async () => {
+          await esperar(pronto);
+          if (recuperacao) await esperar(recuperacao);
+          await esperar(pressao());
+          if (recuperacao) await esperar(recuperacao);
+          canal.send(copia); return true;
+        });
         fila = pedido.catch(erro => { fechar(erro); });
         return pedido.finally(() => { bytesPendentes -= copia.byteLength; pedidosPendentes--; });
       },
@@ -180,13 +235,62 @@ function criarEnlaceDaChamadaWeb({
     },
   };
 
-  async function colherCandidatos() {
-    if (pc.iceGatheringState === "complete") return;
-    await esperar(new Promise((ok, nao) => {
-      const limpar = erro => { pc.removeEventListener("icegatheringstatechange", mudou); limpezas.delete(limpar); erro ? nao(erro) : ok(); };
-      const mudou = () => { if (pc.iceGatheringState === "complete") limpar(); };
-      limpezas.add(limpar); pc.addEventListener("icegatheringstatechange", mudou); mudou();
-    }));
+  function ufrag(sdp) {
+    const valores = [...sdp.matchAll(/^a=ice-ufrag:([^\r\n]+)\r?$/gm)].map(m => m[1]);
+    if (!valores.length || valores.some(v => v !== valores[0])) throw new Error("chamada: geração ICE inválida");
+    return valores[0];
+  }
+  function contarCandidato(texto, tipos) {
+    const tipo = texto.match(/ typ (host|srflx|prflx|relay)(?: |$)/)?.[1] || "outro";
+    tipos[tipo] = (tipos[tipo] || 0) + 1;
+  }
+  function enfileirarSinal(mensagem) {
+    if (terminou) return Promise.reject(new Error("chamada: encerrada"));
+    if (saidasPendentes >= MAX_CANDIDATOS + 2) {
+      falhar("sinais-demais"); return Promise.reject(new Error("chamada: sinais demais"));
+    }
+    saidasPendentes++;
+    const pedido = saidaEmOrdem.then(() => { conferirViva(); return esperar(enviarSinal(mensagem)); });
+    saidaEmOrdem = pedido.catch(() => { if (!terminou) falhar("sinalizacao"); });
+    return pedido.finally(() => { saidasPendentes--; });
+  }
+  function escoarCandidatos() {
+    if (!descricaoEnfileirada || terminou) return;
+    for (const c of candidatosLocais.splice(0)) {
+      if (c.geracao !== geracaoLocal) continue;
+      // Não se espera a resposta HTTP aqui: a oferta já está na MESMA fila.
+      // A fachada limita a pressão da caixa remota sem bloquear a coleta ICE.
+      void enfileirarSinal({ Candidato: c.valor }).catch(() => {});
+    }
+  }
+  pc.addEventListener("icecandidate", ({ candidate }) => {
+    if (terminou || !candidate?.candidate) return;
+    const texto = candidate.candidate;
+    const geracao = candidate.usernameFragment || texto.match(/(?:^| )ufrag ([^ ]+)/)?.[1] || geracaoLocal;
+    if (!geracao || (geracaoLocal && geracao !== geracaoLocal)) return;
+    const candidato = /(?:^| )ufrag /.test(texto) ? texto : `${texto} ufrag ${geracao}`;
+    if (new TextEncoder().encode(candidato).length > 2048 || candidatosLocais.length + saidasPendentes >= MAX_CANDIDATOS) {
+      falhar("candidatos-demais"); return;
+    }
+    contarCandidato(candidato, tiposLocais);
+    candidatosLocais.push({ geracao, valor: { candidato, mid: candidate.sdpMid, linha: candidate.sdpMLineIndex } });
+    escoarCandidatos();
+  });
+  async function aplicarCandidato(c) {
+    const geracao = c.candidato.match(/(?:^| )ufrag ([^ ]+)/)?.[1];
+    // Pacotes atrasados da negociação anterior não encerram nem contaminam a nova.
+    if (geracao && geracao !== geracaoRemota) {
+      if (geracoesRemotas.has(geracao)) return;
+      if (candidatosRemotos.length >= MAX_CANDIDATOS) throw new Error("chamada: candidatos demais");
+      candidatosRemotos.push(c); return;
+    }
+    if (!pc.remoteDescription) {
+      if (candidatosRemotos.length >= MAX_CANDIDATOS) throw new Error("chamada: candidatos demais");
+      candidatosRemotos.push(c); return;
+    }
+    contarCandidato(c.candidato, tiposRemotos);
+    await esperar(pc.addIceCandidate({ candidate: c.candidato, sdpMid: c.mid, sdpMLineIndex: c.linha,
+      ...(geracao ? { usernameFragment: geracao } : {}) }));
   }
   function impressao(sdp) {
     const fps = [...sdp.matchAll(/^a=fingerprint:sha-256 ([0-9A-F:]+)\r?$/gmi)].map(m => m[1].replace(/:/g, "").toLowerCase());
@@ -203,46 +307,72 @@ function criarEnlaceDaChamadaWeb({
     }
   }
   async function enviarDescricao(tipo) {
-    await colherCandidatos();
-    const sdp = pc.localDescription.sdp;
+    // A descrição sai imediatamente. STUN lento não segura endereços locais
+    // ou IPv6 já disponíveis; os candidatos seguem por envelopes assinados.
+    const sdp = pc.localDescription.sdp + (pc.localDescription.sdp.includes(CAPACIDADE_REINICIO) ? "" : `${CAPACIDADE_REINICIO}\r\n`);
     conferirDescricao(sdp);
-    await esperar(enviarSinal({ [tipo]: { sdp, impressao: impressao(sdp) } }));
+    geracaoLocal = ufrag(sdp);
+    const envio = enfileirarSinal({ [tipo]: { sdp, impressao: impressao(sdp) } });
+    descricaoEnfileirada = true; escoarCandidatos();
+    await envio;
+  }
+  async function ofertar(reinicio = false) {
+    descricaoEnfileirada = false;
+    const oferta = await esperar(pc.createOffer(reinicio ? { iceRestart: true } : undefined));
+    geracaoLocal = ufrag(oferta.sdp);
+    await esperar(pc.setLocalDescription(oferta));
+    await enviarDescricao("Oferta");
+  }
+  async function reiniciar() {
+    if (terminou || !recuperando || !aceitaReinicio || papel !== "quem-liga" || reinicios >= 2 || pc.signalingState !== "stable") return;
+    reinicios++;
+    await ofertar(true);
   }
   async function iniciar() {
     conferirViva();
     if (iniciado) return;
-    iniciado = true; mudar("conectando");
-    try {
-      conferirViva();
-      if (papel === "quem-liga") {
-        const oferta = await esperar(pc.createOffer());
-        await esperar(pc.setLocalDescription(oferta));
-        await enviarDescricao("Oferta");
-      }
-    } catch (erro) { fechar(erro); throw erro; }
+    iniciado = true; mudar("conectando"); marcarEtapa("sinalizacao");
+    prazoTotal = setTimeout(() => falhar("prazo-total"), 60000);
+    try { if (papel === "quem-liga") await ofertar(); }
+    catch (erro) { fechar(erro); throw erro; }
   }
   async function receber(mensagem) {
     conferirViva();
     if (mensagem?.Oferta || mensagem?.Resposta) {
       const oferta = Boolean(mensagem.Oferta), descricao = mensagem.Oferta ?? mensagem.Resposta;
-      if ((oferta ? papel !== "quem-recebe" || pc.signalingState !== "stable" || pc.remoteDescription : papel !== "quem-liga" || pc.signalingState !== "have-local-offer") ||
+      const repetida = Boolean(pc.remoteDescription);
+      if ((oferta ? papel !== "quem-recebe" || pc.signalingState !== "stable" : papel !== "quem-liga" || pc.signalingState !== "have-local-offer") ||
           typeof descricao.sdp !== "string" || new TextEncoder().encode(descricao.sdp).length > 16 * 1024 || !Array.isArray(descricao.impressao)) throw new Error("chamada: descrição inesperada");
       conferirDescricao(descricao.sdp);
-      const fp = impressao(descricao.sdp);
+      const fp = impressao(descricao.sdp), geracao = ufrag(descricao.sdp);
       if (descricao.impressao.length !== 32 || fp.some((byte, i) => byte !== descricao.impressao[i])) throw new Error("chamada: impressão não corresponde ao SDP autenticado");
+      if (impressaoRemota && fp.some((byte, i) => byte !== impressaoRemota[i])) throw new Error("chamada: identidade DTLS mudou");
+      if (repetida && (!aceitaReinicio || !abriu || geracoesRemotas.has(geracao) || (oferta && reinicios >= 2))) throw new Error("chamada: reinício inesperado");
+      if (repetida && oferta) reinicios++;
+      impressaoRemota = fp;
+      aceitaReinicio = descricao.sdp.split(/\r?\n/).includes(CAPACIDADE_REINICIO);
+      await iniciar();
       await esperar(pc.setRemoteDescription({ type: oferta ? "offer" : "answer", sdp: descricao.sdp }));
+      geracaoRemota = geracao; geracoesRemotas.add(geracao);
+      if (!abriu) marcarEtapa("ice");
+      for (const c of candidatosRemotos.splice(0)) await aplicarCandidato(c);
       if (oferta) {
-        await iniciar();
-        await esperar(pc.setLocalDescription(await esperar(pc.createAnswer())));
+        descricaoEnfileirada = false;
+        const resposta = await esperar(pc.createAnswer());
+        geracaoLocal = ufrag(resposta.sdp);
+        await esperar(pc.setLocalDescription(resposta));
         await enviarDescricao("Resposta");
       }
     } else if (mensagem?.Candidato) {
       const c = mensagem.Candidato;
-      if (!pc.remoteDescription || typeof c.candidato !== "string" || new TextEncoder().encode(c.candidato).length > 2048 || (c.mid !== null && (typeof c.mid !== "string" || new TextEncoder().encode(c.mid).length > 64))) throw new Error("chamada: candidato inesperado");
-      await esperar(pc.addIceCandidate({ candidate: c.candidato, sdpMid: c.mid, sdpMLineIndex: c.linha }));
+      if (typeof c.candidato !== "string" || !c.candidato.startsWith("candidate:") || new TextEncoder().encode(c.candidato).length > 2048 ||
+          (c.mid !== null && (typeof c.mid !== "string" || new TextEncoder().encode(c.mid).length > 64)) ||
+          (c.linha !== null && (!Number.isInteger(c.linha) || c.linha < 0 || c.linha > 65535))) throw new Error("chamada: candidato inesperado");
+      await aplicarCandidato(c);
     } else if (mensagem === "FimDosCandidatos") {
-      if (!pc.remoteDescription) throw new Error("chamada: fim inesperado");
-      await esperar(pc.addIceCandidate(null));
+      // Compatibilidade com pares antigos; durante restart não aplicar marcador
+      // sem geração à negociação seguinte. A conexão não depende desse marcador.
+      if (pc.remoteDescription && !reinicios) await esperar(pc.addIceCandidate(null));
     } else throw new Error("chamada: sinal inválido");
   }
   function receberSinalAutenticado(mensagem) {
@@ -253,5 +383,7 @@ function criarEnlaceDaChamadaWeb({
   sinal?.addEventListener("abort", abortar, { once: true });
   if (sinal?.aborted) abortar();
   return { pronto, iniciar, receberSinalAutenticado, controle, transporteDaVoz, tela, perfil, abortar,
-    get estado() { return estado; }, get contas() { return { ...contas }; } };
+    get estado() { return estado; },
+    get diagnostico() { return { etapa, motivo: motivoFinal, ice: pc.iceConnectionState, conexao: pc.connectionState, reinicios, candidatosLocais: { ...tiposLocais }, candidatosRemotos: { ...tiposRemotos } }; },
+    get contas() { return { ...contas }; } };
 }

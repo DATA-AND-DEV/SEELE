@@ -558,6 +558,13 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
 
   // ------------------------------------------------- abrir e fechar
 
+  async function trocarSaida(id) {
+    const elemento = vivo.elemento, vez = geracaoDoAudio;
+    if (!elemento || typeof elemento.setSinkId !== "function") throw new Error("Seleção de saída indisponível");
+    await elemento.setSinkId(id);
+    if (vez !== geracaoDoAudio || vivo.elemento !== elemento) throw new DOMException("Conversa encerrada", "AbortError");
+  }
+
   /**
    * Abre o áudio. **Dentro do gesto**: o `AudioContext` e o `play()` da saída
    * pedem um toque, e no iPhone a sessão de áudio tem de ser declarada antes
@@ -1018,6 +1025,7 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
 
   return {
     ligar,
+    trocarSaida,
     calarMicrofone,
     entrar,
     reconectar,

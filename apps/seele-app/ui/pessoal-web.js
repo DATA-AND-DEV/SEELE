@@ -2,6 +2,73 @@
 // não cria identidades, não interpreta SDP e não imita um Snapshot de servidor.
 "use strict";
 
+// Guarda somente a preferência desta aba; nunca pede microfone para listar saídas.
+function criarSelecaoDaSaidaPessoal({ aplicar, aoEstado, midia = navigator.mediaDevices,
+  suportada = typeof HTMLMediaElement !== "undefined" && typeof HTMLMediaElement.prototype.setSinkId === "function",
+  armazenamento = (() => { try { return sessionStorage; } catch { return null; } })() }) {
+  const chave = "seele.pessoal.saida";
+  let preferida = "", atual = "", aparelhos = [], geracao = 0, revisao = 0, indisponivel = false;
+  try { preferida = armazenamento?.getItem(chave) || ""; } catch {}
+  const nativa = suportada && typeof midia?.selectAudioOutput === "function";
+  const guardar = id => { preferida = id; try { if (id) armazenamento?.setItem(chave, id); else armazenamento?.removeItem(chave); } catch {} };
+  const anunciar = () => aoEstado({ disponivel: suportada && (nativa || aparelhos.length > 0), nativa,
+    aparelhos: aparelhos.map(a => ({ ...a })), id: atual, indisponivel,
+    nome: indisponivel ? "Saída indisponível" : aparelhos.find(a => a.id === atual)?.nome || (atual ? "Dispositivo escolhido" : "Sistema") });
+  async function atualizar() {
+    const vez = ++revisao;
+    let lista = [];
+    try { if (suportada) lista = await midia?.enumerateDevices?.() || []; } catch {}
+    if (vez !== revisao) return;
+    aparelhos = lista.filter(a => a.kind === "audiooutput" && a.deviceId && !["default", "communications"].includes(a.deviceId))
+      .filter((a, i, todos) => todos.findIndex(b => b.deviceId === a.deviceId) === i)
+      .map((a, i) => ({ id: a.deviceId, nome: a.label || `Saída ${i + 1}` }));
+    if (atual && !aparelhos.some(a => a.id === atual)) {
+      // O dispositivo removido não recebe mais áudio; devolve à rota do sistema.
+      const vez = ++geracao;
+      try { await aplicar(""); indisponivel = false; } catch { indisponivel = true; }
+      if (vez !== geracao) return;
+      atual = ""; guardar("");
+    }
+    if (preferida && !aparelhos.some(a => a.id === preferida)) guardar("");
+    anunciar();
+  }
+  async function selecionar(id) {
+    if (!suportada) return;
+    const vez = ++geracao;
+    let escolhido = id;
+    // Chamada somente pelo clique explícito; nunca por restauração/devicechange.
+    if (id === undefined) {
+      if (!nativa) return;
+      let dispositivo;
+      try { dispositivo = await midia.selectAudioOutput({ deviceId: preferida }); }
+      catch (erro) { if (["NotAllowedError", "AbortError"].includes(erro.name)) return; throw erro; }
+      escolhido = dispositivo.deviceId;
+      if (typeof escolhido !== "string" || !escolhido) throw new Error("Saída não disponível");
+      if (escolhido === "default") escolhido = "";
+      if (vez !== geracao) return;
+      if (escolhido && !aparelhos.some(a => a.id === escolhido)) {
+        aparelhos.push({ id: escolhido, nome: dispositivo.label || "Dispositivo escolhido" });
+      }
+    } else if (id !== "" && !aparelhos.some(a => a.id === id)) throw new Error("Saída não disponível");
+    if (vez !== geracao) return;
+    try { await aplicar(escolhido); }
+    catch (erro) { if (vez === geracao) anunciar(); throw erro; }
+    if (vez !== geracao) return;
+    atual = escolhido; indisponivel = false; guardar(escolhido); anunciar();
+  }
+  async function restaurar() {
+    const vez = geracao;
+    await atualizar();
+    if (vez !== geracao) return;
+    if (preferida) {
+      try { await selecionar(preferida); }
+      catch { /* Sem permissão atual, conserva apenas a preferência para outro gesto. */ }
+    }
+  }
+  function invalidar() { ++geracao; ++revisao; atual = ""; indisponivel = false; anunciar(); }
+  return { atualizar, selecionar, restaurar, invalidar };
+}
+
 function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   const no = (tag, classe, texto = "") => {
     const el = documento.createElement(tag);
@@ -9,19 +76,19 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     el.textContent = texto;
     return el;
   };
-  const desenhos = { VOLTAR: "recuar", "ENTRAR NA CONVERSA": "avancar", "CRIAR CONVERSA": "avancar", "COPIAR LINK": "anexo", ATENDER: "fone", RECUSAR: "sair", ENVIAR: "avancar", "LIGAR MICROFONE": "microfone", "DESLIGAR MICROFONE": "microfone", "COMPARTILHAR TELA": "aparencia", "PARAR COMPARTILHAMENTO": "aparencia", "SAIR DA CONVERSA": "sair", CANCELAR: "sair", "ENCERRAR CONVITE": "sair" };
+  const desenhos = { "SAÍDA DE ÁUDIO": "fone", VOLTAR: "recuar", "ENTRAR NA CONVERSA": "avancar", "CRIAR CONVERSA": "avancar", "COPIAR LINK": "anexo", ATENDER: "fone", RECUSAR: "sair", ENVIAR: "avancar", "LIGAR MICROFONE": "microfone", "DESLIGAR MICROFONE": "microfone", "COMPARTILHAR TELA": "aparencia", "PARAR COMPARTILHAMENTO": "aparencia", "SAIR DA CONVERSA": "sair", CANCELAR: "sair", "ENCERRAR CONVITE": "sair" };
   const rotular = (el, texto) => {
     if (el.getAttribute("aria-label") === texto && el.querySelector(".glifo")) return;
     el.setAttribute("aria-label", texto);
     const icone = texto === "LIGAR MICROFONE" ? glifoComEstado("microfone", true) : glifo(desenhos[texto] || "avancar");
-    const curto = { "LIGAR MICROFONE": "MICROFONE", "DESLIGAR MICROFONE": "MICROFONE", "COMPARTILHAR TELA": "COMPARTILHAR", "PARAR COMPARTILHAMENTO": "PARAR TELA", "SAIR DA CONVERSA": "SAIR" };
+    const curto = { "LIGAR MICROFONE": "MICROFONE", "DESLIGAR MICROFONE": "MICROFONE", "COMPARTILHAR TELA": "TELA", "PARAR COMPARTILHAMENTO": "PARAR TELA", "SAIR DA CONVERSA": "SAIR" };
     el.replaceChildren(icone, no("span", "pessoal-web-botao-texto", curto[texto] || texto));
   };
-  const botao = (texto, acao, principal = false) => {
+  const botao = (texto, acao, principal = false, local = false) => {
     const el = no("button", principal ? "botao" : "botao-fantasma", texto);
     el.type = "button";
     rotular(el, texto);
-    el.addEventListener("click", () => executar(acao));
+    el.addEventListener("click", () => local ? acao() : executar(acao));
     return el;
   };
   const raiz = no("section", "pessoal-web");
@@ -122,12 +189,34 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
   const mic = botao("LIGAR MICROFONE", () => acoes.microfone());
   mic.setAttribute("aria-pressed", "false");
   const compartilhar = botao("COMPARTILHAR TELA", () => acoes.compartilhar());
+  const saida = botao("SAÍDA DE ÁUDIO", () => {
+    painelDaSaida.hidden = !painelDaSaida.hidden;
+    saida.setAttribute("aria-expanded", String(!painelDaSaida.hidden));
+    if (!painelDaSaida.hidden) listaDaSaida.focus();
+  }, false, true);
+  saida.classList.add("pessoal-web-saida");
+  saida.setAttribute("aria-expanded", "false");
+  const painelDaSaida = no("div", "pessoal-web-painel-saida");
+  painelDaSaida.hidden = true;
+  painelDaSaida.id = "pessoal-web-saidas";
+  saida.setAttribute("aria-controls", painelDaSaida.id);
+  const rotuloDaSaida = no("label", "", "Saída de áudio");
+  const listaDaSaida = no("select", "");
+  listaDaSaida.setAttribute("aria-label", "Saída de áudio");
+  rotuloDaSaida.append(listaDaSaida);
+  listaDaSaida.addEventListener("change", () => executar(() => acoes.saida(listaDaSaida.value)));
+  const escolherSaida = botao("ESCOLHER DISPOSITIVO", () => acoes.saida());
+  painelDaSaida.append(rotuloDaSaida, escolherSaida);
+  painelDaSaida.addEventListener("keydown", evento => {
+    if (evento.key === "Escape") { painelDaSaida.hidden = true; saida.setAttribute("aria-expanded", "false"); saida.focus(); }
+  });
+  let estadoDaSaida = { disponivel: false };
   const desligar = botao("SAIR DA CONVERSA", () => acoes.encerrar());
   const erro = no("p", "pessoal-web-erro");
   erro.setAttribute("role", "alert");
   erro.hidden = true;
-  rodape.append(mic, compartilhar, desligar);
-  raiz.append(topo, corpo, erro, rodape);
+  rodape.append(mic, compartilhar, saida, desligar);
+  raiz.append(topo, corpo, erro, rodape, painelDaSaida);
   let retrato = { estado: "livre" };
   let recebido = false;
   let nomeDoPar = "";
@@ -168,6 +257,9 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
     convite.hidden = fase !== "recebendo" || !link.value;
     atender.hidden = recusar.hidden = fase !== "tocando";
     mic.hidden = compartilhar.hidden = !dentro;
+    saida.hidden = !dentro || !estadoDaSaida.disponivel;
+    saida.disabled = listaDaSaida.disabled = escolherSaida.disabled = ocupado;
+    if (saida.hidden) { painelDaSaida.hidden = true; saida.setAttribute("aria-expanded", "false"); }
     compartilhar.disabled = ocupado || !acoes.podeCompartilhar();
     compartilhar.title = acoes.podeCompartilhar() ? "Compartilhar tela sem som do sistema" : "Captura de tela indisponível";
     desligar.hidden = ["livre", "encerrada"].includes(fase);
@@ -224,6 +316,19 @@ function criarVistaDaConversaPessoal({ acoes, documento = document }) {
       // A conversa não grava histórico ilimitado na memória da aba.
       if (mensagens.childElementCount > 200) { mensagens.firstElementChild.remove(); ids.delete(ids.values().next().value); }
       mensagens.scrollTop = mensagens.scrollHeight;
+      desenhar();
+    },
+    saida(novo) {
+      estadoDaSaida = novo;
+      listaDaSaida.replaceChildren();
+      for (const aparelho of [{ id: "", nome: "Sistema" }, ...(novo.aparelhos || [])]) {
+        const opcao = no("option", "", aparelho.nome); opcao.value = aparelho.id; listaDaSaida.append(opcao);
+      }
+      listaDaSaida.value = novo.id || "";
+      if (novo.indisponivel) listaDaSaida.selectedIndex = -1;
+      escolherSaida.hidden = !novo.nativa;
+      saida.title = `Saída de áudio: ${novo.nome || "Sistema"}`;
+      saida.setAttribute("aria-label", saida.title);
       desenhar();
     },
     microfone(ligado) {
