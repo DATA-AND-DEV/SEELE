@@ -288,13 +288,25 @@ async fn encerrar_tudo_mata_espera_e_fecha_a_porta() {
     let arquivo = p.0.join("batimento");
     let argumento = arquivo.to_string_lossy().into_owned();
     let (_q, programa) = programa("encerrar", &["batimento", &argumento]);
-    let _processo = programa
+    let mut processo = programa
         .rodar(&pedido(&["batimento", &argumento], ""))
         .unwrap();
     esperar_o_primeiro_batimento(&arquivo).await;
     assert_eq!(programa.processos_vivos(), 1);
     assert_eq!(programa.encerrar_tudo().await, 1);
     assert_eq!(programa.processos_vivos(), 0);
+    // «Espera» medido sem relógio: o `Terminou` já está na fila quando
+    // `encerrar_tudo` volta. Um prazo zero só olha o que já chegou — o
+    // `timeout` do Tokio consulta o futuro antes do prazo. A primeira versão
+    // deste teste olhava só o batimento 300 ms depois, e passava com a espera
+    // revertida (só mandar matar): o tempo da asserção dava tempo ao kill.
+    let fim = tokio::time::timeout(Duration::ZERO, processo.proximo())
+        .await
+        .expect("encerrar_tudo voltou antes de o processo terminar");
+    assert!(
+        matches!(fim, Some(EventoDoProcesso::Terminou(FimDoProcesso { morto_a_pedido: true, .. }))),
+        "{fim:?}"
+    );
     assert!(!esta_vivo(&arquivo).await, "encerrar voltou com o processo vivo");
     assert_eq!(
         programa
