@@ -56,6 +56,20 @@ serde = "1.0.229"
 # depender de `seele-server`, então a pergunta é refeita aqui, sem a
 # ordenação por heurística de VPN que só importa para o convite.
 if-addrs = "0.15"
+# O poder `programa` da API 8 (`crate::programa`): baixar artefatos de centenas
+# de MB com hash declarado. **Zero crate novo no `Cargo.lock`**, medido: o
+# `seele-app` já traz este `reqwest` com esta mesma feature (o atualizador do
+# ADR 0026), e o `rustls` com `ring` já está aqui pelo mesmo app e pelo
+# `seele-server`. `default-features = false` mantém fora o `native-tls` e o
+# `gzip` — um corpo descomprimido no caminho não teria mais o tamanho que o MOD
+# declarou. O que entra é uma aresta, não uma árvore.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+# Os três hashes que as origens publicam (spec da API 8, §5): a Mojang dá
+# `sha1`, a Adoptium `sha256`, o `.mrpack` `sha1` e `sha512`. As duas versões já
+# estão na árvore deste crate, pelo STUN e pelo SRTP do `seele-enlace`.
+sha1 = "0.10.7"
+sha2 = "0.10.9"
 
 [features]
 # O gêmeo do guarda da F5 (`seele-server`, a mesma feature), do lado de quem
@@ -88,6 +102,12 @@ aparelho-de-mentira = ["seele-audio/aparelho-de-mentira"]
 # Custo nenhum sobre o que já se audita: mesmo crate, já na árvore, e
 # `dev-dependencies` não entra em binário publicado.
 tokio = { version = "1.53.1", features = ["test-util"] }
+# Um servidor HTTPS de verdade em `127.0.0.1` para o teste do `programa`
+# (`tests/programa_https.rs`): o corte do corpo grande tem de ser provado no
+# `reqwest` real, e não só na origem de mentira. As duas já estão no
+# `Cargo.lock` (o `rcgen` pelo `seele-server`, o `tokio-rustls` pelo `reqwest`).
+rcgen = "0.14.8"
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "logging", "tls12"] }
 
 [lints]
 workspace = true

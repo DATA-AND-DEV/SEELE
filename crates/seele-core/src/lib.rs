@@ -78,6 +78,7 @@ pub mod entrada;
 pub mod frame;
 pub mod identity;
 pub mod mods;
+pub mod programa;
 pub mod par;
 pub mod preferences;
 /// O juiz das prévias mora no `seele-sessao` desde a Tarefa 2.6 da F4, como a
