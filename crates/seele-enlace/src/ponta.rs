@@ -72,8 +72,8 @@ use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot, watch, Semaphore};
 
 use crate::conexao::{
-    Comando, Compartilhado, Conexao, ContadoresVivos, Depois, Entrada, Envio, EstadoDoCanal,
-    LadoDaTarefa, Recebe,
+    Aberto, CanalDeTunel, Comando, Compartilhado, Conexao, ConfigLida, ContadoresVivos, Datagramas,
+    Depois, Entrada, Envio, EstadoDoCanal, LadoDaTarefa, Natureza, Recebe, RespostaDeAbrir,
 };
 use crate::{CertificadoDtls, Motivo};
 
@@ -792,11 +792,20 @@ enum Tipo {
     /// Um "u" que o par abriu: só lê.
     UniEntrada,
     Bi,
+    /// O `t`: bidirecional como o `b` (mesmo envelope e mesmo crédito), mas
+    /// entregue na fila do túnel e sem o prazo das imagens.
+    Tunel,
+    /// O `j`: datagramas crus, sem envelope, sem crédito e sem fila de dados:
+    /// vive de `jogo_entrada` e `Comando::Jogo`.
+    Jogo,
 }
 
 impl Tipo {
     const fn de_volume(self) -> bool {
-        matches!(self, Self::UniSaida | Self::UniEntrada | Self::Bi)
+        matches!(
+            self,
+            Self::UniSaida | Self::UniEntrada | Self::Bi | Self::Tunel
+        )
     }
 }
 
@@ -845,10 +854,13 @@ struct Canal {
     cortou: bool,
     /// O corte deste lado já saiu para o SCTP.
     corte_saiu: bool,
+    /// Só no `j`: para onde vão os datagramas que chegam.
+    jogo_entrada: Option<mpsc::Sender<Vec<u8>>>,
+    /// Só no `j`: os datagramas que `Datagramas::mandar` entregou e ainda não
+    /// foram escritos no SCTP.
+    jogo_na_fila: Arc<AtomicUsize>,
 }
 
-/// Quem pediu um canal espera os punhos dele, ou o motivo.
-pub(crate) type RespostaDeAbrir = oneshot::Sender<Result<(Envio, Option<Recebe>), Motivo>>;
 /// O que não é STUN nem DTLS, com a origem.
 type FilaDoEnc = mpsc::Receiver<(SocketAddr, Vec<u8>)>;
 
@@ -875,18 +887,24 @@ impl Canal {
             anunciou: false,
             cortou: false,
             corte_saiu: false,
+            jogo_entrada: None,
+            jogo_na_fila: Arc::new(AtomicUsize::new(0)),
         }
     }
 
     /// Se este lado lê este canal (e por isso anuncia crédito nele).
     const fn le(&self) -> bool {
-        matches!(self.tipo, Tipo::Ctl | Tipo::UniEntrada | Tipo::Bi)
+        matches!(
+            self.tipo,
+            Tipo::Ctl | Tipo::UniEntrada | Tipo::Bi | Tipo::Tunel
+        )
     }
 
     fn morrer(&mut self, falha: crate::FalhaDoCanal) {
         self.estado.parar(falha);
         self.credito.close();
         self.entrada = None;
+        self.jogo_entrada = None;
         self.pendentes.clear();
     }
 }
@@ -1845,9 +1863,21 @@ impl Motor {
             }
             Comando::Abrir {
                 par,
-                bidirecional,
+                natureza,
                 resposta,
-            } => self.abrir_canal(par, bidirecional, resposta),
+            } => self.abrir_canal(par, natureza, resposta),
+            Comando::Jogo { par, canal, bytes } => self.mandar_jogo(par, canal, &bytes),
+            Comando::FecharJogo { par, canal } => {
+                if let Some(c) = self
+                    .pares
+                    .get_mut(&par)
+                    .and_then(|p| p.canais.get_mut(&canal))
+                {
+                    c.jogo_entrada = None;
+                    c.fechar = true;
+                }
+                self.escrever(par);
+            }
             Comando::Fechar { par, codigo } => {
                 if let Some(p) = self.pares.get_mut(&par) {
                     if p.fechando.is_none() {
@@ -2028,12 +2058,7 @@ impl Motor {
         self.drenar(id);
     }
 
-    fn abrir_canal(
-        &mut self,
-        id: usize,
-        bidirecional: bool,
-        resposta: oneshot::Sender<Result<(Envio, Option<Recebe>), Motivo>>,
-    ) {
+    fn abrir_canal(&mut self, id: usize, natureza: Natureza, resposta: RespostaDeAbrir) {
         let Some(par) = self.pares.get_mut(&id) else {
             let _ = resposta.send(Err(Motivo::Caiu("a conexão acabou".into())));
             return;
@@ -2043,29 +2068,35 @@ impl Motor {
             return;
         }
         if par.canais.len() >= crate::MAX_CANAIS {
-            let _ = resposta.send(Err(Motivo::Caiu(format!(
-                "o teto de {} canais por conexão",
-                crate::MAX_CANAIS
-            ))));
+            let _ = resposta.send(Err(Motivo::CanaisEsgotados));
             return;
         }
+        let (label, tipo, ordered, reliability) = match natureza {
+            Natureza::Uni => (
+                crate::LABEL_UNI,
+                Tipo::UniSaida,
+                true,
+                Reliability::Reliable,
+            ),
+            Natureza::Bi => (crate::LABEL_BI, Tipo::Bi, true, Reliability::Reliable),
+            Natureza::Tunel => (crate::LABEL_TUNEL, Tipo::Tunel, true, Reliability::Reliable),
+            // O mesmo ajuste da `voz`: sem ordem e sem retransmissão. Datagrama
+            // atrasado de jogo é pior que datagrama perdido.
+            Natureza::Jogo => (
+                crate::LABEL_JOGO,
+                Tipo::Jogo,
+                false,
+                Reliability::MaxRetransmits { retransmits: 0 },
+            ),
+        };
         let canal = par.rtc.direct_api().create_data_channel(ChannelConfig {
-            label: if bidirecional {
-                crate::LABEL_BI
-            } else {
-                crate::LABEL_UNI
-            }
-            .into(),
-            ordered: true,
-            reliability: Reliability::Reliable,
+            label: label.into(),
+            ordered,
+            reliability,
             negotiated: None,
             protocol: crate::PROTOCOLO_DOS_CANAIS.into(),
         });
-        let mut novo = Canal::novo(if bidirecional {
-            Tipo::Bi
-        } else {
-            Tipo::UniSaida
-        });
+        let mut novo = Canal::novo(tipo);
         novo.abrindo = Some(resposta);
         par.canais.insert(canal, novo);
         self.drenar(id);
@@ -2173,7 +2204,10 @@ impl Motor {
             // 3. Fechar o que terminou e já saiu do SCTP.
             let mut fechar = Vec::new();
             for (canal, c) in &par.canais {
-                if c.fechar && c.pendentes.is_empty() && c.tipo.de_volume() {
+                if c.fechar
+                    && c.pendentes.is_empty()
+                    && (c.tipo.de_volume() || c.tipo == Tipo::Jogo)
+                {
                     let vazio = par
                         .rtc
                         .channel(*canal)
@@ -2323,12 +2357,20 @@ impl Motor {
         let Some(par) = self.pares.get_mut(&id) else {
             return;
         };
+        let config = ler_config(&mut par.rtc, canal);
         if let Some(c) = par.canais.get_mut(&canal) {
             c.aberto = true;
             // Um canal aberto por este lado já é da aplicação: um "b" também é
             // lido por ela, e anuncia a janela (dentro do agregado).
             c.aceito = true;
-            if let Some(resposta) = c.abrindo.take() {
+            if c.tipo == Tipo::Jogo {
+                if let Some(resposta) = c.abrindo.take() {
+                    let datagramas =
+                        datagramas_de(c, Arc::clone(&par.comp), cmd.clone(), canal, config);
+                    // Largado antes de chegar: o `Drop` do `Datagramas` fecha o canal.
+                    let _ = resposta.send(Ok(Aberto::Jogo(datagramas)));
+                }
+            } else if let Some(resposta) = c.abrindo.take() {
                 let envio = Envio::novo(
                     cmd.clone(),
                     Arc::clone(&par.comp),
@@ -2336,7 +2378,7 @@ impl Motor {
                     Arc::clone(&c.credito),
                     Arc::clone(&c.estado),
                 );
-                let recebe = (c.tipo == Tipo::Bi).then(|| {
+                let recebe = matches!(c.tipo, Tipo::Bi | Tipo::Tunel).then(|| {
                     let (tx, rx) = mpsc::unbounded_channel();
                     c.entrada = Some(tx);
                     Recebe::novo(
@@ -2347,7 +2389,7 @@ impl Motor {
                         canal,
                     )
                 });
-                if resposta.send(Ok((envio, recebe))).is_err() {
+                if resposta.send(Ok(Aberto::Fluxo(envio, recebe))).is_err() {
                     c.fim_local = true;
                     c.fechar = true;
                 }
@@ -2368,6 +2410,8 @@ impl Motor {
         let tipo = match label {
             crate::LABEL_UNI => Some(Tipo::UniEntrada),
             crate::LABEL_BI => Some(Tipo::Bi),
+            crate::LABEL_TUNEL => Some(Tipo::Tunel),
+            crate::LABEL_JOGO => Some(Tipo::Jogo),
             _ => None,
         };
         let aceito = par.pronto
@@ -2390,29 +2434,45 @@ impl Motor {
         };
         let mut c = Canal::novo(tipo);
         c.aberto = true;
-        // Sem crédito até a aplicação aceitar (`Comando::Aceito`).
-        let (tx, rx) = mpsc::unbounded_channel();
-        c.entrada = Some(tx);
-        let recebe = Recebe::novo(
-            rx,
-            Arc::clone(&c.na_fila),
-            cmd.clone(),
-            Arc::clone(&par.comp),
-            canal,
-        );
-        let entregue = match (tipo, par.lado.as_ref()) {
-            (Tipo::UniEntrada, Some(lado)) => lado.uni.try_send(recebe).is_ok(),
-            (Tipo::Bi, Some(lado)) => {
-                let envio = Envio::novo(
-                    cmd,
-                    Arc::clone(&par.comp),
-                    canal,
-                    Arc::clone(&c.credito),
-                    Arc::clone(&c.estado),
-                );
-                lado.bi.try_send((envio, recebe)).is_ok()
+        let entregue = if tipo == Tipo::Jogo {
+            // Sem `Recebe`, sem envelope e sem crédito: só datagramas.
+            let datagramas = datagramas_de(&mut c, Arc::clone(&par.comp), cmd, canal, config);
+            par.lado.as_ref().is_some_and(|lado| {
+                lado.tunel
+                    .try_send(CanalDeTunel::SemOrdem(datagramas))
+                    .is_ok()
+            })
+        } else {
+            // Sem crédito até a aplicação aceitar (`Comando::Aceito`).
+            let (tx, rx) = mpsc::unbounded_channel();
+            c.entrada = Some(tx);
+            let recebe = Recebe::novo(
+                rx,
+                Arc::clone(&c.na_fila),
+                cmd.clone(),
+                Arc::clone(&par.comp),
+                canal,
+            );
+            match (tipo, par.lado.as_ref()) {
+                (Tipo::UniEntrada, Some(lado)) => lado.uni.try_send(recebe).is_ok(),
+                (Tipo::Bi | Tipo::Tunel, Some(lado)) => {
+                    let envio = Envio::novo(
+                        cmd,
+                        Arc::clone(&par.comp),
+                        canal,
+                        Arc::clone(&c.credito),
+                        Arc::clone(&c.estado),
+                    );
+                    if tipo == Tipo::Bi {
+                        lado.bi.try_send((envio, recebe)).is_ok()
+                    } else {
+                        lado.tunel
+                            .try_send(CanalDeTunel::Ordenado(envio, recebe))
+                            .is_ok()
+                    }
+                }
+                _ => false,
             }
-            _ => false,
         };
         if entregue {
             par.canais.insert(canal, c);
@@ -2424,6 +2484,29 @@ impl Motor {
             par.rtc.direct_api().close_data_channel(canal);
             self.drenar(id);
         }
+    }
+
+    /// Um datagrama do `j` para o SCTP, sem fila e sem espera: se o SCTP não
+    /// tem espaço, o datagrama é descartado e contado.
+    fn mandar_jogo(&mut self, id: usize, canal: ChannelId, bytes: &[u8]) {
+        let Some(par) = self.pares.get_mut(&id) else {
+            return;
+        };
+        if let Some(c) = par.canais.get(&canal) {
+            c.jogo_na_fila.fetch_sub(1, Ordering::Relaxed);
+        }
+        let escrito = par.pronto
+            && par
+                .rtc
+                .channel(canal)
+                .is_some_and(|mut h| h.write(true, bytes).unwrap_or(false));
+        if !escrito {
+            par.comp
+                .contadores
+                .tunel_descartado
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        self.drenar(id);
     }
 
     fn violacao(&mut self, id: usize, canal: ChannelId, porque: &str) {
@@ -2484,6 +2567,24 @@ impl Motor {
             }
             return;
         }
+        if let Some(c) = par.canais.get(&canal).filter(|c| c.tipo == Tipo::Jogo) {
+            // O `j` não tem envelope: a mensagem SCTP é o datagrama. O que não
+            // couber (grande demais, ou a fila de quem lê cheia) some e é contado;
+            // nunca é violação do enlace nem corte, porque o jogo repete.
+            let contadores = &par.comp.contadores;
+            if bytes.len() > crate::MAX_DADOS {
+                contadores
+                    .tunel_grande_demais
+                    .fetch_add(1, Ordering::Relaxed);
+            } else if !c
+                .jogo_entrada
+                .as_ref()
+                .is_some_and(|fila| fila.try_send(bytes).is_ok())
+            {
+                contadores.tunel_descartado.fetch_add(1, Ordering::Relaxed);
+            }
+            return;
+        }
         if bytes.len() > crate::MAX_MENSAGEM {
             self.violacao(id, canal, "mensagem acima do teto");
             return;
@@ -2526,7 +2627,7 @@ impl Motor {
             if let Some(c) = par.canais.get_mut(&canal) {
                 // Só em quem escreve neste canal; num "u" que o par abriu, quem
                 // escreve é ele, e um crédito de volta não tem sentido.
-                if matches!(c.tipo, Tipo::Ctl | Tipo::Bi | Tipo::UniSaida) {
+                if matches!(c.tipo, Tipo::Ctl | Tipo::Bi | Tipo::Tunel | Tipo::UniSaida) {
                     c.limite_do_par = c.limite_do_par.max(limite);
                 }
             }
@@ -2624,7 +2725,7 @@ impl Motor {
                             depois: Depois::Nada,
                         });
                     }
-                    Tipo::Bi if c.fim_local => {
+                    Tipo::Bi | Tipo::Tunel if c.fim_local => {
                         c.estado.entregue();
                         c.fechar = true;
                     }
@@ -2987,6 +3088,40 @@ fn rever_credito(par: &mut Par) {
     par.comp.credito_em_aberto.store(total, Ordering::Relaxed);
 }
 
+/// O que o DCEP trouxe da configuração de um canal.
+fn ler_config(rtc: &mut Rtc, canal: ChannelId) -> ConfigLida {
+    let (ordenado, reliability) = rtc
+        .channel(canal)
+        .and_then(|h| h.config().map(|c| (c.ordered, c.reliability)))
+        .unwrap_or((true, Reliability::Reliable));
+    ConfigLida {
+        ordenado,
+        sem_retransmissao: matches!(reliability, Reliability::MaxRetransmits { retransmits: 0 }),
+    }
+}
+
+/// Monta os punhos de um `j`: a fila de entrada fica no canal, a de saída é
+/// contada nele e em quem manda.
+fn datagramas_de(
+    c: &mut Canal,
+    comp: Arc<Compartilhado>,
+    cmd: mpsc::UnboundedSender<Comando>,
+    canal: ChannelId,
+    config: ConfigLida,
+) -> Datagramas {
+    let (tx, rx) = mpsc::channel(crate::FILA_DE_JOGO);
+    c.jogo_entrada = Some(tx);
+    Datagramas {
+        cmd,
+        comp,
+        canal,
+        estado: Arc::clone(&c.estado),
+        na_fila: Arc::clone(&c.jogo_na_fila),
+        entrada: rx,
+        config,
+    }
+}
+
 /// Escreve a mensagem da frente de um canal no SCTP. `false` se não coube.
 fn escrever_um(rtc: &mut Rtc, canal: ChannelId, c: &mut Canal) -> bool {
     let Some(frente) = c.pendentes.front() else {
@@ -3024,7 +3159,7 @@ fn escrever_um(rtc: &mut Rtc, canal: ChannelId, c: &mut Canal) -> bool {
         Depois::Fim => {
             // Um "u" espera quem lê devolver o fim (a confirmação de entrega)
             // para fechar; um "b" fecha quando os dois fins passaram.
-            if c.tipo == Tipo::Bi && c.fim_remoto {
+            if matches!(c.tipo, Tipo::Bi | Tipo::Tunel) && c.fim_remoto {
                 c.estado.entregue();
                 c.fechar = true;
             }

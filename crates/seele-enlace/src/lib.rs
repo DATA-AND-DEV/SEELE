@@ -36,7 +36,10 @@ pub mod envelope;
 mod ponta;
 pub mod teste;
 
-pub use conexao::{Conexao, Contadores, Envio, FalhaDoCanal, Leitura, Motivo, Recebe, Recusa};
+pub use conexao::{
+    CanalDeTunel, Conexao, Confiabilidade, Contadores, Datagramas, Envio, FalhaDoCanal, Leitura,
+    Motivo, Recebe, Recusa,
+};
 pub use credencial::{credencial_valida, sortear_credencial, CREDENCIAL_LEN};
 pub use dtls::CertificadoDtls;
 pub use ponta::{
@@ -59,6 +62,35 @@ pub const MAX_VOZ: usize = 1100;
 pub const MAX_APRESENTACAO: usize = 512;
 /// Canais abertos por conexão, contando o `ctl` e a `voz`.
 pub const MAX_CANAIS: usize = 64;
+/// Quantos canais de túnel (`t` e `j`) cabem de uma vez numa conexão, **no
+/// máximo**: `MAX_CANAIS` menos o `ctl` e a `voz`.
+///
+/// # O que foi medido (Task 4 do túnel de jogo)
+///
+/// `MAX_CANAIS` é o teto de canais **vivos** por conexão, e não só dos que o
+/// par abre: `abrir_canal` recusa quando `par.canais.len() >= MAX_CANAIS`, e a
+/// chegada de um canal do par faz a mesma conta (mais o teto de filas de
+/// entrada vivas, que só os canais com `Recebe` — `u`, `b` e `t` — ocupam). O
+/// mapa `par.canais` guarda o `ctl`, a `voz` e **todo** canal aberto, de qualquer
+/// rótulo, então os `t` e `j` entram na mesma conta que os `u` e `b`: **a
+/// vaga é compartilhada, nenhuma é reservada**. Com `n` canais de imagem ou
+/// anexo abertos, cabem `MAX_FLUXOS_DE_TUNEL - n` de túnel (teste
+/// `os_canais_de_tunel_contam_no_teto_e_quem_abre_recebe_canais_esgotados`).
+///
+/// Quem abre acima do teto recebe [`Motivo::CanaisEsgotados`] **na hora**, sem
+/// nada ir ao fio — e é isso que o servidor traduz em
+/// `RecusaDeTunel::CanaisEsgotados`. A contagem é simétrica (os dois lados
+/// guardam os mesmos canais), então quem abre costuma bater no teto antes do
+/// par; se o par tiver mais canais vivos que quem abre (as filas de entrada
+/// terminadas e não lidas contam só no lado que lê), ele fecha o canal ao
+/// chegar (`canais_recusados`) e quem abre só vê a escrita falhar. Um túnel de
+/// horas ocupa a vaga por todo esse tempo: quem hospeda decide quantos túneis
+/// aceita bem antes deste teto.
+pub const MAX_FLUXOS_DE_TUNEL: usize = MAX_CANAIS - 2;
+/// Datagramas `j` esperando na fila de saída (ou na de entrada) antes de o
+/// mais novo ser descartado e contado. O jogo repete o que perde; esperar
+/// por vaga seria devolver ao jogador o atraso que o `j` existe para evitar.
+pub const FILA_DE_JOGO: usize = 256;
 /// Bytes esperando leitura num canal antes de ele ser cortado.
 pub const MAX_FILA_DE_ENTRADA: usize = 1024 * 1024;
 /// Bytes que um canal pode ter a caminho do SCTP antes de `write_all` esperar.
@@ -107,3 +139,17 @@ pub const LABEL_BI: &str = seele_proto::transport::LABEL_BI;
 pub const LABEL_CTL: &str = seele_proto::transport::LABEL_CTL;
 /// O label da voz.
 pub const LABEL_VOZ: &str = seele_proto::transport::LABEL_VOZ;
+/// O label do túnel ordenado e confiável (TCP do jogo e o controle do túnel).
+///
+/// Só se abre entre pontas que negociaram a linha 12: um par 11 não conhece o
+/// rótulo e o recusa ao chegar (`Contadores::canais_recusados`). Quem decide
+/// isso é quem chama `abrir_tunel`; o enlace não olha a versão negociada.
+pub const LABEL_TUNEL: &str = seele_proto::transport::LABEL_TUNEL;
+/// O label do túnel de datagramas (UDP do jogo): sem ordem e sem retransmissão.
+///
+/// **Não é o canal `voz`**, de propósito. A `voz` é um por conexão, negociado
+/// fora de banda, e o leitor dela trata todo datagrama como voz da sala; jogo
+/// misturado ali quebraria a voz. E **não é um `b`**: os `b` são lidos como
+/// pedido de imagem, com prazo e poucas vagas, e um túnel dura horas. Mesmo
+/// `protocol` dos outros canais extras; mesma regra de só abrir entre pontas 12.
+pub const LABEL_JOGO: &str = seele_proto::transport::LABEL_JOGO;

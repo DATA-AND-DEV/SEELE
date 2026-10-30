@@ -34,6 +34,10 @@ pub enum Motivo {
     Caiu(String),
     /// Este lado fechou.
     Local,
+    /// Quem abre um canal bateu no teto de [`crate::MAX_CANAIS`] canais vivos
+    /// por conexão. **Só a abertura é recusada**: a conexão segue de pé. É o
+    /// que o servidor traduz em `RecusaDeTunel::CanaisEsgotados`.
+    CanaisEsgotados,
 }
 
 impl std::fmt::Display for Motivo {
@@ -42,6 +46,9 @@ impl std::fmt::Display for Motivo {
             Self::Fechada { codigo } => write!(f, "o par fechou a conexão (código {codigo})"),
             Self::Caiu(porque) => write!(f, "a conexão caiu: {porque}"),
             Self::Local => write!(f, "a conexão foi fechada deste lado"),
+            Self::CanaisEsgotados => {
+                write!(f, "o teto de {} canais por conexão", crate::MAX_CANAIS)
+            }
         }
     }
 }
@@ -62,14 +69,17 @@ pub enum FalhaDoCanal {
     Caiu(Motivo),
 }
 
-/// Por que um datagrama de voz não saiu. Nunca espera: a voz atrasada não serve.
+/// Por que um datagrama (de voz, ou do `j` do túnel) não saiu. Nunca espera:
+/// voz ou jogo atrasado não serve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum Recusa {
-    /// Maior que [`crate::MAX_VOZ`].
-    #[error("datagrama de voz acima de {} bytes", crate::MAX_VOZ)]
+    /// Acima do teto do canal: [`crate::MAX_VOZ`] na voz, [`crate::MAX_DADOS`]
+    /// no `j`. No `j` é contado em `Contadores::tunel_grande_demais`.
+    #[error("datagrama acima do teto do canal")]
     Grande,
-    /// A fila da tarefa está cheia.
-    #[error("a fila de voz está cheia")]
+    /// A fila da tarefa está cheia (a de voz, ou a do `j`: [`crate::FILA_DE_JOGO`]).
+    /// No `j` é contado em `Contadores::tunel_descartado`.
+    #[error("a fila de datagramas está cheia")]
     Cheia,
     /// A conexão acabou.
     #[error("a conexão acabou")]
@@ -119,6 +129,13 @@ pub struct Contadores {
     /// frente da voz, em bytes. Fica abaixo de `LIMIAR_DE_VOLUME` mais uma
     /// mensagem: é a garantia do R4, medida.
     pub maior_volume_no_sctp: u64,
+    /// Datagramas `j` do túnel que não couberam: a fila de saída cheia, o SCTP
+    /// sem espaço, ou a fila de entrada cheia. O jogo repete o que perde; o
+    /// número serve a quem investiga «o jogo engasga».
+    pub tunel_descartado: u64,
+    /// Datagramas `j` acima de [`crate::MAX_DADOS`], na saída (recusados) ou na
+    /// entrada (descartados).
+    pub tunel_grande_demais: u64,
 }
 
 #[derive(Default)]
@@ -129,6 +146,8 @@ pub(crate) struct ContadoresVivos {
     pub(crate) voz_descartada: AtomicU64,
     pub(crate) voz_nao_saiu: AtomicU64,
     pub(crate) maior_volume_no_sctp: AtomicU64,
+    pub(crate) tunel_descartado: AtomicU64,
+    pub(crate) tunel_grande_demais: AtomicU64,
 }
 
 /// O que a tarefa e os punhos de uma conexão dividem.
@@ -207,8 +226,20 @@ pub(crate) enum Comando {
     },
     Abrir {
         par: usize,
-        bidirecional: bool,
-        resposta: oneshot::Sender<Result<(Envio, Option<Recebe>), Motivo>>,
+        natureza: Natureza,
+        resposta: crate::conexao::RespostaDeAbrir,
+    },
+    /// Quem segurava o `j` largou: o canal fecha, sem envelope (um corte de
+    /// `u`/`b` seria lixo para quem lê datagramas crus).
+    FecharJogo {
+        par: usize,
+        canal: ChannelId,
+    },
+    /// Um datagrama do `j`: sai sem esperar, e o que não couber é contado.
+    Jogo {
+        par: usize,
+        canal: ChannelId,
+        bytes: Vec<u8>,
     },
     Fechar {
         par: usize,
@@ -226,6 +257,26 @@ pub(crate) enum Comando {
     Anfitriao(Option<Box<crate::ConfigDoAnfitriao>>),
     Desligar,
 }
+
+/// O que um `Comando::Abrir` abre.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Natureza {
+    Uni,
+    Bi,
+    /// O `t`: bidirecional como o `b`, mas entregue na fila do túnel.
+    Tunel,
+    /// O `j`: datagramas, sem envelope, sem ordem e sem retransmissão.
+    Jogo,
+}
+
+/// O que a abertura de um canal devolve a quem pediu.
+pub(crate) enum Aberto {
+    Fluxo(Envio, Option<Recebe>),
+    Jogo(Datagramas),
+}
+
+/// Quem pediu um canal espera os punhos dele, ou o motivo.
+pub(crate) type RespostaDeAbrir = oneshot::Sender<Result<Aberto, Motivo>>;
 
 /// O que acontece com o canal depois que esta mensagem entra no SCTP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -313,6 +364,7 @@ struct Filas {
     uni: tokio::sync::Mutex<mpsc::Receiver<Recebe>>,
     bi: tokio::sync::Mutex<mpsc::Receiver<(Envio, Recebe)>>,
     voz: tokio::sync::Mutex<mpsc::Receiver<Vec<u8>>>,
+    tunel: tokio::sync::Mutex<mpsc::Receiver<CanalDeTunel>>,
     controle: Mutex<Option<(Envio, Recebe)>>,
 }
 
@@ -330,6 +382,7 @@ pub(crate) struct LadoDaTarefa {
     pub(crate) uni: mpsc::Sender<Recebe>,
     pub(crate) bi: mpsc::Sender<(Envio, Recebe)>,
     pub(crate) voz: mpsc::Sender<Vec<u8>>,
+    pub(crate) tunel: mpsc::Sender<CanalDeTunel>,
 }
 
 impl Conexao {
@@ -341,10 +394,12 @@ impl Conexao {
         let (uni_tx, uni_rx) = mpsc::channel(crate::MAX_CANAIS);
         let (bi_tx, bi_rx) = mpsc::channel(crate::MAX_CANAIS);
         let (voz_tx, voz_rx) = mpsc::channel(crate::FILA_DE_VOZ);
+        let (tunel_tx, tunel_rx) = mpsc::channel(crate::MAX_CANAIS);
         let filas = Arc::new(Filas {
             uni: tokio::sync::Mutex::new(uni_rx),
             bi: tokio::sync::Mutex::new(bi_rx),
             voz: tokio::sync::Mutex::new(voz_rx),
+            tunel: tokio::sync::Mutex::new(tunel_rx),
             controle: Mutex::new(Some(controle)),
         });
         let guarda = Arc::new(Guarda {
@@ -362,6 +417,7 @@ impl Conexao {
                 uni: uni_tx,
                 bi: bi_tx,
                 voz: voz_tx,
+                tunel: tunel_tx,
             },
         )
     }
@@ -404,12 +460,12 @@ impl Conexao {
         Ok((envio, recebe))
     }
 
-    async fn abrir(&self, bidirecional: bool) -> Result<(Envio, Option<Recebe>), Motivo> {
+    async fn abrir(&self, natureza: Natureza) -> Result<Aberto, Motivo> {
         let (resposta, espera) = oneshot::channel();
         self.cmd
             .send(Comando::Abrir {
                 par: self.comp.id,
-                bidirecional,
+                natureza,
                 resposta,
             })
             .map_err(|_| self.comp.motivo_atual())?;
@@ -422,7 +478,10 @@ impl Conexao {
     ///
     /// A conexão que acabou, ou o teto de canais.
     pub async fn open_uni(&self) -> Result<Envio, Motivo> {
-        Ok(self.abrir(false).await?.0)
+        match self.abrir(Natureza::Uni).await? {
+            Aberto::Fluxo(envio, _) => Ok(envio),
+            Aberto::Jogo(_) => Err(Motivo::Caiu("o canal unidirecional abriu como jogo".into())),
+        }
     }
 
     /// Abre um canal "b" com o par.
@@ -431,12 +490,52 @@ impl Conexao {
     ///
     /// A conexão que acabou, ou o teto de canais.
     pub async fn open_bi(&self) -> Result<(Envio, Recebe), Motivo> {
-        match self.abrir(true).await? {
-            (envio, Some(recebe)) => Ok((envio, recebe)),
-            (_, None) => Err(Motivo::Caiu(
+        match self.abrir(Natureza::Bi).await? {
+            Aberto::Fluxo(envio, Some(recebe)) => Ok((envio, recebe)),
+            _ => Err(Motivo::Caiu(
                 "o canal bidirecional abriu sem leitura".into(),
             )),
         }
+    }
+
+    /// Abre um canal de túnel para o par: o `t` (ordenado e confiável) ou o `j`
+    /// (sem ordem e sem retransmissão).
+    ///
+    /// **Só chame para um par que negociou a linha 12.** Um par 11 não conhece
+    /// os rótulos e fecha o canal ao chegar; o enlace não sabe a versão
+    /// negociada, e quem decide é o chamador.
+    ///
+    /// # Errors
+    ///
+    /// [`Motivo::CanaisEsgotados`] no teto de [`crate::MAX_CANAIS`] canais (a
+    /// conexão segue de pé), ou o motivo de a conexão ter acabado.
+    pub async fn abrir_tunel(&self, c: Confiabilidade) -> Result<CanalDeTunel, Motivo> {
+        let natureza = match c {
+            Confiabilidade::Ordenada => Natureza::Tunel,
+            Confiabilidade::SemOrdem => Natureza::Jogo,
+        };
+        match self.abrir(natureza).await? {
+            Aberto::Fluxo(envio, Some(recebe)) => Ok(CanalDeTunel::Ordenado(envio, recebe)),
+            Aberto::Jogo(datagramas) => Ok(CanalDeTunel::SemOrdem(datagramas)),
+            Aberto::Fluxo(_, None) => {
+                Err(Motivo::Caiu("o canal de túnel abriu sem leitura".into()))
+            }
+        }
+    }
+
+    /// O próximo canal de túnel (`t` ou `j`) que o par abriu.
+    ///
+    /// # Errors
+    ///
+    /// O [`Motivo`] de a conexão ter acabado.
+    pub async fn aceitar_tunel(&self) -> Result<CanalDeTunel, Motivo> {
+        let mut fila = self.filas.tunel.lock().await;
+        let canal = fila.recv().await.ok_or_else(|| self.comp.motivo_atual())?;
+        match &canal {
+            CanalDeTunel::Ordenado(_, recebe) => self.aceitou(recebe.canal),
+            CanalDeTunel::SemOrdem(datagramas) => self.aceitou(datagramas.canal),
+        }
+        Ok(canal)
     }
 
     /// O próximo datagrama de voz.
@@ -594,6 +693,8 @@ impl Conexao {
             voz_descartada: c.voz_descartada.load(Ordering::Relaxed),
             voz_nao_saiu: c.voz_nao_saiu.load(Ordering::Relaxed),
             maior_volume_no_sctp: c.maior_volume_no_sctp.load(Ordering::Relaxed),
+            tunel_descartado: c.tunel_descartado.load(Ordering::Relaxed),
+            tunel_grande_demais: c.tunel_grande_demais.load(Ordering::Relaxed),
         }
     }
 }
@@ -604,6 +705,113 @@ impl std::fmt::Debug for Conexao {
             .field("id", &self.comp.id)
             .field("remoto", &self.remote_address())
             .finish_non_exhaustive()
+    }
+}
+
+/// Se o túnel pede ordem e retransmissão (o TCP do jogo) ou não (o UDP).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confiabilidade {
+    /// Ordenado e confiável: o canal `t`.
+    Ordenada,
+    /// Sem ordem e sem retransmissão: o canal `j`.
+    SemOrdem,
+}
+
+/// Um canal de túnel, do tipo que o `abrir_tunel` pediu ou que o par abriu.
+#[derive(Debug)]
+pub enum CanalDeTunel {
+    /// O `t`: os mesmos `Envio` e `Recebe` (e o mesmo crédito) dos canais `u` e `b`.
+    Ordenado(Envio, Recebe),
+    /// O `j`: datagramas.
+    SemOrdem(Datagramas),
+}
+
+/// O que se leu da configuração de um canal `j` no DCEP. Só a [`crate::teste`] lê.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ConfigLida {
+    pub(crate) ordenado: bool,
+    pub(crate) sem_retransmissao: bool,
+}
+
+/// O canal `j`: datagramas sem ordem e sem retransmissão, cada um até
+/// [`crate::MAX_DADOS`] bytes, sem envelope (a mensagem SCTP é o datagrama).
+///
+/// Nada aqui espera: o jogo que atrasa é pior que o que perde.
+pub struct Datagramas {
+    pub(crate) cmd: mpsc::UnboundedSender<Comando>,
+    pub(crate) comp: Arc<Compartilhado>,
+    pub(crate) canal: ChannelId,
+    pub(crate) estado: Arc<EstadoDoCanal>,
+    /// Datagramas já entregues à tarefa e ainda não escritos no SCTP.
+    pub(crate) na_fila: Arc<AtomicUsize>,
+    pub(crate) entrada: mpsc::Receiver<Vec<u8>>,
+    pub(crate) config: ConfigLida,
+}
+
+impl std::fmt::Debug for Datagramas {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Datagramas")
+            .field("conexao", &self.comp.id)
+            .field("canal", &self.canal)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Datagramas {
+    /// Só a [`crate::teste`]: o que o DCEP trouxe da configuração do canal.
+    pub(crate) fn config_lida(&self) -> ConfigLida {
+        self.config
+    }
+
+    /// Manda um datagrama. Nunca espera.
+    ///
+    /// # Errors
+    ///
+    /// [`Recusa::Grande`] acima de [`crate::MAX_DADOS`] (conta
+    /// `tunel_grande_demais`); [`Recusa::Cheia`] com [`crate::FILA_DE_JOGO`]
+    /// datagramas esperando (conta `tunel_descartado`); [`Recusa::Fechada`] se
+    /// o canal ou a conexão acabou.
+    pub fn mandar(&self, bytes: &[u8]) -> Result<(), Recusa> {
+        if self.comp.motivo.borrow().is_some() || self.estado.falha().is_some() {
+            return Err(Recusa::Fechada);
+        }
+        let contadores = &self.comp.contadores;
+        if bytes.len() > crate::MAX_DADOS {
+            contadores
+                .tunel_grande_demais
+                .fetch_add(1, Ordering::Relaxed);
+            return Err(Recusa::Grande);
+        }
+        if self.na_fila.fetch_add(1, Ordering::Relaxed) >= crate::FILA_DE_JOGO {
+            self.na_fila.fetch_sub(1, Ordering::Relaxed);
+            contadores.tunel_descartado.fetch_add(1, Ordering::Relaxed);
+            return Err(Recusa::Cheia);
+        }
+        self.cmd
+            .send(Comando::Jogo {
+                par: self.comp.id,
+                canal: self.canal,
+                bytes: bytes.to_vec(),
+            })
+            .map_err(|_| {
+                self.na_fila.fetch_sub(1, Ordering::Relaxed);
+                Recusa::Fechada
+            })
+    }
+
+    /// O próximo datagrama, ou `None` quando o canal acabou.
+    pub async fn receber(&mut self) -> Option<Vec<u8>> {
+        self.entrada.recv().await
+    }
+}
+
+impl Drop for Datagramas {
+    fn drop(&mut self) {
+        // Largar o `j` o fecha: a tarefa tira o canal do mapa e libera a vaga.
+        let _ = self.cmd.send(Comando::FecharJogo {
+            par: self.comp.id,
+            canal: self.canal,
+        });
     }
 }
 
