@@ -56,8 +56,10 @@ const ECO: &str = "x/eco";
 ///
 /// `aoPedir`: um pedido da máquina (`contexto.maquina`) é gravado em
 /// `dados.visto_da_maquina` e respondido; os outros fazem o que o pedido
-/// manda — `pedir` (a `quem`, ou a quem pediu) e `avisar`. `aoAcontecer`:
-/// cada momento da máquina, uma linha em `dados.momentos`. A oferta é a mesma
+/// manda — `pedir` (a `quem`, ou a quem pediu), `avisar` e `insistir`.
+/// `aoAcontecer`: cada momento da máquina, uma linha em `dados.momentos`; com
+/// `insistir`, um `MaquinaRecusou` faz pedir de novo — o tentar-de-novo que,
+/// sem freio, se alimentaria sozinho. A oferta é a mesma
 /// de [`oferta`], no JSON que um MOD escreve.
 const METADE: &str = r#"
 const OFERTA = { titulo: "Minecraft", receita: "minecraft-java", versao_da_receita: "1.0.0",
@@ -69,12 +71,17 @@ globalThis.aoPedir = (contexto, pedido) => {
     dados.visto_da_maquina = JSON.stringify({ servidor: c.maquina.servidor, pessoa: c.person, pedido: p });
     return JSON.stringify({ ok: true, servidor: c.maquina.servidor });
   }
+  if (p.insistir) dados.insistir = "1";
   if (p.pedir) mundo.maquinas.pedir({ quem: p.quem === undefined ? c.person : p.quem, servidor: "mc-1", oferta: OFERTA });
   if (p.avisar !== undefined) mundo.maquinas.avisar({ servidor: "mc-1", carga: p.avisar });
   return JSON.stringify({ ok: true });
 };
 globalThis.aoAcontecer = (momento, carga) => {
   if (momento.indexOf("Maquina") === 0) dados.momentos = (dados.momentos || "") + momento + " " + carga + "\n";
+  if (momento === "MaquinaRecusou" && dados.insistir) {
+    const c = JSON.parse(carga);
+    mundo.maquinas.pedir({ quem: c.pessoa, servidor: c.servidor, oferta: OFERTA });
+  }
 };
 "#;
 
@@ -1023,6 +1030,126 @@ async fn os_momentos_da_maquina_vao_so_ao_mod_dela() -> Result<()> {
         !vistos.contains("Maquina"),
         "um momento da máquina de x/jogo chegou a x/eco: {vistos:?}"
     );
+    m.daemon.shutdown();
+    Ok(())
+}
+
+/// **Um momento que pede de novo ao ler a recusa não se alimenta sozinho.**
+/// O `aoAcontecer` do MOD de teste, com `insistir`, pede de novo a cada
+/// `MaquinaRecusou`; quem foi chamado não está aqui. A primeira recusa chega
+/// (a do pedido), e a repetida pelo momento fica no contador, sem virar outro
+/// momento.
+#[tokio::test(flavor = "multi_thread")]
+async fn um_momento_que_insiste_na_recusa_nao_gira_sozinho() -> Result<()> {
+    let m = montar().await?;
+    let mut gestora = entrar(m.endereco, GESTORA, 12).await?;
+    pedir_ao_mod(
+        &mut gestora,
+        1,
+        &serde_json::json!({ "insistir": true, "pedir": true, "quem": 999 }),
+    )
+    .await?;
+    esperar_no_quintal(&m, "momentos", "nao-esta-aqui").await;
+    // Tempo para muitas voltas do laço, se ele existisse.
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let momentos = quintal(&m, MOD)
+        .await
+        .get("momentos")
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        momentos.matches("MaquinaRecusou").count(),
+        1,
+        "a recusa voltou como momento mais de uma vez: {momentos}"
+    );
+    assert!(
+        m.daemon.server().recusas_juntadas(MOD) >= 1,
+        "a recusa repetida não foi contada"
+    );
+    m.daemon.shutdown();
+    Ok(())
+}
+
+/// **O aviso vai à conexão que aceitou**, e não a outra sessão da mesma
+/// pessoa.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_aviso_vai_so_a_conexao_que_aceitou() -> Result<()> {
+    let m = montar().await?;
+    let mut gestora = entrar(m.endereco, GESTORA, 12).await?;
+    let mut alice = entrar(m.endereco, ALICE, 12).await?;
+    chamar_e_aceitar(&m, &mut gestora, &mut alice).await?;
+    let outra = entrar(m.endereco, ALICE, 12).await?;
+    let lidos: Arc<Mutex<Vec<ServerMessage>>> = Arc::new(Mutex::new(Vec::new()));
+    {
+        let lidos = Arc::clone(&lidos);
+        let mut recebe = outra.ligado.recebe;
+        tokio::spawn(async move {
+            while let Ok(q) = frame::read::<ServerMessage>(&mut recebe).await {
+                lidos.lock().unwrap().push(q);
+            }
+        });
+    }
+    pedir_ao_mod(&mut gestora, 2, &serde_json::json!({ "avisar": "oi" })).await?;
+    let carga = esperar(&mut alice.ligado.recebe, |q| match q {
+        ServerMessage::AvisoParaMaquina { carga, .. } => Some(carga.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(
+        carga.as_deref(),
+        Some(r#""oi""#),
+        "a conexão que aceitou não recebeu o aviso"
+    );
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let na_outra: Vec<_> = lidos
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|q| matches!(q, ServerMessage::AvisoParaMaquina { .. }))
+        .cloned()
+        .collect();
+    assert!(
+        na_outra.is_empty(),
+        "a outra sessão de Alice recebeu {na_outra:?}"
+    );
+    m.daemon.shutdown();
+    Ok(())
+}
+
+/// **Uma dispensa só** para quem operava e tinha um pedido novo pendente
+/// quando o servidor de jogo passa a outra pessoa.
+#[tokio::test(flavor = "multi_thread")]
+async fn quem_operava_com_um_pedido_novo_recebe_uma_dispensa_so() -> Result<()> {
+    let m = montar().await?;
+    let gestora = entrar(m.endereco, GESTORA, 12).await?;
+    let mut alice = entrar(m.endereco, ALICE, 12).await?;
+    let resumo = pedir(&m, alice.pessoa, gestora.pessoa);
+    aceitar(&m, &mut alice, &resumo).await?;
+    let mut outra_oferta = oferta();
+    outra_oferta.titulo = "Minecraft 2".into();
+    let _ = seele_server::maquinas::pedir(
+        m.daemon.server(),
+        MOD,
+        &m.hash,
+        SERVIDOR,
+        alice.pessoa,
+        gestora.pessoa,
+        &outra_oferta,
+    );
+    let _ = pedir(&m, PersonId(77), gestora.pessoa);
+    let mut dispensas = 0;
+    let fim = Instant::now() + Duration::from_millis(800);
+    while Instant::now() < fim {
+        if let Ok(Ok(ServerMessage::MaquinaDispensada { .. })) = tokio::time::timeout(
+            Duration::from_millis(100),
+            frame::read::<ServerMessage>(&mut alice.ligado.recebe),
+        )
+        .await
+        {
+            dispensas += 1;
+        }
+    }
+    assert_eq!(dispensas, 1, "Alice recebeu {dispensas} dispensas");
     m.daemon.shutdown();
     Ok(())
 }

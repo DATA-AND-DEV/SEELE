@@ -581,9 +581,9 @@ pub async fn acompanhar(
             continue;
         };
         for (id, declarado) in resposta.maquinas {
-            // Num momento ninguém pediu: `PersonId(0)`, que o app mostra como
-            // «alguém deste servidor».
-            maquina::despejar(&server, &id, seele_proto::ids::PersonId(0), declarado).await;
+            // Num momento ninguém pediu, e uma recusa repetida não volta como
+            // momento: ver `maquina::Origem`.
+            maquina::despejar(&server, &id, maquina::Origem::Momento, declarado).await;
         }
     }
 }

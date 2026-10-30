@@ -472,7 +472,13 @@ async fn executar_inner(
     // E o que a chamada declarou em `mundo.maquinas`, pela mesma regra: só
     // depois do quintal gravado. Fora de qualquer cadeado: o despejo lê o banco
     // e toma o livro na ordem de `Server::maquinas`.
-    super::maquina::despejar(server, &id, person, maquinas).await;
+    super::maquina::despejar(
+        server,
+        &id,
+        super::maquina::Origem::Pedido(person),
+        maquinas,
+    )
+    .await;
     Ok(response)
 }
 
@@ -612,10 +618,17 @@ async fn conferir(
     // tem agora, para a metade de servidor decidir o que mostrar; não é o
     // bloqueio (o bloqueio é o portão acima).
     // `maquina`: `{ servidor }` quando quem pede é a máquina aceita daquele
-    // servidor de jogo (`executar_da_maquina`), e `null` em todo outro pedido.
+    // servidor de jogo (`executar_da_maquina`), e **ausente** em todo outro
+    // pedido: um MOD da 7 ou da 6 recebe o contexto que sempre recebeu.
     // Como `person`, é o servidor quem diz: o pedido não tem como mandá-la.
-    let maquina = maquina.map(|servidor| serde_json::json!({ "servidor": servidor }));
-    let context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"sala":sala,"admin":admin,"write":write,"acao":acao,"permissoes":permissoes_do_mod,"maquina":maquina}).to_string();
+    let mut context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"sala":sala,"admin":admin,"write":write,"acao":acao,"permissoes":permissoes_do_mod});
+    if let (Some(servidor), Some(campos)) = (maquina, context.as_object_mut()) {
+        campos.insert(
+            "maquina".into(),
+            serde_json::json!({ "servidor": servidor }),
+        );
+    }
+    let context = context.to_string();
     Ok(Conferencia::Vale(Conferido {
         hash: active.hash.clone(),
         contexto: context,
@@ -1341,6 +1354,12 @@ mod tests {
             assert_eq!(
                 resposta["contexto"]["admin"], administra,
                 "o MOD leu o `admin` errado de {quem:?}: {resposta}"
+            );
+            // Fora de um pedido da máquina, a chave nem existe: um MOD da 7 ou
+            // da 6 recebe o contexto que sempre recebeu.
+            assert!(
+                resposta["contexto"].get("maquina").is_none(),
+                "`maquina` apareceu no contexto de um pedido comum: {resposta}"
             );
         }
     }

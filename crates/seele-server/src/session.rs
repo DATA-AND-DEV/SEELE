@@ -485,20 +485,6 @@ pub async fn serve(
     // para tirar esta conexão da soma da subida, e ali ela não existe mais.
     let id_da_conexao = connection.stable_id() as u64;
 
-    // Quem negociou o 12 pode ser chamado a rodar uma máquina: o livro sabe a
-    // quem um `PedidoDeMaquina` chega, e a metade de servidor que pede a quem
-    // não está aqui ouve `nao-esta-aqui` em vez de esperar. Sai em
-    // `maquinas::saiu`, lá embaixo.
-    if session.protocol_version
-        >= seele_proto::vocabulario::desde(&ServerMessage::MaquinaDispensada {
-            mod_id: String::new(),
-            servidor: String::new(),
-            motivo: seele_proto::maquina::MotivoDaDispensa::SemAceite,
-        })
-    {
-        server.maquinas().chegou(session.person, id_da_conexao);
-    }
-
     let result = run_session(
         connection,
         send,
@@ -2314,6 +2300,23 @@ async fn run_session(
 
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
     let mut events = server.events.subscribe();
+    // Quem negociou o 12 pode ser chamado a rodar uma máquina: o livro sabe a
+    // quem um `PedidoDeMaquina` chega, e a metade de servidor que pede a quem
+    // não está aqui ouve `nao-esta-aqui` em vez de esperar. **Depois** do
+    // `subscribe`: antes, um pedido que saísse no meio acharia a pessoa no livro
+    // e nenhuma assinatura para levá-lo. Sai em `maquinas::saiu`, no fim da
+    // sessão.
+    if session.protocol_version
+        >= seele_proto::vocabulario::desde(&ServerMessage::MaquinaDispensada {
+            mod_id: String::new(),
+            servidor: String::new(),
+            motivo: seele_proto::maquina::MotivoDaDispensa::SemAceite,
+        })
+    {
+        server
+            .maquinas()
+            .chegou(session.person, connection.stable_id() as u64);
+    }
     // Toda escrita ao par daqui em diante passa pela vigia do atraso: ver
     // [`escrever_vigiando`]. As despedidas (`let _ = frame::write_em(...)`
     // com `Disconnecting`) ficam de fora, porque já são o fim.
@@ -4683,6 +4686,14 @@ async fn run_session(
                         continue;
                     }
                 }
+                // **O aviso à máquina é da conexão que aceitou**, e não da
+                // pessoa: outra sessão dela (o navegador) não roda máquina.
+                // `translate` não conhece a conexão; o filtro é aqui.
+                if let Event::AvisoParaMaquina { conexao, .. } = &event {
+                    if *conexao != connection.stable_id() as u64 {
+                        continue;
+                    }
+                }
                 if let Some(message) = translate(&event, &channels, session.person) {
                     if entende_a_mensagem(&message, session.protocol_version) {
                         escrever!(&message).await?;
@@ -6435,6 +6446,7 @@ fn translate(
         }),
         Event::AvisoParaMaquina {
             para,
+            conexao: _,
             mod_id,
             servidor,
             carga,

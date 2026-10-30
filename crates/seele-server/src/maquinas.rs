@@ -209,6 +209,12 @@ pub struct Maquinas {
     no_doze: HashMap<PersonId, Vec<u64>>,
     /// Quantos avisos de cada MOD não saíram por falta de máquina aceita.
     sem_maquina: HashMap<String, u64>,
+    /// Quando cada recusa do servidor `(mod, servidor, quem, motivo)` foi dita
+    /// ao MOD por último: é o que corta o laço de um momento que pede de novo
+    /// (`mods::maquina::JANELA_DA_RECUSA_REPETIDA`).
+    recusas_ditas: HashMap<(String, String, PersonId, &'static str), std::time::Instant>,
+    /// Quantas recusas de cada MOD não voltaram como momento por isso.
+    recusas_juntadas: HashMap<String, u64>,
 }
 
 impl Maquinas {
@@ -457,6 +463,11 @@ impl Maquinas {
                 true
             }
         });
+        // Quem operava e tinha um pedido novo pendente para o mesmo servidor
+        // de jogo recebe uma dispensa só, a da máquina.
+        desligado
+            .pendentes
+            .retain(|p| !desligado.maquinas.contains(p));
         desligado
     }
 
@@ -481,6 +492,50 @@ impl Maquinas {
         let n = self.sem_maquina.entry(mod_id.to_owned()).or_default();
         *n += 1;
         *n
+    }
+
+    /// Marca que a recusa `(mod_id, servidor, quem, motivo)` foi dita agora, e
+    /// diz se ela é **nova** — não dita nos últimos `janela`. As velhas saem
+    /// aqui mesmo: o mapa não cresce com o tempo.
+    pub fn marcar_recusa(
+        &mut self,
+        mod_id: &str,
+        servidor: &str,
+        quem: PersonId,
+        motivo: &'static str,
+        agora: std::time::Instant,
+        janela: std::time::Duration,
+    ) -> bool {
+        self.recusas_ditas
+            .retain(|_, quando| agora.saturating_duration_since(*quando) < janela);
+        let chave = (mod_id.to_owned(), servidor.to_owned(), quem, motivo);
+        if self.recusas_ditas.contains_key(&chave) {
+            return false;
+        }
+        self.recusas_ditas.insert(chave, agora);
+        true
+    }
+
+    /// Conta uma recusa de `mod_id` que não voltou como momento, e devolve
+    /// quantas já são.
+    pub fn contar_recusa_juntada(&mut self, mod_id: &str) -> u64 {
+        let n = self.recusas_juntadas.entry(mod_id.to_owned()).or_default();
+        *n += 1;
+        *n
+    }
+
+    /// Quantas recusas de `mod_id` não voltaram como momento.
+    #[must_use]
+    pub fn recusas_juntadas(&self, mod_id: &str) -> u64 {
+        self.recusas_juntadas.get(mod_id).copied().unwrap_or(0)
+    }
+
+    /// Quem opera a máquina aceita de `(mod_id, servidor)`, e por qual conexão.
+    #[must_use]
+    pub fn operador(&self, mod_id: &str, servidor: &str) -> Option<(PersonId, u64)> {
+        self.aceitas
+            .get(&chave(mod_id, servidor))
+            .map(|a| (a.quem, a.conexao))
     }
 
     /// Quantos avisos de `mod_id` não saíram por falta de máquina aceita.
@@ -629,10 +684,13 @@ pub fn pedir(
             ..
         } => {
             tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, pedido_por = %pedido_por, "máquina: pedido mostrado a quem vai operá-la");
-            if let Some(chamada) = pendente_dispensado {
+            // Quem operava e tinha um pedido novo pendente recebe uma dispensa
+            // só, a da máquina.
+            let ja_dispensada = dispensada.as_ref().map(|d| d.quem);
+            if let Some(chamada) = pendente_dispensado.filter(|c| Some(*c) != ja_dispensada) {
                 dispensar_o_pendente(
                     server,
-                    *chamada,
+                    chamada,
                     mod_id,
                     servidor,
                     MotivoDaDispensa::OutroPedido,
@@ -1045,13 +1103,15 @@ mod tests {
         assert_eq!(pendente_dispensado, Some(A));
 
         let _ = m.pedir(MOD, HASH, "mc-2", A, GESTORA, &o);
+        // B aceita mc-1 e é chamado de novo, com outra oferta: no desligar, ele
+        // aparece só como máquina, e não também como pendente.
+        m.aceitar(B, 20, MOD, "mc-1", &resumo("mc-1", &o))
+            .expect("B aceita");
+        let _ = m.pedir(MOD, HASH, "mc-1", B, GESTORA, &oferta(25566));
         let mut desligado = m.mod_desligado(MOD);
         desligado.pendentes.sort();
-        assert_eq!(
-            desligado.pendentes,
-            vec![(A, "mc-2".to_owned()), (B, "mc-1".to_owned())]
-        );
-        assert!(desligado.maquinas.is_empty());
+        assert_eq!(desligado.pendentes, vec![(A, "mc-2".to_owned())]);
+        assert_eq!(desligado.maquinas, vec![(B, "mc-1".to_owned())]);
     }
 
     /// Quem pode ser chamado é quem tem uma conexão no 12 aberta, e deixa de
@@ -1070,5 +1130,19 @@ mod tests {
         );
         let _ = m.saiu(A, 11);
         assert!(!m.pode_ser_chamada(A));
+    }
+
+    /// A mesma recusa só é **nova** uma vez por janela; outra chave, ou a
+    /// janela passada, é nova de novo.
+    #[test]
+    fn a_mesma_recusa_so_e_nova_uma_vez_por_janela() {
+        let mut m = Maquinas::default();
+        let janela = std::time::Duration::from_secs(5);
+        let t0 = std::time::Instant::now();
+        assert!(m.marcar_recusa(MOD, "mc-1", A, "nao-esta-aqui", t0, janela));
+        assert!(!m.marcar_recusa(MOD, "mc-1", A, "nao-esta-aqui", t0, janela));
+        assert!(m.marcar_recusa(MOD, "mc-1", B, "nao-esta-aqui", t0, janela));
+        assert!(m.marcar_recusa(MOD, "mc-1", A, "pendentes-demais", t0, janela));
+        assert!(m.marcar_recusa(MOD, "mc-1", A, "nao-esta-aqui", t0 + janela, janela));
     }
 }

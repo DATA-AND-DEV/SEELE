@@ -554,6 +554,9 @@ pub enum Event {
     AvisoParaMaquina {
         /// A máquina.
         para: PersonId,
+        /// A conexão que aceitou: só ela recebe. Outra sessão da mesma pessoa
+        /// (o navegador, digamos) não é a máquina.
+        conexao: u64,
         /// `autor/nome` do MOD.
         mod_id: String,
         /// O servidor de jogo.

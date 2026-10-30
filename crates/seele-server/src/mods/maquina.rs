@@ -403,6 +403,38 @@ pub fn oferta_do_json(o: &Map<String, Value>) -> Result<OfertaDeMaquina, String>
     Ok(oferta)
 }
 
+/// Por quanto tempo uma recusa do servidor já dita ao MOD não volta a ele como
+/// momento quando o pedido repetido vem **de um momento**.
+///
+/// Sem isto, um `aoAcontecer` que pede de novo ao ler `MaquinaRecusou` (o
+/// tentar-de-novo natural para `nao-esta-aqui`) se alimenta sozinho: o despejo
+/// recusa, a recusa vira momento, o momento pede de novo — a thread dos MODs
+/// gira, os vizinhos perdem momentos e o log enche. Cinco segundos é mais que
+/// uma volta do barramento e menos que uma pessoa leva para entrar.
+pub const JANELA_DA_RECUSA_REPETIDA: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// De onde veio a chamada cujo declarado se despeja.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origem {
+    /// Um `aoPedir`: a pessoa que pediu (vai em `pedido_por`). Toda recusa do
+    /// servidor volta ao MOD como momento.
+    Pedido(PersonId),
+    /// Um `aoAcontecer`: ninguém pediu (`pedido_por` é `PersonId(0)`, que o app
+    /// mostra como «alguém deste servidor»). Uma recusa igual a uma já dita
+    /// dentro de [`JANELA_DA_RECUSA_REPETIDA`] não volta como momento: fica no
+    /// log e em [`Server::recusas_juntadas`].
+    Momento,
+}
+
+impl Origem {
+    const fn pedido_por(self) -> PersonId {
+        match self {
+            Self::Pedido(quem) => quem,
+            Self::Momento => PersonId(0),
+        }
+    }
+}
+
 /// O nome com que um teto do livro volta ao MOD em `MaquinaRecusou`.
 const fn nome_do_excesso(excesso: Excesso) -> &'static str {
     match excesso {
@@ -414,18 +446,13 @@ const fn nome_do_excesso(excesso: Excesso) -> &'static str {
 /// Leva ao livro o que a chamada de `mod_id` declarou em `mundo.maquinas`,
 /// depois de ela terminar e de o quintal gravar.
 ///
-/// `pedido_por` é quem pediu ao MOD (`aoPedir`), ou `PersonId(0)` num momento,
-/// onde ninguém pediu: o app o mostra como «alguém deste servidor».
+/// `origem` diz quem pediu ([`Origem`]) e se uma recusa repetida volta ao MOD.
 ///
 /// A ordem dos cadeados é a de [`Server::maquinas`]: o banco é lido e solto
 /// antes, e o livro nunca é tomado com o avisador na mão a partir daqui (o
 /// avisador toma o livro ao soltar, em [`entregar_aviso`]).
-pub async fn despejar(
-    server: &Arc<Server>,
-    mod_id: &str,
-    pedido_por: PersonId,
-    declarado: Declarado,
-) {
+pub async fn despejar(server: &Arc<Server>, mod_id: &str, origem: Origem, declarado: Declarado) {
+    let pedido_por = origem.pedido_por();
     if declarado.vazio() {
         return;
     }
@@ -456,14 +483,21 @@ pub async fn despejar(
         } = pedido;
         if !server.maquinas().pode_ser_chamada(quem) {
             tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, motivo = NAO_ESTA_AQUI, "máquina: pedido a quem não está conectado num 12; volta ao MOD como recusa");
-            recusar_ao_mod(server, mod_id, servidor, quem, NAO_ESTA_AQUI);
+            recusar_ao_mod(server, origem, mod_id, servidor, quem, NAO_ESTA_AQUI);
             continue;
         }
         // `maquinas::pedir` já diz no log o que fez, inclusive o teto.
         if let Pedido::Recusado(excesso) =
             crate::maquinas::pedir(server, mod_id, &hash, &servidor, quem, pedido_por, &oferta)
         {
-            recusar_ao_mod(server, mod_id, servidor, quem, nome_do_excesso(excesso));
+            recusar_ao_mod(
+                server,
+                origem,
+                mod_id,
+                servidor,
+                quem,
+                nome_do_excesso(excesso),
+            );
         }
     }
 
@@ -492,13 +526,33 @@ pub async fn despejar(
 
 /// O MOD fica sabendo que o pedido não foi mostrado, pelo momento
 /// `MaquinaRecusou` — o mesmo que ele lê quando a pessoa diz não.
+///
+/// Vinda de um momento, a mesma recusa já dita há menos de
+/// [`JANELA_DA_RECUSA_REPETIDA`] não volta: o MOD já sabe, e dizer de novo é o
+/// laço que se alimenta sozinho. Vinda de um pedido, sempre volta (e marca a
+/// janela): um pedido não nasce de um momento, então não fecha laço.
 fn recusar_ao_mod(
     server: &Server,
+    origem: Origem,
     mod_id: &str,
     servidor: String,
     quem: PersonId,
     motivo: &'static str,
 ) {
+    let agora = std::time::Instant::now();
+    let nova = server.maquinas().marcar_recusa(
+        mod_id,
+        &servidor,
+        quem,
+        motivo,
+        agora,
+        JANELA_DA_RECUSA_REPETIDA,
+    );
+    if !nova && origem == Origem::Momento {
+        let juntadas = server.maquinas().contar_recusa_juntada(mod_id);
+        tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, motivo, juntadas, "máquina: a mesma recusa, pedida de novo por um momento, já foi dita ao MOD há pouco; não volta como momento");
+        return;
+    }
     let _ = server
         .events
         .send(Event::Maquina(MudancaDeMaquina::Recusou {
@@ -520,11 +574,12 @@ fn sem_maquina(server: &Server, mod_id: &str, servidor: &str) {
 /// Solta um aviso que passou pela taxa: à máquina aceita **agora**, que pode
 /// não ser a de quando ele foi declarado.
 fn entregar_aviso(server: &Server, saindo: AvisoQueSai<String>) {
-    let quem = server.maquinas().quem_opera(&saindo.mod_id, &saindo.canal);
-    match quem {
-        Some(para) => {
+    let operador = server.maquinas().operador(&saindo.mod_id, &saindo.canal);
+    match operador {
+        Some((para, conexao)) => {
             let _ = server.events.send(Event::AvisoParaMaquina {
                 para,
+                conexao,
                 mod_id: saindo.mod_id,
                 servidor: saindo.canal,
                 carga: saindo.carga,
@@ -540,6 +595,13 @@ impl Server {
     #[must_use]
     pub fn avisos_sem_maquina(&self, mod_id: &str) -> u64 {
         self.maquinas().avisos_sem_maquina(mod_id)
+    }
+
+    /// Quantas recusas de `mod_id`, repetidas por um momento dentro de
+    /// [`JANELA_DA_RECUSA_REPETIDA`], não voltaram a ele como momento.
+    #[must_use]
+    pub fn recusas_juntadas(&self, mod_id: &str) -> u64 {
+        self.maquinas().recusas_juntadas(mod_id)
     }
 }
 
