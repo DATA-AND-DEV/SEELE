@@ -80,7 +80,7 @@ const LIMIAR_DO_VOLUME = 64 * 1024;
 const VOLTA_DO_VOLUME_MS = 10;
 
 /** O prazo do aperto: do discar até o controle, a voz e a apresentação. */
-const PRAZO_DO_ENLACE_MS = 10_000;
+const PRAZO_DO_ENLACE_MS = 20_000;
 
 /** Quanto o caminho direto tem, antes de a página chamar pelo ponto (D9). */
 const ESPERA_DO_DIRETO_MS = 1_500;
@@ -94,6 +94,13 @@ const ESPERA_DO_REFLETIDO_MS = 1_500;
  * ponto recusa o `CHAMA` inteiro com mais que isto, ou com um repetido.
  */
 const LIMITE_DE_SRFLX = 2;
+
+// O anfitrião admite até três candidatos distintos por credencial e não
+// renova o prazo do par ao receber outro CHAMADO. Atualizações são precoces,
+// sequenciais e limitadas; não são um laço de reconexão.
+const LIMITE_DE_ANUNCIADOS = 3;
+const LIMITE_DE_CHAMADAS_AO_PONTO = 3;
+const JANELA_DE_ATUALIZACAO_MS = 8_000;
 
 /**
  * Quanto a página espera o `getStats()` que diz por qual par o ICE abriu. É
@@ -926,6 +933,8 @@ function criarEnlaceRtc({
   const refletidos = [];
   const visto = { refletido: null, sinal: null, dtls: null, candidatos: [], venceu: null, soNomes: false };
   let fechado = false;
+  let requisicaoDoSinal = null;
+  let descobrindoCaminho = Boolean(bilhete);
   let ultimaVoz = performance.now();
 
   // ------------------------------------------------------------ o fecho
@@ -936,6 +945,7 @@ function criarEnlaceRtc({
   function encerrar(motivo) {
     if (fechado) return;
     fechado = true;
+    requisicaoDoSinal?.abort();
     clearInterval(keepalive);
     fila.fechar("caiu");
     for (const credito of creditosDoPar) credito.fechar("caiu");
@@ -961,13 +971,14 @@ function criarEnlaceRtc({
     if (fechado) return;
     const dtls = pc.sctp?.transport?.state;
     if ((pc.connectionState === "failed" || dtls === "failed") && iceAberto() && !visto.dtls) visto.dtls = "failed";
-    if (pc.connectionState === "failed" || pc.connectionState === "closed" || dtls === "failed") {
+    const falhaFinal = !descobrindoCaminho || iceAberto();
+    if ((pc.connectionState === "failed" && falhaFinal) || pc.connectionState === "closed" || dtls === "failed") {
       encerrar({ caiu: pc.connectionState, dtls: dtls ?? null });
     }
   }
   pc.addEventListener("connectionstatechange", olharOEstado);
   pc.addEventListener("iceconnectionstatechange", () => {
-    if (pc.iceConnectionState === "failed" && !iceAberto()) encerrar({ caiu: "ice" });
+    if (pc.iceConnectionState === "failed" && !descobrindoCaminho) encerrar({ caiu: "ice" });
   });
   ctl.addEventListener("close", () => encerrar({ caiu: "ctl" }));
 
@@ -1203,7 +1214,8 @@ function criarEnlaceRtc({
   /**
    * Espera os refletidos pelo STUN do ponto: sai no que vier antes entre já haver
    * um v4 e um v6, a coleta completa, e o teto de [`ESPERA_DO_REFLETIDO_MS`]
-   * (o mesmo de sempre: nenhum segundo extra). Um `srflx` que chega depois fica fora.
+   * Esta espera só agrupa o primeiro anúncio. Um `srflx` tardio ainda pode
+   * atualizar o mesmo par durante a janela limitada de sinalização.
    */
   async function esperarORefletido() {
     const ate = performance.now() + ESPERA_DO_REFLETIDO_MS;
@@ -1213,16 +1225,11 @@ function criarEnlaceRtc({
   }
 
   /** **A chamada pelo ponto** (D7): o `POST /sinal/1`, e os candidatos do `AQUI`. */
-  async function chamarPeloPonto(mid) {
-    const url = enderecoDoSinal(bilhete.ponto);
-    await esperarORefletido();
-    // A tentativa já acabou (o prazo venceu enquanto o STUN respondia): nada de chamada.
-    if (fechado) return;
+  async function anunciarPeloPonto(mid, url, candidatos) {
     if (!url || !sinal) {
       visto.sinal = { semSinal: true };
       return;
     }
-    const candidatos = osSrflxQueVao();
     const montado = sinal.montar({ impressao, credencial, candidatos });
     if (!montado.corpo) {
       visto.sinal = { erro: montado.erro };
@@ -1232,9 +1239,11 @@ function criarEnlaceRtc({
     // Se o prazo vencer com a chamada no ar, ficou assim: o ponto não respondeu à página.
     visto.sinal = { pendente: true };
     let texto;
+    const abortador = new AbortController();
+    requisicaoDoSinal = abortador;
     try {
-      const resposta = await esperarNoMaximo(
-        buscar(url, {
+      texto = await esperarNoMaximo((async () => {
+        const resposta = await buscar(url, {
           method: "POST",
           body: montado.corpo,
           headers: { "Content-Type": "text/plain" },
@@ -1242,19 +1251,65 @@ function criarEnlaceRtc({
           credentials: "omit",
           cache: "no-store",
           referrerPolicy: "no-referrer",
-        }),
+          signal: abortador.signal,
+        });
+        if (!resposta.ok) throw `http ${resposta.status}`;
+        return resposta.text();
+      })(),
         PRAZO_DO_SINAL_MS,
         "prazo",
       );
-      if (!resposta.ok) throw `http ${resposta.status}`;
-      texto = await resposta.text();
     } catch (falha) {
-      visto.sinal = { mudo: String(falha) };
+      if (!fechado) visto.sinal = { mudo: String(falha) };
       return;
+    } finally {
+      abortador.abort();
+      if (requisicaoDoSinal === abortador) requisicaoDoSinal = null;
     }
+    if (fechado) return;
     const lido = sinal.ler(texto);
     visto.sinal = lido;
     if (lido.aqui) await somarCandidatos(mid, [lido.aqui.endereco, ...(lido.aqui.dicas ?? [])]);
+  }
+
+  async function chamarPeloPonto(mid) {
+    try {
+      await atualizarCaminhoPeloPonto(mid);
+    } finally {
+      descobrindoCaminho = false;
+      olharOEstado();
+      if (!fechado && pc.iceConnectionState === "failed") encerrar({ caiu: "ice" });
+    }
+  }
+
+  async function atualizarCaminhoPeloPonto(mid) {
+    const url = enderecoDoSinal(bilhete.ponto);
+    await esperarORefletido();
+    if (fechado) return;
+    const ate = performance.now() + JANELA_DE_ATUALIZACAO_MS;
+    const anunciados = new Set();
+    let chamadas = 0;
+    while (!fechado && !iceAberto() && ctl.readyState !== "open" && chamadas < LIMITE_DE_CHAMADAS_AO_PONTO) {
+      if (chamadas > 0 && performance.now() >= ate) return;
+      const atuais = chamadas === 0 ? osSrflxQueVao() : refletidos;
+      const novos = atuais.filter((c) => !anunciados.has(c)).slice(0, LIMITE_DE_ANUNCIADOS - anunciados.size);
+      if (chamadas === 0 || novos.length) {
+        // Novos primeiro: não gastar os dois lugares repetindo endereços que
+        // o anfitrião já conhece. A credencial e o certificado não mudam.
+        const candidatos = [...novos, ...atuais.filter((c) => anunciados.has(c))].slice(0, LIMITE_DE_SRFLX);
+        for (const c of candidatos) anunciados.add(c);
+        chamadas += 1;
+        visto.chamadasAoPonto = chamadas;
+        visto.candidatosAnunciados = anunciados.size;
+        await anunciarPeloPonto(mid, url, candidatos);
+        if (visto.sinal?.ninguem || visto.sinal?.recusa || visto.sinal?.erro || visto.sinal?.semSinal) return;
+      }
+      if (fechado || performance.now() >= ate || anunciados.size >= LIMITE_DE_ANUNCIADOS) return;
+      // Depois de complete ainda podemos ter recebido um candidato durante
+      // o POST; só encerrar a coleta após conferir se falta anunciá-lo.
+      if (pc.iceGatheringState === "complete" && !refletidos.some((c) => !anunciados.has(c))) return;
+      await new Promise((resolver) => setTimeout(resolver, 50));
+    }
   }
 
   /** O que deu errado, com as medidas desta tentativa. */
@@ -1312,6 +1367,7 @@ function criarEnlaceRtc({
       // Depois do prazo ela pode rejeitar sobre um `pc` já fechado: ninguém a espera.
       tentativa.catch(() => {});
       await esperarNoMaximo(tentativa, prazo, FALHA_DO_ENLACE.prazo);
+      descobrindoCaminho = false;
     } catch (motivo) {
       falha = motivo;
     }
