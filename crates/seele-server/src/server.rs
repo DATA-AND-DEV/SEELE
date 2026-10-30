@@ -458,6 +458,23 @@ pub enum Event {
         impressao: String,
     },
 
+    // ---- o túnel de jogo (protocolo 12) ----
+    /// Um túnel acabou, e esta pessoa precisa saber.
+    ///
+    /// Endereçado a uma pessoa e entregue a todas, como o [`Self::SirvaTelaPara`]:
+    /// um servidor não tem outra maneira de uma sessão alcançar outra. Quem
+    /// estreita a audiência é `session::translate`.
+    TunelEncerrado {
+        /// A quem entregar.
+        para: PersonId,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// Por quê.
+        motivo: seele_proto::tunel::MotivoDoFimDoTunel,
+    },
+
     // ---- o bitrate adaptativo do ADR 0036 ----
     /// Quanto da voz de alguém não está chegando.
     ///
@@ -1512,6 +1529,16 @@ pub struct Server {
     /// Quem declarou que empresta a subida, e quem serve quem. Ver
     /// [`crate::pares::Pares`].
     pub pares: Arc<Mutex<crate::pares::Pares>>,
+    /// Os túneis de jogo que as máquinas servem e quem está dentro de cada um.
+    /// Ver [`crate::tuneis`].
+    ///
+    /// Um `std::sync::Mutex`, e nunca atravessa um `await`: o que vem de fora
+    /// (o banco, a ocupação) é lido **antes** de tomá-lo, na ordem de
+    /// `session::apontar_um_par`.
+    pub tuneis: std::sync::Mutex<crate::tuneis::Tuneis>,
+    /// A cópia de [`crate::ServerConfig::malha_para_tuneis`]: se o servidor
+    /// apresenta as pontas de um túnel para o caminho direto.
+    pub malha_para_tuneis: bool,
     /// The attachment store, its ceiling, and the byte budget. ADR 0027.
     ///
     /// `None` when this server has nowhere to keep blobs, which is the in-memory

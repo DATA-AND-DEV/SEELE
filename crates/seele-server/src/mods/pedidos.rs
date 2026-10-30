@@ -717,6 +717,8 @@ mod tests {
             desconhecidas: Arc::new(crate::server::MensagensDesconhecidas::default()),
             desassentamentos: Arc::new(crate::server::Desassentamentos::default()),
             pares: Arc::new(Mutex::new(crate::pares::Pares::default())),
+            tuneis: std::sync::Mutex::new(crate::tuneis::Tuneis::default()),
+            malha_para_tuneis: true,
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
             telas: Arc::new(Mutex::new(Telas::default())),
             anexos: None,

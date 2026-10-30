@@ -523,6 +523,12 @@ pub async fn serve(
         .await
         .saiu(session.person, id_da_conexao);
 
+    // E dos túneis de jogo: os que esta conexão servia acabam (`MaquinaSaiu`
+    // para quem estava dentro), e as concessões dela somem. Pela conexão, e não
+    // só pela pessoa, pelo mesmo motivo do `Pares::saiu` logo acima.
+    let fim_dos_tuneis = server.tuneis().saiu(session.person, id_da_conexao);
+    crate::tuneis::anunciar(&server, fim_dos_tuneis);
+
     // E a sala pessoal fica sabendo quem saiu: quem recebe saindo desliga a
     // ligação, e um convidado saindo abre a tolerância dele (ADR 0059).
     sair_da_sala(&server, chave_provada);
@@ -2252,6 +2258,34 @@ async fn run_session(
         }))
     };
 
+    // **Os canais de túnel que esta pessoa abre neste servidor** (`t` e `j`),
+    // para o repasse pela estrela. Uma fila própria no enlace, nunca a dos `b`
+    // das imagens acima. Todo canal é entregue a `tuneis::repassar`, que o corta
+    // se quem abriu não tem concessão; num par 11 nenhum canal chega, e se
+    // chegar não tem concessão.
+    let _tuneis = {
+        let contexto = Arc::clone(server);
+        let conexao = connection.clone();
+        let pessoa = session.person;
+        AbortaAoSair(tokio::spawn(async move {
+            // Um `JoinSet` e não `spawn` solto: largado com a tarefa, cancela os
+            // repasses desta conexão junto com ela.
+            let mut repasses = tokio::task::JoinSet::new();
+            loop {
+                tokio::select! {
+                    canal = conexao.aceitar_tunel() => {
+                        let Ok(canal) = canal else { break };
+                        let contexto = Arc::clone(&contexto);
+                        repasses.spawn(async move {
+                            let _ = crate::tuneis::repassar(&contexto, pessoa, canal).await;
+                        });
+                    }
+                    Some(_) = repasses.join_next(), if !repasses.is_empty() => {}
+                }
+            }
+        }))
+    };
+
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
     let mut events = server.events.subscribe();
     // Toda escrita ao par daqui em diante passa pela vigia do atraso: ver
@@ -2735,20 +2769,88 @@ async fn run_session(
                             escrever!(&ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
                         }
                     }
-                    // O protocolo 12: os verbos do túnel de jogo. O servidor
-                    // ainda não os trata — a conferência de permissão, o
-                    // registro de túneis e a apresentação das pontas chegam nas
-                    // tarefas seguintes do plano «API 8, parte 2: o túnel de
-                    // jogo». Até lá a recusa é dita no log, e não silenciosa.
-                    ClientMessage::ServirTunel { .. }
+                    // **O protocolo 12: os verbos do túnel de jogo.** A conferência
+                    // do poder, do nome e do cargo é de `crate::tuneis`; aqui só se
+                    // responde, e só a quem pediu. Um par que negociou menos de 12
+                    // não conhece estes verbos: se mandar, é ignorado e dito no log,
+                    // e nada que nasceu no 12 volta para ele.
+                    m @ (ClientMessage::ServirTunel { .. }
                     | ClientMessage::PararTunel { .. }
                     | ClientMessage::EntrarNoTunel { .. }
-                    | ClientMessage::SairDoTunel { .. }
-                    | ClientMessage::TunelFalhou { .. } => {
+                    | ClientMessage::SairDoTunel { .. }) if session.protocol_version < 12 => {
                         tracing::warn!(
                             person = %session.person,
-                            "verbo de túnel recebido e ainda não tratado por este servidor"
+                            versao = session.protocol_version,
+                            verbo = ?std::mem::discriminant(&m),
+                            "um verbo de túnel de um par que não negociou o 12: ignorado"
                         );
+                    }
+                    ClientMessage::ServirTunel { mod_id, nome, protocolo, porta } => {
+                        let resposta = match crate::tuneis::atender_servir(
+                            server,
+                            session.person,
+                            connection.stable_id() as u64,
+                            &connection,
+                            crate::tuneis::PedidoDeTunel { mod_id: &mod_id, nome: &nome, protocolo, porta },
+                        )
+                        .await
+                        {
+                            Ok(()) => {
+                                tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, porta, "túnel: a máquina passou a servir");
+                                ServerMessage::TunelConcedido { mod_id, nome, protocolo, porta }
+                            }
+                            Err(motivo) => {
+                                tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, ?motivo, "túnel: servir recusado");
+                                ServerMessage::TunelRecusado { mod_id, nome, motivo }
+                            }
+                        };
+                        if entende_a_mensagem(&resposta, session.protocol_version) {
+                            escrever!(&resposta).await?;
+                        }
+                    }
+                    ClientMessage::PararTunel { mod_id, nome } => {
+                        let fim = server.tuneis().parar(session.person, &mod_id, &nome);
+                        crate::tuneis::anunciar(server, fim);
+                    }
+                    ClientMessage::EntrarNoTunel { mod_id, nome } => {
+                        let resposta = match crate::tuneis::atender_entrar(
+                            server,
+                            session.person,
+                            connection.stable_id() as u64,
+                            &mod_id,
+                            &nome,
+                        )
+                        .await
+                        {
+                            Ok(servido) => {
+                                tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, "túnel: a pessoa entrou");
+                                ServerMessage::TunelConcedido {
+                                    mod_id,
+                                    nome,
+                                    protocolo: servido.protocolo,
+                                    porta: servido.porta,
+                                }
+                            }
+                            Err(motivo) => {
+                                tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, ?motivo, "túnel: entrada recusada");
+                                ServerMessage::TunelRecusado { mod_id, nome, motivo }
+                            }
+                        };
+                        if entende_a_mensagem(&resposta, session.protocol_version) {
+                            escrever!(&resposta).await?;
+                        }
+                    }
+                    ClientMessage::SairDoTunel { mod_id, nome } => {
+                        // Só o log: quem sai sabe que saiu (`PessoaSaiu`).
+                        if server.tuneis().sair(session.person, &mod_id, &nome) {
+                            tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, motivo = ?seele_proto::tunel::MotivoDoFimDoTunel::PessoaSaiu, "túnel: a pessoa saiu");
+                        }
+                    }
+                    // O caminho direto de um túnel falhou. A apresentação das
+                    // pontas é do Task 6 do plano «API 8, parte 2»; até lá não há
+                    // apresentação a desfazer, e o relato fica dito no log.
+                    ClientMessage::TunelFalhou { mod_id, nome, motivo } => {
+                        tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, ?motivo, "túnel: relato de falha do caminho direto (ainda sem apresentação a desfazer)");
                     }
                     ClientMessage::ModRequest { request, id, channel, payload } => {
                         let response = crate::mods::pedidos::executar(server, session.person, channel, &id, &payload).await;
@@ -5462,6 +5564,9 @@ pub(crate) async fn aplicar_os_cargos(
             }
         }
     }
+    // E o túnel de jogo: quem perdeu o `entrar-no-jogo` sai dos túneis, e os
+    // canais que andavam por ele caem, no servidor e agora (ADR 0064).
+    crate::tuneis::reconferir(server, Some(afetadas)).await;
 }
 
 /// Encerra e anuncia o que **esta conexão** estivesse transmitindo.
@@ -6056,6 +6161,21 @@ fn translate(
             screen: *screen,
             enderecos: enderecos.clone(),
             impressao: impressao.clone(),
+        }),
+
+        // O túnel que acabou é dito a quem servia ou jogava, e a mais ninguém:
+        // quem está noutro jogo não tem o que fazer com o fim deste. O corte
+        // por versão (nada de 12 chega a um par 11) é de `entende_a_mensagem`,
+        // no laço, como em toda mensagem nova.
+        Event::TunelEncerrado {
+            para,
+            mod_id,
+            nome,
+            motivo,
+        } => (*para == self_person).then(|| ServerMessage::TunelEncerrado {
+            mod_id: mod_id.clone(),
+            nome: nome.clone(),
+            motivo: *motivo,
         }),
     }
 }
@@ -6821,6 +6941,8 @@ mod fim_de_tela_por_sessao {
             desconhecidas: Arc::new(crate::server::MensagensDesconhecidas::default()),
             desassentamentos: Arc::new(crate::server::Desassentamentos::default()),
             pares: Arc::new(Mutex::new(crate::pares::Pares::default())),
+            tuneis: std::sync::Mutex::new(crate::tuneis::Tuneis::default()),
+            malha_para_tuneis: true,
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
             telas: Arc::new(Mutex::new(Telas::default())),
             anexos: None,
