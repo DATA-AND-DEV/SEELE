@@ -88,10 +88,13 @@ pub enum Caminho {
     Estrela,
 }
 
+/// O rótulo de [`Caminho::Direto`] nos logs e nas contas por caminho.
+const ROTULO_DIRETO: &str = "direto";
+
 impl Caminho {
     fn rotulo(self) -> &'static str {
         match self {
-            Self::Direto { .. } => "direto",
+            Self::Direto { .. } => ROTULO_DIRETO,
             Self::Estrela => "estrela",
         }
     }
@@ -123,6 +126,15 @@ pub enum Queda {
     /// Fim normal: o jogo fechou a conexão, o fluxo UDP ficou ocioso, ou a
     /// pessoa saiu do túnel.
     Fechado,
+    /// O servidor (ou a máquina) não tinha mais canal livre para uma conexão
+    /// desta pessoa e a cortou **depois** de conceder o túnel. O túnel segue de
+    /// pé; a conexão cortada conta também como `CaminhoCaiu`, e esta é a razão.
+    SemCanais,
+    /// Este computador não conseguiu aceitar a conexão do jogo na porta local
+    /// (sem descritor de arquivo livre, por exemplo). Conta **uma vez por
+    /// rajada** de erros seguidos, e o laço espera um pouco mais a cada erro em
+    /// vez de girar.
+    PortaFalhou,
 }
 
 /// O que o túnel mediu, para a casca desenhar.
@@ -148,8 +160,15 @@ pub struct RelatorioDoTunel {
     pub bytes_por_segundo_ida: u64,
     /// Bytes por segundo da máquina para quem joga, na última janela.
     pub bytes_por_segundo_volta: u64,
-    /// Conexões TCP e fluxos UDP vivos agora.
+    /// Conexões TCP e fluxos UDP vivos agora (a soma das duas abaixo).
     pub conexoes: u32,
+    /// As vivas que andam pela **ligação direta**.
+    pub conexoes_diretas: u32,
+    /// As vivas que andam pelo **anfitrião**. `caminho` só diz por onde as
+    /// conexões *novas* vão; uma conexão TCP, ou um fluxo UDP, que começou
+    /// antes do direto segue na estrela até acabar (não migra), e é este
+    /// número que diz quantas são.
+    pub conexoes_pela_estrela: u32,
     /// Quantas vezes cada motivo acabou algo, desde que o túnel abriu.
     pub quedas: Vec<(Queda, u32)>,
     /// Datagramas UDP que não saíram: fila cheia aqui, fila cheia no enlace,
@@ -340,6 +359,9 @@ pub(crate) struct Medidas {
     ida: AtomicU64,
     volta: AtomicU64,
     conexoes: AtomicU32,
+    /// Das `conexoes`, as que andam pela ligação direta. As da estrela são a
+    /// diferença.
+    conexoes_diretas: AtomicU32,
     /// Microssegundos; zero é «ainda não medido».
     latencia_us: AtomicU64,
     /// Datagramas que a fila de um fluxo, aqui, não comportou.
@@ -354,6 +376,7 @@ impl Medidas {
             ida: AtomicU64::new(0),
             volta: AtomicU64::new(0),
             conexoes: AtomicU32::new(0),
+            conexoes_diretas: AtomicU32::new(0),
             latencia_us: AtomicU64::new(0),
             udp_perdidos: AtomicU64::new(0),
             quedas: Mutex::new(BTreeMap::new()),
@@ -405,21 +428,35 @@ impl Medidas {
     }
 }
 
-/// Uma conexão ou fluxo vivo: conta enquanto existir.
-struct ConexaoViva<'a>(&'a Medidas);
+/// Uma conexão ou fluxo vivo: conta enquanto existir, **no caminho em que
+/// nasceu** (ela não migra).
+struct ConexaoViva<'a> {
+    medidas: &'a Medidas,
+    direta: bool,
+}
 
 impl<'a> ConexaoViva<'a> {
-    fn nova(medidas: &'a Medidas) -> Self {
+    /// `caminho` é o rótulo de [`Caminho::rotulo`]: `"direto"` ou `"estrela"`.
+    fn nova(medidas: &'a Medidas, caminho: &str) -> Self {
+        let direta = caminho == ROTULO_DIRETO;
         medidas.conexoes.fetch_add(1, Ordering::Relaxed);
+        if direta {
+            medidas.conexoes_diretas.fetch_add(1, Ordering::Relaxed);
+        }
         medidas.mudou();
-        Self(medidas)
+        Self { medidas, direta }
     }
 }
 
 impl Drop for ConexaoViva<'_> {
     fn drop(&mut self) {
-        self.0.conexoes.fetch_sub(1, Ordering::Relaxed);
-        self.0.mudou();
+        self.medidas.conexoes.fetch_sub(1, Ordering::Relaxed);
+        if self.direta {
+            self.medidas
+                .conexoes_diretas
+                .fetch_sub(1, Ordering::Relaxed);
+        }
+        self.medidas.mudou();
     }
 }
 
@@ -433,6 +470,9 @@ pub(crate) enum Evento {
     Direto(Arc<ParLigado>, PersonId),
     /// A ligação direta desta geração caiu.
     DiretoCaiu(u32),
+    /// Algo aconteceu ao túnel que o laço não vê sozinho (o servidor recusou
+    /// um canal por falta de vaga): conta-se a queda e sai um relatório.
+    Quedou(Queda),
     /// Um fluxo UDP acabou.
     FluxoAcabou { origem: SocketAddr, fluxo: u32 },
 }
@@ -731,6 +771,12 @@ impl Contexto {
             bytes_por_segundo_ida: ida_bps,
             bytes_por_segundo_volta: volta_bps,
             conexoes: self.medidas.conexoes.load(Ordering::Relaxed),
+            conexoes_diretas: self.medidas.conexoes_diretas.load(Ordering::Relaxed),
+            conexoes_pela_estrela: self
+                .medidas
+                .conexoes
+                .load(Ordering::Relaxed)
+                .saturating_sub(self.medidas.conexoes_diretas.load(Ordering::Relaxed)),
             quedas: self.medidas.quedas(),
             udp_descartados: descartes
                 .saturating_add(self.medidas.udp_perdidos.load(Ordering::Relaxed)),
@@ -1013,7 +1059,7 @@ async fn conexao_do_jogo(
     contexto: Arc<Contexto>,
 ) {
     let _ = tcp.set_nodelay(true);
-    let viva = ConexaoViva::nova(&contexto.medidas);
+    let viva = ConexaoViva::nova(&contexto.medidas, caminho);
     let aberto = abrir_t(&via, &contexto, fluxo, TipoDeCanalDeTunel::Tcp).await;
     let (queda, detalhe) = match aberto {
         Ok((envio, recebe)) => {
@@ -1077,7 +1123,7 @@ async fn fluxo_udp_do_jogo(
         caminho,
         fluxo,
     } = de;
-    let viva = ConexaoViva::nova(&contexto.medidas);
+    let viva = ConexaoViva::nova(&contexto.medidas, caminho);
     let (queda, detalhe) = 'fluxo: {
         let mut datagramas: Datagramas = match via.abrir(Confiabilidade::SemOrdem).await {
             Ok(CanalDeTunel::SemOrdem(datagramas)) => datagramas,
@@ -1159,6 +1205,47 @@ fn avisar_relatorio(contexto: &Contexto, relatorio: RelatorioDoTunel) {
     let _ = contexto.avisos.send(Aviso::Tunel(relatorio));
 }
 
+/// Os erros seguidos do `accept` da porta local.
+///
+/// Um erro persistente (sem descritor livre) devolvia na hora, e o laço girava
+/// emitindo um aviso por volta. Cada erro seguido espera o dobro do anterior
+/// (de 50 ms até 2 s), o primeiro da rajada é contado e dito, e um `accept`
+/// que dá certo zera a conta.
+#[derive(Default)]
+struct ErrosDeAccept {
+    seguidos: u32,
+    pausa_ate: Option<Instant>,
+}
+
+impl ErrosDeAccept {
+    const PRIMEIRA_PAUSA: Duration = Duration::from_millis(50);
+    const TETO_DA_PAUSA: Duration = Duration::from_secs(2);
+
+    /// Um `accept` falhou. `true` se é o primeiro da rajada (o que se conta e
+    /// se diz).
+    fn falhou(&mut self, agora: Instant) -> bool {
+        self.seguidos = self.seguidos.saturating_add(1);
+        let dobros = self.seguidos.saturating_sub(1).min(16);
+        let pausa = Self::PRIMEIRA_PAUSA
+            .saturating_mul(1_u32 << dobros)
+            .min(Self::TETO_DA_PAUSA);
+        self.pausa_ate = Some(agora + pausa);
+        self.seguidos == 1
+    }
+
+    fn deu_certo(&mut self) {
+        self.seguidos = 0;
+        self.pausa_ate = None;
+    }
+
+    /// Espera o fim da pausa, se há uma.
+    async fn pausa(&self) {
+        if let Some(ate) = self.pausa_ate {
+            tokio::time::sleep_until(ate).await;
+        }
+    }
+}
+
 /// O laço de um túnel de quem joga.
 async fn laco_do_jogador(
     contexto: Arc<Contexto>,
@@ -1196,16 +1283,25 @@ async fn laco_do_jogador(
     let mut base_de_descartes = via.descartes();
     let (mut ida_bps, mut volta_bps) = (0_u64, 0_u64);
 
+    let mut erros_de_accept = ErrosDeAccept::default();
     let fim = loop {
         tokio::select! {
-            aceito = esperar_tcp(&escuta) => {
+            aceito = async { erros_de_accept.pausa().await; esperar_tcp(&escuta).await } => {
                 match aceito {
                     Ok((tcp, origem)) => {
+                        erros_de_accept.deu_certo();
                         proximo_fluxo = proximo_fluxo.wrapping_add(1);
                         tracing::debug!(mod_id = %contexto.mod_id, tunel = %contexto.nome, caminho = caminho.rotulo(), fluxo = proximo_fluxo, %origem, "túnel: conexão do jogo aceita");
                         filhos.spawn(conexao_do_jogo(tcp, via.clone(), caminho.rotulo(), proximo_fluxo, Arc::clone(&contexto)));
                     }
-                    Err(erro) => tracing::warn!(%erro, mod_id = %contexto.mod_id, tunel = %contexto.nome, "túnel: o accept da porta local falhou"),
+                    Err(erro) => {
+                        // Uma vez por rajada: o erro persistente não enche o log
+                        // nem faz o laço girar (a pausa cresce a cada erro).
+                        if erros_de_accept.falhou(Instant::now()) {
+                            tracing::warn!(%erro, mod_id = %contexto.mod_id, tunel = %contexto.nome, "túnel: o accept da porta local falhou; a espera cresce a cada erro seguido");
+                            medidas.quedar(Queda::PortaFalhou);
+                        }
+                    }
                 }
             }
             () = esperar_udp(&escuta) => {
@@ -1265,6 +1361,7 @@ async fn laco_do_jogador(
                         mudou = true;
                     }
                     Evento::DiretoCaiu(_) => {}
+                    Evento::Quedou(queda) => medidas.quedar(queda),
                     Evento::FluxoAcabou { origem, fluxo } => {
                         if fluxos.get(&origem).is_some_and(|(id, _)| *id == fluxo) {
                             fluxos.remove(&origem);
@@ -2030,7 +2127,7 @@ async fn tcp_da_maquina(
         }
     };
     let _ = tcp.set_nodelay(true);
-    let viva = ConexaoViva::nova(&servido.medidas);
+    let viva = ConexaoViva::nova(&servido.medidas, caminho);
     let mut parada = servido.parada.subscribe();
     // Da máquina, `sai` é a volta do ponto de vista de quem joga.
     let ponte = ponte_tcp(
@@ -2075,7 +2172,7 @@ async fn udp_da_maquina(
             return;
         }
     };
-    let viva = ConexaoViva::nova(&servido.medidas);
+    let viva = ConexaoViva::nova(&servido.medidas, caminho);
     let mut parada = servido.parada.subscribe();
     // O primeiro byte é o tag de dado, posto uma vez: o jogo escreve a partir
     // do segundo, e o datagrama sai como está, sem outra cópia.
@@ -2449,6 +2546,8 @@ impl Tuneis {
                     bytes_por_segundo_ida: 0,
                     bytes_por_segundo_volta: 0,
                     conexoes: 0,
+                    conexoes_diretas: 0,
+                    conexoes_pela_estrela: 0,
                     quedas: medidas.quedas(),
                     udp_descartados: 0,
                     encerrado: Some(Queda::PortaOcupada),
@@ -2502,6 +2601,13 @@ impl Tuneis {
             if let Some(tunel) = self.jogando.remove(&chave) {
                 tunel.encerrar(queda);
                 self.ligacoes.podar(&self.jogando);
+            }
+        } else if motivo == RecusaDeTunel::CanaisEsgotados {
+            // O túnel segue, mas a pessoa tem de saber por que a conexão dela
+            // caiu: só o `CaminhoCaiu` da conexão cortada não diria que foi
+            // falta de vaga.
+            if let Some(tunel) = self.jogando.get(&chave) {
+                let _ = tunel.eventos.send(Evento::Quedou(Queda::SemCanais));
             }
         }
     }
@@ -2858,6 +2964,36 @@ mod testes {
         assert!(r.udp_descartados >= 1, "{r:?}");
         assert!(r.conexoes >= 1);
         assert_eq!(r.caminho, Caminho::Estrela);
+    }
+
+    /// **M7.** Um `accept` que falha sempre não pode girar: cada erro seguido
+    /// espera o dobro (50 ms até 2 s), só o primeiro da rajada é dito, e um
+    /// `accept` bom zera a conta.
+    #[tokio::test(start_paused = true)]
+    async fn o_accept_que_falha_sempre_espera_mais_a_cada_erro_e_so_a_rajada_e_dita() {
+        let mut erros = ErrosDeAccept::default();
+        let mut pausas = Vec::new();
+        let mut ditos = 0;
+        for _ in 0..9 {
+            let agora = Instant::now();
+            if erros.falhou(agora) {
+                ditos += 1;
+            }
+            pausas.push(erros.pausa_ate.unwrap() - agora);
+        }
+        assert_eq!(ditos, 1, "a rajada foi dita mais de uma vez");
+        assert_eq!(
+            pausas,
+            [50, 100, 200, 400, 800, 1600, 2000, 2000, 2000].map(Duration::from_millis)
+        );
+        // A pausa existe de verdade: o `accept` seguinte só vem depois dela.
+        let antes = Instant::now();
+        erros.pausa().await;
+        assert!(Instant::now() - antes >= Duration::from_millis(2000));
+        // Um `accept` bom zera a conta; a próxima rajada é dita de novo.
+        erros.deu_certo();
+        assert!(erros.pausa_ate.is_none());
+        assert!(erros.falhou(Instant::now()));
     }
 
     // ---- o canal j: a abertura marcada, repetida, e a carga antes dela
@@ -3246,6 +3382,90 @@ mod testes {
         assert_eq!(maquina.estado().canais_alheios(), 0);
     }
 
+    /// **I3.** O `caminho` do relatório só descreve as conexões **novas**: uma
+    /// conexão que começou na estrela segue nela depois que o direto chega. O
+    /// relatório diz quantas vivas andam por cada caminho, e a faixa do produto
+    /// escreve «ligação direta» sem esconder o que ainda passa pelo anfitrião.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn o_relatorio_conta_as_conexoes_vivas_por_caminho_e_a_antiga_fica_na_estrela() {
+        let (jogo, _eco) = eco_tcp().await;
+        let mut cena = cena(ProtocoloDeTunel::Tcp, jogo).await;
+        let alvo = cena.porta.endereco();
+
+        // A primeira conexão nasce na estrela.
+        let mut antiga = TcpStream::connect(alvo).await.unwrap();
+        antiga.write_all(b"ola").await.unwrap();
+        let mut volta = [0_u8; 3];
+        antiga.read_exact(&mut volta).await.unwrap();
+        let r = esperar_relatorio(&mut cena.avisos, |r| r.conexoes_pela_estrela == 1).await;
+        assert_eq!((r.conexoes, r.conexoes_diretas), (1, 0), "{r:?}");
+        assert_eq!(r.caminho, Caminho::Estrela);
+
+        // A ligação direta chega: só as conexões NOVAS vão por ela.
+        let serve = ponta_de_sessao();
+        let busca = ponta_de_sessao();
+        let impressao_serve = crate::par::impressao(serve.identidade());
+        let impressao_busca = crate::par::impressao(busca.identidade());
+        let (maquina_id, joga_id) = (PersonId(1), PersonId(2));
+        let prazo = Duration::from_secs(5);
+        cena.maquina.servir_a(Apresentacao {
+            ponta: serve.clone(),
+            quem: joga_id,
+            mod_id: MOD.to_owned(),
+            nome: NOME.to_owned(),
+            enderecos: vec![busca.ponta().local_addr()],
+            impressao: impressao_busca,
+            prazo,
+        });
+        let mut ligacoes = Ligacoes::default();
+        let mut estado = ligacoes.obter(Alcance {
+            mod_id: MOD.to_owned(),
+            nome: NOME.to_owned(),
+            ponta: busca.clone(),
+            enderecos: vec![serve.ponta().local_addr()],
+            impressao: impressao_serve,
+            prazo,
+            quem: maquina_id,
+        });
+        let ligada = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                match &*estado.borrow_and_update() {
+                    EstadoDaLigacao::Pronta(ligado) => return Arc::clone(ligado),
+                    EstadoDaLigacao::Discando => {}
+                    _ => panic!("a ligação direta falhou ou caiu"),
+                }
+                estado.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("a ligação direta não veio em 20 s");
+        cena.tunel
+            .eventos
+            .send(Evento::Direto(ligada, maquina_id))
+            .unwrap();
+        esperar_relatorio(&mut cena.avisos, |r| {
+            matches!(r.caminho, Caminho::Direto { .. })
+        })
+        .await;
+
+        let mut nova = TcpStream::connect(alvo).await.unwrap();
+        nova.write_all(b"ola").await.unwrap();
+        nova.read_exact(&mut volta).await.unwrap();
+        let r = esperar_relatorio(&mut cena.avisos, |r| r.conexoes_diretas == 1).await;
+        assert!(matches!(r.caminho, Caminho::Direto { .. }), "{r:?}");
+        assert_eq!(
+            (r.conexoes, r.conexoes_diretas, r.conexoes_pela_estrela),
+            (2, 1, 1),
+            "a conexão antiga tem de seguir contada na estrela: {r:?}"
+        );
+
+        // A antiga acaba: sobra só a direta.
+        drop(antiga);
+        let r = esperar_relatorio(&mut cena.avisos, |r| r.conexoes_pela_estrela == 0).await;
+        assert_eq!((r.conexoes, r.conexoes_diretas), (1, 1), "{r:?}");
+        drop(nova);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_ligacao_espera_a_apresentacao_atrasada_mas_nao_para_sempre() {
         let permitidos = Permitidos::de((MOD.to_owned(), "a".to_owned()));
@@ -3531,6 +3751,16 @@ mod testes {
             prazo,
         );
         drop(TcpStream::connect(alvo).await.unwrap());
+        // E fica dito por quê: o corte por falta de vaga entra nas quedas, e
+        // não some atrás do `CaminhoCaiu` da conexão cortada.
+        let r = esperar_relatorio(&mut recebidos, |r| {
+            r.quedas.iter().any(|(q, _)| *q == Queda::SemCanais)
+        })
+        .await;
+        assert!(
+            r.encerrado.is_none(),
+            "o corte de um canal não acaba o túnel"
+        );
 
         // Perder a permissão acaba.
         tuneis.tratar(

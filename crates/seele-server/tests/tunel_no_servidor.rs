@@ -741,7 +741,7 @@ async fn udp_pronto(
 async fn o_udp_vai_pela_estrela_com_a_abertura_marcada_e_a_carga_marcada() -> Result<()> {
     let (endereco, daemon, _temp) = montar(true).await?;
     let _gestora = entrar(endereco, GESTORA, 12).await?;
-    let (mut maquina, jogador, mut dele, udp) = udp_pronto(endereco).await?;
+    let (maquina, jogador, mut dele, udp) = udp_pronto(endereco).await?;
     dele.mandar(&seele_proto::tunel::datagrama_de_abertura(&udp)?)?;
     let CanalDeTunel::SemOrdem(mut da_maquina) =
         tokio::time::timeout(PRAZO, maquina.ligado.conexao.aceitar_tunel()).await??
@@ -791,7 +791,7 @@ async fn o_udp_vai_pela_estrela_com_a_abertura_marcada_e_a_carga_marcada() -> Re
 async fn carga_antes_da_abertura_nao_corta_o_canal_j_e_a_repeticao_chega_reescrita() -> Result<()> {
     let (endereco, daemon, _temp) = montar(true).await?;
     let _gestora = entrar(endereco, GESTORA, 12).await?;
-    let (mut maquina, jogador, mut dele, udp) = udp_pronto(endereco).await?;
+    let (maquina, jogador, dele, udp) = udp_pronto(endereco).await?;
 
     // A abertura «se perdeu»: o primeiro que o anfitrião vê é carga.
     dele.mandar(&datagrama_de_dado(b"cedo demais"))?;
@@ -857,7 +857,7 @@ async fn carga_antes_da_abertura_nao_corta_o_canal_j_e_a_repeticao_chega_reescri
 async fn abertura_malformada_no_canal_j_corta_e_conta() -> Result<()> {
     let (endereco, daemon, _temp) = montar(true).await?;
     let _gestora = entrar(endereco, GESTORA, 12).await?;
-    let (_maquina, _jogador, mut dele, _udp) = udp_pronto(endereco).await?;
+    let (_maquina, _jogador, dele, _udp) = udp_pronto(endereco).await?;
     let mut lixo = vec![seele_proto::tunel::TAG_DE_ABERTURA];
     lixo.extend_from_slice(&[0xff; 12]);
     dele.mandar(&lixo)?;

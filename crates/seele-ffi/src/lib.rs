@@ -1246,6 +1246,15 @@ impl EscolhaDeTela {
     }
 }
 
+/// Os túneis de jogo de quem joga, como `Connection::tuneis_abertos` os lê.
+#[derive(Default)]
+struct TabelaDeTuneis {
+    /// O último relatório de cada túnel que está de pé.
+    abertos: std::collections::BTreeMap<(String, String), RelatorioDeTunel>,
+    /// Quantos relatórios finais (`encerrado`) cada túnel já teve.
+    fins: std::collections::BTreeMap<(String, String), u64>,
+}
+
 /// State the driver thread writes and the shell reads.
 struct Shared {
     /// O caminho de subida que a sonda mediu, em bits por segundo.
@@ -1397,7 +1406,7 @@ struct Shared {
     /// está de pé por [`Connection::tuneis_abertos`] em vez de esperar o
     /// próximo relatório. Sai daqui quando o túnel acaba (`encerrado`), quando
     /// o MOD é fechado, e com a sessão.
-    tuneis: Mutex<std::collections::BTreeMap<(String, String), RelatorioDeTunel>>,
+    tuneis: Mutex<TabelaDeTuneis>,
     /// Os limites que esta sessão pediu para a transmissão de tela dela.
     ///
     /// **Mora aqui porque a janela não sobrevive à transmissão.** O §5 manda
@@ -2152,7 +2161,7 @@ impl Connection {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(false),
             pending_weights: Mutex::new(Vec::new()),
-            tuneis: Mutex::new(std::collections::BTreeMap::new()),
+            tuneis: Mutex::new(TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
@@ -2689,7 +2698,9 @@ impl Connection {
         // fechando, e o relatório final que chegar volta a pô-los só com
         // `encerrado`.
         if let Ok(mut tuneis) = self.shared.tuneis.lock() {
-            tuneis.retain(|(mod_do_tunel, _), _| *mod_do_tunel != mod_id);
+            tuneis
+                .abertos
+                .retain(|(mod_do_tunel, _), _| *mod_do_tunel != mod_id);
         }
         self.command(Command::SairDosTuneisDoMod { mod_id })
     }
@@ -2702,6 +2713,7 @@ impl Connection {
             .lock()
             .map(|tuneis| {
                 tuneis
+                    .abertos
                     .values()
                     .filter(|relatorio| relatorio.encerrado.is_none())
                     .cloned()
@@ -5454,7 +5466,7 @@ async fn drive(
     // Os túneis acabam com a sessão (o enlace os derruba ao sair); a faixa que
     // lê depois não os vê de pé.
     if let Ok(mut tuneis) = shared.tuneis.lock() {
-        tuneis.clear();
+        tuneis.abertos.clear();
     }
     client.sair().await;
 }
@@ -5494,6 +5506,8 @@ fn relatorio_para_a_casca(
         bytes_por_segundo_ida: relatorio.bytes_por_segundo_ida,
         bytes_por_segundo_volta: relatorio.bytes_por_segundo_volta,
         conexoes: relatorio.conexoes,
+        conexoes_diretas: relatorio.conexoes_diretas,
+        conexoes_pela_estrela: relatorio.conexoes_pela_estrela,
         quedas: relatorio
             .quedas
             .iter()
@@ -5516,7 +5530,10 @@ fn guardar_relatorio_de_tunel(shared: &Shared, relatorio: &RelatorioDeTunel) {
     };
     let chave = (relatorio.mod_id.clone(), relatorio.nome.clone());
     if let Some(motivo) = relatorio.encerrado {
-        tuneis.remove(&chave);
+        tuneis.abertos.remove(&chave);
+        // Quantos fins este túnel já teve: `guardar_tunel_aberto` compara com
+        // o que viu antes de pedir a entrada.
+        *tuneis.fins.entry(chave).or_insert(0) += 1;
         tracing::info!(
             mod_id = %relatorio.mod_id,
             tunel = %relatorio.nome,
@@ -5525,19 +5542,49 @@ fn guardar_relatorio_de_tunel(shared: &Shared, relatorio: &RelatorioDeTunel) {
             "túnel de jogo acabou"
         );
     } else {
-        tuneis.insert(chave, relatorio.clone());
+        tuneis.abertos.insert(chave, relatorio.clone());
     }
+}
+
+/// Quantos fins de relatório este túnel já teve. Lido **antes** de pedir a
+/// entrada, para `guardar_tunel_aberto` saber se o túnel acabou no meio.
+fn fins_do_tunel(shared: &Shared, mod_id: &str, nome: &str) -> u64 {
+    shared.tuneis.lock().map_or(0, |tuneis| {
+        tuneis
+            .fins
+            .get(&(mod_id.to_owned(), nome.to_owned()))
+            .copied()
+            .unwrap_or(0)
+    })
 }
 
 /// A porta que o núcleo abriu, na tabela antes do primeiro relatório: quem lê
 /// `tuneis_abertos` logo depois de entrar já a vê, e o que a casca diz é o que
 /// o núcleo fez. Não sobrescreve um relatório que chegou antes.
-fn guardar_tunel_aberto(shared: &Shared, mod_id: &str, nome: &str, aberta: PortaDeTunel) {
+///
+/// **Nem ressuscita um túnel que já acabou.** O relatório final (`encerrado`)
+/// pode chegar antes de a espera da entrada voltar aqui; sem a conferência,
+/// este `or_insert` punha na tabela um túnel fantasma, que `tuneis_abertos`
+/// devolvia para sempre. `fins_antes` é o que `fins_do_tunel` contava antes de
+/// o pedido sair: se mudou, o túnel acabou no meio e nada é guardado.
+fn guardar_tunel_aberto(
+    shared: &Shared,
+    mod_id: &str,
+    nome: &str,
+    aberta: PortaDeTunel,
+    fins_antes: u64,
+) {
     let Ok(mut tuneis) = shared.tuneis.lock() else {
         return;
     };
+    let chave = (mod_id.to_owned(), nome.to_owned());
+    if tuneis.fins.get(&chave).copied().unwrap_or(0) != fins_antes {
+        tracing::info!(mod_id = %mod_id, tunel = %nome, "túnel de jogo: acabou antes de a entrada voltar; nada é guardado");
+        return;
+    }
     tuneis
-        .entry((mod_id.to_owned(), nome.to_owned()))
+        .abertos
+        .entry(chave)
         .or_insert_with(|| RelatorioDeTunel {
             mod_id: mod_id.to_owned(),
             nome: nome.to_owned(),
@@ -5550,6 +5597,8 @@ fn guardar_tunel_aberto(shared: &Shared, mod_id: &str, nome: &str, aberta: Porta
             bytes_por_segundo_ida: 0,
             bytes_por_segundo_volta: 0,
             conexoes: 0,
+            conexoes_diretas: 0,
+            conexoes_pela_estrela: 0,
             quedas: Vec::new(),
             udp_descartados: 0,
             encerrado: None,
@@ -7320,6 +7369,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
             // O pedido sai agora; a espera (até o prazo do par) vai para uma
             // tarefa. Parada aqui, ela pararia as teclas e os avisos de quem
             // usa por até três segundos, a cada recusa.
+            let fins_antes = fins_do_tunel(shared, &mod_id, &nome);
             match client.pedir_entrada_no_tunel(&mod_id, &nome).await {
                 Err(recusa) => {
                     tunel_recusado_dito(&mod_id, &nome, recusa);
@@ -7336,7 +7386,7 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
                                     desejada: porta.desejada,
                                 };
                                 tunel_aberto_dito(&mod_id, &nome, aberta);
-                                guardar_tunel_aberto(&shared, &mod_id, &nome, aberta);
+                                guardar_tunel_aberto(&shared, &mod_id, &nome, aberta, fins_antes);
                                 Ok(aberta)
                             }
                             Err(recusa) => {
@@ -9392,6 +9442,62 @@ mod tests {
         );
     }
 
+    fn relatorio_de_tunel_de_teste(encerrado: Option<&'static str>) -> RelatorioDeTunel {
+        RelatorioDeTunel {
+            mod_id: "x/jogo".into(),
+            nome: "eco".into(),
+            porta: 25565,
+            preferida: true,
+            desejada: 25565,
+            caminho: CaminhoDeTunel::Estrela,
+            latencia_ms: None,
+            bytes_por_segundo: 0,
+            bytes_por_segundo_ida: 0,
+            bytes_por_segundo_volta: 0,
+            conexoes: 0,
+            conexoes_diretas: 0,
+            conexoes_pela_estrela: 0,
+            quedas: Vec::new(),
+            udp_descartados: 0,
+            encerrado,
+        }
+    }
+
+    /// **M6.** O relatório final de um túnel pode chegar **antes** de a espera
+    /// da entrada voltar a `guardar_tunel_aberto`. Sem a conferência, o
+    /// `or_insert` punha na tabela um túnel que já acabou, e
+    /// `tuneis_abertos` o devolvia para sempre.
+    #[test]
+    fn o_tunel_que_acabou_antes_de_a_entrada_voltar_nao_ressuscita_na_tabela() {
+        let shared = bare_shared();
+        let aberta = PortaDeTunel {
+            porta: 25565,
+            preferida: true,
+            desejada: 25565,
+        };
+        // O caso de sempre: sem fim no meio, a porta entra na tabela.
+        let antes = fins_do_tunel(&shared, "x/jogo", "eco");
+        guardar_tunel_aberto(&shared, "x/jogo", "eco", aberta, antes);
+        assert_eq!(shared.tuneis.lock().unwrap().abertos.len(), 1);
+        guardar_relatorio_de_tunel(&shared, &relatorio_de_tunel_de_teste(Some("fechado")));
+        assert!(shared.tuneis.lock().unwrap().abertos.is_empty());
+
+        // A corrida: o pedido saiu (fins lidos), o relatório final chegou, e só
+        // então a espera voltou.
+        let antes = fins_do_tunel(&shared, "x/jogo", "eco");
+        guardar_relatorio_de_tunel(&shared, &relatorio_de_tunel_de_teste(Some("maquina-saiu")));
+        guardar_tunel_aberto(&shared, "x/jogo", "eco", aberta, antes);
+        assert!(
+            shared.tuneis.lock().unwrap().abertos.is_empty(),
+            "o túnel que acabou no meio voltou à tabela como fantasma"
+        );
+
+        // E uma entrada nova, depois do fim, é um túnel novo e entra.
+        let antes = fins_do_tunel(&shared, "x/jogo", "eco");
+        guardar_tunel_aberto(&shared, "x/jogo", "eco", aberta, antes);
+        assert_eq!(shared.tuneis.lock().unwrap().abertos.len(), 1);
+    }
+
     /// A `Shared` with nothing in it, for the folds below. O mesmo da
     /// conformidade dos dois produtores (`crate::sem_rede`).
     fn bare_shared() -> Arc<Shared> {
@@ -10749,7 +10855,7 @@ mod tests {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
-            tuneis: Mutex::new(std::collections::BTreeMap::new()),
+            tuneis: Mutex::new(TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
@@ -10910,7 +11016,7 @@ mod tests {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
-            tuneis: Mutex::new(std::collections::BTreeMap::new()),
+            tuneis: Mutex::new(TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
@@ -14033,7 +14139,7 @@ mod o_audio_segue_a_sala {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
-            tuneis: Mutex::new(std::collections::BTreeMap::new()),
+            tuneis: Mutex::new(crate::TabelaDeTuneis::default()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(super::EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),

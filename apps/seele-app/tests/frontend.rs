@@ -25626,6 +25626,39 @@ fn tunel_descarregar_um_mod_chama_tunel_sair_do_mod() {
 /// (`nome_da_recusa_do_tunel`, `nome_da_queda`), que não compilam sem um braço
 /// por variante: uma variante nova sem frase reprova aqui, e não vira o nome
 /// cru na tela de quem joga.
+/// **O que a faixa do túnel promete, ela diz**: «ligação direta» só das
+/// conexões novas (a faixa diz quantas ainda passam pelo anfitrião), a troca de
+/// vista explica por que a porta fechou, e `nome-tomado` não acusa quem joga.
+/// O comportamento está na bancada (`tunel-de-jogador.cjs`, casos 17 a 20); este
+/// guarda segura os fios que a ligam ao resto da casca.
+#[test]
+fn tunel_a_faixa_diz_o_que_ainda_passa_pelo_anfitriao_e_por_que_fechou() {
+    let faixa = without_comments(&read("ui/camada-tuneis.js"));
+    assert!(
+        faixa.contains("conexoes_pela_estrela") && faixa.contains("aindaPeloAnfitriao"),
+        "a faixa deixou de contar as conexões que ainda passam pelo anfitrião"
+    );
+    let sessoes = without_comments(&read("ui/camada-sessoes.js"));
+    assert!(
+        sessoes.contains("encerrarOAmbienteDosMods(\"troca-de-vista\")"),
+        "a troca de vista não diz por que fecha as portas"
+    );
+    let base = without_comments(&read("ui/base.js"));
+    assert!(
+        base.contains("seele-tuneis-limpar\", { detail: { motivo } }"),
+        "o fim das portas da vista não leva o motivo à faixa"
+    );
+    let frases = without_comments(&read("ui/frases.js"));
+    assert!(
+        frases.contains("\"troca-de-vista\":") && frases.contains("aindaPeloAnfitriao:"),
+        "faltam as frases da troca de vista e das conexões na estrela"
+    );
+    assert!(
+        !frases.contains("você já tem uma porta aberta com esse nome"),
+        "`nome-tomado` voltou a acusar quem joga: o nome é de OUTRA máquina"
+    );
+}
+
 #[test]
 fn tunel_cada_recusa_e_cada_queda_do_rust_tem_frase() {
     use seele_core::tunel::{Queda, RecusaDeTunel};
@@ -25654,6 +25687,8 @@ fn tunel_cada_recusa_e_cada_queda_do_rust_tem_frase() {
         Queda::ModDesligado,
         Queda::ServidorSaiu,
         Queda::Fechado,
+        Queda::SemCanais,
+        Queda::PortaFalhou,
     ];
     let frases = without_comments(&read("ui/frases.js"));
     let bloco = frases

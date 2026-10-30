@@ -131,8 +131,12 @@ function desenharUmTunel(entrada) {
       ` aberta para ${dono}`,
     );
     const r = entrada.relatorio;
+    const naEstrela = Number(r?.conexoes_pela_estrela) || 0;
     const partes = [
       caminhoEmTexto(r?.caminho),
+      // «Direto» descreve as conexões NOVAS. As que começaram na estrela ficam
+      // nela até acabar, e a faixa diz quantas são em vez de calar.
+      ...(r?.caminho?.tipo === "direto" && naEstrela > 0 ? [FRASES_DO_TUNEL.aindaPeloAnfitriao(naEstrela)] : []),
       r ? (r.latencia_ms === null ? "medindo…" : `${r.latencia_ms} ms`) : "medindo…",
       vazaoEmTexto(r?.bytes_por_segundo ?? 0),
     ];
@@ -183,7 +187,11 @@ function dizerAFalhaDaFaixa(oQue, falha) {
 
 /** Relê o que está de pé nesta sessão (`tuneis_abertos`) no lugar do que havia. */
 async function relerOsTuneis() {
-  tuneisNaFaixa.clear();
+  // A porta que fechou porque a vista trocou de servidor continua dizendo isso
+  // até a pessoa a dispensar: relê o que está de pé, e não apaga a explicação.
+  for (const [chave, entrada] of [...tuneisNaFaixa]) {
+    if (!(entrada.estado === "fechada" && entrada.motivo === "troca-de-vista")) tuneisNaFaixa.delete(chave);
+  }
   desenharOsTuneis();
   let abertos;
   try {
@@ -250,8 +258,27 @@ globalThis.addEventListener("seele-tunel-mod-saiu", ({ detail }) => {
   desenharOsTuneis();
 });
 
-globalThis.addEventListener("seele-tuneis-limpar", () => {
-  tuneisNaFaixa.clear();
+globalThis.addEventListener("seele-tuneis-limpar", ({ detail }) => {
+  if (detail?.motivo === "troca-de-vista") {
+    // A sessão segue viva lá, mas os MODs dela saem com a vista, e as portas
+    // com eles: a faixa diz por quê, em vez de a linha sumir calada.
+    for (const [chave, entrada] of [...tuneisNaFaixa]) {
+      if (entrada.estado !== "aberta") {
+        tuneisNaFaixa.delete(chave);
+        continue;
+      }
+      entrada.estado = "fechada";
+      entrada.motivo = "troca-de-vista";
+      registrarNoAnfitriao(
+        "tunel",
+        `${entrada.modId}: a porta ${entrada.porta} de ${entrada.nome} fechou porque a vista trocou de servidor`,
+        "info",
+        entrada.modId,
+      );
+    }
+  } else {
+    tuneisNaFaixa.clear();
+  }
   desenharOsTuneis();
 });
 

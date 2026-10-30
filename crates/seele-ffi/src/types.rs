@@ -2077,8 +2077,14 @@ pub struct RelatorioDeTunel {
     pub bytes_por_segundo_ida: u64,
     /// Bytes por segundo da máquina para quem joga.
     pub bytes_por_segundo_volta: u64,
-    /// Conexões TCP e fluxos UDP vivos agora.
+    /// Conexões TCP e fluxos UDP vivos agora (a soma das duas abaixo).
     pub conexoes: u32,
+    /// As vivas que andam pela ligação direta.
+    pub conexoes_diretas: u32,
+    /// As vivas que andam pelo anfitrião. `caminho` só diz por onde as
+    /// conexões *novas* vão: uma que começou antes do direto segue na estrela,
+    /// e é este número que diz quantas são.
+    pub conexoes_pela_estrela: u32,
     /// Quantas vezes cada motivo acabou algo, desde que o túnel abriu.
     pub quedas: Vec<QuedaDeTunel>,
     /// Datagramas UDP que não saíram, e foram contados.
@@ -2104,6 +2110,8 @@ pub const fn nome_da_queda(queda: seele_core::tunel::Queda) -> &'static str {
         Queda::ModDesligado => "mod-desligado",
         Queda::ServidorSaiu => "servidor-saiu",
         Queda::Fechado => "fechado",
+        Queda::SemCanais => "sem-canais",
+        Queda::PortaFalhou => "porta-falhou",
     }
 }
 
@@ -2165,6 +2173,8 @@ mod tests {
             (Queda::ModDesligado, "mod-desligado"),
             (Queda::ServidorSaiu, "servidor-saiu"),
             (Queda::Fechado, "fechado"),
+            (Queda::SemCanais, "sem-canais"),
+            (Queda::PortaFalhou, "porta-falhou"),
         ];
         for (queda, nome) in quedas {
             assert_eq!(nome_da_queda(queda), nome);
@@ -2188,7 +2198,9 @@ mod tests {
             bytes_por_segundo: 120,
             bytes_por_segundo_ida: 20,
             bytes_por_segundo_volta: 100,
-            conexoes: 1,
+            conexoes: 3,
+            conexoes_diretas: 2,
+            conexoes_pela_estrela: 1,
             quedas: vec![QuedaDeTunel {
                 motivo: "caminho-caiu",
                 vezes: 2,
@@ -2217,6 +2229,15 @@ mod tests {
                 serde_json::json!("Fulano"),
             ),
             ("/TunnelReport/report/latencia_ms", serde_json::json!(34)),
+            ("/TunnelReport/report/conexoes", serde_json::json!(3)),
+            (
+                "/TunnelReport/report/conexoes_diretas",
+                serde_json::json!(2),
+            ),
+            (
+                "/TunnelReport/report/conexoes_pela_estrela",
+                serde_json::json!(1),
+            ),
             (
                 "/TunnelReport/report/bytes_por_segundo",
                 serde_json::json!(120),

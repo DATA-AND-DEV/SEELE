@@ -41,7 +41,7 @@ pub(crate) fn shared(apelido: &str) -> Arc<Shared> {
         signal: AtomicU8::new(0),
         running: AtomicBool::new(true),
         pending_weights: Mutex::new(Vec::new()),
-        tuneis: Mutex::new(std::collections::BTreeMap::new()),
+        tuneis: Mutex::new(crate::TabelaDeTuneis::default()),
         limites_da_tela: Mutex::new(None),
         tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
         tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),

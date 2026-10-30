@@ -1702,7 +1702,7 @@ const FRASES_DO_TUNEL = Object.freeze({
     "sem-permissao": "você não tem a permissão de entrar no jogo",
     "acao-nao-declarada": "o MOD não declara a permissão de entrar no jogo, e ninguém poderia usar a porta",
     "mod-sem-porta": "o MOD não está ligado neste servidor, ou não declara o poder de abrir a porta",
-    "nome-tomado": "você já tem uma porta aberta com esse nome",
+    "nome-tomado": "outra máquina já serve um jogo com esse nome neste MOD",
     "maquina-saiu": "a máquina do jogo saiu do servidor enquanto o pedido andava",
     "tuneis-demais": "o servidor já tem portas de jogo demais abertas",
     "canais-esgotados": "não há mais canais livres para o seu jogo neste servidor",
@@ -1721,6 +1721,8 @@ const FRASES_DO_TUNEL = Object.freeze({
     "mod-desligado": "o MOD foi desligado neste servidor",
     "servidor-saiu": "a sessão com o servidor acabou",
     "fechado": "a conexão foi fechada",
+    "sem-canais": "o servidor não tinha mais canais livres para o seu jogo e cortou uma conexão",
+    "porta-falhou": "este computador não conseguiu aceitar a conexão do jogo na porta (talvez falte arquivo aberto livre); feche programas e tente de novo",
   }),
   // **O fim de um túnel inteiro** (`encerrado` do último relatório). Quase todo
   // motivo diz a mesma coisa que diz como queda; `fechado` aqui é o túnel que
@@ -1728,7 +1730,15 @@ const FRASES_DO_TUNEL = Object.freeze({
   // acabou como devia.
   fins: Object.freeze({
     "fechado": "a porta foi fechada, por você ou pelo MOD ao sair",
+    // A vista saiu da sessão (outro servidor na janela): os MODs dela saem, e
+    // com eles a porta. A sessão segue viva lá; voltar a ela e jogar abre outra.
+    "troca-de-vista": "a porta foi fechada porque você trocou de servidor; volte a ele e abra de novo",
   }),
+  // O caminho **direto** só vale para as conexões novas: as que começaram antes
+  // seguem pelo anfitrião até acabar, e a faixa não pode dizer «direto» sem
+  // dizer quantas ainda passam por ele.
+  aindaPeloAnfitriao: (n) =>
+    n === 1 ? "1 conexão ainda pelo anfitrião" : `${n} conexões ainda pelo anfitrião`,
 });
 
 /**

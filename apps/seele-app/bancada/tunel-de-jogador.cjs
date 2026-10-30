@@ -27,7 +27,13 @@
 //     queda, que não acusa a rede;
 // 10. o túnel que acabou: «fechou: …», com o motivo em frase e DISPENSAR;
 // 11. a recusa do servidor chega ao MOD pelo nome E à faixa, em frase;
-// 12. a faixa mora fora de toda superfície de MOD.
+// 12. a faixa mora fora de toda superfície de MOD;
+// 17. «ligação direta» só das conexões novas: a faixa diz quantas ainda passam
+//     pelo anfitrião (e cala quando nenhuma passa);
+// 18. a queda por falta de canal depois de conceder tem frase própria;
+// 19. `nome-tomado` diz que OUTRA máquina serve o nome;
+// 20. a troca de vista fecha as portas da sessão que sai, e a faixa e o
+//     registro dizem por quê.
 //
 //   PLAYWRIGHT=/caminho/para/node_modules/playwright node apps/seele-app/bancada/tunel-de-jogador.cjs
 
@@ -421,8 +427,84 @@ async function caso(motor, numero, prova) {
           assert.doesNotMatch(log, /x\/outro.*sessao-encerrada/, `${motor}: 13 · a sessão viva foi dita como encerrada: ${log}`);
         });
 
+        // 17. «Direto» é das conexões NOVAS: a faixa diz quantas ainda passam
+        //     pelo anfitrião, e cala quando nenhuma passa.
+        await caso(motor, "17", async () => {
+          const relatorio = (diretas, estrela) => ({ TunnelReport: { report: {
+            mod_id: "x/jogo", nome: "minecraft-17", porta: 25565, preferida: true, desejada: 25565,
+            caminho: { tipo: "direto", par: 7, apelido: "Fulano" }, latencia_ms: 34,
+            bytes_por_segundo: 0, bytes_por_segundo_ida: 0, bytes_por_segundo_volta: 0,
+            conexoes: diretas + estrela, conexoes_diretas: diretas, conexoes_pela_estrela: estrela,
+            quedas: [], udp_descartados: 0, encerrado: null,
+          } } });
+          await pagina.evaluate((r) => emitir("seele://event", r), relatorio(1, 2));
+          let faixa = (await pagina.evaluate(() => faixa())).split("\n").join(" ");
+          assert.match(faixa, /minecraft-17 \(x\/jogo\) · ligação direta com Fulano · 2 conexões ainda pelo anfitrião · 34 ms/, `${motor}: 17 · ${faixa}`);
+          await pagina.evaluate((r) => emitir("seele://event", r), relatorio(1, 1));
+          faixa = (await pagina.evaluate(() => faixa())).split("\n").join(" ");
+          assert.match(faixa, /ligação direta com Fulano · 1 conexão ainda pelo anfitrião · 34 ms/, `${motor}: 17 · ${faixa}`);
+          await pagina.evaluate((r) => emitir("seele://event", r), relatorio(2, 0));
+          faixa = (await pagina.evaluate(() => faixa())).split("\n").join(" ");
+          assert.match(faixa, /minecraft-17 \(x\/jogo\) · ligação direta com Fulano · 34 ms/, `${motor}: 17 · ${faixa}`);
+          assert.doesNotMatch(faixa, /ainda pelo anfitrião/, `${motor}: 17 · nenhuma conexão na estrela e a faixa ainda diz que há: ${faixa}`);
+        });
+
+        // 18. O servidor cortou uma conexão por falta de canal depois de
+        //     conceder: a faixa diz isso, e não só que a conexão caiu.
+        await caso(motor, "18", async () => {
+          await pagina.evaluate(() => emitir("seele://event", { TunnelReport: { report: {
+            mod_id: "x/jogo", nome: "minecraft-18", porta: 25565, preferida: true, desejada: 25565,
+            caminho: { tipo: "estrela" }, latencia_ms: null,
+            bytes_por_segundo: 0, bytes_por_segundo_ida: 0, bytes_por_segundo_volta: 0,
+            conexoes: 0, conexoes_diretas: 0, conexoes_pela_estrela: 0,
+            quedas: [{ motivo: "caminho-caiu", vezes: 1 }, { motivo: "sem-canais", vezes: 1 }],
+            udp_descartados: 0, encerrado: null,
+          } } }));
+          const faixa = (await pagina.evaluate(() => faixa())).split("\n").join(" ");
+          assert.match(faixa, /minecraft-18 \(x\/jogo\)/, `${motor}: 18 · ${faixa}`);
+          assert.match(faixa, /última queda: o servidor não tinha mais canais livres para o seu jogo/, `${motor}: 18 · ${faixa}`);
+        });
+
+        // 19. `nome-tomado` é de outra máquina servir o nome, e não de quem joga
+        //     já ter uma porta com ele.
+        await caso(motor, "19", async () => {
+          await pagina.evaluate(() => dizerARecusaDoTunel(jogo.mod, "minecraft-19", "nome-tomado"));
+          const faixa = (await pagina.evaluate(() => faixa())).split("\n").join(" ");
+          assert.match(faixa, /x\/jogo não abriu minecraft-19: outra máquina já serve um jogo com esse nome/, `${motor}: 19 · ${faixa}`);
+          assert.doesNotMatch(faixa, /você já tem uma porta/, `${motor}: 19 · a frase velha voltou: ${faixa}`);
+        });
+
+        // 20. A vista troca de servidor: as portas da sessão que sai fecham com
+        //     o MOD, e a faixa e o registro dizem POR QUE, em vez de a linha
+        //     sumir calada ou de aparecer o «fechado» genérico.
+        await caso(motor, "20", async () => {
+          await pagina.evaluate(() => {
+            chamadas.length = 0;
+            emitir("seele://event", { TunnelReport: { report: {
+              mod_id: "x/jogo", nome: "minecraft-20", porta: 25570, preferida: true, desejada: 25570,
+              caminho: { tipo: "estrela" }, latencia_ms: null,
+              bytes_por_segundo: 0, bytes_por_segundo_ida: 0, bytes_por_segundo_volta: 0,
+              conexoes: 0, conexoes_diretas: 0, conexoes_pela_estrela: 0,
+              quedas: [], udp_descartados: 0, encerrado: null,
+            } } });
+            // O que a troca de vista chama de verdade (`camada-sessoes.js`).
+            fecharOQueEDaSessao();
+            // E a vista seguinte relê o que está de pé nela.
+            entrarNaGeracao(2);
+          });
+          const faixa = (await pagina.evaluate(() => faixa())).split("\n").join(" ");
+          assert.match(
+            faixa,
+            /porta 25570 de minecraft-20 \(x\/jogo\) fechou: a porta foi fechada porque você trocou de servidor/,
+            `${motor}: 20 · ${faixa}`,
+          );
+          assert.doesNotMatch(faixa, /por você ou pelo MOD ao sair/, `${motor}: 20 · o «fechado» genérico: ${faixa}`);
+          const log = await pagina.evaluate(() => chamadas.filter((c) => c.cmd === "registrar_da_janela").map((c) => c.args.oQue).join("\n"));
+          assert.match(log, /x\/jogo: a porta 25570 de minecraft-20 fechou porque a vista trocou de servidor/, `${motor}: 20 · o registro não diz por quê: ${log}`);
+        });
+
         await caso(motor, "página", async () => assert.deepEqual(erros, [], `${motor}: erros na página`));
-        console.log(JSON.stringify({ motor, casos: 16, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
+        console.log(JSON.stringify({ motor, casos: 20, falhas: falhas.filter((f) => f.startsWith(motor)).length }));
         await pagina.close();
       } finally {
         await navegador.close();

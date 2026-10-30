@@ -4830,7 +4830,7 @@ setInterval(carregarMods, 4000);
  * expulsão. Chamar duas vezes é seguro e é o ponto — quem sai não precisa saber
  * se o outro lado também vai avisar.
  */
-function encerrarOAmbienteDosMods() {
+function encerrarOAmbienteDosMods(motivo = "sessao") {
   // **Revogar primeiro** — §5 do contrato, passo 1. A janela deixa de admitir
   // efeito em nome desta sessão **antes** de começar a desmontar: entre a
   // primeira linha e a última há mensagens de worker em voo, `await`s voltando
@@ -4885,7 +4885,9 @@ function encerrarOAmbienteDosMods() {
   // que mostrava, e relê o que está de pé na vista seguinte quando ela entra
   // (`entrarNaGeracao`). Não diz que a sessão acabou — na troca ela segue viva, e
   // os túneis dela fecham pelo descarregar dos MODs, pelo carimbo dela.
-  globalThis.dispatchEvent(new CustomEvent("seele-tuneis-limpar"));
+  // `motivo` diz à faixa por que as portas fecham: na troca de vista a sessão
+  // segue viva e a faixa explica, em vez de a linha sumir calada.
+  globalThis.dispatchEvent(new CustomEvent("seele-tuneis-limpar", { detail: { motivo } }));
   // A exigência é de um destino, e o destino acabou. Esperar o tique seguinte
   // deixaria a gestão dizendo «exigido por este servidor» por até quatro
   // segundos depois de a sessão ter terminado.

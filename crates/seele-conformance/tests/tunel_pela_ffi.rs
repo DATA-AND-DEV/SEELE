@@ -309,6 +309,36 @@ async fn a_porta_abre_pela_ffi_e_o_relatorio_chega_a_casca_com_o_apelido() -> Re
         r.nome == "eco-tcp" && r.latencia_ms.is_some() && r.bytes_por_segundo > 0
     });
     assert!(medido.bytes_por_segundo >= medido.bytes_por_segundo_ida);
+    // As conexões vivas se dividem entre os dois caminhos, sem sobra.
+    assert_eq!(
+        medido.conexoes,
+        medido.conexoes_diretas + medido.conexoes_pela_estrela,
+        "{medido:?}"
+    );
+
+    // **Um segundo JOGAR com a porta aberta devolve a mesma porta e não mexe na
+    // conexão do jogo.** Antes, o segundo pedido refazia o túnel: a porta velha
+    // fechava (e levava a conexão viva) e a nova podia cair numa «ocupada».
+    let mut viva = tokio::net::TcpStream::connect(("127.0.0.1", aberta.porta)).await?;
+    viva.write_all(b"antes").await?;
+    let mut ouvido = [0_u8; 5];
+    tokio::time::timeout(Duration::from_secs(10), viva.read_exact(&mut ouvido)).await??;
+    assert_eq!(&ouvido, b"antes");
+    let de_novo = conexao
+        .entrar_no_tunel(MOD.into(), "eco-tcp".into())
+        .await
+        .map_err(|r| anyhow::anyhow!("entrar de novo: {r}"))?;
+    assert_eq!(
+        (de_novo.porta, de_novo.preferida, de_novo.desejada),
+        (aberta.porta, aberta.preferida, aberta.desejada),
+        "o segundo JOGAR trouxe outra porta"
+    );
+    viva.write_all(b"depois").await?;
+    let mut ouvido = [0_u8; 6];
+    tokio::time::timeout(Duration::from_secs(10), viva.read_exact(&mut ouvido))
+        .await
+        .expect("a conexão do jogo morreu com o segundo JOGAR")?;
+    assert_eq!(&ouvido, b"depois");
     conexao.disconnect();
     drop(maquina);
     Ok(())
