@@ -157,6 +157,7 @@ impl AceitesDeMaquina {
     ///
     /// As de [`Self::listar`], e a escrita.
     pub fn guardar(&self, aceite: &AceiteDeMaquina) -> io::Result<()> {
+        let _trava = self.travar()?;
         let mut aceites: Vec<AceiteDeMaquina> = self
             .listar()?
             .into_iter()
@@ -172,6 +173,7 @@ impl AceitesDeMaquina {
     ///
     /// As de [`Self::listar`], e a escrita.
     pub fn revogar(&self, alvo: &str, mod_id: &str, servidor: &str) -> io::Result<bool> {
+        let _trava = self.travar()?;
         let antes = self.listar()?;
         let total = antes.len();
         let depois: Vec<AceiteDeMaquina> = antes
@@ -185,28 +187,35 @@ impl AceitesDeMaquina {
         Ok(true)
     }
 
-    fn escrever(&self, aceites: &[AceiteDeMaquina]) -> io::Result<()> {
+    /// A trava de `maquinas.trava`, segurada da leitura até a troca.
+    ///
+    /// **Sem ela, uma revogação podia voltar.** `guardar` e `revogar` leem o
+    /// arquivo inteiro e o regravam; um `guardar` que leu antes de uma
+    /// revogação terminar regravava a lista velha — com o aceite revogado
+    /// dentro, e é ele que a parte 4 usa para baixar e executar. A mesma trava
+    /// dos `conhecidos` e da agenda (um `flock` num arquivo ao lado, que vale
+    /// entre processos e entre threads do mesmo processo).
+    fn travar(&self) -> io::Result<Option<std::fs::File>> {
         if let Some(pasta) = self.arquivo.parent() {
             std::fs::create_dir_all(pasta)?;
         }
+        crate::conhecidos::travar(&self.arquivo).map_err(io::Error::other)
+    }
+
+    /// Regrava o arquivo inteiro. Quem chama segura [`Self::travar`].
+    ///
+    /// Pelo `trocar_privado` dos vizinhos: o arquivo novo nasce `0600` ao lado
+    /// e troca de nome por cima do velho. `0600` porque o que está aqui diz o
+    /// que este computador aceita executar, e não é da conta de outra conta da
+    /// máquina; a troca, para uma queda no meio deixar o arquivo de antes.
+    fn escrever(&self, aceites: &[AceiteDeMaquina]) -> io::Result<()> {
         let mut texto = String::new();
         for aceite in aceites {
             let linha = serde_json::to_string(aceite).map_err(io::Error::other)?;
             texto.push_str(&linha);
             texto.push('\n');
         }
-        // O temporário ao lado, no mesmo diretório: `rename` só é atômico
-        // dentro do mesmo sistema de arquivos. O número do processo no nome
-        // impede dois apps abertos de escreverem no mesmo temporário.
-        let temporario = self
-            .arquivo
-            .with_file_name(format!("{ARQUIVO}.{}.novo", std::process::id()));
-        std::fs::write(&temporario, texto)?;
-        if let Err(erro) = std::fs::rename(&temporario, &self.arquivo) {
-            let _ = std::fs::remove_file(&temporario);
-            return Err(erro);
-        }
-        Ok(())
+        crate::conhecidos::trocar_privado(&self.arquivo, texto.as_bytes()).map_err(io::Error::other)
     }
 }
 
@@ -257,7 +266,27 @@ fn pedaco_seguro(texto: &str) -> String {
     if saida.is_empty() {
         saida.push('%');
     }
+    // Os nomes de aparelho do Windows (`con`, `nul`, `com1`...) não são pastas
+    // lá, nem com extensão: `nul.x` abre o aparelho. O primeiro byte escapado
+    // basta para o nome deixar de sê-lo, e continua sem colidir.
+    let tronco = saida.split('.').next().unwrap_or_default();
+    if nome_de_aparelho_do_windows(tronco) {
+        let primeiro = saida.remove(0);
+        saida.insert_str(0, &format!("%{:02X}", u32::from(primeiro)));
+    }
     saida
+}
+
+fn nome_de_aparelho_do_windows(tronco: &str) -> bool {
+    match tronco {
+        "con" | "prn" | "aux" | "nul" => true,
+        _ => {
+            let (base, numero) = tronco.split_at(tronco.len().min(3));
+            matches!(base, "com" | "lpt")
+                && numero.len() == 1
+                && numero.bytes().all(|b| (b'1'..=b'9').contains(&b))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -424,6 +453,83 @@ mod tests {
             pasta_do_servidor_de_jogo(&dir, "casa:8383", "seele/jogo", "mundo"),
             dir.join("jogos/casa%3A8383/seele_jogo/mundo")
         );
+    }
+
+    /// Os nomes de aparelho do Windows saem escapados, com ou sem extensão, e
+    /// os vizinhos deles não.
+    #[test]
+    fn um_nome_de_aparelho_do_windows_nao_vira_pasta() {
+        for nome in [
+            "con", "prn", "aux", "nul", "com1", "lpt9", "nul.txt", "con.d",
+        ] {
+            let pedaco = pedaco_seguro(nome);
+            assert!(pedaco.starts_with('%'), "{nome} saiu {pedaco}");
+        }
+        for nome in ["console", "com0", "com10", "lpt", "nulo"] {
+            assert_eq!(pedaco_seguro(nome), nome);
+        }
+        assert_ne!(pedaco_seguro("con"), pedaco_seguro("%63on"));
+    }
+
+    /// **Uma revogação não volta.** `guardar` e `revogar` ao mesmo tempo, em
+    /// threads: sem a trava entre a leitura e a troca, um `guardar` que leu a
+    /// lista antes da revogação a regravava com o aceite revogado dentro.
+    #[test]
+    fn guardar_e_revogar_ao_mesmo_tempo_nao_ressuscitam_o_revogado() {
+        let dir = pasta("corrida");
+        let mut ressuscitados = 0;
+        for volta in 0..200 {
+            let aceites = AceitesDeMaquina::em(&dir);
+            aceites.guardar(&aceite("casa:8383", "mundo", 1)).unwrap();
+            std::thread::scope(|escopo| {
+                escopo.spawn(|| {
+                    AceitesDeMaquina::em(&dir)
+                        .guardar(&aceite("casa:8383", &format!("outro-{volta}"), 2))
+                        .unwrap();
+                });
+                escopo.spawn(|| {
+                    AceitesDeMaquina::em(&dir)
+                        .revogar("casa:8383", "seele/jogo", "mundo")
+                        .unwrap();
+                });
+            });
+            let depois = AceitesDeMaquina::em(&dir);
+            if depois
+                .de("casa:8383", "seele/jogo", "mundo")
+                .unwrap()
+                .is_some()
+            {
+                ressuscitados += 1;
+            }
+            assert!(
+                depois
+                    .de("casa:8383", "seele/jogo", &format!("outro-{volta}"))
+                    .unwrap()
+                    .is_some(),
+                "o aceite guardado ao mesmo tempo se perdeu (volta {volta})"
+            );
+            assert_eq!(depois.ilegiveis(), 0, "meio arquivo lido (volta {volta})");
+        }
+        assert_eq!(
+            ressuscitados, 0,
+            "o aceite revogado voltou em {ressuscitados} de 200"
+        );
+    }
+
+    /// O arquivo diz o que este computador aceita executar: só a conta o lê.
+    #[cfg(unix)]
+    #[test]
+    fn o_arquivo_nasce_so_da_conta() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = pasta("modo");
+        AceitesDeMaquina::em(&dir)
+            .guardar(&aceite("casa:8383", "mundo", 1))
+            .unwrap();
+        let modo = std::fs::metadata(dir.join(ARQUIVO))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(modo & 0o777, 0o600);
     }
 
     /// Dois nomes diferentes nunca dão a mesma pasta.

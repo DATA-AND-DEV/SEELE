@@ -5863,9 +5863,6 @@ fn guardar_tunel_aberto(
         });
 }
 
-/// «O produto sabe e não conta»: toda recusa de entrada num túnel vai ao
-/// registro com o MOD e o túnel, no nível que ela merece (uma recusa do
-/// servidor é rotina; a de porta local é uma máquina com problema).
 /// Uma recusa a servir um túnel, dita: `fora-do-aceite` é a que a pessoa vai
 /// perguntar, e só o log a guarda.
 fn tunel_servido_recusado_dito(
@@ -5883,6 +5880,9 @@ fn tunel_servido_recusado_dito(
     );
 }
 
+/// «O produto sabe e não conta»: toda recusa de entrada num túnel vai ao
+/// registro com o MOD e o túnel, no nível que ela merece (uma recusa do
+/// servidor é rotina; a de porta local é uma máquina com problema).
 fn tunel_recusado_dito(mod_id: &str, nome: &str, recusa: seele_core::tunel::RecusaDeTunel) {
     tracing::warn!(
         mod_id = %mod_id,

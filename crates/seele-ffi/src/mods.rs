@@ -364,7 +364,8 @@ pub fn aceite_de_maquina(
 /// # Errors
 ///
 /// `"EnderecoInvalido"`, `"OfertaInvalida"` (uma oferta que o fio recusaria
-/// não vira aceite) e `"NaoDeuParaGravar"`.
+/// não vira aceite), `"ResumoNaoConfere"` (o resumo não é o desta oferta, deste
+/// pacote e deste servidor de jogo) e `"NaoDeuParaGravar"`.
 pub fn guardar_aceite_de_maquina(
     home: &str,
     alvo: &str,
@@ -375,6 +376,19 @@ pub fn guardar_aceite_de_maquina(
         .oferta
         .para_o_nucleo()
         .map_err(|_| "OfertaInvalida".to_owned())?;
+    // O resumo é o que a pessoa aceitou; a oferta guardada é o que a parte 4
+    // executa. Se os dois não falam da mesma coisa — uma casca que remontou a
+    // oferta errado, ou juntou a oferta de um pedido ao resumo de outro —, o
+    // disco guardaria permissão para algo que ninguém viu.
+    let resumo = seele_core::maquina::resumo_em_hex(&seele_core::maquina::resumo_da_oferta(
+        &aceite.mod_id,
+        &aceite.hash,
+        &aceite.servidor,
+        &oferta,
+    ));
+    if resumo != aceite.resumo {
+        return Err("ResumoNaoConfere".to_owned());
+    }
     let quando = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |passou| passou.as_secs());
@@ -449,6 +463,17 @@ mod tests_do_aceite_de_maquina {
     }
 
     fn aceite() -> AceiteDeMaquinaGuardado {
+        let mut aceite = sem_resumo();
+        aceite.resumo = seele_core::maquina::resumo_em_hex(&seele_core::maquina::resumo_da_oferta(
+            &aceite.mod_id,
+            &aceite.hash,
+            &aceite.servidor,
+            &aceite.oferta.para_o_nucleo().unwrap(),
+        ));
+        aceite
+    }
+
+    fn sem_resumo() -> AceiteDeMaquinaGuardado {
         AceiteDeMaquinaGuardado {
             alvo: String::new(),
             mod_id: "seele/jogo".into(),
@@ -509,6 +534,25 @@ mod tests_do_aceite_de_maquina {
             aceite_de_maquina(&home, "casa", "seele/jogo", "mundo"),
             Ok(None)
         );
+    }
+
+    /// O resumo guardado é o da oferta guardada: com outra porta, outro
+    /// pacote ou um resumo qualquer, nada vai ao disco.
+    #[test]
+    fn um_resumo_que_nao_e_o_da_oferta_nao_vira_aceite() {
+        let home = pasta("resumo");
+        let mut outra_porta = aceite();
+        outra_porta.oferta.tuneis[0].porta = 25566;
+        let mut outro_pacote = aceite();
+        outro_pacote.hash = "ef".repeat(32);
+        for torto in [sem_resumo(), outra_porta, outro_pacote] {
+            assert_eq!(
+                guardar_aceite_de_maquina(&home, "casa", &torto),
+                Err("ResumoNaoConfere".to_owned())
+            );
+        }
+        assert_eq!(aceites_de_maquina(&home).unwrap().aceites.len(), 0);
+        guardar_aceite_de_maquina(&home, "casa", &aceite()).unwrap();
     }
 
     #[test]
