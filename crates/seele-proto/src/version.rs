@@ -151,7 +151,25 @@ use thiserror::Error;
 /// faixa desta build, e um par dela não chega nem a mandar um `Hello`, porque
 /// não há transporte em comum — o ADR 0063 diz como as duas pontas ficam
 /// sabendo disso antes de tentar.
-pub const PROTOCOL_VERSION: u8 = 11;
+///
+/// **12 desde 29/10/2026: as plataformas antes da entrada e o túnel de jogo,
+/// numa subida só** (API 8, partes 1 e 2).
+///
+/// Entram `ServerMessage::PlataformasDosMods` (a parte 1 não pôde levar as
+/// plataformas no `ModAnunciado`: campo novo em mensagem que existe é proibido,
+/// ADR 0058) e o vocabulário do túnel de jogo — cinco verbos do cliente
+/// (`ServirTunel`, `PararTunel`, `EntrarNoTunel`, `SairDoTunel`, `TunelFalhou`)
+/// e cinco respostas do servidor (`TunelConcedido`, `TunelRecusado`,
+/// `SirvaTunelPara`, `AlcanceTunelPor`, `TunelEncerrado`), mais os rótulos de
+/// canal `t` e `j`. A 11 **está publicada** (v0.18.1, commit `ae0f2715`,
+/// conferido no release em 29/10), então nada pôde pegar carona nela.
+///
+/// **Um par 11 continua entrando** — `PRIMEIRO_DA_LINHA_DOIS` e
+/// [`VERSAO_MINIMA`] seguem 10 — **e não recebe nada disto**:
+/// [`crate::vocabulario::desde`] barra o que o servidor escreve, e
+/// [`crate::vocabulario::desde_do_cliente`] (novo) barra o que um cliente 12
+/// escreveria a um servidor 11.
+pub const PROTOCOL_VERSION: u8 = 12;
 
 /// O primeiro número da linha 1. **Congelado** (ADR 0058), e desde a linha 2 o
 /// único número dela: a linha 1 não recebe versão nova (ADR 0063).
@@ -448,7 +466,7 @@ mod tests {
     /// `assert!` abaixo.
     #[test]
     fn a_linha_dois_fala_dez_e_onze_e_a_0_16_fica_de_fora() {
-        assert_eq!(PROTOCOL_VERSION, 11);
+        assert_eq!(PROTOCOL_VERSION, 12);
         assert_eq!(VERSAO_MINIMA, 10);
         assert!(
             confere_o_carimbo(8).is_err(),
@@ -460,7 +478,7 @@ mod tests {
         );
         assert!(confere_o_carimbo(10).is_ok());
         assert!(
-            confere_o_carimbo(12).is_err(),
+            confere_o_carimbo(13).is_err(),
             "um par do futuro foi aceito pelo carimbo"
         );
         assert_eq!(oldest_supported_version(), VERSAO_MINIMA);
@@ -600,7 +618,7 @@ mod tests {
     /// anúncio de MODs —, e de que o anúncio continua alcançado pela global.
     #[test]
     fn a_api_de_pedidos_preserva_o_limiar_do_anuncio_original() {
-        assert_eq!(PROTOCOL_VERSION, 11);
+        assert_eq!(PROTOCOL_VERSION, 12);
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,
             5,

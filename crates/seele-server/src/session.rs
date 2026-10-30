@@ -2721,6 +2721,21 @@ async fn run_session(
                             escrever!(&ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
                         }
                     }
+                    // O protocolo 12: os verbos do túnel de jogo. O servidor
+                    // ainda não os trata — a conferência de permissão, o
+                    // registro de túneis e a apresentação das pontas chegam nas
+                    // tarefas seguintes do plano «API 8, parte 2: o túnel de
+                    // jogo». Até lá a recusa é dita no log, e não silenciosa.
+                    ClientMessage::ServirTunel { .. }
+                    | ClientMessage::PararTunel { .. }
+                    | ClientMessage::EntrarNoTunel { .. }
+                    | ClientMessage::SairDoTunel { .. }
+                    | ClientMessage::TunelFalhou { .. } => {
+                        tracing::warn!(
+                            person = %session.person,
+                            "verbo de túnel recebido e ainda não tratado por este servidor"
+                        );
+                    }
                     ClientMessage::ModRequest { request, id, channel, payload } => {
                         let response = crate::mods::pedidos::executar(server, session.person, channel, &id, &payload).await;
                         let parts = crate::mods::pedidos::partes(&response);

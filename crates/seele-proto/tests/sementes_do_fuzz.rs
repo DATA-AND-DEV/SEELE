@@ -168,6 +168,27 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             tag: "A001".into(),
         }),
     );
+    // O protocolo 12: um quadro de cada sentido, para o fuzz já partir de uma
+    // variante que o analisador antigo não conhecia.
+    controle.insert(
+        "servidor-plataformas-dos-mods".to_owned(),
+        quadro(&ServerMessage::PlataformasDosMods {
+            mods: vec![seele_proto::mods::PlataformasDoMod {
+                hash: "ab".repeat(32),
+                plataformas: vec![
+                    seele_proto::mods::Plataforma::App,
+                    seele_proto::mods::Plataforma::Navegador,
+                ],
+            }],
+        }),
+    );
+    controle.insert(
+        "cliente-entrar-no-tunel".to_owned(),
+        quadro(&ClientMessage::EntrarNoTunel {
+            mod_id: "autor/nome".to_owned(),
+            nome: "mc-1".to_owned(),
+        }),
+    );
     todas.insert("control_frame", controle);
 
     let mut midia = DoAlvo::new();

@@ -39,6 +39,7 @@ pub mod screen;
 pub mod signal;
 pub mod stream;
 pub mod transport;
+pub mod tunel;
 pub mod uri;
 pub mod version;
 pub mod vocabulario;

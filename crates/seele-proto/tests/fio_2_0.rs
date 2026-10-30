@@ -56,12 +56,16 @@ use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc, VoiceRoomId,
 };
-use seele_proto::mods::ModAnunciado;
+use seele_proto::mods::{ModAnunciado, Plataforma, PlataformasDoMod};
 use seele_proto::screen::{
     cabecalho_de_quadro, LeitorDeTela, LidoDaTela, ScreenCodec, ScreenHeader, ScreenSource,
     TipoDeQuadro, SCREEN_HEADER_VERSION,
 };
 use seele_proto::stream::StreamType;
+use seele_proto::tunel::{
+    AberturaDeTunel, MotivoDoFimDoTunel, ProtocoloDeTunel, RecusaDeTunel, SinalDeTunel,
+    TipoDeCanalDeTunel,
+};
 use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem, VolumeHeader, VolumeRefusal};
 use seele_proto::MediaHeader;
 const FAIXA: seele_proto::version::Faixa = seele_proto::version::Faixa {
@@ -377,6 +381,45 @@ fn clientes() -> Vec<(&'static str, ClientMessage)> {
                 channel: ChannelId(1),
                 acao: "fechar-mesa".into(),
                 payload: "{}".into(),
+            },
+        ),
+        // O protocolo 12: o túnel de jogo.
+        (
+            "ServirTunel",
+            ClientMessage::ServirTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                protocolo: ProtocoloDeTunel::Tcp,
+                porta: 25565,
+            },
+        ),
+        (
+            "PararTunel",
+            ClientMessage::PararTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+            },
+        ),
+        (
+            "EntrarNoTunel",
+            ClientMessage::EntrarNoTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+            },
+        ),
+        (
+            "SairDoTunel",
+            ClientMessage::SairDoTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+            },
+        ),
+        (
+            "TunelFalhou",
+            ClientMessage::TunelFalhou {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                motivo: MotivoDeFalhaDePar::CaiuNoMeio,
             },
         ),
     ]
@@ -842,6 +885,60 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 },
             },
         ),
+        // O protocolo 12: as plataformas antes da entrada e o túnel de jogo.
+        (
+            "PlataformasDosMods",
+            ServerMessage::PlataformasDosMods {
+                mods: vec![PlataformasDoMod {
+                    hash: "ab".repeat(32),
+                    plataformas: vec![Plataforma::App, Plataforma::Navegador],
+                }],
+            },
+        ),
+        (
+            "TunelConcedido",
+            ServerMessage::TunelConcedido {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                protocolo: ProtocoloDeTunel::Udp,
+                porta: 19132,
+            },
+        ),
+        (
+            "TunelRecusado",
+            ServerMessage::TunelRecusado {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                motivo: RecusaDeTunel::SemPermissao,
+            },
+        ),
+        (
+            "SirvaTunelPara",
+            ServerMessage::SirvaTunelPara {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                quem: PersonId(42),
+                enderecos: vec!["203.0.113.5:41234".parse().unwrap()],
+                impressao: IMPRESSAO.into(),
+            },
+        ),
+        (
+            "AlcanceTunelPor",
+            ServerMessage::AlcanceTunelPor {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                enderecos: vec!["198.51.100.7:41234".parse().unwrap()],
+                impressao: IMPRESSAO.into(),
+            },
+        ),
+        (
+            "TunelEncerrado",
+            ServerMessage::TunelEncerrado {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                motivo: MotivoDoFimDoTunel::SemPermissao,
+            },
+        ),
     ]
 }
 
@@ -963,6 +1060,40 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
         })
         .unwrap(),
     ));
+    // O túnel (12): a primeira mensagem de todo canal `t` e `j`, e o que corre
+    // no canal de controle de um túnel UDP.
+    todos.push((
+        "tunel:abertura-tcp".to_owned(),
+        encode_em(
+            12,
+            &AberturaDeTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                fluxo: 1,
+                tipo: TipoDeCanalDeTunel::Tcp,
+                de: None,
+            },
+        )
+        .unwrap(),
+    ));
+    todos.push((
+        "tunel:abertura-udp-pela-estrela".to_owned(),
+        encode_em(
+            12,
+            &AberturaDeTunel {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                fluxo: 7,
+                tipo: TipoDeCanalDeTunel::Udp,
+                de: Some(PersonId(42)),
+            },
+        )
+        .unwrap(),
+    ));
+    todos.push((
+        "tunel:ping".to_owned(),
+        encode_em(12, &SinalDeTunel::Ping { n: 3 }).unwrap(),
+    ));
     todos.push((
         "fluxo:resposta-de-imagem".to_owned(),
         encode(&RespostaDeImagem {
@@ -977,7 +1108,16 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
 fn exemplares() -> Vec<(String, Vec<u8>)> {
     let mut todos = Vec::new();
     for (nome, mensagem) in clientes() {
-        todos.push((format!("cliente:{nome}"), encode(&mensagem).unwrap()));
+        // Como os servidores: com o carimbo do número em que a variante nasceu,
+        // que para os verbos do 12 não é o 10.
+        todos.push((
+            format!("cliente:{nome}"),
+            encode_em(
+                seele_proto::vocabulario::desde_do_cliente(&mensagem).max(10),
+                &mensagem,
+            )
+            .unwrap(),
+        ));
     }
     for (nome, mensagem) in servidores() {
         todos.push((
@@ -1152,7 +1292,7 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
         &'static [&'static str],
     );
 
-    let casos: [Caso; 17] = [
+    let casos: [Caso; 21] = [
         (
             "DisconnectReason",
             variantes::<DisconnectReason>(),
@@ -1328,6 +1468,43 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
             "VolumeRefusal",
             variantes::<VolumeRefusal>(),
             &["SemEspera", "TipoRecusado", "NaoGravei", "Incompleto"],
+        ),
+        (
+            "ProtocoloDeTunel",
+            variantes::<ProtocoloDeTunel>(),
+            &["Tcp", "Udp"],
+        ),
+        (
+            "RecusaDeTunel",
+            variantes::<RecusaDeTunel>(),
+            &[
+                "NaoExiste",
+                "SemPermissao",
+                "AcaoNaoDeclarada",
+                "ModSemPorta",
+                "NomeTomado",
+                "MaquinaSaiu",
+                "TuneisDemais",
+                "CanaisEsgotados",
+                "ServidorAntigo",
+            ],
+        ),
+        (
+            "MotivoDoFimDoTunel",
+            variantes::<MotivoDoFimDoTunel>(),
+            &[
+                "MaquinaParou",
+                "MaquinaSaiu",
+                "ModDesligado",
+                "SemPermissao",
+                "PessoaSaiu",
+                "AnfitriaoCaiu",
+            ],
+        ),
+        (
+            "TipoDeCanalDeTunel",
+            variantes::<TipoDeCanalDeTunel>(),
+            &["Tcp", "Udp", "Controle"],
         ),
     ];
     let mut errados = Vec::new();

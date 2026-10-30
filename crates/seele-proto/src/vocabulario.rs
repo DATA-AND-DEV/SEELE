@@ -22,7 +22,7 @@
 //!
 //! Mora aqui também a tabela de **em que número cada variante nasceu**
 //! ([`desde`], [`desde_a_razao`], [`desde_o_alerta`], [`desde_a_causa`],
-//! [`desde_a_recusa`]): o
+//! [`desde_a_recusa`], e [`desde_do_cliente`] para o outro sentido): o
 //! portão que decide o
 //! que o servidor pode escrever para um par, e que até a 0.15 era um `match`
 //! com `_` dentro do `seele-server`.
@@ -30,7 +30,9 @@
 use std::cell::Cell;
 use std::fmt;
 
-use crate::control::{AlertReason, CausaDaRecusa, DisconnectReason, MessageRefusal, ServerMessage};
+use crate::control::{
+    AlertReason, CausaDaRecusa, ClientMessage, DisconnectReason, MessageRefusal, ServerMessage,
+};
 use crate::version::{PRIMEIRO_DA_LINHA_DOIS, PRIMEIRO_DA_LINHA_UM};
 
 /// Os nomes das variantes do enum `T`, na ordem dos ordinais.
@@ -81,6 +83,16 @@ where
 pub const fn desde(mensagem: &ServerMessage) -> u8 {
     match mensagem {
         ServerMessage::IdentidadeApresentada { .. } => 11,
+        // O protocolo 12 (29/10/2026): as plataformas antes da entrada e o
+        // túnel de jogo. A 11 está publicada (v0.18.1), e um par 11 que
+        // recebesse isto leria uma variante que não conhece e perderia o fluxo
+        // de controle inteiro.
+        ServerMessage::PlataformasDosMods { .. }
+        | ServerMessage::TunelConcedido { .. }
+        | ServerMessage::TunelRecusado { .. }
+        | ServerMessage::SirvaTunelPara { .. }
+        | ServerMessage::AlcanceTunelPor { .. }
+        | ServerMessage::TunelEncerrado { .. } => 12,
         // O `Alert` existe desde sempre, e o que pode ser novo é o motivo.
         ServerMessage::Alert { reason, .. } => maior(PRIMEIRO_DA_LINHA_UM, desde_o_alerta(reason)),
         // Puxa o número da razão que leva, como o `Alert` puxa o do motivo: uma
@@ -142,6 +154,78 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
         ServerMessage::QuadroDeCargos(..)
         | ServerMessage::SuasPermissoes(..)
         | ServerMessage::CargoRecusado { .. } => PRIMEIRO_DA_LINHA_DOIS,
+    }
+}
+
+/// Em que número de protocolo um verbo do **cliente** passou a existir.
+///
+/// A metade que faltava de [`desde`]: o servidor tem o portão de quem manda
+/// (`entende_a_mensagem`), e o cliente precisa do mesmo para **não mandar** a
+/// um servidor que negociou menos o que ele não conhece. Um cliente 12 diante
+/// de um servidor 11 não escreve verbo de túnel nenhum — o servidor 11 leria
+/// uma variante desconhecida e o fluxo de controle desalinharia.
+///
+/// Também carimba o quadro: os bytes-ouro de `tests/fio_2_0.rs` usam
+/// `desde_do_cliente(..).max(10)` para cada verbo, como já fazem com os do
+/// servidor.
+///
+/// Sem `_`, de propósito, pelo mesmo motivo de [`desde`]: o guarda
+/// `as_tabelas_tem_um_braco_por_variante` o confere contra a lista do `serde`.
+#[must_use]
+pub const fn desde_do_cliente(mensagem: &ClientMessage) -> u8 {
+    match mensagem {
+        ClientMessage::Hello { .. }
+        | ClientMessage::Response { .. }
+        | ClientMessage::EnterVoiceRoom { .. }
+        | ClientMessage::LeaveVoiceRoom
+        | ClientMessage::JoinChannel { .. }
+        | ClientMessage::SendMessage { .. }
+        | ClientMessage::FetchHistory { .. }
+        | ClientMessage::SetMuted { .. }
+        | ClientMessage::SetTotalIsolation { .. }
+        | ClientMessage::SetPresence { .. }
+        | ClientMessage::Ping { .. }
+        | ClientMessage::CreateVoiceRoom { .. }
+        | ClientMessage::CreateChannel { .. }
+        | ClientMessage::RenameVoiceRoom { .. }
+        | ClientMessage::RenameChannel { .. }
+        | ClientMessage::KickPerson { .. }
+        | ClientMessage::BanPerson { .. }
+        | ClientMessage::RemoveMessage { .. }
+        | ClientMessage::MovePerson { .. }
+        | ClientMessage::DeleteVoiceRoom { .. }
+        | ClientMessage::DeleteChannel { .. }
+        | ClientMessage::WeighChannel { .. }
+        | ClientMessage::FetchAttachment { .. }
+        | ClientMessage::RenameServer { .. }
+        | ClientMessage::SetServerIcon { .. }
+        | ClientMessage::StartScreenShare
+        | ClientMessage::StopScreenShare
+        | ClientMessage::RequestKeyFrame { .. }
+        | ClientMessage::SetPersonIcon { .. }
+        | ClientMessage::SetNickname { .. }
+        | ClientMessage::WatchScreen { .. }
+        | ClientMessage::UnwatchScreen { .. }
+        | ClientMessage::EmprestarSubida { .. }
+        | ClientMessage::ParFalhou { .. }
+        | ClientMessage::AceitarMods { .. }
+        | ClientMessage::RecusarMods
+        | ClientMessage::ModRequest { .. } => PRIMEIRO_DA_LINHA_UM,
+        // Cargos e permissões (ADR 0064): as primeiras da linha 2.
+        ClientMessage::CriarCargo { .. }
+        | ClientMessage::EditarCargo { .. }
+        | ClientMessage::MoverCargo { .. }
+        | ClientMessage::ApagarCargo { .. }
+        | ClientMessage::AtribuirCargo { .. }
+        | ClientMessage::RevogarCargo { .. }
+        | ClientMessage::PedirCargos
+        | ClientMessage::AcaoDeMod { .. } => PRIMEIRO_DA_LINHA_DOIS,
+        // O túnel de jogo (29/10/2026).
+        ClientMessage::ServirTunel { .. }
+        | ClientMessage::PararTunel { .. }
+        | ClientMessage::EntrarNoTunel { .. }
+        | ClientMessage::SairDoTunel { .. }
+        | ClientMessage::TunelFalhou { .. } => 12,
     }
 }
 
@@ -299,7 +383,8 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::control::AlertSeverity;
+    use crate::control::{AlertSeverity, ClientMessage};
+    use crate::tunel::{MotivoDoFimDoTunel, ProtocoloDeTunel, RecusaDeTunel};
 
     /// O corpo de uma tabela, lido desta fonte: de `pub const fn {nome}(` até a
     /// próxima função.
@@ -341,6 +426,11 @@ mod tests {
         for (tabela, tipo, lista) in [
             ("desde", "ServerMessage", variantes::<ServerMessage>()),
             (
+                "desde_do_cliente",
+                "ClientMessage",
+                variantes::<ClientMessage>(),
+            ),
+            (
                 "desde_a_razao",
                 "DisconnectReason",
                 variantes::<DisconnectReason>(),
@@ -375,6 +465,72 @@ mod tests {
                 "a tabela {tabela} não tem um braço para cada variante de {tipo}"
             );
         }
+    }
+
+    /// As seis mensagens de servidor que nasceram no 12, uma de cada.
+    fn exemplares_do_doze() -> Vec<ServerMessage> {
+        vec![
+            ServerMessage::PlataformasDosMods {
+                mods: vec![crate::mods::PlataformasDoMod {
+                    hash: "ab".repeat(32),
+                    plataformas: vec![crate::mods::Plataforma::App],
+                }],
+            },
+            ServerMessage::TunelConcedido {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                protocolo: ProtocoloDeTunel::Tcp,
+                porta: 25565,
+            },
+            ServerMessage::TunelRecusado {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                motivo: RecusaDeTunel::NaoExiste,
+            },
+            ServerMessage::SirvaTunelPara {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                quem: crate::ids::PersonId(2),
+                enderecos: vec![],
+                impressao: "3c".repeat(32),
+            },
+            ServerMessage::AlcanceTunelPor {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                enderecos: vec![],
+                impressao: "3c".repeat(32),
+            },
+            ServerMessage::TunelEncerrado {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                motivo: MotivoDoFimDoTunel::MaquinaParou,
+            },
+        ]
+    }
+
+    /// **Um par 11 não recebe o que nasceu no 12.** O servidor só escreve para
+    /// quem negociou um número igual ou acima do que `desde` diz; se um braço
+    /// novo voltasse o número de antes, o quadro chegaria a um par que não
+    /// conhece a variante e desalinharia o fluxo de controle dele.
+    #[test]
+    fn um_par_onze_nao_recebe_o_que_nasceu_no_doze() {
+        for nova in exemplares_do_doze() {
+            assert_eq!(desde(&nova), 12, "{nova:?}");
+            assert!(desde(&nova) > 11);
+        }
+        assert_eq!(
+            desde_do_cliente(&ClientMessage::EntrarNoTunel {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into()
+            }),
+            12
+        );
+        assert_eq!(
+            desde_do_cliente(&ClientMessage::AceitarMods {
+                conjunto: "0".repeat(64)
+            }),
+            9
+        );
     }
 
     /// Na linha 1, tudo o que existe nasceu, do ponto de vista de quem

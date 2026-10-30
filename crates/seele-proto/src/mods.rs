@@ -1172,6 +1172,20 @@ pub struct ModAnunciado {
     pub tema: bool,
 }
 
+/// As plataformas efetivas de um MOD do anúncio, antes de a pessoa entrar
+/// (protocolo 12).
+///
+/// Mensagem à parte e não campo de [`ModAnunciado`]: campo novo em mensagem que
+/// existe é proibido (ADR 0058), e o anúncio da parte 1 não pôde levá-lo (commit
+/// `cf9ac7b6`). O `hash` é o do MOD no anúncio; a lista nunca é vazia.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlataformasDoMod {
+    /// O hash do conteúdo do MOD, o mesmo de [`ModAnunciado::hash`].
+    pub hash: String,
+    /// Onde ele roda, já com a regra «sem a chave, nas duas» aplicada.
+    pub plataformas: Vec<Plataforma>,
+}
+
 /// Um hash de conteúdo em hexadecimal minúsculo, e nada mais.
 ///
 /// **Tamanho exato e caixa fixa, e não um teto.** O mesmo argumento de

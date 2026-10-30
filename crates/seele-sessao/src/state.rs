@@ -1835,6 +1835,18 @@ impl Room {
             // entrada, não há o que absorver, e o roster não muda.
             ServerMessage::ModsExigidos { .. } => {}
             ServerMessage::ModReply { .. } => {}
+
+            // O protocolo 12: as plataformas antes da entrada e o túnel de
+            // jogo. O `Room` ainda não os dobra; o tratamento real chega nas
+            // tarefas seguintes do plano «API 8, parte 2: o túnel de jogo»
+            // (servidor, enlace, núcleo e casca). Calada de propósito até lá,
+            // e não por esquecimento.
+            ServerMessage::PlataformasDosMods { .. }
+            | ServerMessage::TunelConcedido { .. }
+            | ServerMessage::TunelRecusado { .. }
+            | ServerMessage::SirvaTunelPara { .. }
+            | ServerMessage::AlcanceTunelPor { .. }
+            | ServerMessage::TunelEncerrado { .. } => {}
         }
 
         changed

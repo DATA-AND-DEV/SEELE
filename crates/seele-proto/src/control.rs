@@ -1962,6 +1962,59 @@ pub enum ClientMessage {
         /// O JSON do MOD.
         payload: String,
     },
+
+    /// A máquina de um MOD passa a servir um túnel de jogo (protocolo 12).
+    ///
+    /// Só vale de um MOD ligado que declara o poder `porta`; o servidor confere
+    /// e responde com [`ServerMessage::TunelConcedido`] ou
+    /// [`ServerMessage::TunelRecusado`]. `porta` é a porta do jogo **na máquina
+    /// de quem serve**: o produto só a discará em `127.0.0.1`.
+    ServirTunel {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel, [`crate::tunel::nome_valido`].
+        nome: String,
+        /// O que o túnel carrega.
+        protocolo: crate::tunel::ProtocoloDeTunel,
+        /// A porta do jogo na máquina.
+        porta: u16,
+    },
+    /// A máquina para de servir o túnel.
+    PararTunel {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+    },
+    /// Quem joga pede para alcançar o túnel de uma máquina.
+    ///
+    /// O servidor confere, a cada entrada, que a pessoa tem a ação
+    /// [`crate::tunel::ACAO_ENTRAR_NO_JOGO`] do MOD (ADR 0064).
+    EntrarNoTunel {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+    },
+    /// Quem joga deixa o túnel.
+    SairDoTunel {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+    },
+    /// O caminho direto de um túnel falhou, e por quê.
+    ///
+    /// O mesmo motivo de [`Self::ParFalhou`], para o servidor desfazer a
+    /// apresentação e o túnel seguir pela estrela.
+    TunelFalhou {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// O que aconteceu.
+        motivo: MotivoDeFalhaDePar,
+    },
 }
 
 /// Server to client.
@@ -2778,6 +2831,75 @@ pub enum ServerMessage {
         /// Quatro caracteres ASCII base36 maiúsculos.
         tag: String,
     },
+
+    // ---- as plataformas antes da entrada e o túnel de jogo, protocolo 12 ----
+    /// As plataformas efetivas de **todos** os MODs do anúncio, pela ordem dele.
+    ///
+    /// Mensagem à parte porque campo novo em [`crate::mods::ModAnunciado`] é
+    /// proibido (ADR 0058); a parte 1 da API 8 parou nesse limite (commit
+    /// `cf9ac7b6`). Cada item leva a lista efetiva, nunca vazia.
+    PlataformasDosMods {
+        /// Um item por MOD do anúncio.
+        mods: Vec<crate::mods::PlataformasDoMod>,
+    },
+    /// O servidor aceitou o túnel que a máquina quis servir.
+    TunelConcedido {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// O que o túnel carrega.
+        protocolo: crate::tunel::ProtocoloDeTunel,
+        /// A porta do jogo, na máquina.
+        porta: u16,
+    },
+    /// O pedido de túnel foi recusado, e por quê.
+    TunelRecusado {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// O motivo, enumerado.
+        motivo: crate::tunel::RecusaDeTunel,
+    },
+    /// Sirva este túnel a esta pessoa, por ligação direta.
+    ///
+    /// A irmã de [`Self::SirvaTelaPara`] para o túnel: quem recebe disca e
+    /// atende ao mesmo tempo, e confere a impressão digital.
+    SirvaTunelPara {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// Quem vai jogar.
+        quem: PersonId,
+        /// Onde quem joga pode ser alcançado.
+        enderecos: Vec<std::net::SocketAddr>,
+        /// A impressão digital que quem joga vai apresentar.
+        impressao: String,
+    },
+    /// Alcance este túnel por esta máquina, sem passar pelo anfitrião.
+    ///
+    /// A irmã de [`Self::AssistaTelaPor`].
+    AlcanceTunelPor {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// Onde a máquina pode ser alcançada.
+        enderecos: Vec<std::net::SocketAddr>,
+        /// A impressão digital que ela vai apresentar.
+        impressao: String,
+    },
+    /// O túnel acabou, e por quê. Sai para quem servia e para quem jogava.
+    TunelEncerrado {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// O motivo, enumerado.
+        motivo: crate::tunel::MotivoDoFimDoTunel,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2908,11 +3030,11 @@ pub trait ListaDeCima: for<'de> Deserialize<'de> + Validate {
 }
 
 impl ListaDeCima for ClientMessage {
-    const CONHECIDAS: u32 = 45;
+    const CONHECIDAS: u32 = 50;
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 52;
+    const CONHECIDAS: u32 = 58;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3464,6 +3586,19 @@ impl Validate for ClientMessage {
                 }
                 check("mod_payload", payload.len(), MAX_CARGA_DE_MOD)
             }
+            // O protocolo 12. `porta` é um `u16` e zero não serve a ninguém;
+            // o resto é a mesma régua de `AberturaDeTunel`.
+            Self::ServirTunel { mod_id, nome, porta, .. } => {
+                crate::tunel::check_tunel(mod_id, nome)?;
+                if *porta == 0 {
+                    return Err(ControlError::FieldOutOfRange { field: "porta" });
+                }
+                Ok(())
+            }
+            Self::PararTunel { mod_id, nome }
+            | Self::EntrarNoTunel { mod_id, nome }
+            | Self::SairDoTunel { mod_id, nome }
+            | Self::TunelFalhou { mod_id, nome, .. } => crate::tunel::check_tunel(mod_id, nome),
         }
     }
 }
@@ -3682,6 +3817,57 @@ impl Validate for ServerMessage {
                 }
                 _ => Ok(()),
             },
+            Self::PlataformasDosMods { mods } => {
+                // Nunca mais itens que o anúncio aceita: o quadro responde a
+                // um `ModsExigidos`, e este é o mesmo teto.
+                check_bounds("mods", mods.len(), MAX_MODS_NO_ANUNCIO)?;
+                for item in mods {
+                    if !crate::mods::e_hash_de_conteudo(&item.hash) {
+                        return Err(ControlError::FieldOutOfRange { field: "mod_hash" });
+                    }
+                    if item.plataformas.is_empty() {
+                        return Err(ControlError::FieldOutOfRange {
+                            field: "plataformas",
+                        });
+                    }
+                    // Só há duas plataformas; uma lista maior repete alguma.
+                    check_bounds("plataformas", item.plataformas.len(), 2)?;
+                }
+                Ok(())
+            }
+            Self::TunelConcedido {
+                mod_id,
+                nome,
+                porta,
+                ..
+            } => {
+                crate::tunel::check_tunel(mod_id, nome)?;
+                if *porta == 0 {
+                    return Err(ControlError::FieldOutOfRange { field: "porta" });
+                }
+                Ok(())
+            }
+            // O motivo é um enumerado, inclusive `ServidorAntigo`, que o
+            // servidor nunca manda mas que não é malformado.
+            Self::TunelRecusado { mod_id, nome, .. }
+            | Self::TunelEncerrado { mod_id, nome, .. } => crate::tunel::check_tunel(mod_id, nome),
+            Self::SirvaTunelPara {
+                mod_id,
+                nome,
+                enderecos,
+                impressao,
+                ..
+            }
+            | Self::AlcanceTunelPor {
+                mod_id,
+                nome,
+                enderecos,
+                impressao,
+            } => {
+                crate::tunel::check_tunel(mod_id, nome)?;
+                crate::tunel::check_enderecos(enderecos.len())?;
+                check_impressao(impressao)
+            }
         }
     }
 }
@@ -5386,14 +5572,14 @@ mod o_vocabulario_e_a_versao {
         // quando alguém acrescenta, e é a que faltava.
         assert_eq!(
             ultima_variante::<ClientMessage>(),
-            44,
+            49,
             "a lista do cliente mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número: a pergunta é sobre `PROTOCOL_VERSION`, e não \
              sobre esta linha"
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            51,
+            57,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -5466,9 +5652,18 @@ mod o_vocabulario_e_a_versao {
         // se fosse medida. É uma mudança de CAMPO, que a regra do ADR 0058
         // proíbe no publicado; o 10 não foi publicado, e o ouro do 9 não muda.
         // As listas não mudaram de tamanho por isso.
+        // **12 em 29/10/2026: as plataformas antes da entrada e o túnel de
+        // jogo, numa subida só** (API 8, partes 1 e 2). O cliente foi de 44
+        // para 49: `ServirTunel`, `PararTunel`, `EntrarNoTunel`, `SairDoTunel`
+        // e `TunelFalhou`. O servidor, de 51 para 57: `PlataformasDosMods`,
+        // `TunelConcedido`, `TunelRecusado`, `SirvaTunelPara`, `AlcanceTunelPor`
+        // e `TunelEncerrado`. O 11 está publicado (v0.18.1), então nada pôde
+        // pegar carona nele; um par 11 continua entrando e não recebe nada
+        // disto (`vocabulario::desde` e `desde_do_cliente`).
+        //
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            11,
+            12,
             "a versão do protocolo mudou; confira se os ordinais acima, a faixa \
              de `version::FAIXA` e `mods::VERSAO_DO_ANUNCIO` continuam contando \
              a mesma história"
@@ -5480,6 +5675,73 @@ mod o_vocabulario_e_a_versao {
              `VERSAO_DO_ANUNCIO`, e nenhum par negocia acima da versão global: \
              se as duas divergirem, ou o anúncio voltou a ser dormente, ou ele \
              passou a sair para quem não sabe lê-lo"
+        );
+    }
+
+    /// O que o `Validate` do protocolo 12 recusa: as plataformas sem lista,
+    /// com hash que não é hash ou em número que o anúncio não aceita, e os
+    /// verbos de túnel com nome ou MOD fora da forma.
+    #[test]
+    fn o_vocabulario_do_doze_recusa_o_que_nao_tem_forma() {
+        use crate::mods::{Plataforma, PlataformasDoMod};
+        use crate::tunel::{MotivoDoFimDoTunel, ProtocoloDeTunel};
+
+        let item = |hash: &str, plataformas: Vec<Plataforma>| PlataformasDoMod {
+            hash: hash.into(),
+            plataformas,
+        };
+        let boa = || item(&"ab".repeat(32), vec![Plataforma::App]);
+        assert!(ServerMessage::PlataformasDosMods { mods: vec![boa()] }
+            .validate()
+            .is_ok());
+        assert!(ServerMessage::PlataformasDosMods { mods: vec![] }
+            .validate()
+            .is_ok());
+        for ruim in [
+            item("AB", vec![Plataforma::App]),
+            item(&"AB".repeat(32), vec![Plataforma::App]),
+            item(&"ab".repeat(32), vec![]),
+        ] {
+            assert!(ServerMessage::PlataformasDosMods { mods: vec![ruim] }
+                .validate()
+                .is_err());
+        }
+        let demais = vec![boa(); MAX_MODS_NO_ANUNCIO + 1];
+        assert!(ServerMessage::PlataformasDosMods { mods: demais }
+            .validate()
+            .is_err());
+
+        let servir = |mod_id: &str, nome: &str, porta: u16| ClientMessage::ServirTunel {
+            mod_id: mod_id.into(),
+            nome: nome.into(),
+            protocolo: ProtocoloDeTunel::Tcp,
+            porta,
+        };
+        assert!(servir("a/b", "mc-1", 25565).validate().is_ok());
+        assert!(servir("ab", "mc-1", 25565).validate().is_err());
+        assert!(servir("a/b", "MC", 25565).validate().is_err());
+        assert!(servir("a/b", "mc-1", 0).validate().is_err());
+
+        let encerrado = ServerMessage::TunelEncerrado {
+            mod_id: "a/b".into(),
+            nome: "-x".into(),
+            motivo: MotivoDoFimDoTunel::PessoaSaiu,
+        };
+        assert!(encerrado.validate().is_err());
+
+        let sirva = |impressao: &str, quantos: usize| ServerMessage::SirvaTunelPara {
+            mod_id: "a/b".into(),
+            nome: "mc-1".into(),
+            quem: PersonId(2),
+            enderecos: vec!["203.0.113.5:4000".parse().unwrap(); quantos],
+            impressao: impressao.into(),
+        };
+        assert!(sirva(&"3c".repeat(32), 2).validate().is_ok());
+        assert!(sirva("3c", 2).validate().is_err());
+        assert!(
+            sirva(&"3c".repeat(32), crate::tunel::MAX_ENDERECOS_DE_TUNEL + 1)
+                .validate()
+                .is_err()
         );
     }
 
