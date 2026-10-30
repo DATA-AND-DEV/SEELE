@@ -17,10 +17,14 @@
 //! servidor**, e o servidor abre outro do mesmo tipo na conexão da máquina e
 //! copia nos dois sentidos ([`repassar`]). A primeira mensagem de todo canal
 //! repassado é uma [`AberturaDeTunel`]: no `t`, um quadro de controle
-//! (`crate::frame`, o mesmo dos canais `b`); no `j`, o primeiro datagrama (o
-//! `control::encode` da abertura, sem prefixo de comprimento). O anfitrião
-//! reescreve o campo `de` com quem de fato abriu o canal, e é esse o motivo de
-//! a máquina não precisar confiar no que a rede diz.
+//! (`crate::frame`, o mesmo dos canais `b`); no `j`, um datagrama marcado com
+//! `TAG_DE_ABERTURA` (o `control::encode` da abertura depois do tag, sem prefixo
+//! de comprimento), e todo datagrama de carga leva `TAG_DE_DADO` na frente. O
+//! `j` não ordena nem retransmite, então a abertura não é «o primeiro
+//! datagrama»: quem abre a repete até algo voltar, e o repasse **reencaminha**
+//! cada repetição à máquina com a abertura reescrita. O anfitrião reescreve o
+//! campo `de` com quem de fato abriu o canal, e é esse o motivo de a máquina
+//! não precisar confiar no que a rede diz.
 //!
 //! **Um canal sem concessão é cortado e contado**, sem tocar na máquina
 //! ([`Server::canais_sem_concessao`]), e uma concessão retirada derruba junto os
@@ -37,8 +41,8 @@ use seele_proto::cargos::RecusaDeAcaoDeMod;
 use seele_proto::ids::PersonId;
 use seele_proto::mods::Poder;
 use seele_proto::tunel::{
-    AberturaDeTunel, MotivoDoFimDoTunel, ProtocoloDeTunel, RecusaDeTunel, TipoDeCanalDeTunel,
-    ACAO_ENTRAR_NO_JOGO,
+    datagrama_de_abertura, ler_datagrama_j, AberturaDeTunel, DatagramaJ, MotivoDoFimDoTunel,
+    ProtocoloDeTunel, RecusaDeTunel, TipoDeCanalDeTunel, ACAO_ENTRAR_NO_JOGO,
 };
 
 use crate::server::{Event, Server};
@@ -166,6 +170,8 @@ pub struct Tuneis {
     conexoes: HashMap<u64, Conexao>,
     contadores: HashMap<Chave, Arc<AtomicU64>>,
     sem_concessao: AtomicU64,
+    /// Datagramas de carga que chegaram a um canal `j` antes da abertura dele.
+    dados_antes_da_abertura: AtomicU64,
 }
 
 impl Tuneis {
@@ -524,6 +530,18 @@ impl Tuneis {
     pub fn canais_sem_concessao(&self) -> u64 {
         self.sem_concessao.load(Ordering::Relaxed)
     }
+
+    /// Conta um datagrama de carga que chegou antes da abertura do canal `j`.
+    pub fn contar_dado_antes_da_abertura(&self) {
+        self.dados_antes_da_abertura.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Quantos datagramas de carga chegaram a um canal `j` antes da abertura:
+    /// descartados e contados, sem cortar o canal.
+    #[must_use]
+    pub fn dados_antes_da_abertura(&self) -> u64 {
+        self.dados_antes_da_abertura.load(Ordering::Relaxed)
+    }
 }
 
 /// `t` leva TCP e o canal de sinais (`Controle`, de qualquer túnel: é por ele
@@ -565,6 +583,14 @@ impl Server {
     #[must_use]
     pub fn canais_sem_concessao(&self) -> u64 {
         self.tuneis().canais_sem_concessao()
+    }
+
+    /// Quantos datagramas de carga chegaram a um canal `j` **antes** da
+    /// abertura dele: descartados e contados, nunca motivo de corte (a
+    /// abertura pode só ter se atrasado ou se perdido, e quem abre a repete).
+    #[must_use]
+    pub fn datagramas_j_antes_da_abertura(&self) -> u64 {
+        self.tuneis().dados_antes_da_abertura()
     }
 }
 
@@ -1067,20 +1093,53 @@ async fn repassar_t(
     Ok(())
 }
 
+/// Lê o canal `j` de quem joga até a abertura (`TAG_DE_ABERTURA`).
+///
+/// Carga que chega antes dela é descartada e contada, e **não** corta o canal:
+/// o `j` não ordena nem retransmite, e a abertura pode ter se atrasado ou se
+/// perdido (quem abre a repete). Só uma abertura malformada, o fim do canal ou
+/// o prazo vencido cortam.
+async fn ler_a_abertura_j(
+    server: &Server,
+    de: PersonId,
+    datagramas: &mut seele_enlace::Datagramas,
+) -> Option<AberturaDeTunel> {
+    let fim = tokio::time::Instant::now() + PRAZO_DA_ABERTURA;
+    loop {
+        let bytes = match tokio::time::timeout_at(fim, datagramas.receber()).await {
+            Ok(Some(bytes)) => bytes,
+            outro => {
+                server.tuneis().contar_sem_concessao();
+                tracing::warn!(pessoa = %de, fechou = outro.is_ok(), "túnel: canal j sem abertura no prazo, cortado");
+                return None;
+            }
+        };
+        match ler_datagrama_j(&bytes) {
+            DatagramaJ::Abertura(corpo) => {
+                return match seele_proto::control::decode::<AberturaDeTunel>(corpo) {
+                    Ok(abertura) => Some(abertura),
+                    Err(erro) => {
+                        server.tuneis().contar_sem_concessao();
+                        tracing::warn!(pessoa = %de, %erro, "túnel: abertura do canal j malformada, cortado");
+                        None
+                    }
+                };
+            }
+            DatagramaJ::Dado(_) | DatagramaJ::Ilegivel => {
+                server.tuneis().contar_dado_antes_da_abertura();
+                tracing::debug!(pessoa = %de, "túnel: carga de canal j antes da abertura, descartada");
+            }
+        }
+    }
+}
+
 async fn repassar_j(
     server: &Server,
     de: PersonId,
     mut datagramas: seele_enlace::Datagramas,
     tunel: &mut Option<(String, String)>,
 ) -> Result<(), RecusaDeTunel> {
-    let primeiro = tokio::time::timeout(PRAZO_DA_ABERTURA, datagramas.receber()).await;
-    let abertura = match primeiro {
-        Ok(Some(bytes)) => seele_proto::control::decode::<AberturaDeTunel>(&bytes).ok(),
-        _ => None,
-    };
-    let Some(abertura) = abertura else {
-        server.tuneis().contar_sem_concessao();
-        tracing::warn!(pessoa = %de, "túnel: canal j sem abertura legível, cortado");
+    let Some(abertura) = ler_a_abertura_j(server, de, &mut datagramas).await else {
         return Err(RecusaDeTunel::SemPermissao);
     };
     *tunel = Some((abertura.mod_id.clone(), abertura.nome.clone()));
@@ -1116,7 +1175,7 @@ async fn repassar_j(
         de: Some(de),
         ..abertura.clone()
     };
-    let quadro = match seele_proto::control::encode(&reescrita) {
+    let quadro = match datagrama_de_abertura(&reescrita) {
         Ok(quadro) => quadro,
         Err(erro) => {
             tracing::warn!(
@@ -1145,16 +1204,30 @@ async fn repassar_j(
         tokio::select! {
             recebido = datagramas.receber() => {
                 let Some(bytes) = recebido else { break "quem joga fechou o canal" };
-                match da_maquina.mandar(&bytes) {
-                    Ok(()) => { rota.contador.fetch_add(bytes.len() as u64, Ordering::Relaxed); }
+                // **O tag passa como veio** nos dois sentidos, exceto a
+                // abertura: a que quem joga repete traz `de: None`, e a
+                // máquina só pode ver a reescrita pelo anfitrião. Cada
+                // repetição vira o `quadro` reescrito de novo, que cobre a
+                // perda do primeiro no trecho até a máquina.
+                let (a_enviar, carga): (&[u8], u64) = match ler_datagrama_j(&bytes) {
+                    DatagramaJ::Abertura(_) => (&quadro, 0),
+                    DatagramaJ::Dado(c) => (&bytes, c.len() as u64),
+                    DatagramaJ::Ilegivel => { descartados += 1; continue; }
+                };
+                match da_maquina.mandar(a_enviar) {
+                    Ok(()) => { rota.contador.fetch_add(carga, Ordering::Relaxed); }
                     Err(Recusa::Fechada) => break "a máquina fechou o canal",
                     Err(_) => descartados += 1,
                 }
             }
             recebido = da_maquina.receber() => {
                 let Some(bytes) = recebido else { break "a máquina fechou o canal" };
+                // Só carga volta da máquina; o que não for é descartado em vez
+                // de repassado a quem joga.
+                let DatagramaJ::Dado(c) = ler_datagrama_j(&bytes) else { descartados += 1; continue; };
+                let carga = c.len() as u64;
                 match datagramas.mandar(&bytes) {
-                    Ok(()) => { rota.contador.fetch_add(bytes.len() as u64, Ordering::Relaxed); }
+                    Ok(()) => { rota.contador.fetch_add(carga, Ordering::Relaxed); }
                     Err(Recusa::Fechada) => break "quem joga fechou o canal",
                     Err(_) => descartados += 1,
                 }

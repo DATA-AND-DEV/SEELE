@@ -36,7 +36,8 @@ use seele_proto::control::{ClientMessage, MotivoDeFalhaDePar, ServerMessage};
 use seele_proto::ids::PersonId;
 pub use seele_proto::tunel::RecusaDeTunel;
 use seele_proto::tunel::{
-    AberturaDeTunel, MotivoDoFimDoTunel, ProtocoloDeTunel, SinalDeTunel, TipoDeCanalDeTunel,
+    datagrama_de_abertura, ler_datagrama_j, AberturaDeTunel, DatagramaJ, MotivoDoFimDoTunel,
+    ProtocoloDeTunel, SinalDeTunel, TipoDeCanalDeTunel, REPETE_A_ABERTURA_A_CADA, TAG_DE_DADO,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -514,8 +515,56 @@ async fn escrever_abertura_t(envio: &mut Envio, abertura: &AberturaDeTunel) -> R
         .map_err(|erro| erro.to_string())
 }
 
-fn abertura_j(abertura: &AberturaDeTunel) -> Result<Vec<u8>, String> {
-    seele_proto::control::encode(abertura).map_err(|erro| erro.to_string())
+/// O datagrama de abertura de um canal `j` (ver
+/// [`seele_proto::tunel::datagrama_de_abertura`]).
+///
+/// O `j` não retransmite nem ordena, então a abertura não é «o primeiro
+/// datagrama»: é o que o tag diz que é, e quem abre a repete (ver
+/// [`Repeticao`]).
+pub(crate) fn abertura_j(abertura: &AberturaDeTunel) -> Result<Vec<u8>, String> {
+    datagrama_de_abertura(abertura).map_err(|erro| erro.to_string())
+}
+
+/// Quando quem abre um canal `j` repete a abertura.
+///
+/// A abertura vai uma vez, ao abrir, e o canal não tem como saber se ela
+/// chegou: um datagrama perdido ou atrasado deixava o outro lado lendo carga
+/// do jogo como se fosse abertura. Enquanto nada voltar pelo canal, a abertura
+/// se repete antes do próximo dado quando o prazo vence, e o prazo dobra de
+/// 100 ms até [`REPETE_A_ABERTURA_A_CADA`]: rápido o bastante para a primeira
+/// perda não custar um segundo de jogo, e limitado para um fluxo só de ida
+/// (que nunca ouve resposta) pagar no máximo uma abertura por segundo.
+pub(crate) struct Repeticao {
+    proxima: Instant,
+    intervalo: Duration,
+}
+
+impl Repeticao {
+    const PRIMEIRO_INTERVALO: Duration = Duration::from_millis(100);
+
+    pub(crate) fn nova(agora: Instant) -> Self {
+        Self {
+            proxima: agora + Self::PRIMEIRO_INTERVALO,
+            intervalo: Self::PRIMEIRO_INTERVALO,
+        }
+    }
+
+    /// Se a abertura deve ir de novo antes do próximo dado.
+    pub(crate) fn vencida(&self, agora: Instant) -> bool {
+        agora >= self.proxima
+    }
+
+    /// Anota que a abertura foi repetida e marca a próxima.
+    pub(crate) fn repetiu(&mut self, agora: Instant) {
+        self.intervalo = (self.intervalo * 2).min(REPETE_A_ABERTURA_A_CADA);
+        self.proxima = agora + self.intervalo;
+    }
+
+    /// O intervalo que vale depois da última repetição.
+    #[cfg(test)]
+    fn intervalo(&self) -> Duration {
+        self.intervalo
+    }
 }
 
 fn abertura(mod_id: &str, nome: &str, fluxo: u32, tipo: TipoDeCanalDeTunel) -> AberturaDeTunel {
@@ -1040,28 +1089,39 @@ async fn fluxo_udp_do_jogo(
             }
             Err(motivo) => break 'fluxo (Queda::CaminhoCaiu, motivo.to_string()),
         };
-        let primeiro = abertura_j(&abertura(
+        let abertura_do_fluxo = match abertura_j(&abertura(
             &contexto.mod_id,
             &contexto.nome,
             fluxo,
             TipoDeCanalDeTunel::Udp,
-        ));
-        match primeiro {
-            Ok(bytes) => {
-                if datagramas.mandar(&bytes).is_err() {
-                    break 'fluxo (Queda::CaminhoCaiu, "a abertura do j não saiu".to_owned());
-                }
-            }
+        )) {
+            Ok(bytes) => bytes,
             Err(porque) => break 'fluxo (Queda::CaminhoCaiu, porque),
+        };
+        if datagramas.mandar(&abertura_do_fluxo).is_err() {
+            break 'fluxo (Queda::CaminhoCaiu, "a abertura do j não saiu".to_owned());
         }
+        // Enquanto nada voltar, a abertura se repete (ver `Repeticao`): é a
+        // única prova que este lado tem de que ela chegou.
+        let mut repeticao = Repeticao::nova(Instant::now());
+        let mut voltou = false;
         let mut ate = Instant::now() + OCIOSIDADE_DO_FLUXO_UDP;
         loop {
             tokio::select! {
                 dado = entrada.recv() => {
                     let Some(dado) = dado else { break 'fluxo (Queda::Fechado, "o túnel largou o fluxo".to_owned()); };
                     ate = Instant::now() + OCIOSIDADE_DO_FLUXO_UDP;
+                    let agora = Instant::now();
+                    if !voltou && repeticao.vencida(agora) {
+                        // Cheia e Grande: nada a fazer, a próxima vez repete; o
+                        // fim do canal aparece no `mandar` do dado logo abaixo.
+                        let _ = datagramas.mandar(&abertura_do_fluxo);
+                        repeticao.repetiu(agora);
+                    }
+                    // O dado já nasceu com o tag na frente (ver `enviar_ao_fluxo`).
+                    let carga = dado.len().saturating_sub(1) as u64;
                     match datagramas.mandar(&dado) {
-                        Ok(()) => { contexto.medidas.ida.fetch_add(dado.len() as u64, Ordering::Relaxed); }
+                        Ok(()) => { contexto.medidas.ida.fetch_add(carga, Ordering::Relaxed); }
                         // Cheia e Grande já foram contadas pelo enlace, e entram
                         // no relatório por `Via::descartes`.
                         Err(Recusa::Cheia | Recusa::Grande) => {}
@@ -1071,8 +1131,18 @@ async fn fluxo_udp_do_jogo(
                 chegou = datagramas.receber() => {
                     let Some(dado) = chegou else { break 'fluxo (Queda::CaminhoCaiu, "o canal j fechou".to_owned()); };
                     ate = Instant::now() + OCIOSIDADE_DO_FLUXO_UDP;
-                    contexto.medidas.volta.fetch_add(dado.len() as u64, Ordering::Relaxed);
-                    let _ = socket.send_to(&dado, origem).await;
+                    match ler_datagrama_j(&dado) {
+                        DatagramaJ::Dado(carga) => {
+                            voltou = true;
+                            contexto.medidas.volta.fetch_add(carga.len() as u64, Ordering::Relaxed);
+                            let _ = socket.send_to(carga, origem).await;
+                        }
+                        // A máquina não abre canal `j` para quem joga: uma
+                        // abertura ou um tag que não se conhece não é do jogo.
+                        DatagramaJ::Abertura(_) | DatagramaJ::Ilegivel => {
+                            tracing::debug!(mod_id = %contexto.mod_id, tunel = %contexto.nome, caminho, fluxo, "túnel: datagrama j de volta sem tag de dado, descartado");
+                        }
+                    }
                 }
                 () = tokio::time::sleep_until(ate) => break 'fluxo (Queda::Fechado, "ocioso por 60 s".to_owned()),
             }
@@ -1142,7 +1212,11 @@ async fn laco_do_jogador(
                 if let Escuta::Udp(socket) = &escuta {
                     match socket.try_recv_from(&mut buf_udp) {
                         Ok((n, origem)) => {
-                            let dado = buf_udp.get(..n).unwrap_or_default().to_vec();
+                            // O tag de dado vai na frente já aqui, para o
+                            // fluxo mandar o datagrama sem outra cópia.
+                            let mut dado = Vec::with_capacity(n + 1);
+                            dado.push(TAG_DE_DADO);
+                            dado.extend_from_slice(buf_udp.get(..n).unwrap_or_default());
                             enviar_ao_fluxo(
                                 socket, origem, dado, &mut fluxos, &mut proximo_fluxo, &via, caminho.rotulo(), &contexto, &tx, &mut filhos,
                             );
@@ -1328,6 +1402,10 @@ pub(crate) struct EstadoDaMaquina {
     /// Canais cortados porque a abertura nomeava outro túnel, outro tipo, ou
     /// um túnel que esta máquina não serve.
     alheios: AtomicU64,
+    /// Datagramas de carga que chegaram a um canal `j` **antes** da abertura
+    /// dele: descartados e contados, nunca motivo para cortar o canal (a
+    /// abertura pode só ter se atrasado ou se perdido, e quem abre a repete).
+    dados_antes_da_abertura: AtomicU64,
 }
 
 impl EstadoDaMaquina {
@@ -1355,6 +1433,12 @@ impl EstadoDaMaquina {
     #[must_use]
     pub(crate) fn canais_alheios(&self) -> u64 {
         self.alheios.load(Ordering::Relaxed)
+    }
+
+    /// Quantos datagramas de carga chegaram a um canal `j` antes da abertura.
+    #[must_use]
+    pub(crate) fn dados_antes_da_abertura(&self) -> u64 {
+        self.dados_antes_da_abertura.load(Ordering::Relaxed)
     }
 }
 
@@ -1436,6 +1520,7 @@ impl Maquina {
             estado: Arc::new(EstadoDaMaquina {
                 servidos: Mutex::new(HashMap::new()),
                 alheios: AtomicU64::new(0),
+                dados_antes_da_abertura: AtomicU64::new(0),
             }),
             tarefas: JoinSet::new(),
             na_estrela: false,
@@ -1686,14 +1771,7 @@ async fn atender_canal(
             }
         }
         CanalDeTunel::SemOrdem(mut datagramas) => {
-            let primeiro = tokio::time::timeout(PRAZO_DA_ABERTURA, datagramas.receber()).await;
-            let aberta = match primeiro {
-                Ok(Some(bytes)) => seele_proto::control::decode::<AberturaDeTunel>(&bytes).ok(),
-                _ => None,
-            };
-            let Some(aberta) = aberta else {
-                tracing::warn!(caminho, "túnel: canal j sem abertura legível, cortado");
-                estado.alheios.fetch_add(1, Ordering::Relaxed);
+            let Some(aberta) = esperar_a_abertura_j(&mut datagramas, &estado, caminho).await else {
                 return;
             };
             let Some(servido) = conferir(&aberta, da_via(&aberta).await, &estado, caminho) else {
@@ -1703,6 +1781,74 @@ async fn atender_canal(
                 udp_da_maquina(&aberta, &servido, datagramas, caminho).await;
             } else {
                 estado.alheios.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+/// Lê o canal `j` até a abertura, que vem marcada com [`TAG_DE_ABERTURA`].
+///
+/// **Carga que chega antes da abertura não corta o canal.** O `j` não ordena
+/// nem retransmite: se a abertura se atrasou ou se perdeu, o primeiro datagrama
+/// que aparece é do jogo, e lê-lo como abertura (como fazia o «primeiro
+/// datagrama») cortava o canal e contava uma falta de concessão que não houve.
+/// Aqui a carga é descartada e contada, e quem abriu repete a abertura. Só uma
+/// abertura **malformada** corta, e a falta dela dentro do prazo.
+async fn esperar_a_abertura_j(
+    datagramas: &mut Datagramas,
+    estado: &EstadoDaMaquina,
+    caminho: &'static str,
+) -> Option<AberturaDeTunel> {
+    let fim = Instant::now() + PRAZO_DA_ABERTURA;
+    let mut antes = 0_u64;
+    loop {
+        let bytes = match tokio::time::timeout_at(fim, datagramas.receber()).await {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
+                tracing::warn!(
+                    caminho,
+                    antes,
+                    "túnel: canal j fechou sem abertura, cortado"
+                );
+                estado.alheios.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
+            Err(_) => {
+                tracing::warn!(
+                    caminho,
+                    antes,
+                    "túnel: canal j sem abertura no prazo, cortado"
+                );
+                estado.alheios.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
+        };
+        match ler_datagrama_j(&bytes) {
+            DatagramaJ::Abertura(corpo) => {
+                return match seele_proto::control::decode::<AberturaDeTunel>(corpo) {
+                    Ok(aberta) => {
+                        if antes > 0 {
+                            tracing::info!(mod_id = %aberta.mod_id, tunel = %aberta.nome, caminho, antes, "túnel: a abertura do canal j chegou depois de carga, que foi descartada");
+                        }
+                        Some(aberta)
+                    }
+                    Err(erro) => {
+                        tracing::warn!(caminho, %erro, "túnel: abertura do canal j malformada, cortado");
+                        estado.alheios.fetch_add(1, Ordering::Relaxed);
+                        None
+                    }
+                };
+            }
+            DatagramaJ::Dado(_) | DatagramaJ::Ilegivel => {
+                antes += 1;
+                estado
+                    .dados_antes_da_abertura
+                    .fetch_add(1, Ordering::Relaxed);
+                tracing::debug!(
+                    caminho,
+                    antes,
+                    "túnel: carga de canal j antes da abertura, descartada"
+                );
             }
         }
     }
@@ -1801,22 +1947,31 @@ async fn udp_da_maquina(
     };
     let viva = ConexaoViva::nova(&servido.medidas);
     let mut parada = servido.parada.subscribe();
-    let mut buf = vec![0_u8; 65_536];
+    // O primeiro byte é o tag de dado, posto uma vez: o jogo escreve a partir
+    // do segundo, e o datagrama sai como está, sem outra cópia.
+    let mut buf = vec![0_u8; 65_537];
+    if let Some(tag) = buf.first_mut() {
+        *tag = TAG_DE_DADO;
+    }
     let queda = loop {
         tokio::select! {
             chegou = datagramas.receber() => {
-                let Some(dado) = chegou else { break Queda::Fechado; };
+                let Some(bytes) = chegou else { break Queda::Fechado; };
+                // A abertura repetida (a de antes pode ter se perdido no
+                // caminho até aqui) já foi atendida: ignorada. Carga é o que
+                // segue ao jogo.
+                let DatagramaJ::Dado(dado) = ler_datagrama_j(&bytes) else { continue; };
                 servido.medidas.ida.fetch_add(dado.len() as u64, Ordering::Relaxed);
-                match socket.send(&dado).await {
+                match socket.send(dado).await {
                     Ok(_) => {}
                     Err(erro) if erro.kind() == std::io::ErrorKind::ConnectionRefused => break Queda::JogoRecusou,
                     Err(erro) => tracing::debug!(%erro, "túnel: o jogo não recebeu um datagrama"),
                 }
             }
-            lido = socket.recv(&mut buf) => match lido {
+            lido = socket.recv(buf.get_mut(1..).unwrap_or_default()) => match lido {
                 Ok(n) => {
                     servido.medidas.volta.fetch_add(n as u64, Ordering::Relaxed);
-                    let dado = buf.get(..n).unwrap_or_default();
+                    let dado = buf.get(..=n).unwrap_or_default();
                     // Cheia e Grande já foram contadas pelo enlace.
                     if datagramas.mandar(dado) == Err(Recusa::Fechada) { break Queda::CaminhoCaiu; }
                 }
@@ -2222,6 +2377,7 @@ impl Tuneis {
 mod testes {
     use super::*;
     use seele_enlace::teste::{par_em_loopback, ParDeTeste};
+    use seele_proto::tunel::TAG_DE_ABERTURA;
     use tokio::net::TcpStream;
 
     const MOD: &str = "seele/jogo";
@@ -2568,6 +2724,195 @@ mod testes {
         assert!(r.udp_descartados >= 1, "{r:?}");
         assert!(r.conexoes >= 1);
         assert_eq!(r.caminho, Caminho::Estrela);
+    }
+
+    // ---- o canal j: a abertura marcada, repetida, e a carga antes dela
+
+    fn abertura_udp_de_teste() -> AberturaDeTunel {
+        abertura(MOD, NOME, 99, TipoDeCanalDeTunel::Udp)
+    }
+
+    fn dado_marcado(carga: &[u8]) -> Vec<u8> {
+        let mut d = vec![TAG_DE_DADO];
+        d.extend_from_slice(carga);
+        d
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_abertura_repetida_dobra_o_intervalo_ate_um_segundo() {
+        let mut repeticao = Repeticao::nova(Instant::now());
+        assert!(!repeticao.vencida(Instant::now()));
+        let mut vistos = Vec::new();
+        for _ in 0..6 {
+            tokio::time::advance(repeticao.intervalo() + Duration::from_millis(1)).await;
+            assert!(repeticao.vencida(Instant::now()));
+            repeticao.repetiu(Instant::now());
+            assert!(
+                !repeticao.vencida(Instant::now()),
+                "repetiu e já está vencida de novo"
+            );
+            vistos.push(repeticao.intervalo());
+        }
+        assert_eq!(
+            vistos,
+            [200, 400, 800, 1000, 1000, 1000].map(Duration::from_millis)
+        );
+    }
+
+    /// **I2, quem abre.** A abertura vai marcada e **repete** até algo voltar:
+    /// aqui o primeiro datagrama «se perde» (o teste o descarta como a rede
+    /// faria) e a repetição tem de chegar antes de a carga ser inútil. Depois
+    /// que a máquina responde, a repetição para.
+    #[tokio::test]
+    async fn quem_joga_repete_a_abertura_do_j_ate_a_carga_voltar() {
+        let par = par_em_loopback().await;
+        let (avisos, _recebidos) = mpsc::unbounded_channel();
+        let aberta = abrir_porta_local(ProtocoloDeTunel::Udp, 0).await.unwrap();
+        let (_tunel, porta) =
+            TunelDeJogador::iniciar(MOD, NOME, aberta, Via::nova(par.cliente.clone()), avisos)
+                .unwrap();
+        let jogo = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        jogo.connect(porta.endereco()).await.unwrap();
+        jogo.send(b"a").await.unwrap();
+
+        // O túnel também abre o canal de controle (um `t`, o do ping): fica
+        // guardado, sem resposta, enquanto se espera o `j`.
+        let da_maquina = Via::nova(par.anfitriao.clone());
+        let mut controles = Vec::new();
+        let mut maquina = loop {
+            match da_maquina.aceitar().await.unwrap() {
+                CanalDeTunel::SemOrdem(d) => break d,
+                t @ CanalDeTunel::Ordenado(..) => controles.push(t),
+            }
+        };
+        // O primeiro datagrama é a abertura, marcada. A rede o perde.
+        let primeiro = tokio::time::timeout(Duration::from_secs(5), maquina.receber())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(ler_datagrama_j(&primeiro), DatagramaJ::Abertura(_)),
+            "o primeiro datagrama do j tem de ser a abertura marcada: {primeiro:?}"
+        );
+
+        // O jogo segue falando; a abertura tem de reaparecer.
+        let mut repetida = false;
+        let mut dado = false;
+        for _ in 0..80 {
+            jogo.send(b"b").await.unwrap();
+            while let Ok(Some(b)) =
+                tokio::time::timeout(Duration::from_millis(25), maquina.receber()).await
+            {
+                match ler_datagrama_j(&b) {
+                    DatagramaJ::Abertura(corpo) => {
+                        let de = seele_proto::control::decode::<AberturaDeTunel>(corpo).unwrap();
+                        assert_eq!((de.mod_id.as_str(), de.nome.as_str()), (MOD, NOME));
+                        repetida = true;
+                    }
+                    DatagramaJ::Dado(_) => dado = true,
+                    DatagramaJ::Ilegivel => panic!("datagrama sem tag: {b:?}"),
+                }
+            }
+            if repetida && dado {
+                break;
+            }
+        }
+        assert!(
+            repetida && dado,
+            "a abertura não foi repetida (repetida {repetida}, dado {dado})"
+        );
+
+        // A máquina responde: a carga volta ao jogo, e a repetição para.
+        maquina.mandar(&dado_marcado(b"resposta")).unwrap();
+        let mut buf = vec![0_u8; 2048];
+        let n = tokio::time::timeout(Duration::from_secs(5), jogo.recv(&mut buf))
+            .await
+            .expect("a resposta não chegou ao jogo")
+            .unwrap();
+        assert_eq!(&buf[..n], b"resposta");
+        // Esvazia o que ainda andava e confere o silêncio de aberturas por
+        // mais que o teto da repetição (1 s).
+        while tokio::time::timeout(Duration::from_millis(100), maquina.receber())
+            .await
+            .is_ok()
+        {}
+        let ate = Instant::now() + Duration::from_millis(1400);
+        while Instant::now() < ate {
+            jogo.send(b"c").await.unwrap();
+            if let Ok(Some(b)) =
+                tokio::time::timeout(Duration::from_millis(50), maquina.receber()).await
+            {
+                assert!(
+                    !matches!(ler_datagrama_j(&b), DatagramaJ::Abertura(_)),
+                    "a abertura seguiu sendo repetida depois de a carga voltar"
+                );
+            }
+        }
+    }
+
+    /// **I2, quem recebe.** Carga antes da abertura é descartada e contada, a
+    /// abertura repetida depois da primeira é ignorada, e o canal **não** é
+    /// cortado: o eco do jogo só responde ao que vem depois da abertura.
+    #[tokio::test]
+    async fn a_carga_antes_da_abertura_e_contada_e_nao_corta_o_canal_na_maquina() {
+        let (jogo, _eco) = eco_udp().await;
+        let cena = cena(ProtocoloDeTunel::Udp, jogo).await;
+        let estado = cena.maquina.estado();
+        // Um canal `j` à mão, no lugar do túnel de quem joga.
+        let CanalDeTunel::SemOrdem(canal) = Via::nova(cena._par.cliente.clone())
+            .abrir(Confiabilidade::SemOrdem)
+            .await
+            .unwrap()
+        else {
+            panic!("pediu j");
+        };
+        canal.mandar(&dado_marcado(b"cedo")).unwrap();
+        canal.mandar(&dado_marcado(b"cedo de novo")).unwrap();
+        let abertura_marcada = abertura_j(&abertura_udp_de_teste()).unwrap();
+        canal.mandar(&abertura_marcada).unwrap();
+        canal.mandar(&abertura_marcada).unwrap();
+
+        let mut canal = canal;
+        let mut recebido = None;
+        for _ in 0..80 {
+            canal.mandar(&dado_marcado(b"eco?")).unwrap();
+            if let Ok(Some(b)) =
+                tokio::time::timeout(Duration::from_millis(50), canal.receber()).await
+            {
+                recebido = Some(b);
+                break;
+            }
+        }
+        assert_eq!(
+            recebido.as_deref().map(ler_datagrama_j),
+            Some(DatagramaJ::Dado(b"eco?".as_slice())),
+            "o eco não voltou: o canal foi cortado pela carga que veio antes da abertura"
+        );
+        assert_eq!(estado.dados_antes_da_abertura(), 2);
+        assert_eq!(
+            estado.canais_alheios(),
+            0,
+            "o canal foi contado como alheio"
+        );
+    }
+
+    #[tokio::test]
+    async fn uma_abertura_j_malformada_corta_o_canal_e_conta() {
+        let (jogo, _eco) = eco_udp().await;
+        let cena = cena(ProtocoloDeTunel::Udp, jogo).await;
+        let estado = cena.maquina.estado();
+        let CanalDeTunel::SemOrdem(canal) = Via::nova(cena._par.cliente.clone())
+            .abrir(Confiabilidade::SemOrdem)
+            .await
+            .unwrap()
+        else {
+            panic!("pediu j");
+        };
+        let mut lixo = vec![TAG_DE_ABERTURA];
+        lixo.extend_from_slice(&[0xff; 9]);
+        canal.mandar(&lixo).unwrap();
+        esperar_ate(|| estado.canais_alheios() == 1).await;
+        assert_eq!(estado.dados_antes_da_abertura(), 0);
     }
 
     #[tokio::test]

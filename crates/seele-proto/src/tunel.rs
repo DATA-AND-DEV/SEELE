@@ -56,6 +56,41 @@ pub const TAG_DE_DADO: u8 = 1;
 /// abertura chegou, então ela se repete, a cada tanto, com custo limitado.
 pub const REPETE_A_ABERTURA_A_CADA: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// O que um datagrama de um canal `j` é, pelo primeiro byte.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DatagramaJ<'a> {
+    /// A abertura do canal ([`TAG_DE_ABERTURA`]), ainda por decodificar com
+    /// [`crate::control::decode`].
+    Abertura(&'a [u8]),
+    /// Carga do jogo ([`TAG_DE_DADO`]).
+    Dado(&'a [u8]),
+    /// Um tag que esta versão não conhece, ou um datagrama vazio.
+    Ilegivel,
+}
+
+/// Separa o tag do resto de um datagrama de canal `j`.
+#[must_use]
+pub fn ler_datagrama_j(bytes: &[u8]) -> DatagramaJ<'_> {
+    match bytes.split_first() {
+        Some((&TAG_DE_ABERTURA, resto)) => DatagramaJ::Abertura(resto),
+        Some((&TAG_DE_DADO, resto)) => DatagramaJ::Dado(resto),
+        _ => DatagramaJ::Ilegivel,
+    }
+}
+
+/// O datagrama de abertura de um canal `j`: o tag e a abertura codificada.
+///
+/// # Errors
+///
+/// Os de [`crate::control::encode`].
+pub fn datagrama_de_abertura(abertura: &AberturaDeTunel) -> Result<Vec<u8>, ControlError> {
+    let codificada = crate::control::encode(abertura)?;
+    let mut datagrama = Vec::with_capacity(codificada.len() + 1);
+    datagrama.push(TAG_DE_ABERTURA);
+    datagrama.extend_from_slice(&codificada);
+    Ok(datagrama)
+}
+
 /// O que o túnel carrega.
 ///
 /// **Sempre acrescente no fim** (ADR 0058).
@@ -243,6 +278,32 @@ mod tests {
         ] {
             assert!(!nome_valido(ruim), "{ruim}");
         }
+    }
+
+    #[test]
+    fn o_tag_separa_a_abertura_da_carga_e_nao_adivinha_pela_posicao() {
+        let aberta = AberturaDeTunel {
+            mod_id: "a/b".into(),
+            nome: "mc-1".into(),
+            fluxo: 7,
+            tipo: TipoDeCanalDeTunel::Udp,
+            de: None,
+        };
+        let datagrama = datagrama_de_abertura(&aberta).unwrap();
+        let DatagramaJ::Abertura(corpo) = ler_datagrama_j(&datagrama) else {
+            panic!("a abertura tem de ler-se como abertura")
+        };
+        assert_eq!(
+            crate::control::decode::<AberturaDeTunel>(corpo).unwrap(),
+            aberta
+        );
+        // Carga cujo primeiro byte de dado é o tag de dado: nunca abertura,
+        // mesmo que o resto pareça uma.
+        let mut carga = vec![TAG_DE_DADO];
+        carga.extend_from_slice(corpo);
+        assert!(matches!(ler_datagrama_j(&carga), DatagramaJ::Dado(c) if c == corpo));
+        assert_eq!(ler_datagrama_j(&[]), DatagramaJ::Ilegivel);
+        assert_eq!(ler_datagrama_j(&[9, 1, 2]), DatagramaJ::Ilegivel);
     }
 
     #[test]

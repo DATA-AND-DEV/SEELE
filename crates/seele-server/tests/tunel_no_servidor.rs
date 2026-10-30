@@ -632,12 +632,17 @@ async fn desligar_o_mod_fecha_os_tuneis_dele_no_servidor() -> Result<()> {
     Ok(())
 }
 
-/// O `j` pela estrela: a abertura é o primeiro datagrama, e os datagramas
-/// andam nos dois sentidos.
-#[tokio::test(flavor = "multi_thread")]
-async fn o_udp_vai_pela_estrela_com_a_abertura_no_primeiro_datagrama() -> Result<()> {
-    let (endereco, daemon, _temp) = montar(true).await?;
-    let _gestora = entrar(endereco, GESTORA, 12).await?;
+/// Os datagramas de um canal `j` ao anfitrião: o tag na frente de tudo.
+fn datagrama_de_dado(carga: &[u8]) -> Vec<u8> {
+    let mut d = vec![seele_proto::tunel::TAG_DE_DADO];
+    d.extend_from_slice(carga);
+    d
+}
+
+/// Abre um túnel UDP servido pela máquina e deixa o jogador dentro dele.
+async fn udp_pronto(
+    endereco: SocketAddr,
+) -> Result<(Par, Par, seele_enlace::Datagramas, AberturaDeTunel)> {
     let mut maquina = entrar(endereco, MAQUINA, 12).await?;
     let mut jogador = entrar(endereco, JOGADOR, 12).await?;
     frame::write(
@@ -653,8 +658,7 @@ async fn o_udp_vai_pela_estrela_com_a_abertura_no_primeiro_datagrama() -> Result
     assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(19132));
     frame::write(&mut jogador.ligado.envio, &entrar_no_tunel()).await?;
     assert_eq!(resposta_de_tunel(&mut jogador).await?, Ok(19132));
-
-    let CanalDeTunel::SemOrdem(mut dele) = jogador
+    let CanalDeTunel::SemOrdem(dele) = jogador
         .ligado
         .conexao
         .abrir_tunel(Confiabilidade::SemOrdem)
@@ -667,7 +671,17 @@ async fn o_udp_vai_pela_estrela_com_a_abertura_no_primeiro_datagrama() -> Result
         fluxo: 7,
         ..abertura(None)
     };
-    dele.mandar(&seele_proto::control::encode(&udp)?)?;
+    Ok((maquina, jogador, dele, udp))
+}
+
+/// O `j` pela estrela: a abertura vem marcada, a carga também, e os datagramas
+/// andam nos dois sentidos.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_udp_vai_pela_estrela_com_a_abertura_marcada_e_a_carga_marcada() -> Result<()> {
+    let (endereco, daemon, _temp) = montar(true).await?;
+    let _gestora = entrar(endereco, GESTORA, 12).await?;
+    let (mut maquina, jogador, mut dele, udp) = udp_pronto(endereco).await?;
+    dele.mandar(&seele_proto::tunel::datagrama_de_abertura(&udp)?)?;
     let CanalDeTunel::SemOrdem(mut da_maquina) =
         tokio::time::timeout(PRAZO, maquina.ligado.conexao.aceitar_tunel()).await??
     else {
@@ -676,7 +690,12 @@ async fn o_udp_vai_pela_estrela_com_a_abertura_no_primeiro_datagrama() -> Result
     let primeiro = tokio::time::timeout(PRAZO, da_maquina.receber())
         .await?
         .expect("o primeiro datagrama");
-    let chegou: AberturaDeTunel = seele_proto::control::decode(&primeiro)?;
+    let seele_proto::tunel::DatagramaJ::Abertura(corpo) =
+        seele_proto::tunel::ler_datagrama_j(&primeiro)
+    else {
+        anyhow::bail!("o primeiro datagrama não é uma abertura marcada: {primeiro:?}");
+    };
+    let chegou: AberturaDeTunel = seele_proto::control::decode(corpo)?;
     assert_eq!(chegou.de, Some(jogador.pessoa));
     assert_eq!(chegou.fluxo, 7);
     // Os datagramas andam, sem garantia: manda-se até chegar um de cada lado.
@@ -684,20 +703,109 @@ async fn o_udp_vai_pela_estrela_com_a_abertura_no_primeiro_datagrama() -> Result
     let mut ida = false;
     let mut volta = false;
     while Instant::now() < ate && !(ida && volta) {
-        let _ = dele.mandar(b"ping");
-        let _ = da_maquina.mandar(b"pong");
+        let _ = dele.mandar(&datagrama_de_dado(b"ping"));
+        let _ = da_maquina.mandar(&datagrama_de_dado(b"pong"));
         if let Ok(Some(b)) =
             tokio::time::timeout(Duration::from_millis(100), da_maquina.receber()).await
         {
-            ida |= b == b"ping";
+            ida |= b == datagrama_de_dado(b"ping");
         }
         if let Ok(Some(b)) = tokio::time::timeout(Duration::from_millis(100), dele.receber()).await
         {
-            volta |= b == b"pong";
+            volta |= b == datagrama_de_dado(b"pong");
         }
     }
     assert!(ida && volta, "ida {ida}, volta {volta}");
     assert!(daemon.server().contador_de_repasse(MOD, NOME) >= 8);
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **I2.** O `j` não ordena nem retransmite: carga que chega **antes** da
+/// abertura (ela se atrasou ou se perdeu) é descartada e contada, e o canal
+/// **não** é cortado nem conta como falta de concessão. Quando a abertura chega
+/// o repasse segue, e cada repetição dela chega à máquina reescrita pelo
+/// anfitrião (`de: Some(quem abriu)`), nunca como quem joga a mandou.
+#[tokio::test(flavor = "multi_thread")]
+async fn carga_antes_da_abertura_nao_corta_o_canal_j_e_a_repeticao_chega_reescrita() -> Result<()> {
+    let (endereco, daemon, _temp) = montar(true).await?;
+    let _gestora = entrar(endereco, GESTORA, 12).await?;
+    let (mut maquina, jogador, mut dele, udp) = udp_pronto(endereco).await?;
+
+    // A abertura «se perdeu»: o primeiro que o anfitrião vê é carga.
+    dele.mandar(&datagrama_de_dado(b"cedo demais"))?;
+    dele.mandar(&datagrama_de_dado(b"outro cedo"))?;
+    // E depois ela chega, repetida pelo jogador.
+    let abertura_marcada = seele_proto::tunel::datagrama_de_abertura(&udp)?;
+    dele.mandar(&abertura_marcada)?;
+    let CanalDeTunel::SemOrdem(mut da_maquina) =
+        tokio::time::timeout(PRAZO, maquina.ligado.conexao.aceitar_tunel()).await??
+    else {
+        anyhow::bail!("a máquina recebeu um t");
+    };
+    let primeiro = tokio::time::timeout(PRAZO, da_maquina.receber())
+        .await?
+        .expect("o primeiro datagrama");
+    let seele_proto::tunel::DatagramaJ::Abertura(corpo) =
+        seele_proto::tunel::ler_datagrama_j(&primeiro)
+    else {
+        anyhow::bail!("a máquina não leu a abertura primeiro, e sim: {primeiro:?}");
+    };
+    let chegou: AberturaDeTunel = seele_proto::control::decode(corpo)?;
+    assert_eq!(chegou.de, Some(jogador.pessoa));
+    assert_eq!(
+        daemon.server().datagramas_j_antes_da_abertura(),
+        2,
+        "a carga que veio antes da abertura não foi contada"
+    );
+    assert_eq!(
+        daemon.server().canais_sem_concessao(),
+        0,
+        "a carga antes da abertura foi tratada como falta de concessão"
+    );
+
+    // A repetição da abertura (a que a máquina pode ter perdido no trecho até
+    // ela) chega reescrita, e a carga segue atrás dela.
+    let ate = Instant::now() + PRAZO;
+    let mut repetida = false;
+    let mut carga = false;
+    while Instant::now() < ate && !(repetida && carga) {
+        let _ = dele.mandar(&abertura_marcada);
+        let _ = dele.mandar(&datagrama_de_dado(b"ping"));
+        while let Ok(Some(b)) =
+            tokio::time::timeout(Duration::from_millis(100), da_maquina.receber()).await
+        {
+            match seele_proto::tunel::ler_datagrama_j(&b) {
+                seele_proto::tunel::DatagramaJ::Abertura(corpo) => {
+                    let de = seele_proto::control::decode::<AberturaDeTunel>(corpo)?.de;
+                    assert_eq!(de, Some(jogador.pessoa), "a repetição foi sem reescrever");
+                    repetida = true;
+                }
+                seele_proto::tunel::DatagramaJ::Dado(c) => carga |= c == b"ping",
+                seele_proto::tunel::DatagramaJ::Ilegivel => {}
+            }
+        }
+    }
+    assert!(repetida && carga, "repetida {repetida}, carga {carga}");
+    daemon.shutdown();
+    Ok(())
+}
+
+/// Uma abertura **malformada** corta o canal: é o único motivo, além do prazo.
+#[tokio::test(flavor = "multi_thread")]
+async fn abertura_malformada_no_canal_j_corta_e_conta() -> Result<()> {
+    let (endereco, daemon, _temp) = montar(true).await?;
+    let _gestora = entrar(endereco, GESTORA, 12).await?;
+    let (_maquina, _jogador, mut dele, _udp) = udp_pronto(endereco).await?;
+    let mut lixo = vec![seele_proto::tunel::TAG_DE_ABERTURA];
+    lixo.extend_from_slice(&[0xff; 12]);
+    dele.mandar(&lixo)?;
+    let ate = Instant::now() + PRAZO;
+    while daemon.server().canais_sem_concessao() == 0 && Instant::now() < ate {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(daemon.server().canais_sem_concessao(), 1);
+    assert_eq!(daemon.server().datagramas_j_antes_da_abertura(), 0);
     daemon.shutdown();
     Ok(())
 }

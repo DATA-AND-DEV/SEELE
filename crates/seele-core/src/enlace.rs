@@ -3004,6 +3004,13 @@ impl Enlace {
         self.maquina.canais_alheios()
     }
 
+    /// Quantos datagramas de carga chegaram a um canal `j` da máquina antes da
+    /// abertura dele: descartados e contados, sem cortar o canal.
+    #[must_use]
+    pub fn datagramas_de_tunel_antes_da_abertura(&self) -> u64 {
+        self.maquina.dados_antes_da_abertura()
+    }
+
     async fn mandar(&self, comando: Comando) -> Result<(), Fechado> {
         self.comandos.send(comando).await.map_err(|_| Fechado)
     }
