@@ -482,7 +482,8 @@ pub enum Event {
     },
 
     // ---- o túnel de jogo (protocolo 12) ----
-    /// Um túnel acabou, e esta pessoa precisa saber.
+    /// O repasse cortou um canal que esta pessoa abriu (o túnel segue), e ela
+    /// precisa saber por quê.
     ///
     /// Endereçado a uma pessoa e entregue a todas, como o [`Self::SirvaTelaPara`]:
     /// um servidor não tem outra maneira de uma sessão alcançar outra. Quem

@@ -119,4 +119,10 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 #   `botao` (`sentido`), a faixa do produto, e as recusas do túnel em
 #   `recusas.tunel`. As recusas entram no mesmo commit da entrega: o guarda da
 #   lista fechada amarra a janela ao contrato.
-eebadf1e51930220a4d9fb08fc5b57213ec81b35f9031952fd5a2349ce795f05  v8.json
+# - Emenda da revisão final da parte 2 (30/10/2026): o texto do `nome-tomado`
+#   (o nome é de OUTRA máquina), o `compatibilidade.porque` e o protocolo da
+#   `notes` (12, e não 11), e a faixa que diz quantas conexões ainda passam pelo
+#   anfitrião e por que as portas fecham na troca de vista. Conferido em
+#   30/10/2026 no release (`curl` do CLAUDE.md): a v0.18.3 diz que a API 8 não
+#   entrou nela, e a v8 segue sem release.
+57985039603671272a7bd26f0e030d9a7420a9e803dc59fd3e232bef393c2daf  v8.json

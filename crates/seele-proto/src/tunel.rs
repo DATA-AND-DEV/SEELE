@@ -167,6 +167,13 @@ pub enum MotivoDoFimDoTunel {
     /// A pessoa que jogava saiu.
     PessoaSaiu,
     /// O anfitrião da ligação caiu.
+    ///
+    /// **Reservada: nenhum produtor hoje.** Quando o anfitrião cai, a conexão
+    /// das duas pontas cai com ele, e quem joga vê `ServidorSaiu` (a sessão
+    /// acabou) em vez de uma mensagem do servidor. A variante fica por causa da
+    /// regra do ADR 0058 (nada se remove da lista) e porque a parte 3, com o
+    /// servidor da máquina separado do anfitrião, pode precisar dela. O núcleo
+    /// já a traduz (`queda_do_fim`), para o dia em que alguém a mandar.
     AnfitriaoCaiu,
 }
 

@@ -1,6 +1,6 @@
 {
   "version": 8,
-  "notes": "A v8 é a v7 inteira, mais a declaração de plataformas, de poderes e da metade de máquina do manifesto (API 8; ADR 0058, acréscimo). É escrita por inteiro, sem extends, como a v6 e a v7. Servidor 2.0 = protocolo 11 + APIs 8, 7 e 6: um MOD da 7 ou da 6 continua rodando, nas duas plataformas. Enquanto a v8 não sai numa release, ela segue a regra da v7 antes da publicação: a linha dela já está em congeladas.sha256 e é refeita a cada emenda. A v7 e a v6 estão publicadas e não mudam.",
+  "notes": "A v8 é a v7 inteira, mais a declaração de plataformas, de poderes e da metade de máquina do manifesto (API 8; ADR 0058, acréscimo). É escrita por inteiro, sem extends, como a v6 e a v7. Servidor 2.0 = protocolo 12 + APIs 8, 7 e 6: um MOD da 7 ou da 6 continua rodando, nas duas plataformas. Enquanto a v8 não sai numa release, ela segue a regra da v7 antes da publicação: a linha dela já está em congeladas.sha256 e é refeita a cada emenda. A v7 e a v6 estão publicadas e não mudam.",
   "compatibilidade": {
     "aceitas": [
       8,
@@ -8,7 +8,7 @@
       6
     ],
     "servidor": "2.0",
-    "porque": "A linha 2 roda a 8, a 7 e a 6 (APIS_POR_LINHA). A 8 só acrescenta à 7: o manifesto pode declarar plataformas (Plataforma), e o MOD de servidor de jogo, que só faz sentido onde há servidor para hospedá-lo, diz que roda no app. Um manifesto da 7 ou da 6 com plataformas é recusado com PlataformasPedemApiNova. A 0.18 (linha 2, APIs 7 e 6) recusa um manifesto da 8: como Malformed se ele traz plataformas, como ApiTooNew se não traz.",
+    "porque": "A linha 2 roda a 8, a 7 e a 6 (APIS_POR_LINHA). A 8 só acrescenta à 7: o manifesto pode declarar plataformas (Plataforma), poderes (Poder, hoje só porta) e a metade de máquina (maquina), e o MOD de servidor de jogo, que só faz sentido onde há servidor para hospedá-lo, diz que roda no app. Com o poder porta, a casca ganha SeeleUI.tunel.entrar (a porta local do jogo, de um clique) e o produto desenha a faixa dos túneis. Um manifesto da 7 ou da 6 com plataformas é recusado com PlataformasPedemApiNova, e com poderes ou maquina, com PoderesPedemApiNova. A 0.18 (linha 2, APIs 7 e 6) recusa um manifesto da 8: como Malformed se ele traz plataformas, como ApiTooNew se não traz.",
     "capacidades-por-versao": {
       "6": [
         "superficies",
@@ -161,7 +161,7 @@
     "retrato": "SeeleUI.retrato, no lugar de SeeleMods.snapshot",
     "tunel.entrar": "SeeleUI.tunel.entrar(nome) existe só para o MOD da API 8 que declara o poder porta (a capacidade tunel vem do poder, e não da versão). Resolve com o número da porta em 127.0.0.1 em que o jogo de quem joga deve ligar: a do jogo, ou a primeira livre das 64 seguintes, e a faixa do produto diz qual. Só vale chamado de dentro do ouvinte de um evento botao, na mesma volta: o bilhete de gesto que o evento leva (gesto) é emitido pela casca, vale 2 s e se gasta no primeiro uso; sem ele, inventado, vencido ou já gasto, a recusa é fora-de-um-clique e nada vai ao núcleo. A entrada é o consentimento de quem clicou. Fora do app (no navegador) a recusa é so-no-app",
     "botao.gesto": "só o MOD que declara o poder porta recebe gesto no evento botao: o bilhete que SeeleUI.tunel.entrar usa na mesma volta. Os demais MODs recebem o evento como sempre",
-    "tunel.faixa": "o produto desenha, fora de toda superfície de MOD, uma linha por porta aberta: a porta, o nome do túnel e o MOD, por onde o tráfego anda (ligação direta com a pessoa da máquina, ou pela estrela, via o anfitrião), a latência, a vazão, a porta trocada quando a do jogo estava ocupada e a última queda com o motivo em frase. Um MOD não a desenha, não a cala e não a lê",
+    "tunel.faixa": "o produto desenha, fora de toda superfície de MOD, uma linha por porta aberta: a porta, o nome do túnel e o MOD, por onde o tráfego anda (ligação direta com a pessoa da máquina, ou pela estrela, via o anfitrião), a latência, a vazão, a porta trocada quando a do jogo estava ocupada e a última queda com o motivo em frase. Na ligação direta a faixa diz quantas conexões ainda passam pelo anfitrião (as que começaram antes do direto não migram), e quando as portas fecham porque a vista trocou de servidor ela diz isso, em vez de só sumir. Um MOD não a desenha, não a cala e não a lê",
     "formulario-erros": "a recusa do servidor de volta ao campo — s.formulario.erros({ chave: frase }), um campo ou vários; {} limpa; chave que não é de um campo: chave-desconhecida (tarefa 7, Step 6b)",
     "atualizar-contribuicao": "atualiza uma contribuição de pé, pelo punho (PERFIS R7)",
     "superficie-atualizar": "superficie.atualizar(chave, subarvore) — troca o nó de chave e o que está sob ele, numa mensagem própria; o teto da superfície é o de nós (4096) e o de mídia, e não o da mensagem. No contrato, existe desde a 6; na casca, mora na capacidade superficies, que só a 6 tem",
@@ -811,7 +811,7 @@
       "sem-permissao (a pessoa não tem a ação entrar-no-jogo do MOD)",
       "acao-nao-declarada (o MOD não declara a ação entrar-no-jogo)",
       "mod-sem-porta (o MOD não está ligado neste servidor, ou não declara o poder porta)",
-      "nome-tomado (a pessoa já tem um túnel com esse nome neste MOD)",
+      "nome-tomado (outra máquina já serve um túnel com esse nome neste MOD)",
       "maquina-saiu (a máquina saiu do servidor enquanto o pedido andava)",
       "tuneis-demais (o servidor já tem túneis demais)",
       "canais-esgotados (não há canais de túnel livres para a pessoa)",
