@@ -211,6 +211,19 @@ impl PortaLocal {
         self.protocolo
     }
 
+    /// Uma cópia da descrição, sem a escuta: o que se devolve a quem pede
+    /// entrada num túnel que já está aberto.
+    fn descrita(&self) -> Self {
+        Self {
+            porta: self.porta,
+            preferida: self.preferida,
+            desejada: self.desejada,
+            endereco: self.endereco,
+            protocolo: self.protocolo,
+            escuta: None,
+        }
+    }
+
     /// Tira a escuta, deixando a descrição. `None` só se a porta já foi
     /// separada.
     fn separar(mut self) -> Option<(Self, Escuta)> {
@@ -686,6 +699,9 @@ pub(crate) struct TunelDeJogador {
     /// A máquina com quem se tentou a ligação direta: é a chave de
     /// [`Ligacoes`], e é por ela que a poda sabe quem ainda precisa do quê.
     quem: Option<PersonId>,
+    /// A descrição da porta, para quem pedir entrada num túnel que já está
+    /// aberto receber a mesma porta, e não uma nova.
+    porta: PortaLocal,
 }
 
 /// O que `AlcanceTunelPor` entrega para discar a máquina.
@@ -817,6 +833,7 @@ impl TunelDeJogador {
                 tarefa: Some(tarefa),
                 discagem: None,
                 quem: None,
+                porta: descricao.descrita(),
             },
             descricao,
         ))
@@ -1860,7 +1877,9 @@ pub(crate) fn fim_pela_recusa(motivo: RecusaDeTunel) -> Option<Queda> {
 pub(crate) struct Tuneis {
     jogando: HashMap<Chave, TunelDeJogador>,
     ligacoes: Ligacoes,
-    entrando: HashMap<Chave, oneshot::Sender<Result<PortaLocal, RecusaDeTunel>>>,
+    /// Quem espera a porta de um túnel. Mais de um quando a pessoa clica de novo
+    /// antes de o servidor responder: o verbo sai uma vez só.
+    entrando: HashMap<Chave, Vec<oneshot::Sender<Result<PortaLocal, RecusaDeTunel>>>>,
     servindo: HashMap<Chave, oneshot::Sender<Result<(), RecusaDeTunel>>>,
     maquina: Maquina,
     avisos: mpsc::UnboundedSender<Aviso>,
@@ -1882,12 +1901,29 @@ impl Tuneis {
         self.maquina.estado()
     }
 
+    /// Registra quem espera a porta de um túnel. Devolve `true` quando o verbo
+    /// `EntrarNoTunel` precisa sair, e `false` quando o pedido já foi atendido
+    /// ou já está em andamento.
+    ///
+    /// **Entrar de novo num túnel aberto não refaz nada.** Um segundo clique em
+    /// JOGAR chegava aqui, sobrescrevia a espera, mandava outro
+    /// `EntrarNoTunel`, e a concessão que voltava substituía o túnel vivo (a
+    /// porta velha fechava e levava a conexão do jogo, e a nova, com o jogo
+    /// ainda em cima da velha, podia cair numa porta «ocupada» inventada). O
+    /// túnel já aberto responde com a descrição que tem.
     pub(crate) fn pedir_entrada(
         &mut self,
         chave: Chave,
         resposta: oneshot::Sender<Result<PortaLocal, RecusaDeTunel>>,
-    ) {
-        self.entrando.insert(chave, resposta);
+    ) -> bool {
+        if let Some(aberto) = self.jogando.get(&chave) {
+            tracing::info!(mod_id = %chave.0, tunel = %chave.1, "túnel: já aberto; a porta de antes é devolvida");
+            let _ = resposta.send(Ok(aberto.porta.descrita()));
+            return false;
+        }
+        let fila = self.entrando.entry(chave).or_default();
+        fila.push(resposta);
+        fila.len() == 1
     }
 
     pub(crate) fn pedir_servico(
@@ -1900,7 +1936,7 @@ impl Tuneis {
 
     /// Responde `recusa` a um pedido cujo verbo não saiu (ou foi recusado).
     pub(crate) fn recusar_pedido(&mut self, chave: &Chave, recusa: RecusaDeTunel) {
-        if let Some(resposta) = self.entrando.remove(chave) {
+        for resposta in self.entrando.remove(chave).into_iter().flatten() {
             let _ = resposta.send(Err(recusa));
         }
         if let Some(resposta) = self.servindo.remove(chave) {
@@ -2085,10 +2121,11 @@ impl Tuneis {
             let _ = resposta.send(Ok(()));
             return;
         }
-        let Some(resposta) = self.entrando.remove(&chave) else {
+        let esperas = self.entrando.remove(&chave).unwrap_or_default();
+        if esperas.is_empty() {
             tracing::debug!(%mod_id, tunel = %nome, "túnel: concedido sem pedido em andamento");
             return;
-        };
+        }
         let desfazer = || {
             enviar(ClientMessage::SairDoTunel {
                 mod_id: mod_id.to_owned(),
@@ -2096,10 +2133,12 @@ impl Tuneis {
             });
         };
         let Some(estrela) = estrela else {
-            let _ = resposta.send(Err(RecusaDeTunel::SemResposta));
+            for resposta in esperas {
+                let _ = resposta.send(Err(RecusaDeTunel::SemResposta));
+            }
             return;
         };
-        if resposta.is_closed() {
+        if esperas.iter().all(oneshot::Sender::is_closed) {
             // Quem pediu desistiu (o prazo venceu): a concessão não fica órfã.
             desfazer();
             return;
@@ -2126,7 +2165,9 @@ impl Tuneis {
                     encerrado: Some(Queda::PortaOcupada),
                 }));
                 desfazer();
-                let _ = resposta.send(Err(RecusaDeTunel::PortaLocalOcupada));
+                for resposta in esperas {
+                    let _ = resposta.send(Err(RecusaDeTunel::PortaLocalOcupada));
+                }
                 return;
             }
         };
@@ -2137,13 +2178,19 @@ impl Tuneis {
             Via::nova(estrela.clone()),
             self.avisos.clone(),
         ) else {
-            let _ = resposta.send(Err(RecusaDeTunel::CanaisEsgotados));
+            for resposta in esperas {
+                let _ = resposta.send(Err(RecusaDeTunel::CanaisEsgotados));
+            }
             return;
         };
-        // Um túnel velho do mesmo nome sai antes, e leva a porta dele.
+        // `pedir_entrada` não deixa chegar aqui com um túnel aberto do mesmo
+        // nome; se chegasse (concessão repetida do servidor), o velho sai antes
+        // e leva a porta dele.
         self.jogando.insert(chave, tunel);
         tracing::info!(%mod_id, tunel = %nome, porta = descricao.porta, preferida = descricao.preferida, "túnel: porta local aberta");
-        let _ = resposta.send(Ok(descricao));
+        for resposta in esperas {
+            let _ = resposta.send(Ok(descricao.descrita()));
+        }
     }
 
     fn recusado(&mut self, mod_id: &str, nome: &str, motivo: RecusaDeTunel) {
@@ -2152,8 +2199,10 @@ impl Tuneis {
             let _ = resposta.send(Err(motivo));
             return;
         }
-        if let Some(resposta) = self.entrando.remove(&chave) {
-            let _ = resposta.send(Err(motivo));
+        if let Some(esperas) = self.entrando.remove(&chave) {
+            for resposta in esperas {
+                let _ = resposta.send(Err(motivo));
+            }
             return;
         }
         // Depois da concessão: o servidor cortou um canal repassado, ou a
@@ -2859,6 +2908,67 @@ mod testes {
         let r = esperar_relatorio(&mut recebidos, |r| r.encerrado.is_some()).await;
         assert_eq!(r.encerrado, Some(Queda::SemPermissao));
         esperar_ate(|| std::net::TcpStream::connect(alvo).is_err()).await;
+    }
+
+    /// **I4.** Um segundo JOGAR com o túnel aberto devolve a porta de antes: não
+    /// reabre a escuta, não manda outro `EntrarNoTunel` e não inventa porta
+    /// «ocupada». E dois cliques antes da resposta mandam o verbo uma vez só,
+    /// e os dois recebem a mesma porta.
+    #[tokio::test]
+    async fn entrar_de_novo_num_tunel_aberto_devolve_a_mesma_porta_e_nao_manda_o_verbo() {
+        let par = par_em_loopback().await;
+        let (avisos, _recebidos) = mpsc::unbounded_channel();
+        let mut tuneis = Tuneis::nova(avisos);
+        let chave = (MOD.to_owned(), NOME.to_owned());
+        let enviar = sem_enviar();
+        let prazo = Duration::from_secs(3);
+        let conceder = |tuneis: &mut Tuneis| {
+            tuneis.tratar(
+                &ServerMessage::TunelConcedido {
+                    mod_id: MOD.into(),
+                    nome: NOME.into(),
+                    protocolo: ProtocoloDeTunel::Tcp,
+                    porta: 0,
+                },
+                Some(&par.cliente),
+                None,
+                &enviar,
+                prazo,
+            );
+        };
+
+        // Dois cliques antes da resposta: o verbo sai uma vez.
+        let (r1, c1) = oneshot::channel();
+        let (r2, c2) = oneshot::channel();
+        assert!(
+            tuneis.pedir_entrada(chave.clone(), r1),
+            "o primeiro pedido manda o verbo"
+        );
+        assert!(
+            !tuneis.pedir_entrada(chave.clone(), r2),
+            "o segundo espera o primeiro"
+        );
+        conceder(&mut tuneis);
+        let primeira = c1.await.unwrap().unwrap();
+        let segunda = c2.await.unwrap().unwrap();
+        assert_eq!(primeira.porta, segunda.porta);
+        let alvo = primeira.endereco();
+
+        // Um clique com o túnel já aberto: nada de verbo, nada de porta nova.
+        let (r3, c3) = oneshot::channel();
+        assert!(
+            !tuneis.pedir_entrada(chave.clone(), r3),
+            "com o túnel aberto o verbo não sai"
+        );
+        let terceira = c3.await.unwrap().unwrap();
+        assert_eq!(terceira.porta, primeira.porta);
+        assert_eq!(terceira.preferida, primeira.preferida);
+        assert_eq!(terceira.desejada, primeira.desejada);
+        assert_eq!(terceira.endereco(), alvo);
+        // A escuta é a mesma, ainda de pé: um túnel substituído a teria fechado
+        // e aberto outra.
+        drop(TcpStream::connect(alvo).await.unwrap());
+        assert_eq!(tuneis.jogando.len(), 1);
     }
 
     #[tokio::test]

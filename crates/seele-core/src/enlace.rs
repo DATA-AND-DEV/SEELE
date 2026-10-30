@@ -4398,7 +4398,11 @@ impl Motor {
         resposta: tokio::sync::oneshot::Sender<Result<crate::tunel::PortaLocal, RecusaDeTunel>>,
     ) {
         let chave = (mod_id.clone(), nome.clone());
-        self.tuneis.pedir_entrada(chave.clone(), resposta);
+        // Um túnel já aberto (ou já pedido) responde sem verbo nenhum: ver
+        // `Tuneis::pedir_entrada`.
+        if !self.tuneis.pedir_entrada(chave.clone(), resposta) {
+            return;
+        }
         if let Err(recusa) = self
             .mandar_verbo_de_tunel(ClientMessage::EntrarNoTunel { mod_id, nome })
             .await
