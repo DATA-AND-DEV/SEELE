@@ -54,6 +54,13 @@ pub const MAX_TUNEIS_POR_MOD: usize = 8;
 /// Quantos túneis o servidor inteiro guarda.
 pub const MAX_TUNEIS_POR_SERVIDOR: usize = 32;
 
+/// Quantos canais repassados **vivos** uma pessoa pode ter ao mesmo tempo,
+/// somados todos os túneis. A conexão da máquina tem `MAX_CANAIS` (64) canais
+/// para todo mundo: sem este teto, uma pessoa sozinha os esgota e ninguém mais
+/// entra no jogo. O teto fica bem abaixo, para que quatro pessoas no limite
+/// ainda caibam.
+pub const MAX_CANAIS_REPASSADOS_POR_PESSOA: usize = 16;
+
 /// Quanto se espera pela [`AberturaDeTunel`] de um canal que chegou. Um canal
 /// que não diz a que veio não ocupa vaga para sempre.
 const PRAZO_DA_ABERTURA: Duration = Duration::from_secs(10);
@@ -212,6 +219,29 @@ pub struct Rota {
     pub contador: Arc<AtomicU64>,
 }
 
+/// Uma vaga de canal repassado de uma pessoa. Devolve-a no `Drop`: o repasse
+/// tem muitas saídas (erro, fim limpo, concessão acabada, tarefa abortada), e
+/// um decremento escrito à mão em cada uma vaza vaga na primeira que se esquece.
+pub struct CanalRepassado {
+    de: PersonId,
+    mapa: Arc<std::sync::Mutex<HashMap<PersonId, usize>>>,
+}
+
+impl Drop for CanalRepassado {
+    fn drop(&mut self) {
+        let mut mapa = self
+            .mapa
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(vivos) = mapa.get_mut(&self.de) {
+            *vivos = vivos.saturating_sub(1);
+            if *vivos == 0 {
+                mapa.remove(&self.de);
+            }
+        }
+    }
+}
+
 /// O livro dos túneis.
 #[derive(Default)]
 pub struct Tuneis {
@@ -220,6 +250,13 @@ pub struct Tuneis {
     conexoes: HashMap<u64, Conexao>,
     contadores: HashMap<Chave, Arc<AtomicU64>>,
     sem_concessao: AtomicU64,
+    /// Quantos canais cada pessoa tem hoje repassados. Atrás do próprio
+    /// `Arc<Mutex>` (e não do cadeado do livro) para o `Drop` do guarda poder
+    /// devolver a vaga sem tomar `tuneis()`: é um cadeado-folha, nunca seguro
+    /// junto de outro nem atravessando um `await`, então não cria ordem nova.
+    repassados: Arc<std::sync::Mutex<HashMap<PersonId, usize>>>,
+    /// Canais cortados por a pessoa já ter o teto de canais vivos.
+    acima_do_teto: AtomicU64,
     /// Datagramas de carga que chegaram a um canal `j` antes da abertura dele.
     dados_antes_da_abertura: AtomicU64,
 }
@@ -597,6 +634,25 @@ impl Tuneis {
             .map_or(0, |c| c.load(Ordering::Relaxed))
     }
 
+    /// Reserva uma vaga de canal repassado para `de`, ou diz que o teto
+    /// ([`MAX_CANAIS_REPASSADOS_POR_PESSOA`]) já foi atingido. A vaga volta
+    /// sozinha quando o guarda cai, por qualquer caminho de saída do repasse.
+    pub fn reservar_canal(&self, de: PersonId) -> Option<CanalRepassado> {
+        let mut mapa = self
+            .repassados
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let vivos = mapa.entry(de).or_default();
+        if *vivos >= MAX_CANAIS_REPASSADOS_POR_PESSOA {
+            return None;
+        }
+        *vivos += 1;
+        Some(CanalRepassado {
+            de,
+            mapa: Arc::clone(&self.repassados),
+        })
+    }
+
     /// Conta um canal cortado por falta de concessão.
     pub fn contar_sem_concessao(&self) {
         self.sem_concessao.fetch_add(1, Ordering::Relaxed);
@@ -606,6 +662,12 @@ impl Tuneis {
     #[must_use]
     pub fn canais_sem_concessao(&self) -> u64 {
         self.sem_concessao.load(Ordering::Relaxed)
+    }
+
+    /// Quantos canais foram cortados por a pessoa já ter o teto de canais vivos.
+    #[must_use]
+    pub fn canais_acima_do_teto(&self) -> u64 {
+        self.acima_do_teto.load(Ordering::Relaxed)
     }
 
     /// Conta um datagrama de carga que chegou antes da abertura do canal `j`.
@@ -660,6 +722,13 @@ impl Server {
     #[must_use]
     pub fn canais_sem_concessao(&self) -> u64 {
         self.tuneis().canais_sem_concessao()
+    }
+
+    /// Quantos canais foram cortados por a pessoa já ter o teto de canais
+    /// repassados vivos ([`MAX_CANAIS_REPASSADOS_POR_PESSOA`]).
+    #[must_use]
+    pub fn canais_acima_do_teto(&self) -> u64 {
+        self.tuneis().canais_acima_do_teto()
     }
 
     /// Quantos datagramas de carga chegaram a um canal `j` **antes** da
@@ -1116,6 +1185,30 @@ fn corta_e_conta(
     }
 }
 
+/// A vaga de canal de `de`, ou o corte por teto: contado e dito no log com
+/// quem, MOD, túnel e o teto, porque quem joga só vê o canal recusado.
+fn reservar_ou_corta(
+    server: &Server,
+    de: PersonId,
+    abertura: &AberturaDeTunel,
+) -> Result<CanalRepassado, RecusaDeTunel> {
+    let vaga = server.tuneis().reservar_canal(de);
+    vaga.ok_or_else(|| {
+        server
+            .tuneis()
+            .acima_do_teto
+            .fetch_add(1, Ordering::Relaxed);
+        tracing::warn!(
+            quem = %de,
+            mod_id = %abertura.mod_id,
+            tunel = %abertura.nome,
+            teto = MAX_CANAIS_REPASSADOS_POR_PESSOA,
+            "túnel: canal cortado, a pessoa já tem o teto de canais repassados vivos"
+        );
+        RecusaDeTunel::CanaisEsgotados
+    })
+}
+
 fn motivo_de_abrir(motivo: &Motivo) -> RecusaDeTunel {
     match motivo {
         Motivo::CanaisEsgotados => RecusaDeTunel::CanaisEsgotados,
@@ -1155,6 +1248,13 @@ async fn repassar_t(
         Err(por_que) => {
             cortar_t(&mut envio, &mut recebe);
             return Err(corta_e_conta(server, de, &abertura, por_que));
+        }
+    };
+    let _vaga = match reservar_ou_corta(server, de, &abertura) {
+        Ok(vaga) => vaga,
+        Err(motivo) => {
+            cortar_t(&mut envio, &mut recebe);
+            return Err(motivo);
         }
     };
     let mut vigia = rota.vigia;
@@ -1282,6 +1382,7 @@ async fn repassar_j(
         Ok(rota) => rota,
         Err(por_que) => return Err(corta_e_conta(server, de, &abertura, por_que)),
     };
+    let _vaga = reservar_ou_corta(server, de, &abertura)?;
     let mut vigia = rota.vigia;
     let mut da_maquina = match rota.conexao.abrir_tunel(Confiabilidade::SemOrdem).await {
         Ok(CanalDeTunel::SemOrdem(d)) => d,
@@ -1436,6 +1537,25 @@ mod tests {
             protocolo: ProtocoloDeTunel::Tcp,
             porta: 25565,
         }
+    }
+
+    /// O teto é por pessoa e conta canais **vivos**: a vaga volta no `Drop`.
+    #[test]
+    fn o_teto_de_canais_e_por_pessoa_e_a_vaga_volta_no_drop() {
+        let livro = Tuneis::default();
+        let mut vagas: Vec<_> = (0..MAX_CANAIS_REPASSADOS_POR_PESSOA)
+            .map(|_| livro.reservar_canal(PersonId(1)).expect("cabe"))
+            .collect();
+        assert!(livro.reservar_canal(PersonId(1)).is_none(), "o 17º passou");
+        assert!(
+            livro.reservar_canal(PersonId(2)).is_some(),
+            "o teto é de todos"
+        );
+        drop(vagas.pop());
+        assert!(
+            livro.reservar_canal(PersonId(1)).is_some(),
+            "a vaga não voltou"
+        );
     }
 
     fn com_tunel() -> Tuneis {

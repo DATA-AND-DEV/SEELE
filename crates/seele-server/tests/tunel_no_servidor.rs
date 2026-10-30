@@ -1016,3 +1016,140 @@ async fn sem_malha_nao_ha_apresentacao() -> Result<()> {
     daemon.shutdown();
     Ok(())
 }
+
+/// **O teto de canais por pessoa, de ponta a ponta.** A conexão da máquina tem
+/// 64 canais para todos; uma pessoa que abre canais sem parar não pode
+/// esgotá-los. O 17º canal vivo dela é cortado e ela lê `CanaisEsgotados` (a
+/// prova que faltava de que o motivo chega a quem joga); outra pessoa ainda
+/// chega à máquina; e fechado um dos 16 a vaga volta.
+///
+/// Os canais são `j` (UDP) de propósito: o teto vale para todo canal repassado,
+/// e o `j` não passa pelo crédito de leitura do enlace
+/// (`MAX_CREDITO_DA_CONEXAO`), que com 16 canais `t` parados abertos deixa o
+/// 17º sem receber byte e faria o teste medir o enlace, e não o teto.
+#[tokio::test(flavor = "multi_thread")]
+async fn uma_pessoa_nao_esgota_os_canais_da_maquina() -> Result<()> {
+    const OUTRO: u8 = 4;
+    let teto = seele_server::tuneis::MAX_CANAIS_REPASSADOS_POR_PESSOA;
+    let (endereco, daemon, _temp) = montar(true).await?;
+    let _gestora = entrar(endereco, GESTORA, 12).await?;
+    let (maquina, mut jogador, primeiro, udp) = udp_pronto(endereco).await?;
+    let mut outro = entrar(endereco, OUTRO, 12).await?;
+    frame::write(&mut outro.ligado.envio, &entrar_no_tunel()).await?;
+    assert_eq!(resposta_de_tunel(&mut outro).await?, Ok(19132));
+
+    // Abre um canal `j` de `quem` e manda a abertura (repete-se onde o `j`
+    // pode perdê-la).
+    async fn abrir(quem: &Par, udp: &AberturaDeTunel) -> Result<seele_enlace::Datagramas> {
+        let CanalDeTunel::SemOrdem(canal) = quem
+            .ligado
+            .conexao
+            .abrir_tunel(Confiabilidade::SemOrdem)
+            .await?
+        else {
+            anyhow::bail!("o j veio ordenado");
+        };
+        canal.mandar(&seele_proto::tunel::datagrama_de_abertura(udp)?)?;
+        Ok(canal)
+    }
+    // Espera o próximo canal chegar à máquina, repetindo a abertura de `canal`
+    // enquanto não vem.
+    async fn chega(
+        maquina: &Par,
+        canal: &mut seele_enlace::Datagramas,
+        udp: &AberturaDeTunel,
+    ) -> Result<Option<seele_enlace::Datagramas>> {
+        let ate = Instant::now() + PRAZO;
+        while Instant::now() < ate {
+            let _ = canal.mandar(&seele_proto::tunel::datagrama_de_abertura(udp)?);
+            if let Ok(chegou) = tokio::time::timeout(
+                Duration::from_millis(300),
+                maquina.ligado.conexao.aceitar_tunel(),
+            )
+            .await
+            {
+                let CanalDeTunel::SemOrdem(d) = chegou? else {
+                    anyhow::bail!("a máquina recebeu um t");
+                };
+                return Ok(Some(d));
+            }
+        }
+        Ok(None)
+    }
+
+    // O `_primeiro` de `udp_pronto` já é um canal vivo do jogador.
+    let mut dele = vec![primeiro];
+    let mut da_maquina = Vec::new();
+    let mut primeiro_da_maquina = None;
+    {
+        // O primeiro canal ainda não foi anunciado: a abertura dele sai agora.
+        let c = dele.first_mut().expect("o primeiro canal");
+        primeiro_da_maquina = chega(&maquina, c, &udp).await?.or(primeiro_da_maquina);
+        da_maquina.push(
+            primeiro_da_maquina
+                .take()
+                .expect("o primeiro chegou à máquina"),
+        );
+    }
+    while dele.len() < teto {
+        let mut novo = abrir(&jogador, &udp).await?;
+        da_maquina.push(
+            chega(&maquina, &mut novo, &udp)
+                .await?
+                .expect("o canal dentro do teto chegou à máquina"),
+        );
+        dele.push(novo);
+    }
+    assert_eq!(daemon.server().canais_acima_do_teto(), 0);
+
+    // O 17º é cortado, e quem joga lê o motivo.
+    let corte = abrir(&jogador, &udp).await?;
+    let recusa = {
+        let ate = Instant::now() + PRAZO;
+        let mut visto = None;
+        while visto.is_none() && Instant::now() < ate {
+            let _ = corte.mandar(&seele_proto::tunel::datagrama_de_abertura(&udp)?);
+            visto = esperar_curto(&mut jogador.ligado.recebe).await;
+        }
+        visto
+    };
+    assert_eq!(recusa, Some(RecusaDeTunel::CanaisEsgotados));
+    assert_eq!(daemon.server().canais_acima_do_teto(), 1);
+    drop(corte);
+
+    // Outra pessoa ainda chega à máquina: o teto é por pessoa.
+    let mut do_outro = abrir(&outro, &udp).await?;
+    let _chegou = chega(&maquina, &mut do_outro, &udp)
+        .await?
+        .expect("o canal de outra pessoa chegou à máquina");
+
+    // Fechado um dos 16, a vaga volta e o próximo passa.
+    drop(dele.remove(0));
+    let mut novo = abrir(&jogador, &udp).await?;
+    let passou = chega(&maquina, &mut novo, &udp).await?;
+    assert!(
+        passou.is_some(),
+        "a vaga não voltou depois que um canal fechou"
+    );
+    assert_eq!(
+        daemon.server().canais_acima_do_teto(),
+        1,
+        "só o 17º foi cortado"
+    );
+    drop(da_maquina);
+    daemon.shutdown();
+    Ok(())
+}
+
+/// Um `TunelRecusado` no controle, se vier em 300 ms.
+async fn esperar_curto(recebe: &mut seele_enlace::Recebe) -> Option<RecusaDeTunel> {
+    let Ok(Ok(ServerMessage::TunelRecusado { motivo, .. })) = tokio::time::timeout(
+        Duration::from_millis(300),
+        frame::read::<ServerMessage>(recebe),
+    )
+    .await
+    else {
+        return None;
+    };
+    Some(motivo)
+}
