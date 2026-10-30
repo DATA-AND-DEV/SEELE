@@ -166,10 +166,8 @@ pub(crate) mod tests {
         impl Pasta {
             pub(crate) fn nova(nome: &str) -> Self {
                 let n = PROXIMA.fetch_add(1, Ordering::Relaxed);
-                let caminho = std::env::temp_dir().join(format!(
-                    "seele-programa-{nome}-{}-{n}",
-                    std::process::id()
-                ));
+                let caminho = std::env::temp_dir()
+                    .join(format!("seele-programa-{nome}-{}-{n}", std::process::id()));
                 let _ = std::fs::remove_dir_all(&caminho);
                 std::fs::create_dir_all(&caminho).unwrap();
                 Self(caminho)
@@ -199,7 +197,13 @@ pub(crate) mod tests {
     #[test]
     fn absoluto_e_recusado_em_qualquer_grafia() {
         let (_p, raiz) = raiz();
-        for caminho in ["/etc/passwd", "\\Windows\\x", "C:\\x", "c:/x", "\\\\srv\\share"] {
+        for caminho in [
+            "/etc/passwd",
+            "\\Windows\\x",
+            "C:\\x",
+            "c:/x",
+            "\\\\srv\\share",
+        ] {
             assert!(
                 matches!(
                     dentro_da_raiz(&raiz, caminho, true),
@@ -213,7 +217,13 @@ pub(crate) mod tests {
     #[test]
     fn pai_e_recusado_em_qualquer_posicao_e_com_qualquer_barra() {
         let (_p, raiz) = raiz();
-        for caminho in ["..", "../fora", "server/../../fora", "server\\..\\..\\fora", "a/.."] {
+        for caminho in [
+            "..",
+            "../fora",
+            "server/../../fora",
+            "server\\..\\..\\fora",
+            "a/..",
+        ] {
             assert!(
                 matches!(
                     dentro_da_raiz(&raiz, caminho, true),

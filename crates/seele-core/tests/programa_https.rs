@@ -15,8 +15,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use seele_core::programa::{
-    AlgoritmoDeHash, ComandoAceito, HashDeclarado, Origem, OrigemHttps, PedidoDeDownload,
-    Politica, Programa, Recusa,
+    AlgoritmoDeHash, ComandoAceito, HashDeclarado, Origem, OrigemHttps, PedidoDeDownload, Politica,
+    Programa, Recusa,
 };
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio_rustls::rustls;
@@ -44,8 +44,8 @@ async fn servidor(corpo: Corpo) -> (u16, Vec<u8>, Arc<AtomicU64>) {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let gerado = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
     let der = gerado.cert.der().to_vec();
-    let chave = rustls::pki_types::PrivateKeyDer::try_from(gerado.signing_key.serialize_der())
-        .unwrap();
+    let chave =
+        rustls::pki_types::PrivateKeyDer::try_from(gerado.signing_key.serialize_der()).unwrap();
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(vec![gerado.cert.der().clone()], chave)
@@ -193,5 +193,9 @@ async fn corpo_sem_fim_e_cortado_pelo_https_de_verdade() {
     );
     let parado = escritos.load(Ordering::SeqCst);
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(escritos.load(Ordering::SeqCst), parado, "o servidor ainda escreve");
+    assert_eq!(
+        escritos.load(Ordering::SeqCst),
+        parado,
+        "o servidor ainda escreve"
+    );
 }

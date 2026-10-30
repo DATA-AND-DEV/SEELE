@@ -372,14 +372,15 @@ async fn correr(
 
     let mut saltos = 0_usize;
     let (alegado, mut corpo) = loop {
-        let resposta = interior
-            .origem
-            .pedir(&url)
-            .await
-            .map_err(|motivo| Recusa::OrigemFalhou {
-                url: url.to_string(),
-                motivo,
-            })?;
+        let resposta =
+            interior
+                .origem
+                .pedir(&url)
+                .await
+                .map_err(|motivo| Recusa::OrigemFalhou {
+                    url: url.to_string(),
+                    motivo,
+                })?;
         match resposta {
             Resposta::Corpo { alegado, corpo } => break (alegado, corpo),
             Resposta::Status(status) => {
@@ -426,7 +427,9 @@ async fn correr(
         }
     };
     let pasta = destino.parent().unwrap_or(&interior.raiz).to_path_buf();
-    tokio::fs::create_dir_all(&pasta).await.map_err(disco(&pasta))?;
+    tokio::fs::create_dir_all(&pasta)
+        .await
+        .map_err(disco(&pasta))?;
     caminho::dentro_da_raiz(&interior.raiz, &pedido.destino, false)?;
 
     let nome = destino
@@ -452,10 +455,13 @@ async fn correr(
             });
             proximo_aviso = recebidos.saturating_add(PASSO_DO_PROGRESSO);
         }
-        let Some(pedaco) = corpo.pedaco().await.map_err(|motivo| Recusa::OrigemFalhou {
-            url: url.to_string(),
-            motivo,
-        })?
+        let Some(pedaco) = corpo
+            .pedaco()
+            .await
+            .map_err(|motivo| Recusa::OrigemFalhou {
+                url: url.to_string(),
+                motivo,
+            })?
         else {
             break;
         };
@@ -554,8 +560,7 @@ impl OrigemHttps {
             // download para sempre.
             .read_timeout(std::time::Duration::from_secs(60));
         if let Some(der) = der {
-            let certificado =
-                reqwest::Certificate::from_der(der).map_err(|e| erro_inteiro(&e))?;
+            let certificado = reqwest::Certificate::from_der(der).map_err(|e| erro_inteiro(&e))?;
             construtor = construtor.tls_certs_only([certificado]);
         }
         let cliente = construtor.build().map_err(|e| erro_inteiro(&e))?;

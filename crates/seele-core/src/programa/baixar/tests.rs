@@ -187,7 +187,10 @@ fn sem_parcial(raiz: &Path) -> bool {
 async fn baixa_confere_e_renomeia_com_progresso() {
     let bytes = b"um servidor de jogo";
     let b = bancada(Mentira::default().com(URL, corpo(bytes)), 1 << 20);
-    let mut download = b.programa.baixar(pedido(bytes, "server/server.jar")).unwrap();
+    let mut download = b
+        .programa
+        .baixar(pedido(bytes, "server/server.jar"))
+        .unwrap();
     let mut eventos = vec![];
     while let Some(e) = download.proximo().await {
         eventos.push(e);
@@ -442,9 +445,15 @@ async fn redirecionamento_dentro_do_aceite_e_seguido() {
     let bytes = b"cdn";
     let b = bancada(
         Mentira::default()
-            .com(URL, Roteiro::Redireciona("https://cdn.mojang.com/a".to_owned()))
+            .com(
+                URL,
+                Roteiro::Redireciona("https://cdn.mojang.com/a".to_owned()),
+            )
             // Relativo: resolvido contra o salto atual.
-            .com("https://cdn.mojang.com/a", Roteiro::Redireciona("/b".to_owned()))
+            .com(
+                "https://cdn.mojang.com/a",
+                Roteiro::Redireciona("/b".to_owned()),
+            )
             .com("https://cdn.mojang.com/b", corpo(bytes)),
         1 << 20,
     );

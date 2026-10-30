@@ -399,10 +399,7 @@ async fn ler_linhas<R: AsyncRead + Unpin>(
             contas.perdidas.fetch_add(1, Ordering::SeqCst);
         }
     };
-    loop {
-        let Ok(buffer) = leitor.fill_buf().await else {
-            break;
-        };
+    while let Ok(buffer) = leitor.fill_buf().await {
         if buffer.is_empty() {
             if !linha.is_empty() || descartando {
                 entregar(&mut linha);

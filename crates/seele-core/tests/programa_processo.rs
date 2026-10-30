@@ -159,7 +159,13 @@ async fn le_a_saida_e_o_erro_escreve_na_entrada_e_diz_o_codigo() {
 /// espaço chegam como estão, e nada é executado.
 #[tokio::test]
 async fn os_argumentos_chegam_um_a_um_sem_shell() {
-    let estranhos = ["argumentos", "a b; echo injetado", "\"aspas\"", "$HOME", "%PATH%"];
+    let estranhos = [
+        "argumentos",
+        "a b; echo injetado",
+        "\"aspas\"",
+        "$HOME",
+        "%PATH%",
+    ];
     let (_p, programa) = programa("args", &estranhos);
     let mut processo = programa.rodar(&pedido(&estranhos, "")).unwrap();
     let (linhas, fim) = esperar_o_fim(&mut processo).await;
@@ -189,7 +195,10 @@ async fn comando_ou_argumentos_fora_do_aceite_sao_recusados_e_contados() {
         comando: "/bin/sh".to_owned(),
         ..pedido(&["eco"], "")
     };
-    assert_eq!(programa.rodar(&sh).unwrap_err().nome(), "comando-fora-do-aceito");
+    assert_eq!(
+        programa.rodar(&sh).unwrap_err().nome(),
+        "comando-fora-do-aceito"
+    );
     assert_eq!(
         programa.rodar(&pedido(&["eco", "--mais"], "")).unwrap_err(),
         Recusa::ArgumentosForaDoAceito {
@@ -304,10 +313,19 @@ async fn encerrar_tudo_mata_espera_e_fecha_a_porta() {
         .await
         .expect("encerrar_tudo voltou antes de o processo terminar");
     assert!(
-        matches!(fim, Some(EventoDoProcesso::Terminou(FimDoProcesso { morto_a_pedido: true, .. }))),
+        matches!(
+            fim,
+            Some(EventoDoProcesso::Terminou(FimDoProcesso {
+                morto_a_pedido: true,
+                ..
+            }))
+        ),
         "{fim:?}"
     );
-    assert!(!esta_vivo(&arquivo).await, "encerrar voltou com o processo vivo");
+    assert!(
+        !esta_vivo(&arquivo).await,
+        "encerrar voltou com o processo vivo"
+    );
     assert_eq!(
         programa
             .rodar(&pedido(&["batimento", &argumento], ""))
@@ -336,7 +354,11 @@ fn o_runtime_caindo_mata_o_processo() {
     drop(runtime);
     let antes = batimento(&arquivo);
     std::thread::sleep(Duration::from_millis(400));
-    assert_eq!(batimento(&arquivo), antes, "o processo sobreviveu ao runtime");
+    assert_eq!(
+        batimento(&arquivo),
+        antes,
+        "o processo sobreviveu ao runtime"
+    );
     drop(processo);
     drop(programa);
 }
@@ -393,7 +415,12 @@ async fn linha_longa_chega_cortada_e_a_seguinte_inteira() {
             _ => None,
         })
         .collect();
-    assert_eq!(saidas.len(), 3, "{:?}", saidas.iter().map(|s| s.len()).collect::<Vec<_>>());
+    assert_eq!(
+        saidas.len(),
+        3,
+        "{:?}",
+        saidas.iter().map(|s| s.len()).collect::<Vec<_>>()
+    );
     assert_eq!(saidas[1].len(), MAX_BYTES_POR_LINHA);
     assert_eq!(saidas[2], "salvo");
     assert_eq!(fim.linhas_cortadas, 1);

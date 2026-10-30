@@ -61,7 +61,11 @@ fn eco() {
                 }
             }
             "longa" => {
-                let _ = writeln!(saida, "{}", "x".repeat(usize::try_from(numero).unwrap_or(0)));
+                let _ = writeln!(
+                    saida,
+                    "{}",
+                    "x".repeat(usize::try_from(numero).unwrap_or(0))
+                );
             }
             _ => {
                 let _ = writeln!(saida, "eco: {linha}");

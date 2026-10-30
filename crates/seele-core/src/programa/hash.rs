@@ -147,7 +147,7 @@ mod tests {
         let trocado = [sha512.clone(), sha256.clone(), sha1.clone()];
         assert_eq!(o_mais_forte(&trocado), Some(&sha512));
         assert_eq!(o_mais_forte(&[sha1.clone(), sha256.clone()]), Some(&sha256));
-        assert_eq!(o_mais_forte(&[sha1.clone()]), Some(&sha1));
+        assert_eq!(o_mais_forte(std::slice::from_ref(&sha1)), Some(&sha1));
         assert_eq!(o_mais_forte(&[]), None);
     }
 
