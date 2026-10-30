@@ -89,7 +89,7 @@ pub struct Reenvio {
 /// Se a recusa é a que o cliente dá sozinho, sem a pessoa ver a oferta: o
 /// núcleo sem tela (`SemTela`) e o navegador (`SoNoApp`) respondem na hora, e
 /// a mesma pessoa pode estar com o app aberto ao lado.
-const fn automatica(motivo: MotivoDaRecusaDeMaquina) -> bool {
+pub const fn automatica(motivo: MotivoDaRecusaDeMaquina) -> bool {
     matches!(
         motivo,
         MotivoDaRecusaDeMaquina::SemTela | MotivoDaRecusaDeMaquina::SoNoApp
@@ -628,6 +628,37 @@ impl Maquinas {
         true
     }
 
+    /// Se `quem` recusou **sozinho** (`SemTela`, `SoNoApp`) um pedido de
+    /// `(mod_id, servidor)` nos últimos `janela`. Um momento que pede de novo
+    /// logo depois disso receberia a mesma recusa na volta da rede, e assim
+    /// para sempre: o despejo não manda (`mods::maquina::despejar`).
+    #[must_use]
+    pub fn recusa_automatica_recente(
+        &self,
+        mod_id: &str,
+        servidor: &str,
+        quem: PersonId,
+        agora: std::time::Instant,
+        janela: std::time::Duration,
+    ) -> bool {
+        [
+            MotivoDaRecusaDeMaquina::SemTela,
+            MotivoDaRecusaDeMaquina::SoNoApp,
+        ]
+        .iter()
+        .any(|motivo| {
+            let chave = (
+                mod_id.to_owned(),
+                servidor.to_owned(),
+                quem,
+                seele_proto::maquina::nome_da_recusa(motivo),
+            );
+            self.recusas_ditas
+                .get(&chave)
+                .is_some_and(|quando| agora.saturating_duration_since(*quando) < janela)
+        })
+    }
+
     /// Conta uma recusa de `mod_id` que não voltou como momento, e devolve
     /// quantas já são.
     pub fn contar_recusa_juntada(&mut self, mod_id: &str) -> u64 {
@@ -910,6 +941,28 @@ pub fn chegou(server: &Server, quem: PersonId, conexao: u64) {
     }
 }
 
+/// Guarda que `quem` recusou o pedido de `(mod_id, servidor)` agora, quando a
+/// recusa foi automática: é a janela que [`Maquinas::recusa_automatica_recente`]
+/// lê para um momento não pedir de novo no passo da rede.
+pub fn lembrar_a_recusa(
+    server: &Server,
+    mod_id: &str,
+    servidor: &str,
+    quem: PersonId,
+    motivo: MotivoDaRecusaDeMaquina,
+) {
+    if automatica(motivo) {
+        let _ = server.maquinas().marcar_recusa(
+            mod_id,
+            servidor,
+            quem,
+            seele_proto::maquina::nome_da_recusa(&motivo),
+            std::time::Instant::now(),
+            crate::mods::maquina::JANELA_DA_RECUSA_REPETIDA,
+        );
+    }
+}
+
 /// Uma sessão acabou: as máquinas que a conexão dela aceitou saem do livro, e
 /// a metade de servidor fica sabendo (`Parou { saiu }`). Os túneis são de
 /// `Tuneis::saiu`, que os encerra com `MaquinaSaiu`.
@@ -921,6 +974,7 @@ pub fn saiu(server: &Server, quem: PersonId, conexao: u64) {
     };
     for (mod_id, servidor, motivo) in caidos {
         let nome = seele_proto::maquina::nome_da_recusa(&motivo);
+        lembrar_a_recusa(server, &mod_id, &servidor, quem, motivo);
         tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, motivo = nome, "máquina: a última sessão que podia ver o pedido saiu, e as outras recusaram sozinhas");
         publicar(
             server,
@@ -1306,6 +1360,9 @@ mod tests {
         let _ = m.chegou(A, 11);
         let _ = m.pedir(MOD, HASH, "mc-1", A, GESTORA, &o);
         assert_eq!(m.recusar(A, 11, MOD, "mc-1", M::SoNoApp), Recusa::Esperando);
+        // O mesmo pedido chegou duas vezes à conexão 11 (o anúncio e o reenvio):
+        // a segunda recusa dela não derruba nada.
+        assert_eq!(m.recusar(A, 11, MOD, "mc-1", M::SoNoApp), Recusa::Esperando);
         assert_eq!(
             m.recusar(B, 10, MOD, "mc-1", M::PeloDono),
             Recusa::SemPedido
@@ -1319,6 +1376,9 @@ mod tests {
             m.sem_quem_veja(A),
             vec![(MOD.to_owned(), "mc-1".to_owned(), M::SemTela)]
         );
+        // E depois de cair, outra recusa da mesma conexão não acha o que recusar
+        // (o servidor não publica duas vezes).
+        assert_eq!(m.recusar(A, 10, MOD, "mc-1", M::SemTela), Recusa::SemPedido);
 
         // `PeloDono` de qualquer conexão derruba na hora.
         let _ = m.pedir(MOD, HASH, "mc-1", A, GESTORA, &o);

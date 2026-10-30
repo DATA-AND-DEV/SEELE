@@ -853,6 +853,7 @@
       "avisos-a-maquina-demais (mais de MAX_AVISOS_A_MAQUINA_POR_CHAMADA servidores de jogo avisados numa chamada)",
       "nao-esta-aqui (não lança: volta como MaquinaRecusou, quando quem não tem conexão aberta no 12; NAO_ESTA_AQUI)",
       "a mesma recusa do servidor, pedida de novo por um momento dentro de JANELA_DA_RECUSA_REPETIDA (5 s), não volta como MaquinaRecusou: fica no seele.log e em Server::recusas_juntadas (Origem::Momento), para um aoAcontecer que tenta de novo não se alimentar sozinho",
+      "um pedido que um momento repete a quem recusou sozinho (sem-tela, so-no-app) dentro de JANELA_DA_RECUSA_REPETIDA não sai: o MOD já leu essa recusa, e o pedido repetido fica no seele.log e em Server::recusas_juntadas (Maquinas::recusa_automatica_recente)",
       "pendentes-demais e maquinas-demais (não lançam: voltam como MaquinaRecusou, pelos tetos do livro, Excesso::PendentesDemais e Excesso::MaquinasDemais)",
       "sem-maquina (não lança nem volta: o aviso a um servidor de jogo sem máquina aceita não sai, fica no seele.log e no contador Server::avisos_sem_maquina; SEM_MAQUINA)"
     ]

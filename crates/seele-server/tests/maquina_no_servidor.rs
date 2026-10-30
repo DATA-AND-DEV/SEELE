@@ -1299,3 +1299,78 @@ async fn so_quando_todas_recusam_sozinhas_o_pedido_cai() -> Result<()> {
     m.daemon.shutdown();
     Ok(())
 }
+
+/// **Uma recusa automática também não alimenta um laço.** A única sessão de
+/// Alice é um navegador que responde `SoNoApp` a todo pedido, na hora; o MOD,
+/// com `insistir`, pede de novo a cada `MaquinaRecusou`. Sem freio, o laço
+/// iria no passo da ida e volta da rede. O MOD lê a recusa uma vez, o pedido
+/// repetido pelo momento não sai, e o contador sobe.
+#[tokio::test(flavor = "multi_thread")]
+async fn uma_sessao_que_recusa_sozinha_nao_alimenta_o_laco_do_momento() -> Result<()> {
+    let m = montar().await?;
+    let mut gestora = entrar(m.endereco, GESTORA, 12).await?;
+    let navegador = entrar(m.endereco, ALICE, 12).await?;
+    let pessoa = navegador.pessoa;
+    // A ponta e a conexão ficam aqui, vivas até o fim do teste: o laço que
+    // responde leva só o envio e a leitura.
+    let _ponta = navegador.ligado.ponta;
+    let _conexao = navegador.ligado.conexao;
+    // A sessão entra no livro ao começar a ouvir o barramento, logo depois do
+    // `Session`: espera-se por isso para o pedido não cair em `nao-esta-aqui`.
+    let ate = Instant::now() + PRAZO;
+    while !m.daemon.server().maquinas().pode_ser_chamada(pessoa) {
+        assert!(
+            Instant::now() < ate,
+            "a sessão do navegador não entrou no livro"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let pedidos_vistos = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        let vistos = Arc::clone(&pedidos_vistos);
+        let mut recebe = navegador.ligado.recebe;
+        let mut envio = navegador.ligado.envio;
+        tokio::spawn(async move {
+            while let Ok(q) = frame::read::<ServerMessage>(&mut recebe).await {
+                if matches!(q, ServerMessage::PedidoDeMaquina { .. }) {
+                    vistos.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let _ = frame::write(
+                        &mut envio,
+                        &recusa(seele_proto::maquina::MotivoDaRecusaDeMaquina::SoNoApp),
+                    )
+                    .await;
+                }
+            }
+        });
+    }
+    pedir_ao_mod(
+        &mut gestora,
+        1,
+        &serde_json::json!({ "insistir": true, "pedir": true, "quem": pessoa.0 }),
+    )
+    .await?;
+    esperar_no_quintal(&m, "momentos", "so-no-app").await;
+    // Tempo para muitas voltas do laço, se ele existisse.
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let momentos = quintal(&m, MOD)
+        .await
+        .get("momentos")
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        momentos.matches("MaquinaRecusou").count(),
+        1,
+        "a recusa automática voltou como momento mais de uma vez: {momentos}"
+    );
+    assert_eq!(
+        pedidos_vistos.load(std::sync::atomic::Ordering::Relaxed),
+        1,
+        "o pedido repetido pelo momento saiu de novo"
+    );
+    assert!(
+        m.daemon.server().recusas_juntadas(MOD) >= 1,
+        "o pedido repetido não foi contado"
+    );
+    m.daemon.shutdown();
+    Ok(())
+}

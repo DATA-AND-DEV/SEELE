@@ -481,6 +481,23 @@ pub async fn despejar(server: &Arc<Server>, mod_id: &str, origem: Origem, declar
             servidor,
             oferta,
         } = pedido;
+        // Um momento que pede de novo a quem acabou de recusar **sozinho**
+        // (o navegador com `SoNoApp`, o núcleo sem tela com `SemTela`) teria a
+        // mesma recusa na volta da rede, e o laço seguiria no passo dela. O
+        // MOD já leu essa recusa uma vez; o pedido repetido não sai.
+        if origem == Origem::Momento
+            && server.maquinas().recusa_automatica_recente(
+                mod_id,
+                &servidor,
+                quem,
+                std::time::Instant::now(),
+                JANELA_DA_RECUSA_REPETIDA,
+            )
+        {
+            let juntadas = server.maquinas().contar_recusa_juntada(mod_id);
+            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, juntadas, "máquina: um momento pediu de novo a quem acabou de recusar sozinho; o pedido não sai");
+            continue;
+        }
         if !server.maquinas().pode_ser_chamada(quem) {
             tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, motivo = NAO_ESTA_AQUI, "máquina: pedido a quem não está conectado num 12; volta ao MOD como recusa");
             recusar_ao_mod(server, origem, mod_id, servidor, quem, NAO_ESTA_AQUI);

@@ -2947,6 +2947,7 @@ async fn run_session(
                         match recusa {
                             crate::maquinas::Recusa::Recusado(motivo) => {
                                 let nome = seele_proto::maquina::nome_da_recusa(&motivo);
+                                crate::maquinas::lembrar_a_recusa(server, &mod_id, &servidor, session.person, motivo);
                                 tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: recusada por quem foi chamado");
                                 let _ = server.events.send(crate::server::Event::Maquina(
                                     crate::maquinas::MudancaDeMaquina::Recusou {
