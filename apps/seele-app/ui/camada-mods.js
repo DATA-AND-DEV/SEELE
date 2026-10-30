@@ -691,8 +691,9 @@ function linhaDeModInstalado(mod, hospedando) {
     const frase = FASES_DO_MOD[estado.fase];
     if (frase) {
       // Só o que deu certo fica com a cor de nota; o resto é recusa, e recusa
-      // tem cor própria nesta casca.
-      const tranquilo = ["carregado", "carregando"].includes(estado.fase);
+      // tem cor própria nesta casca. «Só noutra plataforma» não é falha (o MOD
+      // está certo, só não é daqui) e fica com a cor de nota também.
+      const tranquilo = ["carregado", "carregando", "so-noutra-plataforma"].includes(estado.fase);
       const classe = tranquilo ? "mods-versao" : "mods-recusado";
       texto.append(
         elemento("span", classe, estado.detalhe ? `${frase} — ${estado.detalhe}` : frase),
@@ -795,10 +796,13 @@ function linhaDeModQueFalta(id, hash) {
 
   const estado = estadoDosMods.get(id);
   const frase = FASES_DO_MOD[estado?.fase];
+  // Pela mesma razão da lista de cima: não estar nesta plataforma não é uma
+  // falha, e não leva a cor de erro.
+  const classe = estado?.fase === "so-noutra-plataforma" ? "mods-versao" : "mods-recusado";
   texto.append(
     elemento(
       "span",
-      "mods-recusado",
+      classe,
       frase && estado.detalhe
         ? `${frase} — ${estado.detalhe}`
         : (frase ??
@@ -2137,7 +2141,6 @@ async function desenharMods() {
 // continua rodando: `seele_proto::mods::{MOD_API_VERSION, APIS_ACEITAS}`. A 8
 // (`plataformas` no manifesto) entra na linha 2 ao lado delas.
 const API_DESTE_APLICATIVO = 8;
-const APIS_QUE_ESTE_APLICATIVO_ACEITA = [8, 7, 6];
 
 /** Os pacotes guardados nesta máquina, com tamanho e com quem os exige. */
 async function desenharOCache() {
@@ -2264,15 +2267,15 @@ function linhaDePacoteNoCache(pacote) {
         // roda como sempre rodou.
         : APIS_DO_SERVIDOR_0_15.includes(dele)
           ? `este pacote foi feito para a API ${dele}, que roda no Servidor `
-            + `0.15, e este SEELE roda as APIs ${[...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort().join(" e ")}. `
-            + "Procure a versão dele para a API 6 ou 7 no catálogo do servidor, ou "
+            + `0.15, e este SEELE roda as APIs ${APIS_ACEITAS_DITAS_E}. `
+            + `Procure a versão dele para a API ${APIS_ACEITAS_DITAS_OU} no catálogo do servidor, ou `
             + "use o Servidor 0.15 pelo launcher, que roda o pacote como está."
           // Uma mais velha que essas, como as do layout antigo, nenhum
           // servidor de hoje roda (lote 58-1, rodada 2): só a versão nova serve.
           : `este pacote foi feito para a API ${dele}, que nenhum servidor de hoje `
-            + `roda: este SEELE roda as APIs ${[...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort().join(" e ")}, e o `
+            + `roda: este SEELE roda as APIs ${APIS_ACEITAS_DITAS_E}, e o `
             + `Servidor 0.15, as ${APIS_DO_SERVIDOR_0_15_DITAS}. `
-            + "Procure a versão dele para a API 6 ou 7 no catálogo do servidor.";
+            + `Procure a versão dele para a API ${APIS_ACEITAS_DITAS_OU} no catálogo do servidor.`;
     texto.append(elemento("span", "mods-recusado", explicacao));
   }
   caixa.append(texto);

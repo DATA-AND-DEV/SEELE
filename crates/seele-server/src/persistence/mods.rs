@@ -221,8 +221,11 @@ pub fn enabled(persistence: &Persistence) -> Result<Vec<EnabledMod>> {
             // nomeia no registro a linha que não consegue.
             tema: row.get::<_, Option<i64>>(7)?.is_some_and(|tema| tema != 0),
             // Nulo, ou um texto que não é uma lista de plataformas conhecidas,
-            // lê-se «não preenchida»: o catálogo diz as duas e a subida tenta
-            // de novo. Uma linha estragada não derruba a leitura das outras.
+            // lê-se «não preenchida», e o catálogo diz as duas. Só o nulo é
+            // tentado de novo no início (`por_preencher` seleciona
+            // `plataformas IS NULL`): o texto ilegível fica como está e lê-se
+            // como as duas, sem nova tentativa. O que importa aqui é que a
+            // leitura não falha, e uma linha estragada não derruba a lista.
             plataformas: row
                 .get::<_, Option<String>>(8)?
                 .and_then(|texto| serde_json::from_str(&texto).ok()),
@@ -269,6 +272,15 @@ pub fn preencher_do_pacote(
     tema: bool,
     plataformas: &[Plataforma],
 ) -> Result<bool> {
+    // A lista vazia não é uma plataforma declarada: o manifesto da API 8 a
+    // recusa, e quem chega aqui sem nada declarado roda nas duas, como a chave
+    // ausente. Gravar `[]` faria o catálogo dizer «não roda em lugar nenhum».
+    let duas = [Plataforma::App, Plataforma::Navegador];
+    let plataformas = if plataformas.is_empty() {
+        &duas[..]
+    } else {
+        plataformas
+    };
     let mudou = persistence.connection().execute(
         "UPDATE mods
             SET api = CASE WHEN api = 0 THEN ?3 ELSE api END,
@@ -570,17 +582,34 @@ mod tests {
         com_api.api = 5;
         enable(&persistence, &com_api).expect("habilitar");
 
+        assert!(preencher_do_pacote(
+            &persistence,
+            "seele/sem",
+            &hash,
+            6,
+            false,
+            &[Plataforma::App, Plataforma::Navegador]
+        )
+        .expect("preencher"));
+        assert!(!preencher_do_pacote(
+            &persistence,
+            "seele/com",
+            &hash,
+            6,
+            false,
+            &[Plataforma::App, Plataforma::Navegador]
+        )
+        .expect("preencher"));
         assert!(
-            preencher_do_pacote(&persistence, "seele/sem", &hash, 6, false, &[])
-                .expect("preencher")
-        );
-        assert!(
-            !preencher_do_pacote(&persistence, "seele/com", &hash, 6, false, &[])
-                .expect("preencher")
-        );
-        assert!(
-            !preencher_do_pacote(&persistence, "seele/sem", &"d4".repeat(32), 9, false, &[])
-                .expect("preencher"),
+            !preencher_do_pacote(
+                &persistence,
+                "seele/sem",
+                &"d4".repeat(32),
+                9,
+                false,
+                &[Plataforma::App, Plataforma::Navegador]
+            )
+            .expect("preencher"),
             "outro hash não é a mesma linha"
         );
 

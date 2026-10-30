@@ -4245,8 +4245,10 @@ fn a_api_da_casca_bate_com_a_do_nucleo() {
     // texto. Desde o corte da API 6 o `APIS_ACEITAS` sai de `APIS_POR_LINHA`
     // (`c4eb6d03`), e a leitura do texto, que procurava a lista escrita,
     // reprovava com «sumiu» — o guarda dependia da forma, e não do número.
-    let da_casca: Vec<u32> = casca
-        .split_once("const APIS_QUE_ESTE_APLICATIVO_ACEITA = [")
+    // A lista mora em `frases.js` (antes das frases que a dizem), e a
+    // `API_DESTE_APLICATIVO`, acima, na `camada-mods.js`.
+    let da_casca: Vec<u32> = without_comments(&read("ui/frases.js"))
+        .split_once("const APIS_QUE_ESTE_APLICATIVO_ACEITA = Object.freeze([")
         .and_then(|(_, resto)| resto.split_once(']'))
         .map(|(lista, _)| {
             lista
@@ -4254,7 +4256,7 @@ fn a_api_da_casca_bate_com_a_do_nucleo() {
                 .filter_map(|n| n.trim().parse().ok())
                 .collect()
         })
-        .expect("`APIS_QUE_ESTE_APLICATIVO_ACEITA` sumiu de camada-mods.js");
+        .expect("`APIS_QUE_ESTE_APLICATIVO_ACEITA` sumiu de frases.js");
     assert_eq!(
         da_casca,
         seele_ffi::mods::APIS_ACEITAS,
@@ -22072,7 +22074,7 @@ fn a_conferencia_de_mods_da_sessao_que_saiu_nao_vira_aviso_da_sessao_nova() {
     rodar_node(
         "a conferência de MODs entre sessões",
         r##"
-const m = mundo({ snapshot: {}, mods_instalados: [] });
+const m = mundo({ snapshot: {}, mods_instalados: [], plataforma: "macos" });
 const portas = [];
 const avisos = [];
 m.ctx.console = { ...console, warn: (...a) => avisos.push(a.map(String).join(" ")) };

@@ -127,14 +127,15 @@ const CATALOGO = [
         // O host trocou a marca de um MOD já carregado para fora daqui: descarrega.
         const trocou = await pagina.evaluate(async (catalogo) => {
           table.mods_instalados = catalogo.map((m) => ({ id: m.id, hash: m.hash, client: true }));
-          modsCarregados.clear(); estadoDosMods.clear();
+          modsCarregados.clear(); estadoDosMods.clear(); montados.length = 0;
           entrarNaGeracao(2);
           modsCarregados.set("x/dois", { encerrar: async () => {} });
           pedirAoServidor = async () => ({ ok: true, conjunto: "conj-2", mods: catalogo.map((m) => (m.id === "x/dois" ? { ...m, plataformas: ["app"] } : m)) });
           await carregarMods();
-          return { carregado: modsCarregados.has("x/dois"), estado: estadoDosMods.get("x/dois") };
+          return { carregado: modsCarregados.has("x/dois"), estado: estadoDosMods.get("x/dois"), montados: [...montados] };
         }, CATALOGO);
         assert.equal(trocou.carregado, false, `${motor}: continuou carregado`);
+        assert.ok(!trocou.montados.includes("x/so-app"), `${motor}: montou o MOD só do app: ${JSON.stringify(trocou)}`);
         assert.equal(trocou.estado?.fase, "so-noutra-plataforma", `${motor}: ${JSON.stringify(trocou)}`);
 
         assert.deepEqual(erros, [], `${motor}: erros na página`);

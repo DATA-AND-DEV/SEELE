@@ -567,17 +567,6 @@ pub enum Plataforma {
     Navegador,
 }
 
-impl Plataforma {
-    /// O nome que o manifesto escreve, e que a interface mostra.
-    #[must_use]
-    pub const fn nome(self) -> &'static str {
-        match self {
-            Self::App => "app",
-            Self::Navegador => "navegador",
-        }
-    }
-}
-
 /// **As plataformas em que o MOD roda de fato**: a lista declarada, ou as duas
 /// quando o manifesto não declara nenhuma. É por aqui que o resto do produto
 /// lê, e nunca por `Manifest::plataformas` direto, para a regra «sem a chave,
@@ -1560,6 +1549,16 @@ mod tests {
     fn plataformas_sem_a_api_8_sao_recusadas() {
         assert_eq!(
             read_manifest(&com_api(7, r#" "plataformas": ["app"],"#)),
+            Err(Refused::PlataformasPedemApiNova { api: 7, exige: 8 })
+        );
+    }
+
+    /// A lista vazia numa API 7 é recusada pela API, e não pela lista: a 7 não
+    /// conhece a chave, e o guia documenta que ela diz isso primeiro.
+    #[test]
+    fn plataformas_vazias_na_api_7_pedem_a_api_8() {
+        assert_eq!(
+            read_manifest(&com_api(7, r#" "plataformas": [],"#)),
             Err(Refused::PlataformasPedemApiNova { api: 7, exige: 8 })
         );
     }

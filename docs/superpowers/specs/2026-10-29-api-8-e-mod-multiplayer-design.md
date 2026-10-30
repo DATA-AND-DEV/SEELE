@@ -145,7 +145,9 @@ app que não roda a 8 recusa o manifesto da 8 como `ApiTooNew`, ou como
   no protocolo. O aceite do conjunto não muda.
 - Quem entra por uma plataforma fora da lista **não baixa** a metade de cliente.
   A tela de MODs mostra o MOD com a frase «só funciona no app», e o MOD não
-  conta como falha.
+  conta como falha. Até as plataformas viajarem antes da entrada (próximo
+  plano), isto vale depois de entrar: durante o aceite o navegador pode baixar
+  o pacote sem executá-lo, porque o anúncio ainda não as carrega.
 - Declarar `poderes` (abaixo) **exige** `"plataformas": ["app"]`. Um manifesto
   com poderes e sem essa restrição é recusado na instalação, com o motivo
   escrito.

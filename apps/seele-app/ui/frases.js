@@ -690,6 +690,24 @@ const APIS_DO_SERVIDOR_0_15 = Object.freeze([3, 4, 5]);
 /** As mesmas, como as frases as dizem: «3 a 5». */
 const APIS_DO_SERVIDOR_0_15_DITAS = `${APIS_DO_SERVIDOR_0_15[0]} a ${APIS_DO_SERVIDOR_0_15.at(-1)}`;
 
+/**
+ * As APIs de MOD que este aplicativo roda (`seele_proto::mods::APIS_ACEITAS`).
+ * Mora aqui, antes das frases, porque elas a dizem e são montadas no
+ * carregamento; a `API_DESTE_APLICATIVO` (a mais nova) fica na `camada-mods.js`.
+ */
+const APIS_QUE_ESTE_APLICATIVO_ACEITA = Object.freeze([8, 7, 6]);
+
+/** Uma lista dita em português: «6, 7 e 8» / «6, 7 ou 8»; uma só, ela mesma. */
+function dizerLista(itens, conjuncao) {
+  const textos = itens.map(String);
+  if (textos.length < 2) return textos.join("");
+  return `${textos.slice(0, -1).join(", ")} ${conjuncao} ${textos.at(-1)}`;
+}
+const APIS_ACEITAS_ORDENADAS = [...APIS_QUE_ESTE_APLICATIVO_ACEITA].sort((a, b) => a - b);
+/** «6, 7 e 8», «6, 7 ou 8»: derivadas da constante, e não escritas à mão. */
+const APIS_ACEITAS_DITAS_E = dizerLista(APIS_ACEITAS_ORDENADAS, "e");
+const APIS_ACEITAS_DITAS_OU = dizerLista(APIS_ACEITAS_ORDENADAS, "ou");
+
 const RECUSAS_DE_PACOTE = {
   "malformed": "o mod.json dele não é um JSON que este app lê, ou tem uma chave que ele não conhece",
   "schema-too-new": "o mod.json dele é de um formato mais novo que este app; atualize o aplicativo",
@@ -708,7 +726,7 @@ const RECUSAS_DE_PACOTE = {
     "a lista de plataformas que ele declara está vazia, e assim ele não roda em lugar nenhum; quem publica precisa listar app, navegador ou as duas, ou tirar a chave",
   "plataforma-repetida":
     "a lista de plataformas que ele declara repete uma plataforma; quem publica precisa corrigi-la",
-  "api-too-old": `ele é de uma API mais velha que a 6, a mais velha que este app roda; procure a versão dele para a API 6 ou 7, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
+  "api-too-old": `ele é de uma API mais velha que a 6, a mais velha que este app roda; procure a versão dele para a API ${APIS_ACEITAS_DITAS_OU}, ou use o Servidor 0.15 pelo launcher, que roda as APIs ${APIS_DO_SERVIDOR_0_15_DITAS}`,
   "malformed-id": "o identificador dele não é «autor/nome»",
   "empty": "ele não declara nem a metade de janela nem a de servidor, e não faria nada",
   "tema-sem-metade-de-servidor": "ele declara a porta do tema sem a metade de servidor, que é quem pinta a aparência: o tema nunca apareceria",
@@ -849,7 +867,7 @@ function fraseDeErro(erro, apelido, deOnde) {
         "ESTE SERVIDOR TEM MOD QUE ESTE APP NÃO RODA.\n" +
         ditos.join("\n") +
         (algumComApi
-          ? "\nAtualize o MOD para a versão da API 6 ou 7; " +
+          ? `\nAtualize o MOD para a versão da API ${APIS_ACEITAS_DITAS_OU}; ` +
             (algumDo015 ? "ou hospede pelo Servidor 0.15, no launcher; " : "") +
             "ou desligue o MOD e hospede sem ele — os dados dele ficam."
           : "")

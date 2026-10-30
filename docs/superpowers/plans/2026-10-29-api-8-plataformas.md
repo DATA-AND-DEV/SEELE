@@ -16,7 +16,7 @@
 - Nenhum campo novo em mensagem que já existe no fio (ADR 0058). `PROTOCOL_VERSION` não muda neste plano.
 - Valores de `plataformas`: `"app"` e `"navegador"`. O celular é a casca web, então conta como `"navegador"`.
 - Ausente quer dizer as duas. Valor desconhecido é recusado (serde, `Malformed`).
-- A metade de cliente de um MOD fora da plataforma **não é baixada**, e a tela diz «só funciona no app» (ou «só funciona no navegador»).
+- A metade de cliente de um MOD fora da plataforma **não é baixada**, e a tela diz «só funciona no app» (ou «só funciona no navegador»). Até as plataformas viajarem antes da entrada (próximo plano), isto vale depois de entrar: durante o aceite o navegador pode baixar o pacote sem executá-lo.
 - Recusa é variante de `Refused`, com os números dentro; nenhuma string livre chega à casca (`specs/02-protocolo.md`).
 - Os comentários seguem o idioma do repositório: português, o porquê e não o quê.
 - Provar cada guarda revertendo o conserto e vendo o teste falhar (CLAUDE.md, «Existir não é funcionar»).
@@ -40,7 +40,6 @@
 **Interfaces:**
 - Produces:
   - `pub enum Plataforma { App, Navegador }` com `#[serde(rename_all = "lowercase")]`, `Deserialize`, `Serialize`, `Clone, Copy, Debug, PartialEq, Eq`.
-  - `impl Plataforma { pub const fn nome(self) -> &'static str }` → `"app"` / `"navegador"`.
   - `Manifest::plataformas: Vec<Plataforma>` (`#[serde(default)]`; vazio sem a chave).
   - `pub fn plataformas_efetivas(manifest: &Manifest) -> Vec<Plataforma>` → `[App, Navegador]` quando a lista está vazia, senão a lista.
   - `pub const PRIMEIRA_API_COM_PLATAFORMAS: u32 = 8;`
@@ -134,7 +133,7 @@ Copie `api/v7.json` e escreva a v8 por inteiro, sem `extends` (a regra da v6 e d
 
 - [ ] **Step 3: Espelhos**
 
-`CAPACIDADES_POR_API[8]` em `base.js` igual ao `[7]`. `api-do-indexador.json` com a 8, no formato das entradas que já estão lá. Em `api/README.md`, a seção «A API 8»: o que entra (`plataformas`), por que na linha 2 (ADR 0058, acréscimo), e o que a 0.18 faz com um manifesto da 8 (`ApiTooNew` sem a chave, `Malformed` com ela). Não mexa em `congeladas.sha256` para a v8: ela só congela quando sair numa release.
+`CAPACIDADES_POR_API[8]` em `base.js` igual ao `[7]`. `api-do-indexador.json` com a 8, no formato das entradas que já estão lá. Em `api/README.md`, a seção «A API 8»: o que entra (`plataformas`), por que na linha 2 (ADR 0058, acréscimo), e o que a 0.18 faz com um manifesto da 8 (`ApiTooNew` sem a chave, `Malformed` com ela). A linha da v8 em `congeladas.sha256` entra no commit que cria a `v8.json` e é refeita a cada emenda até a v8 sair numa release; só então ela congela.
 
 - [ ] **Step 4: Rodar os guardas e ver passar**
 

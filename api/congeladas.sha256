@@ -112,4 +112,4 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 # `check-api` exige a linha dela desde o commit que a cria; até a v8 sair numa
 # release, cada emenda a refaz aqui, na regra da v6 e da v7. Quando sair, ela
 # congela.
-d9f1eec301e666ac3146b0b7b98dbd84821d95742c40b812bf56b7deb7dbba08  v8.json
+890ec9918d52c37359d3fcbfcfeb50c0d843d0a869322cb6863be792d68610c2  v8.json

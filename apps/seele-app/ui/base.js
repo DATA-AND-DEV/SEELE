@@ -4430,7 +4430,9 @@ function plataformaDaCasca(respostaDoInvoke) {
  */
 function rodaAqui(modDoCatalogo, aqui) {
   const plataformas = modDoCatalogo?.plataformas;
-  if (!Array.isArray(plataformas) || !aqui) return true;
+  // `[]` lê-se como a chave ausente (as duas): o servidor não a grava, mas a
+  // lista vazia dita «não roda em lugar nenhum» tiraria o MOD do jogo.
+  if (!Array.isArray(plataformas) || plataformas.length === 0 || !aqui) return true;
   return plataformas.includes(aqui);
 }
 // A entrada não precisa esperar o relógio de quatro segundos. Se a consulta
@@ -4478,7 +4480,10 @@ async function carregarMods() {
     // Onde esta casca roda, perguntado uma vez por conferência. Quem não
     // responde fica sem lugar (`null`), e `rodaAqui` não recusa nada por isso.
     let aqui = null;
-    try { aqui = plataformaDaCasca(await invoke("plataforma")); } catch { /* sem lugar: nada é recusado */ }
+    try { aqui = plataformaDaCasca(await invoke("plataforma")); } catch (falha) {
+      // Sem lugar nada é recusado, mas o motivo não morre calado.
+      console.warn("plataforma:", falha);
+    }
     if (desistir()) return;
     // Pelo caminho de dentro, e não pela API dos MODs: o `id` vazio é o
     // catálogo do próprio servidor, e não um MOD pedindo alguma coisa. Enquanto
