@@ -1,0 +1,80 @@
+/* SEELE — as portas de jogo abertas (`#tuneis`).
+
+   Uma faixa do produto, fora de toda superfície de MOD: um MOD de jogo pede a
+   porta (`SeeleUI.tunel.entrar`), mas é o produto quem diz que ela está aberta,
+   em que número, por onde o tráfego anda e o que caiu. A faixa fica entre o
+   cabeçalho e os painéis, à vista, e some quando não há porta nenhuma.
+
+   Nenhuma cor literal aqui, nem em regra nem em comentário: `tests/tokens.rs`
+   lê o arquivo inteiro. O verde-fósforo é o valor nominal (a porta aberta e a
+   medida), o laranja é o aviso (a porta trocada, a queda), e o vermelho é só da
+   queda que acabou com o túnel. */
+
+/* **Na pilha da tela, e não por cima dela**: entre o cabeçalho e os painéis, ocupando
+   o lugar que tem. Uma faixa fixa no canto cobria o operador (microfone e SAIR DA
+   SALA) e o rodapé, e a porta aberta de um jogo é dado que a pessoa lê, e não aviso
+   que some. Escondida, não ocupa nada. */
+.camada-tuneis {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+  margin: var(--seele-e1) 12px 0;
+  max-height: 30dvh;
+  overflow-y: auto;
+}
+
+.camada-tuneis[hidden] { display: none; }
+
+.tunel-bloco {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--seele-e1) var(--seele-e2);
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  background: var(--seele-negro-painel);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  line-height: 1.4;
+}
+
+.tunel-bloco[data-estado="aberta"] { border-color: var(--seele-fosforo); }
+.tunel-bloco[data-estado="fechada"],
+.tunel-bloco[data-estado="recusada"] {
+  border-color: var(--seele-vermelho-alerta);
+  background: var(--seele-vermelho-fraco);
+}
+
+/* Em bloco e em linha, e não em flex: a linha é uma frase, e o texto dela tem
+   de sair inteiro, com os espaços, de quem a lê com um leitor de tela. */
+.tunel-linha {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tunel-porta { color: var(--seele-fosforo); font-weight: 700; }
+.tunel-bloco[data-estado="fechada"] .tunel-porta,
+.tunel-bloco[data-estado="recusada"] .tunel-porta { color: var(--seele-vermelho-alerta); }
+
+.tunel-medida { color: var(--seele-osso-apagado); }
+
+/* A porta trocada e a última queda: o que a pessoa precisa para agir (usar
+   outra porta) ou para saber por que o jogo soluçou. */
+.tunel-nota {
+  margin: 0;
+  color: var(--seele-laranja-nerv);
+  overflow-wrap: anywhere;
+}
+
+.tunel-dispensar {
+  align-self: flex-end;
+  padding: 2px var(--seele-e1);
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  background: transparent;
+  color: var(--seele-osso);
+  font: inherit;
+  cursor: pointer;
+}

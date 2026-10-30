@@ -1101,6 +1101,33 @@ impl Room {
             .map_or_else(|| format!("pessoa {}", person.0), |p| p.nickname.clone())
     }
 
+    /// O apelido de uma pessoa que o roster conhece, ou `None`.
+    ///
+    /// Diferente de [`Self::name_of`], que inventa um nome para quem nunca foi
+    /// apresentado: quem diz «ligação direta com <apelido>» prefere calar o
+    /// nome a escrever «pessoa 7» como se fosse um.
+    ///
+    /// **O nome que a tela mostra**, e não o interno: com a identidade
+    /// apresentada (a base e a tag de quatro caracteres), é a base — o roster
+    /// guarda `maquina#ZUN7`, e a faixa dizer isso a quem joga seria mostrar o
+    /// alias que `identidades_apresentadas` existe para esconder. A mesma regra
+    /// que a janela aplica ao retrato (`apelidoNoRetrato`).
+    #[must_use]
+    pub fn apelido_de(&self, person: PersonId) -> Option<String> {
+        let interno = &self.people.get(&person)?.nickname;
+        Some(match self.identidades_apresentadas.get(&person.0) {
+            Some((base, tag))
+                if tag.len() == 4
+                    && tag
+                        .chars()
+                        .all(|c| c.is_ascii_digit() || c.is_ascii_uppercase()) =>
+            {
+                base.clone()
+            }
+            _ => interno.clone(),
+        })
+    }
+
     /// A transmissão que **este** pessoa está compartilhando, se houver uma.
     ///
     /// Uma por sala de voz (§6 item 3), então achar a minha é achar aquela cujo dono
@@ -3480,6 +3507,51 @@ mod tests {
         );
         assert!(room.telas.is_empty());
         assert_eq!(room.chave_pedida, None);
+    }
+}
+
+#[cfg(test)]
+mod apelido_para_a_faixa_testes {
+    use super::*;
+
+    fn chega(room: &mut Room, id: u64, apelido: &str) {
+        room.apply(&ServerMessage::PersonPresent {
+            profile: seele_proto::control::PersonProfile {
+                id: PersonId(id),
+                nickname: apelido.into(),
+                roles: vec![],
+                material_e2ee: None,
+            },
+            ssrc: Ssrc(id as u32),
+        });
+    }
+
+    /// **A faixa dos túneis diz o nome que a tela mostra**: com a identidade
+    /// apresentada, a base — e não o `maquina#ZUN7` interno. Sem ela, o que o
+    /// roster guarda; e quem o roster não conhece, nada (a faixa cala o nome em
+    /// vez de escrever «pessoa 7» como se fosse um).
+    #[test]
+    fn o_apelido_da_faixa_e_a_base_da_identidade_apresentada() {
+        let mut room = Room::new();
+        chega(&mut room, 1, "maquina#ZUN7");
+        chega(&mut room, 2, "sem-tag");
+        assert_eq!(
+            room.apelido_de(PersonId(1)).as_deref(),
+            Some("maquina#ZUN7"),
+            "sem identidade apresentada ainda, é o que o roster guarda"
+        );
+        room.apply(&ServerMessage::IdentidadeApresentada {
+            pessoa: PersonId(1),
+            base: "maquina".into(),
+            tag: "ZUN7".into(),
+        });
+        assert_eq!(room.apelido_de(PersonId(1)).as_deref(), Some("maquina"));
+        assert_eq!(room.apelido_de(PersonId(2)).as_deref(), Some("sem-tag"));
+        assert_eq!(
+            room.apelido_de(PersonId(99)),
+            None,
+            "quem o roster não conhece"
+        );
     }
 }
 

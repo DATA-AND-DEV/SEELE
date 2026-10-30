@@ -652,11 +652,14 @@ struct InstanciaNativa {
     geracao: u64,
     /// O conteúdo exato que subiu.
     hash: String,
-    /// A API que o manifesto deste pacote declara.
-    ///
-    /// Guardada com a instância e não relida na ativação: quem decide o que
-    /// este MOD pode chamar tem de ser a mesma leitura que provou o hash dele.
-    api_declarada: u32,
+    /// **O que o manifesto deste pacote deixa o MOD chamar**: as capacidades da
+    /// API dele mais as que os poderes dão (`tunel` para quem declara
+    /// `porta`). Guardadas com a instância e não relidas na ativação: quem
+    /// decide o que este MOD pode chamar tem de ser a mesma leitura que provou
+    /// o hash dele — e é por aqui que o
+    /// prelúdio monta `SeeleUI`, e que `tunel_entrar` confere o poder antes de
+    /// falar com o servidor.
+    capacidades: Vec<&'static str>,
     /// Em que ponto do ciclo ela está.
     estado: EstadoNativo,
     /// O executor.
@@ -842,6 +845,20 @@ impl ModsNativos {
         let numero = self.proxima;
         self.vivos.insert(numero, instancia);
         numero
+    }
+
+    /// Este MOD está de pé nesta geração, e o manifesto dele deixa chamar
+    /// `capacidade`? É a segunda porta do que o prelúdio só omite (a primeira é
+    /// `podePedir`, na janela): um comando que abre algo na máquina de quem usa
+    /// confere o poder aqui, com o que o Rust leu do pacote, e não com o que a
+    /// janela diz.
+    fn pode(&self, geracao: u64, id: &str, capacidade: &str) -> bool {
+        self.vivos.values().any(|instancia| {
+            instancia.geracao == geracao
+                && instancia.id == id
+                && instancia.estado == EstadoNativo::Ativa
+                && instancia.capacidades.contains(&capacidade)
+        })
     }
 
     /// Acha uma instância, viva ou encerrando.
@@ -6880,6 +6897,105 @@ fn mod_request(
     saiu
 }
 
+/// **Entra num túnel de jogo** (API 8, `SeeleUI.tunel.entrar`): abre a porta em
+/// `127.0.0.1` em que o jogo de quem joga deve ligar, e devolve o número dela.
+///
+/// **Só a janela chama, e só depois de gastar o bilhete de gesto** (um clique,
+/// 2 s, uso único; `base.js`). O Rust não confere o clique, que é da janela, mas
+/// confere o que é dele: a geração, e que este MOD está de pé nela com o poder
+/// `porta` no manifesto que o pacote provou. Quem confere o MOD ligado no
+/// servidor, a ação `entrar-no-jogo` e a máquina que serve é o servidor, a cada
+/// entrada.
+///
+/// A recusa é sempre `Recusado { motivo }`, com o nome em kebab-case de
+/// `RecusaDeTunel` (ou `mod-sem-porta` e `sessao-encerrada`, daqui): a frase é
+/// da janela.
+///
+/// # Errors
+///
+/// [`FalhaNoMod::Recusado`], como descrito.
+#[tauri::command]
+async fn tunel_entrar(
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+    nome: String,
+) -> Result<seele_ffi::PortaDeTunel, FalhaNoMod> {
+    entrar_no_tunel_do_mod(&session, geracao, &id, nome).await
+}
+
+/// O corpo de [`tunel_entrar`], sem o `State`: é o que deixa um teste chamá-lo
+/// com uma `Session` à mão.
+async fn entrar_no_tunel_do_mod(
+    session: &Session,
+    geracao: u64,
+    id: &str,
+    nome: String,
+) -> Result<seele_ffi::PortaDeTunel, FalhaNoMod> {
+    // Antes do efeito, como todo comando de MOD.
+    session.recusar_se_morta(geracao)?;
+    let pode = session
+        .mods_nativos
+        .lock()
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+        .pode(geracao, id, "tunel");
+    if !pode {
+        // Dito: um MOD que pede uma porta sem ter o poder é um defeito dele, e
+        // a recusa chega a quem hospeda além de chegar a ele.
+        tracing::warn!(
+            mod_id = %id_no_registro(id),
+            geracao,
+            "o MOD pediu uma porta de jogo e não está de pé com o poder porta"
+        );
+        return Err(FalhaNoMod::Recusado {
+            motivo: "mod-sem-porta".to_owned(),
+        });
+    }
+    let conexao = session.connection().map_err(|_| FalhaNoMod::Recusado {
+        motivo: "sessao-encerrada".to_owned(),
+    })?;
+    conexao
+        .entrar_no_tunel(id.to_owned(), nome)
+        .await
+        .map_err(|motivo| FalhaNoMod::Recusado {
+            motivo: motivo.to_owned(),
+        })
+}
+
+/// **Fecha os túneis de jogo de um MOD** que saiu (desligado, descarregado,
+/// sessão nova): a porta fecha e os fluxos acabam. Fechar o que não existe não
+/// é erro.
+///
+/// # Errors
+///
+/// [`FalhaNoMod::Recusado`] com `sessao-encerrada` quando a sessão (ou a
+/// geração) já acabou; nesse caso o enlace já derrubou os túneis ao sair.
+#[tauri::command]
+fn tunel_sair_do_mod(
+    session: State<'_, Session>,
+    geracao: u64,
+    id: String,
+) -> Result<(), FalhaNoMod> {
+    session.recusar_se_morta(geracao)?;
+    session
+        .connection()
+        .and_then(|conexao| conexao.sair_dos_tuneis_do_mod(id))
+        .map_err(|_| FalhaNoMod::Recusado {
+            motivo: "sessao-encerrada".to_owned(),
+        })
+}
+
+/// Os túneis de jogo abertos agora nesta sessão, com o último relatório de
+/// cada um: o que a faixa do produto lê ao carregar e quando a sessão da vista
+/// muda. Sem sessão, lista vazia — e é a resposta certa: não há porta aberta.
+#[tauri::command]
+fn tuneis_abertos(session: State<'_, Session>) -> Vec<seele_ffi::RelatorioDeTunel> {
+    session
+        .connection()
+        .map(|conexao| conexao.tuneis_abertos())
+        .unwrap_or_default()
+}
+
 /// **O id de um pedido de MOD como as linhas de [`mod_request`] o levam**:
 /// os três braços da metade servidor (`executar`, em
 /// `crates/seele-server/src/mods/pedidos.rs`), para que as duas metades
@@ -8128,7 +8244,11 @@ fn reservar_no_executor(
     // O mesmo caminho de sempre para chegar ao código: a conferência de hash e
     // de identidade mora lá, e um segundo caminho seria uma segunda regra. Lido
     // agora para que a ativação não possa falhar por causa do disco.
-    let (codigo, api_declarada) = ler_codigo_do_mod(app, session, geracao, id, &hash)?;
+    let CodigoDoMod {
+        fonte: codigo,
+        capacidades,
+        ..
+    } = ler_codigo_do_mod(app, session, geracao, id, &hash)?;
 
     let mut executor =
         executor::ExecutorQuickJs::novo(executor::Limites::default()).map_err(|_| {
@@ -8166,7 +8286,7 @@ fn reservar_no_executor(
             avisos_perdidos: 0,
             parou: false,
             codigo: Some(codigo),
-            api_declarada,
+            capacidades,
             avisado: false,
         },
     )?;
@@ -8336,9 +8456,10 @@ fn liberar_reserva(
     let codigo = alvo.codigo.take().ok_or(FalhaNoMod::Recusado {
         motivo: "nada-reservado".to_owned(),
     })?;
-    let api = alvo.api_declarada;
+    // As capacidades do manifesto, e não o número da API: o `tunel` é do poder.
+    let capacidades = alvo.capacidades.clone();
     alvo.executor
-        .iniciar_com_api(&codigo, api)
+        .iniciar_com_capacidades(&codigo, capacidades)
         .map_err(|_| FalhaNoMod::Recusado {
             motivo: "executor-nao-aceitou-o-codigo".to_owned(),
         })?;
@@ -9646,7 +9767,7 @@ fn codigo_do_mod(
     geracao: u64,
     id: String,
     hash: String,
-) -> Result<(String, u32), FalhaNoMod> {
+) -> Result<CodigoDoMod, FalhaNoMod> {
     // **Dita no registro, uma vez por motivo** ([`recusa_de_carga_dita`]). A
     // carga só é dada por aceita quando a reserva sobe, em
     // [`mod_nativo_reservar`]: o código lido aqui ainda não é um MOD de pé.
@@ -9663,7 +9784,7 @@ fn ler_codigo_do_mod(
     geracao: u64,
     id: &str,
     hash: &str,
-) -> Result<(String, u32), FalhaNoMod> {
+) -> Result<CodigoDoMod, FalhaNoMod> {
     // O código de um MOD é o começo de uma montagem, e uma montagem pertence a
     // uma sessão. Entregá-lo para uma geração morta seria pôr um worker de pé
     // depois de a sessão dele ter acabado — a corrida que o roteiro da E2 chama
@@ -9679,6 +9800,11 @@ fn ler_codigo_do_mod(
             motivo: "conteudo-de-outro-mod".to_owned(),
         });
     }
+    // **As capacidades saem da mesma leitura**: os poderes que o manifesto
+    // declara decidem se o MOD tem `SeeleUI.tunel`, e uma segunda leitura do
+    // pacote seria uma segunda chance de discordar da que provou o hash.
+    let capacidades = pacote.capacidades();
+    let api = pacote.api;
     let Some(cliente) = pacote.client else {
         return Err(FalhaNoMod::Recusado {
             motivo: "sem-metade-de-cliente".to_owned(),
@@ -9694,11 +9820,34 @@ fn ler_codigo_do_mod(
     // leitura do manifesto: duas leituras são duas oportunidades de discordar,
     // e a que decide o que o MOD pode chamar tem de ser a mesma que provou o
     // hash dele.
-    let api = pacote.api;
     let fonte = String::from_utf8(bytes).map_err(|_| FalhaNoMod::Recusado {
         motivo: "cliente-nao-e-utf8".to_owned(),
     })?;
-    Ok((fonte, api))
+    Ok(CodigoDoMod {
+        fonte,
+        api,
+        capacidades,
+    })
+}
+
+/// O código de um MOD lido do disco, com o que o manifesto dele deixa chamar.
+///
+/// Para a janela é o par `[fonte, api]` de sempre (a serialização é a de uma
+/// tupla): as capacidades são do lado do Rust, e é ele quem monta o prelúdio.
+#[derive(Debug)]
+struct CodigoDoMod {
+    /// O que o pacote traz.
+    fonte: String,
+    /// A API que o manifesto declara.
+    api: u32,
+    /// As capacidades da API mais as dos poderes.
+    capacidades: Vec<&'static str>,
+}
+
+impl serde::Serialize for CodigoDoMod {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (&self.fonte, self.api).serialize(serializer)
+    }
 }
 
 /// Um arquivo de mídia de um MOD, pronto para a janela montar.
@@ -14536,6 +14685,9 @@ fn main() {
             tirar_icone_do_server,
             mods_instalados,
             mod_request,
+            tunel_entrar,
+            tunel_sair_do_mod,
+            tuneis_abertos,
             aceite_de_mods,
             aceitar_mods,
             esquecer_aceite_de_mods,
@@ -14671,6 +14823,12 @@ fn main() {
                     .await;
                     saida.exit(0);
                 });
+                // **As portas de jogo fecham aqui**: `despedir_se` encerra cada
+                // sessão (`encerrar_e_esperar`), e o enlace derruba os túneis de
+                // quem joga ao sair — a porta em `127.0.0.1` não sobrevive ao
+                // app. Provado em `tunel_pela_ffi.rs` (conformidade),
+                // `encerrar_a_sessao_fecha_a_porta`: a mesma chamada, com a porta
+                // aberta de verdade.
                 despedir_se(handle);
             }
             // **E quem sai sem fechar a janela** (tarefa 21 da F7): o Sair do
@@ -15978,7 +16136,8 @@ mod a_supervisao_dos_mods_nativos {
             id: "prova/mod".to_owned(),
             geracao,
             hash: "a".repeat(64),
-            api_declarada: seele_ffi::mods::MOD_API_VERSION,
+            capacidades: seele_ffi::mods::capacidades_da_api(seele_ffi::mods::MOD_API_VERSION)
+                .to_vec(),
             estado: EstadoNativo::Ativa,
             executor: ExecutorQuickJs::novo(Limites::default()).expect("motor"),
             pendentes: std::collections::VecDeque::new(),
@@ -16570,6 +16729,8 @@ mod a_supervisao_dos_mods_nativos {
             ("fn mod_nativo_colher(", 1),
             ("fn mod_nativo_entregar(", 1),
             ("fn ler_codigo_do_mod(", 1),
+            ("async fn entrar_no_tunel_do_mod(", 1),
+            ("fn tunel_sair_do_mod(", 1),
             ("fn reservar_no_executor(", 1),
             ("fn midia_do_mod(", 1),
             ("fn som_do_mod(", 1),
@@ -22225,6 +22386,137 @@ mod a_api_do_mod_habilitado {
         assert!(
             lista.contains("pacote_no_cache_de(") && !lista.contains(concat!("PacoteNoCache", " {")),
             "`pacotes_no_cache` deixou de montar a lista pela construção que leva a API do manifesto"
+        );
+    }
+}
+
+/// **O comando `tunel_entrar` confere o que é do Rust** (API 8, parte 2): a
+/// geração, e que o MOD está de pé nela com o poder `porta` no manifesto que o
+/// pacote provou. O bilhete de gesto é da janela (`bancada/tunel-de-jogador.cjs`);
+/// quem confere o servidor, a ação e a máquina é o servidor (conformidade).
+///
+/// A recusa é sempre um nome da lista fechada, nunca a variante de um erro de
+/// conexão: é o que o MOD e a faixa leem.
+#[cfg(test)]
+mod o_tunel_de_jogo_pelo_app {
+    use super::{entrar_no_tunel_do_mod, EstadoNativo, FalhaNoMod, InstanciaNativa, Session};
+    use crate::executor::{ExecutorQuickJs, Limites};
+
+    fn motivo(falha: &FalhaNoMod) -> &str {
+        match falha {
+            FalhaNoMod::Recusado { motivo } => motivo,
+            outra => panic!("esperava `Recusado`, veio {outra:?}"),
+        }
+    }
+
+    /// Uma sessão viva (geração 1) com um MOD de pé que pode chamar `capacidades`.
+    fn sessao_com(id: &str, capacidades: Vec<&'static str>) -> (Session, u64) {
+        let sessao = Session::default();
+        let geracao = sessao.revogar();
+        let instancia = InstanciaNativa {
+            id: id.to_owned(),
+            geracao,
+            hash: "a".repeat(64),
+            capacidades,
+            estado: EstadoNativo::Ativa,
+            executor: ExecutorQuickJs::novo(Limites::default()).expect("motor"),
+            pendentes: std::collections::VecDeque::new(),
+            bytes_pendentes: 0,
+            avisos: std::collections::VecDeque::new(),
+            avisos_perdidos: 0,
+            parou: false,
+            codigo: None,
+            avisado: false,
+        };
+        sessao
+            .mods_nativos
+            .lock()
+            .expect("tabela")
+            .guardar(instancia);
+        (sessao, geracao)
+    }
+
+    fn rodar<T>(futuro: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(futuro)
+    }
+
+    #[test]
+    fn a_sessao_que_acabou_e_recusada_antes_de_olhar_o_mod() {
+        let sessao = Session::default();
+        // Geração 0 nunca vale; e uma morta (1, depois revogada) também não.
+        let viva = sessao.revogar();
+        sessao.revogar();
+        for geracao in [0, viva] {
+            let falha = rodar(entrar_no_tunel_do_mod(
+                &sessao,
+                geracao,
+                "x/jogo",
+                "n".into(),
+            ))
+            .expect_err("uma geração morta não entra");
+            assert_eq!(motivo(&falha), "sessao-encerrada", "geração {geracao}");
+        }
+    }
+
+    #[test]
+    fn um_mod_sem_o_poder_porta_e_recusado_com_o_nome() {
+        // De pé, na geração viva, mas com as capacidades da API e sem `tunel`.
+        let (sessao, geracao) = sessao_com(
+            "x/sem-porta",
+            seele_ffi::mods::capacidades_da_api(seele_ffi::mods::MOD_API_VERSION).to_vec(),
+        );
+        let falha = rodar(entrar_no_tunel_do_mod(
+            &sessao,
+            geracao,
+            "x/sem-porta",
+            "n".into(),
+        ))
+        .expect_err("sem o poder porta não entra");
+        assert_eq!(motivo(&falha), "mod-sem-porta");
+        // Um MOD que não está de pé tampouco.
+        let falha = rodar(entrar_no_tunel_do_mod(
+            &sessao,
+            geracao,
+            "x/ninguem",
+            "n".into(),
+        ))
+        .expect_err("quem não está de pé não entra");
+        assert_eq!(motivo(&falha), "mod-sem-porta");
+    }
+
+    #[test]
+    fn o_poder_porta_passa_o_portao_e_so_para_na_falta_de_sessao() {
+        // `tunel` nas capacidades: passa pelo portão do Rust, e a recusa que
+        // sobra é a da conexão — que esta sessão de teste não tem. A diferença
+        // para `mod-sem-porta` é o que prova que o portão deixou passar.
+        let (sessao, geracao) = sessao_com("x/jogo", vec!["tunel"]);
+        let falha = rodar(entrar_no_tunel_do_mod(
+            &sessao,
+            geracao,
+            "x/jogo",
+            "n".into(),
+        ))
+        .expect_err("sem conexão não há porta");
+        assert_eq!(motivo(&falha), "sessao-encerrada");
+    }
+
+    #[test]
+    fn o_poder_de_outra_geracao_ou_de_outro_mod_nao_vale() {
+        let (sessao, geracao) = sessao_com("x/jogo", vec!["tunel"]);
+        let tabela = sessao.mods_nativos.lock().expect("tabela");
+        assert!(tabela.pode(geracao, "x/jogo", "tunel"));
+        assert!(
+            !tabela.pode(geracao + 1, "x/jogo", "tunel"),
+            "outra geração"
+        );
+        assert!(!tabela.pode(geracao, "x/outro", "tunel"), "outro MOD");
+        assert!(
+            !tabela.pode(geracao, "x/jogo", "retrato"),
+            "outra capacidade"
         );
     }
 }

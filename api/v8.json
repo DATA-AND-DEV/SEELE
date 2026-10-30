@@ -159,6 +159,9 @@
     "servidor.dados.uso": "dados.uso(): os bytes do quintal, chave mais valor, em UTF-8 — a conta da gravação",
     "servidor.dados.teto": "dados.teto: o teto da gravação; acima dele, o pedido volta com o erro quintal-cheio",
     "retrato": "SeeleUI.retrato, no lugar de SeeleMods.snapshot",
+    "tunel.entrar": "SeeleUI.tunel.entrar(nome) existe só para o MOD da API 8 que declara o poder porta (a capacidade tunel vem do poder, e não da versão). Resolve com o número da porta em 127.0.0.1 em que o jogo de quem joga deve ligar: a do jogo, ou a primeira livre das 64 seguintes, e a faixa do produto diz qual. Só vale chamado de dentro do ouvinte de um evento botao, na mesma volta: o bilhete de gesto que o evento leva (gesto) é emitido pela casca, vale 2 s e se gasta no primeiro uso; sem ele, inventado, vencido ou já gasto, a recusa é fora-de-um-clique e nada vai ao núcleo. A entrada é o consentimento de quem clicou. Fora do app (no navegador) a recusa é so-no-app",
+    "botao.gesto": "só o MOD que declara o poder porta recebe gesto no evento botao: o bilhete que SeeleUI.tunel.entrar usa na mesma volta. Os demais MODs recebem o evento como sempre",
+    "tunel.faixa": "o produto desenha, fora de toda superfície de MOD, uma linha por porta aberta: a porta, o nome do túnel e o MOD, por onde o tráfego anda (ligação direta com a pessoa da máquina, ou pela estrela, via o anfitrião), a latência, a vazão, a porta trocada quando a do jogo estava ocupada e a última queda com o motivo em frase. Um MOD não a desenha, não a cala e não a lê",
     "formulario-erros": "a recusa do servidor de volta ao campo — s.formulario.erros({ chave: frase }), um campo ou vários; {} limpa; chave que não é de um campo: chave-desconhecida (tarefa 7, Step 6b)",
     "atualizar-contribuicao": "atualiza uma contribuição de pé, pelo punho (PERFIS R7)",
     "superficie-atualizar": "superficie.atualizar(chave, subarvore) — troca o nó de chave e o que está sob ele, numa mensagem própria; o teto da superfície é o de nós (4096) e o de mídia, e não o da mensagem. No contrato, existe desde a 6; na casca, mora na capacidade superficies, que só a 6 tem",
@@ -800,6 +803,21 @@
     ],
     "tema-pela-janela": [
       "contraste (no evento tema e na resposta da prévia, e não em mundo.tema; leva pares: [{ frente, fundo, razao, piso }], e a regiao quando quem recusou foi uma região; tarefa 17e)"
+    ],
+    "tunel": [
+      "fora-de-um-clique (SeeleUI.tunel.entrar sem o bilhete de gesto de um clique: ausente, inventado, vencido ou já gasto; nada vai ao núcleo)",
+      "so-no-app (o navegador não abre porta local)",
+      "nao-existe (nenhuma máquina serve esse nome)",
+      "sem-permissao (a pessoa não tem a ação entrar-no-jogo do MOD)",
+      "acao-nao-declarada (o MOD não declara a ação entrar-no-jogo)",
+      "mod-sem-porta (o MOD não está ligado neste servidor, ou não declara o poder porta)",
+      "nome-tomado (a pessoa já tem um túnel com esse nome neste MOD)",
+      "maquina-saiu (a máquina saiu do servidor enquanto o pedido andava)",
+      "tuneis-demais (o servidor já tem túneis demais)",
+      "canais-esgotados (não há canais de túnel livres para a pessoa)",
+      "servidor-antigo (o servidor negociou menos de 12: nada foi escrito no fio)",
+      "porta-local-ocupada (a do jogo e as 64 seguintes estavam tomadas em 127.0.0.1)",
+      "sem-resposta (a sessão acabou, ou o prazo venceu sem resposta do servidor)"
     ]
   },
   "manifesto": {

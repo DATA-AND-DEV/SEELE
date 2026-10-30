@@ -33,11 +33,23 @@ pub const PRELUDIO: &str = r#"
 
   let ouvinte = null;
 
+  // **O bilhete de gesto da volta em curso**: o `gesto` do evento `botao` que o
+  // ouvinte está recebendo agora, e `null` em qualquer outro momento. O MOD de
+  // jogo só abre uma porta de dentro de um clique, e o clique chega aqui como
+  // este bilhete, emitido pela casca; fora do ouvinte (depois de um `await`,
+  // num temporizador) ele não existe, e `SeeleUI.tunel.entrar` sai com
+  // `gesto: null`. Quem confere o bilhete é a casca (prazo de 2 s, uso único);
+  // aqui ele só é carregado, e solto ao fim da volta.
+  let gestoDaVolta = null;
+
   globalThis.aoResponder = (texto) => {
     let m;
     try { m = JSON.parse(texto); } catch { return; }
     if (m.tipo === 'evento') {
       if (!ouvinte) return;
+      // Só o `botao` carrega bilhete: um `gesto` num evento de outro nome não é
+      // da casca, e não vale.
+      gestoDaVolta = (m.nome === 'botao' && typeof m.gesto === 'string') ? m.gesto : null;
       // O erro do MOD fica com o MOD: um ouvinte que lança não pode impedir o
       // próximo evento de chegar. A volta inteira falharia, e o anfitrião a
       // relataria como `Falhou` — que é o MOD com defeito, não este.
@@ -48,6 +60,8 @@ pub const PRELUDIO: &str = r#"
       try { ouvinte(m); } catch (erro) {
         dizerOErro('erro num ouvinte de evento:', erro);
         seele.postar(JSON.stringify({ tipo: 'erro-no-evento', erro: String(erro) }));
+      } finally {
+        gestoDaVolta = null;
       }
       return;
     }
@@ -395,6 +409,17 @@ pub const PRELUDIO: &str = r#"
     atualizar: (handle, conteudo) => pedir('atualizar-contribuicao', { handle, conteudo }),
   }));
 
+  // **O túnel de jogo** (API 8, poder `porta`): ausente para quem não o
+  // declara, como toda capacidade. `entrar` leva o bilhete de gesto da volta em
+  // que foi chamado (`gestoDaVolta`), lido **na hora da chamada**: um `entrar`
+  // depois de um `await` sai com `gesto: null` e a casca o recusa como
+  // `fora-de-um-clique`. Resolve com o número da porta em `127.0.0.1`.
+  const tunel = comCapacidade('tunel', Object.freeze({
+    // `async`, como os membros de `superficies`: o bilhete é lido **agora**, na
+    // chamada, e a promessa é a da resposta.
+    entrar: async (nome) => pedir('tunel-entrar', { nome: String(nome ?? ''), gesto: gestoDaVolta }),
+  }));
+
   globalThis.SeeleUI = Object.freeze({
     // **Sem `regiao` e sem `cartoes`** (decisão do dono de 08/10): a região é
     // um ponto de contribuição, e o cartão de uma pessoa é o `pessoa.cartao`.
@@ -412,6 +437,7 @@ pub const PRELUDIO: &str = r#"
     ...(capacidades.has('retrato') ? { retrato: () => pedir('retrato', {}) } : {}),
     ...(superficies ? { superficies } : {}),
     ...(contribuicoes ? { contribuicoes } : {}),
+    ...(tunel ? { tunel } : {}),
     // A lista, legível pelo próprio MOD: um pacote que queira degradar em vez
     // de falhar precisa poder perguntar, e perguntar a `SeeleUI.superficies`
     // já é a resposta — mas um nome explícito evita o truque.

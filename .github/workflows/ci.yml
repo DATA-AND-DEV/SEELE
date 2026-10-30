@@ -600,6 +600,12 @@ jobs:
       - run: node apps/seele-app/bancada/plataformas-dos-mods.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O túnel de jogo, do lado de quem joga (API 8, parte 2): o bilhete de gesto
+      # na fronteira da casca (casos 2 a 4), o fecho no descarregar e a faixa do
+      # produto. Nos dois motores, por isso também depois do `install webkit`.
+      - run: node apps/seele-app/bancada/tunel-de-jogador.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/visual-0174.cjs target/visual-0174
         if: ${{ !cancelled() }}
         timeout-minutes: 5

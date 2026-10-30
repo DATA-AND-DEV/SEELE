@@ -122,6 +122,15 @@ pub struct ModInstalado {
 }
 
 impl ModInstalado {
+    /// **O que este pacote pode chamar**: as capacidades da API dele, mais as
+    /// que os poderes dão (`tunel` para quem declara `porta`). É a lista que o
+    /// executor leva ao prelúdio, pela mesma regra de
+    /// [`seele_proto::mods::capacidades_do_manifesto`].
+    #[must_use]
+    pub fn capacidades(&self) -> Vec<&'static str> {
+        seele_proto::mods::capacidades_de(self.api, &self.poderes)
+    }
+
     /// Um pacote que leu limpo, sob o hash dele em hexadecimal.
     #[must_use]
     pub fn lido(manifest: Manifest, hash: String) -> Self {

@@ -21,8 +21,8 @@ use seele_core::mods::{hex, refusal_name, Found};
 /// `crates/seele-conformance/tests/a_api_dos_mods_nao_diverge.rs`: a primeira
 /// divergência só apareceu no primeiro MOD de verdade.
 pub use seele_core::mods::{
-    capacidades_da_api, capacidades_do_manifesto, Poder, APIS_ACEITAS, MOD_API_MINIMA,
-    MOD_API_VERSION,
+    capacidades_da_api, capacidades_de, capacidades_do_manifesto, Poder, APIS_ACEITAS,
+    MOD_API_MINIMA, MOD_API_VERSION,
 };
 
 /// Ler um arquivo de mídia de um MOD — ver [`seele_core::mods::ler_midia`].

@@ -15891,7 +15891,8 @@ fn o_executor_nativo_e_admitido_antes_de_rodar_e_junto_com_a_revogacao() {
         .1;
     let ativar = ativar.split_once("\n/// ").map_or(ativar, |(a, _)| a);
     assert!(
-        ativar.contains("geracao_vale()") && ativar.contains(".iniciar_com_api(&codigo, api)"),
+        ativar.contains("geracao_vale()")
+            && ativar.contains(".iniciar_com_capacidades(&codigo, capacidades)"),
         "a ativação deixou de conferir a revogação antes de liberar a \
          execução: {ativar}"
     );
@@ -15900,8 +15901,8 @@ fn o_executor_nativo_e_admitido_antes_de_rodar_e_junto_com_a_revogacao() {
     // `SeeleUI` a partir deste número, e trocá-lo por `MOD_API_VERSION` daria
     // superfícies e contribuições a um pacote que não as declarou.
     assert!(
-        ativar.contains("alvo.api_declarada"),
-        "a ativação passou a subir o MOD com uma API que não é a do manifesto \
+        ativar.contains("alvo.capacidades"),
+        "a ativação passou a subir o MOD com capacidades que não são as do manifesto \
          dele: {ativar}"
     );
 
@@ -17117,7 +17118,8 @@ fn plataforma_o_mod_de_outro_lugar_sai_antes_da_conta_do_que_falta() {
     // As duas peças.
     let rodaaqui = js_function(&base, "function rodaAqui(");
     assert!(
-        rodaaqui.contains("Array.isArray(plataformas)") && rodaaqui.contains("plataformas.includes(aqui)"),
+        rodaaqui.contains("Array.isArray(plataformas)")
+            && rodaaqui.contains("plataformas.includes(aqui)"),
         "`rodaAqui` perdeu o caso do host antigo (sem a chave, roda) ou o `includes`: {rodaaqui}"
     );
     let casca = js_function(&base, "function plataformaDaCasca(");
@@ -17137,7 +17139,8 @@ fn plataforma_o_laco_de_carga_pula_o_mod_marcado_como_de_outro_lugar() {
         .expect("o laço de carga de `carregarMods` sumiu");
     let antes_de_montar = laco.split("montarOMod(").next().unwrap();
     assert!(
-        antes_de_montar.contains("\"so-noutra-plataforma\"") && antes_de_montar.contains("continue"),
+        antes_de_montar.contains("\"so-noutra-plataforma\"")
+            && antes_de_montar.contains("continue"),
         "o laço de carga não pula o MOD marcado `so-noutra-plataforma`: {laco}"
     );
     // O que já estava carregado e o host trocou de lado sai pelo caminho de «saiu da exigência».
@@ -20709,7 +20712,8 @@ fn todo_pacote_recusado_e_dito_com_uma_frase() {
 /// onze nomes que o contrato não listava, e o contrato não dizia que o
 /// genérico é `falhou`.
 ///
-/// - todo nome que a janela entrega está no contrato;
+/// - todo nome que a janela entrega está no contrato (o `recusas` da v6, e o
+///   `recusas.tunel` da v8, que nasceu depois dela);
 /// - todo nome do contrato está na janela, menos os da lista `tema`, que são
 ///   do `mundo.tema` da metade de servidor e não passam pela janela;
 /// - as recusas das contribuições e as das superfícies, que têm lista ou
@@ -20763,6 +20767,25 @@ fn a_lista_fechada_das_recusas_e_a_do_v6() {
             }
         }
     }
+
+    // **As do túnel de jogo são da v8** (API 8, `recusas.tunel`): a v6 é
+    // publicada e não muda, e o contrato do túnel nasceu depois dela. Entram no
+    // mesmo conjunto, e valem nos dois sentidos como as outras.
+    let v8: serde_json::Value =
+        serde_json::from_str(&read("../../api/v8.json")).expect("api/v8.json é JSON");
+    let do_tunel: Vec<String> = v8
+        .pointer("/recusas/tunel")
+        .and_then(serde_json::Value::as_array)
+        .expect("api/v8.json sem `recusas.tunel`")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(nome)
+        .collect();
+    assert!(
+        do_tunel.len() >= 12,
+        "a leitura de `recusas.tunel` do v8 quebrou: {do_tunel:?}"
+    );
+    contrato.extend(do_tunel);
 
     let fora_do_contrato: Vec<_> = janela
         .iter()
@@ -25469,5 +25492,249 @@ for (const [nome, m] of mutantesDePedido) {
 }
 clearTimeout(vigia);
 "##,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// O túnel de jogo, do lado de quem joga (API 8, parte 2; Task 9)
+//
+// A bancada `tunel-de-jogador.cjs` mede no navegador; estes guardam a forma,
+// que é o que a suíte de texto vê: a ordem das chamadas na fronteira, e os
+// arquivos que a faixa do produto não pode tocar.
+// ---------------------------------------------------------------------------
+
+/// **`tunel-entrar` só passa para quem tem o poder `porta`**: a capacidade
+/// `tunel` não está em `CAPACIDADES_POR_API` (é do manifesto, e não da versão),
+/// e `podePedir` a soma quando `mod.poderes` tem `"porta"`.
+#[test]
+fn tunel_pode_pedir_exige_a_capacidade_do_poder_porta() {
+    let base = without_comments(&read("ui/base.js"));
+    assert!(
+        base.contains("\"tunel-entrar\": \"tunel\""),
+        "`CAPACIDADE_DA_MENSAGEM` não exige `tunel` para `tunel-entrar`"
+    );
+    let pode = js_function(&base, "function podePedir(");
+    assert!(
+        pode.contains("poderes") && pode.contains("\"porta\"") && pode.contains("\"tunel\""),
+        "`podePedir` não soma `tunel` quando o MOD declara o poder `porta`: {pode}"
+    );
+    // E a lista por API continua sem `tunel`: dois MODs da 8 têm listas diferentes.
+    let tabela = base
+        .split_once("const CAPACIDADES_POR_API")
+        .and_then(|(_, resto)| resto.split_once("\n});"))
+        .map(|(tabela, _)| tabela.to_owned())
+        .expect("`CAPACIDADES_POR_API` sumiu");
+    assert!(
+        !tabela.contains("\"tunel\""),
+        "`tunel` entrou na lista por API: um MOD sem `porta` o ganharia"
+    );
+}
+
+/// **O bilhete é a fronteira**: o roteador gasta o gesto antes do `invoke`. Um
+/// `invoke` antes da conferência abriria a porta de um MOD que não foi clicado.
+#[test]
+fn tunel_o_roteador_gasta_o_gesto_antes_do_invoke() {
+    let base = without_comments(&read("ui/base.js"));
+    let atender = js_function(&base, "async function atenderOMod(");
+    let caso = atender
+        .split_once("case \"tunel-entrar\"")
+        .map(|(_, resto)| resto.to_owned())
+        .expect("`atenderOMod` não trata `tunel-entrar`");
+    let gasta = caso
+        .find("gastarGesto(")
+        .expect("o caso `tunel-entrar` não gasta o bilhete de gesto");
+    let invoca = caso
+        .find("invoke(\"tunel_entrar\"")
+        .expect("o caso `tunel-entrar` não chama `tunel_entrar`");
+    assert!(
+        gasta < invoca,
+        "o gesto é gasto depois do `invoke(\"tunel_entrar\"`: a porta abriria sem clique"
+    );
+    assert!(
+        caso[..invoca].contains("fora-de-um-clique"),
+        "a recusa `fora-de-um-clique` não vem antes do `invoke`"
+    );
+    // As duas peças.
+    let emitir = js_function(&base, "function emitirGesto(");
+    assert!(
+        emitir.contains("2000") && emitir.contains("performance.now()"),
+        "o bilhete deixou de valer 2 s por `performance.now()`: {emitir}"
+    );
+    let gastar = js_function(&base, "function gastarGesto(");
+    assert!(
+        gastar.contains("performance.now()") && gastar.contains("= null"),
+        "`gastarGesto` não confere o prazo ou não gasta o bilhete: {gastar}"
+    );
+}
+
+/// **Descarregar um MOD fecha os túneis dele**, e a falha de fechar não morre
+/// calada: vai ao `seele.log` e à faixa.
+#[test]
+fn tunel_descarregar_um_mod_chama_tunel_sair_do_mod() {
+    let base = without_comments(&read("ui/base.js"));
+    // O fecho é ligado na subida, e roda no descarte da instância (o ciclo
+    // único de `encerrar`): desligado, sessão nova e saída passam por ali.
+    let montar = js_function(&base, "async function montarOMod(");
+    assert!(
+        montar.contains("ligarOFechoDosTuneis(mod, instancia)"),
+        "`montarOMod` não liga o fecho dos túneis à instância: {montar}"
+    );
+    let ligar = js_function(&base, "function ligarOFechoDosTuneis(");
+    assert!(
+        ligar.contains("temOPoderPorta(mod)")
+            && ligar.contains("instancia.registrar(")
+            && ligar.contains("fecharOsTuneisDoMod("),
+        "o fecho só vale para o MOD com `porta` e roda no descarte da instância: {ligar}"
+    );
+    let fechar = js_function(&base, "function fecharOsTuneisDoMod(");
+    assert!(
+        fechar.contains("invoke(\"tunel_sair_do_mod\"") && fechar.contains("registrarNoAnfitriao("),
+        "o fecho não chama `tunel_sair_do_mod` ou a falha dele não vai ao registro: {fechar}"
+    );
+}
+
+/// **Toda recusa e toda queda do Rust tem frase na faixa**, e a faixa não tem
+/// frase para o que o Rust não diz. Os nomes saem das funções exaustivas da FFI
+/// (`nome_da_recusa_do_tunel`, `nome_da_queda`), que não compilam sem um braço
+/// por variante: uma variante nova sem frase reprova aqui, e não vira o nome
+/// cru na tela de quem joga.
+#[test]
+fn tunel_cada_recusa_e_cada_queda_do_rust_tem_frase() {
+    use seele_core::tunel::{Queda, RecusaDeTunel};
+    use seele_ffi::types::{nome_da_queda, nome_da_recusa_do_tunel};
+
+    let recusas = [
+        RecusaDeTunel::NaoExiste,
+        RecusaDeTunel::SemPermissao,
+        RecusaDeTunel::AcaoNaoDeclarada,
+        RecusaDeTunel::ModSemPorta,
+        RecusaDeTunel::NomeTomado,
+        RecusaDeTunel::MaquinaSaiu,
+        RecusaDeTunel::TuneisDemais,
+        RecusaDeTunel::CanaisEsgotados,
+        RecusaDeTunel::ServidorAntigo,
+        RecusaDeTunel::PortaLocalOcupada,
+        RecusaDeTunel::SemResposta,
+    ];
+    let quedas = [
+        Queda::PortaOcupada,
+        Queda::CaminhoCaiu,
+        Queda::JogoRecusou,
+        Queda::MaquinaParou,
+        Queda::MaquinaSaiu,
+        Queda::SemPermissao,
+        Queda::ModDesligado,
+        Queda::ServidorSaiu,
+        Queda::Fechado,
+    ];
+    let frases = without_comments(&read("ui/frases.js"));
+    let bloco = frases
+        .split_once("const FRASES_DO_TUNEL = Object.freeze({")
+        .map(|(_, resto)| resto.to_owned())
+        .expect("`FRASES_DO_TUNEL` sumiu de frases.js");
+    let (das_recusas, das_quedas) = bloco
+        .split_once("quedas: Object.freeze({")
+        .expect("`FRASES_DO_TUNEL` sem `quedas`");
+    let nomes = |trecho: &str| -> BTreeSet<String> {
+        trecho
+            .lines()
+            .filter_map(|linha| {
+                let linha = linha.trim();
+                let (nome, resto) = linha.strip_prefix('"')?.split_once("\":")?;
+                // Só a chave com a frase na mesma linha ou na seguinte.
+                (resto.trim().starts_with('"') || resto.trim().is_empty()).then(|| nome.to_owned())
+            })
+            .collect()
+    };
+    let (recusas_com_frase, quedas_com_frase) = (nomes(das_recusas), nomes(das_quedas));
+    for recusa in recusas {
+        let nome = nome_da_recusa_do_tunel(recusa);
+        assert!(
+            recusas_com_frase.contains(nome),
+            "a recusa «{nome}» do Rust não tem frase em `FRASES_DO_TUNEL.recusas`"
+        );
+    }
+    for queda in quedas {
+        let nome = nome_da_queda(queda);
+        assert!(
+            quedas_com_frase.contains(nome),
+            "a queda «{nome}» do Rust não tem frase em `FRASES_DO_TUNEL.quedas`"
+        );
+    }
+    // E as da casca, que o Rust não diz: o MOD as recebe pelo mesmo nome.
+    for da_casca in [
+        "fora-de-um-clique",
+        "so-no-app",
+        "tipo-desconhecido",
+        "sessao-encerrada",
+        "falhou",
+    ] {
+        assert!(
+            recusas_com_frase.contains(da_casca),
+            "a recusa «{da_casca}» da casca não tem frase"
+        );
+    }
+    // **A frase da queda do caminho não acusa a rede**: quem joga também a vê
+    // quando o jogo da máquina recusou a conexão.
+    assert!(
+        frases.contains("\"caminho-caiu\": \"a conexão com o jogo caiu\""),
+        "a frase de `caminho-caiu` mudou: ela é a de uma conexão que caiu, e não a de uma rede que falhou"
+    );
+}
+
+/// **No navegador não há porta local**: a ponte recusa pelo nome.
+#[test]
+fn tunel_a_ponte_do_navegador_recusa_entrar_com_so_no_app() {
+    let ponte = without_comments(&read("ui/ponte-web.js"));
+    let entrar = ponte
+        .split_once("  tunel_entrar:")
+        .map(|(_, resto)| {
+            resto
+                .split_once("\n  },")
+                .map_or(resto, |(a, _)| a)
+                .to_owned()
+        })
+        .expect("`tunel_entrar` não está nos atendimentos da ponte");
+    assert!(
+        entrar.contains("so-no-app"),
+        "a ponte do navegador não recusa `tunel_entrar` com `so-no-app`: {entrar}"
+    );
+}
+
+/// **O botão leva o bilhete**, e a faixa do produto não passa pela região de
+/// MOD: a camada é do produto, e um MOD não a desenha nem a calar.
+#[test]
+fn tunel_o_botao_leva_o_bilhete_e_a_faixa_e_do_produto() {
+    let regiao = without_comments(&read("ui/mods-regiao.js"));
+    let botao = js_function(&regiao, "\n  montarBotao(elem, plano)");
+    assert!(
+        botao.contains("emitirGesto") && botao.contains("gesto"),
+        "o evento `botao` não leva o bilhete de gesto: {botao}"
+    );
+    assert!(
+        !regiao.contains("camada-tuneis") && !regiao.contains("tuneis_abertos"),
+        "a faixa dos túneis passou por `mods-regiao.js`: ela é do produto, fora das superfícies de MOD"
+    );
+    let html = read("ui/index.html");
+    assert!(
+        html.contains("<script src=\"camada-tuneis.js\"></script>")
+            && html.contains("<link rel=\"stylesheet\" href=\"camada-tuneis.css\">")
+            && html.contains("id=\"tuneis\""),
+        "a faixa dos túneis não está na página (script, folha e o elemento `tuneis`)"
+    );
+    let camada = without_comments(&read("ui/camada-tuneis.js"));
+    for oque in [
+        "tuneis_abertos",
+        "TunnelReport",
+        "porta ",
+        "ligação direta com",
+        "pela estrela",
+    ] {
+        assert!(camada.contains(oque), "a faixa dos túneis perdeu «{oque}»");
+    }
+    // Nada de `catch {}` calado: toda falha da faixa é dita.
+    assert!(
+        !camada.contains("catch {}") && !camada.contains("catch (_) {}"),
+        "a faixa dos túneis engole uma falha em silêncio"
     );
 }

@@ -1514,7 +1514,14 @@ class RegiaoDeMod {
   montarBotao(elem, plano) {
     elem.type = "button";
     const aoApertar = () => {
-      const falar = () => this.dono.falar({ nome: "botao", chave: plano.no.chave ?? "" });
+      const falar = () => {
+        // **O bilhete de gesto sai do clique, aqui** (API 8, `SeeleUI.tunel`):
+        // o clique de quem usa é a prova, e a casca a emite no instante em que
+        // o evento sai — depois da confirmação, quando há. Só o MOD com o poder
+        // `porta` o recebe; para os outros o evento é o de sempre.
+        const gesto = this.dono.emitirGesto?.();
+        this.dono.falar({ nome: "botao", chave: plano.no.chave ?? "", ...(gesto ? { gesto } : {}) });
+      };
       const consequencia = this.confirmacoes.get(elem);
       if (consequencia) this.confirmarAntes(elem, consequencia, falar);
       else falar();

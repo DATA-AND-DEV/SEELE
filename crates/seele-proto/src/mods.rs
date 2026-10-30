@@ -249,8 +249,17 @@ pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
 /// `SeeleUI` de um MOD que declara poderes.
 #[must_use]
 pub fn capacidades_do_manifesto(manifest: &Manifest) -> Vec<&'static str> {
-    let mut capacidades = capacidades_da_api(manifest.api).to_vec();
-    if manifest.poderes.contains(&Poder::Porta) {
+    capacidades_de(manifest.api, &manifest.poderes)
+}
+
+/// O mesmo de [`capacidades_do_manifesto`], para quem já tem a API e os
+/// poderes lidos (a lista de MODs instalados guarda os dois, e não o manifesto
+/// inteiro). **Uma regra só**: as duas entradas passam por aqui, e uma terceira
+/// cópia da soma `tunel` ⇐ `porta` seria uma regra que pode discordar.
+#[must_use]
+pub fn capacidades_de(api: u32, poderes: &[Poder]) -> Vec<&'static str> {
+    let mut capacidades = capacidades_da_api(api).to_vec();
+    if poderes.contains(&Poder::Porta) {
         capacidades.push("tunel");
     }
     capacidades

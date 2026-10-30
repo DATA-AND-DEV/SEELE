@@ -197,10 +197,7 @@ pub struct ModExigido {
 impl ModExigido {
     /// Junta o que o servidor disse sobre onde este MOD roda.
     #[must_use]
-    pub fn com_plataformas(
-        mut self,
-        dita: Option<&seele_core::mods::PlataformasDoMod>,
-    ) -> Self {
+    pub fn com_plataformas(mut self, dita: Option<&seele_core::mods::PlataformasDoMod>) -> Self {
         self.plataformas = dita.map(|dita| {
             dita.plataformas
                 .iter()
@@ -1270,6 +1267,16 @@ pub enum Event {
         /// Qual transmissão.
         screen: u32,
     },
+    /// Um túnel de jogo de quem joga mediu de novo, ou acabou.
+    ///
+    /// Grosso na medida do possível, mas o relatório inteiro vai junto: a faixa
+    /// do produto desenha a porta, o caminho, a latência e as quedas, e uma
+    /// leitura por comando a cada relatório custaria uma travessia por linha
+    /// desenhada. O último relatório de um túnel traz `encerrado: Some(motivo)`.
+    TunnelReport {
+        /// O que o túnel mediu.
+        report: RelatorioDeTunel,
+    },
 }
 
 /// Where one file is on its way.
@@ -2002,9 +2009,240 @@ impl std::fmt::Display for ConnectionError {
 
 impl std::error::Error for ConnectionError {}
 
+// ------------------------------------------------------------ o túnel de jogo
+
+/// A porta em que o jogo de quem joga deve ligar (`127.0.0.1:porta`).
+///
+/// O que `tunel_entrar` devolve à casca e, por ela, ao MOD (que recebe só o
+/// número).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct PortaDeTunel {
+    /// A porta em `127.0.0.1` de fato aberta.
+    pub porta: u16,
+    /// Se é a do jogo, e não uma das seguintes.
+    pub preferida: bool,
+    /// A porta do jogo, a que se tentou primeiro; é a que estava ocupada
+    /// quando `preferida` é falso. Zero quando se pediu qualquer uma.
+    pub desejada: u16,
+}
+
+/// Por onde as conexões novas de um túnel andam.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "tipo", rename_all = "kebab-case")]
+pub enum CaminhoDeTunel {
+    /// Ligação direta com a máquina do jogo, sem passar pelo anfitrião.
+    Direto {
+        /// A pessoa da máquina.
+        par: u64,
+        /// O apelido dela na sala, quando o roster a conhece. A casca diz
+        /// «ligação direta com <apelido>», e sem o apelido diz só «direta».
+        apelido: Option<String>,
+    },
+    /// Pelo anfitrião: o caminho que sempre funciona.
+    Estrela,
+}
+
+/// Quantas vezes um motivo acabou algo num túnel.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct QuedaDeTunel {
+    /// O nome do motivo, em kebab-case (`caminho-caiu`, `porta-ocupada`...). A
+    /// frase é da casca.
+    pub motivo: &'static str,
+    /// Quantas vezes, desde que o túnel abriu.
+    pub vezes: u32,
+}
+
+/// O que um túnel de quem joga mediu, como a casca o desenha.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RelatorioDeTunel {
+    /// `autor/nome` do MOD.
+    pub mod_id: String,
+    /// O nome do túnel.
+    pub nome: String,
+    /// A porta em `127.0.0.1` em que o jogo deve ligar; zero quando nenhuma
+    /// coube.
+    pub porta: u16,
+    /// Se `porta` é a do jogo.
+    pub preferida: bool,
+    /// A porta do jogo, a que se tentou primeiro.
+    pub desejada: u16,
+    /// Por onde as conexões novas andam.
+    pub caminho: CaminhoDeTunel,
+    /// A ida e volta de ponta a ponta, em milissegundos; `None` até a primeira
+    /// medida.
+    pub latencia_ms: Option<u64>,
+    /// Bytes por segundo nos dois sentidos somados.
+    pub bytes_por_segundo: u64,
+    /// Bytes por segundo de quem joga para a máquina.
+    pub bytes_por_segundo_ida: u64,
+    /// Bytes por segundo da máquina para quem joga.
+    pub bytes_por_segundo_volta: u64,
+    /// Conexões TCP e fluxos UDP vivos agora.
+    pub conexoes: u32,
+    /// Quantas vezes cada motivo acabou algo, desde que o túnel abriu.
+    pub quedas: Vec<QuedaDeTunel>,
+    /// Datagramas UDP que não saíram, e foram contados.
+    pub udp_descartados: u64,
+    /// `Some` no último relatório do túnel: por que ele acabou.
+    pub encerrado: Option<&'static str>,
+}
+
+/// O nome em kebab-case de um motivo de queda: o que atravessa a ponte.
+///
+/// Exaustivo de propósito: uma queda nova sem nome é erro de compilação aqui, e
+/// não um relatório que a casca lê como vazio.
+#[must_use]
+pub const fn nome_da_queda(queda: seele_core::tunel::Queda) -> &'static str {
+    use seele_core::tunel::Queda;
+    match queda {
+        Queda::PortaOcupada => "porta-ocupada",
+        Queda::CaminhoCaiu => "caminho-caiu",
+        Queda::JogoRecusou => "jogo-recusou",
+        Queda::MaquinaParou => "maquina-parou",
+        Queda::MaquinaSaiu => "maquina-saiu",
+        Queda::SemPermissao => "sem-permissao",
+        Queda::ModDesligado => "mod-desligado",
+        Queda::ServidorSaiu => "servidor-saiu",
+        Queda::Fechado => "fechado",
+    }
+}
+
+/// O nome em kebab-case de uma recusa de túnel: o que o MOD e a casca leem.
+///
+/// Exaustivo de propósito, como [`nome_da_queda`]. São os nomes da lista
+/// fechada de recusas ao MOD (`api/v8.json`, `recusas.tunel`).
+#[must_use]
+pub const fn nome_da_recusa_do_tunel(recusa: seele_core::tunel::RecusaDeTunel) -> &'static str {
+    use seele_core::tunel::RecusaDeTunel;
+    match recusa {
+        RecusaDeTunel::NaoExiste => "nao-existe",
+        RecusaDeTunel::SemPermissao => "sem-permissao",
+        RecusaDeTunel::AcaoNaoDeclarada => "acao-nao-declarada",
+        RecusaDeTunel::ModSemPorta => "mod-sem-porta",
+        RecusaDeTunel::NomeTomado => "nome-tomado",
+        RecusaDeTunel::MaquinaSaiu => "maquina-saiu",
+        RecusaDeTunel::TuneisDemais => "tuneis-demais",
+        RecusaDeTunel::CanaisEsgotados => "canais-esgotados",
+        RecusaDeTunel::ServidorAntigo => "servidor-antigo",
+        RecusaDeTunel::PortaLocalOcupada => "porta-local-ocupada",
+        RecusaDeTunel::SemResposta => "sem-resposta",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **Os nomes do túnel que a casca lê não mudam sem aviso**: a faixa e o
+    /// MOD os recebem em kebab-case, e `api/v8.json` os lista em `recusas.tunel`.
+    /// Um nome renomeado aqui deixaria a janela sem frase para ele.
+    #[test]
+    fn os_nomes_das_recusas_e_das_quedas_do_tunel_sao_os_do_contrato() {
+        use seele_core::tunel::{Queda, RecusaDeTunel};
+        let recusas = [
+            (RecusaDeTunel::NaoExiste, "nao-existe"),
+            (RecusaDeTunel::SemPermissao, "sem-permissao"),
+            (RecusaDeTunel::AcaoNaoDeclarada, "acao-nao-declarada"),
+            (RecusaDeTunel::ModSemPorta, "mod-sem-porta"),
+            (RecusaDeTunel::NomeTomado, "nome-tomado"),
+            (RecusaDeTunel::MaquinaSaiu, "maquina-saiu"),
+            (RecusaDeTunel::TuneisDemais, "tuneis-demais"),
+            (RecusaDeTunel::CanaisEsgotados, "canais-esgotados"),
+            (RecusaDeTunel::ServidorAntigo, "servidor-antigo"),
+            (RecusaDeTunel::PortaLocalOcupada, "porta-local-ocupada"),
+            (RecusaDeTunel::SemResposta, "sem-resposta"),
+        ];
+        for (recusa, nome) in recusas {
+            assert_eq!(nome_da_recusa_do_tunel(recusa), nome);
+        }
+        let quedas = [
+            (Queda::PortaOcupada, "porta-ocupada"),
+            (Queda::CaminhoCaiu, "caminho-caiu"),
+            (Queda::JogoRecusou, "jogo-recusou"),
+            (Queda::MaquinaParou, "maquina-parou"),
+            (Queda::MaquinaSaiu, "maquina-saiu"),
+            (Queda::SemPermissao, "sem-permissao"),
+            (Queda::ModDesligado, "mod-desligado"),
+            (Queda::ServidorSaiu, "servidor-saiu"),
+            (Queda::Fechado, "fechado"),
+        ];
+        for (queda, nome) in quedas {
+            assert_eq!(nome_da_queda(queda), nome);
+        }
+    }
+
+    /// **O relatório atravessa para a janela pelos nomes que ela lê**
+    /// (`camada-tuneis.js`): `TunnelReport.report`, o caminho com `tipo`
+    /// (`direto` com `apelido`, ou `estrela`), as quedas como `{ motivo, vezes }`.
+    /// Trocar um nome de um lado só calava a faixa.
+    #[test]
+    fn o_relatorio_do_tunel_atravessa_pelos_nomes_que_a_faixa_le() {
+        let relatorio = |caminho| RelatorioDeTunel {
+            mod_id: "x/jogo".into(),
+            nome: "minecraft-1".into(),
+            porta: 25566,
+            preferida: false,
+            desejada: 25565,
+            caminho,
+            latencia_ms: Some(34),
+            bytes_por_segundo: 120,
+            bytes_por_segundo_ida: 20,
+            bytes_por_segundo_volta: 100,
+            conexoes: 1,
+            quedas: vec![QuedaDeTunel {
+                motivo: "caminho-caiu",
+                vezes: 2,
+            }],
+            udp_descartados: 3,
+            encerrado: Some("maquina-saiu"),
+        };
+        let direto = serde_json::to_value(Event::TunnelReport {
+            report: relatorio(CaminhoDeTunel::Direto {
+                par: 7,
+                apelido: Some("Fulano".into()),
+            }),
+        })
+        .expect("serializa");
+        for (ponteiro, esperado) in [
+            ("/TunnelReport/report/mod_id", serde_json::json!("x/jogo")),
+            ("/TunnelReport/report/porta", serde_json::json!(25566)),
+            ("/TunnelReport/report/preferida", serde_json::json!(false)),
+            ("/TunnelReport/report/desejada", serde_json::json!(25565)),
+            (
+                "/TunnelReport/report/caminho/tipo",
+                serde_json::json!("direto"),
+            ),
+            (
+                "/TunnelReport/report/caminho/apelido",
+                serde_json::json!("Fulano"),
+            ),
+            ("/TunnelReport/report/latencia_ms", serde_json::json!(34)),
+            (
+                "/TunnelReport/report/bytes_por_segundo",
+                serde_json::json!(120),
+            ),
+            (
+                "/TunnelReport/report/quedas/0/motivo",
+                serde_json::json!("caminho-caiu"),
+            ),
+            ("/TunnelReport/report/quedas/0/vezes", serde_json::json!(2)),
+            (
+                "/TunnelReport/report/encerrado",
+                serde_json::json!("maquina-saiu"),
+            ),
+        ] {
+            assert_eq!(
+                direto.pointer(ponteiro),
+                Some(&esperado),
+                "{ponteiro}: {direto}"
+            );
+        }
+        let estrela = serde_json::to_value(relatorio(CaminhoDeTunel::Estrela)).expect("serializa");
+        assert_eq!(
+            estrela.pointer("/caminho/tipo"),
+            Some(&serde_json::json!("estrela"))
+        );
+    }
 
     #[test]
     fn every_disconnect_reason_the_protocol_has_maps_to_one_here() {

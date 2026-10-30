@@ -1035,6 +1035,8 @@ function entrarNaGeracao(numero) {
   const anterior = geracaoDaSessao;
   geracaoDaSessao = Number(numero) || 0;
   if (geracaoDaSessao && geracaoDaSessao !== anterior) queueMicrotask(pedirCargaDosMods);
+  // A faixa dos túneis relê o que está de pé nesta sessão.
+  if (geracaoDaSessao && geracaoDaSessao !== anterior) globalThis.dispatchEvent(new CustomEvent("seele-tuneis-reler"));
 }
 
 /** Esta geração ainda é a de pé? */
@@ -1217,6 +1219,8 @@ async function montarOMod(mod) {
   // estado.
   instancia.estado = ESTADOS_DE_MOD.ativa;
   modsCarregados.set(mod.id, instancia);
+  // Os túneis de jogo saem com a instância (desligado, sessão nova, saída).
+  ligarOFechoDosTuneis(mod, instancia);
 
   await executor.iniciar(
     codigo,
@@ -1291,6 +1295,11 @@ function donoDaRegiao(mod, instancia) {
     podeFalar: meu,
     /** A recusa como o MOD a recebe, ou `null` até a API 5 (`recusaParaOMod`). */
     recusaParaOMod: (falha) => recusaParaOMod(mod, falha),
+    /**
+     * O bilhete de gesto de um clique em botão, ou `null`: só o MOD com o poder
+     * `porta` o recebe, e o evento dos outros sai como sempre saiu.
+     */
+    emitirGesto: () => (temOPoderPorta(mod) ? emitirGesto(instancia) : null),
     // Uma superfície deste MOD fechou: a prévia do tema que era dela sai (17g).
     aoFecharASuperficie: (chave) => aoFecharASuperficieDaPrevia(mod.id, chave),
     // A API do pacote: as superfícies que ele tem dependem dela — a `folha` na
@@ -3434,6 +3443,9 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "atualizar-contribuicao": "contribuicoes",
   retrato: "retrato",
   acao: "acoes",
+  // O túnel de jogo (API 8): a capacidade é do poder `porta` do manifesto, e
+  // não da versão. `podePedir` a soma quando o MOD declara o poder.
+  "tunel-entrar": "tunel",
 });
 
 /**
@@ -3448,11 +3460,114 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
  * barrava. O manifesto dele já é recusado ao carregar; esta é a segunda porta.
  */
 function podePedir(mod, tipo) {
-  const tem = CAPACIDADES_POR_API[Number(mod?.api)];
-  if (!tem) return false;
+  const daApi = CAPACIDADES_POR_API[Number(mod?.api)];
+  if (!daApi) return false;
   const exigida = CAPACIDADE_DA_MENSAGEM[tipo];
   if (!exigida) return true;
+  // **O `tunel` é do poder, e não da versão** (API 8): dois MODs da 8 têm
+  // listas diferentes, e a lista por API continua a mesma. `poderes` vem de
+  // `mods_instalados`, lido do manifesto do pacote cujo hash esta janela
+  // conferiu — e nunca de um campo da mensagem.
+  const tem = Array.isArray(mod?.poderes) && mod.poderes.includes("porta")
+    ? [...daApi, "tunel"]
+    : daApi;
   return tem.includes(exigida);
+}
+
+/**
+ * **O bilhete de gesto** (API 8, `SeeleUI.tunel.entrar`): a prova de que uma
+ * pessoa clicou, emitida pela casca no evento `botao` e conferida por ela antes
+ * de qualquer `invoke`. O prelúdio apenas o carrega; o MOD que o guarde e use
+ * depois, ou duas vezes, é recusado aqui — a fronteira é a casca, e não o
+ * prelúdio, que o MOD alcança.
+ *
+ * Um só por instância: o clique mais novo vale, e o anterior deixa de valer.
+ * Aleatório e de vida curta (2 s) porque o que ele autoriza é abrir uma porta
+ * na máquina de quem clicou.
+ *
+ * @returns {string} O bilhete, para ir no evento.
+ */
+function emitirGesto(instancia) {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  const valor = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  instancia.gesto = { valor, ate: performance.now() + 2000 };
+  return valor;
+}
+
+/**
+ * Gasta o bilhete: **uso único** e dentro do prazo. Um bilhete que não é o
+ * emitido não gasta o que está de pé (um MOD que erra o valor não derruba o
+ * clique de quem usa); o certo, vencido ou não, é gasto.
+ */
+function gastarGesto(instancia, gesto) {
+  const bilhete = instancia?.gesto;
+  if (!bilhete || typeof gesto !== "string" || gesto !== bilhete.valor) return false;
+  instancia.gesto = null;
+  return performance.now() <= bilhete.ate;
+}
+
+/** Este MOD declara o poder `porta`? Só ele recebe bilhetes e fecha túneis. */
+function temOPoderPorta(mod) {
+  return Array.isArray(mod?.poderes) && mod.poderes.includes("porta");
+}
+
+/**
+ * O motivo de uma falha de `tunel_entrar` em kebab-case, para a faixa e o
+ * registro: a recusa nomeada do Rust (`{ Recusado: { motivo } }`), o nome de
+ * uma recusa da casca (`recusa`), ou `falhou`.
+ */
+function motivoDoTunel(falha) {
+  if (typeof falha?.Recusado?.motivo === "string") return falha.Recusado.motivo;
+  if (typeof falha?.recusa === "string") return falha.recusa;
+  return "falhou";
+}
+
+/**
+ * Diz à faixa do produto que uma entrada num túnel foi recusada, e por quê.
+ * **A recusa chega a quem joga**, e não só ao MOD: a pessoa clicou em JOGAR e
+ * está diante de um jogo sem porta; quem sabe o motivo é a casca, e calar seria
+ * o defeito que este repositório mais paga.
+ */
+function dizerARecusaDoTunel(mod, nome, motivo) {
+  globalThis.dispatchEvent(new CustomEvent("seele-tunel-recusado", {
+    detail: { modId: mod.id, nome, motivo },
+  }));
+}
+
+/**
+ * Fecha os túneis de um MOD que saiu (desligado, sessão nova, saída). A
+ * recusa `sessao-encerrada` é a esperada de uma sessão que já acabou — o
+ * enlace derrubou os túneis ao sair —, e as outras vão ao `seele.log` e à
+ * faixa, que **continua mostrando** o que não conseguiu fechar.
+ */
+function fecharOsTuneisDoMod(modId, geracao) {
+  const aviso = (detail) => globalThis.dispatchEvent(new CustomEvent("seele-tunel-mod-saiu", { detail }));
+  invoke("tunel_sair_do_mod", { geracao, id: modId }).then(
+    () => aviso({ modId, fechou: true }),
+    (falha) => {
+      const motivo = motivoDoTunel(falha);
+      registrarNoAnfitriao(
+        "tunel",
+        `${modId}: não consegui fechar os túneis do MOD — ${motivo}`,
+        motivo === "sessao-encerrada" ? "info" : "aviso",
+        modId,
+      );
+      aviso({ modId, fechou: false, motivo });
+    },
+  );
+}
+
+/**
+ * Registra, na instância, o fecho dos túneis dela: sair da instância (pelo ciclo
+ * único de `encerrar`) chama `tunel_sair_do_mod`. Só para o MOD com o poder
+ * `porta`: os outros não têm túnel, e o comando seria ruído.
+ */
+function ligarOFechoDosTuneis(mod, instancia) {
+  if (!temOPoderPorta(mod)) return;
+  instancia.registrar(`${mod.id}: os túneis de jogo`, () => {
+    fecharOsTuneisDoMod(mod.id, instancia.geracao);
+  });
 }
 
 /**
@@ -3910,6 +4025,22 @@ const RECUSAS_AO_MOD = Object.freeze([
   "teto-de-alvos",
   "contribuicao-ja-existe",
   "contribuicao-de-outro-mod",
+  // O túnel de jogo (`recusas.tunel`, API 8): as da casca (`fora-de-um-clique`,
+  // `so-no-app`) e as de `RecusaDeTunel` em kebab-case. `tipo-desconhecido` é o
+  // do MOD que não declara o poder `porta`, e já está na lista da ponte.
+  "fora-de-um-clique",
+  "so-no-app",
+  "sem-permissao",
+  "acao-nao-declarada",
+  "nao-existe",
+  "servidor-antigo",
+  "mod-sem-porta",
+  "nome-tomado",
+  "maquina-saiu",
+  "tuneis-demais",
+  "canais-esgotados",
+  "porta-local-ocupada",
+  "sem-resposta",
 ]);
 
 /**
@@ -4271,6 +4402,38 @@ async function atenderOMod(mod, instancia, m) {
           valor: contribuicoesDosMods.atualizar(m.handle, { id: mod.id, instancia }, m.conteudo),
         });
         break;
+      // ---- o túnel de jogo (API 8, poder `porta`) ----
+      case "tunel-entrar": {
+        const nome = String(m.nome ?? "");
+        // **O bilhete é conferido aqui, antes do `invoke`**: sem clique (ou com
+        // o clique vencido, ou já gasto), nada vai ao Rust. O prelúdio só o
+        // carrega.
+        if (!gastarGesto(instancia, m.gesto)) {
+          dizerARecusaDoTunel(mod, nome, "fora-de-um-clique");
+          throw recusaAoMod(
+            "fora-de-um-clique",
+            `${mod.id}: tunel-entrar sem o bilhete de um clique (sem ele, vencido ou já gasto)`,
+          );
+        }
+        let aberta;
+        try {
+          aberta = await invoke("tunel_entrar", { geracao: instancia.geracao, id: mod.id, nome });
+        } catch (falha) {
+          dizerARecusaDoTunel(mod, nome, motivoDoTunel(falha));
+          throw falha;
+        }
+        if (!meu()) {
+          // Entrou enquanto o MOD saía: o fecho dele já passou, e a porta que
+          // acabou de abrir não tem mais dono.
+          fecharOsTuneisDoMod(mod.id, instancia.geracao);
+        } else {
+          globalThis.dispatchEvent(new CustomEvent("seele-tunel-aberto", {
+            detail: { modId: mod.id, nome, ...aberta },
+          }));
+        }
+        responder(true, { valor: aberta.porta });
+        break;
+      }
       default:
         // **Recusado e nomeado.** Uma mensagem que a API não conhece não pode
         // ser ignorada: quem escreveu o MOD ficaria esperando para sempre uma
@@ -4679,6 +4842,9 @@ function encerrarOAmbienteDosMods() {
     instancia?.encerrar().catch(() => {});
   }
   modsCarregados.clear();
+  // Os túneis de jogo acabaram com a sessão (o enlace os derruba ao sair): a
+  // faixa do produto limpa o que mostrava.
+  globalThis.dispatchEvent(new CustomEvent("seele-tuneis-sessao-acabou"));
   // A exigência é de um destino, e o destino acabou. Esperar o tique seguinte
   // deixaria a gestão dizendo «exigido por este servidor» por até quatro
   // segundos depois de a sessão ter terminado.

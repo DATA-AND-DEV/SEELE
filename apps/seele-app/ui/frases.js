@@ -1678,6 +1678,60 @@ const FRASES_DO_CATALOGO = Object.freeze({
 });
 
 /**
+ * **O túnel de jogo** (API 8, `SeeleUI.tunel`): o que a faixa das portas abertas
+ * (`camada-tuneis.js`) diz de cada recusa e de cada queda. Os nomes são os do
+ * Rust, em kebab-case (`nome_da_recusa_do_tunel` e `nome_da_queda`, em
+ * `seele-ffi/src/types.rs`); a frase é daqui, como em toda fronteira.
+ *
+ * **`caminho-caiu` não acusa a rede.** É o que quem joga vê tanto quando a
+ * ligação caiu quanto quando o jogo da máquina recusou a conexão (`JogoRecusou`
+ * só é visto na máquina): a frase diz o que é certo nos dois casos, a conexão
+ * com o jogo.
+ */
+const FRASES_DO_TUNEL = Object.freeze({
+  recusas: Object.freeze({
+    // As da casca, antes do Rust.
+    "fora-de-um-clique":
+      "a porta só abre com um clique seu, e o MOD tentou abri-la sem ele (ou com um clique velho)",
+    "so-no-app": "abrir a porta de um jogo só funciona no aplicativo",
+    "tipo-desconhecido": "este MOD não declara o poder de abrir a porta de um jogo",
+    "sessao-encerrada": "a sessão acabou antes de a porta abrir",
+    "falhou": "a porta não abriu, e o motivo está no seele.log",
+    // As de `RecusaDeTunel`.
+    "nao-existe": "nenhuma máquina serve esse jogo agora",
+    "sem-permissao": "você não tem a permissão de entrar no jogo",
+    "acao-nao-declarada": "o MOD não declara a permissão de entrar no jogo, e ninguém poderia usar a porta",
+    "mod-sem-porta": "o MOD não está ligado neste servidor, ou não declara o poder de abrir a porta",
+    "nome-tomado": "você já tem uma porta aberta com esse nome",
+    "maquina-saiu": "a máquina do jogo saiu do servidor enquanto o pedido andava",
+    "tuneis-demais": "o servidor já tem portas de jogo demais abertas",
+    "canais-esgotados": "não há mais canais livres para o seu jogo neste servidor",
+    "servidor-antigo": "este servidor é de uma versão que não leva jogo; peça a quem hospeda para atualizá-lo",
+    "porta-local-ocupada":
+      "nenhuma das portas perto da do jogo está livre neste computador; feche o que as usa e tente de novo",
+    "sem-resposta": "o servidor não respondeu a tempo",
+  }),
+  quedas: Object.freeze({
+    "porta-ocupada": "nenhuma porta livre neste computador para o jogo ligar",
+    "caminho-caiu": "a conexão com o jogo caiu",
+    "jogo-recusou": "o jogo da máquina recusou a conexão",
+    "maquina-parou": "a máquina parou de servir este jogo",
+    "maquina-saiu": "a máquina do jogo saiu do servidor",
+    "sem-permissao": "você perdeu a permissão de entrar no jogo",
+    "mod-desligado": "o MOD foi desligado neste servidor",
+    "servidor-saiu": "a sessão com o servidor acabou",
+    "fechado": "a conexão foi fechada",
+  }),
+  // **O fim de um túnel inteiro** (`encerrado` do último relatório). Quase todo
+  // motivo diz a mesma coisa que diz como queda; `fechado` aqui é o túnel que
+  // quem o abriu fechou (ou que o MOD fechou ao sair), e não uma conexão que
+  // acabou como devia.
+  fins: Object.freeze({
+    "fechado": "a porta foi fechada, por você ou pelo MOD ao sair",
+  }),
+});
+
+/**
  * **A tela que este navegador não compartilha** (caso 12 do browser-signaling,
  * medido no WebKit). Igual na 0.16: a transmissão do navegador precisa do
  * `MediaStreamTrackProcessor`, e o Safari não o tem. Não é a versão nem a

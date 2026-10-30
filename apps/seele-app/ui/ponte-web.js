@@ -247,7 +247,10 @@ const COMANDOS_DA_PONTE = new Set([
   "send_message", "set_muted", "set_talking", "set_total_isolation",
   "set_voice_mode", "set_volume", "snapshot", "soltar_a_entrada", "soltar_escolhido",
   "som_da_tela", "som_do_mod", "tecla_de_falar", "tirar_minha_imagem",
-  "versoes_instaladas", "volumes_locais"
+  "versoes_instaladas", "volumes_locais",
+  // O túnel de jogo é do aplicativo: aqui a entrada é recusada pelo nome, a
+  // saída não tem o que fechar e a lista é vazia.
+  "tunel_entrar", "tunel_sair_do_mod", "tuneis_abertos"
 ]);
 
 /**
@@ -2463,6 +2466,16 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     if (lido.falha) throw lido.falha;
     return lido.ok;
   },
+  // **O túnel de jogo não existe no navegador**: a porta é um `127.0.0.1` da
+  // máquina de quem joga, e uma página não abre porta. Um MOD com o poder
+  // `porta` exige `plataformas: ["app"]` e nem sobe aqui; se um pedido chegar
+  // mesmo assim, a recusa tem o nome, e não um erro de ponte.
+  tunel_entrar: async () => {
+    throw { Recusado: { motivo: "so-no-app" } };
+  },
+  // Sem túnel não há o que fechar, e fechar nada não é falha.
+  tunel_sair_do_mod: async () => null,
+  tuneis_abertos: async () => [],
   // **O seletor do MOD**: a pessoa escolhe, e o MOD recebe um número e lê os
   // bytes em pedaços. As regras e o guarda moram no `.wasm`; os bytes, aqui.
   escolher_para_o_mod: async ({ geracao, id, finalidade, papeis, extensoes, limiteDeBytes } = {}) => {

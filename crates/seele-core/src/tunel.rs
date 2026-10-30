@@ -31,11 +31,12 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+// Republicada para a FFI nomear a recusa sem tocar em `seele-proto` (ADR 0002).
 use seele_proto::control::{ClientMessage, MotivoDeFalhaDePar, ServerMessage};
 use seele_proto::ids::PersonId;
+pub use seele_proto::tunel::RecusaDeTunel;
 use seele_proto::tunel::{
-    AberturaDeTunel, MotivoDoFimDoTunel, ProtocoloDeTunel, RecusaDeTunel, SinalDeTunel,
-    TipoDeCanalDeTunel,
+    AberturaDeTunel, MotivoDoFimDoTunel, ProtocoloDeTunel, SinalDeTunel, TipoDeCanalDeTunel,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -134,6 +135,9 @@ pub struct RelatorioDoTunel {
     pub porta_local: u16,
     /// Se `porta_local` é a porta do jogo (e não uma das seguintes).
     pub preferida: bool,
+    /// A porta do jogo, a que se tentou primeiro. Com `preferida: false` é ela
+    /// que estava ocupada, e é o que a casca diz a quem joga.
+    pub desejada: u16,
     /// Por onde as conexões novas andam.
     pub caminho: Caminho,
     /// A ida e volta de **ponta a ponta** (pela estrela inclui os dois
@@ -175,6 +179,10 @@ pub struct PortaLocal {
     pub porta: u16,
     /// Se é a que se pediu (a do jogo), e não uma das seguintes.
     pub preferida: bool,
+    /// A porta que se pediu (a do jogo), ocupada ou não; zero quando se pediu
+    /// qualquer uma. A casca precisa dela para dizer «a 25565 estava ocupada»:
+    /// só `preferida: false` não diz qual era.
+    pub desejada: u16,
     endereco: SocketAddr,
     protocolo: ProtocoloDeTunel,
     escuta: Option<Escuta>,
@@ -251,6 +259,7 @@ pub(crate) fn abrir_sincrono(
                 return Ok(PortaLocal {
                     porta: endereco.port(),
                     preferida: indice == 0,
+                    desejada: preferida,
                     endereco,
                     protocolo,
                     escuta: Some(escuta),
@@ -593,6 +602,7 @@ struct Contexto {
     nome: String,
     porta_local: u16,
     preferida: bool,
+    desejada: u16,
     medidas: Arc<Medidas>,
     avisos: mpsc::UnboundedSender<Aviso>,
 }
@@ -621,6 +631,7 @@ impl Contexto {
             nome: self.nome.clone(),
             porta_local: self.porta_local,
             preferida: self.preferida,
+            desejada: self.desejada,
             caminho,
             latencia: self.medidas.latencia(),
             bytes_por_segundo_ida: ida_bps,
@@ -762,6 +773,7 @@ impl TunelDeJogador {
             nome: nome.to_owned(),
             porta_local: descricao.porta,
             preferida: descricao.preferida,
+            desejada: descricao.desejada,
             medidas: Arc::new(Medidas::nova(Some(tx.clone()))),
             avisos,
         });
@@ -2071,6 +2083,7 @@ impl Tuneis {
                     nome: nome.to_owned(),
                     porta_local: 0,
                     preferida: false,
+                    desejada: porta,
                     caminho: Caminho::Estrela,
                     latencia: None,
                     bytes_por_segundo_ida: 0,
@@ -2162,6 +2175,8 @@ mod testes {
         let porta = abrir_porta_local(ProtocoloDeTunel::Tcp, p).await.unwrap();
         assert_ne!(porta.porta, p);
         assert!(!porta.preferida);
+        // A casca diz «a <desejada> estava ocupada»: a porta pedida volta.
+        assert_eq!(porta.desejada, p);
         assert!(porta.porta > p && porta.porta <= p.saturating_add(64));
     }
 
@@ -2596,6 +2611,7 @@ mod testes {
                 nome: nome.to_owned(),
                 porta_local: 0,
                 preferida: false,
+                desejada: 0,
                 medidas: Arc::new(Medidas::nova(None)),
                 avisos: mpsc::unbounded_channel().0,
             };

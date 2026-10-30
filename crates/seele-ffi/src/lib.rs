@@ -70,14 +70,15 @@ use seele_core::{
 };
 
 pub use types::{
-    AberturaDoAudio, Attachment, AttachmentRefusal, CaptureDevice, Carimbo, Channel, ChannelWeight,
-    ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio,
-    EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, LimitesDeTela,
-    LimitesDosCampos, LinkState, LinkTrust, MembroForaDoAr, Message, MotivoDaRecusa,
+    AberturaDoAudio, Attachment, AttachmentRefusal, CaminhoDeTunel, CaptureDevice, Carimbo,
+    Channel, ChannelWeight, ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho,
+    EstadoDoEnvio, EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela,
+    LimitesDeTela, LimitesDosCampos, LinkState, LinkTrust, MembroForaDoAr, Message, MotivoDaRecusa,
     NotSavedReason, Notice, NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person,
-    PlaybackDevice, Preview, PreviewRefusal, PreviewRules, SaveDestination, SaveRefused, Severity,
-    SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, Transfer,
-    TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
+    PlaybackDevice, PortaDeTunel, Preview, PreviewRefusal, PreviewRules, QuedaDeTunel,
+    RelatorioDeTunel, SaveDestination, SaveRefused, Severity, SignalBand as Band, Snapshot,
+    SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, Transfer, TransmissaoNaSala, Trust, VoiceMode,
+    VoiceRoom, VoiceRoomSync, VolumeRefusal,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -1021,6 +1022,22 @@ impl SessaoId {
 type RespostaDoPeso = tokio::sync::oneshot::Sender<Result<ChannelWeight, types::CausaDaRecusa>>;
 
 enum Command {
+    /// Quem joga entra num túnel de jogo. A resposta vai por `resposta`, e a
+    /// espera por ela não pode parar este laço (ver `run_command`).
+    EntrarNoTunel {
+        mod_id: String,
+        nome: String,
+        resposta: tokio::sync::oneshot::Sender<Result<PortaDeTunel, &'static str>>,
+    },
+    /// Quem joga deixa um túnel.
+    SairDoTunel {
+        mod_id: String,
+        nome: String,
+    },
+    /// Quem joga deixa todos os túneis de um MOD (ele foi descarregado).
+    SairDosTuneisDoMod {
+        mod_id: String,
+    },
     ImagemDeMod {
         pedido: seele_core::PedidoDeImagem,
         bytes: Vec<u8>,
@@ -1375,6 +1392,12 @@ struct Shared {
     /// atenderia uma e deixaria a outra esperando para sempre. Aqui as duas
     /// recebem a mesma resposta.
     pending_weights: Mutex<Vec<(ChannelId, RespostaDoPeso)>>,
+    /// **O último relatório de cada túnel de jogo de quem joga**, por MOD e
+    /// nome. A casca que acaba de abrir (ou a faixa que recarregou) lê o que
+    /// está de pé por [`Connection::tuneis_abertos`] em vez de esperar o
+    /// próximo relatório. Sai daqui quando o túnel acaba (`encerrado`), quando
+    /// o MOD é fechado, e com a sessão.
+    tuneis: Mutex<std::collections::BTreeMap<(String, String), RelatorioDeTunel>>,
     /// Os limites que esta sessão pediu para a transmissão de tela dela.
     ///
     /// **Mora aqui porque a janela não sobrevive à transmissão.** O §5 manda
@@ -2129,6 +2152,7 @@ impl Connection {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(false),
             pending_weights: Mutex::new(Vec::new()),
+            tuneis: Mutex::new(std::collections::BTreeMap::new()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
@@ -2616,6 +2640,74 @@ impl Connection {
             acao,
             payload,
         })
+    }
+
+    /// Quem joga entra num túnel de jogo e espera a porta em `127.0.0.1`.
+    ///
+    /// A casca só chama isto de um clique (o bilhete de gesto é dela). Quem
+    /// confere o MOD ligado, o poder `porta` e a ação `entrar-no-jogo` é o
+    /// servidor, a cada entrada.
+    ///
+    /// # Errors
+    ///
+    /// O nome em kebab-case da recusa (`RecusaDeTunel`: `sem-permissao`,
+    /// `porta-local-ocupada`, `servidor-antigo`...), ou `sessao-encerrada`
+    /// quando a sessão já acabou. Nunca texto livre: a frase é da casca.
+    pub async fn entrar_no_tunel(
+        &self,
+        mod_id: String,
+        nome: String,
+    ) -> Result<PortaDeTunel, &'static str> {
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.command(Command::EntrarNoTunel {
+            mod_id,
+            nome,
+            resposta,
+        })
+        .map_err(|_| "sessao-encerrada")?;
+        // A sessão que acaba no meio larga o remetente: é o mesmo desfecho.
+        caixa.await.map_err(|_| "sessao-encerrada")?
+    }
+
+    /// Quem joga deixa o túnel `nome` do MOD: a porta fecha e os fluxos acabam.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn sair_do_tunel(&self, mod_id: String, nome: String) -> Result<(), ConnectionError> {
+        self.command(Command::SairDoTunel { mod_id, nome })
+    }
+
+    /// Quem joga deixa todos os túneis do MOD: ele foi desligado, descarregado
+    /// ou a janela dele acabou.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NotConnected`] once the session is over.
+    pub fn sair_dos_tuneis_do_mod(&self, mod_id: String) -> Result<(), ConnectionError> {
+        // Tirados daqui já: a faixa que lê logo depois não vê o que está
+        // fechando, e o relatório final que chegar volta a pô-los só com
+        // `encerrado`.
+        if let Ok(mut tuneis) = self.shared.tuneis.lock() {
+            tuneis.retain(|(mod_do_tunel, _), _| *mod_do_tunel != mod_id);
+        }
+        self.command(Command::SairDosTuneisDoMod { mod_id })
+    }
+
+    /// Os túneis de jogo abertos agora, com o último relatório de cada um.
+    #[must_use]
+    pub fn tuneis_abertos(&self) -> Vec<RelatorioDeTunel> {
+        self.shared
+            .tuneis
+            .lock()
+            .map(|tuneis| {
+                tuneis
+                    .values()
+                    .filter(|relatorio| relatorio.encerrado.is_none())
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Asks the server to make a voice room.
@@ -5229,11 +5321,14 @@ async fn drive(
                         }
                         shared.notify(&Event::TelemetryChanged);
                     }
-                    // O relatório de um túnel de jogo chega à casca no lote
-                    // seguinte (Task 9); até lá fica no log, e não se perde sem
-                    // dizer.
+                    // **O relatório de um túnel de jogo vai à casca inteiro**,
+                    // e o último de cada túnel leva o motivo de ele ter
+                    // acabado: sem isto a faixa do produto não teria como saber
+                    // que o fluxo de relatórios parou.
                     seele_core::enlace::Aviso::Tunel(relatorio) => {
-                        tracing::debug!(?relatorio, "relatório de túnel de jogo");
+                        let relatorio = relatorio_para_a_casca(&shared, &relatorio);
+                        guardar_relatorio_de_tunel(&shared, &relatorio);
+                        shared.notify(&Event::TunnelReport { report: relatorio });
                     }
                     seele_core::enlace::Aviso::Encerrado(motivo) => {
                         shared.notify(&Event::Ended {
@@ -5356,7 +5451,133 @@ async fn drive(
     if let Ok(mut pending) = shared.pending_weights.lock() {
         pending.clear();
     }
+    // Os túneis acabam com a sessão (o enlace os derruba ao sair); a faixa que
+    // lê depois não os vê de pé.
+    if let Ok(mut tuneis) = shared.tuneis.lock() {
+        tuneis.clear();
+    }
     client.sair().await;
+}
+
+/// Um relatório do núcleo como a casca o lê: motivos por nome, a latência em
+/// milissegundos e, no caminho direto, o apelido da máquina que o roster
+/// conhece.
+fn relatorio_para_a_casca(
+    shared: &Shared,
+    relatorio: &seele_core::tunel::RelatorioDoTunel,
+) -> RelatorioDeTunel {
+    use seele_core::tunel::Caminho;
+    let caminho = match relatorio.caminho {
+        Caminho::Direto { par } => CaminhoDeTunel::Direto {
+            par: par.0,
+            apelido: shared
+                .room
+                .lock()
+                .ok()
+                .and_then(|room| room.apelido_de(par)),
+        },
+        Caminho::Estrela => CaminhoDeTunel::Estrela,
+    };
+    RelatorioDeTunel {
+        mod_id: relatorio.mod_id.clone(),
+        nome: relatorio.nome.clone(),
+        porta: relatorio.porta_local,
+        preferida: relatorio.preferida,
+        desejada: relatorio.desejada,
+        caminho,
+        latencia_ms: relatorio
+            .latencia
+            .map(|latencia| u64::try_from(latencia.as_millis()).unwrap_or(u64::MAX)),
+        bytes_por_segundo: relatorio
+            .bytes_por_segundo_ida
+            .saturating_add(relatorio.bytes_por_segundo_volta),
+        bytes_por_segundo_ida: relatorio.bytes_por_segundo_ida,
+        bytes_por_segundo_volta: relatorio.bytes_por_segundo_volta,
+        conexoes: relatorio.conexoes,
+        quedas: relatorio
+            .quedas
+            .iter()
+            .map(|(queda, vezes)| QuedaDeTunel {
+                motivo: types::nome_da_queda(*queda),
+                vezes: *vezes,
+            })
+            .collect(),
+        udp_descartados: relatorio.udp_descartados,
+        encerrado: relatorio.encerrado.map(types::nome_da_queda),
+    }
+}
+
+/// Guarda o último relatório de um túnel. **O que acabou sai da tabela** (a
+/// faixa o recebe no evento, com o motivo, e `tuneis_abertos` não o devolve
+/// mais).
+fn guardar_relatorio_de_tunel(shared: &Shared, relatorio: &RelatorioDeTunel) {
+    let Ok(mut tuneis) = shared.tuneis.lock() else {
+        return;
+    };
+    let chave = (relatorio.mod_id.clone(), relatorio.nome.clone());
+    if let Some(motivo) = relatorio.encerrado {
+        tuneis.remove(&chave);
+        tracing::info!(
+            mod_id = %relatorio.mod_id,
+            tunel = %relatorio.nome,
+            motivo,
+            quedas = ?relatorio.quedas,
+            "túnel de jogo acabou"
+        );
+    } else {
+        tuneis.insert(chave, relatorio.clone());
+    }
+}
+
+/// A porta que o núcleo abriu, na tabela antes do primeiro relatório: quem lê
+/// `tuneis_abertos` logo depois de entrar já a vê, e o que a casca diz é o que
+/// o núcleo fez. Não sobrescreve um relatório que chegou antes.
+fn guardar_tunel_aberto(shared: &Shared, mod_id: &str, nome: &str, aberta: PortaDeTunel) {
+    let Ok(mut tuneis) = shared.tuneis.lock() else {
+        return;
+    };
+    tuneis
+        .entry((mod_id.to_owned(), nome.to_owned()))
+        .or_insert_with(|| RelatorioDeTunel {
+            mod_id: mod_id.to_owned(),
+            nome: nome.to_owned(),
+            porta: aberta.porta,
+            preferida: aberta.preferida,
+            desejada: aberta.desejada,
+            caminho: CaminhoDeTunel::Estrela,
+            latencia_ms: None,
+            bytes_por_segundo: 0,
+            bytes_por_segundo_ida: 0,
+            bytes_por_segundo_volta: 0,
+            conexoes: 0,
+            quedas: Vec::new(),
+            udp_descartados: 0,
+            encerrado: None,
+        });
+}
+
+/// «O produto sabe e não conta»: toda recusa de entrada num túnel vai ao
+/// registro com o MOD e o túnel, no nível que ela merece (uma recusa do
+/// servidor é rotina; a de porta local é uma máquina com problema).
+fn tunel_recusado_dito(mod_id: &str, nome: &str, recusa: seele_core::tunel::RecusaDeTunel) {
+    tracing::warn!(
+        mod_id = %mod_id,
+        tunel = %nome,
+        motivo = types::nome_da_recusa_do_tunel(recusa),
+        "entrar no túnel de jogo foi recusado"
+    );
+}
+
+/// A entrada que deu certo, dita com a porta que de fato abriu.
+fn tunel_aberto_dito(mod_id: &str, nome: &str, aberta: PortaDeTunel) {
+    tracing::info!(
+        mod_id = %mod_id,
+        tunel = %nome,
+        porta = aberta.porta,
+        preferida = aberta.preferida,
+        desejada = aberta.desejada,
+        "porta do túnel de jogo aberta"
+    );
 }
 
 /// Larga a voz da sessão sem segurar quem chama. M-4 do lote V.
@@ -7091,6 +7312,53 @@ async fn run_command(client: &Enlace, shared: &Arc<Shared>, command: Command) ->
     match command {
         // O olhar mora no fim da volta do laço de `drive`; aqui só se guarda
         // quem espera por ele.
+        Command::EntrarNoTunel {
+            mod_id,
+            nome,
+            resposta,
+        } => {
+            // O pedido sai agora; a espera (até o prazo do par) vai para uma
+            // tarefa. Parada aqui, ela pararia as teclas e os avisos de quem
+            // usa por até três segundos, a cada recusa.
+            match client.pedir_entrada_no_tunel(&mod_id, &nome).await {
+                Err(recusa) => {
+                    tunel_recusado_dito(&mod_id, &nome, recusa);
+                    let _ = resposta.send(Err(types::nome_da_recusa_do_tunel(recusa)));
+                }
+                Ok(espera) => {
+                    let shared = Arc::clone(shared);
+                    tokio::spawn(async move {
+                        let desfecho = match espera.aguardar().await {
+                            Ok(porta) => {
+                                let aberta = PortaDeTunel {
+                                    porta: porta.porta,
+                                    preferida: porta.preferida,
+                                    desejada: porta.desejada,
+                                };
+                                tunel_aberto_dito(&mod_id, &nome, aberta);
+                                guardar_tunel_aberto(&shared, &mod_id, &nome, aberta);
+                                Ok(aberta)
+                            }
+                            Err(recusa) => {
+                                tunel_recusado_dito(&mod_id, &nome, recusa);
+                                Err(types::nome_da_recusa_do_tunel(recusa))
+                            }
+                        };
+                        let _ = resposta.send(desfecho);
+                    });
+                }
+            }
+        }
+        Command::SairDoTunel { mod_id, nome } => {
+            if client.sair_do_tunel(&mod_id, &nome).await.is_err() {
+                return false;
+            }
+        }
+        Command::SairDosTuneisDoMod { mod_id } => {
+            if client.sair_dos_tuneis_do_mod(&mod_id).await.is_err() {
+                return false;
+            }
+        }
         Command::OlharAVoz(resposta) => shared.voice.esperar_o_olhar(resposta),
         Command::LembrarCaminho(bps) => {
             let _ = client.lembrar_o_caminho(bps).await;
@@ -10481,6 +10749,7 @@ mod tests {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
+            tuneis: Mutex::new(std::collections::BTreeMap::new()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
@@ -10641,6 +10910,7 @@ mod tests {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
+            tuneis: Mutex::new(std::collections::BTreeMap::new()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),
@@ -13763,6 +14033,7 @@ mod o_audio_segue_a_sala {
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
+            tuneis: Mutex::new(std::collections::BTreeMap::new()),
             limites_da_tela: Mutex::new(None),
             tela_escolhida: Mutex::new(super::EscolhaDeTela::NinguemEscolheu),
             tela_ligada: Mutex::new(seele_core::retrato::TelaLigada::default()),

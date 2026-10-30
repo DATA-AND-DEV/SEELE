@@ -49,6 +49,7 @@
 <link rel="stylesheet" href="tela-sessao.css">
 <link rel="stylesheet" href="camada-alerta.css">
 <link rel="stylesheet" href="camada-bateria.css">
+<link rel="stylesheet" href="camada-tuneis.css">
 <link rel="stylesheet" href="camada-portaria.css">
 <link rel="stylesheet" href="camada-toque.css">
 <link rel="stylesheet" href="camada-sala.css">
@@ -1140,6 +1141,17 @@
 
 
 
+
+  <!--
+    **As portas de jogo abertas** (API 8, `SeeleUI.tunel`): uma linha por túnel,
+    com a porta em que o jogo deve ligar, por onde o tráfego anda, a latência, a
+    vazão e a última queda. **É do produto, e fica fora de toda superfície de
+    MOD**: um MOD pede a porta, mas é o produto quem diz que ela está aberta, e
+    um MOD que pudesse calar ou pintar esta faixa poderia abrir uma porta na
+    máquina de quem joga sem que a pessoa soubesse. Desenhada por
+    `camada-tuneis.js`; escondida sem túnel nenhum.
+  -->
+  <div id="tuneis" class="camada-tuneis" role="status" aria-live="polite" hidden></div>
 
   <!--
     As quatro colunas do comp v3, nas larguras dele — `60px 268px minmax(0,1fr)
@@ -5062,6 +5074,7 @@
 <script src="camada-nomear.js"></script>
 <script src="camada-mods.js"></script>
 <script src="camada-versoes.js"></script>
+<script src="camada-tuneis.js"></script>
 <script src="tela-antes-de-hospedar.js"></script>
 <script src="camada-servidores.js"></script>
 <!--

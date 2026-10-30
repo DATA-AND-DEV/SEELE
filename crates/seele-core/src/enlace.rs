@@ -939,6 +939,30 @@ pub enum Andamento {
     },
 }
 
+/// A resposta que [`Enlace::pedir_entrada_no_tunel`] ainda espera do servidor.
+///
+/// Dona da caixa e de mais nada: pode ir para outra tarefa enquanto o enlace
+/// segue servindo quem o usa.
+#[derive(Debug)]
+pub struct EsperaDeTunel {
+    caixa: tokio::sync::oneshot::Receiver<Result<crate::tunel::PortaLocal, RecusaDeTunel>>,
+}
+
+impl EsperaDeTunel {
+    /// Espera até `PRAZO_DO_PAR`. Sem resposta (sessão caída, prazo vencido) a
+    /// recusa é [`RecusaDeTunel::SemResposta`].
+    ///
+    /// # Errors
+    ///
+    /// A recusa do servidor, ou as locais de [`Enlace::entrar_no_tunel`].
+    pub async fn aguardar(self) -> Result<crate::tunel::PortaLocal, RecusaDeTunel> {
+        match tokio::time::timeout(PRAZO_DO_PAR, self.caixa).await {
+            Ok(Ok(resultado)) => resultado,
+            Ok(Err(_)) | Err(_) => Err(RecusaDeTunel::SemResposta),
+        }
+    }
+}
+
 /// A sessão com um servidor, viva através de quedas.
 pub struct Enlace {
     comandos: mpsc::Sender<Comando>,
@@ -2853,6 +2877,29 @@ impl Enlace {
         mod_id: &str,
         nome: &str,
     ) -> Result<crate::tunel::PortaLocal, RecusaDeTunel> {
+        self.pedir_entrada_no_tunel(mod_id, nome)
+            .await?
+            .aguardar()
+            .await
+    }
+
+    /// A primeira metade de [`Self::entrar_no_tunel`]: manda o pedido e devolve
+    /// a espera, **sem esperar**.
+    ///
+    /// Existe para quem tem só um `&Enlace` dentro de um laço que não pode
+    /// parar (o da FFI, que também entrega os avisos e as teclas de quem usa):
+    /// a espera de até `PRAZO_DO_PAR` vai para uma tarefa à parte, e o laço
+    /// segue. A espera é dona do que precisa e não segura o enlace.
+    ///
+    /// # Errors
+    ///
+    /// As recusas que se sabem antes de mandar: nome malformado e sessão
+    /// caída.
+    pub async fn pedir_entrada_no_tunel(
+        &self,
+        mod_id: &str,
+        nome: &str,
+    ) -> Result<EsperaDeTunel, RecusaDeTunel> {
         // A régua do fio, aplicada antes: um nome que o servidor recusaria
         // como malformado não existe.
         seele_proto::tunel::check_tunel(mod_id, nome).map_err(|_| RecusaDeTunel::NaoExiste)?;
@@ -2864,10 +2911,7 @@ impl Enlace {
         })
         .await
         .map_err(|_| RecusaDeTunel::SemResposta)?;
-        match tokio::time::timeout(PRAZO_DO_PAR, caixa).await {
-            Ok(Ok(resultado)) => resultado,
-            Ok(Err(_)) | Err(_) => Err(RecusaDeTunel::SemResposta),
-        }
+        Ok(EsperaDeTunel { caixa })
     }
 
     /// Quem joga deixa o túnel: a porta fecha e os fluxos acabam.

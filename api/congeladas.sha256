@@ -113,4 +113,10 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 # `check-api` exige a linha dela desde o commit que a cria; até a v8 sair numa
 # release, cada emenda a refaz aqui, na regra da v6 e da v7. Quando sair, ela
 # congela.
-c100a72699ef16b88ac305dd8993a66e88898888aec6a1889509f858592236e9  v8.json
+#
+# - Emenda do túnel de jogo (29/10/2026, Task 9 da parte 2): escreveu o que a
+#   entrega da casca trouxe — `SeeleUI.tunel.entrar` e o bilhete de gesto do
+#   `botao` (`sentido`), a faixa do produto, e as recusas do túnel em
+#   `recusas.tunel`. As recusas entram no mesmo commit da entrega: o guarda da
+#   lista fechada amarra a janela ao contrato.
+eebadf1e51930220a4d9fb08fc5b57213ec81b35f9031952fd5a2349ce795f05  v8.json
