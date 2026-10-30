@@ -2861,10 +2861,13 @@ async fn run_session(
                         }
                     }
                     ClientMessage::SairDoTunel { mod_id, nome } => {
-                        // Só o log: quem sai sabe que saiu (`PessoaSaiu`).
-                        if server.tuneis().sair(session.person, &mod_id, &nome) {
+                        // Quem sai sabe que saiu (`PessoaSaiu`, só no log); a
+                        // máquina é avisada para cortar a ligação direta dele.
+                        let fim = server.tuneis().sair(session.person, &mod_id, &nome);
+                        if !fim.retiradas.is_empty() {
                             tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, motivo = ?seele_proto::tunel::MotivoDoFimDoTunel::PessoaSaiu, "túnel: a pessoa saiu");
                         }
+                        crate::tuneis::anunciar(server, fim);
                     }
                     // O caminho direto de um túnel falhou. Só se registra: quem
                     // joga já está na estrela (o túnel nunca saiu dela), então
@@ -6263,6 +6266,18 @@ fn translate(
             mod_id: mod_id.clone(),
             nome: nome.clone(),
             motivo: *motivo,
+        }),
+        // A retirada vai só à máquina que serve: é ela quem confere a ligação
+        // direta, onde o servidor não vê os canais.
+        Event::TunelRetirado {
+            para,
+            mod_id,
+            nome,
+            quem,
+        } => (*para == self_person).then(|| ServerMessage::TunelRetirado {
+            mod_id: mod_id.clone(),
+            nome: nome.clone(),
+            quem: *quem,
         }),
     }
 }

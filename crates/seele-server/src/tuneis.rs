@@ -101,6 +101,56 @@ pub struct Encerramento {
     pub motivo: MotivoDoFimDoTunel,
 }
 
+/// A máquina que serve precisa saber que uma pessoa deixou de poder alcançar o
+/// túnel: vira um `TunelRetirado` endereçado (`Event::TunelRetirado`).
+///
+/// `Encerramento` conta a quem jogava; esta conta a quem serve. Sem ela a
+/// máquina não tem como cortar a ligação direta, onde o servidor não vê os
+/// canais.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Retirada {
+    /// A máquina que serve o túnel.
+    pub para: PersonId,
+    /// `autor/nome` do MOD.
+    pub mod_id: String,
+    /// O nome do túnel.
+    pub nome: String,
+    /// Quem perdeu o direito.
+    pub quem: PersonId,
+}
+
+/// O que um evento do livro obriga a dizer: os túneis que acabaram e as
+/// pessoas retiradas de túneis que seguem.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Fim {
+    /// Quem precisa saber que um túnel acabou.
+    pub encerramentos: Vec<Encerramento>,
+    /// As máquinas que precisam saber que uma pessoa saiu do túnel delas.
+    pub retiradas: Vec<Retirada>,
+}
+
+impl From<Vec<Encerramento>> for Fim {
+    fn from(encerramentos: Vec<Encerramento>) -> Self {
+        Self {
+            encerramentos,
+            retiradas: Vec::new(),
+        }
+    }
+}
+
+impl Fim {
+    /// Se não há o que dizer a ninguém.
+    #[must_use]
+    pub fn vazio(&self) -> bool {
+        self.encerramentos.is_empty() && self.retiradas.is_empty()
+    }
+
+    fn junta(&mut self, outro: Self) {
+        self.encerramentos.extend(outro.encerramentos);
+        self.retiradas.extend(outro.retiradas);
+    }
+}
+
 /// A concessão de uma pessoa a um túnel.
 struct Concessao {
     /// A conexão que entrou. A saída de uma conexão velha não tira quem já
@@ -310,11 +360,28 @@ impl Tuneis {
         })
     }
 
-    /// Quem joga deixa o túnel. Diz se havia o que tirar.
-    pub fn sair(&mut self, pessoa: PersonId, mod_id: &str, nome: &str) -> bool {
-        self.servidos
-            .get_mut(&chave(mod_id, nome))
-            .is_some_and(|entrada| entrada.dentro.remove(&pessoa).is_some())
+    /// Quem joga deixa o túnel. Devolve a retirada a dizer à máquina (vazio se
+    /// não havia o que tirar).
+    pub fn sair(&mut self, pessoa: PersonId, mod_id: &str, nome: &str) -> Fim {
+        let mut fim = Fim::default();
+        if let Some(entrada) = self.servidos.get_mut(&chave(mod_id, nome)) {
+            if entrada.dentro.remove(&pessoa).is_some() {
+                fim.retiradas
+                    .extend(Self::retirada(entrada, mod_id, nome, pessoa));
+            }
+        }
+        fim
+    }
+
+    /// A retirada de `quem` do túnel de `entrada`, para a máquina. Nenhuma
+    /// quando `quem` é a própria máquina.
+    fn retirada(entrada: &Entrada, mod_id: &str, nome: &str, quem: PersonId) -> Option<Retirada> {
+        (quem != entrada.maquina).then(|| Retirada {
+            para: entrada.maquina,
+            mod_id: mod_id.to_owned(),
+            nome: nome.to_owned(),
+            quem,
+        })
     }
 
     /// Se alguém serve `(mod_id, nome)`.
@@ -330,7 +397,7 @@ impl Tuneis {
     /// A conexão é conferida nos dois casos: uma corrida de candidatos deixa
     /// duas conexões vivas da mesma pessoa, e o fim da que perdeu não pode levar
     /// o que a vencedora acabou de fazer.
-    pub fn saiu(&mut self, pessoa: PersonId, conexao: u64) -> Vec<Encerramento> {
+    pub fn saiu(&mut self, pessoa: PersonId, conexao: u64) -> Fim {
         self.conexoes.remove(&conexao);
         let acabaram: Vec<Chave> = self
             .servidos
@@ -338,10 +405,10 @@ impl Tuneis {
             .filter(|(_, e)| e.maquina == pessoa && e.conexao == conexao)
             .map(|(k, _)| k.clone())
             .collect();
-        let mut fim = Vec::new();
+        let mut fim = Fim::default();
         for k in acabaram {
             if let Some(entrada) = self.servidos.remove(&k) {
-                fim.extend(Self::encerrar_para_quem_joga(
+                fim.encerramentos.extend(Self::encerrar_para_quem_joga(
                     &entrada,
                     &k.0,
                     &k.1,
@@ -356,6 +423,10 @@ impl Tuneis {
                 .is_some_and(|c| c.conexao == conexao);
             if eh_dela {
                 entrada.dentro.remove(&pessoa);
+                // A máquina fecha a ligação direta de quem saiu, que o
+                // servidor não enxerga.
+                fim.retiradas
+                    .extend(Self::retirada(entrada, &k.0, &k.1, pessoa));
                 tracing::info!(
                     mod_id = %k.0,
                     tunel = %k.1,
@@ -406,16 +477,22 @@ impl Tuneis {
 
     /// A pessoa perdeu a ação `entrar-no-jogo` do MOD: as concessões dela nos
     /// túneis dele somem, e os canais que andavam por elas caem junto.
-    pub fn sem_permissao(&mut self, pessoa: PersonId, mod_id: &str) -> Vec<Encerramento> {
-        let mut fim = Vec::new();
+    ///
+    /// Devolve o `SemPermissao` de quem perdeu **e a retirada de quem serve**:
+    /// pela estrela os canais caem com a concessão, mas a ligação direta é da
+    /// máquina, e é ela que tem de saber.
+    pub fn sem_permissao(&mut self, pessoa: PersonId, mod_id: &str) -> Fim {
+        let mut fim = Fim::default();
         for (k, entrada) in &mut self.servidos {
             if k.0 == mod_id && entrada.dentro.remove(&pessoa).is_some() {
-                fim.push(Encerramento {
+                fim.encerramentos.push(Encerramento {
                     para: pessoa,
                     mod_id: k.0.clone(),
                     nome: k.1.clone(),
                     motivo: MotivoDoFimDoTunel::SemPermissao,
                 });
+                fim.retiradas
+                    .extend(Self::retirada(entrada, &k.0, &k.1, pessoa));
             }
         }
         fim
@@ -702,7 +779,17 @@ pub async fn atender_entrar(
     // e a gravação de cima passou por `reconferir` quando a concessão ainda não
     // existia; sem esta segunda conferência ela ficaria de pé para sempre.
     if let Err(recusa) = confere_a_acao(server, pessoa, mod_id).await {
-        let _ = server.tuneis().sem_permissao(pessoa, mod_id);
+        // A concessão recém-gravada some, e a máquina é avisada: a apresentação
+        // ainda não saiu, mas a retirada é inofensiva sem ligação direta.
+        // Quem pediu já recebe a recusa; só a máquina precisa do aviso.
+        let retiradas = server.tuneis().sem_permissao(pessoa, mod_id).retiradas;
+        anunciar(
+            server,
+            Fim {
+                encerramentos: Vec::new(),
+                retiradas,
+            },
+        );
         return Err(recusa);
     }
     Ok(servido)
@@ -710,8 +797,27 @@ pub async fn atender_entrar(
 
 /// Diz a quem precisa saber que túneis acabaram: no log, com `mod_id=` e
 /// `tunel=`, e pelo barramento, endereçado.
-pub fn anunciar(server: &Server, fim: Vec<Encerramento>) {
-    for e in fim {
+pub fn anunciar(server: &Server, fim: impl Into<Fim>) {
+    let Fim {
+        encerramentos,
+        retiradas,
+    } = fim.into();
+    for r in retiradas {
+        tracing::info!(
+            mod_id = %r.mod_id,
+            tunel = %r.nome,
+            maquina = %r.para,
+            quem = %r.quem,
+            "túnel: a máquina é avisada de que a pessoa saiu do túnel"
+        );
+        let _ = server.events.send(Event::TunelRetirado {
+            para: r.para,
+            mod_id: r.mod_id,
+            nome: r.nome,
+            quem: r.quem,
+        });
+    }
+    for e in encerramentos {
         tracing::info!(
             mod_id = %e.mod_id,
             tunel = %e.nome,
@@ -832,11 +938,11 @@ pub async fn reconferir(server: &Server, pessoas: Option<&[PersonId]>) {
             perderam.push((pessoa, mod_id));
         }
     }
-    let mut fim = Vec::new();
+    let mut fim = Fim::default();
     {
         let mut livro = server.tuneis();
         for (pessoa, mod_id) in perderam {
-            fim.extend(livro.sem_permissao(pessoa, &mod_id));
+            fim.junta(livro.sem_permissao(pessoa, &mod_id));
         }
     }
     anunciar(server, fim);
@@ -1408,8 +1514,8 @@ mod tests {
         t.entrar(JOGA, 3, "x/jogo", "eco").expect("entra");
         // Uma conexão velha da mesma pessoa que cai depois da nova não leva o
         // túnel junto.
-        assert!(t.saiu(MAQUINA, 99).is_empty());
-        let fim = t.saiu(MAQUINA, 7);
+        assert!(t.saiu(MAQUINA, 99).vazio());
+        let fim = t.saiu(MAQUINA, 7).encerramentos;
         assert_eq!(fim.len(), 1);
         assert_eq!(fim[0].para, JOGA);
         assert_eq!(fim[0].motivo, MotivoDoFimDoTunel::MaquinaSaiu);
@@ -1454,9 +1560,22 @@ mod tests {
         t.entrar(JOGA, 3, "x/jogo", "eco").expect("entra");
         assert_eq!(t.mods_em_que_esta(JOGA), vec!["x/jogo".to_owned()]);
         let fim = t.sem_permissao(JOGA, "x/jogo");
-        assert_eq!(fim.len(), 1);
-        assert_eq!(fim[0].para, JOGA);
-        assert_eq!(fim[0].motivo, MotivoDoFimDoTunel::SemPermissao);
+        assert_eq!(fim.encerramentos.len(), 1);
+        assert_eq!(fim.encerramentos[0].para, JOGA);
+        assert_eq!(
+            fim.encerramentos[0].motivo,
+            MotivoDoFimDoTunel::SemPermissao
+        );
+        // E a máquina é avisada: a ligação direta é dela.
+        assert_eq!(
+            fim.retiradas,
+            vec![Retirada {
+                para: MAQUINA,
+                mod_id: "x/jogo".into(),
+                nome: "eco".into(),
+                quem: JOGA,
+            }]
+        );
         assert!(t.mods_em_que_esta(JOGA).is_empty());
 
         t.entrar(JOGA, 3, "x/jogo", "eco").expect("entra");
@@ -1466,6 +1585,50 @@ mod tests {
         assert_eq!(t.mods_em_que_esta(JOGA).len(), 1);
         t.saiu(JOGA, 4);
         assert!(t.mods_em_que_esta(JOGA).is_empty());
+    }
+
+    /// **I1, o livro.** Toda saída de uma pessoa de um túnel que segue de pé
+    /// (perder a ação, deixar o túnel, a conexão dela cair) diz à máquina que
+    /// serve, e só a ela; a saída da própria máquina e o túnel que acaba por
+    /// inteiro não geram retirada (o `Encerramento` já cobre).
+    #[test]
+    fn quem_sai_do_tunel_e_dito_a_maquina_por_todos_os_caminhos() {
+        let retirada = |quem| Retirada {
+            para: MAQUINA,
+            mod_id: "x/jogo".into(),
+            nome: "eco".into(),
+            quem,
+        };
+        // Deixar o túnel.
+        let mut t = com_tunel();
+        t.entrar(JOGA, 3, "x/jogo", "eco").expect("entra");
+        assert!(t.sair(PersonId(9), "x/jogo", "eco").vazio());
+        assert_eq!(
+            t.sair(JOGA, "x/jogo", "eco").retiradas,
+            vec![retirada(JOGA)]
+        );
+        // Já fora: nada a dizer.
+        assert!(t.sair(JOGA, "x/jogo", "eco").vazio());
+
+        // A conexão que entrou cai.
+        t.entrar(JOGA, 3, "x/jogo", "eco").expect("entra");
+        // Uma conexão velha caindo não retira quem voltou por outra.
+        t.entrar(JOGA, 4, "x/jogo", "eco").expect("volta");
+        assert!(t.saiu(JOGA, 3).vazio());
+        let fim = t.saiu(JOGA, 4);
+        assert_eq!(fim.retiradas, vec![retirada(JOGA)]);
+        assert!(fim.encerramentos.is_empty());
+
+        // A máquina que entra no próprio túnel e sai não se retira de si.
+        t.entrar(MAQUINA, 7, "x/jogo", "eco")
+            .expect("a máquina entra");
+        assert!(t.sem_permissao(MAQUINA, "x/jogo").retiradas.is_empty());
+
+        // O túnel que acaba por inteiro: encerramentos, nenhuma retirada.
+        t.entrar(JOGA, 3, "x/jogo", "eco").expect("entra");
+        let fim = Fim::from(t.parar(MAQUINA, "x/jogo", "eco"));
+        assert!(fim.retiradas.is_empty());
+        assert!(!fim.encerramentos.is_empty());
     }
 
     #[test]

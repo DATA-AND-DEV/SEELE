@@ -57,6 +57,15 @@ type Servidor = (SocketAddr, Arc<Daemon>, String, tempfile::TempDir);
 /// ação `entrar-no-jogo` dada a todos. A mesma montagem de
 /// `seele-server/tests/tunel_no_servidor.rs`.
 async fn servidor(malha_para_tuneis: bool) -> Result<Servidor> {
+    servidor_com_dono(malha_para_tuneis, None).await
+}
+
+/// Como [`servidor`], com o dono declarado por impressão (para um teste que
+/// mexe nos cargos pelo fio).
+async fn servidor_com_dono(
+    malha_para_tuneis: bool,
+    proprietario: Option<String>,
+) -> Result<Servidor> {
     let temp = tempfile::tempdir()?;
     let raizes = seele_server::RaizesDosMods {
         pacotes: temp.path().join("cache"),
@@ -89,6 +98,7 @@ async fn servidor(malha_para_tuneis: bool) -> Result<Servidor> {
         mods_dir: Some(raizes.clone()),
         malha_para_tuneis,
         servir_tuneis: true,
+        proprietario,
         ..ServerConfig::default()
     };
     let daemon = Arc::new(ligar_insistindo(config).await?);
@@ -634,6 +644,131 @@ async fn quem_sai_do_servidor_fecha_a_porta() -> Result<()> {
         matches!(fim, Ok(Ok(_)) | Ok(Err(_))),
         "a conexão local de quem joga não acabou"
     );
+    Ok(())
+}
+
+/// **I1, de ponta a ponta.** O dono revoga `entrar-no-jogo` com o túnel aberto
+/// **pelo caminho direto**: o servidor, que não vê o que passa por ele, avisa a
+/// máquina (`TunelRetirado`), e é a máquina que acaba com a conexão viva (o
+/// motivo `SemPermissao` fica nas quedas dela, e não `CaminhoCaiu`, que seria
+/// a conta de quem joga fechando a ligação por conta própria) e derruba a
+/// ligação direta, que não tem mais nada permitido a essa pessoa.
+///
+/// O corte de um canal **novo** numa ligação que o cliente não fecha (um
+/// cliente modificado) não cabe aqui, porque o cliente de verdade fecha a
+/// ligação sozinho ao saber do `TunelEncerrado`: esse caso está provado na
+/// máquina, em `seele-core::tunel`
+/// (`a_retirada_corta_o_canal_direto_vivo_o_novo_e_derruba_a_ligacao_vazia`).
+#[tokio::test(flavor = "multi_thread")]
+async fn revogar_entrar_no_jogo_corta_o_direto_na_maquina() -> Result<()> {
+    use seele_proto::cargos::{ChaveDeMod, PedidoDeCargo, Permissao, TODOS};
+
+    let semente_do_dono = 9_u8;
+    let impressao_do_dono = seele_proto::transport::key_fingerprint(
+        &SigningKey::from_bytes(&[semente_do_dono; 32])
+            .verifying_key()
+            .to_bytes(),
+    );
+    let (endereco, daemon, conjunto, _temp) =
+        servidor_com_dono(true, Some(impressao_do_dono)).await?;
+    let maquina = Lado::novo(endereco, &conjunto, 1, "maquina").await?;
+    let mut joga = Lado::novo(endereco, &conjunto, 2, "joga").await?;
+    let dono = Lado::novo(endereco, &conjunto, semente_do_dono, "dono").await?;
+    esperar_as_identidades(&daemon, &maquina, &joga).await?;
+
+    let (jogo, mut acabou) = eco_tcp("").await;
+    maquina
+        .enlace
+        .servir_tunel(MOD, "eco-tcp", ProtocoloDeTunel::Tcp, jogo)
+        .await
+        .map_err(|r| anyhow::anyhow!("{r:?}"))?;
+    let porta = joga
+        .enlace
+        .entrar_no_tunel(MOD, "eco-tcp")
+        .await
+        .map_err(|r| anyhow::anyhow!("{r:?}"))?
+        .porta;
+    joga.relatorio("o caminho direto", "eco-tcp", |r| {
+        matches!(r.caminho, Caminho::Direto { .. })
+    })
+    .await?;
+
+    // Uma conexão viva pelo direto, com o eco provado.
+    let mut viva = TcpStream::connect(("127.0.0.1", porta)).await?;
+    viva.write_all(b"ola").await?;
+    let mut tres = [0_u8; 3];
+    tokio::time::timeout(PACIENCIA, viva.read_exact(&mut tres)).await??;
+    assert_eq!(&tres, b"ola");
+    assert_eq!(maquina.enlace.ligacoes_diretas_da_maquina(), 1);
+
+    // O dono tira `entrar-no-jogo` do @everyone, pelo fio.
+    let quadro = {
+        let db = daemon.server().persistence.lock().await;
+        seele_server::cargos::quadro(&db)?
+    };
+    let todos = quadro
+        .cargos
+        .iter()
+        .find(|c| c.id == TODOS)
+        .expect("o @everyone")
+        .clone();
+    let mut restringe = todos.restringe.clone();
+    restringe.push(Permissao::DeMod(ChaveDeMod {
+        mod_id: MOD.into(),
+        acao: ACAO_ENTRAR_NO_JOGO.into(),
+    }));
+    dono.enlace
+        .cargo(Some((
+            quadro.revisao,
+            PedidoDeCargo::Editar {
+                cargo: TODOS,
+                nome: todos.nome.clone(),
+                concede: todos.concede.clone(),
+                restringe,
+            },
+        )))
+        .await
+        .map_err(|_| anyhow::anyhow!("o enlace do dono já tinha acabado"))?;
+
+    // Quem joga fica sabendo, com o nome do motivo...
+    let fim = joga
+        .relatorio("o aviso do fim do túnel", "eco-tcp", |r| {
+            r.encerrado.is_some()
+        })
+        .await?;
+    assert_eq!(fim.encerrado, Some(Queda::SemPermissao), "{fim:?}");
+    // ...a conexão do jogo acaba dos dois lados...
+    let mut sobra = [0_u8; 16];
+    let lida = tokio::time::timeout(PACIENCIA, viva.read(&mut sobra)).await?;
+    assert!(matches!(lida, Ok(0) | Err(_)), "a conexão seguiu viva");
+    tokio::time::timeout(PACIENCIA, acabou.recv())
+        .await?
+        .expect("o jogo não viu a conexão acabar");
+    // ...e a máquina **foi quem a cortou**, pelo aviso do servidor.
+    let fim_ate = Instant::now() + PACIENCIA;
+    loop {
+        let quedas = maquina.enlace.quedas_do_tunel_servido(MOD, "eco-tcp");
+        if quedas
+            .iter()
+            .any(|(q, n)| *q == Queda::SemPermissao && *n >= 1)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < fim_ate,
+            "a máquina não cortou a conexão por falta de permissão: {quedas:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // A ligação direta dessa pessoa não tem mais nada permitido: cai.
+    let fim_ate = Instant::now() + PACIENCIA;
+    while maquina.enlace.ligacoes_diretas_da_maquina() != 0 {
+        assert!(
+            Instant::now() < fim_ate,
+            "a máquina seguiu com a ligação direta de quem perdeu o túnel"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     Ok(())
 }
 

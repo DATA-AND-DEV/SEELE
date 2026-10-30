@@ -1406,6 +1406,9 @@ pub(crate) struct EstadoDaMaquina {
     /// dele: descartados e contados, nunca motivo para cortar o canal (a
     /// abertura pode só ter se atrasado ou se perdido, e quem abre a repete).
     dados_antes_da_abertura: AtomicU64,
+    /// Quem a máquina está atendendo (ou esperando) pela malha: **uma ligação
+    /// por pessoa**, com os túneis que o servidor apresentou a ela.
+    atendendo: Arc<Mutex<HashMap<PersonId, Atendimento>>>,
 }
 
 impl EstadoDaMaquina {
@@ -1440,6 +1443,15 @@ impl EstadoDaMaquina {
     pub(crate) fn dados_antes_da_abertura(&self) -> u64 {
         self.dados_antes_da_abertura.load(Ordering::Relaxed)
     }
+
+    /// Com quantas pessoas a máquina mantém ligação direta agora.
+    #[must_use]
+    pub(crate) fn ligacoes_diretas(&self) -> usize {
+        self.atendendo
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    }
 }
 
 /// O lado da máquina: aceita canais e os liga no jogo.
@@ -1447,15 +1459,24 @@ pub(crate) struct Maquina {
     estado: Arc<EstadoDaMaquina>,
     tarefas: JoinSet<()>,
     na_estrela: bool,
-    /// Quem a máquina está atendendo (ou esperando) pela malha: **uma ligação
-    /// por pessoa**, com os túneis que o servidor apresentou a ela.
+    /// O mesmo mapa de [`EstadoDaMaquina::atendendo`].
     atendendo: Arc<Mutex<HashMap<PersonId, Atendimento>>>,
     proximo_atendimento: u64,
 }
 
 /// Os túneis que o servidor apresentou a uma pessoa: o que a ligação direta
 /// dela pode abrir. Um canal que nomeia outro túnel é cortado.
-pub(crate) struct Permitidos(Mutex<HashSet<Chave>>);
+///
+/// Cada túnel carrega um **sinal de vigia** que morre quando o túnel é
+/// retirado (`TunelRetirado`): todo canal que andava por ele o segura e acaba
+/// junto. O servidor só confere os canais que passam por ele; pela ligação
+/// direta, quem confere é esta lista, e sem o sinal ela só crescia.
+pub(crate) struct Permitidos {
+    mapa: Mutex<HashMap<Chave, watch::Sender<()>>>,
+    /// Vira `true` quando a lista esvazia por retirada: a ligação direta para
+    /// de aceitar canais e espera os que ainda acabam.
+    esvaziada: watch::Sender<bool>,
+}
 
 /// Quanto um canal que chega por uma ligação direta espera pela apresentação
 /// do túnel que nomeia. O servidor apresenta o túnel à máquina e a quem joga
@@ -1466,35 +1487,91 @@ const GRACA_DA_APRESENTACAO: Duration = Duration::from_millis(1500);
 
 impl Permitidos {
     pub(crate) fn de(chave: Chave) -> Arc<Self> {
-        Arc::new(Self(Mutex::new(HashSet::from([chave]))))
+        Arc::new(Self {
+            mapa: Mutex::new(HashMap::from([(chave, watch::Sender::new(()))])),
+            esvaziada: watch::Sender::new(false),
+        })
     }
 
     fn permitir(&self, chave: Chave) {
-        self.0
+        self.mapa
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(chave);
+            .entry(chave)
+            .or_insert_with(|| watch::Sender::new(()));
     }
 
-    fn permite(&self, chave: &Chave) -> bool {
-        self.0
+    /// O sinal de vigia do túnel, se ele é permitido agora.
+    fn vigia(&self, chave: &Chave) -> Option<watch::Receiver<()>> {
+        self.mapa
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .contains(chave)
+            .get(chave)
+            .map(watch::Sender::subscribe)
     }
 
-    /// Se o túnel é permitido agora ou passa a ser dentro da graça.
-    async fn permite_logo(&self, chave: &Chave) -> bool {
+    /// Tira o túnel da lista: o sinal de vigia morre e os canais que o seguram
+    /// acabam. `true` se estava lá.
+    ///
+    /// Esvaziada a lista, avisa a ligação (`esvaziada`) para parar de aceitar
+    /// canais **sem abortar** os que ainda estão acabando: cada um registra a
+    /// própria queda (`SemPermissao`) ao ver o vigia morrer, e abortar a
+    /// ligação no meio apagaria essa conta.
+    fn retirar(&self, chave: &Chave) -> bool {
+        let mut mapa = self.mapa.lock().unwrap_or_else(PoisonError::into_inner);
+        let tinha = mapa.remove(chave).is_some();
+        if mapa.is_empty() {
+            self.esvaziada.send_replace(true);
+        }
+        tinha
+    }
+
+    fn vazio(&self) -> bool {
+        self.mapa
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
+    }
+
+    /// O vigia do túnel se ele é permitido agora ou passa a ser dentro da
+    /// graça; `None` se a graça venceu sem a apresentação chegar.
+    async fn vigia_logo(&self, chave: &Chave) -> Option<watch::Receiver<()>> {
         let fim = Instant::now() + GRACA_DA_APRESENTACAO;
         loop {
-            if self.permite(chave) {
-                return true;
+            if let Some(vigia) = self.vigia(chave) {
+                return Some(vigia);
             }
             if Instant::now() >= fim {
-                return false;
+                return None;
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
+    }
+}
+
+/// Quanto a ligação direta espera, depois de esvaziada, os canais que ainda
+/// estão acabando registrarem a queda deles.
+const PRAZO_DA_DESPEDIDA: Duration = Duration::from_secs(2);
+
+/// Espera a lista de permitidos da ligação esvaziar. Sem lista (a estrela)
+/// nunca acontece.
+async fn lista_esvaziada(esvaziada: &mut Option<watch::Receiver<bool>>) {
+    match esvaziada {
+        Some(rx) => {
+            let _ = rx.wait_for(|vazia| *vazia).await;
+        }
+        None => pending().await,
+    }
+}
+
+/// Espera o túnel ser retirado de quem abriu o canal. Sem vigia (a estrela, que
+/// o servidor confere canal a canal) nunca acontece.
+async fn retirada(vigia: &mut Option<watch::Receiver<()>>) {
+    match vigia {
+        // Nada é enviado por este sinal: `changed` só volta com erro, quando a
+        // lista largou o túnel.
+        Some(vigia) => while vigia.changed().await.is_ok() {},
+        None => pending().await,
     }
 }
 
@@ -1516,15 +1593,17 @@ pub(crate) struct Atendimento {
 
 impl Maquina {
     pub(crate) fn nova() -> Self {
+        let atendendo = Arc::new(Mutex::new(HashMap::new()));
         Self {
             estado: Arc::new(EstadoDaMaquina {
                 servidos: Mutex::new(HashMap::new()),
                 alheios: AtomicU64::new(0),
                 dados_antes_da_abertura: AtomicU64::new(0),
+                atendendo: Arc::clone(&atendendo),
             }),
             tarefas: JoinSet::new(),
             na_estrela: false,
-            atendendo: Arc::new(Mutex::new(HashMap::new())),
+            atendendo,
             proximo_atendimento: 0,
         }
     }
@@ -1655,6 +1734,33 @@ impl Maquina {
         });
     }
 
+    /// `TunelRetirado`: `quem` deixou de poder alcançar `mod_id/nome`.
+    ///
+    /// O servidor confere cada canal que passa **por ele**; pela ligação
+    /// direta, quem confere é a máquina, e ela só aprendia o que a pessoa
+    /// *ganhava*. Aqui o túnel sai do que a ligação aceita, os canais dessa
+    /// pessoa naquele túnel acabam, e a ligação inteira cai quando nada mais é
+    /// permitido a ela.
+    pub(crate) fn retirar(&mut self, mod_id: &str, nome: &str, quem: PersonId) {
+        let chave = (mod_id.to_owned(), nome.to_owned());
+        let mut atendendo = self
+            .atendendo
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let Some(atendimento) = atendendo.get(&quem) else {
+            tracing::debug!(%mod_id, tunel = %nome, %quem, "túnel: retirada de quem não tem ligação direta com esta máquina");
+            return;
+        };
+        let tinha = atendimento.permitidos.retirar(&chave);
+        tracing::info!(%mod_id, tunel = %nome, %quem, tinha, "túnel: a pessoa perdeu o túnel; os canais dela nele acabam");
+        if atendimento.permitidos.vazio() {
+            // A lista avisou a ligação (`Permitidos::retirar`); aqui só se
+            // esquece o atendimento, para a próxima apresentação criar outro.
+            atendendo.remove(&quem);
+            tracing::info!(%mod_id, tunel = %nome, %quem, "túnel: nada mais é permitido a esta pessoa; a ligação direta cai");
+        }
+    }
+
     /// A conexão com o servidor acabou, ou o enlace termina: nada mais serve.
     pub(crate) fn derrubar_tudo(&mut self, queda: Queda) {
         for servido in self
@@ -1684,6 +1790,7 @@ async fn aceitar_canais(
     caminho: &'static str,
 ) {
     let mut filhos: JoinSet<()> = JoinSet::new();
+    let mut esvaziada = restrito.as_ref().map(|p| p.esvaziada.subscribe());
     loop {
         tokio::select! {
             canal = via.aceitar() => match canal {
@@ -1696,6 +1803,17 @@ async fn aceitar_canais(
                 }
             },
             Some(_) = filhos.join_next(), if !filhos.is_empty() => {}
+            () = lista_esvaziada(&mut esvaziada) => {
+                // Nada mais é permitido a esta pessoa: não se aceita canal
+                // novo, e os que viviam acabam sozinhos (o vigia morreu) e
+                // contam a própria queda antes de a ligação ir embora.
+                let _ = tokio::time::timeout(PRAZO_DA_DESPEDIDA, async {
+                    while filhos.join_next().await.is_some() {}
+                })
+                .await;
+                tracing::debug!(caminho, "túnel: a ligação direta ficou sem túnel permitido");
+                return;
+            }
         }
     }
 }
@@ -1739,14 +1857,15 @@ async fn atender_canal(
     estado: Arc<EstadoDaMaquina>,
     caminho: &'static str,
 ) {
-    // Se o túnel nomeado é um dos que esta via pode abrir.
+    // Se o túnel nomeado é um dos que esta via pode abrir. Na ligação direta
+    // devolve o vigia dele (o canal acaba quando o túnel é retirado de quem
+    // abriu); na estrela, onde o servidor já conferiu, é `Some(None)`.
     let da_via = async |aberta: &AberturaDeTunel| match &restrito {
-        None => true,
-        Some(permitidos) => {
-            permitidos
-                .permite_logo(&(aberta.mod_id.clone(), aberta.nome.clone()))
-                .await
-        }
+        None => Some(None),
+        Some(permitidos) => permitidos
+            .vigia_logo(&(aberta.mod_id.clone(), aberta.nome.clone()))
+            .await
+            .map(Some),
     };
     match canal {
         CanalDeTunel::Ordenado(mut envio, mut recebe) => {
@@ -1760,25 +1879,33 @@ async fn atender_canal(
                 estado.alheios.fetch_add(1, Ordering::Relaxed);
                 return;
             };
-            let Some(servido) = conferir(&aberta, da_via(&aberta).await, &estado, caminho) else {
+            let vigia = da_via(&aberta).await;
+            let Some(servido) = conferir(&aberta, vigia.is_some(), &estado, caminho) else {
                 let _ = envio.reset(CODIGO_CORTADO);
                 let _ = recebe.stop(CODIGO_CORTADO);
                 return;
             };
+            let mut vigia = vigia.flatten();
             match aberta.tipo {
-                TipoDeCanalDeTunel::Controle => responder_aos_pings(envio, recebe).await,
-                _ => tcp_da_maquina(&aberta, &servido, envio, recebe, caminho).await,
+                TipoDeCanalDeTunel::Controle => {
+                    tokio::select! {
+                        () = responder_aos_pings(envio, recebe) => {}
+                        () = retirada(&mut vigia) => {}
+                    }
+                }
+                _ => tcp_da_maquina(&aberta, &servido, envio, recebe, vigia, caminho).await,
             }
         }
         CanalDeTunel::SemOrdem(mut datagramas) => {
             let Some(aberta) = esperar_a_abertura_j(&mut datagramas, &estado, caminho).await else {
                 return;
             };
-            let Some(servido) = conferir(&aberta, da_via(&aberta).await, &estado, caminho) else {
+            let vigia = da_via(&aberta).await;
+            let Some(servido) = conferir(&aberta, vigia.is_some(), &estado, caminho) else {
                 return;
             };
             if aberta.tipo == TipoDeCanalDeTunel::Udp {
-                udp_da_maquina(&aberta, &servido, datagramas, caminho).await;
+                udp_da_maquina(&aberta, &servido, datagramas, vigia.flatten(), caminho).await;
             } else {
                 estado.alheios.fetch_add(1, Ordering::Relaxed);
             }
@@ -1886,6 +2013,7 @@ async fn tcp_da_maquina(
     servido: &Arc<Servido>,
     mut envio: Envio,
     recebe: Recebe,
+    mut vigia: Option<watch::Receiver<()>>,
     caminho: &'static str,
 ) {
     let (mod_id, nome, fluxo) = (&aberta.mod_id, &aberta.nome, aberta.fluxo);
@@ -1915,6 +2043,7 @@ async fn tcp_da_maquina(
     let queda = tokio::select! {
         fim = ponte => fim.queda(),
         queda = esperar_parada(&mut parada) => queda,
+        () = retirada(&mut vigia) => Queda::SemPermissao,
     };
     if queda == Queda::Fechado {
         tracing::debug!(%mod_id, tunel = %nome, caminho, fluxo, "túnel: conexão fechada na máquina");
@@ -1929,6 +2058,7 @@ async fn udp_da_maquina(
     aberta: &AberturaDeTunel,
     servido: &Arc<Servido>,
     mut datagramas: Datagramas,
+    mut vigia: Option<watch::Receiver<()>>,
     caminho: &'static str,
 ) {
     let (mod_id, nome, fluxo) = (&aberta.mod_id, &aberta.nome, aberta.fluxo);
@@ -1982,6 +2112,7 @@ async fn udp_da_maquina(
                 }
             },
             queda = esperar_parada(&mut parada) => break queda,
+            () = retirada(&mut vigia) => break Queda::SemPermissao,
         }
     };
     if queda == Queda::Fechado {
@@ -2232,6 +2363,9 @@ impl Tuneis {
                     Arc::clone(enviar),
                     &mut self.ligacoes,
                 );
+            }
+            ServerMessage::TunelRetirado { mod_id, nome, quem } => {
+                self.maquina.retirar(mod_id, nome, *quem);
             }
             ServerMessage::SirvaTunelPara {
                 mod_id,
@@ -3122,17 +3256,15 @@ mod testes {
             tokio::time::sleep(Duration::from_millis(300)).await;
             tardio.permitir((MOD.to_owned(), "b".to_owned()));
         });
-        assert!(
-            permitidos
-                .permite_logo(&(MOD.to_owned(), "b".to_owned()))
-                .await
-        );
+        assert!(permitidos
+            .vigia_logo(&(MOD.to_owned(), "b".to_owned()))
+            .await
+            .is_some());
         // Um que ninguém apresentou é recusado quando a graça acaba.
-        assert!(
-            !permitidos
-                .permite_logo(&(MOD.to_owned(), "c".to_owned()))
-                .await
-        );
+        assert!(permitidos
+            .vigia_logo(&(MOD.to_owned(), "c".to_owned()))
+            .await
+            .is_none());
     }
 
     #[tokio::test]
@@ -3186,6 +3318,168 @@ mod testes {
             .await
             .unwrap();
         esperar_ate(|| estado.canais_alheios() == 1).await;
+    }
+
+    // ---- a retirada: quem perdeu o túnel perde também a ligação direta
+
+    /// Põe à mão, na máquina, uma ligação direta de `quem` que aceita os
+    /// túneis `nomes` (o que `servir_a` faz depois de discar).
+    fn atender_direto(
+        maquina: &mut Maquina,
+        par: &ParDeTeste,
+        quem: PersonId,
+        nomes: &[&str],
+    ) -> tokio::task::AbortHandle {
+        let permitidos = Permitidos::de((MOD.to_owned(), nomes[0].to_owned()));
+        for nome in &nomes[1..] {
+            permitidos.permitir((MOD.to_owned(), (*nome).to_owned()));
+        }
+        let tarefa = maquina.tarefas.spawn(aceitar_canais(
+            Via::nova(par.anfitriao.clone()),
+            Some(Arc::clone(&permitidos)),
+            maquina.estado(),
+            "direto",
+        ));
+        maquina
+            .atendendo
+            .lock()
+            .unwrap()
+            .insert(quem, Atendimento { id: 1, permitidos });
+        tarefa
+    }
+
+    /// Abre um canal `t` no túnel `nome` pela ligação e prova que o eco passa.
+    async fn t_com_eco(par: &ParDeTeste, nome: &str) -> (Envio, Recebe) {
+        let CanalDeTunel::Ordenado(mut envio, mut recebe) = Via::nova(par.cliente.clone())
+            .abrir(Confiabilidade::Ordenada)
+            .await
+            .unwrap()
+        else {
+            panic!("pediu t");
+        };
+        escrever_abertura_t(&mut envio, &abertura(MOD, nome, 1, TipoDeCanalDeTunel::Tcp))
+            .await
+            .unwrap();
+        envio.write_all(b"ola").await.unwrap();
+        let mut ouvido = [0_u8; 3];
+        tokio::time::timeout(Duration::from_secs(5), recebe.read_exact(&mut ouvido))
+            .await
+            .expect("o eco não voltou")
+            .unwrap();
+        assert_eq!(&ouvido, b"ola");
+        (envio, recebe)
+    }
+
+    /// Se o canal `t` acaba (fim ou erro) dentro do prazo.
+    async fn t_acabou(recebe: &mut Recebe) -> bool {
+        let mut buf = [0_u8; 16];
+        matches!(
+            tokio::time::timeout(Duration::from_secs(5), recebe.read(&mut buf)).await,
+            Ok(Ok(None | Some(0)) | Err(_))
+        )
+    }
+
+    /// **I1, a máquina.** O servidor só confere os canais que passam por ele;
+    /// pela ligação direta quem confere é a máquina, e a lista de permitidos só
+    /// crescia. `TunelRetirado` tira o túnel da lista: o canal vivo dessa
+    /// pessoa nele acaba, um canal novo no mesmo túnel é cortado (e contado),
+    /// os outros túneis dela seguem, e a ligação cai quando nada mais é
+    /// permitido a ela.
+    #[tokio::test]
+    async fn a_retirada_corta_o_canal_direto_vivo_o_novo_e_derruba_a_ligacao_vazia() {
+        let (jogo, _eco) = eco_tcp().await;
+        let par = par_em_loopback().await;
+        let mut maquina = Maquina::nova();
+        maquina.registrar(MOD, NOME, ProtocoloDeTunel::Tcp, jogo);
+        maquina.registrar(MOD, "outro", ProtocoloDeTunel::Tcp, jogo);
+        let estado = maquina.estado();
+        let quem = PersonId(5);
+        let tarefa = atender_direto(&mut maquina, &par, quem, &[NOME, "outro"]);
+        assert_eq!(estado.ligacoes_diretas(), 1);
+
+        let (_envio_vivo, mut vivo) = t_com_eco(&par, NOME).await;
+        let (_envio_outro, mut outro) = t_com_eco(&par, "outro").await;
+
+        maquina.retirar(MOD, NOME, quem);
+
+        // O canal que estava vivo naquele túnel acaba.
+        assert!(
+            t_acabou(&mut vivo).await,
+            "o canal direto de quem perdeu o túnel seguiu vivo"
+        );
+        // Um canal novo no mesmo túnel é cortado, e contado.
+        let CanalDeTunel::Ordenado(mut envio, mut recebe) = Via::nova(par.cliente.clone())
+            .abrir(Confiabilidade::Ordenada)
+            .await
+            .unwrap()
+        else {
+            panic!("pediu t");
+        };
+        escrever_abertura_t(&mut envio, &abertura(MOD, NOME, 2, TipoDeCanalDeTunel::Tcp))
+            .await
+            .unwrap();
+        let _ = envio.write_all(b"ola").await;
+        assert!(
+            t_acabou(&mut recebe).await,
+            "o canal novo foi servido depois da retirada"
+        );
+        esperar_ate(|| estado.canais_alheios() == 1).await;
+
+        // O outro túnel da mesma pessoa não foi tocado, e a ligação segue.
+        let mut buf = [0_u8; 16];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(300), outro.read(&mut buf))
+                .await
+                .is_err(),
+            "o outro túnel da pessoa foi cortado junto"
+        );
+        assert_eq!(estado.ligacoes_diretas(), 1);
+
+        // Retirado o último, a ligação cai: a tarefa que a atendia acaba.
+        assert!(!tarefa.is_finished());
+        maquina.retirar(MOD, "outro", quem);
+        assert_eq!(estado.ligacoes_diretas(), 0);
+        esperar_ate(|| tarefa.is_finished()).await;
+        assert!(t_acabou(&mut outro).await);
+        // E ninguém mais aceita canais nela.
+        let CanalDeTunel::Ordenado(mut envio, mut recebe) = Via::nova(par.cliente.clone())
+            .abrir(Confiabilidade::Ordenada)
+            .await
+            .unwrap()
+        else {
+            panic!("pediu t");
+        };
+        let _ = escrever_abertura_t(
+            &mut envio,
+            &abertura(MOD, "outro", 3, TipoDeCanalDeTunel::Tcp),
+        )
+        .await;
+        let _ = envio.write_all(b"ola").await;
+        let mut buf = [0_u8; 3];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(600), recebe.read_exact(&mut buf))
+                .await
+                .is_err(),
+            "a ligação derrubada ainda serviu um canal"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_retirada_de_quem_nao_tem_ligacao_direta_nao_faz_nada() {
+        let (avisos, _recebidos) = mpsc::unbounded_channel();
+        let mut tuneis = Tuneis::nova(avisos);
+        tuneis.tratar(
+            &ServerMessage::TunelRetirado {
+                mod_id: MOD.into(),
+                nome: NOME.into(),
+                quem: PersonId(9),
+            },
+            None,
+            None,
+            &sem_enviar(),
+            Duration::from_secs(1),
+        );
+        assert_eq!(tuneis.estado_da_maquina().ligacoes_diretas(), 0);
     }
 
     // ---- o que o enlace faz com as mensagens do servidor

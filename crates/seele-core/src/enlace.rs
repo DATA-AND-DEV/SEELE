@@ -3004,6 +3004,14 @@ impl Enlace {
         self.maquina.canais_alheios()
     }
 
+    /// Com quantas pessoas esta máquina mantém, agora, uma ligação direta que
+    /// aceita canais de túnel. Cai a zero quando o servidor retira de todas
+    /// elas o direito aos túneis (`TunelRetirado`).
+    #[must_use]
+    pub fn ligacoes_diretas_da_maquina(&self) -> usize {
+        self.maquina.ligacoes_diretas()
+    }
+
     /// Quantos datagramas de carga chegaram a um canal `j` da máquina antes da
     /// abertura dele: descartados e contados, sem cortar o canal.
     #[must_use]
@@ -4461,6 +4469,7 @@ impl Motor {
                 | ServerMessage::TunelEncerrado { .. }
                 | ServerMessage::AlcanceTunelPor { .. }
                 | ServerMessage::SirvaTunelPara { .. }
+                | ServerMessage::TunelRetirado { .. }
         ) {
             return;
         }

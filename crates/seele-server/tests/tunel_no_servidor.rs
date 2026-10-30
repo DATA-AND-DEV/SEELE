@@ -384,6 +384,59 @@ async fn quem_serve_sem_o_poder_porta_e_recusado() -> Result<()> {
     Ok(())
 }
 
+/// Lê da máquina até um `TunelRetirado` deste túnel: quem foi retirado.
+async fn retirada_lida(maquina: &mut Par) -> Option<PersonId> {
+    esperar(&mut maquina.ligado.recebe, |m| match m {
+        ServerMessage::TunelRetirado { mod_id, nome, quem } if mod_id == MOD && nome == NOME => {
+            Some(*quem)
+        }
+        _ => None,
+    })
+    .await
+}
+
+/// **I1.** Quem deixa o túnel (`SairDoTunel`) e quem some (a conexão cai) são
+/// ditos à máquina, que corta a ligação direta dele; o túnel segue de pé.
+#[tokio::test(flavor = "multi_thread")]
+async fn quem_sai_do_tunel_ou_cai_e_dito_a_maquina() -> Result<()> {
+    let (endereco, daemon, _temp) = montar(true).await?;
+    let _gestora = entrar(endereco, GESTORA, 12).await?;
+    let mut maquina = entrar(endereco, MAQUINA, 12).await?;
+    let mut jogador = entrar(endereco, JOGADOR, 12).await?;
+    frame::write(&mut maquina.ligado.envio, &servir()).await?;
+    assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(25565));
+
+    // Deixar o túnel.
+    frame::write(&mut jogador.ligado.envio, &entrar_no_tunel()).await?;
+    assert_eq!(resposta_de_tunel(&mut jogador).await?, Ok(25565));
+    frame::write(
+        &mut jogador.ligado.envio,
+        &ClientMessage::SairDoTunel {
+            mod_id: MOD.into(),
+            nome: NOME.into(),
+        },
+    )
+    .await?;
+    assert_eq!(retirada_lida(&mut maquina).await, Some(jogador.pessoa));
+
+    // Cair com o túnel aberto.
+    frame::write(&mut jogador.ligado.envio, &entrar_no_tunel()).await?;
+    assert_eq!(resposta_de_tunel(&mut jogador).await?, Ok(25565));
+    let pessoa = jogador.pessoa;
+    drop(jogador);
+    assert_eq!(
+        retirada_lida(&mut maquina).await,
+        Some(pessoa),
+        "a máquina não soube que quem jogava saiu"
+    );
+    assert!(
+        daemon.server().tuneis().existe(MOD, NOME),
+        "a saída de quem joga derrubou o túnel da máquina"
+    );
+    daemon.shutdown();
+    Ok(())
+}
+
 /// **Servir é provisório e vem desligado** (`ServerConfig::servir_tuneis`): com
 /// ele desligado, uma sessão 12 qualquer não serve o nome de túnel de um MOD
 /// com `porta`, mesmo com o MOD ligado e o poder declarado. O padrão do
@@ -467,6 +520,14 @@ async fn revogar_entrar_no_jogo_fecha_o_tunel_aberto() -> Result<()> {
     })
     .await;
     assert_eq!(motivo, Some(MotivoDoFimDoTunel::SemPermissao));
+    // **A máquina também fica sabendo.** O servidor só confere os canais que
+    // passam por ele; a ligação direta é dela, e sem este aviso ela só soube
+    // do túnel inteiro acabar.
+    assert_eq!(
+        retirada_lida(&mut maquina).await,
+        Some(jogador.pessoa),
+        "a máquina não foi avisada de que a pessoa perdeu o túnel"
+    );
 
     // O canal que já andava acaba, e um canal aberto agora é cortado sem tocar
     // na máquina.

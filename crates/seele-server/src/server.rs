@@ -511,6 +511,22 @@ pub enum Event {
         motivo: seele_proto::tunel::MotivoDoFimDoTunel,
     },
 
+    /// A máquina que serve um túnel precisa saber que `quem` deixou de poder
+    /// alcançá-lo (perdeu a ação, saiu ou deixou o túnel).
+    ///
+    /// Endereçado como o [`Self::TunelRecusado`] acima. Vai só à máquina: quem
+    /// perdeu o túnel já recebe o próprio [`Self::TunelEncerrado`].
+    TunelRetirado {
+        /// A máquina que serve.
+        para: PersonId,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// Quem perdeu o direito.
+        quem: PersonId,
+    },
+
     // ---- o bitrate adaptativo do ADR 0036 ----
     /// Quanto da voz de alguém não está chegando.
     ///
