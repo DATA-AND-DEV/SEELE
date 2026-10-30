@@ -75,13 +75,12 @@ pub(crate) type Chave = (String, String);
 /// Por onde o túnel anda agora.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Caminho {
-    /// Direto com a máquina, pela malha. `par` é a pessoa dela quando se sabe:
-    /// **o fio não a carrega** (`AlcanceTunelPor` só tem endereços e impressão,
-    /// e campo novo em mensagem existente é proibido, ADR 0058), então este
-    /// núcleo devolve `None` e quem desenha diz «ligação direta» sem o nome.
+    /// Direto com a máquina, pela malha. `par` é a pessoa dela, como o
+    /// servidor a nomeou em `AlcanceTunelPor.quem`: é com ela que o produto
+    /// diz «ligação direta com <apelido>».
     Direto {
-        /// Quem serve, se a casca souber por outra via.
-        par: Option<PersonId>,
+        /// Quem serve.
+        par: PersonId,
     },
     /// Pelo servidor, que repassa.
     Estrela,
@@ -376,7 +375,7 @@ pub(crate) enum Evento {
     /// O túnel acabou, por este motivo.
     Fim(Queda),
     /// A ligação direta chegou.
-    Direto(Box<ParLigado>),
+    Direto(Box<ParLigado>, PersonId),
     /// A ligação direta desta geração caiu.
     DiretoCaiu(u32),
     /// Um fluxo UDP acabou.
@@ -397,6 +396,11 @@ impl AbortaAoLargar {
     /// Larga sem abortar: a tarefa termina sozinha.
     fn soltar(mut self) {
         self.0.take();
+    }
+
+    /// Tira a alça, sem abortar, para quem quiser esperar a tarefa acabar.
+    fn tirar_alca(mut self) -> Option<tokio::task::JoinHandle<()>> {
+        self.0.take()
     }
 }
 
@@ -646,6 +650,8 @@ pub(crate) struct Alcance {
     pub(crate) enderecos: Vec<SocketAddr>,
     pub(crate) impressao: String,
     pub(crate) prazo: Duration,
+    /// A pessoa da máquina, para o caminho dizer com quem é a ligação.
+    pub(crate) quem: PersonId,
 }
 
 /// Quem avisa o servidor de um verbo que o túnel quer mandar.
@@ -692,12 +698,13 @@ impl TunelDeJogador {
             enderecos,
             impressao,
             prazo,
+            quem,
         } = alcance;
         let eventos = self.eventos.clone();
         self.discagem = Some(AbortaAoLargar::nova(async move {
             match cumprir_apresentacao(&ponta, Papel::Busca, &enderecos, impressao, prazo).await {
                 Ok(ligado) => {
-                    let _ = eventos.send(Evento::Direto(Box::new(ligado)));
+                    let _ = eventos.send(Evento::Direto(Box::new(ligado), quem));
                 }
                 Err(erro) => {
                     let motivo: MotivoDeFalhaDePar = motivo_de_falha(&erro);
@@ -710,6 +717,16 @@ impl TunelDeJogador {
                 }
             }
         }));
+    }
+
+    /// Como [`Self::encerrar`], devolvendo a alça da tarefa para quem quiser
+    /// esperar o último relatório sair.
+    pub(crate) fn encerrar_esperando(
+        mut self,
+        queda: Queda,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let _ = self.eventos.send(Evento::Fim(queda));
+        self.tarefa.take().and_then(AbortaAoLargar::tirar_alca)
     }
 
     /// Acaba o túnel por este motivo: sai o último relatório e a tarefa
@@ -774,7 +791,7 @@ async fn conexao_do_jogo(
     contexto: Arc<Contexto>,
 ) {
     let _ = tcp.set_nodelay(true);
-    let _viva = ConexaoViva::nova(&contexto.medidas);
+    let viva = ConexaoViva::nova(&contexto.medidas);
     let aberto = abrir_t(&via, &contexto, fluxo, TipoDeCanalDeTunel::Tcp).await;
     let (queda, detalhe) = match aberto {
         Ok((envio, recebe)) => {
@@ -790,6 +807,9 @@ async fn conexao_do_jogo(
         }
         Err(porque) => (Queda::CaminhoCaiu, porque),
     };
+    // A conexão deixa de contar como viva ANTES de a queda ser contada: se o
+    // túnel acabar agora, ela não entra duas vezes no relatório final.
+    drop(viva);
     contexto.terminou(caminho, fluxo, queda, &detalhe);
 }
 
@@ -835,7 +855,7 @@ async fn fluxo_udp_do_jogo(
         caminho,
         fluxo,
     } = de;
-    let _viva = ConexaoViva::nova(&contexto.medidas);
+    let viva = ConexaoViva::nova(&contexto.medidas);
     let (queda, detalhe) = 'fluxo: {
         let mut datagramas: Datagramas = match via.abrir(Confiabilidade::SemOrdem).await {
             Ok(CanalDeTunel::SemOrdem(datagramas)) => datagramas,
@@ -885,6 +905,9 @@ async fn fluxo_udp_do_jogo(
             }
         }
     };
+    // A conexão deixa de contar como viva ANTES de a queda ser contada: se o
+    // túnel acabar agora, ela não entra duas vezes no relatório final.
+    drop(viva);
     contexto.terminou(caminho, fluxo, queda, &detalhe);
     let _ = eventos.send(Evento::FluxoAcabou { origem, fluxo });
 }
@@ -963,18 +986,19 @@ async fn laco_do_jogador(
                 match evento {
                     Evento::Mudou => mudou = true,
                     Evento::Fim(queda) => break queda,
-                    Evento::Direto(par) => {
+                    Evento::Direto(par, quem) => {
                         geracao = geracao.wrapping_add(1);
                         descartes_acumulados = descartes_acumulados.saturating_add(via.descartes().saturating_sub(base_de_descartes));
                         via = Via::nova(par.conexao.clone());
                         base_de_descartes = via.descartes();
-                        caminho = Caminho::Direto { par: None };
+                        caminho = Caminho::Direto { par: quem };
                         tracing::info!(mod_id = %contexto.mod_id, tunel = %contexto.nome, caminho = caminho.rotulo(), "túnel: as conexões novas vão pela ligação direta");
                         let g = geracao;
                         let (tx, conexao) = (tx.clone(), par.conexao.clone());
+                        let (mod_id, nome) = (contexto.mod_id.clone(), contexto.nome.clone());
                         filhos.spawn(async move {
                             let motivo = conexao.closed().await;
-                            tracing::warn!(%motivo, "túnel: a ligação direta caiu");
+                            tracing::warn!(%mod_id, tunel = %nome, caminho = "direto", %motivo, "túnel: a ligação direta caiu");
                             let _ = tx.send(Evento::DiretoCaiu(g));
                         });
                         ligado = Some(par);
@@ -1261,7 +1285,9 @@ impl Maquina {
                     tracing::info!(%mod_id, tunel = %nome, "túnel: ligação direta atendida");
                     // `ligado` fica vivo enquanto o aceitador correr.
                     let via = Via::nova(ligado.conexao.clone());
-                    aceitar_canais(via, Some((mod_id, nome)), estado, "direto").await;
+                    aceitar_canais(via, Some((mod_id.clone(), nome.clone())), estado, "direto")
+                        .await;
+                    tracing::info!(%mod_id, tunel = %nome, caminho = "direto", "túnel: a ligação direta da máquina acabou");
                     drop(ligado);
                 }
                 Err(erro) => {
@@ -1303,7 +1329,8 @@ async fn aceitar_canais(
                     filhos.spawn(atender_canal(canal, restrito.clone(), Arc::clone(&estado), caminho));
                 }
                 Err(motivo) => {
-                    tracing::debug!(caminho, %motivo, "túnel: a via de canais acabou");
+                    let (mod_id, nome) = restrito.as_ref().map_or(("", ""), |(m, n)| (m.as_str(), n.as_str()));
+                    tracing::debug!(mod_id, tunel = nome, caminho, %motivo, "túnel: a via de canais acabou");
                     return;
                 }
             },
@@ -1444,7 +1471,7 @@ async fn tcp_da_maquina(
         }
     };
     let _ = tcp.set_nodelay(true);
-    let _viva = ConexaoViva::nova(&servido.medidas);
+    let viva = ConexaoViva::nova(&servido.medidas);
     let mut parada = servido.parada.subscribe();
     // Da máquina, `sai` é a volta do ponto de vista de quem joga.
     let ponte = ponte_tcp(
@@ -1463,6 +1490,7 @@ async fn tcp_da_maquina(
     } else {
         tracing::warn!(%mod_id, tunel = %nome, caminho, fluxo, ?queda, "túnel: conexão caiu na máquina");
     }
+    drop(viva);
     servido.medidas.quedar(queda);
 }
 
@@ -1486,7 +1514,7 @@ async fn udp_da_maquina(
             return;
         }
     };
-    let _viva = ConexaoViva::nova(&servido.medidas);
+    let viva = ConexaoViva::nova(&servido.medidas);
     let mut parada = servido.parada.subscribe();
     let mut buf = vec![0_u8; 65_536];
     let queda = loop {
@@ -1521,6 +1549,7 @@ async fn udp_da_maquina(
     } else {
         tracing::warn!(%mod_id, tunel = %nome, caminho, fluxo, ?queda, "túnel: fluxo UDP caiu na máquina");
     }
+    drop(viva);
     servido.medidas.quedar(queda);
 }
 
@@ -1553,7 +1582,9 @@ pub(crate) fn fim_pela_recusa(motivo: RecusaDeTunel) -> Option<Queda> {
         | RecusaDeTunel::NomeTomado
         | RecusaDeTunel::TuneisDemais
         | RecusaDeTunel::CanaisEsgotados
-        | RecusaDeTunel::ServidorAntigo => None,
+        | RecusaDeTunel::ServidorAntigo
+        | RecusaDeTunel::PortaLocalOcupada
+        | RecusaDeTunel::SemResposta => None,
     }
 }
 
@@ -1636,6 +1667,26 @@ impl Tuneis {
         self.maquina.parar(mod_id, nome, Queda::MaquinaParou)
     }
 
+    /// Como [`Self::derrubar_tudo`], e só volta quando o último relatório de
+    /// cada túnel (com `encerrado`) já saiu — ou o `teto` venceu. É o que deixa
+    /// o enlace que acaba entregar esses relatórios **antes** do `Encerrado`.
+    pub(crate) async fn derrubar_e_esperar(&mut self, queda: Queda, teto: Duration) {
+        let esperas: Vec<_> = self
+            .jogando
+            .drain()
+            .filter_map(|(_, tunel)| tunel.encerrar_esperando(queda))
+            .collect();
+        self.entrando.clear();
+        self.servindo.clear();
+        self.maquina.derrubar_tudo(queda);
+        let _ = tokio::time::timeout(teto, async {
+            for espera in esperas {
+                let _ = espera.await;
+            }
+        })
+        .await;
+    }
+
     /// Tudo o que uma conexão perdida leva junto.
     pub(crate) fn derrubar_tudo(&mut self, queda: Queda) {
         for (_, tunel) in self.jogando.drain() {
@@ -1686,6 +1737,7 @@ impl Tuneis {
             ServerMessage::AlcanceTunelPor {
                 mod_id,
                 nome,
+                quem,
                 enderecos,
                 impressao,
             } => {
@@ -1710,6 +1762,7 @@ impl Tuneis {
                         enderecos: enderecos.clone(),
                         impressao: impressao.clone(),
                         prazo,
+                        quem: *quem,
                     },
                     Arc::clone(enviar),
                 );
@@ -1766,7 +1819,7 @@ impl Tuneis {
             });
         };
         let Some(estrela) = estrela else {
-            let _ = resposta.send(Err(RecusaDeTunel::MaquinaSaiu));
+            let _ = resposta.send(Err(RecusaDeTunel::SemResposta));
             return;
         };
         if resposta.is_closed() {
@@ -1795,9 +1848,7 @@ impl Tuneis {
                     encerrado: Some(Queda::PortaOcupada),
                 }));
                 desfazer();
-                // O fio não tem recusa para «sem porta local»; a verdade vai no
-                // relatório acima e no log, e esta é a mais próxima.
-                let _ = resposta.send(Err(RecusaDeTunel::CanaisEsgotados));
+                let _ = resposta.send(Err(RecusaDeTunel::PortaLocalOcupada));
                 return;
             }
         };
@@ -2400,6 +2451,145 @@ mod testes {
             mandados.lock().unwrap().as_slice(),
             [ClientMessage::SairDoTunel { .. }]
         ));
+    }
+
+    #[tokio::test]
+    async fn sem_porta_local_livre_a_recusa_e_local_e_o_relatorio_diz_porta_ocupada() {
+        let par = par_em_loopback().await;
+        // 65 portas seguidas tomadas: a preferida e as 64 de folga.
+        let mut seguradas = Vec::new();
+        let base = 'achar: loop {
+            seguradas.clear();
+            let primeira = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let p = primeira.local_addr().unwrap().port();
+            if p > 65_000 {
+                continue;
+            }
+            seguradas.push(primeira);
+            for outra in p + 1..=p + 64 {
+                match std::net::TcpListener::bind(("127.0.0.1", outra)) {
+                    Ok(l) => seguradas.push(l),
+                    Err(_) => continue 'achar,
+                }
+            }
+            break p;
+        };
+        let (avisos, mut recebidos) = mpsc::unbounded_channel();
+        let mut tuneis = Tuneis::nova(avisos);
+        let (resposta, caixa) = oneshot::channel();
+        tuneis.pedir_entrada((MOD.to_owned(), NOME.to_owned()), resposta);
+        tuneis.tratar(
+            &ServerMessage::TunelConcedido {
+                mod_id: MOD.into(),
+                nome: NOME.into(),
+                protocolo: ProtocoloDeTunel::Tcp,
+                porta: base,
+            },
+            Some(&par.cliente),
+            None,
+            &sem_enviar(),
+            Duration::from_secs(1),
+        );
+        assert_eq!(
+            caixa.await.unwrap().unwrap_err(),
+            RecusaDeTunel::PortaLocalOcupada
+        );
+        let r = esperar_relatorio(&mut recebidos, |r| r.encerrado.is_some()).await;
+        assert_eq!(r.encerrado, Some(Queda::PortaOcupada));
+        drop(seguradas);
+    }
+
+    #[tokio::test]
+    async fn concedido_sem_conexao_viva_e_sem_resposta() {
+        let (avisos, _recebidos) = mpsc::unbounded_channel();
+        let mut tuneis = Tuneis::nova(avisos);
+        let (resposta, caixa) = oneshot::channel();
+        tuneis.pedir_entrada((MOD.to_owned(), NOME.to_owned()), resposta);
+        tuneis.tratar(
+            &ServerMessage::TunelConcedido {
+                mod_id: MOD.into(),
+                nome: NOME.into(),
+                protocolo: ProtocoloDeTunel::Tcp,
+                porta: 0,
+            },
+            None,
+            None,
+            &sem_enviar(),
+            Duration::from_secs(1),
+        );
+        assert_eq!(
+            caixa.await.unwrap().unwrap_err(),
+            RecusaDeTunel::SemResposta
+        );
+    }
+
+    #[tokio::test]
+    async fn o_enlace_que_acaba_entrega_o_relatorio_final_antes_de_voltar() {
+        let (jogo, _eco) = eco_tcp().await;
+        let cena = cena(ProtocoloDeTunel::Tcp, jogo).await;
+        let (avisos, mut recebidos) = mpsc::unbounded_channel();
+        let mut tuneis = Tuneis::nova(avisos);
+        let (entrar, entrada) = oneshot::channel();
+        tuneis.pedir_entrada((MOD.to_owned(), NOME.to_owned()), entrar);
+        tuneis.tratar(
+            &ServerMessage::TunelConcedido {
+                mod_id: MOD.into(),
+                nome: NOME.into(),
+                protocolo: ProtocoloDeTunel::Tcp,
+                porta: 0,
+            },
+            Some(&cena._par.cliente),
+            None,
+            &sem_enviar(),
+            Duration::from_secs(1),
+        );
+        entrada.await.unwrap().unwrap();
+        tuneis
+            .derrubar_e_esperar(Queda::ServidorSaiu, Duration::from_secs(5))
+            .await;
+        // Já está na fila quando a espera volta: o `Encerrado` vem depois.
+        let mut final_ = None;
+        while let Ok(Aviso::Tunel(r)) = recebidos.try_recv() {
+            if r.encerrado.is_some() {
+                final_ = Some(r);
+            }
+        }
+        assert_eq!(final_.unwrap().encerrado, Some(Queda::ServidorSaiu));
+    }
+
+    #[tokio::test]
+    async fn o_fim_conta_so_as_conexoes_que_ainda_estavam_vivas() {
+        let (jogo, _eco) = eco_tcp().await;
+        let mut cena = cena(ProtocoloDeTunel::Tcp, jogo).await;
+        let alvo = cena.porta.endereco();
+        // Uma conexão que o jogo fecha antes do fim...
+        {
+            let mut curta = TcpStream::connect(alvo).await.unwrap();
+            curta.write_all(b"a").await.unwrap();
+            let mut um = [0_u8; 1];
+            curta.read_exact(&mut um).await.unwrap();
+        }
+        esperar_relatorio(&mut cena.avisos, |r| {
+            r.conexoes == 0 && r.quedas.contains(&(Queda::Fechado, 1))
+        })
+        .await;
+        // ...e uma que segue viva quando o túnel acaba.
+        let mut viva = TcpStream::connect(alvo).await.unwrap();
+        viva.write_all(b"b").await.unwrap();
+        let mut um = [0_u8; 1];
+        viva.read_exact(&mut um).await.unwrap();
+        cena.tunel.encerrar(Queda::ModDesligado);
+        let r = esperar_relatorio(&mut cena.avisos, |r| r.encerrado.is_some()).await;
+        // Fechado: 1 (a que acabou antes). ModDesligado: 1 da viva + 1 do túnel.
+        assert_eq!(
+            r.quedas,
+            vec![(Queda::ModDesligado, 2), (Queda::Fechado, 1)]
+                .into_iter()
+                .collect::<std::collections::BTreeMap<_, _>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
+        drop(viva);
     }
 
     #[tokio::test]

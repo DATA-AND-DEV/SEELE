@@ -75,6 +75,13 @@ pub enum RecusaDeTunel {
     /// pode mandar verbo de túnel; a variante mora aqui para a casca ter um
     /// nome só para as recusas.
     ServidorAntigo,
+    /// **Nunca atravessa o fio.** Nenhuma das 65 portas locais (a do jogo e as
+    /// 64 seguintes) estava livre em `127.0.0.1`: a recusa é desta máquina.
+    PortaLocalOcupada,
+    /// **Nunca atravessa o fio.** Ninguém respondeu: a sessão desta pessoa já
+    /// tinha acabado, o canal de comandos fechou, ou o prazo venceu sem
+    /// `TunelConcedido` nem `TunelRecusado`.
+    SemResposta,
 }
 
 /// Por que um túnel acabou.

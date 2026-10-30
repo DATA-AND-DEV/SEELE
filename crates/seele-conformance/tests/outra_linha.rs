@@ -235,3 +235,88 @@ async fn uma_mensagem_que_esta_build_nao_conhece_e_pulada_e_a_sessao_segue() -> 
     );
     Ok(())
 }
+
+/// **Um servidor que negociou 11 não recebe verbo de túnel** (Review Focus 1
+/// do plano da parte 2). O servidor cru carimba a sessão com 11; o cliente 12
+/// recusa `EntrarNoTunel` e `ServirTunel` com `NaoSaiu::ServidorAntigo` **sem
+/// escrever nada**, e o que já existia no 11 (o `Ping`) continua saindo, no
+/// carimbo 11.
+#[tokio::test(flavor = "multi_thread")]
+async fn um_servidor_onze_recusa_o_verbo_de_tunel_sem_escrever_no_fio() -> Result<()> {
+    use seele_core::client::NaoSaiu;
+    use seele_proto::control::{encode_em, ClientMessage};
+    use seele_proto::tunel::ProtocoloDeTunel;
+
+    let _vaga = vaga::minha();
+    let ponta = par_cru::anfitriao().await;
+    let endereco = ponta.local_addr();
+    let servidor = tokio::spawn(async move {
+        let (_conexao, mut envia, mut recebe) = par_cru::primeira_chegada(&ponta).await?;
+        let onze = |mensagem: &ServerMessage| -> Result<Vec<u8>> {
+            Ok(seele_proto::quadro::enquadrar(&encode_em(11, mensagem)?)?)
+        };
+        let _hello = par_cru::ler_quadro(&mut recebe).await?;
+        par_cru::escrever(
+            &mut envia,
+            &onze(&ServerMessage::Challenge { nonce: vec![7; 32] })?,
+        )
+        .await?;
+        let _prova = par_cru::ler_quadro(&mut recebe).await?;
+        par_cru::escrever(
+            &mut envia,
+            &onze(&ServerMessage::Session {
+                id: seele_proto::ids::SessionId(1),
+                person: seele_proto::ids::PersonId(1),
+                ssrc: seele_proto::ids::Ssrc(1),
+                server: "Casa".into(),
+                voice_rooms: Vec::new(),
+                channels: Vec::new(),
+                roles: Vec::new(),
+                permissions: Vec::new(),
+            })?,
+        )
+        .await?;
+        // O que chega depois da sessão: só o `Ping` que o teste manda para
+        // provar que o fio funciona. Qualquer outro quadro é o defeito.
+        let primeiro =
+            tokio::time::timeout(Duration::from_secs(10), par_cru::ler_quadro(&mut recebe))
+                .await??;
+        let segundo =
+            tokio::time::timeout(Duration::from_millis(800), par_cru::ler_quadro(&mut recebe))
+                .await;
+        drop(ponta);
+        Ok::<_, anyhow::Error>((primeiro, segundo.is_ok()))
+    });
+
+    let mut cliente = conectar(endereco, 156)
+        .await
+        .map_err(|erro| anyhow::anyhow!("o cliente não entrou: {erro:?}"))?;
+    let entrar = ClientMessage::EntrarNoTunel {
+        mod_id: "seele/jogo".into(),
+        nome: "mundo".into(),
+    };
+    let servir = ClientMessage::ServirTunel {
+        mod_id: "seele/jogo".into(),
+        nome: "mundo".into(),
+        protocolo: ProtocoloDeTunel::Tcp,
+        porta: 25565,
+    };
+    assert_eq!(
+        cliente.enviar_verbo_do_tunel(&entrar).await,
+        Err(NaoSaiu::ServidorAntigo)
+    );
+    assert_eq!(
+        cliente.enviar_verbo_do_tunel(&servir).await,
+        Err(NaoSaiu::ServidorAntigo)
+    );
+    cliente.send_ping().await?;
+    let (primeiro, veio_mais) = tokio::time::timeout(Duration::from_secs(15), servidor).await???;
+    assert_eq!(primeiro[0], 11, "o Ping saiu com outro carimbo");
+    let decodificado = seele_proto::control::decode::<ClientMessage>(&primeiro)?;
+    assert!(
+        matches!(decodificado, ClientMessage::Ping { .. }),
+        "o primeiro quadro depois da sessão não foi o Ping: {decodificado:?}"
+    );
+    assert!(!veio_mais, "um verbo de túnel chegou ao servidor 11");
+    Ok(())
+}

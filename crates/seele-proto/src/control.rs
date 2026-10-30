@@ -2886,6 +2886,10 @@ pub enum ServerMessage {
         mod_id: String,
         /// O nome do túnel.
         nome: String,
+        /// Quem serve: a pessoa da máquina, para a casca dizer «ligação direta
+        /// com <apelido>». A mensagem nasceu no protocolo 12 desta branch e
+        /// nunca foi publicada, então o campo cabe (ADR 0058 não a alcança).
+        quem: PersonId,
         /// Onde a máquina pode ser alcançada.
         enderecos: Vec<std::net::SocketAddr>,
         /// A impressão digital que ela vai apresentar.
@@ -3863,6 +3867,7 @@ impl Validate for ServerMessage {
                 nome,
                 enderecos,
                 impressao,
+                ..
             } => {
                 crate::tunel::check_tunel(mod_id, nome)?;
                 crate::tunel::check_enderecos(enderecos.len())?;

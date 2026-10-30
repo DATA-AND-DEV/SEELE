@@ -2841,8 +2841,9 @@ impl Enlace {
     /// [`RecusaDeTunel::ServidorAntigo`] sem escrever no fio.
     ///
     /// Espera até `PRAZO_DO_PAR` pela resposta do servidor. Sem resposta
-    /// (sessão caída, prazo vencido) a recusa é [`RecusaDeTunel::MaquinaSaiu`]:
-    /// o fio não tem uma recusa para «ninguém respondeu».
+    /// (sessão caída, prazo vencido) a recusa é [`RecusaDeTunel::SemResposta`];
+    /// sem porta local livre, [`RecusaDeTunel::PortaLocalOcupada`]. As duas só
+    /// existem aqui: nunca atravessam o fio.
     ///
     /// # Errors
     ///
@@ -2862,10 +2863,10 @@ impl Enlace {
             resposta,
         })
         .await
-        .map_err(|_| RecusaDeTunel::MaquinaSaiu)?;
+        .map_err(|_| RecusaDeTunel::SemResposta)?;
         match tokio::time::timeout(PRAZO_DO_PAR, caixa).await {
             Ok(Ok(resultado)) => resultado,
-            Ok(Err(_)) | Err(_) => Err(RecusaDeTunel::MaquinaSaiu),
+            Ok(Err(_)) | Err(_) => Err(RecusaDeTunel::SemResposta),
         }
     }
 
@@ -2903,7 +2904,7 @@ impl Enlace {
     /// # Errors
     ///
     /// A recusa do servidor, [`RecusaDeTunel::ServidorAntigo`] sem escrever no
-    /// fio, ou [`RecusaDeTunel::MaquinaSaiu`] se ninguém respondeu.
+    /// fio, ou [`RecusaDeTunel::SemResposta`] se ninguém respondeu.
     pub async fn servir_tunel(
         &self,
         mod_id: &str,
@@ -2921,10 +2922,10 @@ impl Enlace {
             resposta,
         })
         .await
-        .map_err(|_| RecusaDeTunel::MaquinaSaiu)?;
+        .map_err(|_| RecusaDeTunel::SemResposta)?;
         match tokio::time::timeout(PRAZO_DO_PAR, caixa).await {
             Ok(Ok(resultado)) => resultado,
-            Ok(Err(_)) | Err(_) => Err(RecusaDeTunel::MaquinaSaiu),
+            Ok(Err(_)) | Err(_) => Err(RecusaDeTunel::SemResposta),
         }
     }
 
@@ -3469,7 +3470,16 @@ impl Motor {
                         match resultado {
                             ResultadoDoPar::ParaOServidor(mensagem) => {
                                 if let Err(erro) = cliente.enviar_verbo_do_tunel(&mensagem).await {
+                                    let (mod_id, tunel) = match &mensagem {
+                                        ClientMessage::TunelFalhou { mod_id, nome, .. }
+                                        | ClientMessage::SairDoTunel { mod_id, nome } => {
+                                            (mod_id.as_str(), nome.as_str())
+                                        }
+                                        _ => ("", ""),
+                                    };
                                     tracing::warn!(
+                                        mod_id,
+                                        tunel,
                                         ?erro,
                                         "o verbo do túnel não saiu; o túnel segue pela estrela"
                                     );
@@ -3547,7 +3557,7 @@ impl Motor {
                         let _ = self.avisos.send(Aviso::Mensagem(Box::new(mensagem)));
                         if let Some(reason) = despedida {
                             tracing::info!(?reason, "o servidor acabou com esta sessão");
-                            return self.encerrar(Motivo::Moderado(reason));
+                            return self.encerrar(Motivo::Moderado(reason)).await;
                         }
                     }
                     // O fluxo caiu. Não é o fim da sessão: é o começo da
@@ -3629,7 +3639,7 @@ impl Motor {
             }
             Action::Reconnect => self.tentar().await,
             Action::EndSession => {
-                self.encerrar(Motivo::Descarregou);
+                self.encerrar(Motivo::Descarregou).await;
                 return true;
             }
             Action::Wait => {}
@@ -3870,7 +3880,7 @@ impl Motor {
             // acaba com a sessão, saía sem linha nenhuma no `seele.log`.
             Err(erro) if !vale_insistir(&erro) => {
                 tracing::warn!(?erro, "a volta da bateria foi recusada, e a sessão acaba");
-                self.encerrar(Motivo::Recusado(erro));
+                self.encerrar(Motivo::Recusado(erro)).await;
             }
             Err(erro) => {
                 tracing::debug!(?erro, "tentativa de reconexão falhou");
@@ -4321,16 +4331,16 @@ impl Motor {
         mensagem: ClientMessage,
     ) -> Result<(), RecusaDeTunel> {
         let Some(cliente) = self.cliente.as_mut() else {
-            return Err(RecusaDeTunel::MaquinaSaiu);
+            return Err(RecusaDeTunel::SemResposta);
         };
         match cliente.enviar_verbo_do_tunel(&mensagem).await {
             Ok(()) => Ok(()),
-            // Sem escrever nada: o servidor negociou 11.
-            Err(crate::client::NaoSaiu::ServidorAntigo) => Err(RecusaDeTunel::ServidorAntigo),
-            Err(crate::client::NaoSaiu::Escrita(erro)) => {
-                tracing::warn!(%erro, "o fluxo de controle não aceitou o verbo do túnel");
-                self.cair();
-                Err(RecusaDeTunel::MaquinaSaiu)
+            Err(erro) => {
+                if let crate::client::NaoSaiu::Escrita(porque) = &erro {
+                    tracing::warn!(%porque, "o fluxo de controle não aceitou o verbo do túnel");
+                    self.cair();
+                }
+                Err(recusa_do_verbo(&erro))
             }
         }
     }
@@ -5911,7 +5921,7 @@ impl Motor {
         self.tarefas_de_par
             .largar_tudo_e_esperar(ESPERA_DAS_TAREFAS_DE_PAR)
             .await;
-        self.encerrar(Motivo::Pedido);
+        self.encerrar(Motivo::Pedido).await;
         if let Some(ponta) = ponta {
             // O `close` do enlace pôs o corte no `ctl` e o fechamento na fila
             // da ponta; espera-se a ponta ficar sem conexão viva, e então ela
@@ -5934,16 +5944,31 @@ impl Motor {
         }
     }
 
-    fn encerrar(&mut self, motivo: Motivo) {
+    async fn encerrar(&mut self, motivo: Motivo) {
         // Antes de derrubar a conexão: a bomba fecha o fluxo dela ao morrer, e
         // o fim do fluxo é a segunda maneira de dizer «parei» (§3.6). Derrubar
         // primeiro trocaria isso por um fluxo cortado.
         self.tela_pedida = None;
         self.parar_a_tela();
+        // Os túneis dizem por que acabaram **antes** do `Encerrado`: depois
+        // dele a casca já não espera relatório nenhum.
+        self.tuneis
+            .derrubar_e_esperar(crate::tunel::Queda::ServidorSaiu, Duration::from_secs(1))
+            .await;
         if let Some(mut cliente) = self.cliente.take() {
             cliente.disconnect();
         }
         let _ = self.avisos.send(Aviso::Encerrado(motivo));
+    }
+}
+
+/// A recusa que `entrar_no_tunel` e `servir_tunel` devolvem quando o verbo não
+/// saiu: o servidor que negociou 11 é `ServidorAntigo` (nada foi escrito); o
+/// fluxo de controle fechado é `SemResposta`.
+fn recusa_do_verbo(erro: &crate::client::NaoSaiu) -> RecusaDeTunel {
+    match erro {
+        crate::client::NaoSaiu::ServidorAntigo => RecusaDeTunel::ServidorAntigo,
+        crate::client::NaoSaiu::Escrita(_) => RecusaDeTunel::SemResposta,
     }
 }
 
@@ -9909,6 +9934,43 @@ mod tests {
             Teto::Bps(1_200_000),
             "sem escolha nenhuma o teto deixou de ser o de CAMINHO_DA_PROVA_BPS: \
              {teto:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sem_sessao_o_pedido_de_tunel_e_sem_resposta_e_o_servidor_onze_e_antigo() {
+        use crate::client::NaoSaiu;
+        let mut motor = motor_de_teste();
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        motor
+            .entrar_no_tunel("seele/jogo".into(), "mundo".into(), resposta)
+            .await;
+        assert_eq!(
+            caixa.await.unwrap().unwrap_err(),
+            RecusaDeTunel::SemResposta
+        );
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        motor
+            .servir_tunel(
+                "seele/jogo".into(),
+                "mundo".into(),
+                ProtocoloDeTunel::Tcp,
+                1,
+                resposta,
+            )
+            .await;
+        assert_eq!(
+            caixa.await.unwrap().unwrap_err(),
+            RecusaDeTunel::SemResposta
+        );
+        // E o que o cliente diz do verbo que não saiu vira a recusa certa.
+        assert_eq!(
+            recusa_do_verbo(&NaoSaiu::ServidorAntigo),
+            RecusaDeTunel::ServidorAntigo
+        );
+        assert_eq!(
+            recusa_do_verbo(&NaoSaiu::Escrita("fechado".into())),
+            RecusaDeTunel::SemResposta
         );
     }
 

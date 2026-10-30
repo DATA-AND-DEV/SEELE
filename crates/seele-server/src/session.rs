@@ -6230,6 +6230,7 @@ fn translate(
                 (Motivo::Tunel { mod_id, nome }, Papel::Busca) => ServerMessage::AlcanceTunelPor {
                     mod_id: mod_id.clone(),
                     nome: nome.clone(),
+                    quem: *com,
                     enderecos,
                     impressao,
                 },
@@ -7455,6 +7456,7 @@ mod a_apresentacao {
             Some(ServerMessage::AlcanceTunelPor {
                 mod_id: "seele/jogo".to_owned(),
                 nome: "mundo".to_owned(),
+                quem: PersonId(1),
                 enderecos: enderecos(),
                 impressao: "a".repeat(64),
             })

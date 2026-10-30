@@ -927,6 +927,7 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
             ServerMessage::AlcanceTunelPor {
                 mod_id: "seele/mesa".into(),
                 nome: "mc-1".into(),
+                quem: PersonId(42),
                 enderecos: vec!["198.51.100.7:41234".parse().unwrap()],
                 impressao: IMPRESSAO.into(),
             },
@@ -1487,6 +1488,8 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
                 "TuneisDemais",
                 "CanaisEsgotados",
                 "ServidorAntigo",
+                "PortaLocalOcupada",
+                "SemResposta",
             ],
         ),
         (

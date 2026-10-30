@@ -497,6 +497,7 @@ mod tests {
             ServerMessage::AlcanceTunelPor {
                 mod_id: "a/b".into(),
                 nome: "mc-1".into(),
+                quem: crate::ids::PersonId(2),
                 enderecos: vec![],
                 impressao: "3c".repeat(32),
             },
