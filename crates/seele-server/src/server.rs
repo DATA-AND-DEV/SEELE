@@ -457,6 +457,29 @@ pub enum Event {
         /// A impressão digital que quem empresta apresenta.
         impressao: String,
     },
+    // A apresentação **geral**, que o túnel de jogo usa: o motivo vai dentro e
+    // `session::translate` o devolve ao fio de cada um. A tela continua nos dois
+    // eventos de cima, de propósito: eles são o que o barramento publica para
+    // quem observa a exposição de endereços (`seele-conformance`,
+    // `tela_por_um_par`), e trocá-los é mudar um contrato que a prova da tela
+    // lê. Quando a tela migrar, é só `apontar_um_par` emitir esta variante com
+    // `MotivoDaApresentacao::Tela` — `translate` já devolve os mesmos bytes.
+    /// O servidor apresentou esta pessoa à outra ponta de um par.
+    Apresentacao {
+        /// Por quê: a tela ou o túnel.
+        motivo: crate::pares::MotivoDaApresentacao,
+        /// A quem entregar.
+        para: PersonId,
+        /// Quem é a outra ponta. A tela não o diz no fio; o
+        /// `SirvaTunelPara` diz quem vai jogar.
+        com: PersonId,
+        /// O papel de `para` nesta ligação.
+        papel: crate::pares::Papel,
+        /// Onde alcançar a outra ponta.
+        enderecos: Vec<std::net::SocketAddr>,
+        /// A impressão digital que a outra ponta apresenta.
+        impressao: String,
+    },
 
     // ---- o túnel de jogo (protocolo 12) ----
     /// Um túnel acabou, e esta pessoa precisa saber.

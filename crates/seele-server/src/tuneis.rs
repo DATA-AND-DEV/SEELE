@@ -674,6 +674,94 @@ pub fn anunciar(server: &Server, fim: Vec<Encerramento>) {
     }
 }
 
+/// Os dois avisos da apresentação de um túnel, **na ordem em que saem**: o de
+/// quem serve primeiro, o de quem joga depois. `None` quando o túnel vai pela
+/// estrela.
+///
+/// Pura de propósito, para a regra ser afirmável sem servidor: a malha desligada
+/// ou uma das pontas sem declaração de identidade (`Pares::apresentar`) são os
+/// dois jeitos de o túnel ficar na estrela, e nenhum dos dois é um erro.
+#[must_use]
+pub fn apresentacao_do_tunel(
+    pares: &crate::pares::Pares,
+    malha_para_tuneis: bool,
+    mod_id: &str,
+    nome: &str,
+    maquina: PersonId,
+    quem_joga: PersonId,
+) -> Option<[Event; 2]> {
+    use crate::pares::{MotivoDaApresentacao, Papel};
+    if !malha_para_tuneis {
+        return None;
+    }
+    let (serve, busca) = pares.apresentar(maquina, quem_joga)?;
+    let motivo = MotivoDaApresentacao::Tunel {
+        mod_id: mod_id.to_owned(),
+        nome: nome.to_owned(),
+    };
+    Some([
+        // Quem serve passa a atender **antes** de quem joga discar: a porta
+        // dele só é armada quando a mensagem chega (a razão de
+        // `session::apontar_um_par`).
+        Event::Apresentacao {
+            motivo: motivo.clone(),
+            para: maquina,
+            com: quem_joga,
+            papel: Papel::Serve,
+            enderecos: busca.enderecos,
+            impressao: busca.impressao,
+        },
+        Event::Apresentacao {
+            motivo,
+            para: quem_joga,
+            com: maquina,
+            papel: Papel::Busca,
+            enderecos: serve.enderecos,
+            impressao: serve.impressao,
+        },
+    ])
+}
+
+/// Apresenta a máquina a quem acabou de entrar, pela malha, se der. Chamada
+/// **depois** do `TunelConcedido` ser escrito: quem joga já tem a resposta do
+/// pedido quando o caminho direto começa a ser tentado.
+///
+/// Sem apresentação nada sai e o túnel vai pela estrela, dito em DEBUG: a
+/// malha é alívio, nunca dependência.
+pub async fn apresentar(
+    server: &Server,
+    mod_id: &str,
+    nome: &str,
+    maquina: PersonId,
+    quem_joga: PersonId,
+) {
+    let avisos = {
+        let pares = server.pares.lock().await;
+        apresentacao_do_tunel(
+            &pares,
+            server.malha_para_tuneis,
+            mod_id,
+            nome,
+            maquina,
+            quem_joga,
+        )
+    };
+    let Some(avisos) = avisos else {
+        tracing::debug!(
+            mod_id = %mod_id,
+            tunel = %nome,
+            malha = server.malha_para_tuneis,
+            "túnel: sem apresentação das pontas (malha desligada ou alguém sem identidade \
+             declarada); o túnel vai pela estrela"
+        );
+        return;
+    };
+    tracing::info!(mod_id = %mod_id, tunel = %nome, %maquina, %quem_joga, "túnel: as pontas foram apresentadas");
+    for aviso in avisos {
+        let _ = server.events.send(aviso);
+    }
+}
+
 /// Confere de novo a ação `entrar-no-jogo` de quem está dentro de algum túnel
 /// (de `pessoas`, ou de todos): quem a perdeu sai, com `SemPermissao`.
 ///
@@ -1289,5 +1377,57 @@ mod tests {
         assert!(corte(None, RecusaDeTunel::MaquinaSaiu)
             .aviso(jogador)
             .is_none());
+    }
+
+    #[test]
+    fn a_apresentacao_do_tunel_sai_na_ordem_certa_e_nada_sem_malha_ou_sem_declaracao() {
+        use crate::pares::{MotivoDaApresentacao, Papel};
+        use seele_proto::control::ConsentimentoDePar;
+        let ende = |n: u8| std::net::SocketAddr::from(([192, 168, 1, n], 8383));
+        let mut pares = crate::pares::Pares::nova();
+        for (pessoa, n) in [(MAQUINA, 1), (JOGA, 2)] {
+            pares.declarou(
+                pessoa,
+                u64::from(n),
+                ConsentimentoDePar::de_ninguem(),
+                format!("{n}").repeat(64),
+                vec![ende(n)],
+                ende(n),
+            );
+        }
+        let avisos = apresentacao_do_tunel(&pares, true, "x/jogo", "mundo", MAQUINA, JOGA)
+            .expect("as duas declararam e a malha está ligada");
+        let tunel = MotivoDaApresentacao::Tunel {
+            mod_id: "x/jogo".into(),
+            nome: "mundo".into(),
+        };
+        // `SirvaTunelPara` (a máquina) primeiro, `AlcanceTunelPor` (quem joga)
+        // depois, cada um com o endereço e a impressão da OUTRA ponta.
+        assert!(
+            matches!(
+                &avisos[0],
+                Event::Apresentacao { motivo, para, com, papel: Papel::Serve, enderecos, impressao }
+                    if *motivo == tunel && *para == MAQUINA && *com == JOGA
+                        && enderecos.contains(&ende(2)) && *impressao == "2".repeat(64)
+            ),
+            "{:?}",
+            avisos[0]
+        );
+        assert!(
+            matches!(
+                &avisos[1],
+                Event::Apresentacao { motivo, para, com, papel: Papel::Busca, enderecos, impressao }
+                    if *motivo == tunel && *para == JOGA && *com == MAQUINA
+                        && enderecos.contains(&ende(1)) && *impressao == "1".repeat(64)
+            ),
+            "{:?}",
+            avisos[1]
+        );
+        // A malha desligada leva o túnel pela estrela.
+        assert!(apresentacao_do_tunel(&pares, false, "x/jogo", "mundo", MAQUINA, JOGA).is_none());
+        // E quem não declarou identidade também.
+        assert!(
+            apresentacao_do_tunel(&pares, true, "x/jogo", "mundo", MAQUINA, PersonId(9)).is_none()
+        );
     }
 }

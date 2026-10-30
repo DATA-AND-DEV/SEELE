@@ -729,15 +729,6 @@ const ESPERA_DE_ANEXO: Duration = Duration::from_secs(10);
 /// dependência.
 const PRAZO_DO_PAR: Duration = Duration::from_secs(3);
 
-/// Quanto dura **cada** tentativa de discar para um par, dentro de
-/// [`PRAZO_DO_PAR`].
-///
-/// Ver [`discar_ate_o_prazo`] para por que são várias e não uma. Meio segundo
-/// é folgado para um aperto de mão em rede local e curto o bastante para
-/// caberem seis tentativas no prazo — um par que exista responde na primeira
-/// ou na segunda, e um que não exista custa o mesmo prazo total de antes.
-const TENTATIVA_DE_PAR: Duration = Duration::from_millis(500);
-
 /// O que uma tentativa do caminho entre pares, resolvida numa tarefa solta,
 /// devolve ao laço de [`Motor::rodar`] para ele agir.
 ///
@@ -4295,17 +4286,15 @@ impl Motor {
 
     /// `ServerMessage::AssistaTelaPor`: vá buscar esta tela naquele par.
     ///
-    /// Roda numa tarefa solta porque `par::por_onde` pode levar até
+    /// Roda numa tarefa solta porque `par::cumprir_apresentacao` pode levar até
     /// [`PRAZO_DO_PAR`] — bloquear o laço de [`Motor::rodar`] por isso
     /// pausaria a voz, o ping e o resto desta sessão até o par responder ou o
     /// prazo vencer.
     ///
-    /// `por_onde` **nunca erra** — essa é a promessa dela, escrita no próprio
-    /// doc: quem chama não tem decisão a tomar sobre a falha do par. O que
-    /// este método faz com o `PorOndeAssistir::Servidor` que ela devolve —
-    /// desde o fix round 1, já com o motivo enumerado dentro — é mandar o
-    /// aviso ao servidor pelo canal de [`ResultadoDoPar`]: só o laço de
-    /// `rodar`, dono do `&mut Client`, pode falar com ele.
+    /// Quem chama não tem decisão a tomar sobre a falha do par: o erro de
+    /// `par::cumprir_apresentacao` vira o motivo enumerado (`par::motivo_de_falha`)
+    /// e este método o manda ao servidor pelo canal de [`ResultadoDoPar`]: só o
+    /// laço de `rodar`, dono do `&mut Client`, pode falar com ele.
     ///
     /// Disca com a **própria** identidade — a parede simétrica da Task 5 faz
     /// quem atende exigir certificado sempre, e sem uma identidade para
@@ -4345,8 +4334,16 @@ impl Motor {
         let avisos = self.avisos.clone();
         let resultados = self.resultados_do_par_tx.clone();
         let tarefa = tokio::spawn(async move {
-            match discar_ate_o_prazo(&ponta, &enderecos, &impressao).await {
-                par::PorOndeAssistir::Par(ligado) => {
+            match par::cumprir_apresentacao(
+                &ponta,
+                par::Papel::Busca,
+                &enderecos,
+                impressao,
+                PRAZO_DO_PAR,
+            )
+            .await
+            {
+                Ok(ligado) => {
                     // A conta de bytes é de quem empresta — `crate::par::repassar`
                     // escreve por pedaço do lado dele. Do lado de quem assiste
                     // muda uma coisa só, e ela está no doc de
@@ -4389,11 +4386,13 @@ impl Motor {
                         }
                     }
                 }
-                // `por_onde` já classificou o motivo — `ImpressaoNaoBate`
+                // O motivo é enumerado aqui — `ImpressaoNaoBate`
                 // continua sendo o evento de segurança que é, agora também
                 // para o servidor, e não só no `tracing` local de
                 // `classificar` em `par.rs`.
-                par::PorOndeAssistir::Servidor(motivo) => {
+                Err(erro) => {
+                    let motivo = par::motivo_de_falha(&erro);
+                    tracing::info!(%erro, ?motivo, ?screen, "o par não veio; a tela vem do servidor");
                     let _ = resultados.send(ResultadoDoPar::ParFalhou { screen, motivo });
                 }
             }
@@ -4579,58 +4578,13 @@ async fn repassar_a_tela(repasse: &RepasseDeTela, ligado: &par::ParLigado, scree
     }
 }
 
-/// Disca para o par até o prazo acabar, e não uma vez só.
-///
-/// # Por que a primeira tentativa pode falhar sem ninguém ter feito nada errado
-///
-/// O servidor manda `SirvaTelaPara` e `AssistaTelaPor` no mesmo instante, pelo
-/// mesmo barramento. Quem empresta só **passa a atender** quando a mensagem
-/// dele chega e a tarefa dele roda (`crate::par::passar_a_atender`), e quem
-/// assiste disca quando a mensagem dele chega e a tarefa dele roda. Se a
-/// segunda vencer a primeira por um milissegundo, a discagem bate numa porta
-/// que ainda não abriu — e uma tentativa única leria isso como
-/// `NaoAlcancou`, que faria o servidor assumir uma transmissão que o par
-/// serviria perfeitamente um instante depois.
-///
-/// Não é folga inventada: é o mesmo prazo de sempre, [`PRAZO_DO_PAR`],
-/// gasto em tentativas de [`TENTATIVA_DE_PAR`] em vez de numa espera só.
-///
-/// **`ImpressaoNaoBate` não é retentada.** É evento de segurança — alguém
-/// respondeu no lugar de quem o servidor apresentou —, e insistir contra quem
-/// se faz passar por outro é dar-lhe mais tentativas, não menos.
-async fn discar_ate_o_prazo(
-    ponta: &crate::transporte::PontaDaSessao,
-    enderecos: &[SocketAddr],
-    impressao: &str,
-) -> par::PorOndeAssistir {
-    let ate = tokio::time::Instant::now() + PRAZO_DO_PAR;
-    let mut ultimo = MotivoDeFalhaDePar::NaoAlcancou;
-    while tokio::time::Instant::now() < ate {
-        match par::por_onde(ponta, enderecos, impressao.to_owned(), TENTATIVA_DE_PAR).await {
-            par::PorOndeAssistir::Par(ligado) => return par::PorOndeAssistir::Par(ligado),
-            par::PorOndeAssistir::Servidor(MotivoDeFalhaDePar::ImpressaoNaoBate) => {
-                return par::PorOndeAssistir::Servidor(MotivoDeFalhaDePar::ImpressaoNaoBate);
-            }
-            par::PorOndeAssistir::Servidor(motivo) => ultimo = motivo,
-        }
-    }
-    tracing::info!(
-        ?ultimo,
-        ?PRAZO_DO_PAR,
-        "o prazo do par acabou sem ligação; a tela vem do servidor"
-    );
-    par::PorOndeAssistir::Servidor(ultimo)
-}
-
 /// Passa a atender, e fura o NAT desta ponta para o outro lado enquanto
-/// espera.
+/// espera: a metade de quem serve de [`par::cumprir_apresentacao`].
 ///
-/// **Quem assiste disca; quem empresta atende.** Desde a 0.17 a ponta de quem
-/// empresta é anfitriã (`crate::par::passar_a_atender`). Ela só checa quem já
-/// mandou um Binding (aqui não há `CHAMADO` com a credencial de quem vai discar),
-/// então o mapeamento de NAT deste lado abre pelas Binding Indications de
-/// `Ponta::furar` para os endereços de quem vai discar — a metade do furo
-/// simultâneo do §3.3 que a discagem de antes fazia.
+/// **Quem assiste disca; quem empresta atende.** O corpo mora em
+/// `par::cumprir_apresentacao`, que o túnel de jogo usa com os mesmos prazos;
+/// aqui sobra o que é da tela: o resultado sem motivo (quem empresta nunca
+/// manda `ParFalhou`) e o `Option` que o resto do motor lê.
 ///
 /// `None` se ninguém chegar a tempo. Livre e não método de `Motor` porque roda
 /// dentro do `tokio::spawn` de [`Motor::servir_par`].
@@ -4639,27 +4593,15 @@ async fn servir_um_par(
     enderecos: Vec<SocketAddr>,
     impressao: String,
 ) -> Option<par::ParLigado> {
-    par::passar_a_atender(&ponta);
-    let furando = {
-        let ponta = ponta.clone();
-        let enderecos = enderecos.clone();
-        tokio::spawn(async move {
-            // Um furo a cada segundo enquanto se espera: a primeira rajada pode
-            // sair antes de quem assiste começar a discar, e o NAT de cá fecha
-            // o mapeamento de um destino calado em poucas dezenas de segundos.
-            loop {
-                let furados = ponta.ponta().furar(&enderecos);
-                tracing::debug!(furados, "furando o NAT desta ponta para o par");
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        })
-    };
-    let resultado = par::atender(&ponta, &impressao, PRAZO_DO_PAR, PRAZO_DO_PAR).await;
-    furando.abort();
-    // **Desarma sempre, sirva ou não sirva** (fix round 3): armada, a ponta
-    // criaria estado para todo Binding que chegasse.
-    par::parar_de_atender(&ponta);
-    resultado
+    par::cumprir_apresentacao(
+        &ponta,
+        par::Papel::Serve,
+        &enderecos,
+        impressao,
+        PRAZO_DO_PAR,
+    )
+    .await
+    .ok()
 }
 
 /// Os endereços de rede local desta máquina, na porta que `ponta` já usa.

@@ -93,6 +93,42 @@ pub struct QuemDeclarou {
     pub consentimento: ConsentimentoDePar,
 }
 
+/// Por que o servidor apresenta duas pontas uma à outra.
+///
+/// A generalização da malha é **por dentro**: o fio da tela
+/// (`SirvaTelaPara`/`AssistaTelaPor`) não ganha campo nenhum — mensagem que
+/// existe não muda (ADR 0058) —, e quem diz o motivo é este tipo, que só vive
+/// no servidor. `session::translate` o devolve ao fio de cada motivo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MotivoDaApresentacao {
+    /// Uma transmissão de tela repassada por um par.
+    Tela {
+        /// Qual transmissão.
+        screen: ScreenId,
+    },
+    /// Um túnel de jogo andando direto entre a máquina e quem joga.
+    Tunel {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+    },
+}
+
+/// O papel de uma ponta numa apresentação: quem serve atende (e fura o NAT),
+/// quem busca disca.
+///
+/// O núcleo tem o próprio espelho (`seele_core::par::Papel`): o ADR 0002
+/// proíbe `seele-core` de depender de `seele-server`, e um tipo em
+/// `seele-proto` seria superfície de protocolo que o fio não precisa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Papel {
+    /// Quem empresta a subida (tela) ou hospeda o jogo (túnel).
+    Serve,
+    /// Quem assiste (tela) ou joga (túnel).
+    Busca,
+}
+
 /// Um repasse que deixou de ser consentido e por isso tem de acabar.
 ///
 /// Devolvido por [`Pares::declarou`] porque declarar e desfazer o que a
@@ -381,6 +417,33 @@ impl Pares {
             .count()
     }
 
+    /// As duas declarações de uma apresentação, **sem** a regra de escolha da
+    /// tela.
+    ///
+    /// [`Self::escolher`] decide *quem* serve uma transmissão; um túnel já tem
+    /// quem serve (o livro `crate::tuneis` sabe) e quem busca, e só precisa do
+    /// que cada uma declarou para a parede simétrica: a impressão e onde
+    /// alcançar. `None` se uma das duas não declarou identidade — e então o
+    /// túnel vai pela estrela, como sempre pôde. Ninguém se apresenta a si
+    /// mesmo.
+    ///
+    /// O consentimento da tela (`assiste_por_par`, `empresta_conexao`) não é
+    /// lido aqui de propósito: o consentimento do túnel é o ato de servir e o
+    /// de entrar (decisão do plano), e quem o dá já está dentro do livro.
+    #[must_use]
+    pub fn apresentar(
+        &self,
+        quem_serve: PersonId,
+        quem_busca: PersonId,
+    ) -> Option<(QuemDeclarou, QuemDeclarou)> {
+        if quem_serve == quem_busca {
+            return None;
+        }
+        let serve = self.quem.get(&quem_serve)?.clone();
+        let busca = self.quem.get(&quem_busca)?.clone();
+        Some((serve, busca))
+    }
+
     /// Quem pode servir esta transmissão a esta pessoa, se alguém.
     ///
     /// Só considera quem declarou `emprestando: true` — ter identidade
@@ -569,6 +632,49 @@ mod testes {
 
     /// Quem só conectou: identidade declarada, consentimento nenhum.
     const NAO_CONSENTE: ConsentimentoDePar = ConsentimentoDePar::de_ninguem();
+
+    #[test]
+    fn apresentar_devolve_as_duas_declaracoes_e_nada_sem_uma_delas() {
+        // O túnel apresenta as duas pontas sem a regra de escolha da tela
+        // (`escolher`): quem serve e quem busca já estão decididos pelo livro
+        // dos túneis. Basta que as duas tenham declarado identidade.
+        let mut pares = Pares::nova();
+        pares.declarou(
+            PersonId(1),
+            10,
+            NAO_CONSENTE,
+            "a".repeat(64),
+            vec![endereco(1)],
+            endereco(1),
+        );
+        assert!(
+            pares.apresentar(PersonId(1), PersonId(2)).is_none(),
+            "apresentou com uma das pontas sem declaração"
+        );
+        assert!(
+            pares.apresentar(PersonId(2), PersonId(1)).is_none(),
+            "apresentou com uma das pontas sem declaração (ordem trocada)"
+        );
+        pares.declarou(
+            PersonId(2),
+            20,
+            NAO_CONSENTE,
+            "b".repeat(64),
+            vec![endereco(2)],
+            endereco(2),
+        );
+        let (serve, busca) = pares
+            .apresentar(PersonId(1), PersonId(2))
+            .expect("as duas declararam e nada foi apresentado");
+        assert_eq!(serve.pessoa, PersonId(1), "a primeira é a de quem serve");
+        assert_eq!(busca.pessoa, PersonId(2), "a segunda é a de quem busca");
+        assert_eq!(serve.impressao, "a".repeat(64));
+        assert_eq!(busca.impressao, "b".repeat(64));
+        assert!(
+            pares.apresentar(PersonId(1), PersonId(1)).is_none(),
+            "ninguém se apresenta a si mesmo"
+        );
+    }
 
     #[test]
     fn o_endereco_de_quem_nao_consentiu_assistir_por_par_nao_e_entregue_a_ninguem() {

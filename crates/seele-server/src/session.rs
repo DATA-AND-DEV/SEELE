@@ -2822,6 +2822,7 @@ async fn run_session(
                         crate::tuneis::anunciar(server, fim);
                     }
                     ClientMessage::EntrarNoTunel { mod_id, nome } => {
+                        let mut a_apresentar = None;
                         let resposta = match crate::tuneis::atender_entrar(
                             server,
                             session.person,
@@ -2832,6 +2833,7 @@ async fn run_session(
                         .await
                         {
                             Ok(servido) => {
+                                a_apresentar = Some((mod_id.clone(), nome.clone(), servido.maquina));
                                 tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, "túnel: a pessoa entrou");
                                 ServerMessage::TunelConcedido {
                                     mod_id,
@@ -2848,6 +2850,15 @@ async fn run_session(
                         if entende_a_mensagem(&resposta, session.protocol_version) {
                             escrever!(&resposta).await?;
                         }
+                        // **Depois do `TunelConcedido`, e não antes**: quem joga
+                        // tem a resposta do pedido na mão quando o caminho
+                        // direto começa a ser tentado. Só o par que negociou o
+                        // 12 recebe as mensagens novas (o portão de
+                        // `translate`, abaixo); quem serve e quem joga o são
+                        // por construção, mas o portão continua valendo.
+                        if let Some((mod_id, nome, maquina)) = a_apresentar {
+                            crate::tuneis::apresentar(server, &mod_id, &nome, maquina, session.person).await;
+                        }
                     }
                     ClientMessage::SairDoTunel { mod_id, nome } => {
                         // Só o log: quem sai sabe que saiu (`PessoaSaiu`).
@@ -2855,11 +2866,14 @@ async fn run_session(
                             tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, motivo = ?seele_proto::tunel::MotivoDoFimDoTunel::PessoaSaiu, "túnel: a pessoa saiu");
                         }
                     }
-                    // O caminho direto de um túnel falhou. A apresentação das
-                    // pontas é do Task 6 do plano «API 8, parte 2»; até lá não há
-                    // apresentação a desfazer, e o relato fica dito no log.
+                    // O caminho direto de um túnel falhou. Só se registra: quem
+                    // joga já está na estrela (o túnel nunca saiu dela), então
+                    // não há nada a desfazer nem a reabrir — ao contrário da
+                    // tela, que tira o espectador do cano do servidor ao
+                    // apontar um par. É o relato que impede a falha de ser
+                    // silenciosa, e é por isso que ele carrega o motivo.
                     ClientMessage::TunelFalhou { mod_id, nome, motivo } => {
-                        tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, ?motivo, "túnel: relato de falha do caminho direto (ainda sem apresentação a desfazer)");
+                        tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, ?motivo, "túnel: o caminho direto falhou; quem joga continua pela estrela");
                     }
                     ClientMessage::ModRequest { request, id, channel, payload } => {
                         let response = crate::mods::pedidos::executar(server, session.person, channel, &id, &payload).await;
@@ -6151,6 +6165,14 @@ fn translate(
         // discar para ela. O §5 da spec de 05/09 nomeia privacidade como a
         // primeira das duas razões do opt-in; espalhar aqui o que o opt-in
         // guardou lá desfaria o opt-in.
+        // As duas exceções do caminho entre pares, pela mesma razão do
+        // `KeyFrameRequested` acima: são endereçadas a uma pessoa. E aqui a
+        // audiência estreita é **também** privacidade — cada mensagem carrega o
+        // endereço e a impressão digital de alguém, e difundi-los à sala
+        // inteira daria a topologia de rede de quem empresta a quem nunca vai
+        // discar para ela. O §5 da spec de 05/09 nomeia privacidade como a
+        // primeira das duas razões do opt-in; espalhar aqui o que o opt-in
+        // guardou lá desfaria o opt-in.
         Event::SirvaTelaPara {
             screen,
             quem_empresta,
@@ -6171,6 +6193,48 @@ fn translate(
             enderecos: enderecos.clone(),
             impressao: impressao.clone(),
         }),
+
+        Event::Apresentacao {
+            motivo,
+            para,
+            com,
+            papel,
+            enderecos,
+            impressao,
+        } => {
+            if *para != self_person {
+                return None;
+            }
+            use crate::pares::{MotivoDaApresentacao as Motivo, Papel};
+            let enderecos = enderecos.clone();
+            let impressao = impressao.clone();
+            Some(match (motivo, papel) {
+                // O fio da tela é o de sempre, byte a byte.
+                (Motivo::Tela { screen }, Papel::Serve) => ServerMessage::SirvaTelaPara {
+                    screen: *screen,
+                    enderecos,
+                    impressao,
+                },
+                (Motivo::Tela { screen }, Papel::Busca) => ServerMessage::AssistaTelaPor {
+                    screen: *screen,
+                    enderecos,
+                    impressao,
+                },
+                (Motivo::Tunel { mod_id, nome }, Papel::Serve) => ServerMessage::SirvaTunelPara {
+                    mod_id: mod_id.clone(),
+                    nome: nome.clone(),
+                    quem: *com,
+                    enderecos,
+                    impressao,
+                },
+                (Motivo::Tunel { mod_id, nome }, Papel::Busca) => ServerMessage::AlcanceTunelPor {
+                    mod_id: mod_id.clone(),
+                    nome: nome.clone(),
+                    enderecos,
+                    impressao,
+                },
+            })
+        }
 
         // O canal que o repasse cortou por um motivo que não é a falta de
         // concessão (o teto de canais da máquina, ela ter saído): quem o abriu
@@ -7302,5 +7366,103 @@ mod o_aviso_do_mod {
                 "o aviso do canal {canal:?} não virou ModAviso para quem não assinou o canal"
             );
         }
+    }
+}
+
+/// A apresentação pela malha, do barramento ao fio: a da tela sai com os
+/// bytes de sempre, e a do túnel com as duas mensagens do protocolo 12.
+#[cfg(test)]
+mod a_apresentacao {
+    use super::translate;
+    use crate::pares::{MotivoDaApresentacao, Papel};
+    use crate::server::Event;
+    use seele_proto::{
+        control::ServerMessage,
+        ids::{PersonId, ScreenId},
+    };
+
+    fn enderecos() -> Vec<std::net::SocketAddr> {
+        vec![std::net::SocketAddr::from(([203, 0, 113, 9], 8383))]
+    }
+
+    fn apresentacao(motivo: MotivoDaApresentacao, para: u64, papel: Papel) -> Event {
+        Event::Apresentacao {
+            motivo,
+            para: PersonId(para),
+            com: PersonId(if para == 1 { 2 } else { 1 }),
+            papel,
+            enderecos: enderecos(),
+            impressao: "a".repeat(64),
+        }
+    }
+
+    fn tunel() -> MotivoDaApresentacao {
+        MotivoDaApresentacao::Tunel {
+            mod_id: "seele/jogo".to_owned(),
+            nome: "mundo".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_apresentacao_de_tunel_vira_as_mensagens_novas_e_a_de_tela_as_de_sempre() {
+        let tela = MotivoDaApresentacao::Tela {
+            screen: ScreenId(7),
+        };
+        // A tela: exatamente as mensagens de antes, sem campo novo.
+        assert_eq!(
+            translate(
+                &apresentacao(tela.clone(), 1, Papel::Serve),
+                &[],
+                PersonId(1)
+            ),
+            Some(ServerMessage::SirvaTelaPara {
+                screen: ScreenId(7),
+                enderecos: enderecos(),
+                impressao: "a".repeat(64),
+            })
+        );
+        assert_eq!(
+            translate(&apresentacao(tela, 2, Papel::Busca), &[], PersonId(2)),
+            Some(ServerMessage::AssistaTelaPor {
+                screen: ScreenId(7),
+                enderecos: enderecos(),
+                impressao: "a".repeat(64),
+            })
+        );
+        // O túnel: quem serve recebe `SirvaTunelPara` (com quem vai jogar) e
+        // quem busca recebe `AlcanceTunelPor`.
+        let servir = Event::Apresentacao {
+            motivo: tunel(),
+            para: PersonId(1),
+            com: PersonId(2),
+            papel: Papel::Serve,
+            enderecos: enderecos(),
+            impressao: "a".repeat(64),
+        };
+        let mensagem = translate(&servir, &[], PersonId(1));
+        assert!(
+            matches!(
+                &mensagem,
+                Some(ServerMessage::SirvaTunelPara { mod_id, nome, quem, enderecos: e, impressao })
+                    if mod_id == "seele/jogo" && nome == "mundo" && *quem == PersonId(2)
+                        && *e == enderecos()
+                        && *impressao == "a".repeat(64)
+            ),
+            "Tunel+Serve não virou SirvaTunelPara: {mensagem:?}"
+        );
+        assert_eq!(
+            translate(&apresentacao(tunel(), 2, Papel::Busca), &[], PersonId(2)),
+            Some(ServerMessage::AlcanceTunelPor {
+                mod_id: "seele/jogo".to_owned(),
+                nome: "mundo".to_owned(),
+                enderecos: enderecos(),
+                impressao: "a".repeat(64),
+            })
+        );
+        // E só a quem é endereçada: privacidade do endereço, como sempre.
+        assert_eq!(
+            translate(&apresentacao(tunel(), 2, Papel::Busca), &[], PersonId(1)),
+            None
+        );
     }
 }

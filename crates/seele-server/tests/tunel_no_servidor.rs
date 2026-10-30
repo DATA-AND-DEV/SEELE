@@ -59,6 +59,14 @@ fn publica(semente: u8) -> [u8; 32] {
 /// Um servidor com o MOD `x/jogo` ligado: poder `porta`, a ação
 /// `entrar-no-jogo` declarada, e dada a todos só se `todos`.
 async fn montar(todos: bool) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir)> {
+    montar_com_malha(todos, true).await
+}
+
+/// Como [`montar`], com o interruptor da malha dos túneis na mão.
+async fn montar_com_malha(
+    todos: bool,
+    malha_para_tuneis: bool,
+) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir)> {
     let temp = tempfile::tempdir()?;
     let raizes = seele_server::RaizesDosMods {
         pacotes: temp.path().join("cache"),
@@ -90,6 +98,7 @@ async fn montar(todos: bool) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempD
         database: Location::Memory,
         proprietario: Some(seele_proto::transport::key_fingerprint(&publica(GESTORA))),
         mods_dir: Some(raizes.clone()),
+        malha_para_tuneis,
         ..ServerConfig::default()
     };
     let daemon = Arc::new(Daemon::bind(config).await?);
@@ -708,6 +717,90 @@ async fn o_corte_do_repasse_chega_a_quem_abriu_o_canal_como_recusa_nomeada() -> 
         recusa,
         Some((MOD.to_owned(), NOME.to_owned(), RecusaDeTunel::MaquinaSaiu))
     );
+    daemon.shutdown();
+    Ok(())
+}
+
+/// Declara identidade para o caminho entre pares: sem ela, o servidor não tem o
+/// que apresentar e o túnel vai pela estrela.
+async fn declarar(par: &mut Par, letra: char) -> Result<()> {
+    // Quem não empresta não publica endereço local; o público o servidor vê.
+    frame::write(
+        &mut par.ligado.envio,
+        &ClientMessage::EmprestarSubida {
+            consentimento: seele_proto::control::ConsentimentoDePar::de_ninguem(),
+            impressao: letra.to_string().repeat(64),
+            locais: Vec::new(),
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+/// O que cada ponta lê do túnel, em ordem, até o prazo: o resumo das mensagens
+/// de túnel de uma ponta.
+async fn tuneis_lidos(par: &mut Par, ate_ver: usize) -> Vec<&'static str> {
+    let mut vistos = Vec::new();
+    let fim = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < fim && vistos.len() < ate_ver {
+        let Ok(Ok(m)) = tokio::time::timeout(
+            Duration::from_millis(200),
+            frame::read::<ServerMessage>(&mut par.ligado.recebe),
+        )
+        .await
+        else {
+            continue;
+        };
+        match m {
+            ServerMessage::TunelConcedido { .. } => vistos.push("concedido"),
+            ServerMessage::SirvaTunelPara { .. } => vistos.push("sirva"),
+            ServerMessage::AlcanceTunelPor { .. } => vistos.push("alcance"),
+            _ => {}
+        }
+    }
+    vistos
+}
+
+/// A apresentação sai depois do `TunelConcedido`: a máquina lê o dela e depois
+/// o `SirvaTunelPara`, e quem joga lê o dele e depois o `AlcanceTunelPor`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_apresentacao_do_tunel_sai_depois_do_concedido() -> Result<()> {
+    let (endereco, daemon, _temp) = montar(true).await?;
+    let _gestora = entrar(endereco, GESTORA, 12).await?;
+    let mut maquina = entrar(endereco, MAQUINA, 12).await?;
+    let mut jogador = entrar(endereco, JOGADOR, 12).await?;
+    declarar(&mut maquina, 'a').await?;
+    declarar(&mut jogador, 'b').await?;
+    // O servidor lê a declaração antes do verbo seguinte (mesmo fluxo, em ordem).
+    frame::write(&mut maquina.ligado.envio, &servir()).await?;
+    assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(25565));
+    frame::write(&mut jogador.ligado.envio, &entrar_no_tunel()).await?;
+
+    assert_eq!(
+        tuneis_lidos(&mut jogador, 2).await,
+        ["concedido", "alcance"]
+    );
+    assert_eq!(tuneis_lidos(&mut maquina, 1).await, ["sirva"]);
+    daemon.shutdown();
+    Ok(())
+}
+
+/// Com a malha desligada o servidor não apresenta ninguém: o jogador recebe o
+/// `TunelConcedido` e nada mais, e o túnel vai pela estrela.
+#[tokio::test(flavor = "multi_thread")]
+async fn sem_malha_nao_ha_apresentacao() -> Result<()> {
+    let (endereco, daemon, _temp) = montar_com_malha(true, false).await?;
+    let _gestora = entrar(endereco, GESTORA, 12).await?;
+    let mut maquina = entrar(endereco, MAQUINA, 12).await?;
+    let mut jogador = entrar(endereco, JOGADOR, 12).await?;
+    declarar(&mut maquina, 'a').await?;
+    declarar(&mut jogador, 'b').await?;
+    frame::write(&mut maquina.ligado.envio, &servir()).await?;
+    assert_eq!(resposta_de_tunel(&mut maquina).await?, Ok(25565));
+    frame::write(&mut jogador.ligado.envio, &entrar_no_tunel()).await?;
+
+    assert_eq!(tuneis_lidos(&mut jogador, 2).await, ["concedido"]);
+    assert!(tuneis_lidos(&mut maquina, 1).await.is_empty());
     daemon.shutdown();
     Ok(())
 }
