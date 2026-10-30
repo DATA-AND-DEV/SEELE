@@ -8,7 +8,7 @@
   const resultado = document.getElementById("resultado");
   const copiar = document.getElementById("copiar");
   const entrar = document.getElementById("entrar");
-  let ativo = null, geracao = 0;
+  let ativo = null, geracao = 0, pararMedidas = () => {};
   const fragmento = location.hash;
   if (fragmento) {
     campo.value = `https://seele.sh/${fragmento}`;
@@ -30,12 +30,28 @@
     const alvos = [hash.slice(0, corte), ...(dados.get("alt") || "").split(","), enc.slice(barra + 1)].filter(Boolean);
     return { hash, alvos: [...new Set(alvos)], impressao, bilhete: { ponto } };
   }
-  parar.addEventListener("click", () => { geracao++; ativo?.close(); ativo = null; testar.disabled = false; parar.disabled = true; estado.textContent = "Teste cancelado."; });
+  function acompanhar(enlace, relatorio, vez, inicio) {
+    let parado = false, relogio;
+    async function medir() {
+      if (parado || vez !== geracao) return;
+      const amostra = await enlace.medirCaminho();
+      if (parado || vez !== geracao) return;
+      // Uma coleta depois do fechamento pode vir vazia: não apagar a última útil.
+      if (!relatorio.caminho || amostra.pares?.length) {
+        relatorio.caminho = { ms: Math.round(performance.now() - inicio), ...amostra };
+      }
+      relogio = setTimeout(medir, 300);
+    }
+    medir().catch(() => {});
+    return () => { parado = true; clearTimeout(relogio); };
+  }
+  parar.addEventListener("click", () => { geracao++; pararMedidas(); ativo?.close(); ativo = null; testar.disabled = false; parar.disabled = true; estado.textContent = "Teste cancelado."; });
   testar.addEventListener("click", async () => {
     const vez = ++geracao, inicio = performance.now();
     testar.disabled = true; parar.disabled = false; copiar.disabled = true; entrar.hidden = true;
     resultado.textContent = ""; estado.textContent = "Verificando conexão…";
-    const relatorio = { teste: "servidor-hospedado-2", horario: new Date().toISOString(), etapas: [] };
+    const relatorio = { teste: "servidor-hospedado-3", horario: new Date().toISOString(), etapas: [] };
+    let pararEstaMedicao = () => {};
     let enlace;
     try {
       const convite = lerConvite(campo.value);
@@ -46,6 +62,7 @@
       enlace = ativo = criarEnlaceRtc({ ...convite, certificado, sinal: fronteiraDoSinal(wasm),
         aoMudar(e) { relatorio.etapas.push({ etapa: Object.keys(e)[0], ms: Math.round(performance.now() - inicio) }); },
       });
+      pararEstaMedicao = pararMedidas = acompanhar(enlace, relatorio, vez, inicio);
       await enlace.ready;
       relatorio.conectou = true;
       if (vez === geracao) {
@@ -59,6 +76,7 @@
       relatorio.conexao = e?.FalhaDoEnlace?.detalhe?.conexao || null;
       if (vez === geracao) estado.textContent = "A conexão não abriu. Copie o diagnóstico abaixo.";
     } finally {
+      pararEstaMedicao();
       const v = enlace?.visto;
       if (v) {
         // Somente contagens/estados. Sem IPs, SDP, convite, credenciais ou nomes.
@@ -69,6 +87,8 @@
         relatorio.anuncios = v.chamadasAoPonto || 0;
         relatorio.enderecosEnviados = v.candidatosAnunciados || 0;
         relatorio.enderecosDoServidor = v.candidatos.length;
+        relatorio.antesDeFechar = v.antesDeFechar || null;
+        relatorio.candidatosRecusados = enlace.contas.candidatosRecusados;
       }
       relatorio.duracaoMs = Math.round(performance.now() - inicio);
       enlace?.close();
@@ -82,5 +102,5 @@
     try { await navigator.clipboard.writeText(resultado.textContent); estado.textContent = "Diagnóstico copiado."; }
     catch { estado.textContent = "Selecione e copie o diagnóstico abaixo."; }
   });
-  window.addEventListener("pagehide", () => { geracao++; ativo?.close(); ativo = null; });
+  window.addEventListener("pagehide", () => { geracao++; pararMedidas(); ativo?.close(); ativo = null; });
 })();

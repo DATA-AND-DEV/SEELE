@@ -862,6 +862,36 @@ function esperarNoMaximo(promessa, ms, motivo) {
   return Promise.race([promessa, prazo]).finally(() => clearTimeout(relogio));
 }
 
+/** Estatísticas exportáveis: nunca inclui IP, porta, URL, SDP, IDs ou credenciais. */
+function resumirCaminhoRtc(estatisticas) {
+  const familia = (c) => {
+    const endereco = c?.address || c?.ip;
+    if (typeof endereco !== "string" || !endereco || endereco.endsWith(".local")) return "oculta";
+    return endereco.includes(":") ? "ipv6" : /^\d+\.\d+\.\d+\.\d+$/.test(endereco) ? "ipv4" : "oculta";
+  };
+  const tipo = (c) => ["host", "srflx", "prflx", "relay"].includes(c?.candidateType) ? c.candidateType : "desconhecido";
+  const numero = (n) => Number.isFinite(n) && n >= 0 ? n : null;
+  const locais = {}, remotos = {}, pares = [];
+  estatisticas.forEach((s) => {
+    if (s.type === "local-candidate" || s.type === "remote-candidate") {
+      const tabela = s.type === "local-candidate" ? locais : remotos;
+      const chave = `${tipo(s)}_${familia(s)}`;
+      tabela[chave] = (tabela[chave] || 0) + 1;
+    }
+    if (s.type !== "candidate-pair" || pares.length >= 32) return;
+    const local = estatisticas.get(s.localCandidateId), remoto = estatisticas.get(s.remoteCandidateId);
+    pares.push({
+      local: `${tipo(local)}_${familia(local)}`, remoto: `${tipo(remoto)}_${familia(remoto)}`,
+      estado: ["frozen", "waiting", "in-progress", "failed", "succeeded"].includes(s.state) ? s.state : "desconhecido",
+      nomeado: s.nominated === true,
+      pedidosEnviados: numero(s.requestsSent), respostasRecebidas: numero(s.responsesReceived),
+      pedidosRecebidos: numero(s.requestsReceived), respostasEnviadas: numero(s.responsesSent),
+      bytesEnviados: numero(s.bytesSent), bytesRecebidos: numero(s.bytesReceived),
+    });
+  });
+  return { locais, remotos, pares };
+}
+
 /**
  * **O enlace de uma tentativa**, com a forma que a sessão espera.
  *
@@ -944,6 +974,8 @@ function criarEnlaceRtc({
   });
   function encerrar(motivo) {
     if (fechado) return;
+    // `pc.close()` apaga o estado que explica a falha; preservá-lo antes.
+    visto.antesDeFechar = { ice: pc.iceConnectionState, conexao: pc.connectionState, coleta: pc.iceGatheringState, dtls: pc.sctp?.transport?.state ?? null };
     fechado = true;
     requisicaoDoSinal?.abort();
     clearInterval(keepalive);
@@ -1429,6 +1461,16 @@ function criarEnlaceRtc({
     /** O que esta tentativa viu (o sinal, o refletido), para o registro. */
     get visto() {
       return { ...visto };
+    },
+    /** Somente o diagnóstico chama esta medição; não muda a negociação. */
+    async medirCaminho() {
+      const estado = visto.antesDeFechar || { ice: pc.iceConnectionState, conexao: pc.connectionState, coleta: pc.iceGatheringState, dtls: pc.sctp?.transport?.state ?? null };
+      try {
+        const estatisticas = await esperarNoMaximo(pc.getStats(), 500, "sem-estatisticas");
+        return { estado, ...resumirCaminhoRtc(estatisticas) };
+      } catch {
+        return { estado, indisponivel: true };
+      }
     },
     /** O fluxo de controle: o canal 0, entregue uma vez. */
     controle() {
