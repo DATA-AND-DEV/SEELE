@@ -458,6 +458,15 @@ fn quarantine(path: &std::path::Path) {
     }
 }
 
+/// Por que um verbo do túnel não saiu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NaoSaiu {
+    /// O servidor negociou menos do que o verbo exige; nada foi escrito.
+    ServidorAntigo,
+    /// O fluxo de controle não aceitou a escrita.
+    Escrita(String),
+}
+
 /// A connected, verified client.
 pub struct Client {
     connection: crate::transporte::Conexao,
@@ -895,6 +904,34 @@ impl Client {
     #[must_use]
     pub fn ponta(&self) -> crate::transporte::PontaDaSessao {
         self.ponta.clone()
+    }
+
+    /// Um punho da conexão com o servidor: a estrela do túnel de jogo.
+    ///
+    /// Barato de clonar. O túnel abre e aceita canais `t`/`j` nela, e é só
+    /// isso que faz com ela: o fluxo de controle continua sendo de quem o lê.
+    #[must_use]
+    pub fn conexao(&self) -> crate::transporte::Conexao {
+        self.connection.clone()
+    }
+
+    /// Escreve um verbo do túnel de jogo (protocolo 12) no fluxo de controle.
+    ///
+    /// **Antes de escrever**, confere o verbo contra o número que o servidor
+    /// carimbou: um servidor 11 leria uma variante que não conhece e o fluxo
+    /// desalinharia. Recusado, nada vai ao fio.
+    ///
+    /// # Errors
+    ///
+    /// [`NaoSaiu::ServidorAntigo`] sem escrever; [`NaoSaiu::Escrita`] se o
+    /// fluxo de controle está fechado.
+    pub async fn enviar_verbo_do_tunel(&mut self, mensagem: &ClientMessage) -> Result<(), NaoSaiu> {
+        if !crate::tunel::verbo_cabe(self.carimbo, mensagem) {
+            return Err(NaoSaiu::ServidorAntigo);
+        }
+        frame::write_em(&mut self.send, self.carimbo, mensagem)
+            .await
+            .map_err(|erro| NaoSaiu::Escrita(erro.to_string()))
     }
 
     /// A fila por onde chegam os fluxos de tela, sem o byte de tipo.

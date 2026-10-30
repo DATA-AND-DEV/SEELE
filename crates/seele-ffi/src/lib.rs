@@ -5229,6 +5229,12 @@ async fn drive(
                         }
                         shared.notify(&Event::TelemetryChanged);
                     }
+                    // O relatório de um túnel de jogo chega à casca no lote
+                    // seguinte (Task 9); até lá fica no log, e não se perde sem
+                    // dizer.
+                    seele_core::enlace::Aviso::Tunel(relatorio) => {
+                        tracing::debug!(?relatorio, "relatório de túnel de jogo");
+                    }
                     seele_core::enlace::Aviso::Encerrado(motivo) => {
                         shared.notify(&Event::Ended {
                             reason: fim_da_sessao(&motivo),

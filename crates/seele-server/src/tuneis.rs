@@ -510,7 +510,8 @@ impl Tuneis {
     }
 }
 
-/// `t` leva TCP (e, num túnel UDP, o canal de sinais); `j` leva UDP.
+/// `t` leva TCP e o canal de sinais (`Controle`, de qualquer túnel: é por ele
+/// que quem joga mede a latência de ponta a ponta); `j` leva UDP.
 fn tipo_combina(
     canal_ordenado: bool,
     tipo: TipoDeCanalDeTunel,
@@ -519,7 +520,7 @@ fn tipo_combina(
     matches!(
         (canal_ordenado, tipo, protocolo),
         (true, TipoDeCanalDeTunel::Tcp, ProtocoloDeTunel::Tcp)
-            | (true, TipoDeCanalDeTunel::Controle, ProtocoloDeTunel::Udp)
+            | (true, TipoDeCanalDeTunel::Controle, _)
             | (false, TipoDeCanalDeTunel::Udp, ProtocoloDeTunel::Udp)
     )
 }
@@ -1150,6 +1151,22 @@ async fn repassar_j(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn o_canal_de_controle_passa_em_qualquer_tunel_e_o_resto_so_no_seu_protocolo() {
+        use TipoDeCanalDeTunel::{Controle, Tcp, Udp};
+        for protocolo in [ProtocoloDeTunel::Tcp, ProtocoloDeTunel::Udp] {
+            assert!(tipo_combina(true, Controle, protocolo));
+            // O controle é ordenado: num `j` não faz sentido.
+            assert!(!tipo_combina(false, Controle, protocolo));
+        }
+        assert!(tipo_combina(true, Tcp, ProtocoloDeTunel::Tcp));
+        assert!(!tipo_combina(true, Tcp, ProtocoloDeTunel::Udp));
+        assert!(tipo_combina(false, Udp, ProtocoloDeTunel::Udp));
+        assert!(!tipo_combina(false, Udp, ProtocoloDeTunel::Tcp));
+        assert!(!tipo_combina(true, Udp, ProtocoloDeTunel::Udp));
+    }
+
     use seele_proto::ids::PersonId;
     use seele_proto::mods::Poder;
     use seele_proto::tunel::{

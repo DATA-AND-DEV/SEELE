@@ -42,12 +42,13 @@ use std::time::{Duration, Instant};
 
 use ed25519_dalek::SigningKey;
 use seele_proto::control::{
-    ConsentimentoDePar, DisconnectReason, MotivoDeFalhaDePar, ServerMessage,
+    ClientMessage, ConsentimentoDePar, DisconnectReason, MotivoDeFalhaDePar, ServerMessage,
 };
 use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId,
 };
 use seele_proto::signal::SignalBand;
+use seele_proto::tunel::{ProtocoloDeTunel, RecusaDeTunel};
 use tokio::sync::mpsc;
 
 use crate::battery::{Action, Battery, Link};
@@ -356,6 +357,11 @@ pub enum Aviso {
         /// Qual leitura acabou: o número do [`Self::TelaAbriu`] dela.
         leitura: u64,
     },
+    /// O que um túnel de jogo mediu: caminho, latência, bytes, quedas.
+    ///
+    /// A cada segundo enquanto há tráfego, e sempre que o caminho ou o estado
+    /// muda. O último de um túnel traz `encerrado: Some(..)`.
+    Tunel(crate::tunel::RelatorioDoTunel),
     /// Acabou. Ou os cinco minutos passaram, ou não vale a pena tentar.
     Encerrado(Motivo),
 }
@@ -366,6 +372,7 @@ impl std::fmt::Debug for Aviso {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Mensagem(mensagem) => f.debug_tuple("Mensagem").field(mensagem).finish(),
+            Self::Tunel(relatorio) => f.debug_tuple("Tunel").field(relatorio).finish(),
             Self::Estado { estado, restante } => f
                 .debug_struct("Estado")
                 .field("estado", estado)
@@ -661,6 +668,34 @@ enum Comando {
     /// independentes do §5 — ver [`ConsentimentoDePar`]. Guardado em
     /// [`Motor::consentimento`] e redito a cada reconexão.
     ConsentirNoCaminhoEntrePares(ConsentimentoDePar),
+    /// Quem joga pede para alcançar um túnel. A resposta é a porta local.
+    EntrarNoTunel {
+        mod_id: String,
+        nome: String,
+        resposta: tokio::sync::oneshot::Sender<Result<crate::tunel::PortaLocal, RecusaDeTunel>>,
+    },
+    /// Quem joga deixa um túnel.
+    SairDoTunel {
+        mod_id: String,
+        nome: String,
+    },
+    /// Quem joga deixa todos os túneis de um MOD.
+    SairDosTuneisDoMod {
+        mod_id: String,
+    },
+    /// A máquina passa a servir um túnel.
+    ServirTunel {
+        mod_id: String,
+        nome: String,
+        protocolo: ProtocoloDeTunel,
+        porta: u16,
+        resposta: tokio::sync::oneshot::Sender<Result<(), RecusaDeTunel>>,
+    },
+    /// A máquina para de servir um túnel.
+    PararTunel {
+        mod_id: String,
+        nome: String,
+    },
     Sair,
 }
 
@@ -706,6 +741,11 @@ impl Comando {
             Self::PedirQuadroChave { .. } => "PedirQuadroChave",
             Self::DeclararIdentidadeDePar => "DeclararIdentidadeDePar",
             Self::ConsentirNoCaminhoEntrePares(_) => "ConsentirNoCaminhoEntrePares",
+            Self::EntrarNoTunel { .. } => "EntrarNoTunel",
+            Self::SairDoTunel { .. } => "SairDoTunel",
+            Self::SairDosTuneisDoMod { .. } => "SairDosTuneisDoMod",
+            Self::ServirTunel { .. } => "ServirTunel",
+            Self::PararTunel { .. } => "PararTunel",
             Self::Sair => "Sair",
         }
     }
@@ -739,6 +779,9 @@ const PRAZO_DO_PAR: Duration = Duration::from_secs(3);
 /// quem tem o `&mut Client` — o laço de `rodar` — pode falar com o servidor.
 #[derive(Debug)]
 enum ResultadoDoPar {
+    /// Um verbo do túnel que uma tarefa solta quer mandar (`TunelFalhou`,
+    /// `SairDoTunel`): só o laço, dono do `&mut Client`, escreve no fluxo.
+    ParaOServidor(ClientMessage),
     /// O par não veio, ou ligou e nunca abriu a transmissão: o servidor
     /// precisa saber, para poder ele mesmo assumir. Ver
     /// [`seele_proto::control::ClientMessage::ParFalhou`].
@@ -923,6 +966,8 @@ pub struct Enlace {
     /// conhecidos, e transformar cada janela de medição num aviso encheria a
     /// fila de coisas que ninguém precisa ver acontecer.
     caminho_medido: Arc<std::sync::atomic::AtomicU32>,
+    /// O que a máquina que serve túneis de jogo já contou, para quem investiga.
+    maquina: Arc<crate::tunel::EstadoDaMaquina>,
     /// A tarefa do motor. `None` depois de [`Enlace::sair`], que a espera
     /// terminar — ou a aborta, vencido o teto.
     tarefa: Option<tokio::task::JoinHandle<()>>,
@@ -1986,6 +2031,8 @@ impl Enlace {
         let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
 
         let bateria = bateria_de(&destino);
+        let tuneis = crate::tunel::Tuneis::nova(avisos_tx.clone());
+        let maquina = tuneis.estado_da_maquina();
         let motor = Motor {
             destino,
             // Guardado para a reconexão, e não só para a primeira entrada: uma
@@ -2020,6 +2067,7 @@ impl Enlace {
             resultados_do_par,
             resultados_do_par_tx,
             tarefas_de_par: TarefasDePar::default(),
+            tuneis,
         };
         // **Não declara identidade aqui.** Achado do fix round 2:
         // `conectar_por` é o funil que **cada candidato** de uma conexão com
@@ -2044,6 +2092,7 @@ impl Enlace {
             veredito,
             rtt,
             caminho_medido,
+            maquina,
             tarefa: Some(tarefa),
         })
     }
@@ -2784,6 +2833,132 @@ impl Enlace {
         Ok(valeu)
     }
 
+    /// Quem joga entra num túnel de jogo: o servidor confere a ação
+    /// `entrar-no-jogo`, e a resposta é a porta em `127.0.0.1` onde o jogo
+    /// deve ligar. As medidas chegam depois como [`Aviso::Tunel`].
+    ///
+    /// Um servidor que negociou menos de 12 recebe **nada**: a resposta é
+    /// [`RecusaDeTunel::ServidorAntigo`] sem escrever no fio.
+    ///
+    /// Espera até `PRAZO_DO_PAR` pela resposta do servidor. Sem resposta
+    /// (sessão caída, prazo vencido) a recusa é [`RecusaDeTunel::MaquinaSaiu`]:
+    /// o fio não tem uma recusa para «ninguém respondeu».
+    ///
+    /// # Errors
+    ///
+    /// A recusa do servidor, ou as locais descritas acima.
+    pub async fn entrar_no_tunel(
+        &self,
+        mod_id: &str,
+        nome: &str,
+    ) -> Result<crate::tunel::PortaLocal, RecusaDeTunel> {
+        // A régua do fio, aplicada antes: um nome que o servidor recusaria
+        // como malformado não existe.
+        seele_proto::tunel::check_tunel(mod_id, nome).map_err(|_| RecusaDeTunel::NaoExiste)?;
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.mandar(Comando::EntrarNoTunel {
+            mod_id: mod_id.to_owned(),
+            nome: nome.to_owned(),
+            resposta,
+        })
+        .await
+        .map_err(|_| RecusaDeTunel::MaquinaSaiu)?;
+        match tokio::time::timeout(PRAZO_DO_PAR, caixa).await {
+            Ok(Ok(resultado)) => resultado,
+            Ok(Err(_)) | Err(_) => Err(RecusaDeTunel::MaquinaSaiu),
+        }
+    }
+
+    /// Quem joga deixa o túnel: a porta fecha e os fluxos acabam.
+    ///
+    /// # Errors
+    ///
+    /// [`Fechado`] quando a sessão já acabou.
+    pub async fn sair_do_tunel(&self, mod_id: &str, nome: &str) -> Result<(), Fechado> {
+        self.mandar(Comando::SairDoTunel {
+            mod_id: mod_id.to_owned(),
+            nome: nome.to_owned(),
+        })
+        .await
+    }
+
+    /// Quem joga deixa todos os túneis de um MOD (o MOD foi fechado).
+    ///
+    /// # Errors
+    ///
+    /// [`Fechado`] quando a sessão já acabou.
+    pub async fn sair_dos_tuneis_do_mod(&self, mod_id: &str) -> Result<(), Fechado> {
+        self.mandar(Comando::SairDosTuneisDoMod {
+            mod_id: mod_id.to_owned(),
+        })
+        .await
+    }
+
+    /// A máquina passa a servir `porta` (a do jogo, em `127.0.0.1` desta
+    /// máquina) como o túnel `mod_id/nome`.
+    ///
+    /// Nesta parte da API 8 ninguém no produto chama isto: quem serve é a
+    /// metade de máquina, da parte 3. Existe para a prova de conformidade.
+    ///
+    /// # Errors
+    ///
+    /// A recusa do servidor, [`RecusaDeTunel::ServidorAntigo`] sem escrever no
+    /// fio, ou [`RecusaDeTunel::MaquinaSaiu`] se ninguém respondeu.
+    pub async fn servir_tunel(
+        &self,
+        mod_id: &str,
+        nome: &str,
+        protocolo: ProtocoloDeTunel,
+        porta: u16,
+    ) -> Result<(), RecusaDeTunel> {
+        seele_proto::tunel::check_tunel(mod_id, nome).map_err(|_| RecusaDeTunel::NaoExiste)?;
+        let (resposta, caixa) = tokio::sync::oneshot::channel();
+        self.mandar(Comando::ServirTunel {
+            mod_id: mod_id.to_owned(),
+            nome: nome.to_owned(),
+            protocolo,
+            porta,
+            resposta,
+        })
+        .await
+        .map_err(|_| RecusaDeTunel::MaquinaSaiu)?;
+        match tokio::time::timeout(PRAZO_DO_PAR, caixa).await {
+            Ok(Ok(resultado)) => resultado,
+            Ok(Err(_)) | Err(_) => Err(RecusaDeTunel::MaquinaSaiu),
+        }
+    }
+
+    /// A máquina para de servir o túnel.
+    ///
+    /// # Errors
+    ///
+    /// [`Fechado`] quando a sessão já acabou.
+    pub async fn parar_tunel(&self, mod_id: &str, nome: &str) -> Result<(), Fechado> {
+        self.mandar(Comando::PararTunel {
+            mod_id: mod_id.to_owned(),
+            nome: nome.to_owned(),
+        })
+        .await
+    }
+
+    /// Por que as conexões de um túnel que **esta máquina serve** acabaram,
+    /// contadas por motivo — é aqui que aparece `JogoRecusou`, que só a
+    /// máquina sabe. Vazio para um túnel que ela não serve.
+    #[must_use]
+    pub fn quedas_do_tunel_servido(
+        &self,
+        mod_id: &str,
+        nome: &str,
+    ) -> Vec<(crate::tunel::Queda, u32)> {
+        self.maquina.quedas(mod_id, nome)
+    }
+
+    /// Quantos canais de túnel a máquina cortou por nomearem outro túnel.
+    #[must_use]
+    pub fn canais_de_tunel_cortados(&self) -> u64 {
+        self.maquina.canais_alheios()
+    }
+
     async fn mandar(&self, comando: Comando) -> Result<(), Fechado> {
         self.comandos.send(comando).await.map_err(|_| Fechado)
     }
@@ -2931,6 +3106,8 @@ struct Motor {
     /// porta: um mapa largado desprende as tarefas em vez de cancelá-las, e
     /// elas sobreviviam à morte do motor inteiro. Ver [`TarefasDePar`].
     tarefas_de_par: TarefasDePar,
+    /// Os túneis de jogo: o de quem joga, o da máquina e os pedidos no ar.
+    tuneis: crate::tunel::Tuneis,
 }
 
 /// O que uma conexão que caiu deixa para a volta. Ver [`Motor::queda`].
@@ -3290,6 +3467,14 @@ impl Motor {
                     // `rodar`, dono do `&mut Client`, pode falar com o servidor.
                     Some(resultado) = resultados_do_par.recv() => {
                         match resultado {
+                            ResultadoDoPar::ParaOServidor(mensagem) => {
+                                if let Err(erro) = cliente.enviar_verbo_do_tunel(&mensagem).await {
+                                    tracing::warn!(
+                                        ?erro,
+                                        "o verbo do túnel não saiu; o túnel segue pela estrela"
+                                    );
+                                }
+                            }
                             ResultadoDoPar::ParFalhou { screen, motivo } => {
                                 if let Err(erro) = cliente.par_falhou(screen, motivo).await {
                                     tracing::warn!(
@@ -3358,6 +3543,7 @@ impl Motor {
                         // repassá-la: é aqui que a transmissão ganha nome e a
                         // bomba nasce.
                         self.a_tela_ouviu(&mensagem);
+                        self.o_tunel_ouviu(&mensagem);
                         let _ = self.avisos.send(Aviso::Mensagem(Box::new(mensagem)));
                         if let Some(reason) = despedida {
                             tracing::info!(?reason, "o servidor acabou com esta sessão");
@@ -3508,6 +3694,12 @@ impl Motor {
         self.tela_pedida = None;
         self.parar_a_tela();
         self.largar_o_caminho_entre_pares();
+        // **Os túneis morrem com a conexão que os concedeu.** O servidor apaga
+        // a concessão e a declaração quando a sessão sai (`Tuneis::saiu`);
+        // uma porta local que sobrevivesse levaria o jogo para um canal que
+        // ninguém mais repassa. Quem joga reconecta no mesmo `localhost:porta`
+        // depois de entrar de novo.
+        self.tuneis.derrubar_tudo(crate::tunel::Queda::ServidorSaiu);
     }
 
     /// O caminho entre pares não sobrevive à conexão que o montou.
@@ -3711,6 +3903,48 @@ impl Motor {
                 self.passar_a_consentir(novo).await;
                 return;
             }
+            Comando::EntrarNoTunel {
+                mod_id,
+                nome,
+                resposta,
+            } => {
+                self.entrar_no_tunel(mod_id, nome, resposta).await;
+                return;
+            }
+            Comando::SairDoTunel { mod_id, nome } => {
+                self.sair_do_tunel(&mod_id, &nome).await;
+                return;
+            }
+            Comando::SairDosTuneisDoMod { mod_id } => {
+                for nome in self.tuneis.sair_do_mod(&mod_id) {
+                    self.mandar_verbo_de_tunel(ClientMessage::SairDoTunel {
+                        mod_id: mod_id.clone(),
+                        nome,
+                    })
+                    .await
+                    .ok();
+                }
+                return;
+            }
+            Comando::ServirTunel {
+                mod_id,
+                nome,
+                protocolo,
+                porta,
+                resposta,
+            } => {
+                self.servir_tunel(mod_id, nome, protocolo, porta, resposta)
+                    .await;
+                return;
+            }
+            Comando::PararTunel { mod_id, nome } => {
+                if self.tuneis.parar_servico(&mod_id, &nome) {
+                    self.mandar_verbo_de_tunel(ClientMessage::PararTunel { mod_id, nome })
+                        .await
+                        .ok();
+                }
+                return;
+            }
             _ => {}
         }
         // O número do pedido de entrada que `lembrar` acabou de pôr no ar, se
@@ -3830,7 +4064,13 @@ impl Motor {
             // chegam aqui de verdade. `match` continua exaustivo porque o
             // `enum` inteiro é um só, e um braço a menos aqui quebraria a
             // primeira vez que `Comando` ganhasse mais uma variante.
-            Comando::DeclararIdentidadeDePar | Comando::ConsentirNoCaminhoEntrePares(_) => Ok(()),
+            Comando::DeclararIdentidadeDePar
+            | Comando::ConsentirNoCaminhoEntrePares(_)
+            | Comando::EntrarNoTunel { .. }
+            | Comando::SairDoTunel { .. }
+            | Comando::SairDosTuneisDoMod { .. }
+            | Comando::ServirTunel { .. }
+            | Comando::PararTunel { .. } => Ok(()),
 
             // Numa tarefa própria, e não aqui dentro. Executar vinte megabytes
             // no laço de comandos devolveria, dentro do cliente, exatamente o
@@ -4071,6 +4311,107 @@ impl Motor {
         if let Some(numero) = entrada {
             self.entradas.desfazer(&mut self.voice_room, numero);
         }
+    }
+
+    // ------------------------------------------------------------------ túneis
+
+    /// Um verbo do túnel para o servidor, conferido contra o número negociado.
+    async fn mandar_verbo_de_tunel(
+        &mut self,
+        mensagem: ClientMessage,
+    ) -> Result<(), RecusaDeTunel> {
+        let Some(cliente) = self.cliente.as_mut() else {
+            return Err(RecusaDeTunel::MaquinaSaiu);
+        };
+        match cliente.enviar_verbo_do_tunel(&mensagem).await {
+            Ok(()) => Ok(()),
+            // Sem escrever nada: o servidor negociou 11.
+            Err(crate::client::NaoSaiu::ServidorAntigo) => Err(RecusaDeTunel::ServidorAntigo),
+            Err(crate::client::NaoSaiu::Escrita(erro)) => {
+                tracing::warn!(%erro, "o fluxo de controle não aceitou o verbo do túnel");
+                self.cair();
+                Err(RecusaDeTunel::MaquinaSaiu)
+            }
+        }
+    }
+
+    /// `EntrarNoTunel`: o pedido sai, e a resposta é a porta local quando o
+    /// `TunelConcedido` chegar (ver `o_tunel_ouviu`).
+    async fn entrar_no_tunel(
+        &mut self,
+        mod_id: String,
+        nome: String,
+        resposta: tokio::sync::oneshot::Sender<Result<crate::tunel::PortaLocal, RecusaDeTunel>>,
+    ) {
+        let chave = (mod_id.clone(), nome.clone());
+        self.tuneis.pedir_entrada(chave.clone(), resposta);
+        if let Err(recusa) = self
+            .mandar_verbo_de_tunel(ClientMessage::EntrarNoTunel { mod_id, nome })
+            .await
+        {
+            self.tuneis.recusar_pedido(&chave, recusa);
+        }
+    }
+
+    async fn sair_do_tunel(&mut self, mod_id: &str, nome: &str) {
+        if self.tuneis.sair(mod_id, nome) {
+            self.mandar_verbo_de_tunel(ClientMessage::SairDoTunel {
+                mod_id: mod_id.to_owned(),
+                nome: nome.to_owned(),
+            })
+            .await
+            .ok();
+        }
+    }
+
+    async fn servir_tunel(
+        &mut self,
+        mod_id: String,
+        nome: String,
+        protocolo: ProtocoloDeTunel,
+        porta: u16,
+        resposta: tokio::sync::oneshot::Sender<Result<(), RecusaDeTunel>>,
+    ) {
+        let chave = (mod_id.clone(), nome.clone());
+        self.tuneis.pedir_servico(chave.clone(), resposta);
+        if let Err(recusa) = self
+            .mandar_verbo_de_tunel(ClientMessage::ServirTunel {
+                mod_id,
+                nome,
+                protocolo,
+                porta,
+            })
+            .await
+        {
+            self.tuneis.recusar_pedido(&chave, recusa);
+        }
+    }
+
+    /// O que uma mensagem do servidor faz com os túneis de jogo.
+    fn o_tunel_ouviu(&mut self, mensagem: &ServerMessage) {
+        if !matches!(
+            mensagem,
+            ServerMessage::TunelConcedido { .. }
+                | ServerMessage::TunelRecusado { .. }
+                | ServerMessage::TunelEncerrado { .. }
+                | ServerMessage::AlcanceTunelPor { .. }
+                | ServerMessage::SirvaTunelPara { .. }
+        ) {
+            return;
+        }
+        let estrela = self.cliente.as_ref().map(Client::conexao);
+        let ponta = self.ponta_de_pares();
+        let resultados = self.resultados_do_par_tx.clone();
+        let enviar: crate::tunel::Enviar = Arc::new(move |mensagem| {
+            let _ = resultados.send(ResultadoDoPar::ParaOServidor(mensagem));
+        });
+        self.tuneis.tratar(
+            mensagem,
+            estrela.as_ref(),
+            ponta.as_ref(),
+            &enviar,
+            PRAZO_DO_PAR,
+        );
     }
 
     // ------------------------------------------------------------------ tela
@@ -9574,6 +9915,7 @@ mod tests {
     fn motor_de_teste() -> Motor {
         let (avisos, _) = mpsc::unbounded_channel();
         let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
+        let tuneis = crate::tunel::Tuneis::nova(avisos.clone());
         Motor {
             bilhete: None,
             destino: Destino {
@@ -9612,6 +9954,7 @@ mod tests {
             resultados_do_par,
             resultados_do_par_tx,
             tarefas_de_par: TarefasDePar::default(),
+            tuneis,
         }
     }
 
