@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(r, resumo_da_oferta("x/jogo", HASH_A, "mc-1", &base.clone()));
 
         type Mexe = fn(&mut OfertaDeMaquina);
-        let casos: [(&str, Mexe); 16] = [
+        let casos: [(&str, Mexe); 22] = [
             ("titulo", |o| o.titulo.push('x')),
             ("receita", |o| o.receita.push('x')),
             ("versao_da_receita", |o| o.versao_da_receita.push('x')),
@@ -487,6 +487,21 @@ mod tests {
             ("artefatos.hash", |o| o.artefatos[0].hash.hex = sha('c', 40)),
             ("artefatos.url", |o| o.artefatos[0].url.push('x')),
             ("pack", |o| o.pack = None),
+            ("pack.outro_hash", |o| {
+                o.pack = Some(HashDeArtefato {
+                    algoritmo: AlgoritmoDeHash::Sha256,
+                    hex: sha('d', 64),
+                });
+            }),
+            ("artefatos.nome", |o| o.artefatos[0].nome.push('x')),
+            ("artefatos.tamanho", |o| o.artefatos[0].tamanho += 1),
+            ("tuneis.nome", |o| o.tuneis[0].nome = "mc-2".into()),
+            ("termos.titulo", |o| o.termos[0].titulo.push('x')),
+            ("rodar.comando", |o| {
+                if let Some(r) = o.rodar.as_mut() {
+                    r.comando = "java21".into();
+                }
+            }),
             ("origens", |o| o.origens.push("outra.exemplo".into())),
             ("dominios_do_jogo", |o| o.dominios_do_jogo.clear()),
             ("rodar.argumento", |o| {

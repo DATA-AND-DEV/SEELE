@@ -6012,6 +6012,66 @@ mod o_vocabulario_e_a_versao {
         .is_err());
     }
 
+    /// O `PedidoDeMaquina` confere o hash do pacote e delega a oferta inteira
+    /// ao `Validate` dela, no `validate` e no decodificador (onde um servidor
+    /// hostil chega).
+    #[test]
+    fn o_pedido_de_maquina_recusa_hash_ruim_e_oferta_invalida() {
+        let oferta = || crate::maquina::OfertaDeMaquina {
+            titulo: "t".into(),
+            receita: "r".into(),
+            versao_da_receita: "1".into(),
+            versao_do_jogo: "1".into(),
+            tuneis: vec![],
+            artefatos: vec![crate::maquina::ArtefatoOferecido {
+                nome: "a.jar".into(),
+                url: "https://exemplo.com/a.jar".into(),
+                tamanho: 1,
+                hash: crate::maquina::HashDeArtefato {
+                    algoritmo: crate::maquina::AlgoritmoDeHash::Sha1,
+                    hex: "ab".repeat(20),
+                },
+            }],
+            pack: None,
+            origens: vec![],
+            dominios_do_jogo: vec![],
+            rodar: None,
+            disco_maximo: 0,
+            termos: vec![],
+        };
+        let pedido = |hash: String, oferta| ServerMessage::PedidoDeMaquina {
+            mod_id: "a/b".into(),
+            hash,
+            servidor: "mc-1".into(),
+            pedido_por: PersonId(1),
+            oferta,
+        };
+        let crua = |m: &ServerMessage| {
+            let mut quadro = vec![PROTOCOL_VERSION];
+            postcard::to_extend(m, quadro.split_off(0)).map(|mut b| {
+                quadro.append(&mut b);
+                quadro
+            })
+        };
+        assert!(pedido("0".repeat(64), oferta()).validate().is_ok());
+
+        let hash_ruim = pedido("0".repeat(63), oferta());
+        assert!(hash_ruim.validate().is_err(), "hash curto passou");
+        assert!(pedido("A".repeat(64), oferta()).validate().is_err());
+
+        let mut invalida = oferta();
+        invalida.artefatos[0].url = "http://exemplo.com/a.jar".into();
+        let invalida = pedido("0".repeat(64), invalida);
+        assert!(invalida.validate().is_err(), "oferta inválida passou");
+
+        for m in [&hash_ruim, &invalida] {
+            let quadro = crua(m).unwrap();
+            assert!(decode::<ServerMessage>(&quadro).is_err());
+        }
+        let boa = crua(&pedido("0".repeat(64), oferta())).unwrap();
+        assert!(decode::<ServerMessage>(&boa).is_ok());
+    }
+
     #[test]
     fn uma_impressao_que_nao_e_um_sha256_em_hex_e_recusada_no_fio() {
         // **O teto não bastava.** `check(.., MAX_IMPRESSAO_LEN)` aceitava
