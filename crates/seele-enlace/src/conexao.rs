@@ -480,6 +480,7 @@ impl Conexao {
     pub async fn open_uni(&self) -> Result<Envio, Motivo> {
         match self.abrir(Natureza::Uni).await? {
             Aberto::Fluxo(envio, _) => Ok(envio),
+            // Inalcançável: `Natureza::Uni` nunca abre um `j`; falha em vez de entrar em pânico.
             Aberto::Jogo(_) => Err(Motivo::Caiu("o canal unidirecional abriu como jogo".into())),
         }
     }

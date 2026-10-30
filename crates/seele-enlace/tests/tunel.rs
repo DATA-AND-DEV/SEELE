@@ -94,6 +94,11 @@ async fn o_canal_j_leva_datagramas_e_conta_o_que_nao_coube() {
 
     // 100 datagramas de 1200 B: a ordem não é exigida, o número que chega é.
     for n in 0..100_u8 {
+        // Em rajadas de 10 (12 KB): o `j` descarta acima do limiar de volume
+        // (R4), e este teste mede a chegada, não o descarte.
+        if n % 10 == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         let mut d = vec![n; 1200];
         d[0] = n;
         match de_quem_joga.mandar(&d) {
@@ -258,4 +263,44 @@ async fn largar_o_j_fecha_o_canal_no_par() {
     assert_eq!(dele.mandar(b"x"), Err(Recusa::Fechada));
     // Nenhum datagrama de envelope vazou como dado: nada foi contado.
     assert_eq!(par.anfitriao.contadores().violacoes, 0);
+}
+
+/// R4: o `j` escreve direto no SCTP, então sem o limiar um jogo a toda
+/// velocidade poria até o buffer inteiro na frente da voz sem que
+/// `maior_volume_no_sctp` (a medida do R4) soubesse.
+#[tokio::test]
+async fn uma_enxurrada_de_j_nao_passa_do_limiar_de_volume_na_frente_da_voz() {
+    let par = par_em_loopback().await;
+    let CanalDeTunel::SemOrdem(d) = par
+        .cliente
+        .abrir_tunel(Confiabilidade::SemOrdem)
+        .await
+        .unwrap()
+    else {
+        panic!("esperava um j");
+    };
+    let _dele = par.anfitriao.aceitar_tunel().await.unwrap();
+    let grande = vec![7_u8; MAX_DADOS];
+    for _ in 0..20 {
+        // Uma rajada inteira sem ceder a vez, depois a tarefa a processa.
+        for _ in 0..FILA_DE_JOGO {
+            let _ = d.mandar(&grande);
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    let c = par.cliente.contadores();
+    let teto = (seele_enlace::LIMIAR_DE_VOLUME + MAX_DADOS) as u64;
+    assert!(
+        c.maior_volume_no_sctp <= teto,
+        "o j deixou {} bytes no SCTP na frente da voz (teto {teto})",
+        c.maior_volume_no_sctp
+    );
+    assert!(
+        c.maior_volume_no_sctp > 0,
+        "o j não foi contado na medida do R4"
+    );
+    assert!(
+        c.tunel_descartado > 0,
+        "a enxurrada não foi descartada nem contada"
+    );
 }

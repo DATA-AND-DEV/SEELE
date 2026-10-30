@@ -2171,10 +2171,9 @@ impl Motor {
                 })
                 .collect();
             if !volume.is_empty() {
-                let mut esperando: usize = volume
-                    .iter()
-                    .filter_map(|c| par.rtc.channel(*c).map(|mut h| h.buffered_amount()))
-                    .sum();
+                // O `j` não entra no revezamento (ele escreve direto, sem fila),
+                // mas o que ele deixou no SCTP conta como volume na frente da voz.
+                let mut esperando: usize = volume_no_sctp(par);
                 let mut parados = 0;
                 while esperando < LIMIAR_DE_VOLUME && parados < volume.len() {
                     par.revezamento = (par.revezamento + 1) % volume.len();
@@ -2486,8 +2485,13 @@ impl Motor {
         }
     }
 
-    /// Um datagrama do `j` para o SCTP, sem fila e sem espera: se o SCTP não
-    /// tem espaço, o datagrama é descartado e contado.
+    /// Um datagrama do `j` para o SCTP, sem fila e sem espera.
+    ///
+    /// Descarta e conta em `tunel_descartado` quando: o SCTP não tem espaço; o
+    /// volume (`u`, `b`, `t` e `j`, a voz fora) já esperando no SCTP chegou a
+    /// [`LIMIAR_DE_VOLUME`] — o mesmo limiar do escalonador, ou um jogo a toda
+    /// velocidade poria até `BUFFER_DE_ENVIO` na frente da voz (R4); ou a
+    /// conexão está sendo desmontada (esses descartes também são contados).
     fn mandar_jogo(&mut self, id: usize, canal: ChannelId, bytes: &[u8]) {
         let Some(par) = self.pares.get_mut(&id) else {
             return;
@@ -2495,12 +2499,20 @@ impl Motor {
         if let Some(c) = par.canais.get(&canal) {
             c.jogo_na_fila.fetch_sub(1, Ordering::Relaxed);
         }
+        let esperando = volume_no_sctp(par);
         let escrito = par.pronto
+            && esperando < LIMIAR_DE_VOLUME
             && par
                 .rtc
                 .channel(canal)
                 .is_some_and(|mut h| h.write(true, bytes).unwrap_or(false));
-        if !escrito {
+        if escrito {
+            // A mesma medida do R4: o `j` também fica na conta de `maior_volume_no_sctp`.
+            par.comp
+                .contadores
+                .maior_volume_no_sctp
+                .fetch_max((esperando + bytes.len()) as u64, Ordering::Relaxed);
+        } else {
             par.comp
                 .contadores
                 .tunel_descartado
@@ -3086,6 +3098,20 @@ fn rever_credito(par: &mut Par) {
         }
     }
     par.comp.credito_em_aberto.store(total, Ordering::Relaxed);
+}
+
+/// O volume que a associação tem esperando: os canais `u`, `b`, `t` e `j`
+/// (a voz e o `ctl` ficam de fora).
+fn volume_no_sctp(par: &mut Par) -> usize {
+    let ids: Vec<ChannelId> = par
+        .canais
+        .iter()
+        .filter(|(_, c)| (c.tipo.de_volume() || c.tipo == Tipo::Jogo) && c.aberto)
+        .map(|(id, _)| *id)
+        .collect();
+    ids.iter()
+        .filter_map(|c| par.rtc.channel(*c).map(|mut h| h.buffered_amount()))
+        .sum()
 }
 
 /// O que o DCEP trouxe da configuração de um canal.
