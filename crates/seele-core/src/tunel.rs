@@ -24,7 +24,7 @@
 //! ([`Queda`]), vai para o log com `mod_id`, `tunel` e `caminho`, e entra no
 //! [`RelatorioDoTunel`] que a casca recebe como [`Aviso::Tunel`].
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::pending;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -375,7 +375,7 @@ pub(crate) enum Evento {
     /// O túnel acabou, por este motivo.
     Fim(Queda),
     /// A ligação direta chegou.
-    Direto(Box<ParLigado>, PersonId),
+    Direto(Arc<ParLigado>, PersonId),
     /// A ligação direta desta geração caiu.
     DiretoCaiu(u32),
     /// Um fluxo UDP acabou.
@@ -640,6 +640,9 @@ pub(crate) struct TunelDeJogador {
     eventos: mpsc::UnboundedSender<Evento>,
     tarefa: Option<AbortaAoLargar>,
     discagem: Option<AbortaAoLargar>,
+    /// A máquina com quem se tentou a ligação direta: é a chave de
+    /// [`Ligacoes`], e é por ela que a poda sabe quem ainda precisa do quê.
+    quem: Option<PersonId>,
 }
 
 /// O que `AlcanceTunelPor` entrega para discar a máquina.
@@ -656,6 +659,92 @@ pub(crate) struct Alcance {
 
 /// Quem avisa o servidor de um verbo que o túnel quer mandar.
 pub(crate) type Enviar = Arc<dyn Fn(ClientMessage) + Send + Sync>;
+
+/// Onde está a discagem da ligação direta com uma máquina.
+#[derive(Clone)]
+enum EstadoDaLigacao {
+    Discando,
+    Pronta(Arc<ParLigado>),
+    Falhou(MotivoDeFalhaDePar, String),
+    /// Chegou a existir e acabou.
+    Caiu,
+}
+
+struct Ligacao {
+    estado: watch::Receiver<EstadoDaLigacao>,
+    /// A discagem, e depois a espera pelo fim da conexão. Larga-la a aborta, e
+    /// com ela a ligação (se nenhum túnel a segura mais).
+    _tarefa: AbortaAoLargar,
+}
+
+/// As ligações diretas de quem joga, **uma por máquina**.
+///
+/// Dois túneis da mesma máquina (um TCP e um UDP, o caso comum de um jogo)
+/// são apresentados pelo servidor duas vezes, às mesmas duas pontas. Se cada
+/// túnel discasse a sua, as duas discagens e os dois atendimentos disputariam
+/// as mesmas conexões de entrada e se casariam trocados: a máquina atenderia
+/// a ligação do túnel A achando que era do B, e a outra discagem esgotaria o
+/// prazo. Medido na prova `tunel_de_jogo.rs`: o segundo túnel nunca ia direto.
+/// Por isso a discagem é uma só, e todo túnel da máquina espera por ela.
+#[derive(Default)]
+pub(crate) struct Ligacoes {
+    por_maquina: HashMap<PersonId, Ligacao>,
+}
+
+impl Ligacoes {
+    /// A discagem em curso (ou pronta) para esta máquina, começando uma se não
+    /// houver — ou se a que havia falhou ou caiu.
+    fn obter(&mut self, alcance: Alcance) -> watch::Receiver<EstadoDaLigacao> {
+        if let Some(viva) = self.por_maquina.get(&alcance.quem) {
+            if matches!(
+                *viva.estado.borrow(),
+                EstadoDaLigacao::Discando | EstadoDaLigacao::Pronta(_)
+            ) {
+                return viva.estado.clone();
+            }
+        }
+        let (tx, rx) = watch::channel(EstadoDaLigacao::Discando);
+        let Alcance {
+            ponta,
+            enderecos,
+            impressao,
+            prazo,
+            quem,
+            ..
+        } = alcance;
+        let tarefa = AbortaAoLargar::nova(async move {
+            match cumprir_apresentacao(&ponta, Papel::Busca, &enderecos, impressao, prazo).await {
+                Ok(ligado) => {
+                    let ligado = Arc::new(ligado);
+                    let conexao = ligado.conexao.clone();
+                    tx.send_replace(EstadoDaLigacao::Pronta(ligado));
+                    conexao.closed().await;
+                    tx.send_replace(EstadoDaLigacao::Caiu);
+                }
+                Err(erro) => {
+                    tx.send_replace(EstadoDaLigacao::Falhou(
+                        motivo_de_falha(&erro),
+                        erro.to_string(),
+                    ));
+                }
+            }
+        });
+        self.por_maquina.insert(
+            quem,
+            Ligacao {
+                estado: rx.clone(),
+                _tarefa: tarefa,
+            },
+        );
+        rx
+    }
+
+    /// Larga as ligações de que nenhum túnel precisa mais.
+    fn podar(&mut self, jogando: &HashMap<Chave, TunelDeJogador>) {
+        let precisadas: HashSet<PersonId> = jogando.values().filter_map(|t| t.quem).collect();
+        self.por_maquina.retain(|quem, _| precisadas.contains(quem));
+    }
+}
 
 impl TunelDeJogador {
     /// Põe o túnel de pé sobre a escuta já aberta, começando pela estrela.
@@ -683,37 +772,60 @@ impl TunelDeJogador {
                 eventos: tx,
                 tarefa: Some(tarefa),
                 discagem: None,
+                quem: None,
             },
             descricao,
         ))
     }
 
-    /// Tenta a ligação direta com a máquina; falhando, avisa o servidor com
+    /// Pede a ligação direta com a máquina; falhando, avisa o servidor com
     /// `TunelFalhou` e o túnel segue pela estrela.
-    pub(crate) fn alcancar_por(&mut self, alcance: Alcance, enviar: Enviar) {
-        let Alcance {
-            mod_id,
-            nome,
-            ponta,
-            enderecos,
-            impressao,
-            prazo,
-            quem,
-        } = alcance;
+    ///
+    /// A ligação é **da máquina, e não do túnel**: dois túneis da mesma máquina
+    /// esperam a mesma discagem (ver [`Ligacoes`]).
+    pub(crate) fn alcancar_por(
+        &mut self,
+        alcance: Alcance,
+        enviar: Enviar,
+        ligacoes: &mut Ligacoes,
+    ) {
+        let quem = alcance.quem;
+        let mod_id = alcance.mod_id.clone();
+        let nome = alcance.nome.clone();
+        let mut estado = ligacoes.obter(alcance);
+        self.quem = Some(quem);
         let eventos = self.eventos.clone();
         self.discagem = Some(AbortaAoLargar::nova(async move {
-            match cumprir_apresentacao(&ponta, Papel::Busca, &enderecos, impressao, prazo).await {
-                Ok(ligado) => {
-                    let _ = eventos.send(Evento::Direto(Box::new(ligado), quem));
-                }
-                Err(erro) => {
-                    let motivo: MotivoDeFalhaDePar = motivo_de_falha(&erro);
-                    tracing::info!(%mod_id, tunel = %nome, %erro, ?motivo, "túnel: a ligação direta não veio; segue pela estrela");
-                    enviar(ClientMessage::TunelFalhou {
-                        mod_id,
-                        nome,
-                        motivo,
-                    });
+            loop {
+                let visto = estado.borrow_and_update().clone();
+                match visto {
+                    EstadoDaLigacao::Pronta(ligado) => {
+                        let _ = eventos.send(Evento::Direto(ligado, quem));
+                        return;
+                    }
+                    EstadoDaLigacao::Falhou(motivo, erro) => {
+                        tracing::info!(%mod_id, tunel = %nome, %erro, ?motivo, "túnel: a ligação direta não veio; segue pela estrela");
+                        enviar(ClientMessage::TunelFalhou {
+                            mod_id,
+                            nome,
+                            motivo,
+                        });
+                        return;
+                    }
+                    EstadoDaLigacao::Caiu => {
+                        tracing::info!(%mod_id, tunel = %nome, "túnel: a ligação direta caiu antes de ser usada; segue pela estrela");
+                        enviar(ClientMessage::TunelFalhou {
+                            mod_id,
+                            nome,
+                            motivo: MotivoDeFalhaDePar::NaoAlcancou,
+                        });
+                        return;
+                    }
+                    EstadoDaLigacao::Discando => {
+                        if estado.changed().await.is_err() {
+                            return;
+                        }
+                    }
                 }
             }
         }));
@@ -929,7 +1041,7 @@ async fn laco_do_jogador(
     let mut via = estrela.clone();
     let mut caminho = Caminho::Estrela;
     let mut geracao = 0_u32;
-    let mut ligado: Option<Box<ParLigado>> = None;
+    let mut ligado: Option<Arc<ParLigado>> = None;
     let mut pingador = AbortaAoLargar::nova(pingar(via.clone(), Arc::clone(&contexto)));
     {
         let (tx, estrela) = (tx.clone(), estrela.clone());
@@ -1190,6 +1302,71 @@ pub(crate) struct Maquina {
     estado: Arc<EstadoDaMaquina>,
     tarefas: JoinSet<()>,
     na_estrela: bool,
+    /// Quem a máquina está atendendo (ou esperando) pela malha: **uma ligação
+    /// por pessoa**, com os túneis que o servidor apresentou a ela.
+    atendendo: Arc<Mutex<HashMap<PersonId, Atendimento>>>,
+    proximo_atendimento: u64,
+}
+
+/// Os túneis que o servidor apresentou a uma pessoa: o que a ligação direta
+/// dela pode abrir. Um canal que nomeia outro túnel é cortado.
+pub(crate) struct Permitidos(Mutex<HashSet<Chave>>);
+
+/// Quanto um canal que chega por uma ligação direta espera pela apresentação
+/// do túnel que nomeia. O servidor apresenta o túnel à máquina e a quem joga
+/// por dois caminhos independentes, e quem joga pode abrir o canal um instante
+/// antes de a máquina ouvir a apresentação; sem a espera, esse canal seria
+/// cortado por uma corrida, e não por falta de permissão.
+const GRACA_DA_APRESENTACAO: Duration = Duration::from_millis(1500);
+
+impl Permitidos {
+    pub(crate) fn de(chave: Chave) -> Arc<Self> {
+        Arc::new(Self(Mutex::new(HashSet::from([chave]))))
+    }
+
+    fn permitir(&self, chave: Chave) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(chave);
+    }
+
+    fn permite(&self, chave: &Chave) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(chave)
+    }
+
+    /// Se o túnel é permitido agora ou passa a ser dentro da graça.
+    async fn permite_logo(&self, chave: &Chave) -> bool {
+        let fim = Instant::now() + GRACA_DA_APRESENTACAO;
+        loop {
+            if self.permite(chave) {
+                return true;
+            }
+            if Instant::now() >= fim {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+}
+
+/// O que `SirvaTunelPara` entrega para atender quem vai jogar.
+pub(crate) struct Apresentacao {
+    pub(crate) ponta: PontaDaSessao,
+    pub(crate) quem: PersonId,
+    pub(crate) mod_id: String,
+    pub(crate) nome: String,
+    pub(crate) enderecos: Vec<SocketAddr>,
+    pub(crate) impressao: String,
+    pub(crate) prazo: Duration,
+}
+
+pub(crate) struct Atendimento {
+    id: u64,
+    permitidos: Arc<Permitidos>,
 }
 
 impl Maquina {
@@ -1201,6 +1378,8 @@ impl Maquina {
             }),
             tarefas: JoinSet::new(),
             na_estrela: false,
+            atendendo: Arc::new(Mutex::new(HashMap::new())),
+            proximo_atendimento: 0,
         }
     }
 
@@ -1264,35 +1443,68 @@ impl Maquina {
     }
 
     /// `SirvaTunelPara`: atende a ligação direta de quem vai jogar, conferida
-    /// pela impressão, e aceita nela só canais deste túnel.
-    pub(crate) fn servir_a(
-        &mut self,
-        ponta: PontaDaSessao,
-        mod_id: String,
-        nome: String,
-        enderecos: Vec<SocketAddr>,
-        impressao: String,
-        prazo: Duration,
-    ) {
+    /// pela impressão, e aceita nela só canais dos túneis que o servidor
+    /// apresentou a essa pessoa.
+    ///
+    /// **A ligação é da pessoa, e não do túnel.** Quem joga dois túneis desta
+    /// máquina recebe duas apresentações, e atender cada uma por conta própria
+    /// as faria disputar a mesma conexão de entrada (ver [`Ligacoes`]). A
+    /// segunda apresentação só acrescenta o túnel ao que a ligação já aceita.
+    pub(crate) fn servir_a(&mut self, apresentacao: Apresentacao) {
+        let Apresentacao {
+            ponta,
+            quem,
+            mod_id,
+            nome,
+            enderecos,
+            impressao,
+            prazo,
+        } = apresentacao;
         if !self.serve(&mod_id, &nome) {
             tracing::debug!(%mod_id, tunel = %nome, "túnel: apresentação para um túnel que esta máquina não serve");
             return;
         }
+        let permitidos = {
+            let mut atendendo = self
+                .atendendo
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if let Some(ja) = atendendo.get(&quem) {
+                ja.permitidos.permitir((mod_id.clone(), nome.clone()));
+                tracing::debug!(%mod_id, tunel = %nome, %quem, "túnel: a ligação direta desta pessoa já está sendo atendida; o túnel entra nela");
+                return;
+            }
+            self.proximo_atendimento += 1;
+            let permitidos = Permitidos::de((mod_id.clone(), nome.clone()));
+            atendendo.insert(
+                quem,
+                Atendimento {
+                    id: self.proximo_atendimento,
+                    permitidos: Arc::clone(&permitidos),
+                },
+            );
+            permitidos
+        };
+        let id = self.proximo_atendimento;
         let estado = Arc::clone(&self.estado);
+        let atendendo = Arc::clone(&self.atendendo);
         self.tarefas.spawn(async move {
             match cumprir_apresentacao(&ponta, Papel::Serve, &enderecos, impressao, prazo).await {
                 Ok(ligado) => {
-                    tracing::info!(%mod_id, tunel = %nome, "túnel: ligação direta atendida");
+                    tracing::info!(%mod_id, tunel = %nome, %quem, "túnel: ligação direta atendida");
                     // `ligado` fica vivo enquanto o aceitador correr.
                     let via = Via::nova(ligado.conexao.clone());
-                    aceitar_canais(via, Some((mod_id.clone(), nome.clone())), estado, "direto")
-                        .await;
-                    tracing::info!(%mod_id, tunel = %nome, caminho = "direto", "túnel: a ligação direta da máquina acabou");
+                    aceitar_canais(via, Some(permitidos), estado, "direto").await;
+                    tracing::info!(%mod_id, tunel = %nome, %quem, caminho = "direto", "túnel: a ligação direta da máquina acabou");
                     drop(ligado);
                 }
                 Err(erro) => {
-                    tracing::info!(%mod_id, tunel = %nome, %erro, "túnel: ninguém veio pela ligação direta; fica a estrela");
+                    tracing::info!(%mod_id, tunel = %nome, %quem, %erro, "túnel: ninguém veio pela ligação direta; fica a estrela");
                 }
+            }
+            let mut atendendo = atendendo.lock().unwrap_or_else(PoisonError::into_inner);
+            if atendendo.get(&quem).is_some_and(|a| a.id == id) {
+                atendendo.remove(&quem);
             }
         });
     }
@@ -1309,15 +1521,19 @@ impl Maquina {
             servido.parada.send_replace(Some(queda));
         }
         self.tarefas.abort_all();
+        self.atendendo
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
         self.na_estrela = false;
     }
 }
 
-/// Aceita canais de uma via até ela acabar. `restrito` é o túnel a que a via
-/// pertence (ligação direta); a estrela aceita qualquer túnel servido.
+/// Aceita canais de uma via até ela acabar. `restrito` são os túneis a que a
+/// via pertence (ligação direta); a estrela aceita qualquer túnel servido.
 async fn aceitar_canais(
     via: Via,
-    restrito: Option<Chave>,
+    restrito: Option<Arc<Permitidos>>,
     estado: Arc<EstadoDaMaquina>,
     caminho: &'static str,
 ) {
@@ -1329,8 +1545,7 @@ async fn aceitar_canais(
                     filhos.spawn(atender_canal(canal, restrito.clone(), Arc::clone(&estado), caminho));
                 }
                 Err(motivo) => {
-                    let (mod_id, nome) = restrito.as_ref().map_or(("", ""), |(m, n)| (m.as_str(), n.as_str()));
-                    tracing::debug!(mod_id, tunel = nome, caminho, %motivo, "túnel: a via de canais acabou");
+                    tracing::debug!(caminho, %motivo, "túnel: a via de canais acabou");
                     return;
                 }
             },
@@ -1342,7 +1557,7 @@ async fn aceitar_canais(
 /// Confere a abertura contra o que a máquina serve e contra a via de onde veio.
 fn conferir(
     abertura: &AberturaDeTunel,
-    restrito: Option<&Chave>,
+    da_via: bool,
     estado: &EstadoDaMaquina,
     caminho: &str,
 ) -> Option<Arc<Servido>> {
@@ -1351,8 +1566,8 @@ fn conferir(
         estado.alheios.fetch_add(1, Ordering::Relaxed);
         tracing::warn!(mod_id = %abertura.mod_id, tunel = %abertura.nome, caminho, porque, "túnel: canal cortado na máquina");
     };
-    if restrito.is_some_and(|r| *r != chave) {
-        corte("a ligação direta é de outro túnel");
+    if !da_via {
+        corte("a ligação direta não é deste túnel");
         return None;
     }
     let Some(servido) = estado.servido(&chave) else {
@@ -1374,10 +1589,19 @@ fn conferir(
 
 async fn atender_canal(
     canal: CanalDeTunel,
-    restrito: Option<Chave>,
+    restrito: Option<Arc<Permitidos>>,
     estado: Arc<EstadoDaMaquina>,
     caminho: &'static str,
 ) {
+    // Se o túnel nomeado é um dos que esta via pode abrir.
+    let da_via = async |aberta: &AberturaDeTunel| match &restrito {
+        None => true,
+        Some(permitidos) => {
+            permitidos
+                .permite_logo(&(aberta.mod_id.clone(), aberta.nome.clone()))
+                .await
+        }
+    };
     match canal {
         CanalDeTunel::Ordenado(mut envio, mut recebe) => {
             let lida = tokio::time::timeout(
@@ -1390,7 +1614,7 @@ async fn atender_canal(
                 estado.alheios.fetch_add(1, Ordering::Relaxed);
                 return;
             };
-            let Some(servido) = conferir(&aberta, restrito.as_ref(), &estado, caminho) else {
+            let Some(servido) = conferir(&aberta, da_via(&aberta).await, &estado, caminho) else {
                 let _ = envio.reset(CODIGO_CORTADO);
                 let _ = recebe.stop(CODIGO_CORTADO);
                 return;
@@ -1411,7 +1635,7 @@ async fn atender_canal(
                 estado.alheios.fetch_add(1, Ordering::Relaxed);
                 return;
             };
-            let Some(servido) = conferir(&aberta, restrito.as_ref(), &estado, caminho) else {
+            let Some(servido) = conferir(&aberta, da_via(&aberta).await, &estado, caminho) else {
                 return;
             };
             if aberta.tipo == TipoDeCanalDeTunel::Udp {
@@ -1591,6 +1815,7 @@ pub(crate) fn fim_pela_recusa(motivo: RecusaDeTunel) -> Option<Queda> {
 /// Os pedidos em andamento e os túneis vivos de um enlace.
 pub(crate) struct Tuneis {
     jogando: HashMap<Chave, TunelDeJogador>,
+    ligacoes: Ligacoes,
     entrando: HashMap<Chave, oneshot::Sender<Result<PortaLocal, RecusaDeTunel>>>,
     servindo: HashMap<Chave, oneshot::Sender<Result<(), RecusaDeTunel>>>,
     maquina: Maquina,
@@ -1601,6 +1826,7 @@ impl Tuneis {
     pub(crate) fn nova(avisos: mpsc::UnboundedSender<Aviso>) -> Self {
         Self {
             jogando: HashMap::new(),
+            ligacoes: Ligacoes::default(),
             entrando: HashMap::new(),
             servindo: HashMap::new(),
             maquina: Maquina::nova(),
@@ -1642,6 +1868,7 @@ impl Tuneis {
     pub(crate) fn sair(&mut self, mod_id: &str, nome: &str) -> bool {
         if let Some(tunel) = self.jogando.remove(&(mod_id.to_owned(), nome.to_owned())) {
             tunel.encerrar(Queda::Fechado);
+            self.ligacoes.podar(&self.jogando);
             true
         } else {
             false
@@ -1676,6 +1903,7 @@ impl Tuneis {
             .drain()
             .filter_map(|(_, tunel)| tunel.encerrar_esperando(queda))
             .collect();
+        self.ligacoes.por_maquina.clear();
         self.entrando.clear();
         self.servindo.clear();
         self.maquina.derrubar_tudo(queda);
@@ -1692,6 +1920,7 @@ impl Tuneis {
         for (_, tunel) in self.jogando.drain() {
             tunel.encerrar(queda);
         }
+        self.ligacoes.por_maquina.clear();
         self.entrando.clear();
         self.servindo.clear();
         self.maquina.derrubar_tudo(queda);
@@ -1731,6 +1960,7 @@ impl Tuneis {
                 let chave = (mod_id.clone(), nome.clone());
                 if let Some(tunel) = self.jogando.remove(&chave) {
                     tunel.encerrar(queda);
+                    self.ligacoes.podar(&self.jogando);
                 }
                 self.maquina.parar(mod_id, nome, queda);
             }
@@ -1765,24 +1995,27 @@ impl Tuneis {
                         quem: *quem,
                     },
                     Arc::clone(enviar),
+                    &mut self.ligacoes,
                 );
             }
             ServerMessage::SirvaTunelPara {
                 mod_id,
                 nome,
+                quem,
                 enderecos,
                 impressao,
                 ..
             } => {
                 let Some(ponta) = ponta else { return };
-                self.maquina.servir_a(
-                    ponta.clone(),
-                    mod_id.clone(),
-                    nome.clone(),
-                    enderecos.clone(),
-                    impressao.clone(),
+                self.maquina.servir_a(Apresentacao {
+                    ponta: ponta.clone(),
+                    quem: *quem,
+                    mod_id: mod_id.clone(),
+                    nome: nome.clone(),
+                    enderecos: enderecos.clone(),
+                    impressao: impressao.clone(),
                     prazo,
-                );
+                });
             }
             _ => {}
         }
@@ -1885,6 +2118,7 @@ impl Tuneis {
         if let Some(queda) = fim_pela_recusa(motivo) {
             if let Some(tunel) = self.jogando.remove(&chave) {
                 tunel.encerrar(queda);
+                self.ligacoes.podar(&self.jogando);
             }
         }
     }
@@ -2227,8 +2461,8 @@ mod testes {
         maquina.registrar(MOD, NOME, ProtocoloDeTunel::Tcp, jogo);
         maquina.registrar(MOD, "outro", ProtocoloDeTunel::Tcp, jogo);
         let estado = maquina.estado();
-        // Uma ligação direta é de um túnel só: a abertura que nomeia outro é cortada.
-        let restrito = Some((MOD.to_owned(), NOME.to_owned()));
+        // Uma ligação direta só abre os túneis apresentados à pessoa: a abertura que nomeia outro é cortada.
+        let restrito = Some(Permitidos::de((MOD.to_owned(), NOME.to_owned())));
         let aceitando = tokio::spawn(aceitar_canais(
             Via::nova(par.anfitriao.clone()),
             restrito,
@@ -2275,6 +2509,131 @@ mod testes {
         assert_eq!(estado.canais_alheios(), 1);
         aceitando.abort();
         drop(maquina);
+    }
+
+    /// A ponta de uma sessão em `127.0.0.1`, como o produto a arma.
+    fn ponta_de_sessao() -> PontaDaSessao {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        crate::transporte::abrir_ponta(Some(socket)).unwrap()
+    }
+
+    /// **O defeito que a prova `tunel_de_jogo.rs` achou.** Dois túneis da mesma
+    /// máquina são apresentados duas vezes às mesmas duas pontas. Cada
+    /// discagem e cada atendimento por conta própria disputavam as mesmas
+    /// conexões e se casavam trocados: a máquina atendia a ligação do túnel A
+    /// achando que era do B, e a outra discagem esgotava o prazo — o segundo
+    /// túnel nunca ia direto. Aqui as duas apresentações dividem UMA ligação, e
+    /// os dois túneis passam por ela.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dois_tuneis_da_mesma_maquina_dividem_uma_ligacao_direta() {
+        let (jogo_a, _eco_a) = eco_tcp().await;
+        let (jogo_b, _eco_b) = eco_tcp().await;
+        let serve = ponta_de_sessao();
+        let busca = ponta_de_sessao();
+        let impressao_serve = crate::par::impressao(serve.identidade());
+        let impressao_busca = crate::par::impressao(busca.identidade());
+        let onde_serve = serve.ponta().local_addr();
+        let onde_busca = busca.ponta().local_addr();
+        let prazo = Duration::from_secs(5);
+        let (maquina_id, joga_id) = (PersonId(1), PersonId(2));
+
+        let mut maquina = Maquina::nova();
+        maquina.registrar(MOD, "a", ProtocoloDeTunel::Tcp, jogo_a);
+        maquina.registrar(MOD, "b", ProtocoloDeTunel::Tcp, jogo_b);
+        // O servidor apresenta os dois túneis, um depois do outro.
+        for nome in ["a", "b"] {
+            maquina.servir_a(Apresentacao {
+                ponta: serve.clone(),
+                quem: joga_id,
+                mod_id: MOD.to_owned(),
+                nome: nome.to_owned(),
+                enderecos: vec![onde_busca],
+                impressao: impressao_busca.clone(),
+                prazo,
+            });
+        }
+        let mut ligacoes = Ligacoes::default();
+        let alcance = |nome: &str| Alcance {
+            mod_id: MOD.to_owned(),
+            nome: nome.to_owned(),
+            ponta: busca.clone(),
+            enderecos: vec![onde_serve],
+            impressao: impressao_serve.clone(),
+            prazo,
+            quem: maquina_id,
+        };
+        let mut a = ligacoes.obter(alcance("a"));
+        let mut b = ligacoes.obter(alcance("b"));
+        let pronta = |rx: &mut watch::Receiver<EstadoDaLigacao>| {
+            let mut rx = rx.clone();
+            async move {
+                tokio::time::timeout(Duration::from_secs(20), async {
+                    loop {
+                        match &*rx.borrow_and_update() {
+                            EstadoDaLigacao::Pronta(ligado) => return Arc::clone(ligado),
+                            EstadoDaLigacao::Discando => {}
+                            EstadoDaLigacao::Falhou(_, erro) => panic!("a discagem falhou: {erro}"),
+                            EstadoDaLigacao::Caiu => panic!("a ligação caiu"),
+                        }
+                        rx.changed().await.unwrap();
+                    }
+                })
+                .await
+                .expect("a ligação direta não veio em 20 s")
+            }
+        };
+        let (ligada_a, ligada_b) = (pronta(&mut a).await, pronta(&mut b).await);
+        assert!(
+            Arc::ptr_eq(&ligada_a, &ligada_b),
+            "dois túneis da mesma máquina discaram duas ligações"
+        );
+
+        // Os dois túneis passam pela única ligação, cada um no seu jogo.
+        let via = Via::nova(ligada_a.conexao.clone());
+        for (nome, fluxo) in [("a", 1), ("b", 2)] {
+            let contexto = Contexto {
+                mod_id: MOD.to_owned(),
+                nome: nome.to_owned(),
+                porta_local: 0,
+                preferida: false,
+                medidas: Arc::new(Medidas::nova(None)),
+                avisos: mpsc::unbounded_channel().0,
+            };
+            let (mut envio, mut recebe) = abrir_t(&via, &contexto, fluxo, TipoDeCanalDeTunel::Tcp)
+                .await
+                .unwrap();
+            envio.write_all(b"ola").await.unwrap();
+            let mut volta = [0_u8; 3];
+            tokio::time::timeout(Duration::from_secs(10), recebe.read_exact(&mut volta))
+                .await
+                .unwrap_or_else(|_| panic!("o túnel {nome} não respondeu pela ligação direta"))
+                .unwrap();
+            assert_eq!(&volta, b"ola");
+        }
+        assert_eq!(maquina.estado().canais_alheios(), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_ligacao_espera_a_apresentacao_atrasada_mas_nao_para_sempre() {
+        let permitidos = Permitidos::de((MOD.to_owned(), "a".to_owned()));
+        // Um túnel que o servidor ainda não apresentou a esta máquina, mas
+        // apresenta dentro da graça: o canal que chegou antes não é cortado.
+        let tardio = Arc::clone(&permitidos);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            tardio.permitir((MOD.to_owned(), "b".to_owned()));
+        });
+        assert!(
+            permitidos
+                .permite_logo(&(MOD.to_owned(), "b".to_owned()))
+                .await
+        );
+        // Um que ninguém apresentou é recusado quando a graça acaba.
+        assert!(
+            !permitidos
+                .permite_logo(&(MOD.to_owned(), "c".to_owned()))
+                .await
+        );
     }
 
     #[tokio::test]
