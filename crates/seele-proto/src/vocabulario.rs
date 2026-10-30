@@ -92,7 +92,8 @@ pub const fn desde(mensagem: &ServerMessage) -> u8 {
         | ServerMessage::TunelRecusado { .. }
         | ServerMessage::SirvaTunelPara { .. }
         | ServerMessage::AlcanceTunelPor { .. }
-        | ServerMessage::TunelEncerrado { .. } => 12,
+        | ServerMessage::TunelEncerrado { .. }
+        | ServerMessage::TunelRetirado { .. } => 12,
         // O `Alert` existe desde sempre, e o que pode ser novo é o motivo.
         ServerMessage::Alert { reason, .. } => maior(PRIMEIRO_DA_LINHA_UM, desde_o_alerta(reason)),
         // Puxa o número da razão que leva, como o `Alert` puxa o do motivo: uma
@@ -467,7 +468,7 @@ mod tests {
         }
     }
 
-    /// As seis mensagens de servidor que nasceram no 12, uma de cada.
+    /// As sete mensagens de servidor que nasceram no 12, uma de cada.
     fn exemplares_do_doze() -> Vec<ServerMessage> {
         vec![
             ServerMessage::PlataformasDosMods {
@@ -505,6 +506,11 @@ mod tests {
                 mod_id: "a/b".into(),
                 nome: "mc-1".into(),
                 motivo: MotivoDoFimDoTunel::MaquinaParou,
+            },
+            ServerMessage::TunelRetirado {
+                mod_id: "a/b".into(),
+                nome: "mc-1".into(),
+                quem: crate::ids::PersonId(2),
             },
         ]
     }

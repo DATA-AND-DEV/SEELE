@@ -38,6 +38,24 @@ pub fn nome_valido(nome: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
+/// O primeiro byte de todo datagrama de um canal `j`: este datagrama é a
+/// [`AberturaDeTunel`] do canal.
+///
+/// O `j` anda num canal sem retransmissão e sem ordem. Antes do tag, a abertura
+/// era «o primeiro datagrama»: se ele se perdesse ou chegasse depois de um
+/// dado, quem recebia lia bytes do jogo como abertura, cortava o canal e
+/// contava uma concessão que nunca faltou. Com o tag, ninguém adivinha pela
+/// posição.
+pub const TAG_DE_ABERTURA: u8 = 0;
+
+/// O primeiro byte de um datagrama de um canal `j` que leva **carga do jogo**.
+pub const TAG_DE_DADO: u8 = 1;
+
+/// O intervalo máximo entre duas aberturas repetidas num canal `j` que só tem
+/// ida (o jogo manda e nunca ouve): sem resposta não há como saber que a
+/// abertura chegou, então ela se repete, a cada tanto, com custo limitado.
+pub const REPETE_A_ABERTURA_A_CADA: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// O que o túnel carrega.
 ///
 /// **Sempre acrescente no fim** (ADR 0058).
@@ -82,6 +100,20 @@ pub enum RecusaDeTunel {
     /// tinha acabado, o canal de comandos fechou, ou o prazo venceu sem
     /// `TunelConcedido` nem `TunelRecusado`.
     SemResposta,
+}
+
+impl RecusaDeTunel {
+    /// Se a recusa nasce na ponta e **nunca** atravessa o fio.
+    ///
+    /// O `Validate` de `TunelRecusado` usa isto para recusar, ao decodificar,
+    /// o que um servidor hostil não teria motivo de mandar.
+    #[must_use]
+    pub const fn so_na_ponta(self) -> bool {
+        matches!(
+            self,
+            Self::ServidorAntigo | Self::PortaLocalOcupada | Self::SemResposta
+        )
+    }
 }
 
 /// Por que um túnel acabou.

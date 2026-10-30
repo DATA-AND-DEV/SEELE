@@ -2904,6 +2904,23 @@ pub enum ServerMessage {
         /// O motivo, enumerado.
         motivo: crate::tunel::MotivoDoFimDoTunel,
     },
+    /// Esta pessoa deixou de poder alcançar o túnel: tire-a da lista de quem
+    /// pode e corte o que ela tem aberto.
+    ///
+    /// Sai só para a **máquina** que serve. `TunelEncerrado` conta a quem
+    /// jogava; sem esta, a máquina só sabia do túnel inteiro acabar, e quem
+    /// perdeu a ação `entrar-no-jogo` (ou saiu) seguia com a ligação direta
+    /// aberta e com o direito de abrir canais novos nela, porque o servidor,
+    /// que confere cada canal da estrela, não vê o que passa pelo direto.
+    /// Nasceu no 12 desta branch, que nunca foi publicado.
+    TunelRetirado {
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O nome do túnel.
+        nome: String,
+        /// Quem perdeu o direito.
+        quem: PersonId,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -3038,7 +3055,7 @@ impl ListaDeCima for ClientMessage {
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 58;
+    const CONHECIDAS: u32 = 59;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3851,10 +3868,22 @@ impl Validate for ServerMessage {
                 }
                 Ok(())
             }
-            // O motivo é um enumerado, inclusive `ServidorAntigo`, que o
-            // servidor nunca manda mas que não é malformado.
-            Self::TunelRecusado { mod_id, nome, .. }
-            | Self::TunelEncerrado { mod_id, nome, .. } => crate::tunel::check_tunel(mod_id, nome),
+            Self::TunelRecusado {
+                mod_id,
+                nome,
+                motivo,
+            } => {
+                crate::tunel::check_tunel(mod_id, nome)?;
+                // Só o servidor escreve este quadro, e ele nunca manda uma
+                // recusa que nasce na ponta: um servidor hostil que mandasse
+                // `ServidorAntigo` faria a casca acusar a própria versão.
+                if motivo.so_na_ponta() {
+                    return Err(ControlError::FieldOutOfRange { field: "motivo" });
+                }
+                Ok(())
+            }
+            Self::TunelEncerrado { mod_id, nome, .. }
+            | Self::TunelRetirado { mod_id, nome, .. } => crate::tunel::check_tunel(mod_id, nome),
             Self::SirvaTunelPara {
                 mod_id,
                 nome,
@@ -5584,7 +5613,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            57,
+            58,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -5665,6 +5694,8 @@ mod o_vocabulario_e_a_versao {
         // e `TunelEncerrado`. O 11 está publicado (v0.18.1), então nada pôde
         // pegar carona nele; um par 11 continua entrando e não recebe nada
         // disto (`vocabulario::desde` e `desde_do_cliente`).
+        // O servidor foi de 57 para 58 na revisão final da branch, ainda no 12:
+        // `TunelRetirado`, que diz à máquina que uma pessoa perdeu o túnel.
         //
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
@@ -5748,6 +5779,46 @@ mod o_vocabulario_e_a_versao {
                 .validate()
                 .is_err()
         );
+    }
+
+    /// **Só o servidor escreve `TunelRecusado`, e as três recusas que nascem
+    /// na ponta nunca viajam.** Um servidor hostil que mandasse
+    /// `ServidorAntigo` faria a casca acusar a versão de quem a recebe; a
+    /// validação recusa ao decodificar. Em cada recusa que viaja, passa.
+    #[test]
+    fn uma_recusa_que_nasce_na_ponta_nao_atravessa_o_fio() {
+        use crate::tunel::RecusaDeTunel::{
+            AcaoNaoDeclarada, CanaisEsgotados, MaquinaSaiu, ModSemPorta, NaoExiste, NomeTomado,
+            PortaLocalOcupada, SemPermissao, SemResposta, ServidorAntigo, TuneisDemais,
+        };
+        let com = |motivo| ServerMessage::TunelRecusado {
+            mod_id: "a/b".into(),
+            nome: "mc-1".into(),
+            motivo,
+        };
+        for viaja in [
+            NaoExiste,
+            SemPermissao,
+            AcaoNaoDeclarada,
+            ModSemPorta,
+            NomeTomado,
+            MaquinaSaiu,
+            TuneisDemais,
+            CanaisEsgotados,
+        ] {
+            assert!(com(viaja).validate().is_ok(), "{viaja:?}");
+        }
+        for so_na_ponta in [ServidorAntigo, PortaLocalOcupada, SemResposta] {
+            assert!(com(so_na_ponta).validate().is_err(), "{so_na_ponta:?}");
+            // E o decodificador, que é onde um servidor hostil chega: o quadro
+            // é montado à mão, porque `encode` já recusaria.
+            let mut quadro = vec![PROTOCOL_VERSION];
+            quadro = postcard::to_extend(&com(so_na_ponta), quadro).unwrap();
+            assert!(
+                decode::<ServerMessage>(&quadro).is_err(),
+                "{so_na_ponta:?} passou pelo decodificador"
+            );
+        }
     }
 
     #[test]

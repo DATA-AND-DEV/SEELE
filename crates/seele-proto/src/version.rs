@@ -159,8 +159,8 @@ use thiserror::Error;
 /// plataformas no `ModAnunciado`: campo novo em mensagem que existe é proibido,
 /// ADR 0058) e o vocabulário do túnel de jogo — cinco verbos do cliente
 /// (`ServirTunel`, `PararTunel`, `EntrarNoTunel`, `SairDoTunel`, `TunelFalhou`)
-/// e cinco respostas do servidor (`TunelConcedido`, `TunelRecusado`,
-/// `SirvaTunelPara`, `AlcanceTunelPor`, `TunelEncerrado`), mais os rótulos de
+/// e seis respostas do servidor (`TunelConcedido`, `TunelRecusado`,
+/// `SirvaTunelPara`, `AlcanceTunelPor`, `TunelEncerrado`, `TunelRetirado`), mais os rótulos de
 /// canal `t` e `j`. A 11 **está publicada** (v0.18.1, commit `ae0f2715`,
 /// conferido no release em 29/10), então nada pôde pegar carona nela.
 ///

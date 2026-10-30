@@ -940,6 +940,14 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 motivo: MotivoDoFimDoTunel::SemPermissao,
             },
         ),
+        (
+            "TunelRetirado",
+            ServerMessage::TunelRetirado {
+                mod_id: "seele/mesa".into(),
+                nome: "mc-1".into(),
+                quem: PersonId(42),
+            },
+        ),
     ]
 }
 

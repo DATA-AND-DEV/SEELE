@@ -1870,15 +1870,16 @@ impl Room {
             // entrada, a casca já decidiu o que baixar e não há o que absorver.
             ServerMessage::PlataformasDosMods { .. } => {}
 
-            // O túnel de jogo (protocolo 12). O `Room` ainda não o dobra; o
-            // tratamento real chega nas tarefas seguintes do plano «API 8, parte
-            // 2: o túnel de jogo» (servidor, enlace, núcleo e casca). Calado de
-            // propósito até lá, e não por esquecimento.
+            // O túnel de jogo (protocolo 12). Quem o trata é o motor do enlace
+            // (`seele-core::tunel`), que lê estas mensagens antes de a sala as
+            // ver; o `Room` não tem estado de túnel para dobrar. Calado de
+            // propósito, e não por esquecimento.
             ServerMessage::TunelConcedido { .. }
             | ServerMessage::TunelRecusado { .. }
             | ServerMessage::SirvaTunelPara { .. }
             | ServerMessage::AlcanceTunelPor { .. }
-            | ServerMessage::TunelEncerrado { .. } => {}
+            | ServerMessage::TunelEncerrado { .. }
+            | ServerMessage::TunelRetirado { .. } => {}
         }
 
         changed
