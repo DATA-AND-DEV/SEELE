@@ -21,7 +21,9 @@
 use std::collections::HashMap;
 
 use seele_proto::ids::PersonId;
-use seele_proto::maquina::{MotivoDaDispensa, OfertaDeMaquina, TunelOferecido};
+use seele_proto::maquina::{
+    MotivoDaDispensa, MotivoDaRecusaDeMaquina, OfertaDeMaquina, TunelOferecido,
+};
 use seele_proto::tunel::ProtocoloDeTunel;
 
 use crate::server::{Event, Server};
@@ -46,7 +48,52 @@ struct Pendente {
     pedido_por: PersonId,
     hash: String,
     resumo_hex: String,
-    tuneis: Vec<TunelOferecido>,
+    /// Inteira, e não só os túneis: uma conexão de `quem` que chega com o
+    /// pedido pendente o recebe também ([`Maquinas::chegou`]).
+    oferta: OfertaDeMaquina,
+    /// As conexões de `quem` a que o pedido foi mostrado e que ainda não
+    /// recusaram **sozinhas**. Ver [`Maquinas::recusar`].
+    esperando: Vec<u64>,
+    /// O motivo da última recusa automática, que é o que o MOD lê se todas as
+    /// conexões recusarem sozinhas.
+    ultima_automatica: Option<MotivoDaRecusaDeMaquina>,
+}
+
+/// O que [`Maquinas::recusar`] fez.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recusa {
+    /// Não havia pedido pendente desta pessoa para esse servidor de jogo.
+    SemPedido,
+    /// Esta conexão recusou sozinha, e outra ainda pode aceitar: o pedido
+    /// segue pendente.
+    Esperando,
+    /// O pedido saiu do livro, com este motivo.
+    Recusado(MotivoDaRecusaDeMaquina),
+}
+
+/// Um pedido pendente reenviado a uma conexão que chegou depois dele.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reenvio {
+    /// `autor/nome` do MOD.
+    pub mod_id: String,
+    /// O servidor de jogo.
+    pub servidor: String,
+    /// O hash do pacote do pedido.
+    pub hash: String,
+    /// Quem pediu.
+    pub pedido_por: PersonId,
+    /// O que foi mostrado.
+    pub oferta: OfertaDeMaquina,
+}
+
+/// Se a recusa é a que o cliente dá sozinho, sem a pessoa ver a oferta: o
+/// núcleo sem tela (`SemTela`) e o navegador (`SoNoApp`) respondem na hora, e
+/// a mesma pessoa pode estar com o app aberto ao lado.
+const fn automatica(motivo: MotivoDaRecusaDeMaquina) -> bool {
+    matches!(
+        motivo,
+        MotivoDaRecusaDeMaquina::SemTela | MotivoDaRecusaDeMaquina::SoNoApp
+    )
 }
 
 /// Uma máquina aceita.
@@ -285,7 +332,9 @@ impl Maquinas {
                 pedido_por,
                 hash: hash.to_owned(),
                 resumo_hex: resumo_hex.clone(),
-                tuneis: oferta.tuneis.clone(),
+                oferta: oferta.clone(),
+                esperando: self.no_doze.get(&quem).cloned().unwrap_or_default(),
+                ultima_automatica: None,
             },
         );
         Pedido::Guardado {
@@ -362,7 +411,7 @@ impl Maquinas {
             conexao,
             hash: pendente.hash,
             resumo_hex: pendente.resumo_hex,
-            tuneis: pendente.tuneis,
+            tuneis: pendente.oferta.tuneis,
         };
         // O aceite anterior da mesma pessoa (outra oferta, ou outra conexão):
         // o que ele cobria e a oferta nova não cobre para de valer.
@@ -379,16 +428,37 @@ impl Maquinas {
         })
     }
 
-    /// A pessoa recusou o pedido. `true` se havia um pendente dela para esse
-    /// servidor de jogo (e ele saiu); `false` se não havia o que recusar.
-    pub fn recusar(&mut self, quem: PersonId, mod_id: &str, servidor: &str) -> bool {
+    /// A pessoa recusou o pedido, pela conexão `conexao`.
+    ///
+    /// **Uma recusa automática é da conexão, e não da pessoa.** O pedido vai a
+    /// toda sessão dela no 12; o navegador responde `SoNoApp` e o núcleo sem
+    /// tela `SemTela` na hora, antes de ela ver a oferta no app aberto ao lado.
+    /// Derrubar o pedido por isso seria o MOD ler «recusou» e o aceite do app
+    /// cair em `SemPedido`. Então: a recusa automática só tira esta conexão das
+    /// que esperam, e o pedido cai (com o último motivo automático) quando
+    /// nenhuma sobra. Uma recusa da pessoa (`PeloDono`) ou do pacote
+    /// (`PacoteDiferente`, `OfertaInvalida`) derruba na hora.
+    pub fn recusar(
+        &mut self,
+        quem: PersonId,
+        conexao: u64,
+        mod_id: &str,
+        servidor: &str,
+        motivo: MotivoDaRecusaDeMaquina,
+    ) -> Recusa {
         let k = chave(mod_id, servidor);
-        if self.pendentes.get(&k).is_some_and(|p| p.quem == quem) {
-            self.pendentes.remove(&k);
-            true
-        } else {
-            false
+        let Some(pendente) = self.pendentes.get_mut(&k).filter(|p| p.quem == quem) else {
+            return Recusa::SemPedido;
+        };
+        if automatica(motivo) {
+            pendente.esperando.retain(|c| *c != conexao);
+            pendente.ultima_automatica = Some(motivo);
+            if !pendente.esperando.is_empty() {
+                return Recusa::Esperando;
+            }
         }
+        self.pendentes.remove(&k);
+        Recusa::Recusado(motivo)
     }
 
     /// A máquina parou. Só a própria, pela conexão que aceitou; devolve o que
@@ -424,6 +494,9 @@ impl Maquinas {
     /// Os pendentes chamados a esta pessoa ficam: o pedido é à pessoa, e outra
     /// sessão dela pode responder.
     pub fn saiu(&mut self, quem: PersonId, conexao: u64) -> Vec<(String, String)> {
+        for pendente in self.pendentes.values_mut().filter(|p| p.quem == quem) {
+            pendente.esperando.retain(|c| *c != conexao);
+        }
         if let Some(conexoes) = self.no_doze.get_mut(&quem) {
             conexoes.retain(|c| *c != conexao);
             if conexoes.is_empty() {
@@ -473,11 +546,50 @@ impl Maquinas {
 
     /// Uma conexão de `quem` negociou o 12: daqui até [`Self::saiu`] dela, um
     /// pedido de máquina a `quem` tem a quem chegar.
-    pub fn chegou(&mut self, quem: PersonId, conexao: u64) {
+    ///
+    /// Os pedidos que já esperam `quem` passam a esperar esta conexão também,
+    /// e voltam para serem mostrados a ela: a pessoa que abre o app depois do
+    /// pedido o vê ali, e não só na aba que recusou sozinha.
+    pub fn chegou(&mut self, quem: PersonId, conexao: u64) -> Vec<Reenvio> {
         let conexoes = self.no_doze.entry(quem).or_default();
         if !conexoes.contains(&conexao) {
             conexoes.push(conexao);
         }
+        let mut reenvios = Vec::new();
+        for ((mod_id, servidor), pendente) in &mut self.pendentes {
+            if pendente.quem != quem || pendente.esperando.contains(&conexao) {
+                continue;
+            }
+            pendente.esperando.push(conexao);
+            reenvios.push(Reenvio {
+                mod_id: mod_id.clone(),
+                servidor: servidor.clone(),
+                hash: pendente.hash.clone(),
+                pedido_por: pendente.pedido_por,
+                oferta: pendente.oferta.clone(),
+            });
+        }
+        reenvios
+    }
+
+    /// Os pedidos a `quem` que todas as conexões que sobraram já recusaram
+    /// sozinhas: saem do livro, com o último motivo automático. É o caso da
+    /// pessoa que fecha o app com a aba do navegador (que recusou `SoNoApp`)
+    /// ainda aberta — ninguém mais vai ver a oferta.
+    pub fn sem_quem_veja(
+        &mut self,
+        quem: PersonId,
+    ) -> Vec<(String, String, MotivoDaRecusaDeMaquina)> {
+        let mut caidos = Vec::new();
+        self.pendentes
+            .retain(|(mod_id, servidor), p| match p.ultima_automatica {
+                Some(motivo) if p.quem == quem && p.esperando.is_empty() => {
+                    caidos.push((mod_id.clone(), servidor.clone(), motivo));
+                    false
+                }
+                _ => true,
+            });
+        caidos
     }
 
     /// Se `quem` tem alguma conexão aberta no 12 ([`Self::chegou`]).
@@ -701,6 +813,7 @@ pub fn pedir(
             }
             let _ = server.events.send(Event::PedidoDeMaquina {
                 para: quem,
+                conexao: None,
                 mod_id: mod_id.to_owned(),
                 hash: hash.to_owned(),
                 servidor: servidor.to_owned(),
@@ -779,11 +892,46 @@ pub fn parar_tuneis(server: &Server, quem: PersonId, mod_id: &str, nomes: &[Stri
     crate::tuneis::anunciar(server, fim);
 }
 
+/// Uma conexão de `quem` negociou o 12 ([`Maquinas::chegou`]): os pedidos que
+/// já a esperavam vão a ela, e só a ela — as outras sessões já os têm.
+pub fn chegou(server: &Server, quem: PersonId, conexao: u64) {
+    let reenvios = server.maquinas().chegou(quem, conexao);
+    for r in reenvios {
+        tracing::info!(mod_id = %r.mod_id, servidor = %r.servidor, quem = %quem, conexao, "máquina: pedido pendente mostrado a uma sessão que chegou depois dele");
+        let _ = server.events.send(Event::PedidoDeMaquina {
+            para: quem,
+            conexao: Some(conexao),
+            mod_id: r.mod_id,
+            hash: r.hash,
+            servidor: r.servidor,
+            pedido_por: r.pedido_por,
+            oferta: Box::new(r.oferta),
+        });
+    }
+}
+
 /// Uma sessão acabou: as máquinas que a conexão dela aceitou saem do livro, e
 /// a metade de servidor fica sabendo (`Parou { saiu }`). Os túneis são de
 /// `Tuneis::saiu`, que os encerra com `MaquinaSaiu`.
 pub fn saiu(server: &Server, quem: PersonId, conexao: u64) {
-    let sairam = server.maquinas().saiu(quem, conexao);
+    let (sairam, caidos) = {
+        let mut livro = server.maquinas();
+        let sairam = livro.saiu(quem, conexao);
+        (sairam, livro.sem_quem_veja(quem))
+    };
+    for (mod_id, servidor, motivo) in caidos {
+        let nome = seele_proto::maquina::nome_da_recusa(&motivo);
+        tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, motivo = nome, "máquina: a última sessão que podia ver o pedido saiu, e as outras recusaram sozinhas");
+        publicar(
+            server,
+            MudancaDeMaquina::Recusou {
+                mod_id,
+                servidor,
+                quem,
+                motivo: nome,
+            },
+        );
+    }
     for (mod_id, servidor) in sairam {
         tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, motivo = "saiu", "máquina: quem operava saiu");
         publicar(
@@ -1144,5 +1292,43 @@ mod tests {
         assert!(m.marcar_recusa(MOD, "mc-1", B, "nao-esta-aqui", t0, janela));
         assert!(m.marcar_recusa(MOD, "mc-1", A, "pendentes-demais", t0, janela));
         assert!(m.marcar_recusa(MOD, "mc-1", A, "nao-esta-aqui", t0 + janela, janela));
+    }
+
+    /// A recusa automática é da conexão; a da pessoa, do pedido. Uma conexão
+    /// que chega com o pedido pendente passa a ser esperada e o recebe; a
+    /// última que podia vê-lo saindo derruba o pedido com o motivo automático.
+    #[test]
+    fn a_recusa_automatica_e_da_conexao_e_a_da_pessoa_e_do_pedido() {
+        use seele_proto::maquina::MotivoDaRecusaDeMaquina as M;
+        let mut m = Maquinas::default();
+        let o = oferta(25565);
+        let _ = m.chegou(A, 10);
+        let _ = m.chegou(A, 11);
+        let _ = m.pedir(MOD, HASH, "mc-1", A, GESTORA, &o);
+        assert_eq!(m.recusar(A, 11, MOD, "mc-1", M::SoNoApp), Recusa::Esperando);
+        assert_eq!(
+            m.recusar(B, 10, MOD, "mc-1", M::PeloDono),
+            Recusa::SemPedido
+        );
+        // Uma conexão nova é esperada e recebe o pedido; uma já esperada, não.
+        assert_eq!(m.chegou(A, 12).len(), 1);
+        assert!(m.chegou(A, 12).is_empty());
+        assert_eq!(m.recusar(A, 10, MOD, "mc-1", M::SemTela), Recusa::Esperando);
+        let _ = m.saiu(A, 12);
+        assert_eq!(
+            m.sem_quem_veja(A),
+            vec![(MOD.to_owned(), "mc-1".to_owned(), M::SemTela)]
+        );
+
+        // `PeloDono` de qualquer conexão derruba na hora.
+        let _ = m.pedir(MOD, HASH, "mc-1", A, GESTORA, &o);
+        assert_eq!(
+            m.recusar(A, 11, MOD, "mc-1", M::PeloDono),
+            Recusa::Recusado(M::PeloDono)
+        );
+        assert_eq!(
+            m.aceitar(A, 10, MOD, "mc-1", &resumo("mc-1", &o)),
+            Err(MotivoDeAceiteInvalido::SemPedido)
+        );
     }
 }

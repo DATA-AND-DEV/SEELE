@@ -537,6 +537,9 @@ pub enum Event {
     PedidoDeMaquina {
         /// A quem mostrar a oferta.
         para: PersonId,
+        /// Só esta conexão de `para`, quando o pedido é reenviado a uma sessão
+        /// que chegou depois dele; `None` é toda sessão dela.
+        conexao: Option<u64>,
         /// `autor/nome` do MOD.
         mod_id: String,
         /// O hash do pacote ligado.

@@ -1153,3 +1153,149 @@ async fn quem_operava_com_um_pedido_novo_recebe_uma_dispensa_so() -> Result<()> 
     m.daemon.shutdown();
     Ok(())
 }
+
+fn recusa(motivo: seele_proto::maquina::MotivoDaRecusaDeMaquina) -> ClientMessage {
+    ClientMessage::RecusaDeMaquina {
+        mod_id: MOD.into(),
+        servidor: SERVIDOR.into(),
+        motivo,
+    }
+}
+
+async fn chegou_o_pedido(par: &mut Par) -> bool {
+    esperar(&mut par.ligado.recebe, |q| {
+        matches!(q, ServerMessage::PedidoDeMaquina { .. }).then_some(())
+    })
+    .await
+    .is_some()
+}
+
+/// **A recusa automática de uma sessão não derruba o pedido da outra.** Alice
+/// tem o app e uma aba do navegador; o navegador responde `SoNoApp` na hora,
+/// antes de ela ver a tela no app. O pedido segue pendente para o app, que
+/// aceita, e o MOD nunca lê `MaquinaRecusou`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recusa_automatica_de_uma_sessao_nao_derruba_o_pedido_da_outra() -> Result<()> {
+    use seele_proto::maquina::MotivoDaRecusaDeMaquina;
+    let m = montar().await?;
+    let mut gestora = entrar(m.endereco, GESTORA, 12).await?;
+    let mut app = entrar(m.endereco, ALICE, 12).await?;
+    let mut navegador = entrar(m.endereco, ALICE, 12).await?;
+    pedir_ao_mod(
+        &mut gestora,
+        1,
+        &serde_json::json!({ "pedir": true, "quem": app.pessoa.0 }),
+    )
+    .await?;
+    assert!(
+        chegou_o_pedido(&mut navegador).await,
+        "o navegador não recebeu o pedido"
+    );
+    frame::write(
+        &mut navegador.ligado.envio,
+        &recusa(MotivoDaRecusaDeMaquina::SoNoApp),
+    )
+    .await?;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    aceitar_o_que_chegou(&m, &mut app, gestora.pessoa).await?;
+    esperar_no_quintal(
+        &m,
+        "momentos",
+        &format!(
+            r#"MaquinaAceitou {{"servidor":"mc-1","pessoa":{}}}"#,
+            app.pessoa.0
+        ),
+    )
+    .await;
+    let momentos = quintal(&m, MOD)
+        .await
+        .get("momentos")
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !momentos.contains("MaquinaRecusou"),
+        "a recusa automática do navegador chegou ao MOD: {momentos}"
+    );
+    m.daemon.shutdown();
+    Ok(())
+}
+
+/// Quando **todas** as sessões recusam sozinhas, o pedido cai, e o MOD lê o
+/// motivo da última; e `PeloDono` de uma sessão só derruba na hora. Uma sessão
+/// que chega com o pedido pendente também o recebe.
+#[tokio::test(flavor = "multi_thread")]
+async fn so_quando_todas_recusam_sozinhas_o_pedido_cai() -> Result<()> {
+    use seele_proto::maquina::MotivoDaRecusaDeMaquina;
+    let m = montar().await?;
+    let mut gestora = entrar(m.endereco, GESTORA, 12).await?;
+    let mut um = entrar(m.endereco, ALICE, 12).await?;
+    pedir_ao_mod(
+        &mut gestora,
+        1,
+        &serde_json::json!({ "pedir": true, "quem": um.pessoa.0 }),
+    )
+    .await?;
+    assert!(chegou_o_pedido(&mut um).await);
+    // Uma segunda sessão que chega depois do pedido o recebe também.
+    let mut dois = entrar(m.endereco, ALICE, 12).await?;
+    assert!(
+        chegou_o_pedido(&mut dois).await,
+        "a sessão que chegou depois não recebeu o pedido pendente"
+    );
+
+    frame::write(
+        &mut um.ligado.envio,
+        &recusa(MotivoDaRecusaDeMaquina::SemTela),
+    )
+    .await?;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !quintal(&m, MOD)
+            .await
+            .get("momentos")
+            .cloned()
+            .unwrap_or_default()
+            .contains("MaquinaRecusou"),
+        "o pedido caiu com uma sessão ainda sem responder"
+    );
+    frame::write(
+        &mut dois.ligado.envio,
+        &recusa(MotivoDaRecusaDeMaquina::SoNoApp),
+    )
+    .await?;
+    esperar_no_quintal(
+        &m,
+        "momentos",
+        &format!(
+            r#"MaquinaRecusou {{"servidor":"mc-1","pessoa":{},"motivo":"so-no-app"}}"#,
+            um.pessoa.0
+        ),
+    )
+    .await;
+
+    // De novo, e agora uma sessão diz não de verdade: cai na hora.
+    pedir_ao_mod(
+        &mut gestora,
+        2,
+        &serde_json::json!({ "pedir": true, "quem": um.pessoa.0 }),
+    )
+    .await?;
+    assert!(chegou_o_pedido(&mut um).await);
+    frame::write(
+        &mut um.ligado.envio,
+        &recusa(MotivoDaRecusaDeMaquina::PeloDono),
+    )
+    .await?;
+    esperar_no_quintal(
+        &m,
+        "momentos",
+        &format!(
+            r#"MaquinaRecusou {{"servidor":"mc-1","pessoa":{},"motivo":"pelo-dono"}}"#,
+            um.pessoa.0
+        ),
+    )
+    .await;
+    m.daemon.shutdown();
+    Ok(())
+}

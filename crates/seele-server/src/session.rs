@@ -2313,9 +2313,7 @@ async fn run_session(
             motivo: seele_proto::maquina::MotivoDaDispensa::SemAceite,
         })
     {
-        server
-            .maquinas()
-            .chegou(session.person, connection.stable_id() as u64);
+        crate::maquinas::chegou(server, session.person, connection.stable_id() as u64);
     }
     // Toda escrita ao par daqui em diante passa pela vigia do atraso: ver
     // [`escrever_vigiando`]. As despedidas (`let _ = frame::write_em(...)`
@@ -2939,18 +2937,32 @@ async fn run_session(
                     }
                     ClientMessage::RecusaDeMaquina { mod_id, servidor, motivo } => {
                         let nome = seele_proto::maquina::nome_da_recusa(&motivo);
-                        if server.maquinas().recusar(session.person, &mod_id, &servidor) {
-                            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: recusada por quem foi chamado");
-                            let _ = server.events.send(crate::server::Event::Maquina(
-                                crate::maquinas::MudancaDeMaquina::Recusou {
-                                    mod_id,
-                                    servidor,
-                                    quem: session.person,
-                                    motivo: nome,
-                                },
-                            ));
-                        } else {
-                            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: recusa sem pedido pendente desta pessoa; ignorada");
+                        let recusa = server.maquinas().recusar(
+                            session.person,
+                            connection.stable_id() as u64,
+                            &mod_id,
+                            &servidor,
+                            motivo,
+                        );
+                        match recusa {
+                            crate::maquinas::Recusa::Recusado(motivo) => {
+                                let nome = seele_proto::maquina::nome_da_recusa(&motivo);
+                                tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: recusada por quem foi chamado");
+                                let _ = server.events.send(crate::server::Event::Maquina(
+                                    crate::maquinas::MudancaDeMaquina::Recusou {
+                                        mod_id,
+                                        servidor,
+                                        quem: session.person,
+                                        motivo: nome,
+                                    },
+                                ));
+                            }
+                            crate::maquinas::Recusa::Esperando => {
+                                tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: uma sessão recusou sozinha; o pedido segue pendente para as outras");
+                            }
+                            crate::maquinas::Recusa::SemPedido => {
+                                tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: recusa sem pedido pendente desta pessoa; ignorada");
+                            }
                         }
                     }
                     ClientMessage::MaquinaParada { mod_id, servidor, motivo } => {
@@ -4694,6 +4706,13 @@ async fn run_session(
                         continue;
                     }
                 }
+                // O pedido reenviado a uma sessão que chegou depois dele é só
+                // dela: as outras já o mostraram.
+                if let Event::PedidoDeMaquina { conexao: Some(conexao), .. } = &event {
+                    if *conexao != connection.stable_id() as u64 {
+                        continue;
+                    }
+                }
                 if let Some(message) = translate(&event, &channels, session.person) {
                     if entende_a_mensagem(&message, session.protocol_version) {
                         escrever!(&message).await?;
@@ -6432,6 +6451,7 @@ fn translate(
         // alguém; difundi-la contaria a todos o que roda na casa de uma pessoa.
         Event::PedidoDeMaquina {
             para,
+            conexao: _,
             mod_id,
             hash,
             servidor,
