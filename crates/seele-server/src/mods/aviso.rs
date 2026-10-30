@@ -43,10 +43,16 @@ pub const AVISOS_POR_SEGUNDO: usize = 4;
 pub const TETO_DE_AVISOS_POR_CHAMADA: usize = 16;
 
 /// Um aviso que a metade de servidor declarou numa chamada.
+///
+/// `K` é para onde ele vai, e é por ele que o excedente se junta: o canal das
+/// janelas (`Option<ChannelId>`, o padrão), ou o servidor de jogo de uma
+/// máquina (`String`, em [`super::maquina`]). Os dois dividem o teto e a regra
+/// da taxa, e não o orçamento: são dois [`Avisador`]es.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AvisoDeclarado {
-    /// O canal do aviso; `None` é o servidor inteiro.
-    pub canal: Option<ChannelId>,
+pub struct AvisoDeclarado<K = Option<ChannelId>> {
+    /// O canal do aviso; `None` é o servidor inteiro. Numa máquina, o servidor
+    /// de jogo.
+    pub canal: K,
     /// A carga, já serializada em JSON.
     pub carga: String,
 }
@@ -114,16 +120,28 @@ pub fn juntar(lista: &mut Vec<AvisoDeclarado>, aviso: AvisoDeclarado) -> Result<
 }
 
 /// O estado de um MOD no avisador.
-#[derive(Default)]
-struct DoMod {
+struct DoMod<K> {
     /// Quando saíram os últimos avisos, até [`AVISOS_POR_SEGUNDO`].
     saidas: VecDeque<Instant>,
     /// O mais novo de cada canal que ainda não saiu, e quantos ele substituiu.
-    pendentes: BTreeMap<Option<ChannelId>, (u64, String, u64)>,
+    pendentes: BTreeMap<K, (u64, String, u64)>,
     /// A ordem de chegada dos pendentes, para o mais antigo sair primeiro.
     proxima_ordem: u64,
     /// Se já há uma tarefa esperando a janela abrir para este MOD.
     esperando: bool,
+}
+
+// À mão, e não `derive`: o `derive` pediria `K: Default`, que o canal não
+// precisa ter.
+impl<K> Default for DoMod<K> {
+    fn default() -> Self {
+        Self {
+            saidas: VecDeque::new(),
+            pendentes: BTreeMap::new(),
+            proxima_ordem: 0,
+            esperando: false,
+        }
+    }
 }
 
 /// **A taxa por MOD, com o excedente junto por canal** (pedido da MESA, 09/10).
@@ -134,23 +152,30 @@ struct DoMod {
 /// no `seele.log` quando o mais novo sai. Assim a última revisão sempre chega:
 /// numa luta, as rolagens de cinco pessoas passam de 4 por segundo, e um aviso
 /// descartado deixaria uma janela parada na revisão velha.
-#[derive(Default)]
-pub struct Avisador {
-    mods: Mutex<BTreeMap<String, DoMod>>,
+pub struct Avisador<K = Option<ChannelId>> {
+    mods: Mutex<BTreeMap<String, DoMod<K>>>,
+}
+
+impl<K> Default for Avisador<K> {
+    fn default() -> Self {
+        Self {
+            mods: Mutex::new(BTreeMap::new()),
+        }
+    }
 }
 
 /// Um aviso pronto para o barramento.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AvisoQueSai {
+pub struct AvisoQueSai<K = Option<ChannelId>> {
     /// O MOD que avisa.
     pub mod_id: String,
-    /// O canal; `None` é o servidor inteiro.
-    pub canal: Option<ChannelId>,
+    /// O canal; `None` é o servidor inteiro. Numa máquina, o servidor de jogo.
+    pub canal: K,
     /// A carga, em JSON.
     pub carga: String,
 }
 
-impl Avisador {
+impl<K: Ord + Clone + std::fmt::Debug + Send + 'static> Avisador<K> {
     /// Entrega os avisos de uma chamada que terminou.
     ///
     /// `sair` é chamado para cada aviso que sai agora; o que fica para depois é
@@ -158,10 +183,10 @@ impl Avisador {
     pub fn avisar<F>(
         self: &std::sync::Arc<Self>,
         mod_id: &str,
-        avisos: Vec<AvisoDeclarado>,
+        avisos: Vec<AvisoDeclarado<K>>,
         sair: F,
     ) where
-        F: Fn(AvisoQueSai) + Send + Sync + Clone + 'static,
+        F: Fn(AvisoQueSai<K>) + Send + Sync + Clone + 'static,
     {
         if avisos.is_empty() {
             return;
@@ -202,9 +227,9 @@ impl Avisador {
     }
 
     /// Solta os pendentes até a taxa deixar, do mais antigo para o mais novo.
-    fn soltar_o_que_cabe<F: Fn(AvisoQueSai)>(
+    fn soltar_o_que_cabe<F: Fn(AvisoQueSai<K>)>(
         mod_id: &str,
-        do_mod: &mut DoMod,
+        do_mod: &mut DoMod<K>,
         agora: Instant,
         sair: &F,
     ) {
@@ -220,7 +245,7 @@ impl Avisador {
                 .pendentes
                 .iter()
                 .min_by_key(|(_, (ordem, _, _))| *ordem)
-                .map(|(canal, _)| *canal)
+                .map(|(canal, _)| canal.clone())
             else {
                 break;
             };
@@ -230,7 +255,7 @@ impl Avisador {
             if substituidos > 0 {
                 tracing::info!(
                     mod_id = %mod_id,
-                    canal = ?canal.map(|c| c.0),
+                    canal = ?canal,
                     substituidos,
                     "avisos do MOD juntados pela taxa: saiu o mais novo"
                 );
@@ -245,7 +270,7 @@ impl Avisador {
     }
 
     /// Espera a janela abrir e solta o que couber, até não sobrar pendente.
-    async fn esperar_e_soltar<F: Fn(AvisoQueSai)>(&self, mod_id: &str, sair: F) {
+    async fn esperar_e_soltar<F: Fn(AvisoQueSai<K>)>(&self, mod_id: &str, sair: F) {
         loop {
             let acorda = {
                 let Ok(mods) = self.mods.lock() else {

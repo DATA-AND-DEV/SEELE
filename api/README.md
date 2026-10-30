@@ -334,6 +334,20 @@ emenda da v8, até a release: só então ela congela, como a v7 fez.
   MOD chame, só o que o manifesto declara. **`tunel` é do poder, e não da
   versão**: `capacidades_do_manifesto` soma `tunel` à lista da API quando o
   manifesto declara a `porta` (`compatibilidade.capacidades-por-poder`).
+- **A metade de servidor chama a máquina** (`mundo.maquinas`, só para o MOD
+  que declara `maquina`; `Portas::maquinas`). `mundo.maquinas.pedir({ quem,
+  servidor, oferta })` mostra a oferta a `quem`, e `mundo.maquinas.avisar({
+  servidor, carga })` fala com a máquina aceita. As duas **declaram**, como
+  `mundo.avisar`: o que a chamada pediu sai depois que ela termina e o quintal
+  grava (`maquina::despejar`), e o que é inválido **lança** com o nome da regra
+  (`oferta-invalida:<campo>`, `servidor-invalido`, os tetos por chamada). O MOD
+  sempre fica sabendo do destino do pedido, pelos três momentos que só ele
+  recebe — `MaquinaAceitou`, `MaquinaRecusou` (inclusive `nao-esta-aqui`, para
+  quem não está num 12) e `MaquinaParou` —; um aviso sem máquina aceita não sai,
+  e fica no `seele.log` (`sem-maquina`) e no contador
+  `Server::avisos_sem_maquina`. A máquina responde por `PedidoDaMaquina`, que
+  chega ao `aoPedir` com `contexto.maquina = { servidor }`; de quem não é a
+  máquina aceita, o MOD nem é chamado (`MaquinaDispensada`, `SemAceite`).
 
 O que fica:
 

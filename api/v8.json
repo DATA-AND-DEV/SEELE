@@ -91,7 +91,8 @@
     "capacidades": "capacidades_da_api",
     "servidor.contexto": "pedidos::executar",
     "servidor.dados.uso": "ler_o_quintal",
-    "servidor.dados.teto": "Anfitriao::TETO_DO_QUINTAL"
+    "servidor.dados.teto": "Anfitriao::TETO_DO_QUINTAL",
+    "contexto.maquina": "pedidos::executar_da_maquina"
   },
   "retrato-fica-de-fora": [
     "link_state e link: o veredito de conexão segura é do núcleo",
@@ -151,7 +152,9 @@
     "mundo.agora": "mundo::agora",
     "mundo.registrar": "mundo::registrar",
     "mundo.avisar": "aviso::aviso_da_chamada",
-    "mundo.tema": "mundo::valores_do_tema"
+    "mundo.tema": "mundo::valores_do_tema",
+    "mundo.maquinas.pedir": "maquina::pedido_da_chamada",
+    "mundo.maquinas.avisar": "maquina::aviso_da_chamada"
   },
   "sentido": {
     "contexto.canal": "ChannelId | null — null é o pedido de escopo de servidor (SeeleMods.request(id, 0, valor)); pedidos.rs:174-186",
@@ -182,13 +185,23 @@
     "poderes": "No mod.json: [\"porta\"], valores de Poder (minúsculos); hoje só a porta, o túnel de quem joga, existe. Ausente quer dizer nenhum poder; a chave presente e vazia é recusada (PoderesVazios), e um valor repetido também (PoderRepetido). Declarar exige \"api\": 8 (PoderesPedemApiNova) e vale só para o MOD que roda apenas no app (PoderesExigemSoOApp). Um valor desconhecido faz o manifesto inteiro ser recusado (Malformed). Poder pede a metade de máquina: sem a chave maquina o MOD é recusado (PoderesSemMaquina).",
     "maquina": "No mod.json: o caminho, dentro do pacote, do script da metade de máquina. Fora do pacote é recusado (MaquinaForaDoPacote), e sem poderes também (MaquinaSemPoderes). Ela pede a metade de servidor: sem a chave server o MOD é recusado (MaquinaSemServidor). Declará-la numa API anterior à 8 é recusado (PoderesPedemApiNova).",
     "porta": "O poder porta exige a permissão entrar-no-jogo declarada no próprio manifesto (ACAO_ENTRAR_NO_JOGO); sem ela o MOD é recusado na instalação (PortaSemEntrarNoJogo), porque ninguém poderia abrir o túnel.",
-    "capacidades-por-poder": "A capacidade tunel é do poder porta, e não da versão: capacidades_do_manifesto soma tunel a capacidades_da_api quando o manifesto declara a porta, e a lista da API 8 não muda. A metade de máquina não tem tela: o que ela pode chamar vem de capacidades-da-maquina (capacidades_da_maquina), que não soma nenhuma capacidade de capacidades-por-versao."
+    "capacidades-por-poder": "A capacidade tunel é do poder porta, e não da versão: capacidades_do_manifesto soma tunel a capacidades_da_api quando o manifesto declara a porta, e a lista da API 8 não muda. A metade de máquina não tem tela: o que ela pode chamar vem de capacidades-da-maquina (capacidades_da_maquina), que não soma nenhuma capacidade de capacidades-por-versao.",
+    "mundo.maquinas.pedir": "mundo.maquinas.pedir({ quem, servidor, oferta }) chama quem (o id numérico da pessoa) a rodar a máquina do servidor de jogo; só existe para o MOD cujo manifesto declara maquina (Portas::maquinas). A oferta tem os nomes de campo de OfertaDeMaquina (o protocolo tcp ou udp; o hash como { algoritmo: \"sha256\", hex }; ausentes viram vazio, null ou 0) e é validada na hora: inválida lança com o nome da regra (servidor-invalido, quem-invalido, oferta-invalida:<campo>). Declarativa, como mundo.avisar: o pedido sai pelo despejo (maquina::despejar) só se a chamada terminar e o quintal gravar, como PedidoDeMaquina com o hash do pacote ligado agora; dentro da chamada, o mais novo de cada servidor de jogo, até MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA (pedidos-de-maquina-demais). Quem não está conectado num 12 volta ao MOD como MaquinaRecusou com nao-esta-aqui; um pedido a outra pessoa para o mesmo servidor de jogo dispensa (MaquinaDispensada, OutroPedido) a máquina aceita e o pedido sem resposta de quem tinha sido chamado.",
+    "mundo.maquinas.avisar": "mundo.maquinas.avisar({ servidor, carga }) manda a carga (um valor JSON) à máquina aceita daquele servidor de jogo como AvisoParaMaquina, e a ninguém mais; declarativa como mundo.avisar, com o mesmo teto (TETO_DO_AVISO, aviso-grande-demais) e a mesma taxa por MOD (AVISOS_POR_SEGUNDO, o excedente junto por servidor de jogo, o mais novo), num orçamento à parte do das janelas (Server::avisador_de_maquinas). Até MAX_AVISOS_A_MAQUINA_POR_CHAMADA servidores de jogo por chamada (avisos-a-maquina-demais). Sem máquina aceita nada sai e o retorno da chamada não muda: o seele.log diz sem-maquina e Server::avisos_sem_maquina conta.",
+    "contexto.maquina": "{ servidor } quando quem pede é a máquina aceita daquele servidor de jogo (ClientMessage::PedidoDaMaquina; pedidos::executar_da_maquina), e null em todo outro pedido; contexto.person é então a pessoa que opera a máquina. Um PedidoDaMaquina de quem não é a máquina aceita não chama o MOD: o servidor responde MaquinaDispensada com SemAceite.",
+    "MaquinaAceitou": "momento { servidor, pessoa } entregue só ao MOD da máquina (despacho::so_para), quando a pessoa aceita a oferta mostrada (MudancaDeMaquina::Aceitou).",
+    "MaquinaRecusou": "momento { servidor, pessoa, motivo } entregue só ao MOD da máquina (MudancaDeMaquina::Recusou): motivo é o nome da recusa da pessoa (pelo-dono, sem-tela, so-no-app, pacote-diferente, oferta-invalida; nome_da_recusa) ou do servidor (nao-esta-aqui, pendentes-demais, maquinas-demais).",
+    "MaquinaParou": "momento { servidor, pessoa, motivo } entregue só ao MOD da máquina (MudancaDeMaquina::Parou): a parada da pessoa (pelo-dono, revogada, app-fechou, metade-falhou; nome_da_parada), a saída dela (saiu) ou a dispensa pelo servidor (mod-desligado, outro-pedido; nome_da_dispensa).",
+    "maquinas-por-chamada": "MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA e MAX_AVISOS_A_MAQUINA_POR_CHAMADA, em crates/seele-server/src/mods/maquina.rs; acima deles, a chamada lança com o nome."
   },
   "moments": [
     "PersonJoined",
     "PersonLeft",
     "MessageReceived",
-    "MessageRemoved"
+    "MessageRemoved",
+    "MaquinaAceitou",
+    "MaquinaRecusou",
+    "MaquinaParou"
   ],
   "eventos": [
     "campo",
@@ -739,7 +752,8 @@
     "capas-animadas": "6 ao mesmo tempo, contando a do operador, escolhidas pela vista",
     "quadros-por-capa": "60 quadros, 10 s",
     "folhas": "3 à vista",
-    "medido": "na M3 de 10/10 (docs/evidencias/m3-custo-dos-mods/medidas-api6.json), com cada ponto no teto e todos juntos: nenhum commit de quadro acima de um quadro de 60 Hz, o p95 do commit abaixo de 1 ms, e o jitter da voz no máximo +0,32 ms; cada número vale igual no desktop e no navegador, porque o motor é o mesmo"
+    "medido": "na M3 de 10/10 (docs/evidencias/m3-custo-dos-mods/medidas-api6.json), com cada ponto no teto e todos juntos: nenhum commit de quadro acima de um quadro de 60 Hz, o p95 do commit abaixo de 1 ms, e o jitter da voz no máximo +0,32 ms; cada número vale igual no desktop e no navegador, porque o motor é o mesmo",
+    "maquinas-por-chamada": "4 servidores de jogo pedidos (MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA) e 16 avisados (MAX_AVISOS_A_MAQUINA_POR_CHAMADA) por chamada; o aviso à máquina tem o teto e a taxa do aviso do servidor (TETO_DO_AVISO, AVISOS_POR_SEGUNDO), com orçamento próprio (avisador_de_maquinas)"
   },
   "celular": {
     "regra": "toda região e camada diz se existe na casca de uma mão (≤ 600 px), com que tamanho, e o que acontece com uma contribuição para onde ela não existe",
@@ -827,6 +841,19 @@
       "porta-local-ocupada (a do jogo e as 64 seguintes estavam tomadas em 127.0.0.1)",
       "sem-resposta (a sessão acabou, ou o prazo venceu sem resposta do servidor)",
       "fora-do-aceite (este computador não aceitou servir este jogo, ou a porta não é a que foi aceita)"
+    ],
+    "maquinas": [
+      "servidor-invalido (o servidor de jogo não é [a-z0-9-] de 1 a 32, sem - nas pontas: servidor_valido)",
+      "quem-invalido (quem não é o id numérico de uma pessoa, em número ou no texto de contexto.person)",
+      "pedido-invalido (o argumento de mundo.maquinas.pedir não é um objeto)",
+      "oferta-invalida:<campo> (a oferta não passou na forma ou em OfertaDeMaquina::validate; o campo é o da regra, como titulo, tuneis, artefato_hash, ou a chave que OfertaDeMaquina não tem)",
+      "pedidos-de-maquina-demais (mais de MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA servidores de jogo pedidos numa chamada)",
+      "aviso-invalido (mundo.maquinas.avisar sem carga, ou com uma que o JSON não escreve)",
+      "aviso-grande-demais (a carga passa de TETO_DO_AVISO)",
+      "avisos-a-maquina-demais (mais de MAX_AVISOS_A_MAQUINA_POR_CHAMADA servidores de jogo avisados numa chamada)",
+      "nao-esta-aqui (não lança: volta como MaquinaRecusou, quando quem não tem conexão aberta no 12; NAO_ESTA_AQUI)",
+      "pendentes-demais e maquinas-demais (não lançam: voltam como MaquinaRecusou, pelos tetos do livro, Excesso::PendentesDemais e Excesso::MaquinasDemais)",
+      "sem-maquina (não lança nem volta: o aviso a um servidor de jogo sem máquina aceita não sai, fica no seele.log e no contador Server::avisos_sem_maquina; SEM_MAQUINA)"
     ]
   },
   "manifesto": {

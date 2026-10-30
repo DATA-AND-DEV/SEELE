@@ -32,6 +32,7 @@ pub mod arquivos;
 pub mod aviso;
 pub mod despacho;
 pub mod instalar;
+pub mod maquina;
 pub mod mundo;
 pub mod pedidos;
 pub mod tema;
@@ -449,6 +450,11 @@ fn tamanho_no_registro(c: char) -> usize {
 pub struct Portas {
     /// `"tema": true`: pode chamar `mundo.tema` (rascunho da API 6, §9).
     pub tema: bool,
+    /// `"maquina": "<script>"`: a metade de servidor ganha `mundo.maquinas`
+    /// (API 8, parte 3). Sem metade de máquina, não há a quem pedir uma, e o
+    /// nome nem existe: um MOD que o escreva lê `undefined`, e não um verbo que
+    /// recusa sempre.
+    pub maquinas: bool,
 }
 
 /// A metade de servidor de um MOD, como o disco a entrega ao anfitrião.
@@ -525,6 +531,9 @@ pub struct Anfitriao {
     /// Os avisos declarados na chamada em curso (`mundo.avisar`), o mais novo
     /// de cada canal, que só saem daqui se ela terminar.
     avisos: Arc<std::sync::Mutex<Vec<aviso::AvisoDeclarado>>>,
+    /// O que a chamada em curso declarou em `mundo.maquinas`, que só sai daqui
+    /// se ela terminar. Ver [`maquina`].
+    maquinas: Arc<std::sync::Mutex<maquina::Declarado>>,
 }
 
 impl Anfitriao {
@@ -562,6 +571,7 @@ impl Anfitriao {
             pintor: Arc::new(std::sync::Mutex::new(None)),
             declarado: Arc::new(std::sync::Mutex::new(None)),
             avisos: Arc::new(std::sync::Mutex::new(Vec::new())),
+            maquinas: Arc::new(std::sync::Mutex::new(maquina::Declarado::default())),
         })
     }
 
@@ -843,6 +853,50 @@ impl Anfitriao {
                 },
             )?,
         )?;
+        // A máquina de jogo (API 8, parte 3), **só** para quem declara a
+        // metade de máquina. Ao contrário de `mundo.avisar`, o que é inválido
+        // **lança**: um pedido mal escrito não é uma condição do momento que o
+        // MOD trate, é um defeito dele, e a exceção diz onde.
+        if portas.maquinas {
+            let maquinas_js = rquickjs::Object::new(ctx.clone())?;
+            let declarado = Arc::clone(&self.maquinas);
+            maquinas_js.set(
+                "pedir",
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'js>,
+                          valor: rquickjs::Value<'js>|
+                          -> rquickjs::Result<()> {
+                        let juntado = maquina::pedido_da_chamada(&ctx, valor)?.and_then(|p| {
+                            declarado
+                                .lock()
+                                .map_err(|_| "falhou".to_owned())
+                                .and_then(|mut d| d.juntar_pedido(p).map_err(str::to_owned))
+                        });
+                        juntado.map_err(|nome| rquickjs::Exception::throw_message(&ctx, &nome))
+                    },
+                )?,
+            )?;
+            let declarado = Arc::clone(&self.maquinas);
+            maquinas_js.set(
+                "avisar",
+                Function::new(
+                    ctx.clone(),
+                    move |ctx: rquickjs::Ctx<'js>,
+                          valor: rquickjs::Value<'js>|
+                          -> rquickjs::Result<()> {
+                        let juntado = maquina::aviso_da_chamada(&ctx, valor)?.and_then(|a| {
+                            declarado
+                                .lock()
+                                .map_err(|_| "falhou")
+                                .and_then(|mut d| d.juntar_aviso(a))
+                        });
+                        juntado.map_err(|nome| rquickjs::Exception::throw_message(&ctx, nome))
+                    },
+                )?,
+            )?;
+            mundo_js.set("maquinas", maquinas_js)?;
+        }
         ctx.globals().set("mundo", mundo_js)?;
 
         ctx.eval::<(), _>(fonte)
@@ -1011,14 +1065,29 @@ impl Anfitriao {
             .unwrap_or_default()
     }
 
-    /// Esquece o que a chamada declarou — o tema e os avisos —, no começo de
-    /// cada chamada e quando ela falha.
+    /// O que a última chamada declarou em `mundo.maquinas`, se ela terminou —
+    /// tirado daqui.
+    ///
+    /// Quem chama o leva ao livro com [`maquina::despejar`], depois de gravar o
+    /// quintal. Uma chamada que falhou não deixa nada para tomar.
+    pub fn tomar_maquinas(&mut self) -> maquina::Declarado {
+        self.maquinas
+            .lock()
+            .map(|mut declarado| std::mem::take(&mut *declarado))
+            .unwrap_or_default()
+    }
+
+    /// Esquece o que a chamada declarou — o tema, os avisos e as máquinas —, no
+    /// começo de cada chamada e quando ela falha.
     fn esquecer_o_declarado(&self) {
         if let Ok(mut declarado) = self.declarado.lock() {
             *declarado = None;
         }
         if let Ok(mut avisos) = self.avisos.lock() {
             avisos.clear();
+        }
+        if let Ok(mut maquinas) = self.maquinas.lock() {
+            *maquinas = maquina::Declarado::default();
         }
     }
 
@@ -1137,6 +1206,7 @@ pub fn carregar_do_disco(
         };
         let portas = Portas {
             tema: manifesto.tema,
+            maquinas: manifesto.maquina.is_some(),
         };
         let Some(metade) = manifesto.server else {
             continue;
@@ -2695,7 +2765,15 @@ mod tests {
     fn com_a_porta(id: &str, fonte: &str) -> Anfitriao {
         let mut anfitriao = Anfitriao::novo().expect("anfitrião");
         anfitriao
-            .carregar_com_portas(id, fonte, &pasta_de_teste("tema"), Portas { tema: true })
+            .carregar_com_portas(
+                id,
+                fonte,
+                &pasta_de_teste("tema"),
+                Portas {
+                    tema: true,
+                    ..Portas::default()
+                },
+            )
             .expect("carregar");
         anfitriao
     }
@@ -2899,7 +2977,10 @@ mod tests {
                 "seele/estilo",
                 "globalThis.aoAcontecer = () => { mundo.tema({ acento: '#c86b1f' }); };",
                 &pasta_de_teste("tema"),
-                Portas { tema: true },
+                Portas {
+                    tema: true,
+                    ..Portas::default()
+                },
             )
             .expect("carregar");
         anfitriao
@@ -3153,5 +3234,302 @@ mod tests {
             !matches!(falha, Falha::QuintalCheio),
             "a resposta grande saiu como quintal cheio: {falha:?}"
         );
+    }
+
+    // ---- `mundo.maquinas` (API 8, parte 3) ----
+
+    /// Pede o que o `pedido` traz, pela metade de servidor de teste: `pedir`
+    /// ou `avisar` com o argumento dado, e devolve `ok` ou a mensagem do que
+    /// foi lançado.
+    const PEDE_MAQUINA: &str = "globalThis.aoPedir = (contexto, pedido) => { \
+           const p = JSON.parse(pedido); \
+           try { \
+             for (const a of p.args) { mundo.maquinas[p.verbo](a); } \
+             return 'ok'; \
+           } catch (e) { return String(e && e.message); } \
+         }; \
+         globalThis.aoAcontecer = () => { \
+           mundo.maquinas.pedir({ quem: 9, servidor: 'mc-9', oferta: { titulo: 'T', receita: 'r', \
+             versao_da_receita: '1', versao_do_jogo: '1' } }); \
+         };";
+
+    fn com_a_maquina(fonte: &str) -> Anfitriao {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar_com_portas(
+                "x/jogo",
+                fonte,
+                &pasta_de_teste("maquina"),
+                Portas {
+                    maquinas: true,
+                    ..Portas::default()
+                },
+            )
+            .expect("carregar");
+        anfitriao
+    }
+
+    fn pedir_maquina(anfitriao: &mut Anfitriao, verbo: &str, args: &serde_json::Value) -> String {
+        anfitriao
+            .pedir(
+                "x/jogo",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                &serde_json::json!({ "verbo": verbo, "args": args }).to_string(),
+                &mut BTreeMap::new(),
+            )
+            .expect("o pedido falhou")
+    }
+
+    /// Uma oferta válida, no JSON que um MOD escreve: os nomes de campo de
+    /// `OfertaDeMaquina`, o protocolo e o algoritmo em minúsculas.
+    fn oferta_js() -> serde_json::Value {
+        serde_json::json!({
+            "titulo": "Minecraft",
+            "receita": "minecraft-java",
+            "versao_da_receita": "1.0.0",
+            "versao_do_jogo": "1.21.4",
+            "tuneis": [{ "nome": "mc", "protocolo": "tcp", "porta": 25565 }],
+            "artefatos": [{
+                "nome": "server.jar",
+                "url": "https://piston-data.mojang.com/server.jar",
+                "tamanho": 51_000_000,
+                "hash": { "algoritmo": "sha1", "hex": "a".repeat(40) },
+            }],
+            "origens": ["piston-data.mojang.com"],
+            "rodar": { "comando": "java", "argumentos": ["-jar", "server.jar", "nogui"] },
+            "disco_maximo": 2_000_000_000_u64,
+        })
+    }
+
+    /// **`mundo.maquinas` só existe para o MOD que declara a metade de
+    /// máquina** (`Portas::maquinas`, do `"maquina"` do manifesto). Sem ela,
+    /// `typeof` é `undefined`: o MOD que testa a presença do verbo lê a
+    /// verdade, em vez de um verbo que existe e recusa sempre.
+    #[test]
+    fn mundo_maquinas_so_existe_com_a_metade_de_maquina() {
+        let fonte = "globalThis.aoPedir = () => typeof mundo.maquinas + '/' + \
+                     typeof (mundo.maquinas && mundo.maquinas.pedir) + '/' + \
+                     typeof (mundo.maquinas && mundo.maquinas.avisar);";
+        let mut sem = Anfitriao::novo().expect("anfitrião");
+        sem.carregar("x/jogo", fonte, &pasta_de_teste("maquina"))
+            .expect("carregar");
+        assert_eq!(
+            sem.pedir(
+                "x/jogo",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut BTreeMap::new()
+            )
+            .expect("o pedido"),
+            "undefined/undefined/undefined"
+        );
+        let mut com = com_a_maquina(fonte);
+        assert_eq!(
+            com.pedir(
+                "x/jogo",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut BTreeMap::new()
+            )
+            .expect("o pedido"),
+            "object/function/function"
+        );
+    }
+
+    /// **Uma oferta inválida lança na hora, com o nome da regra** — e não sai
+    /// depois como um pedido que a pessoa recusaria sem o MOD saber por quê.
+    /// O nome é o campo que a validação do fio (`OfertaDeMaquina::validate`)
+    /// recusaria, para o MOD achar no guia a mesma palavra.
+    #[test]
+    fn uma_oferta_invalida_lanca_com_o_nome() {
+        let mut anfitriao = com_a_maquina(PEDE_MAQUINA);
+        let com = |mudar: &dyn Fn(&mut serde_json::Value)| {
+            let mut oferta = oferta_js();
+            mudar(&mut oferta);
+            serde_json::json!([{ "quem": 3, "servidor": "mc-1", "oferta": oferta }])
+        };
+        let casos: Vec<(serde_json::Value, &str)> = vec![
+            (
+                serde_json::json!([{ "quem": 3, "servidor": "MC 1", "oferta": oferta_js() }]),
+                "servidor-invalido",
+            ),
+            (
+                serde_json::json!([{ "quem": "tres", "servidor": "mc-1", "oferta": oferta_js() }]),
+                "quem-invalido",
+            ),
+            (com(&|o| o["titulo"] = "".into()), "oferta-invalida:titulo"),
+            (
+                com(&|o| o["tuneis"][0]["porta"] = 0.into()),
+                "oferta-invalida:tuneis",
+            ),
+            (
+                com(&|o| o["tuneis"][0]["protocolo"] = "sctp".into()),
+                "oferta-invalida:tuneis",
+            ),
+            (
+                com(&|o| o["artefatos"][0]["hash"]["hex"] = "AB".into()),
+                "oferta-invalida:artefato_hash",
+            ),
+            (
+                com(&|o| o["artefatos"][0]["url"] = "http://x".into()),
+                "oferta-invalida:artefato_url",
+            ),
+            (
+                com(&|o| o["disco_maximo"] = (-1).into()),
+                "oferta-invalida:disco_maximo",
+            ),
+            // Uma chave que não existe é um erro de escrita, e não um campo
+            // vazio: `tunels` viraria uma oferta sem túnel nenhum, calada.
+            (
+                com(&|o| o["tunels"] = serde_json::json!([])),
+                "oferta-invalida:tunels",
+            ),
+            (
+                serde_json::json!([{ "quem": 3, "servidor": "mc-1" }]),
+                "oferta-invalida:oferta",
+            ),
+        ];
+        for (args, esperado) in casos {
+            assert_eq!(
+                pedir_maquina(&mut anfitriao, "pedir", &args),
+                esperado,
+                "{args}"
+            );
+            assert!(
+                anfitriao.tomar_maquinas().pedidos.is_empty(),
+                "o pedido inválido ficou declarado: {args}"
+            );
+        }
+
+        // A válida não lança, e fica declarada com a oferta como o fio a leva.
+        // `quem` vale como número ou como o texto de `contexto.person`.
+        assert_eq!(
+            pedir_maquina(
+                &mut anfitriao,
+                "pedir",
+                &serde_json::json!([{ "quem": "3", "servidor": "mc-1", "oferta": oferta_js() }])
+            ),
+            "ok"
+        );
+        let declarado = anfitriao.tomar_maquinas();
+        let [pedido] = declarado.pedidos.as_slice() else {
+            panic!("esperava um pedido: {declarado:?}");
+        };
+        assert_eq!(pedido.quem, seele_proto::ids::PersonId(3));
+        assert_eq!(pedido.servidor, "mc-1");
+        let o = &pedido.oferta;
+        assert_eq!(
+            (o.titulo.as_str(), o.tuneis.len(), o.disco_maximo),
+            ("Minecraft", 1, 2_000_000_000)
+        );
+        assert_eq!(
+            o.tuneis[0].protocolo,
+            seele_proto::tunel::ProtocoloDeTunel::Tcp
+        );
+        assert_eq!(
+            o.artefatos[0].hash.algoritmo,
+            seele_proto::maquina::AlgoritmoDeHash::Sha1
+        );
+        assert_eq!(o.rodar.as_ref().map(|r| r.argumentos.len()), Some(3));
+        assert!(o.pack.is_none() && o.termos.is_empty() && o.dominios_do_jogo.is_empty());
+        seele_proto::control::Validate::validate(o).expect("a oferta declarada passa no fio");
+    }
+
+    /// **Os tetos por chamada lançam com o nome**: quatro servidores de jogo
+    /// pedidos, dezesseis avisados. O mesmo servidor de jogo de novo não conta
+    /// — fica o mais novo, como o canal de `mundo.avisar`.
+    #[test]
+    fn os_tetos_de_uma_chamada_lancam_com_o_nome() {
+        let mut anfitriao = com_a_maquina(PEDE_MAQUINA);
+        let pedido = |servidor: String| serde_json::json!({ "quem": 3, "servidor": servidor, "oferta": oferta_js() });
+        let mut args: Vec<serde_json::Value> = (0..maquina::MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA)
+            .map(|n| pedido(format!("mc-{n}")))
+            .collect();
+        args.push(pedido("mc-0".to_owned()));
+        assert_eq!(
+            pedir_maquina(
+                &mut anfitriao,
+                "pedir",
+                &serde_json::Value::from(args.clone())
+            ),
+            "ok",
+            "o mesmo servidor de jogo de novo contou como mais um"
+        );
+        assert_eq!(
+            anfitriao.tomar_maquinas().pedidos.len(),
+            maquina::MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA
+        );
+        args.push(pedido("mc-extra".to_owned()));
+        assert_eq!(
+            pedir_maquina(&mut anfitriao, "pedir", &serde_json::Value::from(args)),
+            "pedidos-de-maquina-demais"
+        );
+        // O MOD apanhou a exceção e a chamada terminou: os quatro de antes
+        // valem, e o quinto não entrou.
+        let declarados = anfitriao.tomar_maquinas().pedidos;
+        assert_eq!(
+            declarados.len(),
+            maquina::MAX_PEDIDOS_DE_MAQUINA_POR_CHAMADA
+        );
+        assert!(
+            declarados.iter().all(|p| p.servidor != "mc-extra"),
+            "o pedido além do teto entrou"
+        );
+
+        let avisos: Vec<serde_json::Value> = (0..=maquina::MAX_AVISOS_A_MAQUINA_POR_CHAMADA)
+            .map(|n| serde_json::json!({ "servidor": format!("mc-{n}"), "carga": n }))
+            .collect();
+        assert_eq!(
+            pedir_maquina(
+                &mut anfitriao,
+                "avisar",
+                &serde_json::Value::from(
+                    avisos[..maquina::MAX_AVISOS_A_MAQUINA_POR_CHAMADA].to_vec()
+                )
+            ),
+            "ok"
+        );
+        assert_eq!(
+            anfitriao.tomar_maquinas().avisos.len(),
+            maquina::MAX_AVISOS_A_MAQUINA_POR_CHAMADA
+        );
+        assert_eq!(
+            pedir_maquina(&mut anfitriao, "avisar", &serde_json::Value::from(avisos)),
+            "avisos-a-maquina-demais"
+        );
+        // E o aviso sem carga, grande demais, ou para um servidor de jogo que
+        // não se escreve.
+        for (aviso, nome) in [
+            (serde_json::json!({ "servidor": "mc-1" }), "aviso-invalido"),
+            (
+                serde_json::json!({ "servidor": "mc-1", "carga": "a".repeat(aviso::TETO_DO_AVISO) }),
+                "aviso-grande-demais",
+            ),
+            (
+                serde_json::json!({ "servidor": "", "carga": 1 }),
+                "servidor-invalido",
+            ),
+        ] {
+            assert_eq!(
+                pedir_maquina(&mut anfitriao, "avisar", &serde_json::json!([aviso])),
+                nome
+            );
+        }
+    }
+
+    /// Um momento também declara, e o que ele declara fica para quem rodou o
+    /// momento tomar.
+    #[test]
+    fn um_momento_tambem_pede_maquina() {
+        let mut anfitriao = com_a_maquina(PEDE_MAQUINA);
+        anfitriao
+            .chamar("x/jogo", "PersonJoined", "{}", &mut BTreeMap::new())
+            .expect("o momento");
+        let declarado = anfitriao.tomar_maquinas();
+        assert_eq!(declarado.pedidos.len(), 1, "{declarado:?}");
+        assert_eq!(declarado.pedidos[0].servidor, "mc-9");
     }
 }

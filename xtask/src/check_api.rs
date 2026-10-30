@@ -440,9 +440,15 @@ fn tipos_da_casca(superficies: &str) -> std::collections::BTreeMap<String, (u64,
 /// …)`, com o `.set(` quebrado em linhas ou não, como o `rustfmt` deixar. Um
 /// membro vira `<global>.<membro>` (`arquivos.ler`); uma global cujo valor não
 /// é um objeto com membros (`dados`) fica pelo nome.
+///
+/// **Um objeto pendurado noutro também conta** (API 8, `mundo.maquinas`): o
+/// `mundo_js.set("maquinas", maquinas_js)` faz de `maquinas_js` o objeto
+/// `mundo.maquinas`, e o `maquinas_js.set("pedir", …)` vira
+/// `mundo.maquinas.pedir`. Sem isto, um nome de dois pontos nunca seria
+/// achado, e o `world` não poderia citá-lo.
 fn nomes_do_runtime(runtime: &str) -> BTreeSet<String> {
     let mut globais: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
-    let mut membros: Vec<(String, String)> = Vec::new();
+    let mut membros: Vec<(String, String, String)> = Vec::new();
     let mut expostos = BTreeSet::new();
     let mut resto = runtime;
     while let Some(posicao) = resto.find(".set(") {
@@ -465,23 +471,43 @@ fn nomes_do_runtime(runtime: &str) -> BTreeSet<String> {
         else {
             continue;
         };
+        let valor: String = argumentos
+            .split_once(',')
+            .map(|(_, v)| v.trim_start())
+            .unwrap_or("")
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
         if dono.ends_with("globals()") {
-            let valor: String = argumentos
-                .split_once(',')
-                .map(|(_, v)| v.trim_start())
-                .unwrap_or("")
-                .chars()
-                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                .collect();
             expostos.insert(nome.clone());
             globais.insert(valor, nome);
         } else if !dono.is_empty() {
-            membros.push((dono.rsplit('.').next().unwrap_or(&dono).to_owned(), nome));
+            membros.push((
+                dono.rsplit('.').next().unwrap_or(&dono).to_owned(),
+                nome,
+                valor,
+            ));
         }
     }
-    for (objeto, membro) in membros {
-        if let Some(global) = globais.get(&objeto) {
-            expostos.insert(format!("{global}.{membro}"));
+    // Cada volta resolve um nível a mais de objeto pendurado; para quando uma
+    // volta não acha nada novo (e um ciclo no texto não a prende: o conjunto só
+    // cresce, e é finito).
+    let mut nomeados = globais;
+    loop {
+        let mut novos = Vec::new();
+        for (objeto, membro, valor) in &membros {
+            if let Some(dono) = nomeados.get(objeto) {
+                let nome = format!("{dono}.{membro}");
+                if expostos.insert(nome.clone()) && !valor.is_empty() {
+                    novos.push((valor.clone(), nome));
+                }
+            }
+        }
+        if novos.is_empty() {
+            break;
+        }
+        for (valor, nome) in novos {
+            nomeados.entry(valor).or_insert(nome);
         }
     }
     expostos
@@ -2442,6 +2468,42 @@ const PERFIS_DE_RENDER = Object.freeze({
             "pub enum ClientMessage {\n    SendMessage { texto: String },\n}\n",
         ),
     ];
+
+    /// **Um objeto pendurado noutro é achado pelo caminho inteiro** (API 8):
+    /// `mundo.maquinas.pedir` existe quando `maquinas_js` é membro de `mundo_js`
+    /// e `pedir` é membro de `maquinas_js`; um objeto solto, que ninguém
+    /// pendura, não expõe nada.
+    #[test]
+    fn um_objeto_pendurado_noutro_expoe_o_caminho_inteiro() {
+        let runtime = r#"
+            let maquinas_js = rquickjs::Object::new(ctx.clone())?;
+            maquinas_js.set(
+                "pedir",
+                Function::new(ctx.clone(), move |v: Value| maquina::pedido_da_chamada(&ctx, v))?,
+            )?;
+            maquinas_js.set("avisar", Function::new(ctx.clone(), f)?)?;
+            mundo_js.set("maquinas", maquinas_js)?;
+            ctx.globals().set("mundo", mundo_js)?;
+            let solto_js = rquickjs::Object::new(ctx.clone())?;
+            solto_js.set("nada", Function::new(ctx.clone(), f)?)?;
+        "#;
+        let expostos = nomes_do_runtime(runtime);
+        for nome in [
+            "mundo",
+            "mundo.maquinas",
+            "mundo.maquinas.pedir",
+            "mundo.maquinas.avisar",
+        ] {
+            assert!(
+                expostos.contains(nome),
+                "`{nome}` não foi achado: {expostos:?}"
+            );
+        }
+        assert!(
+            !expostos.iter().any(|n| n.contains("nada")),
+            "um objeto que ninguém pendura expôs um nome: {expostos:?}"
+        );
+    }
 
     #[test]
     fn os_extratores_leem_a_casca_e_o_runtime_na_forma_do_codigo() {

@@ -1740,6 +1740,11 @@ pub struct Server {
     /// canal (rascunho da API 6, §7.3). Um só por servidor, porque os pedidos e
     /// os momentos de um MOD dividem a mesma taxa.
     pub avisador: Arc<crate::mods::aviso::Avisador>,
+    /// A mesma taxa e o mesmo teto, para os avisos da metade de servidor à
+    /// máquina (`mundo.maquinas.avisar`), com o excedente junto por servidor de
+    /// jogo. Um orçamento à parte do das janelas: são outros destinatários, e
+    /// uma máquina falante não pode atrasar o «mudou» de uma janela.
+    pub avisador_de_maquinas: Arc<crate::mods::aviso::Avisador<String>>,
     /// A impressão do certificado **de longa duração** deste servidor — a
     /// identidade —, em bytes: o SHA-256 do DER dele, o mesmo cujo hex vai no
     /// `fp=` do link.

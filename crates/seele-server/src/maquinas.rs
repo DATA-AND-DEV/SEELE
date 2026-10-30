@@ -109,6 +109,10 @@ pub enum Pedido {
         resumo_hex: String,
         /// A máquina de outra pessoa que deixa de valer.
         dispensada: Option<Dispensa>,
+        /// Outra pessoa que tinha sido chamada a este servidor de jogo e ainda
+        /// não respondeu: o pedido dela sumiu, e a tela de aceite dela tem de
+        /// fechar (`MaquinaDispensada { OutroPedido }`).
+        pendente_dispensado: Option<PersonId>,
     },
     /// A mesma pessoa já aceitou exatamente isso: nada muda, nada sai.
     JaAceito,
@@ -183,11 +187,28 @@ pub enum MudancaDeMaquina {
     },
 }
 
+/// O que [`Maquinas::mod_desligado`] tirou do livro.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Desligado {
+    /// `(quem, servidor)` de cada máquina aceita que operava.
+    pub maquinas: Vec<(PersonId, String)>,
+    /// `(quem, servidor)` de cada pedido que esperava resposta: a tela de aceite
+    /// de quem foi chamado tem de fechar.
+    pub pendentes: Vec<(PersonId, String)>,
+}
+
 /// O livro das máquinas.
 #[derive(Default)]
 pub struct Maquinas {
     pendentes: HashMap<Chave, Pendente>,
     aceitas: HashMap<Chave, Aceitada>,
+    /// As conexões de cada pessoa que negociaram o 12 e ainda estão abertas:
+    /// é a quem um `PedidoDeMaquina` chega. Um pedido a quem não está aqui
+    /// seria um pendente que ninguém vê, e a metade de servidor esperaria uma
+    /// resposta que não vem.
+    no_doze: HashMap<PersonId, Vec<u64>>,
+    /// Quantos avisos de cada MOD não saíram por falta de máquina aceita.
+    sem_maquina: HashMap<String, u64>,
 }
 
 impl Maquinas {
@@ -233,6 +254,11 @@ impl Maquinas {
         if !self.aceitas.contains_key(&k) && self.aceitas_do_mod(mod_id) >= MAX_MAQUINAS_POR_MOD {
             return Pedido::Recusado(Excesso::MaquinasDemais);
         }
+        let pendente_dispensado = self
+            .pendentes
+            .get(&k)
+            .map(|p| p.quem)
+            .filter(|chamada| *chamada != quem);
         let dispensada = match self.aceitas.get(&k) {
             Some(a) if a.quem != quem => self.aceitas.remove(&k).map(|velha| {
                 let a_parar = self.so_desta(&velha, mod_id);
@@ -259,6 +285,7 @@ impl Maquinas {
         Pedido::Guardado {
             resumo_hex,
             dispensada,
+            pendente_dispensado,
         }
     }
 
@@ -391,6 +418,12 @@ impl Maquinas {
     /// Os pendentes chamados a esta pessoa ficam: o pedido é à pessoa, e outra
     /// sessão dela pode responder.
     pub fn saiu(&mut self, quem: PersonId, conexao: u64) -> Vec<(String, String)> {
+        if let Some(conexoes) = self.no_doze.get_mut(&quem) {
+            conexoes.retain(|c| *c != conexao);
+            if conexoes.is_empty() {
+                self.no_doze.remove(&quem);
+            }
+        }
         let sairam: Vec<Chave> = self
             .aceitas
             .iter()
@@ -404,20 +437,56 @@ impl Maquinas {
     }
 
     /// O MOD foi desligado (ou trocou de pacote): todo pendente e toda máquina
-    /// dele saem. Volta `(quem, servidor)` de cada máquina que operava, para a
-    /// dispensa.
-    pub fn mod_desligado(&mut self, mod_id: &str) -> Vec<(PersonId, String)> {
-        self.pendentes.retain(|(m, _), _| m != mod_id);
-        let mut dispensadas = Vec::new();
-        self.aceitas.retain(|(m, servidor), a| {
+    /// dele saem. Volta `(quem, servidor)` de cada máquina que operava e de cada
+    /// pedido que esperava resposta, para a dispensa.
+    pub fn mod_desligado(&mut self, mod_id: &str) -> Desligado {
+        let mut desligado = Desligado::default();
+        self.pendentes.retain(|(m, servidor), p| {
             if m == mod_id {
-                dispensadas.push((a.quem, servidor.clone()));
+                desligado.pendentes.push((p.quem, servidor.clone()));
                 false
             } else {
                 true
             }
         });
-        dispensadas
+        self.aceitas.retain(|(m, servidor), a| {
+            if m == mod_id {
+                desligado.maquinas.push((a.quem, servidor.clone()));
+                false
+            } else {
+                true
+            }
+        });
+        desligado
+    }
+
+    /// Uma conexão de `quem` negociou o 12: daqui até [`Self::saiu`] dela, um
+    /// pedido de máquina a `quem` tem a quem chegar.
+    pub fn chegou(&mut self, quem: PersonId, conexao: u64) {
+        let conexoes = self.no_doze.entry(quem).or_default();
+        if !conexoes.contains(&conexao) {
+            conexoes.push(conexao);
+        }
+    }
+
+    /// Se `quem` tem alguma conexão aberta no 12 ([`Self::chegou`]).
+    #[must_use]
+    pub fn pode_ser_chamada(&self, quem: PersonId) -> bool {
+        self.no_doze.contains_key(&quem)
+    }
+
+    /// Conta um aviso de `mod_id` que não saiu por falta de máquina aceita, e
+    /// devolve quantos já são.
+    pub fn contar_aviso_sem_maquina(&mut self, mod_id: &str) -> u64 {
+        let n = self.sem_maquina.entry(mod_id.to_owned()).or_default();
+        *n += 1;
+        *n
+    }
+
+    /// Quantos avisos de `mod_id` não saíram por falta de máquina aceita.
+    #[must_use]
+    pub fn avisos_sem_maquina(&self, mod_id: &str) -> u64 {
+        self.sem_maquina.get(mod_id).copied().unwrap_or(0)
     }
 
     /// Por que `quem`/`conexao` não pode servir este túnel, ou `Ok` se pode:
@@ -554,8 +623,21 @@ pub fn pedir(
         .maquinas()
         .pedir(mod_id, hash, servidor, quem, pedido_por, oferta);
     match &pedido {
-        Pedido::Guardado { dispensada, .. } => {
+        Pedido::Guardado {
+            dispensada,
+            pendente_dispensado,
+            ..
+        } => {
             tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, pedido_por = %pedido_por, "máquina: pedido mostrado a quem vai operá-la");
+            if let Some(chamada) = pendente_dispensado {
+                dispensar_o_pendente(
+                    server,
+                    *chamada,
+                    mod_id,
+                    servidor,
+                    MotivoDaDispensa::OutroPedido,
+                );
+            }
             if let Some(dispensa) = dispensada {
                 dispensar(server, dispensa.clone());
             }
@@ -576,6 +658,27 @@ pub fn pedir(
         }
     }
     pedido
+}
+
+/// Diz a quem tinha sido chamado, e ainda não respondeu, que o pedido sumiu: a
+/// tela de aceite dele fecha, em vez de ficar mostrando uma oferta que, aceita,
+/// cairia em `SemPedido`. Não há `Parou` para a metade de servidor: ela mesma
+/// substituiu o pedido, ou foi desligada.
+pub fn dispensar_o_pendente(
+    server: &Server,
+    quem: PersonId,
+    mod_id: &str,
+    servidor: &str,
+    motivo: MotivoDaDispensa,
+) {
+    let nome = seele_proto::maquina::nome_da_dispensa(&motivo);
+    tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, motivo = nome, "máquina: pedido sem resposta dispensado; quem foi chamado fica sabendo");
+    let _ = server.events.send(Event::MaquinaDispensada {
+        para: quem,
+        mod_id: mod_id.to_owned(),
+        servidor: servidor.to_owned(),
+        motivo,
+    });
 }
 
 /// Diz a quem operava que a máquina foi dispensada, **e só depois** para os
@@ -671,8 +774,17 @@ pub async fn fechar_as_que_nao_valem_mais(server: &Server) {
         .collect();
     a_desligar.dedup();
     for mod_id in a_desligar {
-        let dispensadas = server.maquinas().mod_desligado(&mod_id);
-        for (quem, servidor) in dispensadas {
+        let desligado = server.maquinas().mod_desligado(&mod_id);
+        for (quem, servidor) in desligado.pendentes {
+            dispensar_o_pendente(
+                server,
+                quem,
+                &mod_id,
+                &servidor,
+                MotivoDaDispensa::ModDesligado,
+            );
+        }
+        for (quem, servidor) in desligado.maquinas {
             dispensar(
                 server,
                 Dispensa {
@@ -901,5 +1013,62 @@ mod tests {
         assert!(!m.tunel_permitido(A, 11, MOD, "mc", ProtocoloDeTunel::Tcp, 25565));
         assert!(!m.tunel_permitido(A, 10, "x/outro", "mc", ProtocoloDeTunel::Tcp, 25565));
         assert!(!m.tunel_permitido(B, 10, MOD, "mc", ProtocoloDeTunel::Tcp, 25565));
+    }
+
+    /// **Um pendente que some diz a quem foi chamado** (a decisão da revisão
+    /// do Task 3): substituído por um pedido a outra pessoa, ou com o MOD
+    /// desligado. O mesmo `quem` chamado de novo não é dispensado — o pedido
+    /// novo toma o lugar da tela dele.
+    #[test]
+    fn o_pendente_que_some_diz_quem_foi_chamado() {
+        let mut m = Maquinas::default();
+        let o = oferta(25565);
+        let _ = m.pedir(MOD, HASH, "mc-1", A, GESTORA, &o);
+        let Pedido::Guardado {
+            pendente_dispensado,
+            ..
+        } = m.pedir(MOD, HASH, "mc-1", A, GESTORA, &oferta(25566))
+        else {
+            panic!("o pedido de novo a A não ficou pendente");
+        };
+        assert_eq!(
+            pendente_dispensado, None,
+            "A chamada de novo foi dispensada"
+        );
+        let Pedido::Guardado {
+            pendente_dispensado,
+            ..
+        } = m.pedir(MOD, HASH, "mc-1", B, GESTORA, &o)
+        else {
+            panic!("o pedido a B não ficou pendente");
+        };
+        assert_eq!(pendente_dispensado, Some(A));
+
+        let _ = m.pedir(MOD, HASH, "mc-2", A, GESTORA, &o);
+        let mut desligado = m.mod_desligado(MOD);
+        desligado.pendentes.sort();
+        assert_eq!(
+            desligado.pendentes,
+            vec![(A, "mc-2".to_owned()), (B, "mc-1".to_owned())]
+        );
+        assert!(desligado.maquinas.is_empty());
+    }
+
+    /// Quem pode ser chamado é quem tem uma conexão no 12 aberta, e deixa de
+    /// ser quando a última sai.
+    #[test]
+    fn so_quem_esta_no_doze_pode_ser_chamado() {
+        let mut m = Maquinas::default();
+        assert!(!m.pode_ser_chamada(A));
+        m.chegou(A, 10);
+        m.chegou(A, 11);
+        assert!(m.pode_ser_chamada(A));
+        let _ = m.saiu(A, 10);
+        assert!(
+            m.pode_ser_chamada(A),
+            "a outra conexão de A ainda está aberta"
+        );
+        let _ = m.saiu(A, 11);
+        assert!(!m.pode_ser_chamada(A));
     }
 }

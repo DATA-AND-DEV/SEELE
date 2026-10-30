@@ -51,7 +51,44 @@ pub async fn executar(
     id: &str,
     payload: &str,
 ) -> String {
-    executar_com(server, person, channel, id, None, payload).await
+    executar_com(server, person, channel, id, None, None, payload).await
+}
+
+/// **Um pedido da máquina aceita à metade de servidor do MOD dela**
+/// (`ClientMessage::PedidoDaMaquina`, API 8 parte 3).
+///
+/// Quem chama — o braço da sessão — já conferiu que `person`, por `conexao`, é
+/// a máquina aceita de `(id, servidor)`: quem não é nem chega aqui, e o MOD
+/// não é chamado. A mesma estrada de [`executar`], no escopo de servidor
+/// (canal zero), com `contexto.maquina = { servidor }`; e uma conferência a
+/// mais **antes dos efeitos**: a máquina pode ter sido dispensada enquanto o
+/// pedido esperava a vez do MOD, e aí o que o MOD respondeu e declarou é
+/// descartado (`sem-aceite`).
+pub async fn executar_da_maquina(
+    server: &Arc<Server>,
+    person: PersonId,
+    conexao: u64,
+    id: &str,
+    servidor: &str,
+    payload: &str,
+) -> String {
+    executar_com(
+        server,
+        person,
+        ChannelId(0),
+        id,
+        None,
+        Some(DaMaquina { servidor, conexao }),
+        payload,
+    )
+    .await
+}
+
+/// O pedido vem da máquina aceita de `servidor`, pela conexão `conexao`.
+#[derive(Clone, Copy)]
+struct DaMaquina<'a> {
+    servidor: &'a str,
+    conexao: u64,
 }
 
 /// **Uma ação declarada de MOD** (`ClientMessage::AcaoDeMod`, ADR 0064).
@@ -69,7 +106,7 @@ pub async fn executar_acao(
     acao: &str,
     payload: &str,
 ) -> String {
-    executar_com(server, person, channel, id, Some(acao), payload).await
+    executar_com(server, person, channel, id, Some(acao), None, payload).await
 }
 
 async fn executar_com(
@@ -78,9 +115,10 @@ async fn executar_com(
     channel: ChannelId,
     id: &str,
     acao: Option<&str>,
+    maquina: Option<DaMaquina<'_>>,
     payload: &str,
 ) -> String {
-    match executar_inner(server, person, channel, id, acao, payload).await {
+    match executar_inner(server, person, channel, id, acao, maquina, payload).await {
         Ok(text) => text,
         Err(error) => {
             // O pedido do catálogo (id vazio) não é de MOD nenhum, e um
@@ -170,6 +208,7 @@ async fn executar_inner(
     channel: ChannelId,
     id: &str,
     acao: Option<&str>,
+    maquina: Option<DaMaquina<'_>>,
     payload: &str,
 ) -> anyhow::Result<String> {
     // **O banco é lido e soltado.** Não levado ao trabalhador.
@@ -228,7 +267,10 @@ async fn executar_inner(
     }
     // **A primeira conferência**, antes da fila do MOD: recusa barato o que
     // já não pode, sem esperar o turno de ninguém.
-    if let Conferencia::Recusada(recusa) = conferir(server, person, channel, id, acao).await? {
+    let servidor_da_maquina = maquina.map(|m| m.servidor);
+    if let Conferencia::Recusada(recusa) =
+        conferir(server, person, channel, id, acao, servidor_da_maquina).await?
+    {
         return Ok(recusa);
     }
     let id = id.to_owned();
@@ -264,7 +306,7 @@ async fn executar_inner(
     let Conferido {
         hash,
         contexto: context,
-    } = match conferir(server, person, channel, &id, acao).await? {
+    } = match conferir(server, person, channel, &id, acao, servidor_da_maquina).await? {
         Conferencia::Recusada(recusa) => return Ok(recusa),
         Conferencia::Vale(conferido) => conferido,
     };
@@ -319,6 +361,7 @@ async fn executar_inner(
                             std::fs::read_to_string(raiz.join(relative))?,
                             super::Portas {
                                 tema: manifest.tema,
+                                maquinas: manifest.maquina.is_some(),
                             },
                         ))
                     },
@@ -358,6 +401,7 @@ async fn executar_inner(
         quintal: data,
         tema,
         avisos,
+        maquinas,
     } = tokio::task::spawn_blocking(move || -> anyhow::Result<DoPedido> {
         let mut host = super::Anfitriao::novo()?;
         // **Antes de `carregar`.** As ligações do QuickJS clonam este `Arc` ao
@@ -372,6 +416,7 @@ async fn executar_inner(
             quintal: data,
             tema: host.tomar_tema_declarado(),
             avisos: host.tomar_avisos(),
+            maquinas: host.tomar_maquinas(),
         })
     })
     .await??;
@@ -389,12 +434,18 @@ async fn executar_inner(
     // uma revogação (ou um MOD desligado ou trocado) no meio dele não pode
     // deixar gravar o quintal, publicar o tema nem avisar ninguém. O que o MOD
     // respondeu é descartado, e quem pediu lê a recusa.
-    match conferir(server, person, channel, &id, acao).await? {
+    match conferir(server, person, channel, &id, acao, servidor_da_maquina).await? {
         Conferencia::Recusada(recusa) => return Ok(recusa),
         Conferencia::Vale(agora) if agora.hash != hash => {
             anyhow::bail!("package changed");
         }
         Conferencia::Vale(_) => {}
+    }
+    if let Some(DaMaquina { servidor, conexao }) = maquina {
+        if !server.maquinas().maquina_de(person, conexao, &id, servidor) {
+            tracing::info!(mod_id = %id_seguro(&id), servidor = %servidor, quem = %person, motivo = "sem-aceite", "máquina: dispensada enquanto o pedido dela rodava; o que o MOD respondeu e declarou é descartado");
+            return Ok(r#"{"ok":false,"error":"sem-aceite"}"#.into());
+        }
     }
     if data != before || tema.is_some() {
         let mut db = server.persistence.lock().await;
@@ -418,6 +469,10 @@ async fn executar_inner(
             });
         });
     }
+    // E o que a chamada declarou em `mundo.maquinas`, pela mesma regra: só
+    // depois do quintal gravado. Fora de qualquer cadeado: o despejo lê o banco
+    // e toma o livro na ordem de `Server::maquinas`.
+    super::maquina::despejar(server, &id, person, maquinas).await;
     Ok(response)
 }
 
@@ -451,6 +506,7 @@ async fn conferir(
     channel: ChannelId,
     id: &str,
     acao: Option<&str>,
+    maquina: Option<&str>,
 ) -> anyhow::Result<Conferencia> {
     let (enabled, pode_ler) = {
         let db = server.persistence.lock().await;
@@ -555,7 +611,11 @@ async fn conferir(
     // `null` num `ModRequest`. `permissoes`: as ações deste MOD que a pessoa
     // tem agora, para a metade de servidor decidir o que mostrar; não é o
     // bloqueio (o bloqueio é o portão acima).
-    let context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"sala":sala,"admin":admin,"write":write,"acao":acao,"permissoes":permissoes_do_mod}).to_string();
+    // `maquina`: `{ servidor }` quando quem pede é a máquina aceita daquele
+    // servidor de jogo (`executar_da_maquina`), e `null` em todo outro pedido.
+    // Como `person`, é o servidor quem diz: o pedido não tem como mandá-la.
+    let maquina = maquina.map(|servidor| serde_json::json!({ "servidor": servidor }));
+    let context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"sala":sala,"admin":admin,"write":write,"acao":acao,"permissoes":permissoes_do_mod,"maquina":maquina}).to_string();
     Ok(Conferencia::Vale(Conferido {
         hash: active.hash.clone(),
         contexto: context,
@@ -626,6 +686,7 @@ struct DoPedido {
     quintal: BTreeMap<String, String>,
     tema: Option<super::TemaDeclarado>,
     avisos: Vec<super::aviso::AvisoDeclarado>,
+    maquinas: super::maquina::Declarado,
 }
 
 /// Splits only at character boundaries, keeping each wire frame under its ceiling.
@@ -703,6 +764,7 @@ mod tests {
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
+            avisador_de_maquinas: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao: [0; 32],
             recepcao: None,
             persistence,

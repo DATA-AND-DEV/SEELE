@@ -485,6 +485,20 @@ pub async fn serve(
     // para tirar esta conexão da soma da subida, e ali ela não existe mais.
     let id_da_conexao = connection.stable_id() as u64;
 
+    // Quem negociou o 12 pode ser chamado a rodar uma máquina: o livro sabe a
+    // quem um `PedidoDeMaquina` chega, e a metade de servidor que pede a quem
+    // não está aqui ouve `nao-esta-aqui` em vez de esperar. Sai em
+    // `maquinas::saiu`, lá embaixo.
+    if session.protocol_version
+        >= seele_proto::vocabulario::desde(&ServerMessage::MaquinaDispensada {
+            mod_id: String::new(),
+            servidor: String::new(),
+            motivo: seele_proto::maquina::MotivoDaDispensa::SemAceite,
+        })
+    {
+        server.maquinas().chegou(session.person, id_da_conexao);
+    }
+
     let result = run_session(
         connection,
         send,
@@ -2961,17 +2975,31 @@ async fn run_session(
                             tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: parada de quem não é a máquina aceita por esta conexão; ignorada");
                         }
                     }
-                    ClientMessage::PedidoDaMaquina { request, mod_id, servidor, .. } => {
+                    ClientMessage::PedidoDaMaquina { request, mod_id, servidor, payload } => {
                         if server.maquinas().maquina_de(
                             session.person,
                             connection.stable_id() as u64,
                             &mod_id,
                             &servidor,
                         ) {
-                            // GANCHO DO TASK 5: o pedido vai à metade de
-                            // servidor e volta como `ModReply`. Até lá, só o
-                            // log, e nenhuma resposta.
-                            tracing::debug!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, request, "máquina: pedido à metade de servidor (ainda sem quem atenda)");
+                            // A máquina aceita fala com a metade de servidor do
+                            // MOD dela, e a resposta volta como a de qualquer
+                            // pedido, com `contexto.maquina = { servidor }`.
+                            tracing::debug!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, request, "máquina: pedido à metade de servidor");
+                            let response = crate::mods::pedidos::executar_da_maquina(
+                                server,
+                                session.person,
+                                connection.stable_id() as u64,
+                                &mod_id,
+                                &servidor,
+                                &payload,
+                            )
+                            .await;
+                            let parts = crate::mods::pedidos::partes(&response);
+                            let total = parts.len() as u32;
+                            for (part, payload) in parts.into_iter().enumerate() {
+                                escrever!(&ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
+                            }
                         } else {
                             // Quem não é a máquina aceita deste servidor de jogo
                             // fica sabendo que não é, em vez de esperar uma
@@ -7177,6 +7205,7 @@ mod fim_de_tela_por_sessao {
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             avisador: Arc::new(crate::mods::aviso::Avisador::default()),
+            avisador_de_maquinas: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao: [0; 32],
             recepcao: None,
             persistence,
