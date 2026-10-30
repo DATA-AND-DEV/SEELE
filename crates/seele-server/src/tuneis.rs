@@ -715,7 +715,8 @@ async fn poderes_do_mod(server: &Server, mod_id: &str) -> Vec<Poder> {
 ///
 /// # Errors
 ///
-/// A recusa nomeada de [`Tuneis::servir`].
+/// [`RecusaDeTunel::ForaDoAceite`] (com `servir_tuneis` desligado e o túnel
+/// fora do aceite de `maquina`), ou a recusa nomeada de [`Tuneis::servir`].
 pub async fn atender_servir(
     server: &Server,
     maquina: PersonId,
@@ -723,22 +724,45 @@ pub async fn atender_servir(
     conexao: &Conexao,
     pedido: PedidoDeTunel<'_>,
 ) -> Result<(), RecusaDeTunel> {
-    // Provisório até a parte 3 (ver `ServerConfig::servir_tuneis`): sem o
-    // interruptor, ninguém serve túnel, e a recusa é dita no log.
-    if !server.servir_tuneis {
-        tracing::warn!(
-            mod_id = %pedido.mod_id,
-            tunel = %pedido.nome,
-            maquina = %maquina,
-            "túnel: este servidor não aceita que uma máquina sirva túneis (servir_tuneis desligado)"
-        );
-        return Err(RecusaDeTunel::SemPermissao);
-    }
-    // O que vem de fora antes do cadeado do livro.
+    // O que vem de fora antes dos cadeados dos livros.
     let poderes = poderes_do_mod(server, pedido.mod_id).await;
+    // **O aceite**, ao lado do interruptor provisório (`ServerConfig::servir_tuneis`,
+    // que o Task 7 tira): só serve quem é a máquina aceita de um servidor de
+    // jogo deste MOD, pela conexão que aceitou, e só o túnel que a oferta
+    // aceita trazia, com a mesma porta e o mesmo protocolo.
+    //
+    // `maquinas()` fica tomado até o túnel entrar no livro: uma parada que
+    // corra agora ou vê o túnel e o para, ou tira o aceite antes e este pedido
+    // é recusado. Solto entre os dois, um túnel podia sobrar de uma máquina que
+    // já parou. A ordem é a de `session::apontar_um_par`: `maquinas` antes de
+    // `tuneis`, e o banco já lido.
+    let maquinas = server.maquinas();
+    if !server.servir_tuneis {
+        if let Err(porque) = maquinas.conferir_tunel(
+            maquina,
+            id_da_conexao,
+            pedido.mod_id,
+            pedido.nome,
+            pedido.protocolo,
+            pedido.porta,
+        ) {
+            tracing::info!(
+                mod_id = %pedido.mod_id,
+                tunel = %pedido.nome,
+                quem = %maquina,
+                protocolo = ?pedido.protocolo,
+                porta = pedido.porta,
+                ?porque,
+                "túnel: servir fora do aceite"
+            );
+            return Err(RecusaDeTunel::ForaDoAceite);
+        }
+    }
     let mut livro = server.tuneis();
     livro.servir(maquina, id_da_conexao, pedido, &poderes)?;
     livro.registrar_conexao(id_da_conexao, conexao.clone());
+    drop(livro);
+    drop(maquinas);
     Ok(())
 }
 
@@ -965,8 +989,9 @@ async fn fechar_os_que_nao_valem_mais(server: &Server) {
 }
 
 /// A tarefa que acompanha o conjunto de MODs: desligar um MOD (ou trocar o
-/// pacote por um que não declara a porta) fecha os túneis dele, e uma mudança
-/// no conjunto confere de novo quem está dentro.
+/// pacote por um que não declara a porta) fecha os túneis dele e dispensa as
+/// máquinas dele (`crate::maquinas::fechar_as_que_nao_valem_mais`), e uma
+/// mudança no conjunto confere de novo quem está dentro.
 ///
 /// Termina quando o servidor acaba (o `Weak` não o segura de pé).
 pub async fn acompanhar_os_mods(server: Weak<Server>) {
@@ -981,6 +1006,9 @@ pub async fn acompanhar_os_mods(server: Weak<Server>) {
         let Some(s) = server.upgrade() else {
             break;
         };
+        // As máquinas primeiro: a dispensa chega a quem opera antes de os
+        // túneis dela caírem.
+        crate::maquinas::fechar_as_que_nao_valem_mais(&s).await;
         fechar_os_que_nao_valem_mais(&s).await;
         reconferir(&s, None).await;
     }

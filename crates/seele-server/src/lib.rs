@@ -37,6 +37,7 @@ pub mod campainha;
 pub mod cargos;
 pub mod frame;
 pub mod hospedagem;
+pub mod maquinas;
 pub mod mods;
 pub mod pares;
 pub mod perda_de_subida;
@@ -314,12 +315,14 @@ pub struct ServerConfig {
     /// Se este servidor aceita que uma máquina **sirva** um túnel de jogo.
     /// **Padrão: desligado.**
     ///
-    /// Provisório até a parte 3 da API 8, que prende o `ServirTunel` ao aceite
-    /// do dono da máquina e **troca** este interruptor por esse aceite. Até lá,
-    /// qualquer sessão no protocolo 12 poderia servir o nome de túnel de
+    /// Provisório: a parte 3 da API 8 prende o `ServirTunel` ao aceite do
+    /// dono da máquina (`crate::maquinas`), e o Task 7 tira este interruptor.
+    /// Ligado, qualquer sessão no protocolo 12 serve o nome de túnel de
     /// qualquer MOD com o poder `porta`: o servidor confere o MOD, e não quem o
-    /// pede. Desligado, o `ServirTunel` é recusado (`SemPermissao`) e vai para
-    /// o log com `mod_id=` e `tunel=`. As provas que servem túneis o ligam.
+    /// pede. Desligado, só serve a máquina aceita, e só o túnel da oferta
+    /// aceita; o resto é recusado (`ForaDoAceite`) e vai para o log com
+    /// `mod_id=`, `tunel=` e qual das três coisas não bateu. As provas que
+    /// servem túneis sem máquina aceita o ligam.
     pub servir_tuneis: bool,
 }
 
@@ -780,6 +783,7 @@ impl Daemon {
             telas: Arc::new(tokio::sync::Mutex::new(server::Telas::default())),
             pares: Arc::new(tokio::sync::Mutex::new(pares::Pares::nova())),
             tuneis: std::sync::Mutex::new(tuneis::Tuneis::default()),
+            maquinas: std::sync::Mutex::new(maquinas::Maquinas::default()),
             malha_para_tuneis: config.malha_para_tuneis,
             servir_tuneis: config.servir_tuneis,
             anexos,

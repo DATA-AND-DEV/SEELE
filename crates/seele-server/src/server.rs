@@ -528,6 +528,54 @@ pub enum Event {
         quem: PersonId,
     },
 
+    // ---- a máquina de jogo (protocolo 12, API 8 parte 3) ----
+    //
+    // Os três primeiros são endereçados a **uma** pessoa e entregues a todas,
+    // como o [`Self::TunelRetirado`] acima: quem estreita a audiência é
+    // `session::translate`, e o corte por versão é de `entende_a_mensagem`.
+    /// O servidor pede a `para` que rode a máquina de um servidor de jogo.
+    PedidoDeMaquina {
+        /// A quem mostrar a oferta.
+        para: PersonId,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O hash do pacote ligado.
+        hash: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// Quem pediu.
+        pedido_por: PersonId,
+        /// O que a pessoa vê antes de aceitar. Numa caixa: a oferta é o maior
+        /// valor do barramento, e sem a caixa todo evento pagaria o tamanho
+        /// dela.
+        oferta: Box<seele_proto::maquina::OfertaDeMaquina>,
+    },
+    /// Um aviso da metade de servidor à máquina.
+    AvisoParaMaquina {
+        /// A máquina.
+        para: PersonId,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// O que o MOD mandou.
+        carga: String,
+    },
+    /// O servidor dispensou a máquina de `para`.
+    MaquinaDispensada {
+        /// Quem operava.
+        para: PersonId,
+        /// `autor/nome` do MOD.
+        mod_id: String,
+        /// O servidor de jogo.
+        servidor: String,
+        /// Por quê.
+        motivo: seele_proto::maquina::MotivoDaDispensa,
+    },
+    /// O livro das máquinas mudou. Não vai a cliente nenhum: é o que a metade
+    /// de servidor (Task 5) escuta para os momentos dela.
+    Maquina(crate::maquinas::MudancaDeMaquina),
+
     // ---- o bitrate adaptativo do ADR 0036 ----
     /// Quanto da voz de alguém não está chegando.
     ///
@@ -1589,6 +1637,12 @@ pub struct Server {
     /// (o banco, a ocupação) é lido **antes** de tomá-lo, na ordem de
     /// `session::apontar_um_par`.
     pub tuneis: std::sync::Mutex<crate::tuneis::Tuneis>,
+    /// As máquinas de jogo pedidas e aceitas. Ver [`crate::maquinas`].
+    ///
+    /// Um `std::sync::Mutex` que nunca atravessa um `await`, tomado **antes**
+    /// de [`Self::tuneis`] quando os dois vão juntos, e nunca com o banco
+    /// aberto.
+    pub maquinas: std::sync::Mutex<crate::maquinas::Maquinas>,
     /// A cópia de [`crate::ServerConfig::malha_para_tuneis`]: se o servidor
     /// apresenta as pontas de um túnel para o caminho direto.
     pub malha_para_tuneis: bool,

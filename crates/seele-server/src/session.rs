@@ -526,6 +526,11 @@ pub async fn serve(
     // E dos túneis de jogo: os que esta conexão servia acabam (`MaquinaSaiu`
     // para quem estava dentro), e as concessões dela somem. Pela conexão, e não
     // só pela pessoa, pelo mesmo motivo do `Pares::saiu` logo acima.
+    //
+    // As máquinas que esta conexão aceitou saem do livro **antes**: a ordem
+    // `maquinas` antes de `tuneis`, e nenhum `ServirTunel` que corra agora acha
+    // um aceite de uma conexão que está acabando.
+    crate::maquinas::saiu(&server, session.person, id_da_conexao);
     let fim_dos_tuneis = server.tuneis().saiu(session.person, id_da_conexao);
     crate::tuneis::anunciar(&server, fim_dos_tuneis);
 
@@ -2784,14 +2789,18 @@ async fn run_session(
                     m @ (ClientMessage::ServirTunel { .. }
                     | ClientMessage::PararTunel { .. }
                     | ClientMessage::EntrarNoTunel { .. }
-                    | ClientMessage::SairDoTunel { .. })
+                    | ClientMessage::SairDoTunel { .. }
+                    | ClientMessage::AceiteDeMaquina { .. }
+                    | ClientMessage::RecusaDeMaquina { .. }
+                    | ClientMessage::MaquinaParada { .. }
+                    | ClientMessage::PedidoDaMaquina { .. })
                         if session.protocol_version < seele_proto::vocabulario::desde_do_cliente(&m) =>
                     {
                         tracing::warn!(
                             person = %session.person,
                             versao = session.protocol_version,
                             verbo = ?std::mem::discriminant(&m),
-                            "um verbo de túnel de um par que não negociou o 12: ignorado"
+                            "um verbo de túnel ou de máquina de um par que não negociou o 12: ignorado"
                         );
                     }
                     ClientMessage::ServirTunel { mod_id, nome, protocolo, porta } => {
@@ -2878,16 +2887,105 @@ async fn run_session(
                     ClientMessage::TunelFalhou { mod_id, nome, motivo } => {
                         tracing::info!(mod_id = %mod_id, tunel = %nome, person = %session.person, ?motivo, "túnel: o caminho direto falhou; quem joga continua pela estrela");
                     }
-                    // A máquina (protocolo 12, API 8 parte 3): o vocabulário
-                    // entrou antes do livro-razão do servidor. Até ele chegar,
-                    // o verbo é lido e registrado, e não responde — o servidor
-                    // ainda não pede máquina a ninguém, então nenhum cliente
-                    // honesto o manda.
-                    ClientMessage::AceiteDeMaquina { mod_id, servidor, .. }
-                    | ClientMessage::RecusaDeMaquina { mod_id, servidor, .. }
-                    | ClientMessage::MaquinaParada { mod_id, servidor, .. }
-                    | ClientMessage::PedidoDaMaquina { mod_id, servidor, .. } => {
-                        tracing::warn!(mod_id = %mod_id, servidor = %servidor, person = %session.person, "máquina: verbo recebido antes de o servidor tratar máquinas; ignorado");
+                    // **A máquina (protocolo 12, API 8 parte 3).** O livro é de
+                    // `crate::maquinas`; aqui se confere quem fala e se avisa a
+                    // metade de servidor pelo barramento (`Event::Maquina`).
+                    //
+                    // O aceite inválido **não tem resposta**: quem aceita é quem
+                    // foi chamado, e um aceite sem pedido, de outra pessoa ou de
+                    // outra oferta não tem a quem responder. Fica no log, em
+                    // WARN, porque um cliente honesto nunca o manda.
+                    ClientMessage::AceiteDeMaquina { mod_id, servidor, resumo } => {
+                        let aceite = server.maquinas().aceitar(
+                            session.person,
+                            connection.stable_id() as u64,
+                            &mod_id,
+                            &servidor,
+                            &resumo,
+                        );
+                        match aceite {
+                            Ok(aceita) => {
+                                tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, "máquina: aceita");
+                                let _ = server.events.send(crate::server::Event::Maquina(
+                                    crate::maquinas::MudancaDeMaquina::Aceitou {
+                                        mod_id: mod_id.clone(),
+                                        servidor: servidor.clone(),
+                                        quem: session.person,
+                                    },
+                                ));
+                                crate::maquinas::parar_tuneis(server, session.person, &mod_id, &aceita.a_parar);
+                            }
+                            Err(motivo) => {
+                                tracing::warn!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, ?motivo, "máquina: aceite inválido; nada muda");
+                            }
+                        }
+                    }
+                    ClientMessage::RecusaDeMaquina { mod_id, servidor, motivo } => {
+                        let nome = seele_proto::maquina::nome_da_recusa(&motivo);
+                        if server.maquinas().recusar(session.person, &mod_id, &servidor) {
+                            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: recusada por quem foi chamado");
+                            let _ = server.events.send(crate::server::Event::Maquina(
+                                crate::maquinas::MudancaDeMaquina::Recusou {
+                                    mod_id,
+                                    servidor,
+                                    quem: session.person,
+                                    motivo: nome,
+                                },
+                            ));
+                        } else {
+                            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: recusa sem pedido pendente desta pessoa; ignorada");
+                        }
+                    }
+                    ClientMessage::MaquinaParada { mod_id, servidor, motivo } => {
+                        let nome = seele_proto::maquina::nome_da_parada(&motivo);
+                        // `maquinas()` solto antes de `parar_tuneis` tomar
+                        // `tuneis()`: a ordem de `apontar_um_par`.
+                        let parada = server.maquinas().parar(
+                            session.person,
+                            connection.stable_id() as u64,
+                            &mod_id,
+                            &servidor,
+                        );
+                        if let Some(parada) = parada {
+                            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: parou");
+                            let _ = server.events.send(crate::server::Event::Maquina(
+                                crate::maquinas::MudancaDeMaquina::Parou {
+                                    mod_id: mod_id.clone(),
+                                    servidor,
+                                    quem: session.person,
+                                    motivo: nome,
+                                },
+                            ));
+                            crate::maquinas::parar_tuneis(server, session.person, &mod_id, &parada.a_parar);
+                        } else {
+                            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: parada de quem não é a máquina aceita por esta conexão; ignorada");
+                        }
+                    }
+                    ClientMessage::PedidoDaMaquina { request, mod_id, servidor, .. } => {
+                        if server.maquinas().maquina_de(
+                            session.person,
+                            connection.stable_id() as u64,
+                            &mod_id,
+                            &servidor,
+                        ) {
+                            // GANCHO DO TASK 5: o pedido vai à metade de
+                            // servidor e volta como `ModReply`. Até lá, só o
+                            // log, e nenhuma resposta.
+                            tracing::debug!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, request, "máquina: pedido à metade de servidor (ainda sem quem atenda)");
+                        } else {
+                            // Quem não é a máquina aceita deste servidor de jogo
+                            // fica sabendo que não é, em vez de esperar uma
+                            // resposta que nunca vem.
+                            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, request, motivo = "sem-aceite", "máquina: pedido de quem não é a máquina aceita");
+                            let resposta = ServerMessage::MaquinaDispensada {
+                                mod_id,
+                                servidor,
+                                motivo: seele_proto::maquina::MotivoDaDispensa::SemAceite,
+                            };
+                            if entende_a_mensagem(&resposta, session.protocol_version) {
+                                escrever!(&resposta).await?;
+                            }
+                        }
                     }
                     ClientMessage::ModRequest { request, id, channel, payload } => {
                         let response = crate::mods::pedidos::executar(server, session.person, channel, &id, &payload).await;
@@ -6290,6 +6388,45 @@ fn translate(
             nome: nome.clone(),
             quem: *quem,
         }),
+        // A máquina: o pedido, o aviso e a dispensa vão só a quem opera (ou foi
+        // chamado a operar). A oferta mostra portas e comandos de uma máquina de
+        // alguém; difundi-la contaria a todos o que roda na casa de uma pessoa.
+        Event::PedidoDeMaquina {
+            para,
+            mod_id,
+            hash,
+            servidor,
+            pedido_por,
+            oferta,
+        } => (*para == self_person).then(|| ServerMessage::PedidoDeMaquina {
+            mod_id: mod_id.clone(),
+            hash: hash.clone(),
+            servidor: servidor.clone(),
+            pedido_por: *pedido_por,
+            oferta: (**oferta).clone(),
+        }),
+        Event::AvisoParaMaquina {
+            para,
+            mod_id,
+            servidor,
+            carga,
+        } => (*para == self_person).then(|| ServerMessage::AvisoParaMaquina {
+            mod_id: mod_id.clone(),
+            servidor: servidor.clone(),
+            carga: carga.clone(),
+        }),
+        Event::MaquinaDispensada {
+            para,
+            mod_id,
+            servidor,
+            motivo,
+        } => (*para == self_person).then(|| ServerMessage::MaquinaDispensada {
+            mod_id: mod_id.clone(),
+            servidor: servidor.clone(),
+            motivo: *motivo,
+        }),
+        // O livro mudou: é da metade de servidor, e não de cliente nenhum.
+        Event::Maquina(_) => None,
     }
 }
 
@@ -7055,6 +7192,7 @@ mod fim_de_tela_por_sessao {
             desassentamentos: Arc::new(crate::server::Desassentamentos::default()),
             pares: Arc::new(Mutex::new(crate::pares::Pares::default())),
             tuneis: std::sync::Mutex::new(crate::tuneis::Tuneis::default()),
+            maquinas: std::sync::Mutex::new(crate::maquinas::Maquinas::default()),
             malha_para_tuneis: true,
             servir_tuneis: true,
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,

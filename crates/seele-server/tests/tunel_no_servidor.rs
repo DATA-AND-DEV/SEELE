@@ -455,9 +455,11 @@ async fn sem_o_interruptor_ninguem_serve_um_tunel() -> Result<()> {
     let _gestora = entrar(endereco, GESTORA, 12).await?;
     let mut maquina = entrar(endereco, MAQUINA, 12).await?;
     frame::write(&mut maquina.ligado.envio, &servir()).await?;
+    // Sem o interruptor, quem decide é o aceite (`crate::maquinas`), e esta
+    // sessão não aceitou máquina nenhuma.
     assert_eq!(
         resposta_de_tunel(&mut maquina).await?,
-        Err(RecusaDeTunel::SemPermissao)
+        Err(RecusaDeTunel::ForaDoAceite)
     );
     assert!(
         !daemon.server().tuneis().existe(MOD, NOME),
