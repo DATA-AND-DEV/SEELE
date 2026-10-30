@@ -620,6 +620,17 @@ pub async fn atender_servir(
     conexao: &Conexao,
     pedido: PedidoDeTunel<'_>,
 ) -> Result<(), RecusaDeTunel> {
+    // Provisório até a parte 3 (ver `ServerConfig::servir_tuneis`): sem o
+    // interruptor, ninguém serve túnel, e a recusa é dita no log.
+    if !server.servir_tuneis {
+        tracing::warn!(
+            mod_id = %pedido.mod_id,
+            tunel = %pedido.nome,
+            maquina = %maquina,
+            "túnel: este servidor não aceita que uma máquina sirva túneis (servir_tuneis desligado)"
+        );
+        return Err(RecusaDeTunel::SemPermissao);
+    }
     // O que vem de fora antes do cadeado do livro.
     let poderes = poderes_do_mod(server, pedido.mod_id).await;
     let mut livro = server.tuneis();

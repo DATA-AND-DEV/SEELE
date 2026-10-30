@@ -308,9 +308,19 @@ pub struct ServerConfig {
     /// da estrela, e o que serve a quem hospeda e não quer a malha. A malha é
     /// alívio, nunca dependência: todo túnel funciona pela estrela.
     ///
-    /// Nesta parte o campo só é guardado em [`crate::server::Server`]; quem
-    /// apresenta as pontas é a tarefa seguinte do plano.
+    /// Quem apresenta as pontas é [`crate::tuneis::apresentar`], que lê a cópia
+    /// guardada em [`crate::server::Server`].
     pub malha_para_tuneis: bool,
+    /// Se este servidor aceita que uma máquina **sirva** um túnel de jogo.
+    /// **Padrão: desligado.**
+    ///
+    /// Provisório até a parte 3 da API 8, que prende o `ServirTunel` ao aceite
+    /// do dono da máquina e **troca** este interruptor por esse aceite. Até lá,
+    /// qualquer sessão no protocolo 12 poderia servir o nome de túnel de
+    /// qualquer MOD com o poder `porta`: o servidor confere o MOD, e não quem o
+    /// pede. Desligado, o `ServirTunel` é recusado (`SemPermissao`) e vai para
+    /// o log com `mod_id=` e `tunel=`. As provas que servem túneis o ligam.
+    pub servir_tuneis: bool,
 }
 
 impl Default for ServerConfig {
@@ -353,6 +363,10 @@ impl Default for ServerConfig {
             modo_local: false,
             // Ligada: a malha alivia o anfitrião, e a estrela cobre o resto.
             malha_para_tuneis: true,
+            // Desligado até a parte 3 (ver o campo): nada no produto serve
+            // túnel hoje, e um servidor de produção não deve aceitar quem o
+            // faça por conta própria.
+            servir_tuneis: false,
         }
     }
 }
@@ -767,6 +781,7 @@ impl Daemon {
             pares: Arc::new(tokio::sync::Mutex::new(pares::Pares::nova())),
             tuneis: std::sync::Mutex::new(tuneis::Tuneis::default()),
             malha_para_tuneis: config.malha_para_tuneis,
+            servir_tuneis: config.servir_tuneis,
             anexos,
             caminho_bps: config.caminho_bps,
             versao_do_anuncio: config.versao_do_anuncio,

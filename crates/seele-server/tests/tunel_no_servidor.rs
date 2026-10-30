@@ -67,6 +67,16 @@ async fn montar_com_malha(
     todos: bool,
     malha_para_tuneis: bool,
 ) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir)> {
+    montar_completo(todos, malha_para_tuneis, true).await
+}
+
+/// Como [`montar_com_malha`], com também o interruptor de servir túneis na mão
+/// (`ServerConfig::servir_tuneis`, desligado no padrão do produto).
+async fn montar_completo(
+    todos: bool,
+    malha_para_tuneis: bool,
+    servir_tuneis: bool,
+) -> Result<(SocketAddr, Arc<Daemon>, tempfile::TempDir)> {
     let temp = tempfile::tempdir()?;
     let raizes = seele_server::RaizesDosMods {
         pacotes: temp.path().join("cache"),
@@ -99,6 +109,7 @@ async fn montar_com_malha(
         proprietario: Some(seele_proto::transport::key_fingerprint(&publica(GESTORA))),
         mods_dir: Some(raizes.clone()),
         malha_para_tuneis,
+        servir_tuneis,
         ..ServerConfig::default()
     };
     let daemon = Arc::new(Daemon::bind(config).await?);
@@ -368,6 +379,32 @@ async fn quem_serve_sem_o_poder_porta_e_recusado() -> Result<()> {
     assert_eq!(
         resposta_de_tunel(&mut maquina).await?,
         Err(RecusaDeTunel::ModSemPorta)
+    );
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **Servir é provisório e vem desligado** (`ServerConfig::servir_tuneis`): com
+/// ele desligado, uma sessão 12 qualquer não serve o nome de túnel de um MOD
+/// com `porta`, mesmo com o MOD ligado e o poder declarado. O padrão do
+/// produto é o desligado, e o teste o pega pelo `Default`.
+#[tokio::test(flavor = "multi_thread")]
+async fn sem_o_interruptor_ninguem_serve_um_tunel() -> Result<()> {
+    assert!(
+        !ServerConfig::default().servir_tuneis,
+        "o padrão do produto tem de ser não servir túneis"
+    );
+    let (endereco, daemon, _temp) = montar_completo(true, true, false).await?;
+    let _gestora = entrar(endereco, GESTORA, 12).await?;
+    let mut maquina = entrar(endereco, MAQUINA, 12).await?;
+    frame::write(&mut maquina.ligado.envio, &servir()).await?;
+    assert_eq!(
+        resposta_de_tunel(&mut maquina).await?,
+        Err(RecusaDeTunel::SemPermissao)
+    );
+    assert!(
+        !daemon.server().tuneis().existe(MOD, NOME),
+        "o túnel foi para o livro apesar da recusa"
     );
     daemon.shutdown();
     Ok(())

@@ -7030,6 +7030,7 @@ mod fim_de_tela_por_sessao {
             pares: Arc::new(Mutex::new(crate::pares::Pares::default())),
             tuneis: std::sync::Mutex::new(crate::tuneis::Tuneis::default()),
             malha_para_tuneis: true,
+            servir_tuneis: true,
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
             telas: Arc::new(Mutex::new(Telas::default())),
             anexos: None,

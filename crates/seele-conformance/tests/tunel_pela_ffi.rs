@@ -92,6 +92,7 @@ async fn servidor(malha_para_tuneis: bool) -> Result<Servidor> {
         database: Location::Memory,
         mods_dir: Some(raizes.clone()),
         malha_para_tuneis,
+        servir_tuneis: true,
         ..ServerConfig::default()
     };
     let daemon = Arc::new(ligar_insistindo(config).await?);
