@@ -13457,9 +13457,12 @@ fn sem_nome_o_primeiro_conectar_pergunta_antes() {
     // tela só a ouvia ao fechar, quando não dava mais para responder; e a nota
     // de sempre do campo («O que você já disse continua com o nome de então»)
     // falava com quem nunca disse nada.
+    // O campo também é descrito pela recusa dele (`perfil-apelido-erro`, o
+    // nome único da 0.19); a nota de quem fecha sem nome continua lá.
     let campo = tag_with_id(&read("ui/index.html"), "perfil-apelido");
     assert!(
-        attribute(&campo, "aria-describedby").as_deref() == Some("perfil-sem-nome"),
+        attribute(&campo, "aria-describedby")
+            .is_some_and(|ids| ids.split_whitespace().any(|id| id == "perfil-sem-nome")),
         "o campo do apelido não é descrito pela nota de quem fecha sem nome, e o \
          leitor de tela só a diz depois de a caixa fechar:\n{campo}"
     );
@@ -26268,7 +26271,7 @@ m.$("perfis-entrada").removeAttribute = () => {};
 m.$("perfis-diretorio").hidden = true;
 m.$("perfil-folha").hidden = true;
 carregar(m, "frases.js", "perfis.js");
-for (const nome of ["aplicarAvatar", "aplicarCapa", "capaDaPessoa"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+for (const nome of ["aplicarAvatar", "aplicarCapa", "capaDaPessoa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
 vm.runInContext("sincronizarPerfis({ perfis_revision: 1, me: 1 })", m.ctx);
 await tick();
 const quadrado = comEstilo(new El("q"));
@@ -26303,7 +26306,9 @@ capaDoMod = null;
 lista = [{ ...lista[0], revisao: 3, capa: null }];
 vm.runInContext("perfisOficiais.marca = null; sincronizarPerfis({ perfis_revision: 3, me: 1 })", m.ctx);
 await tick();
-confere("sem capa em lugar nenhum, a camada ficou", capa() === "");
+// Sem capa em lugar nenhum, a imagem sai; quem tem perfil fica com a cor dele
+// (0.19, `a_cor_do_perfil_entra_no_lugar_da_capa_so_sem_capa`).
+confere("sem capa em lugar nenhum, a imagem ficou", capa() === "" && quadro.dataset.capaDeCor === "sim");
 "##,
     );
 }
@@ -26655,18 +26660,245 @@ const padrao = await vm.runInContext("lerOPerfilPadrao()", a.m.ctx);
 a.m.ctx.P = padrao;
 vm.runInContext("prepararOEditorDoPerfil(null, 'maya', P)", a.m.ctx);
 confere("o editor da tela inicial não abriu no modo do padrão", vm.runInContext("editorDoPerfil.modo", a.m.ctx) === "padrao" && a.m.$("perfil").dataset.modo === "padrao");
-confere("os campos não vieram do padrão", a.m.$("perfil-nome-exibido").value === "Maya" && a.m.$("perfil-status").value === "no ar");
+// Um nome só (0.19): o campo do nome mostra o nome do padrão, e não o apelido.
+confere("os campos não vieram do padrão", a.m.$("perfil-apelido").value === "Maya" && a.m.$("perfil-status").value === "no ar");
 confere("a tela inicial não diz que edita o padrão", /perfil padrão/.test(a.m.$("perfil-padrao-linha").textContent));
-a.m.$("perfil-nome-exibido").value = "N".repeat(50);
+a.m.$("perfil-apelido").value = "N".repeat(50);
 const recusado = await vm.runInContext("gravarOPerfilOficial()", a.m.ctx);
-confere("o campo longo não voltou ao campo", recusado === false && a.m.$("perfil-nome-exibido-erro").hidden === false && /40/.test(a.m.$("perfil-nome-exibido-erro").textContent));
+confere("o campo longo não voltou ao campo", recusado === false && a.m.$("perfil-apelido-erro").hidden === false && /40/.test(a.m.$("perfil-apelido-erro").textContent));
 recusar = false;
-a.m.$("perfil-nome-exibido").value = "Maya B";
+a.m.$("perfil-apelido").value = "Maya B";
 const salvo = await vm.runInContext("gravarOPerfilOficial()", a.m.ctx);
 const pedido = so(a.m, "gravar_perfil_padrao").pop();
 confere("o SALVAR da tela inicial não gravou o padrão", salvo === true && pedido?.args.entrada.nome_exibido === "Maya B");
 confere("o SALVAR da tela inicial falou com um servidor", so(a.m, "gravar_perfil").length === 0);
 confere("o padrão salvo não ficou guardado na janela", vm.runInContext("perfilPadraoAtual().nome_exibido", a.m.ctx) === "Maya B");
+"##,
+    );
+}
+
+/// **Um nome só** (0.19, pedido do dono: «se o usuário troca o nome, troca
+/// também no registro do server»). O editor dentro do servidor tem um campo
+/// «Nome», que mostra o nome exibido do perfil (e não o apelido) quando os dois
+/// divergem; o SALVAR manda o `SetNickname` **e depois** o `GravarPerfil` com o
+/// `nome_exibido` igual; a recusa do servidor ao nome (o `PedidoRecusado` do
+/// `SetNickname`) é dita no campo e **o perfil não é gravado**; e um nome que a
+/// regra mais estrita recusa não sai.
+///
+/// `perfis.js`, `perfil-padrao.js` e o SALVAR de `camada-nomear.js`
+/// (`salvarOPerfil`, `guardarOApelido`) rodam de verdade, sobre o servidor
+/// simulado do padrão. Provado revertendo: com o `GravarPerfil` antes do
+/// `SetNickname` (`gravarOPerfilOficial` antes de `guardarOApelido`), com o
+/// `if (!desfecho.ok)` tirado (o perfil gravado depois da recusa), ou com o
+/// campo voltando a mostrar o apelido, este guarda reprova.
+#[test]
+fn o_nome_unico_vai_ao_registro_e_depois_ao_perfil_e_para_na_recusa() {
+    rodar_o_padrao(
+        "o nome único",
+        r##"
+const meu = { pessoa: 1, revisao: 3, nome_exibido: "Cria de GRU", pronomes: "", status: "", bio: "", cor: "#4fd1c5", efeito: "Nenhum", foto: null, capa: null };
+const a = servidorDoPadrao({ perfis: [meu], padrao: { ...PADRAO, revisao: 0 } });
+let respostaDoNome = "aceita";
+const ordem = [];
+const invocar = a.m.ctx.invoke;
+a.m.ctx.invoke = async (cmd, args) => {
+  if (cmd === "snapshot") return { me: 1 };
+  if (cmd === "escolher_apelido") {
+    a.m.chamadas.push({ cmd, args });
+    ordem.push("SetNickname");
+    if (respostaDoNome === "aceita") setTimeout(() => { a.m.ctx.identidadesApresentadas = { "1": [args.apelido, "4F2A"] }; }, 5);
+    else setTimeout(() => a.m.ouvintes["seele://event"]({ payload: { NoticeRaised: { notice: { reason: { PedidoRecusado: { pedido: "SetNickname", causa: "NomeTomado" } } } } } }), 5);
+    return null;
+  }
+  if (cmd === "gravar_perfil") ordem.push("GravarPerfil");
+  return invocar(cmd, args);
+};
+Object.assign(a.m.ctx, {
+  passaDoTeto: async (campo, texto) => (campo === "apelido" && Buffer.byteLength(texto) > 32 ? "passa do teto" : null),
+  fraseDeErro: (f) => String(f),
+});
+for (const nome of ["guardarOApelido", "salvarOPerfil"]) vm.runInContext(funcao("camada-nomear.js", nome), a.m.ctx);
+a.entrar();
+await espera(() => vm.runInContext("perfilOficial(1) !== null", a.m.ctx));
+await tick(); await tick();
+// O servidor diz quem a pessoa é depois da lista: a conferência da entrada
+// (o alinhamento do registro, parte (5)) não age antes de saber.
+a.m.ctx.identidadesApresentadas = { "1": ["teste", "4F2A"] };
+vm.runInContext("prepararOEditorDoPerfil({ me: 1 }, 'teste', null)", a.m.ctx);
+confere("o editor do servidor não abriu no modo oficial", vm.runInContext("editorDoPerfil.modo", a.m.ctx) === "oficial");
+confere("o campo do nome mostrou o apelido, e não o nome exibido: " + a.m.$("perfil-apelido").value, a.m.$("perfil-apelido").value === "Cria de GRU");
+confere("abrir com o nome exibido diferente do apelido já contou como alteração", vm.runInContext("perfilTemAlteracoes()", a.m.ctx) === false);
+const salvar = () => vm.runInContext("salvarOPerfil()", a.m.ctx);
+
+// (1) A regra mais estrita, antes de qualquer pedido.
+for (const [nome, porque] of [["", "vazio"], ["Nov\u202eo", "controle de direção"], ["é".repeat(17), "34 bytes"]]) {
+  a.m.$("perfil-apelido").value = nome;
+  const ok = await salvar();
+  confere(`o nome recusado pela regra (${porque}) foi salvo`, ok === false && a.m.$("perfil-apelido-erro").hidden === false);
+}
+confere("um nome que a regra recusa saiu: " + ordem.join(), ordem.length === 0);
+
+// (2) O servidor recusa o nome: dito no campo, e o perfil não é gravado.
+respostaDoNome = "recusa";
+a.m.$("perfil-apelido").value = "Novo Nome";
+const recusado = await salvar();
+confere("a recusa do nome fechou o editor", recusado === false);
+confere("a recusa do nome não foi dita no campo: " + a.m.$("perfil-apelido-erro").textContent,
+  a.m.$("perfil-apelido-erro").hidden === false && /outra pessoa/.test(a.m.$("perfil-apelido-erro").textContent));
+confere("o perfil foi gravado com o nome que o registro recusou: " + ordem.join(), ordem.join() === "SetNickname");
+confere("o perfil mudou depois da recusa: " + a.meu().nome_exibido, a.meu().nome_exibido === "Cria de GRU");
+
+// (3) Aceito: o registro primeiro, o perfil depois, com o mesmo nome.
+respostaDoNome = "aceita";
+ordem.length = 0;
+const salvo = await salvar();
+confere("o nome aceito não fechou o editor", salvo === true);
+confere("a ordem não foi SetNickname e depois GravarPerfil: " + ordem.join(), ordem.join() === "SetNickname,GravarPerfil");
+const pedido = so(a.m, "escolher_apelido").pop();
+confere("o SetNickname não levou o nome do campo", pedido?.args.apelido === "Novo Nome");
+confere("o perfil não ficou com o mesmo nome: " + a.meu().nome_exibido, a.meu().nome_exibido === "Novo Nome");
+
+// A lista nova do (3) passa pela conferência do padrão: ela termina antes.
+await tick(); await tick();
+await espera(() => vm.runInContext("!estadoDoPadrao.aplicando", a.m.ctx));
+
+// (4) Um perfil cujo nome exibido diverge do apelido: salvar sem mexer alinha o registro.
+a.m.ctx.identidadesApresentadas = { "1": ["teste", "4F2A"] };
+ordem.length = 0;
+vm.runInContext("prepararOEditorDoPerfil({ me: 1 }, 'teste', null)", a.m.ctx);
+const alinhado = await salvar();
+confere("salvar sem mexer não alinhou o registro ao nome exibido: " + ordem.join(), alinhado === true && ordem.join() === "SetNickname" && so(a.m, "escolher_apelido").pop()?.args.apelido === "Novo Nome");
+
+// (5) A conexão seguinte volta com o apelido desta máquina no `Hello`: a
+// conferência da lista alinha o registro ao nome do perfil, uma vez.
+a.m.ctx.identidadesApresentadas = { "1": ["teste", "4F2A"] };
+ordem.length = 0;
+await vm.runInContext("conferirOPadrao()", a.m.ctx);
+await vm.runInContext("conferirOPadrao()", a.m.ctx);
+confere("a conferência não alinhou o registro ao nome do perfil (ou alinhou duas vezes): " + ordem.join(), ordem.join() === "SetNickname" && so(a.m, "escolher_apelido").pop()?.args.apelido === "Novo Nome");
+"##,
+    );
+}
+
+/// **O nome recusa os mesmos caracteres que o perfil**: a conferência do
+/// editor (`caractereRecusadoNoNome`, `perfis.js`) é a de
+/// `seele_proto::perfil::e_recusado` fora da bio, código a código até U+3000.
+/// Provado revertendo: sem o U+061C (ou sem o intervalo U+2066–2069) na
+/// conferência, este guarda reprova.
+#[test]
+fn o_nome_recusa_os_mesmos_caracteres_que_o_perfil() {
+    let recusados: Vec<u32> = (0u32..0x3000)
+        .filter_map(char::from_u32)
+        .filter(|c| seele_proto::perfil::e_recusado(*c, false))
+        .map(u32::from)
+        .collect();
+    rodar_node(
+        "os caracteres do nome",
+        &format!(
+            r##"
+const m = mundo({{}});
+vm.runInContext(funcao("perfis.js", "caractereRecusadoNoNome"), m.ctx);
+const doRust = new Set({recusados:?});
+const diferentes = [];
+for (let n = 0; n < 0x3000; n += 1) {{
+  if (n >= 0xd800 && n <= 0xdfff) continue;
+  m.ctx.c = String.fromCodePoint(n);
+  if (vm.runInContext("caractereRecusadoNoNome(c)", m.ctx) !== doRust.has(n)) diferentes.push(n.toString(16));
+}}
+confere("o nome e o perfil discordam nestes códigos: " + diferentes.join(" "), diferentes.length === 0);
+"##
+        ),
+    );
+}
+
+/// **A linha de pessoa mostra um nome só** (0.19, pedido do dono: «dentro do
+/// server, tem que tirar o nome teste de baixo»): com perfil oficial, o nome
+/// exibido com o «(você)» junto, e o apelido não aparece de novo embaixo; sem
+/// perfil, o apelido de sempre. E **sem capa, a linha veste a cor do perfil**
+/// (`aplicarCapa`), e não veste nada para quem não tem perfil.
+///
+/// `linhaNativaDoRoster`, `nomeDaPessoa` e `nomeNaLinha` vêm de
+/// `tela-sessao.js`. Provado revertendo: com a linha do apelido de volta ao
+/// lado do nome exibido, ou com a condição da capa só pela imagem
+/// (`capaDaPessoa`), este guarda reprova.
+#[test]
+fn a_linha_de_pessoa_mostra_um_nome_so_e_veste_a_cor_sem_capa() {
+    rodar_node(
+        "um nome na linha",
+        r##"
+const m = mundo({});
+let perfis = { "1": { nome_exibido: "Cria de GRU", cor: "#4fd1c5" } };
+const vestidas = [];
+Object.assign(m.ctx, {
+  elemento: (tag, classe, texto) => { const e = new El(""); e.tag = tag; e.className = classe ?? ""; if (texto !== undefined) e.textContent = texto; e.classList = { add() {} }; return e; },
+  perfilOficial: (id) => perfis[String(id)] ?? null,
+  linhaDoPerfil: () => "", iniciaisDoApelido: (a) => a.slice(0, 2), vestirAvatar: (n) => n,
+  nosDeMod: () => [], conteudoDasContribuicoes: () => [], estadosDaPessoa: () => new El("estados"),
+  capaDaPessoa: () => null, vestirCapa: (no, id) => { vestidas.push(String(id)); return no; },
+});
+for (const nome of ["nomeDaPessoa", "nomeNaLinha", "corDoPerfilDe", "linhaNativaDoRoster"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+const textos = (no) => [no.textContent, ...(no.children ?? []).flatMap(textos)].filter(Boolean);
+const linha = (pessoa) => { m.ctx.p = pessoa; return vm.runInContext("linhaNativaDoRoster(p, true)", m.ctx); };
+
+const eu = linha({ id: 1, nome: "teste (você)", eu: true });
+const nomes = textos(eu);
+confere("a linha não mostra o nome exibido com o (você): " + JSON.stringify(nomes), nomes.includes("Cria de GRU (você)"));
+confere("a linha ainda mostra o apelido embaixo do nome: " + JSON.stringify(nomes), !nomes.some((t) => /teste/.test(t)));
+confere("a linha não vestiu a cor do perfil sem capa", vestidas.join() === "1");
+
+perfis = {};
+const sem = textos(linha({ id: 2, nome: "ana" }));
+confere("sem perfil, a linha não mostra o apelido: " + JSON.stringify(sem), sem.includes("ana"));
+confere("sem perfil, a linha vestiu uma cor", vestidas.join() === "1");
+"##,
+    );
+}
+
+/// **A cor do perfil no lugar da capa** (0.19, pedido do dono: «tem que ter a
+/// cor do banner escolhido como fundo, caso não tenha imagem»): `aplicarCapa`
+/// põe a camada com `data-capa-de-cor` e a cor em `--cor-do-perfil` quando o
+/// perfil não tem capa; com capa, a imagem e nenhuma cor; sem perfil, nada; e
+/// a faixa do cartão do perfil (`data-cor-propria`), que pinta a cor do
+/// rascunho, não ganha a camada. Provado revertendo: com o `cor` de
+/// `aplicarCapa` em `null`, ou sem a conferência do `corPropria`, reprova.
+#[test]
+fn a_cor_do_perfil_entra_no_lugar_da_capa_so_sem_capa() {
+    rodar_node(
+        "a cor no lugar da capa",
+        r##"
+let perfis = { "7": { cor: "#4FD1C5" } };
+let capa = null;
+const m = mundo({});
+const comEstilo = (no) => Object.assign(no, {
+  style: { backgroundImage: "", props: {}, setProperty(k, v) { this.props[k] = v; }, removeProperty(k) { if (k === "background-image") this.backgroundImage = ""; delete this.props[k]; } },
+  prepend(c) { c.pai = this; this.children.unshift(c); },
+  remove() { if (this.pai) this.pai.children = this.pai.children.filter((x) => x !== this); },
+  querySelector() { return this.children.find((c) => c.className === "capa-camada") ?? null; },
+});
+Object.assign(m.ctx, {
+  matchMedia: () => ({ matches: false }),
+  elemento: (tag, classe) => { const e = comEstilo(new El("")); e.className = classe ?? ""; return e; },
+  capaDaPessoa: () => capa,
+  perfilOficial: (id) => perfis[String(id)] ?? null,
+});
+for (const nome of ["aplicarCapa", "corDoPerfilDe"]) vm.runInContext(funcao("tela-sessao.js", nome), m.ctx);
+const quadro = comEstilo(new El("q"));
+quadro.dataset.pessoaDaCapa = "7";
+const aplicar = () => { m.ctx.q = quadro; vm.runInContext("aplicarCapa(q)", m.ctx); return quadro; };
+
+aplicar();
+confere("sem capa, a cor do perfil não entrou", quadro.dataset.capaDeCor === "sim" && quadro.dataset.comCapa === "sim" && quadro.style.props["--cor-do-perfil"] === "#4fd1c5" && quadro.querySelector() !== null);
+capa = { url: "data:capa", estatico: "data:capa" };
+aplicar();
+confere("com capa, a cor ficou por cima da imagem", quadro.dataset.capaDeCor === undefined && !("--cor-do-perfil" in quadro.style.props) && /data:capa/.test(quadro.querySelector()?.style.backgroundImage));
+capa = null; perfis = {};
+aplicar();
+confere("sem perfil e sem capa, sobrou camada", quadro.querySelector() === null && quadro.dataset.comCapa === undefined && quadro.dataset.capaDeCor === undefined);
+perfis = { "7": { cor: "#4fd1c5" } };
+const faixa = comEstilo(new El("f"));
+faixa.dataset.pessoaDaCapa = "7"; faixa.dataset.corPropria = "sim";
+m.ctx.q = faixa; vm.runInContext("aplicarCapa(q)", m.ctx);
+confere("a faixa do cartão, que pinta a cor do rascunho, ganhou a camada de cor", faixa.querySelector() === null && faixa.dataset.capaDeCor === undefined);
 "##,
     );
 }

@@ -944,6 +944,18 @@ button.voice_room-nome:hover { text-decoration: underline; }
   background: color-mix(in srgb, var(--seele-negro-painel) 55%, transparent);
 }
 
+/* **Sem capa, a cor do perfil** (0.19, pedido do dono): a mesma camada, com
+   um degradê da cor que a pessoa escolheu — já escurecido na mistura com o
+   painel, para que o véu de cada superfície, por cima, deixe o texto com 4,5:1
+   ou mais no pior ponto do degradê, nas oito amostras do editor (medido em
+   `bancada/cor-do-perfil.cjs`). A cor chega pela propriedade `--cor-do-perfil`,
+   posta por `aplicarCapa`. */
+[data-capa-de-cor] > .capa-camada {
+  background-image: linear-gradient(135deg,
+    color-mix(in srgb, var(--cor-do-perfil, var(--seele-laranja-nerv)) 60%, var(--seele-negro-painel)),
+    color-mix(in srgb, var(--cor-do-perfil, var(--seele-laranja-nerv)) 25%, var(--seele-negro-painel)));
+}
+
 [data-fala="sim"] > .capa-camada::after {
   background: color-mix(in srgb, var(--seele-laranja-carga) 75%, transparent);
   box-shadow: inset 0 0 0 var(--seele-b-forte) var(--seele-laranja-nerv);

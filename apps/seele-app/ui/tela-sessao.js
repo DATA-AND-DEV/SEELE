@@ -1333,7 +1333,9 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
   const item = elemento("li", "voice_room-pessoa");
   chaveNaLista.set(item, `pessoa:${pessoa.id}`);
   item.append(glifo(pessoa.speaking ? "falando" : "silencio"));
-  item.append(elemento("span", "voice_room-pessoa-nome", apelidoApresentado(pessoa.id, pessoa.nickname)));
+  // O nome da linha (0.19, um nome só): o exibido do perfil, ou o apelido.
+  const exibido = typeof perfilOficial === "function" ? perfilOficial(pessoa.id)?.nome_exibido?.trim() : "";
+  item.append(elemento("span", "voice_room-pessoa-nome", exibido || apelidoApresentado(pessoa.id, pessoa.nickname)));
   if (pessoa.is_self) item.append(elemento("span", "voice_room-pessoa-eu", "(você)"));
   if (pessoa.muted) {
     item.append(elemento("span", "voice_room-pessoa-marca", "mudo"));
@@ -1349,7 +1351,9 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
 /** A tira do operador, no rodapé da coluna de canais. */
 function desenharOperador(snapshot) {
   aplicarARegiao("operador.barra", $("operador-mods"));
-  $("operador-nome").textContent = apelidoApresentado(snapshot.me, snapshot.nickname);
+  // Um nome só (0.19): o exibido do perfil oficial, ou o apelido.
+  const exibidoDoOperador = typeof perfilOficial === "function" ? perfilOficial(snapshot.me)?.nome_exibido?.trim() : "";
+  $("operador-nome").textContent = exibidoDoOperador || apelidoApresentado(snapshot.me, snapshot.nickname);
   // A linha de baixo do nome: onde a voz está. Só descreve o que o snapshot já
   // diz (a sala em que esta janela está), e sem sala fica o rótulo de sempre.
   const salaDoOperador = snapshot.voice_rooms.find((c) => c.occupied_by_us);
@@ -2807,6 +2811,7 @@ function desenharPessoas(snapshot) {
               // desenhado não serve para nada disso: um MOD pode tê-lo trocado.
               id: pessoa.id,
               nome: apelidoApresentado(pessoa.id, pessoa.nickname) + (pessoa.is_self ? " (você)" : ""),
+              eu: Boolean(pessoa.is_self),
               // Esta ramificação é a de quem está **numa sala**: é dela que
               // sai a diferença entre «o microfone está aberto» e «a voz está
               // indo para alguém». Ver `estado` em `linhaNativaDoRoster`.
@@ -2843,6 +2848,7 @@ function desenharPessoas(snapshot) {
           {
             id: snapshot.me,
             nome: `${apelidoApresentado(snapshot.me, snapshot.nickname)} (você)`,
+            eu: true,
             // Fora de sala: o microfone pode estar captando, e não há para
             // onde transmitir.
             emSala: false,
@@ -3293,11 +3299,23 @@ function cartaoDeContribuicao(contribuicao, id) {
  * responder. O mesmo elemento na linha nativa e no núcleo de uma linha
  * apresentada por um MOD.
  */
-function nomeDaPessoa(pessoa) {
+function nomeDaPessoa(pessoa, nome = pessoa.nome) {
   // **Texto, e não mais a porta da moderação** (0.19): a linha inteira abre a
   // ficha da pessoa, e é nela que o MODERAR mora, nomeado. Um botão dentro do
   // alvo da linha seria dois gestos diferentes no mesmo nome.
-  return elemento("span", "pessoa-nome", pessoa.nome);
+  return elemento("span", "pessoa-nome", nome);
+}
+
+/**
+ * **O nome que a linha nativa mostra** (0.19): o nome exibido do perfil
+ * oficial, quando há um, com o «(você)» de quem usa; sem ele, o apelido de
+ * sempre (`pessoa.nome`, que já traz o «(você)»).
+ */
+function nomeNaLinha(pessoa, oficial) {
+  if (oficial === undefined) oficial = typeof perfilOficial === "function" ? perfilOficial(pessoa.id) : null;
+  const exibido = oficial?.nome_exibido?.trim() ?? "";
+  if (!exibido) return String(pessoa.nome ?? "");
+  return pessoa.eu ? `${exibido} (você)` : exibido;
 }
 
 /**
@@ -3314,7 +3332,10 @@ function botaoDaFicha(pessoa, rotulo = null) {
   const botao = elemento("button", "pessoa-abrir", rotulo ?? undefined);
   botao.type = "button";
   botao.dataset.fichaPessoa = String(pessoa.id);
-  const nome = String(pessoa.nome ?? "");
+  // O nome que a linha mostra, no rótulo: na nativa, o nome exibido
+  // (`nomeNaLinha`); no «⋯» da apresentada por um MOD, o apelido verificável
+  // que o produto escreve ao lado dele.
+  const nome = rotulo === null ? nomeNaLinha(pessoa) : String(pessoa.nome ?? "");
   botao.setAttribute("aria-label", FRASES_DA_FICHA.abrir(nome));
   botao.title = FRASES_DA_FICHA.abrir(nome);
   botao.setAttribute("aria-haspopup", "dialog");
@@ -3379,6 +3400,10 @@ function fichaDaPessoa(id) {
     // o nome de novo (o dono viu «ana» duas vezes, uma embaixo da outra).
     cabeca.append(avatar, estadosDaPessoa(pessoa, "ficha-estados", "p"));
     nos.push(cabeca);
+    // **A identidade verificável**, o apelido com a tag («teste#4F2A»): a
+    // linha da lista mostra um nome só, e é aqui que a chave se confere.
+    const verificavel = apelidoComTag(id);
+    if (verificavel) nos.unshift(elemento("p", "ficha-apelido", verificavel));
   } else {
     nos.push(...conteudoDaFolhaDoPerfil(id));
     // O estado em palavra, como na linha.
@@ -3437,6 +3462,16 @@ function fichaDaPessoa(id) {
     }
   }
   return { pessoa, nos };
+}
+
+/**
+ * O apelido com a tag, como o servidor registra a pessoa («teste#4F2A»), ou
+ * vazio quando o servidor não disse (um 0.18 sem `IdentidadeApresentada`).
+ */
+function apelidoComTag(id) {
+  const par = identidadesApresentadas?.[String(id)];
+  if (!Array.isArray(par) || !par[0]) return "";
+  return par[1] ? `${par[0]}#${par[1]}` : String(par[0]);
 }
 
 /** Abre a ficha: um modal no desktop, a folha que sobe da borda no celular. */
@@ -3502,26 +3537,24 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
 
   const cabeca = elemento("span", "pessoa-cabeca");
   const identidade = elemento("span", "pessoa-identidade");
+  const oficial = typeof perfilOficial === "function" ? perfilOficial(pessoa.id) : null;
   // O quadrado de iniciais do desenho 0.19, antes do nome. Decoração: o nome
   // inteiro está ao lado, e anunciar `AN` antes de `ana` seria ler duas vezes.
+  // As iniciais são as do nome que a linha mostra (`nomeNaLinha`).
   if (pessoa.id !== undefined && pessoa.id !== null) {
-    const avatar = elemento("span", "pessoa-avatar", iniciaisDoApelido(String(pessoa.nome ?? "")));
+    const avatar = elemento("span", "pessoa-avatar", iniciaisDoApelido(nomeNaLinha(pessoa, oficial)));
     avatar.setAttribute("aria-hidden", "true");
     vestirAvatar(avatar, pessoa.id);
     identidade.append(avatar);
   }
-  // **O nome exibido do perfil oficial** (0.19, §5.3), grande, com o apelido
-  // pequeno ao lado e sempre visível: o apelido é o nome verificável, o que a
-  // moderação e o resto do produto usam, e ele não some atrás de um apelido
-  // de vitrine. Sem perfil (ou num servidor 0.18), a linha é a de sempre.
-  const oficial = typeof perfilOficial === "function" ? perfilOficial(pessoa.id) : null;
-  const exibido = oficial?.nome_exibido?.trim() ?? "";
-  if (exibido && exibido !== String(pessoa.nome ?? "")) {
-    identidade.append(elemento("span", "pessoa-exibido", exibido));
-    identidade.classList.add("pessoa-identidade-com-exibido");
-  }
-  // Na apresentação do MOD, este é o nome verificável nos detalhes nativos.
-  identidade.append(nomeDaPessoa(pessoa));
+  // **Um nome só na linha** (0.19, pedido do dono: «dentro do server, tem que
+  // tirar o nome teste de baixo»): o nome exibido do perfil oficial, ou o
+  // apelido de quem não tem um, com o «(você)» junto. O nome e o apelido são
+  // um só desde o editor (`salvarOPerfil`), e a identidade verificável — o
+  // apelido com a tag — fica a um toque, no título da ficha da pessoa.
+  // A linha que um MOD apresenta é outra regra, e continua: lá o apelido
+  // verificável fica fora do cartão (`linhaSubstituida`).
+  identidade.append(nomeDaPessoa(pessoa, nomeNaLinha(pessoa, oficial)));
   // «pronomes · status» também fora do recolhido: o celular desenha a linha em
   // grade e mostra este; o desktop o esconde e mostra o de dentro do recolhido
   // (`perfis.css`), junto do «Ver perfil».
@@ -3566,7 +3599,9 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   // sempre o quadro parado — numa lista de 250, nenhuma linha anima; o teto de
   // capas animadas fica para a chamada e o operador. Só quem tem capa ganha a
   // camada: as outras linhas não entram na escolha de cada quadro.
-  if (!comoDetalhe && pessoa.id !== undefined && pessoa.id !== null && capaDaPessoa(String(pessoa.id))) {
+  // Sem capa, quem tem perfil ganha a cor dele no mesmo lugar (`aplicarCapa`).
+  if (!comoDetalhe && pessoa.id !== undefined && pessoa.id !== null
+    && (capaDaPessoa(String(pessoa.id)) || corDoPerfilDe(String(pessoa.id)))) {
     item.dataset.capaSempreParada = "sim";
     vestirCapa(item, pessoa.id);
   }
@@ -6201,10 +6236,19 @@ function aplicarCapa(quadro) {
   const parada = quadro.dataset.capaAnimada !== "sim"
     || (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
   const url = capa ? (parada ? capa.estatico : capa.url) : null;
+  // **Sem capa, a cor do perfil** (0.19, pedido do dono: «tem que ter a cor do
+  // banner escolhido como fundo, caso não tenha imagem»). A mesma camada, o
+  // mesmo véu e as mesmas regras de leitura da capa; o fundo é um degradê da
+  // cor (`--cor-do-perfil`, `tela-sessao.css`). Só para quem tem perfil
+  // oficial, e não onde quem veste já pinta a cor do rascunho (a faixa do
+  // cartão do perfil, `data-cor-propria`).
+  const cor = url || quadro.dataset.corPropria === "sim" ? null : corDoPerfilDe(id);
   let camada = quadro.querySelector(":scope > .capa-camada");
-  if (!url) {
+  if (!url && !cor) {
     camada?.remove();
     delete quadro.dataset.comCapa;
+    delete quadro.dataset.capaDeCor;
+    quadro.style.removeProperty("--cor-do-perfil");
     return quadro;
   }
   if (!camada) {
@@ -6212,9 +6256,24 @@ function aplicarCapa(quadro) {
     camada.setAttribute("aria-hidden", "true");
     quadro.prepend(camada);
   }
-  camada.style.backgroundImage = `url(${url})`;
   quadro.dataset.comCapa = "sim";
+  if (url) {
+    camada.style.backgroundImage = `url(${url})`;
+    delete quadro.dataset.capaDeCor;
+    quadro.style.removeProperty("--cor-do-perfil");
+  } else {
+    camada.style.removeProperty("background-image");
+    quadro.dataset.capaDeCor = "sim";
+    quadro.style.setProperty("--cor-do-perfil", cor);
+  }
   return quadro;
+}
+
+/** A cor do perfil oficial de uma pessoa (`#rrggbb`), ou `null` sem perfil. */
+function corDoPerfilDe(id) {
+  if (!id || typeof perfilOficial !== "function") return null;
+  const cor = perfilOficial(id)?.cor;
+  return typeof cor === "string" && /^#[0-9a-f]{6}$/i.test(cor) ? cor.toLowerCase() : null;
 }
 
 /**

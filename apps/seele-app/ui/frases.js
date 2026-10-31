@@ -3238,6 +3238,17 @@ const FRASES_DOS_PERFIS = Object.freeze({
     ControleSemQuebra: "Não aceita Enter nem caractere de controle.",
     Formato: "Use o formato #rrggbb.",
   }),
+  // **O nome** (um campo só, 0.19): ao lado dele, como as recusas de campo.
+  nome: Object.freeze({
+    vazio: "Escreva um nome.",
+    recusado: (causa) => {
+      const porque = CAUSAS_DE_RECUSA[causa];
+      return porque
+        ? `O servidor não aceitou o nome: ${porque.causa.toLocaleLowerCase("pt-BR")}. ${porque.fazer}`
+        : "O servidor não aceitou o nome. Nada mudou: tente de novo.";
+    },
+    semResposta: "O servidor não confirmou o nome. Nada mudou: tente salvar de novo.",
+  }),
   limites: Object.freeze({ NomeExibido: 40, Pronomes: 30, Status: 60, Bio: 280 }),
   contador: (n, max) => `${n}/${max}`,
   revisaoVelha: "Seu perfil mudou em outra janela. Recarregue para ver o que está valendo; o que você escreveu aqui se perde.",

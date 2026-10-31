@@ -303,6 +303,11 @@ function apelidoETagDe(id) {
   return { apelido: nome || `pessoa ${id}`, tag: "" };
 }
 
+/** Se o servidor já disse quem a pessoa é (`IdentidadeApresentada`, protocolo 11 em diante). */
+function identidadeConhecida(id) {
+  return typeof identidadesApresentadas !== "undefined" && Array.isArray(identidadesApresentadas?.[String(id)]);
+}
+
 /** A linha «pronomes · status», ou vazio. */
 function linhaDoPerfil(perfil) {
   return [perfil?.pronomes, perfil?.status].map((parte) => (parte ?? "").trim()).filter(Boolean).join(" · ");
@@ -317,11 +322,13 @@ function linhaDoPerfil(perfil) {
  *
  * `perfil` é o do armazém, ou o rascunho do editor (a prévia viva).
  */
-function montarCartaoDoPerfil(id, { perfil = perfilOficial(id), comoBotao = false, comBio = true, apelido: apelidoDado = null, imagens = null } = {}) {
+function montarCartaoDoPerfil(id, { perfil = perfilOficial(id), comoBotao = false, comBio = true, apelido: apelidoDado = null, tag: tagDada = null, imagens = null } = {}) {
   // `apelido` e `imagens` são do **perfil padrão** (`perfil-padrao.js`), que
   // não é de pessoa nenhuma de servidor nenhum: o apelido vem do campo, e a
-  // foto e a capa, dos `data:` que esta máquina guarda.
-  const { apelido, tag } = apelidoDado === null ? apelidoETagDe(id) : { apelido: apelidoDado, tag: "" };
+  // foto e a capa, dos `data:` que esta máquina guarda. Na prévia do editor
+  // dentro do servidor, o apelido é o do campo e a tag é a da chave: o nome
+  // que o SALVAR vai registrar, com a tag que o servidor mantém.
+  const { apelido, tag } = apelidoDado === null ? apelidoETagDe(id) : { apelido: apelidoDado, tag: tagDada ?? "" };
   const nome = perfil?.nome_exibido?.trim() || apelido;
   const raiz = elemento(comoBotao ? "button" : "article", "perfil-cartao");
   raiz.dataset.pessoa = String(id);
@@ -340,6 +347,10 @@ function montarCartaoDoPerfil(id, { perfil = perfilOficial(id), comoBotao = fals
     // Sem a marca: o redesenho dos perfis relê a moldura pelo id, e o padrão não tem id.
     delete foto.dataset.molduraDoPerfil;
   } else {
+    // Sem capa, a faixa já pinta a cor do perfil (`--perfil-cor`, a do
+    // rascunho na prévia): a camada de cor de `aplicarCapa`, que lê a cor do
+    // armazém, mostraria a cor de antes enquanto se escolhe outra.
+    capa.dataset.corPropria = "sim";
     vestirCapa(capa, id);
     vestirAvatar(foto, id);
     vestirMolduraDoPerfil(foto, id, perfil);
@@ -588,6 +599,13 @@ function fecharFolhaDoPerfil() {
 const editorDoPerfil = {
   aberto: false,
   /**
+   * O nome que o campo mostrou ao abrir: o nome exibido do perfil, ou o
+   * apelido quando o perfil não tem um. É contra ele que «tem alteração» se
+   * mede — um perfil cujo nome exibido difere do apelido abre sem alteração, e
+   * o SALVAR alinha os dois.
+   */
+  nomeNoCampo: "",
+  /**
    * `true` quando os campos do perfil aparecem: no servidor da vista com
    * perfis oficiais (`modo` `"oficial"`) e na tela inicial, onde o que se
    * edita é o perfil padrão desta máquina (`modo` `"padrao"`).
@@ -603,7 +621,9 @@ const editorDoPerfil = {
 
 /** Os campos do editor, pelo nome do campo no fio (`CampoDoPerfil`). */
 const CAMPOS_DO_EDITOR = Object.freeze({
-  NomeExibido: { id: "perfil-nome-exibido", chave: "nome_exibido" },
+  // Um nome só (0.19): o campo do nome é o do apelido, e a recusa do
+  // `nome_exibido` volta a ele.
+  NomeExibido: { id: "perfil-apelido", chave: "nome_exibido" },
   Pronomes: { id: "perfil-pronomes", chave: "pronomes" },
   Status: { id: "perfil-status", chave: "status" },
   Bio: { id: "perfil-bio", chave: "bio" },
@@ -626,7 +646,7 @@ function textosDoPerfil(perfil) {
 function entradaDoEditor() {
   const efeito = document.querySelector("#perfil-efeitos [aria-pressed='true']")?.dataset.efeito ?? "Nenhum";
   return {
-    nome_exibido: $("perfil-nome-exibido").value,
+    nome_exibido: $("perfil-apelido").value,
     pronomes: $("perfil-pronomes").value,
     status: $("perfil-status").value,
     bio: $("perfil-bio").value,
@@ -645,8 +665,9 @@ function mesmosTextos(a, b) {
 /** Se o editor tem alguma coisa escrita que ainda não foi salva. */
 function perfilTemAlteracoes() {
   if (!editorDoPerfil.aberto) return false;
-  if ($("perfil-apelido").value.trim() !== editorDoPerfil.apelido.trim()) return true;
-  return editorDoPerfil.oficial && !mesmosTextos(entradaDoEditor(), editorDoPerfil.base);
+  if ($("perfil-apelido").value.trim() !== editorDoPerfil.nomeNoCampo.trim()) return true;
+  return editorDoPerfil.oficial
+    && !mesmosTextos(entradaDoEditor(), { ...editorDoPerfil.base, nome_exibido: editorDoPerfil.nomeNoCampo });
 }
 
 /**
@@ -664,6 +685,7 @@ function prepararOEditorDoPerfil(snapshot, apelido, padrao = null) {
   editorDoPerfil.oficial = oficial;
   editorDoPerfil.modo = modo;
   editorDoPerfil.apelido = apelido ?? "";
+  editorDoPerfil.nomeNoCampo = editorDoPerfil.apelido;
   editorDoPerfil.estadoDaImagem = { Foto: "", Capa: "" };
   const raiz = $("perfil");
   raiz.dataset.oficial = oficial ? "sim" : "nao";
@@ -699,7 +721,10 @@ function imagensDoEditor() {
 }
 
 function preencherOEditor(textos) {
-  $("perfil-nome-exibido").value = textos.nome_exibido;
+  // **Um nome só**: o nome exibido, e o apelido quando o perfil não tem um.
+  const nome = (textos.nome_exibido ?? "").trim() || editorDoPerfil.apelido;
+  $("perfil-apelido").value = nome;
+  editorDoPerfil.nomeNoCampo = nome;
   $("perfil-pronomes").value = textos.pronomes;
   $("perfil-status").value = textos.status;
   $("perfil-bio").value = textos.bio;
@@ -755,7 +780,11 @@ function atualizarEditorDoPerfil() {
       apelido: $("perfil-apelido").value.trim() || editorDoPerfil.apelido || "?",
       imagens: { foto: imagens.foto?.url || null, capa: imagens.capa?.url || null },
     })
-    : montarCartaoDoPerfil(me, { perfil: rascunho });
+    : montarCartaoDoPerfil(me, {
+      perfil: rascunho,
+      apelido: $("perfil-apelido").value.trim() || editorDoPerfil.apelido || "?",
+      tag: apelidoETagDe(me).tag,
+    });
   previa.replaceChildren(cartao);
   for (const lado of ["Foto", "Capa"]) desenharBlocoDaImagem(lado, imagens);
 }
@@ -931,6 +960,92 @@ function mostrarErroDoPerfil(frase, { recarregar = false } = {}) {
   $("perfil-recarregar").hidden = !recarregar;
 }
 
+// ------------------------------------------------------------- o nome
+//
+// **Um nome só** (0.19, pedido do dono). O editor tinha o apelido e o nome
+// exibido, e a lista mostrava os dois; agora o campo é um, e o SALVAR o manda
+// ao registro do servidor (`SetNickname`, que mantém a tag da chave) e depois
+// ao perfil (`GravarPerfil`, o `nome_exibido`). A regra é a mais estrita das
+// duas: não vazio, o teto do fio do apelido (em bytes, lido da FFI pelo
+// `passaDoTeto`), os caracteres que o perfil recusa e o limite do nome exibido.
+
+/**
+ * Se `c` é recusado no nome: o `seele_proto::perfil::e_recusado` fora da bio
+ * (os controles C0 e C1, U+061C, LRM/RLM, U+202A–202E e U+2066–2069; a quebra
+ * de linha é um C0). O guarda `o_nome_recusa_os_mesmos_caracteres_que_o_perfil`
+ * o confere contra o Rust, código a código.
+ */
+function caractereRecusadoNoNome(c) {
+  const n = c.codePointAt(0);
+  return n <= 0x1f || (n >= 0x7f && n <= 0x9f) || n === 0x061c || n === 0x200e || n === 0x200f
+    || (n >= 0x202a && n <= 0x202e) || (n >= 0x2066 && n <= 0x2069);
+}
+
+/**
+ * **A conferência do nome antes de qualquer pedido**: a frase da recusa, ou
+ * `null`. `nome` já vem aparado, como os dois lados gravam.
+ */
+async function conferirONome(nome) {
+  const f = FRASES_DOS_PERFIS;
+  if (nome === "") return f.nome.vazio;
+  if ([...nome].some(caractereRecusadoNoNome)) return f.campo.ControleSemQuebra;
+  const grandeDemais = typeof passaDoTeto === "function" ? await passaDoTeto("apelido", nome) : null;
+  if (grandeDemais) return grandeDemais;
+  if ([...nome].length > f.limites.NomeExibido) return f.campo.Longo(f.limites.NomeExibido);
+  return null;
+}
+
+/** Diz no campo do nome por que ele não passou, e leva o teclado até lá. */
+function dizerNoNome(frase) {
+  const onde = $("perfil-apelido-erro");
+  onde.textContent = frase;
+  onde.hidden = false;
+  $("perfil-apelido").setAttribute("aria-invalid", "true");
+  $("perfil-apelido").focus();
+}
+
+/** Quem espera a recusa de um `SetNickname` (o `PedidoRecusado` do servidor). */
+const esperandoOApelido = new Set();
+
+/**
+ * **O nome ao registro do servidor, e o desfecho.** O `SetNickname` não tem
+ * resposta: o sim é a identidade apresentada da pessoa (`[base, tag]`)
+ * passar a ter este nome; o não é o aviso `PedidoRecusado` do `SetNickname`,
+ * que só quem pediu recebe; e sem nenhum dos dois, o prazo. `{ ok }` ou
+ * `{ frase }` — e quem recebe a frase não grava o perfil: um nome exibido que
+ * o registro recusou seria o nome divergente que este pedido veio acabar.
+ */
+async function mandarONomeAoServidor(nome, { carimbo = null, prazoMs = 10_000 } = {}) {
+  let feito = false;
+  let prazo = null;
+  let resolver;
+  const desfecho = new Promise((r) => { resolver = r; });
+  const acabar = (valor) => {
+    if (feito) return;
+    feito = true;
+    clearTimeout(prazo);
+    esperandoOApelido.delete(recusar);
+    resolver(valor);
+  };
+  const recusar = (causa) => acabar({ frase: FRASES_DOS_PERFIS.nome.recusado(causa) });
+  const olhar = () => {
+    if (feito) return;
+    if (apelidoETagDe(perfisOficiais.me).apelido.trim() === nome) return acabar({ ok: true });
+    setTimeout(olhar, 50);
+  };
+  esperandoOApelido.add(recusar);
+  prazo = setTimeout(() => acabar({ frase: FRASES_DOS_PERFIS.nome.semResposta }), prazoMs);
+  try {
+    await invoke("escolher_apelido", carimbo ? { apelido: nome, carimbo } : { apelido: nome });
+  } catch (falha) {
+    console.warn("escolher_apelido:", falha);
+    acabar({ frase: fraseDeErro(falha), falha });
+    return desfecho;
+  }
+  olhar();
+  return desfecho;
+}
+
 // ------------------------------------------------------------- o SALVAR
 
 /** Acorda quem espera o desfecho de um SALVAR, com o armazém novo. */
@@ -980,8 +1095,9 @@ function revisaoParaGravar() {
 
 /**
  * **SALVAR, a parte do perfil**: `GravarPerfil` com os textos, se mudaram, e
- * a espera do desfecho. `true` fecha o editor. O apelido (`SetNickname`) já
- * foi antes, por `guardarOApelido`; as imagens já foram ao escolher.
+ * a espera do desfecho. `true` fecha o editor. O nome já foi antes ao registro
+ * do servidor (`SetNickname`, por `guardarOApelido`), e só seguiu até aqui
+ * porque o servidor o aceitou; as imagens já foram ao escolher.
  */
 async function gravarOPerfilOficial() {
   if (!editorDoPerfil.oficial) return true;
@@ -1104,6 +1220,11 @@ function perfisAoEvento(mensagem) {
     return;
   }
   if (evento.PerfilRecusado) avisarQuemEsperaOPerfil(evento);
+  // O servidor não aceitou o nome: quem espera o `SetNickname` ouve por quê.
+  const recusa = evento.NoticeRaised?.notice?.reason?.PedidoRecusado;
+  if (recusa?.pedido === "SetNickname") {
+    for (const recusar of [...esperandoOApelido]) recusar(recusa.causa ?? null);
+  }
 }
 Promise.resolve(listen("seele://event", perfisAoEvento)).catch((falha) => console.warn("perfis: ouvir os eventos", falha));
 
@@ -1167,7 +1288,7 @@ Promise.resolve(listen("seele://event", perfisAoEvento)).catch((falha) => consol
     });
     efeitos.append(pilula);
   }
-  for (const id of ["perfil-nome-exibido", "perfil-pronomes", "perfil-status", "perfil-bio", "perfil-apelido"]) {
+  for (const id of ["perfil-pronomes", "perfil-status", "perfil-bio", "perfil-apelido"]) {
     $(id).addEventListener("input", () => {
       if (id === "perfil-bio") contarABio();
       atualizarEditorDoPerfil();

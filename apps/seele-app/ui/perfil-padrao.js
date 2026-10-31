@@ -225,6 +225,12 @@ async function aplicarOPadrao(acao, carimbo, { forcar = false, visto = null } = 
   // **A revisão é a do perfil que a decisão viu**, e não a da lista que chegou
   // durante a espera: se o perfil mudou por fora nesse meio-tempo, o servidor
   // responde `RevisaoVelha`, e ele não é sobrescrito.
+  // **Um nome só** (0.19): o nome do padrão vai também ao registro do
+  // servidor, e antes do perfil — recusado ali, o perfil não é gravado com um
+  // nome exibido que o registro não tem.
+  const alinhado = await alinharONomeNoServidor(carimbo, entrada.nome_exibido);
+  if (alinhado.frase) throw new FalhaDoPadrao(alinhado.frase, "apelido");
+
   let meu = visto;
   if (acao === "primeira" || !meu || !mesmosTextos(textosDoPerfil(meu), entrada)) {
     let revisao = acao === "primeira" ? 0 : (meu?.revisao ?? 0);
@@ -279,6 +285,53 @@ async function aplicarOPadrao(acao, carimbo, { forcar = false, visto = null } = 
   return { resultado: "aplicado" };
 }
 
+/** Os nomes já mandados ao registro nesta janela (`sessao:nome`): uma vez cada. */
+const nomesAlinhados = new Set();
+
+/**
+ * **O registro do servidor com o nome do perfil.** O `Hello` de cada conexão
+ * leva o apelido desta máquina, e o servidor o grava: um nome trocado dentro
+ * do servidor (o `nome_exibido` e o `SetNickname`, juntos) voltaria ao apelido
+ * de antes na conexão seguinte. Aqui o registro segue o nome do perfil — uma
+ * vez por sessão e nome, e só quando o servidor já disse quem a pessoa é.
+ *
+ * `{}` quando não há o que fazer (ou o nome não cabe no registro, o que é dito
+ * no console), `{ ok }` quando foi, `{ frase }` quando o servidor recusou.
+ */
+async function alinharONomeNoServidor(carimbo, nome) {
+  const me = perfisOficiais.me;
+  nome = (nome ?? "").trim();
+  if (!nome || !identidadeConhecida(me) || apelidoETagDe(me).apelido.trim() === nome) return {};
+  const chave = `${carimbo.sessao}:${nome}`;
+  if (nomesAlinhados.has(chave)) return {};
+  nomesAlinhados.add(chave);
+  const recusa = await conferirONome(nome);
+  if (recusa) {
+    console.warn(`perfil: o nome do perfil não cabe no registro do servidor, e o apelido ficou: ${recusa}`);
+    return {};
+  }
+  const desfecho = await mandarONomeAoServidor(nome, { carimbo });
+  if (!desfecho.ok) console.warn(`perfil: o servidor não alinhou o apelido ao nome do perfil: ${desfecho.frase}`);
+  return desfecho;
+}
+
+/**
+ * **A pergunta do nome semeia o padrão** (`guardarOApelido`, `camada-nomear.js`):
+ * o nome com que se entra passa a ser o nome do perfil padrão quando ele ainda
+ * não tem um — o nome é um só, e o padrão que nunca foi escrito não fica
+ * mudo sobre ele. Uma falha é dita no console, e o apelido continua gravado.
+ */
+async function semearONomeDoPadrao(nome) {
+  const padrao = await lerOPerfilPadrao();
+  if (!padrao || (padrao.nome_exibido ?? "").trim() !== "") return;
+  const entrada = { ...entradaDoPadrao(padrao), nome_exibido: nome };
+  try {
+    estadoDoPadrao.atual = await invoke("gravar_perfil_padrao", { entrada });
+  } catch (falha) {
+    console.warn("perfil padrão: o nome não foi semeado:", falha);
+  }
+}
+
 /** A falha de aplicar o padrão na sessão da vista, ou `null` (o aviso da coluna lê). */
 function falhaDoPadraoNaVista() {
   const sessao = typeof vistaDaJanela === "object" ? vistaDaJanela.sessao : null;
@@ -325,6 +378,9 @@ async function conferirOPadrao({ forcar = false } = {}) {
     let decisao = decidirOPadrao({ disponivel: perfisOficiais.disponivel, meu, padrao, seguimento });
     if (forcar && padrao?.revisao > 0 && seguimento?.servidor) decisao = { acao: meu ? "seguir" : "primeira" };
     acao = decisao.acao;
+    // Quem não vai receber o padrão agora, e tem perfil aqui: o registro segue
+    // o nome dele (`alinharONomeNoServidor`).
+    if (meu && acao !== "primeira" && acao !== "seguir") await alinharONomeNoServidor(carimbo, meu.nome_exibido);
     if (acao === "soltar") {
       await guardarOSeguimento(carimbo, { segue: false, revisao_aplicada: seguimento.revisao_aplicada, assinatura: null });
       console.info("perfil padrão: o perfil deste servidor mudou por outro caminho, e ele deixou de seguir o padrão");
