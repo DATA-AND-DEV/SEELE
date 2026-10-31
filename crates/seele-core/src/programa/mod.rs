@@ -29,7 +29,9 @@
 mod aceite;
 mod baixar;
 mod caminho;
+mod copia;
 mod desempacotar;
+mod empacotar;
 mod escrever;
 mod hash;
 mod ler;
@@ -47,7 +49,11 @@ pub use baixar::{
     Resposta, MAX_REDIRECIONAMENTOS, MAX_TENTATIVAS,
 };
 pub use caminho::dentro_da_raiz;
+pub use copia::{
+    CopiaOferecida, CopiaRecebida, PedidoDeCopia, MAX_TENTATIVAS_DA_COPIA, PRAZO_SEM_BYTES_DA_COPIA,
+};
 pub use desempacotar::{Desempacotado, PedidoDeDesempacotar, MAX_ENTRADAS_DESEMPACOTADAS};
+pub use empacotar::Empacotado;
 pub use escrever::MAX_BYTES_ESCRITOS;
 pub use hash::{o_mais_forte, AlgoritmoDeHash, HashDeclarado};
 pub use ler::MAX_BYTES_LIDOS;
@@ -111,6 +117,11 @@ pub struct Politica {
     pub pack: Option<HashDeclarado>,
     /// O teto de disco da raiz, em bytes.
     pub teto_de_disco: u64,
+    /// **As portas em que esta máquina pode oferecer uma cópia do mundo**
+    /// (API 8 parte 7): as portas TCP dos túneis da oferta aceita. A cópia só
+    /// sai desta máquina por um túnel que o dono aceitou servir; uma porta que
+    /// a tela não mostrou não se abre.
+    pub portas_de_copia: Vec<u16>,
     /// A pasta deste servidor de jogo, dentro da área do MOD. Criada se não
     /// existir.
     pub raiz: PathBuf,
@@ -396,6 +407,65 @@ pub enum Recusa {
         /// O arquivo pedido.
         arquivo: String,
     },
+    /// A origem de `empacotar` não é uma pasta (API 8 parte 7).
+    #[error("{origem} não é uma pasta: só uma pasta se empacota")]
+    NaoEPasta {
+        /// A origem pedida.
+        origem: String,
+    },
+    /// O pacote cairia dentro da pasta que se empacota: ele se leria a si
+    /// mesmo enquanto cresce.
+    #[error("{arquivo} fica dentro de {origem}: o pacote não pode morar na pasta que ele copia")]
+    ArquivoDentroDaOrigem {
+        /// O pacote pedido.
+        arquivo: String,
+        /// A pasta que se empacota.
+        origem: String,
+    },
+    /// A porta pedida para oferecer a cópia não é a de um túnel TCP aceito.
+    #[error("a porta {porta} não é de um túnel aceito (as aceitas são {aceitas:?})")]
+    PortaForaDoAceite {
+        /// A porta pedida.
+        porta: u16,
+        /// As portas TCP dos túneis da oferta aceita.
+        aceitas: Vec<u16>,
+    },
+    /// O sistema não deixou escutar na porta (outro programa a usa).
+    #[error("a porta {porta} não abriu em 127.0.0.1: {motivo}")]
+    PortaOcupada {
+        /// A porta pedida.
+        porta: u16,
+        /// O que o sistema disse.
+        motivo: String,
+    },
+    /// A máquina que oferece a cópia a recusou (outra cópia, código errado).
+    #[error("a máquina que tem a cópia a recusou: {motivo}")]
+    CopiaRecusada {
+        /// O nome do motivo que ela deu (`codigo-errado`, `outra-copia`,
+        /// `copia-mudou`, `alem-do-fim`, `tamanho-diferente`, `fala-errada`).
+        motivo: String,
+    },
+    /// A ligação com a máquina que tem a cópia caiu mais vezes que o teto;
+    /// o que chegou fica guardado, e a próxima vez continua dali.
+    #[error("a cópia parou em {recebidos} de {tamanho} bytes depois de {tentativas} tentativas: {motivo}")]
+    CopiaCaiu {
+        /// Os bytes que já estão no disco.
+        recebidos: u64,
+        /// O tamanho da cópia.
+        tamanho: u64,
+        /// Quantas vezes se tentou.
+        tentativas: u32,
+        /// O que deu errado na última.
+        motivo: String,
+    },
+    /// A cópia inteira chegou e o sha256 não é o anunciado. Nada foi gravado.
+    #[error("a cópia chegou com o sha256 {obtido}, e o anunciado era {esperado}; nada foi gravado")]
+    CopiaNaoBate {
+        /// O sha256 anunciado.
+        esperado: String,
+        /// O sha256 do que chegou.
+        obtido: String,
+    },
 }
 
 /// **Todo nome de [`Recusa`]**, na ordem do enum: o que `api/v8.json` escreve
@@ -436,6 +506,13 @@ pub const NOMES_DAS_RECUSAS: &[&str] = &[
     "sem-pack-aceito",
     "pack-diferente",
     "nao-e-texto",
+    "nao-e-pasta",
+    "arquivo-dentro-da-origem",
+    "porta-fora-do-aceite",
+    "porta-ocupada",
+    "copia-recusada",
+    "copia-caiu",
+    "copia-nao-bate",
 ];
 
 impl Recusa {
@@ -478,6 +555,13 @@ impl Recusa {
             Self::SemPackAceito { .. } => "sem-pack-aceito",
             Self::PackDiferente { .. } => "pack-diferente",
             Self::NaoETexto { .. } => "nao-e-texto",
+            Self::NaoEPasta { .. } => "nao-e-pasta",
+            Self::ArquivoDentroDaOrigem { .. } => "arquivo-dentro-da-origem",
+            Self::PortaForaDoAceite { .. } => "porta-fora-do-aceite",
+            Self::PortaOcupada { .. } => "porta-ocupada",
+            Self::CopiaRecusada { .. } => "copia-recusada",
+            Self::CopiaCaiu { .. } => "copia-caiu",
+            Self::CopiaNaoBate { .. } => "copia-nao-bate",
         }
     }
 }
@@ -518,6 +602,9 @@ pub(crate) struct Interior {
     pub(crate) downloads: Mutex<HashMap<u64, tokio::task::AbortHandle>>,
     /// Os processos vivos: o sinal de matar e a tarefa que os vigia.
     pub(crate) processos: Mutex<HashMap<u64, rodar::Vigia>>,
+    /// A cópia do mundo que esta máquina oferece agora (API 8 parte 7): a
+    /// escuta em `127.0.0.1`, uma só por vez.
+    pub(crate) copia: Mutex<Option<tokio::task::AbortHandle>>,
 }
 
 impl Interior {
@@ -582,6 +669,7 @@ impl Programa {
                 proximo: AtomicU64::new(1),
                 downloads: Mutex::new(HashMap::new()),
                 processos: Mutex::new(HashMap::new()),
+                copia: Mutex::new(None),
             }),
         })
     }
@@ -624,6 +712,7 @@ impl Programa {
         for download in downloads {
             download.abort();
         }
+        copia::parar_de_oferecer(&self.interior);
         let vigias: Vec<rodar::Vigia> = self
             .interior
             .processos
@@ -648,6 +737,7 @@ impl Drop for Programa {
                 download.abort();
             }
         }
+        copia::parar_de_oferecer(&self.interior);
         if let Ok(processos) = self.interior.processos.lock() {
             for vigia in processos.values() {
                 vigia.mandar_matar();
@@ -786,6 +876,30 @@ mod tests {
                 obtido: s(),
             },
             Recusa::NaoETexto { arquivo: s() },
+            Recusa::NaoEPasta { origem: s() },
+            Recusa::ArquivoDentroDaOrigem {
+                arquivo: s(),
+                origem: s(),
+            },
+            Recusa::PortaForaDoAceite {
+                porta: 0,
+                aceitas: vec![],
+            },
+            Recusa::PortaOcupada {
+                porta: 0,
+                motivo: s(),
+            },
+            Recusa::CopiaRecusada { motivo: s() },
+            Recusa::CopiaCaiu {
+                recebidos: 0,
+                tamanho: 0,
+                tentativas: 0,
+                motivo: s(),
+            },
+            Recusa::CopiaNaoBate {
+                esperado: s(),
+                obtido: s(),
+            },
         ];
         let nomes: Vec<&str> = todas.iter().map(Recusa::nome).collect();
         assert_eq!(nomes, NOMES_DAS_RECUSAS);

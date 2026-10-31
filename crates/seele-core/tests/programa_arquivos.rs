@@ -44,6 +44,7 @@ fn programa_com_pack(nome: &str, teto: u64, pack: Option<HashDeclarado>) -> (Pas
         instalar: None,
         pack,
         teto_de_disco: teto,
+        portas_de_copia: vec![],
         raiz: caminho.join("jogo"),
     };
     let origem: Arc<dyn Origem> = Arc::new(OrigemHttps::nova().unwrap());

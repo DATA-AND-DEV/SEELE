@@ -1652,6 +1652,8 @@ pub struct Server {
     /// A cópia de [`crate::ServerConfig::malha_para_tuneis`]: se o servidor
     /// apresenta as pontas de um túnel para o caminho direto.
     pub malha_para_tuneis: bool,
+    /// A cópia de [`crate::ServerConfig::prazo_da_maquina_sumida`].
+    pub prazo_da_maquina_sumida: std::time::Duration,
     /// The attachment store, its ceiling, and the byte budget. ADR 0027.
     ///
     /// `None` when this server has nowhere to keep blobs, which is the in-memory
@@ -1747,7 +1749,7 @@ pub struct Server {
     /// máquina (`mundo.maquinas.avisar`), com o excedente junto por servidor de
     /// jogo. Um orçamento à parte do das janelas: são outros destinatários, e
     /// uma máquina falante não pode atrasar o «mudou» de uma janela.
-    pub avisador_de_maquinas: Arc<crate::mods::aviso::Avisador<String>>,
+    pub avisador_de_maquinas: Arc<crate::mods::aviso::Avisador<(String, crate::maquinas::Papel)>>,
     /// A impressão do certificado **de longa duração** deste servidor — a
     /// identidade —, em bytes: o SHA-256 do DER dele, o mesmo cujo hex vai no
     /// `fp=` do link.

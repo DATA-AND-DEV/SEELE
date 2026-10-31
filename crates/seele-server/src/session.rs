@@ -2924,11 +2924,12 @@ async fn run_session(
                         );
                         match aceite {
                             Ok(aceita) => {
-                                tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, "máquina: aceita");
+                                tracing::info!(mod_id = %mod_id, servidor = %servidor, papel = aceita.papel.nome(), quem = %session.person, "máquina: aceita");
                                 let _ = server.events.send(crate::server::Event::Maquina(
                                     crate::maquinas::MudancaDeMaquina::Aceitou {
                                         mod_id: mod_id.clone(),
                                         servidor: servidor.clone(),
+                                        papel: aceita.papel,
                                         quem: session.person,
                                     },
                                 ));
@@ -2968,14 +2969,15 @@ async fn run_session(
                             motivo,
                         );
                         match recusa {
-                            crate::maquinas::Recusa::Recusado(motivo) => {
+                            crate::maquinas::Recusa::Recusado(motivo, papel) => {
                                 let nome = seele_proto::maquina::nome_da_recusa(&motivo);
                                 crate::maquinas::lembrar_a_recusa(server, &mod_id, &servidor, session.person, motivo);
-                                tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: recusada por quem foi chamado");
+                                tracing::info!(mod_id = %mod_id, servidor = %servidor, papel = papel.nome(), quem = %session.person, motivo = nome, "máquina: recusada por quem foi chamado");
                                 let _ = server.events.send(crate::server::Event::Maquina(
                                     crate::maquinas::MudancaDeMaquina::Recusou {
                                         mod_id,
                                         servidor,
+                                        papel,
                                         quem: session.person,
                                         motivo: nome,
                                     },
@@ -2993,24 +2995,14 @@ async fn run_session(
                         let nome = seele_proto::maquina::nome_da_parada(&motivo);
                         // `maquinas()` solto antes de `parar_tuneis` tomar
                         // `tuneis()`: a ordem do doc de `Server::maquinas`.
-                        let parada = server.maquinas().parar(
+                        if !crate::maquinas::parou(
+                            server,
                             session.person,
                             connection.stable_id() as u64,
                             &mod_id,
                             &servidor,
-                        );
-                        if let Some(parada) = parada {
-                            tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: parou");
-                            let _ = server.events.send(crate::server::Event::Maquina(
-                                crate::maquinas::MudancaDeMaquina::Parou {
-                                    mod_id: mod_id.clone(),
-                                    servidor,
-                                    quem: session.person,
-                                    motivo: nome,
-                                },
-                            ));
-                            crate::maquinas::parar_tuneis(server, session.person, &mod_id, &parada.a_parar);
-                        } else {
+                            nome,
+                        ) {
                             tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %session.person, motivo = nome, "máquina: parada de quem não é a máquina aceita por esta conexão; ignorada");
                         }
                     }
@@ -7279,6 +7271,7 @@ mod fim_de_tela_por_sessao {
             tuneis: std::sync::Mutex::new(crate::tuneis::Tuneis::default()),
             maquinas: std::sync::Mutex::new(crate::maquinas::Maquinas::default()),
             malha_para_tuneis: true,
+            prazo_da_maquina_sumida: crate::PRAZO_DA_MAQUINA_SUMIDA,
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
             telas: Arc::new(Mutex::new(Telas::default())),
             anexos: None,

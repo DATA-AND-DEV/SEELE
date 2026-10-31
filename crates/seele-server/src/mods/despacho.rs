@@ -600,7 +600,9 @@ pub fn so_para(evento: &crate::server::Event) -> Option<&str> {
         Event::Maquina(
             MudancaDeMaquina::Aceitou { mod_id, .. }
             | MudancaDeMaquina::Recusou { mod_id, .. }
-            | MudancaDeMaquina::Parou { mod_id, .. },
+            | MudancaDeMaquina::Parou { mod_id, .. }
+            | MudancaDeMaquina::Sumiu { mod_id, .. }
+            | MudancaDeMaquina::Voltou { mod_id, .. },
         ) => Some(mod_id),
         _ => None,
     }
@@ -668,40 +670,84 @@ pub fn momento_de(evento: &crate::server::Event) -> Option<(&'static str, String
         ),
         // A máquina de jogo (API 8, parte 3): só ao MOD que a pediu, por
         // `so_para`. `motivo` é o nome em kebab-case.
-        Event::Maquina(MudancaDeMaquina::Aceitou { servidor, quem, .. }) => (
+        Event::Maquina(MudancaDeMaquina::Aceitou {
+            servidor,
+            papel,
+            quem,
+            ..
+        }) => (
             "MaquinaAceitou",
             format!(
-                r#"{{"servidor":{},"pessoa":{}}}"#,
+                r#"{{"servidor":{},"papel":"{}","pessoa":{}}}"#,
                 texto_json(servidor),
+                papel.nome(),
                 quem.0
             ),
         ),
         Event::Maquina(MudancaDeMaquina::Recusou {
             servidor,
+            papel,
             quem,
             motivo,
             ..
         }) => (
             "MaquinaRecusou",
             format!(
-                r#"{{"servidor":{},"pessoa":{},"motivo":{}}}"#,
+                r#"{{"servidor":{},"papel":"{}","pessoa":{},"motivo":{}}}"#,
                 texto_json(servidor),
+                papel.nome(),
                 quem.0,
                 texto_json(motivo)
             ),
         ),
         Event::Maquina(MudancaDeMaquina::Parou {
             servidor,
+            papel,
             quem,
             motivo,
             ..
         }) => (
             "MaquinaParou",
             format!(
-                r#"{{"servidor":{},"pessoa":{},"motivo":{}}}"#,
+                r#"{{"servidor":{},"papel":"{}","pessoa":{},"motivo":{}}}"#,
                 texto_json(servidor),
+                papel.nome(),
                 quem.0,
                 texto_json(motivo)
+            ),
+        ),
+        // A máquina que parou e não voltou no prazo (API 8 parte 7).
+        Event::Maquina(MudancaDeMaquina::Sumiu {
+            servidor,
+            papel,
+            quem,
+            motivo,
+            segundos,
+            ..
+        }) => (
+            "MaquinaSumiu",
+            format!(
+                r#"{{"servidor":{},"papel":"{}","pessoa":{},"motivo":{},"segundos":{}}}"#,
+                texto_json(servidor),
+                papel.nome(),
+                quem.0,
+                texto_json(motivo),
+                segundos
+            ),
+        ),
+        // Quem operava caiu e voltou (API 8 parte 7).
+        Event::Maquina(MudancaDeMaquina::Voltou {
+            servidor,
+            papel,
+            quem,
+            ..
+        }) => (
+            "MaquinaVoltou",
+            format!(
+                r#"{{"servidor":{},"papel":"{}","pessoa":{}}}"#,
+                texto_json(servidor),
+                papel.nome(),
+                quem.0
             ),
         ),
         // Telemetria e o que mais não está no `api/v1.json`.
@@ -832,7 +878,7 @@ mod tests {
     /// pé), e `so_para` diz o MOD — sem ele, `None`, todo MOD ligado.
     #[test]
     fn os_momentos_da_maquina_saem_com_a_carga_e_so_para_o_mod_dela() {
-        use crate::maquinas::MudancaDeMaquina;
+        use crate::maquinas::{MudancaDeMaquina, Papel};
         use crate::server::Event;
         use seele_proto::ids::PersonId;
 
@@ -841,30 +887,55 @@ mod tests {
                 MudancaDeMaquina::Aceitou {
                     mod_id: "x/jogo".into(),
                     servidor: "mc-1".into(),
+                    papel: Papel::Principal,
                     quem: PersonId(4),
                 },
                 "MaquinaAceitou",
-                serde_json::json!({ "servidor": "mc-1", "pessoa": 4 }),
+                serde_json::json!({ "servidor": "mc-1", "papel": "principal", "pessoa": 4 }),
             ),
             (
                 MudancaDeMaquina::Recusou {
                     mod_id: "x/jogo".into(),
                     servidor: "mc-1".into(),
+                    papel: Papel::Reserva,
                     quem: PersonId(4),
                     motivo: "nao-esta-aqui",
                 },
                 "MaquinaRecusou",
-                serde_json::json!({ "servidor": "mc-1", "pessoa": 4, "motivo": "nao-esta-aqui" }),
+                serde_json::json!({ "servidor": "mc-1", "papel": "reserva", "pessoa": 4, "motivo": "nao-esta-aqui" }),
             ),
             (
                 MudancaDeMaquina::Parou {
                     mod_id: "x/jogo".into(),
                     servidor: "a\"b".into(),
+                    papel: Papel::Principal,
                     quem: PersonId(4),
                     motivo: "saiu",
                 },
                 "MaquinaParou",
-                serde_json::json!({ "servidor": "a\"b", "pessoa": 4, "motivo": "saiu" }),
+                serde_json::json!({ "servidor": "a\"b", "papel": "principal", "pessoa": 4, "motivo": "saiu" }),
+            ),
+            (
+                MudancaDeMaquina::Sumiu {
+                    mod_id: "x/jogo".into(),
+                    servidor: "mc-1".into(),
+                    papel: Papel::Principal,
+                    quem: PersonId(4),
+                    motivo: "saiu",
+                    segundos: 60,
+                },
+                "MaquinaSumiu",
+                serde_json::json!({ "servidor": "mc-1", "papel": "principal", "pessoa": 4, "motivo": "saiu", "segundos": 60 }),
+            ),
+            (
+                MudancaDeMaquina::Voltou {
+                    mod_id: "x/jogo".into(),
+                    servidor: "mc-1".into(),
+                    papel: Papel::Principal,
+                    quem: PersonId(4),
+                },
+                "MaquinaVoltou",
+                serde_json::json!({ "servidor": "mc-1", "papel": "principal", "pessoa": 4 }),
             ),
         ];
         for (mudanca, nome, carga) in casos {

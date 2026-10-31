@@ -312,7 +312,15 @@ pub struct ServerConfig {
     /// Quem apresenta as pontas é [`crate::tuneis::apresentar`], que lê a cópia
     /// guardada em [`crate::server::Server`].
     pub malha_para_tuneis: bool,
+    /// **Quanto uma máquina de jogo aceita pode sumir antes de a metade de
+    /// servidor ouvir `MaquinaSumiu`** (API 8 parte 7, a reserva). **Padrão:
+    /// 60 s**, o prazo curto da spec. O servidor não passa a posse sozinho:
+    /// ele só acorda a metade de servidor, que decide.
+    pub prazo_da_maquina_sumida: std::time::Duration,
 }
+
+/// O padrão de [`ServerConfig::prazo_da_maquina_sumida`].
+pub const PRAZO_DA_MAQUINA_SUMIDA: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -354,6 +362,7 @@ impl Default for ServerConfig {
             modo_local: false,
             // Ligada: a malha alivia o anfitrião, e a estrela cobre o resto.
             malha_para_tuneis: true,
+            prazo_da_maquina_sumida: PRAZO_DA_MAQUINA_SUMIDA,
         }
     }
 }
@@ -769,6 +778,7 @@ impl Daemon {
             tuneis: std::sync::Mutex::new(tuneis::Tuneis::default()),
             maquinas: std::sync::Mutex::new(maquinas::Maquinas::default()),
             malha_para_tuneis: config.malha_para_tuneis,
+            prazo_da_maquina_sumida: config.prazo_da_maquina_sumida,
             anexos,
             caminho_bps: config.caminho_bps,
             versao_do_anuncio: config.versao_do_anuncio,

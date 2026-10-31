@@ -766,7 +766,7 @@ async fn chamar_e_aceitar(m: &Montado, gestora: &mut Par, quem: &mut Par) -> Res
         m,
         "momentos",
         &format!(
-            r#"MaquinaAceitou {{"servidor":"mc-1","pessoa":{}}}"#,
+            r#"MaquinaAceitou {{"servidor":"mc-1","papel":"principal","pessoa":{}}}"#,
             quem.pessoa.0
         ),
     )
@@ -823,7 +823,7 @@ async fn a_metade_de_servidor_chama_e_ouve_o_aceite() -> Result<()> {
         &m,
         "momentos",
         &format!(
-            r#"MaquinaParou {{"servidor":"mc-1","pessoa":{},"motivo":"pelo-dono"}}"#,
+            r#"MaquinaParou {{"servidor":"mc-1","papel":"principal","pessoa":{},"motivo":"pelo-dono"}}"#,
             alice.pessoa.0
         ),
     )
@@ -861,7 +861,7 @@ async fn a_recusa_de_quem_foi_chamado_chega_ao_mod() -> Result<()> {
         &m,
         "momentos",
         &format!(
-            r#"MaquinaRecusou {{"servidor":"mc-1","pessoa":{},"motivo":"pelo-dono"}}"#,
+            r#"MaquinaRecusou {{"servidor":"mc-1","papel":"principal","pessoa":{},"motivo":"pelo-dono"}}"#,
             alice.pessoa.0
         ),
     )
@@ -995,7 +995,7 @@ async fn pedir_a_quem_nao_esta_aqui_volta_como_recusa() -> Result<()> {
             &m,
             "momentos",
             &format!(
-                r#"MaquinaRecusou {{"servidor":"mc-1","pessoa":{quem},"motivo":"nao-esta-aqui"}}"#
+                r#"MaquinaRecusou {{"servidor":"mc-1","papel":"principal","pessoa":{quem},"motivo":"nao-esta-aqui"}}"#
             ),
         )
         .await;
@@ -1257,7 +1257,7 @@ async fn a_recusa_automatica_de_uma_sessao_nao_derruba_o_pedido_da_outra() -> Re
         &m,
         "momentos",
         &format!(
-            r#"MaquinaAceitou {{"servidor":"mc-1","pessoa":{}}}"#,
+            r#"MaquinaAceitou {{"servidor":"mc-1","papel":"principal","pessoa":{}}}"#,
             app.pessoa.0
         ),
     )
@@ -1322,7 +1322,7 @@ async fn so_quando_todas_recusam_sozinhas_o_pedido_cai() -> Result<()> {
         &m,
         "momentos",
         &format!(
-            r#"MaquinaRecusou {{"servidor":"mc-1","pessoa":{},"motivo":"so-no-app"}}"#,
+            r#"MaquinaRecusou {{"servidor":"mc-1","papel":"principal","pessoa":{},"motivo":"so-no-app"}}"#,
             um.pessoa.0
         ),
     )
@@ -1345,7 +1345,7 @@ async fn so_quando_todas_recusam_sozinhas_o_pedido_cai() -> Result<()> {
         &m,
         "momentos",
         &format!(
-            r#"MaquinaRecusou {{"servidor":"mc-1","pessoa":{},"motivo":"pelo-dono"}}"#,
+            r#"MaquinaRecusou {{"servidor":"mc-1","papel":"principal","pessoa":{},"motivo":"pelo-dono"}}"#,
             um.pessoa.0
         ),
     )

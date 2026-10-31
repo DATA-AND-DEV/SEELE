@@ -143,4 +143,12 @@ d10e67f96793d648ec0c5941c7d5c000ada385e4b707e5020b97df3f5f3908c7  v7.json
 #   jaEstava do baixar, e as recusas novas do programa e da cola. Conferido em
 #   31/10/2026 no release (`curl` do CLAUDE.md): a mais nova é a v0.18.3, e a
 #   v8 segue sem release.
-afd5d662e0cce1916526bb2d4d2d659dff5fffacd6618f85df2c648cddc872c8  v8.json
+# - Emenda da reserva (31/10/2026, parte 7): o papel (principal ou reserva) em
+#   mundo.maquinas.pedir e .avisar, mundo.maquinas.dona (a posse), papel e dona
+#   em contexto.maquina e o papel nos momentos da máquina, os momentos
+#   MaquinaSumiu e MaquinaVoltou, maquina.programa.empacotar, .oferecerCopia e
+#   .receberCopia, as recusas novas (das máquinas, do programa e da cola) e os
+#   limites maquina-sumida e copia-do-mundo. Conferido em 31/10/2026 no
+#   release (`curl` do CLAUDE.md): a mais nova é a v0.18.3, e a v8 segue sem
+#   release.
+df6fe0bf2997fedd59de9030f12711c9e1c31bbb18335c435e65e4f7fc14d3af  v8.json

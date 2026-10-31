@@ -20933,11 +20933,12 @@ fn o_preludio_e_o_roteador_falam_os_mesmos_tipos_pela_mesma_capacidade() {
         );
     }
     // Os quatro da parte 3 (`maquina-pedir` e os três `porta-*`), os sete do
-    // poder `programa` da parte 4 e os dois da parte 6 (`programa-trazer`,
-    // `programa-ler`).
+    // poder `programa` da parte 4, os dois da parte 6 (`programa-trazer`,
+    // `programa-ler`) e os três da cópia do mundo da parte 7
+    // (`programa-empacotar`, `programa-oferecer-copia`, `programa-receber-copia`).
     assert_eq!(
         tipos_da_maquina.len(),
-        13,
+        16,
         "a leitura dos tipos da metade de máquina quebrou: {tipos_da_maquina:?}"
     );
 

@@ -143,9 +143,11 @@ async fn a_porta_fecha(porta: u16) -> Result<()> {
 fn momento(nome: &str, pessoa: u64, motivo: Option<&str>) -> String {
     match motivo {
         Some(m) => format!(
-            r#"{nome} {{"servidor":"{SERVIDOR_DE_JOGO}","pessoa":{pessoa},"motivo":"{m}"}}"#
+            r#"{nome} {{"servidor":"{SERVIDOR_DE_JOGO}","papel":"principal","pessoa":{pessoa},"motivo":"{m}"}}"#
         ),
-        None => format!(r#"{nome} {{"servidor":"{SERVIDOR_DE_JOGO}","pessoa":{pessoa}}}"#),
+        None => format!(
+            r#"{nome} {{"servidor":"{SERVIDOR_DE_JOGO}","papel":"principal","pessoa":{pessoa}}}"#
+        ),
     }
 }
 

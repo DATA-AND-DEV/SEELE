@@ -33,7 +33,7 @@ use seele_proto::tunel::ProtocoloDeTunel;
 use serde_json::{Map, Value};
 
 use super::aviso::{AvisoDeclarado, AvisoQueSai, TETO_DO_AVISO};
-use crate::maquinas::{Excesso, MudancaDeMaquina, Pedido};
+use crate::maquinas::{Excesso, MudancaDeMaquina, Papel, Pedido};
 use crate::server::{Event, Server};
 
 /// Quantos servidores de jogo uma chamada pode pedir. Pedir é mostrar uma tela
@@ -59,6 +59,8 @@ pub struct PedidoDeclarado {
     pub quem: PersonId,
     /// O servidor de jogo.
     pub servidor: String,
+    /// O papel (API 8 parte 7): `principal`, se o MOD não disse.
+    pub papel: Papel,
     /// O que a pessoa vai ver.
     pub oferta: OfertaDeMaquina,
 }
@@ -66,20 +68,40 @@ pub struct PedidoDeclarado {
 /// O que uma chamada declarou em `mundo.maquinas`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Declarado {
-    /// Os pedidos, o mais novo de cada servidor de jogo.
+    /// Os pedidos, o mais novo de cada servidor de jogo e papel.
     pub pedidos: Vec<PedidoDeclarado>,
-    /// Os avisos, o mais novo de cada servidor de jogo (`canal` é o servidor).
-    pub avisos: Vec<AvisoDeclarado<String>>,
+    /// Os avisos, o mais novo de cada servidor de jogo e papel (`canal` é o
+    /// par).
+    pub avisos: Vec<AvisoDeclarado<(String, Papel)>>,
+    /// A posse (API 8 parte 7): a mais nova de cada servidor de jogo.
+    pub donas: Vec<(String, Papel)>,
 }
 
 impl Declarado {
     /// Nada a despejar.
     #[must_use]
     pub fn vazio(&self) -> bool {
-        self.pedidos.is_empty() && self.avisos.is_empty()
+        self.pedidos.is_empty() && self.avisos.is_empty() && self.donas.is_empty()
     }
 
-    /// Guarda o pedido, o mais novo de cada servidor de jogo.
+    /// Guarda a posse, a mais nova de cada servidor de jogo.
+    ///
+    /// # Errors
+    ///
+    /// `donas-demais` além de [`MAX_AVISOS_A_MAQUINA_POR_CHAMADA`] servidores.
+    pub fn juntar_dona(&mut self, servidor: String, papel: Papel) -> Result<(), &'static str> {
+        if let Some(mesma) = self.donas.iter_mut().find(|(s, _)| *s == servidor) {
+            mesma.1 = papel;
+            return Ok(());
+        }
+        if self.donas.len() >= MAX_AVISOS_A_MAQUINA_POR_CHAMADA {
+            return Err("donas-demais");
+        }
+        self.donas.push((servidor, papel));
+        Ok(())
+    }
+
+    /// Guarda o pedido, o mais novo de cada servidor de jogo e papel.
     ///
     /// # Errors
     ///
@@ -88,7 +110,7 @@ impl Declarado {
         if let Some(mesmo) = self
             .pedidos
             .iter_mut()
-            .find(|p| p.servidor == pedido.servidor)
+            .find(|p| p.servidor == pedido.servidor && p.papel == pedido.papel)
         {
             *mesmo = pedido;
             return Ok(());
@@ -105,7 +127,10 @@ impl Declarado {
     /// # Errors
     ///
     /// `avisos-a-maquina-demais` além de [`MAX_AVISOS_A_MAQUINA_POR_CHAMADA`].
-    pub fn juntar_aviso(&mut self, aviso: AvisoDeclarado<String>) -> Result<(), &'static str> {
+    pub fn juntar_aviso(
+        &mut self,
+        aviso: AvisoDeclarado<(String, Papel)>,
+    ) -> Result<(), &'static str> {
         if let Some(mesmo) = self.avisos.iter_mut().find(|a| a.canal == aviso.canal) {
             *mesmo = aviso;
             return Ok(());
@@ -133,6 +158,15 @@ fn objeto_da_chamada<'js>(
         Ok(Value::Object(objeto)) => Some(objeto),
         _ => None,
     })
+}
+
+/// `papel`: `principal` (o padrão, sem a chave) ou `reserva`.
+fn papel_de(objeto: &Map<String, Value>) -> Result<Papel, String> {
+    match objeto.get("papel") {
+        None | Some(Value::Null) => Ok(Papel::Principal),
+        Some(Value::String(s)) => Papel::de(s).ok_or_else(|| "papel-invalido".to_owned()),
+        Some(_) => Err("papel-invalido".to_owned()),
+    }
 }
 
 fn servidor_de(objeto: &Map<String, Value>) -> Result<String, String> {
@@ -172,6 +206,7 @@ pub fn pedido_da_chamada<'js>(
     };
     Ok((|| {
         let servidor = servidor_de(&objeto)?;
+        let papel = papel_de(&objeto)?;
         let quem = quem_de(&objeto)?;
         let oferta = match objeto.get("oferta") {
             Some(Value::Object(oferta)) => oferta_do_json(oferta),
@@ -181,14 +216,39 @@ pub fn pedido_da_chamada<'js>(
         Ok(PedidoDeclarado {
             quem,
             servidor,
+            papel,
             oferta,
         })
     })())
 }
 
-/// O argumento de `mundo.maquinas.avisar` (`{ servidor, carga }`), ou o nome
-/// da recusa: `servidor-invalido`, `aviso-invalido` (sem carga, ou uma que o
-/// JSON não escreve) e `aviso-grande-demais` (acima de [`TETO_DO_AVISO`]).
+/// O argumento de `mundo.maquinas.dona` (`{ servidor, papel }`, API 8 parte
+/// 7), ou o nome da recusa: `servidor-invalido`, `papel-invalido` (aqui o
+/// papel é obrigatório: a posse não tem padrão que se escreva sem querer).
+///
+/// # Errors
+///
+/// As de [`pedido_da_chamada`].
+pub fn dona_da_chamada<'js>(
+    ctx: &rquickjs::Ctx<'js>,
+    valor: rquickjs::Value<'js>,
+) -> rquickjs::Result<Result<(String, Papel), String>> {
+    let Some(objeto) = objeto_da_chamada(ctx, valor)? else {
+        return Ok(Err("dona-invalida".to_owned()));
+    };
+    Ok((|| {
+        let servidor = servidor_de(&objeto)?;
+        if !objeto.contains_key("papel") {
+            return Err("papel-invalido".to_owned());
+        }
+        Ok((servidor, papel_de(&objeto)?))
+    })())
+}
+
+/// O argumento de `mundo.maquinas.avisar` (`{ servidor, papel, carga }`), ou o
+/// nome da recusa: `servidor-invalido`, `papel-invalido`, `aviso-invalido`
+/// (sem carga, ou uma que o JSON não escreve) e `aviso-grande-demais` (acima
+/// de [`TETO_DO_AVISO`]). Sem `papel`, o aviso vai à principal.
 ///
 /// # Errors
 ///
@@ -196,7 +256,7 @@ pub fn pedido_da_chamada<'js>(
 pub fn aviso_da_chamada<'js>(
     ctx: &rquickjs::Ctx<'js>,
     valor: rquickjs::Value<'js>,
-) -> rquickjs::Result<Result<AvisoDeclarado<String>, &'static str>> {
+) -> rquickjs::Result<Result<AvisoDeclarado<(String, Papel)>, &'static str>> {
     let Some(objeto) = valor
         .as_object()
         .filter(|_| valor.type_of() == rquickjs::Type::Object)
@@ -212,6 +272,21 @@ pub fn aviso_da_chamada<'js>(
     else {
         return Ok(Err("servidor-invalido"));
     };
+    let papel_js: rquickjs::Value<'js> = objeto.get("papel")?;
+    let papel = if papel_js.is_undefined() || papel_js.is_null() {
+        Papel::Principal
+    } else {
+        match papel_js
+            .as_string()
+            .map(rquickjs::String::to_string)
+            .transpose()?
+            .as_deref()
+            .and_then(Papel::de)
+        {
+            Some(papel) => papel,
+            None => return Ok(Err("papel-invalido")),
+        }
+    };
     let carga_js: rquickjs::Value<'js> = objeto.get("carga")?;
     let Some(texto) = ctx.json_stringify(carga_js)? else {
         return Ok(Err("aviso-invalido"));
@@ -221,7 +296,7 @@ pub fn aviso_da_chamada<'js>(
         return Ok(Err("aviso-grande-demais"));
     }
     Ok(Ok(AvisoDeclarado {
-        canal: servidor,
+        canal: (servidor, papel),
         carga,
     }))
 }
@@ -454,6 +529,7 @@ const fn nome_do_excesso(excesso: Excesso) -> &'static str {
     match excesso {
         Excesso::PendentesDemais => "pendentes-demais",
         Excesso::MaquinasDemais => "maquinas-demais",
+        Excesso::MesmaPessoaNasDuas => "mesma-pessoa-nas-duas",
     }
 }
 
@@ -489,10 +565,18 @@ pub async fn despejar(server: &Arc<Server>, mod_id: &str, origem: Origem, declar
         }
     };
 
+    // **A posse antes de tudo** (API 8 parte 7): o aviso que a mesma chamada
+    // manda à nova dona («assuma») tem de achá-la já dona, e os túneis da de
+    // antes param antes de ela ouvir «desligue».
+    for (servidor, papel) in declarado.donas {
+        crate::maquinas::passar_a_posse(server, mod_id, &servidor, papel);
+    }
+
     for pedido in declarado.pedidos {
         let PedidoDeclarado {
             quem,
             servidor,
+            papel,
             oferta,
         } = pedido;
         // Um momento que pede de novo a quem acabou de recusar **sozinho**
@@ -514,18 +598,19 @@ pub async fn despejar(server: &Arc<Server>, mod_id: &str, origem: Origem, declar
         }
         if !server.maquinas().pode_ser_chamada(quem) {
             tracing::info!(mod_id = %mod_id, servidor = %servidor, quem = %quem, motivo = NAO_ESTA_AQUI, "máquina: pedido a quem não está conectado num 12; volta ao MOD como recusa");
-            recusar_ao_mod(server, origem, mod_id, servidor, quem, NAO_ESTA_AQUI);
+            recusar_ao_mod(server, origem, mod_id, servidor, papel, quem, NAO_ESTA_AQUI);
             continue;
         }
-        // `maquinas::pedir` já diz no log o que fez, inclusive o teto.
-        if let Pedido::Recusado(excesso) =
-            crate::maquinas::pedir(server, mod_id, &hash, &servidor, quem, pedido_por, &oferta)
-        {
+        // `maquinas::pedir_como` já diz no log o que fez, inclusive o teto.
+        if let Pedido::Recusado(excesso) = crate::maquinas::pedir_como(
+            server, mod_id, &hash, &servidor, papel, quem, pedido_por, &oferta,
+        ) {
             recusar_ao_mod(
                 server,
                 origem,
                 mod_id,
                 servidor,
+                papel,
                 quem,
                 nome_do_excesso(excesso),
             );
@@ -534,10 +619,15 @@ pub async fn despejar(server: &Arc<Server>, mod_id: &str, origem: Origem, declar
 
     let mut a_mandar = Vec::new();
     for aviso in declarado.avisos {
-        if server.maquinas().quem_opera(mod_id, &aviso.canal).is_some() {
+        let (servidor, papel) = &aviso.canal;
+        if server
+            .maquinas()
+            .quem_opera_como(mod_id, servidor, *papel)
+            .is_some()
+        {
             a_mandar.push(aviso);
         } else {
-            sem_maquina(server, mod_id, &aviso.canal);
+            sem_maquina(server, mod_id, servidor, *papel);
         }
     }
     if a_mandar.is_empty() {
@@ -567,6 +657,7 @@ fn recusar_ao_mod(
     origem: Origem,
     mod_id: &str,
     servidor: String,
+    papel: Papel,
     quem: PersonId,
     motivo: &'static str,
 ) {
@@ -589,6 +680,7 @@ fn recusar_ao_mod(
         .send(Event::Maquina(MudancaDeMaquina::Recusou {
             mod_id: mod_id.to_owned(),
             servidor,
+            papel,
             quem,
             motivo,
         }));
@@ -597,26 +689,27 @@ fn recusar_ao_mod(
 /// Um aviso sem máquina aceita: não sai, e o MOD não lê erro nenhum (a chamada
 /// que o declarou já terminou). Fica no log, com o nome, e no contador do MOD
 /// ([`Server::avisos_sem_maquina`]).
-fn sem_maquina(server: &Server, mod_id: &str, servidor: &str) {
+fn sem_maquina(server: &Server, mod_id: &str, servidor: &str, papel: Papel) {
     let quantos = server.maquinas().contar_aviso_sem_maquina(mod_id);
-    tracing::info!(mod_id = %mod_id, servidor = %servidor, motivo = SEM_MAQUINA, quantos, "máquina: aviso a um servidor de jogo sem máquina aceita; não saiu");
+    tracing::info!(mod_id = %mod_id, servidor = %servidor, papel = papel.nome(), motivo = SEM_MAQUINA, quantos, "máquina: aviso a um servidor de jogo sem máquina aceita; não saiu");
 }
 
 /// Solta um aviso que passou pela taxa: à máquina aceita **agora**, que pode
 /// não ser a de quando ele foi declarado.
-fn entregar_aviso(server: &Server, saindo: AvisoQueSai<String>) {
-    let operador = server.maquinas().operador(&saindo.mod_id, &saindo.canal);
+fn entregar_aviso(server: &Server, saindo: AvisoQueSai<(String, Papel)>) {
+    let (servidor, papel) = saindo.canal;
+    let operador = server.maquinas().operador(&saindo.mod_id, &servidor, papel);
     match operador {
         Some((para, conexao)) => {
             let _ = server.events.send(Event::AvisoParaMaquina {
                 para,
                 conexao,
                 mod_id: saindo.mod_id,
-                servidor: saindo.canal,
+                servidor,
                 carga: saindo.carga,
             });
         }
-        None => sem_maquina(server, &saindo.mod_id, &saindo.canal),
+        None => sem_maquina(server, &saindo.mod_id, &servidor, papel),
     }
 }
 
@@ -668,11 +761,21 @@ mod tests {
             "avisos-a-maquina-demais",
             nome_do_excesso(Excesso::PendentesDemais),
             nome_do_excesso(Excesso::MaquinasDemais),
+            nome_do_excesso(Excesso::MesmaPessoaNasDuas),
+            "papel-invalido",
+            "dona-invalida",
+            "donas-demais",
         ] {
             assert!(recusas.contains(nome), "`{nome}` falta em recusas.maquinas");
         }
         let momentos = v8["moments"].to_string();
-        for nome in ["MaquinaAceitou", "MaquinaRecusou", "MaquinaParou"] {
+        for nome in [
+            "MaquinaAceitou",
+            "MaquinaRecusou",
+            "MaquinaParou",
+            "MaquinaSumiu",
+            "MaquinaVoltou",
+        ] {
             assert!(momentos.contains(nome), "`{nome}` falta em moments");
         }
     }

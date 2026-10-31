@@ -116,6 +116,7 @@ fn programa(der: &[u8], nome: &str) -> (Pasta, Programa) {
             instalar: None,
             pack: None,
             teto_de_disco: 1 << 30,
+            portas_de_copia: vec![],
             raiz: pasta.0.join("jogo"),
         },
         origem,

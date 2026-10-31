@@ -709,6 +709,32 @@ pub const PRELUDIO: &str = r#"
           argumentos: Array.isArray(pedido?.argumentos) ? pedido.argumentos.map(String) : [],
           pasta: String(pedido?.pasta ?? ''),
         })),
+        // **A cópia do mundo** (API 8 parte 7). `empacotar` faz um `.tar.gz`
+        // de uma pasta (depois do salvamento seguro da receita) e resolve com
+        // `{ arquivo, tamanho, sha256, arquivos, bytes, linksPulados }`;
+        // `oferecerCopia` o serve na porta de um túnel TCP aceito e resolve com
+        // `{ codigo, tamanho, sha256, porta }`; `receberCopia` entra no túnel
+        // `tunel` da oferta, recebe, confere o sha256 e retoma, e resolve com
+        // `{ destino, tamanho, sha256, retomadas, jaEstavam, caminho }`.
+        empacotar: (pedido) => pedir('programa-empacotar', {
+          origem: String(pedido?.origem ?? ''),
+          arquivo: String(pedido?.arquivo ?? ''),
+        }),
+        oferecerCopia: (pedido) => pedir('programa-oferecer-copia', {
+          arquivo: String(pedido?.arquivo ?? ''),
+          porta: Number(pedido?.porta),
+        }),
+        receberCopia: (pedido) => {
+          const n = proximo + 1;
+          if (typeof (pedido && pedido.aoProgresso) === 'function') progressos.set(n, pedido.aoProgresso);
+          return pedir('programa-receber-copia', {
+            tunel: String(pedido?.tunel ?? ''),
+            codigo: String(pedido?.codigo ?? ''),
+            sha256: String(pedido?.sha256 ?? ''),
+            tamanho: Number(pedido?.tamanho),
+            destino: String(pedido?.destino ?? ''),
+          }).finally(() => { progressos.delete(n); });
+        },
         // `{ nome: vezes }`: cada recusa desde que esta metade subiu.
         recusas: () => pedir('programa-recusas', {}),
       });
