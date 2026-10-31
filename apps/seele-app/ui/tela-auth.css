@@ -354,11 +354,57 @@
   color: var(--seele-osso-apagado);
   font-family: var(--seele-ui);
 }
-/* «Esperar é normal» (0.19): a primeira coisa que quem espera lê, e a que
-   responde se deu errado. Em osso, e não no apagado das outras. */
-.auth-espera-normal {
+/* **A cabeça da sala de espera** (0.19; decisão do dono, 31/10): acima de tudo,
+   no tamanho do título, e só na espera pendente. No lugar dela some o «Entrar
+   no servidor», que lido de cima parecia uma entrada parada. Laranja e não
+   vermelho: esperar não é falha. */
+.auth-espera-cabeca { display: none; }
+#tela-auth[data-modo="espera"][data-espera="pendente"] .auth-espera-cabeca {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#tela-auth[data-modo="espera"][data-espera="pendente"] .auth-cabeca { display: none; }
+.auth-espera-rotulo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--seele-mono);
+  font-size: 11px;
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  color: var(--seele-laranja-nerv);
+}
+/* O ponto que pulsa: alguém do outro lado decide, e a tela continua viva. */
+.auth-espera-rotulo::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: var(--seele-raio-pilula);
+  background: var(--seele-laranja-nerv);
+  animation: auth-espera-pulso 1.4s ease-in-out infinite;
+}
+@keyframes auth-espera-pulso { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .auth-espera-rotulo::before { animation: none; } }
+.auth-espera-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: 44px;
+  line-height: 1.08;
+  letter-spacing: var(--seele-tracking-cartela);
   color: var(--seele-osso);
-  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.auth-espera-nao-e-erro {
+  margin: 0;
+  font-family: var(--seele-ui);
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--seele-osso);
+}
+@media (max-width: 700px) {
+  .auth-espera-titulo { font-size: 32px; }
 }
 
 .auth-servidor-cabecalho {

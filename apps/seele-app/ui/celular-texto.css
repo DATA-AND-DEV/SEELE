@@ -895,6 +895,12 @@
 :where(:root[data-casca="celular"]) .auth-parede { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .auth-espera-frase { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .auth-espera-fatos { font-size: calc(14px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-espera-rotulo { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-espera-titulo { font-size: calc(44px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .auth-espera-nao-e-erro { font-size: calc(17px * var(--cel-escala)); }
+@media (max-width: 700px) {
+  :where(:root[data-casca="celular"]) .auth-espera-titulo { font-size: calc(32px * var(--cel-escala)); }
+}
 :where(:root[data-casca="celular"]) .auth-servidor-cabecalho { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .auth-server-nome { font-size: calc(26px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .auth-server-sub { font-size: calc(11px * var(--cel-escala)); }

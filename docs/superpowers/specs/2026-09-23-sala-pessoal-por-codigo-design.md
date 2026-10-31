@@ -417,7 +417,9 @@ protocolo.
   O estado chega à casca por evento.
 - **Saída do app:** `prevent_exit`, depois `encerrar` nas duas hospedagens (a
   escada desce e os convidados recebem `ChamadaEncerrada`), e só então `exit`.
-  A confirmação ao fechar vale só para o servidor guardado.
+  A confirmação ao fechar vale só para o servidor guardado. **Emenda de 31/10
+  (decisão do dono, `docs/0.19/decisoes.md`):** também pergunta quem fecha com
+  um pedido esperando na portaria de alguém.
 - **"Não receber ligações"**, no PERFIL, desliga a sala pessoal inteira. Sem
   registro no quarto, quem liga lê «NÃO ESTÁ DISPONÍVEL».
 - **A porta 8385 ocupada**, por exemplo por outra instância, vira

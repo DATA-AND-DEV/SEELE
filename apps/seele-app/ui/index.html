@@ -2446,6 +2446,18 @@
 
     <!-- ---------------- A·02 ---------------- -->
     <div class="auth-entrada">
+      <!--
+        **A cabeça da sala de espera** (0.19; decisão do dono em 31/10: «muita
+        gente confunde a espera com não ter dado certo»). Só em espera pendente
+        (`data-espera="pendente"`), e acima de tudo, no tamanho do título: só
+        falta a aprovação de quem hospeda, e não é carregamento nem erro. O
+        `role="status"` anuncia a chegada a ela; o texto vem de `frases.js`.
+      -->
+      <div id="auth-espera-cabeca" class="auth-espera-cabeca" role="status">
+        <span id="auth-espera-rotulo" class="auth-espera-rotulo"></span>
+        <p id="auth-espera-titulo" class="auth-espera-titulo"></p>
+        <p id="auth-espera-nao-e-erro" class="auth-espera-nao-e-erro"></p>
+      </div>
       <div class="auth-cabeca">
         <h1 class="auth-titulo"><span class="auth-eyebrow">Entrar no servidor</span> <span id="auth-titulo-nome" class="auth-titulo-nome">——</span></h1>
         <div class="auth-selo">
@@ -2531,7 +2543,6 @@
         <div id="auth-espera" class="auth-espera">
           <p id="auth-espera-frase" class="auth-espera-frase"></p>
           <ul class="auth-espera-fatos">
-            <li id="auth-espera-normal" class="auth-espera-normal"></li>
             <li>Esta tela verifica a aprovação automaticamente enquanto estiver aberta.</li>
             <li>Seu pedido fica guardado. Você pode voltar mais tarde ou avisar quem hospeda por outro canal.</li>
           </ul>

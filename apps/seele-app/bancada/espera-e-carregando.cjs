@@ -20,12 +20,16 @@
 // 6. **A espera da portaria no desktop**: a tela diz que esperar é normal; o
 //    VOLTAR À ENTRADA e o Esc perguntam antes, com o foco no CONTINUAR
 //    ESPERANDO; Esc e apertar fora ficam; SAIR MESMO ASSIM sai e para de bater;
-//    a recusa por baixo da caixa a fecha; recusado, sair não pergunta.
+//    a recusa por baixo da caixa a fecha; recusado, sair não pergunta. A cabeça
+//    «Esperando a aprovação de quem hospeda» vem acima de tudo, em letra
+//    grande; fechar a janela (e o Cmd+Q) com o pedido pendente pergunta antes
+//    (decisão do dono, 31/10), e sem pedido fecha direto.
 // 7. **A espera no celular** («ENTRAR EM»): o aviso é o laranja do que se lê, e
-//    não o vermelho do erro; o AGORA NÃO e o ‹ VOLTAR perguntam antes.
+//    não o vermelho do erro, e a cabeça da espera vem acima do título; o AGORA
+//    NÃO e o ‹ VOLTAR perguntam antes.
 //
 // Rodar:  node apps/seele-app/bancada/espera-e-carregando.cjs [--fotos <pasta>]
-//         [--reverter=carregando|um-por-vez|falha|sair|celular]
+//         [--reverter=carregando|um-por-vez|falha|sair|fechar|cabeca|celular]
 //
 // `--reverter=<nome>` serve à página uma cópia com o conserto desfeito (nunca
 // na árvore), e a bancada tem de reprovar.
@@ -48,6 +52,8 @@ const REVERSOES = {
   "um-por-vez": ["tela-boot.js", "  if (hospedandoAgora) {", "  if (false) {"],
   falha: ["tela-boot.js", 'hospedagemFalhou(subiu ? "entrar" : "subir", erro.textContent, noAr ? f.ficouNoAr : f.nadaNoAr);', "fecharHospedando();"],
   sair: ["tela-auth.js", '$("auth-voltar").addEventListener("click", sairDaEspera);', '$("auth-voltar").addEventListener("click", voltarParaAEntrada);'],
+  fechar: ["camada-hospedagem.js", "      if (!esperaPendenteNaTela()) return;\n      pedido.preventDefault();", "      return;\n      pedido.preventDefault();"],
+  cabeca: ["tela-auth.js", "$(\"auth-espera-titulo\").textContent = FRASES_DA_ESPERA.titulo;", ""],
   celular: ["celular-entrada.js", 'const sair = naPortaria ? () => perguntarAntesDeSairDaEspera("aparelho", agoraNao) : agoraNao;', "const sair = agoraNao;"],
 };
 if (reverter && !REVERSOES[reverter]) {
@@ -112,7 +118,11 @@ const ANFITRIAO = {
             return tabela[cmd] ?? null;
           } },
           event: { listen: async (nome, ouvinte) => { if (nome === "seele://event") ouvintes.push(ouvinte); return () => {}; } },
-          window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+          window: { getCurrentWindow: () => ({
+            onCloseRequested(f) { window.aoFechar = f; },
+            close: async () => { window.fechou = (window.fechou ?? 0) + 1; },
+            isMaximized: async () => false,
+          }) },
         };
       }, { tabela: respostas({ meu_servidor: null, onde_estou: "Guardado", snapshot: null }), snapshot: retrato() });
       await page.goto(endereco);
@@ -231,8 +241,27 @@ const ANFITRIAO = {
       naEspera: !$("tela-auth").hidden,
     }));
     await esperar();
-    assert.equal(await page.evaluate(() => $("auth-espera-normal").textContent), F.e.normal, "a espera não diz que esperar é normal");
-    await foto(page, "espera-desktop.png");
+    const cab = await page.evaluate(() => {
+      const t = $("auth-espera-titulo");
+      const caixa = $("auth-espera-cabeca").getBoundingClientRect();
+      const resto = [...document.querySelectorAll("#tela-auth .auth-entrada > *")]
+        .filter((e) => e.id !== "auth-espera-cabeca" && e.getClientRects().length > 0);
+      return {
+        texto: t.textContent,
+        visivel: t.getClientRects().length > 0,
+        tamanho: parseFloat(getComputedStyle(t).fontSize),
+        acima: resto.every((e) => e.getBoundingClientRect().top >= caixa.bottom - 1),
+        entrarNoServidor: document.querySelector("#tela-auth .auth-cabeca").getClientRects().length > 0,
+        nota: $("auth-espera-nao-e-erro").textContent,
+      };
+    });
+    assert.equal(cab.visivel, true, "a espera pendente não mostra a cabeça");
+    assert.equal(cab.texto, F.e.titulo);
+    assert.equal(cab.nota, F.e.naoEErro);
+    assert.ok(cab.tamanho >= 40, `a cabeça da espera não está em letra grande: ${cab.tamanho}px`);
+    assert.ok(cab.acima, "há coisa acima da cabeça da espera");
+    assert.equal(cab.entrarNoServidor, false, "o «Entrar no servidor» continua por cima da espera");
+    await foto(page, "espera-explicita-desktop.png");
     await page.click("#auth-voltar");
     let p = await pergunta();
     assert.equal(p.aberta, true, "VOLTAR À ENTRADA saiu da espera sem perguntar");
@@ -257,7 +286,30 @@ const ANFITRIAO = {
     await page.click("#auth-voltar");
     assert.equal((await pergunta()).aberta, false, "uma recusa perguntou antes de sair");
     assert.equal(await page.evaluate(() => !$("tela-boot").hidden), true);
-    // De novo na espera: SAIR MESMO ASSIM sai, e para de bater.
+    // De novo na espera: fechar a janela (e o Cmd+Q, que passa por ela) pergunta.
+    await esperar();
+    const fecharJanela = () => page.evaluate(async () => {
+      let segurou = false;
+      await aoFechar({ preventDefault() { segurou = true; } });
+      return segurou;
+    });
+    assert.equal(await fecharJanela(), true, "fechar a janela com o pedido pendente não perguntou");
+    p = await pergunta();
+    assert.equal(p.aberta, true);
+    assert.equal(p.foco, "sair-da-espera-ficar", "fechar: o padrão não é CONTINUAR ESPERANDO");
+    assert.deepEqual(p.itens, [F.e.nadaErrado, F.e.fechar, F.e.voltar]);
+    assert.equal(await page.evaluate(() => $("sair-da-espera-titulo").textContent), F.e.tituloSair);
+    assert.equal(await page.evaluate(() => $("sair-da-espera-sair").textContent), F.e.fecharMesmo);
+    await foto(page, "fechar-na-espera-desktop.png");
+    await page.click("#sair-da-espera-ficar");
+    assert.equal(await page.evaluate(() => window.fechou ?? 0), 0, "CONTINUAR ESPERANDO fechou a janela");
+    assert.equal(await fecharJanela(), true);
+    await page.click("#sair-da-espera-sair");
+    await page.waitForFunction(() => window.fechou === 1, null, { timeout: 2000 });
+    // Sem pedido pendente (fora da espera), fechar passa direto.
+    await page.evaluate(() => { $("tela-auth").hidden = true; $("tela-boot").hidden = false; });
+    assert.equal(await fecharJanela(), false, "fechar sem pedido pendente foi segurado");
+    // E de novo na espera: SAIR MESMO ASSIM sai, e para de bater.
     await esperar();
     await page.click("#auth-voltar");
     await page.click("#sair-da-espera-sair");
@@ -286,11 +338,24 @@ const ANFITRIAO = {
     });
     await page.locator("#cel-entrada-apelido").fill("bancada celular");
     await page.locator(".cel-entrada-pe button").filter({ hasText: /^ENTRAR$/ }).click();
-    const desfecho = page.locator(".cel-entrada-aviso").filter({ hasText: "QUEM HOSPEDA AINDA NÃO DECIDIU" });
-    await desfecho.waitFor();
-    assert.equal(await desfecho.getAttribute("data-tipo"), null, "a espera do celular veste o vermelho do erro");
-    assert.equal(await desfecho.getAttribute("role"), "status");
-    await foto(page, "espera-celular.png");
+    const cabeca = page.locator(".cel-entrada-espera");
+    await cabeca.waitFor();
+    const cel = await page.evaluate(() => {
+      const c = document.querySelector(".cel-entrada-espera");
+      const titulo = document.querySelector("#cel-entrada-titulo");
+      return {
+        texto: c.querySelector(".cel-entrada-espera-titulo").textContent,
+        tamanho: parseFloat(getComputedStyle(c.querySelector(".cel-entrada-espera-titulo")).fontSize),
+        acima: c.getBoundingClientRect().bottom <= titulo.getBoundingClientRect().top,
+        vermelho: document.querySelectorAll('.cel-entrada-aviso[data-tipo="erro"]').length,
+      };
+    });
+    assert.equal(cel.texto, F.e.titulo, "a espera do celular não diz que só espera a aprovação");
+    assert.ok(cel.acima, "a cabeça da espera não está acima do «Entrar em»");
+    assert.ok(cel.tamanho >= 28, `a cabeça da espera não está em letra grande: ${cel.tamanho}px`);
+    assert.equal(cel.vermelho, 0, "a espera do celular veste o vermelho do erro");
+    assert.equal(await cabeca.getAttribute("role"), "status");
+    await foto(page, "espera-explicita-celular.png");
     for (const qual of ["agora-nao", "voltar"]) {
       const saida = qual === "agora-nao" ? page.getByRole("button", { name: "AGORA NÃO", exact: true }) : page.locator(".cel-entrada-voltar");
       await saida.click();

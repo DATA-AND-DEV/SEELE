@@ -19,13 +19,16 @@
 // - a «ENTRAR EM» do celular, depois de uma batida que ficou na portaria: o
 //   AGORA NÃO e o ‹ VOLTAR (`celular-entrada.js`).
 //
-// **Fechar a janela não pergunta**, e é decisão, não esquecimento. No app, o
-// fechar só é segurado com o servidor guardado no ar (tarefa 21 da F7; spec de
-// 23/09: «a confirmação ao fechar vale só para o servidor guardado»), e o guarda
-// `a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta` prende
-// isso. No navegador, o `beforeunload` só mostra a frase genérica dele («sair
-// do site?»), que diria que algo se perde — e nada se perde: o pedido continua
-// no servidor.
+// - fechar a janela do app, e o Cmd+Q do macOS, que passa por ela
+//   (`camada-hospedagem.js`, o mesmo ouvinte do fechar com o servidor no ar).
+//   Decisão do dono em 31/10, por cima da regra de 23/09 («a confirmação ao
+//   fechar vale só para o servidor guardado»): «muita gente confunde a espera
+//   com não ter dado certo» (`docs/0.19/decisoes.md`).
+//
+// **Fechar a aba do navegador não pergunta**, e é decisão: o `beforeunload` só
+// mostra a frase genérica do navegador («sair do site? as alterações podem não
+// ser salvas»), que diz o contrário do que é verdade — nada se perde, o pedido
+// continua no servidor. Ver `docs/0.19/decisoes.md`.
 
 "use strict";
 
@@ -41,8 +44,9 @@ let soltarDoVoltar = null;
 /**
  * Pergunta antes de sair de uma espera pendente.
  *
- * `modo`: `"sair"` (a `#tela-auth`, que confere sozinha) ou `"aparelho"` (a
- * «ENTRAR EM» do celular, onde o servidor fica na lista do aparelho). `sair` roda no SAIR
+ * `modo`: `"sair"` (a `#tela-auth`, que confere sozinha), `"fechar"` (a
+ * janela do app fechando) ou `"aparelho"` (a «ENTRAR EM» do celular, onde o
+ * servidor fica na lista do aparelho). `sair` roda no SAIR
  * MESMO ASSIM, e só nele.
  */
 function perguntarAntesDeSairDaEspera(modo, sair) {
@@ -52,20 +56,20 @@ function perguntarAntesDeSairDaEspera(modo, sair) {
   const doAparelho = modo === "aparelho" || (modo === "sair" && CASCA.esperaNoAparelho === true);
   const itens = [
     f.nadaErrado,
-    doAparelho ? f.sairCelular : f.sair,
+    doAparelho ? f.sairCelular : modo === "fechar" ? f.fechar : f.sair,
     doAparelho ? f.voltarCelular : f.voltar,
   ];
   focoAntesDeSairDaEspera = document.activeElement;
   saidaDaEspera = sair;
   $("sair-da-espera-rotulo").textContent = f.rotulo;
-  $("sair-da-espera-titulo").textContent = f.titulo;
+  $("sair-da-espera-titulo").textContent = f.tituloSair;
   $("sair-da-espera-itens").replaceChildren(...itens.map((texto) => elemento("li", null, texto)));
-  $("sair-da-espera-sair").textContent = f.sairMesmo;
+  $("sair-da-espera-sair").textContent = modo === "fechar" ? f.fecharMesmo : f.sairMesmo;
   $("sair-da-espera-ficar").textContent = f.ficar;
   $("sair-da-espera").dataset.modo = modo;
   $("sair-da-espera").hidden = false;
   $("sair-da-espera-ficar").focus();
-  anunciar(`${f.titulo}. ${f.nadaErrado}`);
+  anunciar(`${f.tituloSair}. ${f.nadaErrado}`);
   // O voltar do celular fecha a camada de cima: aqui, continuar esperando.
   const empilhar = typeof CELULAR === "object" && CELULAR ? CELULAR.ajudante("empilhar") : null;
   soltarDoVoltar?.();

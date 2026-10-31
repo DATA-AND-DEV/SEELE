@@ -284,7 +284,13 @@
     // dizendo que o pedido continua (`camada-sair-da-espera.js`).
     const naPortaria = desfecho?.erro === "espera-de-admissao";
     const sair = naPortaria ? () => perguntarAntesDeSairDaEspera("aparelho", agoraNao) : agoraNao;
-    const avisoDoDesfecho = desfecho && desfecho.erro && aviso(fraseDoDesfecho(desfecho), {
+    // E acima de tudo, no tamanho do título (decisão do dono, 31/10): só falta
+    // a aprovação de quem hospeda. O aviso pequeno sai: a cabeça diz o mesmo.
+    const cabecaDaEspera = naPortaria && h("div", { class: "cel-entrada-espera", role: "status" },
+      h("span", { class: "cel-entrada-espera-rotulo", text: FRASES_DA_ESPERA.rotulo }),
+      h("p", { class: "cel-entrada-espera-titulo", text: FRASES_DA_ESPERA.titulo }),
+      h("p", { class: "cel-entrada-espera-nota", text: FRASES_DA_ESPERA.naoEErroCelular }));
+    const avisoDoDesfecho = !naPortaria && desfecho && desfecho.erro && aviso(fraseDoDesfecho(desfecho), {
       erro: !naPortaria,
       extra: desfecho.erro === "recusado" && desfecho.razao !== AINDA_NAO_NO_NAVEGADOR && desfecho.razao
         && h("p", { class: "cel-entrada-razao", text: MOTIVOS[desfecho.razao] ?? desfecho.razao }),
@@ -324,6 +330,7 @@
 
     mostrar([
       h("button", { class: "cel-entrada-voltar", type: "button", onclick: sair }, h("span", { "aria-hidden": "true", text: "‹ " }), h("span", { text: FRASES_DAS_SESSOES.voltar })),
+      cabecaDaEspera,
       titulo(f.titulo, " ", h("span", { class: "cel-entrada-endereco", text: lido.endereco ? `${lido.endereco}?` : "" })),
       avisoDoDesfecho,
       avisoDoEstado,

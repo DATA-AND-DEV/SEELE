@@ -1735,18 +1735,26 @@ const FRASES_DA_HOSPEDAGEM = Object.freeze({
  * isso antes de a pessoa sair, para ela não sair achando que deu errado.
  */
 const FRASES_DA_ESPERA = Object.freeze({
-  normal: "Esperar é normal, e nada deu errado: quem hospeda admite cada pessoa nova uma vez.",
+  // A cabeça da sala de espera, acima de tudo (decisão do dono, 31/10): só
+  // falta a aprovação de quem hospeda — não é carregamento, nem erro.
   rotulo: "SALA DE ESPERA",
-  titulo: "Seu pedido ainda está esperando",
-  nadaErrado: "Nada deu errado. Quem hospeda só ainda não decidiu.",
+  titulo: "Esperando a aprovação de quem hospeda",
+  naoEErro: "Não é carregamento nem erro: o seu pedido chegou ao servidor, e só falta quem hospeda aprovar.",
+  // A «ENTRAR EM» do celular não confere sozinha.
+  naoEErroCelular: "Não é erro: o pedido chegou ao servidor, e o convite não foi gasto. Quando quem hospeda aprovar, toque ENTRAR de novo.",
+  // A caixa de sair.
+  tituloSair: "Você só está esperando a aprovação",
+  nadaErrado: "Nada deu errado. O pedido chegou, e quem hospeda só ainda não decidiu.",
   // O desktop e a casca larga: a `#tela-auth` bate de novo sozinha.
   sair: "Sair não cancela o pedido: ele fica guardado no servidor, e esta tela só para de conferir.",
+  fechar: "Fechar o SEELE não cancela o pedido: ele fica guardado no servidor.",
   voltar: "Para entrar depois, use o mesmo link ou endereço neste computador. Se já tiver sido admitido, você entra sem pedir de novo.",
   // O celular: a «ENTRAR EM» não bate sozinha, e o servidor fica na lista do aparelho.
   sairCelular: "Sair não cancela o pedido: ele fica na porta do servidor, e o servidor fica na lista deste aparelho.",
   voltarCelular: "Volte por ela, ou pelo mesmo link, depois que quem hospeda admitir: você entra sem pedir de novo.",
   ficar: "CONTINUAR ESPERANDO",
   sairMesmo: "SAIR MESMO ASSIM",
+  fecharMesmo: "FECHAR O SEELE",
 });
 
 /**

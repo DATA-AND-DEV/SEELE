@@ -884,8 +884,11 @@ document.addEventListener("keydown", (evento) => {
   sairDaEspera();
 });
 
-// A frase de que esperar é normal, na lista do que quem espera precisa saber.
-$("auth-espera-normal").textContent = FRASES_DA_ESPERA.normal;
+// A cabeça da sala de espera: só falta a aprovação de quem hospeda. Escrita uma
+// vez; quem a mostra ou esconde é o `data-espera` (`tela-auth.css`).
+$("auth-espera-rotulo").textContent = FRASES_DA_ESPERA.rotulo;
+$("auth-espera-titulo").textContent = FRASES_DA_ESPERA.titulo;
+$("auth-espera-nao-e-erro").textContent = FRASES_DA_ESPERA.naoEErro;
 
 /*
  * A espera segue o olho.

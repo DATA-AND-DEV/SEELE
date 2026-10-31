@@ -11348,12 +11348,17 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // **E a exceção do `onCloseRequested`** (tarefa 21 da F7, decidida pela
     // orquestradora em 10/10, no molde da do `beforeunload`): fechar o SEELE com
     // o servidor guardado no ar tira todo mundo dele, e a página pergunta antes.
+    // **E, desde 31/10, com um pedido esperando na portaria de alguém** (decisão
+    // do dono, que substitui neste caso a regra do spec de 23/09, «a confirmação
+    // ao fechar vale só para o servidor guardado»; `docs/0.19/decisoes.md`):
+    // «muita gente confunde a espera com não ter dado certo».
     // O `close-requested` cru continua proibido. Cada chamada do `onCloseRequested`
-    // (direta ou `?.(`) tem de
-    // mostrar, **antes** do `preventDefault`: as duas credenciais esquecidas
-    // (`fecharAceiteDeMods()` e `esquecerARecusaDoApelido()`), e o veto só com o
-    // servidor guardado no ar: `invoke("meu_servidor")`, **depois** o `return`
-    // sem ele, e só então o `preventDefault`.
+    // (direta ou `?.(`) tem de mostrar, **antes** de todo `preventDefault`: as
+    // duas credenciais esquecidas (`fecharAceiteDeMods()` e
+    // `esquecerARecusaDoApelido()`) e a pergunta `invoke("meu_servidor")`. E o
+    // veto só em dois lugares: dentro do `if (!meu) {`, depois de
+    // `if (!esperaPendenteNaTela()) return;`, com o bloco terminando em
+    // `return;`; ou depois dele, com o servidor no ar.
     for nome in ui_files(".js") {
         let texto = without_comments(&read(&format!("ui/{nome}")));
         assert!(
@@ -11416,28 +11421,67 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 "fecharAceiteDeMods()",
                 "esquecerARecusaDoApelido()",
                 "invoke(\"meu_servidor\")",
-                "if (!meu) return;",
             ] {
                 assert!(
                     ouvinte.find(antes).is_some_and(|onde| onde < segura),
                     "`{nome}` segura o fechar da janela sem `{antes}` antes do \
                      `preventDefault`: ou a credencial da tentativa sobrevive na página \
-                     segurada, ou o fechar é segurado sem o servidor guardado no ar \
-                     (tarefa 21 da F7):\n{ouvinte}"
+                     segurada, ou o veto não sabe se há servidor no ar (tarefa 21 da \
+                     F7):\n{ouvinte}"
                 );
             }
-            // O `return` sem servidor só confere algo **depois** da pergunta: um
-            // escrito antes dela não sabe se há servidor, e o veto passa a
-            // depender do que `meu` valia antes.
+            // **Onde o veto pode estar.** O bloco sem servidor, pelas chaves
+            // balanceadas, depois da pergunta; dentro dele, só depois da
+            // conferência da espera pendente; e ele termina em `return;`, para o
+            // veto de baixo (o do servidor no ar) nunca rodar sem servidor.
             let pergunta = ouvinte.find("invoke(\"meu_servidor\")");
-            let sem_servidor = ouvinte.find("if (!meu) return;");
+            let Some(sem_meu) = ouvinte.find("if (!meu) {") else {
+                panic!(
+                    "`{nome}`: o ouvinte do fechar não tem o bloco sem servidor \
+                     (`if (!meu) {{`), e o veto pode acontecer sem servidor nem espera \
+                     (tarefa 21 da F7; decisão de 31/10):\n{ouvinte}"
+                );
+            };
             assert!(
-                pergunta.zip(sem_servidor).is_some_and(|(p, r)| p < r),
-                "`{nome}` sai do ouvinte do fechar (`if (!meu) return;`) antes de \
-                 perguntar se há servidor no ar (`invoke(\"meu_servidor\")`): o `return` \
-                 não confere nada, e o fechar pode ser segurado sem o servidor guardado \
-                 no ar (tarefa 21 da F7):\n{ouvinte}"
+                pergunta.is_some_and(|p| p < sem_meu),
+                "`{nome}` decide sem servidor (`if (!meu) {{`) antes de perguntar \
+                 (`invoke(\"meu_servidor\")`):\n{ouvinte}"
             );
+            let abre = sem_meu + "if (!meu) ".len();
+            let mut fundura = 0usize;
+            let fecha = ouvinte[abre..]
+                .char_indices()
+                .find_map(|(onde, c)| {
+                    match c {
+                        '{' => fundura += 1,
+                        '}' => {
+                            fundura -= 1;
+                            if fundura == 0 {
+                                return Some(abre + onde);
+                            }
+                        }
+                        _ => {}
+                    }
+                    None
+                })
+                .unwrap_or(ouvinte.len());
+            let bloco = &ouvinte[abre..fecha];
+            assert!(
+                bloco.trim_end().ends_with("return;"),
+                "`{nome}`: o bloco sem servidor do fechar não termina em `return;`, e o \
+                 veto do servidor no ar roda sem servidor:\n{bloco}"
+            );
+            let espera = bloco.find("if (!esperaPendenteNaTela()) return;");
+            for (onde, _) in ouvinte.match_indices("preventDefault") {
+                let dentro = onde > abre && onde < fecha;
+                assert!(
+                    if dentro { espera.is_some_and(|e| abre + e < onde) } else { onde > fecha },
+                    "`{nome}` segura o fechar sem servidor no ar e sem pedido pendente na \
+                     portaria: o veto sem servidor só vale depois de \
+                     `if (!esperaPendenteNaTela()) return;` (decisão do dono, 31/10), e \
+                     o outro só depois do bloco sem servidor (tarefa 21 da F7):\n{ouvinte}"
+                );
+            }
         }
         for (em, _) in texto.match_indices("\"beforeunload\"") {
             let ouvinte = &texto[em..];
@@ -23189,7 +23233,8 @@ confere("a entrada não mostra o ENTRAR antes de tocar", Boolean(entrar()));
 await entrar().onclick({});
 await tick(); await tick();
 confere("a espera da portaria caiu em «RECUSOU A ENTRADA»: " + corpo.texto().slice(0, 120), !/RECUSOU A ENTRADA/.test(corpo.texto()));
-confere("a espera não diz que quem hospeda ainda não decidiu: " + corpo.texto().slice(0, 160), /AINDA NÃO DECIDIU/.test(corpo.texto()));
+// Desde 31/10 (decisão do dono), o título da espera diz que só falta a aprovação.
+confere("a espera não diz que só espera a aprovação de quem hospeda: " + corpo.texto().slice(0, 160), /Esperando a aprovação de quem hospeda/.test(corpo.texto()));
 confere("a espera não diz que ENTRAR de novo entra: " + corpo.texto().slice(0, 240), /ENTRAR de novo/.test(corpo.texto()) && /convite não foi gasto/.test(corpo.texto()));
 confere("a espera tirou o ENTRAR", Boolean(entrar()));
 
@@ -28008,7 +28053,10 @@ fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
 
     let frases = read("ui/frases.js");
     let espera = js_const(&frases, "FRASES_DA_ESPERA");
-    for chave in ["normal:", "nadaErrado:", "sair:", "voltar:", "sairCelular:", "voltarCelular:", "ficar:", "sairMesmo:"] {
+    for chave in [
+        "titulo:", "naoEErro:", "naoEErroCelular:", "tituloSair:", "nadaErrado:", "sair:", "fechar:",
+        "voltar:", "sairCelular:", "voltarCelular:", "ficar:", "sairMesmo:", "fecharMesmo:",
+    ] {
         assert!(espera.contains(chave), "FRASES_DA_ESPERA perdeu `{chave}`");
     }
     assert!(
@@ -28016,7 +28064,43 @@ fn sair_de_uma_espera_pendente_pergunta_antes_e_diz_que_nada_deu_errado() {
         "a pergunta deixou de dizer que nada deu errado e que sair não cancela o pedido"
     );
     assert!(
-        auth.contains("$(\"auth-espera-normal\").textContent = FRASES_DA_ESPERA.normal;"),
-        "a tela de espera não diz mais que esperar é normal"
+        espera.contains("\"Esperando a aprovação de quem hospeda\"")
+            && espera.contains("Não é carregamento nem erro"),
+        "a sala de espera deixou de dizer, no título, que só espera a aprovação de quem hospeda"
     );
+
+    // **A cabeça da espera, acima de tudo** (decisão do dono, 31/10): na
+    // `#tela-auth`, antes do «Entrar no servidor», que some na espera pendente;
+    // e na «ENTRAR EM» do celular, antes do título dela.
+    let pagina = read("ui/index.html");
+    let entrada = pagina.split("<div class=\"auth-entrada\">").nth(1).expect("a coluna da entrada");
+    let cabeca = entrada.find("id=\"auth-espera-cabeca\"").expect("a sala de espera perdeu a cabeça");
+    assert!(
+        cabeca < entrada.find("class=\"auth-cabeca\"").expect("o título da entrada"),
+        "a cabeça da espera não está acima de tudo na tela de entrada"
+    );
+    assert!(auth.contains("$(\"auth-espera-titulo\").textContent = FRASES_DA_ESPERA.titulo;"));
+    let css = read("ui/tela-auth.css");
+    assert!(
+        css.contains("#tela-auth[data-modo=\"espera\"][data-espera=\"pendente\"] .auth-espera-cabeca {")
+            && css.contains("#tela-auth[data-modo=\"espera\"][data-espera=\"pendente\"] .auth-cabeca { display: none; }"),
+        "a cabeça da espera não aparece na espera pendente, ou o «Entrar no servidor» continua por cima dela"
+    );
+    let cabeca_cel = entrar_em.find("cabecaDaEspera,").expect("a «ENTRAR EM» não mostra a cabeça da espera");
+    assert!(
+        cabeca_cel < entrar_em.find("titulo(f.titulo").expect("o título da «ENTRAR EM»")
+            && entrar_em.contains("text: FRASES_DA_ESPERA.titulo"),
+        "no celular, a cabeça da espera não vem acima do título"
+    );
+
+    // **E fechar a janela com o pedido pendente pergunta** (decisão do dono,
+    // 31/10), pela mesma caixa: o veto e o resto das condições são do guarda da
+    // credencial; aqui, que ele existe e leva à pergunta.
+    let fechar = without_comments(&read("ui/camada-hospedagem.js"));
+    assert!(
+        fechar.contains("if (!esperaPendenteNaTela()) return;")
+            && fechar.contains("perguntarAntesDeSairDaEspera(\"fechar\","),
+        "fechar o SEELE com um pedido esperando na portaria não pergunta antes"
+    );
+    assert!(perguntar.contains("f.fecharMesmo") && perguntar.contains("f.fechar"));
 }
