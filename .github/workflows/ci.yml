@@ -350,6 +350,11 @@ jobs:
       - run: node apps/seele-app/bancada/capa.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # Sem capa, a cor do perfil no lugar dela (0.19): o texto por cima fica
+      # a 4,5:1 nas oito cores, no ponto mais claro do degradê.
+      - run: node apps/seele-app/bancada/cor-do-perfil.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # As camadas da API 6 (tarefa 7 da F3): a folha que empilha três, com a
       # saída e o `descartou` do produto, o painel recusado na 6, e os tetos
       # das superfícies pelo nome.
